@@ -3,7 +3,6 @@ open! Core
 type t =
   { mutable rank : int
   ; mutable next_id : int
-  ; env : Env.t
   }
 
 let fresh_tvar t ~rank =
