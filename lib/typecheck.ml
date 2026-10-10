@@ -3,12 +3,25 @@ open! Core
 type t =
   { mutable rank : int
   ; mutable next_id : int
+  ; mutable level : Env.Level.t
+  ; env : Env.t
   }
-[@@deriving fields]
+[@@deriving fields, sexp]
 
-let create () = { rank = 0; next_id = 0 }
-let incr_rank t = t.rank <- t.rank + 1
-let decr_rank t = t.rank <- t.rank - 1
+let create () = { rank = 0; next_id = 0; level = Any; env = Env.create () }
+
+let incr_level t =
+  match t.level with
+  | Any -> t.level <- Level 0
+  | Level n -> t.level <- Level (n + 1)
+;;
+
+let decr_level t =
+  match t.level with
+  | Any -> failwith "decr_level: level is already Any"
+  | Level n when n = 0 -> t.level <- Any
+  | Level n -> t.level <- Level (n - 1)
+;;
 
 let fresh_tvar t ~rank =
   let new_id = t.next_id in
@@ -343,4 +356,107 @@ and unify_arg t ~arg1 ~arg2
     in
     Type.AContext context
   | ATy _, AContext _ | AContext _, ATy _ -> Error `Kind_mismatch
+;;
+
+module Typecheck_error = struct
+  type t =
+    | Unification_error of Unification_error.t
+    | Not_in_scope of string
+    | Duplicate_name_in_recursive_bindings of Error.t
+  [@@deriving sexp, compare, equal]
+end
+
+let push_let t ~name ~ty ~args =
+  Hashtbl.add_multi
+    t.env.entries
+    ~key:name
+    ~data:
+      { scheme = ty; level = t.level; type_check_state = To_be_checked; args }
+;;
+
+let pop_let t ~name =
+  match Hashtbl.find t.env.entries name with
+  | None -> failwith "pop_let: no binding found"
+  | Some [] -> failwith "pop_let: no binding found"
+  | Some (_ :: rest) ->
+    if List.is_empty rest
+    then Hashtbl.remove t.env.entries name
+    else Hashtbl.set t.env.entries ~key:name ~data:rest
+;;
+
+let unpack_annot t annot =
+  Option.value_or_thunk annot ~default:(fun () ->
+    Type.TVar (fresh_tvar t ~rank:t.rank))
+;;
+
+let var_type t ~name : (Type.ty, Typecheck_error.t) Result.t = failwith "TODO"
+
+let push_and_typecheck_recursive_bindings
+      t
+      ~(bindings :
+         (string * Syntax.Binding.t list * Type.ty option * Syntax.Expr.t) list)
+  : (unit, Typecheck_error.t) Result.t
+  =
+  let%bind.Result () =
+    match
+      List.map bindings ~f:(fun (name, _, _, _) -> name)
+      |> List.find_a_dup ~compare:String.compare
+    with
+    | None -> Ok ()
+    | Some dup ->
+      Error
+        (Typecheck_error.Duplicate_name_in_recursive_bindings
+           (Error.of_string dup))
+  in
+  List.iter bindings ~f:(fun (name, args, annot, expr) ->
+    let args_with_types =
+      List.map args ~f:(fun (name, annot) -> name, unpack_annot t annot)
+    in
+    let res_ty = unpack_annot t annot in
+    let ty =
+      List.fold_right args_with_types ~init:res_ty ~f:(fun (_, arg_ty) ty ->
+        Type.TArrow (arg_ty, ty))
+    in
+    push_let t ~name ~ty ~args:args_with_types);
+  List.map bindings ~f:(fun (name, _, _, _) ->
+    var_type t ~name |> Result.map ~f:(ignore : Type.ty -> unit))
+  |> Result.all_unit
+;;
+
+let typecheck t ~(program : Syntax.Program.t)
+  : (unit, Typecheck_error.t) Result.t
+  =
+  let%bind.Result toplevel_bindings =
+    List.map program ~f:(function Let (name, bindings, ty_opt, expr) ->
+        name, (bindings, ty_opt, expr))
+    |> String.Table.of_alist_or_error
+    |> Result.map_error ~f:(fun err ->
+      Typecheck_error.Duplicate_name_in_recursive_bindings err)
+  in
+  let visited = String.Hash_set.create () in
+  let rec typecheck_toplevel var =
+    if Hash_set.mem visited var
+    then Ok ()
+    else (
+      match Hashtbl.find toplevel_bindings var with
+      | None -> (* already handled *) Ok ()
+      | Some (bindings, ty_opt, expr) ->
+        (* t.rank <- t.rank + 1;
+
+        t.rank <- t.rank - 1; *)
+        ())
+  in
+  Hashtbl.keys toplevel_bindings
+  |> List.map ~f:(fun var ->
+    let%map.Result () = typecheck_toplevel var in
+    Hash_set.iter visited ~f:(fun var ->
+      let entries = Hashtbl.find_exn t.env.entries var in
+      let entry = List.hd_exn entries in
+      let entry =
+        { entry with scheme = generalize_ty t ~rank:t.rank ~ty:entry.scheme }
+      in
+      Hashtbl.remove toplevel_bindings var;
+      Hashtbl.set t.env.entries ~key:var ~data:(entry :: List.tl_exn entries));
+    Hash_set.clear visited)
+  |> Result.all_unit
 ;;
