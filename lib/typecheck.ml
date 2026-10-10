@@ -281,7 +281,7 @@ and rewrite t var (context : Type.context)
         ] )
       Result.t
   =
-  match context with
+  match Type.canonical_context context with
   | CEmpty -> Error (`Mismatch_reason (Empty_context_has_variable var))
   | CExtend (x, ty, rest) ->
     (match String.equal x var with
