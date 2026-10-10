@@ -4,6 +4,11 @@ type t =
   { mutable rank : int
   ; mutable next_id : int
   }
+[@@deriving fields]
+
+let create () = { rank = 0; next_id = 0 }
+let incr_rank t = t.rank <- t.rank + 1
+let decr_rank t = t.rank <- t.rank - 1
 
 let fresh_tvar t ~rank =
   let new_id = t.next_id in

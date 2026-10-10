@@ -1,9 +1,12 @@
 open! Core
 
-type t =
-  { mutable rank : int
-  ; mutable next_id : int
-  }
+type t
+
+val create : unit -> t 
+
+val incr_rank : t -> unit
+val decr_rank : t -> unit
+val rank : t -> Type.rank
 
 val fresh_tvar : t -> rank:Type.rank -> Type.tvar ref
 val fresh_cvar : t -> rank:Type.rank -> Type.cvar ref
