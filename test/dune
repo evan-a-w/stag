@@ -1,0 +1,6 @@
+(library
+ (name test_stag)
+ (preprocess
+  (pps ppx_jane))
+ (inline_tests)
+ (libraries core stag))
