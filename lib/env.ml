@@ -55,6 +55,7 @@ module Entry = struct
   type t =
     { mutable scheme : Type.ty
     ; mutable type_check_state : Type_check_state.t
+    ; mutable bypasses_value_restriction : bool
     ; counts : Counts.Ro.t
     }
   [@@deriving sexp, compare, equal]

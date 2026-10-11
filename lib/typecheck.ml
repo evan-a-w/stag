@@ -391,7 +391,12 @@ let push_let t ~name ~ty ~type_check_state =
   Hashtbl.add_multi
     t.env.entries
     ~key:name
-    ~data:{ scheme = ty; counts = Env.Counts.ro (counts t); type_check_state }
+    ~data:
+      { scheme = ty
+      ; counts = Env.Counts.ro (counts t)
+      ; type_check_state
+      ; bypasses_value_restriction = false
+      }
 ;;
 
 let pop_let t ~name =
@@ -414,28 +419,33 @@ let rec var_type t ~name : (Type.ty, Typecheck_error.t) Result.t =
     Env.lookup t.env name
     |> Result.of_option ~error:(Typecheck_error.Not_in_scope name)
   in
-  match entry.type_check_state with
-  | Done -> Ok (inst_ty t ~scheme:entry.scheme ~rank:(counts t).rank)
-  | In_check -> Ok entry.scheme
-  | To_be_checked { args; expr } ->
-    push_counts t ~counts:entry.counts;
-    entry.type_check_state <- In_check;
-    List.iter args ~f:(fun (name, ty) ->
-      push_let t ~name ~ty ~type_check_state:Done);
-    incr_rank t;
-    let expr_ty = type_check_expr t ~expr in
-    decr_rank t;
-    let%map.Result new_ty =
-      unify_ty t ~ty1:entry.scheme ~ty2:expr_ty
-      |> Result.map_error ~f:Typecheck_error.unification_error
-    in
-    entry.scheme <- new_ty;
-    let is_syntactic_value = not (List.is_empty args) in
-    if is_syntactic_value
-    then entry.scheme <- generalize_ty t ~rank:(counts t).rank ~ty:new_ty;
-    entry.type_check_state <- Done;
-    pop_counts t;
-    entry.scheme
+  let%map.Result () =
+    match entry.type_check_state with
+    | Done | In_check -> Ok ()
+    | To_be_checked { args; expr } ->
+      push_counts t ~counts:entry.counts;
+      entry.type_check_state <- In_check;
+      entry.bypasses_value_restriction
+      <- (* syntactic value. Later we will have a [pure] mode prob *)
+         not (List.is_empty args);
+      List.iter args ~f:(fun (name, ty) ->
+        push_let t ~name ~ty ~type_check_state:Done);
+      incr_rank t;
+      let expr_ty = type_check_expr t ~expr in
+      decr_rank t;
+      let%map.Result new_ty =
+        unify_ty t ~ty1:entry.scheme ~ty2:expr_ty
+        |> Result.map_error ~f:Typecheck_error.unification_error
+      in
+      entry.scheme <- new_ty;
+      if entry.bypasses_value_restriction
+      then
+        (* generalize *)
+        entry.scheme <- generalize_ty t ~rank:(counts t).rank ~ty:new_ty;
+      entry.type_check_state <- Done;
+      pop_counts t
+  in
+  inst_ty t ~scheme:entry.scheme ~rank:(counts t).rank
 
 and type_check_expr t ~expr = failwith "TODO"
 
