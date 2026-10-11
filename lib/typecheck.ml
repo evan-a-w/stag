@@ -1,27 +1,29 @@
 open! Core
 
 type t =
-  { mutable rank : int
-  ; mutable next_id : int
-  ; mutable level : Env.Level.t
+  { mutable next_id : int
+  ; counts : Env.Counts.t Stack.t
   ; env : Env.t
   }
 [@@deriving fields, sexp]
 
-let create () = { rank = 0; next_id = 0; level = Any; env = Env.create () }
-
-let incr_level t =
-  match t.level with
-  | Any -> t.level <- Level 0
-  | Level n -> t.level <- Level (n + 1)
+let create () =
+  { next_id = 0
+  ; env = Env.create ()
+  ; counts = Stack.of_list [ Env.Counts.create () ]
+  }
 ;;
 
-let decr_level t =
-  match t.level with
-  | Any -> failwith "decr_level: level is already Any"
-  | Level n when n = 0 -> t.level <- Any
-  | Level n -> t.level <- Level (n - 1)
+let push_counts t ~(counts : Env.Counts.Ro.t) =
+  Stack.push t.counts (Env.Counts.of_ro counts)
 ;;
+
+let pop_counts t = ignore (Stack.pop_exn t.counts : Env.Counts.t)
+let counts t = Stack.top_exn t.counts
+let incr_rank t = (counts t).rank <- (counts t).rank + 1
+let decr_rank t = (counts t).rank <- (counts t).rank - 1
+let incr_level t = Env.Counts.incr_level (counts t)
+let decr_level t = Env.Counts.decr_level (counts t)
 
 let fresh_tvar t ~rank =
   let new_id = t.next_id in
@@ -35,30 +37,31 @@ let fresh_cvar t ~rank =
   ref (Type.CUnbound (new_id, rank))
 ;;
 
-let rec inst_ty t ~remap_ty ~remap_context ~(scheme : Type.ty) : Type.ty =
+let rec inst_ty' t ~remap_ty ~remap_context ~(scheme : Type.ty) ~rank : Type.ty =
   let scheme = Type.canonical_ty scheme in
   match scheme with
   | TCon _ -> scheme
   | TArrow (ty1, ty2) ->
     TArrow
-      ( inst_ty t ~remap_ty ~remap_context ~scheme:ty1
-      , inst_ty t ~remap_ty ~remap_context ~scheme:ty2 )
+      ( inst_ty' t ~remap_ty ~remap_context ~scheme:ty1 ~rank
+      , inst_ty' t ~remap_ty ~remap_context ~scheme:ty2 ~rank )
   | TTuple tys ->
     TTuple
       (List.map tys ~f:(fun scheme ->
-         inst_ty t ~remap_ty ~remap_context ~scheme))
+         inst_ty' t ~remap_ty ~remap_context ~scheme ~rank))
   | TCode { inner; context } ->
     TCode
-      { inner = inst_ty t ~remap_ty ~remap_context ~scheme:inner
-      ; context = inst_context t ~remap_ty ~remap_context ~context
+      { inner = inst_ty' t ~remap_ty ~remap_context ~scheme:inner ~rank
+      ; context = inst_context' t ~remap_ty ~remap_context ~context ~rank
       }
-  | TVar { contents = Link ty } -> inst_ty t ~remap_ty ~remap_context ~scheme:ty
+  | TVar { contents = Link ty } ->
+    inst_ty' t ~remap_ty ~remap_context ~scheme:ty ~rank
   | TVar { contents = Type.Unbound (id, _) } -> (* weak *) scheme
   | TVar { contents = Type.Generic id } ->
     Hashtbl.find_or_add remap_ty id ~default:(fun () ->
-      Type.TVar (fresh_tvar t ~rank:t.rank))
+      Type.TVar (fresh_tvar t ~rank))
 
-and inst_context t ~remap_ty ~remap_context ~(context : Type.context)
+and inst_context' t ~remap_ty ~remap_context ~(context : Type.context) ~rank
   : Type.context
   =
   let context = Type.canonical_context context in
@@ -67,14 +70,32 @@ and inst_context t ~remap_ty ~remap_context ~(context : Type.context)
   | CExtend (name, ty, context') ->
     CExtend
       ( name
-      , inst_ty t ~remap_ty ~remap_context ~scheme:ty
-      , inst_context t ~remap_ty ~remap_context ~context:context' )
+      , inst_ty' t ~remap_ty ~remap_context ~scheme:ty ~rank
+      , inst_context' t ~remap_ty ~remap_context ~context:context' ~rank )
   | CVar { contents = Type.CLink context' } ->
-    inst_context t ~remap_ty ~remap_context ~context:context'
+    inst_context' t ~remap_ty ~remap_context ~context:context' ~rank
   | CVar { contents = Type.CUnbound (id, _) } -> (* weak *) context
   | CVar { contents = Type.CGeneric id } ->
     Hashtbl.find_or_add remap_context id ~default:(fun () ->
-      Type.CVar (fresh_cvar t ~rank:t.rank))
+      Type.CVar (fresh_cvar t ~rank))
+;;
+
+let inst_ty t ~scheme ~rank =
+  inst_ty'
+    t
+    ~scheme
+    ~remap_ty:(Int.Table.create ())
+    ~remap_context:(Int.Table.create ())
+    ~rank
+;;
+
+let inst_context t ~context ~rank =
+  inst_context'
+    t
+    ~context
+    ~remap_ty:(Int.Table.create ())
+    ~rank
+    ~remap_context:(Int.Table.create ())
 ;;
 
 let rec generalize_ty t ~rank ~(ty : Type.ty) : Type.ty =
@@ -363,15 +384,14 @@ module Typecheck_error = struct
     | Unification_error of Unification_error.t
     | Not_in_scope of string
     | Duplicate_name_in_recursive_bindings of Error.t
-  [@@deriving sexp, compare, equal]
+  [@@deriving sexp, compare, equal, variants]
 end
 
-let push_let t ~name ~ty ~args =
+let push_let t ~name ~ty ~type_check_state =
   Hashtbl.add_multi
     t.env.entries
     ~key:name
-    ~data:
-      { scheme = ty; level = t.level; type_check_state = To_be_checked; args }
+    ~data:{ scheme = ty; counts = Env.Counts.ro (counts t); type_check_state }
 ;;
 
 let pop_let t ~name =
@@ -386,12 +406,40 @@ let pop_let t ~name =
 
 let unpack_annot t annot =
   Option.value_or_thunk annot ~default:(fun () ->
-    Type.TVar (fresh_tvar t ~rank:t.rank))
+    Type.TVar (fresh_tvar t ~rank:(counts t).rank))
 ;;
 
-let var_type t ~name : (Type.ty, Typecheck_error.t) Result.t = failwith "TODO"
+let rec var_type t ~name : (Type.ty, Typecheck_error.t) Result.t =
+  let%bind.Result entry =
+    Env.lookup t.env name
+    |> Result.of_option ~error:(Typecheck_error.Not_in_scope name)
+  in
+  match entry.type_check_state with
+  | Done -> Ok (inst_ty t ~scheme:entry.scheme ~rank:(counts t).rank)
+  | In_check -> Ok entry.scheme
+  | To_be_checked { args; expr } ->
+    push_counts t ~counts:entry.counts;
+    entry.type_check_state <- In_check;
+    List.iter args ~f:(fun (name, ty) ->
+      push_let t ~name ~ty ~type_check_state:Done);
+    incr_rank t;
+    let expr_ty = type_check_expr t ~expr in
+    decr_rank t;
+    let%map.Result new_ty =
+      unify_ty t ~ty1:entry.scheme ~ty2:expr_ty
+      |> Result.map_error ~f:Typecheck_error.unification_error
+    in
+    entry.scheme <- new_ty;
+    let is_syntactic_value = not (List.is_empty args) in
+    if is_syntactic_value
+    then entry.scheme <- generalize_ty t ~rank:(counts t).rank ~ty:new_ty;
+    entry.type_check_state <- Done;
+    pop_counts t;
+    entry.scheme
 
-let push_and_typecheck_recursive_bindings
+and type_check_expr t ~expr = failwith "TODO"
+
+and push_and_typecheck_recursive_bindings
       t
       ~(bindings :
          (string * Syntax.Binding.t list * Type.ty option * Syntax.Expr.t) list)
@@ -409,15 +457,15 @@ let push_and_typecheck_recursive_bindings
            (Error.of_string dup))
   in
   List.iter bindings ~f:(fun (name, args, annot, expr) ->
-    let args_with_types =
+    let args =
       List.map args ~f:(fun (name, annot) -> name, unpack_annot t annot)
     in
     let res_ty = unpack_annot t annot in
     let ty =
-      List.fold_right args_with_types ~init:res_ty ~f:(fun (_, arg_ty) ty ->
+      List.fold_right args ~init:res_ty ~f:(fun (_, arg_ty) ty ->
         Type.TArrow (arg_ty, ty))
     in
-    push_let t ~name ~ty ~args:args_with_types);
+    push_let t ~name ~ty ~type_check_state:(To_be_checked { args; expr }));
   List.map bindings ~f:(fun (name, _, _, _) ->
     var_type t ~name |> Result.map ~f:(ignore : Type.ty -> unit))
   |> Result.all_unit
@@ -444,7 +492,7 @@ let typecheck t ~(program : Syntax.Program.t)
         (* t.rank <- t.rank + 1;
 
         t.rank <- t.rank - 1; *)
-        ())
+        failwith "TODO")
   in
   Hashtbl.keys toplevel_bindings
   |> List.map ~f:(fun var ->
@@ -453,7 +501,9 @@ let typecheck t ~(program : Syntax.Program.t)
       let entries = Hashtbl.find_exn t.env.entries var in
       let entry = List.hd_exn entries in
       let entry =
-        { entry with scheme = generalize_ty t ~rank:t.rank ~ty:entry.scheme }
+        { entry with
+          scheme = generalize_ty t ~rank:(counts t).rank ~ty:entry.scheme
+        }
       in
       Hashtbl.remove toplevel_bindings var;
       Hashtbl.set t.env.entries ~key:var ~data:(entry :: List.tl_exn entries));

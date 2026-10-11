@@ -9,20 +9,6 @@ val fresh_cvar : t -> rank:Type.rank -> Type.cvar ref
 
 val env : t -> Env.t
 
-val inst_ty
-  :  t
-  -> remap_ty:Type.ty Int.Table.t
-  -> remap_context:Type.context Int.Table.t
-  -> scheme:Type.ty
-  -> Type.ty
-
-val inst_context
-  :  t
-  -> remap_ty:Type.ty Int.Table.t
-  -> remap_context:Type.context Int.Table.t
-  -> context:Type.context
-  -> Type.context
-
 (** Marks unbound variables with rank greater than [rank] as [Generic]. *)
 val generalize_ty : t -> rank:Type.rank -> ty:Type.ty -> Type.ty
 
