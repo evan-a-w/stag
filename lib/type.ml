@@ -33,6 +33,12 @@ and arg =
   | AContext of context
 [@@deriving sexp, compare, equal]
 
+let int = TCon ("int", [])
+let bool = TCon ("bool", [])
+let string = TCon ("string", [])
+let char = TCon ("char", [])
+let unit = TCon ("char", [])
+
 module Var = struct
   type t =
     | TVar of tvar ref

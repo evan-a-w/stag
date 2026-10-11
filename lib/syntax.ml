@@ -8,6 +8,14 @@ module Lit = struct
     | Char of char
     | Unit
   [@@deriving sexp, compare, equal, variants]
+
+  let ty = function
+    | Int _ -> Type.int
+    | Bool _ -> Type.bool
+    | String _ -> Type.string
+    | Char _ -> Type.char
+    | Unit -> Type.unit
+  ;;
 end
 
 module Binding = struct
@@ -23,7 +31,7 @@ module Expr = struct
     | Splice of
         { expr : t
         ; subs :
-            (string * t) list
+            (string * t option) list
               option (* [None] is all in scope, so is diff to [] *)
         }
     | Quote of t

@@ -1,9 +1,22 @@
 open! Core
 
+module Mask = struct
+  type t =
+    { masked_names : String.Set.t
+    ; failed_lookups : Type.ty String.Table.t
+    }
+  [@@deriving fields, sexp]
+
+  let create masked_names =
+    { masked_names; failed_lookups = String.Table.create () }
+  ;;
+end
+
 type t =
   { mutable next_id : int
   ; counts : Env.Counts.t Stack.t
   ; env : Env.t
+  ; masks : Mask.t Stack.t
   }
 [@@deriving fields, sexp]
 
@@ -11,8 +24,23 @@ let create () =
   { next_id = 0
   ; env = Env.create ()
   ; counts = Stack.of_list [ Env.Counts.create () ]
+  ; masks = Stack.create ()
   }
 ;;
+
+let lookup t ~name ~use_mask =
+  match
+    (not use_mask)
+    || Option.map (Stack.top t.masks) ~f:(fun mask ->
+         Set.mem mask.masked_names name)
+       |> Option.value ~default:true (* no mask -> allowed *)
+  with
+  | false -> None
+  | true -> Env.lookup t.env name
+;;
+
+let push_mask t ~mask = Stack.push t.masks mask
+let pop_mask t = Stack.pop_exn t.masks
 
 let push_counts t ~(counts : Env.Counts.Ro.t) =
   Stack.push t.counts (Env.Counts.of_ro counts)
@@ -384,8 +412,17 @@ module Typecheck_error = struct
     | Unification_error of Unification_error.t
     | Not_in_scope of string
     | Duplicate_name_in_recursive_bindings of Error.t
+    | Variable_used_at_wrong_level of
+        { name : string
+        ; var_level : Env.Level.t
+        ; expected_level : Env.Level.t
+        }
   [@@deriving sexp, compare, equal, variants]
 end
+
+let unify_ty' t ~ty1 ~ty2 =
+  unify_ty t ~ty1 ~ty2 |> Result.map_error ~f:Typecheck_error.unification_error
+;;
 
 let push_let t ~name ~ty ~type_check_state =
   Hashtbl.add_multi
@@ -414,15 +451,16 @@ let unpack_annot t annot =
     Type.TVar (fresh_tvar t ~rank:(counts t).rank))
 ;;
 
-let rec var_type t ~name : (Type.ty, Typecheck_error.t) Result.t =
+let rec var_type t ~name ~use_mask : (Type.ty, Typecheck_error.t) Result.t =
   let%bind.Result entry =
-    Env.lookup t.env name
+    lookup t ~name ~use_mask
     |> Result.of_option ~error:(Typecheck_error.Not_in_scope name)
   in
-  let%map.Result () =
+  let%bind.Result () =
     match entry.type_check_state with
     | Done | In_check -> Ok ()
-    | To_be_checked { args; expr } ->
+    | To_be_checked { args; expr; mask } ->
+      push_mask t ~mask;
       push_counts t ~counts:entry.counts;
       entry.type_check_state <- In_check;
       entry.bypasses_value_restriction
@@ -431,7 +469,7 @@ let rec var_type t ~name : (Type.ty, Typecheck_error.t) Result.t =
       List.iter args ~f:(fun (name, ty) ->
         push_let t ~name ~ty ~type_check_state:Done);
       incr_rank t;
-      let expr_ty = type_check_expr t ~expr in
+      let%bind.Result expr_ty = expr_type t ~expr in
       decr_rank t;
       let%map.Result new_ty =
         unify_ty t ~ty1:entry.scheme ~ty2:expr_ty
@@ -443,11 +481,74 @@ let rec var_type t ~name : (Type.ty, Typecheck_error.t) Result.t =
         (* generalize *)
         entry.scheme <- generalize_ty t ~rank:(counts t).rank ~ty:new_ty;
       entry.type_check_state <- Done;
-      pop_counts t
+      pop_counts t;
+      pop_mask t
   in
-  inst_ty t ~scheme:entry.scheme ~rank:(counts t).rank
+  let which =
+    if entry.bypasses_value_restriction then `Any_greater else `Exactly_the_same
+  in
+  match
+    Env.Level.is_allowed_at entry.counts.level ~used_at:(counts t).level ~which
+  with
+  | true -> Ok (inst_ty t ~scheme:entry.scheme ~rank:(counts t).rank)
+  | false ->
+    Error
+      (Variable_used_at_wrong_level
+         { name
+         ; var_level = entry.counts.level
+         ; expected_level = (counts t).level
+         })
 
-and type_check_expr t ~expr = failwith "TODO"
+and expr_type t ~expr =
+  match expr with
+  | Lit l -> Ok (Syntax.Lit.ty l)
+  | Var (name, binding) ->
+    let%bind.Result ty = var_type t ~name ~use_mask:true in
+    (match binding with
+     | None -> Ok ty
+     | Some ty' -> unify_ty' t ~ty1:ty ~ty2:ty')
+  | App (f, x) ->
+    let a : Type.ty = TVar (fresh_tvar t ~rank:(counts t).rank) in
+    let b : Type.ty = TVar (fresh_tvar t ~rank:(counts t).rank) in
+    let%bind.Result f_ty = expr_type t ~expr:f in
+    let%bind.Result f_ty = unify_ty' t ~ty1:(Type.TArrow (a, b)) ~ty2:f_ty in
+    let%bind.Result x_ty = expr_type t ~expr:x in
+    let%map.Result x_ty = unify_ty' t ~ty1:a ~ty2:x_ty in
+    b
+  | Let (name, args, annot, equal, in_) ->
+    let%bind.Result () =
+      push_and_typecheck_recursive_bindings
+        t
+        ~bindings:[ name, args, annot, equal ]
+    in
+    let%map.Result res = expr_type t ~expr:in_ in
+    pop_let t ~name;
+    res
+  | Splice { expr; subs } ->
+    let%bind.Result () =
+      match subs with
+      | None -> Ok ()
+      | Some subs ->
+        let%map.Result () =
+          push_and_typecheck_recursive_bindings
+            t
+            ~bindings:
+              (List.filter_map subs ~f:(fun (name, expr) ->
+                 let%map.Option expr in
+                 name, [], None, expr))
+        in
+        push_mask t ~mask:(List.map subs ~f:Tuple2.get1 |> String.Set.of_list)
+    in
+    incr_level t;
+    let%bind.Result inner = expr_type t ~expr in
+    decr_level t;
+    (match subs with
+     | None -> ()
+     | Some subs ->
+       List.iter subs ~f:(fun (name, _) -> pop_let t ~name);
+       pop_mask t);
+    Type.TCode { inner; context }
+  | Quote expr -> ()
 
 and push_and_typecheck_recursive_bindings
       t
@@ -477,7 +578,7 @@ and push_and_typecheck_recursive_bindings
     in
     push_let t ~name ~ty ~type_check_state:(To_be_checked { args; expr }));
   List.map bindings ~f:(fun (name, _, _, _) ->
-    var_type t ~name |> Result.map ~f:(ignore : Type.ty -> unit))
+    var_type t ~name ~use_mask:false |> Result.map ~f:(ignore : Type.ty -> unit))
   |> Result.all_unit
 ;;
 

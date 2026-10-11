@@ -33,6 +33,12 @@ and arg =
   | AContext of context
 [@@deriving sexp, compare, equal]
 
+val int : ty
+val bool : ty
+val string : ty
+val char :ty 
+val unit : ty
+
 module Var : sig
   type t =
     | TVar of tvar ref

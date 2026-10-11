@@ -1,10 +1,13 @@
 open! Core
 
 module Level = struct
-  type t =
-    | Any
-    | Level of int
-  [@@deriving sexp, compare, equal]
+  type t = int [@@deriving sexp, compare, equal]
+
+  let is_allowed_at t ~used_at ~which =
+    match which with
+    | `Any_greater -> used_at >= t
+    | `Exactly_the_same -> used_at = t
+  ;;
 end
 
 module Counts = struct
@@ -24,20 +27,9 @@ module Counts = struct
 
   let ro { level; rank } : Ro.t = { level; rank }
   let of_ro ({ level; rank } : Ro.t) = { level; rank }
-  let create () = { level = Any; rank = 0 }
-
-  let incr_level t =
-    match t.level with
-    | Any -> t.level <- Level 0
-    | Level n -> t.level <- Level (n + 1)
-  ;;
-
-  let decr_level t =
-    match t.level with
-    | Any -> failwith "decr_level: level is already Any"
-    | Level n when n = 0 -> t.level <- Any
-    | Level n -> t.level <- Level (n - 1)
-  ;;
+  let create () = { level = 0; rank = 0 }
+  let incr_level t = t.level <- t.level + 1
+  let decr_level t = t.level <- t.level - 1
 end
 
 module Type_check_state = struct
@@ -45,6 +37,7 @@ module Type_check_state = struct
     | To_be_checked of
         { args : (string * Type.ty) list
         ; expr : Syntax.Expr.t
+        ; mask : String.Set.t
         }
     | In_check
     | Done
