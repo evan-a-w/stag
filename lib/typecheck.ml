@@ -2,7 +2,7 @@ open! Core
 
 module Mask = struct
   type t =
-    { masked_names : String.Set.t
+    { masked_names : String.Set.t option
     ; failed_lookups : Type.ty String.Table.t
     }
   [@@deriving fields, sexp]
@@ -26,17 +26,6 @@ let create () =
   ; counts = Stack.of_list [ Env.Counts.create () ]
   ; masks = Stack.create ()
   }
-;;
-
-let lookup t ~name ~use_mask =
-  match
-    (not use_mask)
-    || Option.map (Stack.top t.masks) ~f:(fun mask ->
-         Set.mem mask.masked_names name)
-       |> Option.value ~default:true (* no mask -> allowed *)
-  with
-  | false -> None
-  | true -> Env.lookup t.env name
 ;;
 
 let push_mask t ~mask = Stack.push t.masks mask
@@ -63,6 +52,43 @@ let fresh_cvar t ~rank =
   let new_id = t.next_id in
   t.next_id <- new_id + 1;
   ref (Type.CUnbound (new_id, rank))
+;;
+
+let push_let t ~name ~ty ~type_check_state =
+  Hashtbl.add_multi
+    t.env.entries
+    ~key:name
+    ~data:
+      { scheme = ty
+      ; counts = Env.Counts.ro (counts t)
+      ; type_check_state
+      ; bypasses_value_restriction = false
+      }
+;;
+
+let pop_let t ~name =
+  match Hashtbl.find t.env.entries name with
+  | None -> failwith "pop_let: no binding found"
+  | Some [] -> failwith "pop_let: no binding found"
+  | Some (_ :: rest) ->
+    if List.is_empty rest
+    then Hashtbl.remove t.env.entries name
+    else Hashtbl.set t.env.entries ~key:name ~data:rest
+;;
+
+let lookup t ~name ~use_mask =
+  match use_mask, Stack.top t.masks with
+  | false, _ | _, (None | Some { masked_names = None; _ }) ->
+    Env.lookup t.env name
+  | true, Some { masked_names = Some masked_names; failed_lookups } ->
+    (match Set.mem masked_names name, Hashtbl.find failed_lookups name with
+     | false, _ | _, Some _ (* don't just return the ty - could be rebound *) ->
+       Env.lookup t.env name
+     | true, None ->
+       let ty = Type.TVar (fresh_tvar t ~rank:(counts t).rank) in
+       Hashtbl.set failed_lookups ~key:name ~data:ty;
+       push_let t ~name ~ty ~type_check_state:Done;
+       Env.lookup t.env name)
 ;;
 
 let rec inst_ty' t ~remap_ty ~remap_context ~(scheme : Type.ty) ~rank : Type.ty =
@@ -422,28 +448,6 @@ end
 
 let unify_ty' t ~ty1 ~ty2 =
   unify_ty t ~ty1 ~ty2 |> Result.map_error ~f:Typecheck_error.unification_error
-;;
-
-let push_let t ~name ~ty ~type_check_state =
-  Hashtbl.add_multi
-    t.env.entries
-    ~key:name
-    ~data:
-      { scheme = ty
-      ; counts = Env.Counts.ro (counts t)
-      ; type_check_state
-      ; bypasses_value_restriction = false
-      }
-;;
-
-let pop_let t ~name =
-  match Hashtbl.find t.env.entries name with
-  | None -> failwith "pop_let: no binding found"
-  | Some [] -> failwith "pop_let: no binding found"
-  | Some (_ :: rest) ->
-    if List.is_empty rest
-    then Hashtbl.remove t.env.entries name
-    else Hashtbl.set t.env.entries ~key:name ~data:rest
 ;;
 
 let unpack_annot t annot =
