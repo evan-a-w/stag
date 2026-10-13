@@ -36,7 +36,7 @@ and arg =
 val int : ty
 val bool : ty
 val string : ty
-val char :ty 
+val char : ty
 val unit : ty
 
 module Var : sig
@@ -54,3 +54,7 @@ val canonical_context : context -> context
 
 (** The row variable at the end of [context], if it is open. *)
 val tail_var : context -> cvar ref option
+
+(** Renders [ty] for humans. Variables are named in order of appearance;
+    weak (unbound) ones are prefixed with [_]. *)
+val to_string_hum : ty -> string

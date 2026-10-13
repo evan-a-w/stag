@@ -2,12 +2,9 @@ open! Core
 
 type t
 
-
 val create : unit -> t
 val fresh_tvar : t -> rank:Type.rank -> Type.tvar ref
 val fresh_cvar : t -> rank:Type.rank -> Type.cvar ref
-
-val env : t -> Env.t
 
 (** Marks unbound variables with rank greater than [rank] as [Generic]. *)
 val generalize_ty : t -> rank:Type.rank -> ty:Type.ty -> Type.ty
@@ -54,3 +51,26 @@ val unify_context
   -> context1:Type.context
   -> context2:Type.context
   -> (Type.context, Unification_error.t) Result.t
+
+module Typecheck_error : sig
+  type t =
+    | Unification_error of Unification_error.t
+    | Not_in_scope of string
+    | Duplicate_toplevel of string
+    | Duplicate_substitution of string
+    | Variable_used_at_wrong_level of
+        { name : string
+        ; var_level : Env.Level.t
+        ; used_at : Env.Level.t
+        }
+  [@@deriving sexp, compare, equal]
+end
+
+(** Toplevel bindings may refer to each other in any order. Each strongly
+    connected component is generalized once fully checked, if all its members
+    are syntactic functions. Returns the type of each binding, in program
+    order. *)
+val typecheck
+  :  t
+  -> program:Syntax.Program.t
+  -> ((string * Type.ty) list, Typecheck_error.t) Result.t

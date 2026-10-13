@@ -1,95 +1,42 @@
 open! Core
 
-module Mask = struct
-  type t =
-    { masked_names : String.Set.t option
-    ; failed_lookups : Type.ty String.Table.t
-    }
-  [@@deriving fields, sexp]
+module Toplevel = struct
+  module State = struct
+    type t =
+      | Unchecked
+      | In_progress of
+          { index : int
+          ; ty : Type.ty
+          }
+      | Done of Env.Entry.t
+    [@@deriving sexp_of]
+  end
 
-  let create masked_names =
-    { masked_names; failed_lookups = String.Table.create () }
-  ;;
+  type t =
+    { name : string
+    ; args : Syntax.Binding.t list
+    ; annot : Type.ty option
+    ; expr : Syntax.Expr.t
+    ; mutable state : State.t
+    }
+  [@@deriving sexp_of]
 end
 
 type t =
   { mutable next_id : int
-  ; counts : Env.Counts.t Stack.t
-  ; env : Env.t
-  ; masks : Mask.t Stack.t
+  ; toplevels : Toplevel.t String.Table.t
   }
-[@@deriving fields, sexp]
 
-let create () =
-  { next_id = 0
-  ; env = Env.create ()
-  ; counts = Stack.of_list [ Env.Counts.create () ]
-  ; masks = Stack.create ()
-  }
+let create () = { next_id = 0; toplevels = String.Table.create () }
+
+let fresh_id t =
+  let id = t.next_id in
+  t.next_id <- id + 1;
+  id
 ;;
 
-let push_mask t ~mask = Stack.push t.masks mask
-let pop_mask t = Stack.pop_exn t.masks
-
-let push_counts t ~(counts : Env.Counts.Ro.t) =
-  Stack.push t.counts (Env.Counts.of_ro counts)
-;;
-
-let pop_counts t = ignore (Stack.pop_exn t.counts : Env.Counts.t)
-let counts t = Stack.top_exn t.counts
-let incr_rank t = (counts t).rank <- (counts t).rank + 1
-let decr_rank t = (counts t).rank <- (counts t).rank - 1
-let incr_level t = Env.Counts.incr_level (counts t)
-let decr_level t = Env.Counts.decr_level (counts t)
-
-let fresh_tvar t ~rank =
-  let new_id = t.next_id in
-  t.next_id <- new_id + 1;
-  ref (Type.Unbound (new_id, rank))
-;;
-
-let fresh_cvar t ~rank =
-  let new_id = t.next_id in
-  t.next_id <- new_id + 1;
-  ref (Type.CUnbound (new_id, rank))
-;;
-
-let push_let t ~name ~ty ~type_check_state =
-  Hashtbl.add_multi
-    t.env.entries
-    ~key:name
-    ~data:
-      { scheme = ty
-      ; counts = Env.Counts.ro (counts t)
-      ; type_check_state
-      ; bypasses_value_restriction = false
-      }
-;;
-
-let pop_let t ~name =
-  match Hashtbl.find t.env.entries name with
-  | None -> failwith "pop_let: no binding found"
-  | Some [] -> failwith "pop_let: no binding found"
-  | Some (_ :: rest) ->
-    if List.is_empty rest
-    then Hashtbl.remove t.env.entries name
-    else Hashtbl.set t.env.entries ~key:name ~data:rest
-;;
-
-let lookup t ~name ~use_mask =
-  match use_mask, Stack.top t.masks with
-  | false, _ | _, (None | Some { masked_names = None; _ }) ->
-    Env.lookup t.env name
-  | true, Some { masked_names = Some masked_names; failed_lookups } ->
-    (match Set.mem masked_names name, Hashtbl.find failed_lookups name with
-     | false, _ | _, Some _ (* don't just return the ty - could be rebound *) ->
-       Env.lookup t.env name
-     | true, None ->
-       let ty = Type.TVar (fresh_tvar t ~rank:(counts t).rank) in
-       Hashtbl.set failed_lookups ~key:name ~data:ty;
-       push_let t ~name ~ty ~type_check_state:Done;
-       Env.lookup t.env name)
-;;
+let fresh_tvar t ~rank = ref (Type.Unbound (fresh_id t, rank))
+let fresh_cvar t ~rank = ref (Type.CUnbound (fresh_id t, rank))
 
 let rec inst_ty' t ~remap_ty ~remap_context ~(scheme : Type.ty) ~rank : Type.ty =
   let scheme = Type.canonical_ty scheme in
@@ -110,7 +57,7 @@ let rec inst_ty' t ~remap_ty ~remap_context ~(scheme : Type.ty) ~rank : Type.ty 
       }
   | TVar { contents = Link ty } ->
     inst_ty' t ~remap_ty ~remap_context ~scheme:ty ~rank
-  | TVar { contents = Type.Unbound (id, _) } -> (* weak *) scheme
+  | TVar { contents = Type.Unbound _ } -> scheme
   | TVar { contents = Type.Generic id } ->
     Hashtbl.find_or_add remap_ty id ~default:(fun () ->
       Type.TVar (fresh_tvar t ~rank))
@@ -128,7 +75,7 @@ and inst_context' t ~remap_ty ~remap_context ~(context : Type.context) ~rank
       , inst_context' t ~remap_ty ~remap_context ~context:context' ~rank )
   | CVar { contents = Type.CLink context' } ->
     inst_context' t ~remap_ty ~remap_context ~context:context' ~rank
-  | CVar { contents = Type.CUnbound (id, _) } -> (* weak *) context
+  | CVar { contents = Type.CUnbound _ } -> context
   | CVar { contents = Type.CGeneric id } ->
     Hashtbl.find_or_add remap_context id ~default:(fun () ->
       Type.CVar (fresh_cvar t ~rank))
@@ -141,15 +88,6 @@ let inst_ty t ~scheme ~rank =
     ~remap_ty:(Int.Table.create ())
     ~remap_context:(Int.Table.create ())
     ~rank
-;;
-
-let inst_context t ~context ~rank =
-  inst_context'
-    t
-    ~context
-    ~remap_ty:(Int.Table.create ())
-    ~rank
-    ~remap_context:(Int.Table.create ())
 ;;
 
 let rec generalize_ty t ~rank ~(ty : Type.ty) : Type.ty =
@@ -437,191 +375,307 @@ module Typecheck_error = struct
   type t =
     | Unification_error of Unification_error.t
     | Not_in_scope of string
-    | Duplicate_name_in_recursive_bindings of Error.t
+    | Duplicate_toplevel of string
+    | Duplicate_substitution of string
     | Variable_used_at_wrong_level of
         { name : string
         ; var_level : Env.Level.t
-        ; expected_level : Env.Level.t
+        ; used_at : Env.Level.t
         }
   [@@deriving sexp, compare, equal, variants]
 end
 
 let unify_ty' t ~ty1 ~ty2 =
-  unify_ty t ~ty1 ~ty2 |> Result.map_error ~f:Typecheck_error.unification_error
+  unify_ty t ~ty1 ~ty2
+  |> Result.map_error ~f:Typecheck_error.unification_error
+  |> Result.ignore_m
 ;;
 
-let unpack_annot t annot =
+let unify_context' t ~context1 ~context2 =
+  unify_context t ~context1 ~context2
+  |> Result.map_error ~f:Typecheck_error.unification_error
+  |> Result.ignore_m
+;;
+
+(* Toplevels are checked on demand, so strongly connected components are found
+   with Tarjan's algorithm as we go. [pending] are the visited toplevels whose
+   component is not yet complete. *)
+module Scc_frame = struct
+  type t =
+    { mutable lowlink : int
+    ; mutable pending : Toplevel.t list
+    }
+end
+
+module Scope = struct
+  type t =
+    { level : Env.Level.t
+    ; rank : Type.rank
+    ; locals : Env.t
+    ; quote : quote option
+    ; scc : Scc_frame.t
+    }
+
+  and quote =
+    { id : int
+    ; rank_at_quote : Type.rank
+    ; free_vars : Type.ty String.Table.t
+    ; other_free_vars : Type.context
+      (* The context's tail: free variables of spliced code whose context is
+         not fully known yet. *)
+    ; outside : t
+    }
+
+  let quote_id t = Option.map t.quote ~f:(fun quote -> quote.id)
+
+  let entry t ~scheme ~persistent =
+    { Env.Entry.scheme; level = t.level; quote_id = quote_id t; persistent }
+  ;;
+end
+
+let unpack_annot t ~rank annot =
   Option.value_or_thunk annot ~default:(fun () ->
-    Type.TVar (fresh_tvar t ~rank:(counts t).rank))
+    Type.TVar (fresh_tvar t ~rank))
 ;;
 
-let rec var_type t ~name ~use_mask : (Type.ty, Typecheck_error.t) Result.t =
-  let%bind.Result entry =
-    lookup t ~name ~use_mask
-    |> Result.of_option ~error:(Typecheck_error.Not_in_scope name)
+let function_type t ~rank ~(args : Syntax.Binding.t list) ~annot =
+  let args =
+    List.map args ~f:(fun (name, annot) -> name, unpack_annot t ~rank annot)
   in
-  let%bind.Result () =
-    match entry.type_check_state with
-    | Done | In_check -> Ok ()
-    | To_be_checked { args; expr; mask } ->
-      push_mask t ~mask;
-      push_counts t ~counts:entry.counts;
-      entry.type_check_state <- In_check;
-      entry.bypasses_value_restriction
-      <- (* syntactic value. Later we will have a [pure] mode prob *)
-         not (List.is_empty args);
-      List.iter args ~f:(fun (name, ty) ->
-        push_let t ~name ~ty ~type_check_state:Done);
-      incr_rank t;
-      let%bind.Result expr_ty = expr_type t ~expr in
-      decr_rank t;
-      let%map.Result new_ty =
-        unify_ty t ~ty1:entry.scheme ~ty2:expr_ty
-        |> Result.map_error ~f:Typecheck_error.unification_error
-      in
-      entry.scheme <- new_ty;
-      if entry.bypasses_value_restriction
-      then
-        (* generalize *)
-        entry.scheme <- generalize_ty t ~rank:(counts t).rank ~ty:new_ty;
-      entry.type_check_state <- Done;
-      pop_counts t;
-      pop_mask t
+  let res_ty = unpack_annot t ~rank annot in
+  let ty =
+    List.fold_right args ~init:res_ty ~f:(fun (_, arg_ty) ty ->
+      Type.TArrow (arg_ty, ty))
   in
-  let which =
-    if entry.bypasses_value_restriction then `Any_greater else `Exactly_the_same
-  in
-  match
-    Env.Level.is_allowed_at entry.counts.level ~used_at:(counts t).level ~which
-  with
-  | true -> Ok (inst_ty t ~scheme:entry.scheme ~rank:(counts t).rank)
-  | false ->
-    Error
-      (Variable_used_at_wrong_level
-         { name
-         ; var_level = entry.counts.level
-         ; expected_level = (counts t).level
-         })
+  args, res_ty, ty
+;;
 
-and expr_type t ~expr =
+let free_var t (quote : Scope.quote) ~name =
+  Hashtbl.find_or_add quote.free_vars name ~default:(fun () ->
+    Type.TVar (fresh_tvar t ~rank:quote.rank_at_quote))
+;;
+
+let finish_scc t (members : Toplevel.t list) =
+  let persistent =
+    List.for_all members ~f:(fun member -> not (List.is_empty member.args))
+  in
+  List.iter members ~f:(fun member ->
+    match member.state with
+    | In_progress { ty; _ } ->
+      let scheme = if persistent then generalize_ty t ~rank:0 ~ty else ty in
+      member.state <- Done (Env.Entry.toplevel ~scheme ~persistent)
+    | Unchecked | Done _ ->
+      raise_s
+        [%message "finish_scc: member not in progress" (member : Toplevel.t)])
+;;
+
+let rec var_type t (scope : Scope.t) ~name
+  : (Type.ty, Typecheck_error.t) Result.t
+  =
+  let%bind.Result entry =
+    match Env.find scope.locals name with
+    | Some entry -> Ok (Some entry)
+    | None ->
+      (match Hashtbl.find t.toplevels name with
+       | None -> Ok None
+       | Some toplevel ->
+         toplevel_entry t scope toplevel |> Result.map ~f:Option.some)
+  in
+  match entry, scope.quote with
+  | Some entry, _
+    when Env.Entry.is_allowed_at
+           entry
+           ~used_at:scope.level
+           ~quote_id:(Scope.quote_id scope) ->
+    Ok (inst_ty t ~scheme:entry.scheme ~rank:scope.rank)
+  | Some entry, Some quote when entry.level <= scope.level ->
+    Ok (free_var t quote ~name)
+  | None, Some quote -> Ok (free_var t quote ~name)
+  | Some entry, _ ->
+    Error
+      (Typecheck_error.Variable_used_at_wrong_level
+         { name; var_level = entry.level; used_at = scope.level })
+  | None, None -> Error (Typecheck_error.Not_in_scope name)
+
+and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) =
+  match toplevel.state with
+  | Done entry -> Ok entry
+  | In_progress { index; ty } ->
+    scope.scc.lowlink <- Int.min scope.scc.lowlink index;
+    Ok (Env.Entry.toplevel ~scheme:ty ~persistent:false)
+  | Unchecked ->
+    let%bind.Result scc = check_toplevel t toplevel in
+    scope.scc.lowlink <- Int.min scope.scc.lowlink scc.lowlink;
+    scope.scc.pending <- scc.pending @ scope.scc.pending;
+    toplevel_entry t scope toplevel
+
+and check_toplevel t (toplevel : Toplevel.t)
+  : (Scc_frame.t, Typecheck_error.t) Result.t
+  =
+  let index = fresh_id t in
+  let scc = { Scc_frame.lowlink = index; pending = [ toplevel ] } in
+  let scope =
+    { Scope.level = 0; rank = 1; locals = Env.create (); quote = None; scc }
+  in
+  let args, res_ty, ty =
+    function_type t ~rank:scope.rank ~args:toplevel.args ~annot:toplevel.annot
+  in
+  toplevel.state <- In_progress { index; ty };
+  let%map.Result () = check_body t scope ~args ~res_ty ~body:toplevel.expr in
+  if scc.lowlink = index
+  then (
+    finish_scc t scc.pending;
+    scc.pending <- []);
+  scc
+
+and check_body t (scope : Scope.t) ~args ~res_ty ~body =
+  Env.with_bindings
+    scope.locals
+    (List.map args ~f:(fun (name, ty) ->
+       name, Scope.entry scope ~scheme:ty ~persistent:false))
+    ~f:(fun () ->
+      let%bind.Result body_ty = expr_type t scope ~expr:body in
+      unify_ty' t ~ty1:res_ty ~ty2:body_ty)
+
+and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
+  : (Type.ty, Typecheck_error.t) Result.t
+  =
   match expr with
   | Lit l -> Ok (Syntax.Lit.ty l)
-  | Var (name, binding) ->
-    let%bind.Result ty = var_type t ~name ~use_mask:true in
-    (match binding with
+  | Var (name, annot) ->
+    let%bind.Result ty = var_type t scope ~name in
+    (match annot with
      | None -> Ok ty
-     | Some ty' -> unify_ty' t ~ty1:ty ~ty2:ty')
+     | Some annot ->
+       let%map.Result () = unify_ty' t ~ty1:ty ~ty2:annot in
+       ty)
   | App (f, x) ->
-    let a : Type.ty = TVar (fresh_tvar t ~rank:(counts t).rank) in
-    let b : Type.ty = TVar (fresh_tvar t ~rank:(counts t).rank) in
-    let%bind.Result f_ty = expr_type t ~expr:f in
-    let%bind.Result f_ty = unify_ty' t ~ty1:(Type.TArrow (a, b)) ~ty2:f_ty in
-    let%bind.Result x_ty = expr_type t ~expr:x in
-    let%map.Result x_ty = unify_ty' t ~ty1:a ~ty2:x_ty in
+    let a : Type.ty = TVar (fresh_tvar t ~rank:scope.rank) in
+    let b : Type.ty = TVar (fresh_tvar t ~rank:scope.rank) in
+    let%bind.Result f_ty = expr_type t scope ~expr:f in
+    let%bind.Result () = unify_ty' t ~ty1:(TArrow (a, b)) ~ty2:f_ty in
+    let%bind.Result x_ty = expr_type t scope ~expr:x in
+    let%map.Result () = unify_ty' t ~ty1:a ~ty2:x_ty in
     b
   | Let (name, args, annot, equal, in_) ->
+    let rank = scope.rank + 1 in
+    let args, res_ty, ty = function_type t ~rank ~args ~annot in
     let%bind.Result () =
-      push_and_typecheck_recursive_bindings
+      Env.with_bindings
+        scope.locals
+        [ name, Scope.entry scope ~scheme:ty ~persistent:false ]
+        ~f:(fun () ->
+          check_body t { scope with rank } ~args ~res_ty ~body:equal)
+    in
+    (* syntactic value restriction *)
+    let persistent = not (List.is_empty args) in
+    let scheme =
+      if persistent then generalize_ty t ~rank:scope.rank ~ty else ty
+    in
+    Env.with_bindings
+      scope.locals
+      [ name, Scope.entry scope ~scheme ~persistent ]
+      ~f:(fun () -> expr_type t scope ~expr:in_)
+  | Quote expr ->
+    let quote =
+      { Scope.id = fresh_id t
+      ; rank_at_quote = scope.rank
+      ; free_vars = String.Table.create ()
+      ; other_free_vars = CVar (fresh_cvar t ~rank:scope.rank)
+      ; outside = scope
+      }
+    in
+    let%map.Result inner =
+      expr_type
         t
-        ~bindings:[ name, args, annot, equal ]
+        { scope with level = scope.level + 1; quote = Some quote }
+        ~expr
     in
-    let%map.Result res = expr_type t ~expr:in_ in
-    pop_let t ~name;
-    res
-  | Splice { expr; subs } ->
-    let%bind.Result () =
-      match subs with
-      | None -> Ok ()
-      | Some subs ->
-        let%map.Result () =
-          push_and_typecheck_recursive_bindings
-            t
-            ~bindings:
-              (List.filter_map subs ~f:(fun (name, expr) ->
-                 let%map.Option expr in
-                 name, [], None, expr))
-        in
-        push_mask t ~mask:(List.map subs ~f:Tuple2.get1 |> String.Set.of_list)
+    let context =
+      Hashtbl.to_alist quote.free_vars
+      |> List.sort ~compare:(Comparable.lift String.compare ~f:fst)
+      |> List.fold_right ~init:quote.other_free_vars ~f:(fun (name, ty) rest ->
+        Type.CExtend (name, ty, rest))
     in
-    incr_level t;
-    let%bind.Result inner = expr_type t ~expr in
-    decr_level t;
-    (match subs with
-     | None -> ()
-     | Some subs ->
-       List.iter subs ~f:(fun (name, _) -> pop_let t ~name);
-       pop_mask t);
     Type.TCode { inner; context }
-  | Quote expr -> ()
+  | Splice { expr; subs } ->
+    let outside : Scope.t =
+      match scope.quote with
+      | Some quote -> { quote.outside with rank = scope.rank }
+      | None -> { scope with level = scope.level - 1 }
+    in
+    let inner = Type.TVar (fresh_tvar t ~rank:scope.rank) in
+    let context = Type.CVar (fresh_cvar t ~rank:scope.rank) in
+    let%bind.Result code_ty = expr_type t outside ~expr in
+    let%bind.Result () =
+      unify_ty' t ~ty1:(TCode { inner; context }) ~ty2:code_ty
+    in
+    let%map.Result () =
+      match subs with
+      | None -> substitute_from_scope t scope ~context
+      | Some subs -> substitute_explicitly t scope ~context ~subs
+    in
+    inner
 
-and push_and_typecheck_recursive_bindings
-      t
-      ~(bindings :
-         (string * Syntax.Binding.t list * Type.ty option * Syntax.Expr.t) list)
-  : (unit, Typecheck_error.t) Result.t
-  =
+and substitute_from_scope t scope ~context =
+  match Type.canonical_context context with
+  | CEmpty -> Ok ()
+  | CExtend (name, ty, rest) ->
+    let%bind.Result var_ty = var_type t scope ~name in
+    let%bind.Result () = unify_ty' t ~ty1:ty ~ty2:var_ty in
+    substitute_from_scope t scope ~context:rest
+  | CVar _ as context ->
+    (match (scope : Scope.t).quote with
+     | None -> unify_context' t ~context1:context ~context2:CEmpty
+     | Some quote ->
+       unify_context' t ~context1:quote.other_free_vars ~context2:context)
+
+and substitute_explicitly t scope ~context ~subs =
   let%bind.Result () =
-    match
-      List.map bindings ~f:(fun (name, _, _, _) -> name)
-      |> List.find_a_dup ~compare:String.compare
-    with
+    match List.map subs ~f:fst |> List.find_a_dup ~compare:String.compare with
     | None -> Ok ()
-    | Some dup ->
-      Error
-        (Typecheck_error.Duplicate_name_in_recursive_bindings
-           (Error.of_string dup))
+    | Some name -> Error (Typecheck_error.Duplicate_substitution name)
   in
-  List.iter bindings ~f:(fun (name, args, annot, expr) ->
-    let args =
-      List.map args ~f:(fun (name, annot) -> name, unpack_annot t annot)
-    in
-    let res_ty = unpack_annot t annot in
-    let ty =
-      List.fold_right args ~init:res_ty ~f:(fun (_, arg_ty) ty ->
-        Type.TArrow (arg_ty, ty))
-    in
-    push_let t ~name ~ty ~type_check_state:(To_be_checked { args; expr }));
-  List.map bindings ~f:(fun (name, _, _, _) ->
-    var_type t ~name ~use_mask:false |> Result.map ~f:(ignore : Type.ty -> unit))
-  |> Result.all_unit
+  let%bind.Result provided =
+    List.fold_result subs ~init:[] ~f:(fun acc (name, expr) ->
+      let%map.Result ty =
+        match expr with
+        | None -> var_type t scope ~name
+        | Some expr -> expr_type t scope ~expr
+      in
+      (name, ty) :: acc)
+  in
+  let provided =
+    List.fold provided ~init:Type.CEmpty ~f:(fun rest (name, ty) ->
+      Type.CExtend (name, ty, rest))
+  in
+  unify_context' t ~context1:context ~context2:provided
 ;;
 
 let typecheck t ~(program : Syntax.Program.t)
-  : (unit, Typecheck_error.t) Result.t
+  : ((string * Type.ty) list, Typecheck_error.t) Result.t
   =
-  let%bind.Result toplevel_bindings =
-    List.map program ~f:(function Let (name, bindings, ty_opt, expr) ->
-        name, (bindings, ty_opt, expr))
-    |> String.Table.of_alist_or_error
-    |> Result.map_error ~f:(fun err ->
-      Typecheck_error.Duplicate_name_in_recursive_bindings err)
+  let toplevels =
+    List.map program ~f:(fun (Let (name, args, annot, expr)) ->
+      { Toplevel.name; args; annot; expr; state = Unchecked })
   in
-  let visited = String.Hash_set.create () in
-  let rec typecheck_toplevel var =
-    if Hash_set.mem visited var
-    then Ok ()
-    else (
-      match Hashtbl.find toplevel_bindings var with
-      | None -> (* already handled *) Ok ()
-      | Some (bindings, ty_opt, expr) ->
-        (* t.rank <- t.rank + 1;
-
-        t.rank <- t.rank - 1; *)
-        failwith "TODO")
+  let%bind.Result () =
+    List.fold_result toplevels ~init:() ~f:(fun () toplevel ->
+      match Hashtbl.add t.toplevels ~key:toplevel.name ~data:toplevel with
+      | `Ok -> Ok ()
+      | `Duplicate -> Error (Typecheck_error.Duplicate_toplevel toplevel.name))
   in
-  Hashtbl.keys toplevel_bindings
-  |> List.map ~f:(fun var ->
-    let%map.Result () = typecheck_toplevel var in
-    Hash_set.iter visited ~f:(fun var ->
-      let entries = Hashtbl.find_exn t.env.entries var in
-      let entry = List.hd_exn entries in
-      let entry =
-        { entry with
-          scheme = generalize_ty t ~rank:(counts t).rank ~ty:entry.scheme
-        }
-      in
-      Hashtbl.remove toplevel_bindings var;
-      Hashtbl.set t.env.entries ~key:var ~data:(entry :: List.tl_exn entries));
-    Hash_set.clear visited)
-  |> Result.all_unit
+  List.fold_result toplevels ~init:[] ~f:(fun acc toplevel ->
+    let%map.Result () =
+      match toplevel.state with
+      | Unchecked ->
+        check_toplevel t toplevel
+        |> Result.map ~f:(ignore : Scc_frame.t -> unit)
+      | In_progress _ | Done _ -> Ok ()
+    in
+    match toplevel.state with
+    | Done { scheme; _ } -> (toplevel.name, scheme) :: acc
+    | Unchecked | In_progress _ ->
+      raise_s [%message "typecheck: toplevel not done" (toplevel : Toplevel.t)])
+  |> Result.map ~f:List.rev
 ;;

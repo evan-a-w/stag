@@ -1,6 +1,5 @@
 open! Core
 open Stag
-
 open Type
 
 let int = TCon ("int", [])
@@ -74,7 +73,6 @@ let%expect_test "list fail unification" =
       (Base_types_not_equal int string)))
     |}]
 ;;
-
 
 let%expect_test "constructor arity mismatch" =
   let typecheck = Typecheck.create () in

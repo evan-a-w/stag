@@ -10,54 +10,37 @@ module Level = struct
   ;;
 end
 
-module Counts = struct
-  module Ro = struct
-    type t =
-      { level : Level.t
-      ; rank : Type.rank
-      }
-    [@@deriving sexp, compare, equal, fields]
-  end
-
-  type t =
-    { mutable level : Level.t
-    ; mutable rank : Type.rank
-    }
-  [@@deriving fields, sexp]
-
-  let ro { level; rank } : Ro.t = { level; rank }
-  let of_ro ({ level; rank } : Ro.t) = { level; rank }
-  let create () = { level = 0; rank = 0 }
-  let incr_level t = t.level <- t.level + 1
-  let decr_level t = t.level <- t.level - 1
-end
-
-module Type_check_state = struct
-  type t =
-    | To_be_checked of
-        { args : (string * Type.ty) list
-        ; expr : Syntax.Expr.t
-        ; mask : String.Set.t
-        }
-    | In_check
-    | Done
-  [@@deriving sexp, compare, equal]
-end
-
 module Entry = struct
   type t =
-    { mutable scheme : Type.ty
-    ; mutable type_check_state : Type_check_state.t
-    ; mutable bypasses_value_restriction : bool
-    ; counts : Counts.Ro.t
+    { scheme : Type.ty
+    ; level : Level.t
+    ; quote_id : int option
+    ; persistent : bool
     }
   [@@deriving sexp, compare, equal]
+
+  let toplevel ~scheme ~persistent =
+    { scheme; level = 0; quote_id = None; persistent }
+  ;;
+
+  let is_allowed_at t ~used_at ~quote_id =
+    if t.persistent
+    then Level.is_allowed_at t.level ~used_at ~which:`Any_greater
+    else
+      Level.is_allowed_at t.level ~used_at ~which:`Exactly_the_same
+      && [%equal: int option] t.quote_id quote_id
+  ;;
 end
 
-type t = { entries : Entry.t list String.Table.t } [@@deriving sexp]
+type t = Entry.t list String.Table.t [@@deriving sexp_of]
 
-let create () = { entries = String.Table.create () }
+let create () = String.Table.create ()
+let find t name = Hashtbl.find t name |> Option.bind ~f:List.hd
 
-let lookup t name =
-  Hashtbl.find t.entries name |> Option.value ~default:[] |> List.hd
+let with_bindings t bindings ~f =
+  List.iter bindings ~f:(fun (name, entry) ->
+    Hashtbl.add_multi t ~key:name ~data:entry);
+  let result = f () in
+  List.iter bindings ~f:(fun (name, _) -> Hashtbl.remove_multi t name);
+  result
 ;;
