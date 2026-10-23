@@ -1,4 +1,6 @@
 open! Core
+module Unification_error = Unification_error
+module Typecheck_error = Typecheck_error
 
 module Toplevel = struct
   module State = struct
@@ -15,16 +17,20 @@ module Toplevel = struct
   type t =
     { name : string
     ; args : Syntax.Binding.t list
-    ; annot : Type.ty option
+    ; annot : Syntax.Type_expr.t option
     ; expr : Syntax.Expr.t
     ; mutable state : State.t
     }
   [@@deriving sexp_of]
+
+  let is_function t = not (List.is_empty t.args)
+  let is_value t = is_function t || Syntax.Expr.is_value t.expr
 end
 
 type t =
   { mutable next_id : int
   ; toplevels : Toplevel.t String.Table.t
+  ; mutable type_env : Type_env.t
   ; context_bounds : Type.context list Int.Table.t
     (* Upper bounds of context variables, by id: every entry the variable gets
        must also be an entry of each bound. Kept out of [Type.context] as
@@ -34,6 +40,7 @@ type t =
 let create () =
   { next_id = 0
   ; toplevels = String.Table.create ()
+  ; type_env = Type_env.empty
   ; context_bounds = Int.Table.create ()
   }
 ;;
@@ -68,7 +75,13 @@ end
 let rec inst_ty' t ~(remap : Remap.t) ~(scheme : Type.ty) ~rank : Type.ty =
   let scheme = Type.canonical_ty scheme in
   match scheme with
-  | TCon _ -> scheme
+  | TCon (name, args) ->
+    TCon
+      ( name
+      , List.map args ~f:(function
+          | ATy scheme -> Type.ATy (inst_ty' t ~remap ~scheme ~rank)
+          | AContext context -> AContext (inst_context' t ~remap ~context ~rank))
+      )
   | TArrow (ty1, ty2) ->
     TArrow
       (inst_ty' t ~remap ~scheme:ty1 ~rank, inst_ty' t ~remap ~scheme:ty2 ~rank)
@@ -128,7 +141,13 @@ let inst_ty t ~scheme ~rank = inst_ty' t ~scheme ~remap:(Remap.create ()) ~rank
 let rec generalize_ty t ~rank ~(ty : Type.ty) : Type.ty =
   let ty = Type.canonical_ty ty in
   match ty with
-  | TCon _ -> ty
+  | TCon (name, args) ->
+    TCon
+      ( name
+      , List.map args ~f:(function
+          | ATy ty -> Type.ATy (generalize_ty t ~rank ~ty)
+          | AContext context -> AContext (generalize_context t ~rank ~context))
+      )
   | TArrow (ty1, ty2) ->
     TArrow (generalize_ty t ~rank ~ty:ty1, generalize_ty t ~rank ~ty:ty2)
   | TTuple tys -> TTuple (List.map tys ~f:(fun ty -> generalize_ty t ~rank ~ty))
@@ -176,31 +195,6 @@ and generalize_presence ~rank ~presence : Type.presence =
     presence
   | Present | Absent | PVar _ -> presence
 ;;
-
-module Unification_error = struct
-  module Type_mismatch_reason = struct
-    type t =
-      | Base_types_not_equal of string * string
-      | Args_length_mismatch of int * int
-      | Mismatch_arg_kind of Type.arg * Type.arg
-      | Structural_mismatch
-    [@@deriving sexp, compare, equal]
-  end
-
-  module Context_mismatch_reason = struct
-    type t =
-      | Empty_context_has_variable of string
-      | Cyclic_context
-    [@@deriving sexp, compare, equal]
-  end
-
-  type t =
-    | Type_mismatch of Type.ty * Type.ty * Type_mismatch_reason.t
-    | Context_mismatch of
-        Type.context * Type.context * Context_mismatch_reason.t
-    | Occurs_check_failed of Type.Var.t
-  [@@deriving sexp, compare, equal]
-end
 
 let rec unify_ty t ~ty1 ~ty2 : (Type.ty, Unification_error.t) Result.t =
   let ty1 = Type.canonical_ty ty1 in
@@ -504,20 +498,6 @@ and unify_arg t ~arg1 ~arg2
   | ATy _, AContext _ | AContext _, ATy _ -> Error `Kind_mismatch
 ;;
 
-module Typecheck_error = struct
-  type t =
-    | Unification_error of Unification_error.t
-    | Not_in_scope of string
-    | Duplicate_toplevel of string
-    | Duplicate_substitution of string
-    | Variable_used_at_wrong_level of
-        { name : string
-        ; var_level : Env.Level.t
-        ; used_at : Env.Level.t
-        }
-  [@@deriving sexp, compare, equal, variants]
-end
-
 let unify_ty' t ~ty1 ~ty2 =
   unify_ty t ~ty1 ~ty2
   |> Result.map_error ~f:Typecheck_error.unification_error
@@ -547,6 +527,7 @@ module Scope = struct
     ; locals : Env.t
     ; quote : quote option
     ; scc : Scc_frame.t
+    ; annotation_vars : Type_env.Annotation_vars.t
     }
 
   and quote =
@@ -562,21 +543,129 @@ module Scope = struct
   ;;
 end
 
-let unpack_annot t ~rank annot =
-  Option.value_or_thunk annot ~default:(fun () ->
-    Type.TVar (fresh_tvar t ~rank))
+let elaborate t (scope : Scope.t) annot =
+  Type_env.elaborate t.type_env scope.annotation_vars annot
 ;;
 
-let function_type t ~rank ~(args : Syntax.Binding.t list) ~annot =
-  let args =
-    List.map args ~f:(fun (name, annot) -> name, unpack_annot t ~rank annot)
+let unpack_annot t scope ~rank annot =
+  match annot with
+  | None -> Ok (Type.TVar (fresh_tvar t ~rank))
+  | Some annot -> elaborate t scope annot
+;;
+
+let function_type t scope ~rank ~(args : Syntax.Binding.t list) ~annot =
+  let%bind.Result args =
+    List.map args ~f:(fun (name, annot) ->
+      let%map.Result ty = unpack_annot t scope ~rank annot in
+      name, ty)
+    |> Result.all
   in
-  let res_ty = unpack_annot t ~rank annot in
+  let%map.Result res_ty = unpack_annot t scope ~rank annot in
   let ty =
     List.fold_right args ~init:res_ty ~f:(fun (_, arg_ty) ty ->
       Type.TArrow (arg_ty, ty))
   in
   args, res_ty, ty
+;;
+
+let check_arity ~(constructor : Type_env.Constructor.t) ~args =
+  let expected = List.length constructor.args in
+  let got = List.length args in
+  if expected = got
+  then Ok ()
+  else
+    Error
+      (Typecheck_error.Constructor_arity_mismatch
+         { constructor = constructor.name; expected; got })
+;;
+
+(* Returns the instantiated record type and each field's type. *)
+let record_fields t (scope : Scope.t) fields ~all_required
+  : (Type.ty * (Type.ty * 'a) list, Typecheck_error.t) Result.t
+  =
+  let%bind.Result fields =
+    List.map fields ~f:(fun (path, x) ->
+      let%map.Result field = Type_env.find_field t.type_env path in
+      field, x)
+    |> Result.all
+  in
+  match fields with
+  | [] -> Error Typecheck_error.Empty_record
+  | (first, _) :: _ ->
+    let%bind.Result () =
+      List.fold_result fields ~init:() ~f:(fun () (field, _) ->
+        if String.equal field.type_name first.type_name
+        then Ok ()
+        else
+          Error
+            (Typecheck_error.Fields_of_different_types
+               { field = field.name
+               ; expected_type = first.type_name
+               ; actual_type = field.type_name
+               }))
+    in
+    let names = List.map fields ~f:(fun (field, _) -> field.name) in
+    let%bind.Result () =
+      match List.find_a_dup names ~compare:String.compare with
+      | None -> Ok ()
+      | Some name -> Error (Typecheck_error.Duplicate_field name)
+    in
+    let%map.Result () =
+      match
+        List.find first.all_fields ~f:(fun name ->
+          all_required && not (List.mem names name ~equal:String.equal))
+      with
+      | None -> Ok ()
+      | Some name -> Error (Typecheck_error.Missing_field name)
+    in
+    let remap = Remap.create () in
+    let inst scheme = inst_ty' t ~remap ~scheme ~rank:scope.rank in
+    ( inst first.record
+    , List.map fields ~f:(fun ((field : Type_env.Field.t), x) ->
+        inst field.ty, x) )
+;;
+
+let inst_constructor t (scope : Scope.t) (constructor : Type_env.Constructor.t) =
+  let remap = Remap.create () in
+  let inst scheme = inst_ty' t ~remap ~scheme ~rank:scope.rank in
+  List.map constructor.args ~f:inst, inst constructor.result
+;;
+
+let rec pattern_type t (scope : Scope.t) ~(pattern : Syntax.Pattern.t)
+  : (Type.ty * (string * Type.ty) list, Typecheck_error.t) Result.t
+  =
+  let fresh () = Type.TVar (fresh_tvar t ~rank:scope.rank) in
+  let sub_patterns patterns ~types =
+    List.zip_exn patterns types
+    |> List.fold_result ~init:[] ~f:(fun bindings (pattern, ty) ->
+      let%bind.Result pattern_ty, bindings' = pattern_type t scope ~pattern in
+      let%map.Result () = unify_ty' t ~ty1:ty ~ty2:pattern_ty in
+      bindings @ bindings')
+  in
+  match pattern with
+  | Any -> Ok (fresh (), [])
+  | Var name ->
+    let ty = fresh () in
+    Ok (ty, [ name, ty ])
+  | Lit lit -> Ok (Syntax.Lit.ty lit, [])
+  | Tuple patterns ->
+    let types = List.map patterns ~f:(fun _ -> fresh ()) in
+    let%map.Result bindings = sub_patterns patterns ~types in
+    Type.TTuple types, bindings
+  | Construct (path, patterns) ->
+    let%bind.Result constructor = Type_env.find_constructor t.type_env path in
+    let%bind.Result () = check_arity ~constructor ~args:patterns in
+    let types, result = inst_constructor t scope constructor in
+    let%map.Result bindings = sub_patterns patterns ~types in
+    result, bindings
+  | Record fields ->
+    let%bind.Result record, fields =
+      record_fields t scope fields ~all_required:false
+    in
+    let%map.Result bindings =
+      sub_patterns (List.map fields ~f:snd) ~types:(List.map fields ~f:fst)
+    in
+    record, bindings
 ;;
 
 let constrain_context' t ~context ~bound =
@@ -620,13 +709,12 @@ module Capture = struct
 end
 
 let finish_scc t (members : Toplevel.t list) =
-  let persistent =
-    List.for_all members ~f:(fun member -> not (List.is_empty member.args))
-  in
+  let generalize = List.for_all members ~f:Toplevel.is_value in
+  let persistent = List.for_all members ~f:Toplevel.is_function in
   List.iter members ~f:(fun member ->
     match member.state with
     | In_progress { ty; _ } ->
-      let scheme = if persistent then generalize_ty t ~rank:0 ~ty else ty in
+      let scheme = if generalize then generalize_ty t ~rank:0 ~ty else ty in
       member.state <- Done (Env.Entry.toplevel ~scheme ~persistent)
     | Unchecked | Done _ ->
       raise_s
@@ -659,7 +747,7 @@ let rec var_type t (scope : Scope.t) ~name
     Error
       (Typecheck_error.Variable_used_at_wrong_level
          { name; var_level = entry.level; used_at = scope.level })
-  | None, None -> Error (Typecheck_error.Not_in_scope name)
+  | None, None -> Error (Typecheck_error.Not_in_scope (Syntax.Path.name name))
 
 and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) =
   match toplevel.state with
@@ -678,11 +766,24 @@ and check_toplevel t (toplevel : Toplevel.t)
   =
   let index = fresh_id t in
   let scc = { Scc_frame.lowlink = index; pending = [ toplevel ] } in
+  let rank = 1 in
   let scope =
-    { Scope.level = 0; rank = 1; locals = Env.create (); quote = None; scc }
+    { Scope.level = 0
+    ; rank
+    ; locals = Env.create ()
+    ; quote = None
+    ; scc
+    ; annotation_vars =
+        Type_env.Annotation_vars.create ~fresh_id:(fun () -> fresh_id t) ~rank
+    }
   in
-  let args, res_ty, ty =
-    function_type t ~rank:scope.rank ~args:toplevel.args ~annot:toplevel.annot
+  let%bind.Result args, res_ty, ty =
+    function_type
+      t
+      scope
+      ~rank:scope.rank
+      ~args:toplevel.args
+      ~annot:toplevel.annot
   in
   toplevel.state <- In_progress { index; ty };
   let%map.Result () = check_body t scope ~args ~res_ty ~body:toplevel.expr in
@@ -693,24 +794,32 @@ and check_toplevel t (toplevel : Toplevel.t)
   scc
 
 and check_body t (scope : Scope.t) ~args ~res_ty ~body =
+  with_monomorphic_bindings scope args ~f:(fun () ->
+    let%bind.Result body_ty = expr_type t scope ~expr:body in
+    unify_ty' t ~ty1:res_ty ~ty2:body_ty)
+
+and with_monomorphic_bindings (scope : Scope.t) bindings ~f =
   Env.with_bindings
     scope.locals
-    (List.map args ~f:(fun (name, ty) ->
+    (List.map bindings ~f:(fun (name, ty) ->
        name, Scope.entry scope ~scheme:ty ~persistent:false))
-    ~f:(fun () ->
-      let%bind.Result body_ty = expr_type t scope ~expr:body in
-      unify_ty' t ~ty1:res_ty ~ty2:body_ty)
+    ~f
 
 and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
   : (Type.ty, Typecheck_error.t) Result.t
   =
   match expr with
   | Lit l -> Ok (Syntax.Lit.ty l)
-  | Var (name, annot) ->
-    let%bind.Result ty = var_type t scope ~name in
+  | Var (path, annot) ->
+    let%bind.Result ty =
+      match (path :> string list) with
+      | [ name ] -> var_type t scope ~name
+      | _ -> Error (Typecheck_error.Not_in_scope path)
+    in
     (match annot with
      | None -> Ok ty
      | Some annot ->
+       let%bind.Result annot = elaborate t scope annot in
        let%map.Result () = unify_ty' t ~ty1:ty ~ty2:annot in
        ty)
   | App (f, x) ->
@@ -723,7 +832,9 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
     b
   | Let (name, args, annot, equal, in_) ->
     let rank = scope.rank + 1 in
-    let args, res_ty, ty = function_type t ~rank ~args ~annot in
+    let%bind.Result args, res_ty, ty =
+      function_type t scope ~rank ~args ~annot
+    in
     let%bind.Result () =
       Env.with_bindings
         scope.locals
@@ -731,10 +842,11 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
         ~f:(fun () ->
           check_body t { scope with rank } ~args ~res_ty ~body:equal)
     in
-    (* syntactic value restriction *)
     let persistent = not (List.is_empty args) in
     let scheme =
-      if persistent then generalize_ty t ~rank:scope.rank ~ty else ty
+      if persistent || Syntax.Expr.is_value equal
+      then generalize_ty t ~rank:scope.rank ~ty
+      else ty
     in
     Env.with_bindings
       scope.locals
@@ -772,6 +884,56 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
       | Some subs -> substitute_explicitly t scope ~context ~subs
     in
     inner
+  | Tuple exprs ->
+    let%map.Result types =
+      List.map exprs ~f:(fun expr -> expr_type t scope ~expr) |> Result.all
+    in
+    Type.TTuple types
+  | Construct (path, args) ->
+    let%bind.Result constructor = Type_env.find_constructor t.type_env path in
+    let%bind.Result () = check_arity ~constructor ~args in
+    let types, result = inst_constructor t scope constructor in
+    let%map.Result () = check_exprs t scope (List.zip_exn args types) in
+    result
+  | Record fields ->
+    let%bind.Result record, fields =
+      record_fields t scope fields ~all_required:true
+    in
+    let%map.Result () =
+      check_exprs t scope (List.map fields ~f:(fun (ty, expr) -> expr, ty))
+    in
+    record
+  | Field (expr, path) ->
+    let%bind.Result record, field_types =
+      record_fields t scope [ path, () ] ~all_required:false
+    in
+    let%bind.Result expr_ty = expr_type t scope ~expr in
+    let%map.Result () = unify_ty' t ~ty1:record ~ty2:expr_ty in
+    fst (List.hd_exn field_types)
+  | Match (expr, cases) ->
+    let%bind.Result scrutinee = expr_type t scope ~expr in
+    let result = Type.TVar (fresh_tvar t ~rank:scope.rank) in
+    let%map.Result () =
+      List.fold_result cases ~init:() ~f:(fun () (pattern, body) ->
+        let%bind.Result pattern_ty, bindings = pattern_type t scope ~pattern in
+        let%bind.Result () =
+          match
+            List.map bindings ~f:fst |> List.find_a_dup ~compare:String.compare
+          with
+          | None -> Ok ()
+          | Some name -> Error (Typecheck_error.Duplicate_pattern_variable name)
+        in
+        let%bind.Result () = unify_ty' t ~ty1:scrutinee ~ty2:pattern_ty in
+        with_monomorphic_bindings scope bindings ~f:(fun () ->
+          let%bind.Result body_ty = expr_type t scope ~expr:body in
+          unify_ty' t ~ty1:result ~ty2:body_ty))
+    in
+    result
+
+and check_exprs t scope exprs =
+  List.fold_result exprs ~init:() ~f:(fun () (expr, ty) ->
+    let%bind.Result expr_ty = expr_type t scope ~expr in
+    unify_ty' t ~ty1:ty ~ty2:expr_ty)
 
 and substitute_from_scope t (scope : Scope.t) ~context =
   match scope.quote with
@@ -876,10 +1038,16 @@ and substitute_explicitly t scope ~context ~subs =
 let typecheck t ~(program : Syntax.Program.t)
   : ((string * Type.ty) list, Typecheck_error.t) Result.t
   =
-  let toplevels =
-    List.map program ~f:(fun (Let (name, args, annot, expr)) ->
-      { Toplevel.name; args; annot; expr; state = Unchecked })
+  let decls, toplevels =
+    List.partition_map program ~f:(function
+      | Type decl -> First decl
+      | Let (name, args, annot, expr) ->
+        Second { Toplevel.name; args; annot; expr; state = Unchecked })
   in
+  let%bind.Result type_env =
+    Type_env.create decls ~fresh_id:(fun () -> fresh_id t)
+  in
+  t.type_env <- type_env;
   let%bind.Result () =
     List.fold_result toplevels ~init:() ~f:(fun () toplevel ->
       match Hashtbl.add t.toplevels ~key:toplevel.name ~data:toplevel with

@@ -16,30 +16,7 @@ val generalize_context
   -> context:Type.context
   -> Type.context
 
-module Unification_error : sig
-  module Type_mismatch_reason : sig
-    type t =
-      | Base_types_not_equal of string * string
-      | Args_length_mismatch of int * int
-      | Mismatch_arg_kind of Type.arg * Type.arg
-      | Structural_mismatch
-    [@@deriving sexp, compare, equal]
-  end
-
-  module Context_mismatch_reason : sig
-    type t =
-      | Empty_context_has_variable of string
-      | Cyclic_context
-    [@@deriving sexp, compare, equal]
-  end
-
-  type t =
-    | Type_mismatch of Type.ty * Type.ty * Type_mismatch_reason.t
-    | Context_mismatch of
-        Type.context * Type.context * Context_mismatch_reason.t
-    | Occurs_check_failed of Type.Var.t
-  [@@deriving sexp, compare, equal]
-end
+module Unification_error = Unification_error
 
 val unify_ty
   :  t
@@ -53,23 +30,12 @@ val unify_context
   -> context2:Type.context
   -> (Type.context, Unification_error.t) Result.t
 
-module Typecheck_error : sig
-  type t =
-    | Unification_error of Unification_error.t
-    | Not_in_scope of string
-    | Duplicate_toplevel of string
-    | Duplicate_substitution of string
-    | Variable_used_at_wrong_level of
-        { name : string
-        ; var_level : Env.Level.t
-        ; used_at : Env.Level.t
-        }
-  [@@deriving sexp, compare, equal]
-end
+module Typecheck_error = Typecheck_error
 
-(** Toplevel bindings may refer to each other in any order. Each strongly
-    connected component is generalized once fully checked, if all its members
-    are syntactic functions. Returns the type of each binding, in program
+(** Type declarations are checked first. Toplevel bindings may refer to each
+    other in any order. Each strongly connected component is generalized once
+    fully checked, if all its members are syntactic values, and persistent if
+    all are syntactic functions. Returns the type of each binding, in program
     order. *)
 val typecheck
   :  t
