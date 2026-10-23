@@ -16,6 +16,7 @@ module Toplevel = struct
 
   type t =
     { name : string
+    ; module_ : Module_scope.t
     ; args : Syntax.Binding.t list
     ; annot : Syntax.Type_expr.t option
     ; expr : Syntax.Expr.t
@@ -526,6 +527,7 @@ module Scope = struct
     ; rank : Type.rank
     ; locals : Env.t
     ; quote : quote option
+    ; module_ : Module_scope.t
     ; scc : Scc_frame.t
     ; annotation_vars : Type_env.Annotation_vars.t
     }
@@ -544,7 +546,7 @@ module Scope = struct
 end
 
 let elaborate t (scope : Scope.t) annot =
-  Type_env.elaborate t.type_env scope.annotation_vars annot
+  Type_env.elaborate t.type_env scope.module_ scope.annotation_vars annot
 ;;
 
 let unpack_annot t scope ~rank annot =
@@ -585,7 +587,9 @@ let record_fields t (scope : Scope.t) fields ~all_required
   =
   let%bind.Result fields =
     List.map fields ~f:(fun (path, x) ->
-      let%map.Result field = Type_env.find_field t.type_env path in
+      let%map.Result field =
+        Type_env.find_field t.type_env scope.module_ path
+      in
       field, x)
     |> Result.all
   in
@@ -653,7 +657,9 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Syntax.Pattern.t)
     let%map.Result bindings = sub_patterns patterns ~types in
     Type.TTuple types, bindings
   | Construct (path, patterns) ->
-    let%bind.Result constructor = Type_env.find_constructor t.type_env path in
+    let%bind.Result constructor =
+      Type_env.find_constructor t.type_env scope.module_ path
+    in
     let%bind.Result () = check_arity ~constructor ~args:patterns in
     let types, result = inst_constructor t scope constructor in
     let%map.Result bindings = sub_patterns patterns ~types in
@@ -721,18 +727,11 @@ let finish_scc t (members : Toplevel.t list) =
         [%message "finish_scc: member not in progress" (member : Toplevel.t)])
 ;;
 
-let rec var_type t (scope : Scope.t) ~name
+(* [name] is the context entry the variable is provided as, if it becomes a
+   free variable of the quote: a local's name or a toplevel's canonical name. *)
+let rec entry_type t (scope : Scope.t) ~name (entry : Env.Entry.t option)
   : (Type.ty, Typecheck_error.t) Result.t
   =
-  let%bind.Result entry =
-    match Env.find scope.locals name with
-    | Some entry -> Ok (Some entry)
-    | None ->
-      (match Hashtbl.find t.toplevels name with
-       | None -> Ok None
-       | Some toplevel ->
-         toplevel_entry t scope toplevel |> Result.map ~f:Option.some)
-  in
   match entry, scope.quote with
   | Some entry, _
     when Env.Entry.is_allowed_at
@@ -747,7 +746,36 @@ let rec var_type t (scope : Scope.t) ~name
     Error
       (Typecheck_error.Variable_used_at_wrong_level
          { name; var_level = entry.level; used_at = scope.level })
-  | None, None -> Error (Typecheck_error.Not_in_scope (Syntax.Path.name name))
+  | None, None ->
+    Error (Typecheck_error.Not_in_scope (Syntax.Path.of_string name))
+
+and var_type t (scope : Scope.t) ~(path : Syntax.Path.t) =
+  let name = Syntax.Path.to_string path in
+  let local =
+    match (path :> string list) with
+    | [ name ] -> Env.find scope.locals name
+    | _ -> None
+  in
+  match local with
+  | Some entry -> entry_type t scope ~name (Some entry)
+  | None ->
+    (match%bind.Result Module_scope.find scope.module_ Value path with
+     | Some name -> toplevel_type t scope (Hashtbl.find_exn t.toplevels name)
+     | None ->
+       (match (path :> string list) with
+        | [ _ ] -> entry_type t scope ~name None
+        | _ -> Error (Typecheck_error.Not_in_scope path)))
+
+(* Provides context entry [name] at a splice site. *)
+and entry_name_type t (scope : Scope.t) ~name =
+  match Env.find scope.locals name, Hashtbl.find t.toplevels name with
+  | Some entry, _ -> entry_type t scope ~name (Some entry)
+  | None, Some toplevel -> toplevel_type t scope toplevel
+  | None, None -> entry_type t scope ~name None
+
+and toplevel_type t scope (toplevel : Toplevel.t) =
+  let%bind.Result entry = toplevel_entry t scope toplevel in
+  entry_type t scope ~name:toplevel.name (Some entry)
 
 and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) =
   match toplevel.state with
@@ -772,6 +800,7 @@ and check_toplevel t (toplevel : Toplevel.t)
     ; rank
     ; locals = Env.create ()
     ; quote = None
+    ; module_ = toplevel.module_
     ; scc
     ; annotation_vars =
         Type_env.Annotation_vars.create ~fresh_id:(fun () -> fresh_id t) ~rank
@@ -811,11 +840,7 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
   match expr with
   | Lit l -> Ok (Syntax.Lit.ty l)
   | Var (path, annot) ->
-    let%bind.Result ty =
-      match (path :> string list) with
-      | [ name ] -> var_type t scope ~name
-      | _ -> Error (Typecheck_error.Not_in_scope path)
-    in
+    let%bind.Result ty = var_type t scope ~path in
     (match annot with
      | None -> Ok ty
      | Some annot ->
@@ -890,7 +915,9 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
     in
     Type.TTuple types
   | Construct (path, args) ->
-    let%bind.Result constructor = Type_env.find_constructor t.type_env path in
+    let%bind.Result constructor =
+      Type_env.find_constructor t.type_env scope.module_ path
+    in
     let%bind.Result () = check_arity ~constructor ~args in
     let types, result = inst_constructor t scope constructor in
     let%map.Result () = check_exprs t scope (List.zip_exn args types) in
@@ -948,7 +975,7 @@ and substitute_outside_quote t scope ~context =
     when Type.equal_presence (Type.canonical_presence presence) Absent ->
     substitute_outside_quote t scope ~context:rest
   | CExtend (name, _, ty, rest) ->
-    let%bind.Result var_ty = var_type t scope ~name in
+    let%bind.Result var_ty = entry_name_type t scope ~name in
     let%bind.Result () = unify_ty' t ~ty1:ty ~ty2:var_ty in
     substitute_outside_quote t scope ~context:rest
   | CVar _ as context -> unify_context' t ~context1:context ~context2:CEmpty
@@ -1023,7 +1050,7 @@ and substitute_explicitly t scope ~context ~subs =
     List.fold_result subs ~init:[] ~f:(fun acc (name, expr) ->
       let%map.Result ty =
         match expr with
-        | None -> var_type t scope ~name
+        | None -> var_type t scope ~path:(Syntax.Path.of_string name)
         | Some expr -> expr_type t scope ~expr
       in
       (name, ty) :: acc)
@@ -1038,22 +1065,31 @@ and substitute_explicitly t scope ~context ~subs =
 let typecheck t ~(program : Syntax.Program.t)
   : ((string * Type.ty) list, Typecheck_error.t) Result.t
   =
-  let decls, toplevels =
-    List.partition_map program ~f:(function
-      | Type decl -> First decl
-      | Let (name, args, annot, expr) ->
-        Second { Toplevel.name; args; annot; expr; state = Unchecked })
+  let%bind.Result root =
+    Module_scope.create
+      (List.map Type_env.builtins ~f:Syntax.Toplevel.type_ @ program)
   in
   let%bind.Result type_env =
-    Type_env.create decls ~fresh_id:(fun () -> fresh_id t)
+    Type_env.create root ~fresh_id:(fun () -> fresh_id t)
   in
   t.type_env <- type_env;
-  let%bind.Result () =
-    List.fold_result toplevels ~init:() ~f:(fun () toplevel ->
-      match Hashtbl.add t.toplevels ~key:toplevel.name ~data:toplevel with
-      | `Ok -> Ok ()
-      | `Duplicate -> Error (Typecheck_error.Duplicate_toplevel toplevel.name))
+  let toplevels =
+    Module_scope.toplevels root
+    |> List.filter_map ~f:(fun (module_, (toplevel : Syntax.Toplevel.t)) ->
+      match toplevel with
+      | Let (name, args, annot, expr) ->
+        Some
+          { Toplevel.name = Module_scope.canonical_name module_ name
+          ; module_
+          ; args
+          ; annot
+          ; expr
+          ; state = Unchecked
+          }
+      | Type _ | Module _ -> None)
   in
+  List.iter toplevels ~f:(fun toplevel ->
+    Hashtbl.add_exn t.toplevels ~key:toplevel.name ~data:toplevel);
   List.fold_result toplevels ~init:[] ~f:(fun acc toplevel ->
     let%map.Result () =
       match toplevel.state with

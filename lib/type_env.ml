@@ -24,6 +24,8 @@ end
 module Decl = struct
   type t =
     { decl : Type_decl.t
+    ; name : string
+    ; module_ : Module_scope.t
     ; params : Type.arg list
     }
 
@@ -46,33 +48,30 @@ let empty =
   }
 ;;
 
-(* Modules will make these lexical lookups. *)
-let find_in map (path : Path.t) =
-  match (path :> string list) with
-  | [ name ] -> Map.find map name
-  | _ -> None
-;;
-
-let find_type t path = find_in t.types path
-
-let find_constructor t path =
-  find_in t.constructors path
-  |> Result.of_option ~error:(Typecheck_error.Unbound_constructor path)
-;;
-
-let find_field t path =
-  find_in t.fields path
-  |> Result.of_option ~error:(Typecheck_error.Unbound_field path)
-;;
-
 let builtins =
-  String.Map.of_alist_exn
-    [ "int", Type.int
-    ; "bool", Type.bool
-    ; "string", Type.string
-    ; "char", Type.char
-    ; "unit", Type.unit
-    ]
+  List.map [ "int"; "bool"; "string"; "char"; "unit" ] ~f:(fun name ->
+    { Type_decl.name; params = []; kind = Variant [] })
+;;
+
+let find_in map module_ namespace path ~unbound
+  : (_, Typecheck_error.t) Result.t
+  =
+  match%bind.Result Module_scope.find module_ namespace path with
+  | None -> Error (unbound path)
+  | Some name -> Ok (Map.find_exn map name)
+;;
+
+let find_type t module_ path =
+  find_in t.types module_ Type path ~unbound:(fun path -> Unbound_type path)
+;;
+
+let find_constructor t module_ path =
+  find_in t.constructors module_ Constructor path ~unbound:(fun path ->
+    Unbound_constructor path)
+;;
+
+let find_field t module_ path =
+  find_in t.fields module_ Field path ~unbound:(fun path -> Unbound_field path)
 ;;
 
 module Annotation_vars = struct
@@ -126,71 +125,72 @@ module Vars = struct
   ;;
 end
 
-let rec elaborate' t vars (expr : Type_expr.t)
+let rec elaborate' t module_ vars (expr : Type_expr.t)
   : (Type.ty, Typecheck_error.t) Result.t
   =
   match expr with
   | Var name -> Vars.ty vars name
-  | Con (path, args) -> elaborate_con t vars path args
+  | Con (path, args) -> elaborate_con t module_ vars path args
   | Arrow (ty1, ty2) ->
-    let%bind.Result ty1 = elaborate' t vars ty1 in
-    let%map.Result ty2 = elaborate' t vars ty2 in
+    let%bind.Result ty1 = elaborate' t module_ vars ty1 in
+    let%map.Result ty2 = elaborate' t module_ vars ty2 in
     Type.TArrow (ty1, ty2)
   | Tuple tys ->
-    let%map.Result tys = List.map tys ~f:(elaborate' t vars) |> Result.all in
+    let%map.Result tys =
+      List.map tys ~f:(elaborate' t module_ vars) |> Result.all
+    in
     Type.TTuple tys
   | Code { inner; context } ->
-    let%bind.Result inner = elaborate' t vars inner in
-    let%map.Result context = elaborate_context t vars context in
+    let%bind.Result inner = elaborate' t module_ vars inner in
+    let%map.Result context = elaborate_context t module_ vars context in
     Type.TCode { inner; context }
 
-and elaborate_context t vars (context : Type_expr.context)
+and elaborate_context t module_ vars (context : Type_expr.context)
   : (Type.context, Typecheck_error.t) Result.t
   =
   match context with
   | Empty -> Ok CEmpty
   | Extend (name, ty, rest) ->
-    let%bind.Result ty = elaborate' t vars ty in
-    let%map.Result rest = elaborate_context t vars rest in
+    let%bind.Result ty = elaborate' t module_ vars ty in
+    let%map.Result rest = elaborate_context t module_ vars rest in
     Type.CExtend (name, Present, ty, rest)
   | Var name -> Vars.context vars name
 
-and elaborate_con t vars path args =
-  let check_arity ~expected =
-    let got = List.length args in
+and elaborate_con t module_ vars path args =
+  let%bind.Result decl = find_type t module_ path in
+  let expected = List.length decl.params in
+  let got = List.length args in
+  let%bind.Result () =
     if expected = got
     then Ok ()
     else
       Error
         (Typecheck_error.Type_arity_mismatch { type_name = path; expected; got })
   in
-  match find_type t path, (path :> string list) with
-  | None, [ name ] when Map.mem builtins name ->
-    let%map.Result () = check_arity ~expected:0 in
-    Map.find_exn builtins name
-  | None, _ -> Error (Unbound_type path)
-  | Some decl, _ ->
-    let%bind.Result () = check_arity ~expected:(List.length decl.params) in
-    let%bind.Result args =
-      List.map2_exn decl.decl.params args ~f:(fun param arg ->
-        match param, arg with
-        | Ty _, Ty ty ->
-          elaborate' t vars ty |> Result.map ~f:(fun ty -> Type.ATy ty)
-        | Context _, Context context ->
-          elaborate_context t vars context
-          |> Result.map ~f:(fun context -> Type.AContext context)
-        | Ty _, Context _ | Context _, Ty _ ->
-          Error
-            (Typecheck_error.Type_arg_kind_mismatch { type_name = path; param }))
-      |> Result.all
-    in
-    (match decl.decl.kind with
-     | Alias body ->
-       elaborate' t (Params (Decl.param_map { decl with params = args })) body
-     | Variant _ | Record _ -> Ok (Type.TCon (decl.decl.name, args)))
+  let%bind.Result args =
+    List.map2_exn decl.decl.params args ~f:(fun param arg ->
+      match param, arg with
+      | Ty _, Ty ty ->
+        elaborate' t module_ vars ty |> Result.map ~f:(fun ty -> Type.ATy ty)
+      | Context _, Context context ->
+        elaborate_context t module_ vars context
+        |> Result.map ~f:(fun context -> Type.AContext context)
+      | Ty _, Context _ | Context _, Ty _ ->
+        Error
+          (Typecheck_error.Type_arg_kind_mismatch { type_name = path; param }))
+    |> Result.all
+  in
+  match decl.decl.kind with
+  | Alias body ->
+    elaborate'
+      t
+      decl.module_
+      (Params (Decl.param_map { decl with params = args }))
+      body
+  | Variant _ | Record _ -> Ok (Type.TCon (decl.name, args))
 ;;
 
-let elaborate t vars expr = elaborate' t (Annotation vars) expr
+let elaborate t module_ vars expr = elaborate' t module_ (Annotation vars) expr
 
 let rec referenced_types (expr : Type_expr.t) =
   match expr with
@@ -216,62 +216,55 @@ let check_alias_cycles t =
   let rec visit (decl : Decl.t) ~visiting =
     match decl.decl.kind with
     | Variant _ | Record _ -> Ok ()
-    | Alias _ when Hash_set.mem finished decl.decl.name -> Ok ()
-    | Alias _ when Set.mem visiting decl.decl.name ->
-      Error (Typecheck_error.Cyclic_type_alias decl.decl.name)
+    | Alias _ when Hash_set.mem finished decl.name -> Ok ()
+    | Alias _ when Set.mem visiting decl.name ->
+      Error (Typecheck_error.Cyclic_type_alias decl.name)
     | Alias body ->
-      let visiting = Set.add visiting decl.decl.name in
+      let visiting = Set.add visiting decl.name in
       let%map.Result () =
-        List.filter_map (referenced_types body) ~f:(find_type t)
+        List.filter_map (referenced_types body) ~f:(fun path ->
+          find_type t decl.module_ path |> Result.ok)
         |> List.fold_result ~init:() ~f:(fun () decl -> visit decl ~visiting)
       in
-      Hash_set.add finished decl.decl.name
+      Hash_set.add finished decl.name
   in
   Map.data t.types
   |> List.fold_result ~init:() ~f:(fun () decl ->
     visit decl ~visiting:String.Set.empty)
 ;;
 
-let add map ~key ~data ~duplicate =
-  match Map.add map ~key ~data with
-  | `Ok map -> Ok map
-  | `Duplicate -> Error (duplicate key)
-;;
-
-let declare_types decls ~fresh_id =
-  List.fold_result
-    decls
-    ~init:String.Map.empty
-    ~f:(fun types (decl : Type_decl.t) ->
-      let%bind.Result () =
-        match
-          List.map decl.params ~f:Type_decl.Param.name
-          |> List.find_a_dup ~compare:String.compare
-        with
-        | None -> Ok ()
-        | Some param ->
-          Error
-            (Typecheck_error.Duplicate_type_parameter
-               { type_name = decl.name; param })
-      in
-      let params =
-        List.map decl.params ~f:(function
-          | Ty _ -> Type.ATy (TVar (ref (Type.Generic (fresh_id ()))))
-          | Context _ -> AContext (CVar (ref (Type.CGeneric (fresh_id ())))))
-      in
-      add
-        types
-        ~key:decl.name
-        ~data:{ Decl.decl; params }
-        ~duplicate:(fun name -> Typecheck_error.Duplicate_type name))
+let declare module_ (decl : Type_decl.t) ~fresh_id =
+  let%map.Result () =
+    match
+      List.map decl.params ~f:Type_decl.Param.name
+      |> List.find_a_dup ~compare:String.compare
+    with
+    | None -> Ok ()
+    | Some param ->
+      Error
+        (Typecheck_error.Duplicate_type_parameter
+           { type_name = Module_scope.canonical_name module_ decl.name; param })
+  in
+  let params =
+    List.map decl.params ~f:(function
+      | Ty _ -> Type.ATy (TVar (ref (Type.Generic (fresh_id ()))))
+      | Context _ -> AContext (CVar (ref (Type.CGeneric (fresh_id ())))))
+  in
+  { Decl.decl
+  ; name = Module_scope.canonical_name module_ decl.name
+  ; module_
+  ; params
+  }
 ;;
 
 let define t (decl : Decl.t) =
   let vars = Vars.Params (Decl.param_map decl) in
-  let result = Type.TCon (decl.decl.name, decl.params) in
+  let elaborate = elaborate' t decl.module_ vars in
+  let canonical_name = Module_scope.canonical_name decl.module_ in
+  let result = Type.TCon (decl.name, decl.params) in
   match decl.decl.kind with
   | Alias body ->
-    let%map.Result (_ : Type.ty) = elaborate' t vars body in
+    let%map.Result (_ : Type.ty) = elaborate body in
     t
   | Variant constructors ->
     let%map.Result constructors =
@@ -279,40 +272,52 @@ let define t (decl : Decl.t) =
         constructors
         ~init:t.constructors
         ~f:(fun constructors (name, args) ->
-          let%bind.Result args =
-            List.map args ~f:(elaborate' t vars) |> Result.all
-          in
-          add
+          let%map.Result args = List.map args ~f:elaborate |> Result.all in
+          let name = canonical_name name in
+          Map.add_exn
             constructors
             ~key:name
-            ~data:{ Constructor.name; args; result }
-            ~duplicate:(fun name -> Typecheck_error.Duplicate_constructor name))
+            ~data:{ Constructor.name; args; result })
     in
     { t with constructors }
   | Record fields ->
-    let all_fields = List.map fields ~f:fst in
+    let all_fields =
+      List.map fields ~f:(fun (name, _) -> canonical_name name)
+    in
     let%map.Result fields =
       List.fold_result fields ~init:t.fields ~f:(fun fields (name, ty) ->
-        let%bind.Result ty = elaborate' t vars ty in
-        add
+        let%map.Result ty = elaborate ty in
+        let name = canonical_name name in
+        Map.add_exn
           fields
           ~key:name
           ~data:
             { Field.name
-            ; type_name = decl.decl.name
+            ; type_name = decl.name
             ; ty
             ; record = result
             ; all_fields
-            }
-          ~duplicate:(fun name -> Typecheck_error.Duplicate_field name))
+            })
     in
     { t with fields }
 ;;
 
-let create decls ~fresh_id =
-  let%bind.Result types = declare_types decls ~fresh_id in
-  let t = { empty with types } in
+let create root ~fresh_id =
+  let%bind.Result decls =
+    Module_scope.toplevels root
+    |> List.filter_map ~f:(fun (module_, (toplevel : Toplevel.t)) ->
+      match toplevel with
+      | Type decl -> Some (declare module_ decl ~fresh_id)
+      | Let _ | Module _ -> None)
+    |> Result.all
+  in
+  let t =
+    { empty with
+      types =
+        List.map decls ~f:(fun (decl : Decl.t) -> decl.name, decl)
+        |> String.Map.of_alist_exn
+    }
+  in
   let%bind.Result () = check_alias_cycles t in
-  List.fold_result decls ~init:t ~f:(fun t (decl : Type_decl.t) ->
-    define t (Map.find_exn types decl.name))
+  List.fold_result decls ~init:t ~f:define
 ;;

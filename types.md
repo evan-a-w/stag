@@ -32,8 +32,10 @@ Elaboration:
   rank.
 - In declarations, variables must be declared parameters of the right kind
   (`Ty` vs `Context`), otherwise `Unbound_type_variable`.
-- Builtins `int`, `bool`, `string`, `char`, `unit` stay as they are
-  (`Type.int` etc.), resolved when no user type of that name is in scope.
+- Builtins `int`, `bool`, `string`, `char`, `unit` are nominal types without
+  constructors declared in the root module (so `Type.int` is `TCon ("int", [])`
+  as before): redeclaring one at the root is `Duplicate_type`, while `M.unit`
+  is a distinct type that shadows the builtin within `M`.
 - Arity and kind of arguments are checked (`Type_arity_mismatch`,
   `Type_arg_kind_mismatch`).
 - Aliases are expanded during elaboration, so never appear in `Type.ty`.
@@ -137,6 +139,34 @@ No functors or signatures yet.
 - Members of all modules are order independent, as toplevels are now; checking
   on demand and SCC detection work across modules (keyed by canonical path).
 - Module names are unique within a module (`Duplicate_module`).
-- `typecheck` returns every `let` with its canonical path, in program order.
-- Errors name canonical paths: `Unbound_module`, `Unbound_type`,
-  `Unbound_constructor`, `Unbound_field`, and `Not_in_scope` for values.
+- Resolution is implemented once, in `Module_scope`, which returns canonical
+  names; types, constructors, fields and toplevels are stored by canonical
+  name.
+- Duplicate members (`Duplicate_toplevel`, `Duplicate_type`,
+  `Duplicate_constructor`, `Duplicate_field`, `Duplicate_module`) are per
+  module and named canonically. A module and a member of another kind may
+  share a name.
+- `typecheck` returns every `let` with its canonical path, in program order
+  (depth first through modules).
+- Paths in errors are as written: `Unbound_module` (the prefix up to the
+  missing module), `Unbound_type`, `Unbound_constructor`, `Unbound_field`,
+  `Not_in_scope` for values, and the type in type argument errors. Other
+  names in errors are canonical.
+- A qualified path whose last name is missing is an error even inside a
+  quote: only single names may become free variables.
+
+### Toplevels in quotes
+
+Toplevels are still not in `Env`, so implicit splices never capture them.
+Persistent toplevels are usable in quotes by any path. A non-persistent
+toplevel used in a quote becomes a free variable of the quote labelled by its
+**canonical** name, however it was written: inside `M`, `n` and `M.n` give the
+same entry `M.n`, which a binder `n` of an enclosing quote does not capture.
+Labelling by the path as written would make the entry depend on where the code
+was built, so splicing it elsewhere would find a different value or none.
+
+At a level 0 splice, an entry is provided by the local of that name, else the
+toplevel of that canonical name (as before, for root toplevels). Locals are
+single names, so only the toplevel provides an entry such as `M.n`. The
+explicit substitution shorthand `{l}` stands for `{l = l}`, with the right
+`l` read as a path and resolved lexically.

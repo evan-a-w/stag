@@ -1,14 +1,18 @@
 open! Core
 
 (** User type declarations, the constructors and fields they define, and the
-    elaboration of surface types. *)
+    elaboration of surface types. Names are canonical. *)
 type t
 
 val empty : t
 
-(** Checks [decls], which may refer to each other in any order. *)
+(** The builtin types, as declarations of the root module. *)
+val builtins : Syntax.Type_decl.t list
+
+(** Checks the type declarations of every module of the program [root], which
+    may refer to each other in any order. *)
 val create
-  :  Syntax.Type_decl.t list
+  :  Module_scope.t
   -> fresh_id:(unit -> Type.id)
   -> (t, Typecheck_error.t) Result.t
 
@@ -38,10 +42,15 @@ end
 
 val find_constructor
   :  t
+  -> Module_scope.t
   -> Syntax.Path.t
   -> (Constructor.t, Typecheck_error.t) Result.t
 
-val find_field : t -> Syntax.Path.t -> (Field.t, Typecheck_error.t) Result.t
+val find_field
+  :  t
+  -> Module_scope.t
+  -> Syntax.Path.t
+  -> (Field.t, Typecheck_error.t) Result.t
 
 (** The type and context variables of the annotations of one toplevel
     definition: each name stands for the same variable throughout. *)
@@ -54,6 +63,7 @@ end
 
 val elaborate
   :  t
+  -> Module_scope.t
   -> Annotation_vars.t
   -> Syntax.Type_expr.t
   -> (Type.ty, Typecheck_error.t) Result.t

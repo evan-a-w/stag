@@ -24,6 +24,10 @@ module Path : sig
 
   val of_list_exn : string list -> t
   val name : string -> t
+
+  (** Splits on [.]. *)
+  val of_string : string -> t
+
   val to_string : t -> string
 end = struct
   type t = string list [@@deriving compare, equal]
@@ -34,9 +38,10 @@ end = struct
   ;;
 
   let name name = [ name ]
+  let of_string string = String.split string ~on:'.' |> of_list_exn
   let to_string t = String.concat t ~sep:"."
   let sexp_of_t t = Sexp.Atom (to_string t)
-  let t_of_sexp sexp = String.split (string_of_sexp sexp) ~on:'.' |> of_list_exn
+  let t_of_sexp sexp = of_string (string_of_sexp sexp)
 end
 
 module Type_expr = struct
@@ -141,6 +146,7 @@ module Toplevel = struct
   type t =
     | Let of string * Binding.t list * Type_expr.t option * Expr.t
     | Type of Type_decl.t
+    | Module of string * t list
   [@@deriving sexp, compare, equal, variants]
 end
 

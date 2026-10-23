@@ -32,11 +32,12 @@ val unify_context
 
 module Typecheck_error = Typecheck_error
 
-(** Type declarations are checked first. Toplevel bindings may refer to each
-    other in any order. Each strongly connected component is generalized once
-    fully checked, if all its members are syntactic values, and persistent if
-    all are syntactic functions. Returns the type of each binding, in program
-    order. *)
+(** Type declarations of every module are checked first. Toplevel bindings, in
+    any module, may refer to each other in any order. Each strongly connected
+    component is generalized once fully checked, if all its members are
+    syntactic values, and persistent if all are syntactic functions. Returns
+    the type of each binding by canonical path, in program order (depth first
+    through modules). *)
 val typecheck
   :  t
   -> program:Syntax.Program.t

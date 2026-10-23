@@ -2,8 +2,10 @@ open! Core
 open Stag
 open Syntax
 
+let path name = Path.of_string name
+
 module Ty = struct
-  let con ?(args = []) name = Type_expr.Con (Path.name name, args)
+  let con ?(args = []) name = Type_expr.Con (path name, args)
   let int = con "int"
   let bool = con "bool"
   let unit = con "unit"
@@ -26,7 +28,6 @@ module Ty = struct
   ;;
 end
 
-let path name = Path.of_list_exn (String.split name ~on:'.')
 let int n = Expr.Lit (Int (Int.to_string n))
 let bool b = Expr.Lit (Bool b)
 let var ?annot name = Expr.Var (path name, annot)
@@ -41,6 +42,7 @@ let seq first second = let_ "_" [] first second
 let quote expr = Expr.Quote expr
 let splice ?subs expr = Expr.Splice { expr; subs }
 let top ?annot name params expr = Toplevel.Let (name, args params, annot, expr)
+let module_ name toplevels = Toplevel.Module (name, toplevels)
 
 let prims =
   let int_arg name = name, Some Ty.int in

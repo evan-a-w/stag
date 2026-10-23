@@ -1,7 +1,7 @@
 open! Core
 
-(** Names of types, constructors and fields are canonical, except in [Unbound_*]
-    errors, which give the path as written. *)
+(** Names of toplevels, types, constructors and fields are canonical, except
+    for paths ([Syntax.Path.t]), which are as written. *)
 type t =
   | Unification_error of Unification_error.t
   | Not_in_scope of Syntax.Path.t
@@ -12,6 +12,7 @@ type t =
       ; var_level : Env.Level.t
       ; used_at : Env.Level.t
       }
+  | Unbound_module of Syntax.Path.t
   | Unbound_type of Syntax.Path.t
   | Unbound_type_variable of string
   | Unbound_constructor of Syntax.Path.t
@@ -26,6 +27,7 @@ type t =
       ; param : Syntax.Type_decl.Param.t
       }
   | Cyclic_type_alias of string
+  | Duplicate_module of string
   | Duplicate_type of string
   | Duplicate_type_parameter of
       { type_name : string

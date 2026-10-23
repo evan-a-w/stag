@@ -397,7 +397,7 @@ let%expect_test "arity and kind of type arguments" =
     (Type_arg_kind_mismatch (type_name list) (param (Ty a)))
     (Type_arg_kind_mismatch (type_name stmt) (param (Context r)))
     (Unbound_type list)
-    (Unbound_type M.t)
+    (Unbound_module M)
     |}]
 ;;
 
@@ -467,14 +467,6 @@ let%expect_test "cyclic aliases" =
     (Cyclic_type_alias t)
     ok : u
     |}]
-;;
-
-let%expect_test "builtins can be shadowed by user types" =
-  check
-    [ Decl.variant "unit" [ "Unit", [] ]
-    ; top "u" [] ~annot:(Ty.con "unit") (construct "Unit")
-    ];
-  [%expect {| u : unit |}]
 ;;
 
 let%expect_test "annotation variables are shared within a toplevel" =
@@ -792,19 +784,5 @@ let%expect_test "SCCs are generalized iff all members are values" =
     b : list['_a]
     xs : list[int]
     ys : list[int]
-    |}]
-;;
-
-let%expect_test "multi-segment paths are unbound" =
-  check [ top "v" [] (var "M.x") ];
-  check [ top "c" [] (construct "M.A") ];
-  check [ point; top "f" [ "p" ] (field (var "p") "M.x") ];
-  check [ point; top "f" [ "p" ] (quote (var "M.x")) ];
-  [%expect
-    {|
-    (Not_in_scope M.x)
-    (Unbound_constructor M.A)
-    (Unbound_field M.x)
-    (Not_in_scope M.x)
     |}]
 ;;
