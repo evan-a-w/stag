@@ -27,24 +27,24 @@ let prims =
   ]
 ;;
 
-let print_types types =
+let print_types typecheck types =
   List.iter types ~f:(fun (name, ty) ->
-    printf "%s : %s\n" name (Type.to_string_hum ty))
+    printf "%s : %s\n" name (Typecheck.to_string_hum typecheck ty))
 ;;
 
 let check program =
-  match
-    Typecheck.typecheck (Typecheck.create ()) ~program:(prims @ program)
-  with
-  | Ok types -> print_types (List.drop types (List.length prims))
+  let typecheck = Typecheck.create () in
+  match Typecheck.typecheck typecheck ~program:(prims @ program) with
+  | Ok types -> print_types typecheck (List.drop types (List.length prims))
   | Error error -> print_s [%sexp (error : Typecheck.Typecheck_error.t)]
 ;;
 
 let%expect_test "primitives" =
-  Typecheck.typecheck (Typecheck.create ()) ~program:prims
+  let typecheck = Typecheck.create () in
+  Typecheck.typecheck typecheck ~program:prims
   |> Result.ok
   |> Option.value_exn
-  |> print_types;
+  |> print_types typecheck;
   [%expect
     {|
     add : int -> int -> int
@@ -387,8 +387,9 @@ let%expect_test "splice substitution errors" =
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     (Unification_error
      (Context_mismatch
-      (CExtend x (TVar (Link (TCon int ()))) (CVar (CUnbound 15 1))) CEmpty
-      (Empty_context_has_variable x)))
+      (CExtend x (PVar (PLink Present)) (TVar (Link (TCon int ())))
+       (CVar (CUnbound 24 1)))
+      CEmpty (Empty_context_has_variable x)))
     extra : <int>{..'_a}
     (Duplicate_substitution x)
     (Unification_error
@@ -431,6 +432,7 @@ let%expect_test "splice with implicit substitutions" =
                            ; context =
                                CExtend
                                  ( "x"
+                                 , Present
                                  , Type.int
                                  , CVar
                                      (ref (Type.CUnbound (-1, Int.max_value)))
@@ -472,14 +474,14 @@ let%expect_test "splice with implicit substitutions" =
     {|
     bound : <int>{..'_a}
     propagates : <int>{x : int; ..'_a}
-    unknown_context : <'a>{..'b} -> <'a>{..'b}
-    explicit_unknown : <'a>{x : int} -> <'a>{..'b}
-    two_unknown : <int>{..'a} -> <int>{..'a} -> <int>{..'a}
-    known_and_unknown : <int>{x : int; ..'a} -> <int>{..'a}
-    with_free_var : <int>{..'a} -> <int>{y : int; ..'a}
+    unknown_context : <'a>{..'b} -> <'a>{..'c} where ..'b <= {..'c}
+    explicit_unknown : <'a>{x?'b : int} -> <'a>{..'c}
+    two_unknown : <int>{..'a} -> <int>{..'b} -> <int>{..'c} where ..'a <= {..'c}, ..'b <= {..'c}
+    known_and_unknown : <int>{x : int; ..'a} -> <int>{..'b} where ..'a <= {..'b}
+    with_free_var : <int>{..'a} -> <int>{y : int; ..'b} where ..'a <= {y : int; ..'b}
     instantiated : <int>{y : int; z : int; ..'_a}
     (Unification_error
-     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+     (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
     toplevel_unknown : '_a
     (Unification_error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
@@ -520,14 +522,16 @@ let%expect_test "levels" =
   [%expect
     {|
     (Variable_used_at_wrong_level (name y) (var_level 1) (used_at 0))
-    outer_in_splice : <'a>{..'b} -> <'a>{..'b}
+    outer_in_splice : <'a>{..'b} -> <'a>{..'c} where ..'b <= {..'c}
     rebind_inner : <int>{..'_a}
     toplevel_splice : int
     toplevel_splice_arg : 'a -> 'a
     not_captured : <int>{..'_a}
     (Not_in_scope x)
     (Unification_error
-     (Context_mismatch (CExtend x (TVar (Unbound 18 1)) (CVar (CUnbound 16 1)))
+     (Context_mismatch
+      (CExtend x (PVar (PLink Present)) (TVar (Unbound 20 1))
+       (CVar (CUnbound 21 1)))
       CEmpty (Empty_context_has_variable x)))
     (Variable_used_at_wrong_level (name x) (var_level 0) (used_at -1))
     |}]
@@ -561,11 +565,257 @@ let%expect_test "staged power" =
     ];
   [%expect
     {|
-    power : int -> <int>{..'a} -> <int>{..'a}
-    cube : <int>{..'_a}
-    power : int -> <int>{..'a} -> <int>{..'a}
-    open : <int>{y : int; ..'_a}
+    power : int -> <int>{..'a} -> <int>{..'b} where ..'a <= {..'c}, ..'b <= {..'c}
+    cube : <int>{..'_a} where ..'_a <= {..'_b}
+    power : int -> <int>{..'a} -> <int>{..'b} where ..'a <= {..'c}, ..'b <= {..'c}
+    open : <int>{..'_a} where ..'_a <= {y : int; ..'_b}
     (Unification_error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    |}]
+;;
+
+let%expect_test
+    "splices capture binders of the quote even once the code is known"
+  =
+  let captures_x =
+    top
+      "captures_x"
+      [ "c" ]
+      (quote (let_ "x" [] (bool true) (splice (var "c"))))
+  in
+  let closed =
+    top
+      "closed"
+      []
+      ~annot:(TCode { inner = Type.int; context = CEmpty })
+      (quote (int 1))
+  in
+  check
+    [ captures_x
+    ; closed
+    ; top
+        "uses_x"
+        []
+        (app
+           (var "captures_x")
+           [ quote (app (var "cond") [ var "x"; int 1; int 2 ]) ])
+    ; top
+        "uses_y"
+        []
+        (app (var "captures_x") [ quote (app (var "add") [ var "y"; int 1 ]) ])
+    ; top "uses_closed" [] (app (var "captures_x") [ var "closed" ])
+    ];
+  check
+    [ captures_x
+    ; top
+        "wrong_type"
+        []
+        (app (var "captures_x") [ quote (app (var "add") [ var "x"; int 1 ]) ])
+    ];
+  [%expect
+    {|
+    captures_x : <'a>{x?'b : bool; ..'c} -> <'a>{..'d} where ..'c <= {..'d}
+    closed : <int>{}
+    uses_x : <int>{..'_a}
+    uses_y : <int>{y : int; ..'_a}
+    uses_closed : <int>{..'_a}
+    (Unification_error
+     (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
+    |}]
+;;
+
+let%expect_test "splices capture the same whether the context is known or not" =
+  let code = quote (app (var "add") [ var "x"; var "y" ]) in
+  check
+    [ top "known" [] (quote (let_ "x" [] (int 1) (splice code)))
+    ; top "unknown" [ "c" ] (quote (let_ "x" [] (int 1) (splice (var "c"))))
+    ; top "unknown_applied" [] (app (var "unknown") [ code ])
+    ];
+  [%expect
+    {|
+    known : <int>{y : int; ..'_a}
+    unknown : <'a>{x?'b : int; ..'c} -> <'a>{..'d} where ..'c <= {..'d}
+    unknown_applied : <int>{y : int; ..'_a}
+    |}]
+;;
+
+let%expect_test "spliced code that may use a name propagates it as such" =
+  check
+    [ top
+        "twice"
+        [ "c" ]
+        (seq
+           (quote (let_ "x" [] (bool true) (splice (var "c"))))
+           (quote (splice (var "c"))))
+    ; top
+        "propagates"
+        []
+        (app
+           (var "twice")
+           [ quote (app (var "cond") [ var "x"; int 1; int 2 ]) ])
+    ; top "not_used" [] (app (var "twice") [ quote (int 1) ])
+    ];
+  check
+    [ top
+        "direct_use"
+        [ "c" ]
+        (quote
+           (let_
+              "y"
+              []
+              (splice (quote (let_ "x" [] (bool true) (splice (var "c")))))
+              (var "x")))
+    ];
+  [%expect
+    {|
+    twice : <'a>{x?'b : bool; ..'c} -> <'a>{x?'b : bool; ..'d} where ..'c <= {x?'b : bool; ..'d}, ..'c <= {..'e}
+    propagates : <int>{x : bool; ..'_a}
+    not_used : <int>{x?'_a : bool; ..'_b}
+    direct_use : <'a>{x?'b : bool; ..'c} -> <'d>{x : 'd; ..'e} where ..'c <= {y?'f : 'a; ..'g}, ..'g <= {x : 'd; ..'e}
+    |}]
+;;
+
+let%expect_test "only binders of the enclosing quote capture" =
+  check
+    [ top
+        "outer_persistent"
+        [ "c" ]
+        (let_ "g" [ "v" ] (var "v") (quote (splice (var "c"))))
+    ; top "add_free" [ "add" ] (quote (var "add"))
+    ; top "not_toplevel" [] (quote (splice (app (var "add_free") [ int 1 ])))
+    ];
+  [%expect
+    {|
+    outer_persistent : <'a>{..'b} -> <'a>{..'c} where ..'b <= {..'c}
+    add_free : 'a -> <'b>{add : 'b; ..'c}
+    not_toplevel : <'_a>{add : '_a; ..'_b}
+    |}]
+;;
+
+let%expect_test "names bound at a later level are absent from spliced code" =
+  let inner_splice =
+    top
+      "inner_splice"
+      [ "c" ]
+      (quote (quote (let_ "z" [] (int 1) (splice (splice (var "c"))))))
+  in
+  check
+    [ inner_splice
+    ; top "uses_z" [] (app (var "inner_splice") [ quote (quote (var "z")) ])
+    ];
+  check
+    [ inner_splice
+    ; top
+        "uses_z_too_early"
+        []
+        (app (var "inner_splice") [ quote (seq (var "z") (quote (int 1))) ])
+    ];
+  let known_z =
+    Type.TCode
+      { inner =
+          TCode
+            { inner = Type.int
+            ; context = CVar (ref (Type.CUnbound (-1, Int.max_value)))
+            }
+      ; context =
+          CExtend
+            ( "z"
+            , Present
+            , Type.int
+            , CVar (ref (Type.CUnbound (-2, Int.max_value))) )
+      }
+  in
+  check
+    [ top
+        "known_z"
+        [ "c" ]
+        (quote
+           (quote
+              (let_ "z" [] (int 1) (splice (splice (Var ("c", Some known_z)))))))
+    ];
+  [%expect
+    {|
+    inner_splice : <<'a>{z?'b : int; ..'c}>{-z; ..'d} -> <<'a>{..'e}>{..'f} where ..'c <= {..'e}, ..'d <= {..'f}
+    uses_z : <<int>{..'_a}>{..'_b}
+    (Unification_error
+     (Context_mismatch
+      (CExtend z Absent (TVar (Unbound 33 1)) (CVar (CUnbound 32 1)))
+      (CExtend z (PVar (PLink Present)) (TVar (Unbound 41 1))
+       (CVar (CUnbound 42 1)))
+      (Empty_context_has_variable z)))
+    (Variable_used_at_wrong_level (name z) (var_level 2) (used_at 1))
+    |}]
+;;
+
+let%expect_test "free variables of a quote are not duplicated by spliced code" =
+  let f =
+    top "f" [ "c" ] (quote (app (var "add") [ var "x"; splice (var "c") ]))
+  in
+  check
+    [ f
+    ; top
+        "same"
+        []
+        (app (var "f") [ quote (app (var "add") [ var "x"; int 1 ]) ])
+    ; top
+        "other"
+        []
+        (app (var "f") [ quote (app (var "add") [ var "y"; int 1 ]) ])
+    ];
+  check
+    [ f
+    ; top
+        "conflict"
+        []
+        (app (var "f") [ quote (app (var "cond") [ var "x"; int 1; int 1 ]) ])
+    ];
+  check
+    [ top
+        "later_use"
+        [ "c" ]
+        (quote (app (var "add") [ splice (var "c"); var "x" ]))
+    ; top
+        "conflict"
+        []
+        (app
+           (var "later_use")
+           [ quote (app (var "cond") [ var "x"; int 1; int 1 ]) ])
+    ];
+  [%expect
+    {|
+    f : <int>{..'a} -> <int>{x : int; ..'b} where ..'a <= {x : int; ..'b}
+    same : <int>{x : int; ..'_a}
+    other : <int>{x : int; y : int; ..'_a}
+    (Unification_error
+     (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
+    (Unification_error
+     (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
+    |}]
+;;
+
+let%expect_test "spliced code does not take on the quote's free variables" =
+  let closed =
+    top
+      "closed"
+      []
+      ~annot:(TCode { inner = Type.int; context = CEmpty })
+      (quote (int 1))
+  in
+  check
+    [ closed
+    ; top
+        "before"
+        []
+        (quote (app (var "add") [ var "x"; splice (var "closed") ]))
+    ; top
+        "after"
+        []
+        (quote (app (var "add") [ splice (var "closed"); var "x" ]))
+    ];
+  [%expect
+    {|
+    closed : <int>{}
+    before : <int>{x : int; ..'_a}
+    after : <int>{x : int; ..'_a}
     |}]
 ;;

@@ -5,6 +5,7 @@ type t
 val create : unit -> t
 val fresh_tvar : t -> rank:Type.rank -> Type.tvar ref
 val fresh_cvar : t -> rank:Type.rank -> Type.cvar ref
+val fresh_pvar : t -> rank:Type.rank -> Type.pvar ref
 
 (** Marks unbound variables with rank greater than [rank] as [Generic]. *)
 val generalize_ty : t -> rank:Type.rank -> ty:Type.ty -> Type.ty
@@ -74,3 +75,14 @@ val typecheck
   :  t
   -> program:Syntax.Program.t
   -> ((string * Type.ty) list, Typecheck_error.t) Result.t
+
+(** Like [Type.to_string_hum], also printing the bounds of context variables. *)
+val to_string_hum : t -> Type.ty -> string
+
+(** Constrains every entry [context] has, or later gets, to also be an entry of
+    [bound]. *)
+val constrain_context
+  :  t
+  -> context:Type.context
+  -> bound:Type.context
+  -> (unit, Unification_error.t) Result.t
