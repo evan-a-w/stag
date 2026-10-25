@@ -12,6 +12,7 @@ end
 module Context_mismatch_reason = struct
   type t =
     | Empty_context_has_variable of string
+    | Presence_mismatch of string
     | Cyclic_context
   [@@deriving sexp, compare, equal]
 end

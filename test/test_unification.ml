@@ -560,7 +560,7 @@ let%expect_test "presence" =
       (CExtend y Present (TCon bool ()) CEmpty)))
     (Error
      (Context_mismatch (CExtend x Absent (TCon int ()) CEmpty)
-      (CExtend x Present (TCon int ()) CEmpty) (Empty_context_has_variable x)))
+      (CExtend x Present (TCon int ()) CEmpty) (Presence_mismatch x)))
     (Ok (CExtend x Absent (TCon int ()) CEmpty))
     |}]
 ;;
@@ -731,5 +731,250 @@ let%expect_test "bounds lower ranks" =
     {|
     (Ok (CVar (CUnbound 2 1)))
     (CVar (CUnbound 1 1))
+    |}]
+;;
+
+let%expect_test "an absent entry shadows later entries with its name" =
+  let typecheck = Typecheck.create () in
+  let constrain ~context ~bound =
+    let result = Typecheck.constrain_context typecheck ~context ~bound in
+    print_s [%sexp (result : (unit, Typecheck.Unification_error.t) Result.t)]
+  in
+  let pvar () = PVar (Typecheck.fresh_pvar typecheck ~rank:1) in
+  let absent_then_x =
+    CExtend ("x", Absent, int, CExtend ("x", Present, bool, CEmpty))
+  in
+  (* The shadowed [x] is unreachable, so needs no entry in the bound. *)
+  constrain ~context:absent_then_x ~bound:CEmpty;
+  let maybe_then_x =
+    CExtend ("x", pvar (), int, CExtend ("x", Present, bool, CEmpty))
+  in
+  constrain ~context:maybe_then_x ~bound:CEmpty;
+  print_context maybe_then_x;
+  (* Unification never finds the shadowed [x] in place of the absent one. *)
+  unify_context
+    typecheck
+    ~context1:(CExtend ("x", Present, bool, cvar typecheck ~rank:1))
+    ~context2:absent_then_x;
+  let r = cvar typecheck ~rank:1 in
+  constrain
+    ~context:r
+    ~bound:
+      (CExtend
+         ("x", Absent, int, CExtend ("x", Present, bool, cvar typecheck ~rank:1)));
+  unify_context
+    typecheck
+    ~context1:r
+    ~context2:(CExtend ("x", Present, bool, CEmpty));
+  (* Shadowed entries still take part in unification, which is stricter than
+     needed. *)
+  unify_context typecheck ~context1:CEmpty ~context2:absent_then_x;
+  [%expect
+    {|
+    (Ok ())
+    (Ok ())
+    (CExtend x (PVar (PLink Absent)) (TCon int ())
+     (CExtend x Present (TCon bool ()) CEmpty))
+    (Error
+     (Context_mismatch (CExtend x Present (TCon bool ()) (CVar (CUnbound 1 1)))
+      (CExtend x Absent (TCon int ()) (CExtend x Present (TCon bool ()) CEmpty))
+      (Presence_mismatch x)))
+    (Ok ())
+    (Error
+     (Context_mismatch (CExtend x Present (TCon bool ()) CEmpty)
+      (CExtend x Absent (TCon int ())
+       (CExtend x Present (TCon bool ()) (CVar (CUnbound 3 1))))
+      (Presence_mismatch x)))
+    (Error
+     (Context_mismatch CEmpty (CExtend x Present (TCon bool ()) CEmpty)
+      (Empty_context_has_variable x)))
+    |}]
+;;
+
+let%expect_test "cyclic bounds" =
+  let typecheck = Typecheck.create () in
+  let constrain ~context ~bound =
+    let result = Typecheck.constrain_context typecheck ~context ~bound in
+    print_s [%sexp (result : (unit, Typecheck.Unification_error.t) Result.t)]
+  in
+  let print contexts =
+    TTuple
+      (List.map contexts ~f:(fun context -> TCode { inner = int; context }))
+    |> Typecheck.to_string_hum typecheck
+    |> print_endline
+  in
+  let cycle () =
+    let a = cvar typecheck ~rank:1 in
+    let b = cvar typecheck ~rank:1 in
+    let c = cvar typecheck ~rank:1 in
+    constrain ~context:a ~bound:b;
+    constrain ~context:b ~bound:c;
+    constrain ~context:c ~bound:a;
+    a, b, c
+  in
+  let a, b, c = cycle () in
+  print [ a; b; c ];
+  (* An entry of any member reaches every member. *)
+  unify_context
+    typecheck
+    ~context1:a
+    ~context2:(CExtend ("x", Present, int, cvar typecheck ~rank:1));
+  print [ a; b; c ];
+  unify_context
+    typecheck
+    ~context1:c
+    ~context2:(CExtend ("y", Present, bool, cvar typecheck ~rank:1));
+  print [ a; b; c ];
+  unify_context
+    typecheck
+    ~context1:b
+    ~context2:(CExtend ("x", Present, bool, cvar typecheck ~rank:1));
+  (* Once one member is closed, no member can get entries. *)
+  let a, b, c = cycle () in
+  unify_context typecheck ~context1:c ~context2:CEmpty;
+  print [ a; b; c ];
+  unify_context
+    typecheck
+    ~context1:a
+    ~context2:(CExtend ("x", Present, int, cvar typecheck ~rank:1));
+  [%expect
+    {|
+    (Ok ())
+    (Ok ())
+    (Ok ())
+    <int>{..'_a} * <int>{..'_b} * <int>{..'_c} where ..'_a <= {..'_b}, ..'_b <= {..'_c}, ..'_c <= {..'_a}
+    (Ok (CExtend x Present (TCon int ()) (CVar (CUnbound 3 1))))
+    <int>{x : int; ..'_a} * <int>{x : int; ..'_b} * <int>{x : int; ..'_c} where ..'_a <= {x : int; ..'_b}, ..'_b <= {x : int; ..'_c}, ..'_c <= {x : int; ..'_a}
+    (Ok
+     (CExtend x (PVar (PLink Present)) (TVar (Link (TCon int ())))
+      (CVar (CLink (CExtend y Present (TCon bool ()) (CVar (CUnbound 13 1)))))))
+    <int>{x : int; y : bool; ..'_a} * <int>{x : int; y : bool; ..'_b} * <int>{x : int; y : bool; ..'_c} where ..'_a <= {x : int; y : bool; ..'_b}, ..'_b <= {x : int; y : bool; ..'_c}, ..'_c <= {x : int; y : bool; ..'_a}
+    (Error
+     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    (Ok ())
+    (Ok ())
+    (Ok ())
+    (Ok CEmpty)
+    <int>{..'_a} * <int>{..'_b} * <int>{} where ..'_a <= {..'_b}, ..'_b <= {}
+    (Error
+     (Context_mismatch (CExtend x Present (TCon int ()) (CVar (CUnbound 24 1)))
+      (CVar
+       (CLink
+        (CExtend x (PVar (PLink Absent)) (TVar (Unbound 26 1))
+         (CVar (CUnbound 27 1)))))
+      (Presence_mismatch x)))
+    |}]
+;;
+
+let%expect_test "bounds referring to the bounded variable" =
+  let typecheck = Typecheck.create () in
+  let print context =
+    TCode { inner = int; context }
+    |> Typecheck.to_string_hum typecheck
+    |> print_endline
+  in
+  let s = cvar typecheck ~rank:1 in
+  (* A bound that is the variable itself constrains nothing. *)
+  print_s
+    [%sexp
+      (Typecheck.constrain_context typecheck ~context:s ~bound:s
+       : (unit, Typecheck.Unification_error.t) Result.t)];
+  print s;
+  print_s
+    [%sexp
+      (Typecheck.constrain_context
+         typecheck
+         ~context:s
+         ~bound:(CExtend ("x", Present, int, s))
+       : (unit, Typecheck.Unification_error.t) Result.t)];
+  print s;
+  unify_context
+    typecheck
+    ~context1:s
+    ~context2:(CExtend ("y", Present, bool, cvar typecheck ~rank:1));
+  print s;
+  unify_context
+    typecheck
+    ~context1:s
+    ~context2:
+      (CExtend ("x", Present, int, CExtend ("y", Present, bool, CEmpty)));
+  print s;
+  [%expect
+    {|
+    (Ok ())
+    <int>{..'_a}
+    (Ok ())
+    <int>{..'_a} where ..'_a <= {x : int; ..'_a}
+    (Ok (CExtend y Present (TCon bool ()) (CVar (CUnbound 1 1))))
+    <int>{y : bool; ..'_a} where ..'_a <= {x : int; y : bool; ..'_a}
+    (Ok
+     (CExtend y Present (TCon bool ())
+      (CVar (CLink (CExtend x Present (TCon int ()) CEmpty)))))
+    <int>{x : int; y : bool}
+    |}]
+;;
+
+let%expect_test "bounds do not constrain shadowed entries" =
+  let typecheck = Typecheck.create () in
+  let r = cvar typecheck ~rank:1 in
+  let bound = CExtend ("x", Present, int, cvar typecheck ~rank:1) in
+  print_s
+    [%sexp
+      (Typecheck.constrain_context
+         typecheck
+         ~context:(CExtend ("x", Present, int, r))
+         ~bound
+       : (unit, Typecheck.Unification_error.t) Result.t)];
+  (* [r]'s [x] is hidden by the [x : int] before it. *)
+  unify_context
+    typecheck
+    ~context1:r
+    ~context2:
+      (CExtend
+         ( "x"
+         , Present
+         , bool
+         , CExtend ("y", Present, bool, cvar typecheck ~rank:1) ));
+  print_context bound;
+  (* Shadowing is kept as bounds move to the rest of [r]. *)
+  unify_context
+    typecheck
+    ~context1:r
+    ~context2:
+      (CExtend
+         ( "x"
+         , Present
+         , bool
+         , CExtend
+             ( "y"
+             , Present
+             , bool
+             , CExtend
+                 ("x", Present, string, CExtend ("y", Present, string, CEmpty))
+             ) ));
+  print_context bound;
+  [%expect
+    {|
+    (Ok ())
+    (Ok
+     (CExtend x Present (TCon bool ())
+      (CExtend y Present (TCon bool ()) (CVar (CUnbound 2 1)))))
+    (CExtend x Present (TCon int ())
+     (CVar
+      (CLink
+       (CExtend y (PVar (PLink Present)) (TVar (Link (TCon bool ())))
+        (CVar (CUnbound 5 1))))))
+    (Ok
+     (CExtend x Present (TCon bool ())
+      (CExtend y Present (TCon bool ())
+       (CVar
+        (CLink
+         (CExtend x Present (TCon string ())
+          (CExtend y Present (TCon string ()) CEmpty)))))))
+    (CExtend x Present (TCon int ())
+     (CVar
+      (CLink
+       (CExtend y (PVar (PLink Present)) (TVar (Link (TCon bool ())))
+        (CVar (CUnbound 5 1))))))
     |}]
 ;;

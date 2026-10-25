@@ -13,7 +13,7 @@ let%expect_test "primitives" =
     {|
     add : int -> int -> int
     eq : int -> int -> bool
-    cond : bool -> 'a -> 'b -> 'a
+    cond : bool -> 'a -> 'a -> 'a
     id : 'a -> 'a
     |}]
 ;;
@@ -48,7 +48,7 @@ let%expect_test "application errors" =
     (Unification_error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     (Unification_error
-     (Type_mismatch (TArrow (TVar (Unbound 11 1)) (TVar (Unbound 12 1)))
+     (Type_mismatch (TArrow (TVar (Unbound 18 1)) (TVar (Unbound 19 1)))
       (TCon int ()) Structural_mismatch))
     |}]
 ;;
@@ -351,13 +351,13 @@ let%expect_test "splice substitution errors" =
     (Unification_error
      (Context_mismatch
       (CExtend x (PVar (PLink Present)) (TVar (Link (TCon int ())))
-       (CVar (CUnbound 24 1)))
+       (CVar (CUnbound 30 1)))
       CEmpty (Empty_context_has_variable x)))
     extra : <int>{..'a}
     (Duplicate_substitution x)
     (Unification_error
      (Type_mismatch
-      (TCode (inner (TVar (Unbound 13 1))) (context (CVar (CUnbound 14 1))))
+      (TCode (inner (TVar (Unbound 20 1))) (context (CVar (CUnbound 21 1))))
       (TCon int ()) Structural_mismatch))
     |}]
 ;;
@@ -482,8 +482,8 @@ let%expect_test "levels" =
     (Not_in_scope x)
     (Unification_error
      (Context_mismatch
-      (CExtend x (PVar (PLink Present)) (TVar (Unbound 20 1))
-       (CVar (CUnbound 21 1)))
+      (CExtend x (PVar (PLink Present)) (TVar (Unbound 26 1))
+       (CVar (CUnbound 27 1)))
       CEmpty (Empty_context_has_variable x)))
     (Variable_used_at_wrong_level (name x) (var_level 0) (used_at -1))
     |}]
@@ -513,14 +513,27 @@ let%expect_test "staged power" =
   check [ power; top "open" [] (app (var "power") [ int 3; quote (var "y") ]) ];
   check
     [ power
+    ; top
+        "open_as_closed"
+        []
+        ~annot:(Ty.code Ty.int)
+        (app (var "power") [ int 3; quote (var "y") ])
+    ];
+  check
+    [ power
     ; top "wrong_inner" [] (app (var "power") [ int 3; quote (bool true) ])
     ];
   [%expect
     {|
-    power : int -> <int>{..'a} -> <int>{..'b} where ..'a <= {..'c}, ..'b <= {..'c}
-    cube : <int>{..'_a} where ..'_a <= {..'_b}
-    power : int -> <int>{..'a} -> <int>{..'b} where ..'a <= {..'c}, ..'b <= {..'c}
-    open : <int>{..'_a} where ..'_a <= {y : int; ..'_b}
+    power : int -> <int>{..'a} -> <int>{..'b} where ..'a <= {..'b}
+    cube : <int>{..'_a}
+    power : int -> <int>{..'a} -> <int>{..'b} where ..'a <= {..'b}
+    open : <int>{y : int; ..'_a}
+    (Unification_error
+     (Context_mismatch CEmpty
+      (CExtend y (PVar (PLink Present)) (TVar (Link (TCon int ())))
+       (CVar (CUnbound 67 1)))
+      (Empty_context_has_variable y)))
     (Unification_error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     |}]
@@ -673,10 +686,10 @@ let%expect_test "names bound at a later level are absent from spliced code" =
     uses_z : <<int>{..'_a}>{..'_b}
     (Unification_error
      (Context_mismatch
-      (CExtend z Absent (TVar (Unbound 33 1)) (CVar (CUnbound 32 1)))
-      (CExtend z (PVar (PLink Present)) (TVar (Unbound 41 1))
-       (CVar (CUnbound 42 1)))
-      (Empty_context_has_variable z)))
+      (CExtend z Absent (TVar (Unbound 40 1)) (CVar (CUnbound 39 1)))
+      (CExtend z (PVar (PLink Present)) (TVar (Unbound 47 1))
+       (CVar (CUnbound 48 1)))
+      (Presence_mismatch z)))
     (Variable_used_at_wrong_level (name z) (var_level 2) (used_at 1))
     |}]
 ;;
@@ -745,5 +758,152 @@ let%expect_test "spliced code does not take on the quote's free variables" =
     closed : <int>{}
     before : <int>{x : int; ..'a}
     after : <int>{x : int; ..'a}
+    |}]
+;;
+
+let%expect_test "mutually recursive staged functions" =
+  let ping =
+    top
+      "ping"
+      [ "n"; "c" ]
+      (app
+         (var "cond")
+         [ app (var "eq") [ var "n"; int 0 ]
+         ; var "c"
+         ; quote
+             (let_
+                "x"
+                []
+                (int 1)
+                (splice (app (var "pong") [ var "n"; var "c" ])))
+         ])
+  in
+  let pong =
+    top
+      "pong"
+      [ "n"; "c" ]
+      (quote
+         (app
+            (var "add")
+            [ splice
+                (app
+                   (var "ping")
+                   [ app (var "add") [ var "n"; int (-1) ]; var "c" ])
+            ; var "y"
+            ]))
+  in
+  check [ ping; pong ];
+  check
+    [ ping
+    ; pong
+    ; top "uses_x" [] (app (var "ping") [ int 2; quote (var "x") ])
+    ; top "uses_z" [] (app (var "ping") [ int 2; quote (var "z") ])
+    ];
+  check
+    [ ping
+    ; pong
+    ; top
+        "uses_z_as_closed"
+        []
+        ~annot:(Ty.code Ty.int)
+        (app (var "ping") [ int 2; quote (var "z") ])
+    ];
+  [%expect
+    {|
+    ping : int -> <int>{y : int; ..'a} -> <int>{y : int; ..'a} where ..'a <= {x?'b : int; y : int; ..'c}, ..'c <= {y : int; ..'a}
+    pong : int -> <int>{y : int; ..'a} -> <int>{x?'b : int; y : int; ..'c} where ..'a <= {x?'b : int; y : int; ..'c}, ..'c <= {y : int; ..'a}
+    ping : int -> <int>{y : int; ..'a} -> <int>{y : int; ..'a} where ..'a <= {x?'b : int; y : int; ..'c}, ..'c <= {y : int; ..'a}
+    pong : int -> <int>{y : int; ..'a} -> <int>{x?'b : int; y : int; ..'c} where ..'a <= {x?'b : int; y : int; ..'c}, ..'c <= {y : int; ..'a}
+    uses_x : <int>{x : int; y : int; ..'_a} where ..'_a <= {x : int; y : int; ..'_b}, ..'_b <= {x : int; y : int; ..'_a}
+    uses_z : <int>{y : int; z : int; ..'_a} where ..'_a <= {x?'_b : int; y : int; z : int; ..'_c}, ..'_c <= {y : int; z : int; ..'_a}
+    (Unification_error
+     (Context_mismatch CEmpty
+      (CExtend y Present (TCon int ())
+       (CVar
+        (CLink
+         (CExtend z (PVar (PLink Present)) (TVar (Link (TCon int ())))
+          (CVar (CUnbound 84 1))))))
+      (Empty_context_has_variable y)))
+    |}]
+;;
+
+let%expect_test "toplevel splices drop names spliced code only may use" =
+  let run ?(binder = "x") code =
+    splice
+      (let_
+         "g"
+         [ "c" ]
+         (seq (quote (let_ binder [] (bool true) (splice (var "c")))) (var "c"))
+         (app (var "g") [ code ]))
+  in
+  check [ top "unused" [] (run (quote (int 1))) ];
+  check
+    [ top "used" [] (run (quote (app (var "cond") [ var "x"; int 1; int 2 ]))) ];
+  (* The generated code is at level 0, where the toplevel [x] is in scope. *)
+  check
+    [ top "x" [] (bool true); top "used_toplevel" [] (run (quote (var "x"))) ];
+  (* The type of a name that may be used is unified with the name's, even if
+     it turns out to be unused. *)
+  check [ top "unused_but_typed" [] (run ~binder:"id" (quote (int 1))) ];
+  [%expect
+    {|
+    unused : int
+    (Not_in_scope x)
+    x : bool
+    used_toplevel : bool
+    (Unification_error
+     (Type_mismatch (TCon bool ())
+      (TArrow (TVar (Unbound 41 1)) (TVar (Unbound 41 1))) Structural_mismatch))
+    |}]
+;;
+
+let%expect_test "presence approximation" =
+  (* [p <= q] on unknown presences is solved as [p = q], so using [x] in a
+     quote after splicing code that may use [x] makes the code use [x], while
+     using it before does not. *)
+  let binds_x c = quote (let_ "x" [] (int 1) (splice c)) in
+  let closed = top "closed" [] ~annot:(Ty.code Ty.int) (quote (int 1)) in
+  let uses_x_then_splices =
+    top
+      "uses_x_then_splices"
+      [ "c" ]
+      (seq
+         (binds_x (var "c"))
+         (seq (quote (app (var "add") [ var "x"; splice (var "c") ])) (var "c")))
+  in
+  let splices_then_uses_x =
+    top
+      "splices_then_uses_x"
+      [ "c" ]
+      (seq
+         (binds_x (var "c"))
+         (seq (quote (app (var "add") [ splice (var "c"); var "x" ])) (var "c")))
+  in
+  check
+    [ closed
+    ; uses_x_then_splices
+    ; splices_then_uses_x
+    ; top
+        "uses_x_then_splices_closed"
+        []
+        (app (var "uses_x_then_splices") [ var "closed" ])
+    ];
+  check
+    [ closed
+    ; splices_then_uses_x
+    ; top
+        "splices_then_uses_x_closed"
+        []
+        (app (var "splices_then_uses_x") [ var "closed" ])
+    ];
+  [%expect
+    {|
+    closed : <int>{}
+    uses_x_then_splices : <int>{x?'a : int; ..'b} -> <int>{x?'a : int; ..'b} where ..'b <= {x : int; ..'c}, ..'b <= {..'d}
+    splices_then_uses_x : <int>{x : int; ..'a} -> <int>{x : int; ..'a} where ..'a <= {x : int; ..'b}, ..'a <= {..'c}
+    uses_x_then_splices_closed : <int>{-x}
+    (Unification_error
+     (Context_mismatch (CExtend x Present (TCon int ()) (CVar (CUnbound 47 1)))
+      CEmpty (Empty_context_has_variable x)))
     |}]
 ;;

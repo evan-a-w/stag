@@ -73,5 +73,7 @@ val canonical_presence : presence -> presence
 val tail_var : context -> cvar ref option
 
 (** Renders [ty] for humans. Variables are named in order of appearance;
-    weak (unbound) ones are prefixed with [_]. *)
+    weak (unbound) ones are prefixed with [_]. The [context_bounds] of the
+    context variables reached are listed after the type, as
+    [where ..'a <= {...}]. *)
 val to_string_hum : ?context_bounds:(id -> context list) -> ty -> string

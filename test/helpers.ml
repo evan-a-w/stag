@@ -48,7 +48,12 @@ let prims =
   let int_arg name = name, Some Ty.int in
   [ Toplevel.Let ("add", [ int_arg "x"; int_arg "y" ], Some Ty.int, var "x")
   ; Let ("eq", [ int_arg "x"; int_arg "y" ], Some Ty.bool, bool true)
-  ; Let ("cond", [ "c", Some Ty.bool; "x", None; "y", None ], None, var "x")
+  ; Let
+      ( "cond"
+      , [ "c", Some Ty.bool; "x", None; "y", None ]
+      , None
+      , (* The recursive call makes both branches share a type. *)
+        seq (app (var "cond") [ var "c"; var "y"; var "x" ]) (var "x") )
   ; Let ("id", [ "x", None ], None, var "x")
   ]
 ;;

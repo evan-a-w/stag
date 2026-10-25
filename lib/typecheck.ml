@@ -28,14 +28,22 @@ module Toplevel = struct
   let is_value t = is_function t || Syntax.Expr.is_value t.expr
 end
 
+(* An upper bound of a context variable: every entry the variable gets must
+   also be an entry of [context], unless shadowed where the bound arose. *)
+module Bound = struct
+  type t =
+    { context : Type.context
+    ; shadowed : String.Set.t
+    }
+end
+
 type t =
   { mutable next_id : int
   ; toplevels : Toplevel.t String.Table.t
   ; mutable type_env : Type_env.t
-  ; context_bounds : Type.context list Int.Table.t
-    (* Upper bounds of context variables, by id: every entry the variable gets
-       must also be an entry of each bound. Kept out of [Type.context] as
-       bounds may refer back to the variable. *)
+  ; context_bounds : Bound.t list Int.Table.t
+    (* By context variable id. Kept out of [Type.context] as bounds may refer
+       back to the variable. *)
   }
 
 let create () =
@@ -121,11 +129,14 @@ and inst_context' t ~(remap : Remap.t) ~(context : Type.context) ~rank
        let id' = fresh_id t in
        let context = Type.CVar (ref (Type.CUnbound (id', rank))) in
        Hashtbl.set remap.context ~key:id ~data:context;
-       List.iter (context_bounds t id) ~f:(fun bound ->
+       List.iter (context_bounds t id) ~f:(fun (bound : Bound.t) ->
          Hashtbl.add_multi
            t.context_bounds
            ~key:id'
-           ~data:(inst_context' t ~remap ~context:bound ~rank));
+           ~data:
+             { bound with
+               context = inst_context' t ~remap ~context:bound.context ~rank
+             });
        context)
 
 and inst_presence t ~(remap : Remap.t) ~presence ~rank : Type.presence =
@@ -182,8 +193,9 @@ and generalize_context t ~rank ~(context : Type.context) : Type.context =
     if rank' > rank
     then (
       cvar := Type.CGeneric id;
-      List.iter (context_bounds t id) ~f:(fun bound ->
-        ignore (generalize_context t ~rank ~context:bound : Type.context));
+      List.iter (context_bounds t id) ~f:(fun (bound : Bound.t) ->
+        ignore
+          (generalize_context t ~rank ~context:bound.context : Type.context));
       CVar cvar)
     else context
   | CVar { contents = Type.CGeneric _ } -> context
@@ -249,8 +261,12 @@ and bind_cvar t (r : Type.cvar ref) context =
     let bounds = context_bounds t id in
     Hashtbl.remove t.context_bounds id;
     let%map.Result () =
-      List.fold_result bounds ~init:() ~f:(fun () bound ->
-        constrain_context t ~context ~bound)
+      List.fold_result bounds ~init:() ~f:(fun () (bound : Bound.t) ->
+        constrain_context
+          t
+          ~context
+          ~bound:bound.context
+          ~shadowed:bound.shadowed)
     in
     context
   | CGeneric _ | CLink _ ->
@@ -308,8 +324,11 @@ and adjust_context t ~(var : Type.Var.t option) ~rank ~context =
        if rank' > rank
        then (
          r' := CUnbound (id, rank);
-         List.fold_result (context_bounds t id) ~init:() ~f:(fun () bound ->
-           adjust_context t ~var:None ~rank ~context:bound))
+         List.fold_result
+           (context_bounds t id)
+           ~init:()
+           ~f:(fun () (bound : Bound.t) ->
+             adjust_context t ~var:None ~rank ~context:bound.context))
        else Ok ())
 
 and adjust_presence ~rank ~presence =
@@ -345,7 +364,7 @@ and unify_context t ~context1 ~context2
       unify_presence ~presence1:p1 ~presence2:p2
       |> Result.map_error ~f:(fun () ->
         Unification_error.Context_mismatch
-          (context1, context2, Empty_context_has_variable x))
+          (context1, context2, presence_mismatch_reason x ~found:t2))
     in
     let%bind.Result () =
       match t2 with
@@ -392,17 +411,25 @@ and rewrite t var (context : Type.context)
     px, Some tx, r'
   | CVar _ -> failwith "rewrite: unexpected cvar state"
 
-and constrain_context t ~context ~bound =
-  let rec go context ~seen =
+and presence_mismatch_reason name ~found
+  : Unification_error.Context_mismatch_reason.t
+  =
+  match found with
+  | None -> Empty_context_has_variable name
+  | Some (_ : Type.ty) -> Presence_mismatch name
+
+(* Names in [shadowed] are hidden by earlier entries of the context the
+   constraint is about, so are not constrained. *)
+and constrain_context t ~context ~bound ~shadowed =
+  let rec go context ~shadowed =
     match Type.canonical_context context with
     | CEmpty -> Ok ()
     | CExtend (name, presence, ty, rest) ->
       let%bind.Result () =
-        if
-          Set.mem seen name
-          || Type.equal_presence (Type.canonical_presence presence) Absent
-        then Ok ()
-        else (
+        match Type.canonical_presence presence with
+        | _ when Set.mem shadowed name -> Ok ()
+        | Absent -> Ok ()
+        | Present | PVar _ ->
           let%bind.Result bound_presence, bound_ty, (_ : Type.context) =
             rewrite t name bound
           in
@@ -410,25 +437,31 @@ and constrain_context t ~context ~bound =
             presence_at_most ~presence ~bound:bound_presence
             |> Result.map_error ~f:(fun () ->
               Unification_error.Context_mismatch
-                (context, bound, Empty_context_has_variable name))
+                (context, bound, presence_mismatch_reason name ~found:bound_ty))
           in
-          match bound_ty with
-          | None -> Ok ()
-          | Some bound_ty -> unify_ty t ~ty1:ty ~ty2:bound_ty |> Result.ignore_m)
+          (match bound_ty with
+           | None -> Ok ()
+           | Some bound_ty ->
+             unify_ty t ~ty1:ty ~ty2:bound_ty |> Result.ignore_m)
       in
-      go rest ~seen:(Set.add seen name)
+      go rest ~shadowed:(Set.add shadowed name)
     | CVar ({ contents = CUnbound (id, rank) } as r) ->
       (match Type.canonical_context bound with
        | CVar r' when phys_equal r r' -> Ok ()
        | _ ->
          let%map.Result () = adjust_context t ~var:None ~rank ~context:bound in
-         Hashtbl.add_multi t.context_bounds ~key:id ~data:bound)
+         Hashtbl.add_multi
+           t.context_bounds
+           ~key:id
+           ~data:{ Bound.context = bound; shadowed })
     | CVar { contents = CGeneric _ | CLink _ } ->
       failwith "constrain_context: unexpected cvar state"
   in
-  go context ~seen:String.Set.empty
+  go context ~shadowed
 
-(* Approximates [presence <= bound] by equality when both are unknown. *)
+(* Approximates [presence <= bound] by equality when both are unknown, so
+   whether a program typechecks can depend on the order constraints arise in:
+   see the "presence approximation" tests. *)
 and presence_at_most ~presence ~bound =
   match Type.canonical_presence presence, Type.canonical_presence bound with
   | Absent, _ | _, Present -> Ok ()
@@ -674,21 +707,36 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Syntax.Pattern.t)
     record, bindings
 ;;
 
-let constrain_context' t ~context ~bound =
-  constrain_context t ~context ~bound
+let constrain_context' t ~context ~bound ~shadowed =
+  constrain_context t ~context ~bound ~shadowed
   |> Result.map_error ~f:Typecheck_error.unification_error
 ;;
 
 let free_var t (quote : Scope.quote) ~name =
-  let ty = Type.TVar (fresh_tvar t ~rank:Int.max_value) in
-  let%map.Result () =
-    constrain_context'
-      t
-      ~context:(CExtend (name, Present, ty, CEmpty))
-      ~bound:quote.context
+  let%bind.Result presence, found, (_ : Type.context) =
+    rewrite t name quote.context
+    |> Result.map_error ~f:Typecheck_error.unification_error
   in
-  ty
+  let ty =
+    Option.value_or_thunk found ~default:(fun () ->
+      Type.TVar (fresh_tvar t ~rank:quote.outside.rank))
+  in
+  unify_presence ~presence1:Present ~presence2:presence
+  |> Result.map ~f:(fun () -> ty)
+  |> Result.map_error ~f:(fun () ->
+    Typecheck_error.Unification_error
+      (Context_mismatch
+         ( CExtend (name, Present, ty, CEmpty)
+         , quote.context
+         , presence_mismatch_reason name ~found )))
 ;;
+
+module Resolution = struct
+  type t =
+    | Resolved of Type.ty
+    | Free_in_quote of Scope.quote
+    | Unresolved of Typecheck_error.t (** The error if the name is used. *)
+end
 
 module Capture = struct
   type t =
@@ -729,8 +777,8 @@ let finish_scc t (members : Toplevel.t list) =
 
 (* [name] is the context entry the variable is provided as, if it becomes a
    free variable of the quote: a local's name or a toplevel's canonical name. *)
-let rec entry_type t (scope : Scope.t) ~name (entry : Env.Entry.t option)
-  : (Type.ty, Typecheck_error.t) Result.t
+let entry_resolution t (scope : Scope.t) ~name (entry : Env.Entry.t option)
+  : Resolution.t
   =
   match entry, scope.quote with
   | Some entry, _
@@ -738,16 +786,25 @@ let rec entry_type t (scope : Scope.t) ~name (entry : Env.Entry.t option)
            entry
            ~used_at:scope.level
            ~quote_id:(Scope.quote_id scope) ->
-    Ok (inst_ty t ~scheme:entry.scheme ~rank:scope.rank)
+    Resolved (inst_ty t ~scheme:entry.scheme ~rank:scope.rank)
   | Some entry, Some quote when entry.level <= scope.level ->
-    free_var t quote ~name
-  | None, Some quote -> free_var t quote ~name
+    Free_in_quote quote
+  | None, Some quote -> Free_in_quote quote
   | Some entry, _ ->
-    Error
-      (Typecheck_error.Variable_used_at_wrong_level
+    Unresolved
+      (Variable_used_at_wrong_level
          { name; var_level = entry.level; used_at = scope.level })
-  | None, None ->
-    Error (Typecheck_error.Not_in_scope (Syntax.Path.of_string name))
+  | None, None -> Unresolved (Not_in_scope (Syntax.Path.of_string name))
+;;
+
+let resolution_type t ~name : Resolution.t -> _ = function
+  | Resolved ty -> Ok ty
+  | Free_in_quote quote -> free_var t quote ~name
+  | Unresolved error -> Error error
+;;
+
+let rec entry_type t scope ~name entry =
+  resolution_type t ~name (entry_resolution t scope ~name entry)
 
 and var_type t (scope : Scope.t) ~(path : Syntax.Path.t) =
   let name = Syntax.Path.to_string path in
@@ -766,12 +823,14 @@ and var_type t (scope : Scope.t) ~(path : Syntax.Path.t) =
         | [ _ ] -> entry_type t scope ~name None
         | _ -> Error (Typecheck_error.Not_in_scope path)))
 
-(* Provides context entry [name] at a splice site. *)
-and entry_name_type t (scope : Scope.t) ~name =
+(* Resolves context entry [name] at a splice site. *)
+and entry_name_resolution t (scope : Scope.t) ~name =
   match Env.find scope.locals name, Hashtbl.find t.toplevels name with
-  | Some entry, _ -> entry_type t scope ~name (Some entry)
-  | None, Some toplevel -> toplevel_type t scope toplevel
-  | None, None -> entry_type t scope ~name None
+  | Some entry, _ -> Ok (entry_resolution t scope ~name (Some entry))
+  | None, Some toplevel ->
+    let%map.Result entry = toplevel_entry t scope toplevel in
+    entry_resolution t scope ~name:toplevel.name (Some entry)
+  | None, None -> Ok (entry_resolution t scope ~name None)
 
 and toplevel_type t scope (toplevel : Toplevel.t) =
   let%bind.Result entry = toplevel_entry t scope toplevel in
@@ -964,20 +1023,29 @@ and check_exprs t scope exprs =
 
 and substitute_from_scope t (scope : Scope.t) ~context =
   match scope.quote with
-  | None -> substitute_outside_quote t scope ~context
+  | None -> substitute_outside_quote t scope ~context ~seen:String.Set.empty
   | Some quote ->
     substitute_in_quote t scope quote ~context ~seen:String.Set.empty
 
-and substitute_outside_quote t scope ~context =
+and substitute_outside_quote t scope ~context ~seen =
   match Type.canonical_context context with
   | CEmpty -> Ok ()
-  | CExtend (_, presence, _, rest)
-    when Type.equal_presence (Type.canonical_presence presence) Absent ->
-    substitute_outside_quote t scope ~context:rest
-  | CExtend (name, _, ty, rest) ->
-    let%bind.Result var_ty = entry_name_type t scope ~name in
-    let%bind.Result () = unify_ty' t ~ty1:ty ~ty2:var_ty in
-    substitute_outside_quote t scope ~context:rest
+  | CExtend (name, presence, ty, rest) ->
+    let%bind.Result () =
+      match Type.canonical_presence presence with
+      | _ when Set.mem seen name -> Ok ()
+      | Absent -> Ok ()
+      | Present | PVar _ ->
+        (match%bind.Result entry_name_resolution t scope ~name with
+         | Unresolved error ->
+           (* Code that may use [name] can't, so doesn't. *)
+           unify_presence ~presence1:presence ~presence2:Absent
+           |> Result.map_error ~f:(fun () -> error)
+         | resolution ->
+           let%bind.Result var_ty = resolution_type t ~name resolution in
+           unify_ty' t ~ty1:ty ~ty2:var_ty)
+    in
+    substitute_outside_quote t scope ~context:rest ~seen:(Set.add seen name)
   | CVar _ as context -> unify_context' t ~context1:context ~context2:CEmpty
 
 and substitute_in_quote t scope quote ~context ~seen =
@@ -988,6 +1056,7 @@ and substitute_in_quote t scope quote ~context ~seen =
       match
         Type.canonical_presence presence, Capture.find scope quote ~name
       with
+      | _ when Set.mem seen name -> Ok ()
       | Absent, _ -> Ok ()
       | _, Local entry ->
         unify_ty'
@@ -1004,6 +1073,7 @@ and substitute_in_quote t scope quote ~context ~seen =
           t
           ~context:(CExtend (name, presence, ty, CEmpty))
           ~bound:quote.context
+          ~shadowed:String.Set.empty
     in
     substitute_in_quote t scope quote ~context:rest ~seen:(Set.add seen name)
   | CVar _ as tail ->
@@ -1038,7 +1108,13 @@ and substitute_in_quote t scope quote ~context ~seen =
              ~f:(fun (name, presence, ty) rest ->
                Type.CExtend (name, presence, ty, rest)))
     in
-    constrain_context' t ~context:rest ~bound:quote.context
+    constrain_context'
+      t
+      ~context:rest
+      ~bound:quote.context
+      ~shadowed:
+        (List.fold captured ~init:seen ~f:(fun seen (name, _, _) ->
+           Set.add seen name))
 
 and substitute_explicitly t scope ~context ~subs =
   let%bind.Result () =
@@ -1106,5 +1182,12 @@ let typecheck t ~(program : Syntax.Program.t)
 ;;
 
 let to_string_hum t ty =
-  Type.to_string_hum ~context_bounds:(context_bounds t) ty
+  Type.to_string_hum
+    ~context_bounds:(fun id ->
+      List.map (context_bounds t id) ~f:(fun (bound : Bound.t) -> bound.context))
+    ty
+;;
+
+let constrain_context t ~context ~bound =
+  constrain_context t ~context ~bound ~shadowed:String.Set.empty
 ;;

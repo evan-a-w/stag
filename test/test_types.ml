@@ -317,7 +317,7 @@ let%expect_test "match errors" =
     (Unification_error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     (Unification_error
-     (Type_mismatch (TCon option ((ATy (TVar (Link (TVar (Unbound 15 1)))))))
+     (Type_mismatch (TCon option ((ATy (TVar (Link (TVar (Unbound 22 1)))))))
       (TCon int ()) (Base_types_not_equal option int)))
     (Duplicate_pattern_variable x)
     (Duplicate_pattern_variable x)
@@ -331,8 +331,8 @@ let%expect_test "match errors" =
     (Unification_error
      (Type_mismatch (TTuple ((TCon int ()) (TCon int ())))
       (TTuple
-       ((TVar (Link (TVar (Unbound 15 1)))) (TVar (Link (TVar (Unbound 16 1))))
-        (TVar (Link (TVar (Unbound 17 1))))))
+       ((TVar (Link (TVar (Unbound 22 1)))) (TVar (Link (TVar (Unbound 23 1))))
+        (TVar (Link (TVar (Unbound 24 1))))))
       (Args_length_mismatch 2 3)))
     |}]
 ;;
