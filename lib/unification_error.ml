@@ -9,16 +9,16 @@ module Type_mismatch_reason = struct
   [@@deriving sexp_of]
 end
 
-module Context_mismatch_reason = struct
+module Row_mismatch_reason = struct
   type t =
-    | Empty_context_has_variable of string
+    | Missing_label of string
     | Presence_mismatch of string
-    | Cyclic_context
+    | Cyclic_row
   [@@deriving sexp_of]
 end
 
 type t =
   | Type_mismatch of Type.ty * Type.ty * Type_mismatch_reason.t
-  | Context_mismatch of Type.context * Type.context * Context_mismatch_reason.t
+  | Row_mismatch of Type.row * Type.row * Row_mismatch_reason.t
   | Occurs_check_failed of Type.arg
 [@@deriving sexp_of]

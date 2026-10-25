@@ -82,7 +82,7 @@ let rec members_of_toplevels toplevels ~path
       in
       let members = { members with types } in
       (match kind with
-       | Alias _ -> Ok members
+       | Alias _ | Abstract -> Ok members
        | Variant constructors ->
          let%map.Result constructors =
            add_names

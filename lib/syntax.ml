@@ -52,17 +52,19 @@ module Type_expr = struct
     | Tuple of t list
     | Code of
         { inner : t
-        ; context : context
+        ; context : row
         }
+    | Record of row
+    | Variant of row (** Each entry is a tag and its argument type. *)
 
-  and context =
+  and row =
     | Empty
-    | Extend of string * t * context
+    | Extend of string * t * row
     | Var of string
 
   and arg =
     | Ty of t
-    | Context of context
+    | Row of row
   [@@deriving sexp, compare, equal]
 end
 
@@ -70,10 +72,10 @@ module Type_decl = struct
   module Param = struct
     type t =
       | Ty of string
-      | Context of string
+      | Row of string
     [@@deriving sexp, compare, equal]
 
-    let name (Ty name | Context name) = name
+    let name (Ty name | Row name) = name
   end
 
   module Kind = struct
@@ -81,6 +83,7 @@ module Type_decl = struct
       | Variant of (string * Type_expr.t list) list
       | Record of (string * Type_expr.t) list
       | Alias of Type_expr.t
+      | Abstract
     [@@deriving sexp, compare, equal]
   end
 
@@ -97,6 +100,16 @@ module Binding = struct
 end
 
 module Pattern = struct
+  (** What a polymorphic record pattern says about the fields it does not
+      list. *)
+  module Rest = struct
+    type t =
+      | Closed (** There are none. *)
+      | Open (** There may be some. *)
+      | Bind of string (** Binds the record without the listed fields. *)
+    [@@deriving sexp, compare, equal]
+  end
+
   type t =
     | Any
     | Var of string
@@ -104,16 +117,38 @@ module Pattern = struct
     | Tuple of t list
     | Construct of Path.t * t list
     | Record of (Path.t * t) list
+    | Poly_variant of string * t option (** [None] matches a [unit] argument. *)
+    | Poly_record of
+        { fields : (string * t) list
+        ; rest : Rest.t
+        }
   [@@deriving sexp, compare, equal]
 
   let rec binds t name =
     match t with
-    | Any | Lit _ -> false
+    | Any | Lit _ | Poly_variant (_, None) -> false
     | Var var -> String.equal var name
     | Tuple patterns | Construct (_, patterns) ->
       List.exists patterns ~f:(fun pattern -> binds pattern name)
     | Record fields ->
       List.exists fields ~f:(fun (_, pattern) -> binds pattern name)
+    | Poly_variant (_, Some pattern) -> binds pattern name
+    | Poly_record { fields; rest } ->
+      List.exists fields ~f:(fun (_, pattern) -> binds pattern name)
+      ||
+        (match rest with
+        | Closed | Open -> false
+        | Bind rest -> String.equal rest name)
+  ;;
+
+  (** Nominal records and constructors are refutable, even when their type has
+      only one constructor. *)
+  let rec is_irrefutable = function
+    | Any | Var _ -> true
+    | Lit _ | Construct _ | Record _ | Poly_variant _ -> false
+    | Tuple patterns -> List.for_all patterns ~f:is_irrefutable
+    | Poly_record { fields; rest = _ } ->
+      List.for_all fields ~f:(fun (_, pattern) -> is_irrefutable pattern)
   ;;
 end
 
@@ -135,6 +170,12 @@ module Expr = struct
     | Record of (Path.t * t) list
     | Field of t * Path.t
     | Match of t * (Pattern.t * t) list
+    | Poly_record of (string * t) list
+    | Poly_field of t * string
+    | Poly_extend of (string * t) list * t (** [{x = v; ... | e}] *)
+    | Poly_restrict of t * string (** [e \ x] *)
+    | Poly_update of t * (string * t) list (** [{e with x = v; ...}] *)
+    | Poly_variant of string * t option (** [None] is a [unit] argument. *)
   [@@deriving sexp, compare, equal, variants]
 
   let sub_exprs = function
@@ -145,9 +186,17 @@ module Expr = struct
       expr
       :: List.filter_map (Option.value subs ~default:[]) ~f:(fun (_, expr) ->
         expr)
-    | Quote expr | Field (expr, _) -> [ expr ]
+    | Quote expr
+    | Field (expr, _)
+    | Poly_field (expr, _)
+    | Poly_restrict (expr, _)
+    | Poly_variant (_, Some expr) -> [ expr ]
+    | Poly_variant (_, None) -> []
     | Tuple exprs | Construct (_, exprs) -> exprs
     | Record fields -> List.map fields ~f:snd
+    | Poly_record fields -> List.map fields ~f:snd
+    | Poly_extend (fields, expr) -> List.map fields ~f:snd @ [ expr ]
+    | Poly_update (expr, fields) -> expr :: List.map fields ~f:snd
     | Match (expr, cases) -> expr :: List.map cases ~f:snd
   ;;
 
@@ -174,13 +223,25 @@ module Expr = struct
       refers_to expr name
       || List.exists cases ~f:(fun (pattern, body) ->
         (not (Pattern.binds pattern name)) && refers_to body name)
-    | App _ | Quote _ | Tuple _ | Construct _ | Record _ | Field _ ->
+    | App _
+    | Quote _
+    | Tuple _
+    | Construct _
+    | Record _
+    | Field _
+    | Poly_record _
+    | Poly_field _
+    | Poly_extend _
+    | Poly_restrict _
+    | Poly_update _
+    | Poly_variant _ ->
       List.exists (sub_exprs t) ~f:(fun expr -> refers_to expr name)
   ;;
 
   (** Syntactic values, which may be generalized (the relaxed value
       restriction). *)
-  let rec is_value = function
+  let rec is_value t =
+    match t with
     | Lit _ | Var _ -> true
     | Quote expr -> splices_are_values expr ~depth:1
     | Let (name, args, _, equal, in_) ->
@@ -189,6 +250,12 @@ module Expr = struct
     | Tuple exprs | Construct (_, exprs) -> List.for_all exprs ~f:is_value
     | Record fields -> List.for_all fields ~f:(fun (_, expr) -> is_value expr)
     | Field (expr, _) -> is_value expr
+    | Poly_record _
+    | Poly_field _
+    | Poly_extend _
+    | Poly_restrict _
+    | Poly_update _
+    | Poly_variant _ -> List.for_all (sub_exprs t) ~f:is_value
     | Match (expr, cases) ->
       is_value expr && List.for_all cases ~f:(fun (_, expr) -> is_value expr)
 
@@ -211,7 +278,14 @@ module Expr = struct
     | Construct _
     | Record _
     | Field _
-    | Match _ -> List.for_all (sub_exprs t) ~f:(splices_are_values ~depth)
+    | Match _
+    | Poly_record _
+    | Poly_field _
+    | Poly_extend _
+    | Poly_restrict _
+    | Poly_update _
+    | Poly_variant _ ->
+      List.for_all (sub_exprs t) ~f:(splices_are_values ~depth)
 
   (** Local lets are recursive, and a recursive non-function is not a
       value. *)

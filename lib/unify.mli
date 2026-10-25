@@ -1,6 +1,6 @@
 open! Core
 
-(** Unification of types, contexts and presences, and context bounds. Variables
+(** Unification of types, rows and presences, and row bounds. Variables
     bound are rank lowered and occurs checked. *)
 
 val unify_ty
@@ -9,10 +9,10 @@ val unify_ty
   -> ty2:Type.ty
   -> (unit, Unification_error.t) Result.t
 
-val unify_context
+val unify_row
   :  Fresh.t
-  -> context1:Type.context
-  -> context2:Type.context
+  -> row1:Type.row
+  -> row2:Type.row
   -> (unit, Unification_error.t) Result.t
 
 val unify_presence
@@ -21,22 +21,22 @@ val unify_presence
   -> error:'error
   -> (unit, 'error) Result.t
 
-(** Constrains every entry [context] has, or later gets, to also be an entry of
-    [bound]. Names in [shadowed] are hidden by earlier entries of the context
+(** Constrains every entry [row] has, or later gets, to also be an entry of
+    [bound]. Names in [shadowed] are hidden by earlier entries of the row
     the constraint is about, so are not constrained. *)
-val constrain_context
+val constrain_row
   :  Fresh.t
-  -> context:Type.context
-  -> bound:Type.context
+  -> row:Type.row
+  -> bound:Type.row
   -> shadowed:String.Set.t
   -> (unit, Unification_error.t) Result.t
 
-(** The type of the first entry for [name] in [context], which must be present.
+(** The type of the first entry for [name] in [row], which must be present.
     [rank] is that of the variable standing for the type in the error if
-    [context] lacks [name]. *)
+    [row] lacks [name]. *)
 val present_entry
   :  Fresh.t
-  -> context:Type.context
+  -> row:Type.row
   -> name:string
   -> rank:Type.rank
   -> (Type.ty, Unification_error.t) Result.t

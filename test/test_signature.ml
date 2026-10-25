@@ -18,7 +18,7 @@ let%expect_test "items mirror the program" =
     ; Decl.list
     ; Decl.variant
         "stmt"
-        ~params:[ Decl.context "r"; Decl.ty "a" ]
+        ~params:[ Decl.row "r"; Decl.ty "a" ]
         [ "Stmt", [ Ty.code (Ty.var "a") ~tail:"r" ] ]
     ; Decl.record
         "point"

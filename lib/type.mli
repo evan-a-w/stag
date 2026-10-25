@@ -3,7 +3,7 @@ open! Core
 type id = int [@@deriving sexp, compare, equal]
 type rank = int [@@deriving sexp, compare, equal]
 
-(** A unification variable standing for an ['a]. Only context variables have
+(** A unification variable standing for an ['a]. Only row variables have
     bounds: for the other kinds, ['bound] is [Nothing.t]. *)
 module Var : sig
   type 'a state =
@@ -37,19 +37,21 @@ type ty =
   | TTuple of ty list
   | TCode of
       { inner : ty
-      ; context : context
+      ; context : row
       }
+  | TRecord of row
+  | TVariant of row (** Tags without the backquote. *)
   | TVar of (ty, Nothing.t) Var.t
 
-and context =
-  | CEmpty
-  | CExtend of string * presence * ty * context
+and row =
+  | REmpty
+  | RExtend of string * presence * ty * row
   (** Labels are scoped: the first entry for a name shadows later ones. *)
-  | CVar of (context, bound) Var.t
+  | RVar of (row, bound) Var.t
 
-(** Whether code uses a context entry. An [Absent] entry may be dropped, so a
-    context with entries of unknown presence can still unify with one that
-    lacks them. *)
+(** Whether an entry is in the row (for a context, whether code uses it). An
+    [Absent] entry may be dropped, so a row with entries of unknown presence
+    can still unify with one that lacks them. *)
 and presence =
   | Present
   | Absent
@@ -57,12 +59,12 @@ and presence =
 
 and arg =
   | ATy of ty
-  | AContext of context
+  | ARow of row
 
-(** An upper bound of a context variable: every entry the variable gets must
-    also be an entry of [context], unless shadowed where the bound arose. *)
+(** An upper bound of a row variable: every entry the variable gets must
+    also be an entry of [row], unless shadowed where the bound arose. *)
 and bound =
-  { context : context
+  { row : row
   ; shadowed : String.Set.t
   }
 [@@deriving sexp_of]
@@ -76,11 +78,11 @@ val unit : ty
 (** Follows [Link]s, compressing the path. *)
 val canonical_ty : ty -> ty
 
-val canonical_context : context -> context
+val canonical_row : row -> row
 val canonical_presence : presence -> presence
 
-(** The row variable at the end of [context], if it is open. *)
-val tail_var : context -> (context, bound) Var.t option
+(** The row variable at the end of [row], if it is open. *)
+val tail_var : row -> (row, bound) Var.t option
 
 (** Rebuilds a type, replacing each variable that is not a [Link] by the result
     of the callback for its kind. Links are followed, so do not appear in the
@@ -88,25 +90,25 @@ val tail_var : context -> (context, bound) Var.t option
 module Mapper : sig
   type t =
     { ty : (ty, Nothing.t) Var.t -> ty
-    ; context : (context, bound) Var.t -> context
+    ; row : (row, bound) Var.t -> row
     ; presence : (presence, Nothing.t) Var.t -> presence
     }
 end
 
 val map_ty : Mapper.t -> ty -> ty
-val map_context : Mapper.t -> context -> context
+val map_row : Mapper.t -> row -> row
 
 (** Visits each variable that is not a [Link], stopping at the first error. *)
 module Iter : sig
   type 'e t =
     { ty : (ty, Nothing.t) Var.t -> (unit, 'e) Result.t
-    ; context : (context, bound) Var.t -> (unit, 'e) Result.t
+    ; row : (row, bound) Var.t -> (unit, 'e) Result.t
     ; presence : (presence, Nothing.t) Var.t -> (unit, 'e) Result.t
     }
 end
 
 val iter_ty : 'e Iter.t -> ty -> (unit, 'e) Result.t
-val iter_context : 'e Iter.t -> context -> (unit, 'e) Result.t
+val iter_row : 'e Iter.t -> row -> (unit, 'e) Result.t
 
 (** Renders types for humans. Variables are named in order of appearance,
     consistently across the types one printer renders; weak (unbound) ones are
@@ -120,7 +122,7 @@ module Printer : sig
 
   val ty : t -> ty -> string
 
-  (** The bounds of the context variables reached, as
+  (** The bounds of the row variables reached, as
       [" where ..'a <= {...}"], or [""] if there are none. *)
   val where : t -> string
 end

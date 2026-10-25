@@ -31,6 +31,7 @@ module Type_decl = struct
       | Variant of Constructor.t list
       | Record of Field.t list
       | Alias of Type.ty
+      | Abstract
     [@@deriving sexp_of]
   end
 
@@ -46,7 +47,8 @@ module Type_decl = struct
     let head = ty (TCon (canonical_name, t.params)) in
     let body =
       match t.kind with
-      | Variant [] -> "|"
+      | Abstract -> None
+      | Variant [] -> Some "|"
       | Variant constructors ->
         List.map constructors ~f:(fun { name; args } ->
           match args with
@@ -55,14 +57,18 @@ module Type_decl = struct
              need. *)
           | args -> sprintf "%s of %s" name (ty (TTuple args)))
         |> String.concat ~sep:" | "
+        |> Some
       | Record fields ->
         List.map fields ~f:(fun { name; ty = field } ->
           sprintf "%s : %s" name (ty field))
         |> String.concat ~sep:"; "
         |> sprintf "{ %s }"
-      | Alias body -> ty body
+        |> Some
+      | Alias body -> Some (ty body)
     in
-    sprintf "type %s = %s" head body
+    match body with
+    | None -> sprintf "type %s" head
+    | Some body -> sprintf "type %s = %s" head body
   ;;
 end
 

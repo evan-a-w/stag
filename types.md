@@ -15,29 +15,30 @@ module Type_expr : sig
     | Con of Path.t * arg list                   (* int, M.t, 'a list *)
     | Arrow of t * t
     | Tuple of t list
-    | Code of { inner : t; context : context }   (* <t>{...} *)
-  and context =
+    | Code of { inner : t; context : row }       (* <t>{...} *)
+  and row =
     | Empty                                      (* closed *)
-    | Extend of string * t * context             (* x : t; ... (Present) *)
+    | Extend of string * t * row                 (* x : t; ... (Present) *)
     | Var of string                              (* ..r *)
-  and arg = Ty of t | Context of context
+  and arg = Ty of t | Row of row
 end
 ```
 
 Elaboration:
 
-- In annotations, type and context variables are unification variables scoped
+- In annotations, type and row variables are unification variables scoped
   over the enclosing toplevel definition (as in OCaml): the same name within a
   toplevel is the same variable, created fresh on first use at the current
   rank.
 - In declarations, variables must be declared parameters
-  (`Unbound_type_variable`) of the right kind, `Ty` vs `Context`
+  (`Unbound_type_variable`) of the right kind, `Ty` vs `Row`
   (`Type_variable_kind_mismatch`).
-- A label appears at most once in one context (`Duplicate_context_entry`).
-- Builtins `int`, `bool`, `string`, `char`, `unit` are nominal types without
-  constructors declared in the root module (so `Type.int` is `TCon ("int", [])`
-  as before): redeclaring one at the root is `Duplicate_type`, while `M.unit`
-  is a distinct type that shadows the builtin within `M`.
+- A label appears at most once in one row (`Duplicate_row_entry`).
+- Builtins `int`, `bool`, `string`, `char`, `unit` are abstract types
+  (`Kind.Abstract`) declared in the root module (so `Type.int` is
+  `TCon ("int", [])` as before): redeclaring one at the root is
+  `Duplicate_type`, while `M.unit` is a distinct type that shadows the builtin
+  within `M`.
 - Arity and kind of arguments are checked (`Type_arity_mismatch`,
   `Type_arg_kind_mismatch`).
 - Aliases are expanded during elaboration, so never appear in `Type.ty`.
@@ -46,12 +47,13 @@ Elaboration:
 
 ```ocaml
 module Type_decl : sig
-  module Param : sig type t = Ty of string | Context of string end
+  module Param : sig type t = Ty of string | Row of string end
   module Kind : sig
     type t =
       | Variant of (string * Type_expr.t list) list  (* Cons of 'a * 'a list *)
       | Record of (string * Type_expr.t) list
       | Alias of Type_expr.t
+      | Abstract  (* type t: no constructors or fields; not an empty variant *)
   end
   type t = { name : string; params : Param.t list; kind : Kind.t }
 end
@@ -60,7 +62,7 @@ end
 - `Toplevel.t` gains `Type of Type_decl.t`.
 - Declarations are order independent and may be (mutually) recursive, like
   `let` toplevels. They are all checked before any `let`.
-- Variant and record types are nominal: `Type.TCon (canonical name, args)`.
+- Variant, record and abstract types are nominal: `Type.TCon (canonical name, args)`.
   The canonical name is the full module path joined with `.` (e.g. `"M.t"`;
   just `"t"` at the root).
 - Aliases are structural (expanded). Cyclic aliases are an error

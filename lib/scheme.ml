@@ -2,7 +2,7 @@ open! Core
 
 let instantiator fresh ~rank : Type.Mapper.t =
   let tys = Int.Table.create () in
-  let contexts = Int.Table.create () in
+  let rows = Int.Table.create () in
   let presences = Int.Table.create () in
   let inst table (var : _ Type.Var.t) ~wrap ~bound =
     match var.state with
@@ -25,14 +25,14 @@ let instantiator fresh ~rank : Type.Mapper.t =
             var
             ~wrap:(fun var -> Type.TVar var)
             ~bound:Nothing.unreachable_code)
-    ; context =
+    ; row =
         (fun var ->
           inst
-            contexts
+            rows
             var
-            ~wrap:(fun var -> Type.CVar var)
+            ~wrap:(fun var -> Type.RVar var)
             ~bound:(fun (bound : Type.bound) ->
-              { bound with context = Type.map_context mapper bound.context }))
+              { bound with row = Type.map_row mapper bound.row }))
     ; presence =
         (fun var ->
           inst
@@ -59,11 +59,11 @@ let generalizer ~rank : Type.Mapper.t =
         generalize
           ~wrap:(fun var -> Type.TVar var)
           ~bound:Nothing.unreachable_code
-    ; context =
+    ; row =
         generalize
-          ~wrap:(fun var -> Type.CVar var)
+          ~wrap:(fun var -> Type.RVar var)
           ~bound:(fun (bound : Type.bound) ->
-            ignore (Type.map_context mapper bound.context : Type.context))
+            ignore (Type.map_row mapper bound.row : Type.row))
     ; presence =
         generalize
           ~wrap:(fun var -> Type.PVar var)
@@ -74,9 +74,5 @@ let generalizer ~rank : Type.Mapper.t =
 ;;
 
 let generalize_ty ~rank ty = Type.map_ty (generalizer ~rank) ty
-
-let generalize_context ~rank context =
-  Type.map_context (generalizer ~rank) context
-;;
-
+let generalize_row ~rank row = Type.map_row (generalizer ~rank) row
 let instantiate fresh ~rank = Type.map_ty (instantiator fresh ~rank)

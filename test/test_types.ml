@@ -65,6 +65,49 @@ let%expect_test "variant types are nominal" =
     |}]
 ;;
 
+let%expect_test "abstract types" =
+  let id ty =
+    Toplevel.Let ("id_" ^ ty, [ typed "x" (Ty.con ty) ], None, var "x")
+  in
+  check
+    [ Decl.abstract "t"
+    ; Decl.abstract "box" ~params:[ Decl.ty "a"; Decl.row "r" ]
+    ; id "t"
+    ; module_ "M" [ Decl.abstract "int"; id "int" ]
+    ; id "int"
+    ];
+  check [ Decl.abstract "t"; id "t"; top "bad" [] (app (var "id_t") [ int 1 ]) ];
+  check
+    [ Decl.abstract "t"
+    ; Toplevel.Let
+        ("absurd", [ typed "x" (Ty.con "t") ], None, match_ (var "x") [])
+    ];
+  check [ Decl.abstract "t"; top "bad" [] (construct "T") ];
+  check
+    [ module_ "M" [ Decl.abstract "int"; id "int" ]
+    ; top "bad" [] (app (var "M.id_int") [ int 1 ])
+    ];
+  [%expect
+    {|
+    type t
+    type box['a, {..'b}]
+    val id_t : t -> t
+    module M : sig
+      type int
+      val id_int : int -> int
+    end
+    val id_int : int -> int
+    (Unification_error
+     (Type_mismatch (TCon t ()) (TCon int ()) (Base_types_not_equal t int)))
+    (Unification_error
+     (Type_mismatch (TVariant REmpty) (TCon t ()) Structural_mismatch))
+    (Unbound_constructor T)
+    (Unification_error
+     (Type_mismatch (TCon M.int ()) (TCon int ())
+      (Base_types_not_equal M.int int)))
+    |}]
+;;
+
 let%expect_test "declarations are order independent and may be recursive" =
   check
     [ top "tree" [] (construct "Node" ~args:[ cons (construct "Leaf") nil ])
@@ -241,7 +284,7 @@ let%expect_test "match" =
     val get_y : point -> int
     val get_opt : option['a] -> 'a -> 'a
     val shadows : 'a -> int
-    val no_cases : 'a -> 'b
+    val no_cases : [] -> 'a
     val nested_record : option[point] -> int
     |}]
 ;;
@@ -350,7 +393,7 @@ let%expect_test "match errors" =
 
 let%expect_test "declaration errors" =
   check [ Decl.variant "t" [ "A", [] ]; Decl.record "t" [ "x", Ty.int ] ];
-  check [ Decl.variant "t" ~params:[ Decl.ty "a"; Decl.context "a" ] [] ];
+  check [ Decl.variant "t" ~params:[ Decl.ty "a"; Decl.row "a" ] [] ];
   check [ Decl.variant "t" [ "A", []; "A", [ Ty.int ] ] ];
   check [ Decl.variant "t" [ "A", [] ]; Decl.variant "u" [ "A", [] ] ];
   check [ Decl.record "t" [ "x", Ty.int; "x", Ty.bool ] ];
@@ -362,8 +405,7 @@ let%expect_test "declaration errors" =
         ~params:[ Decl.ty "a" ]
         [ "A", [ Ty.code Ty.int ~tail:"a" ] ]
     ];
-  check
-    [ Decl.variant "t" ~params:[ Decl.context "r" ] [ "A", [ Ty.var "r" ] ] ];
+  check [ Decl.variant "t" ~params:[ Decl.row "r" ] [ "A", [ Ty.var "r" ] ] ];
   check [ Decl.variant "t" [ "A", [ Ty.con "nope" ] ] ];
   check [ Decl.alias "t" (Ty.con "nope") ];
   [%expect
@@ -389,15 +431,14 @@ let%expect_test "duplicate context entries" =
   check [ Decl.variant "t" [ "A", [ twice ] ] ];
   check [ Decl.alias "t" twice ];
   check
-    [ Decl.alias "code" ~params:[ Decl.context "r" ] (Ty.code Ty.int ~tail:"r")
+    [ Decl.alias "code" ~params:[ Decl.row "r" ] (Ty.code Ty.int ~tail:"r")
     ; top
         "f"
         [ "c" ]
         ~annot:
           (Ty.con
              "code"
-             ~args:
-               [ Context (Extend ("x", Ty.int, Extend ("x", Ty.int, Var "r"))) ])
+             ~args:[ Row (Extend ("x", Ty.int, Extend ("x", Ty.int, Var "r"))) ])
         (var "c")
     ];
   check
@@ -412,11 +453,11 @@ let%expect_test "duplicate context entries" =
     ];
   [%expect
     {|
-    (Duplicate_context_entry x)
-    (Duplicate_context_entry x)
-    (Duplicate_context_entry x)
-    (Duplicate_context_entry x)
-    (Duplicate_context_entry x)
+    (Duplicate_row_entry x)
+    (Duplicate_row_entry x)
+    (Duplicate_row_entry x)
+    (Duplicate_row_entry x)
+    (Duplicate_row_entry x)
     val nested : <<int>{x : int}>{x : bool} -> <<int>{x : int}>{x : bool}
     |}]
 ;;
@@ -425,7 +466,7 @@ let%expect_test "arity and kind of type arguments" =
   let stmt =
     Decl.variant
       "stmt"
-      ~params:[ Decl.context "r" ]
+      ~params:[ Decl.row "r" ]
       [ "Stmt", [ Ty.code Ty.unit ~tail:"r" ] ]
   in
   check [ Decl.list; Decl.variant "t" [ "A", [ Ty.con "list" ] ] ];
@@ -433,7 +474,7 @@ let%expect_test "arity and kind of type arguments" =
   check [ top "f" [ "x" ] ~annot:(Ty.con "bool" ~args:[ Ty Ty.int ]) (var "x") ];
   check
     [ Decl.list
-    ; Decl.variant "t" [ "A", [ Ty.con "list" ~args:[ Context Empty ] ] ]
+    ; Decl.variant "t" [ "A", [ Ty.con "list" ~args:[ Row Empty ] ] ]
     ];
   check
     [ stmt; Decl.variant "t" [ "A", [ Ty.con "stmt" ~args:[ Ty Ty.int ] ] ] ];
@@ -445,7 +486,7 @@ let%expect_test "arity and kind of type arguments" =
     (Type_arity_mismatch (type_name int) (expected 0) (got 1))
     (Type_arity_mismatch (type_name bool) (expected 0) (got 1))
     (Type_arg_kind_mismatch (type_name list) (param (Ty a)))
-    (Type_arg_kind_mismatch (type_name stmt) (param (Context r)))
+    (Type_arg_kind_mismatch (type_name stmt) (param (Row r)))
     (Unbound_type list)
     (Unbound_module M)
     |}]
@@ -459,7 +500,7 @@ let%expect_test "aliases" =
       (Ty.tuple [ Ty.var "a"; Ty.var "a" ])
   in
   let code =
-    Decl.alias "code" ~params:[ Decl.context "r" ] (Ty.code Ty.int ~tail:"r")
+    Decl.alias "code" ~params:[ Decl.row "r" ] (Ty.code Ty.int ~tail:"r")
   in
   check
     [ pair
@@ -472,7 +513,7 @@ let%expect_test "aliases" =
     ; top
         "g"
         [ "c" ]
-        ~annot:(Ty.con "code" ~args:[ Context (Extend ("x", Ty.int, Var "r")) ])
+        ~annot:(Ty.con "code" ~args:[ Row (Extend ("x", Ty.int, Var "r")) ])
         (var "c")
     ; top "h" [] ~annot:(Ty.con "unused" ~args:[ Ty Ty.int ]) (bool true)
     ];
@@ -590,10 +631,10 @@ let%expect_test "context parameters" =
   let stmt =
     Decl.variant
       "stmt"
-      ~params:[ Decl.context "r" ]
+      ~params:[ Decl.row "r" ]
       [ ( "Stmt"
         , [ Ty.code Ty.unit ~tail:"r"
-          ; list_of (Ty.con "stmt" ~args:[ Context (Var "r") ])
+          ; list_of (Ty.con "stmt" ~args:[ Row (Var "r") ])
           ] )
       ]
   in
@@ -617,8 +658,7 @@ let%expect_test "context parameters" =
     ; top
         "annotated"
         [ "s" ]
-        ~annot:
-          (Ty.con "stmt" ~args:[ Context (Extend ("y", Ty.bool, Var "r")) ])
+        ~annot:(Ty.con "stmt" ~args:[ Row (Extend ("y", Ty.bool, Var "r")) ])
         (var "s")
     ; top
         "body"
