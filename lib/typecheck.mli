@@ -29,6 +29,8 @@ module Unification_error : sig
   module Context_mismatch_reason : sig
     type t =
       | Empty_context_has_variable of string
+      | Presence_mismatch of string
+      (** Both contexts have the name, but one has it [Absent]. *)
       | Cyclic_context
     [@@deriving sexp, compare, equal]
   end

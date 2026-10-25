@@ -560,7 +560,7 @@ let%expect_test "presence" =
       (CExtend y Present (TCon bool ()) CEmpty)))
     (Error
      (Context_mismatch (CExtend x Absent (TCon int ()) CEmpty)
-      (CExtend x Present (TCon int ()) CEmpty) (Empty_context_has_variable x)))
+      (CExtend x Present (TCon int ()) CEmpty) (Presence_mismatch x)))
     (Ok (CExtend x Absent (TCon int ()) CEmpty))
     |}]
 ;;
@@ -778,13 +778,13 @@ let%expect_test "an absent entry shadows later entries with its name" =
     (Error
      (Context_mismatch (CExtend x Present (TCon bool ()) (CVar (CUnbound 1 1)))
       (CExtend x Absent (TCon int ()) (CExtend x Present (TCon bool ()) CEmpty))
-      (Empty_context_has_variable x)))
+      (Presence_mismatch x)))
     (Ok ())
     (Error
      (Context_mismatch (CExtend x Present (TCon bool ()) CEmpty)
       (CExtend x Absent (TCon int ())
        (CExtend x Present (TCon bool ()) (CVar (CUnbound 3 1))))
-      (Empty_context_has_variable x)))
+      (Presence_mismatch x)))
     (Error
      (Context_mismatch CEmpty (CExtend x Present (TCon bool ()) CEmpty)
       (Empty_context_has_variable x)))
@@ -862,7 +862,7 @@ let%expect_test "cyclic bounds" =
        (CLink
         (CExtend x (PVar (PLink Absent)) (TVar (Unbound 26 1))
          (CVar (CUnbound 27 1)))))
-      (Empty_context_has_variable x)))
+      (Presence_mismatch x)))
     |}]
 ;;
 
@@ -911,5 +911,70 @@ let%expect_test "bounds referring to the bounded variable" =
      (CExtend y Present (TCon bool ())
       (CVar (CLink (CExtend x Present (TCon int ()) CEmpty)))))
     <int>{x : int; y : bool}
+    |}]
+;;
+
+let%expect_test "bounds do not constrain shadowed entries" =
+  let typecheck = Typecheck.create () in
+  let r = cvar typecheck ~rank:1 in
+  let bound = CExtend ("x", Present, int, cvar typecheck ~rank:1) in
+  print_s
+    [%sexp
+      (Typecheck.constrain_context
+         typecheck
+         ~context:(CExtend ("x", Present, int, r))
+         ~bound
+       : (unit, Typecheck.Unification_error.t) Result.t)];
+  (* [r]'s [x] is hidden by the [x : int] before it. *)
+  unify_context
+    typecheck
+    ~context1:r
+    ~context2:
+      (CExtend
+         ( "x"
+         , Present
+         , bool
+         , CExtend ("y", Present, bool, cvar typecheck ~rank:1) ));
+  print_context bound;
+  (* Shadowing is kept as bounds move to the rest of [r]. *)
+  unify_context
+    typecheck
+    ~context1:r
+    ~context2:
+      (CExtend
+         ( "x"
+         , Present
+         , bool
+         , CExtend
+             ( "y"
+             , Present
+             , bool
+             , CExtend
+                 ("x", Present, string, CExtend ("y", Present, string, CEmpty))
+             ) ));
+  print_context bound;
+  [%expect
+    {|
+    (Ok ())
+    (Ok
+     (CExtend x Present (TCon bool ())
+      (CExtend y Present (TCon bool ()) (CVar (CUnbound 2 1)))))
+    (CExtend x Present (TCon int ())
+     (CVar
+      (CLink
+       (CExtend y (PVar (PLink Present)) (TVar (Link (TCon bool ())))
+        (CVar (CUnbound 5 1))))))
+    (Ok
+     (CExtend x Present (TCon bool ())
+      (CExtend y Present (TCon bool ())
+       (CVar
+        (CLink
+         (CExtend x Present (TCon string ())
+          (CExtend y Present (TCon string ()) CEmpty)))))))
+    (CExtend x Present (TCon int ())
+     (CVar
+      (CLink
+       (CExtend y (PVar (PLink Present)) (TVar (Link (TCon bool ())))
+        (CVar (CUnbound 5 1))))))
     |}]
 ;;
