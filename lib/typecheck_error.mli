@@ -50,6 +50,6 @@ type t =
   | Empty_record
   | Duplicate_pattern_variable of string
   | Duplicate_context_entry of string
-[@@deriving sexp, compare, equal]
+[@@deriving sexp_of]
 
 val unification_error : Unification_error.t -> t

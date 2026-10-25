@@ -6,7 +6,7 @@ module Type_mismatch_reason : sig
     | Args_length_mismatch of int * int
     | Mismatch_arg_kind of Type.arg * Type.arg
     | Structural_mismatch
-  [@@deriving sexp, compare, equal]
+  [@@deriving sexp_of]
 end
 
 module Context_mismatch_reason : sig
@@ -15,11 +15,12 @@ module Context_mismatch_reason : sig
     | Presence_mismatch of string
     (** Both contexts have the name, but one has it [Absent]. *)
     | Cyclic_context
-  [@@deriving sexp, compare, equal]
+  [@@deriving sexp_of]
 end
 
 type t =
   | Type_mismatch of Type.ty * Type.ty * Type_mismatch_reason.t
   | Context_mismatch of Type.context * Type.context * Context_mismatch_reason.t
-  | Occurs_check_failed of Type.Var.t
-[@@deriving sexp, compare, equal]
+  | Occurs_check_failed of Type.arg
+  (** The variable that would occur in the type it is bound to. *)
+[@@deriving sexp_of]

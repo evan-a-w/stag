@@ -891,8 +891,8 @@ let%expect_test "recursive local non-functions are not generalized" =
           ; top "local" [] (let_ "x" [] equal (tuple [ var "x"; var "x" ]))
           ]
     with
-    | Ok signature -> print_signature typecheck [ List.last_exn signature ]
-    | Error error -> print_s [%sexp (error : Typecheck.Typecheck_error.t)]
+    | Ok signature -> print_signature [ List.last_exn signature ]
+    | Error error -> print_s [%sexp (error : Typecheck_error.t)]
   in
   print_local (var "x");
   print_local (seq (var "x") nil);

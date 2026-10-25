@@ -6,14 +6,11 @@ open Helpers
 let typecheck_exn program =
   let typecheck = Typecheck.create () in
   match Typecheck.typecheck typecheck ~program with
-  | Ok signature -> typecheck, signature
-  | Error error -> raise_s [%sexp (error : Typecheck.Typecheck_error.t)]
+  | Ok signature -> signature
+  | Error error -> raise_s [%sexp (error : Typecheck_error.t)]
 ;;
 
-let print program =
-  let typecheck, signature = typecheck_exn program in
-  print_signature typecheck signature
-;;
+let print program = print_signature (typecheck_exn program)
 
 let%expect_test "items mirror the program" =
   print
@@ -293,7 +290,7 @@ let%expect_test "a type shadowing a builtin" =
 ;;
 
 let%expect_test "sexp" =
-  let _, signature =
+  let signature =
     typecheck_exn
       [ Decl.record "box" ~params:[ Decl.ty "a" ] [ "contents", Ty.var "a" ]
       ; module_
