@@ -58,7 +58,13 @@ shadowing is only by nesting extensions.
   closing the tail of the scrutinee's row, matters: the scrutinee may already
   have entries of its own, so `` match `C with `A -> e `` is an error rather
   than `` [`A | `C] ``. Nested variant patterns stay open. An empty match,
-  `match e with`, has type `[] -> 'a`.
+  `match e with`, has type `[] -> 'a`, unless the scrutinee's type is
+  already known (after checking it) to be a declared variant type with no
+  constructors, such as `type void = |` (or an alias of one, as aliases are
+  expanded), which is then kept: `let absurd (x : void) = match x with` is
+  `void -> 'a`. Builtins are abstract, so `match (1 : int) with` is an error.
+  This is order dependent: in `let f x = match x with`, `x` is not yet known
+  to be `void`, so `f : [] -> 'a` and applying `f` to a `void` is an error.
 - Residuals: a top level `Var` pattern gets the scrutinee's type with, for
   each tag handled by an earlier case `` `A p `` with `p` irrefutable, the
   first entry for that tag removed (once per tag). Irrefutable: `Var`, `Any`,

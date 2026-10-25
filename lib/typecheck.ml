@@ -331,9 +331,16 @@ module Variant_match = struct
     | _ -> handled
   ;;
 
+  let is_empty_nominal (scope : Scope.t) scrutinee =
+    match Type.canonical_ty scrutinee with
+    | TCon (name, _) -> Type_env.is_empty_variant scope.program.type_env name
+    | _ -> false
+  ;;
+
   (* Without a top level catch-all, a variant scrutinee may only have the tags
-     of the cases, and an empty match's none. *)
-  let close t scope ~scrutinee (patterns : Syntax.Pattern.t list) =
+     of the cases, and an empty match's none, unless the scrutinee is already
+     known to be an empty nominal type. *)
+  let close t (scope : Scope.t) ~scrutinee (patterns : Syntax.Pattern.t list) =
     let tags =
       List.filter_map patterns ~f:(function
         | Poly_variant (tag, _) -> Some tag
@@ -345,7 +352,10 @@ module Variant_match = struct
         | Var _ | Any -> true
         | _ -> false)
     in
-    if has_catch_all || (List.is_empty tags && not (List.is_empty patterns))
+    if
+      has_catch_all
+      || (List.is_empty tags && not (List.is_empty patterns))
+      || (List.is_empty patterns && is_empty_nominal scope scrutinee)
     then Ok ()
     else (
       let closed =

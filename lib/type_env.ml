@@ -42,8 +42,10 @@ type t =
   ; checked : Signature.Type_decl.t String.Map.t
   }
 
+let builtin_names = [ "int"; "bool"; "string"; "char"; "unit" ]
+
 let builtins =
-  List.map [ "int"; "bool"; "string"; "char"; "unit" ] ~f:(fun name ->
+  List.map builtin_names ~f:(fun name ->
     { Type_decl.name; params = []; kind = Variant [] })
 ;;
 
@@ -69,6 +71,14 @@ let find_field t module_ path =
 ;;
 
 let find_decl_exn t name = Map.find_exn t.checked name
+
+let is_empty_variant t name =
+  (not (List.mem builtin_names name ~equal:String.equal))
+  &&
+  match (find_decl_exn t name).kind with
+  | Variant [] -> true
+  | Variant (_ :: _) | Record _ | Alias _ -> false
+;;
 
 module Annotation_vars = struct
   type t =

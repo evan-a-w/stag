@@ -772,3 +772,69 @@ let%expect_test "structural types are not recursive" =
     val two : t
     |}]
 ;;
+
+let%expect_test "empty matches on empty nominal types" =
+  let void = Decl.variant "void" [] in
+  let absurd ?(name = "absurd") ty =
+    Toplevel.Let (name, [ typed "x" ty ], None, match_ (var "x") [])
+  in
+  check
+    [ void
+    ; absurd (Ty.con "void")
+    ; top "poly" [ "x" ] (match_ (var "x") [])
+    ; Toplevel.Let
+        ( "through_let"
+        , [ typed "v" (Ty.con "void") ]
+        , None
+        , let_ "y" [] (var "v") (match_ (var "y") []) )
+    ];
+  check
+    [ module_ "M" [ void; absurd (Ty.con "void") ]; absurd (Ty.con "M.void") ];
+  check [ void; Decl.alias "empty" (Ty.con "void"); absurd (Ty.con "empty") ];
+  [%expect
+    {|
+    type void = |
+    val absurd : void -> 'a
+    val poly : [] -> 'a
+    val through_let : void -> 'a
+    module M : sig
+      type void = |
+      val absurd : void -> 'a
+    end
+    val absurd : M.void -> 'a
+    type void = |
+    type empty = void
+    val absurd : void -> 'a
+    |}];
+  check [ Decl.variant "t" [ "A", [] ]; absurd (Ty.con "t") ];
+  check [ absurd Ty.int ];
+  [%expect
+    {|
+    (Unification_error
+     (Type_mismatch (TVariant REmpty) (TCon t ()) Structural_mismatch))
+    (Unification_error
+     (Type_mismatch (TVariant REmpty) (TCon int ()) Structural_mismatch))
+    |}];
+  (* Order dependent: [f]'s scrutinee is not yet known to be [void]. *)
+  check
+    [ void
+    ; top "f" [ "x" ] (match_ (var "x") [])
+    ; Toplevel.Let
+        ("g", [ typed "v" (Ty.con "void") ], None, app (var "f") [ var "v" ])
+    ];
+  check
+    [ void
+    ; Toplevel.Let
+        ( "local"
+        , [ typed "v" (Ty.con "void") ]
+        , None
+        , let_ "f" [ "x" ] (match_ (var "x") []) (app (var "f") [ var "v" ]) )
+    ];
+  [%expect
+    {|
+    (Unification_error
+     (Type_mismatch (TVariant REmpty) (TCon void ()) Structural_mismatch))
+    (Unification_error
+     (Type_mismatch (TVariant REmpty) (TCon void ()) Structural_mismatch))
+    |}]
+;;
