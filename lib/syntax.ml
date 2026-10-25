@@ -52,17 +52,17 @@ module Type_expr = struct
     | Tuple of t list
     | Code of
         { inner : t
-        ; context : context
+        ; context : row
         }
 
-  and context =
+  and row =
     | Empty
-    | Extend of string * t * context
+    | Extend of string * t * row
     | Var of string
 
   and arg =
     | Ty of t
-    | Context of context
+    | Row of row
   [@@deriving sexp, compare, equal]
 end
 
@@ -70,10 +70,10 @@ module Type_decl = struct
   module Param = struct
     type t =
       | Ty of string
-      | Context of string
+      | Row of string
     [@@deriving sexp, compare, equal]
 
-    let name (Ty name | Context name) = name
+    let name (Ty name | Row name) = name
   end
 
   module Kind = struct

@@ -11,4 +11,4 @@ val instantiate : Fresh.t -> rank:Type.rank -> Type.ty -> Type.ty
 (** Marks unbound variables with rank greater than [rank] as [Generic]. *)
 val generalize_ty : rank:Type.rank -> Type.ty -> Type.ty
 
-val generalize_context : rank:Type.rank -> Type.context -> Type.context
+val generalize_row : rank:Type.rank -> Type.row -> Type.row

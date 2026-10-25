@@ -47,14 +47,14 @@ type ty =
   | TTuple of ty list
   | TCode of
       { inner : ty
-      ; context : context
+      ; context : row
       }
   | TVar of (ty, Nothing.t) Var.t
 
-and context =
-  | CEmpty
-  | CExtend of string * presence * ty * context
-  | CVar of (context, bound) Var.t
+and row =
+  | REmpty
+  | RExtend of string * presence * ty * row
+  | RVar of (row, bound) Var.t
 
 and presence =
   | Present
@@ -63,10 +63,10 @@ and presence =
 
 and arg =
   | ATy of ty
-  | AContext of context
+  | ARow of row
 
 and bound =
-  { context : context
+  { row : row
   ; shadowed : String.Set.t
   }
 [@@deriving sexp_of]
@@ -83,10 +83,10 @@ let canonical_ty =
     | TCon _ | TArrow _ | TTuple _ | TCode _ -> None)
 ;;
 
-let canonical_context =
+let canonical_row =
   Var.canonical ~var:(function
-    | CVar var -> Some var
-    | CEmpty | CExtend _ -> None)
+    | RVar var -> Some var
+    | REmpty | RExtend _ -> None)
 ;;
 
 let canonical_presence =
@@ -95,18 +95,17 @@ let canonical_presence =
     | Present | Absent -> None)
 ;;
 
-let rec tail_var context =
-  match context with
-  | CEmpty -> None
-  | CExtend (_, _, _, context') | CVar { state = Link context'; _ } ->
-    tail_var context'
-  | CVar var -> Some var
+let rec tail_var row =
+  match row with
+  | REmpty -> None
+  | RExtend (_, _, _, row') | RVar { state = Link row'; _ } -> tail_var row'
+  | RVar var -> Some var
 ;;
 
 module Mapper = struct
   type t =
     { ty : (ty, Nothing.t) Var.t -> ty
-    ; context : (context, bound) Var.t -> context
+    ; row : (row, bound) Var.t -> row
     ; presence : (presence, Nothing.t) Var.t -> presence
     }
 end
@@ -118,19 +117,19 @@ let rec map_ty (f : Mapper.t) ty =
       ( name
       , List.map args ~f:(function
           | ATy ty -> ATy (map_ty f ty)
-          | AContext context -> AContext (map_context f context)) )
+          | ARow row -> ARow (map_row f row)) )
   | TArrow (ty1, ty2) -> TArrow (map_ty f ty1, map_ty f ty2)
   | TTuple tys -> TTuple (List.map tys ~f:(map_ty f))
   | TCode { inner; context } ->
-    TCode { inner = map_ty f inner; context = map_context f context }
+    TCode { inner = map_ty f inner; context = map_row f context }
   | TVar var -> f.ty var
 
-and map_context f context =
-  match canonical_context context with
-  | CEmpty -> CEmpty
-  | CExtend (name, presence, ty, rest) ->
-    CExtend (name, map_presence f presence, map_ty f ty, map_context f rest)
-  | CVar var -> f.context var
+and map_row f row =
+  match canonical_row row with
+  | REmpty -> REmpty
+  | RExtend (name, presence, ty, rest) ->
+    RExtend (name, map_presence f presence, map_ty f ty, map_row f rest)
+  | RVar var -> f.row var
 
 and map_presence f presence =
   match canonical_presence presence with
@@ -141,7 +140,7 @@ and map_presence f presence =
 module Iter = struct
   type 'e t =
     { ty : (ty, Nothing.t) Var.t -> (unit, 'e) Result.t
-    ; context : (context, bound) Var.t -> (unit, 'e) Result.t
+    ; row : (row, bound) Var.t -> (unit, 'e) Result.t
     ; presence : (presence, Nothing.t) Var.t -> (unit, 'e) Result.t
     }
 end
@@ -151,24 +150,24 @@ let rec iter_ty (f : _ Iter.t) ty =
   | TCon (_, args) ->
     List.fold_result args ~init:() ~f:(fun () -> function
       | ATy ty -> iter_ty f ty
-      | AContext context -> iter_context f context)
+      | ARow row -> iter_row f row)
   | TArrow (ty1, ty2) ->
     let%bind.Result () = iter_ty f ty1 in
     iter_ty f ty2
   | TTuple tys -> List.fold_result tys ~init:() ~f:(fun () -> iter_ty f)
   | TCode { inner; context } ->
     let%bind.Result () = iter_ty f inner in
-    iter_context f context
+    iter_row f context
   | TVar var -> f.ty var
 
-and iter_context f context =
-  match canonical_context context with
-  | CEmpty -> Ok ()
-  | CExtend (_, presence, ty, rest) ->
+and iter_row f row =
+  match canonical_row row with
+  | REmpty -> Ok ()
+  | RExtend (_, presence, ty, rest) ->
     let%bind.Result () = iter_presence f presence in
     let%bind.Result () = iter_ty f ty in
-    iter_context f rest
-  | CVar var -> f.context var
+    iter_row f rest
+  | RVar var -> f.row var
 
 and iter_presence f presence =
   match canonical_presence presence with
@@ -180,8 +179,8 @@ module Printer = struct
   type t =
     { type_name : string -> string
     ; names : int Int.Table.t
-    ; bounded : (string * (context, bound) Var.t) Queue.t
-      (* Bounded context variables, in order of appearance, to print their
+    ; bounded : (string * (row, bound) Var.t) Queue.t
+      (* Bounded row variables, in order of appearance, to print their
          bounds after the types. *)
     }
 
@@ -205,7 +204,7 @@ module Printer = struct
     sprintf "'%s%c%s" (if weak then "_" else "") letter suffix
   ;;
 
-  let context_var_name t (var : _ Var.t) =
+  let row_var_name t (var : _ Var.t) =
     let first_appearance = not (Hashtbl.mem t.names var.id) in
     let name = ".." ^ var_name t var in
     if first_appearance && not (List.is_empty var.bounds)
@@ -223,7 +222,7 @@ module Printer = struct
         (t.type_name name)
         (List.map args ~f:(function
            | ATy ty -> ty_to_string t ~prec:0 ty
-           | AContext context -> context_to_string t context)
+           | ARow row -> row_to_string t row)
          |> String.concat ~sep:", ")
     | TArrow (ty1, ty2) ->
       let ty1 = ty_to_string t ~prec:1 ty1 in
@@ -235,17 +234,17 @@ module Printer = struct
         (List.map tys ~f:(ty_to_string t ~prec:2) |> String.concat ~sep:" * ")
     | TCode { inner; context } ->
       let inner = ty_to_string t ~prec:0 inner in
-      sprintf "<%s>%s" inner (context_to_string t context)
+      sprintf "<%s>%s" inner (row_to_string t context)
     | TVar var -> var_name t var
 
-  and context_to_string t context =
-    let rec entries context =
-      match canonical_context context with
-      | CEmpty -> [], None
-      | CExtend (name, presence, ty, rest) ->
+  and row_to_string t row =
+    let rec entries row =
+      match canonical_row row with
+      | REmpty -> [], None
+      | RExtend (name, presence, ty, rest) ->
         let entries, tail = entries rest in
         (name, presence, ty) :: entries, tail
-      | CVar var -> [], Some var
+      | RVar var -> [], Some var
     in
     let entry (name, presence, ty) =
       let ty () = ty_to_string t ~prec:0 ty in
@@ -256,13 +255,13 @@ module Printer = struct
         let presence = var_name t var in
         sprintf "%s?%s : %s" name presence (ty ())
     in
-    let fields, tail = entries context in
+    let fields, tail = entries row in
     let fields =
       List.stable_sort fields ~compare:(fun (a, _, _) (b, _, _) ->
         String.compare a b)
       |> List.map ~f:entry
     in
-    let tail = Option.map tail ~f:(context_var_name t) |> Option.to_list in
+    let tail = Option.map tail ~f:(row_var_name t) |> Option.to_list in
     "{" ^ String.concat ~sep:"; " (fields @ tail) ^ "}"
   ;;
 
@@ -274,7 +273,7 @@ module Printer = struct
     | Some (name, var) ->
       let these =
         List.map var.bounds ~f:(fun bound ->
-          sprintf "%s <= %s" name (context_to_string t bound.context))
+          sprintf "%s <= %s" name (row_to_string t bound.row))
       in
       these @ bounds t
   ;;

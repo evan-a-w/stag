@@ -14,7 +14,7 @@ module Ty = struct
   let tuple tys = Type_expr.Tuple tys
 
   let code ?(entries = []) ?tail inner =
-    let tail : Type_expr.context =
+    let tail : Type_expr.row =
       match tail with
       | None -> Empty
       | Some name -> Var name
@@ -92,7 +92,7 @@ end
 
 module Decl = struct
   let ty name = Type_decl.Param.Ty name
-  let context name = Type_decl.Param.Context name
+  let row name = Type_decl.Param.Row name
 
   let type_ ?(params = []) name kind =
     Toplevel.Type { Type_decl.name; params; kind }

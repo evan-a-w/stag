@@ -8,12 +8,12 @@ let string = TCon ("string", [])
 let con ?(args = []) name = TCon (name, args)
 let code ?(inner = int) context = TCode { inner; context }
 let tvar fresh ~rank = TVar (Fresh.var fresh ~rank)
-let cvar fresh ~rank = CVar (Fresh.var fresh ~rank)
+let rvar fresh ~rank = RVar (Fresh.var fresh ~rank)
 let pvar fresh ~rank = PVar (Fresh.var fresh ~rank)
-let ext ?(presence = Present) name ty rest = CExtend (name, presence, ty, rest)
+let ext ?(presence = Present) name ty rest = RExtend (name, presence, ty, rest)
 
 (** Present entries, in order, before [tail]. *)
-let context ?(tail = CEmpty) entries =
+let row ?(tail = REmpty) entries =
   List.fold_right entries ~init:tail ~f:(fun (name, ty) rest ->
     ext name ty rest)
 ;;
@@ -23,20 +23,20 @@ let unify_ty fresh ~ty1 ~ty2 =
   print_s [%sexp (result : (unit, Unification_error.t) Result.t)]
 ;;
 
-let unify_context fresh ~context1 ~context2 =
-  let result = Unify.unify_context fresh ~context1 ~context2 in
+let unify_row fresh ~row1 ~row2 =
+  let result = Unify.unify_row fresh ~row1 ~row2 in
   print_s [%sexp (result : (unit, Unification_error.t) Result.t)]
 ;;
 
-let constrain fresh ~context ~bound =
+let constrain fresh ~row ~bound =
   let result =
-    Unify.constrain_context fresh ~context ~bound ~shadowed:String.Set.empty
+    Unify.constrain_row fresh ~row ~bound ~shadowed:String.Set.empty
   in
   print_s [%sexp (result : (unit, Unification_error.t) Result.t)]
 ;;
 
 let print_ty ty = print_s [%sexp (ty : Type.ty)]
-let print_context context = print_s [%sexp (context : Type.context)]
+let print_row row = print_s [%sexp (row : Type.row)]
 
 let%expect_test "trivial unification" =
   let fresh = Fresh.create () in
@@ -92,12 +92,12 @@ let%expect_test "constructor arg kind mismatch" =
   unify_ty
     fresh
     ~ty1:(con "t" ~args:[ ATy int ])
-    ~ty2:(con "t" ~args:[ AContext CEmpty ]);
+    ~ty2:(con "t" ~args:[ ARow REmpty ]);
   [%expect
     {|
     (Error
-     (Type_mismatch (TCon t ((ATy (TCon int ())))) (TCon t ((AContext CEmpty)))
-      (Mismatch_arg_kind (ATy (TCon int ())) (AContext CEmpty))))
+     (Type_mismatch (TCon t ((ATy (TCon int ())))) (TCon t ((ARow REmpty)))
+      (Mismatch_arg_kind (ATy (TCon int ())) (ARow REmpty))))
     |}]
 ;;
 
@@ -106,8 +106,8 @@ let%expect_test "constructor with context args" =
   let a = tvar fresh ~rank:1 in
   unify_ty
     fresh
-    ~ty1:(con "t" ~args:[ AContext (context [ "x", a ]) ])
-    ~ty2:(con "t" ~args:[ AContext (context [ "x", int ]) ]);
+    ~ty1:(con "t" ~args:[ ARow (row [ "x", a ]) ])
+    ~ty2:(con "t" ~args:[ ARow (row [ "x", int ]) ]);
   print_ty a;
   [%expect
     {|
@@ -172,15 +172,15 @@ let%expect_test "structural mismatch" =
 let%expect_test "code types unify inner type and context" =
   let fresh = Fresh.create () in
   let a = tvar fresh ~rank:1 in
-  let r = cvar fresh ~rank:1 in
-  unify_ty fresh ~ty1:(code ~inner:a r) ~ty2:(code (context [ "x", bool ]));
+  let r = rvar fresh ~rank:1 in
+  unify_ty fresh ~ty1:(code ~inner:a r) ~ty2:(code (row [ "x", bool ]));
   print_ty a;
-  print_context r;
+  print_row r;
   [%expect
     {|
     (Ok ())
     (TVar (Link (TCon int ())))
-    (CVar (Link (CExtend x Present (TCon bool ()) CEmpty)))
+    (RVar (Link (RExtend x Present (TCon bool ()) REmpty)))
     |}]
 ;;
 
@@ -250,7 +250,7 @@ let%expect_test "occurs check" =
 let%expect_test "occurs check through context" =
   let fresh = Fresh.create () in
   let a = tvar fresh ~rank:1 in
-  unify_ty fresh ~ty1:a ~ty2:(code (context [ "x", a ]));
+  unify_ty fresh ~ty1:a ~ty2:(code (row [ "x", a ]));
   [%expect {| (Error (Occurs_check_failed (ATy (TVar (Unbound 0 1))))) |}]
 ;;
 
@@ -259,7 +259,7 @@ let%expect_test "binding lowers ranks of variables in the bound type" =
   let a = tvar fresh ~rank:1 in
   let b = tvar fresh ~rank:3 in
   let c = tvar fresh ~rank:2 in
-  let r = cvar fresh ~rank:3 in
+  let r = rvar fresh ~rank:3 in
   let d = tvar fresh ~rank:0 in
   let ty = TTuple [ TArrow (b, c); code ~inner:d r ] in
   unify_ty fresh ~ty1:a ~ty2:ty;
@@ -269,7 +269,7 @@ let%expect_test "binding lowers ranks of variables in the bound type" =
     (Ok ())
     (TTuple
      ((TArrow (TVar (Unbound 1 1)) (TVar (Unbound 2 1)))
-      (TCode (inner (TVar (Unbound 4 0))) (context (CVar (Unbound 3 1))))))
+      (TCode (inner (TVar (Unbound 4 0))) (context (RVar (Unbound 3 1))))))
     |}]
 ;;
 
@@ -302,42 +302,36 @@ let%expect_test "bindings are not undone on failure" =
 
 let%expect_test "empty contexts" =
   let fresh = Fresh.create () in
-  unify_context fresh ~context1:CEmpty ~context2:CEmpty;
-  unify_context fresh ~context1:CEmpty ~context2:(context [ "x", int ]);
-  unify_context fresh ~context1:(context [ "x", int ]) ~context2:CEmpty;
+  unify_row fresh ~row1:REmpty ~row2:REmpty;
+  unify_row fresh ~row1:REmpty ~row2:(row [ "x", int ]);
+  unify_row fresh ~row1:(row [ "x", int ]) ~row2:REmpty;
   [%expect
     {|
     (Ok ())
     (Error
-     (Context_mismatch CEmpty (CExtend x Present (TCon int ()) CEmpty)
-      (Empty_context_has_variable x)))
+     (Row_mismatch REmpty (RExtend x Present (TCon int ()) REmpty)
+      (Missing_label x)))
     (Error
-     (Context_mismatch (CExtend x Present (TCon int ()) CEmpty) CEmpty
-      (Empty_context_has_variable x)))
+     (Row_mismatch (RExtend x Present (TCon int ()) REmpty) REmpty
+      (Missing_label x)))
     |}]
 ;;
 
 let%expect_test "context order does not matter" =
   let fresh = Fresh.create () in
-  unify_context
+  unify_row
     fresh
-    ~context1:(context [ "x", int; "y", bool ])
-    ~context2:(context [ "y", bool; "x", int ]);
+    ~row1:(row [ "x", int; "y", bool ])
+    ~row2:(row [ "y", bool; "x", int ]);
   [%expect {| (Ok ()) |}]
 ;;
 
 let%expect_test "context label types are unified" =
   let fresh = Fresh.create () in
   let a = tvar fresh ~rank:1 in
-  unify_context
-    fresh
-    ~context1:(context [ "x", a ])
-    ~context2:(context [ "x", int ]);
+  unify_row fresh ~row1:(row [ "x", a ]) ~row2:(row [ "x", int ]);
   print_ty a;
-  unify_context
-    fresh
-    ~context1:(context [ "x", int ])
-    ~context2:(context [ "x", bool ]);
+  unify_row fresh ~row1:(row [ "x", int ]) ~row2:(row [ "x", bool ]);
   [%expect
     {|
     (Ok ())
@@ -349,105 +343,102 @@ let%expect_test "context label types are unified" =
 
 let%expect_test "missing label in closed context" =
   let fresh = Fresh.create () in
-  unify_context
-    fresh
-    ~context1:(context [ "x", int ])
-    ~context2:(context [ "y", int ]);
+  unify_row fresh ~row1:(row [ "x", int ]) ~row2:(row [ "y", int ]);
   [%expect
     {|
     (Error
-     (Context_mismatch (CExtend x Present (TCon int ()) CEmpty)
-      (CExtend y Present (TCon int ()) CEmpty) (Empty_context_has_variable x)))
+     (Row_mismatch (RExtend x Present (TCon int ()) REmpty)
+      (RExtend y Present (TCon int ()) REmpty) (Missing_label x)))
     |}]
 ;;
 
 let%expect_test "open context against closed context" =
   let fresh = Fresh.create () in
-  let r = cvar fresh ~rank:1 in
-  unify_context
+  let r = rvar fresh ~rank:1 in
+  unify_row
     fresh
-    ~context1:(context [ "x", int ] ~tail:r)
-    ~context2:(context [ "x", int; "y", bool ]);
-  print_context r;
+    ~row1:(row [ "x", int ] ~tail:r)
+    ~row2:(row [ "x", int; "y", bool ]);
+  print_row r;
   [%expect
     {|
     (Ok ())
-    (CVar (Link (CExtend y Present (TCon bool ()) CEmpty)))
+    (RVar (Link (RExtend y Present (TCon bool ()) REmpty)))
     |}]
 ;;
 
 let%expect_test "two open contexts share a fresh tail" =
   let fresh = Fresh.create () in
-  let r1 = cvar fresh ~rank:1 in
-  let r2 = cvar fresh ~rank:3 in
-  unify_context
+  let r1 = rvar fresh ~rank:1 in
+  let r2 = rvar fresh ~rank:3 in
+  unify_row
     fresh
-    ~context1:(context [ "x", int ] ~tail:r1)
-    ~context2:(context [ "y", bool ] ~tail:r2);
-  print_context r1;
-  print_context r2;
+    ~row1:(row [ "x", int ] ~tail:r1)
+    ~row2:(row [ "y", bool ] ~tail:r2);
+  print_row r1;
+  print_row r2;
   [%expect
     {|
     (Ok ())
-    (CVar (Link (CExtend y Present (TCon bool ()) (CVar (Unbound 4 1)))))
-    (CVar
+    (RVar (Link (RExtend y Present (TCon bool ()) (RVar (Unbound 4 1)))))
+    (RVar
      (Link
-      (CExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-       (CVar (Unbound 4 1)))))
+      (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
+       (RVar (Unbound 4 1)))))
     |}]
 ;;
 
 let%expect_test "context variables" =
   let fresh = Fresh.create () in
-  let r = cvar fresh ~rank:1 in
-  unify_context fresh ~context1:r ~context2:r;
-  unify_context fresh ~context1:r ~context2:(context [ "x", int ]);
-  print_context r;
+  let r = rvar fresh ~rank:1 in
+  unify_row fresh ~row1:r ~row2:r;
+  unify_row fresh ~row1:r ~row2:(row [ "x", int ]);
+  print_row r;
   [%expect
     {|
     (Ok ())
     (Ok ())
-    (CVar (Link (CExtend x Present (TCon int ()) CEmpty)))
+    (RVar (Link (RExtend x Present (TCon int ()) REmpty)))
     |}]
 ;;
 
 let%expect_test "context occurs check" =
   let fresh = Fresh.create () in
-  let r = cvar fresh ~rank:1 in
-  unify_context fresh ~context1:r ~context2:(context [ "x", int ] ~tail:r);
-  [%expect {| (Error (Occurs_check_failed (AContext (CVar (Unbound 0 1))))) |}]
+  let r = rvar fresh ~rank:1 in
+  unify_row fresh ~row1:r ~row2:(row [ "x", int ] ~tail:r);
+  [%expect {| (Error (Occurs_check_failed (ARow (RVar (Unbound 0 1))))) |}]
 ;;
 
 let%expect_test "cyclic context" =
   let fresh = Fresh.create () in
-  let r = cvar fresh ~rank:1 in
-  unify_context
+  let r = rvar fresh ~rank:1 in
+  unify_row
     fresh
-    ~context1:(context [ "x", int ] ~tail:r)
-    ~context2:(context [ "y", bool ] ~tail:r);
+    ~row1:(row [ "x", int ] ~tail:r)
+    ~row2:(row [ "y", bool ] ~tail:r);
   [%expect
     {|
     (Error
-     (Context_mismatch
-      (CExtend x Present (TCon int ())
-       (CVar
+     (Row_mismatch
+      (RExtend x Present (TCon int ())
+       (RVar
         (Link
-         (CExtend x (PVar (Unbound 1 1)) (TVar (Unbound 2 1))
-          (CVar (Unbound 3 1))))))
-      (CExtend y Present (TCon bool ())
-       (CVar
+         (RExtend x (PVar (Unbound 1 1)) (TVar (Unbound 2 1))
+          (RVar (Unbound 3 1))))))
+      (RExtend y Present (TCon bool ())
+       (RVar
         (Link
-         (CExtend x (PVar (Unbound 1 1)) (TVar (Unbound 2 1))
-          (CVar (Unbound 3 1))))))
-      Cyclic_context))
+         (RExtend x (PVar (Unbound 1 1)) (TVar (Unbound 2 1))
+          (RVar (Unbound 3 1))))))
+      Cyclic_row))
     |}]
 ;;
 
 let%expect_test "duplicate labels are scoped" =
   let fresh = Fresh.create () in
-  let context1 = context [ "x", int; "x", bool ] in
-  unify_context fresh ~context1 ~context2:(context [ "x", int; "x", bool ]);
-  unify_context fresh ~context1 ~context2:(context [ "x", bool; "x", int ]);
+  let row1 = row [ "x", int; "x", bool ] in
+  unify_row fresh ~row1 ~row2:(row [ "x", int; "x", bool ]);
+  unify_row fresh ~row1 ~row2:(row [ "x", bool; "x", int ]);
   [%expect
     {|
     (Ok ())
@@ -458,24 +449,21 @@ let%expect_test "duplicate labels are scoped" =
 
 let%expect_test "linked context variable in tail position" =
   let fresh = Fresh.create () in
-  let r = cvar fresh ~rank:1 in
-  unify_context fresh ~context1:r ~context2:(context [ "z", int ]);
-  unify_context
+  let r = rvar fresh ~rank:1 in
+  unify_row fresh ~row1:r ~row2:(row [ "z", int ]);
+  unify_row fresh ~row1:(row [ "x", int ]) ~row2:(row [ "y", bool ] ~tail:r);
+  unify_row
     fresh
-    ~context1:(context [ "x", int ])
-    ~context2:(context [ "y", bool ] ~tail:r);
-  unify_context
-    fresh
-    ~context1:(context [ "z", int; "y", bool ])
-    ~context2:(context [ "y", bool ] ~tail:r);
+    ~row1:(row [ "z", int; "y", bool ])
+    ~row2:(row [ "y", bool ] ~tail:r);
   [%expect
     {|
     (Ok ())
     (Error
-     (Context_mismatch (CExtend x Present (TCon int ()) CEmpty)
-      (CExtend y Present (TCon bool ())
-       (CVar (Link (CExtend z Present (TCon int ()) CEmpty))))
-      (Empty_context_has_variable x)))
+     (Row_mismatch (RExtend x Present (TCon int ()) REmpty)
+      (RExtend y Present (TCon bool ())
+       (RVar (Link (RExtend z Present (TCon int ()) REmpty))))
+      (Missing_label x)))
     (Ok ())
     |}]
 ;;
@@ -483,61 +471,55 @@ let%expect_test "linked context variable in tail position" =
 let%expect_test "presence" =
   let fresh = Fresh.create () in
   let maybe name ty rest = ext name ty rest ~presence:(pvar fresh ~rank:1) in
-  let maybe_x = maybe "x" int CEmpty in
-  unify_context fresh ~context1:maybe_x ~context2:CEmpty;
-  print_context maybe_x;
-  let maybe_x = maybe "x" int CEmpty in
-  unify_context fresh ~context1:(context [ "x", int ]) ~context2:maybe_x;
-  print_context maybe_x;
-  let maybe_x = maybe "x" int (context [ "y", bool ]) in
-  unify_context fresh ~context1:maybe_x ~context2:(context [ "y", bool ]);
-  print_context maybe_x;
-  unify_context
+  let maybe_x = maybe "x" int REmpty in
+  unify_row fresh ~row1:maybe_x ~row2:REmpty;
+  print_row maybe_x;
+  let maybe_x = maybe "x" int REmpty in
+  unify_row fresh ~row1:(row [ "x", int ]) ~row2:maybe_x;
+  print_row maybe_x;
+  let maybe_x = maybe "x" int (row [ "y", bool ]) in
+  unify_row fresh ~row1:maybe_x ~row2:(row [ "y", bool ]);
+  print_row maybe_x;
+  unify_row
     fresh
-    ~context1:(ext "x" int CEmpty ~presence:Absent)
-    ~context2:(context [ "x", int ]);
-  unify_context
-    fresh
-    ~context1:(ext "x" int CEmpty ~presence:Absent)
-    ~context2:CEmpty;
+    ~row1:(ext "x" int REmpty ~presence:Absent)
+    ~row2:(row [ "x", int ]);
+  unify_row fresh ~row1:(ext "x" int REmpty ~presence:Absent) ~row2:REmpty;
   [%expect
     {|
     (Ok ())
-    (CExtend x (PVar (Link Absent)) (TCon int ()) CEmpty)
+    (RExtend x (PVar (Link Absent)) (TCon int ()) REmpty)
     (Ok ())
-    (CExtend x (PVar (Link Present)) (TCon int ()) CEmpty)
+    (RExtend x (PVar (Link Present)) (TCon int ()) REmpty)
     (Ok ())
-    (CExtend x (PVar (Link Absent)) (TCon int ())
-     (CExtend y Present (TCon bool ()) CEmpty))
+    (RExtend x (PVar (Link Absent)) (TCon int ())
+     (RExtend y Present (TCon bool ()) REmpty))
     (Error
-     (Context_mismatch (CExtend x Absent (TCon int ()) CEmpty)
-      (CExtend x Present (TCon int ()) CEmpty) (Presence_mismatch x)))
+     (Row_mismatch (RExtend x Absent (TCon int ()) REmpty)
+      (RExtend x Present (TCon int ()) REmpty) (Presence_mismatch x)))
     (Ok ())
     |}]
 ;;
 
 let%expect_test "absent entries need not agree on type" =
   let fresh = Fresh.create () in
-  let r = cvar fresh ~rank:1 in
-  unify_context
+  let r = rvar fresh ~rank:1 in
+  unify_row fresh ~row1:(ext "x" int REmpty ~presence:Absent) ~row2:r;
+  print_row r;
+  unify_row
     fresh
-    ~context1:(ext "x" int CEmpty ~presence:Absent)
-    ~context2:r;
-  print_context r;
-  unify_context
-    fresh
-    ~context1:(ext "x" int CEmpty ~presence:Absent)
-    ~context2:(context [ "y", bool ]);
+    ~row1:(ext "x" int REmpty ~presence:Absent)
+    ~row2:(row [ "y", bool ]);
   [%expect
     {|
     (Ok ())
-    (CVar
+    (RVar
      (Link
-      (CExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
-       (CVar (Link CEmpty)))))
+      (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
+       (RVar (Link REmpty)))))
     (Error
-     (Context_mismatch CEmpty (CExtend y Present (TCon bool ()) CEmpty)
-      (Empty_context_has_variable y)))
+     (Row_mismatch REmpty (RExtend y Present (TCon bool ()) REmpty)
+      (Missing_label y)))
     |}]
 ;;
 
@@ -545,65 +527,56 @@ let%expect_test "presence variables are generalized and their rank lowered" =
   let fresh = Fresh.create () in
   let inner = Fresh.var fresh ~rank:2 in
   let outer = pvar fresh ~rank:1 in
-  let r = cvar fresh ~rank:1 in
-  unify_context
-    fresh
-    ~context1:r
-    ~context2:(ext "x" int CEmpty ~presence:(PVar inner));
+  let r = rvar fresh ~rank:1 in
+  unify_row fresh ~row1:r ~row2:(ext "x" int REmpty ~presence:(PVar inner));
   print_s [%sexp (inner : (presence, Nothing.t) Var.t)];
   let context =
     ext
       "y"
       int
       ~presence:outer
-      (ext "z" int CEmpty ~presence:(pvar fresh ~rank:2))
+      (ext "z" int REmpty ~presence:(pvar fresh ~rank:2))
   in
-  print_context (Scheme.generalize_context ~rank:1 context);
+  print_row (Scheme.generalize_row ~rank:1 context);
   [%expect
     {|
     (Ok ())
     (Unbound 0 1)
-    (CExtend y (PVar (Unbound 1 1)) (TCon int ())
-     (CExtend z (PVar (Generic 3)) (TCon int ()) CEmpty))
+    (RExtend y (PVar (Unbound 1 1)) (TCon int ())
+     (RExtend z (PVar (Generic 3)) (TCon int ()) REmpty))
     |}]
 ;;
 
 let%expect_test "context bounds" =
   let fresh = Fresh.create () in
-  let r = cvar fresh ~rank:1 in
-  let bound = cvar fresh ~rank:1 in
-  constrain fresh ~context:r ~bound;
-  unify_context
-    fresh
-    ~context1:r
-    ~context2:(context [ "x", int ] ~tail:(cvar fresh ~rank:1));
-  print_context bound;
+  let r = rvar fresh ~rank:1 in
+  let bound = rvar fresh ~rank:1 in
+  constrain fresh ~row:r ~bound;
+  unify_row fresh ~row1:r ~row2:(row [ "x", int ] ~tail:(rvar fresh ~rank:1));
+  print_row bound;
   (* An entry already in the bound is reused, rather than duplicated. *)
-  unify_context
+  unify_row
     fresh
-    ~context1:r
-    ~context2:(context [ "x", int; "y", bool ] ~tail:(cvar fresh ~rank:1));
-  print_context bound;
-  unify_context
-    fresh
-    ~context1:r
-    ~context2:(context [ "y", int ] ~tail:(cvar fresh ~rank:1));
+    ~row1:r
+    ~row2:(row [ "x", int; "y", bool ] ~tail:(rvar fresh ~rank:1));
+  print_row bound;
+  unify_row fresh ~row1:r ~row2:(row [ "y", int ] ~tail:(rvar fresh ~rank:1));
   [%expect
     {|
     (Ok ())
     (Ok ())
-    (CVar
+    (RVar
      (Link
-      (CExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-       (CVar (Unbound 5 1)))))
+      (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
+       (RVar (Unbound 5 1)))))
     (Ok ())
-    (CVar
+    (RVar
      (Link
-      (CExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-       (CVar
+      (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
+       (RVar
         (Link
-         (CExtend y (PVar (Link Present)) (TVar (Link (TCon bool ())))
-          (CVar (Unbound 9 1))))))))
+         (RExtend y (PVar (Link Present)) (TVar (Link (TCon bool ())))
+          (RVar (Unbound 9 1))))))))
     (Error
      (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
     |}]
@@ -614,39 +587,37 @@ let%expect_test "context bounds and presence" =
   let constrain = constrain fresh in
   let maybe name ty rest = ext name ty rest ~presence:(pvar fresh ~rank:1) in
   (* Unused entries need not be in the bound. *)
-  let maybe_x = maybe "x" int CEmpty in
-  constrain ~context:maybe_x ~bound:CEmpty;
-  print_context maybe_x;
-  constrain ~context:(ext "x" int CEmpty ~presence:Absent) ~bound:CEmpty;
-  constrain ~context:(context [ "x", int ]) ~bound:CEmpty;
+  let maybe_x = maybe "x" int REmpty in
+  constrain ~row:maybe_x ~bound:REmpty;
+  print_row maybe_x;
+  constrain ~row:(ext "x" int REmpty ~presence:Absent) ~bound:REmpty;
+  constrain ~row:(row [ "x", int ]) ~bound:REmpty;
   (* A used entry makes the bound's entry used. *)
-  let bound = maybe "x" int CEmpty in
-  constrain ~context:(context [ "x", int ]) ~bound;
-  print_context bound;
+  let bound = maybe "x" int REmpty in
+  constrain ~row:(row [ "x", int ]) ~bound;
+  print_row bound;
   (* Shadowed entries are not constrained. *)
-  constrain
-    ~context:(context [ "x", int; "x", bool ])
-    ~bound:(context [ "x", int ]);
+  constrain ~row:(row [ "x", int; "x", bool ]) ~bound:(row [ "x", int ]);
   [%expect
     {|
     (Ok ())
-    (CExtend x (PVar (Link Absent)) (TCon int ()) CEmpty)
+    (RExtend x (PVar (Link Absent)) (TCon int ()) REmpty)
     (Ok ())
     (Error
-     (Context_mismatch (CExtend x Present (TCon int ()) CEmpty) CEmpty
-      (Empty_context_has_variable x)))
+     (Row_mismatch (RExtend x Present (TCon int ()) REmpty) REmpty
+      (Missing_label x)))
     (Ok ())
-    (CExtend x (PVar (Link Present)) (TCon int ()) CEmpty)
+    (RExtend x (PVar (Link Present)) (TCon int ()) REmpty)
     (Ok ())
     |}]
 ;;
 
 let%expect_test "bounds are kept by generalization and instantiation" =
   let fresh = Fresh.create () in
-  let r = cvar fresh ~rank:2 in
-  let bound = cvar fresh ~rank:2 in
+  let r = rvar fresh ~rank:2 in
+  let bound = rvar fresh ~rank:2 in
   ignore
-    (Unify.constrain_context fresh ~context:r ~bound ~shadowed:String.Set.empty
+    (Unify.constrain_row fresh ~row:r ~bound ~shadowed:String.Set.empty
      : _ Result.t);
   let ty = TArrow (code r, code bound) in
   let print ty = print_endline (Type.to_string_hum ty) in
@@ -662,70 +633,70 @@ let%expect_test "bounds are kept by generalization and instantiation" =
 
 let%expect_test "bounds lower ranks" =
   let fresh = Fresh.create () in
-  let r = cvar fresh ~rank:2 in
-  let bound = cvar fresh ~rank:2 in
+  let r = rvar fresh ~rank:2 in
+  let bound = rvar fresh ~rank:2 in
   ignore
-    (Unify.constrain_context fresh ~context:r ~bound ~shadowed:String.Set.empty
+    (Unify.constrain_row fresh ~row:r ~bound ~shadowed:String.Set.empty
      : _ Result.t);
-  unify_context fresh ~context1:r ~context2:(cvar fresh ~rank:1);
-  print_context r;
-  print_context bound;
+  unify_row fresh ~row1:r ~row2:(rvar fresh ~rank:1);
+  print_row r;
+  print_row bound;
   [%expect
     {|
     (Ok ())
-    (CVar (Link (CVar (Unbound 2 1))))
-    (CVar (Unbound 1 1))
+    (RVar (Link (RVar (Unbound 2 1))))
+    (RVar (Unbound 1 1))
     |}]
 ;;
 
 let%expect_test "an absent entry shadows later entries with its name" =
   let fresh = Fresh.create () in
   let constrain = constrain fresh in
-  let absent_then_x = ext "x" int (context [ "x", bool ]) ~presence:Absent in
+  let absent_then_x = ext "x" int (row [ "x", bool ]) ~presence:Absent in
   (* The shadowed [x] is unreachable, so needs no entry in the bound. *)
-  constrain ~context:absent_then_x ~bound:CEmpty;
+  constrain ~row:absent_then_x ~bound:REmpty;
   let maybe_then_x =
-    ext "x" int (context [ "x", bool ]) ~presence:(pvar fresh ~rank:1)
+    ext "x" int (row [ "x", bool ]) ~presence:(pvar fresh ~rank:1)
   in
-  constrain ~context:maybe_then_x ~bound:CEmpty;
-  print_context maybe_then_x;
+  constrain ~row:maybe_then_x ~bound:REmpty;
+  print_row maybe_then_x;
   (* Unification never finds the shadowed [x] in place of the absent one. *)
-  unify_context
+  unify_row
     fresh
-    ~context1:(context [ "x", bool ] ~tail:(cvar fresh ~rank:1))
-    ~context2:absent_then_x;
-  let r = cvar fresh ~rank:1 in
+    ~row1:(row [ "x", bool ] ~tail:(rvar fresh ~rank:1))
+    ~row2:absent_then_x;
+  let r = rvar fresh ~rank:1 in
   constrain
-    ~context:r
+    ~row:r
     ~bound:
       (ext
          "x"
          int
-         (context [ "x", bool ] ~tail:(cvar fresh ~rank:1))
+         (row [ "x", bool ] ~tail:(rvar fresh ~rank:1))
          ~presence:Absent);
-  unify_context fresh ~context1:r ~context2:(context [ "x", bool ]);
+  unify_row fresh ~row1:r ~row2:(row [ "x", bool ]);
   (* Shadowed entries still take part in unification, which is stricter than
      needed. *)
-  unify_context fresh ~context1:CEmpty ~context2:absent_then_x;
+  unify_row fresh ~row1:REmpty ~row2:absent_then_x;
   [%expect
     {|
     (Ok ())
     (Ok ())
-    (CExtend x (PVar (Link Absent)) (TCon int ())
-     (CExtend x Present (TCon bool ()) CEmpty))
+    (RExtend x (PVar (Link Absent)) (TCon int ())
+     (RExtend x Present (TCon bool ()) REmpty))
     (Error
-     (Context_mismatch (CExtend x Present (TCon bool ()) (CVar (Unbound 1 1)))
-      (CExtend x Absent (TCon int ()) (CExtend x Present (TCon bool ()) CEmpty))
+     (Row_mismatch (RExtend x Present (TCon bool ()) (RVar (Unbound 1 1)))
+      (RExtend x Absent (TCon int ()) (RExtend x Present (TCon bool ()) REmpty))
       (Presence_mismatch x)))
     (Ok ())
     (Error
-     (Context_mismatch (CExtend x Present (TCon bool ()) CEmpty)
-      (CExtend x Absent (TCon int ())
-       (CExtend x Present (TCon bool ()) (CVar (Unbound 3 1))))
+     (Row_mismatch (RExtend x Present (TCon bool ()) REmpty)
+      (RExtend x Absent (TCon int ())
+       (RExtend x Present (TCon bool ()) (RVar (Unbound 3 1))))
       (Presence_mismatch x)))
     (Error
-     (Context_mismatch CEmpty (CExtend x Present (TCon bool ()) CEmpty)
-      (Empty_context_has_variable x)))
+     (Row_mismatch REmpty (RExtend x Present (TCon bool ()) REmpty)
+      (Missing_label x)))
     |}]
 ;;
 
@@ -736,39 +707,27 @@ let%expect_test "cyclic bounds" =
     TTuple (List.map contexts ~f:code) |> Type.to_string_hum |> print_endline
   in
   let cycle () =
-    let a = cvar fresh ~rank:1 in
-    let b = cvar fresh ~rank:1 in
-    let c = cvar fresh ~rank:1 in
-    constrain ~context:a ~bound:b;
-    constrain ~context:b ~bound:c;
-    constrain ~context:c ~bound:a;
+    let a = rvar fresh ~rank:1 in
+    let b = rvar fresh ~rank:1 in
+    let c = rvar fresh ~rank:1 in
+    constrain ~row:a ~bound:b;
+    constrain ~row:b ~bound:c;
+    constrain ~row:c ~bound:a;
     a, b, c
   in
   let a, b, c = cycle () in
   print [ a; b; c ];
   (* An entry of any member reaches every member. *)
-  unify_context
-    fresh
-    ~context1:a
-    ~context2:(context [ "x", int ] ~tail:(cvar fresh ~rank:1));
+  unify_row fresh ~row1:a ~row2:(row [ "x", int ] ~tail:(rvar fresh ~rank:1));
   print [ a; b; c ];
-  unify_context
-    fresh
-    ~context1:c
-    ~context2:(context [ "y", bool ] ~tail:(cvar fresh ~rank:1));
+  unify_row fresh ~row1:c ~row2:(row [ "y", bool ] ~tail:(rvar fresh ~rank:1));
   print [ a; b; c ];
-  unify_context
-    fresh
-    ~context1:b
-    ~context2:(context [ "x", bool ] ~tail:(cvar fresh ~rank:1));
+  unify_row fresh ~row1:b ~row2:(row [ "x", bool ] ~tail:(rvar fresh ~rank:1));
   (* Once one member is closed, no member can get entries. *)
   let a, b, c = cycle () in
-  unify_context fresh ~context1:c ~context2:CEmpty;
+  unify_row fresh ~row1:c ~row2:REmpty;
   print [ a; b; c ];
-  unify_context
-    fresh
-    ~context1:a
-    ~context2:(context [ "x", int ] ~tail:(cvar fresh ~rank:1));
+  unify_row fresh ~row1:a ~row2:(row [ "x", int ] ~tail:(rvar fresh ~rank:1));
   [%expect
     {|
     (Ok ())
@@ -787,11 +746,11 @@ let%expect_test "cyclic bounds" =
     (Ok ())
     <int>{..'_a} * <int>{..'_b} * <int>{} where ..'_a <= {..'_b}, ..'_b <= {}
     (Error
-     (Context_mismatch (CExtend x Present (TCon int ()) (CVar (Unbound 24 1)))
-      (CVar
+     (Row_mismatch (RExtend x Present (TCon int ()) (RVar (Unbound 24 1)))
+      (RVar
        (Link
-        (CExtend x (PVar (Link Absent)) (TVar (Unbound 26 1))
-         (CVar (Unbound 27 1)))))
+        (RExtend x (PVar (Link Absent)) (TVar (Unbound 26 1))
+         (RVar (Unbound 27 1)))))
       (Presence_mismatch x)))
     |}]
 ;;
@@ -799,18 +758,15 @@ let%expect_test "cyclic bounds" =
 let%expect_test "bounds referring to the bounded variable" =
   let fresh = Fresh.create () in
   let print context = print_endline (Type.to_string_hum (code context)) in
-  let s = cvar fresh ~rank:1 in
+  let s = rvar fresh ~rank:1 in
   (* A bound that is the variable itself constrains nothing. *)
-  constrain fresh ~context:s ~bound:s;
+  constrain fresh ~row:s ~bound:s;
   print s;
-  constrain fresh ~context:s ~bound:(context [ "x", int ] ~tail:s);
+  constrain fresh ~row:s ~bound:(row [ "x", int ] ~tail:s);
   print s;
-  unify_context
-    fresh
-    ~context1:s
-    ~context2:(context [ "y", bool ] ~tail:(cvar fresh ~rank:1));
+  unify_row fresh ~row1:s ~row2:(row [ "y", bool ] ~tail:(rvar fresh ~rank:1));
   print s;
-  unify_context fresh ~context1:s ~context2:(context [ "x", int; "y", bool ]);
+  unify_row fresh ~row1:s ~row2:(row [ "x", int; "y", bool ]);
   print s;
   [%expect
     {|
@@ -827,35 +783,35 @@ let%expect_test "bounds referring to the bounded variable" =
 
 let%expect_test "bounds do not constrain shadowed entries" =
   let fresh = Fresh.create () in
-  let r = cvar fresh ~rank:1 in
-  let bound = context [ "x", int ] ~tail:(cvar fresh ~rank:1) in
-  constrain fresh ~context:(context [ "x", int ] ~tail:r) ~bound;
+  let r = rvar fresh ~rank:1 in
+  let bound = row [ "x", int ] ~tail:(rvar fresh ~rank:1) in
+  constrain fresh ~row:(row [ "x", int ] ~tail:r) ~bound;
   (* [r]'s [x] is hidden by the [x : int] before it. *)
-  unify_context
+  unify_row
     fresh
-    ~context1:r
-    ~context2:(context [ "x", bool; "y", bool ] ~tail:(cvar fresh ~rank:1));
-  print_context bound;
+    ~row1:r
+    ~row2:(row [ "x", bool; "y", bool ] ~tail:(rvar fresh ~rank:1));
+  print_row bound;
   (* Shadowing is kept as bounds move to the rest of [r]. *)
-  unify_context
+  unify_row
     fresh
-    ~context1:r
-    ~context2:(context [ "x", bool; "y", bool; "x", string; "y", string ]);
-  print_context bound;
+    ~row1:r
+    ~row2:(row [ "x", bool; "y", bool; "x", string; "y", string ]);
+  print_row bound;
   [%expect
     {|
     (Ok ())
     (Ok ())
-    (CExtend x Present (TCon int ())
-     (CVar
+    (RExtend x Present (TCon int ())
+     (RVar
       (Link
-       (CExtend y (PVar (Link Present)) (TVar (Link (TCon bool ())))
-        (CVar (Unbound 5 1))))))
+       (RExtend y (PVar (Link Present)) (TVar (Link (TCon bool ())))
+        (RVar (Unbound 5 1))))))
     (Ok ())
-    (CExtend x Present (TCon int ())
-     (CVar
+    (RExtend x Present (TCon int ())
+     (RVar
       (Link
-       (CExtend y (PVar (Link Present)) (TVar (Link (TCon bool ())))
-        (CVar (Unbound 5 1))))))
+       (RExtend y (PVar (Link Present)) (TVar (Link (TCon bool ())))
+        (RVar (Unbound 5 1))))))
     |}]
 ;;

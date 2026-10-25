@@ -64,7 +64,7 @@ module Scope = struct
 
   and quote =
     { id : int
-    ; context : Type.context
+    ; context : Type.row
     ; outside : t
     }
 
@@ -75,7 +75,7 @@ module Scope = struct
   ;;
 
   let fresh_ty ids t = Type.TVar (Fresh.var ids ~rank:t.rank)
-  let fresh_context ids t = Type.CVar (Fresh.var ids ~rank:t.rank)
+  let fresh_row ids t = Type.RVar (Fresh.var ids ~rank:t.rank)
   let fresh_presence ids t = Type.PVar (Fresh.var ids ~rank:t.rank)
   let instantiate ids t = Scheme.instantiate ids ~rank:t.rank
 
@@ -256,7 +256,7 @@ let resolution_type t (scope : Scope.t) ~name : Resolution.t -> _ = function
   | Local entry | Outside_quote { usable = Some entry; _ } ->
     Ok (Scope.instantiate t scope entry.scheme)
   | Outside_quote { quote; usable = None } ->
-    Unify.present_entry t ~context:quote.context ~name ~rank:quote.outside.rank
+    Unify.present_entry t ~row:quote.context ~name ~rank:quote.outside.rank
     |> lift
   | Unusable error -> Error error
 ;;
@@ -412,7 +412,7 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
   | Quote expr ->
     let quote =
       { Scope.id = Fresh.id t
-      ; context = Scope.fresh_context t scope
+      ; context = Scope.fresh_row t scope
       ; outside = scope
       }
     in
@@ -430,7 +430,7 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
       | None -> { scope with level = scope.level - 1 }
     in
     let inner = Scope.fresh_ty t scope in
-    let context = Scope.fresh_context t scope in
+    let context = Scope.fresh_row t scope in
     let%bind.Result code_ty = expr_type t outside ~expr in
     let%bind.Result () =
       Unify.unify_ty t ~ty1:(TCode { inner; context }) ~ty2:code_ty |> lift
@@ -487,9 +487,9 @@ and check_exprs t scope exprs =
 
 and substitute_from_scope t (scope : Scope.t) ~context =
   let rec go context ~seen =
-    match Type.canonical_context context with
-    | CEmpty -> Ok ()
-    | CExtend (name, presence, ty, rest) ->
+    match Type.canonical_row context with
+    | REmpty -> Ok ()
+    | RExtend (name, presence, ty, rest) ->
       let%bind.Result () =
         match Type.canonical_presence presence with
         | _ when Set.mem seen name -> Ok ()
@@ -497,9 +497,9 @@ and substitute_from_scope t (scope : Scope.t) ~context =
         | Present | PVar _ -> substitute_entry t scope ~name ~presence ~ty
       in
       go rest ~seen:(Set.add seen name)
-    | CVar _ as tail ->
+    | RVar _ as tail ->
       (match scope.quote with
-       | None -> Unify.unify_context t ~context1:tail ~context2:CEmpty |> lift
+       | None -> Unify.unify_row t ~row1:tail ~row2:REmpty |> lift
        | Some quote -> substitute_tail t scope quote ~tail ~seen)
   in
   go context ~seen:String.Set.empty
@@ -525,9 +525,9 @@ and substitute_entry t (scope : Scope.t) ~name ~presence ~ty =
     Unify.unify_ty t ~ty1:ty ~ty2:(Scope.instantiate t scope entry.scheme)
     |> lift
   | Outside_quote { quote; _ } ->
-    Unify.constrain_context
+    Unify.constrain_row
       t
-      ~context:(CExtend (name, presence, ty, CEmpty))
+      ~row:(RExtend (name, presence, ty, REmpty))
       ~bound:quote.context
       ~shadowed:String.Set.empty
     |> lift
@@ -551,22 +551,22 @@ and substitute_tail t scope (quote : Scope.quote) ~tail ~seen =
         | Unusable _ -> Some (name, Absent, Scope.fresh_ty t scope)
         | Outside_quote _ -> None))
   in
-  let rest = Scope.fresh_context t scope in
+  let rest = Scope.fresh_row t scope in
   let%bind.Result () =
-    Unify.unify_context
+    Unify.unify_row
       t
-      ~context1:tail
-      ~context2:
+      ~row1:tail
+      ~row2:
         (List.fold_right
            captured
            ~init:rest
            ~f:(fun (name, presence, ty) rest ->
-             Type.CExtend (name, presence, ty, rest)))
+             Type.RExtend (name, presence, ty, rest)))
     |> lift
   in
-  Unify.constrain_context
+  Unify.constrain_row
     t
-    ~context:rest
+    ~row:rest
     ~bound:quote.context
     ~shadowed:
       (List.fold captured ~init:seen ~f:(fun seen (name, _, _) ->
@@ -588,10 +588,10 @@ and substitute_explicitly t scope ~context ~subs =
       (name, ty) :: acc)
   in
   let provided =
-    List.fold provided ~init:Type.CEmpty ~f:(fun rest (name, ty) ->
-      Type.CExtend (name, Scope.fresh_presence t scope, ty, rest))
+    List.fold provided ~init:Type.REmpty ~f:(fun rest (name, ty) ->
+      Type.RExtend (name, Scope.fresh_presence t scope, ty, rest))
   in
-  Unify.unify_context t ~context1:context ~context2:provided |> lift
+  Unify.unify_row t ~row1:context ~row2:provided |> lift
 ;;
 
 let typecheck t ~(program : Syntax.Program.t)

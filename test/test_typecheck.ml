@@ -369,15 +369,15 @@ let%expect_test "splice substitution errors" =
     (Unification_error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     (Unification_error
-     (Context_mismatch
-      (CExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-       (CVar (Unbound 30 1)))
-      CEmpty (Empty_context_has_variable x)))
+     (Row_mismatch
+      (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
+       (RVar (Unbound 30 1)))
+      REmpty (Missing_label x)))
     val extra : <int>{..'a}
     (Duplicate_substitution x)
     (Unification_error
      (Type_mismatch
-      (TCode (inner (TVar (Unbound 20 1))) (context (CVar (Unbound 21 1))))
+      (TCode (inner (TVar (Unbound 20 1))) (context (RVar (Unbound 21 1))))
       (TCon int ()) Structural_mismatch))
     |}]
 ;;
@@ -501,10 +501,10 @@ let%expect_test "levels" =
     val not_captured : <int>{..'a}
     (Not_in_scope x)
     (Unification_error
-     (Context_mismatch
-      (CExtend x (PVar (Link Present)) (TVar (Unbound 26 1))
-       (CVar (Unbound 27 1)))
-      CEmpty (Empty_context_has_variable x)))
+     (Row_mismatch
+      (RExtend x (PVar (Link Present)) (TVar (Unbound 26 1))
+       (RVar (Unbound 27 1)))
+      REmpty (Missing_label x)))
     (Variable_used_at_wrong_level (name x) (var_level 0) (used_at -1))
     |}]
 ;;
@@ -550,10 +550,10 @@ let%expect_test "staged power" =
     val power : int -> <int>{..'a} -> <int>{..'b} where ..'a <= {..'b}
     val open : <int>{y : int; ..'_a}
     (Unification_error
-     (Context_mismatch CEmpty
-      (CExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
-       (CVar (Unbound 67 1)))
-      (Empty_context_has_variable y)))
+     (Row_mismatch REmpty
+      (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
+       (RVar (Unbound 67 1)))
+      (Missing_label y)))
     (Unification_error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     |}]
@@ -708,10 +708,9 @@ let%expect_test "names bound at a later level are absent from spliced code" =
     val inner_splice : <<'a>{z?'b : int; ..'c}>{-z; ..'d} -> <<'a>{..'e}>{..'f} where ..'c <= {..'e}, ..'d <= {..'f}
     val uses_z : <<int>{..'_a}>{..'_b}
     (Unification_error
-     (Context_mismatch
-      (CExtend z Absent (TVar (Unbound 40 1)) (CVar (Unbound 39 1)))
-      (CExtend z (PVar (Link Present)) (TVar (Unbound 47 1))
-       (CVar (Unbound 48 1)))
+     (Row_mismatch (RExtend z Absent (TVar (Unbound 40 1)) (RVar (Unbound 39 1)))
+      (RExtend z (PVar (Link Present)) (TVar (Unbound 47 1))
+       (RVar (Unbound 48 1)))
       (Presence_mismatch z)))
     (Variable_used_at_wrong_level (name z) (var_level 2) (used_at 1))
     |}]
@@ -840,13 +839,13 @@ let%expect_test "mutually recursive staged functions" =
     val uses_x : <int>{x : int; y : int; ..'_a} where ..'_a <= {x : int; y : int; ..'_b}, ..'_b <= {x : int; y : int; ..'_a}
     val uses_z : <int>{y : int; z : int; ..'_a} where ..'_a <= {x?'_b : int; y : int; z : int; ..'_c}, ..'_c <= {y : int; z : int; ..'_a}
     (Unification_error
-     (Context_mismatch CEmpty
-      (CExtend y Present (TCon int ())
-       (CVar
+     (Row_mismatch REmpty
+      (RExtend y Present (TCon int ())
+       (RVar
         (Link
-         (CExtend z (PVar (Link Present)) (TVar (Link (TCon int ())))
-          (CVar (Unbound 84 1))))))
-      (Empty_context_has_variable y)))
+         (RExtend z (PVar (Link Present)) (TVar (Link (TCon int ())))
+          (RVar (Unbound 84 1))))))
+      (Missing_label y)))
     |}]
 ;;
 
@@ -926,7 +925,7 @@ let%expect_test "presence approximation" =
     val splices_then_uses_x : <int>{x : int; ..'a} -> <int>{x : int; ..'a} where ..'a <= {x : int; ..'b}, ..'a <= {..'c}
     val uses_x_then_splices_closed : <int>{-x}
     (Unification_error
-     (Context_mismatch (CExtend x Present (TCon int ()) (CVar (Unbound 47 1)))
-      CEmpty (Empty_context_has_variable x)))
+     (Row_mismatch (RExtend x Present (TCon int ()) (RVar (Unbound 47 1))) REmpty
+      (Missing_label x)))
     |}]
 ;;

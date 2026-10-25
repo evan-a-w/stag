@@ -75,15 +75,11 @@ module Annotation_vars = struct
     { fresh : Fresh.t
     ; rank : Type.rank
     ; tys : Type.ty String.Table.t
-    ; contexts : Type.context String.Table.t
+    ; rows : Type.row String.Table.t
     }
 
   let create fresh ~rank =
-    { fresh
-    ; rank
-    ; tys = String.Table.create ()
-    ; contexts = String.Table.create ()
-    }
+    { fresh; rank; tys = String.Table.create (); rows = String.Table.create () }
   ;;
 
   let ty t name =
@@ -91,9 +87,9 @@ module Annotation_vars = struct
       Type.TVar (Fresh.var t.fresh ~rank:t.rank))
   ;;
 
-  let context t name =
-    Hashtbl.find_or_add t.contexts name ~default:(fun () ->
-      Type.CVar (Fresh.var t.fresh ~rank:t.rank))
+  let row t name =
+    Hashtbl.find_or_add t.rows name ~default:(fun () ->
+      Type.RVar (Fresh.var t.fresh ~rank:t.rank))
   ;;
 end
 
@@ -108,16 +104,16 @@ module Vars = struct
     | Params params ->
       (match Map.find params name with
        | Some (ATy ty) -> Ok ty
-       | Some (AContext _) -> Error (Type_variable_kind_mismatch name)
+       | Some (ARow _) -> Error (Type_variable_kind_mismatch name)
        | None -> Error (Unbound_type_variable name))
   ;;
 
-  let context t name : (Type.context, Typecheck_error.t) Result.t =
+  let row t name : (Type.row, Typecheck_error.t) Result.t =
     match t with
-    | Annotation vars -> Ok (Annotation_vars.context vars name)
+    | Annotation vars -> Ok (Annotation_vars.row vars name)
     | Params params ->
       (match Map.find params name with
-       | Some (AContext context) -> Ok context
+       | Some (ARow row) -> Ok row
        | Some (ATy _) -> Error (Type_variable_kind_mismatch name)
        | None -> Error (Unbound_type_variable name))
   ;;
@@ -140,24 +136,24 @@ let rec elaborate' t module_ vars (expr : Type_expr.t)
     Type.TTuple tys
   | Code { inner; context } ->
     let%bind.Result inner = elaborate' t module_ vars inner in
-    let%map.Result context = elaborate_context t module_ vars context in
+    let%map.Result context = elaborate_row t module_ vars context in
     Type.TCode { inner; context }
 
-and elaborate_context t module_ vars (context : Type_expr.context)
-  : (Type.context, Typecheck_error.t) Result.t
+and elaborate_row t module_ vars (row : Type_expr.row)
+  : (Type.row, Typecheck_error.t) Result.t
   =
-  let rec go (context : Type_expr.context) ~seen =
-    match context with
-    | Empty -> Ok Type.CEmpty
+  let rec go (row : Type_expr.row) ~seen =
+    match row with
+    | Empty -> Ok Type.REmpty
     | Extend (name, _, _) when Set.mem seen name ->
-      Error (Typecheck_error.Duplicate_context_entry name)
+      Error (Typecheck_error.Duplicate_row_entry name)
     | Extend (name, ty, rest) ->
       let%bind.Result ty = elaborate' t module_ vars ty in
       let%map.Result rest = go rest ~seen:(Set.add seen name) in
-      Type.CExtend (name, Present, ty, rest)
-    | Var name -> Vars.context vars name
+      Type.RExtend (name, Present, ty, rest)
+    | Var name -> Vars.row vars name
   in
-  go context ~seen:String.Set.empty
+  go row ~seen:String.Set.empty
 
 and elaborate_con t module_ vars path args =
   let%bind.Result decl = find_type t module_ path in
@@ -175,10 +171,10 @@ and elaborate_con t module_ vars path args =
       match param, arg with
       | Ty _, Ty ty ->
         elaborate' t module_ vars ty |> Result.map ~f:(fun ty -> Type.ATy ty)
-      | Context _, Context context ->
-        elaborate_context t module_ vars context
-        |> Result.map ~f:(fun context -> Type.AContext context)
-      | Ty _, Context _ | Context _, Ty _ ->
+      | Row _, Row row ->
+        elaborate_row t module_ vars row
+        |> Result.map ~f:(fun row -> Type.ARow row)
+      | Ty _, Row _ | Row _, Ty _ ->
         Error
           (Typecheck_error.Type_arg_kind_mismatch { type_name = path; param }))
     |> Result.all
@@ -202,16 +198,16 @@ let rec referenced_types (expr : Type_expr.t) =
     path
     :: List.concat_map args ~f:(function
       | Ty ty -> referenced_types ty
-      | Context context -> context_referenced_types context)
+      | Row row -> row_referenced_types row)
   | Arrow (ty1, ty2) -> referenced_types ty1 @ referenced_types ty2
   | Tuple tys -> List.concat_map tys ~f:referenced_types
   | Code { inner; context } ->
-    referenced_types inner @ context_referenced_types context
+    referenced_types inner @ row_referenced_types context
 
-and context_referenced_types (context : Type_expr.context) =
-  match context with
+and row_referenced_types (row : Type_expr.row) =
+  match row with
   | Empty | Var _ -> []
-  | Extend (_, ty, rest) -> referenced_types ty @ context_referenced_types rest
+  | Extend (_, ty, rest) -> referenced_types ty @ row_referenced_types rest
 ;;
 
 let check_alias_cycles t =
@@ -251,7 +247,7 @@ let declare module_ (decl : Type_decl.t) ~fresh =
   let params =
     List.map decl.params ~f:(function
       | Ty _ -> Type.ATy (TVar (Type.Var.create (Fresh.id fresh) Generic))
-      | Context _ -> AContext (CVar (Type.Var.create (Fresh.id fresh) Generic)))
+      | Row _ -> ARow (RVar (Type.Var.create (Fresh.id fresh) Generic)))
   in
   { Decl.decl
   ; name = Module_scope.canonical_name module_ decl.name

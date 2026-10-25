@@ -15,12 +15,12 @@ module Type_expr : sig
     | Con of Path.t * arg list                   (* int, M.t, 'a list *)
     | Arrow of t * t
     | Tuple of t list
-    | Code of { inner : t; context : context }   (* <t>{...} *)
-  and context =
+    | Code of { inner : t; context : row }       (* <t>{...} *)
+  and row =
     | Empty                                      (* closed *)
-    | Extend of string * t * context             (* x : t; ... (Present) *)
+    | Extend of string * t * row                 (* x : t; ... (Present) *)
     | Var of string                              (* ..r *)
-  and arg = Ty of t | Context of context
+  and arg = Ty of t | Row of row
 end
 ```
 
@@ -31,9 +31,9 @@ Elaboration:
   toplevel is the same variable, created fresh on first use at the current
   rank.
 - In declarations, variables must be declared parameters
-  (`Unbound_type_variable`) of the right kind, `Ty` vs `Context`
+  (`Unbound_type_variable`) of the right kind, `Ty` vs `Row`
   (`Type_variable_kind_mismatch`).
-- A label appears at most once in one context (`Duplicate_context_entry`).
+- A label appears at most once in one context (`Duplicate_row_entry`).
 - Builtins `int`, `bool`, `string`, `char`, `unit` are nominal types without
   constructors declared in the root module (so `Type.int` is `TCon ("int", [])`
   as before): redeclaring one at the root is `Duplicate_type`, while `M.unit`
@@ -46,7 +46,7 @@ Elaboration:
 
 ```ocaml
 module Type_decl : sig
-  module Param : sig type t = Ty of string | Context of string end
+  module Param : sig type t = Ty of string | Row of string end
   module Kind : sig
     type t =
       | Variant of (string * Type_expr.t list) list  (* Cons of 'a * 'a list *)
