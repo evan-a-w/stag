@@ -1,48 +1,7 @@
 open! Core
 open Stag
 open Syntax
-
-let int n = Expr.Lit (Int (Int.to_string n))
-let bool b = Expr.Lit (Bool b)
-let var name = Expr.Var (name, None)
-let app f args = List.fold args ~init:f ~f:(fun f x -> Expr.App (f, x))
-let args = List.map ~f:(fun name -> name, None)
-
-let let_ ?annot name params equal in_ =
-  Expr.Let (name, args params, annot, equal, in_)
-;;
-
-let seq first second = let_ "_" [] first second
-let quote expr = Expr.Quote expr
-let splice ?subs expr = Expr.Splice { expr; subs }
-let top ?annot name params expr = Toplevel.Let (name, args params, annot, expr)
-let arrow a b = Type.TArrow (a, b)
-
-let prims =
-  let int_arg name = name, Some Type.int in
-  [ Toplevel.Let ("add", [ int_arg "x"; int_arg "y" ], Some Type.int, var "x")
-  ; Let ("eq", [ int_arg "x"; int_arg "y" ], Some Type.bool, bool true)
-  ; Let
-      ( "cond"
-      , [ "c", Some Type.bool; "x", None; "y", None ]
-      , None
-      , (* The recursive call makes both branches share a type. *)
-        seq (app (var "cond") [ var "c"; var "y"; var "x" ]) (var "x") )
-  ; Let ("id", [ "x", None ], None, var "x")
-  ]
-;;
-
-let print_types typecheck types =
-  List.iter types ~f:(fun (name, ty) ->
-    printf "%s : %s\n" name (Typecheck.to_string_hum typecheck ty))
-;;
-
-let check program =
-  let typecheck = Typecheck.create () in
-  match Typecheck.typecheck typecheck ~program:(prims @ program) with
-  | Ok types -> print_types typecheck (List.drop types (List.length prims))
-  | Error error -> print_s [%sexp (error : Typecheck.Typecheck_error.t)]
-;;
+open Helpers
 
 let%expect_test "primitives" =
   let typecheck = Typecheck.create () in
@@ -56,6 +15,26 @@ let%expect_test "primitives" =
     eq : int -> int -> bool
     cond : bool -> 'a -> 'a -> 'a
     id : 'a -> 'a
+    |}]
+;;
+
+let%expect_test "typechecking twice with the same state" =
+  let typecheck = Typecheck.create () in
+  let run program =
+    match Typecheck.typecheck typecheck ~program with
+    | Ok types -> print_types typecheck types
+    | Error error -> print_s [%sexp (error : Typecheck.Typecheck_error.t)]
+  in
+  run prims;
+  run [ top "id" [ "x" ] (var "x"); top "n" [] (app (var "id") [ int 1 ]) ];
+  [%expect
+    {|
+    add : int -> int -> int
+    eq : int -> int -> bool
+    cond : bool -> 'a -> 'a -> 'a
+    id : 'a -> 'a
+    id : 'a -> 'a
+    n : int
     |}]
 ;;
 
@@ -131,10 +110,9 @@ let%expect_test "value restriction" =
 ;;
 
 let%expect_test "annotations" =
-  check [ top "f" [ "x" ] ~annot:Type.int (var "x") ];
-  check [ top "f" [] (Var ("id", Some (arrow Type.bool Type.bool))) ];
-  check
-    [ top "f" [ "x" ] ~annot:Type.bool (app (var "add") [ var "x"; int 1 ]) ];
+  check [ top "f" [ "x" ] ~annot:Ty.int (var "x") ];
+  check [ top "f" [] (var "id" ~annot:(Ty.arrow Ty.bool Ty.bool)) ];
+  check [ top "f" [ "x" ] ~annot:Ty.bool (app (var "add") [ var "x"; int 1 ]) ];
   [%expect
     {|
     f : int -> int
@@ -196,7 +174,7 @@ let%expect_test "mutual recursion is monomorphic within an SCC" =
     |}]
 ;;
 
-let%expect_test "SCC containing a non-function is not generalized" =
+let%expect_test "SCC containing a non-value is not generalized" =
   check
     [ top "x" [] (app (var "f") [ int 1 ])
     ; top "f" [ "y" ] (seq (var "x") (var "y"))
@@ -261,7 +239,7 @@ let%expect_test "local lets" =
         (let_
            "i"
            []
-           (var "id")
+           (app (var "id") [ var "id" ])
            (seq (app (var "i") [ int 1 ]) (app (var "i") [ bool true ])))
     ];
   check
@@ -277,7 +255,7 @@ let%expect_test "local lets" =
   [%expect
     {|
     poly : bool
-    rec_ : '_a -> '_b
+    rec_ : 'a -> 'b
     shadow : 'a -> int
     arg_scope : 'a -> 'a
     (Unification_error
@@ -307,14 +285,14 @@ let%expect_test "quotes" =
     ];
   [%expect
     {|
-    closed : <int>{..'_a}
-    open : <int>{x : int; y : int; ..'_a}
-    local : <int>{..'_a}
-    persistent : <int>{..'_a}
+    closed : <int>{..'a}
+    open : <int>{x : int; y : int; ..'a}
+    local : <int>{..'a}
+    persistent : <int>{..'a}
     n : int
-    not_persistent : <'_a>{n : '_a; ..'_b}
+    not_persistent : <'a>{n : 'a; ..'b}
     outer_arg : 'a -> <'b>{x : 'b; ..'c}
-    nested : <<int>{x : int; ..'_a}>{..'_b}
+    nested : <<int>{x : int; ..'a}>{..'b}
     |}]
 ;;
 
@@ -359,11 +337,11 @@ let%expect_test "splice with explicit substitutions" =
     ];
   [%expect
     {|
-    values : <int>{..'_a}
-    reorder : <int>{..'_a}
-    from_scope : <int>{y : int; ..'_a}
-    infers_sub : <int>{z : int; ..'_a}
-    closed : <int>{..'_a}
+    values : <int>{..'a}
+    reorder : <int>{..'a}
+    from_scope : <int>{y : int; ..'a}
+    infers_sub : <int>{z : int; ..'a}
+    closed : <int>{..'a}
     |}]
 ;;
 
@@ -395,7 +373,7 @@ let%expect_test "splice substitution errors" =
       (CExtend x (PVar (PLink Present)) (TVar (Link (TCon int ())))
        (CVar (CUnbound 30 1)))
       CEmpty (Empty_context_has_variable x)))
-    extra : <int>{..'_a}
+    extra : <int>{..'a}
     (Duplicate_substitution x)
     (Unification_error
      (Type_mismatch
@@ -429,20 +407,9 @@ let%expect_test "splice with implicit substitutions" =
               []
               (int 1)
               (splice
-                 (Var
-                    ( "c"
-                    , Some
-                        (TCode
-                           { inner = Type.int
-                           ; context =
-                               CExtend
-                                 ( "x"
-                                 , Present
-                                 , Type.int
-                                 , CVar
-                                     (ref (Type.CUnbound (-1, Int.max_value)))
-                                 )
-                           }) )))))
+                 (var
+                    "c"
+                    ~annot:(Ty.code Ty.int ~entries:[ "x", Ty.int ] ~tail:"r")))))
     ; top
         "with_free_var"
         [ "c" ]
@@ -477,8 +444,8 @@ let%expect_test "splice with implicit substitutions" =
   check [ top "wrong_type" [] (quote (let_ "x" [] (bool true) (splice code))) ];
   [%expect
     {|
-    bound : <int>{..'_a}
-    propagates : <int>{x : int; ..'_a}
+    bound : <int>{..'a}
+    propagates : <int>{x : int; ..'a}
     unknown_context : <'a>{..'b} -> <'a>{..'c} where ..'b <= {..'c}
     explicit_unknown : <'a>{x?'b : int} -> <'a>{..'c}
     two_unknown : <int>{..'a} -> <int>{..'b} -> <int>{..'c} where ..'a <= {..'c}, ..'b <= {..'c}
@@ -528,10 +495,10 @@ let%expect_test "levels" =
     {|
     (Variable_used_at_wrong_level (name y) (var_level 1) (used_at 0))
     outer_in_splice : <'a>{..'b} -> <'a>{..'c} where ..'b <= {..'c}
-    rebind_inner : <int>{..'_a}
+    rebind_inner : <int>{..'a}
     toplevel_splice : int
     toplevel_splice_arg : 'a -> 'a
-    not_captured : <int>{..'_a}
+    not_captured : <int>{..'a}
     (Not_in_scope x)
     (Unification_error
      (Context_mismatch
@@ -569,7 +536,7 @@ let%expect_test "staged power" =
     ; top
         "open_as_closed"
         []
-        ~annot:(TCode { inner = Type.int; context = CEmpty })
+        ~annot:(Ty.code Ty.int)
         (app (var "power") [ int 3; quote (var "y") ])
     ];
   check
@@ -601,13 +568,7 @@ let%expect_test
       [ "c" ]
       (quote (let_ "x" [] (bool true) (splice (var "c"))))
   in
-  let closed =
-    top
-      "closed"
-      []
-      ~annot:(TCode { inner = Type.int; context = CEmpty })
-      (quote (int 1))
-  in
+  let closed = top "closed" [] ~annot:(Ty.code Ty.int) (quote (int 1)) in
   check
     [ captures_x
     ; closed
@@ -651,7 +612,7 @@ let%expect_test "splices capture the same whether the context is known or not" =
     ];
   [%expect
     {|
-    known : <int>{y : int; ..'_a}
+    known : <int>{y : int; ..'a}
     unknown : <'a>{x?'b : int; ..'c} -> <'a>{..'d} where ..'c <= {..'d}
     unknown_applied : <int>{y : int; ..'_a}
     |}]
@@ -729,19 +690,7 @@ let%expect_test "names bound at a later level are absent from spliced code" =
         (app (var "inner_splice") [ quote (seq (var "z") (quote (int 1))) ])
     ];
   let known_z =
-    Type.TCode
-      { inner =
-          TCode
-            { inner = Type.int
-            ; context = CVar (ref (Type.CUnbound (-1, Int.max_value)))
-            }
-      ; context =
-          CExtend
-            ( "z"
-            , Present
-            , Type.int
-            , CVar (ref (Type.CUnbound (-2, Int.max_value))) )
-      }
+    Ty.code (Ty.code Ty.int ~tail:"r1") ~entries:[ "z", Ty.int ] ~tail:"r2"
   in
   check
     [ top
@@ -749,7 +698,7 @@ let%expect_test "names bound at a later level are absent from spliced code" =
         [ "c" ]
         (quote
            (quote
-              (let_ "z" [] (int 1) (splice (splice (Var ("c", Some known_z)))))))
+              (let_ "z" [] (int 1) (splice (splice (var "c" ~annot:known_z))))))
     ];
   [%expect
     {|
@@ -812,13 +761,7 @@ let%expect_test "free variables of a quote are not duplicated by spliced code" =
 ;;
 
 let%expect_test "spliced code does not take on the quote's free variables" =
-  let closed =
-    top
-      "closed"
-      []
-      ~annot:(TCode { inner = Type.int; context = CEmpty })
-      (quote (int 1))
-  in
+  let closed = top "closed" [] ~annot:(Ty.code Ty.int) (quote (int 1)) in
   check
     [ closed
     ; top
@@ -833,8 +776,8 @@ let%expect_test "spliced code does not take on the quote's free variables" =
   [%expect
     {|
     closed : <int>{}
-    before : <int>{x : int; ..'_a}
-    after : <int>{x : int; ..'_a}
+    before : <int>{x : int; ..'a}
+    after : <int>{x : int; ..'a}
     |}]
 ;;
 
@@ -882,7 +825,7 @@ let%expect_test "mutually recursive staged functions" =
     ; top
         "uses_z_as_closed"
         []
-        ~annot:(TCode { inner = Type.int; context = CEmpty })
+        ~annot:(Ty.code Ty.int)
         (app (var "ping") [ int 2; quote (var "z") ])
     ];
   [%expect
@@ -939,13 +882,7 @@ let%expect_test "presence approximation" =
      quote after splicing code that may use [x] makes the code use [x], while
      using it before does not. *)
   let binds_x c = quote (let_ "x" [] (int 1) (splice c)) in
-  let closed =
-    top
-      "closed"
-      []
-      ~annot:(TCode { inner = Type.int; context = CEmpty })
-      (quote (int 1))
-  in
+  let closed = top "closed" [] ~annot:(Ty.code Ty.int) (quote (int 1)) in
   let uses_x_then_splices =
     top
       "uses_x_then_splices"

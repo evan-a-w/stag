@@ -35,3 +35,8 @@ Test comprehensively, such that we can be fully confident in correctness, and
 don't consider work done until tests are present and working. Prefer
 having human readable test output (in expect test style) rather than checking
 (eg. don't just [assert_true] some condition, print something demonstrating it).
+
+Use subagents to
+1. Parallelize work, where relevant
+2. Just delegate, so that you are more responsive to the user - you can wait on subagent output and therefore in the meantime while it works, be ready to respond to the user. This is important.
+3. Review code (independent subagents are more likely to catch issues). You should do this for nontrivial work before reporting to the user that it's done.
