@@ -39,6 +39,8 @@ type ty =
       { inner : ty
       ; context : row
       }
+  | TRecord of row
+  | TVariant of row (** Tags without the backquote. *)
   | TVar of (ty, Nothing.t) Var.t
 
 and row =

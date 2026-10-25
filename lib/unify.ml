@@ -93,6 +93,8 @@ let rec unify_ty fresh ~ty1 ~ty2 : (unit, Unification_error.t) Result.t =
     , TCode { inner = inner2; context = row2 } ) ->
     let%bind.Result () = unify_ty fresh ~ty1:inner1 ~ty2:inner2 in
     unify_row fresh ~row1 ~row2
+  | TRecord row1, TRecord row2 | TVariant row1, TVariant row2 ->
+    unify_row fresh ~row1 ~row2
   | TVar var1, TVar var2 when phys_equal var1 var2 -> Ok ()
   | TVar var, ty | ty, TVar var ->
     let%map.Result () =

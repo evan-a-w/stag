@@ -49,6 +49,8 @@ type ty =
       { inner : ty
       ; context : row
       }
+  | TRecord of row
+  | TVariant of row
   | TVar of (ty, Nothing.t) Var.t
 
 and row =
@@ -80,7 +82,7 @@ let unit = TCon ("unit", [])
 let canonical_ty =
   Var.canonical ~var:(function
     | TVar var -> Some var
-    | TCon _ | TArrow _ | TTuple _ | TCode _ -> None)
+    | TCon _ | TArrow _ | TTuple _ | TCode _ | TRecord _ | TVariant _ -> None)
 ;;
 
 let canonical_row =
@@ -122,6 +124,8 @@ let rec map_ty (f : Mapper.t) ty =
   | TTuple tys -> TTuple (List.map tys ~f:(map_ty f))
   | TCode { inner; context } ->
     TCode { inner = map_ty f inner; context = map_row f context }
+  | TRecord row -> TRecord (map_row f row)
+  | TVariant row -> TVariant (map_row f row)
   | TVar var -> f.ty var
 
 and map_row f row =
@@ -158,6 +162,7 @@ let rec iter_ty (f : _ Iter.t) ty =
   | TCode { inner; context } ->
     let%bind.Result () = iter_ty f inner in
     iter_row f context
+  | TRecord row | TVariant row -> iter_row f row
   | TVar var -> f.ty var
 
 and iter_row f row =
@@ -235,34 +240,55 @@ module Printer = struct
     | TCode { inner; context } ->
       let inner = ty_to_string t ~prec:0 inner in
       sprintf "<%s>%s" inner (row_to_string t context)
+    | TRecord row -> row_to_string t row
+    | TVariant row -> variant_to_string t row
     | TVar var -> var_name t var
 
-  and row_to_string t row =
-    let rec entries row =
-      match canonical_row row with
-      | REmpty -> [], None
-      | RExtend (name, presence, ty, rest) ->
-        let entries, tail = entries rest in
-        (name, presence, ty) :: entries, tail
-      | RVar var -> [], Some var
-    in
-    let entry (name, presence, ty) =
-      let ty () = ty_to_string t ~prec:0 ty in
-      match canonical_presence presence with
-      | Present -> sprintf "%s : %s" name (ty ())
-      | Absent -> "-" ^ name
-      | PVar var ->
-        let presence = var_name t var in
-        sprintf "%s?%s : %s" name presence (ty ())
-    in
-    let fields, tail = entries row in
-    let fields =
-      List.stable_sort fields ~compare:(fun (a, _, _) (b, _, _) ->
+  and row_entries row =
+    match canonical_row row with
+    | REmpty -> [], None
+    | RExtend (name, presence, ty, rest) ->
+      let entries, tail = row_entries rest in
+      (name, presence, ty) :: entries, tail
+    | RVar var -> [], Some var
+
+  and sorted_row_entries t row ~label ~entry =
+    let entries, tail = row_entries row in
+    let entries =
+      List.stable_sort entries ~compare:(fun (a, _, _) (b, _, _) ->
         String.compare a b)
-      |> List.map ~f:entry
+      |> List.map ~f:(fun (name, presence, ty) ->
+        let name = label name in
+        match canonical_presence presence with
+        | Present -> entry name ty
+        | Absent -> "-" ^ name
+        | PVar var -> entry (sprintf "%s?%s" name (var_name t var)) ty)
     in
-    let tail = Option.map tail ~f:(row_var_name t) |> Option.to_list in
-    "{" ^ String.concat ~sep:"; " (fields @ tail) ^ "}"
+    entries, Option.map tail ~f:(row_var_name t)
+
+  and variant_to_string t row =
+    let entries, tail =
+      sorted_row_entries
+        t
+        row
+        ~label:(fun tag -> "`" ^ tag)
+        ~entry:(fun tag ty ->
+          match canonical_ty ty with
+          | TCon ("unit", []) -> tag
+          | ty -> sprintf "%s of %s" tag (ty_to_string t ~prec:0 ty))
+    in
+    let entries = String.concat entries ~sep:" | " in
+    match entries, tail with
+    | entries, None -> "[" ^ entries ^ "]"
+    | "", Some tail -> "[" ^ tail ^ "]"
+    | entries, Some tail -> "[" ^ entries ^ "; " ^ tail ^ "]"
+
+  and row_to_string t row =
+    let entries, tail =
+      sorted_row_entries t row ~label:Fn.id ~entry:(fun name ty ->
+        sprintf "%s : %s" name (ty_to_string t ~prec:0 ty))
+    in
+    "{" ^ String.concat ~sep:"; " (entries @ Option.to_list tail) ^ "}"
   ;;
 
   let ty t ty = ty_to_string t ~prec:0 ty

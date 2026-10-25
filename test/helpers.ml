@@ -13,19 +13,23 @@ module Ty = struct
   let arrow a b = Type_expr.Arrow (a, b)
   let tuple tys = Type_expr.Tuple tys
 
-  let code ?(entries = []) ?tail inner =
+  (** Present [entries], in order, before [tail] (closed if [None]). *)
+  let row ?(entries = []) ?tail () =
     let tail : Type_expr.row =
       match tail with
       | None -> Empty
       | Some name -> Var name
     in
-    Type_expr.Code
-      { inner
-      ; context =
-          List.fold_right entries ~init:tail ~f:(fun (name, ty) rest ->
-            Type_expr.Extend (name, ty, rest))
-      }
+    List.fold_right entries ~init:tail ~f:(fun (name, ty) rest ->
+      Type_expr.Extend (name, ty, rest))
   ;;
+
+  let code ?entries ?tail inner =
+    Type_expr.Code { inner; context = row ?entries ?tail () }
+  ;;
+
+  let record ?tail entries = Type_expr.Record (row ~entries ?tail ())
+  let variant ?tail entries = Type_expr.Variant (row ~entries ?tail ())
 end
 
 let int n = Expr.Lit (Int (Int.to_string n))
@@ -77,6 +81,12 @@ let record fields =
 
 let field expr name = Expr.Field (expr, path name)
 let match_ expr cases = Expr.Match (expr, cases)
+let poly_record fields = Expr.Poly_record fields
+let dot expr label = Expr.Poly_field (expr, label)
+let extend fields expr = Expr.Poly_extend (fields, expr)
+let restrict expr label = Expr.Poly_restrict (expr, label)
+let update expr fields = Expr.Poly_update (expr, fields)
+let tag ?arg name = Expr.Poly_variant (name, arg)
 
 module Pat = struct
   let any = Pattern.Any
@@ -87,6 +97,12 @@ module Pat = struct
 
   let record fields =
     Pattern.Record (List.map fields ~f:(fun (name, p) -> path name, p))
+  ;;
+
+  let tag ?arg name = Pattern.Poly_variant (name, arg)
+
+  let poly_record ?(rest = Pattern.Rest.Closed) fields =
+    Pattern.Poly_record { fields; rest }
   ;;
 end
 

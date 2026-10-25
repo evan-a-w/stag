@@ -138,6 +138,12 @@ let rec elaborate' t module_ vars (expr : Type_expr.t)
     let%bind.Result inner = elaborate' t module_ vars inner in
     let%map.Result context = elaborate_row t module_ vars context in
     Type.TCode { inner; context }
+  | Record row ->
+    let%map.Result row = elaborate_row t module_ vars row in
+    Type.TRecord row
+  | Variant row ->
+    let%map.Result row = elaborate_row t module_ vars row in
+    Type.TVariant row
 
 and elaborate_row t module_ vars (row : Type_expr.row)
   : (Type.row, Typecheck_error.t) Result.t
@@ -203,6 +209,7 @@ let rec referenced_types (expr : Type_expr.t) =
   | Tuple tys -> List.concat_map tys ~f:referenced_types
   | Code { inner; context } ->
     referenced_types inner @ row_referenced_types context
+  | Record row | Variant row -> row_referenced_types row
 
 and row_referenced_types (row : Type_expr.row) =
   match row with

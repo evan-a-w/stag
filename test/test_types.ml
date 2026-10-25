@@ -241,7 +241,7 @@ let%expect_test "match" =
     val get_y : point -> int
     val get_opt : option['a] -> 'a -> 'a
     val shadows : 'a -> int
-    val no_cases : 'a -> 'b
+    val no_cases : [] -> 'a
     val nested_record : option[point] -> int
     |}]
 ;;
