@@ -39,6 +39,7 @@ type t =
   { types : Decl.t String.Map.t
   ; constructors : Constructor.t String.Map.t
   ; fields : Field.t String.Map.t
+  ; checked : Signature.Type_decl.t String.Map.t
   }
 
 let builtins =
@@ -66,6 +67,8 @@ let find_constructor t module_ path =
 let find_field t module_ path =
   find_in t.fields module_ Field path ~unbound:(fun path -> Unbound_field path)
 ;;
+
+let find_decl_exn t name = Map.find_exn t.checked name
 
 module Annotation_vars = struct
   type t =
@@ -258,38 +261,64 @@ let declare module_ (decl : Type_decl.t) ~fresh_id =
 ;;
 
 let define t (decl : Decl.t) =
-  let vars = Vars.Params (Decl.param_map decl) in
-  let elaborate = elaborate' t decl.module_ vars in
+  let elaborate = elaborate' t decl.module_ (Params (Decl.param_map decl)) in
   let canonical_name = Module_scope.canonical_name decl.module_ in
-  match decl.decl.kind with
-  | Alias body ->
-    let%map.Result (_ : Type.ty) = elaborate body in
-    t
+  let%map.Result kind =
+    match decl.decl.kind with
+    | Alias body ->
+      let%map.Result body = elaborate body in
+      Signature.Type_decl.Kind.Alias body
+    | Variant constructors ->
+      let%map.Result constructors =
+        List.map constructors ~f:(fun (name, args) ->
+          let%map.Result args = List.map args ~f:elaborate |> Result.all in
+          { Signature.Constructor.name; args })
+        |> Result.all
+      in
+      Signature.Type_decl.Kind.Variant constructors
+    | Record fields ->
+      let%map.Result fields =
+        List.map fields ~f:(fun (name, ty) ->
+          let%map.Result ty = elaborate ty in
+          { Signature.Field.name; ty })
+        |> Result.all
+      in
+      Signature.Type_decl.Kind.Record fields
+  in
+  let checked =
+    Map.add_exn
+      t.checked
+      ~key:decl.name
+      ~data:
+        { Signature.Type_decl.name = decl.decl.name
+        ; params = decl.params
+        ; kind
+        }
+  in
+  let t = { t with checked } in
+  match kind with
+  | Alias _ -> t
   | Variant constructors ->
-    let%map.Result constructors =
-      List.fold_result
+    let result = Type.TCon (decl.name, decl.params) in
+    let constructors =
+      List.fold
         constructors
         ~init:t.constructors
-        ~f:(fun constructors (name, args) ->
-          let%map.Result args = List.map args ~f:elaborate |> Result.all in
+        ~f:(fun constructors { name; args } ->
           let name = canonical_name name in
           Map.add_exn
             constructors
             ~key:name
-            ~data:
-              { Constructor.name
-              ; args
-              ; result = Type.TCon (decl.name, decl.params)
-              })
+            ~data:{ Constructor.name; args; result })
     in
     { t with constructors }
   | Record fields ->
     let all_fields =
-      List.map fields ~f:(fun (name, _) -> canonical_name name)
+      List.map fields ~f:(fun (field : Signature.Field.t) ->
+        canonical_name field.name)
     in
-    let%map.Result fields =
-      List.fold_result fields ~init:t.fields ~f:(fun fields (name, ty) ->
-        let%map.Result ty = elaborate ty in
+    let fields =
+      List.fold fields ~init:t.fields ~f:(fun fields { name; ty } ->
         let name = canonical_name name in
         Map.add_exn
           fields
@@ -320,6 +349,7 @@ let create root ~fresh_id =
         |> String.Map.of_alist_exn
     ; constructors = String.Map.empty
     ; fields = String.Map.empty
+    ; checked = String.Map.empty
     }
   in
   let%bind.Result () = check_alias_cycles t in

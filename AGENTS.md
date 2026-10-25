@@ -39,4 +39,4 @@ having human readable test output (in expect test style) rather than checking
 Use subagents to
 1. Parallelize work, where relevant
 2. Just delegate, so that you are more responsive to the user - you can wait on subagent output and therefore in the meantime while it works, be ready to respond to the user. This is important.
-3. Review code (independent subagents are more likely to catch issues). You should do this for nontrivial work before reporting to the user that it's done.
+3. Review code (independent subagents are more likely to catch issues). You should do this for nontrivial work before reporting to the user that it's done. Don't duplicate this though - eg. if you are a subagent spawned by a different agent, let the parent agent start any reviewers.

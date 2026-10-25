@@ -16,11 +16,13 @@ let%expect_test "qualified and unqualified values" =
     ];
   [%expect
     {|
-    M.x : int
-    M.f : int -> int
-    M.g : int -> int
-    a : int
-    b : int
+    module M : sig
+      val x : int
+      val f : int -> int
+      val g : int -> int
+    end
+    val a : int
+    val b : int
     |}]
 ;;
 
@@ -45,16 +47,20 @@ let%expect_test "nested modules" =
     ];
   [%expect
     {|
-    root : string
-    A.v : int
-    A.B.x : bool
-    A.B.from_a : int
-    A.B.from_root : string
-    A.B.self : bool
-    A.B.absolute : int
-    A.y : bool
-    z : bool
-    w : bool
+    val root : string
+    module A : sig
+      val v : int
+      module B : sig
+        val x : bool
+        val from_a : int
+        val from_root : string
+        val self : bool
+        val absolute : int
+      end
+      val y : bool
+    end
+    val z : bool
+    val w : bool
     |}]
 ;;
 
@@ -71,11 +77,15 @@ let%expect_test "results are in program order, depth first" =
     ];
   [%expect
     {|
-    a : int
-    A.b : int
-    A.B.c : int
-    A.d : int
-    e : int
+    val a : int
+    module A : sig
+      val b : int
+      module B : sig
+        val c : int
+      end
+      val d : int
+    end
+    val e : int
     |}]
 ;;
 
@@ -95,14 +105,18 @@ let%expect_test "lexical shadowing" =
     ];
   [%expect
     {|
-    x : int
-    M.x : bool
-    M.y : bool
-    M.N.z : bool
-    M.local : 'a -> 'a
-    M.local_let : unit
-    M.qualified_ignores_locals : 'a -> bool
-    root_x : int
+    val x : int
+    module M : sig
+      val x : bool
+      val y : bool
+      module N : sig
+        val z : bool
+      end
+      val local : 'a -> 'a
+      val local_let : unit
+      val qualified_ignores_locals : 'a -> bool
+    end
+    val root_x : int
     |}]
 ;;
 
@@ -120,12 +134,20 @@ let%expect_test "modules shadow lexically" =
     ];
   [%expect
     {|
-    N.x : int
-    M.N.x : bool
-    M.inner : bool
-    M.K.inner_too : bool
-    outer : int
-    explicit : bool
+    module N : sig
+      val x : int
+    end
+    module M : sig
+      module N : sig
+        val x : bool
+      end
+      val inner : bool
+      module K : sig
+        val inner_too : bool
+      end
+    end
+    val outer : int
+    val explicit : bool
     |}]
 ;;
 
@@ -174,9 +196,12 @@ let%expect_test "modules and other members have separate namespaces" =
     ];
   [%expect
     {|
-    M.M : int
-    a : int
-    b : M
+    module M : sig
+      val M : int
+    end
+    type M = M
+    val a : int
+    val b : M
     |}]
 ;;
 
@@ -212,11 +237,17 @@ let%expect_test "values are order independent and recursive across modules" =
     ];
   [%expect
     {|
-    main : bool * char
-    A.even : int -> bool
-    B.odd : int -> bool
-    B.later : char
-    C.value : char
+    val main : bool * char
+    module A : sig
+      val even : int -> bool
+    end
+    module B : sig
+      val odd : int -> bool
+      val later : char
+    end
+    module C : sig
+      val value : char
+    end
     |}]
 ;;
 
@@ -247,14 +278,26 @@ let%expect_test "SCCs across modules" =
     ];
   [%expect
     {|
-    A.f : 'a -> 'a
-    B.g : 'a -> 'a
-    use : int * bool
-    A.f : bool -> int
-    A.h : int -> int
-    B.g : int -> int
-    A.w : '_a -> '_a
-    B.g : ('_a -> '_a) -> '_a -> '_a
+    module A : sig
+      val f : 'a -> 'a
+    end
+    module B : sig
+      val g : 'a -> 'a
+    end
+    val use : int * bool
+    module A : sig
+      val f : bool -> int
+      val h : int -> int
+    end
+    module B : sig
+      val g : int -> int
+    end
+    module A : sig
+      val w : '_a -> '_a
+    end
+    module B : sig
+      val g : ('_a -> '_a) -> '_a -> '_a
+    end
     |}]
 ;;
 
@@ -291,16 +334,20 @@ let%expect_test "qualified and unqualified types, constructors and fields" =
     ];
   [%expect
     {|
-    M.a : M.t
-    M.mk : int -> M.r
-    M.get : M.r -> int
-    M.annotated : M.t -> M.t
-    b : M.t
-    r : M.r
-    get_x : M.r -> int
-    annotated : M.r -> M.r
-    matched : M.t -> int
-    record_pattern : M.r -> M.t
+    module M : sig
+      type t = A | B of int
+      type r = { x : int; y : t }
+      val a : t
+      val mk : int -> r
+      val get : r -> int
+      val annotated : t -> t
+    end
+    val b : M.t
+    val r : M.r
+    val get_x : M.r -> int
+    val annotated : M.r -> M.r
+    val matched : M.t -> int
+    val record_pattern : M.r -> M.t
     |}]
 ;;
 
@@ -323,10 +370,14 @@ let%expect_test "types in different modules are distinct" =
     ];
   [%expect
     {|
-    M.inner : M.t
-    M.outer : M.t
-    root : t
-    qualified : M.t
+    type t = A
+    module M : sig
+      type t = A
+      val inner : t
+      val outer : t
+    end
+    val root : t
+    val qualified : M.t
     (Unification_error
      (Type_mismatch (TCon t ()) (TCon M.t ()) (Base_types_not_equal t M.t)))
     |}]
@@ -351,10 +402,18 @@ let%expect_test "types resolve lexically" =
     ];
   [%expect
     {|
-    M.N.s : M.N.s
-    M.t : M.t
-    M.root_u : u
-    s : M.N.s
+    type t = R
+    type u = U
+    module M : sig
+      type t = T
+      module N : sig
+        type s = S of t * u
+        val s : s
+      end
+      val t : t
+      val root_u : u
+    end
+    val s : M.N.s
     |}]
 ;;
 
@@ -388,8 +447,15 @@ let%expect_test "types are order independent and recursive across modules" =
     ];
   [%expect
     {|
-    tree : A.tree
-    pair : A.tree * A.tree
+    val tree : A.tree
+    module A : sig
+      type tree = Leaf | Node of B.forest
+    end
+    module B : sig
+      type forest = Nil | Cons of A.tree * forest
+      type trees = A.tree * A.tree
+    end
+    val pair : A.tree * A.tree
     |}]
 ;;
 
@@ -406,7 +472,12 @@ let%expect_test "cyclic aliases across modules" =
   [%expect
     {|
     (Cyclic_type_alias A.t)
-    x : int
+    module A : sig
+      type t = int
+      type u = int
+    end
+    type u = int
+    val x : int
     |}]
 ;;
 
@@ -441,11 +512,17 @@ let%expect_test "builtin types are declared in the root module" =
     (Duplicate_type int)
     (Duplicate_type unit)
     (Duplicate_type bool)
-    M.u : M.unit
-    M.i : bool
-    M.N.nested : M.unit
-    root : unit
-    qualified : M.unit
+    module M : sig
+      type unit = U
+      type int = bool
+      val u : unit
+      val i : bool
+      module N : sig
+        val nested : unit
+      end
+    end
+    val root : unit
+    val qualified : M.unit
     (Unification_error
      (Type_mismatch (TCon M.unit ()) (TCon unit ())
       (Base_types_not_equal M.unit unit)))
@@ -492,10 +569,23 @@ let%expect_test "duplicates are per module" =
     [ module_ "M" [ Decl.variant "t" ~params:[ Decl.ty "a"; Decl.ty "a" ] [] ] ];
   [%expect
     {|
-    M.x : int
-    K.x : bool
-    x : unit
-    fields : int * bool
+    module M : sig
+      val x : int
+      type t = A
+      type r = { f : int }
+      module N : sig end
+    end
+    module K : sig
+      val x : bool
+      type t = A
+      type r = { f : bool }
+      module N : sig end
+    end
+    val x : unit
+    type t = A
+    type r = { f : unit }
+    module N : sig end
+    val fields : int * bool
     (Duplicate_module M)
     (Duplicate_module M.N)
     (Duplicate_toplevel M.x)
@@ -582,9 +672,11 @@ let%expect_test "persistent toplevels of modules are usable in quotes" =
     ];
   [%expect
     {|
-    M.f : int -> int
-    M.inner : <int>{..'a}
-    outer : <int>{..'a}
+    module M : sig
+      val f : int -> int
+      val inner : <int>{..'a}
+    end
+    val outer : <int>{..'a}
     |}]
 ;;
 
@@ -608,17 +700,19 @@ let%expect_test "non-persistent toplevels are free variables named canonically" 
     ];
   [%expect
     {|
-    n : bool
-    M.n : int
-    M.q : 'a -> <'b>{M.n : 'b; ..'c}
-    M.both : <'a * 'a>{M.n : 'a; ..'b}
-    M.local : <unit>{..'a}
-    M.root_code : <'_a>{n : '_a; ..'_b}
-    q : 'a -> <'b>{M.n : 'b; ..'c}
-    q_root : 'a -> <'b>{n : 'b; ..'c}
-    spliced : <'_a>{M.n : '_a; ..'_b}
-    not_captured : <'_a>{M.n : '_a; ..'_b}
-    captured : <unit>{..'_a}
+    val n : bool
+    module M : sig
+      val n : int
+      val q : 'a -> <'b>{M.n : 'b; ..'c}
+      val both : <'a * 'a>{M.n : 'a; ..'b}
+      val local : <unit>{..'a}
+      val root_code : <'_a>{n : '_a; ..'_b}
+    end
+    val q : 'a -> <'b>{M.n : 'b; ..'c}
+    val q_root : 'a -> <'b>{n : 'b; ..'c}
+    val spliced : <'_a>{M.n : '_a; ..'_b}
+    val not_captured : <'_a>{M.n : '_a; ..'_b}
+    val captured : <unit>{..'_a}
     |}]
 ;;
 
@@ -647,11 +741,13 @@ let%expect_test "splicing code with canonically named free variables" =
     ];
   [%expect
     {|
-    M.n : int
-    implicit : int
-    local_does_not_provide : bool -> int
-    explicit : string
-    shorthand : int
+    module M : sig
+      val n : int
+    end
+    val implicit : int
+    val local_does_not_provide : bool -> int
+    val explicit : string
+    val shorthand : int
     (Unification_error
      (Context_mismatch
       (CExtend M.n (PVar (PLink Present)) (TVar (Unbound 25 1))

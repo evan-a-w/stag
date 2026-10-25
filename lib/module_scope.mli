@@ -9,6 +9,9 @@ val create : Syntax.Program.t -> (t, Typecheck_error.t) Result.t
 (** The full path of member [name] of [t], joined with [.]. *)
 val canonical_name : t -> string -> string
 
+(** The member module [name] of [t], which must exist. *)
+val enter : t -> string -> t
+
 (** Every toplevel of the program, depth first in program order, with the
     module it is directly in. *)
 val toplevels : t -> (t * Syntax.Toplevel.t) list

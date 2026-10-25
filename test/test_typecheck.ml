@@ -8,13 +8,13 @@ let%expect_test "primitives" =
   Typecheck.typecheck typecheck ~program:prims
   |> Result.ok
   |> Option.value_exn
-  |> print_types typecheck;
+  |> print_signature typecheck;
   [%expect
     {|
-    add : int -> int -> int
-    eq : int -> int -> bool
-    cond : bool -> 'a -> 'a -> 'a
-    id : 'a -> 'a
+    val add : int -> int -> int
+    val eq : int -> int -> bool
+    val cond : bool -> 'a -> 'a -> 'a
+    val id : 'a -> 'a
     |}]
 ;;
 
@@ -22,19 +22,19 @@ let%expect_test "typechecking twice with the same state" =
   let typecheck = Typecheck.create () in
   let run program =
     match Typecheck.typecheck typecheck ~program with
-    | Ok types -> print_types typecheck types
+    | Ok signature -> print_signature typecheck signature
     | Error error -> print_s [%sexp (error : Typecheck.Typecheck_error.t)]
   in
   run prims;
   run [ top "id" [ "x" ] (var "x"); top "n" [] (app (var "id") [ int 1 ]) ];
   [%expect
     {|
-    add : int -> int -> int
-    eq : int -> int -> bool
-    cond : bool -> 'a -> 'a -> 'a
-    id : 'a -> 'a
-    id : 'a -> 'a
-    n : int
+    val add : int -> int -> int
+    val eq : int -> int -> bool
+    val cond : bool -> 'a -> 'a -> 'a
+    val id : 'a -> 'a
+    val id : 'a -> 'a
+    val n : int
     |}]
 ;;
 
@@ -50,13 +50,13 @@ let%expect_test "literals and application" =
     ];
   [%expect
     {|
-    i : int
-    b : bool
-    s : string
-    c : char
-    u : unit
-    sum : int
-    partial : int -> int
+    val i : int
+    val b : bool
+    val s : string
+    val c : char
+    val u : unit
+    val sum : int
+    val partial : int -> int
     |}]
 ;;
 
@@ -86,9 +86,9 @@ let%expect_test "functions are generalized" =
     ];
   [%expect
     {|
-    k : 'a -> 'b -> 'a
-    flip : ('a -> 'b -> 'c) -> 'b -> 'a -> 'c
-    both : bool
+    val k : 'a -> 'b -> 'a
+    val flip : ('a -> 'b -> 'c) -> 'b -> 'a -> 'c
+    val both : bool
     |}]
 ;;
 
@@ -103,7 +103,7 @@ let%expect_test "value restriction" =
     ];
   [%expect
     {|
-    weak : '_a -> '_a
+    val weak : '_a -> '_a
     (Unification_error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     |}]
@@ -115,8 +115,8 @@ let%expect_test "annotations" =
   check [ top "f" [ "x" ] ~annot:Ty.bool (app (var "add") [ var "x"; int 1 ]) ];
   [%expect
     {|
-    f : int -> int
-    f : bool -> bool
+    val f : int -> int
+    val f : bool -> bool
     (Unification_error
      (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
     |}]
@@ -145,9 +145,9 @@ let%expect_test "toplevels are order independent and generalized per SCC" =
     ];
   [%expect
     {|
-    main : bool
-    f : 'a -> 'a
-    g : 'a -> 'a
+    val main : bool
+    val f : 'a -> 'a
+    val g : 'a -> 'a
     |}]
 ;;
 
@@ -166,9 +166,9 @@ let%expect_test "mutual recursion is monomorphic within an SCC" =
     ];
   [%expect
     {|
-    a : bool -> int
-    b : int -> int
-    c : int
+    val a : bool -> int
+    val b : int -> int
+    val c : int
     (Unification_error
      (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
     |}]
@@ -181,8 +181,8 @@ let%expect_test "SCC containing a non-value is not generalized" =
     ];
   [%expect
     {|
-    x : int
-    f : int -> int
+    val x : int
+    val f : int -> int
     |}]
 ;;
 
@@ -204,11 +204,11 @@ let%expect_test "an SCC below an in-progress toplevel is generalized" =
     ];
   [%expect
     {|
-    a : int -> int
-    b : 'a -> 'a
-    c : int -> int
-    d : int -> int
-    e : bool
+    val a : int -> int
+    val b : 'a -> 'a
+    val c : int -> int
+    val d : int -> int
+    val e : bool
     |}]
 ;;
 
@@ -254,10 +254,10 @@ let%expect_test "local lets" =
     ];
   [%expect
     {|
-    poly : bool
-    rec_ : 'a -> 'b
-    shadow : 'a -> int
-    arg_scope : 'a -> 'a
+    val poly : bool
+    val rec_ : 'a -> 'b
+    val shadow : 'a -> int
+    val arg_scope : 'a -> 'a
     (Unification_error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     (Unification_error
@@ -285,14 +285,14 @@ let%expect_test "quotes" =
     ];
   [%expect
     {|
-    closed : <int>{..'a}
-    open : <int>{x : int; y : int; ..'a}
-    local : <int>{..'a}
-    persistent : <int>{..'a}
-    n : int
-    not_persistent : <'a>{n : 'a; ..'b}
-    outer_arg : 'a -> <'b>{x : 'b; ..'c}
-    nested : <<int>{x : int; ..'a}>{..'b}
+    val closed : <int>{..'a}
+    val open : <int>{x : int; y : int; ..'a}
+    val local : <int>{..'a}
+    val persistent : <int>{..'a}
+    val n : int
+    val not_persistent : <'a>{n : 'a; ..'b}
+    val outer_arg : 'a -> <'b>{x : 'b; ..'c}
+    val nested : <<int>{x : int; ..'a}>{..'b}
     |}]
 ;;
 
@@ -310,7 +310,7 @@ let%expect_test "free variables of a quote are not generalized by inner lets" =
                  (app (var "add") [ app (var "g") [ int 1 ]; int 1 ])
                  (app (var "g") [ bool true ]))))
     ];
-  [%expect {| f : 'a -> <int>{x : int; ..'b} |}]
+  [%expect {| val f : 'a -> <int>{x : int; ..'b} |}]
 ;;
 
 let%expect_test "splice with explicit substitutions" =
@@ -337,11 +337,11 @@ let%expect_test "splice with explicit substitutions" =
     ];
   [%expect
     {|
-    values : <int>{..'a}
-    reorder : <int>{..'a}
-    from_scope : <int>{y : int; ..'a}
-    infers_sub : <int>{z : int; ..'a}
-    closed : <int>{..'a}
+    val values : <int>{..'a}
+    val reorder : <int>{..'a}
+    val from_scope : <int>{y : int; ..'a}
+    val infers_sub : <int>{z : int; ..'a}
+    val closed : <int>{..'a}
     |}]
 ;;
 
@@ -373,7 +373,7 @@ let%expect_test "splice substitution errors" =
       (CExtend x (PVar (PLink Present)) (TVar (Link (TCon int ())))
        (CVar (CUnbound 30 1)))
       CEmpty (Empty_context_has_variable x)))
-    extra : <int>{..'a}
+    val extra : <int>{..'a}
     (Duplicate_substitution x)
     (Unification_error
      (Type_mismatch
@@ -444,17 +444,17 @@ let%expect_test "splice with implicit substitutions" =
   check [ top "wrong_type" [] (quote (let_ "x" [] (bool true) (splice code))) ];
   [%expect
     {|
-    bound : <int>{..'a}
-    propagates : <int>{x : int; ..'a}
-    unknown_context : <'a>{..'b} -> <'a>{..'c} where ..'b <= {..'c}
-    explicit_unknown : <'a>{x?'b : int} -> <'a>{..'c}
-    two_unknown : <int>{..'a} -> <int>{..'b} -> <int>{..'c} where ..'a <= {..'c}, ..'b <= {..'c}
-    known_and_unknown : <int>{x : int; ..'a} -> <int>{..'b} where ..'a <= {..'b}
-    with_free_var : <int>{..'a} -> <int>{y : int; ..'b} where ..'a <= {y : int; ..'b}
-    instantiated : <int>{y : int; z : int; ..'_a}
+    val bound : <int>{..'a}
+    val propagates : <int>{x : int; ..'a}
+    val unknown_context : <'a>{..'b} -> <'a>{..'c} where ..'b <= {..'c}
+    val explicit_unknown : <'a>{x?'b : int} -> <'a>{..'c}
+    val two_unknown : <int>{..'a} -> <int>{..'b} -> <int>{..'c} where ..'a <= {..'c}, ..'b <= {..'c}
+    val known_and_unknown : <int>{x : int; ..'a} -> <int>{..'b} where ..'a <= {..'b}
+    val with_free_var : <int>{..'a} -> <int>{y : int; ..'b} where ..'a <= {y : int; ..'b}
+    val instantiated : <int>{y : int; z : int; ..'_a}
     (Unification_error
      (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
-    toplevel_unknown : '_a
+    val toplevel_unknown : '_a
     (Unification_error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     |}]
@@ -494,11 +494,11 @@ let%expect_test "levels" =
   [%expect
     {|
     (Variable_used_at_wrong_level (name y) (var_level 1) (used_at 0))
-    outer_in_splice : <'a>{..'b} -> <'a>{..'c} where ..'b <= {..'c}
-    rebind_inner : <int>{..'a}
-    toplevel_splice : int
-    toplevel_splice_arg : 'a -> 'a
-    not_captured : <int>{..'a}
+    val outer_in_splice : <'a>{..'b} -> <'a>{..'c} where ..'b <= {..'c}
+    val rebind_inner : <int>{..'a}
+    val toplevel_splice : int
+    val toplevel_splice_arg : 'a -> 'a
+    val not_captured : <int>{..'a}
     (Not_in_scope x)
     (Unification_error
      (Context_mismatch
@@ -545,10 +545,10 @@ let%expect_test "staged power" =
     ];
   [%expect
     {|
-    power : int -> <int>{..'a} -> <int>{..'b} where ..'a <= {..'b}
-    cube : <int>{..'_a}
-    power : int -> <int>{..'a} -> <int>{..'b} where ..'a <= {..'b}
-    open : <int>{y : int; ..'_a}
+    val power : int -> <int>{..'a} -> <int>{..'b} where ..'a <= {..'b}
+    val cube : <int>{..'_a}
+    val power : int -> <int>{..'a} -> <int>{..'b} where ..'a <= {..'b}
+    val open : <int>{y : int; ..'_a}
     (Unification_error
      (Context_mismatch CEmpty
       (CExtend y (PVar (PLink Present)) (TVar (Link (TCon int ())))
@@ -593,11 +593,11 @@ let%expect_test
     ];
   [%expect
     {|
-    captures_x : <'a>{x?'b : bool; ..'c} -> <'a>{..'d} where ..'c <= {..'d}
-    closed : <int>{}
-    uses_x : <int>{..'_a}
-    uses_y : <int>{y : int; ..'_a}
-    uses_closed : <int>{..'_a}
+    val captures_x : <'a>{x?'b : bool; ..'c} -> <'a>{..'d} where ..'c <= {..'d}
+    val closed : <int>{}
+    val uses_x : <int>{..'_a}
+    val uses_y : <int>{y : int; ..'_a}
+    val uses_closed : <int>{..'_a}
     (Unification_error
      (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
     |}]
@@ -612,9 +612,9 @@ let%expect_test "splices capture the same whether the context is known or not" =
     ];
   [%expect
     {|
-    known : <int>{y : int; ..'a}
-    unknown : <'a>{x?'b : int; ..'c} -> <'a>{..'d} where ..'c <= {..'d}
-    unknown_applied : <int>{y : int; ..'_a}
+    val known : <int>{y : int; ..'a}
+    val unknown : <'a>{x?'b : int; ..'c} -> <'a>{..'d} where ..'c <= {..'d}
+    val unknown_applied : <int>{y : int; ..'_a}
     |}]
 ;;
 
@@ -647,10 +647,10 @@ let%expect_test "spliced code that may use a name propagates it as such" =
     ];
   [%expect
     {|
-    twice : <'a>{x?'b : bool; ..'c} -> <'a>{x?'b : bool; ..'d} where ..'c <= {x?'b : bool; ..'d}, ..'c <= {..'e}
-    propagates : <int>{x : bool; ..'_a}
-    not_used : <int>{x?'_a : bool; ..'_b}
-    direct_use : <'a>{x?'b : bool; ..'c} -> <'d>{x : 'd; ..'e} where ..'c <= {y?'f : 'a; ..'g}, ..'g <= {x : 'd; ..'e}
+    val twice : <'a>{x?'b : bool; ..'c} -> <'a>{x?'b : bool; ..'d} where ..'c <= {x?'b : bool; ..'d}, ..'c <= {..'e}
+    val propagates : <int>{x : bool; ..'_a}
+    val not_used : <int>{x?'_a : bool; ..'_b}
+    val direct_use : <'a>{x?'b : bool; ..'c} -> <'d>{x : 'd; ..'e} where ..'c <= {y?'f : 'a; ..'g}, ..'g <= {x : 'd; ..'e}
     |}]
 ;;
 
@@ -665,9 +665,9 @@ let%expect_test "only binders of the enclosing quote capture" =
     ];
   [%expect
     {|
-    outer_persistent : <'a>{..'b} -> <'a>{..'c} where ..'b <= {..'c}
-    add_free : 'a -> <'b>{add : 'b; ..'c}
-    not_toplevel : <'_a>{add : '_a; ..'_b}
+    val outer_persistent : <'a>{..'b} -> <'a>{..'c} where ..'b <= {..'c}
+    val add_free : 'a -> <'b>{add : 'b; ..'c}
+    val not_toplevel : <'_a>{add : '_a; ..'_b}
     |}]
 ;;
 
@@ -702,8 +702,8 @@ let%expect_test "names bound at a later level are absent from spliced code" =
     ];
   [%expect
     {|
-    inner_splice : <<'a>{z?'b : int; ..'c}>{-z; ..'d} -> <<'a>{..'e}>{..'f} where ..'c <= {..'e}, ..'d <= {..'f}
-    uses_z : <<int>{..'_a}>{..'_b}
+    val inner_splice : <<'a>{z?'b : int; ..'c}>{-z; ..'d} -> <<'a>{..'e}>{..'f} where ..'c <= {..'e}, ..'d <= {..'f}
+    val uses_z : <<int>{..'_a}>{..'_b}
     (Unification_error
      (Context_mismatch
       (CExtend z Absent (TVar (Unbound 40 1)) (CVar (CUnbound 39 1)))
@@ -750,9 +750,9 @@ let%expect_test "free variables of a quote are not duplicated by spliced code" =
     ];
   [%expect
     {|
-    f : <int>{..'a} -> <int>{x : int; ..'b} where ..'a <= {x : int; ..'b}
-    same : <int>{x : int; ..'_a}
-    other : <int>{x : int; y : int; ..'_a}
+    val f : <int>{..'a} -> <int>{x : int; ..'b} where ..'a <= {x : int; ..'b}
+    val same : <int>{x : int; ..'_a}
+    val other : <int>{x : int; y : int; ..'_a}
     (Unification_error
      (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
     (Unification_error
@@ -775,9 +775,9 @@ let%expect_test "spliced code does not take on the quote's free variables" =
     ];
   [%expect
     {|
-    closed : <int>{}
-    before : <int>{x : int; ..'a}
-    after : <int>{x : int; ..'a}
+    val closed : <int>{}
+    val before : <int>{x : int; ..'a}
+    val after : <int>{x : int; ..'a}
     |}]
 ;;
 
@@ -830,12 +830,12 @@ let%expect_test "mutually recursive staged functions" =
     ];
   [%expect
     {|
-    ping : int -> <int>{y : int; ..'a} -> <int>{y : int; ..'a} where ..'a <= {x?'b : int; y : int; ..'c}, ..'c <= {y : int; ..'a}
-    pong : int -> <int>{y : int; ..'a} -> <int>{x?'b : int; y : int; ..'c} where ..'a <= {x?'b : int; y : int; ..'c}, ..'c <= {y : int; ..'a}
-    ping : int -> <int>{y : int; ..'a} -> <int>{y : int; ..'a} where ..'a <= {x?'b : int; y : int; ..'c}, ..'c <= {y : int; ..'a}
-    pong : int -> <int>{y : int; ..'a} -> <int>{x?'b : int; y : int; ..'c} where ..'a <= {x?'b : int; y : int; ..'c}, ..'c <= {y : int; ..'a}
-    uses_x : <int>{x : int; y : int; ..'_a} where ..'_a <= {x : int; y : int; ..'_b}, ..'_b <= {x : int; y : int; ..'_a}
-    uses_z : <int>{y : int; z : int; ..'_a} where ..'_a <= {x?'_b : int; y : int; z : int; ..'_c}, ..'_c <= {y : int; z : int; ..'_a}
+    val ping : int -> <int>{y : int; ..'a} -> <int>{y : int; ..'a} where ..'a <= {x?'b : int; y : int; ..'c}, ..'c <= {y : int; ..'a}
+    val pong : int -> <int>{y : int; ..'a} -> <int>{x?'b : int; y : int; ..'c} where ..'a <= {x?'b : int; y : int; ..'c}, ..'c <= {y : int; ..'a}
+    val ping : int -> <int>{y : int; ..'a} -> <int>{y : int; ..'a} where ..'a <= {x?'b : int; y : int; ..'c}, ..'c <= {y : int; ..'a}
+    val pong : int -> <int>{y : int; ..'a} -> <int>{x?'b : int; y : int; ..'c} where ..'a <= {x?'b : int; y : int; ..'c}, ..'c <= {y : int; ..'a}
+    val uses_x : <int>{x : int; y : int; ..'_a} where ..'_a <= {x : int; y : int; ..'_b}, ..'_b <= {x : int; y : int; ..'_a}
+    val uses_z : <int>{y : int; z : int; ..'_a} where ..'_a <= {x?'_b : int; y : int; z : int; ..'_c}, ..'_c <= {y : int; z : int; ..'_a}
     (Unification_error
      (Context_mismatch CEmpty
       (CExtend y Present (TCon int ())
@@ -867,10 +867,10 @@ let%expect_test "toplevel splices drop names spliced code only may use" =
   check [ top "unused_but_typed" [] (run ~binder:"id" (quote (int 1))) ];
   [%expect
     {|
-    unused : int
+    val unused : int
     (Not_in_scope x)
-    x : bool
-    used_toplevel : bool
+    val x : bool
+    val used_toplevel : bool
     (Unification_error
      (Type_mismatch (TCon bool ())
       (TArrow (TVar (Unbound 41 1)) (TVar (Unbound 41 1))) Structural_mismatch))
@@ -918,10 +918,10 @@ let%expect_test "presence approximation" =
     ];
   [%expect
     {|
-    closed : <int>{}
-    uses_x_then_splices : <int>{x?'a : int; ..'b} -> <int>{x?'a : int; ..'b} where ..'b <= {x : int; ..'c}, ..'b <= {..'d}
-    splices_then_uses_x : <int>{x : int; ..'a} -> <int>{x : int; ..'a} where ..'a <= {x : int; ..'b}, ..'a <= {..'c}
-    uses_x_then_splices_closed : <int>{-x}
+    val closed : <int>{}
+    val uses_x_then_splices : <int>{x?'a : int; ..'b} -> <int>{x?'a : int; ..'b} where ..'b <= {x : int; ..'c}, ..'b <= {..'d}
+    val splices_then_uses_x : <int>{x : int; ..'a} -> <int>{x : int; ..'a} where ..'a <= {x : int; ..'b}, ..'a <= {..'c}
+    val uses_x_then_splices_closed : <int>{-x}
     (Unification_error
      (Context_mismatch (CExtend x Present (TCon int ()) (CVar (CUnbound 47 1)))
       CEmpty (Empty_context_has_variable x)))

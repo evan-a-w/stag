@@ -150,15 +150,25 @@ No functors or signatures yet.
 - Members of all modules are order independent, as toplevels are now; checking
   on demand and SCC detection work across modules (keyed by canonical path).
 - Module names are unique within a module (`Duplicate_module`).
-- Resolution is implemented once, in `Module_scope`, which returns canonical
-  names; types, constructors, fields and toplevels are stored by canonical
-  name.
+- Resolution is implemented in `Module_scope`, which returns canonical names;
+  types, constructors, fields and toplevels are stored by canonical name.
+  `Signature`'s printer mirrors the lookup rules to choose relative names.
 - Duplicate members (`Duplicate_toplevel`, `Duplicate_type`,
   `Duplicate_constructor`, `Duplicate_field`, `Duplicate_module`) are per
   module and named canonically. A module and a member of another kind may
   share a name.
-- `typecheck` returns every `let` with its canonical path, in program order
-  (depth first through modules).
+- `typecheck` returns the program's `Signature.t`: its items (values with
+  their schemes, checked type declarations and modules) mirroring the program,
+  with unqualified names. Builtin types are not items.
+- `Signature.to_string_hum` names each type constructor relative to the module
+  of the item it is printed in: by the shortest suffix of its canonical name
+  that resolves back to it under the lexical rules above (`M.N.t` is `t` in
+  `M.N`, `N.t` in `M`, `M.N.t` at the root). If none does, e.g. a root `t`
+  (or builtin `int`) inside a module declaring its own `t` (`int`), or `N.t`
+  inside a module with its own `N`, it is the canonical name after a leading
+  `.` standing for the root: `.t`, `.int`, `.N.t`. The printer reconstructs
+  the scopes from the signature itself. Errors and `Typecheck.to_string_hum`
+  keep canonical names.
 - Paths in errors are as written: `Unbound_module` (the prefix up to the
   missing module), `Unbound_type`, `Unbound_constructor`, `Unbound_field`,
   `Not_in_scope` for values, and the type in type argument errors. Other

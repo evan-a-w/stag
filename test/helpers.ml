@@ -58,15 +58,15 @@ let prims =
   ]
 ;;
 
-let print_types typecheck types =
-  List.iter types ~f:(fun (name, ty) ->
-    printf "%s : %s\n" name (Typecheck.to_string_hum typecheck ty))
+let print_signature typecheck signature =
+  print_string (Typecheck.signature_to_string_hum typecheck signature)
 ;;
 
 let check program =
   let typecheck = Typecheck.create () in
   match Typecheck.typecheck typecheck ~program:(prims @ program) with
-  | Ok types -> print_types typecheck (List.drop types (List.length prims))
+  | Ok signature ->
+    print_signature typecheck (List.drop signature (List.length prims))
   | Error error -> print_s [%sexp (error : Typecheck.Typecheck_error.t)]
 ;;
 

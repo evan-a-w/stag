@@ -72,8 +72,26 @@ val canonical_presence : presence -> presence
 (** The row variable at the end of [context], if it is open. *)
 val tail_var : context -> cvar ref option
 
-(** Renders [ty] for humans. Variables are named in order of appearance;
-    weak (unbound) ones are prefixed with [_]. The [context_bounds] of the
-    context variables reached are listed after the type, as
-    [where ..'a <= {...}]. *)
+(** Renders types for humans. Variables are named in order of appearance,
+    consistently across the types one printer renders; weak (unbound) ones are
+    prefixed with [_]. *)
+module Printer : sig
+  type t
+
+  (** [type_name] renders the canonical name of a type constructor, as is by
+      default. *)
+  val create
+    :  ?context_bounds:(id -> context list)
+    -> ?type_name:(string -> string)
+    -> unit
+    -> t
+
+  val ty : t -> ty -> string
+
+  (** The [context_bounds] of the context variables reached, as
+      [" where ..'a <= {...}"], or [""] if there are none. *)
+  val where : t -> string
+end
+
+(** One type rendered by a [Printer], followed by its [Printer.where]. *)
 val to_string_hum : ?context_bounds:(id -> context list) -> ty -> string

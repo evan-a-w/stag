@@ -1168,7 +1168,7 @@ and substitute_explicitly t scope ~context ~subs =
 ;;
 
 let typecheck t ~(program : Syntax.Program.t)
-  : ((string * Type.ty) list, Typecheck_error.t) Result.t
+  : (Signature.t, Typecheck_error.t) Result.t
   =
   let%bind.Result root =
     Module_scope.create
@@ -1192,33 +1192,58 @@ let typecheck t ~(program : Syntax.Program.t)
           }
       | Type _ | Module _ -> None)
   in
-  let program =
+  let program_env =
     { Program_env.type_env
     ; toplevels =
         List.map toplevels ~f:(fun toplevel -> toplevel.name, toplevel)
         |> String.Table.of_alist_exn
     }
   in
-  List.fold_result toplevels ~init:[] ~f:(fun acc toplevel ->
-    let%map.Result () =
+  let%map.Result () =
+    List.fold_result toplevels ~init:() ~f:(fun () toplevel ->
       match toplevel.state with
       | Unchecked ->
-        check_toplevel t program toplevel
+        check_toplevel t program_env toplevel
         |> Result.map ~f:(ignore : Scc_frame.t -> unit)
-      | In_progress _ | Done _ -> Ok ()
-    in
-    match toplevel.state with
-    | Done { scheme; _ } -> (toplevel.name, scheme) :: acc
-    | Unchecked | In_progress _ ->
-      raise_s [%message "typecheck: toplevel not done" (toplevel : Toplevel.t)])
-  |> Result.map ~f:List.rev
+      | In_progress _ | Done _ -> Ok ())
+  in
+  let rec signature module_ toplevels =
+    let canonical_name = Module_scope.canonical_name module_ in
+    List.map
+      toplevels
+      ~f:(fun (toplevel : Syntax.Toplevel.t) : Signature.Item.t ->
+        match toplevel with
+        | Let (name, _, _, _) ->
+          let toplevel =
+            Hashtbl.find_exn program_env.toplevels (canonical_name name)
+          in
+          (match toplevel.state with
+           | Done { scheme; persistent; _ } ->
+             Value { name; scheme; persistent }
+           | Unchecked | In_progress _ ->
+             raise_s
+               [%message "typecheck: toplevel not done" (toplevel : Toplevel.t)])
+        | Type decl ->
+          Type (Type_env.find_decl_exn type_env (canonical_name decl.name))
+        | Module (name, toplevels) ->
+          Module
+            { name
+            ; items = signature (Module_scope.enter module_ name) toplevels
+            })
+  in
+  signature root program
+;;
+
+let bound_contexts t id =
+  List.map (context_bounds t id) ~f:(fun (bound : Bound.t) -> bound.context)
 ;;
 
 let to_string_hum t ty =
-  Type.to_string_hum
-    ~context_bounds:(fun id ->
-      List.map (context_bounds t id) ~f:(fun (bound : Bound.t) -> bound.context))
-    ty
+  Type.to_string_hum ~context_bounds:(bound_contexts t) ty
+;;
+
+let signature_to_string_hum t signature =
+  Signature.to_string_hum ~context_bounds:(bound_contexts t) signature
 ;;
 
 let constrain_context t ~context ~bound =

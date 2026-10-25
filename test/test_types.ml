@@ -36,11 +36,13 @@ let%expect_test "variants" =
   check [ Decl.list; top "arity" [] (construct "Nil" ~args:[ int 1 ]) ];
   [%expect
     {|
-    nil : list['a]
-    one : list[int]
-    some : 'a -> option['a]
-    none : option['a]
-    nested : option[list[bool]]
+    type list['a] = Nil | Cons of 'a * list['a]
+    type option['a] = None | Some of 'a
+    val nil : list['a]
+    val one : list[int]
+    val some : 'a -> option['a]
+    val none : option['a]
+    val nested : option[list[bool]]
     (Unification_error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     (Unbound_constructor Nil)
@@ -83,7 +85,10 @@ let%expect_test "declarations are order independent and may be recursive" =
     ];
   [%expect
     {|
-    tree : tree
+    val tree : tree
+    type tree = Leaf | Node of list[tree]
+    type forest = list[tree]
+    type list['a] = Nil | Cons of 'a * list['a]
     (Unification_error
      (Type_mismatch (TCon odd ()) (TCon even ()) (Base_types_not_equal odd even)))
     |}]
@@ -103,12 +108,15 @@ let%expect_test "records" =
     ];
   [%expect
     {|
-    origin : point
-    get_x : point -> int
-    boxed : 'a -> box['a]
-    unbox : box['a] -> 'a
-    boxed_nil : box[list['a]]
-    unboxed : list['a]
+    type point = { x : int; y : int }
+    type box['a] = { contents : 'a }
+    val origin : point
+    val get_x : point -> int
+    val boxed : 'a -> box['a]
+    val unbox : box['a] -> 'a
+    val boxed_nil : box[list['a]]
+    val unboxed : list['a]
+    type list['a] = Nil | Cons of 'a * list['a]
     |}]
 ;;
 
@@ -162,9 +170,9 @@ let%expect_test "tuples" =
     ];
   [%expect
     {|
-    pair : int * bool
-    nested : 'a -> 'a * ('a * unit)
-    fn : ('_a -> '_a) * (int -> int)
+    val pair : int * bool
+    val nested : 'a -> 'a * ('a * unit)
+    val fn : ('_a -> '_a) * (int -> int)
     |}]
 ;;
 
@@ -224,14 +232,17 @@ let%expect_test "match" =
     ];
   [%expect
     {|
-    sum2 : list[int] -> int
-    is_zero : int -> bool
-    fst : 'a * 'b -> 'a
-    get_y : point -> int
-    get_opt : option['a] -> 'a -> 'a
-    shadows : 'a -> int
-    no_cases : 'a -> 'b
-    nested_record : option[point] -> int
+    type list['a] = Nil | Cons of 'a * list['a]
+    type option['a] = None | Some of 'a
+    type point = { x : int; y : int }
+    val sum2 : list[int] -> int
+    val is_zero : int -> bool
+    val fst : 'a * 'b -> 'a
+    val get_y : point -> int
+    val get_opt : option['a] -> 'a -> 'a
+    val shadows : 'a -> int
+    val no_cases : 'a -> 'b
+    val nested_record : option[point] -> int
     |}]
 ;;
 
@@ -321,7 +332,7 @@ let%expect_test "match errors" =
       (TCon int ()) (Base_types_not_equal option int)))
     (Duplicate_pattern_variable x)
     (Duplicate_pattern_variable x)
-    same_name_other_arms : int
+    val same_name_other_arms : int
     (Constructor_arity_mismatch (constructor Some) (expected 1) (got 0))
     (Unbound_constructor Some)
     (Duplicate_field x)
@@ -406,7 +417,7 @@ let%expect_test "duplicate context entries" =
     (Duplicate_context_entry x)
     (Duplicate_context_entry x)
     (Duplicate_context_entry x)
-    nested : <<int>{x : int}>{x : bool} -> <<int>{x : int}>{x : bool}
+    val nested : <<int>{x : int}>{x : bool} -> <<int>{x : int}>{x : bool}
     |}]
 ;;
 
@@ -475,10 +486,15 @@ let%expect_test "aliases" =
     ];
   [%expect
     {|
-    f : int * int -> int * int
-    a : t
-    g : <int>{x : int; ..'a} -> <int>{x : int; ..'a}
-    h : bool
+    type pair['a] = 'a * 'a
+    type code[{..'a}] = <int>{..'a}
+    type int_pair = int * int
+    type unused['a] = bool
+    type t = A of (int * int)
+    val f : int * int -> int * int
+    val a : t
+    val g : <int>{x : int; ..'a} -> <int>{x : int; ..'a}
+    val h : bool
     (Unification_error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     |}]
@@ -504,7 +520,10 @@ let%expect_test "cyclic aliases" =
     (Cyclic_type_alias t)
     (Cyclic_type_alias t)
     (Cyclic_type_alias t)
-    ok : u
+    type list['a] = Nil | Cons of 'a * list['a]
+    type t = list[u]
+    type u = U of list[u]
+    val ok : u
     |}]
 ;;
 
@@ -541,11 +560,11 @@ let%expect_test "annotation variables are shared within a toplevel" =
     ];
   [%expect
     {|
-    annotated : 'a -> 'a -> 'a
-    other_toplevel : int -> int
-    independent : 'a -> 'b -> 'b
-    context : <int>{x : int; ..'a} -> <int>{..'a} -> <int>{..'a}
-    ty_and_context_named_alike : <'a>{..'b} -> <'a>{..'b}
+    val annotated : 'a -> 'a -> 'a
+    val other_toplevel : int -> int
+    val independent : 'a -> 'b -> 'b
+    val context : <int>{x : int; ..'a} -> <int>{..'a} -> <int>{..'a}
+    val ty_and_context_named_alike : <'a>{..'b} -> <'a>{..'b}
     |}]
 ;;
 
@@ -610,11 +629,13 @@ let%expect_test "context parameters" =
     ];
   [%expect
     {|
-    single : <unit>{..'a} -> stmt[{..'a}]
-    uses_x : stmt[{x : 'a; ..'b}]
-    nested : stmt[{x : int; ..'a}]
-    annotated : stmt[{y : bool; ..'a}] -> stmt[{y : bool; ..'a}]
-    body : stmt[{..'a}] -> <unit>{..'a}
+    type list['a] = Nil | Cons of 'a * list['a]
+    type stmt[{..'a}] = Stmt of <unit>{..'a} * list[stmt[{..'a}]]
+    val single : <unit>{..'a} -> stmt[{..'a}]
+    val uses_x : stmt[{x : 'a; ..'b}]
+    val nested : stmt[{x : int; ..'a}]
+    val annotated : stmt[{y : bool; ..'a}] -> stmt[{y : bool; ..'a}]
+    val body : stmt[{..'a}] -> <unit>{..'a}
     |}]
 ;;
 
@@ -656,10 +677,10 @@ let%expect_test "patterns in quotes are captured by splices" =
     ];
   [%expect
     {|
-    captures : <'a>{x?'b : int; ..'c} -> <'a>{..'d} where ..'c <= {..'d}
-    applied : <int>{..'_a}
-    local : <int>{..'a}
-    bound_outside : <'a>{x : 'a; ..'b}
+    val captures : <'a>{x?'b : int; ..'c} -> <'a>{..'d} where ..'c <= {..'d}
+    val applied : <int>{..'_a}
+    val local : <int>{..'a}
+    val bound_outside : <'a>{x : 'a; ..'b}
     (Unification_error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     (Variable_used_at_wrong_level (name x) (var_level 1) (used_at 0))
@@ -686,11 +707,13 @@ let%expect_test "constructors and fields are not free variables of quotes" =
     ];
   [%expect
     {|
-    closed : <list[int]>{..'a}
-    open : <list['a]>{y : 'a; ..'b}
-    record : <int>{y : int; ..'a}
-    pattern : <int>{l : list[int]; ..'a}
-    in_splice : <list['a]>{..'b}
+    type list['a] = Nil | Cons of 'a * list['a]
+    type point = { x : int; y : int }
+    val closed : <list[int]>{..'a}
+    val open : <list['a]>{y : 'a; ..'b}
+    val record : <int>{y : int; ..'a}
+    val pattern : <int>{l : list[int]; ..'a}
+    val in_splice : <list['a]>{..'b}
     |}]
 ;;
 
@@ -723,22 +746,24 @@ let%expect_test "generalization of syntactic values" =
     ];
   [%expect
     {|
-    nil : list['a]
-    uses : list[int] * list[bool]
-    pair : list['a] * ('b -> 'b)
-    boxed : box[list['a]]
-    contents : list['a]
-    matched : list['a]
-    local : list[list['a]]
-    local_fn : 'a -> 'a
-    quoted : <list['a]>{..'b}
-    weak_app : '_a -> '_a
-    weak_cons : list['_a -> '_a]
-    weak_let : list['_a]
-    weak_match : list['_a]
-    weak_arm : list['_a]
-    weak_field : list['_a]
-    weak_splice : list['_a]
+    type list['a] = Nil | Cons of 'a * list['a]
+    type box['a] = { contents : 'a }
+    val nil : list['a]
+    val uses : list[int] * list[bool]
+    val pair : list['a] * ('b -> 'b)
+    val boxed : box[list['a]]
+    val contents : list['a]
+    val matched : list['a]
+    val local : list[list['a]]
+    val local_fn : 'a -> 'a
+    val quoted : <list['a]>{..'b}
+    val weak_app : '_a -> '_a
+    val weak_cons : list['_a -> '_a]
+    val weak_let : list['_a]
+    val weak_match : list['_a]
+    val weak_arm : list['_a]
+    val weak_field : list['_a]
+    val weak_splice : list['_a]
     |}]
 ;;
 
@@ -767,7 +792,8 @@ let%expect_test "local generalization of syntactic values" =
     ];
   [%expect
     {|
-    poly : list[int] * list[bool]
+    type list['a] = Nil | Cons of 'a * list['a]
+    val poly : list[int] * list[bool]
     (Unification_error
      (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
     |}]
@@ -783,10 +809,11 @@ let%expect_test "generalized values are not persistent" =
     ];
   [%expect
     {|
-    nil : list['a]
-    f : 'a -> 'a
-    uses_nil : <'a>{nil : 'a; ..'b}
-    uses_f : <'a -> 'a>{..'b}
+    type list['a] = Nil | Cons of 'a * list['a]
+    val nil : list['a]
+    val f : 'a -> 'a
+    val uses_nil : <'a>{nil : 'a; ..'b}
+    val uses_f : <'a -> 'a>{..'b}
     |}]
 ;;
 
@@ -804,11 +831,13 @@ let%expect_test "SCCs are generalized iff all members are values" =
     ];
   [%expect
     {|
-    nil : list['a]
-    f : 'a -> 'b
-    g : 'a -> 'b
-    a : '_a -> list['_b]
-    b : list['_a]
+    type list['a] = Nil | Cons of 'a * list['a]
+    val nil : list['a]
+    val f : 'a -> 'b
+    val g : 'a -> 'b
+    type list['a] = Nil | Cons of 'a * list['a]
+    val a : '_a -> list['_b]
+    val b : list['_a]
     |}]
 ;;
 
@@ -833,15 +862,19 @@ let%expect_test "recursive SCCs with a non-function are not generalized" =
     ];
   [%expect
     {|
-    a : '_a -> list['_b]
-    b : list['_a]
-    quoted : <'a>{a : int -> 'a; ..'b}
-    xs : list[int]
-    ys : list[int]
-    x : '_a
-    x : '_a
-    y : '_a
-    M.x : '_a
+    type list['a] = Nil | Cons of 'a * list['a]
+    val a : '_a -> list['_b]
+    val b : list['_a]
+    val quoted : <'a>{a : int -> 'a; ..'b}
+    type list['a] = Nil | Cons of 'a * list['a]
+    val xs : list[int]
+    val ys : list[int]
+    val x : '_a
+    val x : '_a
+    val y : '_a
+    module M : sig
+      val x : '_a
+    end
     (Unification_error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     |}]
@@ -849,10 +882,17 @@ let%expect_test "recursive SCCs with a non-function are not generalized" =
 
 let%expect_test "recursive local non-functions are not generalized" =
   let print_local equal =
-    check
-      [ Decl.list
-      ; top "local" [] (let_ "x" [] equal (tuple [ var "x"; var "x" ]))
-      ]
+    let typecheck = Typecheck.create () in
+    match
+      Typecheck.typecheck
+        typecheck
+        ~program:
+          [ Decl.list
+          ; top "local" [] (let_ "x" [] equal (tuple [ var "x"; var "x" ]))
+          ]
+    with
+    | Ok signature -> print_signature typecheck [ List.last_exn signature ]
+    | Error error -> print_s [%sexp (error : Typecheck.Typecheck_error.t)]
   in
   print_local (var "x");
   print_local (seq (var "x") nil);
@@ -867,16 +907,16 @@ let%expect_test "recursive local non-functions are not generalized" =
   print_local (quote (splice ~subs:[ "x", None ] (quote nil)));
   [%expect
     {|
-    local : '_a * '_a
-    local : list['_a] * list['_a]
-    local : list['_a] * list['_a]
-    local : <list['_a]>{..'_b} * <list['_a]>{..'_b}
-    local : list['a] * list['b]
-    local : list['a] * list['b]
-    local : list['a] * list['b]
-    local : list['a] * list['b]
-    local : <list['a]>{y : 'b; ..'c} * <list['d]>{y : 'e; ..'f}
-    local : <list['_a]>{x : '_b; ..'_c} * <list['_a]>{x : '_b; ..'_c}
+    val local : '_a * '_a
+    val local : list['_a] * list['_a]
+    val local : list['_a] * list['_a]
+    val local : <list['_a]>{..'_b} * <list['_a]>{..'_b}
+    val local : list['a] * list['b]
+    val local : list['a] * list['b]
+    val local : list['a] * list['b]
+    val local : list['a] * list['b]
+    val local : <list['a]>{y : 'b; ..'c} * <list['d]>{y : 'e; ..'f}
+    val local : <list['_a]>{x : '_b; ..'_c} * <list['_a]>{x : '_b; ..'_c}
     |}]
 ;;
 
@@ -904,11 +944,12 @@ let%expect_test "quotes are values unless their level 0 splices are not" =
     ];
   [%expect
     {|
-    no_splice : <list['a]>{..'b}
-    value_splice : <list['a]>{..'b}
-    app_splice : <list['_a]>{..'_b}
-    nested_app_splice : <<list['a]>{..'b}>{..'c}
-    escaping_app_splice : <<list['_a]>{..'_b}>{..'_c}
-    substitution : <list['a]>{..'b}
+    type list['a] = Nil | Cons of 'a * list['a]
+    val no_splice : <list['a]>{..'b}
+    val value_splice : <list['a]>{..'b}
+    val app_splice : <list['_a]>{..'_b}
+    val nested_app_splice : <<list['a]>{..'b}>{..'c}
+    val escaping_app_splice : <<list['_a]>{..'_b}>{..'_c}
+    val substitution : <list['a]>{..'b}
     |}]
 ;;

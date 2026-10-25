@@ -50,6 +50,9 @@ val find_field
   -> Syntax.Path.t
   -> (Field.t, Typecheck_error.t) Result.t
 
+(** The checked declaration of the type of canonical name [name]. *)
+val find_decl_exn : t -> string -> Signature.Type_decl.t
+
 (** The type and context variables of the annotations of one toplevel
     definition: each name stands for the same variable throughout. *)
 module Annotation_vars : sig
