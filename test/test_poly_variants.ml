@@ -753,7 +753,7 @@ let%expect_test "structural types are not recursive" =
     ];
   [%expect
     {|
-    (Unification_error (Occurs_check_failed (ATy (TVar (Unbound 17 1)))))
+    val occurs : ([`A of 'a; ..'b] as 'a) -> 'a
     (Unification_error
      (Row_mismatch
       (RExtend A Present (TCon unit ())

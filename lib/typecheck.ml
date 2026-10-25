@@ -393,8 +393,8 @@ let finish_scc t (members : Toplevel.t list) =
   List.iter members ~f:(fun member ->
     match member.state with
     | In_progress { ty; _ } ->
-      let scheme = if generalize then Scheme.generalize_ty ~rank:0 ty else ty in
-      member.state <- Done (Env.Entry.toplevel ~scheme ~persistent)
+      if generalize then Scheme.generalize_ty ~rank:0 ty;
+      member.state <- Done (Env.Entry.toplevel ~scheme:ty ~persistent)
     | Unchecked | Done _ ->
       raise_s
         [%message "finish_scc: member not in progress" (member : Toplevel.t)])
@@ -512,14 +512,11 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
         ~f:(fun () -> check_body t inner ~args:arg_types ~res_ty ~body:equal)
     in
     let persistent = not (List.is_empty args) in
-    let scheme =
-      if Syntax.Expr.binding_is_value name ~args ~equal
-      then Scheme.generalize_ty ~rank:scope.rank ty
-      else ty
-    in
+    if Syntax.Expr.binding_is_value name ~args ~equal
+    then Scheme.generalize_ty ~rank:scope.rank ty;
     Env.with_bindings
       scope.locals
-      [ name, Scope.entry scope ~scheme ~persistent ]
+      [ name, Scope.entry scope ~scheme:ty ~persistent ]
       ~f:(fun () -> expr_type t scope ~expr:in_)
   | Quote expr ->
     let quote =

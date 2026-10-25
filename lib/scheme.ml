@@ -40,39 +40,43 @@ let instantiator fresh ~rank : Type.Mapper.t =
             var
             ~wrap:(fun var -> Type.PVar var)
             ~bound:Nothing.unreachable_code)
+    ; keeps =
+        (fun var ->
+          match var.state with
+          | Generic -> false
+          | Unbound _ | Link _ -> true)
+    ; id = (fun () -> Fresh.id fresh)
     }
   in
   mapper
 ;;
 
-let generalizer ~rank : Type.Mapper.t =
-  let generalize (var : _ Type.Var.t) ~wrap ~bound =
+let rec generalizer ~rank : Nothing.t Type.Iter.t =
+  let generalize ~guarded:_ (var : _ Type.Var.t) ~bound =
     (match var.state with
      | Unbound rank' when rank' > rank ->
        var.state <- Generic;
        List.iter var.bounds ~f:bound
      | Unbound _ | Generic | Link _ -> ());
-    wrap var
+    Ok ()
   in
-  let rec mapper : Type.Mapper.t =
-    { ty =
-        generalize
-          ~wrap:(fun var -> Type.TVar var)
-          ~bound:Nothing.unreachable_code
-    ; row =
-        generalize
-          ~wrap:(fun var -> Type.RVar var)
-          ~bound:(fun (bound : Type.bound) ->
-            ignore (Type.map_row mapper bound.row : Type.row))
-    ; presence =
-        generalize
-          ~wrap:(fun var -> Type.PVar var)
-          ~bound:Nothing.unreachable_code
-    }
-  in
-  mapper
+  { ty = generalize ~bound:Nothing.unreachable_code
+  ; row =
+      generalize ~bound:(fun (bound : Type.bound) ->
+        generalize_row ~rank bound.row)
+  ; presence = generalize ~bound:Nothing.unreachable_code
+  }
+
+and generalize_row ~rank row =
+  match Type.iter_row (generalizer ~rank) row with
+  | Ok () -> ()
+  | Error _ -> .
 ;;
 
-let generalize_ty ~rank ty = Type.map_ty (generalizer ~rank) ty
-let generalize_row ~rank row = Type.map_row (generalizer ~rank) row
+let generalize_ty ~rank ty =
+  match Type.iter_ty (generalizer ~rank) ty with
+  | Ok () -> ()
+  | Error _ -> .
+;;
+
 let instantiate fresh ~rank = Type.map_ty (instantiator fresh ~rank)

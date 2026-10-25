@@ -1,14 +1,15 @@
 open! Core
 
 (* Lowers ranks to at most [rank]. [occurs] is the id of the variable being
-   bound, if any, with the variable to report if it is reached. Bounds are not
-   part of a type's structure, so are only rank lowered. *)
+   bound, if any, with the variable to report if it is reached other than
+   through a record or variant, which would make an unguarded cycle. Bounds are
+   not part of a type's structure, so are only rank lowered. *)
 let rec adjuster ~rank ~(occurs : (Type.id * Type.arg) option)
   : Unification_error.t Type.Iter.t
   =
-  let adjust (var : _ Type.Var.t) ~bound =
+  let adjust ~guarded (var : _ Type.Var.t) ~bound =
     match occurs with
-    | Some (id, arg) when id = var.id ->
+    | Some (id, arg) when id = var.id && not guarded ->
       Error (Unification_error.Occurs_check_failed arg)
     | Some _ | None ->
       if Type.Var.rank_exn var > rank
@@ -24,6 +25,28 @@ let rec adjuster ~rank ~(occurs : (Type.id * Type.arg) option)
   ; presence = adjust ~bound:Nothing.unreachable_code
   }
 ;;
+
+(* The pairs of records or variants being or already unified, assumed equal
+   when reached again: as each cycle passes through one, unifying cyclic types
+   terminates. *)
+module State = struct
+  type t =
+    { fresh : Fresh.t
+    ; mutable assumed : (Type.ty * Type.ty) list
+    }
+
+  let create fresh = { fresh; assumed = [] }
+
+  let assume t ty1 ty2 =
+    let assumed =
+      List.exists t.assumed ~f:(fun (ty1', ty2') ->
+        (phys_equal ty1 ty1' && phys_equal ty2 ty2')
+        || (phys_equal ty1 ty2' && phys_equal ty2 ty1'))
+    in
+    if not assumed then t.assumed <- (ty1, ty2) :: t.assumed;
+    assumed
+  ;;
+end
 
 let unify_presence ~presence1 ~presence2 ~error =
   match
@@ -59,7 +82,7 @@ let presence_mismatch_reason name ~found
   | Some (_ : Type.ty) -> Presence_mismatch name
 ;;
 
-let rec unify_ty fresh ~ty1 ~ty2 : (unit, Unification_error.t) Result.t =
+let rec unify_ty' state ~ty1 ~ty2 : (unit, Unification_error.t) Result.t =
   let ty1 = Type.canonical_ty ty1 in
   let ty2 = Type.canonical_ty ty2 in
   let zip xs ys : (_, Unification_error.t) Result.t =
@@ -71,6 +94,7 @@ let rec unify_ty fresh ~ty1 ~ty2 : (unit, Unification_error.t) Result.t =
            (ty1, ty2, Args_length_mismatch (List.length xs, List.length ys)))
   in
   match ty1, ty2 with
+  | _ when phys_equal ty1 ty2 -> Ok ()
   | TCon (name1, args1), TCon (name2, args2) ->
     if not (String.equal name1 name2)
     then Error (Type_mismatch (ty1, ty2, Base_types_not_equal (name1, name2)))
@@ -78,23 +102,23 @@ let rec unify_ty fresh ~ty1 ~ty2 : (unit, Unification_error.t) Result.t =
       let%bind.Result args = zip args1 args2 in
       List.fold_result args ~init:() ~f:(fun () (arg1, arg2) ->
         match arg1, arg2 with
-        | ATy ty1, ATy ty2 -> unify_ty fresh ~ty1 ~ty2
-        | ARow row1, ARow row2 -> unify_row fresh ~row1 ~row2
+        | ATy ty1, ATy ty2 -> unify_ty' state ~ty1 ~ty2
+        | ARow row1, ARow row2 -> unify_row' state ~row1 ~row2
         | ATy _, ARow _ | ARow _, ATy _ ->
           Error (Type_mismatch (ty1, ty2, Mismatch_arg_kind (arg1, arg2)))))
   | TArrow (arg1, res1), TArrow (arg2, res2) ->
-    let%bind.Result () = unify_ty fresh ~ty1:arg1 ~ty2:arg2 in
-    unify_ty fresh ~ty1:res1 ~ty2:res2
+    let%bind.Result () = unify_ty' state ~ty1:arg1 ~ty2:arg2 in
+    unify_ty' state ~ty1:res1 ~ty2:res2
   | TTuple tys1, TTuple tys2 ->
     let%bind.Result tys = zip tys1 tys2 in
-    List.map tys ~f:(fun (ty1, ty2) -> unify_ty fresh ~ty1 ~ty2)
+    List.map tys ~f:(fun (ty1, ty2) -> unify_ty' state ~ty1 ~ty2)
     |> Result.all_unit
   | ( TCode { inner = inner1; context = row1 }
     , TCode { inner = inner2; context = row2 } ) ->
-    let%bind.Result () = unify_ty fresh ~ty1:inner1 ~ty2:inner2 in
-    unify_row fresh ~row1 ~row2
+    let%bind.Result () = unify_ty' state ~ty1:inner1 ~ty2:inner2 in
+    unify_row' state ~row1 ~row2
   | TRecord row1, TRecord row2 | TVariant row1, TVariant row2 ->
-    unify_row fresh ~row1 ~row2
+    if State.assume state ty1 ty2 then Ok () else unify_row' state ~row1 ~row2
   | TVar var1, TVar var2 when phys_equal var1 var2 -> Ok ()
   | TVar var, ty | ty, TVar var ->
     let%map.Result () =
@@ -107,7 +131,7 @@ let rec unify_ty fresh ~ty1 ~ty2 : (unit, Unification_error.t) Result.t =
     var.state <- Link ty
   | _ -> Error (Type_mismatch (ty1, ty2, Structural_mismatch))
 
-and bind_rvar fresh (var : _ Type.Var.t) row =
+and bind_rvar state (var : _ Type.Var.t) row =
   let%bind.Result () =
     Type.iter_row
       (adjuster
@@ -119,16 +143,16 @@ and bind_rvar fresh (var : _ Type.Var.t) row =
   let bounds = var.bounds in
   var.bounds <- [];
   List.fold_result bounds ~init:() ~f:(fun () (bound : Type.bound) ->
-    constrain_row fresh ~row ~bound:bound.row ~shadowed:bound.shadowed)
+    constrain_row' state ~row ~bound:bound.row ~shadowed:bound.shadowed)
 
-and unify_row fresh ~row1 ~row2 : (unit, Unification_error.t) Result.t =
+and unify_row' state ~row1 ~row2 : (unit, Unification_error.t) Result.t =
   let row1 = Type.canonical_row row1 in
   let row2 = Type.canonical_row row2 in
   match row1, row2 with
   | REmpty, REmpty -> Ok ()
   | RExtend (x, p1, t1, rest1), c2 ->
     let tail1 = Type.tail_var rest1 in
-    let%bind.Result p2, t2, rest2 = rewrite fresh x c2 in
+    let%bind.Result p2, t2, rest2 = rewrite state x c2 in
     let%bind.Result () =
       match tail1 with
       | Some { state = Link _; _ } ->
@@ -146,9 +170,9 @@ and unify_row fresh ~row1 ~row2 : (unit, Unification_error.t) Result.t =
     let%bind.Result () =
       match t2 with
       | None -> Ok ()
-      | Some t2 -> unify_ty fresh ~ty1:t1 ~ty2:t2
+      | Some t2 -> unify_ty' state ~ty1:t1 ~ty2:t2
     in
-    unify_row fresh ~row1:rest1 ~row2:rest2
+    unify_row' state ~row1:rest1 ~row2:rest2
   | REmpty, RExtend (x, p2, _, rest2) ->
     let%bind.Result () =
       unify_presence
@@ -156,13 +180,13 @@ and unify_row fresh ~row1 ~row2 : (unit, Unification_error.t) Result.t =
         ~presence2:p2
         ~error:(Unification_error.Row_mismatch (row1, row2, Missing_label x))
     in
-    unify_row fresh ~row1 ~row2:rest2
+    unify_row' state ~row1 ~row2:rest2
   | RVar var1, RVar var2 when phys_equal var1 var2 -> Ok ()
-  | RVar var, row | row, RVar var -> bind_rvar fresh var row
+  | RVar var, row | row, RVar var -> bind_rvar state var row
 
 (* Finds the first entry for [name], which has no type if [row] lacks
    [name] entirely. *)
-and rewrite fresh name (row : Type.row)
+and rewrite state name (row : Type.row)
   : (Type.presence * Type.ty option * Type.row, Unification_error.t) Result.t
   =
   match Type.canonical_row row with
@@ -171,17 +195,17 @@ and rewrite fresh name (row : Type.row)
     (match String.equal x name with
      | true -> Ok (presence, Some ty, rest)
      | false ->
-       let%map.Result presence', ty', rest' = rewrite fresh name rest in
+       let%map.Result presence', ty', rest' = rewrite state name rest in
        presence', ty', Type.RExtend (x, presence, ty, rest'))
   | RVar var ->
     let rank = Type.Var.rank_exn var in
-    let px = Type.PVar (Fresh.var fresh ~rank) in
-    let tx = Type.TVar (Fresh.var fresh ~rank) in
-    let rest = Type.RVar (Fresh.var fresh ~rank) in
-    let%map.Result () = bind_rvar fresh var (RExtend (name, px, tx, rest)) in
+    let px = Type.PVar (Fresh.var state.fresh ~rank) in
+    let tx = Type.TVar (Fresh.var state.fresh ~rank) in
+    let rest = Type.RVar (Fresh.var state.fresh ~rank) in
+    let%map.Result () = bind_rvar state var (RExtend (name, px, tx, rest)) in
     px, Some tx, rest
 
-and constrain_row fresh ~row ~bound ~shadowed =
+and constrain_row' state ~row ~bound ~shadowed =
   match Type.canonical_row row with
   | REmpty -> Ok ()
   | RExtend (name, presence, ty, rest) ->
@@ -191,7 +215,7 @@ and constrain_row fresh ~row ~bound ~shadowed =
       | Absent -> Ok ()
       | Present | PVar _ ->
         let%bind.Result bound_presence, bound_ty, (_ : Type.row) =
-          rewrite fresh name bound
+          rewrite state name bound
         in
         let%bind.Result () =
           presence_at_most
@@ -203,9 +227,9 @@ and constrain_row fresh ~row ~bound ~shadowed =
         in
         (match bound_ty with
          | None -> Ok ()
-         | Some bound_ty -> unify_ty fresh ~ty1:ty ~ty2:bound_ty)
+         | Some bound_ty -> unify_ty' state ~ty1:ty ~ty2:bound_ty)
     in
-    constrain_row fresh ~row:rest ~bound ~shadowed:(Set.add shadowed name)
+    constrain_row' state ~row:rest ~bound ~shadowed:(Set.add shadowed name)
   | RVar var ->
     let rank = Type.Var.rank_exn var in
     (match Type.canonical_row bound with
@@ -215,8 +239,17 @@ and constrain_row fresh ~row ~bound ~shadowed =
        var.bounds <- { row = bound; shadowed } :: var.bounds)
 ;;
 
+let unify_ty fresh ~ty1 ~ty2 = unify_ty' (State.create fresh) ~ty1 ~ty2
+let unify_row fresh ~row1 ~row2 = unify_row' (State.create fresh) ~row1 ~row2
+
+let constrain_row fresh ~row ~bound ~shadowed =
+  constrain_row' (State.create fresh) ~row ~bound ~shadowed
+;;
+
 let present_entry fresh ~row ~name ~rank =
-  let%bind.Result presence, found, (_ : Type.row) = rewrite fresh name row in
+  let%bind.Result presence, found, (_ : Type.row) =
+    rewrite (State.create fresh) name row
+  in
   let ty =
     Option.value_or_thunk found ~default:(fun () ->
       Type.TVar (Fresh.var fresh ~rank))
