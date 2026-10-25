@@ -8,7 +8,8 @@ open! Core
     instances. *)
 val instantiate : Fresh.t -> rank:Type.rank -> Type.ty -> Type.ty
 
-(** Marks unbound variables with rank greater than [rank] as [Generic]. *)
+(** Marks unbound variables with rank greater than [rank] as [Generic], in
+    place. *)
 val generalize_ty : rank:Type.rank -> Type.ty -> unit
 
 val generalize_row : rank:Type.rank -> Type.row -> unit

@@ -41,7 +41,8 @@ Elaboration:
   within `M`.
 - Arity and kind of arguments are checked (`Type_arity_mismatch`,
   `Type_arg_kind_mismatch`).
-- Aliases are expanded during elaboration, so never appear in `Type.ty`.
+- Aliases are expanded during elaboration, so never appear in `Type.ty`; a
+  recursive alias expands to a cyclic type.
 
 ## Declarations: `Syntax.Type_decl`
 
@@ -65,8 +66,10 @@ end
 - Variant, record and abstract types are nominal: `Type.TCon (canonical name, args)`.
   The canonical name is the full module path joined with `.` (e.g. `"M.t"`;
   just `"t"` at the root).
-- Aliases are structural (expanded). Cyclic aliases are an error
-  (`Cyclic_type_alias`); recursion through a variant or record is fine.
+- Aliases are structural (expanded). Recursion through a nominal variant or
+  record is fine, and through a polymorphic record or variant gives a cyclic
+  (equi-recursive) type if regular (see `rows.md`). Other cyclic aliases are
+  an error (`Cyclic_type_alias`, or `Non_regular_recursive_alias`).
 - Constructor and field names are unique within a module
   (`Duplicate_constructor`, `Duplicate_field`); type names likewise
   (`Duplicate_type`). Parameters must be distinct.

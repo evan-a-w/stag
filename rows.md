@@ -102,12 +102,75 @@ Labels are distinct within one pattern.
 
 ## Recursion
 
-Structural types can't be recursive: there are no equi-recursive types, so
-the occurs check rejects `{x : 'a; ..'r}` with `'a` that record (and
-likewise for variants and rows, `Cyclic_row`), and an alias whose body
-refers to itself, through records and variants too, is
-`Cyclic_type_alias`. Recursion goes through a nominal wrapper:
-`` type t = T of [`Nil | `Cons of int * t] ``.
+Structural types are equi-recursive, with OCaml's default semantics for
+polymorphic variants and objects:
+
+```ocaml
+let len l = match l with `Nil -> 0 | `Cons (_, t) -> add 1 (len t)
+(* ([`Cons of 'a * 'b | `Nil] as 'b) -> int *)
+```
+
+- Types are graphs. Only variables are mutable, so every cycle passes
+  through a `Link`, and it must also pass through a `TRecord` or `TVariant`
+  (it is guarded). The occurs check (`Unify.adjuster`, via `Type.iter_ty`'s
+  `guarded`) only rejects a variable reached outside any record or variant
+  of the type it is bound to: `'a = 'a -> int`, `'a = 'a * int`,
+  `'a = 'a list`, `'a = <'a>{}`, `'a = <int>{x : 'a}` and a row variable in
+  its own row's spine (or a context or type argument there) are still
+  `Occurs_check_failed`, while `'a = {x : 'a list}`,
+  `` 'a = [`A of 'a -> int] `` and `r = x : {..r}` are cycles.
+- Unification is coinductive: it keeps the pairs of (physical) records and
+  variants it has unified or is unifying, and assumes a pair equal when it
+  is reached again. Unification only creates rows and variables, never
+  records or variants, so the pairs are finitely many and it terminates.
+  Rewriting and row unification follow row spines, which are acyclic.
+- Traversals terminate and preserve sharing. `Type.iter_ty` visits each
+  `Link` at most once unguarded and once guarded. `Type.map_ty`
+  (instantiation) memoizes on `Link`s and on records and variants, closing
+  the copy of a cycle with a new `Link`, and keeps the parts with nothing to
+  instantiate as they are; generalization marks variables in place. Records
+  and variants are identified physically or by their (physical) canonical
+  row, as `TRecord (RVar r)` may be built more than once for one `r`.
+  Unification does not merge equal nodes, so unifying two separately built
+  cyclic types leaves both, and printing one of them may show it unrolled.
+- Printing: `` ([`Cons of int * 'a | `Nil] as 'a) ``, always parenthesized.
+  The name is allocated where it first appears (usually within the body),
+  like other variables of the printer, and is weak (`'_a`) if the type has a
+  weak variable. Later occurrences of the same node print as its name. Sexps
+  print `(Cycle n ...)` around a record or variant reached again within
+  itself, and `(Cycle_ref n)` there.
+
+### Recursive aliases
+
+An alias may refer to itself, or to aliases referring back to it, through
+records and variants:
+
+```ocaml
+type 'a l = [`Nil | `Cons of 'a * 'a l]
+type 'a a = {b : 'a b; v : 'a}   type 'b b = [`End | `More of 'b a]
+type tree = [`Leaf of int | `Node of tree list]
+```
+
+- Each expansion of an alias (each use, and its declaration with its own
+  parameters) ties the knot: a reference back to an alias being expanded
+  becomes a variable linked to the expansion's body once elaborated. So each
+  instance has its own cycle.
+- The reference back must be guarded: an alias being expanded reached again
+  with no record or variant entered since its expansion began is
+  `Cyclic_type_alias` (`type t = t * int`, `type t = t list`,
+  `type t = t id`, `type t = <int>{x : t}`).
+- Recursion must be regular: the reference back must have the arguments of
+  the expansion in progress, i.e. (as declarations are elaborated with their
+  own parameters) the alias's own parameters in order, checked physically.
+  Otherwise it is `Non_regular_recursive_alias` (`` type 'a t = [`A of ('a *
+  'a) t] ``, `` [`A of int t] ``, swapped parameters, or a different row
+  argument), so expansion terminates.
+- `Signature` keeps the expanded body of an alias, a cyclic type, and prints
+  occurrences of the whole body within it as the alias:
+  `` type l['a] = [`Cons of 'a * l['a] | `Nil] ``, and `type ints = int l` is
+  `` type ints = [`Cons of int * ints | `Nil] ``. Uses of an alias elsewhere,
+  as in values and other declarations, are expanded, so print in the `as`
+  form: `` val nil : ([`Cons of bool * 'a | `Nil] as 'a) ``.
 
 ## Values
 

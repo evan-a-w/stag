@@ -305,11 +305,21 @@ let%expect_test "occurs check fails for unguarded cycles" =
   check (fun a -> TCode { inner = int; context = row [ "x", a ] });
   check (fun a -> TCode { inner = a; context = REmpty });
   check (fun a -> TArrow (record [ "x", a ], a));
-  let r = rvar fresh in
-  print_s
-    [%sexp
-      (Unify.unify_row fresh ~row1:r ~row2:(row [ "x", int ] ~tail:r)
-       : (unit, Unification_error.t) Result.t)];
+  let check_row f =
+    let r = rvar fresh in
+    print_s
+      [%sexp
+        (Unify.unify_row fresh ~row1:r ~row2:(f r)
+         : (unit, Unification_error.t) Result.t)]
+  in
+  check_row (fun r -> row [ "x", int ] ~tail:r);
+  check_row (fun r -> row [ "x", TCode { inner = int; context = r } ]);
+  check_row (fun r -> row [ "x", TCon ("t", [ ARow r ]) ]);
+  (* Through a variable already bound to an unguarded cycle's part. *)
+  let a = tvar fresh in
+  let b = tvar fresh in
+  unify fresh a (TTuple [ b; int ]);
+  unify fresh b (TArrow (int, a));
   [%expect
     {|
     (Error (Occurs_check_failed (ATy (TVar (Unbound 0 1)))))
@@ -319,6 +329,10 @@ let%expect_test "occurs check fails for unguarded cycles" =
     (Error (Occurs_check_failed (ATy (TVar (Unbound 4 1)))))
     (Error (Occurs_check_failed (ATy (TVar (Unbound 5 1)))))
     (Error (Occurs_check_failed (ARow (RVar (Unbound 6 1)))))
+    (Error (Occurs_check_failed (ARow (RVar (Unbound 7 1)))))
+    (Error (Occurs_check_failed (ARow (RVar (Unbound 8 1)))))
+    (Ok ())
+    (Error (Occurs_check_failed (ATy (TVar (Unbound 10 1)))))
     |}]
 ;;
 
@@ -741,5 +755,54 @@ let%expect_test "sexps of recursive aliases" =
            (RExtend Nil Present (TCon unit ())
             (RExtend Cons Present
              (TTuple ((TVar (Generic 0)) (TVar (Link (Cycle_ref 0))))) REmpty)))))))))
+    |}]
+;;
+
+let%expect_test "bounds with cyclic types" =
+  let fresh = Fresh.create () in
+  let open T in
+  let list () =
+    fix fresh (fun l -> variant [ "Nil", Type.unit; "Cons", TTuple [ int; l ] ])
+  in
+  let r = rvar fresh in
+  print_s
+    [%sexp
+      (Unify.constrain_row
+         fresh
+         ~row:r
+         ~bound:(row [ "x", list () ] ~tail:(rvar fresh))
+         ~shadowed:String.Set.empty
+       : (unit, Unification_error.t) Result.t)];
+  print (TRecord r);
+  let x = tvar fresh in
+  unify fresh (TRecord r) (record [ "x", x ]);
+  unify fresh x (variant [ "Cons", TTuple [ int; list () ] ] ~tail:(rvar fresh));
+  print (TRecord r);
+  let s = rvar fresh in
+  ignore
+    (Unify.constrain_row
+       fresh
+       ~row:s
+       ~bound:(row [ "x", list () ])
+       ~shadowed:String.Set.empty
+     : _ Result.t);
+  unify
+    fresh
+    (TRecord s)
+    (record
+       [ ( "x"
+         , variant
+             [ "Cons", TTuple [ Type.bool; tvar fresh ] ]
+             ~tail:(rvar fresh) )
+       ]);
+  [%expect
+    {|
+    (Ok ())
+    {..'_a} where ..'_a <= {x : ([`Cons of int * 'b | `Nil] as 'b); ..'_c}
+    (Ok ())
+    (Ok ())
+    {x : ([`Cons of int * 'a | `Nil] as 'a)}
+    (Error
+     (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
     |}]
 ;;
