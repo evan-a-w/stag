@@ -69,9 +69,9 @@ and bound =
   }
 
 (** Types are graphs: [Link]s may close cycles, each through a [TRecord] or
-    [TVariant] (equi-recursive types). Sexps print a [Link] closing a cycle
-    as [(Cycle_link id target)], and the variable within as
-    [(Back_link id)]. *)
+    [TVariant] (equi-recursive types). Sexps print a record or variant
+    reached again within itself as [(Cycle_ref n)], and the record or
+    variant as [(Cycle n ...)]. *)
 val sexp_of_ty : ty -> Sexp.t
 
 val sexp_of_row : row -> Sexp.t

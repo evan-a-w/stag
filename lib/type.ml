@@ -287,31 +287,27 @@ let has_unbound_var ty =
 ;;
 
 module Sexper = struct
-  (* For each [Link] being printed, whether a cycle reached it again. *)
+  (* A record or variant being printed, labelled once a cycle reaches it
+     again. *)
+  module Cycle = struct
+    type t =
+      { node : ty
+      ; mutable label : int option
+      }
+  end
+
   type t =
-    { tys : bool ref Int.Table.t
-    ; rows : bool ref Int.Table.t
+    { mutable cycles : Cycle.t list
+    ; mutable next_label : int
     }
 
-  let create () = { tys = Int.Table.create (); rows = Int.Table.create () }
+  let create () = { cycles = []; next_label = 0 }
 
-  let var table (var : _ Var.t) ~sexp_of_link =
+  let var (var : _ Var.t) ~sexp_of_link =
     match var.state with
     | Unbound rank -> [%sexp "Unbound", (var.id : id), (rank : rank)]
     | Generic -> [%sexp "Generic", (var.id : id)]
-    | Link target ->
-      (match Hashtbl.find table var.id with
-       | Some cyclic ->
-         cyclic := true;
-         [%sexp "Back_link", (var.id : id)]
-       | None ->
-         let cyclic = ref false in
-         Hashtbl.set table ~key:var.id ~data:cyclic;
-         let target = sexp_of_link target in
-         Hashtbl.remove table var.id;
-         if !cyclic
-         then [%sexp "Cycle_link", (var.id : id), (target : Sexp.t)]
-         else [%sexp "Link", (target : Sexp.t)])
+    | Link target -> [%sexp "Link", (sexp_of_link target : Sexp.t)]
   ;;
 
   let rec ty t ty' : Sexp.t =
@@ -326,16 +322,43 @@ module Sexper = struct
         ; List [ Atom "inner"; ty t inner ]
         ; List [ Atom "context"; row t context ]
         ]
-    | TRecord r -> List [ Atom "TRecord"; row t r ]
-    | TVariant r -> List [ Atom "TVariant"; row t r ]
-    | TVar v -> List [ Atom "TVar"; var t.tys v ~sexp_of_link:(ty t) ]
+    | TRecord r ->
+      cycle t ty' (fun () : Sexp.t -> List [ Atom "TRecord"; row t r ])
+    | TVariant r ->
+      cycle t ty' (fun () : Sexp.t -> List [ Atom "TVariant"; row t r ])
+    | TVar v -> List [ Atom "TVar"; var v ~sexp_of_link:(ty t) ]
+
+  and cycle t node sexp =
+    match
+      List.find t.cycles ~f:(fun (cycle : Cycle.t) -> same_node cycle.node node)
+    with
+    | Some cycle ->
+      let label =
+        match cycle.label with
+        | Some label -> label
+        | None ->
+          let label = t.next_label in
+          t.next_label <- label + 1;
+          cycle.label <- Some label;
+          label
+      in
+      [%sexp "Cycle_ref", (label : int)]
+    | None ->
+      let cycle = { Cycle.node; label = None } in
+      let cycles = t.cycles in
+      t.cycles <- cycle :: cycles;
+      let sexp = sexp () in
+      t.cycles <- cycles;
+      (match cycle.label with
+       | None -> sexp
+       | Some label -> [%sexp "Cycle", (label : int), (sexp : Sexp.t)])
 
   and row t row' : Sexp.t =
     match row' with
     | REmpty -> Atom "REmpty"
     | RExtend (name, p, ty', rest) ->
       List [ Atom "RExtend"; Atom name; presence p; ty t ty'; row t rest ]
-    | RVar v -> List [ Atom "RVar"; var t.rows v ~sexp_of_link:(row t) ]
+    | RVar v -> List [ Atom "RVar"; var v ~sexp_of_link:(row t) ]
 
   and presence p : Sexp.t =
     match p with

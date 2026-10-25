@@ -653,7 +653,7 @@ let%expect_test "absent entries in records" =
     {| val absent : <<'a>{z?'b : int; ..'c}>{-z; ..'d} -> {-z; ..'d} -> {-z; ..'d} where ..'c <= {..'e}, ..'d <= {..'f} |}]
 ;;
 
-let%expect_test "structural types are not recursive" =
+let%expect_test "structural types may be recursive" =
   check
     [ top
         "occurs"
@@ -703,8 +703,9 @@ let%expect_test "structural types are not recursive" =
            (RExtend x (PVar (Unbound 28 1)) (TVar (Unbound 29 1))
             (RVar (Unbound 30 1))))))))
       Cyclic_row))
-    (Cyclic_type_alias t)
-    (Cyclic_type_alias a)
+    type t = {next : t}
+    type a = {b : [`A of a]}
+    type b = [`A of {b : b}]
     type t = T of {next : t}
     val deref : t -> t
     |}]

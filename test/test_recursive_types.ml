@@ -386,21 +386,21 @@ let%expect_test "sexps of cyclic types" =
   [%expect
     {|
     (TVar
-     (Cycle_link 0
-      (TVariant
-       (RExtend Nil Present (TCon unit ())
-        (RExtend Cons Present (TTuple ((TCon int ()) (TVar (Back_link 0))))
-         REmpty)))))
-    (TRecord
-     (RVar
-      (Cycle_link 1 (RExtend x Present (TRecord (RVar (Back_link 1))) REmpty))))
-    (ATy
-     (TVar
-      (Cycle_link 0
+     (Link
+      (Cycle 0
        (TVariant
         (RExtend Nil Present (TCon unit ())
-         (RExtend Cons Present (TTuple ((TCon int ()) (TVar (Back_link 0))))
-          REmpty))))))
+         (RExtend Cons Present
+          (TTuple ((TCon int ()) (TVar (Link (Cycle_ref 0))))) REmpty))))))
+    (Cycle 0 (TRecord (RVar (Link (RExtend x Present (Cycle_ref 0) REmpty)))))
+    (ATy
+     (TVar
+      (Link
+       (Cycle 0
+        (TVariant
+         (RExtend Nil Present (TCon unit ())
+          (RExtend Cons Present
+           (TTuple ((TCon int ()) (TVar (Link (Cycle_ref 0))))) REmpty)))))))
     |}]
 ;;
 
@@ -454,14 +454,18 @@ let%expect_test "mismatching cyclic types" =
      (Row_mismatch
       (RExtend A Present
        (TVar
-        (Cycle_link 0 (TVariant (RExtend A Present (TVar (Back_link 0)) REmpty))))
+        (Link
+         (Cycle 0
+          (TVariant (RExtend A Present (TVar (Link (Cycle_ref 0))) REmpty)))))
        REmpty)
       (RExtend B Present
        (TVar
-        (Cycle_link 1
-         (TVariant
-          (RExtend A Present
-           (TVariant (RExtend B Present (TVar (Back_link 1)) REmpty)) REmpty))))
+        (Link
+         (Cycle 0
+          (TVariant
+           (RExtend A Present
+            (TVariant (RExtend B Present (TVar (Link (Cycle_ref 0))) REmpty))
+            REmpty)))))
        REmpty)
       (Missing_label A)))
     (Error
@@ -503,5 +507,239 @@ let%expect_test "generalization and instantiation of cyclic types" =
     (Ok ())
     (Ok ())
     (([`Cons of int * 'a | `Nil] as 'a) * 'a) * (([`Cons of bool * 'b | `Nil] as 'b) * 'b) * (([`Cons of 'c * 'd | `Nil] as 'd) * 'd)
+    |}]
+;;
+
+let list_of ty = Ty.con "list" ~args:[ Ty ty ]
+
+(* [type 'a l = [`Nil | `Cons of 'a * 'a l]] *)
+let l =
+  Decl.alias
+    "l"
+    ~params:[ Decl.ty "a" ]
+    (Ty.variant
+       [ "Nil", Ty.unit
+       ; "Cons", Ty.tuple [ Ty.var "a"; Ty.con "l" ~args:[ Ty (Ty.var "a") ] ]
+       ])
+;;
+
+let l_of ty = Ty.con "l" ~args:[ Ty ty ]
+
+let%expect_test "recursive aliases" =
+  check
+    [ l
+    ; len
+    ; Toplevel.Let
+        ( "len_ints"
+        , [ typed "l" (l_of Ty.int) ]
+        , None
+        , app (var "len") [ var "l" ] )
+    ; Toplevel.Let
+        ( "len_any"
+        , [ typed "l" (l_of (Ty.var "a")) ]
+        , None
+        , app (var "len") [ var "l" ] )
+    ; top "nil" [] ~annot:(l_of Ty.bool) (tag "Nil")
+    ; top "one" [] ~annot:(l_of Ty.int) (cons (int 1) (tag "Nil"))
+    ; Decl.alias "ints" (l_of Ty.int)
+    ; Decl.variant "n" [ "N", [ l_of Ty.int ] ]
+    ; top "wrapped" [] (construct "N" ~args:[ var "one" ])
+    ];
+  check [ l; top "bad" [] ~annot:(l_of Ty.int) (cons (bool true) (tag "Nil")) ];
+  check [ l; top "open" [] ~annot:(l_of Ty.int) (tag "Other") ];
+  [%expect
+    {|
+    type l['a] = [`Cons of 'a * l['a] | `Nil]
+    val len : ([`Cons of 'a * 'b | `Nil] as 'b) -> int
+    val len_ints : ([`Cons of int * 'a | `Nil] as 'a) -> int
+    val len_any : ([`Cons of 'a * 'b | `Nil] as 'b) -> int
+    val nil : ([`Cons of bool * 'a | `Nil] as 'a)
+    val one : ([`Cons of int * 'a | `Nil] as 'a)
+    type ints = [`Cons of int * ints | `Nil]
+    type n = N of ([`Cons of int * 'a | `Nil] as 'a)
+    val wrapped : n
+    (Unification_error
+     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    (Unification_error
+     (Row_mismatch REmpty
+      (RExtend Other Present (TCon unit ()) (RVar (Unbound 26 1)))
+      (Missing_label Other)))
+    |}]
+;;
+
+let%expect_test "recursive aliases through records, tuples and type arguments" =
+  check
+    [ Decl.alias
+        "stream"
+        ~params:[ Decl.ty "a" ]
+        (Ty.record
+           [ "head", Ty.var "a"
+           ; ( "tail"
+             , Ty.arrow Ty.unit (Ty.con "stream" ~args:[ Ty (Ty.var "a") ]) )
+           ])
+    ; Decl.list
+    ; Decl.alias
+        "tree"
+        (Ty.variant [ "Leaf", Ty.int; "Node", list_of (Ty.con "tree") ])
+    ; Decl.alias "pair" (Ty.tuple [ Ty.variant [ "A", Ty.con "pair" ]; Ty.int ])
+    ; Decl.alias "id" ~params:[ Decl.ty "a" ] (Ty.var "a")
+    ; Decl.alias
+        "through_id"
+        (Ty.con "id" ~args:[ Ty (Ty.variant [ "A", Ty.con "through_id" ]) ])
+    ; Decl.alias
+        "rows"
+        ~params:[ Decl.row "r" ]
+        (Ty.record [ "x", Ty.con "rows" ~args:[ Row (Var "r") ] ] ~tail:"r")
+    ; Toplevel.Let
+        ( "heads"
+        , [ typed "s" (Ty.con "stream" ~args:[ Ty Ty.int ]) ]
+        , None
+        , tuple
+            [ dot (var "s") "head"
+            ; dot (app (dot (var "s") "tail") [ unit ]) "head"
+            ] )
+    ; Toplevel.Let
+        ( "leaf"
+        , [ typed "t" (Ty.con "tree") ]
+        , None
+        , match_
+            (var "t")
+            [ Pat.tag "Leaf" ~arg:(Pat.var "n"), var "n"; Pat.any, int 0 ] )
+    ];
+  [%expect
+    {|
+    type stream['a] = {head : 'a; tail : unit -> stream['a]}
+    type list['a] = Nil | Cons of 'a * list['a]
+    type tree = [`Leaf of int | `Node of list[tree]]
+    type pair = [`A of pair] * int
+    type id['a] = 'a
+    type through_id = [`A of through_id]
+    type rows[{..'a}] = {x : rows[{..'a}]; ..'a}
+    val heads : ({head : int; tail : unit -> 'a} as 'a) -> int * int
+    val leaf : ([`Leaf of int | `Node of list['a]] as 'a) -> int
+    |}]
+;;
+
+let%expect_test "mutually recursive aliases" =
+  check
+    [ Decl.alias
+        "a"
+        ~params:[ Decl.ty "x" ]
+        (Ty.record
+           [ "b", Ty.con "b" ~args:[ Ty (Ty.var "x") ]; "v", Ty.var "x" ])
+    ; Decl.alias
+        "b"
+        ~params:[ Decl.ty "y" ]
+        (Ty.variant
+           [ "End", Ty.unit; "More", Ty.con "a" ~args:[ Ty (Ty.var "y") ] ])
+    ; Decl.alias "c" (Ty.con "a" ~args:[ Ty Ty.int ])
+    ; top
+        "a"
+        [ "x" ]
+        ~annot:(Ty.con "a" ~args:[ Ty (Ty.var "t") ])
+        (poly_record [ "b", tag "End"; "v", var "x" ])
+    ; top
+        "more"
+        []
+        (poly_record
+           [ "b", tag "More" ~arg:(app (var "a") [ int 1 ]); "v", int 2 ])
+    ; top "c" [] ~annot:(Ty.con "c") (var "more")
+    ];
+  check
+    [ module_ "M" [ l ]
+    ; Decl.alias
+        "u"
+        (Ty.variant [ "U", Ty.con "M.l" ~args:[ Ty (Ty.con "u") ] ])
+    ];
+  [%expect
+    {|
+    type a['a] = {b : [`End | `More of a['a]]; v : 'a}
+    type b['a] = [`End | `More of {b : b['a]; v : 'a}]
+    type c = {b : [`End | `More of c]; v : int}
+    val a : 'a -> ({b : [`End | `More of 'b]; v : 'a} as 'b)
+    val more : {b : [`End | `More of ({b : [`End | `More of 'a]; v : int} as 'a)]; v : int}
+    val c : ({b : [`End | `More of 'a]; v : int} as 'a)
+    module M : sig
+      type l['a] = [`Cons of 'a * l['a] | `Nil]
+    end
+    type u = [`U of ([`Cons of u * 'a | `Nil] as 'a)]
+    |}]
+;;
+
+let%expect_test "non-regular and unguarded recursive aliases" =
+  let t_of ty = Ty.con "t" ~args:[ Ty ty ] in
+  check
+    [ Decl.alias
+        "t"
+        ~params:[ Decl.ty "a" ]
+        (Ty.variant [ "A", t_of (Ty.tuple [ Ty.var "a"; Ty.var "a" ]) ])
+    ];
+  check
+    [ Decl.alias "t" ~params:[ Decl.ty "a" ] (Ty.variant [ "A", t_of Ty.int ]) ];
+  check
+    [ Decl.alias
+        "t"
+        ~params:[ Decl.ty "a"; Decl.ty "b" ]
+        (Ty.variant
+           [ "A", Ty.con "t" ~args:[ Ty (Ty.var "b"); Ty (Ty.var "a") ] ])
+    ];
+  check
+    [ Decl.alias
+        "a"
+        ~params:[ Decl.ty "x" ]
+        (Ty.record [ "b", Ty.con "b" ~args:[ Ty (Ty.var "x") ] ])
+    ; Decl.alias
+        "b"
+        ~params:[ Decl.ty "y" ]
+        (Ty.variant [ "A", Ty.con "a" ~args:[ Ty Ty.int ] ])
+    ];
+  check
+    [ Decl.alias
+        "t"
+        ~params:[ Decl.row "r" ]
+        (Ty.record
+           [ "x", Ty.con "t" ~args:[ Row (Extend ("y", Ty.int, Var "r")) ] ])
+    ];
+  check [ Decl.alias "t" (Ty.tuple [ Ty.con "t"; Ty.int ]) ];
+  check [ Decl.list; Decl.alias "t" (list_of (Ty.con "t")) ];
+  check
+    [ Decl.alias "id" ~params:[ Decl.ty "a" ] (Ty.var "a")
+    ; Decl.alias "t" (Ty.con "id" ~args:[ Ty (Ty.con "t") ])
+    ];
+  check [ Decl.alias "t" (Ty.code (Ty.con "t")) ];
+  check [ Decl.alias "t" (Ty.code Ty.int ~entries:[ "x", Ty.con "t" ]) ];
+  check [ Decl.alias "t" (Ty.arrow (Ty.variant [ "A", Ty.int ]) (Ty.con "t")) ];
+  [%expect
+    {|
+    (Non_regular_recursive_alias t)
+    (Non_regular_recursive_alias t)
+    (Non_regular_recursive_alias t)
+    (Non_regular_recursive_alias a)
+    (Non_regular_recursive_alias t)
+    (Cyclic_type_alias t)
+    (Cyclic_type_alias t)
+    (Cyclic_type_alias t)
+    (Cyclic_type_alias t)
+    (Cyclic_type_alias t)
+    (Cyclic_type_alias t)
+    |}]
+;;
+
+let%expect_test "sexps of recursive aliases" =
+  let typecheck = Typecheck.create () in
+  (match Typecheck.typecheck typecheck ~program:[ l ] with
+   | Ok signature -> print_s [%sexp (signature : Signature.t)]
+   | Error error -> print_s [%sexp (error : Typecheck_error.t)]);
+  [%expect
+    {|
+    ((Type
+      ((name l) (params ((ATy (TVar (Generic 0)))))
+       (kind
+        (Alias
+         (Cycle 0
+          (TVariant
+           (RExtend Nil Present (TCon unit ())
+            (RExtend Cons Present
+             (TTuple ((TVar (Generic 0)) (TVar (Link (Cycle_ref 0))))) REmpty)))))))))
     |}]
 ;;

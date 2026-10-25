@@ -711,7 +711,7 @@ let%expect_test "rows shared between records and variants" =
     |}]
 ;;
 
-let%expect_test "structural types are not recursive" =
+let%expect_test "structural types may be recursive" =
   check
     [ top
         "occurs"
@@ -767,7 +767,7 @@ let%expect_test "structural types are not recursive" =
          (RExtend A (PVar (Unbound 26 1)) (TVar (Unbound 27 1))
           (RVar (Unbound 28 1))))))
       Cyclic_row))
-    (Cyclic_type_alias t)
+    type t = [`Cons of int * t | `Nil]
     type t = T of [`Cons of int * t | `Nil]
     val two : t
     |}]
