@@ -13,7 +13,7 @@ module Entry : sig
       (** Persistent entries (generalized syntactic functions) may also be used
           at any later level, from within any quote. *)
     }
-  [@@deriving sexp, compare, equal]
+  [@@deriving sexp_of]
 
   val toplevel : scheme:Type.ty -> persistent:bool -> t
 

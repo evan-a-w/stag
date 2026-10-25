@@ -48,4 +48,4 @@ type t =
   | Empty_record
   | Duplicate_pattern_variable of string
   | Duplicate_context_entry of string
-[@@deriving sexp, compare, equal, variants]
+[@@deriving sexp_of, variants]

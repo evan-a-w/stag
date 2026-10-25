@@ -9,10 +9,7 @@ val builtins : Syntax.Type_decl.t list
 
 (** Checks the type declarations of every module of the program [root], which
     may refer to each other in any order. *)
-val create
-  :  Module_scope.t
-  -> fresh_id:(unit -> Type.id)
-  -> (t, Typecheck_error.t) Result.t
+val create : Module_scope.t -> Fresh.t -> (t, Typecheck_error.t) Result.t
 
 (** The parameters of the declaring type are [Generic] in [args] and [result],
     to be instantiated together on each use. *)
@@ -26,12 +23,12 @@ module Constructor : sig
 end
 
 (** Like [Constructor], with the record type's parameters [Generic] in
-    [params] and [ty]. The record type is [TCon (type_name, params)]. *)
+    [record] and [ty]. *)
 module Field : sig
   type t =
     { name : string
     ; type_name : string
-    ; params : Type.arg list
+    ; record : Type.ty
     ; ty : Type.ty
     ; all_fields : string list
     }
@@ -59,7 +56,7 @@ module Annotation_vars : sig
   type t
 
   (** Variables are created at [rank] on first use. *)
-  val create : fresh_id:(unit -> Type.id) -> rank:Type.rank -> t
+  val create : Fresh.t -> rank:Type.rank -> t
 end
 
 val elaborate

@@ -750,9 +750,9 @@ let%expect_test "splicing code with canonically named free variables" =
     val shorthand : int
     (Unification_error
      (Context_mismatch
-      (CExtend M.n (PVar (PLink Present)) (TVar (Unbound 25 1))
-       (CVar (CUnbound 26 1)))
-      (CExtend n (PVar (PUnbound 27 1)) (TCon int ()) CEmpty)
+      (CExtend M.n (PVar (Link Present)) (TVar (Unbound 25 1))
+       (CVar (Unbound 26 1)))
+      (CExtend n (PVar (Unbound 27 1)) (TCon int ()) CEmpty)
       (Empty_context_has_variable M.n)))
     |}]
 ;;

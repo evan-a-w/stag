@@ -14,7 +14,7 @@ module Field = struct
   type t =
     { name : string
     ; type_name : string
-    ; params : Type.arg list
+    ; record : Type.ty
     ; ty : Type.ty
     ; all_fields : string list
     }
@@ -72,14 +72,14 @@ let find_decl_exn t name = Map.find_exn t.checked name
 
 module Annotation_vars = struct
   type t =
-    { fresh_id : unit -> Type.id
+    { fresh : Fresh.t
     ; rank : Type.rank
     ; tys : Type.ty String.Table.t
     ; contexts : Type.context String.Table.t
     }
 
-  let create ~fresh_id ~rank =
-    { fresh_id
+  let create fresh ~rank =
+    { fresh
     ; rank
     ; tys = String.Table.create ()
     ; contexts = String.Table.create ()
@@ -88,12 +88,12 @@ module Annotation_vars = struct
 
   let ty t name =
     Hashtbl.find_or_add t.tys name ~default:(fun () ->
-      Type.TVar (ref (Type.Unbound (t.fresh_id (), t.rank))))
+      Type.TVar (Fresh.var t.fresh ~rank:t.rank))
   ;;
 
   let context t name =
     Hashtbl.find_or_add t.contexts name ~default:(fun () ->
-      Type.CVar (ref (Type.CUnbound (t.fresh_id (), t.rank))))
+      Type.CVar (Fresh.var t.fresh ~rank:t.rank))
   ;;
 end
 
@@ -236,7 +236,7 @@ let check_alias_cycles t =
     visit decl ~visiting:String.Set.empty)
 ;;
 
-let declare module_ (decl : Type_decl.t) ~fresh_id =
+let declare module_ (decl : Type_decl.t) ~fresh =
   let%map.Result () =
     match
       List.map decl.params ~f:Type_decl.Param.name
@@ -250,8 +250,8 @@ let declare module_ (decl : Type_decl.t) ~fresh_id =
   in
   let params =
     List.map decl.params ~f:(function
-      | Ty _ -> Type.ATy (TVar (ref (Type.Generic (fresh_id ()))))
-      | Context _ -> AContext (CVar (ref (Type.CGeneric (fresh_id ())))))
+      | Ty _ -> Type.ATy (TVar (Type.Var.create (Fresh.id fresh) Generic))
+      | Context _ -> AContext (CVar (Type.Var.create (Fresh.id fresh) Generic)))
   in
   { Decl.decl
   ; name = Module_scope.canonical_name module_ decl.name
@@ -326,7 +326,7 @@ let define t (decl : Decl.t) =
           ~data:
             { Field.name
             ; type_name = decl.name
-            ; params = decl.params
+            ; record = TCon (decl.name, decl.params)
             ; ty
             ; all_fields
             })
@@ -334,12 +334,12 @@ let define t (decl : Decl.t) =
     { t with fields }
 ;;
 
-let create root ~fresh_id =
+let create root fresh =
   let%bind.Result decls =
     Module_scope.toplevels root
     |> List.filter_map ~f:(fun (module_, (toplevel : Toplevel.t)) ->
       match toplevel with
-      | Type decl -> Some (declare module_ decl ~fresh_id)
+      | Type decl -> Some (declare module_ decl ~fresh)
       | Let _ | Module _ -> None)
     |> Result.all
   in

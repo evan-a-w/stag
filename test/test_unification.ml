@@ -5,40 +5,48 @@ open Type
 let int = TCon ("int", [])
 let bool = TCon ("bool", [])
 let string = TCon ("string", [])
-let tvar typecheck ~rank = TVar (Typecheck.fresh_tvar typecheck ~rank)
-let cvar typecheck ~rank = CVar (Typecheck.fresh_cvar typecheck ~rank)
+let con ?(args = []) name = TCon (name, args)
+let code ?(inner = int) context = TCode { inner; context }
+let tvar fresh ~rank = TVar (Fresh.var fresh ~rank)
+let cvar fresh ~rank = CVar (Fresh.var fresh ~rank)
+let pvar fresh ~rank = PVar (Fresh.var fresh ~rank)
+let ext ?(presence = Present) name ty rest = CExtend (name, presence, ty, rest)
 
-let unify_ty typecheck ~ty1 ~ty2 =
-  let result = Typecheck.unify_ty typecheck ~ty1 ~ty2 in
-  print_s [%sexp (result : (Type.ty, Typecheck.Unification_error.t) Result.t)]
+(** Present entries, in order, before [tail]. *)
+let context ?(tail = CEmpty) entries =
+  List.fold_right entries ~init:tail ~f:(fun (name, ty) rest ->
+    ext name ty rest)
 ;;
 
-let unify_context typecheck ~context1 ~context2 =
-  let result = Typecheck.unify_context typecheck ~context1 ~context2 in
-  print_s
-    [%sexp (result : (Type.context, Typecheck.Unification_error.t) Result.t)]
+let unify_ty fresh ~ty1 ~ty2 =
+  let result = Unify.unify_ty fresh ~ty1 ~ty2 in
+  print_s [%sexp (result : (unit, Unification_error.t) Result.t)]
+;;
+
+let unify_context fresh ~context1 ~context2 =
+  let result = Unify.unify_context fresh ~context1 ~context2 in
+  print_s [%sexp (result : (unit, Unification_error.t) Result.t)]
+;;
+
+let constrain fresh ~context ~bound =
+  let result =
+    Unify.constrain_context fresh ~context ~bound ~shadowed:String.Set.empty
+  in
+  print_s [%sexp (result : (unit, Unification_error.t) Result.t)]
 ;;
 
 let print_ty ty = print_s [%sexp (ty : Type.ty)]
 let print_context context = print_s [%sexp (context : Type.context)]
 
 let%expect_test "trivial unification" =
-  let open Type in
-  let ty1 = TCon ("int", []) in
-  let ty2 = TCon ("int", []) in
-  let typecheck = Typecheck.create () in
-  let result = Typecheck.unify_ty typecheck ~ty1 ~ty2 in
-  print_s [%sexp (result : (Type.ty, Typecheck.Unification_error.t) Result.t)];
-  [%expect {| (Ok (TCon int ())) |}]
+  let fresh = Fresh.create () in
+  unify_ty fresh ~ty1:int ~ty2:int;
+  [%expect {| (Ok ()) |}]
 ;;
 
 let%expect_test "trivial fail unification" =
-  let open Type in
-  let ty1 = TCon ("int", []) in
-  let ty2 = TCon ("string", []) in
-  let typecheck = Typecheck.create () in
-  let result = Typecheck.unify_ty typecheck ~ty1 ~ty2 in
-  print_s [%sexp (result : (Type.ty, Typecheck.Unification_error.t) Result.t)];
+  let fresh = Fresh.create () in
+  unify_ty fresh ~ty1:int ~ty2:string;
   [%expect
     {|
     (Error
@@ -48,26 +56,16 @@ let%expect_test "trivial fail unification" =
 ;;
 
 let%expect_test "list unification" =
-  let open Type in
-  let typecheck = Typecheck.create () in
-  let ty1 = TCon ("list", [ ATy (TCon ("int", [])) ]) in
-  let ty2 =
-    TCon ("list", [ ATy (TVar (Typecheck.fresh_tvar typecheck ~rank:0)) ])
-  in
-  let result = Typecheck.unify_ty typecheck ~ty1 ~ty2 in
-  print_s [%sexp (result : (Type.ty, Typecheck.Unification_error.t) Result.t)];
-  [%expect {| (Ok (TCon list ((ATy (TCon int ()))))) |}]
-;;
-
-let%expect_test "list fail unification" =
-  let open Type in
-  let ty1 = TCon ("list", [ ATy (TCon ("int", [])) ]) in
-  let ty2 = TCon ("list", [ ATy (TCon ("string", [])) ]) in
-  let typecheck = Typecheck.create () in
-  let result = Typecheck.unify_ty typecheck ~ty1 ~ty2 in
-  print_s [%sexp (result : (Type.ty, Typecheck.Unification_error.t) Result.t)];
+  let fresh = Fresh.create () in
+  let list ty = con "list" ~args:[ ATy ty ] in
+  let a = tvar fresh ~rank:0 in
+  unify_ty fresh ~ty1:(list int) ~ty2:(list a);
+  print_ty a;
+  unify_ty fresh ~ty1:(list int) ~ty2:(list string);
   [%expect
     {|
+    (Ok ())
+    (TVar (Link (TCon int ())))
     (Error
      (Type_mismatch (TCon int ()) (TCon string ())
       (Base_types_not_equal int string)))
@@ -75,11 +73,11 @@ let%expect_test "list fail unification" =
 ;;
 
 let%expect_test "constructor arity mismatch" =
-  let typecheck = Typecheck.create () in
+  let fresh = Fresh.create () in
   unify_ty
-    typecheck
-    ~ty1:(TCon ("pair", [ ATy int ]))
-    ~ty2:(TCon ("pair", [ ATy int; ATy bool ]));
+    fresh
+    ~ty1:(con "pair" ~args:[ ATy int ])
+    ~ty2:(con "pair" ~args:[ ATy int; ATy bool ]);
   [%expect
     {|
     (Error
@@ -90,11 +88,11 @@ let%expect_test "constructor arity mismatch" =
 ;;
 
 let%expect_test "constructor arg kind mismatch" =
-  let typecheck = Typecheck.create () in
+  let fresh = Fresh.create () in
   unify_ty
-    typecheck
-    ~ty1:(TCon ("t", [ ATy int ]))
-    ~ty2:(TCon ("t", [ AContext CEmpty ]));
+    fresh
+    ~ty1:(con "t" ~args:[ ATy int ])
+    ~ty2:(con "t" ~args:[ AContext CEmpty ]);
   [%expect
     {|
     (Error
@@ -104,50 +102,50 @@ let%expect_test "constructor arg kind mismatch" =
 ;;
 
 let%expect_test "constructor with context args" =
-  let typecheck = Typecheck.create () in
-  let a = tvar typecheck ~rank:1 in
-  let ty1 = TCon ("t", [ AContext (CExtend ("x", Present, a, CEmpty)) ]) in
-  let ty2 = TCon ("t", [ AContext (CExtend ("x", Present, int, CEmpty)) ]) in
-  unify_ty typecheck ~ty1 ~ty2;
+  let fresh = Fresh.create () in
+  let a = tvar fresh ~rank:1 in
+  unify_ty
+    fresh
+    ~ty1:(con "t" ~args:[ AContext (context [ "x", a ]) ])
+    ~ty2:(con "t" ~args:[ AContext (context [ "x", int ]) ]);
   print_ty a;
   [%expect
     {|
-    (Ok
-     (TCon t ((AContext (CExtend x Present (TVar (Link (TCon int ()))) CEmpty)))))
+    (Ok ())
     (TVar (Link (TCon int ())))
     |}]
 ;;
 
 let%expect_test "arrows" =
-  let typecheck = Typecheck.create () in
-  let a = tvar typecheck ~rank:1 in
-  let b = tvar typecheck ~rank:1 in
-  unify_ty typecheck ~ty1:(TArrow (a, int)) ~ty2:(TArrow (bool, b));
+  let fresh = Fresh.create () in
+  let a = tvar fresh ~rank:1 in
+  let b = tvar fresh ~rank:1 in
+  unify_ty fresh ~ty1:(TArrow (a, int)) ~ty2:(TArrow (bool, b));
   print_ty a;
   print_ty b;
   [%expect
     {|
-    (Ok (TArrow (TCon bool ()) (TCon int ())))
+    (Ok ())
     (TVar (Link (TCon bool ())))
     (TVar (Link (TCon int ())))
     |}]
 ;;
 
 let%expect_test "tuples" =
-  let typecheck = Typecheck.create () in
-  let a = tvar typecheck ~rank:1 in
-  unify_ty typecheck ~ty1:(TTuple [ a; int ]) ~ty2:(TTuple [ bool; int ]);
+  let fresh = Fresh.create () in
+  let a = tvar fresh ~rank:1 in
+  unify_ty fresh ~ty1:(TTuple [ a; int ]) ~ty2:(TTuple [ bool; int ]);
   print_ty a;
   [%expect
     {|
-    (Ok (TTuple ((TCon bool ()) (TCon int ()))))
+    (Ok ())
     (TVar (Link (TCon bool ())))
     |}]
 ;;
 
 let%expect_test "tuple length mismatch" =
-  let typecheck = Typecheck.create () in
-  unify_ty typecheck ~ty1:(TTuple [ int; int ]) ~ty2:(TTuple [ int ]);
+  let fresh = Fresh.create () in
+  unify_ty fresh ~ty1:(TTuple [ int; int ]) ~ty2:(TTuple [ int ]);
   [%expect
     {|
     (Error
@@ -157,9 +155,9 @@ let%expect_test "tuple length mismatch" =
 ;;
 
 let%expect_test "structural mismatch" =
-  let typecheck = Typecheck.create () in
-  unify_ty typecheck ~ty1:(TArrow (int, int)) ~ty2:(TTuple [ int; int ]);
-  unify_ty typecheck ~ty1:int ~ty2:(TArrow (int, int));
+  let fresh = Fresh.create () in
+  unify_ty fresh ~ty1:(TArrow (int, int)) ~ty2:(TTuple [ int; int ]);
+  unify_ty fresh ~ty1:int ~ty2:(TArrow (int, int));
   [%expect
     {|
     (Error
@@ -172,62 +170,62 @@ let%expect_test "structural mismatch" =
 ;;
 
 let%expect_test "code types unify inner type and context" =
-  let typecheck = Typecheck.create () in
-  let a = tvar typecheck ~rank:1 in
-  let r = cvar typecheck ~rank:1 in
-  unify_ty
-    typecheck
-    ~ty1:(TCode { inner = a; context = r })
-    ~ty2:(TCode { inner = int; context = CExtend ("x", Present, bool, CEmpty) });
+  let fresh = Fresh.create () in
+  let a = tvar fresh ~rank:1 in
+  let r = cvar fresh ~rank:1 in
+  unify_ty fresh ~ty1:(code ~inner:a r) ~ty2:(code (context [ "x", bool ]));
   print_ty a;
   print_context r;
   [%expect
     {|
-    (Ok
-     (TCode (inner (TCon int ()))
-      (context (CExtend x Present (TCon bool ()) CEmpty))))
+    (Ok ())
     (TVar (Link (TCon int ())))
-    (CVar (CLink (CExtend x Present (TCon bool ()) CEmpty)))
+    (CVar (Link (CExtend x Present (TCon bool ()) CEmpty)))
     |}]
 ;;
 
 let%expect_test "variable with itself" =
-  let typecheck = Typecheck.create () in
-  let a = tvar typecheck ~rank:1 in
-  unify_ty typecheck ~ty1:a ~ty2:a;
-  [%expect {| (Ok (TVar (Unbound 0 1))) |}]
+  let fresh = Fresh.create () in
+  let a = tvar fresh ~rank:1 in
+  unify_ty fresh ~ty1:a ~ty2:a;
+  print_ty a;
+  [%expect
+    {|
+    (Ok ())
+    (TVar (Unbound 0 1))
+    |}]
 ;;
 
 let%expect_test "variable binds on either side" =
-  let typecheck = Typecheck.create () in
-  let a = tvar typecheck ~rank:1 in
-  let b = tvar typecheck ~rank:1 in
-  unify_ty typecheck ~ty1:a ~ty2:int;
-  unify_ty typecheck ~ty1:int ~ty2:b;
+  let fresh = Fresh.create () in
+  let a = tvar fresh ~rank:1 in
+  let b = tvar fresh ~rank:1 in
+  unify_ty fresh ~ty1:a ~ty2:int;
+  unify_ty fresh ~ty1:int ~ty2:b;
   print_ty a;
   print_ty b;
   [%expect
     {|
-    (Ok (TCon int ()))
-    (Ok (TCon int ()))
+    (Ok ())
+    (Ok ())
     (TVar (Link (TCon int ())))
     (TVar (Link (TCon int ())))
     |}]
 ;;
 
 let%expect_test "link chains" =
-  let typecheck = Typecheck.create () in
-  let a = tvar typecheck ~rank:1 in
-  let b = tvar typecheck ~rank:1 in
-  unify_ty typecheck ~ty1:a ~ty2:b;
-  unify_ty typecheck ~ty1:b ~ty2:int;
+  let fresh = Fresh.create () in
+  let a = tvar fresh ~rank:1 in
+  let b = tvar fresh ~rank:1 in
+  unify_ty fresh ~ty1:a ~ty2:b;
+  unify_ty fresh ~ty1:b ~ty2:int;
   print_ty a;
   print_ty (Type.canonical_ty a);
-  unify_ty typecheck ~ty1:a ~ty2:bool;
+  unify_ty fresh ~ty1:a ~ty2:bool;
   [%expect
     {|
-    (Ok (TVar (Unbound 1 1)))
-    (Ok (TCon int ()))
+    (Ok ())
+    (Ok ())
     (TVar (Link (TVar (Link (TCon int ())))))
     (TCon int ())
     (Error
@@ -236,68 +234,62 @@ let%expect_test "link chains" =
 ;;
 
 let%expect_test "occurs check" =
-  let typecheck = Typecheck.create () in
-  let a = tvar typecheck ~rank:1 in
-  unify_ty typecheck ~ty1:a ~ty2:(TArrow (a, int));
-  unify_ty typecheck ~ty1:a ~ty2:(TTuple [ a; int ]);
-  unify_ty typecheck ~ty1:a ~ty2:(TCon ("list", [ ATy a ]));
+  let fresh = Fresh.create () in
+  let a = tvar fresh ~rank:1 in
+  unify_ty fresh ~ty1:a ~ty2:(TArrow (a, int));
+  unify_ty fresh ~ty1:a ~ty2:(TTuple [ a; int ]);
+  unify_ty fresh ~ty1:a ~ty2:(con "list" ~args:[ ATy a ]);
   [%expect
     {|
-    (Error (Occurs_check_failed (TVar (Unbound 0 1))))
-    (Error (Occurs_check_failed (TVar (Unbound 0 1))))
-    (Error (Occurs_check_failed (TVar (Unbound 0 1))))
+    (Error (Occurs_check_failed (ATy (TVar (Unbound 0 1)))))
+    (Error (Occurs_check_failed (ATy (TVar (Unbound 0 1)))))
+    (Error (Occurs_check_failed (ATy (TVar (Unbound 0 1)))))
     |}]
 ;;
 
 let%expect_test "occurs check through context" =
-  let typecheck = Typecheck.create () in
-  let a = tvar typecheck ~rank:1 in
-  unify_ty
-    typecheck
-    ~ty1:a
-    ~ty2:(TCode { inner = int; context = CExtend ("x", Present, a, CEmpty) });
-  [%expect {| (Error (Occurs_check_failed (TVar (Unbound 0 1)))) |}]
+  let fresh = Fresh.create () in
+  let a = tvar fresh ~rank:1 in
+  unify_ty fresh ~ty1:a ~ty2:(code (context [ "x", a ]));
+  [%expect {| (Error (Occurs_check_failed (ATy (TVar (Unbound 0 1))))) |}]
 ;;
 
 let%expect_test "binding lowers ranks of variables in the bound type" =
-  let typecheck = Typecheck.create () in
-  let a = tvar typecheck ~rank:1 in
-  let b = tvar typecheck ~rank:3 in
-  let c = tvar typecheck ~rank:2 in
-  let r = cvar typecheck ~rank:3 in
-  let d = tvar typecheck ~rank:0 in
-  let ty = TTuple [ TArrow (b, c); TCode { inner = d; context = r } ] in
-  unify_ty typecheck ~ty1:a ~ty2:ty;
+  let fresh = Fresh.create () in
+  let a = tvar fresh ~rank:1 in
+  let b = tvar fresh ~rank:3 in
+  let c = tvar fresh ~rank:2 in
+  let r = cvar fresh ~rank:3 in
+  let d = tvar fresh ~rank:0 in
+  let ty = TTuple [ TArrow (b, c); code ~inner:d r ] in
+  unify_ty fresh ~ty1:a ~ty2:ty;
   print_ty ty;
   [%expect
     {|
-    (Ok
-     (TTuple
-      ((TArrow (TVar (Unbound 1 1)) (TVar (Unbound 2 1)))
-       (TCode (inner (TVar (Unbound 4 0))) (context (CVar (CUnbound 3 1)))))))
+    (Ok ())
     (TTuple
      ((TArrow (TVar (Unbound 1 1)) (TVar (Unbound 2 1)))
-      (TCode (inner (TVar (Unbound 4 0))) (context (CVar (CUnbound 3 1))))))
+      (TCode (inner (TVar (Unbound 4 0))) (context (CVar (Unbound 3 1))))))
     |}]
 ;;
 
 let%expect_test "binding variable to variable lowers rank" =
-  let typecheck = Typecheck.create () in
-  let a = tvar typecheck ~rank:1 in
-  let b = tvar typecheck ~rank:3 in
-  unify_ty typecheck ~ty1:a ~ty2:b;
+  let fresh = Fresh.create () in
+  let a = tvar fresh ~rank:1 in
+  let b = tvar fresh ~rank:3 in
+  unify_ty fresh ~ty1:a ~ty2:b;
   print_ty b;
   [%expect
     {|
-    (Ok (TVar (Unbound 1 1)))
+    (Ok ())
     (TVar (Unbound 1 1))
     |}]
 ;;
 
 let%expect_test "bindings are not undone on failure" =
-  let typecheck = Typecheck.create () in
-  let a = tvar typecheck ~rank:1 in
-  unify_ty typecheck ~ty1:(TArrow (a, int)) ~ty2:(TArrow (bool, string));
+  let fresh = Fresh.create () in
+  let a = tvar fresh ~rank:1 in
+  unify_ty fresh ~ty1:(TArrow (a, int)) ~ty2:(TArrow (bool, string));
   print_ty a;
   [%expect
     {|
@@ -309,19 +301,13 @@ let%expect_test "bindings are not undone on failure" =
 ;;
 
 let%expect_test "empty contexts" =
-  let typecheck = Typecheck.create () in
-  unify_context typecheck ~context1:CEmpty ~context2:CEmpty;
-  unify_context
-    typecheck
-    ~context1:CEmpty
-    ~context2:(CExtend ("x", Present, int, CEmpty));
-  unify_context
-    typecheck
-    ~context1:(CExtend ("x", Present, int, CEmpty))
-    ~context2:CEmpty;
+  let fresh = Fresh.create () in
+  unify_context fresh ~context1:CEmpty ~context2:CEmpty;
+  unify_context fresh ~context1:CEmpty ~context2:(context [ "x", int ]);
+  unify_context fresh ~context1:(context [ "x", int ]) ~context2:CEmpty;
   [%expect
     {|
-    (Ok CEmpty)
+    (Ok ())
     (Error
      (Context_mismatch CEmpty (CExtend x Present (TCon int ()) CEmpty)
       (Empty_context_has_variable x)))
@@ -332,35 +318,29 @@ let%expect_test "empty contexts" =
 ;;
 
 let%expect_test "context order does not matter" =
-  let typecheck = Typecheck.create () in
+  let fresh = Fresh.create () in
   unify_context
-    typecheck
-    ~context1:
-      (CExtend ("x", Present, int, CExtend ("y", Present, bool, CEmpty)))
-    ~context2:
-      (CExtend ("y", Present, bool, CExtend ("x", Present, int, CEmpty)));
-  [%expect
-    {|
-    (Ok
-     (CExtend x Present (TCon int ()) (CExtend y Present (TCon bool ()) CEmpty)))
-    |}]
+    fresh
+    ~context1:(context [ "x", int; "y", bool ])
+    ~context2:(context [ "y", bool; "x", int ]);
+  [%expect {| (Ok ()) |}]
 ;;
 
 let%expect_test "context label types are unified" =
-  let typecheck = Typecheck.create () in
-  let a = tvar typecheck ~rank:1 in
+  let fresh = Fresh.create () in
+  let a = tvar fresh ~rank:1 in
   unify_context
-    typecheck
-    ~context1:(CExtend ("x", Present, a, CEmpty))
-    ~context2:(CExtend ("x", Present, int, CEmpty));
+    fresh
+    ~context1:(context [ "x", a ])
+    ~context2:(context [ "x", int ]);
   print_ty a;
   unify_context
-    typecheck
-    ~context1:(CExtend ("x", Present, int, CEmpty))
-    ~context2:(CExtend ("x", Present, bool, CEmpty));
+    fresh
+    ~context1:(context [ "x", int ])
+    ~context2:(context [ "x", bool ]);
   [%expect
     {|
-    (Ok (CExtend x Present (TVar (Link (TCon int ()))) CEmpty))
+    (Ok ())
     (TVar (Link (TCon int ())))
     (Error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
@@ -368,11 +348,11 @@ let%expect_test "context label types are unified" =
 ;;
 
 let%expect_test "missing label in closed context" =
-  let typecheck = Typecheck.create () in
+  let fresh = Fresh.create () in
   unify_context
-    typecheck
-    ~context1:(CExtend ("x", Present, int, CEmpty))
-    ~context2:(CExtend ("y", Present, int, CEmpty));
+    fresh
+    ~context1:(context [ "x", int ])
+    ~context2:(context [ "y", int ]);
   [%expect
     {|
     (Error
@@ -382,202 +362,179 @@ let%expect_test "missing label in closed context" =
 ;;
 
 let%expect_test "open context against closed context" =
-  let typecheck = Typecheck.create () in
-  let r = cvar typecheck ~rank:1 in
+  let fresh = Fresh.create () in
+  let r = cvar fresh ~rank:1 in
   unify_context
-    typecheck
-    ~context1:(CExtend ("x", Present, int, r))
-    ~context2:
-      (CExtend ("x", Present, int, CExtend ("y", Present, bool, CEmpty)));
+    fresh
+    ~context1:(context [ "x", int ] ~tail:r)
+    ~context2:(context [ "x", int; "y", bool ]);
   print_context r;
   [%expect
     {|
-    (Ok
-     (CExtend x Present (TCon int ())
-      (CVar (CLink (CExtend y Present (TCon bool ()) CEmpty)))))
-    (CVar (CLink (CExtend y Present (TCon bool ()) CEmpty)))
+    (Ok ())
+    (CVar (Link (CExtend y Present (TCon bool ()) CEmpty)))
     |}]
 ;;
 
 let%expect_test "two open contexts share a fresh tail" =
-  let typecheck = Typecheck.create () in
-  let r1 = cvar typecheck ~rank:1 in
-  let r2 = cvar typecheck ~rank:3 in
+  let fresh = Fresh.create () in
+  let r1 = cvar fresh ~rank:1 in
+  let r2 = cvar fresh ~rank:3 in
   unify_context
-    typecheck
-    ~context1:(CExtend ("x", Present, int, r1))
-    ~context2:(CExtend ("y", Present, bool, r2));
+    fresh
+    ~context1:(context [ "x", int ] ~tail:r1)
+    ~context2:(context [ "y", bool ] ~tail:r2);
   print_context r1;
   print_context r2;
   [%expect
     {|
-    (Ok
-     (CExtend x Present (TCon int ())
-      (CVar (CLink (CExtend y Present (TCon bool ()) (CVar (CUnbound 4 1)))))))
-    (CVar (CLink (CExtend y Present (TCon bool ()) (CVar (CUnbound 4 1)))))
+    (Ok ())
+    (CVar (Link (CExtend y Present (TCon bool ()) (CVar (Unbound 4 1)))))
     (CVar
-     (CLink
-      (CExtend x (PVar (PLink Present)) (TVar (Link (TCon int ())))
-       (CVar (CUnbound 4 1)))))
+     (Link
+      (CExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
+       (CVar (Unbound 4 1)))))
     |}]
 ;;
 
 let%expect_test "context variables" =
-  let typecheck = Typecheck.create () in
-  let r = cvar typecheck ~rank:1 in
-  unify_context typecheck ~context1:r ~context2:r;
-  unify_context
-    typecheck
-    ~context1:r
-    ~context2:(CExtend ("x", Present, int, CEmpty));
+  let fresh = Fresh.create () in
+  let r = cvar fresh ~rank:1 in
+  unify_context fresh ~context1:r ~context2:r;
+  unify_context fresh ~context1:r ~context2:(context [ "x", int ]);
   print_context r;
   [%expect
     {|
-    (Ok (CVar (CUnbound 0 1)))
-    (Ok (CExtend x Present (TCon int ()) CEmpty))
-    (CVar (CLink (CExtend x Present (TCon int ()) CEmpty)))
+    (Ok ())
+    (Ok ())
+    (CVar (Link (CExtend x Present (TCon int ()) CEmpty)))
     |}]
 ;;
 
 let%expect_test "context occurs check" =
-  let typecheck = Typecheck.create () in
-  let r = cvar typecheck ~rank:1 in
-  unify_context typecheck ~context1:r ~context2:(CExtend ("x", Present, int, r));
-  [%expect {| (Error (Occurs_check_failed (CVar (CUnbound 0 1)))) |}]
+  let fresh = Fresh.create () in
+  let r = cvar fresh ~rank:1 in
+  unify_context fresh ~context1:r ~context2:(context [ "x", int ] ~tail:r);
+  [%expect {| (Error (Occurs_check_failed (AContext (CVar (Unbound 0 1))))) |}]
 ;;
 
 let%expect_test "cyclic context" =
-  let typecheck = Typecheck.create () in
-  let r = cvar typecheck ~rank:1 in
+  let fresh = Fresh.create () in
+  let r = cvar fresh ~rank:1 in
   unify_context
-    typecheck
-    ~context1:(CExtend ("x", Present, int, r))
-    ~context2:(CExtend ("y", Present, bool, r));
+    fresh
+    ~context1:(context [ "x", int ] ~tail:r)
+    ~context2:(context [ "y", bool ] ~tail:r);
   [%expect
     {|
     (Error
      (Context_mismatch
       (CExtend x Present (TCon int ())
        (CVar
-        (CLink
-         (CExtend x (PVar (PUnbound 1 1)) (TVar (Unbound 2 1))
-          (CVar (CUnbound 3 1))))))
+        (Link
+         (CExtend x (PVar (Unbound 1 1)) (TVar (Unbound 2 1))
+          (CVar (Unbound 3 1))))))
       (CExtend y Present (TCon bool ())
        (CVar
-        (CLink
-         (CExtend x (PVar (PUnbound 1 1)) (TVar (Unbound 2 1))
-          (CVar (CUnbound 3 1))))))
+        (Link
+         (CExtend x (PVar (Unbound 1 1)) (TVar (Unbound 2 1))
+          (CVar (Unbound 3 1))))))
       Cyclic_context))
     |}]
 ;;
 
 let%expect_test "duplicate labels are scoped" =
-  let typecheck = Typecheck.create () in
-  let context1 =
-    CExtend ("x", Present, int, CExtend ("x", Present, bool, CEmpty))
-  in
-  unify_context
-    typecheck
-    ~context1
-    ~context2:
-      (CExtend ("x", Present, int, CExtend ("x", Present, bool, CEmpty)));
-  unify_context
-    typecheck
-    ~context1
-    ~context2:
-      (CExtend ("x", Present, bool, CExtend ("x", Present, int, CEmpty)));
+  let fresh = Fresh.create () in
+  let context1 = context [ "x", int; "x", bool ] in
+  unify_context fresh ~context1 ~context2:(context [ "x", int; "x", bool ]);
+  unify_context fresh ~context1 ~context2:(context [ "x", bool; "x", int ]);
   [%expect
     {|
-    (Ok
-     (CExtend x Present (TCon int ()) (CExtend x Present (TCon bool ()) CEmpty)))
+    (Ok ())
     (Error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     |}]
 ;;
 
 let%expect_test "linked context variable in tail position" =
-  let typecheck = Typecheck.create () in
-  let r = cvar typecheck ~rank:1 in
+  let fresh = Fresh.create () in
+  let r = cvar fresh ~rank:1 in
+  unify_context fresh ~context1:r ~context2:(context [ "z", int ]);
   unify_context
-    typecheck
-    ~context1:r
-    ~context2:(CExtend ("z", Present, int, CEmpty));
+    fresh
+    ~context1:(context [ "x", int ])
+    ~context2:(context [ "y", bool ] ~tail:r);
   unify_context
-    typecheck
-    ~context1:(CExtend ("x", Present, int, CEmpty))
-    ~context2:(CExtend ("y", Present, bool, r));
-  unify_context
-    typecheck
-    ~context1:
-      (CExtend ("z", Present, int, CExtend ("y", Present, bool, CEmpty)))
-    ~context2:(CExtend ("y", Present, bool, r));
+    fresh
+    ~context1:(context [ "z", int; "y", bool ])
+    ~context2:(context [ "y", bool ] ~tail:r);
   [%expect
     {|
-    (Ok (CExtend z Present (TCon int ()) CEmpty))
+    (Ok ())
     (Error
      (Context_mismatch (CExtend x Present (TCon int ()) CEmpty)
       (CExtend y Present (TCon bool ())
-       (CVar (CLink (CExtend z Present (TCon int ()) CEmpty))))
+       (CVar (Link (CExtend z Present (TCon int ()) CEmpty))))
       (Empty_context_has_variable x)))
-    (Ok
-     (CExtend z Present (TCon int ()) (CExtend y Present (TCon bool ()) CEmpty)))
+    (Ok ())
     |}]
 ;;
 
 let%expect_test "presence" =
-  let typecheck = Typecheck.create () in
-  let pvar () = PVar (Typecheck.fresh_pvar typecheck ~rank:1) in
-  let maybe_x = CExtend ("x", pvar (), int, CEmpty) in
-  unify_context typecheck ~context1:maybe_x ~context2:CEmpty;
+  let fresh = Fresh.create () in
+  let maybe name ty rest = ext name ty rest ~presence:(pvar fresh ~rank:1) in
+  let maybe_x = maybe "x" int CEmpty in
+  unify_context fresh ~context1:maybe_x ~context2:CEmpty;
   print_context maybe_x;
-  let maybe_x = CExtend ("x", pvar (), int, CEmpty) in
-  unify_context
-    typecheck
-    ~context1:(CExtend ("x", Present, int, CEmpty))
-    ~context2:maybe_x;
+  let maybe_x = maybe "x" int CEmpty in
+  unify_context fresh ~context1:(context [ "x", int ]) ~context2:maybe_x;
+  print_context maybe_x;
+  let maybe_x = maybe "x" int (context [ "y", bool ]) in
+  unify_context fresh ~context1:maybe_x ~context2:(context [ "y", bool ]);
   print_context maybe_x;
   unify_context
-    typecheck
-    ~context1:
-      (CExtend ("x", pvar (), int, CExtend ("y", Present, bool, CEmpty)))
-    ~context2:(CExtend ("y", Present, bool, CEmpty));
+    fresh
+    ~context1:(ext "x" int CEmpty ~presence:Absent)
+    ~context2:(context [ "x", int ]);
   unify_context
-    typecheck
-    ~context1:(CExtend ("x", Absent, int, CEmpty))
-    ~context2:(CExtend ("x", Present, int, CEmpty));
-  unify_context
-    typecheck
-    ~context1:(CExtend ("x", Absent, int, CEmpty))
+    fresh
+    ~context1:(ext "x" int CEmpty ~presence:Absent)
     ~context2:CEmpty;
   [%expect
     {|
-    (Ok (CExtend x (PVar (PLink Absent)) (TCon int ()) CEmpty))
-    (CExtend x (PVar (PLink Absent)) (TCon int ()) CEmpty)
-    (Ok (CExtend x Present (TCon int ()) CEmpty))
-    (CExtend x (PVar (PLink Present)) (TCon int ()) CEmpty)
-    (Ok
-     (CExtend x (PVar (PLink Absent)) (TCon int ())
-      (CExtend y Present (TCon bool ()) CEmpty)))
+    (Ok ())
+    (CExtend x (PVar (Link Absent)) (TCon int ()) CEmpty)
+    (Ok ())
+    (CExtend x (PVar (Link Present)) (TCon int ()) CEmpty)
+    (Ok ())
+    (CExtend x (PVar (Link Absent)) (TCon int ())
+     (CExtend y Present (TCon bool ()) CEmpty))
     (Error
      (Context_mismatch (CExtend x Absent (TCon int ()) CEmpty)
       (CExtend x Present (TCon int ()) CEmpty) (Presence_mismatch x)))
-    (Ok (CExtend x Absent (TCon int ()) CEmpty))
+    (Ok ())
     |}]
 ;;
 
 let%expect_test "absent entries need not agree on type" =
-  let typecheck = Typecheck.create () in
+  let fresh = Fresh.create () in
+  let r = cvar fresh ~rank:1 in
   unify_context
-    typecheck
-    ~context1:(CExtend ("x", Absent, int, CEmpty))
-    ~context2:(cvar typecheck ~rank:1);
+    fresh
+    ~context1:(ext "x" int CEmpty ~presence:Absent)
+    ~context2:r;
+  print_context r;
   unify_context
-    typecheck
-    ~context1:(CExtend ("x", Absent, int, CEmpty))
-    ~context2:(CExtend ("y", Present, bool, CEmpty));
+    fresh
+    ~context1:(ext "x" int CEmpty ~presence:Absent)
+    ~context2:(context [ "y", bool ]);
   [%expect
     {|
-    (Ok (CExtend x Absent (TCon int ()) CEmpty))
+    (Ok ())
+    (CVar
+     (Link
+      (CExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
+       (CVar (Link CEmpty)))))
     (Error
      (Context_mismatch CEmpty (CExtend y Present (TCon bool ()) CEmpty)
       (Empty_context_has_variable y)))
@@ -585,133 +542,116 @@ let%expect_test "absent entries need not agree on type" =
 ;;
 
 let%expect_test "presence variables are generalized and their rank lowered" =
-  let typecheck = Typecheck.create () in
-  let inner = Typecheck.fresh_pvar typecheck ~rank:2 in
-  let outer = Typecheck.fresh_pvar typecheck ~rank:1 in
-  let r = cvar typecheck ~rank:1 in
+  let fresh = Fresh.create () in
+  let inner = Fresh.var fresh ~rank:2 in
+  let outer = pvar fresh ~rank:1 in
+  let r = cvar fresh ~rank:1 in
   unify_context
-    typecheck
+    fresh
     ~context1:r
-    ~context2:(CExtend ("x", PVar inner, int, CEmpty));
-  print_s [%sexp (inner : pvar ref)];
+    ~context2:(ext "x" int CEmpty ~presence:(PVar inner));
+  print_s [%sexp (inner : (presence, Nothing.t) Var.t)];
   let context =
-    CExtend
-      ( "y"
-      , PVar outer
-      , int
-      , CExtend ("z", PVar (Typecheck.fresh_pvar typecheck ~rank:2), int, CEmpty)
-      )
+    ext
+      "y"
+      int
+      ~presence:outer
+      (ext "z" int CEmpty ~presence:(pvar fresh ~rank:2))
   in
-  print_context (Typecheck.generalize_context typecheck ~rank:1 ~context);
+  print_context (Scheme.generalize_context ~rank:1 context);
   [%expect
     {|
-    (Ok (CExtend x (PVar (PUnbound 0 1)) (TCon int ()) CEmpty))
-    (PUnbound 0 1)
-    (CExtend y (PVar (PUnbound 1 1)) (TCon int ())
-     (CExtend z (PVar (PGeneric 3)) (TCon int ()) CEmpty))
+    (Ok ())
+    (Unbound 0 1)
+    (CExtend y (PVar (Unbound 1 1)) (TCon int ())
+     (CExtend z (PVar (Generic 3)) (TCon int ()) CEmpty))
     |}]
 ;;
 
 let%expect_test "context bounds" =
-  let typecheck = Typecheck.create () in
-  let constrain ~context ~bound =
-    let result = Typecheck.constrain_context typecheck ~context ~bound in
-    print_s [%sexp (result : (unit, Typecheck.Unification_error.t) Result.t)]
-  in
-  let r = cvar typecheck ~rank:1 in
-  let bound = cvar typecheck ~rank:1 in
-  constrain ~context:r ~bound;
+  let fresh = Fresh.create () in
+  let r = cvar fresh ~rank:1 in
+  let bound = cvar fresh ~rank:1 in
+  constrain fresh ~context:r ~bound;
   unify_context
-    typecheck
+    fresh
     ~context1:r
-    ~context2:(CExtend ("x", Present, int, cvar typecheck ~rank:1));
+    ~context2:(context [ "x", int ] ~tail:(cvar fresh ~rank:1));
   print_context bound;
   (* An entry already in the bound is reused, rather than duplicated. *)
   unify_context
-    typecheck
+    fresh
     ~context1:r
-    ~context2:
-      (CExtend
-         ( "x"
-         , Present
-         , int
-         , CExtend ("y", Present, bool, cvar typecheck ~rank:1) ));
+    ~context2:(context [ "x", int; "y", bool ] ~tail:(cvar fresh ~rank:1));
   print_context bound;
   unify_context
-    typecheck
+    fresh
     ~context1:r
-    ~context2:(CExtend ("y", Present, int, cvar typecheck ~rank:1));
+    ~context2:(context [ "y", int ] ~tail:(cvar fresh ~rank:1));
   [%expect
     {|
     (Ok ())
-    (Ok (CExtend x Present (TCon int ()) (CVar (CUnbound 2 1))))
+    (Ok ())
     (CVar
-     (CLink
-      (CExtend x (PVar (PLink Present)) (TVar (Link (TCon int ())))
-       (CVar (CUnbound 5 1)))))
-    (Ok
-     (CExtend x Present (TCon int ())
-      (CVar (CLink (CExtend y Present (TCon bool ()) (CVar (CUnbound 6 1)))))))
+     (Link
+      (CExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
+       (CVar (Unbound 5 1)))))
+    (Ok ())
     (CVar
-     (CLink
-      (CExtend x (PVar (PLink Present)) (TVar (Link (TCon int ())))
+     (Link
+      (CExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
        (CVar
-        (CLink
-         (CExtend y (PVar (PLink Present)) (TVar (Link (TCon bool ())))
-          (CVar (CUnbound 9 1))))))))
+        (Link
+         (CExtend y (PVar (Link Present)) (TVar (Link (TCon bool ())))
+          (CVar (Unbound 9 1))))))))
     (Error
      (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
     |}]
 ;;
 
 let%expect_test "context bounds and presence" =
-  let typecheck = Typecheck.create () in
-  let constrain ~context ~bound =
-    let result = Typecheck.constrain_context typecheck ~context ~bound in
-    print_s [%sexp (result : (unit, Typecheck.Unification_error.t) Result.t)]
-  in
-  let pvar () = PVar (Typecheck.fresh_pvar typecheck ~rank:1) in
+  let fresh = Fresh.create () in
+  let constrain = constrain fresh in
+  let maybe name ty rest = ext name ty rest ~presence:(pvar fresh ~rank:1) in
   (* Unused entries need not be in the bound. *)
-  let maybe_x = CExtend ("x", pvar (), int, CEmpty) in
+  let maybe_x = maybe "x" int CEmpty in
   constrain ~context:maybe_x ~bound:CEmpty;
   print_context maybe_x;
-  constrain ~context:(CExtend ("x", Absent, int, CEmpty)) ~bound:CEmpty;
-  constrain ~context:(CExtend ("x", Present, int, CEmpty)) ~bound:CEmpty;
+  constrain ~context:(ext "x" int CEmpty ~presence:Absent) ~bound:CEmpty;
+  constrain ~context:(context [ "x", int ]) ~bound:CEmpty;
   (* A used entry makes the bound's entry used. *)
-  let bound = CExtend ("x", pvar (), int, CEmpty) in
-  constrain ~context:(CExtend ("x", Present, int, CEmpty)) ~bound;
+  let bound = maybe "x" int CEmpty in
+  constrain ~context:(context [ "x", int ]) ~bound;
   print_context bound;
   (* Shadowed entries are not constrained. *)
   constrain
-    ~context:(CExtend ("x", Present, int, CExtend ("x", Present, bool, CEmpty)))
-    ~bound:(CExtend ("x", Present, int, CEmpty));
+    ~context:(context [ "x", int; "x", bool ])
+    ~bound:(context [ "x", int ]);
   [%expect
     {|
     (Ok ())
-    (CExtend x (PVar (PLink Absent)) (TCon int ()) CEmpty)
+    (CExtend x (PVar (Link Absent)) (TCon int ()) CEmpty)
     (Ok ())
     (Error
      (Context_mismatch (CExtend x Present (TCon int ()) CEmpty) CEmpty
       (Empty_context_has_variable x)))
     (Ok ())
-    (CExtend x (PVar (PLink Present)) (TCon int ()) CEmpty)
+    (CExtend x (PVar (Link Present)) (TCon int ()) CEmpty)
     (Ok ())
     |}]
 ;;
 
 let%expect_test "bounds are kept by generalization and instantiation" =
-  let typecheck = Typecheck.create () in
-  let r = cvar typecheck ~rank:2 in
-  let bound = cvar typecheck ~rank:2 in
-  ignore (Typecheck.constrain_context typecheck ~context:r ~bound : _ Result.t);
-  let ty =
-    TArrow
-      ( TCode { inner = int; context = r }
-      , TCode { inner = int; context = bound } )
-  in
-  let print ty = print_endline (Typecheck.to_string_hum typecheck ty) in
+  let fresh = Fresh.create () in
+  let r = cvar fresh ~rank:2 in
+  let bound = cvar fresh ~rank:2 in
+  ignore
+    (Unify.constrain_context fresh ~context:r ~bound ~shadowed:String.Set.empty
+     : _ Result.t);
+  let ty = TArrow (code r, code bound) in
+  let print ty = print_endline (Type.to_string_hum ty) in
   print ty;
-  let ty = Typecheck.generalize_ty typecheck ~rank:1 ~ty in
+  let ty = Scheme.generalize_ty ~rank:1 ty in
   print ty;
   [%expect
     {|
@@ -721,69 +661,67 @@ let%expect_test "bounds are kept by generalization and instantiation" =
 ;;
 
 let%expect_test "bounds lower ranks" =
-  let typecheck = Typecheck.create () in
-  let r = cvar typecheck ~rank:2 in
-  let bound = cvar typecheck ~rank:2 in
-  ignore (Typecheck.constrain_context typecheck ~context:r ~bound : _ Result.t);
-  unify_context typecheck ~context1:r ~context2:(cvar typecheck ~rank:1);
+  let fresh = Fresh.create () in
+  let r = cvar fresh ~rank:2 in
+  let bound = cvar fresh ~rank:2 in
+  ignore
+    (Unify.constrain_context fresh ~context:r ~bound ~shadowed:String.Set.empty
+     : _ Result.t);
+  unify_context fresh ~context1:r ~context2:(cvar fresh ~rank:1);
+  print_context r;
   print_context bound;
   [%expect
     {|
-    (Ok (CVar (CUnbound 2 1)))
-    (CVar (CUnbound 1 1))
+    (Ok ())
+    (CVar (Link (CVar (Unbound 2 1))))
+    (CVar (Unbound 1 1))
     |}]
 ;;
 
 let%expect_test "an absent entry shadows later entries with its name" =
-  let typecheck = Typecheck.create () in
-  let constrain ~context ~bound =
-    let result = Typecheck.constrain_context typecheck ~context ~bound in
-    print_s [%sexp (result : (unit, Typecheck.Unification_error.t) Result.t)]
-  in
-  let pvar () = PVar (Typecheck.fresh_pvar typecheck ~rank:1) in
-  let absent_then_x =
-    CExtend ("x", Absent, int, CExtend ("x", Present, bool, CEmpty))
-  in
+  let fresh = Fresh.create () in
+  let constrain = constrain fresh in
+  let absent_then_x = ext "x" int (context [ "x", bool ]) ~presence:Absent in
   (* The shadowed [x] is unreachable, so needs no entry in the bound. *)
   constrain ~context:absent_then_x ~bound:CEmpty;
   let maybe_then_x =
-    CExtend ("x", pvar (), int, CExtend ("x", Present, bool, CEmpty))
+    ext "x" int (context [ "x", bool ]) ~presence:(pvar fresh ~rank:1)
   in
   constrain ~context:maybe_then_x ~bound:CEmpty;
   print_context maybe_then_x;
   (* Unification never finds the shadowed [x] in place of the absent one. *)
   unify_context
-    typecheck
-    ~context1:(CExtend ("x", Present, bool, cvar typecheck ~rank:1))
+    fresh
+    ~context1:(context [ "x", bool ] ~tail:(cvar fresh ~rank:1))
     ~context2:absent_then_x;
-  let r = cvar typecheck ~rank:1 in
+  let r = cvar fresh ~rank:1 in
   constrain
     ~context:r
     ~bound:
-      (CExtend
-         ("x", Absent, int, CExtend ("x", Present, bool, cvar typecheck ~rank:1)));
-  unify_context
-    typecheck
-    ~context1:r
-    ~context2:(CExtend ("x", Present, bool, CEmpty));
+      (ext
+         "x"
+         int
+         (context [ "x", bool ] ~tail:(cvar fresh ~rank:1))
+         ~presence:Absent);
+  unify_context fresh ~context1:r ~context2:(context [ "x", bool ]);
   (* Shadowed entries still take part in unification, which is stricter than
      needed. *)
-  unify_context typecheck ~context1:CEmpty ~context2:absent_then_x;
+  unify_context fresh ~context1:CEmpty ~context2:absent_then_x;
   [%expect
     {|
     (Ok ())
     (Ok ())
-    (CExtend x (PVar (PLink Absent)) (TCon int ())
+    (CExtend x (PVar (Link Absent)) (TCon int ())
      (CExtend x Present (TCon bool ()) CEmpty))
     (Error
-     (Context_mismatch (CExtend x Present (TCon bool ()) (CVar (CUnbound 1 1)))
+     (Context_mismatch (CExtend x Present (TCon bool ()) (CVar (Unbound 1 1)))
       (CExtend x Absent (TCon int ()) (CExtend x Present (TCon bool ()) CEmpty))
       (Presence_mismatch x)))
     (Ok ())
     (Error
      (Context_mismatch (CExtend x Present (TCon bool ()) CEmpty)
       (CExtend x Absent (TCon int ())
-       (CExtend x Present (TCon bool ()) (CVar (CUnbound 3 1))))
+       (CExtend x Present (TCon bool ()) (CVar (Unbound 3 1))))
       (Presence_mismatch x)))
     (Error
      (Context_mismatch CEmpty (CExtend x Present (TCon bool ()) CEmpty)
@@ -792,21 +730,15 @@ let%expect_test "an absent entry shadows later entries with its name" =
 ;;
 
 let%expect_test "cyclic bounds" =
-  let typecheck = Typecheck.create () in
-  let constrain ~context ~bound =
-    let result = Typecheck.constrain_context typecheck ~context ~bound in
-    print_s [%sexp (result : (unit, Typecheck.Unification_error.t) Result.t)]
-  in
+  let fresh = Fresh.create () in
+  let constrain = constrain fresh in
   let print contexts =
-    TTuple
-      (List.map contexts ~f:(fun context -> TCode { inner = int; context }))
-    |> Typecheck.to_string_hum typecheck
-    |> print_endline
+    TTuple (List.map contexts ~f:code) |> Type.to_string_hum |> print_endline
   in
   let cycle () =
-    let a = cvar typecheck ~rank:1 in
-    let b = cvar typecheck ~rank:1 in
-    let c = cvar typecheck ~rank:1 in
+    let a = cvar fresh ~rank:1 in
+    let b = cvar fresh ~rank:1 in
+    let c = cvar fresh ~rank:1 in
     constrain ~context:a ~bound:b;
     constrain ~context:b ~bound:c;
     constrain ~context:c ~bound:a;
@@ -816,88 +748,69 @@ let%expect_test "cyclic bounds" =
   print [ a; b; c ];
   (* An entry of any member reaches every member. *)
   unify_context
-    typecheck
+    fresh
     ~context1:a
-    ~context2:(CExtend ("x", Present, int, cvar typecheck ~rank:1));
+    ~context2:(context [ "x", int ] ~tail:(cvar fresh ~rank:1));
   print [ a; b; c ];
   unify_context
-    typecheck
+    fresh
     ~context1:c
-    ~context2:(CExtend ("y", Present, bool, cvar typecheck ~rank:1));
+    ~context2:(context [ "y", bool ] ~tail:(cvar fresh ~rank:1));
   print [ a; b; c ];
   unify_context
-    typecheck
+    fresh
     ~context1:b
-    ~context2:(CExtend ("x", Present, bool, cvar typecheck ~rank:1));
+    ~context2:(context [ "x", bool ] ~tail:(cvar fresh ~rank:1));
   (* Once one member is closed, no member can get entries. *)
   let a, b, c = cycle () in
-  unify_context typecheck ~context1:c ~context2:CEmpty;
+  unify_context fresh ~context1:c ~context2:CEmpty;
   print [ a; b; c ];
   unify_context
-    typecheck
+    fresh
     ~context1:a
-    ~context2:(CExtend ("x", Present, int, cvar typecheck ~rank:1));
+    ~context2:(context [ "x", int ] ~tail:(cvar fresh ~rank:1));
   [%expect
     {|
     (Ok ())
     (Ok ())
     (Ok ())
     <int>{..'_a} * <int>{..'_b} * <int>{..'_c} where ..'_a <= {..'_b}, ..'_b <= {..'_c}, ..'_c <= {..'_a}
-    (Ok (CExtend x Present (TCon int ()) (CVar (CUnbound 3 1))))
+    (Ok ())
     <int>{x : int; ..'_a} * <int>{x : int; ..'_b} * <int>{x : int; ..'_c} where ..'_a <= {x : int; ..'_b}, ..'_b <= {x : int; ..'_c}, ..'_c <= {x : int; ..'_a}
-    (Ok
-     (CExtend x (PVar (PLink Present)) (TVar (Link (TCon int ())))
-      (CVar (CLink (CExtend y Present (TCon bool ()) (CVar (CUnbound 13 1)))))))
+    (Ok ())
     <int>{x : int; y : bool; ..'_a} * <int>{x : int; y : bool; ..'_b} * <int>{x : int; y : bool; ..'_c} where ..'_a <= {x : int; y : bool; ..'_b}, ..'_b <= {x : int; y : bool; ..'_c}, ..'_c <= {x : int; y : bool; ..'_a}
     (Error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     (Ok ())
     (Ok ())
     (Ok ())
-    (Ok CEmpty)
+    (Ok ())
     <int>{..'_a} * <int>{..'_b} * <int>{} where ..'_a <= {..'_b}, ..'_b <= {}
     (Error
-     (Context_mismatch (CExtend x Present (TCon int ()) (CVar (CUnbound 24 1)))
+     (Context_mismatch (CExtend x Present (TCon int ()) (CVar (Unbound 24 1)))
       (CVar
-       (CLink
-        (CExtend x (PVar (PLink Absent)) (TVar (Unbound 26 1))
-         (CVar (CUnbound 27 1)))))
+       (Link
+        (CExtend x (PVar (Link Absent)) (TVar (Unbound 26 1))
+         (CVar (Unbound 27 1)))))
       (Presence_mismatch x)))
     |}]
 ;;
 
 let%expect_test "bounds referring to the bounded variable" =
-  let typecheck = Typecheck.create () in
-  let print context =
-    TCode { inner = int; context }
-    |> Typecheck.to_string_hum typecheck
-    |> print_endline
-  in
-  let s = cvar typecheck ~rank:1 in
+  let fresh = Fresh.create () in
+  let print context = print_endline (Type.to_string_hum (code context)) in
+  let s = cvar fresh ~rank:1 in
   (* A bound that is the variable itself constrains nothing. *)
-  print_s
-    [%sexp
-      (Typecheck.constrain_context typecheck ~context:s ~bound:s
-       : (unit, Typecheck.Unification_error.t) Result.t)];
+  constrain fresh ~context:s ~bound:s;
   print s;
-  print_s
-    [%sexp
-      (Typecheck.constrain_context
-         typecheck
-         ~context:s
-         ~bound:(CExtend ("x", Present, int, s))
-       : (unit, Typecheck.Unification_error.t) Result.t)];
+  constrain fresh ~context:s ~bound:(context [ "x", int ] ~tail:s);
   print s;
   unify_context
-    typecheck
+    fresh
     ~context1:s
-    ~context2:(CExtend ("y", Present, bool, cvar typecheck ~rank:1));
+    ~context2:(context [ "y", bool ] ~tail:(cvar fresh ~rank:1));
   print s;
-  unify_context
-    typecheck
-    ~context1:s
-    ~context2:
-      (CExtend ("x", Present, int, CExtend ("y", Present, bool, CEmpty)));
+  unify_context fresh ~context1:s ~context2:(context [ "x", int; "y", bool ]);
   print s;
   [%expect
     {|
@@ -905,76 +818,44 @@ let%expect_test "bounds referring to the bounded variable" =
     <int>{..'_a}
     (Ok ())
     <int>{..'_a} where ..'_a <= {x : int; ..'_a}
-    (Ok (CExtend y Present (TCon bool ()) (CVar (CUnbound 1 1))))
+    (Ok ())
     <int>{y : bool; ..'_a} where ..'_a <= {x : int; y : bool; ..'_a}
-    (Ok
-     (CExtend y Present (TCon bool ())
-      (CVar (CLink (CExtend x Present (TCon int ()) CEmpty)))))
+    (Ok ())
     <int>{x : int; y : bool}
     |}]
 ;;
 
 let%expect_test "bounds do not constrain shadowed entries" =
-  let typecheck = Typecheck.create () in
-  let r = cvar typecheck ~rank:1 in
-  let bound = CExtend ("x", Present, int, cvar typecheck ~rank:1) in
-  print_s
-    [%sexp
-      (Typecheck.constrain_context
-         typecheck
-         ~context:(CExtend ("x", Present, int, r))
-         ~bound
-       : (unit, Typecheck.Unification_error.t) Result.t)];
+  let fresh = Fresh.create () in
+  let r = cvar fresh ~rank:1 in
+  let bound = context [ "x", int ] ~tail:(cvar fresh ~rank:1) in
+  constrain fresh ~context:(context [ "x", int ] ~tail:r) ~bound;
   (* [r]'s [x] is hidden by the [x : int] before it. *)
   unify_context
-    typecheck
+    fresh
     ~context1:r
-    ~context2:
-      (CExtend
-         ( "x"
-         , Present
-         , bool
-         , CExtend ("y", Present, bool, cvar typecheck ~rank:1) ));
+    ~context2:(context [ "x", bool; "y", bool ] ~tail:(cvar fresh ~rank:1));
   print_context bound;
   (* Shadowing is kept as bounds move to the rest of [r]. *)
   unify_context
-    typecheck
+    fresh
     ~context1:r
-    ~context2:
-      (CExtend
-         ( "x"
-         , Present
-         , bool
-         , CExtend
-             ( "y"
-             , Present
-             , bool
-             , CExtend
-                 ("x", Present, string, CExtend ("y", Present, string, CEmpty))
-             ) ));
+    ~context2:(context [ "x", bool; "y", bool; "x", string; "y", string ]);
   print_context bound;
   [%expect
     {|
     (Ok ())
-    (Ok
-     (CExtend x Present (TCon bool ())
-      (CExtend y Present (TCon bool ()) (CVar (CUnbound 2 1)))))
+    (Ok ())
     (CExtend x Present (TCon int ())
      (CVar
-      (CLink
-       (CExtend y (PVar (PLink Present)) (TVar (Link (TCon bool ())))
-        (CVar (CUnbound 5 1))))))
-    (Ok
-     (CExtend x Present (TCon bool ())
-      (CExtend y Present (TCon bool ())
-       (CVar
-        (CLink
-         (CExtend x Present (TCon string ())
-          (CExtend y Present (TCon string ()) CEmpty)))))))
+      (Link
+       (CExtend y (PVar (Link Present)) (TVar (Link (TCon bool ())))
+        (CVar (Unbound 5 1))))))
+    (Ok ())
     (CExtend x Present (TCon int ())
      (CVar
-      (CLink
-       (CExtend y (PVar (PLink Present)) (TVar (Link (TCon bool ())))
-        (CVar (CUnbound 5 1))))))
+      (Link
+       (CExtend y (PVar (Link Present)) (TVar (Link (TCon bool ())))
+        (CVar (Unbound 5 1))))))
     |}]
 ;;

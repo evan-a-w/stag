@@ -69,7 +69,4 @@ type t = Item.t list [@@deriving sexp_of]
     and [M.N.t] at the root. If no suffix does, as for a root type shadowed by
     a type of the same name in an enclosing module, it is the canonical name
     after a leading [.], which stands for the root: [.t], [.M.t]. *)
-val to_string_hum
-  :  ?context_bounds:(Type.id -> Type.context list)
-  -> t
-  -> string
+val to_string_hum : t -> string

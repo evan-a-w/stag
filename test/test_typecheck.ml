@@ -8,7 +8,7 @@ let%expect_test "primitives" =
   Typecheck.typecheck typecheck ~program:prims
   |> Result.ok
   |> Option.value_exn
-  |> print_signature typecheck;
+  |> print_signature;
   [%expect
     {|
     val add : int -> int -> int
@@ -22,8 +22,8 @@ let%expect_test "typechecking twice with the same state" =
   let typecheck = Typecheck.create () in
   let run program =
     match Typecheck.typecheck typecheck ~program with
-    | Ok signature -> print_signature typecheck signature
-    | Error error -> print_s [%sexp (error : Typecheck.Typecheck_error.t)]
+    | Ok signature -> print_signature signature
+    | Error error -> print_s [%sexp (error : Typecheck_error.t)]
   in
   run prims;
   run [ top "id" [ "x" ] (var "x"); top "n" [] (app (var "id") [ int 1 ]) ];
@@ -370,14 +370,14 @@ let%expect_test "splice substitution errors" =
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     (Unification_error
      (Context_mismatch
-      (CExtend x (PVar (PLink Present)) (TVar (Link (TCon int ())))
-       (CVar (CUnbound 30 1)))
+      (CExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
+       (CVar (Unbound 30 1)))
       CEmpty (Empty_context_has_variable x)))
     val extra : <int>{..'a}
     (Duplicate_substitution x)
     (Unification_error
      (Type_mismatch
-      (TCode (inner (TVar (Unbound 20 1))) (context (CVar (CUnbound 21 1))))
+      (TCode (inner (TVar (Unbound 20 1))) (context (CVar (Unbound 21 1))))
       (TCon int ()) Structural_mismatch))
     |}]
 ;;
@@ -502,8 +502,8 @@ let%expect_test "levels" =
     (Not_in_scope x)
     (Unification_error
      (Context_mismatch
-      (CExtend x (PVar (PLink Present)) (TVar (Unbound 26 1))
-       (CVar (CUnbound 27 1)))
+      (CExtend x (PVar (Link Present)) (TVar (Unbound 26 1))
+       (CVar (Unbound 27 1)))
       CEmpty (Empty_context_has_variable x)))
     (Variable_used_at_wrong_level (name x) (var_level 0) (used_at -1))
     |}]
@@ -551,8 +551,8 @@ let%expect_test "staged power" =
     val open : <int>{y : int; ..'_a}
     (Unification_error
      (Context_mismatch CEmpty
-      (CExtend y (PVar (PLink Present)) (TVar (Link (TCon int ())))
-       (CVar (CUnbound 67 1)))
+      (CExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
+       (CVar (Unbound 67 1)))
       (Empty_context_has_variable y)))
     (Unification_error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
@@ -633,6 +633,8 @@ let%expect_test "spliced code that may use a name propagates it as such" =
            (var "twice")
            [ quote (app (var "cond") [ var "x"; int 1; int 2 ]) ])
     ; top "not_used" [] (app (var "twice") [ quote (int 1) ])
+    ; (* Instantiation keeps the order of bounds. *)
+      top "instance" [ "c" ] (app (var "twice") [ var "c" ])
     ];
   check
     [ top
@@ -650,6 +652,7 @@ let%expect_test "spliced code that may use a name propagates it as such" =
     val twice : <'a>{x?'b : bool; ..'c} -> <'a>{x?'b : bool; ..'d} where ..'c <= {x?'b : bool; ..'d}, ..'c <= {..'e}
     val propagates : <int>{x : bool; ..'_a}
     val not_used : <int>{x?'_a : bool; ..'_b}
+    val instance : <'a>{x?'b : bool; ..'c} -> <'a>{x?'b : bool; ..'d} where ..'c <= {x?'b : bool; ..'d}, ..'c <= {..'e}
     val direct_use : <'a>{x?'b : bool; ..'c} -> <'d>{x : 'd; ..'e} where ..'c <= {y?'f : 'a; ..'g}, ..'g <= {x : 'd; ..'e}
     |}]
 ;;
@@ -706,9 +709,9 @@ let%expect_test "names bound at a later level are absent from spliced code" =
     val uses_z : <<int>{..'_a}>{..'_b}
     (Unification_error
      (Context_mismatch
-      (CExtend z Absent (TVar (Unbound 40 1)) (CVar (CUnbound 39 1)))
-      (CExtend z (PVar (PLink Present)) (TVar (Unbound 47 1))
-       (CVar (CUnbound 48 1)))
+      (CExtend z Absent (TVar (Unbound 40 1)) (CVar (Unbound 39 1)))
+      (CExtend z (PVar (Link Present)) (TVar (Unbound 47 1))
+       (CVar (Unbound 48 1)))
       (Presence_mismatch z)))
     (Variable_used_at_wrong_level (name z) (var_level 2) (used_at 1))
     |}]
@@ -840,9 +843,9 @@ let%expect_test "mutually recursive staged functions" =
      (Context_mismatch CEmpty
       (CExtend y Present (TCon int ())
        (CVar
-        (CLink
-         (CExtend z (PVar (PLink Present)) (TVar (Link (TCon int ())))
-          (CVar (CUnbound 84 1))))))
+        (Link
+         (CExtend z (PVar (Link Present)) (TVar (Link (TCon int ())))
+          (CVar (Unbound 84 1))))))
       (Empty_context_has_variable y)))
     |}]
 ;;
@@ -923,7 +926,7 @@ let%expect_test "presence approximation" =
     val splices_then_uses_x : <int>{x : int; ..'a} -> <int>{x : int; ..'a} where ..'a <= {x : int; ..'b}, ..'a <= {..'c}
     val uses_x_then_splices_closed : <int>{-x}
     (Unification_error
-     (Context_mismatch (CExtend x Present (TCon int ()) (CVar (CUnbound 47 1)))
+     (Context_mismatch (CExtend x Present (TCon int ()) (CVar (Unbound 47 1)))
       CEmpty (Empty_context_has_variable x)))
     |}]
 ;;

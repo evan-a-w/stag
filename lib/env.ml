@@ -17,7 +17,7 @@ module Entry = struct
     ; quote_id : int option
     ; persistent : bool
     }
-  [@@deriving sexp, compare, equal]
+  [@@deriving sexp_of]
 
   let toplevel ~scheme ~persistent =
     { scheme; level = 0; quote_id = None; persistent }
