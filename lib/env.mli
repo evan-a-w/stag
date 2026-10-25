@@ -28,6 +28,9 @@ type t [@@deriving sexp_of]
 val create : unit -> t
 val find : t -> string -> Entry.t option
 
+(** The innermost entry of each bound name, sorted by name. *)
+val visible : t -> (string * Entry.t) list
+
 (** Binds [bindings] (later ones shadowing earlier ones) for the duration of
     [f]. *)
 val with_bindings : t -> (string * Entry.t) list -> f:(unit -> 'a) -> 'a

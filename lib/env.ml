@@ -37,6 +37,13 @@ type t = Entry.t list String.Table.t [@@deriving sexp_of]
 let create () = String.Table.create ()
 let find t name = Hashtbl.find t name |> Option.bind ~f:List.hd
 
+let visible t =
+  Hashtbl.to_alist t
+  |> List.filter_map ~f:(fun (name, entries) ->
+    List.hd entries |> Option.map ~f:(fun entry -> name, entry))
+  |> List.sort ~compare:(Comparable.lift String.compare ~f:fst)
+;;
+
 let with_bindings t bindings ~f =
   List.iter bindings ~f:(fun (name, entry) ->
     Hashtbl.add_multi t ~key:name ~data:entry);

@@ -25,8 +25,18 @@ and cvar =
 
 and context =
   | CEmpty
-  | CExtend of string * ty * context
+  | CExtend of string * presence * ty * context
   | CVar of cvar ref
+
+and presence =
+  | Present
+  | Absent
+  | PVar of pvar ref
+
+and pvar =
+  | PLink of presence
+  | PGeneric of id
+  | PUnbound of id * rank
 
 and arg =
   | ATy of ty
@@ -61,7 +71,7 @@ let rec canonical_ty ty =
 let rec canonical_context context =
   match context with
   | CEmpty
-  | CExtend (_, _, _)
+  | CExtend (_, _, _, _)
   | CVar { contents = CGeneric _ | CUnbound (_, _) } -> context
   | CVar ({ contents = CLink context' } as cvar) ->
     let context'' = canonical_context context' in
@@ -69,15 +79,25 @@ let rec canonical_context context =
     context''
 ;;
 
+let rec canonical_presence presence =
+  match presence with
+  | Present | Absent | PVar { contents = PGeneric _ | PUnbound (_, _) } ->
+    presence
+  | PVar ({ contents = PLink presence' } as pvar) ->
+    let presence'' = canonical_presence presence' in
+    pvar := PLink presence'';
+    presence''
+;;
+
 let rec tail_var context =
   match context with
   | CEmpty -> None
-  | CExtend (_, _, context') -> tail_var context'
+  | CExtend (_, _, _, context') -> tail_var context'
   | CVar { contents = CLink context' } -> tail_var context'
   | CVar ({ contents = CGeneric _ | CUnbound (_, _) } as cvar) -> Some cvar
 ;;
 
-let to_string_hum ty =
+let to_string_hum ?(context_bounds = fun (_ : id) -> []) ty =
   let names = Int.Table.create () in
   let var_name id ~weak =
     let index =
@@ -86,6 +106,16 @@ let to_string_hum ty =
     let letter = Char.of_int_exn (Char.to_int 'a' + (index % 26)) in
     let suffix = if index >= 26 then Int.to_string (index / 26) else "" in
     sprintf "'%s%c%s" (if weak then "_" else "") letter suffix
+  in
+  (* Bounded context variables, in order of appearance, to print their bounds
+     after the type. *)
+  let bounded = Queue.create () in
+  let context_var_name id ~weak =
+    let first_appearance = not (Hashtbl.mem names id) in
+    let name = ".." ^ var_name id ~weak in
+    if first_appearance && not (List.is_empty (context_bounds id))
+    then Queue.enqueue bounded (name, id);
+    name
   in
   let rec ty_to_string ~prec ty =
     let parens_if cond s = if cond then "(" ^ s ^ ")" else s in
@@ -116,16 +146,51 @@ let to_string_hum ty =
   and context_to_string context =
     let rec entries context =
       match canonical_context context with
-      | CEmpty -> []
-      | CExtend (name, ty, rest) ->
-        let entry = sprintf "%s : %s" name (ty_to_string ~prec:0 ty) in
-        entry :: entries rest
-      | CVar { contents = CGeneric id } -> [ ".." ^ var_name id ~weak:false ]
-      | CVar { contents = CUnbound (id, _) } ->
-        [ ".." ^ var_name id ~weak:true ]
+      | CEmpty -> [], None
+      | CExtend (name, presence, ty, rest) ->
+        let entries, tail = entries rest in
+        (name, presence, ty) :: entries, tail
+      | CVar { contents = CGeneric id } -> [], Some (id, false)
+      | CVar { contents = CUnbound (id, _) } -> [], Some (id, true)
       | CVar { contents = CLink _ } -> assert false
     in
-    "{" ^ String.concat ~sep:"; " (entries context) ^ "}"
+    let entry (name, presence, ty) =
+      let ty () = ty_to_string ~prec:0 ty in
+      match canonical_presence presence with
+      | Present -> sprintf "%s : %s" name (ty ())
+      | Absent -> "-" ^ name
+      | PVar { contents = PGeneric id } ->
+        let presence = var_name id ~weak:false in
+        sprintf "%s?%s : %s" name presence (ty ())
+      | PVar { contents = PUnbound (id, _) } ->
+        let presence = var_name id ~weak:true in
+        sprintf "%s?%s : %s" name presence (ty ())
+      | PVar { contents = PLink _ } -> assert false
+    in
+    let fields, tail = entries context in
+    let fields =
+      List.stable_sort fields ~compare:(fun (a, _, _) (b, _, _) ->
+        String.compare a b)
+      |> List.map ~f:entry
+    in
+    let tail =
+      Option.map tail ~f:(fun (id, weak) -> context_var_name id ~weak)
+      |> Option.to_list
+    in
+    "{" ^ String.concat ~sep:"; " (fields @ tail) ^ "}"
   in
-  ty_to_string ~prec:0 ty
+  let ty = ty_to_string ~prec:0 ty in
+  let rec constraints () =
+    match Queue.dequeue bounded with
+    | None -> []
+    | Some (name, id) ->
+      let bounds =
+        List.map (context_bounds id) ~f:(fun bound ->
+          sprintf "%s <= %s" name (context_to_string bound))
+      in
+      bounds @ constraints ()
+  in
+  match constraints () with
+  | [] -> ty
+  | constraints -> ty ^ " where " ^ String.concat ~sep:", " constraints
 ;;
