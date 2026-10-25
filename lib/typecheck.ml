@@ -543,9 +543,8 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
     in
     let inner = Scope.fresh_ty t scope in
     let context = Scope.fresh_row t scope in
-    let%bind.Result code_ty = expr_type t outside ~expr in
     let%bind.Result () =
-      Unify.unify_ty t ~ty1:(TCode { inner; context }) ~ty2:code_ty |> lift
+      check_expr t outside ~expr ~ty:(TCode { inner; context })
     in
     let%map.Result () =
       match subs with
