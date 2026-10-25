@@ -613,12 +613,12 @@ let%expect_test "non-persistent toplevels are free variables named canonically" 
     M.q : 'a -> <'b>{M.n : 'b; ..'c}
     M.both : <'a * 'a>{M.n : 'a; ..'b}
     M.local : <unit>{..'a}
-    M.root_code : <'a>{n : 'a; ..'b}
+    M.root_code : <'_a>{n : '_a; ..'_b}
     q : 'a -> <'b>{M.n : 'b; ..'c}
     q_root : 'a -> <'b>{n : 'b; ..'c}
-    spliced : <'a>{M.n : 'a; ..'b}
-    not_captured : <'a>{M.n : 'a; ..'b}
-    captured : <unit>{..'a}
+    spliced : <'_a>{M.n : '_a; ..'_b}
+    not_captured : <'_a>{M.n : '_a; ..'_b}
+    captured : <unit>{..'_a}
     |}]
 ;;
 

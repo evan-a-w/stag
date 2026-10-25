@@ -15,6 +15,7 @@ type t =
   | Unbound_module of Syntax.Path.t
   | Unbound_type of Syntax.Path.t
   | Unbound_type_variable of string
+  | Type_variable_kind_mismatch of string
   | Unbound_constructor of Syntax.Path.t
   | Unbound_field of Syntax.Path.t
   | Type_arity_mismatch of
@@ -48,6 +49,7 @@ type t =
       }
   | Empty_record
   | Duplicate_pattern_variable of string
+  | Duplicate_context_entry of string
 [@@deriving sexp, compare, equal]
 
 val unification_error : Unification_error.t -> t

@@ -18,6 +18,26 @@ let%expect_test "primitives" =
     |}]
 ;;
 
+let%expect_test "typechecking twice with the same state" =
+  let typecheck = Typecheck.create () in
+  let run program =
+    match Typecheck.typecheck typecheck ~program with
+    | Ok types -> print_types typecheck types
+    | Error error -> print_s [%sexp (error : Typecheck.Typecheck_error.t)]
+  in
+  run prims;
+  run [ top "id" [ "x" ] (var "x"); top "n" [] (app (var "id") [ int 1 ]) ];
+  [%expect
+    {|
+    add : int -> int -> int
+    eq : int -> int -> bool
+    cond : bool -> 'a -> 'a -> 'a
+    id : 'a -> 'a
+    id : 'a -> 'a
+    n : int
+    |}]
+;;
+
 let%expect_test "literals and application" =
   check
     [ top "i" [] (int 1)
@@ -647,7 +667,7 @@ let%expect_test "only binders of the enclosing quote capture" =
     {|
     outer_persistent : <'a>{..'b} -> <'a>{..'c} where ..'b <= {..'c}
     add_free : 'a -> <'b>{add : 'b; ..'c}
-    not_toplevel : <'a>{add : 'a; ..'b}
+    not_toplevel : <'_a>{add : '_a; ..'_b}
     |}]
 ;;
 

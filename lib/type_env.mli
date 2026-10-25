@@ -4,8 +4,6 @@ open! Core
     elaboration of surface types. Names are canonical. *)
 type t
 
-val empty : t
-
 (** The builtin types, as declarations of the root module. *)
 val builtins : Syntax.Type_decl.t list
 
@@ -27,14 +25,14 @@ module Constructor : sig
   [@@deriving sexp_of]
 end
 
-(** Like [Constructor], with the record type's parameters [Generic] in [ty] and
-    [record]. *)
+(** Like [Constructor], with the record type's parameters [Generic] in
+    [params] and [ty]. The record type is [TCon (type_name, params)]. *)
 module Field : sig
   type t =
     { name : string
     ; type_name : string
+    ; params : Type.arg list
     ; ty : Type.ty
-    ; record : Type.ty
     ; all_fields : string list
     }
   [@@deriving sexp_of]

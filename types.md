@@ -30,8 +30,10 @@ Elaboration:
   over the enclosing toplevel definition (as in OCaml): the same name within a
   toplevel is the same variable, created fresh on first use at the current
   rank.
-- In declarations, variables must be declared parameters of the right kind
-  (`Ty` vs `Context`), otherwise `Unbound_type_variable`.
+- In declarations, variables must be declared parameters
+  (`Unbound_type_variable`) of the right kind, `Ty` vs `Context`
+  (`Type_variable_kind_mismatch`).
+- A label appears at most once in one context (`Duplicate_context_entry`).
 - Builtins `int`, `bool`, `string`, `char`, `unit` are nominal types without
   constructors declared in the root module (so `Type.int` is `TCon ("int", [])`
   as before): redeclaring one at the root is `Duplicate_type`, while `M.unit`
@@ -111,14 +113,23 @@ end
 Generalization is decided by whether the bound expression is a syntactic value
 (the relaxed value restriction), instead of "has arguments":
 
-- values: literals, variables, functions (`let` with arguments), quotes,
-  `Construct`/`Tuple`/`Record` of values, `Field` of a value,
-  `let x = v1 in v2`, `match v with p -> v | ...`
+- values: literals, variables, functions (`let` with arguments), quotes whose
+  level 0 splices (those run when the quote is built: inside no deeper quote)
+  splice values, `Construct`/`Tuple`/`Record` of values, `Field` of a value,
+  `let x = v1 in v2` where `v1` does not refer to `x`,
+  `match v with p -> v | ...`
 - not values: applications, splices
+
+Local `let`s are recursive, so like OCaml's `let rec`, a recursive non-function
+is not generalized: `let x = e1 in e2` is generalized only if `e1` does not
+refer to `x`. This is over-approximated: a splice with implicit substitutions
+may refer to any name in scope.
 
 Level crossing (`Env.Entry.persistent`) is unchanged: still only functions.
 Modes will replace both checks (see `modes.md`). For an SCC of toplevels,
-generalize iff all members are values; persistent iff all are functions.
+generalize iff all members are values and, if any member is not a function,
+the SCC is not recursive (it has more than one member, or one referring to
+itself); persistent iff all are functions.
 
 ## Modules
 

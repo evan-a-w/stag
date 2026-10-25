@@ -364,10 +364,49 @@ let%expect_test "declaration errors" =
     (Duplicate_field x)
     (Duplicate_field x)
     (Unbound_type_variable a)
-    (Unbound_type_variable a)
-    (Unbound_type_variable r)
+    (Type_variable_kind_mismatch a)
+    (Type_variable_kind_mismatch r)
     (Unbound_type nope)
     (Unbound_type nope)
+    |}]
+;;
+
+let%expect_test "duplicate context entries" =
+  let twice = Ty.code Ty.int ~entries:[ "x", Ty.int; "x", Ty.bool ] in
+  check [ top "f" [ "c" ] ~annot:twice (var "c") ];
+  check [ top "f" [ "c" ] (var "c" ~annot:twice) ];
+  check [ Decl.variant "t" [ "A", [ twice ] ] ];
+  check [ Decl.alias "t" twice ];
+  check
+    [ Decl.alias "code" ~params:[ Decl.context "r" ] (Ty.code Ty.int ~tail:"r")
+    ; top
+        "f"
+        [ "c" ]
+        ~annot:
+          (Ty.con
+             "code"
+             ~args:
+               [ Context (Extend ("x", Ty.int, Extend ("x", Ty.int, Var "r"))) ])
+        (var "c")
+    ];
+  check
+    [ top
+        "nested"
+        [ "c" ]
+        ~annot:
+          (Ty.code
+             (Ty.code Ty.int ~entries:[ "x", Ty.int ])
+             ~entries:[ "x", Ty.bool ])
+        (var "c")
+    ];
+  [%expect
+    {|
+    (Duplicate_context_entry x)
+    (Duplicate_context_entry x)
+    (Duplicate_context_entry x)
+    (Duplicate_context_entry x)
+    (Duplicate_context_entry x)
+    nested : <<int>{x : int}>{x : bool} -> <<int>{x : int}>{x : bool}
     |}]
 ;;
 
@@ -752,37 +791,124 @@ let%expect_test "generalized values are not persistent" =
 ;;
 
 let%expect_test "SCCs are generalized iff all members are values" =
-  let values =
+  check
     [ Decl.list
-    ; top "a" [ "x" ] (var "b")
-    ; top "b" [] (seq (var "a") nil)
-    ; top
-        "use"
-        []
-        (tuple [ cons (int 1) (var "b"); cons (bool true) (var "b") ])
-    ; top "quoted" [] (quote (app (var "a") [ int 1 ]))
-    ]
-  in
-  check values;
+    ; top "nil" [] nil
+    ; top "f" [ "x" ] (app (var "g") [ var "x" ])
+    ; top "g" [ "x" ] (seq (var "nil") (app (var "f") [ var "x" ]))
+    ];
   check
     [ Decl.list
     ; top "a" [ "x" ] (var "b")
     ; top "b" [] (seq (var "a") (app (var "id") [ nil ]))
+    ];
+  [%expect
+    {|
+    nil : list['a]
+    f : 'a -> 'b
+    g : 'a -> 'b
+    a : '_a -> list['_b]
+    b : list['_a]
+    |}]
+;;
+
+let%expect_test "recursive SCCs with a non-function are not generalized" =
+  check
+    [ Decl.list
+    ; top "a" [ "x" ] (var "b")
+    ; top "b" [] (seq (var "a") nil)
+    ; top "quoted" [] (quote (app (var "a") [ int 1 ]))
     ];
   check
     [ Decl.list
     ; top "xs" [] (cons (int 1) (var "ys"))
     ; top "ys" [] (cons (int 2) (var "xs"))
     ];
+  check [ top "x" [] (var "x") ];
+  check [ top "x" [] (var "y"); top "y" [] (var "x") ];
+  check [ module_ "M" [ top "x" [] (var "M.x") ] ];
+  check
+    [ top "x" [] (var "x")
+    ; top "use" [] (seq (app (var "x") [ int 1 ]) (app (var "x") [ bool true ]))
+    ];
   [%expect
     {|
-    a : 'a -> list['b]
-    b : list['a]
-    use : list[int] * list[bool]
-    quoted : <'a>{a : int -> 'a; ..'b}
     a : '_a -> list['_b]
     b : list['_a]
+    quoted : <'a>{a : int -> 'a; ..'b}
     xs : list[int]
     ys : list[int]
+    x : '_a
+    x : '_a
+    y : '_a
+    M.x : '_a
+    (Unification_error
+     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    |}]
+;;
+
+let%expect_test "recursive local non-functions are not generalized" =
+  let print_local equal =
+    check
+      [ Decl.list
+      ; top "local" [] (let_ "x" [] equal (tuple [ var "x"; var "x" ]))
+      ]
+  in
+  print_local (var "x");
+  print_local (seq (var "x") nil);
+  print_local (match_ (var "x") [ Pat.any, nil ]);
+  (* Over-approximated: the splice could be provided [x] from the scope. *)
+  print_local (quote (splice (quote nil)));
+  print_local nil;
+  print_local (let_ "x" [] nil (var "x"));
+  print_local (match_ nil [ Pat.var "x", var "x" ]);
+  print_local (let_ "g" [ "x" ] (var "x") (seq (var "g") nil));
+  print_local (quote (splice ~subs:[ "y", None ] (quote nil)));
+  print_local (quote (splice ~subs:[ "x", None ] (quote nil)));
+  [%expect
+    {|
+    local : '_a * '_a
+    local : list['_a] * list['_a]
+    local : list['_a] * list['_a]
+    local : <list['_a]>{..'_b} * <list['_a]>{..'_b}
+    local : list['a] * list['b]
+    local : list['a] * list['b]
+    local : list['a] * list['b]
+    local : list['a] * list['b]
+    local : <list['a]>{y : 'b; ..'c} * <list['d]>{y : 'e; ..'f}
+    local : <list['_a]>{x : '_b; ..'_c} * <list['_a]>{x : '_b; ..'_c}
+    |}]
+;;
+
+let%expect_test "quotes are values unless their level 0 splices are not" =
+  check
+    [ Decl.list
+    ; top "no_splice" [] (quote nil)
+    ; top "value_splice" [] (quote (splice (quote nil)))
+    ; top "app_splice" [] (quote (splice (app (var "id") [ quote nil ])))
+    ; top
+        "nested_app_splice"
+        []
+        (quote (quote (splice (app (var "id") [ quote nil ]))))
+    ; top
+        "escaping_app_splice"
+        []
+        (quote (quote (splice (splice (app (var "id") [ quote (quote nil) ])))))
+    ; top
+        "substitution"
+        []
+        (quote
+           (splice
+              ~subs:[ "x", Some (app (var "id") [ nil ]) ]
+              (quote (var "x"))))
+    ];
+  [%expect
+    {|
+    no_splice : <list['a]>{..'b}
+    value_splice : <list['a]>{..'b}
+    app_splice : <list['_a]>{..'_b}
+    nested_app_splice : <<list['a]>{..'b}>{..'c}
+    escaping_app_splice : <<list['_a]>{..'_b}>{..'_c}
+    substitution : <list['a]>{..'b}
     |}]
 ;;

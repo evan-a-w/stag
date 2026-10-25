@@ -14,8 +14,8 @@ module Field = struct
   type t =
     { name : string
     ; type_name : string
+    ; params : Type.arg list
     ; ty : Type.ty
-    ; record : Type.ty
     ; all_fields : string list
     }
   [@@deriving sexp_of]
@@ -40,13 +40,6 @@ type t =
   ; constructors : Constructor.t String.Map.t
   ; fields : Field.t String.Map.t
   }
-
-let empty =
-  { types = String.Map.empty
-  ; constructors = String.Map.empty
-  ; fields = String.Map.empty
-  }
-;;
 
 let builtins =
   List.map [ "int"; "bool"; "string"; "char"; "unit" ] ~f:(fun name ->
@@ -112,7 +105,8 @@ module Vars = struct
     | Params params ->
       (match Map.find params name with
        | Some (ATy ty) -> Ok ty
-       | Some (AContext _) | None -> Error (Unbound_type_variable name))
+       | Some (AContext _) -> Error (Type_variable_kind_mismatch name)
+       | None -> Error (Unbound_type_variable name))
   ;;
 
   let context t name : (Type.context, Typecheck_error.t) Result.t =
@@ -121,7 +115,8 @@ module Vars = struct
     | Params params ->
       (match Map.find params name with
        | Some (AContext context) -> Ok context
-       | Some (ATy _) | None -> Error (Unbound_type_variable name))
+       | Some (ATy _) -> Error (Type_variable_kind_mismatch name)
+       | None -> Error (Unbound_type_variable name))
   ;;
 end
 
@@ -148,13 +143,18 @@ let rec elaborate' t module_ vars (expr : Type_expr.t)
 and elaborate_context t module_ vars (context : Type_expr.context)
   : (Type.context, Typecheck_error.t) Result.t
   =
-  match context with
-  | Empty -> Ok CEmpty
-  | Extend (name, ty, rest) ->
-    let%bind.Result ty = elaborate' t module_ vars ty in
-    let%map.Result rest = elaborate_context t module_ vars rest in
-    Type.CExtend (name, Present, ty, rest)
-  | Var name -> Vars.context vars name
+  let rec go (context : Type_expr.context) ~seen =
+    match context with
+    | Empty -> Ok Type.CEmpty
+    | Extend (name, _, _) when Set.mem seen name ->
+      Error (Typecheck_error.Duplicate_context_entry name)
+    | Extend (name, ty, rest) ->
+      let%bind.Result ty = elaborate' t module_ vars ty in
+      let%map.Result rest = go rest ~seen:(Set.add seen name) in
+      Type.CExtend (name, Present, ty, rest)
+    | Var name -> Vars.context vars name
+  in
+  go context ~seen:String.Set.empty
 
 and elaborate_con t module_ vars path args =
   let%bind.Result decl = find_type t module_ path in
@@ -261,7 +261,6 @@ let define t (decl : Decl.t) =
   let vars = Vars.Params (Decl.param_map decl) in
   let elaborate = elaborate' t decl.module_ vars in
   let canonical_name = Module_scope.canonical_name decl.module_ in
-  let result = Type.TCon (decl.name, decl.params) in
   match decl.decl.kind with
   | Alias body ->
     let%map.Result (_ : Type.ty) = elaborate body in
@@ -277,7 +276,11 @@ let define t (decl : Decl.t) =
           Map.add_exn
             constructors
             ~key:name
-            ~data:{ Constructor.name; args; result })
+            ~data:
+              { Constructor.name
+              ; args
+              ; result = Type.TCon (decl.name, decl.params)
+              })
     in
     { t with constructors }
   | Record fields ->
@@ -294,8 +297,8 @@ let define t (decl : Decl.t) =
           ~data:
             { Field.name
             ; type_name = decl.name
+            ; params = decl.params
             ; ty
-            ; record = result
             ; all_fields
             })
     in
@@ -312,10 +315,11 @@ let create root ~fresh_id =
     |> Result.all
   in
   let t =
-    { empty with
-      types =
+    { types =
         List.map decls ~f:(fun (decl : Decl.t) -> decl.name, decl)
         |> String.Map.of_alist_exn
+    ; constructors = String.Map.empty
+    ; fields = String.Map.empty
     }
   in
   let%bind.Result () = check_alias_cycles t in

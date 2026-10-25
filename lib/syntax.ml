@@ -105,6 +105,16 @@ module Pattern = struct
     | Construct of Path.t * t list
     | Record of (Path.t * t) list
   [@@deriving sexp, compare, equal]
+
+  let rec binds t name =
+    match t with
+    | Any | Lit _ -> false
+    | Var var -> String.equal var name
+    | Tuple patterns | Construct (_, patterns) ->
+      List.exists patterns ~f:(fun pattern -> binds pattern name)
+    | Record fields ->
+      List.exists fields ~f:(fun (_, pattern) -> binds pattern name)
+  ;;
 end
 
 module Expr = struct
@@ -127,18 +137,86 @@ module Expr = struct
     | Match of t * (Pattern.t * t) list
   [@@deriving sexp, compare, equal, variants]
 
+  let sub_exprs = function
+    | Lit _ | Var _ -> []
+    | App (f, x) -> [ f; x ]
+    | Let (_, _, _, equal, in_) -> [ equal; in_ ]
+    | Splice { expr; subs } ->
+      expr
+      :: List.filter_map (Option.value subs ~default:[]) ~f:(fun (_, expr) ->
+        expr)
+    | Quote expr | Field (expr, _) -> [ expr ]
+    | Tuple exprs | Construct (_, exprs) -> exprs
+    | Record fields -> List.map fields ~f:snd
+    | Match (expr, cases) -> expr :: List.map cases ~f:snd
+  ;;
+
+  (** Over-approximates: a splice with implicit substitutions may refer to any
+      name in scope. *)
+  let rec refers_to t name =
+    match t with
+    | Lit _ -> false
+    | Var (path, _) -> [%equal: Path.t] path (Path.name name)
+    | Let (bound, args, _, equal, in_) ->
+      (not (String.equal bound name))
+      && (refers_to in_ name
+          || ((not
+                 (List.exists args ~f:(fun (arg, _) -> String.equal arg name)))
+              && refers_to equal name))
+    | Splice { subs = None; _ } -> true
+    | Splice { expr; subs = Some subs } ->
+      refers_to expr name
+      || List.exists subs ~f:(fun (label, expr) ->
+        match expr with
+        | None -> [%equal: Path.t] (Path.of_string label) (Path.name name)
+        | Some expr -> refers_to expr name)
+    | Match (expr, cases) ->
+      refers_to expr name
+      || List.exists cases ~f:(fun (pattern, body) ->
+        (not (Pattern.binds pattern name)) && refers_to body name)
+    | App _ | Quote _ | Tuple _ | Construct _ | Record _ | Field _ ->
+      List.exists (sub_exprs t) ~f:(fun expr -> refers_to expr name)
+  ;;
+
   (** Syntactic values, which may be generalized (the relaxed value
       restriction). *)
   let rec is_value = function
-    | Lit _ | Var _ | Quote _ -> true
-    | Let (_, args, _, equal, in_) ->
-      ((not (List.is_empty args)) || is_value equal) && is_value in_
+    | Lit _ | Var _ -> true
+    | Quote expr -> splices_are_values expr ~depth:1
+    | Let (name, args, _, equal, in_) ->
+      binding_is_value name ~args ~equal && is_value in_
     | App _ | Splice _ -> false
     | Tuple exprs | Construct (_, exprs) -> List.for_all exprs ~f:is_value
     | Record fields -> List.for_all fields ~f:(fun (_, expr) -> is_value expr)
     | Field (expr, _) -> is_value expr
     | Match (expr, cases) ->
       is_value expr && List.for_all cases ~f:(fun (_, expr) -> is_value expr)
+
+  (* Whether the splices run when the enclosing quote [depth] levels out is
+     built are values. *)
+  and splices_are_values t ~depth =
+    match t with
+    | Splice { expr; subs } ->
+      (if depth = 1
+       then is_value expr
+       else splices_are_values expr ~depth:(depth - 1))
+      && List.for_all (Option.value subs ~default:[]) ~f:(fun (_, expr) ->
+        Option.for_all expr ~f:(splices_are_values ~depth))
+    | Quote expr -> splices_are_values expr ~depth:(depth + 1)
+    | Lit _
+    | Var _
+    | App _
+    | Let _
+    | Tuple _
+    | Construct _
+    | Record _
+    | Field _
+    | Match _ -> List.for_all (sub_exprs t) ~f:(splices_are_values ~depth)
+
+  (** Local lets are recursive, and a recursive non-function is not a
+      value. *)
+  and binding_is_value name ~args ~equal =
+    (not (List.is_empty args)) || (is_value equal && not (refers_to equal name))
   ;;
 end
 

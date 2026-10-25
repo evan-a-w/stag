@@ -9,6 +9,7 @@ module Toplevel = struct
       | In_progress of
           { index : int
           ; ty : Type.ty
+          ; mutable recursive : bool
           }
       | Done of Env.Entry.t
     [@@deriving sexp_of]
@@ -39,21 +40,12 @@ end
 
 type t =
   { mutable next_id : int
-  ; toplevels : Toplevel.t String.Table.t
-  ; mutable type_env : Type_env.t
   ; context_bounds : Bound.t list Int.Table.t
     (* By context variable id. Kept out of [Type.context] as bounds may refer
        back to the variable. *)
   }
 
-let create () =
-  { next_id = 0
-  ; toplevels = String.Table.create ()
-  ; type_env = Type_env.empty
-  ; context_bounds = Int.Table.create ()
-  }
-;;
-
+let create () = { next_id = 0; context_bounds = Int.Table.create () }
 let context_bounds t id = Hashtbl.find_multi t.context_bounds id
 
 let fresh_id t =
@@ -554,9 +546,18 @@ module Scc_frame = struct
     }
 end
 
+(* What one call of [typecheck] checks. *)
+module Program_env = struct
+  type t =
+    { type_env : Type_env.t
+    ; toplevels : Toplevel.t String.Table.t
+    }
+end
+
 module Scope = struct
   type t =
-    { level : Env.Level.t
+    { program : Program_env.t
+    ; level : Env.Level.t
     ; rank : Type.rank
     ; locals : Env.t
     ; quote : quote option
@@ -578,14 +579,18 @@ module Scope = struct
   ;;
 end
 
-let elaborate t (scope : Scope.t) annot =
-  Type_env.elaborate t.type_env scope.module_ scope.annotation_vars annot
+let elaborate (scope : Scope.t) annot =
+  Type_env.elaborate
+    scope.program.type_env
+    scope.module_
+    scope.annotation_vars
+    annot
 ;;
 
 let unpack_annot t scope ~rank annot =
   match annot with
   | None -> Ok (Type.TVar (fresh_tvar t ~rank))
-  | Some annot -> elaborate t scope annot
+  | Some annot -> elaborate scope annot
 ;;
 
 let function_type t scope ~rank ~(args : Syntax.Binding.t list) ~annot =
@@ -621,7 +626,7 @@ let record_fields t (scope : Scope.t) fields ~all_required
   let%bind.Result fields =
     List.map fields ~f:(fun (path, x) ->
       let%map.Result field =
-        Type_env.find_field t.type_env scope.module_ path
+        Type_env.find_field scope.program.type_env scope.module_ path
       in
       field, x)
     |> Result.all
@@ -657,9 +662,19 @@ let record_fields t (scope : Scope.t) fields ~all_required
     in
     let remap = Remap.create () in
     let inst scheme = inst_ty' t ~remap ~scheme ~rank:scope.rank in
-    ( inst first.record
+    ( inst (TCon (first.type_name, first.params))
     , List.map fields ~f:(fun ((field : Type_env.Field.t), x) ->
         inst field.ty, x) )
+;;
+
+(* Returns the instantiated record type and the field's type. *)
+let field_type t (scope : Scope.t) path =
+  let%map.Result (field : Type_env.Field.t) =
+    Type_env.find_field scope.program.type_env scope.module_ path
+  in
+  let remap = Remap.create () in
+  let inst scheme = inst_ty' t ~remap ~scheme ~rank:scope.rank in
+  inst (TCon (field.type_name, field.params)), inst field.ty
 ;;
 
 let inst_constructor t (scope : Scope.t) (constructor : Type_env.Constructor.t) =
@@ -691,7 +706,7 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Syntax.Pattern.t)
     Type.TTuple types, bindings
   | Construct (path, patterns) ->
     let%bind.Result constructor =
-      Type_env.find_constructor t.type_env scope.module_ path
+      Type_env.find_constructor scope.program.type_env scope.module_ path
     in
     let%bind.Result () = check_arity ~constructor ~args:patterns in
     let types, result = inst_constructor t scope constructor in
@@ -763,8 +778,17 @@ module Capture = struct
 end
 
 let finish_scc t (members : Toplevel.t list) =
-  let generalize = List.for_all members ~f:Toplevel.is_value in
   let persistent = List.for_all members ~f:Toplevel.is_function in
+  let recursive =
+    List.exists members ~f:(fun member ->
+      match member.state with
+      | In_progress { recursive; _ } -> recursive
+      | Unchecked | Done _ -> false)
+  in
+  (* Like OCaml's [let rec], a recursive non-function is not generalized. *)
+  let generalize =
+    List.for_all members ~f:Toplevel.is_value && (persistent || not recursive)
+  in
   List.iter members ~f:(fun member ->
     match member.state with
     | In_progress { ty; _ } ->
@@ -817,7 +841,8 @@ and var_type t (scope : Scope.t) ~(path : Syntax.Path.t) =
   | Some entry -> entry_type t scope ~name (Some entry)
   | None ->
     (match%bind.Result Module_scope.find scope.module_ Value path with
-     | Some name -> toplevel_type t scope (Hashtbl.find_exn t.toplevels name)
+     | Some name ->
+       toplevel_type t scope (Hashtbl.find_exn scope.program.toplevels name)
      | None ->
        (match (path :> string list) with
         | [ _ ] -> entry_type t scope ~name None
@@ -825,7 +850,9 @@ and var_type t (scope : Scope.t) ~(path : Syntax.Path.t) =
 
 (* Resolves context entry [name] at a splice site. *)
 and entry_name_resolution t (scope : Scope.t) ~name =
-  match Env.find scope.locals name, Hashtbl.find t.toplevels name with
+  match
+    Env.find scope.locals name, Hashtbl.find scope.program.toplevels name
+  with
   | Some entry, _ -> Ok (entry_resolution t scope ~name (Some entry))
   | None, Some toplevel ->
     let%map.Result entry = toplevel_entry t scope toplevel in
@@ -839,23 +866,27 @@ and toplevel_type t scope (toplevel : Toplevel.t) =
 and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) =
   match toplevel.state with
   | Done entry -> Ok entry
-  | In_progress { index; ty } ->
-    scope.scc.lowlink <- Int.min scope.scc.lowlink index;
-    Ok (Env.Entry.toplevel ~scheme:ty ~persistent:false)
+  | In_progress in_progress ->
+    (* [toplevel] is in the component being checked, so this is a recursive
+       reference. *)
+    in_progress.recursive <- true;
+    scope.scc.lowlink <- Int.min scope.scc.lowlink in_progress.index;
+    Ok (Env.Entry.toplevel ~scheme:in_progress.ty ~persistent:false)
   | Unchecked ->
-    let%bind.Result scc = check_toplevel t toplevel in
+    let%bind.Result scc = check_toplevel t scope.program toplevel in
     scope.scc.lowlink <- Int.min scope.scc.lowlink scc.lowlink;
     scope.scc.pending <- scc.pending @ scope.scc.pending;
     toplevel_entry t scope toplevel
 
-and check_toplevel t (toplevel : Toplevel.t)
+and check_toplevel t program (toplevel : Toplevel.t)
   : (Scc_frame.t, Typecheck_error.t) Result.t
   =
   let index = fresh_id t in
   let scc = { Scc_frame.lowlink = index; pending = [ toplevel ] } in
   let rank = 1 in
   let scope =
-    { Scope.level = 0
+    { Scope.program
+    ; level = 0
     ; rank
     ; locals = Env.create ()
     ; quote = None
@@ -873,7 +904,7 @@ and check_toplevel t (toplevel : Toplevel.t)
       ~args:toplevel.args
       ~annot:toplevel.annot
   in
-  toplevel.state <- In_progress { index; ty };
+  toplevel.state <- In_progress { index; ty; recursive = false };
   let%map.Result () = check_body t scope ~args ~res_ty ~body:toplevel.expr in
   if scc.lowlink = index
   then (
@@ -903,7 +934,7 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
     (match annot with
      | None -> Ok ty
      | Some annot ->
-       let%bind.Result annot = elaborate t scope annot in
+       let%bind.Result annot = elaborate scope annot in
        let%map.Result () = unify_ty' t ~ty1:ty ~ty2:annot in
        ty)
   | App (f, x) ->
@@ -916,7 +947,7 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
     b
   | Let (name, args, annot, equal, in_) ->
     let rank = scope.rank + 1 in
-    let%bind.Result args, res_ty, ty =
+    let%bind.Result arg_types, res_ty, ty =
       function_type t scope ~rank ~args ~annot
     in
     let%bind.Result () =
@@ -924,11 +955,11 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
         scope.locals
         [ name, Scope.entry scope ~scheme:ty ~persistent:false ]
         ~f:(fun () ->
-          check_body t { scope with rank } ~args ~res_ty ~body:equal)
+          check_body t { scope with rank } ~args:arg_types ~res_ty ~body:equal)
     in
     let persistent = not (List.is_empty args) in
     let scheme =
-      if persistent || Syntax.Expr.is_value equal
+      if Syntax.Expr.binding_is_value name ~args ~equal
       then generalize_ty t ~rank:scope.rank ~ty
       else ty
     in
@@ -975,7 +1006,7 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
     Type.TTuple types
   | Construct (path, args) ->
     let%bind.Result constructor =
-      Type_env.find_constructor t.type_env scope.module_ path
+      Type_env.find_constructor scope.program.type_env scope.module_ path
     in
     let%bind.Result () = check_arity ~constructor ~args in
     let types, result = inst_constructor t scope constructor in
@@ -990,12 +1021,10 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
     in
     record
   | Field (expr, path) ->
-    let%bind.Result record, field_types =
-      record_fields t scope [ path, () ] ~all_required:false
-    in
+    let%bind.Result record, field_ty = field_type t scope path in
     let%bind.Result expr_ty = expr_type t scope ~expr in
     let%map.Result () = unify_ty' t ~ty1:record ~ty2:expr_ty in
-    fst (List.hd_exn field_types)
+    field_ty
   | Match (expr, cases) ->
     let%bind.Result scrutinee = expr_type t scope ~expr in
     let result = Type.TVar (fresh_tvar t ~rank:scope.rank) in
@@ -1148,7 +1177,6 @@ let typecheck t ~(program : Syntax.Program.t)
   let%bind.Result type_env =
     Type_env.create root ~fresh_id:(fun () -> fresh_id t)
   in
-  t.type_env <- type_env;
   let toplevels =
     Module_scope.toplevels root
     |> List.filter_map ~f:(fun (module_, (toplevel : Syntax.Toplevel.t)) ->
@@ -1164,13 +1192,18 @@ let typecheck t ~(program : Syntax.Program.t)
           }
       | Type _ | Module _ -> None)
   in
-  List.iter toplevels ~f:(fun toplevel ->
-    Hashtbl.add_exn t.toplevels ~key:toplevel.name ~data:toplevel);
+  let program =
+    { Program_env.type_env
+    ; toplevels =
+        List.map toplevels ~f:(fun toplevel -> toplevel.name, toplevel)
+        |> String.Table.of_alist_exn
+    }
+  in
   List.fold_result toplevels ~init:[] ~f:(fun acc toplevel ->
     let%map.Result () =
       match toplevel.state with
       | Unchecked ->
-        check_toplevel t toplevel
+        check_toplevel t program toplevel
         |> Result.map ~f:(ignore : Scc_frame.t -> unit)
       | In_progress _ | Done _ -> Ok ()
     in
