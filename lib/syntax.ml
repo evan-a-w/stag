@@ -83,6 +83,7 @@ module Type_decl = struct
       | Variant of (string * Type_expr.t list) list
       | Record of (string * Type_expr.t) list
       | Alias of Type_expr.t
+      | Abstract
     [@@deriving sexp, compare, equal]
   end
 

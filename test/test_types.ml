@@ -65,6 +65,49 @@ let%expect_test "variant types are nominal" =
     |}]
 ;;
 
+let%expect_test "abstract types" =
+  let id ty =
+    Toplevel.Let ("id_" ^ ty, [ typed "x" (Ty.con ty) ], None, var "x")
+  in
+  check
+    [ Decl.abstract "t"
+    ; Decl.abstract "box" ~params:[ Decl.ty "a"; Decl.row "r" ]
+    ; id "t"
+    ; module_ "M" [ Decl.abstract "int"; id "int" ]
+    ; id "int"
+    ];
+  check [ Decl.abstract "t"; id "t"; top "bad" [] (app (var "id_t") [ int 1 ]) ];
+  check
+    [ Decl.abstract "t"
+    ; Toplevel.Let
+        ("absurd", [ typed "x" (Ty.con "t") ], None, match_ (var "x") [])
+    ];
+  check [ Decl.abstract "t"; top "bad" [] (construct "T") ];
+  check
+    [ module_ "M" [ Decl.abstract "int"; id "int" ]
+    ; top "bad" [] (app (var "M.id_int") [ int 1 ])
+    ];
+  [%expect
+    {|
+    type t
+    type box['a, {..'b}]
+    val id_t : t -> t
+    module M : sig
+      type int
+      val id_int : int -> int
+    end
+    val id_int : int -> int
+    (Unification_error
+     (Type_mismatch (TCon t ()) (TCon int ()) (Base_types_not_equal t int)))
+    (Unification_error
+     (Type_mismatch (TVariant REmpty) (TCon t ()) Structural_mismatch))
+    (Unbound_constructor T)
+    (Unification_error
+     (Type_mismatch (TCon M.int ()) (TCon int ())
+      (Base_types_not_equal M.int int)))
+    |}]
+;;
+
 let%expect_test "declarations are order independent and may be recursive" =
   check
     [ top "tree" [] (construct "Node" ~args:[ cons (construct "Leaf") nil ])

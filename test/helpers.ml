@@ -121,6 +121,7 @@ module Decl = struct
 
   let record ?params name fields = type_ ?params name (Record fields)
   let alias ?params name ty = type_ ?params name (Alias ty)
+  let abstract ?params name = type_ ?params name Abstract
 
   (** ['a list = Nil | Cons of 'a * 'a list] *)
   let list =

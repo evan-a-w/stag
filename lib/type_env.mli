@@ -51,7 +51,7 @@ val find_field
 val find_decl_exn : t -> string -> Signature.Type_decl.t
 
 (** Whether the type of canonical name [name] is a declared variant with no
-    constructors. The builtins are abstract, so not. *)
+    constructors. *)
 val is_empty_variant : t -> string -> bool
 
 (** The type and row variables of the annotations of one toplevel

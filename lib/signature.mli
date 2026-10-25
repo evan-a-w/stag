@@ -35,6 +35,7 @@ module Type_decl : sig
       | Variant of Constructor.t list
       | Record of Field.t list
       | Alias of Type.ty (** Expanded. *)
+      | Abstract
     [@@deriving sexp_of]
   end
 

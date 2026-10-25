@@ -42,11 +42,9 @@ type t =
   ; checked : Signature.Type_decl.t String.Map.t
   }
 
-let builtin_names = [ "int"; "bool"; "string"; "char"; "unit" ]
-
 let builtins =
-  List.map builtin_names ~f:(fun name ->
-    { Type_decl.name; params = []; kind = Variant [] })
+  List.map [ "int"; "bool"; "string"; "char"; "unit" ] ~f:(fun name ->
+    { Type_decl.name; params = []; kind = Abstract })
 ;;
 
 let find_in map module_ namespace path ~unbound
@@ -73,11 +71,9 @@ let find_field t module_ path =
 let find_decl_exn t name = Map.find_exn t.checked name
 
 let is_empty_variant t name =
-  (not (List.mem builtin_names name ~equal:String.equal))
-  &&
   match (find_decl_exn t name).kind with
   | Variant [] -> true
-  | Variant (_ :: _) | Record _ | Alias _ -> false
+  | Variant (_ :: _) | Record _ | Alias _ | Abstract -> false
 ;;
 
 module Annotation_vars = struct
@@ -202,7 +198,7 @@ and elaborate_con t module_ vars path args =
       decl.module_
       (Params (Decl.param_map { decl with params = args }))
       body
-  | Variant _ | Record _ -> Ok (Type.TCon (decl.name, args))
+  | Variant _ | Record _ | Abstract -> Ok (Type.TCon (decl.name, args))
 ;;
 
 let elaborate t module_ vars expr = elaborate' t module_ (Annotation vars) expr
@@ -231,7 +227,7 @@ let check_alias_cycles t =
   let finished = String.Hash_set.create () in
   let rec visit (decl : Decl.t) ~visiting =
     match decl.decl.kind with
-    | Variant _ | Record _ -> Ok ()
+    | Variant _ | Record _ | Abstract -> Ok ()
     | Alias _ when Hash_set.mem finished decl.name -> Ok ()
     | Alias _ when Set.mem visiting decl.name ->
       Error (Typecheck_error.Cyclic_type_alias decl.name)
@@ -281,6 +277,7 @@ let define t (decl : Decl.t) =
     | Alias body ->
       let%map.Result body = elaborate body in
       Signature.Type_decl.Kind.Alias body
+    | Abstract -> Ok Signature.Type_decl.Kind.Abstract
     | Variant constructors ->
       let%map.Result constructors =
         List.map constructors ~f:(fun (name, args) ->
@@ -310,7 +307,7 @@ let define t (decl : Decl.t) =
   in
   let t = { t with checked } in
   match kind with
-  | Alias _ -> t
+  | Alias _ | Abstract -> t
   | Variant constructors ->
     let result = Type.TCon (decl.name, decl.params) in
     let constructors =
