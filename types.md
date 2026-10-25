@@ -26,14 +26,14 @@ end
 
 Elaboration:
 
-- In annotations, type and context variables are unification variables scoped
+- In annotations, type and row variables are unification variables scoped
   over the enclosing toplevel definition (as in OCaml): the same name within a
   toplevel is the same variable, created fresh on first use at the current
   rank.
 - In declarations, variables must be declared parameters
   (`Unbound_type_variable`) of the right kind, `Ty` vs `Row`
   (`Type_variable_kind_mismatch`).
-- A label appears at most once in one context (`Duplicate_row_entry`).
+- A label appears at most once in one row (`Duplicate_row_entry`).
 - Builtins `int`, `bool`, `string`, `char`, `unit` are nominal types without
   constructors declared in the root module (so `Type.int` is `TCon ("int", [])`
   as before): redeclaring one at the root is `Duplicate_type`, while `M.unit`

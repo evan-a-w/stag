@@ -173,12 +173,12 @@ and rewrite fresh name (row : Type.row)
      | false ->
        let%map.Result presence', ty', rest' = rewrite fresh name rest in
        presence', ty', Type.RExtend (x, presence, ty, rest'))
-  | RVar cvar ->
-    let rank = Type.Var.rank_exn cvar in
+  | RVar var ->
+    let rank = Type.Var.rank_exn var in
     let px = Type.PVar (Fresh.var fresh ~rank) in
     let tx = Type.TVar (Fresh.var fresh ~rank) in
     let rest = Type.RVar (Fresh.var fresh ~rank) in
-    let%map.Result () = bind_rvar fresh cvar (RExtend (name, px, tx, rest)) in
+    let%map.Result () = bind_rvar fresh var (RExtend (name, px, tx, rest)) in
     px, Some tx, rest
 
 and constrain_row fresh ~row ~bound ~shadowed =

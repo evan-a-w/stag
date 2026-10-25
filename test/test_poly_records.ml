@@ -3,8 +3,6 @@ open Stag
 open Syntax
 open Helpers
 
-let typed name ty = name, Some ty
-
 let%expect_test "record operations" =
   check
     [ top "lit" [] (poly_record [ "x", int 1; "y", bool true ])
@@ -109,11 +107,11 @@ let%expect_test "update, restriction and access require the field" =
     {|
     (Unification_error
      (Row_mismatch
-      (RExtend x Present (TVar (Unbound 19 1)) (RVar (Unbound 18 1)))
+      (RExtend x Present (TVar (Unbound 18 1)) (RVar (Unbound 19 1)))
       (RExtend y Present (TCon int ()) REmpty) (Missing_label x)))
     (Unification_error
      (Row_mismatch
-      (RExtend x Present (TVar (Unbound 19 1)) (RVar (Unbound 18 1)))
+      (RExtend x Present (TVar (Unbound 18 1)) (RVar (Unbound 19 1)))
       (RExtend y Present (TCon int ()) REmpty) (Missing_label x)))
     (Unification_error
      (Row_mismatch
@@ -544,7 +542,7 @@ let%expect_test "unification errors" =
       (TCon int ()) Structural_mismatch))
     (Unification_error
      (Type_mismatch
-      (TRecord (RExtend x Present (TVar (Unbound 19 1)) (RVar (Unbound 18 1))))
+      (TRecord (RExtend x Present (TVar (Unbound 18 1)) (RVar (Unbound 19 1))))
       (TCode (inner (TCon int ())) (context (RVar (Unbound 20 1))))
       Structural_mismatch))
     (Unification_error
@@ -552,5 +550,162 @@ let%expect_test "unification errors" =
     (Unification_error
      (Row_mismatch (RExtend x Present (TVar (Unbound 20 1)) REmpty)
       (RExtend y Present (TVar (Unbound 22 1)) REmpty) (Missing_label x)))
+    |}]
+;;
+
+let%expect_test "local polymorphic record operations" =
+  check
+    [ top
+        "access"
+        []
+        (let_
+           "get"
+           [ "r" ]
+           (dot (var "r") "x")
+           (tuple
+              [ app (var "get") [ poly_record [ "x", int 1 ] ]
+              ; app (var "get") [ poly_record [ "x", bool true; "y", int 1 ] ]
+              ]))
+    ; top
+        "restriction"
+        []
+        (let_
+           "drop"
+           [ "r" ]
+           (restrict (var "r") "x")
+           (tuple
+              [ app (var "drop") [ poly_record [ "x", int 1 ] ]
+              ; app (var "drop") [ poly_record [ "x", bool true; "y", int 1 ] ]
+              ]))
+    ; top
+        "update"
+        []
+        (let_
+           "set"
+           [ "r" ]
+           (update (var "r") [ "x", int 0 ])
+           (tuple
+              [ app (var "set") [ poly_record [ "x", bool true ] ]
+              ; app (var "set") [ poly_record [ "x", unit; "y", int 1 ] ]
+              ]))
+    ; top
+        "pattern"
+        []
+        (let_
+           "rest"
+           [ "r" ]
+           (match_
+              (var "r")
+              [ Pat.poly_record ~rest:(Bind "rest") [ "x", Pat.any ], var "rest"
+              ])
+           (tuple
+              [ app (var "rest") [ poly_record [ "x", int 1 ] ]
+              ; app (var "rest") [ poly_record [ "x", int 1; "y", int 1 ] ]
+              ]))
+    ];
+  [%expect
+    {|
+    val access : int * bool
+    val restriction : {} * {y : int}
+    val update : {x : int} * {x : int; y : int}
+    val pattern : {} * {y : int}
+    |}]
+;;
+
+let%expect_test "applied access and restriction are not values" =
+  check
+    [ top "r" [] (poly_record [ "f", var "id"; "g", var "id" ])
+    ; top "field" [] (dot (app (var "id") [ var "r" ]) "f")
+    ; top "restricted" [] (restrict (app (var "id") [ var "r" ]) "g")
+    ];
+  [%expect
+    {|
+    val r : {f : 'a -> 'a; g : 'b -> 'b}
+    val field : '_a -> '_a
+    val restricted : {f : '_a -> '_a}
+    |}]
+;;
+
+let%expect_test "absent entries in records" =
+  check
+    [ Toplevel.Let
+        ( "absent"
+        , [ "c", None; typed "r" (Ty.record [] ~tail:"d") ]
+        , None
+        , seq
+            (quote
+               (quote
+                  (let_
+                     "z"
+                     []
+                     (int 1)
+                     (splice
+                        (splice
+                           (var
+                              "c"
+                              ~annot:
+                                (Ty.code
+                                   (Ty.code (Ty.var "a") ~tail:"c")
+                                   ~tail:"d")))))))
+            (var "r") )
+    ];
+  [%expect
+    {| val absent : <<'a>{z?'b : int; ..'c}>{-z; ..'d} -> {-z; ..'d} -> {-z; ..'d} where ..'c <= {..'e}, ..'d <= {..'f} |}]
+;;
+
+let%expect_test "structural types are not recursive" =
+  check
+    [ top
+        "occurs"
+        [ "r" ]
+        (app (var "cond") [ bool true; dot (var "r") "x"; var "r" ])
+    ];
+  check
+    [ top
+        "cyclic"
+        [ "r" ]
+        (app
+           (var "cond")
+           [ bool true
+           ; extend [ "x", int 1 ] (var "r")
+           ; extend [ "y", int 1 ] (var "r")
+           ])
+    ];
+  check [ Decl.alias "t" (Ty.record [ "next", Ty.con "t" ]) ];
+  check
+    [ Decl.alias "a" (Ty.record [ "b", Ty.con "b" ])
+    ; Decl.alias "b" (Ty.variant [ "A", Ty.con "a" ])
+    ];
+  check
+    [ Decl.variant "t" [ "T", [ Ty.record [ "next", Ty.con "t" ] ] ]
+    ; top
+        "deref"
+        [ "t" ]
+        (match_
+           (var "t")
+           [ Pat.construct "T" ~args:[ Pat.var "r" ], dot (var "r") "next" ])
+    ];
+  [%expect
+    {|
+    (Unification_error (Occurs_check_failed (ATy (TVar (Unbound 26 1)))))
+    (Unification_error
+     (Row_mismatch
+      (RExtend x Present (TCon int ())
+       (RVar
+        (Link
+         (RExtend x (PVar (Unbound 28 1)) (TVar (Unbound 29 1))
+          (RVar (Unbound 30 1))))))
+      (RExtend y Present (TCon int ())
+       (RVar
+        (Link
+         (RVar
+          (Link
+           (RExtend x (PVar (Unbound 28 1)) (TVar (Unbound 29 1))
+            (RVar (Unbound 30 1))))))))
+      Cyclic_row))
+    (Cyclic_type_alias t)
+    (Cyclic_type_alias a)
+    type t = T of {next : t}
+    val deref : t -> t
     |}]
 ;;

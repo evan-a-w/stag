@@ -219,15 +219,28 @@ let field_type t (scope : Scope.t) path =
   inst field.record, ty
 ;;
 
-let present_row entries ~tail =
-  List.fold_right entries ~init:tail ~f:(fun (label, ty) rest ->
-    Type.RExtend (label, Present, ty, rest))
-;;
+(* Rows of polymorphic records and variants, whose entries are [Present]. *)
+module Poly_row = struct
+  let present entries ~tail =
+    List.fold_right entries ~init:tail ~f:(fun (label, ty) rest ->
+      Type.RExtend (label, Present, ty, rest))
+  ;;
 
-let check_distinct_labels entries =
-  check_no_duplicates (List.map entries ~f:fst) ~error:(fun label ->
-    Typecheck_error.Duplicate_row_entry label)
-;;
+  (* [entries] before a fresh tail, which is also returned. *)
+  let open_ t scope entries =
+    let tail = Scope.fresh_row t scope in
+    present entries ~tail, tail
+  ;;
+
+  let variant t scope ~tag ~arg =
+    Type.TVariant (fst (open_ t scope [ tag, arg ]))
+  ;;
+
+  let check_distinct_labels entries =
+    check_no_duplicates (List.map entries ~f:fst) ~error:(fun label ->
+      Typecheck_error.Duplicate_row_entry label)
+  ;;
+end
 
 let rec pattern_type t (scope : Scope.t) ~(pattern : Syntax.Pattern.t)
   : (Type.ty * (string * Type.ty) list, Typecheck_error.t) Result.t
@@ -259,15 +272,14 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Syntax.Pattern.t)
     let%map.Result bindings = sub_patterns fields in
     record, bindings
   | Poly_variant (tag, arg) ->
-    let%map.Result arg_ty, bindings =
+    let%map.Result arg, bindings =
       match arg with
       | None -> Ok (Type.unit, [])
       | Some pattern -> pattern_type t scope ~pattern
     in
-    ( Type.TVariant (present_row [ tag, arg_ty ] ~tail:(Scope.fresh_row t scope))
-    , bindings )
+    Poly_row.variant t scope ~tag ~arg, bindings
   | Poly_record { fields; rest } ->
-    let%bind.Result () = check_distinct_labels fields in
+    let%bind.Result () = Poly_row.check_distinct_labels fields in
     let%map.Result fields, bindings =
       List.fold_result
         fields
@@ -284,49 +296,66 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Syntax.Pattern.t)
         let tail = Scope.fresh_row t scope in
         tail, [ name, Type.TRecord tail ]
     in
-    Type.TRecord (present_row (List.rev fields) ~tail), bindings @ rest_bindings
+    ( Type.TRecord (Poly_row.present (List.rev fields) ~tail)
+    , bindings @ rest_bindings )
 ;;
 
-(* A top level variable pattern matches what the [handled] tags' cases have not:
-   the scrutinee without their first entries. *)
-let case_pattern_type t (scope : Scope.t) ~(pattern : Syntax.Pattern.t) ~handled
-  =
-  match pattern, handled with
-  | Var name, _ :: _ ->
-    let rest = Scope.fresh_row t scope in
-    Ok
-      ( Type.TVariant
-          (present_row
-             (List.map handled ~f:(fun tag -> tag, Scope.fresh_ty t scope))
-             ~tail:rest)
-      , [ name, Type.TVariant rest ] )
-  | _ -> pattern_type t scope ~pattern
-;;
+(* Closing of the scrutinee and residuals of catch-alls in matches on
+   polymorphic variants. *)
+module Variant_match = struct
+  (* The tags handled irrefutably by the cases so far, in order, each once. *)
+  type t = string list
 
-(* Without a top level catch-all, a variant scrutinee may only have the tags
-   of the cases, and an empty match's none. *)
-let close_match t scope ~scrutinee (patterns : Syntax.Pattern.t list) =
-  let tags =
-    List.filter_map patterns ~f:(function
-      | Poly_variant (tag, _) -> Some tag
-      | _ -> None)
-    |> List.stable_dedup ~compare:String.compare
-  in
-  let has_catch_all =
-    List.exists patterns ~f:(function
-      | Var _ | Any -> true
-      | _ -> false)
-  in
-  if has_catch_all || (List.is_empty tags && not (List.is_empty patterns))
-  then Ok ()
-  else (
-    let closed =
-      present_row
-        (List.map tags ~f:(fun tag -> tag, Scope.fresh_ty t scope))
-        ~tail:REmpty
+  let empty = []
+
+  (* A top level variable pattern matches what the handled tags' cases have
+     not: the scrutinee without their first entries. *)
+  let pattern_type t (scope : Scope.t) handled ~(pattern : Syntax.Pattern.t) =
+    match pattern, handled with
+    | Var name, _ :: _ ->
+      let row, rest =
+        Poly_row.open_
+          t
+          scope
+          (List.map handled ~f:(fun tag -> tag, Scope.fresh_ty t scope))
+      in
+      Ok (Type.TVariant row, [ name, Type.TVariant rest ])
+    | _ -> pattern_type t scope ~pattern
+  ;;
+
+  let add_case handled : Syntax.Pattern.t -> t = function
+    | Poly_variant (tag, arg)
+      when Option.for_all arg ~f:Syntax.Pattern.is_irrefutable
+           && not (List.mem handled tag ~equal:String.equal) ->
+      handled @ [ tag ]
+    | _ -> handled
+  ;;
+
+  (* Without a top level catch-all, a variant scrutinee may only have the tags
+     of the cases, and an empty match's none. *)
+  let close t scope ~scrutinee (patterns : Syntax.Pattern.t list) =
+    let tags =
+      List.filter_map patterns ~f:(function
+        | Poly_variant (tag, _) -> Some tag
+        | _ -> None)
+      |> List.stable_dedup ~compare:String.compare
     in
-    Unify.unify_ty t ~ty1:(TVariant closed) ~ty2:scrutinee |> lift)
-;;
+    let has_catch_all =
+      List.exists patterns ~f:(function
+        | Var _ | Any -> true
+        | _ -> false)
+    in
+    if has_catch_all || (List.is_empty tags && not (List.is_empty patterns))
+    then Ok ()
+    else (
+      let closed =
+        Poly_row.present
+          (List.map tags ~f:(fun tag -> tag, Scope.fresh_ty t scope))
+          ~tail:REmpty
+      in
+      Unify.unify_ty t ~ty1:(TVariant closed) ~ty2:scrutinee |> lift)
+  ;;
+end
 
 (* [name] is the context entry the variable is provided as, if it becomes a
    free variable of the quote: a local's name or a toplevel's canonical name. *)
@@ -433,8 +462,7 @@ and check_toplevel t program (toplevel : Toplevel.t)
 
 and check_body t (scope : Scope.t) ~args ~res_ty ~body =
   with_monomorphic_bindings scope args ~f:(fun () ->
-    let%bind.Result body_ty = expr_type t scope ~expr:body in
-    Unify.unify_ty t ~ty1:res_ty ~ty2:body_ty |> lift)
+    check_expr t scope ~expr:body ~ty:res_ty)
 
 and with_monomorphic_bindings (scope : Scope.t) bindings ~f =
   Env.with_bindings
@@ -459,12 +487,8 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
   | App (f, x) ->
     let a = Scope.fresh_ty t scope in
     let b = Scope.fresh_ty t scope in
-    let%bind.Result f_ty = expr_type t scope ~expr:f in
-    let%bind.Result () =
-      Unify.unify_ty t ~ty1:(TArrow (a, b)) ~ty2:f_ty |> lift
-    in
-    let%bind.Result x_ty = expr_type t scope ~expr:x in
-    let%map.Result () = Unify.unify_ty t ~ty1:a ~ty2:x_ty |> lift in
+    let%bind.Result () = check_expr t scope ~expr:f ~ty:(TArrow (a, b)) in
+    let%map.Result () = check_expr t scope ~expr:x ~ty:a in
     b
   | Let (name, args, annot, equal, in_) ->
     let inner = { scope with rank = scope.rank + 1 } in
@@ -536,102 +560,94 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
     record
   | Field (expr, path) ->
     let%bind.Result record, field_ty = field_type t scope path in
-    let%bind.Result expr_ty = expr_type t scope ~expr in
-    let%map.Result () = Unify.unify_ty t ~ty1:record ~ty2:expr_ty |> lift in
+    let%map.Result () = check_expr t scope ~expr ~ty:record in
     field_ty
   | Match (expr, cases) ->
     let%bind.Result scrutinee = expr_type t scope ~expr in
     let result = Scope.fresh_ty t scope in
-    let%bind.Result (_ : string list) =
-      List.fold_result cases ~init:[] ~f:(fun handled (pattern, body) ->
-        let%bind.Result pattern_ty, bindings =
-          case_pattern_type t scope ~pattern ~handled
-        in
-        let%bind.Result () =
-          check_no_duplicates (List.map bindings ~f:fst) ~error:(fun name ->
-            Typecheck_error.Duplicate_pattern_variable name)
-        in
-        let%bind.Result () =
-          Unify.unify_ty t ~ty1:scrutinee ~ty2:pattern_ty |> lift
-        in
-        let%map.Result () =
-          with_monomorphic_bindings scope bindings ~f:(fun () ->
-            let%bind.Result body_ty = expr_type t scope ~expr:body in
-            Unify.unify_ty t ~ty1:result ~ty2:body_ty |> lift)
-        in
-        match pattern with
-        | Poly_variant (tag, arg)
-          when Option.for_all arg ~f:Syntax.Pattern.is_irrefutable
-               && not (List.mem handled tag ~equal:String.equal) ->
-          handled @ [ tag ]
-        | _ -> handled)
+    let%bind.Result (_ : Variant_match.t) =
+      List.fold_result
+        cases
+        ~init:Variant_match.empty
+        ~f:(fun handled (pattern, body) ->
+          let%bind.Result pattern_ty, bindings =
+            Variant_match.pattern_type t scope handled ~pattern
+          in
+          let%bind.Result () =
+            check_no_duplicates (List.map bindings ~f:fst) ~error:(fun name ->
+              Typecheck_error.Duplicate_pattern_variable name)
+          in
+          let%bind.Result () =
+            Unify.unify_ty t ~ty1:scrutinee ~ty2:pattern_ty |> lift
+          in
+          let%map.Result () =
+            with_monomorphic_bindings scope bindings ~f:(fun () ->
+              check_expr t scope ~expr:body ~ty:result)
+          in
+          Variant_match.add_case handled pattern)
     in
     let%map.Result () =
-      close_match t scope ~scrutinee (List.map cases ~f:fst)
+      Variant_match.close t scope ~scrutinee (List.map cases ~f:fst)
     in
     result
   | Poly_record fields ->
     let%map.Result fields = labelled_types t scope fields in
-    Type.TRecord (present_row fields ~tail:REmpty)
+    Type.TRecord (Poly_row.present fields ~tail:REmpty)
   | Poly_field (expr, label) ->
     let ty = Scope.fresh_ty t scope in
-    let%map.Result () =
-      check_exprs
-        t
-        scope
-        [ ( expr
-          , Type.TRecord
-              (present_row [ label, ty ] ~tail:(Scope.fresh_row t scope)) )
-        ]
+    let%map.Result (_ : Type.row) =
+      check_open_record t scope expr [ label, ty ]
     in
     ty
   | Poly_extend (fields, expr) ->
     let%bind.Result fields = labelled_types t scope fields in
     let rest = Scope.fresh_row t scope in
-    let%map.Result () = check_exprs t scope [ expr, TRecord rest ] in
-    Type.TRecord (present_row fields ~tail:rest)
+    let%map.Result () = check_expr t scope ~expr ~ty:(TRecord rest) in
+    Type.TRecord (Poly_row.present fields ~tail:rest)
   | Poly_restrict (expr, label) ->
-    let rest = Scope.fresh_row t scope in
-    let%map.Result () =
-      check_exprs
-        t
-        scope
-        [ ( expr
-          , Type.TRecord
-              (present_row [ label, Scope.fresh_ty t scope ] ~tail:rest) )
-        ]
+    let%map.Result rest =
+      check_open_record t scope expr [ label, Scope.fresh_ty t scope ]
     in
     Type.TRecord rest
   | Poly_update (expr, fields) ->
-    let%bind.Result () = check_distinct_labels fields in
-    let rest = Scope.fresh_row t scope in
-    let old =
-      List.map fields ~f:(fun (label, _) -> label, Scope.fresh_ty t scope)
+    let%bind.Result fields = labelled_types t scope fields in
+    let%map.Result rest =
+      check_open_record
+        t
+        scope
+        expr
+        (List.map fields ~f:(fun (label, _) -> label, Scope.fresh_ty t scope))
     in
-    let%bind.Result () =
-      check_exprs t scope [ expr, TRecord (present_row old ~tail:rest) ]
-    in
-    let%map.Result fields = labelled_types t scope fields in
-    Type.TRecord (present_row fields ~tail:rest)
+    Type.TRecord (Poly_row.present fields ~tail:rest)
   | Poly_variant (tag, arg) ->
-    let%map.Result arg_ty =
+    let%map.Result arg =
       match arg with
       | None -> Ok Type.unit
       | Some expr -> expr_type t scope ~expr
     in
-    Type.TVariant (present_row [ tag, arg_ty ] ~tail:(Scope.fresh_row t scope))
+    Poly_row.variant t scope ~tag ~arg
 
 and labelled_types t scope fields =
-  let%bind.Result () = check_distinct_labels fields in
+  let%bind.Result () = Poly_row.check_distinct_labels fields in
   List.map fields ~f:(fun (label, expr) ->
     let%map.Result ty = expr_type t scope ~expr in
     label, ty)
   |> Result.all
 
+and check_expr t scope ~expr ~ty =
+  let%bind.Result expr_ty = expr_type t scope ~expr in
+  Unify.unify_ty t ~ty1:ty ~ty2:expr_ty |> lift
+
 and check_exprs t scope exprs =
   List.fold_result exprs ~init:() ~f:(fun () (expr, ty) ->
-    let%bind.Result expr_ty = expr_type t scope ~expr in
-    Unify.unify_ty t ~ty1:ty ~ty2:expr_ty |> lift)
+    check_expr t scope ~expr ~ty)
+
+(* Checks [expr] has a record type with [entries] first, returning the rest of
+   its row. *)
+and check_open_record t scope expr entries =
+  let row, rest = Poly_row.open_ t scope entries in
+  let%map.Result () = check_expr t scope ~expr ~ty:(TRecord row) in
+  rest
 
 and substitute_from_scope t (scope : Scope.t) ~context =
   let rec go context ~seen =

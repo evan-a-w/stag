@@ -217,6 +217,30 @@ module Printer = struct
     name
   ;;
 
+  let rec row_entries row =
+    match canonical_row row with
+    | REmpty -> [], None
+    | RExtend (name, presence, ty, rest) ->
+      let entries, tail = row_entries rest in
+      (name, presence, ty) :: entries, tail
+    | RVar var -> [], Some var
+  ;;
+
+  let sorted_row_entries t row ~label ~entry =
+    let entries, tail = row_entries row in
+    let entries =
+      List.stable_sort entries ~compare:(fun (a, _, _) (b, _, _) ->
+        String.compare a b)
+      |> List.map ~f:(fun (name, presence, ty) ->
+        let name = label name in
+        match canonical_presence presence with
+        | Present -> entry name ty
+        | Absent -> "-" ^ name
+        | PVar var -> entry (sprintf "%s?%s" name (var_name t var)) ty)
+    in
+    entries, Option.map tail ~f:(row_var_name t)
+  ;;
+
   let rec ty_to_string t ~prec ty =
     let parens_if cond s = if cond then "(" ^ s ^ ")" else s in
     match canonical_ty ty with
@@ -233,6 +257,7 @@ module Printer = struct
       let ty1 = ty_to_string t ~prec:1 ty1 in
       let ty2 = ty_to_string t ~prec:0 ty2 in
       parens_if (prec > 0) (sprintf "%s -> %s" ty1 ty2)
+    | TTuple [] -> "()"
     | TTuple tys ->
       parens_if
         (prec > 1)
@@ -243,28 +268,6 @@ module Printer = struct
     | TRecord row -> row_to_string t row
     | TVariant row -> variant_to_string t row
     | TVar var -> var_name t var
-
-  and row_entries row =
-    match canonical_row row with
-    | REmpty -> [], None
-    | RExtend (name, presence, ty, rest) ->
-      let entries, tail = row_entries rest in
-      (name, presence, ty) :: entries, tail
-    | RVar var -> [], Some var
-
-  and sorted_row_entries t row ~label ~entry =
-    let entries, tail = row_entries row in
-    let entries =
-      List.stable_sort entries ~compare:(fun (a, _, _) (b, _, _) ->
-        String.compare a b)
-      |> List.map ~f:(fun (name, presence, ty) ->
-        let name = label name in
-        match canonical_presence presence with
-        | Present -> entry name ty
-        | Absent -> "-" ^ name
-        | PVar var -> entry (sprintf "%s?%s" name (var_name t var)) ty)
-    in
-    entries, Option.map tail ~f:(row_var_name t)
 
   and variant_to_string t row =
     let entries, tail =

@@ -72,6 +72,13 @@ let handle_a e k = match e with `A n -> n | other -> k other
 (* [`A of int; ..'r] -> ([..'r] -> int) -> int *)
 ```
 
+- Closing is stricter than residuals: closing gives each tag one entry, so
+  on `` v : [`A of int | `A of bool] `` (e.g. `type t[{..'r}] = [`A of int;
+  ..'r]` at `t[{A : bool}]`), `` match v with `A n -> e `` is rejected, while
+  `` match v with `A n -> e | other -> (match other with `A b -> e') `` is
+  accepted: the residual removes the first `` `A `` and the inner match
+  closes the rest.
+
 No embedding operation, so an inner duplicate tag is never inhabited.
 No exhaustiveness checking beyond what closing gives.
 
@@ -86,6 +93,15 @@ These are `Pattern.Poly_record { fields; rest }` with `rest` a
 `Pattern.Rest.t`: `Closed`, `Open` or `Bind name`.
 
 Labels are distinct within one pattern.
+
+## Recursion
+
+Structural types can't be recursive: there are no equi-recursive types, so
+the occurs check rejects `{x : 'a; ..'r}` with `'a` that record (and
+likewise for variants and rows, `Cyclic_row`), and an alias whose body
+refers to itself, through records and variants too, is
+`Cyclic_type_alias`. Recursion goes through a nominal wrapper:
+`` type t = T of [`Nil | `Cons of int * t] ``.
 
 ## Values
 

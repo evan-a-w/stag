@@ -37,6 +37,7 @@ let bool b = Expr.Lit (Bool b)
 let var ?annot name = Expr.Var (path name, annot)
 let app f args = List.fold args ~init:f ~f:(fun f x -> Expr.App (f, x))
 let args = List.map ~f:(fun name -> name, None)
+let typed name ty = name, Some ty
 
 let let_ ?annot name params equal in_ =
   Expr.Let (name, args params, annot, equal, in_)
