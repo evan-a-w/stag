@@ -1,13 +1,7 @@
 open! Core
 
 module Env : sig
-  type 'value t =
-    { prev : 'value t option
-    ; values : 'value Typed.Ident.Table.t
-    }
-  [@@deriving sexp_of, fields]
-
-  val lookup : 'value t -> ident:Typed.Ident.t -> 'value option
+  type 'value t 
 end
 
 module Value : sig
@@ -29,7 +23,10 @@ end
 
 type t
 
-val create : program:Typed.Program.t -> t
+val create : unit -> t
+val create' : program:Typed.Program.t -> t
+
+val add_program : t -> program:Typed.Program.t -> unit
 
 (** The binders from outside the closure [ident] that it reads when called,
     including itself if it is recursive. Uses in splices that run when a quote

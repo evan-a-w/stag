@@ -3,15 +3,38 @@ open! Core
 module Env = struct
   type 'value t =
     { prev : 'value t option
-    ; values : 'value Typed.Ident.Table.t
+    ; values : 'value option ref Typed.Ident.Table.t
     }
   [@@deriving sexp_of, fields]
 
   let rec lookup t ~ident =
     match Hashtbl.find t.values ident with
-    | None -> Option.bind t.prev ~f:(lookup ~ident)
-    | Some _ as res -> res
+    | None ->
+      (match t.prev with
+       | None -> Ok None
+       | Some prev -> lookup ~ident prev)
+    | Some { contents = None } ->
+      Or_error.error_s
+        [%message
+          "Used value before it was defined (eg. because of recursion on \
+           values)"
+            (ident : Typed.Ident.t)]
+    | Some { contents } -> Ok contents
   ;;
+
+  let create () = { prev = None; values = Typed.Ident.Table.create () }
+
+  let set t ~ident ~value = 
+    let ref = Hashtbl.find_or_add t.values ident ~default:(fun () -> ref None) in
+    ref := Some value
+
+
+  let push t =
+    let res = create () in
+    { res with prev = Some t }
+  ;;
+
+  let pop t = Option.value_or_thunk t.prev ~default:create
 end
 
 module Value = struct
@@ -115,13 +138,62 @@ let captures t ~ident ~args ~body =
     captures)
 ;;
 
-let create ~program:({ sccs; ident_info } : Typed.Program.t) =
-  { eval_stack = Stack.of_list sccs
-  ; ident_info = Typed.Ident.Table.of_alist_exn (Map.to_alist ident_info)
+let create () =
+  { eval_stack = Stack.create ()
+  ; ident_info = Typed.Ident.Table.create ()
   ; values = Typed.Ident.Table.create ()
   ; closure_captures = Typed.Ident.Table.create ()
   ; env = { prev = None; values = Typed.Ident.Table.create () }
   }
+;;
+
+let add_program t ~program:({ sccs; ident_info } : Typed.Program.t) =
+  List.rev sccs |> List.iter ~f:(Stack.push t.eval_stack);
+  Map.iteri ident_info ~f:(fun ~key ~data ->
+    Hashtbl.set t.ident_info ~key ~data)
+;;
+
+let create' ~program =
+  let t = create () in
+  add_program t ~program;
+  t
+;;
+
+(* module Toplevel : sig
+  type t =
+    { ident : Ident.t
+    ; args : Ident.t list
+    ; scheme : Type.ty
+    ; body : Expr.t
+    }
+  [@@deriving sexp_of]
+end *)
+
+let make_env t ~captures =
+  let env = Env.create () in
+  Hash_set.to_list captures |> List.iter ~f:(fun ident -> 
+    Env.set env ~ident ~value:(Env.lookup t.env ~ident)
+    );
+    env
+
+(* ident already in scope before this, but not filled in *)
+let rec eval t ~ident ~args ~body = 
+
+    | Function of
+        { args : Typed.Ident.t list
+        ; body : Typed.Expr.t
+        ; env : t Env.t
+        }
+
+
+let eval_one_scc t ~(scc : Typed.Scc.t) =
+  List.iter scc.members ~f:(fun { ident; _ } ->
+    Hashtbl.set t.env.values ~key:ident ~data:(ref None));
+    List.map scc.members ~f:(fun { ident; args; body; scheme = _ } -> 
+      
+      eval t ~ident ~args ~body
+      ) |> Result.all_unit
+
 ;;
 
 let eval t = ()
