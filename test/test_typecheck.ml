@@ -5,9 +5,8 @@ open Helpers
 
 let%expect_test "primitives" =
   let typecheck = Typecheck.create () in
-  Typecheck.typecheck typecheck ~program:prims
-  |> Result.ok
-  |> Option.value_exn
+  (Typecheck.typecheck typecheck ~program:prims |> Result.ok |> Option.value_exn)
+    .signature
   |> print_signature;
   [%expect
     {|
@@ -22,7 +21,7 @@ let%expect_test "typechecking twice with the same state" =
   let typecheck = Typecheck.create () in
   let run program =
     match Typecheck.typecheck typecheck ~program with
-    | Ok signature -> print_signature signature
+    | Ok { signature; _ } -> print_signature signature
     | Error error -> print_s [%sexp (error : Typecheck_error.t)]
   in
   run prims;

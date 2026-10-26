@@ -16,11 +16,12 @@ module Entry = struct
     ; level : Level.t
     ; quote_id : int option
     ; persistent : bool
+    ; binder : Typed.Binder.t
     }
   [@@deriving sexp_of]
 
-  let toplevel ~scheme ~persistent =
-    { scheme; level = 0; quote_id = None; persistent }
+  let toplevel ~name ~scheme ~persistent =
+    { scheme; level = 0; quote_id = None; persistent; binder = Toplevel name }
   ;;
 
   let is_allowed_at t ~used_at ~quote_id =

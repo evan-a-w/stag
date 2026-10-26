@@ -4,6 +4,8 @@ open Syntax
 module Constructor = struct
   type t =
     { name : string
+    ; type_name : string
+    ; index : int
     ; args : Type.ty list
     ; result : Type.ty
     }
@@ -15,6 +17,7 @@ module Field = struct
     { name : string
     ; type_name : string
     ; record : Type.ty
+    ; index : int
     ; ty : Type.ty
     ; all_fields : string list
     }
@@ -350,15 +353,16 @@ let define t (decl : Decl.t) =
   | Variant constructors ->
     let result = Type.TCon (decl.name, decl.params) in
     let constructors =
-      List.fold
+      List.foldi
         constructors
         ~init:t.constructors
-        ~f:(fun constructors { name; args } ->
+        ~f:(fun index constructors { name; args } ->
           let name = canonical_name name in
           Map.add_exn
             constructors
             ~key:name
-            ~data:{ Constructor.name; args; result })
+            ~data:
+              { Constructor.name; type_name = decl.name; index; args; result })
     in
     { t with constructors }
   | Record fields ->
@@ -367,7 +371,7 @@ let define t (decl : Decl.t) =
         canonical_name field.name)
     in
     let fields =
-      List.fold fields ~init:t.fields ~f:(fun fields { name; ty } ->
+      List.foldi fields ~init:t.fields ~f:(fun index fields { name; ty } ->
         let name = canonical_name name in
         Map.add_exn
           fields
@@ -375,6 +379,7 @@ let define t (decl : Decl.t) =
           ~data:
             { Field.name
             ; type_name = decl.name
+            ; index
             ; record = TCon (decl.name, decl.params)
             ; ty
             ; all_fields
