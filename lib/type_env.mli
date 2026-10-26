@@ -16,6 +16,8 @@ val create : Module_scope.t -> Fresh.t -> (t, Typecheck_error.t) Result.t
 module Constructor : sig
   type t =
     { name : string
+    ; type_name : string
+    ; index : int
     ; args : Type.ty list
     ; result : Type.ty
     }
@@ -29,6 +31,7 @@ module Field : sig
     { name : string
     ; type_name : string
     ; record : Type.ty
+    ; index : int
     ; ty : Type.ty
     ; all_fields : string list
     }

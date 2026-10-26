@@ -12,10 +12,12 @@ module Entry : sig
     ; persistent : bool
       (** Persistent entries (generalized syntactic functions) may also be used
           at any later level, from within any quote. *)
+    ; binder : Typed.Binder.t
     }
   [@@deriving sexp_of]
 
-  val toplevel : scheme:Type.ty -> persistent:bool -> t
+  (** The entry of the toplevel of canonical name [name]. *)
+  val toplevel : name:string -> scheme:Type.ty -> persistent:bool -> t
 
   (** Non-persistent entries may only be used at their own level, within the
       quote they were bound in. *)

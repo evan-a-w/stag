@@ -6,7 +6,7 @@ open Helpers
 let typecheck_exn program =
   let typecheck = Typecheck.create () in
   match Typecheck.typecheck typecheck ~program with
-  | Ok signature -> signature
+  | Ok { signature; _ } -> signature
   | Error error -> raise_s [%sexp (error : Typecheck_error.t)]
 ;;
 

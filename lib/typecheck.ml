@@ -7,9 +7,14 @@ module Toplevel = struct
       | In_progress of
           { index : int
           ; ty : Type.ty
+          ; args : Typed.Ident.t list
+          ; mutable body : Typed.Expr.t option
           ; mutable recursive : bool
           }
-      | Done of Env.Entry.t
+      | Done of
+          { entry : Env.Entry.t
+          ; typed : Typed.Toplevel.t
+          }
     [@@deriving sexp_of]
   end
 
@@ -47,7 +52,17 @@ module Program_env = struct
   type t =
     { type_env : Type_env.t
     ; toplevels : Toplevel.t String.Table.t
+    ; mutable next_stamp : int
+    ; idents : Type.ty Typed.Ident.Table.t
+    ; sccs : Typed.Scc.t Queue.t
     }
+
+  let bind t name ty =
+    let ident = { Typed.Ident.name; stamp = t.next_stamp } in
+    t.next_stamp <- t.next_stamp + 1;
+    Hashtbl.add_exn t.idents ~key:ident ~data:ty;
+    ident
+  ;;
 end
 
 module Scope = struct
@@ -70,8 +85,13 @@ module Scope = struct
 
   let quote_id t = Option.map t.quote ~f:(fun quote -> quote.id)
 
-  let entry t ~scheme ~persistent =
-    { Env.Entry.scheme; level = t.level; quote_id = quote_id t; persistent }
+  let entry t ~ident ~scheme ~persistent =
+    { Env.Entry.scheme
+    ; level = t.level
+    ; quote_id = quote_id t
+    ; persistent
+    ; binder = Local ident
+    }
   ;;
 
   let fresh_ty ids t = Type.TVar (Fresh.var ids ~rank:t.rank)
@@ -125,7 +145,7 @@ let check_no_duplicates names ~error =
   | Some name -> Error (error name)
 ;;
 
-let function_type t scope ~(args : Syntax.Binding.t list) ~annot =
+let function_type t (scope : Scope.t) ~(args : Syntax.Binding.t list) ~annot =
   let annot_type = function
     | None -> Ok (Scope.fresh_ty t scope)
     | Some annot -> Scope.elaborate scope annot
@@ -141,11 +161,29 @@ let function_type t scope ~(args : Syntax.Binding.t list) ~annot =
     List.fold_right args ~init:res_ty ~f:(fun (_, arg_ty) ty ->
       Type.TArrow (arg_ty, ty))
   in
+  let args =
+    List.map args ~f:(fun (name, ty) ->
+      Program_env.bind scope.program name ty, ty)
+  in
   args, res_ty, ty
 ;;
 
-(* Pairs each of [args] with its instantiated type, along with the result
-   type. *)
+let constructor_ref (constructor : Type_env.Constructor.t) =
+  { Typed.Constructor_ref.type_name = constructor.type_name
+  ; name = constructor.name
+  ; index = constructor.index
+  }
+;;
+
+let field_ref (field : Type_env.Field.t) =
+  { Typed.Field_ref.type_name = field.type_name
+  ; name = field.name
+  ; index = field.index
+  }
+;;
+
+(* Pairs each of [args] with its instantiated type, along with the
+   constructor and the result type. *)
 let constructor_types t (scope : Scope.t) path ~args =
   let%bind.Result (constructor : Type_env.Constructor.t) =
     Type_env.find_constructor scope.program.type_env scope.module_ path
@@ -161,11 +199,14 @@ let constructor_types t (scope : Scope.t) path ~args =
   | Ok args ->
     let inst = Scope.instantiate t scope in
     let result = inst constructor.result in
-    Ok (List.map args ~f:(fun (arg, ty) -> arg, inst ty), result)
+    Ok
+      ( constructor_ref constructor
+      , List.map args ~f:(fun (arg, ty) -> arg, inst ty)
+      , result )
 ;;
 
-(* Returns the instantiated record type, and each field paired with its
-   type. *)
+(* Returns the instantiated record type, and each field with its [x] paired
+   with its type. *)
 let record_fields t (scope : Scope.t) fields ~all_required =
   let%bind.Result fields =
     List.map fields ~f:(fun (path, x) ->
@@ -205,18 +246,20 @@ let record_fields t (scope : Scope.t) fields ~all_required =
       | Some _ | None -> Ok ()
     in
     let inst = Scope.instantiate t scope in
-    let fields = List.map fields ~f:(fun (field, x) -> x, inst field.ty) in
+    let fields =
+      List.map fields ~f:(fun (field, x) -> field_ref field, (x, inst field.ty))
+    in
     inst first.record, fields
 ;;
 
-(* Returns the instantiated record type and the field's type. *)
+(* Returns the field, the instantiated record type and the field's type. *)
 let field_type t (scope : Scope.t) path =
   let%map.Result (field : Type_env.Field.t) =
     Type_env.find_field scope.program.type_env scope.module_ path
   in
   let inst = Scope.instantiate t scope in
   let ty = inst field.ty in
-  inst field.record, ty
+  field_ref field, inst field.record, ty
 ;;
 
 (* Rows of polymorphic records and variants, whose entries are [Present]. *)
@@ -243,41 +286,65 @@ module Poly_row = struct
 end
 
 let rec pattern_type t (scope : Scope.t) ~(pattern : Syntax.Pattern.t)
-  : (Type.ty * (string * Type.ty) list, Typecheck_error.t) Result.t
+  : ( Typed.Pattern.t * (Typed.Ident.t * Type.ty) list
+      , Typecheck_error.t )
+      Result.t
   =
+  let node desc ty = { Typed.Pattern.desc; ty } in
+  let bind name ty = Program_env.bind scope.program name ty in
   let sub_patterns patterns =
-    List.fold_result patterns ~init:[] ~f:(fun bindings (pattern, ty) ->
-      let%bind.Result pattern_ty, bindings' = pattern_type t scope ~pattern in
-      let%map.Result () = Unify.unify_ty t ~ty1:ty ~ty2:pattern_ty |> lift in
-      bindings @ bindings')
+    let%map.Result typed, bindings =
+      List.fold_result
+        patterns
+        ~init:([], [])
+        ~f:(fun (typed, bindings) (pattern, ty) ->
+          let%bind.Result pattern, bindings' = pattern_type t scope ~pattern in
+          let%map.Result () =
+            Unify.unify_ty t ~ty1:ty ~ty2:pattern.Typed.Pattern.ty |> lift
+          in
+          pattern :: typed, bindings @ bindings')
+    in
+    List.rev typed, bindings
   in
   match pattern with
-  | Any -> Ok (Scope.fresh_ty t scope, [])
+  | Any -> Ok (node Any (Scope.fresh_ty t scope), [])
   | Var name ->
     let ty = Scope.fresh_ty t scope in
-    Ok (ty, [ name, ty ])
-  | Lit lit -> Ok (Syntax.Lit.ty lit, [])
+    let ident = bind name ty in
+    Ok (node (Var ident) ty, [ ident, ty ])
+  | Lit lit -> Ok (node (Lit lit) (Syntax.Lit.ty lit), [])
   | Tuple patterns ->
     let types = List.map patterns ~f:(fun _ -> Scope.fresh_ty t scope) in
-    let%map.Result bindings = sub_patterns (List.zip_exn patterns types) in
-    Type.TTuple types, bindings
+    let%map.Result patterns, bindings =
+      sub_patterns (List.zip_exn patterns types)
+    in
+    node (Tuple patterns) (Type.TTuple types), bindings
   | Construct (path, args) ->
-    let%bind.Result args, result = constructor_types t scope path ~args in
-    let%map.Result bindings = sub_patterns args in
-    result, bindings
+    let%bind.Result constructor, args, result =
+      constructor_types t scope path ~args
+    in
+    let%map.Result args, bindings = sub_patterns args in
+    node (Construct (constructor, args)) result, bindings
   | Record fields ->
     let%bind.Result record, fields =
       record_fields t scope fields ~all_required:false
     in
-    let%map.Result bindings = sub_patterns fields in
-    record, bindings
+    let%map.Result patterns, bindings = sub_patterns (List.map fields ~f:snd) in
+    ( node (Record (List.zip_exn (List.map fields ~f:fst) patterns)) record
+    , bindings )
   | Poly_variant (tag, arg) ->
     let%map.Result arg, bindings =
       match arg with
-      | None -> Ok (Type.unit, [])
-      | Some pattern -> pattern_type t scope ~pattern
+      | None -> Ok (None, [])
+      | Some pattern ->
+        let%map.Result pattern, bindings = pattern_type t scope ~pattern in
+        Some pattern, bindings
     in
-    Poly_row.variant t scope ~tag ~arg, bindings
+    let arg_ty =
+      Option.value_map arg ~default:Type.unit ~f:(fun pattern -> pattern.ty)
+    in
+    ( node (Poly_variant (tag, arg)) (Poly_row.variant t scope ~tag ~arg:arg_ty)
+    , bindings )
   | Poly_record { fields; rest } ->
     let%bind.Result () = Poly_row.check_distinct_labels fields in
     let%map.Result fields, bindings =
@@ -285,18 +352,27 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Syntax.Pattern.t)
         fields
         ~init:([], [])
         ~f:(fun (fields, bindings) (label, pattern) ->
-          let%map.Result ty, bindings' = pattern_type t scope ~pattern in
-          (label, ty) :: fields, bindings @ bindings')
+          let%map.Result pattern, bindings' = pattern_type t scope ~pattern in
+          (label, pattern) :: fields, bindings @ bindings')
     in
-    let tail, rest_bindings =
+    let fields = List.rev fields in
+    let tail, rest, rest_bindings =
       match rest with
-      | Closed -> Type.REmpty, []
-      | Open -> Scope.fresh_row t scope, []
+      | Closed -> Type.REmpty, Typed.Pattern.Rest.Closed, []
+      | Open -> Scope.fresh_row t scope, Open, []
       | Bind name ->
         let tail = Scope.fresh_row t scope in
-        tail, [ name, Fresh.record t tail ]
+        let ty = Fresh.record t tail in
+        let ident = bind name ty in
+        tail, Bind ident, [ ident, ty ]
     in
-    ( Fresh.record t (Poly_row.present (List.rev fields) ~tail)
+    let row =
+      Poly_row.present
+        (List.map fields ~f:(fun (label, (pattern : Typed.Pattern.t)) ->
+           label, pattern.ty))
+        ~tail
+    in
+    ( node (Poly_record { fields; rest }) (Fresh.record t row)
     , bindings @ rest_bindings )
 ;;
 
@@ -319,7 +395,11 @@ module Variant_match = struct
           scope
           (List.map handled ~f:(fun tag -> tag, Scope.fresh_ty t scope))
       in
-      Ok (Fresh.variant t row, [ name, Fresh.variant t rest ])
+      let rest = Fresh.variant t rest in
+      let ident = Program_env.bind scope.program name rest in
+      Ok
+        ( { Typed.Pattern.desc = Var ident; ty = Fresh.variant t row }
+        , [ ident, rest ] )
     | _ -> pattern_type t scope ~pattern
   ;;
 
@@ -370,15 +450,20 @@ end
 (* [name] is the context entry the variable is provided as, if it becomes a
    free variable of the quote: a local's name or a toplevel's canonical name. *)
 let resolution_type t (scope : Scope.t) ~name : Resolution.t -> _ = function
-  | Local entry | Outside_quote { usable = Some entry; _ } ->
-    Ok (Scope.instantiate t scope entry.scheme)
+  | Local entry ->
+    Ok (Scope.instantiate t scope entry.scheme, Typed.Var_ref.Bound entry.binder)
+  | Outside_quote { usable = Some entry; _ } ->
+    Ok (Scope.instantiate t scope entry.scheme, Persistent entry.binder)
   | Outside_quote { quote; usable = None } ->
-    Unify.present_entry t ~row:quote.context ~name ~rank:quote.outside.rank
-    |> lift
+    let%map.Result ty =
+      Unify.present_entry t ~row:quote.context ~name ~rank:quote.outside.rank
+      |> lift
+    in
+    ty, Typed.Var_ref.Free name
   | Unusable error -> Error error
 ;;
 
-let finish_scc t (members : Toplevel.t list) =
+let finish_scc (program : Program_env.t) (members : Toplevel.t list) =
   let persistent = List.for_all members ~f:Toplevel.is_function in
   let recursive =
     List.exists members ~f:(fun member ->
@@ -390,14 +475,28 @@ let finish_scc t (members : Toplevel.t list) =
   let generalize =
     List.for_all members ~f:Toplevel.is_value && (persistent || not recursive)
   in
-  List.iter members ~f:(fun member ->
-    match member.state with
-    | In_progress { ty; _ } ->
-      if generalize then Scheme.generalize_ty ~rank:0 ty;
-      member.state <- Done (Env.Entry.toplevel ~scheme:ty ~persistent)
-    | Unchecked | Done _ ->
-      raise_s
-        [%message "finish_scc: member not in progress" (member : Toplevel.t)])
+  let members =
+    List.map members ~f:(fun member ->
+      match member.state with
+      | In_progress { index; ty; args; body = Some body; _ } ->
+        if generalize then Scheme.generalize_ty ~rank:0 ty;
+        let typed =
+          { Typed.Toplevel.name = member.name; args; scheme = ty; body }
+        in
+        member.state
+        <- Done
+             { entry =
+                 Env.Entry.toplevel ~name:member.name ~scheme:ty ~persistent
+             ; typed
+             };
+        index, typed
+      | In_progress { body = None; _ } | Unchecked | Done _ ->
+        raise_s
+          [%message "finish_scc: member not checked" (member : Toplevel.t)])
+    |> List.sort ~compare:(Comparable.lift Int.compare ~f:fst)
+    |> List.map ~f:snd
+  in
+  Queue.enqueue program.sccs { Typed.Scc.members; recursive }
 ;;
 
 let rec var_type t (scope : Scope.t) ~(path : Syntax.Path.t) =
@@ -429,13 +528,17 @@ let rec var_type t (scope : Scope.t) ~(path : Syntax.Path.t) =
 
 and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) =
   match toplevel.state with
-  | Done entry -> Ok entry
+  | Done { entry; _ } -> Ok entry
   | In_progress in_progress ->
     (* [toplevel] is in the component being checked, so this is a recursive
        reference. *)
     in_progress.recursive <- true;
     scope.scc.lowlink <- Int.min scope.scc.lowlink in_progress.index;
-    Ok (Env.Entry.toplevel ~scheme:in_progress.ty ~persistent:false)
+    Ok
+      (Env.Entry.toplevel
+         ~name:toplevel.name
+         ~scheme:in_progress.ty
+         ~persistent:false)
   | Unchecked ->
     let%bind.Result scc = check_toplevel t scope.program toplevel in
     scope.scc.lowlink <- Int.min scope.scc.lowlink scc.lowlink;
@@ -462,11 +565,23 @@ and check_toplevel t program (toplevel : Toplevel.t)
   let%bind.Result args, res_ty, ty =
     function_type t scope ~args:toplevel.args ~annot:toplevel.annot
   in
-  toplevel.state <- In_progress { index; ty; recursive = false };
-  let%map.Result () = check_body t scope ~args ~res_ty ~body:toplevel.expr in
+  toplevel.state
+  <- In_progress
+       { index
+       ; ty
+       ; args = List.map args ~f:fst
+       ; body = None
+       ; recursive = false
+       };
+  let%map.Result body = check_body t scope ~args ~res_ty ~body:toplevel.expr in
+  (match toplevel.state with
+   | In_progress in_progress -> in_progress.body <- Some body
+   | Unchecked | Done _ ->
+     raise_s
+       [%message "check_toplevel: not in progress" (toplevel : Toplevel.t)]);
   if scc.lowlink = index
   then (
-    finish_scc t scc.pending;
+    finish_scc program scc.pending;
     scc.pending <- []);
   scc
 
@@ -477,47 +592,60 @@ and check_body t (scope : Scope.t) ~args ~res_ty ~body =
 and with_monomorphic_bindings (scope : Scope.t) bindings ~f =
   Env.with_bindings
     scope.locals
-    (List.map bindings ~f:(fun (name, ty) ->
-       name, Scope.entry scope ~scheme:ty ~persistent:false))
+    (List.map bindings ~f:(fun ((ident : Typed.Ident.t), ty) ->
+       ident.name, Scope.entry scope ~ident ~scheme:ty ~persistent:false))
     ~f
 
 and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
-  : (Type.ty, Typecheck_error.t) Result.t
+  : (Typed.Expr.t, Typecheck_error.t) Result.t
   =
+  let node desc ty = { Typed.Expr.desc; ty } in
+  let tys = List.map ~f:(fun (expr : Typed.Expr.t) -> expr.ty) in
+  let labelled_tys =
+    List.map ~f:(fun (label, (expr : Typed.Expr.t)) -> label, expr.ty)
+  in
   match expr with
-  | Lit l -> Ok (Syntax.Lit.ty l)
+  | Lit l -> Ok (node (Lit l) (Syntax.Lit.ty l))
   | Var (path, annot) ->
-    let%bind.Result ty = var_type t scope ~path in
-    (match annot with
-     | None -> Ok ty
-     | Some annot ->
-       let%bind.Result annot = Scope.elaborate scope annot in
-       let%map.Result () = Unify.unify_ty t ~ty1:ty ~ty2:annot |> lift in
-       ty)
+    let%bind.Result ty, var_ref = var_type t scope ~path in
+    let%map.Result () =
+      match annot with
+      | None -> Ok ()
+      | Some annot ->
+        let%bind.Result annot = Scope.elaborate scope annot in
+        Unify.unify_ty t ~ty1:ty ~ty2:annot |> lift
+    in
+    node (Var var_ref) ty
   | App (f, x) ->
     let a = Scope.fresh_ty t scope in
     let b = Scope.fresh_ty t scope in
-    let%bind.Result () = check_expr t scope ~expr:f ~ty:(TArrow (a, b)) in
-    let%map.Result () = check_expr t scope ~expr:x ~ty:a in
-    b
+    let%bind.Result f = check_expr t scope ~expr:f ~ty:(TArrow (a, b)) in
+    let%map.Result x = check_expr t scope ~expr:x ~ty:a in
+    node (App (f, x)) b
   | Let (name, args, annot, equal, in_) ->
     let inner = { scope with rank = scope.rank + 1 } in
     let%bind.Result arg_types, res_ty, ty =
       function_type t inner ~args ~annot
     in
-    let%bind.Result () =
+    let ident = Program_env.bind scope.program name ty in
+    let%bind.Result body =
       Env.with_bindings
         scope.locals
-        [ name, Scope.entry scope ~scheme:ty ~persistent:false ]
+        [ name, Scope.entry scope ~ident ~scheme:ty ~persistent:false ]
         ~f:(fun () -> check_body t inner ~args:arg_types ~res_ty ~body:equal)
     in
     let persistent = not (List.is_empty args) in
-    if Syntax.Expr.binding_is_value name ~args ~equal
-    then Scheme.generalize_ty ~rank:scope.rank ty;
-    Env.with_bindings
-      scope.locals
-      [ name, Scope.entry scope ~scheme:ty ~persistent ]
-      ~f:(fun () -> expr_type t scope ~expr:in_)
+    let generalized = Syntax.Expr.binding_is_value name ~args ~equal in
+    if generalized then Scheme.generalize_ty ~rank:scope.rank ty;
+    let%map.Result in_ =
+      Env.with_bindings
+        scope.locals
+        [ name, Scope.entry scope ~ident ~scheme:ty ~persistent ]
+        ~f:(fun () -> expr_type t scope ~expr:in_)
+    in
+    node
+      (Let { ident; args = List.map arg_types ~f:fst; body; in_; generalized })
+      in_.ty
   | Quote expr ->
     let quote =
       { Scope.id = Fresh.id t
@@ -531,7 +659,7 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
         { scope with level = scope.level + 1; quote = Some quote }
         ~expr
     in
-    Type.TCode { inner; context = quote.context }
+    node (Quote inner) (TCode { inner = inner.ty; context = quote.context })
   | Splice { expr; subs } ->
     let outside : Scope.t =
       match scope.quote with
@@ -540,139 +668,180 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
     in
     let inner = Scope.fresh_ty t scope in
     let context = Scope.fresh_row t scope in
-    let%bind.Result () =
+    let%bind.Result code =
       check_expr t outside ~expr ~ty:(TCode { inner; context })
     in
-    let%map.Result () =
+    let%map.Result subs =
       match subs with
-      | None -> substitute_from_scope t scope ~context
-      | Some subs -> substitute_explicitly t scope ~context ~subs
+      | None ->
+        let%map.Result captures = substitute_from_scope t scope ~context in
+        Typed.Expr.Subs.Implicit captures
+      | Some subs ->
+        let%map.Result subs = substitute_explicitly t scope ~context ~subs in
+        Typed.Expr.Subs.Explicit subs
     in
-    inner
+    node (Splice { code; subs }) inner
   | Tuple exprs ->
-    let%map.Result types =
+    let%map.Result exprs =
       List.map exprs ~f:(fun expr -> expr_type t scope ~expr) |> Result.all
     in
-    Type.TTuple types
+    node (Tuple exprs) (Type.TTuple (tys exprs))
   | Construct (path, args) ->
-    let%bind.Result args, result = constructor_types t scope path ~args in
-    let%map.Result () = check_exprs t scope args in
-    result
+    let%bind.Result constructor, args, result =
+      constructor_types t scope path ~args
+    in
+    let%map.Result args = check_exprs t scope args in
+    node (Construct (constructor, args)) result
   | Record fields ->
     let%bind.Result record, fields =
       record_fields t scope fields ~all_required:true
     in
-    let%map.Result () = check_exprs t scope fields in
-    record
+    let%map.Result exprs = check_exprs t scope (List.map fields ~f:snd) in
+    node (Record (List.zip_exn (List.map fields ~f:fst) exprs)) record
   | Field (expr, path) ->
-    let%bind.Result record, field_ty = field_type t scope path in
-    let%map.Result () = check_expr t scope ~expr ~ty:record in
-    field_ty
+    let%bind.Result field, record, field_ty = field_type t scope path in
+    let%map.Result expr = check_expr t scope ~expr ~ty:record in
+    node (Field (expr, field)) field_ty
   | Match (expr, cases) ->
     let%bind.Result scrutinee = expr_type t scope ~expr in
     let result = Scope.fresh_ty t scope in
-    let%bind.Result (_ : Variant_match.t) =
+    let%bind.Result (_ : Variant_match.t), typed_cases =
       List.fold_result
         cases
-        ~init:Variant_match.empty
-        ~f:(fun handled (pattern, body) ->
-          let%bind.Result pattern_ty, bindings =
+        ~init:(Variant_match.empty, [])
+        ~f:(fun (handled, typed_cases) (pattern, body) ->
+          let%bind.Result typed_pattern, bindings =
             Variant_match.pattern_type t scope handled ~pattern
           in
           let%bind.Result () =
-            check_no_duplicates (List.map bindings ~f:fst) ~error:(fun name ->
-              Typecheck_error.Duplicate_pattern_variable name)
+            check_no_duplicates
+              (List.map bindings ~f:(fun ((ident : Typed.Ident.t), _) ->
+                 ident.name))
+              ~error:(fun name ->
+                Typecheck_error.Duplicate_pattern_variable name)
           in
           let%bind.Result () =
-            Unify.unify_ty t ~ty1:scrutinee ~ty2:pattern_ty |> lift
+            Unify.unify_ty t ~ty1:scrutinee.ty ~ty2:typed_pattern.ty |> lift
           in
-          let%map.Result () =
+          let%map.Result body =
             with_monomorphic_bindings scope bindings ~f:(fun () ->
               check_expr t scope ~expr:body ~ty:result)
           in
-          Variant_match.add_case handled pattern)
+          ( Variant_match.add_case handled pattern
+          , (typed_pattern, body) :: typed_cases ))
     in
     let%map.Result () =
-      Variant_match.close t scope ~scrutinee (List.map cases ~f:fst)
+      Variant_match.close
+        t
+        scope
+        ~scrutinee:scrutinee.ty
+        (List.map cases ~f:fst)
     in
-    result
+    node (Match (scrutinee, List.rev typed_cases)) result
   | Poly_record fields ->
     let%map.Result fields = labelled_types t scope fields in
-    Fresh.record t (Poly_row.present fields ~tail:REmpty)
+    node
+      (Poly_record fields)
+      (Fresh.record t (Poly_row.present (labelled_tys fields) ~tail:REmpty))
   | Poly_field (expr, label) ->
     let ty = Scope.fresh_ty t scope in
-    let%map.Result (_ : Type.row) =
+    let%map.Result expr, (_ : Type.row) =
       check_open_record t scope expr [ label, ty ]
     in
-    ty
+    node (Poly_field (expr, label)) ty
   | Poly_extend (fields, expr) ->
     let%bind.Result fields = labelled_types t scope fields in
     let rest = Scope.fresh_row t scope in
-    let%map.Result () = check_expr t scope ~expr ~ty:(Fresh.record t rest) in
-    Fresh.record t (Poly_row.present fields ~tail:rest)
+    let%map.Result expr = check_expr t scope ~expr ~ty:(Fresh.record t rest) in
+    node
+      (Poly_extend (fields, expr))
+      (Fresh.record t (Poly_row.present (labelled_tys fields) ~tail:rest))
   | Poly_restrict (expr, label) ->
-    let%map.Result rest =
+    let%map.Result expr, rest =
       check_open_record t scope expr [ label, Scope.fresh_ty t scope ]
     in
-    Fresh.record t rest
+    node (Poly_restrict (expr, label)) (Fresh.record t rest)
   | Poly_update (expr, fields) ->
     let%bind.Result fields = labelled_types t scope fields in
-    let%map.Result rest =
+    let%map.Result expr, rest =
       check_open_record
         t
         scope
         expr
         (List.map fields ~f:(fun (label, _) -> label, Scope.fresh_ty t scope))
     in
-    Fresh.record t (Poly_row.present fields ~tail:rest)
+    node
+      (Poly_update (expr, fields))
+      (Fresh.record t (Poly_row.present (labelled_tys fields) ~tail:rest))
   | Poly_variant (tag, arg) ->
     let%map.Result arg =
       match arg with
-      | None -> Ok Type.unit
-      | Some expr -> expr_type t scope ~expr
+      | None -> Ok None
+      | Some expr ->
+        let%map.Result expr = expr_type t scope ~expr in
+        Some expr
     in
-    Poly_row.variant t scope ~tag ~arg
+    let arg_ty =
+      Option.value_map arg ~default:Type.unit ~f:(fun (expr : Typed.Expr.t) ->
+        expr.ty)
+    in
+    node (Poly_variant (tag, arg)) (Poly_row.variant t scope ~tag ~arg:arg_ty)
 
 and labelled_types t scope fields =
   let%bind.Result () = Poly_row.check_distinct_labels fields in
   List.map fields ~f:(fun (label, expr) ->
-    let%map.Result ty = expr_type t scope ~expr in
-    label, ty)
+    let%map.Result expr = expr_type t scope ~expr in
+    label, expr)
   |> Result.all
 
 and check_expr t scope ~expr ~ty =
-  let%bind.Result expr_ty = expr_type t scope ~expr in
-  Unify.unify_ty t ~ty1:ty ~ty2:expr_ty |> lift
+  let%bind.Result expr = expr_type t scope ~expr in
+  let%map.Result () = Unify.unify_ty t ~ty1:ty ~ty2:expr.ty |> lift in
+  expr
 
 and check_exprs t scope exprs =
-  List.fold_result exprs ~init:() ~f:(fun () (expr, ty) ->
-    check_expr t scope ~expr ~ty)
+  List.fold_result exprs ~init:[] ~f:(fun checked (expr, ty) ->
+    let%map.Result expr = check_expr t scope ~expr ~ty in
+    expr :: checked)
+  |> Result.map ~f:List.rev
 
 (* Checks [expr] has a record type with [entries] first, returning the rest of
    its row. *)
 and check_open_record t scope expr entries =
   let row, rest = Poly_row.open_ t scope entries in
-  let%map.Result () = check_expr t scope ~expr ~ty:(Fresh.record t row) in
-  rest
+  let%map.Result expr = check_expr t scope ~expr ~ty:(Fresh.record t row) in
+  expr, rest
 
+(* Returns the binder each entry that may be captured is captured by. *)
 and substitute_from_scope t (scope : Scope.t) ~context =
-  let rec go context ~seen =
+  let rec go context ~seen ~captures =
     match Type.canonical_row context with
-    | REmpty -> Ok ()
+    | REmpty -> Ok captures
     | RExtend (name, presence, ty, rest) ->
-      let%bind.Result () =
+      let%bind.Result captured =
         match Type.canonical_presence presence with
-        | _ when Set.mem seen name -> Ok ()
-        | Absent -> Ok ()
+        | _ when Set.mem seen name -> Ok None
+        | Absent -> Ok None
         | Present | PVar _ -> substitute_entry t scope ~name ~presence ~ty
       in
-      go rest ~seen:(Set.add seen name)
+      let captures =
+        Option.fold captured ~init:captures ~f:(fun captures binder ->
+          (name, binder) :: captures)
+      in
+      go rest ~seen:(Set.add seen name) ~captures
     | RVar _ as tail ->
       (match scope.quote with
-       | None -> Unify.unify_row t ~row1:tail ~row2:REmpty |> lift
-       | Some quote -> substitute_tail t scope quote ~tail ~seen)
+       | None ->
+         let%map.Result () =
+           Unify.unify_row t ~row1:tail ~row2:REmpty |> lift
+         in
+         captures
+       | Some quote ->
+         let%map.Result captured = substitute_tail t scope quote ~tail ~seen in
+         captured @ captures)
   in
-  go context ~seen:String.Set.empty
+  let%map.Result captures = go context ~seen:String.Set.empty ~captures:[] in
+  String.Map.of_alist_exn captures
 
 and substitute_entry t (scope : Scope.t) ~name ~presence ~ty =
   let%bind.Result entry =
@@ -690,21 +859,30 @@ and substitute_entry t (scope : Scope.t) ~name ~presence ~ty =
   match Resolution.of_entry scope ~name entry with
   | Unusable error ->
     (* Code that may use [name] can't, so doesn't. *)
-    Unify.unify_presence ~presence1:presence ~presence2:Absent ~error
+    let%map.Result () =
+      Unify.unify_presence ~presence1:presence ~presence2:Absent ~error
+    in
+    None
   | Local entry ->
-    Unify.unify_ty t ~ty1:ty ~ty2:(Scope.instantiate t scope entry.scheme)
-    |> lift
+    let%map.Result () =
+      Unify.unify_ty t ~ty1:ty ~ty2:(Scope.instantiate t scope entry.scheme)
+      |> lift
+    in
+    Some entry.binder
   | Outside_quote { quote; _ } ->
-    Unify.constrain_row
-      t
-      ~row:(RExtend (name, presence, ty, REmpty))
-      ~bound:quote.context
-      ~shadowed:String.Set.empty
-    |> lift
+    let%map.Result () =
+      Unify.constrain_row
+        t
+        ~row:(RExtend (name, presence, ty, REmpty))
+        ~bound:quote.context
+        ~shadowed:String.Set.empty
+      |> lift
+    in
+    None
 
 (* The code's remaining free variables are not known yet, so give the ones that
    would be captured here explicit entries. The rest must be free variables of
-   the quote. *)
+   the quote. Returns the binders of the ones that may be captured. *)
 and substitute_tail t scope (quote : Scope.quote) ~tail ~seen =
   let captured =
     Env.visible scope.locals
@@ -717,8 +895,9 @@ and substitute_tail t scope (quote : Scope.quote) ~tail ~seen =
           Some
             ( name
             , Scope.fresh_presence t scope
-            , Scope.instantiate t scope entry.scheme )
-        | Unusable _ -> Some (name, Absent, Scope.fresh_ty t scope)
+            , Scope.instantiate t scope entry.scheme
+            , Some entry.binder )
+        | Unusable _ -> Some (name, Absent, Scope.fresh_ty t scope, None)
         | Outside_quote _ -> None))
   in
   let rest = Scope.fresh_row t scope in
@@ -730,18 +909,22 @@ and substitute_tail t scope (quote : Scope.quote) ~tail ~seen =
         (List.fold_right
            captured
            ~init:rest
-           ~f:(fun (name, presence, ty) rest ->
+           ~f:(fun (name, presence, ty, _) rest ->
              Type.RExtend (name, presence, ty, rest)))
     |> lift
   in
-  Unify.constrain_row
-    t
-    ~row:rest
-    ~bound:quote.context
-    ~shadowed:
-      (List.fold captured ~init:seen ~f:(fun seen (name, _, _) ->
-         Set.add seen name))
-  |> lift
+  let%map.Result () =
+    Unify.constrain_row
+      t
+      ~row:rest
+      ~bound:quote.context
+      ~shadowed:
+        (List.fold captured ~init:seen ~f:(fun seen (name, _, _, _) ->
+           Set.add seen name))
+    |> lift
+  in
+  List.filter_map captured ~f:(fun (name, _, _, binder) ->
+    Option.map binder ~f:(fun binder -> name, binder))
 
 and substitute_explicitly t scope ~context ~subs =
   let%bind.Result () =
@@ -750,22 +933,34 @@ and substitute_explicitly t scope ~context ~subs =
   in
   let%bind.Result provided =
     List.fold_result subs ~init:[] ~f:(fun acc (name, expr) ->
-      let%map.Result ty =
+      let%map.Result expr =
         match expr with
-        | None -> var_type t scope ~path:(Syntax.Path.of_string name)
+        | None ->
+          let%map.Result ty, var_ref =
+            var_type t scope ~path:(Syntax.Path.of_string name)
+          in
+          { Typed.Expr.desc = Var var_ref; ty }
         | Some expr -> expr_type t scope ~expr
       in
-      (name, ty) :: acc)
+      (name, expr) :: acc)
   in
-  let provided =
-    List.fold provided ~init:Type.REmpty ~f:(fun rest (name, ty) ->
-      Type.RExtend (name, Scope.fresh_presence t scope, ty, rest))
+  let row =
+    List.fold provided ~init:Type.REmpty ~f:(fun rest (name, expr) ->
+      Type.RExtend (name, Scope.fresh_presence t scope, expr.ty, rest))
   in
-  Unify.unify_row t ~row1:context ~row2:provided |> lift
+  let%map.Result () = Unify.unify_row t ~row1:context ~row2:row |> lift in
+  List.rev provided
 ;;
 
+module Checked = struct
+  type t =
+    { signature : Signature.t
+    ; program : Typed.Program.t
+    }
+end
+
 let typecheck t ~(program : Syntax.Program.t)
-  : (Signature.t, Typecheck_error.t) Result.t
+  : (Checked.t, Typecheck_error.t) Result.t
   =
   let%bind.Result root =
     Module_scope.create
@@ -792,6 +987,9 @@ let typecheck t ~(program : Syntax.Program.t)
     ; toplevels =
         List.map toplevels ~f:(fun toplevel -> toplevel.name, toplevel)
         |> String.Table.of_alist_exn
+    ; next_stamp = 0
+    ; idents = Typed.Ident.Table.create ()
+    ; sccs = Queue.create ()
     }
   in
   let%map.Result () =
@@ -811,7 +1009,7 @@ let typecheck t ~(program : Syntax.Program.t)
             Hashtbl.find_exn program_env.toplevels (canonical_name name)
           in
           (match toplevel.state with
-           | Done { scheme; persistent; _ } ->
+           | Done { entry = { scheme; persistent; _ }; _ } ->
              Value { name; scheme; persistent }
            | Unchecked | In_progress _ ->
              raise_s
@@ -824,5 +1022,11 @@ let typecheck t ~(program : Syntax.Program.t)
             ; items = signature (Module_scope.enter module_ name) toplevels
             })
   in
-  signature root program
+  { Checked.signature = signature root program
+  ; program =
+      { sccs = Queue.to_list program_env.sccs
+      ; idents =
+          Hashtbl.to_alist program_env.idents |> Typed.Ident.Map.of_alist_exn
+      }
+  }
 ;;

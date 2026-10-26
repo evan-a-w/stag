@@ -68,7 +68,8 @@ let print_signature signature = print_string (Signature.to_string_hum signature)
 let check program =
   let typecheck = Typecheck.create () in
   match Typecheck.typecheck typecheck ~program:(prims @ program) with
-  | Ok signature -> print_signature (List.drop signature (List.length prims))
+  | Ok { signature; _ } ->
+    print_signature (List.drop signature (List.length prims))
   | Error error -> print_s [%sexp (error : Typecheck_error.t)]
 ;;
 
