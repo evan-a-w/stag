@@ -708,7 +708,7 @@ let%expect_test "names bound at a later level are absent from spliced code" =
     val inner_splice : <<'a>{z?'b : int; ..'c}>{-z; ..'d} -> <<'a>{..'e}>{..'f} where ..'c <= {..'e}, ..'d <= {..'f}
     val uses_z : <<int>{..'_a}>{..'_b}
     (Unification_error
-     (Row_mismatch (RExtend z Absent (TVar (Unbound 40 1)) (RVar (Unbound 39 1)))
+     (Row_mismatch (RExtend z Absent (TVar (Unbound 40 1)) (RVar (Unbound 41 1)))
       (RExtend z (PVar (Link Present)) (TVar (Unbound 47 1))
        (RVar (Unbound 48 1)))
       (Presence_mismatch z)))
@@ -840,7 +840,7 @@ let%expect_test "mutually recursive staged functions" =
     val uses_z : <int>{y : int; z : int; ..'_a} where ..'_a <= {x?'_b : int; y : int; z : int; ..'_c}, ..'_c <= {y : int; z : int; ..'_a}
     (Unification_error
      (Row_mismatch REmpty
-      (RExtend y Present (TCon int ())
+      (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
        (RVar
         (Link
          (RExtend z (PVar (Link Present)) (TVar (Link (TCon int ())))
@@ -925,7 +925,9 @@ let%expect_test "presence approximation" =
     val splices_then_uses_x : <int>{x : int; ..'a} -> <int>{x : int; ..'a} where ..'a <= {x : int; ..'b}, ..'a <= {..'c}
     val uses_x_then_splices_closed : <int>{-x}
     (Unification_error
-     (Row_mismatch (RExtend x Present (TCon int ()) (RVar (Unbound 47 1))) REmpty
-      (Missing_label x)))
+     (Row_mismatch
+      (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
+       (RVar (Unbound 47 1)))
+      REmpty (Missing_label x)))
     |}]
 ;;

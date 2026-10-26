@@ -537,7 +537,7 @@ let%expect_test "presence variables are generalized and their rank lowered" =
       ~presence:outer
       (ext "z" int REmpty ~presence:(pvar fresh ~rank:2))
   in
-  Scheme.generalize_row ~rank:1 context;
+  Scheme.generalize_ty ~rank:1 (TRecord context);
   print_row context;
   [%expect
     {|

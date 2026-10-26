@@ -103,18 +103,115 @@ let rec tail_var row =
   | RVar var -> Some var
 ;;
 
-(* Every cycle passes through a [Link] and a [TRecord] or [TVariant], as the
-   other nodes are immutable and unification keeps cycles guarded. *)
-let same_node ty1 ty2 =
-  phys_equal ty1 ty2
-  ||
-  match ty1, ty2 with
-  | TRecord row1, TRecord row2 | TVariant row1, TVariant row2 ->
-    (match canonical_row row1, canonical_row row2 with
-     | (RExtend _ as row1), row2 -> phys_equal row1 row2
-     | (REmpty | RVar _), _ -> false)
-  | _ -> false
-;;
+module Node = struct
+  (* Every cycle passes through a [Link] and a [TRecord] or [TVariant], as the
+     other nodes are immutable and unification keeps cycles guarded. *)
+  let same ty1 ty2 =
+    phys_equal ty1 ty2
+    ||
+    match ty1, ty2 with
+    | TRecord row1, TRecord row2 | TVariant row1, TVariant row2 ->
+      (match canonical_row row1, canonical_row row2 with
+       | (RExtend _ as row1), row2 -> phys_equal row1 row2
+       | (REmpty | RVar _), _ -> false)
+    | _ -> false
+  ;;
+
+  (* Hashes the first few immutable nodes, with variables by id, so is stable
+     under binding variables. *)
+  module Skeleton_hash = struct
+    let combine hash x = (hash * 65599) + x
+
+    let rec ty budget hash ty' =
+      if !budget <= 0
+      then hash
+      else (
+        decr budget;
+        match ty' with
+        | TVar var -> combine hash var.id
+        | TCon (name, args) ->
+          List.fold
+            args
+            ~init:(combine hash (String.hash name))
+            ~f:(fun hash -> function
+              | ATy ty' -> ty budget hash ty'
+              | ARow row' -> row budget hash row')
+        | TArrow (ty1, ty2) -> ty budget (ty budget (combine hash 1) ty1) ty2
+        | TTuple tys -> List.fold tys ~init:(combine hash 2) ~f:(ty budget)
+        | TCode { inner; context } ->
+          row budget (ty budget (combine hash 3) inner) context
+        | TRecord row' -> row budget (combine hash 4) row'
+        | TVariant row' -> row budget (combine hash 5) row')
+
+    and row budget hash row' =
+      if !budget <= 0
+      then hash
+      else (
+        decr budget;
+        match row' with
+        | REmpty -> combine hash 6
+        | RExtend (name, presence', ty', rest) ->
+          let hash = presence (combine hash (String.hash name)) presence' in
+          row budget (ty budget hash ty') rest
+        | RVar var -> combine hash var.id)
+
+    and presence hash presence' =
+      match presence' with
+      | Present -> combine hash 7
+      | Absent -> combine hash 8
+      | PVar var -> combine hash var.id
+    ;;
+
+    let budget () = ref 16
+  end
+
+  let phys_hash node = Skeleton_hash.ty (Skeleton_hash.budget ()) 0 node
+
+  let hash ty =
+    match ty with
+    | TRecord row | TVariant row ->
+      (match canonical_row row with
+       | RExtend _ as row -> Skeleton_hash.row (Skeleton_hash.budget ()) 0 row
+       | REmpty | RVar _ -> phys_hash ty)
+    | _ -> phys_hash ty
+  ;;
+
+  module Table = Stdlib.Hashtbl.Make (struct
+      type t = ty
+
+      let equal = same
+      let hash = hash
+    end)
+
+  module Pair_set = struct
+    module Table = Stdlib.Hashtbl.Make (struct
+        type t = ty * ty
+
+        let equal (ty1, ty2) (ty1', ty2') =
+          (phys_equal ty1 ty1' && phys_equal ty2 ty2')
+          || (phys_equal ty1 ty2' && phys_equal ty2 ty1')
+        ;;
+
+        let hash (ty1, ty2) =
+          let hash1 = phys_hash ty1 in
+          let hash2 = phys_hash ty2 in
+          Hashtbl.hash (min hash1 hash2, max hash1 hash2)
+        ;;
+      end)
+
+    type t = unit Table.t
+
+    let create () = Table.create 16
+
+    let add t ty1 ty2 =
+      if Table.mem t (ty1, ty2)
+      then `Already_present
+      else (
+        Table.replace t (ty1, ty2) ();
+        `Added)
+    ;;
+  end
+end
 
 module Iter = struct
   type 'e t =
@@ -186,18 +283,121 @@ module Mapper = struct
     }
 end
 
+(* Whether what a [Link] points to has a variable not satisfying [keeps],
+   computed once per [Link]. The [Link]s of a strongly connected component
+   (found as by Tarjan's algorithm) reach each other, so share the answer. *)
+module Changes = struct
+  module Visiting = struct
+    type t =
+      { index : int
+      ; mutable changes : bool
+      }
+  end
+
+  module State = struct
+    type t =
+      | Visiting of Visiting.t
+      | Visited of bool
+  end
+
+  type t =
+    { keeps : 'a 'bound. ('a, 'bound) Var.t -> bool
+    ; tys : State.t Int.Table.t
+    ; rows : State.t Int.Table.t
+    ; stack : (State.t Int.Table.t * id * Visiting.t) Stack.t
+    ; mutable next_index : int
+    }
+
+  let create (f : Mapper.t) =
+    { keeps = f.keeps
+    ; tys = Int.Table.create ()
+    ; rows = Int.Table.create ()
+    ; stack = Stack.create ()
+    ; next_index = 0
+    }
+  ;;
+
+  (* Whether there are changes, and the lowest index of a [Link] still being
+     visited reached. *)
+  let none = false, Int.max_value
+
+  let both (changes1, low1) (changes2, low2) =
+    changes1 || changes2, min low1 low2
+  ;;
+
+  let var t var = t.keeps var |> not, Int.max_value
+
+  let link t table (var : _ Var.t) ~target =
+    match Hashtbl.find table var.id with
+    | Some (State.Visited changes) -> changes, Int.max_value
+    | Some (Visiting { index; _ }) -> false, index
+    | None ->
+      let index = t.next_index in
+      t.next_index <- index + 1;
+      let visiting = { Visiting.index; changes = false } in
+      Hashtbl.set table ~key:var.id ~data:(Visiting visiting);
+      Stack.push t.stack (table, var.id, visiting);
+      let changes, low = target () in
+      visiting.changes <- changes;
+      if low < index
+      then changes, low
+      else (
+        let rec pop component =
+          let ((table', id, _) as entry) = Stack.pop_exn t.stack in
+          let component = entry :: component in
+          if phys_equal table table' && id = var.id
+          then component
+          else pop component
+        in
+        let component = pop [] in
+        let changes =
+          List.exists component ~f:(fun (_, _, visiting) -> visiting.changes)
+        in
+        List.iter component ~f:(fun (table, id, _) ->
+          Hashtbl.set table ~key:id ~data:(Visited changes));
+        changes, Int.max_value)
+  ;;
+
+  let rec ty t ty' =
+    match ty' with
+    | TVar ({ state = Link target; _ } as var') ->
+      link t t.tys var' ~target:(fun () -> ty t target)
+    | TVar var' -> var t var'
+    | TCon (_, args) ->
+      List.fold args ~init:none ~f:(fun acc -> function
+        | ATy ty' -> both acc (ty t ty')
+        | ARow row' -> both acc (row t row'))
+    | TArrow (ty1, ty2) -> both (ty t ty1) (ty t ty2)
+    | TTuple tys ->
+      List.fold tys ~init:none ~f:(fun acc ty' -> both acc (ty t ty'))
+    | TCode { inner; context } -> both (ty t inner) (row t context)
+    | TRecord row' | TVariant row' -> row t row'
+
+  and row t row' =
+    match row' with
+    | REmpty -> none
+    | RExtend (_, presence, ty', rest) ->
+      let presence =
+        match canonical_presence presence with
+        | Present | Absent -> none
+        | PVar var' -> var t var'
+      in
+      both presence (both (ty t ty') (row t rest))
+    | RVar ({ state = Link target; _ } as var') ->
+      link t t.rows var' ~target:(fun () -> row t target)
+    | RVar var' -> var t var'
+  ;;
+end
+
 (* A record or variant copied, or being copied if there is no [result] yet. *)
 module Copy = struct
   type t =
-    { node : ty
-    ; mutable result : ty option
+    { mutable result : ty option
     ; mutable knot : (ty, Nothing.t) Var.t option
     }
 end
 
 let mapper (f : Mapper.t) =
-  let keep ~guarded:_ var = if f.keeps var then Ok () else Error () in
-  let keeper : _ Iter.t = { ty = keep; row = keep; presence = keep } in
   let tys = Int.Table.create () in
   let rows = Int.Table.create () in
   let memo table (var : _ Var.t) ~f =
@@ -208,30 +408,38 @@ let mapper (f : Mapper.t) =
       Hashtbl.set table ~key:var.id ~data:result;
       result
   in
-  let copies = ref [] in
+  let changes = Changes.create f in
+  let copies = Node.Table.create 16 in
+  (* Unchanged parts are kept as they are. *)
   let rec map_ty ty =
     match ty with
     | TVar ({ state = Link target; _ } as var) ->
       memo tys var ~f:(fun () ->
-        if Result.is_ok (iter_ty keeper target)
-        then canonical_ty ty
-        else map_ty target)
-    | TVar var -> f.ty var
+        if fst (Changes.ty changes ty) then map_ty target else ty)
+    | TVar var -> if f.keeps var then ty else f.ty var
     | TCon (name, args) ->
-      TCon
-        ( name
-        , List.map args ~f:(function
-            | ATy ty -> ATy (map_ty ty)
-            | ARow row -> ARow (map_row row)) )
-    | TArrow (ty1, ty2) -> TArrow (map_ty ty1, map_ty ty2)
-    | TTuple tys -> TTuple (List.map tys ~f:map_ty)
+      let args' = List.map args ~f:map_arg in
+      if List.for_all2_exn args args' ~f:phys_equal
+      then ty
+      else TCon (name, args')
+    | TArrow (ty1, ty2) ->
+      let ty1' = map_ty ty1 in
+      let ty2' = map_ty ty2 in
+      if phys_equal ty1 ty1' && phys_equal ty2 ty2'
+      then ty
+      else TArrow (ty1', ty2')
+    | TTuple tys ->
+      let tys' = List.map tys ~f:map_ty in
+      if List.for_all2_exn tys tys' ~f:phys_equal then ty else TTuple tys'
     | TCode { inner; context } ->
-      TCode { inner = map_ty inner; context = map_row context }
+      let inner' = map_ty inner in
+      let context' = map_row context in
+      if phys_equal inner inner' && phys_equal context context'
+      then ty
+      else TCode { inner = inner'; context = context' }
     | TRecord row | TVariant row ->
-      (match
-         List.find !copies ~f:(fun (copy : Copy.t) -> same_node copy.node ty)
-       with
-       | Some { result = Some result; _ } -> result
+      (match Node.Table.find_opt copies ty with
+       | Some { Copy.result = Some result; _ } -> result
        | Some copy ->
          let knot =
            match copy.knot with
@@ -243,32 +451,49 @@ let mapper (f : Mapper.t) =
          in
          TVar knot
        | None ->
-         let copy = { Copy.node = ty; result = None; knot = None } in
-         copies := copy :: !copies;
-         let row = map_row row in
+         let copy = { Copy.result = None; knot = None } in
+         Node.Table.replace copies ty copy;
+         let row' = map_row row in
          let result =
-           match ty with
-           | TRecord _ -> TRecord row
-           | _ -> TVariant row
+           if phys_equal row row'
+           then ty
+           else (
+             match ty with
+             | TRecord _ -> TRecord row'
+             | _ -> TVariant row')
          in
          copy.result <- Some result;
          Option.iter copy.knot ~f:(fun knot -> knot.state <- Link result);
          result)
+  and map_arg arg =
+    match arg with
+    | ATy ty ->
+      let ty' = map_ty ty in
+      if phys_equal ty ty' then arg else ATy ty'
+    | ARow row ->
+      let row' = map_row row in
+      if phys_equal row row' then arg else ARow row'
   and map_row row =
     match row with
-    | REmpty -> REmpty
+    | REmpty -> row
     | RExtend (name, presence, ty, rest) ->
-      RExtend (name, map_presence presence, map_ty ty, map_row rest)
+      let presence' = map_presence presence in
+      let ty' = map_ty ty in
+      let rest' = map_row rest in
+      if
+        phys_equal presence presence'
+        && phys_equal ty ty'
+        && phys_equal rest rest'
+      then row
+      else RExtend (name, presence', ty', rest')
     | RVar ({ state = Link target; _ } as var) ->
       memo rows var ~f:(fun () ->
-        if Result.is_ok (iter_row keeper target)
-        then canonical_row row
-        else map_row target)
-    | RVar var -> f.row var
+        if fst (Changes.row changes row) then map_row target else row)
+    | RVar var -> if f.keeps var then row else f.row var
   and map_presence presence =
     match canonical_presence presence with
-    | (Present | Absent) as presence -> presence
-    | PVar var -> f.presence var
+    | Present | Absent -> presence
+    | PVar var -> if f.keeps var then presence else f.presence var
   in
   map_ty, map_row
 ;;
@@ -287,21 +512,14 @@ let has_unbound_var ty =
 ;;
 
 module Sexper = struct
-  (* A record or variant being printed, labelled once a cycle reaches it
-     again. *)
-  module Cycle = struct
-    type t =
-      { node : ty
-      ; mutable label : int option
-      }
-  end
-
   type t =
-    { mutable cycles : Cycle.t list
+    { cycles : int option ref Node.Table.t
+      (* The records and variants being printed, labelled once a cycle
+         reaches them again. *)
     ; mutable next_label : int
     }
 
-  let create () = { cycles = []; next_label = 0 }
+  let create () = { cycles = Node.Table.create 16; next_label = 0 }
 
   let var (var : _ Var.t) ~sexp_of_link =
     match var.state with
@@ -329,27 +547,24 @@ module Sexper = struct
     | TVar v -> List [ Atom "TVar"; var v ~sexp_of_link:(ty t) ]
 
   and cycle t node sexp =
-    match
-      List.find t.cycles ~f:(fun (cycle : Cycle.t) -> same_node cycle.node node)
-    with
-    | Some cycle ->
+    match Node.Table.find_opt t.cycles node with
+    | Some label ->
       let label =
-        match cycle.label with
+        match !label with
         | Some label -> label
         | None ->
-          let label = t.next_label in
-          t.next_label <- label + 1;
-          cycle.label <- Some label;
-          label
+          let next = t.next_label in
+          t.next_label <- next + 1;
+          label := Some next;
+          next
       in
       [%sexp "Cycle_ref", (label : int)]
     | None ->
-      let cycle = { Cycle.node; label = None } in
-      let cycles = t.cycles in
-      t.cycles <- cycle :: cycles;
+      let label = ref None in
+      Node.Table.replace t.cycles node label;
       let sexp = sexp () in
-      t.cycles <- cycles;
-      (match cycle.label with
+      Node.Table.remove t.cycles node;
+      (match !label with
        | None -> sexp
        | Some label -> [%sexp "Cycle", (label : int), (sexp : Sexp.t)])
 
@@ -383,20 +598,14 @@ let sexp_of_bound { row; shadowed } =
 ;;
 
 module Printer = struct
-  (* A node being printed, named once a cycle reaches it again. *)
-  module Cycle = struct
-    type t =
-      { node : ty
-      ; mutable name : string option
-      }
-  end
-
   type t =
     { type_name : string -> string
     ; names : int Int.Table.t
     ; mutable next_index : int
-    ; mutable cyclic : (ty * string) list
-      (* Cyclic nodes printed with their name, which later occurrences use. *)
+    ; cycles : string option ref Node.Table.t
+      (* The records and variants being printed, named once a cycle reaches
+         them again, and those printed with their name, which later
+         occurrences use. *)
     ; bounded : (string * (row, bound) Var.t) Queue.t
       (* Bounded row variables, in order of appearance, to print their
          bounds after the types. *)
@@ -406,12 +615,12 @@ module Printer = struct
     { type_name
     ; names = Int.Table.create ()
     ; next_index = 0
-    ; cyclic = []
+    ; cycles = Node.Table.create 16
     ; bounded = Queue.create ()
     }
   ;;
 
-  let name t index ~weak =
+  let name index ~weak =
     let letter = Char.of_int_exn (Char.to_int 'a' + (index % 26)) in
     let suffix = if index >= 26 then Int.to_string (index / 26) else "" in
     sprintf "'%s%c%s" (if weak then "_" else "") letter suffix
@@ -433,16 +642,16 @@ module Printer = struct
       | Generic -> false
       | Link _ -> assert false
     in
-    name t index ~weak
+    name index ~weak
   ;;
 
   (* Weak if it has a weak variable. *)
-  let cycle_name t (cycle : Cycle.t) =
-    match cycle.name with
+  let cycle_name t cycle node =
+    match !cycle with
     | Some name -> name
     | None ->
-      let name = name t (next_index t) ~weak:(has_unbound_var cycle.node) in
-      cycle.name <- Some name;
+      let name = name (next_index t) ~weak:(has_unbound_var node) in
+      cycle := Some name;
       name
   ;;
 
@@ -478,28 +687,24 @@ module Printer = struct
     entries, Option.map tail ~f:(row_var_name t)
   ;;
 
-  let rec ty_to_string t ~cycles ~prec ty =
+  let rec ty_to_string t ~prec ty =
     let ty = canonical_ty ty in
-    match
-      List.find cycles ~f:(fun (cycle : Cycle.t) -> same_node cycle.node ty)
-    with
-    | Some cycle -> cycle_name t cycle
+    match Node.Table.find_opt t.cycles ty with
+    | Some cycle -> cycle_name t cycle ty
     | None ->
-      (match List.find t.cyclic ~f:(fun (node, _) -> same_node node ty) with
-       | Some (_, name) -> name
-       | None ->
-         (match ty with
-          | TRecord _ | TVariant _ ->
-            let cycle = { Cycle.node = ty; name = None } in
-            let body = structure t ~cycles:(cycle :: cycles) ~prec ty in
-            (match cycle.name with
-             | None -> body
-             | Some name ->
-               t.cyclic <- (ty, name) :: t.cyclic;
-               sprintf "(%s as %s)" body name)
-          | _ -> structure t ~cycles ~prec ty))
+      (match ty with
+       | TRecord _ | TVariant _ ->
+         let cycle = ref None in
+         Node.Table.replace t.cycles ty cycle;
+         let body = structure t ~prec ty in
+         (match !cycle with
+          | None ->
+            Node.Table.remove t.cycles ty;
+            body
+          | Some name -> sprintf "(%s as %s)" body name)
+       | _ -> structure t ~prec ty)
 
-  and structure t ~cycles ~prec ty =
+  and structure t ~prec ty =
     let parens_if cond s = if cond then "(" ^ s ^ ")" else s in
     match canonical_ty ty with
     | TCon (name, []) -> t.type_name name
@@ -508,27 +713,26 @@ module Printer = struct
         "%s[%s]"
         (t.type_name name)
         (List.map args ~f:(function
-           | ATy ty -> ty_to_string t ~cycles ~prec:0 ty
-           | ARow row -> row_to_string t ~cycles row)
+           | ATy ty -> ty_to_string t ~prec:0 ty
+           | ARow row -> row_to_string t row)
          |> String.concat ~sep:", ")
     | TArrow (ty1, ty2) ->
-      let ty1 = ty_to_string t ~cycles ~prec:1 ty1 in
-      let ty2 = ty_to_string t ~cycles ~prec:0 ty2 in
+      let ty1 = ty_to_string t ~prec:1 ty1 in
+      let ty2 = ty_to_string t ~prec:0 ty2 in
       parens_if (prec > 0) (sprintf "%s -> %s" ty1 ty2)
     | TTuple [] -> "()"
     | TTuple tys ->
       parens_if
         (prec > 1)
-        (List.map tys ~f:(ty_to_string t ~cycles ~prec:2)
-         |> String.concat ~sep:" * ")
+        (List.map tys ~f:(ty_to_string t ~prec:2) |> String.concat ~sep:" * ")
     | TCode { inner; context } ->
-      let inner = ty_to_string t ~cycles ~prec:0 inner in
-      sprintf "<%s>%s" inner (row_to_string t ~cycles context)
-    | TRecord row -> row_to_string t ~cycles row
-    | TVariant row -> variant_to_string t ~cycles row
+      let inner = ty_to_string t ~prec:0 inner in
+      sprintf "<%s>%s" inner (row_to_string t context)
+    | TRecord row -> row_to_string t row
+    | TVariant row -> variant_to_string t row
     | TVar var -> var_name t var
 
-  and variant_to_string t ~cycles row =
+  and variant_to_string t row =
     let entries, tail =
       sorted_row_entries
         t
@@ -537,7 +741,7 @@ module Printer = struct
         ~entry:(fun tag ty ->
           match canonical_ty ty with
           | TCon ("unit", []) -> tag
-          | ty -> sprintf "%s of %s" tag (ty_to_string t ~cycles ~prec:0 ty))
+          | ty -> sprintf "%s of %s" tag (ty_to_string t ~prec:0 ty))
     in
     let entries = String.concat entries ~sep:" | " in
     match entries, tail with
@@ -545,19 +749,22 @@ module Printer = struct
     | "", Some tail -> "[" ^ tail ^ "]"
     | entries, Some tail -> "[" ^ entries ^ "; " ^ tail ^ "]"
 
-  and row_to_string t ~cycles row =
+  and row_to_string t row =
     let entries, tail =
       sorted_row_entries t row ~label:Fn.id ~entry:(fun name ty ->
-        sprintf "%s : %s" name (ty_to_string t ~cycles ~prec:0 ty))
+        sprintf "%s : %s" name (ty_to_string t ~prec:0 ty))
     in
     "{" ^ String.concat ~sep:"; " (entries @ Option.to_list tail) ^ "}"
   ;;
 
-  let ty t ty = ty_to_string t ~cycles:[] ~prec:0 ty
+  let ty t ty = ty_to_string t ~prec:0 ty
 
   let recursive t ty ~name =
-    let cycle = { Cycle.node = canonical_ty ty; name = Some name } in
-    structure t ~cycles:[ cycle ] ~prec:0 ty
+    let node = canonical_ty ty in
+    Node.Table.replace t.cycles node (ref (Some name));
+    let body = structure t ~prec:0 ty in
+    Node.Table.remove t.cycles node;
+    body
   ;;
 
   let rec bounds t =
@@ -566,7 +773,7 @@ module Printer = struct
     | Some (name, var) ->
       let these =
         List.map var.bounds ~f:(fun bound ->
-          sprintf "%s <= %s" name (row_to_string t ~cycles:[] bound.row))
+          sprintf "%s <= %s" name (row_to_string t bound.row))
       in
       these @ bounds t
   ;;

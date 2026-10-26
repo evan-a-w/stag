@@ -120,19 +120,26 @@ let len l = match l with `Nil -> 0 | `Cons (_, t) -> add 1 (len t)
   `Occurs_check_failed`, while `'a = {x : 'a list}`,
   `` 'a = [`A of 'a -> int] `` and `r = x : {..r}` are cycles.
 - Unification is coinductive: it keeps the pairs of (physical) records and
-  variants it has unified or is unifying, and assumes a pair equal when it
-  is reached again. Unification only creates rows and variables, never
+  variants it has unified or is unifying (in a hash set), and assumes a pair
+  equal when it is reached again. Unification only creates rows and variables, never
   records or variants, so the pairs are finitely many and it terminates.
   Rewriting and row unification follow row spines, which are acyclic.
-- Traversals terminate and preserve sharing. `Type.iter_ty` visits each
-  `Link` at most once unguarded and once guarded. `Type.map_ty`
-  (instantiation) memoizes on `Link`s and on records and variants, closing
-  the copy of a cycle with a new `Link`, and keeps the parts with nothing to
-  instantiate as they are; generalization marks variables in place. Records
-  and variants are identified physically or by their (physical) canonical
-  row, as `TRecord (RVar r)` may be built more than once for one `r`.
-  Unification does not merge equal nodes, so unifying two separately built
-  cyclic types leaves both, and printing one of them may show it unrolled.
+- Traversals terminate, preserve sharing and take linear time.
+  `Type.iter_ty` visits each `Link` at most once unguarded and once
+  guarded. `Type.map_ty` (instantiation) memoizes on `Link`s and on records
+  and variants, closing the copy of a cycle with a new `Link`, and keeps the
+  parts with nothing to instantiate as they are: whether a `Link` reaches a
+  variable to instantiate is computed once per `Link`, by strongly connected
+  components, as a cycle has something to instantiate if any part of it
+  does. Generalization marks variables in place. Records and variants are
+  identified (`Type.Node`) physically or by their (physical) canonical row,
+  as `TRecord (RVar r)` may be built more than once for one `r`, and tables
+  of them hash their first few immutable nodes, with variables by id.
+- Known limitation: equal cycles built separately stay distinct, as
+  unification does not merge equal nodes, so they may print differently:
+  after unifying two separately built cyclic types, one may print unrolled,
+  e.g. `` [`Cons of int * ([`Cons of int * 'a | `Nil] as 'a) | `Nil] ``, as
+  may the aliases of a mutually recursive clique (see below).
 - Printing: `` ([`Cons of int * 'a | `Nil] as 'a) ``, always parenthesized.
   The name is allocated where it first appears (usually within the body),
   like other variables of the printer, and is weak (`'_a`) if the type has a
@@ -151,14 +158,20 @@ type 'a a = {b : 'a b; v : 'a}   type 'b b = [`End | `More of 'b a]
 type tree = [`Leaf of int | `Node of tree list]
 ```
 
-- Each expansion of an alias (each use, and its declaration with its own
-  parameters) ties the knot: a reference back to an alias being expanded
-  becomes a variable linked to the expansion's body once elaborated. So each
-  instance has its own cycle.
-- The reference back must be guarded: an alias being expanded reached again
-  with no record or variant entered since its expansion began is
-  `Cyclic_type_alias` (`type t = t * int`, `type t = t list`,
-  `type t = t id`, `type t = <int>{x : t}`).
+- An expansion of an alias ties the knot: a reference back to an alias
+  being expanded becomes a variable linked to the expansion's body once
+  elaborated. Within one elaboration (an annotation, or a declaration with
+  its own parameters), each alias is expanded once per (physical)
+  arguments, and further references share the result (or the knot), so a
+  mutually recursive clique of n aliases takes n expansions, not one per
+  path. Separate elaborations have their own cycles.
+- The resulting cycle must be guarded, which is judged on the expansion
+  (not where the reference appears, as the alias's body may place its
+  arguments in a record or variant): it is `Cyclic_type_alias` if the knot
+  is reached from the expansion outside any record or variant
+  (`type t = t`, `type t = t * int`, `type t = t list`, `type t = t id`,
+  `type t = <int>{x : t}`), while `` type 'a f = [`A of 'a] `` and
+  `type g = g f` give `` type g = [`A of g] ``, as in OCaml.
 - Recursion must be regular: the reference back must have the arguments of
   the expansion in progress, i.e. (as declarations are elaborated with their
   own parameters) the alias's own parameters in order, checked physically.
@@ -168,7 +181,9 @@ type tree = [`Leaf of int | `Node of tree list]
 - `Signature` keeps the expanded body of an alias, a cyclic type, and prints
   occurrences of the whole body within it as the alias:
   `` type l['a] = [`Cons of 'a * l['a] | `Nil] ``, and `type ints = int l` is
-  `` type ints = [`Cons of int * ints | `Nil] ``. Uses of an alias elsewhere,
+  `` type ints = [`Cons of int * ints | `Nil] ``. Other aliases of a clique
+  are not printed by name, but each appears once, in the `as` form:
+  `` type a0 = [`T0 of a0 | `T1 of ([`T0 of a0 | `T1 of 'a] as 'a)] ``. Uses of an alias elsewhere,
   as in values and other declarations, are expanded, so print in the `as`
   form: `` val nil : ([`Cons of bool * 'a | `Nil] as 'a) ``.
 

@@ -32,19 +32,15 @@ let rec adjuster ~rank ~(occurs : (Type.id * Type.arg) option)
 module State = struct
   type t =
     { fresh : Fresh.t
-    ; mutable assumed : (Type.ty * Type.ty) list
+    ; assumed : Type.Node.Pair_set.t
     }
 
-  let create fresh = { fresh; assumed = [] }
+  let create fresh = { fresh; assumed = Type.Node.Pair_set.create () }
 
   let assume t ty1 ty2 =
-    let assumed =
-      List.exists t.assumed ~f:(fun (ty1', ty2') ->
-        (phys_equal ty1 ty1' && phys_equal ty2 ty2')
-        || (phys_equal ty1 ty2' && phys_equal ty2 ty1'))
-    in
-    if not assumed then t.assumed <- (ty1, ty2) :: t.assumed;
-    assumed
+    match Type.Node.Pair_set.add t.assumed ty1 ty2 with
+    | `Already_present -> true
+    | `Added -> false
   ;;
 end
 

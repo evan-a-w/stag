@@ -806,3 +806,169 @@ let%expect_test "bounds with cyclic types" =
      (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
     |}]
 ;;
+
+(* [type ai = [`T0 of a0 | ... | `T(n-1) of a(n-1)]] for each [i < n]. *)
+let clique n =
+  let name i = sprintf "a%d" i in
+  List.init n ~f:(fun i ->
+    Decl.alias
+      (name i)
+      (Ty.variant (List.init n ~f:(fun j -> sprintf "T%d" j, Ty.con (name j)))))
+;;
+
+let%expect_test "mutually recursive alias cliques expand each alias once" =
+  check (clique 3);
+  [%expect
+    {|
+    type a0 = [`T0 of a0 | `T1 of ([`T0 of a0 | `T1 of 'a | `T2 of ([`T0 of a0 | `T1 of 'a | `T2 of 'b] as 'b)] as 'a) | `T2 of 'b]
+    type a1 = [`T0 of ([`T0 of 'a | `T1 of a1 | `T2 of ([`T0 of 'a | `T1 of a1 | `T2 of 'b] as 'b)] as 'a) | `T1 of a1 | `T2 of 'b]
+    type a2 = [`T0 of ([`T0 of 'a | `T1 of ([`T0 of 'a | `T1 of 'b | `T2 of a2] as 'b) | `T2 of a2] as 'a) | `T1 of 'b | `T2 of a2]
+    |}];
+  (* Each declaration shows each of the 10 aliases' variants once. *)
+  let typecheck = Typecheck.create () in
+  (match Typecheck.typecheck typecheck ~program:(clique 10) with
+   | Error error -> print_s [%sexp (error : Typecheck_error.t)]
+   | Ok signature ->
+     Signature.to_string_hum signature
+     |> String.split_lines
+     |> List.iter ~f:(fun line ->
+       let variants = String.count line ~f:(Char.equal '[') in
+       printf
+         "%s: %d variants\n"
+         (List.nth_exn (String.split line ~on:' ') 1)
+         variants));
+  [%expect
+    {|
+    a0: 10 variants
+    a1: 10 variants
+    a2: 10 variants
+    a3: 10 variants
+    a4: 10 variants
+    a5: 10 variants
+    a6: 10 variants
+    a7: 10 variants
+    a8: 10 variants
+    a9: 10 variants
+    |}]
+;;
+
+let%expect_test "guardedness is judged on the expansion" =
+  let f_of ty = Ty.con "f" ~args:[ Ty ty ] in
+  let f body = Decl.alias "f" ~params:[ Decl.ty "a" ] body in
+  let variant_f = f (Ty.variant [ "A", Ty.var "a" ]) in
+  let record_f = f (Ty.record [ "x", Ty.var "a" ]) in
+  let g = Decl.alias "g" (f_of (Ty.con "g")) in
+  check [ variant_f; g ];
+  check [ g; variant_f ];
+  check [ record_f; g ];
+  check [ g; record_f ];
+  check
+    [ variant_f
+    ; g
+    ; Toplevel.Let ("v", [ typed "x" (Ty.con "g") ], None, var "x")
+    ; top "a" [] ~annot:(Ty.con "g") (tag "A" ~arg:(tag "A" ~arg:(var "a")))
+    ];
+  check
+    [ Decl.alias "a" (Ty.tuple [ Ty.con "b"; Ty.int ])
+    ; Decl.alias "b" (Ty.variant [ "A", Ty.con "a" ])
+    ];
+  [%expect
+    {|
+    type f['a] = [`A of 'a]
+    type g = [`A of g]
+    type g = [`A of g]
+    type f['a] = [`A of 'a]
+    type f['a] = {x : 'a}
+    type g = {x : g}
+    type g = {x : g}
+    type f['a] = {x : 'a}
+    type f['a] = [`A of 'a]
+    type g = [`A of g]
+    val v : ([`A of 'a] as 'a) -> 'a
+    val a : ([`A of 'a] as 'a)
+    type a = [`A of a] * int
+    type b = [`A of b * int]
+    |}];
+  check [ Decl.alias "t" (Ty.con "t") ];
+  check [ f (Ty.tuple [ Ty.var "a"; Ty.int ]); g ];
+  check [ Decl.list; f (list_of (Ty.var "a")); g ];
+  check [ f (Ty.code (Ty.var "a")); g ];
+  check [ Decl.alias "a" (Ty.con "b"); Decl.alias "b" (Ty.con "a") ];
+  check
+    [ Decl.alias "id" ~params:[ Decl.ty "a" ] (Ty.var "a")
+    ; Decl.alias
+        "t"
+        (Ty.tuple
+           [ Ty.variant [ "A", Ty.con "t" ]
+           ; Ty.con "id" ~args:[ Ty (Ty.con "t") ]
+           ])
+    ];
+  [%expect
+    {|
+    (Cyclic_type_alias t)
+    (Cyclic_type_alias g)
+    (Cyclic_type_alias g)
+    (Cyclic_type_alias g)
+    (Cyclic_type_alias a)
+    (Cyclic_type_alias t)
+    |}]
+;;
+
+let%expect_test "instantiation and unification of large types" =
+  let fresh = Fresh.create () in
+  let n = 4000 in
+  let generic () = Type.TVar (Fresh.var fresh ~rank:2) in
+  let chain =
+    Fn.apply_n_times
+      ~n
+      (fun ty ->
+         let var = Fresh.var fresh ~rank:2 in
+         var.state <- Link (Type.TTuple [ ty; Type.int ]);
+         Type.TVar var)
+      (generic ())
+  in
+  let records =
+    Type.TTuple (List.init n ~f:(fun _ -> T.record [ "x", generic () ]))
+  in
+  let ty = Type.TTuple [ chain; records ] in
+  Scheme.generalize_ty ~rank:1 ty;
+  (* The distinct variables that are not [Link]s, by state. *)
+  let vars ty =
+    let vars = Int.Table.create () in
+    let add ~guarded:_ (var : _ Type.Var.t) =
+      let state =
+        match var.state with
+        | Unbound rank -> sprintf "unbound at %d" rank
+        | Generic -> "generic"
+        | Link _ -> assert false
+      in
+      Hashtbl.set vars ~key:var.id ~data:state;
+      Ok ()
+    in
+    (match
+       (Type.iter_ty { ty = add; row = add; presence = add } ty
+        : (unit, Nothing.t) Result.t)
+     with
+     | Ok () -> ()
+     | Error _ -> .);
+    Hashtbl.data vars
+    |> List.sort_and_group ~compare:String.compare
+    |> List.map ~f:(fun group -> List.hd_exn group, List.length group)
+    |> [%sexp_of: (string * int) list]
+    |> print_s
+  in
+  vars ty;
+  let instance () = Scheme.instantiate fresh ~rank:1 ty in
+  let instance1 = instance () in
+  let instance2 = instance () in
+  vars (TTuple [ ty; instance1; instance2 ]);
+  T.unify fresh instance1 instance2;
+  vars (TTuple [ instance1; instance2 ]);
+  [%expect
+    {|
+    ((generic 4001))
+    ((generic 4001) ("unbound at 1" 8002))
+    (Ok ())
+    (("unbound at 1" 4001))
+    |}]
+;;

@@ -93,11 +93,28 @@ val canonical_presence : presence -> presence
 (** The row variable at the end of [row], if it is open. *)
 val tail_var : row -> (row, bound) Var.t option
 
+(** Records and variants, identified physically or by their (physical)
+    canonical row, as [TRecord (RVar r)] may be built more than once for one
+    [r]. Hashing only looks at the first few nodes, so many separately built
+    records of the same shape, without variables, share a bucket. *)
+module Node : sig
+  module Table : Stdlib.Hashtbl.S with type key = ty
+
+  (** Unordered pairs of physical types. *)
+  module Pair_set : sig
+    type t
+
+    val create : unit -> t
+    val add : t -> ty -> ty -> [ `Added | `Already_present ]
+  end
+end
+
 (** Rebuilds a type, replacing each variable that is not a [Link] by the result
     of the callback for its kind. A [Link] to a part whose variables all
     satisfy [keeps], so would be unchanged, is kept as is; other [Link]s are
-    followed, and sharing through them is preserved. The copy of a cycle is
-    closed by a new [Link], of id [id ()]. *)
+    followed, and sharing through them and through records and variants is
+    preserved. The copy of a cycle is closed by a new [Link], of id
+    [id ()]. *)
 module Mapper : sig
   type t =
     { ty : (ty, Nothing.t) Var.t -> ty
