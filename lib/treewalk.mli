@@ -70,9 +70,9 @@ val create' : stamps:Stamp_counter.t -> program:Typed.Program.t -> t
 val add_program : t -> program:Typed.Program.t -> unit
 
 (** The binders from outside the closure [ident] that it reads when called,
-    including itself if it is recursive. Uses in splices that run when a quote
-    in [body] is built, rather than when the closure is called, are not
-    captures. Cached by [ident]. *)
+    including itself if it is recursive and those embedded by quotes it builds.
+    Toplevel splices in [body] are taken as unexpanded, so uses within them are
+    not captures. *)
 val captures
   :  t
   -> ident:Typed.Ident.t

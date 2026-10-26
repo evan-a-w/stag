@@ -425,3 +425,134 @@ let%expect_test "code values" =
      (Code (Tuple ((Lit (Int 2) : int) (Lit (Int 2) : int)) : "'a * 'a")))
     |}]
 ;;
+
+let%expect_test "explicit substitutions at toplevel splices" =
+  run
+    [ top
+        "f"
+        [ "y" ]
+        (splice
+           ~subs:[ "x", Some (var "y") ]
+           (quote (let_ "g" [ "u" ] (tuple [ var "x"; var "u" ]) (var "g"))))
+    ; top "applied" [] (app (var "f") [ int 1; int 2 ])
+    ];
+  [%expect
+    {|
+    (f <fun>)
+    (applied (Tuple 1 2))
+    |}]
+;;
+
+let%expect_test "evaluation is left to right" =
+  let abc = Decl.variant "abc" [ "A", []; "B", []; "C", [] ] in
+  let only name = match_ (construct name) [ Pat.construct "A", int 0 ] in
+  run
+    [ abc
+    ; top
+        "subs"
+        []
+        (splice
+           (quote
+              (splice
+                 ~subs:[ "b", Some (only "B"); "a", Some (only "C") ]
+                 (quote (tuple [ var "a"; var "b" ])))))
+    ];
+  [%expect {| ("Match failure" (value (B))) |}];
+  run [ abc; top "tuple" [] (tuple [ only "B"; only "C" ]) ];
+  [%expect {| ("Match failure" (value (B))) |}]
+;;
+
+let%expect_test "toplevel splices provided by toplevels and persistent locals" =
+  run
+    [ top "n" [] (int 3)
+    ; top "f" [ "u" ] (splice (quote (tuple [ var "n"; var "u" ])))
+    ; top "applied" [] (app (var "f") [ int 4 ])
+    ; top
+        "local"
+        [ "x" ]
+        (let_
+           "h"
+           [ "y" ]
+           (tuple [ var "x"; var "y" ])
+           (let_
+              "g"
+              [ "u" ]
+              (splice (quote (app (var "h") [ var "u" ])))
+              (var "g")))
+    ; top "local_applied" [] (app (var "local") [ int 5; int 6 ])
+    ];
+  [%expect
+    {|
+    (n 3)
+    (f <fun>)
+    (applied (Tuple 3 4))
+    (local <fun>)
+    (local_applied (Tuple 5 6))
+    |}]
+;;
+
+let%expect_test "spliced code binding patterns and recursive closures" =
+  let c =
+    quote
+      (let_
+         "count"
+         [ "m" ]
+         (match_
+            (var "m")
+            [ Pat.tag "Z", var "x"
+            ; Pat.tag "S" ~arg:(Pat.var "k"), app (var "count") [ var "k" ]
+            ])
+         (app (var "count") [ nat 2 ]))
+  in
+  let under x =
+    match_
+      (poly_record [ "x", int x; "y", int 0 ])
+      [ ( Pat.poly_record ~rest:(Bind "rest") [ "x", Pat.var "x" ]
+        , tuple [ splice (var "c"); var "rest" ] )
+      ]
+  in
+  run
+    [ top
+        "copies"
+        []
+        (splice (let_ "c" [] c (quote (tuple [ under 1; under 2 ]))))
+    ; top
+        "open_rest"
+        []
+        (match_
+           (poly_record [ "a", int 1; "b", int 2 ])
+           [ Pat.poly_record ~rest:Open [ "a", Pat.var "a" ], var "a" ])
+    ];
+  [%expect
+    {|
+    (copies (Tuple (Tuple 1 ((y 0))) (Tuple 2 ((y 0)))))
+    (open_rest 1)
+    |}]
+;;
+
+let%expect_test "nested quotes at runtime" =
+  run
+    [ top "twice" [ "c" ] (quote (quote (splice (splice (var "c")))))
+    ; top "built" [] (app (var "twice") [ quote (quote (int 1)) ])
+    ; top
+        "embedding"
+        [ "x" ]
+        (let_ "h" [ "u" ] (var "x") (quote (app (var "h") [ unit ])))
+    ; top "embedded" [] (app (var "embedding") [ int 7 ])
+    ];
+  [%expect
+    {|
+    (twice <fun>)
+    (built
+     (Code
+      (Quote
+       (Splice (code (Quote (Lit (Int 1) : int) : <int>{..'_a}))
+        (subs (Implicit ())) : 'b)
+       : <'b>{..'c} (where "..'_a <= {..'_d}"))))
+    (embedding <fun>)
+    (embedded
+     (Code
+      (App (Var (Persistent (Local h/21)) : "unit -> 'a") (Lit Unit : unit) : 'a)
+      ((h/21 <fun>))))
+    |}]
+;;

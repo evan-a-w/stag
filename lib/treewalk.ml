@@ -109,6 +109,21 @@ module Value = struct
   ;;
 end
 
+(* The values embedded by a quote being built. [renames] are its own
+   embeddings, of binders it refers to. *)
+module Embedded = struct
+  type t =
+    { renames : Typed.Ident.t Typed.Ident.Table.t
+    ; mutable values : Value.t Typed.Ident.Map.t
+    }
+
+  let create () =
+    { renames = Typed.Ident.Table.create (); values = Typed.Ident.Map.empty }
+  ;;
+
+  let add t ~ident ~value = t.values <- Map.set t.values ~key:ident ~data:value
+end
+
 type t =
   { eval_stack : Typed.Scc.t Stack.t
   ; ident_info : Typed.Ident_info.t Typed.Ident.Table.t
@@ -118,79 +133,78 @@ type t =
   }
 
 let captures t ~ident ~args ~body =
-  Hashtbl.find_or_add t.closure_captures ident ~default:(fun () ->
-    let level (ident : Typed.Ident.t) =
-      (Hashtbl.find_exn t.ident_info ident).level
-    in
-    let closure_level = level ident in
-    let defined = Typed.Ident.Hash_set.create () in
-    let captures = Typed.Ident.Hash_set.create () in
-    let def ident = Hash_set.add defined ident in
-    let use ~depth ident =
-      if
-        depth >= 0
-        && (not (Hash_set.mem defined ident))
-        && level ident <= closure_level
-      then Hash_set.add captures ident
-    in
-    let rec def_pattern ({ desc; _ } : Typed.Pattern.t) =
-      match desc with
-      | Any | Lit _ | Poly_variant (_, None) -> ()
-      | Var ident -> def ident
-      | Tuple patterns | Construct (_, patterns) ->
-        List.iter patterns ~f:def_pattern
-      | Record fields -> List.iter fields ~f:(fun (_, p) -> def_pattern p)
-      | Poly_variant (_, Some pattern) -> def_pattern pattern
-      | Poly_record { fields; rest } ->
-        List.iter fields ~f:(fun (_, p) -> def_pattern p);
-        (match rest with
-         | Closed | Open -> ()
-         | Bind ident -> def ident)
-    in
-    let rec go ~depth ({ desc; _ } : Typed.Expr.t) =
-      match desc with
-      | Lit _ | Var (Free _) -> ()
-      | Var
-          ( Bound (Toplevel ident | Local ident)
-          | Persistent (Toplevel ident | Local ident) ) -> use ~depth ident
-      | Let { ident; args; generalized = _; body; in_ } ->
-        def ident;
-        List.iter args ~f:def;
-        go ~depth body;
-        go ~depth in_
-      | Splice { code; subs } ->
-        go ~depth:(depth - 1) code;
-        (match subs with
-         | Explicit subs -> go_fields ~depth subs
-         | Implicit providers ->
-           Map.iter providers ~f:(fun (Toplevel ident | Local ident) ->
-             use ~depth ident))
-      | Match (expr, cases) ->
-        go ~depth expr;
-        List.iter cases ~f:(fun (pattern, body) ->
-          def_pattern pattern;
-          go ~depth body)
-      | Quote expr -> go ~depth:(depth + 1) expr
-      | Field (expr, _)
-      | Poly_field (expr, _)
-      | Poly_restrict (expr, _)
-      | Poly_variant (_, Some expr) -> go ~depth expr
-      | Poly_variant (_, None) -> ()
-      | App (f, x) ->
-        go ~depth f;
-        go ~depth x
-      | Tuple exprs | Construct (_, exprs) -> List.iter exprs ~f:(go ~depth)
-      | Record fields -> go_fields ~depth fields
-      | Poly_record fields -> go_fields ~depth fields
-      | Poly_extend (fields, expr) | Poly_update (expr, fields) ->
-        go ~depth expr;
-        go_fields ~depth fields
-    and go_fields : 'a. depth:int -> ('a * Typed.Expr.t) list -> unit =
-      fun ~depth fields -> List.iter fields ~f:(fun (_, expr) -> go ~depth expr)
-    in
-    List.iter args ~f:def;
-    go ~depth:0 body;
-    captures)
+  let level (ident : Typed.Ident.t) =
+    (Hashtbl.find_exn t.ident_info ident).level
+  in
+  let closure_level = level ident in
+  let defined = Typed.Ident.Hash_set.create () in
+  let captures = Typed.Ident.Hash_set.create () in
+  let def ident = Hash_set.add defined ident in
+  let use ~depth ident =
+    if
+      depth >= 0
+      && (not (Hash_set.mem defined ident))
+      && level ident <= closure_level
+    then Hash_set.add captures ident
+  in
+  let rec def_pattern ({ desc; _ } : Typed.Pattern.t) =
+    match desc with
+    | Any | Lit _ | Poly_variant (_, None) -> ()
+    | Var ident -> def ident
+    | Tuple patterns | Construct (_, patterns) ->
+      List.iter patterns ~f:def_pattern
+    | Record fields -> List.iter fields ~f:(fun (_, p) -> def_pattern p)
+    | Poly_variant (_, Some pattern) -> def_pattern pattern
+    | Poly_record { fields; rest } ->
+      List.iter fields ~f:(fun (_, p) -> def_pattern p);
+      (match rest with
+       | Closed | Open -> ()
+       | Bind ident -> def ident)
+  in
+  let rec go ~depth ({ desc; _ } : Typed.Expr.t) =
+    match desc with
+    | Lit _ | Var (Free _) -> ()
+    | Var
+        ( Bound (Toplevel ident | Local ident)
+        | Persistent (Toplevel ident | Local ident) ) -> use ~depth ident
+    | Let { ident; args; generalized = _; body; in_ } ->
+      def ident;
+      List.iter args ~f:def;
+      go ~depth body;
+      go ~depth in_
+    | Splice { code; subs } ->
+      go ~depth:(depth - 1) code;
+      (match subs with
+       | Explicit subs -> go_fields ~depth subs
+       | Implicit providers ->
+         Map.iter providers ~f:(fun (Toplevel ident | Local ident) ->
+           use ~depth ident))
+    | Match (expr, cases) ->
+      go ~depth expr;
+      List.iter cases ~f:(fun (pattern, body) ->
+        def_pattern pattern;
+        go ~depth body)
+    | Quote expr -> go ~depth:(depth + 1) expr
+    | Field (expr, _)
+    | Poly_field (expr, _)
+    | Poly_restrict (expr, _)
+    | Poly_variant (_, Some expr) -> go ~depth expr
+    | Poly_variant (_, None) -> ()
+    | App (f, x) ->
+      go ~depth f;
+      go ~depth x
+    | Tuple exprs | Construct (_, exprs) -> List.iter exprs ~f:(go ~depth)
+    | Record fields -> go_fields ~depth fields
+    | Poly_record fields -> go_fields ~depth fields
+    | Poly_extend (fields, expr) | Poly_update (expr, fields) ->
+      go ~depth expr;
+      go_fields ~depth fields
+  and go_fields : 'a. depth:int -> ('a * Typed.Expr.t) list -> unit =
+    fun ~depth fields -> List.iter fields ~f:(fun (_, expr) -> go ~depth expr)
+  in
+  List.iter args ~f:def;
+  go ~depth:0 body;
+  captures
 ;;
 
 let create ~stamps () =
@@ -383,15 +397,18 @@ let splice_code
             { name; stamp = 0 }
             ~info:{ Typed.Ident_info.ty = sub.ty; level }
         in
-        name, (ident, sub))
+        name, ident, sub)
+    in
+    let idents =
+      List.map subs ~f:(fun (name, ident, _) -> name, ident)
       |> String.Map.of_alist_exn
     in
     let%map code =
       instantiate t code ~entry:(fun name ->
-        Map.find subs name
-        |> Option.map ~f:(fun (ident, _) -> Typed.Var_ref.Bound (Local ident)))
+        Map.find idents name
+        |> Option.map ~f:(fun ident -> Typed.Var_ref.Bound (Local ident)))
     in
-    Map.fold_right subs ~init:code ~f:(fun ~key:_ ~data:(ident, sub) in_ ->
+    List.fold_right subs ~init:code ~f:(fun (_, ident, sub) in_ ->
       { Typed.Expr.desc =
           Let { ident; args = []; generalized = false; body = sub; in_ }
       ; ty = in_.ty
@@ -518,12 +535,9 @@ let rec eval t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
     eval' in_
   | Splice _ -> Or_error.error_s [%message "Unexpanded toplevel splice"]
   | Quote body ->
-    let persistent = Typed.Ident.Table.create () in
-    let%map expr = build t ~env ~level ~persistent ~depth:1 body in
-    Value.Code
-      { expr
-      ; persistent = Hashtbl.data persistent |> Typed.Ident.Map.of_alist_exn
-      }
+    let embedded = Embedded.create () in
+    let%map expr = build t ~env ~level ~embedded ~depth:1 body in
+    Value.Code { expr; persistent = embedded.values }
   | Tuple exprs ->
     let%map values = map_result exprs ~f:eval' in
     Value.Tuple values
@@ -589,7 +603,9 @@ and closure t ~env ~level ~ident ~args ~body =
     Env.of_captures
       env
       ~fallback:t.env
-      ~captures:(captures t ~ident ~args ~body)
+      ~captures:
+        (Hashtbl.find_or_add t.closure_captures ident ~default:(fun () ->
+           captures t ~ident ~args ~body))
   in
   Value.Function { args; body; env; level }
 
@@ -612,43 +628,43 @@ and eval_match t ~env ~level value = function
 
 (* The code [expr] is in a quote built at [level], [depth] quotes in. Splices at
    [depth] 1 are evaluated now, and the values of persistent binders of [level]
-   or below are embedded under fresh idents in [persistent], keyed by the
-   binder. *)
-and build t ~env ~level ~persistent ~depth (expr : Typed.Expr.t)
+   or below are embedded under fresh idents. *)
+and build t ~env ~level ~(embedded : Embedded.t) ~depth (expr : Typed.Expr.t)
   : Typed.Expr.t Or_error.t
   =
   match expr.desc with
   | Var (Persistent (Local ident))
     when (Hashtbl.find_exn t.ident_info ident).level <= level ->
-    let%map embedded =
-      match Hashtbl.find persistent ident with
-      | Some (embedded, _) -> Ok embedded
+    let%map renamed =
+      match Hashtbl.find embedded.renames ident with
+      | Some renamed -> Ok renamed
       | None ->
         let%map value = lookup t env ident in
-        let embedded =
+        let renamed =
           fresh_like t ident ~info:(Hashtbl.find_exn t.ident_info ident)
         in
-        Hashtbl.set persistent ~key:ident ~data:(embedded, value);
-        embedded
+        Hashtbl.set embedded.renames ~key:ident ~data:renamed;
+        Embedded.add embedded ~ident:renamed ~value;
+        renamed
     in
-    { expr with desc = Var (Persistent (Local embedded)) }
+    { expr with desc = Var (Persistent (Local renamed)) }
   | Splice { code; subs } when depth = 1 ->
-    let%bind code, embedded = eval t ~env ~level code >>= code_of_value in
+    let%bind code, values = eval t ~env ~level code >>= code_of_value in
     let%bind subs : Typed.Expr.t Typed.Expr.Subs.t =
       match subs with
       | Explicit subs ->
         let%map subs =
-          map_fields subs ~f:(build t ~env ~level ~persistent ~depth)
+          map_fields subs ~f:(build t ~env ~level ~embedded ~depth)
         in
         Typed.Expr.Subs.Explicit subs
       | Implicit _ -> Ok subs
     in
-    Map.iteri embedded ~f:(fun ~key ~data ->
-      Hashtbl.set persistent ~key ~data:(key, data));
+    Map.iteri values ~f:(fun ~key ~data ->
+      Embedded.add embedded ~ident:key ~value:data);
     splice_code t code ~subs ~level:(level + 1)
   | _ ->
     map_children ~depth expr ~f:(fun ~depth ->
-      build t ~env ~level ~persistent ~depth)
+      build t ~env ~level ~embedded ~depth)
 ;;
 
 (* [expr], at [level], with its toplevel splices (those outside any quote)
