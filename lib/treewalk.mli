@@ -1,7 +1,29 @@
 open! Core
 
+(** The bindings of one activation: a closure's captures and arguments, and
+    the locals bound while evaluating its body (or the toplevels). Idents are
+    unique, so a binding is never shadowed or removed. *)
 module Env : sig
-  type 'value t 
+  type 'value t
+
+  val create : unit -> _ t
+
+  (** Errors if [ident] is unbound, or declared but not yet [set]. *)
+  val lookup : 'value t -> ident:Typed.Ident.t -> 'value Or_error.t
+
+  (** Binds [ident] to an empty slot, to be [set] later, eg. for each member
+      of a recursive binding before evaluating their bodies. *)
+  val declare : _ t -> ident:Typed.Ident.t -> unit
+
+  (** Fills the slot of [ident], binding it first if needed. *)
+  val set : 'value t -> ident:Typed.Ident.t -> value:'value -> unit
+
+  (** A new env sharing the slots of [captures] with [t], so slots filled
+      later are seen by both. *)
+  val of_captures
+    :  'value t
+    -> captures:Typed.Ident.Hash_set.t
+    -> 'value t Or_error.t
 end
 
 module Value : sig
@@ -23,9 +45,11 @@ end
 
 type t
 
-val create : unit -> t
-val create' : program:Typed.Program.t -> t
+(** [stamps] should be the counter that made the idents of the programs
+    added, so idents minted while evaluating are distinct from theirs. *)
+val create : stamps:Stamp_counter.t -> unit -> t
 
+val create' : stamps:Stamp_counter.t -> program:Typed.Program.t -> t
 val add_program : t -> program:Typed.Program.t -> unit
 
 (** The binders from outside the closure [ident] that it reads when called,

@@ -10,8 +10,8 @@ open! Core
     it. A node is rendered as its constructor followed by [: type]. *)
 
 module Ident : sig
-  (** A binder, local or toplevel. Stamps are unique among the binders of one
-      program. *)
+  (** A binder, local or toplevel. Stamps are unique among the idents made by
+      one [Stamp_counter.t]. *)
   type t =
     { name : string
     ; stamp : int
@@ -22,6 +22,8 @@ module Ident : sig
 
   include Comparable.S_plain with type t := t
   include Hashable.S_plain with type t := t
+
+  val fresh : Stamp_counter.t -> string -> t
 end
 
 module Binder : sig

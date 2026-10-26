@@ -4,7 +4,9 @@ open! Core
     was done with the [t]. *)
 type t
 
-val create : unit -> t
+(** Idents are made by [stamps], so are unique among those of every program
+    it checks, and of anything else using it. *)
+val create : ?stamps:Stamp_counter.t -> unit -> t
 
 module Checked : sig
   type t =

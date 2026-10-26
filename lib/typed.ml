@@ -76,6 +76,8 @@ module Ident = struct
   include T
   include Comparable.Make_plain (T)
   include Hashable.Make_plain (T)
+
+  let fresh stamps name = { name; stamp = Stamp_counter.next stamps }
 end
 
 module Binder = struct

@@ -32,9 +32,15 @@ module Toplevel = struct
   let is_value t = is_function t || Syntax.Expr.is_value t.expr
 end
 
-type t = Fresh.t
+type t =
+  { fresh : Fresh.t
+  ; stamps : Stamp_counter.t
+  }
 
-let create = Fresh.create
+let create ?(stamps = Stamp_counter.create ()) () =
+  { fresh = Fresh.create (); stamps }
+;;
+
 let lift result = Result.map_error result ~f:Typecheck_error.unification_error
 
 (* Toplevels are checked on demand, so strongly connected components are found
@@ -52,16 +58,12 @@ module Program_env = struct
   type t =
     { type_env : Type_env.t
     ; toplevels : Toplevel.t String.Table.t
-    ; mutable next_stamp : int
+    ; stamps : Stamp_counter.t
     ; mutable ident_info : Typed.Ident_info.t Typed.Ident.Map.t
     ; sccs : Typed.Scc.t Queue.t
     }
 
-  let fresh_ident t name =
-    let ident = { Typed.Ident.name; stamp = t.next_stamp } in
-    t.next_stamp <- t.next_stamp + 1;
-    ident
-  ;;
+  let fresh_ident t name = Typed.Ident.fresh t.stamps name
 
   let add_info t ident ~ty ~level =
     t.ident_info
@@ -1008,7 +1010,7 @@ module Checked = struct
     }
 end
 
-let typecheck t ~(program : Syntax.Program.t)
+let typecheck { fresh = t; stamps } ~(program : Syntax.Program.t)
   : (Checked.t, Typecheck_error.t) Result.t
   =
   let%bind.Result root =
@@ -1019,7 +1021,7 @@ let typecheck t ~(program : Syntax.Program.t)
   let program_env =
     { Program_env.type_env
     ; toplevels = String.Table.create ()
-    ; next_stamp = 0
+    ; stamps
     ; ident_info = Typed.Ident.Map.empty
     ; sccs = Queue.create ()
     }

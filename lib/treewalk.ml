@@ -1,40 +1,47 @@
 open! Core
 
 module Env = struct
-  type 'value t =
-    { prev : 'value t option
-    ; values : 'value option ref Typed.Ident.Table.t
-    }
+  type 'value t = { values : 'value option ref Typed.Ident.Table.t }
   [@@deriving sexp_of, fields]
 
-  let rec lookup t ~ident =
+  let create () = { values = Typed.Ident.Table.create () }
+
+  let lookup t ~ident =
     match Hashtbl.find t.values ident with
     | None ->
-      (match t.prev with
-       | None -> Ok None
-       | Some prev -> lookup ~ident prev)
+      Or_error.error_s [%message "Unbound ident" (ident : Typed.Ident.t)]
     | Some { contents = None } ->
       Or_error.error_s
         [%message
           "Used value before it was defined (eg. because of recursion on \
            values)"
             (ident : Typed.Ident.t)]
-    | Some { contents } -> Ok contents
+    | Some { contents = Some value } -> Ok value
   ;;
 
-  let create () = { prev = None; values = Typed.Ident.Table.create () }
+  let declare t ~ident = Hashtbl.set t.values ~key:ident ~data:(ref None)
 
-  let set t ~ident ~value = 
-    let ref = Hashtbl.find_or_add t.values ident ~default:(fun () -> ref None) in
-    ref := Some value
-
-
-  let push t =
-    let res = create () in
-    { res with prev = Some t }
+  let set t ~ident ~value =
+    let slot =
+      Hashtbl.find_or_add t.values ident ~default:(fun () -> ref None)
+    in
+    slot := Some value
   ;;
 
-  let pop t = Option.value_or_thunk t.prev ~default:create
+  let of_captures t ~captures =
+    let env = create () in
+    let%map.Or_error () =
+      Hash_set.to_list captures
+      |> List.map ~f:(fun ident ->
+        match Hashtbl.find t.values ident with
+        | Some slot -> Ok (Hashtbl.set env.values ~key:ident ~data:slot)
+        | None ->
+          Or_error.error_s
+            [%message "Captured ident not in scope" (ident : Typed.Ident.t)])
+      |> Or_error.all_unit
+    in
+    env
+  ;;
 end
 
 module Value = struct
@@ -57,9 +64,9 @@ end
 type t =
   { eval_stack : Typed.Scc.t Stack.t
   ; ident_info : Typed.Ident_info.t Typed.Ident.Table.t
-  ; values : Value.t Typed.Ident.Table.t
   ; closure_captures : Typed.Ident.Hash_set.t Typed.Ident.Table.t
   ; mutable env : Value.t Env.t
+  ; stamps : Stamp_counter.t
   }
 
 let captures t ~ident ~args ~body =
@@ -138,12 +145,12 @@ let captures t ~ident ~args ~body =
     captures)
 ;;
 
-let create () =
+let create ~stamps () =
   { eval_stack = Stack.create ()
   ; ident_info = Typed.Ident.Table.create ()
-  ; values = Typed.Ident.Table.create ()
   ; closure_captures = Typed.Ident.Table.create ()
-  ; env = { prev = None; values = Typed.Ident.Table.create () }
+  ; env = Env.create ()
+  ; stamps
   }
 ;;
 
@@ -153,8 +160,8 @@ let add_program t ~program:({ sccs; ident_info } : Typed.Program.t) =
     Hashtbl.set t.ident_info ~key ~data)
 ;;
 
-let create' ~program =
-  let t = create () in
+let create' ~stamps ~program =
+  let t = create ~stamps () in
   add_program t ~program;
   t
 ;;
@@ -169,7 +176,7 @@ let create' ~program =
   [@@deriving sexp_of]
 end *)
 
-let make_env t ~captures =
+(* let make_env t ~captures =
   let env = Env.create () in
   Hash_set.to_list captures |> List.iter ~f:(fun ident -> 
     Env.set env ~ident ~value:(Env.lookup t.env ~ident)
@@ -194,6 +201,6 @@ let eval_one_scc t ~(scc : Typed.Scc.t) =
       eval t ~ident ~args ~body
       ) |> Result.all_unit
 
-;;
+;; *)
 
 let eval t = ()

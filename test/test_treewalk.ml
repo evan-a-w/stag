@@ -31,12 +31,13 @@ let sub_exprs (expr : Typed.Expr.t) =
 (* The captures of each closure in [program]: its toplevel functions and the
    local functions within them. *)
 let print program =
+  let stamps = Stamp_counter.create () in
   match
-    Typecheck.typecheck (Typecheck.create ()) ~program:(prims @ program)
+    Typecheck.typecheck (Typecheck.create ~stamps ()) ~program:(prims @ program)
   with
   | Error error -> print_s [%sexp (error : Typecheck_error.t)]
   | Ok { program; _ } ->
-    let t = Treewalk.create' ~program in
+    let t = Treewalk.create' ~stamps ~program in
     let print_captures ~ident ~args ~body =
       let captures =
         Treewalk.captures t ~ident ~args ~body
@@ -251,5 +252,64 @@ let%expect_test "toplevel splices" =
     {|
     (f/5 (add/0))
     (g/17 (add/0 x/15))
+    |}]
+;;
+
+let%expect_test "env slots" =
+  let stamps = Stamp_counter.create () in
+  let f = Typed.Ident.fresh stamps "f" in
+  let x = Typed.Ident.fresh stamps "x" in
+  let unbound = Typed.Ident.fresh stamps "unbound" in
+  let env = Treewalk.Env.create () in
+  let show env ident =
+    print_s [%sexp (Treewalk.Env.lookup env ~ident : int Or_error.t)]
+  in
+  show env unbound;
+  Treewalk.Env.declare env ~ident:f;
+  Treewalk.Env.set env ~ident:x ~value:1;
+  show env f;
+  show env x;
+  let closure =
+    Treewalk.Env.of_captures env ~captures:(Typed.Ident.Hash_set.of_list [ f ])
+    |> Or_error.ok_exn
+  in
+  Treewalk.Env.set env ~ident:f ~value:2;
+  show closure f;
+  show closure x;
+  print_s
+    [%sexp
+      (Treewalk.Env.of_captures
+         env
+         ~captures:(Typed.Ident.Hash_set.of_list [ unbound ])
+       |> Or_error.map ~f:(fun _ -> ())
+       : unit Or_error.t)];
+  [%expect
+    {|
+    (Error ("Unbound ident" (ident unbound/2)))
+    (Error
+     ("Used value before it was defined (eg. because of recursion on values)"
+      (ident f/0)))
+    (Ok 1)
+    (Ok 2)
+    (Error ("Unbound ident" (ident x/1)))
+    (Error ("Captured ident not in scope" (ident unbound/2)))
+    |}]
+;;
+
+let%expect_test "a shared stamp counter" =
+  let stamps = Stamp_counter.create () in
+  let idents program =
+    match Typecheck.typecheck (Typecheck.create ~stamps ()) ~program with
+    | Error error -> raise_s [%sexp (error : Typecheck_error.t)]
+    | Ok { program; _ } -> Map.keys program.ident_info
+  in
+  print_s [%sexp (idents [ top "f" [ "x" ] (var "x") ] : Typed.Ident.t list)];
+  print_s [%sexp (idents [ top "g" [ "y" ] (var "y") ] : Typed.Ident.t list)];
+  print_s [%sexp (Typed.Ident.fresh stamps "minted" : Typed.Ident.t)];
+  [%expect
+    {|
+    (f/0 x/1)
+    (g/2 y/3)
+    minted/4
     |}]
 ;;
