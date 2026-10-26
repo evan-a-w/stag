@@ -33,22 +33,38 @@ end
 
 type t =
   { eval_stack : Typed.Scc.t Stack.t
-  ; idents : Type.ty Typed.Ident.Map.t
+  ; ident_info : Typed.Ident_info.t Typed.Ident.Table.t
   ; values : Value.t Typed.Ident.Table.t
   ; closure_captures : Typed.Ident.Hash_set.t Typed.Ident.Table.t
   ; mutable env : Value.t Env.t
   }
 
-(* let captures t ~ident ~args ~body =
+let captures t ~ident ~args ~body =
   Hashtbl.find_or_add t.closure_captures ~default:(fun () ->
-    let defined = Typed.Ident.Hash_set.create () in
+    let defined = Typed.Ident.Table.create () in
     let captures = Typed.Ident.Hash_set.create () in
-    let def ident = Hash_set.add defined ident in
+    let this_ident_info = Hashtbl.find_exn t.ident_info ident in
+    let def ident =
+      Hashtbl.update defined ~f:(function
+        | None -> 1
+        | Some x -> x + 1)
+    in
+    let undef ident =
+      Hashtbl.change defined ~f:(function
+        | None -> None
+        | Some 1 -> None
+        | Some x -> Some (x - 1))
+    in
     let use ident =
-      if Hash_set.mem defined ident then () else Hash_set.add captures ident
+      if Hashtbl.mem defined ident
+      then ()
+      else if
+        (Hashtbl.find_exn t.ident_info ident).Typed.Ident_info.level
+        <= this_ident_info.level
+      then Hash_set.add captures ident
     in
     List.iter args ~f:(Hash_set.add defined);
-    let rec go ~depth ({ desc; _ } : Typed.Expr.t) =
+    let rec go ({ desc; _ } : Typed.Expr.t) =
       match desc with
       | Lit _ | Var (Free _) -> ()
       | Var
@@ -62,33 +78,27 @@ type t =
         def ident;
         go body;
         go in_
-     
-      | Splice
-          { code
-          ; subs
-          } ->  
-            match subs with
-            | Explicit l -> List.iter l ~f:(fun ~f:(fun (_, e) -> 
-              go e
-              ))
-              | Implicit m -> Map.iter m ~f:(fun (Toplevel ident | Local ident) -> use ident) *)
-
-(*
-      | Quote of 'e
+      | Splice { code; subs } ->
+        (match subs with
+         | Explicit l -> List.iter l ~f:(fun (_, e) -> go e)
+         | Implicit m ->
+           Map.iter m ~f:(fun (Toplevel ident | Local ident) -> use ident))
+      | Quote e -> go e
       | Tuple l -> List.iter l ~f:go
-      | Construct of Constructor_ref.t * 'e list
-      | Record of (Field_ref.t * 'e) list
-      | Field of 'e * Field_ref.t
-      | Match of 'e * (Pattern.t * 'e) list
+      | Construct (_, l) -> List.iter l ~f:go
+      | Record l -> List.iter l ~f:(fun (_, e) -> go e)
+      | Field (e, _) -> go e
+      | Match (e, l) -> go e; List.iter l ~f:(fun (_, e) -> go e)
       | Poly_record of (string * 'e) list
       | Poly_field of 'e * string
       | Poly_extend of (string * 'e) list * 'e
       | Poly_restrict of 'e * string
       | Poly_update of 'e * (string * 'e) list
       | Poly_variant of string * 'e option *)
-(* in
+    in
     go body;
-    captures) *)
+    captures)
+;;
 
 (* let create ~program:({ sccs; idents } : Typed.Program.t) =
   { eval_stack = Stack.of_list sccs
