@@ -681,6 +681,387 @@ let%expect_test "components in evaluation order" =
         (body
          (Quote (App (Var (Free gen) : "'c -> 'b") (Var (Free n) : 'c) : 'b) :
           "<'b>{gen : 'c -> 'b; n : 'c; ..'d}")))))
+     (recursive false))
+    |}]
+;;
+
+let%expect_test "recursive components" =
+  print
+    [ top "gen" [ "n" ] (quote (app (var "gen") [ var "n" ]))
+    ; top "a" [] (quote (var "b"))
+    ; top "b" [] (quote (var "a"))
+    ; top "loop" [ "x" ] (app (var "loop") [ var "x" ])
+    ; top "captured" [ "x" ] (splice (quote (app (var "captured") [ var "x" ])))
+    ];
+  [%expect
+    {|
+    ((members
+      (((name gen) (args (n/9))
+        (scheme "'a -> <'b>{gen : 'c -> 'b; n : 'c; ..'d}")
+        (body
+         (Quote (App (Var (Free gen) : "'c -> 'b") (Var (Free n) : 'c) : 'b) :
+          "<'b>{gen : 'c -> 'b; n : 'c; ..'d}")))))
+     (recursive false))
+    ((members
+      (((name a) (args ()) (scheme "<'_a>{b : '_a; ..'_b}")
+        (body (Quote (Var (Free b) : '_a) : "<'_a>{b : '_a; ..'_b}")))
+       ((name b) (args ()) (scheme "<'_a>{a : '_a; ..'_b}")
+        (body (Quote (Var (Free a) : '_a) : "<'_a>{a : '_a; ..'_b}")))))
+     (recursive false))
+    ((members
+      (((name loop) (args (x/10)) (scheme "'a -> 'b")
+        (body
+         (App (Var (Bound (Toplevel loop)) : "'a -> 'b")
+          (Var (Bound (Local x/10)) : 'a) : 'b)))))
      (recursive true))
+    ((members
+      (((name captured) (args (x/11)) (scheme "'a -> 'b")
+        (body
+         (Splice
+          (code
+           (Quote
+            (App (Var (Free captured) : "'a -> 'b") (Var (Free x) : 'a) : 'b) :
+            "<'b>{captured : 'a -> 'b; x : 'a}"))
+          (subs (Implicit ((captured (Toplevel captured)) (x (Local x/11))))) :
+          'b)))))
+     (recursive true))
+    |}]
+;;
+
+let%expect_test "literals that look like placeholders" =
+  print
+    [ top
+        "lits"
+        [ "s" ]
+        (match_
+           (var "s")
+           [ ( Pattern.Lit (String "\0000")
+             , tuple [ Expr.Lit (Char '\000'); Expr.Lit (String "\0003") ] )
+           ])
+    ];
+  [%expect
+    {|
+    ((members
+      (((name lits) (args (s/9)) (scheme "string -> char * string")
+        (body
+         (Match (Var (Bound (Local s/9)) : string)
+          (((Lit (String "\0000") : string)
+            (Tuple ((Lit (Char "\000") : char) (Lit (String "\0003") : string)) :
+             "char * string")))
+          : "char * string")))))
+     (recursive false))
+    |}]
+;;
+
+let%expect_test "level crossing at splices" =
+  print
+    [ top "n" [] (int 3)
+    ; top
+        "persistent_local"
+        []
+        (quote
+           (let_
+              "f"
+              [ "x" ]
+              (var "x")
+              (splice (app (var "id") [ quote (app (var "f") [ int 1 ]) ]))))
+    ; top
+        "outside_binder"
+        []
+        (let_ "x" [] (int 1) (quote (splice (quote (var "x")))))
+    ; top
+        "shadowed"
+        [ "c" ]
+        (quote (let_ "x" [] (int 1) (let_ "x" [] (int 2) (splice (var "c")))))
+    ; top "n_shadowed" [] (let_ "n" [] (int 1) (splice (quote (var "n"))))
+    ];
+  [%expect
+    {|
+    ((members (((name n) (args ()) (scheme int) (body (Lit (Int 3) : int)))))
+     (recursive false))
+    ((members
+      (((name persistent_local) (args ()) (scheme <int>{..'_a})
+        (body
+         (Quote
+          (Let (ident f/10) (args (x/9)) (generalized true)
+           (body (Var (Bound (Local x/9)) : 'b))
+           (in_
+            (Splice
+             (code
+              (App
+               (Var (Bound (Toplevel id)) :
+                "<int>{f?'_c : '_d -> '_d; ..'_e} -> <int>{f?'_c : '_d -> '_d; ..'_e}")
+               (Quote
+                (App (Var (Persistent (Local f/10)) : "int -> int")
+                 (Lit (Int 1) : int) : int)
+                : "<int>{f?'_c : '_d -> '_d; ..'_e}")
+               : "<int>{f?'_c : '_d -> '_d; ..'_e}"))
+             (subs (Implicit ((f (Local f/10))))) : int))
+           : int)
+          : <int>{..'_a}))
+        (where "..'_e <= {..'_a}"))))
+     (recursive false))
+    ((members
+      (((name outside_binder) (args ()) (scheme "<'a>{x : 'a; ..'b}")
+        (body
+         (Let (ident x/11) (args ()) (generalized true)
+          (body (Lit (Int 1) : int))
+          (in_
+           (Quote
+            (Splice (code (Quote (Var (Free x) : 'a) : "<'a>{x : 'a; ..'_c}"))
+             (subs (Implicit ())) : 'a)
+            : "<'a>{x : 'a; ..'b}"))
+          : "<'a>{x : 'a; ..'b}"))
+        (where "..'_c <= {x : 'a; ..'b}"))))
+     (recursive false))
+    ((members
+      (((name shadowed) (args (c/12))
+        (scheme "<'a>{x?'b : int; ..'c} -> <'a>{..'d}")
+        (body
+         (Quote
+          (Let (ident x/13) (args ()) (generalized true)
+           (body (Lit (Int 1) : int))
+           (in_
+            (Let (ident x/14) (args ()) (generalized true)
+             (body (Lit (Int 2) : int))
+             (in_
+              (Splice
+               (code (Var (Bound (Local c/12)) : "<'a>{x?'b : int; ..'c}"))
+               (subs (Implicit ((x (Local x/14))))) : 'a))
+             : 'a))
+           : 'a)
+          : <'a>{..'d}))
+        (where "..'c <= {..'d}"))))
+     (recursive false))
+    ((members
+      (((name n_shadowed) (args ()) (scheme int)
+        (body
+         (Let (ident n/15) (args ()) (generalized true)
+          (body (Lit (Int 1) : int))
+          (in_
+           (Splice (code (Quote (Var (Free n) : int) : "<int>{n : int}"))
+            (subs (Implicit ((n (Local n/15))))) : int))
+          : int)))))
+     (recursive false))
+    |}]
+;;
+
+let%expect_test "toplevel splice in a level -1 let" =
+  print
+    [ top "n" [] (int 3)
+    ; top
+        "deep"
+        []
+        (splice
+           (let_
+              "x"
+              []
+              (quote (int 1))
+              (splice
+                 (let_
+                    "k"
+                    [ "c" ]
+                    (seq
+                       (quote (let_ "n" [] (int 1) (splice (var "c"))))
+                       (var "c"))
+                    (app (var "k") [ quote (var "x") ])))))
+    ];
+  [%expect
+    {|
+    ((members (((name n) (args ()) (scheme int) (body (Lit (Int 3) : int)))))
+     (recursive false))
+    ((members
+      (((name deep) (args ()) (scheme int)
+        (body
+         (Splice
+          (code
+           (Let (ident x/9) (args ()) (generalized true)
+            (body (Quote (Lit (Int 1) : int) : <int>{..'a}))
+            (in_
+             (Splice
+              (code
+               (Let (ident k/11) (args (c/10)) (generalized true)
+                (body
+                 (Let (ident _/12) (args ()) (generalized false)
+                  (body
+                   (Quote
+                    (Let (ident n/13) (args ()) (generalized true)
+                     (body (Lit (Int 1) : int))
+                     (in_
+                      (Splice
+                       (code
+                        (Var (Bound (Local c/10)) : "<'b>{n?'c : int; ..'d}"))
+                       (subs (Implicit ((n (Local n/13))))) : 'b))
+                     : 'b)
+                    : <'b>{..'e}))
+                  (in_ (Var (Bound (Local c/10)) : "<'b>{n?'c : int; ..'d}")) :
+                  "<'b>{n?'c : int; ..'d}"))
+                (in_
+                 (App
+                  (Var (Bound (Local k/11)) :
+                   "<<int>{}>{-n; x : <int>{}} -> <<int>{}>{-n; x : <int>{}}")
+                  (Quote (Var (Free x) : <int>{}) : "<<int>{}>{-n; x : <int>{}}")
+                  : "<<int>{}>{-n; x : <int>{}}"))
+                : "<<int>{}>{-n; x : <int>{}}"))
+              (subs (Implicit ((x (Local x/9))))) : <int>{}))
+            : <int>{}))
+          (subs (Implicit ())) : int))
+        (where "..'d <= {..'e}"))))
+     (recursive false))
+    |}]
+;;
+
+let%expect_test "toplevel used at a wrong level by spliced code" =
+  print
+    [ top "n" [] (int 3)
+    ; top
+        "deep"
+        []
+        (splice
+           (let_
+              "x"
+              []
+              (quote (int 1))
+              (splice (let_ "n" [] (int 5) (quote (seq (var "n") (var "x")))))))
+    ];
+  [%expect
+    {| (Variable_used_at_wrong_level (name n) (var_level 0) (used_at -1)) |}]
+;;
+
+let%expect_test "explicit substitutions" =
+  print
+    [ top "n" [] (int 3)
+    ; top
+        "persistent_shorthand"
+        []
+        (let_
+           "f"
+           [ "y" ]
+           (var "y")
+           (quote
+              (splice
+                 ~subs:[ "f", None; "id", None ]
+                 (quote (app (var "id") [ app (var "f") [ int 1 ] ])))))
+    ; top
+        "at_toplevel"
+        []
+        (splice
+           ~subs:[ "n", None; "y", Some (int 1) ]
+           (quote (app (var "add") [ var "n"; var "y" ])))
+    ];
+  [%expect
+    {|
+    ((members (((name n) (args ()) (scheme int) (body (Lit (Int 3) : int)))))
+     (recursive false))
+    ((members
+      (((name persistent_shorthand) (args ()) (scheme <int>{..'a})
+        (body
+         (Let (ident f/10) (args (y/9)) (generalized true)
+          (body (Var (Bound (Local y/9)) : 'b))
+          (in_
+           (Quote
+            (Splice
+             (code
+              (Quote
+               (App (Var (Persistent (Toplevel id)) : "int -> int")
+                (App (Var (Persistent (Local f/10)) : "int -> int")
+                 (Lit (Int 1) : int) : int)
+                : int)
+               : "<int>{f?'_c : '_d -> '_d; id?'_e : '_f -> '_f}"))
+             (subs
+              (Explicit
+               ((f (Var (Persistent (Local f/10)) : "'_d -> '_d"))
+                (id (Var (Persistent (Toplevel id)) : "'_f -> '_f")))))
+             : int)
+            : <int>{..'a}))
+          : <int>{..'a})))))
+     (recursive false))
+    ((members
+      (((name at_toplevel) (args ()) (scheme int)
+        (body
+         (Splice
+          (code
+           (Quote
+            (App
+             (App (Var (Persistent (Toplevel add)) : "int -> int -> int")
+              (Var (Free n) : int) : "int -> int")
+             (Var (Free y) : int) : int)
+            : "<int>{n : int; y : int}"))
+          (subs
+           (Explicit
+            ((n (Var (Bound (Toplevel n)) : int)) (y (Lit (Int 1) : int)))))
+          : int)))))
+     (recursive false))
+    |}]
+;;
+
+let%expect_test "local recursion" =
+  print
+    [ top
+        "direct"
+        [ "y" ]
+        (let_
+           "f"
+           [ "x" ]
+           (app (var "f") [ var "x" ])
+           (app (var "f") [ var "y" ]))
+    ; top
+        "in_quote"
+        []
+        (let_ "f" [ "x" ] (quote (app (var "f") [ var "x" ])) (quote (var "f")))
+    ];
+  [%expect
+    {|
+    ((members
+      (((name direct) (args (y/9)) (scheme "'a -> 'b")
+        (body
+         (Let (ident f/11) (args (x/10)) (generalized true)
+          (body
+           (App (Var (Bound (Local f/11)) : "'c -> 'd")
+            (Var (Bound (Local x/10)) : 'c) : 'd))
+          (in_
+           (App (Var (Bound (Local f/11)) : "'a -> 'b")
+            (Var (Bound (Local y/9)) : 'a) : 'b))
+          : 'b)))))
+     (recursive false))
+    ((members
+      (((name in_quote) (args ())
+        (scheme "<'a -> <'b>{f : 'c -> 'b; x : 'c; ..'d}>{..'e}")
+        (body
+         (Let (ident f/13) (args (x/12)) (generalized true)
+          (body
+           (Quote (App (Var (Free f) : "'f -> 'g") (Var (Free x) : 'f) : 'g) :
+            "<'g>{f : 'f -> 'g; x : 'f; ..'h}"))
+          (in_
+           (Quote
+            (Var (Persistent (Local f/13)) :
+             "'a -> <'b>{f : 'c -> 'b; x : 'c; ..'d}")
+            : "<'a -> <'b>{f : 'c -> 'b; x : 'c; ..'d}>{..'e}"))
+          : "<'a -> <'b>{f : 'c -> 'b; x : 'c; ..'d}>{..'e}")))))
+     (recursive false))
+    |}]
+;;
+
+let%expect_test "tuple patterns and annotations" =
+  print
+    ~idents:true
+    [ top
+        "first"
+        [ "p" ]
+        (match_
+           (var "p")
+           [ Pat.tuple [ Pat.var "a"; Pat.any ], var ~annot:Ty.int "a" ])
+    ];
+  [%expect
+    {|
+    ((members
+      (((name first) (args (p/9)) (scheme "int * 'a -> int")
+        (body
+         (Match (Var (Bound (Local p/9)) : "int * 'a")
+          (((Tuple ((Var a/10 : int) (Any : 'a)) : "int * 'a")
+            (Var (Bound (Local a/10)) : int)))
+          : int)))))
+     (recursive false))
+    ((a/10 int) (p/9 "int * 'a"))
     |}]
 ;;

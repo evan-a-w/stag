@@ -15,35 +15,33 @@ module Ident : sig
     { name : string
     ; stamp : int
     }
-  [@@deriving compare, equal, hash]
 
   (** As [name/stamp]. *)
   val sexp_of_t : t -> Sexp.t
 
   include Comparable.S_plain with type t := t
-  include Hashable.S_plain with type t := t
 end
 
 module Binder : sig
   type t =
     | Local of Ident.t
     | Toplevel of string (** By canonical name. *)
-  [@@deriving compare, equal, sexp_of]
+  [@@deriving sexp_of]
 end
 
 (** What a variable refers to. *)
 module Var_ref : sig
   type t =
     | Bound of Binder.t
-    (** Bound at the level the variable is used at, and in the same quote if
-        there is one. *)
+    (** Bound in the same quote, or outside any quote and usable at this
+        level (so a persistent toplevel used at level 0 is [Bound]). *)
     | Persistent of Binder.t
     (** A persistent binder from outside the enclosing quote: its value is
         embedded in the code. *)
     | Free of string
     (** A free variable of the enclosing quote: its context entry of this
         name. *)
-  [@@deriving compare, equal, sexp_of]
+  [@@deriving sexp_of]
 end
 
 (** A constructor or field of a declared type, with its index in the
@@ -54,7 +52,7 @@ module Constructor_ref : sig
     ; name : string
     ; index : int
     }
-  [@@deriving compare, equal, sexp_of]
+  [@@deriving sexp_of]
 end
 
 module Field_ref : sig
@@ -63,7 +61,7 @@ module Field_ref : sig
     ; name : string
     ; index : int
     }
-  [@@deriving compare, equal, sexp_of]
+  [@@deriving sexp_of]
 end
 
 (** [ty] is the type of the values the node matches. *)
@@ -162,7 +160,10 @@ module Toplevel : sig
 end
 
 (** A strongly connected component of toplevels, in the order they were
-    reached. [recursive] if a member refers to a member. *)
+    reached. Components may be larger than needed, as references from within
+    quotes count. [recursive] if the members need a recursive binding: a member
+    refers to a member by a [Bound] or [Persistent] variable, or by an
+    [Implicit] substitution. *)
 module Scc : sig
   type t =
     { members : Toplevel.t list

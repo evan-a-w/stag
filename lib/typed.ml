@@ -4,29 +4,25 @@ open! Core
    in reading order once it is done, so variables are named as they are read. *)
 module Hum = struct
   let pending : Type.ty Queue.t option ref = ref None
-  let placeholder_prefix = "\000"
+
+  (* Compared physically, so no other sexp is mistaken for a placeholder. *)
+  let marker = String.make 1 '\000'
 
   let sexp_of_ty ty =
     match !pending with
     | Some pending ->
       let index = Queue.length pending in
       Queue.enqueue pending ty;
-      Sexp.Atom (placeholder_prefix ^ Int.to_string index)
+      Sexp.List [ Atom marker; Atom (Int.to_string index) ]
     | None -> Sexp.Atom (Type.to_string_hum ty)
   ;;
 
   let rec render printer types (sexp : Sexp.t) : Sexp.t =
     match sexp with
-    | Atom atom ->
-      (match String.chop_prefix atom ~prefix:placeholder_prefix with
-       | Some index ->
-         Atom (Type.Printer.ty printer (Queue.get types (Int.of_string index)))
-       | None -> sexp)
-    | List sexps ->
-      List
-        (List.fold sexps ~init:[] ~f:(fun rendered sexp ->
-           render printer types sexp :: rendered)
-         |> List.rev)
+    | List [ Atom atom; Atom index ] when phys_equal atom marker ->
+      Atom (Type.Printer.ty printer (Queue.get types (Int.of_string index)))
+    | Atom _ -> sexp
+    | List sexps -> List (List.map sexps ~f:(render printer types))
   ;;
 
   let scoped f =
@@ -72,21 +68,20 @@ module Ident = struct
       { name : string
       ; stamp : int
       }
-    [@@deriving compare, equal, hash]
+    [@@deriving compare]
 
     let sexp_of_t t = Sexp.Atom [%string "%{t.name}/%{t.stamp#Int}"]
   end
 
   include T
   include Comparable.Make_plain (T)
-  include Hashable.Make_plain (T)
 end
 
 module Binder = struct
   type t =
     | Local of Ident.t
     | Toplevel of string
-  [@@deriving compare, equal, sexp_of]
+  [@@deriving sexp_of]
 end
 
 module Var_ref = struct
@@ -94,7 +89,7 @@ module Var_ref = struct
     | Bound of Binder.t
     | Persistent of Binder.t
     | Free of string
-  [@@deriving compare, equal, sexp_of]
+  [@@deriving sexp_of]
 end
 
 module Constructor_ref = struct
@@ -103,7 +98,7 @@ module Constructor_ref = struct
     ; name : string
     ; index : int
     }
-  [@@deriving compare, equal, sexp_of]
+  [@@deriving sexp_of]
 end
 
 module Field_ref = struct
@@ -112,7 +107,7 @@ module Field_ref = struct
     ; name : string
     ; index : int
     }
-  [@@deriving compare, equal, sexp_of]
+  [@@deriving sexp_of]
 end
 
 module Pattern = struct

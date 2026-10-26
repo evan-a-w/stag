@@ -11,10 +11,7 @@ module Toplevel = struct
           ; mutable body : Typed.Expr.t option
           ; mutable recursive : bool
           }
-      | Done of
-          { entry : Env.Entry.t
-          ; typed : Typed.Toplevel.t
-          }
+      | Done of Env.Entry.t
     [@@deriving sexp_of]
   end
 
@@ -53,14 +50,14 @@ module Program_env = struct
     { type_env : Type_env.t
     ; toplevels : Toplevel.t String.Table.t
     ; mutable next_stamp : int
-    ; idents : Type.ty Typed.Ident.Table.t
+    ; mutable idents : Type.ty Typed.Ident.Map.t
     ; sccs : Typed.Scc.t Queue.t
     }
 
   let bind t name ty =
     let ident = { Typed.Ident.name; stamp = t.next_stamp } in
     t.next_stamp <- t.next_stamp + 1;
-    Hashtbl.add_exn t.idents ~key:ident ~data:ty;
+    t.idents <- Map.add_exn t.idents ~key:ident ~data:ty;
     ident
   ;;
 end
@@ -463,6 +460,32 @@ let resolution_type t (scope : Scope.t) ~name : Resolution.t -> _ = function
   | Unusable error -> Error error
 ;;
 
+let refers_to_toplevel (expr : Typed.Expr.t) ~f =
+  let binder : Typed.Binder.t -> bool = function
+    | Toplevel name -> f name
+    | Local _ -> false
+  in
+  let snds pairs = List.map pairs ~f:snd in
+  let rec go (expr : Typed.Expr.t) =
+    match expr.desc with
+    | Lit _ | Var (Free _) -> false
+    | Var (Bound binder' | Persistent binder') -> binder binder'
+    | App (e1, e2) | Let { body = e1; in_ = e2; _ } -> go e1 || go e2
+    | Splice { code; subs = Explicit subs } -> go code || go_all (snds subs)
+    | Splice { code; subs = Implicit captures } ->
+      go code || Map.exists captures ~f:binder
+    | Quote e | Field (e, _) | Poly_field (e, _) | Poly_restrict (e, _) -> go e
+    | Tuple es | Construct (_, es) -> go_all es
+    | Record fields -> go_all (snds fields)
+    | Poly_record fields -> go_all (snds fields)
+    | Poly_extend (fields, e) | Poly_update (e, fields) ->
+      go e || go_all (snds fields)
+    | Match (e, cases) -> go e || go_all (snds cases)
+    | Poly_variant (_, e) -> Option.exists e ~f:go
+  and go_all es = List.exists es ~f:go in
+  go expr
+;;
+
 let finish_scc (program : Program_env.t) (members : Toplevel.t list) =
   let persistent = List.for_all members ~f:Toplevel.is_function in
   let recursive =
@@ -480,23 +503,26 @@ let finish_scc (program : Program_env.t) (members : Toplevel.t list) =
       match member.state with
       | In_progress { index; ty; args; body = Some body; _ } ->
         if generalize then Scheme.generalize_ty ~rank:0 ty;
-        let typed =
-          { Typed.Toplevel.name = member.name; args; scheme = ty; body }
-        in
         member.state
-        <- Done
-             { entry =
-                 Env.Entry.toplevel ~name:member.name ~scheme:ty ~persistent
-             ; typed
-             };
-        index, typed
+        <- Done (Env.Entry.toplevel ~name:member.name ~scheme:ty ~persistent);
+        index, { Typed.Toplevel.name = member.name; args; scheme = ty; body }
       | In_progress { body = None; _ } | Unchecked | Done _ ->
         raise_s
           [%message "finish_scc: member not checked" (member : Toplevel.t)])
     |> List.sort ~compare:(Comparable.lift Int.compare ~f:fst)
     |> List.map ~f:snd
   in
-  Queue.enqueue program.sccs { Typed.Scc.members; recursive }
+  let names =
+    String.Set.of_list
+      (List.map members ~f:(fun (member : Typed.Toplevel.t) -> member.name))
+  in
+  Queue.enqueue
+    program.sccs
+    { Typed.Scc.members
+    ; recursive =
+        List.exists members ~f:(fun member ->
+          refers_to_toplevel member.body ~f:(Set.mem names))
+    }
 ;;
 
 let rec var_type t (scope : Scope.t) ~(path : Syntax.Path.t) =
@@ -528,7 +554,7 @@ let rec var_type t (scope : Scope.t) ~(path : Syntax.Path.t) =
 
 and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) =
   match toplevel.state with
-  | Done { entry; _ } -> Ok entry
+  | Done entry -> Ok entry
   | In_progress in_progress ->
     (* [toplevel] is in the component being checked, so this is a recursive
        reference. *)
@@ -988,7 +1014,7 @@ let typecheck t ~(program : Syntax.Program.t)
         List.map toplevels ~f:(fun toplevel -> toplevel.name, toplevel)
         |> String.Table.of_alist_exn
     ; next_stamp = 0
-    ; idents = Typed.Ident.Table.create ()
+    ; idents = Typed.Ident.Map.empty
     ; sccs = Queue.create ()
     }
   in
@@ -1009,7 +1035,7 @@ let typecheck t ~(program : Syntax.Program.t)
             Hashtbl.find_exn program_env.toplevels (canonical_name name)
           in
           (match toplevel.state with
-           | Done { entry = { scheme; persistent; _ }; _ } ->
+           | Done { scheme; persistent; _ } ->
              Value { name; scheme; persistent }
            | Unchecked | In_progress _ ->
              raise_s
@@ -1024,9 +1050,6 @@ let typecheck t ~(program : Syntax.Program.t)
   in
   { Checked.signature = signature root program
   ; program =
-      { sccs = Queue.to_list program_env.sccs
-      ; idents =
-          Hashtbl.to_alist program_env.idents |> Typed.Ident.Map.of_alist_exn
-      }
+      { sccs = Queue.to_list program_env.sccs; idents = program_env.idents }
   }
 ;;
