@@ -1,7 +1,9 @@
 open! Core
 
 (** The source of fresh ids, for variables among others: ids, which appear in
-    sexps of types, depend only on what was done with the [t]. *)
+    sexps of types, depend only on what was done with the [t]. Unification
+    relies on ids being unique, so types built with different [t]s must not
+    meet. *)
 type t
 
 val create : unit -> t
