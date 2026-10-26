@@ -1164,3 +1164,189 @@ let%expect_test "instantiation copies each part of a cycle once" =
     ([`Cons of '_a * (int -> '_b) | `Nil] as '_b) * '_b
     |}]
 ;;
+
+let%expect_test "occurs check through a link visited guarded, then unguarded" =
+  let fresh = Fresh.create () in
+  let open T in
+  (* [l = v -> int], then [v = f l]. *)
+  let check f =
+    let v = tvar fresh in
+    let l = tvar fresh in
+    unify fresh l (TArrow (v, int));
+    unify fresh v (f l)
+  in
+  check (fun l -> TTuple [ record fresh [ "x", l ]; l ]);
+  check (fun l -> TTuple [ l; record fresh [ "x", l ] ]);
+  check (fun l -> TTuple [ record fresh [ "x", l ]; variant fresh [ "A", l ] ]);
+  (* [r = {y : v}], then [v = f <int>{..r}]. *)
+  let check_row f =
+    let v = tvar fresh in
+    let r = rvar fresh in
+    print_s
+      [%sexp
+        (Unify.unify_row fresh ~row1:r ~row2:(row [ "y", v ])
+         : (unit, Unification_error.t) Result.t)];
+    unify fresh v (f (Type.TCode { inner = int; context = r }))
+  in
+  check_row (fun code -> TTuple [ record fresh [ "x", code ]; code ]);
+  check_row (fun code -> TTuple [ code; record fresh [ "x", code ] ]);
+  check_row (fun code ->
+    TTuple [ record fresh [ "x", code ]; record fresh [ "z", code ] ]);
+  [%expect
+    {|
+    (Ok ())
+    (Error (Occurs_check_failed (ATy (TVar (Unbound 0 1)))))
+    (Ok ())
+    (Error (Occurs_check_failed (ATy (TVar (Unbound 3 1)))))
+    (Ok ())
+    (Ok ())
+    (Ok ())
+    (Error (Occurs_check_failed (ATy (TVar (Unbound 10 1)))))
+    (Ok ())
+    (Error (Occurs_check_failed (ATy (TVar (Unbound 13 1)))))
+    (Ok ())
+    (Ok ())
+    |}]
+;;
+
+let%expect_test "unified link pairs are memoised as pairs" =
+  let fresh = Fresh.create () in
+  let open T in
+  let linked ty =
+    let l = tvar fresh in
+    unify fresh l ty;
+    l
+  in
+  let l1 = linked int in
+  let l2 = linked int in
+  let l3 = linked Type.bool in
+  unify fresh (TTuple [ l1; l1 ]) (TTuple [ l2; l3 ]);
+  (* The pair of the cycles' [Link]s is reached again within the cycles, and
+     [a] then meets [c], whose [y] differs. *)
+  let cycle y = fix fresh (fun a -> record fresh [ "x", a; "y", y ]) in
+  let a = cycle int in
+  let b = cycle int in
+  let c = cycle Type.bool in
+  unify fresh (TTuple [ a; a ]) (TTuple [ b; c ]);
+  [%expect
+    {|
+    (Ok ())
+    (Ok ())
+    (Ok ())
+    (Error
+     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    (Error
+     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    |}]
+;;
+
+let field ty name =
+  match Type.canonical_ty ty with
+  | TRecord { row; _ } | TVariant { row; _ } ->
+    let rec find row =
+      match Type.canonical_row row with
+      | Type.RExtend (name', _, ty, rest) ->
+        if String.equal name name' then ty else find rest
+      | REmpty | RVar _ -> raise_s [%message "no field" name]
+    in
+    find row
+  | _ -> assert false
+;;
+
+let%expect_test "instantiation shares cycles without generic variables" =
+  let fresh = Fresh.create () in
+  let open T in
+  let fix_at ~rank f =
+    let a = Type.TVar (Fresh.var fresh ~rank) in
+    unify fresh a (f a);
+    a
+  in
+  let weak = tvar fresh in
+  let inner = fix_at ~rank:1 (fun a -> variant fresh [ "A", a; "W", weak ]) in
+  let generic = Type.TVar (Fresh.var fresh ~rank:2) in
+  let outer =
+    fix_at ~rank:2 (fun a ->
+      record fresh [ "next", a; "g", generic; "inner", inner ])
+  in
+  Scheme.generalize_ty ~rank:1 outer;
+  print outer;
+  let instance1 = Scheme.instantiate fresh ~rank:1 outer in
+  let instance2 = Scheme.instantiate fresh ~rank:1 outer in
+  let same name ty1 ty2 =
+    printf
+      "%s shared: %b\n"
+      name
+      (phys_equal (Type.canonical_ty ty1) (Type.canonical_ty ty2))
+  in
+  same "inner" (field instance1 "inner") (field instance2 "inner");
+  same "inner (original)" (field instance1 "inner") inner;
+  same "outer" instance1 instance2;
+  same "outer next" (field instance1 "next") (field instance2 "next");
+  same "instance1 next" (field instance1 "next") instance1;
+  unify fresh (field instance1 "g") int;
+  unify fresh (field instance2 "g") Type.bool;
+  unify fresh weak Type.string;
+  print (TTuple [ instance1; instance2; outer ]);
+  [%expect
+    {|
+    (Ok ())
+    (Ok ())
+    ({g : 'a; inner : ([`A of '_b | `W of '_c] as '_b); next : '_d} as '_d)
+    inner shared: true
+    inner (original) shared: true
+    outer shared: false
+    outer next shared: false
+    instance1 next shared: true
+    (Ok ())
+    (Ok ())
+    (Ok ())
+    ({g : int; inner : ([`A of 'a | `W of string] as 'a); next : 'b} as 'b) * ({g : bool; inner : 'a; next : 'c} as 'c) * ({g : 'd; inner : 'a; next : 'e} as 'e)
+    |}]
+;;
+
+let%expect_test "instantiation copies generic presences and bounds" =
+  let fresh = Fresh.create () in
+  let open T in
+  let generic () = Fresh.var fresh ~rank:2 in
+  (* [({self : 'a; x?'p : int} as 'a)] *)
+  let knot = Type.TVar (generic ()) in
+  unify
+    fresh
+    knot
+    (Fresh.record
+       fresh
+       (RExtend
+          ("x", PVar (generic ()), int, RExtend ("self", Present, knot, REmpty))));
+  (* [{..'r} where ..'r <= {x : 'g}] *)
+  let r = generic () in
+  print_s
+    [%sexp
+      (Unify.constrain_row
+         fresh
+         ~row:(RVar r)
+         ~bound:(row [ "x", TVar (generic ()) ])
+         ~shadowed:String.Set.empty
+       : (unit, Unification_error.t) Result.t)];
+  let ty = Type.TTuple [ knot; Fresh.record fresh (RVar r) ] in
+  Scheme.generalize_ty ~rank:1 ty;
+  print ty;
+  let instance1 = Scheme.instantiate fresh ~rank:1 ty in
+  let instance2 = Scheme.instantiate fresh ~rank:1 ty in
+  print (TTuple [ instance1; instance2 ]);
+  (match instance1, instance2 with
+   | TTuple [ knot1; _ ], TTuple [ knot2; _ ] ->
+     unify fresh knot1 (record fresh [ "self", tvar fresh ]);
+     unify fresh knot2 (record fresh [ "self", tvar fresh; "x", int ])
+   | _ -> assert false);
+  print (TTuple [ instance1; instance2; ty ]);
+  [%expect
+    {|
+    (Ok ())
+    (Ok ())
+    ({self : 'a; x?'b : int} as 'a) * {..'c} where ..'c <= {x : 'd}
+    (({self : '_a; x?'_b : int} as '_a) * {..'_c}) * (({self : '_d; x?'_e : int} as '_d) * {..'_f}) where ..'_c <= {x : '_g}, ..'_f <= {x : '_h}
+    (Ok ())
+    (Ok ())
+    (({self : 'a; -x} as 'a) * {..'_b}) * (({self : 'c; x : int} as 'c) * {..'_d}) * (({self : 'e; x?'f : int} as 'e) * {..'g}) where ..'_b <= {x : '_h}, ..'_d <= {x : '_i}, ..'g <= {x : 'j}
+    |}]
+;;
