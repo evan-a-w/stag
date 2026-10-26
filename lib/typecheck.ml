@@ -11,7 +11,10 @@ module Toplevel = struct
           ; mutable body : Typed.Expr.t option
           ; mutable recursive : bool
           }
-      | Done of Env.Entry.t
+      | Done of
+          { entry : Env.Entry.t
+          ; typed : Typed.Toplevel.t
+          }
     [@@deriving sexp_of]
   end
 
@@ -503,9 +506,16 @@ let finish_scc (program : Program_env.t) (members : Toplevel.t list) =
       match member.state with
       | In_progress { index; ty; args; body = Some body; _ } ->
         if generalize then Scheme.generalize_ty ~rank:0 ty;
+        let typed =
+          { Typed.Toplevel.name = member.name; args; scheme = ty; body }
+        in
         member.state
-        <- Done (Env.Entry.toplevel ~name:member.name ~scheme:ty ~persistent);
-        index, { Typed.Toplevel.name = member.name; args; scheme = ty; body }
+        <- Done
+             { entry =
+                 Env.Entry.toplevel ~name:member.name ~scheme:ty ~persistent
+             ; typed
+             };
+        index, typed
       | In_progress { body = None; _ } | Unchecked | Done _ ->
         raise_s
           [%message "finish_scc: member not checked" (member : Toplevel.t)])
@@ -554,7 +564,7 @@ let rec var_type t (scope : Scope.t) ~(path : Syntax.Path.t) =
 
 and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) =
   match toplevel.state with
-  | Done entry -> Ok entry
+  | Done { entry; _ } -> Ok entry
   | In_progress in_progress ->
     (* [toplevel] is in the component being checked, so this is a recursive
        reference. *)
@@ -1035,7 +1045,7 @@ let typecheck t ~(program : Syntax.Program.t)
             Hashtbl.find_exn program_env.toplevels (canonical_name name)
           in
           (match toplevel.state with
-           | Done { scheme; persistent; _ } ->
+           | Done { entry = { scheme; persistent; _ }; _ } ->
              Value { name; scheme; persistent }
            | Unchecked | In_progress _ ->
              raise_s
