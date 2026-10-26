@@ -43,25 +43,43 @@ let captures t ~ident ~args ~body =
   Hashtbl.find_or_add t.closure_captures ~default:(fun () ->
     let defined = Typed.Ident.Hash_set.create () in
     let captures = Typed.Ident.Hash_set.create () in
+    let def ident = Hash_set.add defined ident in
+    let use ident =
+      if Hash_set.mem defined ident then () else Hash_set.add captures ident
+    in
     List.iter args ~f:(Hash_set.add defined);
-    let rec go ({desc; _ } : Typed.Expr.t) = 
+    let rec go ({ desc; _ } : Typed.Expr.t) =
       match desc with
-      | Lit _ -> ()
-      | Var of Var_ref.t
-      | App of 'e * 'e
-      | Let of
-          { ident : Ident.t
-          ; args : Ident.t list
-          ; generalized : bool
-          ; body : 'e (** [ident] is bound in [body]. *)
-          ; in_ : 'e
-          }
-      | Splice of
-          { code : 'e (** At the level outside the splice. *)
-          ; subs : 'e Subs.t
-          }
+      | Lit _ | Var (Free _) -> ()
+      | Var
+          ( Bound (Toplevel ident | Local ident)
+          | Persistent (Toplevel ident | Local ident) ) -> use ident
+      | App (a, b) ->
+        go a;
+        go b
+      | Let { ident; args = _; generalized = _; body; in_ } ->
+        (* in scope immediately *)
+        def ident;
+        go body;
+        go in_
+     
+      | Splice
+          { code
+          ; subs
+          } ->  
+            match subs with
+            | Explicit l -> List.iter l ~f:(fun )
+
+      | Explicit of (string * 'e) list
+      (** Each entry, by name, is the code it is bound to, at the splice's
+          level. A substitution without an expression is a [Var]. *)
+      | Implicit of Binder.t String.Map.t
+      (** The binders at the splice that may provide the code's entries of
+          their name. The other entries of the code become entries of the
+         
+            (*
       | Quote of 'e
-      | Tuple of 'e list
+      | Tuple l -> List.iter l ~f:go
       | Construct of Constructor_ref.t * 'e list
       | Record of (Field_ref.t * 'e) list
       | Field of 'e * Field_ref.t
@@ -71,8 +89,8 @@ let captures t ~ident ~args ~body =
       | Poly_extend of (string * 'e) list * 'e
       | Poly_restrict of 'e * string
       | Poly_update of 'e * (string * 'e) list
-      | Poly_variant of string * 'e option
-     in
+      | Poly_variant of string * 'e option *)
+    in
     go body;
     captures)
 ;;
