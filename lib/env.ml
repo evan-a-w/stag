@@ -20,8 +20,8 @@ module Entry = struct
     }
   [@@deriving sexp_of]
 
-  let toplevel ~name ~scheme ~persistent =
-    { scheme; level = 0; quote_id = None; persistent; binder = Toplevel name }
+  let toplevel ~ident ~scheme ~persistent =
+    { scheme; level = 0; quote_id = None; persistent; binder = Toplevel ident }
   ;;
 
   let is_allowed_at t ~used_at ~quote_id =

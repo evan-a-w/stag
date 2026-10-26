@@ -81,7 +81,7 @@ end
 module Binder = struct
   type t =
     | Local of Ident.t
-    | Toplevel of string
+    | Toplevel of Ident.t
   [@@deriving sexp_of]
 end
 
@@ -195,7 +195,7 @@ end
 
 module Toplevel = struct
   type t =
-    { name : string
+    { ident : Ident.t
     ; args : Ident.t list
     ; scheme : Hum.Ty.t
     ; body : Expr.t

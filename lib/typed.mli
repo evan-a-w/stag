@@ -10,7 +10,8 @@ open! Core
     it. A node is rendered as its constructor followed by [: type]. *)
 
 module Ident : sig
-  (** A local binder. Stamps are unique among the binders of one program. *)
+  (** A binder, local or toplevel. Stamps are unique among the binders of one
+      program. *)
   type t =
     { name : string
     ; stamp : int
@@ -26,7 +27,7 @@ end
 module Binder : sig
   type t =
     | Local of Ident.t
-    | Toplevel of string (** By canonical name. *)
+    | Toplevel of Ident.t (** Named by its canonical name. *)
   [@@deriving sexp_of]
 end
 
@@ -152,7 +153,7 @@ end
 
 module Toplevel : sig
   type t =
-    { name : string (** Canonical. *)
+    { ident : Ident.t
     ; args : Ident.t list
     ; scheme : Type.ty
     ; body : Expr.t
@@ -177,7 +178,8 @@ module Program : sig
   type t =
     { sccs : Scc.t list (** Each component after the ones it refers to. *)
     ; idents : Type.ty Ident.Map.t
-      (** The type of each binder: its scheme for a generalized [Let]. *)
+      (** The type of each binder: its scheme for a generalized [Let] or a
+          toplevel. *)
     }
   [@@deriving sexp_of]
 end
