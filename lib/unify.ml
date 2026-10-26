@@ -26,21 +26,40 @@ let rec adjuster ~rank ~(occurs : (Type.id * Type.arg) option)
   }
 ;;
 
-(* The pairs of records or variants being or already unified, assumed equal
-   when reached again: as each cycle passes through one, unifying cyclic types
-   terminates. *)
+(* An unordered pair of ids. *)
+module Id_pair = struct
+  module T = struct
+    type t = int * int [@@deriving compare, hash, sexp_of]
+  end
+
+  include T
+  include Hashable.Make_plain (T)
+
+  let create id1 id2 = Int.min id1 id2, Int.max id1 id2
+end
+
+(* The pairs of records or variants, and of [Link]s, being or already
+   unified, assumed equal when reached again: as each cycle passes through a
+   record or variant, and unification creates none, unifying cyclic types
+   terminates, and shared parts are unified once. *)
 module State = struct
   type t =
     { fresh : Fresh.t
-    ; assumed : Type.Node.Pair_set.t
+    ; nodes : Id_pair.Hash_set.t
+    ; links : Id_pair.Hash_set.t
     }
 
-  let create fresh = { fresh; assumed = Type.Node.Pair_set.create () }
+  let create fresh =
+    { fresh
+    ; nodes = Id_pair.Hash_set.create ()
+    ; links = Id_pair.Hash_set.create ()
+    }
+  ;;
 
-  let assume t ty1 ty2 =
-    match Type.Node.Pair_set.add t.assumed ty1 ty2 with
-    | `Already_present -> true
-    | `Added -> false
+  let assume set id1 id2 =
+    match Hash_set.strict_add set (Id_pair.create id1 id2) with
+    | Ok () -> false
+    | Error _ -> true
   ;;
 end
 
@@ -79,6 +98,13 @@ let presence_mismatch_reason name ~found
 ;;
 
 let rec unify_ty' state ~ty1 ~ty2 : (unit, Unification_error.t) Result.t =
+  match ty1, ty2 with
+  | ( Type.TVar { id = id1; state = Link _; _ }
+    , Type.TVar { id = id2; state = Link _; _ } )
+    when State.assume state.State.links id1 id2 -> Ok ()
+  | _ -> unify_structure state ~ty1 ~ty2
+
+and unify_structure state ~ty1 ~ty2 =
   let ty1 = Type.canonical_ty ty1 in
   let ty2 = Type.canonical_ty ty2 in
   let zip xs ys : (_, Unification_error.t) Result.t =
@@ -113,8 +139,11 @@ let rec unify_ty' state ~ty1 ~ty2 : (unit, Unification_error.t) Result.t =
     , TCode { inner = inner2; context = row2 } ) ->
     let%bind.Result () = unify_ty' state ~ty1:inner1 ~ty2:inner2 in
     unify_row' state ~row1 ~row2
-  | TRecord row1, TRecord row2 | TVariant row1, TVariant row2 ->
-    if State.assume state ty1 ty2 then Ok () else unify_row' state ~row1 ~row2
+  | TRecord { id = id1; row = row1 }, TRecord { id = id2; row = row2 }
+  | TVariant { id = id1; row = row1 }, TVariant { id = id2; row = row2 } ->
+    if State.assume state.State.nodes id1 id2
+    then Ok ()
+    else unify_row' state ~row1 ~row2
   | TVar var1, TVar var2 when phys_equal var1 var2 -> Ok ()
   | TVar var, ty | ty, TVar var ->
     let%map.Result () =

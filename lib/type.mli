@@ -39,8 +39,14 @@ type ty =
       { inner : ty
       ; context : row
       }
-  | TRecord of row
-  | TVariant of row (** Tags without the backquote. *)
+  | TRecord of
+      { id : id
+      ; row : row
+      }
+  | TVariant of
+      { id : id
+      ; row : row (** Tags without the backquote. *)
+      }
   | TVar of (ty, Nothing.t) Var.t
 
 and row =
@@ -69,9 +75,10 @@ and bound =
   }
 
 (** Types are graphs: [Link]s may close cycles, each through a [TRecord] or
-    [TVariant] (equi-recursive types). Sexps print a record or variant
-    reached again within itself as [(Cycle_ref n)], and the record or
-    variant as [(Cycle n ...)]. *)
+    [TVariant] (equi-recursive types). Records and variants are identified by
+    their [id], unique among them, so may be shared. Sexps omit ids, and print a
+    record or variant reached again within itself as [(Cycle_ref n)], and the
+    record or variant as [(Cycle n ...)]. *)
 val sexp_of_ty : ty -> Sexp.t
 
 val sexp_of_row : row -> Sexp.t
@@ -93,28 +100,13 @@ val canonical_presence : presence -> presence
 (** The row variable at the end of [row], if it is open. *)
 val tail_var : row -> (row, bound) Var.t option
 
-(** Records and variants, identified physically or by their (physical)
-    canonical row, as [TRecord (RVar r)] may be built more than once for one
-    [r]. Hashing only looks at the first few nodes, so many separately built
-    records of the same shape, without variables, share a bucket. *)
-module Node : sig
-  module Table : Stdlib.Hashtbl.S with type key = ty
-
-  (** Unordered pairs of physical types. *)
-  module Pair_set : sig
-    type t
-
-    val create : unit -> t
-    val add : t -> ty -> ty -> [ `Added | `Already_present ]
-  end
-end
-
 (** Rebuilds a type, replacing each variable that is not a [Link] by the result
-    of the callback for its kind. A [Link] to a part whose variables all
-    satisfy [keeps], so would be unchanged, is kept as is; other [Link]s are
-    followed, and sharing through them and through records and variants is
-    preserved. The copy of a cycle is closed by a new [Link], of id
-    [id ()]. *)
+    of the callback for its kind. A [Link], record or variant whose variables
+    all satisfy [keeps], so would be unchanged, is kept as is; others are
+    copied once each, preserving sharing through them: a [Link] to a new
+    [Link], of id [id ()], which closes the copy of a cycle (as does one to
+    the copy of a record or variant reached again within itself). Copied
+    records and variants get ids [id ()]. *)
 module Mapper : sig
   type t =
     { ty : (ty, Nothing.t) Var.t -> ty
@@ -130,7 +122,8 @@ val map_row : Mapper.t -> row -> row
 
 (** Visits the variables that are not [Link]s, stopping at the first error.
     [guarded] is whether the occurrence is within a [TRecord] or [TVariant] of
-    the type iterated over. An occurrence may be visited more than once. *)
+    the type iterated over. An occurrence may be visited more than once, but
+    each [Link], record and variant is followed at most twice. *)
 module Iter : sig
   type 'e t =
     { ty : guarded:bool -> (ty, Nothing.t) Var.t -> (unit, 'e) Result.t

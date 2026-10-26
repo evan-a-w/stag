@@ -49,8 +49,14 @@ type ty =
       { inner : ty
       ; context : row
       }
-  | TRecord of row
-  | TVariant of row
+  | TRecord of
+      { id : id
+      ; row : row
+      }
+  | TVariant of
+      { id : id
+      ; row : row
+      }
   | TVar of (ty, Nothing.t) Var.t
 
 and row =
@@ -103,116 +109,6 @@ let rec tail_var row =
   | RVar var -> Some var
 ;;
 
-module Node = struct
-  (* Every cycle passes through a [Link] and a [TRecord] or [TVariant], as the
-     other nodes are immutable and unification keeps cycles guarded. *)
-  let same ty1 ty2 =
-    phys_equal ty1 ty2
-    ||
-    match ty1, ty2 with
-    | TRecord row1, TRecord row2 | TVariant row1, TVariant row2 ->
-      (match canonical_row row1, canonical_row row2 with
-       | (RExtend _ as row1), row2 -> phys_equal row1 row2
-       | (REmpty | RVar _), _ -> false)
-    | _ -> false
-  ;;
-
-  (* Hashes the first few immutable nodes, with variables by id, so is stable
-     under binding variables. *)
-  module Skeleton_hash = struct
-    let combine hash x = (hash * 65599) + x
-
-    let rec ty budget hash ty' =
-      if !budget <= 0
-      then hash
-      else (
-        decr budget;
-        match ty' with
-        | TVar var -> combine hash var.id
-        | TCon (name, args) ->
-          List.fold
-            args
-            ~init:(combine hash (String.hash name))
-            ~f:(fun hash -> function
-              | ATy ty' -> ty budget hash ty'
-              | ARow row' -> row budget hash row')
-        | TArrow (ty1, ty2) -> ty budget (ty budget (combine hash 1) ty1) ty2
-        | TTuple tys -> List.fold tys ~init:(combine hash 2) ~f:(ty budget)
-        | TCode { inner; context } ->
-          row budget (ty budget (combine hash 3) inner) context
-        | TRecord row' -> row budget (combine hash 4) row'
-        | TVariant row' -> row budget (combine hash 5) row')
-
-    and row budget hash row' =
-      if !budget <= 0
-      then hash
-      else (
-        decr budget;
-        match row' with
-        | REmpty -> combine hash 6
-        | RExtend (name, presence', ty', rest) ->
-          let hash = presence (combine hash (String.hash name)) presence' in
-          row budget (ty budget hash ty') rest
-        | RVar var -> combine hash var.id)
-
-    and presence hash presence' =
-      match presence' with
-      | Present -> combine hash 7
-      | Absent -> combine hash 8
-      | PVar var -> combine hash var.id
-    ;;
-
-    let budget () = ref 16
-  end
-
-  let phys_hash node = Skeleton_hash.ty (Skeleton_hash.budget ()) 0 node
-
-  let hash ty =
-    match ty with
-    | TRecord row | TVariant row ->
-      (match canonical_row row with
-       | RExtend _ as row -> Skeleton_hash.row (Skeleton_hash.budget ()) 0 row
-       | REmpty | RVar _ -> phys_hash ty)
-    | _ -> phys_hash ty
-  ;;
-
-  module Table = Stdlib.Hashtbl.Make (struct
-      type t = ty
-
-      let equal = same
-      let hash = hash
-    end)
-
-  module Pair_set = struct
-    module Table = Stdlib.Hashtbl.Make (struct
-        type t = ty * ty
-
-        let equal (ty1, ty2) (ty1', ty2') =
-          (phys_equal ty1 ty1' && phys_equal ty2 ty2')
-          || (phys_equal ty1 ty2' && phys_equal ty2 ty1')
-        ;;
-
-        let hash (ty1, ty2) =
-          let hash1 = phys_hash ty1 in
-          let hash2 = phys_hash ty2 in
-          Hashtbl.hash (min hash1 hash2, max hash1 hash2)
-        ;;
-      end)
-
-    type t = unit Table.t
-
-    let create () = Table.create 16
-
-    let add t ty1 ty2 =
-      if Table.mem t (ty1, ty2)
-      then `Already_present
-      else (
-        Table.replace t (ty1, ty2) ();
-        `Added)
-    ;;
-  end
-end
-
 module Iter = struct
   type 'e t =
     { ty : guarded:bool -> (ty, Nothing.t) Var.t -> (unit, 'e) Result.t
@@ -227,6 +123,7 @@ let iterator (f : _ Iter.t) =
      guarded one. *)
   let tys = Int.Table.create () in
   let rows = Int.Table.create () in
+  let nodes = Int.Hash_set.create () in
   let link table (var : _ Var.t) ~guarded ~visit =
     match Hashtbl.find table var.id with
     | Some was_guarded when guarded || not was_guarded -> Ok ()
@@ -251,7 +148,10 @@ let iterator (f : _ Iter.t) =
     | TCode { inner; context } ->
       let%bind.Result () = iter_ty ~guarded inner in
       iter_row ~guarded context
-    | TRecord row | TVariant row -> iter_row ~guarded:true row
+    | TRecord { id; row } | TVariant { id; row } ->
+      (match Hash_set.strict_add nodes id with
+       | Ok () -> iter_row ~guarded:true row
+       | Error _ -> Ok ())
   and iter_row ~guarded row =
     match row with
     | REmpty -> Ok ()
@@ -283,9 +183,10 @@ module Mapper = struct
     }
 end
 
-(* Whether what a [Link] points to has a variable not satisfying [keeps],
-   computed once per [Link]. The [Link]s of a strongly connected component
-   (found as by Tarjan's algorithm) reach each other, so share the answer. *)
+(* Whether what a [Link], record or variant points to has a variable not
+   satisfying [keeps], computed once for each. Those of a strongly connected
+   component (found as by Tarjan's algorithm) reach each other, so share the
+   answer. *)
 module Changes = struct
   module Visiting = struct
     type t =
@@ -304,6 +205,7 @@ module Changes = struct
     { keeps : 'a 'bound. ('a, 'bound) Var.t -> bool
     ; tys : State.t Int.Table.t
     ; rows : State.t Int.Table.t
+    ; nodes : State.t Int.Table.t
     ; stack : (State.t Int.Table.t * id * Visiting.t) Stack.t
     ; mutable next_index : int
     }
@@ -312,12 +214,13 @@ module Changes = struct
     { keeps = f.keeps
     ; tys = Int.Table.create ()
     ; rows = Int.Table.create ()
+    ; nodes = Int.Table.create ()
     ; stack = Stack.create ()
     ; next_index = 0
     }
   ;;
 
-  (* Whether there are changes, and the lowest index of a [Link] still being
+  (* Whether there are changes, and the lowest index of a vertex still being
      visited reached. *)
   let none = false, Int.max_value
 
@@ -327,25 +230,25 @@ module Changes = struct
 
   let var t var = t.keeps var |> not, Int.max_value
 
-  let link t table (var : _ Var.t) ~target =
-    match Hashtbl.find table var.id with
+  let vertex t table id ~target =
+    match Hashtbl.find table id with
     | Some (State.Visited changes) -> changes, Int.max_value
     | Some (Visiting { index; _ }) -> false, index
     | None ->
       let index = t.next_index in
       t.next_index <- index + 1;
       let visiting = { Visiting.index; changes = false } in
-      Hashtbl.set table ~key:var.id ~data:(Visiting visiting);
-      Stack.push t.stack (table, var.id, visiting);
+      Hashtbl.set table ~key:id ~data:(Visiting visiting);
+      Stack.push t.stack (table, id, visiting);
       let changes, low = target () in
       visiting.changes <- changes;
       if low < index
       then changes, low
       else (
         let rec pop component =
-          let ((table', id, _) as entry) = Stack.pop_exn t.stack in
+          let ((table', id', _) as entry) = Stack.pop_exn t.stack in
           let component = entry :: component in
-          if phys_equal table table' && id = var.id
+          if phys_equal table table' && id = id'
           then component
           else pop component
         in
@@ -361,7 +264,7 @@ module Changes = struct
   let rec ty t ty' =
     match ty' with
     | TVar ({ state = Link target; _ } as var') ->
-      link t t.tys var' ~target:(fun () -> ty t target)
+      vertex t t.tys var'.id ~target:(fun () -> ty t target)
     | TVar var' -> var t var'
     | TCon (_, args) ->
       List.fold args ~init:none ~f:(fun acc -> function
@@ -371,7 +274,8 @@ module Changes = struct
     | TTuple tys ->
       List.fold tys ~init:none ~f:(fun acc ty' -> both acc (ty t ty'))
     | TCode { inner; context } -> both (ty t inner) (row t context)
-    | TRecord row' | TVariant row' -> row t row'
+    | TRecord { id; row = row' } | TVariant { id; row = row' } ->
+      vertex t t.nodes id ~target:(fun () -> row t row')
 
   and row t row' =
     match row' with
@@ -384,38 +288,73 @@ module Changes = struct
       in
       both presence (both (ty t ty') (row t rest))
     | RVar ({ state = Link target; _ } as var') ->
-      link t t.rows var' ~target:(fun () -> row t target)
+      vertex t t.rows var'.id ~target:(fun () -> row t target)
     | RVar var' -> var t var'
   ;;
 end
 
-(* A record or variant copied, or being copied if there is no [result] yet. *)
+(* A record or variant copied, or being copied if there is no [result] yet:
+   reaching it again then gives a [knot], linked to the result once known. *)
 module Copy = struct
   type t =
     { mutable result : ty option
     ; mutable knot : (ty, Nothing.t) Var.t option
     }
+
+  let memo table id ~new_id ~f =
+    match Hashtbl.find table id with
+    | Some { result = Some result; knot = _ } -> result
+    | Some copy ->
+      let knot =
+        match copy.knot with
+        | Some knot -> knot
+        | None ->
+          let knot = Var.create (new_id ()) Generic in
+          copy.knot <- Some knot;
+          knot
+      in
+      TVar knot
+    | None ->
+      let copy = { result = None; knot = None } in
+      Hashtbl.set table ~key:id ~data:copy;
+      let result = f () in
+      copy.result <- Some result;
+      Option.iter copy.knot ~f:(fun knot -> knot.state <- Link result);
+      result
+  ;;
 end
 
 let mapper (f : Mapper.t) =
   let tys = Int.Table.create () in
   let rows = Int.Table.create () in
-  let memo table (var : _ Var.t) ~f =
-    match Hashtbl.find table var.id with
-    | Some result -> result
-    | None ->
-      let result = f () in
-      Hashtbl.set table ~key:var.id ~data:result;
-      result
-  in
+  let nodes = Int.Table.create () in
   let changes = Changes.create f in
-  let copies = Node.Table.create 16 in
+  (* A changed [Link] is copied to a new [Link], created before its target is
+     copied, so the copy shares through it, and closes cycles. *)
+  let link table (var : _ Var.t) ~unchanged ~changes ~wrap ~map_target =
+    match Hashtbl.find table var.id with
+    | Some copy -> copy
+    | None when not changes ->
+      Hashtbl.set table ~key:var.id ~data:unchanged;
+      unchanged
+    | None ->
+      let var' = Var.create (f.id ()) Generic in
+      let copy = wrap var' in
+      Hashtbl.set table ~key:var.id ~data:copy;
+      var'.state <- Link (map_target ());
+      copy
+  in
   (* Unchanged parts are kept as they are. *)
   let rec map_ty ty =
     match ty with
     | TVar ({ state = Link target; _ } as var) ->
-      memo tys var ~f:(fun () ->
-        if fst (Changes.ty changes ty) then map_ty target else ty)
+      link
+        tys
+        var
+        ~unchanged:ty
+        ~changes:(fst (Changes.ty changes ty))
+        ~wrap:(fun var -> TVar var)
+        ~map_target:(fun () -> map_ty target)
     | TVar var -> if f.keeps var then ty else f.ty var
     | TCon (name, args) ->
       let args' = List.map args ~f:map_arg in
@@ -437,34 +376,15 @@ let mapper (f : Mapper.t) =
       if phys_equal inner inner' && phys_equal context context'
       then ty
       else TCode { inner = inner'; context = context' }
-    | TRecord row | TVariant row ->
-      (match Node.Table.find_opt copies ty with
-       | Some { Copy.result = Some result; _ } -> result
-       | Some copy ->
-         let knot =
-           match copy.knot with
-           | Some knot -> knot
-           | None ->
-             let knot = Var.create (f.id ()) Generic in
-             copy.knot <- Some knot;
-             knot
-         in
-         TVar knot
-       | None ->
-         let copy = { Copy.result = None; knot = None } in
-         Node.Table.replace copies ty copy;
-         let row' = map_row row in
-         let result =
-           if phys_equal row row'
-           then ty
-           else (
-             match ty with
-             | TRecord _ -> TRecord row'
-             | _ -> TVariant row')
-         in
-         copy.result <- Some result;
-         Option.iter copy.knot ~f:(fun knot -> knot.state <- Link result);
-         result)
+    | TRecord { id; row } | TVariant { id; row } ->
+      Copy.memo nodes id ~new_id:f.id ~f:(fun () ->
+        if not (fst (Changes.ty changes ty))
+        then ty
+        else (
+          let row = map_row row in
+          match ty with
+          | TRecord _ -> TRecord { id = f.id (); row }
+          | _ -> TVariant { id = f.id (); row }))
   and map_arg arg =
     match arg with
     | ATy ty ->
@@ -487,8 +407,13 @@ let mapper (f : Mapper.t) =
       then row
       else RExtend (name, presence', ty', rest')
     | RVar ({ state = Link target; _ } as var) ->
-      memo rows var ~f:(fun () ->
-        if fst (Changes.row changes row) then map_row target else row)
+      link
+        rows
+        var
+        ~unchanged:row
+        ~changes:(fst (Changes.row changes row))
+        ~wrap:(fun var -> RVar var)
+        ~map_target:(fun () -> map_row target)
     | RVar var -> if f.keeps var then row else f.row var
   and map_presence presence =
     match canonical_presence presence with
@@ -512,20 +437,60 @@ let has_unbound_var ty =
 ;;
 
 module Sexper = struct
+  module Printing = struct
+    type t =
+      { depth : int
+      ; mutable label : int option
+      }
+  end
+
   type t =
-    { cycles : int option ref Node.Table.t
-      (* The records and variants being printed, labelled once a cycle
-         reaches them again. *)
+    { printing : Printing.t Int.Table.t
+      (* The records and variants being printed, by id, labelled once a
+         cycle reaches them again. *)
+    ; nodes : Sexp.t Int.Table.t
+    ; tys : Sexp.t Int.Table.t
+    ; rows : Sexp.t Int.Table.t
+    ; mutable depth : int
+    ; mutable low : int
+      (* The lowest depth of a record or variant being printed that the
+         current part refers to. *)
     ; mutable next_label : int
     }
 
-  let create () = { cycles = Node.Table.create 16; next_label = 0 }
+  let create () =
+    { printing = Int.Table.create ()
+    ; nodes = Int.Table.create ()
+    ; tys = Int.Table.create ()
+    ; rows = Int.Table.create ()
+    ; depth = 0
+    ; low = Int.max_value
+    ; next_label = 0
+    }
+  ;;
 
-  let var (var : _ Var.t) ~sexp_of_link =
+  (* Memoizes the sexp of a part unless it refers to a record or variant
+     being printed around it, as it would then print differently elsewhere. *)
+  let closed t table key ~sexp =
+    match Hashtbl.find table key with
+    | Some sexp -> sexp
+    | None ->
+      let outer_low = t.low in
+      let depth = t.depth + 1 in
+      t.low <- Int.max_value;
+      let sexp = sexp () in
+      if t.low >= depth then Hashtbl.set table ~key ~data:sexp;
+      t.low <- (if t.low >= depth then outer_low else min outer_low t.low);
+      sexp
+  ;;
+
+  let var t table (var : _ Var.t) ~sexp_of_link : Sexp.t =
     match var.state with
     | Unbound rank -> [%sexp "Unbound", (var.id : id), (rank : rank)]
     | Generic -> [%sexp "Generic", (var.id : id)]
-    | Link target -> [%sexp "Link", (sexp_of_link target : Sexp.t)]
+    | Link target ->
+      closed t table var.id ~sexp:(fun () ->
+        [%sexp "Link", (sexp_of_link target : Sexp.t)])
   ;;
 
   let rec ty t ty' : Sexp.t =
@@ -540,40 +505,42 @@ module Sexper = struct
         ; List [ Atom "inner"; ty t inner ]
         ; List [ Atom "context"; row t context ]
         ]
-    | TRecord r ->
-      cycle t ty' (fun () : Sexp.t -> List [ Atom "TRecord"; row t r ])
-    | TVariant r ->
-      cycle t ty' (fun () : Sexp.t -> List [ Atom "TVariant"; row t r ])
-    | TVar v -> List [ Atom "TVar"; var v ~sexp_of_link:(ty t) ]
+    | TRecord { id; row = r } -> node t id ~name:"TRecord" r
+    | TVariant { id; row = r } -> node t id ~name:"TVariant" r
+    | TVar v -> List [ Atom "TVar"; var t t.tys v ~sexp_of_link:(ty t) ]
 
-  and cycle t node sexp =
-    match Node.Table.find_opt t.cycles node with
-    | Some label ->
+  and node t id ~name r =
+    match Hashtbl.find t.printing id with
+    | Some printing ->
+      t.low <- min t.low printing.depth;
       let label =
-        match !label with
+        match printing.label with
         | Some label -> label
         | None ->
           let next = t.next_label in
           t.next_label <- next + 1;
-          label := Some next;
+          printing.label <- Some next;
           next
       in
       [%sexp "Cycle_ref", (label : int)]
     | None ->
-      let label = ref None in
-      Node.Table.replace t.cycles node label;
-      let sexp = sexp () in
-      Node.Table.remove t.cycles node;
-      (match !label with
-       | None -> sexp
-       | Some label -> [%sexp "Cycle", (label : int), (sexp : Sexp.t)])
+      closed t t.nodes id ~sexp:(fun () ->
+        t.depth <- t.depth + 1;
+        let printing = { Printing.depth = t.depth; label = None } in
+        Hashtbl.set t.printing ~key:id ~data:printing;
+        let sexp : Sexp.t = List [ Atom name; row t r ] in
+        Hashtbl.remove t.printing id;
+        t.depth <- t.depth - 1;
+        match printing.label with
+        | None -> sexp
+        | Some label -> [%sexp "Cycle", (label : int), (sexp : Sexp.t)])
 
   and row t row' : Sexp.t =
     match row' with
     | REmpty -> Atom "REmpty"
     | RExtend (name, p, ty', rest) ->
       List [ Atom "RExtend"; Atom name; presence p; ty t ty'; row t rest ]
-    | RVar v -> List [ Atom "RVar"; var v ~sexp_of_link:(row t) ]
+    | RVar v -> List [ Atom "RVar"; var t t.rows v ~sexp_of_link:(row t) ]
 
   and presence p : Sexp.t =
     match p with
@@ -602,10 +569,17 @@ module Printer = struct
     { type_name : string -> string
     ; names : int Int.Table.t
     ; mutable next_index : int
-    ; cycles : string option ref Node.Table.t
-      (* The records and variants being printed, named once a cycle reaches
-         them again, and those printed with their name, which later
-         occurrences use. *)
+    ; cycle_names : string Int.Table.t
+      (* The names of the records and variants reached again within
+         themselves, by id, kept across types for consistency. *)
+    ; printing : bool ref Int.Table.t
+      (* The records and variants being printed, and whether they were
+         reached again within themselves. *)
+    ; introduced : string Int.Table.t
+      (* The records and variants whose name the type being printed has
+         introduced, which later occurrences use. *)
+    ; mutable recursive : (ty * string) option
+      (* The body [recursive] prints, and the name of its occurrences. *)
     ; bounded : (string * (row, bound) Var.t) Queue.t
       (* Bounded row variables, in order of appearance, to print their
          bounds after the types. *)
@@ -615,7 +589,10 @@ module Printer = struct
     { type_name
     ; names = Int.Table.create ()
     ; next_index = 0
-    ; cycles = Node.Table.create 16
+    ; cycle_names = Int.Table.create ()
+    ; printing = Int.Table.create ()
+    ; introduced = Int.Table.create ()
+    ; recursive = None
     ; bounded = Queue.create ()
     }
   ;;
@@ -646,13 +623,9 @@ module Printer = struct
   ;;
 
   (* Weak if it has a weak variable. *)
-  let cycle_name t cycle node =
-    match !cycle with
-    | Some name -> name
-    | None ->
-      let name = name (next_index t) ~weak:(has_unbound_var node) in
-      cycle := Some name;
-      name
+  let cycle_name t id node =
+    Hashtbl.find_or_add t.cycle_names id ~default:(fun () ->
+      name (next_index t) ~weak:(has_unbound_var node))
   ;;
 
   let row_var_name t (var : _ Var.t) =
@@ -688,21 +661,26 @@ module Printer = struct
   ;;
 
   let rec ty_to_string t ~prec ty =
-    let ty = canonical_ty ty in
-    match Node.Table.find_opt t.cycles ty with
-    | Some cycle -> cycle_name t cycle ty
-    | None ->
-      (match ty with
-       | TRecord _ | TVariant _ ->
-         let cycle = ref None in
-         Node.Table.replace t.cycles ty cycle;
+    match canonical_ty ty, t.recursive with
+    | ty, Some (body, name) when phys_equal ty body -> name
+    | ((TRecord { id; _ } | TVariant { id; _ }) as ty), _ ->
+      (match Hashtbl.find t.introduced id, Hashtbl.find t.printing id with
+       | Some name, _ -> name
+       | None, Some reached ->
+         reached := true;
+         cycle_name t id ty
+       | None, None ->
+         let reached = ref false in
+         Hashtbl.set t.printing ~key:id ~data:reached;
          let body = structure t ~prec ty in
-         (match !cycle with
-          | None ->
-            Node.Table.remove t.cycles ty;
-            body
-          | Some name -> sprintf "(%s as %s)" body name)
-       | _ -> structure t ~prec ty)
+         Hashtbl.remove t.printing id;
+         if !reached
+         then (
+           let name = cycle_name t id ty in
+           Hashtbl.set t.introduced ~key:id ~data:name;
+           sprintf "(%s as %s)" body name)
+         else body)
+    | ty, _ -> structure t ~prec ty
 
   and structure t ~prec ty =
     let parens_if cond s = if cond then "(" ^ s ^ ")" else s in
@@ -728,8 +706,8 @@ module Printer = struct
     | TCode { inner; context } ->
       let inner = ty_to_string t ~prec:0 inner in
       sprintf "<%s>%s" inner (row_to_string t context)
-    | TRecord row -> row_to_string t row
-    | TVariant row -> variant_to_string t row
+    | TRecord { row; _ } -> row_to_string t row
+    | TVariant { row; _ } -> variant_to_string t row
     | TVar var -> var_name t var
 
   and variant_to_string t row =
@@ -757,14 +735,18 @@ module Printer = struct
     "{" ^ String.concat ~sep:"; " (entries @ Option.to_list tail) ^ "}"
   ;;
 
-  let ty t ty = ty_to_string t ~prec:0 ty
+  let ty t ty =
+    Hashtbl.clear t.introduced;
+    ty_to_string t ~prec:0 ty
+  ;;
 
   let recursive t ty ~name =
-    let node = canonical_ty ty in
-    Node.Table.replace t.cycles node (ref (Some name));
-    let body = structure t ~prec:0 ty in
-    Node.Table.remove t.cycles node;
-    body
+    Hashtbl.clear t.introduced;
+    let body = canonical_ty ty in
+    t.recursive <- Some (body, name);
+    let printed = structure t ~prec:0 body in
+    t.recursive <- None;
+    printed
   ;;
 
   let rec bounds t =

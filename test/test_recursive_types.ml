@@ -15,8 +15,8 @@ module T = struct
       RExtend (name, Present, ty, rest))
   ;;
 
-  let variant ?tail entries = TVariant (row ?tail entries)
-  let record ?tail entries = TRecord (row ?tail entries)
+  let variant fresh ?tail entries = Fresh.variant fresh (row ?tail entries)
+  let record fresh ?tail entries = Fresh.record fresh (row ?tail entries)
 
   (* [(f 'a as 'a)] *)
   let fix fresh f =
@@ -242,9 +242,9 @@ let%expect_test "extensible interpreter" =
      (Row_mismatch REmpty
       (RExtend Add Present
        (TTuple
-        ((TVariant (RExtend Num Present (TCon int ()) (RVar (Unbound 49 1))))
-         (TVariant (RExtend Num Present (TCon int ()) (RVar (Unbound 50 1))))))
-       (RVar (Unbound 54 1)))
+        ((TVariant (RExtend Num Present (TCon int ()) (RVar (Unbound 69 1))))
+         (TVariant (RExtend Num Present (TCon int ()) (RVar (Unbound 71 1))))))
+       (RVar (Unbound 77 1)))
       (Missing_label Add)))
     |}]
 ;;
@@ -304,7 +304,7 @@ let%expect_test "occurs check fails for unguarded cycles" =
   check (fun a -> TCon ("list", [ ATy a ]));
   check (fun a -> TCode { inner = int; context = row [ "x", a ] });
   check (fun a -> TCode { inner = a; context = REmpty });
-  check (fun a -> TArrow (record [ "x", a ], a));
+  check (fun a -> TArrow (record fresh [ "x", a ], a));
   let check_row f =
     let r = rvar fresh in
     print_s
@@ -328,11 +328,11 @@ let%expect_test "occurs check fails for unguarded cycles" =
     (Error (Occurs_check_failed (ATy (TVar (Unbound 3 1)))))
     (Error (Occurs_check_failed (ATy (TVar (Unbound 4 1)))))
     (Error (Occurs_check_failed (ATy (TVar (Unbound 5 1)))))
-    (Error (Occurs_check_failed (ARow (RVar (Unbound 6 1)))))
     (Error (Occurs_check_failed (ARow (RVar (Unbound 7 1)))))
     (Error (Occurs_check_failed (ARow (RVar (Unbound 8 1)))))
+    (Error (Occurs_check_failed (ARow (RVar (Unbound 9 1)))))
     (Ok ())
-    (Error (Occurs_check_failed (ATy (TVar (Unbound 10 1)))))
+    (Error (Occurs_check_failed (ATy (TVar (Unbound 11 1)))))
     |}]
 ;;
 
@@ -344,26 +344,27 @@ let%expect_test "guarded cycles" =
     unify fresh a (f a);
     print a
   in
-  check (fun a -> variant [ "A", a ]);
-  check (fun a -> record [ "x", TCon ("list", [ ATy a ]) ]);
-  check (fun a -> variant [ "A", TArrow (a, int) ]);
+  check (fun a -> variant fresh [ "A", a ]);
+  check (fun a -> record fresh [ "x", TCon ("list", [ ATy a ]) ]);
+  check (fun a -> variant fresh [ "A", TArrow (a, int) ]);
   check (fun a ->
-    TCode { inner = int; context = row [ "x", record [ "y", a ] ] });
-  check (fun a -> TArrow (variant [ "A", a ], int));
+    TCode { inner = int; context = row [ "x", record fresh [ "y", a ] ] });
+  check (fun a -> TArrow (variant fresh [ "A", a ], int));
   (* Through another variable. *)
   let b = tvar fresh in
   let a = tvar fresh in
-  unify fresh b (variant [ "A", a ]);
+  unify fresh b (variant fresh [ "A", a ]);
   unify fresh a (TArrow (b, int));
   print a;
   print b;
   (* A row variable within its own row, under a record. *)
   let r = rvar fresh in
+  let record_r = Fresh.record fresh r in
   print_s
     [%sexp
-      (Unify.unify_row fresh ~row1:r ~row2:(row [ "x", TRecord r ])
+      (Unify.unify_row fresh ~row1:r ~row2:(row [ "x", record_r ])
        : (unit, Unification_error.t) Result.t)];
-  print (TRecord r);
+  print record_r;
   [%expect
     {|
     (Ok ())
@@ -389,13 +390,15 @@ let%expect_test "sexps of cyclic types" =
   let fresh = Fresh.create () in
   let open T in
   let list =
-    fix fresh (fun l -> variant [ "Nil", Type.unit; "Cons", TTuple [ int; l ] ])
+    fix fresh (fun l ->
+      variant fresh [ "Nil", Type.unit; "Cons", TTuple [ int; l ] ])
   in
   print_s [%sexp (list : Type.ty)];
   let r = rvar fresh in
+  let record_r = Fresh.record fresh r in
   ignore
-    (Unify.unify_row fresh ~row1:r ~row2:(row [ "x", TRecord r ]) : _ Result.t);
-  print_s [%sexp (TRecord r : Type.ty)];
+    (Unify.unify_row fresh ~row1:r ~row2:(row [ "x", record_r ]) : _ Result.t);
+  print_s [%sexp (record_r : Type.ty)];
   print_s [%sexp (Type.ATy list : Type.arg)];
   [%expect
     {|
@@ -421,19 +424,24 @@ let%expect_test "sexps of cyclic types" =
 let%expect_test "unifying cyclic types of different unrollings" =
   let fresh = Fresh.create () in
   let open T in
-  let a = fix fresh (fun a -> variant [ "A", a ]) in
+  let a = fix fresh (fun a -> variant fresh [ "A", a ]) in
   let b = tvar fresh in
-  let unrolled = variant [ "A", variant [ "A", b ] ] in
+  let unrolled = variant fresh [ "A", variant fresh [ "A", b ] ] in
   unify fresh a unrolled;
   print b;
   print unrolled;
-  let two = fix fresh (fun a -> variant [ "A", variant [ "A", a ] ]) in
+  let two =
+    fix fresh (fun a -> variant fresh [ "A", variant fresh [ "A", a ] ])
+  in
   let three =
-    fix fresh (fun a -> variant [ "A", variant [ "A", variant [ "A", a ] ] ])
+    fix fresh (fun a ->
+      variant fresh [ "A", variant fresh [ "A", variant fresh [ "A", a ] ] ])
   in
   unify fresh two three;
   print (TTuple [ two; three ]);
-  let open_ = fix fresh (fun a -> variant [ "A", a ] ~tail:(rvar fresh)) in
+  let open_ =
+    fix fresh (fun a -> variant fresh [ "A", a ] ~tail:(rvar fresh))
+  in
   unify fresh open_ a;
   print open_;
   [%expect
@@ -451,13 +459,17 @@ let%expect_test "unifying cyclic types of different unrollings" =
 let%expect_test "mismatching cyclic types" =
   let fresh = Fresh.create () in
   let open T in
-  let a = fix fresh (fun a -> variant [ "A", a ]) in
-  let ab = fix fresh (fun a -> variant [ "A", variant [ "B", a ] ]) in
+  let a = fix fresh (fun a -> variant fresh [ "A", a ]) in
+  let ab =
+    fix fresh (fun a -> variant fresh [ "A", variant fresh [ "B", a ] ])
+  in
   unify fresh a ab;
-  let r = fix fresh (fun r -> record [ "x", r; "y", int ]) in
+  let r = fix fresh (fun r -> record fresh [ "x", r; "y", int ]) in
   let s =
     fix fresh (fun s ->
-      record [ "x", record [ "x", s; "y", TCon ("bool", []) ]; "y", int ])
+      record
+        fresh
+        [ "x", record fresh [ "x", s; "y", TCon ("bool", []) ]; "y", int ])
   in
   unify fresh r s;
   print r;
@@ -494,7 +506,10 @@ let%expect_test "generalization and instantiation of cyclic types" =
   let open T in
   let elt = Type.TVar (Fresh.var fresh ~rank:2) in
   let list = Type.TVar (Fresh.var fresh ~rank:2) in
-  unify fresh list (variant [ "Nil", Type.unit; "Cons", TTuple [ elt; list ] ]);
+  unify
+    fresh
+    list
+    (variant fresh [ "Nil", Type.unit; "Cons", TTuple [ elt; list ] ]);
   let ty = Type.TTuple [ list; list ] in
   print ty;
   Scheme.generalize_ty ~rank:1 ty;
@@ -504,7 +519,7 @@ let%expect_test "generalization and instantiation of cyclic types" =
   let bools = inst () in
   print ints;
   let cons elt =
-    variant [ "Cons", TTuple [ elt; tvar fresh ] ] ~tail:(rvar fresh)
+    variant fresh [ "Cons", TTuple [ elt; tvar fresh ] ] ~tail:(rvar fresh)
   in
   (match ints, bools with
    | TTuple [ i; _ ], TTuple [ b; _ ] ->
@@ -576,7 +591,7 @@ let%expect_test "recursive aliases" =
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     (Unification_error
      (Row_mismatch REmpty
-      (RExtend Other Present (TCon unit ()) (RVar (Unbound 26 1)))
+      (RExtend Other Present (TCon unit ()) (RVar (Unbound 29 1)))
       (Missing_label Other)))
     |}]
 ;;
@@ -750,11 +765,13 @@ let%expect_test "sexps of recursive aliases" =
       ((name l) (params ((ATy (TVar (Generic 0)))))
        (kind
         (Alias
-         (Cycle 0
-          (TVariant
-           (RExtend Nil Present (TCon unit ())
-            (RExtend Cons Present
-             (TTuple ((TVar (Generic 0)) (TVar (Link (Cycle_ref 0))))) REmpty)))))))))
+         (TVar
+          (Link
+           (Cycle 0
+            (TVariant
+             (RExtend Nil Present (TCon unit ())
+              (RExtend Cons Present
+               (TTuple ((TVar (Generic 0)) (TVar (Link (Cycle_ref 0))))) REmpty)))))))))))
     |}]
 ;;
 
@@ -762,7 +779,8 @@ let%expect_test "bounds with cyclic types" =
   let fresh = Fresh.create () in
   let open T in
   let list () =
-    fix fresh (fun l -> variant [ "Nil", Type.unit; "Cons", TTuple [ int; l ] ])
+    fix fresh (fun l ->
+      variant fresh [ "Nil", Type.unit; "Cons", TTuple [ int; l ] ])
   in
   let r = rvar fresh in
   print_s
@@ -773,11 +791,14 @@ let%expect_test "bounds with cyclic types" =
          ~bound:(row [ "x", list () ] ~tail:(rvar fresh))
          ~shadowed:String.Set.empty
        : (unit, Unification_error.t) Result.t)];
-  print (TRecord r);
+  print (Fresh.record fresh r);
   let x = tvar fresh in
-  unify fresh (TRecord r) (record [ "x", x ]);
-  unify fresh x (variant [ "Cons", TTuple [ int; list () ] ] ~tail:(rvar fresh));
-  print (TRecord r);
+  unify fresh (Fresh.record fresh r) (record fresh [ "x", x ]);
+  unify
+    fresh
+    x
+    (variant fresh [ "Cons", TTuple [ int; list () ] ] ~tail:(rvar fresh));
+  print (Fresh.record fresh r);
   let s = rvar fresh in
   ignore
     (Unify.constrain_row
@@ -788,10 +809,12 @@ let%expect_test "bounds with cyclic types" =
      : _ Result.t);
   unify
     fresh
-    (TRecord s)
+    (Fresh.record fresh s)
     (record
+       fresh
        [ ( "x"
          , variant
+             fresh
              [ "Cons", TTuple [ Type.bool; tvar fresh ] ]
              ~tail:(rvar fresh) )
        ]);
@@ -928,7 +951,7 @@ let%expect_test "instantiation and unification of large types" =
       (generic ())
   in
   let records =
-    Type.TTuple (List.init n ~f:(fun _ -> T.record [ "x", generic () ]))
+    Type.TTuple (List.init n ~f:(fun _ -> T.record fresh [ "x", generic () ]))
   in
   let ty = Type.TTuple [ chain; records ] in
   Scheme.generalize_ty ~rank:1 ty;
@@ -970,5 +993,174 @@ let%expect_test "instantiation and unification of large types" =
     ((generic 4001) ("unbound at 1" 8002))
     (Ok ())
     (("unbound at 1" 4001))
+    |}]
+;;
+
+(* [t0['a] = 'a] and [t(k+1)['a] = step tk['a]], so [tn] has [2^n] paths
+   when [step] uses its argument twice, but [n] expansions. *)
+let alias_dag n ~step =
+  let name k = sprintf "t%d" k in
+  let a = Decl.ty "a" in
+  Decl.alias (name 0) ~params:[ a ] (Ty.var "a")
+  :: List.init n ~f:(fun k ->
+    Decl.alias
+      (name (k + 1))
+      ~params:[ a ]
+      (step (Ty.con (name k) ~args:[ Ty (Ty.var "a") ])))
+;;
+
+(* The distinct records and variants, [Link]s and other variables reachable. *)
+let print_parts ty =
+  let nodes = Int.Hash_set.create () in
+  let links = Int.Hash_set.create () in
+  let vars = Int.Hash_set.create () in
+  let first set id =
+    match Hash_set.strict_add set id with
+    | Ok () -> true
+    | Error _ -> false
+  in
+  let rec go_ty (ty : Type.ty) =
+    match ty with
+    | TVar ({ state = Link target; _ } as var) ->
+      if first links var.id then go_ty target
+    | TVar var -> ignore (first vars var.id : bool)
+    | TCon (_, args) ->
+      List.iter args ~f:(function
+        | ATy ty -> go_ty ty
+        | ARow row -> go_row row)
+    | TArrow (ty1, ty2) ->
+      go_ty ty1;
+      go_ty ty2
+    | TTuple tys -> List.iter tys ~f:go_ty
+    | TCode { inner; context } ->
+      go_ty inner;
+      go_row context
+    | TRecord { id; row } | TVariant { id; row } ->
+      if first nodes id then go_row row
+  and go_row (row : Type.row) =
+    match row with
+    | REmpty -> ()
+    | RExtend (_, _, ty, rest) ->
+      go_ty ty;
+      go_row rest
+    | RVar ({ state = Link target; _ } as var) ->
+      if first links var.id then go_row target
+    | RVar var -> ignore (first vars var.id : bool)
+  in
+  go_ty ty;
+  print_s
+    [%message
+      ""
+        ~records_and_variants:(Hash_set.length nodes : int)
+        ~links:(Hash_set.length links : int)
+        ~vars:(Hash_set.length vars : int)]
+;;
+
+let%expect_test "traversals of shared aliases take linear time" =
+  let n = 40 in
+  let t_n param = Ty.con (sprintf "t%d" n) ~args:[ Ty param ] in
+  let check ~step =
+    let program =
+      alias_dag n ~step
+      @ [ Toplevel.Let ("f", [ typed "x" (t_n (Ty.var "a")) ], None, int 1)
+        ; top "g" [ "y" ] (app (var "f") [ var "y" ])
+        ; Toplevel.Let
+            ("h", [ typed "z" (t_n Ty.int) ], None, app (var "g") [ var "z" ])
+        ]
+    in
+    match Typecheck.typecheck (Typecheck.create ()) ~program with
+    | Error error -> print_s [%sexp (error : Typecheck_error.t)]
+    | Ok signature ->
+      List.iter signature ~f:(function
+        | Value { name; scheme; _ } ->
+          (match Type.canonical_ty scheme with
+           | TArrow (arg, result) ->
+             ignore (Type.sexp_of_ty arg : Sexp.t);
+             printf "%s : _ -> %s " name (Type.to_string_hum result);
+             print_parts arg
+           | _ -> assert false)
+        | Type _ | Module _ -> ())
+  in
+  check ~step:(fun t -> Ty.variant [ "L", t; "R", t ]);
+  check ~step:(fun t -> Ty.tuple [ t; t ]);
+  [%expect
+    {|
+    f : _ -> int ((records_and_variants 40) (links 41) (vars 1))
+    g : _ -> int ((records_and_variants 40) (links 41) (vars 1))
+    h : _ -> int ((records_and_variants 40) (links 41) (vars 0))
+    f : _ -> int ((records_and_variants 0) (links 41) (vars 1))
+    g : _ -> int ((records_and_variants 0) (links 41) (vars 1))
+    h : _ -> int ((records_and_variants 0) (links 41) (vars 0))
+    |}]
+;;
+
+let%expect_test "cycle names are introduced in each type printed" =
+  let l_of a = Ty.con "l" ~args:[ Ty a ] in
+  let l =
+    Decl.alias
+      "l"
+      ~params:[ Decl.ty "a" ]
+      (Ty.variant
+         [ "Cons", Ty.tuple [ Ty.var "a"; l_of (Ty.var "a") ]; "Nil", Ty.unit ])
+  in
+  let a = Ty.var "a" in
+  check
+    [ l
+    ; Decl.record "s" ~params:[ Decl.ty "a" ] [ "c", l_of a; "d", l_of a ]
+    ; Decl.variant "v" ~params:[ Decl.ty "a" ] [ "V", [ l_of a; l_of a ] ]
+    ; Toplevel.Let
+        ("pair", [ typed "x" (Ty.tuple [ l_of a; l_of a ]) ], None, var "x")
+    ];
+  [%expect
+    {|
+    type l['a] = [`Cons of 'a * l['a] | `Nil]
+    type s['a] = { c : ([`Cons of 'a * 'b | `Nil] as 'b); d : ([`Cons of 'a * 'b | `Nil] as 'b) }
+    type v['a] = V of ([`Cons of 'a * 'b | `Nil] as 'b) * 'b
+    val pair : ([`Cons of 'a * 'b | `Nil] as 'b) * 'b -> 'b * 'b
+    |}]
+;;
+
+let%expect_test "elaboration stops at a failed expansion" =
+  let c = Ty.con "c" in
+  check
+    [ Decl.variant "v" [ "A", [ c ]; "B", [ c ] ]
+    ; Decl.alias "u" (Ty.tuple [ c; c ])
+    ; Decl.alias "c" (Ty.tuple [ c; Ty.int ])
+    ];
+  check
+    [ Decl.alias "u" (Ty.tuple [ c; c ])
+    ; Decl.alias "c" (Ty.tuple [ c; Ty.int ])
+    ];
+  [%expect
+    {|
+    (Cyclic_type_alias c)
+    (Cyclic_type_alias c)
+    |}]
+;;
+
+let%expect_test "instantiation copies each part of a cycle once" =
+  let fresh = Fresh.create () in
+  let open T in
+  let elt = Type.TVar (Fresh.var fresh ~rank:2) in
+  let list = Type.TVar (Fresh.var fresh ~rank:2) in
+  unify
+    fresh
+    list
+    (variant
+       fresh
+       [ "Nil", Type.unit; "Cons", Type.TTuple [ elt; TArrow (int, list) ] ]);
+  (* Entered through a [Link], as through the variant. *)
+  let ty = Type.TTuple [ list; Type.canonical_ty list ] in
+  Scheme.generalize_ty ~rank:1 ty;
+  print_parts ty;
+  let instance = Scheme.instantiate fresh ~rank:1 ty in
+  print_parts instance;
+  print instance;
+  [%expect
+    {|
+    (Ok ())
+    ((records_and_variants 1) (links 1) (vars 1))
+    ((records_and_variants 1) (links 1) (vars 1))
+    ([`Cons of '_a * (int -> '_b) | `Nil] as '_b) * '_b
     |}]
 ;;

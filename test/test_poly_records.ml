@@ -119,7 +119,7 @@ let%expect_test "update, restriction and access require the field" =
       (Missing_label x)))
     (Unification_error
      (Row_mismatch
-      (RExtend y Present (TVar (Unbound 25 1)) (RVar (Unbound 26 1)))
+      (RExtend y Present (TVar (Unbound 27 1)) (RVar (Unbound 28 1)))
       (RExtend x Present (TCon int ()) REmpty) (Missing_label y)))
     (Unification_error
      (Row_mismatch
@@ -505,7 +505,7 @@ let%expect_test "rows shared between contexts and records" =
     (Unification_error
      (Row_mismatch
       (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-       (RVar (Unbound 30 1)))
+       (RVar (Unbound 33 1)))
       REmpty (Missing_label x)))
     |}]
 ;;
@@ -534,7 +534,7 @@ let%expect_test "unification errors" =
     (Unification_error
      (Type_mismatch
       (TRecord (RExtend x Present (TVar (Unbound 18 1)) (RVar (Unbound 19 1))))
-      (TVariant (RExtend A Present (TCon unit ()) (RVar (Unbound 20 1))))
+      (TVariant (RExtend A Present (TCon unit ()) (RVar (Unbound 21 1))))
       Structural_mismatch))
     (Unification_error
      (Type_mismatch
@@ -543,13 +543,13 @@ let%expect_test "unification errors" =
     (Unification_error
      (Type_mismatch
       (TRecord (RExtend x Present (TVar (Unbound 18 1)) (RVar (Unbound 19 1))))
-      (TCode (inner (TCon int ())) (context (RVar (Unbound 20 1))))
+      (TCode (inner (TCon int ())) (context (RVar (Unbound 21 1))))
       Structural_mismatch))
     (Unification_error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     (Unification_error
      (Row_mismatch (RExtend x Present (TVar (Unbound 20 1)) REmpty)
-      (RExtend y Present (TVar (Unbound 22 1)) REmpty) (Missing_label x)))
+      (RExtend y Present (TVar (Unbound 23 1)) REmpty) (Missing_label x)))
     |}]
 ;;
 
@@ -693,15 +693,15 @@ let%expect_test "structural types may be recursive" =
       (RExtend x Present (TCon int ())
        (RVar
         (Link
-         (RExtend x (PVar (Unbound 28 1)) (TVar (Unbound 29 1))
-          (RVar (Unbound 30 1))))))
+         (RExtend x (PVar (Unbound 34 1)) (TVar (Unbound 35 1))
+          (RVar (Unbound 36 1))))))
       (RExtend y Present (TCon int ())
        (RVar
         (Link
          (RVar
           (Link
-           (RExtend x (PVar (Unbound 28 1)) (TVar (Unbound 29 1))
-            (RVar (Unbound 30 1))))))))
+           (RExtend x (PVar (Unbound 34 1)) (TVar (Unbound 35 1))
+            (RVar (Unbound 36 1))))))))
       Cyclic_row))
     type t = {next : t}
     type a = {b : [`A of a]}

@@ -11,3 +11,5 @@ let id t =
 ;;
 
 let var t ~rank = Type.Var.create (id t) (Unbound rank)
+let record t row = Type.TRecord { id = id t; row }
+let variant t row = Type.TVariant { id = id t; row }

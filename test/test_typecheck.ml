@@ -552,7 +552,7 @@ let%expect_test "staged power" =
     (Unification_error
      (Row_mismatch REmpty
       (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
-       (RVar (Unbound 67 1)))
+       (RVar (Unbound 74 1)))
       (Missing_label y)))
     (Unification_error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
@@ -708,9 +708,9 @@ let%expect_test "names bound at a later level are absent from spliced code" =
     val inner_splice : <<'a>{z?'b : int; ..'c}>{-z; ..'d} -> <<'a>{..'e}>{..'f} where ..'c <= {..'e}, ..'d <= {..'f}
     val uses_z : <<int>{..'_a}>{..'_b}
     (Unification_error
-     (Row_mismatch (RExtend z Absent (TVar (Unbound 40 1)) (RVar (Unbound 41 1)))
-      (RExtend z (PVar (Link Present)) (TVar (Unbound 47 1))
-       (RVar (Unbound 48 1)))
+     (Row_mismatch (RExtend z Absent (TVar (Unbound 44 1)) (RVar (Unbound 45 1)))
+      (RExtend z (PVar (Link Present)) (TVar (Unbound 52 1))
+       (RVar (Unbound 53 1)))
       (Presence_mismatch z)))
     (Variable_used_at_wrong_level (name z) (var_level 2) (used_at 1))
     |}]
@@ -844,7 +844,7 @@ let%expect_test "mutually recursive staged functions" =
        (RVar
         (Link
          (RExtend z (PVar (Link Present)) (TVar (Link (TCon int ())))
-          (RVar (Unbound 84 1))))))
+          (RVar (Unbound 94 1))))))
       (Missing_label y)))
     |}]
 ;;
@@ -875,7 +875,8 @@ let%expect_test "toplevel splices drop names spliced code only may use" =
     val used_toplevel : bool
     (Unification_error
      (Type_mismatch (TCon bool ())
-      (TArrow (TVar (Unbound 41 1)) (TVar (Unbound 41 1))) Structural_mismatch))
+      (TArrow (TVar (Unbound 44 1)) (TVar (Link (TVar (Unbound 44 1)))))
+      Structural_mismatch))
     |}]
 ;;
 
@@ -927,7 +928,7 @@ let%expect_test "presence approximation" =
     (Unification_error
      (Row_mismatch
       (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-       (RVar (Unbound 47 1)))
+       (RVar (Link (RVar (Unbound 50 1)))))
       REmpty (Missing_label x)))
     |}]
 ;;

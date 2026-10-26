@@ -233,7 +233,7 @@ module Poly_row = struct
   ;;
 
   let variant t scope ~tag ~arg =
-    Type.TVariant (fst (open_ t scope [ tag, arg ]))
+    Fresh.variant t (fst (open_ t scope [ tag, arg ]))
   ;;
 
   let check_distinct_labels entries =
@@ -294,9 +294,9 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Syntax.Pattern.t)
       | Open -> Scope.fresh_row t scope, []
       | Bind name ->
         let tail = Scope.fresh_row t scope in
-        tail, [ name, Type.TRecord tail ]
+        tail, [ name, Fresh.record t tail ]
     in
-    ( Type.TRecord (Poly_row.present (List.rev fields) ~tail)
+    ( Fresh.record t (Poly_row.present (List.rev fields) ~tail)
     , bindings @ rest_bindings )
 ;;
 
@@ -319,7 +319,7 @@ module Variant_match = struct
           scope
           (List.map handled ~f:(fun tag -> tag, Scope.fresh_ty t scope))
       in
-      Ok (Type.TVariant row, [ name, Type.TVariant rest ])
+      Ok (Fresh.variant t row, [ name, Fresh.variant t rest ])
     | _ -> pattern_type t scope ~pattern
   ;;
 
@@ -363,7 +363,7 @@ module Variant_match = struct
           (List.map tags ~f:(fun tag -> tag, Scope.fresh_ty t scope))
           ~tail:REmpty
       in
-      Unify.unify_ty t ~ty1:(TVariant closed) ~ty2:scrutinee |> lift)
+      Unify.unify_ty t ~ty1:(Fresh.variant t closed) ~ty2:scrutinee |> lift)
   ;;
 end
 
@@ -598,7 +598,7 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
     result
   | Poly_record fields ->
     let%map.Result fields = labelled_types t scope fields in
-    Type.TRecord (Poly_row.present fields ~tail:REmpty)
+    Fresh.record t (Poly_row.present fields ~tail:REmpty)
   | Poly_field (expr, label) ->
     let ty = Scope.fresh_ty t scope in
     let%map.Result (_ : Type.row) =
@@ -608,13 +608,13 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
   | Poly_extend (fields, expr) ->
     let%bind.Result fields = labelled_types t scope fields in
     let rest = Scope.fresh_row t scope in
-    let%map.Result () = check_expr t scope ~expr ~ty:(TRecord rest) in
-    Type.TRecord (Poly_row.present fields ~tail:rest)
+    let%map.Result () = check_expr t scope ~expr ~ty:(Fresh.record t rest) in
+    Fresh.record t (Poly_row.present fields ~tail:rest)
   | Poly_restrict (expr, label) ->
     let%map.Result rest =
       check_open_record t scope expr [ label, Scope.fresh_ty t scope ]
     in
-    Type.TRecord rest
+    Fresh.record t rest
   | Poly_update (expr, fields) ->
     let%bind.Result fields = labelled_types t scope fields in
     let%map.Result rest =
@@ -624,7 +624,7 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
         expr
         (List.map fields ~f:(fun (label, _) -> label, Scope.fresh_ty t scope))
     in
-    Type.TRecord (Poly_row.present fields ~tail:rest)
+    Fresh.record t (Poly_row.present fields ~tail:rest)
   | Poly_variant (tag, arg) ->
     let%map.Result arg =
       match arg with
@@ -652,7 +652,7 @@ and check_exprs t scope exprs =
    its row. *)
 and check_open_record t scope expr entries =
   let row, rest = Poly_row.open_ t scope entries in
-  let%map.Result () = check_expr t scope ~expr ~ty:(TRecord row) in
+  let%map.Result () = check_expr t scope ~expr ~ty:(Fresh.record t row) in
   rest
 
 and substitute_from_scope t (scope : Scope.t) ~context =
