@@ -2,14 +2,19 @@ open! Core
 
 (** The bindings of one activation: a closure's captures and arguments, and
     the locals bound while evaluating its body (or the toplevels). Idents are
-    unique, so a binding is never shadowed or removed. *)
+    unique, so a binding is never shadowed or removed. Lookups fall back to
+    [fallback] (the toplevels). *)
 module Env : sig
   type 'value t
 
   val create : unit -> _ t
 
   (** Errors if [ident] is unbound, or declared but not yet [set]. *)
-  val lookup : 'value t -> ident:Typed.Ident.t -> 'value Or_error.t
+  val lookup
+    :  ?fallback:'value t
+    -> 'value t
+    -> ident:Typed.Ident.t
+    -> 'value Or_error.t
 
   (** Binds [ident] to an empty slot, to be [set] later, eg. for each member
       of a recursive binding before evaluating their bodies. *)
@@ -21,7 +26,8 @@ module Env : sig
   (** A new env sharing the slots of [captures] with [t], so slots filled
       later are seen by both. *)
   val of_captures
-    :  'value t
+    :  ?fallback:'value t
+    -> 'value t
     -> captures:Typed.Ident.Hash_set.t
     -> 'value t Or_error.t
 end
@@ -33,14 +39,25 @@ module Value : sig
     | String of string
     | Char of char
     | Unit
-    | Record of t String.Map.t
-    | Variant of string * t
+    | Tuple of t list
+    | Construct of Typed.Constructor_ref.t * t list
+    | Record of t array (** By field index. *)
+    | Poly_record of t String.Map.t
+    | Poly_variant of string * t (** A tag without an argument has [Unit]. *)
     | Function of
-        { args : Typed.Ident.t list
+        { args : Typed.Ident.t list (** Those not yet applied, non-empty. *)
         ; body : Typed.Expr.t
         ; env : t Env.t
+        ; level : int
         }
-  [@@deriving sexp_of, variants]
+    | Code of
+        { expr : Typed.Expr.t
+        ; persistent : t Typed.Ident.Map.t
+          (** The values of the persistent binders [expr] embeds. *)
+        }
+
+  (** Functions are [<fun>], as their envs may contain themselves. *)
+  val sexp_of_t : t -> Sexp.t
 end
 
 type t
@@ -63,4 +80,9 @@ val captures
   -> body:Typed.Expr.t
   -> Typed.Ident.Hash_set.t
 
-val eval : t -> unit
+(** Evaluates the components added, in order. Toplevel splices are expanded
+    first, each member's on its own. *)
+val eval : t -> unit Or_error.t
+
+(** The value of a toplevel, once evaluated. *)
+val find : t -> ident:Typed.Ident.t -> Value.t Or_error.t
