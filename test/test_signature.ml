@@ -311,8 +311,10 @@ let%expect_test "sexp" =
        ((Value
          ((name f)
           (scheme
-           (TArrow (TVar (Generic 2)) (TCon box ((ATy (TVar (Generic 2)))))))
+           (TArrow (TVar (Generic 2))
+            (TVar (Link (TCon box ((ATy (TVar (Link (TVar (Generic 2)))))))))))
           (persistent true)))
-        (Value ((name n) (scheme (TCon int ())) (persistent false)))))))
+        (Value
+         ((name n) (scheme (TVar (Link (TCon int ())))) (persistent false)))))))
     |}]
 ;;

@@ -64,7 +64,7 @@ module Type_decl = struct
         |> String.concat ~sep:"; "
         |> sprintf "{ %s }"
         |> Some
-      | Alias body -> Some (ty body)
+      | Alias body -> Some (Type.Printer.recursive printer body ~name:head)
     in
     match body with
     | None -> sprintf "type %s" head

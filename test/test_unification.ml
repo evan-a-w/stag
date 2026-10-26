@@ -537,7 +537,8 @@ let%expect_test "presence variables are generalized and their rank lowered" =
       ~presence:outer
       (ext "z" int REmpty ~presence:(pvar fresh ~rank:2))
   in
-  print_row (Scheme.generalize_row ~rank:1 context);
+  Scheme.generalize_ty ~rank:1 (Fresh.record fresh context);
+  print_row context;
   [%expect
     {|
     (Ok ())
@@ -622,7 +623,7 @@ let%expect_test "bounds are kept by generalization and instantiation" =
   let ty = TArrow (code r, code bound) in
   let print ty = print_endline (Type.to_string_hum ty) in
   print ty;
-  let ty = Scheme.generalize_ty ~rank:1 ty in
+  Scheme.generalize_ty ~rank:1 ty;
   print ty;
   [%expect
     {|

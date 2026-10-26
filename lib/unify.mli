@@ -1,7 +1,8 @@
 open! Core
 
 (** Unification of types, rows and presences, and row bounds. Variables
-    bound are rank lowered and occurs checked. *)
+    bound are rank lowered and occurs checked, allowing cycles through
+    records and variants. Cyclic types are unified coinductively. *)
 
 val unify_ty
   :  Fresh.t

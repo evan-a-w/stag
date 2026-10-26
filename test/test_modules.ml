@@ -752,7 +752,8 @@ let%expect_test "splicing code with canonically named free variables" =
      (Row_mismatch
       (RExtend M.n (PVar (Link Present)) (TVar (Unbound 25 1))
        (RVar (Unbound 26 1)))
-      (RExtend n (PVar (Unbound 27 1)) (TCon int ()) REmpty) (Missing_label M.n)))
+      (RExtend n (PVar (Unbound 27 1)) (TVar (Link (TCon int ()))) REmpty)
+      (Missing_label M.n)))
     |}]
 ;;
 

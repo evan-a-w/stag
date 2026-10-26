@@ -34,7 +34,9 @@ module Type_decl : sig
     type t =
       | Variant of Constructor.t list
       | Record of Field.t list
-      | Alias of Type.ty (** Expanded. *)
+      | Alias of Type.ty
+      (** Expanded: a recursive alias is a cyclic type, printed with the
+          alias in place of the cycles reaching the whole body. *)
       | Abstract
     [@@deriving sexp_of]
   end

@@ -39,8 +39,14 @@ type ty =
       { inner : ty
       ; context : row
       }
-  | TRecord of row
-  | TVariant of row (** Tags without the backquote. *)
+  | TRecord of
+      { id : id
+      ; row : row
+      }
+  | TVariant of
+      { id : id
+      ; row : row (** Tags without the backquote. *)
+      }
   | TVar of (ty, Nothing.t) Var.t
 
 and row =
@@ -67,8 +73,18 @@ and bound =
   { row : row
   ; shadowed : String.Set.t
   }
-[@@deriving sexp_of]
 
+(** Types are graphs: [Link]s may close cycles, each through a [TRecord] or
+    [TVariant] (equi-recursive types). Records and variants are identified by
+    their [id], unique among them, so may be shared. Sexps omit ids, and print a
+    record or variant reached again within itself as [(Cycle_ref n)], and the
+    record or variant as [(Cycle n ...)]. *)
+val sexp_of_ty : ty -> Sexp.t
+
+val sexp_of_row : row -> Sexp.t
+val sexp_of_presence : presence -> Sexp.t
+val sexp_of_arg : arg -> Sexp.t
+val sexp_of_bound : bound -> Sexp.t
 val int : ty
 val bool : ty
 val string : ty
@@ -85,25 +101,35 @@ val canonical_presence : presence -> presence
 val tail_var : row -> (row, bound) Var.t option
 
 (** Rebuilds a type, replacing each variable that is not a [Link] by the result
-    of the callback for its kind. Links are followed, so do not appear in the
-    result. *)
+    of the callback for its kind. A [Link], record or variant whose variables
+    all satisfy [keeps], so would be unchanged, is kept as is; others are
+    copied once each, preserving sharing through them: a [Link] to a new
+    [Link], of id [id ()], which closes the copy of a cycle (as does one to
+    the copy of a record or variant reached again within itself). Copied
+    records and variants get ids [id ()]. *)
 module Mapper : sig
   type t =
     { ty : (ty, Nothing.t) Var.t -> ty
     ; row : (row, bound) Var.t -> row
     ; presence : (presence, Nothing.t) Var.t -> presence
+    ; keeps : 'a 'bound. ('a, 'bound) Var.t -> bool
+    ; id : unit -> id
     }
 end
 
 val map_ty : Mapper.t -> ty -> ty
 val map_row : Mapper.t -> row -> row
 
-(** Visits each variable that is not a [Link], stopping at the first error. *)
+(** Visits the variables that are not [Link]s, stopping at the first error.
+    [guarded] is whether the occurrence is within a [TRecord] or [TVariant] of
+    the type iterated over. An occurrence may be visited more than once, but
+    each [Link], record and variant is followed at most twice. *)
 module Iter : sig
   type 'e t =
-    { ty : (ty, Nothing.t) Var.t -> (unit, 'e) Result.t
-    ; row : (row, bound) Var.t -> (unit, 'e) Result.t
-    ; presence : (presence, Nothing.t) Var.t -> (unit, 'e) Result.t
+    { ty : guarded:bool -> (ty, Nothing.t) Var.t -> (unit, 'e) Result.t
+    ; row : guarded:bool -> (row, bound) Var.t -> (unit, 'e) Result.t
+    ; presence :
+        guarded:bool -> (presence, Nothing.t) Var.t -> (unit, 'e) Result.t
     }
 end
 
@@ -112,7 +138,9 @@ val iter_row : 'e Iter.t -> row -> (unit, 'e) Result.t
 
 (** Renders types for humans. Variables are named in order of appearance,
     consistently across the types one printer renders; weak (unbound) ones are
-    prefixed with [_]. *)
+    prefixed with [_]. A cyclic type is written [(t as 'a)], with ['a] in [t]
+    standing for itself, and later occurrences written ['a]; it is weak if it
+    has a weak variable. *)
 module Printer : sig
   type t
 
@@ -121,6 +149,9 @@ module Printer : sig
   val create : ?type_name:(string -> string) -> unit -> t
 
   val ty : t -> ty -> string
+
+  (** Renders [ty] with the occurrences of itself within it as [name]. *)
+  val recursive : t -> ty -> name:string -> string
 
   (** The bounds of the row variables reached, as
       [" where ..'a <= {...}"], or [""] if there are none. *)

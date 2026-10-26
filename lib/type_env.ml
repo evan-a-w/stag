@@ -36,7 +36,8 @@ module Decl = struct
 end
 
 type t =
-  { types : Decl.t String.Map.t
+  { fresh : Fresh.t
+  ; types : Decl.t String.Map.t
   ; constructors : Constructor.t String.Map.t
   ; fields : Field.t String.Map.t
   ; checked : Signature.Type_decl.t String.Map.t
@@ -125,33 +126,77 @@ module Vars = struct
   ;;
 end
 
-let rec elaborate' t module_ vars (expr : Type_expr.t)
+(* An expansion of an alias: [knot], linked to the alias's body once
+   elaborated, stands for the expansion. Each alias is expanded once per
+   (physical) arguments during one elaboration, so references to it share the
+   knot, also while it is being expanded, which closes a cycle. As the knot is
+   a [Link], traversals of the expansion's shared occurrences take it once.
+   It is [Generic] until linked, but only reachable from the elaboration,
+   which stops at its first error and is then dropped. *)
+module Expansion = struct
+  type t =
+    { args : Type.arg list
+    ; knot : (Type.ty, Nothing.t) Type.Var.t
+    ; mutable expanded : bool
+    ; mutable reached_back : bool
+    }
+
+  let same_args t args =
+    List.equal
+      (fun (arg1 : Type.arg) (arg2 : Type.arg) ->
+         match arg1, arg2 with
+         | ATy ty1, ATy ty2 -> phys_equal ty1 ty2
+         | ARow row1, ARow row2 -> phys_equal row1 row2
+         | ATy _, ARow _ | ARow _, ATy _ -> false)
+      t.args
+      args
+  ;;
+
+  (* Whether the cycle the knot closes passes through a record or variant. *)
+  let guarded body ~knot =
+    let unguarded ~guarded var =
+      if (not guarded) && phys_equal var knot then Error () else Ok ()
+    in
+    let ok ~guarded:_ _ = Ok () in
+    Type.iter_ty { ty = unguarded; row = ok; presence = ok } body
+    |> Result.is_ok
+  ;;
+end
+
+(* Like [List.map] then [Result.all], but stops at the first error. *)
+let map_result xs ~f =
+  List.fold_result xs ~init:[] ~f:(fun ys x ->
+    let%map.Result y = f x in
+    y :: ys)
+  |> Result.map ~f:List.rev
+;;
+
+let rec elaborate' t module_ vars ~expansions (expr : Type_expr.t)
   : (Type.ty, Typecheck_error.t) Result.t
   =
+  let elaborate = elaborate' t module_ vars ~expansions in
   match expr with
   | Var name -> Vars.ty vars name
-  | Con (path, args) -> elaborate_con t module_ vars path args
+  | Con (path, args) -> elaborate_con t module_ vars ~expansions path args
   | Arrow (ty1, ty2) ->
-    let%bind.Result ty1 = elaborate' t module_ vars ty1 in
-    let%map.Result ty2 = elaborate' t module_ vars ty2 in
+    let%bind.Result ty1 = elaborate ty1 in
+    let%map.Result ty2 = elaborate ty2 in
     Type.TArrow (ty1, ty2)
   | Tuple tys ->
-    let%map.Result tys =
-      List.map tys ~f:(elaborate' t module_ vars) |> Result.all
-    in
+    let%map.Result tys = map_result tys ~f:elaborate in
     Type.TTuple tys
   | Code { inner; context } ->
-    let%bind.Result inner = elaborate' t module_ vars inner in
-    let%map.Result context = elaborate_row t module_ vars context in
+    let%bind.Result inner = elaborate inner in
+    let%map.Result context = elaborate_row t module_ vars ~expansions context in
     Type.TCode { inner; context }
   | Record row ->
-    let%map.Result row = elaborate_row t module_ vars row in
-    Type.TRecord row
+    let%map.Result row = elaborate_row t module_ vars ~expansions row in
+    Fresh.record t.fresh row
   | Variant row ->
-    let%map.Result row = elaborate_row t module_ vars row in
-    Type.TVariant row
+    let%map.Result row = elaborate_row t module_ vars ~expansions row in
+    Fresh.variant t.fresh row
 
-and elaborate_row t module_ vars (row : Type_expr.row)
+and elaborate_row t module_ vars ~expansions (row : Type_expr.row)
   : (Type.row, Typecheck_error.t) Result.t
   =
   let rec go (row : Type_expr.row) ~seen =
@@ -160,14 +205,14 @@ and elaborate_row t module_ vars (row : Type_expr.row)
     | Extend (name, _, _) when Set.mem seen name ->
       Error (Typecheck_error.Duplicate_row_entry name)
     | Extend (name, ty, rest) ->
-      let%bind.Result ty = elaborate' t module_ vars ty in
+      let%bind.Result ty = elaborate' t module_ vars ~expansions ty in
       let%map.Result rest = go rest ~seen:(Set.add seen name) in
       Type.RExtend (name, Present, ty, rest)
     | Var name -> Vars.row vars name
   in
   go row ~seen:String.Set.empty
 
-and elaborate_con t module_ vars path args =
+and elaborate_con t module_ vars ~expansions path args =
   let%bind.Result decl = find_type t module_ path in
   let expected = List.length decl.params in
   let got = List.length args in
@@ -179,70 +224,63 @@ and elaborate_con t module_ vars path args =
         (Typecheck_error.Type_arity_mismatch { type_name = path; expected; got })
   in
   let%bind.Result args =
-    List.map2_exn decl.decl.params args ~f:(fun param arg ->
+    map_result (List.zip_exn decl.decl.params args) ~f:(fun (param, arg) ->
       match param, arg with
       | Ty _, Ty ty ->
-        elaborate' t module_ vars ty |> Result.map ~f:(fun ty -> Type.ATy ty)
+        elaborate' t module_ vars ~expansions ty
+        |> Result.map ~f:(fun ty -> Type.ATy ty)
       | Row _, Row row ->
-        elaborate_row t module_ vars row
+        elaborate_row t module_ vars ~expansions row
         |> Result.map ~f:(fun row -> Type.ARow row)
       | Ty _, Row _ | Row _, Ty _ ->
         Error
           (Typecheck_error.Type_arg_kind_mismatch { type_name = path; param }))
-    |> Result.all
   in
   match decl.decl.kind with
+  | Variant _ | Record _ | Abstract -> Ok (Type.TCon (decl.name, args))
   | Alias body ->
+    let instances = Hashtbl.find_multi expansions decl.name in
+    (match
+       List.find instances ~f:(fun expansion ->
+         Expansion.same_args expansion args)
+     with
+     | Some expansion ->
+       if not expansion.expanded then expansion.reached_back <- true;
+       Ok (Type.TVar expansion.knot)
+     | None ->
+       if List.exists instances ~f:(fun expansion -> not expansion.expanded)
+       then Error (Typecheck_error.Non_regular_recursive_alias decl.name)
+       else expand t decl ~args ~expansions body)
+
+and expand t (decl : Decl.t) ~args ~expansions body =
+  let knot = Type.Var.create (Fresh.id t.fresh) Generic in
+  let expansion =
+    { Expansion.args; knot; expanded = false; reached_back = false }
+  in
+  Hashtbl.add_multi expansions ~key:decl.name ~data:expansion;
+  let%bind.Result body =
     elaborate'
       t
       decl.module_
       (Params (Decl.param_map { decl with params = args }))
+      ~expansions
       body
-  | Variant _ | Record _ | Abstract -> Ok (Type.TCon (decl.name, args))
-;;
-
-let elaborate t module_ vars expr = elaborate' t module_ (Annotation vars) expr
-
-let rec referenced_types (expr : Type_expr.t) =
-  match expr with
-  | Var _ -> []
-  | Con (path, args) ->
-    path
-    :: List.concat_map args ~f:(function
-      | Ty ty -> referenced_types ty
-      | Row row -> row_referenced_types row)
-  | Arrow (ty1, ty2) -> referenced_types ty1 @ referenced_types ty2
-  | Tuple tys -> List.concat_map tys ~f:referenced_types
-  | Code { inner; context } ->
-    referenced_types inner @ row_referenced_types context
-  | Record row | Variant row -> row_referenced_types row
-
-and row_referenced_types (row : Type_expr.row) =
-  match row with
-  | Empty | Var _ -> []
-  | Extend (_, ty, rest) -> referenced_types ty @ row_referenced_types rest
-;;
-
-let check_alias_cycles t =
-  let finished = String.Hash_set.create () in
-  let rec visit (decl : Decl.t) ~visiting =
-    match decl.decl.kind with
-    | Variant _ | Record _ | Abstract -> Ok ()
-    | Alias _ when Hash_set.mem finished decl.name -> Ok ()
-    | Alias _ when Set.mem visiting decl.name ->
-      Error (Typecheck_error.Cyclic_type_alias decl.name)
-    | Alias body ->
-      let visiting = Set.add visiting decl.name in
-      let%map.Result () =
-        List.filter_map (referenced_types body) ~f:(fun path ->
-          find_type t decl.module_ path |> Result.ok)
-        |> List.fold_result ~init:() ~f:(fun () decl -> visit decl ~visiting)
-      in
-      Hash_set.add finished decl.name
   in
-  Map.data t.types
-  |> List.fold_result ~init:() ~f:(fun () decl ->
-    visit decl ~visiting:String.Set.empty)
+  if expansion.reached_back && not (Expansion.guarded body ~knot)
+  then Error (Typecheck_error.Cyclic_type_alias decl.name)
+  else (
+    knot.state <- Link body;
+    expansion.expanded <- true;
+    Ok (Type.TVar knot))
+;;
+
+let elaborate t module_ vars expr =
+  elaborate'
+    t
+    module_
+    (Annotation vars)
+    ~expansions:(String.Table.create ())
+    expr
 ;;
 
 let declare module_ (decl : Type_decl.t) ~fresh =
@@ -270,28 +308,29 @@ let declare module_ (decl : Type_decl.t) ~fresh =
 ;;
 
 let define t (decl : Decl.t) =
-  let elaborate = elaborate' t decl.module_ (Params (Decl.param_map decl)) in
+  let expansions = String.Table.create () in
+  let elaborate =
+    elaborate' t decl.module_ (Params (Decl.param_map decl)) ~expansions
+  in
   let canonical_name = Module_scope.canonical_name decl.module_ in
   let%map.Result kind =
     match decl.decl.kind with
     | Alias body ->
-      let%map.Result body = elaborate body in
+      let%map.Result body = expand t decl ~args:decl.params ~expansions body in
       Signature.Type_decl.Kind.Alias body
     | Abstract -> Ok Signature.Type_decl.Kind.Abstract
     | Variant constructors ->
       let%map.Result constructors =
-        List.map constructors ~f:(fun (name, args) ->
-          let%map.Result args = List.map args ~f:elaborate |> Result.all in
+        map_result constructors ~f:(fun (name, args) ->
+          let%map.Result args = map_result args ~f:elaborate in
           { Signature.Constructor.name; args })
-        |> Result.all
       in
       Signature.Type_decl.Kind.Variant constructors
     | Record fields ->
       let%map.Result fields =
-        List.map fields ~f:(fun (name, ty) ->
+        map_result fields ~f:(fun (name, ty) ->
           let%map.Result ty = elaborate ty in
           { Signature.Field.name; ty })
-        |> Result.all
       in
       Signature.Type_decl.Kind.Record fields
   in
@@ -354,7 +393,8 @@ let create root fresh =
     |> Result.all
   in
   let t =
-    { types =
+    { fresh
+    ; types =
         List.map decls ~f:(fun (decl : Decl.t) -> decl.name, decl)
         |> String.Map.of_alist_exn
     ; constructors = String.Map.empty
@@ -362,6 +402,5 @@ let create root fresh =
     ; checked = String.Map.empty
     }
   in
-  let%bind.Result () = check_alias_cycles t in
   List.fold_result decls ~init:t ~f:define
 ;;
