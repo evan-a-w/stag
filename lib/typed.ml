@@ -68,13 +68,14 @@ module Ident = struct
       { name : string
       ; stamp : int
       }
-    [@@deriving compare]
+    [@@deriving compare, hash]
 
     let sexp_of_t t = Sexp.Atom [%string "%{t.name}/%{t.stamp#Int}"]
   end
 
   include T
   include Comparable.Make_plain (T)
+  include Hashable.Make_plain (T)
 end
 
 module Binder = struct

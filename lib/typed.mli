@@ -20,6 +20,7 @@ module Ident : sig
   val sexp_of_t : t -> Sexp.t
 
   include Comparable.S_plain with type t := t
+  include Hashable.S_plain with type t := t
 end
 
 module Binder : sig
