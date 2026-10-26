@@ -40,72 +40,88 @@ type t =
   }
 
 let captures t ~ident ~args ~body =
-  Hashtbl.find_or_add t.closure_captures ~default:(fun () ->
-    let defined = Typed.Ident.Table.create () in
+  Hashtbl.find_or_add t.closure_captures ident ~default:(fun () ->
+    let level (ident : Typed.Ident.t) =
+      (Hashtbl.find_exn t.ident_info ident).level
+    in
+    let closure_level = level ident in
+    let defined = Typed.Ident.Hash_set.create () in
     let captures = Typed.Ident.Hash_set.create () in
-    let this_ident_info = Hashtbl.find_exn t.ident_info ident in
-    let def ident =
-      Hashtbl.update defined ~f:(function
-        | None -> 1
-        | Some x -> x + 1)
-    in
-    let undef ident =
-      Hashtbl.change defined ~f:(function
-        | None -> None
-        | Some 1 -> None
-        | Some x -> Some (x - 1))
-    in
-    let use ident =
-      if Hashtbl.mem defined ident
-      then ()
-      else if
-        (Hashtbl.find_exn t.ident_info ident).Typed.Ident_info.level
-        <= this_ident_info.level
+    let def ident = Hash_set.add defined ident in
+    let use ~depth ident =
+      if
+        depth >= 0
+        && (not (Hash_set.mem defined ident))
+        && level ident <= closure_level
       then Hash_set.add captures ident
     in
-    List.iter args ~f:(Hash_set.add defined);
-    let rec go ({ desc; _ } : Typed.Expr.t) =
+    let rec def_pattern ({ desc; _ } : Typed.Pattern.t) =
+      match desc with
+      | Any | Lit _ | Poly_variant (_, None) -> ()
+      | Var ident -> def ident
+      | Tuple patterns | Construct (_, patterns) ->
+        List.iter patterns ~f:def_pattern
+      | Record fields -> List.iter fields ~f:(fun (_, p) -> def_pattern p)
+      | Poly_variant (_, Some pattern) -> def_pattern pattern
+      | Poly_record { fields; rest } ->
+        List.iter fields ~f:(fun (_, p) -> def_pattern p);
+        (match rest with
+         | Closed | Open -> ()
+         | Bind ident -> def ident)
+    in
+    let rec go ~depth ({ desc; _ } : Typed.Expr.t) =
       match desc with
       | Lit _ | Var (Free _) -> ()
       | Var
           ( Bound (Toplevel ident | Local ident)
-          | Persistent (Toplevel ident | Local ident) ) -> use ident
-      | App (a, b) ->
-        go a;
-        go b
-      | Let { ident; args = _; generalized = _; body; in_ } ->
-        (* in scope immediately *)
+          | Persistent (Toplevel ident | Local ident) ) -> use ~depth ident
+      | Let { ident; args; generalized = _; body; in_ } ->
         def ident;
-        go body;
-        go in_
+        List.iter args ~f:def;
+        go ~depth body;
+        go ~depth in_
       | Splice { code; subs } ->
+        go ~depth:(depth - 1) code;
         (match subs with
-         | Explicit l -> List.iter l ~f:(fun (_, e) -> go e)
-         | Implicit m ->
-           Map.iter m ~f:(fun (Toplevel ident | Local ident) -> use ident))
-      | Quote e -> go e
-      | Tuple l -> List.iter l ~f:go
-      | Construct (_, l) -> List.iter l ~f:go
-      | Record l -> List.iter l ~f:(fun (_, e) -> go e)
-      | Field (e, _) -> go e
-      | Match (e, l) -> go e; List.iter l ~f:(fun (_, e) -> go e)
-      | Poly_record of (string * 'e) list
-      | Poly_field of 'e * string
-      | Poly_extend of (string * 'e) list * 'e
-      | Poly_restrict of 'e * string
-      | Poly_update of 'e * (string * 'e) list
-      | Poly_variant of string * 'e option *)
+         | Explicit subs -> go_fields ~depth subs
+         | Implicit providers ->
+           Map.iter providers ~f:(fun (Toplevel ident | Local ident) ->
+             use ~depth ident))
+      | Match (expr, cases) ->
+        go ~depth expr;
+        List.iter cases ~f:(fun (pattern, body) ->
+          def_pattern pattern;
+          go ~depth body)
+      | Quote expr -> go ~depth:(depth + 1) expr
+      | Field (expr, _)
+      | Poly_field (expr, _)
+      | Poly_restrict (expr, _)
+      | Poly_variant (_, Some expr) -> go ~depth expr
+      | Poly_variant (_, None) -> ()
+      | App (f, x) ->
+        go ~depth f;
+        go ~depth x
+      | Tuple exprs | Construct (_, exprs) -> List.iter exprs ~f:(go ~depth)
+      | Record fields -> go_fields ~depth fields
+      | Poly_record fields -> go_fields ~depth fields
+      | Poly_extend (fields, expr) | Poly_update (expr, fields) ->
+        go ~depth expr;
+        go_fields ~depth fields
+    and go_fields : 'a. depth:int -> ('a * Typed.Expr.t) list -> unit =
+      fun ~depth fields -> List.iter fields ~f:(fun (_, expr) -> go ~depth expr)
     in
-    go body;
+    List.iter args ~f:def;
+    go ~depth:0 body;
     captures)
 ;;
 
-(* let create ~program:({ sccs; idents } : Typed.Program.t) =
+let create ~program:({ sccs; ident_info } : Typed.Program.t) =
   { eval_stack = Stack.of_list sccs
-  ; idents
+  ; ident_info = Typed.Ident.Table.of_alist_exn (Map.to_alist ident_info)
   ; values = Typed.Ident.Table.create ()
   ; closure_captures = Typed.Ident.Table.create ()
+  ; env = { prev = None; values = Typed.Ident.Table.create () }
   }
-;; *)
+;;
 
 let eval t = ()
