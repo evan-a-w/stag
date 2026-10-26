@@ -174,12 +174,18 @@ module Scc : sig
   [@@deriving sexp_of]
 end
 
+module Ident_info : sig
+  type t =
+    { ty : Type.ty
+    ; level : int
+    }
+  [@@deriving sexp_of]
+end
+
 module Program : sig
   type t =
     { sccs : Scc.t list (** Each component after the ones it refers to. *)
-    ; idents : Type.ty Ident.Map.t
-      (** The type of each binder: its scheme for a generalized [Let] or a
-          toplevel. *)
+    ; ident_info : Ident_info.t Ident.Map.t
     }
   [@@deriving sexp_of]
 end

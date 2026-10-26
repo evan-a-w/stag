@@ -213,10 +213,18 @@ module Scc = struct
   [@@deriving sexp_of]
 end
 
+module Ident_info = struct
+  type t =
+    { ty : Hum.Ty.t
+    ; level : int
+    }
+  [@@deriving sexp_of]
+end
+
 module Program = struct
   type t =
     { sccs : Scc.t list
-    ; idents : Hum.Ty.t Ident.Map.t
+    ; ident_info : Ident_info.t Ident.Map.t
     }
   [@@deriving sexp_of]
 end

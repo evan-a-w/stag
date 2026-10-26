@@ -39,7 +39,7 @@ type t =
   ; mutable env : Value.t Env.t
   }
 
-let captures t ~ident ~args ~body =
+(* let captures t ~ident ~args ~body =
   Hashtbl.find_or_add t.closure_captures ~default:(fun () ->
     let defined = Typed.Ident.Hash_set.create () in
     let captures = Typed.Ident.Hash_set.create () in
@@ -48,7 +48,7 @@ let captures t ~ident ~args ~body =
       if Hash_set.mem defined ident then () else Hash_set.add captures ident
     in
     List.iter args ~f:(Hash_set.add defined);
-    let rec go ({ desc; _ } : Typed.Expr.t) =
+    let rec go ~depth ({ desc; _ } : Typed.Expr.t) =
       match desc with
       | Lit _ | Var (Free _) -> ()
       | Var
@@ -68,16 +68,12 @@ let captures t ~ident ~args ~body =
           ; subs
           } ->  
             match subs with
-            | Explicit l -> List.iter l ~f:(fun )
+            | Explicit l -> List.iter l ~f:(fun ~f:(fun (_, e) -> 
+              go e
+              ))
+              | Implicit m -> Map.iter m ~f:(fun (Toplevel ident | Local ident) -> use ident) *)
 
-      | Explicit of (string * 'e) list
-      (** Each entry, by name, is the code it is bound to, at the splice's
-          level. A substitution without an expression is a [Var]. *)
-      | Implicit of Binder.t String.Map.t
-      (** The binders at the splice that may provide the code's entries of
-          their name. The other entries of the code become entries of the
-         
-            (*
+(*
       | Quote of 'e
       | Tuple l -> List.iter l ~f:go
       | Construct of Constructor_ref.t * 'e list
@@ -90,17 +86,16 @@ let captures t ~ident ~args ~body =
       | Poly_restrict of 'e * string
       | Poly_update of 'e * (string * 'e) list
       | Poly_variant of string * 'e option *)
-    in
+(* in
     go body;
-    captures)
-;;
+    captures) *)
 
-let create ~program:({ sccs; idents } : Typed.Program.t) =
+(* let create ~program:({ sccs; idents } : Typed.Program.t) =
   { eval_stack = Stack.of_list sccs
   ; idents
   ; values = Typed.Ident.Table.create ()
   ; closure_captures = Typed.Ident.Table.create ()
   }
-;;
+;; *)
 
 let eval t = ()
