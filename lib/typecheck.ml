@@ -19,7 +19,7 @@ module Toplevel = struct
   end
 
   type t =
-    { name : string
+    { ident : Typed.Ident.t
     ; module_ : Module_scope.t
     ; args : Syntax.Binding.t list
     ; annot : Syntax.Type_expr.t option
@@ -57,9 +57,14 @@ module Program_env = struct
     ; sccs : Typed.Scc.t Queue.t
     }
 
-  let bind t name ty =
+  let fresh_ident t name =
     let ident = { Typed.Ident.name; stamp = t.next_stamp } in
     t.next_stamp <- t.next_stamp + 1;
+    ident
+  ;;
+
+  let bind t name ty =
+    let ident = fresh_ident t name in
     t.idents <- Map.add_exn t.idents ~key:ident ~data:ty;
     ident
   ;;
@@ -465,7 +470,7 @@ let resolution_type t (scope : Scope.t) ~name : Resolution.t -> _ = function
 
 let refers_to_toplevel (expr : Typed.Expr.t) ~f =
   let binder : Typed.Binder.t -> bool = function
-    | Toplevel name -> f name
+    | Toplevel ident -> f ident
     | Local _ -> false
   in
   let snds pairs = List.map pairs ~f:snd in
@@ -506,13 +511,14 @@ let finish_scc (program : Program_env.t) (members : Toplevel.t list) =
       match member.state with
       | In_progress { index; ty; args; body = Some body; _ } ->
         if generalize then Scheme.generalize_ty ~rank:0 ty;
+        program.idents <- Map.add_exn program.idents ~key:member.ident ~data:ty;
         let typed =
-          { Typed.Toplevel.name = member.name; args; scheme = ty; body }
+          { Typed.Toplevel.ident = member.ident; args; scheme = ty; body }
         in
         member.state
         <- Done
              { entry =
-                 Env.Entry.toplevel ~name:member.name ~scheme:ty ~persistent
+                 Env.Entry.toplevel ~ident:member.ident ~scheme:ty ~persistent
              ; typed
              };
         index, typed
@@ -522,16 +528,16 @@ let finish_scc (program : Program_env.t) (members : Toplevel.t list) =
     |> List.sort ~compare:(Comparable.lift Int.compare ~f:fst)
     |> List.map ~f:snd
   in
-  let names =
-    String.Set.of_list
-      (List.map members ~f:(fun (member : Typed.Toplevel.t) -> member.name))
+  let idents =
+    Typed.Ident.Set.of_list
+      (List.map members ~f:(fun (member : Typed.Toplevel.t) -> member.ident))
   in
   Queue.enqueue
     program.sccs
     { Typed.Scc.members
     ; recursive =
         List.exists members ~f:(fun member ->
-          refers_to_toplevel member.body ~f:(Set.mem names))
+          refers_to_toplevel member.body ~f:(Set.mem idents))
     }
 ;;
 
@@ -572,7 +578,7 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) =
     scope.scc.lowlink <- Int.min scope.scc.lowlink in_progress.index;
     Ok
       (Env.Entry.toplevel
-         ~name:toplevel.name
+         ~ident:toplevel.ident
          ~scheme:in_progress.ty
          ~persistent:false)
   | Unchecked ->
@@ -1003,30 +1009,32 @@ let typecheck t ~(program : Syntax.Program.t)
       (List.map Type_env.builtins ~f:Syntax.Toplevel.type_ @ program)
   in
   let%bind.Result type_env = Type_env.create root t in
+  let program_env =
+    { Program_env.type_env
+    ; toplevels = String.Table.create ()
+    ; next_stamp = 0
+    ; idents = Typed.Ident.Map.empty
+    ; sccs = Queue.create ()
+    }
+  in
   let toplevels =
     Module_scope.toplevels root
     |> List.filter_map ~f:(fun (module_, (toplevel : Syntax.Toplevel.t)) ->
       match toplevel with
       | Let (name, args, annot, expr) ->
-        Some
-          { Toplevel.name = Module_scope.canonical_name module_ name
+        let name = Module_scope.canonical_name module_ name in
+        let toplevel =
+          { Toplevel.ident = Program_env.fresh_ident program_env name
           ; module_
           ; args
           ; annot
           ; expr
           ; state = Unchecked
           }
+        in
+        Hashtbl.add_exn program_env.toplevels ~key:name ~data:toplevel;
+        Some toplevel
       | Type _ | Module _ -> None)
-  in
-  let program_env =
-    { Program_env.type_env
-    ; toplevels =
-        List.map toplevels ~f:(fun toplevel -> toplevel.name, toplevel)
-        |> String.Table.of_alist_exn
-    ; next_stamp = 0
-    ; idents = Typed.Ident.Map.empty
-    ; sccs = Queue.create ()
-    }
   in
   let%map.Result () =
     List.fold_result toplevels ~init:() ~f:(fun () toplevel ->

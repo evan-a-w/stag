@@ -16,8 +16,7 @@ module Entry : sig
     }
   [@@deriving sexp_of]
 
-  (** The entry of the toplevel of canonical name [name]. *)
-  val toplevel : name:string -> scheme:Type.ty -> persistent:bool -> t
+  val toplevel : ident:Typed.Ident.t -> scheme:Type.ty -> persistent:bool -> t
 
   (** Non-persistent entries may only be used at their own level, within the
       quote they were bound in. *)
