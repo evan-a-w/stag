@@ -216,16 +216,14 @@ let create ~stamps () =
   }
 ;;
 
-let add_program t ~program:({ sccs; ident_info } : Typed.Program.t) =
-  List.rev sccs |> List.iter ~f:(Stack.push t.eval_stack);
+let add_ident_info t ident_info =
   Map.iteri ident_info ~f:(fun ~key ~data ->
     Hashtbl.set t.ident_info ~key ~data)
 ;;
 
-let create' ~stamps ~program =
-  let t = create ~stamps () in
-  add_program t ~program;
-  t
+let add_program t ~program:({ sccs; ident_info } : Typed.Program.t) =
+  List.rev sccs |> List.iter ~f:(Stack.push t.eval_stack);
+  add_ident_info t ident_info
 ;;
 
 let map_result list ~f =
@@ -689,14 +687,30 @@ let rec expand t ~level ~depth (expr : Typed.Expr.t) =
   | _ -> map_children ~depth expr ~f:(expand t ~level)
 ;;
 
+let expand_program t ~program:({ sccs; ident_info } : Typed.Program.t) =
+  add_ident_info t ident_info;
+  let known = Typed.Ident.Hash_set.of_list (Hashtbl.keys t.ident_info) in
+  let%map sccs =
+    map_result sccs ~f:(fun (scc : Typed.Scc.t) ->
+      let%map members =
+        map_result scc.members ~f:(fun (member : Typed.Toplevel.t) ->
+          let%map body = expand t ~level:0 ~depth:0 member.body in
+          { member with body })
+      in
+      { scc with members })
+  in
+  let ident_info =
+    Hashtbl.fold t.ident_info ~init:ident_info ~f:(fun ~key ~data ident_info ->
+      if Hash_set.mem known key
+      then ident_info
+      else Map.set ident_info ~key ~data)
+  in
+  { Typed.Program.sccs; ident_info }
+;;
+
 (* Functions are bound first: making their closures reads nothing, so values
    in a recursive component can then use them. *)
 let eval_scc t ({ members; recursive } : Typed.Scc.t) =
-  let%bind members =
-    map_result members ~f:(fun (member : Typed.Toplevel.t) ->
-      let%map body = expand t ~level:0 ~depth:0 member.body in
-      { member with body })
-  in
   if recursive
   then List.iter members ~f:(fun { ident; _ } -> Env.declare t.env ~ident);
   let functions, values =

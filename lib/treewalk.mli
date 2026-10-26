@@ -66,7 +66,14 @@ type t
     added, so idents minted while evaluating are distinct from theirs. *)
 val create : stamps:Stamp_counter.t -> unit -> t
 
-val create' : stamps:Stamp_counter.t -> program:Typed.Program.t -> t
+(** [program] with its toplevel splices (those outside any quote) replaced by
+    the code they evaluate to, at level -1 in an empty env. The [ident_info]
+    returned also has the idents minted for that code. Values the code embeds
+    from level -1 are bound in [t] under fresh idents, so the result is only
+    meaningful to evaluate with [t]. *)
+val expand_program : t -> program:Typed.Program.t -> Typed.Program.t Or_error.t
+
+(** Queues the components of [program] to [eval]. They must be expanded. *)
 val add_program : t -> program:Typed.Program.t -> unit
 
 (** The binders from outside the closure [ident] that it reads when called,
@@ -80,8 +87,7 @@ val captures
   -> body:Typed.Expr.t
   -> Typed.Ident.Hash_set.t
 
-(** Evaluates the components added, in order. Toplevel splices are expanded
-    first, each member's on its own. *)
+(** Evaluates the components added, in order. *)
 val eval : t -> unit Or_error.t
 
 (** The value of a toplevel, once evaluated. *)

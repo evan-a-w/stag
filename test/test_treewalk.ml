@@ -37,7 +37,8 @@ let print program =
   with
   | Error error -> print_s [%sexp (error : Typecheck_error.t)]
   | Ok { program; _ } ->
-    let t = Treewalk.create' ~stamps ~program in
+    let t = Treewalk.create ~stamps () in
+    Treewalk.add_program t ~program;
     let print_captures ~ident ~args ~body =
       let captures =
         Treewalk.captures t ~ident ~args ~body
