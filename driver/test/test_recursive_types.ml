@@ -1,6 +1,6 @@
 open! Import
-open Syntax
 open Helpers
+open Source_helpers
 
 module T = struct
   open Type
@@ -35,47 +35,15 @@ module T = struct
   let print ty = print_endline (Type.to_string_hum ty)
 end
 
-let fn x body = let_ "fn" [ x ] body (var "fn")
-
-(* [match l with `Nil -> 0 | `Cons (_, t) -> add 1 (len t)] *)
-let len =
-  top
-    "len"
-    [ "l" ]
-    (match_
-       (var "l")
-       [ Pat.tag "Nil", int 0
-       ; ( Pat.tag "Cons" ~arg:(Pat.tuple [ Pat.any; Pat.var "t" ])
-         , app (var "add") [ int 1; app (var "len") [ var "t" ] ] )
-       ])
-;;
-
-let cons x l = tag "Cons" ~arg:(tuple [ x; l ])
-
 let%expect_test "recursive functions over recursive variants" =
   check
-    [ len
-    ; top
-        "map"
-        [ "f"; "l" ]
-        (match_
-           (var "l")
-           [ Pat.tag "Nil", tag "Nil"
-           ; ( Pat.tag "Cons" ~arg:(Pat.tuple [ Pat.var "x"; Pat.var "t" ])
-             , cons
-                 (app (var "f") [ var "x" ])
-                 (app (var "map") [ var "f"; var "t" ]) )
-           ])
-    ; top "two" [] (app (var "len") [ cons (int 1) (cons (int 2) (tag "Nil")) ])
-    ; top
-        "lengths"
-        []
-        (tuple
-           [ app (var "len") [ cons (int 1) (tag "Nil") ]
-           ; app (var "len") [ cons (bool true) (tag "Nil") ]
-           ])
-    ; top "mapped" [] (app (var "map") [ var "id"; cons (int 1) (tag "Nil") ])
-    ];
+    {|
+let len l = match l with `Nil -> 0 | `Cons (_, t) -> add 1 (len t)
+let map f l = match l with `Nil -> `Nil | `Cons (x, t) -> `Cons (f x, map f t)
+let two = len (`Cons (1, `Cons (2, `Nil)))
+let lengths = (len (`Cons (1, `Nil)), len (`Cons (true, `Nil)))
+let mapped = map id (`Cons (1, `Nil))
+|};
   [%expect
     {|
     val len : ([`Cons of 'a * 'b | `Nil] as 'b) -> int
@@ -88,25 +56,13 @@ let%expect_test "recursive functions over recursive variants" =
 
 let%expect_test "recursive functions over recursive records" =
   check
-    [ top
-        "sum"
-        [ "r" ]
-        (app
-           (var "add")
-           [ dot (var "r") "v"; app (var "sum") [ dot (var "r") "next" ] ])
-    ; top "next" [ "r" ] (dot (var "r") "next")
-    ; top
-        "both"
-        [ "r" ]
-        (app
-           (var "cond")
-           [ bool true; var "r"; dot (dot (var "r") "next") "next" ])
-    ; top
-        "self"
-        [ "r" ]
-        (app (var "cond") [ bool true; var "r"; dot (var "r") "self" ])
-    ; top "pair" [ "r" ] (tuple [ app (var "self") [ var "r" ]; var "r" ])
-    ];
+    {|
+let sum r = add r.`v (sum r.`next)
+let next r = r.`next
+let both r = cond true r r.`next.`next
+let self r = cond true r r.`self
+let pair r = (self r, r)
+|};
   [%expect
     {|
     val sum : ({`next : 'a; `v : int; ..'b} as 'a) -> int
@@ -119,9 +75,10 @@ let%expect_test "recursive functions over recursive records" =
 
 let%expect_test "recursive values are weak" =
   check
-    [ top "ones" [] (cons (int 1) (var "ones"))
-    ; top "loop" [] (poly_record [ "next", var "loop"; "v", var "id" ])
-    ];
+    {|
+let ones = `Cons (1, ones)
+let loop = {`next = loop; `v = id}
+|};
   [%expect
     {|
     val ones : ([`Cons of int * '_a; ..'_b] as '_a)
@@ -131,24 +88,10 @@ let%expect_test "recursive values are weak" =
 
 let%expect_test "open rows and residuals" =
   check
-    [ top
-        "strip"
-        [ "e" ]
-        (match_
-           (var "e")
-           [ Pat.tag "Wrap" ~arg:(Pat.var "x"), app (var "strip") [ var "x" ]
-           ; Pat.var "other", var "other"
-           ])
-    ; top
-        "count"
-        [ "e" ]
-        (match_
-           (var "e")
-           [ ( Pat.tag "S" ~arg:(Pat.var "x")
-             , app (var "add") [ int 1; app (var "count") [ var "x" ] ] )
-           ; Pat.any, int 0
-           ])
-    ];
+    {|
+let strip e = match e with `Wrap x -> strip x | other -> other
+let count e = match e with `S x -> add 1 (count x) | _ -> 0
+|};
   [%expect
     {|
     val strip : ([`Wrap of 'a; ..'b] as 'a) -> [..'b]
@@ -156,80 +99,46 @@ let%expect_test "open rows and residuals" =
     |}]
 ;;
 
-(* Handlers for each case of an open recursive AST, composed by [eval]. *)
+(* Handlers for each case of an open recursive AST, composed by [eval]. [eval]
+   is on the DSL: source can't write an empty match. *)
 let%expect_test "extensible interpreter" =
-  let handler name tag ~arg body =
-    top_let
-      ( name
-      , args [ "self"; "k"; "e" ]
-      , None
-      , match_
-          (var "e")
-          [ Pat.tag tag ~arg, body
-          ; Pat.var "other", app (var "k") [ var "other" ]
-          ] )
-  in
-  check
-    [ handler "eval_num" "Num" ~arg:(Pat.var "n") (var "n")
-    ; handler
-        "eval_add"
-        "Add"
-        ~arg:(Pat.tuple [ Pat.var "a"; Pat.var "b" ])
-        (app
-           (var "add")
-           [ app (var "self") [ var "a" ]; app (var "self") [ var "b" ] ])
-    ; handler
-        "eval_neg"
-        "Neg"
-        ~arg:(Pat.var "a")
-        (app (var "add") [ int 0; app (var "self") [ var "a" ] ])
-    ; top
-        "eval"
-        [ "e" ]
-        (app
-           (var "eval_add")
-           [ var "eval"
-           ; app
-               (var "eval_num")
-               [ var "eval"
-               ; app
-                   (var "eval_neg")
-                   [ var "eval"; fn "x" (match_ (var "x") []) ]
-               ]
-           ; var "e"
-           ])
-    ; top
-        "example"
-        []
-        (app
-           (var "eval")
-           [ tag
-               "Add"
-               ~arg:
-                 (tuple
-                    [ tag "Num" ~arg:(int 1)
-                    ; tag "Neg" ~arg:(tag "Num" ~arg:(int 2))
-                    ])
-           ])
-    ];
-  check
-    [ handler "eval_num" "Num" ~arg:(Pat.var "n") (var "n")
-    ; top
-        "eval"
-        [ "e" ]
-        (app
-           (var "eval_num")
-           [ var "eval"; fn "x" (match_ (var "x") []); var "e" ])
-    ; top
-        "bad"
-        []
-        (app
-           (var "eval")
-           [ tag
-               "Add"
-               ~arg:(tuple [ tag "Num" ~arg:(int 1); tag "Num" ~arg:(int 2) ])
-           ])
-    ];
+  let absurd = let_ "fn" [ "x" ] (match_ (var "x") []) (var "fn") in
+  let eval body = top "eval" [ "e" ] body in
+  check_program
+    (parse_exn
+       {|
+let eval_num self k e = match e with `Num n -> n | other -> k other
+let eval_add self k e = match e with `Add (a, b) -> add (self a) (self b) | other -> k other
+let eval_neg self k e = match e with `Neg a -> add 0 (self a) | other -> k other
+|}
+     @ [ eval
+           (app
+              (var "eval_add")
+              [ var "eval"
+              ; app
+                  (var "eval_num")
+                  [ var "eval"; app (var "eval_neg") [ var "eval"; absurd ] ]
+              ; var "e"
+              ])
+       ]
+     @ parse_exn
+         ~file:"after_eval.stag"
+         {|
+let example = eval (`Add (`Num 1, `Neg (`Num 2)))
+|}
+    );
+  check_program
+    (parse_exn
+       {|
+let eval_num self k e = match e with `Num n -> n | other -> k other
+|}
+     @ [ eval (app (var "eval_num") [ var "eval"; absurd; var "e" ]) ]
+     @ parse_exn
+         ~file:"after_eval.stag"
+         {|
+let bad = eval (`Add (`Num 1, `Num 2))
+|}
+    );
   [%expect
     {|
     val eval_num : 'a -> ([..'b] -> 'c) -> [`Num of 'c; ..'b] -> 'c
@@ -237,49 +146,31 @@ let%expect_test "extensible interpreter" =
     val eval_neg : ('a -> int) -> ([..'b] -> int) -> [`Neg of 'a; ..'b] -> int
     val eval : ([`Add of 'a * 'a | `Neg of 'a | `Num of int] as 'a) -> int
     val example : int
-    (Unification_error
-     (Row_mismatch REmpty
-      (RExtend Add Present
-       (TTuple
-        ((TVariant (RExtend Num Present (TCon int ()) (RVar (Unbound 66 1))))
-         (TVariant (RExtend Num Present (TCon int ()) (RVar (Unbound 68 1))))))
-       (RVar (Unbound 73 1)))
-      (Missing_label Add)))
+    ((Unification_error
+      (Row_mismatch REmpty
+       (RExtend Add Present
+        (TTuple
+         ((TVariant (RExtend Num Present (TCon int ()) (RVar (Unbound 66 1))))
+          (TVariant (RExtend Num Present (TCon int ()) (RVar (Unbound 68 1))))))
+        (RVar (Unbound 73 1)))
+       (Missing_label Add)))
+     @ after_eval.stag:2:15-38)
     |}]
 ;;
 
 let%expect_test "cyclic types in quotes and contexts" =
   check
-    [ top
-        "compile"
-        [ "e" ]
-        (match_
-           (var "e")
-           [ Pat.tag "Code" ~arg:(Pat.var "c"), var "c"
-           ; ( Pat.tag "Add" ~arg:(Pat.tuple [ Pat.var "a"; Pat.var "b" ])
-             , quote
-                 (app
-                    (var "add")
-                    [ splice (app (var "compile") [ var "a" ])
-                    ; splice (app (var "compile") [ var "b" ])
-                    ]) )
-           ])
-    ; len
-    ; top "free" [] (quote (app (var "len") [ var "l" ]))
-    ; top
-        "provided"
-        []
-        (quote
-           (splice ~subs:[ "l", Some (cons (int 1) (tag "Nil")) ] (var "free")))
-    ; top
-        "spliced_in"
-        [ "l" ]
-        (quote (splice ~subs:[ "l", Some (var "l") ] (var "free")))
-    ; top
-        "quoted_ones"
-        []
-        (quote (let_ "ones" [] (cons (int 1) (var "ones")) (var "ones")))
-    ];
+    {|
+let compile e =
+  match e with
+  | `Code c -> c
+  | `Add (a, b) -> .<add .~(compile a) .~(compile b)>.
+let len l = match l with `Nil -> 0 | `Cons (_, t) -> add 1 (len t)
+let free = .<len l>.
+let provided = .<.~free.{l = `Cons (1, `Nil)}>.
+let spliced_in l = .<.~free.{l = l}>.
+let quoted_ones = .<let ones = `Cons (1, ones) in ones>.
+|};
   [%expect
     {|
     val compile : ([`Add of 'a * 'a | `Code of <int>{..'b}] as 'a) -> <int>{..'b}
@@ -538,43 +429,29 @@ let%expect_test "generalization and instantiation of cyclic types" =
     |}]
 ;;
 
-let list_of ty = Ty.con "list" ~args:[ Ty ty ]
-
-(* [type 'a l = [`Nil | `Cons of 'a * 'a l]] *)
-let l =
-  Decl.alias
-    "l"
-    ~params:[ Decl.ty "a" ]
-    (Ty.variant
-       [ "Nil", Ty.unit
-       ; "Cons", Ty.tuple [ Ty.var "a"; Ty.con "l" ~args:[ Ty (Ty.var "a") ] ]
-       ])
-;;
-
-let l_of ty = Ty.con "l" ~args:[ Ty ty ]
-
 let%expect_test "recursive aliases" =
   check
-    [ l
-    ; len
-    ; top_let
-        ( "len_ints"
-        , [ typed "l" (l_of Ty.int) ]
-        , None
-        , app (var "len") [ var "l" ] )
-    ; top_let
-        ( "len_any"
-        , [ typed "l" (l_of (Ty.var "a")) ]
-        , None
-        , app (var "len") [ var "l" ] )
-    ; top "nil" [] ~annot:(l_of Ty.bool) (tag "Nil")
-    ; top "one" [] ~annot:(l_of Ty.int) (cons (int 1) (tag "Nil"))
-    ; Decl.alias "ints" (l_of Ty.int)
-    ; Decl.variant "n" [ "N", [ l_of Ty.int ] ]
-    ; top "wrapped" [] (construct "N" ~args:[ var "one" ])
-    ];
-  check [ l; top "bad" [] ~annot:(l_of Ty.int) (cons (bool true) (tag "Nil")) ];
-  check [ l; top "open" [] ~annot:(l_of Ty.int) (tag "Other") ];
+    {|
+type l['a] = [`Nil | `Cons of 'a * l['a]]
+let len l = match l with `Nil -> 0 | `Cons (_, t) -> add 1 (len t)
+let len_ints (l : l[int]) = len l
+let len_any (l : l['a]) = len l
+let nil : l[bool] = `Nil
+let one : l[int] = `Cons (1, `Nil)
+type ints = l[int]
+type n = N of l[int]
+let wrapped = N one
+|};
+  check
+    {|
+type l['a] = [`Nil | `Cons of 'a * l['a]]
+let bad : l[int] = `Cons (true, `Nil)
+|};
+  check
+    {|
+type l['a] = [`Nil | `Cons of 'a * l['a]]
+let open : l[int] = `Other
+|};
   [%expect
     {|
     type l['a] = [`Cons of 'a * l['a] | `Nil]
@@ -586,56 +463,31 @@ let%expect_test "recursive aliases" =
     type ints = [`Cons of int * ints | `Nil]
     type n = N of ([`Cons of int * 'a | `Nil] as 'a)
     val wrapped : n
-    (Unification_error
-     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
-    (Unification_error
-     (Row_mismatch REmpty
-      (RExtend Other Present (TCon unit ()) (RVar (Unbound 27 1)))
-      (Missing_label Other)))
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:3:19-37)
+    ((Unification_error
+      (Row_mismatch REmpty
+       (RExtend Other Present (TCon unit ()) (RVar (Unbound 27 1)))
+       (Missing_label Other)))
+     @ t.stag:3:20-26)
     |}]
 ;;
 
 let%expect_test "recursive aliases through records, tuples and type arguments" =
   check
-    [ Decl.alias
-        "stream"
-        ~params:[ Decl.ty "a" ]
-        (Ty.record
-           [ "head", Ty.var "a"
-           ; ( "tail"
-             , Ty.arrow Ty.unit (Ty.con "stream" ~args:[ Ty (Ty.var "a") ]) )
-           ])
-    ; Decl.list
-    ; Decl.alias
-        "tree"
-        (Ty.variant [ "Leaf", Ty.int; "Node", list_of (Ty.con "tree") ])
-    ; Decl.alias "pair" (Ty.tuple [ Ty.variant [ "A", Ty.con "pair" ]; Ty.int ])
-    ; Decl.alias "id" ~params:[ Decl.ty "a" ] (Ty.var "a")
-    ; Decl.alias
-        "through_id"
-        (Ty.con "id" ~args:[ Ty (Ty.variant [ "A", Ty.con "through_id" ]) ])
-    ; Decl.alias
-        "rows"
-        ~params:[ Decl.row "r" ]
-        (Ty.record
-           [ "x", Ty.con "rows" ~args:[ Row (Ty.row ~tail:"r" ()) ] ]
-           ~tail:"r")
-    ; top_let
-        ( "heads"
-        , [ typed "s" (Ty.con "stream" ~args:[ Ty Ty.int ]) ]
-        , None
-        , tuple
-            [ dot (var "s") "head"
-            ; dot (app (dot (var "s") "tail") [ unit ]) "head"
-            ] )
-    ; top_let
-        ( "leaf"
-        , [ typed "t" (Ty.con "tree") ]
-        , None
-        , match_
-            (var "t")
-            [ Pat.tag "Leaf" ~arg:(Pat.var "n"), var "n"; Pat.any, int 0 ] )
-    ];
+    {|
+type stream['a] = {`head : 'a; `tail : unit -> stream['a]}
+type list['a] = Nil | Cons of 'a * list['a]
+type tree = [`Leaf of int | `Node of list[tree]]
+type pair = [`A of pair] * int
+type id['a] = 'a
+type through_id = id[[`A of through_id]]
+type rows[{..'r}] = {`x : rows[{..'r}]; ..'r}
+let heads (s : stream[int]) = (s.`head, (s.`tail ()).`head)
+let leaf (t : tree) = match t with `Leaf n -> n | _ -> 0
+|};
   [%expect
     {|
     type stream['a] = {`head : 'a; `tail : unit -> stream['a]}
@@ -652,35 +504,21 @@ let%expect_test "recursive aliases through records, tuples and type arguments" =
 
 let%expect_test "mutually recursive aliases" =
   check
-    [ Decl.alias
-        "a"
-        ~params:[ Decl.ty "x" ]
-        (Ty.record
-           [ "b", Ty.con "b" ~args:[ Ty (Ty.var "x") ]; "v", Ty.var "x" ])
-    ; Decl.alias
-        "b"
-        ~params:[ Decl.ty "y" ]
-        (Ty.variant
-           [ "End", Ty.unit; "More", Ty.con "a" ~args:[ Ty (Ty.var "y") ] ])
-    ; Decl.alias "c" (Ty.con "a" ~args:[ Ty Ty.int ])
-    ; top
-        "a"
-        [ "x" ]
-        ~annot:(Ty.con "a" ~args:[ Ty (Ty.var "t") ])
-        (poly_record [ "b", tag "End"; "v", var "x" ])
-    ; top
-        "more"
-        []
-        (poly_record
-           [ "b", tag "More" ~arg:(app (var "a") [ int 1 ]); "v", int 2 ])
-    ; top "c" [] ~annot:(Ty.con "c") (var "more")
-    ];
+    {|
+type a['x] = {`b : b['x]; `v : 'x}
+type b['y] = [`End | `More of a['y]]
+type c = a[int]
+let a x : a['t] = {`b = `End; `v = x}
+let more = {`b = `More (a 1); `v = 2}
+let c : c = more
+|};
   check
-    [ module_ "M" [ l ]
-    ; Decl.alias
-        "u"
-        (Ty.variant [ "U", Ty.con "M.l" ~args:[ Ty (Ty.con "u") ] ])
-    ];
+    {|
+module M = struct
+type l['a] = [`Nil | `Cons of 'a * l['a]]
+end
+type u = [`U of M.l[u]]
+|};
   [%expect
     {|
     type a['a] = {`b : [`End | `More of a['a]]; `v : 'a}
@@ -697,73 +535,77 @@ let%expect_test "mutually recursive aliases" =
 ;;
 
 let%expect_test "non-regular and unguarded recursive aliases" =
-  let t_of ty = Ty.con "t" ~args:[ Ty ty ] in
   check
-    [ Decl.alias
-        "t"
-        ~params:[ Decl.ty "a" ]
-        (Ty.variant [ "A", t_of (Ty.tuple [ Ty.var "a"; Ty.var "a" ]) ])
-    ];
+    {|
+type t['a] = [`A of t['a * 'a]]
+|};
   check
-    [ Decl.alias "t" ~params:[ Decl.ty "a" ] (Ty.variant [ "A", t_of Ty.int ]) ];
+    {|
+type t['a] = [`A of t[int]]
+|};
   check
-    [ Decl.alias
-        "t"
-        ~params:[ Decl.ty "a"; Decl.ty "b" ]
-        (Ty.variant
-           [ "A", Ty.con "t" ~args:[ Ty (Ty.var "b"); Ty (Ty.var "a") ] ])
-    ];
+    {|
+type t['a, 'b] = [`A of t['b, 'a]]
+|};
   check
-    [ Decl.alias
-        "a"
-        ~params:[ Decl.ty "x" ]
-        (Ty.record [ "b", Ty.con "b" ~args:[ Ty (Ty.var "x") ] ])
-    ; Decl.alias
-        "b"
-        ~params:[ Decl.ty "y" ]
-        (Ty.variant [ "A", Ty.con "a" ~args:[ Ty Ty.int ] ])
-    ];
+    {|
+type a['x] = {`b : b['x]}
+type b['y] = [`A of a[int]]
+|};
   check
-    [ Decl.alias
-        "t"
-        ~params:[ Decl.row "r" ]
-        (Ty.record
-           [ ( "x"
-             , Ty.con
-                 "t"
-                 ~args:[ Row (Ty.row ~entries:[ "y", Ty.int ] ~tail:"r" ()) ] )
-           ])
-    ];
-  check [ Decl.alias "t" (Ty.tuple [ Ty.con "t"; Ty.int ]) ];
-  check [ Decl.list; Decl.alias "t" (list_of (Ty.con "t")) ];
+    {|
+type t[{..'r}] = {`x : t[{`y : int; ..'r}]}
+|};
   check
-    [ Decl.alias "id" ~params:[ Decl.ty "a" ] (Ty.var "a")
-    ; Decl.alias "t" (Ty.con "id" ~args:[ Ty (Ty.con "t") ])
-    ];
-  check [ Decl.alias "t" (Ty.code (Ty.con "t")) ];
-  check [ Decl.alias "t" (Ty.code Ty.int ~entries:[ "x", Ty.con "t" ]) ];
-  check [ Decl.alias "t" (Ty.arrow (Ty.variant [ "A", Ty.int ]) (Ty.con "t")) ];
+    {|
+type t = t * int
+|};
+  check
+    {|
+type list['a] = Nil | Cons of 'a * list['a]
+type t = list[t]
+|};
+  check
+    {|
+type id['a] = 'a
+type t = id[t]
+|};
+  check
+    {|
+type t = <t>{}
+|};
+  check
+    {|
+type t = <int>{x : t}
+|};
+  check
+    {|
+type t = [`A of int] -> t
+|};
   [%expect
     {|
-    (Non_regular_recursive_alias t)
-    (Non_regular_recursive_alias t)
-    (Non_regular_recursive_alias t)
-    (Non_regular_recursive_alias a)
-    (Non_regular_recursive_alias t)
-    (Cyclic_type_alias t)
-    (Cyclic_type_alias t)
-    (Cyclic_type_alias t)
-    (Cyclic_type_alias t)
-    (Cyclic_type_alias t)
-    (Cyclic_type_alias t)
+    ((Non_regular_recursive_alias t) @ t.stag:2:20-30)
+    ((Non_regular_recursive_alias t) @ t.stag:2:20-26)
+    ((Non_regular_recursive_alias t) @ t.stag:2:24-33)
+    ((Non_regular_recursive_alias a) @ t.stag:3:20-26)
+    ((Non_regular_recursive_alias t) @ t.stag:2:23-42)
+    ((Cyclic_type_alias t) @ t.stag:2:5-6)
+    ((Cyclic_type_alias t) @ t.stag:3:5-6)
+    ((Cyclic_type_alias t) @ t.stag:3:5-6)
+    ((Cyclic_type_alias t) @ t.stag:2:5-6)
+    ((Cyclic_type_alias t) @ t.stag:2:5-6)
+    ((Cyclic_type_alias t) @ t.stag:2:5-6)
     |}]
 ;;
 
 let%expect_test "sexps of recursive aliases" =
-  let typecheck = typechecker () in
-  (match Typecheck.typecheck typecheck ~program:[ l ] with
-   | Ok { signature; _ } -> print_s [%sexp (signature : Signature.t)]
-   | Error error -> print_s [%sexp (error : Typecheck_error.t)]);
+  Option.iter
+    (typecheck
+       ~prelude:false
+       {|
+type l['a] = [`Nil | `Cons of 'a * l['a]]
+|})
+    ~f:(fun t -> print_s [%sexp ((checked t).signature : Signature.t)]);
   [%expect
     {|
     ((Type
@@ -837,11 +679,12 @@ let%expect_test "bounds with cyclic types" =
 
 (* [type ai = [`T0 of a0 | ... | `T(n-1) of a(n-1)]] for each [i < n]. *)
 let clique n =
-  let name i = sprintf "a%d" i in
-  List.init n ~f:(fun i ->
-    Decl.alias
-      (name i)
-      (Ty.variant (List.init n ~f:(fun j -> sprintf "T%d" j, Ty.con (name j)))))
+  let variant =
+    List.init n ~f:(fun j -> sprintf "`T%d of a%d" j j)
+    |> String.concat ~sep:" | "
+  in
+  List.init n ~f:(fun i -> sprintf "type a%d = [%s]\n" i variant)
+  |> String.concat
 ;;
 
 let%expect_test "mutually recursive alias cliques expand each alias once" =
@@ -853,18 +696,17 @@ let%expect_test "mutually recursive alias cliques expand each alias once" =
     type a2 = [`T0 of ([`T0 of 'a | `T1 of ([`T0 of 'a | `T1 of 'b | `T2 of a2] as 'b) | `T2 of a2] as 'a) | `T1 of 'b | `T2 of a2]
     |}];
   (* Each declaration shows each of the 10 aliases' variants once. *)
-  let typecheck = typechecker () in
-  (match Typecheck.typecheck typecheck ~program:(clique 10) with
-   | Error error -> print_s [%sexp (error : Typecheck_error.t)]
-   | Ok { signature; _ } ->
-     Signature.to_string_hum signature
-     |> String.split_lines
-     |> List.iter ~f:(fun line ->
-       let variants = String.count line ~f:(Char.equal '[') in
-       printf
-         "%s: %d variants\n"
-         (List.nth_exn (String.split line ~on:' ') 1)
-         variants));
+  Option.iter
+    (typecheck ~prelude:false (clique 10))
+    ~f:(fun t ->
+      Signature.to_string_hum (checked t).signature
+      |> String.split_lines
+      |> List.iter ~f:(fun line ->
+        let variants = String.count line ~f:(Char.equal '[') in
+        printf
+          "%s: %d variants\n"
+          (List.nth_exn (String.split line ~on:' ') 1)
+          variants));
   [%expect
     {|
     a0: 10 variants
@@ -881,25 +723,38 @@ let%expect_test "mutually recursive alias cliques expand each alias once" =
 ;;
 
 let%expect_test "guardedness is judged on the expansion" =
-  let f_of ty = Ty.con "f" ~args:[ Ty ty ] in
-  let f body = Decl.alias "f" ~params:[ Decl.ty "a" ] body in
-  let variant_f = f (Ty.variant [ "A", Ty.var "a" ]) in
-  let record_f = f (Ty.record [ "x", Ty.var "a" ]) in
-  let g = Decl.alias "g" (f_of (Ty.con "g")) in
-  check [ variant_f; g ];
-  check [ g; variant_f ];
-  check [ record_f; g ];
-  check [ g; record_f ];
   check
-    [ variant_f
-    ; g
-    ; top_let ("v", [ typed "x" (Ty.con "g") ], None, var "x")
-    ; top "a" [] ~annot:(Ty.con "g") (tag "A" ~arg:(tag "A" ~arg:(var "a")))
-    ];
+    {|
+type f['a] = [`A of 'a]
+type g = f[g]
+|};
   check
-    [ Decl.alias "a" (Ty.tuple [ Ty.con "b"; Ty.int ])
-    ; Decl.alias "b" (Ty.variant [ "A", Ty.con "a" ])
-    ];
+    {|
+type g = f[g]
+type f['a] = [`A of 'a]
+|};
+  check
+    {|
+type f['a] = {`x : 'a}
+type g = f[g]
+|};
+  check
+    {|
+type g = f[g]
+type f['a] = {`x : 'a}
+|};
+  check
+    {|
+type f['a] = [`A of 'a]
+type g = f[g]
+let v (x : g) = x
+let a : g = `A (`A a)
+|};
+  check
+    {|
+type a = b * int
+type b = [`A of a]
+|};
   [%expect
     {|
     type f['a] = [`A of 'a]
@@ -917,28 +772,44 @@ let%expect_test "guardedness is judged on the expansion" =
     type a = [`A of a] * int
     type b = [`A of b * int]
     |}];
-  check [ Decl.alias "t" (Ty.con "t") ];
-  check [ f (Ty.tuple [ Ty.var "a"; Ty.int ]); g ];
-  check [ Decl.list; f (list_of (Ty.var "a")); g ];
-  check [ f (Ty.code (Ty.var "a")); g ];
-  check [ Decl.alias "a" (Ty.con "b"); Decl.alias "b" (Ty.con "a") ];
   check
-    [ Decl.alias "id" ~params:[ Decl.ty "a" ] (Ty.var "a")
-    ; Decl.alias
-        "t"
-        (Ty.tuple
-           [ Ty.variant [ "A", Ty.con "t" ]
-           ; Ty.con "id" ~args:[ Ty (Ty.con "t") ]
-           ])
-    ];
+    {|
+type t = t
+|};
+  check
+    {|
+type f['a] = 'a * int
+type g = f[g]
+|};
+  check
+    {|
+type list['a] = Nil | Cons of 'a * list['a]
+type f['a] = list['a]
+type g = f[g]
+|};
+  check
+    {|
+type f['a] = <'a>{}
+type g = f[g]
+|};
+  check
+    {|
+type a = b
+type b = a
+|};
+  check
+    {|
+type id['a] = 'a
+type t = [`A of t] * id[t]
+|};
   [%expect
     {|
-    (Cyclic_type_alias t)
-    (Cyclic_type_alias g)
-    (Cyclic_type_alias g)
-    (Cyclic_type_alias g)
-    (Cyclic_type_alias a)
-    (Cyclic_type_alias t)
+    ((Cyclic_type_alias t) @ t.stag:2:5-6)
+    ((Cyclic_type_alias g) @ t.stag:3:5-6)
+    ((Cyclic_type_alias g) @ t.stag:4:5-6)
+    ((Cyclic_type_alias g) @ t.stag:3:5-6)
+    ((Cyclic_type_alias a) @ t.stag:2:5-6)
+    ((Cyclic_type_alias t) @ t.stag:3:5-6)
     |}]
 ;;
 
@@ -1004,14 +875,10 @@ let%expect_test "instantiation and unification of large types" =
 (* [t0['a] = 'a] and [t(k+1)['a] = step tk['a]], so [tn] has [2^n] paths
    when [step] uses its argument twice, but [n] expansions. *)
 let alias_dag n ~step =
-  let name k = sprintf "t%d" k in
-  let a = Decl.ty "a" in
-  Decl.alias (name 0) ~params:[ a ] (Ty.var "a")
-  :: List.init n ~f:(fun k ->
-    Decl.alias
-      (name (k + 1))
-      ~params:[ a ]
-      (step (Ty.con (name k) ~args:[ Ty (Ty.var "a") ])))
+  "type t0['a] = 'a\n"
+  ^ String.concat
+      (List.init n ~f:(fun k ->
+         sprintf "type t%d['a] = %s\n" (k + 1) (step (sprintf "t%d['a]" k))))
 ;;
 
 (* The distinct records and variants, [Link]s and other variables reachable. *)
@@ -1063,20 +930,19 @@ let print_parts ty =
 
 let%expect_test "traversals of shared aliases take linear time" =
   let n = 40 in
-  let t_n param = Ty.con (sprintf "t%d" n) ~args:[ Ty param ] in
   let check ~step =
-    let program =
+    let source =
       alias_dag n ~step
-      @ [ top_let ("f", [ typed "x" (t_n (Ty.var "a")) ], None, int 1)
-        ; top "g" [ "y" ] (app (var "f") [ var "y" ])
-        ; top_let
-            ("h", [ typed "z" (t_n Ty.int) ], None, app (var "g") [ var "z" ])
-        ]
+      ^ sprintf
+          {|let f (x : t%d['a]) = 1
+let g y = f y
+let h (z : t%d[int]) = g z
+|}
+          n
+          n
     in
-    match Typecheck.typecheck (typechecker ()) ~program with
-    | Error error -> print_s [%sexp (error : Typecheck_error.t)]
-    | Ok { signature; _ } ->
-      List.iter signature ~f:(function
+    Option.iter (typecheck ~prelude:false source) ~f:(fun t ->
+      List.iter (checked t).signature ~f:(function
         | Value { name; scheme; _ } ->
           (match Type.canonical_ty scheme with
            | TArrow (arg, result) ->
@@ -1084,10 +950,10 @@ let%expect_test "traversals of shared aliases take linear time" =
              printf "%s : _ -> %s " name (Type.to_string_hum result);
              print_parts arg
            | _ -> assert false)
-        | Type _ | Module _ -> ())
+        | Type _ | Module _ -> ()))
   in
-  check ~step:(fun t -> Ty.variant [ "L", t; "R", t ]);
-  check ~step:(fun t -> Ty.tuple [ t; t ]);
+  check ~step:(fun t -> sprintf "[`L of %s | `R of %s]" t t);
+  check ~step:(fun t -> sprintf "%s * %s" t t);
   [%expect
     {|
     f : _ -> int ((records_and_variants 40) (links 41) (vars 1))
@@ -1100,22 +966,13 @@ let%expect_test "traversals of shared aliases take linear time" =
 ;;
 
 let%expect_test "cycle names are introduced in each type printed" =
-  let l_of a = Ty.con "l" ~args:[ Ty a ] in
-  let l =
-    Decl.alias
-      "l"
-      ~params:[ Decl.ty "a" ]
-      (Ty.variant
-         [ "Cons", Ty.tuple [ Ty.var "a"; l_of (Ty.var "a") ]; "Nil", Ty.unit ])
-  in
-  let a = Ty.var "a" in
   check
-    [ l
-    ; Decl.record "s" ~params:[ Decl.ty "a" ] [ "c", l_of a; "d", l_of a ]
-    ; Decl.variant "v" ~params:[ Decl.ty "a" ] [ "V", [ l_of a; l_of a ] ]
-    ; top_let
-        ("pair", [ typed "x" (Ty.tuple [ l_of a; l_of a ]) ], None, var "x")
-    ];
+    {|
+type l['a] = [`Cons of 'a * l['a] | `Nil]
+type s['a] = {c : l['a]; d : l['a]}
+type v['a] = V of l['a] * l['a]
+let pair (x : l['a] * l['a]) = x
+|};
   [%expect
     {|
     type l['a] = [`Cons of 'a * l['a] | `Nil]
@@ -1126,20 +983,21 @@ let%expect_test "cycle names are introduced in each type printed" =
 ;;
 
 let%expect_test "elaboration stops at a failed expansion" =
-  let c = Ty.con "c" in
   check
-    [ Decl.variant "v" [ "A", [ c ]; "B", [ c ] ]
-    ; Decl.alias "u" (Ty.tuple [ c; c ])
-    ; Decl.alias "c" (Ty.tuple [ c; Ty.int ])
-    ];
+    {|
+type v = A of c | B of c
+type u = c * c
+type c = c * int
+|};
   check
-    [ Decl.alias "u" (Ty.tuple [ c; c ])
-    ; Decl.alias "c" (Ty.tuple [ c; Ty.int ])
-    ];
+    {|
+type u = c * c
+type c = c * int
+|};
   [%expect
     {|
-    (Cyclic_type_alias c)
-    (Cyclic_type_alias c)
+    ((Cyclic_type_alias c) @ t.stag:2:14-15)
+    ((Cyclic_type_alias c) @ t.stag:2:9-10)
     |}]
 ;;
 

@@ -1,466 +1,377 @@
 open! Import
-open Syntax
-open Helpers
+open Source_helpers
 
-(* Line [n] of [t], so a location in the output names the node built with
-   [at n]. *)
-let at line txt =
-  let pos col = { Loc.Pos.line; col; offset = 0 } in
-  Located.create ~loc:{ Loc.file = "t"; start = pos 0; stop = pos 1 } txt
-;;
-
-let path_at line name = at line (path name)
-let e line desc : Expr.t = at line desc
-let p line desc : Pattern.t = at line desc
-let ty line desc : Type_expr.t = at line desc
-let row line desc : Type_expr.row = at line desc
-let int_at line n = e line (Lit (Int n))
-let bool_at line b = e line (Lit (Bool b))
-let var_at line name = e line (Var (path name, None))
-let app_at line f x = e line (App (f, x))
-let con_at line ?(args = []) name = ty line (Con (path_at line name, args))
-let int_ty line = con_at line "int"
-
-let top_at line name expr =
-  at line (Toplevel.Let (at line name, [], None, expr))
-;;
-
-let type_at line name ?(params = []) kind =
-  at line (Toplevel.Type { name = at line name; params; kind })
-;;
-
-let check_errors cases = List.iter cases ~f:check
+(* Each error is at the node it is about: the span printed is that of the node
+   named in the comment. *)
 
 let%expect_test "values" =
-  check_errors
-    [ [ top_at 1 "x" (var_at 2 "unbound") ]
-    ; [ top_at 1 "x" (app_at 2 (var_at 3 "id") (var_at 4 "M.y")) ]
-    ; (* Unification errors are at the expression checked against a type. *)
-      [ top_at
-          1
-          "x"
-          (app_at 2 (app_at 3 (var_at 4 "add") (bool_at 5 true)) (int_at 6 1))
-      ]
-    ; [ top_at 1 "x" (app_at 2 (int_at 3 1) (int_at 4 2)) ]
-    ; [ at 1 (Toplevel.Let (at 2 "x", [], Some (int_ty 3), bool_at 4 true)) ]
-    ; [ top_at
-          1
-          "x"
-          (e
-             2
-             (Var (path "id", Some (ty 3 (Arrow (int_ty 4, con_at 5 "bool"))))))
-      ]
-    ; [ top_at 1 "x" (e 2 (Var (path "id", Some (con_at 3 "unbound")))) ]
-    ; [ top_at 1 "x" (int_at 2 1)
-      ; top_at 3 "y" (int_at 4 2)
-      ; top_at 5 "x" (int_at 6 3)
-      ]
-    ; [ top_at
-          1
-          "x"
-          (e
-             2
-             (Let
-                ( at 3 "f"
-                , [ at 4 "a", Some (con_at 5 "nope") ]
-                , None
-                , int_at 6 1
-                , int_at 7 1 )))
-      ]
-    ; [ top_at
-          1
-          "x"
-          (e
-             2
-             (Let (at 3 "f", [], Some (con_at 4 "bool"), int_at 5 1, int_at 6 1)))
-      ]
-    ];
+  (* the variable *)
+  check {|let x = unbound|};
+  (* the variable *)
+  check {|let x = id M.y|};
+  (* Unification errors are at the expression checked against a type: [true]. *)
+  check {|let x = add true 1|};
+  (* the applied [1] *)
+  check {|let x = 1 2|};
+  (* the body *)
+  check {|let x : int = true|};
+  (* the annotated variable *)
+  check {|let x = (id : int -> bool)|};
+  (* the annotation *)
+  check {|let x = (id : unbound)|};
+  (* the second [x] *)
+  check
+    {|
+let x = 1
+let y = 2
+let x = 3
+|};
+  (* the argument's annotation *)
+  check {|let x = let f (a : nope) = 1 in 2|};
+  (* the body of [f] *)
+  check {|let x = let f : bool = 1 in 2|};
   [%expect
     {|
-    ((Not_in_scope unbound) @ t:2:0-1)
-    ((Unbound_module M) @ t:4:0-1)
+    ((Not_in_scope unbound) @ t.stag:1:8-15)
+    ((Unbound_module M) @ t.stag:1:11-12)
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
-     @ t:5:0-1)
+     @ t.stag:1:12-16)
     ((Unification_error
       (Type_mismatch (TArrow (TVar (Unbound 18 1)) (TVar (Unbound 19 1)))
        (TCon int ()) Structural_mismatch))
-     @ t:3:0-1)
+     @ t.stag:1:8-9)
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
-     @ t:4:0-1)
+     @ t.stag:1:14-18)
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
-     @ t:2:0-1)
-    ((Unbound_type unbound) @ t:3:0-1)
-    ((Duplicate_toplevel x) @ t:5:0-1)
-    ((Unbound_type nope) @ t:5:0-1)
+     @ t.stag:1:8-26)
+    ((Unbound_type unbound) @ t.stag:1:14-21)
+    ((Duplicate_toplevel x) @ t.stag:4:4-5)
+    ((Unbound_type nope) @ t.stag:1:19-23)
     ((Unification_error
       (Type_mismatch (TCon bool ()) (TCon int ())
        (Base_types_not_equal bool int)))
-     @ t:5:0-1)
+     @ t.stag:1:23-24)
     |}]
 ;;
 
+let nominal_decls =
+  {|
+type t = A | B of int
+type r = {x : int; y : int}
+type s = {z : int}
+|}
+;;
+
 let%expect_test "nominal types" =
-  let decls =
-    [ type_at 10 "t" (Variant [ at 11 "A", []; at 12 "B", [ int_ty 13 ] ])
-    ; type_at 20 "r" (Record [ at 21 "x", int_ty 22; at 23 "y", int_ty 24 ])
-    ; type_at 30 "s" (Record [ at 31 "z", int_ty 32 ])
-    ]
-  in
-  check_errors
+  let check_v expr = check (nominal_decls ^ "let v = " ^ expr) in
+  (* the constructor *)
+  check_v "C";
+  (* the constructor's path *)
+  check_v "M.C";
+  (* the construction *)
+  check_v "B";
+  (* the argument *)
+  check_v "B true";
+  (* the field [w] *)
+  check_v "{x = 1; w = 2}";
+  (* the field [z] *)
+  check_v "{x = 1; z = 2}";
+  (* the second [x] *)
+  check_v "{x = 1; y = 2; x = 3}";
+  (* the record *)
+  check_v "{x = 1}";
+  (* the [true] *)
+  check_v "{x = 1; y = true}";
+  (* Source can't write a nominal record without fields ([{}] is the empty
+     polymorphic record), so its fields are removed after parsing. The error
+     is at the record. *)
+  check_program
     (List.map
-       ~f:(fun expr -> decls @ [ top_at 1 "v" expr ])
-       [ e 2 (Construct (path_at 3 "C", []))
-       ; e 2 (Construct (path_at 3 "M.C", []))
-       ; e 2 (Construct (path_at 3 "B", []))
-       ; e 2 (Construct (path_at 3 "B", [ bool_at 4 true ]))
-       ; e 2 (Record [ path_at 3 "x", int_at 4 1; path_at 5 "w", int_at 6 2 ])
-       ; e 2 (Record [ path_at 3 "x", int_at 4 1; path_at 5 "z", int_at 6 2 ])
-       ; e
-           2
-           (Record
-              [ path_at 3 "x", int_at 4 1
-              ; path_at 5 "y", int_at 6 2
-              ; path_at 7 "x", int_at 8 3
-              ])
-       ; e 2 (Record [ path_at 3 "x", int_at 4 1 ])
-       ; e
-           2
-           (Record [ path_at 3 "x", int_at 4 1; path_at 5 "y", bool_at 6 true ])
-       ; e 2 (Record [])
-       ; e 2 (Field (int_at 3 1, path_at 4 "x"))
-       ; e 2 (Field (int_at 3 1, path_at 4 "w"))
-       ]);
+       (parse_exn (nominal_decls ^ "let v = {x = 1}"))
+       ~f:(fun (toplevel : Syntax.Toplevel.t) ->
+         match toplevel.txt with
+         | Let (name, args, annot, ({ txt = Record _; _ } as record)) ->
+           { toplevel with
+             txt =
+               Syntax.Toplevel.Let
+                 (name, args, annot, { record with txt = Syntax.Expr.Record [] })
+           }
+         | _ -> toplevel));
+  (* the record [1] *)
+  check_v "(1).x";
+  (* the field [w] *)
+  check_v "(1).w";
   [%expect
     {|
-    ((Unbound_constructor C) @ t:3:0-1)
-    ((Unbound_module M) @ t:3:0-1)
-    ((Constructor_arity_mismatch (constructor B) (expected 1) (got 0)) @ t:2:0-1)
+    ((Unbound_constructor C) @ t.stag:5:8-9)
+    ((Unbound_module M) @ t.stag:5:8-9)
+    ((Constructor_arity_mismatch (constructor B) (expected 1) (got 0)) @
+     t.stag:5:8-9)
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
-     @ t:4:0-1)
-    ((Unbound_field w) @ t:5:0-1)
+     @ t.stag:5:10-14)
+    ((Unbound_field w) @ t.stag:5:16-17)
     ((Fields_of_different_types (field z) (expected_type r) (actual_type s)) @
-     t:5:0-1)
-    ((Duplicate_field x) @ t:7:0-1)
-    ((Missing_field y) @ t:2:0-1)
+     t.stag:5:16-17)
+    ((Duplicate_field x) @ t.stag:5:23-24)
+    ((Missing_field y) @ t.stag:5:8-15)
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
-     @ t:6:0-1)
-    (Empty_record @ t:2:0-1)
+     @ t.stag:5:20-24)
+    (Empty_record @ t.stag:5:8-15)
     ((Unification_error
       (Type_mismatch (TCon r ()) (TCon int ()) (Base_types_not_equal r int)))
-     @ t:3:0-1)
-    ((Unbound_field w) @ t:4:0-1)
+     @ t.stag:5:8-11)
+    ((Unbound_field w) @ t.stag:5:12-13)
     |}]
 ;;
 
 let%expect_test "patterns" =
-  let decls =
-    [ type_at 10 "t" (Variant [ at 11 "A", []; at 12 "B", [ int_ty 13 ] ]) ]
+  let check_case cases =
+    check ("type t = A | B of int\nlet v = match 1 with " ^ cases)
   in
-  let match_ cases = e 2 (Match (int_at 3 1, cases)) in
-  check_errors
-    (List.map
-       ~f:(fun expr -> decls @ [ top_at 1 "v" expr ])
-       [ match_ [ p 4 (Lit (Bool true)), int_at 5 1 ]
-       ; match_ [ p 4 (Construct (path_at 5 "C", [])), int_at 6 1 ]
-       ; match_ [ p 4 (Construct (path_at 5 "B", [])), int_at 6 1 ]
-       ; match_ [ p 4 (Record [ path_at 5 "x", p 6 Any ]), int_at 7 1 ]
-       ; match_ [ p 4 (Tuple [ p 5 (Var "a"); p 6 (Var "a") ]), int_at 7 1 ]
-       ; match_
-           [ ( p
-                 4
-                 (Poly_record
-                    { fields = [ at 5 "x", p 6 Any; at 7 "x", p 8 Any ]
-                    ; rest = Closed
-                    })
-             , int_at 9 1 )
-           ]
-       ; match_ [ p 4 Any, int_at 5 1; p 6 Any, bool_at 7 true ]
-       ; (* Closing the scrutinee to the tags of the cases. *)
-         match_ [ p 4 (Poly_variant (at 5 "A", None)), int_at 6 1 ]
-       ]);
+  (* the pattern *)
+  check_case "true -> 1";
+  (* the constructor *)
+  check_case "C -> 1";
+  (* the pattern *)
+  check_case "B -> 1";
+  (* the field *)
+  check_case "{x = _} -> 1";
+  (* the second [a] *)
+  check_case "(a, a) -> 1";
+  (* the second [`x] *)
+  check_case "{`x = _; `x = _} -> 1";
+  (* the second case's body *)
+  check_case "_ -> 1 | _ -> true";
+  (* Closing the scrutinee to the tags of the cases: the pattern. *)
+  check_case "`A -> 1";
   [%expect
     {|
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
-     @ t:4:0-1)
-    ((Unbound_constructor C) @ t:5:0-1)
-    ((Constructor_arity_mismatch (constructor B) (expected 1) (got 0)) @ t:4:0-1)
-    ((Unbound_field x) @ t:5:0-1)
-    ((Duplicate_pattern_variable a) @ t:6:0-1)
-    ((Duplicate_row_entry x) @ t:7:0-1)
+     @ t.stag:2:21-25)
+    ((Unbound_constructor C) @ t.stag:2:21-22)
+    ((Constructor_arity_mismatch (constructor B) (expected 1) (got 0)) @
+     t.stag:2:21-22)
+    ((Unbound_field x) @ t.stag:2:22-23)
+    ((Duplicate_pattern_variable a) @ t.stag:2:25-26)
+    ((Duplicate_row_entry x) @ t.stag:2:30-32)
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
-     @ t:7:0-1)
+     @ t.stag:2:35-39)
     ((Unification_error
       (Type_mismatch (TCon int ())
        (TVariant (RExtend A Present (TCon unit ()) (RVar (Unbound 19 1))))
        Structural_mismatch))
-     @ t:4:0-1)
+     @ t.stag:2:21-23)
     |}]
 ;;
 
 let%expect_test "polymorphic records and variants" =
-  check_errors
-    (List.map
-       ~f:(fun expr -> [ top_at 1 "v" expr ])
-       [ e
-           2
-           (Poly_record
-              [ at 3 "x", int_at 4 1
-              ; at 5 "y", int_at 6 1
-              ; at 7 "x", int_at 8 1
-              ])
-       ; e 2 (Poly_field (int_at 3 1, at 4 "x"))
-       ; e 2 (Poly_field (e 3 (Poly_record [ at 4 "y", int_at 5 1 ]), at 6 "x"))
-       ; e 2 (Poly_restrict (int_at 3 1, at 4 "x"))
-       ; e
-           2
-           (Poly_extend
-              ([ at 3 "x", int_at 4 1; at 5 "x", int_at 6 1 ], int_at 7 1))
-       ; e 2 (Poly_extend ([ at 3 "x", int_at 4 1 ], int_at 5 1))
-       ; e 2 (Poly_update (int_at 3 1, [ at 4 "x", int_at 5 1 ]))
-       ; e
-           2
-           (Poly_update
-              (int_at 3 1, [ at 4 "x", int_at 5 1; at 6 "x", int_at 7 1 ]))
-       ; app_at
-           2
-           (int_at 3 1)
-           (e 4 (Poly_variant (at 5 "A", Some (int_at 6 1))))
-       ]);
+  let check_v expr = check ("let v = " ^ expr) in
+  (* the second [`x] *)
+  check_v "{`x = 1; `y = 1; `x = 1}";
+  (* the [1] *)
+  check_v "(1).`x";
+  (* the record *)
+  check_v "{`y = 1}.`x";
+  (* the [1] *)
+  check_v "(1) \\ `x";
+  (* the second [`x] *)
+  check_v "{`x = 1; `x = 1 | 1}";
+  (* the extended [1] *)
+  check_v "{`x = 1 | 1}";
+  (* the updated [1] *)
+  check_v "{(1) with `x = 1}";
+  (* the second [`x] *)
+  check_v "{(1) with `x = 1; `x = 1}";
+  (* the applied [1] *)
+  check_v "1 (`A 1)";
   [%expect
     {|
-    ((Duplicate_row_entry x) @ t:7:0-1)
+    ((Duplicate_row_entry x) @ t.stag:1:25-27)
     ((Unification_error
       (Type_mismatch
        (TRecord (RExtend x Present (TVar (Unbound 18 1)) (RVar (Unbound 19 1))))
        (TCon int ()) Structural_mismatch))
-     @ t:3:0-1)
+     @ t.stag:1:8-11)
     ((Unification_error
       (Row_mismatch
        (RExtend x Present (TVar (Unbound 18 1)) (RVar (Unbound 19 1)))
        (RExtend y Present (TCon int ()) REmpty) (Missing_label x)))
-     @ t:3:0-1)
+     @ t.stag:1:8-16)
     ((Unification_error
       (Type_mismatch
        (TRecord (RExtend x Present (TVar (Unbound 18 1)) (RVar (Unbound 19 1))))
        (TCon int ()) Structural_mismatch))
-     @ t:3:0-1)
-    ((Duplicate_row_entry x) @ t:5:0-1)
+     @ t.stag:1:8-11)
+    ((Duplicate_row_entry x) @ t.stag:1:17-19)
     ((Unification_error
       (Type_mismatch (TRecord (RVar (Unbound 18 1))) (TCon int ())
        Structural_mismatch))
-     @ t:5:0-1)
+     @ t.stag:1:18-19)
     ((Unification_error
       (Type_mismatch
        (TRecord (RExtend x Present (TVar (Unbound 18 1)) (RVar (Unbound 19 1))))
        (TCon int ()) Structural_mismatch))
-     @ t:3:0-1)
-    ((Duplicate_row_entry x) @ t:6:0-1)
+     @ t.stag:1:9-12)
+    ((Duplicate_row_entry x) @ t.stag:1:26-28)
     ((Unification_error
       (Type_mismatch (TArrow (TVar (Unbound 18 1)) (TVar (Unbound 19 1)))
        (TCon int ()) Structural_mismatch))
-     @ t:3:0-1)
+     @ t.stag:1:8-9)
     |}]
 ;;
 
 let%expect_test "type expressions" =
-  let annotated annot =
-    [ at 1 (Toplevel.Let (at 2 "x", [], Some annot, var_at 3 "x")) ]
+  let annotated ?(decls = "") annot =
+    check (decls ^ "let x : " ^ annot ^ " = x")
   in
-  let list =
-    type_at 10 "list" ~params:[ at 11 (Type_decl.Param.Ty "a") ] Abstract
-  in
-  let rows =
-    type_at 20 "rows" ~params:[ at 21 (Type_decl.Param.Row "r") ] Abstract
-  in
-  check_errors
-    [ annotated (con_at 4 "unbound")
-    ; annotated (ty 4 (Con (path_at 5 "M.t", [])))
-    ; list :: annotated (ty 4 (Con (path_at 5 "list", [])))
-    ; list :: annotated (ty 4 (Con (path_at 5 "list", [ Row (row 6 Empty) ])))
-    ; rows :: annotated (ty 4 (Con (path_at 5 "rows", [ Ty (int_ty 6) ])))
-    ; annotated
-        (ty
-           4
-           (Record
-              (row
-                 5
-                 (Extend
-                    ( at 6 "x"
-                    , int_ty 7
-                    , row 8 (Extend (at 9 "x", int_ty 10, row 11 Empty)) )))))
-    ];
+  let list = "type list['a]\n" in
+  let rows = "type rows[{..'r}]\n" in
+  (* the type *)
+  annotated "unbound";
+  (* the path *)
+  annotated "M.t";
+  (* the type *)
+  annotated ~decls:list "list";
+  annotated ~decls:list "list[{}]";
+  (* the argument *)
+  annotated ~decls:rows "rows[int]";
+  (* the second [`x] *)
+  annotated "{`x : int; `x : int}";
   [%expect
     {|
-    ((Unbound_type unbound) @ t:4:0-1)
-    ((Unbound_module M) @ t:5:0-1)
-    ((Type_arity_mismatch (type_name list) (expected 1) (got 0)) @ t:4:0-1)
+    ((Unbound_type unbound) @ t.stag:1:8-15)
+    ((Unbound_module M) @ t.stag:1:8-9)
+    ((Type_arity_mismatch (type_name list) (expected 1) (got 0)) @ t.stag:2:8-12)
     type list['a]
     val x : list[{}]
-    ((Type_arg_kind_mismatch (type_name rows) (param (Row r))) @ t:6:0-1)
-    ((Duplicate_row_entry x) @ t:9:0-1)
+    ((Type_arg_kind_mismatch (type_name rows) (param (Row r))) @ t.stag:2:13-16)
+    ((Duplicate_row_entry x) @ t.stag:1:19-21)
     |}]
 ;;
 
 let%expect_test "declarations" =
-  check_errors
-    [ [ type_at 1 "t" (Alias (ty 2 (Var "a"))) ]
-    ; [ type_at 1 "t" (Alias (ty 2 (Record (row 3 (Var (at 4 "r")))))) ]
-    ; [ type_at
-          1
-          "t"
-          ~params:[ at 2 (Type_decl.Param.Ty "a") ]
-          (Alias (ty 3 (Record (row 4 (Var (at 5 "a"))))))
-      ]
-    ; [ type_at
-          1
-          "t"
-          ~params:[ at 2 (Type_decl.Param.Row "r") ]
-          (Alias (ty 3 (Var "r")))
-      ]
-    ; [ type_at 1 "t" Abstract; type_at 2 "u" Abstract; type_at 3 "t" Abstract ]
-    ; [ type_at 1 "t" (Variant [ at 2 "A", [] ])
-      ; type_at 3 "u" (Variant [ at 4 "B", []; at 5 "A", [] ])
-      ]
-    ; [ type_at 1 "t" (Record [ at 2 "x", int_ty 3; at 4 "x", int_ty 5 ]) ]
-    ; [ type_at
-          1
-          "t"
-          ~params:
-            [ at 2 (Type_decl.Param.Ty "a")
-            ; at 3 (Type_decl.Param.Ty "b")
-            ; at 4 (Type_decl.Param.Row "a")
-            ]
-          Abstract
-      ]
-    ; [ type_at 1 "t" (Variant [ at 2 "A", [ con_at 3 "unbound" ] ]) ]
-    ; [ type_at 1 "t" (Alias (ty 2 (Tuple [ con_at 3 "t"; int_ty 4 ]))) ]
-    ; [ type_at 1 "u" (Alias (con_at 2 "t"))
-      ; type_at 3 "t" (Alias (ty 4 (Tuple [ con_at 5 "u"; int_ty 6 ])))
-      ]
-    ; [ type_at
-          1
-          "t"
-          ~params:[ at 2 (Type_decl.Param.Ty "a") ]
-          (Alias
-             (ty
-                3
-                (Arrow
-                   ( ty 4 (Var "a")
-                   , ty
-                       5
-                       (Con
-                          ( path_at 6 "t"
-                          , [ Ty
-                                (ty
-                                   7
-                                   (Tuple [ ty 8 (Var "a"); ty 9 (Var "a") ]))
-                            ] )) ))))
-      ]
-    ; [ at 1 (Toplevel.Module (at 2 "M", []))
-      ; at 3 (Toplevel.Module (at 4 "N", []))
-      ; at 5 (Toplevel.Module (at 6 "M", []))
-      ]
-    ; [ at
-          1
-          (Toplevel.Module
-             (at 2 "M", [ top_at 3 "x" (int_at 4 1); top_at 5 "x" (int_at 6 1) ]))
-      ]
-    ];
+  (* the variable *)
+  check {|type t = 'a|};
+  (* the row variable *)
+  check {|type t = {..'r}|};
+  (* the row variable *)
+  check {|type t['a] = {..'a}|};
+  (* the variable *)
+  check {|type t[{..'r}] = 'r|};
+  (* the second [t] *)
+  check
+    {|
+type t
+type u
+type t
+|};
+  (* the second [A] *)
+  check
+    {|
+type t = A
+type u = B | A
+|};
+  (* the second [x] *)
+  check {|type t = {x : int; x : int}|};
+  (* the second [a] *)
+  check {|type t['a, 'b, {..'a}]|};
+  (* the argument's type *)
+  check {|type t = A of unbound|};
+  (* the declaration of [t] *)
+  check {|type t = t * int|};
+  (* the declaration of [u] *)
+  check
+    {|
+type u = t
+type t = u * int
+|};
+  (* the recursive use *)
+  check {|type t['a] = 'a -> t['a * 'a]|};
+  (* the second [M] *)
+  check
+    {|
+module M = struct end
+module N = struct end
+module M = struct end
+|};
+  (* the second [x] *)
+  check
+    {|
+module M = struct
+  let x = 1
+  let x = 1
+end
+|};
   [%expect
     {|
-    ((Unbound_type_variable a) @ t:2:0-1)
-    ((Unbound_type_variable r) @ t:4:0-1)
-    ((Type_variable_kind_mismatch a) @ t:5:0-1)
-    ((Type_variable_kind_mismatch r) @ t:3:0-1)
-    ((Duplicate_type t) @ t:3:0-1)
-    ((Duplicate_constructor A) @ t:5:0-1)
-    ((Duplicate_field x) @ t:4:0-1)
-    ((Duplicate_type_parameter (type_name t) (param a)) @ t:4:0-1)
-    ((Unbound_type unbound) @ t:3:0-1)
-    ((Cyclic_type_alias t) @ t:1:0-1)
-    ((Cyclic_type_alias u) @ t:1:0-1)
-    ((Non_regular_recursive_alias t) @ t:5:0-1)
-    ((Duplicate_module M) @ t:6:0-1)
-    ((Duplicate_toplevel M.x) @ t:5:0-1)
+    ((Unbound_type_variable a) @ t.stag:1:9-11)
+    ((Unbound_type_variable r) @ t.stag:1:12-14)
+    ((Type_variable_kind_mismatch a) @ t.stag:1:16-18)
+    ((Type_variable_kind_mismatch r) @ t.stag:1:17-19)
+    ((Duplicate_type t) @ t.stag:4:5-6)
+    ((Duplicate_constructor A) @ t.stag:3:13-14)
+    ((Duplicate_field x) @ t.stag:1:19-20)
+    ((Duplicate_type_parameter (type_name t) (param a)) @ t.stag:1:15-21)
+    ((Unbound_type unbound) @ t.stag:1:14-21)
+    ((Cyclic_type_alias t) @ t.stag:1:5-6)
+    ((Cyclic_type_alias u) @ t.stag:2:5-6)
+    ((Non_regular_recursive_alias t) @ t.stag:1:19-29)
+    ((Duplicate_module M) @ t.stag:4:7-8)
+    ((Duplicate_toplevel M.x) @ t.stag:4:6-7)
     |}]
 ;;
 
 let%expect_test "staging" =
-  let splice ?subs line expr = e line (Splice { expr; subs }) in
-  let quote line expr = e line (Quote expr) in
-  check_errors
-    [ [ top_at
-          1
-          "x"
-          (quote
-             2
-             (e
-                3
-                (Let (at 4 "y", [], None, int_at 5 1, splice 6 (var_at 7 "y")))))
-      ]
-    ; [ top_at 1 "x" (splice 2 (var_at 3 "x")) ]
-    ; [ top_at 1 "f" (splice 2 (app_at 3 (var_at 4 "id") (var_at 5 "f"))) ]
-    ; [ top_at 1 "x" (splice 2 (int_at 3 1)) ]
-    ; [ top_at 1 "x" (splice 2 (quote 3 (var_at 4 "y"))) ]
-    ; [ top_at
-          1
-          "x"
-          (quote
-             2
-             (splice
-                3
-                ~subs:
-                  [ at 4 "a", Some (int_at 5 1)
-                  ; at 6 "b", None
-                  ; at 7 "a", None
-                  ]
-                (quote 8 (int_at 9 1))))
-      ]
-    ; [ top_at 1 "x" (splice 2 ~subs:[ at 3 "a", None ] (quote 4 (int_at 5 1)))
-      ]
-    ; [ top_at
-          1
-          "x"
-          (splice
-             2
-             (e
-                3
-                (Match (int_at 4 1, [ p 5 (Lit (Int 2)), quote 6 (int_at 7 1) ]))))
-      ]
-    ];
+  (* the spliced [y] *)
+  check {|let x = .<let y = 1 in .~y>.|};
+  (* the [x] *)
+  check {|let x = .~x|};
+  (* the [f] *)
+  check {|let f = .~(id f)|};
+  (* the spliced [1] *)
+  check {|let x = .~1|};
+  (* the splice *)
+  check {|let x = .~(.<y>.)|};
+  (* the second [a] *)
+  check {|let x = .<.~(.<1>.).{a = 1; b; a}>.|};
+  (* the [a] *)
+  check {|let x = .~(.<1>.).{a}|};
+  (* the splice, failing at the match *)
+  check {|let x = .~(match 1 with 2 -> .<1>.)|};
   [%expect
     {|
-    ((Variable_used_at_wrong_level (name y) (var_level 1) (used_at 0)) @ t:7:0-1)
-    ((Compile_time_use_of_toplevel_being_checked x) @ t:3:0-1)
-    ((Compile_time_use_of_toplevel_being_checked f) @ t:5:0-1)
+    ((Variable_used_at_wrong_level (name y) (var_level 1) (used_at 0)) @
+     t.stag:1:25-26)
+    ((Compile_time_use_of_toplevel_being_checked x) @ t.stag:1:10-11)
+    ((Compile_time_use_of_toplevel_being_checked f) @ t.stag:1:14-15)
     ((Unification_error
       (Type_mismatch
        (TCode (inner (TVar (Unbound 18 1))) (context (RVar (Unbound 19 1))))
        (TCon int ()) Structural_mismatch))
-     @ t:3:0-1)
-    ((Not_in_scope y) @ t:2:0-1)
-    ((Duplicate_substitution a) @ t:7:0-1)
-    ((Not_in_scope a) @ t:3:0-1)
+     @ t.stag:1:10-11)
+    ((Not_in_scope y) @ t.stag:1:8-17)
+    ((Duplicate_substitution a) @ t.stag:1:31-32)
+    ((Not_in_scope a) @ t.stag:1:19-20)
     ((Splice_evaluation_failed
       (code
        (Match (Lit (Int 1) : int)
         (((Lit (Int 2) : int) (Quote (Lit (Int 1) : int) : <int>{}))) : <int>{}))
-      (error ("Match failure: no case matches the value 1" @ t:3:0-1)))
-     @ t:2:0-1)
+      (error ("Match failure: no case matches the value 1" @ t.stag:1:10-35)))
+     @ t.stag:1:8-35)
     |}]
 ;;
 
@@ -478,53 +389,27 @@ let rec loc_tree (expr : Typed.Expr.t) =
      :: List.map (Typed.Expr.sub_exprs expr) ~f:loc_tree)
 ;;
 
-let print_loc_trees program =
-  match Typecheck.typecheck (typechecker ()) ~program:(prims @ program) with
-  | Error error -> print_s [%sexp (error : Typecheck_error.t)]
-  | Ok { program; _ } ->
-    let last = List.last_exn program.sccs in
+let print_loc_trees source =
+  Option.iter (typecheck source) ~f:(fun t ->
+    let last = List.last_exn (checked t).program.sccs in
     List.iter last.members ~f:(fun (toplevel : Typed.Toplevel.t) ->
-      print_s (loc_tree toplevel.body))
+      print_s (loc_tree toplevel.body)))
 ;;
 
 let%expect_test "typed nodes keep their syntax's locations" =
-  print_loc_trees
-    [ top_at
-        1
-        "x"
-        (e
-           2
-           (Let
-              ( at 3 "y"
-              , []
-              , None
-              , int_at 4 1
-              , e
-                  5
-                  (Match
-                     ( var_at 6 "y"
-                     , [ p 7 Any, e 8 (Tuple [ var_at 9 "y"; bool_at 10 true ])
-                       ] )) )))
-    ];
+  print_loc_trees {|let x = let y = 1 in match y with _ -> (y, true)|};
   (* Generated code keeps the locations of the quote it came from; lets binding
      explicit substitutions are at the splice. *)
-  print_loc_trees
-    [ top_at
-        1
-        "x"
-        (e
-           2
-           (Splice
-              { expr = e 3 (Quote (app_at 4 (var_at 5 "a") (int_at 6 1)))
-              ; subs = Some [ at 7 "a", Some (var_at 8 "id") ]
-              }))
-    ];
+  print_loc_trees {|let x = .~(.<a 1>.).{a = id}|};
   [%expect
     {|
-    (Let t:2:0-1 (Lit t:4:0-1)
-     (Match t:5:0-1 (Var t:6:0-1) (Tuple t:8:0-1 (Var t:9:0-1) (Lit t:10:0-1))))
-    (Toplevel_splice t:2:0-1
-     (Quote t:3:0-1 (App t:4:0-1 (Var t:5:0-1) (Lit t:6:0-1)))
-     (Let t:2:0-1 (Var t:8:0-1) (App t:4:0-1 (Var t:5:0-1) (Lit t:6:0-1))))
+    (Let t.stag:1:8-48 (Lit t.stag:1:16-17)
+     (Match t.stag:1:21-48 (Var t.stag:1:27-28)
+      (Tuple t.stag:1:39-48 (Var t.stag:1:40-41) (Lit t.stag:1:43-47))))
+    (Toplevel_splice t.stag:1:8-28
+     (Quote t.stag:1:10-19
+      (App t.stag:1:13-16 (Var t.stag:1:13-14) (Lit t.stag:1:15-16)))
+     (Let t.stag:1:8-28 (Var t.stag:1:25-27)
+      (App t.stag:1:13-16 (Var t.stag:1:13-14) (Lit t.stag:1:15-16))))
     |}]
 ;;

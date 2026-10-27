@@ -4,14 +4,14 @@ let run ?(eval = true) src =
   match Parser.program ~file:"t.stag" src with
   | Error error -> print_endline (Parser.Error.to_string error)
   | Ok program ->
-    (match Driver.check ~limits:Helpers.limits program with
+    (match Driver.check ~limits:Source_helpers.limits program with
      | Error error -> print_s [%sexp (error : Typecheck_error.t)]
      | Ok driver ->
-       Helpers.print_signature (Driver.checked driver).signature;
+       print_string (Signature.to_string_hum (Driver.checked driver).signature);
        if eval
        then (
          print_endline "---";
-         match Driver.eval ~limits:Helpers.limits driver with
+         match Driver.eval ~limits:Source_helpers.limits driver with
          | Ok () -> ()
          | Error error -> print_s [%sexp "Runtime error", (error : Error.t)]))
 ;;

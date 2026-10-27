@@ -1,7 +1,7 @@
 open! Import
 
 let check_files files =
-  match Driver.check_files ~limits:Helpers.limits files with
+  match Driver.check_files ~limits:Source_helpers.limits files with
   | Error error ->
     print_s [%sexp (error : Driver.Error.t)];
     None
@@ -15,8 +15,8 @@ let test ?(show = Fn.id) contents =
   match check_files [ { Source_file.path; contents } ] with
   | None -> ()
   | Some driver ->
-    Driver.eval ~limits:Helpers.limits driver |> ok_exn;
-    let results = Expect_test_runner.run ~limits:Helpers.limits driver in
+    Driver.eval ~limits:Source_helpers.limits driver |> ok_exn;
+    let results = Expect_test_runner.run ~limits:Source_helpers.limits driver in
     List.iter results ~f:(fun result ->
       print_s [%sexp (result : Expect_test_runner.Test_result.t)]);
     (match Expect_test_runner.corrected ~path ~contents results with
@@ -216,7 +216,7 @@ let%expect_test "typechecking" =
     Option.iter
       (check_files [ { Source_file.path = "t.stag"; contents } ])
       ~f:(fun driver ->
-        Helpers.print_signature (Driver.checked driver).signature)
+        print_string (Signature.to_string_hum (Driver.checked driver).signature))
   in
   check {|let%expect_test "not unit" = 1|};
   check {x|let f x = [%expect {| |}]|x};

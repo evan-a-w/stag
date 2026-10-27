@@ -1,0 +1,10 @@
+(executable
+ (name dune_rules))
+
+(rule
+ (deps
+  (glob_files ../*.stag))
+ (action
+  (with-stdout-to
+   dune.inc
+   (run ./dune_rules.exe %{deps}))))

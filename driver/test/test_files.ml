@@ -3,12 +3,12 @@ open! Import
 let file path contents = { Source_file.path; contents }
 
 let run files =
-  match Driver.check_files ~limits:Helpers.limits files with
+  match Driver.check_files ~limits:Source_helpers.limits files with
   | Error error -> print_s [%sexp (error : Driver.Error.t)]
   | Ok driver ->
-    Helpers.print_signature (Driver.checked driver).signature;
+    print_string (Signature.to_string_hum (Driver.checked driver).signature);
     print_endline "---";
-    (match Driver.eval ~limits:Helpers.limits driver with
+    (match Driver.eval ~limits:Source_helpers.limits driver with
      | Ok () -> ()
      | Error error -> print_s [%sexp "Runtime error", (error : Error.t)])
 ;;

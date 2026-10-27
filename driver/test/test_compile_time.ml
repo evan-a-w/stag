@@ -1,86 +1,19 @@
 open! Import
-open Syntax
-open Helpers
+open Source_helpers
 
-let prim_names = List.filter_map prims ~f:let_name
-
-let members (checked : Typecheck.Checked.t) =
-  List.concat_map checked.program.sccs ~f:(fun scc -> scc.members)
-  |> List.filter ~f:(fun (member : Typed.Toplevel.t) ->
-    not (List.mem prim_names member.ident.name ~equal:String.equal))
-;;
-
-let print_values driver =
-  List.iter
-    (members (Driver.checked driver))
-    ~f:(fun { ident; _ } ->
-      match Treewalk.find (Driver.interpreter driver) ~ident with
-      | Ok value ->
-        print_s [%sexp (ident.name : string), (value : Treewalk.Value.t)]
-      | Error _ -> ())
-;;
-
-(* Checks [program], printing its signature, the bodies of [bodies], and the
-   toplevels evaluated at compile time; then evaluates it, printing every
-   toplevel's value. *)
-let run ?(bodies = []) ?(eval = true) program =
-  match Driver.check ~limits (prims @ program) with
-  | Error error -> print_s [%sexp (error : Typecheck_error.t)]
-  | Ok driver ->
-    let checked = Driver.checked driver in
-    print_signature (List.drop checked.signature (List.length prims));
-    List.iter (members checked) ~f:(fun { ident; body; _ } ->
-      if List.mem bodies ident.name ~equal:String.equal
-      then print_s [%sexp (ident : Typed.Ident.t), (body : Typed.Expr.t)]);
-    print_endline "-- evaluated at compile time";
-    print_values driver;
-    if eval
-    then (
-      print_endline "-- evaluated";
-      let result = Driver.eval ~limits driver in
-      print_values driver;
-      match result with
-      | Ok () -> ()
-      | Error error -> print_s [%sexp (error : Error.t)])
-;;
-
-let nat = Decl.variant "nat" [ "Z", []; "S", [ Ty.con "nat" ] ]
-
-let rec nat_of_int n =
-  if n = 0 then construct "Z" else construct "S" ~args:[ nat_of_int (n - 1) ]
-;;
-
-(* [power n c] is a list of [n] copies of [c]. *)
-let power =
-  top
-    "power"
-    [ "n"; "c" ]
-    (match_
-       (var "n")
-       [ Pat.construct "Z", quote (construct "Nil")
-       ; ( Pat.construct "S" ~args:[ Pat.var "m" ]
-         , quote
-             (construct
-                "Cons"
-                ~args:
-                  [ splice (var "c")
-                  ; splice (app (var "power") [ var "m"; var "c" ])
-                  ]) )
-       ])
-;;
+(* The source of [toplevels], one per line. *)
+let lines toplevels = String.concat ("" :: toplevels) ~sep:"\n" ^ "\n"
 
 let%expect_test "a generator used by a toplevel splice" =
   run
-    [ nat
-    ; Decl.list
-    ; power
-    ; top "three" [] (nat_of_int 3)
-    ; top
-        "cube"
-        [ "x" ]
-        (splice (app (var "power") [ var "three"; quote (var "x") ]))
-    ; top "used" [] (app (var "cube") [ int 7 ])
-    ];
+    {|
+type nat = Z | S of nat
+type list['a] = Nil | Cons of 'a * list['a]
+let power n c = match n with Z -> .<Nil>. | S m -> .<Cons (.~c, .~(power m c))>.
+let three = S (S (S Z))
+let cube x = .~(power three .<x>.)
+let used = cube 7
+|};
   [%expect
     {|
     type nat = Z | S of nat
@@ -103,13 +36,11 @@ let%expect_test "a generator used by a toplevel splice" =
 let%expect_test "re-inferred types are more precise than the quote's" =
   run
     ~bodies:[ "wrapped" ]
-    [ top
-        "wrap"
-        [ "c" ]
-        (quote (let_ "y" [] (splice (var "c")) (tuple [ var "y"; var "y" ])))
-    ; top "wrapped" [] (splice (app (var "wrap") [ quote (int 1) ]))
-    ; top "generated" [] (app (var "wrap") [ quote (int 1) ])
-    ];
+    {|
+let wrap c = .<let y = .~c in (y, y)>.
+let wrapped = .~(wrap .<1>.)
+let generated = wrap .<1>.
+|};
   [%expect
     {|
     val wrap : <'a>{y?'b : 'a; ..'c} -> <'a * 'a>{..'d} where ..'c <= {..'d}
@@ -148,27 +79,12 @@ let%expect_test "re-inferred types are more precise than the quote's" =
 
 let%expect_test "mutually dependent compile time helpers" =
   run
-    [ nat
-    ; top
-        "even"
-        [ "n" ]
-        (match_
-           (var "n")
-           [ Pat.construct "Z", quote (bool true)
-           ; ( Pat.construct "S" ~args:[ Pat.var "m" ]
-             , app (var "odd") [ var "m" ] )
-           ])
-    ; top
-        "odd"
-        [ "n" ]
-        (match_
-           (var "n")
-           [ Pat.construct "Z", quote (bool false)
-           ; ( Pat.construct "S" ~args:[ Pat.var "m" ]
-             , app (var "even") [ var "m" ] )
-           ])
-    ; top "five_is_odd" [] (splice (app (var "odd") [ nat_of_int 5 ]))
-    ];
+    {|
+type nat = Z | S of nat
+let even n = match n with Z -> .<true>. | S m -> odd m
+let odd n = match n with Z -> .<false>. | S m -> even m
+let five_is_odd = .~(odd (S (S (S (S (S Z))))))
+|};
   [%expect
     {|
     type nat = Z | S of nat
@@ -187,20 +103,12 @@ let%expect_test "mutually dependent compile time helpers" =
 
 let%expect_test "a toplevel used at both levels" =
   run
-    [ top "pair" [ "x" ] (tuple [ var "x"; var "x" ])
-    ; top "at_runtime" [] (app (var "pair") [ int 1 ])
-    ; top
-        "at_compile_time"
-        []
-        (splice
-           (app (var "pair") [ quote (int 2) ]
-            |> fun e -> match_ e [ Pat.tuple [ Pat.var "a"; Pat.any ], var "a" ]
-           ))
-    ; top
-        "in_generated_code"
-        []
-        (splice (quote (app (var "pair") [ bool true ])))
-    ];
+    {|
+let pair x = (x, x)
+let at_runtime = pair 1
+let at_compile_time = .~(match pair .<2>. with (a, _) -> a)
+let in_generated_code = .~(.<pair true>.)
+|};
   [%expect
     {|
     val pair : 'a -> 'a * 'a
@@ -218,16 +126,23 @@ let%expect_test "a toplevel used at both levels" =
 ;;
 
 let%expect_test "compile time use of a toplevel being checked" =
-  run [ top "f" [ "x" ] (splice (seq (var "f") (quote (var "x")))) ];
   run
-    [ top "f" [ "x" ] (app (var "g") [ var "x" ])
-    ; top "g" [ "x" ] (splice (seq (var "f") (quote (var "x"))))
-    ];
-  run [ top "f" [ "x" ] (splice (quote (app (var "f") [ var "x" ]))) ];
+    {|
+let f x = .~(f; .<x>.)
+|};
+  run
+    {|
+let f x = g x
+let g x = .~(f; .<x>.)
+|};
+  run
+    {|
+let f x = .~(.<f x>.)
+|};
   [%expect
     {|
-    (Compile_time_use_of_toplevel_being_checked f)
-    (Compile_time_use_of_toplevel_being_checked f)
+    ((Compile_time_use_of_toplevel_being_checked f) @ t.stag:2:13-14)
+    ((Compile_time_use_of_toplevel_being_checked f) @ t.stag:3:13-14)
     val f : 'a -> 'b
     -- evaluated at compile time
     -- evaluated
@@ -236,40 +151,46 @@ let%expect_test "compile time use of a toplevel being checked" =
 ;;
 
 let%expect_test "level 0 locals are not usable at compile time" =
-  run [ top "f" [ "x" ] (splice (seq (var "x") (quote (int 1)))) ];
   run
-    [ top "f" [] (let_ "x" [] (int 1) (splice (seq (var "x") (quote (int 1)))))
-    ];
+    {|
+let f x = .~(x; .<1>.)
+|};
+  run
+    {|
+let f = let x = 1 in .~(x; .<1>.)
+|};
   [%expect
     {|
-    (Variable_used_at_wrong_level (name x) (var_level 0) (used_at -1))
-    (Variable_used_at_wrong_level (name x) (var_level 0) (used_at -1))
+    ((Variable_used_at_wrong_level (name x) (var_level 0) (used_at -1)) @
+     t.stag:2:13-14)
+    ((Variable_used_at_wrong_level (name x) (var_level 0) (used_at -1)) @
+     t.stag:2:24-25)
     |}]
 ;;
 
 let%expect_test "toplevels are only evaluated if used at compile time" =
-  let abc = Decl.variant "abc" [ "A", []; "B", [] ] in
-  let fails =
-    top "fails" [] (match_ (construct "B") [ Pat.construct "A", int 0 ])
-  in
   run
-    [ abc
-    ; fails
-    ; top
-        "loops"
-        []
-        (let_ "f" [ "x" ] (app (var "f") [ var "x" ]) (app (var "f") [ unit ]))
-    ; top "unused_code" [] (quote (int 0))
-    ; top "used_code" [] (quote (int 1))
-    ; top "spliced" [] (splice (var "used_code"))
-    ]
-    ~eval:false;
-  run [ abc; fails; top "spliced" [] (splice (quote (int 1))) ];
+    ~eval:false
+    {|
+type abc = A | B
+let fails = match B with A -> 0
+let loops = let f x = f x in f ()
+let unused_code = .<0>.
+let used_code = .<1>.
+let spliced = .~used_code
+|};
   run
-    [ abc
-    ; fails
-    ; top "spliced" [] (splice (seq (var "fails") (quote (int 1))))
-    ];
+    {|
+type abc = A | B
+let fails = match B with A -> 0
+let spliced = .~(.<1>.)
+|};
+  run
+    {|
+type abc = A | B
+let fails = match B with A -> 0
+let spliced = .~(fails; .<1>.)
+|};
   [%expect
     {|
     type abc = A | B
@@ -285,53 +206,47 @@ let%expect_test "toplevels are only evaluated if used at compile time" =
     val spliced : int
     -- evaluated at compile time
     -- evaluated
-    ("Match failure: no case matches the value B" @ _none_)
-    (Splice_evaluation_failed
-     (code
-      (Let (ident _/15) (args ()) (generalized true)
-       (body (Var (Bound (Toplevel fails/4)) : int))
-       (in_ (Quote (Lit (Int 1) : int) : <int>{})) : <int>{}))
-     (error ("Match failure: no case matches the value B" @ _none_)))
+    ("Match failure: no case matches the value B" @ t.stag:3:12-31)
+    ((Splice_evaluation_failed
+      (code
+       (Let (ident _/15) (args ()) (generalized true)
+        (body (Var (Bound (Toplevel fails/4)) : int))
+        (in_ (Quote (Lit (Int 1) : int) : <int>{})) : <int>{}))
+      (error ("Match failure: no case matches the value B" @ t.stag:3:12-31)))
+     @ t.stag:4:14-30)
     |}]
 ;;
 
 let%expect_test "splice evaluation failures" =
-  let abc = Decl.variant "abc" [ "A", []; "B", [] ] in
   run
-    [ abc
-    ; top
-        "x"
-        []
-        (splice (match_ (construct "B") [ Pat.construct "A", quote (int 0) ]))
-    ];
+    {|
+type abc = A | B
+let x = .~(match B with A -> .<0>.)
+|};
   [%expect
     {|
-    (Splice_evaluation_failed
-     (code
-      (Match (Construct ((type_name abc) (name B) (index 1)) () : abc)
-       (((Construct ((type_name abc) (name A) (index 0)) () : abc)
-         (Quote (Lit (Int 0) : int) : <int>{})))
-       : <int>{}))
-     (error ("Match failure: no case matches the value B" @ _none_)))
+    ((Splice_evaluation_failed
+      (code
+       (Match (Construct ((type_name abc) (name B) (index 1)) () : abc)
+        (((Construct ((type_name abc) (name A) (index 0)) () : abc)
+          (Quote (Lit (Int 0) : int) : <int>{})))
+        : <int>{}))
+      (error ("Match failure: no case matches the value B" @ t.stag:3:10-35)))
+     @ t.stag:3:8-35)
     |}]
 ;;
 
 let%expect_test "substitutions at toplevel splices" =
   run
     ~bodies:[ "implicit"; "explicit"; "explicit_toplevel" ]
-    [ top "n" [] (int 3)
-    ; top "code" [] (quote (tuple [ var "n"; var "x" ]))
-    ; top "implicit" [ "x" ] (splice (var "code"))
-    ; top
-        "explicit"
-        []
-        (splice ~subs:[ "n", Some (bool true); "x", Some (int 1) ] (var "code"))
-    ; top
-        "explicit_toplevel"
-        []
-        (splice ~subs:[ "n", None; "x", Some (var "n") ] (var "code"))
-    ; top "applied" [] (app (var "implicit") [ bool false ])
-    ];
+    {|
+let n = 3
+let code = .<(n, x)>.
+let implicit x = .~code
+let explicit = .~code.{n = true; x = 1}
+let explicit_toplevel = .~code.{n; x = n}
+let applied = implicit false
+|};
   [%expect
     {|
     val n : int
@@ -395,10 +310,11 @@ let%expect_test "substitutions at toplevel splices" =
 let%expect_test "nested toplevel splices" =
   run
     ~bodies:[ "nested" ]
-    [ top "inner" [] (quote (quote (int 1)))
-    ; top "nested" [] (splice (splice (var "inner")))
-    ; top "in_quote" [] (quote (splice (splice (var "inner"))))
-    ];
+    {|
+let inner = .< .<1>. >.
+let nested = .~(.~inner)
+let in_quote = .<.~(.~inner)>.
+|};
   [%expect
     {|
     val inner : <<int>{..'a}>{..'b}
@@ -422,18 +338,9 @@ let%expect_test "nested toplevel splices" =
 let%expect_test "compile time values embedded in generated code" =
   run
     ~bodies:[ "embeds" ]
-    [ top
-        "embeds"
-        []
-        (splice
-           (let_
-              "k"
-              [ "x" ]
-              (tuple [ var "x"; int 1 ])
-              (quote
-                 (tuple
-                    [ app (var "k") [ bool true ]; app (var "k") [ int 2 ] ]))))
-    ];
+    {|
+let embeds = .~(let k x = (x, 1) in .<(k true, k 2)>.)
+|};
   [%expect
     {|
     val embeds : (bool * int) * (int * int)
@@ -472,38 +379,22 @@ let%expect_test
     "closures made at compile time read the toplevels they capture only when \
      called"
   =
-  let abc = Decl.variant "abc" [ "A", []; "B", [] ] in
   run
-    [ abc
-    ; top "fails" [] (match_ (construct "B") [ Pat.construct "A", int 0 ])
-    ; top "n" [] (int 3)
-    ; top
-        "embeds"
-        []
-        (splice
-           (let_
-              "never_called"
-              [ "x" ]
-              (seq (var "x") (var "fails"))
-              (let_
-                 "k"
-                 [ "x" ]
-                 (tuple [ var "x"; var "n" ])
-                 (quote (app (var "k") [ bool true ])))))
-    ]
-    ~eval:false;
+    ~eval:false
+    {|
+type abc = A | B
+let fails = match B with A -> 0
+let n = 3
+let embeds =
+  .~(let never_called x = x; fails in
+     let k x = (x, n) in
+     .<k true>.)
+|};
   run
-    [ top "n" [] (int 3)
-    ; top
-        "embeds"
-        []
-        (splice
-           (let_
-              "k"
-              [ "x" ]
-              (tuple [ var "x"; var "n" ])
-              (quote (app (var "k") [ bool true ]))))
-    ];
+    {|
+let n = 3
+let embeds = .~(let k x = (x, n) in .<k true>.)
+|};
   [%expect
     {|
     type abc = A | B
@@ -521,21 +412,22 @@ let%expect_test
 ;;
 
 let%expect_test "spliced code using the toplevel being checked" =
-  let f =
-    top
-      "f"
-      [ "n" ]
-      (match_
-         (var "n")
-         [ Pat.construct "Z", int 0
-         ; Pat.construct "S" ~args:[ Pat.var "m" ], splice (var "code")
-         ])
-  in
-  let code = top "code" [] (quote (app (var "f") [ var "m" ])) in
-  let used = top "used" [] (app (var "f") [ nat_of_int 2 ]) in
-  run ~bodies:[ "f" ] [ nat; f; code; used ];
+  run
+    ~bodies:[ "f" ]
+    {|
+type nat = Z | S of nat
+let f n = match n with Z -> 0 | S m -> .~code
+let code = .<f m>.
+let used = f (S (S Z))
+|};
   (* [f] must be checked to know if [code] embeds it, which needs [code]. *)
-  run [ nat; code; f; used ];
+  run
+    {|
+type nat = Z | S of nat
+let code = .<f m>.
+let f n = match n with Z -> 0 | S m -> .~code
+let used = f (S (S Z))
+|};
   [%expect
     {|
     type nat = Z | S of nat
@@ -561,29 +453,25 @@ let%expect_test "spliced code using the toplevel being checked" =
     (code (Code (App (Var (Free f) : "'a -> 'b") (Var (Free m) : 'a) : 'b)))
     (f <fun>)
     (used 0)
-    (Compile_time_use_of_toplevel_being_checked code)
+    ((Compile_time_use_of_toplevel_being_checked code) @ t.stag:4:41-45)
     |}]
 ;;
 
 let%expect_test "maybe-used entries at a toplevel splice" =
   (* [gen]'s result may use [f], so [f?] is in the context of the code
      spliced at level -1. *)
-  let gen =
-    top
-      "gen"
-      [ "c" ]
-      (seq (quote (let_ "f" [] (int 1) (splice (var "c")))) (var "c"))
-  in
   run
-    [ gen
-    ; top "f" [] (splice (splice (app (var "gen") [ quote (quote (int 1)) ])))
-    ];
+    {|
+let gen c = .<let f = 1 in .~c>.; c
+let f = .~(.~(gen .< .<1>. >.))
+|};
   (* Checking [f] on demand would need [x] at compile time. *)
   run
-    [ gen
-    ; top "x" [] (splice (splice (app (var "gen") [ quote (quote (int 1)) ])))
-    ; top "f" [] (splice (seq (var "x") (quote (int 2))))
-    ];
+    {|
+let gen c = .<let f = 1 in .~c>.; c
+let x = .~(.~(gen .< .<1>. >.))
+let f = .~(x; .<2>.)
+|};
   [%expect
     {|
     val gen : <'a>{f?'b : int; ..'c} -> <'a>{f?'b : int; ..'c}
@@ -607,24 +495,22 @@ let%expect_test "maybe-used entries at a toplevel splice" =
 ;;
 
 let%expect_test "toplevels of a component are evaluated separately" =
-  let abc = Decl.variant "abc" [ "A", []; "B", [] ] in
   run
-    [ abc
-    ; top "f" [ "x" ] (seq (var "v") (quote (var "x")))
-    ; top
-        "v"
-        []
-        (seq (var "f") (match_ (construct "B") [ Pat.construct "A", int 0 ]))
-    ; top "g" [ "y" ] (splice (seq (var "f") (quote (var "y"))))
-    ];
+    {|
+type abc = A | B
+let f x = v; .<x>.
+let v = f; match B with A -> 0
+let g y = .~(f; .<y>.)
+|};
   (* [a] reads [b], evaluated when first read, and [c] reads itself. *)
   run
-    [ top "a" [] (seq (var "b") (int 1))
-    ; top "b" [] (seq (var "k") (int 2))
-    ; top "k" [ "u" ] (seq (var "u") (var "a"))
-    ; top "c" [] (seq (var "d") (int 3))
-    ; top "d" [] (app (var "k") [ var "c" ])
-    ];
+    {|
+let a = b; 1
+let b = k; 2
+let k u = u; a
+let c = d; 3
+let d = k c
+|};
   [%expect
     {|
     type abc = A | B
@@ -635,7 +521,7 @@ let%expect_test "toplevels of a component are evaluated separately" =
     (f <fun>)
     -- evaluated
     (f <fun>)
-    ("Match failure: no case matches the value B" @ _none_)
+    ("Match failure: no case matches the value B" @ t.stag:4:11-30)
     val a : int
     val b : int
     val k : int -> int
@@ -647,17 +533,18 @@ let%expect_test "toplevels of a component are evaluated separately" =
     (b 2)
     (k <fun>)
     ("c is used before its value is defined (a value may not depend on itself)" @
-     _none_)
+     t.stag:6:10-11)
     |}]
 ;;
 
 let%expect_test "a splice needing a toplevel whose checking runs a splice" =
   run
-    [ top "user" [] (splice (app (var "gen") [ unit ]))
-    ; top "gen" [ "u" ] (seq (var "helper") (quote (var "helper")))
-    ; top "helper" [] (splice (app (var "gen2") [ unit ]))
-    ; top "gen2" [ "u" ] (quote (int 5))
-    ];
+    {|
+let user = .~(gen ())
+let gen u = helper; .<helper>.
+let helper = .~(gen2 ())
+let gen2 u = .<5>.
+|};
   [%expect
     {|
     val user : int
@@ -679,24 +566,17 @@ let%expect_test "a splice needing a toplevel whose checking runs a splice" =
 let%expect_test "constructors and fields resolve where quoted" =
   run
     ~bodies:[ "M.x"; "M.y" ]
-    [ Decl.variant "t" [ "A", []; "B", [] ]
-    ; Decl.record "r" [ "a", Ty.int ]
-    ; top "code" [] (quote (tuple [ construct "B"; record [ "a", int 1 ] ]))
-    ; module_
-        "M"
-        [ Decl.variant "t" [ "B", []; "C", [] ]
-        ; Decl.record "s" [ "a", Ty.bool ]
-        ; top "x" [] (splice (var "code"))
-        ; top
-            "y"
-            []
-            (match_
-               (splice (var "code"))
-               [ Pat.tuple [ Pat.construct "A"; Pat.any ], int 0
-               ; Pat.any, int 1
-               ])
-        ]
-    ];
+    {|
+type t = A | B
+type r = {a : int}
+let code = .<(B, {a = 1})>.
+module M = struct
+  type t = B | C
+  type s = {a : bool}
+  let x = .~code
+  let y = match .~code with (A, _) -> 0 | _ -> 1
+end
+|};
   [%expect
     {|
     type t = A | B
@@ -752,15 +632,10 @@ let%expect_test "constructors and fields resolve where quoted" =
 let%expect_test "splicing polymorphic code twice" =
   run
     ~bodies:[ "twice" ]
-    [ top "id_code" [] (quote (let_ "f" [ "x" ] (var "x") (var "f")))
-    ; top
-        "twice"
-        []
-        (tuple
-           [ app (splice (var "id_code")) [ int 1 ]
-           ; app (splice (var "id_code")) [ bool true ]
-           ])
-    ];
+    {|
+let id_code = .<let f x = x in f>.
+let twice = (.~id_code 1, .~id_code true)
+|};
   [%expect
     {|
     val id_code : <'a -> 'a>{..'b}
@@ -804,17 +679,12 @@ let%expect_test "splicing polymorphic code twice" =
 
 let%expect_test "toplevel splices are generalized by their expansion" =
   run
-    [ top "id_code" [] (quote (let_ "f" [ "x" ] (var "x") (var "f")))
-    ; top "spliced_id" [] (splice (var "id_code"))
-    ; top
-        "used"
-        []
-        (tuple
-           [ app (var "spliced_id") [ int 1 ]
-           ; app (var "spliced_id") [ bool true ]
-           ])
-    ; top "spliced_app" [] (splice (quote (app (var "id") [ var "id" ])))
-    ];
+    {|
+let id_code = .<let f x = x in f>.
+let spliced_id = .~id_code
+let used = (spliced_id 1, spliced_id true)
+let spliced_app = .~(.<id id>.)
+|};
   [%expect
     {|
     val id_code : <'a -> 'a>{..'b}
@@ -842,9 +712,10 @@ let%expect_test "toplevel splices are generalized by their expansion" =
 let%expect_test "toplevels used at level -2" =
   run
     ~bodies:[ "deep" ]
-    [ top "n" [] (int 2)
-    ; top "deep" [] (splice (splice (seq (var "n") (quote (quote (var "n"))))))
-    ];
+    {|
+let n = 2
+let deep = .~(.~(n; .< .<n>. >.))
+|};
   [%expect
     {|
     val n : int
@@ -876,32 +747,13 @@ let%expect_test "re-inference keeps the providers of implicit splices" =
      and is generalized. Without the annotation, re-inferring the generated
      code would make [x] a provider. *)
   run
-    [ top
-        "code"
-        [ "u" ]
-        (seq
-           (var "u")
-           (quote
-              (let_
-                 "h"
-                 [ "c" ]
-                 (quote
-                    (let_
-                       "x"
-                       []
-                       (let_
-                          "g"
-                          [ "a" ]
-                          (splice (var "c" ~annot:(Ty.code Ty.int)))
-                          (var "g"))
-                       (tuple
-                          [ app (var "x") [ int 1 ]
-                          ; app (var "x") [ bool true ]
-                          ])))
-                 (var "h"))))
-    ; top "user" [] (splice (app (var "code") [ unit ]))
-    ; top "used" [] (splice (app (var "user") [ quote (int 5) ]))
-    ];
+    {|
+let code u =
+  u;
+  .<let h c = .<let x = let g a = .~(c : <int>{}) in g in (x 1, x true)>. in h>.
+let user = .~(code ())
+let used = .~(user .<5>.)
+|};
   [%expect
     {|
     val code : 'a -> <<int>{} -> <int * int>{..'b}>{..'c}
@@ -921,34 +773,17 @@ let%expect_test "re-inference keeps the providers of entries already known" =
   (* Re-inferring the first splice gives [c]'s context an entry [x], which the
      second splice must not provide. *)
   run
-    [ top
-        "code"
-        [ "u" ]
-        (seq
-           (var "u")
-           (quote
-              (let_
-                 "h"
-                 [ "c" ]
-                 (seq
-                    (quote (let_ "x" [] (int 1) (splice (var "c"))))
-                    (quote
-                       (let_
-                          "x"
-                          []
-                          (let_
-                             "g"
-                             [ "a" ]
-                             (splice (var "c" ~annot:(Ty.code Ty.int)))
-                             (var "g"))
-                          (tuple
-                             [ app (var "x") [ int 1 ]
-                             ; app (var "x") [ bool true ]
-                             ]))))
-                 (var "h"))))
-    ; top "user" [] (splice (app (var "code") [ unit ]))
-    ; top "used" [] (splice (app (var "user") [ quote (int 5) ]))
-    ];
+    {|
+let code u =
+  u;
+  .<let h c =
+      .<let x = 1 in .~c>.;
+      .<let x = let g a = .~(c : <int>{}) in g in (x 1, x true)>.
+    in
+    h>.
+let user = .~(code ())
+let used = .~(user .<5>.)
+|};
   [%expect
     {|
     val code : 'a -> <<int>{} -> <int * int>{..'b}>{..'c}
@@ -964,8 +799,10 @@ let%expect_test "re-inference keeps the providers of entries already known" =
     |}]
 ;;
 
+(* On the DSL: source can't write an empty match. *)
 let%expect_test "re-inference of empty matches on empty nominal types" =
-  run
+  let open Helpers in
+  let program =
     [ Decl.variant "void" []
     ; top
         "code"
@@ -980,7 +817,9 @@ let%expect_test "re-inference of empty matches on empty nominal types" =
                  , match_ (var "x") []
                  , var "f" ))))
     ; top "user" [] (splice (app (var "code") [ unit ]))
-    ];
+    ]
+  in
+  run_program program;
   [%expect
     {|
     type void = |
@@ -995,18 +834,18 @@ let%expect_test "re-inference of empty matches on empty nominal types" =
 ;;
 
 let%expect_test "maybe-used entries are not provided by checked toplevels" =
-  let gen =
-    top
-      "gen"
-      [ "c" ]
-      (seq (quote (let_ "f" [] (int 1) (splice (var "c")))) (var "c"))
-  in
-  let f = top "f" [] (bool true) in
-  let x =
-    top "x" [] (splice (splice (app (var "gen") [ quote (quote (int 1)) ])))
-  in
-  run [ gen; f; x ];
-  run [ gen; x; f ];
+  run
+    {|
+let gen c = .<let f = 1 in .~c>.; c
+let f = true
+let x = .~(.~(gen .< .<1>. >.))
+|};
+  run
+    {|
+let gen c = .<let f = 1 in .~c>.; c
+let x = .~(.~(gen .< .<1>. >.))
+let f = true
+|};
   [%expect
     {|
     val gen : <'a>{f?'b : int; ..'c} -> <'a>{f?'b : int; ..'c}
@@ -1036,25 +875,15 @@ let%expect_test
   =
   (* [f]'s annotation decides that [c] doesn't use [x] before [c2]'s quote
      uses it; re-inferred without it, the quote's use comes first. *)
-  let closed_f body =
-    expr_let ("f", [ typed "c" (Ty.code Ty.int) ], None, body, var "f")
-  in
-  let generated =
-    let_
-      "g"
-      [ "d" ]
-      (seq (quote (let_ "x" [] (int 1) (splice (var "d")))) (var "d"))
-      (closed_f
-         (let_
-            "c2"
-            []
-            (app (var "g") [ var "c" ])
-            (quote (app (var "add") [ splice (var "c2"); var "x" ]))))
-  in
   run
-    [ top "gen" [ "u" ] (seq (var "u") (quote generated))
-    ; top "user" [] (splice (app (var "gen") [ unit ]))
-    ];
+    {|
+let gen u =
+  u;
+  .<let g d = .<let x = 1 in .~d>.; d in
+    let f (c : <int>{}) = let c2 = g c in .<add .~c2 x>. in
+    f>.
+let user = .~(gen ())
+|};
   [%expect
     {|
     val gen : 'a -> <<int>{} -> <int>{x : int; ..'b}>{..'c}
@@ -1073,27 +902,32 @@ let%expect_test
   (* [w]'s presence of [x] is weak. Splicing [w <1>] at toplevel forces it
      [Absent], as nothing there provides an [x] the code only may use, so a
      later [w <x>] is rejected; splicing [w <x>] first makes it [Present]. *)
-  let k =
-    top
-      "k"
-      [ "c" ]
-      (seq (quote (let_ "x" [] (int 1) (splice (var "c")))) (var "c"))
-  in
-  let w = top "w" [] (app (var "id") [ var "k" ]) in
-  let x = top "x" [] (int 5) in
-  let s = top "s" [] (splice (app (var "w") [ quote (int 1) ])) in
-  let t = top "t" [] (splice (app (var "w") [ quote (var "x") ])) in
-  run [ x; k; w; s; t ];
-  run [ x; k; w; t; s ];
+  run
+    {|
+let x = 5
+let k c = .<let x = 1 in .~c>.; c
+let w = id k
+let s = .~(w .<1>.)
+let t = .~(w .<x>.)
+|};
+  run
+    {|
+let x = 5
+let k c = .<let x = 1 in .~c>.; c
+let w = id k
+let t = .~(w .<x>.)
+let s = .~(w .<1>.)
+|};
   [%expect
     {|
-    (Unification_error
-     (Row_mismatch
-      (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
-       (RVar (Link (RVar (Link REmpty)))))
-      (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-       (RVar (Unbound 62 1)))
-      (Presence_mismatch x)))
+    ((Unification_error
+      (Row_mismatch
+       (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
+        (RVar (Link (RVar (Link REmpty)))))
+       (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
+        (RVar (Unbound 62 1)))
+       (Presence_mismatch x)))
+     @ t.stag:6:13-18)
     val x : int
     val k : <'a>{x?'b : int; ..'c} -> <'a>{x?'b : int; ..'c}
     val w : <int>{x : int} -> <int>{x : int}
@@ -1112,36 +946,21 @@ let%expect_test
 ;;
 
 let%expect_test "splices of code from a generator with presence bounds" =
-  let gen =
-    top
-      "gen"
-      [ "c" ]
-      (seq (quote (let_ "f" [] (int 1) (splice (var "c")))) (var "c"))
-  in
-  let f = top "f" [] (int 7) in
-  let x =
-    top
-      "x"
-      []
-      (splice (app (var "gen") [ quote (app (var "add") [ var "f"; int 1 ]) ]))
-  in
-  let y =
-    top "y" [] (splice (splice (app (var "gen") [ quote (quote (int 1)) ])))
-  in
+  let gen = {|let gen c = .<let f = 1 in .~c>.; c|} in
+  let f = {|let f = 7|} in
+  let x = {|let x = .~(gen .<add f 1>.)|} in
+  let y = {|let y = .~(.~(gen .< .<1>. >.))|} in
   (* Every order of the toplevels checks and evaluates. *)
   List.iter
     [ [ gen; f; x; y ]; [ x; y; gen; f ]; [ f; y; x; gen ]; [ y; f; gen; x ] ]
-    ~f:(fun program ->
-      match Driver.check ~limits (prims @ program) with
-      | Error error -> print_s [%sexp (error : Typecheck_error.t)]
-      | Ok driver ->
-        print_s
-          [%sexp
-            (List.map
-               (members (Driver.checked driver))
-               ~f:(fun m -> m.ident.name)
-             : string list)
-          , (Driver.eval ~limits driver : unit Or_error.t)]);
+    ~f:(fun toplevels ->
+      Option.iter
+        (typecheck (lines toplevels))
+        ~f:(fun t ->
+          print_s
+            [%sexp
+              (List.map (members t) ~f:(fun m -> m.ident.name) : string list)
+            , (Driver.eval ~limits (driver t) : unit Or_error.t)]));
   [%expect
     {|
     ((gen f x y) (Ok ()))
@@ -1156,41 +975,18 @@ let%expect_test
   =
   (* [h]'s [d] may use [x] only if [e] does, which its annotation decides
      before [h] is generalized, but re-inference only after. *)
-  let h_body =
-    seq
-      (quote (let_ "x" [] (int 1) (splice (var "d"))))
-      (app (var "cond") [ bool true; quote (splice (var "d")); var "e" ])
-  in
-  let f_body =
-    let_
-      "h"
-      [ "d" ]
-      h_body
-      (seq
-         (app (var "h") [ quote (app (var "add") [ var "x"; int 1 ]) ])
-         (seq (app (var "h") [ var "k" ]) (app (var "closeit") [ var "k" ])))
-  in
-  let gen =
-    top
-      "gen"
-      [ "u" ]
-      (seq
-         (var "u")
-         (quote
-            (expr_let
-               ( "f"
-               , [ typed "e" (Ty.code ~entries:[ "x", Ty.int ] Ty.int)
-                 ; "k", None
-                 ]
-               , None
-               , f_body
-               , var "f" ))))
-  in
   run
-    [ top_let ("closeit", [ typed "c" (Ty.code Ty.int) ], None, unit)
-    ; gen
-    ; top "user" [] (splice (app (var "gen") [ unit ]))
-    ];
+    {|
+let closeit (c : <int>{}) = ()
+let gen u =
+  u;
+  .<let f (e : <int>{x : int}) k =
+      let h d = .<let x = 1 in .~d>.; cond true .<.~d>. e in
+      h .<add x 1>.; h k; closeit k
+    in
+    f>.
+let user = .~(gen ())
+|};
   [%expect
     {|
     val closeit : <int>{} -> unit
@@ -1207,59 +1003,38 @@ let%expect_test
 
 (* [tw c] bounds [c]'s row by a row with [x] and an unknown tail, so a local
    [h] using [tw e1] is bounded by [e1]'s row. *)
-let tw =
-  top
-    "tw"
-    [ "c" ]
-    (seq
-       (quote (let_ "x" [] (int 1) (splice (var "c"))))
-       (quote (splice (var "c"))))
-;;
-
-let needx =
-  top_let
-    ( "needx"
-    , [ typed "e" (Ty.code ~entries:[ "x", Ty.int ] Ty.int) ]
-    , None
-    , unit )
-;;
-
-let closeit = top_let ("closeit", [ typed "c" (Ty.code Ty.int) ], None, unit)
+let tw = {|let tw c = .<let x = 1 in .~c>.; .<.~c>.|}
+let needx = {|let needx (e : <int>{x : int}) = ()|}
+let closeit = {|let closeit (c : <int>{}) = ()|}
 
 let%expect_test "re-inference of a local bounded by an outer row" =
   let variants =
-    [ Ty.code ~entries:[ "x", Ty.int ] Ty.int, needx, "needx"
-    ; Ty.code Ty.int, closeit, "closeit"
-    ]
+    [ "<int>{x : int}", needx, "needx"; "<int>{}", closeit, "closeit" ]
   in
   List.iter variants ~f:(fun (annot, use_k_decl, use_k) ->
-    let f annot =
-      expr_let
-        ( "f"
-        , [ "e1", annot; "k", None ]
-        , None
-        , let_
-            "h"
-            [ "d" ]
-            (app
-               (var "cond")
-               [ bool true; app (var "tw") [ var "e1" ]; var "d" ])
-            (seq
-               (app (var "h") [ quote (app (var "add") [ var "x"; var "y" ]) ])
-               (seq (app (var "h") [ var "k" ]) (app (var use_k) [ var "k" ])))
-        , var "f" )
+    let f e1 =
+      sprintf
+        {|let f %s k =
+    let h d = cond true (tw e1) d in
+    h .<add x y>.; h k; %s k
+  in
+  f|}
+        e1
+        use_k
     in
+    let annotated = f (sprintf "(e1 : %s)" annot) in
     print_endline "-- annotated";
-    run ~eval:false [ tw; use_k_decl; top "direct" [] (f (Some annot)) ];
+    run ~eval:false (lines [ tw; use_k_decl; "let direct =\n  " ^ annotated ]);
     print_endline "-- not annotated";
-    run ~eval:false [ tw; use_k_decl; top "direct" [] (f None) ];
+    run ~eval:false (lines [ tw; use_k_decl; "let direct =\n  " ^ f "e1" ]);
     print_endline "-- generated";
     run
-      [ tw
-      ; use_k_decl
-      ; top "gen" [ "u" ] (seq (var "u") (quote (f (Some annot))))
-      ; top "user" [] (splice (app (var "gen") [ unit ]))
-      ]);
+      (lines
+         [ tw
+         ; use_k_decl
+         ; "let gen u = u; .<" ^ annotated ^ ">."
+         ; "let user = .~(gen ())"
+         ]));
   [%expect
     {|
     -- annotated
@@ -1314,42 +1089,35 @@ let%expect_test "re-inference of a local bounded by an outer closed row" =
      of [x] is only bounded below by [e1]'s, which must not keep [h] from
      being generalized: without [k]'s annotation, [h] is used with and without
      [x]. *)
-  let f annot ~use_k =
-    expr_let
-      ( "f"
-      , [ "e1", annot; "k", None ]
-      , None
-      , seq
-          (quote (splice ~subs:[ "x", Some (int 1) ] (var "e1")))
-          (let_
-             "h"
-             [ "d" ]
-             (app
-                (var "cond")
-                [ bool true; app (var "tw") [ var "e1" ]; var "d" ])
-             (seq
-                (app (var "h") [ quote (app (var "add") [ var "x"; var "y" ]) ])
-                (seq (app (var "h") [ var "k" ]) (app (var use_k) [ var "k" ]))))
-      , var "f" )
+  let f e1 ~use_k =
+    sprintf
+      {|let f %s k =
+    .<.~e1.{x = 1}>.;
+    let h d = cond true (tw e1) d in
+    h .<add x y>.; h k; %s k
+  in
+  f|}
+      e1
+      use_k
   in
   List.iter
-    [ Ty.code ~entries:[ "x", Ty.int ] Ty.int, needx, "needx"
-    ; Ty.code Ty.int, closeit, "closeit"
-    ]
+    [ "<int>{x : int}", needx, "needx"; "<int>{}", closeit, "closeit" ]
     ~f:(fun (annot, use_k_decl, use_k) ->
+      let annotated = f (sprintf "(e1 : %s)" annot) ~use_k in
       print_endline "-- annotated";
+      run ~eval:false (lines [ tw; use_k_decl; "let direct =\n  " ^ annotated ]);
+      print_endline "-- not annotated";
       run
         ~eval:false
-        [ tw; use_k_decl; top "direct" [] (f (Some annot) ~use_k) ];
-      print_endline "-- not annotated";
-      run ~eval:false [ tw; use_k_decl; top "direct" [] (f None ~use_k) ];
+        (lines [ tw; use_k_decl; "let direct =\n  " ^ f "e1" ~use_k ]);
       print_endline "-- generated";
       run
-        [ tw
-        ; use_k_decl
-        ; top "gen" [ "u" ] (seq (var "u") (quote (f (Some annot) ~use_k)))
-        ; top "user" [] (splice (app (var "gen") [ unit ]))
-        ]);
+        (lines
+           [ tw
+           ; use_k_decl
+           ; "let gen u = u; .<" ^ annotated ^ ">."
+           ; "let user = .~(gen ())"
+           ]));
   [%expect
     {|
     -- annotated
@@ -1403,22 +1171,15 @@ let%expect_test "the order of splices deciding a weak variable matters" =
   (* [w0]'s row is weak. Spliced under local [x] and [y] first, it is closed
      with neither, as nothing it may use is known; spliced with [x]
      substituted first, it may use [x], which [needx] then makes [Present]. *)
-  let f0 = top "f0" [ "c"; "d" ] (var "d") in
-  let w0 = top "w0" [] (app (var "f0") [ quote (var "y"); quote (int 2) ]) in
-  let substituted =
-    top "substituted" [] (splice ~subs:[ "x", Some (int 3) ] (var "w0"))
-  in
-  let under_lets =
-    top
-      "under_lets"
-      []
-      (let_ "x" [] (int 1) (let_ "y" [] (int 2) (splice (var "w0"))))
-  in
-  let use = top "use" [] (app (var "needx") [ var "w0" ]) in
-  run ~eval:false [ needx; f0; w0; substituted; under_lets; use ];
-  run ~eval:false [ needx; f0; w0; under_lets; substituted; use ];
-  run ~eval:false [ needx; f0; w0; substituted ];
-  run ~eval:false [ needx; f0; w0; under_lets ];
+  let f0 = {|let f0 c d = d|} in
+  let w0 = {|let w0 = f0 .<y>. .<2>.|} in
+  let substituted = {|let substituted = .~w0.{x = 3}|} in
+  let under_lets = {|let under_lets = let x = 1 in let y = 2 in .~w0|} in
+  let use = {|let use = needx w0|} in
+  run ~eval:false (lines [ needx; f0; w0; substituted; under_lets; use ]);
+  run ~eval:false (lines [ needx; f0; w0; under_lets; substituted; use ]);
+  run ~eval:false (lines [ needx; f0; w0; substituted ]);
+  run ~eval:false (lines [ needx; f0; w0; under_lets ]);
   [%expect
     {|
     val needx : <int>{x : int} -> unit
@@ -1430,9 +1191,10 @@ let%expect_test "the order of splices deciding a weak variable matters" =
     -- evaluated at compile time
     (f0 <fun>)
     (w0 (Code (Lit (Int 2) : int)))
-    (Unification_error
-     (Row_mismatch (RExtend x Present (TCon int ()) REmpty) REmpty
-      (Missing_label x)))
+    ((Unification_error
+      (Row_mismatch (RExtend x Present (TCon int ()) REmpty) REmpty
+       (Missing_label x)))
+     @ t.stag:7:16-18)
     val needx : <int>{x : int} -> unit
     val f0 : 'a -> 'b -> 'b
     val w0 : <int>{x?'_a : int}
@@ -1451,27 +1213,27 @@ let%expect_test "the order of splices deciding a weak variable matters" =
 ;;
 
 let%expect_test "weak toplevels used by generated code" =
-  let weak = top "weak" [] (app (var "id") [ var "id" ]) in
-  let gen = top "gen" [ "u" ] (seq (var "u") (quote (var "weak"))) in
-  let spliced = splice (app (var "gen") [ unit ]) in
   run
-    [ weak
-    ; gen
-    ; top "one" [] (app spliced [ int 1 ])
-    ; top "two" [] (app spliced [ int 2 ])
-    ];
+    {|
+let weak = id id
+let gen u = u; .<weak>.
+let one = .~(gen ()) 1
+let two = .~(gen ()) 2
+|};
   run
-    [ weak
-    ; gen
-    ; top "one" [] (app spliced [ int 1 ])
-    ; top "other" [] (app spliced [ bool true ])
-    ];
+    {|
+let weak = id id
+let gen u = u; .<weak>.
+let one = .~(gen ()) 1
+let other = .~(gen ()) true
+|};
   run
-    [ weak
-    ; gen
-    ; top "one" [] (app (var "weak") [ int 1 ])
-    ; top "other" [] (app spliced [ bool true ])
-    ];
+    {|
+let weak = id id
+let gen u = u; .<weak>.
+let one = weak 1
+let other = .~(gen ()) true
+|};
   [%expect
     {|
     val weak : int -> int
@@ -1485,10 +1247,14 @@ let%expect_test "weak toplevels used by generated code" =
     (gen <fun>)
     (one 1)
     (two 2)
-    (Unification_error
-     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
-    (Unification_error
-     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:5:23-27)
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:5:23-27)
     |}]
 ;;
 
@@ -1496,18 +1262,17 @@ let%expect_test "entries of different types code may use, then closed" =
   (* [ki c] and [kb c] give [c]'s [x] the types [int] and [bool], which is
      fine as [c] is closed, so has no [x]: the generated [f] has lost the
      annotation, and closing [c] may come before or after. *)
-  let binds x = seq (quote (let_ "x" [] x (splice (var "c")))) unit in
-  let ki = top "ki" [ "c" ] (binds (int 1)) in
-  let kb = top "kb" [ "c" ] (binds (bool true)) in
-  let call name = app (var name) [ var "c" ] in
-  let local param calls =
-    expr_let ("f", [ param ], None, List.reduce_exn calls ~f:seq, int 0)
-  in
-  let annotated = local (typed "c" (Ty.code Ty.int)) [ call "ki"; call "kb" ] in
-  let gen body = top "gen" [ "u" ] (seq (var "u") (quote body)) in
-  let use = top "use" [] (splice (app (var "gen") [ unit ])) in
-  run [ ki; kb; top "plain" [] annotated ];
-  run [ ki; kb; gen annotated; use ];
+  let ki = {|let ki c = .<let x = 1 in .~c>.; ()|} in
+  let kb = {|let kb c = .<let x = true in .~c>.; ()|} in
+  let use = {|let use = .~(gen ())|} in
+  run (lines [ ki; kb; {|let plain = let f (c : <int>{}) = ki c; kb c in 0|} ]);
+  run
+    (lines
+       [ ki
+       ; kb
+       ; {|let gen u = u; .<let f (c : <int>{}) = ki c; kb c in 0>.|}
+       ; use
+       ]);
   List.iter
     [ [ "closeit"; "ki"; "kb" ]
     ; [ "ki"; "closeit"; "kb" ]
@@ -1515,9 +1280,21 @@ let%expect_test "entries of different types code may use, then closed" =
     ]
     ~f:(fun order ->
       print_endline ("-- " ^ String.concat order ~sep:"; ");
-      let calls = List.map order ~f:call in
-      run [ closeit; ki; kb; top "f" [ "c" ] (List.reduce_exn calls ~f:seq) ];
-      run [ closeit; ki; kb; gen (local ("c", None) calls); use ]);
+      (* Sequenced to the left, as [(a; b); c]. *)
+      let calls =
+        match List.map order ~f:(fun name -> name ^ " c") with
+        | [ a; b; c ] -> sprintf "(%s; %s); %s" a b c
+        | _ -> assert false
+      in
+      run (lines [ closeit; ki; kb; "let f c = " ^ calls ]);
+      run
+        (lines
+           [ closeit
+           ; ki
+           ; kb
+           ; sprintf "let gen u = u; .<let f c = %s in 0>." calls
+           ; use
+           ]));
   [%expect
     {|
     val ki : <'a>{x?'b : int; ..'c} -> unit

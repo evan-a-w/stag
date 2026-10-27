@@ -1,27 +1,21 @@
 open! Import
-open Syntax
 open Helpers
-
-let option =
-  Decl.variant
-    "option"
-    ~params:[ Decl.ty "a" ]
-    [ "None", []; "Some", [ Ty.var "a" ] ]
-;;
+open Source_helpers
 
 (* [fun x -> body] *)
 let fn x body = let_ "fn" [ x ] body (var "fn")
 
 let%expect_test "injection" =
   check
-    [ top "a" [] (tag "A" ~arg:(int 1))
-    ; top "b" [] (tag "B")
-    ; top "unit_arg" [] (tag "B" ~arg:unit)
-    ; top "c" [ "x" ] (tag "C" ~arg:(var "x"))
-    ; top "nested" [] (tag "A" ~arg:(tag "B" ~arg:(int 1)))
-    ; top "pair" [] (tuple [ tag "A"; tag "B" ])
-    ; top "same_type" [] (app (var "cond") [ bool true; tag "A"; tag "B" ])
-    ];
+    {|
+let a = `A 1
+let b = `B
+let unit_arg = `B ()
+let c x = `C x
+let nested = `A (`B 1)
+let pair = (`A, `B)
+let same_type = cond true `A `B
+|};
   [%expect
     {|
     val a : [`A of int; ..'a]
@@ -36,53 +30,29 @@ let%expect_test "injection" =
 
 let%expect_test "matches without a catch-all are closed" =
   check
-    [ top
-        "f"
-        [ "v" ]
-        (match_
-           (var "v")
-           [ Pat.tag "A" ~arg:(Pat.var "n"), var "n"; Pat.tag "B", int 0 ])
-    ; top "applied" [] (app (var "f") [ tag "B" ])
-    ; top "absurd" [ "v" ] (match_ (var "v") [])
-    ; top
-        "with_any"
-        [ "v" ]
-        (match_ (var "v") [ Pat.tag "A", int 1; Pat.any, int 0 ])
-    ; top
-        "with_var"
-        [ "v" ]
-        (match_ (var "v") [ Pat.tag "A", int 1; Pat.var "x", int 0 ])
-    ; top
-        "var_first"
-        [ "v" ]
-        (match_ (var "v") [ Pat.var "x", var "x"; Pat.tag "A", tag "B" ])
-    ; top
-        "repeated"
-        [ "v" ]
-        (match_
-           (var "v")
-           [ Pat.tag "A" ~arg:(Pat.int 1), int 1
-           ; Pat.tag "A" ~arg:Pat.any, int 2
-           ])
-    ];
+    {|
+let f v = match v with `A n -> n | `B -> 0
+let applied = f `B
+|};
+  (* On the DSL: source can't write an empty match. *)
+  check_program [ top "absurd" [ "v" ] (match_ (var "v") []) ];
   check
-    [ top
-        "f"
-        [ "v" ]
-        (match_
-           (var "v")
-           [ Pat.tag "A" ~arg:(Pat.var "n"), var "n"; Pat.tag "B", int 0 ])
-    ; top "unhandled" [] (app (var "f") [ tag "C" ])
-    ];
-  check [ top "absurd_applied" [] (match_ (tag "A") []) ];
+    {|
+let with_any v = match v with `A -> 1 | _ -> 0
+let with_var v = match v with `A -> 1 | x -> 0
+let var_first v = match v with x -> x | `A -> `B
+let repeated v = match v with `A 1 -> 1 | `A _ -> 2
+|};
   check
-    [ top
-        "argument_mismatch"
-        [ "v" ]
-        (match_
-           (var "v")
-           [ Pat.tag "A" ~arg:(Pat.int 1), int 1; Pat.tag "A", int 2 ])
-    ];
+    {|
+let f v = match v with `A n -> n | `B -> 0
+let unhandled = f `C
+|};
+  check_program [ top "absurd_applied" [] (match_ (tag "A") []) ];
+  check
+    {|
+let argument_mismatch v = match v with `A 1 -> 1 | `A -> 2
+|};
   [%expect
     {|
     val f : [`A of int | `B] -> int
@@ -92,17 +62,22 @@ let%expect_test "matches without a catch-all are closed" =
     val with_var : [`A; ..'a] -> int
     val var_first : [`A | `B; ..'a] -> [`A | `B; ..'a]
     val repeated : [`A of int] -> int
-    (Unification_error
-     (Row_mismatch REmpty
-      (RExtend C Present (TCon unit ()) (RVar (Unbound 39 1))) (Missing_label C)))
+    ((Unification_error
+      (Row_mismatch REmpty
+       (RExtend C Present (TCon unit ()) (RVar (Unbound 39 1)))
+       (Missing_label C)))
+     @ t.stag:3:18-20)
     (Unification_error
      (Row_mismatch REmpty
       (RExtend A Present (TCon unit ()) (RVar (Unbound 18 1))) (Missing_label A)))
-    (Unification_error
-     (Type_mismatch (TCon int ()) (TCon unit ()) (Base_types_not_equal int unit)))
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon unit ())
+       (Base_types_not_equal int unit)))
+     @ t.stag:2:51-53)
     |}]
 ;;
 
+(* On the DSL: source can't write an empty match ([match_ x []]). *)
 let%expect_test "residuals of a catch-all" =
   let handle name =
     top
@@ -114,7 +89,7 @@ let%expect_test "residuals of a catch-all" =
          ; Pat.var "other", app (var "k") [ var "other" ]
          ])
   in
-  check
+  check_program
     [ handle "A"
     ; handle "B"
     ; top
@@ -135,7 +110,7 @@ let%expect_test "residuals of a catch-all" =
            (var "handle_a")
            [ var "e"; fn "e" (app (var "handle_b") [ var "e"; var "k" ]) ])
     ];
-  check
+  check_program
     [ handle "A"
     ; handle "B"
     ; top
@@ -165,87 +140,25 @@ let%expect_test "residuals of a catch-all" =
 ;;
 
 let%expect_test "which cases are removed from residuals" =
-  let residual first_cases =
-    match_
-      (var "v")
-      (first_cases @ [ Pat.var "other", app (var "k") [ var "other" ] ])
-  in
   check
-    [ option
-    ; top
-        "two_tags"
-        [ "v"; "k" ]
-        (residual [ Pat.tag "A", int 1; Pat.tag "B", int 2 ])
-    ; top
-        "refutable"
-        [ "v"; "k" ]
-        (residual [ Pat.tag "A" ~arg:(Pat.int 0), int 0 ])
-    ; top
-        "refutable_then_irrefutable"
-        [ "v"; "k" ]
-        (residual
-           [ Pat.tag "A" ~arg:(Pat.int 0), int 0
-           ; Pat.tag "A" ~arg:Pat.any, int 1
-           ])
-    ; top
-        "tuple"
-        [ "v"; "k" ]
-        (residual
-           [ Pat.tag "A" ~arg:(Pat.tuple [ Pat.var "x"; Pat.any ]), var "x" ])
-    ; top
-        "refutable_tuple"
-        [ "v"; "k" ]
-        (residual
-           [ Pat.tag "A" ~arg:(Pat.tuple [ Pat.var "x"; Pat.int 1 ]), var "x" ])
-    ; top
-        "record"
-        [ "v"; "k" ]
-        (residual
-           [ ( Pat.tag "A" ~arg:(Pat.poly_record ~bind:"r" [ "x", Pat.var "x" ])
-             , var "x" )
-           ])
-    ; top
-        "nominal"
-        [ "v"; "k" ]
-        (residual
-           [ ( Pat.tag "A" ~arg:(Pat.construct "Some" ~args:[ Pat.var "x" ])
-             , var "x" )
-           ])
-    ; top
-        "nested_variant"
-        [ "v"; "k" ]
-        (residual [ Pat.tag "A" ~arg:(Pat.tag "B"), int 1 ])
-    ; top
-        "removed_once"
-        [ "v"; "k" ]
-        (residual
-           [ Pat.tag "A" ~arg:(Pat.var "x"), var "x"
-           ; Pat.tag "A" ~arg:(Pat.var "y"), var "y"
-           ])
-    ; top
-        "shadowed_tag"
-        [ "v" ]
-        (match_
-           (var "v")
-           [ Pat.tag "A" ~arg:(Pat.var "n"), var "n"
-           ; ( Pat.var "other"
-             , match_
-                 (var "other")
-                 [ ( Pat.tag "A" ~arg:(Pat.var "b")
-                   , app (var "cond") [ var "b"; int 1; int 2 ] )
-                 ; Pat.any, int 0
-                 ] )
-           ])
-    ; top
-        "later_cases"
-        [ "v"; "k" ]
-        (match_
-           (var "v")
-           [ Pat.tag "A", int 1
-           ; Pat.var "other", app (var "k") [ var "other" ]
-           ; Pat.tag "B", int 2
-           ])
-    ];
+    {|
+type option['a] = None | Some of 'a
+let two_tags v k = match v with `A -> 1 | `B -> 2 | other -> k other
+let refutable v k = match v with `A 0 -> 0 | other -> k other
+let refutable_then_irrefutable v k =
+  match v with `A 0 -> 0 | `A _ -> 1 | other -> k other
+let tuple v k = match v with `A (x, _) -> x | other -> k other
+let refutable_tuple v k = match v with `A (x, 1) -> x | other -> k other
+let record v k = match v with `A {`x = x; ..r} -> x | other -> k other
+let nominal v k = match v with `A (Some x) -> x | other -> k other
+let nested_variant v k = match v with `A `B -> 1 | other -> k other
+let removed_once v k = match v with `A x -> x | `A y -> y | other -> k other
+let shadowed_tag v =
+  match v with
+  | `A n -> n
+  | other -> (match other with `A b -> cond b 1 2 | _ -> 0)
+let later_cases v k = match v with `A -> 1 | other -> k other | `B -> 2
+|};
   [%expect
     {|
     type option['a] = None | Some of 'a
@@ -265,44 +178,15 @@ let%expect_test "which cases are removed from residuals" =
 
 let%expect_test "nested variant patterns stay open" =
   check
-    [ option
-    ; top
-        "pair"
-        [ "p" ]
-        (match_ (var "p") [ Pat.tuple [ Pat.tag "A"; Pat.tag "B" ], int 1 ])
-    ; top
-        "inner"
-        [ "v" ]
-        (match_ (var "v") [ Pat.tag "A" ~arg:(Pat.tag "B"), int 1 ])
-    ; top
-        "in_option"
-        [ "o" ]
-        (match_
-           (var "o")
-           [ Pat.construct "Some" ~args:[ Pat.tag "A" ], int 1
-           ; Pat.construct "None", int 0
-           ])
-    ; top
-        "option_in_tag"
-        [ "v" ]
-        (match_
-           (var "v")
-           [ ( Pat.tag "Some" ~arg:(Pat.construct "Some" ~args:[ Pat.var "x" ])
-             , var "x" )
-           ; Pat.tag "None", int 0
-           ])
-    ; top
-        "in_record"
-        [ "r" ]
-        (match_ (var "r") [ Pat.poly_record [ "x", Pat.tag "A" ], int 1 ])
-    ; top
-        "tuple_of_tags"
-        []
-        (tuple
-           [ tag "A" ~arg:(construct "Some" ~args:[ int 1 ])
-           ; tag "B" ~arg:(tuple [ int 1; bool true ])
-           ])
-    ];
+    {|
+type option['a] = None | Some of 'a
+let pair p = match p with (`A, `B) -> 1
+let inner v = match v with `A `B -> 1
+let in_option o = match o with Some `A -> 1 | None -> 0
+let option_in_tag v = match v with `Some (Some x) -> x | `None -> 0
+let in_record r = match r with {`x = `A} -> 1
+let tuple_of_tags = (`A (Some 1), `B (1, true))
+|};
   [%expect
     {|
     type option['a] = None | Some of 'a
@@ -317,33 +201,24 @@ let%expect_test "nested variant patterns stay open" =
 
 let%expect_test "aliases" =
   check
-    [ Decl.alias "ab" (Ty.variant [ "A", Ty.int; "B", Ty.unit ])
-    ; Decl.alias
-        "with_c"
-        ~params:[ Decl.row "r" ]
-        (Ty.variant [ "C", Ty.bool ] ~tail:"r")
-    ; Decl.variant "wrapper" [ "W", [ Ty.con "ab" ] ]
-    ; top_let ("a", [], Some (Ty.con "ab"), tag "A" ~arg:(int 1))
-    ; top_let
-        ( "c"
-        , []
-        , Some
-            (Ty.con
-               "with_c"
-               ~args:[ Row (Ty.row ~entries:[ "D", Ty.unit ] ()) ])
-        , tag "D" )
-    ; top "w" [] (construct "W" ~args:[ tag "B" ])
-    ; top_let
-        ( "open_param"
-        , [ typed "v" (Ty.con "with_c" ~args:[ Row (Ty.row ~tail:"r" ()) ]) ]
-        , None
-        , var "v" )
-    ];
+    {|
+type ab = [`A of int | `B]
+type with_c[{..'r}] = [`C of bool; ..'r]
+type wrapper = W of ab
+let a : ab = `A 1
+let c : with_c[{`D : unit}] = `D
+let w = W `B
+let open_param (v : with_c[{..'r}]) = v
+|};
   check
-    [ Decl.alias "ab" (Ty.variant [ "A", Ty.int; "B", Ty.unit ])
-    ; top_let ("bad", [], Some (Ty.con "ab"), tag "C")
-    ];
-  check [ Decl.alias "dup" (Ty.variant [ "A", Ty.int; "A", Ty.bool ]) ];
+    {|
+type ab = [`A of int | `B]
+let bad : ab = `C
+|};
+  check
+    {|
+type dup = [`A of int | `A of bool]
+|};
   [%expect
     {|
     type ab = [`A of int | `B]
@@ -353,27 +228,24 @@ let%expect_test "aliases" =
     val c : [`C of bool | `D]
     val w : wrapper
     val open_param : [`C of bool; ..'a] -> [`C of bool; ..'a]
-    (Unification_error
-     (Row_mismatch REmpty
-      (RExtend C Present (TCon unit ()) (RVar (Unbound 26 1))) (Missing_label C)))
-    (Duplicate_row_entry A)
+    ((Unification_error
+      (Row_mismatch REmpty
+       (RExtend C Present (TCon unit ()) (RVar (Unbound 26 1)))
+       (Missing_label C)))
+     @ t.stag:3:15-17)
+    ((Duplicate_row_entry A) @ t.stag:2:24-26)
     |}]
 ;;
 
 let%expect_test "generalization and the value restriction" =
   check
-    [ top "v" [] (tag "A" ~arg:(var "id"))
-    ; top "weak" [] (tag "A" ~arg:(app (var "id") [ var "id" ]))
-    ; top "weak_row" [] (app (var "id") [ tag "A" ])
-    ; top "matched" [] (match_ (tag "A") [ Pat.tag "A", var "id" ])
-    ; top
-        "use"
-        []
-        (tuple
-           [ app (var "cond") [ bool true; var "v"; tag "B" ]
-           ; app (var "cond") [ bool true; var "v"; tag "C" ]
-           ])
-    ];
+    {|
+let v = `A id
+let weak = `A (id id)
+let weak_row = id `A
+let matched = match `A with `A -> id
+let use = (cond true v `B, cond true v `C)
+|};
   [%expect
     {|
     val v : [`A of 'a -> 'a; ..'b]
@@ -386,26 +258,11 @@ let%expect_test "generalization and the value restriction" =
 
 let%expect_test "tags in quotes are not free variables" =
   check
-    [ top "inject" [] (quote (tag "A" ~arg:(var "x")))
-    ; top
-        "match_inside"
-        []
-        (quote
-           (match_
-              (tag "A" ~arg:(int 1))
-              [ Pat.tag "A" ~arg:(Pat.var "x"), var "x"
-              ; Pat.var "other", int 0
-              ]))
-    ; top
-        "residual_spliced"
-        [ "k" ]
-        (quote
-           (match_
-              (var "v")
-              [ Pat.tag "A", int 0
-              ; Pat.var "other", splice (app (var "k") [ quote (var "other") ])
-              ]))
-    ];
+    {|
+let inject = .< `A x >.
+let match_inside = .< match `A 1 with `A x -> x | other -> 0 >.
+let residual_spliced k = .< match v with `A -> 0 | other -> .~(k .< other >.) >.
+|};
   [%expect
     {|
     val inject : <[`A of 'a; ..'b]>{x : 'a; ..'c}
@@ -416,39 +273,14 @@ let%expect_test "tags in quotes are not free variables" =
 
 let%expect_test "presences reach variant rows through contexts" =
   check
-    [ top_let
-        ( "unknown"
-        , [ "c", None; typed "v" (Ty.variant [] ~tail:"r") ]
-        , None
-        , seq
-            (quote
-               (let_
-                  "y"
-                  []
-                  (int 1)
-                  (splice (var "c" ~annot:(Ty.code Ty.int ~tail:"r")))))
-            (var "v") )
-    ; top_let
-        ( "absent"
-        , [ "c", None; typed "v" (Ty.variant [] ~tail:"d") ]
-        , None
-        , seq
-            (quote
-               (quote
-                  (let_
-                     "z"
-                     []
-                     (int 1)
-                     (splice
-                        (splice
-                           (var
-                              "c"
-                              ~annot:
-                                (Ty.code
-                                   (Ty.code (Ty.var "a") ~tail:"c")
-                                   ~tail:"d")))))))
-            (var "v") )
-    ];
+    {|
+let unknown c (v : [..'r]) =
+  .< let y = 1 in .~(c : <int>{..'r}) >.;
+  v
+let absent c (v : [..'d]) =
+  .< .< let z = 1 in .~(.~(c : <<'a>{..'c}>{..'d})) >. >.;
+  v
+|};
   [%expect
     {|
     val unknown : <int>{y?'a : int; ..'b} -> [`y?'a of int; ..'b] -> [`y?'a of int; ..'b]
@@ -458,63 +290,66 @@ let%expect_test "presences reach variant rows through contexts" =
 
 let%expect_test "unification errors" =
   check
-    [ top
-        "variant_vs_record"
-        []
-        (match_ (poly_record []) [ Pat.tag "A", int 1 ])
-    ];
-  check [ top "variant_vs_tuple" [] (app (var "add") [ tag "A"; int 1 ]) ];
+    {|
+let variant_vs_record = match {} with `A -> 1
+|};
   check
-    [ top
-        "argument"
-        []
-        (app
-           (var "cond")
-           [ bool true; tag "A" ~arg:(int 1); tag "A" ~arg:(bool true) ])
-    ];
+    {|
+let variant_vs_tuple = add `A 1
+|};
   check
-    [ top
-        "closed"
-        []
-        (match_ (tag "C") [ Pat.tag "A", int 1; Pat.tag "B", int 2 ])
-    ];
+    {|
+let argument = cond true (`A 1) (`A true)
+|};
   check
-    [ top
-        "maybe_c"
-        [ "v" ]
-        (seq
-           (app (var "cond") [ bool true; var "v"; tag "C" ])
-           (match_ (var "v") [ Pat.tag "A", int 1 ]))
-    ];
+    {|
+let closed = match `C with `A -> 1 | `B -> 2
+|};
+  check
+    {|
+let maybe_c v =
+  cond true v `C;
+  match v with `A -> 1
+|};
   [%expect
     {|
-    (Unification_error
-     (Type_mismatch (TRecord REmpty)
-      (TVariant (RExtend A Present (TCon unit ()) (RVar (Unbound 20 1))))
-      Structural_mismatch))
-    (Unification_error
-     (Type_mismatch (TCon int ())
-      (TVariant (RExtend A Present (TCon unit ()) (RVar (Unbound 22 1))))
-      Structural_mismatch))
-    (Unification_error
-     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
-    (Unification_error
-     (Row_mismatch REmpty
-      (RExtend C Present (TCon unit ()) (RVar (Unbound 30 1))) (Missing_label C)))
-    (Unification_error
-     (Row_mismatch REmpty
-      (RExtend C Present (TCon unit ()) (RVar (Unbound 35 1))) (Missing_label C)))
+    ((Unification_error
+      (Type_mismatch (TRecord REmpty)
+       (TVariant (RExtend A Present (TCon unit ()) (RVar (Unbound 20 1))))
+       Structural_mismatch))
+     @ t.stag:2:38-40)
+    ((Unification_error
+      (Type_mismatch (TCon int ())
+       (TVariant (RExtend A Present (TCon unit ()) (RVar (Unbound 22 1))))
+       Structural_mismatch))
+     @ t.stag:2:27-29)
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:2:32-41)
+    ((Unification_error
+      (Row_mismatch REmpty
+       (RExtend C Present (TCon unit ()) (RVar (Unbound 30 1)))
+       (Missing_label C)))
+     @ t.stag:2:13-44)
+    ((Unification_error
+      (Row_mismatch REmpty
+       (RExtend C Present (TCon unit ()) (RVar (Unbound 35 1)))
+       (Missing_label C)))
+     @ t.stag:4:2-22)
     |}]
 ;;
 
 let%expect_test "empty tuples print as ()" =
+  (* On the DSL: in source, [()] is the unit literal, not the empty tuple. *)
+  check_program
+    [ top "empty" [] (tuple []); top "arg" [] (tag "A" ~arg:(tuple [])) ];
   check
-    [ top "empty" [] (tuple [])
-    ; top "arg" [] (tag "A" ~arg:(tuple []))
-    ; top "unit_arg" [] (tag "A" ~arg:unit)
-    ; Decl.alias "t" (Ty.variant [ "A", Ty.tuple [] ])
-    ; Decl.variant "c" [ "C", [ Ty.tuple [] ] ]
-    ];
+    {|
+let unit_arg = `A ()
+type t = [`A of ()]
+type c = C of ()
+|};
   [%expect
     {|
     val empty : ()
@@ -526,22 +361,11 @@ let%expect_test "empty tuples print as ()" =
 ;;
 
 let%expect_test "literal unit and closed records as tag arguments" =
-  let residual first_cases =
-    match_
-      (var "v")
-      (first_cases @ [ Pat.var "other", app (var "k") [ var "other" ] ])
-  in
   check
-    [ top
-        "unit_literal"
-        [ "v"; "k" ]
-        (residual [ Pat.tag "A" ~arg:Pat.unit, int 0 ])
-    ; top
-        "closed_record"
-        [ "v"; "k" ]
-        (residual
-           [ Pat.tag "A" ~arg:(Pat.poly_record [ "x", Pat.var "n" ]), var "n" ])
-    ];
+    {|
+let unit_literal v k = match v with `A () -> 0 | other -> k other
+let closed_record v k = match v with `A {`x = n} -> n | other -> k other
+|};
   [%expect
     {|
     val unit_literal : [`A; ..'a] -> ([`A; ..'a] -> int) -> int
@@ -551,51 +375,15 @@ let%expect_test "literal unit and closed records as tag arguments" =
 
 let%expect_test "local polymorphic matches" =
   check
-    [ top
-        "closed"
-        []
-        (let_
-           "f"
-           [ "v" ]
-           (match_ (var "v") [ Pat.tag "A" ~arg:(Pat.var "x"), var "x" ])
-           (tuple
-              [ app (var "f") [ tag "A" ~arg:(int 1) ]
-              ; app (var "f") [ tag "A" ~arg:(bool true) ]
-              ]))
-    ; top
-        "residual"
-        []
-        (let_
-           "f"
-           [ "v"; "k" ]
-           (match_
-              (var "v")
-              [ Pat.tag "A", int 1
-              ; Pat.var "other", app (var "k") [ var "other" ]
-              ])
-           (tuple
-              [ app
-                  (var "f")
-                  [ tag "B" ~arg:(int 1)
-                  ; fn
-                      "o"
-                      (match_
-                         (var "o")
-                         [ Pat.tag "B" ~arg:(Pat.var "n"), var "n" ])
-                  ]
-              ; app
-                  (var "f")
-                  [ tag "C" ~arg:(bool true)
-                  ; fn
-                      "o"
-                      (match_
-                         (var "o")
-                         [ ( Pat.tag "C" ~arg:(Pat.var "b")
-                           , app (var "cond") [ var "b"; int 1; int 2 ] )
-                         ])
-                  ]
-              ]))
-    ];
+    {|
+let closed =
+  let f v = match v with `A x -> x in
+  (f (`A 1), f (`A true))
+let residual =
+  let f v k = match v with `A -> 1 | other -> k other in
+  ( f (`B 1) (let fn o = match o with `B n -> n in fn),
+    f (`C true) (let fn o = match o with `C b -> cond b 1 2 in fn) )
+|};
   [%expect
     {|
     val closed : int * bool
@@ -605,179 +393,121 @@ let%expect_test "local polymorphic matches" =
 
 let%expect_test "closing scrutinees with shadowed tags" =
   let shadowed =
-    Decl.alias
-      "t"
-      ~params:[ Decl.row "r" ]
-      (Ty.variant [ "A", Ty.int ] ~tail:"r")
+    {|
+type t[{..'r}] = [`A of int; ..'r]
+|}
   in
-  let v_type = Ty.con "t" ~args:[ Row (Ty.row ~entries:[ "A", Ty.bool ] ()) ] in
   check
-    [ shadowed
-    ; top_let
-        ( "residual"
-        , [ typed "v" v_type ]
-        , None
-        , match_
-            (var "v")
-            [ Pat.tag "A" ~arg:(Pat.var "n"), var "n"
-            ; ( Pat.var "other"
-              , match_
-                  (var "other")
-                  [ ( Pat.tag "A" ~arg:(Pat.var "b")
-                    , app (var "cond") [ var "b"; int 1; int 2 ] )
-                  ] )
-            ] )
-    ];
+    (shadowed
+     ^ {|
+let residual (v : t[{`A : bool}]) =
+  match v with
+  | `A n -> n
+  | other -> (match other with `A b -> cond b 1 2)
+|}
+    );
   (* Closing gives each tag one entry, so the shadowed [`A of bool] is
      extra. *)
   check
-    [ shadowed
-    ; top_let
-        ( "closed"
-        , [ typed "v" v_type ]
-        , None
-        , match_ (var "v") [ Pat.tag "A" ~arg:(Pat.var "n"), int 1 ] )
-    ];
+    (shadowed
+     ^ {|
+let closed (v : t[{`A : bool}]) = match v with `A n -> 1
+|}
+    );
   check
-    [ shadowed
-    ; top_let
-        ( "repeated_tag"
-        , [ typed "v" v_type ]
-        , None
-        , match_
-            (var "v")
-            [ Pat.tag "A" ~arg:(Pat.var "n"), int 1
-            ; Pat.tag "A" ~arg:(Pat.var "b"), int 2
-            ] )
-    ];
+    (shadowed
+     ^ {|
+let repeated_tag (v : t[{`A : bool}]) = match v with `A n -> 1 | `A b -> 2
+|}
+    );
   [%expect
     {|
     type t[{..'a}] = [`A of int; ..'a]
     val residual : [`A of int | `A of bool] -> int
-    (Unification_error
-     (Row_mismatch REmpty (RExtend A Present (TCon bool ()) REmpty)
-      (Missing_label A)))
-    (Unification_error
-     (Row_mismatch REmpty (RExtend A Present (TCon bool ()) REmpty)
-      (Missing_label A)))
+    ((Unification_error
+      (Row_mismatch REmpty (RExtend A Present (TCon bool ()) REmpty)
+       (Missing_label A)))
+     @ t.stag:4:34-56)
+    ((Unification_error
+      (Row_mismatch REmpty (RExtend A Present (TCon bool ()) REmpty)
+       (Missing_label A)))
+     @ t.stag:4:40-74)
     |}]
 ;;
 
 let%expect_test "rows shared between records and variants" =
   check
-    [ top_let
-        ( "same"
-        , [ typed "r" (Ty.record [] ~tail:"r")
-          ; typed "v" (Ty.variant [] ~tail:"r")
-          ]
-        , None
-        , tuple [ var "r"; var "v" ] )
-    ; top
-        "ok"
-        []
-        (app (var "same") [ poly_record [ "A", int 1 ]; tag "A" ~arg:(int 2) ])
-    ; top
-        "matched"
-        [ "r"; "v" ]
-        (seq
-           (app (var "same") [ var "r"; var "v" ])
-           (app
-              (var "cond")
-              [ bool true
-              ; dot (var "r") "A"
-              ; match_ (var "v") [ Pat.tag "A" ~arg:(Pat.var "n"), var "n" ]
-              ]))
-    ];
+    {|
+let same (r : {..'r}) (v : [..'r]) = (r, v)
+let ok = same {`A = 1} (`A 2)
+let matched r v =
+  same r v;
+  cond true r.`A (match v with `A n -> n)
+|};
   check
-    [ top_let
-        ( "same"
-        , [ typed "r" (Ty.record [] ~tail:"r")
-          ; typed "v" (Ty.variant [] ~tail:"r")
-          ]
-        , None
-        , tuple [ var "r"; var "v" ] )
-    ; top
-        "missing"
-        []
-        (app (var "same") [ poly_record [ "A", int 1 ]; tag "B" ])
-    ];
+    {|
+let same (r : {..'r}) (v : [..'r]) = (r, v)
+let missing = same {`A = 1} `B
+|};
   [%expect
     {|
     val same : {..'a} -> [..'a] -> {..'a} * [..'a]
     val ok : {`A : int} * [`A of int]
     val matched : {`A : 'a} -> [`A of 'a] -> 'a
-    (Unification_error
-     (Row_mismatch REmpty
-      (RExtend B Present (TCon unit ()) (RVar (Unbound 35 1))) (Missing_label B)))
+    ((Unification_error
+      (Row_mismatch REmpty
+       (RExtend B Present (TCon unit ()) (RVar (Unbound 35 1)))
+       (Missing_label B)))
+     @ t.stag:3:28-30)
     |}]
 ;;
 
 let%expect_test "structural types may be recursive" =
   check
-    [ top
-        "occurs"
-        [ "v" ]
-        (app (var "cond") [ bool true; var "v"; tag "A" ~arg:(var "v") ])
-    ];
+    {|
+let occurs v = cond true v (`A v)
+|};
   check
-    [ top_let
-        ( "cyclic"
-        , [ typed "a" (Ty.variant [ "A", Ty.unit ] ~tail:"r")
-          ; typed "b" (Ty.variant [ "B", Ty.unit ] ~tail:"r")
-          ]
-        , None
-        , app (var "cond") [ bool true; var "a"; var "b" ] )
-    ];
+    {|
+let cyclic (a : [`A; ..'r]) (b : [`B; ..'r]) = cond true a b
+|};
   check
-    [ Decl.alias
-        "t"
-        (Ty.variant [ "Nil", Ty.unit; "Cons", Ty.tuple [ Ty.int; Ty.con "t" ] ])
-    ];
+    {|
+type t = [`Nil | `Cons of int * t]
+|};
   check
-    [ Decl.variant
-        "t"
-        [ ( "T"
-          , [ Ty.variant
-                [ "Nil", Ty.unit; "Cons", Ty.tuple [ Ty.int; Ty.con "t" ] ]
-            ] )
-        ]
-    ; top
-        "two"
-        []
-        (construct
-           "T"
-           ~args:
-             [ tag
-                 "Cons"
-                 ~arg:(tuple [ int 1; construct "T" ~args:[ tag "Nil" ] ])
-             ])
-    ];
+    {|
+type t = T of [`Nil | `Cons of int * t]
+let two = T (`Cons (1, T `Nil))
+|};
   [%expect
     {|
     val occurs : ([`A of 'a; ..'b] as 'a) -> 'a
-    (Unification_error
-     (Row_mismatch
-      (RExtend A Present (TCon unit ())
-       (RVar
-        (Link
-         (RExtend A (PVar (Unbound 30 1)) (TCon unit ()) (RVar (Unbound 31 1))))))
-      (RExtend B Present (TCon unit ())
-       (RVar
-        (Link
-         (RExtend A (PVar (Unbound 30 1)) (TCon unit ()) (RVar (Unbound 31 1))))))
-      Cyclic_row))
+    ((Unification_error
+      (Row_mismatch
+       (RExtend A Present (TCon unit ())
+        (RVar
+         (Link
+          (RExtend A (PVar (Unbound 30 1)) (TCon unit ()) (RVar (Unbound 31 1))))))
+       (RExtend B Present (TCon unit ())
+        (RVar
+         (Link
+          (RExtend A (PVar (Unbound 30 1)) (TCon unit ()) (RVar (Unbound 31 1))))))
+       Cyclic_row))
+     @ t.stag:2:59-60)
     type t = [`Cons of int * t | `Nil]
     type t = T of [`Cons of int * t | `Nil]
     val two : t
     |}]
 ;;
 
+(* On the DSL: source can't write an empty match ([match_ x []]). *)
 let%expect_test "empty matches on empty nominal types" =
   let void = Decl.variant "void" [] in
   let absurd ?(name = "absurd") ty =
     top_let (name, [ typed "x" ty ], None, match_ (var "x") [])
   in
-  check
+  check_program
     [ void
     ; absurd (Ty.con "void")
     ; top "poly" [ "x" ] (match_ (var "x") [])
@@ -787,9 +517,10 @@ let%expect_test "empty matches on empty nominal types" =
         , None
         , let_ "y" [] (var "v") (match_ (var "y") []) )
     ];
-  check
+  check_program
     [ module_ "M" [ void; absurd (Ty.con "void") ]; absurd (Ty.con "M.void") ];
-  check [ void; Decl.alias "empty" (Ty.con "void"); absurd (Ty.con "empty") ];
+  check_program
+    [ void; Decl.alias "empty" (Ty.con "void"); absurd (Ty.con "empty") ];
   [%expect
     {|
     type void = |
@@ -805,8 +536,8 @@ let%expect_test "empty matches on empty nominal types" =
     type empty = void
     val absurd : void -> 'a
     |}];
-  check [ Decl.variant "t" [ "A", [] ]; absurd (Ty.con "t") ];
-  check [ absurd Ty.int ];
+  check_program [ Decl.variant "t" [ "A", [] ]; absurd (Ty.con "t") ];
+  check_program [ absurd Ty.int ];
   [%expect
     {|
     (Unification_error
@@ -815,13 +546,13 @@ let%expect_test "empty matches on empty nominal types" =
      (Type_mismatch (TVariant REmpty) (TCon int ()) Structural_mismatch))
     |}];
   (* Order dependent: [f]'s scrutinee is not yet known to be [void]. *)
-  check
+  check_program
     [ void
     ; top "f" [ "x" ] (match_ (var "x") [])
     ; top_let
         ("g", [ typed "v" (Ty.con "void") ], None, app (var "f") [ var "v" ])
     ];
-  check
+  check_program
     [ void
     ; top_let
         ( "local"

@@ -1,12 +1,8 @@
 open! Import
-open Syntax
-open Helpers
+open Source_helpers
 
 let%expect_test "primitives" =
-  let typecheck = typechecker () in
-  (Typecheck.typecheck typecheck ~program:prims |> Result.ok |> Option.value_exn)
-    .signature
-  |> print_signature;
+  check ~prelude:false prelude;
   [%expect
     {|
     val add : int -> int -> int
@@ -18,13 +14,17 @@ let%expect_test "primitives" =
 
 let%expect_test "typechecking twice with the same state" =
   let typecheck = typechecker () in
-  let run program =
-    match Typecheck.typecheck typecheck ~program with
-    | Ok { signature; _ } -> print_signature signature
+  let run source =
+    match Typecheck.typecheck typecheck ~program:(parse_exn source) with
+    | Ok { signature; _ } -> print_string (Signature.to_string_hum signature)
     | Error error -> print_s [%sexp (error : Typecheck_error.t)]
   in
-  run prims;
-  run [ top "id" [ "x" ] (var "x"); top "n" [] (app (var "id") [ int 1 ]) ];
+  run prelude;
+  run
+    {|
+let id x = x
+let n = id 1
+|};
   [%expect
     {|
     val add : int -> int -> int
@@ -38,14 +38,15 @@ let%expect_test "typechecking twice with the same state" =
 
 let%expect_test "literals and application" =
   check
-    [ top "i" [] (int 1)
-    ; top "b" [] (bool false)
-    ; top "s" [] (string "s")
-    ; top "c" [] (char 'c')
-    ; top "u" [] unit
-    ; top "sum" [] (app (var "add") [ int 1; int 2 ])
-    ; top "partial" [] (app (var "add") [ int 1 ])
-    ];
+    {|
+let i = 1
+let b = false
+let s = "s"
+let c = 'c'
+let u = ()
+let sum = add 1 2
+let partial = add 1
+|};
   [%expect
     {|
     val i : int
@@ -59,29 +60,34 @@ let%expect_test "literals and application" =
 ;;
 
 let%expect_test "application errors" =
-  check [ top "bad" [] (app (var "add") [ bool true ]) ];
-  check [ top "bad" [] (app (int 1) [ int 2 ]) ];
+  check
+    {|
+let bad = add true
+|};
+  check
+    {|
+let bad = 1 2
+|};
   [%expect
     {|
-    (Unification_error
-     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
-    (Unification_error
-     (Type_mismatch (TArrow (TVar (Unbound 18 1)) (TVar (Unbound 19 1)))
-      (TCon int ()) Structural_mismatch))
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:2:14-18)
+    ((Unification_error
+      (Type_mismatch (TArrow (TVar (Unbound 18 1)) (TVar (Unbound 19 1)))
+       (TCon int ()) Structural_mismatch))
+     @ t.stag:2:10-11)
     |}]
 ;;
 
 let%expect_test "functions are generalized" =
   check
-    [ top "k" [ "x"; "y" ] (var "x")
-    ; top "flip" [ "f"; "x"; "y" ] (app (var "f") [ var "y"; var "x" ])
-    ; top
-        "both"
-        []
-        (seq
-           (app (var "k") [ int 1; bool true ])
-           (app (var "k") [ bool true; int 1 ]))
-    ];
+    {|
+let k x y = x
+let flip f x y = f y x
+let both = k 1 true; k true 1
+|};
   [%expect
     {|
     val k : 'a -> 'b -> 'a
@@ -91,75 +97,59 @@ let%expect_test "functions are generalized" =
 ;;
 
 let%expect_test "value restriction" =
-  check [ top "weak" [] (app (var "id") [ var "id" ]) ];
   check
-    [ top "weak" [] (app (var "id") [ var "id" ])
-    ; top
-        "use"
-        []
-        (seq (app (var "weak") [ int 1 ]) (app (var "weak") [ bool true ]))
-    ];
+    {|
+let weak = id id
+|};
+  check
+    {|
+let weak = id id
+let use = weak 1; weak true
+|};
   [%expect
     {|
     val weak : '_a -> '_a
-    (Unification_error
-     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:3:23-27)
     |}]
 ;;
 
 let%expect_test "later bindings don't generalize weak variables" =
   check
-    [ top
-        "f"
-        [ "u" ]
-        (let_
-           "weak"
-           []
-           (app (var "id") [ var "id" ])
-           (let_
-              "through"
-              [ "c" ]
-              (app (var "weak") [ var "c" ])
-              (tuple
-                 [ app (var "through") [ int 1 ]
-                 ; app (var "through") [ bool true ]
-                 ])))
-    ];
+    {|
+let f u =
+  let weak = id id in
+  let through c = weak c in
+  (through 1, through true)
+|};
   [%expect
     {|
-    (Unification_error
-     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:5:22-26)
     |}]
 ;;
 
 let%expect_test "later toplevels don't generalize weak variables" =
-  let weak = top "weak" [] (app (var "id") [ var "id" ]) in
-  let through = top "through" [ "c" ] (app (var "weak") [ var "c" ]) in
-  check [ weak; through ];
-  check [ through; weak ];
-  check
-    [ weak
-    ; through
-    ; top
-        "use"
-        []
-        (tuple
-           [ app (var "through") [ int 1 ]; app (var "through") [ bool true ] ])
-    ];
-  check
-    [ weak
-    ; through
-    ; top "use" [] (app (var "through") [ int 1 ])
-    ; top "after" [] (var "weak")
-    ];
+  let weak = "let weak = id id\n" in
+  let through = "let through c = weak c\n" in
+  check (weak ^ through);
+  check (through ^ weak);
+  check (weak ^ through ^ "let use = (through 1, through true)\n");
+  check (weak ^ through ^ "let use = through 1\nlet after = weak\n");
   [%expect
     {|
     val weak : '_a -> '_a
     val through : '_a -> '_a
     val through : '_a -> '_a
     val weak : '_a -> '_a
-    (Unification_error
-     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:3:30-34)
     val weak : int -> int
     val through : int -> int
     val use : int
@@ -168,39 +158,59 @@ let%expect_test "later toplevels don't generalize weak variables" =
 ;;
 
 let%expect_test "annotations" =
-  check [ top "f" [ "x" ] ~annot:Ty.int (var "x") ];
-  check [ top "f" [] (var "id" ~annot:(Ty.arrow Ty.bool Ty.bool)) ];
-  check [ top "f" [ "x" ] ~annot:Ty.bool (app (var "add") [ var "x"; int 1 ]) ];
+  check
+    {|
+let f x : int = x
+|};
+  check
+    {|
+let f = (id : bool -> bool)
+|};
+  check
+    {|
+let f x : bool = add x 1
+|};
   [%expect
     {|
     val f : int -> int
     val f : bool -> bool
-    (Unification_error
-     (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
+    ((Unification_error
+      (Type_mismatch (TCon bool ()) (TCon int ())
+       (Base_types_not_equal bool int)))
+     @ t.stag:2:17-24)
     |}]
 ;;
 
 let%expect_test "scope errors" =
-  check [ top "f" [] (var "nope") ];
-  check [ top "f" [ "x" ] (var "x"); top "f" [] (int 1) ];
-  check [ top "f" [ "x" ] (var "g"); top "g" [ "y" ] (var "x") ];
+  check
+    {|
+let f = nope
+|};
+  check
+    {|
+let f x = x
+let f = 1
+|};
+  check
+    {|
+let f x = g
+let g y = x
+|};
   [%expect
     {|
-    (Not_in_scope nope)
-    (Duplicate_toplevel f)
-    (Not_in_scope x)
+    ((Not_in_scope nope) @ t.stag:2:8-12)
+    ((Duplicate_toplevel f) @ t.stag:3:4-5)
+    ((Not_in_scope x) @ t.stag:3:10-11)
     |}]
 ;;
 
 let%expect_test "toplevels are order independent and generalized per SCC" =
   check
-    [ top
-        "main"
-        []
-        (seq (app (var "f") [ int 1 ]) (app (var "f") [ bool true ]))
-    ; top "f" [ "x" ] (app (var "g") [ var "x" ])
-    ; top "g" [ "x" ] (var "x")
-    ];
+    {|
+let main = f 1; f true
+let f x = g x
+let g x = x
+|};
   [%expect
     {|
     val main : bool
@@ -211,32 +221,34 @@ let%expect_test "toplevels are order independent and generalized per SCC" =
 
 let%expect_test "mutual recursion is monomorphic within an SCC" =
   check
-    [ top "a" [ "x" ] (app (var "b") [ int 1 ])
-    ; top "b" [ "y" ] (seq (app (var "a") [ bool true ]) (var "y"))
-    ; top "c" [] (seq (app (var "a") [ bool true ]) (app (var "b") [ int 2 ]))
-    ];
+    {|
+let a x = b 1
+let b y = a true; y
+let c = a true; b 2
+|};
   check
-    [ top "a" [ "x" ] (app (var "b") [ int 1 ])
-    ; top
-        "b"
-        [ "y" ]
-        (seq (app (var "a") [ bool true ]) (app (var "a") [ int 1 ]))
-    ];
+    {|
+let a x = b 1
+let b y = a true; a 1
+|};
   [%expect
     {|
     val a : bool -> int
     val b : int -> int
     val c : int
-    (Unification_error
-     (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
+    ((Unification_error
+      (Type_mismatch (TCon bool ()) (TCon int ())
+       (Base_types_not_equal bool int)))
+     @ t.stag:3:20-21)
     |}]
 ;;
 
 let%expect_test "SCC containing a non-value is not generalized" =
   check
-    [ top "x" [] (app (var "f") [ int 1 ])
-    ; top "f" [ "y" ] (seq (var "x") (var "y"))
-    ];
+    {|
+let x = f 1
+let f y = x; y
+|};
   [%expect
     {|
     val x : int
@@ -246,20 +258,13 @@ let%expect_test "SCC containing a non-value is not generalized" =
 
 let%expect_test "an SCC below an in-progress toplevel is generalized" =
   check
-    [ top
-        "a"
-        [ "x" ]
-        (seq (app (var "b") [ var "a" ]) (app (var "c") [ int 1 ]))
-    ; top "b" [ "x" ] (var "x")
-    ; top "c" [ "x" ] (app (var "d") [ var "x" ])
-    ; top
-        "d"
-        [ "x" ]
-        (seq
-           (app (var "c") [ var "x" ])
-           (seq (app (var "a") [ var "x" ]) (var "x")))
-    ; top "e" [] (seq (app (var "b") [ int 1 ]) (app (var "b") [ bool true ]))
-    ];
+    {|
+let a x = b a; c 1
+let b x = x
+let c x = d x
+let d x = c x; a x; x
+let e = b 1; b true
+|};
   [%expect
     {|
     val a : int -> int
@@ -270,21 +275,15 @@ let%expect_test "an SCC below an in-progress toplevel is generalized" =
     |}]
 ;;
 
-let check_source source =
-  match Parser.program ~file:"t.stag" source with
-  | Ok program -> check program
-  | Error error -> print_endline (Parser.Error.to_string error)
-;;
-
 let%expect_test "a recursive group is generalized at once, in any order" =
   (* The members share variables, which generalizing one at a time would
      simplify while the others still use them: generalizing [g] first gave its
      [y] type [<int>{x?'d : int; ..'e}]. The orders give the same schemes, up to which
      side of an equality is an entry type. *)
   let both_orders f g =
-    check_source (f ^ "\n" ^ g);
+    check (f ^ "\n" ^ g);
     print_endline "---";
-    check_source (g ^ "\n" ^ f)
+    check (g ^ "\n" ^ f)
   in
   both_orders
     "let f c d = let _ = .< let x = .~d in .~c >. in g c d"
@@ -326,9 +325,9 @@ let pre d e = .< let y = .~d in let x = .~e in .~(w .<2>.) >.|}
   List.iter
     [ [ f; g ]; [ g; f ] ]
     ~f:(fun group ->
-      check_source (String.concat ~sep:"\n" ((prelude :: group) @ [ use ]));
+      check (String.concat ~sep:"\n" ((prelude :: group) @ [ use ]));
       print_endline "---");
-  check_source
+  check
     (String.concat
        ~sep:"\n"
        [ prelude
@@ -362,75 +361,49 @@ let pre d e = .< let y = .~d in let x = .~e in .~(w .<2>.) >.|}
 
 let%expect_test "local lets" =
   check
-    [ top
-        "poly"
-        []
-        (let_
-           "i"
-           [ "x" ]
-           (var "x")
-           (seq (app (var "i") [ int 1 ]) (app (var "i") [ bool true ])))
-    ; top
-        "rec_"
-        []
-        (let_ "loop" [ "x" ] (app (var "loop") [ var "x" ]) (var "loop"))
-    ; top "shadow" [ "x" ] (let_ "x" [] (int 1) (var "x"))
-    ; top
-        "arg_scope"
-        [ "x" ]
-        (seq (let_ "f" [ "x" ] (bool true) (var "f")) (var "x"))
-    ];
+    {|
+let poly = let i x = x in i 1; i true
+let rec_ = let loop x = loop x in loop
+let shadow x = let x = 1 in x
+let arg_scope x = (let f x = true in f); x
+|};
   check
-    [ top
-        "mono"
-        []
-        (let_
-           "i"
-           []
-           (app (var "id") [ var "id" ])
-           (seq (app (var "i") [ int 1 ]) (app (var "i") [ bool true ])))
-    ];
+    {|
+let mono = let i = id id in i 1; i true
+|};
   check
-    [ top
-        "mono_rec"
-        []
-        (let_
-           "f"
-           [ "x" ]
-           (seq (app (var "f") [ int 1 ]) (app (var "f") [ bool true ]))
-           (var "f"))
-    ];
+    {|
+let mono_rec = let f x = f 1; f true in f
+|};
   [%expect
     {|
     val poly : bool
     val rec_ : 'a -> 'b
     val shadow : 'a -> int
     val arg_scope : 'a -> 'a
-    (Unification_error
-     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
-    (Unification_error
-     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:2:35-39)
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:2:32-36)
     |}]
 ;;
 
 let%expect_test "quotes" =
   check
-    [ top "closed" [] (quote (int 1))
-    ; top
-        "open"
-        []
-        (quote
-           (app (var "add") [ var "y"; app (var "add") [ var "x"; var "y" ] ]))
-    ; top
-        "local"
-        []
-        (quote (let_ "y" [] (int 1) (app (var "add") [ var "y"; var "y" ])))
-    ; top "persistent" [] (quote (app (var "id") [ int 1 ]))
-    ; top "n" [] (int 5)
-    ; top "not_persistent" [] (quote (var "n"))
-    ; top "outer_arg" [ "x" ] (quote (var "x"))
-    ; top "nested" [] (quote (quote (app (var "add") [ var "x"; int 1 ])))
-    ];
+    {|
+let closed = .<1>.
+let open = .<add y (add x y)>.
+let local = .<let y = 1 in add y y>.
+let persistent = .<id 1>.
+let n = 5
+let not_persistent = .<n>.
+let outer_arg x = .<x>.
+let nested = .< .<add x 1>. >.
+|};
   [%expect
     {|
     val closed : <int>{..'a}
@@ -446,43 +419,21 @@ let%expect_test "quotes" =
 
 let%expect_test "free variables of a quote are not generalized by inner lets" =
   check
-    [ top
-        "f"
-        [ "u" ]
-        (quote
-           (let_
-              "g"
-              [ "v" ]
-              (var "x")
-              (seq
-                 (app (var "add") [ app (var "g") [ int 1 ]; int 1 ])
-                 (app (var "g") [ bool true ]))))
-    ];
+    {|
+let f u = .<let g v = x in add (g 1) 1; g true>.
+|};
   [%expect {| val f : 'a -> <int>{x : int; ..'b} |}]
 ;;
 
 let%expect_test "splice with explicit substitutions" =
-  let code = quote (app (var "add") [ var "x"; var "y" ]) in
   check
-    [ top
-        "values"
-        []
-        (quote (splice ~subs:[ "x", Some (int 1); "y", Some (int 2) ] code))
-    ; top
-        "reorder"
-        []
-        (quote (splice ~subs:[ "y", Some (int 1); "x", Some (int 2) ] code))
-    ; top
-        "from_scope"
-        []
-        (quote
-           (let_ "x" [] (int 1) (splice ~subs:[ "x", None; "y", None ] code)))
-    ; top
-        "infers_sub"
-        []
-        (quote (splice ~subs:[ "x", Some (var "z"); "y", Some (int 1) ] code))
-    ; top "closed" [] (quote (splice ~subs:[] (quote (int 1))))
-    ];
+    {|
+let values = .<.~(.<add x y>.).{x = 1; y = 2}>.
+let reorder = .<.~(.<add x y>.).{y = 1; x = 2}>.
+let from_scope = .<let x = 1 in .~(.<add x y>.).{x; y}>.
+let infers_sub = .<.~(.<add x y>.).{x = z; y = 1}>.
+let closed = .<.~(.<1>.).{}>.
+|};
   [%expect
     {|
     val values : <int>{..'a}
@@ -494,102 +445,77 @@ let%expect_test "splice with explicit substitutions" =
 ;;
 
 let%expect_test "splice substitution errors" =
-  let code = quote (app (var "add") [ var "x"; int 1 ]) in
   check
-    [ top "wrong_type" [] (quote (splice ~subs:[ "x", Some (bool true) ] code))
-    ];
-  check [ top "missing" [] (quote (splice ~subs:[] code)) ];
+    {|
+let wrong_type = .<.~(.<add x 1>.).{x = true}>.
+|};
   check
-    [ top
-        "extra"
-        []
-        (quote (splice ~subs:[ "x", Some (int 1); "y", Some (int 1) ] code))
-    ];
+    {|
+let missing = .<.~(.<add x 1>.).{}>.
+|};
   check
-    [ top
-        "dup"
-        []
-        (quote (splice ~subs:[ "x", Some (int 1); "x", Some (int 1) ] code))
-    ];
-  check [ top "not_code" [] (quote (splice ~subs:[] (int 1))) ];
+    {|
+let extra = .<.~(.<add x 1>.).{x = 1; y = 1}>.
+|};
+  check
+    {|
+let dup = .<.~(.<add x 1>.).{x = 1; x = 1}>.
+|};
+  check
+    {|
+let not_code = .<.~(1).{}>.
+|};
   [%expect
     {|
-    (Unification_error
-     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
-    (Unification_error
-     (Row_mismatch
-      (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-       (RVar (Unbound 30 1)))
-      REmpty (Missing_label x)))
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:2:19-45)
+    ((Unification_error
+      (Row_mismatch
+       (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
+        (RVar (Unbound 30 1)))
+       REmpty (Missing_label x)))
+     @ t.stag:2:16-34)
     val extra : <int>{..'a}
-    (Duplicate_substitution x)
-    (Unification_error
-     (Type_mismatch
-      (TCode (inner (TVar (Unbound 20 1))) (context (RVar (Unbound 21 1))))
-      (TCon int ()) Structural_mismatch))
+    ((Duplicate_substitution x) @ t.stag:2:36-37)
+    ((Unification_error
+      (Type_mismatch
+       (TCode (inner (TVar (Unbound 20 1))) (context (RVar (Unbound 21 1))))
+       (TCon int ()) Structural_mismatch))
+     @ t.stag:2:19-22)
     |}]
 ;;
 
 let%expect_test "splice with implicit substitutions" =
-  let code = quote (app (var "add") [ var "x"; int 1 ]) in
   check
-    [ top "bound" [] (quote (let_ "x" [] (int 1) (splice code)))
-    ; top "propagates" [] (quote (splice code))
-    ; top "unknown_context" [ "c" ] (quote (splice (var "c")))
-    ; top
-        "explicit_unknown"
-        [ "c" ]
-        (quote (splice ~subs:[ "x", Some (int 1) ] (var "c")))
-    ];
+    {|
+let bound = .<let x = 1 in .~(.<add x 1>.)>.
+let propagates = .<.~(.<add x 1>.)>.
+let unknown_context c = .<.~c>.
+let explicit_unknown c = .<.~c.{x = 1}>.
+|};
   check
-    [ top
-        "two_unknown"
-        [ "c1"; "c2" ]
-        (quote (app (var "add") [ splice (var "c1"); splice (var "c2") ]))
-    ; top
-        "known_and_unknown"
-        [ "c" ]
-        (quote
-           (let_
-              "x"
-              []
-              (int 1)
-              (splice
-                 (var
-                    "c"
-                    ~annot:(Ty.code Ty.int ~entries:[ "x", Ty.int ] ~tail:"r")))))
-    ; top
-        "with_free_var"
-        [ "c" ]
-        (quote (app (var "add") [ var "y"; splice (var "c") ]))
-    ; top "instantiated" [] (app (var "with_free_var") [ quote (var "z") ])
-    ];
+    {|
+let two_unknown c1 c2 = .<add .~c1 .~c2>.
+let known_and_unknown c = .<let x = 1 in .~(c : <int>{x : int; ..'r})>.
+let with_free_var c = .<add y .~c>.
+let instantiated = with_free_var .<z>.
+|};
   check
-    [ top
-        "two_unknown"
-        [ "c1"; "c2" ]
-        (quote (app (var "add") [ splice (var "c1"); splice (var "c2") ]))
-    ; top
-        "conflict"
-        []
-        (app
-           (var "two_unknown")
-           [ quote (app (var "add") [ var "y"; int 1 ])
-           ; quote (app (var "cond") [ var "y"; int 1; int 1 ])
-           ])
-    ];
+    {|
+let two_unknown c1 c2 = .<add .~c1 .~c2>.
+let conflict = two_unknown .<add y 1>. .<cond y 1 1>.
+|};
   check
-    [ top
-        "toplevel_unknown"
-        []
-        (splice
-           (let_
-              "opaque"
-              [ "u" ]
-              (app (var "opaque") [ var "u" ])
-              (match_ (int 1) [ Pat.int 2, app (var "opaque") [ int 1 ] ])))
-    ];
-  check [ top "wrong_type" [] (quote (let_ "x" [] (bool true) (splice code))) ];
+    {|
+let toplevel_unknown =
+  .~(let opaque u = opaque u in match 1 with 2 -> opaque 1)
+|};
+  check
+    {|
+let wrong_type = .<let x = true in .~(.<add x 1>.)>.
+|};
   [%expect
     {|
     val bound : <int>{..'a}
@@ -600,158 +526,123 @@ let%expect_test "splice with implicit substitutions" =
     val known_and_unknown : <int>{x : int; ..'a} -> <int>{..'b} where ..'a <= {..'b}
     val with_free_var : <int>{..'a} -> <int>{y : int; ..'b} where ..'a <= {y : int; ..'b}
     val instantiated : <int>{y : int; z : int; ..'_a}
-    (Unification_error
-     (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
-    (Splice_evaluation_failed
-     (code
-      (Let (ident opaque/15) (args (u/14)) (generalized true)
-       (body
-        (App (Var (Bound (Local opaque/15)) : "'a -> 'b")
-         (Var (Bound (Local u/14)) : 'a) : 'b))
-       (in_
-        (Match (Lit (Int 1) : int)
-         (((Lit (Int 2) : int)
-           (App (Var (Bound (Local opaque/15)) : "int -> <'_c>{}")
-            (Lit (Int 1) : int) : <'_c>{})))
-         : <'_c>{}))
-       : <'_c>{}))
-     (error ("Match failure: no case matches the value 1" @ _none_)))
-    (Unification_error
-     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    ((Unification_error
+      (Type_mismatch (TCon bool ()) (TCon int ())
+       (Base_types_not_equal bool int)))
+     @ t.stag:3:39-53)
+    ((Splice_evaluation_failed
+      (code
+       (Let (ident opaque/15) (args (u/14)) (generalized true)
+        (body
+         (App (Var (Bound (Local opaque/15)) : "'a -> 'b")
+          (Var (Bound (Local u/14)) : 'a) : 'b))
+        (in_
+         (Match (Lit (Int 1) : int)
+          (((Lit (Int 2) : int)
+            (App (Var (Bound (Local opaque/15)) : "int -> <'_c>{}")
+             (Lit (Int 1) : int) : <'_c>{})))
+          : <'_c>{}))
+        : <'_c>{}))
+      (error ("Match failure: no case matches the value 1" @ t.stag:3:32-58)))
+     @ t.stag:3:2-59)
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:2:35-50)
     |}]
 ;;
 
 let%expect_test "levels" =
   check
-    [ top "inner_in_splice" [] (quote (let_ "y" [] (int 1) (splice (var "y"))))
-    ];
+    {|
+let inner_in_splice = .<let y = 1 in .~y>.
+|};
   check
-    [ top
-        "outer_in_splice"
-        [ "c" ]
-        (quote (splice (app (var "id") [ var "c" ])))
-    ; top
-        "rebind_inner"
-        []
-        (quote (let_ "y" [] (int 1) (splice (quote (var "y")))))
-    ; top "toplevel_splice" [] (splice (quote (int 1)))
-    ];
+    {|
+let outer_in_splice c = .<.~(id c)>.
+let rebind_inner = .<let y = 1 in .~(.<y>.)>.
+let toplevel_splice = .~(.<1>.)
+|};
   check
-    [ top "toplevel_splice_arg" [ "x" ] (splice (quote (var "x")))
-    ; top
-        "not_captured"
-        []
-        (quote
-           (let_ "x" [] (int 1) (splice ~subs:[ "x", None ] (quote (var "x")))))
-    ];
-  check [ top "toplevel_splice_open" [] (splice (quote (var "x"))) ];
+    {|
+let toplevel_splice_arg x = .~(.<x>.)
+let not_captured = .<let x = 1 in .~(.<x>.).{x}>.
+|};
   check
-    [ top
-        "captured"
-        []
-        (quote (let_ "x" [] (bool true) (splice ~subs:[] (quote (var "x")))))
-    ];
-  check [ top "toplevel_splice_level" [ "x" ] (splice (var "x")) ];
+    {|
+let toplevel_splice_open = .~(.<x>.)
+|};
+  check
+    {|
+let captured = .<let x = true in .~(.<x>.).{}>.
+|};
+  check
+    {|
+let toplevel_splice_level x = .~x
+|};
   [%expect
     {|
-    (Variable_used_at_wrong_level (name y) (var_level 1) (used_at 0))
+    ((Variable_used_at_wrong_level (name y) (var_level 1) (used_at 0)) @
+     t.stag:2:39-40)
     val outer_in_splice : <'a>{..'b} -> <'a>{..'c} where ..'b <= {..'c}
     val rebind_inner : <int>{..'a}
     val toplevel_splice : int
     val toplevel_splice_arg : 'a -> 'a
     val not_captured : <int>{..'a}
-    (Not_in_scope x)
-    (Unification_error
-     (Row_mismatch
-      (RExtend x (PVar (Link Present)) (TVar (Unbound 26 1))
-       (RVar (Unbound 27 1)))
-      REmpty (Missing_label x)))
-    (Variable_used_at_wrong_level (name x) (var_level 0) (used_at -1))
+    ((Not_in_scope x) @ t.stag:2:27-36)
+    ((Unification_error
+      (Row_mismatch
+       (RExtend x (PVar (Link Present)) (TVar (Unbound 26 1))
+        (RVar (Unbound 27 1)))
+       REmpty (Missing_label x)))
+     @ t.stag:2:33-45)
+    ((Variable_used_at_wrong_level (name x) (var_level 0) (used_at -1)) @
+     t.stag:2:32-33)
     |}]
 ;;
 
 let%expect_test "staged power" =
+  (* No negative literals: [-1] is [Int.neg 1]. *)
   let power =
-    top
-      "power"
-      [ "n"; "x" ]
-      (app
-         (var "cond")
-         [ app (var "eq") [ var "n"; int 0 ]
-         ; quote (int 1)
-         ; quote
-             (app
-                (var "add")
-                [ splice (var "x")
-                ; splice
-                    (app
-                       (var "power")
-                       [ app (var "add") [ var "n"; int (-1) ]; var "x" ])
-                ])
-         ])
+    "let power n x = cond (eq n 0) .<1>. .<add .~x .~(power (add n (Int.neg \
+     1)) x)>.\n"
   in
-  check [ power; top "cube" [] (app (var "power") [ int 3; quote (int 2) ]) ];
-  check [ power; top "open" [] (app (var "power") [ int 3; quote (var "y") ]) ];
-  check
-    [ power
-    ; top
-        "open_as_closed"
-        []
-        ~annot:(Ty.code Ty.int)
-        (app (var "power") [ int 3; quote (var "y") ])
-    ];
-  check
-    [ power
-    ; top "wrong_inner" [] (app (var "power") [ int 3; quote (bool true) ])
-    ];
+  check (power ^ "let cube = power 3 .<2>.\n");
+  check (power ^ "let open = power 3 .<y>.\n");
+  check (power ^ "let open_as_closed : <int>{} = power 3 .<y>.\n");
+  check (power ^ "let wrong_inner = power 3 .<true>.\n");
   [%expect
     {|
     val power : int -> <int>{..'a} -> <int>{..'b} where ..'a <= {..'b}
     val cube : <int>{..'_a}
     val power : int -> <int>{..'a} -> <int>{..'b} where ..'a <= {..'b}
     val open : <int>{y : int; ..'_a}
-    (Unification_error
-     (Row_mismatch REmpty
-      (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
-       (RVar (Unbound 74 1)))
-      (Missing_label y)))
-    (Unification_error
-     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    ((Unification_error
+      (Row_mismatch REmpty
+       (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
+        (RVar (Unbound 76 1)))
+       (Missing_label y)))
+     @ t.stag:2:31-44)
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:2:26-34)
     |}]
 ;;
 
 let%expect_test
     "splices capture binders of the quote even once the code is known"
   =
-  let captures_x =
-    top
-      "captures_x"
-      [ "c" ]
-      (quote (let_ "x" [] (bool true) (splice (var "c"))))
-  in
-  let closed = top "closed" [] ~annot:(Ty.code Ty.int) (quote (int 1)) in
+  let captures_x = "let captures_x c = .<let x = true in .~c>.\n" in
   check
-    [ captures_x
-    ; closed
-    ; top
-        "uses_x"
-        []
-        (app
-           (var "captures_x")
-           [ quote (app (var "cond") [ var "x"; int 1; int 2 ]) ])
-    ; top
-        "uses_y"
-        []
-        (app (var "captures_x") [ quote (app (var "add") [ var "y"; int 1 ]) ])
-    ; top "uses_closed" [] (app (var "captures_x") [ var "closed" ])
-    ];
-  check
-    [ captures_x
-    ; top
-        "wrong_type"
-        []
-        (app (var "captures_x") [ quote (app (var "add") [ var "x"; int 1 ]) ])
-    ];
+    (captures_x
+     ^ {|let closed : <int>{} = .<1>.
+let uses_x = captures_x .<cond x 1 2>.
+let uses_y = captures_x .<add y 1>.
+let uses_closed = captures_x closed
+|}
+    );
+  check (captures_x ^ "let wrong_type = captures_x .<add x 1>.\n");
   [%expect
     {|
     val captures_x : <'a>{x?'b : bool; ..'c} -> <'a>{..'d} where ..'c <= {..'d}
@@ -759,18 +650,20 @@ let%expect_test
     val uses_x : <int>{..'_a}
     val uses_y : <int>{y : int; ..'_a}
     val uses_closed : <int>{..'_a}
-    (Unification_error
-     (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
+    ((Unification_error
+      (Type_mismatch (TCon bool ()) (TCon int ())
+       (Base_types_not_equal bool int)))
+     @ t.stag:2:28-39)
     |}]
 ;;
 
 let%expect_test "splices capture the same whether the context is known or not" =
-  let code = quote (app (var "add") [ var "x"; var "y" ]) in
   check
-    [ top "known" [] (quote (let_ "x" [] (int 1) (splice code)))
-    ; top "unknown" [ "c" ] (quote (let_ "x" [] (int 1) (splice (var "c"))))
-    ; top "unknown_applied" [] (app (var "unknown") [ code ])
-    ];
+    {|
+let known = .<let x = 1 in .~(.<add x y>.)>.
+let unknown c = .<let x = 1 in .~c>.
+let unknown_applied = unknown .<add x y>.
+|};
   [%expect
     {|
     val known : <int>{y : int; ..'a}
@@ -781,33 +674,17 @@ let%expect_test "splices capture the same whether the context is known or not" =
 
 let%expect_test "spliced code that may use a name propagates it as such" =
   check
-    [ top
-        "twice"
-        [ "c" ]
-        (seq
-           (quote (let_ "x" [] (bool true) (splice (var "c"))))
-           (quote (splice (var "c"))))
-    ; top
-        "propagates"
-        []
-        (app
-           (var "twice")
-           [ quote (app (var "cond") [ var "x"; int 1; int 2 ]) ])
-    ; top "not_used" [] (app (var "twice") [ quote (int 1) ])
-    ; (* Instantiation keeps the order of bounds. *)
-      top "instance" [ "c" ] (app (var "twice") [ var "c" ])
-    ];
+    {|
+let twice c = .<let x = true in .~c>.; .<.~c>.
+let propagates = twice .<cond x 1 2>.
+let not_used = twice .<1>.
+(* Instantiation keeps the order of bounds. *)
+let instance c = twice c
+|};
   check
-    [ top
-        "direct_use"
-        [ "c" ]
-        (quote
-           (let_
-              "y"
-              []
-              (splice (quote (let_ "x" [] (bool true) (splice (var "c")))))
-              (var "x")))
-    ];
+    {|
+let direct_use c = .<let y = .~(.<let x = true in .~c>.) in x>.
+|};
   [%expect
     {|
     val twice : <'a>{x?'b : bool; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => bool = 'e, ..'c <= {x?'d : 'e; ..'f}
@@ -820,13 +697,11 @@ let%expect_test "spliced code that may use a name propagates it as such" =
 
 let%expect_test "only binders of the enclosing quote capture" =
   check
-    [ top
-        "outer_persistent"
-        [ "c" ]
-        (let_ "g" [ "v" ] (var "v") (quote (splice (var "c"))))
-    ; top "add_free" [ "add" ] (quote (var "add"))
-    ; top "not_toplevel" [] (quote (splice (app (var "add_free") [ int 1 ])))
-    ];
+    {|
+let outer_persistent c = let g v = v in .<.~c>.
+let add_free add = .<add>.
+let not_toplevel = .<.~(add_free 1)>.
+|};
   [%expect
     {|
     val outer_persistent : <'a>{..'b} -> <'a>{..'c} where ..'b <= {..'c}
@@ -836,106 +711,62 @@ let%expect_test "only binders of the enclosing quote capture" =
 ;;
 
 let%expect_test "names bound at a later level are absent from spliced code" =
-  let inner_splice =
-    top
-      "inner_splice"
-      [ "c" ]
-      (quote (quote (let_ "z" [] (int 1) (splice (splice (var "c"))))))
-  in
+  let inner_splice = "let inner_splice c = .< .<let z = 1 in .~(.~c)>. >.\n" in
+  check (inner_splice ^ "let uses_z = inner_splice .< .<z>. >.\n");
+  check (inner_splice ^ "let uses_z_too_early = inner_splice .<z; .<1>.>.\n");
   check
-    [ inner_splice
-    ; top "uses_z" [] (app (var "inner_splice") [ quote (quote (var "z")) ])
-    ];
-  check
-    [ inner_splice
-    ; top
-        "uses_z_too_early"
-        []
-        (app (var "inner_splice") [ quote (seq (var "z") (quote (int 1))) ])
-    ];
-  let known_z =
-    Ty.code (Ty.code Ty.int ~tail:"r1") ~entries:[ "z", Ty.int ] ~tail:"r2"
-  in
-  check
-    [ top
-        "known_z"
-        [ "c" ]
-        (quote
-           (quote
-              (let_ "z" [] (int 1) (splice (splice (var "c" ~annot:known_z))))))
-    ];
+    {|
+let known_z c =
+  .< .<let z = 1 in .~(.~(c : <<int>{..'r1}>{z : int; ..'r2}))>. >.
+|};
   [%expect
     {|
     val inner_splice : <<'a>{z?'b : int; ..'c}>{-z; ..'d} -> <<'a>{..'e}>{..'f} where ..'c <= {..'e}, ..'d <= {..'f}
     val uses_z : <<int>{..'_a}>{..'_b}
-    (Unification_error
-     (Row_mismatch (RExtend z Absent (TVar (Unbound 43 1)) (RVar (Unbound 44 1)))
-      (RExtend z (PVar (Link Present)) (TVar (Unbound 52 1))
-       (RVar (Unbound 53 1)))
-      (Presence_mismatch z)))
-    (Variable_used_at_wrong_level (name z) (var_level 2) (used_at 1))
+    ((Unification_error
+      (Row_mismatch
+       (RExtend z Absent (TVar (Unbound 43 1)) (RVar (Unbound 44 1)))
+       (RExtend z (PVar (Link Present)) (TVar (Unbound 52 1))
+        (RVar (Unbound 53 1)))
+       (Presence_mismatch z)))
+     @ t.stag:2:36-48)
+    ((Variable_used_at_wrong_level (name z) (var_level 2) (used_at 1)) @
+     t.stag:3:22-62)
     |}]
 ;;
 
 let%expect_test "free variables of a quote are not duplicated by spliced code" =
-  let f =
-    top "f" [ "c" ] (quote (app (var "add") [ var "x"; splice (var "c") ]))
-  in
+  let f = "let f c = .<add x .~c>.\n" in
+  check (f ^ "let same = f .<add x 1>.\nlet other = f .<add y 1>.\n");
+  check (f ^ "let conflict = f .<cond x 1 1>.\n");
   check
-    [ f
-    ; top
-        "same"
-        []
-        (app (var "f") [ quote (app (var "add") [ var "x"; int 1 ]) ])
-    ; top
-        "other"
-        []
-        (app (var "f") [ quote (app (var "add") [ var "y"; int 1 ]) ])
-    ];
-  check
-    [ f
-    ; top
-        "conflict"
-        []
-        (app (var "f") [ quote (app (var "cond") [ var "x"; int 1; int 1 ]) ])
-    ];
-  check
-    [ top
-        "later_use"
-        [ "c" ]
-        (quote (app (var "add") [ splice (var "c"); var "x" ]))
-    ; top
-        "conflict"
-        []
-        (app
-           (var "later_use")
-           [ quote (app (var "cond") [ var "x"; int 1; int 1 ]) ])
-    ];
+    {|
+let later_use c = .<add .~c x>.
+let conflict = later_use .<cond x 1 1>.
+|};
   [%expect
     {|
     val f : <int>{..'a} -> <int>{x : int; ..'b} where ..'a <= {x : int; ..'b}
     val same : <int>{x : int; ..'_a}
     val other : <int>{x : int; y : int; ..'_a}
-    (Unification_error
-     (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
-    (Unification_error
-     (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
+    ((Unification_error
+      (Type_mismatch (TCon bool ()) (TCon int ())
+       (Base_types_not_equal bool int)))
+     @ t.stag:2:17-31)
+    ((Unification_error
+      (Type_mismatch (TCon bool ()) (TCon int ())
+       (Base_types_not_equal bool int)))
+     @ t.stag:3:25-39)
     |}]
 ;;
 
 let%expect_test "spliced code does not take on the quote's free variables" =
-  let closed = top "closed" [] ~annot:(Ty.code Ty.int) (quote (int 1)) in
   check
-    [ closed
-    ; top
-        "before"
-        []
-        (quote (app (var "add") [ var "x"; splice (var "closed") ]))
-    ; top
-        "after"
-        []
-        (quote (app (var "add") [ splice (var "closed"); var "x" ]))
-    ];
+    {|
+let closed : <int>{} = .<1>.
+let before = .<add x .~closed>.
+let after = .<add .~closed x>.
+|};
   [%expect
     {|
     val closed : <int>{}
@@ -945,52 +776,16 @@ let%expect_test "spliced code does not take on the quote's free variables" =
 ;;
 
 let%expect_test "mutually recursive staged functions" =
-  let ping =
-    top
-      "ping"
-      [ "n"; "c" ]
-      (app
-         (var "cond")
-         [ app (var "eq") [ var "n"; int 0 ]
-         ; var "c"
-         ; quote
-             (let_
-                "x"
-                []
-                (int 1)
-                (splice (app (var "pong") [ var "n"; var "c" ])))
-         ])
+  (* No negative literals: [-1] is [Int.neg 1]. *)
+  let ping_pong =
+    {|
+let ping n c = cond (eq n 0) c .<let x = 1 in .~(pong n c)>.
+let pong n c = .<add .~(ping (add n (Int.neg 1)) c) y>.
+|}
   in
-  let pong =
-    top
-      "pong"
-      [ "n"; "c" ]
-      (quote
-         (app
-            (var "add")
-            [ splice
-                (app
-                   (var "ping")
-                   [ app (var "add") [ var "n"; int (-1) ]; var "c" ])
-            ; var "y"
-            ]))
-  in
-  check [ ping; pong ];
-  check
-    [ ping
-    ; pong
-    ; top "uses_x" [] (app (var "ping") [ int 2; quote (var "x") ])
-    ; top "uses_z" [] (app (var "ping") [ int 2; quote (var "z") ])
-    ];
-  check
-    [ ping
-    ; pong
-    ; top
-        "uses_z_as_closed"
-        []
-        ~annot:(Ty.code Ty.int)
-        (app (var "ping") [ int 2; quote (var "z") ])
-    ];
+  check ping_pong;
+  check (ping_pong ^ "let uses_x = ping 2 .<x>.\nlet uses_z = ping 2 .<z>.\n");
+  check (ping_pong ^ "let uses_z_as_closed : <int>{} = ping 2 .<z>.\n");
   [%expect
     {|
     val ping : int -> <int>{y : int; ..'a} -> <int>{y : int; ..'a} where ..'a <= {x?'b : int; y : int; ..'c}, ..'c <= {y : int; ..'a}
@@ -999,39 +794,44 @@ let%expect_test "mutually recursive staged functions" =
     val pong : int -> <int>{y : int; ..'a} -> <int>{x?'b : int; y : int; ..'c} where ..'a <= {x?'b : int; y : int; ..'c}, ..'c <= {y : int; ..'a}
     val uses_x : <int>{x : int; y : int; ..'_a} where ..'_a <= {x : int; y : int; ..'_b}, ..'_b <= {x : int; y : int; ..'_a}
     val uses_z : <int>{y : int; z : int; ..'_a} where ..'_a <= {x?'_b : int; y : int; z : int; ..'_c}, ..'_c <= {y : int; z : int; ..'_a}
-    (Unification_error
-     (Row_mismatch REmpty
-      (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
-       (RVar
-        (Link
-         (RExtend z (PVar (Link Present)) (TVar (Link (TCon int ())))
-          (RVar (Unbound 93 1))))))
-      (Missing_label y)))
+    ((Unification_error
+      (Row_mismatch REmpty
+       (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
+        (RVar
+         (Link
+          (RExtend z (PVar (Link Present)) (TVar (Link (TCon int ())))
+           (RVar (Unbound 95 1))))))
+       (Missing_label y)))
+     @ t.stag:4:33-45)
     |}]
 ;;
 
 let%expect_test "toplevel splices drop names spliced code only may use" =
-  let run ?(binder = "x") code =
-    splice
-      (let_
-         "g"
-         [ "c" ]
-         (seq (quote (let_ binder [] (bool true) (splice (var "c")))) (var "c"))
-         (app (var "g") [ code ]))
-  in
-  check [ top "unused" [] (run (quote (int 1))) ];
   check
-    [ top "used" [] (run (quote (app (var "cond") [ var "x"; int 1; int 2 ]))) ];
+    {|
+let unused = .~(let g c = .<let x = true in .~c>.; c in g .<1>.)
+|};
+  check
+    {|
+let used = .~(let g c = .<let x = true in .~c>.; c in g .<cond x 1 2>.)
+|};
   (* The generated code is at level 0, where the toplevel [x] is in scope. *)
   check
-    [ top "x" [] (bool true); top "used_toplevel" [] (run (quote (var "x"))) ];
+    {|
+let x = true
+let used_toplevel = .~(let g c = .<let x = true in .~c>.; c in g .<x>.)
+|};
   (* A name that may be used is not provided by a toplevel, so needn't have
      its type. *)
-  check [ top "unused_of_another_type" [] (run ~binder:"id" (quote (int 1))) ];
+  check
+    {|
+let unused_of_another_type =
+  .~(let g c = .<let id = true in .~c>.; c in g .<1>.)
+|};
   [%expect
     {|
     val unused : int
-    (Not_in_scope x)
+    ((Not_in_scope x) @ t.stag:2:11-71)
     val x : bool
     val used_toplevel : bool
     val unused_of_another_type : int
@@ -1041,41 +841,22 @@ let%expect_test "toplevel splices drop names spliced code only may use" =
 let%expect_test "using a name before or after splicing code that may use it" =
   (* Splicing [c] into a quote that uses [x] only bounds [c]'s [x] by a used
      one, which decides nothing, whichever comes first. *)
-  let binds_x c = quote (let_ "x" [] (int 1) (splice c)) in
-  let closed = top "closed" [] ~annot:(Ty.code Ty.int) (quote (int 1)) in
+  let closed = "let closed : <int>{} = .<1>.\n" in
   let uses_x_then_splices =
-    top
-      "uses_x_then_splices"
-      [ "c" ]
-      (seq
-         (binds_x (var "c"))
-         (seq (quote (app (var "add") [ var "x"; splice (var "c") ])) (var "c")))
+    "let uses_x_then_splices c = .<let x = 1 in .~c>.; .<add x .~c>.; c\n"
   in
   let splices_then_uses_x =
-    top
-      "splices_then_uses_x"
-      [ "c" ]
-      (seq
-         (binds_x (var "c"))
-         (seq (quote (app (var "add") [ splice (var "c"); var "x" ])) (var "c")))
+    "let splices_then_uses_x c = .<let x = 1 in .~c>.; .<add .~c x>.; c\n"
   in
   check
-    [ closed
-    ; uses_x_then_splices
-    ; splices_then_uses_x
-    ; top
-        "uses_x_then_splices_closed"
-        []
-        (app (var "uses_x_then_splices") [ var "closed" ])
-    ];
+    (closed
+     ^ uses_x_then_splices
+     ^ splices_then_uses_x
+     ^ "let uses_x_then_splices_closed = uses_x_then_splices closed\n");
   check
-    [ closed
-    ; splices_then_uses_x
-    ; top
-        "splices_then_uses_x_closed"
-        []
-        (app (var "splices_then_uses_x") [ var "closed" ])
-    ];
+    (closed
+     ^ splices_then_uses_x
+     ^ "let splices_then_uses_x_closed = splices_then_uses_x closed\n");
   [%expect
     {|
     val closed : <int>{}
@@ -1089,35 +870,24 @@ let%expect_test "using a name before or after splicing code that may use it" =
 ;;
 
 let%expect_test "presence constraints are solved in any order" =
-  let closeit =
-    top_let ("closeit", [ typed "c" (Ty.code Ty.int) ], None, unit)
+  let program body =
+    {|
+let closeit (c : <int>{}) = ()
+let g d = .<let x = 1 in .~d>.; d
+let f c = |}
+    ^ body
+    ^ "\n"
   in
-  let g =
-    top
-      "g"
-      [ "d" ]
-      (seq (quote (let_ "x" [] (int 1) (splice (var "d")))) (var "d"))
-  in
-  let use_x = quote (app (var "add") [ splice (var "c2"); var "x" ]) in
-  let close = app (var "closeit") [ var "c" ] in
-  let after_close = let_ "c2" [] (app (var "g") [ var "c" ]) use_x in
-  let f body = top "f" [ "c" ] body in
-  (* [g] bounds [c]'s [x] by its quote's, and [use_x] makes the quote's [x]
-     used, while [closeit] makes [c]'s absent: all orders agree. *)
+  (* [g] bounds [c]'s [x] by its quote's, and [.<add .~c2 x>.] makes the
+     quote's [x] used, while [closeit] makes [c]'s absent: all orders agree. *)
   List.iter
-    [ "close first", seq close after_close
-    ; ( "close last"
-      , let_
-          "c2"
-          []
-          (app (var "g") [ var "c" ])
-          (let_ "r" [] use_x (seq close (var "r"))) )
-    ; ( "close between"
-      , let_ "c2" [] (app (var "g") [ var "c" ]) (seq close use_x) )
+    [ "close first", "closeit c; let c2 = g c in .<add .~c2 x>."
+    ; "close last", "let c2 = g c in let r = .<add .~c2 x>. in closeit c; r"
+    ; "close between", "let c2 = g c in closeit c; .<add .~c2 x>."
     ]
     ~f:(fun (name, body) ->
       print_endline name;
-      check [ closeit; g; f body ]);
+      check (program body));
   [%expect
     {|
     close first
@@ -1135,59 +905,30 @@ let%expect_test "presence constraints are solved in any order" =
     |}]
 ;;
 
-let twice =
-  top
-    "twice"
-    [ "c" ]
-    (seq
-       (quote (let_ "x" [] (bool true) (splice (var "c"))))
-       (quote (splice (var "c"))))
-;;
-
-let closeit = top_let ("closeit", [ typed "c" (Ty.code Ty.int) ], None, unit)
-let uses_x = quote (app (var "cond") [ var "x"; int 1; int 2 ])
-
-let needx =
-  top_let
-    ( "needx"
-    , [ typed "e" (Ty.code ~entries:[ "x", Ty.int ] Ty.int) ]
-    , None
-    , unit )
-;;
+let twice = "let twice c = .<let x = true in .~c>.; .<.~c>.\n"
+let closeit = "let closeit (c : <int>{}) = ()\n"
+let uses_x = ".<cond x 1 2>."
+let needx = "let needx (e : <int>{x : int}) = ()\n"
 
 (* [h]'s argument may use [x] only if [e] does. *)
-let local_bounded_by_outer ~e ~in_ =
-  let_
-    "h"
-    [ "d" ]
-    (seq
-       (quote (let_ "x" [] (int 1) (splice (var "d"))))
-       (app (var "cond") [ bool true; quote (splice (var "d")); var e ]))
-    in_
+let local_bounded_by_outer ~in_ =
+  "let h d = .<let x = 1 in .~d>.; cond true .<.~d>. e in " ^ in_
 ;;
 
 let%expect_test
     "generalization does not depend on when outer presences are known"
   =
-  let uses =
-    seq
-      (app (var "h") [ quote (app (var "add") [ var "x"; int 1 ]) ])
-      (seq (app (var "h") [ var "k" ]) (app (var "closeit") [ var "k" ]))
-  in
-  let needx_e = app (var "needx") [ var "e" ] in
+  let uses = "h .<add x 1>.; h k; closeit k" in
   check
-    [ closeit
-    ; needx
-    ; top
-        "known_before"
-        [ "e"; "k" ]
-        (seq needx_e (local_bounded_by_outer ~e:"e" ~in_:uses))
-    ; top
-        "known_after"
-        [ "e"; "k" ]
-        (local_bounded_by_outer ~e:"e" ~in_:(seq uses needx_e))
-    ; top "never_known" [ "e"; "k" ] (local_bounded_by_outer ~e:"e" ~in_:uses)
-    ];
+    (closeit
+     ^ needx
+     ^ sprintf
+         "let known_before e k = needx e; %s\n"
+         (local_bounded_by_outer ~in_:uses)
+     ^ sprintf
+         "let known_after e k = %s\n"
+         (local_bounded_by_outer ~in_:(sprintf "(%s); needx e" uses))
+     ^ sprintf "let never_known e k = %s\n" (local_bounded_by_outer ~in_:uses));
   [%expect
     {|
     val closeit : <int>{} -> unit
@@ -1200,51 +941,25 @@ let%expect_test
 
 let%expect_test "instances of a scheme bounded by an outer presence" =
   (* Each use of [h] constrains [e] and [h]'s scheme keeps the bound. *)
-  let program in_ = top "f" [ "e" ] (local_bounded_by_outer ~e:"e" ~in_) in
-  check
-    [ closeit
-    ; program
-        (seq
-           (app (var "h") [ quote (int 1) ])
-           (app (var "h") [ quote (int 2) ]))
-    ];
-  check
-    [ closeit
-    ; program
-        (seq
-           (app (var "h") [ quote (int 1) ])
-           (app (var "h") [ quote (app (var "add") [ var "x"; int 1 ]) ]))
-    ];
-  check
-    [ closeit
-    ; program
-        (seq
-           (app (var "closeit") [ var "e" ])
-           (app (var "h") [ quote (app (var "add") [ var "x"; int 1 ]) ]))
-    ];
-  check
-    [ closeit
-    ; needx
-    ; program
-        (seq
-           (app (var "needx") [ var "e" ])
-           (seq
-              (app (var "h") [ quote (int 1) ])
-              (app (var "h") [ quote (app (var "add") [ var "x"; int 1 ]) ])))
-    ];
+  let program in_ = sprintf "let f e = %s\n" (local_bounded_by_outer ~in_) in
+  check (closeit ^ program "h .<1>.; h .<2>.");
+  check (closeit ^ program "h .<1>.; h .<add x 1>.");
+  check (closeit ^ program "closeit e; h .<add x 1>.");
+  check (closeit ^ needx ^ program "needx e; h .<1>.; h .<add x 1>.");
   [%expect
     {|
     val closeit : <int>{} -> unit
     val f : <int>{x?'a : 'b; ..'c} -> <int>{x?'a : 'b; ..'c}
     val closeit : <int>{} -> unit
     val f : <int>{x : int; ..'a} -> <int>{x : int; ..'a}
-    (Unification_error
-     (Row_mismatch
-      (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
-       (RVar (Link (RVar (Unbound 58 1)))))
-      (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-       (RVar (Unbound 67 1)))
-      (Presence_mismatch x)))
+    ((Unification_error
+      (Row_mismatch
+       (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
+        (RVar (Link (RVar (Unbound 58 1)))))
+       (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
+        (RVar (Unbound 67 1)))
+       (Presence_mismatch x)))
+     @ t.stag:2:78-89)
     val closeit : <int>{} -> unit
     val needx : <int>{x : int} -> unit
     val f : <int>{x : int} -> <int>{x : int}
@@ -1254,7 +969,7 @@ let%expect_test "instances of a scheme bounded by an outer presence" =
 let%expect_test "bounds and presences no instance can use are dropped" =
   (* [h]'s instance in [used] bounds [e]'s context by a row used nowhere else,
      and in [spliced] gives presences of [x] the spliced code doesn't use. *)
-  check_source
+  check
     {|let closeit (c : <int>{}) = ()
 let unused e = let h c = .< let _ = .~e in .~c >. in e
 let used e = let h c = .< let _ = .~e in .~c >. in let _ = h .< 1 >. in e
@@ -1287,10 +1002,10 @@ let f e = let h c = .< let _ = .~e in .~c >. in h .< 1 >.
 let partial e = let h c = .< let _ = .~e in .~c >. in let _ = h .< 1 >. in h
 |}
   in
-  check_source f;
-  check_source (f ^ "let ok = .< let y = 2 in .~(f .< y >.) >.");
-  check_source (f ^ "let bad = closeit (f .< y >.)");
-  check_source (f ^ "let bad = closeit (partial .< y >. .< 3 >.)");
+  check f;
+  check (f ^ "let ok = .< let y = 2 in .~(f .< y >.) >.");
+  check (f ^ "let bad = closeit (f .< y >.)");
+  check (f ^ "let bad = closeit (partial .< y >. .< 3 >.)");
   [%expect
     {|
     val closeit : <int>{} -> unit
@@ -1319,19 +1034,14 @@ let%expect_test "presence bounds of polymorphic functions" =
   (* [twice]'s argument may use [x] only if its result does: each use decides
      differently. *)
   check
-    [ twice
-    ; closeit
-    ; top "arg_uses_x" [] (app (var "twice") [ uses_x ])
-    ; top
-        "result_closed"
-        [ "c" ]
-        (seq (app (var "closeit") [ app (var "twice") [ var "c" ] ]) (var "c"))
-    ; top_let
-        ( "arg_closed"
-        , [ typed "c" (Ty.code Ty.int) ]
-        , None
-        , app (var "twice") [ var "c" ] )
-    ];
+    (twice
+     ^ closeit
+     ^ sprintf
+         {|let arg_uses_x = twice %s
+let result_closed c = closeit (twice c); c
+let arg_closed (c : <int>{}) = twice c
+|}
+         uses_x);
   [%expect
     {|
     val twice : <'a>{x?'b : bool; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => bool = 'e, ..'c <= {x?'d : 'e; ..'f}
@@ -1343,46 +1053,39 @@ let%expect_test "presence bounds of polymorphic functions" =
 ;;
 
 let%expect_test "conflicting presence constraints" =
+  check (twice ^ closeit ^ sprintf "let conflict = closeit (twice %s)\n" uses_x);
   check
-    [ twice
-    ; closeit
-    ; top "conflict" [] (app (var "closeit") [ app (var "twice") [ uses_x ] ])
-    ];
-  check
-    [ twice
-    ; closeit
-    ; top
-        "conflict_later"
-        [ "c" ]
-        (let_
-           "r"
-           []
-           (app (var "twice") [ var "c" ])
-           (seq (app (var "closeit") [ var "r" ]) (quote (splice (var "c")))))
-    ; top "use" [] (app (var "conflict_later") [ uses_x ])
-    ];
+    (twice
+     ^ closeit
+     ^ sprintf
+         {|let conflict_later c = let r = twice c in closeit r; .<.~c>.
+let use = conflict_later %s
+|}
+         uses_x);
   [%expect
     {|
-    (Unification_error
-     (Row_mismatch REmpty
-      (RExtend x (PVar (Link Present)) (TVar (Link (TCon bool ())))
-       (RVar (Unbound 55 1)))
-      (Missing_label x)))
-    (Unification_error
-     (Row_mismatch
-      (RExtend x (PVar (Link Absent)) (TVar (Link (TCon bool ())))
-       (RVar (Link (RVar (Link (RVar (Unbound 73 1)))))))
-      (RExtend x (PVar (Link Present)) (TVar (Link (TCon bool ())))
-       (RVar (Unbound 91 1)))
-      (Presence_mismatch x)))
+    ((Unification_error
+      (Row_mismatch REmpty
+       (RExtend x (PVar (Link Present)) (TVar (Link (TCon bool ())))
+        (RVar (Unbound 55 1)))
+       (Missing_label x)))
+     @ t.stag:3:23-45)
+    ((Unification_error
+      (Row_mismatch
+       (RExtend x (PVar (Link Absent)) (TVar (Link (TCon bool ())))
+        (RVar (Link (RVar (Link (RVar (Unbound 73 1)))))))
+       (RExtend x (PVar (Link Present)) (TVar (Link (TCon bool ())))
+        (RVar (Unbound 91 1)))
+       (Presence_mismatch x)))
+     @ t.stag:4:25-39)
     |}]
 ;;
 
 let%expect_test "references to toplevels in quotes don't join their components" =
-  let a = top "a" [] (quote (var "b")) in
-  let b = top "b" [] (tuple [ var "a"; int 1 ]) in
-  check [ a; b ];
-  check [ b; a ];
+  let a = "let a = .<b>.\n" in
+  let b = "let b = (a, 1)\n" in
+  check (a ^ b);
+  check (b ^ a);
   [%expect
     {|
     val a : <'a>{b : 'a; ..'b}
@@ -1392,56 +1095,26 @@ let%expect_test "references to toplevels in quotes don't join their components" 
     |}]
 ;;
 
-let tw =
-  top
-    "tw"
-    [ "c" ]
-    (seq
-       (quote (let_ "x" [] (int 1) (splice (var "c"))))
-       (quote (splice (var "c"))))
-;;
-
-let needy =
-  top_let
-    ( "needy"
-    , [ typed "e" (Ty.code ~entries:[ "y", Ty.int ] ~tail:"r" Ty.int) ]
-    , None
-    , unit )
-;;
+let tw = "let tw c = .<let x = 1 in .~c>.; .<.~c>.\n"
+let needy = "let needy (e : <int>{y : int; ..'r}) = ()\n"
 
 (* [h]'s argument is bounded by [e]'s row through [tw]'s bound. *)
-let local_bounded_by_outer_row ~in_ =
-  let_
-    "h"
-    [ "d" ]
-    (app (var "cond") [ bool true; app (var "tw") [ var "e" ]; var "d" ])
-    in_
-;;
+let local_bounded_by_outer_row ~in_ = "let h d = cond true (tw e) d in " ^ in_
 
 let%expect_test "row bounds are solved in any order" =
-  let uses_x_y = quote (app (var "add") [ var "x"; var "y" ]) in
-  let h arg = app (var "h") [ arg ] in
-  let close name = app (var "closeit") [ var name ] in
-  let program body = [ closeit; needx; tw; top "f" [ "e"; "k" ] body ] in
+  let program body = closeit ^ needx ^ tw ^ sprintf "let f e k = %s\n" body in
   List.iter
     [ ( "closed before"
-      , seq
-          (close "e")
-          (local_bounded_by_outer_row
-             ~in_:(seq (h uses_x_y) (seq (h (var "k")) (close "k")))) )
+      , "closeit e; "
+        ^ local_bounded_by_outer_row ~in_:"h .<add x y>.; h k; closeit k" )
     ; ( "closed between"
       , local_bounded_by_outer_row
-          ~in_:
-            (seq (h uses_x_y) (seq (close "e") (seq (h (var "k")) (close "k"))))
-      )
+          ~in_:"h .<add x y>.; closeit e; h k; closeit k" )
     ; ( "closed after"
       , local_bounded_by_outer_row
-          ~in_:
-            (seq (h uses_x_y) (seq (h (var "k")) (seq (close "k") (close "e"))))
-      )
+          ~in_:"h .<add x y>.; h k; closeit k; closeit e" )
     ; ( "never closed"
-      , local_bounded_by_outer_row
-          ~in_:(seq (h uses_x_y) (seq (h (var "k")) (close "k"))) )
+      , local_bounded_by_outer_row ~in_:"h .<add x y>.; h k; closeit k" )
     ]
     ~f:(fun (name, body) ->
       print_endline name;
@@ -1474,25 +1147,17 @@ let%expect_test "row bounds are solved in any order" =
 let%expect_test "instances of a scheme bounded by an outer row" =
   (* Each use of [h] bounds [e]'s row by its argument's, so what [e] uses
      every argument must allow, whether [e] uses it before or after. *)
-  let h arg = app (var "h") [ arg ] in
-  let uses_y = app (var "needy") [ var "e" ] in
-  let uses = seq (h (quote (int 1))) (h (var "k")) in
-  let program body = [ closeit; needy; tw; top "f" [ "e"; "k" ] body ] in
+  let uses = "(h .<1>.; h k)" in
+  let program body = closeit ^ needy ^ tw ^ sprintf "let f e k = %s\n" body in
   List.iter
     [ "unused", local_bounded_by_outer_row ~in_:uses
-    ; ( "unused, k closed"
-      , local_bounded_by_outer_row
-          ~in_:(seq uses (app (var "closeit") [ var "k" ])) )
-    ; "used before", seq uses_y (local_bounded_by_outer_row ~in_:uses)
-    ; "used after", local_bounded_by_outer_row ~in_:(seq uses uses_y)
+    ; "unused, k closed", local_bounded_by_outer_row ~in_:(uses ^ "; closeit k")
+    ; "used before", "needy e; " ^ local_bounded_by_outer_row ~in_:uses
+    ; "used after", local_bounded_by_outer_row ~in_:(uses ^ "; needy e")
     ; ( "used before, k closed"
-      , seq
-          uses_y
-          (local_bounded_by_outer_row
-             ~in_:(seq uses (app (var "closeit") [ var "k" ]))) )
+      , "needy e; " ^ local_bounded_by_outer_row ~in_:(uses ^ "; closeit k") )
     ; ( "used after, k closed"
-      , local_bounded_by_outer_row
-          ~in_:(seq uses (seq (app (var "closeit") [ var "k" ]) uses_y)) )
+      , local_bounded_by_outer_row ~in_:(uses ^ "; closeit k; needy e") )
     ]
     ~f:(fun (name, body) ->
       print_endline name;
@@ -1520,74 +1185,73 @@ let%expect_test "instances of a scheme bounded by an outer row" =
     val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
     val f : <int>{x?'a : int; y : int; ..'b} -> <int>{x?'c : 'd; y : int; ..'e} -> unit where 'a <= 'c, 'a => int = 'd, ..'b <= {x?'c : 'd; y : int; ..'e}
     used before, k closed
-    (Unification_error
-     (Row_mismatch REmpty
-      (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
-       (RVar (Unbound 115 1)))
-      (Missing_label y)))
+    ((Unification_error
+      (Row_mismatch REmpty
+       (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
+        (RVar (Unbound 115 1)))
+       (Missing_label y)))
+     @ t.stag:4:77-78)
     used after, k closed
-    (Unification_error
-     (Row_mismatch (RExtend y Present (TCon int ()) (RVar (Unbound 107 1)))
-      (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
-       (RVar
-        (Link
-         (RVar
-          (Link
-           (RExtend y (PVar (Link Absent)) (TCon int ()) (RVar (Unbound 109 1))))))))
-      (Presence_mismatch y)))
+    ((Unification_error
+      (Row_mismatch (RExtend y Present (TCon int ()) (RVar (Unbound 107 1)))
+       (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
+        (RVar
+         (Link
+          (RVar
+           (Link
+            (RExtend y (PVar (Link Absent)) (TCon int ()) (RVar (Unbound 109 1))))))))
+       (Presence_mismatch y)))
+     @ t.stag:4:77-78)
     |}]
 ;;
 
 let%expect_test "weak toplevels in a recursive group or a module" =
-  let weak = app (var "id") [ var "id" ] in
-  let at_two_types f =
-    top "use" [] (tuple [ app f [ int 1 ]; app f [ bool true ] ])
-  in
-  let scc =
-    [ top "weak" [] (seq (var "other") weak)
-    ; top "other" [ "u" ] (app (var "weak") [ var "u" ])
-    ]
-  in
+  let at_two_types f = sprintf "let use = (%s 1, %s true)\n" f f in
+  let scc = "let weak = other; id id\nlet other u = weak u\n" in
   check scc;
-  check (scc @ [ at_two_types (var "other") ]);
-  check (scc @ [ at_two_types (var "weak") ]);
-  check [ module_ "M" [ top "weak" [] weak ]; at_two_types (var "M.weak") ];
-  let annotated =
-    top "weak" [] ~annot:(Ty.arrow (Ty.var "a") (Ty.var "a")) weak
-  in
-  check [ annotated ];
-  check [ annotated; at_two_types (var "weak") ];
+  check (scc ^ at_two_types "other");
+  check (scc ^ at_two_types "weak");
+  check ("module M = struct let weak = id id end\n" ^ at_two_types "M.weak");
+  let annotated = "let weak : 'a -> 'a = id id\n" in
+  check annotated;
+  check (annotated ^ at_two_types "weak");
   [%expect
     {|
     val weak : '_a -> '_a
     val other : '_a -> '_a
-    (Unification_error
-     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
-    (Unification_error
-     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
-    (Unification_error
-     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:3:26-30)
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:3:24-28)
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:2:28-32)
     val weak : '_a -> '_a
-    (Unification_error
-     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:2:24-28)
     |}]
 ;;
 
 let%expect_test "an entry code may use only gets a type if it is present" =
   (* [tw c] and the quote give [c]'s [x] different types, which only
      conflict if [c] has [x]: closing [c] makes it absent, whenever it is. *)
-  let binds_bool = quote (let_ "x" [] (bool true) (splice (var "c"))) in
-  let close = app (var "closeit") [ var "c" ] in
-  let tw_c = app (var "tw") [ var "c" ] in
+  let binds_bool = ".<let x = true in .~c>." in
   let orders =
-    [ "closed_first", seq close (seq tw_c binds_bool)
-    ; "closed_between", seq tw_c (seq close binds_bool)
-    ; "closed_last", seq tw_c (seq binds_bool close)
-    ; "never_closed", seq tw_c binds_bool
+    [ "closed_first", "closeit c; tw c; " ^ binds_bool
+    ; "closed_between", "tw c; closeit c; " ^ binds_bool
+    ; "closed_last", "tw c; " ^ binds_bool ^ "; closeit c"
+    ; "never_closed", "tw c; " ^ binds_bool
     ]
   in
   List.iter orders ~f:(fun (name, body) ->
-    check [ closeit; tw; top name [ "c" ] body ]);
+    check (closeit ^ tw ^ sprintf "let %s c = %s\n" name body));
   [%expect
     {|
     val closeit : <int>{} -> unit
@@ -1606,40 +1270,19 @@ let%expect_test "an entry code may use only gets a type if it is present" =
 ;;
 
 let%expect_test "a chain of lets each instantiating the previous one" =
-  let tw =
-    top
-      "tw"
-      [ "c" ]
-      (seq
-         (quote (let_ "x" [] (int 1) (splice (var "c"))))
-         (quote (splice (var "c"))))
-  in
   let chain n =
-    let h i = var (sprintf "h%d" i) in
     let rec go i =
-      let earlier =
-        if i = 0
-        then app (var "tw") [ var "e" ]
-        else app (h (i - 1)) [ app (var "tw") [ var "e" ] ]
-      in
-      let_
-        (sprintf "h%d" i)
-        [ "d" ]
-        (app (var "cond") [ bool true; earlier; var "d" ])
-        (seq
-           (app (h i) [ quote (int 1) ])
-           (if i = n - 1 then app (h i) [ var "k" ] else go (i + 1)))
+      let earlier = if i = 0 then "tw e" else sprintf "h%d (tw e)" (i - 1) in
+      let rest = if i = n - 1 then sprintf "h%d k" i else go (i + 1) in
+      sprintf "let h%d d = cond true (%s) d in h%d .<1>.; %s" i earlier i rest
     in
-    top "f" [ "e"; "k" ] (go 0)
+    sprintf "let f e k = %s\n" (go 0)
   in
   let typecheck n =
-    match
-      Typecheck.typecheck (typechecker ()) ~program:(prims @ [ tw; chain n ])
-    with
-    | Ok { signature; _ } -> List.last_exn signature
-    | Error error -> raise_s [%sexp (error : Typecheck_error.t)]
+    let t = Option.value_exn (typecheck (tw ^ chain n)) in
+    List.last_exn (checked t).signature
   in
-  print_signature [ typecheck 2 ];
+  print_string (Signature.to_string_hum [ typecheck 2 ]);
   let f = Signature.to_string_hum [ typecheck 200 ] in
   let constraints =
     match String.substr_index f ~pattern:" where " with

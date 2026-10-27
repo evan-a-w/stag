@@ -10,6 +10,10 @@ stag run FILE...              # typecheck and evaluate
 stag test [-promote] FILE...  # run let%expect_test tests, writing FILE.corrected
 ```
 
+`stag test -print-corrected FILE` prints the corrected file instead, writing
+nothing. `-fuel N`, `-max-depth N` and `-time-limit SPAN` bound each phase of
+evaluation (compile time, evaluation, each test); they are unlimited by default.
+
 A program is a set of files, each a module named after the file
 (`foo_bar.stag` is `Foo_bar`). Errors are reported as OCaml's compiler does.
 
@@ -65,5 +69,12 @@ before it. They provide the pieces for other tools: `Source_file` and
 modules already parsed), `Driver.eval`, `Expect_test_runner`, `Diagnostic`
 (rendering errors) and `Text_diff`.
 
-Tests: `dune build @runtest` (expect tests in `*/test/`, CLI cram tests in
-`driver/test/cram/`).
+Tests: `dune build @runtest`, then `dune promote` to accept changes.
+
+- Runtime behaviour: stag expect tests in `tests/*.stag` (any new `.stag` file
+  there is picked up automatically), run by `stag test -print-corrected`
+  with a time and depth limit.
+- Types, type errors and compile-time evaluation: OCaml expect tests on stag
+  source strings, using `driver/test/source_helpers.mli`.
+- Type internals and the parser: OCaml unit tests in `X/test/`.
+- The CLI: cram tests in `driver/test/cram/`.

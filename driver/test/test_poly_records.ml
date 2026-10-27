@@ -1,34 +1,22 @@
 open! Import
-open Syntax
-open Helpers
+open Source_helpers
 
 let%expect_test "record operations" =
   check
-    [ top "lit" [] (poly_record [ "x", int 1; "y", bool true ])
-    ; top "empty" [] (poly_record [])
-    ; top "get_x" [ "r" ] (dot (var "r") "x")
-    ; top "extend" [ "r" ] (extend [ "z", int 1 ] (var "r"))
-    ; top
-        "extend_many"
-        [ "r"; "a" ]
-        (extend [ "y", var "a"; "z", int 1 ] (var "r"))
-    ; top "restrict" [ "r" ] (restrict (var "r") "x")
-    ; top "update" [ "r" ] (update (var "r") [ "x", bool true ])
-    ; top "nested" [ "r" ] (dot (dot (var "r") "a") "b")
-    ; top "lit_x" [] (dot (poly_record [ "x", int 1; "y", int 2 ]) "x")
-    ; top
-        "extend_lit"
-        []
-        (extend [ "z", char 'c' ] (poly_record [ "x", int 1 ]))
-    ; top
-        "restrict_lit"
-        []
-        (restrict (poly_record [ "x", int 1; "y", int 2 ]) "x")
-    ; top
-        "two_fields"
-        [ "r" ]
-        (app (var "add") [ dot (var "r") "x"; dot (var "r") "y" ])
-    ];
+    {|
+let lit = {`x = 1; `y = true}
+let empty = {}
+let get_x r = r.`x
+let extend r = {`z = 1 | r}
+let extend_many r a = {`y = a; `z = 1 | r}
+let restrict r = r \ `x
+let update r = {r with `x = true}
+let nested r = r.`a.`b
+let lit_x = {`x = 1; `y = 2}.`x
+let extend_lit = {`z = 'c' | {`x = 1}}
+let restrict_lit = {`x = 1; `y = 2} \ `x
+let two_fields r = add r.`x r.`y
+|};
   [%expect
     {|
     val lit : {`x : int; `y : bool}
@@ -47,27 +35,18 @@ let%expect_test "record operations" =
 ;;
 
 let%expect_test "extension shadows and restriction reveals" =
-  let shadow = extend [ "x", bool true ] (poly_record [ "x", int 1 ]) in
   check
-    [ top "shadow" [] shadow
-    ; top "shadow_x" [] (dot shadow "x")
-    ; top "revealed" [] (dot (restrict shadow "x") "x")
-    ; top "update_shadow" [] (update shadow [ "x", char 'c' ])
-    ; top
-        "update_shadow_inner"
-        []
-        (dot (restrict (update shadow [ "x", char 'c' ]) "x") "x")
-    ; top "restrict_twice" [] (restrict (restrict shadow "x") "x")
-    ; top
-        "extend_restrict"
-        [ "r" ]
-        (restrict (extend [ "x", int 1 ] (var "r")) "x")
-    ; top "extend_get" [ "r" ] (dot (extend [ "x", int 1 ] (var "r")) "x")
-    ; top
-        "reveal"
-        [ "r" ]
-        (dot (restrict (extend [ "x", int 1 ] (var "r")) "x") "x")
-    ];
+    {|
+let shadow = {`x = true | {`x = 1}}
+let shadow_x = {`x = true | {`x = 1}}.`x
+let revealed = ({`x = true | {`x = 1}} \ `x).`x
+let update_shadow = {{`x = true | {`x = 1}} with `x = 'c'}
+let update_shadow_inner = ({{`x = true | {`x = 1}} with `x = 'c'} \ `x).`x
+let restrict_twice = {`x = true | {`x = 1}} \ `x \ `x
+let extend_restrict r = {`x = 1 | r} \ `x
+let extend_get r = {`x = 1 | r}.`x
+let reveal r = ({`x = 1 | r} \ `x).`x
+|};
   [%expect
     {|
     val shadow : {`x : bool; `x : int}
@@ -84,59 +63,62 @@ let%expect_test "extension shadows and restriction reveals" =
 
 let%expect_test "update, restriction and access require the field" =
   check
-    [ top
-        "update_missing"
-        []
-        (update (poly_record [ "y", int 1 ]) [ "x", int 1 ])
-    ];
+    {|
+let update_missing = {{`y = 1} with `x = 1}
+|};
   check
-    [ top "restrict_missing" [] (restrict (poly_record [ "y", int 1 ]) "x") ];
-  check [ top "access_missing" [] (dot (poly_record []) "x") ];
+    {|
+let restrict_missing = {`y = 1} \ `x
+|};
   check
-    [ top "get_y" [ "r" ] (dot (var "r") "y")
-    ; top "closed" [] (app (var "get_y") [ poly_record [ "x", int 1 ] ])
-    ];
+    {|
+let access_missing = {}.`x
+|};
   check
-    [ top
-        "restrict_all"
-        [ "r" ]
-        (dot (restrict (extend [ "x", int 1 ] (poly_record [])) "x") "x")
-    ];
+    {|
+let get_y r = r.`y
+let closed = get_y {`x = 1}
+|};
+  check
+    {|
+let restrict_all r = ({`x = 1 | {}} \ `x).`x
+|};
   [%expect
     {|
-    (Unification_error
-     (Row_mismatch
-      (RExtend x Present (TVar (Unbound 18 1)) (RVar (Unbound 19 1)))
-      (RExtend y Present (TCon int ()) REmpty) (Missing_label x)))
-    (Unification_error
-     (Row_mismatch
-      (RExtend x Present (TVar (Unbound 18 1)) (RVar (Unbound 19 1)))
-      (RExtend y Present (TCon int ()) REmpty) (Missing_label x)))
-    (Unification_error
-     (Row_mismatch
-      (RExtend x Present (TVar (Unbound 18 1)) (RVar (Unbound 19 1))) REmpty
-      (Missing_label x)))
-    (Unification_error
-     (Row_mismatch
-      (RExtend y Present (TVar (Unbound 27 1)) (RVar (Unbound 28 1)))
-      (RExtend x Present (TCon int ()) REmpty) (Missing_label y)))
-    (Unification_error
-     (Row_mismatch
-      (RExtend x Present (TVar (Unbound 19 1)) (RVar (Unbound 20 1))) REmpty
-      (Missing_label x)))
+    ((Unification_error
+      (Row_mismatch
+       (RExtend x Present (TVar (Unbound 18 1)) (RVar (Unbound 19 1)))
+       (RExtend y Present (TCon int ()) REmpty) (Missing_label x)))
+     @ t.stag:2:22-30)
+    ((Unification_error
+      (Row_mismatch
+       (RExtend x Present (TVar (Unbound 18 1)) (RVar (Unbound 19 1)))
+       (RExtend y Present (TCon int ()) REmpty) (Missing_label x)))
+     @ t.stag:2:23-31)
+    ((Unification_error
+      (Row_mismatch
+       (RExtend x Present (TVar (Unbound 18 1)) (RVar (Unbound 19 1))) REmpty
+       (Missing_label x)))
+     @ t.stag:2:21-23)
+    ((Unification_error
+      (Row_mismatch
+       (RExtend y Present (TVar (Unbound 27 1)) (RVar (Unbound 28 1)))
+       (RExtend x Present (TCon int ()) REmpty) (Missing_label y)))
+     @ t.stag:3:19-27)
+    ((Unification_error
+      (Row_mismatch
+       (RExtend x Present (TVar (Unbound 19 1)) (RVar (Unbound 20 1))) REmpty
+       (Missing_label x)))
+     @ t.stag:2:21-41)
     |}]
 ;;
 
 let%expect_test "update may change field types" =
   check
-    [ top
-        "changed"
-        []
-        (update
-           (poly_record [ "x", int 1; "y", int 2; "z", int 3 ])
-           [ "x", bool true; "y", string "s" ])
-    ; top "update_fn" [ "r"; "v" ] (update (var "r") [ "x", var "v" ])
-    ];
+    {|
+let changed = {{`x = 1; `y = 2; `z = 3} with `x = true; `y = "s"}
+let update_fn r v = {r with `x = v}
+|};
   [%expect
     {|
     val changed : {`x : bool; `y : string; `z : int}
@@ -146,105 +128,60 @@ let%expect_test "update may change field types" =
 
 let%expect_test "duplicate labels" =
   check
-    [ top "literal" [] (poly_record [ "x", int 1; "y", int 2; "x", int 2 ]) ];
+    {|
+let literal = {`x = 1; `y = 2; `x = 2}
+|};
   check
-    [ top "extension" [ "r" ] (extend [ "x", int 1; "x", int 2 ] (var "r")) ];
-  check [ top "update" [ "r" ] (update (var "r") [ "x", int 1; "x", int 2 ]) ];
+    {|
+let extension r = {`x = 1; `x = 2 | r}
+|};
   check
-    [ top
-        "pattern"
-        [ "r" ]
-        (match_
-           (var "r")
-           [ Pat.poly_record [ "x", Pat.var "a"; "x", Pat.var "b" ], var "a" ])
-    ];
+    {|
+let update r = {r with `x = 1; `x = 2}
+|};
   check
-    [ top_let
-        ( "annotation"
-        , [ typed "r" (Ty.record [ "x", Ty.int; "x", Ty.bool ]) ]
-        , None
-        , var "r" )
-    ];
-  check [ Decl.alias "t" (Ty.record [ "x", Ty.int; "x", Ty.int ] ~tail:"r") ];
+    {|
+let pattern r = match r with {`x = a; `x = b} -> a
+|};
+  check
+    {|
+let annotation (r : {`x : int; `x : bool}) = r
+|};
+  check
+    {|
+type t = {`x : int; `x : int; ..'r}
+|};
   [%expect
     {|
-    (Duplicate_row_entry x)
-    (Duplicate_row_entry x)
-    (Duplicate_row_entry x)
-    (Duplicate_row_entry x)
-    (Duplicate_row_entry x)
-    (Duplicate_row_entry x)
+    ((Duplicate_row_entry x) @ t.stag:2:31-33)
+    ((Duplicate_row_entry x) @ t.stag:2:27-29)
+    ((Duplicate_row_entry x) @ t.stag:2:31-33)
+    ((Duplicate_row_entry x) @ t.stag:2:38-40)
+    ((Duplicate_row_entry x) @ t.stag:2:31-33)
+    ((Duplicate_row_entry x) @ t.stag:2:20-22)
     |}]
 ;;
 
 let%expect_test "record patterns" =
   check
-    [ top
-        "closed"
-        [ "r" ]
-        (match_
-           (var "r")
-           [ ( Pat.poly_record [ "x", Pat.var "a"; "y", Pat.var "b" ]
-             , app (var "add") [ var "a"; var "b" ] )
-           ])
-    ; top
-        "open"
-        [ "r" ]
-        (match_
-           (var "r")
-           [ Pat.poly_record ~rest:Open [ "x", Pat.var "a" ], var "a" ])
-    ; top
-        "rest"
-        [ "r" ]
-        (match_
-           (var "r")
-           [ ( Pat.poly_record ~bind:"rest" [ "x", Pat.var "a" ]
-             , tuple [ var "a"; var "rest" ] )
-           ])
-    ; top
-        "rest_reveals_shadowed"
-        []
-        (match_
-           (extend [ "x", bool true ] (poly_record [ "x", int 1 ]))
-           [ ( Pat.poly_record ~bind:"rest" [ "x", Pat.var "a" ]
-             , tuple [ var "a"; dot (var "rest") "x" ] )
-           ])
-    ; top
-        "nested"
-        [ "r" ]
-        (match_
-           (var "r")
-           [ ( Pat.poly_record
-                 ~rest:Open
-                 [ "p", Pat.poly_record ~rest:Open [ "x", Pat.var "a" ] ]
-             , var "a" )
-           ])
-    ; top "empty" [ "r" ] (match_ (var "r") [ Pat.poly_record [], int 1 ])
-    ; top
-        "with_literals"
-        [ "r" ]
-        (match_
-           (var "r")
-           [ Pat.poly_record ~rest:Open [ "x", Pat.int 1 ], bool true
-           ; Pat.any, bool false
-           ])
-    ];
+    {|
+let closed r = match r with {`x = a; `y = b} -> add a b
+let open r = match r with {`x = a; ..} -> a
+let rest r = match r with {`x = a; ..rest} -> (a, rest)
+let rest_reveals_shadowed =
+  match {`x = true | {`x = 1}} with {`x = a; ..rest} -> (a, rest.`x)
+let nested r = match r with {`p = {`x = a; ..}; ..} -> a
+let empty r = match r with {} -> 1
+let with_literals r = match r with {`x = 1; ..} -> true | _ -> false
+|};
   check
-    [ top
-        "closed_mismatch"
-        []
-        (match_
-           (poly_record [ "x", int 1; "y", int 2 ])
-           [ Pat.poly_record [ "x", Pat.var "a" ], var "a" ])
-    ];
+    {|
+let closed_mismatch = match {`x = 1; `y = 2} with {`x = a} -> a
+|};
   check
-    [ top
-        "duplicate_rest"
-        [ "r" ]
-        (match_
-           (var "r")
-           [ Pat.poly_record ~bind:"a" [ "x", Pat.var "a" ], var "a" ])
-    ];
+    {|
+let duplicate_rest r = match r with {`x = a; ..a} -> a
+|};
   [%expect
     {|
     val closed : {`x : int; `y : int} -> int
@@ -254,58 +191,38 @@ let%expect_test "record patterns" =
     val nested : {`p : {`x : 'a; ..'b}; ..'c} -> 'a
     val empty : {} -> int
     val with_literals : {`x : int; ..'a} -> bool
-    (Unification_error
-     (Row_mismatch (RExtend y Present (TCon int ()) REmpty) REmpty
-      (Missing_label y)))
-    (Duplicate_pattern_variable a)
+    ((Unification_error
+      (Row_mismatch (RExtend y Present (TCon int ()) REmpty) REmpty
+       (Missing_label y)))
+     @ t.stag:2:50-58)
+    ((Duplicate_pattern_variable a) @ t.stag:2:47-48)
     |}]
 ;;
 
 let%expect_test "aliases" =
   check
-    [ Decl.alias "point" (Ty.record [ "x", Ty.int; "y", Ty.int ])
-    ; Decl.alias
-        "with_x"
-        ~params:[ Decl.row "r" ]
-        (Ty.record [ "x", Ty.int ] ~tail:"r")
-    ; Decl.alias
-        "box"
-        ~params:[ Decl.ty "a" ]
-        (Ty.record [ "contents", Ty.var "a" ])
-    ; Decl.record "holder" [ "p", Ty.con "point" ]
-    ; top_let
-        ( "origin"
-        , []
-        , Some (Ty.con "point")
-        , poly_record [ "x", int 0; "y", int 0 ] )
-    ; top_let
-        ( "get"
-        , [ typed "b" (Ty.con "box" ~args:[ Ty Ty.int ]) ]
-        , None
-        , dot (var "b") "contents" )
-    ; top_let
-        ( "x_of"
-        , [ typed "r" (Ty.con "with_x" ~args:[ Row (Ty.row ~tail:"r" ()) ]) ]
-        , None
-        , dot (var "r") "x" )
-    ; top "x_of_origin" [] (app (var "x_of") [ var "origin" ])
-    ; top "hold" [] (record [ "p", var "origin" ])
-    ; module_
-        "M"
-        [ Decl.variant "t" [ "A", [] ]
-        ; Decl.alias "r" (Ty.record [ "f", Ty.con "t" ])
-        ; Decl.alias
-            "v"
-            ~params:[ Decl.row "r" ]
-            (Ty.variant [ "A", Ty.con "t"; "B", Ty.unit ] ~tail:"r")
-        ]
-    ; top "m" [ "r" ] (var "r" ~annot:(Ty.con "M.r"))
-    ];
+    {|
+type point = {`x : int; `y : int}
+type with_x[{..'r}] = {`x : int; ..'r}
+type box['a] = {`contents : 'a}
+type holder = {p : point}
+let origin : point = {`x = 0; `y = 0}
+let get (b : box[int]) = b.`contents
+let x_of (r : with_x[{..'r}]) = r.`x
+let x_of_origin = x_of origin
+let hold = {p = origin}
+module M = struct
+  type t = A
+  type r = {`f : t}
+  type v[{..'r}] = [`A of t | `B of unit; ..'r]
+end
+let m r = (r : M.r)
+|};
   check
-    [ top_let
-        ("not_a_point", [], Some (Ty.con "point"), poly_record [ "x", int 0 ])
-    ; Decl.alias "point" (Ty.record [ "x", Ty.int; "y", Ty.int ])
-    ];
+    {|
+let not_a_point : point = {`x = 0}
+type point = {`x : int; `y : int}
+|};
   [%expect
     {|
     type point = {`x : int; `y : int}
@@ -323,40 +240,26 @@ let%expect_test "aliases" =
       type v[{..'a}] = [`A of t | `B; ..'a]
     end
     val m : {`f : M.t} -> {`f : M.t}
-    (Unification_error
-     (Row_mismatch (RExtend y Present (TCon int ()) REmpty) REmpty
-      (Missing_label y)))
+    ((Unification_error
+      (Row_mismatch (RExtend y Present (TCon int ()) REmpty) REmpty
+       (Missing_label y)))
+     @ t.stag:2:26-34)
     |}]
 ;;
 
 let%expect_test "generalization and the value restriction" =
   check
-    [ top "r" [] (poly_record [ "f", var "id" ])
-    ; top "weak" [] (poly_record [ "f", app (var "id") [ var "id" ] ])
-    ; top "ext" [] (extend [ "g", var "id" ] (var "r"))
-    ; top "ext_weak" [] (extend [ "g", var "id" ] (app (var "id") [ var "r" ]))
-    ; top "field" [] (dot (var "r") "f")
-    ; top "restricted" [] (restrict (var "ext") "g")
-    ; top "updated" [] (update (var "r") [ "f", poly_record [] ])
-    ; top
-        "used_twice"
-        []
-        (tuple
-           [ app (dot (var "r") "f") [ int 1 ]
-           ; app (dot (var "r") "f") [ bool true ]
-           ])
-    ; top
-        "local"
-        []
-        (let_
-           "p"
-           []
-           (poly_record [ "f", var "id" ])
-           (tuple
-              [ app (dot (var "p") "f") [ int 1 ]
-              ; app (dot (var "p") "f") [ bool true ]
-              ]))
-    ];
+    {|
+let r = {`f = id}
+let weak = {`f = id id}
+let ext = {`g = id | r}
+let ext_weak = {`g = id | id r}
+let field = r.`f
+let restricted = ext \ `g
+let updated = {r with `f = {}}
+let used_twice = (r.`f 1, r.`f true)
+let local = let p = {`f = id} in (p.`f 1, p.`f true)
+|};
   [%expect
     {|
     val r : {`f : 'a -> 'a}
@@ -373,48 +276,13 @@ let%expect_test "generalization and the value restriction" =
 
 let%expect_test "values through the new forms" =
   check
-    [ top
-        "recursive"
-        []
-        (let_
-           "p"
-           []
-           (poly_record [ "a", var "id"; "b", dot (var "p") "a" ])
-           (var "p"))
-    ; top
-        "rest_binds"
-        []
-        (let_
-           "y"
-           []
-           (match_
-              (poly_record [ "x", var "id" ])
-              [ ( Pat.poly_record ~bind:"y" [ "x", Pat.any ]
-                , tuple [ var "y"; var "id" ] )
-              ])
-           (var "y"))
-    ; top
-        "tag_binds"
-        []
-        (let_
-           "y"
-           []
-           (match_
-              (tag "A" ~arg:(var "id"))
-              [ Pat.tag "A" ~arg:(Pat.var "y"), var "y" ])
-           (var "y"))
-    ; top
-        "splice_value"
-        []
-        (quote (poly_record [ "f", splice (quote (var "id")) ]))
-    ; top
-        "splice_not_value"
-        []
-        (quote
-           (extend
-              [ "f", splice (app (var "id") [ quote (var "id") ]) ]
-              (poly_record [])))
-    ];
+    {|
+let recursive = let p = {`a = id; `b = p.`a} in p
+let rest_binds = let y = match {`x = id} with {`x = _; ..y} -> (y, id) in y
+let tag_binds = let y = match `A id with `A y -> y in y
+let splice_value = .<{`f = .~.<id>.}>.
+let splice_not_value = .<{`f = .~(id .<id>.) | {}}>.
+|};
   [%expect
     {|
     val recursive : {`a : '_a -> '_a; `b : '_a -> '_a}
@@ -427,26 +295,13 @@ let%expect_test "values through the new forms" =
 
 let%expect_test "labels in quotes are not free variables" =
   check
-    [ top "label" [] (quote (dot (poly_record [ "x", int 1 ]) "x"))
-    ; top "var_and_label" [] (quote (poly_record [ "y", var "y" ]))
-    ; top
-        "outside"
-        []
-        (let_ "r" [] (poly_record [ "x", int 1 ]) (quote (dot (var "r") "x")))
-    ; top
-        "extend_inside"
-        [ "c" ]
-        (quote (restrict (extend [ "z", int 1 ] (splice (var "c"))) "z"))
-    ; top
-        "pattern_rest"
-        []
-        (quote
-           (match_
-              (var "r")
-              [ ( Pat.poly_record ~bind:"rest" [ "x", Pat.var "x" ]
-                , tuple [ var "x"; var "rest" ] )
-              ]))
-    ];
+    {|
+let label = .<{`x = 1}.`x>.
+let var_and_label = .<{`y = y}>.
+let outside = let r = {`x = 1} in .<r.`x>.
+let extend_inside c = .<{`z = 1 | .~c} \ `z>.
+let pattern_rest = .<match r with {`x = x; ..rest} -> (x, rest)>.
+|};
   [%expect
     {|
     val label : <int>{..'a}
@@ -459,148 +314,94 @@ let%expect_test "labels in quotes are not free variables" =
 
 let%expect_test "rows shared between contexts and records" =
   check
-    [ top_let
-        ( "same_row"
-        , [ typed "c" (Ty.code Ty.int ~tail:"r")
-          ; typed "r" (Ty.record [] ~tail:"r")
-          ]
-        , None
-        , var "c" )
-    ; top
-        "ok"
-        []
-        (app (var "same_row") [ quote (var "x"); poly_record [ "x", int 1 ] ])
-    ; top_let
-        ( "captured"
-        , [ "c", None; typed "r" (Ty.record [] ~tail:"r") ]
-        , None
-        , seq
-            (quote
-               (let_
-                  "y"
-                  []
-                  (int 1)
-                  (splice (var "c" ~annot:(Ty.code Ty.int ~tail:"r")))))
-            (var "r") )
-    ];
+    {|
+let same_row (c : <int>{..'r}) (r : {..'r}) = c
+let ok = same_row .<x>. {`x = 1}
+let captured c (r : {..'r}) = .<let y = 1 in .~(c : <int>{..'r})>.; r
+|};
   check
-    [ top_let
-        ( "same_row"
-        , [ typed "c" (Ty.code Ty.int ~tail:"r")
-          ; typed "r" (Ty.record [] ~tail:"r")
-          ]
-        , None
-        , var "c" )
-    ; top
-        "missing"
-        []
-        (app (var "same_row") [ quote (var "x"); poly_record [] ])
-    ];
+    {|
+let same_row (c : <int>{..'r}) (r : {..'r}) = c
+let missing = same_row .<x>. {}
+|};
   [%expect
     {|
     val same_row : <int>{..'a} -> {..'a} -> <int>{..'a}
     val ok : <int>{x : int}
     val captured : <int>{y?'a : int; ..'b} -> {`y?'a : int; ..'b} -> {`y?'a : int; ..'b}
-    (Unification_error
-     (Row_mismatch
-      (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-       (RVar (Unbound 33 1)))
-      REmpty (Missing_label x)))
+    ((Unification_error
+      (Row_mismatch
+       (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
+        (RVar (Unbound 33 1)))
+       REmpty (Missing_label x)))
+     @ t.stag:3:29-31)
     |}]
 ;;
 
 let%expect_test "unification errors" =
-  check [ top "record_vs_variant" [] (dot (tag "A") "x") ];
-  check [ top "record_vs_int" [] (dot (int 1) "x") ];
-  check [ top "record_vs_code" [] (restrict (quote (int 1)) "x") ];
   check
-    [ top
-        "field_type"
-        []
-        (app (var "add") [ dot (poly_record [ "x", bool true ]) "x"; int 1 ])
-    ];
+    {|
+let record_vs_variant = (`A).`x
+|};
   check
-    [ top
-        "different_rows"
-        [ "r" ]
-        (tuple
-           [ match_ (var "r") [ Pat.poly_record [ "x", Pat.any ], int 1 ]
-           ; match_ (var "r") [ Pat.poly_record [ "y", Pat.any ], int 1 ]
-           ])
-    ];
+    {|
+let record_vs_int = 1.`x
+|};
+  check
+    {|
+let record_vs_code = .<1>. \ `x
+|};
+  check
+    {|
+let field_type = add {`x = true}.`x 1
+|};
+  check
+    {|
+let different_rows r =
+  ((match r with {`x = _} -> 1), (match r with {`y = _} -> 1))
+|};
   [%expect
     {|
-    (Unification_error
-     (Type_mismatch
-      (TRecord (RExtend x Present (TVar (Unbound 18 1)) (RVar (Unbound 19 1))))
-      (TVariant (RExtend A Present (TCon unit ()) (RVar (Unbound 21 1))))
-      Structural_mismatch))
-    (Unification_error
-     (Type_mismatch
-      (TRecord (RExtend x Present (TVar (Unbound 18 1)) (RVar (Unbound 19 1))))
-      (TCon int ()) Structural_mismatch))
-    (Unification_error
-     (Type_mismatch
-      (TRecord (RExtend x Present (TVar (Unbound 18 1)) (RVar (Unbound 19 1))))
-      (TCode (inner (TCon int ())) (context (RVar (Unbound 21 1))))
-      Structural_mismatch))
-    (Unification_error
-     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
-    (Unification_error
-     (Row_mismatch (RExtend x Present (TVar (Unbound 20 1)) REmpty)
-      (RExtend y Present (TVar (Unbound 23 1)) REmpty) (Missing_label x)))
+    ((Unification_error
+      (Type_mismatch
+       (TRecord (RExtend x Present (TVar (Unbound 18 1)) (RVar (Unbound 19 1))))
+       (TVariant (RExtend A Present (TCon unit ()) (RVar (Unbound 21 1))))
+       Structural_mismatch))
+     @ t.stag:2:24-28)
+    ((Unification_error
+      (Type_mismatch
+       (TRecord (RExtend x Present (TVar (Unbound 18 1)) (RVar (Unbound 19 1))))
+       (TCon int ()) Structural_mismatch))
+     @ t.stag:2:20-21)
+    ((Unification_error
+      (Type_mismatch
+       (TRecord (RExtend x Present (TVar (Unbound 18 1)) (RVar (Unbound 19 1))))
+       (TCode (inner (TCon int ())) (context (RVar (Unbound 21 1))))
+       Structural_mismatch))
+     @ t.stag:2:21-26)
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:2:21-35)
+    ((Unification_error
+      (Row_mismatch (RExtend x Present (TVar (Unbound 20 1)) REmpty)
+       (RExtend y Present (TVar (Unbound 23 1)) REmpty) (Missing_label x)))
+     @ t.stag:3:47-55)
     |}]
 ;;
 
 let%expect_test "local polymorphic record operations" =
   check
-    [ top
-        "access"
-        []
-        (let_
-           "get"
-           [ "r" ]
-           (dot (var "r") "x")
-           (tuple
-              [ app (var "get") [ poly_record [ "x", int 1 ] ]
-              ; app (var "get") [ poly_record [ "x", bool true; "y", int 1 ] ]
-              ]))
-    ; top
-        "restriction"
-        []
-        (let_
-           "drop"
-           [ "r" ]
-           (restrict (var "r") "x")
-           (tuple
-              [ app (var "drop") [ poly_record [ "x", int 1 ] ]
-              ; app (var "drop") [ poly_record [ "x", bool true; "y", int 1 ] ]
-              ]))
-    ; top
-        "update"
-        []
-        (let_
-           "set"
-           [ "r" ]
-           (update (var "r") [ "x", int 0 ])
-           (tuple
-              [ app (var "set") [ poly_record [ "x", bool true ] ]
-              ; app (var "set") [ poly_record [ "x", unit; "y", int 1 ] ]
-              ]))
-    ; top
-        "pattern"
-        []
-        (let_
-           "rest"
-           [ "r" ]
-           (match_
-              (var "r")
-              [ Pat.poly_record ~bind:"rest" [ "x", Pat.any ], var "rest" ])
-           (tuple
-              [ app (var "rest") [ poly_record [ "x", int 1 ] ]
-              ; app (var "rest") [ poly_record [ "x", int 1; "y", int 1 ] ]
-              ]))
-    ];
+    {|
+let access = let get r = r.`x in (get {`x = 1}, get {`x = true; `y = 1})
+let restriction =
+  let drop r = r \ `x in (drop {`x = 1}, drop {`x = true; `y = 1})
+let update =
+  let set r = {r with `x = 0} in (set {`x = true}, set {`x = (); `y = 1})
+let pattern =
+  let rest r = match r with {`x = _; ..rest} -> rest in
+  (rest {`x = 1}, rest {`x = 1; `y = 1})
+|};
   [%expect
     {|
     val access : int * bool
@@ -612,10 +413,11 @@ let%expect_test "local polymorphic record operations" =
 
 let%expect_test "applied access and restriction are not values" =
   check
-    [ top "r" [] (poly_record [ "f", var "id"; "g", var "id" ])
-    ; top "field" [] (dot (app (var "id") [ var "r" ]) "f")
-    ; top "restricted" [] (restrict (app (var "id") [ var "r" ]) "g")
-    ];
+    {|
+let r = {`f = id; `g = id}
+let field = (id r).`f
+let restricted = id r \ `g
+|};
   [%expect
     {|
     val r : {`f : 'a -> 'a; `g : 'b -> 'b}
@@ -626,79 +428,54 @@ let%expect_test "applied access and restriction are not values" =
 
 let%expect_test "absent entries in records" =
   check
-    [ top_let
-        ( "absent"
-        , [ "c", None; typed "r" (Ty.record [] ~tail:"d") ]
-        , None
-        , seq
-            (quote
-               (quote
-                  (let_
-                     "z"
-                     []
-                     (int 1)
-                     (splice
-                        (splice
-                           (var
-                              "c"
-                              ~annot:
-                                (Ty.code
-                                   (Ty.code (Ty.var "a") ~tail:"c")
-                                   ~tail:"d")))))))
-            (var "r") )
-    ];
+    {|
+let absent c (r : {..'d}) =
+  .<.<let z = 1 in .~.~(c : <<'a>{..'c}>{..'d})>.>.; r
+|};
   [%expect
     {| val absent : <<'a>{z?'b : int; ..'c}>{-z; ..'d} -> {-`z; ..'d} -> {-`z; ..'d} |}]
 ;;
 
 let%expect_test "structural types may be recursive" =
   check
-    [ top
-        "occurs"
-        [ "r" ]
-        (app (var "cond") [ bool true; dot (var "r") "x"; var "r" ])
-    ];
+    {|
+let occurs r = cond true r.`x r
+|};
   check
-    [ top
-        "cyclic"
-        [ "r" ]
-        (app
-           (var "cond")
-           [ bool true
-           ; extend [ "x", int 1 ] (var "r")
-           ; extend [ "y", int 1 ] (var "r")
-           ])
-    ];
-  check [ Decl.alias "t" (Ty.record [ "next", Ty.con "t" ]) ];
+    {|
+let cyclic r = cond true {`x = 1 | r} {`y = 1 | r}
+|};
   check
-    [ Decl.alias "a" (Ty.record [ "b", Ty.con "b" ])
-    ; Decl.alias "b" (Ty.variant [ "A", Ty.con "a" ])
-    ];
+    {|
+type t = {`next : t}
+|};
   check
-    [ Decl.variant "t" [ "T", [ Ty.record [ "next", Ty.con "t" ] ] ]
-    ; top
-        "deref"
-        [ "t" ]
-        (match_
-           (var "t")
-           [ Pat.construct "T" ~args:[ Pat.var "r" ], dot (var "r") "next" ])
-    ];
+    {|
+type a = {`b : b}
+type b = [`A of a]
+|};
+  check
+    {|
+type t = T of {`next : t}
+let deref t = match t with T r -> r.`next
+|};
   [%expect
     {|
     val occurs : ({`x : 'a; ..'b} as 'a) -> 'a
-    (Unification_error
-     (Row_mismatch
-      (RExtend x Present (TCon int ())
-       (RVar
-        (Link
-         (RExtend x (PVar (Unbound 34 1)) (TCon int ()) (RVar (Unbound 35 1))))))
-      (RExtend y Present (TCon int ())
-       (RVar
-        (Link
-         (RVar
-          (Link
-           (RExtend x (PVar (Unbound 34 1)) (TCon int ()) (RVar (Unbound 35 1))))))))
-      Cyclic_row))
+    ((Unification_error
+      (Row_mismatch
+       (RExtend x Present (TCon int ())
+        (RVar
+         (Link
+          (RExtend x (PVar (Unbound 34 1)) (TCon int ()) (RVar (Unbound 35 1))))))
+       (RExtend y Present (TCon int ())
+        (RVar
+         (Link
+          (RVar
+           (Link
+            (RExtend x (PVar (Unbound 34 1)) (TCon int ()) (RVar (Unbound 35 1))))))))
+       Cyclic_row))
+     @ t.stag:2:38-50)
     type t = {`next : t}
     type a = {`b : [`A of a]}
     type b = [`A of {`b : b}]
