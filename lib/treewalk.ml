@@ -168,6 +168,7 @@ type t =
   ; stamps : Stamp_counter.t
   ; mutable budget : Budget.t
   ; mutable output : string -> unit
+  ; mutable on_expect : (string Located.t -> unit) option
   }
 
 let captures t ~ident ~args ~body =
@@ -201,7 +202,7 @@ let captures t ~ident ~args ~body =
   in
   let rec go ~depth ({ desc; _ } : Typed.Expr.t) =
     match desc with
-    | Lit _ | Var (Free _ | Prim _) -> ()
+    | Lit _ | Var (Free _ | Prim _) | Expect _ -> ()
     | Var
         ( Bound (Toplevel ident | Local ident)
         | Persistent (Toplevel ident | Local ident) ) -> use ~depth ident
@@ -255,11 +256,13 @@ let create ~stamps () =
   ; stamps
   ; budget = Budget.create Limits.unlimited
   ; output = Out_channel.output_string stdout
+  ; on_expect = None
   }
 ;;
 
 let stamps t = t.stamps
 let set_output t output = t.output <- output
+let output t = t.output
 let set_limits t limits = t.budget <- Budget.create limits
 
 let add_ident_info t ~ident ~info =
@@ -299,7 +302,7 @@ let map_children ~depth (expr : Typed.Expr.t) ~f =
   let same = f ~depth in
   let%map desc : Typed.Expr.t Typed.Expr.Desc.t =
     match expr.desc with
-    | (Lit _ | Var _ | Poly_variant (_, None)) as desc -> Ok desc
+    | (Lit _ | Var _ | Poly_variant (_, None) | Expect _) as desc -> Ok desc
     | App (a, b) ->
       let%bind a = same a in
       let%map b = same b in
@@ -619,6 +622,13 @@ and step t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
   let eval' = eval t ~env ~level in
   match expr.desc with
   | Lit lit -> Ok (Value.of_lit lit)
+  | Expect expected ->
+    (match t.on_expect with
+     | Some on_expect ->
+       on_expect expected;
+       Ok Value.Unit
+     | None ->
+       Or_error.error_s [%message "[%expect] outside a running expect test"])
   | Var (Bound (Local ident | Toplevel ident))
   | Var (Persistent (Local ident | Toplevel ident)) -> lookup t env ident
   | Var (Free name) ->
@@ -799,6 +809,15 @@ let splice t ~code ~level ~entry =
   instantiate t code ~entry
 ;;
 
+let run_expect_test t ({ body; _ } : Typed.Expect_test.t) ~on_expect =
+  t.on_expect <- Some on_expect;
+  Exn.protect
+    ~f:(fun () -> eval t ~env:t.env ~level:0 body |> Or_error.ignore_m)
+    ~finally:(fun () -> t.on_expect <- None)
+;;
+
+let find t ~ident = Env.lookup t.env ~ident
+
 let eval t =
   let rec loop () =
     match Queue.dequeue t.sccs with
@@ -813,4 +832,3 @@ let eval t =
 ;;
 
 let eval_toplevel t ~ident = force t ident
-let find t ~ident = Env.lookup t.env ~ident

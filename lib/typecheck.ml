@@ -109,6 +109,7 @@ module Scope = struct
     ; module_ : Module_scope.t
     ; scc : Scc_frame.t
     ; annotation_vars : Type_env.Annotation_vars.t
+    ; in_expect_test : bool
     }
 
   and quote =
@@ -754,6 +755,7 @@ and check_toplevel t program (toplevel : Toplevel.t)
     ; module_ = toplevel.module_
     ; scc
     ; annotation_vars = Type_env.Annotation_vars.create t ~rank
+    ; in_expect_test = false
     }
   in
   let%bind.Result args, res_ty, ty =
@@ -809,6 +811,12 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
   in
   match Source.Expr.view expr with
   | Lit l -> Ok (node (Lit l) (Syntax.Lit.ty l))
+  | Expect expected ->
+    (* Only where it runs as part of the test: not at compile time nor in
+       code. *)
+    if scope.in_expect_test && scope.level = 0 && Option.is_none scope.quote
+    then Ok (node (Expect expected) Type.unit)
+    else error ~loc Expect_outside_expect_test
   | Var (Path (path, annot)) ->
     let%bind.Result ty, var_ref = var_type t scope ~path ~loc in
     let%map.Result () =
@@ -1288,6 +1296,26 @@ module Checked = struct
     }
 end
 
+let check_expect_test t program module_ ~name ~body ~loc =
+  let rank = 1 in
+  let scope =
+    { Scope.program
+    ; level = 0
+    ; rank
+    ; locals = Env.create ()
+    ; quote = None
+    ; module_
+    ; scc = { Scc_frame.lowlink = Fresh.id t; pending = [] }
+    ; annotation_vars = Type_env.Annotation_vars.create t ~rank
+    ; in_expect_test = true
+    }
+  in
+  let%map.Result body =
+    check_expr t scope ~expr:(Source.Expr.Syntax body) ~ty:Type.unit
+  in
+  { Typed.Expect_test.name; body; loc }
+;;
+
 let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
   : (Checked.t, Typecheck_error.t) Result.t
   =
@@ -1323,41 +1351,56 @@ let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
         in
         Hashtbl.add_exn program_env.toplevels ~key:name ~data:toplevel;
         Some toplevel
-      | Type _ | Module _ -> None)
+      | Type _ | Module _ | Expect_test _ -> None)
   in
-  let%map.Result () =
+  let%bind.Result () =
     List.fold_result toplevels ~init:() ~f:(fun () toplevel ->
       match toplevel.state with
       | Unchecked -> check_toplevel t program_env toplevel |> Result.ignore_m
       | In_progress _ | Done _ -> Ok ())
   in
+  let%map.Result expect_tests =
+    Module_scope.toplevels root
+    |> List.filter_map ~f:(fun (module_, (toplevel : Syntax.Toplevel.t)) ->
+      match toplevel.txt with
+      | Expect_test { name; body } -> Some (module_, name, body, toplevel.loc)
+      | Let _ | Type _ | Module _ -> None)
+    |> List.map ~f:(fun (module_, name, body, loc) ->
+      check_expect_test t program_env module_ ~name ~body ~loc)
+    |> Result.all
+  in
   let rec signature module_ toplevels =
     let canonical_name = Module_scope.canonical_name module_ in
-    List.map
+    List.filter_map
       toplevels
-      ~f:(fun (toplevel : Syntax.Toplevel.t) : Signature.Item.t ->
+      ~f:(fun (toplevel : Syntax.Toplevel.t) : Signature.Item.t option ->
         match toplevel.txt with
+        | Expect_test _ -> None
         | Let ({ txt = name; loc = _ }, _, _, _) ->
           let toplevel =
             Hashtbl.find_exn program_env.toplevels (canonical_name name)
           in
           (match toplevel.state with
            | Done { entry = { scheme; persistent; _ }; _ } ->
-             Value { name; scheme; persistent }
+             Some (Value { name; scheme; persistent })
            | Unchecked | In_progress _ ->
              raise_s
                [%message "typecheck: toplevel not done" (toplevel : Toplevel.t)])
         | Type decl ->
-          Type (Type_env.find_decl_exn type_env (canonical_name decl.name.txt))
+          Some
+            (Type
+               (Type_env.find_decl_exn type_env (canonical_name decl.name.txt)))
         | Module ({ txt = name; loc = _ }, toplevels) ->
-          Module
-            { name
-            ; items = signature (Module_scope.enter module_ name) toplevels
-            })
+          Some
+            (Module
+               { name
+               ; items = signature (Module_scope.enter module_ name) toplevels
+               }))
   in
   { Checked.signature = signature root program
   ; program =
       { sccs = Queue.to_list program_env.sccs
+      ; expect_tests
       ; ident_info = program_env.ident_info
       }
   }

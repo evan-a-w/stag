@@ -574,3 +574,44 @@ let%expect_test "errors" =
     t.stag:1:2-3: illegal character '\255'
     |}]
 ;;
+
+let%expect_test "quoted strings and expect tokens" =
+  lex {x|{|a "b" \n|} {id|x |} y|id} {||} let%expect_test [%expect {| 1 |}]|x};
+  lex "{ x } {a b|} {A|x|A}";
+  lex "letx%expect_test let%expect_testx [%expectx [%expect";
+  lex "{|abc";
+  lex "(* {| *) |} *) 1";
+  [%expect
+    {xxx|
+    ((String "a \"b\" \\n") t.stag:1:0-12 "{|a \"b\" \\n|}")
+    ((String "x |} y") t.stag:1:13-27 "{id|x |} y|id}")
+    ((String "") t.stag:1:28-32 {||})
+    (Let_expect_test t.stag:1:33-48 let%expect_test)
+    (Expect_open t.stag:1:49-57 [%expect)
+    ((String " 1 ") t.stag:1:58-65 "{| 1 |}")
+    (Rbracket t.stag:1:65-66 ])
+    (Eof t.stag:1:66-66 "")
+    (Lbrace t.stag:1:0-1 {)
+    ((Lident x) t.stag:1:2-3 x)
+    (Rbrace t.stag:1:4-5 })
+    (Lbrace t.stag:1:6-7 {)
+    ((Lident a) t.stag:1:7-8 a)
+    ((Lident b) t.stag:1:9-10 b)
+    (Bar t.stag:1:10-11 |)
+    (Rbrace t.stag:1:11-12 })
+    (Lbrace t.stag:1:13-14 {)
+    ((Uident A) t.stag:1:14-15 A)
+    (Bar t.stag:1:15-16 |)
+    ((Lident x) t.stag:1:16-17 x)
+    (Bar t.stag:1:17-18 |)
+    ((Uident A) t.stag:1:18-19 A)
+    (Rbrace t.stag:1:19-20 })
+    (Eof t.stag:1:20-20 "")
+    ((kind (Illegal_character %)) (loc t.stag:1:4-5))
+    t.stag:1:4-5: illegal character '%'
+    ((kind Unterminated_string) (loc t.stag:1:0-2))
+    t.stag:1:0-2: unterminated string literal
+    ((Int 1) t.stag:1:15-16 1)
+    (Eof t.stag:1:16-16 "")
+    |xxx}]
+;;

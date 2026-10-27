@@ -75,6 +75,8 @@ val stamps : t -> Stamp_counter.t
 (** Where prims print to, stdout by default. *)
 val set_output : t -> (string -> unit) -> unit
 
+val output : t -> string -> unit
+
 (** Evaluation from now on, until [set_limits] again, is bounded by [limits],
     counted from now: one budget shared by everything evaluated meanwhile, eg.
     every toplevel splice of every program checked with [t]. Building and
@@ -122,6 +124,14 @@ val captures
 
 (** Evaluates the components queued not yet evaluated, in order. *)
 val eval : t -> unit Or_error.t
+
+(** Evaluates the test's body, after [eval], calling [on_expect] at each
+    [[%expect]] it reaches. *)
+val run_expect_test
+  :  t
+  -> Typed.Expect_test.t
+  -> on_expect:(string Located.t -> unit)
+  -> unit Or_error.t
 
 (** Evaluates the toplevel [ident], of a component queued, unless it already
     is. *)

@@ -15,7 +15,8 @@ val create : ?interpreter:Treewalk.t -> unit -> t
 module Checked : sig
   type t =
     { signature : Signature.t
-      (** The signature of the program, mirroring it item by item. *)
+      (** The signature of the program, mirroring it item by item, without its
+          expect tests. *)
     ; program : Typed.Program.t
     }
 end

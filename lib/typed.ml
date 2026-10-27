@@ -198,6 +198,7 @@ module Expr = struct
       | Poly_restrict of 'e * string
       | Poly_update of 'e * (string * 'e) list
       | Poly_variant of string * 'e option
+      | Expect of string Located.t
     [@@deriving sexp_of]
   end
 
@@ -213,7 +214,7 @@ module Expr = struct
   let sub_exprs t =
     let snds = List.map ~f:snd in
     match t.desc with
-    | Lit _ | Var _ | Poly_variant (_, None) -> []
+    | Lit _ | Var _ | Poly_variant (_, None) | Expect _ -> []
     | App (a, b)
     | Let { body = a; in_ = b; _ }
     | Toplevel_splice { code = a; expansion = b } -> [ a; b ]
@@ -246,7 +247,7 @@ module Expr = struct
     | Let { ident; args; body; in_; generalized = _ } ->
       binding_is_value ~ident ~args ~body && is_value in_
     | Toplevel_splice { expansion; code = _ } -> is_value expansion
-    | App _ | Splice _ -> false
+    | App _ | Splice _ | Expect _ -> false
     | Tuple _
     | Construct _
     | Record _
@@ -289,8 +290,8 @@ module Expr = struct
     | Poly_extend _
     | Poly_restrict _
     | Poly_update _
-    | Poly_variant _ ->
-      List.for_all (sub_exprs t) ~f:(splices_are_values ~depth)
+    | Poly_variant _
+    | Expect _ -> List.for_all (sub_exprs t) ~f:(splices_are_values ~depth)
 
   and binding_is_value ~ident ~args ~body =
     (not (List.is_empty args))
@@ -330,9 +331,19 @@ module Ident_info = struct
   [@@deriving sexp_of]
 end
 
+module Expect_test = struct
+  type t =
+    { name : string Located.t
+    ; body : Expr.t
+    ; loc : Loc.t
+    }
+  [@@deriving sexp_of]
+end
+
 module Program = struct
   type t =
     { sccs : Scc.t list
+    ; expect_tests : Expect_test.t list
     ; ident_info : Ident_info.t Ident.Map.t
     }
   [@@deriving sexp_of]

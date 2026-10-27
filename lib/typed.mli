@@ -155,6 +155,9 @@ module Expr : sig
       | Poly_restrict of 'e * string
       | Poly_update of 'e * (string * 'e) list
       | Poly_variant of string * 'e option
+      | Expect of string Located.t
+      (** Checks the output so far against the string, see
+          [Expect_test_runner]. *)
     [@@deriving sexp_of]
   end
 
@@ -212,9 +215,19 @@ module Ident_info : sig
   [@@deriving sexp_of]
 end
 
+module Expect_test : sig
+  type t =
+    { name : string Located.t
+    ; body : Expr.t
+    ; loc : Loc.t
+    }
+  [@@deriving sexp_of]
+end
+
 module Program : sig
   type t =
     { sccs : Scc.t list (** Each component after the ones it refers to. *)
+    ; expect_tests : Expect_test.t list (** In program order. *)
     ; ident_info : Ident_info.t Ident.Map.t
     }
   [@@deriving sexp_of]

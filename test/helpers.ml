@@ -85,7 +85,7 @@ let module_ name' toplevels = toplevel (Module (name name', toplevels))
 let let_name (toplevel : Toplevel.t) =
   match toplevel.txt with
   | Let (name, _, _, _) -> Some name.txt
-  | Type _ | Module _ -> None
+  | Type _ | Module _ | Expect_test _ -> None
 ;;
 
 let prims =

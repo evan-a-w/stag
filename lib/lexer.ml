@@ -159,6 +159,55 @@ let escape (t : State.t) =
     illegal ()
 ;;
 
+(* The delimiter [id] of a quoted string [{id|...|id}] starting here, if one
+   does. *)
+let quoted_string_id (t : State.t) =
+  let rec id_end i =
+    match State.peek_at t i with
+    | Some ('a' .. 'z' | '_') -> id_end (i + 1)
+    | Some '|' -> Some i
+    | _ -> None
+  in
+  match State.peek t with
+  | Some '{' ->
+    Option.map (id_end 1) ~f:(fun i ->
+      String.sub t.src ~pos:(t.offset + 1) ~len:(i - 1))
+  | _ -> None
+;;
+
+(* At the start of a quoted string delimited by [id], its contents, raw. *)
+let quoted_string (t : State.t) ~id =
+  let start = State.pos t in
+  let open_len = String.length id + 2 in
+  State.bump_n t open_len;
+  let close = "|" ^ id ^ "}" in
+  let contents_start = t.offset in
+  let rec loop () =
+    if State.at_end t
+    then State.error_opening t start ~len:open_len Unterminated_string
+    else if String.is_substring_at t.src ~pos:t.offset ~substring:close
+    then (
+      let contents =
+        String.sub t.src ~pos:contents_start ~len:(t.offset - contents_start)
+      in
+      State.bump_n t (String.length close);
+      contents)
+    else (
+      State.bump t;
+      loop ())
+  in
+  loop ()
+;;
+
+(* Whether [word] is next, not followed by an identifier character. *)
+let is_word_at (t : State.t) ~pos word =
+  String.is_substring_at t.src ~pos:(t.offset + pos) ~substring:word
+  && not
+       (Option.exists
+          (State.peek_at t (pos + String.length word))
+          ~f:is_ident_char)
+;;
+
 (* At the opening quote. *)
 let string (t : State.t) =
   let start = State.pos t in
@@ -216,6 +265,9 @@ let comment (t : State.t) =
       | Some '"', _, _, _ ->
         State.bump t;
         skip_string ();
+        loop depth
+      | Some '{', _, _, _ when Option.is_some (quoted_string_id t) ->
+        ignore (quoted_string t ~id:(Option.value_exn (quoted_string_id t)));
         loop depth
       | Some '\'', Some '\\', Some _, Some '\'' ->
         State.bump_n t 4;
@@ -281,9 +333,14 @@ let token (t : State.t) : Located.t =
       (match c, State.peek_at t 1 with
        | '(', _ -> simple 1 Lparen
        | ')', _ -> simple 1 Rparen
+       | '[', Some '%' when is_word_at t ~pos:1 "%expect" ->
+         simple 8 Expect_open
        | '[', _ -> simple 1 Lbracket
        | ']', _ -> simple 1 Rbracket
-       | '{', _ -> simple 1 Lbrace
+       | '{', _ ->
+         (match quoted_string_id t with
+          | Some id -> String (quoted_string t ~id)
+          | None -> simple 1 Lbrace)
        | '}', _ -> simple 1 Rbrace
        | ',', _ -> simple 1 Comma
        | ';', _ -> simple 1 Semi
@@ -320,7 +377,9 @@ let token (t : State.t) : Located.t =
        | c, _ when Char.is_uppercase c -> Uident (ident t)
        | c, _ when is_ident_start c ->
          let text = ident t in
-         Option.value (Token.keyword text) ~default:(Lident text)
+         if String.equal text "let" && is_word_at t ~pos:0 "%expect_test"
+         then simple 12 Let_expect_test
+         else Option.value (Token.keyword text) ~default:(Lident text)
        | c, _ ->
          State.bump t;
          State.error t start (Illegal_character c))

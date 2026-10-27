@@ -151,7 +151,7 @@ let check_files ?(limits = Limits.unlimited) ?output files =
         (List.filter_map modules ~f:(fun (toplevel : Syntax.Toplevel.t) ->
            match toplevel.txt with
            | Module (name, _) -> Some name.txt
-           | Let _ | Type _ -> None))
+           | Let _ | Type _ | Expect_test _ -> None))
       checked.program
   in
   let eval_order =

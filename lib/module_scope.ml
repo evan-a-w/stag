@@ -104,6 +104,7 @@ let rec members_of_toplevels toplevels ~path
                ~duplicate:(fun name -> Duplicate_field name)
            in
            { members with fields })
+      | Expect_test _ -> Ok members
       | Module ({ txt = name; loc }, toplevels) ->
         let%bind.Result module_ =
           members_of_toplevels toplevels ~path:(path @ [ name ])
@@ -128,7 +129,7 @@ let rec toplevels t =
     ::
     (match toplevel.txt with
      | Module (name, _) -> toplevels (enter t name.txt)
-     | Let _ | Type _ -> []))
+     | Let _ | Type _ | Expect_test _ -> []))
 ;;
 
 let rec find_module t name =

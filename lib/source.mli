@@ -114,6 +114,7 @@ module Expr : sig
       | Poly_restrict of t * string
       | Poly_update of t * (Syntax.Name.t * t) list
       | Poly_variant of string * t option
+      | Expect of string Located.t
   end
 
   (** Generated code is code values, so has no [Toplevel_splice]. *)

@@ -162,6 +162,9 @@ module Expr = struct
     | Poly_restrict of t * Name.t (** [e \ x] *)
     | Poly_update of t * (Name.t * t) list (** [{e with x = v; ...}] *)
     | Poly_variant of Name.t * t option (** [None] is a [unit] argument. *)
+    | Expect of string Located.t
+    (** [[%expect {|...|}]], located at the string, or zero width after
+        [[%expect] if there is none. *)
   [@@deriving sexp_of, compare, equal]
 end
 
@@ -172,6 +175,10 @@ module Toplevel = struct
     | Let of Name.t * Binding.t list * Type_expr.t option * Expr.t
     | Type of Type_decl.t
     | Module of Name.t * t list
+    | Expect_test of
+        { name : string Located.t
+        ; body : Expr.t
+        }
   [@@deriving sexp_of, compare, equal]
 end
 

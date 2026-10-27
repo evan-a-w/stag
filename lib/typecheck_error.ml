@@ -51,6 +51,7 @@ module Kind = struct
     | Duplicate_pattern_variable of string
     | Duplicate_row_entry of string
     | Compile_time_use_of_toplevel_being_checked of string
+    | Expect_outside_expect_test
     | Splice_evaluation_failed of
         { code : Typed.Expr.t
         ; error : Error.t

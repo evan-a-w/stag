@@ -439,7 +439,7 @@ let create root fresh =
     |> List.filter_map ~f:(fun (module_, (toplevel : Toplevel.t)) ->
       match toplevel.txt with
       | Type decl -> Some (declare module_ decl ~fresh)
-      | Let _ | Module _ -> None)
+      | Let _ | Module _ | Expect_test _ -> None)
     |> Result.all
   in
   let t =

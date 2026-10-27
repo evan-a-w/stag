@@ -165,6 +165,7 @@ module Expr = struct
       | Poly_restrict of t * string
       | Poly_update of t * (Syntax.Name.t * t) list
       | Poly_variant of string * t option
+      | Expect of string Located.t
   end
 
   let syntax_view (expr : Syntax.Expr.t) : View.t =
@@ -212,6 +213,7 @@ module Expr = struct
     | Poly_restrict (expr, label) -> Poly_restrict (sub expr, label.txt)
     | Poly_update (expr, fields') -> Poly_update (sub expr, fields fields')
     | Poly_variant (tag, arg) -> Poly_variant (tag.txt, Option.map arg ~f:sub)
+    | Expect expected -> Expect expected
   ;;
 
   let generated_view ({ desc; ty = _; loc } : Typed.Expr.t) : View.t =
@@ -262,6 +264,7 @@ module Expr = struct
     | Poly_restrict (expr, label) -> Poly_restrict (sub expr, label)
     | Poly_update (expr, fields') -> Poly_update (sub expr, fields fields')
     | Poly_variant (tag, arg) -> Poly_variant (tag, Option.map arg ~f:sub)
+    | Expect expected -> Expect expected
   ;;
 
   let view = function

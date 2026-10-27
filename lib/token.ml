@@ -12,6 +12,7 @@ type t =
   | True
   | False
   | Let
+  | Let_expect_test (** [let%expect_test] *)
   | In
   | Match
   | With
@@ -23,6 +24,7 @@ type t =
   | Lparen
   | Rparen
   | Lbracket
+  | Expect_open (** [[%expect] *)
   | Rbracket
   | Lbrace
   | Rbrace
@@ -73,6 +75,7 @@ let to_string = function
   | True -> "true"
   | False -> "false"
   | Let -> "let"
+  | Let_expect_test -> "let%expect_test"
   | In -> "in"
   | Match -> "match"
   | With -> "with"
@@ -84,6 +87,7 @@ let to_string = function
   | Lparen -> "("
   | Rparen -> ")"
   | Lbracket -> "["
+  | Expect_open -> "[%expect"
   | Rbracket -> "]"
   | Lbrace -> "{"
   | Rbrace -> "}"

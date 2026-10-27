@@ -545,6 +545,7 @@ let starts_atom : Token.t -> bool = function
   | Lparen
   | Lbrace
   | Quote_open
+  | Expect_open
   | Splice -> true
   | _ -> false
 ;;
@@ -807,6 +808,18 @@ and atom t : Expr.t =
     let e = expr t in
     close t Quote_close ~opener:Quote_open ~open_loc:start;
     expr_since t start (Quote e)
+  | Expect_open ->
+    advance t;
+    let expected =
+      match peek t with
+      | String s ->
+        let loc = loc t in
+        advance t;
+        located ~loc s
+      | _ -> located ~loc:{ start with start = start.stop } ""
+    in
+    close t Rbracket ~opener:Expect_open ~open_loc:start;
+    expr_since t start (Expect expected)
   | _ -> expected t "an expression"
 
 and poly_field t =
@@ -970,6 +983,19 @@ let rec toplevel t : Toplevel.t =
     let toplevels = toplevels t ~stop:Token.End in
     close t End ~opener:Struct ~open_loc:struct_loc;
     since t start (Toplevel.Module (name, toplevels))
+  | Let_expect_test ->
+    advance t;
+    let name =
+      match peek t with
+      | String s ->
+        let loc = loc t in
+        advance t;
+        located ~loc s
+      | _ -> expected t "the name of the test, a string"
+    in
+    expect t Equal;
+    let body = expr t in
+    since t start (Toplevel.Expect_test { name; body })
   | _ -> expected t "a declaration (`let`, `type` or `module`)"
 
 and toplevels t ~stop =

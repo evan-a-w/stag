@@ -916,3 +916,31 @@ let%expect_test "polymorphic records, variants and modules" =
     val quoted : <int>{} -> <int * 'a>{x : 'a; ..'b}
     |}]
 ;;
+
+let%expect_test "expect tests" =
+  prog
+    {x|
+let%expect_test "add" =
+  print_int 1;
+  [%expect {| 1 |}];
+  [%expect];
+  [%expect "s"]
+let%expect_test {|q|} = ()
+|x};
+  prog {|let%expect_test name = ()|};
+  prog {|let%expect_test "x" ()|};
+  expr {|[%expect 1]|};
+  expr "[%expect {||}";
+  [%expect
+    {|
+    ((Expect_test (name add)
+      (body
+       (Let _ () () (App (Var print_int ()) (Lit (Int 1)))
+        (Let _ () () (Expect " 1 ") (Let _ () () (Expect "") (Expect s))))))
+     (Expect_test (name q) (body (Lit Unit))))
+    t.stag:1:16-20: expected the name of the test, a string, found `name`
+    t.stag:1:20-21: expected `=`, found `(`
+    t.stag:1:9-10: expected `]` to close this `[%expect` (opened at 1:0), found `1`
+    t.stag:1:13-13: expected `]` to close this `[%expect` (opened at 1:0), found end of file
+    |}]
+;;

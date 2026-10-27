@@ -12,6 +12,7 @@ type t =
   | True
   | False
   | Let
+  | Let_expect_test (** [let%expect_test] *)
   | In
   | Match
   | With
@@ -23,6 +24,7 @@ type t =
   | Lparen
   | Rparen
   | Lbracket
+  | Expect_open (** [[%expect] *)
   | Rbracket
   | Lbrace
   | Rbrace
