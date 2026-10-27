@@ -118,6 +118,13 @@ module Expr = struct
       | Ref of Typed.Var_ref.t
   end
 
+  module Subs = struct
+    type nonrec t =
+      | Explicit of (string * t option) list
+      | Implicit
+      | Providers of Typed.Binder.t String.Map.t
+  end
+
   module View = struct
     type nonrec t =
       | Lit of Syntax.Lit.t
@@ -132,7 +139,7 @@ module Expr = struct
           }
       | Splice of
           { code : t
-          ; subs : (string * t option) list option
+          ; subs : Subs.t
           }
       | Quote of t
       | Tuple of t list
@@ -168,9 +175,12 @@ module Expr = struct
       Splice
         { code = sub expr
         ; subs =
-            Option.map subs ~f:(fun subs ->
-              List.map subs ~f:(fun (name, expr) ->
-                name, Option.map expr ~f:sub))
+            (match subs with
+             | None -> Implicit
+             | Some subs ->
+               Explicit
+                 (List.map subs ~f:(fun (name, expr) ->
+                    name, Option.map expr ~f:sub)))
         }
     | Quote expr -> Quote (sub expr)
     | Tuple exprs -> Tuple (subs exprs)
@@ -212,10 +222,11 @@ module Expr = struct
       Splice
         { code = sub code
         ; subs =
-            Some (List.map subs ~f:(fun (name, expr) -> name, Some (sub expr)))
+            Explicit
+              (List.map subs ~f:(fun (name, expr) -> name, Some (sub expr)))
         }
-    | Splice { code; subs = Implicit _ } ->
-      Splice { code = sub code; subs = None }
+    | Splice { code; subs = Implicit providers } ->
+      Splice { code = sub code; subs = Providers providers }
     | Toplevel_splice _ ->
       raise_s [%message "Generated code has a toplevel splice"]
     | Quote expr -> Quote (sub expr)

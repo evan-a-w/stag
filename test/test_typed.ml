@@ -761,12 +761,12 @@ let%expect_test "recursive components" =
           "<'b>{gen : 'c -> 'b; n : 'c; ..'d}")))))
      (recursive false))
     ((members
-      (((ident b/6) (args ()) (scheme "<'a>{a : 'a; ..'b}")
-        (body (Quote (Var (Free a) : 'a) : "<'a>{a : 'a; ..'b}")))))
-     (recursive false))
-    ((members
       (((ident a/5) (args ()) (scheme "<'a>{b : 'a; ..'b}")
         (body (Quote (Var (Free b) : 'a) : "<'a>{b : 'a; ..'b}")))))
+     (recursive false))
+    ((members
+      (((ident b/6) (args ()) (scheme "<'a>{a : 'a; ..'b}")
+        (body (Quote (Var (Free a) : 'a) : "<'a>{a : 'a; ..'b}")))))
      (recursive false))
     ((members
       (((ident loop/7) (args (x/19)) (scheme "'a -> 'b")
@@ -970,11 +970,10 @@ let%expect_test "toplevel splice in a level -1 let" =
                 (in_
                  (App
                   (Var (Bound (Local k/17)) :
-                   "<<int>{}>{n?'_f : int; x : <int>{}} -> <<int>{}>{n?'_f : int; x : <int>{}}")
-                  (Quote (Var (Free x) : <int>{}) :
-                   "<<int>{}>{n?'_f : int; x : <int>{}}")
-                  : "<<int>{}>{n?'_f : int; x : <int>{}}"))
-                : "<<int>{}>{n?'_f : int; x : <int>{}}"))
+                   "<<int>{}>{-n; x : <int>{}} -> <<int>{}>{-n; x : <int>{}}")
+                  (Quote (Var (Free x) : <int>{}) : "<<int>{}>{-n; x : <int>{}}")
+                  : "<<int>{}>{-n; x : <int>{}}"))
+                : "<<int>{}>{-n; x : <int>{}}"))
               (expansion (Var (Bound (Local x/15)) : <int>{})) : <int>{}))
             : <int>{}))
           (expansion (Lit (Int 1) : int)) : int))

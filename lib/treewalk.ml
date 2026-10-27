@@ -379,6 +379,8 @@ let instantiate t (code : Typed.Expr.t) ~entry =
     { node with desc }
   in
   let rec go ~depth (expr : Typed.Expr.t) =
+    Budget.step t.budget ~f:(fun () -> go_step ~depth expr)
+  and go_step ~depth (expr : Typed.Expr.t) =
     let desc : Typed.Expr.t Typed.Expr.Desc.t =
       match expr.desc with
       | Var (Free name) when depth = 0 ->
@@ -579,10 +581,7 @@ and bind_functions t ({ members; recursive } : Typed.Scc.t) =
 
 (* [env] has the bindings of the current activation, at [level]. *)
 and eval t ~env ~level expr =
-  let%bind () = Budget.enter t.budget in
-  let value = step t ~env ~level expr in
-  Budget.leave t.budget;
-  value
+  Budget.step t.budget ~f:(fun () -> step t ~env ~level expr)
 
 and step t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
   let eval' = eval t ~env ~level in
@@ -695,7 +694,17 @@ and eval_match t ~env ~level value = function
 (* The code [expr] is in a quote built at [level], [depth] quotes in. Splices at
    [depth] 1 are evaluated now, and the values of persistent binders of [level]
    or below are embedded under fresh idents. *)
-and build t ~env ~level ~(embedded : Embedded.t) ~depth (expr : Typed.Expr.t)
+and build t ~env ~level ~embedded ~depth expr =
+  Budget.step t.budget ~f:(fun () ->
+    build_step t ~env ~level ~embedded ~depth expr)
+
+and build_step
+      t
+      ~env
+      ~level
+      ~(embedded : Embedded.t)
+      ~depth
+      (expr : Typed.Expr.t)
   : Typed.Expr.t Or_error.t
   =
   match expr.desc with

@@ -876,19 +876,16 @@ let%expect_test "toplevel splices drop names spliced code only may use" =
   (* The generated code is at level 0, where the toplevel [x] is in scope. *)
   check
     [ top "x" [] (bool true); top "used_toplevel" [] (run (quote (var "x"))) ];
-  (* The type of a name that may be used is unified with the name's, even if
-     it turns out to be unused. *)
-  check [ top "unused_but_typed" [] (run ~binder:"id" (quote (int 1))) ];
+  (* A name that may be used is not provided by a toplevel, so needn't have
+     its type. *)
+  check [ top "unused_of_another_type" [] (run ~binder:"id" (quote (int 1))) ];
   [%expect
     {|
     val unused : int
     (Not_in_scope x)
     val x : bool
     val used_toplevel : bool
-    (Unification_error
-     (Type_mismatch (TCon bool ())
-      (TArrow (TVar (Unbound 44 1)) (TVar (Link (TVar (Unbound 44 1)))))
-      Structural_mismatch))
+    val unused_of_another_type : int
     |}]
 ;;
 
@@ -942,5 +939,19 @@ let%expect_test "presence approximation" =
       (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
        (RVar (Link (RVar (Unbound 50 1)))))
       REmpty (Missing_label x)))
+    |}]
+;;
+
+let%expect_test "references to toplevels in quotes don't join their components" =
+  let a = top "a" [] (quote (var "b")) in
+  let b = top "b" [] (tuple [ var "a"; int 1 ]) in
+  check [ a; b ];
+  check [ b; a ];
+  [%expect
+    {|
+    val a : <'a>{b : 'a; ..'b}
+    val b : <'a>{b : 'a; ..'b} * int
+    val b : <'a>{b : 'a; ..'b} * int
+    val a : <'a>{b : 'a; ..'b}
     |}]
 ;;
