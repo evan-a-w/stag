@@ -49,4 +49,9 @@ type t =
   | Empty_record
   | Duplicate_pattern_variable of string
   | Duplicate_row_entry of string
+  | Compile_time_use_of_toplevel_being_checked of string
+  | Splice_evaluation_failed of
+      { code : Typed.Expr.t
+      ; error : Error.t
+      }
 [@@deriving sexp_of, variants]

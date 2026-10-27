@@ -755,7 +755,7 @@ let%expect_test "non-regular and unguarded recursive aliases" =
 ;;
 
 let%expect_test "sexps of recursive aliases" =
-  let typecheck = Typecheck.create () in
+  let typecheck = typechecker () in
   (match Typecheck.typecheck typecheck ~program:[ l ] with
    | Ok { signature; _ } -> print_s [%sexp (signature : Signature.t)]
    | Error error -> print_s [%sexp (error : Typecheck_error.t)]);
@@ -848,7 +848,7 @@ let%expect_test "mutually recursive alias cliques expand each alias once" =
     type a2 = [`T0 of ([`T0 of 'a | `T1 of ([`T0 of 'a | `T1 of 'b | `T2 of a2] as 'b) | `T2 of a2] as 'a) | `T1 of 'b | `T2 of a2]
     |}];
   (* Each declaration shows each of the 10 aliases' variants once. *)
-  let typecheck = Typecheck.create () in
+  let typecheck = typechecker () in
   (match Typecheck.typecheck typecheck ~program:(clique 10) with
    | Error error -> print_s [%sexp (error : Typecheck_error.t)]
    | Ok { signature; _ } ->
@@ -1068,7 +1068,7 @@ let%expect_test "traversals of shared aliases take linear time" =
             ("h", [ typed "z" (t_n Ty.int) ], None, app (var "g") [ var "z" ])
         ]
     in
-    match Typecheck.typecheck (Typecheck.create ()) ~program with
+    match Typecheck.typecheck (typechecker ()) ~program with
     | Error error -> print_s [%sexp (error : Typecheck_error.t)]
     | Ok { signature; _ } ->
       List.iter signature ~f:(function

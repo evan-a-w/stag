@@ -50,6 +50,11 @@ val find_field
   -> Syntax.Path.t
   -> (Field.t, Typecheck_error.t) Result.t
 
+(** By canonical name. *)
+val constructor : t -> string -> (Constructor.t, Typecheck_error.t) Result.t
+
+val field : t -> string -> (Field.t, Typecheck_error.t) Result.t
+
 (** The checked declaration of the type of canonical name [name]. *)
 val find_decl_exn : t -> string -> Signature.Type_decl.t
 

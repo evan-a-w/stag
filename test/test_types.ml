@@ -782,7 +782,7 @@ let%expect_test "generalization of syntactic values" =
     ; top "weak_match" [] (match_ (app (var "id") [ nil ]) [ Pat.any, nil ])
     ; top "weak_arm" [] (match_ nil [ Pat.any, app (var "id") [ nil ] ])
     ; top "weak_field" [] (field (app (var "id") [ var "boxed" ]) "contents")
-    ; top "weak_splice" [] (splice (quote nil))
+    ; top "spliced_value" [] (splice (quote nil))
     ];
   [%expect
     {|
@@ -803,7 +803,7 @@ let%expect_test "generalization of syntactic values" =
     val weak_match : list['_a]
     val weak_arm : list['_a]
     val weak_field : list['_a]
-    val weak_splice : list['_a]
+    val spliced_value : list['a]
     |}]
 ;;
 
@@ -922,7 +922,7 @@ let%expect_test "recursive SCCs with a non-function are not generalized" =
 
 let%expect_test "recursive local non-functions are not generalized" =
   let print_local equal =
-    let typecheck = Typecheck.create () in
+    let typecheck = typechecker () in
     match
       Typecheck.typecheck
         typecheck
@@ -937,8 +937,10 @@ let%expect_test "recursive local non-functions are not generalized" =
   print_local (var "x");
   print_local (seq (var "x") nil);
   print_local (match_ (var "x") [ Pat.any, nil ]);
-  (* Over-approximated: the splice could be provided [x] from the scope. *)
+  (* The splices' providers are of the quote's level, so are never the
+     binder. *)
   print_local (quote (splice (quote nil)));
+  print_local (quote (splice (quote (var "x"))));
   print_local nil;
   print_local (let_ "x" [] nil (var "x"));
   print_local (match_ nil [ Pat.var "x", var "x" ]);
@@ -950,13 +952,14 @@ let%expect_test "recursive local non-functions are not generalized" =
     val local : '_a * '_a
     val local : list['_a] * list['_a]
     val local : list['_a] * list['_a]
-    val local : <list['_a]>{..'_b} * <list['_a]>{..'_b}
+    val local : <list['a]>{..'b} * <list['c]>{..'d}
+    val local : <'a>{x : 'a; ..'b} * <'c>{x : 'c; ..'d}
     val local : list['a] * list['b]
     val local : list['a] * list['b]
     val local : list['a] * list['b]
     val local : list['a] * list['b]
     val local : <list['a]>{y : 'b; ..'c} * <list['d]>{y : 'e; ..'f}
-    val local : <list['_a]>{x : '_b; ..'_c} * <list['_a]>{x : '_b; ..'_c}
+    val local : <list['a]>{x : 'b; ..'c} * <list['d]>{x : 'e; ..'f}
     |}]
 ;;
 

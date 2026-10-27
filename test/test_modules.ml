@@ -757,8 +757,26 @@ let%expect_test "splicing code with canonically named free variables" =
     |}]
 ;;
 
-let%expect_test "non-persistent toplevels used at the wrong level" =
+let%expect_test "toplevels of modules used at compile time" =
+  check
+    [ module_
+        "M"
+        [ top "n" [] (int 1)
+        ; top "code" [] (quote (app (var "add") [ var "n"; int 1 ]))
+        ]
+    ; top "x" [] (splice (var "M.code"))
+    ];
   check [ module_ "M" [ top "n" [] (int 1) ]; top "x" [] (splice (var "M.n")) ];
   [%expect
-    {| (Variable_used_at_wrong_level (name M.n) (var_level 0) (used_at -1)) |}]
+    {|
+    module M : sig
+      val n : int
+      val code : <int>{M.n : int; ..'a}
+    end
+    val x : int
+    (Unification_error
+     (Type_mismatch
+      (TCode (inner (TVar (Unbound 20 1))) (context (RVar (Unbound 21 1))))
+      (TCon int ()) Structural_mismatch))
+    |}]
 ;;
