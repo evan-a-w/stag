@@ -1,70 +1,18 @@
 open! Import
-open Syntax
-open Helpers
+open Source_helpers
 
-let prim_names = List.filter_map prims ~f:let_name
-
-let typecheck_exn program =
-  match Typecheck.typecheck (typechecker ()) ~program with
-  | Ok { program; _ } -> program
-  | Error error -> raise_s [%sexp (error : Typecheck_error.t)]
-;;
-
-let is_prim (ident : Typed.Ident.t) =
-  List.mem prim_names ident.name ~equal:String.equal
-;;
-
-let toplevel_idents (program : Typed.Program.t) =
-  List.concat_map program.sccs ~f:(fun scc ->
-    List.map scc.members ~f:(fun member -> member.ident))
-  |> Typed.Ident.Set.of_list
-;;
-
-let prim_locals =
-  let program = typecheck_exn prims in
-  Map.length program.ident_info - Set.length (toplevel_idents program)
-;;
-
-(* The components of [program] after those of [prims], and with [~idents]
-   the types and levels of its binders. Toplevels get the first stamps, then prims'
-   locals, as prims are checked first. *)
-let print ?(idents = false) program =
-  match Typecheck.typecheck (typechecker ()) ~program:(prims @ program) with
-  | Error error -> print_s [%sexp (error : Typecheck_error.t)]
-  | Ok { program; _ } ->
-    List.iter program.sccs ~f:(fun (scc : Typed.Scc.t) ->
-      if not (List.for_all scc.members ~f:(fun member -> is_prim member.ident))
-      then print_s [%sexp (scc : Typed.Scc.t)]);
-    if idents
-    then (
-      let toplevels = toplevel_idents program in
-      print_s
-        [%sexp
-          (Map.filter_keys program.ident_info ~f:(fun ident ->
-             if Set.mem toplevels ident
-             then not (is_prim ident)
-             else ident.stamp >= Set.length toplevels + prim_locals)
-           |> Map.map ~f:(fun { Typed.Ident_info.ty; level } ->
-             Type.to_string_hum ty, level)
-           : (string * int) Typed.Ident.Map.t)])
+let print ?idents source =
+  Option.iter (typecheck source) ~f:(print_typed ?idents)
 ;;
 
 let%expect_test "lets and shadowing" =
   print
     ~idents:true
-    [ top
-        "f"
-        [ "x" ]
-        (let_
-           "x"
-           []
-           (int 1)
-           (match_
-              (tuple [ var "x"; var "x" ])
-              [ ( Pat.var "x"
-                , let_ "g" [ "y" ] (var "y") (app (var "g") [ var "x" ]) )
-              ]))
-    ];
+    {|
+let f x =
+  let x = 1 in
+  match (x, x) with x -> let g y = y in g x
+|};
   [%expect
     {|
     ((members
@@ -94,20 +42,9 @@ let%expect_test "lets and shadowing" =
 
 let%expect_test "instantiation at variables" =
   print
-    [ top
-        "use"
-        []
-        (let_
-           "pair"
-           [ "x" ]
-           (tuple [ var "x"; var "x" ])
-           (tuple
-              [ app (var "id") [ int 1 ]
-              ; app (var "id") [ bool true ]
-              ; app (var "pair") [ unit ]
-              ; var "pair"
-              ]))
-    ];
+    {|
+let use = let pair x = (x, x) in (id 1, id true, pair (), pair)
+|};
   [%expect
     {|
     ((members
@@ -136,33 +73,19 @@ let%expect_test "instantiation at variables" =
 
 let%expect_test "constructors and fields in modules" =
   print
-    [ module_
-        "M"
-        [ Decl.variant
-            "t"
-            [ "A", []; "B", [ Ty.int ]; "C", [ Ty.bool; Ty.int ] ]
-        ; Decl.record "r" [ "x", Ty.int; "y", Ty.bool ]
-        ; top "in_m" [] (construct "C" ~args:[ bool true; int 1 ])
-        ]
-    ; top
-        "outside"
-        [ "v" ]
-        (match_
-           (var "v")
-           [ Pat.construct "M.A", record [ "M.y", bool true; "M.x", int 1 ]
-           ; ( Pat.construct "M.B" ~args:[ Pat.var "n" ]
-             , record [ "M.x", var "n"; "M.y", bool false ] )
-           ; ( Pat.construct "M.C" ~args:[ Pat.any; Pat.int 2 ]
-             , let_
-                 "r"
-                 []
-                 (record [ "M.x", int 2; "M.y", bool true ])
-                 (match_
-                    (var "r")
-                    [ Pat.record [ "M.y", Pat.var "y" ], var "r" ]) )
-           ])
-    ; top "get" [ "r" ] (field (var "r") "M.x")
-    ];
+    {|
+module M = struct
+  type t = A | B of int | C of bool * int
+  type r = {x : int; y : bool}
+  let in_m = C (true, 1)
+end
+let outside v =
+  match v with
+  | M.A -> {M.y = true; M.x = 1}
+  | M.B n -> {M.x = n; M.y = false}
+  | M.C (_, 2) -> let r = {M.x = 2; M.y = true} in (match r with {M.y = y} -> r)
+let get r = r.M.x
+|};
   [%expect
     {|
     ((members
@@ -217,31 +140,11 @@ let%expect_test "constructors and fields in modules" =
 let%expect_test "polymorphic records" =
   print
     ~idents:true
-    [ top
-        "ops"
-        [ "r" ]
-        (tuple
-           [ dot (var "r") "a"
-           ; extend [ "c", int 1 ] (var "r")
-           ; restrict (var "r") "b"
-           ; update (var "r") [ "a", bool true ]
-           ; poly_record [ "a", int 1; "b", unit ]
-           ])
-    ; top
-        "rest"
-        [ "r" ]
-        (match_
-           (var "r")
-           [ ( Pat.poly_record ~bind:"others" [ "a", Pat.var "a"; "b", Pat.any ]
-             , tuple [ var "a"; var "others" ] )
-           ])
-    ; top
-        "open_"
-        [ "r" ]
-        (match_
-           (var "r")
-           [ Pat.poly_record ~rest:Open [ "a", Pat.var "a" ], var "a" ])
-    ];
+    {|
+let ops r = (r.`a, {`c = 1 | r}, r \ `b, {r with `a = true}, {`a = 1; `b = ()})
+let rest r = match r with {`a = a; `b = _; ..others} -> (a, others)
+let open_ r = match r with {`a = a; ..} -> a
+|};
   [%expect
     {|
     ((members
@@ -299,17 +202,10 @@ let%expect_test "polymorphic records" =
 let%expect_test "polymorphic variants" =
   print
     ~idents:true
-    [ top "tags" [] (tuple [ tag "A"; tag "B" ~arg:(int 1) ])
-    ; top
-        "handle"
-        [ "v" ]
-        (match_
-           (var "v")
-           [ Pat.tag "A", int 0
-           ; Pat.tag "B" ~arg:(Pat.var "n"), var "n"
-           ; Pat.var "other", int 2
-           ])
-    ];
+    {|
+let tags = (`A, `B 1)
+let handle v = match v with `A -> 0 | `B n -> n | other -> 2
+|};
   [%expect
     {|
     ((members
@@ -339,9 +235,10 @@ let%expect_test "polymorphic variants" =
 let%expect_test "quotes" =
   print
     ~idents:true
-    [ top "closed" [] (quote (let_ "y" [] (int 1) (var "y")))
-    ; top "nested" [] (quote (quote (app (var "add") [ var "x"; int 1 ])))
-    ];
+    {|
+let closed = .<let y = 1 in y>.
+let nested = .<.<add x 1>.>.
+|};
   [%expect
     {|
     ((members
@@ -372,20 +269,14 @@ let%expect_test "quotes" =
 
 let%expect_test "level crossing" =
   print
-    [ top "n" [] (int 3)
-    ; top "not_persistent" [] (quote (var "n"))
-    ; top "persistent" [] (quote (app (var "id") [ int 1 ]))
-    ; top "outer_arg" [ "x" ] (quote (var "x"))
-    ; top
-        "local_persistent"
-        [ "n" ]
-        (let_
-           "g"
-           [ "x" ]
-           (app (var "add") [ var "x"; var "n" ])
-           (quote (app (var "g") [ int 1 ])))
-    ; top "local_not_persistent" [] (let_ "k" [] (int 1) (quote (var "k")))
-    ];
+    {|
+let n = 3
+let not_persistent = .<n>.
+let persistent = .<id 1>.
+let outer_arg x = .<x>.
+let local_persistent n = let g x = add x n in .<g 1>.
+let local_not_persistent = let k = 1 in .<k>.
+|};
   [%expect
     {|
     ((members (((ident n/4) (args ()) (scheme int) (body (Lit (Int 3) : int)))))
@@ -434,18 +325,10 @@ let%expect_test "level crossing" =
 ;;
 
 let%expect_test "explicit splices" =
-  let code = quote (app (var "add") [ var "x"; var "y" ]) in
   print
-    [ top
-        "explicit"
-        []
-        (quote
-           (let_
-              "x"
-              []
-              (int 1)
-              (splice ~subs:[ "x", None; "y", Some (var "z") ] code)))
-    ];
+    {|
+let explicit = .<let x = 1 in .~(.<add x y>.).{x; y = z}>.
+|};
   [%expect
     {|
     ((members
@@ -474,29 +357,14 @@ let%expect_test "explicit splices" =
 ;;
 
 let%expect_test "implicit splices" =
-  let code = quote (app (var "add") [ var "x"; int 1 ]) in
   print
     ~idents:true
-    [ top "bound" [] (quote (let_ "x" [] (int 1) (splice code)))
-    ; top "propagates" [] (quote (splice code))
-    ; top
-        "tail"
-        [ "c" ]
-        (let_
-           "outer"
-           []
-           (int 1)
-           (quote
-              (let_
-                 "y"
-                 []
-                 (int 1)
-                 (let_ "f" [ "a" ] (var "a") (splice (var "c"))))))
-    ; top
-        "later_level"
-        [ "c" ]
-        (quote (quote (let_ "y" [] (int 1) (splice (splice (var "c"))))))
-    ];
+    {|
+let bound = .<let x = 1 in .~(.<add x 1>.)>.
+let propagates = .<.~(.<add x 1>.)>.
+let tail c = let outer = 1 in .<let y = 1 in let f a = a in .~c>.
+let later_level c = .<.<let y = 1 in .~(.~c)>.>.
+|};
   [%expect
     {|
     ((members
@@ -602,16 +470,12 @@ let%expect_test "implicit splices" =
 let%expect_test "toplevel splices" =
   print
     ~idents:true
-    [ top "n" [] (int 3)
-    ; top "m" [] (var "n")
-    ; top
-        "f"
-        [ "x" ]
-        (splice
-           (quote
-              (app (var "add") [ var "x"; app (var "add") [ var "n"; int 1 ] ])))
-    ; top "closed" [] (splice (quote (int 1)))
-    ];
+    {|
+let n = 3
+let m = n
+let f x = .~(.<add x (add n 1)>.)
+let closed = .~(.<1>.)
+|};
   [%expect
     {|
     ((members (((ident n/4) (args ()) (scheme int) (body (Lit (Int 3) : int)))))
@@ -659,29 +523,14 @@ let%expect_test "toplevel splices" =
 
 let%expect_test "components in evaluation order" =
   print
-    [ top "main" [] (app (var "even") [ int 3 ])
-    ; top
-        "even"
-        [ "n" ]
-        (app
-           (var "cond")
-           [ app (var "eq") [ var "n"; int 0 ]
-           ; bool true
-           ; app (var "odd") [ var "n" ]
-           ])
-    ; top
-        "odd"
-        [ "n" ]
-        (app
-           (var "cond")
-           [ app (var "eq") [ var "n"; int 0 ]
-           ; bool false
-           ; app (var "even") [ var "n" ]
-           ])
-    ; top "a" [] (var "b")
-    ; top "b" [] (int 1)
-    ; top "gen" [ "n" ] (quote (app (var "gen") [ var "n" ]))
-    ];
+    {|
+let main = even 3
+let even n = cond (eq n 0) true (odd n)
+let odd n = cond (eq n 0) false (even n)
+let a = b
+let b = 1
+let gen n = .<gen n>.
+|};
   [%expect
     {|
     ((members
@@ -738,12 +587,13 @@ let%expect_test "components in evaluation order" =
 
 let%expect_test "recursive components" =
   print
-    [ top "gen" [ "n" ] (quote (app (var "gen") [ var "n" ]))
-    ; top "a" [] (quote (var "b"))
-    ; top "b" [] (quote (var "a"))
-    ; top "loop" [ "x" ] (app (var "loop") [ var "x" ])
-    ; top "captured" [ "x" ] (splice (quote (app (var "captured") [ var "x" ])))
-    ];
+    {|
+let gen n = .<gen n>.
+let a = .<b>.
+let b = .<a>.
+let loop x = loop x
+let captured x = .~(.<captured x>.)
+|};
   [%expect
     {|
     ((members
@@ -785,13 +635,9 @@ let%expect_test "recursive components" =
 
 let%expect_test "literals that look like placeholders" =
   print
-    [ top
-        "lits"
-        [ "s" ]
-        (match_
-           (var "s")
-           [ Pat.string "\0000", tuple [ char '\000'; string "\0003" ] ])
-    ];
+    {|
+let lits s = match s with "\0000" -> ('\000', "\0003")
+|};
   [%expect
     {|
     ((members
@@ -809,26 +655,13 @@ let%expect_test "literals that look like placeholders" =
 let%expect_test "level crossing at splices" =
   print
     ~idents:true
-    [ top "n" [] (int 3)
-    ; top
-        "persistent_local"
-        []
-        (quote
-           (let_
-              "f"
-              [ "x" ]
-              (var "x")
-              (splice (app (var "id") [ quote (app (var "f") [ int 1 ]) ]))))
-    ; top
-        "outside_binder"
-        []
-        (let_ "x" [] (int 1) (quote (splice (quote (var "x")))))
-    ; top
-        "shadowed"
-        [ "c" ]
-        (quote (let_ "x" [] (int 1) (let_ "x" [] (int 2) (splice (var "c")))))
-    ; top "n_shadowed" [] (let_ "n" [] (int 1) (splice (quote (var "n"))))
-    ];
+    {|
+let n = 3
+let persistent_local = .<let f x = x in .~(id .<f 1>.)>.
+let outside_binder = let x = 1 in .<.~(.<x>.)>.
+let shadowed c = .<let x = 1 in let x = 2 in .~c>.
+let n_shadowed = let n = 1 in .~(.<n>.)
+|};
   [%expect
     {|
     ((members (((ident n/4) (args ()) (scheme int) (body (Lit (Int 3) : int)))))
@@ -910,24 +743,12 @@ let%expect_test "level crossing at splices" =
 let%expect_test "toplevel splice in a level -1 let" =
   print
     ~idents:true
-    [ top "n" [] (int 3)
-    ; top
-        "deep"
-        []
-        (splice
-           (let_
-              "x"
-              []
-              (quote (int 1))
-              (splice
-                 (let_
-                    "k"
-                    [ "c" ]
-                    (seq
-                       (quote (let_ "n" [] (int 1) (splice (var "c"))))
-                       (var "c"))
-                    (app (var "k") [ quote (var "x") ])))))
-    ];
+    {|
+let n = 3
+let deep =
+  .~(let x = .<1>. in
+     .~(let k c = (.<let n = 1 in .~c>.; c) in k .<x>.))
+|};
   [%expect
     {|
     ((members (((ident n/4) (args ()) (scheme int) (body (Lit (Int 3) : int)))))
@@ -979,17 +800,10 @@ let%expect_test "toplevel splice in a level -1 let" =
 
 let%expect_test "toplevel used at level -1 by spliced code" =
   print
-    [ top "n" [] (int 3)
-    ; top
-        "deep"
-        []
-        (splice
-           (let_
-              "x"
-              []
-              (quote (int 1))
-              (splice (let_ "n" [] (int 5) (quote (seq (var "n") (var "x")))))))
-    ];
+    {|
+let n = 3
+let deep = .~(let x = .<1>. in .~(let n = 5 in .<n; x>.))
+|};
   [%expect
     {|
     ((members (((ident n/4) (args ()) (scheme int) (body (Lit (Int 3) : int)))))
@@ -1026,25 +840,11 @@ let%expect_test "toplevel used at level -1 by spliced code" =
 
 let%expect_test "explicit substitutions" =
   print
-    [ top "n" [] (int 3)
-    ; top
-        "persistent_shorthand"
-        []
-        (let_
-           "f"
-           [ "y" ]
-           (var "y")
-           (quote
-              (splice
-                 ~subs:[ "f", None; "id", None ]
-                 (quote (app (var "id") [ app (var "f") [ int 1 ] ])))))
-    ; top
-        "at_toplevel"
-        []
-        (splice
-           ~subs:[ "n", None; "y", Some (int 1) ]
-           (quote (app (var "add") [ var "n"; var "y" ])))
-    ];
+    {|
+let n = 3
+let persistent_shorthand = let f y = y in .<.~(.<id (f 1)>.).{f; id}>.
+let at_toplevel = .~(.<add n y>.).{n; y = 1}
+|};
   [%expect
     {|
     ((members (((ident n/4) (args ()) (scheme int) (body (Lit (Int 3) : int)))))
@@ -1103,19 +903,10 @@ let%expect_test "explicit substitutions" =
 
 let%expect_test "local recursion" =
   print
-    [ top
-        "direct"
-        [ "y" ]
-        (let_
-           "f"
-           [ "x" ]
-           (app (var "f") [ var "x" ])
-           (app (var "f") [ var "y" ]))
-    ; top
-        "in_quote"
-        []
-        (let_ "f" [ "x" ] (quote (app (var "f") [ var "x" ])) (quote (var "f")))
-    ];
+    {|
+let direct y = let f x = f x in f y
+let in_quote = let f x = .<f x>. in .<f>.
+|};
   [%expect
     {|
     ((members
@@ -1151,13 +942,9 @@ let%expect_test "local recursion" =
 let%expect_test "tuple patterns and annotations" =
   print
     ~idents:true
-    [ top
-        "first"
-        [ "p" ]
-        (match_
-           (var "p")
-           [ Pat.tuple [ Pat.var "a"; Pat.any ], var ~annot:Ty.int "a" ])
-    ];
+    {|
+let first p = match p with (a, _) -> (a : int)
+|};
   [%expect
     {|
     ((members
