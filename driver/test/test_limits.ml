@@ -1,27 +1,21 @@
 open! Import
-open Syntax
-open Helpers
+open Source_helpers
 
-let nat = Decl.variant "nat" [ "Z", []; "S", [ Ty.con "nat" ] ]
-
-let rec nat_of_int n =
-  if n = 0 then construct "Z" else construct "S" ~args:[ nat_of_int (n - 1) ]
-;;
+let nat_type = "type nat = Z | S of nat\n"
 
 (* Takes 2^n steps, at depth n. *)
 let spin =
-  top
-    "spin"
-    [ "n" ]
-    (match_
-       (var "n")
-       [ Pat.construct "Z", unit
-       ; ( Pat.construct "S" ~args:[ Pat.var "m" ]
-         , seq (app (var "spin") [ var "m" ]) (app (var "spin") [ var "m" ]) )
-       ])
+  nat_type ^ "let spin n = match n with Z -> () | S m -> spin m; spin m\n"
 ;;
 
-let loop = top "loop" [ "x" ] (app (var "loop") [ var "x" ])
+(* Code of size 2^n, built in about 2n steps. *)
+let blow =
+  nat_type
+  ^ "let blow n = match n with Z -> .<()>. | S m -> let c = blow m in .<.~c; \
+     .~c>.\n"
+;;
+
+let rec nat n = if n = 0 then "Z" else [%string "S (%{nat (n - 1)})"]
 
 let only_kind error =
   match Error.sexp_of_t error with
@@ -29,16 +23,16 @@ let only_kind error =
   | List _ as sexp -> print_s sexp
 ;;
 
-(* Checks then evaluates [program], printing the values of [show], or the
-   error of the phase that failed. *)
+(* Checks then evaluates [source], printing the values of [show],
+   or the error of the phase that failed. *)
 let run
-      ?(compile_time = limits)
-      ?(runtime = limits)
+      ?(compile_time = Helpers.limits)
+      ?(runtime = Helpers.limits)
       ?(print_error = fun error -> print_s [%sexp (error : Error.t)])
       ?(show = [])
-      program
+      source
   =
-  match Driver.check ~limits:compile_time (prims @ program) with
+  match Driver.check ~limits:compile_time (program source) with
   | Error { kind = Splice_evaluation_failed { error; code = _ }; loc = _ } ->
     print_string "splice failed: ";
     print_error error
@@ -64,35 +58,32 @@ let run
 let fuel_only fuel = { Limits.unlimited with fuel = Some fuel }
 
 let%expect_test "a runaway splice runs out of fuel while checking" =
-  run
-    [ nat
-    ; spin
-    ; top
-        "x"
-        []
-        (splice (seq (app (var "spin") [ nat_of_int 40 ]) (quote (int 1))))
-    ];
+  run (spin ^ [%string "let x = .~(spin (%{nat 40}); .<1>.)\n"]);
   [%expect
-    {| splice failed: ("Out of fuel: evaluation took more than 1000000 steps" @ _none_) |}]
+    {| splice failed: ("Out of fuel: evaluation took more than 1000000 steps" @ t.stag:2:43-57) |}]
 ;;
 
 let%expect_test "a looping toplevel runs out of fuel when evaluated" =
-  run ~runtime:(fuel_only 1000) [ loop; top "x" [] (app (var "loop") [ unit ]) ];
+  run
+    ~runtime:(fuel_only 1000)
+    {|
+let loop x = loop x
+let x = loop ()
+|};
   [%expect
-    {| eval failed: ("Out of fuel: evaluation took more than 1000 steps" @ _none_) |}]
+    {| eval failed: ("Out of fuel: evaluation took more than 1000 steps" @ t.stag:2:13-17) |}]
 ;;
 
 let%expect_test "terminating programs are unaffected" =
   run
     ~show:[ "x"; "y" ]
-    [ nat
-    ; spin
-    ; top
-        "x"
-        []
-        (splice (seq (app (var "spin") [ nat_of_int 5 ]) (quote (int 1))))
-    ; top "y" [] (app (var "spin") [ nat_of_int 5 ])
-    ];
+    (spin
+     ^ [%string
+         {|
+let x = .~(spin (%{nat 5}); .<1>.)
+let y = spin (%{nat 5})
+|}]
+    );
   [%expect
     {|
     (x 1)
@@ -101,66 +92,44 @@ let%expect_test "terminating programs are unaffected" =
 ;;
 
 let%expect_test "deep recursion exceeds the stack depth" =
-  let double =
-    top
-      "double"
-      [ "n" ]
-      (match_
-         (var "n")
-         [ Pat.construct "Z", construct "Z"
-         ; ( Pat.construct "S" ~args:[ Pat.var "m" ]
-           , construct
-               "S"
-               ~args:[ construct "S" ~args:[ app (var "double") [ var "m" ] ] ]
-           )
-         ])
-  in
   let deep limits =
     run
       ~runtime:limits
       ~show:[ "deep" ]
-      [ nat
-      ; double
-      ; top
-          "deep"
-          []
-          (seq
-             (List.fold (List.range 0 14) ~init:(nat_of_int 1) ~f:(fun n _ ->
-                app (var "double") [ n ]))
-             (int 0))
-      ]
+      (nat_type
+       ^ [%string
+           {|
+let double n = match n with Z -> Z | S m -> S (S (double m))
+let deep = %{String.concat (List.init 14 ~f:(fun _ -> "double ("))}%{nat 1}%{String.make 14 ')'}; 0
+|}]
+      )
   in
-  deep limits;
+  deep Helpers.limits;
   deep Limits.unlimited;
   [%expect
     {|
     eval failed: ("Stack depth exceeded: evaluation nested more than 10000 steps deep" @
-     _none_)
+     t.stag:3:21-22)
     (deep 0)
     |}]
 ;;
 
 let%expect_test "compile time and runtime have separate budgets" =
-  let at_compile_time =
-    top
-      "x"
-      []
-      (splice (seq (app (var "spin") [ nat_of_int 10 ]) (quote (int 1))))
-  in
-  let at_runtime = top "y" [] (app (var "spin") [ nat_of_int 10 ]) in
-  let succeeds ~fuel program =
-    match Driver.check ~limits:(fuel_only fuel) (prims @ program) with
+  let at_compile_time = [%string "let x = .~(spin (%{nat 10}); .<1>.)\n"] in
+  let at_runtime = [%string "let y = spin (%{nat 10})\n"] in
+  let succeeds ~fuel source =
+    let source = spin ^ source in
+    match Driver.check ~limits:(fuel_only fuel) (program source) with
     | Error _ -> false
     | Ok driver -> Driver.eval ~limits:(fuel_only fuel) driver |> Result.is_ok
   in
-  let least_fuel program =
-    let program = nat :: spin :: program in
+  let least_fuel source =
     let rec search ~low ~high =
       if low = high
       then low
       else (
         let mid = (low + high) / 2 in
-        if succeeds ~fuel:mid program
+        if succeeds ~fuel:mid source
         then search ~low ~high:mid
         else search ~low:(mid + 1) ~high)
     in
@@ -169,9 +138,9 @@ let%expect_test "compile time and runtime have separate budgets" =
   print_s
     [%message
       ""
-        ~compile_time:(least_fuel [ at_compile_time ] : int)
-        ~runtime:(least_fuel [ at_runtime ] : int)
-        ~both:(least_fuel [ at_compile_time; at_runtime ] : int)];
+        ~compile_time:(least_fuel at_compile_time : int)
+        ~runtime:(least_fuel at_runtime : int)
+        ~both:(least_fuel (at_compile_time ^ at_runtime) : int)];
   [%expect {| ((compile_time 12296) (runtime 12292) (both 12296)) |}]
 ;;
 
@@ -180,7 +149,7 @@ let%expect_test "the time limit" =
     ~runtime:
       { Limits.unlimited with time_limit = Some (Time_ns.Span.of_int_ms 1) }
     ~print_error:only_kind
-    [ nat; spin; top "x" [] (app (var "spin") [ nat_of_int 60 ]) ];
+    (spin ^ [%string "let x = spin (%{nat 60})\n"]);
   [%expect
     {| eval failed: Time limit exceeded: evaluation took more than 1ms |}]
 ;;
@@ -188,13 +157,7 @@ let%expect_test "the time limit" =
 let%expect_test "deep recursion at compile time exceeds the stack depth" =
   run
     ~print_error:only_kind
-    [ nat
-    ; spin
-    ; top
-        "x"
-        []
-        (splice (seq (app (var "spin") [ nat_of_int 20_000 ]) (quote (int 1))))
-    ];
+    (spin ^ [%string "let x = .~(spin (%{nat 20_000}); .<1>.)\n"]);
   [%expect
     {| splice failed: Stack depth exceeded: evaluation nested more than 10000 steps deep |}]
 ;;
@@ -204,84 +167,57 @@ let%expect_test "the time limit at compile time" =
     ~compile_time:
       { Limits.unlimited with time_limit = Some (Time_ns.Span.of_int_ms 1) }
     ~print_error:only_kind
-    [ nat
-    ; spin
-    ; top
-        "x"
-        []
-        (splice (seq (app (var "spin") [ nat_of_int 60 ]) (quote (int 1))))
-    ];
+    (spin ^ [%string "let x = .~(spin (%{nat 60}); .<1>.)\n"]);
   [%expect
     {| splice failed: Time limit exceeded: evaluation took more than 1ms |}]
 ;;
 
 let%expect_test "values forced at compile time are not evaluated again" =
-  let y = top "y" [] (seq (app (var "spin") [ nat_of_int 10 ]) (int 2)) in
-  let x = top "x" [] (splice (seq (var "y") (quote (int 1)))) in
-  run ~runtime:(fuel_only 100) ~show:[ "x"; "y" ] [ nat; spin; y; x ];
-  run ~runtime:(fuel_only 100) ~show:[ "y" ] [ nat; spin; y ];
+  let y = [%string "let y = spin (%{nat 10}); 2\n"] in
+  let x = "let x = .~(y; .<1>.)\n" in
+  run ~runtime:(fuel_only 100) ~show:[ "x"; "y" ] (spin ^ y ^ x);
+  run ~runtime:(fuel_only 100) ~show:[ "y" ] (spin ^ y);
   [%expect
     {|
     (y 2)
     (x 1)
-    eval failed: ("Out of fuel: evaluation took more than 100 steps" @ _none_)
+    eval failed: ("Out of fuel: evaluation took more than 100 steps" @ t.stag:2:31-33)
     |}]
 ;;
 
-(* Code of size 2^n, built in about 2n steps. *)
-let blow =
-  top
-    "blow"
-    [ "n" ]
-    (match_
-       (var "n")
-       [ Pat.construct "Z", quote unit
-       ; ( Pat.construct "S" ~args:[ Pat.var "m" ]
-         , let_
-             "c"
-             []
-             (app (var "blow") [ var "m" ])
-             (quote (seq (splice (var "c")) (splice (var "c")))) )
-       ])
-;;
-
 let%expect_test "growing code exponentially runs out of fuel at compile time" =
-  let program n =
-    [ nat; blow; top "x" [] (splice (app (var "blow") [ nat_of_int n ])) ]
-  in
-  run ~compile_time:(fuel_only 2000) ~show:[ "x" ] (program 1);
-  run ~compile_time:(fuel_only 2000) (program 16);
+  let source n = blow ^ [%string "let x = .~(blow (%{nat n}))\n"] in
+  run ~compile_time:(fuel_only 2000) ~show:[ "x" ] (source 1);
+  run ~compile_time:(fuel_only 2000) (source 16);
   run
     ~compile_time:
       { Limits.unlimited with time_limit = Some (Time_ns.Span.of_int_ms 50) }
     ~print_error:only_kind
-    (program 30);
+    (source 30);
   [%expect
     {|
     (x "()")
-    splice failed: ("Out of fuel: evaluation took more than 2000 steps" @ _none_)
+    splice failed: ("Out of fuel: evaluation took more than 2000 steps" @ t.stag:2:33-35)
     splice failed: Time limit exceeded: evaluation took more than 50ms
     |}]
 ;;
 
 let%expect_test "growing code exponentially runs out of fuel at runtime" =
-  let program n =
-    [ nat; blow; top "x" [] (app (var "blow") [ nat_of_int n ]) ]
-  in
-  run ~runtime:(fuel_only 2000) ~show:[ "x" ] (program 1);
-  run ~runtime:(fuel_only 2000) (program 20);
+  let source n = blow ^ [%string "let x = blow (%{nat n})\n"] in
+  run ~runtime:(fuel_only 2000) ~show:[ "x" ] (source 1);
+  run ~runtime:(fuel_only 2000) (source 20);
   run
     ~runtime:
       { Limits.unlimited with time_limit = Some (Time_ns.Span.of_int_ms 50) }
     ~print_error:only_kind
-    (program 30);
+    (source 30);
   [%expect
     {|
     (x
      (Code
       (Let (ident _/18) (args ()) (generalized false) (body (Lit Unit : unit))
        (in_ (Lit Unit : unit)) : unit)))
-    eval failed: ("Out of fuel: evaluation took more than 2000 steps" @ _none_)
+    eval failed: ("Out of fuel: evaluation took more than 2000 steps" @ t.stag:2:67-75)
     eval failed: Time limit exceeded: evaluation took more than 50ms
     |}]
 ;;
