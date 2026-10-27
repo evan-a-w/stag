@@ -32,15 +32,19 @@ int    list['a]    M.t    with_x[{..'a}]        (* args postfix in brackets *)
 ```
 
 A type argument in brackets is a type, or a row `{...}` (record-style row,
-used for row parameters). Weak variables (`'_a`) and `where` constraints are
-printed but never written.
+used for row parameters). A `{...}` argument always parses as a row; given to
+a type parameter (rather than a row parameter) it is the record type of that
+row. Polymorphic record labels are written with backticks, and code contexts
+(variable names) without; a row argument accepts either. Weak variables
+(`'_a`), presence variables (`` `x?'a ``), absent labels (`-x`), `as` cycles and
+`where` constraints are printed but never written.
 
 ## Expressions
 
 ```ocaml
 let f x (y : int) : t = e in body   (* local lets are always recursive, no `rec` *)
 e1; e2                              (* sugar for let _ = e1 in e2 *)
-match e with | p -> e | ...         (* leading | optional *)
+match e with | p -> e | ...         (* leading | optional; arms are e1; e2 level *)
 f x y                               (* application, left assoc *)
 (x : t)                             (* annotated variable: Expr.Var's annotation *)
 (a, b, c)   ()   (e)
@@ -57,8 +61,31 @@ r \ `x                              (* restrict *)
 .~e{x = e1; y}                      (* explicit; `y` alone is a variable: (y, None) *)
 ```
 
-Splice binds tighter than application (`.~f x` is `(.~f) x`). A splice outside
-any quote is a toplevel (compile-time) splice.
+Splice binds tighter than application (`.~f x` is `(.~f) x`), and looser than
+field access (`.~r.x` is `.~(r.x)`). The substitutions `{...}` attach to the
+splice only when written right after it, without space: `.~f{x}` provides `x`,
+while `.~f {x = 1}` applies `.~f` to a record. A splice outside any quote is a
+toplevel (compile-time) splice.
+
+Precedence, loosest first:
+
+| Construct                                  | Associativity      |
+| ------------------------------------------ | ------------------ |
+| `let ... in`, `match` (extend right)       |                    |
+| `e1; e2`                                   | right              |
+| `e1, e2`                                   | n-ary              |
+| `C e`, `` `A e ``                          | right (`C D x`)    |
+| application `f x`                          | left               |
+| splice `.~e`, `.~e{...}`                   | prefix             |
+| `e.x`, `e.M.x`, `` e.`x ``, `` e \ `x ``   | left, postfix      |
+
+`let` and `match` may also start a tuple component (`a, let x = 1 in x, y` is
+`(a, let x = 1 in (x, y))`). Restriction is postfix like field access, so
+`` f r \ `x `` is `` f (r \ `x) ``. Record field values, extended records (after `|`)
+and substitutions are at the tuple level (`{x = 1, 2}`); the record of an update
+`{e with ...}` is at the splice level. Trailing `;` is allowed in `{...}`.
+`C (a, b)` and `C ((a, b))` both have two arguments. A parenthesized
+expression's location includes its parentheses.
 
 `match` arms extend as far as possible, as in OCaml (wrap nested matches in
 parentheses).

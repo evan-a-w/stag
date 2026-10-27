@@ -727,7 +727,8 @@ module Printer = struct
     | "", Some tail -> "[" ^ tail ^ "]"
     | entries, Some tail -> "[" ^ entries ^ "; " ^ tail ^ "]"
 
-  and record_to_string t row = row_to_string t row ~label:(fun name -> "`" ^ name)
+  and record_to_string t row =
+    row_to_string t row ~label:(fun name -> "`" ^ name)
 
   and row_to_string t row ~label =
     let entries, tail =

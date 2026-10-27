@@ -205,7 +205,9 @@ let rec type_expr t : Type_expr.t =
   then (
     advance t;
     let codomain = type_expr t in
-    located ~loc:(Loc.merge domain.loc codomain.loc) (Type_expr.Arrow (domain, codomain)))
+    located
+      ~loc:(Loc.merge domain.loc codomain.loc)
+      (Type_expr.Arrow (domain, codomain)))
   else domain
 
 and type_tuple t : Type_expr.t =
@@ -220,7 +222,9 @@ and type_tuple t : Type_expr.t =
       else List.rev acc
     in
     let tys = loop [ first ] in
-    located ~loc:(Loc.merge first.loc (List.last_exn tys).loc) (Type_expr.Tuple tys))
+    located
+      ~loc:(Loc.merge first.loc (List.last_exn tys).loc)
+      (Type_expr.Tuple tys))
   else first
 
 and type_app t : Type_expr.t =
@@ -235,8 +239,7 @@ and type_app t : Type_expr.t =
       if List.is_empty args
       then fail (prev_loc t) "expected a type argument, found `]`";
       since t ty.loc (Type_expr.Con (path, args))
-    | _ ->
-      fail (loc t) "only type constructors like `list` take type arguments")
+    | _ -> fail (loc t) "only type constructors like `list` take type arguments")
   else ty
 
 and type_arg t : Type_expr.arg =
@@ -403,7 +406,9 @@ let rec pattern t : Pattern.t =
       else List.rev acc
     in
     let items = loop [ first ] in
-    located ~loc:(Loc.merge first.loc (List.last_exn items).loc) (Pattern.Tuple items))
+    located
+      ~loc:(Loc.merge first.loc (List.last_exn items).loc)
+      (Pattern.Tuple items))
   else first
 
 and pattern_construct t : Pattern.t =
@@ -566,7 +571,8 @@ let rec expr t : Expr.t =
       let semi = loc t in
       advance t;
       let second = expr t in
-      expr_at ~loc:(Loc.merge first.loc second.loc)
+      expr_at
+        ~loc:(Loc.merge first.loc second.loc)
         (Let (located ~loc:semi "_", [], None, first, second)))
     else first
 
@@ -602,7 +608,8 @@ and let_ t : Expr.t =
   let name, params, annot, equal = binding t in
   expect_for t In ~opener:Let ~open_loc:start;
   let body = expr t in
-  expr_at ~loc:(Loc.merge start body.loc)
+  expr_at
+    ~loc:(Loc.merge start body.loc)
     (Expr.Let (name, params, annot, equal, body))
 
 and match_ t : Expr.t =
@@ -767,8 +774,7 @@ and atom t : Expr.t =
          | _ ->
            fail
              e.loc
-             "type annotations are only supported on variables, as in `(x : \
-              t)`")
+             "type annotations are only supported on variables, as in `(x : t)`")
       | _ ->
         close t Rparen ~opener:Lparen ~open_loc:start;
         expr_since t start e.txt)
