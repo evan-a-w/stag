@@ -27,11 +27,11 @@ let toplevel_idents (program : Typed.Program.t) =
 
 let prim_locals =
   let program = typecheck_exn prims in
-  Map.length program.idents - Set.length (toplevel_idents program)
+  Map.length program.ident_info - Set.length (toplevel_idents program)
 ;;
 
 (* The components of [program] after those of [prims], and with [~idents]
-   the types of its binders. Toplevels get the first stamps, then prims'
+   the types and levels of its binders. Toplevels get the first stamps, then prims'
    locals, as prims are checked first. *)
 let print ?(idents = false) program =
   match
@@ -47,12 +47,13 @@ let print ?(idents = false) program =
       let toplevels = toplevel_idents program in
       print_s
         [%sexp
-          (Map.filter_keys program.idents ~f:(fun ident ->
+          (Map.filter_keys program.ident_info ~f:(fun ident ->
              if Set.mem toplevels ident
              then not (is_prim ident)
              else ident.stamp >= Set.length toplevels + prim_locals)
-           |> Map.map ~f:Type.to_string_hum
-           : string Typed.Ident.Map.t)])
+           |> Map.map ~f:(fun { Typed.Ident_info.ty; level } ->
+             Type.to_string_hum ty, level)
+           : (string * int) Typed.Ident.Map.t)])
 ;;
 
 let%expect_test "lets and shadowing" =
@@ -93,8 +94,8 @@ let%expect_test "lets and shadowing" =
             : "int * int"))
           : "int * int")))))
      (recursive false))
-    ((f/4 "'a -> int * int") (g/18 "'a -> 'a") (x/14 'a) (x/15 int)
-     (x/16 "int * int") (y/17 'a))
+    ((f/4 ("'a -> int * int" 0)) (g/18 ("'a -> 'a" 0)) (x/14 ('a 0))
+     (x/15 (int 0)) (x/16 ("int * int" 0)) (y/17 ('a 0)))
     |}]
 ;;
 
@@ -294,12 +295,13 @@ let%expect_test "polymorphic records" =
             (Var (Bound (Local a/21)) : 'a)))
           : 'a)))))
      (recursive false))
-    ((a/18 'a) (a/21 'a) (open_/6 "{a : 'a; ..'b} -> 'a")
+    ((a/18 ('a 0)) (a/21 ('a 0)) (open_/6 ("{a : 'a; ..'b} -> 'a" 0))
      (ops/4
-      "{a : 'a; b : 'b; ..'c} -> 'a * {a : 'a; b : 'b; c : int; ..'c} * {a : 'a; ..'c} * {a : bool; b : 'b; ..'c} * {a : int; b : unit}")
-     (others/19 {..'a}) (r/16 "{a : 'a; b : 'b; ..'c}")
-     (r/17 "{a : 'a; b : 'b; ..'c}") (r/20 "{a : 'a; ..'b}")
-     (rest/5 "{a : 'a; b : 'b; ..'c} -> 'a * {..'c}"))
+      ("{a : 'a; b : 'b; ..'c} -> 'a * {a : 'a; b : 'b; c : int; ..'c} * {a : 'a; ..'c} * {a : bool; b : 'b; ..'c} * {a : int; b : unit}"
+       0))
+     (others/19 ({..'a} 0)) (r/16 ("{a : 'a; b : 'b; ..'c}" 0))
+     (r/17 ("{a : 'a; b : 'b; ..'c}" 0)) (r/20 ("{a : 'a; ..'b}" 0))
+     (rest/5 ("{a : 'a; b : 'b; ..'c} -> 'a * {..'c}" 0)))
     |}]
 ;;
 
@@ -337,13 +339,15 @@ let%expect_test "polymorphic variants" =
            ((Var other/17 : "[`A | `B of int; ..'a]") (Lit (Int 2) : int)))
           : int)))))
      (recursive false))
-    ((handle/5 "[`A | `B of int; ..'a] -> int") (n/16 int) (other/17 [..'a])
-     (tags/4 "[`A; ..'a] * [`B of int; ..'b]") (v/15 "[`A | `B of int; ..'a]"))
+    ((handle/5 ("[`A | `B of int; ..'a] -> int" 0)) (n/16 (int 0))
+     (other/17 ([..'a] 0)) (tags/4 ("[`A; ..'a] * [`B of int; ..'b]" 0))
+     (v/15 ("[`A | `B of int; ..'a]" 0)))
     |}]
 ;;
 
 let%expect_test "quotes" =
   print
+    ~idents:true
     [ top "closed" [] (quote (let_ "y" [] (int 1) (var "y")))
     ; top "nested" [] (quote (quote (app (var "add") [ var "x"; int 1 ])))
     ];
@@ -370,6 +374,8 @@ let%expect_test "quotes" =
            : "<int>{x : int; ..'a}")
           : "<<int>{x : int; ..'a}>{..'b}")))))
      (recursive false))
+    ((closed/4 (<int>{..'a} 0)) (nested/5 ("<<int>{x : int; ..'a}>{..'b}" 0))
+     (y/15 (int 1)))
     |}]
 ;;
 
@@ -479,6 +485,7 @@ let%expect_test "explicit splices" =
 let%expect_test "implicit splices" =
   let code = quote (app (var "add") [ var "x"; int 1 ]) in
   print
+    ~idents:true
     [ top "bound" [] (quote (let_ "x" [] (int 1) (splice code)))
     ; top "propagates" [] (quote (splice code))
     ; top
@@ -584,6 +591,20 @@ let%expect_test "implicit splices" =
           : <<'a>{..'e}>{..'f}))
         (where "..'c <= {..'e}, ..'d <= {..'f}"))))
      (recursive false))
+    ((a/21 ('a 1)) (bound/4 (<int>{..'a} 0))
+     (c/18 ("<'a>{f?'b : 'c -> 'c; y?'d : int; ..'e} where ..'e <= {..'f}" 0))
+     (c/23
+      ("<<'a>{y?'b : int; ..'c}>{-y; ..'d} where ..'c <= {..'e}, ..'d <= {..'f}"
+       0))
+     (f/22 ("'a -> 'a" 1))
+     (later_level/7
+      ("<<'a>{y?'b : int; ..'c}>{-y; ..'d} -> <<'a>{..'e}>{..'f} where ..'c <= {..'e}, ..'d <= {..'f}"
+       0))
+     (outer/19 (int 0)) (propagates/5 ("<int>{x : int; ..'a}" 0))
+     (tail/6
+      ("<'a>{f?'b : 'c -> 'c; y?'d : int; ..'e} -> <'a>{..'f} where ..'e <= {..'f}"
+       0))
+     (x/17 (int 1)) (y/20 (int 1)) (y/24 (int 2)))
     |}]
 ;;
 
@@ -631,7 +652,8 @@ let%expect_test "toplevel splices" =
          (Splice (code (Quote (Lit (Int 1) : int) : <int>{}))
           (subs (Implicit ())) : int)))))
      (recursive false))
-    ((closed/7 int) (f/6 "int -> int") (m/5 int) (n/4 int) (x/17 int))
+    ((closed/7 (int 0)) (f/6 ("int -> int" 0)) (m/5 (int 0)) (n/4 (int 0))
+     (x/17 (int 0)))
     |}]
 ;;
 
@@ -784,6 +806,7 @@ let%expect_test "literals that look like placeholders" =
 
 let%expect_test "level crossing at splices" =
   print
+    ~idents:true
     [ top "n" [] (int 3)
     ; top
         "persistent_local"
@@ -872,11 +895,18 @@ let%expect_test "level crossing at splices" =
             (subs (Implicit ((n (Local n/24))))) : int))
           : int)))))
      (recursive false))
+    ((c/21 ("<'a>{x?'b : int; ..'c} where ..'c <= {..'d}" 0))
+     (f/19 ("'a -> 'a" 1)) (n/4 (int 0)) (n/24 (int 0)) (n_shadowed/8 (int 0))
+     (outside_binder/6 ("<'a>{x : 'a; ..'b}" 0))
+     (persistent_local/5 (<int>{..'_a} 0))
+     (shadowed/7 ("<'a>{x?'b : int; ..'c} -> <'a>{..'d} where ..'c <= {..'d}" 0))
+     (x/18 ('a 1)) (x/20 (int 0)) (x/22 (int 1)) (x/23 (int 1)))
     |}]
 ;;
 
 let%expect_test "toplevel splice in a level -1 let" =
   print
+    ~idents:true
     [ top "n" [] (int 3)
     ; top
         "deep"
@@ -937,6 +967,12 @@ let%expect_test "toplevel splice in a level -1 let" =
           (subs (Implicit ())) : int))
         (where "..'d <= {..'e}"))))
      (recursive false))
+    ((_/18 (<'a>{..'b} -2))
+     (c/16 ("<'a>{n?'b : int; ..'c} where ..'c <= {..'d}" -2)) (deep/5 (int 0))
+     (k/17
+      ("<'a>{n?'b : int; ..'c} -> <'a>{n?'b : int; ..'c} where ..'c <= {..'d}"
+       -2))
+     (n/4 (int 0)) (n/19 (int -1)) (x/15 (<int>{..'a} -1)))
     |}]
 ;;
 
@@ -1091,6 +1127,6 @@ let%expect_test "tuple patterns and annotations" =
             (Var (Bound (Local a/15)) : int)))
           : int)))))
      (recursive false))
-    ((a/15 int) (first/4 "int * 'a -> int") (p/14 "int * 'a"))
+    ((a/15 (int 0)) (first/4 ("int * 'a -> int" 0)) (p/14 ("int * 'a" 0)))
     |}]
 ;;

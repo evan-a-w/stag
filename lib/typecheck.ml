@@ -32,9 +32,15 @@ module Toplevel = struct
   let is_value t = is_function t || Syntax.Expr.is_value t.expr
 end
 
-type t = Fresh.t
+type t =
+  { fresh : Fresh.t
+  ; stamps : Stamp_counter.t
+  }
 
-let create = Fresh.create
+let create ?(stamps = Stamp_counter.create ()) () =
+  { fresh = Fresh.create (); stamps }
+;;
+
 let lift result = Result.map_error result ~f:Typecheck_error.unification_error
 
 (* Toplevels are checked on demand, so strongly connected components are found
@@ -52,20 +58,21 @@ module Program_env = struct
   type t =
     { type_env : Type_env.t
     ; toplevels : Toplevel.t String.Table.t
-    ; mutable next_stamp : int
-    ; mutable idents : Type.ty Typed.Ident.Map.t
+    ; stamps : Stamp_counter.t
+    ; mutable ident_info : Typed.Ident_info.t Typed.Ident.Map.t
     ; sccs : Typed.Scc.t Queue.t
     }
 
-  let fresh_ident t name =
-    let ident = { Typed.Ident.name; stamp = t.next_stamp } in
-    t.next_stamp <- t.next_stamp + 1;
-    ident
+  let fresh_ident t name = Typed.Ident.fresh t.stamps name
+
+  let add_info t ident ~ty ~level =
+    t.ident_info
+    <- Map.add_exn t.ident_info ~key:ident ~data:{ Typed.Ident_info.ty; level }
   ;;
 
-  let bind t name ty =
+  let bind t name ty ~level =
     let ident = fresh_ident t name in
-    t.idents <- Map.add_exn t.idents ~key:ident ~data:ty;
+    add_info t ident ~ty ~level;
     ident
   ;;
 end
@@ -168,7 +175,7 @@ let function_type t (scope : Scope.t) ~(args : Syntax.Binding.t list) ~annot =
   in
   let args =
     List.map args ~f:(fun (name, ty) ->
-      Program_env.bind scope.program name ty, ty)
+      Program_env.bind scope.program name ty ~level:scope.level, ty)
   in
   args, res_ty, ty
 ;;
@@ -296,7 +303,9 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Syntax.Pattern.t)
       Result.t
   =
   let node desc ty = { Typed.Pattern.desc; ty } in
-  let bind name ty = Program_env.bind scope.program name ty in
+  let bind name ty =
+    Program_env.bind scope.program name ty ~level:scope.level
+  in
   let sub_patterns patterns =
     let%map.Result typed, bindings =
       List.fold_result
@@ -401,7 +410,7 @@ module Variant_match = struct
           (List.map handled ~f:(fun tag -> tag, Scope.fresh_ty t scope))
       in
       let rest = Fresh.variant t rest in
-      let ident = Program_env.bind scope.program name rest in
+      let ident = Program_env.bind scope.program name rest ~level:scope.level in
       Ok
         ( { Typed.Pattern.desc = Var ident; ty = Fresh.variant t row }
         , [ ident, rest ] )
@@ -511,7 +520,7 @@ let finish_scc (program : Program_env.t) (members : Toplevel.t list) =
       match member.state with
       | In_progress { index; ty; args; body = Some body; _ } ->
         if generalize then Scheme.generalize_ty ~rank:0 ty;
-        program.idents <- Map.add_exn program.idents ~key:member.ident ~data:ty;
+        Program_env.add_info program member.ident ~ty ~level:0;
         let typed =
           { Typed.Toplevel.ident = member.ident; args; scheme = ty; body }
         in
@@ -669,7 +678,7 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
     let%bind.Result arg_types, res_ty, ty =
       function_type t inner ~args ~annot
     in
-    let ident = Program_env.bind scope.program name ty in
+    let ident = Program_env.bind scope.program name ty ~level:scope.level in
     let%bind.Result body =
       Env.with_bindings
         scope.locals
@@ -1001,7 +1010,7 @@ module Checked = struct
     }
 end
 
-let typecheck t ~(program : Syntax.Program.t)
+let typecheck { fresh = t; stamps } ~(program : Syntax.Program.t)
   : (Checked.t, Typecheck_error.t) Result.t
   =
   let%bind.Result root =
@@ -1012,8 +1021,8 @@ let typecheck t ~(program : Syntax.Program.t)
   let program_env =
     { Program_env.type_env
     ; toplevels = String.Table.create ()
-    ; next_stamp = 0
-    ; idents = Typed.Ident.Map.empty
+    ; stamps
+    ; ident_info = Typed.Ident.Map.empty
     ; sccs = Queue.create ()
     }
   in
@@ -1068,6 +1077,8 @@ let typecheck t ~(program : Syntax.Program.t)
   in
   { Checked.signature = signature root program
   ; program =
-      { sccs = Queue.to_list program_env.sccs; idents = program_env.idents }
+      { sccs = Queue.to_list program_env.sccs
+      ; ident_info = program_env.ident_info
+      }
   }
 ;;

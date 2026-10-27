@@ -1,0 +1,94 @@
+open! Core
+
+(** The bindings of one activation: a closure's captures and arguments, and
+    the locals bound while evaluating its body (or the toplevels). Idents are
+    unique, so a binding is never shadowed or removed. Lookups fall back to
+    [fallback] (the toplevels). *)
+module Env : sig
+  type 'value t
+
+  val create : unit -> _ t
+
+  (** Errors if [ident] is unbound, or declared but not yet [set]. *)
+  val lookup
+    :  ?fallback:'value t
+    -> 'value t
+    -> ident:Typed.Ident.t
+    -> 'value Or_error.t
+
+  (** Binds [ident] to an empty slot, to be [set] later, eg. for each member
+      of a recursive binding before evaluating their bodies. *)
+  val declare : _ t -> ident:Typed.Ident.t -> unit
+
+  (** Fills the slot of [ident], binding it first if needed. *)
+  val set : 'value t -> ident:Typed.Ident.t -> value:'value -> unit
+
+  (** A new env sharing the slots of [captures] with [t], so slots filled
+      later are seen by both. *)
+  val of_captures
+    :  ?fallback:'value t
+    -> 'value t
+    -> captures:Typed.Ident.Hash_set.t
+    -> 'value t Or_error.t
+end
+
+module Value : sig
+  type t =
+    | Int of string
+    | Bool of bool
+    | String of string
+    | Char of char
+    | Unit
+    | Tuple of t list
+    | Construct of Typed.Constructor_ref.t * t list
+    | Record of t array (** By field index. *)
+    | Poly_record of t String.Map.t
+    | Poly_variant of string * t (** A tag without an argument has [Unit]. *)
+    | Function of
+        { args : Typed.Ident.t list (** Those not yet applied, non-empty. *)
+        ; body : Typed.Expr.t
+        ; env : t Env.t
+        ; level : int
+        }
+    | Code of
+        { expr : Typed.Expr.t
+        ; persistent : t Typed.Ident.Map.t
+          (** The values of the persistent binders [expr] embeds. *)
+        }
+
+  (** Functions are [<fun>], as their envs may contain themselves. *)
+  val sexp_of_t : t -> Sexp.t
+end
+
+type t
+
+(** [stamps] should be the counter that made the idents of the programs
+    added, so idents minted while evaluating are distinct from theirs. *)
+val create : stamps:Stamp_counter.t -> unit -> t
+
+(** [program] with its toplevel splices (those outside any quote) replaced by
+    the code they evaluate to, at level -1 in an empty env. The [ident_info]
+    returned also has the idents minted for that code. Values the code embeds
+    from level -1 are bound in [t] under fresh idents, so the result is only
+    meaningful to evaluate with [t]. *)
+val expand_program : t -> program:Typed.Program.t -> Typed.Program.t Or_error.t
+
+(** Queues the components of [program] to [eval]. They must be expanded. *)
+val add_program : t -> program:Typed.Program.t -> unit
+
+(** The binders from outside the closure [ident] that it reads when called,
+    including itself if it is recursive and those embedded by quotes it builds.
+    Toplevel splices in [body] are taken as unexpanded, so uses within them are
+    not captures. *)
+val captures
+  :  t
+  -> ident:Typed.Ident.t
+  -> args:Typed.Ident.t list
+  -> body:Typed.Expr.t
+  -> Typed.Ident.Hash_set.t
+
+(** Evaluates the components added, in order. *)
+val eval : t -> unit Or_error.t
+
+(** The value of a toplevel, once evaluated. *)
+val find : t -> ident:Typed.Ident.t -> Value.t Or_error.t

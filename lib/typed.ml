@@ -68,13 +68,16 @@ module Ident = struct
       { name : string
       ; stamp : int
       }
-    [@@deriving compare]
+    [@@deriving compare, hash]
 
     let sexp_of_t t = Sexp.Atom [%string "%{t.name}/%{t.stamp#Int}"]
   end
 
   include T
   include Comparable.Make_plain (T)
+  include Hashable.Make_plain (T)
+
+  let fresh stamps name = { name; stamp = Stamp_counter.next stamps }
 end
 
 module Binder = struct
@@ -212,10 +215,18 @@ module Scc = struct
   [@@deriving sexp_of]
 end
 
+module Ident_info = struct
+  type t =
+    { ty : Hum.Ty.t
+    ; level : int
+    }
+  [@@deriving sexp_of]
+end
+
 module Program = struct
   type t =
     { sccs : Scc.t list
-    ; idents : Hum.Ty.t Ident.Map.t
+    ; ident_info : Ident_info.t Ident.Map.t
     }
   [@@deriving sexp_of]
 end

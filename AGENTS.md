@@ -41,4 +41,4 @@ Use subagents to
 2. Just delegate, so that you are more responsive to the user - you can wait on subagent output and therefore in the meantime while it works, be ready to respond to the user. This is important.
 3. Review code (independent subagents are more likely to catch issues). You should do this for nontrivial work before reporting to the user that it's done. Don't duplicate this though - eg. if you are a subagent spawned by a different agent, let the parent agent start any reviewers.
 
-Keep commit messages just as "😊". Don't commit unless it's mentioned by the user or it's obvious that you are already in a branch specifically for the change that therefore can be kept up to date.
+Don't commit unless it's mentioned by the user or it's obvious that you are already in a branch specifically for the change that therefore can be kept up to date. If you are asked to commit or the context implies it, keep commit messages just as "😊". 
