@@ -1,20 +1,14 @@
 open! Import
-open Syntax
-open Helpers
+open Source_helpers
 
-let prim_names = List.filter_map prims ~f:let_name
-
-(* The captures of each closure in [program]: its toplevel functions and the
+(* The captures of each closure in [source]: its toplevel functions and the
    local functions within them. *)
-let print program =
-  match Driver.check ~limits (prims @ program) with
-  | Error error -> print_s [%sexp (error : Typecheck_error.t)]
-  | Ok driver ->
-    let t = Driver.interpreter driver in
-    let { Typecheck.Checked.program; _ } = Driver.checked driver in
+let print source =
+  Option.iter (typecheck source) ~f:(fun t ->
+    let interpreter = Driver.interpreter (driver t) in
     let print_captures ~ident ~args ~body =
       let captures =
-        Treewalk.captures t ~ident ~args ~body
+        Treewalk.captures interpreter ~ident ~args ~body
         |> Hash_set.to_list
         |> List.sort ~compare:Typed.Ident.compare
       in
@@ -27,39 +21,23 @@ let print program =
        | _ -> ());
       List.iter (Typed.Expr.sub_exprs expr) ~f:locals
     in
-    List.iter program.sccs ~f:(fun scc ->
-      List.iter scc.members ~f:(fun (member : Typed.Toplevel.t) ->
-        if not (List.mem prim_names member.ident.name ~equal:String.equal)
-        then (
-          if not (List.is_empty member.args)
-          then
-            print_captures
-              ~ident:member.ident
-              ~args:member.args
-              ~body:member.body;
-          locals member.body)))
+    List.iter (members t) ~f:(fun (member : Typed.Toplevel.t) ->
+      if not (List.is_empty member.args)
+      then
+        print_captures ~ident:member.ident ~args:member.args ~body:member.body;
+      locals member.body))
 ;;
 
 let%expect_test "arguments, locals and toplevels" =
   print
-    [ top "k" [] (int 1)
-    ; top
-        "g"
-        [ "a"; "b" ]
-        (let_
-           "f"
-           [ "x" ]
-           (app (var "add") [ var "x"; var "a" ])
-           (let_
-              "unused"
-              []
-              (var "b")
-              (let_
-                 "h"
-                 [ "y" ]
-                 (app (var "add") [ app (var "f") [ var "y" ]; var "k" ])
-                 (int 0))))
-    ];
+    {|
+let k = 1
+let g a b =
+  let f x = add x a in
+  let unused = b in
+  let h y = add (f y) k in
+  0
+|};
   [%expect
     {|
     (g/5 (add/0 k/4))
@@ -70,14 +48,12 @@ let%expect_test "arguments, locals and toplevels" =
 
 let%expect_test "recursion" =
   print
-    [ top "loop" [ "x" ] (app (var "loop") [ var "x" ])
-    ; top "even" [ "x" ] (app (var "odd") [ var "x" ])
-    ; top "odd" [ "x" ] (app (var "even") [ var "x" ])
-    ; top
-        "local"
-        [ "n" ]
-        (let_ "go" [ "x" ] (app (var "go") [ var "n" ]) (var "go"))
-    ];
+    {|
+let loop x = loop x
+let even x = odd x
+let odd x = even x
+let local n = let go x = go n in go
+|};
   [%expect
     {|
     (loop/4 (loop/4))
@@ -90,35 +66,13 @@ let%expect_test "recursion" =
 
 let%expect_test "pattern binders are not captures" =
   print
-    [ top
-        "f"
-        [ "p"; "c" ]
-        (let_
-           "g"
-           [ "q" ]
-           (match_
-              (var "q")
-              [ ( Pat.tuple [ Pat.var "x"; Pat.any ]
-                , app (var "add") [ var "x"; var "c" ] )
-              ])
-           (let_
-              "h"
-              [ "r" ]
-              (match_
-                 (var "r")
-                 [ ( Pat.poly_record ~bind:"rest" [ "a", Pat.var "a" ]
-                   , tuple [ var "a"; var "rest"; var "p" ] )
-                 ])
-              (let_
-                 "v"
-                 [ "w" ]
-                 (match_
-                    (var "w")
-                    [ Pat.tag "A" ~arg:(Pat.var "z"), var "z"
-                    ; Pat.var "other", var "c"
-                    ])
-                 (int 0))))
-    ];
+    {|
+let f p c =
+  let g q = match q with (x, _) -> add x c in
+  let h r = match r with {`a = a; ..rest} -> (a, rest, p) in
+  let v w = match w with `A z -> z | other -> c in
+  0
+|};
   [%expect
     {|
     (f/4 (add/0))
@@ -130,22 +84,11 @@ let%expect_test "pattern binders are not captures" =
 
 let%expect_test "poly records and variants" =
   print
-    [ top
-        "f"
-        [ "r"; "s"; "x" ]
-        (let_
-           "g"
-           [ "u" ]
-           (tuple
-              [ extend [ "a", var "x" ] (var "r")
-              ; update (var "s") [ "b", var "u" ]
-              ; restrict (var "r") "c"
-              ; dot (var "s") "d"
-              ; poly_record [ "e", var "x" ]
-              ; tag "T" ~arg:(var "x")
-              ])
-           (int 0))
-    ];
+    {|
+let f r s x =
+  let g u = ({`a = x | r}, {s with `b = u}, r \ `c, s.`d, {`e = x}, `T x) in
+  0
+|};
   [%expect
     {|
     (f/4 ())
@@ -155,46 +98,13 @@ let%expect_test "poly records and variants" =
 
 let%expect_test "quotes and splices" =
   print
-    [ top
-        "q"
-        [ "c" ]
-        (quote
-           (let_
-              "inner"
-              [ "z" ]
-              (app (var "add") [ var "z"; splice (var "c") ])
-              (int 0)))
-    ; top "h" [ "u" ] (quote (let_ "w" [] (int 1) (splice (var "u"))))
-    ; top
-        "build"
-        [ "c" ]
-        (let_
-           "mk"
-           [ "x" ]
-           (quote (app (var "add") [ splice (var "c"); var "x" ]))
-           (int 0))
-    ; top
-        "persistent"
-        [ "n" ]
-        (let_
-           "k"
-           [ "y" ]
-           (var "y")
-           (quote
-              (let_
-                 "g"
-                 [ "x" ]
-                 (app (var "k") [ var "x" ])
-                 (app (var "g") [ int 1 ]))))
-    ; top
-        "explicit"
-        [ "c"; "d" ]
-        (let_
-           "e"
-           [ "x" ]
-           (quote (splice ~subs:[ "y", Some (splice (var "d")) ] (var "c")))
-           (int 0))
-    ];
+    {|
+let q c = .<let inner z = add z .~c in 0>.
+let h u = .<let w = 1 in .~u>.
+let build c = let mk x = .<add .~c x>. in 0
+let persistent n = let k y = y in .<let g x = k x in g 1>.
+let explicit c d = let e x = .<.~c.{y = .~d}>. in 0
+|};
   [%expect
     {|
     (q/4 (add/0))
@@ -212,16 +122,10 @@ let%expect_test "quotes and splices" =
 
 let%expect_test "toplevel splices" =
   print
-    [ top "n" [] (int 3)
-    ; top
-        "f"
-        [ "x" ]
-        (let_
-           "g"
-           [ "y" ]
-           (splice (quote (app (var "add") [ var "x"; var "y" ])))
-           (int 0))
-    ];
+    {|
+let n = 3
+let f x = let g y = .~(.<add x y>.) in 0
+|};
   [%expect
     {|
     (f/5 (add/0))
@@ -278,8 +182,8 @@ let%expect_test "a shared stamp counter" =
     | Error error -> raise_s [%sexp (error : Typecheck_error.t)]
     | Ok { program; _ } -> Map.keys program.ident_info
   in
-  print_s [%sexp (idents [ top "f" [ "x" ] (var "x") ] : Typed.Ident.t list)];
-  print_s [%sexp (idents [ top "g" [ "y" ] (var "y") ] : Typed.Ident.t list)];
+  print_s [%sexp (idents (parse_exn "let f x = x") : Typed.Ident.t list)];
+  print_s [%sexp (idents (parse_exn "let g y = y") : Typed.Ident.t list)];
   print_s [%sexp (Typed.Ident.fresh stamps "minted" : Typed.Ident.t)];
   [%expect
     {|
