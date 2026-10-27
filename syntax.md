@@ -17,7 +17,7 @@ node, for good errors.
   followed by the final name; `r.x` with lowercase `r` is a field access.
 - Keywords: `let in match with type of module struct end`, `true false`.
 - `@` and `@@` are reserved (for modes, see below).
-- Staging tokens: `.<` `>.` `.~` `~`.
+- Staging tokens: `.<` `>.` `.~`.
 
 ## Types
 
