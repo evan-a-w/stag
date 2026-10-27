@@ -65,5 +65,11 @@ before it. They provide the pieces for other tools: `Source_file` and
 modules already parsed), `Driver.eval`, `Expect_test_runner`, `Diagnostic`
 (rendering errors) and `Text_diff`.
 
-Tests: `dune build @runtest` (expect tests in `*/test/`, CLI cram tests in
-`driver/test/cram/`).
+Tests: `dune build @runtest`, then `dune promote` to accept changes.
+
+- Runtime behaviour: stag expect tests in `tests/*.stag` (any new `.stag` file
+  there is picked up automatically).
+- Types, type errors and compile-time evaluation: OCaml expect tests on stag
+  source strings, using `driver/test/source_helpers.mli`.
+- Type internals and the parser: OCaml unit tests in `X/test/`.
+- The CLI: cram tests in `driver/test/cram/`.

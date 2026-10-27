@@ -1,0 +1,13 @@
+(executable
+ (name stag_expect)
+ (libraries stag_syntax stag_driver core core_unix.command_unix)
+ (preprocess
+  (pps ppx_jane)))
+
+(rule
+ (deps
+  (glob_files ../*.stag))
+ (action
+  (with-stdout-to
+   dune.inc
+   (run ./stag_expect.exe dune-rules %{deps}))))

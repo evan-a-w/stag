@@ -829,6 +829,24 @@ type abstract
 ;;
 
 let%expect_test "the staged power example" =
+  let nat = Decl.variant "nat" [ "Z", []; "S", [ Ty.con "nat" ] ] in
+  let power =
+    top
+      "power"
+      [ "n"; "c" ]
+      (match_
+         (var "n")
+         [ Pat.construct "Z", quote (construct "Nil")
+         ; ( Pat.construct "S" ~args:[ Pat.var "m" ]
+           , quote
+               (construct
+                  "Cons"
+                  ~args:
+                    [ splice (var "c")
+                    ; splice (app (var "power") [ var "m"; var "c" ])
+                    ]) )
+         ])
+  in
   let program =
     parse_exn
       {|
@@ -848,32 +866,24 @@ let%expect_test "the staged power example" =
   in
   print_s
     [%message
-      (Program.equal
-         (List.take program 3)
-         Test_compile_time.[ nat; Decl.list; power ]
-       : bool)];
-  match Driver.check ~limits (prims @ program) with
-  | Error error -> print_s [%sexp (error : Typecheck_error.t)]
-  | Ok driver ->
-    print_signature
-      (List.drop (Driver.checked driver).signature (List.length prims));
-    Driver.eval ~limits driver |> ok_exn;
-    Test_compile_time.print_values driver;
-    [%expect
-      {|
-      ( "Program.equal (List.take program 3)\
-       \n  (let open Test_compile_time in [nat; Decl.list; power])" true)
-      type nat = Z | S of nat
-      type list['a] = Nil | Cons of 'a * list['a]
-      val power : nat -> <'a>{..'b} -> <list['a]>{..'c} where ..'b <= {..'c}
-      val three : nat
-      val cube : 'a -> list['a]
-      val used : list[int]
-      (power <fun>)
-      (three (S (S (S (Z)))))
-      (cube <fun>)
-      (used (Cons 7 (Cons 7 (Cons 7 (Nil)))))
-      |}]
+      (Program.equal (List.take program 3) [ nat; Decl.list; power ] : bool)];
+  Option.iter (Source_helpers.typecheck_program program) ~f:(fun t ->
+    Source_helpers.print_signature t;
+    Source_helpers.eval_and_print_values t);
+  [%expect
+    {|
+    ("Program.equal (List.take program 3) [nat; Decl.list; power]" true)
+    type nat = Z | S of nat
+    type list['a] = Nil | Cons of 'a * list['a]
+    val power : nat -> <'a>{..'b} -> <list['a]>{..'c} where ..'b <= {..'c}
+    val three : nat
+    val cube : 'a -> list['a]
+    val used : list[int]
+    (power <fun>)
+    (three (S (S (S (Z)))))
+    (cube <fun>)
+    (used (Cons 7 (Cons 7 (Cons 7 (Nil)))))
+    |}]
 ;;
 
 let%expect_test "polymorphic records, variants and modules" =
