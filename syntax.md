@@ -8,18 +8,24 @@ node, for good errors.
 
 - Comments `(* ... *)`, nesting, as OCaml.
 - Literals: integers (OCaml's native `int`; a literal out of its range is a
-  lexing error), `true`, `false`, chars `'c'`, strings `"s"` with OCaml
-  escapes (`\n \t \\ \" \' \ddd`), quoted strings `{|raw|}` and
-  `{id|raw|id}` (no escapes; `id` is lowercase letters and `_`), `()`.
+  lexing error; digits may be separated by `_`, as in `1_000`, but not lead
+  with one), `true`, `false`, chars `'c'`, strings `"s"`, quoted strings
+  `{|raw|}` and `{id|raw|id}` (no escapes; `id` is lowercase letters and `_`),
+  `()`. There are no negative literals yet: write `Int.neg 1`.
+- Escapes, in chars and strings: `\n \t \r \b`, `\ ` (space), `\\ \" \'`,
+  `\ddd` (3 decimal digits, at most 255) and `\xhh` (2 hex digits). In
+  strings, a `\` at the end of a line skips the newline and the spaces and
+  tabs that start the next line.
 - `lowercase_ident`: values, types, fields, type params. `Capitalized_ident`:
   constructors and modules. `` `Tag ``: polymorphic variant tags and
   polymorphic record fields (both are structural labels). `'a`: type
   variables.
 - Paths: `M.N.x`, `M.t`, `M.C`. A path is a sequence of capitalized names
   followed by the final name; `r.x` with lowercase `r` is a field access.
-- Keywords: `let in match with type of module struct end`, `true false`.
+- Keywords: `let rec in match with type of module struct end`, `true false`.
+  `rec` is reserved, as lets are always recursive.
 - `@` and `@@` are reserved (for modes, see below).
-- Staging tokens: `.<` `>.` `.~`.
+- Staging tokens: `.<` `>.` `.~`, and `.{` (a splice's substitutions).
 - Expect test tokens: `let%expect_test`, `[%expect`.
 
 ## Types
@@ -30,22 +36,26 @@ As printed by `Type.to_string_hum`, so printed types parse back:
 int    list['a]    M.t    with_x[{..'a}]        (* args postfix in brackets *)
 'a -> 'b * 'c                                    (* -> right assoc, * n-ary *)
 {`x : int; `y : bool; ..'r}   {..'r}   {}       (* polymorphic record *)
-[`A of int | `B; ..'r]   []                      (* polymorphic variant *)
+[`A of int | `B; ..'r]   [..'r]   []             (* polymorphic variant *)
 <'a>{x : int; ..'r}                              (* code type and context *)
 ```
 
 A type argument in brackets is a type, or a row `{...}` (record-style row,
 used for row parameters). A `{...}` argument always parses as a row; given to
 a type parameter (rather than a row parameter) it is the record type of that
-row. Polymorphic record labels are written with backticks, and code contexts
-(variable names) without; a row argument accepts either. Weak variables
+row (so `list[{}]` is a list of empty records). Rows are of polymorphic
+records, so their labels are written with backticks (`` with_x[{`y : int}] ``),
+everywhere except in the context of a code type, whose entries are variables,
+written without (`<int>{x : int}`). Type arguments are written once, after the
+name (`list[int]`, not `int list` or `list[a][b]`). A constructor's argument of
+function type is parenthesized: `C of (int -> int)`. Weak variables
 (`'_a`), presence variables (`` `x?'a ``), absent labels (`-x`), `as` cycles and
 `where` constraints are printed but never written.
 
 ## Expressions
 
 ```ocaml
-let f x (y : int) : t = e in body   (* local lets are always recursive, no `rec` *)
+let f x (y : int) : t = e in body   (* lets are always recursive: no `rec` *)
 e1; e2                              (* sugar for let _ = e1 in e2 *)
 match e with | p -> e | ...         (* leading | optional; arms are e1; e2 level *)
 f x y                               (* application, left assoc *)
@@ -60,15 +70,15 @@ r \ `x                              (* restrict *)
 `A   `A e                           (* polymorphic variant *)
 .< e >.                             (* quote *)
 .~e   .~(f x)                       (* splice: all in scope (subs = None) *)
-.~e{}                               (* explicit, nothing provided (Some []) *)
-.~e{x = e1; y}                      (* explicit; `y` alone is a variable: (y, None) *)
+.~e.{}                              (* explicit, nothing provided (Some []) *)
+.~e.{x = e1; y}                     (* explicit; `y` alone is a variable: (y, None) *)
 ```
 
 Splice binds tighter than application (`.~f x` is `(.~f) x`), and looser than
-field access (`.~r.x` is `.~(r.x)`). The substitutions `{...}` attach to the
-splice only when written right after it, without space: `.~f{x}` provides `x`,
-while `.~f {x = 1}` applies `.~f` to a record. A splice outside any quote is a
-toplevel (compile-time) splice.
+field access (`.~r.x` is `.~(r.x)`). The substitutions `.{...}` follow the
+spliced expression (`.~r.x.{y}` is `.~(r.x)` providing `y`), and are only
+written after a splice; `.~f {x = 1}` applies `.~f` to a record. A splice
+outside any quote is a toplevel (compile-time) splice.
 
 Precedence, loosest first:
 
@@ -79,13 +89,15 @@ Precedence, loosest first:
 | `e1, e2`                                   | n-ary              |
 | `C e`, `` `A e ``                          | right (`C D x`)    |
 | application `f x`                          | left               |
-| splice `.~e`, `.~e{...}`                   | prefix             |
+| splice `.~e`, `.~e.{...}`                  | prefix             |
 | `e.x`, `e.M.x`, `` e.`x ``, `` e \ `x ``   | left, postfix      |
 
 `let` and `match` may also start a tuple component (`a, let x = 1 in x, y` is
 `(a, let x = 1 in (x, y))`). Restriction is postfix like field access, so
 `` f r \ `x `` is `` f (r \ `x) ``. Record field values, extended records (after `|`)
-and substitutions are at the tuple level (`{x = 1, 2}`); the record of an update
+and substitutions are at the tuple level (`{x = 1, 2}`), and a `let` or `match`
+there ends at the next `;` rather than sequencing (`{x = let a = 1 in a; y = 2}`
+has two fields; parenthesize to sequence); the record of an update
 `{e with ...}` is at the splice level. Trailing `;` is allowed in `{...}`.
 `C (a, b)` and `C ((a, b))` both have two arguments. A parenthesized
 expression's location includes its parentheses.
@@ -111,6 +123,7 @@ type nat = Z | S of nat
 type list['a] = Nil | Cons of 'a * list['a]
 type with_x[{..'r}] = {`x : int; ..'r} (* alias *)
 type point = {x : int; y : int}        (* nominal record *)
+type void = |                          (* empty variant *)
 type t                                 (* abstract *)
 module M = struct ... end
 ```
