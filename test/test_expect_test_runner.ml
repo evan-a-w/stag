@@ -11,7 +11,7 @@ let check_files files =
 
 (* Runs the tests of the file [t.stag], printing the results and the corrected
    file. *)
-let test contents =
+let test ?(show = Fn.id) contents =
   let path = "t.stag" in
   match check_files [ { Source_file.path; contents } ] with
   | None -> ()
@@ -24,12 +24,20 @@ let test contents =
      | None -> print_endline "(no corrections)"
      | Some corrected ->
        print_endline "corrected:";
-       print_string corrected)
+       print_string (show corrected))
 ;;
 
 let%expect_test "normalize" =
   List.iter
-    [ ""; " 5 "; "\n\n    a\n      b  \n\n    c\n  "; "a\n  b"; "\n\t x\n" ]
+    [ ""
+    ; " 5 "
+    ; "\n\n    a\n      b  \n\n    c\n  "
+    ; "a\n  b"
+    ; "\n\t x\n"
+    ; "\t a\n\t  b"
+    ; "\ta\n  b"
+    ; "\t\ta\n\tb"
+    ]
     ~f:(fun s -> print_s [%sexp (Expect_test_runner.normalize s : string)]);
   [%expect
     {|
@@ -42,6 +50,12 @@ let%expect_test "normalize" =
      "a\
     \n  b"
     x
+     "a\
+    \n b"
+     "\ta\
+    \n  b"
+     "\ta\
+    \nb"
     |}]
 ;;
 
@@ -240,4 +254,159 @@ let%expect_test "typechecking" =
       val y : int
     end
     |xxx}]
+;;
+
+let%expect_test "an [%expect] reached more than once" =
+  test
+    {x|let%expect_test "different" =
+  let f x = print_int x; [%expect {| 1 |}] in f 1; f 2; f 1
+
+let%expect_test "same, wrong" =
+  let f x = print_int x; [%expect {| 2 |}] in f 1; f 1
+
+let%expect_test "same, right" =
+  let f x = print_int x; [%expect {| 1 |}] in f 1; f 1
+|x};
+  [%expect
+    {xxx|
+    ((name (different @ t.stag:1:16-27)) (mismatches ())
+     (different_outputs (((loc t.stag:2:34-41) (outputs (1 2))))) (error ()))
+    ((name ("same, wrong" @ t.stag:4:16-29))
+     (mismatches (((loc t.stag:5:34-41) (expected (" 2 ")) (actual 1))))
+     (error ()))
+    ((name ("same, right" @ t.stag:7:16-29)) (mismatches ()) (error ()))
+    corrected:
+    let%expect_test "different" =
+      let f x = print_int x; [%expect {| 1 |}] in f 1; f 2; f 1
+
+    let%expect_test "same, wrong" =
+      let f x = print_int x; [%expect {| 1 |}] in f 1; f 1
+
+    let%expect_test "same, right" =
+      let f x = print_int x; [%expect {| 1 |}] in f 1; f 1
+    |xxx}]
+;;
+
+let%expect_test "trailing output after a body ending in a match or let" =
+  test
+    {x|let%expect_test "match" =
+  match 1 with
+  | 1 -> print_int 1
+  | _ -> ()
+
+let%expect_test "let" =
+  let x = 2 in
+  print_int x
+
+let%expect_test "let then match" = let x = 3 in match x with _ -> print_int x
+
+let%expect_test "match then more" =
+  (match 4 with _ -> print_int 4);
+  print_int 5
+|x};
+  [%expect
+    {xxx|
+    ((name (match @ t.stag:1:16-23))
+     (mismatches
+      (((loc t.stag:4:11-11) (expected ()) (actual 1)
+        (parenthesize t.stag:2:2-4:11))))
+     (error ()))
+    ((name (let @ t.stag:6:16-21))
+     (mismatches (((loc t.stag:8:13-13) (expected ()) (actual 2)))) (error ()))
+    ((name ("let then match" @ t.stag:10:16-32))
+     (mismatches
+      (((loc t.stag:10:77-77) (expected ()) (actual 3)
+        (parenthesize t.stag:10:35-77))))
+     (error ()))
+    ((name ("match then more" @ t.stag:12:16-33))
+     (mismatches (((loc t.stag:14:13-13) (expected ()) (actual 45)))) (error ()))
+    corrected:
+    let%expect_test "match" =
+      (match 1 with
+      | 1 -> print_int 1
+      | _ -> ());
+      [%expect {| 1 |}]
+
+    let%expect_test "let" =
+      let x = 2 in
+      print_int x;
+      [%expect {| 2 |}]
+
+    let%expect_test "let then match" = (let x = 3 in match x with _ -> print_int x);
+      [%expect {| 3 |}]
+
+    let%expect_test "match then more" =
+      (match 4 with _ -> print_int 4);
+      print_int 5;
+      [%expect {| 45 |}]
+    |xxx}]
+;;
+
+let%expect_test "output before a runtime error" =
+  test
+    {x|let%expect_test "error" =
+  print_int 1;
+  [%expect {| 1 |}];
+  print_string "before";
+  match 2 with 1 -> ()
+|x};
+  [%expect {xxx|
+    ((name (error @ t.stag:1:16-23)) (mismatches ())
+     (error (("Match failure: no case matches the value 2" @ t.stag:5:2-22)))
+     (output_before_error before))
+    (no corrections)
+    |xxx}]
+;;
+
+let%expect_test "tab indentation" =
+  test
+    ~show:(String.substr_replace_all ~pattern:"\t" ~with_:"<tab>")
+    "let%expect_test \"t\" =\n\
+     \tprint_string \"a\\nb\";\n\
+     \t[%expect {| |}];\n\
+     \tprint_string \"c\\nd\"\n";
+  [%expect {xxx|
+    ((name (t @ t.stag:1:16-19))
+     (mismatches
+      (((loc t.stag:3:10-15) (expected (" ")) (actual  "a\
+                                                      \nb"))
+       ((loc t.stag:4:20-20) (expected ()) (actual  "c\
+                                                   \nd"))))
+     (error ()))
+    corrected:
+    let%expect_test "t" =
+    <tab>print_string "a\nb";
+    <tab>[%expect {|
+    <tab><tab>a
+    <tab><tab>b
+    <tab><tab>|}];
+    <tab>print_string "c\nd";
+    <tab>[%expect {|
+    <tab><tab>c
+    <tab><tab>d
+    <tab><tab>|}]
+    |xxx}]
+;;
+
+let%expect_test "locals of tests are not toplevels" =
+  let contents = {x|let%expect_test "t" = let x = 1 in print_int x; [%expect {| 1 |}]|x} in
+  Option.iter
+    (check_files [ { Source_file.path = "t.stag"; contents } ])
+    ~f:(fun driver ->
+      Driver.eval driver |> ok_exn;
+      let results = Expect_test_runner.run driver in
+      print_s [%sexp (List.for_all results ~f:Expect_test_runner.Test_result.passed : bool)];
+      List.iter (Driver.checked driver).program.expect_tests ~f:(fun test ->
+        match test.body.desc with
+        | Let { ident; _ } ->
+          print_s
+            [%sexp
+              (Treewalk.find (Driver.interpreter driver) ~ident
+               |> Result.map ~f:Treewalk.Value.to_string_hum
+               : string Or_error.t)]
+        | _ -> print_endline "not a let"));
+  [%expect {|
+    true
+    (Error ("Unbound ident" (ident x/0)))
+    |}]
 ;;

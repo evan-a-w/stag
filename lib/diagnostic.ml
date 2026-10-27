@@ -43,6 +43,11 @@ let of_typecheck_error (error : Typecheck_error.t) =
        | Some { loc; message = _ } when not (Loc.is_none loc) ->
          [ { Note.loc; message = "The error was raised here" } ]
        | Some _ | None -> [])
+    | Free_in_spliced_code { name; unusable } ->
+      [ { Note.loc = unusable.loc
+        ; message = sprintf "%s is a variable of the code's context here" name
+        }
+      ]
     | _ -> []
   in
   create ~notes ~loc:error.loc (Typecheck_error.message error)

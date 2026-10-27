@@ -1,5 +1,14 @@
 open! Core
 
+module Unusable_in_quote = struct
+  type t =
+    { loc : Loc.t
+    ; var_level : Env.Level.t
+    ; used_at : Env.Level.t
+    }
+  [@@deriving sexp_of]
+end
+
 module Kind = struct
   type t =
     | Unification_error of Unification_error.t
@@ -10,6 +19,10 @@ module Kind = struct
         { name : string
         ; var_level : Env.Level.t
         ; used_at : Env.Level.t
+        }
+    | Free_in_spliced_code of
+        { name : string
+        ; unusable : Unusable_in_quote.t
         }
     | Unbound_module of Syntax.Path.t
     | Unbound_type of Syntax.Path.t
@@ -141,6 +154,16 @@ let message { kind; loc = _ } =
       name
       (level_name var_level)
       (level_name used_at)
+  | Free_in_spliced_code { name; unusable = { var_level; used_at; loc = _ } } ->
+    sprintf
+      "Unbound value %s, which the spliced code uses: %s is a variable of its \
+       quote's context, as the %s bound at %s can't be used in the quote \
+       (level %d); only toplevel functions may be used at other levels"
+      name
+      name
+      name
+      (level_name var_level)
+      used_at
   | Unbound_module path ->
     sprintf "Unbound module %s" (Syntax.Path.to_string path)
   | Unbound_type path -> sprintf "Unbound type %s" (Syntax.Path.to_string path)

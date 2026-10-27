@@ -712,8 +712,8 @@ and step t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
        Or_error.error_s
          [%message
            "Field of a non-record" (field : Typed.Field_ref.t) (value : Value.t)])
-  | Match (expr, cases) ->
-    let%bind value = eval' expr in
+  | Match (scrutinee, cases) ->
+    let%bind value = eval' scrutinee in
     eval_match t ~env ~level value cases ~loc:expr.loc
   | Poly_record fields ->
     let%bind fields = map_fields fields ~f:eval' in
