@@ -187,9 +187,11 @@ let located ~contents ~whole_file (loc : Loc.t) =
 
 let to_string_hum
       ?(contents = fun _ -> None)
+      ?(warning = false)
       { loc; whole_file; message; notes }
   =
-  (located ~contents ~whole_file loc @ [ "Error: " ^ message ])
+  (located ~contents ~whole_file loc
+   @ [ (if warning then "Warning: " else "Error: ") ^ message ])
   @ List.concat_map notes ~f:(fun { loc; message } ->
     located ~contents ~whole_file:false loc @ [ "Note: " ^ message ])
   |> List.map ~f:(fun line -> line ^ "\n")

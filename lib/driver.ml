@@ -29,6 +29,66 @@ let check ?(limits = Limits.unlimited) ?output program =
   { checked; interpreter; eval_order = [] }
 ;;
 
+module Module_group = struct
+  type t =
+    | File of Syntax.Toplevel.t
+    | Group of Syntax.Name.t * t list
+
+  let name = function
+    | File { txt = Module (name, _); _ } | Group (name, _) -> name.txt
+    | File { txt = Let _ | Type _ | Expect_test _; _ } ->
+      raise_s [%message "Driver.check_modules: a file is not a module"]
+  ;;
+
+  let rec to_toplevel = function
+    | File toplevel -> toplevel
+    | Group (name, members) ->
+      Located.create
+        ~loc:name.loc
+        (Syntax.Toplevel.Module (name, List.map members ~f:to_toplevel))
+  ;;
+end
+
+(* Pairs of toplevels, by canonical name, where the first refers to the
+   second. *)
+let references (program : Typed.Program.t) =
+  List.concat_map program.sccs ~f:(fun scc ->
+    List.concat_map scc.members ~f:(fun member ->
+      let to_ = Queue.create () in
+      ignore
+        (Typed.Expr.refers_to member.body ~f:(function
+           | Toplevel ident ->
+             Queue.enqueue to_ ident.name;
+             false
+           | Local _ -> false)
+         : bool);
+      Queue.to_list to_ |> List.map ~f:(fun to_ -> member.ident.name, to_)))
+;;
+
+(* The members of a group depend on those their toplevels refer to.
+   Components of members come after those they depend on, and otherwise in
+   [members] order, as do members within a component. *)
+let group_order ~prefix ~references (members : Module_group.t list) =
+  let index = String.Table.create () in
+  List.iteri members ~f:(fun i member ->
+    Hashtbl.set index ~key:(Module_group.name member) ~data:i);
+  let member_of name =
+    let%bind.Option rest = String.chop_prefix name ~prefix in
+    let%bind.Option member, _ = String.lsplit2 rest ~on:'.' in
+    Hashtbl.find index member
+  in
+  let deps = Array.create ~len:(List.length members) Int.Set.empty in
+  List.iter references ~f:(fun (from, to_) ->
+    match member_of from, member_of to_ with
+    | Some from, Some to_ when from <> to_ ->
+      deps.(from) <- Set.add deps.(from) to_
+    | _ -> ());
+  let members = Array.of_list members in
+  Scc.topological_components ~successors:(Array.map deps ~f:Set.to_list)
+  |> List.concat
+  |> List.map ~f:(Array.get members)
+;;
+
 (* The toplevels of each item, in program order, named canonically. *)
 let rec toplevel_names ~prefix (items : Signature.t) =
   List.concat_map items ~f:(fun (item : Signature.Item.t) ->
@@ -39,61 +99,41 @@ let rec toplevel_names ~prefix (items : Signature.t) =
       toplevel_names ~prefix:(prefix ^ name ^ ".") items)
 ;;
 
-let file_of_ident (ident : Typed.Ident.t) =
-  String.lsplit2 ident.name ~on:'.' |> Option.map ~f:fst
+let rec eval_order ~prefix ~references ~(items : Signature.t) members =
+  group_order ~prefix ~references members
+  |> List.concat_map ~f:(fun (member : Module_group.t) ->
+    let name = Module_group.name member in
+    let items =
+      List.find_map items ~f:(function
+        | Module { name = name'; items } when String.equal name name' ->
+          Some items
+        | Module _ | Value _ | Type _ -> None)
+      |> Option.value ~default:[]
+    in
+    let prefix = prefix ^ name ^ "." in
+    match member with
+    | File _ -> toplevel_names ~prefix items
+    | Group (_, members) -> eval_order ~prefix ~references ~items members)
 ;;
 
-(* Files depend on the files whose toplevels theirs refer to. Components of
-   files come after those they depend on, and otherwise in [files] order, as do
-   files within a component. *)
-let file_order ~(files : string list) (program : Typed.Program.t) =
-  let index = String.Table.create () in
-  List.iteri files ~f:(fun i file -> Hashtbl.set index ~key:file ~data:i);
-  let n = List.length files in
-  let deps = Array.create ~len:n Int.Set.empty in
-  List.iter program.sccs ~f:(fun scc ->
-    List.iter scc.members ~f:(fun member ->
-      Option.bind (file_of_ident member.ident) ~f:(Hashtbl.find index)
-      |> Option.iter ~f:(fun from ->
-        ignore
-          (Typed.Expr.refers_to member.body ~f:(function
-             | Toplevel ident ->
-               Option.bind (file_of_ident ident) ~f:(Hashtbl.find index)
-               |> Option.iter ~f:(fun to_ ->
-                 if to_ <> from then deps.(from) <- Set.add deps.(from) to_);
-               false
-             | Local _ -> false)))));
-  Scc.topological_components ~successors:(Array.map deps ~f:Set.to_list)
-  |> List.concat
-  |> List.map ~f:(List.nth_exn files)
-;;
-
-let check_modules ?(limits = Limits.unlimited) ?output modules =
+let check_modules ?(limits = Limits.unlimited) ?output groups =
   let interpreter = create_interpreter ~limits ~output in
   let%map.Result checked =
-    Typecheck.typecheck (Typecheck.create ~interpreter ()) ~program:modules
+    Typecheck.typecheck
+      (Typecheck.create ~interpreter ())
+      ~program:(List.map groups ~f:Module_group.to_toplevel)
   in
   let idents =
     List.concat_map checked.program.sccs ~f:(fun scc ->
       List.map scc.members ~f:(fun member -> member.ident.name, member.ident))
     |> String.Map.of_alist_exn
   in
-  let files_in_order =
-    file_order
-      ~files:
-        (List.filter_map modules ~f:(fun (toplevel : Syntax.Toplevel.t) ->
-           match toplevel.txt with
-           | Module (name, _) -> Some name.txt
-           | Let _ | Type _ | Expect_test _ -> None))
-      checked.program
-  in
   let eval_order =
-    List.concat_map files_in_order ~f:(fun file ->
-      List.find_map checked.signature ~f:(function
-        | Module { name; items } when String.equal name file ->
-          Some (toplevel_names ~prefix:(name ^ ".") items)
-        | Module _ | Value _ | Type _ -> None)
-      |> Option.value ~default:[])
+    eval_order
+      ~prefix:""
+      ~references:(references checked.program)
+      ~items:checked.signature
+      groups
     |> List.map ~f:(Map.find_exn idents)
   in
   { checked; interpreter; eval_order }
@@ -114,6 +154,9 @@ let check_files ?limits ?output files =
     |> Result.all
     |> Result.map_error ~f:(fun error -> Error.Source error)
   in
-  check_modules ?limits ?output modules
+  check_modules
+    ?limits
+    ?output
+    (List.map modules ~f:(fun file -> Module_group.File file))
   |> Result.map_error ~f:(fun error -> Error.Typecheck error)
 ;;

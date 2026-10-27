@@ -30,12 +30,21 @@ val check_files
   -> Source_file.t list
   -> (t, Error.t) Result.t
 
-(** As [check_files], for modules already parsed: each of [modules] is a
-    [Toplevel.Module], evaluated as [check_files]'s files are. *)
+(** The modules of a program, for [check_modules]. *)
+module Module_group : sig
+  type t =
+    | File of Syntax.Toplevel.t
+    (** A [Toplevel.Module], as [Source_file.parse] makes. *)
+    | Group of Syntax.Name.t * t list
+    (** The module of these, eg. a library of files, which are ordered among
+        themselves as the files of [check_files] are. *)
+end
+
+(** As [check_files], for modules already parsed. *)
 val check_modules
   :  ?limits:Limits.t
   -> ?output:(string -> unit)
-  -> Syntax.Toplevel.t list
+  -> Module_group.t list
   -> (t, Typecheck_error.t) Result.t
 
 val checked : t -> Typecheck.Checked.t
@@ -45,9 +54,11 @@ val interpreter : t -> Treewalk.t
     of its own, unlimited by default. Those evaluated at compile time keep
     their values, charged to the limits of [check].
 
-    Each toplevel is evaluated after those it refers to. Otherwise, a program
-    is evaluated in order and the files of [check_files] in dependency order:
-    a file depends on those its toplevels refer to, and each strongly connected
-    component of files is evaluated after those it depends on, else in the
-    order given, with its files in the order given. *)
+    Toplevels are evaluated top to bottom: those of [check]'s program in
+    order, and the files of [check_files] (and the members of each
+    [Module_group]) in dependency order, each top to bottom. A file depends on those its toplevels refer to, and each
+    strongly connected component of files comes after those it depends on,
+    else in the order given, with its files in the order given. A toplevel
+    used before its turn, eg. by one earlier, is evaluated then, on demand,
+    and not again. Those used at compile time were evaluated then. *)
 val eval : ?limits:Limits.t -> t -> unit Or_error.t

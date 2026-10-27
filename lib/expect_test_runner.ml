@@ -160,8 +160,10 @@ let run_test ~limits driver (test : Typed.Expect_test.t) =
   }
 ;;
 
-let run ?(limits = Limits.unlimited) driver =
+let run ?(limits = Limits.unlimited) ?files driver =
   (Driver.checked driver).program.expect_tests
+  |> List.filter ~f:(fun (test : Typed.Expect_test.t) ->
+    Option.for_all files ~f:(fun files -> Set.mem files test.name.loc.file))
   |> List.map ~f:(run_test ~limits driver)
 ;;
 

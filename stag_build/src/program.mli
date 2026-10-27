@@ -5,11 +5,6 @@ open! Import
     each other as siblings, and to the libraries as [Bar]. The files of an
     executable or test are modules of the program themselves. *)
 
-val modules
-  :  Project.t
-  -> Project.Target.t
-  -> (Syntax.Toplevel.t list, Diagnostic.t list) Result.t
-
 (** Prims print to [output], stdout by default, as for [Driver.check]. *)
 val check
   :  ?output:(string -> unit)

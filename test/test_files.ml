@@ -226,3 +226,88 @@ let%expect_test "errors" =
   run [];
   [%expect {| --- |}]
 ;;
+
+let%expect_test "toplevels used before their turn are evaluated on demand" =
+  run
+    [ file
+        "a.stag"
+        {|
+let x = print_endline "a.x"; Int.add y (B.n)
+let y = print_endline "a.y"; 1
+let z = print_endline "a.z"; print_int x; print_endline ""
+|}
+    ; file
+        "b.stag"
+        {|
+let m = print_endline "b.m"; 2
+let n = print_endline "b.n"; Int.add m (A.y)
+|}
+    ];
+  [%expect
+    {|
+    module A : sig
+      val x : int
+      val y : int
+      val z : unit
+    end
+    module B : sig
+      val m : int
+      val n : int
+    end
+    ---
+    a.x
+    a.y
+    b.n
+    b.m
+    a.z
+    4
+    |}]
+;;
+
+let%expect_test "groups of files are ordered as files are" =
+  let parse path contents =
+    Driver.Module_group.File
+      (Result.ok_or_failwith
+         (Result.map_error
+            (Source_file.parse (file path contents))
+            ~f:(fun error ->
+              Sexp.to_string [%sexp (error : Source_file.Error.t)])))
+  in
+  let group name members =
+    Driver.Module_group.Group (Located.create ~loc:Loc.none name, members)
+  in
+  match
+    Driver.check_modules
+      [ group
+          "Lib"
+          [ parse "a.stag" {| let p = print_endline "Lib.A"; B.q |}
+          ; parse
+              "b.stag"
+              {|
+let p = print_endline "Lib.B"
+let q = print_endline "Lib.B.q"
+|}
+          ; group
+              "Sub"
+              [ parse "c.stag" {| let p = print_endline "Lib.Sub.C"; D.p |}
+              ; parse "d.stag" {| let p = print_endline "Lib.Sub.D" |}
+              ]
+          ]
+      ; parse "main.stag" {| let p = print_endline "Main"; Lib.A.p |}
+      ; parse "first.stag" {| let p = print_endline "First" |}
+      ]
+  with
+  | Error error -> print_s [%sexp (error : Typecheck_error.t)]
+  | Ok driver ->
+    Driver.eval driver |> ok_exn;
+    [%expect
+      {|
+      Lib.B
+      Lib.B.q
+      Lib.A
+      Lib.Sub.D
+      Lib.Sub.C
+      Main
+      First
+      |}]
+;;

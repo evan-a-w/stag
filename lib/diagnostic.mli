@@ -45,5 +45,9 @@ Error: message
     Then each note likewise, with [Note:] for [Error:]. The quoted source is
     that of [contents] of the file, if given and the span is in it. Spans of
     several lines quote them (elided in the middle when there are many)
-    without underlining. *)
-val to_string_hum : ?contents:(string -> string option) -> t -> string
+    without underlining. With [warning], [Warning:] for [Error:]. *)
+val to_string_hum
+  :  ?contents:(string -> string option)
+  -> ?warning:bool
+  -> t
+  -> string

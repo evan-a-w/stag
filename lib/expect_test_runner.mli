@@ -48,8 +48,13 @@ end
     with [limits] of its own, unlimited by default. Each [[%expect]] checks the
     output since the previous one, and the output after the last must be
     empty. Outputs are compared after [normalize]. An [[%expect]] reached more
-    than once is checked once, if its outputs are all the same. *)
-val run : ?limits:Limits.t -> Driver.t -> Test_result.t list
+    than once is checked once, if its outputs are all the same. With [files],
+    only the tests in those files (by [Loc.file]) run. *)
+val run
+  :  ?limits:Limits.t
+  -> ?files:String.Set.t
+  -> Driver.t
+  -> Test_result.t list
 
 (** Without leading and trailing blank lines, trailing whitespace on each line
     and the leading whitespace common to all lines (a common prefix, so a tab
