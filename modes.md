@@ -58,14 +58,16 @@ const  <  portable  <  nonportable
 - **nonportable**: everything else, e.g. function arguments by default.
 
 `const` implies `portable`: what is known at compile time exists at every
-stage.
+stage. This is the stage axis of [semantics.md](semantics.md), alongside
+provenance and locality; `const` also implies `static` provenance there.
 
 This is about what values *capture*, not about effects. Effect purity (calling
 a function performs no side effects) would be a separate property of arrows,
 needing a small effect system; deferred until the language has effects.
 
 Later refinement: mode crossing by kind, as in OxCaml. Plain data like `int`
-can always be lifted into code, so could cross stages regardless of mode.
+can always be lifted into code, so could cross `portable` regardless of mode,
+but never `const`.
 
 ## Expression modes
 
@@ -145,6 +147,7 @@ toplevel splice is not `const`.
 - Presence ordering constraints (`Absent <= Present`) are kept as bounds
   between presence variables, so are solved independently of the order they
   arise in, as are the type equalities of entries the code may use, which
-  wait for the entry to be `Present`. They could move into the same lattice
-  solver as modes.
+  wait for the entry to be `Present`. They move into the mode solver, as a
+  two point axis whose equalities are triggers (see
+  [semantics.md](semantics.md#solver)).
 - Effect purity, `const fn`, mode crossing by kind.
