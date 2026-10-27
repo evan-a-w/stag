@@ -242,7 +242,8 @@ module Expr = struct
     | Quote expr -> splices_are_values expr ~depth:1
     | Let { ident; args; body; in_; generalized = _ } ->
       binding_is_value ~ident ~args ~body && is_value in_
-    | App _ | Splice _ | Toplevel_splice _ -> false
+    | Toplevel_splice { expansion; code = _ } -> is_value expansion
+    | App _ | Splice _ -> false
     | Tuple _
     | Construct _
     | Record _
@@ -255,6 +256,8 @@ module Expr = struct
     | Poly_update _
     | Poly_variant _ -> List.for_all (sub_exprs t) ~f:is_value
 
+  (* Whether the splices run when the enclosing quote [depth] levels out is
+     built are values. *)
   and splices_are_values t ~depth =
     match t.desc with
     | Splice { code; subs } ->
@@ -267,7 +270,8 @@ module Expr = struct
           List.for_all subs ~f:(fun (_, expr) -> splices_are_values expr ~depth)
         | Implicit _ -> true)
     | Quote expr -> splices_are_values expr ~depth:(depth + 1)
-    | Toplevel_splice _ -> false
+    | Toplevel_splice { expansion; code = _ } ->
+      splices_are_values expansion ~depth
     | Lit _
     | Var _
     | App _

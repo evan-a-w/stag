@@ -124,13 +124,21 @@ module Embedded = struct
   let add t ~ident ~value = t.values <- Map.set t.values ~key:ident ~data:value
 end
 
+(* A toplevel not yet evaluated. *)
+module Pending = struct
+  type t =
+    | Component of Typed.Scc.t (** None of its members' closures are bound. *)
+    | Value of Typed.Expr.t
+end
+
 type t =
   { sccs : Typed.Scc.t Queue.t
-  ; pending : Typed.Scc.t Typed.Ident.Table.t
+  ; pending : Pending.t Typed.Ident.Table.t
   ; ident_info : Typed.Ident_info.t Typed.Ident.Table.t
   ; closure_captures : Typed.Ident.Hash_set.t Typed.Ident.Table.t
   ; mutable env : Value.t Env.t
   ; stamps : Stamp_counter.t
+  ; mutable budget : Budget.t
   }
 
 let captures t ~ident ~args ~body =
@@ -216,10 +224,12 @@ let create ~stamps () =
   ; closure_captures = Typed.Ident.Table.create ()
   ; env = Env.create ()
   ; stamps
+  ; budget = Budget.create Limits.unlimited
   }
 ;;
 
 let stamps t = t.stamps
+let set_limits t limits = t.budget <- Budget.create limits
 
 let add_ident_info t ~ident ~info =
   Hashtbl.set t.ident_info ~key:ident ~data:info
@@ -228,7 +238,7 @@ let add_ident_info t ~ident ~info =
 let add_scc t (scc : Typed.Scc.t) =
   Queue.enqueue t.sccs scc;
   List.iter scc.members ~f:(fun { ident; _ } ->
-    Hashtbl.set t.pending ~key:ident ~data:scc)
+    Hashtbl.set t.pending ~key:ident ~data:(Component scc))
 ;;
 
 let global_info t ~ident =
@@ -539,32 +549,42 @@ let declare_toplevel t ident =
 let rec force t ident =
   match Hashtbl.find t.pending ident with
   | None -> Ok ()
-  | Some scc -> eval_scc t scc
+  | Some (Component scc) ->
+    let%bind () = bind_functions t scc in
+    force t ident
+  | Some (Value body) ->
+    Hashtbl.remove t.pending ident;
+    declare_toplevel t ident;
+    let%map value = eval t ~env:(Env.create ()) ~level:0 body in
+    Env.set t.env ~ident ~value
 
 and lookup t env ident =
   let%bind () = force t ident in
   Env.lookup env ~fallback:t.env ~ident
 
-(* Functions are bound first: making their closures reads nothing, so values
-   in a recursive component can then use them. *)
-and eval_scc t ({ members; recursive } : Typed.Scc.t) =
-  List.iter members ~f:(fun { ident; _ } -> Hashtbl.remove t.pending ident);
-  if recursive
-  then List.iter members ~f:(fun { ident; _ } -> declare_toplevel t ident);
+(* Making closures reads nothing, so a component's functions are all bound at
+   once, and its values evaluated each when first used. *)
+and bind_functions t ({ members; recursive } : Typed.Scc.t) =
   let functions, values =
     List.partition_tf members ~f:(fun { args; _ } -> not (List.is_empty args))
   in
-  let%bind () =
-    iter_result functions ~f:(fun { ident; args; body; _ } ->
-      let%map value = closure t ~env:t.env ~level:0 ~ident ~args ~body in
-      Env.set t.env ~ident ~value)
-  in
-  iter_result values ~f:(fun { ident; body; _ } ->
-    let%map value = eval t ~env:(Env.create ()) ~level:0 body in
+  List.iter values ~f:(fun { ident; body; _ } ->
+    Hashtbl.set t.pending ~key:ident ~data:(Value body));
+  List.iter functions ~f:(fun { ident; _ } ->
+    Hashtbl.remove t.pending ident;
+    if recursive then declare_toplevel t ident);
+  iter_result functions ~f:(fun { ident; args; body; _ } ->
+    let%map value = closure t ~env:t.env ~level:0 ~ident ~args ~body in
     Env.set t.env ~ident ~value)
 
 (* [env] has the bindings of the current activation, at [level]. *)
-and eval t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
+and eval t ~env ~level expr =
+  let%bind () = Budget.enter t.budget in
+  let value = step t ~env ~level expr in
+  Budget.leave t.budget;
+  value
+
+and step t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
   let eval' = eval t ~env ~level in
   match expr.desc with
   | Lit lit -> Ok (Value.of_lit lit)

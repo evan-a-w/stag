@@ -53,7 +53,6 @@ module Pattern : sig
   end
 
   val view : t -> View.t
-  val is_irrefutable : t -> bool
 end
 
 module Expr : sig
@@ -78,7 +77,6 @@ module Expr : sig
           ; annot : Syntax.Type_expr.t option
           ; body : t
           ; in_ : t
-          ; generalized : bool
           }
       | Splice of
           { code : t

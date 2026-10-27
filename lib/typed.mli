@@ -169,8 +169,12 @@ module Expr : sig
       [Persistent] variable or an [Implicit] substitution. *)
   val refers_to : t -> f:(Binder.t -> bool) -> bool
 
-  (** Whether a [Let] of [ident] may be generalized, as
-      [Syntax.Expr.binding_is_value]. *)
+  (** Syntactic values, which may be generalized (the relaxed value
+      restriction). A toplevel splice is judged by its expansion. *)
+  val is_value : t -> bool
+
+  (** Whether a [Let] of [ident] may be generalized: a function, or a value
+      that doesn't refer to [ident]. *)
   val binding_is_value : ident:Ident.t -> args:Ident.t list -> body:t -> bool
 end
 

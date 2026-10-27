@@ -4,7 +4,7 @@ open Syntax
 open Helpers
 
 let typecheck_exn program =
-  let typecheck = Typecheck.create () in
+  let typecheck = typechecker () in
   match Typecheck.typecheck typecheck ~program with
   | Ok { signature; _ } -> signature
   | Error error -> raise_s [%sexp (error : Typecheck_error.t)]

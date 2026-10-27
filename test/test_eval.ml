@@ -12,12 +12,12 @@ let prim_names =
 (* Evaluates [program], then prints its toplevels in evaluation order, or the
    error evaluation stopped at and the toplevels evaluated before it. *)
 let run program =
-  match Driver.check (prims @ program) with
+  match Driver.check ~limits (prims @ program) with
   | Error error -> print_s [%sexp (error : Typecheck_error.t)]
   | Ok driver ->
     let t = Driver.interpreter driver in
     let { Typecheck.Checked.program; _ } = Driver.checked driver in
-    let result = Driver.eval driver in
+    let result = Driver.eval ~limits driver in
     List.iter program.sccs ~f:(fun scc ->
       List.iter scc.members ~f:(fun { ident; _ } ->
         if not (List.mem prim_names ident.name ~equal:String.equal)
@@ -288,7 +288,7 @@ let%expect_test "polymorphic records and variants" =
 let%expect_test "toplevel splices" =
   run
     [ top "five" [] (splice (quote (int 5)))
-    ; (* Toplevel splices are expanded once, before evaluation. *)
+    ; (* Toplevel splices run once, while checking. *)
       top
         "generated"
         []
@@ -557,7 +557,7 @@ let%expect_test "nested quotes at runtime" =
 
 (* The checked bodies of [program]'s toplevels, with their splices expanded. *)
 let expand program =
-  match Driver.check (prims @ program) with
+  match Driver.check ~limits (prims @ program) with
   | Error error -> print_s [%sexp (error : Typecheck_error.t)]
   | Ok driver ->
     let { Typecheck.Checked.program; _ } = Driver.checked driver in
@@ -618,7 +618,7 @@ let%expect_test "expanded programs" =
           (Quote (Quote (Lit (Int 1) : int) : <int>{..'_a}) : <<int>{..'_a}>{}))
          (expansion (Quote (Lit (Int 1) : int) : <int>{..'_a})) : <int>{..'_a}))
        (subs (Implicit ())) : int)
-      : <int>{..'_b} (where "..'_a <= {..'_b}")))
+      : <int>{..'b} (where "..'_a <= {..'b}")))
     |}]
 ;;
 

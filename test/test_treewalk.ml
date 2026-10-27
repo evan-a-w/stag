@@ -12,7 +12,7 @@ let prim_names =
 (* The captures of each closure in [program]: its toplevel functions and the
    local functions within them. *)
 let print program =
-  match Driver.check (prims @ program) with
+  match Driver.check ~limits (prims @ program) with
   | Error error -> print_s [%sexp (error : Typecheck_error.t)]
   | Ok driver ->
     let t = Driver.interpreter driver in

@@ -10,7 +10,7 @@ let prim_names =
 ;;
 
 let typecheck_exn program =
-  match Typecheck.typecheck (Typecheck.create ()) ~program with
+  match Typecheck.typecheck (typechecker ()) ~program with
   | Ok { program; _ } -> program
   | Error error -> raise_s [%sexp (error : Typecheck_error.t)]
 ;;
@@ -34,9 +34,7 @@ let prim_locals =
    the types and levels of its binders. Toplevels get the first stamps, then prims'
    locals, as prims are checked first. *)
 let print ?(idents = false) program =
-  match
-    Typecheck.typecheck (Typecheck.create ()) ~program:(prims @ program)
-  with
+  match Typecheck.typecheck (typechecker ()) ~program:(prims @ program) with
   | Error error -> print_s [%sexp (error : Typecheck_error.t)]
   | Ok { program; _ } ->
     List.iter program.sccs ~f:(fun (scc : Typed.Scc.t) ->
@@ -763,10 +761,12 @@ let%expect_test "recursive components" =
           "<'b>{gen : 'c -> 'b; n : 'c; ..'d}")))))
      (recursive false))
     ((members
-      (((ident a/5) (args ()) (scheme "<'_a>{b : '_a; ..'_b}")
-        (body (Quote (Var (Free b) : '_a) : "<'_a>{b : '_a; ..'_b}")))
-       ((ident b/6) (args ()) (scheme "<'_a>{a : '_a; ..'_b}")
-        (body (Quote (Var (Free a) : '_a) : "<'_a>{a : '_a; ..'_b}")))))
+      (((ident b/6) (args ()) (scheme "<'a>{a : 'a; ..'b}")
+        (body (Quote (Var (Free a) : 'a) : "<'a>{a : 'a; ..'b}")))))
+     (recursive false))
+    ((members
+      (((ident a/5) (args ()) (scheme "<'a>{b : 'a; ..'b}")
+        (body (Quote (Var (Free b) : 'a) : "<'a>{b : 'a; ..'b}")))))
      (recursive false))
     ((members
       (((ident loop/7) (args (x/19)) (scheme "'a -> 'b")
@@ -953,7 +953,7 @@ let%expect_test "toplevel splice in a level -1 let" =
               (code
                (Let (ident k/17) (args (c/16)) (generalized true)
                 (body
-                 (Let (ident _/18) (args ()) (generalized false)
+                 (Let (ident _/18) (args ()) (generalized true)
                   (body
                    (Quote
                     (Let (ident n/19) (args ()) (generalized true)

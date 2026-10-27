@@ -105,11 +105,6 @@ module Pattern = struct
     | Syntax pattern -> syntax_view pattern
     | Generated pattern -> generated_view pattern
   ;;
-
-  let is_irrefutable = function
-    | Syntax pattern -> Syntax.Pattern.is_irrefutable pattern
-    | Generated pattern -> Typed.Pattern.is_irrefutable pattern
-  ;;
 end
 
 module Expr = struct
@@ -134,7 +129,6 @@ module Expr = struct
           ; annot : Syntax.Type_expr.t option
           ; body : t
           ; in_ : t
-          ; generalized : bool
           }
       | Splice of
           { code : t
@@ -169,7 +163,6 @@ module Expr = struct
         ; annot
         ; body = sub equal
         ; in_ = sub in_
-        ; generalized = Syntax.Expr.binding_is_value name ~args ~equal
         }
     | Splice { expr; subs } ->
       Splice
@@ -214,7 +207,6 @@ module Expr = struct
         ; annot = None
         ; body = sub body
         ; in_ = sub in_
-        ; generalized = Typed.Expr.binding_is_value ~ident ~args ~body
         }
     | Splice { code; subs = Explicit subs } ->
       Splice

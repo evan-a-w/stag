@@ -89,10 +89,13 @@ reference evaluator for the pure fragment. Its rules follow the typechecker:
   is compile-time macro expansion of possibly open code. Its entries are
   provided by level 0 locals, or else by the toplevel with that canonical
   name. Entries that cannot be provided are forced `Absent`, so code that is
-  known to use them is rejected. At the moment no toplevel can be used inside
-  a toplevel splice at all, not even a persistent one, so the
-  `~(power 3 <2>)` example in `modes.md` is aspirational. Reflection happens
-  after expansion, so the logic never sees level −1.
+  known to use them is rejected. Splices run during checking: the code the
+  splice computes is evaluated by the interpreter, and the generated code is
+  inferred anew where it is spliced. Any toplevel can be used at compile time,
+  as in `~(power 3 <2>)`, once its component is checked: dependencies are
+  inferred from use, and toplevels are evaluated lazily, each at most once and
+  only if needed. Reflection happens after expansion, so the logic never sees
+  level −1.
 - **Non-persistent toplevels in quotes.** In `<n + 1>`, the name `n` is a free
   variable meaning "whatever `n` is where the code is finally spliced". A
   local `n` at a toplevel splice captures it. A theorem about a generator that

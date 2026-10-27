@@ -68,13 +68,18 @@ val create : stamps:Stamp_counter.t -> unit -> t
 
 val stamps : t -> Stamp_counter.t
 
+(** Evaluation from now on, until [set_limits] again, is bounded by [limits],
+    counted from now. Evaluation is unlimited until [set_limits] is first
+    called. *)
+val set_limits : t -> Limits.t -> unit
+
 (** Every ident evaluated needs its info: the typechecker adds each as it
     binds it. *)
 val add_ident_info : t -> ident:Typed.Ident.t -> info:Typed.Ident_info.t -> unit
 
 (** Queues [scc] to [eval]. Its toplevels are evaluated earlier if used
-    before, eg. by a toplevel splice: each component is evaluated at most
-    once, when first used. *)
+    before, eg. by a toplevel splice: each is evaluated at most once, when
+    first used, and the component's functions are bound when any member is. *)
 val add_scc : t -> Typed.Scc.t -> unit
 
 (** Evaluates the toplevel splice [code], at [level] in an empty env, to code,

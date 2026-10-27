@@ -29,7 +29,7 @@ let print_values driver =
    toplevels evaluated at compile time; then evaluates it, printing every
    toplevel's value. *)
 let run ?(bodies = []) ?(eval = true) program =
-  match Driver.check (prims @ program) with
+  match Driver.check ~limits (prims @ program) with
   | Error error -> print_s [%sexp (error : Typecheck_error.t)]
   | Ok driver ->
     let checked = Driver.checked driver in
@@ -42,7 +42,7 @@ let run ?(bodies = []) ?(eval = true) program =
     if eval
     then (
       print_endline "-- evaluated";
-      let result = Driver.eval driver in
+      let result = Driver.eval ~limits driver in
       print_values driver;
       match result with
       | Ok () -> ()
@@ -408,7 +408,7 @@ let%expect_test "nested toplevel splices" =
     {|
     val inner : <<int>{..'a}>{..'b}
     val nested : int
-    val in_quote : <int>{..'_a}
+    val in_quote : <int>{..'a}
     (nested/5
      (Toplevel_splice
       (code
@@ -526,38 +526,321 @@ let%expect_test
 ;;
 
 let%expect_test "spliced code using the toplevel being checked" =
-  run
-    [ top "f" [ "x" ] (splice (var "code"))
-    ; top "code" [] (quote (app (var "f") [ var "x" ]))
-    ];
-  [%expect {| (Compile_time_use_of_toplevel_being_checked code) |}]
+  let f =
+    top
+      "f"
+      [ "n" ]
+      (match_
+         (var "n")
+         [ Pat.construct "Z", int 0
+         ; Pat.construct "S" ~args:[ Pat.var "m" ], splice (var "code")
+         ])
+  in
+  let code = top "code" [] (quote (app (var "f") [ var "m" ])) in
+  let used = top "used" [] (app (var "f") [ nat_of_int 2 ]) in
+  run ~bodies:[ "f" ] [ nat; f; code; used ];
+  (* [f] must be checked to know if [code] embeds it, which needs [code]. *)
+  run [ nat; code; f; used ];
+  [%expect
+    {|
+    type nat = Z | S of nat
+    val f : nat -> int
+    val code : <'a>{f : 'b -> 'a; m : 'b; ..'c}
+    val used : int
+    (f/4
+     (Match (Var (Bound (Local n/16)) : nat)
+      (((Construct ((type_name nat) (name Z) (index 0)) () : nat)
+        (Lit (Int 0) : int))
+       ((Construct ((type_name nat) (name S) (index 1)) ((Var m/17 : nat)) : nat)
+        (Toplevel_splice
+         (code
+          (Var (Bound (Toplevel code/5)) : "<int>{f : nat -> int; m : nat}"))
+         (expansion
+          (App (Var (Bound (Toplevel f/4)) : "nat -> int")
+           (Var (Bound (Local m/17)) : nat) : int))
+         : int)))
+      : int))
+    -- evaluated at compile time
+    (code (Code (App (Var (Free f) : "'a -> 'b") (Var (Free m) : 'a) : 'b)))
+    -- evaluated
+    (code (Code (App (Var (Free f) : "'a -> 'b") (Var (Free m) : 'a) : 'b)))
+    (f <fun>)
+    (used 0)
+    (Compile_time_use_of_toplevel_being_checked code)
+    |}]
 ;;
 
-let%expect_test "toplevel splices are not generalized" =
+let%expect_test "maybe-used entries at a toplevel splice" =
+  (* [gen]'s result may use [f], so [f?] is in the context of the code
+     spliced at level -1. *)
+  let gen =
+    top
+      "gen"
+      [ "c" ]
+      (seq (quote (let_ "f" [] (int 1) (splice (var "c")))) (var "c"))
+  in
   run
+    [ gen
+    ; top "f" [] (splice (splice (app (var "gen") [ quote (quote (int 1)) ])))
+    ];
+  (* Checking [f] on demand would need [x] at compile time. *)
+  run
+    [ gen
+    ; top "x" [] (splice (splice (app (var "gen") [ quote (quote (int 1)) ])))
+    ; top "f" [] (splice (seq (var "x") (quote (int 2))))
+    ];
+  [%expect
+    {|
+    val gen : <'a>{f?'b : int; ..'c} -> <'a>{f?'b : int; ..'c} where ..'c <= {..'d}
+    val f : int
+    -- evaluated at compile time
+    (gen <fun>)
+    -- evaluated
+    (gen <fun>)
+    (f 1)
+    val gen : <'a>{f?'b : int; ..'c} -> <'a>{f?'b : int; ..'c} where ..'c <= {..'d}
+    val x : int
+    val f : int
+    -- evaluated at compile time
+    (gen <fun>)
+    (x 1)
+    -- evaluated
+    (gen <fun>)
+    (x 1)
+    (f 2)
+    |}]
+;;
+
+let%expect_test "toplevels of a component are evaluated separately" =
+  let abc = Decl.variant "abc" [ "A", []; "B", [] ] in
+  run
+    [ abc
+    ; top "f" [ "x" ] (seq (var "v") (quote (var "x")))
+    ; top
+        "v"
+        []
+        (seq (var "f") (match_ (construct "B") [ Pat.construct "A", int 0 ]))
+    ; top "g" [ "y" ] (splice (seq (var "f") (quote (var "y"))))
+    ];
+  (* [a] reads [b], evaluated when first read, and [c] reads itself. *)
+  run
+    [ top "a" [] (seq (var "b") (int 1))
+    ; top "b" [] (seq (var "k") (int 2))
+    ; top "k" [ "u" ] (seq (var "u") (var "a"))
+    ; top "c" [] (seq (var "d") (int 3))
+    ; top "d" [] (app (var "k") [ var "c" ])
+    ];
+  [%expect
+    {|
+    type abc = A | B
+    val f : '_a -> <'_b>{x : '_b; ..'_c}
+    val v : int
+    val g : 'a -> 'a
+    -- evaluated at compile time
+    (f <fun>)
+    -- evaluated
+    (f <fun>)
+    ("Match failure" (value (B)))
+    val a : int
+    val b : int
+    val k : int -> int
+    val c : int
+    val d : int
+    -- evaluated at compile time
+    -- evaluated
+    (a 1)
+    (b 2)
+    (k <fun>)
+    ("Used value before it was defined (eg. because of recursion on values)"
+     (ident c/7))
+    |}]
+;;
+
+let%expect_test "a splice needing a toplevel whose checking runs a splice" =
+  run
+    [ top "user" [] (splice (app (var "gen") [ unit ]))
+    ; top "gen" [ "u" ] (seq (var "helper") (quote (var "helper")))
+    ; top "helper" [] (splice (app (var "gen2") [ unit ]))
+    ; top "gen2" [ "u" ] (quote (int 5))
+    ];
+  [%expect
+    {|
+    val user : int
+    val gen : 'a -> <'b>{helper : 'b; ..'c}
+    val helper : int
+    val gen2 : 'a -> <int>{..'b}
+    -- evaluated at compile time
+    (gen2 <fun>)
+    (helper 5)
+    (gen <fun>)
+    -- evaluated
+    (gen2 <fun>)
+    (helper 5)
+    (gen <fun>)
+    (user 5)
+    |}]
+;;
+
+let%expect_test "constructors and fields resolve where quoted" =
+  run
+    ~bodies:[ "M.x"; "M.y" ]
+    [ Decl.variant "t" [ "A", []; "B", [] ]
+    ; Decl.record "r" [ "a", Ty.int ]
+    ; top "code" [] (quote (tuple [ construct "B"; record [ "a", int 1 ] ]))
+    ; module_
+        "M"
+        [ Decl.variant "t" [ "B", []; "C", [] ]
+        ; Decl.record "s" [ "a", Ty.bool ]
+        ; top "x" [] (splice (var "code"))
+        ; top
+            "y"
+            []
+            (match_
+               (splice (var "code"))
+               [ Pat.tuple [ Pat.construct "A"; Pat.any ], int 0
+               ; Pat.any, int 1
+               ])
+        ]
+    ];
+  [%expect
+    {|
+    type t = A | B
+    type r = { a : int }
+    val code : <t * r>{..'a}
+    module M : sig
+      type t = B | C
+      type s = { a : bool }
+      val x : .t * r
+      val y : int
+    end
+    (M.x/5
+     (Toplevel_splice (code (Var (Bound (Toplevel code/4)) : "<t * r>{}"))
+      (expansion
+       (Tuple
+        ((Construct ((type_name t) (name B) (index 1)) () : t)
+         (Record ((((type_name r) (name a) (index 0)) (Lit (Int 1) : int))) : r))
+        : "t * r"))
+      : "t * r"))
+    (M.y/6
+     (Match
+      (Toplevel_splice (code (Var (Bound (Toplevel code/4)) : "<t * r>{}"))
+       (expansion
+        (Tuple
+         ((Construct ((type_name t) (name B) (index 1)) () : t)
+          (Record ((((type_name r) (name a) (index 0)) (Lit (Int 1) : int))) : r))
+         : "t * r"))
+       : "t * r")
+      (((Tuple ((Construct ((type_name t) (name A) (index 0)) () : t) (Any : r))
+         : "t * r")
+        (Lit (Int 0) : int))
+       ((Any : "t * r") (Lit (Int 1) : int)))
+      : int))
+    -- evaluated at compile time
+    (code
+     (Code
+      (Tuple
+       ((Construct ((type_name t) (name B) (index 1)) () : t)
+        (Record ((((type_name r) (name a) (index 0)) (Lit (Int 1) : int))) : r))
+       : "t * r")))
+    -- evaluated
+    (code
+     (Code
+      (Tuple
+       ((Construct ((type_name t) (name B) (index 1)) () : t)
+        (Record ((((type_name r) (name a) (index 0)) (Lit (Int 1) : int))) : r))
+       : "t * r")))
+    (M.x (Tuple (B) (Record 1)))
+    (M.y 1)
+    |}]
+;;
+
+let%expect_test "splicing polymorphic code twice" =
+  run
+    ~bodies:[ "twice" ]
     [ top "id_code" [] (quote (let_ "f" [ "x" ] (var "x") (var "f")))
-    ; top "spliced_id" [] (splice (var "id_code"))
-    ; top "used" [] (app (var "spliced_id") [ int 1 ])
+    ; top
+        "twice"
+        []
+        (tuple
+           [ app (splice (var "id_code")) [ int 1 ]
+           ; app (splice (var "id_code")) [ bool true ]
+           ])
     ];
   [%expect
     {|
     val id_code : <'a -> 'a>{..'b}
-    val spliced_id : int -> int
-    val used : int
+    val twice : int * bool
+    (twice/5
+     (Tuple
+      ((App
+        (Toplevel_splice
+         (code (Var (Bound (Toplevel id_code/4)) : "<int -> int>{}"))
+         (expansion
+          (Let (ident f/17) (args (x/18)) (generalized true)
+           (body (Var (Bound (Local x/18)) : 'a))
+           (in_ (Var (Bound (Local f/17)) : "int -> int")) : "int -> int"))
+         : "int -> int")
+        (Lit (Int 1) : int) : int)
+       (App
+        (Toplevel_splice
+         (code (Var (Bound (Toplevel id_code/4)) : "<bool -> bool>{}"))
+         (expansion
+          (Let (ident f/19) (args (x/20)) (generalized true)
+           (body (Var (Bound (Local x/20)) : 'b))
+           (in_ (Var (Bound (Local f/19)) : "bool -> bool")) : "bool -> bool"))
+         : "bool -> bool")
+        (Lit (Bool true) : bool) : bool))
+      : "int * bool"))
     -- evaluated at compile time
     (id_code
      (Code
-      (Let (ident f/17) (args (x/16)) (generalized true)
-       (body (Var (Bound (Local x/16)) : 'a))
-       (in_ (Var (Bound (Local f/17)) : "'b -> 'b")) : "'b -> 'b")))
+      (Let (ident f/16) (args (x/15)) (generalized true)
+       (body (Var (Bound (Local x/15)) : 'a))
+       (in_ (Var (Bound (Local f/16)) : "'b -> 'b")) : "'b -> 'b")))
     -- evaluated
     (id_code
      (Code
-      (Let (ident f/17) (args (x/16)) (generalized true)
-       (body (Var (Bound (Local x/16)) : 'a))
-       (in_ (Var (Bound (Local f/17)) : "'b -> 'b")) : "'b -> 'b")))
+      (Let (ident f/16) (args (x/15)) (generalized true)
+       (body (Var (Bound (Local x/15)) : 'a))
+       (in_ (Var (Bound (Local f/16)) : "'b -> 'b")) : "'b -> 'b")))
+    (twice (Tuple 1 true))
+    |}]
+;;
+
+let%expect_test "toplevel splices are generalized by their expansion" =
+  run
+    [ top "id_code" [] (quote (let_ "f" [ "x" ] (var "x") (var "f")))
+    ; top "spliced_id" [] (splice (var "id_code"))
+    ; top
+        "used"
+        []
+        (tuple
+           [ app (var "spliced_id") [ int 1 ]
+           ; app (var "spliced_id") [ bool true ]
+           ])
+    ; top "spliced_app" [] (splice (quote (app (var "id") [ var "id" ])))
+    ];
+  [%expect
+    {|
+    val id_code : <'a -> 'a>{..'b}
+    val spliced_id : 'a -> 'a
+    val used : int * bool
+    val spliced_app : '_a -> '_a
+    -- evaluated at compile time
+    (id_code
+     (Code
+      (Let (ident f/18) (args (x/17)) (generalized true)
+       (body (Var (Bound (Local x/17)) : 'a))
+       (in_ (Var (Bound (Local f/18)) : "'b -> 'b")) : "'b -> 'b")))
+    -- evaluated
+    (id_code
+     (Code
+      (Let (ident f/18) (args (x/17)) (generalized true)
+       (body (Var (Bound (Local x/17)) : 'a))
+       (in_ (Var (Bound (Local f/18)) : "'b -> 'b")) : "'b -> 'b")))
     (spliced_id <fun>)
-    (used 1)
+    (used (Tuple 1 true))
+    (spliced_app <fun>)
     |}]
 ;;
 

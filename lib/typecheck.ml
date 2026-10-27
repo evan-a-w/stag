@@ -29,7 +29,6 @@ module Toplevel = struct
   [@@deriving sexp_of]
 
   let is_function t = not (List.is_empty t.args)
-  let is_value t = is_function t || Syntax.Expr.is_value t.expr
 end
 
 type t =
@@ -450,10 +449,10 @@ module Variant_match = struct
     | _ -> pattern_type t scope ~pattern
   ;;
 
-  let add_case handled pattern =
-    match Source.Pattern.view pattern with
+  let add_case handled ({ desc; ty = _ } : Typed.Pattern.t) =
+    match desc with
     | Poly_variant (tag, arg)
-      when Option.for_all arg ~f:Source.Pattern.is_irrefutable
+      when Option.for_all arg ~f:Typed.Pattern.is_irrefutable
            && not (List.mem handled tag ~equal:String.equal) ->
       handled @ [ tag ]
     | _ -> handled
@@ -468,8 +467,10 @@ module Variant_match = struct
   (* Without a top level catch-all, a variant scrutinee may only have the tags
      of the cases, and an empty match's none, unless the scrutinee is already
      known to be an empty nominal type. *)
-  let close t (scope : Scope.t) ~scrutinee patterns =
-    let patterns = List.map patterns ~f:Source.Pattern.view in
+  let close t (scope : Scope.t) ~scrutinee (patterns : Typed.Pattern.t list) =
+    let patterns =
+      List.map patterns ~f:(fun (pattern : Typed.Pattern.t) -> pattern.desc)
+    in
     let tags =
       List.filter_map patterns ~f:(function
         | Poly_variant (tag, _) -> Some tag
@@ -522,7 +523,13 @@ let finish_scc (program : Program_env.t) (members : Toplevel.t list) =
   in
   (* Like OCaml's [let rec], a recursive non-function is not generalized. *)
   let generalize =
-    List.for_all members ~f:Toplevel.is_value && (persistent || not recursive)
+    List.for_all members ~f:(fun member ->
+      Toplevel.is_function member
+      ||
+      match member.state with
+      | In_progress { body = Some body; _ } -> Typed.Expr.is_value body
+      | In_progress { body = None; _ } | Unchecked | Done _ -> false)
+    && (persistent || not recursive)
   in
   let members =
     List.map members ~f:(fun member ->
@@ -625,24 +632,33 @@ and var_ref_type t (scope : Scope.t) (var_ref : Typed.Var_ref.t) =
 (* Toplevels may be used from code run at compile time, as if bound at its
    level, once they can be evaluated. *)
 and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) =
+  let at_scope_level (entry : Env.Entry.t) =
+    { entry with level = Int.min entry.level scope.level }
+  in
   match toplevel.state with
-  | Done { entry; _ } when scope.level < 0 ->
-    Ok { entry with level = scope.level }
-  | Done { entry; _ } -> Ok entry
-  | In_progress _ when scope.level < 0 ->
-    Error
-      (Typecheck_error.Compile_time_use_of_toplevel_being_checked
-         toplevel.ident.name)
+  | Done { entry; _ } -> Ok (at_scope_level entry)
   | In_progress in_progress ->
-    (* [toplevel] is in the component being checked, so this is a recursive
-       reference. *)
-    in_progress.recursive <- true;
-    scope.scc.lowlink <- Int.min scope.scc.lowlink in_progress.index;
-    Ok
-      (Env.Entry.toplevel
-         ~ident:toplevel.ident
-         ~scheme:in_progress.ty
-         ~persistent:false)
+    let entry =
+      Env.Entry.toplevel
+        ~ident:toplevel.ident
+        ~scheme:in_progress.ty
+        ~persistent:false
+    in
+    (match scope.quote with
+     | Some _ ->
+       (* Not persistent, so a free variable of the quote: the quote's value
+          doesn't depend on [toplevel]. *)
+       Ok (at_scope_level entry)
+     | None when scope.level < 0 ->
+       Error
+         (Typecheck_error.Compile_time_use_of_toplevel_being_checked
+            toplevel.ident.name)
+     | None ->
+       (* [toplevel] is in the component being checked, so this is a
+          recursive reference. *)
+       in_progress.recursive <- true;
+       scope.scc.lowlink <- Int.min scope.scc.lowlink in_progress.index;
+       Ok entry)
   | Unchecked ->
     let%bind.Result scc = check_toplevel t scope.program toplevel in
     scope.scc.lowlink <- Int.min scope.scc.lowlink scc.lowlink;
@@ -737,7 +753,7 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
     let%bind.Result f = check_expr t scope ~expr:f ~ty:(TArrow (a, b)) in
     let%map.Result x = check_expr t scope ~expr:x ~ty:a in
     node (App (f, x)) b
-  | Let { binder; args; annot; body; in_; generalized } ->
+  | Let { binder; args; annot; body; in_ } ->
     let inner = { scope with rank = scope.rank + 1 } in
     let%bind.Result arg_types, res_ty, ty =
       function_type t inner ~args ~annot
@@ -751,6 +767,8 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
         ~f:(fun () -> check_body t inner ~args:arg_types ~res_ty ~body)
     in
     let persistent = not (List.is_empty args) in
+    let args = List.map arg_types ~f:fst in
+    let generalized = Typed.Expr.binding_is_value ~ident ~args ~body in
     if generalized then Scheme.generalize_ty ~rank:scope.rank ty;
     let%map.Result in_ =
       Env.with_bindings
@@ -758,9 +776,7 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
         [ name, Scope.entry scope ~ident ~scheme:ty ~persistent ]
         ~f:(fun () -> expr_type t scope ~expr:in_)
     in
-    node
-      (Let { ident; args = List.map arg_types ~f:fst; body; in_; generalized })
-      in_.ty
+    node (Let { ident; args; body; in_; generalized }) in_.ty
   | Quote expr ->
     let quote =
       { Scope.id = Fresh.id t
@@ -850,17 +866,18 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
             with_monomorphic_bindings scope bindings ~f:(fun () ->
               check_expr t scope ~expr:body ~ty:result)
           in
-          ( Variant_match.add_case handled pattern
+          ( Variant_match.add_case handled typed_pattern
           , (typed_pattern, body) :: typed_cases ))
     in
+    let typed_cases = List.rev typed_cases in
     let%map.Result () =
       Variant_match.close
         t
         scope
         ~scrutinee:scrutinee.ty
-        (List.map cases ~f:fst)
+        (List.map typed_cases ~f:fst)
     in
-    node (Match (scrutinee, List.rev typed_cases)) result
+    node (Match (scrutinee, typed_cases)) result
   | Poly_record fields ->
     let%map.Result fields = labelled_types t scope fields in
     node
@@ -938,19 +955,29 @@ and expand t (scope : Scope.t) ~code ~subs ~ty =
     |> Result.map_error ~f:(fun error ->
       Typecheck_error.Splice_evaluation_failed { code; error })
   in
-  let%map.Result expansion =
-    with_monomorphic_bindings
-      scope
-      (List.map bindings ~f:(fun (ident, (sub : Typed.Expr.t)) -> ident, sub.ty))
-      ~f:(fun () ->
-        check_expr t scope ~expr:(Source.Expr.Generated generated) ~ty)
-    |> Result.map_error ~f:(fun error ->
-      Typecheck_error.Generated_code_ill_typed { generated; error })
+  let expansion =
+    match
+      with_monomorphic_bindings
+        scope
+        (List.map bindings ~f:(fun (ident, (sub : Typed.Expr.t)) ->
+           ident, sub.ty))
+        ~f:(fun () ->
+          check_expr t scope ~expr:(Source.Expr.Generated generated) ~ty)
+    with
+    | Ok expansion -> expansion
+    | Error error ->
+      raise_s
+        [%message
+          "Generated code is ill typed"
+            (generated : Typed.Expr.t)
+            (error : Typecheck_error.t)]
   in
-  List.fold_right bindings ~init:expansion ~f:(fun (ident, body) in_ ->
-    { Typed.Expr.desc = Let { ident; args = []; generalized = false; body; in_ }
-    ; ty = in_.ty
-    })
+  Ok
+    (List.fold_right bindings ~init:expansion ~f:(fun (ident, body) in_ ->
+       { Typed.Expr.desc =
+           Let { ident; args = []; generalized = false; body; in_ }
+       ; ty = in_.ty
+       }))
 
 and labelled_types t scope fields =
   let%bind.Result () = Poly_row.check_distinct_labels fields in
@@ -1016,10 +1043,16 @@ and substitute_entry t (scope : Scope.t) ~name ~presence ~ty =
        it. *)
     | None, Some _ -> Ok None
     | None, None ->
-      (match Hashtbl.find scope.program.toplevels name with
-       | None -> Ok None
-       | Some toplevel ->
-         toplevel_entry t scope toplevel |> Result.map ~f:Option.some)
+      (* Code that may use [name] doesn't, so a toplevel not yet checked only
+         provides it if used: checking one, or referring to one being checked,
+         could add a dependency on it. *)
+      (match
+         ( Hashtbl.find scope.program.toplevels name
+         , Type.canonical_presence presence )
+       with
+       | Some ({ state = Done _; _ } as toplevel), _ | Some toplevel, Present ->
+         toplevel_entry t scope toplevel |> Result.map ~f:Option.some
+       | None, _ | Some _, (Absent | PVar _) -> Ok None)
   in
   match Resolution.of_entry scope ~name entry with
   | Unusable error ->

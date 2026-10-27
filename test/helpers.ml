@@ -65,8 +65,19 @@ let prims =
 
 let print_signature signature = print_string (Signature.to_string_hum signature)
 
+(* So looping tests fail fast. *)
+let limits =
+  { Limits.fuel = Some 1_000_000; max_depth = Some 10_000; time_limit = None }
+;;
+
+let typechecker () =
+  let interpreter = Treewalk.create ~stamps:(Stamp_counter.create ()) () in
+  Treewalk.set_limits interpreter limits;
+  Typecheck.create ~interpreter ()
+;;
+
 let check program =
-  let typecheck = Typecheck.create () in
+  let typecheck = typechecker () in
   match Typecheck.typecheck typecheck ~program:(prims @ program) with
   | Ok { signature; _ } ->
     print_signature (List.drop signature (List.length prims))

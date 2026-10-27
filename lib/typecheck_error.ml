@@ -54,8 +54,4 @@ type t =
       { code : Typed.Expr.t
       ; error : Error.t
       }
-  | Generated_code_ill_typed of
-      { generated : Typed.Expr.t
-      ; error : t
-      }
 [@@deriving sexp_of, variants]
