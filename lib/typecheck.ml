@@ -34,11 +34,14 @@ end
 
 type t =
   { fresh : Fresh.t
-  ; stamps : Stamp_counter.t
+  ; interpreter : Treewalk.t
   }
 
-let create ?(stamps = Stamp_counter.create ()) () =
-  { fresh = Fresh.create (); stamps }
+let create
+      ?(interpreter = Treewalk.create ~stamps:(Stamp_counter.create ()) ())
+      ()
+  =
+  { fresh = Fresh.create (); interpreter }
 ;;
 
 let lift result = Result.map_error result ~f:Typecheck_error.unification_error
@@ -58,22 +61,38 @@ module Program_env = struct
   type t =
     { type_env : Type_env.t
     ; toplevels : Toplevel.t String.Table.t
-    ; stamps : Stamp_counter.t
+    ; interpreter : Treewalk.t
     ; mutable ident_info : Typed.Ident_info.t Typed.Ident.Map.t
     ; sccs : Typed.Scc.t Queue.t
     }
 
-  let fresh_ident t name = Typed.Ident.fresh t.stamps name
-
-  let add_info t ident ~ty ~level =
-    t.ident_info
-    <- Map.add_exn t.ident_info ~key:ident ~data:{ Typed.Ident_info.ty; level }
+  let fresh_ident t name =
+    Typed.Ident.fresh (Treewalk.stamps t.interpreter) name
   ;;
 
-  let bind t name ty ~level =
-    let ident = fresh_ident t name in
+  let add_info t ident ~ty ~level =
+    let info = { Typed.Ident_info.ty; level } in
+    t.ident_info <- Map.add_exn t.ident_info ~key:ident ~data:info;
+    Treewalk.add_ident_info t.interpreter ~ident ~info
+  ;;
+
+  (* Generated code's binders keep their idents, but get their info anew. *)
+  let bind t (binder : Source.Binder.t) ty ~level =
+    let ident =
+      match binder with
+      | Name name -> fresh_ident t name
+      | Ident ident -> ident
+    in
     add_info t ident ~ty ~level;
     ident
+  ;;
+
+  (* Values a toplevel splice's code embedded in its code. *)
+  let embedded t ident =
+    Treewalk.global_info t.interpreter ~ident
+    |> Option.map ~f:(fun info ->
+      t.ident_info <- Map.set t.ident_info ~key:ident ~data:info;
+      info)
   ;;
 end
 
@@ -157,15 +176,20 @@ let check_no_duplicates names ~error =
   | Some name -> Error (error name)
 ;;
 
-let function_type t (scope : Scope.t) ~(args : Syntax.Binding.t list) ~annot =
+let function_type
+      t
+      (scope : Scope.t)
+      ~(args : (Source.Binder.t * Syntax.Type_expr.t option) list)
+      ~annot
+  =
   let annot_type = function
     | None -> Ok (Scope.fresh_ty t scope)
     | Some annot -> Scope.elaborate scope annot
   in
   let%bind.Result args =
-    List.map args ~f:(fun (name, annot) ->
+    List.map args ~f:(fun (binder, annot) ->
       let%map.Result ty = annot_type annot in
-      name, ty)
+      binder, ty)
     |> Result.all
   in
   let%map.Result res_ty = annot_type annot in
@@ -174,8 +198,8 @@ let function_type t (scope : Scope.t) ~(args : Syntax.Binding.t list) ~annot =
       Type.TArrow (arg_ty, ty))
   in
   let args =
-    List.map args ~f:(fun (name, ty) ->
-      Program_env.bind scope.program name ty ~level:scope.level, ty)
+    List.map args ~f:(fun (binder, ty) ->
+      Program_env.bind scope.program binder ty ~level:scope.level, ty)
   in
   args, res_ty, ty
 ;;
@@ -194,11 +218,22 @@ let field_ref (field : Type_env.Field.t) =
   }
 ;;
 
+let find_constructor (scope : Scope.t) : Source.Constructor.t -> _ = function
+  | Path path ->
+    Type_env.find_constructor scope.program.type_env scope.module_ path
+  | Ref { name; _ } -> Type_env.constructor scope.program.type_env name
+;;
+
+let find_field (scope : Scope.t) : Source.Field.t -> _ = function
+  | Path path -> Type_env.find_field scope.program.type_env scope.module_ path
+  | Ref { name; _ } -> Type_env.field scope.program.type_env name
+;;
+
 (* Pairs each of [args] with its instantiated type, along with the
    constructor and the result type. *)
-let constructor_types t (scope : Scope.t) path ~args =
+let constructor_types t (scope : Scope.t) constructor ~args =
   let%bind.Result (constructor : Type_env.Constructor.t) =
-    Type_env.find_constructor scope.program.type_env scope.module_ path
+    find_constructor scope constructor
   in
   match List.zip args constructor.args with
   | Unequal_lengths ->
@@ -221,10 +256,8 @@ let constructor_types t (scope : Scope.t) path ~args =
    with its type. *)
 let record_fields t (scope : Scope.t) fields ~all_required =
   let%bind.Result fields =
-    List.map fields ~f:(fun (path, x) ->
-      let%map.Result field =
-        Type_env.find_field scope.program.type_env scope.module_ path
-      in
+    List.map fields ~f:(fun (field, x) ->
+      let%map.Result field = find_field scope field in
       field, x)
     |> Result.all
   in
@@ -265,10 +298,8 @@ let record_fields t (scope : Scope.t) fields ~all_required =
 ;;
 
 (* Returns the field, the instantiated record type and the field's type. *)
-let field_type t (scope : Scope.t) path =
-  let%map.Result (field : Type_env.Field.t) =
-    Type_env.find_field scope.program.type_env scope.module_ path
-  in
+let field_type t (scope : Scope.t) field =
+  let%map.Result (field : Type_env.Field.t) = find_field scope field in
   let inst = Scope.instantiate t scope in
   let ty = inst field.ty in
   field_ref field, inst field.record, ty
@@ -297,14 +328,14 @@ module Poly_row = struct
   ;;
 end
 
-let rec pattern_type t (scope : Scope.t) ~(pattern : Syntax.Pattern.t)
+let rec pattern_type t (scope : Scope.t) ~(pattern : Source.Pattern.t)
   : ( Typed.Pattern.t * (Typed.Ident.t * Type.ty) list
       , Typecheck_error.t )
       Result.t
   =
   let node desc ty = { Typed.Pattern.desc; ty } in
-  let bind name ty =
-    Program_env.bind scope.program name ty ~level:scope.level
+  let bind binder ty =
+    Program_env.bind scope.program binder ty ~level:scope.level
   in
   let sub_patterns patterns =
     let%map.Result typed, bindings =
@@ -320,11 +351,11 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Syntax.Pattern.t)
     in
     List.rev typed, bindings
   in
-  match pattern with
+  match Source.Pattern.view pattern with
   | Any -> Ok (node Any (Scope.fresh_ty t scope), [])
-  | Var name ->
+  | Var binder ->
     let ty = Scope.fresh_ty t scope in
-    let ident = bind name ty in
+    let ident = bind binder ty in
     Ok (node (Var ident) ty, [ ident, ty ])
   | Lit lit -> Ok (node (Lit lit) (Syntax.Lit.ty lit), [])
   | Tuple patterns ->
@@ -333,9 +364,9 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Syntax.Pattern.t)
       sub_patterns (List.zip_exn patterns types)
     in
     node (Tuple patterns) (Type.TTuple types), bindings
-  | Construct (path, args) ->
+  | Construct (constructor, args) ->
     let%bind.Result constructor, args, result =
-      constructor_types t scope path ~args
+      constructor_types t scope constructor ~args
     in
     let%map.Result args, bindings = sub_patterns args in
     node (Construct (constructor, args)) result, bindings
@@ -374,10 +405,10 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Syntax.Pattern.t)
       match rest with
       | Closed -> Type.REmpty, Typed.Pattern.Rest.Closed, []
       | Open -> Scope.fresh_row t scope, Open, []
-      | Bind name ->
+      | Bind binder ->
         let tail = Scope.fresh_row t scope in
         let ty = Fresh.record t tail in
-        let ident = bind name ty in
+        let ident = bind binder ty in
         tail, Bind ident, [ ident, ty ]
     in
     let row =
@@ -400,9 +431,9 @@ module Variant_match = struct
 
   (* A top level variable pattern matches what the handled tags' cases have
      not: the scrutinee without their first entries. *)
-  let pattern_type t (scope : Scope.t) handled ~(pattern : Syntax.Pattern.t) =
-    match pattern, handled with
-    | Var name, _ :: _ ->
+  let pattern_type t (scope : Scope.t) handled ~(pattern : Source.Pattern.t) =
+    match Source.Pattern.view pattern, handled with
+    | Var binder, _ :: _ ->
       let row, rest =
         Poly_row.open_
           t
@@ -410,16 +441,19 @@ module Variant_match = struct
           (List.map handled ~f:(fun tag -> tag, Scope.fresh_ty t scope))
       in
       let rest = Fresh.variant t rest in
-      let ident = Program_env.bind scope.program name rest ~level:scope.level in
+      let ident =
+        Program_env.bind scope.program binder rest ~level:scope.level
+      in
       Ok
         ( { Typed.Pattern.desc = Var ident; ty = Fresh.variant t row }
         , [ ident, rest ] )
     | _ -> pattern_type t scope ~pattern
   ;;
 
-  let add_case handled : Syntax.Pattern.t -> t = function
+  let add_case handled pattern =
+    match Source.Pattern.view pattern with
     | Poly_variant (tag, arg)
-      when Option.for_all arg ~f:Syntax.Pattern.is_irrefutable
+      when Option.for_all arg ~f:Source.Pattern.is_irrefutable
            && not (List.mem handled tag ~equal:String.equal) ->
       handled @ [ tag ]
     | _ -> handled
@@ -434,7 +468,8 @@ module Variant_match = struct
   (* Without a top level catch-all, a variant scrutinee may only have the tags
      of the cases, and an empty match's none, unless the scrutinee is already
      known to be an empty nominal type. *)
-  let close t (scope : Scope.t) ~scrutinee (patterns : Syntax.Pattern.t list) =
+  let close t (scope : Scope.t) ~scrutinee patterns =
+    let patterns = List.map patterns ~f:Source.Pattern.view in
     let tags =
       List.filter_map patterns ~f:(function
         | Poly_variant (tag, _) -> Some tag
@@ -477,32 +512,6 @@ let resolution_type t (scope : Scope.t) ~name : Resolution.t -> _ = function
   | Unusable error -> Error error
 ;;
 
-let refers_to_toplevel (expr : Typed.Expr.t) ~f =
-  let binder : Typed.Binder.t -> bool = function
-    | Toplevel ident -> f ident
-    | Local _ -> false
-  in
-  let snds pairs = List.map pairs ~f:snd in
-  let rec go (expr : Typed.Expr.t) =
-    match expr.desc with
-    | Lit _ | Var (Free _) -> false
-    | Var (Bound binder' | Persistent binder') -> binder binder'
-    | App (e1, e2) | Let { body = e1; in_ = e2; _ } -> go e1 || go e2
-    | Splice { code; subs = Explicit subs } -> go code || go_all (snds subs)
-    | Splice { code; subs = Implicit captures } ->
-      go code || Map.exists captures ~f:binder
-    | Quote e | Field (e, _) | Poly_field (e, _) | Poly_restrict (e, _) -> go e
-    | Tuple es | Construct (_, es) -> go_all es
-    | Record fields -> go_all (snds fields)
-    | Poly_record fields -> go_all (snds fields)
-    | Poly_extend (fields, e) | Poly_update (e, fields) ->
-      go e || go_all (snds fields)
-    | Match (e, cases) -> go e || go_all (snds cases)
-    | Poly_variant (_, e) -> Option.exists e ~f:go
-  and go_all es = List.exists es ~f:go in
-  go expr
-;;
-
 let finish_scc (program : Program_env.t) (members : Toplevel.t list) =
   let persistent = List.for_all members ~f:Toplevel.is_function in
   let recursive =
@@ -541,13 +550,17 @@ let finish_scc (program : Program_env.t) (members : Toplevel.t list) =
     Typed.Ident.Set.of_list
       (List.map members ~f:(fun (member : Typed.Toplevel.t) -> member.ident))
   in
-  Queue.enqueue
-    program.sccs
+  let scc =
     { Typed.Scc.members
     ; recursive =
         List.exists members ~f:(fun member ->
-          refers_to_toplevel member.body ~f:(Set.mem idents))
+          Typed.Expr.refers_to member.body ~f:(function
+            | Toplevel ident -> Set.mem idents ident
+            | Local _ -> false))
     }
+  in
+  Queue.enqueue program.sccs scc;
+  Treewalk.add_scc program.interpreter scc
 ;;
 
 let rec var_type t (scope : Scope.t) ~(path : Syntax.Path.t) =
@@ -577,9 +590,49 @@ let rec var_type t (scope : Scope.t) ~(path : Syntax.Path.t) =
   in
   resolution_type t scope ~name (Resolution.of_entry scope ~name entry)
 
+(* Generated code's variables are already resolved, so are found by binder
+   rather than by name, which may be shadowed. *)
+and var_ref_type t (scope : Scope.t) (var_ref : Typed.Var_ref.t) =
+  let resolve ~name entry =
+    resolution_type t scope ~name (Resolution.of_entry scope ~name (Some entry))
+  in
+  let not_in_scope name =
+    Error (Typecheck_error.Not_in_scope (Syntax.Path.of_string name))
+  in
+  match var_ref with
+  | Free name ->
+    (match scope.quote with
+     | Some quote ->
+       resolution_type t scope ~name (Outside_quote { quote; usable = None })
+     | None -> not_in_scope name)
+  | Bound (Toplevel ident) | Persistent (Toplevel ident) ->
+    let%bind.Result entry =
+      toplevel_entry
+        t
+        scope
+        (Hashtbl.find_exn scope.program.toplevels ident.name)
+    in
+    resolve ~name:ident.name entry
+  | Bound (Local ident as binder) | Persistent (Local ident as binder) ->
+    (match Env.find_binder scope.locals binder ~name:ident.name with
+     | Some entry -> resolve ~name:ident.name entry
+     | None ->
+       (match Program_env.embedded scope.program ident with
+        | Some info ->
+          Ok (Scope.instantiate t scope info.ty, Typed.Var_ref.Persistent binder)
+        | None -> not_in_scope ident.name))
+
+(* Toplevels may be used from code run at compile time, as if bound at its
+   level, once they can be evaluated. *)
 and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) =
   match toplevel.state with
+  | Done { entry; _ } when scope.level < 0 ->
+    Ok { entry with level = scope.level }
   | Done { entry; _ } -> Ok entry
+  | In_progress _ when scope.level < 0 ->
+    Error
+      (Typecheck_error.Compile_time_use_of_toplevel_being_checked
+         toplevel.ident.name)
   | In_progress in_progress ->
     (* [toplevel] is in the component being checked, so this is a recursive
        reference. *)
@@ -614,7 +667,13 @@ and check_toplevel t program (toplevel : Toplevel.t)
     }
   in
   let%bind.Result args, res_ty, ty =
-    function_type t scope ~args:toplevel.args ~annot:toplevel.annot
+    function_type
+      t
+      scope
+      ~args:
+        (List.map toplevel.args ~f:(fun (name, annot) ->
+           Source.Binder.Name name, annot))
+      ~annot:toplevel.annot
   in
   toplevel.state
   <- In_progress
@@ -624,7 +683,9 @@ and check_toplevel t program (toplevel : Toplevel.t)
        ; body = None
        ; recursive = false
        };
-  let%map.Result body = check_body t scope ~args ~res_ty ~body:toplevel.expr in
+  let%map.Result body =
+    check_body t scope ~args ~res_ty ~body:(Source.Expr.Syntax toplevel.expr)
+  in
   (match toplevel.state with
    | In_progress in_progress -> in_progress.body <- Some body
    | Unchecked | Done _ ->
@@ -647,7 +708,7 @@ and with_monomorphic_bindings (scope : Scope.t) bindings ~f =
        ident.name, Scope.entry scope ~ident ~scheme:ty ~persistent:false))
     ~f
 
-and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
+and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
   : (Typed.Expr.t, Typecheck_error.t) Result.t
   =
   let node desc ty = { Typed.Expr.desc; ty } in
@@ -655,9 +716,9 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
   let labelled_tys =
     List.map ~f:(fun (label, (expr : Typed.Expr.t)) -> label, expr.ty)
   in
-  match expr with
+  match Source.Expr.view expr with
   | Lit l -> Ok (node (Lit l) (Syntax.Lit.ty l))
-  | Var (path, annot) ->
+  | Var (Path (path, annot)) ->
     let%bind.Result ty, var_ref = var_type t scope ~path in
     let%map.Result () =
       match annot with
@@ -667,26 +728,29 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
         Unify.unify_ty t ~ty1:ty ~ty2:annot |> lift
     in
     node (Var var_ref) ty
+  | Var (Ref var_ref) ->
+    let%map.Result ty, var_ref = var_ref_type t scope var_ref in
+    node (Var var_ref) ty
   | App (f, x) ->
     let a = Scope.fresh_ty t scope in
     let b = Scope.fresh_ty t scope in
     let%bind.Result f = check_expr t scope ~expr:f ~ty:(TArrow (a, b)) in
     let%map.Result x = check_expr t scope ~expr:x ~ty:a in
     node (App (f, x)) b
-  | Let (name, args, annot, equal, in_) ->
+  | Let { binder; args; annot; body; in_; generalized } ->
     let inner = { scope with rank = scope.rank + 1 } in
     let%bind.Result arg_types, res_ty, ty =
       function_type t inner ~args ~annot
     in
-    let ident = Program_env.bind scope.program name ty ~level:scope.level in
+    let ident = Program_env.bind scope.program binder ty ~level:scope.level in
+    let name = Source.Binder.name binder in
     let%bind.Result body =
       Env.with_bindings
         scope.locals
         [ name, Scope.entry scope ~ident ~scheme:ty ~persistent:false ]
-        ~f:(fun () -> check_body t inner ~args:arg_types ~res_ty ~body:equal)
+        ~f:(fun () -> check_body t inner ~args:arg_types ~res_ty ~body)
     in
     let persistent = not (List.is_empty args) in
-    let generalized = Syntax.Expr.binding_is_value name ~args ~equal in
     if generalized then Scheme.generalize_ty ~rank:scope.rank ty;
     let%map.Result in_ =
       Env.with_bindings
@@ -711,7 +775,11 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
         ~expr
     in
     node (Quote inner) (TCode { inner = inner.ty; context = quote.context })
-  | Splice { expr; subs } ->
+  | Splice { code; subs } ->
+    (match scope.quote, expr with
+     | None, Generated _ ->
+       raise_s [%message "Generated code has a splice outside any quote"]
+     | None, Syntax _ | Some _, _ -> ());
     let outside : Scope.t =
       match scope.quote with
       | Some quote -> { quote.outside with rank = scope.rank }
@@ -720,9 +788,9 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
     let inner = Scope.fresh_ty t scope in
     let context = Scope.fresh_row t scope in
     let%bind.Result code =
-      check_expr t outside ~expr ~ty:(TCode { inner; context })
+      check_expr t outside ~expr:code ~ty:(TCode { inner; context })
     in
-    let%map.Result subs =
+    let%bind.Result subs =
       match subs with
       | None ->
         let%map.Result captures = substitute_from_scope t scope ~context in
@@ -731,15 +799,19 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
         let%map.Result subs = substitute_explicitly t scope ~context ~subs in
         Typed.Expr.Subs.Explicit subs
     in
-    node (Splice { code; subs }) inner
+    (match scope.quote with
+     | Some _ -> Ok (node (Splice { code; subs }) inner)
+     | None ->
+       let%map.Result expansion = expand t scope ~code ~subs ~ty:inner in
+       node (Toplevel_splice { code; expansion }) inner)
   | Tuple exprs ->
     let%map.Result exprs =
       List.map exprs ~f:(fun expr -> expr_type t scope ~expr) |> Result.all
     in
     node (Tuple exprs) (Type.TTuple (tys exprs))
-  | Construct (path, args) ->
+  | Construct (constructor, args) ->
     let%bind.Result constructor, args, result =
-      constructor_types t scope path ~args
+      constructor_types t scope constructor ~args
     in
     let%map.Result args = check_exprs t scope args in
     node (Construct (constructor, args)) result
@@ -749,8 +821,8 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
     in
     let%map.Result exprs = check_exprs t scope (List.map fields ~f:snd) in
     node (Record (List.zip_exn (List.map fields ~f:fst) exprs)) record
-  | Field (expr, path) ->
-    let%bind.Result field, record, field_ty = field_type t scope path in
+  | Field (expr, field) ->
+    let%bind.Result field, record, field_ty = field_type t scope field in
     let%map.Result expr = check_expr t scope ~expr ~ty:record in
     node (Field (expr, field)) field_ty
   | Match (expr, cases) ->
@@ -837,6 +909,48 @@ and expr_type t (scope : Scope.t) ~(expr : Syntax.Expr.t)
         expr.ty)
     in
     node (Poly_variant (tag, arg)) (Poly_row.variant t scope ~tag ~arg:arg_ty)
+
+(* Runs the toplevel splice [code], then infers the code it generates here,
+   with its explicit substitutions bound by lets around it. *)
+and expand t (scope : Scope.t) ~code ~subs ~ty =
+  let program = scope.program in
+  let bindings, entry =
+    match (subs : Typed.Expr.t Typed.Expr.Subs.t) with
+    | Implicit providers ->
+      ( []
+      , fun name ->
+          Map.find providers name
+          |> Option.map ~f:(fun binder -> Typed.Var_ref.Bound binder) )
+    | Explicit subs ->
+      let bindings =
+        List.map subs ~f:(fun (name, (sub : Typed.Expr.t)) ->
+          Program_env.bind program (Name name) sub.ty ~level:scope.level, sub)
+      in
+      ( bindings
+      , fun name ->
+          List.find bindings ~f:(fun ((ident : Typed.Ident.t), _) ->
+            String.equal ident.name name)
+          |> Option.map ~f:(fun (ident, _) -> Typed.Var_ref.Bound (Local ident))
+      )
+  in
+  let%bind.Result generated =
+    Treewalk.splice program.interpreter ~code ~level:(scope.level - 1) ~entry
+    |> Result.map_error ~f:(fun error ->
+      Typecheck_error.Splice_evaluation_failed { code; error })
+  in
+  let%map.Result expansion =
+    with_monomorphic_bindings
+      scope
+      (List.map bindings ~f:(fun (ident, (sub : Typed.Expr.t)) -> ident, sub.ty))
+      ~f:(fun () ->
+        check_expr t scope ~expr:(Source.Expr.Generated generated) ~ty)
+    |> Result.map_error ~f:(fun error ->
+      Typecheck_error.Generated_code_ill_typed { generated; error })
+  in
+  List.fold_right bindings ~init:expansion ~f:(fun (ident, body) in_ ->
+    { Typed.Expr.desc = Let { ident; args = []; generalized = false; body; in_ }
+    ; ty = in_.ty
+    })
 
 and labelled_types t scope fields =
   let%bind.Result () = Poly_row.check_distinct_labels fields in
@@ -1010,7 +1124,7 @@ module Checked = struct
     }
 end
 
-let typecheck { fresh = t; stamps } ~(program : Syntax.Program.t)
+let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
   : (Checked.t, Typecheck_error.t) Result.t
   =
   let%bind.Result root =
@@ -1021,7 +1135,7 @@ let typecheck { fresh = t; stamps } ~(program : Syntax.Program.t)
   let program_env =
     { Program_env.type_env
     ; toplevels = String.Table.create ()
-    ; stamps
+    ; interpreter
     ; ident_info = Typed.Ident.Map.empty
     ; sccs = Queue.create ()
     }

@@ -438,7 +438,7 @@ let%expect_test "splice with implicit substitutions" =
               "opaque"
               [ "u" ]
               (app (var "opaque") [ var "u" ])
-              (app (var "opaque") [ int 1 ])))
+              (match_ (int 1) [ Pat.int 2, app (var "opaque") [ int 1 ] ])))
     ];
   check [ top "wrong_type" [] (quote (let_ "x" [] (bool true) (splice code))) ];
   [%expect
@@ -453,7 +453,20 @@ let%expect_test "splice with implicit substitutions" =
     val instantiated : <int>{y : int; z : int; ..'_a}
     (Unification_error
      (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
-    val toplevel_unknown : '_a
+    (Splice_evaluation_failed
+     (code
+      (Let (ident opaque/15) (args (u/14)) (generalized true)
+       (body
+        (App (Var (Bound (Local opaque/15)) : "'a -> 'b")
+         (Var (Bound (Local u/14)) : 'a) : 'b))
+       (in_
+        (Match (Lit (Int 1) : int)
+         (((Lit (Int 2) : int)
+           (App (Var (Bound (Local opaque/15)) : "int -> <'_c>{}")
+            (Lit (Int 1) : int) : <'_c>{})))
+         : <'_c>{}))
+       : <'_c>{}))
+     (error ("Match failure" (value 1))))
     (Unification_error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     |}]

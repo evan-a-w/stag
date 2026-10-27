@@ -30,7 +30,7 @@ module Binder : sig
   type t =
     | Local of Ident.t
     | Toplevel of Ident.t (** Named by its canonical name. *)
-  [@@deriving sexp_of]
+  [@@deriving sexp_of, equal]
 end
 
 (** What a variable refers to. *)
@@ -99,6 +99,10 @@ module Pattern : sig
     ; ty : Type.ty
     }
   [@@deriving sexp_of]
+
+  (** Nominal records and constructors are refutable, even when their type has
+      only one constructor. *)
+  val is_irrefutable : t -> bool
 end
 
 (** [ty] is the type of the node, instantiated where it is a variable. *)
@@ -130,7 +134,13 @@ module Expr : sig
       | Splice of
           { code : 'e (** At the level outside the splice. *)
           ; subs : 'e Subs.t
-          }
+          } (** Within a quote. *)
+      | Toplevel_splice of
+          { code : 'e (** At the level below, evaluated while checking. *)
+          ; expansion : 'e
+            (** The code [code] evaluated to, instantiated and inferred here,
+              within lets binding its explicit substitutions. *)
+          } (** A splice outside any quote. *)
       | Quote of 'e
       | Tuple of 'e list
       | Construct of Constructor_ref.t * 'e list
@@ -151,6 +161,17 @@ module Expr : sig
     ; ty : Type.ty
     }
   [@@deriving sexp_of]
+
+  (** The children of [t], in order. *)
+  val sub_exprs : t -> t list
+
+  (** Whether [t] refers to a binder satisfying [f], by a [Bound] or
+      [Persistent] variable or an [Implicit] substitution. *)
+  val refers_to : t -> f:(Binder.t -> bool) -> bool
+
+  (** Whether a [Let] of [ident] may be generalized, as
+      [Syntax.Expr.binding_is_value]. *)
+  val binding_is_value : ident:Ident.t -> args:Ident.t list -> body:t -> bool
 end
 
 module Toplevel : sig

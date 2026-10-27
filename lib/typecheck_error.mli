@@ -51,6 +51,18 @@ type t =
   | Empty_record
   | Duplicate_pattern_variable of string
   | Duplicate_row_entry of string
+  | Compile_time_use_of_toplevel_being_checked of string
+  (** It can't be evaluated yet. *)
+  | Splice_evaluation_failed of
+      { code : Typed.Expr.t (** The toplevel splice's. *)
+      ; error : Error.t
+      }
+  | Generated_code_ill_typed of
+      { generated : Typed.Expr.t
+        (** The code a toplevel splice generated, with the types it had where
+          it was built. *)
+      ; error : t
+      }
 [@@deriving sexp_of]
 
 val unification_error : Unification_error.t -> t

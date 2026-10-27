@@ -125,7 +125,8 @@ module Embedded = struct
 end
 
 type t =
-  { eval_stack : Typed.Scc.t Stack.t
+  { sccs : Typed.Scc.t Queue.t
+  ; pending : Typed.Scc.t Typed.Ident.Table.t
   ; ident_info : Typed.Ident_info.t Typed.Ident.Table.t
   ; closure_captures : Typed.Ident.Hash_set.t Typed.Ident.Table.t
   ; mutable env : Value.t Env.t
@@ -179,6 +180,7 @@ let captures t ~ident ~args ~body =
        | Implicit providers ->
          Map.iter providers ~f:(fun (Toplevel ident | Local ident) ->
            use ~depth ident))
+    | Toplevel_splice { code = _; expansion } -> go ~depth expansion
     | Match (expr, cases) ->
       go ~depth expr;
       List.iter cases ~f:(fun (pattern, body) ->
@@ -208,7 +210,8 @@ let captures t ~ident ~args ~body =
 ;;
 
 let create ~stamps () =
-  { eval_stack = Stack.create ()
+  { sccs = Queue.create ()
+  ; pending = Typed.Ident.Table.create ()
   ; ident_info = Typed.Ident.Table.create ()
   ; closure_captures = Typed.Ident.Table.create ()
   ; env = Env.create ()
@@ -216,14 +219,22 @@ let create ~stamps () =
   }
 ;;
 
-let add_ident_info t ident_info =
-  Map.iteri ident_info ~f:(fun ~key ~data ->
-    Hashtbl.set t.ident_info ~key ~data)
+let stamps t = t.stamps
+
+let add_ident_info t ~ident ~info =
+  Hashtbl.set t.ident_info ~key:ident ~data:info
 ;;
 
-let add_program t ~program:({ sccs; ident_info } : Typed.Program.t) =
-  List.rev sccs |> List.iter ~f:(Stack.push t.eval_stack);
-  add_ident_info t ident_info
+let add_scc t (scc : Typed.Scc.t) =
+  Queue.enqueue t.sccs scc;
+  List.iter scc.members ~f:(fun { ident; _ } ->
+    Hashtbl.set t.pending ~key:ident ~data:scc)
+;;
+
+let global_info t ~ident =
+  if Hashtbl.mem t.env.values ident
+  then Hashtbl.find t.ident_info ident
+  else None
 ;;
 
 let map_result list ~f =
@@ -266,6 +277,10 @@ let map_children ~depth (expr : Typed.Expr.t) ~f =
         | Implicit _ -> Ok subs
       in
       Typed.Expr.Desc.Splice { code; subs }
+    | Toplevel_splice { code; expansion } ->
+      let%bind code = f ~depth:(depth - 1) code in
+      let%map expansion = same expansion in
+      Typed.Expr.Desc.Toplevel_splice { code; expansion }
     | Quote body ->
       let%map body = f ~depth:(depth + 1) body in
       Typed.Expr.Desc.Quote body
@@ -413,8 +428,6 @@ let splice_code
       })
 ;;
 
-let lookup t env ident = Env.lookup env ~fallback:t.env ~ident
-
 let pattern_mismatch pattern value =
   Or_error.error_s
     [%message
@@ -515,8 +528,43 @@ let code_of_value (value : Value.t) =
     Or_error.error_s [%message "Spliced a non-code value" (value : Value.t)]
 ;;
 
+(* Closures capturing a toplevel not yet evaluated share its slot, so it is
+   kept. *)
+let declare_toplevel t ident =
+  if not (Hashtbl.mem t.env.values ident) then Env.declare t.env ~ident
+;;
+
+(* Toplevels are evaluated on first use, so compile time evaluation only runs
+   what it needs. *)
+let rec force t ident =
+  match Hashtbl.find t.pending ident with
+  | None -> Ok ()
+  | Some scc -> eval_scc t scc
+
+and lookup t env ident =
+  let%bind () = force t ident in
+  Env.lookup env ~fallback:t.env ~ident
+
+(* Functions are bound first: making their closures reads nothing, so values
+   in a recursive component can then use them. *)
+and eval_scc t ({ members; recursive } : Typed.Scc.t) =
+  List.iter members ~f:(fun { ident; _ } -> Hashtbl.remove t.pending ident);
+  if recursive
+  then List.iter members ~f:(fun { ident; _ } -> declare_toplevel t ident);
+  let functions, values =
+    List.partition_tf members ~f:(fun { args; _ } -> not (List.is_empty args))
+  in
+  let%bind () =
+    iter_result functions ~f:(fun { ident; args; body; _ } ->
+      let%map value = closure t ~env:t.env ~level:0 ~ident ~args ~body in
+      Env.set t.env ~ident ~value)
+  in
+  iter_result values ~f:(fun { ident; body; _ } ->
+    let%map value = eval t ~env:(Env.create ()) ~level:0 body in
+    Env.set t.env ~ident ~value)
+
 (* [env] has the bindings of the current activation, at [level]. *)
-let rec eval t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
+and eval t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
   let eval' = eval t ~env ~level in
   match expr.desc with
   | Lit lit -> Ok (Value.of_lit lit)
@@ -531,7 +579,8 @@ let rec eval t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
   | Let { ident; args; generalized = _; body; in_ } ->
     let%bind () = bind_let t ~env ~level ~ident ~args ~body in
     eval' in_
-  | Splice _ -> Or_error.error_s [%message "Unexpanded toplevel splice"]
+  | Splice _ -> Or_error.error_s [%message "Splice outside a quote evaluated"]
+  | Toplevel_splice { code = _; expansion } -> eval' expansion
   | Quote body ->
     let embedded = Embedded.create () in
     let%map expr = build t ~env ~level ~embedded ~depth:1 body in
@@ -597,14 +646,13 @@ and bind_let t ~env ~level ~ident ~args ~body =
   Env.set env ~ident ~value
 
 and closure t ~env ~level ~ident ~args ~body =
-  let%map env =
-    Env.of_captures
-      env
-      ~fallback:t.env
-      ~captures:
-        (Hashtbl.find_or_add t.closure_captures ident ~default:(fun () ->
-           captures t ~ident ~args ~body))
+  let captures =
+    Hashtbl.find_or_add t.closure_captures ident ~default:(fun () ->
+      captures t ~ident ~args ~body)
   in
+  Hash_set.iter captures ~f:(fun ident ->
+    if Hashtbl.mem t.pending ident then declare_toplevel t ident);
+  let%map env = Env.of_captures env ~fallback:t.env ~captures in
   Value.Function { args; body; env; level }
 
 and apply t (f : Value.t) arg =
@@ -665,73 +713,22 @@ and build t ~env ~level ~(embedded : Embedded.t) ~depth (expr : Typed.Expr.t)
       build t ~env ~level ~embedded ~depth)
 ;;
 
-(* [expr], at [level], with its toplevel splices (those outside any quote)
-   replaced by their code. Values embedded in that code are bound globally. *)
-let rec expand t ~level ~depth (expr : Typed.Expr.t) =
-  match expr.desc with
-  | Splice { code; subs } when depth = 0 ->
-    let%bind code = expand t ~level:(level - 1) ~depth:0 code in
-    let%bind subs : Typed.Expr.t Typed.Expr.Subs.t =
-      match subs with
-      | Explicit subs ->
-        let%map subs = map_fields subs ~f:(expand t ~level ~depth) in
-        Typed.Expr.Subs.Explicit subs
-      | Implicit _ -> Ok subs
-    in
-    let%bind code, embedded =
-      eval t ~env:(Env.create ()) ~level:(level - 1) code >>= code_of_value
-    in
-    Map.iteri embedded ~f:(fun ~key ~data ->
-      Env.set t.env ~ident:key ~value:data);
-    splice_code t code ~subs ~level
-  | _ -> map_children ~depth expr ~f:(expand t ~level)
-;;
-
-let expand_program t ~program:({ sccs; ident_info } : Typed.Program.t) =
-  add_ident_info t ident_info;
-  let known = Typed.Ident.Hash_set.of_list (Hashtbl.keys t.ident_info) in
-  let%map sccs =
-    map_result sccs ~f:(fun (scc : Typed.Scc.t) ->
-      let%map members =
-        map_result scc.members ~f:(fun (member : Typed.Toplevel.t) ->
-          let%map body = expand t ~level:0 ~depth:0 member.body in
-          { member with body })
-      in
-      { scc with members })
+let splice t ~code ~level ~entry =
+  let%bind code, embedded =
+    eval t ~env:(Env.create ()) ~level code >>= code_of_value
   in
-  let ident_info =
-    Hashtbl.fold t.ident_info ~init:ident_info ~f:(fun ~key ~data ident_info ->
-      if Hash_set.mem known key
-      then ident_info
-      else Map.set ident_info ~key ~data)
-  in
-  { Typed.Program.sccs; ident_info }
-;;
-
-(* Functions are bound first: making their closures reads nothing, so values
-   in a recursive component can then use them. *)
-let eval_scc t ({ members; recursive } : Typed.Scc.t) =
-  if recursive
-  then List.iter members ~f:(fun { ident; _ } -> Env.declare t.env ~ident);
-  let functions, values =
-    List.partition_tf members ~f:(fun { args; _ } -> not (List.is_empty args))
-  in
-  let%bind () =
-    iter_result functions ~f:(fun { ident; args; body; _ } ->
-      let%map value = closure t ~env:t.env ~level:0 ~ident ~args ~body in
-      Env.set t.env ~ident ~value)
-  in
-  iter_result values ~f:(fun { ident; body; _ } ->
-    let%map value = eval t ~env:(Env.create ()) ~level:0 body in
-    Env.set t.env ~ident ~value)
+  Map.iteri embedded ~f:(fun ~key ~data -> Env.set t.env ~ident:key ~value:data);
+  instantiate t code ~entry
 ;;
 
 let eval t =
   let rec loop () =
-    match Stack.pop t.eval_stack with
+    match Queue.dequeue t.sccs with
     | None -> Ok ()
     | Some scc ->
-      let%bind () = eval_scc t scc in
+      let%bind () =
+        iter_result scc.members ~f:(fun { ident; _ } -> force t ident)
+      in
       loop ()
   in
   loop ()

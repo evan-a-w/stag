@@ -4,9 +4,11 @@ open! Core
     was done with the [t]. *)
 type t
 
-(** Idents are made by [stamps], so are unique among those of every program
-    it checks, and of anything else using it. *)
-val create : ?stamps:Stamp_counter.t -> unit -> t
+(** Toplevel splices are run by [interpreter] while checking, which also gets
+    every checked toplevel, to evaluate those used at compile time on demand,
+    and the rest when it is [Treewalk.eval]ed. Idents are made by its stamps,
+    so are unique among those of every program it checks. *)
+val create : ?interpreter:Treewalk.t -> unit -> t
 
 module Checked : sig
   type t =
@@ -20,7 +22,11 @@ end
     any module, may refer to each other in any order. Each strongly connected
     component is generalized once fully checked, if all its members are
     syntactic values and it is not recursive through a non-function, and
-    persistent if all are syntactic functions. *)
+    persistent if all are syntactic functions.
+
+    A toplevel splice is checked, run and replaced by the code it generates,
+    inferred anew where it is spliced. Code run at compile time may use any
+    toplevel whose component is checked. *)
 val typecheck
   :  t
   -> program:Syntax.Program.t

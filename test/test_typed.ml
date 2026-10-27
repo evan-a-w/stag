@@ -632,7 +632,7 @@ let%expect_test "toplevel splices" =
     ((members
       (((ident f/6) (args (x/17)) (scheme "int -> int")
         (body
-         (Splice
+         (Toplevel_splice
           (code
            (Quote
             (App
@@ -644,13 +644,22 @@ let%expect_test "toplevel splices" =
               (Lit (Int 1) : int) : int)
              : int)
             : "<int>{n : int; x : int}"))
-          (subs (Implicit ((n (Toplevel n/4)) (x (Local x/17))))) : int)))))
+          (expansion
+           (App
+            (App (Var (Bound (Toplevel add/0)) : "int -> int -> int")
+             (Var (Bound (Local x/17)) : int) : "int -> int")
+            (App
+             (App (Var (Bound (Toplevel add/0)) : "int -> int -> int")
+              (Var (Bound (Toplevel n/4)) : int) : "int -> int")
+             (Lit (Int 1) : int) : int)
+            : int))
+          : int)))))
      (recursive false))
     ((members
       (((ident closed/7) (args ()) (scheme int)
         (body
-         (Splice (code (Quote (Lit (Int 1) : int) : <int>{}))
-          (subs (Implicit ())) : int)))))
+         (Toplevel_splice (code (Quote (Lit (Int 1) : int) : <int>{}))
+          (expansion (Lit (Int 1) : int)) : int)))))
      (recursive false))
     ((closed/7 (int 0)) (f/6 ("int -> int" 0)) (m/5 (int 0)) (n/4 (int 0))
      (x/17 (int 0)))
@@ -768,13 +777,15 @@ let%expect_test "recursive components" =
     ((members
       (((ident captured/8) (args (x/20)) (scheme "'a -> 'b")
         (body
-         (Splice
+         (Toplevel_splice
           (code
            (Quote
             (App (Var (Free captured) : "'a -> 'b") (Var (Free x) : 'a) : 'b) :
             "<'b>{captured : 'a -> 'b; x : 'a}"))
-          (subs (Implicit ((captured (Toplevel captured/8)) (x (Local x/20))))) :
-          'b)))))
+          (expansion
+           (App (Var (Bound (Toplevel captured/8)) : "'a -> 'b")
+            (Var (Bound (Local x/20)) : 'a) : 'b))
+          : 'b)))))
      (recursive true))
     |}]
 ;;
@@ -891,8 +902,9 @@ let%expect_test "level crossing at splices" =
          (Let (ident n/24) (args ()) (generalized true)
           (body (Lit (Int 1) : int))
           (in_
-           (Splice (code (Quote (Var (Free n) : int) : "<int>{n : int}"))
-            (subs (Implicit ((n (Local n/24))))) : int))
+           (Toplevel_splice
+            (code (Quote (Var (Free n) : int) : "<int>{n : int}"))
+            (expansion (Var (Bound (Local n/24)) : int)) : int))
           : int)))))
      (recursive false))
     ((c/21 ("<'a>{x?'b : int; ..'c} where ..'c <= {..'d}" 0))
@@ -932,12 +944,12 @@ let%expect_test "toplevel splice in a level -1 let" =
     ((members
       (((ident deep/5) (args ()) (scheme int)
         (body
-         (Splice
+         (Toplevel_splice
           (code
            (Let (ident x/15) (args ()) (generalized true)
             (body (Quote (Lit (Int 1) : int) : <int>{..'a}))
             (in_
-             (Splice
+             (Toplevel_splice
               (code
                (Let (ident k/17) (args (c/16)) (generalized true)
                 (body
@@ -958,13 +970,14 @@ let%expect_test "toplevel splice in a level -1 let" =
                 (in_
                  (App
                   (Var (Bound (Local k/17)) :
-                   "<<int>{}>{-n; x : <int>{}} -> <<int>{}>{-n; x : <int>{}}")
-                  (Quote (Var (Free x) : <int>{}) : "<<int>{}>{-n; x : <int>{}}")
-                  : "<<int>{}>{-n; x : <int>{}}"))
-                : "<<int>{}>{-n; x : <int>{}}"))
-              (subs (Implicit ((x (Local x/15))))) : <int>{}))
+                   "<<int>{}>{n?'_f : int; x : <int>{}} -> <<int>{}>{n?'_f : int; x : <int>{}}")
+                  (Quote (Var (Free x) : <int>{}) :
+                   "<<int>{}>{n?'_f : int; x : <int>{}}")
+                  : "<<int>{}>{n?'_f : int; x : <int>{}}"))
+                : "<<int>{}>{n?'_f : int; x : <int>{}}"))
+              (expansion (Var (Bound (Local x/15)) : <int>{})) : <int>{}))
             : <int>{}))
-          (subs (Implicit ())) : int))
+          (expansion (Lit (Int 1) : int)) : int))
         (where "..'d <= {..'e}"))))
      (recursive false))
     ((_/18 (<'a>{..'b} -2))
@@ -976,7 +989,7 @@ let%expect_test "toplevel splice in a level -1 let" =
     |}]
 ;;
 
-let%expect_test "toplevel used at a wrong level by spliced code" =
+let%expect_test "toplevel used at level -1 by spliced code" =
   print
     [ top "n" [] (int 3)
     ; top
@@ -990,7 +1003,37 @@ let%expect_test "toplevel used at a wrong level by spliced code" =
               (splice (let_ "n" [] (int 5) (quote (seq (var "n") (var "x")))))))
     ];
   [%expect
-    {| (Variable_used_at_wrong_level (name n) (var_level 0) (used_at -1)) |}]
+    {|
+    ((members (((ident n/4) (args ()) (scheme int) (body (Lit (Int 3) : int)))))
+     (recursive false))
+    ((members
+      (((ident deep/5) (args ()) (scheme int)
+        (body
+         (Toplevel_splice
+          (code
+           (Let (ident x/15) (args ()) (generalized true)
+            (body (Quote (Lit (Int 1) : int) : <int>{..'a}))
+            (in_
+             (Toplevel_splice
+              (code
+               (Let (ident n/16) (args ()) (generalized true)
+                (body (Lit (Int 5) : int))
+                (in_
+                 (Quote
+                  (Let (ident _/17) (args ()) (generalized true)
+                   (body (Var (Free n) : int)) (in_ (Var (Free x) : <int>{})) :
+                   <int>{})
+                  : "<<int>{}>{n : int; x : <int>{}}"))
+                : "<<int>{}>{n : int; x : <int>{}}"))
+              (expansion
+               (Let (ident _/18) (args ()) (generalized true)
+                (body (Var (Bound (Toplevel n/4)) : int))
+                (in_ (Var (Bound (Local x/15)) : <int>{})) : <int>{}))
+              : <int>{}))
+            : <int>{}))
+          (expansion (Lit (Int 1) : int)) : int)))))
+     (recursive false))
+    |}]
 ;;
 
 let%expect_test "explicit substitutions" =
@@ -1044,7 +1087,7 @@ let%expect_test "explicit substitutions" =
     ((members
       (((ident at_toplevel/6) (args ()) (scheme int)
         (body
-         (Splice
+         (Toplevel_splice
           (code
            (Quote
             (App
@@ -1052,9 +1095,19 @@ let%expect_test "explicit substitutions" =
               (Var (Free n) : int) : "int -> int")
              (Var (Free y) : int) : int)
             : "<int>{n : int; y : int}"))
-          (subs
-           (Explicit
-            ((n (Var (Bound (Toplevel n/4)) : int)) (y (Lit (Int 1) : int)))))
+          (expansion
+           (Let (ident n/18) (args ()) (generalized false)
+            (body (Var (Bound (Toplevel n/4)) : int))
+            (in_
+             (Let (ident y/19) (args ()) (generalized false)
+              (body (Lit (Int 1) : int))
+              (in_
+               (App
+                (App (Var (Bound (Toplevel add/0)) : "int -> int -> int")
+                 (Var (Bound (Local n/18)) : int) : "int -> int")
+                (Var (Bound (Local y/19)) : int) : int))
+              : int))
+            : int))
           : int)))))
      (recursive false))
     |}]

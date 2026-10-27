@@ -84,7 +84,7 @@ module Binder = struct
   type t =
     | Local of Ident.t
     | Toplevel of Ident.t
-  [@@deriving sexp_of]
+  [@@deriving sexp_of, equal]
 end
 
 module Var_ref = struct
@@ -145,6 +145,15 @@ module Pattern = struct
 
   let rec sexp_of_t' t = Hum.typed (Desc.sexp_of_t sexp_of_t' t.desc) t.ty
   let sexp_of_t t = Hum.scoped (fun () -> sexp_of_t' t)
+
+  let rec is_irrefutable t =
+    match t.desc with
+    | Any | Var _ -> true
+    | Lit _ | Construct _ | Record _ | Poly_variant _ -> false
+    | Tuple patterns -> List.for_all patterns ~f:is_irrefutable
+    | Poly_record { fields; rest = _ } ->
+      List.for_all fields ~f:(fun (_, pattern) -> is_irrefutable pattern)
+  ;;
 end
 
 module Expr = struct
@@ -171,6 +180,10 @@ module Expr = struct
           { code : 'e
           ; subs : 'e Subs.t
           }
+      | Toplevel_splice of
+          { code : 'e
+          ; expansion : 'e
+          }
       | Quote of 'e
       | Tuple of 'e list
       | Construct of Constructor_ref.t * 'e list
@@ -193,6 +206,93 @@ module Expr = struct
 
   let rec sexp_of_t' t = Hum.typed (Desc.sexp_of_t sexp_of_t' t.desc) t.ty
   let sexp_of_t t = Hum.scoped (fun () -> sexp_of_t' t)
+
+  let sub_exprs t =
+    let snds = List.map ~f:snd in
+    match t.desc with
+    | Lit _ | Var _ | Poly_variant (_, None) -> []
+    | App (a, b)
+    | Let { body = a; in_ = b; _ }
+    | Toplevel_splice { code = a; expansion = b } -> [ a; b ]
+    | Splice { code; subs = Explicit subs } -> code :: snds subs
+    | Splice { code; subs = Implicit _ } -> [ code ]
+    | Quote e
+    | Field (e, _)
+    | Poly_field (e, _)
+    | Poly_restrict (e, _)
+    | Poly_variant (_, Some e) -> [ e ]
+    | Tuple es | Construct (_, es) -> es
+    | Record fields -> snds fields
+    | Poly_record fields -> snds fields
+    | Poly_extend (fields, e) | Poly_update (e, fields) -> e :: snds fields
+    | Match (e, cases) -> e :: snds cases
+  ;;
+
+  let rec refers_to t ~f =
+    match t.desc with
+    | Var (Bound binder | Persistent binder) -> f binder
+    | Splice { subs = Implicit providers; _ } when Map.exists providers ~f ->
+      true
+    | _ -> List.exists (sub_exprs t) ~f:(refers_to ~f)
+  ;;
+
+  let rec is_value t =
+    match t.desc with
+    | Lit _ | Var _ -> true
+    | Quote expr -> splices_are_values expr ~depth:1
+    | Let { ident; args; body; in_; generalized = _ } ->
+      binding_is_value ~ident ~args ~body && is_value in_
+    | App _ | Splice _ | Toplevel_splice _ -> false
+    | Tuple _
+    | Construct _
+    | Record _
+    | Field _
+    | Match _
+    | Poly_record _
+    | Poly_field _
+    | Poly_extend _
+    | Poly_restrict _
+    | Poly_update _
+    | Poly_variant _ -> List.for_all (sub_exprs t) ~f:is_value
+
+  and splices_are_values t ~depth =
+    match t.desc with
+    | Splice { code; subs } ->
+      (if depth = 1
+       then is_value code
+       else splices_are_values code ~depth:(depth - 1))
+      &&
+        (match subs with
+        | Explicit subs ->
+          List.for_all subs ~f:(fun (_, expr) -> splices_are_values expr ~depth)
+        | Implicit _ -> true)
+    | Quote expr -> splices_are_values expr ~depth:(depth + 1)
+    | Toplevel_splice _ -> false
+    | Lit _
+    | Var _
+    | App _
+    | Let _
+    | Tuple _
+    | Construct _
+    | Record _
+    | Field _
+    | Match _
+    | Poly_record _
+    | Poly_field _
+    | Poly_extend _
+    | Poly_restrict _
+    | Poly_update _
+    | Poly_variant _ ->
+      List.for_all (sub_exprs t) ~f:(splices_are_values ~depth)
+
+  and binding_is_value ~ident ~args ~body =
+    (not (List.is_empty args))
+    || (is_value body
+        && not
+             (refers_to body ~f:(function
+                | Local ident' -> Ident.equal ident ident'
+                | Toplevel _ -> false)))
+  ;;
 end
 
 module Toplevel = struct

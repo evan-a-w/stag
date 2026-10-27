@@ -72,6 +72,21 @@ let find_field t module_ path =
   find_in t.fields module_ Field path ~unbound:(fun path -> Unbound_field path)
 ;;
 
+let find_canonical map name ~unbound : (_, Typecheck_error.t) Result.t =
+  match Map.find map name with
+  | Some found -> Ok found
+  | None -> Error (unbound (Path.of_string name))
+;;
+
+let constructor t name =
+  find_canonical t.constructors name ~unbound:(fun path ->
+    Unbound_constructor path)
+;;
+
+let field t name =
+  find_canonical t.fields name ~unbound:(fun path -> Unbound_field path)
+;;
+
 let find_decl_exn t name = Map.find_exn t.checked name
 
 let is_empty_variant t name =

@@ -12,18 +12,12 @@ let prim_names =
 (* Evaluates [program], then prints its toplevels in evaluation order, or the
    error evaluation stopped at and the toplevels evaluated before it. *)
 let run program =
-  let stamps = Stamp_counter.create () in
-  match
-    Typecheck.typecheck (Typecheck.create ~stamps ()) ~program:(prims @ program)
-  with
+  match Driver.check (prims @ program) with
   | Error error -> print_s [%sexp (error : Typecheck_error.t)]
-  | Ok { program; _ } ->
-    let t = Treewalk.create ~stamps () in
-    let result =
-      let%bind.Or_error program = Treewalk.expand_program t ~program in
-      Treewalk.add_program t ~program;
-      Treewalk.eval t
-    in
+  | Ok driver ->
+    let t = Driver.interpreter driver in
+    let { Typecheck.Checked.program; _ } = Driver.checked driver in
+    let result = Driver.eval driver in
     List.iter program.sccs ~f:(fun scc ->
       List.iter scc.members ~f:(fun { ident; _ } ->
         if not (List.mem prim_names ident.name ~equal:String.equal)
@@ -561,21 +555,16 @@ let%expect_test "nested quotes at runtime" =
     |}]
 ;;
 
-(* The bodies of [program]'s toplevels after expansion. *)
+(* The checked bodies of [program]'s toplevels, with their splices expanded. *)
 let expand program =
-  let stamps = Stamp_counter.create () in
-  match
-    Typecheck.typecheck (Typecheck.create ~stamps ()) ~program:(prims @ program)
-  with
+  match Driver.check (prims @ program) with
   | Error error -> print_s [%sexp (error : Typecheck_error.t)]
-  | Ok { program; _ } ->
-    (match Treewalk.expand_program (Treewalk.create ~stamps ()) ~program with
-     | Error error -> print_s [%sexp (error : Error.t)]
-     | Ok program ->
-       List.iter program.sccs ~f:(fun scc ->
-         List.iter scc.members ~f:(fun { ident; body; _ } ->
-           if not (List.mem prim_names ident.name ~equal:String.equal)
-           then print_s [%sexp (ident : Typed.Ident.t), (body : Typed.Expr.t)])))
+  | Ok driver ->
+    let { Typecheck.Checked.program; _ } = Driver.checked driver in
+    List.iter program.sccs ~f:(fun scc ->
+      List.iter scc.members ~f:(fun { ident; body; _ } ->
+        if not (List.mem prim_names ident.name ~equal:String.equal)
+        then print_s [%sexp (ident : Typed.Ident.t), (body : Typed.Expr.t)]))
 ;;
 
 let%expect_test "expanded programs" =
@@ -592,27 +581,50 @@ let%expect_test "expanded programs" =
     ];
   [%expect
     {|
-    (five/4 (Lit (Int 5) : int))
+    (five/4
+     (Toplevel_splice (code (Quote (Lit (Int 5) : int) : <int>{}))
+      (expansion (Lit (Int 5) : int)) : int))
     (captured/5
-     (Tuple ((Var (Bound (Local x/17)) : 'a) (Var (Bound (Local x/17)) : 'a)) :
-      "'a * 'a"))
+     (Toplevel_splice
+      (code
+       (Quote (Tuple ((Var (Free x) : 'a) (Var (Free x) : 'a)) : "'a * 'a") :
+        "<'a * 'a>{x : 'a}"))
+      (expansion
+       (Tuple ((Var (Bound (Local x/17)) : 'a) (Var (Bound (Local x/17)) : 'a)) :
+        "'a * 'a"))
+      : "'a * 'a"))
     (explicit/6
-     (Let (ident x/20) (args ()) (generalized false)
-      (body (Var (Bound (Local y/18)) : 'a))
-      (in_
-       (Let (ident z/21) (args ()) (generalized true)
-        (body (Var (Bound (Local x/20)) : 'a))
-        (in_ (Var (Bound (Local z/21)) : 'a)) : 'a))
+     (Toplevel_splice
+      (code
+       (Quote
+        (Let (ident z/19) (args ()) (generalized true) (body (Var (Free x) : 'a))
+         (in_ (Var (Bound (Local z/19)) : 'a)) : 'a)
+        : "<'a>{x : 'a}"))
+      (expansion
+       (Let (ident x/20) (args ()) (generalized false)
+        (body (Var (Bound (Local y/18)) : 'a))
+        (in_
+         (Let (ident z/21) (args ()) (generalized true)
+          (body (Var (Bound (Local x/20)) : 'a))
+          (in_ (Var (Bound (Local z/21)) : 'a)) : 'a))
+        : 'a))
       : 'a))
     (in_quote/7
      (Quote
-      (Splice (code (Quote (Lit (Int 1) : int) : <int>{..'_a}))
+      (Splice
+       (code
+        (Toplevel_splice
+         (code
+          (Quote (Quote (Lit (Int 1) : int) : <int>{..'_a}) : <<int>{..'_a}>{}))
+         (expansion (Quote (Lit (Int 1) : int) : <int>{..'_a})) : <int>{..'_a}))
        (subs (Implicit ())) : int)
       : <int>{..'_b} (where "..'_a <= {..'_b}")))
     |}]
 ;;
 
-let%expect_test "expansion fails before anything is evaluated" =
+let%expect_test
+    "a failing toplevel splice fails checking, before anything is evaluated"
+  =
   let abc = Decl.variant "abc" [ "A", []; "B", []; "C", [] ] in
   run
     [ abc
@@ -625,5 +637,14 @@ let%expect_test "expansion fails before anything is evaluated" =
         []
         (splice (match_ (construct "C") [ Pat.construct "A", quote (int 0) ]))
     ];
-  [%expect {| ("Match failure" (value (C))) |}]
+  [%expect
+    {|
+    (Splice_evaluation_failed
+     (code
+      (Match (Construct ((type_name abc) (name C) (index 2)) () : abc)
+       (((Construct ((type_name abc) (name A) (index 0)) () : abc)
+         (Quote (Lit (Int 0) : int) : <int>{})))
+       : <int>{}))
+     (error ("Match failure" (value (C)))))
+    |}]
 ;;

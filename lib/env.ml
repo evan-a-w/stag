@@ -38,6 +38,14 @@ type t = Entry.t list String.Table.t [@@deriving sexp_of]
 let create () = String.Table.create ()
 let find t name = Hashtbl.find t name |> Option.bind ~f:List.hd
 
+let find_binder t binder ~name =
+  Hashtbl.find t name
+  |> Option.bind
+       ~f:
+         (List.find ~f:(fun (entry : Entry.t) ->
+            [%equal: Typed.Binder.t] entry.binder binder))
+;;
+
 let visible t =
   Hashtbl.to_alist t
   |> List.filter_map ~f:(fun (name, entries) ->

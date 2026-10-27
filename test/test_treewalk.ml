@@ -9,36 +9,14 @@ let prim_names =
     | Type _ | Module _ -> None)
 ;;
 
-let sub_exprs (expr : Typed.Expr.t) =
-  let snds = List.map ~f:snd in
-  match expr.desc with
-  | Lit _ | Var _ | Poly_variant (_, None) -> []
-  | App (a, b) | Let { body = a; in_ = b; _ } -> [ a; b ]
-  | Splice { code; subs = Explicit subs } -> code :: snds subs
-  | Splice { code; subs = Implicit _ } -> [ code ]
-  | Quote e
-  | Field (e, _)
-  | Poly_field (e, _)
-  | Poly_restrict (e, _)
-  | Poly_variant (_, Some e) -> [ e ]
-  | Tuple es | Construct (_, es) -> es
-  | Record fields -> snds fields
-  | Poly_record fields -> snds fields
-  | Poly_extend (fields, e) | Poly_update (e, fields) -> e :: snds fields
-  | Match (e, cases) -> e :: snds cases
-;;
-
 (* The captures of each closure in [program]: its toplevel functions and the
    local functions within them. *)
 let print program =
-  let stamps = Stamp_counter.create () in
-  match
-    Typecheck.typecheck (Typecheck.create ~stamps ()) ~program:(prims @ program)
-  with
+  match Driver.check (prims @ program) with
   | Error error -> print_s [%sexp (error : Typecheck_error.t)]
-  | Ok { program; _ } ->
-    let t = Treewalk.create ~stamps () in
-    Treewalk.add_program t ~program;
+  | Ok driver ->
+    let t = Driver.interpreter driver in
+    let { Typecheck.Checked.program; _ } = Driver.checked driver in
     let print_captures ~ident ~args ~body =
       let captures =
         Treewalk.captures t ~ident ~args ~body
@@ -52,7 +30,7 @@ let print program =
        | Let { ident; args = _ :: _ as args; body; _ } ->
          print_captures ~ident ~args ~body
        | _ -> ());
-      List.iter (sub_exprs expr) ~f:locals
+      List.iter (Typed.Expr.sub_exprs expr) ~f:locals
     in
     List.iter program.sccs ~f:(fun scc ->
       List.iter scc.members ~f:(fun (member : Typed.Toplevel.t) ->
@@ -299,8 +277,9 @@ let%expect_test "env slots" =
 
 let%expect_test "a shared stamp counter" =
   let stamps = Stamp_counter.create () in
+  let interpreter = Treewalk.create ~stamps () in
   let idents program =
-    match Typecheck.typecheck (Typecheck.create ~stamps ()) ~program with
+    match Typecheck.typecheck (Typecheck.create ~interpreter ()) ~program with
     | Error error -> raise_s [%sexp (error : Typecheck_error.t)]
     | Ok { program; _ } -> Map.keys program.ident_info
   in

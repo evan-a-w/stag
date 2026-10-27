@@ -63,23 +63,37 @@ end
 type t
 
 (** [stamps] should be the counter that made the idents of the programs
-    added, so idents minted while evaluating are distinct from theirs. *)
+    evaluated, so idents minted while evaluating are distinct from theirs. *)
 val create : stamps:Stamp_counter.t -> unit -> t
 
-(** [program] with its toplevel splices (those outside any quote) replaced by
-    the code they evaluate to, at level -1 in an empty env. The [ident_info]
-    returned also has the idents minted for that code. Values the code embeds
-    from level -1 are bound in [t] under fresh idents, so the result is only
-    meaningful to evaluate with [t]. *)
-val expand_program : t -> program:Typed.Program.t -> Typed.Program.t Or_error.t
+val stamps : t -> Stamp_counter.t
 
-(** Queues the components of [program] to [eval]. They must be expanded. *)
-val add_program : t -> program:Typed.Program.t -> unit
+(** Every ident evaluated needs its info: the typechecker adds each as it
+    binds it. *)
+val add_ident_info : t -> ident:Typed.Ident.t -> info:Typed.Ident_info.t -> unit
+
+(** Queues [scc] to [eval]. Its toplevels are evaluated earlier if used
+    before, eg. by a toplevel splice: each component is evaluated at most
+    once, when first used. *)
+val add_scc : t -> Typed.Scc.t -> unit
+
+(** Evaluates the toplevel splice [code], at [level] in an empty env, to code,
+    binding the values it embeds globally. Returns that code with fresh
+    binders and the free variables outside its quotes replaced by [entry]. *)
+val splice
+  :  t
+  -> code:Typed.Expr.t
+  -> level:int
+  -> entry:(string -> Typed.Var_ref.t option)
+  -> Typed.Expr.t Or_error.t
+
+(** The info of [ident] if it is bound globally, eg. a value embedded by a
+    toplevel splice's code. *)
+val global_info : t -> ident:Typed.Ident.t -> Typed.Ident_info.t option
 
 (** The binders from outside the closure [ident] that it reads when called,
     including itself if it is recursive and those embedded by quotes it builds.
-    Toplevel splices in [body] are taken as unexpanded, so uses within them are
-    not captures. *)
+    Only the expansions of toplevel splices are read. *)
 val captures
   :  t
   -> ident:Typed.Ident.t
@@ -87,7 +101,7 @@ val captures
   -> body:Typed.Expr.t
   -> Typed.Ident.Hash_set.t
 
-(** Evaluates the components added, in order. *)
+(** Evaluates the components queued not yet evaluated, in order. *)
 val eval : t -> unit Or_error.t
 
 (** The value of a toplevel, once evaluated. *)

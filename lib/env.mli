@@ -29,6 +29,9 @@ type t [@@deriving sexp_of]
 val create : unit -> t
 val find : t -> string -> Entry.t option
 
+(** The entry of [name] binding [binder], even if shadowed. *)
+val find_binder : t -> Typed.Binder.t -> name:string -> Entry.t option
+
 (** The innermost entry of each bound name, sorted by name. *)
 val visible : t -> (string * Entry.t) list
 
