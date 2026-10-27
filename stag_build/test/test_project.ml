@@ -173,7 +173,7 @@ let%expect_test "cycles" =
     |}]
 ;;
 
-let%expect_test "modules of executables and tests do not shadow libraries" =
+let%expect_test "modules do not shadow libraries" =
   load
     [ "a/stag", "(library (name a))"
     ; "b/stag", "(library (name b) (libraries a))"
@@ -185,9 +185,29 @@ let%expect_test "modules of executables and tests do not shadow libraries" =
     ];
   [%expect
     {|
+    File "b/a.stag":
+    Error: The module A is also the library a
     File "main/a.stag":
     Error: The module A is also the library a
     File "main/b.stag":
     Error: The module B is also the library b
+    |}];
+  (* A library's own name, or that of a library outside its closure, is
+     fine. *)
+  load
+    [ "a/stag", "(library (name a))"
+    ; "a/a.stag", ""
+    ; "a/c.stag", ""
+    ; "b/stag", "(library (name b) (libraries a))"
+    ; "b/b.stag", ""
+    ; "c/stag", "(library (name c))"
+    ];
+  [%expect
+    {|
+    ((dir a) (kind Library) (name a) (libraries ()) (files (a/a.stag a/c.stag))
+     (closure ()))
+    ((dir b) (kind Library) (name b) (libraries (a)) (files (b/b.stag))
+     (closure (a)))
+    ((dir c) (kind Library) (name c) (libraries ()) (files ()) (closure ()))
     |}]
 ;;

@@ -5,8 +5,11 @@ open! Import
 
 val corrections_dir : string
 
-(** Checks every target. A target is not checked if a library it depends on
-    has errors. Output at compile time is discarded. *)
+(** Each command checks a target at most once, and not if a library it depends
+    on has errors. Output at compile time is discarded. An expect test in an
+    executable is warned about, as it is never run. *)
+
+(** Checks every target. *)
 val build : Project.t -> bool
 
 (** Checks and evaluates the executable [name]. *)
@@ -14,10 +17,12 @@ val exec : Project.t -> string -> bool
 
 (** Runs the expect tests in the files of each library and test named, or all
     of them. A file whose tests fail has its corrected version written to
-    [corrections_dir], mirroring its path, and the diff printed; a file whose
-    tests pass has its stale correction removed. Targets depending on a library
-    with errors are not tested. *)
+    [corrections_dir], mirroring its path, with the digest of the version it
+    corrects, and the diff printed. A file whose tests pass, or whose target
+    doesn't check or evaluate, has its stale correction removed. *)
 val test : Project.t -> string list -> bool
 
-(** Moves the corrections in [corrections_dir] over their sources. *)
-val promote : root:string -> unit
+(** Moves the corrections in [corrections_dir] over their sources. Refuses,
+    leaving it, a correction whose source is not one of the project's or has
+    changed since it was made. *)
+val promote : Project.t -> bool

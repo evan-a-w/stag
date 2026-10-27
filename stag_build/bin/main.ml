@@ -65,7 +65,7 @@ let promote_command =
   Command.basic
     ~summary:"Move the corrections of failed expect tests over their sources"
     (let%map_open.Command () = return () in
-     fun () -> Action.promote ~root:(find_root ()))
+     fun () -> exit_unless (Action.promote (load ())))
 ;;
 
 let () =

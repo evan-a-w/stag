@@ -4,7 +4,7 @@ let project_file = "stag-project"
 
 let find_root dir =
   let rec loop dir =
-    if Sys_unix.file_exists_exn (dir ^/ project_file)
+    if Sys_unix.is_file_exn (dir ^/ project_file)
     then Ok dir
     else (
       let parent = Filename.dirname dir in
@@ -37,49 +37,62 @@ type t =
 [@@deriving fields ~getters]
 
 let find t name = Map.find t.by_name name
-let relative ~dir name = if String.equal dir "." then name else dir ^/ name
 
 let is_skipped name =
   String.is_prefix name ~prefix:"." || String.is_prefix name ~prefix:"_"
 ;;
 
 let read_targets ~root ~error =
+  let read path =
+    match Fs.try_ ~path (fun () -> In_channel.read_all (root ^/ path)) with
+    | Ok contents -> Some contents
+    | Error diagnostic ->
+      error diagnostic;
+      None
+  in
+  let must_read name =
+    String.equal name "stag"
+    || String.is_suffix name ~suffix:Source_file.extension
+  in
   let rec walk dir =
-    let absolute = root ^/ dir in
-    let entries =
-      Sys_unix.readdir absolute
-      |> Array.to_list
-      |> List.sort ~compare:String.compare
+    let entries = Fs.read_dir ~must_read ~error ~root dir in
+    let files =
+      List.filter_map entries ~f:(fun (name, (entry : Fs.Kind.t)) ->
+        match entry with
+        | File -> Some name
+        | Directory | Other -> None)
     in
-    let is_file name = Sys_unix.is_file_exn (absolute ^/ name) in
     let target =
-      if not (List.mem entries "stag" ~equal:String.equal && is_file "stag")
+      if not (List.mem files "stag" ~equal:String.equal)
       then None
       else (
-        let path = relative ~dir "stag" in
-        match Stanza.parse ~path (In_channel.read_all (absolute ^/ "stag")) with
+        let path = Fs.relative ~dir "stag" in
+        let%bind.Option contents = read path in
+        match Stanza.parse ~path contents with
         | Error errors ->
           List.iter errors ~f:error;
           None
         | Ok None -> None
         | Ok (Some stanza) ->
           let files =
-            List.filter entries ~f:(fun name ->
-              String.is_suffix name ~suffix:Source_file.extension
-              && is_file name)
-            |> List.map ~f:(fun name ->
-              { Source_file.path = relative ~dir name
-              ; contents = In_channel.read_all (absolute ^/ name)
-              })
+            List.filter
+              files
+              ~f:(String.is_suffix ~suffix:Source_file.extension)
+            |> List.filter_map ~f:(fun name ->
+              let path = Fs.relative ~dir name in
+              let%map.Option contents = read path in
+              { Source_file.path; contents })
           in
           Some { Target.stanza; dir; files })
     in
     let subdirs =
-      List.filter entries ~f:(fun name ->
-        (not (is_skipped name)) && Sys_unix.is_directory_exn (absolute ^/ name))
+      List.filter_map entries ~f:(fun (name, (entry : Fs.Kind.t)) ->
+        match entry with
+        | Directory when not (is_skipped name) -> Some name
+        | Directory | File | Other -> None)
     in
     Option.to_list target
-    @ List.concat_map subdirs ~f:(fun name -> walk (relative ~dir name))
+    @ List.concat_map subdirs ~f:(fun name -> walk (Fs.relative ~dir name))
   in
   walk "."
 ;;
@@ -191,28 +204,25 @@ let closure t target = closure_of ~by_name:t.by_name target
 
 let check_module_clashes targets ~by_name ~error =
   List.iter targets ~f:(fun (target : Target.t) ->
-    match target.stanza.kind with
-    | Library -> ()
-    | Executable | Test ->
-      let libraries =
-        closure_of ~by_name target
-        |> List.map ~f:(fun (library : Target.t) ->
-          Stanza.module_name library.stanza, library)
-        |> String.Map.of_alist_exn
-      in
-      List.iter target.files ~f:(fun { path; contents = _ } ->
-        match Source_file.module_name path with
-        | Error _ -> ()
-        | Ok module_name ->
-          Option.iter (Map.find libraries module_name) ~f:(fun library ->
-            error
-            @@ Diagnostic.create
-                 ~whole_file:true
-                 ~loc:(Loc.start_of_file path)
-                 (sprintf
-                    "The module %s is also the library %s"
-                    module_name
-                    (Target.name library)))))
+    let libraries =
+      closure_of ~by_name target
+      |> List.map ~f:(fun (library : Target.t) ->
+        Stanza.module_name library.stanza, library)
+      |> String.Map.of_alist_exn
+    in
+    List.iter target.files ~f:(fun { path; contents = _ } ->
+      match Source_file.module_name path with
+      | Error _ -> ()
+      | Ok module_name ->
+        Option.iter (Map.find libraries module_name) ~f:(fun library ->
+          error
+          @@ Diagnostic.create
+               ~whole_file:true
+               ~loc:(Loc.start_of_file path)
+               (sprintf
+                  "The module %s is also the library %s"
+                  module_name
+                  (Target.name library)))))
 ;;
 
 let load ~root =

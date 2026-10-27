@@ -84,7 +84,9 @@ Tests run the expect tests of libraries and tests.
   [1]
   $ find _stag -type f | sort
   _stag/math/power.stag.corrected
+  _stag/math/power.stag.digest
   _stag/test/calc_test.stag.corrected
+  _stag/test/calc_test.stag.digest
 
 Testing only some stanzas, from a subdirectory:
 
@@ -151,6 +153,7 @@ A correction is removed once its tests pass.
   [1]
   $ find _stag -type f
   _stag/test/calc_test.stag.corrected
+  _stag/test/calc_test.stag.digest
   $ cat > test/calc_test.stag <<'X'
   > let%expect_test "show" = print_endline "x"; [%expect {| x |}]
   > X
@@ -197,10 +200,6 @@ not checked.
   3 | let oops = Int.add 1 "two"
                            ^^^^^
   Error: This expression has type string but an expression was expected of type int
-  File "math/arith.stag", line 3, characters 21-26:
-  3 | let oops = Int.add 1 "two"
-                           ^^^^^
-  Error: This expression has type string but an expression was expected of type int
   [1]
   $ mv arith.bak math/arith.stag
 
@@ -224,7 +223,9 @@ Runtime errors:
   File "test/calc_test.stag", line 1, characters 58-71:
   1 | let%expect_test "div" = print_endline "before"; print_int (Int.div 1 0)
                                                                 ^^^^^^^^^^^^^
-  Error: Division by zero
+  Error: Expect test "div" failed: Division by zero
+  Output since the last [%expect]:
+    before
   calc_test: 1 of 2 test(s) failed
   [1]
 

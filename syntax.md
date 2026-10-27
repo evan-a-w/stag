@@ -161,12 +161,14 @@ letters, digits, `_` and `'`, then `.stag`. A program is a set of files, and
 since toplevels in any module may refer to each other in any order, files may
 refer to each other in any order too.
 
-Evaluation: each toplevel is evaluated after those it refers to. Files are
-evaluated in dependency order: a file depends on the files its toplevels refer
-to; strongly connected components of files are evaluated after those they
-depend on, ties broken by the order the files are given, and the files of a
-component in the order given. Within that, toplevels are evaluated in order.
-Toplevels used by toplevel splices are evaluated at compile time, once.
+Evaluation: toplevels are evaluated in file order. Files are in dependency
+order: a file depends on the files its toplevels refer to; strongly connected
+components of files come after those they depend on, ties broken by the order
+the files are given, and the files of a component are in the order given.
+Within a file, toplevels are evaluated top to bottom. A toplevel used before
+its turn (eg. by an earlier one, or one in an earlier file of a cycle) is
+evaluated on demand at that point, once. Toplevels used by toplevel splices
+are evaluated at compile time, once.
 
 ## Expect tests
 
