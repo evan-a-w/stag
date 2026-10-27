@@ -812,4 +812,5 @@ let eval t =
   loop ()
 ;;
 
+let eval_toplevel t ~ident = force t ident
 let find t ~ident = Env.lookup t.env ~ident

@@ -26,6 +26,9 @@ val none : t
 
 val is_none : t -> bool
 
+(** Zero width, at the start of [file]. *)
+val start_of_file : string -> t
+
 (** The smallest span containing both, which must be in the same file. *)
 val merge : t -> t -> t
 

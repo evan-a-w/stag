@@ -123,5 +123,9 @@ val captures
 (** Evaluates the components queued not yet evaluated, in order. *)
 val eval : t -> unit Or_error.t
 
+(** Evaluates the toplevel [ident], of a component queued, unless it already
+    is. *)
+val eval_toplevel : t -> ident:Typed.Ident.t -> unit Or_error.t
+
 (** The value of a toplevel, once evaluated. *)
 val find : t -> ident:Typed.Ident.t -> Value.t Or_error.t

@@ -20,6 +20,7 @@ type t =
 
 let none = { file = "_none_"; start = Pos.start; stop = Pos.start }
 let is_none t = equal t none
+let start_of_file file = { file; start = Pos.start; stop = Pos.start }
 
 let merge a b =
   if is_none a
