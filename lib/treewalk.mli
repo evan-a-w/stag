@@ -62,6 +62,10 @@ module Value : sig
 
   (** Functions are [<fun>], as their envs may contain themselves. *)
   val sexp_of_t : t -> Sexp.t
+
+  (** As stag syntax, eg. [C (1, `A)], for messages. Functions are [<fun>],
+      code [<code>] and nominal records [<record>]. *)
+  val to_string_hum : t -> string
 end
 
 type t

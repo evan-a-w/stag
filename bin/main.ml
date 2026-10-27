@@ -1,18 +1,20 @@
 open! Core
 open Stag
 
+let canonical path =
+  Option.value
+    (Option.try_with (fun () -> Filename_unix.realpath path))
+    ~default:path
+;;
+
 let read_files paths =
-  List.map paths ~f:(fun path ->
+  List.stable_dedup paths ~compare:(Comparable.lift String.compare ~f:canonical)
+  |> List.map ~f:(fun path ->
     match In_channel.read_all path with
     | contents -> { Source_file.path; contents }
     | exception Sys_error message ->
       eprintf "Error: %s\n%!" message;
       exit 2)
-;;
-
-let output string =
-  Out_channel.output_string stdout string;
-  Out_channel.flush stdout
 ;;
 
 let report files diagnostic =
@@ -25,7 +27,7 @@ let report files diagnostic =
 ;;
 
 let check files =
-  match Driver.check_files ~output files with
+  match Driver.check_files files with
   | Ok driver -> driver
   | Error error ->
     report files (Diagnostic.of_driver_error error);
@@ -82,9 +84,8 @@ let test_command =
        let driver = check files in
        eval files driver;
        let results = Expect_test_runner.run driver in
-       List.iter results ~f:(fun (result : Expect_test_runner.Test_result.t) ->
-         Option.iter result.error ~f:(fun error ->
-           report files (Diagnostic.of_runtime_error error)));
+       List.iter results ~f:(fun result ->
+         List.iter (Diagnostic.of_test_result result) ~f:(report files));
        let mismatched =
          List.filter_map files ~f:(fun { path; contents } ->
            let corrected_path = path ^ ".corrected" in
@@ -102,12 +103,17 @@ let test_command =
                   ~new_:corrected)
                ~f:print_string;
              if promote
-             then Out_channel.write_all path ~data:corrected
+             then (
+               Out_channel.write_all path ~data:corrected;
+               if Sys_unix.file_exists_exn corrected_path
+               then Sys_unix.remove corrected_path)
              else Out_channel.write_all corrected_path ~data:corrected;
              Some path)
        in
        let errors =
-         List.count results ~f:(fun result -> Option.is_some result.error)
+         List.count results ~f:(fun result ->
+           Option.is_some result.error
+           || not (List.is_empty result.different_outputs))
        in
        let total = List.length results in
        let failed =

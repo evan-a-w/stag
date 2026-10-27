@@ -1,5 +1,16 @@
 open! Core
 
+(** A use of a variable in a quote, at [loc], where its binding, at
+    [var_level], was unusable, so it is a free variable of the quote. *)
+module Unusable_in_quote : sig
+  type t =
+    { loc : Loc.t
+    ; var_level : Env.Level.t
+    ; used_at : Env.Level.t
+    }
+  [@@deriving sexp_of]
+end
+
 module Kind : sig
   (** Names of toplevels, types, constructors and fields are canonical, except
       for paths ([Syntax.Path.t]), which are as written. *)
@@ -13,6 +24,12 @@ module Kind : sig
         ; var_level : Env.Level.t
         ; used_at : Env.Level.t
         }
+    | Free_in_spliced_code of
+        { name : string
+        ; unusable : Unusable_in_quote.t
+        }
+    (** Spliced where [name] is unbound, code from a quote in which [name] is
+        free, as the binding of [name] there was [unusable]. *)
     | Unbound_module of Syntax.Path.t
     | Unbound_type of Syntax.Path.t
     | Unbound_type_variable of string

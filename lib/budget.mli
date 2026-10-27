@@ -7,5 +7,5 @@ type t
 val create : Limits.t -> t
 
 (** Runs [f] as one step, one deeper than the steps it is nested in, or errors
-    if that exceeds a limit. *)
-val step : t -> f:(unit -> 'a Or_error.t) -> 'a Or_error.t
+    if that exceeds a limit, with a [Runtime_error] at [loc], the step's. *)
+val step : t -> loc:Loc.t -> f:(unit -> 'a Or_error.t) -> 'a Or_error.t

@@ -460,7 +460,7 @@ let%expect_test "staging" =
       (code
        (Match (Lit (Int 1) : int)
         (((Lit (Int 2) : int) (Quote (Lit (Int 1) : int) : <int>{}))) : <int>{}))
-      (error ("Match failure" (value 1))))
+      (error ("Match failure: no case matches the value 1" @ t:3:0-1)))
      @ t:2:0-1)
     |}]
 ;;

@@ -82,3 +82,136 @@ let%expect_test "unified" =
     +c
     |}]
 ;;
+
+let%expect_test "changes at start, middle and end" =
+  diff "a\nb\nc\nd\n" "x\nb\nc\nd\n";
+  diff "a\nb\nc\nd\ne\n" "a\nb\nx\nd\ne\n";
+  diff "a\nb\nc\nd\n" "a\nb\nc\nx\n";
+  [%expect
+    {|
+    --- a
+    +++ b
+    @@ -1,4 +1,4 @@
+    -a
+    +x
+     b
+     c
+     d
+    --- a
+    +++ b
+    @@ -1,5 +1,5 @@
+     a
+     b
+    -c
+    +x
+     d
+     e
+    --- a
+    +++ b
+    @@ -1,4 +1,4 @@
+     a
+     b
+     c
+    -d
+    +x
+    |}]
+;;
+
+let%expect_test "overlapping common prefix and suffix" =
+  diff "a\na\n" "a\n";
+  diff "a\n" "a\na\n";
+  diff "a\na\na\n" "a\na\na\na\na\n";
+  diff "a\nb\na\n" "a\n";
+  diff "x\na\n" "a\nx\na\n";
+  diff "0\n2\n0\n" "2\n2\n0\n";
+  diff "2\n1\n1\n" "1\n";
+  [%expect
+    {|
+    --- a
+    +++ b
+    @@ -1,2 +1,1 @@
+     a
+    -a
+    --- a
+    +++ b
+    @@ -1,1 +1,2 @@
+     a
+    +a
+    --- a
+    +++ b
+    @@ -1,3 +1,5 @@
+     a
+     a
+     a
+    +a
+    +a
+    --- a
+    +++ b
+    @@ -1,3 +1,1 @@
+     a
+    -b
+    -a
+    --- a
+    +++ b
+    @@ -1,2 +1,3 @@
+    +a
+     x
+     a
+    --- a
+    +++ b
+    @@ -1,3 +1,3 @@
+    -0
+     2
+    +2
+     0
+    --- a
+    +++ b
+    @@ -1,3 +1,1 @@
+    -2
+     1
+    -1
+    |}]
+;;
+
+let%expect_test "empty files" =
+  diff "" "";
+  diff "" "a\nb\n";
+  diff "a\nb\n" "";
+  [%expect
+    {|
+    (equal)
+    --- a
+    +++ b
+    @@ -0,0 +1,2 @@
+    +a
+    +b
+    --- a
+    +++ b
+    @@ -1,2 +0,0 @@
+    -a
+    -b
+    |}]
+;;
+
+let%expect_test "large file with a small change" =
+  diff
+    (lines 100_000)
+    (String.substr_replace_all
+       (lines 100_000)
+       ~pattern:"\n50000\n"
+       ~with_:"\nx\n");
+  [%expect
+    {|
+    --- a
+    +++ b
+    @@ -49997,7 +49997,7 @@
+     49997
+     49998
+     49999
+    -50000
+    +x
+     50001
+     50002
+     50003
+    |}]
+;;

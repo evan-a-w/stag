@@ -139,7 +139,7 @@ print_int : int -> unit            print_char : char -> unit
 Int.add sub mul div rem : int -> int -> int     Int.neg : int -> int
 Int.equal lt le gt ge : int -> int -> bool      Int.compare : int -> int -> int
 Int.to_string : int -> string      Int.of_string : string -> int
-String.concat : string -> string -> string      String.length : string -> int
+String.append : string -> string -> string      String.length : string -> int
 String.get : string -> int -> char              String.sub : string -> int -> int -> string
 String.equal : string -> string -> bool         String.compare : string -> string -> int
 Char.equal : char -> char -> bool  Char.code : char -> int
@@ -180,17 +180,24 @@ let%expect_test "power" =
 
 `let%expect_test "name" = e` is a toplevel (in any module) whose body has type
 `unit`. `[%expect {|...|}]` (or `[%expect "..."]`, or `[%expect]` for empty)
-has type `unit` and is allowed only in a test's body, outside quotes and
-toplevel splices.
+has type `unit` and is allowed only in a test's body where it runs while the
+test runs: at the body's level, so not in a quote's code nor in a toplevel
+splice (which runs at compile time), but in a splice within a quote, which runs
+when the quote is evaluated (`.<.~([%expect]; .<()>.)>.`).
 
 Tests run only when testing (`stag test`), after the program's toplevels are
 evaluated, in order. Each `[%expect]` compares the output printed since the
 previous one with its string, both normalized: leading and trailing blank lines
 and trailing whitespace removed, and the indentation common to all lines
-removed. Output after the last `[%expect]` must be empty. A runtime error fails
-the test, and stops it. Mismatches are corrected in a copy of the file:
-`{| 5 |}` for one line, otherwise an indented block, and trailing output as a
-new `[%expect]` at the end of the test.
+removed (as a common prefix, so a tab and spaces differ). Output after the last
+`[%expect]` must be empty. An `[%expect]` reached more than once is checked
+once if its outputs are all the same, and is an error if they differ. A
+runtime error fails the test, and stops it; the output since the last
+`[%expect]` is shown with it. Mismatches are corrected in a copy of the file:
+`{| 5 |}` for one line, otherwise a block indented from the `[%expect]`'s line
+by its leading whitespace, and trailing output as a new `[%expect]` after the
+test's body (parenthesized if it ends in a `match`). A test's local bindings
+are not visible to other tests.
 
 ## Later
 

@@ -25,23 +25,45 @@ let lines string =
   | lines -> lines
 ;;
 
-(* By longest common subsequence. *)
+(* By longest common subsequence, only tabulating the lines between the common prefix and
+   suffix. Past them, the shorter side's remaining lines are a subsequence of
+   the other's, which are matched greedily as the full table would. *)
 let diff (old : string array) (new_ : string array) =
   let n = Array.length old in
   let m = Array.length new_ in
-  let lcs = Array.make_matrix ~dimx:(n + 1) ~dimy:(m + 1) 0 in
-  for i = n - 1 downto 0 do
-    for j = m - 1 downto 0 do
-      lcs.(i).(j)
+  let prefix = ref 0 in
+  while
+    !prefix < n && !prefix < m && String.equal old.(!prefix) new_.(!prefix)
+  do
+    incr prefix
+  done;
+  let p = !prefix in
+  let suffix = ref 0 in
+  while
+    !suffix < n - p
+    && !suffix < m - p
+    && String.equal old.(n - 1 - !suffix) new_.(m - 1 - !suffix)
+  do
+    incr suffix
+  done;
+  let n' = n - !suffix in
+  let m' = m - !suffix in
+  let lcs = Array.make_matrix ~dimx:(n' - p + 1) ~dimy:(m' - p + 1) 0 in
+  for i = n' - 1 downto p do
+    for j = m' - 1 downto p do
+      lcs.(i - p).(j - p)
       <- (if String.equal old.(i) new_.(j)
-          then lcs.(i + 1).(j + 1) + 1
-          else Int.max lcs.(i + 1).(j) lcs.(i).(j + 1))
+          then lcs.(i - p + 1).(j - p + 1) + 1
+          else Int.max lcs.(i - p + 1).(j - p) lcs.(i - p).(j - p + 1))
     done
   done;
   let rec go i j acc =
     if i < n && j < m && String.equal old.(i) new_.(j)
     then go (i + 1) (j + 1) (Line.Same old.(i) :: acc)
-    else if i < n && (j = m || lcs.(i + 1).(j) >= lcs.(i).(j + 1))
+    else if
+      if i < n' && j < m'
+      then lcs.(i - p + 1).(j - p) >= lcs.(i - p).(j - p + 1)
+      else n - i > m - j
     then go (i + 1) j (Line.Removed old.(i) :: acc)
     else if j < m
     then go i (j + 1) (Line.Added new_.(j) :: acc)

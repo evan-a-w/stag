@@ -8,8 +8,6 @@ type t =
   }
 [@@deriving sexp_of]
 
-val extension : string
-
 (** [Foo_bar] for [dir/foo_bar.stag] or [dir/Foo_bar.stag]. Errs unless the
     basename is [.stag] after a letter followed by letters, digits, [_] and
     [']. *)

@@ -2,7 +2,7 @@ Programs are sets of files, each a module named after its file.
 
   $ cat > util.stag <<'EOF'
   > let double x = Int.mul 2 x
-  > let greet name = print_endline (String.concat "Hello, " name)
+  > let greet name = print_endline (String.append "Hello, " name)
   > EOF
   $ cat > main.stag <<'EOF'
   > let n = Util.double 21
@@ -83,10 +83,8 @@ Errors are reported like OCaml's.
   [1]
   $ printf 'let x = 1\n' > bad-name.stag
   $ stag check bad-name.stag
-  File "bad-name.stag", line 1, characters 0-0:
-  1 | let x = 1
-      ^
-  Error: Bad-name.stag is not a valid module file name: it should be a letter followed by letters, digits, _ and ', then .stag
+  File "bad-name.stag":
+  Error: bad-name.stag is not a valid module file name: it should be a letter followed by letters, digits, _ and ', then .stag
   [1]
   $ cat > multi.stag <<'EOF'
   > let r =
@@ -99,7 +97,11 @@ Errors are reported like OCaml's.
   2 |   .~(let x = 1 in
   3 |      Int.div x 0;
   4 |      .<1>.)
-  Error: This toplevel splice failed at compile time: Division by zero, at multi.stag:3:5-16
+  Error: This toplevel splice failed at compile time: Division by zero
+  File "multi.stag", line 3, characters 5-16:
+  3 |      Int.div x 0;
+           ^^^^^^^^^^^
+  Note: The error was raised here
   [1]
   $ cat > crash.stag <<'EOF'
   > let s = String.sub "abc" 1 5
@@ -113,3 +115,42 @@ Errors are reported like OCaml's.
   $ stag check missing.stag
   Error: missing.stag: No such file or directory
   [2]
+
+Runtime errors are located, and output before them is printed first.
+
+  $ cat > match.stag <<'EOF'
+  > let a = print_endline "first"
+  > let f x = match x with
+  >   | 1 -> ()
+  > let b = a; f 2
+  > EOF
+  $ stag run match.stag 2>&1
+  first
+  File "match.stag", lines 2-3, characters 10-11:
+  2 | let f x = match x with
+  3 |   | 1 -> ()
+  Error: Match failure: no case matches the value 2
+  [1]
+
+Tabs before an error keep the caret aligned.
+
+  $ printf 'let x =\n\tInt.add 1 true\n' > tab.stag
+  $ stag check tab.stag 2>&1 | sed 's/\t/<tab>/g'
+  File "tab.stag", line 2, characters 11-15:
+  2 | <tab>Int.add 1 true
+      <tab>          ^^^^
+  Error: This expression has type bool but an expression was expected of type int
+
+A splice's code using a variable bound at another level is explained.
+
+  $ printf 'let w = .~(let z = 1 in .< z >.)\n' > level.stag
+  $ stag check level.stag
+  File "level.stag", line 1, characters 8-32:
+  1 | let w = .~(let z = 1 in .< z >.)
+              ^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: Unbound value z, which the spliced code uses: z is a variable of its quote's context, as the z bound at compile time (level -1) can't be used in the quote (level 0); only toplevel functions may be used at other levels
+  File "level.stag", line 1, characters 27-28:
+  1 | let w = .~(let z = 1 in .< z >.)
+                                 ^
+  Note: z is a variable of the code's context here
+  [1]

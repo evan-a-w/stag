@@ -156,8 +156,8 @@ let%expect_test "recursive values" =
   run [ top "x" [] (app (var "add") [ var "x"; int 1 ]) ];
   [%expect
     {|
-    ("Used value before it was defined (eg. because of recursion on values)"
-     (ident x/4))
+    ("x is used before its value is defined (a value may not depend on itself)" @
+     _none_)
     |}];
   run
     [ top "z" [] (app (var "g") [ tag "B" ])
@@ -169,8 +169,8 @@ let%expect_test "recursive values" =
   [%expect
     {|
     (g <fun>)
-    ("Used value before it was defined (eg. because of recursion on values)"
-     (ident z/4))
+    ("z is used before its value is defined (a value may not depend on itself)" @
+     _none_)
     |}];
   (* A closure may refer to the value it is part of. *)
   run
@@ -228,7 +228,7 @@ let%expect_test "nominal types" =
     (fields (Tuple 3 true))
     (matched (Tuple 3 true))
     (only_a <fun>)
-    ("Match failure" (value (B 1 true)))
+    ("Match failure: no case matches the value B (1, true)" @ _none_)
     |}]
 ;;
 
@@ -442,9 +442,9 @@ let%expect_test "evaluation is left to right" =
                  ~subs:[ "b", Some (only "B"); "a", Some (only "C") ]
                  (quote (tuple [ var "a"; var "b" ])))))
     ];
-  [%expect {| ("Match failure" (value (B))) |}];
+  [%expect {| ("Match failure: no case matches the value B" @ _none_) |}];
   run [ abc; top "tuple" [] (tuple [ only "B"; only "C" ]) ];
-  [%expect {| ("Match failure" (value (B))) |}]
+  [%expect {| ("Match failure: no case matches the value B" @ _none_) |}]
 ;;
 
 let%expect_test "toplevel splices provided by toplevels and persistent locals" =
@@ -632,6 +632,6 @@ let%expect_test
        (((Construct ((type_name abc) (name A) (index 0)) () : abc)
          (Quote (Lit (Int 0) : int) : <int>{})))
        : <int>{}))
-     (error ("Match failure" (value (C)))))
+     (error ("Match failure: no case matches the value C" @ _none_)))
     |}]
 ;;

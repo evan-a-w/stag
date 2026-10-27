@@ -9,6 +9,20 @@ module Mismatch : sig
           none), or for trailing output, zero width at the end of the test. *)
     ; expected : string option (** [None] for trailing output. *)
     ; actual : string (** Normalized. *)
+    ; parenthesize : Loc.t option
+      (** For trailing output after a body ending in a [match], the body, which
+          the correction parenthesizes so the new [[%expect]] follows the
+          [match] rather than ending its last case. *)
+    }
+  [@@deriving sexp_of]
+end
+
+(** An [[%expect]] reached more than once, with different outputs, so it can't
+    be corrected. *)
+module Different_outputs : sig
+  type t =
+    { loc : Loc.t (** As [Mismatch.loc]. *)
+    ; outputs : string list (** Normalized, distinct, in the order reached. *)
     }
   [@@deriving sexp_of]
 end
@@ -17,9 +31,13 @@ module Test_result : sig
   type t =
     { name : string Located.t
     ; mismatches : Mismatch.t list
+    ; different_outputs : Different_outputs.t list
     ; error : Error.t option
       (** A runtime error, which stops the test, so later [[%expect]]s and
           trailing output are not checked. *)
+    ; output_before_error : string
+      (** Normalized, printed after the last [[%expect]] reached before
+          [error]. *)
     }
   [@@deriving sexp_of]
 
@@ -29,16 +47,18 @@ end
 (** Runs the tests of [driver]'s program in order, after [Driver.eval], each
     with [limits] of its own, unlimited by default. Each [[%expect]] checks the
     output since the previous one, and the output after the last must be
-    empty. Outputs are compared after [normalize]. *)
+    empty. Outputs are compared after [normalize]. An [[%expect]] reached more
+    than once is checked once, if its outputs are all the same. *)
 val run : ?limits:Limits.t -> Driver.t -> Test_result.t list
 
 (** Without leading and trailing blank lines, trailing whitespace on each line
-    and the indentation common to all lines. *)
+    and the leading whitespace common to all lines (a common prefix, so a tab
+    and spaces are different). *)
 val normalize : string -> string
 
 (** [contents] of the file [path] with the mismatches in it corrected, if any,
-    formatted as ppx_expect does: [{| 5 |}] for one line, else an indented
-    block. An [[%expect]] reached more than once gets its first mismatch. *)
+    formatted as ppx_expect does: [{| 5 |}] for one line, else a block indented
+    from the line of the [[%expect]] by its leading whitespace. *)
 val corrected
   :  path:string
   -> contents:string

@@ -73,12 +73,14 @@ let%expect_test "a runaway splice runs out of fuel while checking" =
         []
         (splice (seq (app (var "spin") [ nat_of_int 40 ]) (quote (int 1))))
     ];
-  [%expect {| splice failed: ("Out of fuel" (fuel 1000000)) |}]
+  [%expect
+    {| splice failed: ("Out of fuel: evaluation took more than 1000000 steps" @ _none_) |}]
 ;;
 
 let%expect_test "a looping toplevel runs out of fuel when evaluated" =
   run ~runtime:(fuel_only 1000) [ loop; top "x" [] (app (var "loop") [ unit ]) ];
-  [%expect {| eval failed: ("Out of fuel" (fuel 1000)) |}]
+  [%expect
+    {| eval failed: ("Out of fuel: evaluation took more than 1000 steps" @ _none_) |}]
 ;;
 
 let%expect_test "terminating programs are unaffected" =
@@ -133,7 +135,8 @@ let%expect_test "deep recursion exceeds the stack depth" =
   deep Limits.unlimited;
   [%expect
     {|
-    eval failed: ("Stack depth exceeded" (max_depth 10000))
+    eval failed: ("Stack depth exceeded: evaluation nested more than 10000 steps deep" @
+     _none_)
     (deep 0)
     |}]
 ;;
@@ -179,7 +182,8 @@ let%expect_test "the time limit" =
       { Limits.unlimited with time_limit = Some (Time_ns.Span.of_int_ms 1) }
     ~print_error:only_kind
     [ nat; spin; top "x" [] (app (var "spin") [ nat_of_int 60 ]) ];
-  [%expect {| eval failed: Time limit exceeded |}]
+  [%expect
+    {| eval failed: Time limit exceeded: evaluation took more than 1ms |}]
 ;;
 
 let%expect_test "deep recursion at compile time exceeds the stack depth" =
@@ -192,7 +196,8 @@ let%expect_test "deep recursion at compile time exceeds the stack depth" =
         []
         (splice (seq (app (var "spin") [ nat_of_int 20_000 ]) (quote (int 1))))
     ];
-  [%expect {| splice failed: Stack depth exceeded |}]
+  [%expect
+    {| splice failed: Stack depth exceeded: evaluation nested more than 10000 steps deep |}]
 ;;
 
 let%expect_test "the time limit at compile time" =
@@ -207,7 +212,8 @@ let%expect_test "the time limit at compile time" =
         []
         (splice (seq (app (var "spin") [ nat_of_int 60 ]) (quote (int 1))))
     ];
-  [%expect {| splice failed: Time limit exceeded |}]
+  [%expect
+    {| splice failed: Time limit exceeded: evaluation took more than 1ms |}]
 ;;
 
 let%expect_test "values forced at compile time are not evaluated again" =
@@ -219,7 +225,7 @@ let%expect_test "values forced at compile time are not evaluated again" =
     {|
     (y 2)
     (x 1)
-    eval failed: ("Out of fuel" (fuel 100))
+    eval failed: ("Out of fuel: evaluation took more than 100 steps" @ _none_)
     |}]
 ;;
 
@@ -254,8 +260,8 @@ let%expect_test "growing code exponentially runs out of fuel at compile time" =
   [%expect
     {|
     (x "()")
-    splice failed: ("Out of fuel" (fuel 2000))
-    splice failed: Time limit exceeded
+    splice failed: ("Out of fuel: evaluation took more than 2000 steps" @ _none_)
+    splice failed: Time limit exceeded: evaluation took more than 50ms
     |}]
 ;;
 
@@ -276,7 +282,7 @@ let%expect_test "growing code exponentially runs out of fuel at runtime" =
      (Code
       (Let (ident _/18) (args ()) (generalized false) (body (Lit Unit : unit))
        (in_ (Lit Unit : unit)) : unit)))
-    eval failed: ("Out of fuel" (fuel 2000))
-    eval failed: Time limit exceeded
+    eval failed: ("Out of fuel: evaluation took more than 2000 steps" @ _none_)
+    eval failed: Time limit exceeded: evaluation took more than 50ms
     |}]
 ;;

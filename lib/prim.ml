@@ -34,7 +34,6 @@ type t =
   ; impl : output:(string -> unit) -> Value.t list -> (Value.t, string) Result.t
   }
 
-let name t = t.name
 let equal a b = String.equal a.name b.name
 let sexp_of_t t = Sexp.Atom t.name
 
@@ -163,7 +162,7 @@ let all =
            | Some n -> Ok (Value.Int n)
            | None -> Error (sprintf "Int.of_string: invalid integer %S" s))
       | _ -> None)
-  ; binary "String.concat" [ String; String ] String (fun a b ->
+  ; binary "String.append" [ String; String ] String (fun a b ->
       match a, b with
       | String a, String b -> ok (Value.String (a ^ b))
       | _ -> None)

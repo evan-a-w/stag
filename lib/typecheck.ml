@@ -67,6 +67,10 @@ module Program_env = struct
     ; interpreter : Treewalk.t
     ; mutable ident_info : Typed.Ident_info.t Typed.Ident.Map.t
     ; sccs : Typed.Scc.t Queue.t
+    ; unusable_in_quotes : Typecheck_error.Unusable_in_quote.t String.Table.t
+      (** The latest free variable of a quote that a binding of its name,
+          unusable there, did not bind, to explain an error if the code is
+          spliced where the name is unbound. *)
     }
 
   let fresh_ident t name =
@@ -147,9 +151,12 @@ module Resolution = struct
     | Outside_quote of
         { quote : Scope.quote
         ; usable : Env.Entry.t option
+        ; unusable : Env.Entry.t option
         }
     (** Not bound in the enclosing [quote], so a free variable of it, unless
-        used directly while [usable]. Splices never capture the name. *)
+        used directly while [usable]. Splices never capture the name.
+        [unusable] is the entry of the name, if it has one that isn't
+        [usable]. *)
     | Unusable of Typecheck_error.Kind.t (** The error if the name is used. *)
 
   let of_entry (scope : Scope.t) ~name (entry : Env.Entry.t option) =
@@ -164,8 +171,14 @@ module Resolution = struct
     | Some quote, Some entry
       when [%equal: int option] entry.quote_id (Some quote.id) -> Local entry
     | Some quote, Some entry when entry.level <= scope.level ->
-      Outside_quote { quote; usable = Option.some_if (usable entry) entry }
-    | Some quote, None -> Outside_quote { quote; usable = None }
+      let usable = usable entry in
+      Outside_quote
+        { quote
+        ; usable = Option.some_if usable entry
+        ; unusable = Option.some_if (not usable) entry
+        }
+    | Some quote, None ->
+      Outside_quote { quote; usable = None; unusable = None }
     | _, Some entry ->
       Unusable
         (Variable_used_at_wrong_level
@@ -549,7 +562,12 @@ let resolution_type t (scope : Scope.t) ~name ~loc : Resolution.t -> _
     Ok (Scope.instantiate t scope entry.scheme, Typed.Var_ref.Bound entry.binder)
   | Outside_quote { usable = Some entry; _ } ->
     Ok (Scope.instantiate t scope entry.scheme, Persistent entry.binder)
-  | Outside_quote { quote; usable = None } ->
+  | Outside_quote { quote; usable = None; unusable } ->
+    Option.iter unusable ~f:(fun entry ->
+      Hashtbl.set
+        scope.program.unusable_in_quotes
+        ~key:name
+        ~data:{ loc; var_level = entry.level; used_at = scope.level });
     let%map.Result ty =
       Unify.present_entry t ~row:quote.context ~name ~rank:quote.outside.rank
       |> lift ~loc
@@ -679,7 +697,7 @@ and var_ref_type t (scope : Scope.t) (var_ref : Typed.Var_ref.t) ~loc =
          scope
          ~name
          ~loc
-         (Outside_quote { quote; usable = None })
+         (Outside_quote { quote; usable = None; unusable = None })
      | None -> not_in_scope name)
   | Bound (Toplevel ident) | Persistent (Toplevel ident) ->
     let%bind.Result entry =
@@ -1182,6 +1200,20 @@ and substitute_entry t (scope : Scope.t) ~name ~presence ~ty ~loc ~may_capture =
        | None, _ | Some _, (Absent | PVar _) -> Ok None)
   in
   match Resolution.of_entry scope ~name entry with
+  | Unusable (Not_in_scope _)
+    when Option.is_none scope.quote
+         && Hashtbl.mem scope.program.unusable_in_quotes name ->
+    let unusable = Hashtbl.find_exn scope.program.unusable_in_quotes name in
+    let%map.Result () =
+      Unify.unify_presence
+        ~presence1:presence
+        ~presence2:Absent
+        ~error:
+          (Typecheck_error.create
+             ~loc
+             (Free_in_spliced_code { name; unusable }))
+    in
+    None
   | Unusable kind ->
     (* Code that may use [name] can't, so doesn't. *)
     let%map.Result () =
@@ -1337,6 +1369,7 @@ let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
     ; interpreter
     ; ident_info = Typed.Ident.Map.empty
     ; sccs = Queue.create ()
+    ; unusable_in_quotes = String.Table.create ()
     }
   in
   let toplevels =
