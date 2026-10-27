@@ -44,3 +44,5 @@ Use subagents to
 Don't commit unless it's mentioned by the user or it's obvious that you are already in a branch specifically for the change that therefore can be kept up to date. If you are asked to commit or the context implies it, keep commit messages just as "😊". 
 
 When running tests or any code really, you should always use a time limit (even if it's very large relative to the time the tests take), to guard against infinite loops.
+
+When making PRs, don't add any detail - just use the smiley emoji.
