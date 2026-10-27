@@ -1,0 +1,18 @@
+open! Import
+
+(** The source of fresh ids, for variables among others: ids, which appear in
+    sexps of types, depend only on what was done with the [t]. Unification
+    relies on ids being unique, so types built with different [t]s must not
+    meet. *)
+type t
+
+val create : unit -> t
+val id : t -> Type.id
+
+(** An [Unbound] variable with a fresh id. *)
+val var : t -> rank:Type.rank -> (_, _) Type.Var.t
+
+(** A record or variant with a fresh id. *)
+val record : t -> Type.row -> Type.ty
+
+val variant : t -> Type.row -> Type.ty

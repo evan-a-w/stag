@@ -1,0 +1,14 @@
+(library
+ (name test_driver)
+ (preprocess
+  (pps ppx_jane))
+ (inline_tests)
+ (libraries
+  core
+  stag_common
+  stag_types
+  stag_syntax
+  stag_ir
+  stag_eval
+  stag_typecheck
+  stag_driver))

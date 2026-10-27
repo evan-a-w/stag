@@ -1,4 +1,4 @@
-open! Core
+open! Import
 open Stag_build
 
 let find_root () =
@@ -18,7 +18,7 @@ let load () =
       Option.try_with (fun () -> In_channel.read_all (root ^/ path))
     in
     List.iter diagnostics ~f:(fun diagnostic ->
-      eprintf "%s%!" (Stag.Diagnostic.to_string_hum ~contents diagnostic));
+      eprintf "%s%!" (Diagnostic.to_string_hum ~contents diagnostic));
     exit 1
 ;;
 

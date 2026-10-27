@@ -57,10 +57,13 @@ rejected). Nothing else is written: programs are interpreted.
 
 ## Library
 
-The library (`lib/`) provides the pieces for other tools: `Source_file` and
+The compiler is split into libraries, each in `X/src` (library `stag_X`, tests
+in `X/test`): `common`, `types`, `syntax`, `ir`, `eval`, `typecheck` and
+`driver` (whose `bin` is the `stag` executable), each depending only on those
+before it. They provide the pieces for other tools: `Source_file` and
 `Driver.check_files` (files to a checked program; `Driver.check_modules` for
 modules already parsed), `Driver.eval`, `Expect_test_runner`, `Diagnostic`
 (rendering errors) and `Text_diff`.
 
-Tests: `dune build @runtest` (expect tests in `test/` and
-`stag_build/test/`, CLI cram tests in `test/cram/`).
+Tests: `dune build @runtest` (expect tests in `*/test/`, CLI cram tests in
+`driver/test/cram/`).

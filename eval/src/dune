@@ -1,0 +1,5 @@
+(library
+ (name stag_eval)
+ (preprocess
+  (pps ppx_jane))
+ (libraries core stag_common stag_syntax stag_ir))

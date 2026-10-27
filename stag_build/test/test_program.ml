@@ -1,4 +1,4 @@
-open! Core
+open! Import
 open Stag_build
 
 let check ?(eval = true) files ~target =
@@ -11,16 +11,16 @@ let check ?(eval = true) files ~target =
        | Error diagnostics -> Helpers.print_diagnostics ~root diagnostics
        | Ok driver ->
          print_string
-           (Stag.Signature.to_string_hum (Stag.Driver.checked driver).signature);
+           (Signature.to_string_hum (Driver.checked driver).signature);
          if eval
          then (
            print_endline "---";
-           match Stag.Driver.eval driver with
+           match Driver.eval driver with
            | Ok () -> ()
            | Error error ->
              Helpers.print_diagnostics
                ~root
-               [ Stag.Diagnostic.of_runtime_error error ])))
+               [ Diagnostic.of_runtime_error error ])))
 ;;
 
 let project =

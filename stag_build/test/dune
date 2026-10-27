@@ -3,4 +3,11 @@
  (preprocess
   (pps ppx_jane))
  (inline_tests)
- (libraries stag_build core core_unix core_unix.filename_unix core_unix.sys_unix))
+ (libraries
+  stag_build
+  stag_types
+  stag_driver
+  core
+  core_unix
+  core_unix.filename_unix
+  core_unix.sys_unix))

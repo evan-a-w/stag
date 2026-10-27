@@ -1,0 +1,15 @@
+include Core
+module Limits = Stag_common.Limits
+module Loc = Stag_common.Loc
+module Located = Stag_common.Located
+module Scc = Stag_common.Scc
+module Stamp_counter = Stag_common.Stamp_counter
+module Signature = Stag_types.Signature
+module Parser = Stag_syntax.Parser
+module Source_file = Stag_syntax.Source_file
+module Syntax = Stag_syntax.Syntax
+module Typed = Stag_ir.Typed
+module Runtime_error = Stag_eval.Runtime_error
+module Treewalk = Stag_eval.Treewalk
+module Typecheck = Stag_typecheck.Typecheck
+module Typecheck_error = Stag_typecheck.Typecheck_error

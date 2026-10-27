@@ -1,0 +1,12 @@
+(library
+ (name stag_driver)
+ (preprocess
+  (pps ppx_jane))
+ (libraries
+  core
+  stag_common
+  stag_types
+  stag_syntax
+  stag_ir
+  stag_eval
+  stag_typecheck))

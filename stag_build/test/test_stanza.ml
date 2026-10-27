@@ -1,4 +1,4 @@
-open! Core
+open! Import
 open Stag_build
 
 let parse contents =
@@ -7,9 +7,7 @@ let parse contents =
   | Error diagnostics ->
     List.iter diagnostics ~f:(fun diagnostic ->
       print_string
-        (Stag.Diagnostic.to_string_hum
-           ~contents:(fun _ -> Some contents)
-           diagnostic))
+        (Diagnostic.to_string_hum ~contents:(fun _ -> Some contents) diagnostic))
 ;;
 
 let%expect_test "stanzas" =
