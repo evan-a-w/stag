@@ -51,7 +51,8 @@ let u = Util.A.x|}
 
 let%expect_test "libraries are wrapped; executables are not" =
   check project ~target:"main";
-  [%expect {|
+  [%expect
+    {|
     module Util : sig
       module A : sig
         val x : int
@@ -90,7 +91,8 @@ let%expect_test "libraries are wrapped; executables are not" =
 let%expect_test "a library is checked with those it depends on" =
   check project ~target:"util";
   check project ~target:"lib" ~eval:false;
-  [%expect {|
+  [%expect
+    {|
     module Util : sig
       module A : sig
         val x : int
@@ -142,7 +144,8 @@ let%expect_test "errors" =
     ; "b/b.stag", "let x = A.X.x"
     ]
     ~target:"b";
-  [%expect {|
+  [%expect
+    {|
     File "a/x.stag", line 1, characters 8-14:
     1 | let x = Y.nope
                 ^^^^^^
