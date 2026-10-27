@@ -242,9 +242,9 @@ let%expect_test "extensible interpreter" =
      (Row_mismatch REmpty
       (RExtend Add Present
        (TTuple
-        ((TVariant (RExtend Num Present (TCon int ()) (RVar (Unbound 69 1))))
-         (TVariant (RExtend Num Present (TCon int ()) (RVar (Unbound 71 1))))))
-       (RVar (Unbound 77 1)))
+        ((TVariant (RExtend Num Present (TCon int ()) (RVar (Unbound 66 1))))
+         (TVariant (RExtend Num Present (TCon int ()) (RVar (Unbound 68 1))))))
+       (RVar (Unbound 73 1)))
       (Missing_label Add)))
     |}]
 ;;
@@ -512,7 +512,7 @@ let%expect_test "generalization and instantiation of cyclic types" =
     (variant fresh [ "Nil", Type.unit; "Cons", TTuple [ elt; list ] ]);
   let ty = Type.TTuple [ list; list ] in
   print ty;
-  Scheme.generalize_ty ~rank:1 ty;
+  Scheme.generalize fresh ~rank:1 [ ty ];
   print ty;
   let inst () = Scheme.instantiate fresh ~rank:1 ty in
   let ints = inst () in
@@ -591,7 +591,7 @@ let%expect_test "recursive aliases" =
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     (Unification_error
      (Row_mismatch REmpty
-      (RExtend Other Present (TCon unit ()) (RVar (Unbound 29 1)))
+      (RExtend Other Present (TCon unit ()) (RVar (Unbound 27 1)))
       (Missing_label Other)))
     |}]
 ;;
@@ -960,7 +960,7 @@ let%expect_test "instantiation and unification of large types" =
     Type.TTuple (List.init n ~f:(fun _ -> T.record fresh [ "x", generic () ]))
   in
   let ty = Type.TTuple [ chain; records ] in
-  Scheme.generalize_ty ~rank:1 ty;
+  Scheme.generalize fresh ~rank:1 [ ty ];
   (* The distinct variables that are not [Link]s, by state. *)
   let vars ty =
     let vars = Int.Table.create () in
@@ -1157,7 +1157,7 @@ let%expect_test "instantiation copies each part of a cycle once" =
        [ "Nil", Type.unit; "Cons", Type.TTuple [ elt; TArrow (int, list) ] ]);
   (* Entered through a [Link], as through the variant. *)
   let ty = Type.TTuple [ list; Type.canonical_ty list ] in
-  Scheme.generalize_ty ~rank:1 ty;
+  Scheme.generalize fresh ~rank:1 [ ty ];
   print_parts ty;
   let instance = Scheme.instantiate fresh ~rank:1 ty in
   print_parts instance;
@@ -1274,7 +1274,7 @@ let%expect_test "instantiation shares cycles without generic variables" =
     fix_at ~rank:2 (fun a ->
       record fresh [ "next", a; "g", generic; "inner", inner ])
   in
-  Scheme.generalize_ty ~rank:1 outer;
+  Scheme.generalize fresh ~rank:1 [ outer ];
   print outer;
   let instance1 = Scheme.instantiate fresh ~rank:1 outer in
   let instance2 = Scheme.instantiate fresh ~rank:1 outer in
@@ -1334,7 +1334,7 @@ let%expect_test "instantiation copies generic presences and bounds" =
          ~shadowed:String.Set.empty
        : (unit, Unification_error.t) Result.t)];
   let ty = Type.TTuple [ knot; Fresh.record fresh (RVar r) ] in
-  Scheme.generalize_ty ~rank:1 ty;
+  Scheme.generalize fresh ~rank:1 [ ty ];
   print ty;
   let instance1 = Scheme.instantiate fresh ~rank:1 ty in
   let instance2 = Scheme.instantiate fresh ~rank:1 ty in
@@ -1353,6 +1353,6 @@ let%expect_test "instantiation copies generic presences and bounds" =
     (({`self : '_a; `x?'_b : int} as '_a) * {..'_c}) * (({`self : '_d; `x?'_e : int} as '_d) * {..'_f}) where ..'_c <= {x : '_g}, ..'_f <= {x : '_h}
     (Ok ())
     (Ok ())
-    (({`self : 'a; -`x} as 'a) * {..'_b}) * (({`self : 'c; `x : int} as 'c) * {..'_d}) * (({`self : 'e; `x?'f : int} as 'e) * {..'g}) where ..'_b <= {x : '_h}, ..'_d <= {x : '_i}, ..'g <= {x : 'j}
+    (({`self : 'a} as 'a) * {..'_b}) * (({`self : 'c; `x : int} as 'c) * {..'_d}) * (({`self : 'e; `x?'f : int} as 'e) * {..'g}) where ..'_b <= {x : '_h}, ..'_d <= {x : '_i}, ..'g <= {x : 'j}
     |}]
 ;;

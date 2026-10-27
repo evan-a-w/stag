@@ -142,11 +142,9 @@ toplevel splice is not `const`.
 
 - `<t @ m>{ctx}` code modes.
 - Mode annotations and mode polymorphism.
-- Ordering constraints for presence (`Absent <= Present`) in the same lattice
-  solver, replacing the equality approximations in context bounds. These
-  make typechecking depend on the order constraints arise in: using a free
-  variable `x` in a quote after splicing code that may use `x` forces the code
-  to use `x`, while using it before does not (see the "presence
-  approximation" test). Likewise, a name the code may use is given the type of
-  the name at the splice site even when the code turns out not to use it.
+- Presence ordering constraints (`Absent <= Present`) are kept as bounds
+  between presence variables, so are solved independently of the order they
+  arise in, as are the type equalities of entries the code may use, which
+  wait for the entry to be `Present`. They could move into the same lattice
+  solver as modes.
 - Effect purity, `const fn`, mode crossing by kind.

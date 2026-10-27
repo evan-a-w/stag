@@ -86,10 +86,12 @@ reference evaluator for the pure fragment. Its rules follow the typechecker:
   `Absent`, and toplevels never capture inside a quote. Remaining entries
   become entries of the enclosing quote's context.
 - **Toplevel splices.** A splice outside any quote is checked at level −1. It
-  is compile-time macro expansion of possibly open code. Its entries are
-  provided by level 0 locals, or else by the toplevel with that canonical
-  name. Entries that cannot be provided are forced `Absent`, so code that is
-  known to use them is rejected. Splices run during checking: the code the
+  is compile-time macro expansion of possibly open code. Level 0 locals
+  provide every entry the code may use. Toplevels provide only entries the
+  code is known to use (`Present`): providing one the code only may use would
+  add a dependency on that toplevel, and the outcome would depend on whether
+  its component is checked yet. Every other entry is forced `Absent`, so code
+  that is known to use one is rejected. Splices run during checking: the code the
   splice computes is evaluated by the interpreter, and the generated code is
   inferred anew where it is spliced. Any toplevel can be used at compile time,
   as in `~(power 3 <2>)`, once its component is checked: dependencies are
@@ -112,9 +114,58 @@ whichever rules hold by then.
 The evaluator is the ground truth. It resolves splices from the actual free
 names of code values, not from types. Property tests ("well-typed programs
 don't get stuck") are the main evidence that the context typing is sound.
-That evidence matters, because presence is approximated, and the outcome
-depends on the order in which constraints arise (see the "presence
-approximation" test).
+That evidence matters, because the context typing is intricate. Presence
+and context bound inference is principal. A constraint `p <= q` between
+unknown presences ("if `p` is `Present` so is `q`") is kept as a bound of both
+variables (printed `where 'p <= 'q`), and a context bound `..'c <= {x?'p;
+..'e}` as a bound of `'c`, whatever the ranks of the variables involved.
+Generalization quantifies them together, and a recursive group of toplevels,
+whose members share variables, is generalized at once. A variable that is not
+generalized loses its bounds to the quantified ones: the scheme keeps them, and each
+instance adds them again. Generalization also adds the constraints that held
+through the quantified variables to the variables outside, which are those
+of an instance whose variables are used nowhere else. Bounds are propagated
+when either side becomes known, so the outcome does not depend on the order
+in which constraints arise (see the "presence constraints are solved in any
+order", "row bounds are solved in any order" and "generalization does not
+depend on when outer presences are known" tests). The type of an entry
+matters only if it is `Present`: equalities between the types of entries of
+an unknown presence `p`, such as an entry code may use and the name where the
+code is spliced, or an entry and the one of a bound, are kept as bounds of
+`p` (printed `where 'p => t = u`), imposed if `p` becomes `Present` and
+dropped if it becomes `Absent`. They are generalized and instantiated with
+`p`, like its other bounds. A generalized entry type `'a` with `'p => 'a =
+t`, all of whose uses are entry types or equalities under presences at most
+`'p`, is replaced by `t`: where `'p` is `Present` they are equal, and where
+it is `Absent` so are those uses, so instances are unchanged. A bound
+`..'c <= {..'g}` that generalization would add to an outer variable through a
+quantified `'g` used nowhere else is left out, as `'g` can be `'c`; so is
+such a bound of a quantified `'c`, and an equality `'p => t = 'a` with a
+quantified `'a` used nowhere else. A quantified presence that no type or
+bound uses and that is not the upper bound of another presence is `Absent`,
+as no instance can make it `Present`. A bound `..'c <= {x?'p : 't; ..'r}`
+of a quantified `'c`, whose `'p`, `'t` and `'r` are quantified and used
+nowhere else but in bounds of `'p` and equalities `'q => s = 't`, is left
+out if `'c` has another bound that it becomes when `'p`, `'t` and `'r` are
+that bound's parts, with those bounds and equalities then ones the scheme
+has: an instance can choose them so. Otherwise each instance of a scheme
+would pile such bounds up (see "a chain of lets each instantiating the
+previous one"). An equality `p => t = u` between types that can't be
+unified whatever their variables, such as `int` and `bool * 'a`, makes `p`
+`Absent`: it is decided at once if `p` is unknown, and at generalization
+for a quantified `p` that is not the upper bound of another presence, as
+every instance would have to make it `Absent` anyway. So a row equality or
+bound means exactly that the entries that are present agree, and as every constraint is
+kept until it can be decided, the most general solution is found whatever
+the order (see "an entry code may use only gets a type if it is present"),
+up to equivalent schemes: an entry type may be `t` in one and `'a` with
+`'p => 'a = t` in another (see "a recursive group is generalized at once, in
+any order"). Decisions are
+still made where code runs: a toplevel splice forces the entries its code only may use, and that
+toplevels can't provide, `Absent`. Through weak variables, such a decision
+can then reject a later use, depending on the order of toplevels (see the
+"weak generators decide presences at their first toplevel splice" and "the
+order of splices deciding a weak variable matters" tests).
 
 ### 3. Exhaustiveness
 
@@ -185,11 +236,15 @@ Checked stag is lowered to a small, explicitly typed, pure core:
 - **Explicit polymorphism.** Type abstraction is explicit, and each use site
   records its instantiation. `Typecheck` computes this information but then
   discards it. Schemes are not plain HM: they quantify over context and
-  presence variables, with bounds (`where ..'a <= {..'b}`). The IR therefore
-  needs bounded row quantification, at least on code types.
+  presence variables, with bounds (`where ..'a <= {..'b}, 'p <= 'q`). The IR
+  therefore needs bounded row and presence quantification, at least on code
+  types.
 - **Weak variables are defaulted.** Toplevels such as `cube : <int>{..'_a}`
   keep variables that are never generalized, and the IR needs ground types.
-  An empty context and `unit` are natural defaults.
+  An empty context and `unit` are natural defaults. Inference lowers weak
+  variables to rank 0 once their SCC is checked, and the variables of a local
+  `let` that is not generalized to the enclosing rank, so later bindings
+  never generalize them.
 - **Lambda lifting.** Local recursive or generalized `let`s become toplevel
   `fix` groups, with stable names that proofs can refer to. HOL terms have no
   let-polymorphism, and Isabelle's `fun` works only at toplevel.

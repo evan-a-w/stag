@@ -587,14 +587,14 @@ let%expect_test "maybe-used entries at a toplevel splice" =
     ];
   [%expect
     {|
-    val gen : <'a>{f?'b : int; ..'c} -> <'a>{f?'b : int; ..'c} where ..'c <= {..'d}
+    val gen : <'a>{f?'b : int; ..'c} -> <'a>{f?'b : int; ..'c}
     val f : int
     -- evaluated at compile time
     (gen <fun>)
     -- evaluated
     (gen <fun>)
     (f 1)
-    val gen : <'a>{f?'b : int; ..'c} -> <'a>{f?'b : int; ..'c} where ..'c <= {..'d}
+    val gen : <'a>{f?'b : int; ..'c} -> <'a>{f?'b : int; ..'c}
     val x : int
     val f : int
     -- evaluated at compile time
@@ -952,8 +952,8 @@ let%expect_test "re-inference keeps the providers of entries already known" =
     ];
   [%expect
     {|
-    val code : 'a -> <<int>{-x} -> <int * int>{..'b}>{..'c}
-    val user : <int>{-x} -> <int * int>{..'a}
+    val code : 'a -> <<int>{} -> <int * int>{..'b}>{..'c}
+    val user : <int>{} -> <int * int>{..'a}
     val used : int * int
     -- evaluated at compile time
     (code <fun>)
@@ -1010,7 +1010,7 @@ let%expect_test "maybe-used entries are not provided by checked toplevels" =
   run [ gen; x; f ];
   [%expect
     {|
-    val gen : <'a>{f?'b : int; ..'c} -> <'a>{f?'b : int; ..'c} where ..'c <= {..'d}
+    val gen : <'a>{f?'b : int; ..'c} -> <'a>{f?'b : int; ..'c}
     val f : bool
     val x : int
     -- evaluated at compile time
@@ -1019,7 +1019,7 @@ let%expect_test "maybe-used entries are not provided by checked toplevels" =
     (gen <fun>)
     (f true)
     (x 1)
-    val gen : <'a>{f?'b : int; ..'c} -> <'a>{f?'b : int; ..'c} where ..'c <= {..'d}
+    val gen : <'a>{f?'b : int; ..'c} -> <'a>{f?'b : int; ..'c}
     val x : int
     val f : bool
     -- evaluated at compile time
@@ -1028,5 +1028,589 @@ let%expect_test "maybe-used entries are not provided by checked toplevels" =
     (gen <fun>)
     (x 1)
     (f true)
+    |}]
+;;
+
+let%expect_test
+    "re-inference without annotations meets presence constraints in another \
+     order"
+  =
+  (* [f]'s annotation decides that [c] doesn't use [x] before [c2]'s quote
+     uses it; re-inferred without it, the quote's use comes first. *)
+  let closed_f body =
+    expr_let ("f", [ typed "c" (Ty.code Ty.int) ], None, body, var "f")
+  in
+  let generated =
+    let_
+      "g"
+      [ "d" ]
+      (seq (quote (let_ "x" [] (int 1) (splice (var "d")))) (var "d"))
+      (closed_f
+         (let_
+            "c2"
+            []
+            (app (var "g") [ var "c" ])
+            (quote (app (var "add") [ splice (var "c2"); var "x" ]))))
+  in
+  run
+    [ top "gen" [ "u" ] (seq (var "u") (quote generated))
+    ; top "user" [] (splice (app (var "gen") [ unit ]))
+    ];
+  [%expect
+    {|
+    val gen : 'a -> <<int>{} -> <int>{x : int; ..'b}>{..'c}
+    val user : <int>{} -> <int>{x : int; ..'a}
+    -- evaluated at compile time
+    (gen <fun>)
+    -- evaluated
+    (gen <fun>)
+    (user <fun>)
+    |}]
+;;
+
+let%expect_test
+    "weak generators decide presences at their first toplevel splice"
+  =
+  (* [w]'s presence of [x] is weak. Splicing [w <1>] at toplevel forces it
+     [Absent], as nothing there provides an [x] the code only may use, so a
+     later [w <x>] is rejected; splicing [w <x>] first makes it [Present]. *)
+  let k =
+    top
+      "k"
+      [ "c" ]
+      (seq (quote (let_ "x" [] (int 1) (splice (var "c")))) (var "c"))
+  in
+  let w = top "w" [] (app (var "id") [ var "k" ]) in
+  let x = top "x" [] (int 5) in
+  let s = top "s" [] (splice (app (var "w") [ quote (int 1) ])) in
+  let t = top "t" [] (splice (app (var "w") [ quote (var "x") ])) in
+  run [ x; k; w; s; t ];
+  run [ x; k; w; t; s ];
+  [%expect
+    {|
+    (Unification_error
+     (Row_mismatch
+      (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
+       (RVar (Link (RVar (Link REmpty)))))
+      (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
+       (RVar (Unbound 62 1)))
+      (Presence_mismatch x)))
+    val x : int
+    val k : <'a>{x?'b : int; ..'c} -> <'a>{x?'b : int; ..'c}
+    val w : <int>{x : int} -> <int>{x : int}
+    val t : int
+    val s : int
+    -- evaluated at compile time
+    (k <fun>)
+    (w <fun>)
+    -- evaluated
+    (x 5)
+    (k <fun>)
+    (w <fun>)
+    (t 5)
+    (s 1)
+    |}]
+;;
+
+let%expect_test "splices of code from a generator with presence bounds" =
+  let gen =
+    top
+      "gen"
+      [ "c" ]
+      (seq (quote (let_ "f" [] (int 1) (splice (var "c")))) (var "c"))
+  in
+  let f = top "f" [] (int 7) in
+  let x =
+    top
+      "x"
+      []
+      (splice (app (var "gen") [ quote (app (var "add") [ var "f"; int 1 ]) ]))
+  in
+  let y =
+    top "y" [] (splice (splice (app (var "gen") [ quote (quote (int 1)) ])))
+  in
+  (* Every order of the toplevels checks and evaluates. *)
+  List.iter
+    [ [ gen; f; x; y ]; [ x; y; gen; f ]; [ f; y; x; gen ]; [ y; f; gen; x ] ]
+    ~f:(fun program ->
+      match Driver.check ~limits (prims @ program) with
+      | Error error -> print_s [%sexp (error : Typecheck_error.t)]
+      | Ok driver ->
+        print_s
+          [%sexp
+            (List.map
+               (members (Driver.checked driver))
+               ~f:(fun m -> m.ident.name)
+             : string list)
+          , (Driver.eval ~limits driver : unit Or_error.t)]);
+  [%expect
+    {|
+    ((gen f x y) (Ok ()))
+    ((gen f x y) (Ok ()))
+    ((f gen y x) (Ok ()))
+    ((gen y f x) (Ok ()))
+    |}]
+;;
+
+let%expect_test
+    "re-inference of a local polymorphic in a presence bounded by an annotation"
+  =
+  (* [h]'s [d] may use [x] only if [e] does, which its annotation decides
+     before [h] is generalized, but re-inference only after. *)
+  let h_body =
+    seq
+      (quote (let_ "x" [] (int 1) (splice (var "d"))))
+      (app (var "cond") [ bool true; quote (splice (var "d")); var "e" ])
+  in
+  let f_body =
+    let_
+      "h"
+      [ "d" ]
+      h_body
+      (seq
+         (app (var "h") [ quote (app (var "add") [ var "x"; int 1 ]) ])
+         (seq (app (var "h") [ var "k" ]) (app (var "closeit") [ var "k" ])))
+  in
+  let gen =
+    top
+      "gen"
+      [ "u" ]
+      (seq
+         (var "u")
+         (quote
+            (expr_let
+               ( "f"
+               , [ typed "e" (Ty.code ~entries:[ "x", Ty.int ] Ty.int)
+                 ; "k", None
+                 ]
+               , None
+               , f_body
+               , var "f" ))))
+  in
+  run
+    [ top_let ("closeit", [ typed "c" (Ty.code Ty.int) ], None, unit)
+    ; gen
+    ; top "user" [] (splice (app (var "gen") [ unit ]))
+    ];
+  [%expect
+    {|
+    val closeit : <int>{} -> unit
+    val gen : 'a -> <<int>{x : int} -> <int>{} -> unit>{..'b}
+    val user : <int>{x : int} -> <int>{} -> unit
+    -- evaluated at compile time
+    (gen <fun>)
+    -- evaluated
+    (closeit <fun>)
+    (gen <fun>)
+    (user <fun>)
+    |}]
+;;
+
+(* [tw c] bounds [c]'s row by a row with [x] and an unknown tail, so a local
+   [h] using [tw e1] is bounded by [e1]'s row. *)
+let tw =
+  top
+    "tw"
+    [ "c" ]
+    (seq
+       (quote (let_ "x" [] (int 1) (splice (var "c"))))
+       (quote (splice (var "c"))))
+;;
+
+let needx =
+  top_let
+    ( "needx"
+    , [ typed "e" (Ty.code ~entries:[ "x", Ty.int ] Ty.int) ]
+    , None
+    , unit )
+;;
+
+let closeit = top_let ("closeit", [ typed "c" (Ty.code Ty.int) ], None, unit)
+
+let%expect_test "re-inference of a local bounded by an outer row" =
+  let variants =
+    [ Ty.code ~entries:[ "x", Ty.int ] Ty.int, needx, "needx"
+    ; Ty.code Ty.int, closeit, "closeit"
+    ]
+  in
+  List.iter variants ~f:(fun (annot, use_k_decl, use_k) ->
+    let f annot =
+      expr_let
+        ( "f"
+        , [ "e1", annot; "k", None ]
+        , None
+        , let_
+            "h"
+            [ "d" ]
+            (app
+               (var "cond")
+               [ bool true; app (var "tw") [ var "e1" ]; var "d" ])
+            (seq
+               (app (var "h") [ quote (app (var "add") [ var "x"; var "y" ]) ])
+               (seq (app (var "h") [ var "k" ]) (app (var use_k) [ var "k" ])))
+        , var "f" )
+    in
+    print_endline "-- annotated";
+    run ~eval:false [ tw; use_k_decl; top "direct" [] (f (Some annot)) ];
+    print_endline "-- not annotated";
+    run ~eval:false [ tw; use_k_decl; top "direct" [] (f None) ];
+    print_endline "-- generated";
+    run
+      [ tw
+      ; use_k_decl
+      ; top "gen" [ "u" ] (seq (var "u") (quote (f (Some annot))))
+      ; top "user" [] (splice (app (var "gen") [ unit ]))
+      ]);
+  [%expect
+    {|
+    -- annotated
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val needx : <int>{x : int} -> unit
+    val direct : <int>{x : int} -> <int>{x : int} -> unit
+    -- evaluated at compile time
+    -- not annotated
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val needx : <int>{x : int} -> unit
+    val direct : <int>{x?'a : int; ..'b} -> <int>{x : int} -> unit where ..'b <= {x : int}, ..'b <= {x : int; y : int; ..'c}
+    -- evaluated at compile time
+    -- generated
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val needx : <int>{x : int} -> unit
+    val gen : 'a -> <<int>{x : int} -> <int>{x : int} -> unit>{..'b}
+    val user : <int>{x : int} -> <int>{x : int} -> unit
+    -- evaluated at compile time
+    (gen <fun>)
+    -- evaluated
+    (tw <fun>)
+    (needx <fun>)
+    (gen <fun>)
+    (user <fun>)
+    -- annotated
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val closeit : <int>{} -> unit
+    val direct : <int>{} -> <int>{} -> unit
+    -- evaluated at compile time
+    -- not annotated
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val closeit : <int>{} -> unit
+    val direct : <int>{-x; ..'a} -> <int>{} -> unit where ..'a <= {}
+    -- evaluated at compile time
+    -- generated
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val closeit : <int>{} -> unit
+    val gen : 'a -> <<int>{} -> <int>{} -> unit>{..'b}
+    val user : <int>{} -> <int>{} -> unit
+    -- evaluated at compile time
+    (gen <fun>)
+    -- evaluated
+    (tw <fun>)
+    (closeit <fun>)
+    (gen <fun>)
+    (user <fun>)
+    |}]
+;;
+
+let%expect_test "re-inference of a local bounded by an outer closed row" =
+  (* Splicing [e1] with only [x] substituted closes its row, so [h]'s presence
+     of [x] is only bounded below by [e1]'s, which must not keep [h] from
+     being generalized: without [k]'s annotation, [h] is used with and without
+     [x]. *)
+  let f annot ~use_k =
+    expr_let
+      ( "f"
+      , [ "e1", annot; "k", None ]
+      , None
+      , seq
+          (quote (splice ~subs:[ "x", Some (int 1) ] (var "e1")))
+          (let_
+             "h"
+             [ "d" ]
+             (app
+                (var "cond")
+                [ bool true; app (var "tw") [ var "e1" ]; var "d" ])
+             (seq
+                (app (var "h") [ quote (app (var "add") [ var "x"; var "y" ]) ])
+                (seq (app (var "h") [ var "k" ]) (app (var use_k) [ var "k" ]))))
+      , var "f" )
+  in
+  List.iter
+    [ Ty.code ~entries:[ "x", Ty.int ] Ty.int, needx, "needx"
+    ; Ty.code Ty.int, closeit, "closeit"
+    ]
+    ~f:(fun (annot, use_k_decl, use_k) ->
+      print_endline "-- annotated";
+      run
+        ~eval:false
+        [ tw; use_k_decl; top "direct" [] (f (Some annot) ~use_k) ];
+      print_endline "-- not annotated";
+      run ~eval:false [ tw; use_k_decl; top "direct" [] (f None ~use_k) ];
+      print_endline "-- generated";
+      run
+        [ tw
+        ; use_k_decl
+        ; top "gen" [ "u" ] (seq (var "u") (quote (f (Some annot) ~use_k)))
+        ; top "user" [] (splice (app (var "gen") [ unit ]))
+        ]);
+  [%expect
+    {|
+    -- annotated
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val needx : <int>{x : int} -> unit
+    val direct : <int>{x : int} -> <int>{x : int} -> unit
+    -- evaluated at compile time
+    -- not annotated
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val needx : <int>{x : int} -> unit
+    val direct : <int>{x?'a : int} -> <int>{x : int} -> unit
+    -- evaluated at compile time
+    -- generated
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val needx : <int>{x : int} -> unit
+    val gen : 'a -> <<int>{x : int} -> <int>{x : int} -> unit>{..'b}
+    val user : <int>{x : int} -> <int>{x : int} -> unit
+    -- evaluated at compile time
+    (gen <fun>)
+    -- evaluated
+    (tw <fun>)
+    (needx <fun>)
+    (gen <fun>)
+    (user <fun>)
+    -- annotated
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val closeit : <int>{} -> unit
+    val direct : <int>{} -> <int>{} -> unit
+    -- evaluated at compile time
+    -- not annotated
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val closeit : <int>{} -> unit
+    val direct : <int>{} -> <int>{} -> unit
+    -- evaluated at compile time
+    -- generated
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val closeit : <int>{} -> unit
+    val gen : 'a -> <<int>{} -> <int>{} -> unit>{..'b}
+    val user : <int>{} -> <int>{} -> unit
+    -- evaluated at compile time
+    (gen <fun>)
+    -- evaluated
+    (tw <fun>)
+    (closeit <fun>)
+    (gen <fun>)
+    (user <fun>)
+    |}]
+;;
+
+let%expect_test "the order of splices deciding a weak variable matters" =
+  (* [w0]'s row is weak. Spliced under local [x] and [y] first, it is closed
+     with neither, as nothing it may use is known; spliced with [x]
+     substituted first, it may use [x], which [needx] then makes [Present]. *)
+  let f0 = top "f0" [ "c"; "d" ] (var "d") in
+  let w0 = top "w0" [] (app (var "f0") [ quote (var "y"); quote (int 2) ]) in
+  let substituted =
+    top "substituted" [] (splice ~subs:[ "x", Some (int 3) ] (var "w0"))
+  in
+  let under_lets =
+    top
+      "under_lets"
+      []
+      (let_ "x" [] (int 1) (let_ "y" [] (int 2) (splice (var "w0"))))
+  in
+  let use = top "use" [] (app (var "needx") [ var "w0" ]) in
+  run ~eval:false [ needx; f0; w0; substituted; under_lets; use ];
+  run ~eval:false [ needx; f0; w0; under_lets; substituted; use ];
+  run ~eval:false [ needx; f0; w0; substituted ];
+  run ~eval:false [ needx; f0; w0; under_lets ];
+  [%expect
+    {|
+    val needx : <int>{x : int} -> unit
+    val f0 : 'a -> 'b -> 'b
+    val w0 : <int>{x : int}
+    val substituted : int
+    val under_lets : int
+    val use : unit
+    -- evaluated at compile time
+    (f0 <fun>)
+    (w0 (Code (Lit (Int 2) : int)))
+    (Unification_error
+     (Row_mismatch (RExtend x Present (TCon int ()) REmpty) REmpty
+      (Missing_label x)))
+    val needx : <int>{x : int} -> unit
+    val f0 : 'a -> 'b -> 'b
+    val w0 : <int>{x?'_a : int}
+    val substituted : int
+    -- evaluated at compile time
+    (f0 <fun>)
+    (w0 (Code (Lit (Int 2) : int)))
+    val needx : <int>{x : int} -> unit
+    val f0 : 'a -> 'b -> 'b
+    val w0 : <int>{}
+    val under_lets : int
+    -- evaluated at compile time
+    (f0 <fun>)
+    (w0 (Code (Lit (Int 2) : int)))
+    |}]
+;;
+
+let%expect_test "weak toplevels used by generated code" =
+  let weak = top "weak" [] (app (var "id") [ var "id" ]) in
+  let gen = top "gen" [ "u" ] (seq (var "u") (quote (var "weak"))) in
+  let spliced = splice (app (var "gen") [ unit ]) in
+  run
+    [ weak
+    ; gen
+    ; top "one" [] (app spliced [ int 1 ])
+    ; top "two" [] (app spliced [ int 2 ])
+    ];
+  run
+    [ weak
+    ; gen
+    ; top "one" [] (app spliced [ int 1 ])
+    ; top "other" [] (app spliced [ bool true ])
+    ];
+  run
+    [ weak
+    ; gen
+    ; top "one" [] (app (var "weak") [ int 1 ])
+    ; top "other" [] (app spliced [ bool true ])
+    ];
+  [%expect
+    {|
+    val weak : int -> int
+    val gen : 'a -> <'b>{weak : 'b; ..'c}
+    val one : int
+    val two : int
+    -- evaluated at compile time
+    (gen <fun>)
+    -- evaluated
+    (weak <fun>)
+    (gen <fun>)
+    (one 1)
+    (two 2)
+    (Unification_error
+     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    (Unification_error
+     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    |}]
+;;
+
+let%expect_test "entries of different types code may use, then closed" =
+  (* [ki c] and [kb c] give [c]'s [x] the types [int] and [bool], which is
+     fine as [c] is closed, so has no [x]: the generated [f] has lost the
+     annotation, and closing [c] may come before or after. *)
+  let binds x = seq (quote (let_ "x" [] x (splice (var "c")))) unit in
+  let ki = top "ki" [ "c" ] (binds (int 1)) in
+  let kb = top "kb" [ "c" ] (binds (bool true)) in
+  let call name = app (var name) [ var "c" ] in
+  let local param calls =
+    expr_let ("f", [ param ], None, List.reduce_exn calls ~f:seq, int 0)
+  in
+  let annotated = local (typed "c" (Ty.code Ty.int)) [ call "ki"; call "kb" ] in
+  let gen body = top "gen" [ "u" ] (seq (var "u") (quote body)) in
+  let use = top "use" [] (splice (app (var "gen") [ unit ])) in
+  run [ ki; kb; top "plain" [] annotated ];
+  run [ ki; kb; gen annotated; use ];
+  List.iter
+    [ [ "closeit"; "ki"; "kb" ]
+    ; [ "ki"; "closeit"; "kb" ]
+    ; [ "ki"; "kb"; "closeit" ]
+    ]
+    ~f:(fun order ->
+      print_endline ("-- " ^ String.concat order ~sep:"; ");
+      let calls = List.map order ~f:call in
+      run [ closeit; ki; kb; top "f" [ "c" ] (List.reduce_exn calls ~f:seq) ];
+      run [ closeit; ki; kb; gen (local ("c", None) calls); use ]);
+  [%expect
+    {|
+    val ki : <'a>{x?'b : int; ..'c} -> unit
+    val kb : <'a>{x?'b : bool; ..'c} -> unit
+    val plain : int
+    -- evaluated at compile time
+    -- evaluated
+    (ki <fun>)
+    (kb <fun>)
+    (plain 0)
+    val ki : <'a>{x?'b : int; ..'c} -> unit
+    val kb : <'a>{x?'b : bool; ..'c} -> unit
+    val gen : 'a -> <int>{..'b}
+    val use : int
+    -- evaluated at compile time
+    (gen <fun>)
+    -- evaluated
+    (ki <fun>)
+    (kb <fun>)
+    (gen <fun>)
+    (use 0)
+    -- closeit; ki; kb
+    val closeit : <int>{} -> unit
+    val ki : <'a>{x?'b : int; ..'c} -> unit
+    val kb : <'a>{x?'b : bool; ..'c} -> unit
+    val f : <int>{} -> unit
+    -- evaluated at compile time
+    -- evaluated
+    (closeit <fun>)
+    (ki <fun>)
+    (kb <fun>)
+    (f <fun>)
+    val closeit : <int>{} -> unit
+    val ki : <'a>{x?'b : int; ..'c} -> unit
+    val kb : <'a>{x?'b : bool; ..'c} -> unit
+    val gen : 'a -> <int>{..'b}
+    val use : int
+    -- evaluated at compile time
+    (gen <fun>)
+    -- evaluated
+    (closeit <fun>)
+    (ki <fun>)
+    (kb <fun>)
+    (gen <fun>)
+    (use 0)
+    -- ki; closeit; kb
+    val closeit : <int>{} -> unit
+    val ki : <'a>{x?'b : int; ..'c} -> unit
+    val kb : <'a>{x?'b : bool; ..'c} -> unit
+    val f : <int>{} -> unit
+    -- evaluated at compile time
+    -- evaluated
+    (closeit <fun>)
+    (ki <fun>)
+    (kb <fun>)
+    (f <fun>)
+    val closeit : <int>{} -> unit
+    val ki : <'a>{x?'b : int; ..'c} -> unit
+    val kb : <'a>{x?'b : bool; ..'c} -> unit
+    val gen : 'a -> <int>{..'b}
+    val use : int
+    -- evaluated at compile time
+    (gen <fun>)
+    -- evaluated
+    (closeit <fun>)
+    (ki <fun>)
+    (kb <fun>)
+    (gen <fun>)
+    (use 0)
+    -- ki; kb; closeit
+    val closeit : <int>{} -> unit
+    val ki : <'a>{x?'b : int; ..'c} -> unit
+    val kb : <'a>{x?'b : bool; ..'c} -> unit
+    val f : <int>{} -> unit
+    -- evaluated at compile time
+    -- evaluated
+    (closeit <fun>)
+    (ki <fun>)
+    (kb <fun>)
+    (f <fun>)
+    val closeit : <int>{} -> unit
+    val ki : <'a>{x?'b : int; ..'c} -> unit
+    val kb : <'a>{x?'b : bool; ..'c} -> unit
+    val gen : 'a -> <int>{..'b}
+    val use : int
+    -- evaluated at compile time
+    (gen <fun>)
+    -- evaluated
+    (closeit <fun>)
+    (ki <fun>)
+    (kb <fun>)
+    (gen <fun>)
+    (use 0)
     |}]
 ;;

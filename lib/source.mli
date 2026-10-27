@@ -5,8 +5,10 @@ open! Core
     node at a time, so one set of rules serves both.
 
     Generated code has lost its annotations, so may be inferred more generally
-    than when first inferred. Decisions that depend on types are kept, so that
-    it is never inferred less generally (see [Expr.Subs.Providers]). *)
+    than when first inferred. Inference, including of presences and context
+    bounds, is principal, so doesn't depend on the order constraints arise in,
+    and decisions that depend on types are kept (see [Expr.Subs.Providers]):
+    it is never inferred less generally (see proofs.md). *)
 
 (** A binder: generated code already has its idents. *)
 module Binder : sig

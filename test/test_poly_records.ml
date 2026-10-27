@@ -501,7 +501,7 @@ let%expect_test "rows shared between contexts and records" =
     {|
     val same_row : <int>{..'a} -> {..'a} -> <int>{..'a}
     val ok : <int>{x : int}
-    val captured : <int>{y?'a : int; ..'b} -> {`y?'a : int; ..'b} -> {`y?'a : int; ..'b} where ..'b <= {..'c}
+    val captured : <int>{y?'a : int; ..'b} -> {`y?'a : int; ..'b} -> {`y?'a : int; ..'b}
     (Unification_error
      (Row_mismatch
       (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
@@ -649,7 +649,7 @@ let%expect_test "absent entries in records" =
             (var "r") )
     ];
   [%expect
-    {| val absent : <<'a>{z?'b : int; ..'c}>{-z; ..'d} -> {-`z; ..'d} -> {-`z; ..'d} where ..'c <= {..'e}, ..'d <= {..'f} |}]
+    {| val absent : <<'a>{z?'b : int; ..'c}>{-z; ..'d} -> {-`z; ..'d} -> {-`z; ..'d} |}]
 ;;
 
 let%expect_test "structural types may be recursive" =
@@ -692,15 +692,13 @@ let%expect_test "structural types may be recursive" =
       (RExtend x Present (TCon int ())
        (RVar
         (Link
-         (RExtend x (PVar (Unbound 34 1)) (TVar (Unbound 35 1))
-          (RVar (Unbound 36 1))))))
+         (RExtend x (PVar (Unbound 34 1)) (TCon int ()) (RVar (Unbound 35 1))))))
       (RExtend y Present (TCon int ())
        (RVar
         (Link
          (RVar
           (Link
-           (RExtend x (PVar (Unbound 34 1)) (TVar (Unbound 35 1))
-            (RVar (Unbound 36 1))))))))
+           (RExtend x (PVar (Unbound 34 1)) (TCon int ()) (RVar (Unbound 35 1))))))))
       Cyclic_row))
     type t = {`next : t}
     type a = {`b : [`A of a]}

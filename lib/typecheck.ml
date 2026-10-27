@@ -71,6 +71,11 @@ module Program_env = struct
       (** The latest free variable of a quote that a binding of its name,
           unusable there, did not bind, to explain an error if the code is
           spliced where the name is unbound. *)
+    ; unfinished : Type.ty Stack.t
+      (** The types of the toplevels and binders of components not yet
+          finished. Code checked later can reach them, so once their
+          component is finished, the variables not generalized are lowered to
+          rank 0, so that later components don't generalize them. *)
     }
 
   let fresh_ident t name =
@@ -91,6 +96,7 @@ module Program_env = struct
       | Ident ident -> ident
     in
     add_info t ident ~ty ~level;
+    Stack.push t.unfinished ty;
     ident
   ;;
 
@@ -576,7 +582,7 @@ let resolution_type t (scope : Scope.t) ~name ~loc : Resolution.t -> _
   | Unusable kind -> error ~loc kind
 ;;
 
-let finish_scc (program : Program_env.t) (members : Toplevel.t list) =
+let finish_scc t (program : Program_env.t) (members : Toplevel.t list) =
   let persistent = List.for_all members ~f:Toplevel.is_function in
   let recursive =
     List.exists members ~f:(fun member ->
@@ -594,11 +600,21 @@ let finish_scc (program : Program_env.t) (members : Toplevel.t list) =
       | In_progress { body = None; _ } | Unchecked | Done _ -> false)
     && (persistent || not recursive)
   in
+  if generalize
+  then
+    Scheme.generalize
+      t
+      ~rank:0
+      (List.map members ~f:(fun member ->
+         match member.state with
+         | In_progress { ty; _ } -> ty
+         | Unchecked | Done _ ->
+           raise_s
+             [%message "finish_scc: member not checked" (member : Toplevel.t)]));
   let members =
     List.map members ~f:(fun member ->
       match member.state with
       | In_progress { index; ty; args; body = Some body; _ } ->
-        if generalize then Scheme.generalize_ty ~rank:0 ty;
         Program_env.add_info program member.ident ~ty ~level:0;
         let typed =
           { Typed.Toplevel.ident = member.ident; args; scheme = ty; body }
@@ -768,6 +784,7 @@ and check_toplevel t program (toplevel : Toplevel.t)
   =
   let index = Fresh.id t in
   let scc = { Scc_frame.lowlink = index; pending = [ toplevel ] } in
+  let unfinished = Stack.length program.unfinished in
   let rank = 1 in
   let scope =
     { Scope.program
@@ -790,6 +807,7 @@ and check_toplevel t program (toplevel : Toplevel.t)
            Source.Binder.Name name, annot))
       ~annot:toplevel.annot
   in
+  Stack.push program.unfinished ty;
   toplevel.state
   <- In_progress
        { index
@@ -808,8 +826,11 @@ and check_toplevel t program (toplevel : Toplevel.t)
        [%message "check_toplevel: not in progress" (toplevel : Toplevel.t)]);
   if scc.lowlink = index
   then (
-    finish_scc program scc.pending;
-    scc.pending <- []);
+    finish_scc t program scc.pending;
+    scc.pending <- [];
+    while Stack.length program.unfinished > unfinished do
+      Unify.lower_ty ~rank:0 (Stack.pop_exn program.unfinished)
+    done);
   scc
 
 and check_body t (scope : Scope.t) ~args ~res_ty ~body =
@@ -875,7 +896,9 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
     let persistent = not (List.is_empty args) in
     let args = List.map arg_types ~f:fst in
     let generalized = Typed.Expr.binding_is_value ~ident ~args ~body in
-    if generalized then Scheme.generalize_ty ~rank:scope.rank ty;
+    if generalized
+    then Scheme.generalize t ~rank:scope.rank [ ty ]
+    else Unify.lower_ty ~rank:scope.rank ty;
     let%map.Result in_ =
       Env.with_bindings
         scope.locals
@@ -1205,9 +1228,9 @@ and substitute_entry t (scope : Scope.t) ~name ~presence ~ty ~loc ~may_capture =
          && Hashtbl.mem scope.program.unusable_in_quotes name ->
     let unusable = Hashtbl.find_exn scope.program.unusable_in_quotes name in
     let%map.Result () =
-      Unify.unify_presence
-        ~presence1:presence
-        ~presence2:Absent
+      Unify.make_absent
+        t
+        presence
         ~error:
           (Typecheck_error.create
              ~loc
@@ -1217,15 +1240,16 @@ and substitute_entry t (scope : Scope.t) ~name ~presence ~ty ~loc ~may_capture =
   | Unusable kind ->
     (* Code that may use [name] can't, so doesn't. *)
     let%map.Result () =
-      Unify.unify_presence
-        ~presence1:presence
-        ~presence2:Absent
-        ~error:(Typecheck_error.create ~loc kind)
+      Unify.make_absent t presence ~error:(Typecheck_error.create ~loc kind)
     in
     None
   | Local entry when may_capture name entry.binder ->
     let%map.Result () =
-      Unify.unify_ty t ~ty1:ty ~ty2:(Scope.instantiate t scope entry.scheme)
+      Unify.unify_if_present
+        t
+        ~presence
+        ~ty1:ty
+        ~ty2:(Scope.instantiate t scope entry.scheme)
       |> lift ~loc
     in
     Some entry.binder
@@ -1370,6 +1394,7 @@ let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
     ; ident_info = Typed.Ident.Map.empty
     ; sccs = Queue.create ()
     ; unusable_in_quotes = String.Table.create ()
+    ; unfinished = Stack.create ()
     }
   in
   let toplevels =

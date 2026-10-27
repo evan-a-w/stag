@@ -3,18 +3,115 @@ open! Core
 type id = int [@@deriving sexp, compare, equal]
 type rank = int [@@deriving sexp, compare, equal]
 
-(** A unification variable standing for an ['a]. Only row variables have
-    bounds: for the other kinds, ['bound] is [Nothing.t]. *)
+type 'a var_state =
+  | Unbound of rank
+  | Generic
+  | Link of 'a
+
+(** A unification variable standing for an ['a]. Only row and presence
+    variables have bounds: for the other kinds, ['bound] is [Nothing.t].
+    [in_bounds_of] has the variables with a bound that has this variable
+    (and maybe others: it is only added to), so that generalizing it can
+    find them. *)
+type ('a, 'bound) var =
+  { id : id
+  ; mutable state : 'a var_state
+  ; mutable bounds : 'bound list
+  ; mutable in_bounds_of : bounded list
+  ; mutable kept : kept list
+  }
+
+and ty =
+  | TCon of string * arg list
+  | TArrow of ty * ty
+  | TTuple of ty list
+  | TCode of
+      { inner : ty
+      ; context : row
+      }
+  | TRecord of
+      { id : id
+      ; row : row
+      }
+  | TVariant of
+      { id : id
+      ; row : row (** Tags without the backquote. *)
+      }
+  | TVar of (ty, Nothing.t) var
+
+and row =
+  | REmpty
+  | RExtend of string * presence * ty * row
+  (** Labels are scoped: the first entry for a name shadows later ones. *)
+  | RVar of (row, bound) var
+
+(** Whether an entry is in the row (for a context, whether code uses it). An
+    [Absent] entry may be dropped, so a row with entries of unknown presence
+    can still unify with one that lacks them. *)
+and presence =
+  | Present
+  | Absent
+  | PVar of (presence, presence_bound) var
+
+(** [p <= q], as [At_most q] in the bounds of [p] and
+    [At_least p] in those of [q]: if [p] is [Present] so is [q], and if [q] is
+    [Absent] so is [p]. Bounds may relate variables of different ranks: a
+    generic variable keeps its bounds to variables that are not generalized,
+    which drop theirs to it (see [Scheme.generalize]). *)
+and presence_bound =
+  | At_most of presence
+  | At_least of presence
+  | If_present of ty * ty
+  (** The types of entries with this presence that must be equal if it is
+      [Present]: the type of an entry it is absent from doesn't matter. *)
+
+and arg =
+  | ATy of ty
+  | ARow of row
+
+(** An upper bound of a row variable: every entry the variable gets must
+    also be an entry of [row], unless shadowed where the bound arose. The
+    variables of [row] may have any ranks. *)
+and bound =
+  { row : row
+  ; shadowed : String.Set.t
+  }
+
+and bounded =
+  | Row_var of (row, bound) var
+  | Presence_var of (presence, presence_bound) var
+
+(** A bound of a variable that is not generalized, with [Generic]
+    variables: each of them keeps it rather than the variable, and each
+    instance of the scheme adds it to the variable once (see
+    [Scheme.generalize]). *)
+and kept =
+  | Row_bound of
+      { id : id
+      ; lower : (row, bound) var
+      ; bound : bound
+      }
+  | If_present_kept of
+      { id : id
+      ; presence : (presence, presence_bound) var
+      ; ty1 : ty
+      ; ty2 : ty
+      }
+
+val kept_id : kept -> id
+
 module Var : sig
-  type 'a state =
+  type 'a state = 'a var_state =
     | Unbound of rank
     | Generic
     | Link of 'a
 
-  type ('a, 'bound) t =
+  type ('a, 'bound) t = ('a, 'bound) var =
     { id : id
     ; mutable state : 'a state
     ; mutable bounds : 'bound list
+    ; mutable in_bounds_of : bounded list
+    ; mutable kept : kept list
     }
 
   val create : id -> 'a state -> ('a, _) t
@@ -31,49 +128,6 @@ module Var : sig
     -> Sexp.t
 end
 
-type ty =
-  | TCon of string * arg list
-  | TArrow of ty * ty
-  | TTuple of ty list
-  | TCode of
-      { inner : ty
-      ; context : row
-      }
-  | TRecord of
-      { id : id
-      ; row : row
-      }
-  | TVariant of
-      { id : id
-      ; row : row (** Tags without the backquote. *)
-      }
-  | TVar of (ty, Nothing.t) Var.t
-
-and row =
-  | REmpty
-  | RExtend of string * presence * ty * row
-  (** Labels are scoped: the first entry for a name shadows later ones. *)
-  | RVar of (row, bound) Var.t
-
-(** Whether an entry is in the row (for a context, whether code uses it). An
-    [Absent] entry may be dropped, so a row with entries of unknown presence
-    can still unify with one that lacks them. *)
-and presence =
-  | Present
-  | Absent
-  | PVar of (presence, Nothing.t) Var.t
-
-and arg =
-  | ATy of ty
-  | ARow of row
-
-(** An upper bound of a row variable: every entry the variable gets must
-    also be an entry of [row], unless shadowed where the bound arose. *)
-and bound =
-  { row : row
-  ; shadowed : String.Set.t
-  }
-
 (** Types are graphs: [Link]s may close cycles, each through a [TRecord] or
     [TVariant] (equi-recursive types). Records and variants are identified by
     their [id], unique among them, so may be shared. Sexps omit ids, and print a
@@ -84,6 +138,7 @@ val sexp_of_ty : ty -> Sexp.t
 val sexp_of_row : row -> Sexp.t
 val sexp_of_presence : presence -> Sexp.t
 val sexp_of_arg : arg -> Sexp.t
+val sexp_of_presence_bound : presence_bound -> Sexp.t
 val sexp_of_bound : bound -> Sexp.t
 val int : ty
 val bool : ty
@@ -100,6 +155,28 @@ val canonical_presence : presence -> presence
 (** The row variable at the end of [row], if it is open. *)
 val tail_var : row -> (row, bound) Var.t option
 
+(** The variable of a presence bound, if it is not known. *)
+val presence_bound_var
+  :  presence_bound
+  -> (presence, presence_bound) Var.t option
+
+(** Whether two types are the same up to [Link]s: records and variants are
+    only the same if they are the same node, so this is conservative. *)
+val same_ty : ty -> ty -> bool
+
+val same_row : row -> row -> bool
+val same_presence : presence -> presence -> bool
+
+(** Whether two bounds have the same entries, in order, and shadow the same
+    names. Entries of types that are not the same are still the same if
+    [same_entry_ty presence ty1 ty2] says those of [presence] of types [ty1]
+    and [ty2] are interchangeable in a bound. *)
+val same_bound
+  :  ?same_entry_ty:(presence -> ty -> ty -> bool)
+  -> bound
+  -> bound
+  -> bool
+
 (** Rebuilds a type, replacing each variable that is not a [Link] by the result
     of the callback for its kind. A [Link], record or variant whose variables
     all satisfy [keeps], so would be unchanged, is kept as is; others are
@@ -111,7 +188,7 @@ module Mapper : sig
   type t =
     { ty : (ty, Nothing.t) Var.t -> ty
     ; row : (row, bound) Var.t -> row
-    ; presence : (presence, Nothing.t) Var.t -> presence
+    ; presence : (presence, presence_bound) Var.t -> presence
     ; keeps : 'a 'bound. ('a, 'bound) Var.t -> bool
     ; id : unit -> id
     }
@@ -129,7 +206,7 @@ module Iter : sig
     { ty : guarded:bool -> (ty, Nothing.t) Var.t -> (unit, 'e) Result.t
     ; row : guarded:bool -> (row, bound) Var.t -> (unit, 'e) Result.t
     ; presence :
-        guarded:bool -> (presence, Nothing.t) Var.t -> (unit, 'e) Result.t
+        guarded:bool -> (presence, presence_bound) Var.t -> (unit, 'e) Result.t
     }
 end
 
@@ -153,8 +230,8 @@ module Printer : sig
   (** Renders [ty] with the occurrences of itself within it as [name]. *)
   val recursive : t -> ty -> name:string -> string
 
-  (** The bounds of the row variables reached, as
-      [" where ..'a <= {...}"], or [""] if there are none. *)
+  (** The bounds of the row and presence variables reached, as
+      [" where ..'a <= {...}, 'b <= 'c"], or [""] if there are none. *)
   val where : t -> string
 end
 
