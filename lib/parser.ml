@@ -263,7 +263,7 @@ and type_atom t : Type_expr.t =
     located ~loc:var.loc (Var var.txt : Type_expr.desc)
   | Lident _ | Uident _ ->
     let path = lowercase_path t ~what:"a type name" in
-    located ~loc:path.loc (Type_expr.Con (path.txt, []))
+    located ~loc:path.loc (Type_expr.Con (path, []))
   | Lparen ->
     advance t;
     if is t Rparen
@@ -298,17 +298,36 @@ and type_atom t : Type_expr.t =
     since t start (Type_expr.Code { inner; context })
   | _ -> expected t "a type"
 
-(** [{l : t; ...; ..'r}]. *)
+(** A zero width [Empty] row, before the current token. *)
+and empty_row t : Type_expr.row =
+  let loc = loc t in
+  located ~loc:{ loc with stop = loc.start } Type_expr.Empty
+
+and extend_row name ty (rest : Type_expr.row) : Type_expr.row =
+  let last =
+    match rest.txt with
+    | Empty -> ty.Located.loc
+    | Extend _ | Var _ -> rest.loc
+  in
+  located
+    ~loc:(Loc.merge name.Located.loc last)
+    (Type_expr.Extend (name, ty, rest))
+
+(** [..'r], at [..]. *)
+and row_tail t : Type_expr.row =
+  let start = loc t in
+  expect t Dotdot;
+  let var = tyvar t in
+  since t start (Type_expr.Var var)
+
+(** [{l : t; ...; ..'r}], located with its braces. *)
 and row t ~entry_label ~what : Type_expr.row =
   let open_loc = loc t in
   expect t Lbrace;
   let rec loop () : Type_expr.row =
     match peek t with
-    | Rbrace -> Empty
-    | Dotdot ->
-      advance t;
-      let var = tyvar t in
-      Var var
+    | Rbrace -> empty_row t
+    | Dotdot -> row_tail t
     | Label _ | Lident _ ->
       let name = entry_label t in
       expect t Colon;
@@ -318,14 +337,14 @@ and row t ~entry_label ~what : Type_expr.row =
         | Semi ->
           advance t;
           loop ()
-        | _ -> Empty
+        | _ -> empty_row t
       in
-      Extend (name, ty, rest)
+      extend_row name ty rest
     | _ -> expected t what
   in
   let row = loop () in
   close t Rbrace ~opener:Lbrace ~open_loc;
-  row
+  since t open_loc row.txt
 
 (** [[`A of t | `B; ..'r]]. *)
 and variant t : Type_expr.t =
@@ -334,10 +353,8 @@ and variant t : Type_expr.t =
   if is t Bar then advance t;
   let tail () : Type_expr.row =
     match peek t with
-    | Dotdot ->
-      advance t;
-      Var (tyvar t)
-    | _ -> Empty
+    | Dotdot -> row_tail t
+    | _ -> empty_row t
   in
   let rec entries () : Type_expr.row =
     match peek t with
@@ -348,7 +365,10 @@ and variant t : Type_expr.t =
         then (
           advance t;
           type_expr t)
-        else located ~loc:tag.loc (Type_expr.Con (Path.name "unit", []))
+        else
+          located
+            ~loc:tag.loc
+            (Type_expr.Con (located ~loc:tag.loc (Path.name "unit"), []))
       in
       let rest : Type_expr.row =
         match peek t with
@@ -358,15 +378,16 @@ and variant t : Type_expr.t =
         | Semi ->
           advance t;
           tail ()
-        | _ -> Empty
+        | _ -> empty_row t
       in
-      Extend (tag, ty, rest)
+      extend_row tag ty rest
     | Dotdot -> tail ()
-    | Rbracket -> Empty
+    | Rbracket -> empty_row t
     | _ -> expected t "a polymorphic variant tag like `A"
   in
   let row = entries () in
   close t Rbracket ~opener:Lbracket ~open_loc:start;
+  let row = since t start row.txt in
   since t start (Type_expr.Variant row)
 ;;
 
@@ -428,6 +449,7 @@ and pattern_construct t : Pattern.t =
     in
     since t start (Pattern.Construct (path, args))
   | Label tag ->
+    let tag = located ~loc:start tag in
     advance t;
     let arg =
       if starts_pattern_atom (peek t) then Some (pattern_construct t) else None
@@ -679,6 +701,7 @@ and construct t : Expr.t =
        t.pos <- saved;
        app t)
   | Label tag ->
+    let tag = located ~loc:start tag in
     advance t;
     let arg = if starts_atom (peek t) then Some (snd (arg ())) else None in
     expr_since t start (Poly_variant (tag, arg))
@@ -722,8 +745,8 @@ and postfix t : Expr.t =
     | Dot ->
       advance t;
       (match peek t with
-       | Label label ->
-         advance t;
+       | Label _ ->
+         let label = label t ~what:"" in
          loop (expr_since t e.loc (Poly_field (e, label)))
        | _ ->
          let field = lowercase_path t ~what:"a field name" in
@@ -731,7 +754,7 @@ and postfix t : Expr.t =
     | Backslash ->
       advance t;
       let label = label t ~what:"a polymorphic record label like `x" in
-      loop (expr_since t e.loc (Poly_restrict (e, label.txt)))
+      loop (expr_since t e.loc (Poly_restrict (e, label)))
     | _ -> e
   in
   loop (atom t)
@@ -754,7 +777,7 @@ and atom t : Expr.t =
      | path, false -> expr_since t start (Var (path.txt, None)))
   | Label tag ->
     advance t;
-    expr_since t start (Poly_variant (tag, None))
+    expr_since t start (Poly_variant (located ~loc:start tag, None))
   | Lparen ->
     advance t;
     if is t Rparen

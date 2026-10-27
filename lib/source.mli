@@ -32,9 +32,7 @@ module Field : sig
     | Ref of Typed.Field_ref.t
 end
 
-(** Generated code has no locations for its names: they are [Loc.none] in
-    views of it. *)
-
+(** Names in views of generated code are located at the node they are in. *)
 module Pattern : sig
   type t =
     | Syntax of Syntax.Pattern.t

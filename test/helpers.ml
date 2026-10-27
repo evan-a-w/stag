@@ -9,7 +9,7 @@ let located_path name = none (path name)
 
 module Ty = struct
   let con ?(args = []) name : Type_expr.t =
-    none (Type_expr.Con (path name, args))
+    none (Type_expr.Con (located_path name, args))
   ;;
 
   let int = con "int"
@@ -21,13 +21,13 @@ module Ty = struct
 
   (** Present [entries], in order, before [tail] (closed if [None]). *)
   let row ?(entries = []) ?tail () =
-    let tail : Type_expr.row =
+    let tail : Type_expr.row_desc =
       match tail with
       | None -> Empty
       | Some tail -> Var (name tail)
     in
-    List.fold_right entries ~init:tail ~f:(fun (label, ty) rest ->
-      Type_expr.Extend (name label, ty, rest))
+    List.fold_right entries ~init:(none tail) ~f:(fun (label, ty) rest ->
+      none (Type_expr.Extend (name label, ty, rest)))
   ;;
 
   let code ?entries ?tail inner : Type_expr.t =
@@ -135,11 +135,11 @@ let labelled = List.map ~f:(fun (label, x) -> name label, x)
 let field e name = expr (Field (e, located_path name))
 let match_ e cases = expr (Match (e, cases))
 let poly_record fields = expr (Poly_record (labelled fields))
-let dot e label = expr (Poly_field (e, label))
+let dot e label = expr (Poly_field (e, name label))
 let extend fields e = expr (Poly_extend (labelled fields, e))
-let restrict e label = expr (Poly_restrict (e, label))
+let restrict e label = expr (Poly_restrict (e, name label))
 let update e fields = expr (Poly_update (e, labelled fields))
-let tag ?arg name = expr (Poly_variant (name, arg))
+let tag ?arg tag = expr (Poly_variant (name tag, arg))
 
 module Pat = struct
   let pattern desc : Pattern.t = none desc
@@ -159,7 +159,7 @@ module Pat = struct
       (Record (List.map fields ~f:(fun (name, p) -> located_path name, p)))
   ;;
 
-  let tag ?arg name = pattern (Poly_variant (name, arg))
+  let tag ?arg tag = pattern (Poly_variant (name tag, arg))
 
   (** [Bind] the rest to [bind], if given. *)
   let poly_record ?(rest = Pattern.Rest.Closed) ?bind fields =

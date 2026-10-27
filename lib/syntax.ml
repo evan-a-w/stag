@@ -54,7 +54,7 @@ module Type_expr = struct
 
   and desc =
     | Var of string
-    | Con of Path.t * arg list
+    | Con of Path.t Located.t * arg list
     | Arrow of t * t
     | Tuple of t list
     | Code of
@@ -64,7 +64,9 @@ module Type_expr = struct
     | Record of row
     | Variant of row (** Each entry is a tag and its argument type. *)
 
-  and row =
+  and row = row_desc Located.t
+
+  and row_desc =
     | Empty
     | Extend of Name.t * t * row
     | Var of Name.t
@@ -126,7 +128,7 @@ module Pattern = struct
     | Tuple of t list
     | Construct of Path.t Located.t * t list
     | Record of (Path.t Located.t * t) list
-    | Poly_variant of string * t option (** [None] matches a [unit] argument. *)
+    | Poly_variant of Name.t * t option (** [None] matches a [unit] argument. *)
     | Poly_record of
         { fields : (Name.t * t) list
         ; rest : Rest.t
@@ -155,11 +157,11 @@ module Expr = struct
     | Field of t * Path.t Located.t
     | Match of t * (Pattern.t * t) list
     | Poly_record of (Name.t * t) list
-    | Poly_field of t * string
+    | Poly_field of t * Name.t
     | Poly_extend of (Name.t * t) list * t (** [{x = v; ... | e}] *)
-    | Poly_restrict of t * string (** [e \ x] *)
+    | Poly_restrict of t * Name.t (** [e \ x] *)
     | Poly_update of t * (Name.t * t) list (** [{e with x = v; ...}] *)
-    | Poly_variant of string * t option (** [None] is a [unit] argument. *)
+    | Poly_variant of Name.t * t option (** [None] is a [unit] argument. *)
   [@@deriving sexp_of, compare, equal]
 end
 

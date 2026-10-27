@@ -69,7 +69,7 @@ module Pattern = struct
       Record
         (List.map fields' ~f:(fun (path, pattern) ->
            Field.Path path, sub pattern))
-    | Poly_variant (tag, arg) -> Poly_variant (tag, Option.map arg ~f:sub)
+    | Poly_variant (tag, arg) -> Poly_variant (tag.txt, Option.map arg ~f:sub)
     | Poly_record { fields = fields'; rest } ->
       Poly_record
         { fields = fields fields'
@@ -81,7 +81,7 @@ module Pattern = struct
         }
   ;;
 
-  let generated_view ({ desc; ty = _; loc = _ } : Typed.Pattern.t) : View.t =
+  let generated_view ({ desc; ty = _; loc } : Typed.Pattern.t) : View.t =
     let sub pattern = Generated pattern in
     match desc with
     | Any -> Any
@@ -98,7 +98,8 @@ module Pattern = struct
     | Poly_record { fields; rest } ->
       Poly_record
         { fields =
-            List.map fields ~f:(fun (label, p) -> Located.create label, sub p)
+            List.map fields ~f:(fun (label, p) ->
+              Located.create ~loc label, sub p)
         ; rest =
             (match rest with
              | Closed -> Closed
@@ -206,18 +207,18 @@ module Expr = struct
         , List.map cases ~f:(fun (pattern, body) ->
             Pattern.Syntax pattern, sub body) )
     | Poly_record fields' -> Poly_record (fields fields')
-    | Poly_field (expr, label) -> Poly_field (sub expr, label)
+    | Poly_field (expr, label) -> Poly_field (sub expr, label.txt)
     | Poly_extend (fields', expr) -> Poly_extend (fields fields', sub expr)
-    | Poly_restrict (expr, label) -> Poly_restrict (sub expr, label)
+    | Poly_restrict (expr, label) -> Poly_restrict (sub expr, label.txt)
     | Poly_update (expr, fields') -> Poly_update (sub expr, fields fields')
-    | Poly_variant (tag, arg) -> Poly_variant (tag, Option.map arg ~f:sub)
+    | Poly_variant (tag, arg) -> Poly_variant (tag.txt, Option.map arg ~f:sub)
   ;;
 
-  let generated_view ({ desc; ty = _; loc = _ } : Typed.Expr.t) : View.t =
+  let generated_view ({ desc; ty = _; loc } : Typed.Expr.t) : View.t =
     let sub expr = Generated expr in
     let subs = List.map ~f:sub in
     let fields =
-      List.map ~f:(fun (key, expr) -> Located.create key, sub expr)
+      List.map ~f:(fun (key, expr) -> Located.create ~loc key, sub expr)
     in
     match desc with
     | Lit lit -> Lit lit
@@ -237,7 +238,7 @@ module Expr = struct
         ; subs =
             Explicit
               (List.map subs ~f:(fun (name, expr) ->
-                 Located.create name, Some (sub expr)))
+                 Located.create ~loc name, Some (sub expr)))
         }
     | Splice { code; subs = Implicit providers } ->
       Splice { code = sub code; subs = Providers providers }
