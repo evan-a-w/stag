@@ -45,6 +45,7 @@ module Var_ref : sig
     | Free of string
     (** A free variable of the enclosing quote: its context entry of this
         name. *)
+    | Prim of Prim.t (** Usable at any level, like a persistent toplevel. *)
   [@@deriving sexp_of]
 end
 
@@ -97,6 +98,7 @@ module Pattern : sig
   type t =
     { desc : t Desc.t
     ; ty : Type.ty
+    ; loc : Loc.t (** Of the syntax it was inferred from. *)
     }
   [@@deriving sexp_of]
 
@@ -153,12 +155,16 @@ module Expr : sig
       | Poly_restrict of 'e * string
       | Poly_update of 'e * (string * 'e) list
       | Poly_variant of string * 'e option
+      | Expect of string Located.t
+      (** Checks the output so far against the string, see
+          [Expect_test_runner]. *)
     [@@deriving sexp_of]
   end
 
   type t =
     { desc : t Desc.t
     ; ty : Type.ty
+    ; loc : Loc.t (** Of the syntax it was inferred from. *)
     }
   [@@deriving sexp_of]
 
@@ -209,9 +215,19 @@ module Ident_info : sig
   [@@deriving sexp_of]
 end
 
+module Expect_test : sig
+  type t =
+    { name : string Located.t
+    ; body : Expr.t
+    ; loc : Loc.t
+    }
+  [@@deriving sexp_of]
+end
+
 module Program : sig
   type t =
     { sccs : Scc.t list (** Each component after the ones it refers to. *)
+    ; expect_tests : Expect_test.t list (** In program order. *)
     ; ident_info : Ident_info.t Ident.Map.t
     }
   [@@deriving sexp_of]

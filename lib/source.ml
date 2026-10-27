@@ -2,24 +2,30 @@ open! Core
 
 module Binder = struct
   type t =
-    | Name of string
+    | Name of Syntax.Name.t
     | Ident of Typed.Ident.t
 
   let name = function
-    | Name name -> name
+    | Name name -> name.txt
     | Ident ident -> ident.name
+  ;;
+
+  let loc t ~enclosing =
+    match t with
+    | Name name -> name.loc
+    | Ident _ -> enclosing
   ;;
 end
 
 module Constructor = struct
   type t =
-    | Path of Syntax.Path.t
+    | Path of Syntax.Path.t Located.t
     | Ref of Typed.Constructor_ref.t
 end
 
 module Field = struct
   type t =
-    | Path of Syntax.Path.t
+    | Path of Syntax.Path.t Located.t
     | Ref of Typed.Field_ref.t
 end
 
@@ -45,17 +51,17 @@ module Pattern = struct
       | Record of (Field.t * t) list
       | Poly_variant of string * t option
       | Poly_record of
-          { fields : (string * t) list
+          { fields : (Syntax.Name.t * t) list
           ; rest : Rest.t
           }
   end
 
-  let syntax_view : Syntax.Pattern.t -> View.t =
+  let syntax_view ({ txt; loc } : Syntax.Pattern.t) : View.t =
     let sub pattern = Syntax pattern in
     let fields = List.map ~f:(fun (key, pattern) -> key, sub pattern) in
-    function
+    match txt with
     | Any -> Any
-    | Var name -> Var (Name name)
+    | Var name -> Var (Name { txt = name; loc })
     | Lit lit -> Lit lit
     | Tuple patterns -> Tuple (List.map patterns ~f:sub)
     | Construct (path, patterns) ->
@@ -64,7 +70,7 @@ module Pattern = struct
       Record
         (List.map fields' ~f:(fun (path, pattern) ->
            Field.Path path, sub pattern))
-    | Poly_variant (tag, arg) -> Poly_variant (tag, Option.map arg ~f:sub)
+    | Poly_variant (tag, arg) -> Poly_variant (tag.txt, Option.map arg ~f:sub)
     | Poly_record { fields = fields'; rest } ->
       Poly_record
         { fields = fields fields'
@@ -76,7 +82,7 @@ module Pattern = struct
         }
   ;;
 
-  let generated_view ({ desc; ty = _ } : Typed.Pattern.t) : View.t =
+  let generated_view ({ desc; ty = _; loc } : Typed.Pattern.t) : View.t =
     let sub pattern = Generated pattern in
     match desc with
     | Any -> Any
@@ -92,7 +98,9 @@ module Pattern = struct
     | Poly_variant (tag, arg) -> Poly_variant (tag, Option.map arg ~f:sub)
     | Poly_record { fields; rest } ->
       Poly_record
-        { fields = List.map fields ~f:(fun (label, p) -> label, sub p)
+        { fields =
+            List.map fields ~f:(fun (label, p) ->
+              Located.create ~loc label, sub p)
         ; rest =
             (match rest with
              | Closed -> Closed
@@ -104,6 +112,11 @@ module Pattern = struct
   let view = function
     | Syntax pattern -> syntax_view pattern
     | Generated pattern -> generated_view pattern
+  ;;
+
+  let loc = function
+    | Syntax pattern -> pattern.loc
+    | Generated pattern -> pattern.loc
   ;;
 end
 
@@ -120,7 +133,7 @@ module Expr = struct
 
   module Subs = struct
     type nonrec t =
-      | Explicit of (string * t option) list
+      | Explicit of (Syntax.Name.t * t option) list
       | Implicit
       | Providers of Typed.Binder.t String.Map.t
   end
@@ -147,19 +160,20 @@ module Expr = struct
       | Record of (Field.t * t) list
       | Field of t * Field.t
       | Match of t * (Pattern.t * t) list
-      | Poly_record of (string * t) list
+      | Poly_record of (Syntax.Name.t * t) list
       | Poly_field of t * string
-      | Poly_extend of (string * t) list * t
+      | Poly_extend of (Syntax.Name.t * t) list * t
       | Poly_restrict of t * string
-      | Poly_update of t * (string * t) list
+      | Poly_update of t * (Syntax.Name.t * t) list
       | Poly_variant of string * t option
+      | Expect of string Located.t
   end
 
-  let syntax_view : Syntax.Expr.t -> View.t =
+  let syntax_view (expr : Syntax.Expr.t) : View.t =
     let sub expr = Syntax expr in
     let subs = List.map ~f:sub in
     let fields = List.map ~f:(fun (key, expr) -> key, sub expr) in
-    function
+    match expr.txt with
     | Lit lit -> Lit lit
     | Var (path, annot) -> Var (Path (path, annot))
     | App (f, x) -> App (sub f, sub x)
@@ -195,17 +209,20 @@ module Expr = struct
         , List.map cases ~f:(fun (pattern, body) ->
             Pattern.Syntax pattern, sub body) )
     | Poly_record fields' -> Poly_record (fields fields')
-    | Poly_field (expr, label) -> Poly_field (sub expr, label)
+    | Poly_field (expr, label) -> Poly_field (sub expr, label.txt)
     | Poly_extend (fields', expr) -> Poly_extend (fields fields', sub expr)
-    | Poly_restrict (expr, label) -> Poly_restrict (sub expr, label)
+    | Poly_restrict (expr, label) -> Poly_restrict (sub expr, label.txt)
     | Poly_update (expr, fields') -> Poly_update (sub expr, fields fields')
-    | Poly_variant (tag, arg) -> Poly_variant (tag, Option.map arg ~f:sub)
+    | Poly_variant (tag, arg) -> Poly_variant (tag.txt, Option.map arg ~f:sub)
+    | Expect expected -> Expect expected
   ;;
 
-  let generated_view ({ desc; ty = _ } : Typed.Expr.t) : View.t =
+  let generated_view ({ desc; ty = _; loc } : Typed.Expr.t) : View.t =
     let sub expr = Generated expr in
     let subs = List.map ~f:sub in
-    let fields = List.map ~f:(fun (key, expr) -> key, sub expr) in
+    let fields =
+      List.map ~f:(fun (key, expr) -> Located.create ~loc key, sub expr)
+    in
     match desc with
     | Lit lit -> Lit lit
     | Var var_ref -> Var (Ref var_ref)
@@ -223,7 +240,8 @@ module Expr = struct
         { code = sub code
         ; subs =
             Explicit
-              (List.map subs ~f:(fun (name, expr) -> name, Some (sub expr)))
+              (List.map subs ~f:(fun (name, expr) ->
+                 Located.create ~loc name, Some (sub expr)))
         }
     | Splice { code; subs = Implicit providers } ->
       Splice { code = sub code; subs = Providers providers }
@@ -247,10 +265,16 @@ module Expr = struct
     | Poly_restrict (expr, label) -> Poly_restrict (sub expr, label)
     | Poly_update (expr, fields') -> Poly_update (sub expr, fields fields')
     | Poly_variant (tag, arg) -> Poly_variant (tag, Option.map arg ~f:sub)
+    | Expect expected -> Expect expected
   ;;
 
   let view = function
     | Syntax expr -> syntax_view expr
     | Generated expr -> generated_view expr
+  ;;
+
+  let loc = function
+    | Syntax expr -> expr.loc
+    | Generated expr -> expr.loc
   ;;
 end

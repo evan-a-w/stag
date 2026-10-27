@@ -12,6 +12,7 @@ pkgs.mkShell {
     dune_3
     findlib
     core
+    core_unix
     ppx_jane
     ppx_optional
     ppx_expect

@@ -1,0 +1,3 @@
+(test
+ (name calc_test)
+ (libraries fmt))

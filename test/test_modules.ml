@@ -28,7 +28,7 @@ let%expect_test "qualified and unqualified values" =
 
 let%expect_test "nested modules" =
   check
-    [ top "root" [] (Lit (String "s"))
+    [ top "root" [] (string "s")
     ; module_
         "A"
         [ top "v" [] (int 1)
@@ -233,7 +233,7 @@ let%expect_test "values are order independent and recursive across modules" =
                ])
         ; top "later" [] (var "C.value")
         ]
-    ; module_ "C" [ top "value" [] (Lit (Char 'c')) ]
+    ; module_ "C" [ top "value" [] (char 'c') ]
     ];
   [%expect
     {|
@@ -729,7 +729,7 @@ let%expect_test "splicing code with canonically named free variables" =
     ; top
         "explicit"
         []
-        (splice ~subs:[ "M.n", Some (Lit (String "s")) ] (quote (var "M.n")))
+        (splice ~subs:[ "M.n", Some (string "s") ] (quote (var "M.n")))
     ; top "shorthand" [] (splice ~subs:[ "M.n", None ] (quote (var "M.n")))
     ];
   check

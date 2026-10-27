@@ -1,0 +1,12 @@
+let pow x n =
+  let go acc n = match Int.equal n 0 with
+    | true -> acc
+    | false -> go (Int.mul acc x) (Int.sub n 1)
+  in
+  go 1 n
+
+let fourth x = Arith.square (Arith.square x)
+
+let%expect_test "pow" =
+  print_int (pow 2 10);
+  [%expect {| 1024 |}]

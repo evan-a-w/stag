@@ -3,11 +3,7 @@ open Stag
 open Syntax
 open Helpers
 
-let prim_names =
-  List.filter_map prims ~f:(function
-    | Toplevel.Let (name, _, _, _) -> Some name
-    | Type _ | Module _ -> None)
-;;
+let prim_names = List.filter_map prims ~f:let_name
 
 let members (checked : Typecheck.Checked.t) =
   List.concat_map checked.program.sccs ~f:(fun scc -> scc.members)
@@ -290,13 +286,13 @@ let%expect_test "toplevels are only evaluated if used at compile time" =
     val spliced : int
     -- evaluated at compile time
     -- evaluated
-    ("Match failure" (value (B)))
+    ("Match failure: no case matches the value B" @ _none_)
     (Splice_evaluation_failed
      (code
       (Let (ident _/15) (args ()) (generalized true)
        (body (Var (Bound (Toplevel fails/4)) : int))
        (in_ (Quote (Lit (Int 1) : int) : <int>{})) : <int>{}))
-     (error ("Match failure" (value (B)))))
+     (error ("Match failure: no case matches the value B" @ _none_)))
     |}]
 ;;
 
@@ -317,7 +313,7 @@ let%expect_test "splice evaluation failures" =
        (((Construct ((type_name abc) (name A) (index 0)) () : abc)
          (Quote (Lit (Int 0) : int) : <int>{})))
        : <int>{}))
-     (error ("Match failure" (value (B)))))
+     (error ("Match failure: no case matches the value B" @ _none_)))
     |}]
 ;;
 
@@ -640,7 +636,7 @@ let%expect_test "toplevels of a component are evaluated separately" =
     (f <fun>)
     -- evaluated
     (f <fun>)
-    ("Match failure" (value (B)))
+    ("Match failure: no case matches the value B" @ _none_)
     val a : int
     val b : int
     val k : int -> int
@@ -651,8 +647,8 @@ let%expect_test "toplevels of a component are evaluated separately" =
     (a 1)
     (b 2)
     (k <fun>)
-    ("Used value before it was defined (eg. because of recursion on values)"
-     (ident c/7))
+    ("c is used before its value is defined (a value may not depend on itself)" @
+     _none_)
     |}]
 ;;
 
@@ -978,7 +974,7 @@ let%expect_test "re-inference of empty matches on empty nominal types" =
         (seq
            (var "u")
            (quote
-              (Expr.Let
+              (expr_let
                  ( "f"
                  , [ "x", Some (Ty.con "void") ]
                  , None

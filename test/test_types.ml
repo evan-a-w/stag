@@ -66,9 +66,7 @@ let%expect_test "variant types are nominal" =
 ;;
 
 let%expect_test "abstract types" =
-  let id ty =
-    Toplevel.Let ("id_" ^ ty, [ typed "x" (Ty.con ty) ], None, var "x")
-  in
+  let id ty = top_let ("id_" ^ ty, [ typed "x" (Ty.con ty) ], None, var "x") in
   check
     [ Decl.abstract "t"
     ; Decl.abstract "box" ~params:[ Decl.ty "a"; Decl.row "r" ]
@@ -79,8 +77,7 @@ let%expect_test "abstract types" =
   check [ Decl.abstract "t"; id "t"; top "bad" [] (app (var "id_t") [ int 1 ]) ];
   check
     [ Decl.abstract "t"
-    ; Toplevel.Let
-        ("absurd", [ typed "x" (Ty.con "t") ], None, match_ (var "x") [])
+    ; top_let ("absurd", [ typed "x" (Ty.con "t") ], None, match_ (var "x") [])
     ];
   check [ Decl.abstract "t"; top "bad" [] (construct "T") ];
   check
@@ -438,7 +435,9 @@ let%expect_test "duplicate context entries" =
         ~annot:
           (Ty.con
              "code"
-             ~args:[ Row (Extend ("x", Ty.int, Extend ("x", Ty.int, Var "r"))) ])
+             ~args:
+               [ Row (Ty.row ~entries:[ "x", Ty.int; "x", Ty.int ] ~tail:"r" ())
+               ])
         (var "c")
     ];
   check
@@ -474,7 +473,7 @@ let%expect_test "arity and kind of type arguments" =
   check [ top "f" [ "x" ] ~annot:(Ty.con "bool" ~args:[ Ty Ty.int ]) (var "x") ];
   check
     [ Decl.list
-    ; Decl.variant "t" [ "A", [ Ty.con "list" ~args:[ Row Empty ] ] ]
+    ; Decl.variant "t" [ "A", [ Ty.con "list" ~args:[ Row (Ty.row ()) ] ] ]
     ];
   check
     [ stmt; Decl.variant "t" [ "A", [ Ty.con "stmt" ~args:[ Ty Ty.int ] ] ] ];
@@ -485,7 +484,8 @@ let%expect_test "arity and kind of type arguments" =
     (Type_arity_mismatch (type_name list) (expected 1) (got 0))
     (Type_arity_mismatch (type_name int) (expected 0) (got 1))
     (Type_arity_mismatch (type_name bool) (expected 0) (got 1))
-    (Type_arg_kind_mismatch (type_name list) (param (Ty a)))
+    type list['a] = Nil | Cons of 'a * list['a]
+    type t = A of list[{}]
     (Type_arg_kind_mismatch (type_name stmt) (param (Row r)))
     (Unbound_type list)
     (Unbound_module M)
@@ -513,7 +513,10 @@ let%expect_test "aliases" =
     ; top
         "g"
         [ "c" ]
-        ~annot:(Ty.con "code" ~args:[ Row (Extend ("x", Ty.int, Var "r")) ])
+        ~annot:
+          (Ty.con
+             "code"
+             ~args:[ Row (Ty.row ~entries:[ "x", Ty.int ] ~tail:"r" ()) ])
         (var "c")
     ; top "h" [] ~annot:(Ty.con "unused" ~args:[ Ty Ty.int ]) (bool true)
     ];
@@ -634,7 +637,7 @@ let%expect_test "context parameters" =
       ~params:[ Decl.row "r" ]
       [ ( "Stmt"
         , [ Ty.code Ty.unit ~tail:"r"
-          ; list_of (Ty.con "stmt" ~args:[ Row (Var "r") ])
+          ; list_of (Ty.con "stmt" ~args:[ Row (Ty.row ~tail:"r" ()) ])
           ] )
       ]
   in
@@ -658,7 +661,10 @@ let%expect_test "context parameters" =
     ; top
         "annotated"
         [ "s" ]
-        ~annot:(Ty.con "stmt" ~args:[ Row (Extend ("y", Ty.bool, Var "r")) ])
+        ~annot:
+          (Ty.con
+             "stmt"
+             ~args:[ Row (Ty.row ~entries:[ "y", Ty.bool ] ~tail:"r" ()) ])
         (var "s")
     ; top
         "body"
@@ -672,9 +678,9 @@ let%expect_test "context parameters" =
     type list['a] = Nil | Cons of 'a * list['a]
     type stmt[{..'a}] = Stmt of <unit>{..'a} * list[stmt[{..'a}]]
     val single : <unit>{..'a} -> stmt[{..'a}]
-    val uses_x : stmt[{x : 'a; ..'b}]
-    val nested : stmt[{x : int; ..'a}]
-    val annotated : stmt[{y : bool; ..'a}] -> stmt[{y : bool; ..'a}]
+    val uses_x : stmt[{`x : 'a; ..'b}]
+    val nested : stmt[{`x : int; ..'a}]
+    val annotated : stmt[{`y : bool; ..'a}] -> stmt[{`y : bool; ..'a}]
     val body : stmt[{..'a}] -> <unit>{..'a}
     |}]
 ;;

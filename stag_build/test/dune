@@ -1,0 +1,6 @@
+(library
+ (name test_stag_build)
+ (preprocess
+  (pps ppx_jane))
+ (inline_tests)
+ (libraries stag_build core core_unix core_unix.filename_unix core_unix.sys_unix))

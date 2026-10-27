@@ -43,7 +43,11 @@ let create
   { fresh = Fresh.create (); interpreter }
 ;;
 
-let lift result = Result.map_error result ~f:Typecheck_error.unification_error
+let lift ~loc result =
+  Result.map_error result ~f:(Typecheck_error.unification_error ~loc)
+;;
+
+let error ~loc kind = Error (Typecheck_error.create ~loc kind)
 
 (* Toplevels are checked on demand, so strongly connected components are found
    with Tarjan's algorithm as we go. [pending] are the visited toplevels whose
@@ -63,6 +67,10 @@ module Program_env = struct
     ; interpreter : Treewalk.t
     ; mutable ident_info : Typed.Ident_info.t Typed.Ident.Map.t
     ; sccs : Typed.Scc.t Queue.t
+    ; unusable_in_quotes : Typecheck_error.Unusable_in_quote.t String.Table.t
+      (** The latest free variable of a quote that a binding of its name,
+          unusable there, did not bind, to explain an error if the code is
+          spliced where the name is unbound. *)
     }
 
   let fresh_ident t name =
@@ -79,7 +87,7 @@ module Program_env = struct
   let bind t (binder : Source.Binder.t) ty ~level =
     let ident =
       match binder with
-      | Name name -> fresh_ident t name
+      | Name name -> fresh_ident t name.txt
       | Ident ident -> ident
     in
     add_info t ident ~ty ~level;
@@ -105,6 +113,7 @@ module Scope = struct
     ; module_ : Module_scope.t
     ; scc : Scc_frame.t
     ; annotation_vars : Type_env.Annotation_vars.t
+    ; in_expect_test : bool
     }
 
   and quote =
@@ -142,10 +151,13 @@ module Resolution = struct
     | Outside_quote of
         { quote : Scope.quote
         ; usable : Env.Entry.t option
+        ; unusable : Env.Entry.t option
         }
     (** Not bound in the enclosing [quote], so a free variable of it, unless
-        used directly while [usable]. Splices never capture the name. *)
-    | Unusable of Typecheck_error.t (** The error if the name is used. *)
+        used directly while [usable]. Splices never capture the name.
+        [unusable] is the entry of the name, if it has one that isn't
+        [usable]. *)
+    | Unusable of Typecheck_error.Kind.t (** The error if the name is used. *)
 
   let of_entry (scope : Scope.t) ~name (entry : Env.Entry.t option) =
     let usable entry =
@@ -159,8 +171,14 @@ module Resolution = struct
     | Some quote, Some entry
       when [%equal: int option] entry.quote_id (Some quote.id) -> Local entry
     | Some quote, Some entry when entry.level <= scope.level ->
-      Outside_quote { quote; usable = Option.some_if (usable entry) entry }
-    | Some quote, None -> Outside_quote { quote; usable = None }
+      let usable = usable entry in
+      Outside_quote
+        { quote
+        ; usable = Option.some_if usable entry
+        ; unusable = Option.some_if (not usable) entry
+        }
+    | Some quote, None ->
+      Outside_quote { quote; usable = None; unusable = None }
     | _, Some entry ->
       Unusable
         (Variable_used_at_wrong_level
@@ -169,10 +187,11 @@ module Resolution = struct
   ;;
 end
 
-let check_no_duplicates names ~error =
-  match List.find_a_dup names ~compare:String.compare with
-  | None -> Ok ()
-  | Some name -> Error (error name)
+(* Errs at the second occurrence of the first name repeated. *)
+let check_no_duplicates (names : Syntax.Name.t list) ~error:kind =
+  List.fold_result names ~init:String.Set.empty ~f:(fun seen { txt; loc } ->
+    if Set.mem seen txt then error ~loc (kind txt) else Ok (Set.add seen txt))
+  |> Result.ignore_m
 ;;
 
 let function_type
@@ -217,27 +236,36 @@ let field_ref (field : Type_env.Field.t) =
   }
 ;;
 
-let find_constructor (scope : Scope.t) : Source.Constructor.t -> _ = function
+let find_constructor (scope : Scope.t) ~loc : Source.Constructor.t -> _
+  = function
   | Path path ->
     Type_env.find_constructor scope.program.type_env scope.module_ path
-  | Ref { name; _ } -> Type_env.constructor scope.program.type_env name
+  | Ref { name; _ } -> Type_env.constructor scope.program.type_env name ~loc
 ;;
 
-let find_field (scope : Scope.t) : Source.Field.t -> _ = function
+(* Generated code's fields are at [loc], its node's. *)
+let field_loc ~loc : Source.Field.t -> Loc.t = function
+  | Path path -> path.loc
+  | Ref _ -> loc
+;;
+
+let find_field (scope : Scope.t) ~loc (field : Source.Field.t) =
+  match field with
   | Path path -> Type_env.find_field scope.program.type_env scope.module_ path
-  | Ref { name; _ } -> Type_env.field scope.program.type_env name
+  | Ref { name; _ } -> Type_env.field scope.program.type_env name ~loc
 ;;
 
 (* Pairs each of [args] with its instantiated type, along with the
    constructor and the result type. *)
-let constructor_types t (scope : Scope.t) constructor ~args =
+let constructor_types t (scope : Scope.t) constructor ~args ~loc =
   let%bind.Result (constructor : Type_env.Constructor.t) =
-    find_constructor scope constructor
+    find_constructor scope constructor ~loc
   in
   match List.zip args constructor.args with
   | Unequal_lengths ->
-    Error
-      (Typecheck_error.Constructor_arity_mismatch
+    error
+      ~loc
+      (Constructor_arity_mismatch
          { constructor = constructor.name
          ; expected = List.length constructor.args
          ; got = List.length args
@@ -253,52 +281,56 @@ let constructor_types t (scope : Scope.t) constructor ~args =
 
 (* Returns the instantiated record type, and each field with its [x] paired
    with its type. *)
-let record_fields t (scope : Scope.t) fields ~all_required =
+let record_fields t (scope : Scope.t) fields ~all_required ~loc =
   let%bind.Result fields =
     List.map fields ~f:(fun (field, x) ->
-      let%map.Result field = find_field scope field in
-      field, x)
+      let%map.Result found = find_field scope field ~loc in
+      found, field_loc field ~loc, x)
     |> Result.all
   in
   match fields with
-  | [] -> Error Typecheck_error.Empty_record
-  | ((first : Type_env.Field.t), _) :: _ ->
+  | [] -> error ~loc Empty_record
+  | ((first : Type_env.Field.t), _, _) :: _ ->
     let%bind.Result () =
-      List.fold_result fields ~init:() ~f:(fun () (field, _) ->
+      List.fold_result fields ~init:() ~f:(fun () (field, loc, _) ->
         if String.equal field.type_name first.type_name
         then Ok ()
         else
-          Error
-            (Typecheck_error.Fields_of_different_types
+          error
+            ~loc
+            (Fields_of_different_types
                { field = field.name
                ; expected_type = first.type_name
                ; actual_type = field.type_name
                }))
     in
-    let names = List.map fields ~f:(fun (field, _) -> field.name) in
     let%bind.Result () =
-      check_no_duplicates names ~error:(fun name ->
-        Typecheck_error.Duplicate_field name)
+      check_no_duplicates
+        (List.map fields ~f:(fun (field, loc, _) ->
+           { Located.txt = field.name; loc }))
+        ~error:(fun name -> Duplicate_field name)
     in
     let%map.Result () =
       match
         List.find first.all_fields ~f:(fun name ->
-          not (List.mem names name ~equal:String.equal))
+          not
+            (List.exists fields ~f:(fun (field, _, _) ->
+               String.equal field.name name)))
       with
-      | Some name when all_required ->
-        Error (Typecheck_error.Missing_field name)
+      | Some name when all_required -> error ~loc (Missing_field name)
       | Some _ | None -> Ok ()
     in
     let inst = Scope.instantiate t scope in
     let fields =
-      List.map fields ~f:(fun (field, x) -> field_ref field, (x, inst field.ty))
+      List.map fields ~f:(fun (field, _, x) ->
+        field_ref field, (x, inst field.ty))
     in
     inst first.record, fields
 ;;
 
 (* Returns the field, the instantiated record type and the field's type. *)
-let field_type t (scope : Scope.t) field =
-  let%map.Result (field : Type_env.Field.t) = find_field scope field in
+let field_type t (scope : Scope.t) field ~loc =
+  let%map.Result (field : Type_env.Field.t) = find_field scope field ~loc in
   let inst = Scope.instantiate t scope in
   let ty = inst field.ty in
   field_ref field, inst field.record, ty
@@ -323,18 +355,29 @@ module Poly_row = struct
 
   let check_distinct_labels entries =
     check_no_duplicates (List.map entries ~f:fst) ~error:(fun label ->
-      Typecheck_error.Duplicate_row_entry label)
+      Duplicate_row_entry label)
   ;;
 end
 
+module Pattern_var = struct
+  type t =
+    { ident : Typed.Ident.t
+    ; ty : Type.ty
+    ; loc : Loc.t
+    }
+
+  let bindings = List.map ~f:(fun t -> t.ident, t.ty)
+end
+
 let rec pattern_type t (scope : Scope.t) ~(pattern : Source.Pattern.t)
-  : ( Typed.Pattern.t * (Typed.Ident.t * Type.ty) list
-      , Typecheck_error.t )
-      Result.t
+  : (Typed.Pattern.t * Pattern_var.t list, Typecheck_error.t) Result.t
   =
-  let node desc ty = { Typed.Pattern.desc; ty } in
+  let loc = Source.Pattern.loc pattern in
+  let node desc ty = { Typed.Pattern.desc; ty; loc } in
   let bind binder ty =
-    Program_env.bind scope.program binder ty ~level:scope.level
+    let ident = Program_env.bind scope.program binder ty ~level:scope.level in
+    ( ident
+    , { Pattern_var.ident; ty; loc = Source.Binder.loc binder ~enclosing:loc } )
   in
   let sub_patterns patterns =
     let%map.Result typed, bindings =
@@ -344,7 +387,8 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Source.Pattern.t)
         ~f:(fun (typed, bindings) (pattern, ty) ->
           let%bind.Result pattern, bindings' = pattern_type t scope ~pattern in
           let%map.Result () =
-            Unify.unify_ty t ~ty1:ty ~ty2:pattern.Typed.Pattern.ty |> lift
+            Unify.unify_ty t ~ty1:ty ~ty2:pattern.Typed.Pattern.ty
+            |> lift ~loc:pattern.loc
           in
           pattern :: typed, bindings @ bindings')
     in
@@ -354,8 +398,8 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Source.Pattern.t)
   | Any -> Ok (node Any (Scope.fresh_ty t scope), [])
   | Var binder ->
     let ty = Scope.fresh_ty t scope in
-    let ident = bind binder ty in
-    Ok (node (Var ident) ty, [ ident, ty ])
+    let ident, var = bind binder ty in
+    Ok (node (Var ident) ty, [ var ])
   | Lit lit -> Ok (node (Lit lit) (Syntax.Lit.ty lit), [])
   | Tuple patterns ->
     let types = List.map patterns ~f:(fun _ -> Scope.fresh_ty t scope) in
@@ -365,13 +409,13 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Source.Pattern.t)
     node (Tuple patterns) (Type.TTuple types), bindings
   | Construct (constructor, args) ->
     let%bind.Result constructor, args, result =
-      constructor_types t scope constructor ~args
+      constructor_types t scope constructor ~args ~loc
     in
     let%map.Result args, bindings = sub_patterns args in
     node (Construct (constructor, args)) result, bindings
   | Record fields ->
     let%bind.Result record, fields =
-      record_fields t scope fields ~all_required:false
+      record_fields t scope fields ~all_required:false ~loc
     in
     let%map.Result patterns, bindings = sub_patterns (List.map fields ~f:snd) in
     ( node (Record (List.zip_exn (List.map fields ~f:fst) patterns)) record
@@ -397,7 +441,7 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Source.Pattern.t)
         ~init:([], [])
         ~f:(fun (fields, bindings) (label, pattern) ->
           let%map.Result pattern, bindings' = pattern_type t scope ~pattern in
-          (label, pattern) :: fields, bindings @ bindings')
+          (label.txt, pattern) :: fields, bindings @ bindings')
     in
     let fields = List.rev fields in
     let tail, rest, rest_bindings =
@@ -406,9 +450,8 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Source.Pattern.t)
       | Open -> Scope.fresh_row t scope, Open, []
       | Bind binder ->
         let tail = Scope.fresh_row t scope in
-        let ty = Fresh.record t tail in
-        let ident = bind binder ty in
-        tail, Bind ident, [ ident, ty ]
+        let ident, var = bind binder (Fresh.record t tail) in
+        tail, Bind ident, [ var ]
     in
     let row =
       Poly_row.present
@@ -444,12 +487,20 @@ module Variant_match = struct
         Program_env.bind scope.program binder rest ~level:scope.level
       in
       Ok
-        ( { Typed.Pattern.desc = Var ident; ty = Fresh.variant t row }
-        , [ ident, rest ] )
+        ( { Typed.Pattern.desc = Var ident
+          ; ty = Fresh.variant t row
+          ; loc = Source.Pattern.loc pattern
+          }
+        , [ { Pattern_var.ident
+            ; ty = rest
+            ; loc =
+                Source.Binder.loc binder ~enclosing:(Source.Pattern.loc pattern)
+            }
+          ] )
     | _ -> pattern_type t scope ~pattern
   ;;
 
-  let add_case handled ({ desc; ty = _ } : Typed.Pattern.t) =
+  let add_case handled ({ desc; ty = _; loc = _ } : Typed.Pattern.t) =
     match desc with
     | Poly_variant (tag, arg)
       when Option.for_all arg ~f:Typed.Pattern.is_irrefutable
@@ -467,7 +518,13 @@ module Variant_match = struct
   (* Without a top level catch-all, a variant scrutinee may only have the tags
      of the cases, and an empty match's none, unless the scrutinee is already
      known to be an empty nominal type. *)
-  let close t (scope : Scope.t) ~scrutinee (patterns : Typed.Pattern.t list) =
+  let close
+        t
+        (scope : Scope.t)
+        ~scrutinee
+        ~loc
+        (patterns : Typed.Pattern.t list)
+    =
     let patterns =
       List.map patterns ~f:(fun (pattern : Typed.Pattern.t) -> pattern.desc)
     in
@@ -493,24 +550,30 @@ module Variant_match = struct
           (List.map tags ~f:(fun tag -> tag, Scope.fresh_ty t scope))
           ~tail:REmpty
       in
-      Unify.unify_ty t ~ty1:(Fresh.variant t closed) ~ty2:scrutinee |> lift)
+      Unify.unify_ty t ~ty1:(Fresh.variant t closed) ~ty2:scrutinee |> lift ~loc)
   ;;
 end
 
 (* [name] is the context entry the variable is provided as, if it becomes a
    free variable of the quote: a local's name or a toplevel's canonical name. *)
-let resolution_type t (scope : Scope.t) ~name : Resolution.t -> _ = function
+let resolution_type t (scope : Scope.t) ~name ~loc : Resolution.t -> _
+  = function
   | Local entry ->
     Ok (Scope.instantiate t scope entry.scheme, Typed.Var_ref.Bound entry.binder)
   | Outside_quote { usable = Some entry; _ } ->
     Ok (Scope.instantiate t scope entry.scheme, Persistent entry.binder)
-  | Outside_quote { quote; usable = None } ->
+  | Outside_quote { quote; usable = None; unusable } ->
+    Option.iter unusable ~f:(fun entry ->
+      Hashtbl.set
+        scope.program.unusable_in_quotes
+        ~key:name
+        ~data:{ loc; var_level = entry.level; used_at = scope.level });
     let%map.Result ty =
       Unify.present_entry t ~row:quote.context ~name ~rank:quote.outside.rank
-      |> lift
+      |> lift ~loc
     in
     ty, Typed.Var_ref.Free name
-  | Unusable error -> Error error
+  | Unusable kind -> error ~loc kind
 ;;
 
 let finish_scc (program : Program_env.t) (members : Toplevel.t list) =
@@ -570,47 +633,71 @@ let finish_scc (program : Program_env.t) (members : Toplevel.t list) =
   Treewalk.add_scc program.interpreter scc
 ;;
 
-let rec var_type t (scope : Scope.t) ~(path : Syntax.Path.t) =
+let rec var_type t (scope : Scope.t) ~(path : Syntax.Path.t) ~loc =
+  let resolve ~name entry =
+    resolution_type t scope ~name ~loc (Resolution.of_entry scope ~name entry)
+  in
+  let prim prim = Ok (Prim.ty prim, Typed.Var_ref.Prim prim) in
   let local =
     match (path :> string list) with
     | [ name ] ->
       Env.find scope.locals name |> Option.map ~f:(fun entry -> name, entry)
     | _ -> None
   in
-  let%bind.Result name, entry =
-    match local with
-    | Some (name, entry) -> Ok (name, Some entry)
-    | None ->
-      (match%bind.Result Module_scope.find scope.module_ Value path with
-       | Some name ->
-         let%map.Result entry =
-           toplevel_entry
-             t
-             scope
-             (Hashtbl.find_exn scope.program.toplevels name)
-         in
-         name, Some entry
-       | None ->
-         (match (path :> string list) with
-          | [ name ] -> Ok (name, None)
-          | _ -> Error (Typecheck_error.Not_in_scope path)))
-  in
-  resolution_type t scope ~name (Resolution.of_entry scope ~name entry)
+  match local with
+  | Some (name, entry) -> resolve ~name (Some entry)
+  | None ->
+    (* Prims are outside the root module, so found only where the program has
+       nothing of their name: no value, or no module for a path. *)
+    (match
+       Module_scope.find scope.module_ Value path ~loc, (path :> string list)
+     with
+     | Ok (Some name), _ ->
+       let%bind.Result entry =
+         toplevel_entry
+           t
+           scope
+           (Hashtbl.find_exn scope.program.toplevels name)
+           ~loc
+       in
+       resolve ~name (Some entry)
+     | Ok None, [ name ] ->
+       (match Prim.find path with
+        | Some p -> prim p
+        | None -> resolve ~name None)
+     | Ok None, _ -> error ~loc (Not_in_scope path)
+     | Error ({ kind = Unbound_module _; _ } as error'), module_ :: _ ->
+       (match Prim.find path with
+        | Some p -> prim p
+        | None when Prim.is_module module_ -> error ~loc (Not_in_scope path)
+        | None -> Error error')
+     | (Error _ as error), _ -> error)
 
 (* Generated code's variables are already resolved, so are found by binder
    rather than by name, which may be shadowed. *)
-and var_ref_type t (scope : Scope.t) (var_ref : Typed.Var_ref.t) =
+and var_ref_type t (scope : Scope.t) (var_ref : Typed.Var_ref.t) ~loc =
   let resolve ~name entry =
-    resolution_type t scope ~name (Resolution.of_entry scope ~name (Some entry))
+    resolution_type
+      t
+      scope
+      ~name
+      ~loc
+      (Resolution.of_entry scope ~name (Some entry))
   in
   let not_in_scope name =
-    Error (Typecheck_error.Not_in_scope (Syntax.Path.of_string name))
+    error ~loc (Not_in_scope (Syntax.Path.of_string name))
   in
   match var_ref with
+  | Prim prim -> Ok (Prim.ty prim, var_ref)
   | Free name ->
     (match scope.quote with
      | Some quote ->
-       resolution_type t scope ~name (Outside_quote { quote; usable = None })
+       resolution_type
+         t
+         scope
+         ~name
+         ~loc
+         (Outside_quote { quote; usable = None; unusable = None })
      | None -> not_in_scope name)
   | Bound (Toplevel ident) | Persistent (Toplevel ident) ->
     let%bind.Result entry =
@@ -618,6 +705,7 @@ and var_ref_type t (scope : Scope.t) (var_ref : Typed.Var_ref.t) =
         t
         scope
         (Hashtbl.find_exn scope.program.toplevels ident.name)
+        ~loc
     in
     resolve ~name:ident.name entry
   | Bound (Local ident as binder) | Persistent (Local ident as binder) ->
@@ -631,7 +719,7 @@ and var_ref_type t (scope : Scope.t) (var_ref : Typed.Var_ref.t) =
 
 (* Toplevels may be used from code run at compile time, as if bound at its
    level, once they can be evaluated. *)
-and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) =
+and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
   let at_scope_level (entry : Env.Entry.t) =
     { entry with level = Int.min entry.level scope.level }
   in
@@ -650,9 +738,9 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) =
           doesn't depend on [toplevel]. *)
        Ok (at_scope_level entry)
      | None when scope.level < 0 ->
-       Error
-         (Typecheck_error.Compile_time_use_of_toplevel_being_checked
-            toplevel.ident.name)
+       error
+         ~loc
+         (Compile_time_use_of_toplevel_being_checked toplevel.ident.name)
      | None ->
        (* [toplevel] is in the component being checked, so this is a
           recursive reference. *)
@@ -673,7 +761,7 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) =
     let%bind.Result scc = check_toplevel t scope.program toplevel in
     scope.scc.lowlink <- Int.min scope.scc.lowlink scc.lowlink;
     scope.scc.pending <- scc.pending @ scope.scc.pending;
-    toplevel_entry t scope toplevel
+    toplevel_entry t scope toplevel ~loc
 
 and check_toplevel t program (toplevel : Toplevel.t)
   : (Scc_frame.t, Typecheck_error.t) Result.t
@@ -690,6 +778,7 @@ and check_toplevel t program (toplevel : Toplevel.t)
     ; module_ = toplevel.module_
     ; scc
     ; annotation_vars = Type_env.Annotation_vars.create t ~rank
+    ; in_expect_test = false
     }
   in
   let%bind.Result args, res_ty, ty =
@@ -737,25 +826,32 @@ and with_monomorphic_bindings (scope : Scope.t) bindings ~f =
 and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
   : (Typed.Expr.t, Typecheck_error.t) Result.t
   =
-  let node desc ty = { Typed.Expr.desc; ty } in
+  let loc = Source.Expr.loc expr in
+  let node desc ty = { Typed.Expr.desc; ty; loc } in
   let tys = List.map ~f:(fun (expr : Typed.Expr.t) -> expr.ty) in
   let labelled_tys =
     List.map ~f:(fun (label, (expr : Typed.Expr.t)) -> label, expr.ty)
   in
   match Source.Expr.view expr with
   | Lit l -> Ok (node (Lit l) (Syntax.Lit.ty l))
+  | Expect expected ->
+    (* Only where it runs as part of the test: not at compile time nor in
+       code. *)
+    if scope.in_expect_test && scope.level = 0 && Option.is_none scope.quote
+    then Ok (node (Expect expected) Type.unit)
+    else error ~loc Expect_outside_expect_test
   | Var (Path (path, annot)) ->
-    let%bind.Result ty, var_ref = var_type t scope ~path in
+    let%bind.Result ty, var_ref = var_type t scope ~path ~loc in
     let%map.Result () =
       match annot with
       | None -> Ok ()
       | Some annot ->
         let%bind.Result annot = Scope.elaborate scope annot in
-        Unify.unify_ty t ~ty1:ty ~ty2:annot |> lift
+        Unify.unify_ty t ~ty1:ty ~ty2:annot |> lift ~loc
     in
     node (Var var_ref) ty
   | Var (Ref var_ref) ->
-    let%map.Result ty, var_ref = var_ref_type t scope var_ref in
+    let%map.Result ty, var_ref = var_ref_type t scope var_ref ~loc in
     node (Var var_ref) ty
   | App (f, x) ->
     let a = Scope.fresh_ty t scope in
@@ -820,7 +916,8 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
       match subs with
       | Implicit ->
         let%map.Result captures =
-          substitute_from_scope t scope ~context ~may_capture:(fun _ _ -> true)
+          substitute_from_scope t scope ~context ~loc ~may_capture:(fun _ _ ->
+            true)
         in
         Typed.Expr.Subs.Implicit captures
       | Providers providers ->
@@ -829,6 +926,7 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
             t
             scope
             ~context
+            ~loc
             ~may_capture:(fun name binder ->
               [%equal: Typed.Binder.t option]
                 (Map.find providers name)
@@ -836,13 +934,15 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
         in
         Typed.Expr.Subs.Implicit captures
       | Explicit subs ->
-        let%map.Result subs = substitute_explicitly t scope ~context ~subs in
+        let%map.Result subs =
+          substitute_explicitly t scope ~context ~subs ~loc
+        in
         Typed.Expr.Subs.Explicit subs
     in
     (match scope.quote with
      | Some _ -> Ok (node (Splice { code; subs }) inner)
      | None ->
-       let%map.Result expansion = expand t scope ~code ~subs ~ty:inner in
+       let%map.Result expansion = expand t scope ~code ~subs ~ty:inner ~loc in
        node (Toplevel_splice { code; expansion }) inner)
   | Tuple exprs ->
     let%map.Result exprs =
@@ -851,18 +951,18 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
     node (Tuple exprs) (Type.TTuple (tys exprs))
   | Construct (constructor, args) ->
     let%bind.Result constructor, args, result =
-      constructor_types t scope constructor ~args
+      constructor_types t scope constructor ~args ~loc
     in
     let%map.Result args = check_exprs t scope args in
     node (Construct (constructor, args)) result
   | Record fields ->
     let%bind.Result record, fields =
-      record_fields t scope fields ~all_required:true
+      record_fields t scope fields ~all_required:true ~loc
     in
     let%map.Result exprs = check_exprs t scope (List.map fields ~f:snd) in
     node (Record (List.zip_exn (List.map fields ~f:fst) exprs)) record
   | Field (expr, field) ->
-    let%bind.Result field, record, field_ty = field_type t scope field in
+    let%bind.Result field, record, field_ty = field_type t scope field ~loc in
     let%map.Result expr = check_expr t scope ~expr ~ty:record in
     node (Field (expr, field)) field_ty
   | Match (expr, cases) ->
@@ -878,17 +978,19 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
           in
           let%bind.Result () =
             check_no_duplicates
-              (List.map bindings ~f:(fun ((ident : Typed.Ident.t), _) ->
-                 ident.name))
-              ~error:(fun name ->
-                Typecheck_error.Duplicate_pattern_variable name)
+              (List.map bindings ~f:(fun (var : Pattern_var.t) ->
+                 { Located.txt = var.ident.name; loc = var.loc }))
+              ~error:(fun name -> Duplicate_pattern_variable name)
           in
           let%bind.Result () =
-            Unify.unify_ty t ~ty1:scrutinee.ty ~ty2:typed_pattern.ty |> lift
+            Unify.unify_ty t ~ty1:scrutinee.ty ~ty2:typed_pattern.ty
+            |> lift ~loc:typed_pattern.loc
           in
           let%map.Result body =
-            with_monomorphic_bindings scope bindings ~f:(fun () ->
-              check_expr t scope ~expr:body ~ty:result)
+            with_monomorphic_bindings
+              scope
+              (Pattern_var.bindings bindings)
+              ~f:(fun () -> check_expr t scope ~expr:body ~ty:result)
           in
           ( Variant_match.add_case handled typed_pattern
           , (typed_pattern, body) :: typed_cases ))
@@ -905,6 +1007,7 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
           t
           scope
           ~scrutinee:scrutinee.ty
+          ~loc
           (List.map typed_cases ~f:fst)
     in
     node (Match (scrutinee, typed_cases)) result
@@ -959,7 +1062,7 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
 
 (* Runs the toplevel splice [code], then infers the code it generates here,
    with its explicit substitutions bound by lets around it. *)
-and expand t (scope : Scope.t) ~code ~subs ~ty =
+and expand t (scope : Scope.t) ~code ~subs ~ty ~loc =
   let program = scope.program in
   let bindings, entry =
     match (subs : Typed.Expr.t Typed.Expr.Subs.t) with
@@ -971,7 +1074,12 @@ and expand t (scope : Scope.t) ~code ~subs ~ty =
     | Explicit subs ->
       let bindings =
         List.map subs ~f:(fun (name, (sub : Typed.Expr.t)) ->
-          Program_env.bind program (Name name) sub.ty ~level:scope.level, sub)
+          ( Program_env.bind
+              program
+              (Name (Located.create ~loc name))
+              sub.ty
+              ~level:scope.level
+          , sub ))
       in
       ( bindings
       , fun name ->
@@ -983,7 +1091,7 @@ and expand t (scope : Scope.t) ~code ~subs ~ty =
   let%bind.Result generated =
     Treewalk.splice program.interpreter ~code ~level:(scope.level - 1) ~entry
     |> Result.map_error ~f:(fun error ->
-      Typecheck_error.Splice_evaluation_failed { code; error })
+      Typecheck_error.create ~loc (Splice_evaluation_failed { code; error }))
   in
   let expansion =
     match
@@ -1007,18 +1115,21 @@ and expand t (scope : Scope.t) ~code ~subs ~ty =
        { Typed.Expr.desc =
            Let { ident; args = []; generalized = false; body; in_ }
        ; ty = in_.ty
+       ; loc
        }))
 
 and labelled_types t scope fields =
   let%bind.Result () = Poly_row.check_distinct_labels fields in
-  List.map fields ~f:(fun (label, expr) ->
+  List.map fields ~f:(fun ((label : Syntax.Name.t), expr) ->
     let%map.Result expr = expr_type t scope ~expr in
-    label, expr)
+    label.txt, expr)
   |> Result.all
 
 and check_expr t scope ~expr ~ty =
   let%bind.Result expr = expr_type t scope ~expr in
-  let%map.Result () = Unify.unify_ty t ~ty1:ty ~ty2:expr.ty |> lift in
+  let%map.Result () =
+    Unify.unify_ty t ~ty1:ty ~ty2:expr.ty |> lift ~loc:expr.loc
+  in
   expr
 
 and check_exprs t scope exprs =
@@ -1036,7 +1147,7 @@ and check_open_record t scope expr entries =
 
 (* Returns the binder each entry that may be captured is captured by: entries
    bound in the quote may be captured by their binders if [may_capture]. *)
-and substitute_from_scope t (scope : Scope.t) ~context ~may_capture =
+and substitute_from_scope t (scope : Scope.t) ~context ~loc ~may_capture =
   let rec go context ~seen ~captures =
     match Type.canonical_row context with
     | REmpty -> Ok captures
@@ -1046,7 +1157,7 @@ and substitute_from_scope t (scope : Scope.t) ~context ~may_capture =
         | _ when Set.mem seen name -> Ok None
         | Absent -> Ok None
         | Present | PVar _ ->
-          substitute_entry t scope ~name ~presence ~ty ~may_capture
+          substitute_entry t scope ~name ~presence ~ty ~loc ~may_capture
       in
       let captures =
         Option.fold captured ~init:captures ~f:(fun captures binder ->
@@ -1057,19 +1168,19 @@ and substitute_from_scope t (scope : Scope.t) ~context ~may_capture =
       (match scope.quote with
        | None ->
          let%map.Result () =
-           Unify.unify_row t ~row1:tail ~row2:REmpty |> lift
+           Unify.unify_row t ~row1:tail ~row2:REmpty |> lift ~loc
          in
          captures
        | Some quote ->
          let%map.Result captured =
-           substitute_tail t scope quote ~tail ~seen ~may_capture
+           substitute_tail t scope quote ~tail ~seen ~loc ~may_capture
          in
          captured @ captures)
   in
   let%map.Result captures = go context ~seen:String.Set.empty ~captures:[] in
   String.Map.of_alist_exn captures
 
-and substitute_entry t (scope : Scope.t) ~name ~presence ~ty ~may_capture =
+and substitute_entry t (scope : Scope.t) ~name ~presence ~ty ~loc ~may_capture =
   let%bind.Result entry =
     match Env.find scope.locals name, scope.quote with
     | Some entry, _ -> Ok (Some entry)
@@ -1085,20 +1196,37 @@ and substitute_entry t (scope : Scope.t) ~name ~presence ~ty ~may_capture =
          , Type.canonical_presence presence )
        with
        | Some toplevel, Present ->
-         toplevel_entry t scope toplevel |> Result.map ~f:Option.some
+         toplevel_entry t scope toplevel ~loc |> Result.map ~f:Option.some
        | None, _ | Some _, (Absent | PVar _) -> Ok None)
   in
   match Resolution.of_entry scope ~name entry with
-  | Unusable error ->
+  | Unusable (Not_in_scope _)
+    when Option.is_none scope.quote
+         && Hashtbl.mem scope.program.unusable_in_quotes name ->
+    let unusable = Hashtbl.find_exn scope.program.unusable_in_quotes name in
+    let%map.Result () =
+      Unify.unify_presence
+        ~presence1:presence
+        ~presence2:Absent
+        ~error:
+          (Typecheck_error.create
+             ~loc
+             (Free_in_spliced_code { name; unusable }))
+    in
+    None
+  | Unusable kind ->
     (* Code that may use [name] can't, so doesn't. *)
     let%map.Result () =
-      Unify.unify_presence ~presence1:presence ~presence2:Absent ~error
+      Unify.unify_presence
+        ~presence1:presence
+        ~presence2:Absent
+        ~error:(Typecheck_error.create ~loc kind)
     in
     None
   | Local entry when may_capture name entry.binder ->
     let%map.Result () =
       Unify.unify_ty t ~ty1:ty ~ty2:(Scope.instantiate t scope entry.scheme)
-      |> lift
+      |> lift ~loc
     in
     Some entry.binder
   | Local _ ->
@@ -1107,7 +1235,7 @@ and substitute_entry t (scope : Scope.t) ~name ~presence ~ty ~may_capture =
         t
         ~row1:(RExtend (name, presence, ty, REmpty))
         ~row2:(RExtend (name, Absent, ty, REmpty))
-      |> lift
+      |> lift ~loc
     in
     None
   | Outside_quote { quote; _ } ->
@@ -1117,7 +1245,7 @@ and substitute_entry t (scope : Scope.t) ~name ~presence ~ty ~may_capture =
         ~row:(RExtend (name, presence, ty, REmpty))
         ~bound:quote.context
         ~shadowed:String.Set.empty
-      |> lift
+      |> lift ~loc
     in
     None
 
@@ -1125,7 +1253,7 @@ and substitute_entry t (scope : Scope.t) ~name ~presence ~ty ~may_capture =
    would be captured here explicit entries, absent unless [may_capture]. The
    rest must be free variables of the quote. Returns the binders of the ones
    that may be captured. *)
-and substitute_tail t scope (quote : Scope.quote) ~tail ~seen ~may_capture =
+and substitute_tail t scope (quote : Scope.quote) ~tail ~seen ~loc ~may_capture =
   let captured =
     Env.visible scope.locals
     |> List.filter_map ~f:(fun (name, entry) ->
@@ -1154,7 +1282,7 @@ and substitute_tail t scope (quote : Scope.quote) ~tail ~seen ~may_capture =
            ~init:rest
            ~f:(fun (name, presence, ty, _) rest ->
              Type.RExtend (name, presence, ty, rest)))
-    |> lift
+    |> lift ~loc
   in
   let%map.Result () =
     Unify.constrain_row
@@ -1164,34 +1292,37 @@ and substitute_tail t scope (quote : Scope.quote) ~tail ~seen ~may_capture =
       ~shadowed:
         (List.fold captured ~init:seen ~f:(fun seen (name, _, _, _) ->
            Set.add seen name))
-    |> lift
+    |> lift ~loc
   in
   List.filter_map captured ~f:(fun (name, _, _, binder) ->
     Option.map binder ~f:(fun binder -> name, binder))
 
-and substitute_explicitly t scope ~context ~subs =
+and substitute_explicitly t scope ~context ~subs ~loc =
   let%bind.Result () =
     check_no_duplicates (List.map subs ~f:fst) ~error:(fun name ->
-      Typecheck_error.Duplicate_substitution name)
+      Duplicate_substitution name)
   in
   let%bind.Result provided =
-    List.fold_result subs ~init:[] ~f:(fun acc (name, expr) ->
-      let%map.Result expr =
-        match expr with
-        | None ->
-          let%map.Result ty, var_ref =
-            var_type t scope ~path:(Syntax.Path.of_string name)
-          in
-          { Typed.Expr.desc = Var var_ref; ty }
-        | Some expr -> expr_type t scope ~expr
-      in
-      (name, expr) :: acc)
+    List.fold_result
+      subs
+      ~init:[]
+      ~f:(fun acc ({ txt = name; loc = name_loc }, expr) ->
+        let%map.Result expr =
+          match expr with
+          | None ->
+            let%map.Result ty, var_ref =
+              var_type t scope ~path:(Syntax.Path.of_string name) ~loc:name_loc
+            in
+            { Typed.Expr.desc = Var var_ref; ty; loc = name_loc }
+          | Some expr -> expr_type t scope ~expr
+        in
+        (name, expr) :: acc)
   in
   let row =
     List.fold provided ~init:Type.REmpty ~f:(fun rest (name, expr) ->
       Type.RExtend (name, Scope.fresh_presence t scope, expr.ty, rest))
   in
-  let%map.Result () = Unify.unify_row t ~row1:context ~row2:row |> lift in
+  let%map.Result () = Unify.unify_row t ~row1:context ~row2:row |> lift ~loc in
   List.rev provided
 ;;
 
@@ -1202,12 +1333,34 @@ module Checked = struct
     }
 end
 
+let check_expect_test t program module_ ~name ~body ~loc =
+  let rank = 1 in
+  let scope =
+    { Scope.program
+    ; level = 0
+    ; rank
+    ; locals = Env.create ()
+    ; quote = None
+    ; module_
+    ; scc = { Scc_frame.lowlink = Fresh.id t; pending = [] }
+    ; annotation_vars = Type_env.Annotation_vars.create t ~rank
+    ; in_expect_test = true
+    }
+  in
+  let%map.Result body =
+    check_expr t scope ~expr:(Source.Expr.Syntax body) ~ty:Type.unit
+  in
+  { Typed.Expect_test.name; body; loc }
+;;
+
 let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
   : (Checked.t, Typecheck_error.t) Result.t
   =
   let%bind.Result root =
     Module_scope.create
-      (List.map Type_env.builtins ~f:Syntax.Toplevel.type_ @ program)
+      (List.map Type_env.builtins ~f:(fun decl ->
+         Located.create (Syntax.Toplevel.Type decl))
+       @ program)
   in
   let%bind.Result type_env = Type_env.create root t in
   let program_env =
@@ -1216,14 +1369,15 @@ let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
     ; interpreter
     ; ident_info = Typed.Ident.Map.empty
     ; sccs = Queue.create ()
+    ; unusable_in_quotes = String.Table.create ()
     }
   in
   let toplevels =
     Module_scope.toplevels root
     |> List.filter_map ~f:(fun (module_, (toplevel : Syntax.Toplevel.t)) ->
-      match toplevel with
+      match toplevel.txt with
       | Let (name, args, annot, expr) ->
-        let name = Module_scope.canonical_name module_ name in
+        let name = Module_scope.canonical_name module_ name.txt in
         let toplevel =
           { Toplevel.ident = Program_env.fresh_ident program_env name
           ; module_
@@ -1235,41 +1389,56 @@ let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
         in
         Hashtbl.add_exn program_env.toplevels ~key:name ~data:toplevel;
         Some toplevel
-      | Type _ | Module _ -> None)
+      | Type _ | Module _ | Expect_test _ -> None)
   in
-  let%map.Result () =
+  let%bind.Result () =
     List.fold_result toplevels ~init:() ~f:(fun () toplevel ->
       match toplevel.state with
       | Unchecked -> check_toplevel t program_env toplevel |> Result.ignore_m
       | In_progress _ | Done _ -> Ok ())
   in
+  let%map.Result expect_tests =
+    Module_scope.toplevels root
+    |> List.filter_map ~f:(fun (module_, (toplevel : Syntax.Toplevel.t)) ->
+      match toplevel.txt with
+      | Expect_test { name; body } -> Some (module_, name, body, toplevel.loc)
+      | Let _ | Type _ | Module _ -> None)
+    |> List.map ~f:(fun (module_, name, body, loc) ->
+      check_expect_test t program_env module_ ~name ~body ~loc)
+    |> Result.all
+  in
   let rec signature module_ toplevels =
     let canonical_name = Module_scope.canonical_name module_ in
-    List.map
+    List.filter_map
       toplevels
-      ~f:(fun (toplevel : Syntax.Toplevel.t) : Signature.Item.t ->
-        match toplevel with
-        | Let (name, _, _, _) ->
+      ~f:(fun (toplevel : Syntax.Toplevel.t) : Signature.Item.t option ->
+        match toplevel.txt with
+        | Expect_test _ -> None
+        | Let ({ txt = name; loc = _ }, _, _, _) ->
           let toplevel =
             Hashtbl.find_exn program_env.toplevels (canonical_name name)
           in
           (match toplevel.state with
            | Done { entry = { scheme; persistent; _ }; _ } ->
-             Value { name; scheme; persistent }
+             Some (Value { name; scheme; persistent })
            | Unchecked | In_progress _ ->
              raise_s
                [%message "typecheck: toplevel not done" (toplevel : Toplevel.t)])
         | Type decl ->
-          Type (Type_env.find_decl_exn type_env (canonical_name decl.name))
-        | Module (name, toplevels) ->
-          Module
-            { name
-            ; items = signature (Module_scope.enter module_ name) toplevels
-            })
+          Some
+            (Type
+               (Type_env.find_decl_exn type_env (canonical_name decl.name.txt)))
+        | Module ({ txt = name; loc = _ }, toplevels) ->
+          Some
+            (Module
+               { name
+               ; items = signature (Module_scope.enter module_ name) toplevels
+               }))
   in
   { Checked.signature = signature root program
   ; program =
       { sccs = Queue.to_list program_env.sccs
+      ; expect_tests
       ; ident_info = program_env.ident_info
       }
   }

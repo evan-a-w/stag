@@ -3,11 +3,7 @@ open Stag
 open Syntax
 open Helpers
 
-let prim_names =
-  List.filter_map prims ~f:(function
-    | Toplevel.Let (name, _, _, _) -> Some name
-    | Type _ | Module _ -> None)
-;;
+let prim_names = List.filter_map prims ~f:let_name
 
 (* Evaluates [program], then prints its toplevels in evaluation order, or the
    error evaluation stopped at and the toplevels evaluated before it. *)
@@ -37,16 +33,7 @@ let nat n =
 
 let%expect_test "values" =
   run
-    [ top
-        "lits"
-        []
-        (tuple
-           [ int 1
-           ; bool true
-           ; Expr.Lit (String "s")
-           ; Expr.Lit (Char 'c')
-           ; unit
-           ])
+    [ top "lits" [] (tuple [ int 1; bool true; string "s"; char 'c'; unit ])
     ; top "tags" [] (tuple [ tag "A"; tag "B" ~arg:(int 1) ])
     ; top "poly_record" [] (poly_record [ "a", int 1; "b", bool false ])
     ; top "fn" [ "x" ] (var "x")
@@ -169,8 +156,8 @@ let%expect_test "recursive values" =
   run [ top "x" [] (app (var "add") [ var "x"; int 1 ]) ];
   [%expect
     {|
-    ("Used value before it was defined (eg. because of recursion on values)"
-     (ident x/4))
+    ("x is used before its value is defined (a value may not depend on itself)" @
+     _none_)
     |}];
   run
     [ top "z" [] (app (var "g") [ tag "B" ])
@@ -182,8 +169,8 @@ let%expect_test "recursive values" =
   [%expect
     {|
     (g <fun>)
-    ("Used value before it was defined (eg. because of recursion on values)"
-     (ident z/4))
+    ("z is used before its value is defined (a value may not depend on itself)" @
+     _none_)
     |}];
   (* A closure may refer to the value it is part of. *)
   run
@@ -241,7 +228,7 @@ let%expect_test "nominal types" =
     (fields (Tuple 3 true))
     (matched (Tuple 3 true))
     (only_a <fun>)
-    ("Match failure" (value (B 1 true)))
+    ("Match failure: no case matches the value B (1, true)" @ _none_)
     |}]
 ;;
 
@@ -257,7 +244,7 @@ let%expect_test "polymorphic records and variants" =
         []
         (match_
            r
-           [ ( Pat.poly_record ~rest:(Bind "rest") [ "a", Pat.var "a" ]
+           [ ( Pat.poly_record ~bind:"rest" [ "a", Pat.var "a" ]
              , tuple [ var "a"; var "rest" ] )
            ])
     ; top
@@ -455,9 +442,9 @@ let%expect_test "evaluation is left to right" =
                  ~subs:[ "b", Some (only "B"); "a", Some (only "C") ]
                  (quote (tuple [ var "a"; var "b" ])))))
     ];
-  [%expect {| ("Match failure" (value (B))) |}];
+  [%expect {| ("Match failure: no case matches the value B" @ _none_) |}];
   run [ abc; top "tuple" [] (tuple [ only "B"; only "C" ]) ];
-  [%expect {| ("Match failure" (value (B))) |}]
+  [%expect {| ("Match failure: no case matches the value B" @ _none_) |}]
 ;;
 
 let%expect_test "toplevel splices provided by toplevels and persistent locals" =
@@ -505,7 +492,7 @@ let%expect_test "spliced code binding patterns and recursive closures" =
   let under x =
     match_
       (poly_record [ "x", int x; "y", int 0 ])
-      [ ( Pat.poly_record ~rest:(Bind "rest") [ "x", Pat.var "x" ]
+      [ ( Pat.poly_record ~bind:"rest" [ "x", Pat.var "x" ]
         , tuple [ splice (var "c"); var "rest" ] )
       ]
   in
@@ -645,6 +632,6 @@ let%expect_test
        (((Construct ((type_name abc) (name A) (index 0)) () : abc)
          (Quote (Lit (Int 0) : int) : <int>{})))
        : <int>{}))
-     (error ("Match failure" (value (C)))))
+     (error ("Match failure: no case matches the value C" @ _none_)))
     |}]
 ;;

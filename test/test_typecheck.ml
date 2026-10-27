@@ -41,9 +41,9 @@ let%expect_test "literals and application" =
   check
     [ top "i" [] (int 1)
     ; top "b" [] (bool false)
-    ; top "s" [] (Lit (String "s"))
-    ; top "c" [] (Lit (Char 'c'))
-    ; top "u" [] (Lit Unit)
+    ; top "s" [] (string "s")
+    ; top "c" [] (char 'c')
+    ; top "u" [] unit
     ; top "sum" [] (app (var "add") [ int 1; int 2 ])
     ; top "partial" [] (app (var "add") [ int 1 ])
     ];
@@ -466,7 +466,7 @@ let%expect_test "splice with implicit substitutions" =
             (Lit (Int 1) : int) : <'_c>{})))
          : <'_c>{}))
        : <'_c>{}))
-     (error ("Match failure" (value 1))))
+     (error ("Match failure: no case matches the value 1" @ _none_)))
     (Unification_error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     |}]
