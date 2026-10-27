@@ -7,8 +7,10 @@ node, for good errors.
 ## Lexical
 
 - Comments `(* ... *)`, nesting, as OCaml.
-- Literals: integers of any size (digits, kept as a string), `true`, `false`,
-  chars `'c'`, strings `"s"` with OCaml escapes (`\n \t \\ \" \' \ddd`), `()`.
+- Literals: integers (OCaml's native `int`; a literal out of its range is a
+  lexing error), `true`, `false`, chars `'c'`, strings `"s"` with OCaml
+  escapes (`\n \t \\ \" \' \ddd`), quoted strings `{|raw|}` and
+  `{id|raw|id}` (no escapes; `id` is lowercase letters and `_`), `()`.
 - `lowercase_ident`: values, types, fields, type params. `Capitalized_ident`:
   constructors and modules. `` `Tag ``: polymorphic variant tags and
   polymorphic record fields (both are structural labels). `'a`: type
@@ -18,6 +20,7 @@ node, for good errors.
 - Keywords: `let in match with type of module struct end`, `true false`.
 - `@` and `@@` are reserved (for modes, see below).
 - Staging tokens: `.<` `>.` `.~`.
+- Expect test tokens: `let%expect_test`, `[%expect`.
 
 ## Types
 
@@ -112,12 +115,69 @@ type t                                 (* abstract *)
 module M = struct ... end
 ```
 
+## Primitives
+
+Built-in functions, implemented by the interpreter, available in every program
+at any level (in quotes and at compile time too, like persistent toplevels):
+
+```ocaml
+print_string : string -> unit      print_endline : string -> unit
+print_int : int -> unit            print_char : char -> unit
+Int.add sub mul div rem : int -> int -> int     Int.neg : int -> int
+Int.equal lt le gt ge : int -> int -> bool      Int.compare : int -> int -> int
+Int.to_string : int -> string      Int.of_string : string -> int
+String.concat : string -> string -> string      String.length : string -> int
+String.get : string -> int -> char              String.sub : string -> int -> int -> string
+String.equal : string -> string -> bool         String.compare : string -> string -> int
+Char.equal : char -> char -> bool  Char.code : char -> int
+Char.of_code : int -> char         Char.to_string : char -> string
+Bool.not : bool -> bool            Bool.equal : bool -> bool -> bool
+```
+
+They are outside the program's root module, so the program's own definitions
+shadow them: a toplevel `print_int` hides the prim, and a module `Int` hides
+all of `Int.*`. Division by zero, out of bounds indices, unparsable
+`Int.of_string` and invalid `Char.of_code` are runtime errors at the
+application.
+
 ## Files
 
 Files are modules, as in OCaml: `foo_bar.stag` is the module `Foo_bar`,
-containing the file's declarations. A program is a set of files, and since
-toplevels in any module may refer to each other in any order, files may refer
-to each other in any order too.
+containing the file's declarations. A file name must be a letter followed by
+letters, digits, `_` and `'`, then `.stag`. A program is a set of files, and
+since toplevels in any module may refer to each other in any order, files may
+refer to each other in any order too.
+
+Evaluation: each toplevel is evaluated after those it refers to. Files are
+evaluated in dependency order: a file depends on the files its toplevels refer
+to; strongly connected components of files are evaluated after those they
+depend on, ties broken by the order the files are given, and the files of a
+component in the order given. Within that, toplevels are evaluated in order.
+Toplevels used by toplevel splices are evaluated at compile time, once.
+
+## Expect tests
+
+As OCaml's ppx_expect:
+
+```ocaml
+let%expect_test "power" =
+  print_int (Int.add 3 2);
+  [%expect {| 5 |}]
+```
+
+`let%expect_test "name" = e` is a toplevel (in any module) whose body has type
+`unit`. `[%expect {|...|}]` (or `[%expect "..."]`, or `[%expect]` for empty)
+has type `unit` and is allowed only in a test's body, outside quotes and
+toplevel splices.
+
+Tests run only when testing (`stag test`), after the program's toplevels are
+evaluated, in order. Each `[%expect]` compares the output printed since the
+previous one with its string, both normalized: leading and trailing blank lines
+and trailing whitespace removed, and the indentation common to all lines
+removed. Output after the last `[%expect]` must be empty. A runtime error fails
+the test, and stops it. Mismatches are corrected in a copy of the file:
+`{| 5 |}` for one line, otherwise an indented block, and trailing output as a
+new `[%expect]` at the end of the test.
 
 ## Later
 
