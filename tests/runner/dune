@@ -1,8 +1,5 @@
 (executable
- (name stag_expect)
- (libraries stag_syntax stag_driver core core_unix.command_unix)
- (preprocess
-  (pps ppx_jane)))
+ (name dune_rules))
 
 (rule
  (deps
@@ -10,4 +7,4 @@
  (action
   (with-stdout-to
    dune.inc
-   (run ./stag_expect.exe dune-rules %{deps}))))
+   (run ./dune_rules.exe %{deps}))))

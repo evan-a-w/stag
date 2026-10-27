@@ -67,12 +67,8 @@ let check_files ?(limits = limits) files =
   | Ok driver -> Some { driver; prelude = [] }
 ;;
 
-let is_prelude t (ident : Typed.Ident.t) =
-  List.exists t.prelude ~f:(fun toplevel ->
-    match (toplevel : Syntax.Toplevel.t).txt with
-    | Let (name, _, _, _) -> String.equal name.txt ident.name
-    | Type _ | Module _ | Expect_test _ -> false)
-;;
+(* Toplevels get stamps in program order, from 0, so the prelude's come first. *)
+let is_prelude t (ident : Typed.Ident.t) = ident.stamp < List.length t.prelude
 
 let members t =
   List.concat_map (checked t).program.sccs ~f:(fun scc -> scc.members)
@@ -116,7 +112,7 @@ let toplevel_idents (program : Typed.Program.t) =
   |> Typed.Ident.Set.of_list
 ;;
 
-(* Toplevels get the first stamps, then the prelude's locals, as the prelude is
+(* The prelude's locals get the stamps after the toplevels', as the prelude is
    checked first. *)
 let prelude_locals =
   lazy

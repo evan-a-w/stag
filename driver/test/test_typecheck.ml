@@ -602,6 +602,7 @@ let toplevel_splice_level x = .~x
 ;;
 
 let%expect_test "staged power" =
+  (* No negative literals: [-1] is [Int.neg 1]. *)
   let power =
     "let power n x = cond (eq n 0) .<1>. .<add .~x .~(power (add n (Int.neg \
      1)) x)>.\n"
@@ -775,6 +776,7 @@ let after = .<add .~closed x>.
 ;;
 
 let%expect_test "mutually recursive staged functions" =
+  (* No negative literals: [-1] is [Int.neg 1]. *)
   let ping_pong =
     {|
 let ping n c = cond (eq n 0) c .<let x = 1 in .~(pong n c)>.

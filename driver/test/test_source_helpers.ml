@@ -179,3 +179,40 @@ let%expect_test "program" =
     2
     |}]
 ;;
+
+let%expect_test "toplevels named like the prelude's" =
+  run
+    ~bodies:[ "M.add" ]
+    {|
+module M = struct let add x = x end
+let id2 = M.add 1
+|};
+  run
+    ~prelude:false
+    ~bodies:[ "add" ]
+    {|
+let add x = x
+|};
+  check
+    {|
+let add x = x
+|};
+  [%expect
+    {|
+    module M : sig
+      val add : 'a -> 'a
+    end
+    val id2 : int
+    (M.add/4 (Var (Bound (Local x/15)) : 'a))
+    -- evaluated at compile time
+    -- evaluated
+    (M.add <fun>)
+    (id2 1)
+    val add : 'a -> 'a
+    (add/0 (Var (Bound (Local x/1)) : 'a))
+    -- evaluated at compile time
+    -- evaluated
+    (add <fun>)
+    ((Duplicate_toplevel add) @ t.stag:2:4-7)
+    |}]
+;;

@@ -25,16 +25,16 @@ let report files diagnostic =
   eprintf "%s%!" (Diagnostic.to_string_hum ~contents diagnostic)
 ;;
 
-let check files =
-  match Driver.check_files files with
+let check ~limits files =
+  match Driver.check_files ~limits files with
   | Ok driver -> driver
   | Error error ->
     report files (Diagnostic.of_driver_error error);
     exit 1
 ;;
 
-let eval files driver =
-  match Driver.eval driver with
+let eval ~limits files driver =
+  match Driver.eval ~limits driver with
   | Ok () -> ()
   | Error error ->
     report files (Diagnostic.of_runtime_error error);
@@ -45,23 +45,51 @@ let files_param =
   Command.Param.(anon (non_empty_sequence_as_list ("FILE" %: string)))
 ;;
 
+let limits_param =
+  let%map_open.Command fuel =
+    flag
+      "fuel"
+      (optional int)
+      ~doc:"N evaluation steps allowed in each phase (default: unlimited)"
+  and max_depth =
+    flag
+      "max-depth"
+      (optional int)
+      ~doc:"N nesting of evaluation allowed (default: unlimited)"
+  and time_limit =
+    flag
+      "time-limit"
+      (optional Time_ns.Span.arg_type)
+      ~doc:"SPAN time allowed for each phase, eg. 10s (default: unlimited)"
+  in
+  { Limits.fuel; max_depth; time_limit }
+;;
+
+let limits_readme ~phases =
+  sprintf "Limits apply to each phase of evaluation on its own: %s." phases
+;;
+
 let check_command =
   Command.basic
     ~summary:"Typecheck the program of the files and print its signature"
-    (let%map_open.Command paths = files_param in
+    ~readme:(fun () -> limits_readme ~phases:"compile time and evaluation")
+    (let%map_open.Command paths = files_param
+     and limits = limits_param in
      fun () ->
        let files = read_files paths in
-       let driver = check files in
+       let driver = check ~limits files in
        print_string (Signature.to_string_hum (Driver.checked driver).signature))
 ;;
 
 let run_command =
   Command.basic
     ~summary:"Typecheck and evaluate the program of the files"
-    (let%map_open.Command paths = files_param in
+    ~readme:(fun () -> limits_readme ~phases:"compile time and evaluation")
+    (let%map_open.Command paths = files_param
+     and limits = limits_param in
      fun () ->
        let files = read_files paths in
-       eval files (check files))
+       eval ~limits files (check ~limits files))
 ;;
 
 let test_command =
@@ -69,45 +97,72 @@ let test_command =
     ~summary:"Run the expect tests of the program of the files"
     ~readme:(fun () ->
       "Each failing FILE is corrected into FILE.corrected, or in place with \
-       -promote, and the diff printed.")
+       -promote, and the diff printed. With -print-corrected, the program is \
+       one FILE, printed to stdout corrected (or as it is if it passes), \
+       without writing any file, eg. for a dune rule diffing it with FILE. "
+      ^ limits_readme ~phases:"compile time, evaluation and each test")
     (let%map_open.Command paths = files_param
-     and promote =
-       flag
-         "promote"
-         ~aliases:[ "--promote" ]
-         no_arg
-         ~doc:" correct the files in place"
+     and limits = limits_param
+     and mode =
+       choose_one
+         ~if_nothing_chosen:(Default_to `Write_corrected)
+         [ flag
+             "promote"
+             ~aliases:[ "--promote" ]
+             (no_arg_some `Promote)
+             ~doc:" correct the files in place"
+         ; flag
+             "print-corrected"
+             (no_arg_some `Print_corrected)
+             ~doc:" print the corrected FILE to stdout"
+         ]
      in
      fun () ->
        let files = read_files paths in
-       let driver = check files in
-       eval files driver;
-       let results = Expect_test_runner.run driver in
+       (match mode, files with
+        | `Print_corrected, _ :: _ :: _ ->
+          eprintf "Error: -print-corrected takes one FILE\n%!";
+          exit 2
+        | _ -> ());
+       let driver = check ~limits files in
+       eval ~limits files driver;
+       let results = Expect_test_runner.run ~limits driver in
        List.iter results ~f:(fun result ->
          List.iter (Diagnostic.of_test_result result) ~f:(report files));
        let mismatched =
          List.filter_map files ~f:(fun { path; contents } ->
            let corrected_path = path ^ ".corrected" in
-           match Expect_test_runner.corrected ~path ~contents results with
-           | None ->
+           let remove_corrected () =
              if Sys_unix.file_exists_exn corrected_path
-             then Sys_unix.remove corrected_path;
-             None
-           | Some corrected ->
-             Option.iter
-               (Text_diff.unified
-                  ~old_name:path
-                  ~new_name:corrected_path
-                  ~old:contents
-                  ~new_:corrected)
-               ~f:print_string;
-             if promote
-             then (
-               Out_channel.write_all path ~data:corrected;
-               if Sys_unix.file_exists_exn corrected_path
-               then Sys_unix.remove corrected_path)
-             else Out_channel.write_all corrected_path ~data:corrected;
-             Some path)
+             then Sys_unix.remove corrected_path
+           in
+           let corrected =
+             Expect_test_runner.corrected ~path ~contents results
+           in
+           match mode with
+           | `Print_corrected ->
+             print_string (Option.value corrected ~default:contents);
+             Option.map corrected ~f:(fun _ -> path)
+           | (`Promote | `Write_corrected) as mode ->
+             (match corrected with
+              | None ->
+                remove_corrected ();
+                None
+              | Some corrected ->
+                Option.iter
+                  (Text_diff.unified
+                     ~old_name:path
+                     ~new_name:corrected_path
+                     ~old:contents
+                     ~new_:corrected)
+                  ~f:print_string;
+                (match mode with
+                 | `Promote ->
+                   Out_channel.write_all path ~data:corrected;
+                   remove_corrected ()
+                 | `Write_corrected ->
+                   Out_channel.write_all corrected_path ~data:corrected);
+                Some path))
        in
        let errors =
          List.count results ~f:(fun result ->
@@ -125,10 +180,16 @@ let test_command =
            "%d of %d test(s) failed%s\n%!"
            failed
            total
-           (if promote && not (List.is_empty mismatched)
-            then " (expectations promoted)"
-            else "");
-       if errors > 0 || ((not promote) && failed > 0) then exit 1)
+           (match mode with
+            | `Promote when not (List.is_empty mismatched) ->
+              " (expectations promoted)"
+            | `Promote | `Print_corrected | `Write_corrected -> "");
+       let failed_on_mismatch =
+         match mode with
+         | `Write_corrected -> true
+         | `Promote | `Print_corrected -> false
+       in
+       if errors > 0 || (failed_on_mismatch && failed > 0) then exit 1)
 ;;
 
 let () =

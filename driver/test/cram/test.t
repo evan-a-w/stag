@@ -183,3 +183,91 @@ A file given more than once is read once.
               ^^^^^^^^^
   Error: [%expect] is only allowed in the body of a let%expect_test where it runs with the test: not in a quote's code nor in a toplevel splice
   [1]
+
+-print-corrected prints the corrected file, or the file as it is if its tests
+pass, writing nothing. Mismatches alone don't fail.
+
+  $ cat > print.stag <<'EOF'
+  > let%expect_test "p" = print_int 1; [%expect {| 2 |}]
+  > EOF
+  $ stag test -print-corrected print.stag
+  let%expect_test "p" = print_int 1; [%expect {| 1 |}]
+  1 of 1 test(s) failed
+  $ ls print.stag*
+  print.stag
+  $ stag test -print-corrected ok.stag
+  let%expect_test "fine" = print_string "x"; [%expect {| x |}]
+
+Errors still fail, after printing the corrections of other tests.
+
+  $ cat >> print.stag <<'EOF'
+  > let%expect_test "boom" = print_int (Int.div 1 0)
+  > EOF
+  $ stag test -print-corrected print.stag
+  File "print.stag", line 2, characters 35-48:
+  2 | let%expect_test "boom" = print_int (Int.div 1 0)
+                                         ^^^^^^^^^^^^^
+  Error: Expect test "boom" failed: Division by zero
+  let%expect_test "p" = print_int 1; [%expect {| 1 |}]
+  let%expect_test "boom" = print_int (Int.div 1 0)
+  2 of 2 test(s) failed
+  [1]
+  $ stag test -print-corrected power.stag ok.stag
+  Error: -print-corrected takes one FILE
+  [2]
+  $ stag test -print-corrected -promote ok.stag
+  Error parsing command line:
+  
+    Cannot pass more than one of these: 
+      -promote
+      -print-corrected
+  
+  For usage information, run
+  
+    stag test -help
+  
+  [1]
+
+Limits apply to tests, evaluation and compile time.
+
+  $ cat > loop.stag <<'EOF'
+  > let loop n = loop (Int.add n 1)
+  > let%expect_test "loop" = loop 0
+  > let%expect_test "fine" = print_int 1; [%expect {| 1 |}]
+  > EOF
+  $ stag test -max-depth 1000 loop.stag
+  File "loop.stag", line 1, characters 19-26:
+  1 | let loop n = loop (Int.add n 1)
+                         ^^^^^^^
+  Error: Expect test "loop" failed: Stack depth exceeded: evaluation nested more than 1000 steps deep
+  1 of 2 test(s) failed
+  [1]
+  $ stag test -fuel 1000 loop.stag
+  File "loop.stag", line 1, characters 19-28:
+  1 | let loop n = loop (Int.add n 1)
+                         ^^^^^^^^^
+  Error: Expect test "loop" failed: Out of fuel: evaluation took more than 1000 steps
+  1 of 2 test(s) failed
+  [1]
+Where the time limit stops evaluation varies.
+
+  $ stag test -time-limit 100ms loop.stag 2>&1 | grep Error
+  Error: Expect test "loop" failed: Time limit exceeded: evaluation took more than 100ms
+  $ printf 'let loop n = loop n\nlet x = loop 0\n' > loop_run.stag
+  $ stag run -fuel 1000 loop_run.stag
+  File "loop_run.stag", line 1, characters 13-17:
+  1 | let loop n = loop n
+                   ^^^^
+  Error: Out of fuel: evaluation took more than 1000 steps
+  [1]
+  $ printf 'let loop n = loop n\nlet x = .~(loop 0)\n' > loop_check.stag
+  $ stag check -fuel 1000 loop_check.stag
+  File "loop_check.stag", line 2, characters 8-18:
+  2 | let x = .~(loop 0)
+              ^^^^^^^^^^
+  Error: This toplevel splice failed at compile time: Out of fuel: evaluation took more than 1000 steps
+  File "loop_check.stag", line 1, characters 13-17:
+  1 | let loop n = loop n
+                   ^^^^
+  Note: The error was raised here
+  [1]

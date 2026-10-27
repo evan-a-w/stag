@@ -33,7 +33,6 @@ let f v = match v with `A n -> n | `B -> 0
 (** A checked program. *)
 type t
 
-(** ["t.stag"], the file of source strings. *)
 val file : string
 
 (** Primitives for tests:
@@ -82,8 +81,7 @@ val driver : t -> Driver.t
 val checked : t -> Typecheck.Checked.t
 
 (** The checked toplevels, except the prelude's, in the order of their
-    components. The prelude's are told apart by name, so a toplevel shadowing
-    one of its names is left out too. *)
+    components. *)
 val members : t -> Typed.Toplevel.t list
 
 (** The signature, without the prelude. *)
