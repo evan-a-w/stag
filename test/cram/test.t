@@ -110,6 +110,70 @@ Runtime errors fail the test.
   1 of 1 test(s) failed
   [1]
 
+The output since the last [%expect] is shown with the error, and printed output
+comes before it.
+
+  $ cat > err_output.stag <<'EOF'
+  > let%expect_test "partial" =
+  >   print_string "seen";
+  >   [%expect {| seen |}];
+  >   print_endline "before";
+  >   print_endline "  the error";
+  >   match 2 with 1 -> ()
+  > EOF
+  $ stag test err_output.stag 2>&1
+  File "err_output.stag", line 6, characters 2-22:
+  6 |   match 2 with 1 -> ()
+        ^^^^^^^^^^^^^^^^^^^^
+  Error: Expect test "partial" failed: Match failure: no case matches the value 2
+  Output since the last [%expect]:
+    before
+      the error
+  1 of 1 test(s) failed
+  [1]
+
+An [%expect] reached with different outputs is an error, not corrected.
+
+  $ cat > twice.stag <<'EOF'
+  > let%expect_test "l" = let f x = print_int x; [%expect {| 1 |}] in f 1; f 2
+  > EOF
+  $ stag test twice.stag
+  File "twice.stag", line 1, characters 54-61:
+  1 | let%expect_test "l" = let f x = print_int x; [%expect {| 1 |}] in f 1; f 2
+                                                            ^^^^^^^
+  Error: Expect test "l": this [%expect] was reached with different outputs:
+  Output 1:
+    1
+  Output 2:
+    2
+  1 of 1 test(s) failed
+  [1]
+  $ ls twice.stag*
+  twice.stag
+
+-promote removes a stale FILE.corrected.
+
+  $ cat > stale.stag <<'EOF'
+  > let%expect_test "s" = print_int 1
+  > EOF
+  $ stag test stale.stag > /dev/null 2>&1
+  [1]
+  $ ls stale.stag*
+  stale.stag
+  stale.stag.corrected
+  $ stag test -promote stale.stag > /dev/null 2>&1
+  $ ls stale.stag*
+  stale.stag
+  $ cat stale.stag
+  let%expect_test "s" = print_int 1;
+  [%expect {| 1 |}]
+
+A file given more than once is read once.
+
+  $ stag test ok.stag ok.stag ./ok.stag
+  $ stag check ok.stag ok.stag
+  module Ok : sig end
+
 [%expect] outside a test.
 
   $ printf 'let x = [%%expect]\n' > outside.stag

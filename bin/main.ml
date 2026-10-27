@@ -1,8 +1,12 @@
 open! Core
 open Stag
 
+let canonical path =
+  Option.value (Option.try_with (fun () -> Filename_unix.realpath path)) ~default:path
+;;
+
 let read_files paths =
-  List.stable_dedup paths ~compare:String.compare
+  List.stable_dedup paths ~compare:(Comparable.lift String.compare ~f:canonical)
   |> List.map ~f:(fun path ->
     match In_channel.read_all path with
     | contents -> { Source_file.path; contents }

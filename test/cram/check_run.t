@@ -115,3 +115,42 @@ Errors are reported like OCaml's.
   $ stag check missing.stag
   Error: missing.stag: No such file or directory
   [2]
+
+Runtime errors are located, and output before them is printed first.
+
+  $ cat > match.stag <<'EOF'
+  > let a = print_endline "first"
+  > let f x = match x with
+  >   | 1 -> ()
+  > let b = a; f 2
+  > EOF
+  $ stag run match.stag 2>&1
+  first
+  File "match.stag", lines 2-3, characters 10-11:
+  2 | let f x = match x with
+  3 |   | 1 -> ()
+  Error: Match failure: no case matches the value 2
+  [1]
+
+Tabs before an error keep the caret aligned.
+
+  $ printf 'let x =\n\tInt.add 1 true\n' > tab.stag
+  $ stag check tab.stag 2>&1 | sed 's/\t/<tab>/g'
+  File "tab.stag", line 2, characters 11-15:
+  2 | <tab>Int.add 1 true
+      <tab>          ^^^^
+  Error: This expression has type bool but an expression was expected of type int
+
+A splice's code using a variable bound at another level is explained.
+
+  $ printf 'let w = .~(let z = 1 in .< z >.)\n' > level.stag
+  $ stag check level.stag
+  File "level.stag", line 1, characters 8-32:
+  1 | let w = .~(let z = 1 in .< z >.)
+              ^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: Unbound value z, which the spliced code uses: z is a variable of its quote's context, as the z bound at compile time (level -1) can't be used in the quote (level 0); only toplevel functions may be used at other levels
+  File "level.stag", line 1, characters 27-28:
+  1 | let w = .~(let z = 1 in .< z >.)
+                                 ^
+  Note: z is a variable of the code's context here
+  [1]
