@@ -34,4 +34,9 @@ let enter t =
     Ok ()
 ;;
 
-let leave t = t.depth <- t.depth - 1
+let step t ~f =
+  let%bind.Or_error () = enter t in
+  let result = f () in
+  t.depth <- t.depth - 1;
+  result
+;;

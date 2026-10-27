@@ -15,5 +15,6 @@ val checked : t -> Typecheck.Checked.t
 val interpreter : t -> Treewalk.t
 
 (** Evaluates the toplevels not yet evaluated at compile time, in order, within
-    [limits] of its own, unlimited by default. *)
+    [limits] of its own, unlimited by default. Those evaluated at compile time
+    keep their values, charged to the limits of [check]. *)
 val eval : ?limits:Limits.t -> t -> unit Or_error.t

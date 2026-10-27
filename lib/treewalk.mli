@@ -69,8 +69,13 @@ val create : stamps:Stamp_counter.t -> unit -> t
 val stamps : t -> Stamp_counter.t
 
 (** Evaluation from now on, until [set_limits] again, is bounded by [limits],
-    counted from now. Evaluation is unlimited until [set_limits] is first
-    called. *)
+    counted from now: one budget shared by everything evaluated meanwhile, eg.
+    every toplevel splice of every program checked with [t]. Building and
+    instantiating code takes a step per node. Evaluation is unlimited until
+    [set_limits] is first called.
+
+    Toplevels are evaluated at most once, so those evaluated while one budget
+    is in force are not evaluated, nor charged, again under the next. *)
 val set_limits : t -> Limits.t -> unit
 
 (** Every ident evaluated needs its info: the typechecker adds each as it
@@ -84,7 +89,9 @@ val add_scc : t -> Typed.Scc.t -> unit
 
 (** Evaluates the toplevel splice [code], at [level] in an empty env, to code,
     binding the values it embeds globally. Returns that code with fresh
-    binders and the free variables outside its quotes replaced by [entry]. *)
+    binders and the free variables outside its quotes replaced by [entry].
+    Instantiating takes a step per node, which stands for inferring the code
+    too, so code too large to infer within the budget is an error. *)
 val splice
   :  t
   -> code:Typed.Expr.t

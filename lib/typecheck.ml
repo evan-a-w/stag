@@ -659,6 +659,16 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) =
        in_progress.recursive <- true;
        scope.scc.lowlink <- Int.min scope.scc.lowlink in_progress.index;
        Ok entry)
+  | Unchecked
+    when Option.is_some scope.quote && not (Toplevel.is_function toplevel) ->
+    (* A free variable of the quote, like an [In_progress] toplevel. A function
+       is checked, as it is persistent once its component is. *)
+    Ok
+      (at_scope_level
+         (Env.Entry.toplevel
+            ~ident:toplevel.ident
+            ~scheme:(Scope.fresh_ty t scope)
+            ~persistent:false))
   | Unchecked ->
     let%bind.Result scc = check_toplevel t scope.program toplevel in
     scope.scc.lowlink <- Int.min scope.scc.lowlink scc.lowlink;
@@ -808,10 +818,24 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
     in
     let%bind.Result subs =
       match subs with
-      | None ->
-        let%map.Result captures = substitute_from_scope t scope ~context in
+      | Implicit ->
+        let%map.Result captures =
+          substitute_from_scope t scope ~context ~may_capture:(fun _ _ -> true)
+        in
         Typed.Expr.Subs.Implicit captures
-      | Some subs ->
+      | Providers providers ->
+        let%map.Result captures =
+          substitute_from_scope
+            t
+            scope
+            ~context
+            ~may_capture:(fun name binder ->
+              [%equal: Typed.Binder.t option]
+                (Map.find providers name)
+                (Some binder))
+        in
+        Typed.Expr.Subs.Implicit captures
+      | Explicit subs ->
         let%map.Result subs = substitute_explicitly t scope ~context ~subs in
         Typed.Expr.Subs.Explicit subs
     in
@@ -871,11 +895,17 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
     in
     let typed_cases = List.rev typed_cases in
     let%map.Result () =
-      Variant_match.close
-        t
-        scope
-        ~scrutinee:scrutinee.ty
-        (List.map typed_cases ~f:fst)
+      match expr, typed_cases with
+      | Generated _, [] ->
+        (* Its scrutinee was closed, unless of an empty nominal type, which
+           may have been known only from an annotation. *)
+        Ok ()
+      | _ ->
+        Variant_match.close
+          t
+          scope
+          ~scrutinee:scrutinee.ty
+          (List.map typed_cases ~f:fst)
     in
     node (Match (scrutinee, typed_cases)) result
   | Poly_record fields ->
@@ -1004,8 +1034,9 @@ and check_open_record t scope expr entries =
   let%map.Result expr = check_expr t scope ~expr ~ty:(Fresh.record t row) in
   expr, rest
 
-(* Returns the binder each entry that may be captured is captured by. *)
-and substitute_from_scope t (scope : Scope.t) ~context =
+(* Returns the binder each entry that may be captured is captured by: entries
+   bound in the quote may be captured by their binders if [may_capture]. *)
+and substitute_from_scope t (scope : Scope.t) ~context ~may_capture =
   let rec go context ~seen ~captures =
     match Type.canonical_row context with
     | REmpty -> Ok captures
@@ -1014,7 +1045,8 @@ and substitute_from_scope t (scope : Scope.t) ~context =
         match Type.canonical_presence presence with
         | _ when Set.mem seen name -> Ok None
         | Absent -> Ok None
-        | Present | PVar _ -> substitute_entry t scope ~name ~presence ~ty
+        | Present | PVar _ ->
+          substitute_entry t scope ~name ~presence ~ty ~may_capture
       in
       let captures =
         Option.fold captured ~init:captures ~f:(fun captures binder ->
@@ -1029,13 +1061,15 @@ and substitute_from_scope t (scope : Scope.t) ~context =
          in
          captures
        | Some quote ->
-         let%map.Result captured = substitute_tail t scope quote ~tail ~seen in
+         let%map.Result captured =
+           substitute_tail t scope quote ~tail ~seen ~may_capture
+         in
          captured @ captures)
   in
   let%map.Result captures = go context ~seen:String.Set.empty ~captures:[] in
   String.Map.of_alist_exn captures
 
-and substitute_entry t (scope : Scope.t) ~name ~presence ~ty =
+and substitute_entry t (scope : Scope.t) ~name ~presence ~ty ~may_capture =
   let%bind.Result entry =
     match Env.find scope.locals name, scope.quote with
     | Some entry, _ -> Ok (Some entry)
@@ -1043,14 +1077,14 @@ and substitute_entry t (scope : Scope.t) ~name ~presence ~ty =
        it. *)
     | None, Some _ -> Ok None
     | None, None ->
-      (* Code that may use [name] doesn't, so a toplevel not yet checked only
-         provides it if used: checking one, or referring to one being checked,
-         could add a dependency on it. *)
+      (* The code is checked and runs now, so if it may use [name], it doesn't.
+         Providing it anyway could add a dependency on its toplevel, and would
+         depend on whether that is checked yet. *)
       (match
          ( Hashtbl.find scope.program.toplevels name
          , Type.canonical_presence presence )
        with
-       | Some ({ state = Done _; _ } as toplevel), _ | Some toplevel, Present ->
+       | Some toplevel, Present ->
          toplevel_entry t scope toplevel |> Result.map ~f:Option.some
        | None, _ | Some _, (Absent | PVar _) -> Ok None)
   in
@@ -1061,12 +1095,21 @@ and substitute_entry t (scope : Scope.t) ~name ~presence ~ty =
       Unify.unify_presence ~presence1:presence ~presence2:Absent ~error
     in
     None
-  | Local entry ->
+  | Local entry when may_capture name entry.binder ->
     let%map.Result () =
       Unify.unify_ty t ~ty1:ty ~ty2:(Scope.instantiate t scope entry.scheme)
       |> lift
     in
     Some entry.binder
+  | Local _ ->
+    let%map.Result () =
+      Unify.unify_row
+        t
+        ~row1:(RExtend (name, presence, ty, REmpty))
+        ~row2:(RExtend (name, Absent, ty, REmpty))
+      |> lift
+    in
+    None
   | Outside_quote { quote; _ } ->
     let%map.Result () =
       Unify.constrain_row
@@ -1079,9 +1122,10 @@ and substitute_entry t (scope : Scope.t) ~name ~presence ~ty =
     None
 
 (* The code's remaining free variables are not known yet, so give the ones that
-   would be captured here explicit entries. The rest must be free variables of
-   the quote. Returns the binders of the ones that may be captured. *)
-and substitute_tail t scope (quote : Scope.quote) ~tail ~seen =
+   would be captured here explicit entries, absent unless [may_capture]. The
+   rest must be free variables of the quote. Returns the binders of the ones
+   that may be captured. *)
+and substitute_tail t scope (quote : Scope.quote) ~tail ~seen ~may_capture =
   let captured =
     Env.visible scope.locals
     |> List.filter_map ~f:(fun (name, entry) ->
@@ -1089,13 +1133,14 @@ and substitute_tail t scope (quote : Scope.quote) ~tail ~seen =
       then None
       else (
         match Resolution.of_entry scope ~name (Some entry) with
-        | Local entry ->
+        | Local entry when may_capture name entry.binder ->
           Some
             ( name
             , Scope.fresh_presence t scope
             , Scope.instantiate t scope entry.scheme
             , Some entry.binder )
-        | Unusable _ -> Some (name, Absent, Scope.fresh_ty t scope, None)
+        | Local _ | Unusable _ ->
+          Some (name, Absent, Scope.fresh_ty t scope, None)
         | Outside_quote _ -> None))
   in
   let rest = Scope.fresh_row t scope in

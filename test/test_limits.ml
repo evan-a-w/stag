@@ -170,7 +170,7 @@ let%expect_test "compile time and runtime have separate budgets" =
         ~compile_time:(least_fuel [ at_compile_time ] : int)
         ~runtime:(least_fuel [ at_runtime ] : int)
         ~both:(least_fuel [ at_compile_time; at_runtime ] : int)];
-  [%expect {| ((compile_time 12294) (runtime 12292) (both 12294)) |}]
+  [%expect {| ((compile_time 12296) (runtime 12292) (both 12296)) |}]
 ;;
 
 let%expect_test "the time limit" =
@@ -180,4 +180,103 @@ let%expect_test "the time limit" =
     ~print_error:only_kind
     [ nat; spin; top "x" [] (app (var "spin") [ nat_of_int 60 ]) ];
   [%expect {| eval failed: Time limit exceeded |}]
+;;
+
+let%expect_test "deep recursion at compile time exceeds the stack depth" =
+  run
+    ~print_error:only_kind
+    [ nat
+    ; spin
+    ; top
+        "x"
+        []
+        (splice (seq (app (var "spin") [ nat_of_int 20_000 ]) (quote (int 1))))
+    ];
+  [%expect {| splice failed: Stack depth exceeded |}]
+;;
+
+let%expect_test "the time limit at compile time" =
+  run
+    ~compile_time:
+      { Limits.unlimited with time_limit = Some (Time_ns.Span.of_int_ms 1) }
+    ~print_error:only_kind
+    [ nat
+    ; spin
+    ; top
+        "x"
+        []
+        (splice (seq (app (var "spin") [ nat_of_int 60 ]) (quote (int 1))))
+    ];
+  [%expect {| splice failed: Time limit exceeded |}]
+;;
+
+let%expect_test "values forced at compile time are not evaluated again" =
+  let y = top "y" [] (seq (app (var "spin") [ nat_of_int 10 ]) (int 2)) in
+  let x = top "x" [] (splice (seq (var "y") (quote (int 1)))) in
+  run ~runtime:(fuel_only 100) ~show:[ "x"; "y" ] [ nat; spin; y; x ];
+  run ~runtime:(fuel_only 100) ~show:[ "y" ] [ nat; spin; y ];
+  [%expect
+    {|
+    (y 2)
+    (x 1)
+    eval failed: ("Out of fuel" (fuel 100))
+    |}]
+;;
+
+(* Code of size 2^n, built in about 2n steps. *)
+let blow =
+  top
+    "blow"
+    [ "n" ]
+    (match_
+       (var "n")
+       [ Pat.construct "Z", quote unit
+       ; ( Pat.construct "S" ~args:[ Pat.var "m" ]
+         , let_
+             "c"
+             []
+             (app (var "blow") [ var "m" ])
+             (quote (seq (splice (var "c")) (splice (var "c")))) )
+       ])
+;;
+
+let%expect_test "growing code exponentially runs out of fuel at compile time" =
+  let program n =
+    [ nat; blow; top "x" [] (splice (app (var "blow") [ nat_of_int n ])) ]
+  in
+  run ~compile_time:(fuel_only 2000) ~show:[ "x" ] (program 1);
+  run ~compile_time:(fuel_only 2000) (program 16);
+  run
+    ~compile_time:
+      { Limits.unlimited with time_limit = Some (Time_ns.Span.of_int_ms 50) }
+    ~print_error:only_kind
+    (program 30);
+  [%expect
+    {|
+    (x "()")
+    splice failed: ("Out of fuel" (fuel 2000))
+    splice failed: Time limit exceeded
+    |}]
+;;
+
+let%expect_test "growing code exponentially runs out of fuel at runtime" =
+  let program n =
+    [ nat; blow; top "x" [] (app (var "blow") [ nat_of_int n ]) ]
+  in
+  run ~runtime:(fuel_only 2000) ~show:[ "x" ] (program 1);
+  run ~runtime:(fuel_only 2000) (program 20);
+  run
+    ~runtime:
+      { Limits.unlimited with time_limit = Some (Time_ns.Span.of_int_ms 50) }
+    ~print_error:only_kind
+    (program 30);
+  [%expect
+    {|
+    (x
+     (Code
+      (Let (ident _/18) (args ()) (generalized false) (body (Lit Unit : unit))
+       (in_ (Lit Unit : unit)) : unit)))
+    eval failed: ("Out of fuel" (fuel 2000))
+    eval failed: Time limit exceeded
+    |}]
 ;;

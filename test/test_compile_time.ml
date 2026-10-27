@@ -875,3 +875,162 @@ let%expect_test "toplevels used at level -2" =
     (deep 2)
     |}]
 ;;
+
+let%expect_test "re-inference keeps the providers of implicit splices" =
+  (* The annotation closes [c]'s context, so [x] doesn't provide its entries
+     and is generalized. Without the annotation, re-inferring the generated
+     code would make [x] a provider. *)
+  run
+    [ top
+        "code"
+        [ "u" ]
+        (seq
+           (var "u")
+           (quote
+              (let_
+                 "h"
+                 [ "c" ]
+                 (quote
+                    (let_
+                       "x"
+                       []
+                       (let_
+                          "g"
+                          [ "a" ]
+                          (splice (var "c" ~annot:(Ty.code Ty.int)))
+                          (var "g"))
+                       (tuple
+                          [ app (var "x") [ int 1 ]
+                          ; app (var "x") [ bool true ]
+                          ])))
+                 (var "h"))))
+    ; top "user" [] (splice (app (var "code") [ unit ]))
+    ; top "used" [] (splice (app (var "user") [ quote (int 5) ]))
+    ];
+  [%expect
+    {|
+    val code : 'a -> <<int>{} -> <int * int>{..'b}>{..'c}
+    val user : <int>{} -> <int * int>{..'a}
+    val used : int * int
+    -- evaluated at compile time
+    (code <fun>)
+    (user <fun>)
+    -- evaluated
+    (code <fun>)
+    (user <fun>)
+    (used (Tuple 5 5))
+    |}]
+;;
+
+let%expect_test "re-inference keeps the providers of entries already known" =
+  (* Re-inferring the first splice gives [c]'s context an entry [x], which the
+     second splice must not provide. *)
+  run
+    [ top
+        "code"
+        [ "u" ]
+        (seq
+           (var "u")
+           (quote
+              (let_
+                 "h"
+                 [ "c" ]
+                 (seq
+                    (quote (let_ "x" [] (int 1) (splice (var "c"))))
+                    (quote
+                       (let_
+                          "x"
+                          []
+                          (let_
+                             "g"
+                             [ "a" ]
+                             (splice (var "c" ~annot:(Ty.code Ty.int)))
+                             (var "g"))
+                          (tuple
+                             [ app (var "x") [ int 1 ]
+                             ; app (var "x") [ bool true ]
+                             ]))))
+                 (var "h"))))
+    ; top "user" [] (splice (app (var "code") [ unit ]))
+    ; top "used" [] (splice (app (var "user") [ quote (int 5) ]))
+    ];
+  [%expect
+    {|
+    val code : 'a -> <<int>{-x} -> <int * int>{..'b}>{..'c}
+    val user : <int>{-x} -> <int * int>{..'a}
+    val used : int * int
+    -- evaluated at compile time
+    (code <fun>)
+    (user <fun>)
+    -- evaluated
+    (code <fun>)
+    (user <fun>)
+    (used (Tuple 5 5))
+    |}]
+;;
+
+let%expect_test "re-inference of empty matches on empty nominal types" =
+  run
+    [ Decl.variant "void" []
+    ; top
+        "code"
+        [ "u" ]
+        (seq
+           (var "u")
+           (quote
+              (Expr.Let
+                 ( "f"
+                 , [ "x", Some (Ty.con "void") ]
+                 , None
+                 , match_ (var "x") []
+                 , var "f" ))))
+    ; top "user" [] (splice (app (var "code") [ unit ]))
+    ];
+  [%expect
+    {|
+    type void = |
+    val code : 'a -> <void -> 'b>{..'c}
+    val user : void -> 'a
+    -- evaluated at compile time
+    (code <fun>)
+    -- evaluated
+    (code <fun>)
+    (user <fun>)
+    |}]
+;;
+
+let%expect_test "maybe-used entries are not provided by checked toplevels" =
+  let gen =
+    top
+      "gen"
+      [ "c" ]
+      (seq (quote (let_ "f" [] (int 1) (splice (var "c")))) (var "c"))
+  in
+  let f = top "f" [] (bool true) in
+  let x =
+    top "x" [] (splice (splice (app (var "gen") [ quote (quote (int 1)) ])))
+  in
+  run [ gen; f; x ];
+  run [ gen; x; f ];
+  [%expect
+    {|
+    val gen : <'a>{f?'b : int; ..'c} -> <'a>{f?'b : int; ..'c} where ..'c <= {..'d}
+    val f : bool
+    val x : int
+    -- evaluated at compile time
+    (gen <fun>)
+    -- evaluated
+    (gen <fun>)
+    (f true)
+    (x 1)
+    val gen : <'a>{f?'b : int; ..'c} -> <'a>{f?'b : int; ..'c} where ..'c <= {..'d}
+    val x : int
+    val f : bool
+    -- evaluated at compile time
+    (gen <fun>)
+    -- evaluated
+    (gen <fun>)
+    (x 1)
+    (f true)
+    |}]
+;;
