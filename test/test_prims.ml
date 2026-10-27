@@ -79,7 +79,7 @@ let%expect_test "string, char, bool" =
     {|
 let show_bool b = match b with true -> print_endline "true" | false -> print_endline "false"
 let main4 =
-  print_endline (String.concat "ab" "cd");
+  print_endline (String.append "ab" "cd");
   print_int (String.length "hello"); print_endline "";
   print_char (String.get "hello" 1); print_endline "";
   print_endline (String.sub "hello" 1 3);

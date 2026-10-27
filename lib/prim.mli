@@ -18,9 +18,6 @@ end
 
 type t [@@deriving sexp_of, equal]
 
-(** The full path, eg. [Int.add]. *)
-val name : t -> string
-
 (** Monomorphic, so needs no instantiation. *)
 val ty : t -> Type.ty
 
@@ -34,8 +31,6 @@ val apply
   -> output:(string -> unit)
   -> Value.t list
   -> (Value.t, string) Result.t
-
-val all : t list
 
 (** By full path. *)
 val find : Syntax.Path.t -> t option

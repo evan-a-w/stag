@@ -139,7 +139,7 @@ print_int : int -> unit            print_char : char -> unit
 Int.add sub mul div rem : int -> int -> int     Int.neg : int -> int
 Int.equal lt le gt ge : int -> int -> bool      Int.compare : int -> int -> int
 Int.to_string : int -> string      Int.of_string : string -> int
-String.concat : string -> string -> string      String.length : string -> int
+String.append : string -> string -> string      String.length : string -> int
 String.get : string -> int -> char              String.sub : string -> int -> int -> string
 String.equal : string -> string -> bool         String.compare : string -> string -> int
 Char.equal : char -> char -> bool  Char.code : char -> int

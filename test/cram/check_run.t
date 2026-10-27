@@ -2,7 +2,7 @@ Programs are sets of files, each a module named after its file.
 
   $ cat > util.stag <<'EOF'
   > let double x = Int.mul 2 x
-  > let greet name = print_endline (String.concat "Hello, " name)
+  > let greet name = print_endline (String.append "Hello, " name)
   > EOF
   $ cat > main.stag <<'EOF'
   > let n = Util.double 21
