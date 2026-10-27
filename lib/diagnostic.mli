@@ -21,7 +21,7 @@ type t =
   }
 [@@deriving sexp_of]
 
-val create : ?notes:Note.t list -> loc:Loc.t -> string -> t
+val create : ?notes:Note.t list -> ?whole_file:bool -> loc:Loc.t -> string -> t
 val of_parse_error : Parser.Error.t -> t
 val of_source_file_error : Source_file.Error.t -> t
 val of_typecheck_error : Typecheck_error.t -> t

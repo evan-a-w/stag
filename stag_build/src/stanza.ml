@@ -61,7 +61,9 @@ let is_valid_name name =
 
 let parse ~path contents =
   let errors = Queue.create () in
-  let error loc message = Queue.enqueue errors { Diagnostic.loc; message } in
+  let error loc message =
+    Queue.enqueue errors (Diagnostic.create ~loc message)
+  in
   let atom (cst : Cst.t) =
     match cst with
     | Atom { atom; loc = range; _ } ->

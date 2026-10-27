@@ -121,13 +121,9 @@ let%expect_test "invalid file names" =
     ];
   [%expect
     {|
-    File "a/1.stag", line 1, characters 0-0:
-    1 |
-        ^
+    File "a/1.stag":
     Error: 1.stag is not a valid module file name: it should be a letter followed by letters, digits, _ and ', then .stag
-    File "a/foo-bar.stag", line 1, characters 0-0:
-    1 | let x = 1
-        ^
+    File "a/foo-bar.stag":
     Error: foo-bar.stag is not a valid module file name: it should be a letter followed by letters, digits, _ and ', then .stag
     |}]
 ;;
@@ -189,13 +185,9 @@ let%expect_test "modules of executables and tests do not shadow libraries" =
     ];
   [%expect
     {|
-    File "main/a.stag", line 1, characters 0-0:
-    1 |
-        ^
+    File "main/a.stag":
     Error: The module A is also the library a
-    File "main/b.stag", line 1, characters 0-0:
-    1 |
-        ^
+    File "main/b.stag":
     Error: The module B is also the library b
     |}]
 ;;

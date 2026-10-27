@@ -513,6 +513,6 @@ let%expect_test "end to end: source to rendered errors" =
     File "a.stag", line 1, characters 10-19:
     1 | let x = .<[%expect]>.
                   ^^^^^^^^^
-    Error: [%expect] is only allowed in the body of a let%expect_test, outside quotes and toplevel splices
+    Error: [%expect] is only allowed in the body of a let%expect_test where it runs with the test: not in a quote's code nor in a toplevel splice
     |}]
 ;;

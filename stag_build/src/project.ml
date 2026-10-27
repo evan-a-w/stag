@@ -89,7 +89,11 @@ let check_file_names (target : Target.t) ~error =
     match Source_file.module_name path with
     | Ok (_ : string) -> ()
     | Error message ->
-      error { Diagnostic.loc = Loc.start_of_file path; message })
+      error
+        (Diagnostic.create
+           ~whole_file:true
+           ~loc:(Loc.start_of_file path)
+           message))
 ;;
 
 let index targets ~error =
@@ -101,14 +105,13 @@ let index targets ~error =
       match Map.find by_name name.txt with
       | Some (other : Target.t) ->
         error
-          { Diagnostic.loc = name.loc
-          ; message =
-              sprintf
+        @@ Diagnostic.create
+             ~loc:name.loc
+             (sprintf
                 "The name %s is already used by the %s in %s"
                 name.txt
                 (Stanza.Kind.to_string other.stanza.kind)
-                other.stanza.name.loc.file
-          };
+                other.stanza.name.loc.file);
         by_name
       | None -> Map.set by_name ~key:name.txt ~data:target)
 ;;
@@ -119,21 +122,20 @@ let check_libraries targets ~by_name ~error =
       match Map.find by_name library.txt with
       | None ->
         error
-          { Diagnostic.loc = library.loc
-          ; message = sprintf "Unknown library %s" library.txt
-          }
+        @@ Diagnostic.create
+             ~loc:library.loc
+             (sprintf "Unknown library %s" library.txt)
       | Some (other : Target.t) ->
         (match other.stanza.kind with
          | Library -> ()
          | Executable | Test ->
            error
-             { Diagnostic.loc = library.loc
-             ; message =
-                 sprintf
+           @@ Diagnostic.create
+                ~loc:library.loc
+                (sprintf
                    "%s is %s, not a library"
                    library.txt
-                   (Stanza.Kind.to_string_with_article other.stanza.kind)
-             })))
+                   (Stanza.Kind.to_string_with_article other.stanza.kind)))))
 ;;
 
 let deps ~by_name (target : Target.t) =
@@ -159,12 +161,11 @@ let check_cycles targets ~by_name ~error =
                 ~f:(Fn.non (String.equal library.txt))
             in
             error
-              { Diagnostic.loc = library.loc
-              ; message =
-                  sprintf
+            @@ Diagnostic.create
+                 ~loc:library.loc
+                 (sprintf
                     "Dependency cycle between libraries: %s"
-                    (String.concat ~sep:" -> " (cycle @ [ library.txt ]))
-              })
+                    (String.concat ~sep:" -> " (cycle @ [ library.txt ]))))
           else visit dep ~stack);
       Hash_set.add finished name)
   in
@@ -205,13 +206,13 @@ let check_module_clashes targets ~by_name ~error =
         | Ok module_name ->
           Option.iter (Map.find libraries module_name) ~f:(fun library ->
             error
-              { Diagnostic.loc = Loc.start_of_file path
-              ; message =
-                  sprintf
+            @@ Diagnostic.create
+                 ~whole_file:true
+                 ~loc:(Loc.start_of_file path)
+                 (sprintf
                     "The module %s is also the library %s"
                     module_name
-                    (Target.name library)
-              })))
+                    (Target.name library)))))
 ;;
 
 let load ~root =

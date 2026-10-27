@@ -16,8 +16,8 @@ type t =
   }
 [@@deriving sexp_of]
 
-let create ?(notes = []) ~loc message =
-  { loc; whole_file = false; message; notes }
+let create ?(notes = []) ?(whole_file = false) ~loc message =
+  { loc; whole_file; message; notes }
 ;;
 
 let of_parse_error error =
