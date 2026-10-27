@@ -5,8 +5,6 @@ module Error : sig
     | Source of Source_file.Error.t
     | Typecheck of Typecheck_error.t
   [@@deriving sexp_of]
-
-  val loc : t -> Loc.t
 end
 
 (** A program checked, with the interpreter that ran its toplevel splices and
