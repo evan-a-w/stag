@@ -6,6 +6,11 @@
 type list['a] = Nil | Cons of 'a * list['a]
 type option['a] = None | Some of 'a
 
+let map f l =
+  match l with
+  | Nil -> Nil
+  | Cons (x, rest) -> Cons (f x, map f rest)
+
 module Lit = struct
   type t = Int of int | Bool of bool | String of string | Char of char | Unit
 end
@@ -29,6 +34,18 @@ module Type_expr = struct
   module Arg = struct
     type t = Ty of Type_expr.t | Row of Row.t
   end
+
+  (* [con "list" [t]] is [list[t]]. *)
+  let con name args =
+    let ty t = Arg.Ty t in
+    Con (name, map ty args)
+
+  (* [tuple] of no types is [unit], of one is that type. *)
+  let tuple ts =
+    match ts with
+    | Nil -> Con ("unit", Nil)
+    | Cons (t, Nil) -> t
+    | _ -> Tuple ts
 end
 
 module Type_decl = struct
@@ -65,6 +82,13 @@ module Pattern = struct
     | Record of list[string * t]
     | Poly_variant of string * option[t]
     | Poly_record of {`fields : list[string * t]; `rest : Rest.t}
+
+  (* [tuple] of no patterns is [()], of one is that pattern. *)
+  let tuple ps =
+    match ps with
+    | Nil -> Lit Lit.Unit
+    | Cons (p, Nil) -> p
+    | _ -> Tuple ps
 end
 
 module Expr = struct
@@ -87,6 +111,28 @@ module Expr = struct
     | Poly_update of t * list[string * t]
     | Poly_variant of string * option[t]
     | Expect of string
+
+  let var name = Var (name, None)
+  let int n = Lit (Lit.Int n)
+  let string s = Lit (Lit.String s)
+
+  (* [apply f [x; y]] is [f x y]. *)
+  let apply f args =
+    match args with
+    | Nil -> f
+    | Cons (x, rest) -> apply (App (f, x)) rest
+
+  (* [tuple] of no expressions is [()], of one is that expression. *)
+  let tuple es =
+    match es with
+    | Nil -> Lit Lit.Unit
+    | Cons (e, Nil) -> e
+    | _ -> Tuple es
+
+  (* [let_ name params equal body] is [let name params = equal in body]. *)
+  let let_ name params equal body =
+    let param name = (name, None) in
+    Let (name, map param params, None, equal, body)
 end
 
 module Toplevel = struct
@@ -95,6 +141,11 @@ module Toplevel = struct
     | Type of Type_decl.t
     | Module of string * list[t]
     | Expect_test of {`name : string; `body : Expr.t}
+
+  (* [let_ name params body] is [let name params = body]. *)
+  let let_ name params body =
+    let param name = (name, None) in
+    Let (name, map param params, None, body)
 end
 
 module Program = struct

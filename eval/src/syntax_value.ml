@@ -1,12 +1,6 @@
 open! Import
+include Syntax_value_intf
 module Value = Treewalk.Value
-
-module type S = sig
-  type t
-
-  val to_value : t -> Value.t
-  val of_value : Value.t -> loc:Loc.t -> t Or_error.t
-end
 
 (* By canonical name, from the prelude's declarations, so they agree with the
    refs the typechecker makes. *)
@@ -217,382 +211,472 @@ end
 module Of_value = struct
   open Syntax
 
+  module Step = struct
+    type t =
+      | Constructor of
+          { name : string
+          ; argument : int option (** Of a constructor of several. *)
+          }
+      | Element of int
+      | Component of int
+      | Field of string
+
+    let to_string = function
+      | Constructor { name; argument = None } -> name
+      | Constructor { name; argument = Some i } ->
+        sprintf "%s argument %d" name i
+      | Element i -> sprintf "element %d" i
+      | Component i -> sprintf "component %d" i
+      | Field label -> sprintf "field `%s" label
+    ;;
+  end
+
   module Malformed = struct
     type t =
       { expected : string
-      ; got : string
-      ; mutable within : string list (** Outermost first. *)
+      ; got : Value.t
+      ; within : Step.t list (** Outermost first. *)
       }
-    [@@deriving sexp_of]
+
+    let to_string { expected; got; within } =
+      let within =
+        match within with
+        | [] -> ""
+        | steps ->
+          sprintf
+            ", within %s"
+            (String.concat ~sep:" > " (List.map steps ~f:Step.to_string))
+      in
+      sprintf
+        "Malformed syntax: expected %s, got %s%s"
+        expected
+        (Value.to_string_hum got)
+        within
+    ;;
   end
 
   exception Malformed of Malformed.t
 
-  let malformed ~expected got = raise (Malformed { expected; got; within = [] })
-
-  let unexpected ~expected value =
-    malformed ~expected (Value.to_string_hum value)
+  let unexpected ~expected got =
+    raise (Malformed { expected; got; within = [] })
   ;;
 
-  (* Raised by a [variant] case for a constructor applied to the wrong
-     arguments. *)
+  let within step read value =
+    try read value with
+    | Malformed malformed ->
+      raise (Malformed { malformed with within = step :: malformed.within })
+  ;;
+
+  module Args = struct
+    type t =
+      { constructor : string
+      ; values : Value.t array
+      }
+
+    let count t = Array.length t.values
+
+    let read t i read =
+      let argument = Option.some_if (count t > 1) i in
+      within (Constructor { name = t.constructor; argument }) read t.values.(i)
+    ;;
+  end
+
+  (* Raised by a [variant] case for a constructor applied to a number of
+     arguments other than it is declared with. *)
   exception Bad_arguments
 
-  (** [f] is given the constructor's name relative to its type's module. Errors
-      within it are said to be within the constructor, if [within]. *)
-  let variant ?(within = true) ty value ~f =
+  (** The constructor of [value], of the prelude's type [ty], by its name
+      relative to its type's module. *)
+  let constructor ty value =
     let type_name = Prelude.canonical ty in
-    match value with
-    | Value.Construct ({ type_name = type_name'; name; index = _ }, args)
+    match (value : Value.t) with
+    | Construct ({ type_name = type_name'; name; index = _ }, args)
       when String.equal type_name type_name' ->
       let prefix =
         match String.rsplit2 type_name ~on:'.' with
         | Some (prefix, _) -> prefix ^ "."
         | None -> ""
       in
-      (match f (String.chop_prefix_exn name ~prefix) args with
-       | result -> result
-       | exception Bad_arguments -> unexpected ~expected:type_name value
-       | exception Malformed malformed ->
-         if within then malformed.within <- name :: malformed.within;
-         raise (Malformed malformed))
+      ( String.chop_prefix_exn name ~prefix
+      , { Args.constructor = name; values = Array.of_list args } )
     | _ -> unexpected ~expected:type_name value
   ;;
 
-  let list f value =
-    let rec loop acc value =
-      match
-        variant "list" ~within:false value ~f:(fun name args ->
-          match name, args with
-          | "Nil", [] -> None
-          | "Cons", [ x; tail ] -> Some (f x, tail)
-          | _ -> raise Bad_arguments)
-      with
-      | None -> List.rev acc
-      | Some (x, tail) -> loop (x :: acc) tail
-    in
-    loop [] value
+  let variant ty value ~f =
+    let name, args = constructor ty value in
+    match f name args with
+    | result -> result
+    | exception Bad_arguments ->
+      unexpected
+        ~expected:(args.constructor ^ " applied to its declared arguments")
+        value
   ;;
 
-  let option f =
-    variant "option" ~within:false ~f:(fun name args ->
-      match name, args with
-      | "None", [] -> None
-      | "Some", [ x ] -> Some (f x)
-      | _ -> raise Bad_arguments)
+  let list f value =
+    let rec loop i acc value =
+      match constructor "list" value with
+      | "Nil", { values = [||]; _ } -> List.rev acc
+      | "Cons", { values = [| x; tail |]; _ } ->
+        loop (i + 1) (within (Element i) f x :: acc) tail
+      | _, { constructor; _ } ->
+        unexpected
+          ~expected:(constructor ^ " applied to its declared arguments")
+          value
+    in
+    loop 0 [] value
+  ;;
+
+  let option f value =
+    match constructor "option" value with
+    | "None", { values = [||]; _ } -> None
+    | "Some", { values = [| x |]; _ } -> Some (f x)
+    | _, { constructor; _ } ->
+      unexpected
+        ~expected:(constructor ^ " applied to its declared arguments")
+        value
+  ;;
+
+  let int : Value.t -> int = function
+    | Int n -> n
+    | value -> unexpected ~expected:"an int" value
+  ;;
+
+  (* As in source, where a negative int is [Int.neg n]. *)
+  let literal_int value =
+    match int value with
+    | n when n < 0 -> unexpected ~expected:"a non-negative int" value
+    | n -> n
+  ;;
+
+  let bool : Value.t -> bool = function
+    | Bool b -> b
+    | value -> unexpected ~expected:"a bool" value
+  ;;
+
+  let char : Value.t -> char = function
+    | Char c -> c
+    | value -> unexpected ~expected:"a char" value
   ;;
 
   let string : Value.t -> string = function
     | String s -> s
-    | value -> unexpected ~expected:"string" value
+    | value -> unexpected ~expected:"a string" value
   ;;
 
   let pair f g : Value.t -> _ = function
-    | Tuple [ a; b ] -> f a, g b
+    | Tuple [ a; b ] -> within (Component 0) f a, within (Component 1) g b
     | value -> unexpected ~expected:"a pair" value
   ;;
 
-  let field (value : Value.t) label =
+  let field label read (value : Value.t) =
     match value with
-    | Poly_record fields when Map.mem fields label -> Map.find_exn fields label
+    | Poly_record fields when Map.mem fields label ->
+      within (Field label) read (Map.find_exn fields label)
     | _ ->
       unexpected ~expected:(sprintf "a record with a field `%s" label) value
   ;;
-
-  module Ident_kind = struct
-    type t =
-      | Lower
-      | Upper
-      | Label
-      | Tyvar
-
-    let describe = function
-      | Lower -> "a lowercase identifier"
-      | Upper -> "a capitalized identifier"
-      | Label -> "a label"
-      | Tyvar -> "a type variable name"
-    ;;
-
-    (* As the lexer reads it, so printed syntax would parse back. *)
-    let accepts t text =
-      let prefix, token =
-        match t with
-        | Lower ->
-          ( ""
-          , if String.equal text "_"
-            then Token.Underscore
-            else Token.Lident text )
-        | Upper -> "", Uident text
-        | Label -> "`", Label text
-        | Tyvar -> "'", Tyvar text
-      in
-      match Lexer.tokenize ~file:"" (prefix ^ text) with
-      | Ok [| { token = token'; _ }; { token = Eof; _ } |] ->
-        Token.equal token token'
-      | Ok _ | Error _ -> false
-    ;;
-  end
 
   let ident kind value =
     let text = string value in
     if Ident_kind.accepts kind text
     then text
-    else malformed ~expected:(Ident_kind.describe kind) (sprintf "%S" text)
+    else unexpected ~expected:(Ident_kind.describe kind) value
   ;;
 
-  module Readers = struct
-    type t =
-      { type_expr : Value.t -> Type_expr.t
-      ; type_decl : Value.t -> Type_decl.t
-      ; pattern : Value.t -> Pattern.t
-      ; expr : Value.t -> Expr.t
-      ; toplevel : Value.t -> Toplevel.t
-      }
-  end
+  let name kind value ~loc = Located.create ~loc (ident kind value)
 
-  let readers ~loc : Readers.t =
-    let open Ident_kind in
-    let at txt = Located.create ~loc txt in
-    let name kind value = at (ident kind value) in
-    (* The modules of a path are capitalized, its last name of [kind]. *)
-    let path kind value =
-      let text = string value in
-      let names = String.split text ~on:'.' in
-      let modules, last = List.split_n names (List.length names - 1) in
-      if
-        List.for_all modules ~f:(Ident_kind.accepts Upper)
-        && List.for_all last ~f:(Ident_kind.accepts kind)
-      then Path.of_list_exn names
-      else
-        malformed
-          ~expected:
-            (sprintf
-               "a path of capitalized identifiers ending in %s"
-               (Ident_kind.describe kind))
-          (sprintf "%S" text)
-    in
-    let lit =
-      variant "Lit.t" ~f:(fun constructor args : Lit.t ->
-        match constructor, args with
-        | "Int", [ Int n ] -> Int n
-        | "Bool", [ Bool b ] -> Bool b
-        | "String", [ String s ] -> String s
-        | "Char", [ Char c ] -> Char c
-        | "Unit", [] -> Unit
-        | _ -> raise Bad_arguments)
-    in
-    let rec type_expr value : Type_expr.t =
-      at
-        (variant
-           "Type_expr.t"
-           value
-           ~f:(fun constructor args : Type_expr.desc ->
-             match constructor, args with
-             | "Var", [ var ] -> Var (ident Tyvar var)
-             | "Con", [ p; args ] -> Con (at (path Lower p), list type_arg args)
-             | "Arrow", [ a; b ] -> Arrow (type_expr a, type_expr b)
-             | "Tuple", [ ts ] -> Tuple (list type_expr ts)
-             | "Code", [ code ] ->
-               Code
-                 { inner = type_expr (field code "inner")
-                 ; context = row ~labels:Lower (field code "context")
-                 }
-             | "Record", [ r ] -> Record (row ~labels:Label r)
-             | "Variant", [ r ] -> Variant (row ~labels:Label r)
-             | _ -> raise Bad_arguments))
-    and row ~labels value : Type_expr.row =
-      at
-        (variant
-           "Type_expr.Row.t"
-           value
-           ~f:(fun constructor args : Type_expr.row_desc ->
-             match constructor, args with
-             | "Empty", [] -> Empty
-             | "Extend", [ label; ty; rest ] ->
-               Extend (name labels label, type_expr ty, row ~labels rest)
-             | "Var", [ var ] -> Var (name Tyvar var)
-             | _ -> raise Bad_arguments))
-    and type_arg value =
-      variant
-        "Type_expr.Arg.t"
+  (* The modules of a path are capitalized, its last name of [kind]. *)
+  let path kind value =
+    let text = string value in
+    let names = String.split text ~on:'.' in
+    let modules, last = List.split_n names (List.length names - 1) in
+    if
+      List.for_all modules ~f:(Ident_kind.accepts Upper)
+      && List.for_all last ~f:(Ident_kind.accepts kind)
+    then Path.of_list_exn names
+    else
+      unexpected
+        ~expected:
+          (sprintf
+             "a path of capitalized identifiers ending in %s"
+             (Ident_kind.describe kind))
         value
-        ~f:(fun constructor args : Type_expr.arg ->
-          match constructor, args with
-          | "Ty", [ ty ] -> Ty (type_expr ty)
-          | "Row", [ r ] -> Row (row ~labels:Label r)
+  ;;
+
+  let located_path kind value ~loc = Located.create ~loc (path kind value)
+
+  (* [Tuple []] is the type [()], but [Lit Unit] in patterns and expressions. *)
+  let components ~min read value =
+    let components = list read value in
+    if List.length components < min || List.length components = 1
+    then
+      unexpected
+        ~expected:
+          (if min = 0
+           then "no components or at least two"
+           else "at least two components")
+        value
+    else components
+  ;;
+
+  let fields read value =
+    match list read value with
+    | [] -> unexpected ~expected:"at least one field" value
+    | fields -> fields
+  ;;
+
+  open Ident_kind
+
+  let lit value =
+    variant "Lit.t" value ~f:(fun constructor args : Lit.t ->
+      let arg i read = Args.read args i read in
+      match constructor, Args.count args with
+      | "Int", 1 -> Int (arg 0 literal_int)
+      | "Bool", 1 -> Bool (arg 0 bool)
+      | "String", 1 -> String (arg 0 string)
+      | "Char", 1 -> Char (arg 0 char)
+      | "Unit", 0 -> Unit
+      | _ -> raise Bad_arguments)
+  ;;
+
+  let rec type_expr value ~loc : Type_expr.t =
+    Located.create
+      ~loc
+      (variant "Type_expr.t" value ~f:(fun constructor args : Type_expr.desc ->
+         let arg i read = Args.read args i read in
+         match constructor, Args.count args with
+         | "Var", 1 -> Var (arg 0 (ident Tyvar))
+         | "Con", 2 ->
+           Con (arg 0 (located_path Lower ~loc), arg 1 (list (type_arg ~loc)))
+         | "Arrow", 2 -> Arrow (arg 0 (type_expr ~loc), arg 1 (type_expr ~loc))
+         | "Tuple", 1 -> Tuple (arg 0 (components ~min:0 (type_expr ~loc)))
+         | "Code", 1 ->
+           arg 0 (fun code : Type_expr.desc ->
+             Code
+               { inner = field "inner" (type_expr ~loc) code
+               ; context = field "context" (row ~labels:Lower ~loc) code
+               })
+         | "Record", 1 -> Record (arg 0 (row ~labels:Label ~loc))
+         | "Variant", 1 -> Variant (arg 0 (row ~labels:Label ~loc))
+         | _ -> raise Bad_arguments))
+
+  and row ~(labels : Ident_kind.t) value ~loc : Type_expr.row =
+    Located.create
+      ~loc
+      (variant
+         "Type_expr.Row.t"
+         value
+         ~f:(fun constructor args : Type_expr.row_desc ->
+           let arg i read = Args.read args i read in
+           match constructor, Args.count args with
+           | "Empty", 0 -> Empty
+           | "Extend", 3 ->
+             Extend
+               ( arg 0 (name labels ~loc)
+               , arg 1 (type_expr ~loc)
+               , arg 2 (row ~labels ~loc) )
+           | "Var", 1 -> Var (arg 0 (name Tyvar ~loc))
+           | _ -> raise Bad_arguments))
+
+  and type_arg value ~loc =
+    variant "Type_expr.Arg.t" value ~f:(fun constructor args : Type_expr.arg ->
+      let arg i read = Args.read args i read in
+      match constructor, Args.count args with
+      | "Ty", 1 -> Ty (arg 0 (type_expr ~loc))
+      | "Row", 1 -> Row (arg 0 (row ~labels:Label ~loc))
+      | _ -> raise Bad_arguments)
+  ;;
+
+  let type_decl value ~loc : Type_decl.t =
+    let param value =
+      Located.create
+        ~loc
+        (variant
+           "Type_decl.Param.t"
+           value
+           ~f:(fun constructor args : Type_decl.Param.t ->
+             let arg i read = Args.read args i read in
+             match constructor, Args.count args with
+             | "Ty", 1 -> Ty (arg 0 (ident Tyvar))
+             | "Row", 1 -> Row (arg 0 (ident Tyvar))
+             | _ -> raise Bad_arguments))
+    in
+    let kind value =
+      variant
+        "Type_decl.Kind.t"
+        value
+        ~f:(fun constructor args : Type_decl.Kind.t ->
+          let arg i read = Args.read args i read in
+          match constructor, Args.count args with
+          | "Variant", 1 ->
+            Variant
+              (arg 0 (list (pair (name Upper ~loc) (list (type_expr ~loc)))))
+          | "Record", 1 ->
+            Record (arg 0 (fields (pair (name Lower ~loc) (type_expr ~loc))))
+          | "Alias", 1 -> Alias (arg 0 (type_expr ~loc))
+          | "Abstract", 0 -> Abstract
           | _ -> raise Bad_arguments)
     in
-    let type_decl value : Type_decl.t =
-      let param value =
-        at
-          (variant
-             "Type_decl.Param.t"
-             value
-             ~f:(fun constructor args : Type_decl.Param.t ->
-               match constructor, args with
-               | "Ty", [ var ] -> Ty (ident Tyvar var)
-               | "Row", [ var ] -> Row (ident Tyvar var)
-               | _ -> raise Bad_arguments))
-      in
-      let kind =
-        variant
-          "Type_decl.Kind.t"
-          ~f:(fun constructor args : Type_decl.Kind.t ->
-            match constructor, args with
-            | "Variant", [ constructors ] ->
-              Variant (list (pair (name Upper) (list type_expr)) constructors)
-            | "Record", [ fields ] ->
-              Record (list (pair (name Lower) type_expr) fields)
-            | "Alias", [ ty ] -> Alias (type_expr ty)
-            | "Abstract", [] -> Abstract
-            | _ -> raise Bad_arguments)
-      in
-      { name = name Lower (field value "name")
-      ; params = list param (field value "params")
-      ; kind = kind (field value "kind")
-      }
-    in
-    let binding = pair (name Lower) (option type_expr) in
-    let rec pattern value : Pattern.t =
-      at
-        (variant "Pattern.t" value ~f:(fun constructor args : Pattern.desc ->
-           match constructor, args with
-           | "Any", [] -> Any
-           | "Var", [ var ] -> Var (ident Lower var)
-           | "Lit", [ l ] -> Lit (lit l)
-           | "Tuple", [ ps ] -> Tuple (list pattern ps)
-           | "Construct", [ p; args ] ->
-             Construct (at (path Upper p), list pattern args)
-           | "Record", [ fields ] ->
-             Record (list (pair (fun p -> at (path Lower p)) pattern) fields)
-           | "Poly_variant", [ tag; arg ] ->
-             Poly_variant (name Label tag, option pattern arg)
-           | "Poly_record", [ r ] ->
-             let rest =
-               variant
-                 "Pattern.Rest.t"
-                 ~f:(fun constructor args : Pattern.Rest.t ->
-                   match constructor, args with
-                   | "Closed", [] -> Closed
-                   | "Open", [] -> Open
-                   | "Bind", [ var ] -> Bind (name Lower var)
-                   | _ -> raise Bad_arguments)
-             in
-             Poly_record
-               { fields = list (pair (name Label) pattern) (field r "fields")
-               ; rest = rest (field r "rest")
-               }
-           | _ -> raise Bad_arguments))
-    in
-    let rec expr value : Expr.t =
-      let fields = list (pair (name Label) expr) in
-      at
-        (variant "Expr.t" value ~f:(fun constructor args : Expr.desc ->
-           match constructor, args with
-           | "Lit", [ l ] -> Lit (lit l)
-           | "Var", [ p; annot ] -> Var (path Lower p, option type_expr annot)
-           | "App", [ f; x ] -> App (expr f, expr x)
-           | "Let", [ var; bindings; annot; equal; body ] ->
-             Let
-               ( name Lower var
-               , list binding bindings
-               , option type_expr annot
-               , expr equal
-               , expr body )
-           | "Splice", [ splice ] ->
-             Splice
-               { expr = expr (field splice "expr")
-               ; subs =
-                   option
-                     (list (pair (name Lower) (option expr)))
-                     (field splice "subs")
-               }
-           | "Quote", [ e ] -> Quote (expr e)
-           | "Tuple", [ es ] -> Tuple (list expr es)
-           | "Construct", [ p; args ] ->
-             Construct (at (path Upper p), list expr args)
-           | "Record", [ record_fields ] ->
-             Record
-               (list (pair (fun p -> at (path Lower p)) expr) record_fields)
-           | "Field", [ e; p ] -> Field (expr e, at (path Lower p))
-           | "Match", [ e; arms ] ->
-             Match (expr e, list (pair pattern expr) arms)
-           | "Poly_record", [ poly_fields ] -> Poly_record (fields poly_fields)
-           | "Poly_field", [ e; label ] -> Poly_field (expr e, name Label label)
-           | "Poly_extend", [ extension; e ] ->
-             Poly_extend (fields extension, expr e)
-           | "Poly_restrict", [ e; label ] ->
-             Poly_restrict (expr e, name Label label)
-           | "Poly_update", [ e; updates ] ->
-             Poly_update (expr e, fields updates)
-           | "Poly_variant", [ tag; arg ] ->
-             Poly_variant (name Label tag, option expr arg)
-           | "Expect", [ expected ] -> Expect (at (string expected))
-           | _ -> raise Bad_arguments))
-    in
-    let rec toplevel value : Toplevel.t =
-      at
-        (variant "Toplevel.t" value ~f:(fun constructor args : Toplevel.desc ->
-           match constructor, args with
-           | "Let", [ var; bindings; annot; body ] ->
-             Let
-               ( name Lower var
-               , list binding bindings
-               , option type_expr annot
-               , expr body )
-           | "Type", [ decl ] -> Type (type_decl decl)
-           | "Module", [ module_name; items ] ->
-             Module (name Upper module_name, list toplevel items)
-           | "Expect_test", [ test ] ->
-             Expect_test
-               { name = at (string (field test "name"))
-               ; body = expr (field test "body")
-               }
-           | _ -> raise Bad_arguments))
-    in
-    { type_expr; type_decl; pattern; expr; toplevel }
+    { name = field "name" (name Lower ~loc) value
+    ; params = field "params" (list param) value
+    ; kind = field "kind" kind value
+    }
   ;;
 
-  let run f value =
-    match f value with
+  let binding ~loc = pair (name Binder ~loc) (option (type_expr ~loc))
+
+  let rec pattern value ~loc : Pattern.t =
+    Located.create
+      ~loc
+      (variant "Pattern.t" value ~f:(fun constructor args : Pattern.desc ->
+         let arg i read = Args.read args i read in
+         match constructor, Args.count args with
+         | "Any", 0 -> Any
+         | "Var", 1 -> Var (arg 0 (ident Lower))
+         | "Lit", 1 -> Lit (arg 0 lit)
+         | "Tuple", 1 -> Tuple (arg 0 (components ~min:2 (pattern ~loc)))
+         | "Construct", 2 ->
+           Construct
+             (arg 0 (located_path Upper ~loc), arg 1 (list (pattern ~loc)))
+         | "Record", 1 ->
+           Record
+             (arg 0 (fields (pair (located_path Lower ~loc) (pattern ~loc))))
+         | "Poly_variant", 2 ->
+           Poly_variant (arg 0 (name Label ~loc), arg 1 (option (pattern ~loc)))
+         | "Poly_record", 1 ->
+           arg 0 (fun record : Pattern.desc ->
+             Poly_record
+               { fields =
+                   field
+                     "fields"
+                     (list (pair (name Label ~loc) (pattern ~loc)))
+                     record
+               ; rest = field "rest" (rest ~loc) record
+               })
+         | _ -> raise Bad_arguments))
+
+  and rest value ~loc =
+    variant "Pattern.Rest.t" value ~f:(fun constructor args : Pattern.Rest.t ->
+      let arg i read = Args.read args i read in
+      match constructor, Args.count args with
+      | "Closed", 0 -> Closed
+      | "Open", 0 -> Open
+      | "Bind", 1 -> Bind (arg 0 (name Lower ~loc))
+      | _ -> raise Bad_arguments)
+  ;;
+
+  let rec expr value ~loc : Expr.t =
+    let labelled = list (pair (name Label ~loc) (expr ~loc)) in
+    Located.create
+      ~loc
+      (variant "Expr.t" value ~f:(fun constructor args : Expr.desc ->
+         let arg i read = Args.read args i read in
+         match constructor, Args.count args with
+         | "Lit", 1 -> Lit (arg 0 lit)
+         | "Var", 2 -> Var (arg 0 (path Lower), arg 1 (option (type_expr ~loc)))
+         | "App", 2 -> App (arg 0 (expr ~loc), arg 1 (expr ~loc))
+         | "Let", 5 ->
+           Let
+             ( arg 0 (name Binder ~loc)
+             , arg 1 (list (binding ~loc))
+             , arg 2 (option (type_expr ~loc))
+             , arg 3 (expr ~loc)
+             , arg 4 (expr ~loc) )
+         | "Splice", 1 ->
+           arg 0 (fun splice : Expr.desc ->
+             Splice
+               { expr = field "expr" (expr ~loc) splice
+               ; subs =
+                   field
+                     "subs"
+                     (option
+                        (list (pair (name Lower ~loc) (option (expr ~loc)))))
+                     splice
+               })
+         | "Quote", 1 -> Quote (arg 0 (expr ~loc))
+         | "Tuple", 1 -> Tuple (arg 0 (components ~min:2 (expr ~loc)))
+         | "Construct", 2 ->
+           Construct (arg 0 (located_path Upper ~loc), arg 1 (list (expr ~loc)))
+         | "Record", 1 ->
+           Record (arg 0 (fields (pair (located_path Lower ~loc) (expr ~loc))))
+         | "Field", 2 ->
+           Field (arg 0 (expr ~loc), arg 1 (located_path Lower ~loc))
+         | "Match", 2 ->
+           Match
+             (arg 0 (expr ~loc), arg 1 (list (pair (pattern ~loc) (expr ~loc))))
+         | "Poly_record", 1 -> Poly_record (arg 0 labelled)
+         | "Poly_field", 2 ->
+           Poly_field (arg 0 (expr ~loc), arg 1 (name Label ~loc))
+         | "Poly_extend", 2 -> Poly_extend (arg 0 labelled, arg 1 (expr ~loc))
+         | "Poly_restrict", 2 ->
+           Poly_restrict (arg 0 (expr ~loc), arg 1 (name Label ~loc))
+         | "Poly_update", 2 -> Poly_update (arg 0 (expr ~loc), arg 1 labelled)
+         | "Poly_variant", 2 ->
+           Poly_variant (arg 0 (name Label ~loc), arg 1 (option (expr ~loc)))
+         | "Expect", 1 -> Expect (Located.create ~loc (arg 0 string))
+         | _ -> raise Bad_arguments))
+  ;;
+
+  let rec toplevel value ~loc : Toplevel.t =
+    Located.create
+      ~loc
+      (variant "Toplevel.t" value ~f:(fun constructor args : Toplevel.desc ->
+         let arg i read = Args.read args i read in
+         match constructor, Args.count args with
+         | "Let", 4 ->
+           Let
+             ( arg 0 (name Binder ~loc)
+             , arg 1 (list (binding ~loc))
+             , arg 2 (option (type_expr ~loc))
+             , arg 3 (expr ~loc) )
+         | "Type", 1 -> Type (arg 0 (type_decl ~loc))
+         | "Module", 2 ->
+           Module (arg 0 (name Upper ~loc), arg 1 (list (toplevel ~loc)))
+         | "Expect_test", 1 ->
+           arg 0 (fun test : Toplevel.desc ->
+             Expect_test
+               { name = Located.create ~loc (field "name" string test)
+               ; body = field "body" (expr ~loc) test
+               })
+         | _ -> raise Bad_arguments))
+  ;;
+
+  let program value ~loc = list (toplevel ~loc) value
+
+  let run read value ~loc =
+    match read value ~loc with
     | result -> Ok result
     | exception Malformed malformed ->
-      Error
-        (Error.create_s
-           [%message "Malformed syntax" ~_:(malformed : Malformed.t)])
+      Error (Error.of_string (Malformed.to_string malformed))
   ;;
 end
 
-let of_value read value ~loc =
-  Of_value.run (fun value -> read (Of_value.readers ~loc) value) value
-;;
-
 module Type_expr = struct
   let to_value = To_value.type_expr
-  let of_value = of_value (fun readers -> readers.type_expr)
+  let of_value = Of_value.(run type_expr)
 end
 
 module Type_decl = struct
   let to_value = To_value.type_decl
-  let of_value = of_value (fun readers -> readers.type_decl)
+  let of_value = Of_value.(run type_decl)
 end
 
 module Pattern = struct
   let to_value = To_value.pattern
-  let of_value = of_value (fun readers -> readers.pattern)
+  let of_value = Of_value.(run pattern)
 end
 
 module Expr = struct
   let to_value = To_value.expr
-  let of_value = of_value (fun readers -> readers.expr)
+  let of_value = Of_value.(run expr)
 end
 
 module Toplevel = struct
   let to_value = To_value.toplevel
-  let of_value = of_value (fun readers -> readers.toplevel)
+  let of_value = Of_value.(run toplevel)
 end
 
 module Program = struct
   let to_value = To_value.program
-  let of_value = of_value (fun readers -> Of_value.list readers.toplevel)
+  let of_value = Of_value.(run program)
 end
