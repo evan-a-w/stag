@@ -96,6 +96,43 @@ let%expect_test "literals and variables" =
     |}]
 ;;
 
+let%expect_test "negative literals" =
+  expr "-1";
+  expr "-4611686018427387904";
+  expr "f -1";
+  expr "f -1 -2_000";
+  expr "Some -1";
+  expr "`A -1";
+  expr "(-1, -2)";
+  expr "match x with -1 -> 0 | 0 -> -1 | Some -2 -> 1 | (-3, _) -> 2";
+  expr "-x";
+  expr "--1";
+  expr "f - 1";
+  pat "-1";
+  pat "Some -1";
+  pat "-";
+  [%expect
+    {|
+    (Lit (Int -1))
+    (Lit (Int -4611686018427387904))
+    (App (Var f ()) (Lit (Int -1)))
+    (App (App (Var f ()) (Lit (Int -1))) (Lit (Int -2000)))
+    (Construct Some ((Lit (Int -1))))
+    (Poly_variant A ((Lit (Int -1))))
+    (Tuple ((Lit (Int -1)) (Lit (Int -2))))
+    (Match (Var x ())
+     (((Lit (Int -1)) (Lit (Int 0))) ((Lit (Int 0)) (Lit (Int -1)))
+      ((Construct Some ((Lit (Int -2)))) (Lit (Int 1)))
+      ((Tuple ((Lit (Int -3)) Any)) (Lit (Int 2)))))
+    t.stag:1:0-1: illegal character '-'
+    t.stag:1:0-1: illegal character '-'
+    t.stag:1:2-3: illegal character '-'
+    (Lit (Int -1))
+    (Construct Some ((Lit (Int -1))))
+    t.stag:1:0-1: illegal character '-'
+    |}]
+;;
+
 let%expect_test "application, constructors and variants" =
   expr "f x y";
   expr "f (g x) y";

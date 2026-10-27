@@ -93,6 +93,52 @@ let failure = only_a (B (1, true))
     |}]
 ;;
 
+let%expect_test "negative literals" =
+  eval
+    {|
+type t = A of int
+let lits = (-1, -4611686018427387904, Int.add -2 3, Int.neg -5)
+let sign n = match n with -1 -> `Minus_one | 0 -> `Zero | _ -> `Other
+let signs = (sign -1, sign 0, sign 1)
+let only_minus_one t = match t with A -1 -> 0
+let matched = only_minus_one (A -1)
+let failure = only_minus_one (A -2)
+|};
+  eval "let tag_failure = match `B -3 with `B 0 -> 0";
+  [%expect
+    {|
+    (lits (Tuple -1 -4611686018427387904 1 5))
+    (sign <fun>)
+    (signs (Tuple `Minus_one `Zero `Other))
+    (only_minus_one <fun>)
+    (matched 0)
+    ("Match failure: no case matches the value A (-2)" @ t.stag:6:23-45)
+    ("Match failure: no case matches the value `B (-3)" @ t.stag:1:18-44)
+    |}]
+;;
+
+let%expect_test "printed negative ints parse back" =
+  List.iter
+    Treewalk.Value.
+      [ Int (-1)
+      ; Int Int.min_value
+      ; Poly_variant ("A", Int (-2))
+      ; Tuple [ Int (-3); Poly_variant ("B", Int 4) ]
+      ]
+    ~f:(fun value ->
+      let printed = Treewalk.Value.to_string_hum value in
+      match Parser.expr ~file:"t.stag" printed with
+      | Ok _ -> print_endline printed
+      | Error error -> print_endline (Parser.Error.to_string error));
+  [%expect
+    {|
+    -1
+    -4611686018427387904
+    `A (-2)
+    (-3, `B 4)
+    |}]
+;;
+
 let%expect_test "polymorphic records and variants" =
   eval
     {|

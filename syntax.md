@@ -9,9 +9,13 @@ node, for good errors.
 - Comments `(* ... *)`, nesting, as OCaml.
 - Literals: integers (OCaml's native `int`; a literal out of its range is a
   lexing error; digits may be separated by `_`, as in `1_000`, but not lead
-  with one), `true`, `false`, chars `'c'`, strings `"s"`, quoted strings
-  `{|raw|}` and `{id|raw|id}` (no escapes; `id` is lowercase letters and `_`),
-  `()`. There are no negative literals yet: write `Int.neg 1`.
+  with one; a `-` directly before a digit makes it negative, as in `-1`, in
+  expressions and patterns), `true`, `false`, chars `'c'`, strings `"s"`,
+  quoted strings `{|raw|}` and `{id|raw|id}` (no escapes; `id` is lowercase
+  letters and `_`), `()`. `-` is otherwise not a token: there is no binary
+  minus, so `f -1` and `x-1` are `f (-1)` and `x (-1)` (write `Int.sub`).
+  Printed values parenthesize negative arguments, `Some (-1)`, as OCaml does,
+  so they will still parse once infix operators follow OCaml.
 - Escapes, in chars and strings: `\n \t \r \b`, `\ ` (space), `\\ \" \'`,
   `\ddd` (3 decimal digits, at most 255) and `\xhh` (2 hex digits). In
   strings, a `\` at the end of a line skips the newline and the spaces and
