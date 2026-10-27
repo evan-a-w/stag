@@ -473,7 +473,7 @@ let%expect_test "arity and kind of type arguments" =
   check [ top "f" [ "x" ] ~annot:(Ty.con "bool" ~args:[ Ty Ty.int ]) (var "x") ];
   check
     [ Decl.list
-    ; Decl.variant "t" [ "A", [ Ty.con "list" ~args:[ Row Empty ] ] ]
+    ; Decl.variant "t" [ "A", [ Ty.con "list" ~args:[ Row (Ty.row ()) ] ] ]
     ];
   check
     [ stmt; Decl.variant "t" [ "A", [ Ty.con "stmt" ~args:[ Ty Ty.int ] ] ] ];

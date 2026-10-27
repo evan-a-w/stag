@@ -224,7 +224,7 @@ let rec elaborate' t module_ vars ~expansions (expr : Type_expr.t)
 and elaborate_row t module_ vars ~expansions (row : Type_expr.row)
   : (Type.row, Typecheck_error.t) Result.t
   =
-  let rec go (row : Type_expr.row) ~seen =
+  let rec go ({ txt = row; loc = _ } : Type_expr.row) ~seen =
     match row with
     | Empty -> Ok Type.REmpty
     | Extend ({ txt = name; loc }, _, _) when Set.mem seen name ->
@@ -237,15 +237,23 @@ and elaborate_row t module_ vars ~expansions (row : Type_expr.row)
   in
   go row ~seen:String.Set.empty
 
-and elaborate_con t module_ vars ~expansions path args ~loc =
-  let error kind = Error (Typecheck_error.create ~loc kind) in
-  let%bind.Result decl = find_type t module_ path ~loc in
+and elaborate_con
+      t
+      module_
+      vars
+      ~expansions
+      ({ txt = path; loc = path_loc } : Path.t Located.t)
+      args
+      ~loc
+  =
+  let error ~loc kind = Error (Typecheck_error.create ~loc kind) in
+  let%bind.Result decl = find_type t module_ path ~loc:path_loc in
   let expected = List.length decl.params in
   let got = List.length args in
   let%bind.Result () =
     if expected = got
     then Ok ()
-    else error (Type_arity_mismatch { type_name = path; expected; got })
+    else error ~loc (Type_arity_mismatch { type_name = path; expected; got })
   in
   let%bind.Result args =
     map_result (List.zip_exn decl.decl.params args) ~f:(fun (param, arg) ->
@@ -256,8 +264,10 @@ and elaborate_con t module_ vars ~expansions path args ~loc =
       | Row _, Row row ->
         elaborate_row t module_ vars ~expansions row
         |> Result.map ~f:(fun row -> Type.ARow row)
-      | Ty _, Row _ | Row _, Ty _ ->
-        error (Type_arg_kind_mismatch { type_name = path; param = param.txt }))
+      | Ty _, Row { loc; _ } | Row _, Ty { loc; _ } ->
+        error
+          ~loc
+          (Type_arg_kind_mismatch { type_name = path; param = param.txt }))
   in
   match decl.decl.kind with
   | Variant _ | Record _ | Abstract -> Ok (Type.TCon (decl.name, args))
@@ -272,7 +282,7 @@ and elaborate_con t module_ vars ~expansions path args ~loc =
        Ok (Type.TVar expansion.knot)
      | None ->
        if List.exists instances ~f:(fun expansion -> not expansion.expanded)
-       then error (Non_regular_recursive_alias decl.name)
+       then error ~loc (Non_regular_recursive_alias decl.name)
        else expand t decl ~args ~expansions body ~loc)
 
 and expand t (decl : Decl.t) ~args ~expansions body ~loc =
@@ -308,19 +318,23 @@ let elaborate t module_ vars expr =
 
 let declare module_ (decl : Type_decl.t) ~fresh =
   let%map.Result () =
-    match
-      List.find_a_dup decl.params ~compare:(fun a b ->
-        String.compare (Type_decl.Param.name a.txt) (Type_decl.Param.name b.txt))
-    with
-    | None -> Ok ()
-    | Some { txt = param; loc } ->
-      Error
-        (Typecheck_error.create
-           ~loc
-           (Duplicate_type_parameter
-              { type_name = Module_scope.canonical_name module_ decl.name.txt
-              ; param = Type_decl.Param.name param
-              }))
+    List.fold_result
+      decl.params
+      ~init:String.Set.empty
+      ~f:(fun seen { txt = param; loc } ->
+        let param = Type_decl.Param.name param in
+        if Set.mem seen param
+        then
+          Error
+            (Typecheck_error.create
+               ~loc
+               (Duplicate_type_parameter
+                  { type_name =
+                      Module_scope.canonical_name module_ decl.name.txt
+                  ; param
+                  }))
+        else Ok (Set.add seen param))
+    |> Result.ignore_m
   in
   let params =
     List.map decl.params ~f:(fun param ->
