@@ -5,9 +5,12 @@ open! Core
 type t
 
 (** Typechecks [program], running its toplevel splices as they are reached.
-    All evaluation at compile time shares [limits], unlimited by default. *)
+    All evaluation at compile time shares [limits], unlimited by default.
+    Prims print to [output], stdout by default, at compile time and when
+    evaluated. *)
 val check
   :  ?limits:Limits.t
+  -> ?output:(string -> unit)
   -> Syntax.Program.t
   -> (t, Typecheck_error.t) Result.t
 

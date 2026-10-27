@@ -34,7 +34,7 @@ end
 
 module Value : sig
   type t =
-    | Int of string
+    | Int of int
     | Bool of bool
     | String of string
     | Char of char
@@ -55,6 +55,10 @@ module Value : sig
         ; persistent : t Typed.Ident.Map.t
           (** The values of the persistent binders [expr] embeds. *)
         }
+    | Prim of
+        { prim : Prim.t
+        ; applied : t list (** Fewer than its arity, latest first. *)
+        }
 
   (** Functions are [<fun>], as their envs may contain themselves. *)
   val sexp_of_t : t -> Sexp.t
@@ -67,6 +71,9 @@ type t
 val create : stamps:Stamp_counter.t -> unit -> t
 
 val stamps : t -> Stamp_counter.t
+
+(** Where prims print to, stdout by default. *)
+val set_output : t -> (string -> unit) -> unit
 
 (** Evaluation from now on, until [set_limits] again, is bounded by [limits],
     counted from now: one budget shared by everything evaluated meanwhile, eg.

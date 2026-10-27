@@ -1,7 +1,7 @@
 open! Core
 
 type t =
-  | Int of string
+  | Int of int
   | Char of char
   | String of string
   | Lident of string

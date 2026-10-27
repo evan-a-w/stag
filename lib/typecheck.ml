@@ -610,32 +610,44 @@ let finish_scc (program : Program_env.t) (members : Toplevel.t list) =
 ;;
 
 let rec var_type t (scope : Scope.t) ~(path : Syntax.Path.t) ~loc =
+  let resolve ~name entry =
+    resolution_type t scope ~name ~loc (Resolution.of_entry scope ~name entry)
+  in
+  let prim prim = Ok (Prim.ty prim, Typed.Var_ref.Prim prim) in
   let local =
     match (path :> string list) with
     | [ name ] ->
       Env.find scope.locals name |> Option.map ~f:(fun entry -> name, entry)
     | _ -> None
   in
-  let%bind.Result name, entry =
-    match local with
-    | Some (name, entry) -> Ok (name, Some entry)
-    | None ->
-      (match%bind.Result Module_scope.find scope.module_ Value path ~loc with
-       | Some name ->
-         let%map.Result entry =
-           toplevel_entry
-             t
-             scope
-             (Hashtbl.find_exn scope.program.toplevels name)
-             ~loc
-         in
-         name, Some entry
-       | None ->
-         (match (path :> string list) with
-          | [ name ] -> Ok (name, None)
-          | _ -> error ~loc (Not_in_scope path)))
-  in
-  resolution_type t scope ~name ~loc (Resolution.of_entry scope ~name entry)
+  match local with
+  | Some (name, entry) -> resolve ~name (Some entry)
+  | None ->
+    (* Prims are outside the root module, so found only where the program has
+       nothing of their name: no value, or no module for a path. *)
+    (match
+       Module_scope.find scope.module_ Value path ~loc, (path :> string list)
+     with
+     | Ok (Some name), _ ->
+       let%bind.Result entry =
+         toplevel_entry
+           t
+           scope
+           (Hashtbl.find_exn scope.program.toplevels name)
+           ~loc
+       in
+       resolve ~name (Some entry)
+     | Ok None, [ name ] ->
+       (match Prim.find path with
+        | Some p -> prim p
+        | None -> resolve ~name None)
+     | Ok None, _ -> error ~loc (Not_in_scope path)
+     | Error ({ kind = Unbound_module _; _ } as error'), module_ :: _ ->
+       (match Prim.find path with
+        | Some p -> prim p
+        | None when Prim.is_module module_ -> error ~loc (Not_in_scope path)
+        | None -> Error error')
+     | (Error _ as error), _ -> error)
 
 (* Generated code's variables are already resolved, so are found by binder
    rather than by name, which may be shadowed. *)
@@ -652,6 +664,7 @@ and var_ref_type t (scope : Scope.t) (var_ref : Typed.Var_ref.t) ~loc =
     error ~loc (Not_in_scope (Syntax.Path.of_string name))
   in
   match var_ref with
+  | Prim prim -> Ok (Prim.ty prim, var_ref)
   | Free name ->
     (match scope.quote with
      | Some quote ->

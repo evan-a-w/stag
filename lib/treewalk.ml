@@ -54,7 +54,7 @@ end
 
 module Value = struct
   type t =
-    | Int of string
+    | Int of int
     | Bool of bool
     | String of string
     | Char of char
@@ -74,6 +74,34 @@ module Value = struct
         { expr : Typed.Expr.t
         ; persistent : t Typed.Ident.Map.t
         }
+    | Prim of
+        { prim : Prim.t
+        ; applied : t list
+        }
+
+  let of_prim : Prim.Value.t -> t = function
+    | Int n -> Int n
+    | Bool b -> Bool b
+    | String s -> String s
+    | Char c -> Char c
+    | Unit -> Unit
+  ;;
+
+  let to_prim : t -> Prim.Value.t option = function
+    | Int n -> Some (Int n)
+    | Bool b -> Some (Bool b)
+    | String s -> Some (String s)
+    | Char c -> Some (Char c)
+    | Unit -> Some Unit
+    | Tuple _
+    | Construct _
+    | Record _
+    | Poly_record _
+    | Poly_variant _
+    | Function _
+    | Code _
+    | Prim _ -> None
+  ;;
 
   let of_lit : Syntax.Lit.t -> t = function
     | Int n -> Int n
@@ -84,7 +112,7 @@ module Value = struct
   ;;
 
   let rec sexp_of_t : t -> Sexp.t = function
-    | Int n -> Atom n
+    | Int n -> Atom (Int.to_string n)
     | Bool b -> sexp_of_bool b
     | String s -> List [ Atom "String"; Atom s ]
     | Char c -> List [ Atom "Char"; sexp_of_char c ]
@@ -97,7 +125,7 @@ module Value = struct
     | Poly_record fields -> [%sexp (fields : t String.Map.t)]
     | Poly_variant (tag, Unit) -> Atom ("`" ^ tag)
     | Poly_variant (tag, arg) -> List [ Atom ("`" ^ tag); sexp_of_t arg ]
-    | Function _ -> Atom "<fun>"
+    | Function _ | Prim _ -> Atom "<fun>"
     | Code { expr; persistent } ->
       List
         (Atom "Code"
@@ -139,6 +167,7 @@ type t =
   ; mutable env : Value.t Env.t
   ; stamps : Stamp_counter.t
   ; mutable budget : Budget.t
+  ; mutable output : string -> unit
   }
 
 let captures t ~ident ~args ~body =
@@ -172,7 +201,7 @@ let captures t ~ident ~args ~body =
   in
   let rec go ~depth ({ desc; _ } : Typed.Expr.t) =
     match desc with
-    | Lit _ | Var (Free _) -> ()
+    | Lit _ | Var (Free _ | Prim _) -> ()
     | Var
         ( Bound (Toplevel ident | Local ident)
         | Persistent (Toplevel ident | Local ident) ) -> use ~depth ident
@@ -225,10 +254,12 @@ let create ~stamps () =
   ; env = Env.create ()
   ; stamps
   ; budget = Budget.create Limits.unlimited
+  ; output = Out_channel.output_string stdout
   }
 ;;
 
 let stamps t = t.stamps
+let set_output t output = t.output <- output
 let set_limits t limits = t.budget <- Budget.create limits
 
 let add_ident_info t ~ident ~info =
@@ -454,7 +485,7 @@ let rec match_pattern env (pattern : Typed.Pattern.t) (value : Value.t) =
   | Var ident, _ ->
     Env.set env ~ident ~value;
     Ok true
-  | Lit (Int a), Int b -> Ok (String.equal a b)
+  | Lit (Int a), Int b -> Ok (Int.equal a b)
   | Lit (Bool a), Bool b -> Ok (Bool.equal a b)
   | Lit (String a), String b -> Ok (String.equal a b)
   | Lit (Char a), Char b -> Ok (Char.equal a b)
@@ -592,10 +623,11 @@ and step t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
   | Var (Persistent (Local ident | Toplevel ident)) -> lookup t env ident
   | Var (Free name) ->
     Or_error.error_s [%message "Free variable of code evaluated" name]
+  | Var (Prim prim) -> Ok (Value.Prim { prim; applied = [] })
   | App (f, arg) ->
     let%bind f = eval' f in
     let%bind arg = eval' arg in
-    apply t f arg
+    apply t f arg ~loc:expr.loc
   | Let { ident; args; generalized = _; body; in_ } ->
     let%bind () = bind_let t ~env ~level ~ident ~args ~body in
     eval' in_
@@ -675,8 +707,24 @@ and closure t ~env ~level ~ident ~args ~body =
   let%map env = Env.of_captures env ~fallback:t.env ~captures in
   Value.Function { args; body; env; level }
 
-and apply t (f : Value.t) arg =
+and apply t (f : Value.t) arg ~loc =
   match f with
+  | Prim { prim; applied } ->
+    let applied = arg :: applied in
+    if List.length applied < Prim.arity prim
+    then Ok (Value.Prim { prim; applied })
+    else (
+      match List.rev applied |> List.map ~f:Value.to_prim |> Option.all with
+      | None ->
+        Or_error.error_s
+          [%message
+            "Prim applied to a non-base value"
+              (prim : Prim.t)
+              (applied : Value.t list)]
+      | Some args ->
+        (match Prim.apply prim ~output:t.output args with
+         | Ok value -> Ok (Value.of_prim value)
+         | Error message -> Error (Runtime_error.to_error { loc; message })))
   | Function { args = param :: args; body; env; level } ->
     let env = Env.copy env in
     Env.set env ~ident:param ~value:arg;

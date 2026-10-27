@@ -17,6 +17,7 @@ module Error = struct
       | Unterminated_char
       | Illegal_escape of string
       | Invalid_int_literal of string
+      | Int_literal_out_of_range of string
     [@@deriving sexp_of]
 
     let to_string = function
@@ -26,6 +27,8 @@ module Error = struct
       | Unterminated_char -> "unterminated character literal"
       | Illegal_escape s -> sprintf "illegal escape sequence %s" s
       | Invalid_int_literal s -> sprintf "invalid integer literal %s" s
+      | Int_literal_out_of_range s ->
+        sprintf "integer literal %s exceeds the range of int" s
     ;;
   end
 
@@ -309,7 +312,10 @@ let token (t : State.t) : Located.t =
        | c, _ when Char.is_digit c ->
          let text = ident t in
          if String.for_all text ~f:Char.is_digit
-         then Int text
+         then (
+           match Int.of_string_opt text with
+           | Some n -> Int n
+           | None -> State.error t start (Int_literal_out_of_range text))
          else State.error t start (Invalid_int_literal text)
        | c, _ when Char.is_uppercase c -> Uident (ident t)
        | c, _ when is_ident_start c ->

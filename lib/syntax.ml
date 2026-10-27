@@ -2,7 +2,7 @@ open! Core
 
 module Lit = struct
   type t =
-    | Int of string
+    | Int of int
     | Bool of bool
     | String of string
     | Char of char

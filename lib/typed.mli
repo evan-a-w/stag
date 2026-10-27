@@ -45,6 +45,7 @@ module Var_ref : sig
     | Free of string
     (** A free variable of the enclosing quote: its context entry of this
         name. *)
+    | Prim of Prim.t (** Usable at any level, like a persistent toplevel. *)
   [@@deriving sexp_of]
 end
 

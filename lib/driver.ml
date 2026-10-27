@@ -6,8 +6,9 @@ type t =
   }
 [@@deriving fields ~getters]
 
-let check ?(limits = Limits.unlimited) program =
+let check ?(limits = Limits.unlimited) ?output program =
   let interpreter = Treewalk.create ~stamps:(Stamp_counter.create ()) () in
+  Option.iter output ~f:(Treewalk.set_output interpreter);
   Treewalk.set_limits interpreter limits;
   let%map.Result checked =
     Typecheck.typecheck (Typecheck.create ~interpreter ()) ~program

@@ -92,6 +92,7 @@ module Var_ref = struct
     | Bound of Binder.t
     | Persistent of Binder.t
     | Free of string
+    | Prim of Prim.t
   [@@deriving sexp_of]
 end
 

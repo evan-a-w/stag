@@ -17,6 +17,7 @@ module Error : sig
       | Unterminated_char
       | Illegal_escape of string
       | Invalid_int_literal of string
+      | Int_literal_out_of_range of string
     [@@deriving sexp_of]
   end
 

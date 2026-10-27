@@ -44,7 +44,7 @@ module Ty = struct
 end
 
 let expr desc : Expr.t = none desc
-let int n = expr (Lit (Int (Int.to_string n)))
+let int n = expr (Lit (Int n))
 let bool b = expr (Lit (Bool b))
 let string s = expr (Lit (String s))
 let char c = expr (Lit (Char c))
@@ -145,7 +145,7 @@ module Pat = struct
   let pattern desc : Pattern.t = none desc
   let any = pattern Any
   let var name = pattern (Var name)
-  let int n = pattern (Lit (Int (Int.to_string n)))
+  let int n = pattern (Lit (Int n))
   let string s = pattern (Lit (String s))
   let unit = pattern (Lit Unit)
   let tuple patterns = pattern (Tuple patterns)

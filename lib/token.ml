@@ -1,7 +1,7 @@
 open! Core
 
 type t =
-  | Int of string
+  | Int of int
   | Char of char
   | String of string
   | Lident of string
@@ -63,7 +63,7 @@ let keyword = function
 ;;
 
 let to_string = function
-  | Int s -> s
+  | Int n -> Int.to_string n
   | Char c -> sprintf "'%s'" (Char.escaped c)
   | String s -> sprintf "\"%s\"" (String.escaped s)
   | Lident s | Uident s -> s

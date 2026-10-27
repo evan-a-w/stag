@@ -178,15 +178,17 @@ let%expect_test "labels" =
 ;;
 
 let%expect_test "ints" =
-  lex "0 42 123456789012345678901234567890 007";
+  lex "0 42 4611686018427387903 007";
+  lex "4611686018427387904";
   [%expect
     {|
     ((Int 0) t.stag:1:0-1 0)
     ((Int 42) t.stag:1:2-4 42)
-    ((Int 123456789012345678901234567890) t.stag:1:5-35
-     123456789012345678901234567890)
-    ((Int 007) t.stag:1:36-39 007)
-    (Eof t.stag:1:39-39 "")
+    ((Int 4611686018427387903) t.stag:1:5-24 4611686018427387903)
+    ((Int 7) t.stag:1:25-28 007)
+    (Eof t.stag:1:28-28 "")
+    ((kind (Int_literal_out_of_range 4611686018427387904)) (loc t.stag:1:0-19))
+    t.stag:1:0-19: integer literal 4611686018427387904 exceeds the range of int
     |}]
 ;;
 
@@ -346,7 +348,7 @@ let%expect_test "positions across lines" =
 
 let%expect_test "token to_string" =
   let tokens : Token.t list =
-    [ Int "12"
+    [ Int 12
     ; Char 'a'
     ; Char '\n'
     ; Char '\''

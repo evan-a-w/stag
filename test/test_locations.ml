@@ -15,7 +15,7 @@ let e line desc : Expr.t = at line desc
 let p line desc : Pattern.t = at line desc
 let ty line desc : Type_expr.t = at line desc
 let row line desc : Type_expr.row = at line desc
-let int_at line n = e line (Lit (Int (Int.to_string n)))
+let int_at line n = e line (Lit (Int n))
 let bool_at line b = e line (Lit (Bool b))
 let var_at line name = e line (Var (path name, None))
 let app_at line f x = e line (App (f, x))
@@ -440,8 +440,7 @@ let%expect_test "staging" =
              2
              (e
                 3
-                (Match
-                   (int_at 4 1, [ p 5 (Lit (Int "2")), quote 6 (int_at 7 1) ]))))
+                (Match (int_at 4 1, [ p 5 (Lit (Int 2)), quote 6 (int_at 7 1) ]))))
       ]
     ];
   [%expect

@@ -76,7 +76,7 @@ let show_locs sexp_of_t parse source =
 
 let%expect_test "literals and variables" =
   expr "1";
-  expr "123456789012345678901234567890";
+  expr "4611686018427387903";
   expr "true";
   expr "false";
   expr "'c'";
@@ -90,7 +90,7 @@ let%expect_test "literals and variables" =
   [%expect
     {|
     (Lit (Int 1))
-    (Lit (Int 123456789012345678901234567890))
+    (Lit (Int 4611686018427387903))
     (Lit (Bool true))
     (Lit (Bool false))
     (Lit (Char c))
