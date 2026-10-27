@@ -11,6 +11,9 @@ module Error : sig
 
   val loc : t -> Loc.t
 
+  (** Without the location. *)
+  val message : t -> string
+
   (** [file:line:col-col: message]. *)
   val to_string : t -> string
 end

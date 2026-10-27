@@ -38,6 +38,8 @@ module Error = struct
     }
   [@@deriving sexp_of]
 
+  let message t = Kind.to_string t.kind
+
   let to_string { kind; loc } =
     sprintf "%s: %s" (Loc.to_string loc) (Kind.to_string kind)
   ;;

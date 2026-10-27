@@ -27,6 +27,9 @@ module Error : sig
     }
   [@@deriving sexp_of]
 
+  (** Without the location. *)
+  val message : t -> string
+
   val to_string : t -> string
 end
 

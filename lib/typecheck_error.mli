@@ -74,3 +74,6 @@ val sexp_of_t : t -> Sexp.t
 
 val create : loc:Loc.t -> Kind.t -> t
 val unification_error : loc:Loc.t -> Unification_error.t -> t
+
+(** A human readable message, without the location, as OCaml's [Error: ...]. *)
+val message : t -> string

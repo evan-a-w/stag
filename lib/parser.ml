@@ -15,6 +15,11 @@ module Error = struct
     | Syntax { loc; _ } -> loc
   ;;
 
+  let message = function
+    | Lex error -> Lexer.Error.message error
+    | Syntax { message; loc = _ } -> message
+  ;;
+
   let to_string = function
     | Lex error -> Lexer.Error.to_string error
     | Syntax { loc; message } -> sprintf "%s: %s" (Loc.to_string loc) message
