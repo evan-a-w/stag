@@ -202,9 +202,7 @@ let%expect_test "which cases are removed from residuals" =
         "record"
         [ "v"; "k" ]
         (residual
-           [ ( Pat.tag
-                 "A"
-                 ~arg:(Pat.poly_record ~rest:(Bind "r") [ "x", Pat.var "x" ])
+           [ ( Pat.tag "A" ~arg:(Pat.poly_record ~bind:"r" [ "x", Pat.var "x" ])
              , var "x" )
            ])
     ; top
@@ -326,22 +324,25 @@ let%expect_test "aliases" =
         ~params:[ Decl.row "r" ]
         (Ty.variant [ "C", Ty.bool ] ~tail:"r")
     ; Decl.variant "wrapper" [ "W", [ Ty.con "ab" ] ]
-    ; Toplevel.Let ("a", [], Some (Ty.con "ab"), tag "A" ~arg:(int 1))
-    ; Toplevel.Let
+    ; top_let ("a", [], Some (Ty.con "ab"), tag "A" ~arg:(int 1))
+    ; top_let
         ( "c"
         , []
-        , Some (Ty.con "with_c" ~args:[ Row (Extend ("D", Ty.unit, Empty)) ])
+        , Some
+            (Ty.con
+               "with_c"
+               ~args:[ Row (Ty.row ~entries:[ "D", Ty.unit ] ()) ])
         , tag "D" )
     ; top "w" [] (construct "W" ~args:[ tag "B" ])
-    ; Toplevel.Let
+    ; top_let
         ( "open_param"
-        , [ typed "v" (Ty.con "with_c" ~args:[ Row (Var "r") ]) ]
+        , [ typed "v" (Ty.con "with_c" ~args:[ Row (Ty.row ~tail:"r" ()) ]) ]
         , None
         , var "v" )
     ];
   check
     [ Decl.alias "ab" (Ty.variant [ "A", Ty.int; "B", Ty.unit ])
-    ; Toplevel.Let ("bad", [], Some (Ty.con "ab"), tag "C")
+    ; top_let ("bad", [], Some (Ty.con "ab"), tag "C")
     ];
   check [ Decl.alias "dup" (Ty.variant [ "A", Ty.int; "A", Ty.bool ]) ];
   [%expect
@@ -416,7 +417,7 @@ let%expect_test "tags in quotes are not free variables" =
 
 let%expect_test "presences reach variant rows through contexts" =
   check
-    [ Toplevel.Let
+    [ top_let
         ( "unknown"
         , [ "c", None; typed "v" (Ty.variant [] ~tail:"r") ]
         , None
@@ -428,7 +429,7 @@ let%expect_test "presences reach variant rows through contexts" =
                   (int 1)
                   (splice (var "c" ~annot:(Ty.code Ty.int ~tail:"r")))))
             (var "v") )
-    ; Toplevel.Let
+    ; top_let
         ( "absent"
         , [ "c", None; typed "v" (Ty.variant [] ~tail:"d") ]
         , None
@@ -535,7 +536,7 @@ let%expect_test "literal unit and closed records as tag arguments" =
     [ top
         "unit_literal"
         [ "v"; "k" ]
-        (residual [ Pat.tag "A" ~arg:(Pattern.Lit Unit), int 0 ])
+        (residual [ Pat.tag "A" ~arg:Pat.unit, int 0 ])
     ; top
         "closed_record"
         [ "v"; "k" ]
@@ -610,10 +611,10 @@ let%expect_test "closing scrutinees with shadowed tags" =
       ~params:[ Decl.row "r" ]
       (Ty.variant [ "A", Ty.int ] ~tail:"r")
   in
-  let v_type = Ty.con "t" ~args:[ Row (Extend ("A", Ty.bool, Empty)) ] in
+  let v_type = Ty.con "t" ~args:[ Row (Ty.row ~entries:[ "A", Ty.bool ] ()) ] in
   check
     [ shadowed
-    ; Toplevel.Let
+    ; top_let
         ( "residual"
         , [ typed "v" v_type ]
         , None
@@ -632,7 +633,7 @@ let%expect_test "closing scrutinees with shadowed tags" =
      extra. *)
   check
     [ shadowed
-    ; Toplevel.Let
+    ; top_let
         ( "closed"
         , [ typed "v" v_type ]
         , None
@@ -640,7 +641,7 @@ let%expect_test "closing scrutinees with shadowed tags" =
     ];
   check
     [ shadowed
-    ; Toplevel.Let
+    ; top_let
         ( "repeated_tag"
         , [ typed "v" v_type ]
         , None
@@ -665,7 +666,7 @@ let%expect_test "closing scrutinees with shadowed tags" =
 
 let%expect_test "rows shared between records and variants" =
   check
-    [ Toplevel.Let
+    [ top_let
         ( "same"
         , [ typed "r" (Ty.record [] ~tail:"r")
           ; typed "v" (Ty.variant [] ~tail:"r")
@@ -689,7 +690,7 @@ let%expect_test "rows shared between records and variants" =
               ]))
     ];
   check
-    [ Toplevel.Let
+    [ top_let
         ( "same"
         , [ typed "r" (Ty.record [] ~tail:"r")
           ; typed "v" (Ty.variant [] ~tail:"r")
@@ -720,7 +721,7 @@ let%expect_test "structural types may be recursive" =
         (app (var "cond") [ bool true; var "v"; tag "A" ~arg:(var "v") ])
     ];
   check
-    [ Toplevel.Let
+    [ top_let
         ( "cyclic"
         , [ typed "a" (Ty.variant [ "A", Ty.unit ] ~tail:"r")
           ; typed "b" (Ty.variant [ "B", Ty.unit ] ~tail:"r")
@@ -777,13 +778,13 @@ let%expect_test "structural types may be recursive" =
 let%expect_test "empty matches on empty nominal types" =
   let void = Decl.variant "void" [] in
   let absurd ?(name = "absurd") ty =
-    Toplevel.Let (name, [ typed "x" ty ], None, match_ (var "x") [])
+    top_let (name, [ typed "x" ty ], None, match_ (var "x") [])
   in
   check
     [ void
     ; absurd (Ty.con "void")
     ; top "poly" [ "x" ] (match_ (var "x") [])
-    ; Toplevel.Let
+    ; top_let
         ( "through_let"
         , [ typed "v" (Ty.con "void") ]
         , None
@@ -820,12 +821,12 @@ let%expect_test "empty matches on empty nominal types" =
   check
     [ void
     ; top "f" [ "x" ] (match_ (var "x") [])
-    ; Toplevel.Let
+    ; top_let
         ("g", [ typed "v" (Ty.con "void") ], None, app (var "f") [ var "v" ])
     ];
   check
     [ void
-    ; Toplevel.Let
+    ; top_let
         ( "local"
         , [ typed "v" (Ty.con "void") ]
         , None

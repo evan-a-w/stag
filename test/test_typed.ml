@@ -3,11 +3,7 @@ open Stag
 open Syntax
 open Helpers
 
-let prim_names =
-  List.filter_map prims ~f:(function
-    | Toplevel.Let (name, _, _, _) -> Some name
-    | Type _ | Module _ -> None)
-;;
+let prim_names = List.filter_map prims ~f:let_name
 
 let typecheck_exn program =
   match Typecheck.typecheck (typechecker ()) ~program with
@@ -237,9 +233,7 @@ let%expect_test "polymorphic records" =
         [ "r" ]
         (match_
            (var "r")
-           [ ( Pat.poly_record
-                 ~rest:(Bind "others")
-                 [ "a", Pat.var "a"; "b", Pat.any ]
+           [ ( Pat.poly_record ~bind:"others" [ "a", Pat.var "a"; "b", Pat.any ]
              , tuple [ var "a"; var "others" ] )
            ])
     ; top
@@ -797,9 +791,7 @@ let%expect_test "literals that look like placeholders" =
         [ "s" ]
         (match_
            (var "s")
-           [ ( Pattern.Lit (String "\0000")
-             , tuple [ Expr.Lit (Char '\000'); Expr.Lit (String "\0003") ] )
-           ])
+           [ Pat.string "\0000", tuple [ char '\000'; string "\0003" ] ])
     ];
   [%expect
     {|

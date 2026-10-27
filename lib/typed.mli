@@ -97,6 +97,7 @@ module Pattern : sig
   type t =
     { desc : t Desc.t
     ; ty : Type.ty
+    ; loc : Loc.t (** Of the syntax it was inferred from. *)
     }
   [@@deriving sexp_of]
 
@@ -159,6 +160,7 @@ module Expr : sig
   type t =
     { desc : t Desc.t
     ; ty : Type.ty
+    ; loc : Loc.t (** Of the syntax it was inferred from. *)
     }
   [@@deriving sexp_of]
 

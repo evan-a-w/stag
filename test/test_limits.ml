@@ -40,7 +40,7 @@ let run
       program
   =
   match Driver.check ~limits:compile_time (prims @ program) with
-  | Error (Splice_evaluation_failed { error; code = _ }) ->
+  | Error { kind = Splice_evaluation_failed { error; code = _ }; loc = _ } ->
     print_string "splice failed: ";
     print_error error
   | Error error -> print_s [%sexp (error : Typecheck_error.t)]

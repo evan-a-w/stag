@@ -160,7 +160,7 @@ let%expect_test "open rows and residuals" =
 (* Handlers for each case of an open recursive AST, composed by [eval]. *)
 let%expect_test "extensible interpreter" =
   let handler name tag ~arg body =
-    Toplevel.Let
+    top_let
       ( name
       , args [ "self"; "k"; "e" ]
       , None
@@ -558,12 +558,12 @@ let%expect_test "recursive aliases" =
   check
     [ l
     ; len
-    ; Toplevel.Let
+    ; top_let
         ( "len_ints"
         , [ typed "l" (l_of Ty.int) ]
         , None
         , app (var "len") [ var "l" ] )
-    ; Toplevel.Let
+    ; top_let
         ( "len_any"
         , [ typed "l" (l_of (Ty.var "a")) ]
         , None
@@ -618,8 +618,10 @@ let%expect_test "recursive aliases through records, tuples and type arguments" =
     ; Decl.alias
         "rows"
         ~params:[ Decl.row "r" ]
-        (Ty.record [ "x", Ty.con "rows" ~args:[ Row (Var "r") ] ] ~tail:"r")
-    ; Toplevel.Let
+        (Ty.record
+           [ "x", Ty.con "rows" ~args:[ Row (Ty.row ~tail:"r" ()) ] ]
+           ~tail:"r")
+    ; top_let
         ( "heads"
         , [ typed "s" (Ty.con "stream" ~args:[ Ty Ty.int ]) ]
         , None
@@ -627,7 +629,7 @@ let%expect_test "recursive aliases through records, tuples and type arguments" =
             [ dot (var "s") "head"
             ; dot (app (dot (var "s") "tail") [ unit ]) "head"
             ] )
-    ; Toplevel.Let
+    ; top_let
         ( "leaf"
         , [ typed "t" (Ty.con "tree") ]
         , None
@@ -727,7 +729,11 @@ let%expect_test "non-regular and unguarded recursive aliases" =
         "t"
         ~params:[ Decl.row "r" ]
         (Ty.record
-           [ "x", Ty.con "t" ~args:[ Row (Extend ("y", Ty.int, Var "r")) ] ])
+           [ ( "x"
+             , Ty.con
+                 "t"
+                 ~args:[ Row (Ty.row ~entries:[ "y", Ty.int ] ~tail:"r" ()) ] )
+           ])
     ];
   check [ Decl.alias "t" (Ty.tuple [ Ty.con "t"; Ty.int ]) ];
   check [ Decl.list; Decl.alias "t" (list_of (Ty.con "t")) ];
@@ -888,7 +894,7 @@ let%expect_test "guardedness is judged on the expansion" =
   check
     [ variant_f
     ; g
-    ; Toplevel.Let ("v", [ typed "x" (Ty.con "g") ], None, var "x")
+    ; top_let ("v", [ typed "x" (Ty.con "g") ], None, var "x")
     ; top "a" [] ~annot:(Ty.con "g") (tag "A" ~arg:(tag "A" ~arg:(var "a")))
     ];
   check
@@ -1062,9 +1068,9 @@ let%expect_test "traversals of shared aliases take linear time" =
   let check ~step =
     let program =
       alias_dag n ~step
-      @ [ Toplevel.Let ("f", [ typed "x" (t_n (Ty.var "a")) ], None, int 1)
+      @ [ top_let ("f", [ typed "x" (t_n (Ty.var "a")) ], None, int 1)
         ; top "g" [ "y" ] (app (var "f") [ var "y" ])
-        ; Toplevel.Let
+        ; top_let
             ("h", [ typed "z" (t_n Ty.int) ], None, app (var "g") [ var "z" ])
         ]
     in
@@ -1108,7 +1114,7 @@ let%expect_test "cycle names are introduced in each type printed" =
     [ l
     ; Decl.record "s" ~params:[ Decl.ty "a" ] [ "c", l_of a; "d", l_of a ]
     ; Decl.variant "v" ~params:[ Decl.ty "a" ] [ "V", [ l_of a; l_of a ] ]
-    ; Toplevel.Let
+    ; top_let
         ("pair", [ typed "x" (Ty.tuple [ l_of a; l_of a ]) ], None, var "x")
     ];
   [%expect

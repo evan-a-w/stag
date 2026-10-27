@@ -3,11 +3,7 @@ open Stag
 open Syntax
 open Helpers
 
-let prim_names =
-  List.filter_map prims ~f:(function
-    | Toplevel.Let (name, _, _, _) -> Some name
-    | Type _ | Module _ -> None)
-;;
+let prim_names = List.filter_map prims ~f:let_name
 
 (* The captures of each closure in [program]: its toplevel functions and the
    local functions within them. *)
@@ -111,7 +107,7 @@ let%expect_test "pattern binders are not captures" =
               [ "r" ]
               (match_
                  (var "r")
-                 [ ( Pat.poly_record ~rest:(Bind "rest") [ "a", Pat.var "a" ]
+                 [ ( Pat.poly_record ~bind:"rest" [ "a", Pat.var "a" ]
                    , tuple [ var "a"; var "rest"; var "p" ] )
                  ])
               (let_

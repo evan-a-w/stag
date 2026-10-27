@@ -140,7 +140,7 @@ let%expect_test "params, bounds and every part of an item are relative" =
             [ "V", [ Ty.con "t" ~args:[ Ty (Ty.var "a") ] ] ]
         ; Decl.record "f" [ "x", Ty.con "t" ~args:[ Ty Ty.int ] ]
         ; top "wrap" [ "x" ] (construct "T" ~args:[ var "x" ])
-        ; Toplevel.Let
+        ; top_let
             ( "use"
             , [ "x", Some (Ty.con "t" ~args:[ Ty Ty.int ]); "y", None ]
             , None

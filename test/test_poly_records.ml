@@ -20,7 +20,7 @@ let%expect_test "record operations" =
     ; top
         "extend_lit"
         []
-        (extend [ "z", Lit (Char 'c') ] (poly_record [ "x", int 1 ]))
+        (extend [ "z", char 'c' ] (poly_record [ "x", int 1 ]))
     ; top
         "restrict_lit"
         []
@@ -53,11 +53,11 @@ let%expect_test "extension shadows and restriction reveals" =
     [ top "shadow" [] shadow
     ; top "shadow_x" [] (dot shadow "x")
     ; top "revealed" [] (dot (restrict shadow "x") "x")
-    ; top "update_shadow" [] (update shadow [ "x", Lit (Char 'c') ])
+    ; top "update_shadow" [] (update shadow [ "x", char 'c' ])
     ; top
         "update_shadow_inner"
         []
-        (dot (restrict (update shadow [ "x", Lit (Char 'c') ]) "x") "x")
+        (dot (restrict (update shadow [ "x", char 'c' ]) "x") "x")
     ; top "restrict_twice" [] (restrict (restrict shadow "x") "x")
     ; top
         "extend_restrict"
@@ -135,7 +135,7 @@ let%expect_test "update may change field types" =
         []
         (update
            (poly_record [ "x", int 1; "y", int 2; "z", int 3 ])
-           [ "x", bool true; "y", Lit (String "s") ])
+           [ "x", bool true; "y", string "s" ])
     ; top "update_fn" [ "r"; "v" ] (update (var "r") [ "x", var "v" ])
     ];
   [%expect
@@ -160,7 +160,7 @@ let%expect_test "duplicate labels" =
            [ Pat.poly_record [ "x", Pat.var "a"; "x", Pat.var "b" ], var "a" ])
     ];
   check
-    [ Toplevel.Let
+    [ top_let
         ( "annotation"
         , [ typed "r" (Ty.record [ "x", Ty.int; "x", Ty.bool ]) ]
         , None
@@ -199,7 +199,7 @@ let%expect_test "record patterns" =
         [ "r" ]
         (match_
            (var "r")
-           [ ( Pat.poly_record ~rest:(Bind "rest") [ "x", Pat.var "a" ]
+           [ ( Pat.poly_record ~bind:"rest" [ "x", Pat.var "a" ]
              , tuple [ var "a"; var "rest" ] )
            ])
     ; top
@@ -207,7 +207,7 @@ let%expect_test "record patterns" =
         []
         (match_
            (extend [ "x", bool true ] (poly_record [ "x", int 1 ]))
-           [ ( Pat.poly_record ~rest:(Bind "rest") [ "x", Pat.var "a" ]
+           [ ( Pat.poly_record ~bind:"rest" [ "x", Pat.var "a" ]
              , tuple [ var "a"; dot (var "rest") "x" ] )
            ])
     ; top
@@ -244,7 +244,7 @@ let%expect_test "record patterns" =
         [ "r" ]
         (match_
            (var "r")
-           [ Pat.poly_record ~rest:(Bind "a") [ "x", Pat.var "a" ], var "a" ])
+           [ Pat.poly_record ~bind:"a" [ "x", Pat.var "a" ], var "a" ])
     ];
   [%expect
     {|
@@ -274,19 +274,19 @@ let%expect_test "aliases" =
         ~params:[ Decl.ty "a" ]
         (Ty.record [ "contents", Ty.var "a" ])
     ; Decl.record "holder" [ "p", Ty.con "point" ]
-    ; Toplevel.Let
+    ; top_let
         ( "origin"
         , []
         , Some (Ty.con "point")
         , poly_record [ "x", int 0; "y", int 0 ] )
-    ; Toplevel.Let
+    ; top_let
         ( "get"
         , [ typed "b" (Ty.con "box" ~args:[ Ty Ty.int ]) ]
         , None
         , dot (var "b") "contents" )
-    ; Toplevel.Let
+    ; top_let
         ( "x_of"
-        , [ typed "r" (Ty.con "with_x" ~args:[ Row (Var "r") ]) ]
+        , [ typed "r" (Ty.con "with_x" ~args:[ Row (Ty.row ~tail:"r" ()) ]) ]
         , None
         , dot (var "r") "x" )
     ; top "x_of_origin" [] (app (var "x_of") [ var "origin" ])
@@ -303,7 +303,7 @@ let%expect_test "aliases" =
     ; top "m" [ "r" ] (var "r" ~annot:(Ty.con "M.r"))
     ];
   check
-    [ Toplevel.Let
+    [ top_let
         ("not_a_point", [], Some (Ty.con "point"), poly_record [ "x", int 0 ])
     ; Decl.alias "point" (Ty.record [ "x", Ty.int; "y", Ty.int ])
     ];
@@ -390,7 +390,7 @@ let%expect_test "values through the new forms" =
            []
            (match_
               (poly_record [ "x", var "id" ])
-              [ ( Pat.poly_record ~rest:(Bind "y") [ "x", Pat.any ]
+              [ ( Pat.poly_record ~bind:"y" [ "x", Pat.any ]
                 , tuple [ var "y"; var "id" ] )
               ])
            (var "y"))
@@ -444,7 +444,7 @@ let%expect_test "labels in quotes are not free variables" =
         (quote
            (match_
               (var "r")
-              [ ( Pat.poly_record ~rest:(Bind "rest") [ "x", Pat.var "x" ]
+              [ ( Pat.poly_record ~bind:"rest" [ "x", Pat.var "x" ]
                 , tuple [ var "x"; var "rest" ] )
               ]))
     ];
@@ -460,7 +460,7 @@ let%expect_test "labels in quotes are not free variables" =
 
 let%expect_test "rows shared between contexts and records" =
   check
-    [ Toplevel.Let
+    [ top_let
         ( "same_row"
         , [ typed "c" (Ty.code Ty.int ~tail:"r")
           ; typed "r" (Ty.record [] ~tail:"r")
@@ -471,7 +471,7 @@ let%expect_test "rows shared between contexts and records" =
         "ok"
         []
         (app (var "same_row") [ quote (var "x"); poly_record [ "x", int 1 ] ])
-    ; Toplevel.Let
+    ; top_let
         ( "captured"
         , [ "c", None; typed "r" (Ty.record [] ~tail:"r") ]
         , None
@@ -485,7 +485,7 @@ let%expect_test "rows shared between contexts and records" =
             (var "r") )
     ];
   check
-    [ Toplevel.Let
+    [ top_let
         ( "same_row"
         , [ typed "c" (Ty.code Ty.int ~tail:"r")
           ; typed "r" (Ty.record [] ~tail:"r")
@@ -596,8 +596,7 @@ let%expect_test "local polymorphic record operations" =
            [ "r" ]
            (match_
               (var "r")
-              [ Pat.poly_record ~rest:(Bind "rest") [ "x", Pat.any ], var "rest"
-              ])
+              [ Pat.poly_record ~bind:"rest" [ "x", Pat.any ], var "rest" ])
            (tuple
               [ app (var "rest") [ poly_record [ "x", int 1 ] ]
               ; app (var "rest") [ poly_record [ "x", int 1; "y", int 1 ] ]
@@ -628,7 +627,7 @@ let%expect_test "applied access and restriction are not values" =
 
 let%expect_test "absent entries in records" =
   check
-    [ Toplevel.Let
+    [ top_let
         ( "absent"
         , [ "c", None; typed "r" (Ty.record [] ~tail:"d") ]
         , None

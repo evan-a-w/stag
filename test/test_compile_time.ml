@@ -3,11 +3,7 @@ open Stag
 open Syntax
 open Helpers
 
-let prim_names =
-  List.filter_map prims ~f:(function
-    | Toplevel.Let (name, _, _, _) -> Some name
-    | Type _ | Module _ -> None)
-;;
+let prim_names = List.filter_map prims ~f:let_name
 
 let members (checked : Typecheck.Checked.t) =
   List.concat_map checked.program.sccs ~f:(fun scc -> scc.members)
@@ -978,7 +974,7 @@ let%expect_test "re-inference of empty matches on empty nominal types" =
         (seq
            (var "u")
            (quote
-              (Expr.Let
+              (expr_let
                  ( "f"
                  , [ "x", Some (Ty.con "void") ]
                  , None

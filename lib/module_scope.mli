@@ -25,10 +25,11 @@ module Namespace : sig
 end
 
 (** The canonical name [path] refers to from [t], resolved lexically. [None] if
-    the last name of [path] is not a member, [Unbound_module] if a module on
-    the way is not. *)
+    the last name of [path] is not a member, [Unbound_module] at [loc] if a
+    module on the way is not. *)
 val find
   :  t
   -> Namespace.t
   -> Syntax.Path.t
+  -> loc:Loc.t
   -> (string option, Typecheck_error.t) Result.t

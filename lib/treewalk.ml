@@ -437,6 +437,7 @@ let splice_code
       { Typed.Expr.desc =
           Let { ident; args = []; generalized = false; body = sub; in_ }
       ; ty = in_.ty
+      ; loc = in_.loc
       })
 ;;
 

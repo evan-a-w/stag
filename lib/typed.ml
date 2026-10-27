@@ -141,6 +141,7 @@ module Pattern = struct
   type t =
     { desc : t Desc.t
     ; ty : Type.ty
+    ; loc : Loc.t
     }
 
   let rec sexp_of_t' t = Hum.typed (Desc.sexp_of_t sexp_of_t' t.desc) t.ty
@@ -202,6 +203,7 @@ module Expr = struct
   type t =
     { desc : t Desc.t
     ; ty : Type.ty
+    ; loc : Loc.t
     }
 
   let rec sexp_of_t' t = Hum.typed (Desc.sexp_of_t sexp_of_t' t.desc) t.ty

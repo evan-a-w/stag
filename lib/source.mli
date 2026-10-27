@@ -11,23 +11,29 @@ open! Core
 (** A binder: generated code already has its idents. *)
 module Binder : sig
   type t =
-    | Name of string
+    | Name of Syntax.Name.t
     | Ident of Typed.Ident.t
 
   val name : t -> string
+
+  (** [Loc.none] for generated code's. *)
+  val loc : t -> Loc.t
 end
 
 module Constructor : sig
   type t =
-    | Path of Syntax.Path.t
+    | Path of Syntax.Path.t Located.t
     | Ref of Typed.Constructor_ref.t
 end
 
 module Field : sig
   type t =
-    | Path of Syntax.Path.t
+    | Path of Syntax.Path.t Located.t
     | Ref of Typed.Field_ref.t
 end
+
+(** Generated code has no locations for its names: they are [Loc.none] in
+    views of it. *)
 
 module Pattern : sig
   type t =
@@ -51,12 +57,13 @@ module Pattern : sig
       | Record of (Field.t * t) list
       | Poly_variant of string * t option
       | Poly_record of
-          { fields : (string * t) list
+          { fields : (Syntax.Name.t * t) list
           ; rest : Rest.t
           }
   end
 
   val view : t -> View.t
+  val loc : t -> Loc.t
 end
 
 module Expr : sig
@@ -72,7 +79,7 @@ module Expr : sig
 
   module Subs : sig
     type nonrec t =
-      | Explicit of (string * t option) list
+      | Explicit of (Syntax.Name.t * t option) list
       (** As [Syntax.Expr.Splice]'s, where a name without an expression is a
           variable. *)
       | Implicit (** Each entry is provided by the binder in scope, if any. *)
@@ -103,14 +110,16 @@ module Expr : sig
       | Record of (Field.t * t) list
       | Field of t * Field.t
       | Match of t * (Pattern.t * t) list
-      | Poly_record of (string * t) list
+      | Poly_record of (Syntax.Name.t * t) list
       | Poly_field of t * string
-      | Poly_extend of (string * t) list * t
+      | Poly_extend of (Syntax.Name.t * t) list * t
       | Poly_restrict of t * string
-      | Poly_update of t * (string * t) list
+      | Poly_update of t * (Syntax.Name.t * t) list
       | Poly_variant of string * t option
   end
 
   (** Generated code is code values, so has no [Toplevel_splice]. *)
   val view : t -> View.t
+
+  val loc : t -> Loc.t
 end

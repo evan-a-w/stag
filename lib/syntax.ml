@@ -44,8 +44,15 @@ end = struct
   let t_of_sexp sexp = of_string (string_of_sexp sexp)
 end
 
+(** A name as written, eg. a binder or a label. *)
+module Name = struct
+  type t = string Located.t [@@deriving sexp_of, compare, equal]
+end
+
 module Type_expr = struct
-  type t =
+  type t = desc Located.t
+
+  and desc =
     | Var of string
     | Con of Path.t * arg list
     | Arrow of t * t
@@ -59,13 +66,13 @@ module Type_expr = struct
 
   and row =
     | Empty
-    | Extend of string * t * row
-    | Var of string
+    | Extend of Name.t * t * row
+    | Var of Name.t
 
   and arg =
     | Ty of t
     | Row of row
-  [@@deriving sexp, compare, equal]
+  [@@deriving sexp_of, compare, equal]
 end
 
 module Type_decl = struct
@@ -73,30 +80,30 @@ module Type_decl = struct
     type t =
       | Ty of string
       | Row of string
-    [@@deriving sexp, compare, equal]
+    [@@deriving sexp_of, compare, equal]
 
     let name (Ty name | Row name) = name
   end
 
   module Kind = struct
     type t =
-      | Variant of (string * Type_expr.t list) list
-      | Record of (string * Type_expr.t) list
+      | Variant of (Name.t * Type_expr.t list) list
+      | Record of (Name.t * Type_expr.t) list
       | Alias of Type_expr.t
       | Abstract
-    [@@deriving sexp, compare, equal]
+    [@@deriving sexp_of, compare, equal]
   end
 
   type t =
-    { name : string
-    ; params : Param.t list
+    { name : Name.t
+    ; params : Param.t Located.t list
     ; kind : Kind.t
     }
-  [@@deriving sexp, compare, equal]
+  [@@deriving sexp_of, compare, equal]
 end
 
 module Binding = struct
-  type t = string * Type_expr.t option [@@deriving sexp, compare, equal]
+  type t = Name.t * Type_expr.t option [@@deriving sexp_of, compare, equal]
 end
 
 module Pattern = struct
@@ -106,60 +113,66 @@ module Pattern = struct
     type t =
       | Closed (** There are none. *)
       | Open (** There may be some. *)
-      | Bind of string (** Binds the record without the listed fields. *)
-    [@@deriving sexp, compare, equal]
+      | Bind of Name.t (** Binds the record without the listed fields. *)
+    [@@deriving sexp_of, compare, equal]
   end
 
-  type t =
+  type t = desc Located.t
+
+  and desc =
     | Any
     | Var of string
     | Lit of Lit.t
     | Tuple of t list
-    | Construct of Path.t * t list
-    | Record of (Path.t * t) list
+    | Construct of Path.t Located.t * t list
+    | Record of (Path.t Located.t * t) list
     | Poly_variant of string * t option (** [None] matches a [unit] argument. *)
     | Poly_record of
-        { fields : (string * t) list
+        { fields : (Name.t * t) list
         ; rest : Rest.t
         }
-  [@@deriving sexp, compare, equal]
+  [@@deriving sexp_of, compare, equal]
 end
 
 module Expr = struct
-  type t =
+  type t = desc Located.t
+
+  and desc =
     | Lit of Lit.t
     | Var of Path.t * Type_expr.t option
     | App of t * t
-    | Let of string * Binding.t list * Type_expr.t option * t * t
+    | Let of Name.t * Binding.t list * Type_expr.t option * t * t
     | Splice of
         { expr : t
         ; subs :
-            (string * t option) list
+            (Name.t * t option) list
               option (* [None] is all in scope, so is diff to [] *)
         }
     | Quote of t
     | Tuple of t list
-    | Construct of Path.t * t list
-    | Record of (Path.t * t) list
-    | Field of t * Path.t
+    | Construct of Path.t Located.t * t list
+    | Record of (Path.t Located.t * t) list
+    | Field of t * Path.t Located.t
     | Match of t * (Pattern.t * t) list
-    | Poly_record of (string * t) list
+    | Poly_record of (Name.t * t) list
     | Poly_field of t * string
-    | Poly_extend of (string * t) list * t (** [{x = v; ... | e}] *)
+    | Poly_extend of (Name.t * t) list * t (** [{x = v; ... | e}] *)
     | Poly_restrict of t * string (** [e \ x] *)
-    | Poly_update of t * (string * t) list (** [{e with x = v; ...}] *)
+    | Poly_update of t * (Name.t * t) list (** [{e with x = v; ...}] *)
     | Poly_variant of string * t option (** [None] is a [unit] argument. *)
-  [@@deriving sexp, compare, equal, variants]
+  [@@deriving sexp_of, compare, equal]
 end
 
 module Toplevel = struct
-  type t =
-    | Let of string * Binding.t list * Type_expr.t option * Expr.t
+  type t = desc Located.t
+
+  and desc =
+    | Let of Name.t * Binding.t list * Type_expr.t option * Expr.t
     | Type of Type_decl.t
-    | Module of string * t list
-  [@@deriving sexp, compare, equal, variants]
+    | Module of Name.t * t list
+  [@@deriving sexp_of, compare, equal]
 end
 
 module Program = struct
-  type t = Toplevel.t list [@@deriving sexp, compare, equal]
+  type t = Toplevel.t list [@@deriving sexp_of, compare, equal]
 end

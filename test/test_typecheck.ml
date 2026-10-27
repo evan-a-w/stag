@@ -41,9 +41,9 @@ let%expect_test "literals and application" =
   check
     [ top "i" [] (int 1)
     ; top "b" [] (bool false)
-    ; top "s" [] (Lit (String "s"))
-    ; top "c" [] (Lit (Char 'c'))
-    ; top "u" [] (Lit Unit)
+    ; top "s" [] (string "s")
+    ; top "c" [] (char 'c')
+    ; top "u" [] unit
     ; top "sum" [] (app (var "add") [ int 1; int 2 ])
     ; top "partial" [] (app (var "add") [ int 1 ])
     ];

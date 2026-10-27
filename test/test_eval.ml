@@ -3,11 +3,7 @@ open Stag
 open Syntax
 open Helpers
 
-let prim_names =
-  List.filter_map prims ~f:(function
-    | Toplevel.Let (name, _, _, _) -> Some name
-    | Type _ | Module _ -> None)
-;;
+let prim_names = List.filter_map prims ~f:let_name
 
 (* Evaluates [program], then prints its toplevels in evaluation order, or the
    error evaluation stopped at and the toplevels evaluated before it. *)
@@ -37,16 +33,7 @@ let nat n =
 
 let%expect_test "values" =
   run
-    [ top
-        "lits"
-        []
-        (tuple
-           [ int 1
-           ; bool true
-           ; Expr.Lit (String "s")
-           ; Expr.Lit (Char 'c')
-           ; unit
-           ])
+    [ top "lits" [] (tuple [ int 1; bool true; string "s"; char 'c'; unit ])
     ; top "tags" [] (tuple [ tag "A"; tag "B" ~arg:(int 1) ])
     ; top "poly_record" [] (poly_record [ "a", int 1; "b", bool false ])
     ; top "fn" [ "x" ] (var "x")
@@ -257,7 +244,7 @@ let%expect_test "polymorphic records and variants" =
         []
         (match_
            r
-           [ ( Pat.poly_record ~rest:(Bind "rest") [ "a", Pat.var "a" ]
+           [ ( Pat.poly_record ~bind:"rest" [ "a", Pat.var "a" ]
              , tuple [ var "a"; var "rest" ] )
            ])
     ; top
@@ -505,7 +492,7 @@ let%expect_test "spliced code binding patterns and recursive closures" =
   let under x =
     match_
       (poly_record [ "x", int x; "y", int 0 ])
-      [ ( Pat.poly_record ~rest:(Bind "rest") [ "x", Pat.var "x" ]
+      [ ( Pat.poly_record ~bind:"rest" [ "x", Pat.var "x" ]
         , tuple [ splice (var "c"); var "rest" ] )
       ]
   in

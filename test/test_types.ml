@@ -66,9 +66,7 @@ let%expect_test "variant types are nominal" =
 ;;
 
 let%expect_test "abstract types" =
-  let id ty =
-    Toplevel.Let ("id_" ^ ty, [ typed "x" (Ty.con ty) ], None, var "x")
-  in
+  let id ty = top_let ("id_" ^ ty, [ typed "x" (Ty.con ty) ], None, var "x") in
   check
     [ Decl.abstract "t"
     ; Decl.abstract "box" ~params:[ Decl.ty "a"; Decl.row "r" ]
@@ -79,8 +77,7 @@ let%expect_test "abstract types" =
   check [ Decl.abstract "t"; id "t"; top "bad" [] (app (var "id_t") [ int 1 ]) ];
   check
     [ Decl.abstract "t"
-    ; Toplevel.Let
-        ("absurd", [ typed "x" (Ty.con "t") ], None, match_ (var "x") [])
+    ; top_let ("absurd", [ typed "x" (Ty.con "t") ], None, match_ (var "x") [])
     ];
   check [ Decl.abstract "t"; top "bad" [] (construct "T") ];
   check
@@ -438,7 +435,9 @@ let%expect_test "duplicate context entries" =
         ~annot:
           (Ty.con
              "code"
-             ~args:[ Row (Extend ("x", Ty.int, Extend ("x", Ty.int, Var "r"))) ])
+             ~args:
+               [ Row (Ty.row ~entries:[ "x", Ty.int; "x", Ty.int ] ~tail:"r" ())
+               ])
         (var "c")
     ];
   check
@@ -513,7 +512,10 @@ let%expect_test "aliases" =
     ; top
         "g"
         [ "c" ]
-        ~annot:(Ty.con "code" ~args:[ Row (Extend ("x", Ty.int, Var "r")) ])
+        ~annot:
+          (Ty.con
+             "code"
+             ~args:[ Row (Ty.row ~entries:[ "x", Ty.int ] ~tail:"r" ()) ])
         (var "c")
     ; top "h" [] ~annot:(Ty.con "unused" ~args:[ Ty Ty.int ]) (bool true)
     ];
@@ -634,7 +636,7 @@ let%expect_test "context parameters" =
       ~params:[ Decl.row "r" ]
       [ ( "Stmt"
         , [ Ty.code Ty.unit ~tail:"r"
-          ; list_of (Ty.con "stmt" ~args:[ Row (Var "r") ])
+          ; list_of (Ty.con "stmt" ~args:[ Row (Ty.row ~tail:"r" ()) ])
           ] )
       ]
   in
@@ -658,7 +660,10 @@ let%expect_test "context parameters" =
     ; top
         "annotated"
         [ "s" ]
-        ~annot:(Ty.con "stmt" ~args:[ Row (Extend ("y", Ty.bool, Var "r")) ])
+        ~annot:
+          (Ty.con
+             "stmt"
+             ~args:[ Row (Ty.row ~entries:[ "y", Ty.bool ] ~tail:"r" ()) ])
         (var "s")
     ; top
         "body"
