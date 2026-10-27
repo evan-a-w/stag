@@ -15,4 +15,3 @@ let sexp_of_t sexp_of_txt { txt; loc } =
 ;;
 
 let create ?(loc = Loc.none) txt = { txt; loc }
-let map t ~f = { t with txt = f t.txt }

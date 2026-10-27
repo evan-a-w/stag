@@ -16,4 +16,3 @@ include Ppx_compare_lib.Equal.S1 with type 'a t := 'a t
 val sexp_of_t : ('a -> Sexp.t) -> 'a t -> Sexp.t
 
 val create : ?loc:Loc.t -> 'a -> 'a t
-val map : 'a t -> f:('a -> 'b) -> 'b t

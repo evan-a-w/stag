@@ -219,6 +219,12 @@ let string (t : State.t) =
     match State.peek t with
     | None -> State.error_opening t start ~len:1 Unterminated_string
     | Some '"' -> State.bump t
+    | Some '\\' when Option.exists (State.peek_at t 1) ~f:(Char.equal '\n') ->
+      State.bump_n t 2;
+      skip_while t ~f:(function
+        | ' ' | '\t' -> true
+        | _ -> false);
+      loop ()
     | Some '\\' ->
       Buffer.add_char buf (escape t);
       loop ()
@@ -358,6 +364,7 @@ let token (t : State.t) : Located.t =
        | '.', Some '<' -> simple 2 Quote_open
        | '.', Some '~' -> simple 2 Splice
        | '.', Some '.' -> simple 2 Dotdot
+       | '.', Some '{' -> simple 2 Dot_lbrace
        | '.', _ -> simple 1 Dot
        | '@', Some '@' -> simple 2 At_at
        | '@', _ -> simple 1 At
@@ -370,9 +377,10 @@ let token (t : State.t) : Located.t =
          simple 1 Underscore
        | c, _ when Char.is_digit c ->
          let text = ident t in
-         if String.for_all text ~f:Char.is_digit
+         if
+           String.for_all text ~f:(fun c -> Char.is_digit c || Char.equal c '_')
          then (
-           match Int.of_string_opt text with
+           match Int.of_string_opt (String.filter text ~f:Char.is_digit) with
            | Some n -> Int n
            | None -> State.error t start (Int_literal_out_of_range text))
          else State.error t start (Invalid_int_literal text)

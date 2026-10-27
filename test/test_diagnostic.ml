@@ -80,7 +80,7 @@ let%expect_test "messages" =
     ; "type t = t"
     ; "let f p = match p with (x, x) -> 1"
     ; "let g = let y = 1 in .~(let z = y in .<1>.)"
-    ; "let c = .<.~(.<1>.){x = 1; x = 2}>."
+    ; "let c = .<.~(.<1>.).{x = 1; x = 2}>."
     ; "let c = .~(Int.div 1 0; .<1>.)"
     ; "let x = [%expect]"
     ; "let x = Int.foo"
@@ -138,9 +138,9 @@ let%expect_test "messages" =
     1 | let g = let y = 1 in .~(let z = y in .<1>.)
                                         ^
     Error: The variable y is bound at runtime (level 0) but used at compile time (level -1); only toplevel functions may be used at other levels
-    File "a.stag", line 1, characters 27-28:
-    1 | let c = .<.~(.<1>.){x = 1; x = 2}>.
-                                   ^
+    File "a.stag", line 1, characters 28-29:
+    1 | let c = .<.~(.<1>.).{x = 1; x = 2}>.
+                                    ^
     Error: The variable x is substituted more than once
     File "a.stag", line 1, characters 8-30:
     1 | let c = .~(Int.div 1 0; .<1>.)

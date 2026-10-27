@@ -133,7 +133,7 @@ let%expect_test "adjacent punctuation" =
     ((Lident x) t.stag:1:19-20 x)
     (Eof t.stag:1:20-20 "")
     |}];
-  lex ".<.~f x>. .~e{}";
+  lex ".<.~f x>. .~e.{}";
   [%expect
     {|
     (Quote_open t.stag:1:0-2 .<)
@@ -143,9 +143,9 @@ let%expect_test "adjacent punctuation" =
     (Quote_close t.stag:1:7-9 >.)
     (Splice t.stag:1:10-12 .~)
     ((Lident e) t.stag:1:12-13 e)
-    (Lbrace t.stag:1:13-14 {)
-    (Rbrace t.stag:1:14-15 })
-    (Eof t.stag:1:15-15 "")
+    (Dot_lbrace t.stag:1:13-15 .{)
+    (Rbrace t.stag:1:15-16 })
+    (Eof t.stag:1:16-16 "")
     |}];
   lex "{..'r} {..} [] ()";
   [%expect
@@ -178,10 +178,24 @@ let%expect_test "labels" =
 ;;
 
 let%expect_test "ints" =
+  lex "1_000 1__0 1_ 4_611_686_018_427_387_903 _1";
+  lex "1_000a";
+  lex "4_611_686_018_427_387_904";
   lex "0 42 4611686018427387903 007";
   lex "4611686018427387904";
   [%expect
     {|
+    ((Int 1000) t.stag:1:0-5 1_000)
+    ((Int 10) t.stag:1:6-10 1__0)
+    ((Int 1) t.stag:1:11-13 1_)
+    ((Int 4611686018427387903) t.stag:1:14-39 4_611_686_018_427_387_903)
+    ((Lident _1) t.stag:1:40-42 _1)
+    (Eof t.stag:1:42-42 "")
+    ((kind (Invalid_int_literal 1_000a)) (loc t.stag:1:0-6))
+    t.stag:1:0-6: invalid integer literal 1_000a
+    ((kind (Int_literal_out_of_range 4_611_686_018_427_387_904))
+     (loc t.stag:1:0-25))
+    t.stag:1:0-25: integer literal 4_611_686_018_427_387_904 exceeds the range of int
     ((Int 0) t.stag:1:0-1 0)
     ((Int 42) t.stag:1:2-4 42)
     ((Int 4611686018427387903) t.stag:1:5-24 4611686018427387903)
@@ -273,6 +287,34 @@ let%expect_test "strings" =
                                      \nline\"")
     ((Lident x) t.stag:2:6-7 x)
     (Eof t.stag:2:7-7 "")
+    |}]
+;;
+
+let%expect_test "line continuations in strings" =
+  lex "\"a\\\n   \t b\" \"\\\n\" \"a\\\n\n b\"";
+  [%expect
+    {|
+    ((String ab) t.stag:1:0-2:7  "\"a\\\
+                                \n   \t b\"")
+    ((String "") t.stag:2:8-3:1  "\"\\\
+                                \n\"")
+    ((String  "a\
+             \n b") t.stag:3:2-5:3  "\"a\\\
+                                   \n\
+                                   \n b\"")
+    (Eof t.stag:5:3-3 "")
+    |}];
+  lex "'\\\n'";
+  [%expect
+    {|
+    ((kind (Illegal_escape "\\")) (loc t.stag:1:1-2))
+    t.stag:1:1-2: illegal escape sequence \
+    |}];
+  lex "(* \"\\\n\" *) x";
+  [%expect
+    {|
+    ((Lident x) t.stag:2:5-6 x)
+    (Eof t.stag:2:6-6 "")
     |}]
 ;;
 
@@ -452,8 +494,9 @@ let%expect_test "errors" =
   lex "\"a\\\nb\"";
   [%expect
     {|
-    ((kind (Illegal_escape "\\")) (loc t.stag:1:2-3))
-    t.stag:1:2-3: illegal escape sequence \
+    ((String ab) t.stag:1:0-2:2  "\"a\\\
+                                \nb\"")
+    (Eof t.stag:2:2-2 "")
     |}];
   lex "'\\q'";
   [%expect
@@ -552,8 +595,8 @@ let%expect_test "errors" =
   lex "1_000";
   [%expect
     {|
-    ((kind (Invalid_int_literal 1_000)) (loc t.stag:1:0-5))
-    t.stag:1:0-5: invalid integer literal 1_000
+    ((Int 1000) t.stag:1:0-5 1_000)
+    (Eof t.stag:1:5-5 "")
     |}];
   lex "x\n  #";
   [%expect

@@ -62,7 +62,10 @@ let describe : Token.t -> string = function
 let fail loc message = raise (Syntax_error (loc, message))
 
 let expected t what =
-  fail (loc t) (sprintf "expected %s, found %s" what (describe (peek t)))
+  match peek t with
+  | At | At_at -> fail (loc t) "`@` is reserved (for modes)"
+  | token ->
+    fail (loc t) (sprintf "expected %s, found %s" what (describe token))
 ;;
 
 let expect t token =
@@ -234,31 +237,48 @@ and type_tuple t : Type_expr.t =
 
 and type_app t : Type_expr.t =
   let ty = type_atom t in
-  if is t Lbracket
-  then (
-    match ty.txt with
-    | Con (path, []) ->
-      let args =
-        delimited t ~opener:Lbracket ~close:Rbracket ~sep:Comma ~item:type_arg
-      in
-      if List.is_empty args
-      then fail (prev_loc t) "expected a type argument, found `]`";
-      since t ty.loc (Type_expr.Con (path, args))
-    | _ -> fail (loc t) "only type constructors like `list` take type arguments")
-  else ty
+  let ty =
+    if is t Lbracket
+    then (
+      match ty.txt with
+      | Con (path, []) ->
+        let args =
+          delimited t ~opener:Lbracket ~close:Rbracket ~sep:Comma ~item:type_arg
+        in
+        if List.is_empty args
+        then fail (prev_loc t) "expected a type argument, found `]`";
+        if is t Lbracket then fail (loc t) "type arguments are written once";
+        since t ty.loc (Type_expr.Con (path, args))
+      | _ ->
+        fail (loc t) "only type constructors like `list` take type arguments")
+    else ty
+  in
+  (match peek t with
+   | Lident _ | Uident _ ->
+     fail
+       (loc t)
+       "type arguments are written after the name, in brackets: `list[int]`"
+   | _ -> ());
+  ty
 
 and type_arg t : Type_expr.arg =
   match peek t with
-  | Lbrace ->
-    Row
-      (row
-         t
-         ~entry_label:(fun t ->
-           match peek t with
-           | Label _ -> label t ~what:""
-           | _ -> lident t ~what:"a label like `x")
-         ~what:"a label like `x")
+  | Lbrace -> Row (record_row t)
   | _ -> Ty (type_expr t)
+
+and record_row t =
+  row
+    t
+    ~entry_label:(fun t ->
+      match peek t with
+      | Lident name ->
+        fail
+          (loc t)
+          (sprintf
+             "polymorphic record labels are written with a backtick: `%s"
+             name)
+      | _ -> label t ~what:"a polymorphic record label like `x")
+    ~what:"a polymorphic record label like `x"
 
 and type_atom t : Type_expr.t =
   let start = loc t in
@@ -280,12 +300,7 @@ and type_atom t : Type_expr.t =
       close t Rparen ~opener:Lparen ~open_loc:start;
       since t start ty.txt)
   | Lbrace ->
-    let row =
-      row
-        t
-        ~entry_label:(label ~what:"a polymorphic record label like `x")
-        ~what:"a polymorphic record label like `x"
-    in
+    let row = record_row t in
     since t start (Type_expr.Record row)
   | Lbracket -> variant t
   | Less ->
@@ -297,7 +312,16 @@ and type_atom t : Type_expr.t =
     let context =
       row
         t
-        ~entry_label:(lident ~what:"a variable name")
+        ~entry_label:(fun t ->
+          match peek t with
+          | Label name ->
+            fail
+              (loc t)
+              (sprintf
+                 "the variables of a code context are written without a \
+                  backtick: %s"
+                 name)
+          | _ -> lident t ~what:"a variable name")
         ~what:"a variable name"
     in
     since t start (Type_expr.Code { inner; context })
@@ -355,13 +379,14 @@ and row t ~entry_label ~what : Type_expr.row =
 and variant t : Type_expr.t =
   let start = loc t in
   expect t Lbracket;
-  if is t Bar then advance t;
+  let leading_bar = is t Bar in
+  if leading_bar then advance t;
   let tail () : Type_expr.row =
     match peek t with
     | Dotdot -> row_tail t
-    | _ -> empty_row t
+    | _ -> expected t "a row variable like `..'r` after `;`"
   in
-  let rec entries () : Type_expr.row =
+  let rec entries ~first : Type_expr.row =
     match peek t with
     | Label _ ->
       let tag = label t ~what:"" in
@@ -379,18 +404,18 @@ and variant t : Type_expr.t =
         match peek t with
         | Bar ->
           advance t;
-          entries ()
+          entries ~first:false
         | Semi ->
           advance t;
           tail ()
         | _ -> empty_row t
       in
       extend_row tag ty rest
-    | Dotdot -> tail ()
-    | Rbracket -> empty_row t
+    | Dotdot when first && not leading_bar -> row_tail t
+    | Rbracket when first && not leading_bar -> empty_row t
     | _ -> expected t "a polymorphic variant tag like `A"
   in
-  let row = entries () in
+  let row = entries ~first:true in
   close t Rbracket ~opener:Lbracket ~open_loc:start;
   let row = since t start row.txt in
   since t start (Type_expr.Variant row)
@@ -480,7 +505,6 @@ and pattern_atom t : Pattern.t =
   | String s -> lit (String s)
   | True -> lit (Bool true)
   | False -> lit (Bool false)
-  | Uident _ | Label _ -> pattern_construct t
   | Lparen ->
     advance t;
     if is t Rparen
@@ -588,13 +612,15 @@ let param t : Binding.t =
   | _ -> binder t, None
 ;;
 
-let rec expr t : Expr.t =
+(* With [~seq:false], as in a [{...}] entry, [e1; e2] is not parsed (also in
+   the bodies of [let] and [match]), leaving the [;] as the separator. *)
+let rec expr ?(seq = true) t : Expr.t =
   match peek t with
-  | Let -> let_ t
-  | Match -> match_ t
+  | Let -> let_ t ~seq
+  | Match -> match_ t ~seq
   | _ ->
-    let first = tuple t in
-    if is t Semi
+    let first = tuple t ~seq in
+    if seq && is t Semi
     then (
       let semi = loc t in
       advance t;
@@ -606,6 +632,7 @@ let rec expr t : Expr.t =
 
 (** [name params : t = e], after [let]. *)
 and binding t =
+  if is t Rec then fail (loc t) "lets are always recursive; remove `rec`";
   let name =
     match peek t with
     | Underscore ->
@@ -630,17 +657,17 @@ and binding t =
   expect t Equal;
   name, params, annot, expr t
 
-and let_ t : Expr.t =
+and let_ t ~seq : Expr.t =
   let start = loc t in
   expect t Let;
   let name, params, annot, equal = binding t in
   expect_for t In ~opener:Let ~open_loc:start;
-  let body = expr t in
+  let body = expr t ~seq in
   expr_at
     ~loc:(Loc.merge start body.loc)
     (Expr.Let (name, params, annot, equal, body))
 
-and match_ t : Expr.t =
+and match_ t ~seq : Expr.t =
   let start = loc t in
   expect t Match;
   let scrutinee = expr t in
@@ -649,7 +676,7 @@ and match_ t : Expr.t =
   let rec arms acc =
     let pattern = pattern t in
     expect t Arrow;
-    let body = expr t in
+    let body = expr t ~seq in
     let acc = (pattern, body) :: acc in
     if is t Bar
     then (
@@ -660,26 +687,29 @@ and match_ t : Expr.t =
   let arms, last = arms [] in
   expr_at ~loc:(Loc.merge start last.loc) (Expr.Match (scrutinee, arms))
 
-and tuple t : Expr.t =
-  let first = tuple_item t in
+and tuple t ~seq : Expr.t =
+  let first = tuple_item t ~seq in
   if is t Comma
   then (
     let rec loop acc =
       if is t Comma
       then (
         advance t;
-        loop (tuple_item t :: acc))
+        loop (tuple_item t ~seq :: acc))
       else List.rev acc
     in
     let items = loop [ first ] in
     expr_at ~loc:(Loc.merge first.loc (List.last_exn items).loc) (Tuple items))
   else first
 
-and tuple_item t : Expr.t =
+and tuple_item t ~seq : Expr.t =
   match peek t with
-  | Let -> let_ t
-  | Match -> match_ t
+  | Let -> let_ t ~seq
+  | Match -> match_ t ~seq
   | _ -> construct t
+
+(** A value in [{...}]. *)
+and entry_value t = tuple t ~seq:false
 
 and construct t : Expr.t =
   let start = loc t in
@@ -728,22 +758,38 @@ and splice t : Expr.t =
   | Splice ->
     let start = loc t in
     advance t;
-    let expr = splice t in
+    let expr =
+      match peek t with
+      | Splice -> splice t
+      | _ -> postfix t
+    in
     let subs =
-      if is t Lbrace && (loc t).start.offset = (prev_loc t).stop.offset
+      if is t Dot_lbrace
       then
         Some
-          (delimited t ~opener:Lbrace ~close:Rbrace ~sep:Semi ~item:(fun t ->
-             let name = lident t ~what:"a variable to provide" in
-             if is t Equal
-             then (
-               advance t;
-               name, Some (tuple t))
-             else name, None))
+          (delimited
+             t
+             ~opener:Dot_lbrace
+             ~close:Rbrace
+             ~sep:Semi
+             ~item:(fun t ->
+               let name = lident t ~what:"a variable to provide" in
+               if is t Equal
+               then (
+                 advance t;
+                 name, Some (entry_value t))
+               else name, None))
       else None
     in
     expr_since t start (Splice { expr; subs })
-  | _ -> postfix t
+  | _ ->
+    let e = postfix t in
+    if is t Dot_lbrace
+    then
+      fail
+        (loc t)
+        "substitutions `.{...}` are only written after a splice `.~e`";
+    e
 
 and postfix t : Expr.t =
   let rec loop (e : Expr.t) =
@@ -830,7 +876,7 @@ and atom t : Expr.t =
 and poly_field t =
   let name = label t ~what:"a polymorphic record label like `x" in
   expect t Equal;
-  name, tuple t
+  name, entry_value t
 
 and record t : Expr.t =
   let start = loc t in
@@ -851,7 +897,7 @@ and record t : Expr.t =
          | _ -> loop acc)
       | Bar ->
         advance t;
-        List.rev acc, Some (tuple t)
+        List.rev acc, Some (entry_value t)
       | _ -> List.rev acc, None
     in
     let fields, base = loop [] in
@@ -864,7 +910,7 @@ and record t : Expr.t =
       delimited t ~opener:Lbrace ~close:Rbrace ~sep:Semi ~item:(fun t ->
         let path = lowercase_path t ~what:"a field name" in
         expect t Equal;
-        path, tuple t)
+        path, entry_value t)
     in
     expr_since t start (Record fields)
   | _ ->
@@ -909,11 +955,16 @@ let constructor_decl t =
     advance t;
     let rec args acc =
       let acc = type_app t :: acc in
-      if is t Star
-      then (
+      match peek t with
+      | Star ->
         advance t;
-        args acc)
-      else List.rev acc
+        args acc
+      | Arrow ->
+        fail
+          (loc t)
+          "a constructor argument of function type must be parenthesized: `C \
+           of (a -> b)`"
+      | _ -> List.rev acc
     in
     name, args [])
   else name, []
@@ -950,8 +1001,13 @@ let type_decl t : Type_decl.t =
   let name = lident t ~what:"a type name" in
   let params =
     if is t Lbracket
-    then
-      delimited t ~opener:Lbracket ~close:Rbracket ~sep:Comma ~item:type_param
+    then (
+      let params =
+        delimited t ~opener:Lbracket ~close:Rbracket ~sep:Comma ~item:type_param
+      in
+      if List.is_empty params
+      then fail (prev_loc t) "expected a type parameter, found `]`";
+      params)
     else []
   in
   let kind =

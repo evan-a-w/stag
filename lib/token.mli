@@ -12,6 +12,7 @@ type t =
   | True
   | False
   | Let
+  | Rec
   | Let_expect_test (** [let%expect_test] *)
   | In
   | Match
@@ -36,6 +37,7 @@ type t =
   | Arrow
   | Star
   | Dot
+  | Dot_lbrace (** [.{], substitutions of a splice *)
   | Dotdot
   | Underscore
   | Backslash

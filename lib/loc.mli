@@ -9,8 +9,6 @@ module Pos : sig
     ; offset : int
     }
   [@@deriving sexp_of, compare, equal]
-
-  val start : t
 end
 
 (** A span of source, from [start] up to but excluding [stop]. *)

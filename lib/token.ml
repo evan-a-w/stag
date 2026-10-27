@@ -12,6 +12,7 @@ type t =
   | True
   | False
   | Let
+  | Rec
   | Let_expect_test (** [let%expect_test] *)
   | In
   | Match
@@ -36,6 +37,7 @@ type t =
   | Arrow
   | Star
   | Dot
+  | Dot_lbrace (** [.{], substitutions of a splice *)
   | Dotdot
   | Underscore
   | Backslash
@@ -53,6 +55,7 @@ let keyword = function
   | "true" -> Some True
   | "false" -> Some False
   | "let" -> Some Let
+  | "rec" -> Some Rec
   | "in" -> Some In
   | "match" -> Some Match
   | "with" -> Some With
@@ -75,6 +78,7 @@ let to_string = function
   | True -> "true"
   | False -> "false"
   | Let -> "let"
+  | Rec -> "rec"
   | Let_expect_test -> "let%expect_test"
   | In -> "in"
   | Match -> "match"
@@ -99,6 +103,7 @@ let to_string = function
   | Arrow -> "->"
   | Star -> "*"
   | Dot -> "."
+  | Dot_lbrace -> ".{"
   | Dotdot -> ".."
   | Underscore -> "_"
   | Backslash -> "\\"

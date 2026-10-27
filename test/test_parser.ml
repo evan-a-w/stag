@@ -254,12 +254,19 @@ let%expect_test "staging" =
   expr ".~(f x)";
   expr ".~r.x";
   expr ".~.~e";
-  expr ".~e{}";
-  expr ".~e{x = e1; y}";
-  expr ".~e{x = 1, 2; y;}";
-  expr ".~(f x){y}";
-  expr ".~f{y} x";
+  expr ".~e.{}";
+  expr ".~e.{x = e1; y}";
+  expr ".~e.{x = 1, 2; y;}";
+  expr ".~(f x).{y}";
+  expr ".~f.{y} x";
   expr ".~f {`x = 1}";
+  expr ".~f{`x = 1}";
+  expr ".~f .{x}";
+  expr ".~.~e.{x}";
+  expr ".~r.x.{x}";
+  expr ".~f.{x} .~g.{y = 1}";
+  expr ".~f.{x = let a = 1 in a; y}";
+  expr ".~f.{x = match a with A -> 1 | B -> 2; y}";
   expr "C .~x";
   expr "`A .~x";
   [%expect
@@ -278,6 +285,20 @@ let%expect_test "staging" =
     (Splice (expr (App (Var f ()) (Var x ()))) (subs (((y ())))))
     (App (Splice (expr (Var f ())) (subs (((y ()))))) (Var x ()))
     (App (Splice (expr (Var f ())) (subs ())) (Poly_record ((x (Lit (Int 1))))))
+    (App (Splice (expr (Var f ())) (subs ())) (Poly_record ((x (Lit (Int 1))))))
+    (Splice (expr (Var f ())) (subs (((x ())))))
+    (Splice (expr (Splice (expr (Var e ())) (subs (((x ())))))) (subs ()))
+    (Splice (expr (Field (Var r ()) x)) (subs (((x ())))))
+    (App (Splice (expr (Var f ())) (subs (((x ())))))
+     (Splice (expr (Var g ())) (subs (((y ((Lit (Int 1)))))))))
+    (Splice (expr (Var f ()))
+     (subs (((x ((Let a () () (Lit (Int 1)) (Var a ())))) (y ())))))
+    (Splice (expr (Var f ()))
+     (subs
+      (((x
+         ((Match (Var a ())
+           (((Construct A ()) (Lit (Int 1))) ((Construct B ()) (Lit (Int 2)))))))
+        (y ())))))
     (Construct C ((Splice (expr (Var x ())) (subs ()))))
     (Poly_variant A ((Splice (expr (Var x ())) (subs ()))))
     |}]
@@ -382,7 +403,7 @@ let%expect_test "types" =
     (Con map ((Ty (Con k ())) (Ty (Con v ()))))
     (Con with_x ((Row (Var a))))
     (Con with_x ((Row (Extend y (Con int ()) (Var a)))))
-    (Con with_x ((Row (Extend y (Con int ()) (Var a)))))
+    t.stag:1:8-9: polymorphic record labels are written with a backtick: `y
     (Arrow (Var a) (Arrow (Var b) (Var c)))
     (Arrow (Arrow (Var a) (Var b)) (Var c))
     (Tuple ((Var a) (Var b) (Var c)))
@@ -485,12 +506,12 @@ let%expect_test "locations" =
   show_locs
     Expr.sexp_of_t
     Parser.expr
-    "match .~e{x = 1; y} with `A p -> {`x = r.`y | {r with `z = ()}} \\ `x | _ \
-     -> .< (f) >.";
+    "match .~e.{x = 1; y} with `A p -> {`x = r.`y | {r with `z = ()}} \\ `x | \
+     _ -> .< (f) >.";
   [%expect
     {|
-    Match "match .~e{x = 1; y} with `A p -> {`x = r.`y | {r with `z = ()}} \\ `x | _ -> .< (f) >."
-      Splice ".~e{x = 1; y}"
+    Match "match .~e.{x = 1; y} with `A p -> {`x = r.`y | {r with `z = ()}} \\ `x | _ -> .< (f) >."
+      Splice ".~e.{x = 1; y}"
         Var "e"
         x "x"
         Lit "1"
@@ -624,7 +645,7 @@ let%expect_test "errors" =
   expr "r.";
   expr "r.M";
   expr "r \\ x";
-  expr ".~e{1}";
+  expr ".~e.{1}";
   expr "C let x = 1 in x";
   expr "\"abc";
   expr "a # b";
@@ -673,7 +694,7 @@ let%expect_test "errors" =
     t.stag:1:2-2: expected a field name, found end of file
     t.stag:1:2-3: expected a field name, found `M`
     t.stag:1:4-5: expected a polymorphic record label like `x, found `x`
-    t.stag:1:4-5: expected a variable to provide, found `1`
+    t.stag:1:5-6: expected a variable to provide, found `1`
     t.stag:1:2-5: expected end of file, found `let`
     t.stag:1:0-1: unterminated string literal
     t.stag:1:2-3: illegal character '#'
@@ -686,11 +707,11 @@ let%expect_test "errors" =
     t.stag:1:2-3: only type constructors like `list` take type arguments
     t.stag:1:5-6: expected a type argument, found `]`
     t.stag:1:6-6: expected a type, found end of file
-    t.stag:1:1-2: expected a polymorphic record label like `x, found `x`
-    t.stag:1:6-8: expected a variable name, found the label `x
+    t.stag:1:1-2: polymorphic record labels are written with a backtick: `x
+    t.stag:1:6-8: the variables of a code context are written without a backtick: x
     t.stag:1:5-5: expected the code type's context, like `{..'r}`, found end of file
     t.stag:1:4-4: expected `>` to close this `<` (opened at 1:0), found end of file
-    t.stag:1:12-14: expected `]` to close this `[` (opened at 1:0), found the label `B
+    t.stag:1:12-14: expected a row variable like `..'r` after `;`, found the label `B
     t.stag:1:0-1: expected a type name, found `M`
     t.stag:1:10-12: unexpected `in`: a toplevel `let` is a declaration, without `in`
     t.stag:1:7-8: expected a type parameter like `'a` or `{..'r}`, found `a`
@@ -885,7 +906,7 @@ let%expect_test "polymorphic records, variants and modules" =
           end
           let deep = M.N.deep
           let annotated (t : M.t) = t
-          let quoted (c : <int>{..'r}) = .< (.~c{}, x) >.
+          let quoted (c : <int>{..'r}) = .< (.~c.{}, x) >.
           |}));
   [%expect
     {|
@@ -942,5 +963,112 @@ let%expect_test {|q|} = ()
     t.stag:1:20-21: expected `=`, found `(`
     t.stag:1:9-10: expected `]` to close this `[%expect` (opened at 1:0), found `1`
     t.stag:1:13-13: expected `]` to close this `[%expect` (opened at 1:0), found end of file
+    |}]
+;;
+
+let%expect_test "let and match in braces end at `;`" =
+  expr "{x = let a = 1 in a; y = 2}";
+  expr "{`x = let a = 1 in a, b; `y = 2}";
+  expr "{`x = 1 | let r = s in r}";
+  expr "{r with `x = match a with A -> 1 | B -> let b = 2 in b; `y = 2}";
+  expr "{x = (let a = 1 in a; b); y = 2}";
+  expr "{x = let a = 1 in let b = a in b; y = 2}";
+  expr "let a = {x = 1} in a; b";
+  expr "match a with A -> {x = 1}; b | B -> c";
+  [%expect
+    {|
+    (Record ((x (Let a () () (Lit (Int 1)) (Var a ()))) (y (Lit (Int 2)))))
+    (Poly_record
+     ((x (Let a () () (Lit (Int 1)) (Tuple ((Var a ()) (Var b ())))))
+      (y (Lit (Int 2)))))
+    (Poly_extend ((x (Lit (Int 1)))) (Let r () () (Var s ()) (Var r ())))
+    (Poly_update (Var r ())
+     ((x
+       (Match (Var a ())
+        (((Construct A ()) (Lit (Int 1)))
+         ((Construct B ()) (Let b () () (Lit (Int 2)) (Var b ()))))))
+      (y (Lit (Int 2)))))
+    (Record
+     ((x (Let a () () (Lit (Int 1)) (Let _ () () (Var a ()) (Var b ()))))
+      (y (Lit (Int 2)))))
+    (Record
+     ((x (Let a () () (Lit (Int 1)) (Let b () () (Var a ()) (Var b ()))))
+      (y (Lit (Int 2)))))
+    (Let a () () (Record ((x (Lit (Int 1)))))
+     (Let _ () () (Var a ()) (Var b ())))
+    (Match (Var a ())
+     (((Construct A ()) (Let _ () () (Record ((x (Lit (Int 1))))) (Var b ())))
+      ((Construct B ()) (Var c ()))))
+    |}]
+;;
+
+let%expect_test "slack and misplaced syntax" =
+  expr "let rec f x = f x in f";
+  prog "let rec f x = f x";
+  expr "f.{x}";
+  expr ".~f.{x = 1; y = 2, 3; }";
+  expr "f @ x";
+  expr "f @@ x";
+  ty "int @ m";
+  prog "let x @ const = 1";
+  prog "type t[] = int";
+  ty "[`A; ]";
+  ty "[`A | ]";
+  ty "[ | ]";
+  ty "[ | ..'r]";
+  ty "[`A | ..'r]";
+  ty "[..'r]";
+  ty "[`A; ..'r]";
+  prog "type t = |";
+  prog "type t = C of int -> int";
+  prog "type t = C of int * int -> int";
+  prog "type t = C of (int -> int)";
+  ty "int list";
+  ty "'a list";
+  ty "int M.t";
+  prog "type t = C of int * int list";
+  ty "list['a][int]";
+  ty "with_x[{x : int}]";
+  ty "with_x[{`x : int; ..'r}]";
+  ty "list[{}]";
+  ty "{x : int}";
+  ty "<int>{`x : int}";
+  ty "<int>{x : int; ..'r}";
+  [%expect
+    {|
+    t.stag:1:4-7: lets are always recursive; remove `rec`
+    t.stag:1:4-7: lets are always recursive; remove `rec`
+    t.stag:1:1-3: substitutions `.{...}` are only written after a splice `.~e`
+    (Splice (expr (Var f ()))
+     (subs (((x ((Lit (Int 1)))) (y ((Tuple ((Lit (Int 2)) (Lit (Int 3))))))))))
+    t.stag:1:2-3: `@` is reserved (for modes)
+    t.stag:1:2-4: `@` is reserved (for modes)
+    t.stag:1:4-5: `@` is reserved (for modes)
+    t.stag:1:6-7: `@` is reserved (for modes)
+    t.stag:1:7-8: expected a type parameter, found `]`
+    t.stag:1:5-6: expected a row variable like `..'r` after `;`, found `]`
+    t.stag:1:6-7: expected a polymorphic variant tag like `A, found `]`
+    t.stag:1:4-5: expected a polymorphic variant tag like `A, found `]`
+    t.stag:1:4-6: expected a polymorphic variant tag like `A, found `..`
+    t.stag:1:6-8: expected a polymorphic variant tag like `A, found `..`
+    (Variant (Var r))
+    (Variant (Extend A (Con unit ()) (Var r)))
+    ((Type ((name t) (params ()) (kind (Variant ())))))
+    t.stag:1:18-20: a constructor argument of function type must be parenthesized: `C of (a -> b)`
+    t.stag:1:24-26: a constructor argument of function type must be parenthesized: `C of (a -> b)`
+    ((Type
+      ((name t) (params ())
+       (kind (Variant ((C ((Arrow (Con int ()) (Con int ()))))))))))
+    t.stag:1:4-8: type arguments are written after the name, in brackets: `list[int]`
+    t.stag:1:3-7: type arguments are written after the name, in brackets: `list[int]`
+    t.stag:1:4-5: type arguments are written after the name, in brackets: `list[int]`
+    t.stag:1:24-28: type arguments are written after the name, in brackets: `list[int]`
+    t.stag:1:8-9: type arguments are written once
+    t.stag:1:8-9: polymorphic record labels are written with a backtick: `x
+    (Con with_x ((Row (Extend x (Con int ()) (Var r)))))
+    (Con list ((Row Empty)))
+    t.stag:1:1-2: polymorphic record labels are written with a backtick: `x
+    t.stag:1:6-8: the variables of a code context are written without a backtick: x
+    (Code (inner (Con int ())) (context (Extend x (Con int ()) (Var r))))
     |}]
 ;;
