@@ -6,3 +6,6 @@ module Stamp_counter = Stag_common.Stamp_counter
 module Syntax = Stag_syntax.Syntax
 module Prim = Stag_ir.Prim
 module Typed = Stag_ir.Typed
+module Lexer = Stag_syntax.Lexer
+module Source_file = Stag_syntax.Source_file
+module Token = Stag_syntax.Token

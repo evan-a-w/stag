@@ -19,3 +19,5 @@ module Typecheck_error = Stag_typecheck.Typecheck_error
 module Diagnostic = Stag_driver.Diagnostic
 module Driver = Stag_driver.Driver
 module Expect_test_runner = Stag_driver.Expect_test_runner
+module Prelude = Stag_eval.Prelude
+module Syntax_value = Stag_eval.Syntax_value

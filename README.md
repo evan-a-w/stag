@@ -67,7 +67,10 @@ in `X/test`): `common`, `types`, `syntax`, `ir`, `eval`, `typecheck` and
 before it. They provide the pieces for other tools: `Source_file` and
 `Driver.check_files` (files to a checked program; `Driver.check_modules` for
 modules already parsed), `Driver.eval`, `Expect_test_runner`, `Diagnostic`
-(rendering errors) and `Text_diff`.
+(rendering errors) and `Text_diff`. `Prelude` is the stag module `Stag`
+([eval/src/prelude/stag.stag](eval/src/prelude/stag.stag)), the syntax as
+data, which `Syntax_value` converts to and from `Syntax`, for declarations
+generated at compile time (not yet in scope of programs).
 
 Tests: `dune build @runtest`, then `dune promote` to accept changes.
 
