@@ -36,6 +36,8 @@ let tarjan ~successors =
   component, !components
 ;;
 
+(* Kahn's algorithm on the components, taking the ready one of smallest vertex
+   first. *)
 let topological_components ~successors =
   let n = Array.length successors in
   let component, count = tarjan ~successors in
@@ -43,24 +45,30 @@ let topological_components ~successors =
   for v = n - 1 downto 0 do
     members.(component.(v)) <- v :: members.(component.(v))
   done;
-  let component_deps =
-    Array.map members ~f:(fun vs ->
-      List.concat_map vs ~f:(fun v ->
-        List.map successors.(v) ~f:(fun w -> component.(w))))
-  in
-  let done_ = Array.create ~len:count false in
+  let dependents = Array.create ~len:count [] in
+  let pending = Array.create ~len:count 0 in
+  Array.iteri successors ~f:(fun v ws ->
+    List.iter ws ~f:(fun w ->
+      let c = component.(v) in
+      let d = component.(w) in
+      if c <> d
+      then (
+        dependents.(d) <- c :: dependents.(d);
+        pending.(c) <- pending.(c) + 1)));
+  let smallest c = List.hd_exn members.(c) in
+  let ready = ref Int.Set.empty in
+  for c = 0 to count - 1 do
+    if pending.(c) = 0 then ready := Set.add !ready (smallest c)
+  done;
   let rec loop acc =
-    let ready =
-      List.find (List.init n ~f:Fn.id) ~f:(fun v ->
-        let c = component.(v) in
-        (not done_.(c))
-        && List.for_all component_deps.(c) ~f:(fun d -> d = c || done_.(d)))
-    in
-    match ready with
+    match Set.min_elt !ready with
     | None -> List.rev acc
     | Some v ->
+      ready := Set.remove !ready v;
       let c = component.(v) in
-      done_.(c) <- true;
+      List.iter dependents.(c) ~f:(fun d ->
+        pending.(d) <- pending.(d) - 1;
+        if pending.(d) = 0 then ready := Set.add !ready (smallest d));
       loop (members.(c) :: acc)
   in
   loop []
