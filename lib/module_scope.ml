@@ -144,7 +144,25 @@ let rec find_lexically t namespace name =
   else Option.bind t.enclosing ~f:(fun t -> find_lexically t namespace name)
 ;;
 
-let rec find_member t namespace name rest ~written ~loc =
+(* The location of the module path [written] at the start of the path at
+   [loc], if written without spaces as for [path]. *)
+let prefix_loc (loc : Loc.t) ~(path : Path.t) ~written =
+  let len = String.length (Path.to_string (Path.of_list_exn written)) in
+  if
+    loc.start.line = loc.stop.line
+    && loc.stop.offset - loc.start.offset = String.length (Path.to_string path)
+  then
+    { loc with
+      stop =
+        { loc.start with
+          col = loc.start.col + len
+        ; offset = loc.start.offset + len
+        }
+    }
+  else loc
+;;
+
+let rec find_member t namespace name rest ~path ~written ~loc =
   match rest with
   | [] ->
     Ok
@@ -154,11 +172,11 @@ let rec find_member t namespace name rest ~written ~loc =
   | member :: rest ->
     let written = written @ [ name ] in
     if Map.mem t.members.modules name
-    then find_member (enter t name) namespace member rest ~written ~loc
+    then find_member (enter t name) namespace member rest ~path ~written ~loc
     else
       Error
         (Typecheck_error.create
-           ~loc
+           ~loc:(prefix_loc loc ~path ~written)
            (Unbound_module (Path.of_list_exn written)))
 ;;
 
@@ -169,7 +187,10 @@ let find t namespace (path : Path.t) ~loc =
   | name :: member :: rest ->
     (match find_module t name with
      | None ->
-       Error (Typecheck_error.create ~loc (Unbound_module (Path.name name)))
+       Error
+         (Typecheck_error.create
+            ~loc:(prefix_loc loc ~path ~written:[ name ])
+            (Unbound_module (Path.name name)))
      | Some module_ ->
-       find_member module_ namespace member rest ~written:[ name ] ~loc)
+       find_member module_ namespace member rest ~path ~written:[ name ] ~loc)
 ;;

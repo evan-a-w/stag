@@ -279,7 +279,7 @@ let a = Int.sub 1 2
   run ~eval:false {| let a = Int.foo |};
   [%expect {| ((Not_in_scope Int.foo) @ t.stag:1:9-16) |}];
   run ~eval:false {| let a = Foo.foo |};
-  [%expect {| ((Unbound_module Foo) @ t.stag:1:9-16) |}];
+  [%expect {| ((Unbound_module Foo) @ t.stag:1:9-12) |}];
   run
     ~eval:false
     {|

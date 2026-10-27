@@ -363,7 +363,8 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Source.Pattern.t)
   let node desc ty = { Typed.Pattern.desc; ty; loc } in
   let bind binder ty =
     let ident = Program_env.bind scope.program binder ty ~level:scope.level in
-    ident, { Pattern_var.ident; ty; loc = Source.Binder.loc binder }
+    ( ident
+    , { Pattern_var.ident; ty; loc = Source.Binder.loc binder ~enclosing:loc } )
   in
   let sub_patterns patterns =
     let%map.Result typed, bindings =
@@ -477,8 +478,12 @@ module Variant_match = struct
           ; ty = Fresh.variant t row
           ; loc = Source.Pattern.loc pattern
           }
-        , [ { Pattern_var.ident; ty = rest; loc = Source.Binder.loc binder } ]
-        )
+        , [ { Pattern_var.ident
+            ; ty = rest
+            ; loc =
+                Source.Binder.loc binder ~enclosing:(Source.Pattern.loc pattern)
+            }
+          ] )
     | _ -> pattern_type t scope ~pattern
   ;;
 

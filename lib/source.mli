@@ -16,8 +16,8 @@ module Binder : sig
 
   val name : t -> string
 
-  (** [Loc.none] for generated code's. *)
-  val loc : t -> Loc.t
+  (** [enclosing], the location of the node it is in, for generated code's. *)
+  val loc : t -> enclosing:Loc.t -> Loc.t
 end
 
 module Constructor : sig

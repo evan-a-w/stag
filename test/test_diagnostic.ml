@@ -110,9 +110,9 @@ let%expect_test "messages" =
     1 | let x = 1 let x = 2
                       ^
     Error: The value A.x is defined more than once in this module
-    File "a.stag", line 1, characters 8-11:
+    File "a.stag", line 1, characters 8-9:
     1 | let x = M.y
-                ^^^
+                ^
     Error: Unbound module M
     File "a.stag", line 1, characters 19-20:
     1 | type t = A let x : u = A
@@ -162,5 +162,182 @@ let%expect_test "messages" =
     1 | module M = struct end module M = struct end
                                      ^
     Error: The module A.M is defined more than once
+    |}]
+;;
+
+let%expect_test "end to end: source to rendered errors" =
+  let check contents =
+    match Driver.check_files [ { Source_file.path = "a.stag"; contents } ] with
+    | Ok _ -> print_endline "ok"
+    | Error error ->
+      print_string
+        (Diagnostic.to_string_hum
+           ~contents:(fun _ -> Some contents)
+           (Diagnostic.of_driver_error error))
+  in
+  List.iter
+    ~f:check
+    [ (* lexing *)
+      "let s = \"abc"
+    ; "let c = '\\q'"
+    ; "let n = 99999999999999999999"
+    ; "let n = 1_000 let s = \"a\\\n    b\""
+    ; (* parsing *)
+      "let rec f x = f x"
+    ; "let g = let rec f x = f x in f"
+    ; "let x = f.{y}"
+    ; "type t = C of int -> int"
+    ; "type t = C of int * int list"
+    ; "let f (x : int list) = x"
+    ; "type t = list[int][int]"
+    ; "let x @ const = 1"
+    ; "type t[] = int"
+    ; "type t = [`A | ]"
+    ; "type t = with_x[{x : int}]"
+    ; "type t = <int>{`x : int}"
+    ; "let r = {x = let a = 1 in a; y}"
+    ; "let x = (1, 2"
+    ; "module M = struct\n  let x = 1\n"
+    ; (* typechecking *)
+      "module M = struct module N = struct let y = 1 end end let x = M.N.z"
+    ; "module M = struct end let x = M.N.y"
+    ; "module M = struct module N = struct end end let x = M.N.O.y"
+    ; "let x : M.t = 1"
+    ; "let x : list[int, int] = 1"
+    ; "type t = A of int let x = A (1, 2)"
+    ; "let f r = r.`x let y = f {`y = 1}"
+    ; "let f x =\n  match x with\n  | `A -> 1\n  | `B -> true"
+    ; "let p = {`x = 1} \\ `y"
+    ; "let f r = match r with {`x = a; ..a} -> a"
+    ; "let c = .<1>. let d = .~c.{y = 1}"
+    ; "let%expect_test \"t\" = 1"
+    ; "let x = .<[%expect]>."
+    ];
+  [%expect
+    {|
+    File "a.stag", line 1, characters 8-9:
+    1 | let s = "abc
+                ^
+    Error: Unterminated string literal
+    File "a.stag", line 1, characters 9-11:
+    1 | let c = '\q'
+                 ^^
+    Error: Illegal escape sequence \q
+    File "a.stag", line 1, characters 8-28:
+    1 | let n = 99999999999999999999
+                ^^^^^^^^^^^^^^^^^^^^
+    Error: Integer literal 99999999999999999999 exceeds the range of int
+    ok
+    File "a.stag", line 1, characters 4-7:
+    1 | let rec f x = f x
+            ^^^
+    Error: Lets are always recursive; remove `rec`
+    File "a.stag", line 1, characters 12-15:
+    1 | let g = let rec f x = f x in f
+                    ^^^
+    Error: Lets are always recursive; remove `rec`
+    File "a.stag", line 1, characters 9-11:
+    1 | let x = f.{y}
+                 ^^
+    Error: Substitutions `.{...}` are only written after a splice `.~e`
+    File "a.stag", line 1, characters 18-20:
+    1 | type t = C of int -> int
+                          ^^
+    Error: A constructor argument of function type must be parenthesized: `C of (a -> b)`
+    File "a.stag", line 1, characters 24-28:
+    1 | type t = C of int * int list
+                                ^^^^
+    Error: Type arguments are written after the name, in brackets: `list[int]`
+    File "a.stag", line 1, characters 15-19:
+    1 | let f (x : int list) = x
+                       ^^^^
+    Error: Type arguments are written after the name, in brackets: `list[int]`
+    File "a.stag", line 1, characters 18-19:
+    1 | type t = list[int][int]
+                          ^
+    Error: Type arguments are written once
+    File "a.stag", line 1, characters 6-7:
+    1 | let x @ const = 1
+              ^
+    Error: `@` is reserved (for modes)
+    File "a.stag", line 1, characters 7-8:
+    1 | type t[] = int
+               ^
+    Error: Expected a type parameter, found `]`
+    File "a.stag", line 1, characters 15-16:
+    1 | type t = [`A | ]
+                       ^
+    Error: Expected a polymorphic variant tag like `A, found `]`
+    File "a.stag", line 1, characters 17-18:
+    1 | type t = with_x[{x : int}]
+                         ^
+    Error: Polymorphic record labels are written with a backtick: `x
+    File "a.stag", line 1, characters 15-17:
+    1 | type t = <int>{`x : int}
+                       ^^
+    Error: The variables of a code context are written without a backtick: x
+    File "a.stag", line 1, characters 30-31:
+    1 | let r = {x = let a = 1 in a; y}
+                                      ^
+    Error: Expected `=`, found `}`
+    File "a.stag", line 1, characters 13-13:
+    1 | let x = (1, 2
+                     ^
+    Error: Expected `)` to close this `(` (opened at 1:8), found end of file
+    File "a.stag", line 3, characters 0-0:
+    3 |
+        ^
+    Error: Expected `end` to close this `struct` (opened at 1:11), found end of file
+    File "a.stag", line 1, characters 62-67:
+    1 | module M = struct module N = struct let y = 1 end end let x = M.N.z
+                                                                      ^^^^^
+    Error: Unbound value M.N.z
+    File "a.stag", line 1, characters 30-33:
+    1 | module M = struct end let x = M.N.y
+                                      ^^^
+    Error: Unbound module M.N
+    File "a.stag", line 1, characters 52-57:
+    1 | module M = struct module N = struct end end let x = M.N.O.y
+                                                            ^^^^^
+    Error: Unbound module M.N.O
+    File "a.stag", line 1, characters 8-9:
+    1 | let x : M.t = 1
+                ^
+    Error: Unbound module M
+    File "a.stag", line 1, characters 8-12:
+    1 | let x : list[int, int] = 1
+                ^^^^
+    Error: Unbound type list
+    File "a.stag", line 1, characters 26-34:
+    1 | type t = A of int let x = A (1, 2)
+                                  ^^^^^^^^
+    Error: The constructor A.A expects 1 argument(s), but is applied to 2
+    File "a.stag", line 1, characters 25-33:
+    1 | let f r = r.`x let y = f {`y = 1}
+                                 ^^^^^^^^
+    Error: The row {`y : int} is incompatible with the row {`x : '_a; ..'_b}
+    The label x is missing.
+    File "a.stag", line 4, characters 10-14:
+    4 |   | `B -> true
+                  ^^^^
+    Error: This expression has type bool but an expression was expected of type int
+    File "a.stag", line 1, characters 8-16:
+    1 | let p = {`x = 1} \ `y
+                ^^^^^^^^
+    Error: The row {`x : int} is incompatible with the row {`y : '_a; ..'_b}
+    The label y is missing.
+    File "a.stag", line 1, characters 34-35:
+    1 | let f r = match r with {`x = a; ..a} -> a
+                                          ^
+    Error: The variable a is bound several times in this matching
+    ok
+    File "a.stag", line 1, characters 22-23:
+    1 | let%expect_test "t" = 1
+                              ^
+    Error: This expression has type int but an expression was expected of type unit
+    File "a.stag", line 1, characters 10-19:
+    1 | let x = .<[%expect]>.
+                  ^^^^^^^^^
+    Error: [%expect] is only allowed in the body of a let%expect_test, outside quotes and toplevel splices
     |}]
 ;;

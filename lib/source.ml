@@ -10,9 +10,10 @@ module Binder = struct
     | Ident ident -> ident.name
   ;;
 
-  let loc = function
+  let loc t ~enclosing =
+    match t with
     | Name name -> name.loc
-    | Ident _ -> Loc.none
+    | Ident _ -> enclosing
   ;;
 end
 
