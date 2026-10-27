@@ -7,6 +7,16 @@ type t =
 
 let file = "t.stag"
 
+let limits =
+  { Limits.fuel = Some 1_000_000; max_depth = Some 10_000; time_limit = None }
+;;
+
+let typechecker () =
+  let interpreter = Treewalk.create ~stamps:(Stamp_counter.create ()) () in
+  Treewalk.set_limits interpreter limits;
+  Typecheck.create ~interpreter ()
+;;
+
 let prelude =
   {|let add (x : int) (y : int) : int = x
 let eq (x : int) (y : int) : bool = true
@@ -27,7 +37,7 @@ let program ?(prelude = true) source = prelude_if prelude @ parse_exn source
 let driver t = t.driver
 let checked t = Driver.checked t.driver
 
-let typecheck_program ?(limits = Helpers.limits) ?(prelude = true) program =
+let typecheck_program ?(limits = limits) ?(prelude = true) program =
   let prelude = prelude_if prelude in
   match Driver.check ~limits (prelude @ program) with
   | Error error ->
@@ -44,7 +54,7 @@ let typecheck ?limits ?prelude source =
   | Ok program -> typecheck_program ?limits ?prelude program
 ;;
 
-let check_files ?(limits = Helpers.limits) files =
+let check_files ?(limits = limits) files =
   match
     Driver.check_files
       ~limits
@@ -59,7 +69,9 @@ let check_files ?(limits = Helpers.limits) files =
 
 let is_prelude t (ident : Typed.Ident.t) =
   List.exists t.prelude ~f:(fun toplevel ->
-    Option.exists (Helpers.let_name toplevel) ~f:(String.equal ident.name))
+    match (toplevel : Syntax.Toplevel.t).txt with
+    | Let (name, _, _, _) -> String.equal name.txt ident.name
+    | Type _ | Module _ | Expect_test _ -> false)
 ;;
 
 let members t =
@@ -69,8 +81,9 @@ let members t =
 ;;
 
 let print_signature t =
-  Helpers.print_signature
-    (List.drop (checked t).signature (List.length t.prelude))
+  print_string
+    (Signature.to_string_hum
+       (List.drop (checked t).signature (List.length t.prelude)))
 ;;
 
 let print_bodies ?only t =
@@ -89,7 +102,7 @@ let print_values t =
     | Error _ -> ())
 ;;
 
-let eval_and_print_values ?(limits = Helpers.limits) t =
+let eval_and_print_values ?(limits = limits) t =
   let result = Driver.eval ~limits t.driver in
   print_values t;
   match result with

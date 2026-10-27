@@ -1,12 +1,6 @@
 open! Import
 open Source_helpers
 
-let%expect_test "the prelude is the DSL's prims" =
-  print_s
-    [%sexp (Syntax.Program.equal (parse_exn prelude) Helpers.prims : bool)];
-  [%expect {| true |}]
-;;
-
 let%expect_test "check" =
   check
     {|
@@ -163,10 +157,10 @@ let f x =
 ;;
 
 let%expect_test "program" =
-  let typecheck = Helpers.typechecker () in
+  let typecheck = typechecker () in
   List.iter [ "let n = add 1 2"; "let n = id true" ] ~f:(fun source ->
     match Typecheck.typecheck typecheck ~program:(program source) with
-    | Ok { signature; _ } -> Helpers.print_signature signature
+    | Ok { signature; _ } -> print_string (Signature.to_string_hum signature)
     | Error error -> print_s [%sexp (error : Typecheck_error.t)]);
   print_s
     [%sexp (List.length (program ~prelude:false "let n = 1 let m = 2") : int)];

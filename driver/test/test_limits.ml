@@ -26,8 +26,8 @@ let only_kind error =
 (* Checks then evaluates [source], printing the values of [show],
    or the error of the phase that failed. *)
 let run
-      ?(compile_time = Helpers.limits)
-      ?(runtime = Helpers.limits)
+      ?(compile_time = limits)
+      ?(runtime = limits)
       ?(print_error = fun error -> print_s [%sexp (error : Error.t)])
       ?(show = [])
       source
@@ -104,7 +104,7 @@ let deep = %{String.concat (List.init 14 ~f:(fun _ -> "double ("))}%{nat 1}%{Str
 |}]
       )
   in
-  deep Helpers.limits;
+  deep limits;
   deep Limits.unlimited;
   [%expect
     {|

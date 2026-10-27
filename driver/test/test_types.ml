@@ -897,7 +897,8 @@ let%expect_test "recursive local non-functions are not generalized" =
     Option.iter
       (typecheck (list_decl ^ "let local = let x = " ^ equal ^ " in (x, x)\n"))
       ~f:(fun t ->
-        Helpers.print_signature [ List.last_exn (checked t).signature ])
+        print_string
+          (Signature.to_string_hum [ List.last_exn (checked t).signature ]))
   in
   print_local "x";
   print_local "x; Nil";

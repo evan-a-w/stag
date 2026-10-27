@@ -20,12 +20,6 @@ let pat source = show Pattern.sexp_of_t (Parser.pattern ~file source)
 let ty source = show Type_expr.sexp_of_t (Parser.type_expr ~file source)
 let prog source = show Program.sexp_of_t (Parser.program ~file source)
 
-let parse_exn source =
-  match Parser.program ~file source with
-  | Ok program -> program
-  | Error error -> raise_s [%message (Parser.Error.to_string error : string)]
-;;
-
 (* The source a [Loc.to_string] spans. *)
 let slice source loc =
   let line_starts =
@@ -720,10 +714,15 @@ let%expect_test "errors" =
     |}]
 ;;
 
-let signature program =
-  match Typecheck.typecheck (typechecker ()) ~program:(prims @ program) with
+let signature source =
+  let prelude = Source_helpers.parse_exn Source_helpers.prelude in
+  match
+    Typecheck.typecheck
+      (Source_helpers.typechecker ())
+      ~program:(prelude @ Source_helpers.parse_exn source)
+  with
   | Ok { signature; _ } ->
-    Signature.to_string_hum (List.drop signature (List.length prims))
+    Signature.to_string_hum (List.drop signature (List.length prelude))
   | Error error -> Sexp.to_string_hum [%sexp (error : Typecheck_error.t)]
 ;;
 
@@ -758,8 +757,11 @@ let%expect_test "printed types parse back" =
     ; "<<'a>{..'b}>{..'c}"
     ]
     ~f:(fun ty ->
-      let program = parse_exn (type_decls ^ sprintf "let f (x : %s) = x" ty) in
-      let printed = signature program |> String.split_lines |> List.last_exn in
+      let printed =
+        signature (type_decls ^ sprintf "let f (x : %s) = x" ty)
+        |> String.split_lines
+        |> List.last_exn
+      in
       let parens =
         match Parser.type_expr ~file ty with
         | Ok { txt = Arrow _; _ } -> sprintf "(%s)" ty
@@ -806,7 +808,7 @@ type e = |
 type abstract
 |}
   in
-  let printed = signature (parse_exn source) in
+  let printed = signature source in
   print_string printed;
   print_s [%message (String.equal printed source : bool)];
   [%expect
@@ -830,6 +832,14 @@ type abstract
 
 let%expect_test "the staged power example" =
   let nat = Decl.variant "nat" [ "Z", []; "S", [ Ty.con "nat" ] ] in
+  let list =
+    Decl.variant
+      "list"
+      ~params:[ Decl.ty "a" ]
+      [ "Nil", []
+      ; "Cons", [ Ty.var "a"; Ty.con "list" ~args:[ Ty (Ty.var "a") ] ]
+      ]
+  in
   let power =
     top
       "power"
@@ -848,7 +858,7 @@ let%expect_test "the staged power example" =
          ])
   in
   let program =
-    parse_exn
+    Source_helpers.parse_exn
       {|
       type nat = Z | S of nat
       type list['a] = Nil | Cons of 'a * list['a]
@@ -865,14 +875,13 @@ let%expect_test "the staged power example" =
       |}
   in
   print_s
-    [%message
-      (Program.equal (List.take program 3) [ nat; Decl.list; power ] : bool)];
+    [%message (Program.equal (List.take program 3) [ nat; list; power ] : bool)];
   Option.iter (Source_helpers.typecheck_program program) ~f:(fun t ->
     Source_helpers.print_signature t;
     Source_helpers.eval_and_print_values t);
   [%expect
     {|
-    ("Program.equal (List.take program 3) [nat; Decl.list; power]" true)
+    ("Program.equal (List.take program 3) [nat; list; power]" true)
     type nat = Z | S of nat
     type list['a] = Nil | Cons of 'a * list['a]
     val power : nat -> <'a>{..'b} -> <list['a]>{..'c} where ..'b <= {..'c}
@@ -889,8 +898,7 @@ let%expect_test "the staged power example" =
 let%expect_test "polymorphic records, variants and modules" =
   print_string
     (signature
-       (parse_exn
-          {|
+       {|
           let lit = {`x = 1; `y = true}
           let empty = {}
           let get_x r = r.`x
@@ -916,7 +924,7 @@ let%expect_test "polymorphic records, variants and modules" =
           let deep = M.N.deep
           let annotated (t : M.t) = t
           let quoted (c : <int>{..'r}) = .< (.~c.{}, x) >.
-          |}));
+          |});
   [%expect
     {|
     val lit : {`x : int; `y : bool}

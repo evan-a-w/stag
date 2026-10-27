@@ -13,10 +13,10 @@ let%expect_test "primitives" =
 ;;
 
 let%expect_test "typechecking twice with the same state" =
-  let typecheck = Helpers.typechecker () in
+  let typecheck = typechecker () in
   let run source =
     match Typecheck.typecheck typecheck ~program:(parse_exn source) with
-    | Ok { signature; _ } -> Helpers.print_signature signature
+    | Ok { signature; _ } -> print_string (Signature.to_string_hum signature)
     | Error error -> print_s [%sexp (error : Typecheck_error.t)]
   in
   run prelude;
@@ -1280,7 +1280,7 @@ let%expect_test "a chain of lets each instantiating the previous one" =
     let t = Option.value_exn (typecheck (tw ^ chain n)) in
     List.last_exn (checked t).signature
   in
-  Helpers.print_signature [ typecheck 2 ];
+  print_string (Signature.to_string_hum [ typecheck 2 ]);
   let f = Signature.to_string_hum [ typecheck 200 ] in
   let constraints =
     match String.substr_index f ~pattern:" where " with

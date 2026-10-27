@@ -960,7 +960,7 @@ let%expect_test "splices of code from a generator with presence bounds" =
           print_s
             [%sexp
               (List.map (members t) ~f:(fun m -> m.ident.name) : string list)
-            , (Driver.eval ~limits:Helpers.limits (driver t) : unit Or_error.t)]));
+            , (Driver.eval ~limits (driver t) : unit Or_error.t)]));
   [%expect
     {|
     ((gen f x y) (Ok ()))
