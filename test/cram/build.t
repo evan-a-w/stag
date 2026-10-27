@@ -411,9 +411,111 @@ Expect tests in executables are never run, so they are warned about:
   2 | let%expect_test "never" = print_endline "never"
                       ^^^^^^^
   Warning: This expect test is in the executable main, whose tests are never run
-  B.first
   B.y
+  B.mid
   A.x
   C.z
   Main
+  $ cd ..
+
+Symlinks to directories are not followed, those to files are:
+
+  $ mkdir links && cd links && touch stag-project && mkdir a b
+  $ echo '(library (name a))' > a/stag
+  $ echo 'let x = 1' > a/x.stag
+  $ echo '(library (name b))' > b/stag
+  $ echo 'let y = 2' > y.stag.src
+  $ ln -s ../y.stag.src b/y.stag
+  $ ln -s .. a/loop
+  $ ln -s ../b a/blink
+  $ ln -s nowhere a/dangling
+  $ stag-build build
+  $ echo '(executable (name main) (libraries a b))' > stag
+  $ echo 'let main = print_int (Int.add A.X.x B.Y.y)' > main.stag
+  $ stag-build exec main
+  3
+
+Unreadable files and directories are errors:
+
+  $ ln -s nowhere a/dangling.stag
+  $ mkdir c && chmod 000 c
+  $ stag-build build
+  Error: a/dangling.stag: No such file or directory
+  Error: c: Permission denied
+  [1]
+  $ chmod 755 c && rm a/dangling.stag
+  $ cd ..
+
+Promoting refuses corrections it can't apply safely, leaving them:
+
+  $ mkdir promote && cd promote && touch stag-project && mkdir -p t/sub
+  $ echo '(test (name t))' > t/stag
+  $ echo 'let%expect_test "a" = print_int 1' > t/a.stag
+  $ echo 'let%expect_test "b" = print_int 2' > t/b.stag
+  $ stag-build test > /dev/null 2>&1
+  [1]
+  $ find _stag | sort
+  _stag
+  _stag/t
+  _stag/t/a.stag.corrected
+  _stag/t/a.stag.digest
+  _stag/t/b.stag.corrected
+  _stag/t/b.stag.digest
+  $ echo 'let%expect_test "a" = print_int 10' > t/a.stag
+  $ rm t/b.stag
+  $ mkdir -p _stag/t/sub && echo x > _stag/t/sub/stag.corrected
+  $ echo x > _stag/stag-project.corrected
+  $ stag-build promote
+  Error: Not promoting _stag/stag-project.corrected: stag-project is not a source of the project
+  Error: Not promoting _stag/t/a.stag.corrected: t/a.stag has changed since its tests ran; run stag-build test again
+  Error: Not promoting _stag/t/b.stag.corrected: t/b.stag does not exist
+  Error: Not promoting _stag/t/sub/stag.corrected: t/sub/stag does not exist
+  [1]
+  $ cat t/a.stag
+  let%expect_test "a" = print_int 10
+  $ find _stag -type f | sort
+  _stag/stag-project.corrected
+  _stag/t/a.stag.corrected
+  _stag/t/a.stag.digest
+  _stag/t/b.stag.corrected
+  _stag/t/b.stag.digest
+  _stag/t/sub/stag.corrected
+  $ rm -r _stag/stag-project.corrected _stag/t/sub _stag/t/b.*
+
+Testing again replaces the correction, which then promotes, removing the
+directories left empty:
+
+  $ stag-build test > /dev/null 2>&1
+  [1]
+  $ stag-build promote
+  Promoting _stag/t/a.stag.corrected to t/a.stag.
+  $ cat t/a.stag
+  let%expect_test "a" = print_int 10;
+  [%expect {| 10 |}]
+  $ find _stag
+  _stag
+
+A target that no longer checks has its corrections removed, as they are stale:
+
+  $ echo 'let%expect_test "a" = print_int 1' > t/a.stag
+  $ stag-build test > /dev/null 2>&1
+  [1]
+  $ find _stag -type f
+  _stag/t/a.stag.corrected
+  _stag/t/a.stag.digest
+  $ echo 'let%expect_test "a" = print_int "1"' > t/a.stag
+  $ stag-build test 2>&1 | tail -1
+  Error: This expression has type string but an expression was expected of type int
+  $ find _stag
+  _stag
+
+A _stag that is not a directory is an error:
+
+  $ rm -r _stag && touch _stag
+  $ stag-build test
+  Error: _stag is not a directory
+  [1]
+  $ stag-build promote
+  Error: _stag is not a directory
+  [1]
   $ cd ..
