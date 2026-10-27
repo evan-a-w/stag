@@ -203,24 +203,50 @@ are not visible to other tests.
 
 ## Later
 
-### Declaration quotes
+### Declaration splices
 
-A quote of declarations is quoted module code:
+Declarations are generated as data: the syntax is defined in stag, in a
+built-in prelude module `Stag` (`Stag.Type_expr`, `Stag.Toplevel`, etc.,
+mirroring `Syntax`), and a toplevel splice of a list of declarations is run at
+compile time, converted to syntax and checked where it is spliced, as a ppx's
+output would be. Shapes may be computed (constructors from data), which typed
+quotes cannot express.
 
 ```ocaml
-let make_ops zero = .< struct
-    type t = A | B of int
-    let f x = match x with A -> .~zero | B y -> y
-  end >.
-(* make_ops : <int>{..} -> <sig type t = A | B of int; val f : t -> int end>{..} *)
-
-module Ops = .~(make_ops .<0>.)     (* splice as a module *)
-include .~(make_ops .<0>.)          (* splice into the current module *)
-let module M = .~e in body          (* inside expressions, including quotes *)
+module Ops = .~(make_ops names)     (* e : list[Stag.Toplevel.t] *)
+include .~(make_ops names)          (* into the current module *)
 ```
 
-Open questions: contexts with type, constructor and module entries;
-generativity (splicing twice gives distinct types); type code (`<type>`).
+A spliced module's members are known only once it has run, so name
+resolution forces it: type declarations, toplevels and declaration splices are
+checked on demand, in one dependency graph, and a splice that depends on what
+it defines is an error. A name both spliced and written in a module is a
+duplicate. Spliced types are named by the splice's path, so splicing twice
+gives distinct types.
+
+Typed code may be embedded as a leaf, keeping its hygiene: only the shape is
+untyped. Its context entries are provided at the declaration splice, as for
+implicit substitutions.
+
+```ocaml
+Stag.Code.erase : <'a>{..'r} -> Expr.t
+```
+
+Quotes of declarations are sugar for building these values, with antiquotes
+in item, type and expression positions:
+
+```ocaml
+.< struct type t = .~(variants names) let f x = .~body end >.  (* list[Stag.Toplevel.t] *)
+```
+
+Reflection, for deriving, gives the declaration of a type at compile time:
+
+```ocaml
+include .~(Show.derive (Stag.decl_of_type "t"))
+```
+
+Typed declaration quotes (code types of signatures, `<sig ... end>{ctx}`) and
+`let module` may come later, beside these.
 
 ### Modes
 
