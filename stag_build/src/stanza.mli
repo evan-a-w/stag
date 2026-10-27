@@ -11,6 +11,9 @@ module Kind : sig
 
   (** As written in a stanza: [library], [executable] or [test]. *)
   val to_string : t -> string
+
+  (** [a library], [an executable] or [a test]. *)
+  val to_string_with_article : t -> string
 end
 
 type t =

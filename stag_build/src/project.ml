@@ -85,29 +85,11 @@ let read_targets ~root ~error =
 ;;
 
 let check_file_names (target : Target.t) ~error =
-  ignore
-    (List.fold
-       target.files
-       ~init:String.Map.empty
-       ~f:(fun seen { path; contents = _ } ->
-         match Source_file.module_name path with
-         | Error message ->
-           error { Diagnostic.loc = Loc.start_of_file path; message };
-           seen
-         | Ok module_name ->
-           (match Map.find seen module_name with
-            | Some other ->
-              error
-                { Diagnostic.loc = Loc.start_of_file path
-                ; message =
-                    sprintf
-                      "The module %s is also the file %s"
-                      module_name
-                      other
-                };
-              seen
-            | None -> Map.set seen ~key:module_name ~data:path))
-     : string String.Map.t)
+  List.iter target.files ~f:(fun { path; contents = _ } ->
+    match Source_file.module_name path with
+    | Ok (_ : string) -> ()
+    | Error message ->
+      error { Diagnostic.loc = Loc.start_of_file path; message })
 ;;
 
 let index targets ~error =
@@ -125,7 +107,7 @@ let index targets ~error =
                 "The name %s is already used by the %s in %s"
                 name.txt
                 (Stanza.Kind.to_string other.stanza.kind)
-                (Loc.to_string other.stanza.name.loc)
+                other.stanza.name.loc.file
           };
         by_name
       | None -> Map.set by_name ~key:name.txt ~data:target)
@@ -148,9 +130,9 @@ let check_libraries targets ~by_name ~error =
              { Diagnostic.loc = library.loc
              ; message =
                  sprintf
-                   "%s is a %s, not a library"
+                   "%s is %s, not a library"
                    library.txt
-                   (Stanza.Kind.to_string other.stanza.kind)
+                   (Stanza.Kind.to_string_with_article other.stanza.kind)
              })))
 ;;
 

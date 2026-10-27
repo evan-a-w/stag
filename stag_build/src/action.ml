@@ -64,9 +64,9 @@ let exec project name =
   | Some { stanza = { kind = (Library | Test) as kind; _ }; _ } ->
     error
       (sprintf
-         "%s is a %s, not an executable"
+         "%s is %s, not an executable"
          name
-         (Stanza.Kind.to_string kind))
+         (Stanza.Kind.to_string_with_article kind))
 ;;
 
 let correction_path path = corrections_dir ^/ path ^ ".corrected"

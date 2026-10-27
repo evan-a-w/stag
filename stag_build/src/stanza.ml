@@ -14,6 +14,12 @@ module Kind = struct
     | Test -> "test"
   ;;
 
+  let to_string_with_article t =
+    match t with
+    | Library | Test -> "a " ^ to_string t
+    | Executable -> "an executable"
+  ;;
+
   let of_string string =
     List.find all ~f:(fun t -> String.equal (to_string t) string)
   ;;

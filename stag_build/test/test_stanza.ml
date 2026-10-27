@@ -176,7 +176,8 @@ let%expect_test "invalid fields" =
 let%expect_test "invalid names" =
   parse "(test (name Foo))";
   parse "(library (name foo-bar) (libraries 1x (y) ok ok))";
-  [%expect {|
+  [%expect
+    {|
     File "dir/stag", line 1, characters 12-15:
     1 | (test (name Foo))
                     ^^^
