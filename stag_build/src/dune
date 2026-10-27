@@ -2,4 +2,13 @@
  (name stag_build)
  (preprocess
   (pps ppx_jane))
- (libraries stag core core_unix core_unix.sys_unix parsexp))
+ (libraries
+  stag_common
+  stag_syntax
+  stag_ir
+  stag_eval
+  stag_driver
+  core
+  core_unix
+  core_unix.sys_unix
+  parsexp))

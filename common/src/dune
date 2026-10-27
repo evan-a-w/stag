@@ -1,0 +1,5 @@
+(library
+ (name stag_common)
+ (preprocess
+  (pps ppx_jane))
+ (libraries core))

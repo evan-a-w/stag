@@ -1,4 +1,4 @@
-open! Core
+open! Import
 
 let rec remove path =
   if Sys_unix.is_directory_exn path
@@ -21,5 +21,5 @@ let print_diagnostics ~root diagnostics =
     Option.try_with (fun () -> In_channel.read_all (root ^/ path))
   in
   List.iter diagnostics ~f:(fun diagnostic ->
-    print_string (Stag.Diagnostic.to_string_hum ~contents diagnostic))
+    print_string (Diagnostic.to_string_hum ~contents diagnostic))
 ;;

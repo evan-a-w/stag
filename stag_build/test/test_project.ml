@@ -1,4 +1,4 @@
-open! Core
+open! Import
 open Stag_build
 
 let print_project project =
