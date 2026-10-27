@@ -2,7 +2,8 @@ open! Core
 open Stag
 
 let show ?contents loc message =
-  print_string (Diagnostic.to_string_hum ?contents (Diagnostic.create ~loc message))
+  print_string
+    (Diagnostic.to_string_hum ?contents (Diagnostic.create ~loc message))
 ;;
 
 let loc (line, col) (line', col') =
@@ -155,7 +156,7 @@ let%expect_test "messages" =
     File "a.stag", line 1, characters 8-17:
     1 | let x = [%expect]
                 ^^^^^^^^^
-    Error: [%expect] is only allowed in the body of a let%expect_test, outside quotes and toplevel splices
+    Error: [%expect] is only allowed in the body of a let%expect_test where it runs with the test: not in a quote's code nor in a toplevel splice
     File "a.stag", line 1, characters 8-15:
     1 | let x = Int.foo
                 ^^^^^^^
@@ -198,7 +199,8 @@ let%expect_test "tabs and wide characters before the span" =
   in
   show (loc (1, 15) (1, 16)) "y";
   print_string (String.substr_replace_all !shown ~pattern:"\t" ~with_:"<tab>");
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 1, characters 15-16:
     1 | <tab>let x =<tab>"é" y
         <tab>       <tab>     ^
@@ -227,7 +229,8 @@ let%expect_test "whole file errors and notes" =
             [ { loc = loc (2, 4) (2, 5); message = "note" }
             ; { loc = Loc.none; message = "unlocated note" }
             ]));
-  [%expect {|
+  [%expect
+    {|
     File "a.stag":
     Error: bad file
     File "a.stag", line 1, characters 4-5:
@@ -259,7 +262,8 @@ let%expect_test "different, with no output" =
   in
   let driver =
     Driver.check_files [ { Source_file.path = "a.stag"; contents } ]
-    |> Result.map_error ~f:(fun error -> Error.create_s [%sexp (error : Driver.Error.t)])
+    |> Result.map_error ~f:(fun error ->
+      Error.create_s [%sexp (error : Driver.Error.t)])
     |> ok_exn
   in
   Driver.eval driver |> ok_exn;
@@ -267,7 +271,8 @@ let%expect_test "different, with no output" =
     List.iter (Diagnostic.of_test_result result) ~f:(fun diagnostic ->
       print_string
         (Diagnostic.to_string_hum ~contents:(fun _ -> Some contents) diagnostic)));
-  [%expect {xxx|
+  [%expect
+    {xxx|
     File "a.stag", line 3, characters 2-22:
     3 |   match 2 with 1 -> ()
           ^^^^^^^^^^^^^^^^^^^^
@@ -296,4 +301,41 @@ let%expect_test "different, with no output" =
                      ^^^^^^^^^^^^^
     Error: Expect test "different, with no output" failed: Division by zero
     |xxx}]
+;;
+
+let%expect_test "exhausted limits are located" =
+  let contents =
+    {|let f x = Int.add 1 (f x)
+let%expect_test "deep" = print_int (f 1)
+|}
+  in
+  let driver =
+    Driver.check_files [ { Source_file.path = "a.stag"; contents } ]
+    |> Result.map_error ~f:(fun error ->
+      Error.create_s [%sexp (error : Driver.Error.t)])
+    |> ok_exn
+  in
+  Driver.eval driver |> ok_exn;
+  List.iter
+    [ { Limits.fuel = None; max_depth = Some 100; time_limit = None }
+    ; { fuel = Some 1000; max_depth = None; time_limit = None }
+    ]
+    ~f:(fun limits ->
+      List.iter (Expect_test_runner.run ~limits driver) ~f:(fun result ->
+        List.iter (Diagnostic.of_test_result result) ~f:(fun diagnostic ->
+          print_string
+            (Diagnostic.to_string_hum
+               ~contents:(fun _ -> Some contents)
+               diagnostic))));
+  [%expect
+    {|
+    File "a.stag", line 1, characters 10-17:
+    1 | let f x = Int.add 1 (f x)
+                  ^^^^^^^
+    Error: Expect test "deep" failed: Stack depth exceeded: evaluation nested more than 100 steps deep
+    File "a.stag", line 1, characters 10-19:
+    1 | let f x = Int.add 1 (f x)
+                  ^^^^^^^^^
+    Error: Expect test "deep" failed: Out of fuel: evaluation took more than 1000 steps
+    |}]
 ;;

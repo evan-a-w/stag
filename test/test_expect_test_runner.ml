@@ -350,7 +350,8 @@ let%expect_test "output before a runtime error" =
   print_string "before";
   match 2 with 1 -> ()
 |x};
-  [%expect {xxx|
+  [%expect
+    {xxx|
     ((name (error @ t.stag:1:16-23)) (mismatches ())
      (error (("Match failure: no case matches the value 2" @ t.stag:5:2-22)))
      (output_before_error before))
@@ -365,7 +366,8 @@ let%expect_test "tab indentation" =
      \tprint_string \"a\\nb\";\n\
      \t[%expect {| |}];\n\
      \tprint_string \"c\\nd\"\n";
-  [%expect {xxx|
+  [%expect
+    {xxx|
     ((name (t @ t.stag:1:16-19))
      (mismatches
       (((loc t.stag:3:10-15) (expected (" ")) (actual  "a\
@@ -389,13 +391,17 @@ let%expect_test "tab indentation" =
 ;;
 
 let%expect_test "locals of tests are not toplevels" =
-  let contents = {x|let%expect_test "t" = let x = 1 in print_int x; [%expect {| 1 |}]|x} in
+  let contents =
+    {x|let%expect_test "t" = let x = 1 in print_int x; [%expect {| 1 |}]|x}
+  in
   Option.iter
     (check_files [ { Source_file.path = "t.stag"; contents } ])
     ~f:(fun driver ->
       Driver.eval driver |> ok_exn;
       let results = Expect_test_runner.run driver in
-      print_s [%sexp (List.for_all results ~f:Expect_test_runner.Test_result.passed : bool)];
+      print_s
+        [%sexp
+          (List.for_all results ~f:Expect_test_runner.Test_result.passed : bool)];
       List.iter (Driver.checked driver).program.expect_tests ~f:(fun test ->
         match test.body.desc with
         | Let { ident; _ } ->
@@ -405,7 +411,8 @@ let%expect_test "locals of tests are not toplevels" =
                |> Result.map ~f:Treewalk.Value.to_string_hum
                : string Or_error.t)]
         | _ -> print_endline "not a let"));
-  [%expect {|
+  [%expect
+    {|
     true
     (Error ("Unbound ident" (ident x/0)))
     |}]

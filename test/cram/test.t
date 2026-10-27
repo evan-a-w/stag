@@ -181,5 +181,5 @@ A file given more than once is read once.
   File "outside.stag", line 1, characters 8-17:
   1 | let x = [%expect]
               ^^^^^^^^^
-  Error: [%expect] is only allowed in the body of a let%expect_test, outside quotes and toplevel splices
+  Error: [%expect] is only allowed in the body of a let%expect_test where it runs with the test: not in a quote's code nor in a toplevel splice
   [1]

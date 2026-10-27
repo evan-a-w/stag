@@ -2,7 +2,9 @@ open! Core
 open Stag
 
 let canonical path =
-  Option.value (Option.try_with (fun () -> Filename_unix.realpath path)) ~default:path
+  Option.value
+    (Option.try_with (fun () -> Filename_unix.realpath path))
+    ~default:path
 ;;
 
 let read_files paths =

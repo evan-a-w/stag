@@ -73,12 +73,14 @@ let%expect_test "a runaway splice runs out of fuel while checking" =
         []
         (splice (seq (app (var "spin") [ nat_of_int 40 ]) (quote (int 1))))
     ];
-  [%expect {| splice failed: ("Out of fuel: evaluation took more than 1000000 steps" @ _none_) |}]
+  [%expect
+    {| splice failed: ("Out of fuel: evaluation took more than 1000000 steps" @ _none_) |}]
 ;;
 
 let%expect_test "a looping toplevel runs out of fuel when evaluated" =
   run ~runtime:(fuel_only 1000) [ loop; top "x" [] (app (var "loop") [ unit ]) ];
-  [%expect {| eval failed: ("Out of fuel: evaluation took more than 1000 steps" @ _none_) |}]
+  [%expect
+    {| eval failed: ("Out of fuel: evaluation took more than 1000 steps" @ _none_) |}]
 ;;
 
 let%expect_test "terminating programs are unaffected" =
@@ -180,7 +182,8 @@ let%expect_test "the time limit" =
       { Limits.unlimited with time_limit = Some (Time_ns.Span.of_int_ms 1) }
     ~print_error:only_kind
     [ nat; spin; top "x" [] (app (var "spin") [ nat_of_int 60 ]) ];
-  [%expect {| eval failed: Time limit exceeded: evaluation took more than 1ms |}]
+  [%expect
+    {| eval failed: Time limit exceeded: evaluation took more than 1ms |}]
 ;;
 
 let%expect_test "deep recursion at compile time exceeds the stack depth" =
@@ -193,7 +196,8 @@ let%expect_test "deep recursion at compile time exceeds the stack depth" =
         []
         (splice (seq (app (var "spin") [ nat_of_int 20_000 ]) (quote (int 1))))
     ];
-  [%expect {| splice failed: Stack depth exceeded: evaluation nested more than 10000 steps deep |}]
+  [%expect
+    {| splice failed: Stack depth exceeded: evaluation nested more than 10000 steps deep |}]
 ;;
 
 let%expect_test "the time limit at compile time" =
@@ -208,7 +212,8 @@ let%expect_test "the time limit at compile time" =
         []
         (splice (seq (app (var "spin") [ nat_of_int 60 ]) (quote (int 1))))
     ];
-  [%expect {| splice failed: Time limit exceeded: evaluation took more than 1ms |}]
+  [%expect
+    {| splice failed: Time limit exceeded: evaluation took more than 1ms |}]
 ;;
 
 let%expect_test "values forced at compile time are not evaluated again" =

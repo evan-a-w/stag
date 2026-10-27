@@ -507,9 +507,7 @@ let splice_code
       })
 ;;
 
-let runtime_error ~loc message =
-  Error (Runtime_error.to_error { loc; message })
-;;
+let runtime_error ~loc message = Error (Runtime_error.to_error { loc; message })
 
 let pattern_mismatch pattern value =
   Or_error.error_s
@@ -674,7 +672,8 @@ and step t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
      | None ->
        Or_error.error_s [%message "[%expect] outside a running expect test"])
   | Var (Bound (Local ident | Toplevel ident))
-  | Var (Persistent (Local ident | Toplevel ident)) -> lookup t env ident ~loc:expr.loc
+  | Var (Persistent (Local ident | Toplevel ident)) ->
+    lookup t env ident ~loc:expr.loc
   | Var (Free name) ->
     Or_error.error_s [%message "Free variable of code evaluated" name]
   | Var (Prim prim) -> Ok (Value.Prim { prim; applied = [] })
@@ -860,7 +859,8 @@ let splice t ~code ~level ~entry =
 let run_expect_test t ({ body; _ } : Typed.Expect_test.t) ~on_expect =
   t.on_expect <- Some on_expect;
   Exn.protect
-    ~f:(fun () -> eval t ~env:(Env.create ()) ~level:0 body |> Or_error.ignore_m)
+    ~f:(fun () ->
+      eval t ~env:(Env.create ()) ~level:0 body |> Or_error.ignore_m)
     ~finally:(fun () -> t.on_expect <- None)
 ;;
 

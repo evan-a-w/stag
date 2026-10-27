@@ -177,7 +177,8 @@ module Resolution = struct
         ; usable = Option.some_if usable entry
         ; unusable = Option.some_if (not usable) entry
         }
-    | Some quote, None -> Outside_quote { quote; usable = None; unusable = None }
+    | Some quote, None ->
+      Outside_quote { quote; usable = None; unusable = None }
     | _, Some entry ->
       Unusable
         (Variable_used_at_wrong_level

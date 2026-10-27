@@ -77,7 +77,9 @@ let normalize string =
     |> Option.value ~default:""
   in
   List.map lines ~f:(fun line ->
-    if String.is_empty line then line else String.drop_prefix line (String.length common))
+    if String.is_empty line
+    then line
+    else String.drop_prefix line (String.length common))
   |> String.concat ~sep:"\n"
 ;;
 
@@ -125,8 +127,13 @@ let run_test ~limits driver (test : Typed.Expect_test.t) =
       then
         Queue.enqueue
           mismatches
-          { Mismatch.loc; expected = Some expected; actual; parenthesize = None }
-    | outputs -> Queue.enqueue different_outputs { Different_outputs.loc; outputs });
+          { Mismatch.loc
+          ; expected = Some expected
+          ; actual
+          ; parenthesize = None
+          }
+    | outputs ->
+      Queue.enqueue different_outputs { Different_outputs.loc; outputs });
   let output_before_error =
     match result with
     | Ok () ->
@@ -139,7 +146,8 @@ let run_test ~limits driver (test : Typed.Expect_test.t) =
           { Mismatch.loc = { test.body.loc with start = stop }
           ; expected = None
           ; actual
-          ; parenthesize = Option.some_if (ends_in_match test.body) test.body.loc
+          ; parenthesize =
+              Option.some_if (ends_in_match test.body) test.body.loc
           });
       ""
     | Error _ -> take_output ()

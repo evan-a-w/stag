@@ -69,12 +69,14 @@ let indented output =
   then "  (no output)"
   else
     String.split_lines output
-    |> List.map ~f:(fun line -> if String.is_empty line then line else "  " ^ line)
+    |> List.map ~f:(fun line ->
+      if String.is_empty line then line else "  " ^ line)
     |> String.concat ~sep:"\n"
 ;;
 
-let of_test_result ({ name; error; output_before_error; different_outputs; _ } :
-                     Expect_test_runner.Test_result.t)
+let of_test_result
+      ({ name; error; output_before_error; different_outputs; _ } :
+        Expect_test_runner.Test_result.t)
   =
   let in_test = sprintf "Expect test %S" name.txt in
   let error =

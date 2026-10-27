@@ -232,8 +232,8 @@ let message { kind; loc = _ } =
        is in the same recursive group as this splice)"
       name
   | Expect_outside_expect_test ->
-    "[%expect] is only allowed in the body of a let%expect_test, outside \
-     quotes and toplevel splices"
+    "[%expect] is only allowed in the body of a let%expect_test where it runs \
+     with the test: not in a quote's code nor in a toplevel splice"
   | Splice_evaluation_failed { code = _; error } ->
     let error =
       match Runtime_error.of_error error with
