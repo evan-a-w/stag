@@ -282,3 +282,138 @@ Outside a project:
   $ cd .. && mkdir elsewhere && cd elsewhere && stag-build build
   Error: No stag-project file in the current directory or any of its ancestors
   [1]
+
+A stag-project that is not a regular file doesn't make a root:
+
+  $ mkdir stag-project && stag-build build
+  Error: No stag-project file in the current directory or any of its ancestors
+  [1]
+  $ cd .. && rm -r elsewhere
+
+Expect test failures other than mismatches are reported:
+
+  $ mkdir failures && cd failures && touch stag-project && mkdir t
+  $ echo '(test (name t))' > t/stag
+  $ cat > t/t.stag <<'X'
+  > let%expect_test "twice" =
+  >   let go n = match Int.equal n 0 with
+  >     | true -> ()
+  >     | false -> print_int n; [%expect {| 1 |}]; go (Int.sub n 1)
+  >   in
+  >   go 2
+  > 
+  > let%expect_test "error" =
+  >   print_endline "before";
+  >   [%expect {| before |}];
+  >   print_endline "after";
+  >   print_int (Int.div 1 0)
+  > X
+  $ stag-build test
+  File "t/t.stag", line 4, characters 37-44:
+  4 |     | false -> print_int n; [%expect {| 1 |}]; go (Int.sub n 1)
+                                           ^^^^^^^
+  Error: Expect test "twice": this [%expect] was reached with different outputs:
+  Output 1:
+    2
+  Output 2:
+    1
+  File "t/t.stag", line 12, characters 12-25:
+  12 |   print_int (Int.div 1 0)
+                   ^^^^^^^^^^^^^
+  Error: Expect test "error" failed: Division by zero
+  Output since the last [%expect]:
+    after
+  t: 2 of 2 test(s) failed
+  [1]
+  $ cd ..
+
+Testing a stanza runs only its own tests, not those of its libraries (this one
+would loop):
+
+  $ mkdir only && cd only && touch stag-project && mkdir lib dep
+  $ echo '(library (name lib))' > lib/stag
+  $ cat > lib/lib.stag <<'X'
+  > let one = 1
+  > let%expect_test "loops" = let loop x = loop x in loop ()
+  > X
+  $ echo '(test (name dep) (libraries lib))' > dep/stag
+  $ cat > dep/dep.stag <<'X'
+  > let%expect_test "one" = print_int Lib.Lib.one; [%expect {| 2 |}]
+  > X
+  $ stag-build test dep
+  --- dep/dep.stag
+  +++ _stag/dep/dep.stag.corrected
+  @@ -1,1 +1,1 @@
+  -let%expect_test "one" = print_int Lib.Lib.one; [%expect {| 2 |}]
+  +let%expect_test "one" = print_int Lib.Lib.one; [%expect {| 1 |}]
+  dep: 1 of 1 test(s) failed
+  [1]
+  $ cd ..
+
+The files of a library are evaluated in dependency order, as those of a
+program are by stag run:
+
+  $ mkdir order && cd order && touch stag-project && mkdir lib bin
+  $ echo '(library (name lib))' > lib/stag
+  $ cat > lib/a.stag <<'X'
+  > let x = print_endline "A.x"; B.y
+  > X
+  $ cat > lib/b.stag <<'X'
+  > let first = print_endline "B.first"
+  > let y = print_endline "B.y"; 1
+  > X
+  $ echo 'let z = print_endline "C.z"' > lib/c.stag
+  $ echo '(executable (name main) (libraries lib))' > bin/stag
+  $ echo 'let main = print_endline "Main"' > bin/main.stag
+  $ stag-build exec main
+  B.first
+  B.y
+  A.x
+  C.z
+  Main
+  $ stag run lib/a.stag lib/b.stag lib/c.stag
+  B.first
+  B.y
+  A.x
+  C.z
+
+A toplevel used before its turn is evaluated then:
+
+  $ cat > lib/b.stag <<'X'
+  > let first = y
+  > let mid = print_endline "B.mid"
+  > let y = print_endline "B.y"; 1
+  > X
+  $ stag-build exec main
+  B.y
+  B.mid
+  A.x
+  C.z
+  Main
+  $ stag run lib/a.stag lib/b.stag lib/c.stag
+  B.y
+  B.mid
+  A.x
+  C.z
+
+Expect tests in executables are never run, so they are warned about:
+
+  $ cat >> bin/main.stag <<'X'
+  > let%expect_test "never" = print_endline "never"
+  > X
+  $ stag-build build
+  File "bin/main.stag", line 2, characters 16-23:
+  2 | let%expect_test "never" = print_endline "never"
+                      ^^^^^^^
+  Warning: This expect test is in the executable main, whose tests are never run
+  $ stag-build exec main
+  File "bin/main.stag", line 2, characters 16-23:
+  2 | let%expect_test "never" = print_endline "never"
+                      ^^^^^^^
+  Warning: This expect test is in the executable main, whose tests are never run
+  B.first
+  B.y
+  A.x
+  C.z
+  Main
+  $ cd ..

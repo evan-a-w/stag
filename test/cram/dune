@@ -5,4 +5,5 @@
  (applies_to build)
  (deps
   %{bin:stag-build}
+  %{bin:stag}
   (source_tree ../../examples)))
