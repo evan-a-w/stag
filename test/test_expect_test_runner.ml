@@ -417,3 +417,26 @@ let%expect_test "locals of tests are not toplevels" =
     (Error ("Unbound ident" (ident x/0)))
     |}]
 ;;
+
+let%expect_test "only the tests of [files] run" =
+  match
+    check_files
+      [ { path = "a.stag"
+        ; contents =
+            {|let%expect_test "loops" = let loop x = loop x in loop ()|}
+        }
+      ; { path = "b.stag"; contents = {|let%expect_test "b" = print_int 1|} }
+      ]
+  with
+  | None -> ()
+  | Some driver ->
+    Driver.eval driver |> ok_exn;
+    Expect_test_runner.run ~files:(String.Set.singleton "b.stag") driver
+    |> List.iter ~f:(fun result ->
+      print_s [%sexp (result : Expect_test_runner.Test_result.t)]);
+    [%expect
+      {|
+      ((name (b @ b.stag:1:16-19))
+       (mismatches (((loc b.stag:1:33-33) (expected ()) (actual 1)))) (error ()))
+      |}]
+;;
