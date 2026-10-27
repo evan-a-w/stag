@@ -59,142 +59,151 @@ let is_valid_name name =
   && String.for_all name ~f:(fun c -> Char.is_alphanum c || Char.equal c '_')
 ;;
 
+let atom ~path (cst : Cst.t) =
+  match cst with
+  | Atom { atom; loc = range; _ } ->
+    Some (Located.create ~loc:(loc ~path range) atom)
+  | List _ -> None
+;;
+
+let name_atom ~path ~error ~what (cst : Cst.t) =
+  match atom ~path cst with
+  | None ->
+    error (cst_loc ~path cst) (sprintf "Expected a %s name" what);
+    None
+  | Some name when not (is_valid_name name.txt) ->
+    error
+      name.loc
+      (sprintf
+         "Invalid %s name %s: it should be a lowercase letter followed by \
+          letters, digits and _"
+         what
+         name.txt);
+    None
+  | Some name -> Some name
+;;
+
+let check_duplicate_libraries ~error libraries =
+  ignore
+    (List.fold
+       libraries
+       ~init:String.Set.empty
+       ~f:(fun seen (library : string Located.t) ->
+         if Set.mem seen library.txt
+         then
+           error
+             library.loc
+             (sprintf "The library %s is listed more than once" library.txt);
+         Set.add seen library.txt)
+     : String.Set.t)
+;;
+
+(* The fields of a stanza, each [Some] once given: the name [Some None] if
+   invalid. *)
+module Fields = struct
+  type t =
+    { mutable name : string Located.t option option
+    ; mutable libraries : string Located.t list option
+    }
+end
+
+let field ~path ~error ~kind (fields : Fields.t) (cst : Cst.t) =
+  let once (field_name : string Located.t) ~given ~set =
+    if given
+    then
+      error
+        field_name.loc
+        (sprintf "The field %s is given more than once" field_name.txt)
+    else set ()
+  in
+  let head_and_args =
+    match cst with
+    | Atom _ -> None
+    | List { elements; _ } ->
+      (match sexps elements with
+       | [] -> None
+       | head :: args ->
+         Option.map (atom ~path head) ~f:(fun head -> head, args))
+  in
+  match head_and_args with
+  | None ->
+    error (cst_loc ~path cst) "Expected a field: (name ...) or (libraries ...)"
+  | Some (({ txt = "name"; _ } as field_name), args) ->
+    let name =
+      match args with
+      | [ arg ] -> name_atom ~path ~error ~what:(Kind.to_string kind) arg
+      | _ ->
+        error
+          (cst_loc ~path cst)
+          "The field name expects one name, eg. (name foo)";
+        None
+    in
+    once field_name ~given:(Option.is_some fields.name) ~set:(fun () ->
+      fields.name <- Some name)
+  | Some (({ txt = "libraries"; _ } as field_name), args) ->
+    let libraries =
+      List.filter_map args ~f:(name_atom ~path ~error ~what:"library")
+    in
+    check_duplicate_libraries ~error libraries;
+    once field_name ~given:(Option.is_some fields.libraries) ~set:(fun () ->
+      fields.libraries <- Some libraries)
+  | Some (field_name, _) ->
+    error
+      field_name.loc
+      (sprintf "Unknown field %s: expected name or libraries" field_name.txt)
+;;
+
+let stanza ~path ~error (cst : Cst.t) =
+  let stanza_loc = cst_loc ~path cst in
+  let head_and_fields =
+    match cst with
+    | Atom _ -> None
+    | List { elements; _ } ->
+      (match sexps elements with
+       | [] -> None
+       | head :: fields ->
+         Option.map (atom ~path head) ~f:(fun head -> head, fields))
+  in
+  match head_and_fields with
+  | None ->
+    error
+      stanza_loc
+      "Expected a stanza: (library ...), (executable ...) or (test ...)";
+    None
+  | Some (kind_name, field_csts) ->
+    (match Kind.of_string kind_name.txt with
+     | None ->
+       error
+         kind_name.loc
+         (sprintf
+            "Unknown stanza %s: expected library, executable or test"
+            kind_name.txt);
+       None
+     | Some kind ->
+       let fields = { Fields.name = None; libraries = None } in
+       List.iter field_csts ~f:(field ~path ~error ~kind fields);
+       (match fields.name with
+        | None ->
+          error
+            stanza_loc
+            (sprintf
+               "The %s stanza has no name: add (name ...)"
+               (Kind.to_string kind));
+          None
+        | Some None -> None
+        | Some (Some name) ->
+          Some
+            { kind
+            ; name
+            ; libraries = Option.value fields.libraries ~default:[]
+            ; loc = stanza_loc
+            }))
+;;
+
 let parse ~path contents =
   let errors = Queue.create () in
   let error loc message =
     Queue.enqueue errors (Diagnostic.create ~loc message)
-  in
-  let atom (cst : Cst.t) =
-    match cst with
-    | Atom { atom; loc = range; _ } ->
-      Some (Located.create ~loc:(loc ~path range) atom)
-    | List _ -> None
-  in
-  let name_atom ~what (cst : Cst.t) =
-    match atom cst with
-    | None ->
-      error (cst_loc ~path cst) (sprintf "Expected a %s name" what);
-      None
-    | Some name when not (is_valid_name name.txt) ->
-      error
-        name.loc
-        (sprintf
-           "Invalid %s name %s: it should be a lowercase letter followed by \
-            letters, digits and _"
-           what
-           name.txt);
-      None
-    | Some name -> Some name
-  in
-  let stanza (cst : Cst.t) =
-    let stanza_loc = cst_loc ~path cst in
-    let expected_stanza () =
-      error
-        stanza_loc
-        "Expected a stanza: (library ...), (executable ...) or (test ...)";
-      None
-    in
-    match cst with
-    | Atom _ -> expected_stanza ()
-    | List { elements; _ } ->
-      (match sexps elements with
-       | [] -> expected_stanza ()
-       | head :: fields ->
-         (match atom head with
-          | None -> expected_stanza ()
-          | Some kind_name ->
-            (match Kind.of_string kind_name.txt with
-             | None ->
-               error
-                 kind_name.loc
-                 (sprintf
-                    "Unknown stanza %s: expected library, executable or test"
-                    kind_name.txt);
-               None
-             | Some kind ->
-               let name = ref None in
-               let libraries = ref None in
-               List.iter fields ~f:(fun field ->
-                 let field_loc = cst_loc ~path field in
-                 let set slot field_name value =
-                   match !slot with
-                   | Some _ ->
-                     error
-                       field_name.Located.loc
-                       (sprintf
-                          "The field %s is given more than once"
-                          field_name.txt)
-                   | None -> slot := Some value
-                 in
-                 match field with
-                 | Atom _ | List { elements = []; _ } ->
-                   error
-                     field_loc
-                     "Expected a field: (name ...) or (libraries ...)"
-                 | List { elements; _ } ->
-                   (match sexps elements with
-                    | [] ->
-                      error
-                        field_loc
-                        "Expected a field: (name ...) or (libraries ...)"
-                    | head :: args ->
-                      (match atom head with
-                       | None ->
-                         error
-                           field_loc
-                           "Expected a field: (name ...) or (libraries ...)"
-                       | Some ({ txt = "name"; _ } as field_name) ->
-                         (match args with
-                          | [ arg ] ->
-                            set
-                              name
-                              field_name
-                              (name_atom ~what:(Kind.to_string kind) arg)
-                          | _ ->
-                            error
-                              field_loc
-                              "The field name expects one name, eg. (name foo)";
-                            set name field_name None)
-                       | Some ({ txt = "libraries"; _ } as field_name) ->
-                         let names =
-                           List.filter_map args ~f:(name_atom ~what:"library")
-                         in
-                         List.fold
-                           names
-                           ~init:String.Set.empty
-                           ~f:(fun seen (library : string Located.t) ->
-                             if Set.mem seen library.txt
-                             then
-                               error
-                                 library.loc
-                                 (sprintf
-                                    "The library %s is listed more than once"
-                                    library.txt);
-                             Set.add seen library.txt)
-                         |> (ignore : String.Set.t -> unit);
-                         set libraries field_name names
-                       | Some field_name ->
-                         error
-                           field_name.loc
-                           (sprintf
-                              "Unknown field %s: expected name or libraries"
-                              field_name.txt))));
-               (match !name with
-                | None ->
-                  error
-                    stanza_loc
-                    (sprintf
-                       "The %s stanza has no name: add (name ...)"
-                       (Kind.to_string kind));
-                  None
-                | Some None -> None
-                | Some (Some name) ->
-                  Some
-                    { kind
-                    ; name
-                    ; libraries = Option.value !libraries ~default:[]
-                    ; loc = stanza_loc
-                    }))))
   in
   let result =
     match Parsexp.Many_cst.parse_string contents with
@@ -213,7 +222,7 @@ let parse ~path contents =
              (cst_loc ~path cst)
              "A stag file has at most one stanza; put the others in their own \
               directories");
-         stanza first)
+         stanza ~path ~error first)
   in
   if Queue.is_empty errors then Ok result else Error (Queue.to_list errors)
 ;;
