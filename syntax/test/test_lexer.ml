@@ -205,6 +205,56 @@ let%expect_test "ints" =
     |}]
 ;;
 
+let%expect_test "negative ints" =
+  lex "-1 -1_000 -0 -007 -4611686018427387904 -4_611_686_018_427_387_903";
+  lex "f -1 (-2) x-3 ->-4";
+  lex "-4611686018427387905";
+  lex "-4_611_686_018_427_387_905";
+  lex "-12abc";
+  lex "-";
+  lex "- 1";
+  lex "--1";
+  lex "-x";
+  lex "-_1";
+  [%expect
+    {|
+    ((Int -1) t.stag:1:0-2 -1)
+    ((Int -1000) t.stag:1:3-9 -1_000)
+    ((Int 0) t.stag:1:10-12 -0)
+    ((Int -7) t.stag:1:13-17 -007)
+    ((Int -4611686018427387904) t.stag:1:18-38 -4611686018427387904)
+    ((Int -4611686018427387903) t.stag:1:39-65 -4_611_686_018_427_387_903)
+    (Eof t.stag:1:65-65 "")
+    ((Lident f) t.stag:1:0-1 f)
+    ((Int -1) t.stag:1:2-4 -1)
+    (Lparen t.stag:1:5-6 "(")
+    ((Int -2) t.stag:1:6-8 -2)
+    (Rparen t.stag:1:8-9 ")")
+    ((Lident x) t.stag:1:10-11 x)
+    ((Int -3) t.stag:1:11-13 -3)
+    (Arrow t.stag:1:14-16 ->)
+    ((Int -4) t.stag:1:16-18 -4)
+    (Eof t.stag:1:18-18 "")
+    ((kind (Int_literal_out_of_range -4611686018427387905)) (loc t.stag:1:0-20))
+    t.stag:1:0-20: integer literal -4611686018427387905 exceeds the range of int
+    ((kind (Int_literal_out_of_range -4_611_686_018_427_387_905))
+     (loc t.stag:1:0-26))
+    t.stag:1:0-26: integer literal -4_611_686_018_427_387_905 exceeds the range of int
+    ((kind (Invalid_int_literal -12abc)) (loc t.stag:1:0-6))
+    t.stag:1:0-6: invalid integer literal -12abc
+    ((kind (Illegal_character -)) (loc t.stag:1:0-1))
+    t.stag:1:0-1: illegal character '-'
+    ((kind (Illegal_character -)) (loc t.stag:1:0-1))
+    t.stag:1:0-1: illegal character '-'
+    ((kind (Illegal_character -)) (loc t.stag:1:0-1))
+    t.stag:1:0-1: illegal character '-'
+    ((kind (Illegal_character -)) (loc t.stag:1:0-1))
+    t.stag:1:0-1: illegal character '-'
+    ((kind (Illegal_character -)) (loc t.stag:1:0-1))
+    t.stag:1:0-1: illegal character '-'
+    |}]
+;;
+
 let%expect_test "chars and type variables" =
   lex
     "'a' 'Z' ' ' '\"' '_' '0' '\\'' '\\\\' '\\n' '\\t' '\\r' '\\b' '\\ ' \
@@ -562,12 +612,6 @@ let%expect_test "errors" =
     {|
     ((kind (Illegal_character -)) (loc t.stag:1:2-3))
     t.stag:1:2-3: illegal character '-'
-    |}];
-  lex "-3";
-  [%expect
-    {|
-    ((kind (Illegal_character -)) (loc t.stag:1:0-1))
-    t.stag:1:0-1: illegal character '-'
     |}];
   lex "a > b";
   [%expect

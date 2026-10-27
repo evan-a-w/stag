@@ -165,6 +165,7 @@ module Value = struct
     match value with
     | Construct (_, []) | Poly_variant (_, Unit) -> to_string_hum value
     | Construct _ | Poly_variant _ -> "(" ^ to_string_hum value ^ ")"
+    | Int n when n < 0 -> "(" ^ to_string_hum value ^ ")"
     | _ -> to_string_hum value
   ;;
 end

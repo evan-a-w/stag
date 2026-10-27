@@ -316,6 +316,26 @@ let quote (t : State.t) : Token.t =
     State.error t start (Illegal_character '\'')
 ;;
 
+(* At a digit, or at a [-] followed by one. The sign is parsed with the digits,
+   so that [min_int] does not overflow. *)
+let int_literal (t : State.t) (start : Loc.Pos.t) : Token.t =
+  let sign =
+    match State.peek t with
+    | Some '-' ->
+      State.bump t;
+      "-"
+    | _ -> ""
+  in
+  let digits = ident t in
+  let text = State.text_from t start in
+  if String.for_all digits ~f:(fun c -> Char.is_digit c || Char.equal c '_')
+  then (
+    match Int.of_string_opt (sign ^ String.filter digits ~f:Char.is_digit) with
+    | Some n -> Int n
+    | None -> State.error t start (Int_literal_out_of_range text))
+  else State.error t start (Invalid_int_literal text)
+;;
+
 let rec skip_trivia (t : State.t) =
   skip_while t ~f:(function
     | ' ' | '\t' | '\n' | '\r' -> true
@@ -375,15 +395,8 @@ let token (t : State.t) : Located.t =
          Label (ident t)
        | '_', c when not (Option.exists c ~f:is_ident_char) ->
          simple 1 Underscore
-       | c, _ when Char.is_digit c ->
-         let text = ident t in
-         if
-           String.for_all text ~f:(fun c -> Char.is_digit c || Char.equal c '_')
-         then (
-           match Int.of_string_opt (String.filter text ~f:Char.is_digit) with
-           | Some n -> Int n
-           | None -> State.error t start (Int_literal_out_of_range text))
-         else State.error t start (Invalid_int_literal text)
+       | '-', Some c when Char.is_digit c -> int_literal t start
+       | c, _ when Char.is_digit c -> int_literal t start
        | c, _ when Char.is_uppercase c -> Uident (ident t)
        | c, _ when is_ident_start c ->
          let text = ident t in

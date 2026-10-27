@@ -143,6 +143,18 @@ module Left_to_right = struct
       |}]
 end
 
+module Negative_literals = struct
+  let sign n = match n with -1 -> "minus one" | 0 -> "zero" | _ -> "other"
+
+  let%expect_test "negative literals" =
+    print_int -5; print_char ' ';
+    print_int (Int.add -2 3); print_char ' ';
+    print_int -4_611_686_018_427_387_904; print_char ' ';
+    print_string (sign -1); print_char ' ';
+    print_string (sign 0);
+    [%expect {| -5 1 -4611686018427387904 minus one zero |}]
+end
+
 module Provided = struct
   let n = 3
   let f u = .~(.<(n, u)>.)

@@ -602,10 +602,8 @@ let toplevel_splice_level x = .~x
 ;;
 
 let%expect_test "staged power" =
-  (* No negative literals: [-1] is [Int.neg 1]. *)
   let power =
-    "let power n x = cond (eq n 0) .<1>. .<add .~x .~(power (add n (Int.neg \
-     1)) x)>.\n"
+    "let power n x = cond (eq n 0) .<1>. .<add .~x .~(power (add n -1) x)>.\n"
   in
   check (power ^ "let cube = power 3 .<2>.\n");
   check (power ^ "let open = power 3 .<y>.\n");
@@ -620,7 +618,7 @@ let%expect_test "staged power" =
     ((Unification_error
       (Row_mismatch REmpty
        (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 76 1)))
+        (RVar (Unbound 74 1)))
        (Missing_label y)))
      @ t.stag:2:31-44)
     ((Unification_error
@@ -776,11 +774,10 @@ let after = .<add .~closed x>.
 ;;
 
 let%expect_test "mutually recursive staged functions" =
-  (* No negative literals: [-1] is [Int.neg 1]. *)
   let ping_pong =
     {|
 let ping n c = cond (eq n 0) c .<let x = 1 in .~(pong n c)>.
-let pong n c = .<add .~(ping (add n (Int.neg 1)) c) y>.
+let pong n c = .<add .~(ping (add n -1) c) y>.
 |}
   in
   check ping_pong;
@@ -800,7 +797,7 @@ let pong n c = .<add .~(ping (add n (Int.neg 1)) c) y>.
         (RVar
          (Link
           (RExtend z (PVar (Link Present)) (TVar (Link (TCon int ())))
-           (RVar (Unbound 95 1))))))
+           (RVar (Unbound 93 1))))))
        (Missing_label y)))
      @ t.stag:4:33-45)
     |}]

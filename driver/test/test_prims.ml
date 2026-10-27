@@ -39,7 +39,7 @@ let show x = print_endline (Int.to_string x)
 let show_bool b = match b with true -> print_endline "true" | false -> print_endline "false"
 let main3 =
   show (Int.add 3 4); show (Int.sub 3 4); show (Int.mul 3 4);
-  show (Int.div 7 2); show (Int.div (Int.neg 7) 2); show (Int.rem (Int.neg 7) 2);
+  show (Int.div 7 2); show (Int.div -7 2); show (Int.rem -7 2);
   show (Int.compare 1 2); show (Int.compare 2 2); show (Int.compare 3 2);
   show_bool (Int.equal 1 1); show_bool (Int.lt 1 2); show_bool (Int.le 2 2);
   show_bool (Int.gt 1 2); show_bool (Int.ge 1 2);
@@ -140,7 +140,7 @@ let%expect_test "runtime errors are located at the application" =
     [ "Int.div 1 0"
     ; "Int.rem 1 0"
     ; "String.get \"abc\" 3"
-    ; "String.get \"abc\" (Int.neg 1)"
+    ; "String.get \"abc\" -1"
     ; "String.sub \"abc\" 2 2"
     ; "Int.of_string \"12a\""
     ; "Int.of_string \"0x12\""
@@ -166,7 +166,7 @@ let%expect_test "runtime errors are located at the application" =
     ---
     ("Runtime error"
      ("String.get: index -1 out of bounds of a string of length 3" @
-      t.stag:1:8-36))
+      t.stag:1:8-27))
     val x : string
     ---
     ("Runtime error"
