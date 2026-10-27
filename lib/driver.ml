@@ -129,16 +129,10 @@ let file_order ~(files : string list) (program : Typed.Program.t) =
   loop [] |> List.map ~f:(List.nth_exn files)
 ;;
 
-let check_files ?(limits = Limits.unlimited) ?output files =
-  let%bind.Result modules =
-    List.map files ~f:Source_file.parse
-    |> Result.all
-    |> Result.map_error ~f:(fun error -> Error.Source error)
-  in
+let check_modules ?(limits = Limits.unlimited) ?output modules =
   let interpreter = create_interpreter ~limits ~output in
   let%map.Result checked =
     Typecheck.typecheck (Typecheck.create ~interpreter ()) ~program:modules
-    |> Result.map_error ~f:(fun error -> Error.Typecheck error)
   in
   let idents =
     List.concat_map checked.program.sccs ~f:(fun scc ->
@@ -173,4 +167,14 @@ let eval ?(limits = Limits.unlimited) t =
       Treewalk.eval_toplevel t.interpreter ~ident)
   in
   Treewalk.eval t.interpreter
+;;
+
+let check_files ?limits ?output files =
+  let%bind.Result modules =
+    List.map files ~f:Source_file.parse
+    |> Result.all
+    |> Result.map_error ~f:(fun error -> Error.Source error)
+  in
+  check_modules ?limits ?output modules
+  |> Result.map_error ~f:(fun error -> Error.Typecheck error)
 ;;

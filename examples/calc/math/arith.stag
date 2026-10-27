@@ -1,0 +1,2 @@
+let double x = Int.mul 2 x
+let square x = Int.mul x x

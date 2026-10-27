@@ -1,0 +1,7 @@
+(executable
+ (public_name stag-build)
+ (package stag)
+ (name main)
+ (libraries stag_build core core_unix.command_unix core_unix.sys_unix)
+ (preprocess
+  (pps ppx_jane)))

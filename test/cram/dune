@@ -1,2 +1,8 @@
 (cram
  (deps %{bin:stag}))
+
+(cram
+ (applies_to build)
+ (deps
+  %{bin:stag-build}
+  (source_tree ../../examples)))
