@@ -86,6 +86,8 @@ let%expect_test "messages" =
     ; "let x = Int.foo"
     ; "type t['a] = A let x : t = A"
     ; "module M = struct end module M = struct end"
+    ; "let w = .~(let z = 1 in .< z >.)"
+    ; "let f z = .< z >.\nlet u = .~(f 3)"
     ];
   [%expect
     {|
@@ -166,5 +168,132 @@ let%expect_test "messages" =
     1 | module M = struct end module M = struct end
                                      ^
     Error: The module A.M is defined more than once
+    File "a.stag", line 1, characters 8-32:
+    1 | let w = .~(let z = 1 in .< z >.)
+                ^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: Unbound value z, which the spliced code uses: z is a variable of its quote's context, as the z bound at compile time (level -1) can't be used in the quote (level 0); only toplevel functions may be used at other levels
+    File "a.stag", line 1, characters 27-28:
+    1 | let w = .~(let z = 1 in .< z >.)
+                                   ^
+    Note: z is a variable of the code's context here
+    File "a.stag", line 2, characters 8-15:
+    2 | let u = .~(f 3)
+                ^^^^^^^
+    Error: Unbound value z, which the spliced code uses: z is a variable of its quote's context, as the z bound at runtime (level 0) can't be used in the quote (level 1); only toplevel functions may be used at other levels
+    File "a.stag", line 1, characters 13-14:
+    1 | let f z = .< z >.
+                     ^
+    Note: z is a variable of the code's context here
     |}]
+;;
+
+let%expect_test "tabs and wide characters before the span" =
+  let contents = function
+    | "a.stag" -> Some "\tlet x =\t\"\xc3\xa9\" y"
+    | _ -> None
+  in
+  let shown = ref "" in
+  let show loc message =
+    shown := Diagnostic.to_string_hum ~contents (Diagnostic.create ~loc message)
+  in
+  show (loc (1, 15) (1, 16)) "y";
+  print_string (String.substr_replace_all !shown ~pattern:"\t" ~with_:"<tab>");
+  [%expect {|
+    File "a.stag", line 1, characters 15-16:
+    1 | <tab>let x =<tab>"é" y
+        <tab>       <tab>     ^
+    Error: y
+    |}]
+;;
+
+let%expect_test "whole file errors and notes" =
+  let contents = function
+    | "a.stag" -> Some "let x = 1\nlet y = 2"
+    | _ -> None
+  in
+  print_string
+    (Diagnostic.to_string_hum
+       ~contents
+       { (Diagnostic.create ~loc:(loc (1, 0) (1, 0)) "bad file") with
+         whole_file = true
+       });
+  print_string
+    (Diagnostic.to_string_hum
+       ~contents
+       (Diagnostic.create
+          ~loc:(loc (1, 4) (1, 5))
+          "main"
+          ~notes:
+            [ { loc = loc (2, 4) (2, 5); message = "note" }
+            ; { loc = Loc.none; message = "unlocated note" }
+            ]));
+  [%expect {|
+    File "a.stag":
+    Error: bad file
+    File "a.stag", line 1, characters 4-5:
+    1 | let x = 1
+            ^
+    Error: main
+    File "a.stag", line 2, characters 4-5:
+    2 | let y = 2
+            ^
+    Note: note
+    Note: unlocated note
+    |}]
+;;
+
+let%expect_test "test results" =
+  let contents =
+    {x|let%expect_test "error" =
+  print_string "before\n  indented";
+  match 2 with 1 -> ()
+
+let%expect_test "different" =
+  let f x = print_int x; [%expect {| 1 |}] in f 1; f 2; print_string ""
+
+let%expect_test "different, with no output" =
+  let f x = (match x with 0 -> () | _ -> print_int x); [%expect] in f 0; f 1;
+  print_string "x"; [%expect {| x |}];
+  print_int (Int.div 1 0)
+|x}
+  in
+  let driver =
+    Driver.check_files [ { Source_file.path = "a.stag"; contents } ]
+    |> Result.map_error ~f:(fun error -> Error.create_s [%sexp (error : Driver.Error.t)])
+    |> ok_exn
+  in
+  Driver.eval driver |> ok_exn;
+  List.iter (Expect_test_runner.run driver) ~f:(fun result ->
+    List.iter (Diagnostic.of_test_result result) ~f:(fun diagnostic ->
+      print_string
+        (Diagnostic.to_string_hum ~contents:(fun _ -> Some contents) diagnostic)));
+  [%expect {xxx|
+    File "a.stag", line 3, characters 2-22:
+    3 |   match 2 with 1 -> ()
+          ^^^^^^^^^^^^^^^^^^^^
+    Error: Expect test "error" failed: Match failure: no case matches the value 2
+    Output since the last [%expect]:
+      before
+        indented
+    File "a.stag", line 6, characters 34-41:
+    6 |   let f x = print_int x; [%expect {| 1 |}] in f 1; f 2; print_string ""
+                                          ^^^^^^^
+    Error: Expect test "different": this [%expect] was reached with different outputs:
+    Output 1:
+      1
+    Output 2:
+      2
+    File "a.stag", line 9, characters 63-63:
+    9 |   let f x = (match x with 0 -> () | _ -> print_int x); [%expect] in f 0; f 1;
+                                                                       ^
+    Error: Expect test "different, with no output": this [%expect] was reached with different outputs:
+    Output 1:
+      (no output)
+    Output 2:
+      1
+    File "a.stag", line 11, characters 12-25:
+    11 |   print_int (Int.div 1 0)
+                     ^^^^^^^^^^^^^
+    Error: Expect test "different, with no output" failed: Division by zero
+    |xxx}]
 ;;
