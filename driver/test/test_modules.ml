@@ -1,18 +1,17 @@
 open! Import
-open Syntax
-open Helpers
+open Source_helpers
 
 let%expect_test "qualified and unqualified values" =
   check
-    [ module_
-        "M"
-        [ top "x" [] (int 1)
-        ; top "f" [ "y" ] (app (var "add") [ var "y"; var "x" ])
-        ; top "g" [ "y" ] (app (var "M.f") [ var "y" ])
-        ]
-    ; top "a" [] (var "M.x")
-    ; top "b" [] (app (var "M.f") [ int 2 ])
-    ];
+    {|
+module M = struct
+  let x = 1
+  let f y = add y x
+  let g y = M.f y
+end
+let a = M.x
+let b = M.f 2
+|};
   [%expect
     {|
     module M : sig
@@ -27,23 +26,22 @@ let%expect_test "qualified and unqualified values" =
 
 let%expect_test "nested modules" =
   check
-    [ top "root" [] (string "s")
-    ; module_
-        "A"
-        [ top "v" [] (int 1)
-        ; module_
-            "B"
-            [ top "x" [] (bool true)
-            ; top "from_a" [] (var "v")
-            ; top "from_root" [] (var "root")
-            ; top "self" [] (var "B.x")
-            ; top "absolute" [] (var "A.v")
-            ]
-        ; top "y" [] (var "B.x")
-        ]
-    ; top "z" [] (var "A.B.x")
-    ; top "w" [] (var "A.y")
-    ];
+    {|
+let root = "s"
+module A = struct
+  let v = 1
+  module B = struct
+    let x = true
+    let from_a = v
+    let from_root = root
+    let self = B.x
+    let absolute = A.v
+  end
+  let y = B.x
+end
+let z = A.B.x
+let w = A.y
+|};
   [%expect
     {|
     val root : string
@@ -65,15 +63,17 @@ let%expect_test "nested modules" =
 
 let%expect_test "results are in program order, depth first" =
   check
-    [ top "a" [] (int 1)
-    ; module_
-        "A"
-        [ top "b" [] (int 2)
-        ; module_ "B" [ top "c" [] (var "A.d") ]
-        ; top "d" [] (int 3)
-        ]
-    ; top "e" [] (var "A.B.c")
-    ];
+    {|
+let a = 1
+module A = struct
+  let b = 2
+  module B = struct
+    let c = A.d
+  end
+  let d = 3
+end
+let e = A.B.c
+|};
   [%expect
     {|
     val a : int
@@ -90,18 +90,20 @@ let%expect_test "results are in program order, depth first" =
 
 let%expect_test "lexical shadowing" =
   check
-    [ top "x" [] (int 1)
-    ; module_
-        "M"
-        [ top "x" [] (bool true)
-        ; top "y" [] (var "x")
-        ; module_ "N" [ top "z" [] (var "x") ]
-        ; top "local" [ "x" ] (var "x")
-        ; top "local_let" [] (let_ "x" [] unit (var "x"))
-        ; top "qualified_ignores_locals" [ "x" ] (var "M.x")
-        ]
-    ; top "root_x" [] (var "x")
-    ];
+    {|
+let x = 1
+module M = struct
+  let x = true
+  let y = x
+  module N = struct
+    let z = x
+  end
+  let local x = x
+  let local_let = let x = () in x
+  let qualified_ignores_locals x = M.x
+end
+let root_x = x
+|};
   [%expect
     {|
     val x : int
@@ -121,16 +123,22 @@ let%expect_test "lexical shadowing" =
 
 let%expect_test "modules shadow lexically" =
   check
-    [ module_ "N" [ top "x" [] (int 1) ]
-    ; module_
-        "M"
-        [ module_ "N" [ top "x" [] (bool true) ]
-        ; top "inner" [] (var "N.x")
-        ; module_ "K" [ top "inner_too" [] (var "N.x") ]
-        ]
-    ; top "outer" [] (var "N.x")
-    ; top "explicit" [] (var "M.N.x")
-    ];
+    {|
+module N = struct
+  let x = 1
+end
+module M = struct
+  module N = struct
+    let x = true
+  end
+  let inner = N.x
+  module K = struct
+    let inner_too = N.x
+  end
+end
+let outer = N.x
+let explicit = M.N.x
+|};
   [%expect
     {|
     module N : sig
@@ -151,43 +159,72 @@ let%expect_test "modules shadow lexically" =
 ;;
 
 let%expect_test "the rest of a path is looked up only in the module" =
-  check [ top "x" [] (int 1); module_ "M" []; top "y" [] (var "M.x") ];
   check
-    [ module_ "N" [ top "x" [] (int 1) ]
-    ; module_ "M" []
-    ; top "y" [] (var "M.N.x")
-    ];
-  check [ module_ "M" [ module_ "N" [] ]; top "y" [] (var "M.N.K.x") ];
-  check [ module_ "M" [ top "x" [] (int 1) ]; top "y" [] (var "M.x.y") ];
+    {|
+let x = 1
+module M = struct end
+let y = M.x
+|};
   check
-    [ Decl.variant "t" [ "A", [] ]
-    ; module_ "M" []
-    ; top "y" [] (construct "M.A")
-    ];
+    {|
+module N = struct
+  let x = 1
+end
+module M = struct end
+let y = M.N.x
+|};
   check
-    [ Decl.variant "t" [ "A", [] ]
-    ; module_ "M" []
-    ; top "y" [] ~annot:(Ty.con "M.t") (construct "A")
-    ];
+    {|
+module M = struct
+  module N = struct end
+end
+let y = M.N.K.x
+|};
+  (* On the DSL: source reads [M.x.y] as the field [y] of [M.x]. *)
+  check_program
+    (parse_exn
+       {|
+module M = struct
+  let x = 1
+end
+|}
+     @ [ Helpers.top "y" [] (Helpers.var "M.x.y") ]);
   check
-    [ module_ "N" [ Decl.record "r" [ "x", Ty.int ] ]
-    ; module_ "M" []
-    ; top "y" [ "r" ] (field (var "r") "M.N.x")
-    ];
+    {|
+type t = A
+module M = struct end
+let y = M.A
+|};
+  check
+    {|
+type t = A
+module M = struct end
+let y : M.t = A
+|};
+  check
+    {|
+module N = struct
+  type r = {x : int}
+end
+module M = struct end
+let y r = r.M.N.x
+|};
   [%expect
     {|
-    (Not_in_scope M.x)
-    (Unbound_module M.N)
-    (Unbound_module M.N.K)
+    ((Not_in_scope M.x) @ t.stag:4:8-11)
+    ((Unbound_module M.N) @ t.stag:6:8-11)
+    ((Unbound_module M.N.K) @ t.stag:5:8-13)
     (Unbound_module M.x)
-    (Unbound_constructor M.A)
-    (Unbound_type M.t)
-    (Unbound_module M.N)
+    ((Unbound_constructor M.A) @ t.stag:4:8-11)
+    ((Unbound_type M.t) @ t.stag:4:8-11)
+    ((Unbound_module M.N) @ t.stag:6:12-15)
     |}]
 ;;
 
+(* On the DSL: source can't name a value or a type with a capital, as [M]. *)
 let%expect_test "modules and other members have separate namespaces" =
-  check
+  let open Helpers in
+  check_program
     [ module_ "M" [ top "M" [] (int 1) ]
     ; Decl.variant "M" [ "M", [] ]
     ; top "a" [] (var "M.M")
@@ -206,34 +243,19 @@ let%expect_test "modules and other members have separate namespaces" =
 
 let%expect_test "values are order independent and recursive across modules" =
   check
-    [ top "main" [] (tuple [ app (var "A.even") [ int 4 ]; var "B.later" ])
-    ; module_
-        "A"
-        [ top
-            "even"
-            [ "n" ]
-            (app
-               (var "cond")
-               [ app (var "eq") [ var "n"; int 0 ]
-               ; bool true
-               ; app (var "B.odd") [ var "n" ]
-               ])
-        ]
-    ; module_
-        "B"
-        [ top
-            "odd"
-            [ "n" ]
-            (app
-               (var "cond")
-               [ app (var "eq") [ var "n"; int 0 ]
-               ; bool false
-               ; app (var "A.even") [ var "n" ]
-               ])
-        ; top "later" [] (var "C.value")
-        ]
-    ; module_ "C" [ top "value" [] (char 'c') ]
-    ];
+    {|
+let main = (A.even 4, B.later)
+module A = struct
+  let even n = cond (eq n 0) true (B.odd n)
+end
+module B = struct
+  let odd n = cond (eq n 0) false (A.even n)
+  let later = C.value
+end
+module C = struct
+  let value = 'c'
+end
+|};
   [%expect
     {|
     val main : bool * char
@@ -252,29 +274,34 @@ let%expect_test "values are order independent and recursive across modules" =
 
 let%expect_test "SCCs across modules" =
   check
-    [ module_ "A" [ top "f" [ "x" ] (app (var "B.g") [ var "x" ]) ]
-    ; module_ "B" [ top "g" [ "x" ] (seq (var "A.f") (var "x")) ]
-    ; top
-        "use"
-        []
-        (tuple [ app (var "A.f") [ int 1 ]; app (var "B.g") [ bool true ] ])
-    ];
+    {|
+module A = struct
+  let f x = B.g x
+end
+module B = struct
+  let g x = A.f; x
+end
+let use = (A.f 1, B.g true)
+|};
   check
-    [ module_
-        "A"
-        [ top "f" [ "x" ] (app (var "B.g") [ int 1 ])
-        ; top "h" [] (seq (app (var "f") [ bool true ]) (var "B.g"))
-        ]
-    ; module_
-        "B"
-        [ top "g" [ "y" ] (seq (app (var "A.f") [ bool true ]) (var "y")) ]
-    ];
+    {|
+module A = struct
+  let f x = B.g 1
+  let h = f true; B.g
+end
+module B = struct
+  let g y = A.f true; y
+end
+|};
   check
-    [ module_
-        "A"
-        [ top "w" [] (app (var "B.g") [ app (var "id") [ var "id" ] ]) ]
-    ; module_ "B" [ top "g" [ "y" ] (seq (var "A.w") (var "y")) ]
-    ];
+    {|
+module A = struct
+  let w = B.g (id id)
+end
+module B = struct
+  let g y = A.w; y
+end
+|};
   [%expect
     {|
     module A : sig
@@ -302,35 +329,22 @@ let%expect_test "SCCs across modules" =
 
 let%expect_test "qualified and unqualified types, constructors and fields" =
   check
-    [ module_
-        "M"
-        [ Decl.variant "t" [ "A", []; "B", [ Ty.int ] ]
-        ; Decl.record "r" [ "x", Ty.int; "y", Ty.con "t" ]
-        ; top "a" [] (construct "A")
-        ; top
-            "mk"
-            [ "n" ]
-            (record [ "x", var "n"; "y", construct "B" ~args:[ var "n" ] ])
-        ; top "get" [ "r" ] (field (var "r") "x")
-        ; top "annotated" [ "v" ] ~annot:(Ty.con "M.t") (var "v")
-        ]
-    ; top "b" [] (construct "M.B" ~args:[ int 1 ])
-    ; top "r" [] (record [ "M.y", construct "M.A"; "M.x", int 2 ])
-    ; top "get_x" [ "r" ] (field (var "r") "M.x")
-    ; top "annotated" [ "v" ] ~annot:(Ty.con "M.r") (var "v")
-    ; top
-        "matched"
-        [ "v" ]
-        (match_
-           (var "v")
-           [ Pat.construct "M.B" ~args:[ Pat.var "n" ], var "n"
-           ; Pat.construct "M.A", int 0
-           ])
-    ; top
-        "record_pattern"
-        [ "r" ]
-        (match_ (var "r") [ Pat.record [ "M.y", Pat.var "y" ], var "y" ])
-    ];
+    {|
+module M = struct
+  type t = A | B of int
+  type r = {x : int; y : t}
+  let a = A
+  let mk n = {x = n; y = B n}
+  let get r = r.x
+  let annotated v : M.t = v
+end
+let b = M.B 1
+let r = {M.y = M.A; M.x = 2}
+let get_x r = r.M.x
+let annotated v : M.r = v
+let matched v = match v with M.B n -> n | M.A -> 0
+let record_pattern r = match r with {M.y = y} -> y
+|};
   [%expect
     {|
     module M : sig
@@ -352,21 +366,24 @@ let%expect_test "qualified and unqualified types, constructors and fields" =
 
 let%expect_test "types in different modules are distinct" =
   check
-    [ Decl.variant "t" [ "A", [] ]
-    ; module_
-        "M"
-        [ Decl.variant "t" [ "A", [] ]
-        ; top "inner" [] (construct "A")
-        ; top "outer" [] ~annot:(Ty.con "t") (construct "M.A")
-        ]
-    ; top "root" [] (construct "A")
-    ; top "qualified" [] (construct "M.A")
-    ];
+    {|
+type t = A
+module M = struct
+  type t = A
+  let inner = A
+  let outer : t = M.A
+end
+let root = A
+let qualified = M.A
+|};
   check
-    [ Decl.variant "t" [ "A", [] ]
-    ; module_ "M" [ Decl.variant "t" [ "A", [] ] ]
-    ; top "mixed" [] ~annot:(Ty.con "t") (construct "M.A")
-    ];
+    {|
+type t = A
+module M = struct
+  type t = A
+end
+let mixed : t = M.A
+|};
   [%expect
     {|
     type t = A
@@ -377,28 +394,28 @@ let%expect_test "types in different modules are distinct" =
     end
     val root : t
     val qualified : M.t
-    (Unification_error
-     (Type_mismatch (TCon t ()) (TCon M.t ()) (Base_types_not_equal t M.t)))
+    ((Unification_error
+      (Type_mismatch (TCon t ()) (TCon M.t ()) (Base_types_not_equal t M.t)))
+     @ t.stag:6:16-19)
     |}]
 ;;
 
 let%expect_test "types resolve lexically" =
   check
-    [ Decl.variant "t" [ "R", [] ]
-    ; Decl.variant "u" [ "U", [] ]
-    ; module_
-        "M"
-        [ Decl.variant "t" [ "T", [] ]
-        ; module_
-            "N"
-            [ Decl.variant "s" [ "S", [ Ty.con "t"; Ty.con "u" ] ]
-            ; top "s" [] (construct "S" ~args:[ construct "T"; construct "U" ])
-            ]
-        ; top "t" [] ~annot:(Ty.con "t") (construct "T")
-        ; top "root_u" [] ~annot:(Ty.con "u") (construct "U")
-        ]
-    ; top "s" [] (construct "M.N.S" ~args:[ construct "M.T"; construct "U" ])
-    ];
+    {|
+type t = R
+type u = U
+module M = struct
+  type t = T
+  module N = struct
+    type s = S of t * u
+    let s = S (T, U)
+  end
+  let t : t = T
+  let root_u : u = U
+end
+let s = M.N.S (M.T, U)
+|};
   [%expect
     {|
     type t = R
@@ -418,32 +435,17 @@ let%expect_test "types resolve lexically" =
 
 let%expect_test "types are order independent and recursive across modules" =
   check
-    [ top
-        "tree"
-        []
-        (construct
-           "A.Node"
-           ~args:
-             [ construct
-                 "B.Cons"
-                 ~args:[ construct "A.Leaf"; construct "B.Nil" ]
-             ])
-    ; module_
-        "A"
-        [ Decl.variant "tree" [ "Leaf", []; "Node", [ Ty.con "B.forest" ] ] ]
-    ; module_
-        "B"
-        [ Decl.variant
-            "forest"
-            [ "Nil", []; "Cons", [ Ty.con "A.tree"; Ty.con "forest" ] ]
-        ; Decl.alias "trees" (Ty.tuple [ Ty.con "A.tree"; Ty.con "A.tree" ])
-        ]
-    ; top
-        "pair"
-        []
-        ~annot:(Ty.con "B.trees")
-        (tuple [ construct "A.Leaf"; var "tree" ])
-    ];
+    {|
+let tree = A.Node (B.Cons (A.Leaf, B.Nil))
+module A = struct
+  type tree = Leaf | Node of B.forest
+end
+module B = struct
+  type forest = Nil | Cons of A.tree * forest
+  type trees = A.tree * A.tree
+end
+let pair : B.trees = (A.Leaf, tree)
+|};
   [%expect
     {|
     val tree : A.tree
@@ -460,17 +462,26 @@ let%expect_test "types are order independent and recursive across modules" =
 
 let%expect_test "cyclic aliases across modules" =
   check
-    [ module_ "A" [ Decl.alias "t" (Ty.con "B.u") ]
-    ; module_ "B" [ Decl.alias "u" (Ty.arrow Ty.int (Ty.con "A.t")) ]
-    ];
+    {|
+module A = struct
+  type t = B.u
+end
+module B = struct
+  type u = int -> A.t
+end
+|};
   check
-    [ module_ "A" [ Decl.alias "t" (Ty.con "u"); Decl.alias "u" Ty.int ]
-    ; Decl.alias "u" (Ty.con "A.t")
-    ; top "x" [] ~annot:(Ty.con "u") (int 1)
-    ];
+    {|
+module A = struct
+  type t = u
+  type u = int
+end
+type u = A.t
+let x : u = 1
+|};
   [%expect
     {|
-    (Cyclic_type_alias A.t)
+    ((Cyclic_type_alias A.t) @ t.stag:3:7-8)
     module A : sig
       type t = int
       type u = int
@@ -481,36 +492,47 @@ let%expect_test "cyclic aliases across modules" =
 ;;
 
 let%expect_test "builtin types are declared in the root module" =
-  check [ Decl.variant "int" [ "I", [] ] ];
-  check [ Decl.alias "unit" Ty.bool ];
   check
-    [ module_ "M" [ Decl.variant "bool" [ "B", [] ] ]
-    ; Decl.alias "bool" Ty.int
-    ];
+    {|
+type int = I
+|};
   check
-    [ module_
-        "M"
-        [ Decl.variant "unit" [ "U", [] ]
-        ; Decl.alias "int" Ty.bool
-        ; top "u" [] ~annot:(Ty.con "unit") (construct "U")
-        ; top "i" [] ~annot:(Ty.con "int") (bool true)
-        ; module_ "N" [ top "nested" [] ~annot:(Ty.con "unit") (construct "U") ]
-        ]
-    ; top "root" [] ~annot:(Ty.con "unit") unit
-    ; top "qualified" [] ~annot:(Ty.con "M.unit") (construct "M.U")
-    ];
+    {|
+type unit = bool
+|};
   check
-    [ module_
-        "M"
-        [ Decl.variant "unit" [ "U", [] ]
-        ; top "lit" [] ~annot:(Ty.con "unit") unit
-        ]
-    ];
+    {|
+module M = struct
+  type bool = B
+end
+type bool = int
+|};
+  check
+    {|
+module M = struct
+  type unit = U
+  type int = bool
+  let u : unit = U
+  let i : int = true
+  module N = struct
+    let nested : unit = U
+  end
+end
+let root : unit = ()
+let qualified : M.unit = M.U
+|};
+  check
+    {|
+module M = struct
+  type unit = U
+  let lit : unit = ()
+end
+|};
   [%expect
     {|
-    (Duplicate_type int)
-    (Duplicate_type unit)
-    (Duplicate_type bool)
+    ((Duplicate_type int) @ t.stag:2:5-8)
+    ((Duplicate_type unit) @ t.stag:2:5-9)
+    ((Duplicate_type bool) @ t.stag:5:5-9)
     module M : sig
       type unit = U
       type int = bool
@@ -522,50 +544,79 @@ let%expect_test "builtin types are declared in the root module" =
     end
     val root : unit
     val qualified : M.unit
-    (Unification_error
-     (Type_mismatch (TCon M.unit ()) (TCon unit ())
-      (Base_types_not_equal M.unit unit)))
+    ((Unification_error
+      (Type_mismatch (TCon M.unit ()) (TCon unit ())
+       (Base_types_not_equal M.unit unit)))
+     @ t.stag:4:19-21)
     |}]
 ;;
 
 let%expect_test "duplicates are per module" =
   check
-    [ module_
-        "M"
-        [ top "x" [] (int 1)
-        ; Decl.variant "t" [ "A", [] ]
-        ; Decl.record "r" [ "f", Ty.int ]
-        ; module_ "N" []
-        ]
-    ; module_
-        "K"
-        [ top "x" [] (bool true)
-        ; Decl.variant "t" [ "A", [] ]
-        ; Decl.record "r" [ "f", Ty.bool ]
-        ; module_ "N" []
-        ]
-    ; top "x" [] unit
-    ; Decl.variant "t" [ "A", [] ]
-    ; Decl.record "r" [ "f", Ty.unit ]
-    ; module_ "N" []
-    ; top
-        "fields"
-        []
-        (tuple
-           [ field (record [ "M.f", int 1 ]) "M.f"
-           ; field (record [ "K.f", bool true ]) "K.f"
-           ])
-    ];
-  check [ module_ "M" []; module_ "M" [] ];
-  check [ module_ "M" [ module_ "N" []; module_ "N" [] ] ];
-  check [ module_ "M" [ top "x" [] (int 1); top "x" [] (int 2) ] ];
-  check [ module_ "M" [ Decl.variant "t" []; Decl.alias "t" Ty.int ] ];
+    {|
+module M = struct
+  let x = 1
+  type t = A
+  type r = {f : int}
+  module N = struct end
+end
+module K = struct
+  let x = true
+  type t = A
+  type r = {f : bool}
+  module N = struct end
+end
+let x = ()
+type t = A
+type r = {f : unit}
+module N = struct end
+let fields = ({M.f = 1}.M.f, {K.f = true}.K.f)
+|};
   check
-    [ module_ "M" [ Decl.variant "t" [ "A", [] ]; Decl.variant "u" [ "A", [] ] ]
-    ];
-  check [ module_ "M" [ Decl.record "t" [ "x", Ty.int; "x", Ty.int ] ] ];
+    {|
+module M = struct end
+module M = struct end
+|};
   check
-    [ module_ "M" [ Decl.variant "t" ~params:[ Decl.ty "a"; Decl.ty "a" ] [] ] ];
+    {|
+module M = struct
+  module N = struct end
+  module N = struct end
+end
+|};
+  check
+    {|
+module M = struct
+  let x = 1
+  let x = 2
+end
+|};
+  check
+    {|
+module M = struct
+  type t = |
+  type t = int
+end
+|};
+  check
+    {|
+module M = struct
+  type t = A
+  type u = A
+end
+|};
+  check
+    {|
+module M = struct
+  type t = {x : int; x : int}
+end
+|};
+  check
+    {|
+module M = struct
+  type t['a, 'a] = |
+end
+|};
   [%expect
     {|
     module M : sig
@@ -585,90 +636,139 @@ let%expect_test "duplicates are per module" =
     type r = { f : unit }
     module N : sig end
     val fields : int * bool
-    (Duplicate_module M)
-    (Duplicate_module M.N)
-    (Duplicate_toplevel M.x)
-    (Duplicate_type M.t)
-    (Duplicate_constructor M.A)
-    (Duplicate_field M.x)
-    (Duplicate_type_parameter (type_name M.t) (param a))
+    ((Duplicate_module M) @ t.stag:3:7-8)
+    ((Duplicate_module M.N) @ t.stag:4:9-10)
+    ((Duplicate_toplevel M.x) @ t.stag:4:6-7)
+    ((Duplicate_type M.t) @ t.stag:4:7-8)
+    ((Duplicate_constructor M.A) @ t.stag:4:11-12)
+    ((Duplicate_field M.x) @ t.stag:3:21-22)
+    ((Duplicate_type_parameter (type_name M.t) (param a)) @ t.stag:3:13-15)
     |}]
 ;;
 
 let%expect_test "unbound modules and members" =
-  check [ top "v" [] (var "M.x") ];
-  check [ top "v" [] ~annot:(Ty.con "M.t") (int 1) ];
-  check [ top "c" [] (construct "M.A") ];
-  check [ top "f" [ "p" ] (field (var "p") "M.x") ];
-  check [ top "r" [] (record [ "M.x", int 1 ]) ];
-  check [ top "p" [ "v" ] (match_ (var "v") [ Pat.construct "M.A", int 1 ]) ];
   check
-    [ top
-        "p"
-        [ "v" ]
-        (match_ (var "v") [ Pat.record [ "M.x", Pat.any ], int 1 ])
-    ];
-  check [ Decl.variant "t" [ "A", [ Ty.con "M.t" ] ] ];
-  check [ module_ "M" []; top "v" [] (var "M.x") ];
-  check [ module_ "M" []; top "v" [] ~annot:(Ty.con "M.t") (int 1) ];
-  check [ module_ "M" []; top "c" [] (construct "M.A") ];
-  check [ module_ "M" []; top "f" [ "p" ] (field (var "p") "M.x") ];
-  check [ module_ "M" [ top "x" [] (var "y") ] ];
+    {|
+let v = M.x
+|};
+  check
+    {|
+let v : M.t = 1
+|};
+  check
+    {|
+let c = M.A
+|};
+  check
+    {|
+let f p = p.M.x
+|};
+  check
+    {|
+let r = {M.x = 1}
+|};
+  check
+    {|
+let p v = match v with M.A -> 1
+|};
+  check
+    {|
+let p v = match v with {M.x = _} -> 1
+|};
+  check
+    {|
+type t = A of M.t
+|};
+  check
+    {|
+module M = struct end
+let v = M.x
+|};
+  check
+    {|
+module M = struct end
+let v : M.t = 1
+|};
+  check
+    {|
+module M = struct end
+let c = M.A
+|};
+  check
+    {|
+module M = struct end
+let f p = p.M.x
+|};
+  check
+    {|
+module M = struct
+  let x = y
+end
+|};
   [%expect
     {|
-    (Unbound_module M)
-    (Unbound_module M)
-    (Unbound_module M)
-    (Unbound_module M)
-    (Unbound_module M)
-    (Unbound_module M)
-    (Unbound_module M)
-    (Unbound_module M)
-    (Not_in_scope M.x)
-    (Unbound_type M.t)
-    (Unbound_constructor M.A)
-    (Unbound_field M.x)
-    (Not_in_scope y)
+    ((Unbound_module M) @ t.stag:2:8-9)
+    ((Unbound_module M) @ t.stag:2:8-9)
+    ((Unbound_module M) @ t.stag:2:8-9)
+    ((Unbound_module M) @ t.stag:2:12-13)
+    ((Unbound_module M) @ t.stag:2:9-10)
+    ((Unbound_module M) @ t.stag:2:23-24)
+    ((Unbound_module M) @ t.stag:2:24-25)
+    ((Unbound_module M) @ t.stag:2:14-15)
+    ((Not_in_scope M.x) @ t.stag:3:8-11)
+    ((Unbound_type M.t) @ t.stag:3:8-11)
+    ((Unbound_constructor M.A) @ t.stag:3:8-11)
+    ((Unbound_field M.x) @ t.stag:3:12-15)
+    ((Not_in_scope y) @ t.stag:3:10-11)
     |}]
 ;;
 
 let%expect_test "errors name canonical constructors, fields and types" =
   let m =
-    module_
-      "M"
-      [ Decl.variant "t" [ "A", [ Ty.int ] ]
-      ; Decl.record "r" [ "x", Ty.int; "y", Ty.int ]
-      ; Decl.record "s" [ "z", Ty.int ]
-      ; Decl.variant "p" ~params:[ Decl.ty "a" ] []
-      ]
+    {|
+module M = struct
+  type t = A of int
+  type r = {x : int; y : int}
+  type s = {z : int}
+  type p['a] = |
+end
+|}
   in
-  check [ m; top "a" [] (construct "M.A") ];
-  check [ m; top "r" [] (record [ "M.x", int 1 ]) ];
-  check [ m; top "r" [] (record [ "M.x", int 1; "M.y", int 1; "M.x", int 1 ]) ];
-  check [ m; top "r" [] (record [ "M.x", int 1; "M.z", int 1 ]) ];
-  check [ m; top "p" [] ~annot:(Ty.con "M.p") (int 1) ];
-  check [ m; module_ "M2" [ top "x" [] (construct "M.A" ~args:[ bool true ]) ] ];
+  List.iter
+    [ "let a = M.A"
+    ; "let r = {M.x = 1}"
+    ; "let r = {M.x = 1; M.y = 1; M.x = 1}"
+    ; "let r = {M.x = 1; M.z = 1}"
+    ; "let p : M.p = 1"
+    ; "module M2 = struct let x = M.A true end"
+    ]
+    ~f:(fun source -> check (m ^ source));
   [%expect
     {|
-    (Constructor_arity_mismatch (constructor M.A) (expected 1) (got 0))
-    (Missing_field M.y)
-    (Duplicate_field M.x)
-    (Fields_of_different_types (field M.z) (expected_type M.r) (actual_type M.s))
-    (Type_arity_mismatch (type_name M.p) (expected 1) (got 0))
-    (Unification_error
-     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    ((Constructor_arity_mismatch (constructor M.A) (expected 1) (got 0)) @
+     t.stag:8:8-11)
+    ((Missing_field M.y) @ t.stag:8:8-17)
+    ((Duplicate_field M.x) @ t.stag:8:27-30)
+    ((Fields_of_different_types (field M.z) (expected_type M.r)
+      (actual_type M.s))
+     @ t.stag:8:18-21)
+    ((Type_arity_mismatch (type_name M.p) (expected 1) (got 0)) @ t.stag:8:8-11)
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:8:31-35)
     |}]
 ;;
 
 let%expect_test "persistent toplevels of modules are usable in quotes" =
   check
-    [ module_
-        "M"
-        [ top "f" [ "x" ] (app (var "add") [ var "x"; int 1 ])
-        ; top "inner" [] (quote (app (var "f") [ int 1 ]))
-        ]
-    ; top "outer" [] (quote (app (var "M.f") [ int 1 ]))
-    ];
+    {|
+module M = struct
+  let f x = add x 1
+  let inner = .<f 1>.
+end
+let outer = .<M.f 1>.
+|};
   [%expect
     {|
     module M : sig
@@ -680,23 +780,22 @@ let%expect_test "persistent toplevels of modules are usable in quotes" =
 ;;
 
 let%expect_test "non-persistent toplevels are free variables named canonically" =
-  let q name = app (var name) [ unit ] in
   check
-    [ top "n" [] (bool true)
-    ; module_
-        "M"
-        [ top "n" [] (int 5)
-        ; top "q" [ "u" ] (quote (var "n"))
-        ; top "both" [] (quote (tuple [ var "n"; var "M.n" ]))
-        ; top "local" [] (quote (let_ "n" [] unit (var "n")))
-        ; top "root_code" [] (quote (splice (q "q_root")))
-        ]
-    ; top "q" [ "u" ] (quote (var "M.n"))
-    ; top "q_root" [ "u" ] (quote (var "n"))
-    ; top "spliced" [] (quote (splice (q "M.q")))
-    ; top "not_captured" [] (quote (let_ "n" [] unit (splice (q "M.q"))))
-    ; top "captured" [] (quote (let_ "n" [] unit (splice (q "q_root"))))
-    ];
+    {|
+let n = true
+module M = struct
+  let n = 5
+  let q u = .<n>.
+  let both = .<(n, M.n)>.
+  let local = .<let n = () in n>.
+  let root_code = .<.~(q_root ())>.
+end
+let q u = .<M.n>.
+let q_root u = .<n>.
+let spliced = .<.~(M.q ())>.
+let not_captured = .<let n = () in .~(M.q ())>.
+let captured = .<let n = () in .~(q_root ())>.
+|};
   [%expect
     {|
     val n : bool
@@ -716,28 +815,31 @@ let%expect_test "non-persistent toplevels are free variables named canonically" 
 ;;
 
 let%expect_test "splicing code with canonically named free variables" =
+  (* [explicit] and [shorthand] on the DSL: source can't write a qualified name
+     in a splice's substitutions. *)
+  check_program
+    (parse_exn
+       {|
+module M = struct
+  let n = 5
+end
+let implicit = .~.<M.n>.
+let local_does_not_provide n = cond n () (); .~.<M.n>.
+|}
+     @ Helpers.
+         [ top
+             "explicit"
+             []
+             (splice ~subs:[ "M.n", Some (string "s") ] (quote (var "M.n")))
+         ; top "shorthand" [] (splice ~subs:[ "M.n", None ] (quote (var "M.n")))
+         ]);
   check
-    [ module_ "M" [ top "n" [] (int 5) ]
-    ; top "implicit" [] (splice (quote (var "M.n")))
-    ; top
-        "local_does_not_provide"
-        [ "n" ]
-        (seq
-           (app (var "cond") [ var "n"; unit; unit ])
-           (splice (quote (var "M.n"))))
-    ; top
-        "explicit"
-        []
-        (splice ~subs:[ "M.n", Some (string "s") ] (quote (var "M.n")))
-    ; top "shorthand" [] (splice ~subs:[ "M.n", None ] (quote (var "M.n")))
-    ];
-  check
-    [ module_
-        "M"
-        [ top "n" [] (int 5)
-        ; top "as_written" [] (splice ~subs:[ "n", None ] (quote (var "n")))
-        ]
-    ];
+    {|
+module M = struct
+  let n = 5
+  let as_written = .~.<n>..{n}
+end
+|};
   [%expect
     {|
     module M : sig
@@ -747,25 +849,32 @@ let%expect_test "splicing code with canonically named free variables" =
     val local_does_not_provide : bool -> int
     val explicit : string
     val shorthand : int
-    (Unification_error
-     (Row_mismatch
-      (RExtend M.n (PVar (Link Present)) (TVar (Unbound 25 1))
-       (RVar (Unbound 26 1)))
-      (RExtend n (PVar (Unbound 27 1)) (TVar (Link (TCon int ()))) REmpty)
-      (Missing_label M.n)))
+    ((Unification_error
+      (Row_mismatch
+       (RExtend M.n (PVar (Link Present)) (TVar (Unbound 25 1))
+        (RVar (Unbound 26 1)))
+       (RExtend n (PVar (Unbound 27 1)) (TVar (Link (TCon int ()))) REmpty)
+       (Missing_label M.n)))
+     @ t.stag:4:19-30)
     |}]
 ;;
 
 let%expect_test "toplevels of modules used at compile time" =
   check
-    [ module_
-        "M"
-        [ top "n" [] (int 1)
-        ; top "code" [] (quote (app (var "add") [ var "n"; int 1 ]))
-        ]
-    ; top "x" [] (splice (var "M.code"))
-    ];
-  check [ module_ "M" [ top "n" [] (int 1) ]; top "x" [] (splice (var "M.n")) ];
+    {|
+module M = struct
+  let n = 1
+  let code = .<add n 1>.
+end
+let x = .~M.code
+|};
+  check
+    {|
+module M = struct
+  let n = 1
+end
+let x = .~M.n
+|};
   [%expect
     {|
     module M : sig
@@ -773,9 +882,10 @@ let%expect_test "toplevels of modules used at compile time" =
       val code : <int>{M.n : int; ..'a}
     end
     val x : int
-    (Unification_error
-     (Type_mismatch
-      (TCode (inner (TVar (Unbound 20 1))) (context (RVar (Unbound 21 1))))
-      (TCon int ()) Structural_mismatch))
+    ((Unification_error
+      (Type_mismatch
+       (TCode (inner (TVar (Unbound 20 1))) (context (RVar (Unbound 21 1))))
+       (TCon int ()) Structural_mismatch))
+     @ t.stag:5:10-13)
     |}]
 ;;
