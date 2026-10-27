@@ -45,67 +45,117 @@ let create ~path ~enclosing =
   }
 ;;
 
-let create_root () = create ~path:[] ~enclosing:None
+let create_root ~types =
+  let t = create ~path:[] ~enclosing:None in
+  List.iter types ~f:(Hash_set.add t.types);
+  t
+;;
 
-let add_name t names ({ txt = name; loc } : Name.t) ~duplicate =
+let iter_result xs ~f = List.fold_result xs ~init:() ~f:(fun () x -> f x)
+
+let add_unique names ({ txt = name; loc } : Name.t) ~duplicate =
   if Hash_set.mem names name
-  then Error (Typecheck_error.create ~loc (duplicate (canonical_name t name)))
+  then Error (Typecheck_error.create ~loc (duplicate name))
   else Ok (Hash_set.add names name)
 ;;
 
-let add_names t names new_names ~duplicate =
-  List.fold_result new_names ~init:() ~f:(fun () name ->
-    add_name t names name ~duplicate)
+let add_all_unique t names new_names ~duplicate =
+  iter_result new_names ~f:(fun (name, _) ->
+    add_unique names name ~duplicate:(fun name ->
+      duplicate (canonical_name t name)))
 ;;
 
-let rec add t toplevels =
-  let%map.Result added =
-    List.fold_result toplevels ~init:[] ~f:(fun added (toplevel : Toplevel.t) ->
-      Queue.enqueue t.declarations toplevel;
-      let%map.Result inner =
-        match toplevel.txt with
-        | Let (name, _, _, _) ->
-          let%map.Result () =
-            add_name t t.values name ~duplicate:(fun name ->
-              Duplicate_toplevel name)
-          in
-          []
-        | Type { name; kind; _ } ->
-          let%bind.Result () =
-            add_name t t.types name ~duplicate:(fun name -> Duplicate_type name)
-          in
-          let%map.Result () =
-            match kind with
-            | Alias _ | Abstract -> Ok ()
-            | Variant constructors ->
-              add_names
-                t
-                t.constructors
-                (List.map constructors ~f:fst)
-                ~duplicate:(fun name -> Duplicate_constructor name)
-            | Record fields ->
-              add_names
-                t
-                t.fields
-                (List.map fields ~f:fst)
-                ~duplicate:(fun name -> Duplicate_field name)
-          in
-          []
-        | Expect_test _ -> Ok []
-        | Module ({ txt = name; loc }, toplevels) ->
-          let module_ = create ~path:(t.path @ [ name ]) ~enclosing:(Some t) in
-          let%bind.Result inner = add module_ toplevels in
-          (match Hashtbl.add t.modules ~key:name ~data:module_ with
-           | `Ok -> Ok inner
-           | `Duplicate ->
-             Error
-               (Typecheck_error.create
-                  ~loc
-                  (Duplicate_module (canonical_name t name))))
-      in
-      List.rev_append inner ((t, toplevel) :: added))
+(* Checks that adding [toplevels] to [t] keeps names unique, without changing
+   [t]. *)
+let rec check_unique t toplevels =
+  let taken namespace = Hash_set.copy (names t namespace) in
+  let values = taken Value in
+  let types = taken Type in
+  let constructors = taken Constructor in
+  let fields = taken Field in
+  let modules = String.Hash_set.of_list (Hashtbl.keys t.modules) in
+  let add_member names name ~duplicate =
+    add_unique names name ~duplicate:(fun name ->
+      duplicate (canonical_name t name))
   in
-  List.rev added
+  iter_result toplevels ~f:(fun (toplevel : Toplevel.t) ->
+    match toplevel.txt with
+    | Let (name, _, _, _) ->
+      add_member values name ~duplicate:(fun name -> Duplicate_toplevel name)
+    | Type { name; params; kind } ->
+      let%bind.Result () =
+        add_member types name ~duplicate:(fun name -> Duplicate_type name)
+      in
+      let type_name = canonical_name t name.txt in
+      let seen = String.Hash_set.create () in
+      let%bind.Result () =
+        iter_result params ~f:(fun { txt = param; loc } ->
+          add_unique
+            seen
+            { txt = Type_decl.Param.name param; loc }
+            ~duplicate:(fun param ->
+              Duplicate_type_parameter { type_name; param }))
+      in
+      (match kind with
+       | Alias _ | Abstract -> Ok ()
+       | Variant members ->
+         add_all_unique t constructors members ~duplicate:(fun name ->
+           Duplicate_constructor name)
+       | Record members ->
+         add_all_unique t fields members ~duplicate:(fun name ->
+           Duplicate_field name))
+    | Expect_test _ -> Ok ()
+    | Module (name, toplevels) ->
+      let%bind.Result () =
+        add_member modules name ~duplicate:(fun name -> Duplicate_module name)
+      in
+      check_unique
+        (create ~path:(t.path @ [ name.txt ]) ~enclosing:(Some t))
+        toplevels)
+;;
+
+let rec register t toplevels ~declare =
+  List.iter toplevels ~f:(fun (toplevel : Toplevel.t) ->
+    declare t toplevel;
+    Queue.enqueue t.declarations toplevel;
+    let add names (name : Name.t) = Hash_set.add names name.txt in
+    match toplevel.txt with
+    | Let (name, _, _, _) -> add t.values name
+    | Type { name; params = _; kind } ->
+      add t.types name;
+      (match kind with
+       | Alias _ | Abstract -> ()
+       | Variant constructors ->
+         List.iter constructors ~f:(fun (name, _) -> add t.constructors name)
+       | Record fields ->
+         List.iter fields ~f:(fun (name, _) -> add t.fields name))
+    | Expect_test _ -> ()
+    | Module ({ txt = name; loc = _ }, toplevels) ->
+      let module_ = create ~path:(t.path @ [ name ]) ~enclosing:(Some t) in
+      register module_ toplevels ~declare;
+      Hashtbl.add_exn t.modules ~key:name ~data:module_)
+;;
+
+let add t toplevels ~declare =
+  let%map.Result () = check_unique t toplevels in
+  register t toplevels ~declare
+;;
+
+let rec iter_declarations t ~f =
+  let rec from index =
+    if index >= Queue.length t.declarations
+    then Ok ()
+    else (
+      let toplevel : Toplevel.t = Queue.get t.declarations index in
+      let%bind.Result () = f t toplevel in
+      let%bind.Result () =
+        match toplevel.txt with
+        | Module (name, _) -> iter_declarations (enter t name.txt) ~f
+        | Let _ | Type _ | Expect_test _ -> Ok ()
+      in
+      from (index + 1))
+  in
+  from 0
 ;;
 
 let rec find_module t name =

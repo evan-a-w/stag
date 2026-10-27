@@ -545,15 +545,12 @@ module Variant_match = struct
         | Var _ | Any -> true
         | _ -> false)
     in
-    let%bind.Result empty_nominal =
-      if List.is_empty patterns
-      then is_empty_nominal scope scrutinee
-      else Ok false
+    let%bind.Result open_ =
+      match patterns with
+      | [] -> is_empty_nominal scope scrutinee
+      | _ :: _ -> Ok (has_catch_all || List.is_empty tags)
     in
-    if
-      has_catch_all
-      || (List.is_empty tags && not (List.is_empty patterns))
-      || empty_nominal
+    if open_
     then Ok ()
     else (
       let closed =
@@ -1384,11 +1381,10 @@ let check_expect_test t program module_ ~name ~body ~loc =
 
 (* Adds [toplevels] to [module_], declaring their types and toplevels. *)
 let add_declarations (program : Program_env.t) module_ toplevels =
-  let%bind.Result added = Module_scope.add module_ toplevels in
-  List.fold_result
-    added
-    ~init:()
-    ~f:(fun () (module_, (toplevel : Syntax.Toplevel.t)) ->
+  Module_scope.add
+    module_
+    toplevels
+    ~declare:(fun module_ (toplevel : Syntax.Toplevel.t) ->
       match toplevel.txt with
       | Type decl -> Type_env.declare program.type_env module_ decl
       | Let (name, args, annot, expr) ->
@@ -1403,50 +1399,39 @@ let add_declarations (program : Program_env.t) module_ toplevels =
             ; annot
             ; expr
             ; state = Unchecked
-            };
-        Ok ()
-      | Module _ | Expect_test _ -> Ok ())
-;;
-
-(* Every declaration of [module_] and its modules, depth first in order, with
-   the module it is directly in. *)
-let rec all_declarations module_ =
-  List.concat_map
-    (Module_scope.declarations module_)
-    ~f:(fun (toplevel : Syntax.Toplevel.t) ->
-      (module_, toplevel)
-      ::
-      (match toplevel.txt with
-       | Module (name, _) ->
-         all_declarations (Module_scope.enter module_ name.txt)
-       | Let _ | Type _ | Expect_test _ -> []))
+            }
+      | Module _ | Expect_test _ -> ())
 ;;
 
 (* Checks the declarations of [module_] and its modules not yet checked on
-   demand, depth first in order. *)
-let rec check_declarations t (program : Program_env.t) module_ =
-  List.fold_result
-    (Module_scope.declarations module_)
-    ~init:()
-    ~f:(fun () (toplevel : Syntax.Toplevel.t) ->
-      match toplevel.txt with
-      | Type decl ->
-        Type_env.check
-          program.type_env
-          (Module_scope.canonical_name module_ decl.name.txt)
-        |> Result.ignore_m
-      | Let (name, _, _, _) ->
-        let toplevel =
-          Hashtbl.find_exn
-            program.toplevels
-            (Module_scope.canonical_name module_ name.txt)
-        in
-        (match toplevel.state with
-         | Unchecked -> check_toplevel t program toplevel |> Result.ignore_m
-         | In_progress _ | Done _ -> Ok ())
-      | Module (name, _) ->
-        check_declarations t program (Module_scope.enter module_ name.txt)
-      | Expect_test _ -> Ok ())
+   demand, depth first in order, returning the expect tests to check after. *)
+let check_declarations t (program : Program_env.t) module_ =
+  let expect_tests = Queue.create () in
+  let%map.Result () =
+    Module_scope.iter_declarations
+      module_
+      ~f:(fun module_ (toplevel : Syntax.Toplevel.t) ->
+        match toplevel.txt with
+        | Type decl ->
+          Type_env.check
+            program.type_env
+            (Module_scope.canonical_name module_ decl.name.txt)
+          |> Result.ignore_m
+        | Let (name, _, _, _) ->
+          let toplevel =
+            Hashtbl.find_exn
+              program.toplevels
+              (Module_scope.canonical_name module_ name.txt)
+          in
+          (match toplevel.state with
+           | Unchecked -> check_toplevel t program toplevel |> Result.ignore_m
+           | In_progress _ | Done _ -> Ok ())
+        | Expect_test { name; body } ->
+          Queue.enqueue expect_tests (module_, name, body, toplevel.loc);
+          Ok ()
+        | Module _ -> Ok ())
+  in
+  Queue.to_list expect_tests
 ;;
 
 let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
@@ -1462,22 +1447,17 @@ let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
     ; unfinished = Stack.create ()
     }
   in
-  let root = Module_scope.create_root () in
-  let%bind.Result () =
-    add_declarations
-      program_env
-      root
-      (List.map Type_env.builtins ~f:(fun decl ->
-         Located.create (Syntax.Toplevel.Type decl))
-       @ program)
+  let root =
+    Module_scope.create_root
+      ~types:
+        (List.map Type_env.builtins ~f:(fun (decl : Syntax.Type_decl.t) ->
+           decl.name.txt))
   in
-  let%bind.Result () = check_declarations t program_env root in
+  List.iter Type_env.builtins ~f:(Type_env.declare program_env.type_env root);
+  let%bind.Result () = add_declarations program_env root program in
+  let%bind.Result expect_tests = check_declarations t program_env root in
   let%map.Result expect_tests =
-    all_declarations root
-    |> List.filter_map ~f:(fun (module_, (toplevel : Syntax.Toplevel.t)) ->
-      match toplevel.txt with
-      | Expect_test { name; body } -> Some (module_, name, body, toplevel.loc)
-      | Let _ | Type _ | Module _ -> None)
+    expect_tests
     |> List.map ~f:(fun (module_, name, body, loc) ->
       check_expect_test t program_env module_ ~name ~body ~loc)
     |> Result.all
@@ -1509,8 +1489,7 @@ let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
             (Module
                { name; items = signature (Module_scope.enter module_ name) }))
   in
-  { Checked.signature =
-      List.drop (signature root) (List.length Type_env.builtins)
+  { Checked.signature = signature root
   ; program =
       { sccs = Queue.to_list program_env.sccs
       ; expect_tests

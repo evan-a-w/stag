@@ -12,13 +12,9 @@ val builtins : Syntax.Type_decl.t list
 
 val create : Fresh.t -> t
 
-(** Declares [decl], a member of [module_], checking its parameters. Types may
-    refer to each other in any order, once declared. *)
-val declare
-  :  t
-  -> Module_scope.t
-  -> Syntax.Type_decl.t
-  -> (unit, Typecheck_error.t) Result.t
+(** Declares [decl], a member of [module_], whose parameters are distinct.
+    Types may refer to each other in any order, once declared. *)
+val declare : t -> Module_scope.t -> Syntax.Type_decl.t -> unit
 
 (** The checked declaration of the type of canonical name [name]. *)
 val check : t -> string -> (Signature.Type_decl.t, Typecheck_error.t) Result.t
@@ -74,8 +70,8 @@ val field : t -> string -> loc:Loc.t -> (Field.t, Typecheck_error.t) Result.t
 (** Like [check], for a type already checked. *)
 val find_decl_exn : t -> string -> Signature.Type_decl.t
 
-(** Whether the type of canonical name [name] is a declared variant with no
-    constructors. *)
+(** Whether the type of canonical name [name] is a variant with no
+    constructors, checking its declaration. *)
 val is_empty_variant : t -> string -> (bool, Typecheck_error.t) Result.t
 
 (** The type and row variables of the annotations of one toplevel

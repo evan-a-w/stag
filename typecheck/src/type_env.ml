@@ -74,14 +74,9 @@ let find_resolved t module_ namespace path ~loc ~unbound ~find =
 ;;
 
 let find_type t module_ path ~loc =
-  find_resolved
-    t
-    module_
-    Type
-    path
-    ~loc
-    ~unbound:(fun path -> Unbound_type path)
-    ~find:(fun t name ~loc:_ -> Ok (Hashtbl.find_exn t.types name))
+  match%bind.Result Module_scope.find module_ Type path ~loc with
+  | None -> Error (Typecheck_error.create ~loc (Unbound_type path))
+  | Some name -> Ok (Hashtbl.find_exn t.types name)
 ;;
 
 module Annotation_vars = struct
@@ -272,9 +267,9 @@ and elaborate_con
      | None ->
        if List.exists instances ~f:(fun expansion -> not expansion.expanded)
        then error ~loc (Non_regular_recursive_alias decl.name)
-       else expand t decl ~args ~expansions body ~loc)
+       else expand t decl ~args ~expansions body)
 
-and expand t (decl : Decl.t) ~args ~expansions body ~loc =
+and expand t (decl : Decl.t) ~args ~expansions body =
   let knot = Type.Var.create (Fresh.id t.fresh) Generic in
   let expansion =
     { Expansion.args; knot; expanded = false; reached_back = false }
@@ -289,7 +284,11 @@ and expand t (decl : Decl.t) ~args ~expansions body ~loc =
       body
   in
   if expansion.reached_back && not (Expansion.guarded body ~knot)
-  then Error (Typecheck_error.create ~loc (Cyclic_type_alias decl.name))
+  then
+    Error
+      (Typecheck_error.create
+         ~loc:decl.decl.name.loc
+         (Cyclic_type_alias decl.name))
   else (
     knot.state <- Link body;
     expansion.expanded <- true;
@@ -307,21 +306,6 @@ let elaborate t module_ vars expr =
 
 let declare t module_ (decl : Type_decl.t) =
   let name = Module_scope.canonical_name module_ decl.name.txt in
-  let%map.Result () =
-    List.fold_result
-      decl.params
-      ~init:String.Set.empty
-      ~f:(fun seen { txt = param; loc } ->
-        let param = Type_decl.Param.name param in
-        if Set.mem seen param
-        then
-          Error
-            (Typecheck_error.create
-               ~loc
-               (Duplicate_type_parameter { type_name = name; param }))
-        else Ok (Set.add seen param))
-    |> Result.ignore_m
-  in
   let params =
     List.map decl.params ~f:(fun param ->
       match param.txt with
@@ -354,9 +338,7 @@ let define t (decl : Decl.t) =
   let%map.Result kind =
     match decl.decl.kind with
     | Alias body ->
-      let%map.Result body =
-        expand t decl ~args:decl.params ~expansions body ~loc:decl.decl.name.loc
-      in
+      let%map.Result body = expand t decl ~args:decl.params ~expansions body in
       Signature.Type_decl.Kind.Alias body
     | Abstract -> Ok Signature.Type_decl.Kind.Abstract
     | Variant constructors ->

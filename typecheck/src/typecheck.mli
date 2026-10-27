@@ -21,17 +21,20 @@ module Checked : sig
     }
 end
 
-(** Declarations, in any module, may refer to each other in any order. They are
-    checked in order, depth first, except those used before their turn, which
-    are checked on demand: a type declaration once its constructors, fields or
-    emptiness are used, a toplevel binding once used. Each strongly connected
-    component of toplevel bindings is generalized once fully checked, if all its members are
-    syntactic values and it is not recursive through a non-function, and
-    persistent if all are syntactic functions.
+(** Declarations, in any module, may refer to each other in any order. Names
+    are first checked unique: members per module, parameters per type. Then
+    declarations are checked in order, depth first, except those used before
+    their turn, which are checked on demand: a type declaration once its
+    constructors, fields or emptiness are used, a toplevel binding once used.
+    Each strongly connected component of toplevel bindings is generalized once
+    fully checked, if all its members are syntactic values and it is not
+    recursive through a non-function, and persistent if all are syntactic
+    functions.
 
     A toplevel splice is checked, run and replaced by the code it generates,
     inferred anew where it is spliced. Code run at compile time may use any
-    toplevel whose component is checked. *)
+    toplevel whose component is checked. So a splice may run before later type
+    declarations are checked, and if it fails, their errors are not reported. *)
 val typecheck
   :  t
   -> program:Syntax.Program.t

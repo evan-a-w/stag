@@ -137,3 +137,145 @@ type t = A of unbound
     ((Unbound_type unbound) @ t.stag:3:14-21)
     |}]
 ;;
+
+let%expect_test "an alias cycle reached first through an annotation" =
+  check
+    {|
+let f (x : a) = x
+let y = add 1 true
+type a = a
+|};
+  check
+    {|
+let f (x : b) = x
+let y = add 1 true
+type a = b
+type b = a
+|};
+  [%expect
+    {|
+    ((Cyclic_type_alias a) @ t.stag:4:5-6)
+    ((Cyclic_type_alias b) @ t.stag:5:5-6)
+    |}]
+;;
+
+let%expect_test "constructors and fields of later types in generated code" =
+  run
+    ~bodies:[ "x" ]
+    {|
+let x = .~(gen 0)
+let gen n = .<({M.f = M.A 1}).M.f>.
+module M = struct
+  type t = A of int
+  type r = {f : t}
+end
+|};
+  [%expect
+    {|
+    val x : M.t
+    val gen : 'a -> <M.t>{..'b}
+    module M : sig
+      type t = A of int
+      type r = { f : t }
+    end
+    (x/4
+     (Toplevel_splice
+      (code
+       (App (Var (Bound (Toplevel gen/5)) : "int -> <M.t>{}") (Lit (Int 0) : int)
+        : <M.t>{}))
+      (expansion
+       (Field
+        (Record
+         ((((type_name M.r) (name M.f) (index 0))
+           (Construct ((type_name M.t) (name M.A) (index 0))
+            ((Lit (Int 1) : int)) : M.t)))
+         : M.r)
+        ((type_name M.r) (name M.f) (index 0)) : M.t))
+      : M.t))
+    -- evaluated at compile time
+    (gen <fun>)
+    -- evaluated
+    (gen <fun>)
+    (x (M.A 1))
+    |}]
+;;
+
+let%expect_test "an expect test in a module using a later type" =
+  Option.iter
+    (typecheck
+       {x|
+module M = struct
+  let%expect_test "later" =
+    print_int (match N.A 2 with N.A n -> n);
+    [%expect {| 2 |}]
+end
+module N = struct
+  type t = A of int
+end
+|x})
+    ~f:(fun checked ->
+      print_signature checked;
+      let driver = driver checked in
+      Driver.eval ~limits driver |> ok_exn;
+      List.iter (Expect_test_runner.run ~limits driver) ~f:(fun result ->
+        print_s [%sexp (result : Expect_test_runner.Test_result.t)]));
+  [%expect
+    {|
+    module M : sig end
+    module N : sig
+      type t = A of int
+    end
+    ((name (later @ t.stag:3:18-25)) (mismatches ()) (error ()))
+    |}]
+;;
+
+let%expect_test "a type in a module checked before its turn keeps its place" =
+  run
+    {|
+let a = M.N.A
+module M = struct
+  type before = int
+  module N = struct
+    type t = A
+    type u = B of int
+  end
+  type after = { x : N.t }
+end
+|};
+  [%expect
+    {|
+    val a : M.N.t
+    module M : sig
+      type before = int
+      module N : sig
+        type t = A
+        type u = B of int
+      end
+      type after = { x : N.t }
+    end
+    -- evaluated at compile time
+    -- evaluated
+    (a (M.N.A))
+    |}]
+;;
+
+let%expect_test "names are checked unique before anything else" =
+  check
+    {|
+let y = add 1 true
+type t['a, 'a] = int
+|};
+  check
+    {|
+let y = add 1 true
+module M = struct
+  type t = A | A
+end
+module M = struct end
+|};
+  [%expect
+    {|
+    ((Duplicate_type_parameter (type_name t) (param a)) @ t.stag:3:11-13)
+    ((Duplicate_constructor M.A) @ t.stag:4:15-16)
+    |}]
+;;

@@ -996,8 +996,8 @@ type c = c * int
 |};
   [%expect
     {|
-    ((Cyclic_type_alias c) @ t.stag:2:14-15)
-    ((Cyclic_type_alias c) @ t.stag:2:9-10)
+    ((Cyclic_type_alias c) @ t.stag:4:5-6)
+    ((Cyclic_type_alias c) @ t.stag:3:5-6)
     |}]
 ;;
 
