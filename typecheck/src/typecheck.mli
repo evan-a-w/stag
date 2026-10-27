@@ -21,9 +21,11 @@ module Checked : sig
     }
 end
 
-(** Type declarations of every module are checked first. Toplevel bindings, in
-    any module, may refer to each other in any order. Each strongly connected
-    component is generalized once fully checked, if all its members are
+(** Declarations, in any module, may refer to each other in any order. They are
+    checked in order, depth first, except those used before their turn, which
+    are checked on demand: a type declaration once its constructors, fields or
+    emptiness are used, a toplevel binding once used. Each strongly connected
+    component of toplevel bindings is generalized once fully checked, if all its members are
     syntactic values and it is not recursive through a non-function, and
     persistent if all are syntactic functions.
 

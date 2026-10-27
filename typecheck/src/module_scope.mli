@@ -1,20 +1,28 @@
 open! Import
 
-(** A module of a program, as the scope names are resolved in. *)
+(** A module of a program, as the scope names are resolved in. Its members are
+    those of the declarations added to it so far. *)
 type t [@@deriving sexp_of]
 
-(** The root module of [program]. Checks member names are unique per module. *)
-val create : Syntax.Program.t -> (t, Typecheck_error.t) Result.t
+(** The root module, with no members. *)
+val create_root : unit -> t
+
+(** Adds the members of [toplevels], declared in [t], creating their modules.
+    Checks member names are unique per module. Returns the added declarations,
+    depth first in order, with the module each is directly in. *)
+val add
+  :  t
+  -> Syntax.Toplevel.t list
+  -> ((t * Syntax.Toplevel.t) list, Typecheck_error.t) Result.t
+
+(** The declarations added to [t], in order. *)
+val declarations : t -> Syntax.Toplevel.t list
 
 (** The full path of member [name] of [t], joined with [.]. *)
 val canonical_name : t -> string -> string
 
 (** The member module [name] of [t], which must exist. *)
 val enter : t -> string -> t
-
-(** Every toplevel of the program, depth first in program order, with the
-    module it is directly in. *)
-val toplevels : t -> (t * Syntax.Toplevel.t) list
 
 module Namespace : sig
   type t =

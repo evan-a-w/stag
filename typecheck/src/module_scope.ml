@@ -9,137 +9,113 @@ module Namespace = struct
     | Field
 end
 
-module Members = struct
-  type t =
-    { values : String.Set.t
-    ; types : String.Set.t
-    ; constructors : String.Set.t
-    ; fields : String.Set.t
-    ; modules : t String.Map.t
-    ; toplevels : Toplevel.t list
-    }
-
-  let names t : Namespace.t -> _ = function
-    | Value -> t.values
-    | Type -> t.types
-    | Constructor -> t.constructors
-    | Field -> t.fields
-  ;;
-end
-
 type t =
-  { members : Members.t
+  { values : String.Hash_set.t
+  ; types : String.Hash_set.t
+  ; constructors : String.Hash_set.t
+  ; fields : String.Hash_set.t
+  ; modules : t String.Table.t
+  ; declarations : Toplevel.t Queue.t
   ; path : string list
   ; enclosing : t option
   }
 
+let names t : Namespace.t -> _ = function
+  | Value -> t.values
+  | Type -> t.types
+  | Constructor -> t.constructors
+  | Field -> t.fields
+;;
+
 let join path = String.concat path ~sep:"."
 let sexp_of_t t = Sexp.Atom (join t.path)
 let canonical_name t name = join (t.path @ [ name ])
+let enter t name = Hashtbl.find_exn t.modules name
+let declarations t = Queue.to_list t.declarations
 
-let enter t name =
-  { members = Map.find_exn t.members.modules name
-  ; path = t.path @ [ name ]
-  ; enclosing = Some t
+let create ~path ~enclosing =
+  { values = String.Hash_set.create ()
+  ; types = String.Hash_set.create ()
+  ; constructors = String.Hash_set.create ()
+  ; fields = String.Hash_set.create ()
+  ; modules = String.Table.create ()
+  ; declarations = Queue.create ()
+  ; path
+  ; enclosing
   }
 ;;
 
-let add_name names ({ txt = name; loc } : Name.t) ~path ~duplicate =
-  if Set.mem names name
-  then Error (Typecheck_error.create ~loc (duplicate (join (path @ [ name ]))))
-  else Ok (Set.add names name)
+let create_root () = create ~path:[] ~enclosing:None
+
+let add_name t names ({ txt = name; loc } : Name.t) ~duplicate =
+  if Hash_set.mem names name
+  then Error (Typecheck_error.create ~loc (duplicate (canonical_name t name)))
+  else Ok (Hash_set.add names name)
 ;;
 
-let add_names names new_names ~path ~duplicate =
-  List.fold_result new_names ~init:names ~f:(fun names name ->
-    add_name names name ~path ~duplicate)
+let add_names t names new_names ~duplicate =
+  List.fold_result new_names ~init:() ~f:(fun () name ->
+    add_name t names name ~duplicate)
 ;;
 
-let rec members_of_toplevels toplevels ~path
-  : (Members.t, Typecheck_error.t) Result.t
-  =
-  let init =
-    { Members.values = String.Set.empty
-    ; types = String.Set.empty
-    ; constructors = String.Set.empty
-    ; fields = String.Set.empty
-    ; modules = String.Map.empty
-    ; toplevels
-    }
+let rec add t toplevels =
+  let%map.Result added =
+    List.fold_result toplevels ~init:[] ~f:(fun added (toplevel : Toplevel.t) ->
+      Queue.enqueue t.declarations toplevel;
+      let%map.Result inner =
+        match toplevel.txt with
+        | Let (name, _, _, _) ->
+          let%map.Result () =
+            add_name t t.values name ~duplicate:(fun name ->
+              Duplicate_toplevel name)
+          in
+          []
+        | Type { name; kind; _ } ->
+          let%bind.Result () =
+            add_name t t.types name ~duplicate:(fun name -> Duplicate_type name)
+          in
+          let%map.Result () =
+            match kind with
+            | Alias _ | Abstract -> Ok ()
+            | Variant constructors ->
+              add_names
+                t
+                t.constructors
+                (List.map constructors ~f:fst)
+                ~duplicate:(fun name -> Duplicate_constructor name)
+            | Record fields ->
+              add_names
+                t
+                t.fields
+                (List.map fields ~f:fst)
+                ~duplicate:(fun name -> Duplicate_field name)
+          in
+          []
+        | Expect_test _ -> Ok []
+        | Module ({ txt = name; loc }, toplevels) ->
+          let module_ = create ~path:(t.path @ [ name ]) ~enclosing:(Some t) in
+          let%bind.Result inner = add module_ toplevels in
+          (match Hashtbl.add t.modules ~key:name ~data:module_ with
+           | `Ok -> Ok inner
+           | `Duplicate ->
+             Error
+               (Typecheck_error.create
+                  ~loc
+                  (Duplicate_module (canonical_name t name))))
+      in
+      List.rev_append inner ((t, toplevel) :: added))
   in
-  List.fold_result
-    toplevels
-    ~init
-    ~f:(fun (members : Members.t) (toplevel : Toplevel.t) ->
-      match toplevel.txt with
-      | Let (name, _, _, _) ->
-        let%map.Result values =
-          add_name members.values name ~path ~duplicate:(fun name ->
-            Duplicate_toplevel name)
-        in
-        { members with values }
-      | Type { name; kind; _ } ->
-        let%bind.Result types =
-          add_name members.types name ~path ~duplicate:(fun name ->
-            Duplicate_type name)
-        in
-        let members = { members with types } in
-        (match kind with
-         | Alias _ | Abstract -> Ok members
-         | Variant constructors ->
-           let%map.Result constructors =
-             add_names
-               members.constructors
-               (List.map constructors ~f:fst)
-               ~path
-               ~duplicate:(fun name -> Duplicate_constructor name)
-           in
-           { members with constructors }
-         | Record fields ->
-           let%map.Result fields =
-             add_names
-               members.fields
-               (List.map fields ~f:fst)
-               ~path
-               ~duplicate:(fun name -> Duplicate_field name)
-           in
-           { members with fields })
-      | Expect_test _ -> Ok members
-      | Module ({ txt = name; loc }, toplevels) ->
-        let%bind.Result module_ =
-          members_of_toplevels toplevels ~path:(path @ [ name ])
-        in
-        (match Map.add members.modules ~key:name ~data:module_ with
-         | `Ok modules -> Ok { members with modules }
-         | `Duplicate ->
-           Error
-             (Typecheck_error.create
-                ~loc
-                (Duplicate_module (join (path @ [ name ]))))))
-;;
-
-let create program =
-  let%map.Result members = members_of_toplevels program ~path:[] in
-  { members; path = []; enclosing = None }
-;;
-
-let rec toplevels t =
-  List.concat_map t.members.toplevels ~f:(fun (toplevel : Toplevel.t) ->
-    (t, toplevel)
-    ::
-    (match toplevel.txt with
-     | Module (name, _) -> toplevels (enter t name.txt)
-     | Let _ | Type _ | Expect_test _ -> []))
+  List.rev added
 ;;
 
 let rec find_module t name =
-  if Map.mem t.members.modules name
-  then Some (enter t name)
-  else Option.bind t.enclosing ~f:(fun t -> find_module t name)
+  match Hashtbl.find t.modules name with
+  | Some module_ -> Some module_
+  | None -> Option.bind t.enclosing ~f:(fun t -> find_module t name)
 ;;
 
 let rec find_lexically t namespace name =
-  if Set.mem (Members.names t.members namespace) name
+  if Hash_set.mem (names t namespace) name
   then Some (canonical_name t name)
   else Option.bind t.enclosing ~f:(fun t -> find_lexically t namespace name)
 ;;
@@ -167,17 +143,18 @@ let rec find_member t namespace name rest ~path ~written ~loc =
   | [] ->
     Ok
       (Option.some_if
-         (Set.mem (Members.names t.members namespace) name)
+         (Hash_set.mem (names t namespace) name)
          (canonical_name t name))
   | member :: rest ->
     let written = written @ [ name ] in
-    if Map.mem t.members.modules name
-    then find_member (enter t name) namespace member rest ~path ~written ~loc
-    else
-      Error
-        (Typecheck_error.create
-           ~loc:(prefix_loc loc ~path ~written)
-           (Unbound_module (Path.of_list_exn written)))
+    (match Hashtbl.find t.modules name with
+     | Some module_ ->
+       find_member module_ namespace member rest ~path ~written ~loc
+     | None ->
+       Error
+         (Typecheck_error.create
+            ~loc:(prefix_loc loc ~path ~written)
+            (Unbound_module (Path.of_list_exn written))))
 ;;
 
 let find t namespace (path : Path.t) ~loc =

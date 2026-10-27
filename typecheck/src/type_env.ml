@@ -30,6 +30,7 @@ module Decl = struct
     ; name : string
     ; module_ : Module_scope.t
     ; params : Type.arg list
+    ; mutable checked : Signature.Type_decl.t option
     }
 
   let param_map t =
@@ -42,61 +43,45 @@ end
 
 type t =
   { fresh : Fresh.t
-  ; types : Decl.t String.Map.t
-  ; constructors : Constructor.t String.Map.t
-  ; fields : Field.t String.Map.t
-  ; checked : Signature.Type_decl.t String.Map.t
+  ; types : Decl.t String.Table.t
+  ; constructors : Constructor.t String.Table.t
+  ; fields : Field.t String.Table.t
+  ; constructor_types : string String.Table.t
+  ; field_types : string String.Table.t
+    (** The type declaring each constructor and field, whose entry in
+        [constructors] or [fields] is added once it is checked. *)
   }
+
+let create fresh =
+  { fresh
+  ; types = String.Table.create ()
+  ; constructors = String.Table.create ()
+  ; fields = String.Table.create ()
+  ; constructor_types = String.Table.create ()
+  ; field_types = String.Table.create ()
+  }
+;;
 
 let builtins =
   List.map [ "int"; "bool"; "string"; "char"; "unit" ] ~f:(fun name ->
     { Type_decl.name = Located.create name; params = []; kind = Abstract })
 ;;
 
-let find_in map module_ namespace path ~loc ~unbound
-  : (_, Typecheck_error.t) Result.t
-  =
+let find_resolved t module_ namespace path ~loc ~unbound ~find =
   match%bind.Result Module_scope.find module_ namespace path ~loc with
   | None -> Error (Typecheck_error.create ~loc (unbound path))
-  | Some name -> Ok (Map.find_exn map name)
+  | Some name -> find t name ~loc
 ;;
 
 let find_type t module_ path ~loc =
-  find_in t.types module_ Type path ~loc ~unbound:(fun path ->
-    Unbound_type path)
-;;
-
-let find_constructor t module_ ({ txt = path; loc } : Path.t Located.t) =
-  find_in t.constructors module_ Constructor path ~loc ~unbound:(fun path ->
-    Unbound_constructor path)
-;;
-
-let find_field t module_ ({ txt = path; loc } : Path.t Located.t) =
-  find_in t.fields module_ Field path ~loc ~unbound:(fun path ->
-    Unbound_field path)
-;;
-
-let find_canonical map name ~loc ~unbound : (_, Typecheck_error.t) Result.t =
-  match Map.find map name with
-  | Some found -> Ok found
-  | None -> Error (Typecheck_error.create ~loc (unbound (Path.of_string name)))
-;;
-
-let constructor t name ~loc =
-  find_canonical t.constructors name ~loc ~unbound:(fun path ->
-    Unbound_constructor path)
-;;
-
-let field t name ~loc =
-  find_canonical t.fields name ~loc ~unbound:(fun path -> Unbound_field path)
-;;
-
-let find_decl_exn t name = Map.find_exn t.checked name
-
-let is_empty_variant t name =
-  match (find_decl_exn t name).kind with
-  | Variant [] -> true
-  | Variant (_ :: _) | Record _ | Alias _ | Abstract -> false
+  find_resolved
+    t
+    module_
+    Type
+    path
+    ~loc
+    ~unbound:(fun path -> Unbound_type path)
+    ~find:(fun t name ~loc:_ -> Ok (Hashtbl.find_exn t.types name))
 ;;
 
 module Annotation_vars = struct
@@ -320,7 +305,8 @@ let elaborate t module_ vars expr =
     expr
 ;;
 
-let declare module_ (decl : Type_decl.t) ~fresh =
+let declare t module_ (decl : Type_decl.t) =
+  let name = Module_scope.canonical_name module_ decl.name.txt in
   let%map.Result () =
     List.fold_result
       decl.params
@@ -332,25 +318,31 @@ let declare module_ (decl : Type_decl.t) ~fresh =
           Error
             (Typecheck_error.create
                ~loc
-               (Duplicate_type_parameter
-                  { type_name =
-                      Module_scope.canonical_name module_ decl.name.txt
-                  ; param
-                  }))
+               (Duplicate_type_parameter { type_name = name; param }))
         else Ok (Set.add seen param))
     |> Result.ignore_m
   in
   let params =
     List.map decl.params ~f:(fun param ->
       match param.txt with
-      | Ty _ -> Type.ATy (TVar (Type.Var.create (Fresh.id fresh) Generic))
-      | Row _ -> ARow (RVar (Type.Var.create (Fresh.id fresh) Generic)))
+      | Ty _ -> Type.ATy (TVar (Type.Var.create (Fresh.id t.fresh) Generic))
+      | Row _ -> ARow (RVar (Type.Var.create (Fresh.id t.fresh) Generic)))
   in
-  { Decl.decl
-  ; name = Module_scope.canonical_name module_ decl.name.txt
-  ; module_
-  ; params
-  }
+  Hashtbl.add_exn
+    t.types
+    ~key:name
+    ~data:{ Decl.decl; name; module_; params; checked = None };
+  let declares names table =
+    List.iter names ~f:(fun ((member : Name.t), _) ->
+      Hashtbl.add_exn
+        table
+        ~key:(Module_scope.canonical_name module_ member.txt)
+        ~data:name)
+  in
+  match decl.kind with
+  | Alias _ | Abstract -> ()
+  | Variant constructors -> declares constructors t.constructor_types
+  | Record fields -> declares fields t.field_types
 ;;
 
 let define t (decl : Decl.t) =
@@ -383,74 +375,109 @@ let define t (decl : Decl.t) =
       Signature.Type_decl.Kind.Record fields
   in
   let checked =
-    Map.add_exn
-      t.checked
-      ~key:decl.name
-      ~data:
-        { Signature.Type_decl.name = decl.decl.name.txt
-        ; params = decl.params
-        ; kind
-        }
-  in
-  let t = { t with checked } in
-  match kind with
-  | Alias _ | Abstract -> t
-  | Variant constructors ->
-    let result = Type.TCon (decl.name, decl.params) in
-    let constructors =
-      List.foldi
-        constructors
-        ~init:t.constructors
-        ~f:(fun index constructors { name; args } ->
-          let name = canonical_name name in
-          Map.add_exn
-            constructors
-            ~key:name
-            ~data:
-              { Constructor.name; type_name = decl.name; index; args; result })
-    in
-    { t with constructors }
-  | Record fields ->
-    let all_fields =
-      List.map fields ~f:(fun (field : Signature.Field.t) ->
-        canonical_name field.name)
-    in
-    let fields =
-      List.foldi fields ~init:t.fields ~f:(fun index fields { name; ty } ->
-        let name = canonical_name name in
-        Map.add_exn
-          fields
-          ~key:name
-          ~data:
-            { Field.name
-            ; type_name = decl.name
-            ; index
-            ; record = TCon (decl.name, decl.params)
-            ; ty
-            ; all_fields
-            })
-    in
-    { t with fields }
-;;
-
-let create root fresh =
-  let%bind.Result decls =
-    Module_scope.toplevels root
-    |> List.filter_map ~f:(fun (module_, (toplevel : Toplevel.t)) ->
-      match toplevel.txt with
-      | Type decl -> Some (declare module_ decl ~fresh)
-      | Let _ | Module _ | Expect_test _ -> None)
-    |> Result.all
-  in
-  let t =
-    { fresh
-    ; types =
-        List.map decls ~f:(fun (decl : Decl.t) -> decl.name, decl)
-        |> String.Map.of_alist_exn
-    ; constructors = String.Map.empty
-    ; fields = String.Map.empty
-    ; checked = String.Map.empty
+    { Signature.Type_decl.name = decl.decl.name.txt
+    ; params = decl.params
+    ; kind
     }
   in
-  List.fold_result decls ~init:t ~f:define
+  decl.checked <- Some checked;
+  (match kind with
+   | Alias _ | Abstract -> ()
+   | Variant constructors ->
+     let result = Type.TCon (decl.name, decl.params) in
+     List.iteri constructors ~f:(fun index { name; args } ->
+       let name = canonical_name name in
+       Hashtbl.add_exn
+         t.constructors
+         ~key:name
+         ~data:{ Constructor.name; type_name = decl.name; index; args; result })
+   | Record fields ->
+     let all_fields =
+       List.map fields ~f:(fun (field : Signature.Field.t) ->
+         canonical_name field.name)
+     in
+     List.iteri fields ~f:(fun index { name; ty } ->
+       let name = canonical_name name in
+       Hashtbl.add_exn
+         t.fields
+         ~key:name
+         ~data:
+           { Field.name
+           ; type_name = decl.name
+           ; index
+           ; record = TCon (decl.name, decl.params)
+           ; ty
+           ; all_fields
+           }));
+  checked
+;;
+
+let check t name =
+  let decl = Hashtbl.find_exn t.types name in
+  match decl.checked with
+  | Some checked -> Ok checked
+  | None -> define t decl
+;;
+
+let find_decl_exn t name =
+  Option.value_exn (Hashtbl.find_exn t.types name).checked
+;;
+
+let is_empty_variant t name =
+  let%map.Result checked = check t name in
+  match checked.kind with
+  | Variant [] -> true
+  | Variant (_ :: _) | Record _ | Alias _ | Abstract -> false
+;;
+
+(* The entry of the constructor or field of canonical name [name], checking
+   its type. *)
+let find_member t ~types ~members name ~loc ~unbound =
+  match Hashtbl.find types name with
+  | None -> Error (Typecheck_error.create ~loc (unbound (Path.of_string name)))
+  | Some type_name ->
+    let%map.Result (_ : Signature.Type_decl.t) = check t type_name in
+    Hashtbl.find_exn members name
+;;
+
+let constructor t name ~loc =
+  find_member
+    t
+    ~types:t.constructor_types
+    ~members:t.constructors
+    name
+    ~loc
+    ~unbound:(fun path -> Unbound_constructor path)
+;;
+
+let field t name ~loc =
+  find_member
+    t
+    ~types:t.field_types
+    ~members:t.fields
+    name
+    ~loc
+    ~unbound:(fun path -> Unbound_field path)
+;;
+
+let find_constructor t module_ ({ txt = path; loc } : Path.t Located.t) =
+  find_resolved
+    t
+    module_
+    Constructor
+    path
+    ~loc
+    ~unbound:(fun path -> Unbound_constructor path)
+    ~find:constructor
+;;
+
+let find_field t module_ ({ txt = path; loc } : Path.t Located.t) =
+  find_resolved
+    t
+    module_
+    Field
+    path
+    ~loc
+    ~unbound:(fun path -> Unbound_field path)
+    ~find:field
 ;;

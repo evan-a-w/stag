@@ -1,15 +1,27 @@
 open! Import
 
 (** User type declarations, the constructors and fields they define, and the
-    elaboration of surface types. Names are canonical. *)
+    elaboration of surface types. Names are canonical. A declaration is
+    checked on first use of its constructors, fields or checked declaration:
+    elaborating a type only needs its parameters, so checking one declaration
+    never needs another one checked. *)
 type t
 
 (** The builtin types, as declarations of the root module. *)
 val builtins : Syntax.Type_decl.t list
 
-(** Checks the type declarations of every module of the program [root], which
-    may refer to each other in any order. *)
-val create : Module_scope.t -> Fresh.t -> (t, Typecheck_error.t) Result.t
+val create : Fresh.t -> t
+
+(** Declares [decl], a member of [module_], checking its parameters. Types may
+    refer to each other in any order, once declared. *)
+val declare
+  :  t
+  -> Module_scope.t
+  -> Syntax.Type_decl.t
+  -> (unit, Typecheck_error.t) Result.t
+
+(** The checked declaration of the type of canonical name [name]. *)
+val check : t -> string -> (Signature.Type_decl.t, Typecheck_error.t) Result.t
 
 (** The parameters of the declaring type are [Generic] in [args] and [result],
     to be instantiated together on each use. *)
@@ -59,12 +71,12 @@ val constructor
 
 val field : t -> string -> loc:Loc.t -> (Field.t, Typecheck_error.t) Result.t
 
-(** The checked declaration of the type of canonical name [name]. *)
+(** Like [check], for a type already checked. *)
 val find_decl_exn : t -> string -> Signature.Type_decl.t
 
 (** Whether the type of canonical name [name] is a declared variant with no
     constructors. *)
-val is_empty_variant : t -> string -> bool
+val is_empty_variant : t -> string -> (bool, Typecheck_error.t) Result.t
 
 (** The type and row variables of the annotations of one toplevel
     definition: each name stands for the same variable throughout. *)
