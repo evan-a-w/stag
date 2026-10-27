@@ -18,14 +18,18 @@ let error message =
   false
 ;;
 
-let build project =
+let all list ~f = List.map list ~f |> List.for_all ~f:Fn.id
+
+(* Whether a target checks, reporting its errors once. A target is not checked
+   if a library it depends on fails. *)
+let checker project =
   let status = String.Table.create () in
   let rec ok (target : Project.Target.t) =
     let name = Project.Target.name target in
     match Hashtbl.find status name with
     | Some ok -> ok
     | None ->
-      let deps_ok = List.for_all (Project.closure project target) ~f:ok in
+      let deps_ok = all (Project.closure project target) ~f:ok in
       let ok =
         deps_ok
         &&
@@ -38,8 +42,10 @@ let build project =
       Hashtbl.set status ~key:name ~data:ok;
       ok
   in
-  List.map (Project.targets project) ~f:ok |> List.for_all ~f:Fn.id
+  ok
 ;;
+
+let build project = all (Project.targets project) ~f:(checker project)
 
 let check_and_eval project target =
   match Program.check project target with
@@ -71,50 +77,53 @@ let exec project name =
 
 let correction_path path = corrections_dir ^/ path ^ ".corrected"
 
-let test_target project (target : Project.Target.t) =
-  match check_and_eval project target with
-  | None -> false
-  | Some driver ->
-    let paths =
-      List.map target.files ~f:(fun file -> file.path) |> String.Set.of_list
-    in
-    let results =
-      Expect_test_runner.run driver
-      |> List.filter ~f:(fun (result : Expect_test_runner.Test_result.t) ->
-        Set.mem paths result.name.loc.file)
-    in
-    report
-      project
-      (List.filter_map results ~f:(fun result ->
-         Option.map result.error ~f:Diagnostic.of_runtime_error));
-    List.iter target.files ~f:(fun { path; contents } ->
-      let correction = correction_path path in
-      let absolute = Project.root project ^/ correction in
-      match Expect_test_runner.corrected ~path ~contents results with
-      | None ->
-        if Sys_unix.file_exists_exn absolute then Sys_unix.remove absolute
-      | Some corrected ->
-        Option.iter
-          (Text_diff.unified
-             ~old_name:path
-             ~new_name:correction
-             ~old:contents
-             ~new_:corrected)
-          ~f:print_string;
-        Core_unix.mkdir_p (Filename.dirname absolute);
-        Out_channel.write_all absolute ~data:corrected);
-    let failed =
-      List.count results ~f:(Fn.non Expect_test_runner.Test_result.passed)
-    in
-    Out_channel.flush stdout;
-    if failed > 0
-    then
-      eprintf
-        "%s: %d of %d test(s) failed\n%!"
-        (Project.Target.name target)
-        failed
-        (List.length results);
-    failed = 0
+let test_target project ~libraries_ok (target : Project.Target.t) =
+  if not (all (Project.closure project target) ~f:libraries_ok)
+  then false
+  else (
+    match check_and_eval project target with
+    | None -> false
+    | Some driver ->
+      let paths =
+        List.map target.files ~f:(fun file -> file.path) |> String.Set.of_list
+      in
+      let results =
+        Expect_test_runner.run driver
+        |> List.filter ~f:(fun (result : Expect_test_runner.Test_result.t) ->
+          Set.mem paths result.name.loc.file)
+      in
+      report
+        project
+        (List.filter_map results ~f:(fun result ->
+           Option.map result.error ~f:Diagnostic.of_runtime_error));
+      List.iter target.files ~f:(fun { path; contents } ->
+        let correction = correction_path path in
+        let absolute = Project.root project ^/ correction in
+        match Expect_test_runner.corrected ~path ~contents results with
+        | None ->
+          if Sys_unix.file_exists_exn absolute then Sys_unix.remove absolute
+        | Some corrected ->
+          Option.iter
+            (Text_diff.unified
+               ~old_name:path
+               ~new_name:correction
+               ~old:contents
+               ~new_:corrected)
+            ~f:print_string;
+          Core_unix.mkdir_p (Filename.dirname absolute);
+          Out_channel.write_all absolute ~data:corrected);
+      let failed =
+        List.count results ~f:(Fn.non Expect_test_runner.Test_result.passed)
+      in
+      Out_channel.flush stdout;
+      if failed > 0
+      then
+        eprintf
+          "%s: %d of %d test(s) failed\n%!"
+          (Project.Target.name target)
+          failed
+          (List.length results);
+      failed = 0)
 ;;
 
 let test project names =
@@ -140,7 +149,7 @@ let test project names =
     List.iter messages ~f:(fun message -> ignore (error message : bool));
     false
   | Ok targets ->
-    List.map targets ~f:(test_target project) |> List.for_all ~f:Fn.id
+    all targets ~f:(test_target project ~libraries_ok:(checker project))
 ;;
 
 let promote ~root =

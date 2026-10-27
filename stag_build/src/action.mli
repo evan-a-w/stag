@@ -15,7 +15,8 @@ val exec : Project.t -> string -> bool
 (** Runs the expect tests in the files of each library and test named, or all
     of them. A file whose tests fail has its corrected version written to
     [corrections_dir], mirroring its path, and the diff printed; a file whose
-    tests pass has its stale correction removed. *)
+    tests pass has its stale correction removed. Targets depending on a library
+    with errors are not tested. *)
 val test : Project.t -> string list -> bool
 
 (** Moves the corrections in [corrections_dir] over their sources. *)
