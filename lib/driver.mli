@@ -32,6 +32,14 @@ val check_files
   -> Source_file.t list
   -> (t, Error.t) Result.t
 
+(** As [check_files], for modules already parsed: each of [modules] is a
+    [Toplevel.Module], evaluated as [check_files]'s files are. *)
+val check_modules
+  :  ?limits:Limits.t
+  -> ?output:(string -> unit)
+  -> Syntax.Toplevel.t list
+  -> (t, Typecheck_error.t) Result.t
+
 val checked : t -> Typecheck.Checked.t
 val interpreter : t -> Treewalk.t
 

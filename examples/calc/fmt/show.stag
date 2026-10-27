@@ -1,0 +1,4 @@
+let power x n =
+  String.concat (Int.to_string x)
+    (String.concat "^" (String.concat (Int.to_string n)
+      (String.concat " = " (Int.to_string (Math.Power.pow x n)))))
