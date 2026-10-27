@@ -962,21 +962,19 @@ let%expect_test "toplevel splice in a level -1 let" =
                 (in_
                  (App
                   (Var (Bound (Local k/17)) :
-                   "<<int>{}>{-n; x : <int>{}} -> <<int>{}>{-n; x : <int>{}}")
-                  (Quote (Var (Free x) : <int>{}) : "<<int>{}>{-n; x : <int>{}}")
-                  : "<<int>{}>{-n; x : <int>{}}"))
-                : "<<int>{}>{-n; x : <int>{}}"))
+                   "<<int>{}>{x : <int>{}} -> <<int>{}>{x : <int>{}}")
+                  (Quote (Var (Free x) : <int>{}) : "<<int>{}>{x : <int>{}}") :
+                  "<<int>{}>{x : <int>{}}"))
+                : "<<int>{}>{x : <int>{}}"))
               (expansion (Var (Bound (Local x/15)) : <int>{})) : <int>{}))
             : <int>{}))
           (expansion (Lit (Int 1) : int)) : int))
         (where "..'d <= {..'e}"))))
      (recursive false))
-    ((_/18 (<'a>{..'b} -2))
-     (c/16 ("<'a>{n?'b : int; ..'c} where ..'c <= {..'d}" -2)) (deep/5 (int 0))
-     (k/17
-      ("<'a>{n?'b : int; ..'c} -> <'a>{n?'b : int; ..'c} where ..'c <= {..'d}"
-       -2))
-     (n/4 (int 0)) (n/19 (int -1)) (x/15 (<int>{..'a} -1)))
+    ((_/18 ("<'a>{..'b} where ..'c <= {..'b}" -2))
+     (c/16 ("<'a>{n?'b : int; ..'c}" -2)) (deep/5 (int 0))
+     (k/17 ("<'a>{n?'b : int; ..'c} -> <'a>{n?'b : int; ..'c}" -2)) (n/4 (int 0))
+     (n/19 (int -1)) (x/15 (<int>{..'a} -1)))
     |}]
 ;;
 

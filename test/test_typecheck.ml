@@ -108,6 +108,66 @@ let%expect_test "value restriction" =
     |}]
 ;;
 
+let%expect_test "later bindings don't generalize weak variables" =
+  check
+    [ top
+        "f"
+        [ "u" ]
+        (let_
+           "weak"
+           []
+           (app (var "id") [ var "id" ])
+           (let_
+              "through"
+              [ "c" ]
+              (app (var "weak") [ var "c" ])
+              (tuple
+                 [ app (var "through") [ int 1 ]
+                 ; app (var "through") [ bool true ]
+                 ])))
+    ];
+  [%expect
+    {|
+    (Unification_error
+     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    |}]
+;;
+
+let%expect_test "later toplevels don't generalize weak variables" =
+  let weak = top "weak" [] (app (var "id") [ var "id" ]) in
+  let through = top "through" [ "c" ] (app (var "weak") [ var "c" ]) in
+  check [ weak; through ];
+  check [ through; weak ];
+  check
+    [ weak
+    ; through
+    ; top
+        "use"
+        []
+        (tuple
+           [ app (var "through") [ int 1 ]; app (var "through") [ bool true ] ])
+    ];
+  check
+    [ weak
+    ; through
+    ; top "use" [] (app (var "through") [ int 1 ])
+    ; top "after" [] (var "weak")
+    ];
+  [%expect
+    {|
+    val weak : '_a -> '_a
+    val through : '_a -> '_a
+    val through : '_a -> '_a
+    val weak : '_a -> '_a
+    (Unification_error
+     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    val weak : int -> int
+    val through : int -> int
+    val use : int
+    val after : int -> int
+    |}]
+;;
+
 let%expect_test "annotations" =
   check [ top "f" [ "x" ] ~annot:Ty.int (var "x") ];
   check [ top "f" [] (var "id" ~annot:(Ty.arrow Ty.bool Ty.bool)) ];
@@ -208,6 +268,96 @@ let%expect_test "an SCC below an in-progress toplevel is generalized" =
     val c : int -> int
     val d : int -> int
     val e : bool
+    |}]
+;;
+
+let check_source source =
+  match Parser.program ~file:"t.stag" source with
+  | Ok program -> check program
+  | Error error -> print_endline (Parser.Error.to_string error)
+;;
+
+let%expect_test "a recursive group is generalized at once, in any order" =
+  (* The members share variables, which generalizing one at a time would
+     simplify while the others still use them: generalizing [g] first gave its
+     [y] type [<int>{x?'d : int; ..'e}]. The orders give the same schemes, up to which
+     side of an equality is an entry type. *)
+  let both_orders f g =
+    check_source (f ^ "\n" ^ g);
+    print_endline "---";
+    check_source (g ^ "\n" ^ f)
+  in
+  both_orders
+    "let f c d = let _ = .< let x = .~d in .~c >. in g c d"
+    "let g c d = let _ = .< .~c >. in let _ = .< let x = 1 in .~c >. in f c d";
+  [%expect
+    {|
+    val f : <'a>{x?'b : 'c; ..'d} -> <'c>{x?'e : 'c; ..'f} -> 'g where 'b => 'c = int, ..'d <= {..'h}, ..'f <= {..'h}
+    val g : <'a>{x?'b : int; ..'c} -> <'d>{x?'e : 'd; ..'f} -> 'g where 'b => 'd = int, ..'c <= {..'h}, ..'f <= {..'h}
+    ---
+    val g : <'a>{x?'b : int; ..'c} -> <'d>{x?'e : 'd; ..'f} -> 'g where 'b => int = 'd, ..'c <= {..'h}, ..'f <= {..'h}
+    val f : <'a>{x?'b : 'c; ..'d} -> <'c>{x?'e : 'c; ..'f} -> 'g where 'b => int = 'c, ..'d <= {..'h}, ..'f <= {..'h}
+    |}];
+  both_orders
+    "let f c = let _ = g c in .< let x = 1 in .~c >."
+    "let g c y = cond true (f c) .< let x = .~y in .~c >.";
+  [%expect
+    {|
+    val f : <'a>{x?'b : 'c; ..'d} -> <'a>{..'e} where 'b => 'c = int, ..'d <= {..'e}
+    val g : <'a>{x?'b : 'c; ..'d} -> <'c>{x?'e : 'c; ..'f} -> <'a>{..'g} where 'b => 'c = int, ..'d <= {..'g}, ..'f <= {..'g}
+    ---
+    val g : <'a>{x?'b : int; ..'c} -> <'d>{x?'e : 'd; ..'f} -> <'a>{..'g} where 'b => int = 'd, ..'c <= {..'g}, ..'f <= {..'g}
+    val f : <'a>{x?'b : int; ..'c} -> <'a>{..'d} where 'b => int = 'e, ..'c <= {..'d}
+    |}]
+;;
+
+let%expect_test "a kept bound is added by instances of every group member" =
+  (* The scheme of the group keeps an equality on [w]'s weak presence of [x]
+     with ['a] of [g] and ['a] of [f]. [f]'s instance must add it again, or
+     the first [r] would be accepted with ill-typed generated code. In the
+     signatures, [w] has it from the generalization, [r]'s instance of [g] and
+     [q]'s of [f]. *)
+  let prelude =
+    {|let w = let k c = c in id k
+let pre d e = .< let y = .~d in let x = .~e in .~(w .<2>.) >.|}
+  in
+  let f = "let f d c = .< let y = .~d in let x = (.~(g ()), y) in .~(w c) >." in
+  let g = "let g u = let _ = f in .< let ident z = z in ident >." in
+  let use = "let r = .~(f .< true >. .< match x with | (a, b) -> b >.)" in
+  List.iter
+    [ [ f; g ]; [ g; f ] ]
+    ~f:(fun group ->
+      check_source (String.concat ~sep:"\n" ((prelude :: group) @ [ use ]));
+      print_endline "---");
+  check_source
+    (String.concat
+       ~sep:"\n"
+       [ prelude
+       ; f
+       ; g
+       ; "let r = g ()"
+       ; "let t = .~r true"
+       ; "let q = f .< false >."
+       ]);
+  [%expect
+    {|
+    ((Unification_error
+      (Type_mismatch (TCon bool ()) (TCon int ())
+       (Base_types_not_equal bool int)))
+     @ t.stag:5:24-56)
+    ---
+    ((Unification_error
+      (Type_mismatch (TCon bool ()) (TCon int ())
+       (Base_types_not_equal bool int)))
+     @ t.stag:5:24-56)
+    ---
+    val w : <int>{x?'_a : '_b; y?'_c : '_d; ..'_e} -> <int>{x?'_a : '_b; y?'_c : '_d; ..'_e} where '_a => '_b = ('_f -> '_f) * bool, '_a => '_b = (bool -> bool) * '_g, '_a => '_b = ('_h -> '_h) * '_i, '_c => '_d = bool, '_c => '_d = '_g, '_c => '_d = '_i, ..'_e <= {..'_j}, ..'_e <= {..'_k}
+    val pre : <'_a>{y?'b : '_a; ..'c} -> <'_d>{x?'e : '_d; y?'f : '_a; ..'g} -> <int>{..'h} where ..'c <= {..'h}, ..'g <= {..'h}, ..'_i <= {..'h}, ..'_i <= {..'_j}, ..'_i <= {..'_k}
+    val f : <'a>{y?'b : 'a; ..'c} -> <int>{x?'_d : '_e; y?'_f : '_g; ..'_h} -> <int>{..'i} where '_f => '_g = 'a, '_d => '_e = ('j -> 'j) * 'a, ..'c <= {..'i}, '_d => '_e = ('_k -> '_k) * bool, '_d => '_e = (bool -> bool) * '_l, '_d => '_e = ('_m -> '_m) * '_n, '_f => '_g = bool, '_f => '_g = '_l, '_f => '_g = '_n, ..'_h <= {..'_o}, ..'_h <= {..'_p}, ..'_h <= {..'i}
+    val g : unit -> <'a -> 'a>{x?'b : ('a -> 'a) * 'c; y?'d : 'c; ..'e} where '_f => '_g = ('a -> 'a) * 'c, '_h => '_i = 'c, ..'e <= {..'j}, '_f => '_g = ('_k -> '_k) * bool, '_f => '_g = (bool -> bool) * '_l, '_f => '_g = ('_m -> '_m) * '_n, '_h => '_i = bool, '_h => '_i = '_l, '_h => '_i = '_n, ..'_o <= {..'j}, ..'_o <= {..'_p}, ..'_o <= {..'_q}
+    val r : <bool -> bool>{}
+    val t : bool
+    val q : <int>{x?'_a : '_b; y?'_c : '_d; ..'_e} -> <int>{..'_f} where '_a => '_b = ('_g -> '_g) * bool, '_a => '_b = (bool -> bool) * '_h, '_a => '_b = ('_i -> '_i) * '_j, '_c => '_d = bool, '_c => '_d = '_h, '_c => '_d = '_j, ..'_e <= {..'_f}, ..'_e <= {..'_k}
     |}]
 ;;
 
@@ -661,10 +811,10 @@ let%expect_test "spliced code that may use a name propagates it as such" =
     ];
   [%expect
     {|
-    val twice : <'a>{x?'b : bool; ..'c} -> <'a>{x?'b : bool; ..'d} where ..'c <= {x?'b : bool; ..'d}, ..'c <= {..'e}
+    val twice : <'a>{x?'b : bool; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => bool = 'e, ..'c <= {x?'d : 'e; ..'f}
     val propagates : <int>{x : bool; ..'_a}
-    val not_used : <int>{x?'_a : bool; ..'_b}
-    val instance : <'a>{x?'b : bool; ..'c} -> <'a>{x?'b : bool; ..'d} where ..'c <= {x?'b : bool; ..'d}, ..'c <= {..'e}
+    val not_used : <int>{x?'_a : '_b; ..'_c} where '_d <= '_a, '_d => bool = '_b
+    val instance : <'a>{x?'b : bool; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => bool = 'e, ..'c <= {x?'d : 'e; ..'f}
     val direct_use : <'a>{x?'b : bool; ..'c} -> <'d>{x : 'd; ..'e} where ..'c <= {y?'f : 'a; ..'g}, ..'g <= {x : 'd; ..'e}
     |}]
 ;;
@@ -720,7 +870,7 @@ let%expect_test "names bound at a later level are absent from spliced code" =
     val inner_splice : <<'a>{z?'b : int; ..'c}>{-z; ..'d} -> <<'a>{..'e}>{..'f} where ..'c <= {..'e}, ..'d <= {..'f}
     val uses_z : <<int>{..'_a}>{..'_b}
     (Unification_error
-     (Row_mismatch (RExtend z Absent (TVar (Unbound 44 1)) (RVar (Unbound 45 1)))
+     (Row_mismatch (RExtend z Absent (TVar (Unbound 43 1)) (RVar (Unbound 44 1)))
       (RExtend z (PVar (Link Present)) (TVar (Unbound 52 1))
        (RVar (Unbound 53 1)))
       (Presence_mismatch z)))
@@ -856,7 +1006,7 @@ let%expect_test "mutually recursive staged functions" =
        (RVar
         (Link
          (RExtend z (PVar (Link Present)) (TVar (Link (TCon int ())))
-          (RVar (Unbound 94 1))))))
+          (RVar (Unbound 93 1))))))
       (Missing_label y)))
     |}]
 ;;
@@ -889,10 +1039,9 @@ let%expect_test "toplevel splices drop names spliced code only may use" =
     |}]
 ;;
 
-let%expect_test "presence approximation" =
-  (* [p <= q] on unknown presences is solved as [p = q], so using [x] in a
-     quote after splicing code that may use [x] makes the code use [x], while
-     using it before does not. *)
+let%expect_test "using a name before or after splicing code that may use it" =
+  (* Splicing [c] into a quote that uses [x] only bounds [c]'s [x] by a used
+     one, which decides nothing, whichever comes first. *)
   let binds_x c = quote (let_ "x" [] (int 1) (splice c)) in
   let closed = top "closed" [] ~annot:(Ty.code Ty.int) (quote (int 1)) in
   let uses_x_then_splices =
@@ -931,14 +1080,302 @@ let%expect_test "presence approximation" =
   [%expect
     {|
     val closed : <int>{}
-    val uses_x_then_splices : <int>{x?'a : int; ..'b} -> <int>{x?'a : int; ..'b} where ..'b <= {x : int; ..'c}, ..'b <= {..'d}
-    val splices_then_uses_x : <int>{x : int; ..'a} -> <int>{x : int; ..'a} where ..'a <= {x : int; ..'b}, ..'a <= {..'c}
-    val uses_x_then_splices_closed : <int>{-x}
+    val uses_x_then_splices : <int>{x?'a : int; ..'b} -> <int>{x?'a : int; ..'b} where ..'b <= {x : int; ..'c}
+    val splices_then_uses_x : <int>{x?'a : int; ..'b} -> <int>{x?'a : int; ..'b} where ..'b <= {x : int; ..'c}
+    val uses_x_then_splices_closed : <int>{}
+    val closed : <int>{}
+    val splices_then_uses_x : <int>{x?'a : int; ..'b} -> <int>{x?'a : int; ..'b} where ..'b <= {x : int; ..'c}
+    val splices_then_uses_x_closed : <int>{}
+    |}]
+;;
+
+let%expect_test "presence constraints are solved in any order" =
+  let closeit =
+    top_let ("closeit", [ typed "c" (Ty.code Ty.int) ], None, unit)
+  in
+  let g =
+    top
+      "g"
+      [ "d" ]
+      (seq (quote (let_ "x" [] (int 1) (splice (var "d")))) (var "d"))
+  in
+  let use_x = quote (app (var "add") [ splice (var "c2"); var "x" ]) in
+  let close = app (var "closeit") [ var "c" ] in
+  let after_close = let_ "c2" [] (app (var "g") [ var "c" ]) use_x in
+  let f body = top "f" [ "c" ] body in
+  (* [g] bounds [c]'s [x] by its quote's, and [use_x] makes the quote's [x]
+     used, while [closeit] makes [c]'s absent: all orders agree. *)
+  List.iter
+    [ "close first", seq close after_close
+    ; ( "close last"
+      , let_
+          "c2"
+          []
+          (app (var "g") [ var "c" ])
+          (let_ "r" [] use_x (seq close (var "r"))) )
+    ; ( "close between"
+      , let_ "c2" [] (app (var "g") [ var "c" ]) (seq close use_x) )
+    ]
+    ~f:(fun (name, body) ->
+      print_endline name;
+      check [ closeit; g; f body ]);
+  [%expect
+    {|
+    close first
+    val closeit : <int>{} -> unit
+    val g : <'a>{x?'b : int; ..'c} -> <'a>{x?'b : int; ..'c}
+    val f : <int>{} -> <int>{x : int; ..'a}
+    close last
+    val closeit : <int>{} -> unit
+    val g : <'a>{x?'b : int; ..'c} -> <'a>{x?'b : int; ..'c}
+    val f : <int>{} -> <int>{x : int; ..'a}
+    close between
+    val closeit : <int>{} -> unit
+    val g : <'a>{x?'b : int; ..'c} -> <'a>{x?'b : int; ..'c}
+    val f : <int>{} -> <int>{x : int; ..'a}
+    |}]
+;;
+
+let twice =
+  top
+    "twice"
+    [ "c" ]
+    (seq
+       (quote (let_ "x" [] (bool true) (splice (var "c"))))
+       (quote (splice (var "c"))))
+;;
+
+let closeit = top_let ("closeit", [ typed "c" (Ty.code Ty.int) ], None, unit)
+let uses_x = quote (app (var "cond") [ var "x"; int 1; int 2 ])
+
+let needx =
+  top_let
+    ( "needx"
+    , [ typed "e" (Ty.code ~entries:[ "x", Ty.int ] Ty.int) ]
+    , None
+    , unit )
+;;
+
+(* [h]'s argument may use [x] only if [e] does. *)
+let local_bounded_by_outer ~e ~in_ =
+  let_
+    "h"
+    [ "d" ]
+    (seq
+       (quote (let_ "x" [] (int 1) (splice (var "d"))))
+       (app (var "cond") [ bool true; quote (splice (var "d")); var e ]))
+    in_
+;;
+
+let%expect_test
+    "generalization does not depend on when outer presences are known"
+  =
+  let uses =
+    seq
+      (app (var "h") [ quote (app (var "add") [ var "x"; int 1 ]) ])
+      (seq (app (var "h") [ var "k" ]) (app (var "closeit") [ var "k" ]))
+  in
+  let needx_e = app (var "needx") [ var "e" ] in
+  check
+    [ closeit
+    ; needx
+    ; top
+        "known_before"
+        [ "e"; "k" ]
+        (seq needx_e (local_bounded_by_outer ~e:"e" ~in_:uses))
+    ; top
+        "known_after"
+        [ "e"; "k" ]
+        (local_bounded_by_outer ~e:"e" ~in_:(seq uses needx_e))
+    ; top "never_known" [ "e"; "k" ] (local_bounded_by_outer ~e:"e" ~in_:uses)
+    ];
+  [%expect
+    {|
+    val closeit : <int>{} -> unit
+    val needx : <int>{x : int} -> unit
+    val known_before : <int>{x : int} -> <int>{} -> unit
+    val known_after : <int>{x : int} -> <int>{} -> unit
+    val never_known : <int>{x : int; ..'a} -> <int>{} -> unit
+    |}]
+;;
+
+let%expect_test "instances of a scheme bounded by an outer presence" =
+  (* Each use of [h] constrains [e] and [h]'s scheme keeps the bound. *)
+  let program in_ = top "f" [ "e" ] (local_bounded_by_outer ~e:"e" ~in_) in
+  check
+    [ closeit
+    ; program
+        (seq
+           (app (var "h") [ quote (int 1) ])
+           (app (var "h") [ quote (int 2) ]))
+    ];
+  check
+    [ closeit
+    ; program
+        (seq
+           (app (var "h") [ quote (int 1) ])
+           (app (var "h") [ quote (app (var "add") [ var "x"; int 1 ]) ]))
+    ];
+  check
+    [ closeit
+    ; program
+        (seq
+           (app (var "closeit") [ var "e" ])
+           (app (var "h") [ quote (app (var "add") [ var "x"; int 1 ]) ]))
+    ];
+  check
+    [ closeit
+    ; needx
+    ; program
+        (seq
+           (app (var "needx") [ var "e" ])
+           (seq
+              (app (var "h") [ quote (int 1) ])
+              (app (var "h") [ quote (app (var "add") [ var "x"; int 1 ]) ])))
+    ];
+  [%expect
+    {|
+    val closeit : <int>{} -> unit
+    val f : <int>{x?'a : 'b; ..'c} -> <int>{x?'a : 'b; ..'c}
+    val closeit : <int>{} -> unit
+    val f : <int>{x : int; ..'a} -> <int>{x : int; ..'a}
     (Unification_error
      (Row_mismatch
+      (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
+       (RVar (Link (RVar (Unbound 58 1)))))
       (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-       (RVar (Link (RVar (Unbound 50 1)))))
-      REmpty (Missing_label x)))
+       (RVar (Unbound 67 1)))
+      (Presence_mismatch x)))
+    val closeit : <int>{} -> unit
+    val needx : <int>{x : int} -> unit
+    val f : <int>{x : int} -> <int>{x : int}
+    |}]
+;;
+
+let%expect_test "bounds and presences no instance can use are dropped" =
+  (* [h]'s instance in [used] bounds [e]'s context by a row used nowhere else,
+     and in [spliced] gives presences of [x] the spliced code doesn't use. *)
+  check_source
+    {|let closeit (c : <int>{}) = ()
+let unused e = let h c = .< let _ = .~e in .~c >. in e
+let used e = let h c = .< let _ = .~e in .~c >. in let _ = h .< 1 >. in e
+let partial e = let h c = .< let _ = .~e in .~c >. in let _ = h .< 1 >. in h
+let lh e = .< let h d = let _ = .< let x = 1 in .~d >. in cond true .< .~d >. e in h >.
+let not_spliced e k =
+  let r = .< let h d = let _ = .< let x = 1 in .~d >. in cond true .< .~d >. e in 0 >. in
+  let _ = closeit k in r
+let spliced e k =
+  let r = .< let h d = let _ = .< let x = 1 in .~d >. in cond true .< .~d >. e in .~k >. in
+  let _ = closeit k in r|};
+  [%expect
+    {|
+    val closeit : <int>{} -> unit
+    val unused : <'a>{_?'b : 'a; ..'c} -> <'a>{_?'b : 'a; ..'c}
+    val used : <'a>{_?'b : 'a; ..'c} -> <'a>{_?'b : 'a; ..'c}
+    val partial : <'a>{_?'b : 'a; ..'c} -> <'d>{_?'e : 'a; ..'f} -> <'d>{..'g} where ..'c <= {..'g}, ..'f <= {..'g}
+    val lh : 'a -> <<'b>{x?'c : int; ..'d} -> <'b>{x?'e : 'f; ..'g}>{e : <'b>{x?'e : 'f; ..'g}; ..'h} where 'c <= 'e, 'c => int = 'f, ..'d <= {x?'e : 'f; ..'g}
+    val not_spliced : 'a -> <int>{} -> <int>{e : <'b>{x?'c : 'd; ..'e}; ..'f}
+    val spliced : 'a -> <int>{} -> <int>{e : <'b>{x?'c : 'd; ..'e}; ..'f}
+    |}]
+;;
+
+let%expect_test "a witness left out still constrains through the scheme" =
+  (* [h c]'s context has [e]'s entries through a row of [h]'s type, so the
+     witness of [e]'s kept bound adds nothing. *)
+  let f =
+    {|let closeit (c : <int>{}) = ()
+let f e = let h c = .< let _ = .~e in .~c >. in h .< 1 >.
+let partial e = let h c = .< let _ = .~e in .~c >. in let _ = h .< 1 >. in h
+|}
+  in
+  check_source f;
+  check_source (f ^ "let ok = .< let y = 2 in .~(f .< y >.) >.");
+  check_source (f ^ "let bad = closeit (f .< y >.)");
+  check_source (f ^ "let bad = closeit (partial .< y >. .< 3 >.)");
+  [%expect
+    {|
+    val closeit : <int>{} -> unit
+    val f : <'a>{_?'b : 'a; ..'c} -> <int>{..'d} where ..'c <= {..'d}
+    val partial : <'a>{_?'b : 'a; ..'c} -> <'d>{_?'e : 'a; ..'f} -> <'d>{..'g} where ..'c <= {..'g}, ..'f <= {..'g}
+    val closeit : <int>{} -> unit
+    val f : <'a>{_?'b : 'a; ..'c} -> <int>{..'d} where ..'c <= {..'d}
+    val partial : <'a>{_?'b : 'a; ..'c} -> <'d>{_?'e : 'a; ..'f} -> <'d>{..'g} where ..'c <= {..'g}, ..'f <= {..'g}
+    val ok : <int>{..'_a}
+    ((Unification_error
+      (Row_mismatch REmpty
+       (RExtend y (PVar (Link Present)) (TVar (Unbound 108 1))
+        (RVar (Unbound 109 1)))
+       (Missing_label y)))
+     @ t.stag:4:18-29)
+    ((Unification_error
+      (Row_mismatch REmpty
+       (RExtend y (PVar (Link Present)) (TVar (Unbound 116 1))
+        (RVar (Unbound 117 1)))
+       (Missing_label y)))
+     @ t.stag:4:18-43)
+    |}]
+;;
+
+let%expect_test "presence bounds of polymorphic functions" =
+  (* [twice]'s argument may use [x] only if its result does: each use decides
+     differently. *)
+  check
+    [ twice
+    ; closeit
+    ; top "arg_uses_x" [] (app (var "twice") [ uses_x ])
+    ; top
+        "result_closed"
+        [ "c" ]
+        (seq (app (var "closeit") [ app (var "twice") [ var "c" ] ]) (var "c"))
+    ; top_let
+        ( "arg_closed"
+        , [ typed "c" (Ty.code Ty.int) ]
+        , None
+        , app (var "twice") [ var "c" ] )
+    ];
+  [%expect
+    {|
+    val twice : <'a>{x?'b : bool; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => bool = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val closeit : <int>{} -> unit
+    val arg_uses_x : <int>{x : bool; ..'_a}
+    val result_closed : <int>{-x; ..'a} -> <int>{-x; ..'a} where ..'a <= {}
+    val arg_closed : <int>{} -> <int>{x?'a : 'b; ..'c}
+    |}]
+;;
+
+let%expect_test "conflicting presence constraints" =
+  check
+    [ twice
+    ; closeit
+    ; top "conflict" [] (app (var "closeit") [ app (var "twice") [ uses_x ] ])
+    ];
+  check
+    [ twice
+    ; closeit
+    ; top
+        "conflict_later"
+        [ "c" ]
+        (let_
+           "r"
+           []
+           (app (var "twice") [ var "c" ])
+           (seq (app (var "closeit") [ var "r" ]) (quote (splice (var "c")))))
+    ; top "use" [] (app (var "conflict_later") [ uses_x ])
+    ];
+  [%expect
+    {|
+    (Unification_error
+     (Row_mismatch REmpty
+      (RExtend x (PVar (Link Present)) (TVar (Link (TCon bool ())))
+       (RVar (Unbound 55 1)))
+      (Missing_label x)))
+    (Unification_error
+     (Row_mismatch
+      (RExtend x (PVar (Link Absent)) (TVar (Link (TCon bool ())))
+       (RVar (Link (RVar (Link (RVar (Unbound 73 1)))))))
+      (RExtend x (PVar (Link Present)) (TVar (Link (TCon bool ())))
+       (RVar (Unbound 91 1)))
+      (Presence_mismatch x)))
     |}]
 ;;
 
@@ -953,5 +1390,267 @@ let%expect_test "references to toplevels in quotes don't join their components" 
     val b : <'a>{b : 'a; ..'b} * int
     val b : <'a>{b : 'a; ..'b} * int
     val a : <'a>{b : 'a; ..'b}
+    |}]
+;;
+
+let tw =
+  top
+    "tw"
+    [ "c" ]
+    (seq
+       (quote (let_ "x" [] (int 1) (splice (var "c"))))
+       (quote (splice (var "c"))))
+;;
+
+let needy =
+  top_let
+    ( "needy"
+    , [ typed "e" (Ty.code ~entries:[ "y", Ty.int ] ~tail:"r" Ty.int) ]
+    , None
+    , unit )
+;;
+
+(* [h]'s argument is bounded by [e]'s row through [tw]'s bound. *)
+let local_bounded_by_outer_row ~in_ =
+  let_
+    "h"
+    [ "d" ]
+    (app (var "cond") [ bool true; app (var "tw") [ var "e" ]; var "d" ])
+    in_
+;;
+
+let%expect_test "row bounds are solved in any order" =
+  let uses_x_y = quote (app (var "add") [ var "x"; var "y" ]) in
+  let h arg = app (var "h") [ arg ] in
+  let close name = app (var "closeit") [ var name ] in
+  let program body = [ closeit; needx; tw; top "f" [ "e"; "k" ] body ] in
+  List.iter
+    [ ( "closed before"
+      , seq
+          (close "e")
+          (local_bounded_by_outer_row
+             ~in_:(seq (h uses_x_y) (seq (h (var "k")) (close "k")))) )
+    ; ( "closed between"
+      , local_bounded_by_outer_row
+          ~in_:
+            (seq (h uses_x_y) (seq (close "e") (seq (h (var "k")) (close "k"))))
+      )
+    ; ( "closed after"
+      , local_bounded_by_outer_row
+          ~in_:
+            (seq (h uses_x_y) (seq (h (var "k")) (seq (close "k") (close "e"))))
+      )
+    ; ( "never closed"
+      , local_bounded_by_outer_row
+          ~in_:(seq (h uses_x_y) (seq (h (var "k")) (close "k"))) )
+    ]
+    ~f:(fun (name, body) ->
+      print_endline name;
+      check (program body));
+  [%expect
+    {|
+    closed before
+    val closeit : <int>{} -> unit
+    val needx : <int>{x : int} -> unit
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val f : <int>{} -> <int>{} -> unit
+    closed between
+    val closeit : <int>{} -> unit
+    val needx : <int>{x : int} -> unit
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val f : <int>{} -> <int>{} -> unit
+    closed after
+    val closeit : <int>{} -> unit
+    val needx : <int>{x : int} -> unit
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val f : <int>{} -> <int>{} -> unit
+    never closed
+    val closeit : <int>{} -> unit
+    val needx : <int>{x : int} -> unit
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val f : <int>{-x; ..'a} -> <int>{} -> unit where ..'a <= {}
+    |}]
+;;
+
+let%expect_test "instances of a scheme bounded by an outer row" =
+  (* Each use of [h] bounds [e]'s row by its argument's, so what [e] uses
+     every argument must allow, whether [e] uses it before or after. *)
+  let h arg = app (var "h") [ arg ] in
+  let uses_y = app (var "needy") [ var "e" ] in
+  let uses = seq (h (quote (int 1))) (h (var "k")) in
+  let program body = [ closeit; needy; tw; top "f" [ "e"; "k" ] body ] in
+  List.iter
+    [ "unused", local_bounded_by_outer_row ~in_:uses
+    ; ( "unused, k closed"
+      , local_bounded_by_outer_row
+          ~in_:(seq uses (app (var "closeit") [ var "k" ])) )
+    ; "used before", seq uses_y (local_bounded_by_outer_row ~in_:uses)
+    ; "used after", local_bounded_by_outer_row ~in_:(seq uses uses_y)
+    ; ( "used before, k closed"
+      , seq
+          uses_y
+          (local_bounded_by_outer_row
+             ~in_:(seq uses (app (var "closeit") [ var "k" ]))) )
+    ; ( "used after, k closed"
+      , local_bounded_by_outer_row
+          ~in_:(seq uses (seq (app (var "closeit") [ var "k" ]) uses_y)) )
+    ]
+    ~f:(fun (name, body) ->
+      print_endline name;
+      check (program body));
+  [%expect
+    {|
+    unused
+    val closeit : <int>{} -> unit
+    val needy : <int>{y : int; ..'a} -> unit
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val f : <int>{x?'a : int; ..'b} -> <int>{x?'c : 'd; ..'e} -> <int>{x?'c : 'd; ..'e} where 'a <= 'c, 'a => int = 'd, ..'b <= {x?'c : 'd; ..'e}
+    unused, k closed
+    val closeit : <int>{} -> unit
+    val needy : <int>{y : int; ..'a} -> unit
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val f : <int>{-x; ..'a} -> <int>{} -> unit where ..'a <= {}
+    used before
+    val closeit : <int>{} -> unit
+    val needy : <int>{y : int; ..'a} -> unit
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val f : <int>{x?'a : int; y : int; ..'b} -> <int>{x?'c : 'd; y : int; ..'e} -> <int>{x?'c : 'd; y : int; ..'e} where 'a <= 'c, 'a => int = 'd, ..'b <= {x?'c : 'd; y : int; ..'e}
+    used after
+    val closeit : <int>{} -> unit
+    val needy : <int>{y : int; ..'a} -> unit
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val f : <int>{x?'a : int; y : int; ..'b} -> <int>{x?'c : 'd; y : int; ..'e} -> unit where 'a <= 'c, 'a => int = 'd, ..'b <= {x?'c : 'd; y : int; ..'e}
+    used before, k closed
+    (Unification_error
+     (Row_mismatch REmpty
+      (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
+       (RVar (Unbound 115 1)))
+      (Missing_label y)))
+    used after, k closed
+    (Unification_error
+     (Row_mismatch (RExtend y Present (TCon int ()) (RVar (Unbound 107 1)))
+      (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
+       (RVar
+        (Link
+         (RVar
+          (Link
+           (RExtend y (PVar (Link Absent)) (TCon int ()) (RVar (Unbound 109 1))))))))
+      (Presence_mismatch y)))
+    |}]
+;;
+
+let%expect_test "weak toplevels in a recursive group or a module" =
+  let weak = app (var "id") [ var "id" ] in
+  let at_two_types f =
+    top "use" [] (tuple [ app f [ int 1 ]; app f [ bool true ] ])
+  in
+  let scc =
+    [ top "weak" [] (seq (var "other") weak)
+    ; top "other" [ "u" ] (app (var "weak") [ var "u" ])
+    ]
+  in
+  check scc;
+  check (scc @ [ at_two_types (var "other") ]);
+  check (scc @ [ at_two_types (var "weak") ]);
+  check [ module_ "M" [ top "weak" [] weak ]; at_two_types (var "M.weak") ];
+  let annotated =
+    top "weak" [] ~annot:(Ty.arrow (Ty.var "a") (Ty.var "a")) weak
+  in
+  check [ annotated ];
+  check [ annotated; at_two_types (var "weak") ];
+  [%expect
+    {|
+    val weak : '_a -> '_a
+    val other : '_a -> '_a
+    (Unification_error
+     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    (Unification_error
+     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    (Unification_error
+     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    val weak : '_a -> '_a
+    (Unification_error
+     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    |}]
+;;
+
+let%expect_test "an entry code may use only gets a type if it is present" =
+  (* [tw c] and the quote give [c]'s [x] different types, which only
+     conflict if [c] has [x]: closing [c] makes it absent, whenever it is. *)
+  let binds_bool = quote (let_ "x" [] (bool true) (splice (var "c"))) in
+  let close = app (var "closeit") [ var "c" ] in
+  let tw_c = app (var "tw") [ var "c" ] in
+  let orders =
+    [ "closed_first", seq close (seq tw_c binds_bool)
+    ; "closed_between", seq tw_c (seq close binds_bool)
+    ; "closed_last", seq tw_c (seq binds_bool close)
+    ; "never_closed", seq tw_c binds_bool
+    ]
+  in
+  List.iter orders ~f:(fun (name, body) ->
+    check [ closeit; tw; top name [ "c" ] body ]);
+  [%expect
+    {|
+    val closeit : <int>{} -> unit
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val closed_first : <int>{} -> <int>{..'a}
+    val closeit : <int>{} -> unit
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val closed_between : <int>{} -> <int>{..'a}
+    val closeit : <int>{} -> unit
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val closed_last : <int>{} -> unit
+    val closeit : <int>{} -> unit
+    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : 'e; ..'f} where 'b <= 'd, 'b => int = 'e, ..'c <= {x?'d : 'e; ..'f}
+    val never_closed : <'a>{-x; ..'b} -> <'a>{..'c} where ..'b <= {..'c}, ..'b <= {x?'d : 'e; ..'f}
+    |}]
+;;
+
+let%expect_test "a chain of lets each instantiating the previous one" =
+  let tw =
+    top
+      "tw"
+      [ "c" ]
+      (seq
+         (quote (let_ "x" [] (int 1) (splice (var "c"))))
+         (quote (splice (var "c"))))
+  in
+  let chain n =
+    let h i = var (sprintf "h%d" i) in
+    let rec go i =
+      let earlier =
+        if i = 0
+        then app (var "tw") [ var "e" ]
+        else app (h (i - 1)) [ app (var "tw") [ var "e" ] ]
+      in
+      let_
+        (sprintf "h%d" i)
+        [ "d" ]
+        (app (var "cond") [ bool true; earlier; var "d" ])
+        (seq
+           (app (h i) [ quote (int 1) ])
+           (if i = n - 1 then app (h i) [ var "k" ] else go (i + 1)))
+    in
+    top "f" [ "e"; "k" ] (go 0)
+  in
+  let typecheck n =
+    match
+      Typecheck.typecheck (typechecker ()) ~program:(prims @ [ tw; chain n ])
+    with
+    | Ok { signature; _ } -> List.last_exn signature
+    | Error error -> raise_s [%sexp (error : Typecheck_error.t)]
+  in
+  print_signature [ typecheck 2 ];
+  let f = Signature.to_string_hum [ typecheck 200 ] in
+  let constraints =
+    match String.substr_index f ~pattern:" where " with
+    | None -> 0
+    | Some at -> List.length (String.split (String.drop_prefix f at) ~on:',')
+  in
+  print_s [%message (constraints : int)];
+  [%expect
+    {|
+    val f : <int>{x?'a : int; ..'b} -> <int>{x?'c : 'd; ..'e} -> <int>{x?'c : 'd; ..'e} where 'a <= 'c, 'a => int = 'd, ..'b <= {x?'c : 'd; ..'e}
+    (constraints 3)
     |}]
 ;;

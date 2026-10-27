@@ -95,7 +95,7 @@ let%expect_test "matches without a catch-all are closed" =
     val repeated : [`A of int] -> int
     (Unification_error
      (Row_mismatch REmpty
-      (RExtend C Present (TCon unit ()) (RVar (Unbound 42 1))) (Missing_label C)))
+      (RExtend C Present (TCon unit ()) (RVar (Unbound 39 1))) (Missing_label C)))
     (Unification_error
      (Row_mismatch REmpty
       (RExtend A Present (TCon unit ()) (RVar (Unbound 18 1))) (Missing_label A)))
@@ -160,7 +160,7 @@ let%expect_test "residuals of a catch-all" =
     val open_ended : [`A of 'a | `B of 'a; ..'b] -> ([..'b] -> 'a) -> 'a
     (Unification_error
      (Row_mismatch REmpty
-      (RExtend C Present (TCon unit ()) (RVar (Unbound 115 1)))
+      (RExtend C Present (TCon unit ()) (RVar (Unbound 105 1)))
       (Missing_label C)))
     |}]
 ;;
@@ -356,7 +356,7 @@ let%expect_test "aliases" =
     val open_param : [`C of bool; ..'a] -> [`C of bool; ..'a]
     (Unification_error
      (Row_mismatch REmpty
-      (RExtend C Present (TCon unit ()) (RVar (Unbound 28 1))) (Missing_label C)))
+      (RExtend C Present (TCon unit ()) (RVar (Unbound 26 1))) (Missing_label C)))
     (Duplicate_row_entry A)
     |}]
 ;;
@@ -452,8 +452,8 @@ let%expect_test "presences reach variant rows through contexts" =
     ];
   [%expect
     {|
-    val unknown : <int>{y?'a : int; ..'b} -> [`y?'a of int; ..'b] -> [`y?'a of int; ..'b] where ..'b <= {..'c}
-    val absent : <<'a>{z?'b : int; ..'c}>{-z; ..'d} -> [-`z; ..'d] -> [-`z; ..'d] where ..'c <= {..'e}, ..'d <= {..'f}
+    val unknown : <int>{y?'a : int; ..'b} -> [`y?'a of int; ..'b] -> [`y?'a of int; ..'b]
+    val absent : <<'a>{z?'b : int; ..'c}>{-z; ..'d} -> [-`z; ..'d] -> [-`z; ..'d]
     |}]
 ;;
 
@@ -501,10 +501,10 @@ let%expect_test "unification errors" =
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     (Unification_error
      (Row_mismatch REmpty
-      (RExtend C Present (TCon unit ()) (RVar (Unbound 33 1))) (Missing_label C)))
+      (RExtend C Present (TCon unit ()) (RVar (Unbound 30 1))) (Missing_label C)))
     (Unification_error
      (Row_mismatch REmpty
-      (RExtend C Present (TCon unit ()) (RVar (Unbound 36 1))) (Missing_label C)))
+      (RExtend C Present (TCon unit ()) (RVar (Unbound 35 1))) (Missing_label C)))
     |}]
 ;;
 
@@ -709,7 +709,7 @@ let%expect_test "rows shared between records and variants" =
     val matched : {`A : 'a} -> [`A of 'a] -> 'a
     (Unification_error
      (Row_mismatch REmpty
-      (RExtend B Present (TCon unit ()) (RVar (Unbound 36 1))) (Missing_label B)))
+      (RExtend B Present (TCon unit ()) (RVar (Unbound 35 1))) (Missing_label B)))
     |}]
 ;;
 
@@ -761,13 +761,11 @@ let%expect_test "structural types may be recursive" =
       (RExtend A Present (TCon unit ())
        (RVar
         (Link
-         (RExtend A (PVar (Unbound 30 1)) (TVar (Unbound 31 1))
-          (RVar (Unbound 32 1))))))
+         (RExtend A (PVar (Unbound 30 1)) (TCon unit ()) (RVar (Unbound 31 1))))))
       (RExtend B Present (TCon unit ())
        (RVar
         (Link
-         (RExtend A (PVar (Unbound 30 1)) (TVar (Unbound 31 1))
-          (RVar (Unbound 32 1))))))
+         (RExtend A (PVar (Unbound 30 1)) (TCon unit ()) (RVar (Unbound 31 1))))))
       Cyclic_row))
     type t = [`Cons of int * t | `Nil]
     type t = T of [`Cons of int * t | `Nil]
