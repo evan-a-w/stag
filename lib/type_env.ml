@@ -256,7 +256,11 @@ and elaborate_con t module_ vars ~expansions path args ~loc =
       | Row _, Row row ->
         elaborate_row t module_ vars ~expansions row
         |> Result.map ~f:(fun row -> Type.ARow row)
-      | Ty _, Row _ | Row _, Ty _ ->
+      (* [{...}] parses as a row, but is a record type for a type parameter. *)
+      | Ty _, Row row ->
+        elaborate_row t module_ vars ~expansions row
+        |> Result.map ~f:(fun row -> Type.ATy (Fresh.record t.fresh row))
+      | Row _, Ty _ ->
         error (Type_arg_kind_mismatch { type_name = path; param = param.txt }))
   in
   match decl.decl.kind with

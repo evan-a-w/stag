@@ -692,7 +692,7 @@ module Printer = struct
         (t.type_name name)
         (List.map args ~f:(function
            | ATy ty -> ty_to_string t ~prec:0 ty
-           | ARow row -> row_to_string t row)
+           | ARow row -> record_to_string t row)
          |> String.concat ~sep:", ")
     | TArrow (ty1, ty2) ->
       let ty1 = ty_to_string t ~prec:1 ty1 in
@@ -705,8 +705,8 @@ module Printer = struct
         (List.map tys ~f:(ty_to_string t ~prec:2) |> String.concat ~sep:" * ")
     | TCode { inner; context } ->
       let inner = ty_to_string t ~prec:0 inner in
-      sprintf "<%s>%s" inner (row_to_string t context)
-    | TRecord { row; _ } -> row_to_string t row
+      sprintf "<%s>%s" inner (row_to_string t context ~label:Fn.id)
+    | TRecord { row; _ } -> record_to_string t row
     | TVariant { row; _ } -> variant_to_string t row
     | TVar var -> var_name t var
 
@@ -727,9 +727,11 @@ module Printer = struct
     | "", Some tail -> "[" ^ tail ^ "]"
     | entries, Some tail -> "[" ^ entries ^ "; " ^ tail ^ "]"
 
-  and row_to_string t row =
+  and record_to_string t row = row_to_string t row ~label:(fun name -> "`" ^ name)
+
+  and row_to_string t row ~label =
     let entries, tail =
-      sorted_row_entries t row ~label:Fn.id ~entry:(fun name ty ->
+      sorted_row_entries t row ~label ~entry:(fun name ty ->
         sprintf "%s : %s" name (ty_to_string t ~prec:0 ty))
     in
     "{" ^ String.concat ~sep:"; " (entries @ Option.to_list tail) ^ "}"
@@ -755,7 +757,7 @@ module Printer = struct
     | Some (name, var) ->
       let these =
         List.map var.bounds ~f:(fun bound ->
-          sprintf "%s <= %s" name (row_to_string t bound.row))
+          sprintf "%s <= %s" name (row_to_string t bound.row ~label:Fn.id))
       in
       these @ bounds t
   ;;

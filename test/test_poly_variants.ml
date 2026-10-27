@@ -255,7 +255,7 @@ let%expect_test "which cases are removed from residuals" =
     val refutable_then_irrefutable : [`A of int; ..'a] -> ([..'a] -> int) -> int
     val tuple : [`A of 'a * 'b; ..'c] -> ([..'c] -> 'a) -> 'a
     val refutable_tuple : [`A of 'a * int; ..'b] -> ([`A of 'a * int; ..'b] -> 'a) -> 'a
-    val record : [`A of {x : 'a; ..'b}; ..'c] -> ([..'c] -> 'a) -> 'a
+    val record : [`A of {`x : 'a; ..'b}; ..'c] -> ([..'c] -> 'a) -> 'a
     val nominal : [`A of option['a]; ..'b] -> ([`A of option['a]; ..'b] -> 'a) -> 'a
     val nested_variant : [`A of [`B; ..'a]; ..'b] -> ([`A of [`B; ..'a]; ..'b] -> int) -> int
     val removed_once : [`A of 'a; ..'b] -> ([..'b] -> 'a) -> 'a
@@ -311,7 +311,7 @@ let%expect_test "nested variant patterns stay open" =
     val inner : [`A of [`B; ..'a]] -> int
     val in_option : option[[`A; ..'a]] -> int
     val option_in_tag : [`None | `Some of option[int]] -> int
-    val in_record : {x : [`A; ..'a]} -> int
+    val in_record : {`x : [`A; ..'a]} -> int
     val tuple_of_tags : [`A of option[int]; ..'a] * [`B of int * bool; ..'b]
     |}]
 ;;
@@ -546,7 +546,7 @@ let%expect_test "literal unit and closed records as tag arguments" =
   [%expect
     {|
     val unit_literal : [`A; ..'a] -> ([`A; ..'a] -> int) -> int
-    val closed_record : [`A of {x : 'a}; ..'b] -> ([..'b] -> 'a) -> 'a
+    val closed_record : [`A of {`x : 'a}; ..'b] -> ([..'b] -> 'a) -> 'a
     |}]
 ;;
 
@@ -705,8 +705,8 @@ let%expect_test "rows shared between records and variants" =
   [%expect
     {|
     val same : {..'a} -> [..'a] -> {..'a} * [..'a]
-    val ok : {A : int} * [`A of int]
-    val matched : {A : 'a} -> [`A of 'a] -> 'a
+    val ok : {`A : int} * [`A of int]
+    val matched : {`A : 'a} -> [`A of 'a] -> 'a
     (Unification_error
      (Row_mismatch REmpty
       (RExtend B Present (TCon unit ()) (RVar (Unbound 36 1))) (Missing_label B)))

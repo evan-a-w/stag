@@ -39,6 +39,8 @@ type t =
   | Backslash
   | Quote_open (** [.<] *)
   | Quote_close (** [>.] *)
+  | Less
+  | Greater
   | Splice (** [.~] *)
   | At
   | At_at

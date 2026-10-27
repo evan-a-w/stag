@@ -110,11 +110,11 @@ let%expect_test "recursive functions over recursive records" =
     ];
   [%expect
     {|
-    val sum : ({next : 'a; v : int; ..'b} as 'a) -> int
-    val next : {next : 'a; ..'b} -> 'a
-    val both : ({next : {next : 'a; ..'b}; ..'c} as 'a) -> 'a
-    val self : ({self : 'a; ..'b} as 'a) -> 'a
-    val pair : ({self : 'a; ..'b} as 'a) -> 'a * 'a
+    val sum : ({`next : 'a; `v : int; ..'b} as 'a) -> int
+    val next : {`next : 'a; ..'b} -> 'a
+    val both : ({`next : {`next : 'a; ..'b}; ..'c} as 'a) -> 'a
+    val self : ({`self : 'a; ..'b} as 'a) -> 'a
+    val pair : ({`self : 'a; ..'b} as 'a) -> 'a * 'a
     |}]
 ;;
 
@@ -126,7 +126,7 @@ let%expect_test "recursive values are weak" =
   [%expect
     {|
     val ones : ([`Cons of int * '_a; ..'_b] as '_a)
-    val loop : ({next : '_a; v : '_b -> '_b} as '_a)
+    val loop : ({`next : '_a; `v : '_b -> '_b} as '_a)
     |}]
 ;;
 
@@ -370,11 +370,11 @@ let%expect_test "guarded cycles" =
     (Ok ())
     ([`A of 'a] as 'a)
     (Ok ())
-    ({x : list['a]} as 'a)
+    ({`x : list['a]} as 'a)
     (Ok ())
     ([`A of 'a -> int] as 'a)
     (Ok ())
-    <int>{x : ({y : <int>{x : 'a}} as 'a)}
+    <int>{x : ({`y : <int>{x : 'a}} as 'a)}
     (Ok ())
     ([`A of 'a -> int] as 'a) -> int
     (Ok ())
@@ -382,7 +382,7 @@ let%expect_test "guarded cycles" =
     ([`A of 'a -> int] as 'a) -> int
     ([`A of 'a -> int] as 'a)
     (Ok ())
-    ({x : 'a} as 'a)
+    ({`x : 'a} as 'a)
     |}]
 ;;
 
@@ -496,8 +496,8 @@ let%expect_test "mismatching cyclic types" =
       (Missing_label A)))
     (Error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
-    ({x : 'a; y : int} as 'a)
-    ({x : {x : 'a; y : bool}; y : int} as 'a)
+    ({`x : 'a; `y : int} as 'a)
+    ({`x : {`x : 'a; `y : bool}; `y : int} as 'a)
     |}]
 ;;
 
@@ -639,14 +639,14 @@ let%expect_test "recursive aliases through records, tuples and type arguments" =
     ];
   [%expect
     {|
-    type stream['a] = {head : 'a; tail : unit -> stream['a]}
+    type stream['a] = {`head : 'a; `tail : unit -> stream['a]}
     type list['a] = Nil | Cons of 'a * list['a]
     type tree = [`Leaf of int | `Node of list[tree]]
     type pair = [`A of pair] * int
     type id['a] = 'a
     type through_id = [`A of through_id]
-    type rows[{..'a}] = {x : rows[{..'a}]; ..'a}
-    val heads : ({head : int; tail : unit -> 'a} as 'a) -> int * int
+    type rows[{..'a}] = {`x : rows[{..'a}]; ..'a}
+    val heads : ({`head : int; `tail : unit -> 'a} as 'a) -> int * int
     val leaf : ([`Leaf of int | `Node of list['a]] as 'a) -> int
     |}]
 ;;
@@ -684,12 +684,12 @@ let%expect_test "mutually recursive aliases" =
     ];
   [%expect
     {|
-    type a['a] = {b : [`End | `More of a['a]]; v : 'a}
-    type b['a] = [`End | `More of {b : b['a]; v : 'a}]
-    type c = {b : [`End | `More of c]; v : int}
-    val a : 'a -> ({b : [`End | `More of 'b]; v : 'a} as 'b)
-    val more : {b : [`End | `More of ({b : [`End | `More of 'a]; v : int} as 'a)]; v : int}
-    val c : ({b : [`End | `More of 'a]; v : int} as 'a)
+    type a['a] = {`b : [`End | `More of a['a]]; `v : 'a}
+    type b['a] = [`End | `More of {`b : b['a]; `v : 'a}]
+    type c = {`b : [`End | `More of c]; `v : int}
+    val a : 'a -> ({`b : [`End | `More of 'b]; `v : 'a} as 'b)
+    val more : {`b : [`End | `More of ({`b : [`End | `More of 'a]; `v : int} as 'a)]; `v : int}
+    val c : ({`b : [`End | `More of 'a]; `v : int} as 'a)
     module M : sig
       type l['a] = [`Cons of 'a * l['a] | `Nil]
     end
@@ -830,7 +830,7 @@ let%expect_test "bounds with cyclic types" =
     {..'_a} where ..'_a <= {x : ([`Cons of int * 'b | `Nil] as 'b); ..'_c}
     (Ok ())
     (Ok ())
-    {x : ([`Cons of int * 'a | `Nil] as 'a)}
+    {`x : ([`Cons of int * 'a | `Nil] as 'a)}
     (Error
      (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
     |}]
@@ -907,10 +907,10 @@ let%expect_test "guardedness is judged on the expansion" =
     type g = [`A of g]
     type g = [`A of g]
     type f['a] = [`A of 'a]
-    type f['a] = {x : 'a}
-    type g = {x : g}
-    type g = {x : g}
-    type f['a] = {x : 'a}
+    type f['a] = {`x : 'a}
+    type g = {`x : g}
+    type g = {`x : g}
+    type f['a] = {`x : 'a}
     type f['a] = [`A of 'a]
     type g = [`A of g]
     val v : ([`A of 'a] as 'a) -> 'a
@@ -1297,7 +1297,7 @@ let%expect_test "instantiation shares cycles without generic variables" =
     {|
     (Ok ())
     (Ok ())
-    ({g : 'a; inner : ([`A of '_b | `W of '_c] as '_b); next : '_d} as '_d)
+    ({`g : 'a; `inner : ([`A of '_b | `W of '_c] as '_b); `next : '_d} as '_d)
     inner shared: true
     inner (original) shared: true
     outer shared: false
@@ -1306,7 +1306,7 @@ let%expect_test "instantiation shares cycles without generic variables" =
     (Ok ())
     (Ok ())
     (Ok ())
-    ({g : int; inner : ([`A of 'a | `W of string] as 'a); next : 'b} as 'b) * ({g : bool; inner : 'a; next : 'c} as 'c) * ({g : 'd; inner : 'a; next : 'e} as 'e)
+    ({`g : int; `inner : ([`A of 'a | `W of string] as 'a); `next : 'b} as 'b) * ({`g : bool; `inner : 'a; `next : 'c} as 'c) * ({`g : 'd; `inner : 'a; `next : 'e} as 'e)
     |}]
 ;;
 
@@ -1349,10 +1349,10 @@ let%expect_test "instantiation copies generic presences and bounds" =
     {|
     (Ok ())
     (Ok ())
-    ({self : 'a; x?'b : int} as 'a) * {..'c} where ..'c <= {x : 'd}
-    (({self : '_a; x?'_b : int} as '_a) * {..'_c}) * (({self : '_d; x?'_e : int} as '_d) * {..'_f}) where ..'_c <= {x : '_g}, ..'_f <= {x : '_h}
+    ({`self : 'a; `x?'b : int} as 'a) * {..'c} where ..'c <= {x : 'd}
+    (({`self : '_a; `x?'_b : int} as '_a) * {..'_c}) * (({`self : '_d; `x?'_e : int} as '_d) * {..'_f}) where ..'_c <= {x : '_g}, ..'_f <= {x : '_h}
     (Ok ())
     (Ok ())
-    (({self : 'a; -x} as 'a) * {..'_b}) * (({self : 'c; x : int} as 'c) * {..'_d}) * (({self : 'e; x?'f : int} as 'e) * {..'g}) where ..'_b <= {x : '_h}, ..'_d <= {x : '_i}, ..'g <= {x : 'j}
+    (({`self : 'a; -`x} as 'a) * {..'_b}) * (({`self : 'c; `x : int} as 'c) * {..'_d}) * (({`self : 'e; `x?'f : int} as 'e) * {..'g}) where ..'_b <= {x : '_h}, ..'_d <= {x : '_i}, ..'g <= {x : 'j}
     |}]
 ;;

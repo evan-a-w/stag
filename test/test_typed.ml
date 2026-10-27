@@ -248,30 +248,30 @@ let%expect_test "polymorphic records" =
     ((members
       (((ident ops/4) (args (r/16))
         (scheme
-         "{a : 'a; b : 'b; ..'c} -> 'a * {a : 'a; b : 'b; c : int; ..'c} * {a : 'a; ..'c} * {a : bool; b : 'b; ..'c} * {a : int; b : unit}")
+         "{`a : 'a; `b : 'b; ..'c} -> 'a * {`a : 'a; `b : 'b; `c : int; ..'c} * {`a : 'a; ..'c} * {`a : bool; `b : 'b; ..'c} * {`a : int; `b : unit}")
         (body
          (Tuple
-          ((Poly_field (Var (Bound (Local r/16)) : "{a : 'a; b : 'b; ..'c}") a :
-            'a)
+          ((Poly_field (Var (Bound (Local r/16)) : "{`a : 'a; `b : 'b; ..'c}") a
+            : 'a)
            (Poly_extend ((c (Lit (Int 1) : int)))
-            (Var (Bound (Local r/16)) : "{a : 'a; b : 'b; ..'c}") :
-            "{a : 'a; b : 'b; c : int; ..'c}")
-           (Poly_restrict (Var (Bound (Local r/16)) : "{a : 'a; b : 'b; ..'c}") b
-            : "{a : 'a; ..'c}")
-           (Poly_update (Var (Bound (Local r/16)) : "{a : 'a; b : 'b; ..'c}")
-            ((a (Lit (Bool true) : bool))) : "{a : bool; b : 'b; ..'c}")
+            (Var (Bound (Local r/16)) : "{`a : 'a; `b : 'b; ..'c}") :
+            "{`a : 'a; `b : 'b; `c : int; ..'c}")
+           (Poly_restrict (Var (Bound (Local r/16)) : "{`a : 'a; `b : 'b; ..'c}")
+            b : "{`a : 'a; ..'c}")
+           (Poly_update (Var (Bound (Local r/16)) : "{`a : 'a; `b : 'b; ..'c}")
+            ((a (Lit (Bool true) : bool))) : "{`a : bool; `b : 'b; ..'c}")
            (Poly_record ((a (Lit (Int 1) : int)) (b (Lit Unit : unit))) :
-            "{a : int; b : unit}"))
+            "{`a : int; `b : unit}"))
           :
-          "'a * {a : 'a; b : 'b; c : int; ..'c} * {a : 'a; ..'c} * {a : bool; b : 'b; ..'c} * {a : int; b : unit}")))))
+          "'a * {`a : 'a; `b : 'b; `c : int; ..'c} * {`a : 'a; ..'c} * {`a : bool; `b : 'b; ..'c} * {`a : int; `b : unit}")))))
      (recursive false))
     ((members
       (((ident rest/5) (args (r/17))
-        (scheme "{a : 'a; b : 'b; ..'c} -> 'a * {..'c}")
+        (scheme "{`a : 'a; `b : 'b; ..'c} -> 'a * {..'c}")
         (body
-         (Match (Var (Bound (Local r/17)) : "{a : 'a; b : 'b; ..'c}")
+         (Match (Var (Bound (Local r/17)) : "{`a : 'a; `b : 'b; ..'c}")
           (((Poly_record (fields ((a (Var a/18 : 'a)) (b (Any : 'b))))
-             (rest (Bind others/19)) : "{a : 'a; b : 'b; ..'c}")
+             (rest (Bind others/19)) : "{`a : 'a; `b : 'b; ..'c}")
             (Tuple
              ((Var (Bound (Local a/18)) : 'a)
               (Var (Bound (Local others/19)) : {..'c}))
@@ -279,21 +279,21 @@ let%expect_test "polymorphic records" =
           : "'a * {..'c}")))))
      (recursive false))
     ((members
-      (((ident open_/6) (args (r/20)) (scheme "{a : 'a; ..'b} -> 'a")
+      (((ident open_/6) (args (r/20)) (scheme "{`a : 'a; ..'b} -> 'a")
         (body
-         (Match (Var (Bound (Local r/20)) : "{a : 'a; ..'b}")
+         (Match (Var (Bound (Local r/20)) : "{`a : 'a; ..'b}")
           (((Poly_record (fields ((a (Var a/21 : 'a)))) (rest Open) :
-             "{a : 'a; ..'b}")
+             "{`a : 'a; ..'b}")
             (Var (Bound (Local a/21)) : 'a)))
           : 'a)))))
      (recursive false))
-    ((a/18 ('a 0)) (a/21 ('a 0)) (open_/6 ("{a : 'a; ..'b} -> 'a" 0))
+    ((a/18 ('a 0)) (a/21 ('a 0)) (open_/6 ("{`a : 'a; ..'b} -> 'a" 0))
      (ops/4
-      ("{a : 'a; b : 'b; ..'c} -> 'a * {a : 'a; b : 'b; c : int; ..'c} * {a : 'a; ..'c} * {a : bool; b : 'b; ..'c} * {a : int; b : unit}"
+      ("{`a : 'a; `b : 'b; ..'c} -> 'a * {`a : 'a; `b : 'b; `c : int; ..'c} * {`a : 'a; ..'c} * {`a : bool; `b : 'b; ..'c} * {`a : int; `b : unit}"
        0))
-     (others/19 ({..'a} 0)) (r/16 ("{a : 'a; b : 'b; ..'c}" 0))
-     (r/17 ("{a : 'a; b : 'b; ..'c}" 0)) (r/20 ("{a : 'a; ..'b}" 0))
-     (rest/5 ("{a : 'a; b : 'b; ..'c} -> 'a * {..'c}" 0)))
+     (others/19 ({..'a} 0)) (r/16 ("{`a : 'a; `b : 'b; ..'c}" 0))
+     (r/17 ("{`a : 'a; `b : 'b; ..'c}" 0)) (r/20 ("{`a : 'a; ..'b}" 0))
+     (rest/5 ("{`a : 'a; `b : 'b; ..'c} -> 'a * {..'c}" 0)))
     |}]
 ;;
 

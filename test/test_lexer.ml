@@ -528,14 +528,18 @@ let%expect_test "errors" =
   lex "a > b";
   [%expect
     {|
-    ((kind (Illegal_character >)) (loc t.stag:1:2-3))
-    t.stag:1:2-3: illegal character '>'
+    ((Lident a) t.stag:1:0-1 a)
+    (Greater t.stag:1:2-3 >)
+    ((Lident b) t.stag:1:4-5 b)
+    (Eof t.stag:1:5-5 "")
     |}];
   lex "a < b";
   [%expect
     {|
-    ((kind (Illegal_character <)) (loc t.stag:1:2-3))
-    t.stag:1:2-3: illegal character '<'
+    ((Lident a) t.stag:1:0-1 a)
+    (Less t.stag:1:2-3 <)
+    ((Lident b) t.stag:1:4-5 b)
+    (Eof t.stag:1:5-5 "")
     |}];
   lex "12abc";
   [%expect

@@ -484,7 +484,8 @@ let%expect_test "arity and kind of type arguments" =
     (Type_arity_mismatch (type_name list) (expected 1) (got 0))
     (Type_arity_mismatch (type_name int) (expected 0) (got 1))
     (Type_arity_mismatch (type_name bool) (expected 0) (got 1))
-    (Type_arg_kind_mismatch (type_name list) (param (Ty a)))
+    type list['a] = Nil | Cons of 'a * list['a]
+    type t = A of list[{}]
     (Type_arg_kind_mismatch (type_name stmt) (param (Row r)))
     (Unbound_type list)
     (Unbound_module M)
@@ -677,9 +678,9 @@ let%expect_test "context parameters" =
     type list['a] = Nil | Cons of 'a * list['a]
     type stmt[{..'a}] = Stmt of <unit>{..'a} * list[stmt[{..'a}]]
     val single : <unit>{..'a} -> stmt[{..'a}]
-    val uses_x : stmt[{x : 'a; ..'b}]
-    val nested : stmt[{x : int; ..'a}]
-    val annotated : stmt[{y : bool; ..'a}] -> stmt[{y : bool; ..'a}]
+    val uses_x : stmt[{`x : 'a; ..'b}]
+    val nested : stmt[{`x : int; ..'a}]
+    val annotated : stmt[{`y : bool; ..'a}] -> stmt[{`y : bool; ..'a}]
     val body : stmt[{..'a}] -> <unit>{..'a}
     |}]
 ;;

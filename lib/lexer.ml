@@ -291,6 +291,8 @@ let token (t : State.t) : Located.t =
        | '\\', _ -> simple 1 Backslash
        | '-', Some '>' -> simple 2 Arrow
        | '>', Some '.' -> simple 2 Quote_close
+       | '>', _ -> simple 1 Greater
+       | '<', _ -> simple 1 Less
        | '.', Some '<' -> simple 2 Quote_open
        | '.', Some '~' -> simple 2 Splice
        | '.', Some '.' -> simple 2 Dotdot

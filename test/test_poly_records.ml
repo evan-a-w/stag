@@ -32,18 +32,18 @@ let%expect_test "record operations" =
     ];
   [%expect
     {|
-    val lit : {x : int; y : bool}
+    val lit : {`x : int; `y : bool}
     val empty : {}
-    val get_x : {x : 'a; ..'b} -> 'a
-    val extend : {..'a} -> {z : int; ..'a}
-    val extend_many : {..'a} -> 'b -> {y : 'b; z : int; ..'a}
-    val restrict : {x : 'a; ..'b} -> {..'b}
-    val update : {x : 'a; ..'b} -> {x : bool; ..'b}
-    val nested : {a : {b : 'a; ..'b}; ..'c} -> 'a
+    val get_x : {`x : 'a; ..'b} -> 'a
+    val extend : {..'a} -> {`z : int; ..'a}
+    val extend_many : {..'a} -> 'b -> {`y : 'b; `z : int; ..'a}
+    val restrict : {`x : 'a; ..'b} -> {..'b}
+    val update : {`x : 'a; ..'b} -> {`x : bool; ..'b}
+    val nested : {`a : {`b : 'a; ..'b}; ..'c} -> 'a
     val lit_x : int
-    val extend_lit : {x : int; z : char}
-    val restrict_lit : {y : int}
-    val two_fields : {x : int; y : int; ..'a} -> int
+    val extend_lit : {`x : int; `z : char}
+    val restrict_lit : {`y : int}
+    val two_fields : {`x : int; `y : int; ..'a} -> int
     |}]
 ;;
 
@@ -71,15 +71,15 @@ let%expect_test "extension shadows and restriction reveals" =
     ];
   [%expect
     {|
-    val shadow : {x : bool; x : int}
+    val shadow : {`x : bool; `x : int}
     val shadow_x : bool
     val revealed : int
-    val update_shadow : {x : char; x : int}
+    val update_shadow : {`x : char; `x : int}
     val update_shadow_inner : int
     val restrict_twice : {}
     val extend_restrict : {..'a} -> {..'a}
     val extend_get : {..'a} -> int
-    val reveal : {x : 'a; ..'b} -> 'a
+    val reveal : {`x : 'a; ..'b} -> 'a
     |}]
 ;;
 
@@ -140,8 +140,8 @@ let%expect_test "update may change field types" =
     ];
   [%expect
     {|
-    val changed : {x : bool; y : string; z : int}
-    val update_fn : {x : 'a; ..'b} -> 'c -> {x : 'c; ..'b}
+    val changed : {`x : bool; `y : string; `z : int}
+    val update_fn : {`x : 'a; ..'b} -> 'c -> {`x : 'c; ..'b}
     |}]
 ;;
 
@@ -248,13 +248,13 @@ let%expect_test "record patterns" =
     ];
   [%expect
     {|
-    val closed : {x : int; y : int} -> int
-    val open : {x : 'a; ..'b} -> 'a
-    val rest : {x : 'a; ..'b} -> 'a * {..'b}
+    val closed : {`x : int; `y : int} -> int
+    val open : {`x : 'a; ..'b} -> 'a
+    val rest : {`x : 'a; ..'b} -> 'a * {..'b}
     val rest_reveals_shadowed : bool * int
-    val nested : {p : {x : 'a; ..'b}; ..'c} -> 'a
+    val nested : {`p : {`x : 'a; ..'b}; ..'c} -> 'a
     val empty : {} -> int
-    val with_literals : {x : int; ..'a} -> bool
+    val with_literals : {`x : int; ..'a} -> bool
     (Unification_error
      (Row_mismatch (RExtend y Present (TCon int ()) REmpty) REmpty
       (Missing_label y)))
@@ -309,21 +309,21 @@ let%expect_test "aliases" =
     ];
   [%expect
     {|
-    type point = {x : int; y : int}
-    type with_x[{..'a}] = {x : int; ..'a}
-    type box['a] = {contents : 'a}
-    type holder = { p : {x : int; y : int} }
-    val origin : {x : int; y : int}
-    val get : {contents : int} -> int
-    val x_of : {x : int; ..'a} -> int
+    type point = {`x : int; `y : int}
+    type with_x[{..'a}] = {`x : int; ..'a}
+    type box['a] = {`contents : 'a}
+    type holder = { p : {`x : int; `y : int} }
+    val origin : {`x : int; `y : int}
+    val get : {`contents : int} -> int
+    val x_of : {`x : int; ..'a} -> int
     val x_of_origin : int
     val hold : holder
     module M : sig
       type t = A
-      type r = {f : t}
+      type r = {`f : t}
       type v[{..'a}] = [`A of t | `B; ..'a]
     end
-    val m : {f : M.t} -> {f : M.t}
+    val m : {`f : M.t} -> {`f : M.t}
     (Unification_error
      (Row_mismatch (RExtend y Present (TCon int ()) REmpty) REmpty
       (Missing_label y)))
@@ -360,13 +360,13 @@ let%expect_test "generalization and the value restriction" =
     ];
   [%expect
     {|
-    val r : {f : 'a -> 'a}
-    val weak : {f : '_a -> '_a}
-    val ext : {f : 'a -> 'a; g : 'b -> 'b}
-    val ext_weak : {f : '_a -> '_a; g : '_b -> '_b}
+    val r : {`f : 'a -> 'a}
+    val weak : {`f : '_a -> '_a}
+    val ext : {`f : 'a -> 'a; `g : 'b -> 'b}
+    val ext_weak : {`f : '_a -> '_a; `g : '_b -> '_b}
     val field : 'a -> 'a
-    val restricted : {f : 'a -> 'a}
-    val updated : {f : {}}
+    val restricted : {`f : 'a -> 'a}
+    val updated : {`f : {}}
     val used_twice : int * bool
     val local : int * bool
     |}]
@@ -418,11 +418,11 @@ let%expect_test "values through the new forms" =
     ];
   [%expect
     {|
-    val recursive : {a : '_a -> '_a; b : '_a -> '_a}
+    val recursive : {`a : '_a -> '_a; `b : '_a -> '_a}
     val rest_binds : {} * ('a -> 'a)
     val tag_binds : 'a -> 'a
-    val splice_value : <{f : 'a -> 'a}>{..'b}
-    val splice_not_value : <{f : '_a -> '_a}>{..'_b}
+    val splice_value : <{`f : 'a -> 'a}>{..'b}
+    val splice_not_value : <{`f : '_a -> '_a}>{..'_b}
     |}]
 ;;
 
@@ -451,10 +451,10 @@ let%expect_test "labels in quotes are not free variables" =
   [%expect
     {|
     val label : <int>{..'a}
-    val var_and_label : <{y : 'a}>{y : 'a; ..'b}
-    val outside : <'a>{r : {x : 'a; ..'b}; ..'c}
+    val var_and_label : <{`y : 'a}>{y : 'a; ..'b}
+    val outside : <'a>{r : {`x : 'a; ..'b}; ..'c}
     val extend_inside : <{..'a}>{..'b} -> <{..'a}>{..'c} where ..'b <= {..'c}
-    val pattern_rest : <'a * {..'b}>{r : {x : 'a; ..'b}; ..'c}
+    val pattern_rest : <'a * {..'b}>{r : {`x : 'a; ..'b}; ..'c}
     |}]
 ;;
 
@@ -501,7 +501,7 @@ let%expect_test "rows shared between contexts and records" =
     {|
     val same_row : <int>{..'a} -> {..'a} -> <int>{..'a}
     val ok : <int>{x : int}
-    val captured : <int>{y?'a : int; ..'b} -> {y?'a : int; ..'b} -> {y?'a : int; ..'b} where ..'b <= {..'c}
+    val captured : <int>{y?'a : int; ..'b} -> {`y?'a : int; ..'b} -> {`y?'a : int; ..'b} where ..'b <= {..'c}
     (Unification_error
      (Row_mismatch
       (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
@@ -605,9 +605,9 @@ let%expect_test "local polymorphic record operations" =
   [%expect
     {|
     val access : int * bool
-    val restriction : {} * {y : int}
-    val update : {x : int} * {x : int; y : int}
-    val pattern : {} * {y : int}
+    val restriction : {} * {`y : int}
+    val update : {`x : int} * {`x : int; `y : int}
+    val pattern : {} * {`y : int}
     |}]
 ;;
 
@@ -619,9 +619,9 @@ let%expect_test "applied access and restriction are not values" =
     ];
   [%expect
     {|
-    val r : {f : 'a -> 'a; g : 'b -> 'b}
+    val r : {`f : 'a -> 'a; `g : 'b -> 'b}
     val field : '_a -> '_a
-    val restricted : {f : '_a -> '_a}
+    val restricted : {`f : '_a -> '_a}
     |}]
 ;;
 
@@ -649,7 +649,7 @@ let%expect_test "absent entries in records" =
             (var "r") )
     ];
   [%expect
-    {| val absent : <<'a>{z?'b : int; ..'c}>{-z; ..'d} -> {-z; ..'d} -> {-z; ..'d} where ..'c <= {..'e}, ..'d <= {..'f} |}]
+    {| val absent : <<'a>{z?'b : int; ..'c}>{-z; ..'d} -> {-`z; ..'d} -> {-`z; ..'d} where ..'c <= {..'e}, ..'d <= {..'f} |}]
 ;;
 
 let%expect_test "structural types may be recursive" =
@@ -686,7 +686,7 @@ let%expect_test "structural types may be recursive" =
     ];
   [%expect
     {|
-    val occurs : ({x : 'a; ..'b} as 'a) -> 'a
+    val occurs : ({`x : 'a; ..'b} as 'a) -> 'a
     (Unification_error
      (Row_mismatch
       (RExtend x Present (TCon int ())
@@ -702,10 +702,10 @@ let%expect_test "structural types may be recursive" =
            (RExtend x (PVar (Unbound 34 1)) (TVar (Unbound 35 1))
             (RVar (Unbound 36 1))))))))
       Cyclic_row))
-    type t = {next : t}
-    type a = {b : [`A of a]}
-    type b = [`A of {b : b}]
-    type t = T of {next : t}
+    type t = {`next : t}
+    type a = {`b : [`A of a]}
+    type b = [`A of {`b : b}]
+    type t = T of {`next : t}
     val deref : t -> t
     |}]
 ;;
