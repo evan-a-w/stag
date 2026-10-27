@@ -83,10 +83,8 @@ Errors are reported like OCaml's.
   [1]
   $ printf 'let x = 1\n' > bad-name.stag
   $ stag check bad-name.stag
-  File "bad-name.stag", line 1, characters 0-0:
-  1 | let x = 1
-      ^
-  Error: Bad-name.stag is not a valid module file name: it should be a letter followed by letters, digits, _ and ', then .stag
+  File "bad-name.stag":
+  Error: bad-name.stag is not a valid module file name: it should be a letter followed by letters, digits, _ and ', then .stag
   [1]
   $ cat > multi.stag <<'EOF'
   > let r =
@@ -99,7 +97,11 @@ Errors are reported like OCaml's.
   2 |   .~(let x = 1 in
   3 |      Int.div x 0;
   4 |      .<1>.)
-  Error: This toplevel splice failed at compile time: Division by zero, at multi.stag:3:5-16
+  Error: This toplevel splice failed at compile time: Division by zero
+  File "multi.stag", line 3, characters 5-16:
+  3 |      Int.div x 0;
+           ^^^^^^^^^^^
+  Note: The error was raised here
   [1]
   $ cat > crash.stag <<'EOF'
   > let s = String.sub "abc" 1 5

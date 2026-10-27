@@ -5,6 +5,15 @@ module Mismatch = struct
     { loc : Loc.t
     ; expected : string option
     ; actual : string
+    ; parenthesize : Loc.t option [@sexp.option]
+    }
+  [@@deriving sexp_of]
+end
+
+module Different_outputs = struct
+  type t =
+    { loc : Loc.t
+    ; outputs : string list
     }
   [@@deriving sexp_of]
 end
@@ -13,12 +22,44 @@ module Test_result = struct
   type t =
     { name : string Located.t
     ; mismatches : Mismatch.t list
+    ; different_outputs : Different_outputs.t list [@sexp.list]
     ; error : Error.t option
+    ; output_before_error : string [@sexp_drop_if String.is_empty]
     }
   [@@deriving sexp_of]
 
-  let passed t = List.is_empty t.mismatches && Option.is_none t.error
+  let passed t =
+    List.is_empty t.mismatches
+    && List.is_empty t.different_outputs
+    && Option.is_none t.error
+  ;;
 end
+
+(* An [[%expect]] reached, with the outputs it was reached with, latest
+   first. *)
+module Reached = struct
+  type t =
+    { loc : Loc.t
+    ; expected : string
+    ; mutable outputs : string list
+    }
+end
+
+let leading_whitespace line =
+  String.prefix
+    line
+    (String.lfindi line ~f:(fun _ c -> not (Char.is_whitespace c))
+     |> Option.value ~default:(String.length line))
+;;
+
+let common_prefix a b =
+  let rec go i =
+    if i < String.length a && i < String.length b && Char.equal a.[i] b.[i]
+    then go (i + 1)
+    else i
+  in
+  String.prefix a (go 0)
+;;
 
 let normalize string =
   let lines =
@@ -29,18 +70,22 @@ let normalize string =
     |> List.drop_while ~f:String.is_empty
     |> List.rev
   in
-  let indentation line =
-    String.length line - String.length (String.lstrip line)
-  in
   let common =
     List.filter lines ~f:(Fn.non String.is_empty)
-    |> List.map ~f:indentation
-    |> List.min_elt ~compare:Int.compare
-    |> Option.value ~default:0
+    |> List.map ~f:leading_whitespace
+    |> List.reduce ~f:common_prefix
+    |> Option.value ~default:""
   in
   List.map lines ~f:(fun line ->
-    if String.is_empty line then line else String.drop_prefix line common)
+    if String.is_empty line then line else String.drop_prefix line (String.length common))
   |> String.concat ~sep:"\n"
+;;
+
+let rec ends_in_match (expr : Typed.Expr.t) =
+  match expr.desc with
+  | Match _ -> true
+  | Let { in_; _ } -> ends_in_match in_
+  | _ -> false
 ;;
 
 let run_test ~limits driver (test : Typed.Expect_test.t) =
@@ -51,35 +96,59 @@ let run_test ~limits driver (test : Typed.Expect_test.t) =
     Buffer.clear buffer;
     output
   in
-  let mismatches = Queue.create () in
-  let check ~loc ~expected =
-    let actual = take_output () in
-    let matches =
-      String.equal actual (normalize (Option.value expected ~default:""))
+  let in_order = Queue.create () in
+  let by_loc = String.Table.create () in
+  let on_expect ({ txt; loc } : string Located.t) =
+    let output = take_output () in
+    let reached =
+      Hashtbl.find_or_add by_loc (Loc.to_string loc) ~default:(fun () ->
+        let reached = { Reached.loc; expected = txt; outputs = [] } in
+        Queue.enqueue in_order reached;
+        reached)
     in
-    if not matches
-    then Queue.enqueue mismatches { Mismatch.loc; expected; actual }
+    reached.outputs <- output :: reached.outputs
   in
   let output = Treewalk.output interpreter in
   Treewalk.set_output interpreter (Buffer.add_string buffer);
   Treewalk.set_limits interpreter limits;
   let result =
     Exn.protect
-      ~f:(fun () ->
-        Treewalk.run_expect_test
-          interpreter
-          test
-          ~on_expect:(fun { txt; loc } -> check ~loc ~expected:(Some txt)))
+      ~f:(fun () -> Treewalk.run_expect_test interpreter test ~on_expect)
       ~finally:(fun () -> Treewalk.set_output interpreter output)
   in
-  (match result with
-   | Ok () ->
-     let stop = test.body.loc.stop in
-     check ~loc:{ test.body.loc with start = stop } ~expected:None
-   | Error _ -> ());
+  let mismatches = Queue.create () in
+  let different_outputs = Queue.create () in
+  Queue.iter in_order ~f:(fun { loc; expected; outputs } ->
+    match List.rev outputs |> List.stable_dedup ~compare:String.compare with
+    | [ actual ] ->
+      if not (String.equal actual (normalize expected))
+      then
+        Queue.enqueue
+          mismatches
+          { Mismatch.loc; expected = Some expected; actual; parenthesize = None }
+    | outputs -> Queue.enqueue different_outputs { Different_outputs.loc; outputs });
+  let output_before_error =
+    match result with
+    | Ok () ->
+      let actual = take_output () in
+      if not (String.is_empty actual)
+      then (
+        let stop = test.body.loc.stop in
+        Queue.enqueue
+          mismatches
+          { Mismatch.loc = { test.body.loc with start = stop }
+          ; expected = None
+          ; actual
+          ; parenthesize = Option.some_if (ends_in_match test.body) test.body.loc
+          });
+      ""
+    | Error _ -> take_output ()
+  in
   { Test_result.name = test.name
   ; mismatches = Queue.to_list mismatches
+  ; different_outputs = Queue.to_list different_outputs
   ; error = Result.error result
+  ; output_before_error
   }
 ;;
 
@@ -88,21 +157,30 @@ let run ?(limits = Limits.unlimited) driver =
   |> List.map ~f:(run_test ~limits driver)
 ;;
 
-let line_indentation contents ~offset =
-  let line_start =
-    match String.rindex_from contents (offset - 1) '\n' with
-    | Some i -> i + 1
-    | None | (exception _) -> 0
-  in
-  let rec count i =
-    if i < String.length contents && Char.equal contents.[i] ' '
-    then count (i + 1)
-    else i - line_start
-  in
-  count line_start
+let line_start contents ~offset =
+  match String.rindex_from contents (offset - 1) '\n' with
+  | Some i -> i + 1
+  | None | (exception _) -> 0
 ;;
 
-let quoted actual ~indent =
+(* The indentation of what starts at [offset]: that of its line, deeper if
+   [offset] is not the first thing on it. *)
+let indentation contents ~offset =
+  let start = line_start contents ~offset in
+  let before = String.sub contents ~pos:start ~len:(offset - start) in
+  let indentation = leading_whitespace before in
+  if String.length indentation = String.length before
+  then indentation
+  else indentation ^ "  "
+;;
+
+let deeper indentation =
+  if String.is_suffix indentation ~suffix:"\t"
+  then indentation ^ "\t"
+  else indentation ^ "  "
+;;
+
+let quoted actual ~indentation =
   let id =
     Sequence.unfold ~init:0 ~f:(fun n ->
       Some ((if n = 0 then "" else String.make n 'x'), n + 1))
@@ -114,14 +192,50 @@ let quoted actual ~indent =
     | [] -> " "
     | [ line ] -> sprintf " %s " line
     | lines ->
-      let pad = String.make indent ' ' in
       "\n"
       ^ String.concat
           (List.map lines ~f:(fun line ->
-             (if String.is_empty line then "" else pad ^ line) ^ "\n"))
-      ^ pad
+             (if String.is_empty line then "" else indentation ^ line) ^ "\n"))
+      ^ indentation
   in
   sprintf "{%s|%s|%s}" id body id
+;;
+
+let edits contents ({ loc; expected; actual; parenthesize } : Mismatch.t) =
+  let start = loc.start.offset in
+  match expected, parenthesize with
+  | Some _, _ ->
+    let line = line_start contents ~offset:start in
+    let indentation =
+      leading_whitespace (String.sub contents ~pos:line ~len:(start - line))
+    in
+    let quoted = quoted actual ~indentation:(deeper indentation) in
+    [ ( start
+      , loc.stop.offset
+      , if loc.start.offset = loc.stop.offset then " " ^ quoted else quoted )
+    ]
+  | None, None ->
+    let line = line_start contents ~offset:start in
+    let indentation =
+      leading_whitespace (String.sub contents ~pos:line ~len:(start - line))
+    in
+    [ ( start
+      , start
+      , sprintf
+          ";\n%s[%%expect %s]"
+          indentation
+          (quoted actual ~indentation:(deeper indentation)) )
+    ]
+  | None, Some body ->
+    let indentation = indentation contents ~offset:body.start.offset in
+    [ body.start.offset, body.start.offset, "("
+    ; ( start
+      , start
+      , sprintf
+          ");\n%s[%%expect %s]"
+          indentation
+          (quoted actual ~indentation:(deeper indentation)) )
+    ]
 ;;
 
 let corrected ~path ~contents results =
@@ -130,25 +244,8 @@ let corrected ~path ~contents results =
       result.mismatches)
     |> List.filter ~f:(fun (mismatch : Mismatch.t) ->
       String.equal mismatch.loc.file path)
-    |> List.map ~f:(fun ({ loc; expected; actual } : Mismatch.t) ->
-      let start = loc.start.offset in
-      let indent = line_indentation contents ~offset:start in
-      let replacement =
-        match expected with
-        | Some _ ->
-          let quoted = quoted actual ~indent:(indent + 2) in
-          if loc.start.offset = loc.stop.offset then " " ^ quoted else quoted
-        | None ->
-          sprintf
-            ";\n%s[%%expect %s]"
-            (String.make indent ' ')
-            (quoted actual ~indent:(indent + 2))
-      in
-      start, loc.stop.offset, replacement)
+    |> List.concat_map ~f:(edits contents)
     |> List.stable_sort ~compare:(fun (a, _, _) (b, _, _) -> Int.compare a b)
-    |> List.remove_consecutive_duplicates
-         ~which_to_keep:`First
-         ~equal:(fun (a, _, _) (b, _, _) -> a = b)
   in
   if List.is_empty edits
   then None

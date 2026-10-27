@@ -106,7 +106,7 @@ Runtime errors fail the test.
   File "err.stag", line 2, characters 12-25:
   2 |   print_int (Int.div 1 0)
                   ^^^^^^^^^^^^^
-  Error: Division by zero
+  Error: Expect test "boom" failed: Division by zero
   1 of 1 test(s) failed
   [1]
 

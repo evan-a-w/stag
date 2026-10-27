@@ -214,8 +214,6 @@ let message { kind; loc = _ } =
   | Splice_evaluation_failed { code = _; error } ->
     let error =
       match Runtime_error.of_error error with
-      | Some { loc; message } when not (Loc.is_none loc) ->
-        sprintf "%s, at %s" message (Loc.to_string loc)
       | Some { message; loc = _ } -> message
       | None -> Error.to_string_hum error
     in

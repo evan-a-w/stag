@@ -135,6 +135,38 @@ module Value = struct
           then []
           else [ [%sexp (persistent : t Typed.Ident.Map.t)] ]))
   ;;
+
+  let rec to_string_hum : t -> string = function
+    | Int n -> Int.to_string n
+    | Bool b -> Bool.to_string b
+    | String s -> sprintf "%S" s
+    | Char c -> sprintf "%C" c
+    | Unit -> "()"
+    | Tuple values -> tuple values
+    | Construct ({ name; _ }, []) -> name
+    | Construct ({ name; _ }, [ value ]) -> name ^ " " ^ argument value
+    | Construct ({ name; _ }, values) -> name ^ " " ^ tuple values
+    | Record _ -> "<record>"
+    | Poly_record fields ->
+      Map.to_alist fields
+      |> List.map ~f:(fun (label, value) ->
+        sprintf "`%s = %s" label (to_string_hum value))
+      |> String.concat ~sep:"; "
+      |> sprintf "{%s}"
+    | Poly_variant (tag, Unit) -> "`" ^ tag
+    | Poly_variant (tag, value) -> sprintf "`%s %s" tag (argument value)
+    | Function _ | Prim _ -> "<fun>"
+    | Code _ -> "<code>"
+
+  and tuple values =
+    sprintf "(%s)" (String.concat ~sep:", " (List.map values ~f:to_string_hum))
+
+  and argument (value : t) =
+    match value with
+    | Construct (_, []) | Poly_variant (_, Unit) -> to_string_hum value
+    | Construct _ | Poly_variant _ -> "(" ^ to_string_hum value ^ ")"
+    | _ -> to_string_hum value
+  ;;
 end
 
 (* The values embedded by a quote being built. [renames] are its own
@@ -413,7 +445,7 @@ let instantiate t (code : Typed.Expr.t) ~entry =
     { node with desc }
   in
   let rec go ~depth (expr : Typed.Expr.t) =
-    Budget.step t.budget ~f:(fun () -> go_step ~depth expr)
+    Budget.step t.budget ~loc:expr.loc ~f:(fun () -> go_step ~depth expr)
   and go_step ~depth (expr : Typed.Expr.t) =
     let desc : Typed.Expr.t Typed.Expr.Desc.t =
       match expr.desc with
@@ -473,6 +505,10 @@ let splice_code
       ; ty = in_.ty
       ; loc = in_.loc
       })
+;;
+
+let runtime_error ~loc message =
+  Error (Runtime_error.to_error { loc; message })
 ;;
 
 let pattern_mismatch pattern value =
@@ -595,9 +631,17 @@ let rec force t ident =
     let%map value = eval t ~env:(Env.create ()) ~level:0 body in
     Env.set t.env ~ident ~value
 
-and lookup t env ident =
+and lookup t env ident ~loc =
   let%bind () = force t ident in
-  Env.lookup env ~fallback:t.env ~ident
+  match Env.find_slot ~fallback:t.env env ident with
+  | Some { contents = None } ->
+    runtime_error
+      ~loc
+      (sprintf
+         "%s is used before its value is defined (a value may not depend on \
+          itself)"
+         ident.name)
+  | Some _ | None -> Env.lookup env ~fallback:t.env ~ident
 
 (* Making closures reads nothing, so a component's functions are all bound at
    once, and its values evaluated each when first used. *)
@@ -616,7 +660,7 @@ and bind_functions t ({ members; recursive } : Typed.Scc.t) =
 
 (* [env] has the bindings of the current activation, at [level]. *)
 and eval t ~env ~level expr =
-  Budget.step t.budget ~f:(fun () -> step t ~env ~level expr)
+  Budget.step t.budget ~loc:expr.loc ~f:(fun () -> step t ~env ~level expr)
 
 and step t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
   let eval' = eval t ~env ~level in
@@ -630,7 +674,7 @@ and step t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
      | None ->
        Or_error.error_s [%message "[%expect] outside a running expect test"])
   | Var (Bound (Local ident | Toplevel ident))
-  | Var (Persistent (Local ident | Toplevel ident)) -> lookup t env ident
+  | Var (Persistent (Local ident | Toplevel ident)) -> lookup t env ident ~loc:expr.loc
   | Var (Free name) ->
     Or_error.error_s [%message "Free variable of code evaluated" name]
   | Var (Prim prim) -> Ok (Value.Prim { prim; applied = [] })
@@ -670,7 +714,7 @@ and step t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
            "Field of a non-record" (field : Typed.Field_ref.t) (value : Value.t)])
   | Match (expr, cases) ->
     let%bind value = eval' expr in
-    eval_match t ~env ~level value cases
+    eval_match t ~env ~level value cases ~loc:expr.loc
   | Poly_record fields ->
     let%bind fields = map_fields fields ~f:eval' in
     let%map fields = String.Map.of_alist_or_error fields in
@@ -734,7 +778,7 @@ and apply t (f : Value.t) arg ~loc =
       | Some args ->
         (match Prim.apply prim ~output:t.output args with
          | Ok value -> Ok (Value.of_prim value)
-         | Error message -> Error (Runtime_error.to_error { loc; message })))
+         | Error message -> runtime_error ~loc message))
   | Function { args = param :: args; body; env; level } ->
     let env = Env.copy env in
     Env.set env ~ident:param ~value:arg;
@@ -743,18 +787,22 @@ and apply t (f : Value.t) arg ~loc =
      | _ :: _ -> Ok (Value.Function { args; body; env; level }))
   | _ -> Or_error.error_s [%message "Applied a non-function" (f : Value.t)]
 
-and eval_match t ~env ~level value = function
-  | [] -> Or_error.error_s [%message "Match failure" (value : Value.t)]
+and eval_match t ~env ~level value cases ~loc =
+  match cases with
+  | [] ->
+    runtime_error
+      ~loc
+      ("Match failure: no case matches the value " ^ Value.to_string_hum value)
   | (pattern, body) :: cases ->
     (match%bind match_pattern env pattern value with
      | true -> eval t ~env ~level body
-     | false -> eval_match t ~env ~level value cases)
+     | false -> eval_match t ~env ~level value cases ~loc)
 
 (* The code [expr] is in a quote built at [level], [depth] quotes in. Splices at
    [depth] 1 are evaluated now, and the values of persistent binders of [level]
    or below are embedded under fresh idents. *)
 and build t ~env ~level ~embedded ~depth expr =
-  Budget.step t.budget ~f:(fun () ->
+  Budget.step t.budget ~loc:expr.loc ~f:(fun () ->
     build_step t ~env ~level ~embedded ~depth expr)
 
 and build_step
@@ -773,7 +821,7 @@ and build_step
       match Hashtbl.find embedded.renames ident with
       | Some renamed -> Ok renamed
       | None ->
-        let%map value = lookup t env ident in
+        let%map value = lookup t env ident ~loc:expr.loc in
         let renamed =
           fresh_like t ident ~info:(Hashtbl.find_exn t.ident_info ident)
         in
@@ -812,7 +860,7 @@ let splice t ~code ~level ~entry =
 let run_expect_test t ({ body; _ } : Typed.Expect_test.t) ~on_expect =
   t.on_expect <- Some on_expect;
   Exn.protect
-    ~f:(fun () -> eval t ~env:t.env ~level:0 body |> Or_error.ignore_m)
+    ~f:(fun () -> eval t ~env:(Env.create ()) ~level:0 body |> Or_error.ignore_m)
     ~finally:(fun () -> t.on_expect <- None)
 ;;
 

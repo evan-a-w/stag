@@ -231,14 +231,9 @@ let%expect_test "typechecking" =
     (Typecheck (Expect_outside_expect_test @ t.stag:1:39-54))
     module T : sig end
     module T : sig end
-    ((name ("reached twice" @ t.stag:1:16-31))
-     (mismatches
-      (((loc t.stag:2:33-33) (expected ("")) (actual 1))
-       ((loc t.stag:2:33-33) (expected ("")) (actual 2))))
-     (error ()))
-    corrected:
-    let%expect_test "reached twice" =
-      let f x = print_int x; [%expect {| 1 |}] in f 1; f 2
+    ((name ("reached twice" @ t.stag:1:16-31)) (mismatches ())
+     (different_outputs (((loc t.stag:2:33-33) (outputs (1 2))))) (error ()))
+    (no corrections)
     (Typecheck ((Not_in_scope y) @ t.stag:1:38-39))
     module T : sig
       val x : int

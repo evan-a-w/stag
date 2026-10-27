@@ -2,7 +2,7 @@ open! Core
 open Stag
 
 let show ?contents loc message =
-  print_string (Diagnostic.to_string_hum ?contents { loc; message })
+  print_string (Diagnostic.to_string_hum ?contents (Diagnostic.create ~loc message))
 ;;
 
 let loc (line, col) (line', col') =
@@ -145,7 +145,11 @@ let%expect_test "messages" =
     File "a.stag", line 1, characters 8-30:
     1 | let c = .~(Int.div 1 0; .<1>.)
                 ^^^^^^^^^^^^^^^^^^^^^^
-    Error: This toplevel splice failed at compile time: Division by zero, at a.stag:1:11-22
+    Error: This toplevel splice failed at compile time: Division by zero
+    File "a.stag", line 1, characters 11-22:
+    1 | let c = .~(Int.div 1 0; .<1>.)
+                   ^^^^^^^^^^^
+    Note: The error was raised here
     File "a.stag", line 1, characters 8-17:
     1 | let x = [%expect]
                 ^^^^^^^^^

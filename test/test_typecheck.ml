@@ -466,7 +466,7 @@ let%expect_test "splice with implicit substitutions" =
             (Lit (Int 1) : int) : <'_c>{})))
          : <'_c>{}))
        : <'_c>{}))
-     (error ("Match failure" (value 1))))
+     (error ("Match failure: no case matches the value 1" @ _none_)))
     (Unification_error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     |}]
