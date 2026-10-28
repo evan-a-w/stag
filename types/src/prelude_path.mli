@@ -19,8 +19,14 @@ val relative : string -> string option
 val shadowed : string -> has:([ `Type | `Module ] -> string -> bool) -> bool
 
 (** A canonical name for humans: without [root] for the prelude's, unless
-    [shadowed] (by default, never), with [root] (eg. [prelude.option]). *)
-val to_string_hum : ?shadowed:(string -> bool) -> string -> string
+    [shadowed] (by default, never), as its root path (eg. [.option]), unless
+    the first name of its path is one of the program's [root_modules] too,
+    where no syntax names it, with [root] (eg. [prelude.Core.Sexp.t]). *)
+val to_string_hum
+  :  ?shadowed:(string -> bool)
+  -> ?root_modules:String.Set.t
+  -> string
+  -> string
 
 (** Prims' canonical names are the prelude's under its module [Prim]. *)
 val prim_prefix : string

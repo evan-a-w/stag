@@ -318,8 +318,9 @@ let in_scope (t : t) : Typecheck_error.In_scope.t =
        modules enclosing
      | Some _ | None -> [])
   in
-  let names kind =
-    List.concat_map (modules t) ~f:(fun module_ ->
+  let modules = modules t in
+  let names ?(modules = modules) kind =
+    List.concat_map modules ~f:(fun module_ ->
       Hashtbl.to_alist module_.members
       |> List.filter_map ~f:(fun ((kind', name), generated_by) ->
         Option.some_if
@@ -327,7 +328,10 @@ let in_scope (t : t) : Typecheck_error.In_scope.t =
           name))
     |> String.Set.of_list
   in
-  { types = names (Member Type); modules = names Module }
+  { types = names (Member Type)
+  ; modules = names Module
+  ; root_modules = names ~modules:[ List.last_exn modules ] Module
+  }
 ;;
 
 (* The program's root module, which root paths are found from: past it are the

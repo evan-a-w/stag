@@ -574,7 +574,7 @@ let shown =
         type option = Some | None
         type list = bool
         type int = bool
-        val x : prelude.list[prelude.option[.int]]
+        val x : .list[.option[.int]]
       end
       val shown : unit
     end

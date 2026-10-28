@@ -12,9 +12,22 @@ let shadowed relative ~has =
   | [] -> false
 ;;
 
-let to_string_hum ?(shadowed = fun _ -> false) name =
+let first_module relative =
+  match String.split relative ~on:'.' with
+  | first :: _ :: _ -> Some first
+  | [ _ ] | [] -> None
+;;
+
+let to_string_hum
+      ?(shadowed = fun _ -> false)
+      ?(root_modules = String.Set.empty)
+      name
+  =
   match relative name with
   | Some relative when not (shadowed relative) -> relative
+  | Some relative
+    when not (Option.exists (first_module relative) ~f:(Set.mem root_modules))
+    -> "." ^ relative
   | Some _ | None -> name
 ;;
 

@@ -113,6 +113,7 @@ module In_scope = struct
   type t =
     { types : String.Set.t
     ; modules : String.Set.t
+    ; root_modules : String.Set.t
     }
 
   let shadows t relative =
@@ -375,5 +376,8 @@ let message { kind; loc = _; in_scope } =
           "Typecheck_error.message: not within a module" (kind : Kind.t)]
   in
   kind_message kind ~show_type:(fun name ->
-    Prelude_path.to_string_hum name ~shadowed:(In_scope.shadows in_scope))
+    Prelude_path.to_string_hum
+      name
+      ~shadowed:(In_scope.shadows in_scope)
+      ~root_modules:in_scope.root_modules)
 ;;

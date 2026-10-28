@@ -38,8 +38,10 @@ let of_source_file_error (error : Source_file.Error.t) =
 let max_declaration_lines = 12
 
 (* Indented, its first lines only if it is long. *)
-let declaration_source toplevel =
-  let lines = String.split_lines (Printer.toplevel ~width:78 toplevel) in
+let declaration_source ?root_modules toplevel =
+  let lines =
+    String.split_lines (Printer.toplevel ~width:78 ?root_modules toplevel)
+  in
   let lines =
     if List.length lines <= max_declaration_lines
     then lines
@@ -54,6 +56,9 @@ let declaration_source toplevel =
 ;;
 
 let of_typecheck_error (error : Typecheck_error.t) =
+  let root_modules =
+    Option.map error.in_scope ~f:(fun in_scope -> in_scope.root_modules)
+  in
   let rec notes : Typecheck_error.Kind.t -> Note.t list = function
     | Splice_evaluation_failed { error; code = _ }
     | Declaration_splice_failed error ->
@@ -95,7 +100,8 @@ let of_typecheck_error (error : Typecheck_error.t) =
       notes error
       @ [ { Note.loc = Loc.none
           ; message =
-              "The generated declaration is:\n" ^ declaration_source generated
+              "The generated declaration is:\n"
+              ^ declaration_source ?root_modules generated
           }
         ]
     | _ -> []

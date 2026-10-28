@@ -131,18 +131,20 @@ module Scope = struct
 
   (* The program's scopes are within the prelude, never inside its modules,
      so a prelude type is named by its full path within it, unless the
-     program shadows the path's first name. *)
+     program shadows the path's first name, then from the root, unless a
+     root module (of the outermost scope) does. *)
   let prelude_name enclosing relative =
-    let shadowed =
-      Prelude_path.shadowed relative ~has:(fun kind name ->
-        List.exists enclosing ~f:(fun t ->
-          Set.mem
-            (match kind with
-             | `Type -> t.types
-             | `Module -> t.modules)
-            name))
-    in
-    if shadowed then Prelude_path.canonical relative else relative
+    Prelude_path.to_string_hum
+      (Prelude_path.canonical relative)
+      ~shadowed:(fun relative ->
+        Prelude_path.shadowed relative ~has:(fun kind name ->
+          List.exists enclosing ~f:(fun t ->
+            Set.mem
+              (match kind with
+               | `Type -> t.types
+               | `Module -> t.modules)
+              name)))
+      ~root_modules:(List.last_exn enclosing).modules
   ;;
 
   let program_name enclosing canonical_name =

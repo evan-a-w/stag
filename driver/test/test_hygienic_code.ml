@@ -265,11 +265,11 @@ let%expect_test "derived" =
       type list['a] = Nil | Cons of 'a
       val to_string : 'a -> string
       val sexp_of_int : 'a -> 'a
-      val sexp_of_pair : int * int -> prelude.Core.Sexp.t
-      val show : prelude.Core.Sexp.t -> string
+      val sexp_of_pair : int * int -> .Core.Sexp.t
+      val show : .Core.Sexp.t -> string
       val local : int -> string
       val helped : int
-      val map : ('a -> 'b) -> prelude.list['a] -> prelude.list['b]
+      val map : ('a -> 'b) -> .list['a] -> .list['b]
       val code : <'a>{prelude.Core.Int.to_string : int -> 'a; ..'b}
     end
     --- output ---

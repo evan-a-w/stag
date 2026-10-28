@@ -137,6 +137,7 @@ module In_scope : sig
   type t =
     { types : String.Set.t
     ; modules : String.Set.t
+    ; root_modules : String.Set.t (** The program's root modules. *)
     }
 end
 
