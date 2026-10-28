@@ -409,17 +409,27 @@ end%inline
 ```
 
 The expansion is declarations, parsed but not checked: what is declared is
-what the splice generates, as without `%inline`, so a stale expansion never
-changes the program, and `stag check` and `stag run` ignore it. Testing
-(`stag test`, `stag-build test`) compares each expansion whose splice ran with
-the declarations generated, both printed, so modulo layout and comments, and a
-stale one (written or edited by hand, or after its generator changed) fails
-and is corrected as expect tests are, in the same corrected file: the
-generated declarations printed (references to declarations as their paths),
-indented by 2 from the splice's line, replacing the expansion and its comments
-(an empty expansion is written `include%inline .~e end%inline`). Splices
-within an expansion don't run. Generated splices have no expansion. Formatting
-formats the expansion, keeping its comments.
+what the splice generates, as without `%inline`, so that a stale expansion
+never changes the program's meaning. `stag check`, `stag run` and `stag-build
+build` warn of each stale expansion; testing (`stag test`, `stag-build test`)
+fails on them, and corrects them as expect tests are, in the same corrected
+file.
+
+An expansion is up to date when it prints as the generated declarations do
+(so modulo layout and comments), each resolved reference of the generated code
+to a declaration printed as the shortest suffix of its full path naming it from
+the splice. One that no suffix names there (eg. shadowed at the splice) is
+printed `<M.t>`, which doesn't parse, so its expansion is always stale. The
+correction is the generated declarations printed so, indented by 2 from the
+leading whitespace of the splice's line, with the file's line endings,
+replacing the expansion and its comments but not comments on the splice's line
+(an empty expansion is written `include%inline .~e end%inline`).
+
+The declarations of an up to date expansion are located as written, so errors
+in them, hover, definitions and the editor's outline point into the expansion
+rather than at the splice. Splices within an expansion don't run. Generated
+splices have no expansion. Formatting formats the expansion, keeping its
+comments.
 
 ## Reflection
 
