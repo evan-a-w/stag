@@ -107,6 +107,7 @@ let expr (expr : Typed.Expr.t) =
       p.loc
       (match p.desc with
        | Any -> Syntax.Pattern.Any
+       | Error (_ : Typed.Pattern.t list) -> raise Reached_error
        | Var ident -> Var (name names ident)
        | Lit lit -> Lit lit
        | Tuple ps -> Tuple (List.map ps ~f:go)

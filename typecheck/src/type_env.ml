@@ -66,10 +66,12 @@ type t =
   ; field_types : string String.Table.t
     (** The type declaring each constructor and field, whose entry in
         [constructors] or [fields] is added once it is checked. *)
+  ; report : Typecheck_error.t -> unit
   }
 
-let create fresh =
+let create fresh ~report =
   { fresh
+  ; report
   ; types = String.Table.create ()
   ; exceptions = String.Table.create ()
   ; constructors = String.Table.create ()
@@ -546,9 +548,11 @@ let check t name =
     define t decl
     |> Result.map_error ~f:(fun error ->
       decl.failed <- true;
-      if Typecheck_error.is_already_reported error
-      then error
-      else decl.wrap_error error)
+      (* Reported here, as the code that first used the declaration may be
+         abandoned, and later uses are [Already_reported]. *)
+      if not (Typecheck_error.is_already_reported error)
+      then t.report (decl.wrap_error error);
+      Typecheck_error.already_reported)
 ;;
 
 let find_decl_exn t name =

@@ -227,6 +227,7 @@ let rec pattern t ~syntax ~program (p : Typed.Pattern.t) =
       ~ty:p.ty
       ~ident:(Some ident)
   | Any | Lit _ -> typed ()
+  | Error ps -> List.iter ps ~f:recurse
   | Tuple ps ->
     typed ();
     List.iter ps ~f:recurse

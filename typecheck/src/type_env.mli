@@ -10,7 +10,7 @@ type t
 (** The builtin types, as declarations of the root module. *)
 val builtins : Syntax.Type_decl.t list
 
-val create : Fresh.t -> t
+val create : Fresh.t -> report:(Typecheck_error.t -> unit) -> t
 
 (** Declares [decl], a member of [module_], whose parameters are distinct.
     Types may refer to each other in any order, once declared. With [lazily],
@@ -35,7 +35,9 @@ val declare_exception
   -> Syntax.Type_expr.t list
   -> unit
 
-(** The checked declaration of the type of canonical name [name]. *)
+(** The checked declaration of the type of canonical name [name]. Its error,
+    the first time, is given to [create]'s [report], and [Already_reported]
+    returned. *)
 val check : t -> string -> (Signature.Type_decl.t, Typecheck_error.t) Result.t
 
 (** The parameters of the declaring type are [Generic] in [args] and [result],

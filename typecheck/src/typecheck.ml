@@ -60,6 +60,9 @@ module Toplevel = struct
       | Done of
           { entry : Env.Entry.t
           ; typed : Typed.Toplevel.t
+          ; failed : bool
+            (** Its component, or one it uses, had an error, so it is not run
+              at compile time. *)
           }
     [@@deriving sexp_of]
   end
@@ -106,11 +109,25 @@ let error ~loc kind = Error (Typecheck_error.create ~loc kind)
 
 (* Toplevels are checked on demand, so strongly connected components are found
    with Tarjan's algorithm as we go. [pending] are the visited toplevels whose
-   component is not yet complete. *)
+   component is not yet complete. [id] identifies the errors reported while
+   checking the frame's code. *)
 module Scc_frame = struct
   type t =
-    { mutable lowlink : int
+    { id : int
+    ; mutable lowlink : int
     ; mutable pending : Toplevel.t list
+    ; mutable failed : bool
+    }
+
+  let create id ~pending = { id; lowlink = id; pending; failed = false }
+end
+
+module Report = struct
+  type t =
+    { error : Typecheck_error.t
+    ; frame : int option
+      (** The [Scc_frame.id] of the code it is in, if its checking may be
+        abandoned. *)
     }
 end
 
@@ -134,18 +151,38 @@ module Program_env = struct
           finished. Code checked later can reach them, so once their
           component is finished, the variables not generalized are lowered to
           rank 0, so that later components don't generalize them. *)
-    ; mutable errors : Typecheck_error.t list (** Latest first. *)
+    ; mutable reports : Report.t list (** Latest first. *)
     ; mutable reported : int
-      (** How many errors were reported, [Already_reported] included. *)
+      (** How many errors were reported, [Already_reported] and forgotten
+          ones included. *)
+    ; mutable syntax_errors : bool
+      (** Whether the program has code that did not parse, reported by the
+          parser. *)
     ; splice_starts : int Stack.t
       (** The index each declaration splice being generated began at,
           innermost first. *)
     }
 
-  let report t (error : Typecheck_error.t) =
+  let report ?frame t error =
     t.reported <- t.reported + 1;
-    if not (Typecheck_error.is_already_reported error)
-    then t.errors <- error :: t.errors
+    t.reports <- { Report.error; frame } :: t.reports
+  ;;
+
+  let errors t =
+    List.filter_map t.reports ~f:(fun { error; frame = _ } ->
+      Option.some_if (not (Typecheck_error.is_already_reported error)) error)
+  ;;
+
+  (* Forgets the errors of the code of [frames], abandoned to be checked
+     anew. *)
+  let forget t ~frames =
+    t.reports
+    <- List.filter t.reports ~f:(fun { error = _; frame } ->
+         not
+           (Option.value_map
+              frame
+              ~default:false
+              ~f:(List.mem frames ~equal:Int.equal)))
   ;;
 
   let fresh_ident t name =
@@ -194,8 +231,11 @@ exception Uses_unfinished
    the error of that evaluation. *)
 exception Reflection_failed of Typecheck_error.t [@@deriving sexp_of]
 
+(* Raised by the interpreter: a bug, eg. ill-typed code that was run. *)
+exception Internal of exn
+
 (* Evaluates at compile time, reflecting on the program's types. *)
-let at_compile_time (program : Program_env.t) f ~error =
+let at_compile_time (program : Program_env.t) f ~loc ~error =
   let reflect name =
     let%bind.Result decl = Type_env.reflect program.type_env name in
     let%map.Result decl_type =
@@ -209,11 +249,21 @@ let at_compile_time (program : Program_env.t) f ~error =
     reflect name
     |> Result.map_error ~f:(fun error -> Error.of_exn (Reflection_failed error))
   in
-  f ~reflect
+  (match f ~reflect with
+   | result -> result
+   | exception Uses_unfinished -> raise Uses_unfinished
+   | exception exn -> Error (Error.of_exn (Internal exn)))
   |> Result.map_error ~f:(fun runtime_error ->
     match Error.to_exn runtime_error with
     | Reflection_failed reflection_error -> reflection_error
     | Treewalk.Reached_error -> Typecheck_error.already_reported
+    | Internal exn ->
+      Typecheck_error.create
+        ~loc
+        (Internal_error
+           (Error.tag_s
+              (Error.of_exn exn)
+              ~tag:[%message "Evaluating at compile time raised"]))
     | _ -> error runtime_error)
 ;;
 
@@ -254,11 +304,13 @@ module Scope = struct
   let instantiate ids t = Scheme.instantiate ids ~rank:t.rank
 
   let report t (error : Typecheck_error.t) =
+    let frame = t.scc.id in
     if Typecheck_error.is_already_reported error
-    then Program_env.report t.program error
+    then Program_env.report t.program error ~frame
     else
       Program_env.report
         t.program
+        ~frame
         (Module_scope.within
            t.module_
            (match t.generated with
@@ -271,10 +323,13 @@ module Scope = struct
     | Error error -> report t error
   ;;
 
-  let unify ids t ~ty1 ~ty2 ~loc =
-    Unify.unify_ty ids ~ty1 ~ty2
-    |> Result.map_error ~f:(Typecheck_error.unification_error ~loc)
-    |> report_if_error t
+  (* Whether they unify: if not, what checked is to become [Error]. *)
+  let unifies ids t ~ty1 ~ty2 ~loc =
+    match Unify.unify_ty ids ~ty1 ~ty2 with
+    | Ok () -> true
+    | Error error ->
+      report t (Typecheck_error.unification_error ~loc error);
+      false
   ;;
 
   let elaborate_resolved t annot =
@@ -606,7 +661,7 @@ let is_given fields (member : Type_env.Field.t) =
 ;;
 
 (* The record type of [fields], and each field with its location and its
-   [x]. *)
+   [x]. A missing required field is reported, and [Error] on [complete]. *)
 let resolve_record_fields (scope : Scope.t) fields ~all_required ~expected ~loc =
   let%bind.Result () =
     if List.is_empty fields then error ~loc Empty_record else Ok ()
@@ -647,13 +702,18 @@ let resolve_record_fields (scope : Scope.t) fields ~all_required ~expected ~loc 
          }))
       ~error:(fun name -> Repeated_field name)
   in
-  let%map.Result () =
+  let complete =
     match List.find known.members ~f:(Fn.non (is_given fields)) with
     | Some member when all_required ->
-      error ~loc (Missing_field (Type_env.Field.name member))
-    | Some _ | None -> Ok ()
+      Scope.report
+        scope
+        (Typecheck_error.create
+           ~loc
+           (Missing_field (Type_env.Field.name member)));
+      false
+    | Some _ | None -> true
   in
-  known, fields
+  Ok (known, fields, complete)
 ;;
 
 let declared_record (known : Type_env.Field.t Known.t) =
@@ -663,7 +723,7 @@ let declared_record (known : Type_env.Field.t Known.t) =
 (* Returns the instantiated record type, and each field with its [x] paired
    with its type. *)
 let record_fields t (scope : Scope.t) fields ~all_required ~expected ~loc =
-  let%bind.Result known, fields =
+  let%bind.Result known, fields, complete =
     resolve_record_fields scope fields ~all_required ~expected ~loc
   in
   let inst = Scope.instantiate t scope in
@@ -673,7 +733,7 @@ let record_fields t (scope : Scope.t) fields ~all_required ~expected ~loc =
     List.map fields ~f:(fun ((field : Type_env.Field.t), _, x) ->
       field_ref field, (x, inst field.ty))
   in
-  record, fields
+  record, fields, complete
 ;;
 
 (* Returns the field, the instantiated record type and the field's type. *)
@@ -773,8 +833,10 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
     let typed =
       List.map2_exn patterns expected ~f:(fun (pattern, ty) expected ->
         let pattern, bindings = pattern_type t scope ~pattern ?expected in
-        Scope.unify t scope ~ty1:ty ~ty2:pattern.ty ~loc:pattern.loc;
-        pattern, bindings)
+        ( (if Scope.unifies t scope ~ty1:ty ~ty2:pattern.ty ~loc:pattern.loc
+           then pattern
+           else Typed.Pattern.error [ pattern ] ~loc:pattern.loc)
+        , bindings ))
     in
     List.map typed ~f:fst, List.concat_map typed ~f:snd
   in
@@ -782,11 +844,11 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
      errors too. *)
   let fail error patterns =
     Scope.report scope error;
-    let (_ : Typed.Pattern.t list), bindings =
+    let patterns, bindings =
       sub_patterns
         (List.map patterns ~f:(fun pattern -> pattern, Scope.fresh_ty t scope))
     in
-    node Any Type.error, bindings
+    Typed.Pattern.error patterns ~loc, bindings
   in
   match Source.Pattern.view pattern with
   | Any -> node Any (Scope.fresh_ty t scope), []
@@ -821,7 +883,7 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
   | Record fields ->
     (match record_fields t scope fields ~all_required:false ~expected ~loc with
      | Error error -> fail error (List.map fields ~f:snd)
-     | Ok (record, fields) ->
+     | Ok (record, fields, (_ : bool)) ->
        let patterns, bindings = sub_patterns (List.map fields ~f:snd) in
        ( node (Record (List.zip_exn (List.map fields ~f:fst) patterns)) record
        , bindings ))
@@ -1002,7 +1064,7 @@ let resolution_type t (scope : Scope.t) ~name ~toplevel ~loc : Resolution.t -> _
   | Unusable kind -> error ~loc kind
 ;;
 
-let finish_scc t (program : Program_env.t) (members : Toplevel.t list) =
+let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
   let persistent = List.for_all members ~f:Toplevel.is_function in
   let recursive =
     List.exists members ~f:(fun member ->
@@ -1044,6 +1106,7 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) =
              { entry =
                  Env.Entry.toplevel ~ident:member.ident ~scheme:ty ~persistent
              ; typed
+             ; failed
              };
         index, typed
       | In_progress { body = None; _ } | Unchecked | Done _ ->
@@ -1187,7 +1250,14 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
     { entry with level = Int.min entry.level scope.level }
   in
   match toplevel.state with
-  | Done { entry; _ } -> Ok (at_scope_level entry)
+  | Done { failed = true; _ } when scope.level < 0 && Option.is_none scope.quote
+    ->
+    (* Code that did not check is not run. *)
+    scope.scc.failed <- true;
+    Error Typecheck_error.already_reported
+  | Done { entry; failed; typed = _ } ->
+    if failed then scope.scc.failed <- true;
+    Ok (at_scope_level entry)
   | In_progress in_progress ->
     let entry =
       Env.Entry.toplevel
@@ -1228,12 +1298,14 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
     let scc = check_toplevel t scope.program toplevel in
     scope.scc.lowlink <- Int.min scope.scc.lowlink scc.lowlink;
     scope.scc.pending <- scc.pending @ scope.scc.pending;
+    if scc.failed then scope.scc.failed <- true;
     toplevel_entry t scope toplevel ~loc
 
 and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
   let index = Fresh.id t in
-  let scc = { Scc_frame.lowlink = index; pending = [ toplevel ] } in
+  let scc = Scc_frame.create index ~pending:[ toplevel ] in
   let unfinished = Stack.length program.unfinished in
+  let reported = program.reported in
   let rank = 1 in
   let scope =
     { Scope.program
@@ -1275,6 +1347,7 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
       abandon program scc ~unfinished;
       raise Uses_unfinished
   in
+  if program.reported > reported then scc.failed <- true;
   (match toplevel.state with
    | In_progress in_progress -> in_progress.body <- Some body
    | Unchecked | Done _ ->
@@ -1282,7 +1355,7 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
        [%message "check_toplevel: not in progress" (toplevel : Toplevel.t)]);
   if scc.lowlink = index
   then (
-    finish_scc t program scc.pending;
+    finish_scc t program scc.pending ~failed:scc.failed;
     scc.pending <- [];
     while Stack.length program.unfinished > unfinished do
       Unify.lower_ty ~rank:0 (Stack.pop_exn program.unfinished)
@@ -1292,6 +1365,14 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
 (* Abandons the toplevels of [scc] with the splice whose code reached them,
    to be checked anew. *)
 and abandon (program : Program_env.t) (scc : Scc_frame.t) ~unfinished =
+  Program_env.forget
+    program
+    ~frames:
+      (scc.id
+       :: List.filter_map scc.pending ~f:(fun (toplevel : Toplevel.t) ->
+         match toplevel.state with
+         | In_progress { index; _ } -> Some index
+         | Unchecked | Done _ -> None));
   List.iter scc.pending ~f:(fun (toplevel : Toplevel.t) ->
     toplevel.state <- Unchecked);
   scc.pending <- [];
@@ -1328,7 +1409,9 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
   in
   match Source.Expr.view expr with
   | Lit l -> node (Lit l) (Syntax.Lit.ty l)
-  | Error -> node (Error []) Type.error
+  | Error ->
+    scope.program.syntax_errors <- true;
+    node (Error []) Type.error
   | Expect expected ->
     (* Only where it runs as part of the test: not at compile time nor in
        code. *)
@@ -1362,8 +1445,10 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
         | Some annot ->
           (match Scope.elaborate_resolved scope annot with
            | Ok (annot_ty, resolved) ->
-             Scope.unify t scope ~ty1:ty ~ty2:annot_ty ~loc;
-             node (Annotated (var, resolved)) ty
+             let annotated = node (Annotated (var, resolved)) ty in
+             if Scope.unifies t scope ~ty1:ty ~ty2:annot_ty ~loc
+             then annotated
+             else node (Error [ annotated ]) Type.error
            | Error error ->
              Scope.report scope error;
              var)))
@@ -1486,7 +1571,8 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
      | Ok subs ->
        (match scope.quote with
         | Some _ -> node (Splice { code; subs }) inner
-        | None when scope.program.reported > reported ->
+        | None
+          when scope.program.reported > reported || Typed.Expr.has_error code ->
           (* Code that did not check is not run. *)
           node
             (Error
@@ -1525,16 +1611,20 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
   | Record fields ->
     (match record_fields t scope fields ~all_required:true ~expected ~loc with
      | Error error -> fail error ~children:(infer (List.map fields ~f:snd))
-     | Ok (record, fields) ->
+     | Ok (record, fields, complete) ->
        let exprs = check_exprs t scope (List.map fields ~f:snd) in
-       node (Record (List.zip_exn (List.map fields ~f:fst) exprs)) record)
+       if complete
+       then node (Record (List.zip_exn (List.map fields ~f:fst) exprs)) record
+       else node (Error exprs) record)
   | Field (expr, field) when Option.is_some (Known.unqualified_field field) ->
     let expr = expr_type t scope ~expr in
     (match field_type t scope field ~record:(Some expr.ty) ~loc with
      | Error error -> fail error ~children:[ expr ]
      | Ok (field, record, field_ty) ->
-       Scope.unify t scope ~ty1:record ~ty2:expr.ty ~loc:expr.loc;
-       node (Field (expr, field)) field_ty)
+       let field = node (Field (expr, field)) field_ty in
+       if Scope.unifies t scope ~ty1:record ~ty2:expr.ty ~loc:expr.loc
+       then field
+       else node (Error [ field ]) Type.error)
   | Field (expr, field) ->
     (match field_type t scope field ~record:None ~loc with
      | Error error -> fail error ~children:(infer [ expr ])
@@ -1566,25 +1656,36 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
         with
         | Error error ->
           fail error ~children:(expr :: infer (List.map fields ~f:snd))
-        | Ok (known, fields) ->
+        | Ok (known, fields, (_ : bool)) ->
           let inst_in = Scope.instantiate t scope in
           let inst_out = Scope.instantiate t scope in
-          Scope.unify
-            t
-            scope
-            ~ty1:(inst_in (declared_record known))
-            ~ty2:expr.ty
-            ~loc:expr.loc;
-          let record = inst_out (declared_record known) in
-          Scope.report_if_error scope (unify_known t ~expected record ~loc);
-          List.filter known.members ~f:(Fn.non (is_given fields))
-          |> List.iter ~f:(fun (member : Type_env.Field.t) ->
-            Scope.unify
+          let unified =
+            Scope.unifies
               t
               scope
-              ~ty1:(inst_in member.ty)
-              ~ty2:(inst_out member.ty)
-              ~loc);
+              ~ty1:(inst_in (declared_record known))
+              ~ty2:expr.ty
+              ~loc:expr.loc
+          in
+          let record = inst_out (declared_record known) in
+          let unified =
+            match unify_known t ~expected record ~loc with
+            | Ok () -> unified
+            | Error error ->
+              Scope.report scope error;
+              false
+          in
+          let unified =
+            List.filter known.members ~f:(Fn.non (is_given fields))
+            |> List.fold ~init:unified ~f:(fun unified member ->
+              Scope.unifies
+                t
+                scope
+                ~ty1:(inst_in member.ty)
+                ~ty2:(inst_out member.ty)
+                ~loc
+              && unified)
+          in
           let exprs =
             check_exprs
               t
@@ -1592,13 +1693,16 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
               (List.map fields ~f:(fun ((field : Type_env.Field.t), _, expr) ->
                  expr, inst_out field.ty))
           in
-          node
-            (Record_update
-               ( expr
-               , List.zip_exn
-                   (List.map fields ~f:(fun (field, _, _) -> field_ref field))
-                   exprs ))
-            record))
+          let update =
+            node
+              (Record_update
+                 ( expr
+                 , List.zip_exn
+                     (List.map fields ~f:(fun (field, _, _) -> field_ref field))
+                     exprs ))
+              record
+          in
+          if unified then update else node (Error [ update ]) Type.error))
   | Match { scrutinee = expr; cases; exception_cases } ->
     let scrutinee = expr_type t scope ~expr in
     let result = Scope.fresh_ty t scope in
@@ -1610,15 +1714,25 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
       if scope.program.reported > before then patterns_failed := true;
       result
     in
-    (* A case of [pattern], typed with its [bindings], of type [ty]. *)
+    (* A case of [pattern], typed with its [bindings], of type [ty], and
+       whether the pattern is of [ty]. *)
     let case ~ty ((pattern : Typed.Pattern.t), bindings) body =
-      counting_errors (fun () ->
-        report_duplicates
-          scope
-          (List.map bindings ~f:(fun (var : Pattern_var.t) ->
-             { Located.txt = var.ident.name; loc = var.loc }))
-          ~error:(fun name -> Duplicate_pattern_variable name);
-        Scope.unify t scope ~ty1:ty ~ty2:pattern.ty ~loc:pattern.loc);
+      let pattern, unified =
+        counting_errors (fun () ->
+          let before = scope.program.reported in
+          report_duplicates
+            scope
+            (List.map bindings ~f:(fun (var : Pattern_var.t) ->
+               { Located.txt = var.ident.name; loc = var.loc }))
+            ~error:(fun name -> Duplicate_pattern_variable name);
+          let unified =
+            Scope.unifies t scope ~ty1:ty ~ty2:pattern.ty ~loc:pattern.loc
+          in
+          ( (if unified && scope.program.reported = before
+             then pattern
+             else Typed.Pattern.error [ pattern ] ~loc:pattern.loc)
+          , unified ))
+      in
       let body =
         with_monomorphic_bindings
           scope
@@ -1631,7 +1745,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
               ~ty:result
               ?expected:(either_known result expected))
       in
-      pattern, body
+      (pattern, body), unified
     in
     (match cases, exception_cases with
      | [], _ :: _ ->
@@ -1640,32 +1754,30 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
          scope
          (Typecheck_error.create ~loc Match_without_value_cases)
      | _ -> ());
-    let (_ : Variant_match.t), cases =
+    let (_ : Variant_match.t), (_ : Type.ty), cases =
       List.fold
         cases
-        ~init:(Variant_match.empty, [])
-        ~f:(fun (handled, typed_cases) (pattern, body) ->
+        ~init:(Variant_match.empty, scrutinee.ty, [])
+        ~f:(fun (handled, ty, typed_cases) (pattern, body) ->
           let typed_pattern =
             counting_errors (fun () ->
-              Variant_match.pattern_type
-                t
-                scope
-                handled
-                ~pattern
-                ~scrutinee:scrutinee.ty)
+              Variant_match.pattern_type t scope handled ~pattern ~scrutinee:ty)
           in
-          let ((pattern, _) as typed_case) =
-            case ~ty:scrutinee.ty typed_pattern body
+          let ((pattern, _) as typed_case), unified =
+            case ~ty typed_pattern body
           in
-          Variant_match.add_case handled pattern, typed_case :: typed_cases)
+          (* So that later cases don't report the same mismatch. *)
+          let ty = if unified then ty else Scope.fresh_ty t scope in
+          Variant_match.add_case handled pattern, ty, typed_case :: typed_cases)
     in
     let cases = List.rev cases in
     let exception_cases =
       List.map exception_cases ~f:(fun (pattern, body) ->
-        case
-          ~ty:Type.exn
-          (pattern_type t scope ~pattern ~expected:Type.exn)
-          body)
+        fst
+          (case
+             ~ty:Type.exn
+             (pattern_type t scope ~pattern ~expected:Type.exn)
+             body))
     in
     (match expr, cases with
      | _ when !patterns_failed -> ()
@@ -1680,8 +1792,11 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
          ~scrutinee:scrutinee.ty
          ~loc
          (List.map cases ~f:fst)
-       |> Scope.report_if_error scope);
-    node (Match { scrutinee; cases; exception_cases }) result
+       |> Result.iter_error ~f:(fun error ->
+         patterns_failed := true;
+         Scope.report scope error));
+    let match_ = node (Match { scrutinee; cases; exception_cases }) result in
+    if !patterns_failed then node (Error [ match_ ]) result else match_
   | Poly_record fields ->
     let fields = labelled_types t scope fields ~expected in
     node
@@ -1760,6 +1875,7 @@ and expand t (scope : Scope.t) ~code ~subs ~ty ~loc =
   in
   let%map.Result generated =
     at_compile_time
+      ~loc
       program
       (fun ~reflect ->
          Treewalk.splice
@@ -1809,8 +1925,9 @@ and check_expr ?expected t scope ~expr ~ty =
   let expr =
     expr_type t scope ~expr ~expected:(Option.value expected ~default:ty)
   in
-  Scope.unify t scope ~ty1:ty ~ty2:expr.ty ~loc:expr.loc;
-  expr
+  if Scope.unifies t scope ~ty1:ty ~ty2:expr.ty ~loc:expr.loc
+  then expr
+  else { desc = Error [ expr ]; ty = Type.error; loc = expr.loc }
 
 and check_exprs t scope exprs =
   List.map exprs ~f:(fun (expr, ty) -> check_expr t scope ~expr ~ty)
@@ -2044,7 +2161,7 @@ let toplevel_scope ?generated t program module_ ~level ~in_expect_test =
   ; locals = Env.create ()
   ; quote = None
   ; module_
-  ; scc = { Scc_frame.lowlink = Fresh.id t; pending = [] }
+  ; scc = Scc_frame.create (Fresh.id t) ~pending:[]
   ; annotation_vars = Type_env.Annotation_vars.create t ~rank
   ; in_expect_test
   ; generated
@@ -2149,7 +2266,6 @@ let generate t (program : Program_env.t) splice
     toplevel_scope t program module_ ~level:(-1) ~in_expect_test:false
   in
   let reported = program.reported in
-  let errors = program.errors in
   let unfinished = Stack.length program.unfinished in
   Stack.push program.splice_starts scope.scc.lowlink;
   match
@@ -2163,8 +2279,6 @@ let generate t (program : Program_env.t) splice
     (* Checked again once what it uses is finished. *)
     ignore (Stack.pop_exn program.splice_starts : int);
     abandon program scope.scc ~unfinished;
-    program.errors <- errors;
-    program.reported <- reported;
     Error Uses_unfinished
   | expr ->
     ignore (Stack.pop_exn program.splice_starts : int);
@@ -2177,6 +2291,7 @@ let generate t (program : Program_env.t) splice
     else (
       let%bind.Result value =
         at_compile_time
+          ~loc
           program
           (fun ~reflect ->
              Treewalk.run program.interpreter expr ~level:(-1) ~reflect)
@@ -2270,6 +2385,9 @@ let check_declarations t (program : Program_env.t) module_ =
       in
       match toplevel.txt with
       | Type decl ->
+        (match decl.kind with
+         | Malformed _ -> program.syntax_errors <- true
+         | Variant _ | Record _ | Alias _ | Abstract -> ());
         Type_env.check
           program.type_env
           (Module_scope.canonical_name module_ decl.name.txt)
@@ -2388,18 +2506,25 @@ let rec signature (program_env : Program_env.t) module_ ~complete =
 ;;
 
 let program_env t interpreter =
-  { Program_env.type_env = Type_env.create t
-  ; toplevels = String.Table.create ()
-  ; interpreter
-  ; ident_info = Typed.Ident.Map.empty
-  ; sccs = Queue.create ()
-  ; declaration_splices = Queue.create ()
-  ; unusable_in_quotes = String.Table.create ()
-  ; unfinished = Stack.create ()
-  ; errors = []
-  ; reported = 0
-  ; splice_starts = Stack.create ()
-  }
+  let report = ref (fun (_ : Typecheck_error.t) -> ()) in
+  let program_env =
+    { Program_env.type_env =
+        Type_env.create t ~report:(fun error -> !report error)
+    ; toplevels = String.Table.create ()
+    ; interpreter
+    ; ident_info = Typed.Ident.Map.empty
+    ; sccs = Queue.create ()
+    ; declaration_splices = Queue.create ()
+    ; unusable_in_quotes = String.Table.create ()
+    ; unfinished = Stack.create ()
+    ; reports = []
+    ; reported = 0
+    ; syntax_errors = false
+    ; splice_starts = Stack.create ()
+    }
+  in
+  (report := fun error -> Program_env.report program_env error);
+  program_env
 ;;
 
 (* The program's root module, within the prelude. *)
@@ -2444,7 +2569,7 @@ let prelude_signature ({ fresh; interpreter; prelude = _ } as t) =
   let program_env = program_env fresh interpreter in
   let prelude, (_ : Module_scope.t) = prelude_and_root t program_env in
   let (_ : _ list) = check_declarations fresh program_env prelude in
-  match program_env.errors with
+  match Program_env.errors program_env with
   | [] -> signature program_env prelude ~complete:true
   | error :: _ -> invalid_prelude error
 ;;
@@ -2465,17 +2590,34 @@ let check_module t (program_env : Program_env.t) module_
           (check_bench t program_env module_ ~name ~param ~body ~loc ~generated))
   in
   let expect_tests, benches = List.partition_map checked ~f:Fn.id in
-  let errors = sorted_errors program_env.errors ~root:module_ in
+  let program =
+    { Typed.Program.sccs = Queue.to_list program_env.sccs
+    ; expect_tests
+    ; benches
+    ; declaration_splices = Queue.to_list program_env.declaration_splices
+    ; ident_info = program_env.ident_info
+    }
+  in
+  let errors =
+    match sorted_errors (Program_env.errors program_env) ~root:module_ with
+    | [] when (not program_env.syntax_errors) && Typed.Program.has_error program
+      ->
+      (* Something failed to check, so the program must not run, though its
+         error was lost. *)
+      [ Module_scope.within
+          module_
+          (Typecheck_error.create
+             ~loc:Loc.none
+             (Internal_error
+                (Error.of_string
+                   "code failed to check but no error was reported")))
+      ]
+    | errors -> errors
+  in
   let checked =
     { Checked.signature =
         signature program_env module_ ~complete:(List.is_empty errors)
-    ; program =
-        { sccs = Queue.to_list program_env.sccs
-        ; expect_tests
-        ; benches
-        ; declaration_splices = Queue.to_list program_env.declaration_splices
-        ; ident_info = program_env.ident_info
-        }
+    ; program
     ; expansions = expansions module_
     }
   in

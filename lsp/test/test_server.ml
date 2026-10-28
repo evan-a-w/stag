@@ -471,6 +471,37 @@ let%expect_test "hover and definition in a file with errors" =
          |}])
 ;;
 
+let%expect_test "hover on the variables of a pattern that failed to check" =
+  Client.with_server
+    ~files:
+      [ ( "a.stag"
+        , "type t = Foo of nope\n\
+           let f v = match v with | Foo z -> z\n\
+           let g n = match n with | Some w -> Int.add w 1 | None -> 0\n\
+           let h = g 3\n" )
+      ]
+    (fun client ->
+       Client.did_open client "a.stag";
+       [%expect
+         {|
+         diagnostics a.stag (version 1):
+           0:16-0:20 error: Unbound type nope
+           3:10-3:11 error: This expression has type int but an expression was expected of type option[int]
+         |}];
+       List.iter
+         [ 1, 29; 1, 34; 2, 30; 2, 43 ]
+         ~f:(fun (line, character) ->
+           printf "%d:%d " line character;
+           hover client ~line ~character);
+       [%expect
+         {|
+         1:29 1:29-1:30 ```stag z : 'a ```
+         1:34 1:34-1:35 ```stag z : 'a ```
+         2:30 2:30-2:31 ```stag w : int ```
+         2:43 2:43-2:44 ```stag w : int ```
+         |}])
+;;
+
 let%expect_test "document symbols" =
   Client.with_server
     ~files:[ "a.stag", source ]

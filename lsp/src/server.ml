@@ -262,7 +262,16 @@ let check t ~uri (document : Document.t) =
       document.path
   with
   | exception exn ->
-    eprintf "stag lsp: checking %s: %s\n%!" document.path (Exn.to_string exn)
+    eprintf "stag lsp: checking %s: %s\n%!" document.path (Exn.to_string exn);
+    publish
+      t
+      ~path:document.path
+      [ Diagnostic.create
+          ~whole_file:true
+          ~loc:(Loc.start_of_file document.path)
+          ("Internal error in the checker: " ^ Exn.to_string exn)
+      ];
+    cover t ~uri (String.Set.singleton document.path)
   | result ->
     let generations =
       Set.union

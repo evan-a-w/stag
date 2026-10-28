@@ -88,6 +88,8 @@ module Pattern = struct
     let sub pattern = Generated pattern in
     match desc with
     | Any -> Any
+    | Error (_ : Typed.Pattern.t list) ->
+      raise_s [%message "Generated code has a pattern that failed to check"]
     | Var ident -> Var (Ident ident)
     | Lit lit -> Lit lit
     | Tuple patterns -> Tuple (List.map patterns ~f:sub)

@@ -262,3 +262,156 @@ let%expect_test "past 50 errors, only how many more" =
       ... and 3 more errors
       |}]
 ;;
+
+let%expect_test "compile-time code never runs what failed to check" =
+  check
+    {|let bad _ = Int.add 1 "x"
+let x = .~ (let _ = bad () in .< 1 >.)
+|};
+  check
+    {|let bad _ = String.length 5
+let x = .~ (print_int (bad ()); .< 1 >.)
+|};
+  check
+    {|let bad _ = (print_endline "side effect"; Int.add 1 "x")
+include .~ (let _ = bad () in Nil)
+let y = 1
+|};
+  check
+    {|let bad x = match x with | Some y -> Int.add y "a" | None -> 0
+let x = .~ (print_int (bad (Some 3)); .< 1 >.)
+|};
+  check
+    {|let indirect _ = Int.add 1 "x"
+let bad _ = indirect ()
+let x = .~ (let _ = bad () in .< 1 >.)
+|};
+  check
+    {|let f x = x.nonexistent_field
+let x = .~ (let _ = f 3 in .< 1 >.)
+|};
+  [%expect
+    {|
+    File "a.stag", line 1, characters 22-25:
+    1 | let bad _ = Int.add 1 "x"
+                              ^^^
+    Error: This expression has type string but an expression was expected of type int
+    File "a.stag", line 1, characters 26-27:
+    1 | let bad _ = String.length 5
+                                  ^
+    Error: This expression has type int but an expression was expected of type string
+    File "a.stag", line 1, characters 52-55:
+    1 | let bad _ = (print_endline "side effect"; Int.add 1 "x")
+                                                            ^^^
+    Error: This expression has type string but an expression was expected of type int
+    File "a.stag", line 1, characters 47-50:
+    1 | let bad x = match x with | Some y -> Int.add y "a" | None -> 0
+                                                       ^^^
+    Error: This expression has type string but an expression was expected of type int
+    File "a.stag", line 1, characters 27-30:
+    1 | let indirect _ = Int.add 1 "x"
+                                   ^^^
+    Error: This expression has type string but an expression was expected of type int
+    File "a.stag", line 1, characters 12-29:
+    1 | let f x = x.nonexistent_field
+                    ^^^^^^^^^^^^^^^^^
+    Error: Unbound record field nonexistent_field
+    |}]
+;;
+
+let%expect_test "a pattern that failed to check matches nothing at compile time"
+  =
+  check
+    {|type t = Foo of nope
+let classify v = match v with | Foo _ -> "foo" | _ -> "other"
+let x = .~ (print_endline (classify 3); .< 1 >.)
+|};
+  [%expect
+    {|
+    File "a.stag", line 1, characters 16-20:
+    1 | type t = Foo of nope
+                        ^^^^
+    Error: Unbound type nope
+    |}]
+;;
+
+let%expect_test "a mistake in the first of several patterns is reported once" =
+  check
+    {|let n = match 3 with | Some x -> x | None -> 0
+|};
+  [%expect
+    {|
+    File "a.stag", line 1, characters 23-29:
+    1 | let n = match 3 with | Some x -> x | None -> 0
+                               ^^^^^^
+    Error: This expression has type option['_a] but an expression was expected of type int
+    |}]
+;;
+
+let%expect_test "a record missing a field still has its type" =
+  check
+    {|type point = { x : int; y : int }
+let p = { x = 1 }
+let z = p.z
+let w : string = p
+|};
+  [%expect
+    {|
+    File "a.stag", line 2, characters 8-17:
+    2 | let p = { x = 1 }
+                ^^^^^^^^^
+    Error: Some record fields are undefined: A.y
+    File "a.stag", line 3, characters 10-11:
+    3 | let z = p.z
+                  ^
+    Error: The record type A.point has no field z
+    File "a.stag", line 4, characters 17-18:
+    4 | let w : string = p
+                         ^
+    Error: This expression has type A.point but an expression was expected of type string
+    |}]
+;;
+
+let%expect_test "errors of code checked by an abandoned splice attempt are kept"
+  =
+  check
+    {|let c = b
+include .~ (let _ = d in let _ = c in Nil)
+let b = zzz
+let d = Int.add 1 "s"
+|};
+  check
+    {|let c = b
+include .~ (let _ = d in Nil)
+let d = Int.add 1 "s"
+let b = 1
+|};
+  check
+    {|let a = .~ (let _ = d in let _ = c in .< 1 >.)
+let c = 2
+let d = Int.add 1 "s"
+|};
+  [%expect
+    {|
+    File "a.stag", line 3, characters 8-11:
+    3 | let b = zzz
+                ^^^
+    Error: Unbound value zzz
+    File "a.stag", line 2, characters 0-42:
+    2 | include .~ (let _ = d in let _ = c in Nil)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: This include, still being generated because its expression uses this code, may define it: move this code before the include or into another module
+    File "a.stag", line 3, characters 8-15:
+    3 | let d = Int.add 1 "s"
+                ^^^^^^^
+    Error: Int.add can't be resolved here: the include at a.stag:2:0-29 comes before this point and may define it, but it is still being generated (its expression uses this code). Move this code before the include or into another module
+    File "a.stag", line 2, characters 0-29:
+    2 | include .~ (let _ = d in Nil)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: The declaration splice is here
+    File "a.stag", line 3, characters 18-21:
+    3 | let d = Int.add 1 "s"
+                          ^^^
+    Error: This expression has type string but an expression was expected of type int
+    |}]
+;;

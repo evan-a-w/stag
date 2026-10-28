@@ -107,6 +107,7 @@ module Kind = struct
         ; error : t
         }
     | Already_reported
+    | Internal_error of Error.t
   [@@deriving sexp_of]
 end
 
@@ -376,6 +377,8 @@ let rec kind_message (kind : Kind.t) ~show_type =
       declaration
       (kind_message error ~show_type)
   | Already_reported -> "An error reported already"
+  | Internal_error error ->
+    sprintf "Internal error in the checker: %s" (Error.to_string_hum error)
 ;;
 
 let message { kind; loc = _; in_scope } =

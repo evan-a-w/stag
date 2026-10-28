@@ -297,6 +297,7 @@ let instantiate t (code : Typed.Expr.t) ~entry =
       | (Any | Lit _) as desc -> desc
       | Var ident -> Var (fresh ident)
       | Tuple patterns -> Tuple (List.map patterns ~f:pattern)
+      | Error patterns -> Error (List.map patterns ~f:pattern)
       | Construct (constructor, patterns) ->
         Construct (constructor, List.map patterns ~f:pattern)
       | Record fields ->
@@ -423,6 +424,7 @@ let pattern_mismatch pattern value =
 let rec match_pattern env (pattern : Typed.Pattern.t) (value : Value.t) =
   match pattern.desc, value with
   | Any, _ -> Ok true
+  | Error _, _ -> Error (Error.of_exn Reached_error)
   | Var ident, _ ->
     Env.set env ~ident ~value;
     Ok true

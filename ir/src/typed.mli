@@ -118,6 +118,9 @@ module Pattern : sig
           { fields : (string * 'p) list
           ; rest : Rest.t
           }
+      | Error of 'p list
+      (** What failed to check, of its parts that did. Matching it raises
+          [Reached_error]. *)
     [@@deriving sexp_of]
   end
 
@@ -134,6 +137,11 @@ module Pattern : sig
 
   (** The variables it binds, in order. *)
   val idents : t -> Ident.t list
+
+  (** Of [Type.error]. *)
+  val error : t list -> loc:Loc.t -> t
+
+  val has_error : t -> bool
 end
 
 (** [ty] is the type of the node, instantiated where it is a variable. *)
@@ -225,6 +233,9 @@ module Expr : sig
   (** The children of [t], in order. *)
   val sub_exprs : t -> t list
 
+  (** Whether [t] has an [Error] node or pattern: what failed to check. *)
+  val has_error : t -> bool
+
   (** Whether [t] refers to a binder satisfying [f], by a [Bound] or
       [Persistent] variable or an [Implicit] substitution. *)
   val refers_to : t -> f:(Binder.t -> bool) -> bool
@@ -302,4 +313,7 @@ module Program : sig
     ; ident_info : Ident_info.t Ident.Map.t
     }
   [@@deriving sexp_of]
+
+  (** Whether any of its expressions [Expr.has_error]. *)
+  val has_error : t -> bool
 end
