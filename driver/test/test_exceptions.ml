@@ -657,3 +657,72 @@ let main = print_int (catch 1000 0)
     Error: Uncaught exception A.E (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf)), A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf))), A.Node (A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf)), A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf)))), A.Node (A.Node (A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf)), A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf))), A.Node (A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf)), A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf))))), A.Node (A.Node (A.No...
     |}]
 ;;
+
+let run_tests_only contents =
+  match
+    Driver.check_files
+      ~limits:Source_helpers.limits
+      [ { Source_file.path = "a.stag"; contents } ]
+  with
+  | Error error -> print_diagnostic ~contents (Diagnostic.of_driver_error error)
+  | Ok driver ->
+    Expect_test_runner.run ~limits:Source_helpers.limits driver
+    |> List.concat_map ~f:Diagnostic.of_test_result
+    |> List.iter ~f:(print_diagnostic ~contents)
+;;
+
+let%expect_test
+    "a toplevel's initialization raising can't be handled by its users"
+  =
+  run
+    {|
+exception E
+let x = raise E
+let y = .~(match x with n -> .<1>. | exception E -> .<2>.)
+let z = .~(match x with n -> .<1>. | exception E -> .<3>.)
+|};
+  [%expect
+    {|
+    File "a.stag", line 4, characters 8-58:
+    4 | let y = .~(match x with n -> .<1>. | exception E -> .<2>.)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This toplevel splice failed at compile time: Initialization of A.x raised A.E
+    File "a.stag", line 3, characters 8-15:
+    3 | let x = raise E
+                ^^^^^^^
+    Note: The error was raised here
+    |}];
+  run
+    {|
+exception E
+let x = Int.add 1 (raise E)
+let main = match x with n -> print_int n | exception E -> print_endline "caught"
+|};
+  [%expect
+    {|
+    File "a.stag", line 3, characters 18-27:
+    3 | let x = Int.add 1 (raise E)
+                          ^^^^^^^^^
+    Error: Uncaught exception A.E
+    |}];
+  (* Each test forces [x], the first evaluating it. *)
+  run_tests_only
+    {xx|
+exception E
+let x = Int.add 1 (raise E)
+let%expect_test "first" = match x with n -> print_int n | exception E -> print_endline "caught"
+let%expect_test "second" = match x with n -> print_int n | exception E -> print_endline "caught"
+let%expect_test "unrelated" = print_endline "fine"; [%expect {| fine |}]
+|xx};
+  [%expect
+    {|
+    File "a.stag", line 3, characters 18-27:
+    3 | let x = Int.add 1 (raise E)
+                          ^^^^^^^^^
+    Error: Expect test "first" failed: Initialization of A.x raised A.E
+    File "a.stag", line 3, characters 18-27:
+    3 | let x = Int.add 1 (raise E)
+                          ^^^^^^^^^
+    Error: Expect test "second" failed: Initialization of A.x raised A.E
+    |}]
+;;

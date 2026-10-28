@@ -23,6 +23,12 @@ module Pending = struct
   type t =
     | Component of Typed.Scc.t (** None of its members' closures are bound. *)
     | Value of Typed.Expr.t
+    | Failed of
+        { error : Error.t
+        ; uncatchable : Error.t
+          (** As [error], but no [match] can handle it, as the toplevel's
+            users can't handle its failure. *)
+        }
 end
 
 type t =
@@ -494,14 +500,39 @@ let rec force t ident =
   | Some (Component scc) ->
     let%bind () = bind_functions t scc in
     force t ident
+  | Some (Failed { error; uncatchable = _ }) -> Error error
   | Some (Value body) ->
     Hashtbl.remove t.pending ident;
     declare_toplevel t ident;
-    let%map value = eval t ~env:(Env.create ()) ~level:0 body in
-    Env.set t.env ~ident ~value
+    (match eval t ~env:(Env.create ()) ~level:0 body with
+     | Ok value ->
+       Env.set t.env ~ident ~value;
+       Ok ()
+     | Error error ->
+       let uncatchable =
+         match Runtime_error.of_error error with
+         | Some ({ kind = Raised exn; loc } : Runtime_error.t) ->
+           Runtime_error.to_error
+             (Runtime_error.create
+                ~loc
+                (sprintf
+                   "Initialization of %s raised %s"
+                   ident.name
+                   (Value.to_string_for_message exn)))
+         | Some { kind = Message _; loc = _ } | None -> error
+       in
+       Hashtbl.set t.pending ~key:ident ~data:(Failed { error; uncatchable });
+       Error error)
 
 and lookup t env ident ~loc =
-  let%bind () = force t ident in
+  let%bind () =
+    match force t ident with
+    | Ok () -> Ok ()
+    | Error error ->
+      (match Hashtbl.find t.pending ident with
+       | Some (Failed { uncatchable; error = _ }) -> Error uncatchable
+       | Some (Component _ | Value _) | None -> Error error)
+  in
   match Env.find_slot ~fallback:t.env env ident with
   | Some { contents = None } ->
     runtime_error
