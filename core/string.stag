@@ -1,5 +1,6 @@
-(* Functions take the function first, as OCaml's [Stdlib.String]. Out of bounds
-   indices are runtime errors in [get] and [sub]. *)
+(* As OCaml's [Stdlib.String]: functions taking a function take it first, the
+   others the string. Out of bounds indices are runtime errors in [get] and
+   [sub]. *)
 
 let length = Prim.String.length
 let get = Prim.String.get

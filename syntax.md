@@ -190,38 +190,46 @@ checking had run when it stopped); a spliced module's declarations count.
 
 ## Core library
 
-The prelude's module `Core` is a small standard library in the style of Base,
-written in stag in the top-level directory `core/`: each file is a submodule
-named after it (`core/list.stag` is `Core.List`), and the files refer to each
-other as siblings (`List.map` within `core/` is `Core.List.map`). Like the rest
-of the prelude it is checked only when used, so a program that does not use it
-is unaffected, and a program's (or stag-build library's) own `Core` shadows
-it. Its locations are in the files `<core>/list.stag` etc.
+The prelude's module `Core` is a small standard library, written in stag in the
+top-level directory `core/`: each file is a submodule named after it
+(`core/list.stag` is `Core.List`), and the files refer to each other as
+siblings (`List.map` within `core/` is `Core.List.map`). Like the rest of the
+prelude it is checked only when used, so a program that does not use it is
+unaffected, and a program's (or stag-build library's) own `Core` shadows it.
+Its locations are in the files `<core>/list.stag` etc.
+
+Its names and argument orders are those of OCaml's Stdlib where it has the
+function (functions first, `String.sub s pos len`), with a few from Base
+(`Option.first_some`, `String.strip`). Partial functions return options
+(`List.hd`, `List.nth`, `Int.of_string`, `List.map2` on lists of different
+lengths). Functions on lists run in constant stack. Each file's helpers are in
+its submodule `Internal`, not meant for use outside `core/`.
 
 - `Core.List`, `Core.Option`, `Core.Result`: the usual combinators on the
   prelude's types (`map`, `fold_left`, `filter_map`, `find`, `zip`, `assoc`, a
-  stable `sort`, `Option.value`, `Result.bind`, `Result.all`, ...). Partial
-  functions return options (`List.hd`, `List.nth`, `Int.of_string_opt`).
+  stable `sort`, `Option.value`, `Result.bind`, `Result.all`, ...).
 - `Core.Int`, `Core.Char`, `Core.Bool`, `Core.String`: the prims of their
   name, re-exported, and helpers on them (`String.concat sep parts`,
   `split_on_char`, `strip`, `escaped`, `Char.is_digit`, ...).
 - `Core.Sexp`: `type t = Atom of string | List of list[t]`, printed and parsed
-  as by OCaml's Sexplib. `to_string` quotes and escapes atoms only when needed
-  (`(a "b c" (d))`); `to_string_hum` puts each element of a list on its own
-  line when it does not fit in 80 columns. `of_string` (and `of_string_many`)
-  read the same syntax: `;` line comments, quoted atoms with OCaml's escapes
-  and `\`-newline continuations (block `#| |#` and sexp `#;` comments are not
-  supported); they return `result[t, Parse_error.t]`, a message with the
-  offset, line (from 1) and column (from 0) of the error.
+  exactly as by OCaml's Sexplib and Parsexp (checked against them in
+  `driver/test/test_core_sexp.ml`). `to_string` is Sexplib's machine format
+  (`(a"b c"(d)e()f)`), and `to_string_hum` its human one, packing lists onto
+  lines of 78 columns as `Format` does. `of_string` (one sexp) and
+  `of_string_many` accept what Parsexp's `Single` and `Many` do, comments
+  included, and fail with its messages, as `result[_, Parse_error.t]`: a
+  message with the offset, line (from 1) and column (from 0) of the error.
 - Conversions for derived code: `sexp_of_X` and `X_of_sexp` for `unit`,
   `bool`, `int`, `char`, `string`, `list`, `option`, `result` and pairs and
   triples (`sexp_of_pair`, `triple_of_sexp`), the container ones taking those
-  of their elements. Stag has no exceptions, so `X_of_sexp` returns
-  `result[X, Of_sexp_error.t]`: a message and the sexp that failed, which for
-  containers is the innermost failing element.
+  of their elements. `X_of_sexp` returns `result[X, Of_sexp_error.t]`: a
+  message and the sexp that failed, which for containers is the innermost
+  failing element.
 
 Since a file of `core/` shadows the prims of its name (`Core.String` hides
-`String.length`), the prelude alone can name prims as `Intrinsic.String.length`.
+`String.length`), the prelude (only) can name any prim `Prim.<prim>`
+(`Prim.String.length`), a path that nothing shadows. This is for values only;
+prims have no types or modules.
 
 ## Declaration splices
 
