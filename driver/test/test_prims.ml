@@ -331,3 +331,36 @@ let y = print_string "run"
       ("after eval" "compile run")
       |}]
 ;;
+
+let%expect_test "only the prelude names prims as [Prim.*]" =
+  run ~eval:false {| let a = Prim.String.length |};
+  [%expect {| ((Unbound_module Prim) @ t.stag:1:9-13) |}];
+  run
+    {|
+module Prim = struct
+  module String = struct let length s = 7 end
+end
+module String = struct let length s = 8 end
+let a = Prim.String.length "ab"
+let b = String.length "ab"
+let c = Core.String.length "ab"
+let main = print_int a; print_int b; print_int c
+|};
+  [%expect
+    {|
+    module Prim : sig
+      module String : sig
+        val length : 'a -> int
+      end
+    end
+    module String : sig
+      val length : 'a -> int
+    end
+    val a : int
+    val b : int
+    val c : int
+    val main : unit
+    ---
+    782
+    |}]
+;;

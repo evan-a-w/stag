@@ -13,6 +13,8 @@ module Value : sig
     | String of string
     | Char of char
     | Unit
+    | String_list of string list
+    (** The prelude's [list[string]], only taken. *)
   [@@deriving sexp_of]
 end
 

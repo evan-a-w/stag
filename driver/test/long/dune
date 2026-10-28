@@ -1,0 +1,8 @@
+; Apart from the other tests, to run in parallel with them.
+
+(library
+ (name test_long)
+ (preprocess
+  (pps ppx_jane))
+ (inline_tests)
+ (libraries core stag_common stag_syntax stag_driver))

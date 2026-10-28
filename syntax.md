@@ -275,11 +275,13 @@ prims:
 ```ocaml
 type list['a] = Nil | Cons of 'a * list['a]
 type option['a] = None | Some of 'a
+type result['a, 'e] = Ok of 'a | Error of 'e
 exception Division_by_zero
 exception Invalid_argument of string
 exception Failure of string
 val raise : exn -> 'a
 module Stag = struct ... end      (* the syntax as data, see below *)
+module Core = struct ... end      (* the core library, see below *)
 ```
 
 Its toplevels are checked only when used. Its names have no syntax of their
@@ -291,6 +293,56 @@ locations are in the file `<prelude>`. In a message, a prelude type or module
 is shadowed if a type or module of its name is declared in a module enclosing
 the error, other than by an include (so that it does not depend on which includes
 checking had run when it stopped); a spliced module's declarations count.
+
+## Core library
+
+The prelude's module `Core` is a small standard library, written in stag in the
+top-level directory `core/`: each file is a submodule named after it
+(`core/list.stag` is `Core.List`), and the files refer to each other as
+siblings (`List.map` within `core/` is `Core.List.map`). Like the rest of the
+prelude it is checked only when used, so a program that does not use it is
+unaffected, and a program's (or stag-build library's) own `Core` shadows it.
+Its locations are in the files `<core>/list.stag` etc.
+
+Its names and argument orders are those of OCaml's Stdlib where it has the
+function (functions first, `String.sub s pos len`), with a few from Base
+(`Option.first_some`, `String.strip`). Partial functions return options
+(`List.hd`, `List.nth`, `Int.of_string`, `List.map2` on lists of different
+lengths), and most have an `_exn` variant raising `Failure` (`List.hd_exn`,
+`Int.of_string_exn`, `Option.value_exn`, `Result.ok_exn`); `Sexp.of_string_exn`
+raises `Sexp.Parse_error of Sexp.Parse_error.t`, and `Sexp.of_sexp_exn
+int_of_sexp t` raises `Sexp.Of_sexp_error of Sexp.Of_sexp_error.t`. Out of
+range indices (`String.get`, `String.sub`) and division by zero are
+programming errors, raising the prelude's `Invalid_argument` and
+`Division_by_zero` as the prims do. Functions on lists run in constant stack.
+Each file's helpers are in its submodule `Internal`, not meant for use outside
+`core/`.
+
+- `Core.List`, `Core.Option`, `Core.Result`: the usual combinators on the
+  prelude's types (`map`, `fold_left`, `filter_map`, `find`, `zip`, `assoc`, a
+  stable `sort`, `Option.value`, `Result.bind`, `Result.all`, ...).
+- `Core.Int`, `Core.Char`, `Core.Bool`, `Core.String`: the prims of their
+  name, re-exported, and helpers on them (`String.concat sep parts`,
+  `split_on_char`, `strip`, `escaped`, `Char.is_digit`, ...).
+- `Core.Sexp`: `type t = Atom of string | List of list[t]`, printed and parsed
+  exactly as by OCaml's Sexplib and Parsexp (checked against them in
+  `driver/test/test_core_sexp.ml`). `to_string` is Sexplib's machine format
+  (`(a"b c"(d)e()f)`), and `to_string_hum` its human one, packing lists onto
+  lines of 78 columns as `Format` does. `of_string` (one sexp) and
+  `of_string_many` accept what Parsexp's `Single` and `Many` do, comments
+  included, and fail with its messages, as `result[_, Parse_error.t]`: a
+  message with the offset, line (from 1) and column (from 0) of the error.
+- Conversions for derived code: `sexp_of_X` and `X_of_sexp` for `unit`,
+  `bool`, `int`, `char`, `string`, `list`, `option`, `result` and pairs and
+  triples (`sexp_of_pair`, `triple_of_sexp`), the container ones taking those
+  of their elements. `X_of_sexp` returns `result[X, Of_sexp_error.t]`: a
+  message and the sexp that failed, which for containers is the innermost
+  failing element.
+
+Since a file of `core/` shadows the prims of its name (`Core.String` hides
+`String.length`), the prelude (only) can name any prim `Prim.<prim>`
+(`Prim.String.length`), a path that nothing shadows. This is for values only;
+prims have no types or modules.
 
 ## Declaration splices
 
@@ -497,6 +549,11 @@ val n : int @@ const      (* modalities on signature items and fields *)
 ```
 
 ### Other
+
+- Core for derived code: generated code naming `Core.Sexp.sexp_of_int` breaks
+  where the program shadows `Core` (a module or stag-build library of that
+  name). Either give the prelude an unshadowable path, or resolve spliced
+  references to canonical prelude names.
 
 `if`, infix operators (`let (+) x y = ...`, OCaml precedences),
 interface files.

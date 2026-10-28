@@ -244,6 +244,11 @@ let to_string_hum
       ?(warning = false)
       { loc; whole_file; message; notes }
   =
+  let contents file =
+    match contents file with
+    | Some contents -> Some contents
+    | None -> Prelude.source file
+  in
   (located ~contents ~whole_file loc
    @ [ (if warning then "Warning: " else "Error: ") ^ message ])
   @ List.concat_map notes ~f:(fun { loc; message } ->

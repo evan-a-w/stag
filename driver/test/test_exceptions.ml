@@ -510,9 +510,21 @@ let main = match loop 0 with n -> n | exception e -> 0
 |};
   [%expect
     {|
-    File "a.stag", line 2, characters 13-17:
+    File "a.stag", line 2, characters 13-19:
     2 | let loop n = loop n
-                     ^^^^
+                     ^^^^^^
+    Error: Out of fuel: evaluation took more than 1000000 steps
+    |}];
+  run
+    {|
+let deep n = Int.add 1 (deep n)
+let main = match deep 0 with n -> n | exception e -> 0
+|};
+  [%expect
+    {|
+    File "a.stag", line 2, characters 13-20:
+    2 | let deep n = Int.add 1 (deep n)
+                     ^^^^^^^
     Error: Stack depth exceeded: evaluation nested more than 10000 steps deep
     |}]
 ;;

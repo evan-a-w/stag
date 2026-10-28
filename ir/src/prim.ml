@@ -7,6 +7,7 @@ module Value = struct
     | String of string
     | Char of char
     | Unit
+    | String_list of string list
   [@@deriving sexp_of]
 end
 
@@ -25,6 +26,7 @@ module Base_type = struct
     | String
     | Char
     | Unit
+    | String_list
 
   let ty : t -> Type.ty = function
     | Int -> Type.int
@@ -32,6 +34,7 @@ module Base_type = struct
     | String -> Type.string
     | Char -> Type.char
     | Unit -> Type.unit
+    | String_list -> TCon (Prelude_path.canonical "list", [ ATy Type.string ])
   ;;
 end
 
@@ -171,6 +174,11 @@ let all =
            | Some n -> Ok (Value.Int n)
            | None ->
              Error (Failure (sprintf "Int.of_string_exn: invalid integer %S" s)))
+      | _ -> None)
+  ; binary "String.concat" [ String; String_list ] String (fun a b ->
+      match a, b with
+      | String sep, String_list parts ->
+        ok (Value.String (String.concat ~sep parts))
       | _ -> None)
   ; binary "String.append" [ String; String ] String (fun a b ->
       match a, b with

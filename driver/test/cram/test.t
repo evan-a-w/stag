@@ -235,11 +235,25 @@ Limits apply to tests, evaluation and compile time.
   > let%expect_test "loop" = loop 0
   > let%expect_test "fine" = print_int 1; [%expect {| 1 |}]
   > EOF
-  $ stag test -max-depth 1000 loop.stag
-  File "loop.stag", line 1, characters 19-26:
+Tail calls do not nest, so only fuel and time stop [loop], and the depth stops
+non-tail recursion.
+
+  $ cat > deep.stag <<'EOF'
+  > let deep n = Int.add 1 (deep n)
+  > let%expect_test "deep" = print_int (deep 0)
+  > EOF
+  $ stag test -max-depth 1000 deep.stag
+  File "deep.stag", line 1, characters 13-20:
+  1 | let deep n = Int.add 1 (deep n)
+                   ^^^^^^^
+  Error: Expect test "deep" failed: Stack depth exceeded: evaluation nested more than 1000 steps deep
+  1 of 1 test(s) failed
+  [1]
+  $ stag test -max-depth 1000 -fuel 100000 loop.stag
+  File "loop.stag", line 1, characters 18-31:
   1 | let loop n = loop (Int.add n 1)
-                         ^^^^^^^
-  Error: Expect test "loop" failed: Stack depth exceeded: evaluation nested more than 1000 steps deep
+                        ^^^^^^^^^^^^^
+  Error: Expect test "loop" failed: Out of fuel: evaluation took more than 100000 steps
   1 of 2 test(s) failed
   [1]
   $ stag test -fuel 1000 loop.stag

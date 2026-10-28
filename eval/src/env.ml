@@ -3,7 +3,7 @@ open Or_error.Let_syntax
 
 type 'value t = { values : 'value option ref Typed.Ident.Table.t }
 
-let create () = { values = Typed.Ident.Table.create () }
+let create () = { values = Typed.Ident.Table.create ~size:4 () }
 let copy t = { values = Hashtbl.copy t.values }
 let mem t ident = Hashtbl.mem t.values ident
 

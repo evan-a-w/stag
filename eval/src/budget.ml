@@ -36,12 +36,19 @@ let exceeded t =
   | _ -> None
 ;;
 
-let step t ~loc ~f =
+let tail_step t ~loc =
   match exceeded t with
   | Some message ->
     Error (Runtime_error.to_error (Runtime_error.create ~loc message))
   | None ->
     t.steps <- t.steps + 1;
+    Ok ()
+;;
+
+let step t ~loc ~f =
+  match tail_step t ~loc with
+  | Error _ as error -> error
+  | Ok () ->
     t.depth <- t.depth + 1;
     let result = f () in
     t.depth <- t.depth - 1;

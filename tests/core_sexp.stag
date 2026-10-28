@@ -1,0 +1,549 @@
+(* [Core.Sexp]: printing, parsing, and conversions to and from sexps. *)
+
+let print_bool b = print_endline (Core.Bool.to_string b)
+let print_sexp t = print_endline (Core.Sexp.to_string t)
+
+let print_int_list l =
+  print_sexp (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int l)
+
+let atom s = Core.Sexp.Atom s
+let list l = Core.Sexp.List l
+
+let print_parse s =
+  match Core.Sexp.of_string s with
+  | Ok t -> print_endline (Core.String.append "Ok " (Core.Sexp.to_string_hum t))
+  | Error e ->
+    print_endline
+      (Core.String.append "Error " (Core.Sexp.Parse_error.to_string e))
+
+(* Prints [t], parses it back, and says whether that gave [t]. *)
+let round_trip t =
+  let printed = Core.Sexp.to_string t in
+  let hum = Core.Sexp.to_string_hum t in
+  let same s =
+    match Core.Sexp.of_string s with
+    | Ok parsed -> Core.Sexp.equal parsed t
+    | Error e -> false
+  in
+  print_string printed;
+  match (same printed, same hum) with
+  | true, true -> print_endline "  round trips"
+  | _ -> print_endline "  DOES NOT ROUND TRIP"
+
+let%expect_test "to_string" =
+  print_sexp (atom "a");
+  print_sexp (list Nil);
+  print_sexp
+    (list
+       (Cons
+          (atom "a",
+           Cons
+             (atom "b",
+              Cons (list (Cons (atom "c", Cons (atom "d", Nil))), Nil)))));
+  print_sexp (list (Cons (list Nil, Cons (list (Cons (list Nil, Nil)), Nil))));
+  [%expect {|
+    a
+    ()
+    (a b(c d))
+    (()(()))
+    |}]
+
+let%expect_test "atoms are quoted only when needed" =
+  let atoms =
+    Cons
+      ("plain",
+       Cons
+         ("with-dash_and.dot",
+          Cons
+            ("123",
+             Cons
+               ("",
+                Cons
+                  ("a b",
+                   Cons
+                     ("a\tb",
+                      Cons
+                        ("line\nbreak",
+                         Cons
+                           ("(",
+                            Cons
+                              (")",
+                               Cons
+                                 ("a;b",
+                                  Cons
+                                    ("say \"hi\"",
+                                     Cons
+                                       ("back\\slash",
+                                        Cons
+                                          ("#|",
+                                           Cons
+                                             ("a|#",
+                                              Cons
+                                                ("#",
+                                                 Cons
+                                                   ("|",
+                                                    Cons
+                                                      ("#a|",
+                                                       Cons
+                                                         ("'quote'",
+                                                          Cons
+                                                            ("café",
+                                                             Cons
+                                                               ("\000\127",
+                                                                Cons
+                                                                  ("~!@$%^&*",
+                                                                   Nil)))))))))))))))))))))
+  in
+  Core.List.iter round_trip (Core.List.map atom atoms);
+  [%expect {|
+    plain  round trips
+    with-dash_and.dot  round trips
+    123  round trips
+    ""  round trips
+    "a b"  round trips
+    "a\tb"  round trips
+    "line\nbreak"  round trips
+    "("  round trips
+    ")"  round trips
+    "a;b"  round trips
+    "say \"hi\""  round trips
+    "back\\slash"  round trips
+    "#|"  round trips
+    "a|#"  round trips
+    #  round trips
+    |  round trips
+    #a|  round trips
+    'quote'  round trips
+    "caf\195\169"  round trips
+    "\000\127"  round trips
+    ~!@$%^&*  round trips
+    |}]
+
+let%expect_test "nested round trips" =
+  round_trip (list Nil);
+  round_trip
+    (list
+       (Cons
+          (list Nil,
+           Cons (atom "", Cons (list (Cons (atom "a b", Nil)), Nil)))));
+  round_trip
+    (list
+       (Cons
+          (atom "key",
+           Cons (list (Cons (atom "x\"y", Cons (atom "\\", Nil))), Nil))));
+  [%expect {|
+    ()  round trips
+    (()""("a b"))  round trips
+    (key("x\"y""\\"))  round trips
+    |}]
+
+let%expect_test "to_string_hum" =
+  let numbers n =
+    list (Core.List.map Core.Sexp.sexp_of_int (Core.List.init n Core.Int.succ))
+  in
+  print_endline (Core.Sexp.to_string_hum (numbers 5));
+  print_endline (Core.Sexp.to_string_hum (atom "a b"));
+  print_endline (Core.Sexp.to_string_hum (numbers 30));
+  let record =
+    list
+      (Cons
+         (list
+            (Cons
+               (atom "name",
+                Cons (atom "a long name for a record field", Nil))),
+          Cons
+            (list (Cons (atom "values", Cons (numbers 12, Nil))),
+             Cons (list (Cons (atom "empty", Cons (list Nil, Nil))), Nil))))
+  in
+  print_endline (Core.Sexp.to_string_hum record);
+  [%expect {|
+    (1 2 3 4 5)
+    "a b"
+    (1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28
+     29 30)
+    ((name "a long name for a record field")
+     (values (1 2 3 4 5 6 7 8 9 10 11 12)) (empty ()))
+    |}]
+
+let%expect_test "of_string" =
+  print_parse "a";
+  print_parse "  (a b (c d))  ";
+  print_parse "()";
+  print_parse "(())";
+  print_parse "(a(b)c)";
+  print_parse "\n\t( a\r\n b )\n";
+  print_parse "(a ; a comment\n b) ; another";
+  print_parse "(a;comment)";
+  print_parse "a\"b\"";
+  print_parse "(\"\" \"a b\")";
+  print_parse "#|not-a-comment|#";
+  [%expect {|
+    Ok a
+    Ok (a b (c d))
+    Ok ()
+    Ok (())
+    Ok (a (b) c)
+    Ok (a b)
+    Ok (a b)
+    Error line 1, column 11: unclosed parentheses at end of input
+    Error line 1, column 1: s-expression followed by data
+    Ok ("" "a b")
+    Error line 1, column 17: no s-expression found in input
+    |}]
+
+let%expect_test "of_string: escapes in quoted atoms" =
+  let show s =
+    match Core.Sexp.of_string s with
+    | Ok (Core.Sexp.Atom a) ->
+      print_string s;
+      print_string " -> ";
+      print_endline (Core.String.escaped a)
+    | Ok t -> print_sexp t
+    | Error e -> print_endline (Core.Sexp.Parse_error.to_string e)
+  in
+  show "\"\\n\\t\\r\\b\\\\\\\"\\'\\ \"";
+  show "\"\\065\\x42\\x6a\\255\\000\"";
+  show "\"\\q\\(\"";
+  show "\"split \\\n     across lines\"";
+  show "\"literal\nnewline\"";
+  show "\"café\"";
+  [%expect {|
+    "\n\t\r\b\\\"\'\ " -> \n\t\r\b\\\"'\\
+    "\065\x42\x6a\255\000" -> ABj\255\000
+    "\q\(" -> \\q\\(
+    "split \
+         across lines" -> split across lines
+    "literal
+    newline" -> literal\nnewline
+    "café" -> caf\195\169
+    |}]
+
+let%expect_test "of_string: errors with positions" =
+  print_parse "";
+  print_parse "   ";
+  print_parse "; only a comment";
+  print_parse "(a";
+  print_parse "(a\n (b c)\n";
+  print_parse ")";
+  print_parse "(a))";
+  print_parse "a b";
+  print_parse "(a)\n  (b)";
+  print_parse "\"unterminated";
+  print_parse "(a \"b\\";
+  print_parse "\"\\256\"";
+  print_parse "\"\\12\"";
+  print_parse "\"\\1x2\"";
+  print_parse "\"\\xg0\"";
+  print_parse "\"\\x4\"";
+  print_parse "(\n\n   \"ok\" \"\\9\")";
+  [%expect {|
+    Error line 1, column 0: no s-expression found in input
+    Error line 1, column 3: no s-expression found in input
+    Error line 1, column 16: no s-expression found in input
+    Error line 1, column 2: unclosed parentheses at end of input
+    Error line 3, column 0: unclosed parentheses at end of input
+    Error line 1, column 0: unexpected character: ')'
+    Error line 1, column 3: unexpected character: ')'
+    Error line 1, column 2: s-expression followed by data
+    Error line 2, column 2: s-expression followed by data
+    Error line 1, column 13: unterminated quoted string
+    Error line 1, column 6: unterminated quoted string
+    Error line 1, column 4: escape sequence in quoted string out of range
+    Error line 1, column 4: unterminated decimal escape sequence
+    Error line 1, column 3: unterminated decimal escape sequence
+    Error line 1, column 3: unterminated hexadecimal escape sequence
+    Error line 1, column 4: unterminated hexadecimal escape sequence
+    Error line 3, column 11: unterminated decimal escape sequence
+    |}]
+
+let%expect_test "of_string_many" =
+  let show s =
+    match Core.Sexp.of_string_many s with
+    | Ok ts -> print_sexp (list ts)
+    | Error e -> print_endline (Core.Sexp.Parse_error.to_string e)
+  in
+  show "";
+  show "a (b c) \"d e\" ; comment\n f";
+  show "a)";
+  [%expect {|
+    ()
+    (a(b c)"d e"f)
+    line 1, column 1: unexpected character: ')'
+    |}]
+
+let%expect_test "Parse_error fields" =
+  match Core.Sexp.of_string "(a\n  b))" with
+  | Ok t -> print_sexp t
+  | Error e ->
+    print_endline e.message;
+    print_sexp
+      (Core.Sexp.sexp_of_list
+         Core.Sexp.sexp_of_int
+         (Cons (e.offset, Cons (e.line, Cons (e.col, Nil)))));
+    [%expect {|
+    unexpected character: ')'
+    (7 2 4)
+    |}]
+
+let%expect_test "equal" =
+  print_bool (Core.Sexp.equal (atom "a") (atom "a"));
+  print_bool (Core.Sexp.equal (atom "a") (atom "b"));
+  print_bool (Core.Sexp.equal (atom "a") (list (Cons (atom "a", Nil))));
+  print_bool
+    (Core.Sexp.equal
+       (list (Cons (atom "a", Nil)))
+       (list (Cons (atom "a", Nil))));
+  print_bool (Core.Sexp.equal (list Nil) (list (Cons (list Nil, Nil))));
+  [%expect {|
+    true
+    false
+    false
+    true
+    false
+    |}]
+
+(* Prints the result of [of_sexp] on the sexp [s] parses to, with [sexp_of]. *)
+let convert sexp_of of_sexp s =
+  match Core.Sexp.of_string s with
+  | Error e -> print_endline (Core.Sexp.Parse_error.to_string e)
+  | Ok t ->
+    print_string s;
+    print_string " -> ";
+    match of_sexp t with
+    | Ok x ->
+      print_endline (Core.String.append "Ok " (Core.Sexp.to_string (sexp_of x)))
+    | Error e ->
+      print_endline
+        (Core.String.append "Error " (Core.Sexp.Of_sexp_error.to_string e))
+
+let%expect_test "sexp_of_*" =
+  print_sexp (Core.Sexp.sexp_of_unit ());
+  print_sexp (Core.Sexp.sexp_of_bool true);
+  print_sexp (Core.Sexp.sexp_of_int (-7));
+  print_sexp (Core.Sexp.sexp_of_char ' ');
+  print_sexp (Core.Sexp.sexp_of_string "hi there");
+  print_sexp
+    (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Cons (1, Cons (2, Nil))));
+  print_sexp (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_int (Some 1));
+  print_sexp (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_int None);
+  print_sexp
+    (Core.Sexp.sexp_of_pair
+       Core.Sexp.sexp_of_int
+       Core.Sexp.sexp_of_bool
+       (1, false));
+  print_sexp
+    (Core.Sexp.sexp_of_triple
+       Core.Sexp.sexp_of_int
+       Core.Sexp.sexp_of_string
+       Core.Sexp.sexp_of_unit
+       (1, "", ()));
+  print_sexp
+    (Core.Sexp.sexp_of_result
+       Core.Sexp.sexp_of_int
+       Core.Sexp.sexp_of_string
+       (Ok 1));
+  print_sexp
+    (Core.Sexp.sexp_of_result
+       Core.Sexp.sexp_of_int
+       Core.Sexp.sexp_of_string
+       (Error "bad"));
+  [%expect {|
+    ()
+    true
+    -7
+    " "
+    "hi there"
+    (1 2)
+    (1)
+    ()
+    (1 false)
+    (1""())
+    (Ok 1)
+    (Error bad)
+    |}]
+
+let%expect_test "*_of_sexp: atoms" =
+  convert Core.Sexp.sexp_of_unit Core.Sexp.unit_of_sexp "()";
+  convert Core.Sexp.sexp_of_unit Core.Sexp.unit_of_sexp "(())";
+  convert Core.Sexp.sexp_of_unit Core.Sexp.unit_of_sexp "unit";
+  convert Core.Sexp.sexp_of_bool Core.Sexp.bool_of_sexp "true";
+  convert Core.Sexp.sexp_of_bool Core.Sexp.bool_of_sexp "false";
+  convert Core.Sexp.sexp_of_bool Core.Sexp.bool_of_sexp "True";
+  convert Core.Sexp.sexp_of_bool Core.Sexp.bool_of_sexp "(true)";
+  convert Core.Sexp.sexp_of_int Core.Sexp.int_of_sexp "42";
+  convert Core.Sexp.sexp_of_int Core.Sexp.int_of_sexp "-4611686018427387904";
+  convert Core.Sexp.sexp_of_int Core.Sexp.int_of_sexp "4611686018427387904";
+  convert Core.Sexp.sexp_of_int Core.Sexp.int_of_sexp "4x";
+  convert Core.Sexp.sexp_of_int Core.Sexp.int_of_sexp "\"\"";
+  convert Core.Sexp.sexp_of_int Core.Sexp.int_of_sexp "(1)";
+  convert Core.Sexp.sexp_of_char Core.Sexp.char_of_sexp "c";
+  convert Core.Sexp.sexp_of_char Core.Sexp.char_of_sexp "\"\\n\"";
+  convert Core.Sexp.sexp_of_char Core.Sexp.char_of_sexp "cd";
+  convert Core.Sexp.sexp_of_char Core.Sexp.char_of_sexp "\"\"";
+  convert Core.Sexp.sexp_of_char Core.Sexp.char_of_sexp "()";
+  convert Core.Sexp.sexp_of_string Core.Sexp.string_of_sexp "abc";
+  convert Core.Sexp.sexp_of_string Core.Sexp.string_of_sexp "\"a (b)\"";
+  convert Core.Sexp.sexp_of_string Core.Sexp.string_of_sexp "(abc)";
+  [%expect {|
+    () -> Ok ()
+    (()) -> Error unit_of_sexp: empty list needed: (())
+    unit -> Error unit_of_sexp: empty list needed: unit
+    true -> Ok true
+    false -> Ok false
+    True -> Error bool_of_sexp: true or false needed: True
+    (true) -> Error bool_of_sexp: atom needed: (true)
+    42 -> Ok 42
+    -4611686018427387904 -> Ok -4611686018427387904
+    4611686018427387904 -> Error int_of_sexp: integer needed: 4611686018427387904
+    4x -> Error int_of_sexp: integer needed: 4x
+    "" -> Error int_of_sexp: integer needed: ""
+    (1) -> Error int_of_sexp: atom needed: (1)
+    c -> Ok c
+    "\n" -> Ok "\n"
+    cd -> Error char_of_sexp: atom of one character needed: cd
+    "" -> Error char_of_sexp: atom of one character needed: ""
+    () -> Error char_of_sexp: atom needed: ()
+    abc -> Ok abc
+    "a (b)" -> Ok "a (b)"
+    (abc) -> Error string_of_sexp: atom needed: (abc)
+    |}]
+
+let%expect_test "*_of_sexp: containers, errors at the failing element" =
+  let ints = Core.Sexp.list_of_sexp Core.Sexp.int_of_sexp in
+  let sexp_of_ints = Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int in
+  convert sexp_of_ints ints "(1 2 3)";
+  convert sexp_of_ints ints "()";
+  convert sexp_of_ints ints "(1 two 3 four)";
+  convert sexp_of_ints ints "1";
+  let int_option = Core.Sexp.option_of_sexp Core.Sexp.int_of_sexp in
+  let sexp_of_int_option = Core.Sexp.sexp_of_option Core.Sexp.sexp_of_int in
+  convert sexp_of_int_option int_option "()";
+  convert sexp_of_int_option int_option "(1)";
+  convert sexp_of_int_option int_option "none";
+  convert sexp_of_int_option int_option "None";
+  convert sexp_of_int_option int_option "(some 1)";
+  convert sexp_of_int_option int_option "(Some 1)";
+  convert sexp_of_int_option int_option "(x)";
+  convert sexp_of_int_option int_option "(1 2)";
+  convert sexp_of_int_option int_option "some";
+  let pair =
+    Core.Sexp.pair_of_sexp Core.Sexp.int_of_sexp Core.Sexp.string_of_sexp
+  in
+  let sexp_of_pair =
+    Core.Sexp.sexp_of_pair Core.Sexp.sexp_of_int Core.Sexp.sexp_of_string
+  in
+  convert sexp_of_pair pair "(1 a)";
+  convert sexp_of_pair pair "(x a)";
+  convert sexp_of_pair pair "(1 (a))";
+  convert sexp_of_pair pair "(x (a))";
+  convert sexp_of_pair pair "(1)";
+  convert sexp_of_pair pair "(1 a b)";
+  let triple =
+    Core.Sexp.triple_of_sexp
+      Core.Sexp.int_of_sexp
+      Core.Sexp.string_of_sexp
+      Core.Sexp.bool_of_sexp
+  in
+  let sexp_of_triple =
+    Core.Sexp.sexp_of_triple
+      Core.Sexp.sexp_of_int
+      Core.Sexp.sexp_of_string
+      Core.Sexp.sexp_of_bool
+  in
+  convert sexp_of_triple triple "(1 a true)";
+  convert sexp_of_triple triple "(1 a yes)";
+  convert sexp_of_triple triple "(1 () yes)";
+  convert sexp_of_triple triple "(1 a)";
+  let result =
+    Core.Sexp.result_of_sexp Core.Sexp.int_of_sexp Core.Sexp.string_of_sexp
+  in
+  let sexp_of_result =
+    Core.Sexp.sexp_of_result Core.Sexp.sexp_of_int Core.Sexp.sexp_of_string
+  in
+  convert sexp_of_result result "(Ok 1)";
+  convert sexp_of_result result "(Error bad)";
+  convert sexp_of_result result "(Ok bad)";
+  convert sexp_of_result result "(Error (bad))";
+  convert sexp_of_result result "(ok 1)";
+  convert sexp_of_result result "(Ok 1 2)";
+  let nested = Core.Sexp.list_of_sexp (Core.Sexp.option_of_sexp int_option) in
+  let sexp_of_nested =
+    Core.Sexp.sexp_of_list (Core.Sexp.sexp_of_option sexp_of_int_option)
+  in
+  convert sexp_of_nested nested "(() (()) ((1)))";
+  convert sexp_of_nested nested "(() (()) ((x)))";
+  [%expect {|
+    (1 2 3) -> Ok (1 2 3)
+    () -> Ok ()
+    (1 two 3 four) -> Error int_of_sexp: integer needed: two
+    1 -> Error list_of_sexp: list needed: 1
+    () -> Ok ()
+    (1) -> Ok (1)
+    none -> Ok ()
+    None -> Ok ()
+    (some 1) -> Ok (1)
+    (Some 1) -> Ok (1)
+    (x) -> Error int_of_sexp: integer needed: x
+    (1 2) -> Error option_of_sexp: list of zero or one element needed: (1 2)
+    some -> Error option_of_sexp: list of zero or one element needed: some
+    (1 a) -> Ok (1 a)
+    (x a) -> Error int_of_sexp: integer needed: x
+    (1 (a)) -> Error string_of_sexp: atom needed: (a)
+    (x (a)) -> Error int_of_sexp: integer needed: x
+    (1) -> Error pair_of_sexp: list of two elements needed: (1)
+    (1 a b) -> Error pair_of_sexp: list of two elements needed: (1 a b)
+    (1 a true) -> Ok (1 a true)
+    (1 a yes) -> Error bool_of_sexp: true or false needed: yes
+    (1 () yes) -> Error string_of_sexp: atom needed: ()
+    (1 a) -> Error triple_of_sexp: list of three elements needed: (1 a)
+    (Ok 1) -> Ok (Ok 1)
+    (Error bad) -> Ok (Error bad)
+    (Ok bad) -> Error int_of_sexp: integer needed: bad
+    (Error (bad)) -> Error string_of_sexp: atom needed: (bad)
+    (ok 1) -> Error result_of_sexp: (Ok _) or (Error _) needed: (ok 1)
+    (Ok 1 2) -> Error result_of_sexp: (Ok _) or (Error _) needed: (Ok 1 2)
+    (() (()) ((1))) -> Ok (()(())((1)))
+    (() (()) ((x))) -> Error int_of_sexp: integer needed: x
+    |}]
+
+let%expect_test "Of_sexp_error fields" =
+  match
+    Core.Sexp.list_of_sexp
+      Core.Sexp.int_of_sexp
+      (list (Cons (atom "1", Cons (list Nil, Nil))))
+  with
+  | Ok l -> print_endline "ok"
+  | Error e ->
+    print_endline e.message;
+    print_sexp e.sexp;
+    [%expect {|
+    int_of_sexp: atom needed
+    ()
+    |}]
+
+let%expect_test "large inputs" =
+  let numbers = Core.List.init 3000 Core.Int.neg in
+  let t = Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int numbers in
+  let printed = Core.Sexp.to_string t in
+  print_int (Core.String.length printed);
+  print_endline "";
+  let ints = Core.Sexp.list_of_sexp Core.Sexp.int_of_sexp in
+  match Core.Sexp.of_string printed with
+  | Error e -> print_endline (Core.Sexp.Parse_error.to_string e)
+  | Ok parsed ->
+    (print_bool (Core.Sexp.equal parsed t);
+     match ints parsed with
+     | Error e -> print_endline (Core.Sexp.Of_sexp_error.to_string e)
+     | Ok l ->
+       let sorted = Core.List.sort Core.Int.compare l in
+       print_int_list
+         (Core.List.filter_map
+            (Core.List.nth sorted)
+            (Cons (0, Cons (2999, Nil))));
+       print_int (Core.String.length (Core.Sexp.to_string_hum t)));
+    [%expect {|
+    16890
+    true
+    (-2999 0)
+    17121
+    |}]

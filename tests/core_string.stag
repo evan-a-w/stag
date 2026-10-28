@@ -1,0 +1,227 @@
+(* [Core.String], its strings printed as sexp atoms, quoted when needed. *)
+
+let print_sexp t = print_endline (Core.Sexp.to_string_hum t)
+let print_s s = print_sexp (Core.Sexp.sexp_of_string s)
+
+let print_strings l =
+  print_sexp (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_string l)
+
+let print_bool b = print_endline (Core.Bool.to_string b)
+
+let print_int_option o =
+  print_sexp (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_int o)
+
+let print_ints l = print_sexp (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int l)
+let abc = "abc"
+
+let%expect_test "the prims" =
+  print_ints
+    (Cons
+       (Core.String.length "",
+        Cons
+          (Core.String.length abc,
+           Cons
+             (Core.String.compare "a" "b",
+              Cons
+                (Core.String.compare "b" "b",
+                 Cons (Core.String.compare "b" "a", Nil))))));
+  print_char (Core.String.get abc 1);
+  print_endline "";
+  print_s (Core.String.sub abc 1 2);
+  print_s (Core.String.sub abc 3 0);
+  print_s (Core.String.append abc "def");
+  print_bool (Core.String.equal abc "abc");
+  print_bool (Core.String.equal abc "abd");
+  print_bool (Core.String.is_empty "");
+  print_bool (Core.String.is_empty abc);
+  [%expect {|
+    (0 3 -1 0 1)
+    b
+    bc
+    ""
+    abcdef
+    true
+    false
+    true
+    false
+    |}]
+
+let%expect_test "construction" =
+  print_s (Core.String.of_char 'x');
+  print_s (Core.String.concat ", " (Cons ("a", Cons ("b", Cons ("c", Nil)))));
+  print_s (Core.String.concat ", " (Cons ("a", Nil)));
+  print_s (Core.String.concat ", " Nil);
+  print_s (Core.String.concat "" (Cons ("a", Cons ("", Cons ("c", Nil)))));
+  let every_other i = Core.String.get "abcdefgh" (Core.Int.mul i 2) in
+  print_s (Core.String.init 4 every_other);
+  print_s (Core.String.init 0 every_other);
+  print_s (Core.String.make 3 'z');
+  print_s (Core.String.make 0 'z');
+  print_s (Core.String.of_list (Cons ('h', Cons ('i', Nil))));
+  print_sexp
+    (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_char (Core.String.to_list abc));
+  print_sexp
+    (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_char (Core.String.to_list ""));
+  [%expect {|
+    x
+    "a, b, c"
+    a
+    ""
+    ac
+    aceg
+    ""
+    zzz
+    ""
+    hi
+    (a b c)
+    ()
+    |}]
+
+let%expect_test "traversal" =
+  let push acc c = Cons (c, acc) in
+  print_sexp
+    (Core.Sexp.sexp_of_list
+       Core.Sexp.sexp_of_char
+       (Core.String.fold_left push Nil abc));
+  Core.String.iter print_char abc;
+  print_endline "";
+  let next c =
+    Core.Option.value (Core.Char.of_code (Core.Int.succ (Core.Char.code c))) c
+  in
+  print_s (Core.String.map next abc);
+  print_s (Core.String.map next "");
+  print_bool (Core.String.for_all Core.Char.is_alpha abc);
+  print_bool (Core.String.for_all Core.Char.is_alpha "ab1");
+  print_bool (Core.String.for_all Core.Char.is_alpha "");
+  print_bool (Core.String.exists Core.Char.is_digit "ab1");
+  print_bool (Core.String.exists Core.Char.is_digit abc);
+  print_bool (Core.String.exists Core.Char.is_digit "");
+  [%expect {|
+    (c b a)
+    abc
+    bcd
+    ""
+    true
+    false
+    true
+    true
+    false
+    false
+    |}]
+
+let%expect_test "search" =
+  print_int_option (Core.String.index "banana" 'n');
+  print_int_option (Core.String.index "banana" 'b');
+  print_int_option (Core.String.index "banana" 'z');
+  print_int_option (Core.String.index "" 'z');
+  print_bool (Core.String.contains "banana" 'n');
+  print_bool (Core.String.contains "banana" 'z');
+  print_bool (Core.String.starts_with "ba" "banana");
+  print_bool (Core.String.starts_with "na" "banana");
+  print_bool (Core.String.starts_with "" "banana");
+  print_bool (Core.String.starts_with "bananas" "banana");
+  print_bool (Core.String.ends_with "na" "banana");
+  print_bool (Core.String.ends_with "ba" "banana");
+  print_bool (Core.String.ends_with "" "");
+  [%expect {|
+    (2)
+    (0)
+    ()
+    ()
+    true
+    false
+    true
+    false
+    true
+    false
+    true
+    false
+    true
+    |}]
+
+let%expect_test "prefix, suffix, drop_prefix, drop_suffix" =
+  let each f =
+    print_strings
+      (Core.List.map
+         (f "hello")
+         (Cons (-1, Cons (0, Cons (2, Cons (5, Cons (6, Nil)))))))
+  in
+  each Core.String.prefix;
+  each Core.String.suffix;
+  each Core.String.drop_prefix;
+  each Core.String.drop_suffix;
+  [%expect {|
+    ("" "" he hello hello)
+    ("" "" lo hello hello)
+    (hello hello llo "" "")
+    (hello hello hel "" "")
+    |}]
+
+let%expect_test "drop_while, strip" =
+  print_s (Core.String.drop_while Core.Char.is_digit "123abc4");
+  print_s (Core.String.drop_while Core.Char.is_digit "123");
+  print_s (Core.String.drop_while Core.Char.is_digit "");
+  print_s (Core.String.strip "  \t a b \n ");
+  print_s (Core.String.strip "a");
+  print_s (Core.String.strip "   ");
+  print_s (Core.String.strip "");
+  [%expect {|
+    abc4
+    ""
+    ""
+    "a b"
+    a
+    ""
+    ""
+    |}]
+
+let%expect_test "split_on_char" =
+  print_strings (Core.String.split_on_char ',' "a,,b");
+  print_strings (Core.String.split_on_char ',' "a,b,");
+  print_strings (Core.String.split_on_char ',' ",");
+  print_strings (Core.String.split_on_char ',' "abc");
+  print_strings (Core.String.split_on_char ',' "");
+  [%expect {|
+    (a "" b)
+    (a b "")
+    ("" "")
+    (abc)
+    ("")
+    |}]
+
+let%expect_test "escaped" =
+  print_endline (Core.String.escaped "plain");
+  print_endline (Core.String.escaped "tab\there \"quoted\" back\\slash");
+  print_endline (Core.String.escaped "\n\r\b\000\031\127");
+  print_endline (Core.String.escaped "café ~");
+  print_endline (Core.String.escaped "");
+  [%expect {|
+    plain
+    tab\there \"quoted\" back\\slash
+    \n\r\b\000\031\127
+    caf\195\169 ~
+    |}]
+
+let%expect_test "rindex, split_on_string" =
+  print_int_option (Core.String.rindex "abcabc" 'b');
+  print_int_option (Core.String.rindex "abcabc" 'z');
+  print_int_option (Core.String.rindex "" 'a');
+  print_strings (Core.String.split_on_string ", " "a, b, ");
+  print_strings (Core.String.split_on_string ", " "a,b");
+  print_strings (Core.String.split_on_string "aa" "aaaaa");
+  print_strings (Core.String.split_on_string "ab" "ab");
+  print_strings (Core.String.split_on_string "abc" "ab");
+  print_strings (Core.String.split_on_string "x" "");
+  print_strings (Core.String.split_on_string "" "abc");
+  [%expect {|
+    (4)
+    ()
+    ()
+    (a b "")
+    (a,b)
+    ("" "" a)
+    ("" "")
+    (ab)
+    ("")
+    (abc)
+    |}]

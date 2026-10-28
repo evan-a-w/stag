@@ -7,5 +7,6 @@
    (glob_files_rec %{project_root}/tests/*.stag)
    (glob_files_rec %{project_root}/examples/*.stag)
    (glob_files_rec %{project_root}/eval/*.stag)
+   (glob_files_rec %{project_root}/core/*.stag)
    (glob_files_rec %{project_root}/bench/*.stag)))
  (libraries core stag_common stag_syntax stag_syntax_round_trip))

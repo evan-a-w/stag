@@ -18,6 +18,18 @@ module Embedded = struct
   let add t ~ident ~value = t.values <- Map.set t.values ~key:ident ~data:value
 end
 
+(* What a step evaluates to: a value, or an expression in tail position, to
+   evaluate in place of the step so that tail calls take no stack. *)
+module Next = struct
+  type t =
+    | Value of Value.t
+    | Eval of
+        { env : Value.t Env.t
+        ; level : int
+        ; expr : Typed.Expr.t
+        }
+end
+
 (* A toplevel not yet evaluated. *)
 module Pending = struct
   type t =
@@ -566,9 +578,43 @@ and bind_functions t ({ members; recursive } : Typed.Scc.t) =
 
 (* [env] has the bindings of the current activation, at [level]. *)
 and eval t ~env ~level expr =
-  Budget.step t.budget ~loc:expr.loc ~f:(fun () -> step t ~env ~level expr)
+  Budget.step t.budget ~loc:expr.loc ~f:(fun () ->
+    run_next t (step t ~env ~level expr))
 
-and step t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
+and run_next t (next : Next.t Or_error.t) =
+  match next with
+  | Error _ as error -> error
+  | Ok (Value value) -> Ok value
+  | Ok (Eval { env; level; expr }) ->
+    (match Budget.tail_step t.budget ~loc:expr.loc with
+     | Error _ as error -> error
+     | Ok () -> run_next t (step t ~env ~level expr))
+
+and step t ~env ~level (expr : Typed.Expr.t) : Next.t Or_error.t =
+  let eval' = eval t ~env ~level in
+  let tail expr = Ok (Next.Eval { env; level; expr }) in
+  match expr.desc with
+  | App (f, arg) ->
+    let%bind f = eval' f in
+    let%bind arg = eval' arg in
+    apply t f arg ~loc:expr.loc
+  | Let { ident; args; generalized = _; body; in_ } ->
+    let%bind () = bind_let t ~env ~level ~ident ~args ~body in
+    tail in_
+  | Toplevel_splice { code = _; expansion } -> tail expansion
+  | Match { scrutinee; cases; exception_cases } ->
+    (match eval' scrutinee with
+     | Ok value -> eval_match t ~env ~level value cases ~loc:expr.loc
+     | Error error ->
+       (match exception_cases, Runtime_error.raised error with
+        | _ :: _, Some exn ->
+          handle t ~env ~level exn exception_cases ~unhandled:(Error error)
+        | _ -> Error error))
+  | _ ->
+    let%map value = step_value t ~env ~level expr in
+    Next.Value value
+
+and step_value t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
   let eval' = eval t ~env ~level in
   match expr.desc with
   | Lit lit -> Ok (Value.of_lit lit)
@@ -587,18 +633,12 @@ and step t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
   | Var (Prim prim) -> Ok (Value.Prim { prim; applied = [] })
   | Var (Intrinsic intrinsic) -> Ok (Value.Intrinsic intrinsic)
   | Type ty -> Ok (Value.Type ty)
-  | App (f, arg) ->
-    let%bind f = eval' f in
-    let%bind arg = eval' arg in
-    apply t f arg ~loc:expr.loc
-  | Let { ident; args; generalized = _; body; in_ } ->
-    let%bind () = bind_let t ~env ~level ~ident ~args ~body in
-    eval' in_
+  | App _ | Let _ | Toplevel_splice _ | Match _ ->
+    run_next t (step t ~env ~level expr)
   | Fun { args; body } ->
     (* Its first parameter identifies it, as a let's name does. *)
     closure t ~env ~level ~ident:(List.hd_exn args) ~args ~body
   | Splice _ -> Or_error.error_s [%message "Splice outside a quote evaluated"]
-  | Toplevel_splice { code = _; expansion } -> eval' expansion
   | Quote body ->
     let embedded = Embedded.create () in
     let%map expr = build t ~env ~level ~embedded ~depth:1 body in
@@ -640,14 +680,6 @@ and step t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
        Ok (Value.Record (record_type, record))
      | _ ->
        Or_error.error_s [%message "Update of a non-record" (value : Value.t)])
-  | Match { scrutinee; cases; exception_cases } ->
-    (match eval' scrutinee with
-     | Ok value -> eval_match t ~env ~level value cases ~loc:expr.loc
-     | Error error as result ->
-       (match exception_cases, Runtime_error.raised error with
-        | _ :: _, Some exn ->
-          handle t ~env ~level exn exception_cases ~unhandled:result
-        | _ -> result))
   | Poly_record fields ->
     let%bind fields = map_fields fields ~f:eval' in
     let%map fields = String.Map.of_alist_or_error fields in
@@ -694,12 +726,13 @@ and closure t ~env ~level ~ident ~args ~body =
   let%map env = Env.of_captures env ~fallback:t.env ~captures in
   Value.Function { args; body; env; level }
 
-and apply t (f : Value.t) arg ~loc =
+and apply t (f : Value.t) arg ~loc : Next.t Or_error.t =
+  let value value = Ok (Next.Value value) in
   match f with
   | Prim { prim; applied } ->
     let applied = arg :: applied in
     if List.length applied < Prim.arity prim
-    then Ok (Value.Prim { prim; applied })
+    then value (Value.Prim { prim; applied })
     else (
       match List.rev applied |> List.map ~f:Value.to_prim |> Option.all with
       | None ->
@@ -710,17 +743,19 @@ and apply t (f : Value.t) arg ~loc =
               (applied : Value.t list)]
       | Some args ->
         (match Prim.apply prim ~output:t.output args with
-         | Ok value -> Ok (Value.of_prim value)
+         | Ok result -> value (Value.of_prim result)
          | Error exn -> raise_exn ~loc (prim_exception exn)))
   | Intrinsic intrinsic ->
     (match intrinsic, arg with
-     | Type_expr, Type ty -> Ok (Syntax_value.Type_expr.to_value ty)
+     | Type_expr, Type ty -> value (Syntax_value.Type_expr.to_value ty)
      | (Type_ref_name | Constructor_ref_name | Field_ref_name), Ref ref_ ->
-       Ok (String (Decl_ref.short_name ref_))
+       value (String (Decl_ref.short_name ref_))
      | Raise, exn -> raise_exn ~loc exn
      | Type_decl, Ref { kind = Type; name } ->
        (match t.reflect with
-        | Some reflect -> reflect name
+        | Some reflect ->
+          let%map decl = reflect name in
+          Next.Value decl
         | None ->
           runtime_error
             ~loc
@@ -737,8 +772,8 @@ and apply t (f : Value.t) arg ~loc =
     let env = Env.copy env in
     Env.set env ~ident:param ~value:arg;
     (match args with
-     | [] -> eval t ~env ~level body
-     | _ :: _ -> Ok (Value.Function { args; body; env; level }))
+     | [] -> Ok (Next.Eval { env; level; expr = body })
+     | _ :: _ -> value (Value.Function { args; body; env; level }))
   | _ -> Or_error.error_s [%message "Applied a non-function" (f : Value.t)]
 
 and eval_match t ~env ~level value cases ~loc =
@@ -750,7 +785,7 @@ and eval_match t ~env ~level value cases ~loc =
        ^ Value.to_string_for_message value)
   | (pattern, body) :: cases ->
     (match%bind match_pattern env pattern value with
-     | true -> eval t ~env ~level body
+     | true -> Ok (Next.Eval { env; level; expr = body })
      | false -> eval_match t ~env ~level value cases ~loc)
 
 and handle t ~env ~level exn cases ~unhandled =
@@ -758,7 +793,7 @@ and handle t ~env ~level exn cases ~unhandled =
   | [] -> unhandled
   | (pattern, body) :: cases ->
     (match%bind match_pattern env pattern exn with
-     | true -> eval t ~env ~level body
+     | true -> Ok (Next.Eval { env; level; expr = body })
      | false -> handle t ~env ~level exn cases ~unhandled)
 
 (* The code [expr] is in a quote built at [level], [depth] quotes in. Splices at

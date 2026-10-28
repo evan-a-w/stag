@@ -141,7 +141,10 @@ modules already parsed), `Driver.eval`, `Expect_test_runner`, `Bench_runner`
 source, keeping comments). `Prelude` is the prelude
 ([eval/src/prelude/prelude.stag](eval/src/prelude/prelude.stag)), whose
 module `Stag` is the syntax as data, which `Syntax_value` converts to and from
-`Syntax`, for declarations generated at compile time.
+`Syntax`, for declarations generated at compile time. The core library, the
+stag module `Core`, is the files of [core/](core) (each a submodule,
+`core/sexp.stag` is `Core.Sexp`), embedded by the library `stag_core_source`
+and added to the prelude by `Prelude`.
 
 Tests: `dune build @runtest`, then `dune promote` to accept changes.
 

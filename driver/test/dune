@@ -6,6 +6,8 @@
  (libraries
   stag_measure
   core
+  parsexp
+  sexplib0
   stag_common
   stag_types
   stag_syntax
