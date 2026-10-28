@@ -666,6 +666,8 @@ module Kind = struct
   type t =
     | Let
     | Type
+    | Module_splice
+    | Include
     | Other
   [@@deriving equal]
 
@@ -673,7 +675,9 @@ module Kind = struct
     match t.txt with
     | Let _ -> Let
     | Type _ | Exception _ -> Type
-    | Module _ | Module_splice _ | Include _ | Expect_test _ | Bench _ -> Other
+    | Module_splice _ -> Module_splice
+    | Include _ -> Include
+    | Module _ | Expect_test _ | Bench _ -> Other
   ;;
 end
 

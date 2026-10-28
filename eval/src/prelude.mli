@@ -1,6 +1,6 @@
 open! Import
 
-(** The prelude, [prelude/prelude.stag], then the module [Core], whose
+(** The prelude, the top-level [prelude/prelude.stag], then the module [Core], whose
     submodules are the files of the top-level [core/] directory ([core/list.stag]
     is [Core.List]): in scope in every program, outside its root module, its
     canonical names those of [Prelude_path]. It has [list], [option], [result],

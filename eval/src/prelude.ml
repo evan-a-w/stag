@@ -4,7 +4,7 @@ let path = "<prelude>"
 let core_dir = "<core>"
 
 let prelude_source =
-  match Prelude_source.files with
+  match Stag_prelude_source.files with
   | [ (_, source) ] -> source
   | files ->
     raise_s

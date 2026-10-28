@@ -683,7 +683,7 @@ let stag_files () =
       else [])
   in
   List.concat_map
-    [ "tests"; "examples"; "eval"; "core"; "bench" ]
+    [ "tests"; "examples"; "prelude"; "core"; "bench" ]
     ~f:(fun dir -> walk ("../.." ^/ dir))
 ;;
 
@@ -719,7 +719,7 @@ let%expect_test "the project's sources round trip and are formatted" =
     (../../examples/calc/math/arith.stag (formatted true) (long_lines 0))
     (../../examples/calc/math/power.stag (formatted true) (long_lines 0))
     (../../examples/calc/test/calc_test.stag (formatted true) (long_lines 0))
-    (../../eval/src/prelude/prelude.stag (formatted true) (long_lines 0))
+    (../../prelude/prelude.stag (formatted true) (long_lines 0))
     (../../core/bool.stag (formatted true) (long_lines 0))
     (../../core/char.stag (formatted true) (long_lines 0))
     (../../core/int.stag (formatted true) (long_lines 0))
@@ -787,7 +787,6 @@ module N = .~((.< x >.))
     module M = .~(gen (type t))
 
     include .~Gen.decls
-
     include .~(.~x)
 
     module N = .~(.< x >.)
