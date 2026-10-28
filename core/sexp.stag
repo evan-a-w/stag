@@ -252,7 +252,7 @@ let result_of_sexp ok_of_sexp error_of_sexp t =
   | _ -> Internal.of_sexp_error "result_of_sexp: (Ok _) or (Error _) needed" t
 
 let sexp_of_t (t : t) = t
-let t_of_sexp (t : t) = Ok t
+let t_of_sexp (t : t) : result[t, Of_sexp_error.t] = Ok t
 
 (* As ppx_sexp_conv's [[@@deriving sexp]]: [include .~(derive (type t))]
    generates [sexp_of_t], [t_of_sexp_exn] (raising [Of_sexp_error]) and
@@ -278,7 +278,9 @@ module Deriving = struct
   (* Raises the error of [name] (eg. ["t_of_sexp"]) on [sexp], which is not a
      variant of the constructors [constants] and [with_args]. *)
   let variant_error name constants with_args sexp =
-    let fail message = error (String.concat ": " (Cons (name, Cons (message, Nil)))) sexp in
+    let fail message =
+      error (String.concat ": " (Cons (name, Cons (message, Nil)))) sexp
+    in
     let is_in tags tag = List.mem String.equal tag tags in
     match sexp with
     | Atom tag ->
@@ -314,7 +316,9 @@ module Deriving = struct
 
   (* The values of the record [sexp]'s fields [names], in order. *)
   let record_fields name names sexp =
-    let fail message = error (String.concat ": " (Cons (name, Cons (message, Nil)))) sexp in
+    let fail message =
+      error (String.concat ": " (Cons (name, Cons (message, Nil)))) sexp
+    in
     let listed message names =
       fail (String.append message (String.concat " " names))
     in
@@ -331,10 +335,10 @@ module Deriving = struct
       match names with
       | Nil -> List.rev repeated
       | Cons (name, rest) ->
-        (match (is_in seen name, is_in repeated name) with
-         | true, false -> repeats rest seen (Cons (name, repeated))
-         | true, true -> repeats rest seen repeated
-         | false, _ -> repeats rest (Cons (name, seen)) repeated)
+        match (is_in seen name, is_in repeated name) with
+        | true, false -> repeats rest seen (Cons (name, repeated))
+        | true, true -> repeats rest seen repeated
+        | false, _ -> repeats rest (Cons (name, seen)) repeated
     in
     match sexp with
     | Atom _ -> fail "list instead of atom for record expected"
@@ -342,8 +346,12 @@ module Deriving = struct
       let pairs = List.map pair items in
       let given = List.map (fun p -> match p with name, _ -> name) pairs in
       let duplicates = repeats given Nil Nil in
-      let extras = List.filter (fun name -> Bool.not (is_in names name)) given in
-      let missing = List.filter (fun name -> Bool.not (is_in given name)) names in
+      let extras =
+        List.filter (fun name -> Bool.not (is_in names name)) given
+      in
+      let missing =
+        List.filter (fun name -> Bool.not (is_in given name)) names
+      in
       match (duplicates, extras, missing) with
       | Cons (_, _), _, _ -> listed "duplicate fields: " duplicates
       | _, Cons (_, _), _ -> listed "extra fields: " extras
@@ -992,8 +1000,7 @@ module Internal = struct
     let erase code = Stag.Code.erase code
 
     let constructor code =
-      match Stag.Code.erase code with
-      | Stag.Expr.Construct (c, _) -> c
+      match Stag.Code.erase code with Stag.Expr.Construct (c, _) -> c
 
     let atom_c = constructor .< Atom "" >.
     let list_c = constructor .< List Nil >.
@@ -1031,8 +1038,7 @@ module Internal = struct
 
     let sexp_list es = Stag.Expr.Construct (list_c, one (expr_list es))
 
-    let list_pattern ps =
-      Stag.Pattern.Construct (list_c, one (pattern_list ps))
+    let list_pattern ps = Stag.Pattern.Construct (list_c, one (pattern_list ps))
 
     (* [v0], [v1], ... *)
     let vars n = List.init n (fun i -> String.append "v" (Int.to_string i))
@@ -1101,8 +1107,8 @@ module Internal = struct
         let head =
           match path with
           | Stag.Path.Ref r ->
-            let path = Stag.Type_ref.path r in
-            (match builtin dir path with
+            (let path = Stag.Type_ref.path r in
+             match builtin dir path with
              | Some e -> e
              | None -> var (relative dir self path))
           | Stag.Path.Name path -> var (relative dir Nil path)
@@ -1125,8 +1131,8 @@ module Internal = struct
          | Dir.To_sexp, _ -> fun_ "v" (tuple_to_sexp self name tys)
          | Dir.Of_sexp, _ -> catch (fun_ "sexp" (tuple_of_sexp self name tys)))
       | Stag.Type_expr.Variant row ->
-        let cases = poly_cases row in
-        (match dir with
+        (let cases = poly_cases row in
+         match dir with
          | Dir.To_sexp -> fun_ "v" (variant_to_sexp self name cases)
          | Dir.Of_sexp -> catch (fun_ "sexp" (variant_of_sexp self name cases)))
       | Stag.Type_expr.Arrow (_, _) -> fail "functions have no sexp conversion"
@@ -1227,9 +1233,9 @@ module Internal = struct
         let tag case =
           match case with
           | tag, args, _, _ ->
-            (match Bool.equal (List.is_empty args) with_args with
-             | true -> None
-             | false -> Some tag)
+            match Bool.equal (List.is_empty args) with_args with
+            | true -> None
+            | false -> Some tag
         in
         string_list (List.filter_map tag cases)
       in
@@ -1270,8 +1276,7 @@ module Internal = struct
         List.mapi binder names
       in
       let value f v =
-        match f with
-        | r, ty -> (Stag.Path.Ref r, of_exn self name ty v)
+        match f with r, ty -> (Stag.Path.Ref r, of_exn self name ty v)
       in
       let fields_of_sexp =
         apply
@@ -1323,16 +1328,20 @@ module Internal = struct
           let cases = poly_cases row in
           (variant_to_sexp self of_name cases,
            variant_of_sexp self of_name cases)
+        | Stag.Type.Kind.Alias (Stag.Type_expr.Tuple tys) ->
+          (tuple_to_sexp self of_name tys, tuple_of_sexp self of_name tys)
         | Stag.Type.Kind.Alias ty ->
           (to_sexp self of_name ty (var "v"), of_exn self of_name ty "sexp")
       in
       let result =
         match_
-          (apply (var exn_name) (with_last (List.map var of_params) (var "sexp")))
+          (apply
+             (var exn_name)
+             (with_last (List.map var of_params) (var "sexp")))
           (two
              (pvar "v", Stag.Expr.Construct (ok_c, one (var "v")))
-             (Stag.Pattern.Exception
-                (Stag.Pattern.Construct (of_sexp_error_c, one (pvar "e"))),
+             (Stag.Pattern.Exception (Stag.Pattern.Construct
+                (of_sexp_error_c, one (pvar "e"))),
               Stag.Expr.Construct (error_c, one (var "e"))))
       in
       match bodies with

@@ -370,7 +370,26 @@ Each file's helpers are in its submodule `Internal`, not meant for use outside
   triples (`sexp_of_pair`, `triple_of_sexp`), the container ones taking those
   of their elements. `X_of_sexp` returns `result[X, Of_sexp_error.t]`: a
   message and the sexp that failed, which for containers is the innermost
-  failing element.
+  failing element. `Sexp.sexp_of_t` and `Sexp.t_of_sexp` are the identity.
+- `Core.Sexp.derive (type t)`: ppx_sexp_conv's `[@@deriving sexp]`, a
+  declaration splice (`include .~(Core.Sexp.derive (type t))`) generating
+  `sexp_of_t`, `t_of_sexp_exn` (raising `Sexp.Of_sexp_error`) and `t_of_sexp`
+  (returning `result`) from the reflected declaration; for type `foo`,
+  `sexp_of_foo` etc. The encoding and error messages are ppx_sexp_conv's:
+  `A`, `(B x)`, `(C x y)` for constructors (a polymorphic variant tag's
+  argument is one value, `(D (x y))`), `((x 1) (y 2))` for records (fields in
+  any order; missing, extra and duplicate fields are errors), `(a b)` for
+  tuples, and Core's conversions for the types above. A parameterised type's
+  conversions take those of its parameters first (`sexp_of_t sexp_of_a v`).
+  Other types are converted by name, resolved where the code is spliced:
+  `u` by `sexp_of_u`/`u_of_sexp`, `M.u` by `M.sexp_of_u`, so recursive types
+  work, and mutually recursive ones when derived in one include
+  (`include .~(List.append (derive (type a)) (derive (type b)))`). What the
+  code refers to in `Core` and the prelude is by ref, so shadowing `Core`,
+  `List`, `Cons` etc. where it is spliced doesn't change it. Abstract types,
+  functions, row parameters and open polymorphic variants fail at compile
+  time. `tests/core_derive_sexp.stag` shows the generated code, by inline
+  expansions.
 
 Since a file of `core/` shadows the prims of its name (`Core.String` hides
 `String.length`), the prelude (only) can name any prim `Prim.<prim>`
@@ -481,6 +500,7 @@ and `Stag.Field_ref.t` are abstract: only reflection makes them.
 Stag.Type.expr : Stag.Type.t['a] -> Stag.Type_expr.t
 Stag.Type.decl : Stag.Type_ref.t -> option[Stag.Type.Decl.t]
 Stag.Type_ref.name : Stag.Type_ref.t -> string   (* also Constructor_ref, Field_ref *)
+Stag.Type_ref.path : Stag.Type_ref.t -> string   (* "A.M.t", "int", "Core.Sexp.t" *)
 
 module Stag.Type.Kind : sig
   type t =
@@ -494,7 +514,9 @@ end
 ```
 
 A ref is a declared type, constructor or field, by identity, and `name` is
-the name it is declared with. `expr` gives the type with each type it names
+the name it is declared with. A type ref's `path` is its path from the root
+scope, without the leading `.`: the file's module, then the modules it is in
+(`A.M.t`), or a builtin's name. `expr` gives the type with each type it names
 as a `Stag.Path.Ref` (`Stag.Type_expr.Con (Ref list, ...)`); `decl` gives a
 type's declaration (its constructors and fields as refs, its types as for
 `expr`), or `None` if it is abstract, as are the builtin types. A type
