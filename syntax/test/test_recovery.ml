@@ -379,3 +379,31 @@ let%expect_test "a single error, with and without recovery" =
       ("t.stag:1:27-27: expected `end` to close this `struct` (opened at 1:11), found end of file")))
     |}]
 ;;
+
+let%expect_test "a source file" =
+  let parse path contents =
+    let toplevel, errors = Source_file.parse_recovering { path; contents } in
+    List.iter errors ~f:(fun error ->
+      print_s [%sexp (error : Source_file.Error.t)]);
+    Option.iter toplevel ~f:(fun toplevel ->
+      print_string (Printer.toplevel toplevel))
+  in
+  parse "dir/foo.stag" "let a = (1\nlet b = 2";
+  [%expect
+    {|
+    (Parse
+     (Syntax (loc dir/foo.stag:2:0-3)
+      (message "expected `)` to close this `(` (opened at 1:8), found `let`")))
+    module Foo = struct
+      let a = <error>
+      let b = 2
+    end
+    |}];
+  parse "dir/1foo.stag" "let a = (1";
+  [%expect
+    {|
+    (Invalid_file_name (path dir/1foo.stag)
+     (message
+      "1foo.stag is not a valid module file name: it should be a letter followed by letters, digits, _ and ', then .stag"))
+    |}]
+;;
