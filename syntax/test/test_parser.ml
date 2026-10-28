@@ -1098,6 +1098,8 @@ module%inline M = .~e end%inline
     ; "end%inline"
     ; "include .~e end%inline"
     ; "module%inline M = .~e end%inline end%inline"
+    ; "module M = struct include%inline .~e let x = 1 end"
+    ; "include%inline .~e module M = struct let x = 1 end%inline"
     ]
     ~f:prog;
   [%expect
@@ -1105,10 +1107,12 @@ module%inline M = .~e end%inline
     t.stag:1:15-16: expected a declaration splice `.~e` after `include%inline`, found `x`
     t.stag:1:18-24: expected a declaration splice `.~e` after `module%inline M =`, found `struct`
     t.stag:1:28-28: expected `end%inline` to close this `include%inline` (opened at 1:0), found end of file
-    t.stag:1:19-22: expected a declaration (`let`, `type`, `exception`, `module` or `include`), found `end`
-    t.stag:1:0-10: expected a declaration (`let`, `type`, `exception`, `module` or `include`), found `end%inline`
-    t.stag:1:12-22: expected a declaration (`let`, `type`, `exception`, `module` or `include`), found `end%inline`
-    t.stag:1:33-43: expected a declaration (`let`, `type`, `exception`, `module` or `include`), found `end%inline`
+    t.stag:1:19-22: expected `end%inline` to close this `include%inline` (opened at 1:0), found `end`
+    t.stag:1:0-10: unmatched `end%inline`
+    t.stag:1:12-22: unmatched `end%inline`
+    t.stag:1:33-43: unmatched `end%inline`
+    t.stag:1:47-50: expected `end%inline` to close this `include%inline` (opened at 1:18), found `end`
+    t.stag:1:47-57: expected `end` to close this `struct` (opened at 1:30), found `end%inline`
     |}]
 ;;
 
@@ -1118,4 +1122,34 @@ let%expect_test "an expansion spans from the splice to [end%inline]" =
      print_endline (Loc.to_string expansion.loc)
    | _ -> print_endline "unexpected");
   [%expect {| t.stag:1:18-3:0 |}]
+;;
+
+let%expect_test "an expansion starts after the comments on its splice's line" =
+  List.iter
+    [ "include%inline .~e (* a *) (* b *)\n  let x = 1\nend%inline"
+    ; "include%inline .~e\n  (* c *) let x = 1\nend%inline"
+    ; "include%inline .~e (* a *) let x = 1 end%inline"
+    ; "include%inline .~e (* a *) end%inline"
+    ]
+    ~f:(fun source ->
+      match Parser.program ~file source with
+      | Ok [ { txt = Include (_, Some expansion); _ } ] ->
+        print_s
+          [%sexp
+            (String.sub
+               source
+               ~pos:expansion.loc.start.offset
+               ~len:(expansion.loc.stop.offset - expansion.loc.start.offset)
+             : string)]
+      | _ -> print_endline "unexpected");
+  [%expect {|
+     "\
+    \n  let x = 1\
+    \n"
+     "\
+    \n  (* c *) let x = 1\
+    \n"
+    " let x = 1 "
+    " "
+    |}]
 ;;

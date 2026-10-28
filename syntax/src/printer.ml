@@ -699,25 +699,24 @@ let rec toplevel ~width ~indent ~blank_between (t : Toplevel.t) =
           ^^ toplevels ~width ~indent:(indent + 2) ~blank_between members)
     ^^ hardline
     ^^ text "end"
-  | Module_splice (name, e, None) ->
-    text ("module " ^ name.txt ^ " = ") ^^ spliced e
-  | Module_splice (name, e, Some expansion) ->
-    text ("module%inline " ^ name.txt ^ " = ")
-    ^^ spliced e
-    ^^ nest
-         2
-         (expansion_doc ~width ~indent:(indent + 2) ~blank_between expansion)
-    ^^ hardline
-    ^^ text "end%inline"
-  | Include (e, None) -> text "include " ^^ spliced e
-  | Include (e, Some expansion) ->
-    text "include%inline "
-    ^^ spliced e
-    ^^ nest
-         2
-         (expansion_doc ~width ~indent:(indent + 2) ~blank_between expansion)
-    ^^ hardline
-    ^^ text "end%inline"
+  | Module_splice (name, e, expansion) ->
+    splice_toplevel
+      ~width
+      ~indent
+      ~blank_between
+      ~keyword:"module"
+      ~prefix:(" " ^ name.txt ^ " = ")
+      e
+      expansion
+  | Include (e, expansion) ->
+    splice_toplevel
+      ~width
+      ~indent
+      ~blank_between
+      ~keyword:"include"
+      ~prefix:" "
+      e
+      expansion
   | Expect_test { name; body } ->
     definition
       (text ("let%expect_test " ^ string_literal name.txt))
@@ -746,10 +745,21 @@ let rec toplevel ~width ~indent ~blank_between (t : Toplevel.t) =
     in
     definition lhs (expr_doc body)
 
-and expansion_doc ~width ~indent ~blank_between (expansion : _ Located.t) =
-  match expansion.txt with
-  | [] -> empty
-  | ts -> hardline ^^ toplevels ~width ~indent ~blank_between ts
+and splice_toplevel ~width ~indent ~blank_between ~keyword ~prefix e expansion =
+  match (expansion : _ Located.t option) with
+  | None -> text (keyword ^ prefix) ^^ spliced e
+  | Some { txt = toplevels'; loc = _ } ->
+    text (keyword ^ "%inline" ^ prefix)
+    ^^ spliced e
+    ^^ nest
+         2
+         (match toplevels' with
+          | [] -> empty
+          | _ ->
+            hardline
+            ^^ toplevels ~width ~indent:(indent + 2) ~blank_between toplevels')
+    ^^ hardline
+    ^^ text "end%inline"
 
 and toplevels ~width ~indent ~blank_between ts =
   let one_line doc = fits_flat ~width:(width - indent) doc in

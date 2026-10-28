@@ -30,6 +30,7 @@ exception Syntax_error of Loc.t * string
 
 type t =
   { tokens : Lexer.Located.t array
+  ; comments : Comment.t array
   ; mutable pos : int
   ; mutable bare_tuple_end : int
     (** The [pos] after the last [)] whose contents were a tuple without
@@ -1101,46 +1102,33 @@ let rec toplevel t : Toplevel.t =
     advance t;
     let name, args = constructor_decl t in
     since t start (Toplevel.Exception (name, args))
-  | Module ->
+  | (Module | Module_inline) as keyword ->
     advance t;
     let name = uident t ~what:"a module name" in
     expect t Equal;
-    (match peek t with
-     | Splice ->
-       since t start (Toplevel.Module_splice (name, declaration_splice t, None))
-     | _ ->
+    (match peek t, keyword with
+     | Splice, _ ->
+       let expr = declaration_splice t in
+       let expansion = expansion t ~keyword ~open_loc:start in
+       since t start (Toplevel.Module_splice (name, expr, expansion))
+     | _, Module ->
        let struct_loc = loc t in
        expect t Struct;
-       let toplevels = toplevels t ~stop:Token.End in
+       let toplevels = toplevels t in
        close t End ~opener:Struct ~open_loc:struct_loc;
-       since t start (Toplevel.Module (name, toplevels)))
-  | Include ->
-    advance t;
-    (match peek t with
-     | Splice -> since t start (Toplevel.Include (declaration_splice t, None))
-     | _ -> expected t "a declaration splice `.~e` after `include`")
-  | Module_inline ->
-    advance t;
-    let name = uident t ~what:"a module name" in
-    expect t Equal;
-    (match peek t with
-     | Splice ->
-       let expr = declaration_splice t in
-       let expansion =
-         expansion t ~opener:Token.Module_inline ~open_loc:start
-       in
-       since t start (Toplevel.Module_splice (name, expr, Some expansion))
+       since t start (Toplevel.Module (name, toplevels))
      | _ -> expected t "a declaration splice `.~e` after `module%inline M =`")
-  | Include_inline ->
+  | (Include | Include_inline) as keyword ->
     advance t;
     (match peek t with
      | Splice ->
        let expr = declaration_splice t in
-       let expansion =
-         expansion t ~opener:Token.Include_inline ~open_loc:start
-       in
-       since t start (Toplevel.Include (expr, Some expansion))
-     | _ -> expected t "a declaration splice `.~e` after `include%inline`")
+       let expansion = expansion t ~keyword ~open_loc:start in
+       since t start (Toplevel.Include (expr, expansion))
+     | _ ->
+       expected
+         t
+         (sprintf "a declaration splice `.~e` after %s" (describe keyword)))
   | Let_expect_test ->
     advance t;
     let name =
@@ -1195,18 +1183,36 @@ and declaration_splice t =
   advance t;
   postfix t
 
-(* The declarations up to [end%inline], from the end of the splice to the
+(* After [include%inline] or [module%inline], the declarations up to
+   [end%inline], from the end of the splice (and comments on its line) to the
    start of [end%inline]. *)
-and expansion t ~opener ~open_loc =
-  let start = (prev_loc t).stop in
-  let toplevels = toplevels t ~stop:Token.End_inline in
-  let end_loc = loc t in
-  close t End_inline ~opener ~open_loc;
-  located ~loc:{ end_loc with start; stop = end_loc.start } toplevels
+and expansion t ~(keyword : Token.t) ~open_loc =
+  match keyword with
+  | Module_inline | Include_inline ->
+    let splice_end = (prev_loc t).stop in
+    let start =
+      Array.fold
+        t.comments
+        ~init:splice_end
+        ~f:(fun start (comment : Comment.t) ->
+          if
+            comment.next_token = t.pos
+            && comment.loc.start.line = splice_end.line
+            && comment.loc.start.offset >= splice_end.offset
+          then comment.loc.stop
+          else start)
+    in
+    let toplevels = toplevels t in
+    let end_loc = loc t in
+    close t End_inline ~opener:keyword ~open_loc;
+    Some (located ~loc:{ end_loc with start; stop = end_loc.start } toplevels)
+  | _ -> None
 
-and toplevels t ~stop =
+and toplevels t =
   let rec loop acc =
-    if is t stop || is t Eof then List.rev acc else loop (toplevel t :: acc)
+    match peek t with
+    | End | End_inline | Eof -> List.rev acc
+    | _ -> loop (toplevel t :: acc)
   in
   loop []
 ;;
@@ -1215,7 +1221,13 @@ let run_with_comments ~file source f =
   match Lexer.tokenize_with_comments ~file source with
   | Error error -> Error (Error.Lex error)
   | Ok (tokens, comments) ->
-    let t = { tokens; pos = 0; bare_tuple_end = -1 } in
+    let t =
+      { tokens
+      ; comments = Array.of_list comments
+      ; pos = 0
+      ; bare_tuple_end = -1
+      }
+    in
     (match
        let result = f t in
        (match peek t with
@@ -1234,10 +1246,10 @@ let run ~file source f =
     result)
 ;;
 
-let program ~file source = run ~file source (toplevels ~stop:Token.Eof)
+let program ~file source = run ~file source toplevels
 
 let program_with_comments ~file source =
-  run_with_comments ~file source (toplevels ~stop:Token.Eof)
+  run_with_comments ~file source toplevels
 ;;
 
 let expr ~file source = run ~file source expr
