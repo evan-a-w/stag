@@ -30,8 +30,12 @@ end
     path goes through a spliced module, when a name is not found among the
     members of a module known so far (the module's includes may define it),
     and by [iter_declarations]. Needing a splice's declarations while forcing
-    it is an error, as is adding, by forcing an include, a name looked up and
-    not found in its module while the include was being forced. *)
+    it is an error.
+
+    While a splice is being forced, a name already known in an enclosing
+    module, or a prim, is found there without forcing the includes of the
+    modules within it (they may need what is being forced): an include then
+    defining the name is an error. *)
 val create_root
   :  ?enclosing:t
   -> ?path:string list

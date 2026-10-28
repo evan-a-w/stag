@@ -1429,7 +1429,7 @@ let check_expect_test t program module_ ~name ~body ~loc ~generated =
     check_expr t scope ~expr:(Source.Expr.Syntax body) ~ty:Type.unit
     |> Generated.wrap_result generated
   in
-  { Typed.Expect_test.name; body; loc }
+  { Typed.Expect_test.name; body; loc; generated = Option.is_some generated }
 ;;
 
 let declarations_type =

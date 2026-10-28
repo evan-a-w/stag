@@ -38,7 +38,8 @@ let of_source_file_error (error : Source_file.Error.t) =
 let of_typecheck_error (error : Typecheck_error.t) =
   let notes =
     match error.kind with
-    | Splice_evaluation_failed { error; code = _ } ->
+    | Splice_evaluation_failed { error; code = _ }
+    | Declaration_splice_failed error ->
       (match Runtime_error.of_error error with
        | Some { loc; message = _ } when not (Loc.is_none loc) ->
          [ { Note.loc; message = "The error was raised here" } ]
@@ -48,6 +49,9 @@ let of_typecheck_error (error : Typecheck_error.t) =
         ; message = sprintf "%s is a variable of the code's context here" name
         }
       ]
+    | Declaration_splice_cycle { splice }
+    | Declaration_splice_defines_used { name = _; splice } ->
+      [ { Note.loc = splice; message = "The declaration splice is here" } ]
     | _ -> []
   in
   create ~notes ~loc:error.loc (Typecheck_error.message error)

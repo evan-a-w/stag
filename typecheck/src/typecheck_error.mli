@@ -84,6 +84,13 @@ module Kind : sig
     | Declaration_splice_cycle of { splice : Loc.t }
     (** What the declaration splice at [splice] generates is needed here, to
         generate it. *)
+    | Declaration_splice_defines_used of
+        { name : string (** Eg. [value x]. *)
+        ; splice : Loc.t
+        }
+    (** [name], used here while running a declaration splice, was found
+        elsewhere without generating the include at [splice], which then
+        defines it. *)
     | In_generated_declaration of
         { declaration : string (** Eg. [let f], [type t]. *)
         ; error : t

@@ -11,7 +11,8 @@ node, for good errors.
   lexing error; digits may be separated by `_`, as in `1_000`, but not lead
   with one), `true`, `false`, chars `'c'`, strings `"s"`, quoted strings
   `{|raw|}` and `{id|raw|id}` (no escapes; `id` is lowercase letters and `_`),
-  `()`. There are no negative literals yet: write `Int.neg 1`.
+  `()`. There are no negative literals in source yet: write `Int.neg 1`
+  (generated declarations may have them, see Declaration splices).
 - Escapes, in chars and strings: `\n \t \r \b`, `\ ` (space), `\\ \" \'`,
   `\ddd` (3 decimal digits, at most 255) and `\xhh` (2 hex digits). In
   strings, a `\` at the end of a line skips the newline and the spaces and
@@ -126,6 +127,8 @@ type point = {x : int; y : int}        (* nominal record *)
 type void = |                          (* empty variant *)
 type t                                 (* abstract *)
 module M = struct ... end
+module M = .~e                         (* declaration splices, see below *)
+include .~e
 ```
 
 ## Primitives
@@ -152,6 +155,58 @@ shadow them: a toplevel `print_int` hides the prim, and a module `Int` hides
 all of `Int.*`. Division by zero, out of bounds indices, unparsable
 `Int.of_string` and invalid `Char.of_code` are runtime errors at the
 application.
+
+## Prelude
+
+A prelude, written in stag, is in scope in every program, outside its root
+module (inside the prims), so the program's definitions shadow it as they do
+prims:
+
+```ocaml
+type list['a] = Nil | Cons of 'a * list['a]
+type option['a] = None | Some of 'a
+module Stag = struct ... end      (* the syntax as data, see below *)
+```
+
+Its toplevels are checked only when used.
+
+## Declaration splices
+
+Declarations are generated as data: the syntax is defined in stag, in the
+prelude's module `Stag` (`Stag.Type_expr.t`, `Stag.Expr.t`, `Stag.Toplevel.t`,
+etc., mirroring `Syntax`, with helpers such as `Stag.Expr.var`,
+`Stag.Toplevel.let_`), and a declaration splice of a list of declarations is
+run at compile time, converted to syntax and checked where it is spliced, as a
+ppx's output would be. Shapes may be computed (constructors from data), which
+typed quotes cannot express.
+
+```ocaml
+module Ops = .~(make_ops names)     (* e : list[Stag.Toplevel.t] *)
+include .~(make_ops names)          (* into the current module, in its place *)
+```
+
+Declaration splices may be in any module, and may generate declaration
+splices. `e` is checked in the module the splice is written in, at compile
+time (as a toplevel splice). Names in generated declarations are as written
+(`"M.x"` is a path, `"A"` a constructor or tag), resolved where they are
+spliced, and every node is located at the splice. Values that are not syntax
+(eg. a tuple of one component, an uppercase let name) are errors at the
+splice; negative int literals are allowed. Errors in generated declarations
+are reported at the splice, naming the declaration. Generated expect tests
+run, but are not corrected.
+
+A spliced module's members are known only once it has run, so name
+resolution forces it: a path `M.x` through a spliced module runs its splice,
+and a name not found among a module's members known so far runs the module's
+pending includes, which may define it, before looking in enclosing modules.
+Splices not forced so are run when checking reaches them, in order. A splice
+that depends on what it defines is an error. While a splice runs, a name
+already known in an enclosing module (or a prim) is found there without
+running the includes of the modules within it, which may need what is
+running; an include then defining it is an error. A name both spliced and
+written in a module is a duplicate. Spliced types are named by the splice's
+path, so splicing twice gives distinct types. Signatures list an include's
+declarations in its place.
 
 ## Files
 
@@ -205,31 +260,12 @@ are not visible to other tests.
 
 ### Declaration splices
 
-Declarations are generated as data: the syntax is defined in stag, in a
-built-in prelude module `Stag` (`Stag.Type_expr`, `Stag.Toplevel`, etc.,
-mirroring `Syntax`), and a toplevel splice of a list of declarations is run at
-compile time, converted to syntax and checked where it is spliced, as a ppx's
-output would be. Shapes may be computed (constructors from data), which typed
-quotes cannot express.
-
-```ocaml
-module Ops = .~(make_ops names)     (* e : list[Stag.Toplevel.t] *)
-include .~(make_ops names)          (* into the current module *)
-```
-
-A spliced module's members are known only once it has run, so name
-resolution forces it: type declarations, toplevels and declaration splices are
-checked on demand, in one dependency graph, and a splice that depends on what
-it defines is an error. A name both spliced and written in a module is a
-duplicate. Spliced types are named by the splice's path, so splicing twice
-gives distinct types.
-
 Typed code may be embedded as a leaf, keeping its hygiene: only the shape is
 untyped. Its context entries are provided at the declaration splice, as for
 implicit substitutions.
 
 ```ocaml
-Stag.Code.erase : <'a>{..'r} -> Expr.t
+Stag.Code.erase : <'a>{..'r} -> Stag.Expr.t
 ```
 
 Quotes of declarations are sugar for building these values, with antiquotes
@@ -239,10 +275,12 @@ in item, type and expression positions:
 .< struct type t = .~(variants names) let f x = .~body end >.  (* list[Stag.Toplevel.t] *)
 ```
 
-Reflection, for deriving, gives the declaration of a type at compile time:
+Reflection, for deriving: types are values, so a type expression `type t`
+evaluates at compile time to its declaration, of type `Stag.Type.t['a]` for
+the type `'a`:
 
 ```ocaml
-include .~(Show.derive (Stag.decl_of_type "t"))
+include .~(Show.derive (type t))
 ```
 
 Typed declaration quotes (code types of signatures, `<sig ... end>{ctx}`) and

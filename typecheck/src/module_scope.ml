@@ -37,8 +37,9 @@ type t =
   ; includes : splice Queue.t
     (* Every include of the module, generated or not, in the order added. *)
   ; missed : Loc.t Member.Table.t
-    (* Names looked up and not found while an include of the module was being
-       forced, so no include may define them, by where they were used. *)
+    (* Names looked up past the module's includes not yet generated, while
+       running a declaration splice, so no include may define them, by where
+       they were used. *)
   ; path : string list
   ; enclosing : t option
   ; splice : splice option (* Of a spliced module. *)
@@ -65,6 +66,7 @@ and state =
 and callbacks =
   { declare : t -> Toplevel.t -> generated_by:splice option -> unit
   ; force : splice -> (Toplevel.t list, Typecheck_error.t) Result.t
+  ; mutable forcing : int (* Splices being forced. *)
   }
 
 module Splice = struct
@@ -110,7 +112,13 @@ let create ~path ~enclosing ~splice ~callbacks =
 ;;
 
 let create_root ?enclosing ?(path = []) ~types ~declare ~force () =
-  let t = create ~path ~enclosing ~splice:None ~callbacks:{ declare; force } in
+  let t =
+    create
+      ~path
+      ~enclosing
+      ~splice:None
+      ~callbacks:{ declare; force; forcing = 0 }
+  in
   List.iter types ~f:(Hash_set.add t.types);
   t
 ;;
@@ -273,6 +281,18 @@ let cycle ~loc (splice : splice) =
        (Declaration_splice_cycle { splice = splice.loc }))
 ;;
 
+let member_to_string ((kind, name) : Member.t) =
+  let kind =
+    match kind with
+    | Member Value -> "value"
+    | Member Type -> "type"
+    | Member Constructor -> "constructor"
+    | Member Field -> "field"
+    | Module -> "module"
+  in
+  sprintf "%s %s" kind name
+;;
+
 (* Runs [splice], adding what it generates to its module, or, for an include,
    to the module it is in. [loc] is where what it generates is needed. *)
 let force_splice (splice : splice) ~module_ ~loc =
@@ -281,13 +301,24 @@ let force_splice (splice : splice) ~module_ ~loc =
   | Forcing -> cycle ~loc splice
   | Pending ->
     splice.state <- Forcing;
-    let%bind.Result toplevels = module_.callbacks.force splice in
+    let callbacks = module_.callbacks in
+    callbacks.forcing <- callbacks.forcing + 1;
+    let toplevels = callbacks.force splice in
+    callbacks.forcing <- callbacks.forcing - 1;
+    let%bind.Result toplevels = toplevels in
     let%bind.Result () = check_unique module_ toplevels in
     let%map.Result () =
       match
-        List.find_map (members toplevels) ~f:(Hashtbl.find module_.missed)
+        List.find_map (members toplevels) ~f:(fun member ->
+          Option.map (Hashtbl.find module_.missed member) ~f:(fun loc ->
+            member, loc))
       with
-      | Some loc -> cycle ~loc splice
+      | Some (member, loc) ->
+        Error
+          (Typecheck_error.create
+             ~loc
+             (Declaration_splice_defines_used
+                { name = member_to_string member; splice = splice.loc }))
       | None -> Ok ()
     in
     let into =
@@ -318,6 +349,20 @@ let force_includes t ~loc =
   from 0
 ;;
 
+let generating t =
+  Queue.exists t.includes ~f:(fun splice ->
+    match splice.state with
+    | Pending | Forcing -> true
+    | Done -> false)
+;;
+
+let miss t member ~loc =
+  if generating t
+  then
+    Hashtbl.add t.missed ~key:member ~data:loc
+    |> (ignore : [ `Ok | `Duplicate ] -> unit)
+;;
+
 (* Whether [t] has [member], forcing its includes if it is not yet known:
    they may define it. *)
 let mem t member ~loc =
@@ -326,15 +371,7 @@ let mem t member ~loc =
   else (
     let%map.Result () = force_includes t ~loc in
     let found = has t member in
-    if
-      (not found)
-      && Queue.exists t.includes ~f:(fun splice ->
-        match splice.state with
-        | Forcing -> true
-        | Pending | Done -> false)
-    then
-      Hashtbl.add t.missed ~key:member ~data:loc
-      |> (ignore : [ `Ok | `Duplicate ] -> unit);
+    if not found then miss t member ~loc;
     found)
 ;;
 
@@ -382,22 +419,67 @@ let iter_declarations t ~f =
   iter_module t
 ;;
 
-let rec find_module t name ~loc =
-  match%bind.Result mem t (Module, name) ~loc with
-  | true -> Ok (Some t)
-  | false ->
-    (match t.enclosing with
-     | None -> Ok None
-     | Some t -> find_module t name ~loc)
+let rec innermost_having t member =
+  if has t member
+  then Some t
+  else Option.bind t.enclosing ~f:(fun t -> innermost_having t member)
 ;;
 
-let rec find_lexically t namespace name ~loc =
-  match%bind.Result mem t (Member namespace, name) ~loc with
-  | true -> Ok (Some (canonical_name t name))
-  | false ->
-    (match t.enclosing with
-     | None -> Ok None
-     | Some t -> find_lexically t namespace name ~loc)
+let outside ((kind, name) : Member.t) =
+  match kind with
+  | Member Value -> Option.is_some (Prim.find (Path.name name))
+  | Module -> Prim.is_module name
+  | Member (Type | Constructor | Field) -> false
+;;
+
+let rec forcing_splice t =
+  match
+    Queue.find t.includes ~f:(fun splice ->
+      match splice.state with
+      | Forcing -> true
+      | Pending | Done -> false)
+  with
+  | Some splice -> Some splice
+  | None -> Option.bind t.enclosing ~f:forcing_splice
+;;
+
+(* The module [member] is found in from [t] outwards, lexically.
+
+   While a declaration splice is being run, a member already known in a
+   module (or a prim) is found there without generating the includes of the
+   modules inside it, which may need what is being run. They then may not
+   define it. Otherwise includes are generated as the search reaches them,
+   and failing to find the member while an include on the way is being
+   generated is a cycle. *)
+let find_lexically t member ~loc =
+  let rec search module_ =
+    match%bind.Result mem module_ member ~loc with
+    | true -> Ok (Some module_)
+    | false ->
+      (match module_.enclosing with
+       | Some module_ -> search module_
+       | None ->
+         (match forcing_splice t with
+          | Some splice -> cycle ~loc splice
+          | None -> Ok None))
+  in
+  let skip_to found =
+    let rec skip t =
+      if not (Option.exists found ~f:(phys_equal t))
+      then (
+        miss t member ~loc;
+        Option.iter t.enclosing ~f:skip)
+    in
+    skip t;
+    Ok found
+  in
+  if t.callbacks.forcing = 0
+  then search t
+  else (
+    match innermost_having t member with
+    | Some found -> skip_to (Some found)
+    | None when outside member -> skip_to None
+    | None -> search t)
 ;;
 
 (* The location of the module path [written] at the start of the path at
@@ -439,9 +521,11 @@ let rec find_member t namespace name rest ~path ~written ~loc =
 let find t namespace (path : Path.t) ~loc =
   match (path :> string list) with
   | [] -> assert false
-  | [ name ] -> find_lexically t namespace name ~loc
+  | [ name ] ->
+    let%map.Result found = find_lexically t (Member namespace, name) ~loc in
+    Option.map found ~f:(fun t -> canonical_name t name)
   | name :: member :: rest ->
-    (match%bind.Result find_module t name ~loc with
+    (match%bind.Result find_lexically t (Module, name) ~loc with
      | None ->
        Error
          (Typecheck_error.create

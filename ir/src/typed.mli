@@ -220,6 +220,7 @@ module Expect_test : sig
     { name : string Located.t
     ; body : Expr.t
     ; loc : Loc.t
+    ; generated : bool (** By a declaration splice, so located at the splice. *)
     }
   [@@deriving sexp_of]
 end
