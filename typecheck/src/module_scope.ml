@@ -643,32 +643,33 @@ end
 let not_in_scope path = Typecheck_error.Kind.Not_in_scope path
 
 (* Prims are outside the root module, so found only where the program has
-   nothing of their name: no value, or no module for a path. *)
+   nothing of their name: no value, or no module for a path. The prelude also
+   names them as [Prim.<prim>] (eg. [Prim.String.length], as [Core.String]
+   hides [String.length]), which nothing shadows. *)
 let find_value t path ~loc : (Value.t, _) Result.t =
-  match%bind.Result find_path t Value path ~loc ~unbound:not_in_scope with
-  | Found name, None -> Ok (Value.Toplevel name)
-  | Found _, Some splice -> Error (cycle splice ~name:path ~loc)
-  | Unbound, blocked ->
-    let in_prelude =
-      Option.is_some (Prelude_path.relative (canonical_name t "_"))
-    in
-    let intrinsic = if in_prelude then Intrinsic.find path else None in
-    (* The prelude reaches the prims it shadows (eg. [Core.String] hides
-       [String.length]) as [Prim.String.length]. *)
-    let prim =
-      match Prim.find path, (path :> string list) with
-      | Some prim, _ -> Some prim
-      | None, "Prim" :: (_ :: _ :: _ as prim) when in_prelude ->
-        Prim.find (Path.of_list_exn prim)
-      | None, _ -> None
-    in
-    (match prim, blocked, intrinsic, (path :> string list) with
-     | Some _, Some splice, _, _ -> Error (cycle splice ~name:path ~loc)
-     | Some prim, None, _, _ -> Ok (Prim prim)
-     | None, None, Some intrinsic, _ -> Ok (Intrinsic intrinsic)
-     | None, None, None, [ _ ] -> Ok Unbound
-     | None, _, _, _ ->
-       Error (unbound_head t Value path ~loc ~unbound:not_in_scope ~blocked))
+  let in_prelude =
+    lazy (Option.is_some (Prelude_path.relative (canonical_name t "_")))
+  in
+  match (path : Path.t :> string list) with
+  | "Prim" :: (_ :: _ as prim) when Lazy.force in_prelude ->
+    (match Prim.find (Path.of_list_exn prim) with
+     | Some prim -> Ok (Prim prim)
+     | None -> Error (Typecheck_error.create ~loc (not_in_scope path)))
+  | _ ->
+    (match%bind.Result find_path t Value path ~loc ~unbound:not_in_scope with
+     | Found name, None -> Ok (Value.Toplevel name)
+     | Found _, Some splice -> Error (cycle splice ~name:path ~loc)
+     | Unbound, blocked ->
+       let intrinsic =
+         if Lazy.force in_prelude then Intrinsic.find path else None
+       in
+       (match Prim.find path, blocked, intrinsic, (path :> string list) with
+        | Some _, Some splice, _, _ -> Error (cycle splice ~name:path ~loc)
+        | Some prim, None, _, _ -> Ok (Prim prim)
+        | None, None, Some intrinsic, _ -> Ok (Intrinsic intrinsic)
+        | None, None, None, [ _ ] -> Ok Unbound
+        | None, _, _, _ ->
+          Error (unbound_head t Value path ~loc ~unbound:not_in_scope ~blocked)))
 ;;
 
 let unbound_value t path ~loc =

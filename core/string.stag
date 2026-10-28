@@ -12,12 +12,6 @@ let compare = Prim.String.compare
 let is_empty s = Int.equal (length s) 0
 let of_char = Char.to_string
 
-(* [fold_range f acc lo hi] is [f (... (f acc lo) ...) (hi - 1)]. *)
-let fold_range f acc lo hi =
-  match Int.lt lo hi with
-  | true -> fold_range f (f acc lo) (Int.succ lo) hi
-  | false -> acc
-
 (* Joins [parts], separated by [sep]. *)
 let concat = Prim.String.concat
 
@@ -44,11 +38,11 @@ let of_list chars = concat "" (List.map of_char chars)
 
 let fold_left f acc s =
   let step acc i = f acc (get s i) in
-  fold_range step acc 0 (length s)
+  Internal.fold_range step acc 0 (length s)
 
 let iter (f : char -> unit) s =
   let step _ i = f (get s i) in
-  fold_range step () 0 (length s)
+  Internal.fold_range step () 0 (length s)
 
 let map f s =
   let char i = f (get s i) in
@@ -148,24 +142,6 @@ let split_on_char sep s =
   in
   loop 0 0 Nil
 
-(* [c] in OCaml's escaped syntax: backslash escapes for newline, tab, carriage
-   return, backspace, backslash and double quote, and decimal [\ddd] for other
-   characters that are not printable ASCII. *)
-let escape_char c =
-  match c with
-  | '"' -> "\\\""
-  | '\\' -> "\\\\"
-  | '\n' -> "\\n"
-  | '\t' -> "\\t"
-  | '\r' -> "\\r"
-  | '\b' -> "\\b"
-  | _ -> (
-    match Char.is_print c with
-    | true -> of_char c
-    | false ->
-      let digits = Int.to_string (Char.code c) in
-      append "\\" (append (make (Int.sub 3 (length digits)) '0') digits))
-
 (* As OCaml's [String.escaped], without the quotes. *)
 let escaped s =
   let plain c =
@@ -184,7 +160,34 @@ let escaped s =
       match plain c with
       | true -> loop start (Int.succ i) parts
       | false ->
-        let escaped = Cons (escape_char c, Cons (plain_part (), parts)) in
+        let escaped = Cons (Internal.escape_char c, Cons (plain_part (), parts)) in
         loop (Int.succ i) (Int.succ i) escaped)
   in
   loop 0 0 Nil
+
+(* Helpers of the functions above. *)
+module Internal = struct
+  (* [fold_range f acc lo hi] is [f (... (f acc lo) ...) (hi - 1)]. *)
+  let fold_range f acc lo hi =
+    match Int.lt lo hi with
+    | true -> fold_range f (f acc lo) (Int.succ lo) hi
+    | false -> acc
+
+  (* [c] in OCaml's escaped syntax: backslash escapes for newline, tab, carriage
+     return, backspace, backslash and double quote, and decimal [\ddd] for other
+     characters that are not printable ASCII. *)
+  let escape_char c =
+    match c with
+    | '"' -> "\\\""
+    | '\\' -> "\\\\"
+    | '\n' -> "\\n"
+    | '\t' -> "\\t"
+    | '\r' -> "\\r"
+    | '\b' -> "\\b"
+    | _ -> (
+      match Char.is_print c with
+      | true -> of_char c
+      | false ->
+        let digits = Int.to_string (Char.code c) in
+        append "\\" (append (make (Int.sub 3 (length digits)) '0') digits))
+end

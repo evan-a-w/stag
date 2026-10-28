@@ -219,67 +219,12 @@ let%expect_test "the prelude's signature" =
       module Sexp : sig
         type t = Atom of string | List of list[t]
         val equal : t -> t -> bool
-        val must_escape : string -> bool
-        val quote : string -> string
-        val atom_to_string : string -> string
         val to_string : t -> string
-        module Pretty : sig
-          module Box : sig
-            type t = Hov | B | Fits
-          end
-          module Token : sig
-            type t = Text of string | Begin of Box.t * int * int * int | End | Break of int * int | Newline
-            val length : t -> int
-          end
-          val sexp_tokens : t -> list[Token.t] -> int -> list[Token.t] * int * int
-          val margin : int
-          val max_indent : int
-          val infinity : int
-          val output : {`out : list['a]; ..'b} -> 'a -> {`out : list['a]; ..'b}
-          val new_line : {`indent : 'a; `new_line : 'b; `out : list[string]; `space_left : 'c; ..'d} -> int -> int -> {`indent : int; `new_line : bool; `out : list[string]; `space_left : int; ..'d}
-          val same_line : {`out : list[string]; `space_left : int; ..'a} -> {`out : list[string]; `space_left : int; ..'a}
-          val format : {`boxes : list[Box.t * int]; `indent : int; `new_line : bool; `out : list[string]; `space_left : int; ..'a} -> Token.t -> int -> {`boxes : list[Box.t * int]; `indent : int; `new_line : bool; `out : list[string]; `space_left : int; ..'a}
-          val advance : {`back : list[Token.t]; `boxes : list[Box.t * int]; `front : list[Token.t]; `indent : int; `left : int; `new_line : bool; `out : list[string]; `right : int; `space_left : int; ..'a} -> int -> {`back : list[Token.t]; `boxes : list[Box.t * int]; `front : list[Token.t]; `indent : int; `left : int; `new_line : bool; `out : list[string]; `right : int; `space_left : int; ..'a}
-          val run : {`back : list[Token.t]; `boxes : list[Box.t * int]; `front : list[Token.t]; `indent : int; `left : int; `new_line : bool; `out : list[string]; `right : int; `space_left : int; ..'a} -> list[Token.t] -> int -> {`back : list[Token.t]; `boxes : list[Box.t * int]; `front : list[Token.t]; `indent : int; `left : int; `new_line : bool; `out : list[string]; `right : int; `space_left : int; ..'a}
-        end
         val to_string_hum : t -> string
         module Parse_error : sig
           type t = { message : string; offset : int; line : int; col : int }
           val create : string -> int -> string -> t
           val to_string : t -> string
-        end
-        module Parser : sig
-          val fail : string -> int -> string -> result['a, Parse_error.t]
-          module Context : sig
-            type t['a] = { single : bool; frames : list[list['a]]; depth : int; ignoring : list[int]; full : int }
-            val create : bool -> t['a]
-            val ignoring : t['a] -> bool
-            val check_new : string -> int -> t['a] -> result[t['a], Parse_error.t]
-            val added : string -> int -> t['a] -> list[list['b]] -> int -> result[t['b], Parse_error.t]
-            val add : string -> int -> t['a] -> 'a -> result[t['a], Parse_error.t]
-            val open_ : string -> int -> t['a] -> result[t['a], Parse_error.t]
-            val close : string -> int -> t[Sexp.t] -> result[t[Sexp.t], Parse_error.t]
-            val start_comment : t['a] -> t['a]
-            val finish : string -> t['a] -> result[list['a], Parse_error.t]
-          end
-          val at_end : string -> int -> bool
-          val next_char : string -> int -> option[char]
-          val is_blank : char -> bool
-          val ends_atom : char -> bool
-          val escape_digits : string -> int -> int -> int -> string -> string -> result[int * int, Parse_error.t]
-          val decimal_escape : string -> int -> string -> result[int * int, Parse_error.t]
-          val hex_escape : string -> int -> string -> result[int * int, Parse_error.t]
-          val between : string -> int -> Context.t[t] -> result[list[t], Parse_error.t]
-          val after_cr : string -> int -> Context.t[t] -> result[list[t], Parse_error.t]
-          val line_comment : string -> int -> Context.t[t] -> result[list[t], Parse_error.t]
-          val atom : string -> int -> int -> Context.t[t] -> result[list[t], Parse_error.t]
-          val after_hash : string -> int -> Context.t[t] -> result[list[t], Parse_error.t]
-          val quoted : string -> int -> int -> list[string] -> Context.t[t] -> result[list[t], Parse_error.t]
-          val escape : string -> int -> list[string] -> Context.t[t] -> result[list[t], Parse_error.t]
-          val escaped_cr : string -> int -> list[string] -> Context.t[t] -> result[list[t], Parse_error.t]
-          val continuation : string -> int -> list[string] -> Context.t[t] -> result[list[t], Parse_error.t]
-          val block_comment : string -> int -> int -> Context.t[t] -> result[list[t], Parse_error.t]
-          val comment_string : string -> int -> int -> Context.t[t] -> result[list[t], Parse_error.t]
         end
         val of_string : string -> result[t, Parse_error.t]
         val of_string_many : string -> result[list[t], Parse_error.t]
@@ -288,7 +233,6 @@ let%expect_test "the prelude's signature" =
           val create : string -> Sexp.t -> t
           val to_string : t -> string
         end
-        val of_sexp_error : string -> t -> result['a, Of_sexp_error.t]
         val sexp_of_unit : unit -> t
         val unit_of_sexp : t -> result[unit, Of_sexp_error.t]
         val sexp_of_bool : bool -> t
@@ -309,6 +253,63 @@ let%expect_test "the prelude's signature" =
         val triple_of_sexp : (t -> result['a, Of_sexp_error.t]) -> (t -> result['b, Of_sexp_error.t]) -> (t -> result['c, Of_sexp_error.t]) -> t -> result['a * 'b * 'c, Of_sexp_error.t]
         val sexp_of_result : ('a -> t) -> ('b -> t) -> result['a, 'b] -> t
         val result_of_sexp : (t -> result['a, Of_sexp_error.t]) -> (t -> result['b, Of_sexp_error.t]) -> t -> result[result['a, 'b], Of_sexp_error.t]
+        module Internal : sig
+          val must_escape : string -> bool
+          val quote : string -> string
+          module Pretty : sig
+            module Box : sig
+              type t = Hov | B | Fits
+            end
+            module Token : sig
+              type t = Text of string | Begin of Box.t * int * int * int | End | Break of int * int | Newline
+              val length : t -> int
+            end
+            val sexp_tokens : t -> list[Token.t] -> int -> list[Token.t] * int * int
+            val margin : int
+            val max_indent : int
+            val infinity : int
+            val output : {`out : list['a]; ..'b} -> 'a -> {`out : list['a]; ..'b}
+            val new_line : {`indent : 'a; `new_line : 'b; `out : list[string]; `space_left : 'c; ..'d} -> int -> int -> {`indent : int; `new_line : bool; `out : list[string]; `space_left : int; ..'d}
+            val same_line : {`out : list[string]; `space_left : int; ..'a} -> {`out : list[string]; `space_left : int; ..'a}
+            val format : {`boxes : list[Box.t * int]; `indent : int; `new_line : bool; `out : list[string]; `space_left : int; ..'a} -> Token.t -> int -> {`boxes : list[Box.t * int]; `indent : int; `new_line : bool; `out : list[string]; `space_left : int; ..'a}
+            val advance : {`back : list[Token.t]; `boxes : list[Box.t * int]; `front : list[Token.t]; `indent : int; `left : int; `new_line : bool; `out : list[string]; `right : int; `space_left : int; ..'a} -> int -> {`back : list[Token.t]; `boxes : list[Box.t * int]; `front : list[Token.t]; `indent : int; `left : int; `new_line : bool; `out : list[string]; `right : int; `space_left : int; ..'a}
+            val run : {`back : list[Token.t]; `boxes : list[Box.t * int]; `front : list[Token.t]; `indent : int; `left : int; `new_line : bool; `out : list[string]; `right : int; `space_left : int; ..'a} -> list[Token.t] -> int -> {`back : list[Token.t]; `boxes : list[Box.t * int]; `front : list[Token.t]; `indent : int; `left : int; `new_line : bool; `out : list[string]; `right : int; `space_left : int; ..'a}
+          end
+          module Parser : sig
+            val fail : string -> int -> string -> result['a, Parse_error.t]
+            module Context : sig
+              type t['a] = { single : bool; frames : list[list['a]]; depth : int; ignoring : list[int]; full : int }
+              val create : bool -> t['a]
+              val ignoring : t['a] -> bool
+              val check_new : string -> int -> t['a] -> result[t['a], Parse_error.t]
+              val added : string -> int -> t['a] -> list[list['b]] -> int -> result[t['b], Parse_error.t]
+              val add : string -> int -> t['a] -> 'a -> result[t['a], Parse_error.t]
+              val open_ : string -> int -> t['a] -> result[t['a], Parse_error.t]
+              val close : string -> int -> t[Sexp.t] -> result[t[Sexp.t], Parse_error.t]
+              val start_comment : t['a] -> t['a]
+              val finish : string -> t['a] -> result[list['a], Parse_error.t]
+            end
+            val at_end : string -> int -> bool
+            val next_char : string -> int -> option[char]
+            val is_blank : char -> bool
+            val ends_atom : char -> bool
+            val escape_digits : string -> int -> int -> int -> string -> string -> result[int * int, Parse_error.t]
+            val decimal_escape : string -> int -> string -> result[int * int, Parse_error.t]
+            val hex_escape : string -> int -> string -> result[int * int, Parse_error.t]
+            val between : string -> int -> Context.t[t] -> result[list[t], Parse_error.t]
+            val after_cr : string -> int -> Context.t[t] -> result[list[t], Parse_error.t]
+            val line_comment : string -> int -> Context.t[t] -> result[list[t], Parse_error.t]
+            val atom : string -> int -> int -> Context.t[t] -> result[list[t], Parse_error.t]
+            val after_hash : string -> int -> Context.t[t] -> result[list[t], Parse_error.t]
+            val quoted : string -> int -> int -> list[string] -> Context.t[t] -> result[list[t], Parse_error.t]
+            val escape : string -> int -> list[string] -> Context.t[t] -> result[list[t], Parse_error.t]
+            val escaped_cr : string -> int -> list[string] -> Context.t[t] -> result[list[t], Parse_error.t]
+            val continuation : string -> int -> list[string] -> Context.t[t] -> result[list[t], Parse_error.t]
+            val block_comment : string -> int -> int -> Context.t[t] -> result[list[t], Parse_error.t]
+            val comment_string : string -> int -> int -> Context.t[t] -> result[list[t], Parse_error.t]
+          end
+          val of_sexp_error : string -> t -> result['a, Of_sexp_error.t]
+        end
       end
       module String : sig
         val length : string -> int
@@ -319,7 +320,6 @@ let%expect_test "the prelude's signature" =
         val compare : string -> string -> int
         val is_empty : string -> bool
         val of_char : char -> string
-        val fold_range : ('a -> int -> 'a) -> 'a -> int -> int -> 'a
         val concat : string -> list[string] -> string
         val init : int -> (int -> char) -> string
         val make : int -> char -> string
@@ -343,8 +343,11 @@ let%expect_test "the prelude's signature" =
         val drop_while : (char -> bool) -> string -> string
         val strip : string -> string
         val split_on_char : char -> string -> list[string]
-        val escape_char : char -> string
         val escaped : string -> string
+        module Internal : sig
+          val fold_range : ('a -> int -> 'a) -> 'a -> int -> int -> 'a
+          val escape_char : char -> string
+        end
       end
     end
     |}]

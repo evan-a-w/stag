@@ -417,24 +417,6 @@ let%expect_test "Of_sexp_error fields" =
     ()
     |}]
 
-let%expect_test "helpers: must_escape, atom_to_string, of_sexp_error" =
-  let show s =
-    print_bool (Core.Sexp.must_escape s);
-    print_endline (Core.Sexp.atom_to_string s)
-  in
-  show "a";
-  show "a b";
-  match Core.Sexp.of_sexp_error "custom" (atom "x") with
-  | Ok u -> print_sexp (Core.Sexp.sexp_of_unit u)
-  | Error e -> print_endline (Core.Sexp.Of_sexp_error.to_string e);
-  [%expect {|
-    false
-    a
-    true
-    "a b"
-    custom: x
-    |}]
-
 let%expect_test "large inputs" =
   let numbers = Core.List.init 3000 Core.Int.neg in
   let t = Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int numbers in
