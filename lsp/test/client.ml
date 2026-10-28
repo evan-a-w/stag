@@ -83,7 +83,10 @@ let flush t =
       (match Lsp.Server_notification.of_jsonrpc notification with
        | Ok (PublishDiagnostics params) -> print_diagnostics t params
        | _ -> print_json t (Jsonrpc.Notification.yojson_of_t notification))
-    | Request request -> printf "request %s\n" request.method_
+    | Request request ->
+      printf "request %s\n" request.method_;
+      Option.iter request.params ~f:(fun params ->
+        print_json t (Jsonrpc.Structured.yojson_of_t params))
     | Response response -> Queue.enqueue responses response
     | Batch_response _ | Batch_call _ -> print_endline "batch");
   Queue.clear t.sent;
@@ -211,7 +214,12 @@ let print_semantic_tokens t file =
         (String.sub (Text.contents text) ~pos:start ~len:(stop - start)))
 ;;
 
-let with_server ?(limits = Server.default_limits) ?(files = []) f =
+let with_server
+      ?(limits = Server.default_limits)
+      ?(capabilities = `Assoc [])
+      ?(files = [])
+      f
+  =
   let root = Filename_unix.realpath (Filename_unix.temp_dir "stag_lsp" "") in
   List.iter files ~f:(fun (file, contents) ->
     Core_unix.mkdir_p (Filename.dirname (root ^/ file));
@@ -228,7 +236,7 @@ let with_server ?(limits = Server.default_limits) ?(files = []) f =
   Exn.protect
     ~f:(fun () ->
       ignore
-        (request t "initialize" (`Assoc [ "capabilities", `Assoc [] ])
+        (request t "initialize" (`Assoc [ "capabilities", capabilities ])
          : _ option);
       notify t "initialized" (`Assoc []);
       f t)

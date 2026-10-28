@@ -612,3 +612,233 @@ let%expect_test "documents without a file are checked standalone" =
       }
       |}])
 ;;
+
+let calc =
+  [ "stag-project", ""
+  ; "math/stag", "(library (name math))"
+  ; "math/arith.stag", "let square x = Int.mul x x\n"
+  ; "math/power.stag", "let fourth x = Arith.square (Arith.square x)\n"
+  ; "bin/stag", "(executable (name main) (libraries math))"
+  ; "bin/main.stag", "let main = print_int (Math.Power.fourth 2)\n"
+  ]
+;;
+
+let%expect_test "documents depending on a changed one are checked again" =
+  Client.with_server ~files:calc (fun client ->
+    Client.did_open client "bin/main.stag";
+    Client.did_open client "math/power.stag";
+    hover ~file:"bin/main.stag" client ~line:0 ~character:34;
+    definition client "bin/main.stag" ~line:0 ~character:34;
+    [%expect
+      {|
+      0:22-0:39 ```stag Math.Power.fourth : int -> int ```
+      -> math/power.stag 0:4-0:10
+      |}];
+    Client.did_change
+      ~check:false
+      client
+      "math/power.stag"
+      ~version:2
+      "\n\nlet fourth x = Arith.square x\n";
+    Client.print_semantic_tokens client "bin/main.stag";
+    [%expect
+      {|
+      0:0+3 Keyword "let"
+      0:4+4 Variable (declaration) "main"
+      0:9+1 Operator "="
+      0:11+9 Variable "print_int"
+      0:22+4 Namespace "Math"
+      0:27+5 Namespace "Power"
+      0:33+6 Variable "fourth"
+      0:40+1 Number "2"
+      |}];
+    Client.check_pending client;
+    [%expect {| |}];
+    hover ~file:"bin/main.stag" client ~line:0 ~character:34;
+    definition client "bin/main.stag" ~line:0 ~character:34;
+    [%expect
+      {|
+      0:22-0:39 ```stag Math.Power.fourth : int -> int ```
+      -> math/power.stag 2:4-2:10
+      |}];
+    Client.did_change
+      client
+      "math/power.stag"
+      ~version:3
+      "\n\nlet fourth x = \"s\"\n";
+    [%expect
+      {|
+      diagnostics bin/main.stag (version 1):
+        0:21-0:42 error: This expression has type string but an expression was expected of type int
+      |}];
+    Client.notify
+      client
+      "textDocument/didClose"
+      (Client.text_document client "math/power.stag");
+    [%expect {| diagnostics bin/main.stag (version 1): none |}])
+;;
+
+let%expect_test "documents not of files nor untitled are not checked" =
+  Client.with_server (fun client ->
+    let open_ uri text =
+      Client.notify
+        client
+        "textDocument/didOpen"
+        (`Assoc
+            [ ( "textDocument"
+              , `Assoc
+                  [ "uri", `String uri
+                  ; "languageId", `String "stag"
+                  ; "version", `Int 1
+                  ; "text", `String text
+                  ] )
+            ])
+    in
+    let hover uri =
+      Option.iter
+        (Client.request
+           client
+           "textDocument/hover"
+           (`Assoc
+               [ "textDocument", `Assoc [ "uri", `String uri ]
+               ; "position", Client.position ~line:0 ~character:5
+               ]))
+        ~f:(Client.print_json client)
+    in
+    open_ "git:/x/a.stag?ref" "let y = Int.add 1 \"s\"\n";
+    [%expect {| |}];
+    hover "git:/x/a.stag?ref";
+    [%expect {| null |}];
+    Option.iter
+      (Client.request
+         client
+         "textDocument/documentSymbol"
+         (`Assoc
+             [ "textDocument", `Assoc [ "uri", `String "git:/x/a.stag?ref" ] ]))
+      ~f:(Client.print_json client);
+    [%expect
+      {|
+      [
+        {
+          "children": [],
+          "kind": 13,
+          "name": "y",
+          "range": {
+            "end": { "character": 21, "line": 0 },
+            "start": { "character": 0, "line": 0 }
+          },
+          "selectionRange": {
+            "end": { "character": 5, "line": 0 },
+            "start": { "character": 4, "line": 0 }
+          }
+        }
+      ]
+      |}];
+    open_ "untitled:/x/same" "let y = Int.add 1 \"s\"\n";
+    open_ "untitled:/y/same" "let y = 1\n";
+    [%expect
+      {|
+      diagnostics untitled:/x/same (version 1):
+        0:18-0:21 error: This expression has type string but an expression was expected of type int
+      |}];
+    hover "untitled:/x/same";
+    hover "untitled:/y/same";
+    [%expect
+      {|
+      null
+      {
+        "contents": { "kind": "markdown", "value": "```stag\nSame_2.y : int\n```" },
+        "range": {
+          "end": { "character": 5, "line": 0 },
+          "start": { "character": 4, "line": 0 }
+        }
+      }
+      |}])
+;;
+
+let%expect_test "files changed on disk, project errors, closing" =
+  Client.with_server
+    ~capabilities:
+      (`Assoc
+          [ ( "workspace"
+            , `Assoc
+                [ ( "didChangeWatchedFiles"
+                  , `Assoc [ "dynamicRegistration", `Bool true ] )
+                ] )
+          ])
+    ~files:
+      [ "stag-project", ""
+      ; "lib/stag", "(library (name lib))"
+      ; "lib/a.stag", "let x = B.y\n"
+      ; "lib/b.stag", "let y : int = \"s\"\n"
+      ]
+    (fun client ->
+       [%expect
+         {|
+         request client/registerCapability
+         {
+           "registrations": [
+             {
+               "id": "stag-files",
+               "method": "workspace/didChangeWatchedFiles",
+               "registerOptions": {
+                 "watchers": [
+                   { "globPattern": "**/*.stag" },
+                   { "globPattern": "**/stag" },
+                   { "globPattern": "**/stag-project" }
+                 ]
+               }
+             }
+           ]
+         }
+         |}];
+       Client.did_open client "lib/a.stag";
+       [%expect
+         {|
+         diagnostics lib/b.stag:
+           0:14-0:17 error: This expression has type string but an expression was expected of type int
+         |}];
+       let write file data =
+         Out_channel.write_all (Client.path client file) ~data;
+         Client.notify
+           client
+           "workspace/didChangeWatchedFiles"
+           (`Assoc
+               [ ( "changes"
+                 , `List
+                     [ `Assoc
+                         [ "uri", `String (Client.uri client file)
+                         ; "type", `Int 2
+                         ]
+                     ] )
+               ])
+       in
+       write "lib/b.stag" "let y = 1\n";
+       [%expect {| diagnostics lib/b.stag: none |}];
+       write "lib/b.stag" "let y : int = \"s\"\n";
+       [%expect
+         {|
+         diagnostics lib/b.stag:
+           0:14-0:17 error: This expression has type string but an expression was expected of type int
+         |}];
+       write "lib/stag" "(library (nme lib))";
+       [%expect
+         {|
+         diagnostics lib/stag:
+           0:10-0:13 error: Unknown field nme: expected name or libraries
+           0:0-0:19 error: The library stanza has no name: add (name ...)
+         diagnostics lib/b.stag: none
+         |}];
+       write "lib/stag" "(library (name lib))";
+       [%expect
+         {|
+         diagnostics lib/b.stag:
+           0:14-0:17 error: This expression has type string but an expression was expected of type int
+         diagnostics lib/stag: none
+         |}];
+       Client.notify
+         client
+         "textDocument/didClose"
+         (Client.text_document client "lib/a.stag");
+       [%expect {| diagnostics lib/b.stag: none |}])
+;;

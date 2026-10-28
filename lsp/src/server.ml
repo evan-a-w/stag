@@ -4,22 +4,19 @@ module Types = Lsp_types
 module Document = struct
   module Checked = struct
     type t =
-      { version : int
-      ; index : Index.t option
+      { index : Index.t option
+      ; generations : int String.Map.t
+        (** Of the files checked, as they were. *)
       }
   end
 
   type t =
-    { text : Text.t
+    { path : string
+    ; checkable : bool
+    ; text : Text.t
     ; version : int
     ; checked : Checked.t option
     }
-
-  let current_index t =
-    match t.checked with
-    | Some { version; index } when version = t.version -> index
-    | Some _ | None -> None
-  ;;
 end
 
 module State = struct
@@ -34,9 +31,13 @@ type t =
   { limits : Limits.t
   ; send : Jsonrpc.Packet.t -> unit
   ; documents : Document.t String.Table.t
+  ; paths : string String.Table.t
   ; pending : String.Hash_set.t
   ; published : Yojson.Safe.t String.Table.t
-  ; virtual_uris : Lsp.Uri.t String.Table.t
+  ; generations : int String.Table.t
+  ; covered : String.Set.t String.Table.t
+  ; owners : string String.Table.t
+  ; mutable client_capabilities : Types.ClientCapabilities.t option
   ; mutable state : State.t
   ; mutable refresh_semantic_tokens : bool
   ; mutable next_request_id : int
@@ -53,9 +54,13 @@ let create ~limits ~send =
   { limits
   ; send
   ; documents = String.Table.create ()
+  ; paths = String.Table.create ()
   ; pending = String.Hash_set.create ()
   ; published = String.Table.create ()
-  ; virtual_uris = String.Table.create ()
+  ; generations = String.Table.create ()
+  ; covered = String.Table.create ()
+  ; owners = String.Table.create ()
+  ; client_capabilities = None
   ; state = Uninitialized
   ; refresh_semantic_tokens = false
   ; next_request_id = 0
@@ -78,48 +83,80 @@ let request t request =
   t.send (Request (Lsp.Server_request.to_jsonrpc_request request ~id))
 ;;
 
-(* Documents without a file, eg. [untitled:Untitled-1], are checked
-   standalone as [/untitled_1.stag]. *)
+let document_of_path t path =
+  Option.bind (Hashtbl.find t.paths path) ~f:(Hashtbl.find t.documents)
+;;
+
+(* Documents without a file, eg. [untitled:Untitled-1], are named by a path
+   of their own, eg. [/untitled_1.stag]. Only those of [file:] and
+   [untitled:] are checked: others, eg. [git:], are views of files. *)
 let path_of_uri t uri =
   let string = Lsp.Uri.to_string uri in
   if String.is_prefix string ~prefix:"file:"
-  then Lsp.Uri.to_path uri
+  then Lsp.Uri.to_path uri, true
   else (
     let name =
       String.map
         (Lsp.Uri.to_path uri |> Filename.basename)
         ~f:(fun c -> if Char.is_alphanum c then Char.lowercase c else '_')
     in
-    let path =
-      sprintf
-        "/%s%s.stag"
-        (if String.is_empty name || not (Char.is_alpha name.[0])
-         then "untitled_"
-         else "")
-        name
+    let name =
+      if String.is_empty name || not (Char.is_alpha name.[0])
+      then "untitled_" ^ name
+      else name
     in
-    Hashtbl.set t.virtual_uris ~key:path ~data:uri;
-    path)
+    let rec unique n =
+      let path =
+        sprintf "/%s%s.stag" name (if n = 1 then "" else sprintf "_%d" n)
+      in
+      if Hashtbl.mem t.paths path then unique (n + 1) else path
+    in
+    unique 1, String.is_prefix string ~prefix:"untitled:")
 ;;
 
 let uri_of_path t path =
-  match Hashtbl.find t.virtual_uris path with
-  | Some uri -> uri
+  match Hashtbl.find t.paths path with
+  | Some uri -> Lsp.Uri.of_string uri
   | None -> Lsp.Uri.of_path path
 ;;
 
+let read_file path =
+  try In_channel.read_all path with
+  | Sys_error _ -> ""
+;;
+
 let text_of_file t path =
-  match Hashtbl.find t.documents path with
+  match document_of_path t path with
   | Some document -> document.text
-  | None ->
-    Text.create
-      (try In_channel.read_all path with
-       | Sys_error _ -> "")
+  | None -> Text.create (read_file path)
 ;;
 
 let contents t path =
-  Option.map (Hashtbl.find t.documents path) ~f:(fun document ->
+  Option.map (document_of_path t path) ~f:(fun document ->
     Text.contents document.text)
+;;
+
+let generation t path =
+  Hashtbl.find t.generations path |> Option.value ~default:0
+;;
+
+let current_index t (document : Document.t) =
+  let%bind.Option checked = document.checked in
+  if
+    Map.for_alli checked.generations ~f:(fun ~key ~data ->
+      generation t key = data)
+  then checked.index
+  else None
+;;
+
+(* [path]'s contents changed: the checks of it are out of date. *)
+let touch t path =
+  Hashtbl.incr t.generations path;
+  Hashtbl.iteri t.documents ~f:(fun ~key ~data:(document : Document.t) ->
+    match document.checked with
+    | Some { generations; _ } when Map.mem generations path ->
+      Hash_set.add t.pending key
+    | Some _ | None -> ())
 ;;
 
 let lsp_diagnostic t (diagnostic : Diagnostic.t) =
@@ -165,7 +202,7 @@ let publish t ~path diagnostics =
     Types.PublishDiagnosticsParams.create
       ~uri:(uri_of_path t path)
       ?version:
-        (Option.map (Hashtbl.find t.documents path) ~f:(fun document ->
+        (Option.map (document_of_path t path) ~f:(fun document ->
            document.version))
       ~diagnostics:(List.map diagnostics ~f:(lsp_diagnostic t))
       ()
@@ -184,20 +221,40 @@ let publish t ~path diagnostics =
     notify t (PublishDiagnostics params))
 ;;
 
-let check t path =
-  match Checker.check ~limits:t.limits ~contents:(contents t) path with
+(* The files that [uri]'s check reported on, and so whose diagnostics it
+   published last, unless a later check also reported on them. *)
+let cover t ~uri files =
+  let previous =
+    Hashtbl.find t.covered uri |> Option.value ~default:String.Set.empty
+  in
+  Set.iter (Set.diff previous files) ~f:(fun path ->
+    if Option.equal String.equal (Hashtbl.find t.owners path) (Some uri)
+    then (
+      Hashtbl.remove t.owners path;
+      publish t ~path []));
+  Set.iter files ~f:(fun path -> Hashtbl.set t.owners ~key:path ~data:uri);
+  Hashtbl.set t.covered ~key:uri ~data:files
+;;
+
+let check t ~uri (document : Document.t) =
+  match Checker.check ~limits:t.limits ~contents:(contents t) document.path with
   | exception exn ->
-    eprintf "stag lsp: checking %s: %s\n%!" path (Exn.to_string exn)
+    eprintf "stag lsp: checking %s: %s\n%!" document.path (Exn.to_string exn)
   | result ->
-    Map.iteri result.diagnostics ~f:(fun ~key:file ~data:_ ->
-      Hash_set.remove t.pending file;
-      Hashtbl.change t.documents file ~f:(fun document ->
-        Option.map document ~f:(fun (document : Document.t) ->
-          { document with
-            checked = Some { version = document.version; index = result.index }
-          })));
+    let generations =
+      Map.mapi result.diagnostics ~f:(fun ~key ~data:_ -> generation t key)
+    in
+    Map.iter_keys result.diagnostics ~f:(fun path ->
+      Option.iter (Hashtbl.find t.paths path) ~f:(fun uri ->
+        Hash_set.remove t.pending uri;
+        Hashtbl.change t.documents uri ~f:(fun document ->
+          Option.map document ~f:(fun (document : Document.t) ->
+            { document with
+              checked = Some { index = result.index; generations }
+            }))));
     Map.iteri result.diagnostics ~f:(fun ~key:path ~data ->
-      publish t ~path data)
+      publish t ~path data);
+    cover t ~uri (Map.key_set result.diagnostics)
 ;;
 
 let check_pending t =
@@ -205,9 +262,9 @@ let check_pending t =
   let rec loop () =
     match Hash_set.find t.pending ~f:(Fn.const true) with
     | None -> ()
-    | Some path ->
-      Hash_set.remove t.pending path;
-      check t path;
+    | Some uri ->
+      Hash_set.remove t.pending uri;
+      Option.iter (Hashtbl.find t.documents uri) ~f:(check t ~uri);
       loop ()
   in
   loop ();
@@ -215,44 +272,40 @@ let check_pending t =
   then request t SemanticTokensRefresh
 ;;
 
-let document_path t (text_document : Types.TextDocumentIdentifier.t) =
-  path_of_uri t text_document.uri
+let find_document t (text_document : Types.TextDocumentIdentifier.t) =
+  Hashtbl.find t.documents (Lsp.Uri.to_string text_document.uri)
 ;;
 
-let offset_at t ~path position =
-  let%map.Option document = Hashtbl.find t.documents path in
-  document, Text.offset_of_position document.text position
-;;
-
-let parse ~path (document : Document.t) =
-  Source_file.parse { path; contents = Text.contents document.text }
+let parse (document : Document.t) =
+  Source_file.parse
+    { path = document.path; contents = Text.contents document.text }
   |> Result.ok
 ;;
 
-let semantic_tokens t ~path =
-  let%map.Option document = Hashtbl.find t.documents path in
-  let index = Document.current_index document in
+let semantic_tokens t (document : Document.t) =
+  let index = current_index t document in
   let occurrences =
-    match parse ~path document with
+    match parse document with
     | Some toplevel -> Syntax_names.of_toplevels ~module_path:[] [ toplevel ]
     | None -> []
   in
   let tokens =
     Semantic_tokens.compute
       document.text
-      ~file:path
+      ~file:document.path
       ~occurrences
       ~is_function:(fun offset ->
         match index with
-        | Some index -> Index.is_function index ~file:path ~offset
+        | Some index -> Index.is_function index ~file:document.path ~offset
         | None -> false)
   in
   Types.SemanticTokens.create ~data:(Semantic_tokens.encode tokens) ()
 ;;
 
-let formatting t ~path =
-  let%map.Option document = Hashtbl.find t.documents path in
-  match Format.file { path; contents = Text.contents document.text } with
+let formatting (document : Document.t) =
+  match
+    Format.file { path = document.path; contents = Text.contents document.text }
+  with
   | Error _ -> []
   | Ok formatted when String.equal formatted (Text.contents document.text) -> []
   | Ok formatted ->
@@ -262,33 +315,40 @@ let formatting t ~path =
     ]
 ;;
 
-let hover t ~path position =
+(* Checks first, so that the index is of the current contents. *)
+let at_position t text_document position ~f =
   check_pending t;
-  let%bind.Option document, offset = offset_at t ~path position in
-  let%bind.Option index = Document.current_index document in
-  let%map.Option { loc; text } = Index.hover index ~file:path ~offset in
-  Types.Hover.create
-    ~contents:
-      (`MarkupContent (Types.MarkupContent.create ~kind:Markdown ~value:text))
-    ~range:(Text.range_of_loc document.text loc)
-    ()
+  let%bind.Option document = find_document t text_document in
+  let%bind.Option index = current_index t document in
+  f
+    document
+    index
+    ~file:document.path
+    ~offset:(Text.offset_of_position document.text position)
 ;;
 
-let definition t ~path position =
-  check_pending t;
-  let%bind.Option document, offset = offset_at t ~path position in
-  let%bind.Option index = Document.current_index document in
-  let%map.Option loc = Index.definition index ~file:path ~offset in
-  `Location
-    [ Types.Location.create
-        ~uri:(uri_of_path t loc.file)
-        ~range:(Text.range_of_loc (text_of_file t loc.file) loc)
-    ]
+let hover t text_document position =
+  at_position t text_document position ~f:(fun document index ~file ~offset ->
+    let%map.Option { loc; text } = Index.hover index ~file ~offset in
+    Types.Hover.create
+      ~contents:
+        (`MarkupContent (Types.MarkupContent.create ~kind:Markdown ~value:text))
+      ~range:(Text.range_of_loc document.text loc)
+      ())
 ;;
 
-let document_symbols t ~path =
-  let%bind.Option document = Hashtbl.find t.documents path in
-  let%map.Option toplevel = parse ~path document in
+let definition t text_document position =
+  at_position t text_document position ~f:(fun _ index ~file ~offset ->
+    let%map.Option loc = Index.definition index ~file ~offset in
+    `Location
+      [ Types.Location.create
+          ~uri:(uri_of_path t loc.file)
+          ~range:(Text.range_of_loc (text_of_file t loc.file) loc)
+      ])
+;;
+
+let document_symbols (document : Document.t) =
+  let%map.Option toplevel = parse document in
   let toplevels =
     match toplevel.txt with
     | Module (_, toplevels) -> toplevels
@@ -352,7 +412,9 @@ let handle_request t (jsonrpc : Jsonrpc.Request.t) =
       =
       fun request ->
       match t.state, request with
-      | Uninitialized, Initialize params -> Ok (initialize t params)
+      | Uninitialized, Initialize params ->
+        t.client_capabilities <- Some params.capabilities;
+        Ok (initialize t params)
       | (Running | Shut_down | Exited _), Initialize _ ->
         Error (InvalidRequest, "Already initialized")
       | Uninitialized, _ -> Error (ServerNotInitialized, "Not initialized")
@@ -361,19 +423,21 @@ let handle_request t (jsonrpc : Jsonrpc.Request.t) =
         t.state <- Shut_down;
         Ok ()
       | Running, TextDocumentFormatting params ->
-        Ok (formatting t ~path:(document_path t params.textDocument))
+        Ok (Option.map (find_document t params.textDocument) ~f:formatting)
       | Running, SemanticTokensFull params ->
-        Ok (semantic_tokens t ~path:(document_path t params.textDocument))
-      | Running, TextDocumentHover params ->
-        Ok (hover t ~path:(document_path t params.textDocument) params.position)
-      | Running, TextDocumentDefinition params ->
         Ok
-          (definition
-             t
-             ~path:(document_path t params.textDocument)
-             params.position)
+          (Option.map
+             (find_document t params.textDocument)
+             ~f:(semantic_tokens t))
+      | Running, TextDocumentHover params ->
+        Ok (hover t params.textDocument params.position)
+      | Running, TextDocumentDefinition params ->
+        Ok (definition t params.textDocument params.position)
       | Running, DocumentSymbol params ->
-        Ok (document_symbols t ~path:(document_path t params.textDocument))
+        Ok
+          (Option.bind
+             (find_document t params.textDocument)
+             ~f:document_symbols)
       | Running, _ -> Error (MethodNotFound, jsonrpc.method_)
     in
     (match result request with
@@ -388,9 +452,97 @@ let handle_request t (jsonrpc : Jsonrpc.Request.t) =
                (Lsp.Client_request.yojson_of_result request result))))
 ;;
 
-let open_document t ~path ~version text =
-  Hashtbl.set t.documents ~key:path ~data:{ text; version; checked = None };
-  Hash_set.add t.pending path
+let watch_files t =
+  let dynamic =
+    let%bind.Option capabilities = t.client_capabilities in
+    let%bind.Option workspace = capabilities.workspace in
+    let%bind.Option watched = workspace.didChangeWatchedFiles in
+    watched.dynamicRegistration
+  in
+  if Option.value dynamic ~default:false
+  then
+    request
+      t
+      (ClientRegisterCapability
+         (Types.RegistrationParams.create
+            ~registrations:
+              [ Types.Registration.create
+                  ~id:"stag-files"
+                  ~method_:"workspace/didChangeWatchedFiles"
+                  ~registerOptions:
+                    (Types.DidChangeWatchedFilesRegistrationOptions.yojson_of_t
+                       (Types.DidChangeWatchedFilesRegistrationOptions.create
+                          ~watchers:
+                            (List.map
+                               [ "**/*.stag"; "**/stag"; "**/stag-project" ]
+                               ~f:(fun pattern ->
+                                 Types.FileSystemWatcher.create
+                                   ~globPattern:(`Pattern pattern)
+                                   ()))))
+                  ()
+              ]))
+;;
+
+let open_document t ~uri ~version text =
+  let key = Lsp.Uri.to_string uri in
+  let previous = Hashtbl.find t.documents key in
+  let path, checkable, checked, changed =
+    match previous with
+    | Some document ->
+      ( document.path
+      , document.checkable
+      , document.checked
+      , not (String.equal (Text.contents document.text) (Text.contents text)) )
+    | None ->
+      let path, checkable = path_of_uri t uri in
+      Hashtbl.set t.paths ~key:path ~data:key;
+      ( path
+      , checkable
+      , None
+      , not (String.equal (read_file path) (Text.contents text)) )
+  in
+  Hashtbl.set t.documents ~key ~data:{ path; checkable; text; version; checked };
+  if changed then touch t path;
+  if checkable then Hash_set.add t.pending key
+;;
+
+let close_document t (text_document : Types.TextDocumentIdentifier.t) =
+  let key = Lsp.Uri.to_string text_document.uri in
+  Option.iter (Hashtbl.find t.documents key) ~f:(fun document ->
+    Hashtbl.remove t.documents key;
+    publish t ~path:document.path [];
+    Hashtbl.remove t.paths document.path;
+    Hash_set.remove t.pending key;
+    if
+      not (String.equal (read_file document.path) (Text.contents document.text))
+    then touch t document.path;
+    let covered =
+      Hashtbl.find_and_remove t.covered key
+      |> Option.value ~default:String.Set.empty
+    in
+    Set.iter covered ~f:(fun path ->
+      let still_covered =
+        Option.is_some (document_of_path t path)
+        || Hashtbl.exists t.documents ~f:(fun (other : Document.t) ->
+          match other.checked with
+          | Some { generations; _ } -> Map.mem generations path
+          | None -> false)
+      in
+      if not still_covered
+      then (
+        Hashtbl.remove t.owners path;
+        publish t ~path [])))
+;;
+
+(* Files changed on disk, eg. by [git checkout], or project files: any
+   check may be out of date. *)
+let files_changed t (changes : Types.FileEvent.t list) =
+  List.iter changes ~f:(fun change ->
+    let path = Lsp.Uri.to_path change.uri in
+    if Option.is_none (document_of_path t path)
+    then Hashtbl.incr t.generations path);
+  Hashtbl.iteri t.documents ~f:(fun ~key ~data:(document : Document.t) ->
+    if document.checkable then Hash_set.add t.pending key)
 ;;
 
 let handle_notification t (jsonrpc : Jsonrpc.Notification.t) =
@@ -404,24 +556,25 @@ let handle_notification t (jsonrpc : Jsonrpc.Notification.t) =
   | _, (Uninitialized | Shut_down | Exited _) | Error _, Running -> ()
   | Ok notification, Running ->
     (match notification with
+     | Initialized -> watch_files t
      | TextDocumentDidOpen { textDocument = { uri; version; text; _ } } ->
-       open_document t ~path:(path_of_uri t uri) ~version (Text.create text)
+       open_document t ~uri ~version (Text.create text)
      | TextDocumentDidChange { textDocument = { uri; version }; contentChanges }
        ->
-       let path = path_of_uri t uri in
-       Option.iter (Hashtbl.find t.documents path) ~f:(fun document ->
-         open_document
-           t
-           ~path
-           ~version
-           (List.fold contentChanges ~init:document.text ~f:Text.apply_change))
+       Option.iter
+         (Hashtbl.find t.documents (Lsp.Uri.to_string uri))
+         ~f:(fun document ->
+           open_document
+             t
+             ~uri
+             ~version
+             (List.fold contentChanges ~init:document.text ~f:Text.apply_change))
      | DidSaveTextDocument { textDocument; _ } ->
-       Hash_set.add t.pending (document_path t textDocument)
-     | TextDocumentDidClose { textDocument } ->
-       let path = document_path t textDocument in
-       Hashtbl.remove t.documents path;
-       Hash_set.remove t.pending path;
-       publish t ~path []
+       Option.iter (find_document t textDocument) ~f:(fun document ->
+         if document.checkable
+         then Hash_set.add t.pending (Lsp.Uri.to_string textDocument.uri))
+     | TextDocumentDidClose { textDocument } -> close_document t textDocument
+     | DidChangeWatchedFiles { changes } -> files_changed t changes
      | _ -> ())
 ;;
 
