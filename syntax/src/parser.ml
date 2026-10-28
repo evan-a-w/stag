@@ -31,6 +31,9 @@ exception Syntax_error of Loc.t * string
 type t =
   { tokens : Lexer.Located.t array
   ; mutable pos : int
+  ; mutable bare_tuple_end : int
+    (** The [pos] after the last [)] whose contents were a tuple without
+          parentheses of its own, as in [(a, b)] but not [((a, b))]. *)
   }
 
 let peek_at t n =
@@ -443,11 +446,24 @@ let starts_pattern_atom : Token.t -> bool = function
   | _ -> false
 ;;
 
-(** [C (a, b)] has two arguments; [arg] started at [arg_start]. *)
-let construct_args (arg : _ Located.t) ~arg_start ~tuple_items =
-  match arg_start, tuple_items arg.txt with
-  | Token.Lparen, Some items -> items
+(** [C (a, b)] has two arguments, and [C ((a, b))] one; [arg] was just
+    parsed. *)
+let construct_args t (arg : _ Located.t) ~tuple_items =
+  match tuple_items arg.txt with
+  | Some items when t.bare_tuple_end = t.pos -> items
   | _ -> [ arg ]
+;;
+
+(** Closes the parentheses around [contents], recording if [contents] is a
+    tuple without parentheses of its own: one starting where its first item
+    does, as parentheses are part of a location. *)
+let close_parens t ~open_loc (contents : _ Located.t) ~tuple_items =
+  close t Rparen ~opener:Lparen ~open_loc;
+  match tuple_items contents.txt with
+  | Some ((first : _ Located.t) :: _)
+    when Loc.Pos.equal first.loc.start contents.loc.start ->
+    t.bare_tuple_end <- t.pos
+  | _ -> ()
 ;;
 
 let rec pattern t : Pattern.t =
@@ -475,9 +491,8 @@ and pattern_construct t : Pattern.t =
     let args =
       if starts_pattern_atom (peek t)
       then (
-        let arg_start = peek t in
         let arg = pattern_construct t in
-        construct_args arg ~arg_start ~tuple_items:(function
+        construct_args t arg ~tuple_items:(function
           | Pattern.Tuple items -> Some items
           | _ -> None))
       else []
@@ -520,7 +535,9 @@ and pattern_atom t : Pattern.t =
       let pattern = pattern t in
       if is t Colon
       then fail (loc t) "type annotations on patterns are not supported";
-      close t Rparen ~opener:Lparen ~open_loc:start;
+      close_parens t ~open_loc:start pattern ~tuple_items:(function
+        | Pattern.Tuple items -> Some items
+        | _ -> None);
       since t start pattern.txt)
   | Lbrace -> record_pattern t
   | _ -> expected t "a pattern"
@@ -719,11 +736,6 @@ and entry_value t = tuple t ~seq:false
 and construct t : Expr.t =
   let start = loc t in
   let saved = t.pos in
-  let arg () =
-    let arg_start = peek t in
-    let arg = construct t in
-    arg_start, arg
-  in
   match peek t with
   | Uident _ ->
     (match path t ~what:"" with
@@ -731,8 +743,8 @@ and construct t : Expr.t =
        let args =
          if starts_atom (peek t)
          then (
-           let arg_start, arg = arg () in
-           construct_args arg ~arg_start ~tuple_items:(function
+           let arg = construct t in
+           construct_args t arg ~tuple_items:(function
              | Expr.Tuple items -> Some items
              | _ -> None))
          else []
@@ -744,7 +756,7 @@ and construct t : Expr.t =
   | Label tag ->
     let tag = located ~loc:start tag in
     advance t;
-    let arg = if starts_atom (peek t) then Some (snd (arg ())) else None in
+    let arg = if starts_atom (peek t) then Some (construct t) else None in
     expr_since t start (Poly_variant (tag, arg))
   | Type ->
     advance t;
@@ -859,7 +871,9 @@ and atom t : Expr.t =
              e.loc
              "type annotations are only supported on variables, as in `(x : t)`")
       | _ ->
-        close t Rparen ~opener:Lparen ~open_loc:start;
+        close_parens t ~open_loc:start e ~tuple_items:(function
+          | Expr.Tuple items -> Some items
+          | _ -> None);
         expr_since t start e.txt)
   | Lbrace -> record t
   | Quote_open ->
@@ -1088,11 +1102,11 @@ and toplevels t ~stop =
   loop []
 ;;
 
-let run ~file source f =
-  match Lexer.tokenize ~file source with
+let run_with_comments ~file source f =
+  match Lexer.tokenize_with_comments ~file source with
   | Error error -> Error (Error.Lex error)
-  | Ok tokens ->
-    let t = { tokens; pos = 0 } in
+  | Ok (tokens, comments) ->
+    let t = { tokens; pos = 0; bare_tuple_end = -1 } in
     (match
        let result = f t in
        (match peek t with
@@ -1102,11 +1116,21 @@ let run ~file source f =
         | _ -> expected t "end of file");
        result
      with
-     | result -> Ok result
+     | result -> Ok (result, tokens, comments)
      | exception Syntax_error (loc, message) -> Error (Syntax { loc; message }))
 ;;
 
+let run ~file source f =
+  Result.map (run_with_comments ~file source f) ~f:(fun (result, _, _) ->
+    result)
+;;
+
 let program ~file source = run ~file source (toplevels ~stop:Token.Eof)
+
+let program_with_comments ~file source =
+  run_with_comments ~file source (toplevels ~stop:Token.Eof)
+;;
+
 let expr ~file source = run ~file source expr
 let pattern ~file source = run ~file source pattern
 let type_expr ~file source = run ~file source type_expr

@@ -99,6 +99,8 @@ let rec to_string_hum : t -> string = function
   | Unit -> "()"
   | Tuple values -> tuple values
   | Construct ({ name; _ }, []) -> Prelude_path.to_string_hum name
+  | Construct ({ name; _ }, [ (Tuple _ as value) ]) ->
+    sprintf "%s (%s)" (Prelude_path.to_string_hum name) (to_string_hum value)
   | Construct ({ name; _ }, [ value ]) ->
     Prelude_path.to_string_hum name ^ " " ^ argument value
   | Construct ({ name; _ }, values) ->

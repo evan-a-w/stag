@@ -1,24 +1,53 @@
 (* Evaluation of closures, recursion and staged code. *)
 
-let print_pair p = match p with (a, b) -> print_char '('; print_int a; print_string ", "; print_int b; print_char ')'
+let print_pair p =
+  match p with
+  | a, b ->
+    print_char '(';
+    print_int a;
+    print_string ", ";
+    print_int b;
+    print_char ')'
 
-let print_bool b = match b with true -> print_string "true" | false -> print_string "false"
+let print_bool b =
+  match b with
+  | true -> print_string "true"
+  | false -> print_string "false"
 
-let print_nat n = match n with `Z -> print_string "Z" | `S m -> print_string "S "; print_nat m
+let print_nat n =
+  match n with
+  | `Z -> print_string "Z"
+  | `S m ->
+    print_string "S ";
+    print_nat m
 
 module Application = struct
   let pair a b = (a, b)
   let applied = pair 1 2
   let partial = pair 1
   let partial_twice = (partial 2, partial 3)
-  let make x = let get u = x in get
-  let closures = let one = make 1 in let two = make 2 in (one (), two ())
-  let shadowing = let x = 1 in ((let x = 2 in x), x)
+
+  let make x =
+    let get u = x in
+    get
+
+  let closures =
+    let one = make 1 in
+    let two = make 2 in
+    (one (), two ())
+
+  let shadowing =
+    let x = 1 in
+    ((let x = 2 in x), x)
 
   let%expect_test "application, partial application and closures" =
     print_pair applied;
     print_endline "";
-    (match partial_twice with (a, b) -> print_pair a; print_string " "; print_pair b);
+    (match partial_twice with
+     | a, b ->
+       print_pair a;
+       print_string " ";
+       print_pair b);
     print_endline "";
     print_pair closures;
     print_endline "";
@@ -32,19 +61,37 @@ module Application = struct
 end
 
 module Recursion = struct
-  let double n = match n with `Z -> `Z | `S m -> `S (`S (double m))
+  let double n =
+    match n with
+    | `Z -> `Z
+    | `S m -> `S (`S (double m))
+
   let doubled = double (`S (`S `Z))
-  let even n = match n with `Z -> true | `S m -> odd m
-  let odd n = match n with `Z -> false | `S m -> even m
+
+  let even n =
+    match n with
+    | `Z -> true
+    | `S m -> odd m
+
+  let odd n =
+    match n with
+    | `Z -> false
+    | `S m -> even m
+
   let parities = (even (`S (`S (`S `Z))), odd (`S (`S (`S `Z))))
+
   let local =
-    let count n = match n with `Z -> `Done | `S m -> count m in
+    let count n =
+      match n with
+      | `Z -> `Done
+      | `S m -> count m
+    in
     count (`S (`S (`S (`S `Z))))
 
   let%expect_test "recursion" =
     print_nat doubled;
     print_endline "";
-    (match parities with (a, b) -> print_bool a; print_string " "; print_bool b);
+    (match parities with a, b -> print_bool a; print_string " "; print_bool b);
     print_endline "";
     (match local with `Done -> print_string "Done");
     [%expect {|
@@ -55,15 +102,21 @@ module Recursion = struct
 end
 
 module Toplevel_splices = struct
-  let five = .~(.<5>.)
+  let five = .~(.< 5 >.)
+
   (* Toplevel splices run once, while checking. *)
   let generated =
-    .~(let gen n = match n with `Z -> .<`Z>. | `S m -> .<`S .~(gen m)>. in
+    .~(let gen n =
+         match n with
+         | `Z -> .< `Z >.
+         | `S m -> .< `S .~(gen m) >.
+       in
        gen (`S (`S (`S `Z))))
+
   (* The level 0 binders at the splice provide the code's context. *)
-  let captured x = .~(.<(x, x)>.)
+  let captured x = .~(.< (x, x) >.)
   let applied = captured 3
-  let nested = .~(.~(.<.<6>.>.))
+  let nested = .~(.~(.< .< 6 >. >.))
 
   let%expect_test "toplevel splices" =
     print_int five;
@@ -83,10 +136,15 @@ end
 
 module Persistent = struct
   (* [h] is a level -1 closure, used by the level 0 code. *)
-  let embedded = .~(let h y = (y, y) in .<h 1>.)
+  let embedded = .~(let h y = (y, y) in .< h 1 >.)
+
   (* Each call of [mk] embeds its own [h]. *)
   let per_build =
-    .~(let mk n = (let h u = n in .<h ()>.) in .<(.~(mk 1), .~(mk 2))>.)
+    .~(let mk n =
+         let h u = n in
+         .< h () >.
+       in
+       .< (.~(mk 1), .~(mk 2)) >.)
 
   let%expect_test "persistent values in code" =
     print_pair embedded;
@@ -100,13 +158,16 @@ end
 
 module Hygiene = struct
   (* An implicit splice is provided by the innermost binder. *)
-  let implicit = .~(let c = .<x>. in .<let x = 1 in (.~c, let x = 2 in .~c)>.)
+  let implicit =
+    .~(let c = .< x >. in .< let x = 1 in (.~c, let x = 2 in .~c) >.)
+
   (* From proofs.md: [x] is the outer [y], not the code's. *)
-  let explicit = .~(.<let y = 1 in .~(.<let y = 2 in (x, y)>.).{x = y}>.)
+  let explicit = .~(.< let y = 1 in .~(.< let y = 2 in (x, y) >.).{x = y} >.)
+
   (* Each copy of the closure [g] captures its own [x]. *)
   let copies =
-    .~(let c = .<let g u = x in g ()>. in
-       .<((let x = 1 in .~c), (let x = 2 in .~c))>.)
+    .~(let c = .< let g u = x in g () >. in
+       .< ((let x = 1 in .~c), let x = 2 in .~c) >.)
 
   let%expect_test "hygiene" =
     print_pair implicit;
@@ -122,7 +183,7 @@ module Hygiene = struct
 end
 
 module Explicit_substitutions = struct
-  let f y = .~(.<let g u = (x, u) in g>.).{x = y}
+  let f y = .~(.< let g u = (x, u) in g >.).{x = y}
   let applied = f 1 2
 
   let%expect_test "explicit substitutions at toplevel splices" =
@@ -133,7 +194,12 @@ end
 module Left_to_right = struct
   let%expect_test "evaluation is left to right" =
     let subs =
-      .~(.<.~(.<(a, b)>.).{b = (print_string "b"; 0); a = (print_string "a"; 0)}>.)
+      .~(.<
+           .~(.< (a, b) >.).{
+             b = (print_string "b"; 0);
+             a = (print_string "a"; 0);
+           }
+         >.)
     in
     print_endline "";
     let tuple = ((print_string "1"; 1), (print_string "2"; 2)) in
@@ -144,25 +210,35 @@ module Left_to_right = struct
 end
 
 module Negative_literals = struct
-  let sign n = match n with -1 -> "minus one" | 0 -> "zero" | _ -> "other"
+  let sign n =
+    match n with
+    | -1 -> "minus one"
+    | 0 -> "zero"
+    | _ -> "other"
 
   let%expect_test "negative literals" =
-    print_int -5; print_char ' ';
-    print_int (Int.add -2 3); print_char ' ';
-    print_int -4_611_686_018_427_387_904; print_char ' ';
-    print_string (sign -1); print_char ' ';
+    print_int (-5);
+    print_char ' ';
+    print_int (Int.add (-2) 3);
+    print_char ' ';
+    print_int (-4611686018427387904);
+    print_char ' ';
+    print_string (sign (-1));
+    print_char ' ';
     print_string (sign 0);
     [%expect {| -5 1 -4611686018427387904 minus one zero |}]
 end
 
 module Provided = struct
   let n = 3
-  let f u = .~(.<(n, u)>.)
+  let f u = .~(.< (n, u) >.)
   let applied = f 4
+
   let local x =
     let h y = (x, y) in
-    let g u = .~(.<h u>.) in
+    let g u = .~(.< h u >.) in
     g
+
   let local_applied = local 5 6
 
   let%expect_test "toplevel splices provided by toplevels and persistent locals" =

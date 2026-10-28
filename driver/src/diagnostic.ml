@@ -35,11 +35,22 @@ let of_source_file_error (error : Source_file.Error.t) =
     }
 ;;
 
-(* Without the locations of [Located] values, all at the splice. *)
-let rec without_locs : Sexp.t -> Sexp.t = function
-  | List [ txt; Atom "@"; _ ] -> without_locs txt
-  | List sexps -> List (List.map sexps ~f:without_locs)
-  | Atom _ as atom -> atom
+let max_declaration_lines = 12
+
+(* Indented, its first lines only if it is long. *)
+let declaration_source toplevel =
+  let lines = String.split_lines (Printer.toplevel ~width:78 toplevel) in
+  let lines =
+    if List.length lines <= max_declaration_lines
+    then lines
+    else (
+      let shown = max_declaration_lines - 1 in
+      List.take lines shown
+      @ [ sprintf "... (%d more lines)" (List.length lines - shown) ])
+  in
+  List.map lines ~f:(fun line ->
+    if String.is_empty line then line else "  " ^ line)
+  |> String.concat ~sep:"\n"
 ;;
 
 let of_typecheck_error (error : Typecheck_error.t) =
@@ -84,9 +95,7 @@ let of_typecheck_error (error : Typecheck_error.t) =
       notes error
       @ [ { Note.loc = Loc.none
           ; message =
-              "The generated declaration is "
-              ^ Sexp.to_string_hum
-                  (without_locs [%sexp (generated : Syntax.Toplevel.t)])
+              "The generated declaration is:\n" ^ declaration_source generated
           }
         ]
     | _ -> []
