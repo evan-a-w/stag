@@ -126,11 +126,19 @@ let char = TCon ("char", [])
 let unit = TCon ("unit", [])
 let exn_name = "exn"
 let exn = TCon (exn_name, [])
+let error_name = "<error>"
+let error = TCon (error_name, [])
 
 let canonical_ty =
   Var.canonical ~var:(function
     | TVar var -> Some var
     | TCon _ | TArrow _ | TTuple _ | TCode _ | TRecord _ | TVariant _ -> None)
+;;
+
+let is_error ty =
+  match canonical_ty ty with
+  | TCon (name, []) -> String.equal name error_name
+  | _ -> false
 ;;
 
 let canonical_row =

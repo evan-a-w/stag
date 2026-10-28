@@ -97,12 +97,13 @@ and state =
   | Pending
   | Forcing
   | Done of Toplevel.t list
-  | Failed of Typecheck_error.t
+  | Failed (* Its error reported. *)
 
 (* Shared by the modules of a root. *)
 and program =
   { declare : t -> Toplevel.t -> generated_by:splice option -> unit
   ; force : splice -> (Toplevel.t list, Force_error.t) Result.t
+  ; report : Typecheck_error.t -> unit
   ; outside : t option (* The root's enclosing scope. *)
   }
 
@@ -117,7 +118,7 @@ module Splice = struct
   let generated (t : t) =
     match t.state with
     | Done toplevels -> Some toplevels
-    | Pending | Forcing | Failed _ -> None
+    | Pending | Forcing | Failed -> None
   ;;
 end
 
@@ -142,14 +143,14 @@ let create ~path ~loc ~enclosing ~splice ~program =
   }
 ;;
 
-let create_root ?enclosing ?(path = []) ~types ~declare ~force () =
+let create_root ?enclosing ?(path = []) ~types ~declare ~force ~report () =
   let module_ =
     create
       ~path
       ~loc:Loc.none
       ~enclosing
       ~splice:None
-      ~program:{ declare; force; outside = enclosing }
+      ~program:{ declare; force; report; outside = enclosing }
   in
   List.iter types ~f:(fun name ->
     Hashtbl.set module_.members ~key:(Member Type, name) ~data:None);
@@ -167,7 +168,6 @@ let rec declarations_of entries =
 ;;
 
 let declarations t = declarations_of t.module_.entries
-let iter_result xs ~f = List.fold_result xs ~init:() ~f:(fun () x -> f x)
 
 (* The members [toplevel] adds to the module it is in. *)
 let members (toplevel : Toplevel.t) : (Member.t * Name.t) list =
@@ -190,65 +190,77 @@ let members (toplevel : Toplevel.t) : (Member.t * Name.t) list =
   | Expect_test _ | Bench _ | Include _ -> []
 ;;
 
-(* Checks that adding [toplevels] to the module [path], whose members are
-   [taken], keeps names unique: a member per module, a parameter per type. *)
-let rec check_unique ~path taken toplevels =
-  iter_result toplevels ~f:(fun (toplevel : Toplevel.t) ->
-    let%bind.Result () =
+(* [toplevels] but those whose names, or type parameters, are taken by those
+   before them or by [taken], the members of the module [path] they are added
+   to, which are reported. *)
+let rec unique ~path taken toplevels ~report =
+  List.filter_map toplevels ~f:(fun (toplevel : Toplevel.t) ->
+    let error ~loc kind =
+      report (Typecheck_error.create ~loc kind);
+      None
+    in
+    let params_unique =
       match toplevel.txt with
       | Type { name; params; kind = _ } ->
         let type_name = join (path @ [ name.txt ]) in
-        List.fold_result
+        List.fold_until
           params
           ~init:String.Set.empty
           ~f:(fun seen { txt = param; loc } ->
             let param = Type_decl.Param.name param in
             if Set.mem seen param
             then
-              Error
-                (Typecheck_error.create
-                   ~loc
-                   (Duplicate_type_parameter { type_name; param }))
-            else Ok (Set.add seen param))
-        |> Result.ignore_m
+              Stop (error ~loc (Duplicate_type_parameter { type_name; param }))
+            else Continue (Set.add seen param))
+          ~finish:(fun _ -> Some ())
       | Let _
       | Exception _
       | Module _
       | Module_splice _
       | Expect_test _
       | Bench _
-      | Include _ -> Ok ()
+      | Include _ -> Some ()
     in
-    let%bind.Result () =
-      iter_result (members toplevel) ~f:(fun (((kind, name) as member), at) ->
-        if Hash_set.mem taken member
-        then
-          Error
-            (Typecheck_error.create
-               ~loc:at.loc
-               (Member_kind.duplicate kind (join (path @ [ name ]))))
-        else Ok (Hash_set.add taken member))
-    in
-    match toplevel.txt with
-    | Module (name, toplevels) ->
-      check_unique
-        ~path:(path @ [ name.txt ])
-        (Member.Hash_set.create ())
-        toplevels
-    | Let _
-    | Type _
-    | Exception _
-    | Module_splice _
-    | Expect_test _
-    | Bench _
-    | Include _ -> Ok ())
+    let%bind.Option () = params_unique in
+    let members = members toplevel in
+    let added = Member.Hash_set.create () in
+    match
+      List.find members ~f:(fun (member, _) ->
+        Hash_set.mem taken member
+        || Hash_set.strict_add added member |> Result.is_error)
+    with
+    | Some ((kind, name), at) ->
+      error ~loc:at.loc (Member_kind.duplicate kind (join (path @ [ name ])))
+    | None ->
+      Hash_set.iter added ~f:(Hash_set.add taken);
+      Some
+        (match toplevel.txt with
+         | Module (name, toplevels) ->
+           { toplevel with
+             txt =
+               Toplevel.Module
+                 ( name
+                 , unique
+                     ~path:(path @ [ name.txt ])
+                     (Member.Hash_set.create ())
+                     toplevels
+                     ~report )
+           }
+         | Let _
+         | Type _
+         | Exception _
+         | Module_splice _
+         | Expect_test _
+         | Bench _
+         | Include _ -> toplevel))
 ;;
 
-let check_unique module_ toplevels =
-  check_unique
+let unique module_ toplevels ~report =
+  unique
     ~path:module_.path
     (Member.Hash_set.of_list (Hashtbl.keys module_.members))
     toplevels
+    ~report
 ;;
 
 let submodule (scope : t) (name : Name.t) ~splice =
@@ -318,8 +330,11 @@ let rec register module_ toplevels ~parent ~generated_by =
 ;;
 
 let add t toplevels =
-  let%map.Result () = check_unique t.module_ toplevels in
-  register t.module_ toplevels ~parent:None ~generated_by:None
+  register
+    t.module_
+    (unique t.module_ toplevels ~report:t.module_.program.report)
+    ~parent:None
+    ~generated_by:None
 ;;
 
 let in_scope (t : t) : Typecheck_error.In_scope.t =
@@ -361,10 +376,17 @@ let cycle ?module_ (splice : splice) ~name ~loc =
 (* Runs [splice], which is not running, adding what it generates to its
    module, or, for an include, to the module it is in, in its place. If it
    uses an unfinished toplevel, it is left pending. *)
-let force (splice : splice) : (unit, Force_error.t) Result.t =
+module Forced = struct
+  type t =
+    | Forced
+    | Failed
+    | Uses_unfinished
+end
+
+let force (splice : splice) : Forced.t =
   match splice.state with
-  | Done _ -> Ok ()
-  | Failed error -> Error (Failed error)
+  | Done _ -> Forced
+  | Failed -> Failed
   | Forcing -> raise_s [%message "Module_scope.force: already running"]
   | Pending ->
     splice.state <- Forcing;
@@ -372,25 +394,30 @@ let force (splice : splice) : (unit, Force_error.t) Result.t =
     (match in_module.program.force splice with
      | Error Uses_unfinished ->
        splice.state <- Pending;
-       Error Uses_unfinished
+       Uses_unfinished
      | Error (Failed error) ->
-       splice.state <- Failed error;
-       Error (Failed error)
+       in_module.program.report error;
+       splice.state <- Failed;
+       Failed
      | Ok toplevels ->
        let module_, parent =
          match splice.into with
          | Into_include _ -> in_module, Some splice
          | Into_module name -> Hashtbl.find_exn in_module.modules name, None
        in
-       (match check_unique module_ toplevels with
-        | Ok () ->
-          register module_ toplevels ~parent ~generated_by:(Some splice);
-          splice.state <- Done toplevels;
-          Ok ()
-        | Error error ->
-          let error = within splice.scope error in
-          splice.state <- Failed error;
-          Error (Failed error)))
+       let toplevels =
+         unique module_ toplevels ~report:(fun error ->
+           in_module.program.report (within splice.scope error))
+       in
+       register module_ toplevels ~parent ~generated_by:(Some splice);
+       splice.state <- Done toplevels;
+       Forced)
+;;
+
+let is_failed (splice : splice) =
+  match splice.state with
+  | Failed -> true
+  | Pending | Forcing | Done _ -> false
 ;;
 
 let is_before (splice : splice) position =
@@ -426,8 +453,8 @@ let rec lookup (t : t) member =
          is_before splice t.position
          &&
          match splice.state with
-         | Done _ -> false
-         | Pending | Forcing | Failed _ -> true)
+         | Done _ | Failed -> false
+         | Pending | Forcing -> true)
        |> first
      with
      | None -> Ok (Absent { blocked = None })
@@ -435,9 +462,16 @@ let rec lookup (t : t) member =
        Ok (Absent { blocked = Some splice })
      | Some splice ->
        (match force splice with
-        | Ok () -> lookup t member
-        | Error (Failed error) -> Error error
-        | Error Uses_unfinished -> Ok (Absent { blocked = Some splice })))
+        | Forced | Failed -> lookup t member
+        | Uses_unfinished -> Ok (Absent { blocked = Some splice })))
+;;
+
+(* Whether an include that failed may have generated what is not found from
+   [t]. *)
+let rec after_failed_include (t : t) =
+  Queue.exists t.module_.includes ~f:(fun splice ->
+    is_failed splice && is_before splice t.position)
+  || Option.exists t.module_.enclosing ~f:after_failed_include
 ;;
 
 module Found = struct
@@ -512,11 +546,11 @@ let open_module module_ name ~path ~loc =
     | Some splice ->
       (match splice.state with
        | Forcing -> Error (cycle splice)
-       | Pending | Done _ | Failed _ ->
+       | Pending | Done _ | Failed ->
          (match force splice with
-          | Ok () -> Ok ()
-          | Error (Failed error) -> Error error
-          | Error Uses_unfinished -> Error (cycle splice)))
+          | Forced -> Ok ()
+          | Failed -> Error Typecheck_error.already_reported
+          | Uses_unfinished -> Error (cycle splice)))
   in
   module_
 ;;
@@ -571,9 +605,12 @@ let rec find_member
         ( Typecheck_error.Kind.Unbound_module (Path.of_list_exn written)
         , prefix_loc loc ~path ~written )
     in
-    Error
-      (hint
-         (Typecheck_error.create ~loc (with_note kind ~blocked ~hidden:None)))
+    if after_failed_include { module_; position = End }
+    then Error Typecheck_error.already_reported
+    else
+      Error
+        (hint
+           (Typecheck_error.create ~loc (with_note kind ~blocked ~hidden:None)))
 ;;
 
 let rec has_path module_ namespace = function
@@ -653,12 +690,15 @@ let unbound_head t namespace (path : Path.t) ~loc ~unbound ~blocked =
       , Typecheck_error.Kind.Unbound_module (Path.of_list_exn [ head ])
       , prefix_loc loc ~path ~written:[ head ] )
   in
-  let hidden =
-    match blocked with
-    | Some _ -> None
-    | None -> generated_after t member
-  in
-  Typecheck_error.create ~loc (with_note kind ~blocked ~hidden)
+  if after_failed_include t
+  then Typecheck_error.already_reported
+  else (
+    let hidden =
+      match blocked with
+      | Some _ -> None
+      | None -> generated_after t member
+    in
+    Typecheck_error.create ~loc (with_note kind ~blocked ~hidden))
 ;;
 
 let find t namespace path ~loc ~unbound =
@@ -716,34 +756,29 @@ let unbound_value t path ~loc =
 let iter_declarations t ~f =
   let force splice =
     match force splice with
-    | Ok () -> Ok ()
-    | Error (Failed error) -> Error error
-    | Error Uses_unfinished ->
+    | Forced | Failed -> ()
+    | Uses_unfinished ->
       raise_s
         [%message
           "Module_scope.iter_declarations: a splice uses an unfinished toplevel"]
   in
   let rec iter_module module_ =
-    let%bind.Result () =
-      match module_.splice with
-      | Some splice -> force splice
-      | None -> Ok ()
-    in
+    Option.iter module_.splice ~f:force;
     iter_entries module_.entries
   and iter_entries entries =
-    iter_result (Queue.to_list entries) ~f:(function
+    Queue.iter entries ~f:(function
       | Included splice ->
-        let%bind.Result () = force splice in
+        force splice;
         (match splice.into with
          | Into_include entries -> iter_entries entries
-         | Into_module _ -> Ok ())
+         | Into_module _ -> ())
       | Written { toplevel; scope; generated_by } ->
-        let%bind.Result () = f scope toplevel ~generated_by in
+        f scope toplevel ~generated_by;
         (match toplevel.txt with
          | Module (name, _) | Module_splice (name, _, _) ->
            iter_module (Hashtbl.find_exn scope.module_.modules name.txt)
          | Let _ | Type _ | Exception _ | Expect_test _ | Bench _ | Include _ ->
-           Ok ()))
+           ()))
   in
   iter_module t.module_
 ;;

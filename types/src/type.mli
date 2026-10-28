@@ -151,6 +151,12 @@ val exn : ty
 
 val exn_name : string
 
+(** The type of what did not check, which unifies with any type, binding its
+    variables to [error], so that what uses it is not in error too. *)
+val error : ty
+
+val is_error : ty -> bool
+
 (** Follows [Link]s, compressing the path. *)
 val canonical_ty : ty -> ty
 
