@@ -397,11 +397,11 @@ let%expect_test "the prelude's signature" =
             val conv : Dir.t -> list[string] -> string -> Stag.Type_expr.t -> Stag.Expr.t
             val to_sexp : list[string] -> string -> Stag.Type_expr.t -> Stag.Expr.t -> Stag.Expr.t
             val of_exn : list[string] -> string -> Stag.Type_expr.t -> string -> Stag.Expr.t
-            val tuple_to_sexp : list[string] -> string -> list[Stag.Type_expr.t] -> Stag.Expr.t
+            val tuple_to_sexp : list[string] -> string -> list[Stag.Type_expr.t] -> Stag.Expr.t -> Stag.Expr.t
             val tuple_of_sexp : list[string] -> string -> list[Stag.Type_expr.t] -> Stag.Expr.t
             val nominal_case : Stag.Constructor_ref.t * 'a -> string * 'a * (list[Stag.Expr.t] -> Stag.Expr.t) * (list[Stag.Pattern.t] -> Stag.Pattern.t)
             val poly_cases : Stag.Type_expr.Row.t -> list[string * list[Stag.Type_expr.t] * (list[Stag.Expr.t] -> Stag.Expr.t) * (list[Stag.Pattern.t] -> Stag.Pattern.t)]
-            val variant_to_sexp : list[string] -> string -> list[string * list[Stag.Type_expr.t] * (list[Stag.Expr.t] -> Stag.Expr.t) * (list[Stag.Pattern.t] -> Stag.Pattern.t)] -> Stag.Expr.t
+            val variant_to_sexp : list[string] -> string -> list[string * list[Stag.Type_expr.t] * (list[Stag.Expr.t] -> Stag.Expr.t) * (list[Stag.Pattern.t] -> Stag.Pattern.t)] -> Stag.Expr.t -> Stag.Expr.t
             val variant_of_sexp : list[string] -> string -> list[string * list[Stag.Type_expr.t] * (list[Stag.Expr.t] -> Stag.Expr.t) * (list[Stag.Pattern.t] -> Stag.Pattern.t)] -> Stag.Expr.t
             val record_to_sexp : list[string] -> string -> list[Stag.Field_ref.t * Stag.Type_expr.t] -> Stag.Expr.t
             val record_of_sexp : list[string] -> string -> list[Stag.Field_ref.t * Stag.Type_expr.t] -> Stag.Expr.t

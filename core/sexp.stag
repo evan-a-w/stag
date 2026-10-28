@@ -1128,18 +1128,25 @@ module Internal = struct
            apply
              (erase .< triple_of_sexp >.)
              (Cons (recur a, two (recur b) (recur c)))
-         | Dir.To_sexp, _ -> fun_ "v" (tuple_to_sexp self name tys)
+         | Dir.To_sexp, _ -> fun_ "v" (tuple_to_sexp self name tys (var "v"))
          | Dir.Of_sexp, _ -> catch (fun_ "sexp" (tuple_of_sexp self name tys)))
       | Stag.Type_expr.Variant row ->
         (let cases = poly_cases row in
          match dir with
-         | Dir.To_sexp -> fun_ "v" (variant_to_sexp self name cases)
+         | Dir.To_sexp -> fun_ "v" (variant_to_sexp self name cases (var "v"))
          | Dir.Of_sexp -> catch (fun_ "sexp" (variant_of_sexp self name cases)))
       | Stag.Type_expr.Arrow (_, _) -> fail "functions have no sexp conversion"
       | Stag.Type_expr.Code _ -> fail "code has no sexp conversion"
       | Stag.Type_expr.Record _ -> fail "polymorphic records are not supported"
 
-    let to_sexp self name ty e = apply (conv Dir.To_sexp self name ty) (one e)
+    (* Anonymous tuples and polymorphic variants are matched in place. *)
+    let to_sexp self name ty e =
+      match ty with
+      | Stag.Type_expr.Tuple (Cons (a, Cons (b, Cons (c, Cons (d, rest))))) ->
+        tuple_to_sexp self name (Cons (a, Cons (b, Cons (c, Cons (d, rest))))) e
+      | Stag.Type_expr.Variant row ->
+        variant_to_sexp self name (poly_cases row) e
+      | _ -> apply (conv Dir.To_sexp self name ty) (one e)
 
     let of_exn self name ty v =
       apply
@@ -1147,13 +1154,13 @@ module Internal = struct
         (two (conv Dir.Of_sexp self name ty) (var v))
 
     (* [v]'s components [(v0 v1 ...)]. *)
-    let tuple_to_sexp self name tys =
+    let tuple_to_sexp self name tys e =
       let vs = vars (List.length tys) in
       let pattern = Stag.Pattern.Tuple (List.map pvar vs) in
       let sexps =
         List.map2_exn (fun ty v -> to_sexp self name ty (var v)) tys vs
       in
-      match_ (var "v") (one (pattern, sexp_list sexps))
+      match_ e (one (pattern, sexp_list sexps))
 
     let tuple_of_sexp self name tys =
       let n = List.length tys in
@@ -1204,7 +1211,7 @@ module Internal = struct
         in
         Cons (case, poly_cases rest)
 
-    let variant_to_sexp self name cases =
+    let variant_to_sexp self name cases e =
       let arm case =
         match case with
         | tag, args, _, pattern ->
@@ -1218,7 +1225,7 @@ module Internal = struct
           in
           (pattern (List.map pvar vs), sexp)
       in
-      match_ (var "v") (List.map arm cases)
+      match_ e (List.map arm cases)
 
     let variant_of_sexp self name cases =
       let arm case =
@@ -1319,17 +1326,18 @@ module Internal = struct
         | Stag.Type.Kind.Variant Nil -> fail "empty variants are not supported"
         | Stag.Type.Kind.Variant cs ->
           let cases = List.map nominal_case cs in
-          (variant_to_sexp self of_name cases,
+          (variant_to_sexp self of_name cases (var "v"),
            variant_of_sexp self of_name cases)
         | Stag.Type.Kind.Record fields ->
           (record_to_sexp self of_name fields,
            record_of_sexp self of_name fields)
         | Stag.Type.Kind.Alias (Stag.Type_expr.Variant row) ->
           let cases = poly_cases row in
-          (variant_to_sexp self of_name cases,
+          (variant_to_sexp self of_name cases (var "v"),
            variant_of_sexp self of_name cases)
         | Stag.Type.Kind.Alias (Stag.Type_expr.Tuple tys) ->
-          (tuple_to_sexp self of_name tys, tuple_of_sexp self of_name tys)
+          (tuple_to_sexp self of_name tys (var "v"),
+           tuple_of_sexp self of_name tys)
         | Stag.Type.Kind.Alias ty ->
           (to_sexp self of_name ty (var "v"), of_exn self of_name ty "sexp")
       in

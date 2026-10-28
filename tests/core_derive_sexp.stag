@@ -881,3 +881,89 @@ module Shadowing = struct
       Error shape_of_sexp: this constructor requires arguments: Circle
       |}]
 end
+
+(* Anonymous tuples of more than 3 and polymorphic variants within a type are
+   converted by functions in place. *)
+type inline = {big : int * int * int * int; dir : [`L | `R of int]}
+
+include%inline .~(Core.Sexp.derive (type inline))
+  let sexp_of_inline v =
+    Core.Sexp.List (Cons
+      (Core.Sexp.Deriving.field
+         "big"
+         (match v.big with
+          | v0, v1, v2, v3 ->
+            Core.Sexp.List (Cons
+              (Core.Sexp.sexp_of_int v0,
+               Cons
+                 (Core.Sexp.sexp_of_int v1,
+                  Cons
+                    (Core.Sexp.sexp_of_int v2,
+                     Cons (Core.Sexp.sexp_of_int v3, Nil)))))),
+       Cons
+         (Core.Sexp.Deriving.field
+            "dir"
+            (match v.dir with
+             | `L -> Core.Sexp.Atom "L"
+             | `R v0 ->
+               Core.Sexp.List (Cons
+                 (Core.Sexp.Atom "R", Cons (Core.Sexp.sexp_of_int v0, Nil)))),
+          Nil)))
+
+  let inline_of_sexp_exn sexp =
+    match
+      Core.Sexp.Deriving.record_fields
+        "inline_of_sexp"
+        (Cons ("big", Cons ("dir", Nil)))
+        sexp
+    with
+    | Cons (big, Cons (dir, Nil)) ->
+      {
+        big =
+          Core.Sexp.of_sexp_exn
+            (Core.Sexp.Deriving.catch
+               (fun sexp ->
+                  match sexp with
+                  | Core.Sexp.List (Cons (v0,
+                                          Cons (v1,
+                                                Cons (v2, Cons (v3, Nil))))) ->
+                    (Core.Sexp.of_sexp_exn Core.Sexp.int_of_sexp v0,
+                     Core.Sexp.of_sexp_exn Core.Sexp.int_of_sexp v1,
+                     Core.Sexp.of_sexp_exn Core.Sexp.int_of_sexp v2,
+                     Core.Sexp.of_sexp_exn Core.Sexp.int_of_sexp v3)
+                  | _ ->
+                    Core.Sexp.Deriving.tuple_error "inline_of_sexp" 4 sexp))
+            big;
+        dir =
+          Core.Sexp.of_sexp_exn
+            (Core.Sexp.Deriving.catch
+               (fun sexp ->
+                  match sexp with
+                  | Core.Sexp.Atom "L" -> `L
+                  | Core.Sexp.List (Cons (Core.Sexp.Atom "R",
+                                          Cons (v0, Nil))) ->
+                    `R (Core.Sexp.of_sexp_exn Core.Sexp.int_of_sexp v0)
+                  | _ ->
+                    Core.Sexp.Deriving.variant_error
+                      "inline_of_sexp"
+                      (Cons ("L", Nil))
+                      (Cons ("R", Nil))
+                      sexp))
+            dir;
+      }
+
+  let inline_of_sexp sexp =
+    match inline_of_sexp_exn sexp with
+    | v -> Ok v
+    | exception Core.Sexp.Of_sexp_error e -> Error e
+end%inline
+
+let%expect_test "anonymous tuples and polymorphic variants" =
+  round_trip sexp_of_inline inline_of_sexp {big = (1, 2, 3, 4); dir = `R 5};
+  parse sexp_of_inline inline_of_sexp "((big (1 2 3)) (dir L))";
+  parse sexp_of_inline inline_of_sexp "((big (1 2 3 4)) (dir (L)))";
+  [%expect {|
+    ((big (1 2 3 4)) (dir (R 5)))
+    Error inline_of_sexp: tuple of size 4 expected: (1 2 3)
+    Error inline_of_sexp: this constructor does not take arguments: (L)
+    |}]
