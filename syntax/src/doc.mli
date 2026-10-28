@@ -20,7 +20,8 @@ val separate : t -> t list -> t
 val line : t
 
 (** [text], of several lines written at column [col], with its later lines
-    moved as much as its first line is from [col], if none would be cut. *)
+    moved alike as much as its first line is from [col], or as far left as
+    they can go. *)
 val block : string -> col:int -> t
 
 (** A space, unless at the start of a line or after one. *)
