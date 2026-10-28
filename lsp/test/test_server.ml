@@ -130,15 +130,19 @@ let%expect_test "changes are checked once, at their last version" =
 
 let%expect_test "a looping splice is stopped by the limits" =
   Client.with_server
+    ~limits:
+      { Server.default_limits with
+        time_limit = Some (Time_ns.Span.of_int_ms 200)
+      }
     ~files:[ "a.stag", "let loop x = loop x\nlet y = .~(loop 0)\n" ]
     (fun client ->
        Client.did_open client "a.stag";
        [%expect
          {|
-        diagnostics a.stag (version 1):
-          1:8-1:18 error: This toplevel splice failed at compile time: Stack depth exceeded: evaluation nested more than 100000 steps deep
-            related a.stag 0:13-0:17: The error was raised here
-        |}])
+         diagnostics a.stag (version 1):
+           1:8-1:18 error: This toplevel splice failed at compile time: Time limit exceeded: evaluation took more than 200ms
+             related a.stag 0:13-0:17: The error was raised here
+         |}])
 ;;
 
 let%expect_test "formatting" =

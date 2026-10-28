@@ -211,7 +211,7 @@ let print_semantic_tokens t file =
         (String.sub (Text.contents text) ~pos:start ~len:(stop - start)))
 ;;
 
-let with_server ?(files = []) f =
+let with_server ?(limits = Server.default_limits) ?(files = []) f =
   let root = Filename_unix.realpath (Filename_unix.temp_dir "stag_lsp" "") in
   List.iter files ~f:(fun (file, contents) ->
     Core_unix.mkdir_p (Filename.dirname (root ^/ file));
@@ -219,8 +219,7 @@ let with_server ?(files = []) f =
   let sent = Queue.create () in
   let t =
     { root
-    ; server =
-        Server.create ~limits:Server.default_limits ~send:(Queue.enqueue sent)
+    ; server = Server.create ~limits ~send:(Queue.enqueue sent)
     ; sent
     ; next_id = 0
     ; contents = String.Table.create ()

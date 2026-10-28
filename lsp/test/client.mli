@@ -8,7 +8,11 @@ type t
 
 (** Initializes a server over the [files] (relative path, contents), and
     removes them after [f]. *)
-val with_server : ?files:(string * string) list -> (t -> unit) -> unit
+val with_server
+  :  ?limits:Limits.t
+  -> ?files:(string * string) list
+  -> (t -> unit)
+  -> unit
 
 val server : t -> Server.t
 val path : t -> string -> string
