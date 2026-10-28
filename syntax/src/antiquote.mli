@@ -32,8 +32,8 @@ val map
 
 val iter : Syntax.Toplevel.t list -> f:(t -> unit) -> unit
 
-(** [placeholder i] stands for the [i]th splice, once its expression is checked
-    apart, and [index] gives [i] back. *)
+(** [placeholder i] stands for the [i]th splice's expression, which no
+    program can write, and [index] gives [i] back. *)
 val placeholder : int -> Syntax.Expr.t
 
-val index : Syntax.Expr.t -> int
+val index : Syntax.Expr.t -> int option

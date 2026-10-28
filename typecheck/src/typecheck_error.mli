@@ -91,6 +91,8 @@ module Kind : sig
     | Declaration_splice_failed of Error.t
     (** Evaluating the declaration splice's expression failed. *)
     | Malformed_declarations of Error.t
+    | Malformed_struct_quote of string
+    | Misplaced_type_splice
     (** What the declaration splice's expression evaluated to is not syntax
         (see [Syntax_value]). *)
     | Declaration_splice_cycle of

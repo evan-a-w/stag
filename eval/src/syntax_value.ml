@@ -34,219 +34,46 @@ let constructor_refs =
 ;;
 
 module To_value = struct
-  open Syntax
-
   let con name args =
     Value.Construct
       ( Hashtbl.find_exn (force constructor_refs) (Prelude_path.canonical name)
       , args )
   ;;
 
-  let list f xs =
-    List.fold_right xs ~init:(con "Nil" []) ~f:(fun x tail ->
-      con "Cons" [ f x; tail ])
-  ;;
+  include Lift.Make (struct
+      type t = Value.t
 
-  let option f = function
-    | None -> con "None" []
-    | Some x -> con "Some" [ f x ]
-  ;;
+      let con = con
+      let int n = Value.Int n
+      let bool b = Value.Bool b
+      let string s = Value.String s
+      let char c = Value.Char c
+      let tuple vs = Value.Tuple vs
+      let record fields = Value.Poly_record (String.Map.of_alist_exn fields)
 
-  let string s = Value.String s
-  let name (name : Name.t) = string name.txt
-  let path (path : Path.t) = string (Path.to_string path)
-  let pair f g (a, b) = Value.Tuple [ f a; g b ]
+      let ref_ (kind : Lift.Ref_kind.t) name =
+        let kind : Decl_ref.Kind.t =
+          match kind with
+          | Type -> Type
+          | Constructor -> Constructor
+          | Field -> Field
+          | Value -> Value
+        in
+        Value.Ref { kind; name }
+      ;;
 
-  let decl_path_txt kind : Decl_path.t -> Value.t = function
-    | Path p -> con "Stag.Path.Name" [ path p ]
-    | Root p -> con "Stag.Path.Name" [ string ("." ^ Path.to_string p) ]
-    | Resolved name -> con "Stag.Path.Ref" [ Value.Ref { kind; name } ]
-  ;;
-
-  let decl_path kind ({ txt; loc = _ } : Decl_path.t Located.t) =
-    decl_path_txt kind txt
-  ;;
-
-  let record fields = Value.Poly_record (String.Map.of_alist_exn fields)
-
-  let lit : Lit.t -> Value.t = function
-    | Int n -> con "Stag.Lit.Int" [ Int n ]
-    | Bool b -> con "Stag.Lit.Bool" [ Bool b ]
-    | String s -> con "Stag.Lit.String" [ String s ]
-    | Char c -> con "Stag.Lit.Char" [ Char c ]
-    | Unit -> con "Stag.Lit.Unit" []
-  ;;
-
-  let rec type_expr ({ txt; loc = _ } : Type_expr.t) =
-    let con name = con ("Stag.Type_expr." ^ name) in
-    match txt with
-    | Var var -> con "Var" [ string var ]
-    | Con (p, args) -> con "Con" [ decl_path Type p; list type_arg args ]
-    | Arrow (a, b) -> con "Arrow" [ type_expr a; type_expr b ]
-    | Tuple ts -> con "Tuple" [ list type_expr ts ]
-    | Code { inner; context } ->
-      con "Code" [ record [ "inner", type_expr inner; "context", row context ] ]
-    | Record r -> con "Record" [ row r ]
-    | Variant r -> con "Variant" [ row r ]
-
-  and row ({ txt; loc = _ } : Type_expr.row) =
-    let con name = con ("Stag.Type_expr.Row." ^ name) in
-    match txt with
-    | Empty -> con "Empty" []
-    | Extend (label, ty, rest) ->
-      con "Extend" [ name label; type_expr ty; row rest ]
-    | Var var -> con "Var" [ name var ]
-
-  and type_arg : Type_expr.arg -> Value.t = function
-    | Ty ty -> con "Stag.Type_expr.Arg.Ty" [ type_expr ty ]
-    | Row r -> con "Stag.Type_expr.Arg.Row" [ row r ]
-  ;;
-
-  let type_param ({ txt; loc = _ } : Type_decl.Param.t Located.t) =
-    match txt with
-    | Ty var -> con "Stag.Type_decl.Param.Ty" [ string var ]
-    | Row var -> con "Stag.Type_decl.Param.Row" [ string var ]
-  ;;
-
-  let type_decl ({ name = decl_name; params; kind } : Type_decl.t) =
-    let decl_kind : Type_decl.Kind.t -> Value.t = function
-      | Variant constructors ->
-        con
-          "Stag.Type_decl.Kind.Variant"
-          [ list (pair name (list type_expr)) constructors ]
-      | Record fields ->
-        con "Stag.Type_decl.Kind.Record" [ list (pair name type_expr) fields ]
-      | Alias ty -> con "Stag.Type_decl.Kind.Alias" [ type_expr ty ]
-      | Abstract -> con "Stag.Type_decl.Kind.Abstract" []
-    in
-    record
-      [ "name", name decl_name
-      ; "params", list type_param params
-      ; "kind", decl_kind kind
-      ]
-  ;;
-
-  let binding = pair name (option type_expr)
-
-  let rec pattern ({ txt; loc = _ } : Pattern.t) =
-    let con name = con ("Stag.Pattern." ^ name) in
-    match txt with
-    | Any -> con "Any" []
-    | Var var -> con "Var" [ string var ]
-    | Lit l -> con "Lit" [ lit l ]
-    | Tuple ps -> con "Tuple" [ list pattern ps ]
-    | Construct (p, args) ->
-      con "Construct" [ decl_path Constructor p; list pattern args ]
-    | Record fields ->
-      con "Record" [ list (pair (decl_path Field) pattern) fields ]
-    | Poly_variant (tag, arg) ->
-      con "Poly_variant" [ name tag; option pattern arg ]
-    | Poly_record { fields; rest } ->
-      let rest_value : Pattern.Rest.t -> Value.t = function
-        | Closed -> con "Rest.Closed" []
-        | Open -> con "Rest.Open" []
-        | Bind var -> con "Rest.Bind" [ name var ]
-      in
-      con
-        "Poly_record"
-        [ record
-            [ "fields", list (pair name pattern) fields
-            ; "rest", rest_value rest
-            ]
-        ]
-    | Exception p -> con "Exception" [ pattern p ]
-  ;;
-
-  let rec expr ({ txt; loc = _ } : Expr.t) =
-    let con name = con ("Stag.Expr." ^ name) in
-    let fields = list (pair name expr) in
-    match txt with
-    | Lit l -> con "Lit" [ lit l ]
-    | Var (p, annot) ->
-      con "Var" [ decl_path_txt Value p; option type_expr annot ]
-    | App (f, x) -> con "App" [ expr f; expr x ]
-    | Let (var, bindings, annot, equal, body) ->
-      con
-        "Let"
-        [ name var
-        ; list binding bindings
-        ; option type_expr annot
-        ; expr equal
-        ; expr body
-        ]
-    | Fun (params, body) -> con "Fun" [ list binding params; expr body ]
-    | Splice { expr = spliced; subs } ->
-      con
-        "Splice"
-        [ record
-            [ "expr", expr spliced
-            ; "subs", option (list (pair name (option expr))) subs
-            ]
-        ]
-    | Quote e -> con "Quote" [ expr e ]
-    | Tuple es -> con "Tuple" [ list expr es ]
-    | Construct (p, args) ->
-      con "Construct" [ decl_path Constructor p; list expr args ]
-    | Record record_fields ->
-      con "Record" [ list (pair (decl_path Field) expr) record_fields ]
-    | Record_update (e, record_fields) ->
-      con
-        "Record_update"
-        [ expr e; list (pair (decl_path Field) expr) record_fields ]
-    | Field (e, p) -> con "Field" [ expr e; decl_path Field p ]
-    | Type ty -> con "Type" [ type_expr ty ]
-    | Match (e, arms) -> con "Match" [ expr e; list (pair pattern expr) arms ]
-    | Poly_record poly_fields -> con "Poly_record" [ fields poly_fields ]
-    | Poly_field (e, label) -> con "Poly_field" [ expr e; name label ]
-    | Poly_extend (extension, e) ->
-      con "Poly_extend" [ fields extension; expr e ]
-    | Poly_restrict (e, label) -> con "Poly_restrict" [ expr e; name label ]
-    | Poly_update (e, updates) -> con "Poly_update" [ expr e; fields updates ]
-    | Poly_variant (tag, arg) ->
-      con "Poly_variant" [ name tag; option expr arg ]
-    | Expect expected -> con "Expect" [ string expected.txt ]
-  ;;
-
-  let rec toplevel ({ txt; loc = _ } : Toplevel.t) =
-    let con name = con ("Stag.Toplevel." ^ name) in
-    match txt with
-    | Let (var, bindings, annot, body) ->
-      con
-        "Let"
-        [ name var; list binding bindings; option type_expr annot; expr body ]
-    | Type decl -> con "Type" [ type_decl decl ]
-    | Exception (exn_name, args) ->
-      con "Exception" [ name exn_name; list type_expr args ]
-    | Module (module_name, items) ->
-      con "Module" [ name module_name; list toplevel items ]
-    | Module_splice (module_name, e, _) ->
-      con "Module_splice" [ name module_name; expr e ]
-    | Include (e, _) -> con "Include" [ expr e ]
-    | Expect_test { name = test_name; body } ->
-      con
-        "Expect_test"
-        [ record [ "name", string test_name.txt; "body", expr body ] ]
-    | Bench { name = bench_name; param; body } ->
-      con
-        "Bench"
-        [ record
-            [ "name", string bench_name.txt
-            ; ( "param"
-              , option
-                  (fun ({ name = param; args } : Bench_param.t) ->
-                     pair name (list expr) (param, args))
-                  param )
-            ; "body", expr body
-            ]
-        ]
-  ;;
-
-  let program = list toplevel
+      let rec append (xs : Value.t) ys =
+        match xs with
+        | Construct (_, [ x; rest ]) -> con "Cons" [ x; append rest ys ]
+        | _ -> ys
+      ;;
+    end)
 
   let reflected_decl decl ~decl_type =
     option
       (fun ({ params; kind } : Reflected_decl.t) ->
          let ref_ kind name = Value.Ref { kind; name } in
+         let pair f g (a, b) = Value.Tuple [ f a; g b ] in
          let kind =
            match kind with
            | Variant constructors ->
@@ -540,6 +367,7 @@ module Of_value = struct
                  })
            | "Record", 1 -> Record (arg 0 (row ~labels:Label ~loc))
            | "Variant", 1 -> Variant (arg 0 (row ~labels:Label ~loc))
+           | "Splice", 1 -> Splice (arg 0 (expr ~loc))
            | _ -> raise Bad_arguments))
 
   and row ~(labels : Ident_kind.t) value ~loc : Type_expr.row =
@@ -570,9 +398,9 @@ module Of_value = struct
         | "Ty", 1 -> Ty (arg 0 (type_expr ~loc))
         | "Row", 1 -> Row (arg 0 (row ~labels:Label ~loc))
         | _ -> raise Bad_arguments)
-  ;;
 
-  let type_decl value ~loc : Type_decl.t =
+
+  and type_decl value ~loc : Type_decl.t =
     let param value =
       Located.create
         ~loc
@@ -600,17 +428,18 @@ module Of_value = struct
             Record (arg 0 (fields (pair (name Lower ~loc) (type_expr ~loc))))
           | "Alias", 1 -> Alias (arg 0 (type_expr ~loc))
           | "Abstract", 0 -> Abstract
+          | "Splice", 1 -> Splice (arg 0 (expr ~loc))
           | _ -> raise Bad_arguments)
     in
     { name = field "name" (name Lower ~loc) value
     ; params = field "params" (list param) value
     ; kind = field "kind" kind value
     }
-  ;;
 
-  let binding ~loc = pair (name Binder ~loc) (option (type_expr ~loc))
 
-  let rec pattern value ~loc : Pattern.t =
+  and binding ~loc = pair (name Binder ~loc) (option (type_expr ~loc))
+
+  and pattern value ~loc : Pattern.t =
     Located.create
       ~loc
       (variant "Stag.Pattern.t" value ~f:(fun constructor args : Pattern.desc ->
@@ -650,9 +479,9 @@ module Of_value = struct
         | "Open", 0 -> Open
         | "Bind", 1 -> Bind (arg 0 (name Lower ~loc))
         | _ -> raise Bad_arguments)
-  ;;
 
-  let rec expr value ~loc : Expr.t =
+
+  and expr value ~loc : Expr.t =
     let labelled = list (pair (name Label ~loc) (expr ~loc)) in
     Located.create
       ~loc
@@ -709,10 +538,11 @@ module Of_value = struct
          | "Poly_variant", 2 ->
            Poly_variant (arg 0 (name Label ~loc), arg 1 (option (expr ~loc)))
          | "Expect", 1 -> Expect (Located.create ~loc (arg 0 string))
+         | "Struct_quote", 1 -> Struct_quote (arg 0 (list (toplevel ~loc)))
          | _ -> raise Bad_arguments))
-  ;;
 
-  let rec toplevel value ~loc : Toplevel.t =
+
+  and toplevel value ~loc : Toplevel.t =
     Located.create
       ~loc
       (variant
@@ -777,12 +607,12 @@ end
 let reflected_decl = To_value.reflected_decl
 
 module Type_expr = struct
-  let to_value = To_value.type_expr
+  let to_value t = To_value.type_expr t
   let of_value = Of_value.(run type_expr)
 end
 
 module Type_decl = struct
-  let to_value = To_value.type_decl
+  let to_value t = To_value.type_decl t
   let of_value = Of_value.(run type_decl)
 end
 
@@ -792,16 +622,16 @@ module Pattern = struct
 end
 
 module Expr = struct
-  let to_value = To_value.expr
+  let to_value t = To_value.expr t
   let of_value = Of_value.(run expr)
 end
 
 module Toplevel = struct
-  let to_value = To_value.toplevel
+  let to_value t = To_value.toplevel t
   let of_value = Of_value.(run toplevel)
 end
 
 module Program = struct
-  let to_value = To_value.program
+  let to_value t = To_value.program t
   let of_value = Of_value.(run program)
 end

@@ -165,10 +165,19 @@ let iter toplevels ~f =
      : Toplevel.t list)
 ;;
 
-let placeholder i = Located.create ~loc:Loc.none (Expr.Lit (Int i))
+(* No program can name it: canonical names never start with [%]. *)
+let placeholder_prefix = "%antiquote."
+
+let placeholder i =
+  Located.create
+    ~loc:Loc.none
+    (Expr.Var (Resolved (placeholder_prefix ^ Int.to_string i), None))
+;;
 
 let index (e : Expr.t) =
   match e.txt with
-  | Lit (Int i) -> i
-  | _ -> raise_s [%message "Antiquote.index: not a placeholder" (e : Expr.t)]
+  | Var (Resolved name, None) ->
+    String.chop_prefix name ~prefix:placeholder_prefix
+    |> Option.map ~f:Int.of_string
+  | _ -> None
 ;;

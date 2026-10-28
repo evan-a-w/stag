@@ -240,6 +240,7 @@ let rec elaborate' t module_ vars ~expansions (expr : Type_expr.t)
     | Variant row ->
       let%map.Result row, syntax = elaborate_row row in
       Fresh.variant t.fresh row, Type_expr.Variant syntax
+    | Splice _ -> Error (Typecheck_error.create ~loc Misplaced_type_splice)
   in
   ty, { expr with txt }
 
@@ -313,7 +314,8 @@ and elaborate_con
   in
   let%map.Result ty =
     match decl.decl.kind with
-    | Variant _ | Record _ | Abstract -> Ok (Type.TCon (decl.name, args))
+    | Variant _ | Record _ | Abstract | Splice _ ->
+      Ok (Type.TCon (decl.name, args))
     | Alias body ->
       let instances = Hashtbl.find_multi expansions decl.name in
       (match
@@ -401,7 +403,7 @@ let declare
         ~data:name)
   in
   match decl.kind with
-  | Alias _ | Abstract -> ()
+  | Alias _ | Abstract | Splice _ -> ()
   | Variant constructors -> declares constructors t.constructor_types
   | Record fields -> declares fields t.field_types
 ;;
@@ -460,6 +462,8 @@ let define t (decl : Decl.t) =
       ( Signature.Type_decl.Kind.Alias body
       , Some (Reflected_decl.Kind.Alias syntax) )
     | Abstract -> Ok (Signature.Type_decl.Kind.Abstract, None)
+    | Splice e ->
+      Error (Typecheck_error.create ~loc:e.loc Misplaced_type_splice)
     | Variant constructors ->
       let%map.Result constructors =
         map_result constructors ~f:(fun ((name : Name.t), args) ->

@@ -1,0 +1,274 @@
+open! Import
+open Syntax
+include Lift_intf
+
+module Make (B : Builder) = struct
+  let con = B.con
+
+  let list f xs =
+    List.fold_right xs ~init:(con "Nil" []) ~f:(fun x tail ->
+      con "Cons" [ f x; tail ])
+  ;;
+
+  let option f = function
+    | None -> con "None" []
+    | Some x -> con "Some" [ f x ]
+  ;;
+
+  let name (name : Name.t) = B.string name.txt
+  let pair f g (a, b) = B.tuple [ f a; g b ]
+
+  let decl_path_txt kind : Decl_path.t -> B.t = function
+    | Path p -> con "Stag.Path.Name" [ B.string (Path.to_string p) ]
+    | Root p -> con "Stag.Path.Name" [ B.string ("." ^ Path.to_string p) ]
+    | Resolved name -> con "Stag.Path.Ref" [ B.ref_ kind name ]
+  ;;
+
+  let decl_path kind ({ txt; loc = _ } : Decl_path.t Located.t) =
+    decl_path_txt kind txt
+  ;;
+
+  let lit : Lit.t -> B.t = function
+    | Int n -> con "Stag.Lit.Int" [ B.int n ]
+    | Bool b -> con "Stag.Lit.Bool" [ B.bool b ]
+    | String s -> con "Stag.Lit.String" [ B.string s ]
+    | Char c -> con "Stag.Lit.Char" [ B.char c ]
+    | Unit -> con "Stag.Lit.Unit" []
+  ;;
+
+  let no_antiquote _ _ = None
+
+  let type_param ({ txt; loc = _ } : Type_decl.Param.t Located.t) =
+    match txt with
+    | Ty var -> con "Stag.Type_decl.Param.Ty" [ B.string var ]
+    | Row var -> con "Stag.Type_decl.Param.Row" [ B.string var ]
+  ;;
+
+  let rec pattern ({ txt; loc = _ } : Pattern.t) =
+    let con name = con ("Stag.Pattern." ^ name) in
+    match txt with
+    | Any -> con "Any" []
+    | Var var -> con "Var" [ B.string var ]
+    | Lit l -> con "Lit" [ lit l ]
+    | Tuple ps -> con "Tuple" [ list pattern ps ]
+    | Construct (p, args) ->
+      con "Construct" [ decl_path Constructor p; list pattern args ]
+    | Record fields ->
+      con "Record" [ list (pair (decl_path Field) pattern) fields ]
+    | Poly_variant (tag, arg) ->
+      con "Poly_variant" [ name tag; option pattern arg ]
+    | Poly_record { fields; rest } ->
+      let rest_value : Pattern.Rest.t -> B.t = function
+        | Closed -> con "Rest.Closed" []
+        | Open -> con "Rest.Open" []
+        | Bind var -> con "Rest.Bind" [ name var ]
+      in
+      con
+        "Poly_record"
+        [ B.record [ "fields", list (pair name pattern) fields; "rest", rest_value rest ]
+        ]
+    | Exception p -> con "Exception" [ pattern p ]
+  ;;
+
+  module type Lifter_s = sig
+    val type_expr : Type_expr.t -> B.t
+    val type_decl : Type_decl.t -> B.t
+    val expr : Expr.t -> B.t
+    val toplevel : Toplevel.t -> B.t
+    val program : Toplevel.t list -> B.t
+  end
+
+  (* [antiquote] replaces splices, the expression of each splice it doesn't
+     being lifted as any other. *)
+  module Lifter (A : sig
+      val antiquote : Antiquote.Kind.t -> Expr.t -> B.t option
+    end) =
+  struct
+    let rec type_expr ({ txt; loc = _ } : Type_expr.t) =
+      let con name = con ("Stag.Type_expr." ^ name) in
+      match txt with
+      | Var var -> con "Var" [ B.string var ]
+      | Con (p, args) -> con "Con" [ decl_path Type p; list type_arg args ]
+      | Arrow (a, b) -> con "Arrow" [ type_expr a; type_expr b ]
+      | Tuple ts -> con "Tuple" [ list type_expr ts ]
+      | Code { inner; context } ->
+        con
+          "Code"
+          [ B.record [ "inner", type_expr inner; "context", row context ] ]
+      | Record r -> con "Record" [ row r ]
+      | Variant r -> con "Variant" [ row r ]
+      | Splice e ->
+        (match A.antiquote Type_expr e with
+         | Some lifted -> lifted
+         | None -> con "Splice" [ expr e ])
+
+    and row ({ txt; loc = _ } : Type_expr.row) =
+      let con name = con ("Stag.Type_expr.Row." ^ name) in
+      match txt with
+      | Empty -> con "Empty" []
+      | Extend (label, ty, rest) ->
+        con "Extend" [ name label; type_expr ty; row rest ]
+      | Var var -> con "Var" [ name var ]
+
+    and type_arg : Type_expr.arg -> B.t = function
+      | Ty ty -> con "Stag.Type_expr.Arg.Ty" [ type_expr ty ]
+      | Row r -> con "Stag.Type_expr.Arg.Row" [ row r ]
+
+    and type_decl ({ name = decl_name; params; kind } : Type_decl.t) =
+      let decl_kind : Type_decl.Kind.t -> B.t = function
+        | Variant constructors ->
+          con
+            "Stag.Type_decl.Kind.Variant"
+            [ list (pair name (list type_expr)) constructors ]
+        | Record fields ->
+          con "Stag.Type_decl.Kind.Record" [ list (pair name type_expr) fields ]
+        | Alias ty -> con "Stag.Type_decl.Kind.Alias" [ type_expr ty ]
+        | Abstract -> con "Stag.Type_decl.Kind.Abstract" []
+        | Splice e ->
+          (match A.antiquote Type_kind e with
+           | Some lifted -> lifted
+           | None -> con "Stag.Type_decl.Kind.Splice" [ expr e ])
+      in
+      B.record
+        [ "name", name decl_name
+        ; "params", list type_param params
+        ; "kind", decl_kind kind
+        ]
+
+    and binding b = pair name (option type_expr) b
+
+    and expr ({ txt; loc = _ } : Expr.t) =
+      let con name = con ("Stag.Expr." ^ name) in
+      let fields = list (pair name expr) in
+      match txt with
+      | Lit l -> con "Lit" [ lit l ]
+      | Var (p, annot) ->
+        con "Var" [ decl_path_txt Value p; option type_expr annot ]
+      | App (f, x) -> con "App" [ expr f; expr x ]
+      | Let (var, bindings, annot, equal, body) ->
+        con
+          "Let"
+          [ name var
+          ; list binding bindings
+          ; option type_expr annot
+          ; expr equal
+          ; expr body
+          ]
+      | Fun (params, body) -> con "Fun" [ list binding params; expr body ]
+      | Splice { expr = spliced; subs } ->
+        (match A.antiquote Expr spliced with
+         | Some lifted -> lifted
+         | None ->
+           con
+             "Splice"
+             [ B.record
+                 [ "expr", expr spliced
+                 ; "subs", option (list (pair name (option expr))) subs
+                 ]
+             ])
+      | Quote e -> con "Quote" [ expr e ]
+      | Struct_quote toplevels -> con "Struct_quote" [ program toplevels ]
+      | Tuple es -> con "Tuple" [ list expr es ]
+      | Construct (p, args) ->
+        con "Construct" [ decl_path Constructor p; list expr args ]
+      | Record record_fields ->
+        con "Record" [ list (pair (decl_path Field) expr) record_fields ]
+      | Record_update (e, record_fields) ->
+        con
+          "Record_update"
+          [ expr e; list (pair (decl_path Field) expr) record_fields ]
+      | Field (e, p) -> con "Field" [ expr e; decl_path Field p ]
+      | Type ty -> con "Type" [ type_expr ty ]
+      | Match (e, arms) -> con "Match" [ expr e; list (pair pattern expr) arms ]
+      | Poly_record poly_fields -> con "Poly_record" [ fields poly_fields ]
+      | Poly_field (e, label) -> con "Poly_field" [ expr e; name label ]
+      | Poly_extend (extension, e) ->
+        con "Poly_extend" [ fields extension; expr e ]
+      | Poly_restrict (e, label) -> con "Poly_restrict" [ expr e; name label ]
+      | Poly_update (e, updates) -> con "Poly_update" [ expr e; fields updates ]
+      | Poly_variant (tag, arg) ->
+        con "Poly_variant" [ name tag; option expr arg ]
+      | Expect expected -> con "Expect" [ B.string expected.txt ]
+
+    and toplevel ({ txt; loc = _ } : Toplevel.t) =
+      let con name = con ("Stag.Toplevel." ^ name) in
+      match txt with
+      | Let (var, bindings, annot, body) ->
+        con
+          "Let"
+          [ name var; list binding bindings; option type_expr annot; expr body ]
+      | Type decl -> con "Type" [ type_decl decl ]
+      | Exception (exn_name, args) ->
+        con "Exception" [ name exn_name; list type_expr args ]
+      | Module (module_name, items) ->
+        con "Module" [ name module_name; program items ]
+      | Module_splice (module_name, e, _) ->
+        (match A.antiquote Item e with
+         | Some items -> con "Module" [ name module_name; items ]
+         | None -> con "Module_splice" [ name module_name; expr e ])
+      | Include (e, _) -> con "Include" [ expr e ]
+      | Expect_test { name = test_name; body } ->
+        con
+          "Expect_test"
+          [ B.record [ "name", B.string test_name.txt; "body", expr body ] ]
+      | Bench { name = bench_name; param; body } ->
+        con
+          "Bench"
+          [ B.record
+              [ "name", B.string bench_name.txt
+              ; ( "param"
+                , option
+                    (fun ({ name = param; args } : Bench_param.t) ->
+                       pair name (list expr) (param, args))
+                    param )
+              ; "body", expr body
+              ]
+          ]
+
+    and program toplevels =
+      List.fold_right
+        toplevels
+        ~init:(con "Nil" [])
+        ~f:(fun (item : Toplevel.t) tail ->
+          let antiquoted =
+            match item.txt with
+            | Include (e, _) -> A.antiquote Item e
+            | _ -> None
+          in
+          match antiquoted with
+          | Some items -> B.append items tail
+          | None -> con "Cons" [ toplevel item; tail ])
+    ;;
+  end
+
+  let lifter antiquote =
+    (module Lifter (struct
+        let antiquote = Option.value antiquote ~default:no_antiquote
+      end) : Lifter_s)
+  ;;
+
+  let type_expr ?antiquote t =
+    let (module L) = lifter antiquote in
+    L.type_expr t
+  ;;
+
+  let type_decl ?antiquote t =
+    let (module L) = lifter antiquote in
+    L.type_decl t
+  ;;
+
+  let expr ?antiquote t =
+    let (module L) = lifter antiquote in
+    L.expr t
+  ;;
+
+  let toplevel ?antiquote t =
+    let (module L) = lifter antiquote in
+    L.toplevel t
+  ;;
+
+  let program ?antiquote t =
+    let (module L) = lifter antiquote in
+    L.program t
+  ;;
+end

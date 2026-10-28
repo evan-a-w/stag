@@ -48,7 +48,7 @@ let of_toplevels text toplevels =
               member ~kind:EnumMember name) )
         | Record fields ->
           Struct, List.map fields ~f:(fun (name, _) -> member ~kind:Field name)
-        | Alias _ | Abstract -> Class, []
+        | Alias _ | Abstract | Splice _ -> Class, []
       in
       [ symbol ~children ~kind:symbol_kind ~loc ~name_loc:name.loc name.txt ]
     | Exception (name, _) ->

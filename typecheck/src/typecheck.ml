@@ -1247,6 +1247,11 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
     if scope.in_expect_test && scope.level = 0 && Option.is_none scope.quote
     then Ok (node (Expect expected) Type.unit)
     else error ~loc Expect_outside_expect_test
+  | Struct_quote toplevels ->
+    (match Struct_quote.expand toplevels ~loc with
+     | Ok expanded ->
+       expr_type ?expected t scope ~expr:(Source.Expr.Syntax expanded)
+     | Error (loc, message) -> error ~loc (Malformed_struct_quote message))
   | Type ty ->
     let%map.Result elaborated, resolved =
       Type_env.elaborate

@@ -117,6 +117,8 @@ module Syntax_at = struct
         subs
         ~f:(List.iter ~f:(fun (_, e) -> Option.iter e ~f:recurse))
     | Quote e -> recurse e
+    | Struct_quote toplevels ->
+      Antiquote.iter toplevels ~f:(fun antiquote -> recurse antiquote.expr)
     | Tuple es -> List.iter es ~f:recurse
     | Construct (path, es) ->
       set t.constructors e.loc path;
@@ -399,7 +401,7 @@ let rec declarations
          List.iter constructors ~f:(fun (name, _) -> set t.constructors name)
        | Record fields ->
          List.iter fields ~f:(fun (name, _) -> set t.fields name)
-       | Alias _ | Abstract -> ())
+       | Alias _ | Abstract | Splice _ -> ())
     | Exception (name, _) -> set t.constructors name
     | Module (name, toplevels) ->
       declarations

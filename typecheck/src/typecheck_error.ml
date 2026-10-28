@@ -83,6 +83,8 @@ module Kind = struct
         }
     | Declaration_splice_failed of Error.t
     | Malformed_declarations of Error.t
+    | Malformed_struct_quote of string
+    | Misplaced_type_splice
     | Declaration_splice_cycle of
         { name : string
         ; module_ : string option
@@ -331,6 +333,10 @@ let rec kind_message (kind : Kind.t) ~show_type =
     sprintf
       "This declaration splice failed at compile time: %s"
       (runtime_message error)
+  | Malformed_struct_quote message -> message
+  | Misplaced_type_splice ->
+    "A type splice runs at compile time, so it may be in a declaration, but \
+     not within a quote or a compile-time expression"
   | Malformed_declarations error ->
     sprintf
       "This declaration splice generated malformed declarations: %s"

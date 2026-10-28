@@ -23,6 +23,11 @@ module Stag = struct
     | Nil -> Nil
     | Cons (x, rest) -> Cons (f x, map f rest)
 
+  let append l tail =
+    match l with
+    | Nil -> tail
+    | Cons (x, rest) -> Cons (x, append rest tail)
+
   (* Declared types, constructors and fields, by identity: a ref names the
      same declaration wherever it is spliced, whatever is in scope there. Only
      reflection ([Type]) makes them. [name] is the name it is declared with,

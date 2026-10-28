@@ -61,8 +61,10 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
     let name ?declaration kind (name : Syntax.Name.t) =
       add ?declaration ~kind ~loc:name.loc [ name.txt ]
     in
-    let type_expr = walk_type_expr ~add in
-    let expr = walk_expr ~add ~type_expr in
+    (* Declarations in a struct quote are not of the module. *)
+    let toplevels = walk_toplevels ~module_path:(module_path @ [ "%struct" ]) in
+    let rec type_expr ty = walk_type_expr ~add ~expr ty
+    and expr e = walk_expr ~add ~type_expr ~toplevels e in
     match toplevel.txt with
     | Let (binder, bindings, annot, body) ->
       let_ ~add ~type_expr binder bindings annot body;
@@ -79,6 +81,7 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
            name ~declaration:true Field field;
            type_expr ty)
        | Alias ty -> type_expr ty
+       | Splice e -> expr e
        | Abstract -> ())
     | Exception (exn, args) ->
       name ~declaration:true Constructor exn;
@@ -124,31 +127,32 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
     List.iter bindings ~f:(fun ((name : Syntax.Name.t), annot) ->
       add ~declaration:true ~kind:Kind.Parameter ~loc:name.loc [ name.txt ];
       Option.iter annot ~f:type_expr)
-  and walk_type_expr ~(add : add) (ty : Syntax.Type_expr.t) =
-    let recurse = walk_type_expr ~add in
+  and walk_type_expr ~(add : add) ~expr (ty : Syntax.Type_expr.t) =
+    let recurse = walk_type_expr ~add ~expr in
     match ty.txt with
     | Var _ -> ()
     | Con (path, args) ->
       decl_path ~add ~kind:Kind.Type ~loc:path.loc path.txt;
       List.iter args ~f:(function
         | Ty ty -> recurse ty
-        | Row row -> walk_row ~add ~kind:Kind.Poly_field row)
+        | Row row -> walk_row ~add ~expr ~kind:Kind.Poly_field row)
     | Arrow (a, b) ->
       recurse a;
       recurse b
     | Tuple tys -> List.iter tys ~f:recurse
     | Code { inner; context } ->
       recurse inner;
-      walk_row ~add ~kind:Kind.Poly_field context
-    | Record row -> walk_row ~add ~kind:Kind.Poly_field row
-    | Variant row -> walk_row ~add ~kind:Kind.Poly_tag row
-  and walk_row ~(add : add) ~kind (row : Syntax.Type_expr.row) =
+      walk_row ~add ~expr ~kind:Kind.Poly_field context
+    | Record row -> walk_row ~add ~expr ~kind:Kind.Poly_field row
+    | Variant row -> walk_row ~add ~expr ~kind:Kind.Poly_tag row
+    | Splice e -> expr e
+  and walk_row ~(add : add) ~expr ~kind (row : Syntax.Type_expr.row) =
     match row.txt with
     | Empty | Var _ -> ()
     | Extend (label, ty, rest) ->
       add ~kind ~loc:label.loc [ label.txt ];
-      walk_type_expr ~add ty;
-      walk_row ~add ~kind rest
+      walk_type_expr ~add ~expr ty;
+      walk_row ~add ~expr ~kind rest
   and walk_pattern ~(add : add) (pattern : Syntax.Pattern.t) =
     let recurse = walk_pattern ~add in
     match pattern.txt with
@@ -175,8 +179,8 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
        | Bind name ->
          add ~declaration:true ~kind:Kind.Pattern_var ~loc:name.loc [ name.txt ])
     | Exception pattern -> recurse pattern
-  and walk_expr ~(add : add) ~type_expr (expr : Syntax.Expr.t) =
-    let recurse = walk_expr ~add ~type_expr in
+  and walk_expr ~(add : add) ~type_expr ~toplevels (expr : Syntax.Expr.t) =
+    let recurse = walk_expr ~add ~type_expr ~toplevels in
     let labelled fields =
       List.iter fields ~f:(fun ((label : Syntax.Name.t), expr) ->
         add ~kind:Kind.Poly_field ~loc:label.loc [ label.txt ];
@@ -246,6 +250,7 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
     | Poly_variant (tag, arg) ->
       add ~kind:Kind.Poly_tag ~loc:tag.loc [ tag.txt ];
       Option.iter arg ~f:recurse
+    | Struct_quote quoted -> toplevels quoted
   in
   walk_toplevels ~module_path toplevels;
   Queue.to_list occurrences

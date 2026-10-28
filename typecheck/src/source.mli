@@ -134,6 +134,7 @@ module Expr : sig
       | Poly_variant of string * t option
       | Expect of string Located.t
       | Type of Syntax.Type_expr.t
+      | Struct_quote of Syntax.Toplevel.t list
   end
 
   (** Generated code is code values, so has no [Toplevel_splice]. *)

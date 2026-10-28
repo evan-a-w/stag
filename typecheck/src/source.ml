@@ -190,6 +190,7 @@ module Expr = struct
       | Poly_variant of string * t option
       | Expect of string Located.t
       | Type of Syntax.Type_expr.t
+      | Struct_quote of Syntax.Toplevel.t list
   end
 
   let syntax_view (expr : Syntax.Expr.t) : View.t =
@@ -251,6 +252,7 @@ module Expr = struct
     | Poly_variant (tag, arg) -> Poly_variant (tag.txt, Option.map arg ~f:sub)
     | Expect expected -> Expect expected
     | Type ty -> Type ty
+    | Struct_quote toplevels -> Struct_quote toplevels
   ;;
 
   let annotated_args args annots =

@@ -180,7 +180,7 @@ let members (toplevel : Toplevel.t) : (Member.t * Name.t) list =
     member Type name
     ::
     (match kind with
-     | Alias _ | Abstract -> []
+     | Alias _ | Abstract | Splice _ -> []
      | Variant constructors ->
        List.map constructors ~f:(fun (name, _) -> member Constructor name)
      | Record fields -> List.map fields ~f:(fun (name, _) -> member Field name))
