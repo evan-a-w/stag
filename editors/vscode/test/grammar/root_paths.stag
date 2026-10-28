@@ -1,0 +1,19 @@
+(* SYNTAX TEST "source.stag" "root paths and field accesses"
+let x : .int = f .Core.Int.to_string r.x M.y (e).z
+(*      ^ punctuation.accessor.root.stag
+(*       ^^^ variable.other.stag
+(*               ^ punctuation.accessor.root.stag
+(*                ^^^^ entity.name.namespace.stag
+(*                                    ^ punctuation.accessor.stag - punctuation.accessor.root
+(*                                     ^ variable.other.property.stag
+(*                                        ^ punctuation.accessor.stag - punctuation.accessor.root
+(*                                              ^ punctuation.accessor.stag - punctuation.accessor.root
+let y = (.Some 1, {.M.x = 2}, r.(.M.x), (* c *).raise, .~.Gen.c)
+(*       ^ punctuation.accessor.root.stag
+(*        ^^^^ variable.other.enummember.stag
+(*                 ^ punctuation.accessor.root.stag
+(*                             ^ punctuation.accessor.stag - punctuation.accessor.root
+(*                               ^ punctuation.accessor.root.stag
+(*                                             ^ punctuation.accessor.root.stag
+(*                                                     ^^ keyword.control.splice.stag
+(*                                                       ^ punctuation.accessor.root.stag
