@@ -35,6 +35,12 @@ module Pending = struct
   type t =
     | Component of Typed.Scc.t (** None of its members' closures are bound. *)
     | Value of Typed.Expr.t
+    | Failed of
+        { error : Error.t
+        ; uncatchable : Error.t
+          (** As [error], but no [match] can handle it, as the toplevel's
+            users can't handle its failure. *)
+        }
 end
 
 type t =
@@ -47,7 +53,7 @@ type t =
   ; mutable budget : Budget.t
   ; mutable output : string -> unit
   ; mutable on_expect : (string Located.t -> unit) option
-  ; mutable reflect : (string -> Reflected_decl.t option Or_error.t) option
+  ; mutable reflect : (string -> Value.t Or_error.t) option
     (** While evaluating at compile time. *)
   }
 
@@ -91,6 +97,9 @@ let captures t ~ident ~args ~body =
       List.iter args ~f:def;
       go ~depth body;
       go ~depth in_
+    | Fun { args; body } ->
+      List.iter args ~f:def;
+      go ~depth body
     | Splice { code; subs } ->
       go ~depth:(depth - 1) code;
       (match subs with
@@ -99,9 +108,9 @@ let captures t ~ident ~args ~body =
          Map.iter providers ~f:(fun (Toplevel ident | Local ident) ->
            use ~depth ident))
     | Toplevel_splice { code = _; expansion } -> go ~depth expansion
-    | Match (expr, cases) ->
-      go ~depth expr;
-      List.iter cases ~f:(fun (pattern, body) ->
+    | Match { scrutinee; cases; exception_cases } ->
+      go ~depth scrutinee;
+      List.iter (cases @ exception_cases) ~f:(fun (pattern, body) ->
         def_pattern pattern;
         go ~depth body)
     | Quote expr -> go ~depth:(depth + 1) expr
@@ -115,6 +124,9 @@ let captures t ~ident ~args ~body =
       go ~depth x
     | Tuple exprs | Construct (_, exprs) -> List.iter exprs ~f:(go ~depth)
     | Record fields -> go_fields ~depth fields
+    | Record_update (expr, fields) ->
+      go ~depth expr;
+      go_fields ~depth fields
     | Poly_record fields -> go_fields ~depth fields
     | Poly_extend (fields, expr) | Poly_update (expr, fields) ->
       go ~depth expr;
@@ -191,6 +203,9 @@ let map_children ~depth (expr : Typed.Expr.t) ~f =
       let%bind body = same let_.body in
       let%map in_ = same let_.in_ in
       Typed.Expr.Desc.Let { let_ with body; in_ }
+    | Fun fun_ ->
+      let%map body = same fun_.body in
+      Typed.Expr.Desc.Fun { fun_ with body }
     | Splice { code; subs } ->
       let%bind code = f ~depth:(depth - 1) code in
       let%map subs : Typed.Expr.t Typed.Expr.Subs.t =
@@ -220,10 +235,15 @@ let map_children ~depth (expr : Typed.Expr.t) ~f =
     | Field (expr, field) ->
       let%map expr = same expr in
       Typed.Expr.Desc.Field (expr, field)
-    | Match (expr, cases) ->
+    | Record_update (expr, fields) ->
       let%bind expr = same expr in
-      let%map cases = map_fields cases ~f:same in
-      Typed.Expr.Desc.Match (expr, cases)
+      let%map fields = map_fields fields ~f:same in
+      Typed.Expr.Desc.Record_update (expr, fields)
+    | Match { scrutinee; cases; exception_cases } ->
+      let%bind scrutinee = same scrutinee in
+      let%bind cases = map_fields cases ~f:same in
+      let%map exception_cases = map_fields exception_cases ~f:same in
+      Typed.Expr.Desc.Match { scrutinee; cases; exception_cases }
     | Poly_record fields ->
       let%map fields = map_fields fields ~f:same in
       Typed.Expr.Desc.Poly_record fields
@@ -304,8 +324,14 @@ let instantiate t (code : Typed.Expr.t) ~entry =
       | Let let_ ->
         let ident = fresh let_.ident in
         Let { let_ with ident; args = List.map let_.args ~f:fresh }
-      | Match (expr, cases) ->
-        Match (expr, List.map cases ~f:(fun (p, body) -> pattern p, body))
+      | Fun fun_ -> Fun { fun_ with args = List.map fun_.args ~f:fresh }
+      | Match { scrutinee; cases; exception_cases } ->
+        let rename = List.map ~f:(fun (p, body) -> pattern p, body) in
+        Match
+          { scrutinee
+          ; cases = rename cases
+          ; exception_cases = rename exception_cases
+          }
       | Splice { code; subs = Implicit providers } ->
         Splice { code; subs = Implicit (Map.map providers ~f:rename_binder) }
       | desc -> desc
@@ -355,7 +381,25 @@ let splice_code
       })
 ;;
 
-let runtime_error ~loc message = Error (Runtime_error.to_error { loc; message })
+let runtime_error ~loc message =
+  Error (Runtime_error.to_error (Runtime_error.create ~loc message))
+;;
+
+let raise_exn ~loc exn =
+  Error (Runtime_error.to_error (Runtime_error.raise_exn ~loc exn))
+;;
+
+let prelude_exception name : Typed.Constructor_ref.t =
+  Typed.Constructor_ref.exception_ (Prelude_path.canonical name)
+;;
+
+let prim_exception : Prim.Exception.t -> Value.t = function
+  | Division_by_zero -> Construct (prelude_exception "Division_by_zero", [])
+  | Invalid_argument message ->
+    Construct (prelude_exception "Invalid_argument", [ String message ])
+  | Failure message ->
+    Construct (prelude_exception "Failure", [ String message ])
+;;
 
 let pattern_mismatch pattern value =
   Or_error.error_s
@@ -377,10 +421,13 @@ let rec match_pattern env (pattern : Typed.Pattern.t) (value : Value.t) =
   | Lit Unit, Unit -> Ok true
   | Tuple patterns, Tuple values -> match_all env pattern patterns values
   | Construct (constructor, patterns), Construct (constructor', values) ->
-    if constructor.index = constructor'.index
+    if
+      constructor.index = constructor'.index
+      && ((not (Typed.Constructor_ref.is_exception constructor))
+          || String.equal constructor.name constructor'.name)
     then match_all env pattern patterns values
     else Ok false
-  | Record fields, Record values ->
+  | Record fields, Record (_, values) ->
     if
       List.exists fields ~f:(fun ((field : Typed.Field_ref.t), _) ->
         field.index >= Array.length values)
@@ -471,14 +518,39 @@ let rec force t ident =
   | Some (Component scc) ->
     let%bind () = bind_functions t scc in
     force t ident
+  | Some (Failed { error; uncatchable = _ }) -> Error error
   | Some (Value body) ->
     Hashtbl.remove t.pending ident;
     declare_toplevel t ident;
-    let%map value = eval t ~env:(Env.create ()) ~level:0 body in
-    Env.set t.env ~ident ~value
+    (match eval t ~env:(Env.create ()) ~level:0 body with
+     | Ok value ->
+       Env.set t.env ~ident ~value;
+       Ok ()
+     | Error error ->
+       let uncatchable =
+         match Runtime_error.of_error error with
+         | Some ({ kind = Raised exn; loc } : Runtime_error.t) ->
+           Runtime_error.to_error
+             (Runtime_error.create
+                ~loc
+                (sprintf
+                   "Initialization of %s raised %s"
+                   ident.name
+                   (Value.to_string_for_message exn)))
+         | Some { kind = Message _; loc = _ } | None -> error
+       in
+       Hashtbl.set t.pending ~key:ident ~data:(Failed { error; uncatchable });
+       Error error)
 
 and lookup t env ident ~loc =
-  let%bind () = force t ident in
+  let%bind () =
+    match force t ident with
+    | Ok () -> Ok ()
+    | Error error ->
+      (match Hashtbl.find t.pending ident with
+       | Some (Failed { uncatchable; error = _ }) -> Error uncatchable
+       | Some (Component _ | Value _) | None -> Error error)
+  in
   match Env.find_slot ~fallback:t.env env ident with
   | Some { contents = None } ->
     runtime_error
@@ -530,9 +602,14 @@ and step t ~env ~level (expr : Typed.Expr.t) : Next.t Or_error.t =
     let%bind () = bind_let t ~env ~level ~ident ~args ~body in
     tail in_
   | Toplevel_splice { code = _; expansion } -> tail expansion
-  | Match (scrutinee, cases) ->
-    let%bind value = eval' scrutinee in
-    eval_match t ~env ~level value cases ~loc:expr.loc
+  | Match { scrutinee; cases; exception_cases } ->
+    (match eval' scrutinee with
+     | Ok value -> eval_match t ~env ~level value cases ~loc:expr.loc
+     | Error error ->
+       (match exception_cases, Runtime_error.raised error with
+        | _ :: _, Some exn ->
+          handle t ~env ~level exn exception_cases ~unhandled:(Error error)
+        | _ -> Error error))
   | _ ->
     let%map value = step_value t ~env ~level expr in
     Next.Value value
@@ -558,6 +635,9 @@ and step_value t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
   | Type ty -> Ok (Value.Type ty)
   | App _ | Let _ | Toplevel_splice _ | Match _ ->
     run_next t (step t ~env ~level expr)
+  | Fun { args; body } ->
+    (* Its first parameter identifies it, as a let's name does. *)
+    closure t ~env ~level ~ident:(List.hd_exn args) ~args ~body
   | Splice _ -> Or_error.error_s [%message "Splice outside a quote evaluated"]
   | Quote body ->
     let embedded = Embedded.create () in
@@ -571,19 +651,35 @@ and step_value t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
     Value.Construct (constructor, values)
   | Record fields ->
     let%map values = map_fields fields ~f:eval' in
-    let record = Array.create ~len:(List.length values) Value.Unit in
+    let record_type = (fst (List.hd_exn values) : Typed.Field_ref.t).record in
+    let record =
+      Array.create ~len:(Array.length record_type.fields) Value.Unit
+    in
     List.iter values ~f:(fun ((field : Typed.Field_ref.t), value) ->
       record.(field.index) <- value);
-    Value.Record record
+    Value.Record (record_type, record)
   | Field (expr, field) ->
     let%bind value = eval' expr in
     (match value with
-     | Record values when field.index < Array.length values ->
+     | Record (_, values) when field.index < Array.length values ->
        Ok values.(field.index)
      | _ ->
        Or_error.error_s
          [%message
            "Field of a non-record" (field : Typed.Field_ref.t) (value : Value.t)])
+  | Record_update (expr, fields) ->
+    let%bind value = eval' expr in
+    let%bind values = map_fields fields ~f:eval' in
+    (match value with
+     | Record (record_type, record)
+       when List.for_all values ~f:(fun ((field : Typed.Field_ref.t), _) ->
+              field.index < Array.length record) ->
+       let record = Array.copy record in
+       List.iter values ~f:(fun ((field : Typed.Field_ref.t), value) ->
+         record.(field.index) <- value);
+       Ok (Value.Record (record_type, record))
+     | _ ->
+       Or_error.error_s [%message "Update of a non-record" (value : Value.t)])
   | Poly_record fields ->
     let%bind fields = map_fields fields ~f:eval' in
     let%map fields = String.Map.of_alist_or_error fields in
@@ -648,17 +744,18 @@ and apply t (f : Value.t) arg ~loc : Next.t Or_error.t =
       | Some args ->
         (match Prim.apply prim ~output:t.output args with
          | Ok result -> value (Value.of_prim result)
-         | Error message -> runtime_error ~loc message))
+         | Error exn -> raise_exn ~loc (prim_exception exn)))
   | Intrinsic intrinsic ->
     (match intrinsic, arg with
      | Type_expr, Type ty -> value (Syntax_value.Type_expr.to_value ty)
      | (Type_ref_name | Constructor_ref_name | Field_ref_name), Ref ref_ ->
        value (String (Decl_ref.short_name ref_))
+     | Raise, exn -> raise_exn ~loc exn
      | Type_decl, Ref { kind = Type; name } ->
        (match t.reflect with
         | Some reflect ->
           let%map decl = reflect name in
-          Next.Value (Syntax_value.reflected_decl decl)
+          Next.Value decl
         | None ->
           runtime_error
             ~loc
@@ -684,11 +781,20 @@ and eval_match t ~env ~level value cases ~loc =
   | [] ->
     runtime_error
       ~loc
-      ("Match failure: no case matches the value " ^ Value.to_string_hum value)
+      ("Match failure: no case matches the value "
+       ^ Value.to_string_for_message value)
   | (pattern, body) :: cases ->
     (match%bind match_pattern env pattern value with
      | true -> Ok (Next.Eval { env; level; expr = body })
      | false -> eval_match t ~env ~level value cases ~loc)
+
+and handle t ~env ~level exn cases ~unhandled =
+  match cases with
+  | [] -> unhandled
+  | (pattern, body) :: cases ->
+    (match%bind match_pattern env pattern exn with
+     | true -> Ok (Next.Eval { env; level; expr = body })
+     | false -> handle t ~env ~level exn cases ~unhandled)
 
 (* The code [expr] is in a quote built at [level], [depth] quotes in. Splices at
    [depth] 1 are evaluated now, and the values of persistent binders of [level]

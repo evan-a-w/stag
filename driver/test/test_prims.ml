@@ -43,7 +43,7 @@ let main3 =
   show (Int.compare 1 2); show (Int.compare 2 2); show (Int.compare 3 2);
   show_bool (Int.equal 1 1); show_bool (Int.lt 1 2); show_bool (Int.le 2 2);
   show_bool (Int.gt 1 2); show_bool (Int.ge 1 2);
-  show (Int.of_string "-12"); show (Int.of_string "4611686018427387903");
+  show (Int.of_string_exn "-12"); show (Int.of_string_exn "4611686018427387903");
   show (Int.add 4611686018427387903 1)
 |};
   [%expect
@@ -142,9 +142,9 @@ let%expect_test "runtime errors are located at the application" =
     ; "String.get \"abc\" 3"
     ; "String.get \"abc\" -1"
     ; "String.sub \"abc\" 2 2"
-    ; "Int.of_string \"12a\""
-    ; "Int.of_string \"0x12\""
-    ; "Int.of_string \"\""
+    ; "Int.of_string_exn \"12a\""
+    ; "Int.of_string_exn \"0x12\""
+    ; "Int.of_string_exn \"\""
     ; "Char.of_code 256"
     ]
   in
@@ -153,38 +153,45 @@ let%expect_test "runtime errors are located at the application" =
     {|
     val x : int
     ---
-    ("Runtime error" ("Division by zero" @ t.stag:1:8-19))
+    ("Runtime error" ("Uncaught exception Division_by_zero" @ t.stag:1:8-19))
     val x : int
     ---
-    ("Runtime error" ("Division by zero" @ t.stag:1:8-19))
+    ("Runtime error" ("Uncaught exception Division_by_zero" @ t.stag:1:8-19))
     val x : char
     ---
     ("Runtime error"
-     ("String.get: index 3 out of bounds of a string of length 3" @
-      t.stag:1:8-26))
+     ("Uncaught exception Invalid_argument \"String.get: index 3 out of bounds of a string of length 3\""
+      @ t.stag:1:8-26))
     val x : char
     ---
     ("Runtime error"
-     ("String.get: index -1 out of bounds of a string of length 3" @
-      t.stag:1:8-27))
+     ("Uncaught exception Invalid_argument \"String.get: index -1 out of bounds of a string of length 3\""
+      @ t.stag:1:8-27))
     val x : string
     ---
     ("Runtime error"
-     ("String.sub: invalid substring (position 2, length 2) of a string of length 3"
+     ("Uncaught exception Invalid_argument \"String.sub: invalid substring (position 2, length 2) of a string of length 3\""
       @ t.stag:1:8-28))
     val x : int
     ---
-    ("Runtime error" ("Int.of_string: invalid integer \"12a\"" @ t.stag:1:8-27))
+    ("Runtime error"
+     ("Uncaught exception Failure \"Int.of_string_exn: invalid integer \\\"12a\\\"\""
+      @ t.stag:1:8-31))
     val x : int
     ---
-    ("Runtime error" ("Int.of_string: invalid integer \"0x12\"" @ t.stag:1:8-28))
+    ("Runtime error"
+     ("Uncaught exception Failure \"Int.of_string_exn: invalid integer \\\"0x12\\\"\""
+      @ t.stag:1:8-32))
     val x : int
     ---
-    ("Runtime error" ("Int.of_string: invalid integer \"\"" @ t.stag:1:8-24))
+    ("Runtime error"
+     ("Uncaught exception Failure \"Int.of_string_exn: invalid integer \\\"\\\"\""
+      @ t.stag:1:8-28))
     val x : char
     ---
     ("Runtime error"
-     ("Char.of_code: invalid character code 256" @ t.stag:1:8-24))
+     ("Uncaught exception Invalid_argument \"Char.of_code: invalid character code 256\""
+      @ t.stag:1:8-24))
     |}]
 ;;
 
@@ -201,7 +208,7 @@ let boom = div 0
     val main5 : unit
     val boom : int
     ---
-    3("Runtime error" ("Division by zero" @ t.stag:4:11-16))
+    3("Runtime error" ("Uncaught exception Division_by_zero" @ t.stag:4:11-16))
     |}]
 ;;
 
@@ -237,7 +244,7 @@ let main9 = print_int (Int.add x 1)
            "int -> int")
           (Lit (Int 0) : int) : int))
         (in_ (Quote (Lit (Int 0) : int) : <int>{})) : <int>{}))
-      (error ("Division by zero" @ t.stag:1:12-23)))
+      (error ("Uncaught exception Division_by_zero" @ t.stag:1:12-23)))
      @ t.stag:1:9-31)
     |}]
 ;;

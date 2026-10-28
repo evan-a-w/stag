@@ -330,3 +330,21 @@ let promote project =
     let promoted = all corrections ~f:(promote_one project ~sources) in
     promoted && Queue.is_empty errors
 ;;
+
+let fmt project ~(mode : Format.Mode.t) =
+  let { Format.Summary.unformatted; errors } =
+    Format.run
+      ~root:(Project.root project)
+      ~mode
+      (List.concat_map (Project.targets project) ~f:(fun target -> target.files))
+  in
+  List.iter unformatted ~f:(fun unformatted ->
+    print_string (Format.Unformatted.diff unformatted));
+  report project errors;
+  let unformatted_fails =
+    match mode with
+    | Check -> not (List.is_empty unformatted)
+    | Inplace -> false
+  in
+  List.is_empty errors && not unformatted_fails
+;;

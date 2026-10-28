@@ -537,10 +537,11 @@ let wrong_type = .<let x = true in .~(.<add x 1>.)>.
          (App (Var (Bound (Local opaque/15)) : "'a -> 'b")
           (Var (Bound (Local u/14)) : 'a) : 'b))
         (in_
-         (Match (Lit (Int 1) : int)
-          (((Lit (Int 2) : int)
-            (App (Var (Bound (Local opaque/15)) : "int -> <'_c>{}")
-             (Lit (Int 1) : int) : <'_c>{})))
+         (Match (scrutinee (Lit (Int 1) : int))
+          (cases
+           (((Lit (Int 2) : int)
+             (App (Var (Bound (Local opaque/15)) : "int -> <'_c>{}")
+              (Lit (Int 1) : int) : <'_c>{}))))
           : <'_c>{}))
         : <'_c>{}))
       (error ("Match failure: no case matches the value 1" @ t.stag:3:32-58)))
@@ -618,7 +619,7 @@ let%expect_test "staged power" =
     ((Unification_error
       (Row_mismatch REmpty
        (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 74 1)))
+        (RVar (Unbound 76 1)))
        (Missing_label y)))
      @ t.stag:2:31-44)
     ((Unification_error
@@ -723,9 +724,9 @@ let known_z c =
     val uses_z : <<int>{..'_a}>{..'_b}
     ((Unification_error
       (Row_mismatch
-       (RExtend z Absent (TVar (Unbound 43 1)) (RVar (Unbound 44 1)))
-       (RExtend z (PVar (Link Present)) (TVar (Unbound 52 1))
-        (RVar (Unbound 53 1)))
+       (RExtend z Absent (TVar (Unbound 44 1)) (RVar (Unbound 45 1)))
+       (RExtend z (PVar (Link Present)) (TVar (Unbound 53 1))
+        (RVar (Unbound 54 1)))
        (Presence_mismatch z)))
      @ t.stag:2:36-48)
     ((Variable_used_at_wrong_level (name z) (var_level 2) (used_at 1)) @
@@ -797,7 +798,7 @@ let pong n c = .<add .~(ping (add n -1) c) y>.
         (RVar
          (Link
           (RExtend z (PVar (Link Present)) (TVar (Link (TCon int ())))
-           (RVar (Unbound 93 1))))))
+           (RVar (Unbound 94 1))))))
        (Missing_label y)))
      @ t.stag:4:33-45)
     |}]
@@ -1014,14 +1015,14 @@ let partial e = let h c = .< let _ = .~e in .~c >. in let _ = h .< 1 >. in h
     val ok : <int>{..'_a}
     ((Unification_error
       (Row_mismatch REmpty
-       (RExtend y (PVar (Link Present)) (TVar (Unbound 108 1))
-        (RVar (Unbound 109 1)))
+       (RExtend y (PVar (Link Present)) (TVar (Unbound 110 1))
+        (RVar (Unbound 111 1)))
        (Missing_label y)))
      @ t.stag:4:18-29)
     ((Unification_error
       (Row_mismatch REmpty
-       (RExtend y (PVar (Link Present)) (TVar (Unbound 116 1))
-        (RVar (Unbound 117 1)))
+       (RExtend y (PVar (Link Present)) (TVar (Unbound 118 1))
+        (RVar (Unbound 119 1)))
        (Missing_label y)))
      @ t.stag:4:18-43)
     |}]

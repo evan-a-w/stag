@@ -2,22 +2,30 @@ open! Import
 open Syntax
 
 let file = "t.stag"
+let strip_locs = Round_trip.strip_locs
 
-let rec strip_locs : Sexp.t -> Sexp.t = function
-  | List [ txt; Atom "@"; Atom _ ] -> strip_locs txt
-  | List sexps -> List (List.map sexps ~f:strip_locs)
-  | Atom _ as atom -> atom
-;;
-
-let show sexp_of_t = function
-  | Ok t -> print_s (strip_locs (sexp_of_t t))
+(* Successfully parsed syntax is also checked to round trip through
+   [Printer]. *)
+let show sexp_of_t round_trip = function
+  | Ok t ->
+    print_s (strip_locs (sexp_of_t t));
+    round_trip t
   | Error error -> print_endline (Parser.Error.to_string error)
 ;;
 
-let expr source = show Expr.sexp_of_t (Parser.expr ~file source)
-let pat source = show Pattern.sexp_of_t (Parser.pattern ~file source)
-let ty source = show Type_expr.sexp_of_t (Parser.type_expr ~file source)
-let prog source = show Program.sexp_of_t (Parser.program ~file source)
+let expr source = show Expr.sexp_of_t Round_trip.expr (Parser.expr ~file source)
+
+let pat source =
+  show Pattern.sexp_of_t Round_trip.pattern (Parser.pattern ~file source)
+;;
+
+let ty source =
+  show Type_expr.sexp_of_t Round_trip.type_expr (Parser.type_expr ~file source)
+;;
+
+let prog source =
+  show Program.sexp_of_t Round_trip.program (Parser.program ~file source)
+;;
 
 (* The source a [Loc.to_string] spans. *)
 let slice source loc =
@@ -158,7 +166,7 @@ let%expect_test "application, constructors and variants" =
     (Construct M.C ())
     (Construct C ((Var x ())))
     (Construct C ((Var a ()) (Var b ())))
-    (Construct C ((Var a ()) (Var b ())))
+    (Construct C ((Tuple ((Var a ()) (Var b ())))))
     (Construct C ((Lit Unit)))
     (Construct C ((App (Var f ()) (Var x ()))))
     (Construct S ((Construct S ((Construct Z ())))))
@@ -168,6 +176,51 @@ let%expect_test "application, constructors and variants" =
     (Poly_variant A ((Tuple ((Var a ()) (Var b ())))))
     (App (App (Var f ()) (Poly_variant A ())) (Var x ()))
     (Poly_variant A ((App (Var f ()) (Var x ()))))
+    |}]
+;;
+
+let%expect_test "a constructor's arguments, or its one tuple argument" =
+  List.iter
+    ~f:expr
+    [ "C (a, b)"
+    ; "C ((a, b))"
+    ; "C (((a, b)))"
+    ; "C ((a), b)"
+    ; "C ((a, b), c)"
+    ; "C (a, (b, c))"
+    ; "C ((a, b)).x"
+    ; "C (a, b) x"
+    ; "C (let x = 1 in a, b)"
+    ; "C ((let x = 1 in a, b))"
+    ; "C (a; b, c)"
+    ; "C D (a, b)"
+    ; "C (D (a, b))"
+    ; "C (D ((a, b)))"
+    ];
+  List.iter
+    ~f:pat
+    [ "C (a, b)"; "C ((a, b))"; "C ((a), b)"; "C (a, (b, c))"; "C D ((a, b))" ];
+  [%expect
+    {|
+    (Construct C ((Var a ()) (Var b ())))
+    (Construct C ((Tuple ((Var a ()) (Var b ())))))
+    (Construct C ((Tuple ((Var a ()) (Var b ())))))
+    (Construct C ((Var a ()) (Var b ())))
+    (Construct C ((Tuple ((Var a ()) (Var b ()))) (Var c ())))
+    (Construct C ((Var a ()) (Tuple ((Var b ()) (Var c ())))))
+    (Construct C ((Field (Tuple ((Var a ()) (Var b ()))) x)))
+    (Construct C ((App (Tuple ((Var a ()) (Var b ()))) (Var x ()))))
+    (Construct C ((Let x () () (Lit (Int 1)) (Tuple ((Var a ()) (Var b ()))))))
+    (Construct C ((Let x () () (Lit (Int 1)) (Tuple ((Var a ()) (Var b ()))))))
+    (Construct C ((Let _ () () (Var a ()) (Tuple ((Var b ()) (Var c ()))))))
+    (Construct C ((Construct D ((Var a ()) (Var b ())))))
+    (Construct C ((Construct D ((Var a ()) (Var b ())))))
+    (Construct C ((Construct D ((Tuple ((Var a ()) (Var b ())))))))
+    (Construct C ((Var a) (Var b)))
+    (Construct C ((Tuple ((Var a) (Var b)))))
+    (Construct C ((Var a) (Var b)))
+    (Construct C ((Var a) (Tuple ((Var b) (Var c)))))
+    (Construct C ((Construct D ((Tuple ((Var a) (Var b)))))))
     |}]
 ;;
 
@@ -227,6 +280,50 @@ let%expect_test "tuples, sequences, let and match" =
     |}]
 ;;
 
+let%expect_test "anonymous functions" =
+  expr "fun x -> x";
+  expr "fun x (y : int) _ (_ : bool) -> f x y";
+  expr "fun x -> a; b";
+  expr "fun x -> fun y -> x, y";
+  expr "f (fun x -> x) y";
+  expr "a, fun x -> x, y";
+  expr "match x with A -> fun y -> y | B -> b";
+  expr "{x = fun y -> y; z = 1}";
+  expr "fun -> x";
+  expr "fun x";
+  expr "fun 1 -> x";
+  expr "fun (x, y) -> x";
+  expr "fun () -> x";
+  expr "fun (x) -> x";
+  expr "fun x (A y) -> x";
+  expr "fun {x = y} -> y";
+  expr "fun in";
+  expr "f fun x -> x";
+  [%expect
+    {|
+    (Fun ((x ())) (Var x ()))
+    (Fun ((x ()) (y ((Con int ()))) (_ ()) (_ ((Con bool ()))))
+     (App (App (Var f ()) (Var x ())) (Var y ())))
+    (Fun ((x ())) (Let _ () () (Var a ()) (Var b ())))
+    (Fun ((x ())) (Fun ((y ())) (Tuple ((Var x ()) (Var y ())))))
+    (App (App (Var f ()) (Fun ((x ())) (Var x ()))) (Var y ()))
+    (Tuple ((Var a ()) (Fun ((x ())) (Tuple ((Var x ()) (Var y ()))))))
+    (Match (Var x ())
+     (((Construct A ()) (Fun ((y ())) (Var y ()))) ((Construct B ()) (Var b ()))))
+    (Record ((x (Fun ((y ())) (Var y ()))) (z (Lit (Int 1)))))
+    t.stag:1:4-6: expected a parameter, found `->`
+    t.stag:1:5-5: expected `->`, found end of file
+    t.stag:1:4-5: patterns are not allowed as parameters, only `x`, `_` or `(x : t)`; use `match`
+    t.stag:1:4-5: patterns are not allowed as parameters, only `x`, `_` or `(x : t)`; use `match`
+    t.stag:1:4-5: patterns are not allowed as parameters, only `x`, `_` or `(x : t)`; use `match`
+    t.stag:1:4-5: patterns are not allowed as parameters, only `x`, `_` or `(x : t)`; use `match`
+    t.stag:1:6-7: patterns are not allowed as parameters, only `x`, `_` or `(x : t)`; use `match`
+    t.stag:1:4-5: patterns are not allowed as parameters, only `x`, `_` or `(x : t)`; use `match`
+    t.stag:1:4-6: expected a parameter, found `in`
+    t.stag:1:2-5: expected end of file, found `fun`
+    |}]
+;;
+
 let%expect_test "records" =
   expr "{x = 1; M.y = 2}";
   expr "{x = 1, 2;}";
@@ -249,6 +346,8 @@ let%expect_test "records" =
   expr "{r with `x = v}";
   expr "{r with `x = v; `y = w;}";
   expr "{r.`a with `x = v}";
+  expr "{r with x = v}";
+  expr "{r.M.a with M.x = v; y = w;}";
   [%expect
     {|
     (Record ((x (Lit (Int 1))) (M.y (Lit (Int 2)))))
@@ -272,6 +371,8 @@ let%expect_test "records" =
     (Poly_update (Var r ()) ((x (Var v ()))))
     (Poly_update (Var r ()) ((x (Var v ())) (y (Var w ()))))
     (Poly_update (Poly_field (Var r ()) a) ((x (Var v ()))))
+    (Record_update (Var r ()) ((x (Var v ()))))
+    (Record_update (Field (Var r ()) M.a) ((M.x (Var v ())) (y (Var w ()))))
     |}]
 ;;
 
@@ -349,6 +450,12 @@ let%expect_test "patterns" =
   pat "C (p, q)";
   pat "C ((p, q))";
   pat "C D x";
+  pat "exception E";
+  pat "exception E x";
+  pat "exception M.E (a, b)";
+  pat "exception e, x";
+  pat "exception (e, x)";
+  pat "C exception e";
   pat "{x = p; M.y = q}";
   pat "`A";
   pat "`A p";
@@ -375,8 +482,14 @@ let%expect_test "patterns" =
     (Construct M.C ())
     (Construct C ((Var p)))
     (Construct C ((Var p) (Var q)))
-    (Construct C ((Var p) (Var q)))
+    (Construct C ((Tuple ((Var p) (Var q)))))
     (Construct C ((Construct D ((Var x)))))
+    (Exception (Construct E ()))
+    (Exception (Construct E ((Var x))))
+    (Exception (Construct M.E ((Var a) (Var b))))
+    (Tuple ((Exception (Var e)) (Var x)))
+    (Exception (Tuple ((Var e) (Var x))))
+    t.stag:1:2-11: expected end of file, found `exception`
     (Record ((x (Var p)) (M.y (Var q))))
     (Poly_variant A ())
     (Poly_variant A ((Var p)))
@@ -471,6 +584,9 @@ let%expect_test "declarations" =
     type e = |
     type b = | A | B
     type c = A
+    exception E
+    exception F of int * M.t
+    exception G of (int * string)
     module M = struct
       let x = 1
       module N = struct end
@@ -497,7 +613,9 @@ let%expect_test "declarations" =
      (Type ((name m) (params ()) (kind (Alias (Con M.t ())))))
      (Type ((name e) (params ()) (kind (Variant ()))))
      (Type ((name b) (params ()) (kind (Variant ((A ()) (B ()))))))
-     (Type ((name c) (params ()) (kind (Variant ((A ()))))))
+     (Type ((name c) (params ()) (kind (Variant ((A ())))))) (Exception E ())
+     (Exception F ((Con int ()) (Con M.t ())))
+     (Exception G ((Tuple ((Con int ()) (Con string ())))))
      (Module M ((Let x () () (Lit (Int 1))) (Module N ()))))
     |}]
 ;;
@@ -667,7 +785,7 @@ let%expect_test "errors" =
   expr "a b c in";
   expr "{x = 1; `y = 2}";
   expr "{`x = 1; y = 2}";
-  expr "{r with x = 1}";
+  expr "{r with x = 1; `y = 2}";
   expr "{r}";
   expr "{`x = 1 | r";
   expr ".< x";
@@ -716,7 +834,7 @@ let%expect_test "errors" =
     t.stag:1:6-8: expected end of file, found `in`
     t.stag:1:8-10: expected a field name, found the label `y
     t.stag:1:9-10: expected a polymorphic record label like `x, found `y`
-    t.stag:1:8-9: expected a polymorphic record label like `x, found `x`
+    t.stag:1:15-17: expected a field name, found the label `y
     t.stag:1:2-3: expected `with` or a record field, found `}`
     t.stag:1:11-11: expected `}` to close this `{` (opened at 1:0), found end of file
     t.stag:1:4-4: expected `>.` to close this `.<` (opened at 1:0), found end of file
@@ -746,7 +864,7 @@ let%expect_test "errors" =
     t.stag:1:7-8: expected a type parameter like `'a` or `{..'r}`, found `a`
     t.stag:1:27-27: expected `end` to close this `struct` (opened at 1:11), found end of file
     t.stag:1:7-8: expected a module name, found `m`
-    t.stag:1:0-1: expected a declaration (`let`, `type`, `module` or `include`), found `x`
+    t.stag:1:0-1: expected a declaration (`let`, `type`, `exception`, `module` or `include`), found `x`
     |}]
 ;;
 

@@ -14,14 +14,14 @@ end
 
 module Field = struct
   type t =
-    { name : string
-    ; type_name : string
+    { record_type : Typed.Record_type.t
     ; record : Type.ty
     ; index : int
     ; ty : Type.ty
-    ; all_fields : string list
     }
   [@@deriving sexp_of]
+
+  let name t = t.record_type.fields.(t.index)
 end
 
 module Decl = struct
@@ -46,9 +46,19 @@ module Decl = struct
   ;;
 end
 
+module Exception_decl = struct
+  type t =
+    { args : Type_expr.t list
+    ; module_ : Module_scope.t
+    ; wrap_error : Typecheck_error.t -> Typecheck_error.t
+    ; mutable checked : Constructor.t option
+    }
+end
+
 type t =
   { fresh : Fresh.t
   ; types : Decl.t String.Table.t
+  ; exceptions : Exception_decl.t String.Table.t
   ; constructors : Constructor.t String.Table.t
   ; fields : Field.t String.Table.t
   ; constructor_types : string String.Table.t
@@ -60,6 +70,7 @@ type t =
 let create fresh =
   { fresh
   ; types = String.Table.create ()
+  ; exceptions = String.Table.create ()
   ; constructors = String.Table.create ()
   ; fields = String.Table.create ()
   ; constructor_types = String.Table.create ()
@@ -68,8 +79,10 @@ let create fresh =
 ;;
 
 let builtins =
-  List.map [ "int"; "bool"; "string"; "char"; "unit" ] ~f:(fun name ->
-    { Type_decl.name = Located.create name; params = []; kind = Abstract })
+  List.map
+    [ "int"; "bool"; "string"; "char"; "unit"; Type.exn_name ]
+    ~f:(fun name ->
+      { Type_decl.name = Located.create name; params = []; kind = Abstract })
 ;;
 
 let find_resolved t module_ namespace path ~loc ~unbound ~find =
@@ -392,6 +405,41 @@ let declare
   | Record fields -> declares fields t.field_types
 ;;
 
+let declare_exception ?(wrap_error = Fn.id) t module_ (name : Name.t) args =
+  Hashtbl.add_exn
+    t.exceptions
+    ~key:(Module_scope.canonical_name module_ name.txt)
+    ~data:{ Exception_decl.args; module_; wrap_error; checked = None }
+;;
+
+(* Its arguments have no type variables, which nothing would bind. *)
+let check_exception t name =
+  let decl = Hashtbl.find_exn t.exceptions name in
+  match decl.checked with
+  | Some checked -> Ok checked
+  | None ->
+    Result.map_error ~f:decl.wrap_error
+    @@
+    let%map.Result args =
+      map_result decl.args ~f:(fun arg ->
+        elaborate'
+          t
+          decl.module_
+          (Params String.Map.empty)
+          ~expansions:(String.Table.create ())
+          arg
+        |> Result.map ~f:fst)
+    in
+    let { Typed.Constructor_ref.type_name; index; name = _ } =
+      Typed.Constructor_ref.exception_ name
+    in
+    let checked =
+      { Constructor.name; type_name; index; args; result = Type.exn }
+    in
+    decl.checked <- Some checked;
+    checked
+;;
+
 let define t (decl : Decl.t) =
   let expansions = String.Table.create () in
   let elaborate =
@@ -454,22 +502,22 @@ let define t (decl : Decl.t) =
          ~key:name
          ~data:{ Constructor.name; type_name = decl.name; index; args; result })
    | Record fields ->
-     let all_fields =
-       List.map fields ~f:(fun (field : Signature.Field.t) ->
-         canonical_name field.name)
+     let record_type =
+       { Typed.Record_type.name = decl.name
+       ; fields =
+           Array.of_list_map fields ~f:(fun (field : Signature.Field.t) ->
+             canonical_name field.name)
+       }
      in
-     List.iteri fields ~f:(fun index { name; ty } ->
-       let name = canonical_name name in
+     List.iteri fields ~f:(fun index { name = _; ty } ->
        Hashtbl.add_exn
          t.fields
-         ~key:name
+         ~key:record_type.fields.(index)
          ~data:
-           { Field.name
-           ; type_name = decl.name
+           { Field.record_type
            ; index
            ; record = TCon (decl.name, Decl.params decl)
            ; ty
-           ; all_fields
            }));
   checked
 ;;
@@ -483,6 +531,42 @@ let check t name =
 
 let find_decl_exn t name =
   Option.value_exn (Hashtbl.find_exn t.types name).checked
+;;
+
+let members t type_name ~kind ~members =
+  match Hashtbl.find t.types type_name with
+  | None -> Ok None
+  | Some decl ->
+    let%map.Result checked = check t type_name in
+    kind checked.kind
+    |> Option.map ~f:(fun names ->
+      List.map names ~f:(fun name ->
+        Hashtbl.find_exn members (Module_scope.canonical_name decl.module_ name)))
+;;
+
+let record_fields t type_name =
+  members t type_name ~members:t.fields ~kind:(function
+    | Record fields ->
+      Some (List.map fields ~f:(fun (field : Signature.Field.t) -> field.name))
+    | Variant _ | Alias _ | Abstract -> None)
+;;
+
+let record_type t type_name =
+  let%map.Result fields = record_fields t type_name in
+  match fields with
+  | Some (field :: _) -> field.record_type
+  | Some [] | None ->
+    raise_s [%message "Not a record type" (type_name : string)]
+;;
+
+let variant_constructors t type_name =
+  members t type_name ~members:t.constructors ~kind:(function
+    | Variant constructors ->
+      Some
+        (List.map
+           constructors
+           ~f:(fun (constructor : Signature.Constructor.t) -> constructor.name))
+    | Record _ | Alias _ | Abstract -> None)
 ;;
 
 let is_empty_variant t name =
@@ -503,13 +587,16 @@ let find_member t ~types ~members name ~loc ~unbound =
 ;;
 
 let constructor t name ~loc =
-  find_member
-    t
-    ~types:t.constructor_types
-    ~members:t.constructors
-    name
-    ~loc
-    ~unbound:(fun path -> Unbound_constructor path)
+  if Hashtbl.mem t.exceptions name
+  then check_exception t name
+  else
+    find_member
+      t
+      ~types:t.constructor_types
+      ~members:t.constructors
+      name
+      ~loc
+      ~unbound:(fun path -> Unbound_constructor path)
 ;;
 
 let field t name ~loc =

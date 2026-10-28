@@ -17,3 +17,7 @@ let to_string_hum ?(shadowed = fun _ -> false) name =
   | Some relative when not (shadowed relative) -> relative
   | Some _ | None -> name
 ;;
+
+let short_name name =
+  Option.value_map (String.rsplit2 name ~on:'.') ~default:name ~f:snd
+;;

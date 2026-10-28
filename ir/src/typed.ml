@@ -107,15 +107,40 @@ module Constructor_ref = struct
     ; index : int
     }
   [@@deriving sexp_of]
+
+  let exception_index = -1
+
+  let exception_ name =
+    { type_name = Type.exn_name; name; index = exception_index }
+  ;;
+
+  let is_exception t = t.index = exception_index
+end
+
+module Record_type = struct
+  type t =
+    { name : string
+    ; fields : string array
+    }
+
+  let sexp_of_t t = Sexp.Atom t.name
 end
 
 module Field_ref = struct
   type t =
-    { type_name : string
-    ; name : string
+    { record : Record_type.t
     ; index : int
     }
-  [@@deriving sexp_of]
+
+  let name t = t.record.fields.(t.index)
+
+  let sexp_of_t t =
+    [%sexp
+      { type_name : string = t.record.name
+      ; name : string = name t
+      ; index : int = t.index
+      }]
+  ;;
 end
 
 module Pattern = struct
@@ -182,6 +207,10 @@ module Expr = struct
           ; body : 'e
           ; in_ : 'e
           }
+      | Fun of
+          { args : Ident.t list
+          ; body : 'e
+          }
       | Splice of
           { code : 'e
           ; subs : 'e Subs.t
@@ -195,7 +224,12 @@ module Expr = struct
       | Construct of Constructor_ref.t * 'e list
       | Record of (Field_ref.t * 'e) list
       | Field of 'e * Field_ref.t
-      | Match of 'e * (Pattern.t * 'e) list
+      | Record_update of 'e * (Field_ref.t * 'e) list
+      | Match of
+          { scrutinee : 'e
+          ; cases : (Pattern.t * 'e) list
+          ; exception_cases : (Pattern.t * 'e) list [@sexp.list]
+          }
       | Poly_record of (string * 'e) list
       | Poly_field of 'e * string
       | Poly_extend of (string * 'e) list * 'e
@@ -227,6 +261,7 @@ module Expr = struct
     | Splice { code; subs = Explicit subs } -> code :: snds subs
     | Splice { code; subs = Implicit _ } -> [ code ]
     | Quote e
+    | Fun { body = e; _ }
     | Field (e, _)
     | Poly_field (e, _)
     | Poly_restrict (e, _)
@@ -235,7 +270,9 @@ module Expr = struct
     | Record fields -> snds fields
     | Poly_record fields -> snds fields
     | Poly_extend (fields, e) | Poly_update (e, fields) -> e :: snds fields
-    | Match (e, cases) -> e :: snds cases
+    | Record_update (e, fields) -> e :: snds fields
+    | Match { scrutinee; cases; exception_cases } ->
+      (scrutinee :: snds cases) @ snds exception_cases
   ;;
 
   let rec refers_to t ~f =
@@ -248,7 +285,7 @@ module Expr = struct
 
   let rec is_value t =
     match t.desc with
-    | Lit _ | Var _ | Type _ -> true
+    | Lit _ | Var _ | Type _ | Fun _ -> true
     | Quote expr -> splices_are_values expr ~depth:1
     | Let { ident; args; body; in_; generalized = _ } ->
       binding_is_value ~ident ~args ~body && is_value in_
@@ -258,6 +295,7 @@ module Expr = struct
     | Construct _
     | Record _
     | Field _
+    | Record_update _
     | Match _
     | Poly_record _
     | Poly_field _
@@ -286,10 +324,12 @@ module Expr = struct
     | Var _
     | App _
     | Let _
+    | Fun _
     | Tuple _
     | Construct _
     | Record _
     | Field _
+    | Record_update _
     | Match _
     | Poly_record _
     | Poly_field _

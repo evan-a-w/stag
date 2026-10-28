@@ -156,66 +156,75 @@ include .~(let _ = (types, decls, abstract) in Nil)
     (decls
      (Tuple
       (Some
-       (Record (Nil)
-        (Stag.Type.Kind.Variant
-         (Cons (Tuple (Ref (constructor M.A)) (Nil))
+       (Stag.Type.Decl.t (params (Nil))
+        (kind
+         (Stag.Type.Kind.Variant
+          (Cons (Tuple (Ref (constructor M.A)) (Nil))
+           (Cons
+            (Tuple (Ref (constructor M.B))
+             (Cons (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type int))) (Nil))
+              (Cons (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type M.t))) (Nil))
+               (Nil))))
+            (Nil)))))))
+      (Some
+       (Stag.Type.Decl.t (params (Nil))
+        (kind
+         (Stag.Type.Kind.Alias
+          (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type M.t))) (Nil))))))
+      (Some
+       (Stag.Type.Decl.t (params (Nil))
+        (kind
+         (Stag.Type.Kind.Record
           (Cons
-           (Tuple (Ref (constructor M.B))
-            (Cons (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type int))) (Nil))
-             (Cons (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type M.t))) (Nil))
-              (Nil))))
-           (Nil))))))
+           (Tuple (Ref (field x))
+            (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type int))) (Nil)))
+           (Cons
+            (Tuple (Ref (field y))
+             (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type M.t))) (Nil)))
+            (Nil)))))))
       (Some
-       (Record (Nil)
-        (Stag.Type.Kind.Alias
-         (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type M.t))) (Nil)))))
-      (Some
-       (Record (Nil)
-        (Stag.Type.Kind.Record
-         (Cons
-          (Tuple (Ref (field x))
-           (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type int))) (Nil)))
-          (Cons
-           (Tuple (Ref (field y))
-            (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type M.t))) (Nil)))
-           (Nil))))))
-      (Some
-       (Record (Cons (Stag.Type_decl.Param.Ty (String a)) (Nil))
-        (Stag.Type.Kind.Variant
-         (Cons (Tuple (Ref (constructor Leaf)) (Nil))
-          (Cons
-           (Tuple (Ref (constructor Node))
-            (Cons
-             (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type tree)))
-              (Cons (Stag.Type_expr.Arg.Ty (Stag.Type_expr.Var (String a)))
-               (Nil)))
-             (Cons (Stag.Type_expr.Var (String a))
-              (Cons
-               (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type tree)))
-                (Cons (Stag.Type_expr.Arg.Ty (Stag.Type_expr.Var (String a)))
-                 (Nil)))
-               (Nil)))))
-           (Nil))))))
-      (Some
-       (Record (Cons (Stag.Type_decl.Param.Row (String r)) (Nil))
-        (Stag.Type.Kind.Alias
-         (Stag.Type_expr.Record
-          (Stag.Type_expr.Row.Extend (String x)
-           (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type int))) (Nil))
-           (Stag.Type_expr.Row.Var (String r)))))))
-      (Some
-       (Record (Cons (Stag.Type_decl.Param.Ty (String a)) (Nil))
-        (Stag.Type.Kind.Variant
-         (Cons (Tuple (Ref (constructor Nil)) (Nil))
-          (Cons
-           (Tuple (Ref (constructor Cons))
-            (Cons (Stag.Type_expr.Var (String a))
+       (Stag.Type.Decl.t
+        (params (Cons (Stag.Type_decl.Param.Ty (String a)) (Nil)))
+        (kind
+         (Stag.Type.Kind.Variant
+          (Cons (Tuple (Ref (constructor Leaf)) (Nil))
+           (Cons
+            (Tuple (Ref (constructor Node))
              (Cons
-              (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type list)))
+              (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type tree)))
                (Cons (Stag.Type_expr.Arg.Ty (Stag.Type_expr.Var (String a)))
                 (Nil)))
-              (Nil))))
-           (Nil))))))))
+              (Cons (Stag.Type_expr.Var (String a))
+               (Cons
+                (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type tree)))
+                 (Cons (Stag.Type_expr.Arg.Ty (Stag.Type_expr.Var (String a)))
+                  (Nil)))
+                (Nil)))))
+            (Nil)))))))
+      (Some
+       (Stag.Type.Decl.t
+        (params (Cons (Stag.Type_decl.Param.Row (String r)) (Nil)))
+        (kind
+         (Stag.Type.Kind.Alias
+          (Stag.Type_expr.Record
+           (Stag.Type_expr.Row.Extend (String x)
+            (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type int))) (Nil))
+            (Stag.Type_expr.Row.Var (String r))))))))
+      (Some
+       (Stag.Type.Decl.t
+        (params (Cons (Stag.Type_decl.Param.Ty (String a)) (Nil)))
+        (kind
+         (Stag.Type.Kind.Variant
+          (Cons (Tuple (Ref (constructor Nil)) (Nil))
+           (Cons
+            (Tuple (Ref (constructor Cons))
+             (Cons (Stag.Type_expr.Var (String a))
+              (Cons
+               (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type list)))
+                (Cons (Stag.Type_expr.Arg.Ty (Stag.Type_expr.Var (String a)))
+                 (Nil)))
+               (Nil))))
+            (Nil)))))))))
     (abstract (Tuple (None) (None) (None)))
     |}]
 ;;
@@ -298,8 +307,8 @@ let derive ty =
   let r = head ty in
   match decl ty with
   | Some d ->
-    (match d.Stag.Type.Decl.kind with
-     | Stag.Type.Kind.Variant constructors ->
+    (match d.kind with
+     | Variant constructors ->
        Cons
          ( Stag.Toplevel.let_ "to_string" (Cons ("x", Nil))
              (Stag.Expr.Match (Stag.Expr.var "x", Stag.map (arm (Stag.Type_ref.name r)) constructors))
@@ -356,7 +365,7 @@ module M = struct
   include .~(
     match decl (type r) with
     | Some d ->
-      (match d.Stag.Type.Decl.kind with
+      (match d.kind with
        | Stag.Type.Kind.Record (Cons ((x, _), Nil)) ->
          Cons
            ( Stag.Toplevel.let_ "get_x" (Cons ("v", Nil)) (Stag.Expr.Field (Stag.Expr.var "v", Stag.Path.Ref x))
@@ -367,7 +376,7 @@ module M = struct
                    ( Stag.Toplevel.let_ "b" Nil
                        (match decl t_type with
                         | Some d ->
-                          (match d.Stag.Type.Decl.kind with
+                          (match d.kind with
                            | Stag.Type.Kind.Variant (Cons ((a, _), _)) ->
                              Stag.Expr.Construct (Stag.Path.Ref a, Nil)))
                    , Cons
@@ -468,7 +477,7 @@ type r = {x : int}
 let c =
   match decl (type t) with
   | Some d ->
-    (match d.Stag.Type.Decl.kind with
+    (match d.kind with
      | Stag.Type.Kind.Variant (Cons ((c, _), _)) -> Stag.Type.decl c)
 |}
     );
@@ -479,15 +488,15 @@ type r = {x : int}
 let f =
   match decl (type r) with
   | Some d ->
-    (match d.Stag.Type.Decl.kind with
+    (match d.kind with
      | Stag.Type.Kind.Record (Cons ((f, _), _)) -> Stag.Type.decl f)
 |}
     );
   [%expect
     {|
-    File "a.stag", line 8, characters 66-95:
+    File "a.stag", line 8, characters 80-95:
     8 | include .~(Cons (Stag.Toplevel.let_ "a" Nil (Stag.Expr.Construct (Stag.Path.Ref (head (type t)), Nil)), Nil))
-                                                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                                                                        ^^^^^^^^^^^^^^^
     Error: This expression has type Stag.Type_ref.t but an expression was expected of type Stag.Constructor_ref.t
     File "a.stag", line 13, characters 67-68:
     13 |      | Stag.Type.Kind.Variant (Cons ((c, _), _)) -> Stag.Type.decl c)
@@ -533,7 +542,7 @@ let%expect_test "refs to the prelude's declarations where they are shadowed" =
 let some_ref =
   match decl (type option[int]) with
   | Some d ->
-    (match d.Stag.Type.Decl.kind with
+    (match d.kind with
      | Stag.Type.Kind.Variant (Cons (_, Cons ((some, _), Nil))) -> some)
 let gen =
   Cons
@@ -735,12 +744,14 @@ include .~(Cons (Stag.Toplevel.Let ("x", Nil, Some (Stag.Type_expr.Con (Stag.Pat
     11 | include .~(Cons (Stag.Toplevel.Let ("x", Nil, Some (Stag.Type_expr.Con (Stag.Path.Ref (head (type list[int])), Nil)), Stag.Expr.construct "Nil" Nil), Nil))
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: In the declaration `let x` generated by this splice: The type list expects 1 argument(s), but is given 0
-    Note: The generated declaration is (Let x () ((Con <list> ())) (Construct Nil ()))
+    Note: The generated declaration is:
+      let x : list = Nil
     File "a.stag", line 10, characters 0-172:
     10 | include .~(Cons (Stag.Toplevel.Let ("x", Nil, Some (Stag.Type_expr.Con (Stag.Path.Ref (head (type M.t[int])), Nil)), Stag.Expr.Construct (Stag.Path.Name "M.A", Nil)), Nil))
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: In the declaration `let x` generated by this splice: The type A.M.t expects 1 argument(s), but is given 0
-    Note: The generated declaration is (Let x () ((Con <A.M.t> ())) (Construct M.A ()))
+    Note: The generated declaration is:
+      let x : A.M.t = M.A
     |}]
 ;;
 
@@ -764,13 +775,15 @@ include .~(let _ = d in Nil)
     (decl <fun>)
     (d
      (Some
-      (Record (Cons (Stag.Type_decl.Param.Ty (String a)) (Nil))
-       (Stag.Type.Kind.Alias
-        (Stag.Type_expr.Variant
-         (Stag.Type_expr.Row.Extend (String A) (Stag.Type_expr.Var (String a))
-          (Stag.Type_expr.Row.Extend (String B)
-           (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type unit))) (Nil))
-           (Stag.Type_expr.Row.Empty))))))))
+      (Stag.Type.Decl.t
+       (params (Cons (Stag.Type_decl.Param.Ty (String a)) (Nil)))
+       (kind
+        (Stag.Type.Kind.Alias
+         (Stag.Type_expr.Variant
+          (Stag.Type_expr.Row.Extend (String A) (Stag.Type_expr.Var (String a))
+           (Stag.Type_expr.Row.Extend (String B)
+            (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type unit))) (Nil))
+            (Stag.Type_expr.Row.Empty)))))))))
     |}]
 ;;
 

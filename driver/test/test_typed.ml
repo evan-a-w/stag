@@ -22,16 +22,18 @@ let f x =
           (body (Lit (Int 1) : int))
           (in_
            (Match
-            (Tuple
-             ((Var (Bound (Local x/15)) : int) (Var (Bound (Local x/15)) : int))
-             : "int * int")
-            (((Var x/16 : "int * int")
-              (Let (ident g/18) (args (y/17)) (generalized true)
-               (body (Var (Bound (Local y/17)) : 'b))
-               (in_
-                (App (Var (Bound (Local g/18)) : "int * int -> int * int")
-                 (Var (Bound (Local x/16)) : "int * int") : "int * int"))
-               : "int * int")))
+            (scrutinee
+             (Tuple
+              ((Var (Bound (Local x/15)) : int) (Var (Bound (Local x/15)) : int))
+              : "int * int"))
+            (cases
+             (((Var x/16 : "int * int")
+               (Let (ident g/18) (args (y/17)) (generalized true)
+                (body (Var (Bound (Local y/17)) : 'b))
+                (in_
+                 (App (Var (Bound (Local g/18)) : "int * int -> int * int")
+                  (Var (Bound (Local x/16)) : "int * int") : "int * int"))
+                : "int * int"))))
             : "int * int"))
           : "int * int")))))
      (recursive false))
@@ -97,35 +99,38 @@ let get r = r.M.x
     ((members
       (((ident outside/5) (args (v/16)) (scheme "M.t -> M.r")
         (body
-         (Match (Var (Bound (Local v/16)) : M.t)
-          (((Construct ((type_name M.t) (name M.A) (index 0)) () : M.t)
-            (Record
-             ((((type_name M.r) (name M.y) (index 1)) (Lit (Bool true) : bool))
-              (((type_name M.r) (name M.x) (index 0)) (Lit (Int 1) : int)))
-             : M.r))
-           ((Construct ((type_name M.t) (name M.B) (index 1)) ((Var n/17 : int))
-             : M.t)
-            (Record
-             ((((type_name M.r) (name M.x) (index 0))
-               (Var (Bound (Local n/17)) : int))
-              (((type_name M.r) (name M.y) (index 1)) (Lit (Bool false) : bool)))
-             : M.r))
-           ((Construct ((type_name M.t) (name M.C) (index 2))
-             ((Any : bool) (Lit (Int 2) : int)) : M.t)
-            (Let (ident r/18) (args ()) (generalized true)
-             (body
-              (Record
-               ((((type_name M.r) (name M.x) (index 0)) (Lit (Int 2) : int))
-                (((type_name M.r) (name M.y) (index 1)) (Lit (Bool true) : bool)))
-               : M.r))
-             (in_
-              (Match (Var (Bound (Local r/18)) : M.r)
-               (((Record
-                  ((((type_name M.r) (name M.y) (index 1)) (Var y/19 : bool))) :
-                  M.r)
-                 (Var (Bound (Local r/18)) : M.r)))
-               : M.r))
-             : M.r)))
+         (Match (scrutinee (Var (Bound (Local v/16)) : M.t))
+          (cases
+           (((Construct ((type_name M.t) (name M.A) (index 0)) () : M.t)
+             (Record
+              ((((type_name M.r) (name M.y) (index 1)) (Lit (Bool true) : bool))
+               (((type_name M.r) (name M.x) (index 0)) (Lit (Int 1) : int)))
+              : M.r))
+            ((Construct ((type_name M.t) (name M.B) (index 1)) ((Var n/17 : int))
+              : M.t)
+             (Record
+              ((((type_name M.r) (name M.x) (index 0))
+                (Var (Bound (Local n/17)) : int))
+               (((type_name M.r) (name M.y) (index 1)) (Lit (Bool false) : bool)))
+              : M.r))
+            ((Construct ((type_name M.t) (name M.C) (index 2))
+              ((Any : bool) (Lit (Int 2) : int)) : M.t)
+             (Let (ident r/18) (args ()) (generalized true)
+              (body
+               (Record
+                ((((type_name M.r) (name M.x) (index 0)) (Lit (Int 2) : int))
+                 (((type_name M.r) (name M.y) (index 1))
+                  (Lit (Bool true) : bool)))
+                : M.r))
+              (in_
+               (Match (scrutinee (Var (Bound (Local r/18)) : M.r))
+                (cases
+                 (((Record
+                    ((((type_name M.r) (name M.y) (index 1)) (Var y/19 : bool)))
+                    : M.r)
+                   (Var (Bound (Local r/18)) : M.r))))
+                : M.r))
+              : M.r))))
           : M.r)))))
      (recursive false))
     ((members
@@ -171,22 +176,25 @@ let open_ r = match r with {`a = a; ..} -> a
       (((ident rest/5) (args (r/17))
         (scheme "{`a : 'a; `b : 'b; ..'c} -> 'a * {..'c}")
         (body
-         (Match (Var (Bound (Local r/17)) : "{`a : 'a; `b : 'b; ..'c}")
-          (((Poly_record (fields ((a (Var a/18 : 'a)) (b (Any : 'b))))
-             (rest (Bind others/19)) : "{`a : 'a; `b : 'b; ..'c}")
-            (Tuple
-             ((Var (Bound (Local a/18)) : 'a)
-              (Var (Bound (Local others/19)) : {..'c}))
-             : "'a * {..'c}")))
+         (Match
+          (scrutinee (Var (Bound (Local r/17)) : "{`a : 'a; `b : 'b; ..'c}"))
+          (cases
+           (((Poly_record (fields ((a (Var a/18 : 'a)) (b (Any : 'b))))
+              (rest (Bind others/19)) : "{`a : 'a; `b : 'b; ..'c}")
+             (Tuple
+              ((Var (Bound (Local a/18)) : 'a)
+               (Var (Bound (Local others/19)) : {..'c}))
+              : "'a * {..'c}"))))
           : "'a * {..'c}")))))
      (recursive false))
     ((members
       (((ident open_/6) (args (r/20)) (scheme "{`a : 'a; ..'b} -> 'a")
         (body
-         (Match (Var (Bound (Local r/20)) : "{`a : 'a; ..'b}")
-          (((Poly_record (fields ((a (Var a/21 : 'a)))) (rest Open) :
-             "{`a : 'a; ..'b}")
-            (Var (Bound (Local a/21)) : 'a)))
+         (Match (scrutinee (Var (Bound (Local r/20)) : "{`a : 'a; ..'b}"))
+          (cases
+           (((Poly_record (fields ((a (Var a/21 : 'a)))) (rest Open) :
+              "{`a : 'a; ..'b}")
+             (Var (Bound (Local a/21)) : 'a))))
           : 'a)))))
      (recursive false))
     ((a/18 ('a 0)) (a/21 ('a 0)) (open_/6 ("{`a : 'a; ..'b} -> 'a" 0))
@@ -219,11 +227,12 @@ let handle v = match v with `A -> 0 | `B n -> n | other -> 2
     ((members
       (((ident handle/5) (args (v/15)) (scheme "[`A | `B of int; ..'a] -> int")
         (body
-         (Match (Var (Bound (Local v/15)) : "[`A | `B of int; ..'a]")
-          (((Poly_variant A () : "[`A | `B of int; ..'a]") (Lit (Int 0) : int))
-           ((Poly_variant B ((Var n/16 : int)) : "[`A | `B of int; ..'a]")
-            (Var (Bound (Local n/16)) : int))
-           ((Var other/17 : "[`A | `B of int; ..'a]") (Lit (Int 2) : int)))
+         (Match (scrutinee (Var (Bound (Local v/15)) : "[`A | `B of int; ..'a]"))
+          (cases
+           (((Poly_variant A () : "[`A | `B of int; ..'a]") (Lit (Int 0) : int))
+            ((Poly_variant B ((Var n/16 : int)) : "[`A | `B of int; ..'a]")
+             (Var (Bound (Local n/16)) : int))
+            ((Var other/17 : "[`A | `B of int; ..'a]") (Lit (Int 2) : int))))
           : int)))))
      (recursive false))
     ((handle/5 ("[`A | `B of int; ..'a] -> int" 0)) (n/16 (int 0))
@@ -643,10 +652,11 @@ let lits s = match s with "\0000" -> ('\000', "\0003")
     ((members
       (((ident lits/4) (args (s/14)) (scheme "string -> char * string")
         (body
-         (Match (Var (Bound (Local s/14)) : string)
-          (((Lit (String "\0000") : string)
-            (Tuple ((Lit (Char "\000") : char) (Lit (String "\0003") : string)) :
-             "char * string")))
+         (Match (scrutinee (Var (Bound (Local s/14)) : string))
+          (cases
+           (((Lit (String "\0000") : string)
+             (Tuple ((Lit (Char "\000") : char) (Lit (String "\0003") : string))
+              : "char * string"))))
           : "char * string")))))
      (recursive false))
     |}]
@@ -950,9 +960,10 @@ let first p = match p with (a, _) -> (a : int)
     ((members
       (((ident first/4) (args (p/14)) (scheme "int * 'a -> int")
         (body
-         (Match (Var (Bound (Local p/14)) : "int * 'a")
-          (((Tuple ((Var a/15 : int) (Any : 'a)) : "int * 'a")
-            (Var (Bound (Local a/15)) : int)))
+         (Match (scrutinee (Var (Bound (Local p/14)) : "int * 'a"))
+          (cases
+           (((Tuple ((Var a/15 : int) (Any : 'a)) : "int * 'a")
+             (Var (Bound (Local a/15)) : int))))
           : int)))))
      (recursive false))
     ((a/15 (int 0)) (first/4 ("int * 'a -> int" 0)) (p/14 ("int * 'a" 0)))

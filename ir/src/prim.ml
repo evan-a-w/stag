@@ -11,6 +11,14 @@ module Value = struct
   [@@deriving sexp_of]
 end
 
+module Exception = struct
+  type t =
+    | Division_by_zero
+    | Invalid_argument of string
+    | Failure of string
+  [@@deriving sexp_of]
+end
+
 module Base_type = struct
   type t =
     | Int
@@ -34,7 +42,8 @@ type t =
   { name : string
   ; args : Base_type.t list
   ; result : Base_type.t
-  ; impl : output:(string -> unit) -> Value.t list -> (Value.t, string) Result.t
+  ; impl :
+      output:(string -> unit) -> Value.t list -> (Value.t, Exception.t) Result.t
   }
 
 let equal a b = String.equal a.name b.name
@@ -83,7 +92,7 @@ let int_binop name f =
 
 let int_division name f =
   prim name [ Int; Int ] Int (fun ~output:_ -> function
-    | [ Int _; Int 0 ] -> Some (Error "Division by zero")
+    | [ Int _; Int 0 ] -> Some (Error Exception.Division_by_zero)
     | [ Int a; Int b ] -> Some (Ok (Value.Int (f a b)))
     | _ -> None)
 ;;
@@ -158,12 +167,13 @@ let all =
   ; unary "Int.to_string" Int String (function
       | Int n -> ok (Value.String (Int.to_string n))
       | _ -> None)
-  ; unary "Int.of_string" String Int (function
+  ; unary "Int.of_string_exn" String Int (function
       | String s ->
         Some
           (match int_of_string s with
            | Some n -> Ok (Value.Int n)
-           | None -> Error (sprintf "Int.of_string: invalid integer %S" s))
+           | None ->
+             Error (Failure (sprintf "Int.of_string_exn: invalid integer %S" s)))
       | _ -> None)
   ; binary "String.concat" [ String; String_list ] String (fun a b ->
       match a, b with
@@ -185,10 +195,12 @@ let all =
            then Ok (Value.Char s.[i])
            else
              Error
-               (sprintf
-                  "String.get: index %d out of bounds of a string of length %d"
-                  i
-                  (String.length s)))
+               (Invalid_argument
+                  (sprintf
+                     "String.get: index %d out of bounds of a string of length \
+                      %d"
+                     i
+                     (String.length s))))
       | _ -> None)
   ; prim "String.sub" [ String; Int; Int ] String (fun ~output:_ -> function
       | [ String s; Int pos; Int len ] ->
@@ -197,12 +209,13 @@ let all =
            then Ok (Value.String (String.sub s ~pos ~len))
            else
              Error
-               (sprintf
-                  "String.sub: invalid substring (position %d, length %d) of a \
-                   string of length %d"
-                  pos
-                  len
-                  (String.length s)))
+               (Invalid_argument
+                  (sprintf
+                     "String.sub: invalid substring (position %d, length %d) \
+                      of a string of length %d"
+                     pos
+                     len
+                     (String.length s))))
       | _ -> None)
   ; binary "String.equal" [ String; String ] Bool (fun a b ->
       match a, b with
@@ -225,7 +238,10 @@ let all =
         Some
           (match Char.of_int n with
            | Some c -> Ok (Value.Char c)
-           | None -> Error (sprintf "Char.of_code: invalid character code %d" n))
+           | None ->
+             Error
+               (Invalid_argument
+                  (sprintf "Char.of_code: invalid character code %d" n)))
       | _ -> None)
   ; unary "Char.to_string" Char String (function
       | Char c -> ok (Value.String (String.of_char c))

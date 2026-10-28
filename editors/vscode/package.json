@@ -1,0 +1,94 @@
+{
+  "name": "stag",
+  "displayName": "stag",
+  "description": "Syntax highlighting and language server client for stag, a staged ML",
+  "version": "0.0.1",
+  "publisher": "stag",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Formatters"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "restrictedConfigurations": [
+        "stag.serverPath"
+      ]
+    }
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "stag",
+        "aliases": [
+          "stag"
+        ],
+        "extensions": [
+          ".stag"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "stag",
+        "scopeName": "source.stag",
+        "path": "./syntaxes/stag.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "stag.restartServer",
+        "title": "Restart Language Server",
+        "category": "stag"
+      }
+    ],
+    "configuration": {
+      "title": "stag",
+      "properties": {
+        "stag.serverPath": {
+          "type": "string",
+          "default": "stag",
+          "description": "The stag executable, run as `stag lsp` for the language server and `stag fmt` for formatting. A bare name is looked up on PATH; a relative path is resolved against the workspace folder of the active (or else any open) stag document, or else the first workspace folder. It is not run in untrusted workspaces.",
+          "scope": "machine-overridable"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build:grammar": "node scripts/build-grammar.js",
+    "bundle": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --target=node20 --minify --sourcemap",
+    "compile": "npm run build:grammar && npm run typecheck && npm run bundle",
+    "typecheck": "tsc -p . --noEmit",
+    "test:grammar": "vscode-tmgrammar-test 'test/grammar/*.stag' && vscode-tmgrammar-snap 'test/snap/*.stag'",
+    "test:repo": "node test/scan-repo.js",
+    "test:lexer": "node test/lexer-diff.js",
+    "gen:corpus": "node scripts/gen-corpus.js",
+    "test:integration": "npm run bundle && node test/integration/run.js",
+    "test": "npm run build:grammar && npm run typecheck && npm run test:grammar && npm run test:repo && npm run test:lexer",
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package --no-dependencies --skip-license --allow-missing-repository"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "~1.91.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.25.12",
+    "js-yaml": "^4.1.0",
+    "typescript": "~5.9.3",
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-textmate": "^9.3.2",
+    "vscode-tmgrammar-test": "^0.1.3"
+  }
+}

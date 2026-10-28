@@ -36,3 +36,9 @@ end
 (** The tokens of a file, always ending in [Eof] (which is zero width, at the
     end of the file). *)
 val tokenize : file:string -> string -> (Located.t array, Error.t) Result.t
+
+(** The tokens, and the comments between them, in order. *)
+val tokenize_with_comments
+  :  file:string
+  -> string
+  -> (Located.t array * Comment.t list, Error.t) Result.t

@@ -37,7 +37,13 @@ module Module_group = struct
   let name = function
     | File { txt = Module (name, _); _ } | Group (name, _) -> name.txt
     | File
-        { txt = Let _ | Type _ | Module_splice _ | Include _ | Expect_test _
+        { txt =
+            ( Let _
+            | Type _
+            | Exception _
+            | Module_splice _
+            | Include _
+            | Expect_test _ )
         ; _
         } -> raise_s [%message "Driver.check_modules: a file is not a module"]
   ;;
@@ -96,7 +102,7 @@ let rec toplevel_names ~prefix (items : Signature.t) =
   List.concat_map items ~f:(fun (item : Signature.Item.t) ->
     match item with
     | Value { name; _ } -> [ prefix ^ name ]
-    | Type _ -> []
+    | Type _ | Exception _ -> []
     | Module { name; items } ->
       toplevel_names ~prefix:(prefix ^ name ^ ".") items)
 ;;
@@ -109,7 +115,7 @@ let rec eval_order ~prefix ~references ~(items : Signature.t) members =
       List.find_map items ~f:(function
         | Module { name = name'; items } when String.equal name name' ->
           Some items
-        | Module _ | Value _ | Type _ -> None)
+        | Module _ | Value _ | Type _ | Exception _ -> None)
       |> Option.value ~default:[]
     in
     let prefix = prefix ^ name ^ "." in

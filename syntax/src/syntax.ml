@@ -152,6 +152,9 @@ module Pattern = struct
         { fields : (Name.t * t) list
         ; rest : Rest.t
         }
+    | Exception of t
+    (** [exception p], at the top of a match arm: matches an exception the
+        scrutinee raises. *)
   [@@deriving sexp_of, compare, equal]
 end
 
@@ -163,6 +166,7 @@ module Expr = struct
     | Var of Path.t * Type_expr.t option
     | App of t * t
     | Let of Name.t * Binding.t list * Type_expr.t option * t * t
+    | Fun of Binding.t list * t (** [fun x (y : t) -> e], of some params. *)
     | Splice of
         { expr : t
         ; subs :
@@ -174,6 +178,8 @@ module Expr = struct
     | Construct of Decl_path.t Located.t * t list
     | Record of (Decl_path.t Located.t * t) list
     | Field of t * Decl_path.t Located.t
+    | Record_update of t * (Decl_path.t Located.t * t) list
+    (** [{e with f = v; ...}] *)
     | Type of Type_expr.t (** [type t]: the type as a value. *)
     | Match of t * (Pattern.t * t) list
     | Poly_record of (Name.t * t) list
@@ -194,6 +200,7 @@ module Toplevel = struct
   and desc =
     | Let of Name.t * Binding.t list * Type_expr.t option * Expr.t
     | Type of Type_decl.t
+    | Exception of Name.t * Type_expr.t list (** [exception E of t1 * t2]. *)
     | Module of Name.t * t list
     | Module_splice of Name.t * Expr.t (** [module M = .~e]. *)
     | Include of Expr.t (** [include .~e]. *)

@@ -60,10 +60,16 @@ module Pattern : sig
           { fields : (Syntax.Name.t * t) list
           ; rest : Rest.t
           }
+      | Exception of t
+      (** Only written, and not at the top of a case, which is misplaced. *)
   end
 
   val view : t -> View.t
   val loc : t -> Loc.t
+
+  (** The tuple of [ts], of at least two written ones: generated nodes are
+      typed, so have their constructor's arity. *)
+  val tuple : t list -> t
 end
 
 module Expr : sig
@@ -100,6 +106,10 @@ module Expr : sig
           ; body : t
           ; in_ : t
           }
+      | Fun of
+          { args : (Binder.t * Syntax.Type_expr.t option) list
+          ; body : t
+          }
       | Splice of
           { code : t
           ; subs : Subs.t
@@ -109,7 +119,13 @@ module Expr : sig
       | Construct of Constructor.t * t list
       | Record of (Field.t * t) list
       | Field of t * Field.t
-      | Match of t * (Pattern.t * t) list
+      | Record_update of t * (Field.t * t) list
+      | Match of
+          { scrutinee : t
+          ; cases : (Pattern.t * t) list
+          ; exception_cases : (Pattern.t * t) list
+            (** The cases [exception p], as [p]. *)
+          }
       | Poly_record of (Syntax.Name.t * t) list
       | Poly_field of t * string
       | Poly_extend of (Syntax.Name.t * t) list * t
@@ -124,4 +140,8 @@ module Expr : sig
   val view : t -> View.t
 
   val loc : t -> Loc.t
+
+  (** The tuple of [ts], of at least two written ones: generated nodes are
+      typed, so have their constructor's arity. *)
+  val tuple : t list -> t
 end

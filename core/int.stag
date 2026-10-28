@@ -54,5 +54,5 @@ let of_string s =
     | false -> lt (String.length significant) (String.length limit)
   in
   match (String.is_empty digits, String.for_all Char.is_digit digits, in_range) with
-  | (false, true, true) -> Some (Prim.Int.of_string s)
+  | (false, true, true) -> Some (Prim.Int.of_string_exn s)
   | _ -> None

@@ -36,6 +36,14 @@ module Kind : sig
     | Type_variable_kind_mismatch of string
     | Unbound_constructor of Syntax.Path.t
     | Unbound_field of Syntax.Path.t
+    | No_such_constructor of
+        { type_name : string
+        ; constructor : string
+        }
+    | No_such_field of
+        { type_name : string
+        ; field : string
+        }
     | Type_arity_mismatch of
         { type_name : Syntax.Decl_path.t
         ; expected : int
@@ -55,6 +63,7 @@ module Kind : sig
         }
     | Duplicate_constructor of string
     | Duplicate_field of string
+    | Repeated_field of string (** In a record expression or pattern. *)
     | Constructor_arity_mismatch of
         { constructor : string
         ; expected : int
@@ -67,7 +76,10 @@ module Kind : sig
         ; actual_type : string
         }
     | Empty_record
+    | Misplaced_exception_pattern
+    | Match_without_value_cases
     | Duplicate_pattern_variable of string
+    | Duplicate_parameter of string
     | Duplicate_row_entry of string
     | Compile_time_use_of_toplevel_being_checked of string
     (** It can't be evaluated yet. *)

@@ -146,6 +146,11 @@ val string : ty
 val char : ty
 val unit : ty
 
+(** The extensible type of exceptions, declared by [exception]. *)
+val exn : ty
+
+val exn_name : string
+
 (** Follows [Link]s, compressing the path. *)
 val canonical_ty : ty -> ty
 

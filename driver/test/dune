@@ -13,4 +13,5 @@
   stag_ir
   stag_eval
   stag_typecheck
-  stag_driver))
+  stag_driver
+  stag_syntax_round_trip))

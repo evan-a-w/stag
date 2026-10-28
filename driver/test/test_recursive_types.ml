@@ -950,7 +950,7 @@ let h (z : t%d[int]) = g z
              printf "%s : _ -> %s " name (Type.to_string_hum result);
              print_parts arg
            | _ -> assert false)
-        | Type _ | Module _ -> ()))
+        | Type _ | Exception _ | Module _ -> ()))
   in
   check ~step:(fun t -> sprintf "[`L of %s | `R of %s]" t t);
   check ~step:(fun t -> sprintf "%s * %s" t t);
