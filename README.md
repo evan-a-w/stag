@@ -8,6 +8,9 @@ quotes (`.< e >.`) and splices (`.~e`), including compile time splices. See
 stag check FILE...            # typecheck, print the signature
 stag run FILE...              # typecheck and evaluate
 stag test [-promote] FILE...  # run let%expect_test tests, writing FILE.corrected
+stag fmt FILE                 # print FILE formatted
+stag fmt -inplace FILE...     # format the files in place
+stag fmt -check FILE...       # list the unformatted files on stdout, failing if any
 ```
 
 `stag test -print-corrected FILE` prints the corrected file instead, writing
@@ -46,6 +49,8 @@ stag-build build             # typecheck every stanza
 stag-build exec NAME         # typecheck and evaluate an executable
 stag-build test [NAME...]    # run the expect tests of libraries and tests
 stag-build promote           # accept the corrections of failed tests
+stag-build fmt [-check]      # format every source in place (or only check),
+                             # printing the diffs
 ```
 
 Each target is checked once per command, and not if a library it depends on

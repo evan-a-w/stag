@@ -68,6 +68,24 @@ let promote_command =
      fun () -> exit_unless (Action.promote (load ())))
 ;;
 
+let fmt_command =
+  Command.basic
+    ~summary:"Format every source of the project"
+    ~readme:(fun () ->
+      "Rewrites each source that is not formatted, printing its diff. With \
+       -check, writes nothing, printing the diffs, and fails if there is one.")
+    (let%map_open.Command check =
+       flag
+         "check"
+         ~aliases:[ "--check" ]
+         no_arg
+         ~doc:" print the diffs without writing them, failing if any"
+     in
+     fun () ->
+       let mode : Format.Mode.t = if check then Check else Inplace in
+       exit_unless (Action.fmt (load ()) ~mode))
+;;
+
 let () =
   Command.group
     ~summary:"Build stag projects"
@@ -75,6 +93,7 @@ let () =
     ; "exec", exec_command
     ; "test", test_command
     ; "promote", promote_command
+    ; "fmt", fmt_command
     ]
   |> Command_unix.run
 ;;

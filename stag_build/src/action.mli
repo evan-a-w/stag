@@ -26,3 +26,8 @@ val test : Project.t -> string list -> bool
     leaving it, a correction whose source is not one of the project's or has
     changed since it was made. *)
 val promote : Project.t -> bool
+
+(** Formats every source of the project, printing the diff of each file that
+    is not formatted, and rewriting it in [Inplace] mode. Fails on a parse
+    error, or in [Check] mode if a file is not formatted. *)
+val fmt : Project.t -> mode:Format.Mode.t -> bool
