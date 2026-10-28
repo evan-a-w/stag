@@ -89,6 +89,8 @@ let%expect_test "Int, Bool, Char, String" =
   show int (fun _ -> Core.String.rindex_exn "abca" 'a');
   show int (fun _ -> Core.String.index_exn "abc" 'z');
   show int (fun _ -> Core.String.rindex_exn "abc" 'z');
+  show Core.Sexp.sexp_of_char (fun _ -> Core.String.get "ab" 5);
+  show Core.Sexp.sexp_of_string (fun _ -> Core.String.sub "ab" 1 5);
   [%expect {|
     -12
     Failure: Int.of_string_exn: invalid integer "1x"
@@ -101,6 +103,8 @@ let%expect_test "Int, Bool, Char, String" =
     3
     Failure: String.index_exn: not found
     Failure: String.rindex_exn: not found
+    Invalid_argument: String.get: index 5 out of bounds of a string of length 2
+    Invalid_argument: String.sub: invalid substring (position 1, length 5) of a string of length 2
     |}]
 
 let%expect_test "Sexp" =

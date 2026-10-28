@@ -308,8 +308,15 @@ Its names and argument orders are those of OCaml's Stdlib where it has the
 function (functions first, `String.sub s pos len`), with a few from Base
 (`Option.first_some`, `String.strip`). Partial functions return options
 (`List.hd`, `List.nth`, `Int.of_string`, `List.map2` on lists of different
-lengths). Functions on lists run in constant stack. Each file's helpers are in
-its submodule `Internal`, not meant for use outside `core/`.
+lengths), and most have an `_exn` variant raising `Failure` (`List.hd_exn`,
+`Int.of_string_exn`, `Option.value_exn`, `Result.ok_exn`); `Sexp.of_string_exn`
+raises `Sexp.Parse_error of Sexp.Parse_error.t`, and `Sexp.of_sexp_exn
+int_of_sexp t` raises `Sexp.Of_sexp_error of Sexp.Of_sexp_error.t`. Out of
+range indices (`String.get`, `String.sub`) and division by zero are
+programming errors, raising the prelude's `Invalid_argument` and
+`Division_by_zero` as the prims do. Functions on lists run in constant stack.
+Each file's helpers are in its submodule `Internal`, not meant for use outside
+`core/`.
 
 - `Core.List`, `Core.Option`, `Core.Result`: the usual combinators on the
   prelude's types (`map`, `fold_left`, `filter_map`, `find`, `zip`, `assoc`, a
@@ -520,6 +527,11 @@ val n : int @@ const      (* modalities on signature items and fields *)
 ```
 
 ### Other
+
+- Core for derived code: generated code naming `Core.Sexp.sexp_of_int` breaks
+  where the program shadows `Core` (a module or stag-build library of that
+  name). Either give the prelude an unshadowable path, or resolve spliced
+  references to canonical prelude names.
 
 `if`, infix operators (`let (+) x y = ...`, OCaml precedences),
 interface files.
