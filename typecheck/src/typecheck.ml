@@ -32,13 +32,15 @@ module Generated = struct
     | In_generated_declaration _ -> error
     | _ when not (Loc.equal error.loc t.splice) -> error
     | kind ->
-      Typecheck_error.create
-        ~loc:t.splice
-        (In_generated_declaration
-           { declaration = t.declaration
-           ; generated = t.generated
-           ; error = kind
-           })
+      { error with
+        loc = t.splice
+      ; kind =
+          In_generated_declaration
+            { declaration = t.declaration
+            ; generated = t.generated
+            ; error = kind
+            }
+      }
   ;;
 
   let wrap_result t result =
@@ -729,7 +731,10 @@ let rec var_type t (scope : Scope.t) ~(path : Syntax.Path.t) ~loc =
        in
        resolve ~name (Some entry)
      | Prim p -> prim p
-     | Unbound -> resolve ~name:(Syntax.Path.to_string path) None)
+     | Unbound ->
+       (match scope.quote with
+        | Some _ -> resolve ~name:(Syntax.Path.to_string path) None
+        | None -> Error (Module_scope.unbound_value scope.module_ path ~loc)))
 
 (* Generated code's variables are already resolved, so are found by binder
    rather than by name, which may be shadowed. *)
@@ -827,6 +832,7 @@ and check_toplevel t program (toplevel : Toplevel.t)
   Generated.wrap_result
     toplevel.generated
     (check_toplevel_unwrapped t program toplevel)
+  |> Result.map_error ~f:(Module_scope.within toplevel.module_)
 
 and check_toplevel_unwrapped t program (toplevel : Toplevel.t) =
   let index = Fresh.id t in
@@ -1423,6 +1429,7 @@ let check_expect_test t program module_ ~name ~body ~loc ~generated =
   let%map.Result body =
     check_expr t scope ~expr:(Source.Expr.Syntax body) ~ty:Type.unit
     |> Generated.wrap_result generated
+    |> Result.map_error ~f:(Module_scope.within module_)
   in
   { Typed.Expect_test.name; body; loc; generated = Option.is_some generated }
 ;;
@@ -1433,18 +1440,43 @@ let declarations_type =
     , [ ATy (TCon (Prelude_path.canonical "Stag.Toplevel.t", [])) ] )
 ;;
 
+(* Whether [error] is a compile time use of a toplevel whose checking was
+   underway before [scope], of a splice, began at index [start]: directly, or
+   through toplevels in its component. *)
+let uses_unfinished
+      (program : Program_env.t)
+      (scope : Scope.t)
+      ~start
+      (error : Typecheck_error.t)
+  =
+  match error.kind with
+  | Compile_time_use_of_toplevel_being_checked name ->
+    scope.scc.lowlink < start
+    || Option.exists
+         (Program_env.find_toplevel program name)
+         ~f:(fun toplevel ->
+           match toplevel.state with
+           | In_progress { index; _ } -> index < start
+           | Unchecked | Done _ -> false)
+  | _ -> false
+;;
+
 (* Checks a declaration splice's expression in the module it is written in,
    and runs it at compile time, to the declarations it generates. *)
-let generate t (program : Program_env.t) splice =
+let generate t (program : Program_env.t) splice
+  : (Syntax.Toplevel.t list, Module_scope.Force_error.t) Result.t
+  =
   let loc = Module_scope.Splice.loc splice in
+  let module_ = Module_scope.Splice.module_ splice in
   let scope =
-    toplevel_scope
-      t
-      program
-      (Module_scope.Splice.module_ splice)
-      ~level:(-1)
-      ~in_expect_test:false
+    toplevel_scope t program module_ ~level:(-1) ~in_expect_test:false
   in
+  let start = scope.scc.lowlink in
+  Result.map_error ~f:(fun error : Module_scope.Force_error.t ->
+    if uses_unfinished program scope ~start error
+    then Uses_unfinished
+    else Failed (Module_scope.within module_ error))
+  @@
   let%bind.Result expr =
     check_expr
       t
@@ -1480,7 +1512,12 @@ let declare
       module_
       decl
       ~lazily:in_prelude
-      ?wrap_error:(Option.map generated ~f:Generated.wrap_error)
+      ~wrap_error:(fun error ->
+        Module_scope.within
+          module_
+          (match generated with
+           | None -> error
+           | Some generated -> Generated.wrap_error generated error))
   | Let (name, args, annot, expr) ->
     let name = Module_scope.canonical_name module_ name.txt in
     let toplevel =
@@ -1590,8 +1627,7 @@ let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
       ()
   in
   List.iter Type_env.builtins ~f:(Type_env.declare program_env.type_env root);
-  Result.map_error ~f:(fun (error : Typecheck_error.t) ->
-    { error with prelude_shadowed = Module_scope.shadows_prelude root })
+  Result.map_error ~f:(Module_scope.within root)
   @@
   let%bind.Result () = Module_scope.add root program in
   let%bind.Result expect_tests = check_declarations t program_env root in

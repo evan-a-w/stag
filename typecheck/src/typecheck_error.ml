@@ -76,6 +76,14 @@ module Kind = struct
         ; module_ : string option
         ; splice : Loc.t
         }
+    | Generated_after_include of
+        { error : t
+        ; include_ : Loc.t
+        }
+    | Maybe_generated_by_running_include of
+        { error : t
+        ; include_ : Loc.t
+        }
     | Shadowed_prelude_module of
         { error : t
         ; module_ : string
@@ -89,17 +97,40 @@ module Kind = struct
   [@@deriving sexp_of]
 end
 
+module In_scope = struct
+  type t =
+    { types : String.Set.t
+    ; modules : String.Set.t
+    }
+
+  let shadows t relative =
+    Prelude_path.shadowed relative ~has:(fun kind name ->
+      Set.mem
+        (match kind with
+         | `Type -> t.types
+         | `Module -> t.modules)
+        name)
+  ;;
+end
+
 type t =
   { loc : Loc.t
   ; kind : Kind.t
-  ; prelude_shadowed : string -> bool
+  ; in_scope : In_scope.t option
   }
 
-let sexp_of_t { loc; kind; prelude_shadowed = _ } =
+let sexp_of_t { loc; kind; in_scope = _ } =
   [%sexp_of: Kind.t Located.t] { txt = kind; loc }
 ;;
 
-let create ~loc kind = { loc; kind; prelude_shadowed = (fun _ -> false) }
+let create ~loc kind = { loc; kind; in_scope = None }
+
+let within t ~in_scope =
+  match t.in_scope with
+  | Some _ -> t
+  | None -> { t with in_scope = Some (force in_scope) }
+;;
+
 let unification_error ~loc error = create ~loc (Unification_error error)
 
 let runtime_message error =
@@ -275,11 +306,9 @@ let rec kind_message (kind : Kind.t) ~show_type =
       (Error.to_string_hum error)
   | Declaration_splice_cycle { name; module_ = None; splice } ->
     sprintf
-      "A declaration splice depends on what it generates: %s is looked up here \
-       among the declarations of the include at %s, which are being generated, \
-       as the include's expression uses this code. Code after an include (or \
-       outside its module) sees what it generates: move the code the include's \
-       expression uses before the include, or into another module"
+      "%s can't be resolved here: the include at %s comes before this point \
+       and may define it, but it is still being generated (its expression uses \
+       this code). Move this code before the include or into another module"
       name
       (Loc.to_string splice)
   | Declaration_splice_cycle { name; module_ = Some module_; splice } ->
@@ -290,6 +319,9 @@ let rec kind_message (kind : Kind.t) ~show_type =
       name
       module_
       (Loc.to_string splice)
+  | Generated_after_include { error; include_ = _ }
+  | Maybe_generated_by_running_include { error; include_ = _ } ->
+    kind_message error ~show_type
   | Shadowed_prelude_module { error; module_; shadowed_by = _ } ->
     sprintf
       "%s (the prelude's module %s is shadowed by the program's %s)"
@@ -303,7 +335,15 @@ let rec kind_message (kind : Kind.t) ~show_type =
       (kind_message error ~show_type)
 ;;
 
-let message { kind; loc = _; prelude_shadowed } =
+let message { kind; loc = _; in_scope } =
+  let in_scope =
+    match in_scope with
+    | Some in_scope -> in_scope
+    | None ->
+      raise_s
+        [%message
+          "Typecheck_error.message: not within a module" (kind : Kind.t)]
+  in
   kind_message kind ~show_type:(fun name ->
-    Prelude_path.to_string_hum name ~shadowed:prelude_shadowed)
+    Prelude_path.to_string_hum name ~shadowed:(In_scope.shadows in_scope))
 ;;

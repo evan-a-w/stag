@@ -337,7 +337,7 @@ end
     File "a.stag", line 4, characters 21-25:
     4 |   let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
                              ^^^^
-    Error: A declaration splice depends on what it generates: Cons is looked up here among the declarations of the include at a.stag:2:0-43, which are being generated, as the include's expression uses this code. Code after an include (or outside its module) sees what it generates: move the code the include's expression uses before the include, or into another module
+    Error: Cons can't be resolved here: the include at a.stag:2:0-43 comes before this point and may define it, but it is still being generated (its expression uses this code). Move this code before the include or into another module
     File "a.stag", line 2, characters 0-43:
     2 | include .~(Gen.value "x" (Stag.Expr.int 1))
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -356,7 +356,7 @@ let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
     File "a.stag", line 3, characters 19-23:
     3 | let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
                            ^^^^
-    Error: A declaration splice depends on what it generates: Cons is looked up here among the declarations of the include at a.stag:2:0-39, which are being generated, as the include's expression uses this code. Code after an include (or outside its module) sees what it generates: move the code the include's expression uses before the include, or into another module
+    Error: Cons can't be resolved here: the include at a.stag:2:0-39 comes before this point and may define it, but it is still being generated (its expression uses this code). Move this code before the include or into another module
     File "a.stag", line 2, characters 0-39:
     2 | include .~(value "x" (Stag.Expr.int 1))
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -641,11 +641,11 @@ module Q = .~(let _ = P.a in value "b" (Stag.Expr.int 2))
     File "a.stag", line 21, characters 22-25:
     21 | module Q = .~(let _ = P.a in value "b" (Stag.Expr.int 2))
                                ^^^
-    Error: A declaration splice depends on what it generates: P.a is looked up here among the declarations of the include at a.stag:19:2-56, which are being generated, as the include's expression uses this code. Code after an include (or outside its module) sees what it generates: move the code the include's expression uses before the include, or into another module
+    Error: Unbound value P.a
     File "a.stag", line 19, characters 2-56:
     19 |   include .~(let _ = Q.b in value "a" (Stag.Expr.int 1))
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Note: The declaration splice is here
+    Note: This include, still being generated because its expression uses this code, may define it: move this code before the include or into another module
     |}]
 ;;
 
@@ -798,10 +798,14 @@ module B = .~(value "b" (Stag.Expr.int A.a))
     );
   [%expect
     {|
-    File "a.stag", line 21, characters 39-42:
+    File "a.stag", line 19, characters 10-13:
+    19 |   let a = B.b
+                   ^^^
+    Error: A declaration splice depends on what it generates: B.b needs the declarations of the module A.B, which the splice at a.stag:21:0-44 is generating, as its expression uses this code
+    File "a.stag", line 21, characters 0-44:
     21 | module B = .~(value "b" (Stag.Expr.int A.a))
-                                                ^^^
-    Error: The toplevel A.A.a is used at compile time before it is fully checked (it is in the same recursive group as this splice)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: The declaration splice is here
     |}];
   (* An unqualified lookup searching the module of a pending include, from
      within its own generator. *)
@@ -1021,5 +1025,566 @@ let%expect_test "a file shadowing the prelude's Stag" =
     1 | let mine = 1
         ^
     Note: The program's module Stag is here
+    |}]
+;;
+
+(* [contents] as a.stag, with gen.stag's [Gen], printing A's signature. *)
+let check_with_gen contents =
+  let files =
+    [ { Source_file.path = "gen.stag"
+      ; contents =
+          {|let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+let module_ name decls = Cons (Stag.Toplevel.Module (name, decls), Nil)
+let call f args = Stag.Expr.apply (Stag.Expr.var f) args
+let include_value name e =
+  Stag.Toplevel.Include
+    (call "Gen.value" (Cons (Stag.Expr.string name, Cons (e, Nil))))
+let type_ name kind =
+  Cons (Stag.Toplevel.Type { `name = name; `params = Nil; `kind = kind }, Nil)
+|}
+      }
+    ; { Source_file.path = "a.stag"; contents }
+    ]
+  in
+  match Driver.check_files files with
+  | Ok driver ->
+    List.iter (Driver.checked driver).signature ~f:(function
+      | Module { name = "A"; _ } as item ->
+        print_string (Signature.to_string_hum [ item ])
+      | _ -> ())
+  | Error error ->
+    print_string
+      (Diagnostic.to_string_hum
+         ~contents:(fun path ->
+           List.find_map files ~f:(fun file ->
+             Option.some_if (String.equal file.path path) file.contents))
+         (Diagnostic.of_driver_error error))
+;;
+
+(* [G], generated by an include, has an include of its own: [before] doesn't
+   see the [x] it generates, [after] does. *)
+let generated_g =
+  {|include .~(Gen.module_ "G"
+  (Cons (Stag.Toplevel.let_ "before" Nil (Stag.Expr.var "x"),
+   Cons (Gen.include_value "x" (Gen.call "Stag.Expr.int" (Cons (Stag.Expr.int 5, Nil))),
+   Cons (Stag.Toplevel.let_ "after" Nil (Stag.Expr.var "x"), Nil)))))
+|}
+;;
+
+let%expect_test "before and after an include in a generated module" =
+  check_with_gen
+    ({|let x = "outer"
+|}
+     ^ generated_g
+     ^ {|let r = (G.before, G.after, G.x)
+|}
+    );
+  [%expect
+    {|
+    module A : sig
+      val x : string
+      module G : sig
+        val before : string
+        val x : int
+        val after : int
+      end
+      val r : string * int * int
+    end
+    |}];
+  (* Used before the include generating it. *)
+  check_with_gen
+    ({|let probe = G.after
+let x = "outer"
+|}
+     ^ generated_g);
+  [%expect
+    {|
+    File "a.stag", line 1, characters 12-13:
+    1 | let probe = G.after
+                    ^
+    Error: Unbound module G
+    File "a.stag", lines 3-6, characters 0-69:
+    3 | include .~(Gen.module_ "G"
+    4 |   (Cons (Stag.Toplevel.let_ "before" Nil (Stag.Expr.var "x"),
+    5 |    Cons (Gen.include_value "x" (Gen.call "Stag.Expr.int" (Cons (Stag.Expr.int 5, Nil))),
+    6 |    Cons (Stag.Toplevel.let_ "after" Nil (Stag.Expr.var "x"), Nil)))))
+    Note: This include generates it, but it is visible only after the include
+    |}];
+  (* The same, once the include has run. *)
+  check_with_gen
+    ({|let a = b
+let probe = G.after
+let x = "outer"
+|}
+     ^ generated_g
+     ^ {|let b = G.x
+|}
+    );
+  [%expect
+    {|
+    File "a.stag", line 2, characters 12-13:
+    2 | let probe = G.after
+                    ^
+    Error: Unbound module G
+    File "a.stag", lines 4-7, characters 0-69:
+    4 | include .~(Gen.module_ "G"
+    5 |   (Cons (Stag.Toplevel.let_ "before" Nil (Stag.Expr.var "x"),
+    6 |    Cons (Gen.include_value "x" (Gen.call "Stag.Expr.int" (Cons (Stag.Expr.int 5, Nil))),
+    7 |    Cons (Stag.Toplevel.let_ "after" Nil (Stag.Expr.var "x"), Nil)))))
+    Note: This include generates it, but it is visible only after the include
+    |}];
+  check_with_gen
+    {|let probe = y
+include .~(Gen.value "y" (Stag.Expr.int 1))
+|};
+  [%expect
+    {|
+    File "a.stag", line 1, characters 12-13:
+    1 | let probe = y
+                    ^
+    Error: Unbound value y
+    File "a.stag", line 2, characters 0-43:
+    2 | include .~(Gen.value "y" (Stag.Expr.int 1))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: This include generates it, but it is visible only after the include
+    |}];
+  (* In an enclosing module. *)
+  check_with_gen
+    {|module M = struct
+  let probe = y
+end
+include .~(Gen.value "y" (Stag.Expr.int 1))
+|};
+  [%expect
+    {|
+    File "a.stag", line 2, characters 14-15:
+    2 |   let probe = y
+                      ^
+    Error: Unbound value y
+    File "a.stag", line 4, characters 0-43:
+    4 | include .~(Gen.value "y" (Stag.Expr.int 1))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: This include generates it, but it is visible only after the include
+    |}]
+;;
+
+let%expect_test "includes in mutually dependent modules, in both orders" =
+  let modules =
+    {|module A = struct
+  include .~(Gen.value "a" (Stag.Expr.int B.k))
+  let k = 10
+  let use_b = B.b
+end
+module B = struct
+  include .~(Gen.value "b" (Stag.Expr.int A.k))
+  let k = 20
+  let use_a = A.a
+end
+|}
+  in
+  check_with_gen modules;
+  [%expect
+    {|
+    module A : sig
+      module A : sig
+        val a : int
+        val k : int
+        val use_b : int
+      end
+      module B : sig
+        val b : int
+        val k : int
+        val use_a : int
+      end
+    end
+    |}];
+  check_with_gen ("let probe = B.use_a\n" ^ modules);
+  [%expect
+    {|
+    module A : sig
+      val probe : int
+      module A : sig
+        val a : int
+        val k : int
+        val use_b : int
+      end
+      module B : sig
+        val b : int
+        val k : int
+        val use_a : int
+      end
+    end
+    |}]
+;;
+
+let%expect_test "a derive in a nested module, its generator written later" =
+  check_with_gen
+    {|type t = A | B
+include .~(Gen.value "show" (Stag.Expr.string "t"))
+include .~(Gen.value "eq" (Stag.Expr.var "show"))
+module N = struct
+  type u = C
+  include .~(derive "nshow")
+  let z = nshow
+end
+let derive name = Gen.value name (Stag.Expr.int 3)
+let r = (show, eq, N.z)
+|};
+  [%expect
+    {|
+    module A : sig
+      type t = A | B
+      val show : string
+      val eq : string
+      module N : sig
+        type u = C
+        val nshow : int
+        val z : int
+      end
+      val derive : string -> list[Stag.Toplevel.t]
+      val r : string * string * int
+    end
+    |}];
+  (* Modules and includes nested in one with includes. *)
+  check_with_gen
+    {|let first = N.x
+let x = "outer"
+module N = struct
+  module Inner = struct let f = x let t = (Inner2.h, 1) end
+  include .~(Gen.value "x" (Stag.Expr.int 1))
+  module Inner2 = struct let h = x end
+  include .~(Gen.module_ "Inner3" (Gen.value "q" (Stag.Expr.var "x")))
+  include .~(Gen.value "w" (Stag.Expr.var "Inner3.q"))
+end
+|};
+  [%expect
+    {|
+    module A : sig
+      val first : int
+      val x : string
+      module N : sig
+        module Inner : sig
+          val f : string
+          val t : int * int
+        end
+        val x : int
+        module Inner2 : sig
+          val h : int
+        end
+        module Inner3 : sig
+          val q : int
+        end
+        val w : int
+      end
+    end
+    |}];
+  check_with_gen
+    {|module N = struct
+  include .~(Gen.module_ "Sub" (Cons (Gen.include_value "k" (Gen.call "Stag.Expr.var" (Cons (Stag.Expr.string "outer_v", Nil))), Nil)))
+  let v = Sub.k
+end
+let outer_v = 1
+|};
+  [%expect
+    {|
+    module A : sig
+      module N : sig
+        module Sub : sig
+          val k : int
+        end
+        val v : int
+      end
+      val outer_v : int
+    end
+    |}]
+;;
+
+(* [f], used by the include's expression, looks past the include. *)
+let past_running_include f =
+  check_with_gen
+    (sprintf
+       {|module X = struct
+  include .~(Gen.value "a" (Stag.Expr.int (f 0)))
+  let f %s
+end
+|}
+       f)
+;;
+
+let%expect_test "names not found past a running include" =
+  past_running_include "n = zzz";
+  [%expect
+    {|
+    File "a.stag", line 3, characters 12-15:
+    3 |   let f n = zzz
+                    ^^^
+    Error: Unbound value zzz
+    File "a.stag", line 2, characters 2-49:
+    2 |   include .~(Gen.value "a" (Stag.Expr.int (f 0)))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: This include, still being generated because its expression uses this code, may define it: move this code before the include or into another module
+    |}];
+  past_running_include "n = Q.zzz";
+  [%expect
+    {|
+    File "a.stag", line 3, characters 12-13:
+    3 |   let f n = Q.zzz
+                    ^
+    Error: Unbound module Q
+    File "a.stag", line 2, characters 2-49:
+    2 |   include .~(Gen.value "a" (Stag.Expr.int (f 0)))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: This include, still being generated because its expression uses this code, may define it: move this code before the include or into another module
+    |}];
+  past_running_include "n = Int.nope";
+  [%expect
+    {|
+    File "a.stag", line 3, characters 12-20:
+    3 |   let f n = Int.nope
+                    ^^^^^^^^
+    Error: Unbound value Int.nope
+    File "a.stag", line 2, characters 2-49:
+    2 |   include .~(Gen.value "a" (Stag.Expr.int (f 0)))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: This include, still being generated because its expression uses this code, may define it: move this code before the include or into another module
+    |}];
+  past_running_include "(n : nope) = 1";
+  [%expect
+    {|
+    File "a.stag", line 3, characters 13-17:
+    3 |   let f (n : nope) = 1
+                     ^^^^
+    Error: Unbound type nope
+    File "a.stag", line 2, characters 2-49:
+    2 |   include .~(Gen.value "a" (Stag.Expr.int (f 0)))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: This include, still being generated because its expression uses this code, may define it: move this code before the include or into another module
+    |}];
+  (* Found further out, as a prim. *)
+  past_running_include "n = Int.add n 1";
+  [%expect
+    {|
+    File "a.stag", line 3, characters 12-19:
+    3 |   let f n = Int.add n 1
+                    ^^^^^^^
+    Error: Int.add can't be resolved here: the include at a.stag:2:2-49 comes before this point and may define it, but it is still being generated (its expression uses this code). Move this code before the include or into another module
+    File "a.stag", line 2, characters 2-49:
+    2 |   include .~(Gen.value "a" (Stag.Expr.int (f 0)))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: The declaration splice is here
+    |}];
+  (* Even when it does define it. *)
+  check_with_gen
+    {|module X = struct
+  include .~(Gen.value "zzz" (Stag.Expr.int (f 0)))
+  let f n = zzz
+end
+|};
+  [%expect
+    {|
+    File "a.stag", line 3, characters 12-15:
+    3 |   let f n = zzz
+                    ^^^
+    Error: Unbound value zzz
+    File "a.stag", line 2, characters 2-51:
+    2 |   include .~(Gen.value "zzz" (Stag.Expr.int (f 0)))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: This include, still being generated because its expression uses this code, may define it: move this code before the include or into another module
+    |}];
+  (* A path into a module with a running include. *)
+  check_with_gen
+    {|module N = struct
+  include .~(Gen.value "a" (Stag.Expr.int A.N.zzz))
+end
+|};
+  [%expect
+    {|
+    File "a.stag", line 2, characters 42-49:
+    2 |   include .~(Gen.value "a" (Stag.Expr.int A.N.zzz))
+                                                  ^^^^^^^
+    Error: Unbound value A.N.zzz
+    File "a.stag", line 2, characters 2-51:
+    2 |   include .~(Gen.value "a" (Stag.Expr.int A.N.zzz))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: This include, still being generated because its expression uses this code, may define it: move this code before the include or into another module
+    |}]
+;;
+
+let%expect_test "an include using a toplevel being checked, in both orders" =
+  let x =
+    {|module X = struct
+  include .~(Gen.value "a" (Stag.Expr.int (f 0)))
+  let f n = Int.add n y
+end
+|}
+  in
+  check_with_gen ("let y = 1\n" ^ x);
+  [%expect
+    {|
+    File "a.stag", line 4, characters 12-19:
+    4 |   let f n = Int.add n y
+                    ^^^^^^^
+    Error: Int.add can't be resolved here: the include at a.stag:3:2-49 comes before this point and may define it, but it is still being generated (its expression uses this code). Move this code before the include or into another module
+    File "a.stag", line 3, characters 2-49:
+    3 |   include .~(Gen.value "a" (Stag.Expr.int (f 0)))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: The declaration splice is here
+    |}];
+  check_with_gen ("let first = X.f\nlet y = 1\n" ^ x);
+  [%expect
+    {|
+    File "a.stag", line 5, characters 12-19:
+    5 |   let f n = Int.add n y
+                    ^^^^^^^
+    Error: Int.add can't be resolved here: the include at a.stag:4:2-49 comes before this point and may define it, but it is still being generated (its expression uses this code). Move this code before the include or into another module
+    File "a.stag", line 4, characters 2-49:
+    4 |   include .~(Gen.value "a" (Stag.Expr.int (f 0)))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: The declaration splice is here
+    |}];
+  let x =
+    {|module X = struct
+  include .~(Gen.value "zzz" (Stag.Expr.int (f 0)))
+  let f n = zzz
+end
+|}
+  in
+  check_with_gen x;
+  [%expect
+    {|
+    File "a.stag", line 3, characters 12-15:
+    3 |   let f n = zzz
+                    ^^^
+    Error: Unbound value zzz
+    File "a.stag", line 2, characters 2-51:
+    2 |   include .~(Gen.value "zzz" (Stag.Expr.int (f 0)))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: This include, still being generated because its expression uses this code, may define it: move this code before the include or into another module
+    |}];
+  check_with_gen ("let g = X.f\n" ^ x);
+  [%expect
+    {|
+    File "a.stag", line 4, characters 12-15:
+    4 |   let f n = zzz
+                    ^^^
+    Error: Unbound value zzz
+    File "a.stag", line 3, characters 2-51:
+    3 |   include .~(Gen.value "zzz" (Stag.Expr.int (f 0)))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: This include, still being generated because its expression uses this code, may define it: move this code before the include or into another module
+    |}]
+;;
+
+let%expect_test "prelude names in messages, with generated shadowing types" =
+  let m =
+    {|module M = .~(Cons (Stag.Toplevel.Type {`name = "option"; `params = Nil; `kind = Stag.Type_decl.Kind.Abstract}, Gen.value "x" (Stag.Expr.int 1)))
+|}
+  in
+  check_with_gen ("let bad : option[int] = 1\n" ^ m);
+  [%expect
+    {|
+    File "a.stag", line 1, characters 24-25:
+    1 | let bad : option[int] = 1
+                                ^
+    Error: This expression has type int but an expression was expected of type option[int]
+    |}];
+  check_with_gen ("let m = M.x\nlet bad : option[int] = 1\n" ^ m);
+  [%expect
+    {|
+    File "a.stag", line 2, characters 24-25:
+    2 | let bad : option[int] = 1
+                                ^
+    Error: This expression has type int but an expression was expected of type option[int]
+    |}];
+  (* In the module generated. *)
+  check_with_gen
+    {|module M = .~(Cons (Stag.Toplevel.Type {`name = "option"; `params = Nil; `kind = Stag.Type_decl.Kind.Abstract}, Gen.value "x" (Gen.call "Int.add" (Cons (Stag.Expr.Construct ("None", Nil), Nil)))))
+|};
+  [%expect
+    {|
+    File "a.stag", line 1, characters 0-196:
+    1 | module M = .~(Cons (Stag.Toplevel.Type {`name = "option"; `params = Nil; `kind = Stag.Type_decl.Kind.Abstract}, Gen.value "x" (Gen.call "Int.add" (Cons (Stag.Expr.Construct ("None", Nil), Nil)))))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: In the declaration `let x` generated by this splice: This expression has type prelude.option['_a] but an expression was expected of type int
+    Note: The generated declaration is (Let x () () (App (Var Int.add ()) (Construct None ())))
+    |}];
+  (* By an include: not counted, whether or not it was run. *)
+  check_with_gen
+    {|include .~(Gen.type_ "option" Stag.Type_decl.Kind.Abstract)
+let bad : int = Some 1
+|};
+  [%expect
+    {|
+    File "a.stag", line 2, characters 16-22:
+    2 | let bad : int = Some 1
+                        ^^^^^^
+    Error: This expression has type option[int] but an expression was expected of type int
+    |}];
+  check_with_gen
+    {|let bad : int = Some 1
+include .~(Gen.type_ "option" Stag.Type_decl.Kind.Abstract)
+|};
+  [%expect
+    {|
+    File "a.stag", line 1, characters 16-22:
+    1 | let bad : int = Some 1
+                        ^^^^^^
+    Error: This expression has type option[int] but an expression was expected of type int
+    |}]
+;;
+
+let%expect_test "a nested module shadowing a prelude type or module" =
+  check_with_gen
+    {|module N = struct
+  type list = L
+  let bad : int = Cons (1, Nil)
+end
+let also_bad : int = Cons (1, Nil)
+|};
+  [%expect
+    {|
+    File "a.stag", line 3, characters 18-31:
+    3 |   let bad : int = Cons (1, Nil)
+                          ^^^^^^^^^^^^^
+    Error: This expression has type prelude.list[int] but an expression was expected of type int
+    |}];
+  check_with_gen
+    {|let bad : int = Cons (1, Nil)
+module N = struct
+  type list = L
+end
+|};
+  [%expect
+    {|
+    File "a.stag", line 1, characters 16-29:
+    1 | let bad : int = Cons (1, Nil)
+                        ^^^^^^^^^^^^^
+    Error: This expression has type list[int] but an expression was expected of type int
+    |}];
+  check_with_gen
+    {|module N = struct
+  module Stag = struct end
+  let bad : int = Gen.call "f" Nil
+end
+|};
+  [%expect
+    {|
+    File "a.stag", line 3, characters 18-34:
+    3 |   let bad : int = Gen.call "f" Nil
+                          ^^^^^^^^^^^^^^^^
+    Error: This expression has type prelude.Stag.Expr.t but an expression was expected of type int
+    |}];
+  check_with_gen
+    {|module N = struct
+  module Stag = struct end
+  let bad : int = Some 1
+end
+|};
+  [%expect
+    {|
+    File "a.stag", line 3, characters 18-24:
+    3 |   let bad : int = Some 1
+                          ^^^^^^
+    Error: This expression has type option[int] but an expression was expected of type int
     |}]
 ;;

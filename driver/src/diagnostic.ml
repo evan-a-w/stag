@@ -57,6 +57,23 @@ let of_typecheck_error (error : Typecheck_error.t) =
       ]
     | Declaration_splice_cycle { splice; name = _; module_ = _ } ->
       [ { Note.loc = splice; message = "The declaration splice is here" } ]
+    | Generated_after_include { error; include_ } ->
+      notes error
+      @ [ { Note.loc = include_
+          ; message =
+              "This include generates it, but it is visible only after the \
+               include"
+          }
+        ]
+    | Maybe_generated_by_running_include { error; include_ } ->
+      notes error
+      @ [ { Note.loc = include_
+          ; message =
+              "This include, still being generated because its expression uses \
+               this code, may define it: move this code before the include or \
+               into another module"
+          }
+        ]
     | Shadowed_prelude_module { error; module_; shadowed_by } ->
       notes error
       @ [ { Note.loc = shadowed_by
