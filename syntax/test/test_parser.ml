@@ -1073,3 +1073,49 @@ let%expect_test "types as values" =
     t.stag:1:10-13: type arguments are written after the name, in brackets: `list[int]`
     |}]
 ;;
+
+let%expect_test "inline expansions" =
+  prog
+    {|
+include%inline .~(gen (type t))
+  type t = A
+  let x = 1
+end%inline
+module%inline M = .~e end%inline
+|};
+  [%expect
+    {|
+    ((Include (App (Var gen ()) (Type (Con t ())))
+      (((Type ((name t) (params ()) (kind (Variant ((A ()))))))
+        (Let x () () (Lit (Int 1))))))
+     (Module_splice M (Var e ()) (())))
+    |}];
+  List.iter
+    [ "include%inline x end%inline"
+    ; "module%inline M = struct end"
+    ; "include%inline .~e let x = 1"
+    ; "include%inline .~e end"
+    ; "end%inline"
+    ; "include .~e end%inline"
+    ; "module%inline M = .~e end%inline end%inline"
+    ]
+    ~f:prog;
+  [%expect
+    {|
+    t.stag:1:15-16: expected a declaration splice `.~e` after `include%inline`, found `x`
+    t.stag:1:18-24: expected a declaration splice `.~e` after `module%inline M =`, found `struct`
+    t.stag:1:28-28: expected `end%inline` to close this `include%inline` (opened at 1:0), found end of file
+    t.stag:1:19-22: expected a declaration (`let`, `type`, `exception`, `module` or `include`), found `end`
+    t.stag:1:0-10: expected a declaration (`let`, `type`, `exception`, `module` or `include`), found `end%inline`
+    t.stag:1:12-22: expected a declaration (`let`, `type`, `exception`, `module` or `include`), found `end%inline`
+    t.stag:1:33-43: expected a declaration (`let`, `type`, `exception`, `module` or `include`), found `end%inline`
+    |}]
+;;
+
+let%expect_test "an expansion spans from the splice to [end%inline]" =
+  (match Parser.program ~file "include%inline .~e\n  let x = 1\nend%inline" with
+   | Ok [ { txt = Include (_, Some expansion); _ } ] ->
+     print_endline (Loc.to_string expansion.loc)
+   | _ -> print_endline "unexpected");
+  [%expect {| t.stag:1:18-3:0 |}]
+;;

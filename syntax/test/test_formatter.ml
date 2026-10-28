@@ -700,3 +700,49 @@ let v = (0
     let v = 0 (* f *)
     |}]
 ;;
+
+let%expect_test "inline expansions" =
+  test
+    {|
+include%inline .~(gen (type t))
+(* first *)
+type t = A
+      let x =   1 (* trailing *)
+  (* last *)
+end%inline
+module M = struct
+  module%inline N = .~e
+      let x = 1
+
+
+      (* before y *)
+      let y = 2
+    (* before the end *)
+  end%inline
+  include%inline .~e   end%inline
+end
+|};
+  [%expect
+    {|
+    include%inline .~(gen (type t))
+      (* first *)
+      type t = A
+
+      let x = 1 (* trailing *)
+      (* last *)
+    end%inline
+
+    module M = struct
+      module%inline N = .~e
+        let x = 1
+
+        (* before y *)
+        let y = 2
+        (* before the end *)
+      end%inline
+
+      include%inline .~e
+      end%inline
+    end
+    |}]
+;;
