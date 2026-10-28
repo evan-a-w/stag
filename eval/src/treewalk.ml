@@ -72,20 +72,6 @@ let captures t ~ident ~args ~body =
       && level ident <= closure_level
     then Hash_set.add captures ident
   in
-  let rec def_pattern ({ desc; _ } : Typed.Pattern.t) =
-    match desc with
-    | Any | Lit _ | Poly_variant (_, None) -> ()
-    | Var ident -> def ident
-    | Tuple patterns | Construct (_, patterns) ->
-      List.iter patterns ~f:def_pattern
-    | Record fields -> List.iter fields ~f:(fun (_, p) -> def_pattern p)
-    | Poly_variant (_, Some pattern) -> def_pattern pattern
-    | Poly_record { fields; rest } ->
-      List.iter fields ~f:(fun (_, p) -> def_pattern p);
-      (match rest with
-       | Closed | Open -> ()
-       | Bind ident -> def ident)
-  in
   let rec go ~depth ({ desc; _ } : Typed.Expr.t) =
     match desc with
     | Lit _
@@ -114,7 +100,7 @@ let captures t ~ident ~args ~body =
     | Match { scrutinee; cases; exception_cases } ->
       go ~depth scrutinee;
       List.iter (cases @ exception_cases) ~f:(fun (pattern, body) ->
-        def_pattern pattern;
+        List.iter (Typed.Pattern.idents pattern) ~f:def;
         go ~depth body)
     | Quote expr -> go ~depth:(depth + 1) expr
     | Field (expr, _)
