@@ -466,6 +466,65 @@ rather than at the splice. Splices within an expansion don't run. Generated
 splices have no expansion. Formatting formats the expansion, keeping its
 comments.
 
+### Struct quotes
+
+A struct quote is sugar for building declarations as data:
+
+```ocaml
+let make names body : list[Stag.Toplevel.t] =
+  .< struct
+    type t = .~(variants names)
+    let f (x : .~ty) = .~body
+    include .~(more names)
+  end >.
+```
+
+Its declarations are untyped syntax, exactly the `list[Stag.Toplevel.t]` that
+the `Stag` constructors would build: nothing in them is checked or resolved
+where the quote is written, but where it is spliced (`include .~e`,
+`module M = .~e`). So a name in it is a `Stag.Path.Name`, resolved at the
+splice like those of any generated syntax, and a root path `.M.x` stays one
+(naming the same declaration wherever it is spliced). To refer to a
+declaration of the generator's own scope whatever is in scope at the splice,
+embed erased code, `.~(Stag.Code.erase <..>)`, whose references are refs.
+
+An antiquote `.~e` outside any quote within it is evaluated when the quote is,
+and spliced in according to its position:
+
+- `include .~e` and `module M = .~e`: `e : list[Stag.Toplevel.t]`, its
+  declarations in place (or as `M`'s);
+- a type: `e : Stag.Type_expr.t`;
+- a type declaration's definition, `type t[...] = .~e`:
+  `e : Stag.Type_decl.Kind.t`;
+- an expression: `e : Stag.Expr.t` (an antiquote with substitutions,
+  `.~e.{x}`, is an error).
+
+A quote or struct quote within a struct quote is quoted with it, a splice
+within that unquoting back into it, as for nested expression quotes: in
+`.< struct let q = .< .~x >. end >.`, `.~x` is part of the generated syntax.
+An `include%inline` in a struct quote is an error (generated declarations have
+no expansions). A struct quote is a `Stag.Expr.Struct_quote` as data, and type
+and definition antiquotes are `Stag.Type_expr.Splice` and
+`Stag.Type_decl.Kind.Splice`.
+
+### Type splices
+
+Outside quotes, `.~e` may stand for a type, `e : Stag.Type_expr.t`, or for a
+type declaration's definition, `e : Stag.Type_decl.Kind.t`, evaluated at
+compile time:
+
+```ocaml
+type point = .~(Gen.record ["x"; "y"])
+let origin : .~(Gen.ty "point") = {x = 0; y = 0}
+let n = (f x : .~(Stag.Type_expr.con "int" []))
+```
+
+A declaration holding type splices is the include of a struct quote of it:
+`type point = .~e` is `include .~(.< struct type point = .~e end >.)`, so its
+splices see what an include there would, and an error in the generated
+declaration is reported at it with a note printing it. A type splice within
+a quote is an error, as quoted code's types are fixed where it is checked.
+
 ## Reflection
 
 Types are values, for deriving: `type τ` has type `Stag.Type.t[τ]`, where `τ`
@@ -647,15 +706,8 @@ the others still run.
 
 ### Declaration splices
 
-Quotes of declarations are sugar for building these values, with antiquotes
-in item, type and expression positions:
-
-```ocaml
-.< struct type t = .~(variants names) let f x = .~body end >.  (* list[Stag.Toplevel.t] *)
-```
-
 Typed declaration quotes (code types of signatures, `<sig ... end>{ctx}`) and
-`let module` may come later, beside these.
+`let module` may come later, beside struct quotes.
 
 ### Modes
 
