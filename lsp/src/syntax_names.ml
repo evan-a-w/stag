@@ -33,7 +33,7 @@ let decl_path : Syntax.Decl_path.t -> string list option = function
 
 type add = ?declaration:bool -> kind:Kind.t -> loc:Loc.t -> string list -> unit
 
-let of_toplevels ~module_path toplevels =
+let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
   let occurrences = Queue.create () in
   let add ?(declaration = false) ~module_path ~kind ~loc path =
     if not (Loc.is_none loc)
@@ -74,16 +74,25 @@ let of_toplevels ~module_path toplevels =
     | Module (module_name, toplevels) ->
       name ~declaration:true Module module_name;
       walk_toplevels ~module_path:(module_path @ [ module_name.txt ]) toplevels
-    | Module_splice (module_name, body, _) ->
+    | Module_splice (module_name, body, expansion) ->
       name ~declaration:true Module module_name;
-      expr body
-    | Include (body, _) -> expr body
+      expr body;
+      expansion_toplevels
+        ~module_path:(module_path @ [ module_name.txt ])
+        expansion
+    | Include (body, expansion) ->
+      expr body;
+      expansion_toplevels ~module_path expansion
     | Expect_test { name = _; body } -> expr body
     | Bench { name = _; param; body } ->
       Option.iter param ~f:(fun { name = param; args } ->
         name ~declaration:true Kind.Parameter param;
         List.iter args ~f:expr);
       expr body
+  and expansion_toplevels ~module_path = function
+    | Some (expansion : Syntax.Toplevel.t list Located.t)
+      when walk_expansion expansion -> walk_toplevels ~module_path expansion.txt
+    | Some _ | None -> ()
   and let_ ~(add : add) ~type_expr (binder : Syntax.Name.t) bindings annot body =
     let is_function =
       (not (List.is_empty bindings))

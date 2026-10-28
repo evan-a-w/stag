@@ -7,7 +7,11 @@ open! Import
 type t
 
 (** [groups] are the program's modules, as checked into [program]. *)
-val create : groups:Driver.Module_group.t list -> program:Typed.Program.t -> t
+val create
+  :  groups:Driver.Module_group.t list
+  -> program:Typed.Program.t
+  -> expansions:Expansion.t list
+  -> t
 
 module Hover : sig
   type t =

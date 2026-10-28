@@ -33,8 +33,10 @@ module Occurrence : sig
 end
 
 (** The occurrences in [toplevels], within the module [module_path], in no
-    particular order. *)
+    particular order, and in the inline expansions [walk_expansion] accepts
+    (by default, all). *)
 val of_toplevels
-  :  module_path:string list
+  :  ?walk_expansion:(Syntax.Toplevel.t list Located.t -> bool)
+  -> module_path:string list
   -> Syntax.Toplevel.t list
   -> Occurrence.t list
