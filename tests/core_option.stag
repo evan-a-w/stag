@@ -1,0 +1,202 @@
+(* [Core.Option] and [Core.Result], printed as sexps. *)
+
+let print_sexp t = print_endline (Core.Sexp.to_string t)
+let print_int_option o = print_sexp (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_int o)
+let print_bool b = print_endline (Core.Bool.to_string b)
+let is_even n = Core.Int.equal (Core.Int.rem n 2) 0
+let double n = Core.Int.mul n 2
+
+let half n =
+  match is_even n with
+  | true -> Some (Core.Int.div n 2)
+  | false -> None
+
+let%expect_test "Option: some, is_some, is_none, value" =
+  print_int_option (Core.Option.some 1);
+  print_bool (Core.Option.is_some (Some 1));
+  print_bool (Core.Option.is_some None);
+  print_bool (Core.Option.is_none (Some 1));
+  print_bool (Core.Option.is_none None);
+  print_int (Core.Option.value (Some 1) 0);
+  print_int (Core.Option.value None 0);
+  [%expect {|
+    (1)
+    true
+    false
+    false
+    true
+    10
+    |}]
+
+let%expect_test "Option: map, bind, join, filter" =
+  print_int_option (Core.Option.map double (Some 2));
+  print_int_option (Core.Option.map double None);
+  print_int_option (Core.Option.bind (Some 4) half);
+  print_int_option (Core.Option.bind (Some 3) half);
+  print_int_option (Core.Option.bind None half);
+  print_int_option (Core.Option.join (Some (Some 1)));
+  print_int_option (Core.Option.join (Some None));
+  print_int_option (Core.Option.join None);
+  print_int_option (Core.Option.filter is_even (Some 2));
+  print_int_option (Core.Option.filter is_even (Some 3));
+  print_int_option (Core.Option.filter is_even None);
+  [%expect {|
+    (4)
+    ()
+    (2)
+    ()
+    ()
+    (1)
+    ()
+    ()
+    (2)
+    ()
+    ()
+    |}]
+
+let%expect_test "Option: iter, fold, exists, for_all" =
+  Core.Option.iter print_int (Some 1);
+  Core.Option.iter print_int None;
+  print_endline "";
+  print_int (Core.Option.fold Core.Int.add 10 (Some 1));
+  print_char ' ';
+  print_int (Core.Option.fold Core.Int.add 10 None);
+  print_endline "";
+  print_bool (Core.Option.exists is_even (Some 2));
+  print_bool (Core.Option.exists is_even (Some 3));
+  print_bool (Core.Option.exists is_even None);
+  print_bool (Core.Option.for_all is_even (Some 2));
+  print_bool (Core.Option.for_all is_even (Some 3));
+  print_bool (Core.Option.for_all is_even None);
+  [%expect {|
+    1
+    11 10
+    true
+    false
+    false
+    true
+    false
+    true
+    |}]
+
+let%expect_test "Option: first_some, both, to_list, equal" =
+  print_int_option (Core.Option.first_some (Some 1) (Some 2));
+  print_int_option (Core.Option.first_some None (Some 2));
+  print_int_option (Core.Option.first_some None None);
+  let print_pair_option o =
+    print_sexp
+      (Core.Sexp.sexp_of_option
+         (Core.Sexp.sexp_of_pair Core.Sexp.sexp_of_int Core.Sexp.sexp_of_string)
+         o)
+  in
+  print_pair_option (Core.Option.both (Some 1) (Some "a"));
+  print_pair_option (Core.Option.both None (Some "a"));
+  print_pair_option (Core.Option.both (Some 1) None);
+  print_sexp (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.Option.to_list (Some 1)));
+  print_sexp (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.Option.to_list None));
+  print_bool (Core.Option.equal Core.Int.equal (Some 1) (Some 1));
+  print_bool (Core.Option.equal Core.Int.equal (Some 1) (Some 2));
+  print_bool (Core.Option.equal Core.Int.equal (Some 1) None);
+  print_bool (Core.Option.equal Core.Int.equal None None);
+  [%expect {|
+    (1)
+    (2)
+    ()
+    ((1 a))
+    ()
+    ()
+    (1)
+    ()
+    true
+    false
+    false
+    true
+    |}]
+
+let print_result r =
+  print_sexp
+    (Core.Sexp.sexp_of_result Core.Sexp.sexp_of_int Core.Sexp.sexp_of_string r)
+
+let half_or_error n =
+  match half n with
+  | Some h -> Ok h
+  | None -> Error (Core.String.append "odd: " (Core.Int.to_string n))
+
+let%expect_test "Result: is_ok, is_error, ok, error, of_option" =
+  print_bool (Core.Result.is_ok (Ok 1));
+  print_bool (Core.Result.is_ok (Error "e"));
+  print_bool (Core.Result.is_error (Ok 1));
+  print_bool (Core.Result.is_error (Error "e"));
+  print_int_option (Core.Result.ok (Ok 1));
+  print_int_option (Core.Result.ok (Error "e"));
+  let print_string_option o =
+    print_sexp (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_string o)
+  in
+  print_string_option (Core.Result.error (Ok 1));
+  print_string_option (Core.Result.error (Error "e"));
+  print_result (Core.Result.of_option (Some 1) "none");
+  print_result (Core.Result.of_option None "none");
+  [%expect {|
+    true
+    false
+    false
+    true
+    (1)
+    ()
+    ()
+    (e)
+    (Ok 1)
+    (Error none)
+    |}]
+
+let%expect_test "Result: map, map_error, bind, join, iter" =
+  print_result (Core.Result.map double (Ok 2));
+  print_result (Core.Result.map double (Error "e"));
+  print_result (Core.Result.map_error Core.String.escaped (Ok 2));
+  print_result (Core.Result.map_error (Core.String.append "more ") (Error "e"));
+  print_result (Core.Result.bind (Ok 4) half_or_error);
+  print_result (Core.Result.bind (Ok 3) half_or_error);
+  print_result (Core.Result.bind (Error "e") half_or_error);
+  print_result (Core.Result.join (Ok (Ok 1)));
+  print_result (Core.Result.join (Ok (Error "inner")));
+  print_result (Core.Result.join (Error "outer"));
+  Core.Result.iter print_int (Ok 1);
+  Core.Result.iter print_int (Error "e");
+  [%expect {|
+    (Ok 4)
+    (Error e)
+    (Ok 2)
+    (Error "more e")
+    (Ok 2)
+    (Error "odd: 3")
+    (Error e)
+    (Ok 1)
+    (Error inner)
+    (Error outer)
+    1
+    |}]
+
+let%expect_test "Result: all, equal" =
+  let print_results r =
+    print_sexp
+      (Core.Sexp.sexp_of_result
+         (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int)
+         Core.Sexp.sexp_of_string r)
+  in
+  print_results (Core.Result.all (Cons (Ok 1, Cons (Ok 2, Nil))));
+  print_results (Core.Result.all Nil);
+  print_results
+    (Core.Result.all (Cons (Ok 1, Cons (Error "first", Cons (Error "second", Nil)))));
+  print_bool (Core.Result.equal Core.Int.equal Core.String.equal (Ok 1) (Ok 1));
+  print_bool (Core.Result.equal Core.Int.equal Core.String.equal (Ok 1) (Ok 2));
+  print_bool (Core.Result.equal Core.Int.equal Core.String.equal (Error "a") (Error "a"));
+  print_bool (Core.Result.equal Core.Int.equal Core.String.equal (Ok 1) (Error "a"));
+  [%expect {|
+    (Ok (1 2))
+    (Ok ())
+    (Error first)
+    true
+    false
+    true
+    false
+    |}]

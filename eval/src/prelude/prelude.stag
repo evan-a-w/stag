@@ -3,6 +3,7 @@
 
 type list['a] = Nil | Cons of 'a * list['a]
 type option['a] = None | Some of 'a
+type result['a, 'e] = Ok of 'a | Error of 'e
 
 module Stag = struct
   (* The syntax of stag as data, mirroring [Syntax], for declarations generated

@@ -2,7 +2,7 @@
  (name stag_eval)
  (preprocess
   (pps ppx_jane))
- (libraries core stag_common stag_types stag_syntax stag_ir))
+ (libraries core stag_common stag_types stag_syntax stag_ir stag_core_source))
 
 (rule
  (target prelude_source.ml)
@@ -10,3 +10,4 @@
   (with-stdout-to
    %{target}
    (run %{exe:../embed/embed.exe} %{dep:prelude/prelude.stag}))))
+

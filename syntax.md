@@ -173,7 +173,9 @@ prims:
 ```ocaml
 type list['a] = Nil | Cons of 'a * list['a]
 type option['a] = None | Some of 'a
+type result['a, 'e] = Ok of 'a | Error of 'e
 module Stag = struct ... end      (* the syntax as data, see below *)
+module Core = struct ... end      (* the core library, see below *)
 ```
 
 Its toplevels are checked only when used. Its names have no syntax of their
@@ -185,6 +187,41 @@ locations are in the file `<prelude>`. In a message, a prelude type or module
 is shadowed if a type or module of its name is declared in a module enclosing
 the error, other than by an include (so that it does not depend on which includes
 checking had run when it stopped); a spliced module's declarations count.
+
+## Core library
+
+The prelude's module `Core` is a small standard library in the style of Base,
+written in stag in the top-level directory `core/`: each file is a submodule
+named after it (`core/list.stag` is `Core.List`), and the files refer to each
+other as siblings (`List.map` within `core/` is `Core.List.map`). Like the rest
+of the prelude it is checked only when used, so a program that does not use it
+is unaffected, and a program's (or stag-build library's) own `Core` shadows
+it. Its locations are in the files `<core>/list.stag` etc.
+
+- `Core.List`, `Core.Option`, `Core.Result`: the usual combinators on the
+  prelude's types (`map`, `fold_left`, `filter_map`, `find`, `zip`, `assoc`, a
+  stable `sort`, `Option.value`, `Result.bind`, `Result.all`, ...). Partial
+  functions return options (`List.hd`, `List.nth`, `Int.of_string_opt`).
+- `Core.Int`, `Core.Char`, `Core.Bool`, `Core.String`: the prims of their
+  name, re-exported, and helpers on them (`String.concat sep parts`,
+  `split_on_char`, `strip`, `escaped`, `Char.is_digit`, ...).
+- `Core.Sexp`: `type t = Atom of string | List of list[t]`, printed and parsed
+  as by OCaml's Sexplib. `to_string` quotes and escapes atoms only when needed
+  (`(a "b c" (d))`); `to_string_hum` puts each element of a list on its own
+  line when it does not fit in 80 columns. `of_string` (and `of_string_many`)
+  read the same syntax: `;` line comments, quoted atoms with OCaml's escapes
+  and `\`-newline continuations (block `#| |#` and sexp `#;` comments are not
+  supported); they return `result[t, Parse_error.t]`, a message with the
+  offset, line (from 1) and column (from 0) of the error.
+- Conversions for derived code: `sexp_of_X` and `X_of_sexp` for `unit`,
+  `bool`, `int`, `char`, `string`, `list`, `option`, `result` and pairs and
+  triples (`sexp_of_pair`, `triple_of_sexp`), the container ones taking those
+  of their elements. Stag has no exceptions, so `X_of_sexp` returns
+  `result[X, Of_sexp_error.t]`: a message and the sexp that failed, which for
+  containers is the innermost failing element.
+
+Since a file of `core/` shadows the prims of its name (`Core.String` hides
+`String.length`), the prelude alone can name prims as `Intrinsic.String.length`.
 
 ## Declaration splices
 

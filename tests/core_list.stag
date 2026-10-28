@@ -1,0 +1,255 @@
+(* [Core.List], its lists written and printed as sexps. *)
+
+let ints s =
+  match Core.Sexp.of_string s with
+  | Ok t -> (
+    match Core.Sexp.list_of_sexp Core.Sexp.int_of_sexp t with
+    | Ok l -> l
+    | Error _ -> Nil)
+  | Error _ -> Nil
+
+let sexp_of_ints l = Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int l
+let print_sexp t = print_endline (Core.Sexp.to_string t)
+let print_ints l = print_sexp (sexp_of_ints l)
+let print_int_option o = print_sexp (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_int o)
+let print_bool b = print_endline (Core.Bool.to_string b)
+let is_even n = Core.Int.equal (Core.Int.rem n 2) 0
+let double n = Core.Int.mul n 2
+
+let%expect_test "length, is_empty, hd, tl, last, nth" =
+  print_endline (Core.Int.to_string (Core.List.length (ints "()")));
+  print_endline (Core.Int.to_string (Core.List.length (ints "(1 2 3)")));
+  print_bool (Core.List.is_empty (ints "()"));
+  print_bool (Core.List.is_empty (ints "(1)"));
+  print_int_option (Core.List.hd (ints "(1 2 3)"));
+  print_int_option (Core.List.hd (ints "()"));
+  print_sexp
+    (Core.Sexp.sexp_of_option sexp_of_ints (Core.List.tl (ints "(1 2 3)")));
+  print_sexp (Core.Sexp.sexp_of_option sexp_of_ints (Core.List.tl (ints "()")));
+  print_int_option (Core.List.last (ints "(1 2 3)"));
+  print_int_option (Core.List.last (ints "()"));
+  print_int_option (Core.List.nth (ints "(10 11 12)") 0);
+  print_int_option (Core.List.nth (ints "(10 11 12)") 2);
+  print_int_option (Core.List.nth (ints "(10 11 12)") 3);
+  print_int_option (Core.List.nth (ints "(10 11 12)") -1);
+  [%expect {|
+    0
+    3
+    true
+    false
+    (1)
+    ()
+    ((2 3))
+    ()
+    (3)
+    ()
+    (10)
+    (12)
+    ()
+    ()
+    |}]
+
+let%expect_test "init, rev, rev_append, append, concat" =
+  print_ints (Core.List.init 5 double);
+  print_ints (Core.List.init 0 double);
+  print_ints (Core.List.init -1 double);
+  print_ints (Core.List.rev (ints "(1 2 3)"));
+  print_ints (Core.List.rev_append (ints "(1 2 3)") (ints "(4 5)"));
+  print_ints (Core.List.append (ints "(1 2 3)") (ints "(4 5)"));
+  print_ints (Core.List.append (ints "()") (ints "(4 5)"));
+  print_ints (Core.List.append (ints "(1)") (ints "()"));
+  print_ints
+    (Core.List.concat
+       (Cons (ints "(1 2)", Cons (ints "()", Cons (ints "(3)", Nil)))));
+  [%expect {|
+    (0 2 4 6 8)
+    ()
+    ()
+    (3 2 1)
+    (3 2 1 4 5)
+    (1 2 3 4 5)
+    (4 5)
+    (1)
+    (1 2 3)
+    |}]
+
+let%expect_test "map, mapi, iter, iteri" =
+  print_ints (Core.List.map double (ints "(1 2 3)"));
+  print_ints (Core.List.mapi Core.Int.mul (ints "(5 5 5)"));
+  let print_item n =
+    print_int n;
+    print_char ' '
+  in
+  Core.List.iter print_item (ints "(1 2 3)");
+  print_endline "";
+  let print_indexed i n =
+    print_int i;
+    print_char '=';
+    print_int n;
+    print_char ' '
+  in
+  Core.List.iteri print_indexed (ints "(7 8 9)");
+  [%expect {|
+    (2 4 6)
+    (0 5 10)
+    1 2 3
+    0=7 1=8 2=9
+    |}]
+
+let%expect_test "map and iter go from left to right" =
+  let noisy n =
+    print_int n;
+    n
+  in
+  print_ints (Core.List.map noisy (ints "(1 2 3)"));
+  [%expect {| 123(1 2 3) |}]
+
+let%expect_test "fold_left, fold_right" =
+  let pair a b =
+    Core.String.concat "" (Cons ("(", Cons (a, Cons (" ", Cons (b, Cons (")", Nil))))))
+  in
+  let show acc n = pair acc (Core.Int.to_string n) in
+  print_endline (Core.List.fold_left show "init" (ints "(1 2 3)"));
+  let show_right n acc = pair (Core.Int.to_string n) acc in
+  print_endline (Core.List.fold_right show_right (ints "(1 2 3)") "init");
+  print_int (Core.List.fold_left Core.Int.add 0 (ints "(1 2 3 4)"));
+  [%expect {|
+    (((init 1) 2) 3)
+    (1 (2 (3 init)))
+    10
+    |}]
+
+let%expect_test "filter, filter_map, partition" =
+  print_ints (Core.List.filter is_even (ints "(1 2 3 4 5 6)"));
+  let half_of_even n =
+    match is_even n with
+    | true -> Some (Core.Int.div n 2)
+    | false -> None
+  in
+  print_ints (Core.List.filter_map half_of_even (ints "(1 2 3 4 5 6)"));
+  print_sexp
+    (Core.Sexp.sexp_of_pair sexp_of_ints sexp_of_ints
+       (Core.List.partition is_even (ints "(1 2 3 4 5 6)")));
+  [%expect {|
+    (2 4 6)
+    (1 2 3)
+    ((2 4 6) (1 3 5))
+    |}]
+
+let%expect_test "concat_map" =
+  let twice n = Cons (n, Cons (n, Nil)) in
+  print_ints (Core.List.concat_map twice (ints "(1 2 3)"));
+  [%expect {| (1 1 2 2 3 3) |}]
+
+let%expect_test "find, find_map, exists, for_all, mem" =
+  print_int_option (Core.List.find is_even (ints "(1 3 4 6)"));
+  print_int_option (Core.List.find is_even (ints "(1 3)"));
+  let even_double n =
+    match is_even n with
+    | true -> Some (double n)
+    | false -> None
+  in
+  print_int_option (Core.List.find_map even_double (ints "(1 3 4 6)"));
+  print_int_option (Core.List.find_map even_double (ints "(1 3)"));
+  print_bool (Core.List.exists is_even (ints "(1 2)"));
+  print_bool (Core.List.exists is_even (ints "(1 3)"));
+  print_bool (Core.List.exists is_even (ints "()"));
+  print_bool (Core.List.for_all is_even (ints "(2 4)"));
+  print_bool (Core.List.for_all is_even (ints "(2 3)"));
+  print_bool (Core.List.for_all is_even (ints "()"));
+  print_bool (Core.List.mem Core.Int.equal 3 (ints "(1 2 3)"));
+  print_bool (Core.List.mem Core.Int.equal 4 (ints "(1 2 3)"));
+  [%expect {|
+    (4)
+    ()
+    (8)
+    ()
+    true
+    false
+    false
+    true
+    false
+    true
+    true
+    false
+    |}]
+
+let%expect_test "equal" =
+  print_bool (Core.List.equal Core.Int.equal (ints "(1 2)") (ints "(1 2)"));
+  print_bool (Core.List.equal Core.Int.equal (ints "(1 2)") (ints "(1 3)"));
+  print_bool (Core.List.equal Core.Int.equal (ints "(1 2)") (ints "(1)"));
+  print_bool (Core.List.equal Core.Int.equal (ints "()") (ints "()"));
+  [%expect {|
+    true
+    false
+    false
+    true
+    |}]
+
+let%expect_test "zip, unzip, assoc" =
+  let sexp_of_pairs l =
+    Core.Sexp.sexp_of_list
+      (Core.Sexp.sexp_of_pair Core.Sexp.sexp_of_int Core.Sexp.sexp_of_string)
+      l
+  in
+  let strings = Cons ("a", Cons ("b", Nil)) in
+  let zipped = Core.List.zip (ints "(1 2)") strings in
+  print_sexp (Core.Sexp.sexp_of_option sexp_of_pairs zipped);
+  print_sexp
+    (Core.Sexp.sexp_of_option sexp_of_pairs
+       (Core.List.zip (ints "(1 2 3)") strings));
+  print_sexp
+    (Core.Sexp.sexp_of_option sexp_of_pairs (Core.List.zip (ints "(1)") strings));
+  let pairs = Core.Option.value zipped Nil in
+  print_sexp
+    (Core.Sexp.sexp_of_pair sexp_of_ints
+       (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_string)
+       (Core.List.unzip pairs));
+  let print_string_option o =
+    print_sexp (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_string o)
+  in
+  print_string_option (Core.List.assoc Core.Int.equal 2 pairs);
+  print_string_option (Core.List.assoc Core.Int.equal 3 pairs);
+  print_string_option
+    (Core.List.assoc Core.Int.equal 1 (Cons ((1, "first"), pairs)));
+  [%expect {|
+    (((1 a) (2 b)))
+    ()
+    ()
+    ((1 2) (a b))
+    (b)
+    ()
+    (first)
+    |}]
+
+let%expect_test "sort" =
+  print_ints (Core.List.sort Core.Int.compare (ints "(5 3 9 1 3 0 -2 8)"));
+  print_ints (Core.List.sort Core.Int.compare (ints "()"));
+  print_ints (Core.List.sort Core.Int.compare (ints "(1)"));
+  print_ints (Core.List.sort Core.Int.compare (ints "(2 1)"));
+  print_ints (Core.List.sort Core.Int.compare (Core.List.init 20 Core.Int.neg));
+  let descending a b = Core.Int.compare b a in
+  print_ints (Core.List.sort descending (ints "(5 3 9 1)"));
+  [%expect {|
+    (-2 0 1 3 3 5 8 9)
+    ()
+    (1)
+    (1 2)
+    (-19 -18 -17 -16 -15 -14 -13 -12 -11 -10 -9 -8 -7 -6 -5 -4 -3 -2 -1 0)
+    (9 5 3 1)
+    |}]
+
+let%expect_test "sort is stable" =
+  let by_first p q =
+    match (p, q) with
+    | ((a, _), (b, _)) -> Core.Int.compare a b
+  in
+  let pairs =
+    Cons ((2, "a"), Cons ((1, "b"), Cons ((2, "c"),
+      Cons ((1, "d"), Cons ((0, "e"), Nil)))))
+  in
+  print_sexp
+    (Core.Sexp.sexp_of_list
+       (Core.Sexp.sexp_of_pair Core.Sexp.sexp_of_int Core.Sexp.sexp_of_string)
+       (Core.List.sort by_first pairs));
+  [%expect {| ((0 e) (1 b) (1 d) (2 a) (2 c)) |}]

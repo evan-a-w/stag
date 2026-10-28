@@ -1,0 +1,11 @@
+(library
+ (name stag_core_source))
+
+(rule
+ (target stag_core_source.ml)
+ (deps
+  (glob_files *.stag))
+ (action
+  (with-stdout-to
+   %{target}
+   (run %{exe:../eval/embed/embed.exe} %{deps}))))

@@ -1,0 +1,82 @@
+let some x = Some x
+
+let is_some o =
+  match o with
+  | Some _ -> true
+  | None -> false
+
+let is_none o = Bool.not (is_some o)
+
+(* [value o default] is [o]'s value, or [default] if it is [None]. *)
+let value o default =
+  match o with
+  | Some x -> x
+  | None -> default
+
+let map f o =
+  match o with
+  | Some x -> Some (f x)
+  | None -> None
+
+let bind o f =
+  match o with
+  | Some x -> f x
+  | None -> None
+
+let join o =
+  match o with
+  | Some inner -> inner
+  | None -> None
+
+let iter f o =
+  match o with
+  | Some x -> f x
+  | None -> ()
+
+(* [fold f init o] is [f init x] for [Some x], [init] for [None]. *)
+let fold f acc o =
+  match o with
+  | Some x -> f acc x
+  | None -> acc
+
+let exists f o =
+  match o with
+  | Some x -> f x
+  | None -> false
+
+let for_all f o =
+  match o with
+  | Some x -> f x
+  | None -> true
+
+let filter f o =
+  match o with
+  | Some x -> (
+    match f x with
+    | true -> o
+    | false -> None)
+  | None -> None
+
+(* [o1] if it is [Some], otherwise [o2]. *)
+let first_some o1 o2 =
+  match o1 with
+  | Some _ -> o1
+  | None -> o2
+
+let both o1 o2 =
+  match (o1, o2) with
+  | (Some x, Some y) ->
+    let p = (x, y) in
+    Some p
+  | _ -> None
+
+let to_list o =
+  match o with
+  | Some x -> Cons (x, Nil)
+  | None -> Nil
+
+let equal equal_value o1 o2 =
+  match (o1, o2) with
+  | (Some x, Some y) -> equal_value x y
+  | (None, None) -> true
+  | _ -> false

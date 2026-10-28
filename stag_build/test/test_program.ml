@@ -160,3 +160,48 @@ let%expect_test "errors" =
     Error: Expected an expression, found `)`
     |}]
 ;;
+
+let%expect_test "every target sees Core, and a library named core shadows it" =
+  let uses_core =
+    {|let main = print_endline (Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.List.init 3 Core.Int.succ)))|}
+  in
+  check
+    [ "a/stag", "(library (name a))"
+    ; "a/x.stag", "let words = Core.String.split_on_char ' ' \"in a library\""
+    ; "b/stag", "(executable (name b) (libraries a))"
+    ; "b/b.stag", uses_core
+    ; "b/c.stag", "let n = Core.List.length A.X.words"
+    ]
+    ~target:"b";
+  check
+    [ "core/stag", "(library (name core))"
+    ; "core/list.stag", "let init n f = Nil"
+    ; "b/stag", "(executable (name b) (libraries core))"
+    ; "b/b.stag", "let n = Core.List.init 3 Core.Int.succ"
+    ]
+    ~target:"b";
+  [%expect
+    {|
+    module A : sig
+      module X : sig
+        val words : list[string]
+      end
+    end
+    module B : sig
+      val main : unit
+    end
+    module C : sig
+      val n : int
+    end
+    ---
+    (1 2 3)
+    File "b/b.stag", line 1, characters 25-33:
+    1 | let n = Core.List.init 3 Core.Int.succ
+                                 ^^^^^^^^
+    Error: Unbound module Core.Int (the prelude's module Core is shadowed by the program's Core)
+    File "core/stag", line 1, characters 15-19:
+    1 | (library (name core))
+                       ^^^^
+    Note: The program's module Core is here
+    |}]
+;;

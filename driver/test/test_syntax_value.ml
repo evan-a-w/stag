@@ -16,6 +16,7 @@ let%expect_test "the prelude's signature" =
     {|
     type list['a] = Nil | Cons of 'a * list['a]
     type option['a] = None | Some of 'a
+    type result['a, 'b] = Ok of 'a | Error of 'b
     module Stag : sig
       val map : ('a -> 'b) -> list['a] -> list['b]
       module Type_ref : sig
@@ -94,6 +95,210 @@ let%expect_test "the prelude's signature" =
         end
         val expr : t['a] -> Type_expr.t
         val decl : Type_ref.t -> option[Decl.t]
+      end
+    end
+    module Core : sig
+      module Bool : sig
+        val not : bool -> bool
+        val equal : bool -> bool -> bool
+        val compare : bool -> bool -> int
+        val to_string : bool -> string
+        val of_string : string -> option[bool]
+      end
+      module Char : sig
+        val equal : char -> char -> bool
+        val compare : char -> char -> int
+        val code : char -> int
+        val of_code : int -> option[char]
+        val to_string : char -> string
+        val is_between : char -> char -> char -> bool
+        val is_digit : char -> bool
+        val is_lowercase : char -> bool
+        val is_uppercase : char -> bool
+        val is_alpha : char -> bool
+        val is_alphanum : char -> bool
+        val is_whitespace : char -> bool
+        val is_print : char -> bool
+      end
+      module Int : sig
+        val add : int -> int -> int
+        val sub : int -> int -> int
+        val mul : int -> int -> int
+        val div : int -> int -> int
+        val rem : int -> int -> int
+        val neg : int -> int
+        val equal : int -> int -> bool
+        val compare : int -> int -> int
+        val lt : int -> int -> bool
+        val le : int -> int -> bool
+        val gt : int -> int -> bool
+        val ge : int -> int -> bool
+        val succ : int -> int
+        val pred : int -> int
+        val max_value : int
+        val min_value : int
+        val abs : int -> int
+        val min : int -> int -> int
+        val max : int -> int -> int
+        val to_string : int -> string
+        val of_string : string -> int
+        val of_string_opt : string -> option[int]
+      end
+      module List : sig
+        val is_empty : list['a] -> bool
+        val length : list['a] -> int
+        val hd : list['a] -> option['a]
+        val tl : list['a] -> option[list['a]]
+        val last : list['a] -> option['a]
+        val nth : list['a] -> int -> option['a]
+        val init : int -> (int -> 'a) -> list['a]
+        val rev_append : list['a] -> list['a] -> list['a]
+        val rev : list['a] -> list['a]
+        val append : list['a] -> list['a] -> list['a]
+        val map : ('a -> 'b) -> list['a] -> list['b]
+        val mapi : (int -> 'a -> 'b) -> list['a] -> list['b]
+        val iter : ('a -> unit) -> list['a] -> unit
+        val iteri : (int -> 'a -> unit) -> list['a] -> unit
+        val fold_left : ('a -> 'b -> 'a) -> 'a -> list['b] -> 'a
+        val fold_right : ('a -> 'b -> 'b) -> list['a] -> 'b -> 'b
+        val filter : ('a -> bool) -> list['a] -> list['a]
+        val filter_map : ('a -> option['b]) -> list['a] -> list['b]
+        val partition : ('a -> bool) -> list['a] -> list['a] * list['a]
+        val concat : list[list['a]] -> list['a]
+        val concat_map : ('a -> list['b]) -> list['a] -> list['b]
+        val find : ('a -> bool) -> list['a] -> option['a]
+        val find_map : ('a -> option['b]) -> list['a] -> option['b]
+        val exists : ('a -> bool) -> list['a] -> bool
+        val for_all : ('a -> bool) -> list['a] -> bool
+        val mem : ('a -> 'b -> bool) -> 'a -> list['b] -> bool
+        val equal : ('a -> 'b -> bool) -> list['a] -> list['b] -> bool
+        val zip : list['a] -> list['b] -> option[list['a * 'b]]
+        val unzip : list['a * 'b] -> list['a] * list['b]
+        val assoc : ('a -> 'b -> bool) -> 'a -> list['b * 'c] -> option['c]
+        val sort : ('a -> 'a -> int) -> list['a] -> list['a]
+      end
+      module Option : sig
+        val some : 'a -> option['a]
+        val is_some : option['a] -> bool
+        val is_none : option['a] -> bool
+        val value : option['a] -> 'a -> 'a
+        val map : ('a -> 'b) -> option['a] -> option['b]
+        val bind : option['a] -> ('a -> option['b]) -> option['b]
+        val join : option[option['a]] -> option['a]
+        val iter : ('a -> unit) -> option['a] -> unit
+        val fold : ('a -> 'b -> 'a) -> 'a -> option['b] -> 'a
+        val exists : ('a -> bool) -> option['a] -> bool
+        val for_all : ('a -> bool) -> option['a] -> bool
+        val filter : ('a -> bool) -> option['a] -> option['a]
+        val first_some : option['a] -> option['a] -> option['a]
+        val both : option['a] -> option['b] -> option['a * 'b]
+        val to_list : option['a] -> list['a]
+        val equal : ('a -> 'b -> bool) -> option['a] -> option['b] -> bool
+      end
+      module Result : sig
+        val is_ok : result['a, 'b] -> bool
+        val is_error : result['a, 'b] -> bool
+        val map : ('a -> 'b) -> result['a, 'c] -> result['b, 'c]
+        val map_error : ('a -> 'b) -> result['c, 'a] -> result['c, 'b]
+        val bind : result['a, 'b] -> ('a -> result['c, 'b]) -> result['c, 'b]
+        val join : result[result['a, 'b], 'b] -> result['a, 'b]
+        val iter : ('a -> unit) -> result['a, 'b] -> unit
+        val ok : result['a, 'b] -> option['a]
+        val error : result['a, 'b] -> option['b]
+        val of_option : option['a] -> 'b -> result['a, 'b]
+        val all : list[result['a, 'b]] -> result[list['a], 'b]
+        val equal : ('a -> 'b -> bool) -> ('c -> 'd -> bool) -> result['a, 'c] -> result['b, 'd] -> bool
+      end
+      module Sexp : sig
+        type t = Atom of string | List of list[t]
+        val equal : t -> t -> bool
+        val must_escape : string -> bool
+        val atom_to_string : string -> string
+        val parenthesize : string -> string
+        val to_string : t -> string
+        val to_string_hum_width : int -> t -> string
+        val to_string_hum : t -> string
+        module Parse_error : sig
+          type t = { message : string; offset : int; line : int; col : int }
+          val create : string -> int -> string -> t
+          val to_string : t -> string
+        end
+        module Parser : sig
+          module Parsed : sig
+            type t['a] = Parsed of 'a * int | Failed of Parse_error.t
+          end
+          val fail : string -> int -> string -> Parsed.t['a]
+          val skip : string -> int -> int
+          val ends_unquoted_atom : char -> bool
+          val digit_value : int -> char -> option[int]
+          val number : string -> int -> int -> int -> option[int]
+          val skip_indentation : string -> int -> int
+          val parse_quoted : string -> int -> int -> list[string] -> Parsed.t[t]
+          val parse_sexp : string -> int -> Parsed.t[t]
+          val parse_list : string -> int -> int -> list[t] -> Parsed.t[t]
+        end
+        val of_string_many : string -> result[list[t], Parse_error.t]
+        val of_string : string -> result[t, Parse_error.t]
+        module Of_sexp_error : sig
+          type t = { message : string; sexp : Sexp.t }
+          val create : string -> Sexp.t -> t
+          val to_string : t -> string
+        end
+        val of_sexp_error : string -> t -> result['a, Of_sexp_error.t]
+        val sexp_of_unit : unit -> t
+        val unit_of_sexp : t -> result[unit, Of_sexp_error.t]
+        val sexp_of_bool : bool -> t
+        val bool_of_sexp : t -> result[bool, Of_sexp_error.t]
+        val sexp_of_int : int -> t
+        val int_of_sexp : t -> result[int, Of_sexp_error.t]
+        val sexp_of_char : char -> t
+        val char_of_sexp : t -> result[char, Of_sexp_error.t]
+        val sexp_of_string : string -> t
+        val string_of_sexp : t -> result[string, Of_sexp_error.t]
+        val sexp_of_list : ('a -> t) -> list['a] -> t
+        val list_of_sexp : (t -> result['a, Of_sexp_error.t]) -> t -> result[list['a], Of_sexp_error.t]
+        val sexp_of_option : ('a -> t) -> option['a] -> t
+        val option_of_sexp : (t -> result['a, Of_sexp_error.t]) -> t -> result[option['a], Of_sexp_error.t]
+        val sexp_of_pair : ('a -> t) -> ('b -> t) -> 'a * 'b -> t
+        val pair_of_sexp : (t -> result['a, Of_sexp_error.t]) -> (t -> result['b, Of_sexp_error.t]) -> t -> result['a * 'b, Of_sexp_error.t]
+        val sexp_of_triple : ('a -> t) -> ('b -> t) -> ('c -> t) -> 'a * 'b * 'c -> t
+        val triple_of_sexp : (t -> result['a, Of_sexp_error.t]) -> (t -> result['b, Of_sexp_error.t]) -> (t -> result['c, Of_sexp_error.t]) -> t -> result['a * 'b * 'c, Of_sexp_error.t]
+        val sexp_of_result : ('a -> t) -> ('b -> t) -> result['a, 'b] -> t
+        val result_of_sexp : (t -> result['a, Of_sexp_error.t]) -> (t -> result['b, Of_sexp_error.t]) -> t -> result[result['a, 'b], Of_sexp_error.t]
+      end
+      module String : sig
+        val length : string -> int
+        val get : string -> int -> char
+        val sub : string -> int -> int -> string
+        val append : string -> string -> string
+        val equal : string -> string -> bool
+        val compare : string -> string -> int
+        val is_empty : string -> bool
+        val of_char : char -> string
+        val fold_range : ('a -> int -> 'a) -> 'a -> int -> int -> 'a
+        val concat : string -> list[string] -> string
+        val init : int -> (int -> char) -> string
+        val make : int -> char -> string
+        val to_list : string -> list[char]
+        val of_list : list[char] -> string
+        val fold : ('a -> char -> 'a) -> 'a -> string -> 'a
+        val iter : (char -> unit) -> string -> unit
+        val map : (char -> char) -> string -> string
+        val for_all : (char -> bool) -> string -> bool
+        val exists : (char -> bool) -> string -> bool
+        val index : string -> char -> option[int]
+        val contains : string -> char -> bool
+        val prefix : string -> int -> string
+        val suffix : string -> int -> string
+        val drop_prefix : string -> int -> string
+        val drop_suffix : string -> int -> string
+        val starts_with : string -> string -> bool
+        val ends_with : string -> string -> bool
+        val drop_while : (char -> bool) -> string -> string
+        val strip : string -> string
+        val split_on_char : char -> string -> list[string]
+        val escape_char : char -> string
+        val escaped : string -> string
       end
     end
     |}]
@@ -189,8 +394,13 @@ let%expect_test "round trips, modulo locations" =
 ;;
 
 let%expect_test "constructors are made as the typechecker resolves them" =
-  let signature = Lazy.force prelude_signature in
-  (* A function matching every constructor of each variant of the prelude. *)
+  let signature =
+    List.filter (Lazy.force prelude_signature) ~f:(function
+      | Module { name = "Core"; _ } | Type { name = "result"; _ } -> false
+      | _ -> true)
+  in
+  (* A function matching every constructor of each variant of the prelude
+     that syntax values may use. *)
   let rec probes path (items : Signature.t) =
     List.concat_map items ~f:(function
       | Module { name; items } -> probes (path @ [ name ]) items

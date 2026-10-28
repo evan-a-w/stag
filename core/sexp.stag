@@ -1,0 +1,415 @@
+(* S-expressions, printed and parsed as by OCaml's Sexplib. *)
+
+type t = Atom of string | List of list[t]
+
+let equal a b =
+  match (a, b) with
+  | (Atom x, Atom y) -> String.equal x y
+  | (List xs, List ys) -> List.equal equal xs ys
+  | _ -> false
+
+(* Whether [s] must be quoted to be read back as an atom: it is empty, or has
+   whitespace, a non-ASCII or control character, a parenthesis, semicolon,
+   double quote or backslash, or the start or end of a Sexplib block comment
+   (hash and bar, either way round). *)
+let must_escape s =
+  let delimits i =
+    match String.get s i with
+    | '(' -> true
+    | ')' -> true
+    | ';' -> true
+    | '"' -> true
+    | '\\' -> true
+    | c -> Bool.not (Char.is_between '!' '~' c)
+  in
+  let block_comment i =
+    match (String.get s i, String.get s (Int.succ i)) with
+    | ('#', '|') -> true
+    | ('|', '#') -> true
+    | _ -> false
+  in
+  let loop i =
+    match Int.lt i (String.length s) with
+    | false -> false
+    | true -> (
+      match delimits i with
+      | true -> true
+      | false -> (
+        match Int.lt (Int.succ i) (String.length s) with
+        | true -> (
+          match block_comment i with
+          | true -> true
+          | false -> loop (Int.succ i))
+        | false -> false))
+  in
+  match String.is_empty s with
+  | true -> true
+  | false -> loop 0
+
+let atom_to_string s =
+  match must_escape s with
+  | true -> String.append "\"" (String.append (String.escaped s) "\"")
+  | false -> s
+
+let parenthesize s = String.append "(" (String.append s ")")
+
+(* On one line: [(a "b c" (d))]. *)
+let to_string t =
+  match t with
+  | Atom s -> atom_to_string s
+  | List ts -> parenthesize (String.concat " " (List.map to_string ts))
+
+(* On one line if it fits in [width] columns, otherwise each element of a
+   list on its own line, indented by one more than the list's [(]. *)
+let to_string_hum_width width t =
+  let hum indent t =
+    let flat = to_string t in
+    match (t, Int.le (Int.add indent (String.length flat)) width) with
+    | (Atom _, _) -> flat
+    | (List _, true) -> flat
+    | (List Nil, false) -> flat
+    | (List (Cons (first, rest)), false) ->
+      let inner = Int.succ indent in
+      let line t =
+        String.append "\n" (String.append (String.make inner ' ') (hum inner t))
+      in
+      let lines = String.concat "" (List.map line rest) in
+      parenthesize (String.append (hum inner first) lines)
+  in
+  hum 0 t
+
+let to_string_hum t = to_string_hum_width 80 t
+
+(* A syntax error, at [offset] in the string parsed, of [line] (from 1) and
+   [col] (from 0). *)
+module Parse_error = struct
+  type t = {message : string; offset : int; line : int; col : int}
+
+  let create s offset message =
+    let count pos c =
+      match (pos, c) with
+      | ((line, _), '\n') -> (Int.succ line, 0)
+      | ((line, col), _) -> (line, Int.succ col)
+    in
+    match String.fold count (1, 0) (String.prefix s offset) with
+    | (line, col) ->
+      {message = message; offset = offset; line = line; col = col}
+
+  let to_string e =
+    let parts =
+      Cons ("line ", Cons (Int.to_string e.line, Cons (", column ",
+      Cons (Int.to_string e.col, Cons (": ", Cons (e.message, Nil))))))
+    in
+    String.concat "" parts
+end
+
+(* [of_string]'s, from an offset in the string parsed. *)
+module Parser = struct
+  (* What was parsed, and the offset after it. *)
+  module Parsed = struct
+    type t['a] = Parsed of 'a * int | Failed of Parse_error.t
+  end
+
+  let fail s offset message =
+    Parsed.Failed (Parse_error.create s offset message)
+
+  (* Whitespace and [;] comments, to the end of their line. *)
+  let skip s i =
+    let comment i =
+      match Int.lt i (String.length s) with
+      | false -> i
+      | true -> (
+        match String.get s i with
+        | '\n' -> Int.succ i
+        | _ -> comment (Int.succ i))
+    in
+    match Int.lt i (String.length s) with
+    | false -> i
+    | true -> (
+      match String.get s i with
+      | ';' -> skip s (comment i)
+      | c -> (
+        match Char.is_whitespace c with
+        | true -> skip s (Int.succ i)
+        | false -> i))
+
+  let ends_unquoted_atom c =
+    match c with
+    | '(' -> true
+    | ')' -> true
+    | '"' -> true
+    | ';' -> true
+    | _ -> Char.is_whitespace c
+
+  let digit_value base c =
+    let from low c = Int.sub (Char.code c) (Char.code low) in
+    let value =
+      match
+        (Char.is_digit c, Char.is_between 'a' 'f' c, Char.is_between 'A' 'F' c)
+      with
+      | (true, _, _) -> Some (from '0' c)
+      | (_, true, _) -> Some (Int.add 10 (from 'a' c))
+      | (_, _, true) -> Some (Int.add 10 (from 'A' c))
+      | _ -> None
+    in
+    let below_base v = Int.lt v base in
+    Option.filter below_base value
+
+  (* The value of the [count] digits in [base] at [i], if they are. *)
+  let number s i count base =
+    let loop i count acc =
+      match Int.equal count 0 with
+      | true -> Some acc
+      | false -> (
+        match Int.lt i (String.length s) with
+        | false -> None
+        | true -> (
+          match digit_value base (String.get s i) with
+          | Some d ->
+            loop (Int.succ i) (Int.pred count) (Int.add (Int.mul acc base) d)
+          | None -> None))
+    in
+    loop i count 0
+
+  (* After a [\]-newline in a quoted atom, the spaces and tabs that start the
+     next line are skipped. *)
+  let skip_indentation s i =
+    match Int.lt i (String.length s) with
+    | false -> i
+    | true -> (
+      match String.get s i with
+      | ' ' -> skip_indentation s (Int.succ i)
+      | '\t' -> skip_indentation s (Int.succ i)
+      | _ -> i)
+
+  (* The quoted atom whose opening quote is at [start], its characters read up
+     to [i] in [parts], in reverse. *)
+  let parse_quoted s start i parts =
+    let continue next part = parse_quoted s start next (Cons (part, parts)) in
+    let escape c = continue (Int.add i 2) (Char.to_string c) in
+    let code next value =
+      match Char.of_code value with
+      | Some c -> continue next (Char.to_string c)
+      | None -> fail s i "invalid escape: character code above 255"
+    in
+    match Int.lt i (String.length s) with
+    | false -> fail s start "unterminated quoted atom"
+    | true -> (
+      match String.get s i with
+      | '"' ->
+        Parsed.Parsed (Atom (String.concat "" (List.rev parts)), Int.succ i)
+      | '\\' -> (
+        match Int.lt (Int.succ i) (String.length s) with
+        | false -> fail s start "unterminated quoted atom"
+        | true -> (
+          match String.get s (Int.succ i) with
+          | 'n' -> escape '\n'
+          | 't' -> escape '\t'
+          | 'r' -> escape '\r'
+          | 'b' -> escape '\b'
+          | ' ' -> escape ' '
+          | '\\' -> escape '\\'
+          | '"' -> escape '"'
+          | '\'' -> escape '\''
+          | '\n' -> continue (skip_indentation s (Int.add i 2)) ""
+          | 'x' -> (
+            match number s (Int.add i 2) 2 16 with
+            | Some value -> code (Int.add i 4) value
+            | None -> fail s i "invalid escape: \\x needs 2 hexadecimal digits")
+          | c -> (
+            match Char.is_digit c with
+            | true -> (
+              match number s (Int.succ i) 3 10 with
+              | Some value -> code (Int.add i 4) value
+              | None -> fail s i "invalid escape: \\ddd needs 3 decimal digits")
+            | false -> continue (Int.add i 2) (String.sub s i 2))))
+      | c -> continue (Int.succ i) (Char.to_string c))
+
+  (* The sexp at [i], which is not whitespace. *)
+  let parse_sexp s i =
+    match Int.lt i (String.length s) with
+    | false -> fail s i "unexpected end of input"
+    | true -> (
+      match String.get s i with
+      | '(' -> parse_list s i (Int.succ i) Nil
+      | ')' -> fail s i "unexpected ')'"
+      | '"' -> parse_quoted s i (Int.succ i) Nil
+      | _ ->
+        let atom_end j =
+          match Int.lt j (String.length s) with
+          | false -> j
+          | true -> (
+            match ends_unquoted_atom (String.get s j) with
+            | true -> j
+            | false -> atom_end (Int.succ j))
+        in
+        let stop = atom_end i in
+        Parsed.Parsed (Atom (String.sub s i (Int.sub stop i)), stop))
+
+  (* The list whose [(] is at [start], its elements read up to [i] in [elts], in
+     reverse. *)
+  let parse_list s start i elts =
+    let j = skip s i in
+    match Int.lt j (String.length s) with
+    | false -> fail s start "unclosed '('"
+    | true -> (
+      match String.get s j with
+      | ')' -> Parsed.Parsed (List (List.rev elts), Int.succ j)
+      | _ -> (
+        match parse_sexp s j with
+        | Parsed.Parsed (elt, next) ->
+          parse_list s start next (Cons (elt, elts))
+        | Parsed.Failed e -> Parsed.Failed e))
+end
+
+(* The sexps of [s], separated by whitespace and comments. *)
+let of_string_many s =
+  let loop i acc =
+    let j = Parser.skip s i in
+    match Int.lt j (String.length s) with
+    | false -> Ok (List.rev acc)
+    | true -> (
+      match Parser.parse_sexp s j with
+      | Parser.Parsed.Parsed (t, next) -> loop next (Cons (t, acc))
+      | Parser.Parsed.Failed e -> Error e)
+  in
+  loop 0 Nil
+
+(* The one sexp of [s], possibly surrounded by whitespace and comments. *)
+let of_string s =
+  match Parser.parse_sexp s (Parser.skip s 0) with
+  | Parser.Parsed.Failed e -> Error e
+  | Parser.Parsed.Parsed (t, next) -> (
+    let rest = Parser.skip s next in
+    match Int.lt rest (String.length s) with
+    | true ->
+      Error (Parse_error.create s rest "expected the end of input after a sexp")
+    | false -> Ok t)
+
+(* Why [*_of_sexp] failed, and the sexp it failed on, which may be within the
+   one it was given. *)
+module Of_sexp_error = struct
+  type t = {message : string; sexp : Sexp.t}
+
+  let create message sexp = {message = message; sexp = sexp}
+  let to_string e =
+    String.append e.message (String.append ": " (Sexp.to_string e.sexp))
+end
+
+let of_sexp_error message sexp = Error (Of_sexp_error.create message sexp)
+let sexp_of_unit (u : unit) = List Nil
+
+let unit_of_sexp t =
+  match t with
+  | List Nil -> Ok ()
+  | _ -> of_sexp_error "unit_of_sexp: empty list needed" t
+
+let sexp_of_bool b = Atom (Bool.to_string b)
+
+let bool_of_sexp t =
+  match t with
+  | Atom "true" -> Ok true
+  | Atom "false" -> Ok false
+  | Atom _ -> of_sexp_error "bool_of_sexp: true or false needed" t
+  | List _ -> of_sexp_error "bool_of_sexp: atom needed" t
+
+let sexp_of_int n = Atom (Int.to_string n)
+
+let int_of_sexp t =
+  match t with
+  | Atom s -> (
+    match Int.of_string_opt s with
+    | Some n -> Ok n
+    | None -> of_sexp_error "int_of_sexp: integer needed" t)
+  | List _ -> of_sexp_error "int_of_sexp: atom needed" t
+
+let sexp_of_char c = Atom (Char.to_string c)
+
+let char_of_sexp t =
+  match t with
+  | Atom s -> (
+    match Int.equal (String.length s) 1 with
+    | true -> Ok (String.get s 0)
+    | false -> of_sexp_error "char_of_sexp: atom of one character needed" t)
+  | List _ -> of_sexp_error "char_of_sexp: atom needed" t
+
+let sexp_of_string s = Atom s
+
+let string_of_sexp t =
+  match t with
+  | Atom s -> Ok s
+  | List _ -> of_sexp_error "string_of_sexp: atom needed" t
+
+let sexp_of_list sexp_of_elt l = List (List.map sexp_of_elt l)
+
+let list_of_sexp elt_of_sexp t =
+  match t with
+  | List ts -> Result.all (List.map elt_of_sexp ts)
+  | Atom _ -> of_sexp_error "list_of_sexp: list needed" t
+
+(* [None] is [()], [Some x] is [(x)]. *)
+let sexp_of_option sexp_of_value o =
+  match o with
+  | None -> List Nil
+  | Some x -> List (Cons (sexp_of_value x, Nil))
+
+(* Also accepts [none], [None], [(some x)] and [(Some x)], as Sexplib does. *)
+let option_of_sexp value_of_sexp t =
+  let some x = Result.map Option.some (value_of_sexp x) in
+  match t with
+  | List Nil -> Ok None
+  | Atom "none" -> Ok None
+  | Atom "None" -> Ok None
+  | List (Cons (x, Nil)) -> some x
+  | List (Cons (Atom "some", Cons (x, Nil))) -> some x
+  | List (Cons (Atom "Some", Cons (x, Nil))) -> some x
+  | _ -> of_sexp_error "option_of_sexp: list of zero or one element needed" t
+
+(* [(a b)]. *)
+let sexp_of_pair sexp_of_a sexp_of_b p =
+  match p with
+  | (a, b) -> List (Cons (sexp_of_a a, Cons (sexp_of_b b, Nil)))
+
+let pair_of_sexp a_of_sexp b_of_sexp t =
+  match t with
+  | List (Cons (a, Cons (b, Nil))) -> (
+    match (a_of_sexp a, b_of_sexp b) with
+    | (Ok a, Ok b) ->
+      let p = (a, b) in
+      Ok p
+    | (Error e, _) -> Error e
+    | (_, Error e) -> Error e)
+  | _ -> of_sexp_error "pair_of_sexp: list of two elements needed" t
+
+(* [(a b c)]. *)
+let sexp_of_triple sexp_of_a sexp_of_b sexp_of_c p =
+  match p with
+  | (a, b, c) ->
+    List (Cons (sexp_of_a a, Cons (sexp_of_b b, Cons (sexp_of_c c, Nil))))
+
+let triple_of_sexp a_of_sexp b_of_sexp c_of_sexp t =
+  match t with
+  | List (Cons (a, Cons (b, Cons (c, Nil)))) -> (
+    match (a_of_sexp a, b_of_sexp b, c_of_sexp c) with
+    | (Ok a, Ok b, Ok c) ->
+      let p = (a, b, c) in
+      Ok p
+    | (Error e, _, _) -> Error e
+    | (_, Error e, _) -> Error e
+    | (_, _, Error e) -> Error e)
+  | _ -> of_sexp_error "triple_of_sexp: list of three elements needed" t
+
+(* [(Ok x)] or [(Error e)]. *)
+let sexp_of_result sexp_of_ok sexp_of_error r =
+  match r with
+  | Ok x -> List (Cons (Atom "Ok", Cons (sexp_of_ok x, Nil)))
+  | Error e -> List (Cons (Atom "Error", Cons (sexp_of_error e, Nil)))
+
+let result_of_sexp ok_of_sexp error_of_sexp t =
+  let ok x = Ok x in
+  let error e = Error e in
+  match t with
+  | List (Cons (Atom "Ok", Cons (x, Nil))) -> Result.map ok (ok_of_sexp x)
+  | List (Cons (Atom "Error", Cons (e, Nil))) ->
+    Result.map error (error_of_sexp e)
+  | _ -> of_sexp_error "result_of_sexp: (Ok _) or (Error _) needed" t

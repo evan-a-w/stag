@@ -1,0 +1,64 @@
+let add = Intrinsic.Int.add
+let sub = Intrinsic.Int.sub
+let mul = Intrinsic.Int.mul
+
+(* Division by zero is a runtime error. *)
+let div = Intrinsic.Int.div
+let rem = Intrinsic.Int.rem
+let neg = Intrinsic.Int.neg
+let equal = Intrinsic.Int.equal
+let compare = Intrinsic.Int.compare
+let lt = Intrinsic.Int.lt
+let le = Intrinsic.Int.le
+let gt = Intrinsic.Int.gt
+let ge = Intrinsic.Int.ge
+let succ n = add n 1
+let pred n = sub n 1
+let max_value = 4611686018427387903
+let min_value = -4611686018427387904
+
+let abs n =
+  match lt n 0 with
+  | true -> neg n
+  | false -> n
+
+let min a b =
+  match le a b with
+  | true -> a
+  | false -> b
+
+let max a b =
+  match ge a b with
+  | true -> a
+  | false -> b
+
+let to_string = Intrinsic.Int.to_string
+
+(* An unparsable string is a runtime error. *)
+let of_string = Intrinsic.Int.of_string
+
+(* An optional [-] then decimal digits, in range. *)
+let of_string_opt s =
+  let digits =
+    match String.starts_with "-" s with
+    | true -> String.drop_prefix s 1
+    | false -> s
+  in
+  let significant = String.drop_while (Char.equal '0') digits in
+  let limit =
+    match String.starts_with "-" s with
+    | true -> String.drop_prefix (to_string min_value) 1
+    | false -> to_string max_value
+  in
+  let in_range =
+    match compare (String.length significant) (String.length limit) with
+    | -1 -> true
+    | 0 -> le (String.compare significant limit) 0
+    | _ -> false
+  in
+  match (String.is_empty digits, String.for_all Char.is_digit digits) with
+  | (false, true) -> (
+    match in_range with
+    | true -> Some (of_string s)
+    | false -> None)
+  | _ -> None

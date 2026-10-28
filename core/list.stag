@@ -1,0 +1,232 @@
+(* Functions take the function first, as OCaml's [Stdlib.List]. Those that
+   could fail return an option. *)
+
+let is_empty l =
+  match l with
+  | Nil -> true
+  | Cons (_, _) -> false
+
+let length l =
+  let loop acc l =
+    match l with
+    | Nil -> acc
+    | Cons (_, rest) -> loop (Int.succ acc) rest
+  in
+  loop 0 l
+
+let hd l =
+  match l with
+  | Nil -> None
+  | Cons (x, _) -> Some x
+
+let tl l =
+  match l with
+  | Nil -> None
+  | Cons (_, rest) -> Some rest
+
+let last l =
+  match l with
+  | Nil -> None
+  | Cons (x, Nil) -> Some x
+  | Cons (_, rest) -> last rest
+
+let nth l n =
+  match l with
+  | Nil -> None
+  | Cons (x, rest) -> (
+    match Int.equal n 0 with
+    | true -> Some x
+    | false -> (
+      match Int.lt n 0 with
+      | true -> None
+      | false -> nth rest (Int.pred n)))
+
+(* [init n f] is [f 0; ...; f (n - 1)]. *)
+let init n f =
+  let loop i acc =
+    match Int.lt i 0 with
+    | true -> acc
+    | false -> loop (Int.pred i) (Cons (f i, acc))
+  in
+  loop (Int.pred n) Nil
+
+let rev_append l tail =
+  match l with
+  | Nil -> tail
+  | Cons (x, rest) -> rev_append rest (Cons (x, tail))
+
+let rev l = rev_append l Nil
+let append l1 l2 = rev_append (rev l1) l2
+
+let map f l =
+  match l with
+  | Nil -> Nil
+  | Cons (x, rest) ->
+    let y = f x in
+    Cons (y, map f rest)
+
+let mapi f l =
+  let loop i l =
+    match l with
+    | Nil -> Nil
+    | Cons (x, rest) ->
+      let y = f i x in
+      Cons (y, loop (Int.succ i) rest)
+  in
+  loop 0 l
+
+let iter (f : 'a -> unit) l =
+  match l with
+  | Nil -> ()
+  | Cons (x, rest) ->
+    f x;
+    iter f rest
+
+let iteri (f : int -> 'a -> unit) l =
+  let loop i l =
+    match l with
+    | Nil -> ()
+    | Cons (x, rest) ->
+      f i x;
+      loop (Int.succ i) rest
+  in
+  loop 0 l
+
+(* [fold_left f init [a; b]] is [f (f init a) b]. *)
+let fold_left f acc l =
+  match l with
+  | Nil -> acc
+  | Cons (x, rest) -> fold_left f (f acc x) rest
+
+(* [fold_right f [a; b] init] is [f a (f b init)]. *)
+let fold_right f l acc =
+  match l with
+  | Nil -> acc
+  | Cons (x, rest) -> f x (fold_right f rest acc)
+
+let filter f l =
+  match l with
+  | Nil -> Nil
+  | Cons (x, rest) -> (
+    match f x with
+    | true -> Cons (x, filter f rest)
+    | false -> filter f rest)
+
+let filter_map f l =
+  match l with
+  | Nil -> Nil
+  | Cons (x, rest) -> (
+    match f x with
+    | Some y -> Cons (y, filter_map f rest)
+    | None -> filter_map f rest)
+
+(* [(those satisfying f, the others)]. *)
+let partition f l =
+  let yes = filter f l in
+  let no x = Bool.not (f x) in
+  (yes, filter no l)
+
+let concat ls = fold_right append ls Nil
+
+let concat_map f l =
+  match l with
+  | Nil -> Nil
+  | Cons (x, rest) ->
+    let ys = f x in
+    append ys (concat_map f rest)
+
+let find f l =
+  match l with
+  | Nil -> None
+  | Cons (x, rest) -> (
+    match f x with
+    | true -> Some x
+    | false -> find f rest)
+
+let find_map f l =
+  match l with
+  | Nil -> None
+  | Cons (x, rest) -> (
+    match f x with
+    | Some y -> Some y
+    | None -> find_map f rest)
+
+let exists f l =
+  match l with
+  | Nil -> false
+  | Cons (x, rest) -> (
+    match f x with
+    | true -> true
+    | false -> exists f rest)
+
+let for_all f l =
+  match l with
+  | Nil -> true
+  | Cons (x, rest) -> (
+    match f x with
+    | true -> for_all f rest
+    | false -> false)
+
+let mem equal x l =
+  let is_x y = equal x y in
+  exists is_x l
+
+let equal equal_elt l1 l2 =
+  match (l1, l2) with
+  | (Nil, Nil) -> true
+  | (Cons (x, rest1), Cons (y, rest2)) -> (
+    match equal_elt x y with
+    | true -> equal equal_elt rest1 rest2
+    | false -> false)
+  | _ -> false
+
+(* [None] if the lists' lengths differ. *)
+let zip l1 l2 =
+  match (l1, l2) with
+  | (Nil, Nil) -> Some Nil
+  | (Cons (x, rest1), Cons (y, rest2)) -> (
+    match zip rest1 rest2 with
+    | Some rest -> Some (Cons ((x, y), rest))
+    | None -> None)
+  | _ -> None
+
+let unzip l =
+  let fst p = match p with (a, _) -> a in
+  let snd p = match p with (_, b) -> b in
+  (map fst l, map snd l)
+
+(* The value of the first pair whose key is [equal] to [key]. *)
+let assoc equal key l =
+  match l with
+  | Nil -> None
+  | Cons ((k, v), rest) -> (
+    match equal key k with
+    | true -> Some v
+    | false -> assoc equal key rest)
+
+(* Stable merge sort, by [compare] (negative, zero or positive, as
+   [Int.compare]). *)
+let sort compare l =
+  let merge l1 l2 =
+    match (l1, l2) with
+    | (Nil, l) -> l
+    | (l, Nil) -> l
+    | (Cons (x, rest1), Cons (y, rest2)) -> (
+      match Int.gt (compare x y) 0 with
+      | true -> Cons (y, merge l1 rest2)
+      | false -> Cons (x, merge rest1 l2))
+  in
+  (* Splits [l] into its first [n] elements, sorted, and the rest. *)
+  let sort_prefix n l =
+    match (Int.le n 1, l) with
+    | (_, Nil) -> (Nil, Nil)
+    | (true, Cons (x, rest)) -> (Cons (x, Nil), rest)
+    | (false, _) -> (
+      let half = Int.div n 2 in
+      match sort_prefix half l with
+      | (sorted1, rest) -> (
+        match sort_prefix (Int.sub n half) rest with
+        | (sorted2, rest) -> (merge sorted1 sorted2, rest)))
+  in
+  match sort_prefix (length l) l with
+  | (sorted, _) -> sorted

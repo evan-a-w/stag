@@ -1,0 +1,19 @@
+let not = Intrinsic.Bool.not
+let equal = Intrinsic.Bool.equal
+
+let compare a b =
+  match (a, b) with
+  | (false, true) -> -1
+  | (true, false) -> 1
+  | _ -> 0
+
+let to_string b =
+  match b with
+  | true -> "true"
+  | false -> "false"
+
+let of_string s =
+  match s with
+  | "true" -> Some true
+  | "false" -> Some false
+  | _ -> None
