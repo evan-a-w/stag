@@ -104,16 +104,21 @@ module Mode = struct
 end
 
 (* [text], written at column [from], with its later lines moved alike as its
-   first is to [col], as far as they can go. *)
+   first is to [col], as far as they can go. Not if one is indented with a
+   tab, whose width is not known. *)
 let shift_block text ~from ~col =
+  let blank line = String.is_empty (String.strip line) in
+  let leading line =
+    String.length line
+    - String.length (String.lstrip line ~drop:(Char.equal ' '))
+  in
   match String.split text ~on:'\n' with
   | [] -> text
+  | _ :: rest
+    when List.exists rest ~f:(fun line ->
+           (not (blank line))
+           && Char.is_whitespace (String.get line (leading line))) -> text
   | first :: rest ->
-    let blank line = String.is_empty (String.strip line) in
-    let leading line =
-      String.length line
-      - String.length (String.lstrip line ~drop:(Char.equal ' '))
-    in
     let shift =
       List.filter rest ~f:(Fn.non blank)
       |> List.map ~f:leading
@@ -131,47 +136,71 @@ let shift_block text ~from ~col =
            ^ String.lstrip line ~drop:(Char.equal ' ')))
 ;;
 
+(* After [s], whether a [Space] prints nothing, given whether it did before. *)
+let spaced_after s ~spaced =
+  if String.is_empty s
+  then spaced
+  else Char.equal (String.get s (String.length s - 1)) ' '
+;;
+
 (* Whether the commands fit in [width], up to the first newline (of a broken
    [line] or a text). After an [End_line], only if a newline comes before any
-   more of the flat text. *)
-let rec fits ?(ended = false) width (commands : (int * Mode.t * t) list) =
+   more of the flat text. [spaced]: whether a [Space] would print nothing, as
+   at the start of a line or after a space. *)
+let rec fits ?(ended = false) ~spaced width (commands : (int * Mode.t * t) list)
+  =
   width >= 0
   &&
   match commands with
   | [] -> true
   | (indent, mode, t) :: rest ->
     (match t with
-     | Empty -> fits ~ended width rest
-     | Block { text; _ } -> fits ~ended width ((indent, mode, Text text) :: rest)
+     | Empty -> fits ~ended ~spaced width rest
+     | Block { text; _ } ->
+       fits ~ended ~spaced width ((indent, mode, Text text) :: rest)
      | Text s when ended ->
-       (String.is_empty (String.strip s) && fits ~ended width rest)
+       (String.is_empty (String.strip s) && fits ~ended ~spaced width rest)
        || Mode.equal mode Break
      | Text s ->
        (match String.index s '\n' with
-        | None -> fits (width - String.length s) rest
+        | None ->
+          fits ~spaced:(spaced_after s ~spaced) (width - String.length s) rest
         | Some i -> Mode.equal mode Break && i <= width)
      | Line s ->
        (match mode with
-        | Flat -> fits ~ended (width - String.length s) rest
+        | Flat ->
+          fits
+            ~ended
+            ~spaced:(spaced_after s ~spaced)
+            (width - String.length s)
+            rest
         | Break -> true)
-     | Space -> fits ~ended (width - 1) rest
+     | Space ->
+       if spaced || ended
+       then fits ~ended ~spaced width rest
+       else fits ~spaced:true (width - 1) rest
      | Hardline | Fresh_line | Blank_line -> Mode.equal mode Break
-     | End_line -> fits ~ended:true width rest
+     | End_line -> fits ~ended:true ~spaced width rest
      | If_break s ->
        (match mode with
-        | Flat -> fits ~ended width rest
-        | Break -> ended || fits (width - String.length s) rest)
+        | Flat -> fits ~ended ~spaced width rest
+        | Break ->
+          ended
+          || fits
+               ~spaced:(spaced_after s ~spaced)
+               (width - String.length s)
+               rest)
      | Cat (a, b) ->
-       fits ~ended width ((indent, mode, a) :: (indent, mode, b) :: rest)
+       fits ~ended ~spaced width ((indent, mode, a) :: (indent, mode, b) :: rest)
      | Nest (_, t) | Align t | Group t | Leading t ->
-       fits ~ended width ((indent, mode, t) :: rest)
+       fits ~ended ~spaced width ((indent, mode, t) :: rest)
      | Alt (a, b) ->
        let t =
          match mode with
          | Flat -> a
          | Break -> b
        in
-       fits ~ended width ((indent, mode, t) :: rest))
+       fits ~ended ~spaced width ((indent, mode, t) :: rest))
 ;;
 
 (* [Leading]s at the start of a group, before it instead. *)
@@ -208,52 +237,62 @@ and split_leading t =
   | _ -> Empty, t
 ;;
 
-let fits_flat ~width t = fits width [ 0, Flat, hoist t ]
+let fits_flat ~width t = fits ~spaced:true width [ 0, Flat, hoist t ]
 
 (* Whether [t], starting at [col] and laid out with its groups flat (its other
    lines broken), fits in [width] on each of its lines: the column it ends at
-   if so. Only the lines of [t] are looked at, each up to the width. *)
-let fits_all ~width ~col ~indent t =
-  let rec go col (commands : (int * Mode.t * t) list) =
+   if so, and whether a [Space] there would print nothing. Only the lines of [t] are looked at, each up to the width. *)
+let fits_all ~width ~col ~spaced ~indent t =
+  let rec go col ~spaced (commands : (int * Mode.t * t) list) =
     if col > width
     then None
     else (
       match commands with
-      | [] -> Some col
+      | [] -> Some (col, spaced)
       | (indent, mode, t) :: rest ->
         (match t with
-         | Empty -> go col rest
+         | Empty -> go col ~spaced rest
          | Block { text; col = from } ->
-           go col ((indent, mode, Text (shift_block text ~from ~col)) :: rest)
+           go
+             col
+             ~spaced
+             ((indent, mode, Text (shift_block text ~from ~col)) :: rest)
          | Text s ->
+           let spaced = spaced_after s ~spaced in
            (match String.rindex s '\n' with
-            | None -> go (col + String.length s) rest
+            | None -> go (col + String.length s) ~spaced rest
             | Some i ->
               (match mode, String.index s '\n' with
                | Break, Some first when col + first <= width ->
-                 go (String.length s - i - 1) rest
+                 go (String.length s - i - 1) ~spaced rest
                | _ -> None))
          | Line s ->
            (match mode with
-            | Flat -> go (col + String.length s) rest
-            | Break -> go indent rest)
+            | Flat ->
+              go (col + String.length s) ~spaced:(spaced_after s ~spaced) rest
+            | Break -> go indent ~spaced:true rest)
          | Hardline | Fresh_line | End_line | Blank_line ->
            (match mode with
             | Flat -> None
-            | Break -> go indent rest)
+            | Break -> go indent ~spaced:true rest)
          | If_break s ->
            (match mode with
-            | Flat -> go col rest
-            | Break -> go (col + String.length s) rest)
-         | Cat (a, b) -> go col ((indent, mode, a) :: (indent, mode, b) :: rest)
-         | Leading t -> go col ((indent, mode, t) :: rest)
-         | Space -> go (col + 1) rest
-         | Nest (n, t) -> go col ((indent + n, mode, t) :: rest)
-         | Align t -> go col ((col, mode, t) :: rest)
-         | Group t -> go col ((indent, Flat, t) :: rest)
-         | Alt (a, _) -> go col ((indent, Flat, a) :: rest)))
+            | Flat -> go col ~spaced rest
+            | Break ->
+              go (col + String.length s) ~spaced:(spaced_after s ~spaced) rest)
+         | Cat (a, b) ->
+           go col ~spaced ((indent, mode, a) :: (indent, mode, b) :: rest)
+         | Leading t -> go col ~spaced ((indent, mode, t) :: rest)
+         | Space ->
+           if spaced
+           then go col ~spaced rest
+           else go (col + 1) ~spaced:true rest
+         | Nest (n, t) -> go col ~spaced ((indent + n, mode, t) :: rest)
+         | Align t -> go col ~spaced ((col, mode, t) :: rest)
+         | Group t -> go col ~spaced ((indent, Flat, t) :: rest)
+         | Alt (a, _) -> go col ~spaced ((indent, Flat, a) :: rest)))
   in
-  go col [ indent, Break, t ]
+  go col ~spaced [ indent, Break, t ]
 ;;
 
 let render ?(width = 80) t =
@@ -293,6 +332,10 @@ let render ?(width = 80) t =
     in
     strip ();
     newline indent
+  in
+  let spaced () =
+    let n = Buffer.length buf in
+    !line_empty || (n > 0 && Char.equal (Buffer.nth buf (n - 1)) ' ')
   in
   let rec go (commands : (int * Mode.t * t) list) =
     match commands with
@@ -347,11 +390,7 @@ let render ?(width = 80) t =
        | Cat (a, b) -> go ((indent, mode, a) :: (indent, mode, b) :: rest)
        | Leading t -> go ((indent, mode, t) :: rest)
        | Space ->
-         let n = Buffer.length buf in
-         if
-           not
-             (!line_empty || (n > 0 && Char.equal (Buffer.nth buf (n - 1)) ' '))
-         then add " ";
+         if not (spaced ()) then add " ";
          go rest
        | Nest (n, t) -> go ((indent + n, mode, t) :: rest)
        | Align t -> go ((!col, mode, t) :: rest)
@@ -360,7 +399,11 @@ let render ?(width = 80) t =
            match mode with
            | Flat -> Flat
            | Break ->
-             if fits (width - !col) ((indent, Flat, t) :: rest)
+             if
+               fits
+                 ~spaced:(spaced ())
+                 (width - !col)
+                 ((indent, Flat, t) :: rest)
              then Flat
              else Break
          in
@@ -370,8 +413,9 @@ let render ?(width = 80) t =
            match mode with
            | Flat -> a, Flat
            | Break ->
-             (match fits_all ~width ~col:!col ~indent a with
-              | Some col when fits (width - col) rest -> a, Break
+             (match fits_all ~width ~col:!col ~spaced:(spaced ()) ~indent a with
+              | Some (col, spaced) when fits ~spaced (width - col) rest ->
+                a, Break
               | _ -> b, Break)
          in
          go ((indent, snd chosen, fst chosen) :: rest))

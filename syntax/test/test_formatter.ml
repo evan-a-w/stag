@@ -51,11 +51,7 @@ let%expect_test "only comments" =
     (* b *)
     |}];
   test "(* a *) (* b *)";
-  [%expect
-    {|
-    (* a *)
-    (* b *)
-    |}]
+  [%expect {| (* a *) (* b *) |}]
 ;;
 
 let%expect_test "blank lines between one line toplevels are kept" =
@@ -454,5 +450,253 @@ x
       (* moved right
          with its second line *)
       x
+    |}]
+;;
+
+let%expect_test "a space after a line is not measured" =
+  test
+    {|let x =
+  iter print_item (map (Int.mul 10) (Cons (1, Cons (2, Cons (3 (* c *), Nil)))))
+|};
+  [%expect
+    {|
+    let x =
+      iter print_item (map (Int.mul 10) (Cons (1, Cons (2, Cons (3, (* c *) Nil)))))
+    |}]
+;;
+
+let%expect_test
+    "an inline comment whose next token is dropped stays before what follows"
+  =
+  test
+    {|let rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr = ((* in redundant paren *) (xxxxxxxxxxxxxxxxxxxxxx))
+let s = .~ (* b *) (q)
+let t = (x (* c *)).y
+|};
+  [%expect
+    {|
+    let rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr =
+      (* in redundant paren *) xxxxxxxxxxxxxxxxxxxxxx
+    let s = .~ (* b *) q
+    let t = x (* c *) .y
+    |}]
+;;
+
+let%expect_test "a trailing comment goes after closers the printer adds" =
+  test
+    {|let f x = match x with a, b -> a, b (* c *)
+let g x = match x with a, b -> a, b (* c *)
+  | _ -> x
+|};
+  [%expect
+    {|
+    let f x = match x with a, b -> (a, b) (* c *)
+
+    let g x =
+      match x with
+      | a, b -> (a, b) (* c *)
+      | _ -> x
+    |}]
+;;
+
+let%expect_test "own line comments on one line stay on one" =
+  test
+    {|(* a *) (* b *)
+let x = 1
+(* c *) (* d
+   e *) (* f *)
+
+let y =
+  (* g *) (* h *)
+  2
+|};
+  [%expect
+    {|
+    (* a *) (* b *)
+    let x = 1
+    (* c *) (* d
+       e *) (* f *)
+
+    let y =
+      (* g *) (* h *)
+      2
+    |}]
+;;
+
+let%expect_test "no space between an opener and a comment" =
+  test
+    {|let x = ( (* c *) h, 2)
+let y = .~f.{ (* s *) x = y (* t *)}
+let z = { (* r *) a = 1 }
+|};
+  [%expect
+    {|
+    let x = ((* c *) h, 2)
+    let y = .~f.{(* s *) x = y (* t *)}
+    let z = {(* r *) a = 1}
+    |}]
+;;
+
+let%expect_test "comments' CRLFs become LFs, as the code's do" =
+  (match
+     Formatter.format
+       ~file:"t.stag"
+       "let x =\r\n  (* a\r\n  b *)\r\n  1\r\nlet y = (* c *) 2\r\n"
+   with
+   | Ok formatted -> print_endline (String.escaped formatted)
+   | Error error -> print_endline (Parser.Error.to_string error));
+  [%expect {| let x =\n  (* a\n  b *)\n  1\nlet y = (* c *) 2\n |}]
+;;
+
+let%expect_test "comments with lines indented by tabs are not moved" =
+  test "let f x =\n        (* a\n\tb\n  \tc *)\n        x\n";
+  [%expect
+    {|
+    let f x =
+      (* a
+    b
+      c *)
+      x
+    |}]
+;;
+
+let%expect_test "long files format quickly" =
+  let check source =
+    let start = Time_ns.now () in
+    let format source =
+      Formatter.format ~file:"t.stag" source |> Result.ok |> Option.value_exn
+    in
+    let formatted = format source in
+    let reformatted = format formatted in
+    let elapsed = Time_ns.diff (Time_ns.now ()) start in
+    let lines = String.split_lines formatted in
+    print_s
+      [%message
+        ""
+          ~lines:(List.length lines : int)
+          ~idempotent:(String.equal formatted reformatted : bool)
+          ~last_lines:(List.drop lines (List.length lines - 3) : string list)];
+    if Time_ns.Span.(elapsed > of_sec 10.)
+    then print_s [%message "too slow" (elapsed : Time_ns.Span.t)]
+  in
+  check
+    (String.concat
+       (List.init 5000 ~f:(fun i ->
+          sprintf
+            "let f%d x = match x with a, b -> a, b (* c%d *)\n\
+             let g%d = (((%d)))\n"
+            i
+            i
+            i
+            i)));
+  check
+    (String.concat
+       (List.init 5000 ~f:(fun i ->
+          sprintf "let f%d x = Int.add (((x))) %d\n" i i)));
+  (* One toplevel, so aligned as a whole. *)
+  check
+    ("let x = {\n"
+     ^ String.concat
+         (List.init 10000 ~f:(fun i ->
+            sprintf "  `a%d = ((%d)); (* c%d *)\n" i i i))
+     ^ "}\n");
+  [%expect
+    {|
+    ((lines 10000) (idempotent true)
+     (last_lines
+      ("let g4998 = 4998" "let f4999 x = match x with a, b -> (a, b) (* c4999 *)"
+       "let g4999 = 4999")))
+    ((lines 5000) (idempotent true)
+     (last_lines
+      ("let f4997 x = Int.add x 4997" "let f4998 x = Int.add x 4998"
+       "let f4999 x = Int.add x 4999")))
+    ((lines 10002) (idempotent true)
+     (last_lines
+      ("  `a9998 = 9998; (* c9998 *)" "  `a9999 = 9999; (* c9999 *)" })))
+    |}]
+;;
+
+let%expect_test "found by the messy random tests" =
+  test
+    {|type t = A of (* a *)(
+(* own line *)
+'b)
+let x = (
+(* b *)( (** c *)
+
+))
+type u = (('a (** d *)))
+
+type v[{..'r},
+       'a] =
+  'a
+let y = {`a = -4 (* e *).`f | z}
+let w = ({x with `l = y} \ `a
+(* f *)  ) \ `a
+|};
+  [%expect
+    {|
+    type t =
+      | A of
+             (* a *)
+             (* own line *)
+             'b
+
+    let x =
+      (
+      (* b *) (** c *)
+
+      )
+
+    type u = 'a (** d *)
+
+    type v[{..'r}, 'a] = 'a
+
+    let y = {`a = (-4 (* e *)).`f | z}
+    let w = ({x with `l = y} \ `a (* f *)) \ `a
+    |}]
+;;
+
+let%expect_test "found by sweeping more random seeds" =
+  test
+    {|let x = {
+  `a = 1;
+  `b = 1
+
+(* own line *)
+
+(* then before a separator *);
+}
+let y = {
+  `a = 1;
+  `b = 1 (* inline *)
+  (* before a separator *) ;
+}
+let z = {`a = (0
+(* in redundant parens
+   on its own line *) ) | `b}
+let v = (0
+(* f *) )
+|};
+  [%expect
+    {|
+    let x = {
+      `a = 1;
+      `b = 1;
+
+      (* own line *)
+
+      (* then before a separator *)
+    }
+    let y = {
+      `a = 1;
+      `b = 1; (* inline *) (* before a separator *)
+    }
+    let z = {
+      `a = 0 (* in redundant parens
+                on its own line *) |
+        `b
+    }
+    let v = 0 (* f *)
     |}]
 ;;

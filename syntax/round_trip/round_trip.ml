@@ -89,12 +89,16 @@ let source_errors ?(widths = [ 80; 40; 10 ]) source =
      print_s
        [%message
          "source does not parse" ~error:(Parser.Error.to_string error : string)]
-   | Ok (program, comments) ->
-     (* The formatter moves a comment's later lines with its first. *)
+   | Ok (program, _, comments) ->
+     (* The formatter moves a comment's later lines with its first, and ends
+        them with [\n]. *)
      let texts comments =
        List.map comments ~f:(fun (c : Comment.t) ->
-         match String.split c.text ~on:'\n' with
-         | [] -> c.text
+         let text =
+           String.substr_replace_all c.text ~pattern:"\r\n" ~with_:"\n"
+         in
+         match String.split text ~on:'\n' with
+         | [] -> text
          | first :: rest ->
            let indent line =
              String.length line - String.length (String.lstrip line)
@@ -132,7 +136,7 @@ let source_errors ?(widths = [ 80; 40; 10 ]) source =
        Option.iter (format ~width source) ~f:(fun printed ->
          match Parser.program_with_comments ~file:"printed.stag" printed with
          | Error _ -> ignore (format ~width printed : string option)
-         | Ok (parsed, parsed_comments) ->
+         | Ok (parsed, _, parsed_comments) ->
            if not (Syntax.Program.equal program parsed)
            then
              print_s

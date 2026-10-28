@@ -582,4 +582,14 @@ A parse error is reported, the other sources still formatted:
   $ cat math/messy.stag fmt/broken.stag
   let y = 1
   let x =
+
+A source that cannot be rewritten is reported, not shown as rewritten:
+
+  $ rm fmt/broken.stag
+  $ echo 'let   y = 1' > math/messy.stag && chmod a-w math/messy.stag
+  $ stag-build fmt
+  Error: math/messy.stag: Permission denied
+  [1]
+  $ chmod u+w math/messy.stag && cat math/messy.stag
+  let   y = 1
   $ cd ..

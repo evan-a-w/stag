@@ -219,3 +219,35 @@ let%expect_test "fits_flat" =
     false
     |}]
 ;;
+
+let%expect_test "a space that prints nothing is not measured" =
+  (* Each line is 10 wide, fitting only if the spaces after a line, a space
+     or a newline count for nothing. *)
+  let doc =
+    separate
+      hardline
+      [ group (text "abcde" ^^ line ^^ space ^^ text "fghi")
+      ; group (text "ab" ^^ space ^^ space ^^ text "cde" ^^ line ^^ text "fgh")
+      ; group (space ^^ text "abcdefgh" ^^ line ^^ text "i")
+      ; alt (text "abcd" ^^ space ^^ space ^^ text "efgh") (text "no")
+        ^^ text "i"
+      ]
+  in
+  print_endline (render ~width:10 doc);
+  List.iter [ 10; 9 ] ~f:(fun width ->
+    printf
+      "%d %b\n"
+      width
+      (fits_flat
+         ~width
+         (space ^^ text "abcde" ^^ space ^^ space ^^ text "fghi")));
+  [%expect
+    {|
+    abcde fghi
+    ab cde fgh
+    abcdefgh i
+    abcd efghi
+    10 true
+    9 false
+    |}]
+;;

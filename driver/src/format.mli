@@ -23,7 +23,8 @@ end
 
 module Summary : sig
   type t =
-    { unformatted : Unformatted.t list (** In the order of the files. *)
+    { unformatted : Unformatted.t list
+      (** In the order of the files. In [Inplace] mode, those rewritten. *)
     ; errors : Diagnostic.t list
       (** Parse errors, and failures to rewrite a file. *)
     }

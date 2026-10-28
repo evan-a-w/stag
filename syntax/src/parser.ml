@@ -1094,11 +1094,15 @@ let run_with_comments ~file source f =
         | _ -> expected t "end of file");
        result
      with
-     | result -> Ok (result, comments)
+     | result -> Ok (result, tokens, comments)
      | exception Syntax_error (loc, message) -> Error (Syntax { loc; message }))
 ;;
 
-let run ~file source f = Result.map (run_with_comments ~file source f) ~f:fst
+let run ~file source f =
+  Result.map (run_with_comments ~file source f) ~f:(fun (result, _, _) ->
+    result)
+;;
+
 let program ~file source = run ~file source (toplevels ~stop:Token.Eof)
 
 let program_with_comments ~file source =

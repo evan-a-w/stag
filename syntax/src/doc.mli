@@ -21,7 +21,7 @@ val line : t
 
 (** [text], of several lines written at column [col], with its later lines
     moved alike as much as its first line is from [col], or as far left as
-    they can go. *)
+    they can go. Left as they are if one is indented with a tab. *)
 val block : string -> col:int -> t
 
 (** A space, unless at the start of a line or after one. *)

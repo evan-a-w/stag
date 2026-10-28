@@ -57,12 +57,12 @@ let run ?root ~(mode : Mode.t) files =
     | Error diagnostic -> Queue.enqueue errors diagnostic
     | Ok formatted when String.equal formatted source.contents -> ()
     | Ok formatted ->
-      Queue.enqueue unformatted { Unformatted.file = source; formatted };
+      let unformatted_file = { Unformatted.file = source; formatted } in
       (match mode with
-       | Check -> ()
+       | Check -> Queue.enqueue unformatted unformatted_file
        | Inplace ->
          (match write ?root ~path:source.path formatted with
-          | Ok () -> ()
+          | Ok () -> Queue.enqueue unformatted unformatted_file
           | Error diagnostic -> Queue.enqueue errors diagnostic)));
   { Summary.unformatted = Queue.to_list unformatted
   ; errors = Queue.to_list errors

@@ -9,3 +9,4 @@ module Round_trip = Stag_syntax_round_trip.Round_trip
 module Located = Stag_common.Located
 module Doc = Stag_syntax.Doc
 module Formatter = Stag_syntax.Formatter
+module Alignment = Stag_syntax.Alignment

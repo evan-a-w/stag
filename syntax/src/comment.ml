@@ -8,7 +8,7 @@ module Placement = struct
         }
     | Trailing
     | Inline
-  [@@deriving sexp_of, equal]
+  [@@deriving sexp_of]
 end
 
 type t =

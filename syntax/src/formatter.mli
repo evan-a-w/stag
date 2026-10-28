@@ -9,7 +9,9 @@ open! Import
     stays so, at the indentation of what follows; one ending a line of code
     stays at its end (breaking the line after it); others stay inline before
     what follows. None is put before a [,], [;] or [in], but after it. The
-    later lines of a comment move with its first, as far as they can. Formatting what this returns gives it back. *)
+    later lines of a comment move with its first, as far as they can (not if
+    one is indented with a tab), and end with [\n]. Formatting what this
+    returns gives it back. *)
 val format
   :  ?width:int
   -> file:string

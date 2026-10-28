@@ -17,7 +17,7 @@ module Placement : sig
     (** After a token on its line that may end code, or after such a comment
         ending on its line, with no token after it on its line. *)
     | Inline (** With a token after it on its line. *)
-  [@@deriving sexp_of, equal]
+  [@@deriving sexp_of]
 end
 
 type t =
