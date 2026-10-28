@@ -848,7 +848,8 @@ let f l = match l with
   | [ x (* x *) ; [ (* nothing *) ] ] -> x
   | _ -> 0
 |};
-  [%expect {|
+  [%expect
+    {|
     let a = [
       (* first *) 1;
       (* second *) 2;
@@ -868,8 +869,11 @@ let f l = match l with
       | [x; (* x *) [(* nothing *)]] -> x
       | _ -> 0
     |}];
-  test ~width:20 {|let x = [aaaaaaa; bbbbbbbb; (* c *) cccccccc; [dddddd; eeeeee]]|};
-  [%expect {|
+  test
+    ~width:20
+    {|let x = [aaaaaaa; bbbbbbbb; (* c *) cccccccc; [dddddd; eeeeee]]|};
+  [%expect
+    {|
     let x = [
       aaaaaaa;
       bbbbbbbb;

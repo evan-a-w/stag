@@ -711,7 +711,7 @@ let%expect_test "the project's sources round trip and are formatted" =
     (../../tests/core_exn.stag (formatted true) (long_lines 1))
     (../../tests/core_list.stag (formatted true) (long_lines 0))
     (../../tests/core_option.stag (formatted true) (long_lines 0))
-    (../../tests/core_sexp.stag (formatted true) (long_lines 2))
+    (../../tests/core_sexp.stag (formatted true) (long_lines 1))
     (../../tests/core_shadowing.stag (formatted true) (long_lines 0))
     (../../tests/core_string.stag (formatted true) (long_lines 0))
     (../../tests/evaluation.stag (formatted true) (long_lines 1))
@@ -975,7 +975,8 @@ let long_name = [first_element; second_element; third_element; fourth_element]
 let long = {field = [first_element; second_element; third_element; fourth_element]}
 let nested = [[first_element; second_element]; [third_element; fourth_element; fifth]]
 |};
-  [%expect {|
+  [%expect
+    {|
     let a = []
     let b = [x]
     let c = [[1]; []; [2; 3]]
@@ -1012,7 +1013,8 @@ let nested = [[first_element; second_element]; [third_element; fourth_element; f
   print
     ~width:20
     {|let f = function_name [first; second] [third] (fun x -> [x; x; x; x; x; x])|};
-  [%expect {|
+  [%expect
+    {|
     let f =
       function_name
         [first; second]
@@ -1034,9 +1036,7 @@ let%expect_test "resolved Cons and Nil not ending a list literal" =
   let cons args = at (Syntax.Expr.Construct (at List_literal.cons, args)) in
   let nil = at (Syntax.Expr.Construct (at List_literal.nil, [])) in
   let var name = at (Syntax.Expr.Var (Path (Syntax.Path.name name), None)) in
-  let pcons args =
-    at (Syntax.Pattern.Construct (at List_literal.cons, args))
-  in
+  let pcons args = at (Syntax.Pattern.Construct (at List_literal.cons, args)) in
   let pvar name = at (Syntax.Pattern.Var name) in
   let show e =
     Round_trip.expr e;
@@ -1048,11 +1048,16 @@ let%expect_test "resolved Cons and Nil not ending a list literal" =
   show (cons [ var "x" ]);
   show (cons [ var "x"; nil; nil ]);
   show (at (Syntax.Expr.Construct (at List_literal.nil, [ var "x" ])));
-  show (at (Syntax.Expr.Field (cons [ var "x"; var "rest" ], at (Syntax.Decl_path.Path (Syntax.Path.name "f")))));
+  show
+    (at
+       (Syntax.Expr.Field
+          ( cons [ var "x"; var "rest" ]
+          , at (Syntax.Decl_path.Path (Syntax.Path.name "f")) )));
   let p = pcons [ pvar "x"; pcons [ pvar "y"; pvar "rest" ] ] in
   Round_trip.pattern p;
   print_endline (Printer.pattern p);
-  [%expect {|
+  [%expect
+    {|
     .Cons (x, rest)
     .Cons (x, .Cons (y, rest))
     [x; []]

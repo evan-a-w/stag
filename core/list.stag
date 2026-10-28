@@ -4,43 +4,43 @@
 
 let is_empty l =
   match l with
-  | Nil -> true
+  | [] -> true
   | Cons (_, _) -> false
 
-let singleton x = Cons (x, Nil)
+let singleton x = [x]
 
 let length l =
   let loop acc l =
     match l with
-    | Nil -> acc
+    | [] -> acc
     | Cons (_, rest) -> loop (Int.succ acc) rest
   in
   loop 0 l
 
 let hd l =
   match l with
-  | Nil -> None
+  | [] -> None
   | Cons (x, _) -> Some x
 
 let hd_exn l =
   match l with
-  | Nil -> raise (Failure "List.hd_exn: empty list")
+  | [] -> raise (Failure "List.hd_exn: empty list")
   | Cons (x, _) -> x
 
 let tl l =
   match l with
-  | Nil -> None
+  | [] -> None
   | Cons (_, rest) -> Some rest
 
 let tl_exn l =
   match l with
-  | Nil -> raise (Failure "List.tl_exn: empty list")
+  | [] -> raise (Failure "List.tl_exn: empty list")
   | Cons (_, rest) -> rest
 
 let last l =
   match l with
-  | Nil -> None
-  | Cons (x, Nil) -> Some x
+  | [] -> None
+  | [x] -> Some x
   | Cons (_, rest) -> last rest
 
 let last_exn l =
@@ -50,7 +50,7 @@ let last_exn l =
 
 let nth l n =
   match l with
-  | Nil -> None
+  | [] -> None
   | Cons (x, rest) ->
     match Int.equal n 0 with
     | true -> Some x
@@ -68,10 +68,10 @@ let nth_exn l n =
 
 let rev_append l tail =
   match l with
-  | Nil -> tail
+  | [] -> tail
   | Cons (x, rest) -> rev_append rest (Cons (x, tail))
 
-let rev l = rev_append l Nil
+let rev l = rev_append l []
 
 (* [init n f] is [f 0; ...; f (n - 1)], calling [f] in that order. *)
 let init n f =
@@ -80,34 +80,34 @@ let init n f =
     | true -> loop (Int.succ i) (Cons (f i, acc))
     | false -> rev acc
   in
-  loop 0 Nil
+  loop 0 []
 
 let append l1 l2 = rev_append (rev l1) l2
 
 (* [fold_left f init [a; b]] is [f (f init a) b]. *)
 let fold_left f acc l =
   match l with
-  | Nil -> acc
+  | [] -> acc
   | Cons (x, rest) -> fold_left f (f acc x) rest
 
 (* [fold_right f [a; b] init] is [f a (f b init)]. *)
 let fold_right f l acc = fold_left (fun acc x -> f x acc) acc (rev l)
 
-let rev_map f l = fold_left (fun acc x -> Cons (f x, acc)) Nil l
+let rev_map f l = fold_left (fun acc x -> Cons (f x, acc)) [] l
 
 let map f l = rev (rev_map f l)
 
 let mapi f l =
   let loop i l acc =
     match l with
-    | Nil -> rev acc
+    | [] -> rev acc
     | Cons (x, rest) -> loop (Int.succ i) rest (Cons (f i x, acc))
   in
-  loop 0 l Nil
+  loop 0 l []
 
 let iter (f : 'a -> unit) l =
   match l with
-  | Nil -> ()
+  | [] -> ()
   | Cons (x, rest) ->
     f x;
     iter f rest
@@ -115,7 +115,7 @@ let iter (f : 'a -> unit) l =
 let iteri (f : int -> 'a -> unit) l =
   let loop i l =
     match l with
-    | Nil -> ()
+    | [] -> ()
     | Cons (x, rest) ->
       f i x;
       loop (Int.succ i) rest
@@ -128,7 +128,7 @@ let filter_map f l =
     | Some y -> Cons (y, acc)
     | None -> acc
   in
-  rev (fold_left step Nil l)
+  rev (fold_left step [] l)
 
 let filter f l =
   let step acc x =
@@ -136,7 +136,7 @@ let filter f l =
     | true -> Cons (x, acc)
     | false -> acc
   in
-  rev (fold_left step Nil l)
+  rev (fold_left step [] l)
 
 (* [(those satisfying f, the others)]. *)
 let partition f l =
@@ -145,11 +145,11 @@ let partition f l =
     | (yes, no), true -> (Cons (x, yes), no)
     | (yes, no), false -> (yes, Cons (x, no))
   in
-  match fold_left step (Nil, Nil) l with yes, no -> (rev yes, rev no)
+  match fold_left step ([], []) l with yes, no -> (rev yes, rev no)
 
-let concat ls = rev (fold_left (fun acc l -> rev_append l acc) Nil ls)
+let concat ls = rev (fold_left (fun acc l -> rev_append l acc) [] ls)
 
-let concat_map f l = rev (fold_left (fun acc x -> rev_append (f x) acc) Nil l)
+let concat_map f l = rev (fold_left (fun acc x -> rev_append (f x) acc) [] l)
 
 let count f l =
   let step n x =
@@ -161,7 +161,7 @@ let count f l =
 
 let find f l =
   match l with
-  | Nil -> None
+  | [] -> None
   | Cons (x, rest) ->
     match f x with
     | true -> Some x
@@ -174,7 +174,7 @@ let find_exn f l =
 
 let find_map f l =
   match l with
-  | Nil -> None
+  | [] -> None
   | Cons (x, rest) ->
     match f x with
     | Some y -> Some y
@@ -182,7 +182,7 @@ let find_map f l =
 
 let exists f l =
   match l with
-  | Nil -> false
+  | [] -> false
   | Cons (x, rest) ->
     match f x with
     | true -> true
@@ -190,7 +190,7 @@ let exists f l =
 
 let for_all f l =
   match l with
-  | Nil -> true
+  | [] -> true
   | Cons (x, rest) ->
     match f x with
     | true -> for_all f rest
@@ -200,7 +200,7 @@ let mem equal x l = exists (fun y -> equal x y) l
 
 let equal equal_elt l1 l2 =
   match (l1, l2) with
-  | Nil, Nil -> true
+  | [], [] -> true
   | Cons (x, rest1), Cons (y, rest2) ->
     (match equal_elt x y with
      | true -> equal equal_elt rest1 rest2
@@ -210,9 +210,9 @@ let equal equal_elt l1 l2 =
 (* Lexicographic: a proper prefix is less. *)
 let compare compare_elt l1 l2 =
   match (l1, l2) with
-  | Nil, Nil -> 0
-  | Nil, _ -> -1
-  | _, Nil -> 1
+  | [], [] -> 0
+  | [], _ -> -1
+  | _, [] -> 1
   | Cons (x, rest1), Cons (y, rest2) ->
     match Int.equal (compare_elt x y) 0 with
     | true -> compare compare_elt rest1 rest2
@@ -225,7 +225,7 @@ let take n l =
     | Cons (x, rest), true -> loop rest (Int.pred n) (Cons (x, acc))
     | _ -> rev acc
   in
-  loop l n Nil
+  loop l n []
 
 (* Without the first [n] elements. *)
 let drop n l =
@@ -237,11 +237,11 @@ let drop n l =
 let zip l1 l2 =
   let loop l1 l2 acc =
     match (l1, l2) with
-    | Nil, Nil -> Some (rev acc)
+    | [], [] -> Some (rev acc)
     | Cons (x, rest1), Cons (y, rest2) -> loop rest1 rest2 (Cons ((x, y), acc))
     | _ -> None
   in
-  loop l1 l2 Nil
+  loop l1 l2 []
 
 let zip_exn l1 l2 =
   match zip l1 l2 with
@@ -252,18 +252,18 @@ let unzip l =
   let step acc p =
     match (acc, p) with (xs, ys), (x, y) -> (Cons (x, xs), Cons (y, ys))
   in
-  match fold_left step (Nil, Nil) l with xs, ys -> (rev xs, rev ys)
+  match fold_left step ([], []) l with xs, ys -> (rev xs, rev ys)
 
 (* [None] if the lists' lengths differ, as for [map2], [iter2] and
    [fold_left2]. *)
 let map2 f l1 l2 =
   let loop l1 l2 acc =
     match (l1, l2) with
-    | Nil, Nil -> Some (rev acc)
+    | [], [] -> Some (rev acc)
     | Cons (x, rest1), Cons (y, rest2) -> loop rest1 rest2 (Cons (f x y, acc))
     | _ -> None
   in
-  loop l1 l2 Nil
+  loop l1 l2 []
 
 let map2_exn f l1 l2 =
   match map2 f l1 l2 with
@@ -274,7 +274,7 @@ let map2_exn f l1 l2 =
    the lengths are equal. *)
 let iter2 (f : 'a -> 'b -> unit) l1 l2 =
   match (l1, l2) with
-  | Nil, Nil -> Some ()
+  | [], [] -> Some ()
   | Cons (x, rest1), Cons (y, rest2) ->
     f x y;
     iter2 f rest1 rest2
@@ -282,7 +282,7 @@ let iter2 (f : 'a -> 'b -> unit) l1 l2 =
 
 let fold_left2 f acc l1 l2 =
   match (l1, l2) with
-  | Nil, Nil -> Some acc
+  | [], [] -> Some acc
   | Cons (x, rest1), Cons (y, rest2) -> fold_left2 f (f acc x y) rest1 rest2
   | _ -> None
 
@@ -294,7 +294,7 @@ let max_elt compare l =
     | false -> best
   in
   match l with
-  | Nil -> None
+  | [] -> None
   | Cons (x, rest) -> Some (fold_left step x rest)
 
 (* [min_elt compare l] is the first least element, [None] if [l] is empty. *)
@@ -305,13 +305,13 @@ let min_elt compare l =
     | false -> best
   in
   match l with
-  | Nil -> None
+  | [] -> None
   | Cons (x, rest) -> Some (fold_left step x rest)
 
 (* The value of the first pair whose key is [equal] to [key]. *)
 let assoc equal key l =
   match l with
-  | Nil -> None
+  | [] -> None
   | Cons ((k, v), rest) ->
     match equal key k with
     | true -> Some v
@@ -328,8 +328,8 @@ let assoc_exn equal key l =
 let sort compare l =
   let merge l1 l2 acc =
     match (l1, l2) with
-    | Nil, l -> rev_append acc l
-    | l, Nil -> rev_append acc l
+    | [], l -> rev_append acc l
+    | l, [] -> rev_append acc l
     | Cons (x, rest1), Cons (y, rest2) ->
       match Int.gt (compare x y) 0 with
       | true -> merge l1 rest2 (Cons (y, acc))
@@ -343,33 +343,33 @@ let sort compare l =
       | false -> rev run
     in
     match l with
-    | Nil -> rev (Cons (close (Cons (x, run)), acc))
+    | [] -> rev (Cons (close (Cons (x, run)), acc))
     | Cons (y, rest) ->
       let down = Int.gt (compare x y) 0 in
       match run with
-      | Nil -> runs down (Cons (x, Nil)) y rest acc
+      | [] -> runs down [x] y rest acc
       | Cons (_, _) ->
         match Bool.equal descending down with
         | true -> runs descending (Cons (x, run)) y rest acc
-        | false -> runs false Nil y rest (Cons (close (Cons (x, run)), acc))
+        | false -> runs false [] y rest (Cons (close (Cons (x, run)), acc))
   in
   (* Merges neighbouring runs, keeping their order. *)
   let merge_pairs runs acc =
     match runs with
     | Cons (r1, Cons (r2, rest)) ->
-      merge_pairs rest (Cons (merge r1 r2 Nil, acc))
-    | Cons (r, Nil) -> rev (Cons (r, acc))
-    | Nil -> rev acc
+      merge_pairs rest (Cons (merge r1 r2 [], acc))
+    | [r] -> rev (Cons (r, acc))
+    | [] -> rev acc
   in
   let merge_all runs =
     match runs with
-    | Nil -> Nil
-    | Cons (r, Nil) -> r
-    | _ -> merge_all (merge_pairs runs Nil)
+    | [] -> []
+    | [r] -> r
+    | _ -> merge_all (merge_pairs runs [])
   in
   match l with
-  | Nil -> Nil
-  | Cons (x, rest) -> merge_all (runs false Nil x rest Nil)
+  | [] -> []
+  | Cons (x, rest) -> merge_all (runs false [] x rest [])
 
 (* Sorted by [compare], keeping the first of the elements it says are equal. *)
 let dedup compare l =
@@ -379,6 +379,6 @@ let dedup compare l =
       (match Int.equal (compare y x) 0 with
        | true -> acc
        | false -> Cons (x, acc))
-    | Nil -> Cons (x, acc)
+    | [] -> Cons (x, acc)
   in
-  rev (fold_left step Nil (sort compare l))
+  rev (fold_left step [] (sort compare l))

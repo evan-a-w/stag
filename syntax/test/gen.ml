@@ -146,7 +146,8 @@ let rec pattern t : Pattern.t =
                 ~items:(list_items (list t ~min:1 ~max:4 pattern))
                 ~close:Loc.none)
                .txt)
-         ; (fun t -> Construct (loc List_literal.cons, [ pattern t; pattern t ]))
+         ; (fun t ->
+             Construct (loc List_literal.cons, [ pattern t; pattern t ]))
          ; (fun t -> Construct (loc (decl_path t ~last:uident), [ pattern t ]))
          ; (fun t ->
              Construct

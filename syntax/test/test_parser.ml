@@ -1265,7 +1265,8 @@ let%expect_test "list literal locations" =
   show_locs Expr.sexp_of_t Parser.expr "[a; b;]";
   show_locs Expr.sexp_of_t Parser.expr "[ ]";
   show_locs Pattern.sexp_of_t Parser.pattern "[a]";
-  [%expect {|
+  [%expect
+    {|
     Construct "[a; b;]"
       <Cons> "["
       Var "a"

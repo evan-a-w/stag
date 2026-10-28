@@ -20,7 +20,7 @@ module Stag = struct
 
   let map f l =
     match l with
-    | Nil -> Nil
+    | [] -> []
     | Cons (x, rest) -> Cons (f x, map f rest)
 
   (* Declared types, constructors and fields, by identity: a ref names the
@@ -96,8 +96,8 @@ module Stag = struct
     (* [tuple] of no types is [unit], of one is that type. *)
     let tuple ts =
       match ts with
-      | Nil -> con "unit" Nil
-      | Cons (t, Nil) -> t
+      | [] -> con "unit" []
+      | [t] -> t
       | _ -> Tuple ts
   end
 
@@ -142,8 +142,8 @@ module Stag = struct
     (* [tuple] of no patterns is [()], of one is that pattern. *)
     let tuple ps =
       match ps with
-      | Nil -> Lit Lit.Unit
-      | Cons (p, Nil) -> p
+      | [] -> Lit Lit.Unit
+      | [p] -> p
       | _ -> Tuple ps
   end
 
@@ -179,14 +179,14 @@ module Stag = struct
     (* [apply f [x; y]] is [f x y]. *)
     let apply f args =
       match args with
-      | Nil -> f
+      | [] -> f
       | Cons (x, rest) -> apply (App (f, x)) rest
 
     (* [tuple] of no expressions is [()], of one is that expression. *)
     let tuple es =
       match es with
-      | Nil -> Lit Lit.Unit
-      | Cons (e, Nil) -> e
+      | [] -> Lit Lit.Unit
+      | [e] -> e
       | _ -> Tuple es
 
     (* [let_ name params equal body] is [let name params = equal in body]. *)

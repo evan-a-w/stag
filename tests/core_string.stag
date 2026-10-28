@@ -16,15 +16,13 @@ let abc = "abc"
 
 let%expect_test "the prims" =
   print_ints
-    (Cons
-       (Core.String.length "",
-        Cons
-          (Core.String.length abc,
-           Cons
-             (Core.String.compare "a" "b",
-              Cons
-                (Core.String.compare "b" "b",
-                 Cons (Core.String.compare "b" "a", Nil))))));
+    [
+      Core.String.length "";
+      Core.String.length abc;
+      Core.String.compare "a" "b";
+      Core.String.compare "b" "b";
+      Core.String.compare "b" "a";
+    ];
   print_char (Core.String.get abc 1);
   print_endline "";
   print_s (Core.String.sub abc 1 2);
@@ -48,16 +46,16 @@ let%expect_test "the prims" =
 
 let%expect_test "construction" =
   print_s (Core.String.of_char 'x');
-  print_s (Core.String.concat ", " (Cons ("a", Cons ("b", Cons ("c", Nil)))));
-  print_s (Core.String.concat ", " (Cons ("a", Nil)));
-  print_s (Core.String.concat ", " Nil);
-  print_s (Core.String.concat "" (Cons ("a", Cons ("", Cons ("c", Nil)))));
+  print_s (Core.String.concat ", " ["a"; "b"; "c"]);
+  print_s (Core.String.concat ", " ["a"]);
+  print_s (Core.String.concat ", " []);
+  print_s (Core.String.concat "" ["a"; ""; "c"]);
   let every_other i = Core.String.get "abcdefgh" (Core.Int.mul i 2) in
   print_s (Core.String.init 4 every_other);
   print_s (Core.String.init 0 every_other);
   print_s (Core.String.make 3 'z');
   print_s (Core.String.make 0 'z');
-  print_s (Core.String.of_list (Cons ('h', Cons ('i', Nil))));
+  print_s (Core.String.of_list ['h'; 'i']);
   print_sexp
     (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_char (Core.String.to_list abc));
   print_sexp
@@ -82,7 +80,7 @@ let%expect_test "traversal" =
   print_sexp
     (Core.Sexp.sexp_of_list
        Core.Sexp.sexp_of_char
-       (Core.String.fold_left push Nil abc));
+       (Core.String.fold_left push [] abc));
   Core.String.iter print_char abc;
   print_endline "";
   let next c =
@@ -140,12 +138,7 @@ let%expect_test "search" =
     |}]
 
 let%expect_test "prefix, suffix, drop_prefix, drop_suffix" =
-  let each f =
-    print_strings
-      (Core.List.map
-         (f "hello")
-         (Cons (-1, Cons (0, Cons (2, Cons (5, Cons (6, Nil)))))))
-  in
+  let each f = print_strings (Core.List.map (f "hello") [-1; 0; 2; 5; 6]) in
   each Core.String.prefix;
   each Core.String.suffix;
   each Core.String.drop_prefix;

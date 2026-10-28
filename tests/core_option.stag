@@ -191,11 +191,9 @@ let%expect_test "Result: all, equal" =
          Core.Sexp.sexp_of_string
          r)
   in
-  print_results (Core.Result.all (Cons (Ok 1, Cons (Ok 2, Nil))));
-  print_results (Core.Result.all Nil);
-  print_results
-    (Core.Result.all
-       (Cons (Ok 1, Cons (Error "first", Cons (Error "second", Nil)))));
+  print_results (Core.Result.all [Ok 1; Ok 2]);
+  print_results (Core.Result.all []);
+  print_results (Core.Result.all [Ok 1; Error "first"; Error "second"]);
   print_bool (Core.Result.equal Core.Int.equal Core.String.equal (Ok 1) (Ok 1));
   print_bool (Core.Result.equal Core.Int.equal Core.String.equal (Ok 1) (Ok 2));
   print_bool

@@ -149,8 +149,7 @@ let list_items t ~item =
   let items = loop open_loc [] in
   let close_loc = loc t in
   close t Rbracket ~opener:Lbracket ~open_loc;
-  ( items
-  , if List.is_empty items then Loc.merge open_loc close_loc else close_loc )
+  items, if List.is_empty items then Loc.merge open_loc close_loc else close_loc
 ;;
 
 let lident t ~what =
@@ -754,8 +753,7 @@ and fun_ t ~seq : Expr.t =
     | True
     | False
     | Lbrace
-    | Lbracket ->
-      fail (loc t) pattern_parameter
+    | Lbracket -> fail (loc t) pattern_parameter
     | _ -> expected t "a parameter");
   expect t Arrow;
   let body = expr t ~seq in

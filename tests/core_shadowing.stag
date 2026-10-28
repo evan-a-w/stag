@@ -2,12 +2,12 @@
    not change [Core] itself. *)
 
 module List = struct
-  let map f l = Nil
+  let map f l = []
 end
 
 type result['a] = Ok of 'a | Error
 
-let lengths = Core.List.map Core.String.length (Cons ("ab", Cons ("c", Nil)))
+let lengths = Core.List.map Core.String.length ["ab"; "c"]
 
 let%expect_test "Core is unaffected by the program's List and result" =
   (print_endline
@@ -35,6 +35,6 @@ module Inner = struct
   end
 
   let%expect_test "a program's Core shadows the core library" =
-    print_int (Core.List.length Nil);
+    print_int (Core.List.length []);
     [%expect {| 42 |}]
 end

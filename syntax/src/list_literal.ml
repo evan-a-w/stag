@@ -60,9 +60,12 @@ let items node t =
 
 let map_items (node : _ Node.t) t ~f =
   Option.map (spine node t) ~f:(fun (conses, nil) ->
-    List.fold_right conses ~init:nil ~f:(fun ((cons : _ Located.t), item) tail ->
-      let c, _ = Option.value_exn (node.destruct cons.txt) in
-      { cons with txt = node.construct c [ f item; tail ] }))
+    List.fold_right
+      conses
+      ~init:nil
+      ~f:(fun ((cons : _ Located.t), item) tail ->
+        let c, _ = Option.value_exn (node.destruct cons.txt) in
+        { cons with txt = node.construct c [ f item; tail ] }))
 ;;
 
 let expr ~items ~close = build Node.expr ~items ~close

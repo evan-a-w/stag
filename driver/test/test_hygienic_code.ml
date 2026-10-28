@@ -749,3 +749,28 @@ let shown = match f (fun n -> n) with | (_, s, _) -> print_endline s
     2
     |}]
 ;;
+
+let%expect_test "list literals are erased as the prelude's Cons and Nil" =
+  show_erased
+    {|
+type list['a] = Nil | Cons of 'a
+let e_literal = Stag.Code.erase .< match [x; [1]] with [y; []] -> [] | _ -> [y] >.
+|};
+  [%expect
+    {|
+    e_literal:
+    match [x; [1]] with
+    | [y; []] -> []
+    | _ -> [y]
+    (Match
+     (Construct <Cons>
+      ((Var x ())
+       (Construct <Cons>
+        ((Construct <Cons> ((Lit (Int 1)) (Construct <Nil> ())))
+         (Construct <Nil> ())))))
+     (((Construct <Cons>
+        ((Var y) (Construct <Cons> ((Construct <Nil> ()) (Construct <Nil> ())))))
+       (Construct <Nil> ()))
+      (Any (Construct <Cons> ((Var y ()) (Construct <Nil> ()))))))
+    |}]
+;;

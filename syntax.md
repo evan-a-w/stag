@@ -588,7 +588,7 @@ did; types as values are given as by `Stag.Type.expr`.
 (* gen.stag *)
 let atom = .< Core.Sexp.Atom (Core.Int.to_string x) >.      (* free x *)
 let derive_int name =
-  Cons (Stag.Toplevel.let_ name (Cons ("x", Nil)) (Stag.Code.erase atom), Nil)
+  [Stag.Toplevel.let_ name ["x"] (Stag.Code.erase atom)]
 
 (* a.stag *)
 module Core = struct end

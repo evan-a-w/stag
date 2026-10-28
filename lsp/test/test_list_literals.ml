@@ -14,7 +14,8 @@ let f x = match x with [] -> 0 | [_; Cons] -> 1 | _ -> 2
        Client.did_open client "a.stag";
        [%expect {| |}];
        Client.print_semantic_tokens client "a.stag";
-       [%expect {|
+       [%expect
+         {|
          0:0+4 Keyword "type"
          0:5+1 Type (declaration) "t"
          0:7+1 Operator "="
@@ -48,7 +49,8 @@ let f x = match x with [] -> 0 | [_; Cons] -> 1 | _ -> 2
          ~f:(fun (line, character) ->
            Client.print_hover client "a.stag" ~line ~character;
            Client.print_definition client "a.stag" ~line ~character);
-       [%expect {|
+       [%expect
+         {|
          1:8 1:8-1:19 ```stag list[A.t] ```
          1:8 no definition
          1:9 1:9-1:13 ```stag A.Cons : A.t ```

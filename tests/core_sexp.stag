@@ -32,15 +32,9 @@ let round_trip t =
 
 let%expect_test "to_string" =
   print_sexp (atom "a");
-  print_sexp (list Nil);
-  print_sexp
-    (list
-       (Cons
-          (atom "a",
-           Cons
-             (atom "b",
-              Cons (list (Cons (atom "c", Cons (atom "d", Nil))), Nil)))));
-  print_sexp (list (Cons (list Nil, Cons (list (Cons (list Nil, Nil)), Nil))));
+  print_sexp (list []);
+  print_sexp (list [atom "a"; atom "b"; list [atom "c"; atom "d"]]);
+  print_sexp (list [list []; list [list []]]);
   [%expect {|
     a
     ()
@@ -49,51 +43,29 @@ let%expect_test "to_string" =
     |}]
 
 let%expect_test "atoms are quoted only when needed" =
-  let atoms =
-    Cons
-      ("plain",
-       Cons
-         ("with-dash_and.dot",
-          Cons
-            ("123",
-             Cons
-               ("",
-                Cons
-                  ("a b",
-                   Cons
-                     ("a\tb",
-                      Cons
-                        ("line\nbreak",
-                         Cons
-                           ("(",
-                            Cons
-                              (")",
-                               Cons
-                                 ("a;b",
-                                  Cons
-                                    ("say \"hi\"",
-                                     Cons
-                                       ("back\\slash",
-                                        Cons
-                                          ("#|",
-                                           Cons
-                                             ("a|#",
-                                              Cons
-                                                ("#",
-                                                 Cons
-                                                   ("|",
-                                                    Cons
-                                                      ("#a|",
-                                                       Cons
-                                                         ("'quote'",
-                                                          Cons
-                                                            ("café",
-                                                             Cons
-                                                               ("\000\127",
-                                                                Cons
-                                                                  ("~!@$%^&*",
-                                                                   Nil)))))))))))))))))))))
-  in
+  let atoms = [
+    "plain";
+    "with-dash_and.dot";
+    "123";
+    "";
+    "a b";
+    "a\tb";
+    "line\nbreak";
+    "(";
+    ")";
+    "a;b";
+    "say \"hi\"";
+    "back\\slash";
+    "#|";
+    "a|#";
+    "#";
+    "|";
+    "#a|";
+    "'quote'";
+    "café";
+    "\000\127";
+    "~!@$%^&*";
+  ] in
   Core.List.iter round_trip (Core.List.map atom atoms);
   [%expect {|
     plain  round trips
@@ -120,17 +92,9 @@ let%expect_test "atoms are quoted only when needed" =
     |}]
 
 let%expect_test "nested round trips" =
-  round_trip (list Nil);
-  round_trip
-    (list
-       (Cons
-          (list Nil,
-           Cons (atom "", Cons (list (Cons (atom "a b", Nil)), Nil)))));
-  round_trip
-    (list
-       (Cons
-          (atom "key",
-           Cons (list (Cons (atom "x\"y", Cons (atom "\\", Nil))), Nil))));
+  round_trip (list []);
+  round_trip (list [list []; atom ""; list [atom "a b"]]);
+  round_trip (list [atom "key"; list [atom "x\"y"; atom "\\"]]);
   [%expect {|
     ()  round trips
     (()""("a b"))  round trips
@@ -146,14 +110,11 @@ let%expect_test "to_string_hum" =
   print_endline (Core.Sexp.to_string_hum (numbers 30));
   let record =
     list
-      (Cons
-         (list
-            (Cons
-               (atom "name",
-                Cons (atom "a long name for a record field", Nil))),
-          Cons
-            (list (Cons (atom "values", Cons (numbers 12, Nil))),
-             Cons (list (Cons (atom "empty", Cons (list Nil, Nil))), Nil))))
+      [
+        list [atom "name"; atom "a long name for a record field"];
+        list [atom "values"; numbers 12];
+        list [atom "empty"; list []];
+      ]
   in
   print_endline (Core.Sexp.to_string_hum record);
   [%expect {|
@@ -277,9 +238,7 @@ let%expect_test "Parse_error fields" =
   | Error e ->
     print_endline e.message;
     print_sexp
-      (Core.Sexp.sexp_of_list
-         Core.Sexp.sexp_of_int
-         (Cons (e.offset, Cons (e.line, Cons (e.col, Nil)))));
+      (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int [e.offset; e.line; e.col]);
     [%expect {|
     unexpected character: ')'
     (7 2 4)
@@ -288,12 +247,9 @@ let%expect_test "Parse_error fields" =
 let%expect_test "equal" =
   print_bool (Core.Sexp.equal (atom "a") (atom "a"));
   print_bool (Core.Sexp.equal (atom "a") (atom "b"));
-  print_bool (Core.Sexp.equal (atom "a") (list (Cons (atom "a", Nil))));
-  print_bool
-    (Core.Sexp.equal
-       (list (Cons (atom "a", Nil)))
-       (list (Cons (atom "a", Nil))));
-  print_bool (Core.Sexp.equal (list Nil) (list (Cons (list Nil, Nil))));
+  print_bool (Core.Sexp.equal (atom "a") (list [atom "a"]));
+  print_bool (Core.Sexp.equal (list [atom "a"]) (list [atom "a"]));
+  print_bool (Core.Sexp.equal (list []) (list [list []]));
   [%expect {|
     true
     false
@@ -322,8 +278,7 @@ let%expect_test "sexp_of_*" =
   print_sexp (Core.Sexp.sexp_of_int (-7));
   print_sexp (Core.Sexp.sexp_of_char ' ');
   print_sexp (Core.Sexp.sexp_of_string "hi there");
-  print_sexp
-    (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Cons (1, Cons (2, Nil))));
+  print_sexp (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int [1; 2]);
   print_sexp (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_int (Some 1));
   print_sexp (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_int None);
   print_sexp
@@ -508,9 +463,7 @@ let%expect_test "*_of_sexp: containers, errors at the failing element" =
 
 let%expect_test "Of_sexp_error fields" =
   match
-    Core.Sexp.list_of_sexp
-      Core.Sexp.int_of_sexp
-      (list (Cons (atom "1", Cons (list Nil, Nil))))
+    Core.Sexp.list_of_sexp Core.Sexp.int_of_sexp (list [atom "1"; list []])
   with
   | Ok l -> print_endline "ok"
   | Error e ->
@@ -536,10 +489,7 @@ let%expect_test "large inputs" =
      | Error e -> print_endline (Core.Sexp.Of_sexp_error.to_string e)
      | Ok l ->
        let sorted = Core.List.sort Core.Int.compare l in
-       print_int_list
-         (Core.List.filter_map
-            (Core.List.nth sorted)
-            (Cons (0, Cons (2999, Nil))));
+       print_int_list (Core.List.filter_map (Core.List.nth sorted) [0; 2999]);
        print_int (Core.String.length (Core.Sexp.to_string_hum t)));
     [%expect {|
     16890

@@ -56,11 +56,11 @@ let of_option o error =
 let all rs =
   let loop rs acc =
     match rs with
-    | Nil -> Ok (List.rev acc)
+    | [] -> Ok (List.rev acc)
     | Cons (Ok x, rest) -> loop rest (Cons (x, acc))
     | Cons (Error e, _) -> Error e
   in
-  loop rs Nil
+  loop rs []
 
 (* Both values combined by [ok], or the errors by [error] if both failed, or
    the one error. *)

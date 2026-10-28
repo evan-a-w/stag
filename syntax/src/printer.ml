@@ -517,8 +517,7 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
       match (unwrap f).txt with
       | Construct (_, []) when not (is_list_literal (unwrap f)) ->
         expr roots ~parenthesize:true (Ctx.at App) f
-      | Poly_variant (_, None) ->
-        expr roots ~parenthesize:true (Ctx.at App) f
+      | Poly_variant (_, None) -> expr roots ~parenthesize:true (Ctx.at App) f
       | _ -> expr roots (Ctx.at App) f
     in
     group

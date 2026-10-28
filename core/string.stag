@@ -29,7 +29,7 @@ let to_list s =
     | true -> acc
     | false -> loop (Int.pred i) (Cons (get s i, acc))
   in
-  loop (Int.pred (length s)) Nil
+  loop (Int.pred (length s)) []
 
 let of_list chars = concat "" (List.map of_char chars)
 
@@ -153,7 +153,7 @@ let split_on_char sep s =
        | false -> loop start (Int.succ i) acc)
     | false -> List.rev (Cons (sub s start (Int.sub i start), acc))
   in
-  loop 0 0 Nil
+  loop 0 0 []
 
 (* The substrings between the non-overlapping occurrences of [sep], found from
    the left: [split_on_string ", " "a, b, "] is [["a"; "b"; ""]]. An empty
@@ -172,8 +172,8 @@ let split_on_string sep s =
     | false -> List.rev (Cons (drop_prefix s start, acc))
   in
   match is_empty sep with
-  | true -> Cons (s, Nil)
-  | false -> loop 0 0 Nil
+  | true -> [s]
+  | false -> loop 0 0 []
 
 (* As OCaml's [String.escaped], without the quotes. *)
 let escaped s =
@@ -198,7 +198,7 @@ let escaped s =
         in
         loop (Int.succ i) (Int.succ i) escaped
   in
-  loop 0 0 Nil
+  loop 0 0 []
 
 (* Helpers of the functions above. *)
 module Internal = struct
