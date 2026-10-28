@@ -173,9 +173,11 @@ server `stag lsp` (formatting falls back to `stag fmt` if it cannot start).
   files, and documents that depend on a changed one are checked again, as
   are all documents when files change on disk (if the client watches
   files). Checking is limited (`-max-depth`, `-time-limit`, `-fuel`; by
-  default a nesting of 100000 and 5s), so a compile-time splice cannot hang
-  the server. Changes that arrive during a check are coalesced: the next
-  check is of the latest version.
+  default a nesting of 100000 and 5s, and `none` lifts a limit), so a
+  compile-time splice cannot hang the server. Checks wait until the client
+  has sent nothing for 150ms, so a burst of changes is checked once, at its
+  latest version; formatting, semantic tokens and symbols don't wait for
+  them.
 - Formatting, by `stag fmt` (no edits if the document doesn't parse).
 - Semantic tokens: keywords, comments, strings, numbers, operators, staging
   operators (as macros), and names by their syntactic role (types in type
