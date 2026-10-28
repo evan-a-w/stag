@@ -11,3 +11,4 @@ module Doc = Stag_syntax.Doc
 module Formatter = Stag_syntax.Formatter
 module Alignment = Stag_syntax.Alignment
 module Relocate = Stag_syntax.Relocate
+module Struct_quote = Stag_syntax.Struct_quote

@@ -3,7 +3,7 @@ open Syntax
 
 exception Error of Loc.t * string
 
-let expand toplevels ~loc =
+let expand_exn toplevels ~loc =
   let antiquotes = Queue.create () in
   let toplevels =
     Antiquote.map toplevels ~f:(fun antiquote ->
@@ -12,7 +12,7 @@ let expand toplevels ~loc =
         raise
           (Error
              ( antiquote.loc
-             , "an antiquote of a struct quote has no substitutions: write \
+             , "An antiquote of a struct quote takes no substitutions: write \
                 `.~e`, of a `Stag.Expr.t`" ));
       Queue.enqueue antiquotes antiquote.expr;
       Antiquote.placeholder (Queue.length antiquotes - 1))
@@ -44,7 +44,7 @@ let expand toplevels ~loc =
           (Error
              ( loc
              , sprintf
-                 "a struct quote can't hold the resolved reference %s"
+                 "A struct quote can't hold the resolved reference %s"
                  (Prelude_path.to_string_hum name) ))
       ;;
 
@@ -54,10 +54,12 @@ let expand toplevels ~loc =
       ;;
     end)
   in
-  match
-    Lift.program toplevels ~antiquote:(fun _ e ->
-      Antiquote.index e |> Option.map ~f:(Queue.get antiquotes))
-  with
+  Lift.program toplevels ~antiquote:(fun _ e ->
+    Antiquote.index e |> Option.map ~f:(Queue.get antiquotes))
+;;
+
+let expand toplevels ~loc =
+  match expand_exn toplevels ~loc with
   | expr -> Ok expr
   | exception Error (loc, message) -> Error (loc, message)
 ;;

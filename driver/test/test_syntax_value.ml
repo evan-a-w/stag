@@ -23,6 +23,7 @@ let%expect_test "the prelude's signature" =
     val raise : exn -> 'a
     module Stag : sig
       val map : ('a -> 'b) -> list['a] -> list['b]
+      val append : list['a] -> list['a] -> list['a]
       module Type_ref : sig
         type t
         val name : t -> string
@@ -46,7 +47,7 @@ let%expect_test "the prelude's signature" =
         type t = Int of int | Bool of bool | String of string | Char of char | Unit
       end
       module Type_expr : sig
-        type t = Var of string | Con of Path.t[Type_ref.t] * list[Arg.t] | Arrow of t * t | Tuple of list[t] | Code of {`context : Row.t; `inner : t} | Record of Row.t | Variant of Row.t
+        type t = Var of string | Con of Path.t[Type_ref.t] * list[Arg.t] | Arrow of t * t | Tuple of list[t] | Code of {`context : Row.t; `inner : t} | Record of Row.t | Variant of Row.t | Splice of Expr.t
         module Row : sig
           type t = Empty | Extend of string * Type_expr.t * t | Var of string
         end
@@ -61,7 +62,7 @@ let%expect_test "the prelude's signature" =
           type t = Ty of string | Row of string
         end
         module Kind : sig
-          type t = Variant of list[string * list[Type_expr.t]] | Record of list[string * Type_expr.t] | Alias of Type_expr.t | Abstract
+          type t = Variant of list[string * list[Type_expr.t]] | Record of list[string * Type_expr.t] | Alias of Type_expr.t | Abstract | Splice of Expr.t
         end
         type t = {`kind : Kind.t; `name : string; `params : list[Param.t]}
       end
@@ -77,7 +78,7 @@ let%expect_test "the prelude's signature" =
         val tuple : list[t] -> t
       end
       module Expr : sig
-        type t = Lit of Lit.t | Var of Path.t[Value_ref.t] * option[Type_expr.t] | App of t * t | Let of string * list[string * option[Type_expr.t]] * option[Type_expr.t] * t * t | Fun of list[string * option[Type_expr.t]] * t | Splice of {`expr : t; `subs : option[list[string * option[t]]]} | Quote of t | Tuple of list[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Field of t * Path.t[Field_ref.t] | Record_update of t * list[Path.t[Field_ref.t] * t] | Type of Type_expr.t | Match of t * list[Pattern.t * t] | Poly_record of list[string * t] | Poly_field of t * string | Poly_extend of list[string * t] * t | Poly_restrict of t * string | Poly_update of t * list[string * t] | Poly_variant of string * option[t] | Expect of string
+        type t = Lit of Lit.t | Var of Path.t[Value_ref.t] * option[Type_expr.t] | App of t * t | Let of string * list[string * option[Type_expr.t]] * option[Type_expr.t] * t * t | Fun of list[string * option[Type_expr.t]] * t | Splice of {`expr : t; `subs : option[list[string * option[t]]]} | Quote of t | Tuple of list[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Field of t * Path.t[Field_ref.t] | Record_update of t * list[Path.t[Field_ref.t] * t] | Type of Type_expr.t | Match of t * list[Pattern.t * t] | Poly_record of list[string * t] | Poly_field of t * string | Poly_extend of list[string * t] * t | Poly_restrict of t * string | Poly_update of t * list[string * t] | Poly_variant of string * option[t] | Expect of string | Struct_quote of list[Toplevel.t]
         val var : string -> t
         val construct : string -> list[t] -> t
         val int : int -> t
@@ -462,6 +463,10 @@ exception E
 exception F of int * list['a]
 exception G of (int * string)
 |stag}
+  ; {|
+type spliced = .~kind
+let quoted = .< struct type t = .~kind let x : .~ty = .~e include .~items end >.
+|}
   ]
 ;;
 
@@ -486,6 +491,7 @@ let%expect_test "round trips, modulo locations" =
         [%message "" ~equal:(Syntax.Program.equal program program' : bool)]);
   [%expect
     {|
+    (equal true)
     (equal true)
     (equal true)
     (equal true)
@@ -559,7 +565,7 @@ let%expect_test "constructors are made as the typechecker resolves them" =
            : bool)];
   [%expect
     {|
-    ((constructors 73)
+    ((constructors 76)
      (reflected
       (prelude.Stag.Path.Ref prelude.Stag.Type.Kind.Alias
        prelude.Stag.Type.Kind.Record prelude.Stag.Type.Kind.Variant))
