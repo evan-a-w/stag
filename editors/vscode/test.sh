@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Tests the extension: grammar unit and snapshot tests, the grammar over every
+# .stag file of the repository, and typechecking. With --integration, also
+# runs the client in a VS Code (downloaded on first use) against the stag
+# executable built by dune.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+run() {
+  if command -v node >/dev/null && command -v npm >/dev/null; then
+    "$@"
+  else
+    nix shell nixpkgs#nodejs_22 -c "$@"
+  fi
+}
+
+[ -d node_modules ] || run npm ci
+run npm test
+if ! git diff --quiet -- syntaxes/stag.tmLanguage.json; then
+  echo "syntaxes/stag.tmLanguage.json is out of date with the YAML source: commit the rebuilt file" >&2
+  exit 1
+fi
+if [ "${1:-}" = --integration ]; then
+  run npm run test:integration
+fi

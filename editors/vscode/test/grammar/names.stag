@@ -1,0 +1,75 @@
+(* SYNTAX TEST "source.stag" "keywords, names, paths, labels and types"
+let rec f x' = match x' with | _ -> y in f
+(* <--- keyword.other.let.stag
+(*  ^^^ keyword.other.rec.stag
+(*      ^ variable.other.stag
+(*        ^^ variable.other.stag
+(*             ^^^^^ keyword.control.match.stag
+(*                      ^^^^ keyword.control.with.stag
+(*                           ^ keyword.operator.bar.stag
+(*                             ^ variable.language.wildcard.stag
+(*                               ^^ keyword.operator.arrow.stag
+(*                                    ^^ keyword.other.in.stag
+let f = 1 let _ = 2 let lets = letx in_ end_ inx
+(*  ^ entity.name.function.stag
+(*            ^ variable.language.wildcard.stag
+(*                      ^^^^ entity.name.function.stag
+(*                             ^^^^ variable.other.stag
+(*                                  ^^^ variable.other.stag
+(*                                      ^^^^ variable.other.stag
+(*                                           ^^^ variable.other.stag
+type t = A | B of int * t
+(* <---- storage.type.type.stag
+(*   ^ entity.name.type.stag
+(*       ^ variable.other.enummember.stag
+(*           ^ variable.other.enummember.stag
+(*             ^^ keyword.other.of.stag
+(*                ^^^ variable.other.stag
+(*                    ^ keyword.operator.product.stag
+type list['a] = Nil | Cons of 'a * list['a]
+(*   ^^^^ entity.name.type.stag
+(*       ^ punctuation.section.brackets.begin.stag
+(*        ^^ variable.other.type.stag
+(*          ^ punctuation.section.brackets.end.stag
+(*                                 ^^^^ entity.name.type.stag
+type with_x[{..'r}] = {`x : int; ..'r}
+(*   ^^^^^^ entity.name.type.stag
+(*           ^^ keyword.operator.row.stag
+(*                     ^^ constant.other.symbol.label.stag
+(*                        ^ keyword.operator.colon.stag
+(*                             ^ punctuation.separator.semicolon.stag
+type v = [`A of int | `B; ..'r] * M.t[option[int]]
+(*        ^^ constant.other.symbol.label.stag
+(*                    ^^ constant.other.symbol.label.stag
+(*                                ^ entity.name.namespace.stag
+(*                                 ^ punctuation.accessor.stag
+(*                                  ^ entity.name.type.stag
+(*                                    ^^^^^^ entity.name.type.stag
+module M = struct include N.O end
+(* <------ storage.type.module.stag
+(*     ^ entity.name.namespace.stag
+(*         ^^^^^^ keyword.other.struct.stag
+(*                ^^^^^^^ keyword.other.include.stag
+(*                        ^ entity.name.namespace.stag
+(*                          ^ variable.other.enummember.stag
+(*                            ^^^ keyword.other.end.stag
+let p = M.N.x M.C r.x r.M.y r.`x r \ `x {r with `x = 1} `_a
+(*      ^ entity.name.namespace.stag
+(*        ^ entity.name.namespace.stag
+(*          ^ variable.other.stag
+(*              ^ variable.other.enummember.stag
+(*                 ^ punctuation.accessor.stag
+(*                  ^ variable.other.property.stag
+(*                      ^ entity.name.namespace.stag
+(*                        ^ variable.other.stag
+(*                            ^^ constant.other.symbol.label.stag
+(*                                 ^ keyword.operator.restrict.stag
+(*                                         ^^^^ keyword.control.with.stag
+(*                                                      ^^^ constant.other.symbol.label.stag
+let p = Int.add 1 2 String.equal M.<
+(*      ^^^ entity.name.namespace.stag
+(*          ^^^ variable.other.stag - variable.other.property
+(*                  ^^^^^^ entity.name.namespace.stag
+(*                         ^^^^^ variable.other.stag - variable.other.property
+(*                               ^ variable.other.enummember.stag
+(*                                ^^ keyword.operator.quote.begin.stag
