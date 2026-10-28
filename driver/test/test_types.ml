@@ -229,7 +229,7 @@ let wrong_record p = p.x.z
   [%expect
     {|
     ((Missing_field y) @ t.stag:3:14-21)
-    ((Duplicate_field x) @ t.stag:3:31-32)
+    ((Repeated_field x) @ t.stag:3:31-32)
     ((No_such_field (type_name point) (field z)) @ t.stag:4:27-28)
     ((No_such_field (type_name point) (field w)) @ t.stag:3:22-23)
     ((Unification_error
@@ -368,7 +368,7 @@ let tuple_length = match (1, 2) with (_, _, _) -> 1
      t.stag:3:25-29)
     ((Constructor_arity_mismatch (constructor prelude.Some) (expected 1) (got 0))
      @ t.stag:2:27-31)
-    ((Duplicate_field x) @ t.stag:3:45-46)
+    ((Repeated_field x) @ t.stag:3:45-46)
     ((No_such_field (type_name point) (field contents)) @ t.stag:4:42-50)
     Empty_record
     ((Unification_error

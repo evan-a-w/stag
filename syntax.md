@@ -70,7 +70,7 @@ f x y                               (* application, left assoc *)
 (a, b, c)   ()   (e)
 C   C e   C (a, b)   C ((a, b))     (* n-ary: C (a, b) has 2 args, C ((a, b)) 1 *)
 {x = 1; M.y = 2}   r.x   r.M.x      (* nominal records *)
-{r with x = 1; M.y = 2}             (* nominal update *)
+{r with x = 1; M.y = 2}             (* nominal update, may change type params *)
 {`x = 1; `y = true}   r.`x          (* polymorphic records *)
 {`x = v; `y = w | r}                (* extend *)
 r \ `x                              (* restrict *)
@@ -134,9 +134,15 @@ declaration. The known type is (after expanding aliases):
 
 - `e.x`: the type of `e`, which is checked first.
 - `{r with x = ...}`: the type of `r`, checked first, else the expected type.
-- `{x = ...}`: the type of its first qualified field if any, else the
-  expected type. All fields must be of that type.
-- `C ...`, record patterns and constructor patterns: the expected type.
+- `{x = ...}` and record patterns: the expected type if any, else the type of
+  the first qualified field if any, else the first of the types the fields
+  are of in scope, in field order, that has all of them. All fields must be
+  of that type: a qualified field of another is the error.
+- `C ...` and constructor patterns: the expected type.
+
+As in OCaml, `{r with x = ...}` is of `r`'s type but for the type parameters
+only in the types of the fields it gives: `{a with v = "s"}` with
+`a : p[int]` and `type p['a] = {v : 'a; w : int}` is a `p[string]`.
 
 The expected type of an expression is what its context is known to require
 at the point it is checked, as inference proceeds left to right: an annotated
@@ -144,10 +150,17 @@ at the point it is checked, as inference proceeds left to right: an annotated
 function is checked first), a constructor's argument types or a field's type
 once the constructor or field is resolved, a component of an expected tuple,
 polymorphic record or variant, a `match` arm's or `let` body's or `e2` of
-`e1; e2` the type of the whole, `e` in `.< e >.` the code type's inner type.
+`e1; e2` the type of the whole, `e` in `.< e >.` the code type's inner type,
+`e` in `.~e` the code type `<T>{..}` of the splice's type `T`.
 A pattern's expected type is the scrutinee's, and inside it each
 sub-pattern's that of its position. Where the type is only known later (eg. a
-parameter whose type is fixed by a later use), the lookup is lexical.
+parameter whose type is fixed by a later use), the lookup is lexical. So the
+order matters, and nothing warns of it (there is no `-principal`):
+`let f v = let _ = (v : N.r) in v.x` finds `N.r`'s `x`, but
+`let f v = let _ = v.x in (v : N.r)` the `x` in scope. Inside a quote, a
+non-function toplevel is a free variable of the quote, whose type is not its
+own (see modes.md), so in `.< N.v.x >.` the `x` is the one in scope whatever
+`N.v`'s type.
 
 ## Patterns
 

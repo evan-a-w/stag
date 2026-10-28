@@ -57,6 +57,7 @@ module Kind = struct
         }
     | Duplicate_constructor of string
     | Duplicate_field of string
+    | Repeated_field of string
     | Constructor_arity_mismatch of
         { constructor : string
         ; expected : int
@@ -284,6 +285,8 @@ let rec kind_message (kind : Kind.t) ~show_type =
     sprintf "The constructor %s is defined more than once in this module" name
   | Duplicate_field name ->
     sprintf "The record field %s is defined more than once in this module" name
+  | Repeated_field name ->
+    sprintf "The field %s is given more than once in this record" name
   | Constructor_arity_mismatch { constructor; expected; got } ->
     sprintf
       "The constructor %s expects %d argument(s), but is applied to %d"

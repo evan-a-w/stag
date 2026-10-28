@@ -85,7 +85,7 @@ let failure = only_a (B (1, true))
     {|
     (of_t <fun>)
     (constructed (Tuple (A) (B 1 true) 2))
-    (r ((x 3) (y true)))
+    (r (r (x 3) (y true)))
     (fields (Tuple 3 true))
     (matched (Tuple 3 true))
     (only_a <fun>)
@@ -152,7 +152,7 @@ let failure = only_none v
 |};
   [%expect
     {|
-    (v ((x 1) (y (Some ((x -2) (y (None)))))))
+    (v (N.r (x 1) (y (Some (N.r (x -2) (y (None)))))))
     (only_none <fun>)
     ("Match failure: no case matches the value {x = 1; y = Some {x = -2; y = None}}"
      @ t.stag:7:26-61)

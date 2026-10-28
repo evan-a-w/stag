@@ -156,7 +156,7 @@ include .~(let _ = (types, decls, abstract) in Nil)
     (decls
      (Tuple
       (Some
-       ((params (Nil))
+       (Stag.Type.Decl.t (params (Nil))
         (kind
          (Stag.Type.Kind.Variant
           (Cons (Tuple (Ref (constructor M.A)) (Nil))
@@ -167,12 +167,12 @@ include .~(let _ = (types, decls, abstract) in Nil)
                (Nil))))
             (Nil)))))))
       (Some
-       ((params (Nil))
+       (Stag.Type.Decl.t (params (Nil))
         (kind
          (Stag.Type.Kind.Alias
           (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type M.t))) (Nil))))))
       (Some
-       ((params (Nil))
+       (Stag.Type.Decl.t (params (Nil))
         (kind
          (Stag.Type.Kind.Record
           (Cons
@@ -183,7 +183,8 @@ include .~(let _ = (types, decls, abstract) in Nil)
              (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type M.t))) (Nil)))
             (Nil)))))))
       (Some
-       ((params (Cons (Stag.Type_decl.Param.Ty (String a)) (Nil)))
+       (Stag.Type.Decl.t
+        (params (Cons (Stag.Type_decl.Param.Ty (String a)) (Nil)))
         (kind
          (Stag.Type.Kind.Variant
           (Cons (Tuple (Ref (constructor Leaf)) (Nil))
@@ -201,7 +202,8 @@ include .~(let _ = (types, decls, abstract) in Nil)
                 (Nil)))))
             (Nil)))))))
       (Some
-       ((params (Cons (Stag.Type_decl.Param.Row (String r)) (Nil)))
+       (Stag.Type.Decl.t
+        (params (Cons (Stag.Type_decl.Param.Row (String r)) (Nil)))
         (kind
          (Stag.Type.Kind.Alias
           (Stag.Type_expr.Record
@@ -209,7 +211,8 @@ include .~(let _ = (types, decls, abstract) in Nil)
             (Stag.Type_expr.Con (Stag.Path.Ref (Ref (type int))) (Nil))
             (Stag.Type_expr.Row.Var (String r))))))))
       (Some
-       ((params (Cons (Stag.Type_decl.Param.Ty (String a)) (Nil)))
+       (Stag.Type.Decl.t
+        (params (Cons (Stag.Type_decl.Param.Ty (String a)) (Nil)))
         (kind
          (Stag.Type.Kind.Variant
           (Cons (Tuple (Ref (constructor Nil)) (Nil))
@@ -772,7 +775,8 @@ include .~(let _ = d in Nil)
     (decl <fun>)
     (d
      (Some
-      ((params (Cons (Stag.Type_decl.Param.Ty (String a)) (Nil)))
+      (Stag.Type.Decl.t
+       (params (Cons (Stag.Type_decl.Param.Ty (String a)) (Nil)))
        (kind
         (Stag.Type.Kind.Alias
          (Stag.Type_expr.Variant

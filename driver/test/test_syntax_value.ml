@@ -294,6 +294,32 @@ let%expect_test "nodes are located where given" =
     |}]
 ;;
 
+let%expect_test "an update of fields by ref round trips" =
+  let at txt = Located.create ~loc:Loc.none txt in
+  let expr desc : Syntax.Expr.t = at desc in
+  let update =
+    expr
+      (Record_update
+         ( expr (Var (Syntax.Path.name "v", None))
+         , [ at (Syntax.Decl_path.Resolved "A.N.x"), expr (Lit (Int 1))
+           ; at (Syntax.Decl_path.Path (Syntax.Path.name "y")), expr (Lit Unit)
+           ] ))
+  in
+  let value = Syntax_value.Expr.to_value update in
+  print_endline (Treewalk.Value.to_string_hum value);
+  (match Syntax_value.Expr.of_value value ~loc:Loc.none with
+   | Ok update' ->
+     print_s [%sexp (update' : Syntax.Expr.t)];
+     print_s [%message "" ~equal:(Syntax.Expr.equal update update' : bool)]
+   | Error error -> print_error error);
+  [%expect
+    {|
+    Stag.Expr.Record_update (Stag.Expr.Var ("v", None), Cons ((Stag.Path.Ref <field A.N.x>, Stag.Expr.Lit (Stag.Lit.Int 1)), Cons ((Stag.Path.Name "y", Stag.Expr.Lit Stag.Lit.Unit), Nil)))
+    (Record_update (Var v ()) ((<A.N.x> (Lit (Int 1))) (y (Lit Unit))))
+    (equal true)
+    |}]
+;;
+
 (* [file], checked and evaluated, and the value of each toplevel
    by canonical name. *)
 let eval_values ?(file = "gen.stag") source =

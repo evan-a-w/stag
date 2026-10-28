@@ -63,6 +63,7 @@ module Kind : sig
         }
     | Duplicate_constructor of string
     | Duplicate_field of string
+    | Repeated_field of string (** In a record expression or pattern. *)
     | Constructor_arity_mismatch of
         { constructor : string
         ; expected : int

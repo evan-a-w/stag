@@ -66,8 +66,7 @@ let of_lit : Syntax.Lit.t -> t = function
 
 (* Unqualified, as fields are looked up in the record's type. *)
 let field_name (record_type : Typed.Record_type.t) index =
-  let name = record_type.fields.(index) in
-  Option.value_map (String.rsplit2 name ~on:'.') ~default:name ~f:snd
+  Prelude_path.short_name record_type.fields.(index)
 ;;
 
 let rec sexp_of_t : t -> Sexp.t = function
@@ -81,9 +80,11 @@ let rec sexp_of_t : t -> Sexp.t = function
     List (Atom (Prelude_path.to_string_hum name) :: List.map values ~f:sexp_of_t)
   | Record (record_type, values) ->
     List
-      (Array.to_list
-         (Array.mapi values ~f:(fun index value ->
-            Sexp.List [ Atom (field_name record_type index); sexp_of_t value ])))
+      (Atom (Prelude_path.to_string_hum record_type.name)
+       :: Array.to_list
+            (Array.mapi values ~f:(fun index value ->
+               Sexp.List
+                 [ Atom (field_name record_type index); sexp_of_t value ])))
   | Poly_record fields -> [%sexp (fields : t String.Map.t)]
   | Poly_variant (tag, Unit) -> Atom ("`" ^ tag)
   | Poly_variant (tag, arg) -> List [ Atom ("`" ^ tag); sexp_of_t arg ]

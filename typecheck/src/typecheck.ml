@@ -175,7 +175,16 @@ exception Reflection_failed of Typecheck_error.t [@@deriving sexp_of]
 (* Evaluates at compile time, reflecting on the program's types. *)
 let at_compile_time (program : Program_env.t) f ~error =
   let reflect name =
-    Type_env.reflect program.type_env name
+    let%bind.Result decl = Type_env.reflect program.type_env name in
+    let%map.Result decl_type =
+      Type_env.record_type
+        program.type_env
+        (Prelude_path.canonical "Stag.Type.Decl.t")
+    in
+    Syntax_value.reflected_decl decl ~decl_type
+  in
+  let reflect name =
+    reflect name
     |> Result.map_error ~f:(fun error -> Error.of_exn (Reflection_failed error))
   in
   f ~reflect
@@ -339,10 +348,6 @@ module Known = struct
   let record scope ty = find scope ty ~members:Type_env.record_fields
   let variant scope ty = find scope ty ~members:Type_env.variant_constructors
 
-  let short_name name =
-    Option.value_map (String.rsplit2 name ~on:'.') ~default:name ~f:snd
-  ;;
-
   (* Only an unqualified name is looked up in the known type: a qualified one
      or a ref names its declaration. *)
   let unqualified : Syntax.Decl_path.t Located.t -> string option = function
@@ -353,10 +358,20 @@ module Known = struct
     | { txt = Resolved _; loc = _ } -> None
   ;;
 
+  let unqualified_field : Source.Field.t -> string option = function
+    | Path path -> unqualified path
+    | Ref _ -> None
+  ;;
+
+  let has t name ~member_name =
+    List.exists t.members ~f:(fun member ->
+      String.equal (Prelude_path.short_name (member_name member)) name)
+  ;;
+
   let member t ~name ~member_name ~loc ~missing =
     match
       List.find t.members ~f:(fun member ->
-        String.equal (short_name (member_name member)) name)
+        String.equal (Prelude_path.short_name (member_name member)) name)
     with
     | Some member -> Ok member
     | None -> error ~loc (missing ~type_name:t.type_name name)
@@ -402,11 +417,6 @@ let find_field (scope : Scope.t) ~loc ~known (field : Source.Field.t) =
     Type_env.field scope.program.type_env (Typed.Field_ref.name field) ~loc
 ;;
 
-let is_unqualified : Source.Field.t -> bool = function
-  | Path path -> Option.is_some (Known.unqualified path)
-  | Ref _ -> false
-;;
-
 (* Unifies [ty], a fresh instance of a declared type, with [expected] if that
    is known to be the same type, so that what is inside is known too. As
    [expected] is always unified with what has [ty] later, it fails only where
@@ -444,9 +454,9 @@ let constructor_types t (scope : Scope.t) constructor ~args ~expected ~loc =
     , result )
 ;;
 
-(* The record type [fields] (not empty) are of: that of the first qualified
-   field (or ref), else [expected] if it is known to be a record type, else
-   that of the first field. *)
+(* The record type [fields] (not empty) are of: [expected] if it is known to
+   be a record type, else that of the first qualified field (or ref), else the
+   first of the unqualified fields' types in scope that has all of them. *)
 let record_type (scope : Scope.t) fields ~expected ~loc =
   let of_field field =
     let%bind.Result (field : Type_env.Field.t) =
@@ -455,67 +465,105 @@ let record_type (scope : Scope.t) fields ~expected ~loc =
     let%map.Result known = Known.record scope (Some field.record) in
     Option.value_exn known
   in
-  match List.find fields ~f:(fun (field, _) -> not (is_unqualified field)) with
-  | Some (field, _) -> of_field field
+  match%bind.Result Known.record scope expected with
+  | Some known -> Ok known
   | None ->
-    (match%bind.Result Known.record scope expected with
-     | Some known -> Ok known
-     | None -> of_field (fst (List.hd_exn fields)))
+    (match
+       List.find fields ~f:(fun (field, _) ->
+         Option.is_none (Known.unqualified_field field))
+     with
+     | Some (field, _) -> of_field field
+     | None ->
+       let names =
+         List.filter_map fields ~f:(fun (field, _) ->
+           Known.unqualified_field field)
+       in
+       let has_all known =
+         List.for_all
+           names
+           ~f:(Known.has known ~member_name:Type_env.Field.name)
+       in
+       (match
+          List.find_map fields ~f:(fun (field, _) ->
+            match of_field field with
+            | Ok known when has_all known -> Some known
+            | Ok _ | Error _ -> None)
+        with
+        | Some known -> Ok known
+        | None -> of_field (fst (List.hd_exn fields))))
 ;;
 
-(* Returns the instantiated record type, and each field with its [x] paired
-   with its type. *)
-let record_fields t (scope : Scope.t) fields ~all_required ~expected ~loc =
+let is_given fields (member : Type_env.Field.t) =
+  List.exists fields ~f:(fun ((field : Type_env.Field.t), _, _) ->
+    field.index = member.index)
+;;
+
+(* The record type of [fields], and each field with its location and its
+   [x]. *)
+let resolve_record_fields (scope : Scope.t) fields ~all_required ~expected ~loc =
   let%bind.Result () =
     if List.is_empty fields then error ~loc Empty_record else Ok ()
   in
   let%bind.Result (known : Type_env.Field.t Known.t) =
     record_type scope fields ~expected ~loc
   in
-  let%bind.Result fields =
-    List.map fields ~f:(fun (field, x) ->
-      let%map.Result found = find_field scope field ~loc ~known:(Some known) in
-      found, field_loc field ~loc, x)
+  let find (field, x) =
+    let%bind.Result (found : Type_env.Field.t) =
+      find_field scope field ~loc ~known:(Some known)
+    in
+    let loc = field_loc field ~loc in
+    if String.equal found.record_type.name known.type_name
+    then Ok (found, loc, x)
+    else
+      error
+        ~loc
+        (Fields_of_different_types
+           { field = Type_env.Field.name found
+           ; expected_type = known.type_name
+           ; actual_type = found.record_type.name
+           })
+  in
+  (* A qualified field of another type is the error, rather than an
+     unqualified one the type lacks. *)
+  let%bind.Result (_ : _ list) =
+    List.filter fields ~f:(fun (field, _) ->
+      Option.is_none (Known.unqualified_field field))
+    |> List.map ~f:find
     |> Result.all
   in
-  let%bind.Result () =
-    List.fold_result
-      fields
-      ~init:()
-      ~f:(fun () ((field : Type_env.Field.t), loc, _) ->
-        if String.equal field.record_type.name known.type_name
-        then Ok ()
-        else
-          error
-            ~loc
-            (Fields_of_different_types
-               { field = Type_env.Field.name field
-               ; expected_type = known.type_name
-               ; actual_type = field.record_type.name
-               }))
-  in
+  let%bind.Result fields = List.map fields ~f:find |> Result.all in
   let%bind.Result () =
     check_no_duplicates
       (List.map fields ~f:(fun (field, loc, _) ->
-         { Located.txt = Type_env.Field.name field; loc }))
-      ~error:(fun name -> Duplicate_field name)
+         { Located.txt = Prelude_path.short_name (Type_env.Field.name field)
+         ; loc
+         }))
+      ~error:(fun name -> Repeated_field name)
   in
-  let%bind.Result () =
-    match
-      List.find known.members ~f:(fun (member : Type_env.Field.t) ->
-        not
-          (List.exists fields ~f:(fun ((field : Type_env.Field.t), _, _) ->
-             field.index = member.index)))
-    with
+  let%map.Result () =
+    match List.find known.members ~f:(Fn.non (is_given fields)) with
     | Some member when all_required ->
       error ~loc (Missing_field (Type_env.Field.name member))
     | Some _ | None -> Ok ()
   in
+  known, fields
+;;
+
+let declared_record (known : Type_env.Field.t Known.t) =
+  (List.hd_exn known.members).record
+;;
+
+(* Returns the instantiated record type, and each field with its [x] paired
+   with its type. *)
+let record_fields t (scope : Scope.t) fields ~all_required ~expected ~loc =
+  let%bind.Result known, fields =
+    resolve_record_fields scope fields ~all_required ~expected ~loc
+  in
   let inst = Scope.instantiate t scope in
-  let record = inst (List.hd_exn known.members : Type_env.Field.t).record in
+  let record = inst (declared_record known) in
   let%map.Result () = unify_known t ~expected record ~loc in
   let fields =
-    List.map fields ~f:(fun (field, _, x) ->
+    List.map fields ~f:(fun ((field : Type_env.Field.t), _, x) ->
       field_ref field, (x, inst field.ty))
   in
   record, fields
@@ -1203,7 +1251,14 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
     let inner = Scope.fresh_ty t scope in
     let context = Scope.fresh_row t scope in
     let%bind.Result code =
-      check_expr t outside ~expr:code ~ty:(TCode { inner; context })
+      check_expr
+        t
+        outside
+        ~expr:code
+        ~ty:(TCode { inner; context })
+        ?expected:
+          (Option.map expected ~f:(fun inner ->
+             Type.TCode { inner; context = Scope.fresh_row t outside }))
     in
     let%bind.Result subs =
       match subs with
@@ -1258,7 +1313,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
     in
     let%map.Result exprs = check_exprs t scope (List.map fields ~f:snd) in
     node (Record (List.zip_exn (List.map fields ~f:fst) exprs)) record
-  | Field (expr, field) when is_unqualified field ->
+  | Field (expr, field) when Option.is_some (Known.unqualified_field field) ->
     let%bind.Result expr = expr_type t scope ~expr in
     let%bind.Result field, record, field_ty =
       field_type t scope field ~record:(Some expr.ty) ~loc
@@ -1274,22 +1329,53 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
     let%map.Result expr = check_expr t scope ~expr ~ty:record in
     node (Field (expr, field)) field_ty
   | Record_update (expr, fields) ->
-    let%bind.Result expr = expr_type t scope ~expr ?expected in
-    let%bind.Result record, fields =
-      record_fields
+    (* As in OCaml, the result's type parameters are those of [expr]'s type
+       but for the ones only in the updated fields' types. *)
+    let%bind.Result known_expected = Known.record scope expected in
+    let%bind.Result expr =
+      expr_type
         t
+        scope
+        ~expr
+        ?expected:
+          (Option.map known_expected ~f:(fun known ->
+             Scope.instantiate t scope (declared_record known)))
+    in
+    let%bind.Result known, fields =
+      resolve_record_fields
         scope
         fields
         ~all_required:false
         ~expected:(either_known expr.ty expected)
         ~loc
     in
+    let inst_in = Scope.instantiate t scope in
+    let inst_out = Scope.instantiate t scope in
     let%bind.Result () =
-      Unify.unify_ty t ~ty1:record ~ty2:expr.ty |> lift ~loc:expr.loc
+      Unify.unify_ty t ~ty1:(inst_in (declared_record known)) ~ty2:expr.ty
+      |> lift ~loc:expr.loc
     in
-    let%map.Result exprs = check_exprs t scope (List.map fields ~f:snd) in
+    let record = inst_out (declared_record known) in
+    let%bind.Result () = unify_known t ~expected record ~loc in
+    let%bind.Result () =
+      List.filter known.members ~f:(Fn.non (is_given fields))
+      |> List.fold_result ~init:() ~f:(fun () (member : Type_env.Field.t) ->
+        Unify.unify_ty t ~ty1:(inst_in member.ty) ~ty2:(inst_out member.ty)
+        |> lift ~loc)
+    in
+    let%map.Result exprs =
+      check_exprs
+        t
+        scope
+        (List.map fields ~f:(fun ((field : Type_env.Field.t), _, expr) ->
+           expr, inst_out field.ty))
+    in
     node
-      (Record_update (expr, List.zip_exn (List.map fields ~f:fst) exprs))
+      (Record_update
+         ( expr
+         , List.zip_exn
+             (List.map fields ~f:(fun (field, _, _) -> field_ref field))
+             exprs ))
       record
   | Match (expr, cases) ->
     let%bind.Result scrutinee = expr_type t scope ~expr in

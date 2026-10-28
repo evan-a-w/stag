@@ -35,7 +35,7 @@ type t =
   ; mutable budget : Budget.t
   ; mutable output : string -> unit
   ; mutable on_expect : (string Located.t -> unit) option
-  ; mutable reflect : (string -> Reflected_decl.t option Or_error.t) option
+  ; mutable reflect : (string -> Value.t Or_error.t) option
     (** While evaluating at compile time. *)
   }
 
@@ -646,9 +646,7 @@ and apply t (f : Value.t) arg ~loc =
        Ok (String (Decl_ref.short_name ref_))
      | Type_decl, Ref { kind = Type; name } ->
        (match t.reflect with
-        | Some reflect ->
-          let%map decl = reflect name in
-          Syntax_value.reflected_decl decl
+        | Some reflect -> reflect name
         | None ->
           runtime_error
             ~loc

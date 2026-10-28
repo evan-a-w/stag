@@ -81,7 +81,6 @@ module Field_ref : sig
     }
 
   val name : t -> string
-  val type_name : t -> string
 
   (** As [((type_name T) (name f) (index i))]. *)
   val sexp_of_t : t -> Sexp.t
@@ -167,7 +166,8 @@ module Expr : sig
       | Record of (Field_ref.t * 'e) list
       | Field of 'e * Field_ref.t
       | Record_update of 'e * (Field_ref.t * 'e) list
-      (** [{e with f = v; ...}], of [e]'s type. *)
+      (** [{e with f = v; ...}], of [e]'s type but for the parameters only the
+          updated fields' types contain. *)
       | Match of 'e * (Pattern.t * 'e) list
       | Poly_record of (string * 'e) list
       | Poly_field of 'e * string

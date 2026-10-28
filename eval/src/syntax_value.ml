@@ -215,29 +215,24 @@ module To_value = struct
 
   let program = list toplevel
 
-  let decl_type =
-    let canonical name = Prelude_path.canonical ("Stag.Type.Decl." ^ name) in
-    { Typed.Record_type.name = canonical "t"
-    ; fields = [| canonical "params"; canonical "kind" |]
-    }
-  ;;
-
-  let reflected_decl =
-    option (fun ({ params; kind } : Reflected_decl.t) ->
-      let ref_ kind name = Value.Ref { kind; name } in
-      let kind =
-        match kind with
-        | Variant constructors ->
-          con
-            "Stag.Type.Kind.Variant"
-            [ list (pair (ref_ Constructor) (list type_expr)) constructors ]
-        | Record fields ->
-          con
-            "Stag.Type.Kind.Record"
-            [ list (pair (ref_ Field) type_expr) fields ]
-        | Alias ty -> con "Stag.Type.Kind.Alias" [ type_expr ty ]
-      in
-      Value.Record (decl_type, [| list type_param params; kind |]))
+  let reflected_decl decl ~decl_type =
+    option
+      (fun ({ params; kind } : Reflected_decl.t) ->
+         let ref_ kind name = Value.Ref { kind; name } in
+         let kind =
+           match kind with
+           | Variant constructors ->
+             con
+               "Stag.Type.Kind.Variant"
+               [ list (pair (ref_ Constructor) (list type_expr)) constructors ]
+           | Record fields ->
+             con
+               "Stag.Type.Kind.Record"
+               [ list (pair (ref_ Field) type_expr) fields ]
+           | Alias ty -> con "Stag.Type.Kind.Alias" [ type_expr ty ]
+         in
+         Value.Record (decl_type, [| list type_param params; kind |]))
+      decl
   ;;
 end
 

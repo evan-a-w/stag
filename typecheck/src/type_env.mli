@@ -83,6 +83,12 @@ val record_fields
   -> string
   -> (Field.t list option, Typecheck_error.t) Result.t
 
+(** The record type of canonical name [name], which must be a nominal record. *)
+val record_type
+  :  t
+  -> string
+  -> (Typed.Record_type.t, Typecheck_error.t) Result.t
+
 (** Likewise, its constructors if it is a variant. *)
 val variant_constructors
   :  t

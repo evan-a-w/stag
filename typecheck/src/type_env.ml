@@ -503,6 +503,14 @@ let record_fields t type_name =
     | Variant _ | Alias _ | Abstract -> None)
 ;;
 
+let record_type t type_name =
+  let%map.Result fields = record_fields t type_name in
+  match fields with
+  | Some (field :: _) -> field.record_type
+  | Some [] | None ->
+    raise_s [%message "Not a record type" (type_name : string)]
+;;
+
 let variant_constructors t type_name =
   members t type_name ~members:t.constructors ~kind:(function
     | Variant constructors ->

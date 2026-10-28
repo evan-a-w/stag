@@ -119,7 +119,7 @@ let%expect_test "nominal types" =
      @ t.stag:5:10-14)
     ((No_such_field (type_name r) (field w)) @ t.stag:5:16-17)
     ((No_such_field (type_name r) (field z)) @ t.stag:5:16-17)
-    ((Duplicate_field x) @ t.stag:5:23-24)
+    ((Repeated_field x) @ t.stag:5:23-24)
     ((Missing_field y) @ t.stag:5:8-15)
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())
