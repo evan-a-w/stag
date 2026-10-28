@@ -331,7 +331,8 @@ let%expect_test "free names in a struct quote are not references" =
     ~files:
       [ ( "a.stag"
         , {|let helper = 1
-let q = .< struct let x = helper end >.
+type t = int
+let q = .< struct let x = helper let y : t = 1 end >.
 module M = .~q
 |}
         )
@@ -339,11 +340,11 @@ module M = .~q
     (fun client ->
        Client.did_open client "a.stag";
        [%expect {| |}];
-       print_at client "a.stag" [ 1, 22; 1, 27 ];
+       print_at client "a.stag" [ 2, 27; 2, 41 ];
        [%expect {|
-         1:22 1:8-1:39 ```stag list[Stag.Toplevel.t] ```
-         1:22 no definition
-         1:27 1:8-1:39 ```stag list[Stag.Toplevel.t] ```
-         1:27 no definition
+         2:27 2:8-2:53 ```stag list[Stag.Toplevel.t] ```
+         2:27 no definition
+         2:41 2:41-2:42 ```stag type t ```
+         2:41 no definition
          |}])
 ;;

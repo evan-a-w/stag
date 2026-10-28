@@ -509,10 +509,12 @@ let create
            Hash_set.mem up_to_date (Span.of_loc expansion.loc))
          ~module_path
          [ toplevel ])
-      ~f:(fun { loc; kind; path; declaration = _; module_path } ->
+      ~f:(fun { loc; kind; path; declaration = _; module_path; quoted } ->
         match kind with
         | Type ->
-          let target = resolve_type t ~module_path path in
+          let target =
+            if quoted then None else resolve_type t ~module_path path
+          in
           add
             t
             { loc

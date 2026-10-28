@@ -28,6 +28,9 @@ module Occurrence : sig
     ; module_path : string list
       (** Of the module it is in, eg. [["Foo"; "A"]] in [a.stag] of library
           [foo], to resolve [path] lexically: [[]] for a root path. *)
+    ; quoted : bool
+      (** In a struct quote, so resolved where the declarations are spliced,
+          not here. *)
     }
   [@@deriving sexp_of]
 end

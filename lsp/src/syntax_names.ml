@@ -22,6 +22,7 @@ module Occurrence = struct
     ; path : string list
     ; declaration : bool
     ; module_path : string list
+    ; quoted : bool
     }
   [@@deriving sexp_of]
 end
@@ -42,7 +43,15 @@ let decl_path ~(add : add) ~kind ~loc : Syntax.Decl_path.t -> unit = function
 
 let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
   let occurrences = Queue.create () in
-  let add ?(declaration = false) ?(root = false) ~module_path ~kind ~loc path =
+  let add
+        ?(declaration = false)
+        ?(root = false)
+        ~module_path
+        ~quoted
+        ~kind
+        ~loc
+        path
+    =
     if not (Loc.is_none loc)
     then
       Queue.enqueue
@@ -52,17 +61,20 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
         ; path
         ; declaration
         ; module_path = (if root then [] else module_path)
+        ; quoted
         }
   in
-  let rec walk_toplevels ~module_path toplevels =
-    List.iter toplevels ~f:(walk_toplevel ~module_path)
-  and walk_toplevel ~module_path (toplevel : Syntax.Toplevel.t) =
-    let add = add ~module_path in
+  let rec walk_toplevels ?(quoted = false) ~module_path toplevels =
+    List.iter toplevels ~f:(walk_toplevel ~quoted ~module_path)
+  and walk_toplevel ~quoted ~module_path (toplevel : Syntax.Toplevel.t) =
+    let add = add ~module_path ~quoted in
     let name ?declaration kind (name : Syntax.Name.t) =
       add ?declaration ~kind ~loc:name.loc [ name.txt ]
     in
     (* Declarations in a struct quote are not of the module. *)
-    let toplevels = walk_toplevels ~module_path:(module_path @ [ "%struct" ]) in
+    let toplevels =
+      walk_toplevels ~quoted:true ~module_path:(module_path @ [ "%struct" ])
+    in
     let rec type_expr ty = walk_type_expr ~add ~expr ty
     and expr e = walk_expr ~add ~type_expr ~toplevels e in
     match toplevel.txt with
@@ -88,7 +100,10 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
       List.iter args ~f:type_expr
     | Module (module_name, toplevels) ->
       name ~declaration:true Module module_name;
-      walk_toplevels ~module_path:(module_path @ [ module_name.txt ]) toplevels
+      walk_toplevels
+        ~quoted
+        ~module_path:(module_path @ [ module_name.txt ])
+        toplevels
     | Module_splice (module_name, body, expansion) ->
       name ~declaration:true Module module_name;
       expr body;
