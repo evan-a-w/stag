@@ -13,10 +13,10 @@ end
 
 module Kind : sig
   (** Names of toplevels, types, constructors and fields are canonical, except
-      for paths ([Syntax.Path.t]), which are as written. *)
+      for paths ([Syntax.Decl_path.t]), which are as written. *)
   type t =
     | Unification_error of Unification_error.t
-    | Not_in_scope of Syntax.Path.t
+    | Not_in_scope of Syntax.Decl_path.t
     | Duplicate_toplevel of string
     | Duplicate_substitution of string
     | Variable_used_at_wrong_level of
@@ -30,12 +30,12 @@ module Kind : sig
         }
     (** Spliced where [name] is unbound, code from a quote in which [name] is
         free, as the binding of [name] there was [unusable]. *)
-    | Unbound_module of Syntax.Path.t
-    | Unbound_type of Syntax.Path.t
+    | Unbound_module of Syntax.Decl_path.t
+    | Unbound_type of Syntax.Decl_path.t
     | Unbound_type_variable of string
     | Type_variable_kind_mismatch of string
-    | Unbound_constructor of Syntax.Path.t
-    | Unbound_field of Syntax.Path.t
+    | Unbound_constructor of Syntax.Decl_path.t
+    | Unbound_field of Syntax.Decl_path.t
     | No_such_constructor of
         { type_name : string
         ; constructor : string

@@ -7,16 +7,32 @@ open! Import
     one element [Tuple]s as their element, and empty ones and nominal records
     as [()] and [{}], and a [Fun] of no parameters as its body.
 
-    A [Decl_path.Resolved], which has no syntax of its own, is printed as its
-    canonical name as a path, without the prelude's root for the prelude's
-    names ([Prelude_path.to_string_hum]): it parses as a [Decl_path.Path],
-    which names the same declaration only where that path is not shadowed
-    (and is in scope). *)
+    A [Decl_path.Resolved], which has no syntax of its own, is printed as the
+    root path naming its declaration from anywhere ([Decl_path.resolved_source]
+    given [root_modules], the program's root module names, none by default):
+    it parses as a [Decl_path.Root] naming the same declaration. Where no
+    syntax names it, it is printed as [<prelude.P>], which does not parse. A
+    [Field] of a [Root] or [Resolved] path is printed as [e.(.M.x)]. *)
 
-val type_expr : ?width:int -> Syntax.Type_expr.t -> string
-val pattern : ?width:int -> Syntax.Pattern.t -> string
-val expr : ?width:int -> Syntax.Expr.t -> string
-val toplevel : ?width:int -> Syntax.Toplevel.t -> string
+val type_expr
+  :  ?width:int
+  -> ?root_modules:String.Set.t
+  -> Syntax.Type_expr.t
+  -> string
+
+val pattern
+  :  ?width:int
+  -> ?root_modules:String.Set.t
+  -> Syntax.Pattern.t
+  -> string
+
+val expr : ?width:int -> ?root_modules:String.Set.t -> Syntax.Expr.t -> string
+
+val toplevel
+  :  ?width:int
+  -> ?root_modules:String.Set.t
+  -> Syntax.Toplevel.t
+  -> string
 
 (** The toplevels, each ending with a newline, separated by blank lines but
     between one line [let]s, and between one line [type]s. *)

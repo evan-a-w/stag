@@ -108,6 +108,18 @@ let is_ident_char c =
 
 let is_ident_start c = Char.is_alpha c || Char.equal c '_'
 
+(* Whether a token that can end an atom ends just before the current
+   character, with no trivia between, so that a [.] here is a field access's
+   or a path's, not a root path's. *)
+let after_atom (t : State.t) ~glued =
+  glued
+  && t.offset > 0
+  &&
+  match t.src.[t.offset - 1] with
+  | ')' | ']' | '}' | '"' | '.' -> true
+  | c -> is_ident_char c
+;;
+
 let skip_while (t : State.t) ~f =
   while Option.exists (State.peek t) ~f do
     State.bump t
@@ -359,7 +371,9 @@ let rec skip_trivia (t : State.t) =
 ;;
 
 let token (t : State.t) : Located.t =
+  let previous_end = t.offset in
   skip_trivia t;
+  let glued = t.offset = previous_end in
   let start = State.pos t in
   let simple n (token : Token.t) =
     State.bump_n t n;
@@ -396,6 +410,8 @@ let token (t : State.t) : Located.t =
        | '.', Some '~' -> simple 2 Splice
        | '.', Some '.' -> simple 2 Dotdot
        | '.', Some '{' -> simple 2 Dot_lbrace
+       | '.', Some c when is_ident_start c && not (after_atom t ~glued) ->
+         simple 1 Root
        | '.', _ -> simple 1 Dot
        | '@', Some '@' -> simple 2 At_at
        | '@', _ -> simple 1 At

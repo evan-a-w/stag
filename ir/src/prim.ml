@@ -258,11 +258,13 @@ let all =
 
 let by_name = String.Map.of_alist_exn (List.map all ~f:(fun t -> t.name, t))
 let find path = Map.find by_name (Syntax.Path.to_string path)
-let canonical_name t = Prelude_path.canonical ("Prim." ^ t.name)
+let canonical_name t = Prelude_path.canonical (Prelude_path.prim_prefix ^ t.name)
 
 let of_canonical_name name =
   let%bind.Option relative = Prelude_path.relative name in
-  let%bind.Option name = String.chop_prefix relative ~prefix:"Prim." in
+  let%bind.Option name =
+    String.chop_prefix relative ~prefix:Prelude_path.prim_prefix
+  in
   Map.find by_name name
 ;;
 

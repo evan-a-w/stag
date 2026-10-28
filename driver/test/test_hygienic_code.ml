@@ -83,26 +83,26 @@ let e_type = Stag.Code.erase .< type list[r] >.
   [%expect
     {|
     e_lib:
-    Core.Sexp.Atom (Core.Int.to_string x)
+    .Core.Sexp.Atom (.Core.Int.to_string x)
     (Construct <Core.Sexp.Atom> ((App (Var <Core.Int.to_string> ()) (Var x ()))))
     e_function:
-    fun x -> Core.Sexp.sexp_of_int x
+    fun x -> .Core.Sexp.sexp_of_int x
     (Fun ((x ())) (App (Var <Core.Sexp.sexp_of_int> ()) (Var x ())))
     e_prim:
-    Prim.String.length "a"
+    .String.length "a"
     (App (Var <Prim.String.length> ()) (Lit (String a)))
     e_own:
-    Gen.helper Gen.n
+    .Gen.helper .Gen.n
     (App (Var <Gen.helper> ()) (Var <Gen.n> ()))
     e_poly:
-    Core.List.map
+    .Core.List.map
     (Var <Core.List.map> ())
     e_binders:
     let y = x in
-    match Some y with
-    | Some z -> (fun w -> {`a = w; `b = `B z}) y
-    | None -> raise (Failure "none")
-    | exception Failure s -> Gen.helper {`a = s; `b = `C}
+    match .Some y with
+    | .Some z -> (fun w -> {`a = w; `b = `B z}) y
+    | .None -> .raise (.Failure "none")
+    | exception .Failure s -> .Gen.helper {`a = s; `b = `C}
     (Let y () () (Var x ())
      (Match (Construct <Some> ((Var y ())))
       (((Construct <Some> ((Var z)))
@@ -116,13 +116,13 @@ let e_type = Stag.Code.erase .< type list[r] >.
         (App (Var <Gen.helper> ())
          (Poly_record ((a (Var s ())) (b (Poly_variant C ())))))))))
     e_record:
-    fun x -> {Gen.f = x.Gen.f}
+    fun x -> {.Gen.f = x.(.Gen.f)}
     (Fun ((x ())) (Record ((<Gen.f> (Field (Var x ()) <Gen.f>)))))
     e_nested:
-    .< Core.Int.to_string 3 >.
+    .< .Core.Int.to_string 3 >.
     (Quote (App (Var <Core.Int.to_string> ()) (Lit (Int 3))))
     e_type:
-    type list[Gen.r]
+    type .list[.Gen.r]
     (Type (Con <list> ((Ty (Con <Gen.r> ())))))
     |}]
 ;;
@@ -475,7 +475,7 @@ include .~(Cons (Stag.Toplevel.let_ "bad" Nil
     Note: The generated declaration is:
       let bad =
         let x = "s" in
-        Core.Int.to_string x
+        .Core.Int.to_string x
     |}]
 ;;
 

@@ -232,6 +232,12 @@ let with_comments doc ~tokens_of_text ~source_tokens ~comments ~cuts =
         { comment with placement = Trailing } :: later
       | _ -> comment :: later)
   in
+  (* After a [.] rather than before it, where it would make it a root path's. *)
+  let not_before_dot : Slot.t -> Slot.t = function
+    | Before i when i < n && Token.equal printed.(i) Dot -> Before (i + 1)
+    | After q when q + 1 < n && Token.equal printed.(q + 1) Dot -> Before (q + 2)
+    | slot -> slot
+  in
   (* As it would be after a reformatting, given the printed tokens around. *)
   let slot (comment : Comment.t) : Slot.t =
     let inline_after q =
@@ -252,8 +258,12 @@ let with_comments doc ~tokens_of_text ~source_tokens ~comments ~cuts =
       else inline_after q
     | Inline, Some q when Token.follows source.(comment.next_token) ->
       (* Not about what follows. A line broken after a token that does not end
-         code would make it about what follows. *)
-      inline_after (skip_separators (q + 1) - 1)
+         code would make it about what follows. Past separators, where it is
+         as one written after them. *)
+      let i = skip_separators (q + 1) in
+      if i > q + 1 && i < n && not (Token.follows printed.(i))
+      then Before i
+      else inline_after (i - 1)
     | Inline, Some q ->
       (match skip_separators (q + 1) with
        | i when i < n && Token.follows printed.(i) -> inline_after (i - 1)
@@ -268,7 +278,7 @@ let with_comments doc ~tokens_of_text ~source_tokens ~comments ~cuts =
   let (_ : Slot.t option) =
     List.fold comments ~init:None ~f:(fun prev (comment : Comment.t) ->
       let slot =
-        match slot comment, prev with
+        match not_before_dot (slot comment), prev with
         | slot, Some prev when Slot.rank slot < Slot.rank prev -> prev
         | slot, _ -> slot
       in

@@ -195,7 +195,7 @@ let local_binders t (program : Typed.Program.t) names idents =
 
 let last_name (path : Syntax.Decl_path.t) =
   match path with
-  | Path path -> List.last_exn (path :> string list)
+  | Path path | Root path -> List.last_exn (path :> string list)
   | Resolved name -> name
 ;;
 

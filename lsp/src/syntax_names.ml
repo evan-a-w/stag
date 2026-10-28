@@ -26,21 +26,33 @@ module Occurrence = struct
   [@@deriving sexp_of]
 end
 
-let decl_path : Syntax.Decl_path.t -> string list option = function
-  | Path path -> Some (path :> string list)
-  | Resolved _ -> None
-;;
+type add =
+  ?declaration:bool
+  -> ?root:bool
+  -> kind:Kind.t
+  -> loc:Loc.t
+  -> string list
+  -> unit
 
-type add = ?declaration:bool -> kind:Kind.t -> loc:Loc.t -> string list -> unit
+let decl_path ~(add : add) ~kind ~loc : Syntax.Decl_path.t -> unit = function
+  | Path path -> add ~kind ~loc (path :> string list)
+  | Root path -> add ~root:true ~kind ~loc (path :> string list)
+  | Resolved _ -> ()
+;;
 
 let of_toplevels ~module_path toplevels =
   let occurrences = Queue.create () in
-  let add ?(declaration = false) ~module_path ~kind ~loc path =
+  let add ?(declaration = false) ?(root = false) ~module_path ~kind ~loc path =
     if not (Loc.is_none loc)
     then
       Queue.enqueue
         occurrences
-        { Occurrence.loc; kind; path; declaration; module_path }
+        { Occurrence.loc
+        ; kind
+        ; path
+        ; declaration
+        ; module_path = (if root then [] else module_path)
+        }
   in
   let rec walk_toplevels ~module_path toplevels =
     List.iter toplevels ~f:(walk_toplevel ~module_path)
@@ -108,7 +120,7 @@ let of_toplevels ~module_path toplevels =
     match ty.txt with
     | Var _ -> ()
     | Con (path, args) ->
-      Option.iter (decl_path path.txt) ~f:(add ~kind:Kind.Type ~loc:path.loc);
+      decl_path ~add ~kind:Kind.Type ~loc:path.loc path.txt;
       List.iter args ~f:(function
         | Ty ty -> recurse ty
         | Row row -> walk_row ~add ~kind:Kind.Poly_field row)
@@ -136,13 +148,11 @@ let of_toplevels ~module_path toplevels =
       add ~declaration:true ~kind:Kind.Pattern_var ~loc:pattern.loc [ name ]
     | Tuple patterns -> List.iter patterns ~f:recurse
     | Construct (path, args) ->
-      Option.iter
-        (decl_path path.txt)
-        ~f:(add ~kind:Kind.Constructor ~loc:path.loc);
+      decl_path ~add ~kind:Kind.Constructor ~loc:path.loc path.txt;
       List.iter args ~f:recurse
     | Record fields ->
       List.iter fields ~f:(fun (path, pattern) ->
-        Option.iter (decl_path path.txt) ~f:(add ~kind:Kind.Field ~loc:path.loc);
+        decl_path ~add ~kind:Kind.Field ~loc:path.loc path.txt;
         recurse pattern)
     | Poly_variant (tag, arg) ->
       add ~kind:Kind.Poly_tag ~loc:tag.loc [ tag.txt ];
@@ -165,13 +175,13 @@ let of_toplevels ~module_path toplevels =
     in
     let fields fields =
       List.iter fields ~f:(fun ((path : Syntax.Decl_path.t Located.t), expr) ->
-        Option.iter (decl_path path.txt) ~f:(add ~kind:Kind.Field ~loc:path.loc);
+        decl_path ~add ~kind:Kind.Field ~loc:path.loc path.txt;
         recurse expr)
     in
     match expr.txt with
     | Lit _ | Expect _ -> ()
     | Var (path, annot) ->
-      Option.iter (decl_path path) ~f:(add ~kind:Kind.Value ~loc:expr.loc);
+      decl_path ~add ~kind:Kind.Value ~loc:expr.loc path;
       Option.iter annot ~f:type_expr
     | App (f, arg) ->
       recurse f;
@@ -199,14 +209,12 @@ let of_toplevels ~module_path toplevels =
     | Quote expr -> recurse expr
     | Tuple exprs -> List.iter exprs ~f:recurse
     | Construct (path, args) ->
-      Option.iter
-        (decl_path path.txt)
-        ~f:(add ~kind:Kind.Constructor ~loc:path.loc);
+      decl_path ~add ~kind:Kind.Constructor ~loc:path.loc path.txt;
       List.iter args ~f:recurse
     | Record record -> fields record
     | Field (expr, path) ->
       recurse expr;
-      Option.iter (decl_path path.txt) ~f:(add ~kind:Kind.Field ~loc:path.loc)
+      decl_path ~add ~kind:Kind.Field ~loc:path.loc path.txt
     | Record_update (expr, record) ->
       recurse expr;
       fields record

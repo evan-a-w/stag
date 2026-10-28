@@ -278,7 +278,7 @@ module Resolution = struct
       Unusable
         (Variable_used_at_wrong_level
            { name; var_level = entry.level; used_at = scope.level })
-    | None, None -> Unusable (Not_in_scope (Syntax.Path.of_string name))
+    | None, None -> Unusable (Not_in_scope (Path (Syntax.Path.of_string name)))
   ;;
 end
 
@@ -366,7 +366,7 @@ module Known = struct
       (match (path :> string list) with
        | [ name ] -> Some name
        | _ -> None)
-    | { txt = Resolved _; loc = _ } -> None
+    | { txt = Root _ | Resolved _; loc = _ } -> None
   ;;
 
   let unqualified_field : Source.Field.t -> string option = function
@@ -989,15 +989,18 @@ let intrinsic_type t scope intrinsic =
     ~row:(fun () -> Scope.fresh_row t scope)
 ;;
 
-let rec var_type t (scope : Scope.t) ~(path : Syntax.Path.t) ~loc =
+let rec var_type t (scope : Scope.t) ~(path : Syntax.Decl_path.t) ~loc =
   let resolve ~name entry =
     resolution_type t scope ~name ~loc (Resolution.of_entry scope ~name entry)
   in
   let local =
-    match (path :> string list) with
-    | [ name ] ->
-      Env.find scope.locals name |> Option.map ~f:(fun entry -> name, entry)
-    | _ -> None
+    match path with
+    | Path path ->
+      (match (path :> string list) with
+       | [ name ] ->
+         Env.find scope.locals name |> Option.map ~f:(fun entry -> name, entry)
+       | _ -> None)
+    | Root _ | Resolved _ -> None
   in
   match local with
   | Some (name, entry) -> resolve ~name (Some entry)
@@ -1010,7 +1013,7 @@ let rec var_type t (scope : Scope.t) ~(path : Syntax.Path.t) ~loc =
        Ok (intrinsic_type t scope intrinsic, Typed.Var_ref.Intrinsic intrinsic)
      | Unbound ->
        (match scope.quote with
-        | Some _ -> resolve ~name:(Syntax.Path.to_string path) None
+        | Some _ -> resolve ~name:(Syntax.Decl_path.to_string path) None
         | None -> Error (Module_scope.unbound_value scope.module_ path ~loc)))
 
 and toplevel_type t scope (toplevel : Toplevel.t) ~loc =
@@ -1035,7 +1038,8 @@ and resolved_value_type t (scope : Scope.t) name ~loc =
   | None, Some intrinsic, _ ->
     Ok (intrinsic_type t scope intrinsic, Typed.Var_ref.Intrinsic intrinsic)
   | None, None, Some toplevel -> toplevel_type t scope toplevel ~loc
-  | None, None, None -> error ~loc (Not_in_scope (Syntax.Path.of_string name))
+  | None, None, None ->
+    error ~loc (Not_in_scope (Path (Syntax.Path.of_string name)))
 
 (* Generated code's variables are already resolved, so are found by binder
    rather than by name, which may be shadowed. *)
@@ -1049,7 +1053,7 @@ and var_ref_type t (scope : Scope.t) (var_ref : Typed.Var_ref.t) ~loc =
       (Resolution.of_entry scope ~name (Some entry))
   in
   let not_in_scope name =
-    error ~loc (Not_in_scope (Syntax.Path.of_string name))
+    error ~loc (Not_in_scope (Path (Syntax.Path.of_string name)))
   in
   match var_ref with
   | Prim prim -> Ok (Prim.ty prim, var_ref)
@@ -1230,7 +1234,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
   | Var (Path (path, annot)) ->
     let%bind.Result ty, var_ref =
       match path with
-      | Path path -> var_type t scope ~path ~loc
+      | Path _ | Root _ -> var_type t scope ~path ~loc
       | Resolved name -> resolved_value_type t scope name ~loc
     in
     let%map.Result () =
@@ -1853,7 +1857,11 @@ and substitute_explicitly t scope ~context ~subs ~loc =
           match expr with
           | None ->
             let%map.Result ty, var_ref =
-              var_type t scope ~path:(Syntax.Path.of_string name) ~loc:name_loc
+              var_type
+                t
+                scope
+                ~path:(Path (Syntax.Path.of_string name))
+                ~loc:name_loc
             in
             { Typed.Expr.desc = Var var_ref; ty; loc = name_loc }
           | Some expr -> expr_type t scope ~expr

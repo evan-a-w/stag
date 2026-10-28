@@ -42,18 +42,31 @@ let tokens source =
   | Ok tokens -> tokens
 ;;
 
-(* Before random tokens, or with [messy] maybe after them. *)
+(* Before random tokens, or with [messy] maybe after them. Not before a [.] or
+   after a root path's, where a comment would change how it lexes. *)
 let random_comments (gen : Gen.t) ~messy ~density source =
-  Array.to_list (tokens source)
+  let tokens = Array.to_list (tokens source) in
+  let lexing_changes =
+    List.filter_map tokens ~f:(fun (token : Lexer.Located.t) ->
+      match token.token with
+      | Dot -> Some token.loc.start.offset
+      | Root -> Some token.loc.stop.offset
+      | _ -> None)
+    |> Int.Set.of_list
+  in
+  tokens
   |> List.filter_map ~f:(fun (token : Lexer.Located.t) ->
-    Option.some_if
-      (Gen.int gen density = 0)
-      (match token.token with
-       | Eof -> token.loc.start.offset
-       | _ ->
-         if messy && Gen.bool gen
-         then token.loc.stop.offset
-         else token.loc.start.offset))
+    let%bind.Option () = Option.some_if (Gen.int gen density = 0) () in
+    let%bind.Option offset =
+      match token.token with
+      | Eof -> Some token.loc.start.offset
+      | _ ->
+        Some
+          (if messy && Gen.bool gen
+           then token.loc.stop.offset
+           else token.loc.start.offset)
+    in
+    Option.some_if (not (Set.mem lexing_changes offset)) offset)
   |> List.mapi ~f:(fun i offset -> offset, comment gen ~messy i)
 ;;
 
@@ -168,7 +181,7 @@ let%expect_test "random programs with comments format" =
     ~density:3
     ~gen:(fun random i -> { Gen.random; size = i % 40; deep = false })
     ();
-  [%expect {| ((!comments 29904) (!failures 0)) |}]
+  [%expect {| ((!comments 28551) (!failures 0)) |}]
 ;;
 
 let%expect_test "deep random programs with a comment in every gap format" =
@@ -179,7 +192,7 @@ let%expect_test "deep random programs with a comment in every gap format" =
     ~density:1
     ~gen:(fun random i -> { Gen.random; size = 10 + i; deep = true })
     ();
-  [%expect {| ((!comments 24320) (!failures 0)) |}]
+  [%expect {| ((!comments 22939) (!failures 0)) |}]
 ;;
 
 let%expect_test "messy random programs with comments format" =
@@ -190,7 +203,7 @@ let%expect_test "messy random programs with comments format" =
     ~density:3
     ~gen:(fun random i -> { Gen.random; size = i % 40; deep = false })
     ();
-  [%expect {| ((!comments 29769) (!failures 0)) |}]
+  [%expect {| ((!comments 28961) (!failures 0)) |}]
 ;;
 
 let%expect_test "messy random programs with a comment in most gaps format" =
@@ -201,5 +214,5 @@ let%expect_test "messy random programs with a comment in most gaps format" =
     ~density:2
     ~gen:(fun random i -> { Gen.random; size = 5 + (i / 4); deep = true })
     ();
-  [%expect {| ((!comments 14364) (!failures 0)) |}]
+  [%expect {| ((!comments 14678) (!failures 0)) |}]
 ;;

@@ -12,7 +12,7 @@ end
 module Kind = struct
   type t =
     | Unification_error of Unification_error.t
-    | Not_in_scope of Syntax.Path.t
+    | Not_in_scope of Syntax.Decl_path.t
     | Duplicate_toplevel of string
     | Duplicate_substitution of string
     | Variable_used_at_wrong_level of
@@ -24,12 +24,12 @@ module Kind = struct
         { name : string
         ; unusable : Unusable_in_quote.t
         }
-    | Unbound_module of Syntax.Path.t
-    | Unbound_type of Syntax.Path.t
+    | Unbound_module of Syntax.Decl_path.t
+    | Unbound_type of Syntax.Decl_path.t
     | Unbound_type_variable of string
     | Type_variable_kind_mismatch of string
-    | Unbound_constructor of Syntax.Path.t
-    | Unbound_field of Syntax.Path.t
+    | Unbound_constructor of Syntax.Decl_path.t
+    | Unbound_field of Syntax.Decl_path.t
     | No_such_constructor of
         { type_name : string
         ; constructor : string
@@ -211,12 +211,12 @@ let unification_message (error : Unification_error.t) ~show_type =
 
 let rec kind_message (kind : Kind.t) ~show_type =
   let decl_path : Syntax.Decl_path.t -> string = function
-    | Path path -> Syntax.Path.to_string path
+    | (Path _ | Root _) as path -> Syntax.Decl_path.to_string path
     | Resolved name -> show_type name
   in
   match kind with
   | Unification_error error -> unification_message error ~show_type
-  | Not_in_scope path -> sprintf "Unbound value %s" (Syntax.Path.to_string path)
+  | Not_in_scope path -> sprintf "Unbound value %s" (decl_path path)
   | Duplicate_toplevel name ->
     sprintf "The value %s is defined more than once in this module" name
   | Duplicate_substitution name ->
@@ -238,16 +238,14 @@ let rec kind_message (kind : Kind.t) ~show_type =
       name
       (level_name var_level)
       used_at
-  | Unbound_module path ->
-    sprintf "Unbound module %s" (Syntax.Path.to_string path)
-  | Unbound_type path -> sprintf "Unbound type %s" (Syntax.Path.to_string path)
+  | Unbound_module path -> sprintf "Unbound module %s" (decl_path path)
+  | Unbound_type path -> sprintf "Unbound type %s" (decl_path path)
   | Unbound_type_variable name -> sprintf "Unbound type variable '%s" name
   | Type_variable_kind_mismatch name ->
     sprintf "The variable %s is used both as a type and as a row" name
   | Unbound_constructor path ->
-    sprintf "Unbound constructor %s" (Syntax.Path.to_string path)
-  | Unbound_field path ->
-    sprintf "Unbound record field %s" (Syntax.Path.to_string path)
+    sprintf "Unbound constructor %s" (decl_path path)
+  | Unbound_field path -> sprintf "Unbound record field %s" (decl_path path)
   | No_such_constructor { type_name; constructor } ->
     sprintf
       "The variant type %s has no constructor %s"

@@ -808,7 +808,7 @@ let reflected = Stag.Type.expr (type (option[M.t[int]] * N.option * list[int]))
     (Tuple
      ((Con <option> ((Ty (Con <Gen.M.t> ((Ty (Con <int> ())))))))
       (Con <Gen.N.option> ()) (Con <list> ((Ty (Con <int> ()))))))
-    option[Gen.M.t[int]] * Gen.N.option * list[int]
+    .option[.Gen.M.t[.int]] * .Gen.N.option * .list[.int]
     |}]
 ;;
 
@@ -820,7 +820,7 @@ let%expect_test "malformed values" =
     {|
     Malformed syntax: expected a capitalized identifier, got "light blue", within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Variant > element 1 > component 0
     Malformed syntax: expected a lowercase identifier or _, got "match", within element 0 > Stag.Toplevel.Let argument 0
-    Malformed syntax: expected a path of capitalized identifiers ending in a lowercase identifier, got "M..y", within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 0 > Stag.Path.Name
+    Malformed syntax: expected a path, optionally from the root ([.M.x]), of capitalized identifiers ending in a lowercase identifier, got "M..y", within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 0 > Stag.Path.Name
     |}];
   (* A value of another type, eg. one with constructors of the same names. *)
   let values =
@@ -1029,7 +1029,7 @@ let%expect_test "names" =
     "M.X"             -   -     -      -    -     -     -       -    -        -       ok
     "M..x"            -   -     -      -    -     -     -       -    -        -        -
     "M."              -   -     -      -    -     -     -       -    -        -        -
-    ".x"              -   -     -      -    -     -     -       -    -        -        -
+    ".x"              -   -     -      -    -     -     -       -    -       ok        -
     ""                -   -     -      -    -     -     -       -    -        -        -
     " x"              -   -     -      -    -     -     -       -    -        -        -
     "x "              -   -     -      -    -     -     -       -    -        -        -
@@ -1056,8 +1056,8 @@ let%expect_test "names" =
     tyvar: Malformed syntax: expected a type variable name, got "x y", within Stag.Type_expr.Var
     context: Malformed syntax: expected a lowercase identifier, got "x y", within Stag.Type_expr.Code > field `context > Stag.Type_expr.Row.Extend argument 0
     subs: Malformed syntax: expected a lowercase identifier, got "x y", within Stag.Expr.Splice > field `subs > element 0 > component 0
-    var path: Malformed syntax: expected a path of capitalized identifiers ending in a lowercase identifier, got "x y", within Stag.Expr.Var argument 0 > Stag.Path.Name
-    con path: Malformed syntax: expected a path of capitalized identifiers ending in a capitalized identifier, got "x y", within Stag.Expr.Construct argument 0 > Stag.Path.Name
+    var path: Malformed syntax: expected a path, optionally from the root ([.M.x]), of capitalized identifiers ending in a lowercase identifier, got "x y", within Stag.Expr.Var argument 0 > Stag.Path.Name
+    con path: Malformed syntax: expected a path, optionally from the root ([.M.x]), of capitalized identifiers ending in a capitalized identifier, got "x y", within Stag.Expr.Construct argument 0 > Stag.Path.Name
     |}]
 ;;
 

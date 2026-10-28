@@ -95,7 +95,7 @@ let find_resolved t module_ namespace path ~loc ~unbound ~find =
 let resolve_type module_ (path : Decl_path.t) ~loc =
   match path with
   | Resolved name -> Ok name
-  | Path path ->
+  | Path _ | Root _ ->
     Module_scope.find module_ Type path ~loc ~unbound:(fun path ->
       Unbound_type path)
 ;;
@@ -105,7 +105,8 @@ let find_type t module_ path ~loc =
   match Hashtbl.find t.types name with
   | Some decl -> Ok decl
   | None ->
-    Error (Typecheck_error.create ~loc (Unbound_type (Path.of_string name)))
+    Error
+      (Typecheck_error.create ~loc (Unbound_type (Path (Path.of_string name))))
 ;;
 
 module Annotation_vars = struct
@@ -580,7 +581,11 @@ let is_empty_variant t name =
    its type. *)
 let find_member t ~types ~members name ~loc ~unbound =
   match Hashtbl.find types name with
-  | None -> Error (Typecheck_error.create ~loc (unbound (Path.of_string name)))
+  | None ->
+    Error
+      (Typecheck_error.create
+         ~loc
+         (unbound (Decl_path.Path (Path.of_string name))))
   | Some type_name ->
     let%map.Result (_ : Signature.Type_decl.t) = check t type_name in
     Hashtbl.find_exn members name
@@ -612,7 +617,7 @@ let field t name ~loc =
 let find_constructor t module_ ({ txt = path; loc } : Decl_path.t Located.t) =
   match path with
   | Resolved name -> constructor t name ~loc
-  | Path path ->
+  | Path _ | Root _ ->
     find_resolved
       t
       module_
@@ -626,7 +631,7 @@ let find_constructor t module_ ({ txt = path; loc } : Decl_path.t Located.t) =
 let find_field t module_ ({ txt = path; loc } : Decl_path.t Located.t) =
   match path with
   | Resolved name -> field t name ~loc
-  | Path path ->
+  | Path _ | Root _ ->
     find_resolved
       t
       module_

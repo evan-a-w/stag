@@ -558,8 +558,8 @@ let%expect_test "types" =
     (Record (Extend x (Con int ()) Empty))
     (Variant Empty)
     (Variant (Var r))
-    (Variant (Extend A (Con int ()) (Extend B (Con unit ()) (Var r))))
-    (Variant (Extend A (Con unit ()) Empty))
+    (Variant (Extend A (Con int ()) (Extend B (Con .unit ()) (Var r))))
+    (Variant (Extend A (Con .unit ()) Empty))
     (Variant
      (Extend A (Arrow (Var a) (Var b))
       (Extend B (Tuple ((Con int ()) (Con int ()))) Empty)))
@@ -731,7 +731,7 @@ let%expect_test "locations" =
                 Extend "`B; ..'s"
                   B "`B"
                   Con "`B"
-                    unit "`B"
+                    .unit "`B"
                   Var "..'s"
                     s "'s"
             Empty ""
@@ -1020,7 +1020,7 @@ let%expect_test "slack and misplaced syntax" =
     t.stag:1:4-6: expected a polymorphic variant tag like `A, found `..`
     t.stag:1:6-8: expected a polymorphic variant tag like `A, found `..`
     (Variant (Var r))
-    (Variant (Extend A (Con unit ()) (Var r)))
+    (Variant (Extend A (Con .unit ()) (Var r)))
     ((Type ((name t) (params ()) (kind (Variant ())))))
     t.stag:1:18-20: a constructor argument of function type must be parenthesized: `C of (a -> b)`
     t.stag:1:24-26: a constructor argument of function type must be parenthesized: `C of (a -> b)`

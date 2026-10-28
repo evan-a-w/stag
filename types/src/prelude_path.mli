@@ -22,5 +22,13 @@ val shadowed : string -> has:([ `Type | `Module ] -> string -> bool) -> bool
     [shadowed] (by default, never), with [root] (eg. [prelude.option]). *)
 val to_string_hum : ?shadowed:(string -> bool) -> string -> string
 
+(** Prims' canonical names are the prelude's under its module [Prim]. *)
+val prim_prefix : string
+
+(** The path naming a canonical name from the root scope, without its leading
+    [.]: the prelude's within it, prims by their public path
+    ([prelude.Prim.String.length] is [String.length]), the program's as is. *)
+val root_path : string -> string
+
 (** The last name of a canonical name, as declared: [x] of [M.N.x]. *)
 val short_name : string -> string

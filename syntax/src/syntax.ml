@@ -45,22 +45,43 @@ end = struct
 end
 
 (** What names a declared type, constructor, field or toplevel value: a path
-    as written, resolved where it is, or a canonical name, which reflection
-    and [Stag.Code.erase] give (see [Stag.Type_ref] in the prelude) and the
-    parser never makes, naming the same declaration wherever it is. *)
+    as written, resolved where it is, or from the root scope ([.M.x], which
+    nothing local shadows), or a canonical name, which reflection and
+    [Stag.Code.erase] give (see [Stag.Type_ref] in the prelude) and the parser
+    never makes, naming the same declaration wherever it is. *)
 module Decl_path = struct
   type t =
     | Path of Path.t
+    | Root of Path.t
     | Resolved of string
   [@@deriving compare, equal]
 
-  (** A [Path] as its path, so as parsed, and a [Resolved] as [<name>]. *)
+  (** As parsed, and a [Resolved] as [<name>]. *)
   let to_string = function
     | Path path -> Path.to_string path
+    | Root path -> "." ^ Path.to_string path
     | Resolved name -> sprintf "<%s>" (Prelude_path.to_string_hum name)
   ;;
 
   let sexp_of_t t = Sexp.Atom (to_string t)
+
+  (** The source naming the declaration of canonical name [name] from
+      anywhere, given the program's root modules: its root path, unless the
+      first name of a prelude path is a root module (or it is an intrinsic,
+      named only within the prelude), where nothing names it, so as
+      [<prelude.P>], which does not parse. *)
+  let resolved_source ~root_modules name =
+    let path = Prelude_path.root_path name in
+    let unnamed =
+      Option.is_some (Prelude_path.relative name)
+      &&
+      match String.split path ~on:'.' with
+      | first :: _ :: _ ->
+        Set.mem root_modules first || String.equal first "Intrinsic"
+      | _ -> false
+    in
+    if unnamed then sprintf "<%s>" name else "." ^ path
+  ;;
 end
 
 (** A name as written, eg. a binder or a label. *)

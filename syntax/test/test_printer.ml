@@ -830,8 +830,8 @@ let%expect_test "resolved paths are printed as paths" =
   Round_trip.program program;
   [%expect
     {|
-    let f (r : option[int]) : Gen.M.t =
-      match x.Gen.M.field with Some {Gen.M.x = _} -> Gen.M.A (type Gen.M.t)
+    let f (r : .option[.int]) : .Gen.M.t =
+      match x.(.Gen.M.field) with .Some {.Gen.M.x = _} -> .Gen.M.A (type .Gen.M.t)
     |}]
 ;;
 
