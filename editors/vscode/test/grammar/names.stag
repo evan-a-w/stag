@@ -10,6 +10,29 @@ let rec f x' = match x' with | _ -> y in f
 (*                             ^ variable.language.wildcard.stag
 (*                               ^^ keyword.operator.arrow.stag
 (*                                    ^^ keyword.other.in.stag
+let f = fun x -> x let fun_ = funx
+(*      ^^^ keyword.other.fun.stag
+(*          ^ variable.other.stag
+(*                     ^^^^ entity.name.function.stag
+(*                            ^^^^ variable.other.stag
+let fun let exception let let let rec
+(* <--- keyword.other.let.stag
+(*  ^^^ keyword.other.fun.stag - entity.name.function
+(*          ^^^^^^^^^ storage.type.exception.stag - entity.name.function
+(*                    ^^^ keyword.other.let.stag
+(*                        ^^^ keyword.other.let.stag - entity.name.function
+(*                                ^^^ keyword.other.rec.stag
+exception Not_found of string exception M.E exceptions
+(* <--------- storage.type.exception.stag
+(*        ^^^^^^^^^ variable.other.enummember.stag
+(*                  ^^ keyword.other.of.stag
+(*                            ^^^^^^^^^ storage.type.exception.stag
+(*                                      ^ entity.name.namespace.stag
+(*                                        ^ variable.other.enummember.stag
+(*                                          ^^^^^^^^^^ variable.other.stag
+let x = match e with exception E -> 1
+(*                   ^^^^^^^^^ storage.type.exception.stag
+(*                             ^ variable.other.enummember.stag
 let f = 1 let _ = 2 let lets = letx in_ end_ inx
 (*  ^ entity.name.function.stag
 (*            ^ variable.language.wildcard.stag
@@ -29,18 +52,18 @@ type t = A | B of int * t
 type list['a] = Nil | Cons of 'a * list['a]
 (*   ^^^^ entity.name.type.stag
 (*       ^ punctuation.section.brackets.begin.stag
-(*        ^^ variable.other.type.stag
+(*        ^^ entity.name.type.parameter.stag
 (*          ^ punctuation.section.brackets.end.stag
 (*                                 ^^^^ entity.name.type.stag
 type with_x[{..'r}] = {`x : int; ..'r}
 (*   ^^^^^^ entity.name.type.stag
 (*           ^^ keyword.operator.row.stag
-(*                     ^^ constant.other.symbol.label.stag
+(*                     ^^ variable.other.enummember.label.stag
 (*                        ^ keyword.operator.colon.stag
 (*                             ^ punctuation.separator.semicolon.stag
 type v = [`A of int | `B; ..'r] * M.t[option[int]]
-(*        ^^ constant.other.symbol.label.stag
-(*                    ^^ constant.other.symbol.label.stag
+(*        ^^ variable.other.enummember.label.stag
+(*                    ^^ variable.other.enummember.label.stag
 (*                                ^ entity.name.namespace.stag
 (*                                 ^ punctuation.accessor.stag
 (*                                  ^ entity.name.type.stag
@@ -62,14 +85,14 @@ let p = M.N.x M.C r.x r.M.y r.`x r \ `x {r with `x = 1} `_a
 (*                  ^ variable.other.property.stag
 (*                      ^ entity.name.namespace.stag
 (*                        ^ variable.other.stag
-(*                            ^^ constant.other.symbol.label.stag
+(*                            ^^ variable.other.enummember.label.stag
 (*                                 ^ keyword.operator.restrict.stag
 (*                                         ^^^^ keyword.control.with.stag
-(*                                                      ^^^ constant.other.symbol.label.stag
+(*                                                      ^^^ variable.other.enummember.label.stag
 let p = Int.add 1 2 String.equal M.<
 (*      ^^^ entity.name.namespace.stag
 (*          ^^^ variable.other.stag - variable.other.property
 (*                  ^^^^^^ entity.name.namespace.stag
 (*                         ^^^^^ variable.other.stag - variable.other.property
 (*                               ^ variable.other.enummember.stag
-(*                                ^^ keyword.operator.quote.begin.stag
+(*                                ^^ keyword.control.quote.begin.stag

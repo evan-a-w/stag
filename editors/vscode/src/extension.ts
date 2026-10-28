@@ -1,4 +1,4 @@
-import { execFile } from "child_process";
+import { ChildProcess, execFile, spawn } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -9,7 +9,7 @@ import {
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
-  TransportKind,
+  State,
 } from "vscode-languageclient/node";
 
 const hideFailureKey = "stag.hideServerFailure";
@@ -22,8 +22,22 @@ class QuietLanguageClient extends LanguageClient {
   }
 }
 
+function baseFolder(): string | undefined {
+  const documents = [
+    vscode.window.activeTextEditor?.document,
+    ...vscode.workspace.textDocuments,
+  ];
+  for (const document of documents) {
+    if (document?.languageId !== "stag") continue;
+    const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+    if (folder) return folder.uri.fsPath;
+  }
+  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
 // [serverPath] as an executable: a bare name is looked up on PATH, other
-// paths are relative to the first workspace folder.
+// paths are relative to the workspace folder of the active (or any open) stag
+// document, or else to the first workspace folder.
 function resolveExecutable(serverPath: string): string | undefined {
   const isFile = (file: string) => {
     try {
@@ -40,8 +54,7 @@ function resolveExecutable(serverPath: string): string | undefined {
   const candidates = (file: string) => extensions.map((ext) => file + ext);
   const expanded = serverPath.replace(/^~(?=$|[\\/])/, os.homedir());
   if (expanded.includes("/") || expanded.includes("\\")) {
-    const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    const absolute = path.resolve(folder ?? process.cwd(), expanded);
+    const absolute = path.resolve(baseFolder() ?? process.cwd(), expanded);
     return candidates(absolute).find(isFile);
   }
   for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
@@ -52,8 +65,50 @@ function resolveExecutable(serverPath: string): string | undefined {
   return undefined;
 }
 
+// Batch files can only be run through the shell, so the command line is
+// quoted.
+function commandLine(
+  executable: string,
+  args: string[],
+): { command: string; args: string[]; shell: boolean } {
+  if (!/\.(cmd|bat)$/i.test(executable)) {
+    return { command: executable, args, shell: false };
+  }
+  const quote = (arg: string) => {
+    if (arg.includes('"')) {
+      throw new Error(`cannot run a batch file with a " in: ${arg}`);
+    }
+    return `"${arg}"`;
+  };
+  return {
+    command: [executable, ...args].map(quote).join(" "),
+    args: [],
+    shell: true,
+  };
+}
+
+function exited(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => child.once("exit", () => resolve()));
+}
+
+async function terminate(child: ChildProcess): Promise<void> {
+  child.kill();
+  const timeout = new Promise<boolean>((resolve) =>
+    setTimeout(() => resolve(false), 2_000),
+  );
+  if (!(await Promise.race([exited(child).then(() => true), timeout]))) {
+    child.kill("SIGKILL");
+    await exited(child);
+  }
+}
+
 // Formats with [stag fmt], until the language server provides formatting.
 class FmtFormatter implements vscode.DocumentFormattingEditProvider {
+  private static warned = false;
+
   constructor(
     private readonly executable: string,
     private readonly output: vscode.LogOutputChannel,
@@ -67,37 +122,65 @@ class FmtFormatter implements vscode.DocumentFormattingEditProvider {
     const name = path.basename(document.fileName) || "untitled.stag";
     const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "stag-fmt-"));
     const file = path.join(dir, name);
+    const text = document.getText();
     try {
-      await fs.promises.writeFile(file, document.getText());
+      await fs.promises.writeFile(file, text);
       const formatted = await new Promise<string | undefined>((resolve) => {
+        // Exit code 1 is a syntax error in the document, which is expected
+        // while editing.
+        const failed = (error: Error & { code?: unknown }, stderr: string) => {
+          const message = (stderr || error.message)
+            .split(file)
+            .join(document.fileName)
+            .trim();
+          this.output.error(`stag fmt failed:\n${message}`);
+          const firstLine = message.split("\n")[0];
+          if (error.code === 1) {
+            vscode.window.setStatusBarMessage(
+              `$(warning) stag fmt: ${firstLine}`,
+              5_000,
+            );
+          } else if (!FmtFormatter.warned) {
+            FmtFormatter.warned = true;
+            void vscode.window.showWarningMessage(
+              `stag fmt failed: ${firstLine}`,
+            );
+          }
+          resolve(undefined);
+        };
+        let command;
+        try {
+          command = commandLine(this.executable, ["fmt", file]);
+        } catch (error) {
+          return failed(error as Error, "");
+        }
         const child = execFile(
-          this.executable,
-          ["fmt", file],
-          { timeout: 10_000, maxBuffer: 64 * 1024 * 1024 },
+          command.command,
+          command.args,
+          {
+            timeout: 10_000,
+            maxBuffer: 64 * 1024 * 1024,
+            shell: command.shell,
+          },
           (error, stdout, stderr) => {
+            cancel.dispose();
             if (token.isCancellationRequested) return resolve(undefined);
-            if (error) {
-              const message = (stderr || error.message)
-                .split(file)
-                .join(document.fileName)
-                .trim();
-              this.output.error(`stag fmt failed:\n${message}`);
-              void vscode.window.showWarningMessage(
-                `stag fmt failed: ${message.split("\n")[0]}`,
-              );
-              return resolve(undefined);
-            }
+            if (error) return failed(error, stderr);
             resolve(stdout);
           },
         );
-        token.onCancellationRequested(() => child.kill());
+        const cancel = token.onCancellationRequested(() => child.kill());
       });
-      if (formatted === undefined || formatted === document.getText()) {
+      if (formatted === "" && text.trim() !== "") {
+        this.output.error(
+          "stag fmt printed nothing; the document is left as is",
+        );
         return [];
       }
+      if (formatted === undefined || formatted === text) return [];
       const all = new vscode.Range(
         document.positionAt(0),
-        document.positionAt(document.getText().length),
+        document.positionAt(text.length),
       );
       return [vscode.TextEdit.replace(all, formatted)];
     } finally {
@@ -106,10 +189,30 @@ class FmtFormatter implements vscode.DocumentFormattingEditProvider {
   }
 }
 
+// A client and the server process it spawned.
+class Session {
+  child: ChildProcess | undefined;
+
+  constructor(readonly client: LanguageClient) {}
+
+  // The library can only stop a running client, so a starting one (eg. a
+  // server that never answers [initialize]) is stopped by killing its process.
+  async stop(): Promise<void> {
+    if (this.client.state === State.Running) {
+      await this.client.stop().catch(() => undefined);
+    }
+    if (this.child) await terminate(this.child);
+  }
+}
+
+// Starts and stops run one at a time, in order. None waits for the server to
+// initialize, so that a hung server can still be restarted.
 class Server {
-  private client: LanguageClient | undefined;
+  private session: Session | undefined;
   private formatter: vscode.Disposable | undefined;
+  private pending: Promise<void> = Promise.resolve();
   readonly reports: string[] = [];
+  readonly liveProcesses = new Set<ChildProcess>();
   // Each start is a generation, so that a failure is reported once, and not
   // for a client that was since stopped.
   private generation = 0;
@@ -119,8 +222,37 @@ class Server {
     private readonly output: vscode.LogOutputChannel,
   ) {}
 
-  async start(explicit: boolean): Promise<void> {
+  start(explicit: boolean): Promise<void> {
+    return this.enqueue(() => this.launch(explicit));
+  }
+
+  stop(): Promise<void> {
+    return this.enqueue(() => this.shutdown());
+  }
+
+  restart(explicit: boolean): Promise<void> {
+    return this.enqueue(async () => {
+      await this.shutdown();
+      await this.launch(explicit);
+    });
+  }
+
+  private enqueue(action: () => Promise<void>): Promise<void> {
+    const next = this.pending.then(action).catch((error) => {
+      this.output.error(`stag: ${error}`);
+    });
+    this.pending = next;
+    return next;
+  }
+
+  private async launch(explicit: boolean): Promise<void> {
     const generation = ++this.generation;
+    if (!vscode.workspace.isTrusted) {
+      this.output.info(
+        "The language server and formatting are off in untrusted workspaces.",
+      );
+      return;
+    }
     const serverPath = vscode.workspace
       .getConfiguration("stag")
       .get<string>("serverPath", "stag");
@@ -133,18 +265,31 @@ class Server {
       );
       return;
     }
+    const isCurrent = () => generation === this.generation;
     let reported = false;
     const failed = (message: string) => {
-      if (reported || generation !== this.generation) return;
+      if (reported || !isCurrent()) return;
       reported = true;
       this.useFallbackFormatter(executable);
       void this.report(explicit, message);
     };
-    const serverOptions: ServerOptions = {
-      command: executable,
-      args: ["lsp"],
-      transport: TransportKind.stdio,
-    };
+    const couldNotStart = `stag: the language server (\`${serverPath} lsp\`) could not start. Highlighting still works, and formatting uses \`stag fmt\`.`;
+    let started = false;
+    const serverOptions: ServerOptions = () =>
+      new Promise<ChildProcess>((resolve, reject) => {
+        if (!isCurrent()) throw new Error("stopped before it started");
+        const command = commandLine(executable, ["lsp"]);
+        const child = spawn(command.command, command.args, {
+          shell: command.shell,
+        });
+        session.child = child;
+        child.once("error", reject);
+        child.once("spawn", () => {
+          this.liveProcesses.add(child);
+          resolve(child);
+        });
+        child.once("exit", () => this.liveProcesses.delete(child));
+      });
     const clientOptions: LanguageClientOptions = {
       documentSelector: [{ language: "stag" }],
       outputChannel: this.output,
@@ -152,50 +297,45 @@ class Server {
         error: () => ({ action: ErrorAction.Shutdown, handled: true }),
         closed: () => {
           failed(
-            `stag: the language server (\`${serverPath} lsp\`) exited. Highlighting still works; restart it with "stag: Restart Language Server".`,
+            started
+              ? `stag: the language server (\`${serverPath} lsp\`) exited. Highlighting still works, and formatting uses \`stag fmt\`; restart the server with "stag: Restart Language Server".`
+              : couldNotStart,
           );
           return { action: CloseAction.DoNotRestart, handled: true };
         },
       },
       initializationFailedHandler: () => false,
     };
-    const client = new QuietLanguageClient(
-      "stag",
-      "stag",
-      serverOptions,
-      clientOptions,
+    const session = new Session(
+      new QuietLanguageClient("stag", "stag", serverOptions, clientOptions),
     );
-    this.client = client;
-    try {
-      await client.start();
-    } catch (error) {
-      this.output.error(`stag language server failed to start: ${error}`);
-      if (this.client === client) this.client = undefined;
-      failed(
-        `stag: the language server (\`${serverPath} lsp\`) could not start. Highlighting still works, and formatting uses \`stag fmt\`.`,
-      );
-      return;
-    }
-    if (generation !== this.generation) return;
-    if (!client.initializeResult?.capabilities.documentFormattingProvider) {
-      this.useFallbackFormatter(executable);
-    }
+    this.session = session;
+    session.client.start().then(
+      async () => {
+        started = true;
+        if (!isCurrent()) return session.stop();
+        if (
+          !session.client.initializeResult?.capabilities
+            .documentFormattingProvider
+        ) {
+          this.useFallbackFormatter(executable);
+        }
+      },
+      async (error) => {
+        if (!isCurrent()) return session.stop();
+        this.output.error(`stag language server failed to start: ${error}`);
+        failed(couldNotStart);
+      },
+    );
   }
 
-  async stop(): Promise<void> {
+  private async shutdown(): Promise<void> {
     this.generation++;
     this.formatter?.dispose();
     this.formatter = undefined;
-    const client = this.client;
-    this.client = undefined;
-    if (client?.isRunning()) {
-      await client.stop().catch(() => undefined);
-    }
-  }
-
-  async restart(): Promise<void> {
-    await this.stop();
-    await this.start(true);
+    const session = this.session;
+    this.session = undefined;
+    await session?.stop();
   }
 
   private useFallbackFormatter(executable: string): void {
@@ -228,9 +368,11 @@ class Server {
 
 let server: Server | undefined;
 
-// The failures reported to the user, for tests.
+// For tests.
 export interface Api {
+  // The failures reported to the user.
   readonly reports: readonly string[];
+  liveServerProcesses(): number;
 }
 
 export function activate(context: vscode.ExtensionContext): Api {
@@ -240,16 +382,22 @@ export function activate(context: vscode.ExtensionContext): Api {
   context.subscriptions.push(
     output,
     vscode.commands.registerCommand("stag.restartServer", () =>
-      started.restart(),
+      started.restart(true),
     ),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration("stag.serverPath")) {
-        void started.restart();
+        void started.restart(true);
       }
+    }),
+    vscode.workspace.onDidGrantWorkspaceTrust(() => {
+      void started.restart(false);
     }),
   );
   void started.start(false);
-  return { reports: started.reports };
+  return {
+    reports: started.reports,
+    liveServerProcesses: () => started.liveProcesses.size,
+  };
 }
 
 export function deactivate(): Promise<void> | undefined {

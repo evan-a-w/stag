@@ -7,3 +7,7 @@ module Driver = Stag_driver.Driver
 module Expect_test_runner = Stag_driver.Expect_test_runner
 module Limits = Stag_common.Limits
 module Format = Stag_driver.Format
+module Lexer = Stag_syntax.Lexer
+module Token = Stag_syntax.Token
+module Comment = Stag_syntax.Comment
+module Loc = Stag_common.Loc

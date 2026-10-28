@@ -226,6 +226,14 @@ let string (t : State.t) =
         | ' ' | '\t' -> true
         | _ -> false);
       loop ()
+    | Some '\\'
+      when Option.exists (State.peek_at t 1) ~f:(Char.equal '\r')
+           && Option.exists (State.peek_at t 2) ~f:(Char.equal '\n') ->
+      State.bump_n t 3;
+      skip_while t ~f:(function
+        | ' ' | '\t' -> true
+        | _ -> false);
+      loop ()
     | Some '\\' ->
       Buffer.add_char buf (escape t);
       loop ()

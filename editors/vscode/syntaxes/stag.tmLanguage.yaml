@@ -7,6 +7,7 @@ fileTypes: [stag]
 variables:
   ident_char: '[A-Za-z0-9_'']'
   not_ident: '(?![A-Za-z0-9_''])'
+  keywords: '(?:let|rec|in|match|with|fun|exception|type|of|module|struct|include|end|true|false)'
   escape: '\\(?:[ntrb \\"'']|x[0-9A-Fa-f]{2}|25[0-5]|2[0-4][0-9]|[01][0-9]{2})'
 
 patterns:
@@ -57,12 +58,12 @@ repository:
       - name: comment.block.string.quoted.other.stag
         begin: '\{([a-z_]*)\|'
         end: '\|\1\}'
-      - match: '''(?:\\.|[^\n])'''
+      - match: '''(?:\\[^\x{80}-\x{10FFFF}]|[^\n\x{80}-\x{10FFFF}])'''
 
   expect:
     patterns:
-      - name: keyword.other.expect-test.stag
-        match: 'let%expect_test{{not_ident}}'
+      - name: keyword.other.extension.$1.stag
+        match: 'let%(expect_test|bench){{not_ident}}'
       - name: meta.expect.stag
         begin: '(\[)(%expect){{not_ident}}'
         beginCaptures:
@@ -79,9 +80,9 @@ repository:
     begin: '\.<'
     end: '>\.'
     beginCaptures:
-      '0': { name: keyword.operator.quote.begin.stag }
+      '0': { name: keyword.control.quote.begin.stag }
     endCaptures:
-      '0': { name: keyword.operator.quote.end.stag }
+      '0': { name: keyword.control.quote.end.stag }
     patterns:
       - include: '#code'
 
@@ -90,7 +91,7 @@ repository:
       - name: meta.splice.stag
         begin: '(\.~)\s*(\()(?!\*)'
         beginCaptures:
-          '1': { name: keyword.operator.splice.stag }
+          '1': { name: keyword.control.splice.stag }
           '2': { name: punctuation.section.parens.begin.stag }
         end: '\)'
         endCaptures:
@@ -98,7 +99,7 @@ repository:
         patterns:
           - include: '#parens'
           - include: '#code'
-      - name: keyword.operator.splice.stag
+      - name: keyword.control.splice.stag
         match: '\.~'
 
   parens:
@@ -141,7 +142,7 @@ repository:
   char:
     patterns:
       - name: string.quoted.single.stag
-        match: '('')(?:([^\\''\n])|({{escape}}))('')'
+        match: '('')(?:([^\\''\n\x{80}-\x{10FFFF}])|({{escape}}))('')'
         captures:
           '1': { name: punctuation.definition.string.begin.stag }
           '3': { name: constant.character.escape.stag }
@@ -151,13 +152,13 @@ repository:
 
   type-variable:
     patterns:
-      - name: variable.other.type.weak.stag
+      - name: entity.name.type.parameter.weak.stag
         match: '''_{{ident_char}}+'
-      - name: variable.other.type.stag
+      - name: entity.name.type.parameter.stag
         match: '''[A-Za-z]{{ident_char}}*'
 
   label:
-    name: constant.other.symbol.label.stag
+    name: variable.other.enummember.label.stag
     match: '`[A-Za-z_]{{ident_char}}*'
 
   number:
@@ -177,7 +178,11 @@ repository:
         captures:
           '1': { name: storage.type.module.stag }
           '2': { name: entity.name.namespace.stag }
-      - match: '\b(let)\s+(?!(?:rec|in|match|with|type|of|module|struct|include|end|true|false){{not_ident}})([a-z]{{ident_char}}*|_{{ident_char}}+)'
+      - match: '\b(exception)\s+([A-Z]{{ident_char}}*)(?![A-Za-z0-9_''.])'
+        captures:
+          '1': { name: storage.type.exception.stag }
+          '2': { name: variable.other.enummember.stag }
+      - match: '\b(let)\s+(?!{{keywords}}{{not_ident}})([a-z]{{ident_char}}*|_{{ident_char}}+)'
         captures:
           '1': { name: keyword.other.let.stag }
           '2': { name: entity.name.function.stag }
@@ -186,12 +191,12 @@ repository:
     patterns:
       - name: keyword.control.$1.stag
         match: '\b(match|with){{not_ident}}'
-      - name: keyword.other.$1.stag
-        match: '\b(let|rec|in|of|struct|end|include){{not_ident}}'
       - name: storage.type.$1.stag
-        match: '\b(type|module){{not_ident}}'
+        match: '\b(type|module|exception){{not_ident}}'
       - name: constant.language.boolean.$1.stag
         match: '\b(true|false){{not_ident}}'
+      - name: keyword.other.$1.stag
+        match: '\b({{keywords}}){{not_ident}}'
 
   code-type:
     name: meta.type.code.stag
@@ -207,7 +212,7 @@ repository:
   # The context of a code type, directly after it, as in <int>{x : int}.
   code-type-context:
     name: meta.type.code.context.stag
-    begin: '(?<=[^-]>)\s*(\{)'
+    begin: '(?<=[^-]>)\s*(\{)(?![a-z_]*\|)'
     end: '\}'
     beginCaptures:
       '1': { name: punctuation.section.braces.begin.stag }
@@ -243,7 +248,7 @@ repository:
     match: '\b[a-z_]{{ident_char}}*(?=\[)'
 
   field:
-    match: '(\.)([a-z_]{{ident_char}}*)'
+    match: '(\.)(?!let%(?:expect_test|bench){{not_ident}})([a-z_]{{ident_char}}*)'
     captures:
       '1': { name: punctuation.accessor.stag }
       '2': { name: variable.other.property.stag }
@@ -260,7 +265,7 @@ repository:
     patterns:
       - name: keyword.operator.arrow.stag
         match: '->'
-      - name: keyword.operator.quote.end.stag
+      - name: keyword.control.quote.end.stag
         match: '>\.'
       - name: punctuation.section.substitutions.begin.stag
         match: '\.\{'

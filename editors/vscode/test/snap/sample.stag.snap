@@ -15,7 +15,7 @@
 #    ^ source.stag
 #     ^^^^ source.stag entity.name.type.stag
 #         ^ source.stag punctuation.section.brackets.begin.stag
-#          ^^ source.stag variable.other.type.stag
+#          ^^ source.stag entity.name.type.parameter.stag
 #            ^ source.stag punctuation.section.brackets.end.stag
 #             ^ source.stag
 #              ^ source.stag keyword.operator.equals.stag
@@ -28,13 +28,13 @@
 #                          ^ source.stag
 #                           ^^ source.stag keyword.other.of.stag
 #                             ^ source.stag
-#                              ^^ source.stag variable.other.type.stag
+#                              ^^ source.stag entity.name.type.parameter.stag
 #                                ^ source.stag
 #                                 ^ source.stag keyword.operator.product.stag
 #                                  ^ source.stag
 #                                   ^^^^ source.stag entity.name.type.stag
 #                                       ^ source.stag punctuation.section.brackets.begin.stag
-#                                        ^^ source.stag variable.other.type.stag
+#                                        ^^ source.stag entity.name.type.parameter.stag
 #                                          ^ source.stag punctuation.section.brackets.end.stag
 >type with_x[{..'r}] = {`x : int; ..'r}
 #^^^^ source.stag storage.type.type.stag
@@ -43,14 +43,14 @@
 #           ^ source.stag punctuation.section.brackets.begin.stag
 #            ^ source.stag punctuation.section.braces.begin.stag
 #             ^^ source.stag keyword.operator.row.stag
-#               ^^ source.stag variable.other.type.stag
+#               ^^ source.stag entity.name.type.parameter.stag
 #                 ^ source.stag punctuation.section.braces.end.stag
 #                  ^ source.stag punctuation.section.brackets.end.stag
 #                   ^ source.stag
 #                    ^ source.stag keyword.operator.equals.stag
 #                     ^ source.stag
 #                      ^ source.stag punctuation.section.braces.begin.stag
-#                       ^^ source.stag constant.other.symbol.label.stag
+#                       ^^ source.stag variable.other.enummember.label.stag
 #                         ^ source.stag
 #                          ^ source.stag keyword.operator.colon.stag
 #                           ^ source.stag
@@ -58,7 +58,7 @@
 #                               ^ source.stag punctuation.separator.semicolon.stag
 #                                ^ source.stag
 #                                 ^^ source.stag keyword.operator.row.stag
-#                                   ^^ source.stag variable.other.type.stag
+#                                   ^^ source.stag entity.name.type.parameter.stag
 #                                     ^ source.stag punctuation.section.braces.end.stag
 >type v = [`A of int | `B; ..'r]
 #^^^^ source.stag storage.type.type.stag
@@ -68,7 +68,7 @@
 #       ^ source.stag keyword.operator.equals.stag
 #        ^ source.stag
 #         ^ source.stag punctuation.section.brackets.begin.stag
-#          ^^ source.stag constant.other.symbol.label.stag
+#          ^^ source.stag variable.other.enummember.label.stag
 #            ^ source.stag
 #             ^^ source.stag keyword.other.of.stag
 #               ^ source.stag
@@ -76,11 +76,11 @@
 #                   ^ source.stag
 #                    ^ source.stag keyword.operator.bar.stag
 #                     ^ source.stag
-#                      ^^ source.stag constant.other.symbol.label.stag
+#                      ^^ source.stag variable.other.enummember.label.stag
 #                        ^ source.stag punctuation.separator.semicolon.stag
 #                         ^ source.stag
 #                          ^^ source.stag keyword.operator.row.stag
-#                            ^^ source.stag variable.other.type.stag
+#                            ^^ source.stag entity.name.type.parameter.stag
 #                              ^ source.stag punctuation.section.brackets.end.stag
 >type point = {x : int; y : int}
 #^^^^ source.stag storage.type.type.stag
@@ -163,11 +163,11 @@
 #        ^ source.stag
 #         ^^ source.stag keyword.operator.arrow.stag
 #           ^ source.stag
-#            ^^ source.stag meta.quote.stag keyword.operator.quote.begin.stag
+#            ^^ source.stag meta.quote.stag keyword.control.quote.begin.stag
 #              ^ source.stag meta.quote.stag
 #               ^ source.stag meta.quote.stag constant.numeric.integer.stag
 #                ^ source.stag meta.quote.stag
-#                 ^^ source.stag meta.quote.stag keyword.operator.quote.end.stag
+#                 ^^ source.stag meta.quote.stag keyword.control.quote.end.stag
 >  | false -> .< Int.mul .~x .~(power (Int.sub n 1) x) >.
 #^^ source.stag
 #  ^ source.stag keyword.operator.bar.stag
@@ -176,16 +176,16 @@
 #         ^ source.stag
 #          ^^ source.stag keyword.operator.arrow.stag
 #            ^ source.stag
-#             ^^ source.stag meta.quote.stag keyword.operator.quote.begin.stag
+#             ^^ source.stag meta.quote.stag keyword.control.quote.begin.stag
 #               ^ source.stag meta.quote.stag
 #                ^^^ source.stag meta.quote.stag entity.name.namespace.stag
 #                   ^ source.stag meta.quote.stag punctuation.accessor.stag
 #                    ^^^ source.stag meta.quote.stag variable.other.stag
 #                       ^ source.stag meta.quote.stag
-#                        ^^ source.stag meta.quote.stag keyword.operator.splice.stag
+#                        ^^ source.stag meta.quote.stag keyword.control.splice.stag
 #                          ^ source.stag meta.quote.stag variable.other.stag
 #                           ^ source.stag meta.quote.stag
-#                            ^^ source.stag meta.quote.stag meta.splice.stag keyword.operator.splice.stag
+#                            ^^ source.stag meta.quote.stag meta.splice.stag keyword.control.splice.stag
 #                              ^ source.stag meta.quote.stag meta.splice.stag punctuation.section.parens.begin.stag
 #                               ^^^^^ source.stag meta.quote.stag meta.splice.stag variable.other.stag
 #                                    ^ source.stag meta.quote.stag meta.splice.stag
@@ -202,7 +202,7 @@
 #                                                   ^ source.stag meta.quote.stag meta.splice.stag variable.other.stag
 #                                                    ^ source.stag meta.quote.stag meta.splice.stag punctuation.section.parens.end.stag
 #                                                     ^ source.stag meta.quote.stag
-#                                                      ^^ source.stag meta.quote.stag keyword.operator.quote.end.stag
+#                                                      ^^ source.stag meta.quote.stag keyword.control.quote.end.stag
 >
 >let r = {`x = 1; `y = true | {}}
 #^^^ source.stag keyword.other.let.stag
@@ -212,14 +212,14 @@
 #      ^ source.stag keyword.operator.equals.stag
 #       ^ source.stag
 #        ^ source.stag punctuation.section.braces.begin.stag
-#         ^^ source.stag constant.other.symbol.label.stag
+#         ^^ source.stag variable.other.enummember.label.stag
 #           ^ source.stag
 #            ^ source.stag keyword.operator.equals.stag
 #             ^ source.stag
 #              ^ source.stag constant.numeric.integer.stag
 #               ^ source.stag punctuation.separator.semicolon.stag
 #                ^ source.stag
-#                 ^^ source.stag constant.other.symbol.label.stag
+#                 ^^ source.stag variable.other.enummember.label.stag
 #                   ^ source.stag
 #                    ^ source.stag keyword.operator.equals.stag
 #                     ^ source.stag
@@ -242,10 +242,10 @@
 #          ^ source.stag
 #           ^ source.stag keyword.operator.restrict.stag
 #            ^ source.stag
-#             ^^ source.stag constant.other.symbol.label.stag
+#             ^^ source.stag variable.other.enummember.label.stag
 #               ^ source.stag punctuation.section.parens.end.stag
 #                ^ source.stag punctuation.accessor.stag
-#                 ^^ source.stag constant.other.symbol.label.stag
+#                 ^^ source.stag variable.other.enummember.label.stag
 >let c = ('\n', 'a', '\x41', "tab\there", {|raw|}, {id|a |} b|id})
 #^^^ source.stag keyword.other.let.stag
 #   ^ source.stag
@@ -306,7 +306,7 @@
 #^^ source.stag
 #  ^^^^^^^ source.stag keyword.other.include.stag
 #         ^ source.stag
-#          ^^ source.stag meta.splice.stag keyword.operator.splice.stag
+#          ^^ source.stag meta.splice.stag keyword.control.splice.stag
 #            ^ source.stag meta.splice.stag punctuation.section.parens.begin.stag
 #             ^^^^ source.stag meta.splice.stag entity.name.namespace.stag
 #                 ^ source.stag meta.splice.stag punctuation.accessor.stag
@@ -329,11 +329,11 @@
 #       ^ source.stag
 #        ^ source.stag keyword.operator.equals.stag
 #         ^ source.stag
-#          ^^ source.stag meta.quote.stag keyword.operator.quote.begin.stag
+#          ^^ source.stag meta.quote.stag keyword.control.quote.begin.stag
 #            ^ source.stag meta.quote.stag
 #             ^^^^ source.stag meta.quote.stag variable.other.stag
 #                 ^ source.stag meta.quote.stag
-#                  ^^ source.stag meta.quote.stag keyword.operator.splice.stag
+#                  ^^ source.stag meta.quote.stag keyword.control.splice.stag
 #                    ^ source.stag meta.quote.stag variable.other.stag
 #                     ^^ source.stag meta.quote.stag punctuation.section.substitutions.begin.stag
 #                       ^ source.stag meta.quote.stag variable.other.stag
@@ -346,7 +346,7 @@
 #                              ^ source.stag meta.quote.stag variable.other.stag
 #                               ^ source.stag meta.quote.stag punctuation.section.braces.end.stag
 #                                ^ source.stag meta.quote.stag
-#                                 ^^ source.stag meta.quote.stag keyword.operator.quote.end.stag
+#                                 ^^ source.stag meta.quote.stag keyword.control.quote.end.stag
 >end
 #^^^ source.stag keyword.other.end.stag
 >
@@ -357,7 +357,7 @@
 #        ^ source.stag
 #         ^ source.stag keyword.operator.equals.stag
 #          ^ source.stag
-#           ^^ source.stag meta.splice.stag keyword.operator.splice.stag
+#           ^^ source.stag meta.splice.stag keyword.control.splice.stag
 #             ^ source.stag meta.splice.stag punctuation.section.parens.begin.stag
 #              ^^^^ source.stag meta.splice.stag variable.other.stag
 #                  ^ source.stag meta.splice.stag
@@ -365,7 +365,7 @@
 #                    ^ source.stag meta.splice.stag punctuation.section.parens.end.stag
 >
 >let%expect_test "power" =
-#^^^^^^^^^^^^^^^ source.stag keyword.other.expect-test.stag
+#^^^^^^^^^^^^^^^ source.stag keyword.other.extension.expect_test.stag
 #               ^ source.stag
 #                ^ source.stag string.quoted.double.stag punctuation.definition.string.begin.stag
 #                 ^^^^^ source.stag string.quoted.double.stag
