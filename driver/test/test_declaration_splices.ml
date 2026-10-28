@@ -150,6 +150,42 @@ let%expect_test "written" = print_endline "w"; [%expect "wrong"]
     |xxx}]
 ;;
 
+let%expect_test "generated functions, and constructors of one tuple argument" =
+  check
+    ~run:true
+    (generators
+     ^ {|
+let pair = Cons (Stag.Expr.int 1, Cons (Stag.Expr.int 2, Nil))
+include .~(value "some" (Stag.Expr.construct "Some" pair))
+include .~(value "swap"
+  (Stag.Expr.Fun
+    ( Cons (("o", None), Nil)
+    , Stag.Expr.Match
+        ( Stag.Expr.var "o"
+        , Cons
+            ( ( Stag.Pattern.construct "Some" (Cons (Stag.Pattern.Var "a", Cons (Stag.Pattern.Var "b", Nil)))
+              , Stag.Expr.construct "Some" (Cons (Stag.Expr.var "b", Cons (Stag.Expr.var "a", Nil))) )
+            , Nil ) ) )))
+let shown = match swap some with Some (a, b) -> print_int a; print_int b
+|}
+    );
+  [%expect
+    {|
+    module A : sig
+      val constructor : 'a -> 'a * list['b]
+      val arm : string -> Stag.Pattern.t * Stag.Expr.t
+      val enum : list[string] -> list[Stag.Toplevel.t]
+      val value : string -> Stag.Expr.t -> list[Stag.Toplevel.t]
+      val pair : list[Stag.Expr.t]
+      val some : option[int * int]
+      val swap : option['a * 'b] -> option['b * 'a]
+      val shown : unit
+    end
+    --- output ---
+    21
+    |}]
+;;
+
 let%expect_test "negative int literals" =
   check
     ~run:true

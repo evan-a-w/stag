@@ -22,8 +22,7 @@ module type S = sig
       Other shapes the parser can't produce but that are meaningful are
       accepted, left to the typechecker: a negative int literal, a match of no
       arms (of an empty
-      type), a constructor applied to one tuple (of a
-      constructor declared [C of (a * b)]), a polymorphic record extended or
+      type), a constructor applied to one tuple, a polymorphic record extended or
       updated with no fields. *)
   val of_value : Value.t -> loc:Loc.t -> t Or_error.t
 end

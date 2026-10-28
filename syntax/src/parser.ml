@@ -446,8 +446,8 @@ let starts_pattern_atom : Token.t -> bool = function
   | _ -> false
 ;;
 
-(** [C (a, b)] has two arguments, and [C ((a, b))] one; [arg] was just
-    parsed. *)
+(** [C (a, b)] has two arguments (a tuple, if [C] is declared with one, which
+    the typechecker decides), and [C ((a, b))] one; [arg] was just parsed. *)
 let construct_args t (arg : _ Located.t) ~tuple_items =
   match tuple_items arg.txt with
   | Some items when t.bare_tuple_end = t.pos -> items

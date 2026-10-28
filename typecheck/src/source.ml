@@ -118,6 +118,28 @@ module Pattern = struct
     | Syntax pattern -> pattern.loc
     | Generated pattern -> pattern.loc
   ;;
+
+  let tuple ts =
+    let loc = Loc.merge (loc (List.hd_exn ts)) (loc (List.last_exn ts)) in
+    let syntax, generated =
+      List.partition_map ts ~f:(function
+        | Syntax pattern -> First pattern
+        | Generated pattern -> Second pattern)
+    in
+    match syntax, generated with
+    | syntax, [] -> Syntax { txt = Tuple syntax; loc }
+    | [], generated ->
+      Generated
+        { desc = Tuple generated
+        ; ty =
+            TTuple
+              (List.map generated ~f:(fun (pattern : Typed.Pattern.t) ->
+                 pattern.ty))
+        ; loc
+        }
+    | _ :: _, _ :: _ ->
+      raise_s [%message "Tuple of syntax and generated patterns"]
+  ;;
 end
 
 module Expr = struct
@@ -293,5 +315,25 @@ module Expr = struct
   let loc = function
     | Syntax expr -> expr.loc
     | Generated expr -> expr.loc
+  ;;
+
+  let tuple ts =
+    let loc = Loc.merge (loc (List.hd_exn ts)) (loc (List.last_exn ts)) in
+    let syntax, generated =
+      List.partition_map ts ~f:(function
+        | Syntax expr -> First expr
+        | Generated expr -> Second expr)
+    in
+    match syntax, generated with
+    | syntax, [] -> Syntax { txt = Tuple syntax; loc }
+    | [], generated ->
+      Generated
+        { desc = Tuple generated
+        ; ty =
+            TTuple
+              (List.map generated ~f:(fun (expr : Typed.Expr.t) -> expr.ty))
+        ; loc
+        }
+    | _ :: _, _ :: _ -> raise_s [%message "Tuple of syntax and generated exprs"]
   ;;
 end

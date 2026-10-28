@@ -339,10 +339,16 @@ let find_field (scope : Scope.t) ~loc (field : Source.Field.t) =
 ;;
 
 (* Pairs each of [args] with its instantiated type, along with the
-   constructor and the result type. *)
-let constructor_types t (scope : Scope.t) constructor ~args ~loc =
+   constructor and the result type. Several [args] of a constructor declared
+   with one are a tuple ([tuple]), as in OCaml. *)
+let constructor_types t (scope : Scope.t) constructor ~args ~tuple ~loc =
   let%bind.Result (constructor : Type_env.Constructor.t) =
     find_constructor scope constructor ~loc
+  in
+  let args =
+    match args, constructor.args with
+    | _ :: _ :: _, [ _ ] -> [ tuple args ]
+    | _ -> args
   in
   match List.zip args constructor.args with
   | Unequal_lengths ->
@@ -492,7 +498,13 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Source.Pattern.t)
     node (Tuple patterns) (Type.TTuple types), bindings
   | Construct (constructor, args) ->
     let%bind.Result constructor, args, result =
-      constructor_types t scope constructor ~args ~loc
+      constructor_types
+        t
+        scope
+        constructor
+        ~args
+        ~tuple:Source.Pattern.tuple
+        ~loc
     in
     let%map.Result args, bindings = sub_patterns args in
     node (Construct (constructor, args)) result, bindings
@@ -1070,7 +1082,7 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
     node (Tuple exprs) (Type.TTuple (tys exprs))
   | Construct (constructor, args) ->
     let%bind.Result constructor, args, result =
-      constructor_types t scope constructor ~args ~loc
+      constructor_types t scope constructor ~args ~tuple:Source.Expr.tuple ~loc
     in
     let%map.Result args = check_exprs t scope args in
     node (Construct (constructor, args)) result

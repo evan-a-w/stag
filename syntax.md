@@ -67,7 +67,7 @@ match e with | p -> e | ...         (* leading | optional; arms are e1; e2 level
 f x y                               (* application, left assoc *)
 (x : t)                             (* annotated variable: Expr.Var's annotation *)
 (a, b, c)   ()   (e)
-C   C e   C (a, b)   C ((a, b))     (* n-ary: C (a, b) has 2 args, C ((a, b)) 1 *)
+C   C e   C (a, b)   C ((a, b))     (* C (a, b): 2 args, or 1 tuple if C has 1 *)
 {x = 1; M.y = 2}   r.x   r.M.x      (* nominal records *)
 {`x = 1; `y = true}   r.`x          (* polymorphic records *)
 {`x = v; `y = w | r}                (* extend *)
@@ -106,10 +106,17 @@ and substitutions are at the tuple level (`{x = 1, 2}`), and a `let`, `match`
 or `fun` there ends at the next `;` rather than sequencing (`{x = let a = 1 in a; y = 2}`
 has two fields; parenthesize to sequence); the record of an update
 `{e with ...}` is at the splice level. Trailing `;` is allowed in `{...}`.
-`C (a, b)` has two arguments and `C ((a, b))` one, a tuple, as in OCaml
-(likewise in patterns): parentheses around a constructor's argument hold its
-arguments, unless they directly hold a tuple's own parentheses. A parenthesized
-expression's location includes its parentheses.
+As in OCaml (and likewise in patterns), parentheses around a constructor's
+argument hold its arguments, unless they directly hold a tuple's own
+parentheses: `C (a, b)` is parsed as two arguments and `C ((a, b))` as one, a
+tuple. Several arguments given to a constructor declared with one (`Some (a,
+b)`, `C of (int * int)`, `C of 'a`) are that argument as a tuple, decided by
+the typechecker from the declaration (and so also for generated code: `C` of
+`[a; b]` in `Stag.Expr.Construct`). A constructor declared with several
+(`C of int * int`) takes exactly that many: `C ((a, b))` is an arity error. A
+polymorphic variant has at most one argument, so `` `A (a, b) `` is always
+`` `A `` of a tuple. A parenthesized expression's location includes its
+parentheses.
 
 `type` takes an atomic type: a name, possibly applied (`type M.t[int]`), or a
 parenthesized type (`type (int -> t)`); as an argument it is parenthesized
@@ -127,7 +134,7 @@ value), and it has no name to recurse by.
 
 ```ocaml
 _   x   1   'c'   "s"   true   ()   (p, q)
-C   C p   C (p, q)   C ((p, q))     (* 2 args, then 1 tuple arg, as in expressions *)
+C   C p   C (p, q)   C ((p, q))     (* as in expressions *)
 {x = p; M.y = q}                    (* nominal *)
 `A   `A p
 {`x = p}   {`x = p; ..}   {`x = p; ..rest}   (* closed, open, bind rest *)

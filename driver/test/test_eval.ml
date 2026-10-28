@@ -317,40 +317,76 @@ let%expect_test "a constructor of one tuple argument, and one of two" =
     {|
 type t = C of (int * int)
 type u = D of int * int
+type box['a] = Box of 'a
 let c = C ((1, 2))
+let c2 = C (1, 2)
 let d = D (1, 2)
 let pair = (3, 4)
 let c' = C pair
 let first = match c with C ((a, b)) -> a
+let first2 = match c2 with C (a, b) -> a
 let whole = match c' with C p -> p
 let second = match d with D (a, b) -> b
+let some = Some (1, true)
+let boxed = Box (1, 2, 3)
+let nested = match Some (Box (1, 2), D (3, 4)) with Some (Box (a, b), D (c, d)) -> (a, b, c, d)
+let none = match some with None -> 0 | Some (n, _) -> n
 |};
   [%expect
     {|
     (c (C (Tuple 1 2)))
+    (c2 (C (Tuple 1 2)))
     (d (D 1 2))
     (pair (Tuple 3 4))
     (c' (C (Tuple 3 4)))
     (first 1)
+    (first2 1)
     (whole (Tuple 3 4))
     (second 2)
+    (some (Some (Tuple 1 true)))
+    (boxed (Box (Tuple 1 2 3)))
+    (nested (Tuple 1 2 3 4))
+    (none 1)
     |}];
   List.iter
     ~f:(fun source -> ignore (typecheck (source ^ "\n") : _ option))
-    [ "type t = C of (int * int)\nlet c = C (1, 2)"
-    ; "type t = C of (int * int)\nlet f x = match x with C (a, b) -> a"
+    [ "type t = C of (int * int)\nlet c = C (1, 2, 3)"
+    ; "type t = C of (int * int)\nlet f x = match x with C (a, b, c) -> a"
     ; "type u = D of int * int\nlet d = D ((1, 2))"
     ; "type u = D of int * int\nlet f x = match x with D ((a, b)) -> a"
+    ; "type u = D of int * int\nlet d = D (1, 2, 3)"
+    ; "type u = D of int * int\nlet d = D 1"
+    ; "type v = E\nlet e = E (1, 2)"
+    ; "let s = Some"
+    ; "let f x = match x with Some -> 1"
     ];
   [%expect
     {|
-    ((Constructor_arity_mismatch (constructor C) (expected 1) (got 2)) @
-     t.stag:2:8-16)
-    ((Constructor_arity_mismatch (constructor C) (expected 1) (got 2)) @
-     t.stag:2:23-31)
+    ((Unification_error
+      (Type_mismatch (TTuple ((TCon int ()) (TCon int ())))
+       (TTuple ((TCon int ()) (TCon int ()) (TCon int ())))
+       (Args_length_mismatch 2 3)))
+     @ t.stag:2:11-18)
+    ((Unification_error
+      (Type_mismatch (TTuple ((TCon int ()) (TCon int ())))
+       (TTuple
+        ((TVar (Link (TVar (Unbound 23 1)))) (TVar (Link (TVar (Unbound 24 1))))
+         (TVar (Link (TVar (Unbound 25 1))))))
+       (Args_length_mismatch 2 3)))
+     @ t.stag:2:26-33)
     ((Constructor_arity_mismatch (constructor D) (expected 2) (got 1)) @
      t.stag:2:8-18)
     ((Constructor_arity_mismatch (constructor D) (expected 2) (got 1)) @
      t.stag:2:23-33)
+    ((Constructor_arity_mismatch (constructor D) (expected 2) (got 3)) @
+     t.stag:2:8-19)
+    ((Constructor_arity_mismatch (constructor D) (expected 2) (got 1)) @
+     t.stag:2:8-11)
+    ((Constructor_arity_mismatch (constructor E) (expected 0) (got 2)) @
+     t.stag:2:8-16)
+    ((Constructor_arity_mismatch (constructor prelude.Some) (expected 1) (got 0))
+     @ t.stag:1:8-12)
+    ((Constructor_arity_mismatch (constructor prelude.Some) (expected 1) (got 0))
+     @ t.stag:1:23-27)
     |}]
 ;;
