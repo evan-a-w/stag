@@ -246,8 +246,7 @@ module Make (B : Builder) = struct
     match antiquote with
     | None -> program t
     | Some antiquote ->
-      let module L =
-        Lifter (struct
+      let module L = Lifter (struct
           let antiquote = antiquote
         end)
       in

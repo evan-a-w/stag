@@ -710,3 +710,219 @@ let x : .~(failing ()) = 1
     Error: This type splice failed at compile time: Uncaught exception A.Fail
     |}]
 ;;
+
+let%expect_test "a function before a definition splice that uses it" =
+  (* Its constructors are visible only after the declaration, so checking [g]
+     doesn't evaluate the splice. *)
+  check
+    {|
+let g x = Some x
+let mk (u : unit) = match g 1 with Some _ -> Stag.Type_decl.Kind.Variant (Cons (("A", Nil), Nil)) | None -> Stag.Type_decl.Kind.Abstract
+type t = .~(let _ = g in mk ())
+let x = A
+|};
+  (* A function before it naming its constructors can't see them: a cycle. *)
+  check
+    {|
+let f x = match x with A -> 1 | B -> 2
+type t = .~(let _ = f in Stag.Type_decl.Kind.Variant (Cons (("A", Nil), Cons (("B", Nil), Nil))))
+|};
+  [%expect
+    {|
+    module A : sig
+      val g : 'a -> option['a]
+      val mk : unit -> Stag.Type_decl.Kind.t
+      type t = A
+      val x : t
+    end
+    File "a.stag", line 2, characters 23-24:
+    2 | let f x = match x with A -> 1 | B -> 2
+                               ^
+    Error: Unbound constructor A
+    File "a.stag", line 3, characters 9-97:
+    3 | type t = .~(let _ = f in Stag.Type_decl.Kind.Variant (Cons (("A", Nil), Cons (("B", Nil), Nil))))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: This type splice, after this point, may define it, but is still being computed because its expression uses this code
+    |}]
+;;
+
+let%expect_test "a definition splice's constructors are visible after it" =
+  check
+    {|
+let early = A
+let mk (u : unit) = Stag.Type_decl.Kind.Variant (Cons (("A", Nil), Nil))
+type t = .~(mk ())
+let late = A
+module M = struct
+  let inner = A
+end
+|};
+  [%expect
+    {|
+    File "a.stag", line 2, characters 12-13:
+    2 | let early = A
+                    ^
+    Error: Unbound constructor A
+    File "a.stag", line 4, characters 9-18:
+    4 | type t = .~(mk ())
+                 ^^^^^^^^^
+    Note: This type splice defines it, but it is visible only after the type's declaration
+    |}]
+;;
+
+let%expect_test "a type splice giving a splice is an error, not a loop" =
+  check
+    {|
+let s = Stag.Type_expr.Splice (Stag.Expr.var "s")
+let x : .~s = 1
+|};
+  check
+    {|
+let k = Stag.Type_decl.Kind.Variant (Cons (("A", Cons (Stag.Type_expr.Splice (Stag.Expr.var "s"), Nil)), Nil))
+type t = .~k
+|};
+  [%expect
+    {|
+    File "a.stag", line 3, characters 8-11:
+    3 | let x : .~s = 1
+                ^^^
+    Error: This type splice gave a type or definition that itself contains a type splice: what a splice gives may not contain splices
+    File "a.stag", line 3, characters 9-12:
+    3 | type t = .~k
+                 ^^^
+    Error: This type splice gave a type or definition that itself contains a type splice: what a splice gives may not contain splices
+    |}]
+;;
+
+let%expect_test "a type splice's expression is evaluated once" =
+  check
+    ~run:true
+    {|
+let int_ty (u : unit) = let _ = print_endline "evaluated" in Stag.Type_expr.con "int" Nil
+type n = .~(Stag.Type_decl.Kind.Alias (int_ty ()))
+exception E of n
+let a = E 1
+let b = E 2
+let kind (u : unit) = let _ = print_endline "defined" in Stag.Type_decl.Kind.Record (Cons (("v", Stag.Type_expr.con "n" Nil), Nil))
+type r = .~(kind ())
+let c = {v = 1}
+let d = {v = 2}
+let f (x : r) = x.v
+|};
+  [%expect
+    {|
+    evaluated
+    defined
+    module A : sig
+      val int_ty : unit -> Stag.Type_expr.t
+      type n = int
+      exception E of int
+      val a : exn
+      val b : exn
+      val kind : unit -> Stag.Type_decl.Kind.t
+      type r = { v : int }
+      val c : r
+      val d : r
+      val f : r -> int
+    end
+    --- output ---
+    |}]
+;;
+
+let%expect_test "polymorphic type splice annotations" =
+  check
+    ~run:true
+    {|
+let arrow = Stag.Type_expr.Arrow (Stag.Type_expr.Var "a", Stag.Type_expr.Var "a")
+let id : .~arrow = fun x -> x
+let both = (id 1, id "s")
+let pair (x : 'a) (y : .~(Stag.Type_expr.Var "a")) = (x, y)
+let shown = match both with (_, s) -> print_endline s
+|};
+  [%expect
+    {|
+    module A : sig
+      val arrow : Stag.Type_expr.t
+      val id : 'a -> 'a
+      val both : int * string
+      val pair : 'a -> 'a -> 'a * 'a
+      val shown : unit
+    end
+    --- output ---
+    s
+    |}]
+;;
+
+let%expect_test "a definition splice reflecting on its own declaration" =
+  check
+    {|
+type t = .~(let _ = Stag.Type.expr (type t) in Stag.Type_decl.Kind.Variant (Cons (("A", Nil), Nil)))
+let x = A
+|};
+  check
+    {|
+type t = .~(match Stag.Type.expr (type t) with Stag.Type_expr.Con (Stag.Path.Ref r, _) -> let _ = Stag.Type.decl r in Stag.Type_decl.Kind.Variant (Cons (("A", Nil), Nil)) | _ -> Stag.Type_decl.Kind.Abstract)
+|};
+  [%expect
+    {|
+    module A : sig
+      type t = A
+      val x : t
+    end
+    File "a.stag", line 2, characters 5-6:
+    2 | type t = .~(match Stag.Type.expr (type t) with Stag.Type_expr.Con (Stag.Path.Ref r, _) -> let _ = Stag.Type.decl r in Stag.Type_decl.Kind.Variant (Cons (("A", Nil), Nil)) | _ -> Stag.Type_decl.Kind.Abstract)
+             ^
+    Error: The type A.t is needed here while its definition is being computed by the type splice at a.stag:2:9-207, whose expression uses this code
+    |}]
+;;
+
+let%expect_test "errors in type splices are reported and checking continues" =
+  check
+    ~run:true
+    {|
+type t = .~(nope 1)
+let use (x : t) = x
+let a : .~(also_nope) = 1
+let b : int = "b"
+let mk (u : unit) = match use with _ -> Stag.Type_expr.con "int" Nil
+let c : .~(mk ()) = 3
+type u = .~(Stag.Type_decl.Kind.Variant (Cons (("U", Nil), Nil)))
+let fine = U
+let shown = print_endline "ran"
+|};
+  [%expect
+    {|
+    File "a.stag", line 2, characters 12-16:
+    2 | type t = .~(nope 1)
+                    ^^^^
+    Error: Unbound value nope
+    File "a.stag", line 4, characters 10-21:
+    4 | let a : .~(also_nope) = 1
+                  ^^^^^^^^^^^
+    Error: Unbound value also_nope
+    File "a.stag", line 5, characters 14-17:
+    5 | let b : int = "b"
+                      ^^^
+    Error: This expression has type string but an expression was expected of type int
+    |}]
+;;
+
+let%expect_test "a failed definition splice fails its declaration once" =
+  check
+    {|
+exception Fail
+let fail (u : unit) : Stag.Type_decl.Kind.t = raise Fail
+type t = .~(fail ())
+let f (x : t) = x
+let g (x : t) = x
+type alias = t
+let h (x : alias) = x
+|};
+  [%expect
+    {|
+    File "a.stag", line 4, characters 9-20:
+    4 | type t = .~(fail ())
+                 ^^^^^^^^^^^
+    Error: This type splice failed at compile time: Uncaught exception A.Fail
+    |}]
+;;

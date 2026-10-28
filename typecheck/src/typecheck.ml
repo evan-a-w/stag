@@ -1345,38 +1345,43 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
        uses it: the cycle is reported. *)
     Scc_frame.create index ~pending:[]
   | Unchecked ->
-  Stack.push program.unfinished ty;
-  toplevel.state
-  <- In_progress
-       { index
-       ; ty
-       ; args = List.map args ~f:fst
-       ; body = None
-       ; recursive = false
-       };
-  let body =
-    match
-      check_body t scope ~args ~res_ty ~body:(Source.Expr.Syntax toplevel.expr)
-    with
-    | body -> body
-    | exception Uses_unfinished ->
-      abandon program scc ~unfinished;
-      raise Uses_unfinished
-  in
-  if program.reported > reported then scc.failed <- true;
-  (match toplevel.state with
-   | In_progress in_progress -> in_progress.body <- Some body
-   | Unchecked | Done _ ->
-     raise_s
-       [%message "check_toplevel: not in progress" (toplevel : Toplevel.t)]);
-  if scc.lowlink = index
-  then (
-    finish_scc t program scc.pending ~failed:scc.failed;
-    scc.pending <- [];
-    while Stack.length program.unfinished > unfinished do
-      Unify.lower_ty ~rank:0 (Stack.pop_exn program.unfinished)
-    done);
-  scc
+    Stack.push program.unfinished ty;
+    toplevel.state
+    <- In_progress
+         { index
+         ; ty
+         ; args = List.map args ~f:fst
+         ; body = None
+         ; recursive = false
+         };
+    let body =
+      match
+        check_body
+          t
+          scope
+          ~args
+          ~res_ty
+          ~body:(Source.Expr.Syntax toplevel.expr)
+      with
+      | body -> body
+      | exception Uses_unfinished ->
+        abandon program scc ~unfinished;
+        raise Uses_unfinished
+    in
+    if program.reported > reported then scc.failed <- true;
+    (match toplevel.state with
+     | In_progress in_progress -> in_progress.body <- Some body
+     | Unchecked | Done _ ->
+       raise_s
+         [%message "check_toplevel: not in progress" (toplevel : Toplevel.t)]);
+    if scc.lowlink = index
+    then (
+      finish_scc t program scc.pending ~failed:scc.failed;
+      scc.pending <- [];
+      while Stack.length program.unfinished > unfinished do
+        Unify.lower_ty ~rank:0 (Stack.pop_exn program.unfinished)
+      done);
+    scc
 
 (* Abandons the toplevels of [scc] with the splice whose code reached them,
    to be checked anew. *)
@@ -2283,8 +2288,7 @@ let stag_type name = Type.TCon (Prelude_path.canonical name, [])
 
 (* Checks [expr], written in [scope], and runs it at compile time, unless it
    did not check. *)
-let run_at_compile_time t (program : Program_env.t) scope ~expr ~ty ~loc ~error
-  =
+let run_at_compile_time t (program : Program_env.t) scope ~expr ~ty ~loc ~error =
   let reported = program.reported in
   let expr = check_expr t scope ~expr:(Source.Expr.Syntax expr) ~ty in
   if program.reported > reported
@@ -2350,7 +2354,9 @@ let forcing (program : Program_env.t) (scope : Scope.t) splice f
 (* The type declaration [type t = .~e] defined by what [e] evaluates to. *)
 let define_type t (program : Program_env.t) splice =
   let loc = Module_scope.Splice.loc splice in
-  let scope = compile_time_scope t program (Module_scope.Splice.module_ splice) in
+  let scope =
+    compile_time_scope t program (Module_scope.Splice.module_ splice)
+  in
   forcing program scope splice (fun () ->
     let%bind.Result value =
       run_at_compile_time
@@ -2370,7 +2376,8 @@ let define_type t (program : Program_env.t) splice =
     in
     let toplevel = Module_scope.Splice.toplevel splice in
     match toplevel.txt with
-    | Type decl -> [ { toplevel with txt = Syntax.Toplevel.Type { decl with kind } } ]
+    | Type decl ->
+      [ { toplevel with txt = Syntax.Toplevel.Type { decl with kind } } ]
     | _ -> raise_s [%message "Typecheck.define_type: not a type declaration"])
 ;;
 
@@ -2383,7 +2390,9 @@ let generate t (program : Program_env.t) splice
   then define_type t program splice
   else (
     let loc = Module_scope.Splice.loc splice in
-    let scope = compile_time_scope t program (Module_scope.Splice.module_ splice) in
+    let scope =
+      compile_time_scope t program (Module_scope.Splice.module_ splice)
+    in
     forcing program scope splice (fun () ->
       let%bind.Result value =
         run_at_compile_time

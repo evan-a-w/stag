@@ -523,11 +523,15 @@ let force (splice : splice) : Forced.t =
        in_module.program.report error;
        failed ()
      | Ok toplevels ->
-       let report error = in_module.program.report (within splice.scope error) in
+       let report error =
+         in_module.program.report (within splice.scope error)
+       in
        (match splice.into with
         | Into_type decl ->
           let type_member = Member_kind.Member Type, decl.name.txt in
-          let taken = Member.Hash_set.of_list (Hashtbl.keys in_module.members) in
+          let taken =
+            Member.Hash_set.of_list (Hashtbl.keys in_module.members)
+          in
           Hash_set.remove taken type_member;
           (match unique_among ~path:in_module.path taken toplevels ~report with
            | [] -> failed ()
@@ -625,8 +629,11 @@ let rec lookup (t : t) member =
    [t]. *)
 let rec after_failed_splice (t : t) member =
   Queue.exists t.module_.includes ~f:(fun splice ->
-    is_failed splice && may_generate splice member && is_before splice t.position)
-  || Option.exists t.module_.enclosing ~f:(fun t -> after_failed_splice t member)
+    is_failed splice
+    && may_generate splice member
+    && is_before splice t.position)
+  || Option.exists t.module_.enclosing ~f:(fun t ->
+    after_failed_splice t member)
 ;;
 
 module Found = struct
@@ -658,8 +665,8 @@ let find_scope t member =
 let rec generated_after (t : t) member =
   match lookup { t with position = End } member, lookup t member with
   | Ok Visible, Ok (Hidden splice) -> Some (Lookup.Hidden splice)
-  | Ok (Absent { blocked = Some ({ state = Pending; _ } as splice) }),
-    Ok (Absent { blocked = None }) ->
+  | ( Ok (Absent { blocked = Some ({ state = Pending; _ } as splice) })
+    , Ok (Absent { blocked = None }) ) ->
     Some (Absent { blocked = Some splice })
   | _ -> Option.bind t.module_.enclosing ~f:(fun t -> generated_after t member)
 ;;

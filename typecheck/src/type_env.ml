@@ -155,7 +155,8 @@ let rec kind_has_splice : Type_decl.Kind.t -> bool = function
   | Abstract -> false
   | Alias ty -> has_splice ty
   | Variant constructors ->
-    List.exists constructors ~f:(fun (_, args) -> List.exists args ~f:has_splice)
+    List.exists constructors ~f:(fun (_, args) ->
+      List.exists args ~f:has_splice)
   | Record fields -> List.exists fields ~f:(fun (_, ty) -> has_splice ty)
   | Malformed kind -> kind_has_splice kind
 ;;
@@ -459,8 +460,7 @@ and definition (decl : Decl.t) ~loc =
     if decl.failed
     then Error Typecheck_error.already_reported
     else Ok decl.decl.kind
-  | Variant _ | Record _ | Alias _ | Abstract | Malformed _ ->
-    Ok decl.decl.kind
+  | Variant _ | Record _ | Alias _ | Abstract | Malformed _ -> Ok decl.decl.kind
 
 and expand t (decl : Decl.t) ~args ~expansions body =
   let knot = Type.Var.create (Fresh.id t.fresh) Generic in

@@ -404,9 +404,8 @@ let rec kind_message (kind : Kind.t) ~show_type =
       { name; module_ = None; splice; splice_kind = Type_definition } ->
     sprintf
       "%s can't be resolved here: the type splice at %s comes before this \
-       point and may define it, but it is still being computed (its \
-       expression uses this code). Move this code before the type or into \
-       another module"
+       point and may define it, but it is still being computed (its expression \
+       uses this code). Move this code before the type or into another module"
       name
       (Loc.to_string splice)
   | Declaration_splice_cycle
