@@ -21,6 +21,7 @@ type t =
   | Of
   | Module
   | Struct
+  | Include
   | End
   | Lparen
   | Rparen
@@ -63,6 +64,7 @@ let keyword = function
   | "of" -> Some Of
   | "module" -> Some Module
   | "struct" -> Some Struct
+  | "include" -> Some Include
   | "end" -> Some End
   | _ -> None
 ;;
@@ -87,6 +89,7 @@ let to_string = function
   | Of -> "of"
   | Module -> "module"
   | Struct -> "struct"
+  | Include -> "include"
   | End -> "end"
   | Lparen -> "("
   | Rparen -> ")"

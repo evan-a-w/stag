@@ -16,11 +16,11 @@ module type S = sig
         name (it is accepted only as a let's name or a parameter);
       - a shape that no source means: a tuple of one component, or of none
         except the type [()] ([()] is [Lit Unit] elsewhere), or a nominal
-        record of no fields (expression, pattern or type declaration);
-      - a negative int literal: as in source, it is written [Int.neg n].
+        record of no fields (expression, pattern or type declaration).
 
       Other shapes the parser can't produce but that are meaningful are
-      accepted, left to the typechecker: a match of no arms (of an empty
+      accepted, left to the typechecker: a negative int literal, a match of no
+      arms (of an empty
       type), a constructor applied to one tuple (of a
       constructor declared [C of (a * b)]), a polymorphic record extended or
       updated with no fields. *)

@@ -25,6 +25,7 @@ module Test_result = struct
     ; different_outputs : Different_outputs.t list [@sexp.list]
     ; error : Error.t option
     ; output_before_error : string [@sexp_drop_if String.is_empty]
+    ; generated : bool [@sexp.bool]
     }
   [@@deriving sexp_of]
 
@@ -157,6 +158,7 @@ let run_test ~limits driver (test : Typed.Expect_test.t) =
   ; different_outputs = Queue.to_list different_outputs
   ; error = Result.error result
   ; output_before_error
+  ; generated = test.generated
   }
 ;;
 
@@ -251,7 +253,7 @@ let edits contents ({ loc; expected; actual; parenthesize } : Mismatch.t) =
 let corrected ~path ~contents results =
   let edits =
     List.concat_map results ~f:(fun (result : Test_result.t) ->
-      result.mismatches)
+      if result.generated then [] else result.mismatches)
     |> List.filter ~f:(fun (mismatch : Mismatch.t) ->
       String.equal mismatch.loc.file path)
     |> List.concat_map ~f:(edits contents)

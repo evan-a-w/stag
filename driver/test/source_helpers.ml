@@ -67,8 +67,12 @@ let check_files ?(limits = limits) files =
   | Ok driver -> Some { driver; prelude = [] }
 ;;
 
-(* Toplevels get stamps in program order, from 0, so the prelude's come first. *)
-let is_prelude t (ident : Typed.Ident.t) = ident.stamp < List.length t.prelude
+(* Toplevels get stamps in program order, from 0, so the test prelude's come
+   first. The real prelude's are named within it. *)
+let is_prelude t (ident : Typed.Ident.t) =
+  ident.stamp < List.length t.prelude
+  || Option.is_some (Prelude_path.relative ident.name)
+;;
 
 let members t =
   List.concat_map (checked t).program.sccs ~f:(fun scc -> scc.members)

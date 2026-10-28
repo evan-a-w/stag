@@ -1039,11 +1039,20 @@ let rec toplevel t : Toplevel.t =
     advance t;
     let name = uident t ~what:"a module name" in
     expect t Equal;
-    let struct_loc = loc t in
-    expect t Struct;
-    let toplevels = toplevels t ~stop:Token.End in
-    close t End ~opener:Struct ~open_loc:struct_loc;
-    since t start (Toplevel.Module (name, toplevels))
+    (match peek t with
+     | Splice ->
+       since t start (Toplevel.Module_splice (name, declaration_splice t))
+     | _ ->
+       let struct_loc = loc t in
+       expect t Struct;
+       let toplevels = toplevels t ~stop:Token.End in
+       close t End ~opener:Struct ~open_loc:struct_loc;
+       since t start (Toplevel.Module (name, toplevels)))
+  | Include ->
+    advance t;
+    (match peek t with
+     | Splice -> since t start (Toplevel.Include (declaration_splice t))
+     | _ -> expected t "a declaration splice `.~e` after `include`")
   | Let_expect_test ->
     advance t;
     let name =
@@ -1057,7 +1066,12 @@ let rec toplevel t : Toplevel.t =
     expect t Equal;
     let body = expr t in
     since t start (Toplevel.Expect_test { name; body })
-  | _ -> expected t "a declaration (`let`, `type` or `module`)"
+  | _ -> expected t "a declaration (`let`, `type`, `module` or `include`)"
+
+(* [.~e], the declarations [e] generates. *)
+and declaration_splice t =
+  advance t;
+  postfix t
 
 and toplevels t ~stop =
   let rec loop acc =

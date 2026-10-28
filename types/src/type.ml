@@ -722,7 +722,7 @@ module Printer = struct
     ; kept : Int.Hash_set.t
     }
 
-  let create ?(type_name = Fn.id) () =
+  let create ?(type_name = fun name -> Prelude_path.to_string_hum name) () =
     { type_name
     ; names = Int.Table.create ()
     ; next_index = 0

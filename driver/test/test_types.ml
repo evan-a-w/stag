@@ -47,7 +47,7 @@ let arity = Nil 1
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
      @ t.stag:3:19-35)
-    ((Unbound_constructor Nil) @ t.stag:2:14-17)
+    val unbound : list['a]
     ((Constructor_arity_mismatch (constructor Cons) (expected 2) (got 1)) @
      t.stag:3:12-18)
     ((Constructor_arity_mismatch (constructor Nil) (expected 0) (got 1)) @
@@ -375,7 +375,8 @@ let tuple_length = match (1, 2) with (_, _, _) -> 1
     val same_name_other_arms : int
     ((Constructor_arity_mismatch (constructor Some) (expected 1) (got 0)) @
      t.stag:3:25-29)
-    ((Unbound_constructor Some) @ t.stag:2:27-31)
+    ((Constructor_arity_mismatch (constructor prelude.Some) (expected 1) (got 0))
+     @ t.stag:2:27-31)
     ((Duplicate_field x) @ t.stag:3:45-46)
     ((Fields_of_different_types (field contents) (expected_type point)
       (actual_type box))
@@ -534,7 +535,7 @@ let f x : M.t = x
     type list['a] = Nil | Cons of 'a * list['a]
     type t = A of list[{}]
     ((Type_arg_kind_mismatch (type_name stmt) (param (Row r))) @ t.stag:3:19-22)
-    ((Unbound_type list) @ t.stag:2:10-14)
+    val f : list[int] -> list[int]
     ((Unbound_module M) @ t.stag:2:10-11)
     |}]
 ;;

@@ -125,7 +125,23 @@ module Scope = struct
           target)
   ;;
 
-  let relative_name enclosing canonical_name =
+  (* The program's scopes are within the prelude, never inside its modules,
+     so a prelude type is named by its full path within it, unless the
+     program shadows the path's first name. *)
+  let prelude_name enclosing relative =
+    let shadowed =
+      Prelude_path.shadowed relative ~has:(fun kind name ->
+        List.exists enclosing ~f:(fun t ->
+          Set.mem
+            (match kind with
+             | `Type -> t.types
+             | `Module -> t.modules)
+            name))
+    in
+    if shadowed then Prelude_path.canonical relative else relative
+  ;;
+
+  let program_name enclosing canonical_name =
     let path = String.split canonical_name ~on:'.' in
     let target = List.drop_last_exn path in
     List.init (List.length path) ~f:(fun dropped ->
@@ -134,6 +150,12 @@ module Scope = struct
     |> Option.value_map
          ~default:("." ^ canonical_name)
          ~f:(String.concat ~sep:".")
+  ;;
+
+  let relative_name enclosing canonical_name =
+    match Prelude_path.relative canonical_name with
+    | Some relative -> prelude_name enclosing relative
+    | None -> program_name enclosing canonical_name
   ;;
 end
 

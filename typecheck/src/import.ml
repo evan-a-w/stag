@@ -13,3 +13,6 @@ module Prim = Stag_ir.Prim
 module Typed = Stag_ir.Typed
 module Runtime_error = Stag_eval.Runtime_error
 module Treewalk = Stag_eval.Treewalk
+module Prelude_path = Stag_types.Prelude_path
+module Syntax_value = Stag_eval.Syntax_value
+module Prelude = Stag_eval.Prelude

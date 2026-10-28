@@ -336,6 +336,7 @@ module Expect_test = struct
     { name : string Located.t
     ; body : Expr.t
     ; loc : Loc.t
+    ; generated : bool [@sexp.bool]
     }
   [@@deriving sexp_of]
 end

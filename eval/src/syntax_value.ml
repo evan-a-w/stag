@@ -6,32 +6,26 @@ module Value = Treewalk.Value
    refs the typechecker makes. *)
 let constructor_refs =
   lazy
-    (match Source_file.parse Prelude.file with
-     | Error error ->
-       raise_s
-         [%message "Prelude failed to parse" (error : Source_file.Error.t)]
-     | Ok { txt = Module (_, items); _ } ->
-       let refs = String.Table.create () in
-       let qualify path name =
-         Prelude.canonical (String.concat (path @ [ name ]) ~sep:".")
-       in
-       let rec add ~path (item : Syntax.Toplevel.t) =
-         match item.txt with
-         | Module (name, items) ->
-           List.iter items ~f:(add ~path:(path @ [ name.txt ]))
-         | Type { name; kind = Variant constructors; params = _ } ->
-           let type_name = qualify path name.txt in
-           List.iteri constructors ~f:(fun index (constructor, _) ->
-             let name = qualify path constructor.txt in
-             Hashtbl.add_exn
-               refs
-               ~key:name
-               ~data:{ Typed.Constructor_ref.type_name; name; index })
-         | Type _ | Let _ | Expect_test _ -> ()
-       in
-       List.iter items ~f:(add ~path:[]);
-       refs
-     | Ok _ -> raise_s [%message "Prelude is not a module"])
+    (let refs = String.Table.create () in
+     let qualify path name =
+       Prelude_path.canonical (String.concat (path @ [ name ]) ~sep:".")
+     in
+     let rec add ~path (item : Syntax.Toplevel.t) =
+       match item.txt with
+       | Module (name, items) ->
+         List.iter items ~f:(add ~path:(path @ [ name.txt ]))
+       | Type { name; kind = Variant constructors; params = _ } ->
+         let type_name = qualify path name.txt in
+         List.iteri constructors ~f:(fun index (constructor, _) ->
+           let name = qualify path constructor.txt in
+           Hashtbl.add_exn
+             refs
+             ~key:name
+             ~data:{ Typed.Constructor_ref.type_name; name; index })
+       | Type _ | Let _ | Expect_test _ | Module_splice _ | Include _ -> ()
+     in
+     List.iter (force Prelude.toplevels) ~f:(add ~path:[]);
+     refs)
 ;;
 
 module To_value = struct
@@ -39,7 +33,8 @@ module To_value = struct
 
   let con name args =
     Value.Construct
-      (Hashtbl.find_exn (force constructor_refs) (Prelude.canonical name), args)
+      ( Hashtbl.find_exn (force constructor_refs) (Prelude_path.canonical name)
+      , args )
   ;;
 
   let list f xs =
@@ -59,15 +54,15 @@ module To_value = struct
   let record fields = Value.Poly_record (String.Map.of_alist_exn fields)
 
   let lit : Lit.t -> Value.t = function
-    | Int n -> con "Lit.Int" [ Int n ]
-    | Bool b -> con "Lit.Bool" [ Bool b ]
-    | String s -> con "Lit.String" [ String s ]
-    | Char c -> con "Lit.Char" [ Char c ]
-    | Unit -> con "Lit.Unit" []
+    | Int n -> con "Stag.Lit.Int" [ Int n ]
+    | Bool b -> con "Stag.Lit.Bool" [ Bool b ]
+    | String s -> con "Stag.Lit.String" [ String s ]
+    | Char c -> con "Stag.Lit.Char" [ Char c ]
+    | Unit -> con "Stag.Lit.Unit" []
   ;;
 
   let rec type_expr ({ txt; loc = _ } : Type_expr.t) =
-    let con name = con ("Type_expr." ^ name) in
+    let con name = con ("Stag.Type_expr." ^ name) in
     match txt with
     | Var var -> con "Var" [ string var ]
     | Con (p, args) -> con "Con" [ path p.txt; list type_arg args ]
@@ -79,7 +74,7 @@ module To_value = struct
     | Variant r -> con "Variant" [ row r ]
 
   and row ({ txt; loc = _ } : Type_expr.row) =
-    let con name = con ("Type_expr.Row." ^ name) in
+    let con name = con ("Stag.Type_expr.Row." ^ name) in
     match txt with
     | Empty -> con "Empty" []
     | Extend (label, ty, rest) ->
@@ -87,25 +82,25 @@ module To_value = struct
     | Var var -> con "Var" [ name var ]
 
   and type_arg : Type_expr.arg -> Value.t = function
-    | Ty ty -> con "Type_expr.Arg.Ty" [ type_expr ty ]
-    | Row r -> con "Type_expr.Arg.Row" [ row r ]
+    | Ty ty -> con "Stag.Type_expr.Arg.Ty" [ type_expr ty ]
+    | Row r -> con "Stag.Type_expr.Arg.Row" [ row r ]
   ;;
 
   let type_decl ({ name = decl_name; params; kind } : Type_decl.t) =
     let param ({ txt; loc = _ } : Type_decl.Param.t Located.t) =
       match txt with
-      | Ty var -> con "Type_decl.Param.Ty" [ string var ]
-      | Row var -> con "Type_decl.Param.Row" [ string var ]
+      | Ty var -> con "Stag.Type_decl.Param.Ty" [ string var ]
+      | Row var -> con "Stag.Type_decl.Param.Row" [ string var ]
     in
     let decl_kind : Type_decl.Kind.t -> Value.t = function
       | Variant constructors ->
         con
-          "Type_decl.Kind.Variant"
+          "Stag.Type_decl.Kind.Variant"
           [ list (pair name (list type_expr)) constructors ]
       | Record fields ->
-        con "Type_decl.Kind.Record" [ list (pair name type_expr) fields ]
-      | Alias ty -> con "Type_decl.Kind.Alias" [ type_expr ty ]
-      | Abstract -> con "Type_decl.Kind.Abstract" []
+        con "Stag.Type_decl.Kind.Record" [ list (pair name type_expr) fields ]
+      | Alias ty -> con "Stag.Type_decl.Kind.Alias" [ type_expr ty ]
+      | Abstract -> con "Stag.Type_decl.Kind.Abstract" []
     in
     record
       [ "name", name decl_name
@@ -117,7 +112,7 @@ module To_value = struct
   let binding = pair name (option type_expr)
 
   let rec pattern ({ txt; loc = _ } : Pattern.t) =
-    let con name = con ("Pattern." ^ name) in
+    let con name = con ("Stag.Pattern." ^ name) in
     match txt with
     | Any -> con "Any" []
     | Var var -> con "Var" [ string var ]
@@ -146,7 +141,7 @@ module To_value = struct
   ;;
 
   let rec expr ({ txt; loc = _ } : Expr.t) =
-    let con name = con ("Expr." ^ name) in
+    let con name = con ("Stag.Expr." ^ name) in
     let fields = list (pair name expr) in
     match txt with
     | Lit l -> con "Lit" [ lit l ]
@@ -190,7 +185,7 @@ module To_value = struct
   ;;
 
   let rec toplevel ({ txt; loc = _ } : Toplevel.t) =
-    let con name = con ("Toplevel." ^ name) in
+    let con name = con ("Stag.Toplevel." ^ name) in
     match txt with
     | Let (var, bindings, annot, body) ->
       con
@@ -199,6 +194,9 @@ module To_value = struct
     | Type decl -> con "Type" [ type_decl decl ]
     | Module (module_name, items) ->
       con "Module" [ name module_name; list toplevel items ]
+    | Module_splice (module_name, e) ->
+      con "Module_splice" [ name module_name; expr e ]
+    | Include e -> con "Include" [ expr e ]
     | Expect_test { name = test_name; body } ->
       con
         "Expect_test"
@@ -288,7 +286,7 @@ module Of_value = struct
   (** The constructor of [value], of the prelude's type [ty], by its name
       relative to its type's module. *)
   let constructor ty value =
-    let type_name = Prelude.canonical ty in
+    let type_name = Prelude_path.canonical ty in
     match (value : Value.t) with
     | Construct ({ type_name = type_name'; name; index = _ }, args)
       when String.equal type_name type_name' ->
@@ -298,8 +296,10 @@ module Of_value = struct
         | None -> ""
       in
       ( String.chop_prefix_exn name ~prefix
-      , { Args.constructor = name; values = Array.of_list args } )
-    | _ -> unexpected ~expected:type_name value
+      , { Args.constructor = Prelude_path.to_string_hum name
+        ; values = Array.of_list args
+        } )
+    | _ -> unexpected ~expected:ty value
   ;;
 
   let variant ty value ~f =
@@ -339,13 +339,6 @@ module Of_value = struct
   let int : Value.t -> int = function
     | Int n -> n
     | value -> unexpected ~expected:"an int" value
-  ;;
-
-  (* As in source, where a negative int is [Int.neg n]. *)
-  let literal_int value =
-    match int value with
-    | n when n < 0 -> unexpected ~expected:"a non-negative int" value
-    | n -> n
   ;;
 
   let bool : Value.t -> bool = function
@@ -428,10 +421,10 @@ module Of_value = struct
   open Ident_kind
 
   let lit value =
-    variant "Lit.t" value ~f:(fun constructor args : Lit.t ->
+    variant "Stag.Lit.t" value ~f:(fun constructor args : Lit.t ->
       let arg i read = Args.read args i read in
       match constructor, Args.count args with
-      | "Int", 1 -> Int (arg 0 literal_int)
+      | "Int", 1 -> Int (arg 0 int)
       | "Bool", 1 -> Bool (arg 0 bool)
       | "String", 1 -> String (arg 0 string)
       | "Char", 1 -> Char (arg 0 char)
@@ -442,29 +435,32 @@ module Of_value = struct
   let rec type_expr value ~loc : Type_expr.t =
     Located.create
       ~loc
-      (variant "Type_expr.t" value ~f:(fun constructor args : Type_expr.desc ->
-         let arg i read = Args.read args i read in
-         match constructor, Args.count args with
-         | "Var", 1 -> Var (arg 0 (ident Tyvar))
-         | "Con", 2 ->
-           Con (arg 0 (located_path Lower ~loc), arg 1 (list (type_arg ~loc)))
-         | "Arrow", 2 -> Arrow (arg 0 (type_expr ~loc), arg 1 (type_expr ~loc))
-         | "Tuple", 1 -> Tuple (arg 0 (components ~min:0 (type_expr ~loc)))
-         | "Code", 1 ->
-           arg 0 (fun code : Type_expr.desc ->
-             Code
-               { inner = field "inner" (type_expr ~loc) code
-               ; context = field "context" (row ~labels:Lower ~loc) code
-               })
-         | "Record", 1 -> Record (arg 0 (row ~labels:Label ~loc))
-         | "Variant", 1 -> Variant (arg 0 (row ~labels:Label ~loc))
-         | _ -> raise Bad_arguments))
+      (variant
+         "Stag.Type_expr.t"
+         value
+         ~f:(fun constructor args : Type_expr.desc ->
+           let arg i read = Args.read args i read in
+           match constructor, Args.count args with
+           | "Var", 1 -> Var (arg 0 (ident Tyvar))
+           | "Con", 2 ->
+             Con (arg 0 (located_path Lower ~loc), arg 1 (list (type_arg ~loc)))
+           | "Arrow", 2 -> Arrow (arg 0 (type_expr ~loc), arg 1 (type_expr ~loc))
+           | "Tuple", 1 -> Tuple (arg 0 (components ~min:0 (type_expr ~loc)))
+           | "Code", 1 ->
+             arg 0 (fun code : Type_expr.desc ->
+               Code
+                 { inner = field "inner" (type_expr ~loc) code
+                 ; context = field "context" (row ~labels:Lower ~loc) code
+                 })
+           | "Record", 1 -> Record (arg 0 (row ~labels:Label ~loc))
+           | "Variant", 1 -> Variant (arg 0 (row ~labels:Label ~loc))
+           | _ -> raise Bad_arguments))
 
   and row ~(labels : Ident_kind.t) value ~loc : Type_expr.row =
     Located.create
       ~loc
       (variant
-         "Type_expr.Row.t"
+         "Stag.Type_expr.Row.t"
          value
          ~f:(fun constructor args : Type_expr.row_desc ->
            let arg i read = Args.read args i read in
@@ -479,12 +475,15 @@ module Of_value = struct
            | _ -> raise Bad_arguments))
 
   and type_arg value ~loc =
-    variant "Type_expr.Arg.t" value ~f:(fun constructor args : Type_expr.arg ->
-      let arg i read = Args.read args i read in
-      match constructor, Args.count args with
-      | "Ty", 1 -> Ty (arg 0 (type_expr ~loc))
-      | "Row", 1 -> Row (arg 0 (row ~labels:Label ~loc))
-      | _ -> raise Bad_arguments)
+    variant
+      "Stag.Type_expr.Arg.t"
+      value
+      ~f:(fun constructor args : Type_expr.arg ->
+        let arg i read = Args.read args i read in
+        match constructor, Args.count args with
+        | "Ty", 1 -> Ty (arg 0 (type_expr ~loc))
+        | "Row", 1 -> Row (arg 0 (row ~labels:Label ~loc))
+        | _ -> raise Bad_arguments)
   ;;
 
   let type_decl value ~loc : Type_decl.t =
@@ -492,7 +491,7 @@ module Of_value = struct
       Located.create
         ~loc
         (variant
-           "Type_decl.Param.t"
+           "Stag.Type_decl.Param.t"
            value
            ~f:(fun constructor args : Type_decl.Param.t ->
              let arg i read = Args.read args i read in
@@ -503,7 +502,7 @@ module Of_value = struct
     in
     let kind value =
       variant
-        "Type_decl.Kind.t"
+        "Stag.Type_decl.Kind.t"
         value
         ~f:(fun constructor args : Type_decl.Kind.t ->
           let arg i read = Args.read args i read in
@@ -528,7 +527,7 @@ module Of_value = struct
   let rec pattern value ~loc : Pattern.t =
     Located.create
       ~loc
-      (variant "Pattern.t" value ~f:(fun constructor args : Pattern.desc ->
+      (variant "Stag.Pattern.t" value ~f:(fun constructor args : Pattern.desc ->
          let arg i read = Args.read args i read in
          match constructor, Args.count args with
          | "Any", 0 -> Any
@@ -556,20 +555,23 @@ module Of_value = struct
          | _ -> raise Bad_arguments))
 
   and rest value ~loc =
-    variant "Pattern.Rest.t" value ~f:(fun constructor args : Pattern.Rest.t ->
-      let arg i read = Args.read args i read in
-      match constructor, Args.count args with
-      | "Closed", 0 -> Closed
-      | "Open", 0 -> Open
-      | "Bind", 1 -> Bind (arg 0 (name Lower ~loc))
-      | _ -> raise Bad_arguments)
+    variant
+      "Stag.Pattern.Rest.t"
+      value
+      ~f:(fun constructor args : Pattern.Rest.t ->
+        let arg i read = Args.read args i read in
+        match constructor, Args.count args with
+        | "Closed", 0 -> Closed
+        | "Open", 0 -> Open
+        | "Bind", 1 -> Bind (arg 0 (name Lower ~loc))
+        | _ -> raise Bad_arguments)
   ;;
 
   let rec expr value ~loc : Expr.t =
     let labelled = list (pair (name Label ~loc) (expr ~loc)) in
     Located.create
       ~loc
-      (variant "Expr.t" value ~f:(fun constructor args : Expr.desc ->
+      (variant "Stag.Expr.t" value ~f:(fun constructor args : Expr.desc ->
          let arg i read = Args.read args i read in
          match constructor, Args.count args with
          | "Lit", 1 -> Lit (arg 0 lit)
@@ -620,25 +622,31 @@ module Of_value = struct
   let rec toplevel value ~loc : Toplevel.t =
     Located.create
       ~loc
-      (variant "Toplevel.t" value ~f:(fun constructor args : Toplevel.desc ->
-         let arg i read = Args.read args i read in
-         match constructor, Args.count args with
-         | "Let", 4 ->
-           Let
-             ( arg 0 (name Binder ~loc)
-             , arg 1 (list (binding ~loc))
-             , arg 2 (option (type_expr ~loc))
-             , arg 3 (expr ~loc) )
-         | "Type", 1 -> Type (arg 0 (type_decl ~loc))
-         | "Module", 2 ->
-           Module (arg 0 (name Upper ~loc), arg 1 (list (toplevel ~loc)))
-         | "Expect_test", 1 ->
-           arg 0 (fun test : Toplevel.desc ->
-             Expect_test
-               { name = Located.create ~loc (field "name" string test)
-               ; body = field "body" (expr ~loc) test
-               })
-         | _ -> raise Bad_arguments))
+      (variant
+         "Stag.Toplevel.t"
+         value
+         ~f:(fun constructor args : Toplevel.desc ->
+           let arg i read = Args.read args i read in
+           match constructor, Args.count args with
+           | "Let", 4 ->
+             Let
+               ( arg 0 (name Binder ~loc)
+               , arg 1 (list (binding ~loc))
+               , arg 2 (option (type_expr ~loc))
+               , arg 3 (expr ~loc) )
+           | "Type", 1 -> Type (arg 0 (type_decl ~loc))
+           | "Module", 2 ->
+             Module (arg 0 (name Upper ~loc), arg 1 (list (toplevel ~loc)))
+           | "Module_splice", 2 ->
+             Module_splice (arg 0 (name Upper ~loc), arg 1 (expr ~loc))
+           | "Include", 1 -> Include (arg 0 (expr ~loc))
+           | "Expect_test", 1 ->
+             arg 0 (fun test : Toplevel.desc ->
+               Expect_test
+                 { name = Located.create ~loc (field "name" string test)
+                 ; body = field "body" (expr ~loc) test
+                 })
+           | _ -> raise Bad_arguments))
   ;;
 
   let program value ~loc = list (toplevel ~loc) value

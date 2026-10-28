@@ -69,17 +69,75 @@ module Kind = struct
         { code : Typed.Expr.t
         ; error : Error.t
         }
+    | Declaration_splice_failed of Error.t
+    | Malformed_declarations of Error.t
+    | Declaration_splice_cycle of
+        { name : string
+        ; module_ : string option
+        ; splice : Loc.t
+        }
+    | Generated_after_include of
+        { error : t
+        ; include_ : Loc.t
+        }
+    | Maybe_generated_by_running_include of
+        { error : t
+        ; include_ : Loc.t
+        }
+    | Shadowed_prelude_module of
+        { error : t
+        ; module_ : string
+        ; shadowed_by : Loc.t
+        }
+    | In_generated_declaration of
+        { declaration : string
+        ; generated : Syntax.Toplevel.t [@sexp.opaque]
+        ; error : t
+        }
   [@@deriving sexp_of]
+end
+
+module In_scope = struct
+  type t =
+    { types : String.Set.t
+    ; modules : String.Set.t
+    }
+
+  let shadows t relative =
+    Prelude_path.shadowed relative ~has:(fun kind name ->
+      Set.mem
+        (match kind with
+         | `Type -> t.types
+         | `Module -> t.modules)
+        name)
+  ;;
 end
 
 type t =
   { loc : Loc.t
   ; kind : Kind.t
+  ; in_scope : In_scope.t option
   }
 
-let sexp_of_t { loc; kind } = [%sexp_of: Kind.t Located.t] { txt = kind; loc }
-let create ~loc kind = { loc; kind }
+let sexp_of_t { loc; kind; in_scope = _ } =
+  [%sexp_of: Kind.t Located.t] { txt = kind; loc }
+;;
+
+let create ~loc kind = { loc; kind; in_scope = None }
+
+let within t ~in_scope =
+  match t.in_scope with
+  | Some _ -> t
+  | None -> { t with in_scope = Some (force in_scope) }
+;;
+
 let unification_error ~loc error = create ~loc (Unification_error error)
+
+let runtime_message error =
+  match Runtime_error.of_error error with
+  | Some { message; loc = _ } -> message
+  | None -> Error.to_string_hum error
+;;
 
 let level_name level =
   match level with
@@ -88,8 +146,8 @@ let level_name level =
   | level -> sprintf "inside %d quote(s) (level %d)" level level
 ;;
 
-let unification_message (error : Unification_error.t) =
-  let printer = Type.Printer.create () in
+let unification_message (error : Unification_error.t) ~show_type =
+  let printer = Type.Printer.create ~type_name:show_type () in
   let ty = Type.Printer.ty printer in
   let row row = ty (TRecord { id = -1; row }) in
   let arg : Type.arg -> string = function
@@ -139,9 +197,9 @@ let unification_message (error : Unification_error.t) =
   message ^ Type.Printer.where printer
 ;;
 
-let message { kind; loc = _ } =
+let rec kind_message (kind : Kind.t) ~show_type =
   match kind with
-  | Unification_error error -> unification_message error
+  | Unification_error error -> unification_message error ~show_type
   | Not_in_scope path -> sprintf "Unbound value %s" (Syntax.Path.to_string path)
   | Duplicate_toplevel name ->
     sprintf "The value %s is defined more than once in this module" name
@@ -210,7 +268,7 @@ let message { kind; loc = _ } =
   | Constructor_arity_mismatch { constructor; expected; got } ->
     sprintf
       "The constructor %s expects %d argument(s), but is applied to %d"
-      constructor
+      (show_type constructor)
       expected
       got
   | Missing_field name -> sprintf "Some record fields are undefined: %s" name
@@ -219,8 +277,8 @@ let message { kind; loc = _ } =
       "The record field %s belongs to the type %s but is mixed here with \
        fields of type %s"
       field
-      actual_type
-      expected_type
+      (show_type actual_type)
+      (show_type expected_type)
   | Empty_record -> "A record must have at least one field"
   | Duplicate_pattern_variable name ->
     sprintf "The variable %s is bound several times in this matching" name
@@ -235,10 +293,57 @@ let message { kind; loc = _ } =
     "[%expect] is only allowed in the body of a let%expect_test where it runs \
      with the test: not in a quote's code nor in a toplevel splice"
   | Splice_evaluation_failed { code = _; error } ->
-    let error =
-      match Runtime_error.of_error error with
-      | Some { message; loc = _ } -> message
-      | None -> Error.to_string_hum error
-    in
-    sprintf "This toplevel splice failed at compile time: %s" error
+    sprintf
+      "This toplevel splice failed at compile time: %s"
+      (runtime_message error)
+  | Declaration_splice_failed error ->
+    sprintf
+      "This declaration splice failed at compile time: %s"
+      (runtime_message error)
+  | Malformed_declarations error ->
+    sprintf
+      "This declaration splice generated malformed declarations: %s"
+      (Error.to_string_hum error)
+  | Declaration_splice_cycle { name; module_ = None; splice } ->
+    sprintf
+      "%s can't be resolved here: the include at %s comes before this point \
+       and may define it, but it is still being generated (its expression uses \
+       this code). Move this code before the include or into another module"
+      name
+      (Loc.to_string splice)
+  | Declaration_splice_cycle { name; module_ = Some module_; splice } ->
+    sprintf
+      "A declaration splice depends on what it generates: %s needs the \
+       declarations of the module %s, which the splice at %s is generating, as \
+       its expression uses this code"
+      name
+      module_
+      (Loc.to_string splice)
+  | Generated_after_include { error; include_ = _ }
+  | Maybe_generated_by_running_include { error; include_ = _ } ->
+    kind_message error ~show_type
+  | Shadowed_prelude_module { error; module_; shadowed_by = _ } ->
+    sprintf
+      "%s (the prelude's module %s is shadowed by the program's %s)"
+      (kind_message error ~show_type)
+      module_
+      module_
+  | In_generated_declaration { declaration; generated = _; error } ->
+    sprintf
+      "In the declaration `%s` generated by this splice: %s"
+      declaration
+      (kind_message error ~show_type)
+;;
+
+let message { kind; loc = _; in_scope } =
+  let in_scope =
+    match in_scope with
+    | Some in_scope -> in_scope
+    | None ->
+      raise_s
+        [%message
+          "Typecheck_error.message: not within a module" (kind : Kind.t)]
+  in
+  kind_message kind ~show_type:(fun name ->
+    Prelude_path.to_string_hum name ~shadowed:(In_scope.shadows in_scope))
 ;;

@@ -746,7 +746,7 @@ let%expect_test "errors" =
     t.stag:1:7-8: expected a type parameter like `'a` or `{..'r}`, found `a`
     t.stag:1:27-27: expected `end` to close this `struct` (opened at 1:11), found end of file
     t.stag:1:7-8: expected a module name, found `m`
-    t.stag:1:0-1: expected a declaration (`let`, `type` or `module`), found `x`
+    t.stag:1:0-1: expected a declaration (`let`, `type`, `module` or `include`), found `x`
     |}]
 ;;
 
