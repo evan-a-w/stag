@@ -369,7 +369,7 @@ let crash = raise (Failure "boom")
     |}]
 ;;
 
-let%expect_test "an expansion in an expansion is only compared" =
+let%expect_test "splices in an expansion do not run, so are not generated" =
   test
     {|
 include%inline .~(value "x" (Stag.Expr.int 1))
