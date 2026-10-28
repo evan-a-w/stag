@@ -386,3 +386,69 @@ let%expect_test "sort is stable on many equal keys" =
     ((0 0) (0 7) (0 14) (0 21) (0 28) (0 35) (0 42) (0 49) (0 56) (0 63)
      (0 70) (0 77))
     |}]
+
+let%expect_test "map2, iter2, fold_left2" =
+  let print_ints_option o = print_sexp (Core.Sexp.sexp_of_option sexp_of_ints o) in
+  print_ints_option (Core.List.map2 Core.Int.sub (ints "(10 20 30)") (ints "(1 2 3)"));
+  print_ints_option (Core.List.map2 Core.Int.sub (ints "(10 20)") (ints "(1 2 3)"));
+  print_ints_option (Core.List.map2 Core.Int.sub (ints "()") (ints "()"));
+  let print_pair a b =
+    print_int a;
+    print_int b;
+    print_endline ""
+  in
+  let print_unit_option o = print_sexp (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_unit o) in
+  print_unit_option (Core.List.iter2 print_pair (ints "(1 2)") (ints "(3 4)"));
+  print_unit_option (Core.List.iter2 print_pair (ints "(1 2 5)") (ints "(3 4)"));
+  let dot acc a b = Core.Int.add acc (Core.Int.mul a b) in
+  print_int_option (Core.List.fold_left2 dot 0 (ints "(1 2 3)") (ints "(4 5 6)"));
+  print_int_option (Core.List.fold_left2 dot 0 (ints "(1 2 3)") (ints "(4 5)"));
+  [%expect {|
+    ((9 18 27))
+    ()
+    (())
+    13
+    24
+    (())
+    13
+    24
+    ()
+    (32)
+    ()
+    |}]
+
+let%expect_test "max_elt, min_elt, dedup" =
+  print_int_option (Core.List.max_elt Core.Int.compare (ints "(3 9 1 9 4)"));
+  print_int_option (Core.List.min_elt Core.Int.compare (ints "(3 9 1 9 4)"));
+  print_int_option (Core.List.max_elt Core.Int.compare (ints "()"));
+  print_int_option (Core.List.min_elt Core.Int.compare (ints "()"));
+  let by_first p q =
+    match (p, q) with
+    | ((a, _), (b, _)) -> Core.Int.compare a b
+  in
+  let print_pairs l =
+    print_sexp
+      (Core.Sexp.sexp_of_list
+         (Core.Sexp.sexp_of_pair Core.Sexp.sexp_of_int Core.Sexp.sexp_of_string)
+         l)
+  in
+  let pairs =
+    Cons ((2, "a"), Cons ((1, "b"), Cons ((2, "c"), Cons ((1, "d"), Cons ((0, "e"), Nil)))))
+  in
+  print_sexp
+    (Core.Sexp.sexp_of_option
+       (Core.Sexp.sexp_of_pair Core.Sexp.sexp_of_int Core.Sexp.sexp_of_string)
+       (Core.List.max_elt by_first pairs));
+  print_pairs (Core.List.dedup by_first pairs);
+  print_ints (Core.List.dedup Core.Int.compare (ints "(3 1 3 2 1 3)"));
+  print_ints (Core.List.dedup Core.Int.compare (ints "()"));
+  [%expect {|
+    (9)
+    (1)
+    ()
+    ()
+    ((2 a))
+    ((0 e) (1 b) (2 a))
+    (1 2 3)
+    ()
+    |}]

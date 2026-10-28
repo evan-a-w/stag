@@ -200,3 +200,23 @@ let%expect_test "Result: all, equal" =
     true
     false
     |}]
+
+let%expect_test "Option.value_map, Result.combine" =
+  print_int (Core.Option.value_map double 0 (Some 4));
+  print_int (Core.Option.value_map double 0 None);
+  print_endline "";
+  let show r =
+    print_sexp (Core.Sexp.sexp_of_result Core.Sexp.sexp_of_int Core.Sexp.sexp_of_string r)
+  in
+  let combine r1 r2 = show (Core.Result.combine Core.Int.add Core.String.append r1 r2) in
+  combine (Ok 1) (Ok 2);
+  combine (Ok 1) (Error "b");
+  combine (Error "a") (Ok 2);
+  combine (Error "a") (Error "b");
+  [%expect {|
+    80
+    (Ok 3)
+    (Error b)
+    (Error a)
+    (Error ab)
+    |}]

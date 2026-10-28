@@ -181,14 +181,21 @@ let%expect_test "the prelude's signature" =
         val drop : int -> list['a] -> list['a]
         val zip : list['a] -> list['b] -> option[list['a * 'b]]
         val unzip : list['a * 'b] -> list['a] * list['b]
+        val map2 : ('a -> 'b -> 'c) -> list['a] -> list['b] -> option[list['c]]
+        val iter2 : ('a -> 'b -> unit) -> list['a] -> list['b] -> option[unit]
+        val fold_left2 : ('a -> 'b -> 'c -> 'a) -> 'a -> list['b] -> list['c] -> option['a]
+        val max_elt : ('a -> 'a -> int) -> list['a] -> option['a]
+        val min_elt : ('a -> 'a -> int) -> list['a] -> option['a]
         val assoc : ('a -> 'b -> bool) -> 'a -> list['b * 'c] -> option['c]
         val sort : ('a -> 'a -> int) -> list['a] -> list['a]
+        val dedup : ('a -> 'a -> int) -> list['a] -> list['a]
       end
       module Option : sig
         val some : 'a -> option['a]
         val is_some : option['a] -> bool
         val is_none : option['a] -> bool
         val value : option['a] -> 'a -> 'a
+        val value_map : ('a -> 'b) -> 'b -> option['a] -> 'b
         val map : ('a -> 'b) -> option['a] -> option['b]
         val bind : option['a] -> ('a -> option['b]) -> option['b]
         val join : option[option['a]] -> option['a]
@@ -214,6 +221,7 @@ let%expect_test "the prelude's signature" =
         val error : result['a, 'b] -> option['b]
         val of_option : option['a] -> 'b -> result['a, 'b]
         val all : list[result['a, 'b]] -> result[list['a], 'b]
+        val combine : ('a -> 'b -> 'c) -> ('d -> 'd -> 'd) -> result['a, 'd] -> result['b, 'd] -> result['c, 'd]
         val equal : ('a -> 'b -> bool) -> ('c -> 'd -> bool) -> result['a, 'c] -> result['b, 'd] -> bool
       end
       module Sexp : sig
@@ -333,6 +341,7 @@ let%expect_test "the prelude's signature" =
         val for_all : (char -> bool) -> string -> bool
         val exists : (char -> bool) -> string -> bool
         val index : string -> char -> option[int]
+        val rindex : string -> char -> option[int]
         val contains : string -> char -> bool
         val prefix : string -> int -> string
         val suffix : string -> int -> string
@@ -343,6 +352,7 @@ let%expect_test "the prelude's signature" =
         val drop_while : (char -> bool) -> string -> string
         val strip : string -> string
         val split_on_char : char -> string -> list[string]
+        val split_on_string : string -> string -> list[string]
         val escaped : string -> string
         module Internal : sig
           val fold_range : ('a -> int -> 'a) -> 'a -> int -> int -> 'a

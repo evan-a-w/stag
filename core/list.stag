@@ -236,6 +236,55 @@ let unzip l =
   match fold_left step (Nil, Nil) l with
   | (xs, ys) -> (rev xs, rev ys)
 
+(* [None] if the lists' lengths differ, as for [map2], [iter2] and
+   [fold_left2]. *)
+let map2 f l1 l2 =
+  let loop l1 l2 acc =
+    match (l1, l2) with
+    | (Nil, Nil) -> Some (rev acc)
+    | (Cons (x, rest1), Cons (y, rest2)) -> loop rest1 rest2 (Cons (f x y, acc))
+    | _ -> None
+  in
+  loop l1 l2 Nil
+
+(* Stops at the end of the shorter list, so [f] is called on all pairs only if
+   the lengths are equal. *)
+let iter2 (f : 'a -> 'b -> unit) l1 l2 =
+  match (l1, l2) with
+  | (Nil, Nil) -> Some ()
+  | (Cons (x, rest1), Cons (y, rest2)) ->
+    f x y;
+    iter2 f rest1 rest2
+  | _ -> None
+
+let fold_left2 f acc l1 l2 =
+  match (l1, l2) with
+  | (Nil, Nil) -> Some acc
+  | (Cons (x, rest1), Cons (y, rest2)) -> fold_left2 f (f acc x y) rest1 rest2
+  | _ -> None
+
+(* [max_elt compare l] is the first greatest element, [None] if [l] is empty. *)
+let max_elt compare l =
+  let step best x =
+    match Int.gt (compare x best) 0 with
+    | true -> x
+    | false -> best
+  in
+  match l with
+  | Nil -> None
+  | Cons (x, rest) -> Some (fold_left step x rest)
+
+(* [min_elt compare l] is the first least element, [None] if [l] is empty. *)
+let min_elt compare l =
+  let step best x =
+    match Int.lt (compare x best) 0 with
+    | true -> x
+    | false -> best
+  in
+  match l with
+  | Nil -> None
+  | Cons (x, rest) -> Some (fold_left step x rest)
+
 (* The value of the first pair whose key is [equal] to [key]. *)
 let assoc equal key l =
   match l with
@@ -293,3 +342,15 @@ let sort compare l =
   match l with
   | Nil -> Nil
   | Cons (x, rest) -> merge_all (runs false Nil x rest Nil)
+
+(* Sorted by [compare], keeping the first of the elements it says are equal. *)
+let dedup compare l =
+  let step acc x =
+    match acc with
+    | Cons (y, _) -> (
+      match Int.equal (compare y x) 0 with
+      | true -> acc
+      | false -> Cons (x, acc))
+    | Nil -> Cons (x, acc)
+  in
+  rev (fold_left step Nil (sort compare l))

@@ -13,6 +13,12 @@ let value o default =
   | Some x -> x
   | None -> default
 
+(* [f]'s result on [o]'s value, or [default] if it is [None]. *)
+let value_map f default o =
+  match o with
+  | Some x -> f x
+  | None -> default
+
 let map f o =
   match o with
   | Some x -> Some (f x)

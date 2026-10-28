@@ -57,6 +57,15 @@ let all rs =
   in
   loop rs Nil
 
+(* Both values combined by [ok], or the errors by [error] if both failed, or
+   the one error. *)
+let combine ok error r1 r2 =
+  match (r1, r2) with
+  | (Ok x, Ok y) -> Ok (ok x y)
+  | (Error e1, Error e2) -> Error (error e1 e2)
+  | (Error e, _) -> Error e
+  | (_, Error e) -> Error e
+
 let equal equal_ok equal_error r1 r2 =
   match (r1, r2) with
   | (Ok x, Ok y) -> equal_ok x y

@@ -78,6 +78,18 @@ let index s c =
   in
   loop 0
 
+(* The index of the last [c] in [s]. *)
+let rindex s c =
+  let loop i =
+    match Int.lt i 0 with
+    | true -> None
+    | false -> (
+      match Char.equal (get s i) c with
+      | true -> Some i
+      | false -> loop (Int.pred i))
+  in
+  loop (Int.pred (length s))
+
 let contains s c = Option.is_some (index s c)
 
 (* The first [n] characters of [s], or all of them if it has fewer. *)
@@ -141,6 +153,26 @@ let split_on_char sep s =
     | false -> List.rev (Cons (sub s start (Int.sub i start), acc))
   in
   loop 0 0 Nil
+
+(* The substrings between the non-overlapping occurrences of [sep], found from
+   the left: [split_on_string ", " "a, b, "] is [["a"; "b"; ""]]. An empty
+   [sep] gives [[s]]. *)
+let split_on_string sep s =
+  let n = length sep in
+  let found i = equal (sub s i n) sep in
+  let loop start i acc =
+    match Int.le (Int.add i n) (length s) with
+    | true -> (
+      match found i with
+      | true ->
+        let part = sub s start (Int.sub i start) in
+        loop (Int.add i n) (Int.add i n) (Cons (part, acc))
+      | false -> loop start (Int.succ i) acc)
+    | false -> List.rev (Cons (drop_prefix s start, acc))
+  in
+  match is_empty sep with
+  | true -> Cons (s, Nil)
+  | false -> loop 0 0 Nil
 
 (* As OCaml's [String.escaped], without the quotes. *)
 let escaped s =

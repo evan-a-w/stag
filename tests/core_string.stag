@@ -183,3 +183,27 @@ let%expect_test "escaped" =
     \n\r\b\000\031\127
     caf\195\169 ~
     |}]
+
+let%expect_test "rindex, split_on_string" =
+  print_int_option (Core.String.rindex "abcabc" 'b');
+  print_int_option (Core.String.rindex "abcabc" 'z');
+  print_int_option (Core.String.rindex "" 'a');
+  print_strings (Core.String.split_on_string ", " "a, b, ");
+  print_strings (Core.String.split_on_string ", " "a,b");
+  print_strings (Core.String.split_on_string "aa" "aaaaa");
+  print_strings (Core.String.split_on_string "ab" "ab");
+  print_strings (Core.String.split_on_string "abc" "ab");
+  print_strings (Core.String.split_on_string "x" "");
+  print_strings (Core.String.split_on_string "" "abc");
+  [%expect {|
+    (4)
+    ()
+    ()
+    (a b "")
+    (a,b)
+    ("" "" a)
+    ("" "")
+    (ab)
+    ("")
+    (abc)
+    |}]
