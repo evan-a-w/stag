@@ -80,6 +80,7 @@ match e with | p -> e | ...         (* leading | optional; arms are e1; e2 level
 f x y                               (* application, left assoc *)
 (x : t)                             (* annotated variable: Expr.Var's annotation *)
 (a, b, c)   ()   (e)
+[a; b; c]   []                      (* the prelude's list, see List literals *)
 C   C e   C (a, b)   C ((a, b))     (* C (a, b): 2 args, or 1 tuple if C has 1 *)
 {x = 1; M.y = 2}   r.x   r.M.x      (* nominal records *)
 {r with x = 1; M.y = 2}             (* nominal update, may change type params *)
@@ -131,6 +132,26 @@ the typechecker from the declaration (and so also for generated code: `C` of
 polymorphic variant has at most one argument, so `` `A (a, b) `` is always
 `` `A `` of a tuple. A parenthesized expression's location includes its
 parentheses.
+
+### List literals
+
+`[a; b; c]` is sugar for `Cons (a, Cons (b, Cons (c, Nil)))` and `[]` for
+`Nil`, in expressions and patterns, always naming the prelude's `Cons` and
+`Nil` (as refs, like `Stag.Code.erase`'s, see Hygienic code): what
+`Cons`, `Nil` or `list` name where the literal is written doesn't change it,
+so `[1; 2]` is a `.list[int]` even beside a local `type list['a] = Nil | Cons`.
+Items are at the tuple level, as record field values (`[a, b; c]` is
+`[(a, b); c]`), and a `let`, `match` or `fun` item ends at the next `;`. A
+trailing `;` is allowed. The literal's outer `Cons` spans the whole literal,
+each inner one from the `;` before its item to the `]`, and the final `Nil`
+the `]` (or the whole `[]`).
+
+The printer prints a chain of the prelude's resolved `Cons` ending in its
+`Nil` as a literal (so erased code shows lists as literals, eg. `[.A.x; y]`),
+broken like records, one item per line with a trailing `;`, and docked after
+`=` or a constructor (`Core.Sexp.List [`). A resolved `Cons` not ending in
+`Nil` is printed as a root path, `.Cons (x, rest)`, and `Cons (a, Nil)` as
+written stays as written.
 
 ### Root paths
 
@@ -208,6 +229,7 @@ own (see modes.md), so in `.< N.v.x >.` the `x` is the one in scope whatever
 ```ocaml
 _   x   1   'c'   "s"   true   ()   (p, q)
 C   C p   C (p, q)   C ((p, q))     (* as in expressions *)
+[p; q]   []                         (* list literals, as in expressions *)
 {x = p; M.y = q}                    (* nominal *)
 `A   `A p
 {`x = p}   {`x = p; ..}   {`x = p; ..rest}   (* closed, open, bind rest *)
@@ -654,7 +676,7 @@ let%bench "sort" n in [100; 1000] = sort (random_list n)  (* times random_list t
 
 `let%bench "name" = e` is a toplevel (in any module) whose body `e` may have
 any type; its value is discarded. `let%bench "name" x in [a; b; ...] = e` (at
-least one argument, all of one type) is a bench per argument, named
+least one argument, all of one type, written as a list literal) is a bench per argument, named
 `name/A` after the argument's value as printed (`sort/100`, `str/"a"`,
 truncated with `...` past 40 characters), with `x` bound to it in `e` only.
 Bodies and arguments are checked at level 0 as toplevel lets are, and like

@@ -715,6 +715,7 @@ let%expect_test "the project's sources round trip and are formatted" =
     (../../tests/core_shadowing.stag (formatted true) (long_lines 0))
     (../../tests/core_string.stag (formatted true) (long_lines 0))
     (../../tests/evaluation.stag (formatted true) (long_lines 1))
+    (../../tests/list_literals.stag (formatted true) (long_lines 0))
     (../../examples/calc/bin/main.stag (formatted true) (long_lines 0))
     (../../examples/calc/fmt/show.stag (formatted true) (long_lines 0))
     (../../examples/calc/math/arith.stag (formatted true) (long_lines 0))

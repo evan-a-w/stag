@@ -1,0 +1,21 @@
+(* SYNTAX TEST "source.stag" "list literals in expressions and patterns"
+let l = [a; Some b; []] [%expect {| |}]
+(*      ^ punctuation.section.brackets.begin.stag
+(*       ^ variable.other.stag
+(*        ^ punctuation.separator.semicolon.stag
+(*          ^^^^ variable.other.enummember.stag
+(*                  ^ punctuation.section.brackets.begin.stag
+(*                   ^ punctuation.section.brackets.end.stag
+(*                    ^ punctuation.section.brackets.end.stag
+let f x = match x with [] -> [x] | [y; z;] -> f [y]
+(*                     ^ punctuation.section.brackets.begin.stag
+(*                      ^ punctuation.section.brackets.end.stag
+(*                               ^ keyword.operator.bar.stag
+(*                                 ^ punctuation.section.brackets.begin.stag
+(*                                  ^ variable.other.stag
+(*                                       ^ punctuation.section.brackets.end.stag
+(*                                            ^ variable.other.stag
+(*                                              ^ punctuation.section.brackets.begin.stag
+let%bench "b" n in [1; 2] = n
+(*                 ^ punctuation.section.brackets.begin.stag
+(*                  ^ constant.numeric.integer.stag
