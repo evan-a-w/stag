@@ -692,3 +692,8 @@ let program ?(width = 80) ts =
   | [] -> ""
   | ts -> render ~width (toplevels ~width ~indent:0 ts ^^ hardline)
 ;;
+
+let format ?width ~file source =
+  Result.map (Parser.program ~file source) ~f:(fun toplevels ->
+    program ?width toplevels)
+;;

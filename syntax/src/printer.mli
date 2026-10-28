@@ -15,3 +15,11 @@ val toplevel : ?width:int -> Syntax.Toplevel.t -> string
 (** The toplevels, each ending with a newline, separated by blank lines but
     between one line [let]s, and between one line [type]s. *)
 val program : ?width:int -> Syntax.Program.t -> string
+
+(** [source], a file's contents, formatted: printed as [program], keeping its
+    comments. *)
+val format
+  :  ?width:int
+  -> file:string
+  -> string
+  -> (string, Parser.Error.t) Result.t
