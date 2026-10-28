@@ -212,14 +212,18 @@ let%expect_test "an unknown type falls back to the fields in scope" =
     (types
      ^ {|
 let late v = (v.x, (v : N.r))
-|});
+|}
+    );
   (* Known later, eg. by an application's argument, is too late: [y] is not
      in scope. *)
-  check (types ^ {|
+  check
+    (types
+     ^ {|
 let apply f = f (M.t.b)
 let y v = v.y
 let late = apply y
-|});
+|}
+    );
   [%expect
     {|
     ((Unification_error
@@ -232,15 +236,24 @@ let late = apply y
 let%expect_test "qualified fields and constructors name their declaration" =
   (* Even where another type is expected, the qualified name wins, and
      unification reports the mismatch. *)
-  check (types ^ {|
+  check
+    (types
+     ^ {|
 let wrong (v : N.r) = v.M.a
-|});
-  check (types ^ {|
+|}
+    );
+  check
+    (types
+     ^ {|
 let wrong : N.r = {M.a = 1; b = M.t.b}
-|});
-  check (types ^ {|
+|}
+    );
+  check
+    (types
+     ^ {|
 let wrong : option[int] = M.A
-|});
+|}
+    );
   [%expect
     {|
     ((Unification_error
@@ -257,28 +270,49 @@ let wrong : option[int] = M.A
 ;;
 
 let%expect_test "a field or constructor the known type lacks" =
-  check (types ^ {|
+  check
+    (types
+     ^ {|
 let missing = M.t.z
-|});
-  check (types ^ {|
+|}
+    );
+  check
+    (types
+     ^ {|
 let missing : N.r = {x = 1; z = 2}
-|});
-  check (types ^ {|
+|}
+    );
+  check
+    (types
+     ^ {|
 let missing (v : N.r) = {v with z = 1}
-|});
-  check (types ^ {|
+|}
+    );
+  check
+    (types
+     ^ {|
 let missing (v : N.r) = match v with {z = n} -> n
-|});
-  check (types ^ {|
+|}
+    );
+  check
+    (types
+     ^ {|
 let missing : M.v = C
-|});
-  check (types ^ {|
+|}
+    );
+  check
+    (types
+     ^ {|
 let missing (v : M.v) = match v with Some _ -> 1 | _ -> 0
-|});
+|}
+    );
   (* Not a nominal record type: the field is looked up in scope. *)
-  check (types ^ {|
+  check
+    (types
+     ^ {|
 let not_nominal = (1, 2).x
-|});
+|}
+    );
   [%expect
     {|
     ((No_such_field (type_name M.t) (field z)) @ t.stag:12:18-19)
@@ -367,5 +401,184 @@ let shown = print_int (get_x N.v)
     end
     --- output ---
     1
+    |}]
+;;
+
+let%expect_test "unqualified constructors resolve by the expected type" =
+  run
+    (types
+     ^ {|
+let annotated : M.v = B 1
+let in_list : list[M.v] = Cons (A, Cons (B 2, Nil))
+let returned n : M.v = B n
+let in_match b : M.v = match b with true -> A | false -> B 3
+let pattern (v : M.v) = match v with A -> 0 | B n -> n
+let nested (l : list[M.v]) = match l with Cons (B n, _) -> n | _ -> 0
+let ran = (pattern (B 5), nested (Cons (B 6, Nil)), in_match false)
+|}
+    );
+  [%expect
+    {|
+    module N : sig
+      type r = { x : int; y : bool }
+    end
+    module M : sig
+      type t = { a : int; b : N.r }
+      type v = A | B of int
+      val t : t
+    end
+    type s = { x : string; z : int }
+    val annotated : M.v
+    val in_list : list[M.v]
+    val returned : int -> M.v
+    val in_match : bool -> M.v
+    val pattern : M.v -> int
+    val nested : list[M.v] -> int
+    val ran : int * int * M.v
+    -- evaluated at compile time
+    -- evaluated
+    (M.t ((a 1) (b ((x 2) (y true)))))
+    (annotated (M.B 1))
+    (in_list (Cons (M.A) (Cons (M.B 2) (Nil))))
+    (returned <fun>)
+    (in_match <fun>)
+    (pattern <fun>)
+    (nested <fun>)
+    (ran (Tuple 5 6 (M.B 3)))
+    |}]
+;;
+
+let%expect_test "aliases, parameters, quotes and match arms" =
+  run
+    (types
+     ^ {|
+type alias = N.r
+module P = struct
+  type p['a] = {v : 'a; w : int}
+end
+let via_alias (v : alias) = v.y
+let alias_built : alias = {x = 1; y = true}
+let param (p : P.p[bool]) = p.v
+let param_built : P.p[string] = {v = "s"; w = 1}
+let param_updated (p : P.p[int]) = {p with v = 5}
+let quoted : <N.r>{} = .< {x = 2; y = false} >.
+let arms b : N.r = match b with true -> {x = 3; y = true} | false -> {M.t.b with y = false}
+let seq : N.r = (); {x = 4; y = true}
+let ran = (via_alias alias_built, param {v = true; w = 2}, (param_updated {v = 1; w = 2}).v, arms false)
+|}
+    );
+  [%expect
+    {|
+    module N : sig
+      type r = { x : int; y : bool }
+    end
+    module M : sig
+      type t = { a : int; b : N.r }
+      type v = A | B of int
+      val t : t
+    end
+    type s = { x : string; z : int }
+    type alias = N.r
+    module P : sig
+      type p['a] = { v : 'a; w : int }
+    end
+    val via_alias : N.r -> bool
+    val alias_built : N.r
+    val param : P.p[bool] -> bool
+    val param_built : P.p[string]
+    val param_updated : P.p[int] -> P.p[int]
+    val quoted : <N.r>{}
+    val arms : bool -> N.r
+    val seq : N.r
+    val ran : bool * bool * int * N.r
+    -- evaluated at compile time
+    -- evaluated
+    (M.t ((a 1) (b ((x 2) (y true)))))
+    (via_alias <fun>)
+    (alias_built ((x 1) (y true)))
+    (param <fun>)
+    (param_built ((v (String s)) (w 1)))
+    (param_updated <fun>)
+    (quoted
+     (Code
+      (Record
+       ((((type_name N.r) (name N.x) (index 0)) (Lit (Int 2) : int))
+        (((type_name N.r) (name N.y) (index 1)) (Lit (Bool false) : bool)))
+       : N.r)))
+    (arms <fun>)
+    (seq ((x 4) (y true)))
+    (ran (Tuple true true 5 ((x 2) (y false))))
+    |}]
+;;
+
+let%expect_test "the known type wins over the latest fields in scope" =
+  run
+    {|
+module K = struct
+  type u = {x : int; y : int}
+  module L = struct
+    type w = {x : bool}
+    let latest v = v.x
+    let picked (v : u) = v.x
+    let built : u = {x = 1; y = 2}
+    let updated (v : u) = {v with x = 3}
+    let matched (v : u) = match v with {x = n} -> n
+    let ran = (picked built, (updated built).x, matched built, latest {x = true})
+  end
+end
+|};
+  [%expect
+    {|
+    module K : sig
+      type u = { x : int; y : int }
+      module L : sig
+        type w = { x : bool }
+        val latest : w -> bool
+        val picked : u -> int
+        val built : u
+        val updated : u -> u
+        val matched : u -> int
+        val ran : int * int * int * bool
+      end
+    end
+    -- evaluated at compile time
+    -- evaluated
+    (K.L.latest <fun>)
+    (K.L.picked <fun>)
+    (K.L.built ((x 1) (y 2)))
+    (K.L.updated <fun>)
+    (K.L.matched <fun>)
+    (K.L.ran (Tuple 1 3 1 true))
+    |}]
+;;
+
+let%expect_test "fields of different types" =
+  check
+    (types
+     ^ {|
+let mixed = {M.a = 1; N.x = 2}
+|}
+    );
+  check
+    (types
+     ^ {|
+let mixed : M.t = {a = 1; N.x = 2}
+|}
+    );
+  check
+    (types
+     ^ {|
+let mixed (v : M.t) = {v with N.x = 2}
+|}
+    );
+  [%expect
+    {|
+    ((Fields_of_different_types (field N.x) (expected_type M.t)
+      (actual_type N.r))
+     @ t.stag:12:22-25)
+    ((No_such_field (type_name N.r) (field a)) @ t.stag:12:19-20)
+    ((Unification_error
+      (Type_mismatch (TCon N.r ()) (TCon M.t ()) (Base_types_not_equal N.r M.t)))
+     @ t.stag:12:23-24)
     |}]
 ;;

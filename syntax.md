@@ -16,6 +16,8 @@ node, for good errors.
   minus, so `f -1` and `x-1` are `f (-1)` and `x (-1)` (write `Int.sub`).
   Printed values parenthesize negative arguments, `Some (-1)`, as OCaml does,
   so they will still parse once infix operators follow OCaml.
+  Nominal records print with their unqualified field names, `{x = 1; y = None}`,
+  which parse back where the record's type is known (see Type-directed fields).
 - Escapes, in chars and strings: `\n \t \r \b`, `\ ` (space), `\\ \" \'`,
   `\ddd` (3 decimal digits, at most 255) and `\xhh` (2 hex digits). In
   strings, a `\` at the end of a line skips the newline and the spaces and
@@ -67,6 +69,7 @@ f x y                               (* application, left assoc *)
 (a, b, c)   ()   (e)
 C   C e   C (a, b)                  (* constructor args are n-ary: C (a, b) has 2 *)
 {x = 1; M.y = 2}   r.x   r.M.x      (* nominal records *)
+{r with x = 1; M.y = 2}             (* nominal update *)
 {`x = 1; `y = true}   r.`x          (* polymorphic records *)
 {`x = v; `y = w | r}                (* extend *)
 r \ `x                              (* restrict *)
@@ -113,6 +116,35 @@ parenthesized type (`type (int -> t)`); as an argument it is parenthesized
 
 `match` arms extend as far as possible, as in OCaml (wrap nested matches in
 parentheses).
+
+### Type-directed fields and constructors
+
+As OCaml's disambiguation, an unqualified field (`x`, not `M.x`) or
+constructor (`A`) is looked up in the nominal type it is known to belong to,
+whether or not that type's names are in scope, and otherwise lexically (the
+innermost declaration in scope, as for other names). The known type wins over
+the lexical one: `v.x` with `v : N.r` is `N.r`'s `x` even where another type's
+`x` shadows it, and if `N.r` has no field `x` it is an error (`The record type
+N.r has no field x`, `The variant type M.v has no constructor C`), rather than
+a fallback. A qualified name or a `Stag.Path.Ref` always names its
+declaration. The known type is (after expanding aliases):
+
+- `e.x`: the type of `e`, which is checked first.
+- `{r with x = ...}`: the type of `r`, checked first, else the expected type.
+- `{x = ...}`: the type of its first qualified field if any, else the
+  expected type. All fields must be of that type.
+- `C ...`, record patterns and constructor patterns: the expected type.
+
+The expected type of an expression is what its context is known to require
+at the point it is checked, as inference proceeds left to right: an annotated
+`let` or return type, a function's parameter type in an application (the
+function is checked first), a constructor's argument types or a field's type
+once the constructor or field is resolved, a component of an expected tuple,
+polymorphic record or variant, a `match` arm's or `let` body's or `e2` of
+`e1; e2` the type of the whole, `e` in `.< e >.` the code type's inner type.
+A pattern's expected type is the scrutinee's, and inside it each
+sub-pattern's that of its position. Where the type is only known later (eg. a
+parameter whose type is fixed by a later use), the lookup is lexical.
 
 ## Patterns
 
