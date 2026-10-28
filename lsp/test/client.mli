@@ -51,3 +51,10 @@ val print_json : t -> Yojson.Safe.t -> unit
 
 (** The semantic tokens of [path], one per line, with their text. *)
 val print_semantic_tokens : t -> string -> unit
+
+(** Prints the hover at a position of [file], after the position. *)
+val print_hover : t -> string -> line:int -> character:int -> unit
+
+(** Prints the definitions of what is at a position of [file], after the
+    position. *)
+val print_definition : t -> string -> line:int -> character:int -> unit

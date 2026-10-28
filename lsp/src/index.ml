@@ -7,7 +7,7 @@ module Span = struct
       ; start : int
       ; stop : int
       }
-    [@@deriving compare, hash, sexp_of]
+    [@@deriving compare, equal, hash, sexp_of]
   end
 
   include T
@@ -52,7 +52,8 @@ type t =
   ; types : Loc.t String.Table.t
   ; constructors : Loc.t String.Table.t
   ; fields : Loc.t String.Table.t
-  ; functions : Span.Hash_set.t
+  ; functions : Int.Hash_set.t String.Table.t
+  ; splices : Span.Hash_set.t
   }
 
 (* The syntax at a typed node's location that names what it doesn't keep. *)
@@ -144,8 +145,20 @@ module Syntax_at = struct
   ;;
 end
 
+(* Generated declarations are located at their splice, so nothing there is
+   indexed but the splice's own expression. *)
+let at_splice t loc = Hash_set.mem t.splices (Span.of_loc loc)
+
+let add_function t (loc : Loc.t) =
+  if not (at_splice t loc)
+  then
+    Hash_set.add
+      (Hashtbl.find_or_add t.functions loc.file ~default:Int.Hash_set.create)
+      loc.start.offset
+;;
+
 let add t (entry : Entry.t) =
-  if not (Loc.is_none entry.loc)
+  if not (Loc.is_none entry.loc || at_splice t entry.loc)
   then
     Queue.enqueue
       (Hashtbl.find_or_add t.entries entry.loc.file ~default:Queue.create)
@@ -161,7 +174,7 @@ let is_arrow ty =
 let add_binder t (name : Syntax.Name.t) ~label ~ty ~ident =
   Option.iter ident ~f:(fun ident ->
     Hashtbl.set t.locals ~key:ident ~data:name.loc);
-  if is_arrow ty then Hash_set.add t.functions (Span.of_loc name.loc);
+  if is_arrow ty then add_function t name.loc;
   add
     t
     { loc = name.loc
@@ -282,7 +295,7 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
        | Prim prim -> Sexp.to_string (Prim.sexp_of_t prim), None
        | Intrinsic intrinsic -> Intrinsic.public_name intrinsic, None
      in
-     if is_arrow e.ty then Hash_set.add t.functions (Span.of_loc e.loc);
+     if is_arrow e.ty then add_function t e.loc;
      typed ~label ?target ()
    | Let { ident; args; _ } ->
      typed ();
@@ -350,9 +363,9 @@ let rec declarations t ~values ~prefix (toplevels : Syntax.Toplevel.t list) =
   in
   List.iter toplevels ~f:(fun toplevel ->
     match toplevel.txt with
-    | Let (name, bindings, _, _) ->
+    | Let (name, bindings, _, body) ->
       set t.values name;
-      Hashtbl.set values ~key:(canonical name) ~data:(name, bindings)
+      Hashtbl.set values ~key:(canonical name) ~data:(name, bindings, body)
     | Type { name; params = _; kind } ->
       set t.types name;
       (match kind with
@@ -364,7 +377,9 @@ let rec declarations t ~values ~prefix (toplevels : Syntax.Toplevel.t list) =
     | Exception (name, _) -> set t.constructors name
     | Module (name, toplevels) ->
       declarations t ~values ~prefix:(prefix @ [ name.txt ]) toplevels
-    | Module_splice _ | Include _ | Expect_test _ | Bench _ -> ())
+    | Module_splice _ | Include _ ->
+      Hash_set.add t.splices (Span.of_loc toplevel.loc)
+    | Expect_test _ | Bench _ -> ())
 ;;
 
 let rec files ~prefix (group : Driver.Module_group.t) =
@@ -389,7 +404,8 @@ let create ~groups ~(program : Typed.Program.t) =
     ; types = String.Table.create ()
     ; constructors = String.Table.create ()
     ; fields = String.Table.create ()
-    ; functions = Span.Hash_set.create ()
+    ; functions = String.Table.create ()
+    ; splices = Span.Hash_set.create ()
     }
   in
   let files = List.concat_map groups ~f:(files ~prefix:[]) in
@@ -442,10 +458,18 @@ let create ~groups ~(program : Typed.Program.t) =
         | Pattern_var -> ()));
   List.iter program.sccs ~f:(fun scc ->
     List.iter scc.members ~f:(fun { ident; args; scheme; body } ->
-      Option.iter (Hashtbl.find values ident.name) ~f:(fun (name, bindings) ->
-        add_binder t name ~label:ident.name ~ty:scheme ~ident:None;
-        local_binders t program (List.map bindings ~f:fst) args);
+      if at_splice t body.loc
+      then Hashtbl.add t.values ~key:ident.name ~data:body.loc |> ignore
+      else
+        Option.iter
+          (Hashtbl.find values ident.name)
+          ~f:(fun (name, bindings, (written : Syntax.Expr.t)) ->
+            if Span.equal (Span.of_loc written.loc) (Span.of_loc body.loc)
+            then (
+              add_binder t name ~label:ident.name ~ty:scheme ~ident:None;
+              local_binders t program (List.map bindings ~f:fst) args));
       expr t ~syntax ~program body));
+  List.iter program.declaration_splices ~f:(expr t ~syntax ~program);
   List.iter program.expect_tests ~f:(fun test ->
     expr t ~syntax ~program test.body);
   List.iter program.benches ~f:(fun bench ->
@@ -471,10 +495,10 @@ let relocate t ~f =
         | target -> target
       in
       add { t with entries } { entry with loc; target }));
-  let functions = Span.Hash_set.create () in
-  Hash_set.iter t.functions ~f:(fun span ->
-    let file = (f (Loc.start_of_file span.file)).file in
-    Hash_set.add functions { span with file });
+  let file name = (f (Loc.start_of_file name)).file in
+  let functions = String.Table.create () in
+  Hashtbl.iteri t.functions ~f:(fun ~key ~data ->
+    Hashtbl.set functions ~key:(file key) ~data);
   { entries
   ; locals = Hashtbl.map t.locals ~f
   ; values = Hashtbl.map t.values ~f
@@ -482,6 +506,10 @@ let relocate t ~f =
   ; constructors = Hashtbl.map t.constructors ~f
   ; fields = Hashtbl.map t.fields ~f
   ; functions
+  ; splices =
+      Hash_set.to_list t.splices
+      |> List.map ~f:(fun span -> { span with Span.file = file span.file })
+      |> Span.Hash_set.of_list
   }
 ;;
 
@@ -531,6 +559,7 @@ let definition t ~file ~offset =
 ;;
 
 let is_function t ~file ~offset =
-  Hash_set.exists t.functions ~f:(fun span ->
-    String.equal span.file file && span.start = offset)
+  match Hashtbl.find t.functions file with
+  | Some offsets -> Hash_set.mem offsets offset
+  | None -> false
 ;;
