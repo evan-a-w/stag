@@ -8,16 +8,21 @@ let parse source =
 
 let print_error error = print_endline (Error.to_string_hum error)
 
+(* The prelude, checked as a program of its own. *)
+let prelude_signature =
+  lazy
+    (match Driver.check (parse Prelude.source) with
+     | Error error -> raise_s [%sexp (error : Typecheck_error.t)]
+     | Ok driver -> (Driver.checked driver).signature)
+;;
+
 let%expect_test "the prelude's signature" =
-  (match Driver.check_files [ Prelude.file ] with
-   | Error error -> print_s [%sexp (error : Driver.Error.t)]
-   | Ok driver ->
-     print_string (Signature.to_string_hum (Driver.checked driver).signature));
+  print_string (Signature.to_string_hum (Lazy.force prelude_signature));
   [%expect
     {|
+    type list['a] = Nil | Cons of 'a * list['a]
+    type option['a] = None | Some of 'a
     module Stag : sig
-      type list['a] = Nil | Cons of 'a * list['a]
-      type option['a] = None | Some of 'a
       val map : ('a -> 'b) -> list['a] -> list['b]
       module Lit : sig
         type t = Int of int | Bool of bool | String of string | Char of char | Unit
@@ -62,7 +67,7 @@ let%expect_test "the prelude's signature" =
         val let_ : string -> list[string] -> t -> t -> t
       end
       module Toplevel : sig
-        type t = Let of string * list[string * option[Type_expr.t]] * option[Type_expr.t] * Expr.t | Type of {`kind : Type_decl.Kind.t; `name : string; `params : list[Type_decl.Param.t]} | Module of string * list[t] | Expect_test of {`body : Expr.t; `name : string}
+        type t = Let of string * list[string * option[Type_expr.t]] * option[Type_expr.t] * Expr.t | Type of {`kind : Type_decl.Kind.t; `name : string; `params : list[Type_decl.Param.t]} | Module of string * list[t] | Module_splice of string * Expr.t | Include of Expr.t | Expect_test of {`body : Expr.t; `name : string}
         val let_ : string -> list[string] -> Expr.t -> t
       end
       module Program : sig
@@ -127,6 +132,8 @@ let%expect_test "power" =
   print_int (Int.add 3 2);
   [%expect {| 5 |}];
   [%expect]
+module G = .~(gen 1)
+include .~gen
 |stag}
   ]
 ;;
@@ -159,11 +166,7 @@ let%expect_test "round trips, modulo locations" =
 ;;
 
 let%expect_test "constructors are made as the typechecker resolves them" =
-  let signature =
-    match Driver.check_files [ Prelude.file ] with
-    | Error error -> raise_s [%sexp (error : Driver.Error.t)]
-    | Ok driver -> (Driver.checked driver).signature
-  in
+  let signature = Lazy.force prelude_signature in
   (* A function matching every constructor of each variant of the prelude. *)
   let rec probes path (items : Signature.t) =
     List.concat_map items ~f:(function
@@ -191,10 +194,7 @@ let%expect_test "constructors are made as the typechecker resolves them" =
     |> String.concat ~sep:"\n"
   in
   let typechecker =
-    match
-      Driver.check_files
-        [ Prelude.file; { path = "probe.stag"; contents = source } ]
-    with
+    match Driver.check_files [ { path = "probe.stag"; contents = source } ] with
     | Error error -> raise_s [%sexp (error : Driver.Error.t)]
     | Ok driver ->
       List.concat_map (Driver.checked driver).program.sccs ~f:(fun scc ->
@@ -219,7 +219,7 @@ let%expect_test "constructors are made as the typechecker resolves them" =
              (sexp_of_refs typechecker)
              (sexp_of_refs round_trip_constructors)
            : bool)];
-  [%expect {| ((constructors 60) (same_as_to_value true)) |}]
+  [%expect {| ((constructors 62) (same_as_to_value true)) |}]
 ;;
 
 let%expect_test "values" =
@@ -232,8 +232,8 @@ let%expect_test "values" =
   show {|type t['a] = A | B of 'a * t['a]|};
   [%expect
     {|
-    Stag.Cons (Stag.Toplevel.Let ("f", Stag.Cons (("x", Stag.Some (Stag.Type_expr.Con ("int", Stag.Nil))), Stag.Nil), Stag.None, Stag.Expr.Poly_variant ("A", Stag.Some (Stag.Expr.Var ("x", Stag.None)))), Stag.Nil)
-    Stag.Cons (Stag.Toplevel.Type {`kind = Stag.Type_decl.Kind.Variant (Stag.Cons (("A", Stag.Nil), Stag.Cons (("B", Stag.Cons (Stag.Type_expr.Var "a", Stag.Cons (Stag.Type_expr.Con ("t", Stag.Cons (Stag.Type_expr.Arg.Ty (Stag.Type_expr.Var "a"), Stag.Nil)), Stag.Nil))), Stag.Nil))); `name = "t"; `params = Stag.Cons (Stag.Type_decl.Param.Ty "a", Stag.Nil)}, Stag.Nil)
+    Cons (Stag.Toplevel.Let ("f", Cons (("x", Some (Stag.Type_expr.Con ("int", Nil))), Nil), None, Stag.Expr.Poly_variant ("A", Some (Stag.Expr.Var ("x", None)))), Nil)
+    Cons (Stag.Toplevel.Type {`kind = Stag.Type_decl.Kind.Variant (Cons (("A", Nil), Cons (("B", Cons (Stag.Type_expr.Var "a", Cons (Stag.Type_expr.Con ("t", Cons (Stag.Type_expr.Arg.Ty (Stag.Type_expr.Var "a"), Nil)), Nil))), Nil))); `name = "t"; `params = Cons (Stag.Type_decl.Param.Ty "a", Nil)}, Nil)
     |}]
 ;;
 
@@ -258,13 +258,13 @@ let%expect_test "nodes are located where given" =
     |}]
 ;;
 
-(* The prelude and [file], checked and evaluated, and the value of each toplevel
+(* [file], checked and evaluated, and the value of each toplevel
    by canonical name. *)
 let eval_values ?(file = "gen.stag") source =
   match
     Driver.check_files
       ~limits:Source_helpers.limits
-      [ Prelude.file; { path = file; contents = source } ]
+      [ { path = file; contents = source } ]
   with
   | Error error -> raise_s [%sexp (error : Driver.Error.t)]
   | Ok driver ->
@@ -280,26 +280,26 @@ let eval_values ?(file = "gen.stag") source =
 
 let generator =
   {|
-let arm name = (Stag.Pattern.Construct (name, Stag.Nil), Stag.Expr.string name)
-let constructor name = (name, Stag.Nil)
+let arm name = (Stag.Pattern.Construct (name, Nil), Stag.Expr.string name)
+let constructor name = (name, Nil)
 
 (* type t = <names>  let to_string x = match x with <name> -> "<name>" ... *)
 let enum names =
-  Stag.Cons
+  Cons
     ( Stag.Toplevel.Type
-        {`name = "t"; `params = Stag.Nil; `kind = Stag.Type_decl.Kind.Variant (Stag.map constructor names)}
-    , Stag.Cons
+        {`name = "t"; `params = Nil; `kind = Stag.Type_decl.Kind.Variant (Stag.map constructor names)}
+    , Cons
         ( Stag.Toplevel.let_
             "to_string"
-            (Stag.Cons ("x", Stag.Nil))
+            (Cons ("x", Nil))
             (Stag.Expr.Match (Stag.Expr.var "x", Stag.map arm names))
-        , Stag.Nil ) )
+        , Nil ) )
 
-let names = Stag.Cons ("Red", Stag.Cons ("Green", Stag.Cons ("Blue", Stag.Nil)))
+let names = Cons ("Red", Cons ("Green", Cons ("Blue", Nil)))
 let decls = enum names
-let bad = enum (Stag.Cons ("Red", Stag.Cons ("light blue", Stag.Nil)))
-let keyword = Stag.Cons (Stag.Toplevel.let_ "match" Stag.Nil (Stag.Expr.var "x"), Stag.Nil)
-let bad_path = Stag.Cons (Stag.Toplevel.let_ "x" Stag.Nil (Stag.Expr.var "M..y"), Stag.Nil)
+let bad = enum (Cons ("Red", Cons ("light blue", Nil)))
+let keyword = Cons (Stag.Toplevel.let_ "match" Nil (Stag.Expr.var "x"), Nil)
+let bad_path = Cons (Stag.Toplevel.let_ "x" Nil (Stag.Expr.var "M..y"), Nil)
 |}
 ;;
 
@@ -361,23 +361,23 @@ let%expect_test "malformed values" =
     eval_values
       ~file:"other.stag"
       {|
-type option['a] = None | Some of 'a
-let decls = Stag.Cons (Stag.Toplevel.Let ("x", Stag.Nil, Stag.None, Stag.Expr.Lit (Stag.Lit.Int 1)), Stag.Nil)
-let other = Some 1
+module Mine = struct type option['a] = None | Some of 'a end
+let decls = Cons (Stag.Toplevel.Let ("x", Nil, None, Stag.Expr.Lit (Stag.Lit.Int 1)), Nil)
+let other = Mine.Some 1
 |}
   in
   let other = values "Other.other" in
   let rec replace_none (value : Treewalk.Value.t) : Treewalk.Value.t =
     match value with
-    | Construct ({ name = "Stag.None"; _ }, []) -> other
+    | Construct ({ name = "prelude.None"; _ }, []) -> other
     | Construct (ref, args) -> Construct (ref, List.map args ~f:replace_none)
     | value -> value
   in
   print_program (replace_none (values "Other.decls"));
   [%expect
-    {| Malformed syntax: expected Stag.option, got Other.Some 1, within element 0 > Stag.Toplevel.Let argument 2 |}];
+    {| Malformed syntax: expected option, got Other.Mine.Some 1, within element 0 > Stag.Toplevel.Let argument 2 |}];
   print_program (Int 1);
-  [%expect {| Malformed syntax: expected Stag.list, got 1 |}]
+  [%expect {| Malformed syntax: expected list, got 1 |}]
 ;;
 
 let print_expr value =
@@ -403,41 +403,44 @@ let%expect_test "malformed values made otherwise" =
   in
   (* Wrong arity. *)
   print_expr
-    (edit (expr "f (g x)") ~name:"Stag.Expr.App" ~f:(fun ref args ->
+    (edit (expr "f (g x)") ~name:"prelude.Stag.Expr.App" ~f:(fun ref args ->
        Construct (ref, List.take args 1)));
   [%expect
-    {| Malformed syntax: expected Stag.Expr.App applied to its declared arguments, got Stag.Expr.App (Stag.Expr.Var ("f", Stag.None)) |}];
+    {| Malformed syntax: expected Stag.Expr.App applied to its declared arguments, got Stag.Expr.App (Stag.Expr.Var ("f", None)) |}];
   (* A wrong payload. *)
   print_expr
-    (edit (expr "(1, 2)") ~name:"Stag.Lit.Int" ~f:(fun ref _ ->
+    (edit (expr "(1, 2)") ~name:"prelude.Stag.Lit.Int" ~f:(fun ref _ ->
        Construct (ref, [ String "1" ])));
   [%expect
     {| Malformed syntax: expected an int, got "1", within Stag.Expr.Tuple > element 0 > Stag.Expr.Lit > Stag.Lit.Int |}];
   (* A missing record field. *)
   print_expr
-    (edit (expr ".< .~e >.") ~name:"Stag.Expr.Splice" ~f:(fun ref args ->
-       match args with
-       | [ Poly_record fields ] ->
-         Construct (ref, [ Poly_record (Map.remove fields "subs") ])
-       | _ -> assert false));
+    (edit
+       (expr ".< .~e >.")
+       ~name:"prelude.Stag.Expr.Splice"
+       ~f:(fun ref args ->
+         match args with
+         | [ Poly_record fields ] ->
+           Construct (ref, [ Poly_record (Map.remove fields "subs") ])
+         | _ -> assert false));
   [%expect
-    {| Malformed syntax: expected a record with a field `subs, got {`expr = Stag.Expr.Var ("e", Stag.None)}, within Stag.Expr.Quote > Stag.Expr.Splice |}];
+    {| Malformed syntax: expected a record with a field `subs, got {`expr = Stag.Expr.Var ("e", None)}, within Stag.Expr.Quote > Stag.Expr.Splice |}];
   (* Not a pair. *)
   print_expr
     (edit
        (expr "let f x (y : int) = x in f")
-       ~name:"Stag.Cons"
+       ~name:"prelude.Cons"
        ~f:(fun ref args ->
          match args with
          | [ Tuple [ name; annot ]; tail ] ->
            Construct (ref, [ Tuple [ name; annot; annot ]; tail ])
          | _ -> assert false));
   [%expect
-    {| Malformed syntax: expected a pair, got ("x", Stag.None, Stag.None), within Stag.Expr.Let argument 1 > element 0 |}];
+    {| Malformed syntax: expected a pair, got ("x", None, None), within Stag.Expr.Let argument 1 > element 0 |}];
   (* A list ending in something else. *)
-  print_expr (edit (expr "(a, b, c)") ~name:"Stag.Nil" ~f:(fun _ _ -> Unit));
+  print_expr (edit (expr "(a, b, c)") ~name:"prelude.Nil" ~f:(fun _ _ -> Unit));
   [%expect
-    {| Malformed syntax: expected Stag.list, got (), within Stag.Expr.Tuple |}]
+    {| Malformed syntax: expected list, got (), within Stag.Expr.Tuple |}]
 ;;
 
 let%expect_test "names" =
@@ -629,8 +632,8 @@ let%expect_test "shapes" =
     ~f:(fun es -> expr (at (Syntax.Expr.Tuple es)));
   [%expect
     {|
-    Malformed syntax: expected at least two components, got Stag.Nil, within Stag.Expr.Tuple
-    Malformed syntax: expected at least two components, got Stag.Cons (Stag.Expr.Lit Stag.Lit.Unit, Stag.Nil), within Stag.Expr.Tuple
+    Malformed syntax: expected at least two components, got Nil, within Stag.Expr.Tuple
+    Malformed syntax: expected at least two components, got Cons (Stag.Expr.Lit Stag.Lit.Unit, Nil), within Stag.Expr.Tuple
     (Tuple ((Lit Unit) (Lit Unit)))
     |}];
   List.iter
@@ -638,8 +641,8 @@ let%expect_test "shapes" =
     ~f:(fun ps -> pattern (at (Syntax.Pattern.Tuple ps)));
   [%expect
     {|
-    Malformed syntax: expected at least two components, got Stag.Nil, within Stag.Pattern.Tuple
-    Malformed syntax: expected at least two components, got Stag.Cons (Stag.Pattern.Any, Stag.Nil), within Stag.Pattern.Tuple
+    Malformed syntax: expected at least two components, got Nil, within Stag.Pattern.Tuple
+    Malformed syntax: expected at least two components, got Cons (Stag.Pattern.Any, Nil), within Stag.Pattern.Tuple
     (Tuple (Any Any))
     |}];
   List.iter
@@ -648,7 +651,7 @@ let%expect_test "shapes" =
   [%expect
     {|
     (Tuple ())
-    Malformed syntax: expected no components or at least two, got Stag.Cons (Stag.Type_expr.Con ("int", Stag.Nil), Stag.Nil), within Stag.Type_expr.Tuple
+    Malformed syntax: expected no components or at least two, got Cons (Stag.Type_expr.Con ("int", Nil), Nil), within Stag.Type_expr.Tuple
     (Tuple ((Con int ()) (Con int ())))
     |}];
   expr (at (Syntax.Expr.Record []));
@@ -656,9 +659,9 @@ let%expect_test "shapes" =
   type_decl { name = at "t"; params = []; kind = Record [] };
   [%expect
     {|
-    Malformed syntax: expected at least one field, got Stag.Nil, within Stag.Expr.Record
-    Malformed syntax: expected at least one field, got Stag.Nil, within Stag.Pattern.Record
-    Malformed syntax: expected at least one field, got Stag.Nil, within field `kind > Stag.Type_decl.Kind.Record
+    Malformed syntax: expected at least one field, got Nil, within Stag.Expr.Record
+    Malformed syntax: expected at least one field, got Nil, within Stag.Pattern.Record
+    Malformed syntax: expected at least one field, got Nil, within field `kind > Stag.Type_decl.Kind.Record
     |}]
 ;;
 
@@ -667,21 +670,21 @@ let%expect_test "shapes left to the typechecker" =
   let values =
     eval_values
       {|
-let unit = Stag.Type_expr.con "unit" Stag.Nil
-let int = Stag.Type_expr.con "int" Stag.Nil
+let unit = Stag.Type_expr.con "unit" Nil
+let int = Stag.Type_expr.con "int" Nil
 let decls =
-  Stag.Cons (Stag.Toplevel.Type {`name = "void"; `params = Stag.Nil; `kind = Stag.Type_decl.Kind.Variant Stag.Nil},
-  Stag.Cons (Stag.Toplevel.Type {`name = "pair"; `params = Stag.Nil;
-     `kind = Stag.Type_decl.Kind.Variant (Stag.Cons (("P", Stag.Cons (Stag.Type_expr.Tuple (Stag.Cons (int, Stag.Cons (int, Stag.Nil))), Stag.Nil)), Stag.Nil))},
-  Stag.Cons (Stag.Toplevel.Let ("absurd", Stag.Cons (("v", Stag.Some (Stag.Type_expr.con "void" Stag.Nil)), Stag.Nil), Stag.Some int,
-     Stag.Expr.Match (Stag.Expr.var "v", Stag.Nil)),
-  Stag.Cons (Stag.Toplevel.let_ "p" Stag.Nil
-     (Stag.Expr.Construct ("P", Stag.Cons (Stag.Expr.Tuple (Stag.Cons (Stag.Expr.int 1, Stag.Cons (Stag.Expr.int 2, Stag.Nil))), Stag.Nil))),
-  Stag.Cons (Stag.Toplevel.let_ "first" (Stag.Cons ("p", Stag.Nil))
-     (Stag.Expr.Match (Stag.Expr.var "p", Stag.Cons ((Stag.Pattern.Construct ("P", Stag.Cons (Stag.Pattern.Var "q", Stag.Nil)), Stag.Expr.var "q"), Stag.Nil))),
-  Stag.Cons (Stag.Toplevel.let_ "extended" Stag.Nil (Stag.Expr.Poly_extend (Stag.Nil, Stag.Expr.Poly_record (Stag.Cons (("x", Stag.Expr.int 1), Stag.Nil)))),
-  Stag.Cons (Stag.Toplevel.let_ "updated" Stag.Nil (Stag.Expr.Poly_update (Stag.Expr.var "extended", Stag.Nil)),
-  Stag.Nil)))))))
+  Cons (Stag.Toplevel.Type {`name = "void"; `params = Nil; `kind = Stag.Type_decl.Kind.Variant Nil},
+  Cons (Stag.Toplevel.Type {`name = "pair"; `params = Nil;
+     `kind = Stag.Type_decl.Kind.Variant (Cons (("P", Cons (Stag.Type_expr.Tuple (Cons (int, Cons (int, Nil))), Nil)), Nil))},
+  Cons (Stag.Toplevel.Let ("absurd", Cons (("v", Some (Stag.Type_expr.con "void" Nil)), Nil), Some int,
+     Stag.Expr.Match (Stag.Expr.var "v", Nil)),
+  Cons (Stag.Toplevel.let_ "p" Nil
+     (Stag.Expr.Construct ("P", Cons (Stag.Expr.Tuple (Cons (Stag.Expr.int 1, Cons (Stag.Expr.int 2, Nil))), Nil))),
+  Cons (Stag.Toplevel.let_ "first" (Cons ("p", Nil))
+     (Stag.Expr.Match (Stag.Expr.var "p", Cons ((Stag.Pattern.Construct ("P", Cons (Stag.Pattern.Var "q", Nil)), Stag.Expr.var "q"), Nil))),
+  Cons (Stag.Toplevel.let_ "extended" Nil (Stag.Expr.Poly_extend (Nil, Stag.Expr.Poly_record (Cons (("x", Stag.Expr.int 1), Nil)))),
+  Cons (Stag.Toplevel.let_ "updated" Nil (Stag.Expr.Poly_update (Stag.Expr.var "extended", Nil)),
+  Nil)))))))
 |}
   in
   let program =
@@ -752,20 +755,18 @@ let decls =
     |}]
 ;;
 
-let%expect_test "negative ints are [Int.neg] applied to a literal" =
+let%expect_test "negative int literals" =
   let values =
     eval_values
       {|
-let minus n = Stag.Expr.App (Stag.Expr.var "Int.neg", Stag.Expr.int n)
-let decls = Stag.Cons (Stag.Toplevel.let_ "minus_one" Stag.Nil (minus 1), Stag.Nil)
-let literal = Stag.Cons (Stag.Toplevel.let_ "minus_one" Stag.Nil (Stag.Expr.int (Int.neg 1)), Stag.Nil)
+let decls = Cons (Stag.Toplevel.let_ "minus_one" Nil (Stag.Expr.int (Int.neg 1)), Nil)
 |}
   in
   let program =
     Syntax_value.Program.of_value (values "Gen.decls") ~loc:Loc.none |> ok_exn
   in
   print_s [%sexp (program : Syntax.Program.t)];
-  [%expect {| ((Let minus_one () () (App (Var Int.neg ()) (Lit (Int 1))))) |}];
+  [%expect {| ((Let minus_one () () (Lit (Int -1)))) |}];
   Source_helpers.run_program
     ~prelude:false
     (program @ parse {|let printed = print_int minus_one; print_endline ""|});
@@ -778,50 +779,48 @@ let literal = Stag.Cons (Stag.Toplevel.let_ "minus_one" Stag.Nil (Stag.Expr.int 
     -1
     (minus_one -1)
     (printed "()")
-    |}];
-  print_program (values "Gen.literal");
-  [%expect
-    {| Malformed syntax: expected a non-negative int, got -1, within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Lit > Stag.Lit.Int |}]
+    |}]
 ;;
 
 let%expect_test "prelude helpers" =
   let values =
     eval_values
       {|
-let int = Stag.Type_expr.con "int" Stag.Nil
+let int = Stag.Type_expr.con "int" Nil
 let types =
-  Stag.Cons (Stag.Type_expr.tuple Stag.Nil,
-  Stag.Cons (Stag.Type_expr.tuple (Stag.Cons (int, Stag.Nil)),
-  Stag.Cons (Stag.Type_expr.tuple (Stag.Cons (int, Stag.Cons (int, Stag.Nil))),
-  Stag.Cons (Stag.Type_expr.con "list" (Stag.Cons (int, Stag.Nil)), Stag.Nil))))
+  Cons (Stag.Type_expr.tuple Nil,
+  Cons (Stag.Type_expr.tuple (Cons (int, Nil)),
+  Cons (Stag.Type_expr.tuple (Cons (int, Cons (int, Nil))),
+  Cons (Stag.Type_expr.con "list" (Cons (int, Nil)), Nil))))
 let patterns =
-  Stag.Cons (Stag.Pattern.tuple Stag.Nil,
-  Stag.Cons (Stag.Pattern.tuple (Stag.Cons (Stag.Pattern.Any, Stag.Nil)),
-  Stag.Cons (Stag.Pattern.tuple (Stag.Cons (Stag.Pattern.Var "a", Stag.Cons (Stag.Pattern.Var "b", Stag.Nil))), Stag.Nil)))
+  Cons (Stag.Pattern.tuple Nil,
+  Cons (Stag.Pattern.tuple (Cons (Stag.Pattern.Any, Nil)),
+  Cons (Stag.Pattern.tuple (Cons (Stag.Pattern.Var "a", Cons (Stag.Pattern.Var "b", Nil))), Nil)))
 let one = Stag.Expr.int 1
 let exprs =
-  Stag.Cons (Stag.Expr.tuple Stag.Nil,
-  Stag.Cons (Stag.Expr.tuple (Stag.Cons (one, Stag.Nil)),
-  Stag.Cons (Stag.Expr.tuple (Stag.Cons (one, Stag.Cons (Stag.Expr.string "s", Stag.Nil))),
-  Stag.Cons (Stag.Expr.apply (Stag.Expr.var "f") Stag.Nil,
-  Stag.Cons (Stag.Expr.apply (Stag.Expr.var "f") (Stag.Cons (one, Stag.Cons (Stag.Expr.var "x", Stag.Nil))), Stag.Nil)))))
+  Cons (Stag.Expr.tuple Nil,
+  Cons (Stag.Expr.tuple (Cons (one, Nil)),
+  Cons (Stag.Expr.tuple (Cons (one, Cons (Stag.Expr.string "s", Nil))),
+  Cons (Stag.Expr.apply (Stag.Expr.var "f") Nil,
+  Cons (Stag.Expr.apply (Stag.Expr.var "f") (Cons (one, Cons (Stag.Expr.var "x", Nil))), Nil)))))
 let decls =
-  Stag.Cons (Stag.Toplevel.let_ "add" (Stag.Cons ("x", Stag.Cons ("y", Stag.Nil)))
-    (Stag.Expr.apply (Stag.Expr.var "Int.add") (Stag.Cons (Stag.Expr.var "x", Stag.Cons (Stag.Expr.var "y", Stag.Nil)))),
-  Stag.Cons (Stag.Toplevel.let_ "seven" Stag.Nil
-    (Stag.Expr.let_ "double" (Stag.Cons ("n", Stag.Nil))
-       (Stag.Expr.apply (Stag.Expr.var "add") (Stag.Cons (Stag.Expr.var "n", Stag.Cons (Stag.Expr.var "n", Stag.Nil))))
-       (Stag.Expr.Match (Stag.Expr.tuple (Stag.Cons (Stag.Expr.int 3, Stag.Cons (one, Stag.Nil))),
-          Stag.Cons ((Stag.Pattern.tuple (Stag.Cons (Stag.Pattern.Var "a", Stag.Cons (Stag.Pattern.Var "b", Stag.Nil))),
-                      Stag.Expr.apply (Stag.Expr.var "add") (Stag.Cons (Stag.Expr.App (Stag.Expr.var "double", Stag.Expr.var "a"), Stag.Cons (Stag.Expr.var "b", Stag.Nil)))),
-                     Stag.Nil)))),
-  Stag.Nil))
+  Cons (Stag.Toplevel.let_ "add" (Cons ("x", Cons ("y", Nil)))
+    (Stag.Expr.apply (Stag.Expr.var "Int.add") (Cons (Stag.Expr.var "x", Cons (Stag.Expr.var "y", Nil)))),
+  Cons (Stag.Toplevel.let_ "seven" Nil
+    (Stag.Expr.let_ "double" (Cons ("n", Nil))
+       (Stag.Expr.apply (Stag.Expr.var "add") (Cons (Stag.Expr.var "n", Cons (Stag.Expr.var "n", Nil))))
+       (Stag.Expr.Match (Stag.Expr.tuple (Cons (Stag.Expr.int 3, Cons (one, Nil))),
+          Cons ((Stag.Pattern.tuple (Cons (Stag.Pattern.Var "a", Cons (Stag.Pattern.Var "b", Nil))),
+                      Stag.Expr.apply (Stag.Expr.var "add") (Cons (Stag.Expr.App (Stag.Expr.var "double", Stag.Expr.var "a"), Cons (Stag.Expr.var "b", Nil)))),
+                     Nil)))),
+  Nil))
 |}
   in
   let each of_value sexp_of name =
     let rec elements (value : Treewalk.Value.t) =
       match value with
-      | Construct ({ name = "Stag.Cons"; _ }, [ x; rest ]) -> x :: elements rest
+      | Construct ({ name = "prelude.Cons"; _ }, [ x; rest ]) ->
+        x :: elements rest
       | _ -> []
     in
     List.iter

@@ -1,11 +1,12 @@
 open! Import
 
-let module_name = "Stag"
+let path = "prelude.stag"
+let source = Prelude_source.source
 
-let file =
-  { Source_file.path = String.uncapitalize module_name ^ Source_file.extension
-  ; contents = Prelude_source.source
-  }
+let toplevels =
+  lazy
+    (match Parser.program ~file:path source with
+     | Ok toplevels -> toplevels
+     | Error error ->
+       raise_s [%message "Prelude failed to parse" (error : Parser.Error.t)])
 ;;
-
-let canonical path = module_name ^ "." ^ path

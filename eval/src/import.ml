@@ -8,3 +8,5 @@ module Prim = Stag_ir.Prim
 module Typed = Stag_ir.Typed
 module Lexer = Stag_syntax.Lexer
 module Source_file = Stag_syntax.Source_file
+module Prelude_path = Stag_types.Prelude_path
+module Parser = Stag_syntax.Parser

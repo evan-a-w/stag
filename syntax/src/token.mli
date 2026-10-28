@@ -21,6 +21,7 @@ type t =
   | Of
   | Module
   | Struct
+  | Include
   | End
   | Lparen
   | Rparen

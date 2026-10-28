@@ -13,8 +13,16 @@ val builtins : Syntax.Type_decl.t list
 val create : Fresh.t -> t
 
 (** Declares [decl], a member of [module_], whose parameters are distinct.
-    Types may refer to each other in any order, once declared. *)
-val declare : t -> Module_scope.t -> Syntax.Type_decl.t -> unit
+    Types may refer to each other in any order, once declared. With [lazily],
+    its parameters' ids are taken when first needed rather than now. Errors
+    checking it are passed through [wrap_error]. *)
+val declare
+  :  ?lazily:bool
+  -> ?wrap_error:(Typecheck_error.t -> Typecheck_error.t)
+  -> t
+  -> Module_scope.t
+  -> Syntax.Type_decl.t
+  -> unit
 
 (** The checked declaration of the type of canonical name [name]. *)
 val check : t -> string -> (Signature.Type_decl.t, Typecheck_error.t) Result.t

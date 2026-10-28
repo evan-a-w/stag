@@ -175,6 +175,8 @@ module Toplevel = struct
     | Let of Name.t * Binding.t list * Type_expr.t option * Expr.t
     | Type of Type_decl.t
     | Module of Name.t * t list
+    | Module_splice of Name.t * Expr.t (** [module M = .~e]. *)
+    | Include of Expr.t (** [include .~e]. *)
     | Expect_test of
         { name : string Located.t
         ; body : Expr.t

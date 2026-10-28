@@ -478,10 +478,10 @@ let%expect_test "end to end: source to rendered errors" =
     1 | let x : M.t = 1
                 ^
     Error: Unbound module M
-    File "a.stag", line 1, characters 8-12:
+    File "a.stag", line 1, characters 8-22:
     1 | let x : list[int, int] = 1
-                ^^^^
-    Error: Unbound type list
+                ^^^^^^^^^^^^^^
+    Error: The type list expects 1 argument(s), but is given 2
     File "a.stag", line 1, characters 26-34:
     1 | type t = A of int let x = A (1, 2)
                                   ^^^^^^^^

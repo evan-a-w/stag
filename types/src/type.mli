@@ -221,8 +221,9 @@ val iter_row : 'e Iter.t -> row -> (unit, 'e) Result.t
 module Printer : sig
   type t
 
-  (** [type_name] renders the canonical name of a type constructor, as is by
-      default. *)
+  (** [type_name] renders the canonical name of a type constructor: by
+      default as is, except the prelude's, which are as within the prelude
+      ([Prelude_path.to_string_hum]). *)
   val create : ?type_name:(string -> string) -> unit -> t
 
   val ty : t -> ty -> string

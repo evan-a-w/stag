@@ -119,7 +119,8 @@ module Value = struct
     | Unit -> Atom "()"
     | Tuple values -> List (Atom "Tuple" :: List.map values ~f:sexp_of_t)
     | Construct ({ name; _ }, values) ->
-      List (Atom name :: List.map values ~f:sexp_of_t)
+      List
+        (Atom (Prelude_path.to_string_hum name) :: List.map values ~f:sexp_of_t)
     | Record values ->
       List (Atom "Record" :: Array.to_list (Array.map values ~f:sexp_of_t))
     | Poly_record fields -> [%sexp (fields : t String.Map.t)]
@@ -143,9 +144,11 @@ module Value = struct
     | Char c -> sprintf "%C" c
     | Unit -> "()"
     | Tuple values -> tuple values
-    | Construct ({ name; _ }, []) -> name
-    | Construct ({ name; _ }, [ value ]) -> name ^ " " ^ argument value
-    | Construct ({ name; _ }, values) -> name ^ " " ^ tuple values
+    | Construct ({ name; _ }, []) -> Prelude_path.to_string_hum name
+    | Construct ({ name; _ }, [ value ]) ->
+      Prelude_path.to_string_hum name ^ " " ^ argument value
+    | Construct ({ name; _ }, values) ->
+      Prelude_path.to_string_hum name ^ " " ^ tuple values
     | Record _ -> "<record>"
     | Poly_record fields ->
       Map.to_alist fields
@@ -855,6 +858,8 @@ let splice t ~code ~level ~entry =
   Map.iteri embedded ~f:(fun ~key ~data -> Env.set t.env ~ident:key ~value:data);
   instantiate t code ~entry
 ;;
+
+let run t expr ~level = eval t ~env:(Env.create ()) ~level expr
 
 let run_expect_test t ({ body; _ } : Typed.Expect_test.t) ~on_expect =
   t.on_expect <- Some on_expect;

@@ -29,14 +29,17 @@ module Decl = struct
     { decl : Type_decl.t
     ; name : string
     ; module_ : Module_scope.t
-    ; params : Type.arg list
+    ; params : Type.arg list Lazy.t
+    ; wrap_error : Typecheck_error.t -> Typecheck_error.t
     ; mutable checked : Signature.Type_decl.t option
     }
 
-  let param_map t =
+  let params t = force t.params
+
+  let param_map t ~params =
     List.zip_exn
       (List.map t.decl.params ~f:(fun param -> Type_decl.Param.name param.txt))
-      t.params
+      params
     |> String.Map.of_alist_exn
   ;;
 end
@@ -228,7 +231,7 @@ and elaborate_con
   =
   let error ~loc kind = Error (Typecheck_error.create ~loc kind) in
   let%bind.Result decl = find_type t module_ path ~loc:path_loc in
-  let expected = List.length decl.params in
+  let expected = List.length decl.decl.params in
   let got = List.length args in
   let%bind.Result () =
     if expected = got
@@ -279,7 +282,7 @@ and expand t (decl : Decl.t) ~args ~expansions body =
     elaborate'
       t
       decl.module_
-      (Params (Decl.param_map { decl with params = args }))
+      (Params (Decl.param_map decl ~params:args))
       ~expansions
       body
   in
@@ -304,18 +307,26 @@ let elaborate t module_ vars expr =
     expr
 ;;
 
-let declare t module_ (decl : Type_decl.t) =
+let declare
+      ?(lazily = false)
+      ?(wrap_error = Fn.id)
+      t
+      module_
+      (decl : Type_decl.t)
+  =
   let name = Module_scope.canonical_name module_ decl.name.txt in
   let params =
-    List.map decl.params ~f:(fun param ->
-      match param.txt with
-      | Ty _ -> Type.ATy (TVar (Type.Var.create (Fresh.id t.fresh) Generic))
-      | Row _ -> ARow (RVar (Type.Var.create (Fresh.id t.fresh) Generic)))
+    lazy
+      (List.map decl.params ~f:(fun param ->
+         match param.txt with
+         | Ty _ -> Type.ATy (TVar (Type.Var.create (Fresh.id t.fresh) Generic))
+         | Row _ -> ARow (RVar (Type.Var.create (Fresh.id t.fresh) Generic))))
   in
+  if not lazily then ignore (force params : Type.arg list);
   Hashtbl.add_exn
     t.types
     ~key:name
-    ~data:{ Decl.decl; name; module_; params; checked = None };
+    ~data:{ Decl.decl; name; module_; params; wrap_error; checked = None };
   let declares names table =
     List.iter names ~f:(fun ((member : Name.t), _) ->
       Hashtbl.add_exn
@@ -332,13 +343,19 @@ let declare t module_ (decl : Type_decl.t) =
 let define t (decl : Decl.t) =
   let expansions = String.Table.create () in
   let elaborate =
-    elaborate' t decl.module_ (Params (Decl.param_map decl)) ~expansions
+    elaborate'
+      t
+      decl.module_
+      (Params (Decl.param_map decl ~params:(Decl.params decl)))
+      ~expansions
   in
   let canonical_name = Module_scope.canonical_name decl.module_ in
   let%map.Result kind =
     match decl.decl.kind with
     | Alias body ->
-      let%map.Result body = expand t decl ~args:decl.params ~expansions body in
+      let%map.Result body =
+        expand t decl ~args:(Decl.params decl) ~expansions body
+      in
       Signature.Type_decl.Kind.Alias body
     | Abstract -> Ok Signature.Type_decl.Kind.Abstract
     | Variant constructors ->
@@ -358,7 +375,7 @@ let define t (decl : Decl.t) =
   in
   let checked =
     { Signature.Type_decl.name = decl.decl.name.txt
-    ; params = decl.params
+    ; params = Decl.params decl
     ; kind
     }
   in
@@ -366,7 +383,7 @@ let define t (decl : Decl.t) =
   (match kind with
    | Alias _ | Abstract -> ()
    | Variant constructors ->
-     let result = Type.TCon (decl.name, decl.params) in
+     let result = Type.TCon (decl.name, Decl.params decl) in
      List.iteri constructors ~f:(fun index { name; args } ->
        let name = canonical_name name in
        Hashtbl.add_exn
@@ -387,7 +404,7 @@ let define t (decl : Decl.t) =
            { Field.name
            ; type_name = decl.name
            ; index
-           ; record = TCon (decl.name, decl.params)
+           ; record = TCon (decl.name, Decl.params decl)
            ; ty
            ; all_fields
            }));
@@ -398,7 +415,7 @@ let check t name =
   let decl = Hashtbl.find_exn t.types name in
   match decl.checked with
   | Some checked -> Ok checked
-  | None -> define t decl
+  | None -> define t decl |> Result.map_error ~f:decl.wrap_error
 ;;
 
 let find_decl_exn t name =

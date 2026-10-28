@@ -60,7 +60,9 @@ module Value : sig
         ; applied : t list (** Fewer than its arity, latest first. *)
         }
 
-  (** Functions are [<fun>], as their envs may contain themselves. *)
+  (** Functions are [<fun>], as their envs may contain themselves. Here and in
+      [to_string_hum], constructors of the prelude are named as within it
+      ([Prelude_path.to_string_hum]). *)
   val sexp_of_t : t -> Sexp.t
 
   (** As stag syntax, eg. [C (1, `A)], for messages. Functions are [<fun>],
@@ -111,6 +113,10 @@ val splice
   -> level:int
   -> entry:(string -> Typed.Var_ref.t option)
   -> Typed.Expr.t Or_error.t
+
+(** Evaluates [expr] at [level] in an empty env, eg. a declaration splice's
+    expression at compile time. *)
+val run : t -> Typed.Expr.t -> level:int -> Value.t Or_error.t
 
 (** The info of [ident] if it is bound globally, eg. a value embedded by a
     toplevel splice's code. *)

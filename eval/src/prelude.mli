@@ -1,10 +1,12 @@
 open! Import
 
-(** The prelude: the module [Stag] of [prelude/stag.stag], the syntax of stag
-    as data, for declarations generated at compile time (see [Syntax_value]). *)
+(** The prelude, [prelude/prelude.stag]: in scope in every program, outside its
+    root module, its canonical names those of [Prelude_path]. It has [list],
+    [option], and the module [Stag], the syntax of stag as data, for
+    declarations generated at compile time (see [Syntax_value]). *)
 
-val file : Source_file.t
+val path : string
+val source : string
 
-(** The canonical name of an item of the prelude, given by its path within it:
-    [canonical "Expr.t"] is ["Stag.Expr.t"]. *)
-val canonical : string -> string
+(** Parsed once. *)
+val toplevels : Syntax.Toplevel.t list Lazy.t

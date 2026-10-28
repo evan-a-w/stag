@@ -36,8 +36,10 @@ module Module_group = struct
 
   let name = function
     | File { txt = Module (name, _); _ } | Group (name, _) -> name.txt
-    | File { txt = Let _ | Type _ | Expect_test _; _ } ->
-      raise_s [%message "Driver.check_modules: a file is not a module"]
+    | File
+        { txt = Let _ | Type _ | Module_splice _ | Include _ | Expect_test _
+        ; _
+        } -> raise_s [%message "Driver.check_modules: a file is not a module"]
   ;;
 
   let rec to_toplevel = function
