@@ -363,8 +363,8 @@ Declaration splices may be in any module, and may generate declaration
 splices. `e` is checked in the module the splice is written in, at compile
 time (as a toplevel splice). Names in generated declarations are as written
 (`"M.x"` is a path, `"A"` a constructor or tag), resolved where they are
-spliced, except that types, constructors and fields may be named by a
-`Stag.Path.Ref` (see Reflection), which names the same declaration wherever
+spliced, except that types, constructors, fields and values may be named by
+a `Stag.Path.Ref` (see Reflection and Hygienic code), which names the same declaration wherever
 it is spliced, and every node is located at the splice. Values that are not syntax
 (eg. a tuple of one component, an uppercase let name) are errors at the
 splice; negative int literals are allowed. Errors in generated declarations
@@ -443,6 +443,52 @@ can exist at run time too, eg. a `type τ` in a runtime function, and `expr`
 and the refs' `name` work there; only `decl`, which queries the typechecker,
 is a runtime error at run time.
 
+### Hygienic code
+
+Generated syntax refers to library values hygienically by erasing typed code:
+
+```ocaml
+Stag.Code.erase : <'a>{..'r} -> Stag.Expr.t
+Stag.Value_ref.name : Stag.Value_ref.t -> string
+```
+
+`erase c` is the syntax of `c` with what it refers to outside it resolved
+where the quote was checked, as `Stag.Path.Ref`s: toplevel values and prims
+(`Stag.Expr.Var (Ref r, None)`, `r : Stag.Value_ref.t`), constructors and
+fields. The code's free variables (its context entries) are
+`Stag.Path.Name`s, resolved where the syntax is spliced: they are the holes
+that generated binders, or the splice site, provide. Its own binders keep
+their names, but are renamed (eg. `x_1`) where one would capture a variable
+of the same name bound elsewhere, or a free one. Type annotations are not
+kept (the typed code has none; spliced code is inferred anew), except types
+as values, which are given as by `Stag.Type.expr`.
+
+```ocaml
+(* gen.stag *)
+let atom = .< Core.Sexp.Atom (Core.Int.to_string x) >.      (* free x *)
+let derive_int name =
+  Cons (Stag.Toplevel.let_ name (Cons ("x", Nil)) (Stag.Code.erase atom), Nil)
+
+(* a.stag *)
+module Core = struct end
+include .~(Gen.derive_int "sexp_of_n")   (* still the prelude's Core.Sexp.Atom *)
+```
+
+A `Value_ref` names the toplevel wherever it is spliced, even where its name
+is shadowed or not in scope, and its type is the toplevel's (generalized
+there), as if named by a path there. Whatever made it was visible where the
+quote was checked, so it exists by the time a splice can use it; checking it
+on demand is subject to the usual rules (eg. a toplevel that needs what the
+running splice generates is an error). Toplevels referred to from inside a
+quote but not yet checked are the quote's free variables by their canonical
+names, and are erased as refs too. A local the code embeds (a local function
+of the code that made it, used in the quote) has no name where the code is
+spliced: `erase` is a runtime error naming it. A splice inside a nested quote
+of the code takes its entries from what is in scope where spliced, by name,
+as written. `erase` works at run time too; only splicing needs compile time.
+Printed, a ref is its declaration's path from the program root (the
+prelude's without `prelude.`), as for resolved types and constructors.
+
 ## Files
 
 Files are modules, as in OCaml: `foo_bar.stag` is the module `Foo_bar`,
@@ -517,14 +563,6 @@ the others still run.
 
 ### Declaration splices
 
-Typed code may be embedded as a leaf, keeping its hygiene: only the shape is
-untyped. Its context entries are provided at the declaration splice, as for
-implicit substitutions.
-
-```ocaml
-Stag.Code.erase : <'a>{..'r} -> Stag.Expr.t
-```
-
 Quotes of declarations are sugar for building these values, with antiquotes
 in item, type and expression positions:
 
@@ -549,11 +587,6 @@ val n : int @@ const      (* modalities on signature items and fields *)
 ```
 
 ### Other
-
-- Core for derived code: generated code naming `Core.Sexp.sexp_of_int` breaks
-  where the program shadows `Core` (a module or stag-build library of that
-  name). Either give the prelude an unshadowable path, or resolve spliced
-  references to canonical prelude names.
 
 `if`, infix operators (`let (+) x y = ...`, OCaml precedences),
 interface files.
