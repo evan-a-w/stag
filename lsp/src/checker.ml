@@ -40,21 +40,16 @@ let diagnostics_by_file ~path ~absolute ~files diagnostics =
 
 let check_groups ~limits ~path ~absolute ~files groups =
   let diagnostics = diagnostics_by_file ~path ~absolute ~files in
-  match groups with
+  match
+    let%bind.Core.Result groups = groups in
+    let%map.Core.Result driver =
+      Program.check_groups ~limits ~output:ignore groups
+    in
+    Index.create ~groups ~program:(Driver.checked driver).program
+    |> Index.relocate ~f:absolute
+  with
   | Error errors -> { Result.diagnostics = diagnostics errors; index = None }
-  | Ok groups ->
-    (match Driver.check_modules ~limits ~output:ignore groups with
-     | Error error ->
-       { diagnostics = diagnostics [ Diagnostic.of_typecheck_error error ]
-       ; index = None
-       }
-     | Ok driver ->
-       { diagnostics = diagnostics []
-       ; index =
-           Some
-             (Index.create ~groups ~program:(Driver.checked driver).program
-              |> Index.relocate ~f:absolute)
-       })
+  | Ok index -> { diagnostics = diagnostics []; index = Some index }
 ;;
 
 let standalone ~limits ~contents path =
