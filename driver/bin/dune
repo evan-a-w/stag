@@ -6,6 +6,7 @@
   stag_types
   stag_syntax
   stag_driver
+  stag_lsp
   core
   core_unix.command_unix
   core_unix.sys_unix

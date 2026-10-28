@@ -1,6 +1,6 @@
-// Runs inside VS Code. The stag executable has no `lsp` subcommand yet, so
-// the server fails: it must be reported once, without restarts, and
-// formatting must fall back to `stag fmt`.
+// Runs inside VS Code: first against `stag lsp`, then against a stag whose
+// server fails, which must be reported once, without restarts, with
+// formatting falling back to `stag fmt`.
 const assert = require("assert");
 const { execFileSync } = require("child_process");
 const fs = require("fs");
@@ -59,6 +59,12 @@ async function typed(keys) {
 }
 
 exports.run = async function () {
+  // The language configuration, with its auto-closing pairs, applies only
+  // once loaded: the first stag buffers can be typed in without it.
+  const start = Date.now();
+  while ((await typed(["("])) !== "()") {
+    if (Date.now() - start > 20_000) throw new Error("timed out: auto-closing");
+  }
   const typing = {};
   for (const keys of ["(*", "{|", "(", "{", ".<", "x `"]) {
     typing[keys] = await typed([...keys]);
@@ -85,16 +91,71 @@ exports.run = async function () {
   const setServerPath = (value) =>
     config.update("serverPath", value, vscode.ConfigurationTarget.Workspace);
 
+  const expected = execFileSync(process.env.STAG_EXE, ["fmt", file], {
+    encoding: "utf8",
+  });
+  assert.notStrictEqual(document.getText(), expected);
+
+  // The server.
+  const errorsOf = (uri) =>
+    vscode.languages
+      .getDiagnostics(uri)
+      .map((d) => `${d.range.start.line}:${d.range.start.character} ${d.message}`);
+  const typeError = await vscode.workspace.openTextDocument({
+    language: "stag",
+    content: 'let y = Int.add 1 "é"\n',
+  });
+  await until("a type error is published", () => errorsOf(typeError.uri).length > 0);
+  console.log("diagnostics:", errorsOf(typeError.uri));
+  assert.match(errorsOf(typeError.uri)[0], /^0:18 This expression has type string/);
+  const fix = new vscode.WorkspaceEdit();
+  fix.replace(typeError.uri, new vscode.Range(0, 18, 0, 21), "2");
+  await vscode.workspace.applyEdit(fix);
+  await until("the error is cleared", () => errorsOf(typeError.uri).length === 0);
+  const hovers = await vscode.commands.executeCommand(
+    "vscode.executeHoverProvider",
+    typeError.uri,
+    new vscode.Position(0, 5),
+  );
+  const hover = hovers.flatMap((h) => h.contents.map((c) => c.value ?? c)).join();
+  console.log("hover:", hover);
+  assert.match(hover, /y : int/);
+  const tokens = await vscode.commands.executeCommand(
+    "vscode.provideDocumentSemanticTokens",
+    typeError.uri,
+  );
+  assert.ok(tokens && tokens.data.length > 0, "semantic tokens");
+  assert.strictEqual(await formatted(document), expected);
+  console.log("formatted by the server:", JSON.stringify(document.getText()));
+  assert.deepStrictEqual(reports, [], "the server starts");
+  assert.strictEqual(api.liveServerProcesses(), 1);
+
+  // A stag whose server fails.
+  const failing = path.join(folder, "failing-stag");
+  fs.writeFileSync(
+    failing,
+    `#!/bin/sh
+if [ "$1" = lsp ]; then exit 1; fi
+exec "$STAG_EXE" "$@"
+`,
+  );
+  fs.chmodSync(failing, 0o755);
+  await setServerPath(failing);
   await until("the failure is reported", () => reports.length > 0);
   await quiet();
   console.log("reports:", reports);
   assert.strictEqual(reports.length, 1, "reported once");
   assert.match(reports[0], /could not start.*stag fmt/);
 
-  const expected = execFileSync(process.env.STAG_EXE, ["fmt", file], {
-    encoding: "utf8",
-  });
-  assert.notStrictEqual(document.getText(), expected);
+  const original = fs.readFileSync(file, "utf8");
+  const revert = new vscode.WorkspaceEdit();
+  revert.replace(
+    document.uri,
+    new vscode.Range(0, 0, document.lineCount, 0),
+    original,
+  );
+  await vscode.workspace.applyEdit(revert);
+  assert.strictEqual(document.getText(), original);
   assert.strictEqual(await formatted(document), expected);
   console.log("formatted:", JSON.stringify(document.getText()));
 
@@ -112,7 +173,7 @@ exports.run = async function () {
 
   // Concurrent restarts, and a relative serverPath.
   fs.mkdirSync(path.join(folder, "bin"));
-  fs.symlinkSync(process.env.STAG_EXE, path.join(folder, "bin", "stag"));
+  fs.symlinkSync(failing, path.join(folder, "bin", "stag"));
   const restarts = [1, 2, 3].map(() =>
     vscode.commands.executeCommand("stag.restartServer"),
   );

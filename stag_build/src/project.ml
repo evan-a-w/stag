@@ -42,9 +42,14 @@ let is_skipped name =
   String.is_prefix name ~prefix:"." || String.is_prefix name ~prefix:"_"
 ;;
 
-let read_targets ~root ~error =
+let read_targets ~root ~error ~contents =
   let read path =
-    match Fs.try_ ~path (fun () -> In_channel.read_all (root ^/ path)) with
+    match
+      Fs.try_ ~path (fun () ->
+        match contents path with
+        | Some contents -> contents
+        | None -> In_channel.read_all (root ^/ path))
+    with
     | Ok contents -> Some contents
     | Error diagnostic ->
       error diagnostic;
@@ -225,11 +230,11 @@ let check_module_clashes targets ~by_name ~error =
                   (Target.name library)))))
 ;;
 
-let load ~root =
+let load ?(contents = fun _ -> None) ~root () =
   let errors = Queue.create () in
   let error = Queue.enqueue errors in
   let ok_so_far () = Queue.is_empty errors in
-  let targets = read_targets ~root ~error in
+  let targets = read_targets ~root ~error ~contents in
   List.iter targets ~f:(check_file_names ~error);
   let by_name = index targets ~error in
   check_libraries targets ~by_name ~error;

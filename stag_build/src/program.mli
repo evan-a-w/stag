@@ -12,7 +12,15 @@ val parse
   -> Project.Target.t
   -> (Driver.Module_group.t list, Diagnostic.t list) Result.t
 
-(** [parse], then [Driver.check_modules]. Prims print to [output], stdout by default, as for [Driver.check]. *)
+(** [Driver.check_modules], its error as diagnostics. [limits] and [output]
+    are as for [Driver.check]. *)
+val check_groups
+  :  ?limits:Limits.t
+  -> ?output:(string -> unit)
+  -> Driver.Module_group.t list
+  -> (Driver.t, Diagnostic.t list) Result.t
+
+(** [parse], then [check_groups]. *)
 val check
   :  ?output:(string -> unit)
   -> Project.t

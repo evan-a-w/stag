@@ -159,9 +159,43 @@ Tests: `dune build @runtest`, then `dune promote` to accept changes.
 ## Editor support
 
 [editors/vscode](editors/vscode) is a VS Code extension: highlighting,
-brackets and indentation for `.stag` files, and a client for the planned
-language server `stag lsp` (formatting falls back to `stag fmt` meanwhile).
+brackets and indentation for `.stag` files, and a client for the language
+server `stag lsp` (formatting falls back to `stag fmt` if it cannot start).
 `stag.serverPath` sets the stag executable (default: `stag` on PATH).
+
+`stag lsp` speaks the Language Server Protocol over stdin and stdout
+(`lsp/`). It supports:
+
+- Diagnostics, on open, change and save. A document is checked as `stag
+  check` or `stag-build` would: in its project (the nearest `stag-project`
+  above it), with the open documents' unsaved contents, or standalone
+  otherwise. Errors in other files of the project are published for those
+  files, and documents that depend on a changed one are checked again, as
+  are all documents when files change on disk (if the client watches
+  files). Checking is limited (`-max-depth`, `-time-limit`, `-fuel`; by
+  default a nesting of 100000 and 5s, and `none` lifts a limit), so a
+  compile-time splice cannot hang the server. Checks wait until the client
+  has sent nothing for 150ms, so a burst of changes is checked once, at its
+  latest version; formatting, semantic tokens and symbols don't wait for
+  them.
+- Formatting, by `stag fmt` (no edits if the document doesn't parse).
+- Semantic tokens: keywords, comments, strings, numbers, operators, staging
+  operators (as macros), and names by their syntactic role (types in type
+  positions, constructors, fields, modules, variables, parameters, type
+  parameters, with a declaration modifier). Values the typechecker resolved
+  to functions are tokens of type function.
+- Hover (the type of the name or expression under the cursor) and go to
+  definition (of variables, toplevel values across files, types,
+  constructors and record fields), from the typed tree of the document's
+  check, so not while it has an error.
+- Only documents of files (`file:`) and new ones (`untitled:`) are checked:
+  others, eg. a diff's old version, could not be checked as in their
+  project.
+- The outline (`textDocument/documentSymbol`): modules, types and their
+  constructors and fields, exceptions, lets, expect tests and benches.
+
+The checker stops at the first error, so a document with an error has only
+that diagnostic, and no hover or definition until it checks again.
 
 ```sh
 cd editors/vscode

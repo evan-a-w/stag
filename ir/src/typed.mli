@@ -281,6 +281,8 @@ module Program : sig
     { sccs : Scc.t list (** Each component after the ones it refers to. *)
     ; expect_tests : Expect_test.t list (** In program order. *)
     ; benches : Bench.t list (** In program order. *)
+    ; declaration_splices : Expr.t list
+      (** The expression of each declaration splice that ran, at level -1. *)
     ; ident_info : Ident_info.t Ident.Map.t
     }
   [@@deriving sexp_of]

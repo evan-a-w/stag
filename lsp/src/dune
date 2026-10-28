@@ -1,0 +1,20 @@
+(library
+ (name stag_lsp)
+ (preprocess
+  (pps ppx_jane))
+ (libraries
+  core
+  core_unix
+  core_unix.filename_unix
+  core_unix.sys_unix
+  jsonrpc
+  lsp
+  yojson
+  stag_common
+  stag_types
+  stag_syntax
+  stag_ir
+  stag_eval
+  stag_typecheck
+  stag_driver
+  stag_build))
