@@ -488,8 +488,8 @@ splice like those of any generated syntax, and a root path `.M.x` stays one
 declaration of the generator's own scope whatever is in scope at the splice,
 embed erased code, `.~(Stag.Code.erase <..>)`, whose references are refs.
 
-An antiquote `.~e` outside any quote within it is evaluated when the quote is,
-and spliced in according to its position:
+An antiquote `.~e` outside any quote within it is evaluated when the quote is
+(the antiquotes in order), and spliced in according to its position:
 
 - `include .~e` and `module M = .~e`: `e : list[Stag.Toplevel.t]`, its
   declarations in place (or as `M`'s). There is no bare `.~e` item: a list
@@ -530,13 +530,20 @@ type pair = (.~a * .~b)  (* not `type pair = .~a * .~b`: see below *)
 After `type t =`, `.~e` is the definition; a type starting with a splice is
 parenthesized there.
 
-A declaration holding type splices is the include of a struct quote of it:
-`type point = .~e` is `include .~(.< struct type point = .~e end >.)`, so its
-splices see what an include there would, and an error in the generated
-declaration is reported at it with a note printing it. Its expression splices stay
-as written (they run when the generated declaration is checked). A type splice
-within a quote is an error, as quoted code's types are fixed where it is
-checked.
+A declaration holding type splices is still the declaration as written: its
+name is known up front (for `type t = .~e`, only its definition is computed),
+so it may be used before it, shadows outer names throughout its module, and
+keeps its source locations (errors, expect test corrections, the editor). When
+the declaration is checked, on demand, each type splice is evaluated as a
+compile-time expression (the usual rules on which toplevels it may use apply,
+and its errors are at the `.~`), and the syntax it gives takes its place. An
+error in that syntax is reported at the `.~` with a note printing it. Types
+may refer to each other through splices, in any order; a splice that needs the
+type it is defining (eg. by reflecting on it) is an error. Generated
+declarations may hold type splices (`Stag.Type_expr.Splice`,
+`Stag.Type_decl.Kind.Splice`), evaluated the same way when checked. A type
+splice within a quote or compile-time code is an error, as nothing evaluates
+it there.
 
 ## Reflection
 
