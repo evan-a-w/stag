@@ -571,8 +571,7 @@ and step t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
          record.(field.index) <- value);
        Ok (Value.Record (record_type, record))
      | _ ->
-       Or_error.error_s
-         [%message "Update of a non-record" (value : Value.t)])
+       Or_error.error_s [%message "Update of a non-record" (value : Value.t)])
   | Match (scrutinee, cases) ->
     let%bind value = eval' scrutinee in
     eval_match t ~env ~level value cases ~loc:expr.loc

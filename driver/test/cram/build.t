@@ -61,7 +61,7 @@ Tests run the expect tests of libraries and tests.
   $ stag-build test
   --- math/power.stag
   +++ _stag/math/power.stag.corrected
-  @@ -13,4 +13,4 @@
+  @@ -14,4 +14,4 @@
    
    let%expect_test "fourth" =
      print_int (fourth 3);
@@ -112,7 +112,7 @@ Testing only some stanzas, from a subdirectory:
   $ stag-build test math fmt
   --- math/power.stag
   +++ _stag/math/power.stag.corrected
-  @@ -13,4 +13,4 @@
+  @@ -14,4 +14,4 @@
    
    let%expect_test "fourth" =
      print_int (fourth 3);
@@ -518,4 +518,78 @@ A _stag that is not a directory is an error:
   $ stag-build promote
   Error: _stag is not a directory
   [1]
+  $ cd ..
+
+Formatting rewrites the sources that are not formatted, printing their diffs,
+and with --check only prints them, failing if there are any. The example is
+formatted:
+
+  $ cp -RL ../../../examples/calc calc_fmt && chmod -R u+w calc_fmt && cd calc_fmt
+  $ stag-build fmt --check
+  $ stag-build fmt
+  $ echo 'let   triple x =   Int.mul 3 x' >> math/arith.stag
+  $ cp math/arith.stag arith.before
+  $ stag-build fmt --check
+  --- math/arith.stag
+  +++ math/arith.stag
+  @@ -1,3 +1,3 @@
+   let double x = Int.mul 2 x
+   let square x = Int.mul x x
+  -let   triple x =   Int.mul 3 x
+  +let triple x = Int.mul 3 x
+  [1]
+  $ diff arith.before math/arith.stag && rm arith.before
+  $ stag-build fmt
+  --- math/arith.stag
+  +++ math/arith.stag
+  @@ -1,3 +1,3 @@
+   let double x = Int.mul 2 x
+   let square x = Int.mul x x
+  -let   triple x =   Int.mul 3 x
+  +let triple x = Int.mul 3 x
+  $ stag-build fmt --check
+  $ cat math/arith.stag
+  let double x = Int.mul 2 x
+  let square x = Int.mul x x
+  let triple x = Int.mul 3 x
+
+A parse error is reported, the other sources still formatted:
+
+  $ echo 'let x =' > fmt/broken.stag
+  $ echo 'let   y = 1' > math/messy.stag
+  $ stag-build fmt -check
+  --- math/messy.stag
+  +++ math/messy.stag
+  @@ -1,1 +1,1 @@
+  -let   y = 1
+  +let y = 1
+  File "fmt/broken.stag", line 2, characters 0-0:
+  2 | 
+      ^
+  Error: Expected an expression, found end of file
+  [1]
+  $ stag-build fmt
+  --- math/messy.stag
+  +++ math/messy.stag
+  @@ -1,1 +1,1 @@
+  -let   y = 1
+  +let y = 1
+  File "fmt/broken.stag", line 2, characters 0-0:
+  2 | 
+      ^
+  Error: Expected an expression, found end of file
+  [1]
+  $ cat math/messy.stag fmt/broken.stag
+  let y = 1
+  let x =
+
+A source that cannot be rewritten is reported, not shown as rewritten:
+
+  $ rm fmt/broken.stag
+  $ echo 'let   y = 1' > math/messy.stag && chmod a-w math/messy.stag
+  $ stag-build fmt
+  Error: math/messy.stag: Permission denied
+  [1]
+  $ chmod u+w math/messy.stag && cat math/messy.stag
+  let   y = 1
   $ cd ..

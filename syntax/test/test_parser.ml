@@ -2,22 +2,30 @@ open! Import
 open Syntax
 
 let file = "t.stag"
+let strip_locs = Round_trip.strip_locs
 
-let rec strip_locs : Sexp.t -> Sexp.t = function
-  | List [ txt; Atom "@"; Atom _ ] -> strip_locs txt
-  | List sexps -> List (List.map sexps ~f:strip_locs)
-  | Atom _ as atom -> atom
-;;
-
-let show sexp_of_t = function
-  | Ok t -> print_s (strip_locs (sexp_of_t t))
+(* Successfully parsed syntax is also checked to round trip through
+   [Printer]. *)
+let show sexp_of_t round_trip = function
+  | Ok t ->
+    print_s (strip_locs (sexp_of_t t));
+    round_trip t
   | Error error -> print_endline (Parser.Error.to_string error)
 ;;
 
-let expr source = show Expr.sexp_of_t (Parser.expr ~file source)
-let pat source = show Pattern.sexp_of_t (Parser.pattern ~file source)
-let ty source = show Type_expr.sexp_of_t (Parser.type_expr ~file source)
-let prog source = show Program.sexp_of_t (Parser.program ~file source)
+let expr source = show Expr.sexp_of_t Round_trip.expr (Parser.expr ~file source)
+
+let pat source =
+  show Pattern.sexp_of_t Round_trip.pattern (Parser.pattern ~file source)
+;;
+
+let ty source =
+  show Type_expr.sexp_of_t Round_trip.type_expr (Parser.type_expr ~file source)
+;;
+
+let prog source =
+  show Program.sexp_of_t Round_trip.program (Parser.program ~file source)
+;;
 
 (* The source a [Loc.to_string] spans. *)
 let slice source loc =
@@ -158,7 +166,7 @@ let%expect_test "application, constructors and variants" =
     (Construct M.C ())
     (Construct C ((Var x ())))
     (Construct C ((Var a ()) (Var b ())))
-    (Construct C ((Var a ()) (Var b ())))
+    (Construct C ((Tuple ((Var a ()) (Var b ())))))
     (Construct C ((Lit Unit)))
     (Construct C ((App (Var f ()) (Var x ()))))
     (Construct S ((Construct S ((Construct Z ())))))
@@ -168,6 +176,51 @@ let%expect_test "application, constructors and variants" =
     (Poly_variant A ((Tuple ((Var a ()) (Var b ())))))
     (App (App (Var f ()) (Poly_variant A ())) (Var x ()))
     (Poly_variant A ((App (Var f ()) (Var x ()))))
+    |}]
+;;
+
+let%expect_test "a constructor's arguments, or its one tuple argument" =
+  List.iter
+    ~f:expr
+    [ "C (a, b)"
+    ; "C ((a, b))"
+    ; "C (((a, b)))"
+    ; "C ((a), b)"
+    ; "C ((a, b), c)"
+    ; "C (a, (b, c))"
+    ; "C ((a, b)).x"
+    ; "C (a, b) x"
+    ; "C (let x = 1 in a, b)"
+    ; "C ((let x = 1 in a, b))"
+    ; "C (a; b, c)"
+    ; "C D (a, b)"
+    ; "C (D (a, b))"
+    ; "C (D ((a, b)))"
+    ];
+  List.iter
+    ~f:pat
+    [ "C (a, b)"; "C ((a, b))"; "C ((a), b)"; "C (a, (b, c))"; "C D ((a, b))" ];
+  [%expect
+    {|
+    (Construct C ((Var a ()) (Var b ())))
+    (Construct C ((Tuple ((Var a ()) (Var b ())))))
+    (Construct C ((Tuple ((Var a ()) (Var b ())))))
+    (Construct C ((Var a ()) (Var b ())))
+    (Construct C ((Tuple ((Var a ()) (Var b ()))) (Var c ())))
+    (Construct C ((Var a ()) (Tuple ((Var b ()) (Var c ())))))
+    (Construct C ((Field (Tuple ((Var a ()) (Var b ()))) x)))
+    (Construct C ((App (Tuple ((Var a ()) (Var b ()))) (Var x ()))))
+    (Construct C ((Let x () () (Lit (Int 1)) (Tuple ((Var a ()) (Var b ()))))))
+    (Construct C ((Let x () () (Lit (Int 1)) (Tuple ((Var a ()) (Var b ()))))))
+    (Construct C ((Let _ () () (Var a ()) (Tuple ((Var b ()) (Var c ()))))))
+    (Construct C ((Construct D ((Var a ()) (Var b ())))))
+    (Construct C ((Construct D ((Var a ()) (Var b ())))))
+    (Construct C ((Construct D ((Tuple ((Var a ()) (Var b ())))))))
+    (Construct C ((Var a) (Var b)))
+    (Construct C ((Tuple ((Var a) (Var b)))))
+    (Construct C ((Var a) (Var b)))
+    (Construct C ((Var a) (Tuple ((Var b) (Var c)))))
+    (Construct C ((Construct D ((Tuple ((Var a) (Var b)))))))
     |}]
 ;;
 
@@ -379,7 +432,7 @@ let%expect_test "patterns" =
     (Construct M.C ())
     (Construct C ((Var p)))
     (Construct C ((Var p) (Var q)))
-    (Construct C ((Var p) (Var q)))
+    (Construct C ((Tuple ((Var p) (Var q)))))
     (Construct C ((Construct D ((Var x)))))
     (Record ((x (Var p)) (M.y (Var q))))
     (Poly_variant A ())

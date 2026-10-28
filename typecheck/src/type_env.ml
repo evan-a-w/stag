@@ -507,8 +507,9 @@ let variant_constructors t type_name =
   members t type_name ~members:t.constructors ~kind:(function
     | Variant constructors ->
       Some
-        (List.map constructors ~f:(fun (constructor : Signature.Constructor.t) ->
-           constructor.name))
+        (List.map
+           constructors
+           ~f:(fun (constructor : Signature.Constructor.t) -> constructor.name))
     | Record _ | Alias _ | Abstract -> None)
 ;;
 

@@ -54,6 +54,7 @@ module State = struct
     ; mutable offset : int
     ; mutable line : int
     ; mutable bol : int
+    ; comments : (string * Loc.t) Queue.t
     }
 
   let peek_at t n =
@@ -342,7 +343,9 @@ let rec skip_trivia (t : State.t) =
     | _ -> false);
   match State.peek t, State.peek_at t 1 with
   | Some '(', Some '*' ->
+    let start = State.pos t in
     comment t;
+    Queue.enqueue t.comments (State.text_from t start, State.loc_from t start);
     skip_trivia t
   | _ -> ()
 ;;
@@ -410,19 +413,98 @@ let token (t : State.t) : Located.t =
   { token; loc = State.loc_from t start }
 ;;
 
-let tokenize ~file src =
-  let t : State.t = { file; src; offset = 0; line = 1; bol = 0 } in
+(* A comment is [Trailing] after a token ending code on its line, or after
+   such a comment ending on its line. *)
+let comments ~(prev : Located.t option) ~(next : Located.t) ~next_index found =
+  let lines : Loc.t array = Array.of_list (List.map found ~f:snd) in
+  let n = Array.length lines in
+  (* Whether code follows on its last line, maybe after other comments. *)
+  let code_after = Array.create ~len:n false in
+  for i = n - 1 downto 0 do
+    code_after.(i)
+    <- (if i < n - 1
+        then
+          lines.(i + 1).start.line = lines.(i).stop.line && code_after.(i + 1)
+        else (
+          match next.token with
+          | Eof -> false
+          | _ -> next.loc.start.line = lines.(i).stop.line))
+  done;
+  let trailing_line =
+    Option.bind prev ~f:(fun prev ->
+      Option.some_if (Token.ends_code prev.token) prev.loc.stop.line)
+  in
+  List.folding_mapi
+    found
+    ~init:trailing_line
+    ~f:(fun i trailing_line (text, (loc : Loc.t)) ->
+      let code_before =
+        Option.exists prev ~f:(fun prev -> prev.loc.stop.line = loc.start.line)
+      in
+      let code_after = code_after.(i) in
+      let placement : Comment.Placement.t =
+        if code_after
+        then Inline
+        else if Option.equal Int.equal trailing_line (Some loc.start.line)
+        then Trailing
+        else (
+          let line_before =
+            if i > 0
+            then Some lines.(i - 1).stop.line
+            else Option.map prev ~f:(fun prev -> prev.loc.stop.line)
+          in
+          let line_after =
+            if i < n - 1
+            then Some lines.(i + 1).start.line
+            else (
+              match next.token with
+              | Eof -> None
+              | _ -> Some next.loc.start.line)
+          in
+          Own_line
+            { blank_before =
+                (not code_before)
+                && Option.exists line_before ~f:(fun line ->
+                  loc.start.line > line + 1)
+            ; blank_after =
+                Option.exists line_after ~f:(fun line ->
+                  line > loc.stop.line + 1)
+            })
+      in
+      let trailing_line =
+        match placement with
+        | Trailing -> Some loc.stop.line
+        | Own_line _ | Inline -> None
+      in
+      trailing_line, { Comment.text; loc; placement; next_token = next_index })
+;;
+
+let tokenize_with_comments ~file src =
+  let t : State.t =
+    { file; src; offset = 0; line = 1; bol = 0; comments = Queue.create () }
+  in
   let tokens = Queue.create () in
+  let all_comments = Queue.create () in
   match
-    let rec loop () =
-      let located = token t in
-      Queue.enqueue tokens located;
-      match located.token with
+    let rec loop prev =
+      let next = token t in
+      Queue.enqueue_all
+        all_comments
+        (comments
+           ~prev
+           ~next
+           ~next_index:(Queue.length tokens)
+           (Queue.to_list t.comments));
+      Queue.clear t.comments;
+      Queue.enqueue tokens next;
+      match next.token with
       | Eof -> ()
-      | _ -> loop ()
+      | _ -> loop (Some next)
     in
-    loop ()
+    loop None
   with
-  | () -> Ok (Queue.to_array tokens)
+  | () -> Ok (Queue.to_array tokens, Queue.to_list all_comments)
   | exception Lex_error error -> Error error
 ;;
+
+let tokenize ~file src = Result.map (tokenize_with_comments ~file src) ~f:fst

@@ -264,7 +264,8 @@ module Expr = struct
     | Record_update (expr, fields') ->
       Record_update
         ( sub expr
-        , List.map fields' ~f:(fun (field, expr) -> Field.Ref field, sub expr) )
+        , List.map fields' ~f:(fun (field, expr) -> Field.Ref field, sub expr)
+        )
     | Match (expr, cases) ->
       Match
         ( sub expr

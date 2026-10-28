@@ -337,10 +337,7 @@ module Known = struct
   ;;
 
   let record scope ty = find scope ty ~members:Type_env.record_fields
-
-  let variant scope ty =
-    find scope ty ~members:Type_env.variant_constructors
-  ;;
+  let variant scope ty = find scope ty ~members:Type_env.variant_constructors
 
   let short_name name =
     Option.value_map (String.rsplit2 name ~on:'.') ~default:name ~f:snd
@@ -366,8 +363,7 @@ module Known = struct
   ;;
 end
 
-let find_constructor (scope : Scope.t) ~loc ~known
-  : Source.Constructor.t -> _
+let find_constructor (scope : Scope.t) ~loc ~known : Source.Constructor.t -> _
   = function
   | Path path ->
     (match Known.unqualified path, known with
@@ -403,10 +399,7 @@ let find_field (scope : Scope.t) ~loc ~known (field : Source.Field.t) =
          ~missing:(fun ~type_name field -> No_such_field { type_name; field })
      | _ -> Type_env.find_field scope.program.type_env scope.module_ path)
   | Ref field ->
-    Type_env.field
-      scope.program.type_env
-      (Typed.Field_ref.name field)
-      ~loc
+    Type_env.field scope.program.type_env (Typed.Field_ref.name field) ~loc
 ;;
 
 let is_unqualified : Source.Field.t -> bool = function
@@ -446,9 +439,9 @@ let constructor_types t (scope : Scope.t) constructor ~args ~expected ~loc =
     let inst = Scope.instantiate t scope in
     let result = inst constructor.result in
     let%map.Result () = unify_known t ~expected result ~loc in
-      ( constructor_ref constructor
-      , List.map args ~f:(fun (arg, ty) -> arg, inst ty)
-      , result )
+    ( constructor_ref constructor
+    , List.map args ~f:(fun (arg, ty) -> arg, inst ty)
+    , result )
 ;;
 
 (* The record type [fields] (not empty) are of: that of the first qualified
@@ -462,9 +455,7 @@ let record_type (scope : Scope.t) fields ~expected ~loc =
     let%map.Result known = Known.record scope (Some field.record) in
     Option.value_exn known
   in
-  match
-    List.find fields ~f:(fun (field, _) -> not (is_unqualified field))
-  with
+  match List.find fields ~f:(fun (field, _) -> not (is_unqualified field)) with
   | Some (field, _) -> of_field field
   | None ->
     (match%bind.Result Known.record scope expected with
@@ -521,9 +512,7 @@ let record_fields t (scope : Scope.t) fields ~all_required ~expected ~loc =
     | Some _ | None -> Ok ()
   in
   let inst = Scope.instantiate t scope in
-  let record =
-    inst (List.hd_exn known.members : Type_env.Field.t).record
-  in
+  let record = inst (List.hd_exn known.members : Type_env.Field.t).record in
   let%map.Result () = unify_known t ~expected record ~loc in
   let fields =
     List.map fields ~f:(fun (field, _, x) ->
@@ -608,11 +597,7 @@ let either_known ty fallback =
 (* [expected] is the type the pattern or expression is known to have where it
    is (it is not unified with it here): constructors and fields are looked up
    in it when it is a nominal type (see [Known]). *)
-let rec pattern_type
-          ?expected
-          t
-          (scope : Scope.t)
-          ~(pattern : Source.Pattern.t)
+let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
   : (Typed.Pattern.t * Pattern_var.t list, Typecheck_error.t) Result.t
   =
   let loc = Source.Pattern.loc pattern in

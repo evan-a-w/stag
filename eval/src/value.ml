@@ -83,8 +83,7 @@ let rec sexp_of_t : t -> Sexp.t = function
     List
       (Array.to_list
          (Array.mapi values ~f:(fun index value ->
-            Sexp.List
-              [ Atom (field_name record_type index); sexp_of_t value ])))
+            Sexp.List [ Atom (field_name record_type index); sexp_of_t value ])))
   | Poly_record fields -> [%sexp (fields : t String.Map.t)]
   | Poly_variant (tag, Unit) -> Atom ("`" ^ tag)
   | Poly_variant (tag, arg) -> List [ Atom ("`" ^ tag); sexp_of_t arg ]
@@ -109,6 +108,8 @@ let rec to_string_hum : t -> string = function
   | Unit -> "()"
   | Tuple values -> tuple values
   | Construct ({ name; _ }, []) -> Prelude_path.to_string_hum name
+  | Construct ({ name; _ }, [ (Tuple _ as value) ]) ->
+    sprintf "%s (%s)" (Prelude_path.to_string_hum name) (to_string_hum value)
   | Construct ({ name; _ }, [ value ]) ->
     Prelude_path.to_string_hum name ^ " " ^ argument value
   | Construct ({ name; _ }, values) ->

@@ -8,3 +8,4 @@ module Source_file = Stag_syntax.Source_file
 module Text_diff = Stag_common.Text_diff
 module Treewalk = Stag_eval.Treewalk
 module Typed = Stag_ir.Typed
+module Format = Stag_driver.Format

@@ -177,7 +177,9 @@ module To_value = struct
     | Record record_fields ->
       con "Record" [ list (pair (decl_path Field) expr) record_fields ]
     | Record_update (e, record_fields) ->
-      con "Record_update" [ expr e; list (pair (decl_path Field) expr) record_fields ]
+      con
+        "Record_update"
+        [ expr e; list (pair (decl_path Field) expr) record_fields ]
     | Field (e, p) -> con "Field" [ expr e; decl_path Field p ]
     | Type ty -> con "Type" [ type_expr ty ]
     | Match (e, arms) -> con "Match" [ expr e; list (pair pattern expr) arms ]

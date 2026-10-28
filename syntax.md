@@ -54,7 +54,8 @@ records, so their labels are written with backticks (`` with_x[{`y : int}] ``),
 everywhere except in the context of a code type, whose entries are variables,
 written without (`<int>{x : int}`). Type arguments are written once, after the
 name (`list[int]`, not `int list` or `list[a][b]`). A constructor's argument of
-function type is parenthesized: `C of (int -> int)`. Weak variables
+function type is parenthesized: `C of (int -> int)`. `C of int * int` has two
+arguments, `C of (int * int)` one, a tuple. Weak variables
 (`'_a`), presence variables (`` `x?'a ``), absent labels (`-x`), `as` cycles and
 `where` constraints are printed but never written.
 
@@ -67,7 +68,7 @@ match e with | p -> e | ...         (* leading | optional; arms are e1; e2 level
 f x y                               (* application, left assoc *)
 (x : t)                             (* annotated variable: Expr.Var's annotation *)
 (a, b, c)   ()   (e)
-C   C e   C (a, b)                  (* constructor args are n-ary: C (a, b) has 2 *)
+C   C e   C (a, b)   C ((a, b))     (* n-ary: C (a, b) has 2 args, C ((a, b)) 1 *)
 {x = 1; M.y = 2}   r.x   r.M.x      (* nominal records *)
 {r with x = 1; M.y = 2}             (* nominal update *)
 {`x = 1; `y = true}   r.`x          (* polymorphic records *)
@@ -107,7 +108,9 @@ and substitutions are at the tuple level (`{x = 1, 2}`), and a `let` or `match`
 there ends at the next `;` rather than sequencing (`{x = let a = 1 in a; y = 2}`
 has two fields; parenthesize to sequence); the record of an update
 `{e with ...}` is at the splice level. Trailing `;` is allowed in `{...}`.
-`C (a, b)` and `C ((a, b))` both have two arguments. A parenthesized
+`C (a, b)` has two arguments and `C ((a, b))` one, a tuple, as in OCaml
+(likewise in patterns): parentheses around a constructor's argument hold its
+arguments, unless they directly hold a tuple's own parentheses. A parenthesized
 expression's location includes its parentheses.
 
 `type` takes an atomic type: a name, possibly applied (`type M.t[int]`), or a
@@ -150,7 +153,7 @@ parameter whose type is fixed by a later use), the lookup is lexical.
 
 ```ocaml
 _   x   1   'c'   "s"   true   ()   (p, q)
-C   C p   C (p, q)
+C   C p   C (p, q)   C ((p, q))     (* 2 args, then 1 tuple arg, as in expressions *)
 {x = p; M.y = q}                    (* nominal *)
 `A   `A p
 {`x = p}   {`x = p; ..}   {`x = p; ..rest}   (* closed, open, bind rest *)

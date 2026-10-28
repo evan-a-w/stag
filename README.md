@@ -8,7 +8,13 @@ quotes (`.< e >.`) and splices (`.~e`), including compile time splices. See
 stag check FILE...            # typecheck, print the signature
 stag run FILE...              # typecheck and evaluate
 stag test [-promote] FILE...  # run let%expect_test tests, writing FILE.corrected
+stag fmt FILE                 # print FILE formatted
+stag fmt -inplace FILE...     # format the files in place
+stag fmt -check FILE...       # list the unformatted files on stdout, failing if any
 ```
+
+`stag fmt` prints to 80 columns, keeping comments where they were (by the
+tokens around them) and blank lines between toplevels.
 
 `stag test -print-corrected FILE` prints the corrected file instead, writing
 nothing. `-fuel N`, `-max-depth N` and `-time-limit SPAN` bound each phase of
@@ -46,6 +52,8 @@ stag-build build             # typecheck every stanza
 stag-build exec NAME         # typecheck and evaluate an executable
 stag-build test [NAME...]    # run the expect tests of libraries and tests
 stag-build promote           # accept the corrections of failed tests
+stag-build fmt [-check]      # format every source in place (or only check),
+                             # printing the diffs
 ```
 
 Each target is checked once per command, and not if a library it depends on
@@ -67,10 +75,11 @@ in `X/test`): `common`, `types`, `syntax`, `ir`, `eval`, `typecheck` and
 before it. They provide the pieces for other tools: `Source_file` and
 `Driver.check_files` (files to a checked program; `Driver.check_modules` for
 modules already parsed), `Driver.eval`, `Expect_test_runner`, `Diagnostic`
-(rendering errors) and `Text_diff`. `Prelude` is the stag module `Stag`
-([eval/src/prelude/stag.stag](eval/src/prelude/stag.stag)), the syntax as
-data, which `Syntax_value` converts to and from `Syntax`, for declarations
-generated at compile time (not yet in scope of programs).
+(rendering errors), `Text_diff`, `Printer` (syntax to source) and `Formatter`
+(source to formatted source, keeping comments). `Prelude` is the prelude
+([eval/src/prelude/prelude.stag](eval/src/prelude/prelude.stag)), whose
+module `Stag` is the syntax as data, which `Syntax_value` converts to and from
+`Syntax`, for declarations generated at compile time.
 
 Tests: `dune build @runtest`, then `dune promote` to accept changes.
 

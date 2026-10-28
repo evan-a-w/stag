@@ -125,7 +125,11 @@ module Field_ref = struct
   let type_name t = t.record.name
 
   let sexp_of_t t =
-    [%sexp { type_name : string = type_name t; name : string = name t; index : int = t.index }]
+    [%sexp
+      { type_name : string = type_name t
+      ; name : string = name t
+      ; index : int = t.index
+      }]
   ;;
 end
 

@@ -78,7 +78,10 @@ val field : t -> string -> loc:Loc.t -> (Field.t, Typecheck_error.t) Result.t
 
 (** The fields of the type of canonical name [name], in order, if it is a
     nominal record, checking its declaration. *)
-val record_fields : t -> string -> (Field.t list option, Typecheck_error.t) Result.t
+val record_fields
+  :  t
+  -> string
+  -> (Field.t list option, Typecheck_error.t) Result.t
 
 (** Likewise, its constructors if it is a variant. *)
 val variant_constructors

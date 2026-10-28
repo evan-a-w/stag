@@ -1,0 +1,5 @@
+(library
+ (name stag_syntax_round_trip)
+ (preprocess
+  (pps ppx_jane))
+ (libraries core stag_syntax))
