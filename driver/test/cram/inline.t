@@ -20,11 +20,11 @@ A fresh expansion is filled in, with the expect tests' corrections.
   File "gen.stag", line 3, characters 0-46:
   3 | include%inline .~(value "x" (Stag.Expr.int 1))
       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+  Error: This inline expansion is out of date
   File "gen.stag", line 7, characters 2-48:
   7 |   include%inline .~(value "y" (Stag.Expr.int 2))
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+  Error: This inline expansion is out of date
   --- gen.stag
   +++ gen.stag.corrected
   @@ -1,11 +1,13 @@
@@ -49,11 +49,11 @@ A fresh expansion is filled in, with the expect tests' corrections.
   File "gen.stag", line 3, characters 0-46:
   3 | include%inline .~(value "x" (Stag.Expr.int 1))
       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+  Error: This inline expansion is out of date
   File "gen.stag", line 7, characters 2-48:
   7 |   include%inline .~(value "y" (Stag.Expr.int 2))
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+  Error: This inline expansion is out of date
   --- gen.stag
   +++ gen.stag.corrected
   @@ -1,11 +1,13 @@
@@ -96,7 +96,7 @@ Editing the expansion makes it stale.
   File "gen.stag", line 8, characters 2-48:
   8 |   include%inline .~(value "y" (Stag.Expr.int 2))
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+  Error: This inline expansion is out of date
   --- gen.stag
   +++ gen.stag.corrected
   @@ -6,7 +6,7 @@
@@ -128,7 +128,7 @@ Editing the expansion makes it stale.
   File "gen.stag", line 8, characters 2-48:
   8 |   include%inline .~(value "y" (Stag.Expr.int 2))
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+  Error: This inline expansion is out of date
   1 inline expansion(s) out of date
 
 Checking and running a program only warn of stale expansions.
@@ -137,7 +137,7 @@ Checking and running a program only warn of stale expansions.
   File "gen.stag", line 8, characters 2-48:
   8 |   include%inline .~(value "y" (Stag.Expr.int 2))
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Warning: this inline expansion is out of date: the declarations written differ from those its splice generates
+  Warning: This inline expansion is out of date
   module Gen : sig
     val value : string -> Stag.Expr.t -> list[Stag.Toplevel.t]
     val x : int
@@ -149,7 +149,7 @@ Checking and running a program only warn of stale expansions.
   File "gen.stag", line 8, characters 2-48:
   8 |   include%inline .~(value "y" (Stag.Expr.int 2))
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Warning: this inline expansion is out of date: the declarations written differ from those its splice generates
+  Warning: This inline expansion is out of date
 
 Formatting formats the expansion.
 

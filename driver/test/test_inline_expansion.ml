@@ -21,9 +21,16 @@ let enum names =
 (* Checks, runs and tests [source] as [a.stag] (after [generators]), with
    [others] files, printing the stale expansions, output, failing tests and the
    corrected sources. *)
-let test ?(others = []) source =
+let test ?(others = []) ?(crlf = false) source =
+  let line_endings text =
+    if crlf
+    then String.substr_replace_all text ~pattern:"\n" ~with_:"\r\n"
+    else text
+  in
   let files =
-    { Source_file.path = "a.stag"; contents = generators ^ source }
+    { Source_file.path = "a.stag"
+    ; contents = line_endings (generators ^ source)
+    }
     :: List.map others ~f:(fun (path, contents) ->
       { Source_file.path; contents })
   in
@@ -64,9 +71,11 @@ let test ?(others = []) source =
       | None -> printf "(%s up to date)\n" path
       | Some corrected ->
         printf "--- %s corrected ---\n" path;
-        print_string
-          (String.chop_prefix_if_exists corrected ~prefix:generators
-           |> String.chop_prefix_if_exists ~prefix:"\n"))
+        String.chop_prefix_if_exists corrected ~prefix:(line_endings generators)
+        |> String.chop_prefix_if_exists ~prefix:(line_endings "\n")
+        |> String.substr_replace_all ~pattern:"\t" ~with_:"<TAB>"
+        |> String.substr_replace_all ~pattern:"\r" ~with_:"<CR>"
+        |> print_string)
 ;;
 
 let%expect_test "an empty expansion is filled" =
@@ -82,7 +91,7 @@ let y = x
     File "a.stag", line 16, characters 0-46:
     16 | include%inline .~(value "x" (Stag.Expr.int 1))
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+    Error: This inline expansion is out of date
     --- a.stag corrected ---
     include%inline .~(value "x" (Stag.Expr.int 1))
       let x = 1
@@ -138,11 +147,11 @@ end
     File "a.stag", line 16, characters 0-46:
     16 | include%inline .~(value "x" (Stag.Expr.int 2))
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+    Error: This inline expansion is out of date
     File "a.stag", line 21, characters 2-55:
     21 |   include%inline .~(enum (Cons ("A", Cons ("B", Nil))))
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+    Error: This inline expansion is out of date
     --- a.stag corrected ---
     include%inline .~(value "x" (Stag.Expr.int 2))
       let x = 2
@@ -174,7 +183,7 @@ end%inline
     File "a.stag", line 16, characters 0-20:
     16 | include%inline .~Nil
          ^^^^^^^^^^^^^^^^^^^^
-    Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+    Error: This inline expansion is out of date
     --- a.stag corrected ---
     include%inline .~Nil
     end%inline
@@ -199,11 +208,11 @@ let shown = print_endline (Color.to_string Color.Red)
     File "a.stag", line 16, characters 0-50:
     16 | module%inline Color = .~(enum (Cons ("Red", Nil)))
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+    Error: This inline expansion is out of date
     File "a.stag", line 19, characters 2-55:
     19 |   module%inline Inner = .~(value "x" (Stag.Expr.int 1))
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+    Error: This inline expansion is out of date
     --- output ---
     Red
     --- a.stag corrected ---
@@ -238,7 +247,7 @@ end
     File "a.stag", line 19, characters 4-33:
     19 |     include%inline .~(enum names)
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+    Error: This inline expansion is out of date
     --- a.stag corrected ---
     let names = Cons ("A_long_constructor_name", Cons ("Another_long_constructor_name", Cons ("Yet_another_one", Nil)))
     module A = struct
@@ -276,7 +285,7 @@ let shown = print_int x
     File "a.stag", line 16, characters 0-46:
     16 | include%inline .~(value "x" (Stag.Expr.int 1))
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+    Error: This inline expansion is out of date
     --- output ---
     1
     --- a.stag corrected ---
@@ -366,7 +375,7 @@ let%expect_test "after" = print_int x; [%expect {| 2 |}]
     File "a.stag", line 17, characters 0-46:
     17 | include%inline .~(value "x" (Stag.Expr.int 1))
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+    Error: This inline expansion is out of date
     ((name (before @ a.stag:16:16-24))
      (mismatches (((loc a.stag:16:56-61) (expected (" ")) (actual hi))))
      (error ()))
@@ -394,7 +403,7 @@ let crash = raise (Failure "boom")
     File "a.stag", line 16, characters 0-46:
     16 | include%inline .~(value "x" (Stag.Expr.int 1))
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+    Error: This inline expansion is out of date
     File "a.stag", line 18, characters 12-34:
     18 | let crash = raise (Failure "boom")
                      ^^^^^^^^^^^^^^^^^^^^^^
@@ -421,10 +430,283 @@ end%inline
     File "a.stag", line 16, characters 0-46:
     16 | include%inline .~(value "x" (Stag.Expr.int 1))
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+    Error: This inline expansion is out of date
     --- a.stag corrected ---
     include%inline .~(value "x" (Stag.Expr.int 1))
       let x = 1
     end%inline
+    |}]
+;;
+
+let%expect_test "corrections are indented as the line of the toplevel" =
+  test
+    "module M = struct\n\
+     \tinclude%inline .~(value \"x\" (Stag.Expr.int 1))\n\
+     \tend%inline\n\
+     end\n\
+     let a = 1 include%inline .~(value \"y\" (Stag.Expr.int 2)) end%inline\n\
+     module N = struct\n\
+    \  let b = 1 module%inline O = .~(value \"z\" (Stag.Expr.int 3)) end%inline\n\
+     end\n";
+  [%expect
+    {|
+    File "a.stag", line 16, characters 1-47:
+    16 | 	include%inline .~(value "x" (Stag.Expr.int 1))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    File "a.stag", line 19, characters 10-56:
+    19 | let a = 1 include%inline .~(value "y" (Stag.Expr.int 2)) end%inline
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    File "a.stag", line 21, characters 12-61:
+    21 |   let b = 1 module%inline O = .~(value "z" (Stag.Expr.int 3)) end%inline
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    --- a.stag corrected ---
+    module M = struct
+    <TAB>include%inline .~(value "x" (Stag.Expr.int 1))
+    <TAB>  let x = 1
+    <TAB>end%inline
+    end
+    let a = 1 include%inline .~(value "y" (Stag.Expr.int 2))
+      let y = 2
+    end%inline
+    module N = struct
+      let b = 1 module%inline O = .~(value "z" (Stag.Expr.int 3))
+        let z = 3
+      end%inline
+    end
+    |}]
+;;
+
+let%expect_test "a comment after the splice is kept" =
+  test
+    {|
+include%inline .~(value "x" (Stag.Expr.int 1)) (* derived *)
+end%inline
+include%inline .~(value "y" (Stag.Expr.int 2)) (* derived *) end%inline
+|};
+  [%expect
+    {|
+    File "a.stag", line 16, characters 0-46:
+    16 | include%inline .~(value "x" (Stag.Expr.int 1)) (* derived *)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    File "a.stag", line 18, characters 0-46:
+    18 | include%inline .~(value "y" (Stag.Expr.int 2)) (* derived *) end%inline
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    --- a.stag corrected ---
+    include%inline .~(value "x" (Stag.Expr.int 1)) (* derived *)
+      let x = 1
+    end%inline
+    include%inline .~(value "y" (Stag.Expr.int 2)) (* derived *)
+      let y = 2
+    end%inline
+    |}]
+;;
+
+let%expect_test "CRLF line endings are kept" =
+  test
+    ~crlf:true
+    {|
+include%inline .~(value "x" (Stag.Expr.int 1))
+end%inline
+module M = struct
+  include%inline .~(value "y" (Stag.Expr.int 2))
+    let y = 3
+  end%inline
+end
+let%expect_test "y" = print_int M.y
+|};
+  [%expect
+    {xxx|
+    File "a.stag", line 16, characters 0-46:
+    16 | include%inline .~(value "x" (Stag.Expr.int 1))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    File "a.stag", line 19, characters 2-48:
+    19 |   include%inline .~(value "y" (Stag.Expr.int 2))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    ((name (y @ a.stag:23:16-19))
+     (mismatches (((loc a.stag:23:35-35) (expected ()) (actual 2)))) (error ()))
+    --- a.stag corrected ---
+    include%inline .~(value "x" (Stag.Expr.int 1))<CR>
+      let x = 1<CR>
+    end%inline<CR>
+    module M = struct<CR>
+      include%inline .~(value "y" (Stag.Expr.int 2))<CR>
+        let y = 2<CR>
+      end%inline<CR>
+    end<CR>
+    let%expect_test "y" = print_int M.y;<CR>
+    [%expect {| 2 |}]<CR>
+    |xxx}];
+  test
+    ~crlf:true
+    {|
+module M = struct
+  include%inline .~(value "y" (Stag.Expr.int 2))
+    let y = 2
+  end%inline
+end
+|};
+  [%expect {| (a.stag up to date) |}]
+;;
+
+let%expect_test "a generator emitting an expect test" =
+  test
+    {|
+include%inline .~(Cons (Stag.Toplevel.Expect_test { `name = "t"; `body = Stag.Expr.apply (Stag.Expr.var "print_int") (Cons (Stag.Expr.int 1, Nil)) }, Nil))
+end%inline
+|};
+  [%expect
+    {|
+    File "a.stag", line 16, characters 0-155:
+    16 | include%inline .~(Cons (Stag.Toplevel.Expect_test { `name = "t"; `body = Stag.Expr.apply (Stag.Expr.var "print_int") (Cons (Stag.Expr.int 1, Nil)) }, Nil))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    ((name (t @ a.stag:16:0-155))
+     (mismatches (((loc a.stag:16:155-155) (expected ()) (actual 1)))) (error ())
+     (generated))
+    --- a.stag corrected ---
+    include%inline .~(Cons (Stag.Toplevel.Expect_test { `name = "t"; `body = Stag.Expr.apply (Stag.Expr.var "print_int") (Cons (Stag.Expr.int 1, Nil)) }, Nil))
+      let%expect_test "t" = print_int 1
+    end%inline
+    |}]
+;;
+
+let%expect_test "expansions in several files" =
+  test
+    ~others:
+      [ ( "b.stag"
+        , {|let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+include%inline .~(value "y" (Stag.Expr.int 2))
+end%inline
+module%inline M = .~(value "z" (Stag.Expr.int 3))
+  let z = 3
+end%inline
+|}
+        )
+      ]
+    {|
+include%inline .~(value "x" (Stag.Expr.int 1))
+end%inline
+|};
+  [%expect
+    {|
+    File "a.stag", line 16, characters 0-46:
+    16 | include%inline .~(value "x" (Stag.Expr.int 1))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    File "b.stag", line 2, characters 0-46:
+    2 | include%inline .~(value "y" (Stag.Expr.int 2))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    --- a.stag corrected ---
+    include%inline .~(value "x" (Stag.Expr.int 1))
+      let x = 1
+    end%inline
+    --- b.stag corrected ---
+    let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+    include%inline .~(value "y" (Stag.Expr.int 2))
+      let y = 2
+    end%inline
+    module%inline M = .~(value "z" (Stag.Expr.int 3))
+      let z = 3
+    end%inline
+    |}]
+;;
+
+let%expect_test "a name written as one shadowed at the expansion is stale" =
+  test
+    {|
+let alias e = Cons (Stag.Toplevel.Type { `name = "u"; `params = Nil; `kind = Stag.Type_decl.Kind.Alias e }, Nil)
+type t = A
+let by_ref = Stag.Type.expr (type t)
+module N = struct
+  module A = struct type t = C end
+  include%inline .~(alias by_ref)
+    type u = A.t
+  end%inline
+  let f (x : u) = match x with A -> 1
+end
+module P = struct
+  module A = struct type t = C end
+  include%inline .~(alias (Stag.Type_expr.Con (Stag.Path.Name "A.t", Nil)))
+    type u = A.t
+  end%inline
+  let f (x : u) = match x with A.C -> 1
+end
+module Q = struct
+  type t = D
+  include%inline .~(alias by_ref)
+    type u = t
+  end%inline
+end
+|};
+  [%expect
+    {|
+    File "a.stag", line 21, characters 2-33:
+    21 |   include%inline .~(alias by_ref)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    File "a.stag", line 35, characters 2-33:
+    35 |   include%inline .~(alias by_ref)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    --- a.stag corrected ---
+    let alias e = Cons (Stag.Toplevel.Type { `name = "u"; `params = Nil; `kind = Stag.Type_decl.Kind.Alias e }, Nil)
+    type t = A
+    let by_ref = Stag.Type.expr (type t)
+    module N = struct
+      module A = struct type t = C end
+      include%inline .~(alias by_ref)
+        type u = t
+      end%inline
+      let f (x : u) = match x with A -> 1
+    end
+    module P = struct
+      module A = struct type t = C end
+      include%inline .~(alias (Stag.Type_expr.Con (Stag.Path.Name "A.t", Nil)))
+        type u = A.t
+      end%inline
+      let f (x : u) = match x with A.C -> 1
+    end
+    module Q = struct
+      type t = D
+      include%inline .~(alias by_ref)
+        type u = A.t
+      end%inline
+    end
+    |}]
+;;
+
+let%expect_test "an error in generated code is in the expansion, if up to date" =
+  test
+    {|
+include%inline .~(value "x" (Stag.Expr.apply (Stag.Expr.var "print_int") (Cons (Stag.Expr.string "a", Nil))))
+  let x = print_int "a"
+end%inline
+|};
+  test
+    {|
+include%inline .~(value "x" (Stag.Expr.apply (Stag.Expr.var "print_int") (Cons (Stag.Expr.string "a", Nil))))
+  let x = print_int "b"
+end%inline
+|};
+  [%expect
+    {|
+    File "a.stag", line 17, characters 20-23:
+    17 |   let x = print_int "a"
+                             ^^^
+    Error: This expression has type string but an expression was expected of type int
+    File "a.stag", line 16, characters 0-109:
+    16 | include%inline .~(value "x" (Stag.Expr.apply (Stag.Expr.var "print_int") (Cons (Stag.Expr.string "a", Nil))))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: In the declaration `let x` generated by this splice: This expression has type string but an expression was expected of type int
+    Note: The generated declaration is:
+      let x = print_int "a"
     |}]
 ;;

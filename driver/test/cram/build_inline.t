@@ -19,7 +19,7 @@ stag-build corrects inline expansions like expect tests, in libraries and tests.
   File "gen/gen.stag", line 3, characters 0-34:
   3 | include%inline .~(value "base" 10)
       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+  Error: This inline expansion is out of date
   --- gen/gen.stag
   +++ _stag/gen/gen.stag.corrected
   @@ -1,4 +1,5 @@
@@ -32,7 +32,7 @@ stag-build corrects inline expansions like expect tests, in libraries and tests.
   File "t/t.stag", line 1, characters 0-41:
   1 | module%inline M = .~(Gen.Gen.value "x" 1)
       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+  Error: This inline expansion is out of date
   --- t/t.stag
   +++ _stag/t/t.stag.corrected
   @@ -1,4 +1,6 @@
@@ -73,7 +73,7 @@ A changed generator makes the expansions using it stale.
   File "gen/gen.stag", line 3, characters 0-34:
   3 | include%inline .~(value "base" 10)
       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+  Error: This inline expansion is out of date
   --- gen/gen.stag
   +++ _stag/gen/gen.stag.corrected
   @@ -1,5 +1,5 @@
@@ -87,7 +87,7 @@ A changed generator makes the expansions using it stale.
   File "t/t.stag", line 1, characters 0-41:
   1 | module%inline M = .~(Gen.Gen.value "x" 1)
       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+  Error: This inline expansion is out of date
   --- t/t.stag
   +++ _stag/t/t.stag.corrected
   @@ -1,6 +1,6 @@
@@ -106,3 +106,35 @@ A changed generator makes the expansions using it stale.
   Promoting _stag/gen/gen.stag.corrected to gen/gen.stag.
   Promoting _stag/t/t.stag.corrected to t/t.stag.
   $ stag-build test
+
+Stale expansions are reported even if running the program fails, and checking
+and building only warn of them.
+
+  $ cat > t/t.stag <<'EOF'
+  > module%inline M = .~(Gen.Gen.value "x" 1)
+  > end%inline
+  > let crash = raise (Failure "boom")
+  > EOF
+  $ stag-build test
+  File "t/t.stag", line 1, characters 0-41:
+  1 | module%inline M = .~(Gen.Gen.value "x" 1)
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: This inline expansion is out of date
+  File "t/t.stag", line 3, characters 12-34:
+  3 | let crash = raise (Failure "boom")
+                  ^^^^^^^^^^^^^^^^^^^^^^
+  Error: Uncaught exception Failure "boom"
+  --- t/t.stag
+  +++ _stag/t/t.stag.corrected
+  @@ -1,3 +1,4 @@
+   module%inline M = .~(Gen.Gen.value "x" 1)
+  +  let x = 2
+   end%inline
+   let crash = raise (Failure "boom")
+  t: 1 inline expansion(s) out of date
+  [1]
+  $ stag-build build
+  File "t/t.stag", line 1, characters 0-41:
+  1 | module%inline M = .~(Gen.Gen.value "x" 1)
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Warning: This inline expansion is out of date

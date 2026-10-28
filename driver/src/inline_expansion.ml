@@ -27,8 +27,5 @@ let edit ({ loc; expansion; status } : Expansion.t) ~contents =
 ;;
 
 let diagnostic ({ loc; _ } : Expansion.t) =
-  Diagnostic.create
-    ~loc
-    "this inline expansion is out of date: the declarations written differ \
-     from those its splice generates"
+  Diagnostic.create ~loc "This inline expansion is out of date"
 ;;
