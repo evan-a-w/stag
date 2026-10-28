@@ -57,10 +57,13 @@ module To_value = struct
   let path (path : Path.t) = string (Path.to_string path)
   let pair f g (a, b) = Value.Tuple [ f a; g b ]
 
-  let decl_path kind ({ txt; loc = _ } : Decl_path.t Located.t) =
-    match txt with
+  let decl_path_txt kind : Decl_path.t -> Value.t = function
     | Path p -> con "Stag.Path.Name" [ path p ]
     | Resolved name -> con "Stag.Path.Ref" [ Value.Ref { kind; name } ]
+  ;;
+
+  let decl_path kind ({ txt; loc = _ } : Decl_path.t Located.t) =
+    decl_path_txt kind txt
   ;;
 
   let record fields = Value.Poly_record (String.Map.of_alist_exn fields)
@@ -158,7 +161,8 @@ module To_value = struct
     let fields = list (pair name expr) in
     match txt with
     | Lit l -> con "Lit" [ lit l ]
-    | Var (p, annot) -> con "Var" [ path p; option type_expr annot ]
+    | Var (p, annot) ->
+      con "Var" [ decl_path_txt Value p; option type_expr annot ]
     | App (f, x) -> con "App" [ expr f; expr x ]
     | Let (var, bindings, annot, equal, body) ->
       con
@@ -646,7 +650,10 @@ module Of_value = struct
          let arg i read = Args.read args i read in
          match constructor, Args.count args with
          | "Lit", 1 -> Lit (arg 0 lit)
-         | "Var", 2 -> Var (arg 0 (path Lower), arg 1 (option (type_expr ~loc)))
+         | "Var", 2 ->
+           Var
+             ( arg 0 (fun value -> (decl_path Lower value ~loc).txt)
+             , arg 1 (option (type_expr ~loc)) )
          | "App", 2 -> App (arg 0 (expr ~loc), arg 1 (expr ~loc))
          | "Let", 5 ->
            Let

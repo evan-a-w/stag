@@ -46,5 +46,11 @@ val apply
 (** By full path. *)
 val find : Syntax.Path.t -> t option
 
+(** The name of [t] as a resolved value ([Syntax.Decl_path.Resolved]):
+    [Prim.<prim>] in the prelude, as the prelude itself writes it. *)
+val canonical_name : t -> string
+
+val of_canonical_name : string -> t option
+
 (** Whether [name] is a built-in module, eg. [Int]. *)
 val is_module : string -> bool

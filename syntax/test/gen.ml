@@ -156,8 +156,8 @@ let rec expr t : Expr.t =
        t
        ~leaves:
          [ (fun t -> Expr.Lit (lit t))
-         ; (fun t -> Var (path t ~last:lident, None))
-         ; (fun t -> Var (path t ~last:lident, Some (type_expr t)))
+         ; (fun t -> Var (decl_path t ~last:lident, None))
+         ; (fun t -> Var (decl_path t ~last:lident, Some (type_expr t)))
          ; (fun t -> Construct (loc (decl_path t ~last:uident), []))
          ; (fun t -> Poly_variant (label t, None))
          ; (fun t -> Expect (loc (string t)))

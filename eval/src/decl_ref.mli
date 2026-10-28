@@ -1,14 +1,16 @@
 open! Import
 
-(** The value of a [Stag.Type_ref.t], [Stag.Constructor_ref.t] or
-    [Stag.Field_ref.t]: a declared type, constructor or field by its canonical
-    name, as reflection gives. Programs can't make one otherwise. *)
+(** The value of a [Stag.Type_ref.t], [Stag.Constructor_ref.t],
+    [Stag.Field_ref.t] or [Stag.Value_ref.t]: a declared type, constructor,
+    field or value by its canonical name, as reflection and [Stag.Code.erase]
+    give. Programs can't make one otherwise. *)
 
 module Kind : sig
   type t =
     | Type
     | Constructor
     | Field
+    | Value
 end
 
 type t =

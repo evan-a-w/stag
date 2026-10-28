@@ -30,7 +30,8 @@ type t =
   | Type of Syntax.Type_expr.t
   (** A [Stag.Type.t], its types named by canonical names. *)
   | Ref of Decl_ref.t
-  (** A [Stag.Type_ref.t], [Stag.Constructor_ref.t] or [Stag.Field_ref.t]. *)
+  (** A [Stag.Type_ref.t], [Stag.Constructor_ref.t], [Stag.Field_ref.t] or
+      [Stag.Value_ref.t]. *)
 
 val of_prim : Prim.Value.t -> t
 val to_prim : t -> Prim.Value.t option

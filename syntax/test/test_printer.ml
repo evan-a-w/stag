@@ -738,7 +738,7 @@ let%expect_test "the project's sources round trip and are formatted" =
 
 let%expect_test "syntax the parser does not produce" =
   let e txt : Syntax.Expr.t = Located.create txt in
-  let x = e (Var (Syntax.Path.name "x", None)) in
+  let x = e (Var (Path (Syntax.Path.name "x"), None)) in
   let c = Located.create (Syntax.Decl_path.Path (Syntax.Path.name "C")) in
   let show expr =
     let printed = Printer.expr expr in
@@ -801,7 +801,7 @@ let%expect_test "resolved paths are printed as paths" =
   let int = ty "prelude.int" [] in
   let option = ty "prelude.option" [ Ty int ] in
   let t = ty "Gen.M.t" [] in
-  let x = at (Syntax.Expr.Var (Syntax.Path.name "x", None)) in
+  let x = at (Syntax.Expr.Var (Path (Syntax.Path.name "x"), None)) in
   let program : Syntax.Program.t =
     [ at
         (Syntax.Toplevel.Let

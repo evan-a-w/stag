@@ -140,7 +140,7 @@ module Expr = struct
 
   module Var = struct
     type t =
-      | Path of Syntax.Path.t * Syntax.Type_expr.t option
+      | Path of Syntax.Decl_path.t * Syntax.Type_expr.t option
       | Ref of Typed.Var_ref.t
   end
 

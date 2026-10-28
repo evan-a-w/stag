@@ -79,7 +79,7 @@ module Expr : sig
 
   module Var : sig
     type t =
-      | Path of Syntax.Path.t * Syntax.Type_expr.t option
+      | Path of Syntax.Decl_path.t * Syntax.Type_expr.t option
       | Ref of Typed.Var_ref.t
   end
 

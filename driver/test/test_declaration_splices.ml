@@ -1027,13 +1027,13 @@ let%expect_test "a program shadowing option, in a type error" =
     {|
 type option['a] = None | Some of 'a
 let o = Some 1
-let v = Stag.Expr.Var ("x", o)
+let v = Stag.Expr.Var (Stag.Path.Name "x", o)
 |};
   [%expect
     {|
-    File "a.stag", line 4, characters 28-29:
-    4 | let v = Stag.Expr.Var ("x", o)
-                                    ^
+    File "a.stag", line 4, characters 43-44:
+    4 | let v = Stag.Expr.Var (Stag.Path.Name "x", o)
+                                                   ^
     Error: This expression has type A.option[int] but an expression was expected of type prelude.option[Stag.Type_expr.t]
     |}]
 ;;

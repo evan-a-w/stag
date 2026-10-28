@@ -44,10 +44,10 @@ end = struct
   let t_of_sexp sexp = of_string (string_of_sexp sexp)
 end
 
-(** What names a declared type, constructor or field: a path as written,
-    resolved where it is, or a canonical name, which reflection gives (see
-    [Stag.Type_ref] in the prelude) and the parser never makes, naming the same
-    declaration wherever it is. *)
+(** What names a declared type, constructor, field or toplevel value: a path
+    as written, resolved where it is, or a canonical name, which reflection
+    and [Stag.Code.erase] give (see [Stag.Type_ref] in the prelude) and the
+    parser never makes, naming the same declaration wherever it is. *)
 module Decl_path = struct
   type t =
     | Path of Path.t
@@ -163,7 +163,7 @@ module Expr = struct
 
   and desc =
     | Lit of Lit.t
-    | Var of Path.t * Type_expr.t option
+    | Var of Decl_path.t * Type_expr.t option
     | App of t * t
     | Let of Name.t * Binding.t list * Type_expr.t option * t * t
     | Fun of Binding.t list * t (** [fun x (y : t) -> e], of some params. *)

@@ -748,9 +748,19 @@ and apply t (f : Value.t) arg ~loc : Next.t Or_error.t =
   | Intrinsic intrinsic ->
     (match intrinsic, arg with
      | Type_expr, Type ty -> value (Syntax_value.Type_expr.to_value ty)
-     | (Type_ref_name | Constructor_ref_name | Field_ref_name), Ref ref_ ->
-       value (String (Decl_ref.short_name ref_))
+     | ( (Type_ref_name | Constructor_ref_name | Field_ref_name | Value_ref_name)
+       , Ref ref_ ) -> value (String (Decl_ref.short_name ref_))
      | Raise, exn -> raise_exn ~loc exn
+     | Erase, Code { expr; persistent = _ } ->
+       (match Erase.expr expr with
+        | Ok expr -> value (Syntax_value.Expr.to_value expr)
+        | Error error ->
+          runtime_error
+            ~loc
+            (sprintf
+               "%s: %s"
+               (Intrinsic.public_name intrinsic)
+               (Error.to_string_hum error)))
      | Type_decl, Ref { kind = Type; name } ->
        (match t.reflect with
         | Some reflect ->

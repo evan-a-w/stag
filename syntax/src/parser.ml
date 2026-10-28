@@ -878,7 +878,7 @@ and atom t : Expr.t =
   | Lident _ | Uident _ ->
     (match path t ~what:"" with
      | path, true -> expr_since t start (Construct (decl_path path, []))
-     | path, false -> expr_since t start (Var (path.txt, None)))
+     | path, false -> expr_since t start (Var (Path path.txt, None)))
   | Label tag ->
     advance t;
     expr_since t start (Poly_variant (located ~loc:start tag, None))

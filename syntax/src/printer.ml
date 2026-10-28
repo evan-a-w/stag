@@ -4,12 +4,12 @@ open Doc
 
 let path p = text (Path.to_string p)
 
-let decl_path (p : Decl_path.t Located.t) =
-  match p.txt with
-  | Path p -> path p
-  | Resolved name -> text (Prelude_path.to_string_hum name)
+let decl_path_txt : Decl_path.t -> string = function
+  | Path p -> Path.to_string p
+  | Resolved name -> Prelude_path.to_string_hum name
 ;;
 
+let decl_path (p : Decl_path.t Located.t) = text (decl_path_txt p.txt)
 let parens t = text "(" ^^ align t ^^ text ")"
 let paren_if b t = if b then parens t else t
 let space_separated ts = separate (text " ") ts
@@ -456,9 +456,9 @@ and bare (ctx : Ctx.t) (e : Expr.t) =
   | Tuple (_ :: _ :: _ as es), _ -> parens (tuple_items es)
   | Tuple _, _ -> text "()"
   | Lit l, _ -> lit l
-  | Var (p, None), _ -> path p
+  | Var (p, None), _ -> text (decl_path_txt p)
   | Var (p, Some t), _ ->
-    parens (text (Path.to_string p ^ " : ") ^^ type_expr_doc t)
+    parens (text (decl_path_txt p ^ " : ") ^^ type_expr_doc t)
   | App _, _ ->
     let rec spine (e : Expr.t) args =
       match e.txt with

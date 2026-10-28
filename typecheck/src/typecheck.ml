@@ -981,15 +981,16 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) =
   Treewalk.add_scc program.interpreter scc
 ;;
 
+let intrinsic_type t scope intrinsic =
+  Intrinsic.ty
+    intrinsic
+    ~var:(fun () -> Scope.fresh_ty t scope)
+    ~row:(fun () -> Scope.fresh_row t scope)
+;;
+
 let rec var_type t (scope : Scope.t) ~(path : Syntax.Path.t) ~loc =
   let resolve ~name entry =
     resolution_type t scope ~name ~loc (Resolution.of_entry scope ~name entry)
-  in
-  let prim prim = Ok (Prim.ty prim, Typed.Var_ref.Prim prim) in
-  let intrinsic intrinsic =
-    Ok
-      ( Intrinsic.ty intrinsic ~var:(fun () -> Scope.fresh_ty t scope)
-      , Typed.Var_ref.Intrinsic intrinsic )
   in
   let local =
     match (path :> string list) with
@@ -1002,16 +1003,38 @@ let rec var_type t (scope : Scope.t) ~(path : Syntax.Path.t) ~loc =
   | None ->
     (match%bind.Result Module_scope.find_value scope.module_ path ~loc with
      | Toplevel name ->
-       let%bind.Result entry =
-         toplevel_entry t scope (Program_env.toplevel scope.program name) ~loc
-       in
-       resolve ~name (Some entry)
-     | Prim p -> prim p
-     | Intrinsic i -> intrinsic i
+       toplevel_type t scope (Program_env.toplevel scope.program name) ~loc
+     | Prim prim -> Ok (Prim.ty prim, Typed.Var_ref.Prim prim)
+     | Intrinsic intrinsic ->
+       Ok (intrinsic_type t scope intrinsic, Typed.Var_ref.Intrinsic intrinsic)
      | Unbound ->
        (match scope.quote with
         | Some _ -> resolve ~name:(Syntax.Path.to_string path) None
         | None -> Error (Module_scope.unbound_value scope.module_ path ~loc)))
+
+and toplevel_type t scope (toplevel : Toplevel.t) ~loc =
+  let%bind.Result entry = toplevel_entry t scope toplevel ~loc in
+  let name = toplevel.ident.name in
+  resolution_type
+    t
+    scope
+    ~name
+    ~loc
+    (Resolution.of_entry scope ~name (Some entry))
+
+(* A [Stag.Value_ref.t]'s canonical name, resolved where the code it was
+   erased from was checked, so not looked up in [scope]. *)
+and resolved_value_type t (scope : Scope.t) name ~loc =
+  match
+    ( Prim.of_canonical_name name
+    , Intrinsic.of_canonical_name name
+    , Program_env.find_toplevel scope.program name )
+  with
+  | Some prim, _, _ -> Ok (Prim.ty prim, Typed.Var_ref.Prim prim)
+  | None, Some intrinsic, _ ->
+    Ok (intrinsic_type t scope intrinsic, Typed.Var_ref.Intrinsic intrinsic)
+  | None, None, Some toplevel -> toplevel_type t scope toplevel ~loc
+  | None, None, None -> error ~loc (Not_in_scope (Syntax.Path.of_string name))
 
 (* Generated code's variables are already resolved, so are found by binder
    rather than by name, which may be shadowed. *)
@@ -1029,8 +1052,7 @@ and var_ref_type t (scope : Scope.t) (var_ref : Typed.Var_ref.t) ~loc =
   in
   match var_ref with
   | Prim prim -> Ok (Prim.ty prim, var_ref)
-  | Intrinsic intrinsic ->
-    Ok (Intrinsic.ty intrinsic ~var:(fun () -> Scope.fresh_ty t scope), var_ref)
+  | Intrinsic intrinsic -> Ok (intrinsic_type t scope intrinsic, var_ref)
   | Free name ->
     (match scope.quote with
      | Some quote ->
@@ -1205,7 +1227,11 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
       (Type resolved)
       (TCon (Prelude_path.canonical "Stag.Type.t", [ ATy elaborated ]))
   | Var (Path (path, annot)) ->
-    let%bind.Result ty, var_ref = var_type t scope ~path ~loc in
+    let%bind.Result ty, var_ref =
+      match path with
+      | Path path -> var_type t scope ~path ~loc
+      | Resolved name -> resolved_value_type t scope name ~loc
+    in
     let%map.Result () =
       match annot with
       | None -> Ok ()

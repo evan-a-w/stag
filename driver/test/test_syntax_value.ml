@@ -35,6 +35,10 @@ let%expect_test "the prelude's signature" =
         type t
         val name : t -> string
       end
+      module Value_ref : sig
+        type t
+        val name : t -> string
+      end
       module Path : sig
         type t['a] = Name of string | Ref of 'a
       end
@@ -73,7 +77,7 @@ let%expect_test "the prelude's signature" =
         val tuple : list[t] -> t
       end
       module Expr : sig
-        type t = Lit of Lit.t | Var of string * option[Type_expr.t] | App of t * t | Let of string * list[string * option[Type_expr.t]] * option[Type_expr.t] * t * t | Fun of list[string * option[Type_expr.t]] * t | Splice of {`expr : t; `subs : option[list[string * option[t]]]} | Quote of t | Tuple of list[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Field of t * Path.t[Field_ref.t] | Record_update of t * list[Path.t[Field_ref.t] * t] | Type of Type_expr.t | Match of t * list[Pattern.t * t] | Poly_record of list[string * t] | Poly_field of t * string | Poly_extend of list[string * t] * t | Poly_restrict of t * string | Poly_update of t * list[string * t] | Poly_variant of string * option[t] | Expect of string
+        type t = Lit of Lit.t | Var of Path.t[Value_ref.t] * option[Type_expr.t] | App of t * t | Let of string * list[string * option[Type_expr.t]] * option[Type_expr.t] * t * t | Fun of list[string * option[Type_expr.t]] * t | Splice of {`expr : t; `subs : option[list[string * option[t]]]} | Quote of t | Tuple of list[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Field of t * Path.t[Field_ref.t] | Record_update of t * list[Path.t[Field_ref.t] * t] | Type of Type_expr.t | Match of t * list[Pattern.t * t] | Poly_record of list[string * t] | Poly_field of t * string | Poly_extend of list[string * t] * t | Poly_restrict of t * string | Poly_update of t * list[string * t] | Poly_variant of string * option[t] | Expect of string
         val var : string -> t
         val construct : string -> list[t] -> t
         val int : int -> t
@@ -88,6 +92,9 @@ let%expect_test "the prelude's signature" =
       end
       module Program : sig
         type t = list[Toplevel.t]
+      end
+      module Code : sig
+        val erase : <'a>{..'b} -> Expr.t
       end
       module Type : sig
         type t['a]
@@ -570,7 +577,7 @@ let%expect_test "values" =
   show {|type t['a] = A | B of 'a * t['a]|};
   [%expect
     {|
-    Cons (Stag.Toplevel.Let ("f", Cons (("x", Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), Nil), None, Stag.Expr.Poly_variant ("A", Some (Stag.Expr.Var ("x", None)))), Nil)
+    Cons (Stag.Toplevel.Let ("f", Cons (("x", Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), Nil), None, Stag.Expr.Poly_variant ("A", Some (Stag.Expr.Var (Stag.Path.Name "x", None)))), Nil)
     Cons (Stag.Toplevel.Type {`kind = Stag.Type_decl.Kind.Variant (Cons (("A", Nil), Cons (("B", Cons (Stag.Type_expr.Var "a", Cons (Stag.Type_expr.Con (Stag.Path.Name "t", Cons (Stag.Type_expr.Arg.Ty (Stag.Type_expr.Var "a"), Nil)), Nil))), Nil))); `name = "t"; `params = Cons (Stag.Type_decl.Param.Ty "a", Nil)}, Nil)
     |}]
 ;;
@@ -602,7 +609,7 @@ let%expect_test "an update of fields by ref round trips" =
   let update =
     expr
       (Record_update
-         ( expr (Var (Syntax.Path.name "v", None))
+         ( expr (Var (Path (Syntax.Path.name "v"), None))
          , [ at (Syntax.Decl_path.Resolved "A.N.x"), expr (Lit (Int 1))
            ; at (Syntax.Decl_path.Path (Syntax.Path.name "y")), expr (Lit Unit)
            ] ))
@@ -616,7 +623,7 @@ let%expect_test "an update of fields by ref round trips" =
    | Error error -> print_error error);
   [%expect
     {|
-    Stag.Expr.Record_update (Stag.Expr.Var ("v", None), Cons ((Stag.Path.Ref <field A.N.x>, Stag.Expr.Lit (Stag.Lit.Int 1)), Cons ((Stag.Path.Name "y", Stag.Expr.Lit Stag.Lit.Unit), Nil)))
+    Stag.Expr.Record_update (Stag.Expr.Var (Stag.Path.Name "v", None), Cons ((Stag.Path.Ref <field A.N.x>, Stag.Expr.Lit (Stag.Lit.Int 1)), Cons ((Stag.Path.Name "y", Stag.Expr.Lit Stag.Lit.Unit), Nil)))
     (Record_update (Var v ()) ((<A.N.x> (Lit (Int 1))) (y (Lit Unit))))
     (equal true)
     |}]
@@ -813,7 +820,7 @@ let%expect_test "malformed values" =
     {|
     Malformed syntax: expected a capitalized identifier, got "light blue", within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Variant > element 1 > component 0
     Malformed syntax: expected a lowercase identifier or _, got "match", within element 0 > Stag.Toplevel.Let argument 0
-    Malformed syntax: expected a path of capitalized identifiers ending in a lowercase identifier, got "M..y", within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 0
+    Malformed syntax: expected a path of capitalized identifiers ending in a lowercase identifier, got "M..y", within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 0 > Stag.Path.Name
     |}];
   (* A value of another type, eg. one with constructors of the same names. *)
   let values =
@@ -867,7 +874,7 @@ let%expect_test "malformed values made otherwise" =
     (edit (expr "f (g x)") ~name:"prelude.Stag.Expr.App" ~f:(fun ref args ->
        Construct (ref, List.take args 1)));
   [%expect
-    {| Malformed syntax: expected Stag.Expr.App applied to its declared arguments, got Stag.Expr.App (Stag.Expr.Var ("f", None)) |}];
+    {| Malformed syntax: expected Stag.Expr.App applied to its declared arguments, got Stag.Expr.App (Stag.Expr.Var (Stag.Path.Name "f", None)) |}];
   (* A wrong payload. *)
   print_expr
     (edit (expr "(1, 2)") ~name:"prelude.Stag.Lit.Int" ~f:(fun ref _ ->
@@ -885,7 +892,7 @@ let%expect_test "malformed values made otherwise" =
            Construct (ref, [ Poly_record (Map.remove fields "subs") ])
          | _ -> assert false));
   [%expect
-    {| Malformed syntax: expected a record with a field `subs, got {`expr = Stag.Expr.Var ("e", None)}, within Stag.Expr.Quote > Stag.Expr.Splice |}];
+    {| Malformed syntax: expected a record with a field `subs, got {`expr = Stag.Expr.Var (Stag.Path.Name "e", None)}, within Stag.Expr.Quote > Stag.Expr.Splice |}];
   (* Not a pair. *)
   print_expr
     (edit
@@ -960,7 +967,7 @@ let%expect_test "names" =
           expr (Splice { expr = unit; subs = Some [ at name, None ] })) )
     ; ( "var path"
       , of_expr (fun name ->
-          expr (Var (Syntax.Path.of_list_exn [ name ], None))) )
+          expr (Var (Path (Syntax.Path.of_list_exn [ name ]), None))) )
     ; ( "con path"
       , of_expr (fun name ->
           expr
@@ -1049,7 +1056,7 @@ let%expect_test "names" =
     tyvar: Malformed syntax: expected a type variable name, got "x y", within Stag.Type_expr.Var
     context: Malformed syntax: expected a lowercase identifier, got "x y", within Stag.Type_expr.Code > field `context > Stag.Type_expr.Row.Extend argument 0
     subs: Malformed syntax: expected a lowercase identifier, got "x y", within Stag.Expr.Splice > field `subs > element 0 > component 0
-    var path: Malformed syntax: expected a path of capitalized identifiers ending in a lowercase identifier, got "x y", within Stag.Expr.Var argument 0
+    var path: Malformed syntax: expected a path of capitalized identifiers ending in a lowercase identifier, got "x y", within Stag.Expr.Var argument 0 > Stag.Path.Name
     con path: Malformed syntax: expected a path of capitalized identifiers ending in a capitalized identifier, got "x y", within Stag.Expr.Construct argument 0 > Stag.Path.Name
     |}]
 ;;
@@ -1211,7 +1218,7 @@ let decls =
                   (Syntax.Expr.Match
                      ( Located.create
                          ~loc:Loc.none
-                         (Syntax.Expr.Var (Syntax.Path.name "p", None))
+                         (Syntax.Expr.Var (Path (Syntax.Path.name "p"), None))
                      , [] )) ))
        ]);
   [%expect
