@@ -30,6 +30,10 @@ module Error : sig
   (** Without the location. *)
   val message : t -> string
 
+  (** Whether its lexeme was skipped, without making a token: an illegal
+      character, or an unterminated comment. *)
+  val skipped : t -> bool
+
   val to_string : t -> string
 end
 

@@ -32,11 +32,6 @@ let diagnostics_by_file ~path ~absolute ~files diagnostics =
   |> Map.map ~f:List.rev
 ;;
 
-let by_loc diagnostics =
-  List.stable_sort diagnostics ~compare:(fun (a : Diagnostic.t) b ->
-    Loc.compare a.loc b.loc)
-;;
-
 (* [checked] is the program's modules, if they parsed, and the program
    checked, which with errors is what checked. *)
 let of_checked
@@ -65,7 +60,7 @@ let of_checked
     in
     { diagnostics =
         diagnostics
-          (by_loc
+          (Diagnostic.sort
              (errors @ List.map type_errors ~f:Diagnostic.of_typecheck_error))
     ; index = Some index
     ; depends_on = []

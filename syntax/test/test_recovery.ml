@@ -48,7 +48,7 @@ let e = 4
     let b = 2
     let c = <error>
 
-    type t
+    type t = A
 
     let d = 3
     let e = 4
@@ -100,7 +100,7 @@ let b = "abc
     t.stag:2:8-9: unterminated string literal
     ---
     let a = <error>
-    let b = <error>
+    let b = "abc\n"
     |}]
 ;;
 
@@ -137,8 +137,8 @@ let f = 5
     t.stag:5:10-12: unexpected `in`: a toplevel `let` is a declaration, without `in`
     ---
     let a = <error>
-    let b = <error>
-    let c = <error>
+    let b = "a?b"
+    let c = 0
     let d = <error>
     let e = 4
     let f = 5
@@ -162,7 +162,7 @@ let d = {|abc
     let a = <error>
     let b = <error>
     let c = 3
-    let d = <error>
+    let d = "abc\n"
     |}]
 ;;
 
@@ -266,7 +266,7 @@ let v = 4
     t.stag:3:2-5: expected `)` to close this `(` (opened at 2:10), found `let`
     t.stag:6:0-10: unmatched `end%inline`
     t.stag:8:10-11: expected an expression, found `]`
-    t.stag:10:0-0: expected `end%inline` to close this `module%inline` (opened at 7:0), found end of file
+    t.stag:9:0-3: expected `end%inline` to close this `module%inline` (opened at 7:0), found `let`
     ---
     include%inline .~(gen 1)
       let x = <error>
@@ -277,8 +277,9 @@ let v = 4
 
     module%inline M = .~e
       let w = <error>
-      let v = 4
     end%inline
+
+    let v = 4
     |}]
 ;;
 
@@ -330,7 +331,7 @@ let ok = 1
 
     let%bench "c" = <error>
 
-    type u['a]
+    type u['a] = A
     type v
 
     module A = .~<error>
@@ -438,4 +439,165 @@ let%expect_test "a source file" =
      (message
       "1foo.stag is not a valid module file name: it should be a letter followed by letters, digits, _ and ', then .stag"))
     |}]
+;;
+
+let%expect_test "a broken type declaration keeps the members that parsed" =
+  let kinds source =
+    let program, errors = Parser.program_recovering ~file source in
+    List.iter errors ~f:(fun error ->
+      print_endline (Parser.Error.to_string error));
+    List.iter program ~f:(fun (toplevel : Syntax.Toplevel.t) ->
+      match toplevel.txt with
+      | Type decl ->
+        print_s
+          [%sexp
+            (decl.name.txt : string), (decl.kind : Syntax.Type_decl.Kind.t)]
+      | _ -> ())
+  in
+  kinds
+    {|type t = { a : int; b : }
+type u = A | B of
+type v = A of int * | C
+type w = { a : int; b
+type x = A | of
+type y = { a : int; b }
+type z['a] = { a : int; }
+|};
+  [%expect
+    {|
+    t.stag:1:24-25: expected a type, found `}`
+    t.stag:3:0-4: expected a type, found `type`
+    t.stag:3:20-21: expected a type, found `|`
+    t.stag:5:0-4: expected `}` to close this `{` (opened at 4:9), found `type`
+    t.stag:5:13-15: expected a constructor name, found `of`
+    t.stag:6:22-23: expected `:`, found `}`
+    (t
+     (Malformed
+      (Record
+       (((a @ t.stag:1:11-12) ((Con (int @ t.stag:1:15-18) ()) @ t.stag:1:15-18))
+        ((b @ t.stag:1:20-21) ((Tuple ()) @ t.stag:1:20-21))))))
+    (u
+     (Malformed (Variant (((A @ t.stag:2:9-10) ()) ((B @ t.stag:2:13-14) ())))))
+    (v
+     (Malformed
+      (Variant
+       (((A @ t.stag:3:9-10)
+         (((Con (int @ t.stag:3:14-17) ()) @ t.stag:3:14-17)))))))
+    (w
+     (Malformed
+      (Record
+       (((a @ t.stag:4:11-12) ((Con (int @ t.stag:4:15-18) ()) @ t.stag:4:15-18))
+        ((b @ t.stag:4:20-21) ((Tuple ()) @ t.stag:4:20-21))))))
+    (x (Malformed (Variant (((A @ t.stag:5:9-10) ())))))
+    (y
+     (Malformed
+      (Record
+       (((a @ t.stag:6:11-12) ((Con (int @ t.stag:6:15-18) ()) @ t.stag:6:15-18))
+        ((b @ t.stag:6:20-21) ((Tuple ()) @ t.stag:6:20-21))))))
+    (z
+     (Record
+      (((a @ t.stag:7:15-16) ((Con (int @ t.stag:7:19-22) ()) @ t.stag:7:19-22)))))
+    |}]
+;;
+
+let%expect_test "an unclosed bracket is reported at the next toplevel" =
+  parse
+    {|let a1 = (
+let a2 = 1
+let a3 = )
+let b = f (.<x
+type t = A
+let c = .~ (
+module M = struct
+  let d = { x = 1;
+  let e = .<
+  module N = struct
+    let f = (1,
+  let g = 1
+end
+let h =
+  let i = 1 in
+  match i with
+  | 1 -> 2
+  | _ ->
+let j = 4
+|};
+  [%expect
+    {|
+    t.stag:2:0-3: expected `)` to close this `(` (opened at 1:9), found `let`
+    t.stag:3:9-10: expected an expression, found `)`
+    t.stag:5:0-4: expected `>.` to close this `.<` (opened at 4:11), found `type`
+    t.stag:7:0-6: expected `)` to close this `(` (opened at 6:11), found `module`
+    t.stag:9:2-5: expected `}` to close this `{` (opened at 8:10), found `let`
+    t.stag:10:2-8: expected `>.` to close this `.<` (opened at 9:10), found `module`
+    t.stag:12:2-5: expected `)` to close this `(` (opened at 11:12), found `let`
+    t.stag:19:0-3: expected an expression, found `let`
+    ---
+    let a1 = <error>
+    let a2 = 1
+    let a3 = <error>
+    let b = <error>
+
+    type t = A
+
+    let c = <error>
+
+    module M = struct
+      let d = <error>
+      let e = <error>
+
+      module N = struct
+        let f = <error>
+      end
+
+      let g = 1
+    end
+
+    let h = <error>
+    let j = 4
+    |}]
+;;
+
+let%expect_test "lexer errors that make a token don't hide what follows" =
+  parse
+    {|let a = "ok\q"
+let b = Int.add a 1
+let c = 99999999999999999999 )
+let d = 1 (
+let e = "\q
+|};
+  [%expect
+    {|
+    t.stag:1:11-13: illegal escape sequence \q
+    t.stag:3:8-28: integer literal 99999999999999999999 exceeds the range of int
+    t.stag:3:29-30: unmatched `)`
+    t.stag:5:0-3: expected `)` to close this `(` (opened at 4:10), found `let`
+    t.stag:5:8-9: unterminated string literal
+    t.stag:5:9-11: illegal escape sequence \q
+    ---
+    let a = "ok?"
+    let b = Int.add a 1
+    let c = 0
+    let d = <error>
+    let e = "?\n"
+    |}]
+;;
+
+let%expect_test "recovery takes linear time" =
+  let steps n =
+    let source =
+      String.concat
+        (List.init n ~f:(fun i ->
+           sprintf "let y%d = (\nlet z%d = f (1, .<\n" i i))
+    in
+    let before = Parser.steps () in
+    let (_ : Syntax.Program.t * Parser.Error.t list) =
+      Parser.program_recovering ~file source
+    in
+    Parser.steps () - before
+  in
+  let small = steps 1000 in
+  let large = steps 2000 in
+  printf "%.2f\n" (Float.of_int large /. Float.of_int small);
+  [%expect {| 2.00 |}]
 ;;

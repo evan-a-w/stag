@@ -40,6 +40,16 @@ module Error = struct
 
   let message t = Kind.to_string t.kind
 
+  let skipped t =
+    match t.kind with
+    | Illegal_character _ | Unterminated_comment -> true
+    | Unterminated_string
+    | Unterminated_char
+    | Illegal_escape _
+    | Invalid_int_literal _
+    | Int_literal_out_of_range _ -> false
+  ;;
+
   let to_string { kind; loc } =
     sprintf "%s: %s" (Loc.to_string loc) (Kind.to_string kind)
   ;;

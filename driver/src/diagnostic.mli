@@ -23,6 +23,9 @@ type t =
 
 val create : ?notes:Note.t list -> ?whole_file:bool -> loc:Loc.t -> string -> t
 
+(** Stably sorted by location ([Loc.sort_by]). *)
+val sort : t list -> t list
+
 (** With each location [f loc], eg. to name files differently. *)
 val relocate : t -> f:(Loc.t -> Loc.t) -> t
 

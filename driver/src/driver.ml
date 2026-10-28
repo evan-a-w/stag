@@ -169,7 +169,7 @@ let check_files ?limits ?output ?prelude files =
     |> List.map ~f:(fun error -> Error.Source error)
   in
   match Option.all (List.map parsed ~f:fst) with
-  | None -> Result.Error source_errors
+  | None -> Result.Error (Loc.sort_by source_errors ~f:Error.loc)
   | Some modules ->
     (match
        check_modules
@@ -179,13 +179,13 @@ let check_files ?limits ?output ?prelude files =
          (List.map modules ~f:(fun file -> Module_group.File file))
      with
      | Ok t when List.is_empty source_errors -> Ok t
-     | Ok _ -> Error source_errors
+     | Ok _ -> Error (Loc.sort_by source_errors ~f:Error.loc)
      | Error { errors; partial = _ } ->
        Error
-         (List.merge
-            source_errors
-            (List.map errors ~f:(fun error -> Error.Typecheck error))
-            ~compare:(Comparable.lift Loc.compare ~f:Error.loc)))
+         (Loc.sort_by
+            (source_errors
+             @ List.map errors ~f:(fun error -> Error.Typecheck error))
+            ~f:Error.loc))
 ;;
 
 let check_prelude ?(limits = Limits.unlimited) ?output prelude =

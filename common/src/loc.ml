@@ -18,6 +18,7 @@ type t =
   }
 [@@deriving compare, equal]
 
+let sort_by l ~f = List.stable_sort l ~compare:(Comparable.lift compare ~f)
 let none = { file = "_none_"; start = Pos.start; stop = Pos.start }
 let is_none t = equal t none
 let start_of_file file = { file; start = Pos.start; stop = Pos.start }

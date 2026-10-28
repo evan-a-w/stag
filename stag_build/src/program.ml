@@ -38,21 +38,16 @@ let parse project target =
   | _, errors -> Error errors
 ;;
 
-let by_loc diagnostics =
-  List.stable_sort diagnostics ~compare:(fun (a : Diagnostic.t) b ->
-    Loc.compare a.loc b.loc)
-;;
-
 let check ?output project target =
   let groups, errors = parse_recovering project target in
   match groups with
-  | None -> Error errors
+  | None -> Error (Diagnostic.sort errors)
   | Some groups ->
     (match Driver.check_modules ?output groups, errors with
      | Ok driver, [] -> Ok driver
-     | Ok _, errors -> Error errors
+     | Ok _, errors -> Error (Diagnostic.sort errors)
      | Error { errors = type_errors; partial = _ }, errors ->
        Error
-         (by_loc
+         (Diagnostic.sort
             (errors @ List.map type_errors ~f:Diagnostic.of_typecheck_error)))
 ;;

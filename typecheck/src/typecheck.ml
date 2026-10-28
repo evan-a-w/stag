@@ -2364,6 +2364,8 @@ let rec signature (program_env : Program_env.t) module_ ~complete =
            Type_env.check program_env.type_env (canonical_name decl.name.txt)
          with
          | Ok decl -> Some (Type decl)
+         (* [Malformed], whose syntax error is the parser's. *)
+         | Error error when Typecheck_error.is_already_reported error -> None
          | Error error -> missing "type" [%sexp (error : Typecheck_error.t)])
       | Exception ({ txt = name; loc = _ }, _) ->
         (match

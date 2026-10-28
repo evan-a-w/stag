@@ -30,6 +30,10 @@ val start_of_file : string -> t
 (** The smallest span containing both, which must be in the same file. *)
 val merge : t -> t -> t
 
+(** Stably sorted by the locations [f] gives, which [compare] orders by file,
+    then position. *)
+val sort_by : 'a list -> f:('a -> t) -> 'a list
+
 (** [file:line:col-line:col], or [file:line:col-col] on one line. *)
 val to_string : t -> string
 

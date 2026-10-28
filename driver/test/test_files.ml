@@ -331,3 +331,64 @@ let%expect_test "a file named prelude.stag" =
     ---
     |}]
 ;;
+
+let%expect_test
+    "errors are ordered by file, then position, whatever the files' order"
+  =
+  let a = file "a.stag" "let x = (\nlet y : int = \"y\"\nlet z = )" in
+  let b = file "b.stag" "let u : int = \"u\"\nlet v = ]\nlet w : int = \"w\"" in
+  let print files =
+    match Driver.check_files ~limits:Source_helpers.limits files with
+    | Ok _ -> print_endline "ok"
+    | Error errors ->
+      List.iter errors ~f:(fun error ->
+        print_endline (Loc.to_string (Driver.Error.loc error)))
+  in
+  print [ a; b ];
+  [%expect
+    {|
+    a.stag:2:0-3
+    a.stag:2:14-17
+    a.stag:3:8-9
+    b.stag:1:14-17
+    b.stag:2:8-9
+    b.stag:3:14-17
+    |}];
+  print [ b; a ];
+  [%expect
+    {|
+    a.stag:2:0-3
+    a.stag:2:14-17
+    a.stag:3:8-9
+    b.stag:1:14-17
+    b.stag:2:8-9
+    b.stag:3:14-17
+    |}]
+;;
+
+let%expect_test "a broken type declaration's members are declared" =
+  let source =
+    {|type t = { a : int; b : }
+type u = A | B of
+let x = { a = 1; b = 2 }
+let y = match B with A -> 1 | B _ -> 2
+let z = Int.add 1 "z"
+|}
+  in
+  match
+    Driver.check_files ~limits:Source_helpers.limits [ file "a.stag" source ]
+  with
+  | Ok _ -> print_endline "ok"
+  | Error errors ->
+    List.iter errors ~f:(fun error ->
+      print_string (Diagnostic.to_string_hum (Diagnostic.of_driver_error error)));
+    [%expect
+      {|
+    File "a.stag", line 1, characters 24-25:
+    Error: Expected a type, found `}`
+    File "a.stag", line 3, characters 0-3:
+    Error: Expected a type, found `let`
+    File "a.stag", line 5, characters 18-21:
+    Error: This expression has type string but an expression was expected of type int
+    |}]
+;;

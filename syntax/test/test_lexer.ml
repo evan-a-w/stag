@@ -737,7 +737,10 @@ let%expect_test "lexing past errors" =
       Lexer.tokenize_recovering ~file:"t.stag" src
     in
     List.iter errors ~f:(fun error ->
-      print_endline (Lexer.Error.to_string error));
+      printf
+        "%s%s\n"
+        (Lexer.Error.to_string error)
+        (if Lexer.Error.skipped error then " (skipped)" else ""));
     print_s
       [%message
         ""
@@ -749,8 +752,8 @@ let%expect_test "lexing past errors" =
   lex "a $ b ` c '\\q' 'd 99999999999999999999 '\\n \"x\\yz\" 1x";
   [%expect
     {|
-    t.stag:1:2-3: illegal character '$'
-    t.stag:1:6-7: illegal character '`'
+    t.stag:1:2-3: illegal character '$' (skipped)
+    t.stag:1:6-7: illegal character '`' (skipped)
     t.stag:1:11-13: illegal escape sequence \q
     t.stag:1:18-38: integer literal 99999999999999999999 exceeds the range of int
     t.stag:1:39-42: unterminated character literal
@@ -761,7 +764,7 @@ let%expect_test "lexing past errors" =
   lex "a (* b {|c *)";
   [%expect
     {|
-    t.stag:1:2-4: unterminated comment
+    t.stag:1:2-4: unterminated comment (skipped)
     ((tokens (a "end of file")) (comments 1))
     |}];
   lex "a \"b";
