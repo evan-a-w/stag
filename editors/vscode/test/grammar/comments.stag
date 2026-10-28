@@ -1,0 +1,39 @@
+(* SYNTAX TEST "source.stag" "comments, with nesting and strings inside"
+(* outer (* inner *) still outer *) x
+(* <-- comment.block.stag punctuation.definition.comment.stag
+(*       ^^ comment.block.stag comment.block.stag punctuation.definition.comment.stag
+(*          ^^^^^ comment.block.stag comment.block.stag
+(*                ^^ comment.block.stag comment.block.stag punctuation.definition.comment.stag
+(*                   ^^^^^^^^^^^ comment.block.stag
+(*                               ^^ comment.block.stag punctuation.definition.comment.stag
+(*                                  ^ variable.other.stag - comment
+(* a string "*)" does not end it *) x
+(*          ^^^^ comment.block.stag comment.block.string.quoted.double.stag
+(*               ^^^^ comment.block.stag - comment.block.string
+(*                                  ^ variable.other.stag - comment
+(* nor "\"*)" an escaped quote *) x
+(*     ^^^^^^ comment.block.string.quoted.double.stag
+(*                                ^ variable.other.stag - comment
+(* nor {|*)|} or {id|*) |}|id} quoted strings *) x
+(*     ^^^^^^ comment.block.string.quoted.other.stag
+(*               ^^^^^^^^^^^^^ comment.block.string.quoted.other.stag
+(*                                               ^ variable.other.stag - comment
+(* chars '"' and '\'' and '*' do not start strings *) x
+(*       ^^^ comment.block.stag - comment.block.string
+(*               ^^^^ comment.block.stag - comment.block.string
+(*                                                    ^ variable.other.stag - comment
+(* (*) opens a comment, so this needs two closes *) still *) x
+(* ^^^ comment.block.stag comment.block.stag
+(*                                                  ^^^^^ comment.block.stag
+(*                                                           ^ variable.other.stag - comment
+(* a comment
+   across lines "with
+   a string *)" still in it *) x
+(* ^^^^^^^^^^^^ comment.block.stag comment.block.string.quoted.double.stag
+(*              ^^^^^^^^^^^ comment.block.stag - comment.block.string
+(*                             ^ variable.other.stag - comment
+(* in a comment, nothing is invalid: 1a % .~ ' `1 "\q" *)
+(*                                   ^^^^^^^^^^^^ comment.block.stag - invalid
+(*                                                 ^^ comment.block.string.quoted.double.stag - invalid
+let x = 1 (* trailing *)
+(*        ^^^^^^^^^^^^^^ comment.block.stag

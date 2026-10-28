@@ -244,6 +244,19 @@ let fmt_command =
          if unformatted_fails || not (List.is_empty errors) then exit 1)
 ;;
 
+let dump_tokens_command =
+  Command.basic
+    ~summary:"Print the tokens of a file with their byte offsets"
+    ~readme:(fun () ->
+      "For tests of editor grammars against the lexer: one (kind start stop) \
+       per token and comment.")
+    (let%map_open.Command path = anon ("FILE" %: string) in
+     fun () ->
+       match read_files [ path ] with
+       | [ file ] -> Dump_tokens.print file.contents
+       | _ -> assert false)
+;;
+
 let () =
   Command.group
     ~summary:"The stag language"
@@ -251,6 +264,7 @@ let () =
     ; "run", run_command
     ; "test", test_command
     ; "fmt", fmt_command
+    ; "dump-tokens", dump_tokens_command
     ]
   |> Command_unix.run
 ;;

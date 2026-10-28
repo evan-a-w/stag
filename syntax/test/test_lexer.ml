@@ -353,6 +353,19 @@ let%expect_test "line continuations in strings" =
                                    \n b\"")
     (Eof t.stag:5:3-3 "")
     |}];
+  lex "\"a\\\r\n  b\"";
+  [%expect
+    {|
+    ((String ab) t.stag:1:0-2:4  "\"a\\\r\
+                                \n  b\"")
+    (Eof t.stag:2:4-4 "")
+    |}];
+  lex "\"a\\\r b\"";
+  [%expect
+    {|
+    ((kind (Illegal_escape "\\\r")) (loc t.stag:1:2-4))
+    t.stag:1:2-4: illegal escape sequence \
+    |}];
   lex "'\\\n'";
   [%expect
     {|

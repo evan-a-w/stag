@@ -1,0 +1,77 @@
+(* SYNTAX TEST "source.stag" "integers, chars, strings and quoted strings"
+let n = 1_000 -1 -> 12a x-1 f -1 1__2 _1
+(*      ^^^^^ constant.numeric.integer.stag
+(*            ^^ constant.numeric.integer.stag
+(*               ^^ keyword.operator.arrow.stag
+(*                  ^^^ invalid.illegal.numeric.stag
+(*                      ^ variable.other.stag
+(*                       ^^ constant.numeric.integer.stag
+(*                            ^^ constant.numeric.integer.stag
+(*                               ^^^^ constant.numeric.integer.stag
+(*                                    ^^ variable.other.stag
+let n = a - b
+(*        ^ invalid.illegal.character.stag
+let c = 'a' 'a '_a '_' '\n' '\'' '\\' '\065' '\x41' '\q' x'
+(*      ^ string.quoted.single.stag punctuation.definition.string.begin.stag
+(*       ^ string.quoted.single.stag
+(*        ^ string.quoted.single.stag punctuation.definition.string.end.stag
+(*          ^^ entity.name.type.parameter.stag
+(*             ^^^ entity.name.type.parameter.weak.stag
+(*                 ^^^ string.quoted.single.stag
+(*                      ^^ string.quoted.single.stag constant.character.escape.stag
+(*                           ^^ string.quoted.single.stag constant.character.escape.stag
+(*                                ^^ string.quoted.single.stag constant.character.escape.stag
+(*                                     ^^^^ string.quoted.single.stag constant.character.escape.stag
+(*                                            ^^^^ string.quoted.single.stag constant.character.escape.stag
+(*                                                  ^^^^ invalid.illegal.char.stag
+(*                                                       ^^ variable.other.stag
+let c = 'a'b ' '
+(*      ^^^ string.quoted.single.stag
+(*         ^ variable.other.stag
+(*           ^^^ string.quoted.single.stag
+let c = ''
+(*      ^^ invalid.illegal.character.stag
+let c = 'é'
+(*      ^ invalid.illegal.character.stag
+(*       ^ - string
+let c = '\é'
+(*      ^^^ invalid.illegal.char.stag
+(* 'é"' "*) x
+(*  ^ comment.block.stag - string
+(*   ^^^^ comment.block.stag comment.block.string.quoted.double.stag
+(*          ^ variable.other.stag - comment
+let s = "a\n\t\r\b\ \\\"\'\255\x7f" "\256\q\x4" "*)"
+(*      ^ string.quoted.double.stag punctuation.definition.string.begin.stag
+(*        ^^^^^^^^^^^^^^^^^^^^^^^^ string.quoted.double.stag constant.character.escape.stag
+(*                                ^ string.quoted.double.stag punctuation.definition.string.end.stag
+(*                                   ^^^^ string.quoted.double.stag invalid.illegal.escape.stag
+(*                                       ^^ string.quoted.double.stag invalid.illegal.escape.stag
+(*                                         ^^^ string.quoted.double.stag invalid.illegal.escape.stag
+(*                                               ^^ string.quoted.double.stag - comment
+let s = "line \
+(*            ^ string.quoted.double.stag constant.character.escape.line-continuation.stag
+    continued" x
+(*  ^^^^^^^^^ string.quoted.double.stag
+(*             ^ variable.other.stag - string
+let q = {|raw \n "|} {id|a |} |x} b|id} {ab|c|}|ab} x
+(*      ^^ string.quoted.other.stag punctuation.definition.string.begin.stag
+(*        ^^^^^^^^ string.quoted.other.stag - constant.character.escape
+(*                ^^ string.quoted.other.stag punctuation.definition.string.end.stag
+(*                   ^^^^ string.quoted.other.stag punctuation.definition.string.begin.stag
+(*                       ^^^^^^^^^^ string.quoted.other.stag - punctuation
+(*                                 ^^^^ string.quoted.other.stag punctuation.definition.string.end.stag
+(*                                      ^^^^^^^^^^^ string.quoted.other.stag
+(*                                                  ^ variable.other.stag - string
+let q = {Ab|x|} {x = 1}
+(*      ^ punctuation.section.braces.begin.stag - string
+(*              ^ punctuation.section.braces.begin.stag - string
+let m = {|
+  multi (* "
+(*^^^^^^^^^^ string.quoted.other.stag - comment
+|} x
+(* <-- string.quoted.other.stag punctuation.definition.string.end.stag
+(* ^ variable.other.stag - string
+let u = () true false
+(*      ^^ constant.language.unit.stag
+(*         ^^^^ constant.language.boolean.true.stag
+(*              ^^^^^ constant.language.boolean.false.stag

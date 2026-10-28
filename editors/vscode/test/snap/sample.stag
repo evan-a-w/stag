@@ -1,0 +1,27 @@
+(* A sample of every token class, (* nested *), with "*)" in a string. *)
+type list['a] = Nil | Cons of 'a * list['a]
+type with_x[{..'r}] = {`x : int; ..'r}
+type v = [`A of int | `B; ..'r]
+type point = {x : int; y : int}
+type void = |
+
+let rec power n (x : <int>{}) : <int>{} =
+  match Int.equal n 0 with
+  | true -> .< 1 >.
+  | false -> .< Int.mul .~x .~(power (Int.sub n 1) x) >.
+
+let r = {`x = 1; `y = true | {}}
+let s = (r \ `y).`x
+let c = ('\n', 'a', '\x41', "tab\there", {|raw|}, {id|a |} b|id})
+let n = -1_000
+
+module M = struct
+  include .~(Show.derive (type list[int]))
+  let x = .< fun_ .~e.{x = 1; y} >.
+end
+
+module N = .~(make 3)
+
+let%expect_test "power" =
+  print_int (power 3 2);
+  [%expect {| 8 |}]

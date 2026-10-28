@@ -1,0 +1,6 @@
+**
+!package.json
+!README.md
+!language-configuration.json
+!syntaxes/stag.tmLanguage.json
+!out/extension.js

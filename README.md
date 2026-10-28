@@ -90,3 +90,20 @@ Tests: `dune build @runtest`, then `dune promote` to accept changes.
   source strings, using `driver/test/source_helpers.mli`.
 - Type internals and the parser: OCaml unit tests in `X/test/`.
 - The CLI: cram tests in `driver/test/cram/`.
+
+## Editor support
+
+[editors/vscode](editors/vscode) is a VS Code extension: highlighting,
+brackets and indentation for `.stag` files, and a client for the planned
+language server `stag lsp` (formatting falls back to `stag fmt` meanwhile).
+`stag.serverPath` sets the stag executable (default: `stag` on PATH).
+
+```sh
+cd editors/vscode
+npm ci && npm run package    # node from nix: nix shell nixpkgs#nodejs_22 -c ...
+code --install-extension stag-*.vsix
+./test.sh                    # grammar tests and tsc; --integration runs VS Code
+```
+
+Its tests need npm packages (and VS Code for `--integration`), so they are not
+part of `dune build @runtest`.
