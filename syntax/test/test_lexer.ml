@@ -60,6 +60,22 @@ let%expect_test "keywords and identifiers" =
     |}]
 ;;
 
+let%expect_test "let%bench" =
+  lex "let%bench let%expect_test";
+  [%expect
+    {|
+    (Let_bench t.stag:1:0-9 let%bench)
+    (Let_expect_test t.stag:1:10-25 let%expect_test)
+    (Eof t.stag:1:25-25 "")
+    |}];
+  lex "let%benchx";
+  [%expect
+    {|
+    ((kind (Illegal_character %)) (loc t.stag:1:3-4))
+    t.stag:1:3-4: illegal character '%'
+    |}]
+;;
+
 let%expect_test "punctuation" =
   lex "( ) [ ] { } , ; : = | -> * . .. _ \\ @ @@ .< >. .~";
   [%expect

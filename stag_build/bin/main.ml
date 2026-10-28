@@ -68,6 +68,32 @@ let promote_command =
      fun () -> exit_unless (Action.promote (load ())))
 ;;
 
+let bench_command =
+  Command.basic
+    ~summary:"Run the benchmarks of every target, or those matching FILTERs"
+    ~readme:(fun () ->
+      sprintf
+        "Runs the let%%bench benchmarks of each library, executable and test, \
+         named TARGET/NAME, whose names contain any FILTER (all without), or \
+         with -phases benchmarks the interpreter on the program of each \
+         target: TARGET/parse, TARGET/typecheck and TARGET/eval. Baselines are \
+         saved in %s/."
+        Action.bench_dir)
+    (let%map_open.Command filters = anon (sequence ("FILTER" %: string))
+     and options = Bench_command.Options.param
+     and phases =
+       flag "phases" no_arg ~doc:" benchmark the phases of the interpreter"
+     in
+     fun () ->
+       exit_unless
+         (Action.bench
+            (load ())
+            options
+            ~clock:(Bench_command.clock ())
+            ~filters
+            ~phases))
+;;
+
 let () =
   Command.group
     ~summary:"Build stag projects"
@@ -75,6 +101,7 @@ let () =
     ; "exec", exec_command
     ; "test", test_command
     ; "promote", promote_command
+    ; "bench", bench_command
     ]
   |> Command_unix.run
 ;;

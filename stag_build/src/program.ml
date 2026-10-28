@@ -18,18 +18,20 @@ let wrapped (library : Project.Target.t) =
   ]
 ;;
 
-let check ?output project (target : Project.Target.t) =
+let parse project (target : Project.Target.t) =
   let own =
     match target.stanza.kind with
     | Library -> wrapped target
     | Executable | Test -> files target
   in
-  let%bind.Result groups =
-    List.map (Project.closure project target) ~f:wrapped @ [ own ]
-    |> Result.combine_errors
-    |> Result.map ~f:List.concat
-    |> Result.map_error ~f:List.concat
-  in
+  List.map (Project.closure project target) ~f:wrapped @ [ own ]
+  |> Result.combine_errors
+  |> Result.map ~f:List.concat
+  |> Result.map_error ~f:List.concat
+;;
+
+let check ?output project target =
+  let%bind.Result groups = parse project target in
   Driver.check_modules ?output groups
   |> Result.map_error ~f:(fun error -> [ Diagnostic.of_typecheck_error error ])
 ;;

@@ -21,7 +21,8 @@ let constructor_refs =
              refs
              ~key:name
              ~data:{ Typed.Constructor_ref.type_name; name; index })
-       | Type _ | Let _ | Expect_test _ | Module_splice _ | Include _ -> ()
+       | Type _ | Let _ | Expect_test _ | Bench _ | Module_splice _ | Include _
+         -> ()
      in
      List.iter (force Prelude.toplevels) ~f:(add ~path:[]);
      refs)
@@ -207,6 +208,19 @@ module To_value = struct
       con
         "Expect_test"
         [ record [ "name", string test_name.txt; "body", expr body ] ]
+    | Bench { name = bench_name; param; body } ->
+      con
+        "Bench"
+        [ record
+            [ "name", string bench_name.txt
+            ; ( "param"
+              , option
+                  (fun ({ name = param; args } : Bench_param.t) ->
+                     pair name (list expr) (param, args))
+                  param )
+            ; "body", expr body
+            ]
+        ]
   ;;
 
   let program = list toplevel
@@ -680,6 +694,26 @@ module Of_value = struct
                Expect_test
                  { name = Located.create ~loc (field "name" string test)
                  ; body = field "body" (expr ~loc) test
+                 })
+           | "Bench", 1 ->
+             arg 0 (fun bench : Toplevel.desc ->
+               Bench
+                 { name = Located.create ~loc (field "name" string bench)
+                 ; param =
+                     field
+                       "param"
+                       (option (fun value : Bench_param.t ->
+                          let name, args =
+                            pair (name Lower ~loc) (list (expr ~loc)) value
+                          in
+                          match args with
+                          | [] ->
+                            unexpected
+                              ~expected:"a parameter with at least one argument"
+                              value
+                          | args -> { name; args }))
+                       bench
+                 ; body = field "body" (expr ~loc) bench
                  })
            | _ -> raise Bad_arguments))
   ;;

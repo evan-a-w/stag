@@ -78,7 +78,7 @@ let%expect_test "the prelude's signature" =
         val let_ : string -> list[string] -> t -> t -> t
       end
       module Toplevel : sig
-        type t = Let of string * list[string * option[Type_expr.t]] * option[Type_expr.t] * Expr.t | Type of {`kind : Type_decl.Kind.t; `name : string; `params : list[Type_decl.Param.t]} | Module of string * list[t] | Module_splice of string * Expr.t | Include of Expr.t | Expect_test of {`body : Expr.t; `name : string}
+        type t = Let of string * list[string * option[Type_expr.t]] * option[Type_expr.t] * Expr.t | Type of {`kind : Type_decl.Kind.t; `name : string; `params : list[Type_decl.Param.t]} | Module of string * list[t] | Module_splice of string * Expr.t | Include of Expr.t | Expect_test of {`body : Expr.t; `name : string} | Bench of {`body : Expr.t; `name : string; `param : option[string * list[Expr.t]]}
         val let_ : string -> list[string] -> Expr.t -> t
       end
       module Program : sig
@@ -250,10 +250,11 @@ let%expect_test "constructors are made as the typechecker resolves them" =
            : bool)];
   [%expect
     {|
-    ((constructors 68)
+    ((constructors 69)
      (reflected
-      (prelude.Stag.Path.Ref prelude.Stag.Type.Kind.Alias
-       prelude.Stag.Type.Kind.Record prelude.Stag.Type.Kind.Variant))
+      (prelude.Stag.Path.Ref prelude.Stag.Toplevel.Bench
+       prelude.Stag.Type.Kind.Alias prelude.Stag.Type.Kind.Record
+       prelude.Stag.Type.Kind.Variant))
      (others_same_as_to_value true))
     |}]
 ;;

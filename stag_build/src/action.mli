@@ -22,6 +22,21 @@ val exec : Project.t -> string -> bool
     doesn't check or evaluate, has its stale correction removed. *)
 val test : Project.t -> string list -> bool
 
+(** Where [-save-baseline] saves baselines. *)
+val bench_dir : string
+
+(** Measures the [let%bench]es of every target, each in its own program and
+    named [TARGET/NAME], or with [phases] the interpreter's phases on the
+    program of each target ([TARGET/parse], etc., see [Phase_bench]), those
+    containing any of [filters] (all without). Output is discarded. *)
+val bench
+  :  Project.t
+  -> Bench_command.Options.t
+  -> clock:Measure.Clock.t
+  -> filters:string list
+  -> phases:bool
+  -> bool
+
 (** Moves the corrections in [corrections_dir] over their sources. Refuses,
     leaving it, a correction whose source is not one of the project's or has
     changed since it was made. *)

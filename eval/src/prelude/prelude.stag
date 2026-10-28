@@ -180,6 +180,8 @@ module Stag = struct
       | Module_splice of string * Expr.t
       | Include of Expr.t
       | Expect_test of {`name : string; `body : Expr.t}
+      | Bench of
+          {`name : string; `param : option[string * list[Expr.t]]; `body : Expr.t}
 
     (* [let_ name params body] is [let name params = body]. *)
     let let_ name params body =

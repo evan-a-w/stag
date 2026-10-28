@@ -8,6 +8,7 @@ quotes (`.< e >.`) and splices (`.~e`), including compile time splices. See
 stag check FILE...            # typecheck, print the signature
 stag run FILE...              # typecheck and evaluate
 stag test [-promote] FILE...  # run let%expect_test tests, writing FILE.corrected
+stag bench FILE...            # run let%bench benchmarks (see Benchmarking)
 ```
 
 `stag test -print-corrected FILE` prints the corrected file instead, writing
@@ -46,6 +47,7 @@ stag-build build             # typecheck every stanza
 stag-build exec NAME         # typecheck and evaluate an executable
 stag-build test [NAME...]    # run the expect tests of libraries and tests
 stag-build promote           # accept the corrections of failed tests
+stag-build bench [FILTER...] # run the benchmarks of every target
 ```
 
 Each target is checked once per command, and not if a library it depends on
@@ -59,14 +61,66 @@ leaving it, a correction whose source is not in the project or has changed
 since. Executables cannot take arguments yet (`exec NAME -- ARGS` is
 rejected). Nothing else is written: programs are interpreted.
 
+## Benchmarking
+
+`let%bench "name" = e` and `let%bench "name" x in [a; b] = e` (see
+[syntax.md](syntax.md#benchmarks)) are measured by `stag bench FILE...`
+(`-filter SUBSTRING`, repeatable) and `stag-build bench [FILTER...]` (each
+target in its own program, as tests are, its benches named `TARGET/NAME`),
+modelled on criterion, divan and core_bench:
+
+```
+fib/15
+  time:      [1.797 ms 1.837 ms 1.878 ms] (mean, 95% CI)
+  median:    1.841 ms   stddev: 94.96 us   MAD: 47.68 us
+  range:     [1.670 ms 2.071 ms]   p50: 1.841 ms   p90: 1.926 ms   p99: 2.043 ms
+  alloc:     1.407M minor words, 1.773k major words, 5.375 minor GCs, 0.01071 major GCs per iteration
+  samples:   20 x 14 iterations (warm-up: 63 iterations in 120.3 ms)
+  outliers:  1 of 20 (5.00%): 1 high mild
+  change:    [+1.104% +3.212% +5.020%] (95% CI) Performance has regressed.
+```
+
+- Warm-up runs batches of 1, 2, 4, ... iterations for `-warm-up SPAN`
+  (default 1s), estimating the time of an iteration. Then, as divan does,
+  `-samples N` (default 100) samples of a fixed number of iterations each,
+  chosen so the samples take `-time SPAN` (default 3s) in all, and each at
+  least 1000 times the clock's resolution; iterations slower than that make
+  fewer samples (at least 10). `-quick` is 100ms, 500ms and 20 samples. The
+  clock is `CLOCK_MONOTONIC`.
+- Statistics are of the per-iteration time of each sample: the mean with a
+  bootstrap confidence interval (10000 resamples, fixed seed), median,
+  stddev, MAD, min, max, p50/p90/p99, and outliers classified by Tukey's
+  fences (mild beyond 1.5 IQR, severe beyond 3). With `-no-alloc`, the GC's
+  counters (minor and major words, collections per iteration) are not read.
+- `-save-baseline NAME` saves the per-iteration times of the run in
+  `_stag/bench/NAME.sexp` (of the project root, or `-baseline-dir` for
+  `stag bench`), merged with those already saved; `-baseline NAME` compares
+  with them: the bootstrapped change of the mean, regressed or improved if its
+  interval excludes 0 and it exceeds `-noise-threshold PERCENT` (default 2),
+  else no change or within noise.
+- `-format sexp|json` (`-sexp`, `-json`) prints all results at the end, for
+  machines; the default is the human report, bench by bench.
+- `-phases` benchmarks the interpreter itself on the program (of each
+  target, for `stag-build`) instead: `parse`, `typecheck` (of the parsed
+  program, including compile-time splices) and `eval` (of a freshly checked
+  program, the check untimed). [bench/](bench) is a project of interpreter
+  benchmarks (calls, list sorting, strings, pattern matching, staged and
+  unstaged power): `cd bench && stag-build bench`.
+- `STAG_BENCH_FAKE_CLOCK=SPAN` replaces the clock with a fake one moving by
+  `SPAN` at each read, for reproducible output in tests.
+
+The engine is the library `stag_measure` ([measure/src](measure/src)),
+independent of stag, with an injectable `Clock`.
+
 ## Library
 
 The compiler is split into libraries, each in `X/src` (library `stag_X`, tests
 in `X/test`): `common`, `types`, `syntax`, `ir`, `eval`, `typecheck` and
 `driver` (whose `bin` is the `stag` executable), each depending only on those
-before it. They provide the pieces for other tools: `Source_file` and
+before it, and `measure`, depending on none. They provide the pieces for other tools: `Source_file` and
 `Driver.check_files` (files to a checked program; `Driver.check_modules` for
-modules already parsed), `Driver.eval`, `Expect_test_runner`, `Diagnostic`
+modules already parsed), `Driver.eval`, `Expect_test_runner`, `Bench_runner`
+(a program's benches) and `Phase_bench`, `Diagnostic`
 (rendering errors) and `Text_diff`. `Prelude` is the stag module `Stag`
 ([eval/src/prelude/stag.stag](eval/src/prelude/stag.stag)), the syntax as
 data, which `Syntax_value` converts to and from `Syntax`, for declarations

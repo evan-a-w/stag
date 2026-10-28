@@ -228,10 +228,24 @@ module Expect_test : sig
   [@@deriving sexp_of]
 end
 
+(** [let%bench "name" = body], or [let%bench "name" x in [a; b] = body]. *)
+module Bench : sig
+  type t =
+    { name : string Located.t
+    ; param : (Ident.t * Expr.t list) option
+      (** The parameter bound in [body], and its arguments, at level 0. *)
+    ; body : Expr.t (** At level 0, of any type. *)
+    ; loc : Loc.t
+    ; generated : bool (** By a declaration splice, so located at the splice. *)
+    }
+  [@@deriving sexp_of]
+end
+
 module Program : sig
   type t =
     { sccs : Scc.t list (** Each component after the ones it refers to. *)
     ; expect_tests : Expect_test.t list (** In program order. *)
+    ; benches : Bench.t list (** In program order. *)
     ; ident_info : Ident_info.t Ident.Map.t
     }
   [@@deriving sexp_of]

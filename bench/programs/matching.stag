@@ -1,0 +1,78 @@
+(* Pattern matching on variants and polymorphic variants: evaluating and
+   simplifying arithmetic expressions. *)
+
+type expr =
+  | Num of int
+  | Var of string
+  | Add of expr * expr
+  | Mul of expr * expr
+
+let simplify e =
+  match e with
+  | Add (Num 0, e) -> simplify e
+  | Add (e, Num 0) -> simplify e
+  | Mul (Num 1, e) -> simplify e
+  | Mul (e, Num 1) -> simplify e
+  | Mul (Num 0, _) -> Num 0
+  | Mul (_, Num 0) -> Num 0
+  | Add (a, b) -> Add (simplify a, simplify b)
+  | Mul (a, b) -> Mul (simplify a, simplify b)
+  | Num _ -> e
+  | Var _ -> e
+
+let eval env e =
+  match e with
+  | Num n -> n
+  | Var x -> env x
+  | Add (a, b) -> Int.add (eval env a) (eval env b)
+  | Mul (a, b) -> Int.mul (eval env a) (eval env b)
+
+(* A balanced tree of [2^depth] leaves, with neutral elements to simplify. *)
+let build depth =
+  match Int.equal depth 0 with
+  | true -> Add (Var "x", Num 0)
+  | false ->
+    (match Int.rem depth 2 with
+     | 0 -> Add (build (Int.sub depth 1), Mul (Num 1, build (Int.sub depth 1)))
+     | _ -> Mul (build (Int.sub depth 1), Add (Num 0, Num 1)))
+
+let tree = build 10
+
+let env x = match String.equal x "x" with true -> 3 | false -> 0
+
+let classify v =
+  match v with
+  | `Zero -> 0
+  | `One _ -> 1
+  | `Pair (_, _) -> 2
+  | `Triple (_, _, _) -> 3
+
+let classify_many n =
+  let go i acc =
+    match Int.equal i n with
+    | true -> acc
+    | false ->
+      let v =
+        match Int.rem i 4 with
+        | 0 -> `Zero
+        | 1 -> `One i
+        | 2 -> `Pair (i, i)
+        | _ -> `Triple (i, i, i)
+      in
+      go (Int.add i 1) (Int.add acc (classify v))
+  in
+  go 0 0
+
+let%bench "simplify" = simplify tree
+
+let%bench "eval" = eval env tree
+
+let%bench "classify 1000" = classify_many 1000
+
+let%expect_test "matching" =
+  print_int (eval env tree);
+  print_string " ";
+  print_int (eval env (simplify tree));
+  print_string " ";
+  print_int (classify_many 1000);
+  [%expect {| 96 96 1500 |}]

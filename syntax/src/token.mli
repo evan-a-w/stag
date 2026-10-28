@@ -14,6 +14,7 @@ type t =
   | Let
   | Rec
   | Let_expect_test (** [let%expect_test] *)
+  | Let_bench (** [let%bench] *)
   | In
   | Match
   | With

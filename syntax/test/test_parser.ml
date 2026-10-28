@@ -778,6 +778,44 @@ let%expect_test {|q|} = ()
     |}]
 ;;
 
+let%expect_test "benches" =
+  prog
+    {|
+let%bench "fib" = fib 20
+let%bench "sort" n in [10; (f x, 3); g y] = sort (list n)
+let%bench "one" n in [1;] = n
+|};
+  prog {|let % bench "x" = 1|};
+  prog {|let%bench name = ()|};
+  prog {|let%bench "x" ()|};
+  prog {|let%bench "x" n = n|};
+  prog {|let%bench "x" n in [] = n|};
+  prog {|let%bench "x" n in 1 = n|};
+  prog {|let%bench "x" N in [1] = n|};
+  prog {|let%bench "x" n in [1; 2 = n|};
+  [%expect
+    {|
+    ((Bench (name fib) (param ()) (body (App (Var fib ()) (Lit (Int 20)))))
+     (Bench (name sort)
+      (param
+       (((name n)
+         (args
+          ((Lit (Int 10)) (Tuple ((App (Var f ()) (Var x ())) (Lit (Int 3))))
+           (App (Var g ()) (Var y ())))))))
+      (body (App (Var sort ()) (App (Var list ()) (Var n ())))))
+     (Bench (name one) (param (((name n) (args ((Lit (Int 1)))))))
+      (body (Var n ()))))
+    t.stag:1:4-5: illegal character '%'
+    t.stag:1:10-14: expected the name of the benchmark, a string, found `name`
+    t.stag:1:14-15: expected `=`, found `(`
+    t.stag:1:16-17: expected `in`, found `=`
+    t.stag:1:19-20: a parameterised benchmark needs an argument
+    t.stag:1:19-20: expected `[`, found `1`
+    t.stag:1:14-15: expected `=`, found `N`
+    t.stag:1:25-26: expected `]` to close this `[` (opened at 1:19), found `=`
+    |}]
+;;
+
 let%expect_test "let and match in braces end at `;`" =
   expr "{x = let a = 1 in a; y = 2}";
   expr "{`x = let a = 1 in a, b; `y = 2}";

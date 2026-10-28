@@ -22,3 +22,4 @@ module Expect_test_runner = Stag_driver.Expect_test_runner
 module Prelude = Stag_eval.Prelude
 module Syntax_value = Stag_eval.Syntax_value
 module Prelude_path = Stag_types.Prelude_path
+module Bench_runner = Stag_driver.Bench_runner

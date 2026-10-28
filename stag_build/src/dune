@@ -8,6 +8,7 @@
   stag_ir
   stag_eval
   stag_driver
+  stag_measure
   core
   core_unix
   core_unix.sys_unix

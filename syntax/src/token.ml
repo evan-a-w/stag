@@ -14,6 +14,7 @@ type t =
   | Let
   | Rec
   | Let_expect_test (** [let%expect_test] *)
+  | Let_bench (** [let%bench] *)
   | In
   | Match
   | With
@@ -82,6 +83,7 @@ let to_string = function
   | Let -> "let"
   | Rec -> "rec"
   | Let_expect_test -> "let%expect_test"
+  | Let_bench -> "let%bench"
   | In -> "in"
   | Match -> "match"
   | With -> "with"

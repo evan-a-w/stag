@@ -1,0 +1,5 @@
+(library
+ (name stag_measure)
+ (preprocess
+  (pps ppx_jane))
+ (libraries core core_unix time_now))

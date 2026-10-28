@@ -1074,6 +1074,37 @@ let rec toplevel t : Toplevel.t =
     expect t Equal;
     let body = expr t in
     since t start (Toplevel.Expect_test { name; body })
+  | Let_bench ->
+    advance t;
+    let name =
+      match peek t with
+      | String s ->
+        let loc = loc t in
+        advance t;
+        located ~loc s
+      | _ -> expected t "the name of the benchmark, a string"
+    in
+    let param =
+      match peek t with
+      | Lident _ ->
+        let name = lident t ~what:"a parameter" in
+        expect t In;
+        let open_loc = loc t in
+        (match
+           delimited
+             t
+             ~opener:Lbracket
+             ~close:Rbracket
+             ~sep:Semi
+             ~item:entry_value
+         with
+         | [] -> fail open_loc "a parameterised benchmark needs an argument"
+         | args -> Some { Bench_param.name; args })
+      | _ -> None
+    in
+    expect t Equal;
+    let body = expr t in
+    since t start (Toplevel.Bench { name; param; body })
   | _ -> expected t "a declaration (`let`, `type`, `module` or `include`)"
 
 (* [.~e], the declarations [e] generates. *)
