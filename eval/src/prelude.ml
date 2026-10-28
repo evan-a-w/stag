@@ -1,6 +1,6 @@
 open! Import
 
-let path = "prelude.stag"
+let path = "<prelude>"
 let source = Prelude_source.source
 
 let toplevels =

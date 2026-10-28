@@ -197,14 +197,15 @@ let shown = print_int x
 ;;
 
 let%expect_test "names are forced via paths and unqualified lookups" =
-  (* [M.x] forces [M]'s splice, which comes later; [y] forces the include. *)
+  (* [M.x] forces [M]'s splice, which comes later; [b] forces the include
+     before it. *)
   check
     (generators
      ^ {|
 let a = M.x
-let b = y
 module M = .~(value "x" (Stag.Expr.int 1))
 include .~(value "y" (Stag.Expr.string "y"))
+let b = y
 |}
     );
   [%expect
@@ -215,11 +216,11 @@ include .~(value "y" (Stag.Expr.string "y"))
       val enum : list[string] -> list[Stag.Toplevel.t]
       val value : string -> Stag.Expr.t -> list[Stag.Toplevel.t]
       val a : int
-      val b : string
       module M : sig
         val x : int
       end
       val y : string
+      val b : string
     end
     |}];
   (* A type through a module splice. *)
@@ -254,8 +255,8 @@ let%expect_test
     ~run:true
     (generators
      ^ {|
-include .~(value "a" (Stag.Expr.int (Int.add b 1)))
 include .~(value "b" (Stag.Expr.int 1))
+include .~(value "a" (Stag.Expr.int (Int.add b 1)))
 module N = struct
   let c = Int.add a b
 end
@@ -269,8 +270,8 @@ let shown = print_int N.c
       val arm : string -> Stag.Pattern.t * Stag.Expr.t
       val enum : list[string] -> list[Stag.Toplevel.t]
       val value : string -> Stag.Expr.t -> list[Stag.Toplevel.t]
-      val a : int
       val b : int
+      val a : int
       module N : sig
         val c : int
       end
@@ -281,65 +282,144 @@ let shown = print_int N.c
     |}]
 ;;
 
-let%expect_test
-    "a name used while running a declaration splice, found elsewhere, can't \
-     then be defined by an include"
-  =
-  (* Found as a prim. *)
+let%expect_test "a generator before its include, in the same module" =
   check
-    (generators
-     ^ {|
-include .~(let p = print_string in value "x" (Stag.Expr.int 1))
-include .~(value "print_string" (Stag.Expr.int 2))
-|}
-    );
+    ~run:true
+    {|
+let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+include .~(value "x" (Stag.Expr.int 1))
+let shown = print_int x
+|};
   [%expect
     {|
-    File "a.stag", line 18, characters 19-31:
-    18 | include .~(let p = print_string in value "x" (Stag.Expr.int 1))
-                            ^^^^^^^^^^^^
-    Error: The value print_string is used here while running a declaration splice, so is not looked for among what the declaration splice at a.stag:19:0-50 generates, but that defines it
-    File "a.stag", line 19, characters 0-50:
-    19 | include .~(value "print_string" (Stag.Expr.int 2))
-         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Note: The declaration splice is here
-    |}];
-  (* Found in an enclosing module: [x] is not looked for in [N]'s second
-     include while running its first. *)
+    module A : sig
+      val value : string -> Stag.Expr.t -> list[Stag.Toplevel.t]
+      val x : int
+      val shown : unit
+    end
+    --- output ---
+    1
+    |}]
+;;
+
+let%expect_test "a generator in a submodule" =
   check
-    (generators
-     ^ {|
-let x = 1
-module N = struct
-  include .~(value "y" (Stag.Expr.int x))
-  include .~(value "x" (Stag.Expr.int 2))
+    ~run:true
+    {|
+module Gen = struct
+  let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
 end
+include .~(Gen.value "x" (Stag.Expr.int 1))
+let shown = print_int x
+|};
+  [%expect
+    {|
+    module A : sig
+      module Gen : sig
+        val value : string -> Stag.Expr.t -> list[Stag.Toplevel.t]
+      end
+      val x : int
+      val shown : unit
+    end
+    --- output ---
+    1
+    |}];
+  (* After the include, the submodule sees what it generates. *)
+  check
+    {|
+include .~(Gen.value "x" (Stag.Expr.int 1))
+module Gen = struct
+  let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+end
+|};
+  [%expect
+    {|
+    File "a.stag", line 4, characters 21-25:
+    4 |   let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+                             ^^^^
+    Error: A declaration splice depends on what it generates: Cons is looked up here among the declarations of the include at a.stag:2:0-43, which are being generated, as the include's expression uses this code. Code after an include (or outside its module) sees what it generates: move the code the include's expression uses before the include, or into another module
+    File "a.stag", line 2, characters 0-43:
+    2 | include .~(Gen.value "x" (Stag.Expr.int 1))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: The declaration splice is here
+    |}]
+;;
+
+let%expect_test "a generator after its include" =
+  check
+    {|
+include .~(value "x" (Stag.Expr.int 1))
+let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+|};
+  [%expect
+    {|
+    File "a.stag", line 3, characters 19-23:
+    3 | let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+                           ^^^^
+    Error: A declaration splice depends on what it generates: Cons is looked up here among the declarations of the include at a.stag:2:0-39, which are being generated, as the include's expression uses this code. Code after an include (or outside its module) sees what it generates: move the code the include's expression uses before the include, or into another module
+    File "a.stag", line 2, characters 0-39:
+    2 | include .~(value "x" (Stag.Expr.int 1))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: The declaration splice is here
+    |}]
+;;
+
+let%expect_test "what an include generates is visible only after it" =
+  (* [before] and [p_before] resolve outward, to the outer [x] and the prim;
+     [after] and [p_after] to what the include generates, shadowing them. *)
+  check
+    ~run:true
+    (generators
+     ^ {|
+let two a e b f =
+  Cons (Stag.Toplevel.let_ a Nil e, Cons (Stag.Toplevel.let_ b Nil f, Nil))
+let x = "outer"
+module N = struct
+  let before = x
+  let p_before = print_string
+  include .~(two "x" (Stag.Expr.int 1) "print_string" (Stag.Expr.int 2))
+  let after = x
+  let p_after = print_string
+end
+let outside = (N.x, N.print_string)
+let shown = N.p_before N.before; print_int (Int.add N.after N.p_after)
 |}
     );
   [%expect
     {|
-    File "a.stag", line 20, characters 38-39:
-    20 |   include .~(value "y" (Stag.Expr.int x))
-                                               ^
-    Error: The value x is used here while running a declaration splice, so is not looked for among what the declaration splice at a.stag:21:2-41 generates, but that defines it
-    File "a.stag", line 21, characters 2-41:
-    21 |   include .~(value "x" (Stag.Expr.int 2))
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Note: The declaration splice is here
+    module A : sig
+      val constructor : 'a -> 'a * list['b]
+      val arm : string -> Stag.Pattern.t * Stag.Expr.t
+      val enum : list[string] -> list[Stag.Toplevel.t]
+      val value : string -> Stag.Expr.t -> list[Stag.Toplevel.t]
+      val two : string -> Stag.Expr.t -> string -> Stag.Expr.t -> list[Stag.Toplevel.t]
+      val x : string
+      module N : sig
+        val before : string
+        val p_before : string -> unit
+        val x : int
+        val print_string : int
+        val after : int
+        val p_after : int
+      end
+      val outside : int * int
+      val shown : unit
+    end
+    --- output ---
+    outer3
     |}];
-  (* Outside running a splice, includes are generated before looking further
-     out, so an included name shadows. *)
+  (* A generator before an include in the same module resolves outward too. *)
   check
     ~run:true
     (generators
      ^ {|
 let x = 1
 module N = struct
-  let y = x
+  include .~(value "y" (Stag.Expr.int x))
   include .~(value "x" (Stag.Expr.int 2))
+  let z = x
 end
-include .~(value "print_string" (Stag.Expr.int 3))
-let shown = print_int (Int.add N.y print_string)
+let shown = print_int N.y; print_int N.z
 |}
     );
   [%expect
@@ -353,12 +433,219 @@ let shown = print_int (Int.add N.y print_string)
       module N : sig
         val y : int
         val x : int
+        val z : int
       end
-      val print_string : int
       val shown : unit
     end
     --- output ---
-    5
+    12
+    |}]
+;;
+
+let%expect_test "outward resolution does not depend on check order" =
+  (* [before] is checked first, then [N]'s include run; or, [first] runs it
+     first, by a path, then [before] is checked while it runs. *)
+  let program ~first =
+    generators
+    ^ (if first then "let first = N.y\n" else "")
+    ^ {|
+let two a e b f =
+  Cons (Stag.Toplevel.let_ a Nil e, Cons (Stag.Toplevel.let_ b Nil f, Nil))
+let x = "outer"
+module N = struct
+  let before = x
+  include .~(let _ = before in two "x" (Stag.Expr.int 1) "y" (Stag.Expr.var "before"))
+end
+|}
+  in
+  check (program ~first:false);
+  [%expect
+    {|
+    module A : sig
+      val constructor : 'a -> 'a * list['b]
+      val arm : string -> Stag.Pattern.t * Stag.Expr.t
+      val enum : list[string] -> list[Stag.Toplevel.t]
+      val value : string -> Stag.Expr.t -> list[Stag.Toplevel.t]
+      val two : string -> Stag.Expr.t -> string -> Stag.Expr.t -> list[Stag.Toplevel.t]
+      val x : string
+      module N : sig
+        val before : string
+        val x : int
+        val y : string
+      end
+    end
+    |}];
+  check (program ~first:true);
+  [%expect
+    {|
+    module A : sig
+      val constructor : 'a -> 'a * list['b]
+      val arm : string -> Stag.Pattern.t * Stag.Expr.t
+      val enum : list[string] -> list[Stag.Toplevel.t]
+      val value : string -> Stag.Expr.t -> list[Stag.Toplevel.t]
+      val first : string
+      val two : string -> Stag.Expr.t -> string -> Stag.Expr.t -> list[Stag.Toplevel.t]
+      val x : string
+      module N : sig
+        val before : string
+        val x : int
+        val y : string
+      end
+    end
+    |}]
+;;
+
+let%expect_test "a failed splice" =
+  (* Reported as its own error wherever it is first reached. *)
+  check
+    (generators
+     ^ {|
+let a = M.x
+module M = .~(Int.div 1 0; Nil)
+let b = M.y
+|}
+    );
+  [%expect
+    {|
+    File "a.stag", line 19, characters 0-31:
+    19 | module M = .~(Int.div 1 0; Nil)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This declaration splice failed at compile time: Division by zero
+    File "a.stag", line 19, characters 14-25:
+    19 | module M = .~(Int.div 1 0; Nil)
+                       ^^^^^^^^^^^
+    Note: The error was raised here
+    |}];
+  (* A module of a prim's name shadows the prim even when its splice fails. *)
+  check
+    (generators
+     ^ {|
+let y = Int.add 1 2
+module Int = .~(let u = Nope.x in Nil)
+|}
+    );
+  [%expect
+    {|
+    File "a.stag", line 19, characters 24-28:
+    19 | module Int = .~(let u = Nope.x in Nil)
+                                 ^^^^
+    Error: Unbound module Nope
+    |}]
+;;
+
+let%expect_test "an unbound name in a generator" =
+  check
+    (generators
+     ^ {|
+include .~(let u = typo in value "x" (Stag.Expr.int 1))
+|}
+    );
+  [%expect
+    {|
+    File "a.stag", line 18, characters 19-23:
+    18 | include .~(let u = typo in value "x" (Stag.Expr.int 1))
+                            ^^^^
+    Error: Unbound value typo
+    |}];
+  check
+    (generators
+     ^ {|
+module M = .~(let u = typo in value "x" (Stag.Expr.int 1))
+|}
+    );
+  [%expect
+    {|
+    File "a.stag", line 18, characters 22-26:
+    18 | module M = .~(let u = typo in value "x" (Stag.Expr.int 1))
+                               ^^^^
+    Error: Unbound value typo
+    |}]
+;;
+
+let%expect_test "generated declaration splices" =
+  (* [y]'s include and [Inner]'s splice are generated by the outer include, in
+     its place, so see what is before it. *)
+  check
+    ~run:true
+    (generators
+     ^ {|
+let call f args = Stag.Expr.apply (Stag.Expr.var f) args
+let int n = call "Stag.Expr.int" (Cons (Stag.Expr.int n, Nil))
+include .~(
+  Cons (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1),
+  Cons (Stag.Toplevel.Include (call "value" (Cons (Stag.Expr.string "y", Cons (int 2, Nil)))),
+  Cons (Stag.Toplevel.Module_splice ("Inner", call "value" (Cons (Stag.Expr.string "z", Cons (int 3, Nil)))),
+  Nil))))
+let shown = print_int x; print_int y; print_int Inner.z
+|}
+    );
+  [%expect
+    {|
+    module A : sig
+      val constructor : 'a -> 'a * list['b]
+      val arm : string -> Stag.Pattern.t * Stag.Expr.t
+      val enum : list[string] -> list[Stag.Toplevel.t]
+      val value : string -> Stag.Expr.t -> list[Stag.Toplevel.t]
+      val call : string -> list[Stag.Expr.t] -> Stag.Expr.t
+      val int : int -> Stag.Expr.t
+      val x : int
+      val y : int
+      module Inner : sig
+        val z : int
+      end
+      val shown : unit
+    end
+    --- output ---
+    123
+    |}];
+  (* A generated declaration using a spliced module after the include. *)
+  check
+    ~run:true
+    (generators
+     ^ {|
+include .~(value "a" (Stag.Expr.var "M.x"))
+module M = .~(value "x" (Stag.Expr.int 1))
+let shown = print_int a
+|}
+    );
+  [%expect
+    {|
+    module A : sig
+      val constructor : 'a -> 'a * list['b]
+      val arm : string -> Stag.Pattern.t * Stag.Expr.t
+      val enum : list[string] -> list[Stag.Toplevel.t]
+      val value : string -> Stag.Expr.t -> list[Stag.Toplevel.t]
+      val a : int
+      module M : sig
+        val x : int
+      end
+      val shown : unit
+    end
+    --- output ---
+    1
+    |}]
+;;
+
+let%expect_test "a cycle through a module splice and an include" =
+  check
+    (generators
+     ^ {|
+module P = struct
+  include .~(let _ = Q.b in value "a" (Stag.Expr.int 1))
+end
+module Q = .~(let _ = P.a in value "b" (Stag.Expr.int 2))
+|}
+    );
+  [%expect
+    {|
+    File "a.stag", line 21, characters 22-25:
+    21 | module Q = .~(let _ = P.a in value "b" (Stag.Expr.int 2))
+                               ^^^
+    Error: A declaration splice depends on what it generates: P.a is looked up here among the declarations of the include at a.stag:19:2-56, which are being generated, as the include's expression uses this code. Code after an include (or outside its module) sees what it generates: move the code the include's expression uses before the include, or into another module
+    File "a.stag", line 19, characters 2-56:
+    19 |   include .~(let _ = Q.b in value "a" (Stag.Expr.int 1))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: The declaration splice is here
     |}]
 ;;
 
@@ -467,7 +754,7 @@ include .~(value "x" (Stag.Expr.int 3))
 ;;
 
 let%expect_test "cycles" =
-  (* The generator uses a value the splice defines. *)
+  (* An include's expression does not see what it generates. *)
   check
     (generators
      ^ {|
@@ -479,11 +766,7 @@ include .~(value "x" (Stag.Expr.int x))
     File "a.stag", line 18, characters 36-37:
     18 | include .~(value "x" (Stag.Expr.int x))
                                              ^
-    Error: A declaration splice depends on what it defines: this needs the declarations generated by the splice at a.stag:18:0-39, to generate them
-    File "a.stag", line 18, characters 0-39:
-    18 | include .~(value "x" (Stag.Expr.int x))
-         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Note: The declaration splice is here
+    Error: Unbound value x
     |}];
   (* A type the splice defines. *)
   check
@@ -497,7 +780,7 @@ module E = .~(let f (e : E.t) = e in enum Nil)
     File "a.stag", line 18, characters 25-28:
     18 | module E = .~(let f (e : E.t) = e in enum Nil)
                                   ^^^
-    Error: A declaration splice depends on what it defines: this needs the declarations generated by the splice at a.stag:18:0-46, to generate them
+    Error: A declaration splice depends on what it generates: E.t needs the declarations of the module A.E, which the splice at a.stag:18:0-46 is generating, as its expression uses this code
     File "a.stag", line 18, characters 0-46:
     18 | module E = .~(let f (e : E.t) = e in enum Nil)
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -600,7 +883,7 @@ include .~(Cons (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1), Nil))
     File "a.stag", line 3, characters 40-43:
     3 | include .~(Cons (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1), Nil))
                                                 ^^^
-    Error: This expression has type A.list['_a] but an expression was expected of type list[string]
+    Error: This expression has type A.list['_a] but an expression was expected of type prelude.list[string]
     |}]
 ;;
 
@@ -646,6 +929,7 @@ module M = .~(value "x" (Stag.Expr.apply (Stag.Expr.var "Int.add") (Cons (Stag.E
     18 | module M = .~(value "x" (Stag.Expr.apply (Stag.Expr.var "Int.add") (Cons (Stag.Expr.int 1, Cons (Stag.Expr.string "a", Nil)))))
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: In the declaration `let x` generated by this splice: This expression has type string but an expression was expected of type int
+    Note: The generated declaration is (Let x () () (App (App (Var Int.add ()) (Lit (Int 1))) (Lit (String a))))
     |}];
   check
     (generators
@@ -659,6 +943,7 @@ include .~(value "x" (Stag.Expr.var "nope"))
     18 | include .~(value "x" (Stag.Expr.var "nope"))
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: In the declaration `let x` generated by this splice: Unbound value nope
+    Note: The generated declaration is (Let x () () (Var nope ()))
     |}];
   (* Failing at compile time. *)
   check
@@ -689,5 +974,52 @@ include .~1
     2 | include .~1
                   ^
     Error: This expression has type int but an expression was expected of type list[Stag.Toplevel.t]
+    |}]
+;;
+
+let%expect_test "a program shadowing option, in a type error" =
+  check
+    {|
+type option['a] = None | Some of 'a
+let v = Stag.Expr.Var ("x", Some 1)
+|};
+  [%expect
+    {|
+    File "a.stag", line 3, characters 28-34:
+    3 | let v = Stag.Expr.Var ("x", Some 1)
+                                    ^^^^^^
+    Error: This expression has type A.option[int] but an expression was expected of type prelude.option[Stag.Type_expr.t]
+    |}]
+;;
+
+let%expect_test "a file shadowing the prelude's Stag" =
+  let files =
+    [ { Source_file.path = "stag.stag"; contents = "let mine = 1\n" }
+    ; { Source_file.path = "a.stag"
+      ; contents =
+          "include .~(Cons (Stag.Toplevel.let_ \"x\" Nil (Stag.Expr.int 1), \
+           Nil))\n"
+      }
+    ]
+  in
+  match Driver.check_files files with
+  | Ok _ -> print_endline "ok"
+  | Error error ->
+    print_string
+      (Diagnostic.to_string_hum
+         ~contents:(fun path ->
+           List.find_map files ~f:(fun file ->
+             Option.some_if (String.equal file.path path) file.contents))
+         (Diagnostic.of_driver_error error));
+    [%expect
+      {|
+    File "a.stag", line 1, characters 17-30:
+    1 | include .~(Cons (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1), Nil))
+                         ^^^^^^^^^^^^^
+    Error: Unbound module Stag.Toplevel (the prelude's module Stag is shadowed by the program's Stag)
+    File "stag.stag", line 1, characters 0-0:
+    1 | let mine = 1
+        ^
+    Note: The program's module Stag is here
     |}]
 ;;

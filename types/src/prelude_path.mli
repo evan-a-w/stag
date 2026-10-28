@@ -13,6 +13,11 @@ val canonical : string -> string
 (** The path within the prelude of a canonical name, if it is the prelude's. *)
 val relative : string -> string option
 
-(** A canonical name as it is written where the prelude is not shadowed:
-    without [root] for the prelude's. *)
-val to_string_hum : string -> string
+(** Whether the prelude's name [relative] is shadowed where [has] tells which
+    types and modules are in scope: by a type of its name, or a module of the
+    first name of its path. *)
+val shadowed : string -> has:([ `Type | `Module ] -> string -> bool) -> bool
+
+(** A canonical name for humans: without [root] for the prelude's, unless
+    [shadowed] (by default, never), with [root] (eg. [prelude.option]). *)
+val to_string_hum : ?shadowed:(string -> bool) -> string -> string

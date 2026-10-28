@@ -35,9 +35,15 @@ let of_source_file_error (error : Source_file.Error.t) =
     }
 ;;
 
+(* Without the locations of [Located] values, all at the splice. *)
+let rec without_locs : Sexp.t -> Sexp.t = function
+  | List [ txt; Atom "@"; _ ] -> without_locs txt
+  | List sexps -> List (List.map sexps ~f:without_locs)
+  | Atom _ as atom -> atom
+;;
+
 let of_typecheck_error (error : Typecheck_error.t) =
-  let notes =
-    match error.kind with
+  let rec notes : Typecheck_error.Kind.t -> Note.t list = function
     | Splice_evaluation_failed { error; code = _ }
     | Declaration_splice_failed error ->
       (match Runtime_error.of_error error with
@@ -49,12 +55,29 @@ let of_typecheck_error (error : Typecheck_error.t) =
         ; message = sprintf "%s is a variable of the code's context here" name
         }
       ]
-    | Declaration_splice_cycle { splice }
-    | Declaration_splice_defines_used { name = _; splice } ->
+    | Declaration_splice_cycle { splice; name = _; module_ = _ } ->
       [ { Note.loc = splice; message = "The declaration splice is here" } ]
+    | Shadowed_prelude_module { error; module_; shadowed_by } ->
+      notes error
+      @ [ { Note.loc = shadowed_by
+          ; message = sprintf "The program's module %s is here" module_
+          }
+        ]
+    | In_generated_declaration { generated; error; declaration = _ } ->
+      notes error
+      @ [ { Note.loc = Loc.none
+          ; message =
+              "The generated declaration is "
+              ^ Sexp.to_string_hum
+                  (without_locs [%sexp (generated : Syntax.Toplevel.t)])
+          }
+        ]
     | _ -> []
   in
-  create ~notes ~loc:error.loc (Typecheck_error.message error)
+  create
+    ~notes:(notes error.kind)
+    ~loc:error.loc
+    (Typecheck_error.message error)
 ;;
 
 let of_driver_error : Driver.Error.t -> t = function

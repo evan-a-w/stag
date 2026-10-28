@@ -71,15 +71,18 @@ let builtins =
 ;;
 
 let find_resolved t module_ namespace path ~loc ~unbound ~find =
-  match%bind.Result Module_scope.find module_ namespace path ~loc with
-  | None -> Error (Typecheck_error.create ~loc (unbound path))
-  | Some name -> find t name ~loc
+  let%bind.Result name =
+    Module_scope.find module_ namespace path ~loc ~unbound
+  in
+  find t name ~loc
 ;;
 
 let find_type t module_ path ~loc =
-  match%bind.Result Module_scope.find module_ Type path ~loc with
-  | None -> Error (Typecheck_error.create ~loc (Unbound_type path))
-  | Some name -> Ok (Hashtbl.find_exn t.types name)
+  let%map.Result name =
+    Module_scope.find module_ Type path ~loc ~unbound:(fun path ->
+      Unbound_type path)
+  in
+  Hashtbl.find_exn t.types name
 ;;
 
 module Annotation_vars = struct

@@ -130,11 +130,13 @@ module Scope = struct
      program shadows the path's first name. *)
   let prelude_name enclosing relative =
     let shadowed =
-      match String.split relative ~on:'.' with
-      | [ name ] -> List.exists enclosing ~f:(fun t -> Set.mem t.types name)
-      | first :: _ :: _ ->
-        List.exists enclosing ~f:(fun t -> Set.mem t.modules first)
-      | [] -> false
+      Prelude_path.shadowed relative ~has:(fun kind name ->
+        List.exists enclosing ~f:(fun t ->
+          Set.mem
+            (match kind with
+             | `Type -> t.types
+             | `Module -> t.modules)
+            name))
     in
     if shadowed then Prelude_path.canonical relative else relative
   ;;

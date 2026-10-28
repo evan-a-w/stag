@@ -6,6 +6,7 @@ module Generated = struct
   type t =
     { splice : Loc.t
     ; declaration : string
+    ; generated : Syntax.Toplevel.t [@sexp.opaque]
     }
   [@@deriving sexp_of]
 
@@ -18,7 +19,10 @@ module Generated = struct
       | Include _ -> "include"
       | Expect_test { name; _ } -> sprintf "let%%expect_test %S" name.txt
     in
-    { splice = Module_scope.Splice.loc splice; declaration }
+    { splice = Module_scope.Splice.loc splice
+    ; declaration
+    ; generated = toplevel
+    }
   ;;
 
   (* Errors in generated code are at the splice. Others, eg. of written
@@ -30,7 +34,11 @@ module Generated = struct
     | kind ->
       Typecheck_error.create
         ~loc:t.splice
-        (In_generated_declaration { declaration = t.declaration; error = kind })
+        (In_generated_declaration
+           { declaration = t.declaration
+           ; generated = t.generated
+           ; error = kind
+           })
   ;;
 
   let wrap_result t result =
@@ -714,27 +722,14 @@ let rec var_type t (scope : Scope.t) ~(path : Syntax.Path.t) ~loc =
   match local with
   | Some (name, entry) -> resolve ~name (Some entry)
   | None ->
-    (* Prims are outside the root module, so found only where the program has
-       nothing of their name: no value, or no module for a path. *)
-    (match
-       Module_scope.find scope.module_ Value path ~loc, (path :> string list)
-     with
-     | Ok (Some name), _ ->
+    (match%bind.Result Module_scope.find_value scope.module_ path ~loc with
+     | Toplevel name ->
        let%bind.Result entry =
          toplevel_entry t scope (Program_env.toplevel scope.program name) ~loc
        in
        resolve ~name (Some entry)
-     | Ok None, [ name ] ->
-       (match Prim.find path with
-        | Some p -> prim p
-        | None -> resolve ~name None)
-     | Ok None, _ -> error ~loc (Not_in_scope path)
-     | Error ({ kind = Unbound_module _; _ } as error'), module_ :: _ ->
-       (match Prim.find path with
-        | Some p -> prim p
-        | None when Prim.is_module module_ -> error ~loc (Not_in_scope path)
-        | None -> Error error')
-     | (Error _ as error), _ -> error)
+     | Prim p -> prim p
+     | Unbound -> resolve ~name:(Syntax.Path.to_string path) None)
 
 (* Generated code's variables are already resolved, so are found by binder
    rather than by name, which may be shadowed. *)
@@ -1595,6 +1590,9 @@ let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
       ()
   in
   List.iter Type_env.builtins ~f:(Type_env.declare program_env.type_env root);
+  Result.map_error ~f:(fun (error : Typecheck_error.t) ->
+    { error with prelude_shadowed = Module_scope.shadows_prelude root })
+  @@
   let%bind.Result () = Module_scope.add root program in
   let%bind.Result expect_tests = check_declarations t program_env root in
   let%map.Result expect_tests =
