@@ -1206,7 +1206,17 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
        ; recursive = false
        };
   let body =
-    check_body t scope ~args ~res_ty ~body:(Source.Expr.Syntax toplevel.expr)
+    match
+      check_body t scope ~args ~res_ty ~body:(Source.Expr.Syntax toplevel.expr)
+    with
+    | body -> body
+    | exception Uses_unfinished ->
+      (* Abandoned with the splice, to be checked anew. *)
+      toplevel.state <- Unchecked;
+      while Stack.length program.unfinished > unfinished do
+        ignore (Stack.pop_exn program.unfinished : Type.ty)
+      done;
+      raise Uses_unfinished
   in
   (match toplevel.state with
    | In_progress in_progress -> in_progress.body <- Some body
@@ -2027,6 +2037,7 @@ let generate t (program : Program_env.t) splice
     toplevel_scope t program module_ ~level:(-1) ~in_expect_test:false
   in
   let reported = program.reported in
+  let errors = program.errors in
   Stack.push program.splice_starts scope.scc.lowlink;
   match
     check_expr
@@ -2036,7 +2047,10 @@ let generate t (program : Program_env.t) splice
       ~ty:declarations_type
   with
   | exception Uses_unfinished ->
+    (* Checked again once what it uses is finished. *)
     ignore (Stack.pop_exn program.splice_starts : int);
+    program.errors <- errors;
+    program.reported <- reported;
     Error Uses_unfinished
   | expr ->
     ignore (Stack.pop_exn program.splice_starts : int);
