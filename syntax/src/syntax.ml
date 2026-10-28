@@ -196,8 +196,7 @@ and expr_desc =
   | Poly_extend of (Name.t * expr) list * expr (** [{x = v; ... | e}] *)
   | Poly_restrict of expr * Name.t (** [e \ x] *)
   | Poly_update of expr * (Name.t * expr) list (** [{e with x = v; ...}] *)
-  | Poly_variant of Name.t * expr option
-  (** [None] is a [unit] argument. *)
+  | Poly_variant of Name.t * expr option (** [None] is a [unit] argument. *)
   | Expect of string Located.t
   (** [[%expect {|...|}]], located at the string, or zero width after
       [[%expect] if there is none. *)

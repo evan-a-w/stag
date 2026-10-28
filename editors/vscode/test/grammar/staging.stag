@@ -75,3 +75,13 @@ let b = x > {|s|} <int>{a|s|a} y
 (*          ^^^^^ string.quoted.other.stag - meta.type
 (*                     ^^^^^^^ string.quoted.other.stag - meta.type
 (*                             ^ variable.other.stag - meta
+let d = .< struct type t = .~k let x : .~ty = .~e end >. y
+(*      ^^ meta.quote.stag keyword.control.quote.begin.stag
+(*         ^^^^^^ meta.quote.stag keyword.other.struct.stag
+(*                         ^^ meta.quote.stag keyword.control.splice.stag
+(*                                     ^^ meta.quote.stag keyword.control.splice.stag
+(*                                                ^^^ meta.quote.stag keyword.other.end.stag
+(*                                                    ^^ meta.quote.stag keyword.control.quote.end.stag
+(*                                                       ^ variable.other.stag - meta.quote
+type t = .~(f x)
+(*       ^^ meta.splice.stag keyword.control.splice.stag

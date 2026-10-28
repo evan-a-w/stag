@@ -174,10 +174,10 @@ let rec fits ?(ended = false) ~spaced width (commands : (int * Mode.t * t) list)
              line is already there. *)
           (not ended)
           && fits
-            ~ended
-            ~spaced:(spaced_after s ~spaced)
-            (width - String.length s)
-            rest
+               ~ended
+               ~spaced:(spaced_after s ~spaced)
+               (width - String.length s)
+               rest
         | Break -> true)
      | Space ->
        if spaced || ended

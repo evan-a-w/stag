@@ -492,18 +492,25 @@ An antiquote `.~e` outside any quote within it is evaluated when the quote is,
 and spliced in according to its position:
 
 - `include .~e` and `module M = .~e`: `e : list[Stag.Toplevel.t]`, its
-  declarations in place (or as `M`'s);
+  declarations in place (or as `M`'s). There is no bare `.~e` item: a list
+  covers one declaration or none, and `include` reads as what it does;
 - a type: `e : Stag.Type_expr.t`;
 - a type declaration's definition, `type t[...] = .~e`:
   `e : Stag.Type_decl.Kind.t`;
 - an expression: `e : Stag.Expr.t` (an antiquote with substitutions,
-  `.~e.{x}`, is an error).
+  `.~e.{x}`, is an error). Typed code goes in through
+  `.~(Stag.Code.erase c)`, keeping its hygiene.
+
+Binders are names as written; to bind a computed name, build that declaration
+with the `Stag` constructors and append it.
 
 A quote or struct quote within a struct quote is quoted with it, a splice
 within that unquoting back into it, as for nested expression quotes: in
 `.< struct let q = .< .~x >. end >.`, `.~x` is part of the generated syntax.
 An `include%inline` in a struct quote is an error (generated declarations have
-no expansions). A struct quote is a `Stag.Expr.Struct_quote` as data, and type
+no expansions). The quote is expanded where it is checked into the
+constructors' applications, so its errors (an antiquote of the wrong type) are
+reported at the antiquote. A struct quote is a `Stag.Expr.Struct_quote` as data, and type
 and definition antiquotes are `Stag.Type_expr.Splice` and
 `Stag.Type_decl.Kind.Splice`.
 
@@ -516,14 +523,20 @@ compile time:
 ```ocaml
 type point = .~(Gen.record ["x"; "y"])
 let origin : .~(Gen.ty "point") = {x = 0; y = 0}
-let n = (f x : .~(Stag.Type_expr.con "int" []))
+let n = (x : .~(Gen.ty "int"))
+type pair = (.~a * .~b)  (* not `type pair = .~a * .~b`: see below *)
 ```
+
+After `type t =`, `.~e` is the definition; a type starting with a splice is
+parenthesized there.
 
 A declaration holding type splices is the include of a struct quote of it:
 `type point = .~e` is `include .~(.< struct type point = .~e end >.)`, so its
 splices see what an include there would, and an error in the generated
-declaration is reported at it with a note printing it. A type splice within
-a quote is an error, as quoted code's types are fixed where it is checked.
+declaration is reported at it with a note printing it. Its expression splices stay
+as written (they run when the generated declaration is checked). A type splice
+within a quote is an error, as quoted code's types are fixed where it is
+checked.
 
 ## Reflection
 

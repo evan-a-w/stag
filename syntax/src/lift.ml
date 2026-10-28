@@ -65,7 +65,10 @@ module Make (B : Builder) = struct
       in
       con
         "Poly_record"
-        [ B.record [ "fields", list (pair name pattern) fields; "rest", rest_value rest ]
+        [ B.record
+            [ "fields", list (pair name pattern) fields
+            ; "rest", rest_value rest
+            ]
         ]
     | Exception p -> con "Exception" [ pattern p ]
   ;;
@@ -243,8 +246,8 @@ module Make (B : Builder) = struct
 
   let lifter antiquote =
     (module Lifter (struct
-        let antiquote = Option.value antiquote ~default:no_antiquote
-      end) : Lifter_s)
+         let antiquote = Option.value antiquote ~default:no_antiquote
+       end) : Lifter_s)
   ;;
 
   let type_expr ?antiquote t =

@@ -20,7 +20,9 @@ type t =
 
 let map toplevels ~f =
   let splice ~depth kind ~loc ~has_subs (e : Expr.t) ~inner =
-    if depth = 0 then f { kind; expr = e; loc; has_subs } else inner (depth - 1) e
+    if depth = 0
+    then f { kind; expr = e; loc; has_subs }
+    else inner (depth - 1) e
   in
   let rec type_expr depth (t : Type_expr.t) : Type_expr.t =
     let type_expr = type_expr depth in

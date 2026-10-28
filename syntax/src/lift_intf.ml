@@ -46,9 +46,7 @@ module type S = sig
   val expr : ?antiquote:antiquote -> Syntax.Expr.t -> t
   val toplevel : ?antiquote:antiquote -> Syntax.Toplevel.t -> t
   val program : ?antiquote:antiquote -> Syntax.Program.t -> t
-
   val list : ('a -> t) -> 'a list -> t
-
   val option : ('a -> t) -> 'a option -> t
 end
 

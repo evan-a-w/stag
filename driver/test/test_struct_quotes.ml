@@ -16,7 +16,8 @@ module P = .~point
 
 let shown = print_endline (P.show P.origin)
 |};
-  [%expect {|
+  [%expect
+    {|
     module A : sig
       val point : list[Stag.Toplevel.t]
       module P : sig
@@ -51,7 +52,8 @@ include .~(make (Cons ("A", Cons ("B", Nil))) .< struct let y = 2 end >.)
 
 let shown = print_endline (Int.to_string (Int.add (f y) Inner.y))
 |};
-  [%expect {|
+  [%expect
+    {|
     module A : sig
       val variants : list[string] -> Stag.Type_decl.Kind.t
       val int : Stag.Type_expr.t
@@ -80,7 +82,8 @@ let shown =
   | Cons (Stag.Toplevel.Let (name, _, _, _), Nil) -> print_endline name
   | _ -> print_endline "?"
 |};
-  [%expect {|
+  [%expect
+    {|
     module A : sig
       val names : list[Stag.Toplevel.t]
       val shown : unit
@@ -105,7 +108,8 @@ let shown =
     print_endline "quoted"
   | _ -> print_endline "?"
 |};
-  [%expect {|
+  [%expect
+    {|
     module A : sig
       val quoted : list[Stag.Toplevel.t]
       val shown : unit
@@ -116,10 +120,12 @@ let shown =
 ;;
 
 let%expect_test "an antiquote of the wrong type" =
-  check {|
+  check
+    {|
 let bad = .< struct let x = .~1 end >.
 |};
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 2, characters 30-31:
     2 | let bad = .< struct let x = .~1 end >.
                                       ^
@@ -128,10 +134,12 @@ let bad = .< struct let x = .~1 end >.
 ;;
 
 let%expect_test "an item antiquote of the wrong type" =
-  check {|
+  check
+    {|
 let bad = .< struct include .~(Stag.Expr.int 1) end >.
 |};
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 2, characters 30-47:
     2 | let bad = .< struct include .~(Stag.Expr.int 1) end >.
                                       ^^^^^^^^^^^^^^^^^
@@ -140,10 +148,12 @@ let bad = .< struct include .~(Stag.Expr.int 1) end >.
 ;;
 
 let%expect_test "an antiquote with substitutions" =
-  check {|
+  check
+    {|
 let bad = .< struct let x = .~(Stag.Expr.int 1).{y} end >.
 |};
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 2, characters 28-51:
     2 | let bad = .< struct let x = .~(Stag.Expr.int 1).{y} end >.
                                     ^^^^^^^^^^^^^^^^^^^^^^^
@@ -157,7 +167,8 @@ let%expect_test "an error in quoted declarations is reported where spliced" =
 let decls = .< struct let x : int = "no" end >.
 include .~decls
 |};
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 3, characters 0-15:
     3 | include .~decls
         ^^^^^^^^^^^^^^^
@@ -167,7 +178,9 @@ include .~decls
     |}]
 ;;
 
-let%expect_test "free names resolve where spliced; root paths and erased code don't" =
+let%expect_test
+    "free names resolve where spliced; root paths and erased code don't"
+  =
   check
     ~run:true
     {|
@@ -187,7 +200,8 @@ let shown = print_endline M.a
 let shown_b = print_endline M.b
 let shown_c = print_endline M.c
 |};
-  [%expect {|
+  [%expect
+    {|
     module A : sig
       val helper : string
       val decls : list[Stag.Toplevel.t]
@@ -228,7 +242,8 @@ exception E of .~int
 
 let shown = print_endline (Int.to_string (f p))
 |};
-  [%expect {|
+  [%expect
+    {|
     module A : sig
       val int : Stag.Type_expr.t
       val fields : list[string] -> Stag.Type_decl.Kind.t
@@ -248,10 +263,12 @@ let shown = print_endline (Int.to_string (f p))
 ;;
 
 let%expect_test "errors in type splices" =
-  check {|
+  check
+    {|
 let x : .~1 = 1
 |};
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 2, characters 10-11:
     2 | let x : .~1 = 1
                   ^
@@ -262,7 +279,8 @@ let x : .~1 = 1
 let ty = Stag.Type_expr.Con (Stag.Path.Name "string", Nil)
 let x : .~ty = 1
 |};
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 3, characters 0-16:
     3 | let x : .~ty = 1
         ^^^^^^^^^^^^^^^^
@@ -275,7 +293,8 @@ let x : .~ty = 1
 let ty = Stag.Type_expr.Con (Stag.Path.Name "nope", Nil)
 type t = list[.~ty]
 |};
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 3, characters 0-19:
     3 | type t = list[.~ty]
         ^^^^^^^^^^^^^^^^^^^
@@ -289,7 +308,8 @@ let ty = Stag.Type_expr.Con (Stag.Path.Name "int", Nil)
 let one = 1
 let quoted = .< (one : .~ty) >.
 |};
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 4, characters 23-27:
     4 | let quoted = .< (one : .~ty) >.
                                ^^^^
@@ -300,7 +320,8 @@ let quoted = .< (one : .~ty) >.
 let kind = Stag.Type_decl.Kind.Splice (Stag.Expr.int 1)
 type t = .~kind
 |};
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 3, characters 0-15:
     3 | type t = .~kind
         ^^^^^^^^^^^^^^^

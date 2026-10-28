@@ -71,8 +71,15 @@ and type_desc (g : Type_expr.desc) (w : Type_expr.desc) : Type_expr.desc option 
   | Splice e, Splice e' ->
     let+ e = expr e e' in
     Type_expr.Splice e
-  | (Var _ | Con _ | Arrow _ | Tuple _ | Code _ | Record _ | Variant _ | Splice _), _
-    -> None
+  | ( ( Var _
+      | Con _
+      | Arrow _
+      | Tuple _
+      | Code _
+      | Record _
+      | Variant _
+      | Splice _ )
+    , _ ) -> None
 
 and row g w = located row_desc g w
 
@@ -100,7 +107,6 @@ and arg (g : Type_expr.arg) (w : Type_expr.arg) =
   | (Ty _ | Row _), _ -> None
 
 and binding b b' = pair name (option type_expr) b b'
-
 and pattern g w = located pattern_desc g w
 
 and pattern_desc (g : Pattern.desc) (w : Pattern.desc) : Pattern.desc option =

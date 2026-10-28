@@ -399,7 +399,6 @@ module Of_value = struct
         | "Row", 1 -> Row (arg 0 (row ~labels:Label ~loc))
         | _ -> raise Bad_arguments)
 
-
   and type_decl value ~loc : Type_decl.t =
     let param value =
       Located.create
@@ -435,7 +434,6 @@ module Of_value = struct
     ; params = field "params" (list param) value
     ; kind = field "kind" kind value
     }
-
 
   and binding ~loc = pair (name Binder ~loc) (option (type_expr ~loc))
 
@@ -479,7 +477,6 @@ module Of_value = struct
         | "Open", 0 -> Open
         | "Bind", 1 -> Bind (arg 0 (name Lower ~loc))
         | _ -> raise Bad_arguments)
-
 
   and expr value ~loc : Expr.t =
     let labelled = list (pair (name Label ~loc) (expr ~loc)) in
@@ -540,7 +537,6 @@ module Of_value = struct
          | "Expect", 1 -> Expect (Located.create ~loc (arg 0 string))
          | "Struct_quote", 1 -> Struct_quote (arg 0 (list (toplevel ~loc)))
          | _ -> raise Bad_arguments))
-
 
   and toplevel value ~loc : Toplevel.t =
     Located.create

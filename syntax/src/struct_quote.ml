@@ -10,20 +10,19 @@ let expand_exn ?(types_only = false) toplevels ~loc =
       match antiquote.kind with
       | (Item | Expr) when types_only -> antiquote.expr
       | Item | Expr | Type_expr | Type_kind ->
-      if antiquote.has_subs
-      then
-        raise
-          (Error
-             ( antiquote.loc
-             , "An antiquote of a struct quote takes no substitutions: write \
-                `.~e`, of a `Stag.Expr.t`" ));
-      Queue.enqueue antiquotes antiquote.expr;
-      Antiquote.placeholder (Queue.length antiquotes - 1))
+        if antiquote.has_subs
+        then
+          raise
+            (Error
+               ( antiquote.loc
+               , "An antiquote of a struct quote takes no substitutions: write \
+                  `.~e`, of a `Stag.Expr.t`" ));
+        Queue.enqueue antiquotes antiquote.expr;
+        Antiquote.placeholder (Queue.length antiquotes - 1))
   in
   let node txt = Located.create ~loc txt in
   let resolved name = Decl_path.Resolved (Prelude_path.canonical name) in
-  let module Lift =
-    Lift.Make (struct
+  let module Lift = Lift.Make (struct
       type t = Expr.t
 
       let con name args =
@@ -61,8 +60,30 @@ let expand_exn ?(types_only = false) toplevels ~loc =
     Antiquote.index e |> Option.map ~f:(Queue.get antiquotes))
 ;;
 
+let rec check_no_expansions (toplevels : Toplevel.t list) =
+  List.iter toplevels ~f:(fun toplevel ->
+    match toplevel.txt with
+    | Include (_, Some _) | Module_splice (_, _, Some _) ->
+      raise
+        (Error
+           ( toplevel.loc
+           , "A struct quote can't hold an inline expansion: generated \
+              declarations have none" ))
+    | Module (_, members) -> check_no_expansions members
+    | Include _
+    | Module_splice _
+    | Let _
+    | Type _
+    | Exception _
+    | Expect_test _
+    | Bench _ -> ())
+;;
+
 let expand toplevels ~loc =
-  match expand_exn toplevels ~loc with
+  match
+    check_no_expansions toplevels;
+    expand_exn toplevels ~loc
+  with
   | expr -> Ok expr
   | exception Error (loc, message) -> Error (loc, message)
 ;;

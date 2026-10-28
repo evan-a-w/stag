@@ -274,7 +274,6 @@ module Kind = struct
   ;;
 end
 
-
 let rec type_expr roots ~prec (t : Type_expr.t) =
   match t.txt with
   | Var name -> tyvar name
@@ -438,7 +437,6 @@ and pattern roots ~prec (p : Pattern.t) =
     paren_if (prec > 1) (text "exception " ^^ pattern roots ~prec:1 p)
 
 and pattern_doc roots p = pattern roots ~prec:0 p
-
 
 and binding roots ((name : Name.t), annot) =
   match annot with
@@ -765,11 +763,7 @@ and toplevel roots ~indent (t : Toplevel.t) =
   | Module (name, []) -> text ("module " ^ name.txt ^ " = struct end")
   | Module (name, members) ->
     text ("module " ^ name.txt ^ " = struct")
-    ^^ nest
-         2
-         (hardline
-          ^^ toplevels roots ~indent:(indent + 2) members
-         )
+    ^^ nest 2 (hardline ^^ toplevels roots ~indent:(indent + 2) members)
     ^^ hardline
     ^^ text "end"
   | Module_splice (name, e, expansion) ->
@@ -781,13 +775,7 @@ and toplevel roots ~indent (t : Toplevel.t) =
       e
       expansion
   | Include (e, expansion) ->
-    splice_toplevel
-      roots
-      ~indent
-      ~keyword:"include"
-      ~prefix:" "
-      e
-      expansion
+    splice_toplevel roots ~indent ~keyword:"include" ~prefix:" " e expansion
   | Expect_test { name; body } ->
     definition
       (text ("let%expect_test " ^ string_literal name.txt))
@@ -818,14 +806,7 @@ and toplevel roots ~indent (t : Toplevel.t) =
     in
     definition lhs (expr_doc roots body)
 
-and splice_toplevel
-      roots
-      ~indent
-      ~keyword
-      ~prefix
-      e
-      expansion
-  =
+and splice_toplevel roots ~indent ~keyword ~prefix e expansion =
   match (expansion : _ Located.t option) with
   | None -> text (keyword ^ prefix) ^^ spliced roots e
   | Some { txt = toplevels'; loc = _ } ->
@@ -835,12 +816,7 @@ and splice_toplevel
          2
          (match toplevels' with
           | [] -> empty
-          | _ ->
-            hardline
-            ^^ toplevels
-                 roots
-                 ~indent:(indent + 2)
-                 toplevels')
+          | _ -> hardline ^^ toplevels roots ~indent:(indent + 2) toplevels')
     ^^ hardline
     ^^ text "end%inline"
 

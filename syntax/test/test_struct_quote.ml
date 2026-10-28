@@ -22,7 +22,8 @@ let nested = .< struct let q = .< struct module M = .~a end >. include .~(gen .~
 let e = .< struct end >.
 let types = (type .~t, type list[.~t], f (type .~t))
 |};
-  [%expect {|
+  [%expect
+    {|
     let ds =
       .< struct
         type t = .~(variants names)
@@ -64,13 +65,15 @@ let expand source =
 
 let%expect_test "expansion" =
   expand {|.< struct type t = .~kind let x : .~ty = .~e include .~items end >.|};
-  [%expect {|
+  [%expect
+    {|
     .Cons
       (.Stag.Toplevel.Type {`name = "t"; `params = .Nil; `kind = kind},
        .Cons (.Stag.Toplevel.Let ("x", .Nil, .Some ty, e), .Stag.append items .Nil))
     |}];
   expand {|.< struct let q = .< .~x >. module M = .~items end >.|};
-  [%expect {|
+  [%expect
+    {|
     .Cons
       (.Stag.Toplevel.Let
          ("q",
@@ -80,6 +83,10 @@ let%expect_test "expansion" =
             {`expr = .Stag.Expr.Var (.Stag.Path.Name "x", .None); `subs = .None})),
        .Cons (.Stag.Toplevel.Module ("M", items), .Nil))
     |}];
+  expand {|.< struct include%inline .~e end%inline end >.|};
+  [%expect
+    {| A struct quote can't hold an inline expansion: generated declarations have none |}];
   expand {|.< struct let x = .~e.{y} end >.|};
-  [%expect {| An antiquote of a struct quote takes no substitutions: write `.~e`, of a `Stag.Expr.t` |}]
+  [%expect
+    {| An antiquote of a struct quote takes no substitutions: write `.~e`, of a `Stag.Expr.t` |}]
 ;;

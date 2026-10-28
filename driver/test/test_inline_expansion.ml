@@ -802,3 +802,47 @@ end%inline
     (gen.stag up to date)
     |}]
 ;;
+
+let%expect_test "a generator written with a struct quote" =
+  test
+    {|
+let int = Stag.Type_expr.Con (Stag.Path.Name "int", Nil)
+let counter start =
+  .< struct
+    type t = {count : .~int}
+    let start = {count = .~(Stag.Expr.int start)}
+    let next c = {count = Int.add c.count 1}
+  end >.
+
+include%inline .~(counter 10)
+end%inline
+
+let shown = print_endline (Int.to_string (next start).count)
+|};
+  [%expect
+    {|
+    File "a.stag", line 24, characters 0-29:
+    24 | include%inline .~(counter 10)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    --- output ---
+    11
+    --- a.stag corrected ---
+    let int = Stag.Type_expr.Con (Stag.Path.Name "int", Nil)
+    let counter start =
+      .< struct
+        type t = {count : .~int}
+        let start = {count = .~(Stag.Expr.int start)}
+        let next c = {count = Int.add c.count 1}
+      end >.
+
+    include%inline .~(counter 10)
+      type t = {count : int}
+
+      let start = {count = 10}
+      let next c = {count = Int.add c.count 1}
+    end%inline
+
+    let shown = print_endline (Int.to_string (next start).count)
+    |}]
+;;
