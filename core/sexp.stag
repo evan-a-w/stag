@@ -308,9 +308,9 @@ let t_of_sexp_exn (t : t) = t
    the conversions of [t]'s type parameters first ([sexp_of_t _of_a v],
    [t_of_sexp_exn _of_a sexp], [_of_a] returning a [result] for both
    [of_sexp]s). Another type [u] is converted by [sexp_of_u] and
-   [u_of_sexp_exn] (or [u_of_sexp] as an argument), named bare if it is of
-   [t]'s module, resolved where the code is spliced, otherwise by its root
-   path ([.A.M.sexp_of_u]). See syntax.md. *)
+   [u_of_sexp_exn] (or [u_of_sexp] as an argument), named by its root path
+   ([.A.M.sexp_of_u]), so wherever the code is spliced; [t] itself bare, as
+   generated beside the splice. See syntax.md. *)
 let derive ty = Internal.Derive.derive ty
 
 (* What the code [derive] generates uses. [name] is the [of_sexp]'s, eg.
@@ -1113,8 +1113,8 @@ module Internal = struct
     end
 
     module Context = struct
-      (* [self]: the path of the derived type's module, whose types are named
-         bare; [name]: the derived [of_sexp]'s, in errors. *)
+      (* [self]: the derived type's root path, which is named bare; [name]: the
+         derived [of_sexp]'s, in errors. *)
       type t = {self : list[string]; name : string}
     end
 
@@ -1271,7 +1271,7 @@ module Internal = struct
       | Stag.Type_ref.Path.Program path ->
         let modules = List.take (Int.pred (List.length path)) path in
         let name = Dir.conv_name dir (Stag.Type_ref.name r) in
-        match List.equal String.equal modules ctx.self with
+        match List.equal String.equal path ctx.self with
         | true -> var name
         | false ->
           var (String.concat "." (Cons ("", List.append modules [name])))
@@ -1527,8 +1527,7 @@ module Internal = struct
       in
       let self =
         match Stag.Type_ref.path r with
-        | Stag.Type_ref.Path.Program path ->
-          List.take (Int.pred (List.length path)) path
+        | Stag.Type_ref.Path.Program path -> path
         | Stag.Type_ref.Path.Prelude _ ->
           fail (String.append type_name " is the prelude's")
       in

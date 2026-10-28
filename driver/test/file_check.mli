@@ -2,8 +2,17 @@ open! Import
 
 (** Checks [contents] as the file [a.stag], printing its signature, or the
     diagnostic. With [run], also evaluates it, printing its output, and runs
-    its expect tests, printing those that fail and the corrected file. *)
-val check : ?run:bool -> string -> unit
+    its expect tests, printing those that fail and the corrected file.
+    [filter_diagnostic] rewrites the printed diagnostic. *)
+val check
+  :  ?run:bool
+  -> ?filter_diagnostic:(string -> string)
+  -> string
+  -> unit
 
 (** As [check], for the files given as [(path, contents)]. *)
-val check_files : ?run:bool -> (string * string) list -> unit
+val check_files
+  :  ?run:bool
+  -> ?filter_diagnostic:(string -> string)
+  -> (string * string) list
+  -> unit
