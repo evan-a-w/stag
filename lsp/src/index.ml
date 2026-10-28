@@ -441,7 +441,7 @@ let resolve_type t ~module_path path =
     Option.some_if (Hashtbl.mem t.types name) name)
 ;;
 
-let create ~groups ~(program : Typed.Program.t) ~expansions =
+let create ?(prelude = []) ~groups ~(program : Typed.Program.t) ~expansions () =
   let up_to_date =
     List.filter_map expansions ~f:(fun (expansion : Expansion.t) ->
       match expansion.status with
@@ -460,6 +460,12 @@ let create ~groups ~(program : Typed.Program.t) ~expansions =
     ; splices = Span.Hash_set.create ()
     }
   in
+  declarations
+    t
+    ~up_to_date
+    ~values:(String.Table.create ())
+    ~prefix:[ Prelude_path.root ]
+    prelude;
   let files = List.concat_map groups ~f:(files ~prefix:[]) in
   let values = String.Table.create () in
   List.iter files ~f:(fun (prefix, toplevel) ->

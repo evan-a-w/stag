@@ -7,8 +7,15 @@ open! Import
 type t
 
 (** Compile-time evaluation of checks is within [limits]. Messages to the
-    client go to [send]. *)
-val create : limits:Limits.t -> send:(Jsonrpc.Packet.t -> unit) -> t
+    client go to [send]. Definitions in the prelude are in [stdlib]'s sources
+    if found nowhere nearer (see [Checker.check]); [run]'s is the checkout
+    its executable is in, if any. *)
+val create
+  :  ?stdlib:Stdlib_checkout.t
+  -> limits:Limits.t
+  -> send:(Jsonrpc.Packet.t -> unit)
+  -> unit
+  -> t
 
 (** Handles a message from the client, but checks no changed documents yet,
     unless a request needs them checked. *)

@@ -169,3 +169,11 @@ let check_files ?limits ?output files =
     (List.map modules ~f:(fun file -> Module_group.File file))
   |> Result.map_error ~f:(fun error -> Error.Typecheck error)
 ;;
+
+let check_prelude ?(limits = Limits.unlimited) ?output prelude =
+  let interpreter = create_interpreter ~limits ~output in
+  let%map.Result checked =
+    Typecheck.check_prelude (Typecheck.create ~interpreter ~prelude ())
+  in
+  { checked; interpreter; eval_order = [] }
+;;

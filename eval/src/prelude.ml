@@ -2,47 +2,66 @@ open! Import
 
 let path = "<prelude>"
 let core_dir = "<core>"
+let checkout_prelude = "prelude/prelude.stag"
+let checkout_core_dir = "core"
 
-let prelude_source =
-  match Stag_prelude_source.files with
-  | [ (_, source) ] -> source
-  | files ->
-    raise_s
-      [%message
-        "Expected one prelude file" ~files:(List.map files ~f:fst : string list)]
-;;
+module Sources = struct
+  type t =
+    { prelude : Source_file.t
+    ; core : Source_file.t list
+    }
 
-let prelude () =
-  match Parser.program ~file:path prelude_source with
-  | Ok toplevels -> toplevels
-  | Error error ->
-    raise_s [%message "Prelude failed to parse" (error : Parser.Error.t)]
-;;
+  let embedded =
+    { prelude =
+        (match Stag_prelude_source.files with
+         | [ (_, contents) ] -> { path; contents }
+         | files ->
+           raise_s
+             [%message
+               "Expected one prelude file"
+                 ~files:(List.map files ~f:fst : string list)])
+    ; core =
+        List.map Stag_core_source.files ~f:(fun (name, contents) ->
+          { Source_file.path = Filename.concat core_dir name; contents })
+    }
+  ;;
+end
 
-let core () : Syntax.Toplevel.t =
-  let files =
-    List.map Stag_core_source.files ~f:(fun (name, contents) ->
-      match
-        Source_file.parse { path = Filename.concat core_dir name; contents }
-      with
-      | Ok file -> file
-      | Error error ->
-        raise_s [%message "Core failed to parse" (error : Source_file.Error.t)])
+let parse ({ prelude; core } : Sources.t) =
+  let%bind.Result prelude =
+    Parser.program ~file:prelude.path prelude.contents
+    |> Result.map_error ~f:(fun error -> Source_file.Error.Parse error)
   in
+  let%map.Result core = List.map core ~f:Source_file.parse |> Result.all in
   let loc = Loc.start_of_file core_dir in
-  Located.create
-    ~loc
-    (Syntax.Toplevel.Module (Located.create ~loc "Core", files))
+  prelude
+  @ [ Located.create
+        ~loc
+        (Syntax.Toplevel.Module (Located.create ~loc "Core", core))
+    ]
 ;;
 
 let source file =
-  if String.equal file path
-  then Some prelude_source
-  else
-    List.find_map Stag_core_source.files ~f:(fun (name, contents) ->
-      Option.some_if
-        (String.equal file (Filename.concat core_dir name))
-        contents)
+  List.find_map
+    (Sources.embedded.prelude :: Sources.embedded.core)
+    ~f:(fun { path; contents } ->
+      Option.some_if (String.equal file path) contents)
 ;;
 
-let toplevels = lazy (prelude () @ [ core () ])
+let checkout_path file =
+  if String.equal file path
+  then Some checkout_prelude
+  else (
+    let%bind.Option name = String.chop_prefix file ~prefix:(core_dir ^ "/") in
+    let%map.Option _ = source file in
+    Filename.concat checkout_core_dir name)
+;;
+
+let toplevels =
+  lazy
+    (match parse Sources.embedded with
+     | Ok toplevels -> toplevels
+     | Error error ->
+       raise_s
+         [%message "Prelude failed to parse" (error : Source_file.Error.t)])
+;;

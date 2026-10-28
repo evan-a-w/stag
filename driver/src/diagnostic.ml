@@ -20,6 +20,15 @@ let create ?(notes = []) ?(whole_file = false) ~loc message =
   { loc; whole_file; message; notes }
 ;;
 
+let relocate t ~f =
+  { t with
+    loc = f t.loc
+  ; notes =
+      List.map t.notes ~f:(fun (note : Note.t) ->
+        { note with loc = f note.loc })
+  }
+;;
+
 let of_parse_error error =
   create
     ~loc:(Parser.Error.loc error)
