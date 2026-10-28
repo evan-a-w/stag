@@ -32,18 +32,13 @@ let located f (g : _ Located.t) (w : _ Located.t) =
 
 let name = located (same String.equal)
 
-let decl_path (g : Decl_path.t) (w : Decl_path.t) =
+let decl_path_desc (g : Decl_path.t) (w : Decl_path.t) =
   match g, w with
-  | Resolved name, Path path
-    when String.equal (Prelude_path.to_string_hum name) (Path.to_string path) ->
-    Some g
-  | Resolved name, Root path
-    when String.equal (Prelude_path.root_path name) (Path.to_string path) ->
-    Some g
+  | (Resolved _ | Root _), (Path _ | Root _) -> Some g
   | _ -> same Decl_path.equal g w
 ;;
 
-let decl_path = located decl_path
+let decl_path = located decl_path_desc
 
 let rec type_expr g w = located type_desc g w
 
@@ -158,7 +153,7 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
   match g, w with
   | Lit a, Lit b -> Option.some_if (Lit.equal a b) g
   | Var (p, t), Var (p', t') ->
-    let* p = same Decl_path.equal p p' in
+    let* p = decl_path_desc p p' in
     let+ t = option type_expr t t' in
     Expr.Var (p, t)
   | App (f, x), App (f', x') ->

@@ -25,7 +25,8 @@ let rec pattern_binders (p : Pattern.t) =
   | Exception p -> pattern_binders p
 ;;
 
-let map (t : Toplevel.t) ~f =
+let rec map' (t : Toplevel.t) ~modules ~f:f' =
+  let f namespace ~locals path = f' namespace ~modules ~locals path in
   let type_path = f Namespace.Type ~locals:String.Set.empty in
   let constructor = f Constructor ~locals:String.Set.empty in
   let field = f Field ~locals:String.Set.empty in
@@ -128,7 +129,7 @@ let map (t : Toplevel.t) ~f =
     in
     { e with txt }
   in
-  let rec toplevel (t : Toplevel.t) : Toplevel.t =
+  let toplevel (t : Toplevel.t) : Toplevel.t =
     let txt : Toplevel.desc =
       match t.txt with
       | Let (n, bs, ty, e) ->
@@ -149,7 +150,9 @@ let map (t : Toplevel.t) ~f =
         in
         Type { name; params; kind }
       | Exception (n, ts) -> Exception (n, List.map ts ~f:type_expr)
-      | Module (n, ts) -> Module (n, List.map ts ~f:toplevel)
+      | Module (n, ts) ->
+        Module
+          (n, List.map ts ~f:(map' ~modules:(modules @ [ n.txt ]) ~f:f'))
       | Module_splice (n, e, expansion) ->
         Module_splice (n, expr String.Set.empty e, expansion)
       | Include (e, expansion) -> Include (expr String.Set.empty e, expansion)
@@ -174,3 +177,5 @@ let map (t : Toplevel.t) ~f =
   in
   toplevel t
 ;;
+
+let map t ~f = map' t ~modules:[] ~f

@@ -2050,7 +2050,7 @@ let expansion_status splice generated =
           ~written:written.txt
           generated
           ~column:toplevel.loc.start.col
-          ~path:(fun namespace ~locals name ->
+          ~path:(fun namespace ~modules ~locals path ->
             Module_scope.path_from_splice
               splice
               generated
@@ -2059,8 +2059,9 @@ let expansion_status splice generated =
                | Constructor -> Constructor
                | Field -> Field
                | Value -> Value)
+              ~modules
               ~locals
-              name) )
+              path) )
   | _ -> None
 ;;
 
