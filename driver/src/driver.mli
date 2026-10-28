@@ -14,10 +14,12 @@ type t
 (** Typechecks [program], running its toplevel splices as they are reached.
     All evaluation at compile time shares [limits], unlimited by default.
     Prims print to [output], stdout by default, at compile time and when
-    evaluated. *)
+    evaluated. The program sees [prelude], by default the embedded one
+    ([Prelude.toplevels]). *)
 val check
   :  ?limits:Limits.t
   -> ?output:(string -> unit)
+  -> ?prelude:Syntax.Toplevel.t list
   -> Syntax.Program.t
   -> (t, Typecheck_error.t) Result.t
 
@@ -27,6 +29,7 @@ val check
 val check_files
   :  ?limits:Limits.t
   -> ?output:(string -> unit)
+  -> ?prelude:Syntax.Toplevel.t list
   -> Source_file.t list
   -> (t, Error.t) Result.t
 
@@ -44,7 +47,16 @@ end
 val check_modules
   :  ?limits:Limits.t
   -> ?output:(string -> unit)
+  -> ?prelude:Syntax.Toplevel.t list
   -> Module_group.t list
+  -> (t, Typecheck_error.t) Result.t
+
+(** Checks [prelude] (eg. [Prelude.parse] of sources being edited) as
+    [Typecheck.check_prelude] does. Its toplevels are not evaluated. *)
+val check_prelude
+  :  ?limits:Limits.t
+  -> ?output:(string -> unit)
+  -> Syntax.Toplevel.t list
   -> (t, Typecheck_error.t) Result.t
 
 val checked : t -> Typecheck.Checked.t

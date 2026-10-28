@@ -6,8 +6,12 @@ let canonical path =
     ~default:path
 ;;
 
-let read_files paths =
+let dedup paths =
   List.stable_dedup paths ~compare:(Comparable.lift String.compare ~f:canonical)
+;;
+
+let read_files paths =
+  dedup paths
   |> List.map ~f:(fun path ->
     match In_channel.read_all path with
     | contents -> { Source_file.path; contents }
@@ -16,13 +20,32 @@ let read_files paths =
       exit 2)
 ;;
 
+(* Files under the current directory, eg. the prelude's sources in a
+   checkout, which are absolute, are named relative to it. *)
+let relative_loc =
+  let cwd = lazy (Sys_unix.getcwd () ^ "/") in
+  fun (loc : Loc.t) ->
+    match String.chop_prefix loc.file ~prefix:(force cwd) with
+    | Some file -> { loc with file }
+    | None -> loc
+;;
+
 let report ?warning files diagnostic =
   let contents path =
-    List.find_map files ~f:(fun (file : Source_file.t) ->
-      Option.some_if (String.equal file.path path) file.contents)
+    match
+      List.find_map files ~f:(fun (file : Source_file.t) ->
+        Option.some_if (String.equal file.path path) file.contents)
+    with
+    | Some contents -> Some contents
+    | None -> Option.try_with (fun () -> In_channel.read_all path)
   in
   Out_channel.flush stdout;
-  eprintf "%s%!" (Diagnostic.to_string_hum ~contents ?warning diagnostic)
+  eprintf
+    "%s%!"
+    (Diagnostic.to_string_hum
+       ~contents
+       ?warning
+       (Diagnostic.relocate diagnostic ~f:relative_loc))
 ;;
 
 let report_stale ?warning files expansions =
@@ -30,8 +53,31 @@ let report_stale ?warning files expansions =
     report ?warning files (Inline_expansion.diagnostic expansion))
 ;;
 
-let check ?output ~limits files =
-  match Driver.check_files ?output ~limits files with
+(* The prelude a program sees: of the sources of the checkout its files are
+   all in, if any (see [Stdlib_checkout.prelude]), else the embedded one. *)
+let program_prelude paths =
+  let checkouts =
+    List.map paths ~f:(fun path ->
+      Stdlib_checkout.find (Filename.dirname (canonical path)))
+  in
+  match checkouts with
+  | Some checkout :: rest
+    when List.for_all rest ~f:(function
+           | Some other ->
+             String.equal
+               (Stdlib_checkout.root other)
+               (Stdlib_checkout.root checkout)
+           | None -> false) ->
+    (match Stdlib_checkout.prelude checkout with
+     | Ok prelude -> Some prelude
+     | Error diagnostic ->
+       report [] diagnostic;
+       exit 1)
+  | _ -> None
+;;
+
+let check ?output ?prelude ~limits files =
+  match Driver.check_files ?output ?prelude ~limits files with
   | Ok driver -> driver
   | Error error ->
     report files (Diagnostic.of_driver_error error);
@@ -100,17 +146,81 @@ let limits_readme ~phases =
   sprintf "Limits apply to each phase of evaluation on its own: %s." phases
 ;;
 
+(* The sources of the prelude among [paths] are checked as the prelude of
+   their checkout, then the others as a program that sees it. *)
+let check_with_prelude_sources ~limits ~sources ~program =
+  let checkout = snd (List.hd_exn sources) in
+  List.iter sources ~f:(fun (path, other) ->
+    if
+      not
+        (String.equal
+           (Stdlib_checkout.root other)
+           (Stdlib_checkout.root checkout))
+    then (
+      eprintf
+        "Error: %s and %s are sources of the preludes of different checkouts, \
+         which are not checked together\n\
+         %!"
+        (fst (List.hd_exn sources))
+        path;
+      exit 1));
+  match Stdlib_checkout.check ~limits checkout with
+  | Error diagnostic ->
+    report [] diagnostic;
+    exit 1
+  | Ok { prelude; driver } ->
+    report_stale ~warning:true [] (Inline_expansion.stale driver);
+    let signature = (Driver.checked driver).signature in
+    List.iter sources ~f:(fun (path, _) ->
+      match
+        Stdlib_checkout.signature_of_source checkout signature (canonical path)
+      with
+      | Ok signature ->
+        print_string (Signature.to_string_hum ~of_prelude:true signature)
+      | Error diagnostic ->
+        report [] diagnostic;
+        exit 1);
+    if not (List.is_empty program)
+    then (
+      let files = read_files program in
+      let driver = check ~prelude ~limits files in
+      report_stale ~warning:true files (Inline_expansion.stale driver);
+      print_string (Signature.to_string_hum (Driver.checked driver).signature))
+;;
+
 let check_command =
   Command.basic
     ~summary:"Typecheck the program of the files and print its signature"
-    ~readme:(fun () -> limits_readme ~phases:"compile time and evaluation")
+    ~readme:(fun () ->
+      limits_readme ~phases:"compile time and evaluation"
+      ^ sprintf
+          "\n\n\
+           Files of the prelude in a stag checkout (a directory with a %s \
+           file), %s and %s/*.stag, are checked as the prelude, and their \
+           signatures printed, then the other files as a program that sees it. \
+           A program in a checkout sees the prelude of its sources, not the \
+           embedded one."
+          Stdlib_checkout.marker_file
+          Stdlib_checkout.prelude_file
+          Stdlib_checkout.core_dir)
     (let%map_open.Command paths = files_param
      and limits = limits_param () in
      fun () ->
-       let files = read_files paths in
-       let driver = check ~limits files in
-       report_stale ~warning:true files (Inline_expansion.stale driver);
-       print_string (Signature.to_string_hum (Driver.checked driver).signature))
+       let sources, program =
+         List.partition_map (dedup paths) ~f:(fun path ->
+           match Stdlib_checkout.of_source (canonical path) with
+           | Some checkout -> First (path, checkout)
+           | None -> Second path)
+       in
+       match sources with
+       | _ :: _ -> check_with_prelude_sources ~limits ~sources ~program
+       | [] ->
+         let prelude = program_prelude paths in
+         let files = read_files paths in
+         let driver = check ?prelude ~limits files in
+         report_stale ~warning:true files (Inline_expansion.stale driver);
+         print_string
+           (Signature.to_string_hum (Driver.checked driver).signature))
 ;;
 
 let run_command =
@@ -120,8 +230,9 @@ let run_command =
     (let%map_open.Command paths = files_param
      and limits = limits_param () in
      fun () ->
+       let prelude = program_prelude paths in
        let files = read_files paths in
-       let driver = check ~limits files in
+       let driver = check ?prelude ~limits files in
        report_stale ~warning:true files (Inline_expansion.stale driver);
        eval ~limits files driver)
 ;;
@@ -160,7 +271,7 @@ let test_command =
           eprintf "Error: -print-corrected takes one FILE\n%!";
           exit 2
         | _ -> ());
-       let driver = check ~limits files in
+       let driver = check ?prelude:(program_prelude paths) ~limits files in
        let expansions = Inline_expansion.stale driver in
        report_stale files expansions;
        let evaluated =
@@ -278,7 +389,9 @@ let bench_command ~fake_clock =
      in
      fun () ->
        let files = read_files paths in
-       let driver = check ~output:ignore ~limits files in
+       let driver =
+         check ~output:ignore ?prelude:(program_prelude paths) ~limits files
+       in
        let benches =
          if phases
          then Phase_bench.benches (Phase_bench.parse_files files)

@@ -21,3 +21,6 @@ module Prim = Stag_ir.Prim
 module Intrinsic = Stag_ir.Intrinsic
 module Expansion = Stag_typecheck.Expansion
 module Antiquote = Stag_syntax.Antiquote
+module Stdlib_checkout = Stag_build.Stdlib_checkout
+module Prelude = Stag_eval.Prelude
+module Prelude_path = Stag_types.Prelude_path

@@ -87,13 +87,21 @@ end
 type t =
   { fresh : Fresh.t
   ; interpreter : Treewalk.t
+  ; prelude : Syntax.Toplevel.t list Lazy.t
   }
 
 let create
       ?(interpreter = Treewalk.create ~stamps:(Stamp_counter.create ()) ())
+      ?prelude
       ()
   =
-  { fresh = Fresh.create (); interpreter }
+  { fresh = Fresh.create ()
+  ; interpreter
+  ; prelude =
+      (match prelude with
+       | Some prelude -> Lazy.from_val prelude
+       | None -> Prelude.toplevels)
+  }
 ;;
 
 let lift ~loc result =
@@ -2218,11 +2226,18 @@ let builtin_names =
     decl.name.txt)
 ;;
 
-let no_splices _ = raise_s [%message "The prelude has no declaration splices"]
+let no_splices splice : (_, Module_scope.Force_error.t) Result.t =
+  Error
+    (Failed
+       (Typecheck_error.create
+          ~loc:(Module_scope.Splice.loc splice)
+          (Declaration_splice_failed
+             (Error.of_string "the prelude cannot have declaration splices"))))
+;;
 
 (* The prelude, outside the program's root module, sees the builtin types as
    the program does. *)
-let add_prelude (program : Program_env.t) =
+let add_prelude (program : Program_env.t) toplevels =
   let builtins =
     Module_scope.create_root
       ~types:builtin_names
@@ -2230,6 +2245,7 @@ let add_prelude (program : Program_env.t) =
       ~force:no_splices
       ()
   in
+  List.iter Type_env.builtins ~f:(Type_env.declare program.type_env builtins);
   let prelude =
     Module_scope.create_root
       ~enclosing:builtins
@@ -2239,10 +2255,11 @@ let add_prelude (program : Program_env.t) =
       ~force:no_splices
       ()
   in
-  match Module_scope.add prelude (force Prelude.toplevels) with
-  | Ok () -> prelude
-  | Error error ->
-    raise_s [%message "The prelude is invalid" (error : Typecheck_error.t)]
+  let%map.Result () =
+    Module_scope.add prelude toplevels
+    |> Result.map_error ~f:(Module_scope.within prelude)
+  in
+  prelude
 ;;
 
 let rec signature (program_env : Program_env.t) module_ =
@@ -2298,37 +2315,40 @@ let program_env t interpreter =
 
 (* The program's root module, within the prelude. *)
 let root t program_env ~enclosing =
-  let root =
-    Module_scope.create_root
-      ~enclosing
-      ~types:builtin_names
-      ~declare:(declare program_env ~in_prelude:false)
-      ~force:(generate t program_env)
-      ()
-  in
-  List.iter Type_env.builtins ~f:(Type_env.declare program_env.type_env root);
-  root
+  Module_scope.create_root
+    ~enclosing
+    ~types:builtin_names
+    ~declare:(declare program_env ~in_prelude:false)
+    ~force:(generate t program_env)
+    ()
 ;;
 
-let prelude_signature { fresh = t; interpreter } =
-  let program_env = program_env t interpreter in
-  let prelude = add_prelude program_env in
-  let (_ : Module_scope.t) = root t program_env ~enclosing:prelude in
-  match check_declarations t program_env prelude with
-  | Ok (_ : _ list) -> signature program_env prelude
+let prelude_and_root t program_env =
+  let%map.Result prelude = add_prelude program_env (force t.prelude) in
+  prelude, root t.fresh program_env ~enclosing:prelude
+;;
+
+let prelude_signature ({ fresh; interpreter; prelude = _ } as t) =
+  let program_env = program_env fresh interpreter in
+  match
+    let%bind.Result prelude, (_ : Module_scope.t) =
+      prelude_and_root t program_env
+    in
+    let%map.Result (_ : _ list) =
+      check_declarations fresh program_env prelude
+    in
+    signature program_env prelude
+  with
+  | Ok signature -> signature
   | Error error ->
     raise_s [%message "The prelude is invalid" (error : Typecheck_error.t)]
 ;;
 
-let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
-  : (Checked.t, Typecheck_error.t) Result.t
-  =
-  let program_env = program_env t interpreter in
-  let root = root t program_env ~enclosing:(add_prelude program_env) in
-  Result.map_error ~f:(Module_scope.within root)
+(* Checks [module_]'s declarations, then its expect tests and benches. *)
+let check_module t program_env module_ =
+  Result.map_error ~f:(Module_scope.within module_)
   @@
-  let%bind.Result () = Module_scope.add root program in
-  let%bind.Result deferred = check_declarations t program_env root in
+  let%bind.Result deferred = check_declarations t program_env module_ in
   let%map.Result checked =
     List.map deferred ~f:(fun (module_, (kind : Deferred.t), loc, generated) ->
       match kind with
@@ -2341,7 +2361,7 @@ let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
     |> Result.all
   in
   let expect_tests, benches = List.partition_map checked ~f:Fn.id in
-  { Checked.signature = signature program_env root
+  { Checked.signature = signature program_env module_
   ; program =
       { sccs = Queue.to_list program_env.sccs
       ; expect_tests
@@ -2349,6 +2369,22 @@ let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
       ; declaration_splices = Queue.to_list program_env.declaration_splices
       ; ident_info = program_env.ident_info
       }
-  ; expansions = expansions root
+  ; expansions = expansions module_
   }
+;;
+
+let typecheck ({ fresh; interpreter; prelude = _ } as t) ~program =
+  let program_env = program_env fresh interpreter in
+  let%bind.Result _, root = prelude_and_root t program_env in
+  let%bind.Result () =
+    Module_scope.add root program
+    |> Result.map_error ~f:(Module_scope.within root)
+  in
+  check_module fresh program_env root
+;;
+
+let check_prelude { fresh; interpreter; prelude } =
+  let program_env = program_env fresh interpreter in
+  let%bind.Result prelude = add_prelude program_env (force prelude) in
+  check_module fresh program_env prelude
 ;;

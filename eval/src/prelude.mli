@@ -10,9 +10,24 @@ open! Import
 (** The file of the prelude's locations. *)
 val path : string
 
-(** The contents of a file of the prelude's or [Core]'s locations (eg.
+module Sources : sig
+  type t =
+    { prelude : Source_file.t
+    ; core : Source_file.t list (** The modules of [Core], by name. *)
+    }
+
+  (** As embedded in stag, at the files of their locations: [path] and
+      [<core>/<x>.stag]. *)
+  val embedded : t
+end
+
+(** The module [Core] is located at its first file, or the prelude's if it
+    has none. *)
+val parse : Sources.t -> (Syntax.Toplevel.t list, Source_file.Error.t) Result.t
+
+(** The contents of a file of the embedded prelude's locations (eg.
     [<core>/list.stag]). *)
 val source : string -> string option
 
-(** Parsed once. *)
+(** Of [Sources.embedded], parsed once. *)
 val toplevels : Syntax.Toplevel.t list Lazy.t

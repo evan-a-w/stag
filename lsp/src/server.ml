@@ -29,6 +29,7 @@ end
 
 type t =
   { limits : Limits.t
+  ; stdlib : Stdlib_checkout.t option
   ; send : Jsonrpc.Packet.t -> unit
   ; documents : Document.t String.Table.t
   ; paths : string String.Table.t
@@ -51,8 +52,9 @@ let default_limits =
   }
 ;;
 
-let create ~limits ~send =
+let create ?stdlib ~limits ~send () =
   { limits
+  ; stdlib
   ; send
   ; documents = String.Table.create ()
   ; paths = String.Table.create ()
@@ -89,13 +91,26 @@ let document_of_path t path =
   Option.bind (Hashtbl.find t.paths path) ~f:(Hashtbl.find t.documents)
 ;;
 
+(* Symlinks resolved, as [Stdlib_checkout]'s are, so that a file has one
+   path. A file that does not exist is in its directory's canonical path. *)
+let canonical path =
+  let realpath path = Option.try_with (fun () -> Filename_unix.realpath path) in
+  match realpath path with
+  | Some path -> path
+  | None ->
+    Option.value_map
+      (realpath (Filename.dirname path))
+      ~default:path
+      ~f:(fun dir -> dir ^/ Filename.basename path)
+;;
+
 (* Documents without a file, eg. [untitled:Untitled-1], are named by a path
    of their own, eg. [/untitled_1.stag]. Only those of [file:] and
    [untitled:] are checked: others, eg. [git:], are views of files. *)
 let path_of_uri t uri =
   let string = Lsp.Uri.to_string uri in
   if String.is_prefix string ~prefix:"file:"
-  then Lsp.Uri.to_path uri, true
+  then canonical (Lsp.Uri.to_path uri), true
   else (
     let name =
       String.map
@@ -239,12 +254,21 @@ let cover t ~uri files =
 ;;
 
 let check t ~uri (document : Document.t) =
-  match Checker.check ~limits:t.limits ~contents:(contents t) document.path with
+  match
+    Checker.check
+      ?stdlib:t.stdlib
+      ~limits:t.limits
+      ~contents:(contents t)
+      document.path
+  with
   | exception exn ->
     eprintf "stag lsp: checking %s: %s\n%!" document.path (Exn.to_string exn)
   | result ->
     let generations =
-      Map.mapi result.diagnostics ~f:(fun ~key ~data:_ -> generation t key)
+      Set.union
+        (Map.key_set result.diagnostics)
+        (String.Set.of_list result.depends_on)
+      |> Set.to_map ~f:(generation t)
     in
     Map.iter_keys result.diagnostics ~f:(fun path ->
       Option.iter (Hashtbl.find t.paths path) ~f:(fun uri ->
@@ -559,7 +583,7 @@ let close_document t (text_document : Types.TextDocumentIdentifier.t) =
    check may be out of date. *)
 let files_changed t (changes : Types.FileEvent.t list) =
   List.iter changes ~f:(fun change ->
-    let path = Lsp.Uri.to_path change.uri in
+    let path = canonical (Lsp.Uri.to_path change.uri) in
     if Option.is_none (document_of_path t path)
     then Hashtbl.incr t.generations path);
   Hashtbl.iteri t.documents ~f:(fun ~key ~data:(document : Document.t) ->
@@ -611,7 +635,16 @@ let handle t (packet : Jsonrpc.Packet.t) =
 ;;
 
 let run ?(debounce = Time_ns.Span.of_int_ms 150) ~limits transport =
-  let t = create ~limits ~send:(Transport.write transport) in
+  let t =
+    create
+      ?stdlib:
+        (Option.try_with (fun () ->
+           Filename_unix.realpath Sys_unix.executable_name)
+         |> Option.bind ~f:Stdlib_checkout.of_executable)
+      ~limits
+      ~send:(Transport.write transport)
+      ()
+  in
   let rec loop () =
     match exit_code t with
     | Some code -> code

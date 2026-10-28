@@ -30,8 +30,8 @@ let parse project (target : Project.Target.t) =
   |> Result.map_error ~f:List.concat
 ;;
 
-let check_groups ?limits ?output groups =
-  Driver.check_modules ?limits ?output groups
+let check_groups ?limits ?output ?prelude groups =
+  Driver.check_modules ?limits ?output ?prelude groups
   |> Result.map_error ~f:(fun error -> [ Diagnostic.of_typecheck_error error ])
 ;;
 

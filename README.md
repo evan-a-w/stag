@@ -146,6 +146,23 @@ stag module `Core`, is the files of [core/](core) (each a submodule,
 `core/sexp.stag` is `Core.Sexp`), embedded by the library `stag_core_source`
 and added to the prelude by `Prelude`.
 
+In a stag checkout (a directory with a `stag-stdlib` file, like this one;
+`Stdlib_checkout`), `stag check`, `run`, `test`, `bench` and `stag lsp` use
+the prelude's sources rather than the embedded copy:
+
+- `prelude/prelude.stag` and `core/*.stag` are checked as the prelude, in
+  which `Core`'s modules see each other and prims. `stag check` on them
+  prints their signatures, names written as within the prelude, and checks
+  any other files given as a program that sees it.
+- Programs in the checkout (eg. `tests/`, `bench/`) see the prelude of its
+  sources, with the editor's unsaved buffers in `stag lsp`, so changes to
+  `Core` are seen without rebuilding (new prims still need one).
+- Copies in a `_build` directory are not checkouts, so dune's runs of
+  `tests/*.stag` use the embedded prelude.
+- Elsewhere, programs use the embedded prelude; `stag lsp` goes to
+  definitions of its names in the sources of the checkout it was built in,
+  if they are the same as the embedded ones.
+
 Tests: `dune build @runtest`, then `dune promote` to accept changes.
 
 - Runtime behaviour: stag expect tests in `tests/*.stag` (any new `.stag` file
@@ -162,6 +179,20 @@ Tests: `dune build @runtest`, then `dune promote` to accept changes.
 brackets and indentation for `.stag` files, and a client for the language
 server `stag lsp` (formatting falls back to `stag fmt` if it cannot start).
 `stag.serverPath` sets the stag executable (default: `stag` on PATH).
+
+To install it:
+
+```sh
+cd editors/vscode
+nix shell nixpkgs#nodejs_22 -c sh -c 'npm ci && npm run package'
+code --install-extension stag-*.vsix --force
+```
+
+Then either put `stag` on PATH (`dune build @install && dune install`) or
+set `stag.serverPath` to `_build/default/driver/bin/main.exe` in this
+checkout, so that `dune build` updates it. After rebuilding, run "stag:
+Restart Language Server" from the command palette. Rerun the commands above
+when `editors/vscode` changes.
 
 `stag lsp` speaks the Language Server Protocol over stdin and stdout
 (`lsp/`). It supports:
