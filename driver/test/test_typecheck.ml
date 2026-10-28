@@ -537,10 +537,11 @@ let wrong_type = .<let x = true in .~(.<add x 1>.)>.
          (App (Var (Bound (Local opaque/15)) : "'a -> 'b")
           (Var (Bound (Local u/14)) : 'a) : 'b))
         (in_
-         (Match (Lit (Int 1) : int)
-          (((Lit (Int 2) : int)
-            (App (Var (Bound (Local opaque/15)) : "int -> <'_c>{}")
-             (Lit (Int 1) : int) : <'_c>{})))
+         (Match (scrutinee (Lit (Int 1) : int))
+          (cases
+           (((Lit (Int 2) : int)
+             (App (Var (Bound (Local opaque/15)) : "int -> <'_c>{}")
+              (Lit (Int 1) : int) : <'_c>{}))))
           : <'_c>{}))
         : <'_c>{}))
       (error ("Match failure: no case matches the value 1" @ t.stag:3:32-58)))

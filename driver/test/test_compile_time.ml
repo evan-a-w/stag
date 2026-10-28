@@ -227,9 +227,11 @@ let x = .~(match B with A -> .<0>.)
     {|
     ((Splice_evaluation_failed
       (code
-       (Match (Construct ((type_name abc) (name B) (index 1)) () : abc)
-        (((Construct ((type_name abc) (name A) (index 0)) () : abc)
-          (Quote (Lit (Int 0) : int) : <int>{})))
+       (Match
+        (scrutinee (Construct ((type_name abc) (name B) (index 1)) () : abc))
+        (cases
+         (((Construct ((type_name abc) (name A) (index 0)) () : abc)
+           (Quote (Lit (Int 0) : int) : <int>{}))))
         : <int>{}))
       (error ("Match failure: no case matches the value B" @ t.stag:3:10-35)))
      @ t.stag:3:8-35)
@@ -435,17 +437,19 @@ let used = f (S (S Z))
     val code : <'a>{f : 'b -> 'a; m : 'b; ..'c}
     val used : int
     (f/4
-     (Match (Var (Bound (Local n/16)) : nat)
-      (((Construct ((type_name nat) (name Z) (index 0)) () : nat)
-        (Lit (Int 0) : int))
-       ((Construct ((type_name nat) (name S) (index 1)) ((Var m/17 : nat)) : nat)
-        (Toplevel_splice
-         (code
-          (Var (Bound (Toplevel code/5)) : "<int>{f : nat -> int; m : nat}"))
-         (expansion
-          (App (Var (Bound (Toplevel f/4)) : "nat -> int")
-           (Var (Bound (Local m/17)) : nat) : int))
-         : int)))
+     (Match (scrutinee (Var (Bound (Local n/16)) : nat))
+      (cases
+       (((Construct ((type_name nat) (name Z) (index 0)) () : nat)
+         (Lit (Int 0) : int))
+        ((Construct ((type_name nat) (name S) (index 1)) ((Var m/17 : nat)) :
+          nat)
+         (Toplevel_splice
+          (code
+           (Var (Bound (Toplevel code/5)) : "<int>{f : nat -> int; m : nat}"))
+          (expansion
+           (App (Var (Bound (Toplevel f/4)) : "nat -> int")
+            (Var (Bound (Local m/17)) : nat) : int))
+          : int))))
       : int))
     -- evaluated at compile time
     (code (Code (App (Var (Free f) : "'a -> 'b") (Var (Free m) : 'a) : 'b)))
@@ -598,17 +602,20 @@ end
       : "t * r"))
     (M.y/6
      (Match
-      (Toplevel_splice (code (Var (Bound (Toplevel code/4)) : "<t * r>{}"))
-       (expansion
-        (Tuple
-         ((Construct ((type_name t) (name B) (index 1)) () : t)
-          (Record ((((type_name r) (name a) (index 0)) (Lit (Int 1) : int))) : r))
-         : "t * r"))
-       : "t * r")
-      (((Tuple ((Construct ((type_name t) (name A) (index 0)) () : t) (Any : r))
-         : "t * r")
-        (Lit (Int 0) : int))
-       ((Any : "t * r") (Lit (Int 1) : int)))
+      (scrutinee
+       (Toplevel_splice (code (Var (Bound (Toplevel code/4)) : "<t * r>{}"))
+        (expansion
+         (Tuple
+          ((Construct ((type_name t) (name B) (index 1)) () : t)
+           (Record ((((type_name r) (name a) (index 0)) (Lit (Int 1) : int))) :
+            r))
+          : "t * r"))
+        : "t * r"))
+      (cases
+       (((Tuple ((Construct ((type_name t) (name A) (index 0)) () : t) (Any : r))
+          : "t * r")
+         (Lit (Int 0) : int))
+        ((Any : "t * r") (Lit (Int 1) : int))))
       : int))
     -- evaluated at compile time
     (code

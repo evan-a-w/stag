@@ -67,7 +67,7 @@ let captures t ~ident ~args ~body =
     | Tuple patterns | Construct (_, patterns) ->
       List.iter patterns ~f:def_pattern
     | Record fields -> List.iter fields ~f:(fun (_, p) -> def_pattern p)
-    | Poly_variant (_, Some pattern) | Exception pattern -> def_pattern pattern
+    | Poly_variant (_, Some pattern) -> def_pattern pattern
     | Poly_record { fields; rest } ->
       List.iter fields ~f:(fun (_, p) -> def_pattern p);
       (match rest with
@@ -96,9 +96,9 @@ let captures t ~ident ~args ~body =
          Map.iter providers ~f:(fun (Toplevel ident | Local ident) ->
            use ~depth ident))
     | Toplevel_splice { code = _; expansion } -> go ~depth expansion
-    | Match (expr, cases) ->
-      go ~depth expr;
-      List.iter cases ~f:(fun (pattern, body) ->
+    | Match { scrutinee; cases; exception_cases } ->
+      go ~depth scrutinee;
+      List.iter (cases @ exception_cases) ~f:(fun (pattern, body) ->
         def_pattern pattern;
         go ~depth body)
     | Quote expr -> go ~depth:(depth + 1) expr
@@ -227,10 +227,11 @@ let map_children ~depth (expr : Typed.Expr.t) ~f =
       let%bind expr = same expr in
       let%map fields = map_fields fields ~f:same in
       Typed.Expr.Desc.Record_update (expr, fields)
-    | Match (expr, cases) ->
-      let%bind expr = same expr in
-      let%map cases = map_fields cases ~f:same in
-      Typed.Expr.Desc.Match (expr, cases)
+    | Match { scrutinee; cases; exception_cases } ->
+      let%bind scrutinee = same scrutinee in
+      let%bind cases = map_fields cases ~f:same in
+      let%map exception_cases = map_fields exception_cases ~f:same in
+      Typed.Expr.Desc.Match { scrutinee; cases; exception_cases }
     | Poly_record fields ->
       let%map fields = map_fields fields ~f:same in
       Typed.Expr.Desc.Poly_record fields
@@ -288,7 +289,6 @@ let instantiate t (code : Typed.Expr.t) ~entry =
       | Record fields ->
         Record (List.map fields ~f:(fun (field, p) -> field, pattern p))
       | Poly_variant (tag, arg) -> Poly_variant (tag, Option.map arg ~f:pattern)
-      | Exception p -> Exception (pattern p)
       | Poly_record { fields; rest } ->
         let fields = List.map fields ~f:(fun (label, p) -> label, pattern p) in
         let rest : Typed.Pattern.Rest.t =
@@ -313,8 +313,13 @@ let instantiate t (code : Typed.Expr.t) ~entry =
         let ident = fresh let_.ident in
         Let { let_ with ident; args = List.map let_.args ~f:fresh }
       | Fun fun_ -> Fun { fun_ with args = List.map fun_.args ~f:fresh }
-      | Match (expr, cases) ->
-        Match (expr, List.map cases ~f:(fun (p, body) -> pattern p, body))
+      | Match { scrutinee; cases; exception_cases } ->
+        let rename = List.map ~f:(fun (p, body) -> pattern p, body) in
+        Match
+          { scrutinee
+          ; cases = rename cases
+          ; exception_cases = rename exception_cases
+          }
       | Splice { code; subs = Implicit providers } ->
         Splice { code; subs = Implicit (Map.map providers ~f:rename_binder) }
       | desc -> desc
@@ -373,7 +378,7 @@ let raise_exn ~loc exn =
 ;;
 
 let prelude_exception name : Typed.Constructor_ref.t =
-  { type_name = "exn"; name = Prelude_path.canonical name; index = 0 }
+  Typed.Constructor_ref.exception_ (Prelude_path.canonical name)
 ;;
 
 let prim_exception : Prim.Exception.t -> Value.t = function
@@ -406,7 +411,7 @@ let rec match_pattern env (pattern : Typed.Pattern.t) (value : Value.t) =
   | Construct (constructor, patterns), Construct (constructor', values) ->
     if
       constructor.index = constructor'.index
-      && ((not (String.equal constructor.type_name "exn"))
+      && ((not (Typed.Constructor_ref.is_exception constructor))
           || String.equal constructor.name constructor'.name)
     then match_all env pattern patterns values
     else Ok false
@@ -448,13 +453,7 @@ let rec match_pattern env (pattern : Typed.Pattern.t) (value : Value.t) =
           Env.set env ~ident ~value:(Poly_record rest)
         | Bind _ | Closed | Open -> ());
        matched)
-  | ( ( Lit _
-      | Tuple _
-      | Construct _
-      | Record _
-      | Poly_variant _
-      | Poly_record _
-      | Exception _ )
+  | ( (Lit _ | Tuple _ | Construct _ | Record _ | Poly_variant _ | Poly_record _)
     , _ ) -> pattern_mismatch pattern value
 
 and match_all env pattern patterns values =
@@ -641,15 +640,9 @@ and step t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
        Ok (Value.Record (record_type, record))
      | _ ->
        Or_error.error_s [%message "Update of a non-record" (value : Value.t)])
-  | Match (scrutinee, cases) ->
-    let value_cases, exception_cases =
-      List.partition_map cases ~f:(fun ((pattern : Typed.Pattern.t), body) ->
-        match pattern.desc with
-        | Exception pattern -> Second (pattern, body)
-        | _ -> First (pattern, body))
-    in
+  | Match { scrutinee; cases; exception_cases } ->
     (match eval' scrutinee with
-     | Ok value -> eval_match t ~env ~level value value_cases ~loc:expr.loc
+     | Ok value -> eval_match t ~env ~level value cases ~loc:expr.loc
      | Error error as result ->
        (match exception_cases, Runtime_error.raised error with
         | _ :: _, Some exn ->

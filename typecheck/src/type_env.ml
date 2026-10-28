@@ -79,8 +79,10 @@ let create fresh =
 ;;
 
 let builtins =
-  List.map [ "int"; "bool"; "string"; "char"; "unit"; "exn" ] ~f:(fun name ->
-    { Type_decl.name = Located.create name; params = []; kind = Abstract })
+  List.map
+    [ "int"; "bool"; "string"; "char"; "unit"; Type.exn_name ]
+    ~f:(fun name ->
+      { Type_decl.name = Located.create name; params = []; kind = Abstract })
 ;;
 
 let find_resolved t module_ namespace path ~loc ~unbound ~find =
@@ -428,13 +430,11 @@ let check_exception t name =
           arg
         |> Result.map ~f:fst)
     in
+    let { Typed.Constructor_ref.type_name; index; name = _ } =
+      Typed.Constructor_ref.exception_ name
+    in
     let checked =
-      { Constructor.name
-      ; type_name = "exn"
-      ; index = 0
-      ; args
-      ; result = Type.exn
-      }
+      { Constructor.name; type_name; index; args; result = Type.exn }
     in
     decl.checked <- Some checked;
     checked

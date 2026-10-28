@@ -59,6 +59,12 @@ module Constructor_ref : sig
     ; index : int
     }
   [@@deriving sexp_of]
+
+  (** The exception [name], a canonical name. Exceptions are of type [exn]
+      and share an index, so are told apart by name. *)
+  val exception_ : string -> t
+
+  val is_exception : t -> bool
 end
 
 (** A nominal record type: its canonical name, and its fields' canonical
@@ -109,9 +115,6 @@ module Pattern : sig
           { fields : (string * 'p) list
           ; rest : Rest.t
           }
-      | Exception of 'p
-      (** [exception p], at the top of a match case: matches what the
-          scrutinee raises. Its type is [exn]. *)
     [@@deriving sexp_of]
   end
 
@@ -175,7 +178,13 @@ module Expr : sig
       | Record_update of 'e * (Field_ref.t * 'e) list
       (** [{e with f = v; ...}], of [e]'s type but for the parameters only the
           updated fields' types contain. *)
-      | Match of 'e * (Pattern.t * 'e) list
+      | Match of
+          { scrutinee : 'e
+          ; cases : (Pattern.t * 'e) list
+          ; exception_cases : (Pattern.t * 'e) list
+            (** The cases [exception p], as [p]: they match what the scrutinee
+              raises. *)
+          }
       | Poly_record of (string * 'e) list
       | Poly_field of 'e * string
       | Poly_extend of (string * 'e) list * 'e

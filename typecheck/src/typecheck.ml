@@ -687,8 +687,7 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
             pattern_type t scope ~pattern ?expected
           in
           let%map.Result () =
-            Unify.unify_ty t ~ty1:ty ~ty2:pattern.Typed.Pattern.ty
-            |> lift ~loc:pattern.loc
+            Unify.unify_ty t ~ty1:ty ~ty2:pattern.ty |> lift ~loc:pattern.loc
           in
           pattern :: typed, bindings @ bindings')
     in
@@ -883,31 +882,6 @@ module Variant_match = struct
       Unify.unify_ty t ~ty1:(Fresh.variant t closed) ~ty2:scrutinee |> lift ~loc)
   ;;
 end
-
-(* A case's pattern, which may be [exception p], matching what the scrutinee
-   raises rather than its value. *)
-let case_pattern_type
-      t
-      (scope : Scope.t)
-      handled
-      ~(pattern : Source.Pattern.t)
-      ~scrutinee
-  =
-  match Source.Pattern.view pattern with
-  | Exception inner ->
-    let%bind.Result inner, bindings =
-      pattern_type t scope ~pattern:inner ~expected:Type.exn
-    in
-    let%map.Result () =
-      Unify.unify_ty t ~ty1:Type.exn ~ty2:inner.ty |> lift ~loc:inner.loc
-    in
-    ( { Typed.Pattern.desc = Exception inner
-      ; ty = Type.exn
-      ; loc = Source.Pattern.loc pattern
-      }
-    , bindings )
-  | _ -> Variant_match.pattern_type t scope handled ~pattern ~scrutinee
-;;
 
 (* [name] is the context entry the variable is provided as, if it becomes a
    free variable of the quote: a local's name or a toplevel's canonical name. *)
@@ -1438,59 +1412,73 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
              (List.map fields ~f:(fun (field, _, _) -> field_ref field))
              exprs ))
       record
-  | Match (expr, cases) ->
+  | Match { scrutinee = expr; cases; exception_cases } ->
     let%bind.Result scrutinee = expr_type t scope ~expr in
     let result = Scope.fresh_ty t scope in
-    let%bind.Result (_ : Variant_match.t), typed_cases =
+    (* A case of [pattern], typed with its [bindings], of type [ty]. *)
+    let case ~ty ((pattern : Typed.Pattern.t), bindings) body =
+      let%bind.Result () =
+        check_no_duplicates
+          (List.map bindings ~f:(fun (var : Pattern_var.t) ->
+             { Located.txt = var.ident.name; loc = var.loc }))
+          ~error:(fun name -> Duplicate_pattern_variable name)
+      in
+      let%bind.Result () =
+        Unify.unify_ty t ~ty1:ty ~ty2:pattern.Typed.Pattern.ty
+        |> lift ~loc:pattern.loc
+      in
+      let%map.Result body =
+        with_monomorphic_bindings
+          scope
+          (Pattern_var.bindings bindings)
+          ~f:(fun () ->
+            check_expr
+              t
+              scope
+              ~expr:body
+              ~ty:result
+              ?expected:(either_known result expected))
+      in
+      pattern, body
+    in
+    let%bind.Result () =
+      match cases, exception_cases with
+      | [], _ :: _ -> error ~loc Match_without_value_cases
+      | _ -> Ok ()
+    in
+    let%bind.Result (_ : Variant_match.t), cases =
       List.fold_result
         cases
         ~init:(Variant_match.empty, [])
         ~f:(fun (handled, typed_cases) (pattern, body) ->
-          let%bind.Result typed_pattern, bindings =
-            case_pattern_type t scope handled ~pattern ~scrutinee:scrutinee.ty
-          in
-          let%bind.Result () =
-            check_no_duplicates
-              (List.map bindings ~f:(fun (var : Pattern_var.t) ->
-                 { Located.txt = var.ident.name; loc = var.loc }))
-              ~error:(fun name -> Duplicate_pattern_variable name)
-          in
-          let%bind.Result () =
-            match typed_pattern.desc with
-            | Exception _ -> Ok ()
-            | _ ->
-              Unify.unify_ty t ~ty1:scrutinee.ty ~ty2:typed_pattern.ty
-              |> lift ~loc:typed_pattern.loc
-          in
-          let%map.Result body =
-            with_monomorphic_bindings
+          let%bind.Result typed_pattern =
+            Variant_match.pattern_type
+              t
               scope
-              (Pattern_var.bindings bindings)
-              ~f:(fun () ->
-                check_expr
-                  t
-                  scope
-                  ~expr:body
-                  ~ty:result
-                  ?expected:(either_known result expected))
+              handled
+              ~pattern
+              ~scrutinee:scrutinee.ty
           in
-          ( Variant_match.add_case handled typed_pattern
-          , (typed_pattern, body) :: typed_cases ))
+          let%map.Result ((pattern, _) as typed_case) =
+            case ~ty:scrutinee.ty typed_pattern body
+          in
+          Variant_match.add_case handled pattern, typed_case :: typed_cases)
     in
-    let typed_cases = List.rev typed_cases in
-    let value_cases =
-      List.filter typed_cases ~f:(fun ((pattern : Typed.Pattern.t), _) ->
-        match pattern.desc with
-        | Exception _ -> false
-        | _ -> true)
-    in
-    let%bind.Result () =
-      match typed_cases, value_cases with
-      | _ :: _, [] -> error ~loc Match_without_value_cases
-      | _ -> Ok ()
+    let cases = List.rev cases in
+    let%bind.Result exception_cases =
+      List.fold_result
+        exception_cases
+        ~init:[]
+        ~f:(fun typed_cases (pattern, body) ->
+          let%bind.Result typed_pattern =
+            pattern_type t scope ~pattern ~expected:Type.exn
+          in
+          let%map.Result typed_case = case ~ty:Type.exn typed_pattern body in
+          typed_case :: typed_cases)
+      |> Result.map ~f:List.rev
     in
     let%map.Result () =
-      match expr, value_cases with
+      match expr, cases with
       | Generated _, [] ->
         (* Its scrutinee was closed, unless of an empty nominal type, which
            may have been known only from an annotation. *)
@@ -1501,9 +1489,9 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
           scope
           ~scrutinee:scrutinee.ty
           ~loc
-          (List.map value_cases ~f:fst)
+          (List.map cases ~f:fst)
     in
-    node (Match (scrutinee, typed_cases)) result
+    node (Match { scrutinee; cases; exception_cases }) result
   | Poly_record fields ->
     let%map.Result fields = labelled_types t scope fields ~expected in
     node

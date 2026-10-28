@@ -232,7 +232,7 @@ let%expect_test "constructors are made as the typechecker resolves them" =
       List.concat_map (Driver.checked driver).program.sccs ~f:(fun scc ->
         List.concat_map scc.members ~f:(fun (member : Typed.Toplevel.t) ->
           match member.body.desc with
-          | Match (_, cases)
+          | Match { cases; _ }
             when String.is_prefix member.ident.name ~prefix:"Probe." ->
             List.map cases ~f:(fun ((pattern : Typed.Pattern.t), _) ->
               match pattern.desc with

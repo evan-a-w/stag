@@ -104,6 +104,14 @@ module Constructor_ref = struct
     ; index : int
     }
   [@@deriving sexp_of]
+
+  let exception_index = -1
+
+  let exception_ name =
+    { type_name = Type.exn_name; name; index = exception_index }
+  ;;
+
+  let is_exception t = t.index = exception_index
 end
 
 module Record_type = struct
@@ -154,7 +162,6 @@ module Pattern = struct
           { fields : (string * 'p) list
           ; rest : Rest.t
           }
-      | Exception of 'p
     [@@deriving sexp_of]
   end
 
@@ -170,7 +177,7 @@ module Pattern = struct
   let rec is_irrefutable t =
     match t.desc with
     | Any | Var _ -> true
-    | Lit _ | Construct _ | Record _ | Poly_variant _ | Exception _ -> false
+    | Lit _ | Construct _ | Record _ | Poly_variant _ -> false
     | Tuple patterns -> List.for_all patterns ~f:is_irrefutable
     | Poly_record { fields; rest = _ } ->
       List.for_all fields ~f:(fun (_, pattern) -> is_irrefutable pattern)
@@ -215,7 +222,11 @@ module Expr = struct
       | Record of (Field_ref.t * 'e) list
       | Field of 'e * Field_ref.t
       | Record_update of 'e * (Field_ref.t * 'e) list
-      | Match of 'e * (Pattern.t * 'e) list
+      | Match of
+          { scrutinee : 'e
+          ; cases : (Pattern.t * 'e) list
+          ; exception_cases : (Pattern.t * 'e) list [@sexp.list]
+          }
       | Poly_record of (string * 'e) list
       | Poly_field of 'e * string
       | Poly_extend of (string * 'e) list * 'e
@@ -257,7 +268,8 @@ module Expr = struct
     | Poly_record fields -> snds fields
     | Poly_extend (fields, e) | Poly_update (e, fields) -> e :: snds fields
     | Record_update (e, fields) -> e :: snds fields
-    | Match (e, cases) -> e :: snds cases
+    | Match { scrutinee; cases; exception_cases } ->
+      (scrutinee :: snds cases) @ snds exception_cases
   ;;
 
   let rec refers_to t ~f =

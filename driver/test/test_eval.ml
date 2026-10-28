@@ -370,9 +370,11 @@ let fails_at_expansion = .~(match C with A -> .<0>.)
     {|
     ((Splice_evaluation_failed
       (code
-       (Match (Construct ((type_name abc) (name C) (index 2)) () : abc)
-        (((Construct ((type_name abc) (name A) (index 0)) () : abc)
-          (Quote (Lit (Int 0) : int) : <int>{})))
+       (Match
+        (scrutinee (Construct ((type_name abc) (name C) (index 2)) () : abc))
+        (cases
+         (((Construct ((type_name abc) (name A) (index 0)) () : abc)
+           (Quote (Lit (Int 0) : int) : <int>{}))))
         : <int>{}))
       (error ("Match failure: no case matches the value C" @ t.stag:4:27-52)))
      @ t.stag:4:25-52)

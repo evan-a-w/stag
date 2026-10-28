@@ -138,16 +138,18 @@ let f x =
           (body (Lit (Int 1) : int))
           (in_
            (Match
-            (Tuple
-             ((Var (Bound (Local x/15)) : int) (Var (Bound (Local x/15)) : int))
-             : "int * int")
-            (((Var x/16 : "int * int")
-              (Let (ident g/18) (args (y/17)) (generalized true)
-               (body (Var (Bound (Local y/17)) : 'b))
-               (in_
-                (App (Var (Bound (Local g/18)) : "int * int -> int * int")
-                 (Var (Bound (Local x/16)) : "int * int") : "int * int"))
-               : "int * int")))
+            (scrutinee
+             (Tuple
+              ((Var (Bound (Local x/15)) : int) (Var (Bound (Local x/15)) : int))
+              : "int * int"))
+            (cases
+             (((Var x/16 : "int * int")
+               (Let (ident g/18) (args (y/17)) (generalized true)
+                (body (Var (Bound (Local y/17)) : 'b))
+                (in_
+                 (App (Var (Bound (Local g/18)) : "int * int -> int * int")
+                  (Var (Bound (Local x/16)) : "int * int") : "int * int"))
+                : "int * int"))))
             : "int * int"))
           : "int * int")))))
      (recursive false))

@@ -109,7 +109,6 @@ module Pattern = struct
              | Open -> Open
              | Bind ident -> Bind (Ident ident))
         }
-    | Exception pattern -> Exception (sub pattern)
   ;;
 
   let view = function
@@ -189,7 +188,11 @@ module Expr = struct
       | Record of (Field.t * t) list
       | Field of t * Field.t
       | Record_update of t * (Field.t * t) list
-      | Match of t * (Pattern.t * t) list
+      | Match of
+          { scrutinee : t
+          ; cases : (Pattern.t * t) list
+          ; exception_cases : (Pattern.t * t) list
+          }
       | Poly_record of (Syntax.Name.t * t) list
       | Poly_field of t * string
       | Poly_extend of (Syntax.Name.t * t) list * t
@@ -243,11 +246,14 @@ module Expr = struct
       Record_update
         ( sub expr
         , List.map fields' ~f:(fun (path, expr) -> Field.Path path, sub expr) )
-    | Match (expr, cases) ->
-      Match
-        ( sub expr
-        , List.map cases ~f:(fun (pattern, body) ->
-            Pattern.Syntax pattern, sub body) )
+    | Match (expr, arms) ->
+      let cases, exception_cases =
+        List.partition_map arms ~f:(fun ((pattern : Syntax.Pattern.t), body) ->
+          match pattern.txt with
+          | Exception pattern -> Second (Pattern.Syntax pattern, sub body)
+          | _ -> First (Pattern.Syntax pattern, sub body))
+      in
+      Match { scrutinee = sub expr; cases; exception_cases }
     | Poly_record fields' -> Poly_record (fields fields')
     | Poly_field (expr, label) -> Poly_field (sub expr, label.txt)
     | Poly_extend (fields', expr) -> Poly_extend (fields fields', sub expr)
@@ -305,11 +311,15 @@ module Expr = struct
         ( sub expr
         , List.map fields' ~f:(fun (field, expr) -> Field.Ref field, sub expr)
         )
-    | Match (expr, cases) ->
+    | Match { scrutinee; cases; exception_cases } ->
+      let generated =
+        List.map ~f:(fun (pattern, body) -> Pattern.Generated pattern, sub body)
+      in
       Match
-        ( sub expr
-        , List.map cases ~f:(fun (pattern, body) ->
-            Pattern.Generated pattern, sub body) )
+        { scrutinee = sub scrutinee
+        ; cases = generated cases
+        ; exception_cases = generated exception_cases
+        }
     | Poly_record fields' -> Poly_record (fields fields')
     | Poly_field (expr, label) -> Poly_field (sub expr, label)
     | Poly_extend (fields', expr) -> Poly_extend (fields fields', sub expr)

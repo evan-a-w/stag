@@ -367,8 +367,9 @@ let%expect_test "staging" =
     ((Not_in_scope a) @ t.stag:1:19-20)
     ((Splice_evaluation_failed
       (code
-       (Match (Lit (Int 1) : int)
-        (((Lit (Int 2) : int) (Quote (Lit (Int 1) : int) : <int>{}))) : <int>{}))
+       (Match (scrutinee (Lit (Int 1) : int))
+        (cases (((Lit (Int 2) : int) (Quote (Lit (Int 1) : int) : <int>{})))) :
+        <int>{}))
       (error ("Match failure: no case matches the value 1" @ t.stag:1:10-35)))
      @ t.stag:1:8-35)
     |}]

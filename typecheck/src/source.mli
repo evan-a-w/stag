@@ -61,6 +61,7 @@ module Pattern : sig
           ; rest : Rest.t
           }
       | Exception of t
+      (** Only written, and not at the top of a case, which is misplaced. *)
   end
 
   val view : t -> View.t
@@ -119,7 +120,12 @@ module Expr : sig
       | Record of (Field.t * t) list
       | Field of t * Field.t
       | Record_update of t * (Field.t * t) list
-      | Match of t * (Pattern.t * t) list
+      | Match of
+          { scrutinee : t
+          ; cases : (Pattern.t * t) list
+          ; exception_cases : (Pattern.t * t) list
+            (** The cases [exception p], as [p]. *)
+          }
       | Poly_record of (Syntax.Name.t * t) list
       | Poly_field of t * string
       | Poly_extend of (Syntax.Name.t * t) list * t
