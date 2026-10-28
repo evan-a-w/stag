@@ -68,8 +68,11 @@ and type_desc (g : Type_expr.desc) (w : Type_expr.desc) : Type_expr.desc option 
   | Variant r, Variant r' ->
     let+ r = row r r' in
     Type_expr.Variant r
-  | (Var _ | Con _ | Arrow _ | Tuple _ | Code _ | Record _ | Variant _), _ ->
-    None
+  | Splice e, Splice e' ->
+    let+ e = expr e e' in
+    Type_expr.Splice e
+  | (Var _ | Con _ | Arrow _ | Tuple _ | Code _ | Record _ | Variant _ | Splice _), _
+    -> None
 
 and row g w = located row_desc g w
 
@@ -95,11 +98,10 @@ and arg (g : Type_expr.arg) (w : Type_expr.arg) =
     let+ r = row r r' in
     Type_expr.Row r
   | (Ty _ | Row _), _ -> None
-;;
 
-let binding = pair name (option type_expr)
+and binding b b' = pair name (option type_expr) b b'
 
-let rec pattern g w = located pattern_desc g w
+and pattern g w = located pattern_desc g w
 
 and pattern_desc (g : Pattern.desc) (w : Pattern.desc) : Pattern.desc option =
   match g, w with
@@ -145,9 +147,8 @@ and pattern_desc (g : Pattern.desc) (w : Pattern.desc) : Pattern.desc option =
       | Poly_record _
       | Exception _ )
     , _ ) -> None
-;;
 
-let rec expr g w = located expr_desc g w
+and expr g w = located expr_desc g w
 
 and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
   let fields = list (pair decl_path expr) in
@@ -231,6 +232,9 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
   | Expect s, Expect s' ->
     let+ s = located (same String.equal) s s' in
     Expr.Expect s
+  | Struct_quote ts, Struct_quote ts' ->
+    let+ ts = toplevels ts ts' in
+    Expr.Struct_quote ts
   | ( ( Lit _
       | Var _
       | App _
@@ -251,11 +255,11 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
       | Poly_restrict _
       | Poly_update _
       | Poly_variant _
-      | Expect _ )
+      | Expect _
+      | Struct_quote _ )
     , _ ) -> None
-;;
 
-let type_decl
+and type_decl
       ({ name = n; params; kind } : Type_decl.t)
       ({ name = n'; params = params'; kind = kind' } : Type_decl.t)
   =
@@ -273,12 +277,14 @@ let type_decl
       let+ t = type_expr t t' in
       Type_decl.Kind.Alias t
     | Abstract, Abstract -> Some kind
-    | (Variant _ | Record _ | Alias _ | Abstract), _ -> None
+    | Splice e, Splice e' ->
+      let+ e = expr e e' in
+      Type_decl.Kind.Splice e
+    | (Variant _ | Record _ | Alias _ | Abstract | Splice _), _ -> None
   in
   { Type_decl.name = n; params; kind }
-;;
 
-let rec toplevel g w = located toplevel_desc g w
+and toplevel g w = located toplevel_desc g w
 
 and toplevel_desc (g : Toplevel.desc) (w : Toplevel.desc) =
   match g, w with

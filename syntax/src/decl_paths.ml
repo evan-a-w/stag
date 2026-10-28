@@ -42,6 +42,7 @@ let map (t : Toplevel.t) ~f =
         Code { inner = type_expr inner; context = row context }
       | Record r -> Record (row r)
       | Variant r -> Variant (row r)
+      | Splice e -> Splice (expr String.Set.empty e)
     in
     { t with txt }
   and row (r : Type_expr.row) : Type_expr.row =
@@ -51,9 +52,8 @@ let map (t : Toplevel.t) ~f =
   and arg : Type_expr.arg -> Type_expr.arg = function
     | Ty t -> Ty (type_expr t)
     | Row r -> Row (row r)
-  in
-  let binding (n, t) = n, Option.map t ~f:type_expr in
-  let rec pattern (p : Pattern.t) : Pattern.t =
+  and binding (n, t) = n, Option.map t ~f:type_expr
+  and pattern (p : Pattern.t) : Pattern.t =
     let txt : Pattern.desc =
       match p.txt with
       | Any | Var _ | Lit _ -> p.txt
@@ -68,8 +68,7 @@ let map (t : Toplevel.t) ~f =
       | Exception p -> Exception (pattern p)
     in
     { p with txt }
-  in
-  let rec expr locals (e : Expr.t) : Expr.t =
+  and expr locals (e : Expr.t) : Expr.t =
     let expr' = expr in
     let expr = expr locals in
     let fields = List.map ~f:(fun (p, value) -> field p, expr value) in
@@ -117,10 +116,10 @@ let map (t : Toplevel.t) ~f =
       | Poly_restrict (e, n) -> Poly_restrict (expr e, n)
       | Poly_update (e, fs) -> Poly_update (expr e, poly_fields fs)
       | Poly_variant (n, e) -> Poly_variant (n, Option.map e ~f:expr)
+      | Struct_quote ts -> Struct_quote (List.map ts ~f:toplevel)
     in
     { e with txt }
-  in
-  let rec toplevel (t : Toplevel.t) : Toplevel.t =
+  and toplevel (t : Toplevel.t) : Toplevel.t =
     let txt : Toplevel.desc =
       match t.txt with
       | Let (n, bs, ty, e) ->
@@ -138,6 +137,7 @@ let map (t : Toplevel.t) ~f =
           | Record fs -> Record (List.map fs ~f:(fun (n, t) -> n, type_expr t))
           | Alias t -> Alias (type_expr t)
           | Abstract -> Abstract
+          | Splice e -> Splice (expr String.Set.empty e)
         in
         Type { name; params; kind }
       | Exception (n, ts) -> Exception (n, List.map ts ~f:type_expr)

@@ -72,6 +72,7 @@ module Stag = struct
       | Code of {`inner : t; `context : Row.t}
       | Record of Row.t
       | Variant of Row.t
+      | Splice of Expr.t
 
     (* Labels are those of polymorphic records and variants, except in the
        context of a code type, whose entries are variables. *)
@@ -107,6 +108,7 @@ module Stag = struct
         | Record of list[string * Type_expr.t]
         | Alias of Type_expr.t
         | Abstract
+        | Splice of Expr.t
     end
 
     type t = {`name : string; `params : list[Param.t]; `kind : Kind.t}
@@ -165,6 +167,7 @@ module Stag = struct
       | Poly_update of t * list[string * t]
       | Poly_variant of string * option[t]
       | Expect of string
+      | Struct_quote of list[Toplevel.t]
 
     let var name = Var (Path.Name name, None)
     let construct name args = Construct (Path.Name name, args)

@@ -4,14 +4,28 @@ open Doc
 
 let path p = text (Path.to_string p)
 
+(* What printing depends on beyond the syntax. Declarations in struct quotes
+   are printed as those of a module. *)
+module Env = struct
+  type t =
+    { root_modules : String.Set.t
+    ; width : int
+    ; blank_between : Loc.t -> Loc.t -> bool
+    }
+
+  let create ?(width = 80) ?(root_modules = String.Set.empty) () =
+    { root_modules; width; blank_between = (fun _ _ -> false) }
+  ;;
+end
+
 let decl_path_txt ~root_modules : Decl_path.t -> string = function
   | Path p -> Path.to_string p
   | Root p -> "." ^ Path.to_string p
   | Resolved name -> Decl_path.resolved_source ~root_modules name
 ;;
 
-let decl_path roots (p : Decl_path.t Located.t) =
-  text (decl_path_txt ~root_modules:roots p.txt)
+let decl_path (roots : Env.t) (p : Decl_path.t Located.t) =
+  text (decl_path_txt ~root_modules:roots.root_modules p.txt)
 ;;
 
 let parens t = text "(" ^^ align t ^^ text ")"
@@ -103,164 +117,6 @@ let definition ?(record = false) ?(sep = " =") ?ending lhs rhs =
 
 let tyvar name = text ("'" ^ name)
 
-let rec type_expr roots ~prec (t : Type_expr.t) =
-  match t.txt with
-  | Var name -> tyvar name
-  | Con (p, []) -> decl_path roots p
-  | Con (p, args) ->
-    decl_path roots p
-    ^^ text "["
-    ^^ align
-         (group
-            (separate (text "," ^^ line) (List.map args ~f:(type_arg roots))))
-    ^^ text "]"
-  | Arrow _ ->
-    let rec arrows (t : Type_expr.t) =
-      match t.txt with
-      | Arrow (domain, codomain) -> domain :: arrows codomain
-      | _ -> [ t ]
-    in
-    let tys = arrows t in
-    paren_if
-      (prec > 0)
-      (group
-         (separate
-            (text " ->" ^^ line)
-            (List.mapi tys ~f:(fun i ty ->
-               type_expr
-                 roots
-                 ~prec:(if i = List.length tys - 1 then 0 else 1)
-                 ty))))
-  | Tuple [] -> text "()"
-  | Tuple [ t ] -> type_expr roots ~prec t
-  | Tuple tys ->
-    paren_if
-      (prec > 1)
-      (group
-         (separate
-            (text " *" ^^ line)
-            (List.map tys ~f:(type_expr roots ~prec:2))))
-  | Code { inner; context } ->
-    text "<"
-    ^^ type_expr roots ~prec:0 inner
-    ^^ text ">"
-    ^^ row roots ~label:Fn.id context
-  | Record r -> row roots ~label:(fun name -> "`" ^ name) r
-  | Variant r -> variant roots r
-
-(* A [{...}] argument is a row, so a type argument starting with a record type
-   is parenthesized. *)
-and type_arg roots : Type_expr.arg -> Doc.t = function
-  | Ty t ->
-    let doc = type_expr roots ~prec:0 t in
-    if starts_with_record t then parens doc else doc
-  | Row r -> row roots ~label:(fun name -> "`" ^ name) r
-
-(* Whether [t], printed at precedence 0, starts with a record type. *)
-and starts_with_record (t : Type_expr.t) =
-  match t.txt with
-  | Record _ -> true
-  | Arrow (first, _) | Tuple (first :: _) -> starts_with_record first
-  | Var _ | Con _ | Tuple [] | Code _ | Variant _ -> false
-
-and row_entries roots (r : Type_expr.row) =
-  match r.txt with
-  | Empty -> [], None
-  | Var name -> [], Some (text ("..'" ^ name.txt))
-  | Extend (name, t, rest) ->
-    let entries, tail = row_entries roots rest in
-    (name, t) :: entries, tail
-
-and row roots ~label r =
-  let entries, tail = row_entries roots r in
-  let entries =
-    List.map entries ~f:(fun ((name : Name.t), t) ->
-      definition ~sep:" :" (text (label name.txt)) (type_expr roots ~prec:0 t))
-  in
-  text "{"
-  ^^ align (group (separate (text ";" ^^ line) (entries @ Option.to_list tail)))
-  ^^ text "}"
-
-and variant roots r =
-  let entries, tail = row_entries roots r in
-  let tags =
-    List.map entries ~f:(fun ((tag : Name.t), (t : Type_expr.t)) ->
-      match t.txt with
-      | Con ({ txt = Root p; _ }, []) when Path.equal p (Path.name "unit") ->
-        text ("`" ^ tag.txt)
-      | _ ->
-        definition ~sep:" of" (text ("`" ^ tag.txt)) (type_expr roots ~prec:0 t))
-  in
-  let tags = separate (text " |" ^^ line) tags in
-  let body =
-    match entries, tail with
-    | _, None -> tags
-    | [], Some tail -> tail
-    | _ :: _, Some tail -> tags ^^ text ";" ^^ line ^^ tail
-  in
-  text "[" ^^ align (group body) ^^ text "]"
-;;
-
-let type_expr_doc roots = type_expr roots ~prec:0
-
-(* Patterns: [prec] 0 is a whole pattern, 1 a tuple's component, 2 a
-   constructor's argument. *)
-
-let rec pattern roots ~prec (p : Pattern.t) =
-  match p.txt with
-  | Any -> text "_"
-  | Var name -> text name
-  | Lit (Int n as l) when n < 0 -> paren_if (prec > 1) (lit l)
-  | Lit l -> lit l
-  | Tuple [] -> text "()"
-  | Tuple [ p ] -> pattern roots ~prec p
-  | Tuple ps ->
-    paren_if
-      (prec > 0)
-      (group
-         (separate (text "," ^^ line) (List.map ps ~f:(pattern roots ~prec:1))))
-  | Construct (c, []) -> decl_path roots c
-  | Construct (c, args) ->
-    let rec unwrap (p : Pattern.t) =
-      match p.txt with
-      | Tuple [ p ] -> unwrap p
-      | _ -> p
-    in
-    let args =
-      match List.map args ~f:unwrap with
-      | [ ({ txt = Tuple (_ :: _ :: _); _ } as arg) ] ->
-        parens (pattern roots ~prec:2 arg)
-      | [ arg ] -> pattern roots ~prec:2 arg
-      | args ->
-        parens
-          (group
-             (separate
-                (text "," ^^ line)
-                (List.map args ~f:(pattern roots ~prec:1))))
-    in
-    paren_if (prec > 1) (decl_path roots c ^^ text " " ^^ args)
-  | Poly_variant (tag, None) -> text ("`" ^ tag.txt)
-  | Poly_variant (tag, Some arg) ->
-    paren_if (prec > 1) (text ("`" ^ tag.txt ^ " ") ^^ pattern roots ~prec:2 arg)
-  | Record fields ->
-    braces
-      (List.map fields ~f:(fun (p, value) ->
-         definition (decl_path roots p) (pattern roots ~prec:1 value)))
-  | Poly_record { fields; rest } ->
-    let fields =
-      List.map fields ~f:(fun (label, value) ->
-        definition (text ("`" ^ label.txt)) (pattern roots ~prec:1 value))
-    in
-    (match rest with
-     | Closed -> braces fields
-     | Open -> braces ~trailing:false (fields @ [ text ".." ])
-     | Bind name -> braces ~trailing:false (fields @ [ text (".." ^ name.txt) ]))
-  | Exception p ->
-    paren_if (prec > 1) (text "exception " ^^ pattern roots ~prec:1 p)
-;;
-
-let pattern_doc roots = pattern roots ~prec:0
-
 (** How tightly an expression binds, loosest first: the expressions that may be
     written at each, without parentheses. *)
 module Level = struct
@@ -341,6 +197,7 @@ let level (e : Expr.t) : Level.t =
   | Construct _
   | Poly_variant _
   | Quote _
+  | Struct_quote _
   | Record _
   | Poly_record _
   | Poly_extend _
@@ -392,13 +249,195 @@ let is_record e =
   | _ -> false
 ;;
 
-let binding roots ((name : Name.t), annot) =
+let type_param (param : Type_decl.Param.t Located.t) =
+  match param.txt with
+  | Ty name -> tyvar name
+  | Row name -> text ("{..'" ^ name ^ "}")
+;;
+
+module Kind = struct
+  type t =
+    | Let
+    | Type
+    | Module_splice
+    | Include
+    | Other
+  [@@deriving equal]
+
+  let of_toplevel (t : Toplevel.t) =
+    match t.txt with
+    | Let _ -> Let
+    | Type _ | Exception _ -> Type
+    | Module_splice _ -> Module_splice
+    | Include _ -> Include
+    | Module _ | Expect_test _ | Bench _ -> Other
+  ;;
+end
+
+
+let rec type_expr roots ~prec (t : Type_expr.t) =
+  match t.txt with
+  | Var name -> tyvar name
+  | Con (p, []) -> decl_path roots p
+  | Con (p, args) ->
+    decl_path roots p
+    ^^ text "["
+    ^^ align
+         (group
+            (separate (text "," ^^ line) (List.map args ~f:(type_arg roots))))
+    ^^ text "]"
+  | Arrow _ ->
+    let rec arrows (t : Type_expr.t) =
+      match t.txt with
+      | Arrow (domain, codomain) -> domain :: arrows codomain
+      | _ -> [ t ]
+    in
+    let tys = arrows t in
+    paren_if
+      (prec > 0)
+      (group
+         (separate
+            (text " ->" ^^ line)
+            (List.mapi tys ~f:(fun i ty ->
+               type_expr
+                 roots
+                 ~prec:(if i = List.length tys - 1 then 0 else 1)
+                 ty))))
+  | Tuple [] -> text "()"
+  | Tuple [ t ] -> type_expr roots ~prec t
+  | Tuple tys ->
+    paren_if
+      (prec > 1)
+      (group
+         (separate
+            (text " *" ^^ line)
+            (List.map tys ~f:(type_expr roots ~prec:2))))
+  | Code { inner; context } ->
+    text "<"
+    ^^ type_expr roots ~prec:0 inner
+    ^^ text ">"
+    ^^ row roots ~label:Fn.id context
+  | Record r -> row roots ~label:(fun name -> "`" ^ name) r
+  | Variant r -> variant roots r
+  | Splice e -> spliced roots e
+
+(* A [{...}] argument is a row, so a type argument starting with a record type
+   is parenthesized. *)
+and type_arg roots : Type_expr.arg -> Doc.t = function
+  | Ty t ->
+    let doc = type_expr roots ~prec:0 t in
+    if starts_with_record t then parens doc else doc
+  | Row r -> row roots ~label:(fun name -> "`" ^ name) r
+
+(* Whether [t], printed at precedence 0, starts with a record type. *)
+and starts_with_record (t : Type_expr.t) =
+  match t.txt with
+  | Record _ -> true
+  | Arrow (first, _) | Tuple (first :: _) -> starts_with_record first
+  | Var _ | Con _ | Tuple [] | Code _ | Variant _ | Splice _ -> false
+
+and row_entries roots (r : Type_expr.row) =
+  match r.txt with
+  | Empty -> [], None
+  | Var name -> [], Some (text ("..'" ^ name.txt))
+  | Extend (name, t, rest) ->
+    let entries, tail = row_entries roots rest in
+    (name, t) :: entries, tail
+
+and row roots ~label r =
+  let entries, tail = row_entries roots r in
+  let entries =
+    List.map entries ~f:(fun ((name : Name.t), t) ->
+      definition ~sep:" :" (text (label name.txt)) (type_expr roots ~prec:0 t))
+  in
+  text "{"
+  ^^ align (group (separate (text ";" ^^ line) (entries @ Option.to_list tail)))
+  ^^ text "}"
+
+and variant roots r =
+  let entries, tail = row_entries roots r in
+  let tags =
+    List.map entries ~f:(fun ((tag : Name.t), (t : Type_expr.t)) ->
+      match t.txt with
+      | Con ({ txt = Root p; _ }, []) when Path.equal p (Path.name "unit") ->
+        text ("`" ^ tag.txt)
+      | _ ->
+        definition ~sep:" of" (text ("`" ^ tag.txt)) (type_expr roots ~prec:0 t))
+  in
+  let tags = separate (text " |" ^^ line) tags in
+  let body =
+    match entries, tail with
+    | _, None -> tags
+    | [], Some tail -> tail
+    | _ :: _, Some tail -> tags ^^ text ";" ^^ line ^^ tail
+  in
+  text "[" ^^ align (group body) ^^ text "]"
+
+and type_expr_doc roots t = type_expr roots ~prec:0 t
+
+(* Patterns: [prec] 0 is a whole pattern, 1 a tuple's component, 2 a
+   constructor's argument. *)
+and pattern roots ~prec (p : Pattern.t) =
+  match p.txt with
+  | Any -> text "_"
+  | Var name -> text name
+  | Lit (Int n as l) when n < 0 -> paren_if (prec > 1) (lit l)
+  | Lit l -> lit l
+  | Tuple [] -> text "()"
+  | Tuple [ p ] -> pattern roots ~prec p
+  | Tuple ps ->
+    paren_if
+      (prec > 0)
+      (group
+         (separate (text "," ^^ line) (List.map ps ~f:(pattern roots ~prec:1))))
+  | Construct (c, []) -> decl_path roots c
+  | Construct (c, args) ->
+    let rec unwrap (p : Pattern.t) =
+      match p.txt with
+      | Tuple [ p ] -> unwrap p
+      | _ -> p
+    in
+    let args =
+      match List.map args ~f:unwrap with
+      | [ ({ txt = Tuple (_ :: _ :: _); _ } as arg) ] ->
+        parens (pattern roots ~prec:2 arg)
+      | [ arg ] -> pattern roots ~prec:2 arg
+      | args ->
+        parens
+          (group
+             (separate
+                (text "," ^^ line)
+                (List.map args ~f:(pattern roots ~prec:1))))
+    in
+    paren_if (prec > 1) (decl_path roots c ^^ text " " ^^ args)
+  | Poly_variant (tag, None) -> text ("`" ^ tag.txt)
+  | Poly_variant (tag, Some arg) ->
+    paren_if (prec > 1) (text ("`" ^ tag.txt ^ " ") ^^ pattern roots ~prec:2 arg)
+  | Record fields ->
+    braces
+      (List.map fields ~f:(fun (p, value) ->
+         definition (decl_path roots p) (pattern roots ~prec:1 value)))
+  | Poly_record { fields; rest } ->
+    let fields =
+      List.map fields ~f:(fun (label, value) ->
+        definition (text ("`" ^ label.txt)) (pattern roots ~prec:1 value))
+    in
+    (match rest with
+     | Closed -> braces fields
+     | Open -> braces ~trailing:false (fields @ [ text ".." ])
+     | Bind name -> braces ~trailing:false (fields @ [ text (".." ^ name.txt) ]))
+  | Exception p ->
+    paren_if (prec > 1) (text "exception " ^^ pattern roots ~prec:1 p)
+
+and pattern_doc roots p = pattern roots ~prec:0 p
+
+
+and binding roots ((name : Name.t), annot) =
   match annot with
   | None -> text name.txt
   | Some t -> parens (text (name.txt ^ " : ") ^^ type_expr_doc roots t)
-;;
 
-let let_lhs roots keyword (name : Name.t) params annot =
+and let_lhs roots keyword (name : Name.t) params annot =
   let annot =
     match annot with
     | None -> empty
@@ -410,9 +449,8 @@ let let_lhs roots keyword (name : Name.t) params annot =
           4
           (concat (List.map params ~f:(fun p -> line ^^ binding roots p))
            ^^ annot))
-;;
 
-let rec expr roots ?(parenthesize = false) (ctx : Ctx.t) e =
+and expr roots ?(parenthesize = false) (ctx : Ctx.t) e =
   let e = unwrap e in
   if parenthesize || (not (bare_at ctx.level e)) || takes_after ctx e
   then parens (flat roots e)
@@ -483,10 +521,10 @@ and bare roots (ctx : Ctx.t) (e : Expr.t) =
   | Tuple (_ :: _ :: _ as es), _ -> parens (tuple_items roots es)
   | Tuple _, _ -> text "()"
   | Lit l, _ -> lit l
-  | Var (p, None), _ -> text (decl_path_txt ~root_modules:roots p)
+  | Var (p, None), _ -> text (decl_path_txt ~root_modules:roots.root_modules p)
   | Var (p, Some t), _ ->
     parens
-      (text (decl_path_txt ~root_modules:roots p ^ " : ")
+      (text (decl_path_txt ~root_modules:roots.root_modules p ^ " : ")
        ^^ type_expr_doc roots t)
   | App _, _ ->
     let rec spine (e : Expr.t) args =
@@ -533,6 +571,12 @@ and bare roots (ctx : Ctx.t) (e : Expr.t) =
   | Quote e, _ ->
     group
       (text ".<" ^^ nest 2 (line ^^ flat roots (unwrap e)) ^^ line ^^ text ">.")
+  | Struct_quote [], _ -> text ".< struct end >."
+  | Struct_quote ts, _ ->
+    text ".< struct"
+    ^^ nest 2 (hardline ^^ toplevels roots ~indent:2 ts)
+    ^^ hardline
+    ^^ text "end >."
   | Field (record, p), _ ->
     let field =
       match p.txt with
@@ -649,17 +693,10 @@ and poly_fields roots ?(last_after = After.Nothing) fields =
   List.mapi fields ~f:(fun i ((label : Name.t), value) ->
     let after = if i = last then last_after else Nothing in
     field roots ~after (text ("`" ^ label.txt)) value)
-;;
 
-let expr_doc roots = expr roots Ctx.top
+and expr_doc roots e = expr roots Ctx.top e
 
-let type_param (param : Type_decl.Param.t Located.t) =
-  match param.txt with
-  | Ty name -> tyvar name
-  | Row name -> text ("{..'" ^ name ^ "}")
-;;
-
-let constructor_decl roots ((name : Name.t), args) =
+and constructor_decl roots ((name : Name.t), args) =
   match args with
   | [] -> text name.txt
   | args ->
@@ -669,9 +706,8 @@ let constructor_decl roots ((name : Name.t), args) =
             (separate
                (text " *" ^^ line)
                (List.map args ~f:(type_expr roots ~prec:2))))
-;;
 
-let type_decl roots ({ name; params; kind } : Type_decl.t) =
+and type_decl roots ({ name; params; kind } : Type_decl.t) =
   let lhs =
     text ("type " ^ name.txt)
     ^^
@@ -686,6 +722,7 @@ let type_decl roots ({ name; params; kind } : Type_decl.t) =
   match kind with
   | Abstract -> lhs
   | Alias t -> definition lhs (type_expr_doc roots t)
+  | Splice e -> lhs ^^ text " = " ^^ spliced roots e
   | Variant [] -> lhs ^^ text " = |"
   | Variant constructors ->
     group
@@ -704,28 +741,8 @@ let type_decl roots ({ name; params; kind } : Type_decl.t) =
     ^^ braces
          (List.map fields ~f:(fun ((name : Name.t), t) ->
             definition ~sep:" :" (text name.txt) (type_expr_doc roots t)))
-;;
 
-module Kind = struct
-  type t =
-    | Let
-    | Type
-    | Module_splice
-    | Include
-    | Other
-  [@@deriving equal]
-
-  let of_toplevel (t : Toplevel.t) =
-    match t.txt with
-    | Let _ -> Let
-    | Type _ | Exception _ -> Type
-    | Module_splice _ -> Module_splice
-    | Include _ -> Include
-    | Module _ | Expect_test _ | Bench _ -> Other
-  ;;
-end
-
-let rec toplevel roots ~width ~indent ~blank_between (t : Toplevel.t) =
+and toplevel roots ~indent (t : Toplevel.t) =
   match t.txt with
   | Let (name, params, annot, rhs) ->
     definition
@@ -741,16 +758,14 @@ let rec toplevel roots ~width ~indent ~blank_between (t : Toplevel.t) =
     ^^ nest
          2
          (hardline
-          ^^ toplevels roots ~width ~indent:(indent + 2) ~blank_between members
+          ^^ toplevels roots ~indent:(indent + 2) members
          )
     ^^ hardline
     ^^ text "end"
   | Module_splice (name, e, expansion) ->
     splice_toplevel
       roots
-      ~width
       ~indent
-      ~blank_between
       ~keyword:"module"
       ~prefix:(" " ^ name.txt ^ " = ")
       e
@@ -758,9 +773,7 @@ let rec toplevel roots ~width ~indent ~blank_between (t : Toplevel.t) =
   | Include (e, expansion) ->
     splice_toplevel
       roots
-      ~width
       ~indent
-      ~blank_between
       ~keyword:"include"
       ~prefix:" "
       e
@@ -797,9 +810,7 @@ let rec toplevel roots ~width ~indent ~blank_between (t : Toplevel.t) =
 
 and splice_toplevel
       roots
-      ~width
       ~indent
-      ~blank_between
       ~keyword
       ~prefix
       e
@@ -818,18 +829,16 @@ and splice_toplevel
             hardline
             ^^ toplevels
                  roots
-                 ~width
                  ~indent:(indent + 2)
-                 ~blank_between
                  toplevels')
     ^^ hardline
     ^^ text "end%inline"
 
-and toplevels roots ~width ~indent ~blank_between ts =
-  let one_line doc = fits_flat ~width:(width - indent) doc in
+and toplevels (roots : Env.t) ~indent ts =
+  let one_line doc = fits_flat ~width:(roots.width - indent) doc in
   let docs =
     List.map ts ~f:(fun (t : Toplevel.t) ->
-      let doc = toplevel roots ~width ~indent ~blank_between t in
+      let doc = toplevel roots ~indent t in
       (Kind.of_toplevel t, one_line doc, t.loc), doc)
   in
   match docs with
@@ -848,31 +857,31 @@ and toplevels roots ~width ~indent ~blank_between ts =
           && one_line
           && Kind.equal prev_kind kind
           && (not (Kind.equal prev_kind Other))
-          && not (blank_between prev_loc loc)
+          && not (roots.blank_between prev_loc loc)
         in
         acc ^^ hardline ^^ (if compact then empty else hardline) ^^ doc)
 ;;
 
-let type_expr ?width ?(root_modules = String.Set.empty) t =
-  render ?width (type_expr_doc root_modules t)
+let env ?width ?root_modules () = Env.create ?width ?root_modules ()
+
+let type_expr ?width ?root_modules t =
+  render ?width (type_expr_doc (env ?width ?root_modules ()) t)
 ;;
 
-let pattern ?width ?(root_modules = String.Set.empty) p =
-  render ?width (pattern_doc root_modules p)
+let pattern ?width ?root_modules p =
+  render ?width (pattern_doc (env ?width ?root_modules ()) p)
 ;;
 
-let expr ?width ?(root_modules = String.Set.empty) e =
-  render ?width (expr_doc root_modules e)
+let expr ?width ?root_modules e =
+  render ?width (expr_doc (env ?width ?root_modules ()) e)
 ;;
 
-let toplevel ?(width = 80) ?(root_modules = String.Set.empty) t =
-  render
-    ~width
-    (toplevel root_modules ~width ~indent:0 ~blank_between:(fun _ _ -> false) t)
+let toplevel ?(width = 80) ?root_modules t =
+  render ~width (toplevel (env ~width ?root_modules ()) ~indent:0 t)
 ;;
 
 let program_doc ~width ~blank_between ts =
-  toplevels String.Set.empty ~width ~indent:0 ~blank_between ts
+  toplevels { (env ~width ()) with blank_between } ~indent:0 ts
 ;;
 
 let toplevels ?(width = 80) ~indent ts =
@@ -882,14 +891,7 @@ let toplevels ?(width = 80) ~indent ts =
     render
       ~width
       (text (String.make indent ' ')
-       ^^ nest
-            indent
-            (toplevels
-               String.Set.empty
-               ~width
-               ~indent
-               ~blank_between:(fun _ _ -> false)
-               ts))
+       ^^ nest indent (toplevels (env ~width ()) ~indent ts))
 ;;
 
 let program ?(width = 80) ts =

@@ -214,6 +214,11 @@ let uppercase_path t ~what =
     expected t what
 ;;
 
+(* Types hold splices of expressions, and expressions struct quotes of
+   declarations, which are parsed after them. *)
+let spliced_expr : (t -> Expr.t) ref = ref (fun _ -> assert false)
+let struct_toplevels : (t -> Toplevel.t list) ref = ref (fun _ -> assert false)
+
 (* Types *)
 
 let rec type_expr t : Type_expr.t =
@@ -334,6 +339,10 @@ and type_atom t : Type_expr.t =
         ~what:"a variable name"
     in
     since t start (Type_expr.Code { inner; context })
+  | Splice ->
+    advance t;
+    let e = !spliced_expr t in
+    since t start (Type_expr.Splice e)
   | _ -> expected t "a type"
 
 (** A zero width [Empty] row, before the current token. *)
@@ -920,6 +929,14 @@ and atom t : Expr.t =
           | _ -> None);
         expr_since t start e.txt)
   | Lbrace -> record t
+  | Quote_open when [%equal: Token.t] (peek_at t 1) Struct ->
+    advance t;
+    let struct_loc = loc t in
+    advance t;
+    let toplevels = !struct_toplevels t in
+    close t End ~opener:Struct ~open_loc:struct_loc;
+    close t Quote_close ~opener:Quote_open ~open_loc:start;
+    expr_since t start (Struct_quote toplevels)
   | Quote_open ->
     advance t;
     let e = expr t in
@@ -1046,6 +1063,9 @@ let constructor_decl t =
 
 let type_kind t : Type_decl.Kind.t =
   match peek t, peek_at t 1 with
+  | Splice, _ ->
+    advance t;
+    Splice (postfix t)
   | Uident _, Dot -> Alias (type_expr t)
   | (Bar | Uident _), _ ->
     let leading_bar = is t Bar in
@@ -1255,6 +1275,11 @@ let run_with_comments ~file source f =
 let run ~file source f =
   Result.map (run_with_comments ~file source f) ~f:(fun (result, _, _) ->
     result)
+;;
+
+let () =
+  spliced_expr := postfix;
+  struct_toplevels := toplevels
 ;;
 
 let program ~file source = run ~file source toplevels
