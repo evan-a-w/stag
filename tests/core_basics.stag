@@ -176,9 +176,6 @@ let%expect_test "Char" =
   Core.List.iter
     classify
     (Core.String.to_list "09azAZ_ \t\n\r\012\011~\127\128\255");
-  print_bool (Core.Char.is_between 'b' 'd' 'c');
-  print_bool (Core.Char.is_between 'b' 'd' 'a');
-  print_bool (Core.Char.is_between 'b' 'd' 'e');
   [%expect {|
     true
     false
@@ -204,7 +201,4 @@ let%expect_test "Char" =
     ("\127")
     ("\128")
     ("\255")
-    true
-    false
-    false
     |}]

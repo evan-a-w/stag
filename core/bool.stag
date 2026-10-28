@@ -17,3 +17,15 @@ let of_string s =
   | "true" -> Some true
   | "false" -> Some false
   | _ -> None
+
+let of_string_exn s =
+  match of_string s with
+  | Some b -> b
+  | None ->
+    raise
+      (Failure
+         (String.concat
+            ""
+            (Cons
+               ("Bool.of_string_exn: invalid bool \"",
+                Cons (s, Cons ("\"", Nil))))))

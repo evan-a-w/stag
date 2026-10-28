@@ -18,14 +18,10 @@ let concat = Prim.String.concat
 
 (* [init n f] is [f 0], ..., [f (n - 1)], calling [f] in that order; empty if
    [n] is not positive. *)
-let init n f =
-  let char i = of_char (f i) in
-  concat "" (List.init n char)
+let init n f = concat "" (List.init n (fun i -> of_char (f i)))
 
 (* [n] copies of [c]; empty if [n] is not positive. *)
-let make n c =
-  let const _ = c in
-  init n const
+let make n c = init n (fun _ -> c)
 
 let to_list s =
   let loop i acc =
@@ -38,16 +34,12 @@ let to_list s =
 let of_list chars = concat "" (List.map of_char chars)
 
 let fold_left f acc s =
-  let step acc i = f acc (get s i) in
-  Internal.fold_range step acc 0 (length s)
+  Internal.fold_range (fun acc i -> f acc (get s i)) acc 0 (length s)
 
 let iter (f : char -> unit) s =
-  let step _ i = f (get s i) in
-  Internal.fold_range step () 0 (length s)
+  Internal.fold_range (fun _ i -> f (get s i)) () 0 (length s)
 
-let map f s =
-  let char i = f (get s i) in
-  init (length s) char
+let map f s = init (length s) (fun i -> f (get s i))
 
 let lowercase s = map Char.lowercase s
 let uppercase s = map Char.uppercase s
@@ -63,9 +55,7 @@ let for_all f s =
   in
   loop 0
 
-let exists f s =
-  let not_f c = Bool.not (f c) in
-  Bool.not (for_all not_f s)
+let exists f s = Bool.not (for_all (fun c -> Bool.not (f c)) s)
 
 (* The index of the first [c] in [s]. *)
 let index s c =
@@ -90,6 +80,16 @@ let rindex s c =
       | false -> loop (Int.pred i)
   in
   loop (Int.pred (length s))
+
+let index_exn s c =
+  match index s c with
+  | Some i -> i
+  | None -> raise (Failure "String.index_exn: not found")
+
+let rindex_exn s c =
+  match rindex s c with
+  | Some i -> i
+  | None -> raise (Failure "String.rindex_exn: not found")
 
 let contains s c = Option.is_some (index s c)
 

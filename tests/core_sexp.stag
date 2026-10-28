@@ -275,15 +275,11 @@ let%expect_test "Parse_error fields" =
   match Core.Sexp.of_string "(a\n  b))" with
   | Ok t -> print_sexp t
   | Error e ->
-    print_endline e.Core.Sexp.Parse_error.message;
+    print_endline e.message;
     print_sexp
       (Core.Sexp.sexp_of_list
          Core.Sexp.sexp_of_int
-         (Cons
-            (e.Core.Sexp.Parse_error.offset,
-             Cons
-               (e.Core.Sexp.Parse_error.line,
-                Cons (e.Core.Sexp.Parse_error.col, Nil)))));
+         (Cons (e.offset, Cons (e.line, Cons (e.col, Nil)))));
     [%expect {|
     unexpected character: ')'
     (7 2 4)
@@ -518,8 +514,8 @@ let%expect_test "Of_sexp_error fields" =
   with
   | Ok l -> print_endline "ok"
   | Error e ->
-    print_endline e.Core.Sexp.Of_sexp_error.message;
-    print_sexp e.Core.Sexp.Of_sexp_error.sexp;
+    print_endline e.message;
+    print_sexp e.sexp;
     [%expect {|
     int_of_sexp: atom needed
     ()

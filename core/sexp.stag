@@ -90,6 +90,18 @@ let of_string s =
 let of_string_many s =
   Internal.Parser.between s 0 (Internal.Parser.Context.create false)
 
+exception Parse_error of Parse_error.t
+
+let of_string_exn s =
+  match of_string s with
+  | Ok t -> t
+  | Error e -> raise (Parse_error e)
+
+let of_string_many_exn s =
+  match of_string_many s with
+  | Ok ts -> ts
+  | Error e -> raise (Parse_error e)
+
 (* Why [*_of_sexp] failed, and the sexp it failed on, which may be within the
    one it was given. *)
 module Of_sexp_error = struct
@@ -100,6 +112,15 @@ module Of_sexp_error = struct
   let to_string e =
     String.append e.message (String.append ": " (Sexp.to_string e.sexp))
 end
+
+exception Of_sexp_error of Of_sexp_error.t
+
+(* [of_sexp t], raising [Of_sexp_error] if it fails, as in
+   [of_sexp_exn int_of_sexp t]. *)
+let of_sexp_exn of_sexp t =
+  match of_sexp t with
+  | Ok x -> x
+  | Error e -> raise (Of_sexp_error e)
 
 let sexp_of_unit (u : unit) = List Nil
 
@@ -223,12 +244,11 @@ let sexp_of_result sexp_of_ok sexp_of_error r =
   | Error e -> List (Cons (Atom "Error", Cons (sexp_of_error e, Nil)))
 
 let result_of_sexp ok_of_sexp error_of_sexp t =
-  let ok x = Ok x in
-  let error e = Error e in
   match t with
-  | List (Cons (Atom "Ok", Cons (x, Nil))) -> Result.map ok (ok_of_sexp x)
+  | List (Cons (Atom "Ok", Cons (x, Nil))) ->
+    Result.map (fun x -> Ok x) (ok_of_sexp x)
   | List (Cons (Atom "Error", Cons (e, Nil))) ->
-    Result.map error (error_of_sexp e)
+    Result.map (fun e -> Error e) (error_of_sexp e)
   | _ -> Internal.of_sexp_error "result_of_sexp: (Ok _) or (Error _) needed" t
 
 (* Helpers of the functions above. *)
@@ -245,7 +265,7 @@ module Internal = struct
       | ';' -> true
       | '"' -> true
       | '\\' -> true
-      | c -> Bool.not (Char.is_between '!' '~' c)
+      | c -> Bool.not (Char.Internal.is_between '!' '~' c)
     in
     let block_comment i =
       match (String.get s i, String.get s (Int.succ i)) with
@@ -627,8 +647,8 @@ module Internal = struct
         let from low = Int.sub (Char.code c) (Char.code low) in
         match
           (Char.is_digit c,
-           Char.is_between 'a' 'f' c,
-           Char.is_between 'A' 'F' c)
+           Char.Internal.is_between 'a' 'f' c,
+           Char.Internal.is_between 'A' 'F' c)
         with
         | true, _, _ -> Some (from '0')
         | _, true, _ -> Some (Int.add 10 (from 'a'))
@@ -694,8 +714,9 @@ module Internal = struct
         | '(' -> Result.bind (Context.open_ s i ctx) (between s next)
         | ')' -> Result.bind (Context.close s i ctx) (between s next)
         | '"' ->
-          let start_quoted ctx = quoted s next next Nil ctx in
-          Result.bind (Context.check_new s i ctx) start_quoted
+          Result.bind
+            (Context.check_new s i ctx)
+            (fun ctx -> quoted s next next Nil ctx)
         | c ->
           match is_blank c with
           | true -> between s next ctx

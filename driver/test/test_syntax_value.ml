@@ -108,14 +108,15 @@ let%expect_test "the prelude's signature" =
         val compare : bool -> bool -> int
         val to_string : bool -> string
         val of_string : string -> option[bool]
+        val of_string_exn : string -> bool
       end
       module Char : sig
         val equal : char -> char -> bool
         val code : char -> int
         val compare : char -> char -> int
         val of_code : int -> option[char]
+        val of_code_exn : int -> char
         val to_string : char -> string
-        val is_between : char -> char -> char -> bool
         val is_digit : char -> bool
         val is_lowercase : char -> bool
         val is_uppercase : char -> bool
@@ -125,6 +126,9 @@ let%expect_test "the prelude's signature" =
         val is_print : char -> bool
         val lowercase : char -> char
         val uppercase : char -> char
+        module Internal : sig
+          val is_between : char -> char -> char -> bool
+        end
       end
       module Int : sig
         val add : int -> int -> int
@@ -148,15 +152,20 @@ let%expect_test "the prelude's signature" =
         val max : int -> int -> int
         val to_string : int -> string
         val of_string : string -> option[int]
+        val of_string_exn : string -> int
       end
       module List : sig
         val is_empty : list['a] -> bool
         val singleton : 'a -> list['a]
         val length : list['a] -> int
         val hd : list['a] -> option['a]
+        val hd_exn : list['a] -> 'a
         val tl : list['a] -> option[list['a]]
+        val tl_exn : list['a] -> list['a]
         val last : list['a] -> option['a]
+        val last_exn : list['a] -> 'a
         val nth : list['a] -> int -> option['a]
+        val nth_exn : list['a] -> int -> 'a
         val rev_append : list['a] -> list['a] -> list['a]
         val rev : list['a] -> list['a]
         val init : int -> (int -> 'a) -> list['a]
@@ -175,6 +184,7 @@ let%expect_test "the prelude's signature" =
         val concat_map : ('a -> list['b]) -> list['a] -> list['b]
         val count : ('a -> bool) -> list['a] -> int
         val find : ('a -> bool) -> list['a] -> option['a]
+        val find_exn : ('a -> bool) -> list['a] -> 'a
         val find_map : ('a -> option['b]) -> list['a] -> option['b]
         val exists : ('a -> bool) -> list['a] -> bool
         val for_all : ('a -> bool) -> list['a] -> bool
@@ -184,13 +194,16 @@ let%expect_test "the prelude's signature" =
         val take : int -> list['a] -> list['a]
         val drop : int -> list['a] -> list['a]
         val zip : list['a] -> list['b] -> option[list['a * 'b]]
+        val zip_exn : list['a] -> list['b] -> list['a * 'b]
         val unzip : list['a * 'b] -> list['a] * list['b]
         val map2 : ('a -> 'b -> 'c) -> list['a] -> list['b] -> option[list['c]]
+        val map2_exn : ('a -> 'b -> 'c) -> list['a] -> list['b] -> list['c]
         val iter2 : ('a -> 'b -> unit) -> list['a] -> list['b] -> option[unit]
         val fold_left2 : ('a -> 'b -> 'c -> 'a) -> 'a -> list['b] -> list['c] -> option['a]
         val max_elt : ('a -> 'a -> int) -> list['a] -> option['a]
         val min_elt : ('a -> 'a -> int) -> list['a] -> option['a]
         val assoc : ('a -> 'b -> bool) -> 'a -> list['b * 'c] -> option['c]
+        val assoc_exn : ('a -> 'b -> bool) -> 'a -> list['b * 'c] -> 'c
         val sort : ('a -> 'a -> int) -> list['a] -> list['a]
         val dedup : ('a -> 'a -> int) -> list['a] -> list['a]
       end
@@ -199,6 +212,7 @@ let%expect_test "the prelude's signature" =
         val is_some : option['a] -> bool
         val is_none : option['a] -> bool
         val value : option['a] -> 'a -> 'a
+        val value_exn : option['a] -> 'a
         val value_map : ('a -> 'b) -> 'b -> option['a] -> 'b
         val map : ('a -> 'b) -> option['a] -> option['b]
         val bind : option['a] -> ('a -> option['b]) -> option['b]
@@ -223,6 +237,7 @@ let%expect_test "the prelude's signature" =
         val iter : ('a -> unit) -> result['a, 'b] -> unit
         val ok : result['a, 'b] -> option['a]
         val error : result['a, 'b] -> option['b]
+        val ok_exn : result['a, 'b] -> 'a
         val of_option : option['a] -> 'b -> result['a, 'b]
         val all : list[result['a, 'b]] -> result[list['a], 'b]
         val combine : ('a -> 'b -> 'c) -> ('d -> 'd -> 'd) -> result['a, 'd] -> result['b, 'd] -> result['c, 'd]
@@ -240,11 +255,16 @@ let%expect_test "the prelude's signature" =
         end
         val of_string : string -> result[t, Parse_error.t]
         val of_string_many : string -> result[list[t], Parse_error.t]
+        exception Parse_error of Parse_error.t
+        val of_string_exn : string -> t
+        val of_string_many_exn : string -> list[t]
         module Of_sexp_error : sig
           type t = { message : string; sexp : Sexp.t }
           val create : string -> Sexp.t -> t
           val to_string : t -> string
         end
+        exception Of_sexp_error of Of_sexp_error.t
+        val of_sexp_exn : ('a -> result['b, Of_sexp_error.t]) -> 'a -> 'b
         val sexp_of_unit : unit -> t
         val unit_of_sexp : t -> result[unit, Of_sexp_error.t]
         val sexp_of_bool : bool -> t
@@ -346,6 +366,8 @@ let%expect_test "the prelude's signature" =
         val exists : (char -> bool) -> string -> bool
         val index : string -> char -> option[int]
         val rindex : string -> char -> option[int]
+        val index_exn : string -> char -> int
+        val rindex_exn : string -> char -> int
         val contains : string -> char -> bool
         val prefix : string -> int -> string
         val suffix : string -> int -> string

@@ -42,6 +42,11 @@ let error r =
   | Ok _ -> None
   | Error e -> Some e
 
+let ok_exn r =
+  match r with
+  | Ok x -> x
+  | Error _ -> raise (Failure "Result.ok_exn: Error")
+
 let of_option o error =
   match o with
   | Some x -> Ok x

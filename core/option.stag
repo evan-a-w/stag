@@ -13,6 +13,11 @@ let value o default =
   | Some x -> x
   | None -> default
 
+let value_exn o =
+  match o with
+  | Some x -> x
+  | None -> raise (Failure "Option.value_exn: None")
+
 (* [f]'s result on [o]'s value, or [default] if it is [None]. *)
 let value_map f default o =
   match o with

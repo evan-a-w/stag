@@ -36,25 +36,9 @@ let to_string = Prim.Int.to_string
 
 (* An optional [-] then decimal digits, in range; [None] otherwise. *)
 let of_string s =
-  let negative = String.starts_with "-" s in
-  let digits =
-    match negative with
-    | true -> String.drop_prefix s 1
-    | false -> s
-  in
-  let significant = String.drop_while (Char.equal '0') digits in
-  let limit =
-    match negative with
-    | true -> String.drop_prefix (to_string min_value) 1
-    | false -> to_string max_value
-  in
-  let in_range =
-    match Int.equal (String.length significant) (String.length limit) with
-    | true -> le (String.compare significant limit) 0
-    | false -> lt (String.length significant) (String.length limit)
-  in
-  match
-    (String.is_empty digits, String.for_all Char.is_digit digits, in_range)
-  with
-  | false, true, true -> Some (Prim.Int.of_string_exn s)
-  | _ -> None
+  match Prim.Int.of_string_exn s with
+  | n -> Some n
+  | exception Failure _ -> None
+
+(* As [of_string], raising [Failure]. *)
+let of_string_exn = Prim.Int.of_string_exn

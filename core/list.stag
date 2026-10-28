@@ -1,5 +1,6 @@
 (* Functions take the function first, as OCaml's [Stdlib.List], and run in
-   constant stack. Those that could fail return an option. *)
+   constant stack. Those that could fail return an option, and have an [_exn]
+   variant raising [Failure]. *)
 
 let is_empty l =
   match l with
@@ -21,16 +22,31 @@ let hd l =
   | Nil -> None
   | Cons (x, _) -> Some x
 
+let hd_exn l =
+  match l with
+  | Nil -> raise (Failure "List.hd_exn: empty list")
+  | Cons (x, _) -> x
+
 let tl l =
   match l with
   | Nil -> None
   | Cons (_, rest) -> Some rest
+
+let tl_exn l =
+  match l with
+  | Nil -> raise (Failure "List.tl_exn: empty list")
+  | Cons (_, rest) -> rest
 
 let last l =
   match l with
   | Nil -> None
   | Cons (x, Nil) -> Some x
   | Cons (_, rest) -> last rest
+
+let last_exn l =
+  match last l with
+  | Some x -> x
+  | None -> raise (Failure "List.last_exn: empty list")
 
 let nth l n =
   match l with
@@ -42,6 +58,13 @@ let nth l n =
       match Int.lt n 0 with
       | true -> None
       | false -> nth rest (Int.pred n)
+
+let nth_exn l n =
+  match nth l n with
+  | Some x -> x
+  | None ->
+    raise
+      (Failure (String.append "List.nth_exn: no element " (Int.to_string n)))
 
 let rev_append l tail =
   match l with
@@ -68,13 +91,9 @@ let fold_left f acc l =
   | Cons (x, rest) -> fold_left f (f acc x) rest
 
 (* [fold_right f [a; b] init] is [f a (f b init)]. *)
-let fold_right f l acc =
-  let step acc x = f x acc in
-  fold_left step acc (rev l)
+let fold_right f l acc = fold_left (fun acc x -> f x acc) acc (rev l)
 
-let rev_map f l =
-  let step acc x = Cons (f x, acc) in
-  fold_left step Nil l
+let rev_map f l = fold_left (fun acc x -> Cons (f x, acc)) Nil l
 
 let map f l = rev (rev_map f l)
 
@@ -112,12 +131,12 @@ let filter_map f l =
   rev (fold_left step Nil l)
 
 let filter f l =
-  let keep x =
+  let step acc x =
     match f x with
-    | true -> Some x
-    | false -> None
+    | true -> Cons (x, acc)
+    | false -> acc
   in
-  filter_map keep l
+  rev (fold_left step Nil l)
 
 (* [(those satisfying f, the others)]. *)
 let partition f l =
@@ -128,13 +147,9 @@ let partition f l =
   in
   match fold_left step (Nil, Nil) l with yes, no -> (rev yes, rev no)
 
-let concat ls =
-  let step acc l = rev_append l acc in
-  rev (fold_left step Nil ls)
+let concat ls = rev (fold_left (fun acc l -> rev_append l acc) Nil ls)
 
-let concat_map f l =
-  let step acc x = rev_append (f x) acc in
-  rev (fold_left step Nil l)
+let concat_map f l = rev (fold_left (fun acc x -> rev_append (f x) acc) Nil l)
 
 let count f l =
   let step n x =
@@ -151,6 +166,11 @@ let find f l =
     match f x with
     | true -> Some x
     | false -> find f rest
+
+let find_exn f l =
+  match find f l with
+  | Some x -> x
+  | None -> raise (Failure "List.find_exn: not found")
 
 let find_map f l =
   match l with
@@ -176,9 +196,7 @@ let for_all f l =
     | true -> for_all f rest
     | false -> false
 
-let mem equal x l =
-  let is_x y = equal x y in
-  exists is_x l
+let mem equal x l = exists (fun y -> equal x y) l
 
 let equal equal_elt l1 l2 =
   match (l1, l2) with
@@ -220,12 +238,15 @@ let zip l1 l2 =
   let loop l1 l2 acc =
     match (l1, l2) with
     | Nil, Nil -> Some (rev acc)
-    | Cons (x, rest1), Cons (y, rest2) ->
-      let p = (x, y) in
-      loop rest1 rest2 (Cons (p, acc))
+    | Cons (x, rest1), Cons (y, rest2) -> loop rest1 rest2 (Cons ((x, y), acc))
     | _ -> None
   in
   loop l1 l2 Nil
+
+let zip_exn l1 l2 =
+  match zip l1 l2 with
+  | Some l -> l
+  | None -> raise (Failure "List.zip_exn: lengths differ")
 
 let unzip l =
   let step acc p =
@@ -243,6 +264,11 @@ let map2 f l1 l2 =
     | _ -> None
   in
   loop l1 l2 Nil
+
+let map2_exn f l1 l2 =
+  match map2 f l1 l2 with
+  | Some l -> l
+  | None -> raise (Failure "List.map2_exn: lengths differ")
 
 (* Stops at the end of the shorter list, so [f] is called on all pairs only if
    the lengths are equal. *)
@@ -290,6 +316,11 @@ let assoc equal key l =
     match equal key k with
     | true -> Some v
     | false -> assoc equal key rest
+
+let assoc_exn equal key l =
+  match assoc equal key l with
+  | Some v -> v
+  | None -> raise (Failure "List.assoc_exn: not found")
 
 (* Stable merge sort, by [compare] (negative, zero or positive, as
    [Int.compare]), of the list's ascending and strictly descending runs: linear
