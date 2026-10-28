@@ -325,3 +325,334 @@ type t = .~kind
     Error: This type splice gave a definition that is itself a splice, `Stag.Type_decl.Kind.Splice`
     |}]
 ;;
+
+let%expect_test "a generated declaration with a type splice and a ref" =
+  check
+    ~run:true
+    {|
+let helper = 1
+let t = Stag.Type_expr.con "int" Nil
+let ann = Stag.Type_expr.Splice (Stag.Expr.var "t")
+include .~(Cons (Stag.Toplevel.Let ("x", Nil, Some ann, Stag.Code.erase .< helper >.), Nil))
+let shown = print_endline (Int.to_string x)
+|};
+  [%expect {|
+    module A : sig
+      val helper : int
+      val t : Stag.Type_expr.t
+      val ann : Stag.Type_expr.t
+      val x : int
+      val shown : unit
+    end
+    --- output ---
+    1
+    |}]
+;;
+
+let%expect_test "type-spliced declarations are used before they are written" =
+  check
+    ~run:true
+    {|
+let int_ty = Stag.Type_expr.con "int" Nil
+let y = Int.add x 1
+let x : .~int_ty = 3
+let f (n : .~int_ty) = match n with 0 -> 0 | _ -> g (Int.sub n 1)
+let g n = match n with 0 -> 0 | _ -> f (Int.sub n 1)
+let shown = print_endline (Int.to_string (Int.add y (f 5)))
+|};
+  [%expect {|
+    module A : sig
+      val int_ty : Stag.Type_expr.t
+      val y : int
+      val x : int
+      val f : int -> int
+      val g : int -> int
+      val shown : unit
+    end
+    --- output ---
+    4
+    |}]
+;;
+
+let%expect_test "a type-spliced declaration shadows outer names throughout" =
+  check
+    ~run:true
+    {|
+let x = "outer"
+module M = struct
+  let y = x
+  let x : .~(Stag.Type_expr.con "int" Nil) = 2
+end
+let shown = print_endline (Int.to_string M.y)
+|};
+  [%expect {|
+    module A : sig
+      val x : string
+      module M : sig
+        val y : int
+        val x : int
+      end
+      val shown : unit
+    end
+    --- output ---
+    2
+    |}]
+;;
+
+let%expect_test "spliced and plain types are mutually recursive" =
+  check
+    ~run:true
+    {|
+let tree = Stag.Type_expr.con "tree" Nil
+let kind =
+  Stag.Type_decl.Kind.Variant
+    (Cons (("Leaf", Nil), Cons (("Node", Cons (Stag.Type_expr.con "forest" Nil, Nil)), Nil)))
+type forest = F of list[.~tree]
+type tree = .~kind
+let size_forest f = match f with F trees -> size_list trees
+let size_list ts = match ts with Nil -> 0 | Cons (t, ts) -> Int.add (size t) (size_list ts)
+let size t = match t with Leaf -> 1 | Node f -> Int.add 1 (size_forest f)
+let shown = print_endline (Int.to_string (size (Node (F (Cons (Leaf, Cons (Leaf, Nil)))))))
+exception E of .~tree
+let caught = match raise (E Leaf) with _ -> () | exception E Leaf -> print_endline "E Leaf"
+|};
+  [%expect {|
+    module A : sig
+      val tree : Stag.Type_expr.t
+      val kind : Stag.Type_decl.Kind.t
+      type forest = F of list[tree]
+      type tree = Leaf | Node of forest
+      val size_forest : forest -> int
+      val size_list : list[tree] -> int
+      val size : tree -> int
+      val shown : unit
+      exception E of tree
+      val caught : unit
+    end
+    --- output ---
+    3
+    E Leaf
+    |}]
+;;
+
+let%expect_test "cycles through type splices" =
+  check
+    {|
+let self (t : Stag.Type.t['a]) = Stag.Type.expr t
+type t = int * .~(self (type t))
+|};
+  [%expect {|
+    File "a.stag", line 3, characters 15-32:
+    3 | type t = int * .~(self (type t))
+                       ^^^^^^^^^^^^^^^^^
+    Error: This type splice's expression needs the type it gives, which is being computed
+    |}];
+  check
+    {|
+let kind_of (ty : Stag.Type.t['a]) =
+  match Stag.Type.expr ty with
+  | Con (Ref r, _) -> (match Stag.Type.decl r with _ -> Stag.Type_decl.Kind.Abstract)
+  | _ -> Stag.Type_decl.Kind.Abstract
+type t = .~(kind_of (type t))
+|};
+  [%expect {|
+    File "a.stag", line 6, characters 5-6:
+    6 | type t = .~(kind_of (type t))
+             ^
+    Error: The type A.t is needed here while its definition is being computed by the type splice at a.stag:6:9-29, whose expression uses this code
+    |}];
+  check
+    {|
+let ty u = Stag.Type_expr.con (Int.to_string x) Nil
+let x : .~(ty 0) = 1
+|};
+  [%expect {|
+    File "a.stag", line 3, characters 11-13:
+    3 | let x : .~(ty 0) = 1
+                   ^^
+    Error: The toplevel A.ty is used at compile time before it is fully checked (it is in the same recursive group as this splice)
+    |}]
+;;
+
+let%expect_test "an expect test with a type splice is corrected" =
+  check
+    ~run:true
+    {x|
+let int_ty = Stag.Type_expr.con "int" Nil
+let%expect_test "t" =
+  let x = 3 in
+  let y = (x : .~int_ty) in
+  print_endline (Int.to_string y);
+  [%expect {| 4 |}]
+|x};
+  [%expect {xxx|
+    module A : sig
+      val int_ty : Stag.Type_expr.t
+    end
+    --- output ---
+    ((name (t @ a.stag:3:16-19))
+     (mismatches (((loc a.stag:7:11-18) (expected (" 4 ")) (actual 3))))
+     (error ()))
+    --- corrected ---
+
+    let int_ty = Stag.Type_expr.con "int" Nil
+    let%expect_test "t" =
+      let x = 3 in
+      let y = (x : .~int_ty) in
+      print_endline (Int.to_string y);
+      [%expect {| 3 |}]
+    |xxx}]
+;;
+
+let%expect_test "errors in a declaration with a type splice are located" =
+  check
+    {|
+let int_ty = Stag.Type_expr.con "int" Nil
+let f (n : .~int_ty) =
+  let a = Int.add n 1 in
+  Int.add a "oops"
+|};
+  [%expect {|
+    File "a.stag", line 5, characters 12-18:
+    5 |   Int.add a "oops"
+                    ^^^^^^
+    Error: This expression has type string but an expression was expected of type int
+    |}];
+  check
+    {|
+let bad = Stag.Type_expr.con "nope" Nil
+exception E of .~bad
+|};
+  [%expect {|
+    File "a.stag", line 3, characters 15-20:
+    3 | exception E of .~bad
+                       ^^^^^
+    Error: In the type this type splice gave: Unbound type nope
+    Note: The type splice gave the type: nope
+    |}];
+  check
+    {|
+let kind = Stag.Type_decl.Kind.Variant (Cons (("A", Cons (Stag.Type_expr.con "nope" Nil, Nil)), Nil))
+type t = .~kind
+let a = A
+|};
+  [%expect {|
+    File "a.stag", line 3, characters 9-15:
+    3 | type t = .~kind
+                 ^^^^^^
+    Error: In the declaration `type t` generated by this splice: Unbound type nope
+    Note: The generated declaration is:
+      type t = A of nope
+    |}];
+  check
+    {|
+let n = 1
+type t = .~n
+|};
+  [%expect {|
+    File "a.stag", line 3, characters 11-12:
+    3 | type t = .~n
+                   ^
+    Error: This expression has type int but an expression was expected of type Stag.Type_decl.Kind.t
+    |}]
+;;
+
+let%expect_test "antiquote errors are at the antiquote in each position" =
+  let bad = "(Stag.Expr.int 1)" in
+  List.iter
+    [ sprintf ".< struct type t = .~%s end >." bad
+    ; sprintf ".< struct let x : .~%s = 1 end >." bad
+    ; sprintf ".< struct let x : code[.~%s] = 1 end >." bad
+    ; sprintf ".< struct let x : {`a : .~%s} = 1 end >." bad
+    ; sprintf ".< struct let x = .~(Stag.Type_expr.con \"int\" Nil) end >."
+    ; sprintf ".< struct let%%expect_test \"t\" = .~(Stag.Type_expr.con \"int\" Nil) end >."
+    ; sprintf ".< struct module M = .~%s end >." bad
+    ]
+    ~f:(fun quote -> check (sprintf "let q = %s\n" quote));
+  [%expect {|
+    File "a.stag", line 1, characters 29-46:
+    1 | let q = .< struct type t = .~(Stag.Expr.int 1) end >.
+                                     ^^^^^^^^^^^^^^^^^
+    Error: This expression has type Stag.Expr.t but an expression was expected of type Stag.Type_decl.Kind.t
+    File "a.stag", line 1, characters 28-45:
+    1 | let q = .< struct let x : .~(Stag.Expr.int 1) = 1 end >.
+                                    ^^^^^^^^^^^^^^^^^
+    Error: This expression has type Stag.Expr.t but an expression was expected of type Stag.Type_expr.t
+    File "a.stag", line 1, characters 33-50:
+    1 | let q = .< struct let x : code[.~(Stag.Expr.int 1)] = 1 end >.
+                                         ^^^^^^^^^^^^^^^^^
+    Error: This expression has type Stag.Expr.t but an expression was expected of type Stag.Type_expr.t
+    File "a.stag", line 1, characters 34-51:
+    1 | let q = .< struct let x : {`a : .~(Stag.Expr.int 1)} = 1 end >.
+                                          ^^^^^^^^^^^^^^^^^
+    Error: This expression has type Stag.Expr.t but an expression was expected of type Stag.Type_expr.t
+    File "a.stag", line 1, characters 28-58:
+    1 | let q = .< struct let x = .~(Stag.Type_expr.con "int" Nil) end >.
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This expression has type Stag.Type_expr.t but an expression was expected of type Stag.Expr.t
+    File "a.stag", line 1, characters 42-72:
+    1 | let q = .< struct let%expect_test "t" = .~(Stag.Type_expr.con "int" Nil) end >.
+                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This expression has type Stag.Type_expr.t but an expression was expected of type Stag.Expr.t
+    File "a.stag", line 1, characters 31-48:
+    1 | let q = .< struct module M = .~(Stag.Expr.int 1) end >.
+                                       ^^^^^^^^^^^^^^^^^
+    Error: This expression has type Stag.Expr.t but an expression was expected of type list[Stag.Toplevel.t]
+    |}]
+;;
+
+let%expect_test "struct quotes in an expression quote and in erased code" =
+  check
+    ~run:true
+    {|
+let v = Stag.Expr.int 5
+let quoted = .< .< struct let x = .~v end >. >.
+let erased = Stag.Code.erase .< let y = 1 in .< struct let x = .~(Stag.Expr.var "y") end >. >.
+module M = .~(Cons (Stag.Toplevel.let_ "z" Nil erased, Nil))
+let y = 7
+module N = .~M.z
+let shown = print_endline (Int.to_string N.x)
+|};
+  [%expect {|
+    module A : sig
+      val v : Stag.Expr.t
+      val quoted : <list[Stag.Toplevel.t]>{A.v : Stag.Expr.t; ..'a}
+      val erased : Stag.Expr.t
+      module M : sig
+        val z : list[Stag.Toplevel.t]
+      end
+      val y : int
+      module N : sig
+        val x : int
+      end
+      val shown : unit
+    end
+    --- output ---
+    7
+    |}]
+;;
+
+let%expect_test "antiquotes are evaluated in order" =
+  check
+    ~run:true
+    {|
+let say s x = let u = print_endline s in x
+let q =
+  .< struct
+    type t = .~(say "kind" Stag.Type_decl.Kind.Abstract)
+    let x : .~(say "type" (Stag.Type_expr.con "int" Nil)) = .~(say "expr" (Stag.Expr.int 1))
+    include .~(say "items" Nil)
+  end >.
+|};
+  [%expect {|
+    module A : sig
+      val say : string -> 'a -> 'a
+      val q : list[Stag.Toplevel.t]
+    end
+    --- output ---
+    kind
+    type
+    expr
+    items
+    |}]
+;;
