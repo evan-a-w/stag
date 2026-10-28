@@ -46,8 +46,8 @@ include%inline .~(Core.Sexp.derive (type color))
     | _ ->
       Core.Sexp.Deriving.variant_error
         "color_of_sexp"
-        (Cons ("Red", Cons ("Green", Cons ("Blue", Nil))))
-        Nil
+        ["Red"; "Green"; "Blue"]
+        []
         sexp
 
   let color_of_sexp sexp =
@@ -88,42 +88,35 @@ include%inline .~(Core.Sexp.derive (type shape))
   let sexp_of_shape v =
     match v with
     | Circle v0 ->
-      Core.Sexp.List (Cons
-        (Core.Sexp.Atom "Circle", Cons (Core.Sexp.sexp_of_int v0, Nil)))
+      Core.Sexp.List [Core.Sexp.Atom "Circle"; Core.Sexp.sexp_of_int v0]
     | Rect (v0, v1) ->
-      Core.Sexp.List (Cons
-        (Core.Sexp.Atom "Rect",
-         Cons (Core.Sexp.sexp_of_int v0, Cons (Core.Sexp.sexp_of_int v1, Nil))))
+      Core.Sexp.List [
+        Core.Sexp.Atom "Rect";
+        Core.Sexp.sexp_of_int v0;
+        Core.Sexp.sexp_of_int v1;
+      ]
     | Segment (v0, v1) ->
-      Core.Sexp.List (Cons
-        (Core.Sexp.Atom "Segment",
-         Cons
-           (Core.Sexp.sexp_of_pair
-              Core.Sexp.sexp_of_int
-              Core.Sexp.sexp_of_int
-              v0,
-            Cons
-              (Core.Sexp.sexp_of_pair
-                 Core.Sexp.sexp_of_int
-                 Core.Sexp.sexp_of_int
-                 v1,
-               Nil))))
+      Core.Sexp.List [
+        Core.Sexp.Atom "Segment";
+        Core.Sexp.sexp_of_pair Core.Sexp.sexp_of_int Core.Sexp.sexp_of_int v0;
+        Core.Sexp.sexp_of_pair Core.Sexp.sexp_of_int Core.Sexp.sexp_of_int v1;
+      ]
     | Label (v0, v1) ->
-      Core.Sexp.List (Cons
-        (Core.Sexp.Atom "Label",
-         Cons (Core.Sexp.sexp_of_string v0, Cons (sexp_of_color v1, Nil))))
+      Core.Sexp.List [
+        Core.Sexp.Atom "Label";
+        Core.Sexp.sexp_of_string v0;
+        sexp_of_color v1;
+      ]
 
   let shape_of_sexp_exn sexp =
     match sexp with
-    | Core.Sexp.List (Cons (Core.Sexp.Atom "Circle", Cons (v0, Nil))) ->
+    | Core.Sexp.List [Core.Sexp.Atom "Circle"; v0] ->
       Circle (Core.Sexp.of_sexp_exn Core.Sexp.int_of_sexp v0)
-    | Core.Sexp.List (Cons (Core.Sexp.Atom "Rect",
-                            Cons (v0, Cons (v1, Nil)))) ->
+    | Core.Sexp.List [Core.Sexp.Atom "Rect"; v0; v1] ->
       Rect
         (Core.Sexp.of_sexp_exn Core.Sexp.int_of_sexp v0,
          Core.Sexp.of_sexp_exn Core.Sexp.int_of_sexp v1)
-    | Core.Sexp.List (Cons (Core.Sexp.Atom "Segment",
-                            Cons (v0, Cons (v1, Nil)))) ->
+    | Core.Sexp.List [Core.Sexp.Atom "Segment"; v0; v1] ->
       Segment
         (Core.Sexp.of_sexp_exn
            (Core.Sexp.pair_of_sexp Core.Sexp.int_of_sexp Core.Sexp.int_of_sexp)
@@ -131,16 +124,15 @@ include%inline .~(Core.Sexp.derive (type shape))
          Core.Sexp.of_sexp_exn
            (Core.Sexp.pair_of_sexp Core.Sexp.int_of_sexp Core.Sexp.int_of_sexp)
            v1)
-    | Core.Sexp.List (Cons (Core.Sexp.Atom "Label",
-                            Cons (v0, Cons (v1, Nil)))) ->
+    | Core.Sexp.List [Core.Sexp.Atom "Label"; v0; v1] ->
       Label
         (Core.Sexp.of_sexp_exn Core.Sexp.string_of_sexp v0,
          Core.Sexp.of_sexp_exn color_of_sexp v1)
     | _ ->
       Core.Sexp.Deriving.variant_error
         "shape_of_sexp"
-        Nil
-        (Cons ("Circle", Cons ("Rect", Cons ("Segment", Cons ("Label", Nil)))))
+        []
+        ["Circle"; "Rect"; "Segment"; "Label"]
         sexp
 
   let shape_of_sexp sexp =
@@ -181,18 +173,14 @@ type point = {x : int; y : int}
 
 include%inline .~(Core.Sexp.derive (type point))
   let sexp_of_point v =
-    Core.Sexp.List (Cons
-      (Core.Sexp.Deriving.field "x" (Core.Sexp.sexp_of_int v.x),
-       Cons (Core.Sexp.Deriving.field "y" (Core.Sexp.sexp_of_int v.y), Nil)))
+    Core.Sexp.List [
+      Core.Sexp.Deriving.field "x" (Core.Sexp.sexp_of_int v.x);
+      Core.Sexp.Deriving.field "y" (Core.Sexp.sexp_of_int v.y);
+    ]
 
   let point_of_sexp_exn sexp =
-    match
-      Core.Sexp.Deriving.record_fields
-        "point_of_sexp"
-        (Cons ("x", Cons ("y", Nil)))
-        sexp
-    with
-    | Cons (x, Cons (y, Nil)) ->
+    match Core.Sexp.Deriving.record_fields "point_of_sexp" ["x"; "y"] sexp with
+    | [x; y] ->
       {
         x = Core.Sexp.of_sexp_exn Core.Sexp.int_of_sexp x;
         y = Core.Sexp.of_sexp_exn Core.Sexp.int_of_sexp y;
@@ -246,64 +234,39 @@ type item = {
 
 include%inline .~(Core.Sexp.derive (type item))
   let sexp_of_item v =
-    Core.Sexp.List (Cons
-      (Core.Sexp.Deriving.field "name" (Core.Sexp.sexp_of_string v.name),
-       Cons
-         (Core.Sexp.Deriving.field "at" (sexp_of_point v.at),
-          Cons
-            (Core.Sexp.Deriving.field "shape" (sexp_of_shape v.shape),
-             Cons
-               (Core.Sexp.Deriving.field
-                  "tags"
-                  (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_string v.tags),
-                Cons
-                  (Core.Sexp.Deriving.field
-                     "note"
-                     (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_string v.note),
-                   Cons
-                     (Core.Sexp.Deriving.field
-                        "status"
-                        (Core.Sexp.sexp_of_result
-                           Core.Sexp.sexp_of_unit
-                           Core.Sexp.sexp_of_string
-                           v.status),
-                      Cons
-                        (Core.Sexp.Deriving.field
-                           "flags"
-                           (Core.Sexp.sexp_of_pair
-                              Core.Sexp.sexp_of_bool
-                              Core.Sexp.sexp_of_char
-                              v.flags),
-                         Cons
-                           (Core.Sexp.Deriving.field
-                              "raw"
-                              (Core.Sexp.sexp_of_t v.raw),
-                            Nil)))))))))
+    Core.Sexp.List [
+      Core.Sexp.Deriving.field "name" (Core.Sexp.sexp_of_string v.name);
+      Core.Sexp.Deriving.field "at" (sexp_of_point v.at);
+      Core.Sexp.Deriving.field "shape" (sexp_of_shape v.shape);
+      Core.Sexp.Deriving.field
+        "tags"
+        (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_string v.tags);
+      Core.Sexp.Deriving.field
+        "note"
+        (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_string v.note);
+      Core.Sexp.Deriving.field
+        "status"
+        (Core.Sexp.sexp_of_result
+           Core.Sexp.sexp_of_unit
+           Core.Sexp.sexp_of_string
+           v.status);
+      Core.Sexp.Deriving.field
+        "flags"
+        (Core.Sexp.sexp_of_pair
+           Core.Sexp.sexp_of_bool
+           Core.Sexp.sexp_of_char
+           v.flags);
+      Core.Sexp.Deriving.field "raw" (Core.Sexp.sexp_of_t v.raw);
+    ]
 
   let item_of_sexp_exn sexp =
     match
       Core.Sexp.Deriving.record_fields
         "item_of_sexp"
-        (Cons
-           ("name",
-            Cons
-              ("at",
-               Cons
-                 ("shape",
-                  Cons
-                    ("tags",
-                     Cons
-                       ("note",
-                        Cons ("status", Cons ("flags", Cons ("raw", Nil)))))))))
+        ["name"; "at"; "shape"; "tags"; "note"; "status"; "flags"; "raw"]
         sexp
     with
-    | Cons (name,
-            Cons (at,
-                  Cons (shape,
-                        Cons (tags,
-                              Cons (note,
-                                    Cons (status,
-                                          Cons (flags, Cons (raw, Nil)))))))) ->
+    | [name; at; shape; tags; note; status; flags; raw] ->
       {
         name = Core.Sexp.of_sexp_exn Core.Sexp.string_of_sexp name;
         at = Core.Sexp.of_sexp_exn point_of_sexp at;
@@ -391,18 +354,19 @@ type labelled['a] = {label : string; value : 'a}
 
 include%inline .~(Core.Sexp.derive (type labelled['a]))
   let sexp_of_labelled sexp_of_a v =
-    Core.Sexp.List (Cons
-      (Core.Sexp.Deriving.field "label" (Core.Sexp.sexp_of_string v.label),
-       Cons (Core.Sexp.Deriving.field "value" (sexp_of_a v.value), Nil)))
+    Core.Sexp.List [
+      Core.Sexp.Deriving.field "label" (Core.Sexp.sexp_of_string v.label);
+      Core.Sexp.Deriving.field "value" (sexp_of_a v.value);
+    ]
 
   let labelled_of_sexp_exn a_of_sexp sexp =
     match
       Core.Sexp.Deriving.record_fields
         "labelled_of_sexp"
-        (Cons ("label", Cons ("value", Nil)))
+        ["label"; "value"]
         sexp
     with
-    | Cons (label, Cons (value, Nil)) ->
+    | [label; value] ->
       {
         label = Core.Sexp.of_sexp_exn Core.Sexp.string_of_sexp label;
         value = Core.Sexp.of_sexp_exn a_of_sexp value;
@@ -419,22 +383,20 @@ type either['a, 'b] = Left of 'a | Right of 'b
 include%inline .~(Core.Sexp.derive (type either['a, 'b]))
   let sexp_of_either sexp_of_a sexp_of_b v =
     match v with
-    | Left v0 ->
-      Core.Sexp.List (Cons (Core.Sexp.Atom "Left", Cons (sexp_of_a v0, Nil)))
-    | Right v0 ->
-      Core.Sexp.List (Cons (Core.Sexp.Atom "Right", Cons (sexp_of_b v0, Nil)))
+    | Left v0 -> Core.Sexp.List [Core.Sexp.Atom "Left"; sexp_of_a v0]
+    | Right v0 -> Core.Sexp.List [Core.Sexp.Atom "Right"; sexp_of_b v0]
 
   let either_of_sexp_exn a_of_sexp b_of_sexp sexp =
     match sexp with
-    | Core.Sexp.List (Cons (Core.Sexp.Atom "Left", Cons (v0, Nil))) ->
+    | Core.Sexp.List [Core.Sexp.Atom "Left"; v0] ->
       Left (Core.Sexp.of_sexp_exn a_of_sexp v0)
-    | Core.Sexp.List (Cons (Core.Sexp.Atom "Right", Cons (v0, Nil))) ->
+    | Core.Sexp.List [Core.Sexp.Atom "Right"; v0] ->
       Right (Core.Sexp.of_sexp_exn b_of_sexp v0)
     | _ ->
       Core.Sexp.Deriving.variant_error
         "either_of_sexp"
-        Nil
-        (Cons ("Left", Cons ("Right", Nil)))
+        []
+        ["Left"; "Right"]
         sexp
 
   let either_of_sexp a_of_sexp b_of_sexp sexp =
@@ -467,27 +429,23 @@ include%inline .~(Core.Sexp.derive (type tree['a]))
     match v with
     | Leaf -> Core.Sexp.Atom "Leaf"
     | Node (v0, v1, v2) ->
-      Core.Sexp.List (Cons
-        (Core.Sexp.Atom "Node",
-         Cons
-           (sexp_of_tree sexp_of_a v0,
-            Cons (sexp_of_a v1, Cons (sexp_of_tree sexp_of_a v2, Nil)))))
+      Core.Sexp.List [
+        Core.Sexp.Atom "Node";
+        sexp_of_tree sexp_of_a v0;
+        sexp_of_a v1;
+        sexp_of_tree sexp_of_a v2;
+      ]
 
   let tree_of_sexp_exn a_of_sexp sexp =
     match sexp with
     | Core.Sexp.Atom "Leaf" -> Leaf
-    | Core.Sexp.List (Cons (Core.Sexp.Atom "Node",
-                            Cons (v0, Cons (v1, Cons (v2, Nil))))) ->
+    | Core.Sexp.List [Core.Sexp.Atom "Node"; v0; v1; v2] ->
       Node
         (Core.Sexp.of_sexp_exn (tree_of_sexp a_of_sexp) v0,
          Core.Sexp.of_sexp_exn a_of_sexp v1,
          Core.Sexp.of_sexp_exn (tree_of_sexp a_of_sexp) v2)
     | _ ->
-      Core.Sexp.Deriving.variant_error
-        "tree_of_sexp"
-        (Cons ("Leaf", Nil))
-        (Cons ("Node", Nil))
-        sexp
+      Core.Sexp.Deriving.variant_error "tree_of_sexp" ["Leaf"] ["Node"] sexp
 
   let tree_of_sexp a_of_sexp sexp =
     match tree_of_sexp_exn a_of_sexp sexp with
@@ -520,26 +478,21 @@ include%inline .~(Core.List.append
                     (Core.Sexp.derive (type stmt)))
   let sexp_of_expr v =
     match v with
-    | Num v0 ->
-      Core.Sexp.List (Cons
-        (Core.Sexp.Atom "Num", Cons (Core.Sexp.sexp_of_int v0, Nil)))
+    | Num v0 -> Core.Sexp.List [Core.Sexp.Atom "Num"; Core.Sexp.sexp_of_int v0]
     | Block v0 ->
-      Core.Sexp.List (Cons
-        (Core.Sexp.Atom "Block",
-         Cons (Core.Sexp.sexp_of_list sexp_of_stmt v0, Nil)))
+      Core.Sexp.List [
+        Core.Sexp.Atom "Block";
+        Core.Sexp.sexp_of_list sexp_of_stmt v0;
+      ]
 
   let expr_of_sexp_exn sexp =
     match sexp with
-    | Core.Sexp.List (Cons (Core.Sexp.Atom "Num", Cons (v0, Nil))) ->
+    | Core.Sexp.List [Core.Sexp.Atom "Num"; v0] ->
       Num (Core.Sexp.of_sexp_exn Core.Sexp.int_of_sexp v0)
-    | Core.Sexp.List (Cons (Core.Sexp.Atom "Block", Cons (v0, Nil))) ->
+    | Core.Sexp.List [Core.Sexp.Atom "Block"; v0] ->
       Block (Core.Sexp.of_sexp_exn (Core.Sexp.list_of_sexp stmt_of_sexp) v0)
     | _ ->
-      Core.Sexp.Deriving.variant_error
-        "expr_of_sexp"
-        Nil
-        (Cons ("Num", Cons ("Block", Nil)))
-        sexp
+      Core.Sexp.Deriving.variant_error "expr_of_sexp" [] ["Num"; "Block"] sexp
 
   let expr_of_sexp sexp =
     match expr_of_sexp_exn sexp with
@@ -547,20 +500,18 @@ include%inline .~(Core.List.append
     | exception Core.Sexp.Of_sexp_error e -> Error e
 
   let sexp_of_stmt v =
-    Core.Sexp.List (Cons
-      (Core.Sexp.Deriving.field
-         "title"
-         (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_string v.title),
-       Cons (Core.Sexp.Deriving.field "body" (sexp_of_expr v.body), Nil)))
+    Core.Sexp.List [
+      Core.Sexp.Deriving.field
+        "title"
+        (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_string v.title);
+      Core.Sexp.Deriving.field "body" (sexp_of_expr v.body);
+    ]
 
   let stmt_of_sexp_exn sexp =
     match
-      Core.Sexp.Deriving.record_fields
-        "stmt_of_sexp"
-        (Cons ("title", Cons ("body", Nil)))
-        sexp
+      Core.Sexp.Deriving.record_fields "stmt_of_sexp" ["title"; "body"] sexp
     with
-    | Cons (title, Cons (body, Nil)) ->
+    | [title; body] ->
       {
         title =
           Core.Sexp.of_sexp_exn
@@ -616,17 +567,16 @@ include%inline .~(Core.List.concat
   let sexp_of_quad v =
     match v with
     | v0, v1, v2, v3 ->
-      Core.Sexp.List (Cons
-        (Core.Sexp.sexp_of_int v0,
-         Cons
-           (Core.Sexp.sexp_of_string v1,
-            Cons
-              (Core.Sexp.sexp_of_bool v2,
-               Cons (Core.Sexp.sexp_of_char v3, Nil)))))
+      Core.Sexp.List [
+        Core.Sexp.sexp_of_int v0;
+        Core.Sexp.sexp_of_string v1;
+        Core.Sexp.sexp_of_bool v2;
+        Core.Sexp.sexp_of_char v3;
+      ]
 
   let quad_of_sexp_exn sexp =
     match sexp with
-    | Core.Sexp.List (Cons (v0, Cons (v1, Cons (v2, Cons (v3, Nil))))) ->
+    | Core.Sexp.List [v0; v1; v2; v3] ->
       (Core.Sexp.of_sexp_exn Core.Sexp.int_of_sexp v0,
        Core.Sexp.of_sexp_exn Core.Sexp.string_of_sexp v1,
        Core.Sexp.of_sexp_exn Core.Sexp.bool_of_sexp v2,
@@ -663,22 +613,19 @@ include%inline .~(Core.Sexp.derive (type move))
   let sexp_of_move v =
     match v with
     | `Stop -> Core.Sexp.Atom "Stop"
-    | `Go v0 ->
-      Core.Sexp.List (Cons
-        (Core.Sexp.Atom "Go", Cons (Core.Sexp.sexp_of_int v0, Nil)))
+    | `Go v0 -> Core.Sexp.List [Core.Sexp.Atom "Go"; Core.Sexp.sexp_of_int v0]
     | `Turn v0 ->
-      Core.Sexp.List (Cons
-        (Core.Sexp.Atom "Turn",
-         Cons
-           (Core.Sexp.sexp_of_pair Core.Sexp.sexp_of_int sexp_of_color v0,
-            Nil)))
+      Core.Sexp.List [
+        Core.Sexp.Atom "Turn";
+        Core.Sexp.sexp_of_pair Core.Sexp.sexp_of_int sexp_of_color v0;
+      ]
 
   let move_of_sexp_exn sexp =
     match sexp with
     | Core.Sexp.Atom "Stop" -> `Stop
-    | Core.Sexp.List (Cons (Core.Sexp.Atom "Go", Cons (v0, Nil))) ->
+    | Core.Sexp.List [Core.Sexp.Atom "Go"; v0] ->
       `Go (Core.Sexp.of_sexp_exn Core.Sexp.int_of_sexp v0)
-    | Core.Sexp.List (Cons (Core.Sexp.Atom "Turn", Cons (v0, Nil))) ->
+    | Core.Sexp.List [Core.Sexp.Atom "Turn"; v0] ->
       `Turn
         (Core.Sexp.of_sexp_exn
            (Core.Sexp.pair_of_sexp Core.Sexp.int_of_sexp color_of_sexp)
@@ -686,8 +633,8 @@ include%inline .~(Core.Sexp.derive (type move))
     | _ ->
       Core.Sexp.Deriving.variant_error
         "move_of_sexp"
-        (Cons ("Stop", Nil))
-        (Cons ("Go", Cons ("Turn", Nil)))
+        ["Stop"]
+        ["Go"; "Turn"]
         sexp
 
   let move_of_sexp sexp =
@@ -717,19 +664,16 @@ module Geometry = struct
 
   include%inline .~(Core.Sexp.derive (type vec))
     let sexp_of_vec v =
-      Core.Sexp.List (Cons
-        (Core.Sexp.Deriving.field "dx" (Core.Sexp.sexp_of_int v.dx),
-         Cons
-           (Core.Sexp.Deriving.field "dy" (Core.Sexp.sexp_of_int v.dy), Nil)))
+      Core.Sexp.List [
+        Core.Sexp.Deriving.field "dx" (Core.Sexp.sexp_of_int v.dx);
+        Core.Sexp.Deriving.field "dy" (Core.Sexp.sexp_of_int v.dy);
+      ]
 
     let vec_of_sexp_exn sexp =
       match
-        Core.Sexp.Deriving.record_fields
-          "vec_of_sexp"
-          (Cons ("dx", Cons ("dy", Nil)))
-          sexp
+        Core.Sexp.Deriving.record_fields "vec_of_sexp" ["dx"; "dy"] sexp
       with
-      | Cons (dx, Cons (dy, Nil)) ->
+      | [dx; dy] ->
         {
           dx = Core.Sexp.of_sexp_exn Core.Sexp.int_of_sexp dx;
           dy = Core.Sexp.of_sexp_exn Core.Sexp.int_of_sexp dy;
@@ -746,20 +690,16 @@ type step = {by : Geometry.vec; times : int}
 
 include%inline .~(Core.Sexp.derive (type step))
   let sexp_of_step v =
-    Core.Sexp.List (Cons
-      (Core.Sexp.Deriving.field "by" (Geometry.sexp_of_vec v.by),
-       Cons
-         (Core.Sexp.Deriving.field "times" (Core.Sexp.sexp_of_int v.times),
-          Nil)))
+    Core.Sexp.List [
+      Core.Sexp.Deriving.field "by" (Geometry.sexp_of_vec v.by);
+      Core.Sexp.Deriving.field "times" (Core.Sexp.sexp_of_int v.times);
+    ]
 
   let step_of_sexp_exn sexp =
     match
-      Core.Sexp.Deriving.record_fields
-        "step_of_sexp"
-        (Cons ("by", Cons ("times", Nil)))
-        sexp
+      Core.Sexp.Deriving.record_fields "step_of_sexp" ["by"; "times"] sexp
     with
-    | Cons (by, Cons (times, Nil)) ->
+    | [by; times] ->
       {
         by = Core.Sexp.of_sexp_exn Geometry.vec_of_sexp by;
         times = Core.Sexp.of_sexp_exn Core.Sexp.int_of_sexp times;
@@ -807,37 +747,32 @@ module Shadowing = struct
 
   include%inline .~(.Core.Sexp.derive (type t))
     let sexp_of_t v =
-      .Core.Sexp.List (.Cons
-        (.Core.Sexp.Deriving.field "shape" (sexp_of_shape v.shape),
-         .Cons
-           (.Core.Sexp.Deriving.field "count" (.Core.Sexp.sexp_of_int v.count),
-            .Cons
-              (.Core.Sexp.Deriving.field
-                 "maybe"
-                 (.Core.Sexp.sexp_of_option
-                    (.Core.Sexp.sexp_of_list .Core.Sexp.sexp_of_int)
-                    v.maybe),
-               .Cons
-                 (.Core.Sexp.Deriving.field
-                    "either"
-                    (sexp_of_either
-                       sexp_of_point
-                       (.Core.Sexp.sexp_of_result
-                          .Core.Sexp.sexp_of_string
-                          .Core.Sexp.sexp_of_unit)
-                       v.either),
-                  .Nil)))))
+      .Core.Sexp.List [
+        .Core.Sexp.Deriving.field "shape" (sexp_of_shape v.shape);
+        .Core.Sexp.Deriving.field "count" (.Core.Sexp.sexp_of_int v.count);
+        .Core.Sexp.Deriving.field
+          "maybe"
+          (.Core.Sexp.sexp_of_option
+             (.Core.Sexp.sexp_of_list .Core.Sexp.sexp_of_int)
+             v.maybe);
+        .Core.Sexp.Deriving.field
+          "either"
+          (sexp_of_either
+             sexp_of_point
+             (.Core.Sexp.sexp_of_result
+                .Core.Sexp.sexp_of_string
+                .Core.Sexp.sexp_of_unit)
+             v.either);
+      ]
 
     let t_of_sexp_exn sexp =
       match
         .Core.Sexp.Deriving.record_fields
           "t_of_sexp"
-          (.Cons
-             ("shape",
-              .Cons ("count", .Cons ("maybe", .Cons ("either", .Nil)))))
+          ["shape"; "count"; "maybe"; "either"]
           sexp
       with
-      | .Cons (shape, .Cons (count, .Cons (maybe, .Cons (either, .Nil)))) ->
+      | [shape; count; maybe; either] ->
         {
           shape = .Core.Sexp.of_sexp_exn shape_of_sexp shape;
           count = .Core.Sexp.of_sexp_exn .Core.Sexp.int_of_sexp count;
@@ -888,45 +823,37 @@ type inline = {big : int * int * int * int; dir : [`L | `R of int]}
 
 include%inline .~(Core.Sexp.derive (type inline))
   let sexp_of_inline v =
-    Core.Sexp.List (Cons
-      (Core.Sexp.Deriving.field
-         "big"
-         (match v.big with
-          | v0, v1, v2, v3 ->
-            Core.Sexp.List (Cons
-              (Core.Sexp.sexp_of_int v0,
-               Cons
-                 (Core.Sexp.sexp_of_int v1,
-                  Cons
-                    (Core.Sexp.sexp_of_int v2,
-                     Cons (Core.Sexp.sexp_of_int v3, Nil)))))),
-       Cons
-         (Core.Sexp.Deriving.field
-            "dir"
-            (match v.dir with
-             | `L -> Core.Sexp.Atom "L"
-             | `R v0 ->
-               Core.Sexp.List (Cons
-                 (Core.Sexp.Atom "R", Cons (Core.Sexp.sexp_of_int v0, Nil)))),
-          Nil)))
+    Core.Sexp.List [
+      Core.Sexp.Deriving.field
+        "big"
+        (match v.big with
+         | v0, v1, v2, v3 ->
+           Core.Sexp.List [
+             Core.Sexp.sexp_of_int v0;
+             Core.Sexp.sexp_of_int v1;
+             Core.Sexp.sexp_of_int v2;
+             Core.Sexp.sexp_of_int v3;
+           ]);
+      Core.Sexp.Deriving.field
+        "dir"
+        (match v.dir with
+         | `L -> Core.Sexp.Atom "L"
+         | `R v0 ->
+           Core.Sexp.List [Core.Sexp.Atom "R"; Core.Sexp.sexp_of_int v0]);
+    ]
 
   let inline_of_sexp_exn sexp =
     match
-      Core.Sexp.Deriving.record_fields
-        "inline_of_sexp"
-        (Cons ("big", Cons ("dir", Nil)))
-        sexp
+      Core.Sexp.Deriving.record_fields "inline_of_sexp" ["big"; "dir"] sexp
     with
-    | Cons (big, Cons (dir, Nil)) ->
+    | [big; dir] ->
       {
         big =
           Core.Sexp.of_sexp_exn
             (Core.Sexp.Deriving.catch
                (fun sexp ->
                   match sexp with
-                  | Core.Sexp.List (Cons (v0,
-                                          Cons (v1,
-                                                Cons (v2, Cons (v3, Nil))))) ->
+                  | Core.Sexp.List [v0; v1; v2; v3] ->
                     (Core.Sexp.of_sexp_exn Core.Sexp.int_of_sexp v0,
                      Core.Sexp.of_sexp_exn Core.Sexp.int_of_sexp v1,
                      Core.Sexp.of_sexp_exn Core.Sexp.int_of_sexp v2,
@@ -940,14 +867,13 @@ include%inline .~(Core.Sexp.derive (type inline))
                (fun sexp ->
                   match sexp with
                   | Core.Sexp.Atom "L" -> `L
-                  | Core.Sexp.List (Cons (Core.Sexp.Atom "R",
-                                          Cons (v0, Nil))) ->
+                  | Core.Sexp.List [Core.Sexp.Atom "R"; v0] ->
                     `R (Core.Sexp.of_sexp_exn Core.Sexp.int_of_sexp v0)
                   | _ ->
                     Core.Sexp.Deriving.variant_error
                       "inline_of_sexp"
-                      (Cons ("L", Nil))
-                      (Cons ("R", Nil))
+                      ["L"]
+                      ["R"]
                       sexp))
             dir;
       }
