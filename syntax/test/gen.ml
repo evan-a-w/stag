@@ -144,6 +144,7 @@ let rec pattern t : Pattern.t =
                { fields = list t ~min:0 ~max:3 (fun t -> label t, pattern t)
                ; rest = pick t [ Pattern.Rest.Closed; Open; Bind (name t) ]
                })
+         ; (fun t -> Exception (pattern t))
          ])
 ;;
 
@@ -230,7 +231,7 @@ let type_decl t : Type_decl.t =
 
 let rec toplevel t : Toplevel.t =
   loc
-    (match int t 8 with
+    (match int t 9 with
      | 0 ->
        Toplevel.Let
          ( name t
@@ -244,5 +245,6 @@ let rec toplevel t : Toplevel.t =
        Module (loc (uident t), list t ~min:0 ~max:3 toplevel)
      | 5 -> Module_splice (loc (uident t), expr t)
      | 6 -> Include (expr t)
+     | 7 -> Exception (loc (uident t), list t ~min:0 ~max:3 type_expr)
      | _ -> Let (name t, [], None, expr t))
 ;;

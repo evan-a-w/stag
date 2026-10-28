@@ -436,6 +436,12 @@ let%expect_test "patterns" =
   pat "C (p, q)";
   pat "C ((p, q))";
   pat "C D x";
+  pat "exception E";
+  pat "exception E x";
+  pat "exception M.E (a, b)";
+  pat "exception e, x";
+  pat "exception (e, x)";
+  pat "C exception e";
   pat "{x = p; M.y = q}";
   pat "`A";
   pat "`A p";
@@ -464,6 +470,12 @@ let%expect_test "patterns" =
     (Construct C ((Var p) (Var q)))
     (Construct C ((Tuple ((Var p) (Var q)))))
     (Construct C ((Construct D ((Var x)))))
+    (Exception (Construct E ()))
+    (Exception (Construct E ((Var x))))
+    (Exception (Construct M.E ((Var a) (Var b))))
+    (Tuple ((Exception (Var e)) (Var x)))
+    (Exception (Tuple ((Var e) (Var x))))
+    t.stag:1:2-11: expected end of file, found `exception`
     (Record ((x (Var p)) (M.y (Var q))))
     (Poly_variant A ())
     (Poly_variant A ((Var p)))
@@ -558,6 +570,9 @@ let%expect_test "declarations" =
     type e = |
     type b = | A | B
     type c = A
+    exception E
+    exception F of int * M.t
+    exception G of (int * string)
     module M = struct
       let x = 1
       module N = struct end
@@ -584,7 +599,9 @@ let%expect_test "declarations" =
      (Type ((name m) (params ()) (kind (Alias (Con M.t ())))))
      (Type ((name e) (params ()) (kind (Variant ()))))
      (Type ((name b) (params ()) (kind (Variant ((A ()) (B ()))))))
-     (Type ((name c) (params ()) (kind (Variant ((A ()))))))
+     (Type ((name c) (params ()) (kind (Variant ((A ())))))) (Exception E ())
+     (Exception F ((Con int ()) (Con M.t ())))
+     (Exception G ((Tuple ((Con int ()) (Con string ())))))
      (Module M ((Let x () () (Lit (Int 1))) (Module N ()))))
     |}]
 ;;

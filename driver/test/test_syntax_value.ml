@@ -16,6 +16,10 @@ let%expect_test "the prelude's signature" =
     {|
     type list['a] = Nil | Cons of 'a * list['a]
     type option['a] = None | Some of 'a
+    exception Division_by_zero
+    exception Invalid_argument of string
+    exception Failure of string
+    val raise : exn -> 'a
     module Stag : sig
       val map : ('a -> 'b) -> list['a] -> list['b]
       module Type_ref : sig
@@ -144,6 +148,7 @@ let poly = ({`x = 1; `y = true}, r.`x, {`x = v; `y = w | r}, r \ `x, {r with `x 
 let staged = .< .~e >.
 let splices = (.~(f x), .~e.{}, .~e.{x = e1; y})
 let types = (type t, type M.t, type list['a], type (int * t), f (type t))
+let exns = match f x with y -> y | exception E -> 1 | exception M.F (a, b) -> 2 | exception e -> raise e
 |}
   ; {stag|
 module M = struct
@@ -158,6 +163,9 @@ let%expect_test "power" =
   [%expect]
 module G = .~(gen 1)
 include .~gen
+exception E
+exception F of int * list['a]
+exception G of (int * string)
 |stag}
   ]
 ;;
@@ -253,8 +261,7 @@ let%expect_test "constructors are made as the typechecker resolves them" =
     {|
     ((constructors 71)
      (reflected
-      (prelude.Stag.Path.Ref prelude.Stag.Pattern.Exception
-       prelude.Stag.Toplevel.Exception prelude.Stag.Type.Kind.Alias
+      (prelude.Stag.Path.Ref prelude.Stag.Type.Kind.Alias
        prelude.Stag.Type.Kind.Record prelude.Stag.Type.Kind.Variant))
      (others_same_as_to_value true))
     |}]

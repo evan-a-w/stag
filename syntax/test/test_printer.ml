@@ -306,6 +306,14 @@ let f x =
   | {`x = a; ..rest} -> 1
   | {..} -> 1
   | {} -> 1
+  | exception E -> 1
+  | exception (E x) -> 1
+  | exception M.E (a, b) -> 1
+  | exception `A x -> 1
+  | exception (a, b) -> 1
+  | exception exception e -> 1
+  | (exception e, exception C x) -> 1
+  | C (exception e) -> 1
 |};
   [%expect
     {|
@@ -325,6 +333,14 @@ let f x =
       | {`x = a; ..rest} -> 1
       | {..} -> 1
       | {} -> 1
+      | exception E -> 1
+      | exception E x -> 1
+      | exception M.E (a, b) -> 1
+      | exception `A x -> 1
+      | exception (a, b) -> 1
+      | exception exception e -> 1
+      | exception e, exception C x -> 1
+      | C (exception e) -> 1
     |}]
 ;;
 

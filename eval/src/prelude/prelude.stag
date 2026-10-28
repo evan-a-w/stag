@@ -4,6 +4,13 @@
 type list['a] = Nil | Cons of 'a * list['a]
 type option['a] = None | Some of 'a
 
+(* Raised by prims on errors in their arguments. *)
+exception Division_by_zero
+exception Invalid_argument of string
+exception Failure of string
+
+let raise = Intrinsic.raise
+
 module Stag = struct
   (* The syntax of stag as data, mirroring [Syntax], for declarations generated
      at compile time. Names are as written, without backticks or quotes: [x],
