@@ -100,6 +100,10 @@ module Expr : sig
           ; body : t
           ; in_ : t
           }
+      | Fun of
+          { args : (Binder.t * Syntax.Type_expr.t option) list
+          ; body : t
+          }
       | Splice of
           { code : t
           ; subs : Subs.t

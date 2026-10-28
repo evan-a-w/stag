@@ -150,6 +150,10 @@ module Expr = struct
           ; body : t
           ; in_ : t
           }
+      | Fun of
+          { args : (Binder.t * Syntax.Type_expr.t option) list
+          ; body : t
+          }
       | Splice of
           { code : t
           ; subs : Subs.t
@@ -185,6 +189,11 @@ module Expr = struct
         ; annot
         ; body = sub equal
         ; in_ = sub in_
+        }
+    | Fun (args, body) ->
+      Fun
+        { args = List.map args ~f:(fun (name, annot) -> Binder.Name name, annot)
+        ; body = sub body
         }
     | Splice { expr; subs } ->
       Splice
@@ -236,6 +245,11 @@ module Expr = struct
         ; annot = None
         ; body = sub body
         ; in_ = sub in_
+        }
+    | Fun { args; body } ->
+      Fun
+        { args = List.map args ~f:(fun ident -> Binder.Ident ident, None)
+        ; body = sub body
         }
     | Splice { code; subs = Explicit subs } ->
       Splice

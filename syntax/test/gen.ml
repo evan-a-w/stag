@@ -173,6 +173,7 @@ let rec expr t : Expr.t =
                , expr t
                , expr t ))
          ; (fun t -> Let (loc "_", [], None, expr t, expr t))
+         ; (fun t -> Fun (list t ~min:1 ~max:2 binding, expr t))
          ; (fun t ->
              Splice
                { expr = expr t

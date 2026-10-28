@@ -26,7 +26,7 @@ node, for good errors.
   variables.
 - Paths: `M.N.x`, `M.t`, `M.C`. A path is a sequence of capitalized names
   followed by the final name; `r.x` with lowercase `r` is a field access.
-- Keywords: `let rec in match with type of module struct end`, `true false`.
+- Keywords: `let rec in match with fun type of module struct end`, `true false`.
   `rec` is reserved, as lets are always recursive.
 - `@` and `@@` are reserved (for modes, see below).
 - Staging tokens: `.<` `>.` `.~`, and `.{` (a splice's substitutions).
@@ -62,6 +62,7 @@ arguments, `C of (int * int)` one, a tuple. Weak variables
 ```ocaml
 let f x (y : int) : t = e in body   (* lets are always recursive: no `rec` *)
 e1; e2                              (* sugar for let _ = e1 in e2 *)
+fun x (y : int) _ -> e              (* anonymous function, of let's params *)
 match e with | p -> e | ...         (* leading | optional; arms are e1; e2 level *)
 f x y                               (* application, left assoc *)
 (x : t)                             (* annotated variable: Expr.Var's annotation *)
@@ -90,7 +91,7 @@ Precedence, loosest first:
 
 | Construct                                  | Associativity      |
 | ------------------------------------------ | ------------------ |
-| `let ... in`, `match` (extend right)       |                    |
+| `let ... in`, `match`, `fun` (extend right) |                    |
 | `e1; e2`                                   | right              |
 | `e1, e2`                                   | n-ary              |
 | `C e`, `` `A e ``, `type t`               | right (`C D x`)    |
@@ -98,11 +99,11 @@ Precedence, loosest first:
 | splice `.~e`, `.~e.{...}`                  | prefix             |
 | `e.x`, `e.M.x`, `` e.`x ``, `` e \ `x ``   | left, postfix      |
 
-`let` and `match` may also start a tuple component (`a, let x = 1 in x, y` is
-`(a, let x = 1 in (x, y))`). Restriction is postfix like field access, so
+`let`, `match` and `fun` may also start a tuple component (`a, let x = 1 in x, y` is
+`(a, let x = 1 in (x, y))`), but not an argument (`f (fun x -> x)`). Restriction is postfix like field access, so
 `` f r \ `x `` is `` f (r \ `x) ``. Record field values, extended records (after `|`)
-and substitutions are at the tuple level (`{x = 1, 2}`), and a `let` or `match`
-there ends at the next `;` rather than sequencing (`{x = let a = 1 in a; y = 2}`
+and substitutions are at the tuple level (`{x = 1, 2}`), and a `let`, `match`
+or `fun` there ends at the next `;` rather than sequencing (`{x = let a = 1 in a; y = 2}`
 has two fields; parenthesize to sequence); the record of an update
 `{e with ...}` is at the splice level. Trailing `;` is allowed in `{...}`.
 `C (a, b)` has two arguments and `C ((a, b))` one, a tuple, as in OCaml
@@ -116,6 +117,11 @@ parenthesized type (`type (int -> t)`); as an argument it is parenthesized
 
 `match` arms extend as far as possible, as in OCaml (wrap nested matches in
 parentheses).
+
+`fun` takes at least one parameter, each as a `let`'s: `x`, `_` or `(x : t)`
+(no patterns). `fun x y -> e` is `let f x y = e in f` for a fresh `f`: its
+type is that of such a let (so `let id = fun x -> x` is generalized, being a
+value), and it has no name to recurse by.
 
 ## Patterns
 
@@ -373,5 +379,5 @@ val n : int @@ const      (* modalities on signature items and fields *)
 
 ### Other
 
-`fun`, `if`, infix operators (`let (+) x y = ...`, OCaml precedences),
+`if`, infix operators (`let (+) x y = ...`, OCaml precedences),
 interface files.

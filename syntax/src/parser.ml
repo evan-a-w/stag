@@ -634,12 +634,22 @@ let param t : Binding.t =
   | _ -> binder t, None
 ;;
 
+let params t =
+  let rec loop acc =
+    match peek t with
+    | Lident _ | Underscore | Lparen -> loop (param t :: acc)
+    | _ -> List.rev acc
+  in
+  loop []
+;;
+
 (* With [~seq:false], as in a [{...}] entry, [e1; e2] is not parsed (also in
    the bodies of [let] and [match]), leaving the [;] as the separator. *)
 let rec expr ?(seq = true) t : Expr.t =
   match peek t with
   | Let -> let_ t ~seq
   | Match -> match_ t ~seq
+  | Fun -> fun_ t ~seq
   | _ ->
     let first = tuple t ~seq in
     if seq && is t Semi
@@ -663,12 +673,7 @@ and binding t =
       located ~loc "_"
     | _ -> lident t ~what:"a name to bind"
   in
-  let rec params acc =
-    match peek t with
-    | Lident _ | Underscore | Lparen -> params (param t :: acc)
-    | _ -> List.rev acc
-  in
-  let params = params [] in
+  let params = params t in
   let annot =
     if is t Colon
     then (
@@ -688,6 +693,15 @@ and let_ t ~seq : Expr.t =
   expr_at
     ~loc:(Loc.merge start body.loc)
     (Expr.Let (name, params, annot, equal, body))
+
+and fun_ t ~seq : Expr.t =
+  let start = loc t in
+  expect t Fun;
+  let params = params t in
+  if List.is_empty params then expected t "a parameter";
+  expect t Arrow;
+  let body = expr t ~seq in
+  expr_at ~loc:(Loc.merge start body.loc) (Expr.Fun (params, body))
 
 and match_ t ~seq : Expr.t =
   let start = loc t in
@@ -728,6 +742,7 @@ and tuple_item t ~seq : Expr.t =
   match peek t with
   | Let -> let_ t ~seq
   | Match -> match_ t ~seq
+  | Fun -> fun_ t ~seq
   | _ -> construct t
 
 (** A value in [{...}]. *)

@@ -137,6 +137,26 @@ let%expect_test "minimal parentheses" =
     ; "let _ = a in b"
     ; "let _ x = a in b"
     ; "let _ : int = a in b"
+    ; "fun x -> x"
+    ; "fun x (y : int) _ -> fun z -> x, y; z"
+    ; "f (fun x -> x) (fun x -> x)"
+    ; "f (fun x -> x) y"
+    ; "(fun x -> x) y"
+    ; "(fun x -> x).y"
+    ; "C (fun x -> x)"
+    ; "(fun x -> x), y"
+    ; "a, fun x -> x"
+    ; "(fun x -> x); y"
+    ; "a; fun x -> x"
+    ; "match x with A -> (fun y -> y) | B -> b"
+    ; "match x with A -> fun y -> y"
+    ; "match fun y -> y with A -> a"
+    ; "let f = fun x -> x in f"
+    ; "{x = fun y -> y; z = (fun y -> y; y)}"
+    ; "{`x = fun y -> y}"
+    ; "{`x = (fun y -> y) | r}"
+    ; ".~(fun x -> x)"
+    ; ".< fun x -> .~(f .< x >.) >."
     ]
   [@ocamlformat "disable"];
   [%expect
@@ -236,6 +256,34 @@ let%expect_test "minimal parentheses" =
     b
     let _ : int = a in
     b
+    fun x -> x
+    fun x (y : int) _ ->
+      fun z ->
+        (x, y);
+        z
+    f (fun x -> x) (fun x -> x)
+    f (fun x -> x) y
+    (fun x -> x) y
+    (fun x -> x).y
+    C (fun x -> x)
+    ((fun x -> x), y)
+    (a, fun x -> x)
+    (fun x -> x);
+    y
+    a;
+    fun x -> x
+    match x with
+    | A -> fun y -> y
+    | B -> b
+    match x with A -> fun y -> y
+    match (fun y -> y) with A -> a
+    let f = fun x -> x in
+    f
+    {x = fun y -> y; z = fun y -> (y; y)}
+    {`x = fun y -> y}
+    {`x = fun y -> y | r}
+    .~(fun x -> x)
+    .< fun x -> .~(f .< x >.) >.
     |xxx}]
 ;;
 
@@ -429,6 +477,36 @@ let lets =
         first_field = {inner = some_value; other = another_value};
         second = {a = 1; b = 2};
       }
+    |}]
+;;
+
+let%expect_test "anonymous functions" =
+  print
+    {|
+let f = List.map (fun element -> some_function element (another_function element)) list
+let g = fun (a_long_parameter : int) (another_long_parameter : string) (third : bool) -> body
+let h = fun a -> fun b -> match a with A -> b | B -> fun c -> c
+|};
+  [%expect
+    {|
+    let f =
+      List.map
+        (fun element -> some_function element (another_function element))
+        list
+
+    let g =
+      fun
+          (a_long_parameter : int)
+          (another_long_parameter : string)
+          (third : bool) ->
+        body
+
+    let h =
+      fun a ->
+        fun b ->
+          match a with
+          | A -> b
+          | B -> fun c -> c
     |}]
 ;;
 

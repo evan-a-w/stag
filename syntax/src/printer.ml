@@ -247,7 +247,7 @@ module Level = struct
   type t =
     | Seq
     | Item
-    (** A tuple's item, or a value in [{...}]: also [let], [match] and
+    (** A tuple's item, or a value in [{...}]: also [let], [match], [fun] and
         negative literals. *)
     | Construct
     | App
@@ -257,8 +257,8 @@ module Level = struct
   [@@deriving compare]
 end
 
-(** What follows an expression, which a [let] or [match] ending it would take
-    as its own. *)
+(** What follows an expression, which a [let], [match] or [fun] ending it
+    would take as its own. *)
 module After = struct
   type t =
     | Nothing
@@ -270,7 +270,8 @@ end
 module Ctx = struct
   type t =
     { level : Level.t
-    ; seq : bool (** Whether the bodies of [let]s and [match]es are [Seq]s. *)
+    ; seq : bool
+      (** Whether the bodies of [let]s, [match]es and [fun]s are [Seq]s. *)
     ; after : After.t
     ; flat : bool
       (** Whether [let]s and sequences may stay on one line, as in parentheses,
@@ -281,13 +282,13 @@ module Ctx = struct
   let at level = { top with level }
   let item ?(seq = true) after = { level = Item; seq; after; flat = true }
 
-  (* The level of the bodies of [let]s and [match]es. *)
+  (* The level of the bodies of [let]s, [match]es and [fun]s. *)
   let body t = if t.seq then Level.Seq else Item
 end
 
 let rec unwrap (e : Expr.t) =
   match e.txt with
-  | Tuple [ e ] -> unwrap e
+  | Tuple [ e ] | Fun ([], e) -> unwrap e
   | _ -> e
 ;;
 
@@ -307,7 +308,7 @@ let level (e : Expr.t) : Level.t =
   let e = unwrap e in
   match e.txt with
   | Let _ when Option.is_some (seq e) -> Seq
-  | Let _ | Match _ -> Item
+  | Let _ | Match _ | Fun _ -> Item
   | Lit (Int n) when n < 0 -> Item
   | _ when is_construct e -> Construct
   | App _ -> App
@@ -329,9 +330,9 @@ let level (e : Expr.t) : Level.t =
 
 let bare_at at e = Level.compare (level e) at >= 0
 
-let is_let_or_match e =
+let extends_right e =
   match (unwrap e).txt with
-  | Let _ | Match _ -> true
+  | Let _ | Match _ | Fun _ -> true
   | _ -> false
 ;;
 
@@ -342,7 +343,7 @@ let rec ends_with_match ~seq:in_seq e =
   match e.txt, seq e with
   | Match _, _ -> true
   | Let _, Some (_, second) -> ends_with_match ~seq:true second
-  | Let (_, _, _, _, body), None ->
+  | (Let (_, _, _, _, body) | Fun (_, body)), None ->
     bare_at (Ctx.body { Ctx.top with seq = in_seq }) body
     && ends_with_match ~seq:in_seq body
   | _ -> false
@@ -351,7 +352,7 @@ let rec ends_with_match ~seq:in_seq e =
 let takes_after (ctx : Ctx.t) e =
   match ctx.after with
   | Nothing -> false
-  | Comma | Semi -> is_let_or_match e
+  | Comma | Semi -> extends_right e
   | Bar -> ends_with_match ~seq:ctx.seq e
 ;;
 
@@ -411,6 +412,13 @@ and bare (ctx : Ctx.t) (e : Expr.t) =
       (expr Ctx.top rhs)
     ^^ (if ctx.flat then line else hardline)
     ^^ expr { ctx with level = Ctx.body ctx } body
+  | Fun (params, body), _ ->
+    group
+      (group
+         (text "fun"
+          ^^ nest 4 (concat (List.map params ~f:(fun p -> line ^^ binding p)))
+          ^^ text " ->")
+       ^^ nest 2 (line ^^ expr { ctx with level = Ctx.body ctx } body))
   | Match (scrutinee, arms), _ ->
     let last = List.length arms - 1 in
     let arm i (p, body) =
@@ -431,10 +439,8 @@ and bare (ctx : Ctx.t) (e : Expr.t) =
          ^^ nest
               2
               (line
-               ^^ expr
-                    ~parenthesize:(is_let_or_match scrutinee)
-                    Ctx.top
-                    scrutinee)
+               ^^ expr ~parenthesize:(extends_right scrutinee) Ctx.top scrutinee
+              )
          ^^ line
          ^^ text "with")
     in

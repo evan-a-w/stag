@@ -15,8 +15,9 @@ module type S = sig
         lowercase constructor, a keyword, or [_] where the parser reads a
         name (it is accepted only as a let's name or a parameter);
       - a shape that no source means: a tuple of one component, or of none
-        except the type [()] ([()] is [Lit Unit] elsewhere), or a nominal
-        record of no fields (expression, pattern or type declaration).
+        except the type [()] ([()] is [Lit Unit] elsewhere), a nominal
+        record of no fields (expression, pattern or type declaration), or a
+        [fun] of no parameters.
 
       Other shapes the parser can't produce but that are meaningful are
       accepted, left to the typechecker: a negative int literal, a match of no

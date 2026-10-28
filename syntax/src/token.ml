@@ -17,6 +17,7 @@ type t =
   | In
   | Match
   | With
+  | Fun
   | Type
   | Of
   | Module
@@ -60,6 +61,7 @@ let keyword = function
   | "in" -> Some In
   | "match" -> Some Match
   | "with" -> Some With
+  | "fun" -> Some Fun
   | "type" -> Some Type
   | "of" -> Some Of
   | "module" -> Some Module
@@ -85,6 +87,7 @@ let to_string = function
   | In -> "in"
   | Match -> "match"
   | With -> "with"
+  | Fun -> "fun"
   | Type -> "type"
   | Of -> "of"
   | Module -> "module"
@@ -140,6 +143,7 @@ let ends_code : t -> bool = function
   | Let
   | Let_expect_test
   | Match
+  | Fun
   | Type
   | Module
   | Include

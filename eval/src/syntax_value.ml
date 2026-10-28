@@ -162,6 +162,7 @@ module To_value = struct
         ; expr equal
         ; expr body
         ]
+    | Fun (params, body) -> con "Fun" [ list binding params; expr body ]
     | Splice { expr = spliced; subs } ->
       con
         "Splice"
@@ -449,6 +450,12 @@ module Of_value = struct
     else components
   ;;
 
+  let params read value =
+    match list read value with
+    | [] -> unexpected ~expected:"at least one parameter" value
+    | params -> params
+  ;;
+
   let fields read value =
     match list read value with
     | [] -> unexpected ~expected:"at least one field" value
@@ -619,6 +626,7 @@ module Of_value = struct
              , arg 2 (option (type_expr ~loc))
              , arg 3 (expr ~loc)
              , arg 4 (expr ~loc) )
+         | "Fun", 2 -> Fun (arg 0 (params (binding ~loc)), arg 1 (expr ~loc))
          | "Splice", 1 ->
            arg 0 (fun splice : Expr.desc ->
              Splice

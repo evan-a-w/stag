@@ -280,6 +280,40 @@ let%expect_test "tuples, sequences, let and match" =
     |}]
 ;;
 
+let%expect_test "anonymous functions" =
+  expr "fun x -> x";
+  expr "fun x (y : int) _ (_ : bool) -> f x y";
+  expr "fun x -> a; b";
+  expr "fun x -> fun y -> x, y";
+  expr "f (fun x -> x) y";
+  expr "a, fun x -> x, y";
+  expr "match x with A -> fun y -> y | B -> b";
+  expr "{x = fun y -> y; z = 1}";
+  expr "fun -> x";
+  expr "fun x";
+  expr "fun 1 -> x";
+  expr "fun (x, y) -> x";
+  expr "f fun x -> x";
+  [%expect
+    {|
+    (Fun ((x ())) (Var x ()))
+    (Fun ((x ()) (y ((Con int ()))) (_ ()) (_ ((Con bool ()))))
+     (App (App (Var f ()) (Var x ())) (Var y ())))
+    (Fun ((x ())) (Let _ () () (Var a ()) (Var b ())))
+    (Fun ((x ())) (Fun ((y ())) (Tuple ((Var x ()) (Var y ())))))
+    (App (App (Var f ()) (Fun ((x ())) (Var x ()))) (Var y ()))
+    (Tuple ((Var a ()) (Fun ((x ())) (Tuple ((Var x ()) (Var y ()))))))
+    (Match (Var x ())
+     (((Construct A ()) (Fun ((y ())) (Var y ()))) ((Construct B ()) (Var b ()))))
+    (Record ((x (Fun ((y ())) (Var y ()))) (z (Lit (Int 1)))))
+    t.stag:1:4-6: expected a parameter, found `->`
+    t.stag:1:5-5: expected `->`, found end of file
+    t.stag:1:4-5: expected a parameter, found `1`
+    t.stag:1:6-7: expected `:`, found `,`
+    t.stag:1:2-5: expected end of file, found `fun`
+    |}]
+;;
+
 let%expect_test "records" =
   expr "{x = 1; M.y = 2}";
   expr "{x = 1, 2;}";

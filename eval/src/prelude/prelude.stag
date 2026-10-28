@@ -132,6 +132,7 @@ module Stag = struct
       | Var of string * option[Type_expr.t]
       | App of t * t
       | Let of string * list[Binding.t] * option[Type_expr.t] * t * t
+      | Fun of list[Binding.t] * t
       | Splice of {`expr : t; `subs : option[list[string * option[t]]]}
       | Quote of t
       | Tuple of list[t]

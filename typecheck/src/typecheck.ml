@@ -996,6 +996,12 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
         ~f:(fun () -> expr_type t scope ~expr:in_)
     in
     node (Let { ident; args; body; in_; generalized }) in_.ty
+  | Fun { args; body } ->
+    let%bind.Result args, res_ty, ty =
+      function_type t scope ~args ~annot:None
+    in
+    let%map.Result body = check_body t scope ~args ~res_ty ~body in
+    node (Fun { args = List.map args ~f:fst; body }) ty
   | Quote expr ->
     let quote =
       { Scope.id = Fresh.id t

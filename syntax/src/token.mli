@@ -17,6 +17,7 @@ type t =
   | In
   | Match
   | With
+  | Fun
   | Type
   | Of
   | Module

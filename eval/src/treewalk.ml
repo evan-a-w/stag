@@ -79,6 +79,9 @@ let captures t ~ident ~args ~body =
       List.iter args ~f:def;
       go ~depth body;
       go ~depth in_
+    | Fun { args; body } ->
+      List.iter args ~f:def;
+      go ~depth body
     | Splice { code; subs } ->
       go ~depth:(depth - 1) code;
       (match subs with
@@ -179,6 +182,9 @@ let map_children ~depth (expr : Typed.Expr.t) ~f =
       let%bind body = same let_.body in
       let%map in_ = same let_.in_ in
       Typed.Expr.Desc.Let { let_ with body; in_ }
+    | Fun fun_ ->
+      let%map body = same fun_.body in
+      Typed.Expr.Desc.Fun { fun_ with body }
     | Splice { code; subs } ->
       let%bind code = f ~depth:(depth - 1) code in
       let%map subs : Typed.Expr.t Typed.Expr.Subs.t =
@@ -292,6 +298,7 @@ let instantiate t (code : Typed.Expr.t) ~entry =
       | Let let_ ->
         let ident = fresh let_.ident in
         Let { let_ with ident; args = List.map let_.args ~f:fresh }
+      | Fun fun_ -> Fun { fun_ with args = List.map fun_.args ~f:fresh }
       | Match (expr, cases) ->
         Match (expr, List.map cases ~f:(fun (p, body) -> pattern p, body))
       | Splice { code; subs = Implicit providers } ->
@@ -522,6 +529,9 @@ and step t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
   | Let { ident; args; generalized = _; body; in_ } ->
     let%bind () = bind_let t ~env ~level ~ident ~args ~body in
     eval' in_
+  | Fun { args; body } ->
+    (* Its first parameter identifies it, as a let's name does. *)
+    closure t ~env ~level ~ident:(List.hd_exn args) ~args ~body
   | Splice _ -> Or_error.error_s [%message "Splice outside a quote evaluated"]
   | Toplevel_splice { code = _; expansion } -> eval' expansion
   | Quote body ->

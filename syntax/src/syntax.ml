@@ -163,6 +163,7 @@ module Expr = struct
     | Var of Path.t * Type_expr.t option
     | App of t * t
     | Let of Name.t * Binding.t list * Type_expr.t option * t * t
+    | Fun of Binding.t list * t (** [fun x (y : t) -> e], of some params. *)
     | Splice of
         { expr : t
         ; subs :

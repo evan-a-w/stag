@@ -134,6 +134,10 @@ module Expr : sig
           ; body : 'e (** [ident] is bound in [body]. *)
           ; in_ : 'e
           }
+      | Fun of
+          { args : Ident.t list (** Non-empty. *)
+          ; body : 'e
+          }
       | Splice of
           { code : 'e (** At the level outside the splice. *)
           ; subs : 'e Subs.t

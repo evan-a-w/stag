@@ -179,6 +179,10 @@ module Expr = struct
           ; body : 'e
           ; in_ : 'e
           }
+      | Fun of
+          { args : Ident.t list
+          ; body : 'e
+          }
       | Splice of
           { code : 'e
           ; subs : 'e Subs.t
@@ -224,6 +228,7 @@ module Expr = struct
     | Splice { code; subs = Explicit subs } -> code :: snds subs
     | Splice { code; subs = Implicit _ } -> [ code ]
     | Quote e
+    | Fun { body = e; _ }
     | Field (e, _)
     | Poly_field (e, _)
     | Poly_restrict (e, _)
@@ -245,7 +250,7 @@ module Expr = struct
 
   let rec is_value t =
     match t.desc with
-    | Lit _ | Var _ | Type _ -> true
+    | Lit _ | Var _ | Type _ | Fun _ -> true
     | Quote expr -> splices_are_values expr ~depth:1
     | Let { ident; args; body; in_; generalized = _ } ->
       binding_is_value ~ident ~args ~body && is_value in_
@@ -283,6 +288,7 @@ module Expr = struct
     | Var _
     | App _
     | Let _
+    | Fun _
     | Tuple _
     | Construct _
     | Record _

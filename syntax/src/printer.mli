@@ -5,7 +5,7 @@ open! Import
 
     Syntax the parser never produces is printed as the closest that parses:
     one element [Tuple]s as their element, and empty ones and nominal records
-    as [()] and [{}].
+    as [()] and [{}], and a [Fun] of no parameters as its body.
 
     A [Decl_path.Resolved], which has no syntax of its own, is printed as its
     canonical name as a path, without the prelude's root for the prelude's
