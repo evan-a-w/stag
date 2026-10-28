@@ -673,7 +673,7 @@ module Kind = struct
     match t.txt with
     | Let _ -> Let
     | Type _ | Exception _ -> Type
-    | Module _ | Module_splice _ | Include _ | Expect_test _ -> Other
+    | Module _ | Module_splice _ | Include _ | Expect_test _ | Bench _ -> Other
   ;;
 end
 
@@ -701,6 +701,30 @@ let rec toplevel ~width ~indent ~blank_between (t : Toplevel.t) =
     definition
       (text ("let%expect_test " ^ string_literal name.txt))
       (expr_doc body)
+  | Bench { name; param; body } ->
+    let lhs = text ("let%bench " ^ string_literal name.txt) in
+    let lhs =
+      match param with
+      | None -> lhs
+      | Some { name = x; args } ->
+        let last = List.length args - 1 in
+        lhs
+        ^^ text (" " ^ x.txt ^ " in ")
+        ^^ group
+             (text "["
+              ^^ nest
+                   2
+                   (cut
+                    ^^ separate
+                         (text ";" ^^ line)
+                         (List.mapi args ~f:(fun i arg ->
+                            entry
+                              ~after:(if i = last then Nothing else Semi)
+                              arg)))
+              ^^ cut
+              ^^ text "]")
+    in
+    definition lhs (expr_doc body)
 
 and toplevels ~width ~indent ~blank_between ts =
   let one_line doc = fits_flat ~width:(width - indent) doc in

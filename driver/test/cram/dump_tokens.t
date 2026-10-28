@@ -3,6 +3,7 @@ Each token and comment, with its byte offsets.
   $ cat > a.stag <<'EOF'
   > (* c "*)" *) let%expect_test "t" = let x = 'a' in {id|q|id}
   > type 'a t = `A of '_b | Some -1 [%expect]
+  > let%bench "b" = 1
   > EOF
   $ stag dump-tokens a.stag
   (comment 0 12)
@@ -27,6 +28,10 @@ Each token and comment, with its byte offsets.
   (int 89 91)
   (expect 92 100)
   (punct 100 101)
+  (expect 102 111)
+  (string 112 115)
+  (punct 116 117)
+  (int 118 119)
 
 Before an error, the tokens that lex.
 

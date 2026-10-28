@@ -17,3 +17,5 @@ module Treewalk = Stag_eval.Treewalk
 module Typecheck = Stag_typecheck.Typecheck
 module Typecheck_error = Stag_typecheck.Typecheck_error
 module Prelude = Stag_eval.Prelude
+module Value = Stag_eval.Value
+module Measure = Stag_measure

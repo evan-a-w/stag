@@ -7,7 +7,12 @@ open! Import
     a [Driver.Module_group.Group], so its files are evaluated in dependency
     order as a program's are. *)
 
-(** Prims print to [output], stdout by default, as for [Driver.check]. *)
+val parse
+  :  Project.t
+  -> Project.Target.t
+  -> (Driver.Module_group.t list, Diagnostic.t list) Result.t
+
+(** [parse], then [Driver.check_modules]. Prims print to [output], stdout by default, as for [Driver.check]. *)
 val check
   :  ?output:(string -> unit)
   -> Project.t

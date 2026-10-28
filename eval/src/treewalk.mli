@@ -84,6 +84,14 @@ val run_expect_test
   -> on_expect:(string Located.t -> unit)
   -> unit Or_error.t
 
+(** Evaluates [expr] at runtime (level 0), after [eval], in an env of
+    [bindings], eg. the body of a [let%bench]. *)
+val eval_expr
+  :  ?bindings:(Typed.Ident.t * Value.t) list
+  -> t
+  -> Typed.Expr.t
+  -> Value.t Or_error.t
+
 (** Evaluates the toplevel [ident], of a component queued, unless it already
     is. *)
 val eval_toplevel : t -> ident:Typed.Ident.t -> unit Or_error.t

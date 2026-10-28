@@ -25,8 +25,8 @@ let report files diagnostic =
   eprintf "%s%!" (Diagnostic.to_string_hum ~contents diagnostic)
 ;;
 
-let check ~limits files =
-  match Driver.check_files ~limits files with
+let check ?output ~limits files =
+  match Driver.check_files ?output ~limits files with
   | Ok driver -> driver
   | Error error ->
     report files (Diagnostic.of_driver_error error);
@@ -192,6 +192,56 @@ let test_command =
        if errors > 0 || (failed_on_mismatch && failed > 0) then exit 1)
 ;;
 
+let bench_command ~fake_clock =
+  Command.basic
+    ~summary:"Run the benchmarks of the program of the files"
+    ~readme:(fun () ->
+      "Runs the let%bench benchmarks whose names contain any -filter (all \
+       without), or with -phases benchmarks the interpreter on the program: \
+       parsing, typechecking and evaluating it. Output of the program is \
+       discarded. Baselines are saved in -baseline-dir. Benchmarks are \
+       unlimited; limits apply to compile time and evaluation.")
+    (let%map_open.Command paths = files_param
+     and limits = limits_param
+     and options = Bench_command.Options.param ~fake_clock
+     and filters =
+       flag
+         "filter"
+         (listed string)
+         ~doc:"SUBSTRING run only the benchmarks whose names contain it"
+     and phases =
+       flag "phases" no_arg ~doc:" benchmark the phases of the interpreter"
+     and baseline_dir =
+       flag
+         "baseline-dir"
+         (optional_with_default "_stag/bench" string)
+         ~doc:"DIR where baselines are saved (default: _stag/bench)"
+     in
+     fun () ->
+       let files = read_files paths in
+       let driver = check ~output:ignore ~limits files in
+       let benches =
+         if phases
+         then Phase_bench.benches (Phase_bench.parse_files files)
+         else (
+           eval ~limits files driver;
+           match Bench_runner.benches driver with
+           | Ok benches -> benches
+           | Error diagnostic ->
+             report files diagnostic;
+             exit 1)
+       in
+       if
+         not
+           (Bench_command.run
+              ~filters
+              options
+              ~baseline_dir
+              ~report:(report files)
+              benches)
+       then exit 1)
+;;
+
 let fmt_command =
   Command.basic
     ~summary:"Format the files"
@@ -258,13 +308,17 @@ let dump_tokens_command =
 ;;
 
 let () =
+  let argv, fake_clock =
+    Bench_command.take_fake_clock (Array.to_list (Sys.get_argv ()))
+  in
   Command.group
     ~summary:"The stag language"
     [ "check", check_command
     ; "run", run_command
     ; "test", test_command
+    ; "bench", bench_command ~fake_clock
     ; "fmt", fmt_command
     ; "dump-tokens", dump_tokens_command
     ]
-  |> Command_unix.run
+  |> Command_unix.run ~argv
 ;;

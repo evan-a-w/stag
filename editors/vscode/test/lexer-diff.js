@@ -216,12 +216,9 @@ function lexerView(file) {
 const show = ({ cls, start, stop }) => `(${cls} ${start} ${stop})`;
 
 // Lexer errors the grammar cannot or should not show.
-function silentError({ start, message }, text) {
+function silentError({ message }) {
   // The grammar does not know the range of int.
-  if (/exceeds the range of int/.test(message)) return true;
-  // let%bench is from the branch bench, which the lexer does not have yet.
-  const before = Buffer.from(text).subarray(0, start + 6).toString("latin1");
-  return /(?:^|[^A-Za-z0-9_'])let%bench$/.test(before);
+  return /exceeds the range of int/.test(message);
 }
 
 // Differences between the views of a source, as strings.
@@ -263,7 +260,7 @@ function compare(lexer, grammar, text) {
       grammar.spans.some(
         (s) => regions.has(s.cls) && !s.closed && s.start <= start,
       );
-    if (!shown && !silentError(lexer.error, text)) {
+    if (!shown && !silentError(lexer.error)) {
       problems.push(`grammar shows no error for the lexer's ${show(lexer.error)}`);
     }
   }

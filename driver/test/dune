@@ -4,6 +4,7 @@
   (pps ppx_jane))
  (inline_tests)
  (libraries
+  stag_measure
   core
   parsexp
   sexplib0
