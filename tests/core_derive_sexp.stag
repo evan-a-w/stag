@@ -286,7 +286,7 @@ let item = {
   note = None;
   status = Ok ();
   flags = (true, 'c');
-  raw = Core.Sexp.List ([Core.Sexp.Atom "any"]);
+  raw = Core.Sexp.List [Core.Sexp.Atom "any"];
 }
 
 let%expect_test "nested types" =
@@ -493,9 +493,7 @@ let%expect_test "mutually recursive types" =
   round_trip
     sexp_of_expr
     expr_of_sexp
-    (Block (Cons
-       ({title = Some "a"; body = Num 1},
-        [{title = None; body = Block []}])));
+    (Block [{title = Some "a"; body = Num 1}; {title = None; body = Block []}]);
   [%expect {| (Block (((title (a)) (body (Num 1))) ((title ()) (body (Block ()))))) |}]
 
 (* Aliases convert as the type they stand for. *)
@@ -504,11 +502,11 @@ type points = list[point]
 type quad = int * string * bool * char
 
 include%inline .~(Core.List.concat
-                    (Cons
-                       (Core.Sexp.derive (type id),
-                        Cons
-                          (Core.Sexp.derive (type points),
-                           [Core.Sexp.derive (type quad)]))))
+                    [
+                      Core.Sexp.derive (type id);
+                      Core.Sexp.derive (type points);
+                      Core.Sexp.derive (type quad);
+                    ])
   let sexp_of_id v = Core.Sexp.sexp_of_int v
   let id_of_sexp_exn sexp = Core.Sexp.int_of_sexp_exn sexp
   let id_of_sexp sexp = Core.Sexp.int_of_sexp sexp
@@ -540,10 +538,7 @@ end%inline
 
 let%expect_test "aliases" =
   round_trip sexp_of_id id_of_sexp 7;
-  round_trip
-    sexp_of_points
-    points_of_sexp
-    ([{x = 1; y = 2}; {x = 3; y = 4}]);
+  round_trip sexp_of_points points_of_sexp [{x = 1; y = 2}; {x = 3; y = 4}];
   round_trip sexp_of_quad quad_of_sexp (1, "b", false, 'd');
   parse sexp_of_quad quad_of_sexp "(1 b false)";
   parse sexp_of_id id_of_sexp "(7)";
@@ -671,7 +666,7 @@ module Shadowing = struct
 
   module Deriving = struct end
 
-  type mine = Some | None | Ok | Error | Cons | [] | Atom
+  type mine = Some | None | Ok | Error | Cons | Nil | Atom
   exception Of_sexp_error
 
   let raise x = x
@@ -741,7 +736,7 @@ module Shadowing = struct
       {
         shape = Circle 1;
         count = 2;
-        maybe = .Some (.Cons (3, .[]));
+        maybe = .Some [3];
         either = Right (.Error ());
       };
     parse
@@ -754,8 +749,8 @@ module Shadowing = struct
       |}]
 end
 
-(* Anonymous tuples of more than 3 and polymorphic variants within a type are
-   converted by functions in place. *)
+(* Anonymous tuples and polymorphic variants within a type are matched in
+   place. *)
 type inline = {big : int * int * int * int; dir : [`L | `R of int]}
 
 include%inline .~(Core.Sexp.derive (type inline))
