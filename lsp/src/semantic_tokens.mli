@@ -37,8 +37,8 @@ val legend : Lsp_types.SemanticTokensLegend.t
 
 (** The tokens of [text] (of [file], as named in locations), each on one
     line, in order. No tokens if it doesn't lex. [occurrences] are those of the
-    syntax, if it parses. [is_function offset] is whether the name at
-    [offset] is of a function. *)
+    syntax, if it parses. [is_function offset] is whether the name or
+    path starting at [offset] is of a function. *)
 val compute
   :  Text.t
   -> file:string

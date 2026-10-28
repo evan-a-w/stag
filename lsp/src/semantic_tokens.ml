@@ -188,20 +188,22 @@ let compute text ~file ~occurrences ~is_function =
       occurrences
       ~f:(fun ({ loc; kind; declaration; _ } : Syntax_names.Occurrence.t) ->
         let names = name_tokens loc in
-        Array.iteri names ~f:(fun i { token = _; loc } ->
-          let start = loc.start.offset in
+        Array.iteri names ~f:(fun i { token = _; loc = name_loc } ->
+          let start = name_loc.start.offset in
           let token_type : Token_type.t =
             if i < Array.length names - 1
             then Namespace
             else (
               match of_kind kind with
-              | (Variable | Parameter) when is_function start -> Function
+              | (Variable | Parameter) when is_function loc.start.offset ->
+                Function
               | token_type -> token_type)
           in
           Hashtbl.set
             by_start
             ~key:start
-            ~data:{ start; stop = loc.stop.offset; token_type; declaration }));
+            ~data:
+              { start; stop = name_loc.stop.offset; token_type; declaration }));
     (* Unclassified module paths, eg. of [include .~M.x]: *)
     Array.iteri tokens ~f:(fun i { token; loc } ->
       match token with

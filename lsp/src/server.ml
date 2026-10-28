@@ -35,7 +35,7 @@ type t =
   ; send : Jsonrpc.Packet.t -> unit
   ; documents : Document.t String.Table.t
   ; pending : String.Hash_set.t
-  ; with_diagnostics : String.Hash_set.t
+  ; published : Yojson.Safe.t String.Table.t
   ; mutable state : State.t
   ; mutable refresh_semantic_tokens : bool
   ; mutable next_request_id : int
@@ -53,7 +53,7 @@ let create ~limits ~send =
   ; send
   ; documents = String.Table.create ()
   ; pending = String.Hash_set.create ()
-  ; with_diagnostics = String.Hash_set.create ()
+  ; published = String.Table.create ()
   ; state = Uninitialized
   ; refresh_semantic_tokens = false
   ; next_request_id = 0
@@ -132,21 +132,27 @@ let lsp_diagnostic t (diagnostic : Diagnostic.t) =
 ;;
 
 let publish t ~path diagnostics =
-  if (not (List.is_empty diagnostics)) || Hash_set.mem t.with_diagnostics path
+  let params =
+    Types.PublishDiagnosticsParams.create
+      ~uri:(uri_of_path path)
+      ?version:
+        (Option.map (Hashtbl.find t.documents path) ~f:(fun document ->
+           document.version))
+      ~diagnostics:(List.map diagnostics ~f:(lsp_diagnostic t))
+      ()
+  in
+  let json = Types.PublishDiagnosticsParams.yojson_of_t params in
+  let unchanged =
+    match Hashtbl.find t.published path with
+    | Some previous -> Yojson.Safe.equal previous json
+    | None -> List.is_empty diagnostics
+  in
+  if not unchanged
   then (
     if List.is_empty diagnostics
-    then Hash_set.remove t.with_diagnostics path
-    else Hash_set.add t.with_diagnostics path;
-    notify
-      t
-      (PublishDiagnostics
-         (Types.PublishDiagnosticsParams.create
-            ~uri:(uri_of_path path)
-            ?version:
-              (Option.map (Hashtbl.find t.documents path) ~f:(fun document ->
-                 document.version))
-            ~diagnostics:(List.map diagnostics ~f:(lsp_diagnostic t))
-            ())))
+    then Hashtbl.remove t.published path
+    else Hashtbl.set t.published ~key:path ~data:json;
+    notify t (PublishDiagnostics params))
 ;;
 
 let check t path =

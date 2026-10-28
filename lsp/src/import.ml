@@ -17,3 +17,5 @@ module Project = Stag_build.Project
 module Program = Stag_build.Program
 module Stanza = Stag_build.Stanza
 module Lsp_types = Lsp.Types
+module Prim = Stag_ir.Prim
+module Intrinsic = Stag_ir.Intrinsic

@@ -225,7 +225,7 @@ let rec pattern t ~syntax ~program (p : Typed.Pattern.t) =
       add
         t
         { loc = path.loc
-        ; label = None
+        ; label = Some constructor.name
         ; ty = Some p.ty
         ; target = Some (Constructor constructor.name)
         });
@@ -238,7 +238,7 @@ let rec pattern t ~syntax ~program (p : Typed.Pattern.t) =
         add
           t
           { loc = path.loc
-          ; label = None
+          ; label = Some (Typed.Field_ref.name field)
           ; ty = Some p.ty
           ; target = Some (Field (Typed.Field_ref.name field))
           });
@@ -265,7 +265,7 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
           add
             t
             { loc = path.loc
-            ; label = None
+            ; label = Some (Typed.Field_ref.name field)
             ; ty = Some value.ty
             ; target = Some (Field (Typed.Field_ref.name field))
             }))
@@ -279,9 +279,8 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
           | Local ident -> ident.name, Some (Target.Local ident)
           | Toplevel ident -> ident.name, Some (Value ident.name))
        | Free name -> name, None
-       | Prim prim -> Sexp.to_string (Typed.Var_ref.sexp_of_t (Prim prim)), None
-       | Intrinsic _ as var ->
-         Sexp.to_string (Typed.Var_ref.sexp_of_t var), None
+       | Prim prim -> Sexp.to_string (Prim.sexp_of_t prim), None
+       | Intrinsic intrinsic -> Intrinsic.public_name intrinsic, None
      in
      if is_arrow e.ty then Hash_set.add t.functions (Span.of_loc e.loc);
      typed ~label ?target ()
@@ -299,7 +298,7 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
        add
          t
          { loc = path.loc
-         ; label = None
+         ; label = Some constructor.name
          ; ty = Some e.ty
          ; target = Some (Constructor constructor.name)
          })
@@ -313,7 +312,7 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
          add
            t
            { loc = path.loc
-           ; label = None
+           ; label = Some (Typed.Field_ref.name field)
            ; ty = Some e.ty
            ; target = Some (Field (Typed.Field_ref.name field))
            }))
