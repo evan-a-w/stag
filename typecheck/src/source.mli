@@ -109,6 +109,7 @@ module Expr : sig
       | Construct of Constructor.t * t list
       | Record of (Field.t * t) list
       | Field of t * Field.t
+      | Record_update of t * (Field.t * t) list
       | Match of t * (Pattern.t * t) list
       | Poly_record of (Syntax.Name.t * t) list
       | Poly_field of t * string

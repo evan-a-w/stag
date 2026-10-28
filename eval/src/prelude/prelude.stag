@@ -138,6 +138,7 @@ module Stag = struct
       | Construct of Path.t[Constructor_ref.t] * list[t]
       | Record of list[Path.t[Field_ref.t] * t]
       | Field of t * Path.t[Field_ref.t]
+      | Record_update of t * list[Path.t[Field_ref.t] * t]
       | Type of Type_expr.t
       | Match of t * list[Pattern.t * t]
       | Poly_record of list[string * t]

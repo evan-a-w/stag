@@ -14,14 +14,14 @@ end
 
 module Field = struct
   type t =
-    { name : string
-    ; type_name : string
+    { record_type : Typed.Record_type.t
     ; record : Type.ty
     ; index : int
     ; ty : Type.ty
-    ; all_fields : string list
     }
   [@@deriving sexp_of]
+
+  let name t = t.record_type.fields.(t.index)
 end
 
 module Decl = struct
@@ -454,22 +454,22 @@ let define t (decl : Decl.t) =
          ~key:name
          ~data:{ Constructor.name; type_name = decl.name; index; args; result })
    | Record fields ->
-     let all_fields =
-       List.map fields ~f:(fun (field : Signature.Field.t) ->
-         canonical_name field.name)
+     let record_type =
+       { Typed.Record_type.name = decl.name
+       ; fields =
+           Array.of_list_map fields ~f:(fun (field : Signature.Field.t) ->
+             canonical_name field.name)
+       }
      in
-     List.iteri fields ~f:(fun index { name; ty } ->
-       let name = canonical_name name in
+     List.iteri fields ~f:(fun index { name = _; ty } ->
        Hashtbl.add_exn
          t.fields
-         ~key:name
+         ~key:record_type.fields.(index)
          ~data:
-           { Field.name
-           ; type_name = decl.name
+           { Field.record_type
            ; index
            ; record = TCon (decl.name, Decl.params decl)
            ; ty
-           ; all_fields
            }));
   checked
 ;;
@@ -483,6 +483,33 @@ let check t name =
 
 let find_decl_exn t name =
   Option.value_exn (Hashtbl.find_exn t.types name).checked
+;;
+
+let members t type_name ~kind ~members =
+  match Hashtbl.find t.types type_name with
+  | None -> Ok None
+  | Some decl ->
+    let%map.Result checked = check t type_name in
+    kind checked.kind
+    |> Option.map ~f:(fun names ->
+      List.map names ~f:(fun name ->
+        Hashtbl.find_exn members (Module_scope.canonical_name decl.module_ name)))
+;;
+
+let record_fields t type_name =
+  members t type_name ~members:t.fields ~kind:(function
+    | Record fields ->
+      Some (List.map fields ~f:(fun (field : Signature.Field.t) -> field.name))
+    | Variant _ | Alias _ | Abstract -> None)
+;;
+
+let variant_constructors t type_name =
+  members t type_name ~members:t.constructors ~kind:(function
+    | Variant constructors ->
+      Some
+        (List.map constructors ~f:(fun (constructor : Signature.Constructor.t) ->
+           constructor.name))
+    | Record _ | Alias _ | Abstract -> None)
 ;;
 
 let is_empty_variant t name =

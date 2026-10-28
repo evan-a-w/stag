@@ -85,7 +85,7 @@ let failure = only_a (B (1, true))
     {|
     (of_t <fun>)
     (constructed (Tuple (A) (B 1 true) 2))
-    (r (Record 3 true))
+    (r ((x 3) (y true)))
     (fields (Tuple 3 true))
     (matched (Tuple 3 true))
     (only_a <fun>)
@@ -136,6 +136,73 @@ let%expect_test "printed negative ints parse back" =
     -4611686018427387904
     `A (-2)
     (-3, `B 4)
+    |}]
+;;
+
+let%expect_test "nominal records print with their unqualified field names" =
+  eval
+    {|
+module N = struct
+  type r = {x : int; y : option[r]}
+end
+type s = {x : bool}
+let v : N.r = {x = 1; y = Some {x = -2; y = None}}
+let only_none (v : N.r) = match v with {x = _; y = None} -> 0
+let failure = only_none v
+|};
+  [%expect
+    {|
+    (v ((x 1) (y (Some ((x -2) (y (None)))))))
+    (only_none <fun>)
+    ("Match failure: no case matches the value {x = 1; y = Some {x = -2; y = None}}"
+     @ t.stag:7:26-61)
+    |}]
+;;
+
+(* Each [name : ty = e] evaluates to a value whose printed form, checked
+   against [ty] after [types], evaluates to a value printed the same. *)
+let%expect_test "printed nominal records parse back" =
+  let types =
+    {|
+module N = struct
+  type r = {x : int; y : option[r]}
+  type t = A of r | B of {`a : r} * r
+end
+type s = {x : bool}
+|}
+  in
+  let value_of source =
+    let%bind.Option t = typecheck (types ^ source) in
+    let%bind.Option () = Driver.eval (driver t) |> Result.ok in
+    List.find_map (members t) ~f:(fun { ident; _ } ->
+      if String.equal ident.name "v"
+      then Treewalk.find (Driver.interpreter (driver t)) ~ident |> Result.ok
+      else None)
+  in
+  List.iter
+    [ "N.r", "{x = 1; y = Some {x = -2; y = None}}"
+    ; "N.t", "N.B ({`a = {x = 3; y = None}}, {x = 4; y = None})"
+    ; "list[N.t]", "Cons (N.A {x = 5; y = None}, Nil)"
+    ; "[`C of N.r]", "`C {x = 6; y = None}"
+    ]
+    ~f:(fun (ty, e) ->
+      let printed source =
+        Option.map (value_of source) ~f:Treewalk.Value.to_string_hum
+      in
+      let first = printed (sprintf "let v : %s = %s" ty e) in
+      let second =
+        Option.bind first ~f:(fun first ->
+          printed (sprintf "let v : %s = %s" ty first))
+      in
+      print_s [%sexp (first : string option), (second : string option)]);
+  [%expect
+    {|
+    (("{x = 1; y = Some {x = -2; y = None}}")
+     ("{x = 1; y = Some {x = -2; y = None}}"))
+    (("N.B ({`a = {x = 3; y = None}}, {x = 4; y = None})")
+     ("N.B ({`a = {x = 3; y = None}}, {x = 4; y = None})"))
+    (("Cons (N.A {x = 5; y = None}, Nil)") ("Cons (N.A {x = 5; y = None}, Nil)"))
+    (("`C {x = 6; y = None}") ("`C {x = 6; y = None}"))
     |}]
 ;;
 

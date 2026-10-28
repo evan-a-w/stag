@@ -847,8 +847,8 @@ let o = Some 1
     end
     --- output ---
     |}];
-  (* A generator must then name the prelude's list, which it can't: its
-     [Cons] is the program's. *)
+  (* Its [Cons] and [Nil] are the prelude's where a prelude list is expected,
+     as constructors are looked up in the expected type. *)
   check
     {|
 type list['a] = Nil | Cons of 'a * list['a]
@@ -856,10 +856,10 @@ include .~(Cons (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1), Nil))
 |};
   [%expect
     {|
-    File "a.stag", line 3, characters 40-43:
-    3 | include .~(Cons (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1), Nil))
-                                                ^^^
-    Error: This expression has type A.list['_a] but an expression was expected of type prelude.list[string]
+    module A : sig
+      type list['a] = Nil | Cons of 'a * list['a]
+      val x : int
+    end
     |}]
 ;;
 
@@ -957,13 +957,14 @@ let%expect_test "a program shadowing option, in a type error" =
   check
     {|
 type option['a] = None | Some of 'a
-let v = Stag.Expr.Var ("x", Some 1)
+let o = Some 1
+let v = Stag.Expr.Var ("x", o)
 |};
   [%expect
     {|
-    File "a.stag", line 3, characters 28-34:
-    3 | let v = Stag.Expr.Var ("x", Some 1)
-                                    ^^^^^^
+    File "a.stag", line 4, characters 28-29:
+    4 | let v = Stag.Expr.Var ("x", o)
+                                    ^
     Error: This expression has type A.option[int] but an expression was expected of type prelude.option[Stag.Type_expr.t]
     |}]
 ;;

@@ -624,7 +624,7 @@ end
        ((Construct ((type_name t) (name B) (index 1)) () : t)
         (Record ((((type_name r) (name a) (index 0)) (Lit (Int 1) : int))) : r))
        : "t * r")))
-    (M.x (Tuple (B) (Record 1)))
+    (M.x (Tuple (B) ((a 1))))
     (M.y 1)
     |}]
 ;;

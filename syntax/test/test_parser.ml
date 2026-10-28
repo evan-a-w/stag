@@ -249,6 +249,8 @@ let%expect_test "records" =
   expr "{r with `x = v}";
   expr "{r with `x = v; `y = w;}";
   expr "{r.`a with `x = v}";
+  expr "{r with x = v}";
+  expr "{r.M.a with M.x = v; y = w;}";
   [%expect
     {|
     (Record ((x (Lit (Int 1))) (M.y (Lit (Int 2)))))
@@ -272,6 +274,8 @@ let%expect_test "records" =
     (Poly_update (Var r ()) ((x (Var v ()))))
     (Poly_update (Var r ()) ((x (Var v ())) (y (Var w ()))))
     (Poly_update (Poly_field (Var r ()) a) ((x (Var v ()))))
+    (Record_update (Var r ()) ((x (Var v ()))))
+    (Record_update (Field (Var r ()) M.a) ((M.x (Var v ())) (y (Var w ()))))
     |}]
 ;;
 
@@ -667,7 +671,7 @@ let%expect_test "errors" =
   expr "a b c in";
   expr "{x = 1; `y = 2}";
   expr "{`x = 1; y = 2}";
-  expr "{r with x = 1}";
+  expr "{r with x = 1; `y = 2}";
   expr "{r}";
   expr "{`x = 1 | r";
   expr ".< x";
@@ -716,7 +720,7 @@ let%expect_test "errors" =
     t.stag:1:6-8: expected end of file, found `in`
     t.stag:1:8-10: expected a field name, found the label `y
     t.stag:1:9-10: expected a polymorphic record label like `x, found `y`
-    t.stag:1:8-9: expected a polymorphic record label like `x, found `x`
+    t.stag:1:15-17: expected a field name, found the label `y
     t.stag:1:2-3: expected `with` or a record field, found `}`
     t.stag:1:11-11: expected `}` to close this `{` (opened at 1:0), found end of file
     t.stag:1:4-4: expected `>.` to close this `.<` (opened at 1:0), found end of file

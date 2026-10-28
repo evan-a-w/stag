@@ -8,7 +8,7 @@ type t =
   | Unit
   | Tuple of t list
   | Construct of Typed.Constructor_ref.t * t list
-  | Record of t array
+  | Record of Typed.Record_type.t * t array
   | Poly_record of t String.Map.t
   | Poly_variant of string * t
   | Function of
@@ -64,6 +64,12 @@ let of_lit : Syntax.Lit.t -> t = function
   | Unit -> Unit
 ;;
 
+(* Unqualified, as fields are looked up in the record's type. *)
+let field_name (record_type : Typed.Record_type.t) index =
+  let name = record_type.fields.(index) in
+  Option.value_map (String.rsplit2 name ~on:'.') ~default:name ~f:snd
+;;
+
 let rec sexp_of_t : t -> Sexp.t = function
   | Int n -> Atom (Int.to_string n)
   | Bool b -> sexp_of_bool b
@@ -73,8 +79,12 @@ let rec sexp_of_t : t -> Sexp.t = function
   | Tuple values -> List (Atom "Tuple" :: List.map values ~f:sexp_of_t)
   | Construct ({ name; _ }, values) ->
     List (Atom (Prelude_path.to_string_hum name) :: List.map values ~f:sexp_of_t)
-  | Record values ->
-    List (Atom "Record" :: Array.to_list (Array.map values ~f:sexp_of_t))
+  | Record (record_type, values) ->
+    List
+      (Array.to_list
+         (Array.mapi values ~f:(fun index value ->
+            Sexp.List
+              [ Atom (field_name record_type index); sexp_of_t value ])))
   | Poly_record fields -> [%sexp (fields : t String.Map.t)]
   | Poly_variant (tag, Unit) -> Atom ("`" ^ tag)
   | Poly_variant (tag, arg) -> List [ Atom ("`" ^ tag); sexp_of_t arg ]
@@ -103,7 +113,12 @@ let rec to_string_hum : t -> string = function
     Prelude_path.to_string_hum name ^ " " ^ argument value
   | Construct ({ name; _ }, values) ->
     Prelude_path.to_string_hum name ^ " " ^ tuple values
-  | Record _ -> "<record>"
+  | Record (record_type, values) ->
+    Array.mapi values ~f:(fun index value ->
+      sprintf "%s = %s" (field_name record_type index) (to_string_hum value))
+    |> Array.to_list
+    |> String.concat ~sep:"; "
+    |> sprintf "{%s}"
   | Poly_record fields ->
     Map.to_alist fields
     |> List.map ~f:(fun (label, value) ->

@@ -103,6 +103,9 @@ let captures t ~ident ~args ~body =
       go ~depth x
     | Tuple exprs | Construct (_, exprs) -> List.iter exprs ~f:(go ~depth)
     | Record fields -> go_fields ~depth fields
+    | Record_update (expr, fields) ->
+      go ~depth expr;
+      go_fields ~depth fields
     | Poly_record fields -> go_fields ~depth fields
     | Poly_extend (fields, expr) | Poly_update (expr, fields) ->
       go ~depth expr;
@@ -208,6 +211,10 @@ let map_children ~depth (expr : Typed.Expr.t) ~f =
     | Field (expr, field) ->
       let%map expr = same expr in
       Typed.Expr.Desc.Field (expr, field)
+    | Record_update (expr, fields) ->
+      let%bind expr = same expr in
+      let%map fields = map_fields fields ~f:same in
+      Typed.Expr.Desc.Record_update (expr, fields)
     | Match (expr, cases) ->
       let%bind expr = same expr in
       let%map cases = map_fields cases ~f:same in
@@ -368,7 +375,7 @@ let rec match_pattern env (pattern : Typed.Pattern.t) (value : Value.t) =
     if constructor.index = constructor'.index
     then match_all env pattern patterns values
     else Ok false
-  | Record fields, Record values ->
+  | Record fields, Record (_, values) ->
     if
       List.exists fields ~f:(fun ((field : Typed.Field_ref.t), _) ->
         field.index >= Array.length values)
@@ -536,19 +543,36 @@ and step t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
     Value.Construct (constructor, values)
   | Record fields ->
     let%map values = map_fields fields ~f:eval' in
-    let record = Array.create ~len:(List.length values) Value.Unit in
+    let record_type = (fst (List.hd_exn values) : Typed.Field_ref.t).record in
+    let record =
+      Array.create ~len:(Array.length record_type.fields) Value.Unit
+    in
     List.iter values ~f:(fun ((field : Typed.Field_ref.t), value) ->
       record.(field.index) <- value);
-    Value.Record record
+    Value.Record (record_type, record)
   | Field (expr, field) ->
     let%bind value = eval' expr in
     (match value with
-     | Record values when field.index < Array.length values ->
+     | Record (_, values) when field.index < Array.length values ->
        Ok values.(field.index)
      | _ ->
        Or_error.error_s
          [%message
            "Field of a non-record" (field : Typed.Field_ref.t) (value : Value.t)])
+  | Record_update (expr, fields) ->
+    let%bind value = eval' expr in
+    let%bind values = map_fields fields ~f:eval' in
+    (match value with
+     | Record (record_type, record)
+       when List.for_all values ~f:(fun ((field : Typed.Field_ref.t), _) ->
+              field.index < Array.length record) ->
+       let record = Array.copy record in
+       List.iter values ~f:(fun ((field : Typed.Field_ref.t), value) ->
+         record.(field.index) <- value);
+       Ok (Value.Record (record_type, record))
+     | _ ->
+       Or_error.error_s
+         [%message "Update of a non-record" (value : Value.t)])
   | Match (scrutinee, cases) ->
     let%bind value = eval' scrutinee in
     eval_match t ~env ~level value cases ~loc:expr.loc

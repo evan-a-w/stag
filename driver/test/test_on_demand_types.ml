@@ -74,7 +74,7 @@ end
     (gen <fun>)
     -- evaluated
     (gen <fun>)
-    (x (Record 1))
+    (x ((v 1)))
     |}]
 ;;
 

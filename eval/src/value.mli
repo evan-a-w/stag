@@ -8,7 +8,7 @@ type t =
   | Unit
   | Tuple of t list
   | Construct of Typed.Constructor_ref.t * t list
-  | Record of t array (** By field index. *)
+  | Record of Typed.Record_type.t * t array (** By field index. *)
   | Poly_record of t String.Map.t
   | Poly_variant of string * t (** A tag without an argument has [Unit]. *)
   | Function of

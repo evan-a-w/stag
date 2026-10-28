@@ -886,6 +886,11 @@ and poly_field t =
   expect t Equal;
   name, entry_value t
 
+and nominal_field t =
+  let path = lowercase_path t ~what:"a field name" in
+  expect t Equal;
+  decl_path path, entry_value t
+
 and record t : Expr.t =
   let start = loc t in
   match peek_at t 1 with
@@ -915,10 +920,7 @@ and record t : Expr.t =
      | Some base -> expr_since t start (Poly_extend (fields, base)))
   | _ when nominal_record_ahead t ->
     let fields =
-      delimited t ~opener:Lbrace ~close:Rbrace ~sep:Semi ~item:(fun t ->
-        let path = lowercase_path t ~what:"a field name" in
-        expect t Equal;
-        decl_path path, entry_value t)
+      delimited t ~opener:Lbrace ~close:Rbrace ~sep:Semi ~item:nominal_field
     in
     expr_since t start (Record fields)
   | _ ->
@@ -926,17 +928,23 @@ and record t : Expr.t =
     let base = splice t in
     if not (is t With) then expected t "`with` or a record field";
     advance t;
-    let rec loop acc =
-      let acc = poly_field t :: acc in
+    let rec loop acc ~field =
+      let acc = field t :: acc in
       if is t Semi
       then (
         advance t;
-        if is t Rbrace then List.rev acc else loop acc)
+        if is t Rbrace then List.rev acc else loop acc ~field)
       else List.rev acc
     in
-    let fields = loop [] in
-    close t Rbrace ~opener:Lbrace ~open_loc:start;
-    expr_since t start (Poly_update (base, fields))
+    (match peek t with
+     | Label _ ->
+       let fields = loop [] ~field:poly_field in
+       close t Rbrace ~opener:Lbrace ~open_loc:start;
+       expr_since t start (Poly_update (base, fields))
+     | _ ->
+       let fields = loop [] ~field:nominal_field in
+       close t Rbrace ~opener:Lbrace ~open_loc:start;
+       expr_since t start (Record_update (base, fields)))
 ;;
 
 (* Declarations *)

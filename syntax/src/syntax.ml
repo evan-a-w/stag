@@ -174,6 +174,8 @@ module Expr = struct
     | Construct of Decl_path.t Located.t * t list
     | Record of (Decl_path.t Located.t * t) list
     | Field of t * Decl_path.t Located.t
+    | Record_update of t * (Decl_path.t Located.t * t) list
+    (** [{e with f = v; ...}] *)
     | Type of Type_expr.t (** [type t]: the type as a value. *)
     | Match of t * (Pattern.t * t) list
     | Poly_record of (Name.t * t) list

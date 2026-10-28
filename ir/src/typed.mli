@@ -61,13 +61,30 @@ module Constructor_ref : sig
   [@@deriving sexp_of]
 end
 
+(** A nominal record type: its canonical name, and its fields' canonical
+    names by index. One per declaration, shared by its fields' refs and its
+    values. *)
+module Record_type : sig
+  type t =
+    { name : string
+    ; fields : string array
+    }
+
+  (** As its name. *)
+  val sexp_of_t : t -> Sexp.t
+end
+
 module Field_ref : sig
   type t =
-    { type_name : string
-    ; name : string
+    { record : Record_type.t
     ; index : int
     }
-  [@@deriving sexp_of]
+
+  val name : t -> string
+  val type_name : t -> string
+
+  (** As [((type_name T) (name f) (index i))]. *)
+  val sexp_of_t : t -> Sexp.t
 end
 
 (** [ty] is the type of the values the node matches. *)
@@ -149,6 +166,8 @@ module Expr : sig
       | Construct of Constructor_ref.t * 'e list
       | Record of (Field_ref.t * 'e) list
       | Field of 'e * Field_ref.t
+      | Record_update of 'e * (Field_ref.t * 'e) list
+      (** [{e with f = v; ...}], of [e]'s type. *)
       | Match of 'e * (Pattern.t * 'e) list
       | Poly_record of (string * 'e) list
       | Poly_field of 'e * string

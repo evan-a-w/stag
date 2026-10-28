@@ -36,6 +36,14 @@ module Kind : sig
     | Type_variable_kind_mismatch of string
     | Unbound_constructor of Syntax.Path.t
     | Unbound_field of Syntax.Path.t
+    | No_such_constructor of
+        { type_name : string
+        ; constructor : string
+        }
+    | No_such_field of
+        { type_name : string
+        ; field : string
+        }
     | Type_arity_mismatch of
         { type_name : Syntax.Decl_path.t
         ; expected : int

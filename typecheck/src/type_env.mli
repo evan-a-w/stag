@@ -44,14 +44,15 @@ end
     [record] and [ty]. *)
 module Field : sig
   type t =
-    { name : string
-    ; type_name : string
+    { record_type : Typed.Record_type.t
     ; record : Type.ty
     ; index : int
     ; ty : Type.ty
-    ; all_fields : string list
     }
   [@@deriving sexp_of]
+
+  (** Canonical. *)
+  val name : t -> string
 end
 
 val find_constructor
@@ -74,6 +75,16 @@ val constructor
   -> (Constructor.t, Typecheck_error.t) Result.t
 
 val field : t -> string -> loc:Loc.t -> (Field.t, Typecheck_error.t) Result.t
+
+(** The fields of the type of canonical name [name], in order, if it is a
+    nominal record, checking its declaration. *)
+val record_fields : t -> string -> (Field.t list option, Typecheck_error.t) Result.t
+
+(** Likewise, its constructors if it is a variant. *)
+val variant_constructors
+  :  t
+  -> string
+  -> (Constructor.t list option, Typecheck_error.t) Result.t
 
 (** Like [check], for a type already checked. *)
 val find_decl_exn : t -> string -> Signature.Type_decl.t
