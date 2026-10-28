@@ -330,6 +330,7 @@ and toplevel_desc (g : Toplevel.desc) (w : Toplevel.desc) =
   | ( ( Let _
       | Type _
       | Exception _
+      | Malformed_exception _
       | Module _
       | Module_splice _
       | Include _

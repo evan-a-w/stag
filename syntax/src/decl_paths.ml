@@ -150,6 +150,8 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
         in
         Type { name; params; kind = decl_kind kind }
       | Exception (n, ts) -> Exception (n, List.map ts ~f:type_expr)
+      | Malformed_exception (n, ts) ->
+        Malformed_exception (n, List.map ts ~f:type_expr)
       | Module (n, ts) ->
         Module (n, List.map ts ~f:(map' ~modules:(modules @ [ n.txt ]) ~f:f'))
       | Module_splice (n, e, expansion) ->

@@ -26,13 +26,15 @@ val declare
 
 (** Declares the exception [name], a constructor of [exn], a member of
     [module_]. Its constructor's [index] is [0]: exceptions are told apart by
-    canonical name. *)
+    canonical name. A [malformed] one, whose syntax error is the parser's, is
+    [Already_reported] when checked. *)
 val declare_exception
   :  ?wrap_error:(Typecheck_error.t -> Typecheck_error.t)
   -> t
   -> Module_scope.t
   -> Syntax.Name.t
   -> Syntax.Type_expr.t list
+  -> malformed:bool
   -> unit
 
 (** The checked declaration of the type of canonical name [name]. Its error,

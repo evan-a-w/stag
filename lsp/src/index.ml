@@ -413,7 +413,8 @@ let rec declarations
         | Alias _ | Abstract -> ()
       in
       members kind
-    | Exception (name, _) -> set t.constructors name
+    | Exception (name, _) | Malformed_exception (name, _) ->
+      set t.constructors name
     | Module (name, toplevels) ->
       declarations
         t
@@ -509,7 +510,7 @@ let create
         List.iter args ~f:(Syntax_at.expr syntax));
       Syntax_at.expr syntax body
     | Module (_, toplevels) -> List.iter toplevels ~f:syntax_of_toplevel
-    | Type _ | Exception _ -> ()
+    | Type _ | Exception _ | Malformed_exception _ -> ()
   in
   List.iter files ~f:(fun (_, toplevel) -> syntax_of_toplevel toplevel);
   List.iter files ~f:(fun (module_path, toplevel) ->

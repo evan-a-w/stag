@@ -46,6 +46,7 @@ module Module_group = struct
             ( Let _
             | Type _
             | Exception _
+            | Malformed_exception _
             | Module_splice _
             | Include _
             | Expect_test _

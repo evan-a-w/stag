@@ -50,6 +50,7 @@ end
 module Exception_decl = struct
   type t =
     { args : Type_expr.t list
+    ; malformed : bool
     ; module_ : Module_scope.t
     ; wrap_error : Typecheck_error.t -> Typecheck_error.t
     ; mutable checked : Constructor.t option
@@ -420,11 +421,19 @@ let declare
   declare_members decl.kind
 ;;
 
-let declare_exception ?(wrap_error = Fn.id) t module_ (name : Name.t) args =
+let declare_exception
+      ?(wrap_error = Fn.id)
+      t
+      module_
+      (name : Name.t)
+      args
+      ~malformed
+  =
   Hashtbl.add_exn
     t.exceptions
     ~key:(Module_scope.canonical_name module_ name.txt)
-    ~data:{ Exception_decl.args; module_; wrap_error; checked = None }
+    ~data:
+      { Exception_decl.args; malformed; module_; wrap_error; checked = None }
 ;;
 
 (* Its arguments have no type variables, which nothing would bind. *)
@@ -432,6 +441,7 @@ let check_exception t name =
   let decl = Hashtbl.find_exn t.exceptions name in
   match decl.checked with
   | Some checked -> Ok checked
+  | None when decl.malformed -> Error Typecheck_error.already_reported
   | None ->
     Result.map_error ~f:decl.wrap_error
     @@

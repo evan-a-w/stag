@@ -749,7 +749,7 @@ module Kind = struct
   let of_toplevel (t : Toplevel.t) =
     match t.txt with
     | Let _ -> Let
-    | Type _ | Exception _ -> Type
+    | Type _ | Exception _ | Malformed_exception _ -> Type
     | Module_splice _ -> Module_splice
     | Include _ -> Include
     | Module _ | Expect_test _ | Bench _ -> Other
@@ -764,7 +764,7 @@ let rec toplevel roots ~width ~indent ~blank_between (t : Toplevel.t) =
       (let_lhs roots "let" name params annot)
       (expr_doc roots rhs)
   | Type decl -> type_decl roots decl
-  | Exception (name, args) ->
+  | Exception (name, args) | Malformed_exception (name, args) ->
     text "exception " ^^ constructor_decl roots (name, args)
   | Module (name, []) -> text ("module " ^ name.txt ^ " = struct end")
   | Module (name, members) ->

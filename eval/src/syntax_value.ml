@@ -23,6 +23,7 @@ let constructor_refs =
              ~data:{ Typed.Constructor_ref.type_name; name; index })
        | Type _
        | Exception _
+       | Malformed_exception _
        | Let _
        | Expect_test _
        | Bench _
@@ -218,7 +219,7 @@ module To_value = struct
         "Let"
         [ name var; list binding bindings; option type_expr annot; expr body ]
     | Type decl -> con "Type" [ type_decl decl ]
-    | Exception (exn_name, args) ->
+    | Exception (exn_name, args) | Malformed_exception (exn_name, args) ->
       con "Exception" [ name exn_name; list type_expr args ]
     | Module (module_name, items) ->
       con "Module" [ name module_name; list toplevel items ]

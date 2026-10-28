@@ -83,7 +83,7 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
         | Malformed kind -> decl_kind kind
       in
       decl_kind kind
-    | Exception (exn, args) ->
+    | Exception (exn, args) | Malformed_exception (exn, args) ->
       name ~declaration:true Constructor exn;
       List.iter args ~f:type_expr
     | Module (module_name, toplevels) ->

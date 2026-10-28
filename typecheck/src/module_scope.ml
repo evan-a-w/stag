@@ -188,7 +188,8 @@ let members (toplevel : Toplevel.t) : (Member.t * Name.t) list =
          List.map fields ~f:(fun (name, _) -> member Field name)
      in
      kind_members kind)
-  | Exception (name, _) -> [ member Constructor name ]
+  | Exception (name, _) | Malformed_exception (name, _) ->
+    [ member Constructor name ]
   | Module (name, _) | Module_splice (name, _, _) ->
     [ (Module, name.txt), name ]
   | Expect_test _ | Bench _ | Include _ -> []
@@ -220,6 +221,7 @@ let rec unique ~path taken toplevels ~report =
           ~finish:(fun _ -> Some ())
       | Let _
       | Exception _
+      | Malformed_exception _
       | Module _
       | Module_splice _
       | Expect_test _
@@ -261,6 +263,7 @@ let rec unique ~path taken toplevels ~report =
     | ( _ :: _
       , ( Let _
         | Exception _
+        | Malformed_exception _
         | Module _
         | Module_splice _
         | Expect_test _
@@ -286,6 +289,7 @@ let rec unique ~path taken toplevels ~report =
          | Let _
          | Type _
          | Exception _
+         | Malformed_exception _
          | Module_splice _
          | Expect_test _
          | Bench _
@@ -342,6 +346,7 @@ let rec register module_ toplevels ~parent ~generated_by =
     | Let _
     | Type _
     | Exception _
+    | Malformed_exception _
     | Expect_test _
     | Bench _
     | Module _
@@ -362,8 +367,13 @@ let rec register module_ toplevels ~parent ~generated_by =
               ~splice:
                 (Some (splice expr ~expansion ~into:(Into_module name.txt)))
             : module_)
-       | Let _ | Type _ | Exception _ | Expect_test _ | Bench _ | Include _ ->
-         ()))
+       | Let _
+       | Type _
+       | Exception _
+       | Malformed_exception _
+       | Expect_test _
+       | Bench _
+       | Include _ -> ()))
 ;;
 
 let add t toplevels =
@@ -963,8 +973,13 @@ let iter_declarations t ~f =
         (match toplevel.txt with
          | Module (name, _) | Module_splice (name, _, _) ->
            iter_module (Hashtbl.find_exn scope.module_.modules name.txt)
-         | Let _ | Type _ | Exception _ | Expect_test _ | Bench _ | Include _ ->
-           ()))
+         | Let _
+         | Type _
+         | Exception _
+         | Malformed_exception _
+         | Expect_test _
+         | Bench _
+         | Include _ -> ()))
   in
   iter_module t.module_
 ;;

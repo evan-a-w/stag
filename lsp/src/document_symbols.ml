@@ -52,7 +52,7 @@ let of_toplevels text toplevels =
       in
       let symbol_kind, children = symbols kind in
       [ symbol ~children ~kind:symbol_kind ~loc ~name_loc:name.loc name.txt ]
-    | Exception (name, _) ->
+    | Exception (name, _) | Malformed_exception (name, _) ->
       [ symbol
           ~detail:"exception"
           ~kind:Constructor

@@ -601,3 +601,33 @@ let%expect_test "recovery takes linear time" =
   printf "%.2f\n" (Float.of_int large /. Float.of_int small);
   [%expect {| 2.00 |}]
 ;;
+
+let%expect_test "a broken exception declaration keeps the arguments that parsed"
+  =
+  let program, errors =
+    Parser.program_recovering
+      ~file
+      {|exception A of (int *
+exception B of
+exception C of int * string *
+exception D of int
+|}
+  in
+  List.iter errors ~f:(fun error ->
+    print_endline (Parser.Error.to_string error));
+  List.iter program ~f:(fun (toplevel : Syntax.Toplevel.t) ->
+    print_s [%sexp (toplevel.txt : Syntax.Toplevel.desc)]);
+  [%expect
+    {|
+    t.stag:2:0-9: expected `)` to close this `(` (opened at 1:15), found `exception`
+    t.stag:3:0-9: expected a type, found `exception`
+    t.stag:4:0-9: expected a type, found `exception`
+    (Malformed_exception (A @ t.stag:1:10-11) ())
+    (Malformed_exception (B @ t.stag:2:10-11) ())
+    (Malformed_exception (C @ t.stag:3:10-11)
+     (((Con (int @ t.stag:3:15-18) ()) @ t.stag:3:15-18)
+      ((Con (string @ t.stag:3:21-27) ()) @ t.stag:3:21-27)))
+    (Exception (D @ t.stag:4:10-11)
+     (((Con (int @ t.stag:4:15-18) ()) @ t.stag:4:15-18)))
+    |}]
+;;

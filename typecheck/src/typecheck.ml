@@ -15,7 +15,8 @@ module Generated = struct
       match toplevel.txt with
       | Let (name, _, _, _) -> "let " ^ name.txt
       | Type decl -> "type " ^ decl.name.txt
-      | Exception (name, _) -> "exception " ^ name.txt
+      | Exception (name, _) | Malformed_exception (name, _) ->
+        "exception " ^ name.txt
       | Module (name, _) | Module_splice (name, _, _) -> "module " ^ name.txt
       | Include _ -> "include"
       | Expect_test { name; _ } -> sprintf "let%%expect_test %S" name.txt
@@ -2340,7 +2341,21 @@ let declare
       ~lazily:in_prelude
       ~wrap_error
   | Exception (name, args) ->
-    Type_env.declare_exception program.type_env module_ name args ~wrap_error
+    Type_env.declare_exception
+      program.type_env
+      module_
+      name
+      args
+      ~malformed:false
+      ~wrap_error
+  | Malformed_exception (name, args) ->
+    Type_env.declare_exception
+      program.type_env
+      module_
+      name
+      args
+      ~malformed:true
+      ~wrap_error
   | Let (name, args, annot, expr) ->
     let name = Module_scope.canonical_name module_ name.txt in
     let toplevel =
@@ -2393,6 +2408,7 @@ let check_declarations t (program : Program_env.t) module_ =
           program.type_env
           (Module_scope.canonical_name module_ decl.name.txt)
         |> report_if_error
+      | Malformed_exception _ -> program.syntax_errors <- true
       | Exception (name, _) ->
         Type_env.check_exception
           program.type_env
@@ -2486,11 +2502,13 @@ let rec signature (program_env : Program_env.t) module_ ~complete =
          (* [Malformed], whose syntax error is the parser's. *)
          | Error error when Typecheck_error.is_already_reported error -> None
          | Error error -> missing "type" [%sexp (error : Typecheck_error.t)])
-      | Exception ({ txt = name; loc = _ }, _) ->
+      | Exception ({ txt = name; loc = _ }, _)
+      | Malformed_exception ({ txt = name; loc = _ }, _) ->
         (match
            Type_env.check_exception program_env.type_env (canonical_name name)
          with
          | Ok { args; _ } -> Some (Exception { name; args })
+         | Error error when Typecheck_error.is_already_reported error -> None
          | Error error ->
            missing "exception" [%sexp (error : Typecheck_error.t)])
       | Module ({ txt = name; loc = _ }, _)

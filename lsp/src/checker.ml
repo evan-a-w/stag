@@ -84,6 +84,7 @@ let rec relocated ~relocate (toplevels : Syntax.Toplevel.t list) =
     | Let _
     | Type _
     | Exception _
+    | Malformed_exception _
     | Module_splice _
     | Include _
     | Expect_test _

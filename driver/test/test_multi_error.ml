@@ -415,3 +415,60 @@ let d = Int.add 1 "s"
     Error: This expression has type string but an expression was expected of type int
     |}]
 ;;
+
+let%expect_test "uses of a broken exception declaration are not errors" =
+  check
+    {|exception E of (int *
+let f _ = raise (E 1)
+let g x = match x with | E n -> n | _ -> 0
+let b : int = "b"
+|};
+  [%expect
+    {|
+    File "a.stag", line 2, characters 0-3:
+    2 | let f _ = raise (E 1)
+        ^^^
+    Error: Expected `)` to close this `(` (opened at 1:15), found `let`
+    File "a.stag", line 4, characters 14-17:
+    4 | let b : int = "b"
+                      ^^^
+    Error: This expression has type string but an expression was expected of type int
+    |}];
+  check
+    {|exception E of
+let f _ = raise (E 1)
+let g x = match x with | E n -> n | _ -> 0
+let b : int = "b"
+|};
+  [%expect
+    {|
+    File "a.stag", line 2, characters 0-3:
+    2 | let f _ = raise (E 1)
+        ^^^
+    Error: Expected a type, found `let`
+    File "a.stag", line 4, characters 14-17:
+    4 | let b : int = "b"
+                      ^^^
+    Error: This expression has type string but an expression was expected of type int
+    |}]
+;;
+
+let%expect_test "compile-time code never raises a broken exception" =
+  check
+    {|exception E of int *
+let x = .~ (print_endline "ran"; raise (E 1))
+include .~ (print_endline "ran"; raise (E 1))
+let b : int = "b"
+|};
+  [%expect
+    {|
+    File "a.stag", line 2, characters 0-3:
+    2 | let x = .~ (print_endline "ran"; raise (E 1))
+        ^^^
+    Error: Expected a type, found `let`
+    File "a.stag", line 4, characters 14-17:
+    4 | let b : int = "b"
+                      ^^^
+    Error: This expression has type string but an expression was expected of type int
+    |}]
+;;

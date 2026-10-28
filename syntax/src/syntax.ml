@@ -235,6 +235,9 @@ module Toplevel = struct
     | Let of Name.t * Binding.t list * Type_expr.t option * Expr.t
     | Type of Type_decl.t
     | Exception of Name.t * Type_expr.t list (** [exception E of t1 * t2]. *)
+    | Malformed_exception of Name.t * Type_expr.t list
+    (** What parsed of an exception declaration with a syntax error, whose
+        arguments may be missing. *)
     | Module of Name.t * t list
     | Module_splice of Name.t * Expr.t * t list Located.t option
     (** [module M = .~e], or with its expansion

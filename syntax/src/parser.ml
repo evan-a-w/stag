@@ -1290,8 +1290,9 @@ let rec toplevel t : Toplevel.t =
   | Exception ->
     advance t;
     let name = uident t ~what:"a constructor name" in
-    salvage t (fun _ -> Exception (name, []));
-    let args = constructor_args t in
+    let parsed args = salvage t (fun _ -> Malformed_exception (name, args)) in
+    parsed [];
+    let args = constructor_args t ~parsed in
     since t start (Toplevel.Exception (name, args))
   | (Module | Module_inline) as keyword ->
     advance t;
