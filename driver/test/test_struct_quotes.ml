@@ -322,7 +322,7 @@ type t = .~kind
     File "a.stag", line 3, characters 9-15:
     3 | type t = .~kind
                  ^^^^^^
-    Error: This type splice gave a definition that is itself a splice, `Stag.Type_decl.Kind.Splice`
+    Error: This type splice gave a type or definition that itself contains a type splice: what a splice gives may not contain splices
     |}]
 ;;
 
@@ -450,7 +450,7 @@ type t = int * .~(self (type t))
     File "a.stag", line 3, characters 15-32:
     3 | type t = int * .~(self (type t))
                        ^^^^^^^^^^^^^^^^^
-    Error: This type splice's expression needs the type it gives, which is being computed
+    Error: This type splice's expression depends on the splice itself (eg. it uses the declaration the splice is in), so it can't be evaluated
     |}];
   check
     {|
@@ -699,15 +699,11 @@ let x : .~(failing ()) = 1
     File "a.stag", line 3, characters 9-15:
     3 | type t = .~kind
                  ^^^^^^
-    Error: This type splice gave a definition that is itself a splice, `Stag.Type_decl.Kind.Splice`
-    module A : sig
-      val int_ty : Stag.Type_expr.t
-      val nested : Stag.Type_expr.t
-      val x : int
-      val shown : unit
-    end
-    --- output ---
-    1
+    Error: This type splice gave a type or definition that itself contains a type splice: what a splice gives may not contain splices
+    File "a.stag", line 4, characters 8-16:
+    4 | let x : .~nested = 1
+                ^^^^^^^^
+    Error: This type splice gave a type or definition that itself contains a type splice: what a splice gives may not contain splices
     File "a.stag", line 4, characters 8-22:
     4 | let x : .~(failing ()) = 1
                 ^^^^^^^^^^^^^^

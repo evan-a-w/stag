@@ -658,7 +658,8 @@ let find_scope t member =
 let rec generated_after (t : t) member =
   match lookup { t with position = End } member, lookup t member with
   | Ok Visible, Ok (Hidden splice) -> Some (Lookup.Hidden splice)
-  | Ok (Absent { blocked = Some splice }), Ok (Absent { blocked = None }) ->
+  | Ok (Absent { blocked = Some ({ state = Pending; _ } as splice) }),
+    Ok (Absent { blocked = None }) ->
     Some (Absent { blocked = Some splice })
   | _ -> Option.bind t.module_.enclosing ~f:(fun t -> generated_after t member)
 ;;

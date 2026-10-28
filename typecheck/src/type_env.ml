@@ -450,13 +450,15 @@ and definition (decl : Decl.t) ~loc =
     decl.used_while_defined <- true;
     Ok decl.decl.kind
   | Splice _ ->
-    let%map.Result () =
+    let%bind.Result () =
       Module_scope.force_definition decl.module_ decl.decl.name.txt ~loc
       |> Result.map_error ~f:(fun error ->
         if Typecheck_error.is_already_reported error then decl.failed <- true;
         error)
     in
-    decl.decl.kind
+    if decl.failed
+    then Error Typecheck_error.already_reported
+    else Ok decl.decl.kind
   | Variant _ | Record _ | Alias _ | Abstract | Malformed _ ->
     Ok decl.decl.kind
 
@@ -555,7 +557,7 @@ let set_definition t name (kind : Type_decl.Kind.t) ~wrap_error ~loc =
   let decl = Hashtbl.find_exn t.types name in
   let error kind =
     decl.failed <- true;
-    t.report (decl.wrap_error (wrap_error (Typecheck_error.create ~loc kind)))
+    t.report (decl.wrap_error (Typecheck_error.create ~loc kind))
   in
   match kind with
   | Alias _ when decl.used_while_defined ->
@@ -713,6 +715,8 @@ let check t name =
          ~loc:decl.decl.name.loc
        |> Result.map_error ~f:decl.wrap_error
      | Variant _ | Record _ | Alias _ | Abstract | Malformed _ -> Ok ())
+    |> Result.bind ~f:(fun () ->
+      if decl.failed then Error Typecheck_error.already_reported else Ok ())
     |> Result.bind ~f:(fun () -> define t decl)
     |> Result.map_error ~f:(fun error ->
       decl.failed <- true;
