@@ -170,7 +170,9 @@ server `stag lsp` (formatting falls back to `stag fmt` if it cannot start).
   check` or `stag-build` would: in its project (the nearest `stag-project`
   above it), with the open documents' unsaved contents, or standalone
   otherwise. Errors in other files of the project are published for those
-  files. Checking is limited (`-max-depth`, `-time-limit`, `-fuel`; by
+  files, and documents that depend on a changed one are checked again, as
+  are all documents when files change on disk (if the client watches
+  files). Checking is limited (`-max-depth`, `-time-limit`, `-fuel`; by
   default a nesting of 100000 and 5s), so a compile-time splice cannot hang
   the server. Changes that arrive during a check are coalesced: the next
   check is of the latest version.
@@ -182,8 +184,11 @@ server `stag lsp` (formatting falls back to `stag fmt` if it cannot start).
   to functions are tokens of type function.
 - Hover (the type of the name or expression under the cursor) and go to
   definition (of variables, toplevel values across files, types,
-  constructors and record fields), from the typed tree of the last
-  successful check.
+  constructors and record fields), from the typed tree of the document's
+  check, so not while it has an error.
+- Only documents of files (`file:`) and new ones (`untitled:`) are checked:
+  others, eg. a diff's old version, could not be checked as in their
+  project.
 - The outline (`textDocument/documentSymbol`): modules, types and their
   constructors and fields, exceptions, lets, expect tests and benches.
 
