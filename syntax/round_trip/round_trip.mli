@@ -10,8 +10,9 @@ val pattern : ?widths:int list -> Syntax.Pattern.t -> unit
 val expr : ?widths:int list -> Syntax.Expr.t -> unit
 val program : ?widths:int list -> Syntax.Program.t -> unit
 
-(** As the others, for source text: formats it with [Printer.format], which
-    must keep its comment texts in order as well as its syntax. *)
+(** As the others, for source text: formats it with [Formatter.format], which
+    must keep its syntax and its comments in order, their texts the same but
+    for the indentation of their later lines, all moved alike. *)
 val source : ?widths:int list -> string -> unit
 
 (** What [source] prints. *)

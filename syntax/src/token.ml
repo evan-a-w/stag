@@ -167,3 +167,18 @@ let ends_code : t -> bool = function
   | Greater
   | Eof -> true
 ;;
+
+let follows = function
+  | Rparen
+  | Rbracket
+  | Rbrace
+  | End
+  | Quote_close
+  | Semi
+  | Comma
+  | In
+  | With
+  | Arrow
+  | Equal -> true
+  | _ -> false
+;;

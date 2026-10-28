@@ -266,10 +266,14 @@ module Ctx = struct
     { level : Level.t
     ; seq : bool (** Whether the bodies of [let]s and [match]es are [Seq]s. *)
     ; after : After.t
+    ; flat : bool
+      (** Whether [let]s and sequences may stay on one line, as in parentheses,
+        rather than always breaking. *)
     }
 
-  let top = { level = Seq; seq = true; after = Nothing }
-  let at level = { level; seq = true; after = Nothing }
+  let top = { level = Seq; seq = true; after = Nothing; flat = false }
+  let at level = { top with level }
+  let item ?(seq = true) after = { level = Item; seq; after; flat = true }
 
   (* The level of the bodies of [let]s and [match]es. *)
   let body t = if t.seq then Level.Seq else Item
@@ -347,7 +351,8 @@ let takes_after (ctx : Ctx.t) e =
 (* Postfix operators would extend these to paths, or just look wrong. *)
 let needs_parens_before_postfix e =
   match (unwrap e).txt with
-  | Construct (_, []) | Poly_variant (_, None) | Quote _ -> true
+  | Construct (_, []) | Poly_variant (_, None) | Quote _ | Poly_restrict _ ->
+    true
   | _ -> false
 ;;
 
@@ -379,15 +384,17 @@ let let_lhs keyword (name : Name.t) params annot =
 let rec expr ?(parenthesize = false) (ctx : Ctx.t) e =
   let e = unwrap e in
   if parenthesize || (not (bare_at ctx.level e)) || takes_after ctx e
-  then parens (bare Ctx.top e)
+  then parens (flat e)
   else bare ctx e
+
+and flat e = group (bare { Ctx.top with flat = true } e)
 
 and bare (ctx : Ctx.t) (e : Expr.t) =
   match e.txt, seq e with
   | Let _, Some (first, second) ->
-    expr { level = Item; seq = true; after = Semi } first
+    expr (Ctx.item Semi) first
     ^^ text ";"
-    ^^ hardline
+    ^^ (if ctx.flat then line else hardline)
     ^^ expr { ctx with level = Seq } second
   | Let (name, params, annot, rhs, body), None ->
     definition
@@ -395,17 +402,21 @@ and bare (ctx : Ctx.t) (e : Expr.t) =
       ~ending:"in"
       (let_lhs "let" name params annot)
       (expr Ctx.top rhs)
-    ^^ hardline
+    ^^ (if ctx.flat then line else hardline)
     ^^ expr { ctx with level = Ctx.body ctx } body
   | Match (scrutinee, arms), _ ->
     let last = List.length arms - 1 in
     let arm i (p, body) =
       let after : After.t = if i = last then ctx.after else Bar in
-      group
-        (align (pattern_doc p)
-         ^^ text " ->"
-         ^^ nest 2 (line ^^ expr { ctx with level = Ctx.body ctx; after } body)
-        )
+      let doc =
+        align (pattern_doc p)
+        ^^ text " ->"
+        ^^ nest 2 (line ^^ expr { ctx with level = Ctx.body ctx; after } body)
+      in
+      (* A flat [let] or sequence is only kept on the line of a flat match. *)
+      match ctx.flat, (unwrap body).txt with
+      | true, Let _ -> doc
+      | _ -> group doc
     in
     let head =
       group
@@ -450,8 +461,13 @@ and bare (ctx : Ctx.t) (e : Expr.t) =
        ^^ nest
             2
             (concat
-               (List.map args ~f:(fun arg -> line ^^ expr (Ctx.at Splice) arg)))
-      )
+               (List.map args ~f:(fun arg ->
+                  let parenthesize =
+                    match (unwrap arg).txt with
+                    | Poly_restrict _ -> true
+                    | _ -> false
+                  in
+                  line ^^ expr ~parenthesize (Ctx.at Splice) arg))))
   | Construct (c, []), _ -> located_path c
   | Poly_variant (tag, None), _ -> text ("`" ^ tag.txt)
   | (Construct _ | Poly_variant _), _ -> construct e
@@ -460,7 +476,7 @@ and bare (ctx : Ctx.t) (e : Expr.t) =
       match (unwrap inner).txt, subs with
       | Splice { subs = None; _ }, Some _ ->
         expr ~parenthesize:true Ctx.top inner
-      | Splice _, _ -> bare Ctx.top (unwrap inner)
+      | (Splice _ | Quote _), _ -> expr ~parenthesize:true Ctx.top inner
       | _ -> expr (Ctx.at Postfix) inner
     in
     let subs =
@@ -476,7 +492,7 @@ and bare (ctx : Ctx.t) (e : Expr.t) =
     in
     text ".~" ^^ inner ^^ subs
   | Quote e, _ ->
-    group (text ".<" ^^ nest 2 (line ^^ expr Ctx.top e) ^^ line ^^ text ">.")
+    group (text ".<" ^^ nest 2 (line ^^ flat (unwrap e)) ^^ line ^^ text ">.")
   | Field (record, p), _ -> postfix record ^^ text "." ^^ located_path p
   | Poly_field (record, label), _ -> postfix record ^^ text (".`" ^ label.txt)
   | Poly_restrict (record, label), _ ->
@@ -556,11 +572,10 @@ and tuple_items es =
        (text "," ^^ line)
        (List.mapi es ~f:(fun i e ->
           let after : After.t = if i = last then Nothing else Comma in
-          expr { level = Item; seq = true; after } e)))
+          expr (Ctx.item after) e)))
 
 (* A value in [{...}]. *)
-and entry ?(after = After.Nothing) e =
-  expr { level = Item; seq = false; after } e
+and entry ?(after = After.Nothing) e = expr (Ctx.item ~seq:false after) e
 
 and field ?after lhs value =
   definition ~record:(is_record value) lhs (entry ?after value)
@@ -588,7 +603,8 @@ let type_decl ({ name; params; kind } : Type_decl.t) =
     | [] -> empty
     | params ->
       text "["
-      ^^ separate (text ", ") (List.map params ~f:type_param)
+      ^^ align
+           (group (separate (text "," ^^ line) (List.map params ~f:type_param)))
       ^^ text "]"
   in
   match kind with

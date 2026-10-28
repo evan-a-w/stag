@@ -82,11 +82,11 @@ let check ~seed ~count ~density ~gen =
 let%expect_test "random programs with comments format" =
   check ~seed:2 ~count:1000 ~density:3 ~gen:(fun random i ->
     { Gen.random; size = i % 40; deep = false });
-  [%expect {| ((!comments 29731) (!failures 0)) |}]
+  [%expect {| ((!comments 29969) (!failures 0)) |}]
 ;;
 
 let%expect_test "deep random programs with a comment in every gap format" =
   check ~seed:3 ~count:100 ~density:1 ~gen:(fun random i ->
     { Gen.random; size = 10 + i; deep = true });
-  [%expect {| ((!comments 22030) (!failures 0)) |}]
+  [%expect {| ((!comments 20359) (!failures 0)) |}]
 ;;

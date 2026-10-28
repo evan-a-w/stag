@@ -61,7 +61,7 @@ Tests run the expect tests of libraries and tests.
   $ stag-build test
   --- math/power.stag
   +++ _stag/math/power.stag.corrected
-  @@ -13,4 +13,4 @@
+  @@ -14,4 +14,4 @@
    
    let%expect_test "fourth" =
      print_int (fourth 3);
@@ -112,7 +112,7 @@ Testing only some stanzas, from a subdirectory:
   $ stag-build test math fmt
   --- math/power.stag
   +++ _stag/math/power.stag.corrected
-  @@ -13,4 +13,4 @@
+  @@ -14,4 +14,4 @@
    
    let%expect_test "fourth" =
      print_int (fourth 3);
@@ -521,37 +521,12 @@ A _stag that is not a directory is an error:
   $ cd ..
 
 Formatting rewrites the sources that are not formatted, printing their diffs,
-and with --check only prints them, failing if there are any.
+and with --check only prints them, failing if there are any. The example is
+formatted:
 
   $ cp -RL ../../../examples/calc calc_fmt && chmod -R u+w calc_fmt && cd calc_fmt
   $ stag-build fmt --check
-  --- fmt/show.stag
-  +++ fmt/show.stag
-  @@ -1,4 +1,8 @@
-   let power x n =
-  -  String.append (Int.to_string x)
-  -    (String.append "^" (String.append (Int.to_string n)
-  -      (String.append " = " (Int.to_string (Math.Power.pow x n)))))
-  +  String.append
-  +    (Int.to_string x)
-  +    (String.append
-  +       "^"
-  +       (String.append
-  +          (Int.to_string n)
-  +          (String.append " = " (Int.to_string (Math.Power.pow x n)))))
-  --- math/power.stag
-  +++ math/power.stag
-  @@ -1,5 +1,6 @@
-   let pow x n =
-  -  let go acc n = match Int.equal n 0 with
-  +  let go acc n =
-  +    match Int.equal n 0 with
-       | true -> acc
-       | false -> go (Int.mul acc x) (Int.sub n 1)
-     in
-  [1]
-  $ stag-build fmt > /dev/null
-  $ stag-build fmt --check
+  $ stag-build fmt
   $ echo 'let   triple x =   Int.mul 3 x' >> math/arith.stag
   $ cp math/arith.stag arith.before
   $ stag-build fmt --check

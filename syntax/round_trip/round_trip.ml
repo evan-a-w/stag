@@ -90,8 +90,31 @@ let source_errors ?(widths = [ 80; 40; 10 ]) source =
        [%message
          "source does not parse" ~error:(Parser.Error.to_string error : string)]
    | Ok (program, comments) ->
+     (* The formatter moves a comment's later lines with its first. *)
      let texts comments =
-       List.map comments ~f:(fun (c : Comment.t) -> c.text)
+       List.map comments ~f:(fun (c : Comment.t) ->
+         match String.split c.text ~on:'\n' with
+         | [] -> c.text
+         | first :: rest ->
+           let indent line =
+             String.length line - String.length (String.lstrip line)
+           in
+           let nonblank =
+             List.filter rest ~f:(fun line ->
+               not (String.is_empty (String.strip line)))
+           in
+           let common =
+             List.map nonblank ~f:indent
+             |> List.min_elt ~compare:Int.compare
+             |> Option.value ~default:0
+           in
+           String.concat
+             ~sep:"\n"
+             (first
+              :: List.map rest ~f:(fun line ->
+                if String.is_empty (String.strip line)
+                then line
+                else String.drop_prefix line common)))
      in
      let format ~width source =
        match Formatter.format ~width ~file:"printed.stag" source with

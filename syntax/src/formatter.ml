@@ -55,7 +55,7 @@ let render_before ~(next : Token.t option) (comments : Comment.t list) =
   Doc.concat
     (List.map comments ~f:(fun comment ->
        let open Doc in
-       let comment_text = text comment.text in
+       let comment_text = block comment.text ~col:comment.loc.start.col in
        match comment.placement with
        | Own_line { blank_before; blank_after } ->
          own_line
@@ -65,17 +65,26 @@ let render_before ~(next : Token.t option) (comments : Comment.t list) =
        | Inline -> space ^^ comment_text ^^ text " "))
 ;;
 
-let render_after (comments : Comment.t list) =
-  match comments with
-  | [] -> Doc.empty
-  | comments ->
-    Doc.(
-      text
-        (String.concat
-           (List.map comments ~f:(fun (comment : Comment.t) ->
-              " " ^ comment.text)))
-      ^^ end_line)
+let render_after (comments : (Comment.t * bool) list) =
+  let open Doc in
+  concat
+    (List.map comments ~f:(fun ((comment : Comment.t), _) ->
+       text " " ^^ block comment.text ~col:comment.loc.start.col))
+  ^^ if List.exists comments ~f:snd then end_line else empty
 ;;
+
+(* Where a comment goes: before the printed token, or after it, then ending
+   the line or not. *)
+module Slot = struct
+  type t =
+    | Before of int
+    | After of int * bool
+
+  let rank = function
+    | Before i -> 2 * i
+    | After (q, _) -> (2 * q) + 1
+  ;;
+end
 
 let with_comments doc ~(source_tokens : Lexer.Located.t array) ~comments =
   let printed = printed_tokens doc in
@@ -92,25 +101,64 @@ let with_comments doc ~(source_tokens : Lexer.Located.t array) ~comments =
   let last_matched = Array.create ~len:(Array.length source + 1) None in
   Array.iteri matched ~f:(fun i m ->
     last_matched.(i + 1) <- Option.first_some m last_matched.(i));
-  let before = Array.create ~len:(n + 1) [] in
-  let after = Array.create ~len:n [] in
-  List.iter (List.rev comments) ~f:(fun (comment : Comment.t) ->
+  let next_matched g = g < Array.length matched && Option.is_some matched.(g) in
+  (* Not before a separator, which would be pushed to the next line. *)
+  let rec past_separators q =
+    if q + 1 < n
+    then (
+      match printed.(q + 1) with
+      | Semi | Comma | In -> past_separators (q + 1)
+      | _ -> q)
+    else q
+  in
+  let slot (comment : Comment.t) : Slot.t =
     match comment.placement, last_matched.(comment.next_token) with
     | Trailing, Some q when Token.ends_code printed.(q) ->
-      (* Not before a separator, which would be pushed to the next line. *)
-      let rec past_separators q =
-        if q + 1 < n
-        then (
-          match printed.(q + 1) with
-          | Semi | Comma | In -> past_separators (q + 1)
-          | _ -> q)
-        else q
-      in
-      let q = past_separators q in
-      after.(q) <- comment :: after.(q)
+      After (past_separators q, true)
+    | Inline, Some q
+      when (not (next_matched comment.next_token))
+           || Token.follows source.(comment.next_token) ->
+      (* What followed it is gone, as a redundant parenthesis, or is not what
+         it is about. *)
+      After (past_separators q, false)
     | _, q ->
-      let i = Option.value_map q ~default:0 ~f:(fun q -> q + 1) in
-      before.(i) <- comment :: before.(i));
+      (* Not before a separator, which would be left alone on its line. *)
+      let rec past_separators i =
+        if i < n
+        then (
+          match printed.(i) with
+          | Semi | Comma | In -> past_separators (i + 1)
+          | _ -> i)
+        else i
+      in
+      Before
+        (past_separators (Option.value_map q ~default:0 ~f:(fun q -> q + 1)))
+  in
+  let before = Array.create ~len:(n + 1) [] in
+  let after = Array.create ~len:n [] in
+  (* Each in a slot no earlier than the one before's, so they stay in order. *)
+  let (_ : Slot.t option) =
+    List.fold comments ~init:None ~f:(fun prev (comment : Comment.t) ->
+      let slot =
+        match slot comment, prev with
+        | slot, Some prev when Slot.rank slot < Slot.rank prev -> prev
+        | slot, _ -> slot
+      in
+      (match slot with
+       | Before i -> before.(i) <- comment :: before.(i)
+       | After (q, ends_line) ->
+         let ends_line =
+           ends_line
+           ||
+           match comment.placement with
+           | Trailing | Own_line _ -> true
+           | Inline -> false
+         in
+         after.(q) <- (comment, ends_line) :: after.(q));
+      Some slot)
+  in
+  let before = Array.map before ~f:List.rev in
+  let after = Array.map after ~f:List.rev in
   let (_ : int), doc =
     Doc.fold_map_leaves doc ~init:0 ~f:(fun first l ->
       let tokens = tokens_of_text (leaf_text l) in

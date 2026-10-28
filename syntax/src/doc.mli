@@ -19,6 +19,10 @@ val separate : t -> t list -> t
 (** A space, or a newline. *)
 val line : t
 
+(** [text], of several lines written at column [col], with its later lines
+    moved as much as its first line is from [col], if none would be cut. *)
+val block : string -> col:int -> t
+
 (** A space, unless at the start of a line or after one. *)
 val space : t
 

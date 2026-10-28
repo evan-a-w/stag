@@ -3,6 +3,10 @@ open! Import
 type t =
   | Empty
   | Text of string
+  | Block of
+      { text : string
+      ; col : int
+      }
   | Line of string
   | Hardline
   | Fresh_line
@@ -19,6 +23,10 @@ type t =
 
 let empty = Empty
 let text s = Text s
+
+let block text ~col =
+  if String.mem text '\n' then Block { text; col } else Text text
+;;
 
 let ( ^^ ) a b =
   match a, b with
@@ -56,8 +64,14 @@ end
 
 let rec fold_map_leaves t ~init ~f =
   match t with
-  | Empty | Line _ | Hardline | Fresh_line | End_line | Blank_line | Space ->
-    init, t
+  | Empty
+  | Block _
+  | Line _
+  | Hardline
+  | Fresh_line
+  | End_line
+  | Blank_line
+  | Space -> init, t
   | Leading t ->
     let acc, t = fold_map_leaves t ~init ~f in
     acc, Leading t
@@ -89,6 +103,34 @@ module Mode = struct
   [@@deriving equal]
 end
 
+(* [text], written at column [from], with its later lines moved alike as its
+   first is to [col], as far as they can go. *)
+let shift_block text ~from ~col =
+  match String.split text ~on:'\n' with
+  | [] -> text
+  | first :: rest ->
+    let blank line = String.is_empty (String.strip line) in
+    let leading line =
+      String.length line
+      - String.length (String.lstrip line ~drop:(Char.equal ' '))
+    in
+    let shift =
+      List.filter rest ~f:(Fn.non blank)
+      |> List.map ~f:leading
+      |> List.min_elt ~compare:Int.compare
+      |> Option.value_map ~default:0 ~f:(fun min -> Int.max (col - from) (-min))
+    in
+    String.concat
+      ~sep:"\n"
+      (first
+       :: List.map rest ~f:(fun line ->
+         if blank line
+         then line
+         else
+           String.make (leading line + shift) ' '
+           ^ String.lstrip line ~drop:(Char.equal ' ')))
+;;
+
 (* Whether the commands fit in [width], up to the first newline (of a broken
    [line] or a text). After an [End_line], only if a newline comes before any
    more of the flat text. *)
@@ -100,6 +142,7 @@ let rec fits ?(ended = false) width (commands : (int * Mode.t * t) list) =
   | (indent, mode, t) :: rest ->
     (match t with
      | Empty -> fits ~ended width rest
+     | Block { text; _ } -> fits ~ended width ((indent, mode, Text text) :: rest)
      | Text s when ended ->
        (String.is_empty (String.strip s) && fits ~ended width rest)
        || Mode.equal mode Break
@@ -136,6 +179,7 @@ let rec hoist t =
   match t with
   | Empty
   | Text _
+  | Block _
   | Line _
   | Hardline
   | Fresh_line
@@ -179,6 +223,8 @@ let fits_all ~width ~col ~indent t =
       | (indent, mode, t) :: rest ->
         (match t with
          | Empty -> go col rest
+         | Block { text; col = from } ->
+           go col ((indent, mode, Text (shift_block text ~from ~col)) :: rest)
          | Text s ->
            (match String.rindex s '\n' with
             | None -> go (col + String.length s) rest
@@ -254,6 +300,10 @@ let render ?(width = 80) t =
     | (indent, mode, t) :: rest ->
       (match t with
        | Empty -> go rest
+       | Block { text; col = from } ->
+         if !end_line then strip_and_newline indent;
+         add (shift_block text ~from ~col:!col);
+         go rest
        | Text s ->
          if !end_line && not (String.is_empty (String.strip s))
          then (
@@ -270,13 +320,21 @@ let render ?(width = 80) t =
          newline indent;
          go rest
        | Fresh_line ->
-         if !line_empty then pending := indent else strip_and_newline indent;
+         if !line_empty
+         then (
+           pending := indent;
+           col := indent)
+         else strip_and_newline indent;
          go rest
        | End_line ->
          end_line := true;
          go rest
        | Blank_line ->
-         if !line_empty then pending := indent else strip_and_newline indent;
+         if !line_empty
+         then (
+           pending := indent;
+           col := indent)
+         else strip_and_newline indent;
          let n = Buffer.length buf in
          if n > 0 && not (n >= 2 && Char.equal (Buffer.nth buf (n - 2)) '\n')
          then newline indent;

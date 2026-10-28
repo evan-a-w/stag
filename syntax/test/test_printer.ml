@@ -154,29 +154,18 @@ let%expect_test "minimal parentheses" =
     `A (`B x)
     C ((a, b))
     C ((a, b), c)
-    C
-      (let x = 1 in
-       x)
+    C (let x = 1 in x)
     ((a, b), c)
     (a, (b, c))
-    ((a;
-      b),
-     c)
-    (a;
-     b);
+    ((a; b), c)
+    (a; b);
     c
     a;
     b;
     c
-    ((let x = 1 in
-      x),
-     y)
-    (a,
-     let x = 1 in
-     x)
-    (a,
-     let x = 1 in
-     x);
+    ((let x = 1 in x), y)
+    (a, let x = 1 in x)
+    (a, let x = 1 in x);
     y
     ((match x with A -> a), b)
     (match x with A -> a);
@@ -185,9 +174,7 @@ let%expect_test "minimal parentheses" =
     | A -> (match y with B -> b)
     | C -> c
     match x with
-    | A ->
-      (let y = 1 in
-       match y with B -> b)
+    | A -> (let y = 1 in match y with B -> b)
     | C -> c
     match x with
     | A -> (a, match y with B -> b)
@@ -208,65 +195,36 @@ let%expect_test "minimal parentheses" =
       y
     in
     x
-    .~.~e
-    .~.~e.{x}
+    .~(.~e)
+    .~(.~e.{x})
     .~(.~e).{x}
-    .~.~e.{x}.{y}
+    .~(.~e.{x}).{y}
     .~r.x.{y; z = (1, 2)}
     .~(f x)
     .~f x
     (.~e).x
     .~e.{}
-    {
-      x =
-        (a;
-         b);
-      M.y =
-        let z = 1 in
-        z;
-      w = match a with B -> b;
-    }
+    {x = (a; b); M.y = let z = 1 in z; w = match a with B -> b}
     {`x = (a, b); `y = (match a with B -> b) | r}
     {`x = 1 | match r with A -> a}
     {(`A) with `x = 1}
     {(`A).`b with `x = 1}
     {(`A (f x)) with `x = 1}
     {C with `x = 1}
-    {
-      x = match a with B -> b;
-      y =
-        let z = 1 in
-        z;
-      w = 2;
-    }
-    {
-      x =
-        match a with
-        | B ->
-          (b;
-           c);
-      y =
-        let z = 1 in
-        (z;
-         w);
-    }
+    {x = match a with B -> b; y = let z = 1 in z; w = 2}
+    {x = match a with B -> (b; c); y = let z = 1 in (z; w)}
     (`A).`x
     f (`A).x (C).`y
     .~(C).x
     (.< x >.) \ `x
     {(f x) with `x = 1}
-    {.~r with
-      `x = 1;
-      `y =
-        (a;
-         b);
-    }
+    {.~r with `x = 1; `y = (a; b)}
     {r.x with `x = 1}
-    f r \ `x
+    f (r \ `x)
     (f r) \ `x
     .~r \ `x
     r.`x.y \ `z
-    .< .< .~.~x >. >.
+    .< .< .~(.~x) >. >.
     (.< x >.).x
     f (x : int) (M.y : list['a])
     (-1, -2)
@@ -628,25 +586,32 @@ let stag_files () =
     walk ("../.." ^/ dir))
 ;;
 
-let%expect_test "the project's sources round trip" =
+let%expect_test "the project's sources round trip and are formatted" =
   List.iter (stag_files ()) ~f:(fun path ->
-    let program = parse (In_channel.read_all path) in
+    let source = In_channel.read_all path in
+    let program = parse source in
     Round_trip.program ~widths:[ 80; 40; 20; 1 ] program;
+    Round_trip.source ~widths:[ 80; 40; 20; 1 ] source;
+    let formatted =
+      match Formatter.format ~file:path source with
+      | Ok formatted -> String.equal formatted source
+      | Error _ -> false
+    in
     let long_lines =
       String.split_lines (Printer.program program)
       |> List.count ~f:(fun line -> String.length line > 80)
     in
-    print_s [%message path (long_lines : int)]);
+    print_s [%message path (formatted : bool) (long_lines : int)]);
   [%expect
     {|
-    (../../tests/basics.stag (long_lines 0))
-    (../../tests/evaluation.stag (long_lines 1))
-    (../../examples/calc/bin/main.stag (long_lines 0))
-    (../../examples/calc/fmt/show.stag (long_lines 0))
-    (../../examples/calc/math/arith.stag (long_lines 0))
-    (../../examples/calc/math/power.stag (long_lines 0))
-    (../../examples/calc/test/calc_test.stag (long_lines 0))
-    (../../eval/src/prelude/stag.stag (long_lines 0))
+    (../../tests/basics.stag (formatted true) (long_lines 0))
+    (../../tests/evaluation.stag (formatted true) (long_lines 1))
+    (../../examples/calc/bin/main.stag (formatted true) (long_lines 0))
+    (../../examples/calc/fmt/show.stag (formatted true) (long_lines 0))
+    (../../examples/calc/math/arith.stag (formatted true) (long_lines 0))
+    (../../examples/calc/math/power.stag (formatted true) (long_lines 0))
+    (../../examples/calc/test/calc_test.stag (formatted true) (long_lines 0))
+    (../../eval/src/prelude/stag.stag (formatted true) (long_lines 0))
     |}]
 ;;
 
@@ -678,4 +643,32 @@ let%expect_test "syntax the parser does not produce" =
     ("x (x, x)" (reparsed (App (Var x ()) (Tuple ((Var x ()) (Var x ()))))))
     ("[%expect {xx|a |} b |x} c|xx}]" (reparsed (Expect "a |} b |x} c")))
     |xxx}]
+;;
+
+let%expect_test "sequences in parentheses stay on one line only if all fits" =
+  print
+    {|let f x =
+  (match x with a, b -> g a; h b);
+  (match partial_twice with a, b -> print_pair a; print_string " "; print_pair b);
+  (match x with A -> a; b | B -> c);
+  (let x = 1 in g x; h x);
+  ((a; b), c)
+|};
+  [%expect
+    {|
+    let f x =
+      (match x with a, b -> g a; h b);
+      (match partial_twice with
+       | a, b ->
+         print_pair a;
+         print_string " ";
+         print_pair b);
+      (match x with
+       | A ->
+         a;
+         b
+       | B -> c);
+      (let x = 1 in g x; h x);
+      ((a; b), c)
+    |}]
 ;;

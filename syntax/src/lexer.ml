@@ -416,8 +416,20 @@ let token (t : State.t) : Located.t =
 (* A comment is [Trailing] after a token ending code on its line, or after
    such a comment ending on its line. *)
 let comments ~(prev : Located.t option) ~(next : Located.t) ~next_index found =
-  let lines = Array.of_list (List.map found ~f:snd) in
+  let lines : Loc.t array = Array.of_list (List.map found ~f:snd) in
   let n = Array.length lines in
+  (* Whether code follows on its last line, maybe after other comments. *)
+  let code_after = Array.create ~len:n false in
+  for i = n - 1 downto 0 do
+    code_after.(i)
+    <- (if i < n - 1
+        then
+          lines.(i + 1).start.line = lines.(i).stop.line && code_after.(i + 1)
+        else (
+          match next.token with
+          | Eof -> false
+          | _ -> next.loc.start.line = lines.(i).stop.line))
+  done;
   let trailing_line =
     Option.bind prev ~f:(fun prev ->
       Option.some_if (Token.ends_code prev.token) prev.loc.stop.line)
@@ -429,11 +441,7 @@ let comments ~(prev : Located.t option) ~(next : Located.t) ~next_index found =
       let code_before =
         Option.exists prev ~f:(fun prev -> prev.loc.stop.line = loc.start.line)
       in
-      let code_after =
-        match next.token with
-        | Eof -> false
-        | _ -> next.loc.start.line = loc.stop.line
-      in
+      let code_after = code_after.(i) in
       let placement : Comment.Placement.t =
         if code_after
         then Inline

@@ -14,6 +14,27 @@ Formatting one file prints it formatted.
   $ stag fmt messy.stag > tidy.stag
   $ stag fmt tidy.stag | diff - tidy.stag
 
+Comments are kept where they were.
+
+  $ cat > commented.stag <<'EOF'
+  > (* A header. *)
+  > 
+  > let   f x =   (* f's body *)
+  >   match x with
+  >   (* zero *)
+  >   | 0 -> "zero" (* the base case *)
+  >   | _ -> (* others *) "other"
+  > EOF
+  $ stag fmt commented.stag
+  (* A header. *)
+  
+  let f x =
+    (* f's body *)
+    match x with
+    (* zero *)
+    | 0 -> "zero" (* the base case *)
+    | _ -> (* others *) "other"
+
 An empty file formats to nothing.
 
   $ touch empty.stag

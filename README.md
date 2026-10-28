@@ -13,6 +13,9 @@ stag fmt -inplace FILE...     # format the files in place
 stag fmt -check FILE...       # list the unformatted files on stdout, failing if any
 ```
 
+`stag fmt` prints to 80 columns, keeping comments where they were (by the
+tokens around them) and blank lines between toplevels.
+
 `stag test -print-corrected FILE` prints the corrected file instead, writing
 nothing. `-fuel N`, `-max-depth N` and `-time-limit SPAN` bound each phase of
 evaluation (compile time, evaluation, each test); they are unlimited by default.
