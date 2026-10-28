@@ -726,3 +726,77 @@ let%expect_test "unrelated" = print_endline "fine"; [%expect {| fine |}]
     Error: Expect test "second" failed: Initialization of A.x raised A.E
     |}]
 ;;
+
+let%expect_test
+    "exception patterns are looked up as exceptions, not in the scrutinee's \
+     type"
+  =
+  run
+    {|
+type t = A | B
+let describe f = match f () with A -> "A" | B -> "B" | exception Failure s -> String.append "Failure " s
+let main =
+  print_endline (describe (fun u -> A));
+  print_endline (describe (fun u -> Int.of_string_exn "x"; B))
+|};
+  [%expect
+    {|
+    A
+    Failure Int.of_string_exn: invalid integer "x"
+    |}];
+  run
+    {|
+exception A
+module M = struct type t = A | B end
+let describe (f : unit -> M.t) = match f () with A -> "M.A" | B -> "M.B" | exception A -> "exception A"
+let main =
+  print_endline (describe (fun u -> M.A));
+  print_endline (describe (fun u -> raise A))
+|};
+  [%expect
+    {|
+    M.A
+    exception A
+    |}];
+  run
+    {|
+module N = struct exception A end
+type t = A | B
+let describe (v : t) = match v with A -> 1 | B -> 2 | exception N.A -> 3
+let lexical (v : t) = match v with A -> 1 | B -> 2 | exception A -> 3
+|};
+  [%expect
+    {|
+    File "a.stag", line 5, characters 63-64:
+    5 | let lexical (v : t) = match v with A -> 1 | B -> 2 | exception A -> 3
+                                                                       ^
+    Error: This expression has type A.t but an expression was expected of type exn
+    |}]
+;;
+
+let%expect_test "a constructor's tuple argument is checked as of its type" =
+  run
+    ~signature:true
+    {|
+type r = {x : int}
+module T = struct type t = A | B end
+type u = B | C
+let v : option[r * T.t] = Some ({x = 1}, B)
+let n = match v with Some ({x = n}, B) -> n | Some _ -> 2 | None -> 3
+let main = print_int n
+|};
+  [%expect
+    {|
+    module A : sig
+      type r = { x : int }
+      module T : sig
+        type t = A | B
+      end
+      type u = B | C
+      val v : option[r * T.t]
+      val n : int
+      val main : unit
+    end
+    1
+    |}]
+;;
