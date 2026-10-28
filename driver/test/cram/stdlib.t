@@ -109,8 +109,8 @@ Prims are only the prelude's.
   Error: Unbound module Prim
   [1]
   $ stag check a.stag stag/core/list.stag
-  File "stag/prelude/prelude.stag", line 249, characters 11-25:
-  249 | let oops = Prim.Nope.nope
+  File "stag/prelude/prelude.stag", line 289, characters 11-25:
+  289 | let oops = Prim.Nope.nope
                    ^^^^^^^^^^^^^^
   Error: Unbound value Prim.Nope.nope
   [1]
