@@ -936,7 +936,7 @@ let s = .~(w .<1>.)
     ((Unification_error
       (Row_mismatch
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
-        (RVar (Link (RVar (Link REmpty)))))
+        (RVar (Link REmpty)))
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
         (RVar (Unbound 64 1)))
        (Presence_mismatch x)))

@@ -52,6 +52,10 @@ and may be checked along with them.
   1 | let x = Core.List.length_plus_one Nil
               ^^^^^^^^^^^^^^^^^^^^^^^^^
   Error: Unbound value Core.List.length_plus_one
+  File "tests/inside.stag", line 1, characters 8-33:
+  1 | let x = Core.List.length_plus_one Nil
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: Unbound value Core.List.length_plus_one
   [1]
 
 Core's files must be modules, and the prelude has no declaration splices.
@@ -94,8 +98,12 @@ Errors are located in their files.
   > let oops = Prim.Nope.nope
   > X
   $ stag check core/list.stag
-  File "prelude/prelude.stag", line 297, characters 11-25:
-  297 | let oops = Prim.Nope.nope
+  File "core/list.stag", line 16, characters 30-39:
+  16 |     | Cons (_, rest) -> loop (Int.succc acc) rest
+                                     ^^^^^^^^^
+  Error: Unbound value Int.succc
+  File "prelude/prelude.stag", line 289, characters 11-25:
+  289 | let oops = Prim.Nope.nope
                    ^^^^^^^^^^^^^^
   Error: Unbound value Prim.Nope.nope
   [1]
@@ -109,8 +117,12 @@ Prims are only the prelude's.
   Error: Unbound module Prim
   [1]
   $ stag check a.stag stag/core/list.stag
-  File "stag/prelude/prelude.stag", line 297, characters 11-25:
-  297 | let oops = Prim.Nope.nope
+  File "stag/core/list.stag", line 16, characters 30-39:
+  16 |     | Cons (_, rest) -> loop (Int.succc acc) rest
+                                     ^^^^^^^^^
+  Error: Unbound value Int.succc
+  File "stag/prelude/prelude.stag", line 289, characters 11-25:
+  289 | let oops = Prim.Nope.nope
                    ^^^^^^^^^^^^^^
   Error: Unbound value Prim.Nope.nope
   [1]
@@ -122,4 +134,32 @@ Without the marker, they are programs.
   16 |     | Cons (_, rest) -> loop (Int.succ acc) rest
                                      ^^^^^^^^
   Error: Unbound value Int.succ
+  File "stag/core/list.stag", line 60, characters 27-35:
+  60 |       | false -> nth rest (Int.pred n)
+                                  ^^^^^^^^
+  Error: Unbound value Int.pred
+  File "stag/core/list.stag", line 80, characters 20-28:
+  80 |     | true -> loop (Int.succ i) (Cons (f i, acc))
+                           ^^^^^^^^
+  Error: Unbound value Int.succ
+  File "stag/core/list.stag", line 104, characters 30-38:
+  104 |     | Cons (x, rest) -> loop (Int.succ i) rest (Cons (f i x, acc))
+                                      ^^^^^^^^
+  Error: Unbound value Int.succ
+  File "stag/core/list.stag", line 121, characters 12-20:
+  121 |       loop (Int.succ i) rest
+                    ^^^^^^^^
+  Error: Unbound value Int.succ
+  File "stag/core/list.stag", line 157, characters 14-22:
+  157 |     | true -> Int.succ n
+                      ^^^^^^^^
+  Error: Unbound value Int.succ
+  File "stag/core/list.stag", line 225, characters 41-49:
+  225 |     | Cons (x, rest), true -> loop rest (Int.pred n) (Cons (x, acc))
+                                                 ^^^^^^^^
+  Error: Unbound value Int.pred
+  File "stag/core/list.stag", line 233, characters 34-42:
+  233 |   | Cons (_, rest), true -> drop (Int.pred n) rest
+                                          ^^^^^^^^
+  Error: Unbound value Int.pred
   [1]

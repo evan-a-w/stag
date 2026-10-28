@@ -56,22 +56,27 @@ end
     its names become visible. [force] generates a splice's declarations, once,
     the first time they are needed: when a path goes through a spliced module,
     when a name is not found among a module's members known so far, from a
-    position after includes that may define it, and by [iter_declarations]. A
-    splice that failed fails again with the same error. Needing a splice's
-    declarations while forcing it is an error. *)
+    position after includes that may define it, and by [iter_declarations].
+    Needing a splice's declarations while forcing it is an error.
+
+    Errors not returned are passed to [report]: a splice's error, once, after
+    which it generates nothing, and those of declarations whose names are not
+    unique, which are dropped. Names not found where a failed splice may have
+    generated them are [Typecheck_error.already_reported]. *)
 val create_root
   :  ?enclosing:t
   -> ?path:string list
   -> types:string list
   -> declare:(t -> Syntax.Toplevel.t -> generated_by:Splice.t option -> unit)
   -> force:(Splice.t -> (Syntax.Toplevel.t list, Force_error.t) Result.t)
+  -> report:(Typecheck_error.t -> unit)
   -> unit
   -> t
 
 (** Adds the members of [toplevels], declared in the root module [t], once,
-    creating their modules, unless a name would not be unique: a member per
-    module, a parameter per type. *)
-val add : t -> Syntax.Toplevel.t list -> (unit, Typecheck_error.t) Result.t
+    creating their modules. Those whose names are not unique (a member per
+    module, a parameter per type) are reported instead. *)
+val add : t -> Syntax.Toplevel.t list -> unit
 
 (** The declarations of [t]'s module, in order, an include's in its place, once
     generated. *)
@@ -79,18 +84,14 @@ val declarations : t -> Syntax.Toplevel.t list
 
 (** Calls [f] on each declaration of [t]'s module and its modules, depth first
     in order, with the scope at its position and the splice that generated it,
-    if any, stopping at the first error. Splices are forced when reached, and
+    if any. Splices are forced when reached, and
     what they generate is visited in their place: a spliced module's
     declarations as those of a module, an include's as if written instead of
     it. *)
 val iter_declarations
   :  t
-  -> f:
-       (t
-        -> Syntax.Toplevel.t
-        -> generated_by:Splice.t option
-        -> (unit, Typecheck_error.t) Result.t)
-  -> (unit, Typecheck_error.t) Result.t
+  -> f:(t -> Syntax.Toplevel.t -> generated_by:Splice.t option -> unit)
+  -> unit
 
 (** The full path of member [name] of [t]'s module, joined with [.]. *)
 val canonical_name : t -> string -> string

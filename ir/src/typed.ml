@@ -166,6 +166,7 @@ module Pattern = struct
           { fields : (string * 'p) list
           ; rest : Rest.t
           }
+      | Error of 'p list
     [@@deriving sexp_of]
   end
 
@@ -182,7 +183,7 @@ module Pattern = struct
     match t.desc with
     | Any | Lit _ | Poly_variant (_, None) -> []
     | Var ident -> [ ident ]
-    | Tuple ps | Construct (_, ps) -> List.concat_map ps ~f:idents
+    | Tuple ps | Construct (_, ps) | Error ps -> List.concat_map ps ~f:idents
     | Record fields -> List.concat_map fields ~f:(fun (_, p) -> idents p)
     | Poly_record { fields; rest } ->
       (match rest with
@@ -192,10 +193,23 @@ module Pattern = struct
     | Poly_variant (_, Some p) -> idents p
   ;;
 
+  let error patterns ~loc = { desc = Error patterns; ty = Type.error; loc }
+
+  let rec has_error t =
+    match t.desc with
+    | Error _ -> true
+    | Any | Var _ | Lit _ | Poly_variant (_, None) -> false
+    | Tuple ps | Construct (_, ps) -> List.exists ps ~f:has_error
+    | Poly_variant (_, Some p) -> has_error p
+    | Record fields -> List.exists fields ~f:(fun (_, p) -> has_error p)
+    | Poly_record { fields; rest = _ } ->
+      List.exists fields ~f:(fun (_, p) -> has_error p)
+  ;;
+
   let rec is_irrefutable t =
     match t.desc with
     | Any | Var _ -> true
-    | Lit _ | Construct _ | Record _ | Poly_variant _ -> false
+    | Lit _ | Construct _ | Record _ | Poly_variant _ | Error _ -> false
     | Tuple patterns -> List.for_all patterns ~f:is_irrefutable
     | Poly_record { fields; rest = _ } ->
       List.for_all fields ~f:(fun (_, pattern) -> is_irrefutable pattern)
@@ -258,6 +272,9 @@ module Expr = struct
       | Expect of string Located.t
       | Type of Syntax.Type_expr.t
       (** [type t], its types named by canonical names ([Resolved]). *)
+      | Error of 'e list
+      (** In place of what did not parse or check, with the parts of it that
+          did. *)
     [@@deriving sexp_of]
   end
 
@@ -286,13 +303,22 @@ module Expr = struct
     | Poly_field (e, _)
     | Poly_restrict (e, _)
     | Poly_variant (_, Some e) -> [ e ]
-    | Tuple es | Construct (_, es) -> es
+    | Tuple es | Construct (_, es) | Error es -> es
     | Record fields -> snds fields
     | Poly_record fields -> snds fields
     | Poly_extend (fields, e) | Poly_update (e, fields) -> e :: snds fields
     | Record_update (e, fields) -> e :: snds fields
     | Match { scrutinee; cases; exception_cases } ->
       (scrutinee :: snds cases) @ snds exception_cases
+  ;;
+
+  let rec has_error t =
+    match t.desc with
+    | Error _ -> true
+    | Match { cases; exception_cases; scrutinee = _ }
+      when List.exists (cases @ exception_cases) ~f:(fun (pattern, _) ->
+             Pattern.has_error pattern) -> true
+    | _ -> List.exists (sub_exprs t) ~f:has_error
   ;;
 
   let rec refers_to t ~f =
@@ -305,7 +331,7 @@ module Expr = struct
 
   let rec is_value t =
     match t.desc with
-    | Lit _ | Var _ | Type _ | Fun _ -> true
+    | Lit _ | Var _ | Type _ | Fun _ | Error _ -> true
     | Quote expr -> splices_are_values expr ~depth:1
     | Annotated (e, _) -> is_value e
     | Let { ident; args; body; in_; _ } ->
@@ -360,7 +386,8 @@ module Expr = struct
     | Poly_update _
     | Poly_variant _
     | Expect _
-    | Type _ -> List.for_all (sub_exprs t) ~f:(splices_are_values ~depth)
+    | Type _
+    | Error _ -> List.for_all (sub_exprs t) ~f:(splices_are_values ~depth)
 
   and binding_is_value ~ident ~args ~body =
     (not (List.is_empty args))
@@ -430,4 +457,17 @@ module Program = struct
     ; ident_info : Ident_info.t Ident.Map.t
     }
   [@@deriving sexp_of]
+
+  let exprs { sccs; expect_tests; benches; declaration_splices; ident_info = _ }
+    =
+    List.concat_map sccs ~f:(fun (scc : Scc.t) ->
+      List.map scc.members ~f:(fun (member : Toplevel.t) -> member.body))
+    @ List.map expect_tests ~f:(fun (test : Expect_test.t) -> test.body)
+    @ List.concat_map benches ~f:(fun (bench : Bench.t) ->
+      bench.body
+      :: Option.value_map bench.param ~default:[] ~f:(fun (_, args) -> args))
+    @ declaration_splices
+  ;;
+
+  let has_error t = List.exists (exprs t) ~f:Expr.has_error
 end

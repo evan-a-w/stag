@@ -30,6 +30,10 @@ module Error : sig
   (** Without the location. *)
   val message : t -> string
 
+  (** Whether its lexeme was skipped, without making a token: an illegal
+      character, or an unterminated comment. *)
+  val skipped : t -> bool
+
   val to_string : t -> string
 end
 
@@ -42,6 +46,18 @@ val tokenize_with_comments
   :  file:string
   -> string
   -> (Located.t array * Comment.t list, Error.t) Result.t
+
+module Recovered : sig
+  type t =
+    { tokens : Located.t array (** Without the lexemes with errors. *)
+    ; comments : Comment.t list
+    ; errors : Error.t list (** In order. *)
+    }
+end
+
+(** Lexes past errors: skips illegal characters, and ends unterminated strings
+    and comments at the end of the file. *)
+val tokenize_recovering : file:string -> string -> Recovered.t
 
 module Prefix : sig
   type t =

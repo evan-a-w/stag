@@ -10,7 +10,7 @@ type t
 (** The builtin types, as declarations of the root module. *)
 val builtins : Syntax.Type_decl.t list
 
-val create : Fresh.t -> t
+val create : Fresh.t -> report:(Typecheck_error.t -> unit) -> t
 
 (** Declares [decl], a member of [module_], whose parameters are distinct.
     Types may refer to each other in any order, once declared. With [lazily],
@@ -26,16 +26,20 @@ val declare
 
 (** Declares the exception [name], a constructor of [exn], a member of
     [module_]. Its constructor's [index] is [0]: exceptions are told apart by
-    canonical name. *)
+    canonical name. A [malformed] one, whose syntax error is the parser's, is
+    [Already_reported] when checked. *)
 val declare_exception
   :  ?wrap_error:(Typecheck_error.t -> Typecheck_error.t)
   -> t
   -> Module_scope.t
   -> Syntax.Name.t
   -> Syntax.Type_expr.t list
+  -> malformed:bool
   -> unit
 
-(** The checked declaration of the type of canonical name [name]. *)
+(** The checked declaration of the type of canonical name [name]. Its error,
+    the first time, is given to [create]'s [report], and [Already_reported]
+    returned. *)
 val check : t -> string -> (Signature.Type_decl.t, Typecheck_error.t) Result.t
 
 (** The parameters of the declaring type are [Generic] in [args] and [result],
@@ -128,7 +132,7 @@ end
 (** The type, and the syntax with each type it names by its canonical name
     ([Resolved]), so that it names the same types wherever it is. With
     [splices], each type splice [.~e] is the type [e] evaluates to (once per
-    splice); without, it is an error, as in quotes and compile-time code. *)
+    splice), which may not itself contain a splice; without, it is an error, as in quotes and compile-time code. *)
 val elaborate
   :  t
   -> Module_scope.t
@@ -149,7 +153,8 @@ val set_evaluate_splice
   -> unit
 
 (** Gives the type [name], declared as [type t = .~e], the definition [e]
-    evaluated to, erring if it is itself a splice, or an alias while the type
+    evaluated to at [loc]. Errs (reported to [create]'s [report], the type
+    then failed) if it contains a type splice, or is an alias while the type
     was used while computing it. Errors checking it are then passed through
     [wrap_error], then as before. *)
 val set_definition
@@ -158,7 +163,7 @@ val set_definition
   -> Syntax.Type_decl.Kind.t
   -> wrap_error:(Typecheck_error.t -> Typecheck_error.t)
   -> loc:Loc.t
-  -> (unit, Typecheck_error.t) Result.t
+  -> unit
 
 (** The declaration of the type of canonical name [name], checking it, its
     types [Resolved] where it is declared. [None] if it is abstract, as are

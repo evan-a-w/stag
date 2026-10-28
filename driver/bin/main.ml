@@ -30,22 +30,32 @@ let relative_loc =
     | None -> loc
 ;;
 
+let contents files path =
+  match
+    List.find_map files ~f:(fun (file : Source_file.t) ->
+      Option.some_if (String.equal file.path path) file.contents)
+  with
+  | Some contents -> Some contents
+  | None -> Option.try_with (fun () -> In_channel.read_all path)
+;;
+
 let report ?warning files diagnostic =
-  let contents path =
-    match
-      List.find_map files ~f:(fun (file : Source_file.t) ->
-        Option.some_if (String.equal file.path path) file.contents)
-    with
-    | Some contents -> Some contents
-    | None -> Option.try_with (fun () -> In_channel.read_all path)
-  in
   Out_channel.flush stdout;
   eprintf
     "%s%!"
     (Diagnostic.to_string_hum
-       ~contents
+       ~contents:(contents files)
        ?warning
        (Diagnostic.relocate diagnostic ~f:relative_loc))
+;;
+
+let report_all files diagnostics =
+  Out_channel.flush stdout;
+  eprintf
+    "%s%!"
+    (Diagnostic.list_to_string_hum
+       ~contents:(contents files)
+       (List.map diagnostics ~f:(Diagnostic.relocate ~f:relative_loc)))
 ;;
 
 let report_stale ?warning files expansions =
@@ -79,8 +89,8 @@ let program_prelude paths =
 let check ?output ?prelude ~limits files =
   match Driver.check_files ?output ?prelude ~limits files with
   | Ok driver -> driver
-  | Error error ->
-    report files (Diagnostic.of_driver_error error);
+  | Error errors ->
+    report_all files (List.map errors ~f:Diagnostic.of_driver_error);
     exit 1
 ;;
 
@@ -165,8 +175,8 @@ let check_with_prelude_sources ~limits ~sources ~program =
         path;
       exit 1));
   match Stdlib_checkout.check ~limits checkout with
-  | Error diagnostic ->
-    report [] diagnostic;
+  | Error diagnostics ->
+    report_all [] diagnostics;
     exit 1
   | Ok { prelude; driver } ->
     report_stale ~warning:true [] (Inline_expansion.stale driver);

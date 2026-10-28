@@ -4,6 +4,10 @@ module Value = Value
 
 type t
 
+(** The error of evaluating code that did not check ([Typed.Expr.Desc.Error]). *)
+exception Reached_error
+[@@deriving sexp_of]
+
 (** [stamps] should be the counter that made the idents of the programs
     evaluated, so idents minted while evaluating are distinct from theirs. *)
 val create : stamps:Stamp_counter.t -> unit -> t

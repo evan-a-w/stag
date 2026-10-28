@@ -134,6 +134,7 @@ module Make (B : Builder) = struct
         con "Stag.Type_decl.Kind.Record" [ list (pair name type_expr) fields ]
       | Alias ty -> con "Stag.Type_decl.Kind.Alias" [ type_expr ty ]
       | Abstract -> con "Stag.Type_decl.Kind.Abstract" []
+      | Malformed kind -> type_decl_kind kind
       | Splice { txt = e; loc = _ } ->
         (match A.antiquote Type_kind e with
          | Some lifted -> lifted
@@ -193,6 +194,7 @@ module Make (B : Builder) = struct
       | Poly_variant (tag, arg) ->
         con "Poly_variant" [ name tag; option expr arg ]
       | Expect expected -> con "Expect" [ B.string expected.txt ]
+      | Error -> raise_s [%message "Lift: an expression that did not parse"]
 
     and toplevel ({ txt; loc = _ } : Toplevel.t) =
       let con name = con ("Stag.Toplevel." ^ name) in
@@ -202,7 +204,7 @@ module Make (B : Builder) = struct
           "Let"
           [ name var; list binding bindings; option type_expr annot; expr body ]
       | Type decl -> con "Type" [ type_decl decl ]
-      | Exception (exn_name, args) ->
+      | Exception (exn_name, args) | Malformed_exception (exn_name, args) ->
         con "Exception" [ name exn_name; list type_expr args ]
       | Module (module_name, items) ->
         con "Module" [ name module_name; program items ]

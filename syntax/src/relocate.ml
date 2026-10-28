@@ -159,6 +159,7 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
   let poly_fields = list (pair name expr) in
   match g, w with
   | Lit a, Lit b -> Option.some_if (Lit.equal a b) g
+  | Error, Error -> Some Error
   | Var (p, t), Var (p', t') ->
     let* p = decl_path_desc p p' in
     let+ t = option type_expr t t' in
@@ -260,7 +261,8 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
       | Poly_update _
       | Poly_variant _
       | Expect _
-      | Struct_quote _ )
+      | Struct_quote _
+      | Error )
     , _ ) -> None
 
 and type_decl
@@ -284,7 +286,8 @@ and type_decl
     | Splice e, Splice e' ->
       let+ txt = expr e.txt e'.txt in
       Type_decl.Kind.Splice { e' with txt }
-    | (Variant _ | Record _ | Alias _ | Abstract | Splice _), _ -> None
+    | (Variant _ | Record _ | Alias _ | Abstract | Splice _ | Malformed _), _ ->
+      None
   in
   { Type_decl.name = n; params; kind }
 
@@ -340,6 +343,7 @@ and toplevel_desc (g : Toplevel.desc) (w : Toplevel.desc) =
   | ( ( Let _
       | Type _
       | Exception _
+      | Malformed_exception _
       | Module _
       | Module_splice _
       | Include _

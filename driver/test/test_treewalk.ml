@@ -179,7 +179,9 @@ let%expect_test "a shared stamp counter" =
   let interpreter = Treewalk.create ~stamps () in
   let idents program =
     match Typecheck.typecheck (Typecheck.create ~interpreter ()) ~program with
-    | Error error -> raise_s [%sexp (error : Typecheck_error.t)]
+    | Error error ->
+      raise_s
+        [%sexp ((error : Typecheck.Failed.t).errors : Typecheck_error.t list)]
     | Ok { program; _ } -> Map.keys program.ident_info
   in
   print_s [%sexp (idents (parse_exn "let f x = x") : Typed.Ident.t list)];

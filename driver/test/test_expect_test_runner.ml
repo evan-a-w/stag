@@ -3,7 +3,7 @@ open! Import
 let check_files files =
   match Driver.check_files ~limits:Source_helpers.limits files with
   | Error error ->
-    print_s [%sexp (error : Driver.Error.t)];
+    List.iter error ~f:(fun error -> print_s [%sexp (error : Driver.Error.t)]);
     None
   | Ok driver -> Some driver
 ;;

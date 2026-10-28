@@ -35,10 +35,27 @@ type t =
   ; mutable bare_tuple_end : int
     (** The [pos] after the last [)] whose contents were a tuple without
           parentheses of its own, as in [(a, b)] but not [((a, b))]. *)
+  ; errors : Error.t Queue.t option
+    (** Where to record errors, to keep parsing toplevels after them, if
+          any. *)
+  ; mutable salvage : (Expr.t -> Toplevel.desc) option
+    (** What of the toplevel being parsed parsed, given an [Expr.Error] for
+          the rest. *)
+  ; lex_errors : int array
+    (** The offsets of the lexemes skipped by lexer errors, in order, if
+          recovering. *)
+  ; mutable limit : int
+    (** When recovering, the index of the next token that ends the toplevel
+        being parsed (it appears as [Eof]), else that of [Eof]. *)
+  ; mutable col : int (** That of the toplevel being parsed, if recovering. *)
   }
 
+let steps = ref 0
+
 let peek_at t n =
-  t.tokens.(Int.min (t.pos + n) (Array.length t.tokens - 1)).token
+  incr steps;
+  let i = t.pos + n in
+  t.tokens.(if i >= t.limit then Array.length t.tokens - 1 else i).token
 ;;
 
 let peek t = peek_at t 0
@@ -65,8 +82,11 @@ let describe : Token.t -> string = function
 
 let fail loc message = raise (Syntax_error (loc, message))
 
+(* The token at [pos], even past [limit]. *)
+let found t = t.tokens.(t.pos).token
+
 let expected t what =
-  match peek t with
+  match found t with
   | At | At_at -> fail (loc t) "`@` is reserved (for modes)"
   | token ->
     fail (loc t) (sprintf "expected %s, found %s" what (describe token))
@@ -89,7 +109,7 @@ let close t token ~opener ~open_loc =
          (describe opener)
          open_loc.Loc.start.line
          open_loc.start.col
-         (describe (peek t)))
+         (describe (found t)))
 ;;
 
 (** Expects [token], which goes with the [opener] at [open_loc]. *)
@@ -105,7 +125,7 @@ let expect_for t token ~opener ~open_loc =
          (describe opener)
          open_loc.Loc.start.line
          open_loc.start.col
-         (describe (peek t)))
+         (describe (found t)))
 ;;
 
 (** Parses [opener items close], with [item]s separated by [sep] and an
@@ -715,25 +735,27 @@ let rec expr ?(seq = true) t : Expr.t =
         (Let (located ~loc:semi "_", [], None, first, second)))
     else first
 
+and binding_name t =
+  if is t Rec then fail (loc t) "lets are always recursive; remove `rec`";
+  match peek t with
+  | Underscore ->
+    let loc = loc t in
+    advance t;
+    located ~loc "_"
+  | _ -> lident t ~what:"a name to bind"
+
+and binding_annot t =
+  if is t Colon
+  then (
+    advance t;
+    Some (type_expr t))
+  else None
+
 (** [name params : t = e], after [let]. *)
 and binding t =
-  if is t Rec then fail (loc t) "lets are always recursive; remove `rec`";
-  let name =
-    match peek t with
-    | Underscore ->
-      let loc = loc t in
-      advance t;
-      located ~loc "_"
-    | _ -> lident t ~what:"a name to bind"
-  in
+  let name = binding_name t in
   let params = params t in
-  let annot =
-    if is t Colon
-    then (
-      advance t;
-      Some (type_expr t))
-    else None
-  in
+  let annot = binding_annot t in
   expect t Equal;
   name, params, annot, expr t
 
@@ -1062,6 +1084,8 @@ and record t : Expr.t =
 
 (* Declarations *)
 
+let salvage t f = t.salvage <- Some f
+
 let type_param t : Type_decl.Param.t Located.t =
   let start = loc t in
   match peek t with
@@ -1077,13 +1101,14 @@ let type_param t : Type_decl.Param.t Located.t =
   | _ -> expected t "a type parameter like `'a` or `{..'r}`"
 ;;
 
-let constructor_decl t =
-  let name = uident t ~what:"a constructor name" in
+(* [parsed] is told the arguments parsed so far, as they are parsed. *)
+let constructor_args ?(parsed = ignore) t =
   if is t Of
   then (
     advance t;
     let rec args acc =
       let acc = type_app t :: acc in
+      parsed (List.rev acc);
       match peek t with
       | Star ->
         advance t;
@@ -1095,11 +1120,13 @@ let constructor_decl t =
            of (a -> b)`"
       | _ -> List.rev acc
     in
-    name, args [])
-  else name, []
+    args [])
+  else []
 ;;
 
-let type_kind t : Type_decl.Kind.t =
+(* [parsed] is told the members parsed so far, including the one being parsed
+   once it is named, as they are parsed. *)
+let type_kind t ~(parsed : Type_decl.Kind.t -> unit) : Type_decl.Kind.t =
   match peek t, peek_at t 1 with
   | Splice, _ ->
     let start = loc t in
@@ -1121,7 +1148,13 @@ let type_kind t : Type_decl.Kind.t =
     (match peek t with
      | Uident _ ->
        let rec loop acc =
-         let acc = constructor_decl t :: acc in
+         let name = uident t ~what:"a constructor name" in
+         let parsed_args args =
+           parsed (Variant (List.rev ((name, args) :: acc)))
+         in
+         parsed_args [];
+         let acc = (name, constructor_args t ~parsed:parsed_args) :: acc in
+         parsed (Variant (List.rev acc));
          if is t Bar
          then (
            advance t;
@@ -1131,16 +1164,28 @@ let type_kind t : Type_decl.Kind.t =
        Variant (loop [])
      | _ -> Variant [])
   | Lbrace, Lident _ ->
+    let fields = ref [] in
     Record
       (delimited t ~opener:Lbrace ~close:Rbrace ~sep:Semi ~item:(fun t ->
          let name = lident t ~what:"a field name" in
+         (* For the name, whose type is never looked at. *)
+         let missing = located ~loc:name.loc (Type_expr.Tuple []) in
+         parsed (Record (List.rev ((name, missing) :: !fields)));
          expect t Colon;
-         name, type_expr t))
+         let field = name, type_expr t in
+         fields := field :: !fields;
+         parsed (Record (List.rev !fields));
+         field))
   | _ -> Alias (type_expr t)
 ;;
 
-let type_decl t : Type_decl.t =
+(* [salvage] is told what parsed of it so far, as it is parsed. *)
+let type_decl t ~salvage : Type_decl.t =
   let name = lident t ~what:"a type name" in
+  let salvage params kind =
+    salvage { Type_decl.name; params; kind = Malformed kind }
+  in
+  salvage [] Abstract;
   let params =
     if is t Lbracket
     then (
@@ -1152,14 +1197,98 @@ let type_decl t : Type_decl.t =
       params)
     else []
   in
+  salvage params Abstract;
   let kind =
     if is t Equal
     then (
       advance t;
-      type_kind t)
+      type_kind t ~parsed:(salvage params))
     else Abstract
   in
+  salvage params kind;
   { name; params; kind }
+;;
+
+(* What follows a skipped lexeme in a toplevel parsed as if it were not
+   there, so the toplevel is salvaged as if it were a syntax error. Those in a
+   [struct] are in the toplevels in it. *)
+let with_lex_errors t (toplevel : Toplevel.t) ~start =
+  let start = t.tokens.(start).loc.start.offset in
+  let stop = (loc t).start.offset in
+  match toplevel.txt, t.salvage with
+  | (Module _ | Module_splice (_, _, Some _) | Include (_, Some _)), _ | _, None
+    -> toplevel
+  | _, Some desc ->
+    if
+      Array.binary_search
+        t.lex_errors
+        ~compare:Int.compare
+        `First_greater_than_or_equal_to
+        start
+      |> Option.exists ~f:(fun i -> t.lex_errors.(i) < stop)
+    then { toplevel with txt = desc (expr_at ~loc:toplevel.loc Error) }
+    else toplevel
+;;
+
+let first_on_line t i =
+  i = 0 || t.tokens.(i).loc.start.line > t.tokens.(i - 1).loc.stop.line
+;;
+
+(* Whether the token at [i] is a toplevel keyword first on its line and not
+   indented more than [col]. *)
+let starts_toplevel_at t i ~col =
+  match t.tokens.(i).token with
+  | Let
+  | Type
+  | Exception
+  | Module
+  | Module_inline
+  | Include
+  | Include_inline
+  | Let_expect_test
+  | Let_bench -> first_on_line t i && t.tokens.(i).loc.start.col <= col
+  | _ -> false
+;;
+
+(* The index of the first token from [from] that starts a toplevel not
+   indented more than [col], or of [Eof]. *)
+let next_toplevel t ~from ~col =
+  let rec go i =
+    incr steps;
+    match t.tokens.(i).token with
+    | Eof -> i
+    | _ when starts_toplevel_at t i ~col -> i
+    | _ -> go (i + 1)
+  in
+  go from
+;;
+
+let closer : Token.t -> Token.t option = function
+  | Lparen -> Some Rparen
+  | Lbracket | Expect_open -> Some Rbracket
+  | Lbrace | Dot_lbrace -> Some Rbrace
+  | Quote_open -> Some Quote_close
+  | Struct -> Some End
+  | Module_inline | Include_inline -> Some End_inline
+  | _ -> None
+;;
+
+(* The innermost bracket opened from [start] and not closed before [stop],
+   with its closer, if any. *)
+let unclosed t ~start ~stop =
+  let rec go i open_ =
+    incr steps;
+    if i >= stop
+    then List.hd open_
+    else (
+      let ({ token; loc } : Lexer.Located.t) = t.tokens.(i) in
+      match closer token, token with
+      | Some closer, _ -> go (i + 1) ((token, loc, closer) :: open_)
+      | None, (Rparen | Rbracket | Rbrace | Quote_close | End | End_inline) ->
+        go (i + 1) (List.tl open_ |> Option.value ~default:[])
+      | None, _ -> go (i + 1) open_)
+  in
+  go start []
 ;;
 
 let rec toplevel t : Toplevel.t =
@@ -1167,23 +1296,38 @@ let rec toplevel t : Toplevel.t =
   match peek t with
   | Let ->
     advance t;
-    let name, params, annot, equal = binding t in
+    let name = binding_name t in
+    salvage t (fun error -> Let (name, [], None, error));
+    let params = params t in
+    salvage t (fun error -> Let (name, params, None, error));
+    let annot = binding_annot t in
+    salvage t (fun error -> Let (name, params, annot, error));
+    expect t Equal;
+    let equal = expr t in
     if is t In
-    then
+    then (
+      salvage t (fun _ -> Let (name, params, annot, equal));
       fail
         (loc t)
-        "unexpected `in`: a toplevel `let` is a declaration, without `in`";
+        "unexpected `in`: a toplevel `let` is a declaration, without `in`");
     since t start (Toplevel.Let (name, params, annot, equal))
   | Type ->
     advance t;
-    since t start (Toplevel.Type (type_decl t))
+    let decl =
+      type_decl t ~salvage:(fun decl -> salvage t (fun _ -> Type decl))
+    in
+    since t start (Toplevel.Type decl)
   | Exception ->
     advance t;
-    let name, args = constructor_decl t in
+    let name = uident t ~what:"a constructor name" in
+    let parsed args = salvage t (fun _ -> Malformed_exception (name, args)) in
+    parsed [];
+    let args = constructor_args t ~parsed in
     since t start (Toplevel.Exception (name, args))
   | (Module | Module_inline) as keyword ->
     advance t;
     let name = uident t ~what:"a module name" in
+    salvage t (fun error -> Module_splice (name, error, None));
     expect t Equal;
     (match peek t, keyword with
      | Splice, _ ->
@@ -1193,12 +1337,13 @@ let rec toplevel t : Toplevel.t =
      | _, Module ->
        let struct_loc = loc t in
        expect t Struct;
-       let toplevels = toplevels t in
-       close t End ~opener:Struct ~open_loc:struct_loc;
+       let toplevels = toplevels t ~in_struct:true in
+       close_recovering t End ~opener:Struct ~open_loc:struct_loc;
        since t start (Toplevel.Module (name, toplevels))
      | _ -> expected t "a declaration splice `.~e` after `module%inline M =`")
   | (Include | Include_inline) as keyword ->
     advance t;
+    salvage t (fun error -> Include (error, None));
     (match peek t with
      | Splice ->
        let expr = declaration_splice t in
@@ -1218,6 +1363,7 @@ let rec toplevel t : Toplevel.t =
         located ~loc s
       | _ -> expected t "the name of the test, a string"
     in
+    salvage t (fun body -> Expect_test { name; body });
     expect t Equal;
     let body = expr t in
     since t start (Toplevel.Expect_test { name; body })
@@ -1231,6 +1377,7 @@ let rec toplevel t : Toplevel.t =
         located ~loc s
       | _ -> expected t "the name of the benchmark, a string"
     in
+    salvage t (fun body -> Bench { name; param = None; body });
     let param =
       match peek t with
       | Lident _ ->
@@ -1242,6 +1389,7 @@ let rec toplevel t : Toplevel.t =
          | args -> Some { Bench_param.name; args })
       | _ -> None
     in
+    salvage t (fun body -> Bench { name; param; body });
     expect t Equal;
     let body = expr t in
     since t start (Toplevel.Bench { name; param; body })
@@ -1249,6 +1397,28 @@ let rec toplevel t : Toplevel.t =
     expected
       t
       "a declaration (`let`, `type`, `exception`, `module` or `include`)"
+
+(* The next toplevel after the broken one at [start]: the next toplevel
+   keyword first on its line and not indented more than the broken one, or, in
+   a [struct], the [end] closing it, by nesting or by being less indented.
+   Unmatched closing brackets are skipped. *)
+and resync t ~start ~in_struct =
+  let col = t.tokens.(start).loc.start.col in
+  let rec go i ~depth =
+    incr steps;
+    let ({ token; loc } : Lexer.Located.t) = t.tokens.(i) in
+    match token with
+    | Eof -> i
+    | _ when starts_toplevel_at t i ~col -> i
+    | (End | End_inline)
+      when in_struct && first_on_line t i && loc.start.col < col -> i
+    | token when Option.is_some (closer token) -> go (i + 1) ~depth:(depth + 1)
+    | (End | End_inline) when in_struct && depth = 0 -> i
+    | Rparen | Rbracket | Rbrace | End | End_inline | Quote_close ->
+      go (i + 1) ~depth:(Int.max 0 (depth - 1))
+    | _ -> go (i + 1) ~depth
+  in
+  go (start + 1) ~depth:0
 
 (* [.~e], the declarations [e] generates. *)
 and declaration_splice t =
@@ -1274,30 +1444,106 @@ and expansion t ~(keyword : Token.t) ~open_loc =
           then comment.loc.stop
           else start)
     in
-    let toplevels = toplevels t in
+    let toplevels = toplevels t ~in_struct:true in
     let end_loc = loc t in
-    close t End_inline ~opener:keyword ~open_loc;
+    close_recovering t End_inline ~opener:keyword ~open_loc;
     Some (located ~loc:{ end_loc with start; stop = end_loc.start } toplevels)
   | _ -> None
 
-and toplevels t =
-  let rec loop acc =
+and close_recovering t (token : Token.t) ~(opener : Token.t) ~open_loc =
+  match t.errors with
+  | None -> close t token ~opener ~open_loc
+  | Some errors ->
+    (try close t token ~opener ~open_loc with
+     | Syntax_error (loc, message) ->
+       Queue.enqueue errors (Syntax { loc; message }))
+
+and toplevels t ~in_struct =
+  let stop () =
     match peek t with
-    | End | End_inline | Eof -> List.rev acc
-    | _ -> loop (toplevel t :: acc)
+    | Eof -> true
+    | End | End_inline -> in_struct || Option.is_none t.errors
+    | _ -> false
   in
-  loop []
+  match t.errors with
+  | None ->
+    let rec loop acc =
+      if stop () then List.rev acc else loop (toplevel t :: acc)
+    in
+    loop []
+  | Some errors ->
+    let no_limit = Array.length t.tokens - 1 in
+    let outer_limit = t.limit in
+    let outer_col = t.col in
+    (* Unless the declarations in it are not indented more than it. *)
+    let limit = if t.limit = t.pos then no_limit else t.limit in
+    let rec loop acc =
+      t.limit <- limit;
+      if stop ()
+      then List.rev acc
+      else (
+        let start = t.pos in
+        t.salvage <- None;
+        t.col <- t.tokens.(start).loc.start.col;
+        t.limit <- Int.min limit (next_toplevel t ~from:(start + 1) ~col:t.col);
+        match
+          match peek t with
+          | (Rparen | Rbracket | Rbrace | Quote_close | End | End_inline) as
+            token -> fail (loc t) (sprintf "unmatched %s" (describe token))
+          | _ -> toplevel t
+        with
+        | toplevel -> loop (with_lex_errors t toplevel ~start :: acc)
+        | exception Syntax_error (loc, message) ->
+          let message =
+            match
+              t.pos = t.limit
+              && t.limit < Array.length t.tokens - 1
+              && Loc.equal loc t.tokens.(t.limit).loc
+            with
+            | false -> message
+            | true ->
+              (match unclosed t ~start ~stop:t.limit with
+               | None -> message
+               | Some (opener, open_loc, closer) ->
+                 sprintf
+                   "expected %s to close this %s (opened at %d:%d), found %s"
+                   (describe closer)
+                   (describe opener)
+                   open_loc.start.line
+                   open_loc.start.col
+                   (describe (found t)))
+          in
+          Queue.enqueue errors (Syntax { loc; message });
+          let salvage = t.salvage in
+          t.pos <- resync t ~start ~in_struct;
+          let loc = Loc.merge t.tokens.(start).loc (prev_loc t) in
+          (match salvage with
+           | None -> loop acc
+           | Some desc -> loop (located ~loc (desc (expr_at ~loc Error)) :: acc)))
+    in
+    let toplevels = loop [] in
+    t.col <- outer_col;
+    t.limit
+    <- (if outer_limit = no_limit || t.pos <= outer_limit
+        then outer_limit
+        else next_toplevel t ~from:t.pos ~col:outer_col);
+    toplevels
 ;;
 
 let run_with_comments ~file source f =
   match Lexer.tokenize_with_comments ~file source with
-  | Error error -> Error (Error.Lex error)
+  | Error error -> Result.Error (Error.Lex error)
   | Ok (tokens, comments) ->
     let t =
       { tokens
       ; comments = Array.of_list comments
       ; pos = 0
       ; bare_tuple_end = -1
+      ; errors = None
+      ; salvage = None
+      ; lex_errors = [||]
+      ; limit = Array.length tokens - 1
+      ; col = 0
       }
     in
     (match
@@ -1320,15 +1566,68 @@ let run ~file source f =
 
 let () =
   spliced_expr := postfix;
-  struct_toplevels := toplevels
+  struct_toplevels := toplevels ~in_struct:true
 ;;
 
-let program ~file source = run ~file source toplevels
+let program ~file source = run ~file source (toplevels ~in_struct:false)
 
 let program_with_comments ~file source =
-  run_with_comments ~file source toplevels
+  run_with_comments ~file source (toplevels ~in_struct:false)
 ;;
 
 let expr ~file source = run ~file source expr
 let pattern ~file source = run ~file source pattern
 let type_expr ~file source = run ~file source type_expr
+let steps () = !steps
+
+let program_recovering ~file source =
+  let { Lexer.Recovered.tokens; comments; errors = lex_errors } =
+    Lexer.tokenize_recovering ~file source
+  in
+  let skipped =
+    List.filter lex_errors ~f:Lexer.Error.skipped
+    |> List.map ~f:(fun (error : Lexer.Error.t) -> error.loc)
+  in
+  match lex_errors, program ~file source with
+  | [], Ok program -> program, []
+  | _ ->
+    let errors = Queue.create () in
+    let t =
+      { tokens
+      ; comments = Array.of_list comments
+      ; pos = 0
+      ; bare_tuple_end = -1
+      ; errors = Some errors
+      ; salvage = None
+      ; lex_errors =
+          List.map skipped ~f:(fun loc -> loc.start.offset) |> Array.of_list
+      ; limit = Array.length tokens - 1
+      ; col = 0
+      }
+    in
+    let program = toplevels t ~in_struct:false in
+    (* A syntax error at the token after a skipped lexeme is likely due to
+       it. *)
+    let after_skipped =
+      List.filter_map skipped ~f:(fun loc ->
+        Array.binary_search
+          tokens
+          ~compare:(fun (token : Lexer.Located.t) offset ->
+            Int.compare token.loc.start.offset offset)
+          `First_greater_than_or_equal_to
+          loc.stop.offset
+        |> Option.map ~f:(fun i -> tokens.(i).loc.start.offset))
+      |> Int.Set.of_list
+    in
+    let start (error : Error.t) = (Error.loc error).start.offset in
+    let errors =
+      List.map lex_errors ~f:(fun error -> Error.Lex error)
+      @ List.filter (Queue.to_list errors) ~f:(fun error ->
+        not (Set.mem after_skipped (start error)))
+      |> List.stable_sort ~compare:(Comparable.lift Int.compare ~f:start)
+      |> List.remove_consecutive_duplicates
+           ~which_to_keep:`First
+           ~equal:(fun a b -> start a = start b)
+    in
+    program, errors
+;;

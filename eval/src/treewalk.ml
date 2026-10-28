@@ -43,6 +43,8 @@ module Pending = struct
         }
 end
 
+exception Reached_error = Erase.Reached_error
+
 type t =
   { sccs : Typed.Scc.t Queue.t
   ; pending : Pending.t Typed.Ident.Table.t
@@ -111,7 +113,8 @@ let captures t ~ident ~args ~body =
     | App (f, x) ->
       go ~depth f;
       go ~depth x
-    | Tuple exprs | Construct (_, exprs) -> List.iter exprs ~f:(go ~depth)
+    | Tuple exprs | Construct (_, exprs) | Error exprs ->
+      List.iter exprs ~f:(go ~depth)
     | Record fields -> go_fields ~depth fields
     | Record_update (expr, fields) ->
       go ~depth expr;
@@ -221,6 +224,9 @@ let map_children ~depth (expr : Typed.Expr.t) ~f =
     | Construct (constructor, exprs) ->
       let%map exprs = map_result exprs ~f:same in
       Typed.Expr.Desc.Construct (constructor, exprs)
+    | Error exprs ->
+      let%map exprs = map_result exprs ~f:same in
+      Typed.Expr.Desc.Error exprs
     | Record fields ->
       let%map fields = map_fields fields ~f:same in
       Typed.Expr.Desc.Record fields
@@ -291,6 +297,7 @@ let instantiate t (code : Typed.Expr.t) ~entry =
       | (Any | Lit _) as desc -> desc
       | Var ident -> Var (fresh ident)
       | Tuple patterns -> Tuple (List.map patterns ~f:pattern)
+      | Error patterns -> Error (List.map patterns ~f:pattern)
       | Construct (constructor, patterns) ->
         Construct (constructor, List.map patterns ~f:pattern)
       | Record fields ->
@@ -417,6 +424,7 @@ let pattern_mismatch pattern value =
 let rec match_pattern env (pattern : Typed.Pattern.t) (value : Value.t) =
   match pattern.desc, value with
   | Any, _ -> Ok true
+  | Error _, _ -> Error (Error.of_exn Reached_error)
   | Var ident, _ ->
     Env.set env ~ident ~value;
     Ok true
@@ -646,6 +654,7 @@ and step_value t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
     (* Its first parameter identifies it, as a let's name does. *)
     closure t ~env ~level ~ident:(List.hd_exn args) ~args ~body
   | Splice _ -> Or_error.error_s [%message "Splice outside a quote evaluated"]
+  | Error _ -> Error (Error.of_exn Reached_error)
   | Quote body ->
     let embedded = Embedded.create () in
     let%map expr = build t ~env ~level ~embedded ~depth:1 body in
@@ -762,6 +771,7 @@ and apply t (f : Value.t) arg ~loc : Next.t Or_error.t =
      | Raise, exn -> raise_exn ~loc exn
      | Erase, Code { expr; persistent = _ } ->
        (match Erase.expr expr with
+        | exception Reached_error -> Error (Error.of_exn Reached_error)
         | Ok expr -> value (Syntax_value.Expr.to_value expr)
         | Error error ->
           runtime_error

@@ -12,9 +12,9 @@ let iter_erased source ~f =
   with
   | Error error ->
     print_string
-      (Diagnostic.to_string_hum
+      (Diagnostic.list_to_string_hum
          ~contents:(fun _ -> Some source)
-         (Diagnostic.of_driver_error error))
+         (List.map error ~f:Diagnostic.of_driver_error))
   | Ok driver ->
     (match Driver.eval ~limits:Source_helpers.limits driver with
      | Error error ->

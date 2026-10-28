@@ -119,10 +119,13 @@ module Checked = struct
 end
 
 let check ?contents ?output ~limits t =
-  let%bind.Result prelude = prelude ?contents t in
+  let%bind.Result prelude =
+    prelude ?contents t |> Result.map_error ~f:List.return
+  in
   let%map.Result driver =
     Driver.check_prelude ~limits ?output prelude
-    |> Result.map_error ~f:Diagnostic.of_typecheck_error
+    |> Result.map_error ~f:(fun { Typecheck.Failed.errors; partial = _ } ->
+      List.map errors ~f:Diagnostic.of_typecheck_error)
   in
   { Checked.prelude; driver }
 ;;

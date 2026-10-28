@@ -85,7 +85,14 @@ let x = A
 let y = add 1 true
 type t = A of unbound
 |};
-  [%expect {| ((Unbound_type unbound) @ t.stag:4:14-21) |}]
+  [%expect
+    {|
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:3:14-18)
+    ((Unbound_type unbound) @ t.stag:4:14-21)
+    |}]
 ;;
 
 let%expect_test "a type is not checked when only named" =
@@ -101,6 +108,7 @@ type t = A of unbound
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
      @ t.stag:3:14-18)
+    ((Unbound_type unbound) @ t.stag:4:14-21)
     |}]
 ;;
 
@@ -116,13 +124,21 @@ type t = A of unbound
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
      @ t.stag:2:14-18)
+    ((Unbound_type unbound) @ t.stag:3:14-21)
     |}];
   check
     {|
 type t = A of unbound
 let y = add 1 true
 |};
-  [%expect {| ((Unbound_type unbound) @ t.stag:2:14-21) |}]
+  [%expect
+    {|
+    ((Unbound_type unbound) @ t.stag:2:14-21)
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:3:14-18)
+    |}]
 ;;
 
 let%expect_test "toplevel splices run before later declarations are checked" =
@@ -154,6 +170,15 @@ type b = a
 |};
   [%expect
     {|
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:3:14-18)
+    ((Cyclic_type_alias a) @ t.stag:4:5-6)
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:3:14-18)
     ((Cyclic_type_alias a) @ t.stag:4:5-6)
     ((Cyclic_type_alias b) @ t.stag:5:5-6)
     |}]
@@ -275,7 +300,16 @@ module M = struct end
 |};
   [%expect
     {|
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:2:14-18)
     ((Duplicate_type_parameter (type_name t) (param a)) @ t.stag:3:11-13)
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:2:14-18)
     ((Duplicate_constructor M.A) @ t.stag:4:15-16)
+    ((Duplicate_module M) @ t.stag:6:7-8)
     |}]
 ;;

@@ -11,7 +11,7 @@ module Result : sig
           load because of), empty if fine. Locations name files by absolute
           path. *)
     ; index : Index.t option
-      (** If it typechecked. Locations name files by absolute path. *)
+      (** If it parsed, of what checked. Locations name files by absolute path. *)
     ; depends_on : string list
       (** Other files read, whose changes make [t] out of date: the sources
           of the prelude in a checkout. *)

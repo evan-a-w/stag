@@ -33,6 +33,7 @@ module Decl = struct
     ; mutable wrap_error : Typecheck_error.t -> Typecheck_error.t
     ; mutable used_while_defined : bool
     ; mutable checked : Signature.Type_decl.t option
+    ; mutable failed : bool (** Checking it reported an error. *)
     ; mutable reflected : Reflected_decl.t option
       (** Once checked, unless abstract. *)
     }
@@ -50,6 +51,7 @@ end
 module Exception_decl = struct
   type t =
     { args : Type_expr.t list
+    ; malformed : bool
     ; module_ : Module_scope.t
     ; wrap_error : Typecheck_error.t -> Typecheck_error.t
     ; mutable checked : Constructor.t option
@@ -76,8 +78,8 @@ type t =
       -> Expr.t
       -> loc:Loc.t
       -> (Type_expr.t, Typecheck_error.t) Result.t
-  ; mutable type_splices : Type_splice.t list
-    (* Physically keyed: each splice is evaluated once. *)
+  ; type_splices : Type_splice.t list Loc.Table.t
+    (* By location, then physically: each splice is evaluated once. *)
   ; types : Decl.t String.Table.t
   ; exceptions : Exception_decl.t String.Table.t
   ; constructors : Constructor.t String.Table.t
@@ -86,14 +88,16 @@ type t =
   ; field_types : string String.Table.t
     (** The type declaring each constructor and field, whose entry in
         [constructors] or [fields] is added once it is checked. *)
+  ; report : Typecheck_error.t -> unit
   }
 
-let create fresh =
+let create fresh ~report =
   { fresh
   ; evaluate_splice =
       (fun _ _ ~loc:_ ->
         raise_s [%message "Type_env: no type splice evaluator"])
-  ; type_splices = []
+  ; type_splices = Loc.Table.create ()
+  ; report
   ; types = String.Table.create ()
   ; exceptions = String.Table.create ()
   ; constructors = String.Table.create ()
@@ -105,7 +109,7 @@ let create fresh =
 
 let builtins =
   List.map
-    [ "int"; "bool"; "string"; "char"; "unit"; Type.exn_name ]
+    [ "int"; "bool"; "string"; "char"; "unit"; Type.exn_name; Type.error_name ]
     ~f:(fun name ->
       { Type_decl.name = Located.create name; params = []; kind = Abstract })
 ;;
@@ -127,19 +131,66 @@ let resolve_type module_ (path : Decl_path.t) ~loc =
 
 let set_evaluate_splice t f = t.evaluate_splice <- f
 
-let evaluate_splice t module_ expr ~loc =
-  match
-    List.find t.type_splices ~f:(fun splice -> phys_equal splice.expr expr)
-  with
+let rec has_splice (expr : Type_expr.t) =
+  match expr.txt with
+  | Splice _ -> true
+  | Var _ -> false
+  | Con (_, args) ->
+    List.exists args ~f:(function
+      | Ty ty -> has_splice ty
+      | Row row -> row_has_splice row)
+  | Arrow (ty1, ty2) -> has_splice ty1 || has_splice ty2
+  | Tuple tys -> List.exists tys ~f:has_splice
+  | Code { inner; context } -> has_splice inner || row_has_splice context
+  | Record row | Variant row -> row_has_splice row
+
+and row_has_splice (row : Type_expr.row) =
+  match row.txt with
+  | Empty | Var _ -> false
+  | Extend (_, ty, rest) -> has_splice ty || row_has_splice rest
+;;
+
+let rec kind_has_splice : Type_decl.Kind.t -> bool = function
+  | Splice _ -> true
+  | Abstract -> false
+  | Alias ty -> has_splice ty
+  | Variant constructors ->
+    List.exists constructors ~f:(fun (_, args) -> List.exists args ~f:has_splice)
+  | Record fields -> List.exists fields ~f:(fun (_, ty) -> has_splice ty)
+  | Malformed kind -> kind_has_splice kind
+;;
+
+(* What a splice gives may not contain splices, so that evaluating splices
+   ends. If its evaluation is abandoned (raising [Uses_unfinished]), it is
+   evaluated anew. *)
+let evaluate_splice t module_ (expr : Expr.t) ~loc =
+  let splices = Hashtbl.find_multi t.type_splices expr.loc in
+  match List.find splices ~f:(fun splice -> phys_equal splice.expr expr) with
   | Some { state = Evaluated result; _ } -> result
   | Some { state = Evaluating; _ } ->
     Error (Typecheck_error.create ~loc Type_splice_cycle)
   | None ->
     let splice = { Type_splice.expr; state = Evaluating } in
-    t.type_splices <- splice :: t.type_splices;
-    let result = t.evaluate_splice module_ expr ~loc in
-    splice.state <- Evaluated result;
-    result
+    Hashtbl.add_multi t.type_splices ~key:expr.loc ~data:splice;
+    (match t.evaluate_splice module_ expr ~loc with
+     | exception exn ->
+       Hashtbl.change t.type_splices expr.loc ~f:(fun splices ->
+         match
+           List.filter (Option.value splices ~default:[]) ~f:(fun splice' ->
+             not (phys_equal splice splice'))
+         with
+         | [] -> None
+         | splices -> Some splices);
+       raise exn
+     | result ->
+       let result =
+         match result with
+         | Ok generated when has_splice generated ->
+           Result.Error (Typecheck_error.create ~loc Nested_type_splice)
+         | Ok _ | Error _ -> result
+       in
+       splice.state <- Evaluated result;
+       result)
 ;;
 
 let find_type t module_ path ~loc =
@@ -332,6 +383,9 @@ and elaborate_con
   =
   let error ~loc kind = Error (Typecheck_error.create ~loc kind) in
   let%bind.Result decl = find_type t module_ path ~loc:path_loc in
+  let%bind.Result () =
+    if decl.failed then Error Typecheck_error.already_reported else Ok ()
+  in
   let expected = List.length decl.decl.params in
   let got = List.length args in
   let%bind.Result () =
@@ -369,8 +423,8 @@ and elaborate_con
   in
   let%bind.Result kind = definition decl ~loc in
   let%map.Result ty =
-    match kind with
-    | Variant _ | Record _ | Abstract | Splice _ ->
+    match (kind : Type_decl.Kind.t) with
+    | Variant _ | Record _ | Abstract | Splice _ | Malformed _ ->
       Ok (Type.TCon (decl.name, args))
     | Alias body ->
       let instances = Hashtbl.find_multi expansions decl.name in
@@ -398,9 +452,13 @@ and definition (decl : Decl.t) ~loc =
   | Splice _ ->
     let%map.Result () =
       Module_scope.force_definition decl.module_ decl.decl.name.txt ~loc
+      |> Result.map_error ~f:(fun error ->
+        if Typecheck_error.is_already_reported error then decl.failed <- true;
+        error)
     in
     decl.decl.kind
-  | Variant _ | Record _ | Alias _ | Abstract -> Ok decl.decl.kind
+  | Variant _ | Record _ | Alias _ | Abstract | Malformed _ ->
+    Ok decl.decl.kind
 
 and expand t (decl : Decl.t) ~args ~expansions body =
   let knot = Type.Var.create (Fresh.id t.fresh) Generic in
@@ -447,10 +505,13 @@ let declare_members t module_ (decl : Type_decl.t) ~name =
         ~key:(Module_scope.canonical_name module_ member.txt)
         ~data:name)
   in
-  match decl.kind with
-  | Alias _ | Abstract | Splice _ -> ()
-  | Variant constructors -> declares constructors t.constructor_types
-  | Record fields -> declares fields t.field_types
+  let rec declare_members : Type_decl.Kind.t -> unit = function
+    | Alias _ | Abstract | Splice _ -> ()
+    | Malformed kind -> declare_members kind
+    | Variant constructors -> declares constructors t.constructor_types
+    | Record fields -> declares fields t.field_types
+  in
+  declare_members decl.kind
 ;;
 
 let declare
@@ -480,33 +541,45 @@ let declare
       ; wrap_error
       ; used_while_defined = false
       ; checked = None
+      ; failed =
+          (match decl.kind with
+           | Malformed _ -> true
+           | Variant _ | Record _ | Alias _ | Abstract | Splice _ -> false)
       ; reflected = None
       };
   declare_members t module_ decl ~name
 ;;
 
+(* Reported, as the type's definition, once its splice is evaluated. *)
 let set_definition t name (kind : Type_decl.Kind.t) ~wrap_error ~loc =
   let decl = Hashtbl.find_exn t.types name in
+  let error kind =
+    decl.failed <- true;
+    t.report (decl.wrap_error (wrap_error (Typecheck_error.create ~loc kind)))
+  in
   match kind with
   | Alias _ when decl.used_while_defined ->
-    Error
-      (Typecheck_error.create
-         ~loc
-         (Type_definition_cycle { name; splice = loc }))
-  | Splice e ->
-    Error (Typecheck_error.create ~loc:e.loc Nested_definition_splice)
-  | Alias _ | Variant _ | Record _ | Abstract ->
+    error (Type_definition_cycle { name; splice = loc })
+  | _ when kind_has_splice kind -> error Nested_type_splice
+  | Alias _ | Variant _ | Record _ | Abstract | Malformed _ | Splice _ ->
     decl.decl <- { decl.decl with kind };
     decl.wrap_error <- Fn.compose decl.wrap_error wrap_error;
-    declare_members t decl.module_ decl.decl ~name;
-    Ok ()
+    declare_members t decl.module_ decl.decl ~name
 ;;
 
-let declare_exception ?(wrap_error = Fn.id) t module_ (name : Name.t) args =
+let declare_exception
+      ?(wrap_error = Fn.id)
+      t
+      module_
+      (name : Name.t)
+      args
+      ~malformed
+  =
   Hashtbl.add_exn
     t.exceptions
     ~key:(Module_scope.canonical_name module_ name.txt)
-    ~data:{ Exception_decl.args; module_; wrap_error; checked = None }
+    ~data:
+      { Exception_decl.args; malformed; module_; wrap_error; checked = None }
 ;;
 
 (* Its arguments have no type variables, which nothing would bind. *)
@@ -514,6 +587,7 @@ let check_exception t name =
   let decl = Hashtbl.find_exn t.exceptions name in
   match decl.checked with
   | Some checked -> Ok checked
+  | None when decl.malformed -> Error Typecheck_error.already_reported
   | None ->
     Result.map_error ~f:decl.wrap_error
     @@
@@ -560,6 +634,8 @@ let define t (decl : Decl.t) =
     | Abstract -> Ok (Signature.Type_decl.Kind.Abstract, None)
     | Splice _ ->
       raise_s [%message "Type_env.define: definition not computed" decl.name]
+    | Malformed _ ->
+      raise_s [%message "Type_env.define: malformed" (decl.name : string)]
     | Variant constructors ->
       let%map.Result constructors =
         map_result constructors ~f:(fun ((name : Name.t), args) ->
@@ -627,20 +703,24 @@ let check t name =
   let decl = Hashtbl.find_exn t.types name in
   match decl.checked with
   | Some checked -> Ok checked
+  | None when decl.failed -> Error Typecheck_error.already_reported
   | None ->
-    let%bind.Result () =
-      match decl.decl.kind with
-      | Splice _ ->
-        Module_scope.force_definition
-          decl.module_
-          decl.decl.name.txt
-          ~loc:decl.decl.name.loc
-        |> Result.map_error ~f:decl.wrap_error
-      | Variant _ | Record _ | Alias _ | Abstract -> Ok ()
-    in
-    (match define t decl with
-     | Ok checked -> Ok checked
-     | Error error -> Error (decl.wrap_error error))
+    (match decl.decl.kind with
+     | Splice _ ->
+       Module_scope.force_definition
+         decl.module_
+         decl.decl.name.txt
+         ~loc:decl.decl.name.loc
+       |> Result.map_error ~f:decl.wrap_error
+     | Variant _ | Record _ | Alias _ | Abstract | Malformed _ -> Ok ())
+    |> Result.bind ~f:(fun () -> define t decl)
+    |> Result.map_error ~f:(fun error ->
+      decl.failed <- true;
+      (* Reported here, as the code that first used the declaration may be
+         abandoned, and later uses are [Already_reported]. *)
+      if not (Typecheck_error.is_already_reported error)
+      then t.report (decl.wrap_error error);
+      Typecheck_error.already_reported)
 ;;
 
 let find_decl_exn t name =

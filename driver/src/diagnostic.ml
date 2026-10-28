@@ -20,6 +20,8 @@ let create ?(notes = []) ?(whole_file = false) ~loc message =
   { loc; whole_file; message; notes }
 ;;
 
+let sort ts = Loc.sort_by ts ~f:(fun t -> t.loc)
+
 let relocate t ~f =
   { t with
     loc = f t.loc
@@ -80,23 +82,54 @@ let of_typecheck_error (error : Typecheck_error.t) =
         ; message = sprintf "%s is a variable of the code's context here" name
         }
       ]
-    | Declaration_splice_cycle { splice; name = _; module_ = _ } ->
-      [ { Note.loc = splice; message = "The declaration splice is here" } ]
-    | Generated_after_include { error; include_ } ->
+    | Declaration_splice_cycle { splice; splice_kind; name = _; module_ = _ } ->
+      [ { Note.loc = splice
+        ; message =
+            (match splice_kind with
+             | Include -> "The declaration splice is here"
+             | Type_definition -> "The type splice is here")
+        }
+      ]
+    | Generated_after_include { error; include_; splice_kind } ->
       notes error
       @ [ { Note.loc = include_
           ; message =
-              "This include generates it, but it is visible only after the \
-               include"
+              (match splice_kind with
+               | Include ->
+                 "This include generates it, but it is visible only after the \
+                  include"
+               | Type_definition ->
+                 "This type splice defines it, but it is visible only after \
+                  the type's declaration")
           }
         ]
-    | Maybe_generated_by_running_include { error; include_ } ->
+    | Maybe_generated_by_running_include { error; include_; splice_kind; after }
+      ->
+      let splice, being =
+        match splice_kind with
+        | Include -> "include", "generated"
+        | Type_definition -> "type splice", "computed"
+      in
       notes error
       @ [ { Note.loc = include_
           ; message =
-              "This include, still being generated because its expression uses \
-               this code, may define it: move this code before the include or \
-               into another module"
+              (if after
+               then
+                 sprintf
+                   "This %s, after this point, may define it, but is still \
+                    being %s because its expression uses this code"
+                   splice
+                   being
+               else
+                 sprintf
+                   "This %s, still being %s because its expression uses this \
+                    code, may define it: move this code before the %s or into \
+                    another module"
+                   splice
+                   being
+                   (match splice_kind with
+                    | Include -> "include"
+                    | Type_definition -> "type"))
           }
         ]
     | Shadowed_prelude_module { error; module_; shadowed_by } ->
@@ -278,4 +311,19 @@ let to_string_hum
     located ~contents ~whole_file:false loc @ [ "Note: " ^ message ])
   |> List.map ~f:(fun line -> line ^ "\n")
   |> String.concat
+;;
+
+let max_shown = 50
+
+let list_to_string_hum ?contents ?warning ts =
+  let shown, hidden = List.split_n ts max_shown in
+  String.concat (List.map shown ~f:(to_string_hum ?contents ?warning))
+  ^
+  match List.length hidden with
+  | 0 -> ""
+  | hidden ->
+    sprintf
+      "... and %d more %s\n"
+      hidden
+      (if Option.value warning ~default:false then "warnings" else "errors")
 ;;

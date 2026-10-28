@@ -24,3 +24,6 @@ type t =
   | Occurs_check_failed of Type.arg
   (** The variable that would occur in the type it is bound to. *)
 [@@deriving sexp_of]
+
+(** With its types as they are now ([Type.Snapshot]). *)
+val snapshot : t -> t

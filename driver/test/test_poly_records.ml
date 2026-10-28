@@ -471,9 +471,7 @@ let deref t = match t with T r -> r.`next
        (RExtend y Present (TCon int ())
         (RVar
          (Link
-          (RVar
-           (Link
-            (RExtend x (PVar (Unbound 34 1)) (TCon int ()) (RVar (Unbound 35 1))))))))
+          (RExtend x (PVar (Unbound 34 1)) (TCon int ()) (RVar (Unbound 35 1))))))
        Cyclic_row))
      @ t.stag:2:38-50)
     type t = {`next : t}

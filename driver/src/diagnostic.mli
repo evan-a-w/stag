@@ -23,6 +23,9 @@ type t =
 
 val create : ?notes:Note.t list -> ?whole_file:bool -> loc:Loc.t -> string -> t
 
+(** Stably sorted by location ([Loc.sort_by]). *)
+val sort : t list -> t list
+
 (** With each location [f loc], eg. to name files differently. *)
 val relocate : t -> f:(Loc.t -> Loc.t) -> t
 
@@ -55,3 +58,14 @@ val to_string_hum
   -> ?warning:bool
   -> t
   -> string
+
+(** Each as [to_string_hum], the first [max_shown] only, then a line of how
+    many more there are. *)
+val list_to_string_hum
+  :  ?contents:(string -> string option)
+  -> ?warning:bool
+  -> t list
+  -> string
+
+(** 50. *)
+val max_shown : int

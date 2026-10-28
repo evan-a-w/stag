@@ -33,10 +33,16 @@ let run
       source
   =
   match Driver.check ~limits:compile_time (program source) with
-  | Error { kind = Splice_evaluation_failed { error; code = _ }; loc = _ } ->
+  | Error
+      { errors =
+          [ { kind = Splice_evaluation_failed { error; code = _ }; loc = _ } ]
+      ; partial = _
+      } ->
     print_string "splice failed: ";
     print_error error
-  | Error error -> print_s [%sexp (error : Typecheck_error.t)]
+  | Error error ->
+    List.iter (error : Typecheck.Failed.t).errors ~f:(fun error ->
+      print_s [%sexp (error : Typecheck_error.t)])
   | Ok driver ->
     (match Driver.eval ~limits:runtime driver with
      | Error error ->

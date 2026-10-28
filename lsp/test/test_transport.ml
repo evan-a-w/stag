@@ -256,7 +256,7 @@ let%expect_test "serving until exit" =
     {"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Line 1, bytes 0-1:\nUnexpected end of input"}}
     {"jsonrpc":"2.0","id":2,"error":{"code":-32600,"message":"(\"Jsonrpc: json conversion failed: missing field error\")"}}
     {"params":{"diagnostics":[{"message":"This expression has type string but an expression was expected of type int","range":{"end":{"character":21,"line":0},"start":{"character":18,"line":0}},"relatedInformation":[],"severity":1,"source":"stag"}],"uri":"untitled:a","version":1},"method":"textDocument/publishDiagnostics","jsonrpc":"2.0"}
-    {"id":3,"jsonrpc":"2.0","result":null}
+    {"id":3,"jsonrpc":"2.0","result":{"contents":{"kind":"markdown","value":"```stag\nA.x : int\n```"},"range":{"end":{"character":5,"line":0},"start":{"character":4,"line":0}}}}
     {"id":4,"jsonrpc":"2.0","result":null}
     |}]
 ;;

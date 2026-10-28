@@ -23,6 +23,7 @@ let constructor_refs =
              ~data:{ Typed.Constructor_ref.type_name; name; index })
        | Type _
        | Exception _
+       | Malformed_exception _
        | Let _
        | Expect_test _
        | Bench _

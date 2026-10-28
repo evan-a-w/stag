@@ -84,7 +84,7 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
     let poly_fields = List.map ~f:(fun (n, value) -> n, expr value) in
     let txt : Expr.desc =
       match e.txt with
-      | Lit _ | Expect _ -> e.txt
+      | Lit _ | Expect _ | Error -> e.txt
       | Var (p, t) ->
         Var
           ( (f Value ~locals { txt = p; loc = e.loc }).txt
@@ -138,8 +138,7 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
           , Option.map ty ~f:type_expr
           , expr (String.Set.of_list (binding_names bs)) e )
       | Type { name; params; kind } ->
-        let kind : Type_decl.Kind.t =
-          match kind with
+        let rec decl_kind : Type_decl.Kind.t -> Type_decl.Kind.t = function
           | Variant cs ->
             Variant
               (List.map cs ~f:(fun (n, ts) -> n, List.map ts ~f:type_expr))
@@ -147,9 +146,12 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
           | Alias t -> Alias (type_expr t)
           | Abstract -> Abstract
           | Splice e -> Splice { e with txt = expr String.Set.empty e.txt }
+          | Malformed kind -> Malformed (decl_kind kind)
         in
-        Type { name; params; kind }
+        Type { name; params; kind = decl_kind kind }
       | Exception (n, ts) -> Exception (n, List.map ts ~f:type_expr)
+      | Malformed_exception (n, ts) ->
+        Malformed_exception (n, List.map ts ~f:type_expr)
       | Module (n, ts) ->
         Module (n, List.map ts ~f:(map' ~modules:(modules @ [ n.txt ]) ~f:f'))
       | Module_splice (n, e, expansion) ->

@@ -12,8 +12,9 @@ let benches ?(prefix = "") parse =
   let parse () = parse () |> Result.map_error ~f:to_error in
   let check groups =
     Driver.check_modules ~output:ignore groups
-    |> Result.map_error ~f:(fun error ->
-      to_error [ Diagnostic.of_typecheck_error error ])
+    |> Result.map_error
+         ~f:(fun ({ errors; partial = _ } : Typecheck.Failed.t) ->
+           to_error (List.map errors ~f:Diagnostic.of_typecheck_error))
   in
   let bench name routine =
     Measure.Suite.Bench.Single { name = prefix ^ name; routine }

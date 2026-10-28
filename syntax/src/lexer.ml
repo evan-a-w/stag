@@ -40,6 +40,16 @@ module Error = struct
 
   let message t = Kind.to_string t.kind
 
+  let skipped t =
+    match t.kind with
+    | Illegal_character _ | Unterminated_comment -> true
+    | Unterminated_string
+    | Unterminated_char
+    | Illegal_escape _
+    | Invalid_int_literal _
+    | Int_literal_out_of_range _ -> false
+  ;;
+
   let to_string { kind; loc } =
     sprintf "%s: %s" (Loc.to_string loc) (Kind.to_string kind)
   ;;
@@ -55,6 +65,8 @@ module State = struct
     ; mutable line : int
     ; mutable bol : int
     ; comments : (string * Loc.t) Queue.t
+    ; errors : Error.t Queue.t option
+      (** Where to record errors, to keep lexing after them, if any. *)
     }
 
   let peek_at t n =
@@ -87,14 +99,20 @@ module State = struct
     { file = t.file; start; stop = pos t }
   ;;
 
-  let error t start kind = raise (Lex_error { kind; loc = loc_from t start })
+  let report t (error : Error.t) =
+    match t.errors with
+    | None -> raise (Lex_error error)
+    | Some errors -> Queue.enqueue errors error
+  ;;
+
+  let error t start kind = report t { kind; loc = loc_from t start }
 
   (* For an opening delimiter of [len] bytes, which never spans lines. *)
   let error_opening t (start : Loc.Pos.t) ~len kind =
     let stop =
       { start with col = start.col + len; offset = start.offset + len }
     in
-    raise (Lex_error { kind; loc = { file = t.file; start; stop } })
+    report t { kind; loc = { file = t.file; start; stop } }
   ;;
 
   let text_from t (start : Loc.Pos.t) =
@@ -137,7 +155,8 @@ let escape (t : State.t) =
   let start = State.pos t in
   State.bump t;
   let illegal () =
-    State.error t start (Illegal_escape (State.text_from t start))
+    State.error t start (Illegal_escape (State.text_from t start));
+    '?'
   in
   let simple c =
     State.bump t;
@@ -145,10 +164,16 @@ let escape (t : State.t) =
   in
   let digits ~n ~f =
     let digits_start = t.offset in
-    for _ = 1 to n do
-      if Option.exists (State.peek t) ~f then State.bump t else illegal ()
-    done;
-    String.sub t.src ~pos:digits_start ~len:n
+    let rec loop i =
+      if i = n
+      then Some (String.sub t.src ~pos:digits_start ~len:n)
+      else if Option.exists (State.peek t) ~f
+      then (
+        State.bump t;
+        loop (i + 1))
+      else None
+    in
+    loop 0
   in
   match State.peek t with
   | Some 'n' -> simple '\n'
@@ -161,11 +186,14 @@ let escape (t : State.t) =
   | Some '\'' -> simple '\''
   | Some 'x' ->
     State.bump t;
-    let digits = digits ~n:2 ~f:Char.is_hex_digit in
-    Char.of_int_exn (Int.of_string ("0x" ^ digits))
+    (match digits ~n:2 ~f:Char.is_hex_digit with
+     | Some digits -> Char.of_int_exn (Int.of_string ("0x" ^ digits))
+     | None -> illegal ())
   | Some c when Char.is_digit c ->
-    let digits = digits ~n:3 ~f:Char.is_digit in
-    (match Char.of_int (Int.of_string digits) with
+    (match
+       Option.bind (digits ~n:3 ~f:Char.is_digit) ~f:(fun digits ->
+         Char.of_int (Int.of_string digits))
+     with
      | Some c -> c
      | None -> illegal ())
   | Some '\n' | None -> illegal ()
@@ -199,7 +227,9 @@ let quoted_string (t : State.t) ~id =
   let contents_start = t.offset in
   let rec loop () =
     if State.at_end t
-    then State.error_opening t start ~len:open_len Unterminated_string
+    then (
+      State.error_opening t start ~len:open_len Unterminated_string;
+      String.sub t.src ~pos:contents_start ~len:(t.offset - contents_start))
     else if String.is_substring_at t.src ~pos:t.offset ~substring:close
     then (
       let contents =
@@ -268,7 +298,7 @@ let comment (t : State.t) =
   in
   let rec skip_string () =
     match State.peek t with
-    | None -> unterminated ()
+    | None -> ()
     | Some '"' -> State.bump t
     | Some '\\' ->
       State.bump t;
@@ -296,8 +326,14 @@ let comment (t : State.t) =
         skip_string ();
         loop depth
       | Some '{', _, _, _ when Option.is_some (quoted_string_id t) ->
-        ignore (quoted_string t ~id:(Option.value_exn (quoted_string_id t)));
-        loop depth
+        let close = "|" ^ Option.value_exn (quoted_string_id t) ^ "}" in
+        (match String.substr_index t.src ~pos:t.offset ~pattern:close with
+         | Some i ->
+           State.bump_n t (i + String.length close - t.offset);
+           loop depth
+         | None ->
+           State.bump_n t (String.length t.src - t.offset);
+           unterminated ())
       | Some '\'', Some '\\', Some _, Some '\'' ->
         State.bump_n t 4;
         loop depth
@@ -311,6 +347,9 @@ let comment (t : State.t) =
   loop 1
 ;;
 
+(* After recording an error at a lexeme that is no token. *)
+exception Skipped
+
 (* At a single quote: a char literal, or a type variable. *)
 let quote (t : State.t) : Token.t =
   let start = State.pos t in
@@ -322,7 +361,9 @@ let quote (t : State.t) : Token.t =
      | Some '\'' ->
        State.bump t;
        Char c
-     | _ -> State.error t start Unterminated_char)
+     | _ ->
+       State.error t start Unterminated_char;
+       Char c)
   | Some c, Some '\'' when not (Char.equal c '\n' || Char.equal c '\'') ->
     State.bump_n t 3;
     Char c
@@ -334,7 +375,8 @@ let quote (t : State.t) : Token.t =
     Tyvar (ident t)
   | _ ->
     State.bump t;
-    State.error t start (Illegal_character '\'')
+    State.error t start (Illegal_character '\'');
+    raise Skipped
 ;;
 
 (* At a digit, or at a [-] followed by one. The sign is parsed with the digits,
@@ -353,8 +395,12 @@ let int_literal (t : State.t) (start : Loc.Pos.t) : Token.t =
   then (
     match Int.of_string_opt (sign ^ String.filter digits ~f:Char.is_digit) with
     | Some n -> Int n
-    | None -> State.error t start (Int_literal_out_of_range text))
-  else State.error t start (Invalid_int_literal text)
+    | None ->
+      State.error t start (Int_literal_out_of_range text);
+      Int 0)
+  else (
+    State.error t start (Invalid_int_literal text);
+    Int 0)
 ;;
 
 let rec skip_trivia (t : State.t) =
@@ -370,7 +416,11 @@ let rec skip_trivia (t : State.t) =
   | _ -> ()
 ;;
 
-let token (t : State.t) : Located.t =
+let rec token (t : State.t) : Located.t =
+  try token_or_skip t with
+  | Skipped -> token t
+
+and token_or_skip (t : State.t) : Located.t =
   let previous_end = t.offset in
   skip_trivia t;
   let glued = t.offset = previous_end in
@@ -439,7 +489,8 @@ let token (t : State.t) : Located.t =
           | _ -> Option.value (Token.keyword text) ~default:(Lident text))
        | c, _ ->
          State.bump t;
-         State.error t start (Illegal_character c))
+         State.error t start (Illegal_character c);
+         raise Skipped)
   in
   { token; loc = State.loc_from t start }
 ;;
@@ -510,32 +561,56 @@ let comments ~(prev : Located.t option) ~(next : Located.t) ~next_index found =
       trailing_line, { Comment.text; loc; placement; next_token = next_index })
 ;;
 
-let tokenize_with_comments ~file src =
+let lex ~file src ~errors =
   let t : State.t =
-    { file; src; offset = 0; line = 1; bol = 0; comments = Queue.create () }
+    { file
+    ; src
+    ; offset = 0
+    ; line = 1
+    ; bol = 0
+    ; comments = Queue.create ()
+    ; errors
+    }
   in
   let tokens = Queue.create () in
   let all_comments = Queue.create () in
-  match
-    let rec loop prev =
-      let next = token t in
-      Queue.enqueue_all
-        all_comments
-        (comments
-           ~prev
-           ~next
-           ~next_index:(Queue.length tokens)
-           (Queue.to_list t.comments));
-      Queue.clear t.comments;
-      Queue.enqueue tokens next;
-      match next.token with
-      | Eof -> ()
-      | _ -> loop (Some next)
-    in
-    loop None
-  with
-  | () -> Ok (Queue.to_array tokens, Queue.to_list all_comments)
+  let rec loop prev =
+    let next = token t in
+    Queue.enqueue_all
+      all_comments
+      (comments
+         ~prev
+         ~next
+         ~next_index:(Queue.length tokens)
+         (Queue.to_list t.comments));
+    Queue.clear t.comments;
+    Queue.enqueue tokens next;
+    match next.token with
+    | Eof -> ()
+    | _ -> loop (Some next)
+  in
+  loop None;
+  Queue.to_array tokens, Queue.to_list all_comments
+;;
+
+let tokenize_with_comments ~file src =
+  match lex ~file src ~errors:None with
+  | result -> Ok result
   | exception Lex_error error -> Error error
+;;
+
+module Recovered = struct
+  type t =
+    { tokens : Located.t array
+    ; comments : Comment.t list
+    ; errors : Error.t list
+    }
+end
+
+let tokenize_recovering ~file src =
+  let errors = Queue.create () in
+  let tokens, comments = lex ~file src ~errors:(Some errors) in
+  { Recovered.tokens; comments; errors = Queue.to_list errors }
 ;;
 
 let tokenize ~file src = Result.map (tokenize_with_comments ~file src) ~f:fst

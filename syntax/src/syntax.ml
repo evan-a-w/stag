@@ -91,10 +91,12 @@ end
 
 (* The syntax's types are mutually recursive, as splices in type positions
    hold expressions and struct quotes hold declarations; each is re-exported
-   by its module below. *)
-[@@@warning "-30"]
+   by its module below. They are in [Defs], so that their constructors (eg.
+   [Error]) don't shadow others where [Syntax] is opened. *)
+module Defs = struct
+  [@@@warning "-30"]
 
-type type_expr = type_expr_desc Located.t
+  type type_expr = type_expr_desc Located.t
 
 and type_expr_desc =
   | Var of string
@@ -135,6 +137,9 @@ and type_decl_kind =
   (** [type t = .~e], located at [.~e]: the definition
       [e : Stag.Type_decl.Kind.t] evaluates to at compile time, or an
       antiquote in a struct quote. *)
+  | Malformed of type_decl_kind
+  (** What parsed of a declaration with a syntax error, whose members' types
+      may be missing. *)
 
 and type_decl =
   { name : Name.t
@@ -203,6 +208,7 @@ and expr_desc =
   | Struct_quote of toplevel list
   (** [.< struct ... end >.]: the declarations as a
       [list[Stag.Toplevel.t]], with antiquotes. *)
+  | Error (** In place of what did not parse. *)
 
 and bench_param =
   { name : Name.t
@@ -215,6 +221,9 @@ and toplevel_desc =
   | Let of Name.t * binding list * type_expr option * expr
   | Type of type_decl
   | Exception of Name.t * type_expr list (** [exception E of t1 * t2]. *)
+  | Malformed_exception of Name.t * type_expr list
+  (** What parsed of an exception declaration with a syntax error, whose
+      arguments may be missing. *)
   | Module of Name.t * toplevel list
   | Module_splice of Name.t * expr * toplevel list Located.t option
   (** [module M = .~e], or with its expansion
@@ -235,8 +244,9 @@ and toplevel_desc =
       ; body : expr
       }
 [@@deriving sexp_of, compare, equal]
+end
 
-[@@@warning "+30"]
+open Defs
 
 module Type_expr = struct
   type nonrec row = row
@@ -289,6 +299,7 @@ module Type_decl = struct
       | Alias of Type_expr.t
       | Abstract
       | Splice of expr Located.t
+      | Malformed of t
 
     let sexp_of_t = sexp_of_type_decl_kind
     let compare = compare_type_decl_kind
@@ -378,6 +389,7 @@ module Expr = struct
     | Poly_variant of Name.t * t option
     | Expect of string Located.t
     | Struct_quote of toplevel list
+    | Error
 
   let sexp_of_t = sexp_of_expr
   let compare = compare_expr
@@ -403,6 +415,7 @@ module Toplevel = struct
     | Let of Name.t * Binding.t list * Type_expr.t option * Expr.t
     | Type of Type_decl.t
     | Exception of Name.t * Type_expr.t list
+    | Malformed_exception of Name.t * Type_expr.t list
     | Module of Name.t * t list
     | Module_splice of Name.t * Expr.t * t list Located.t option
     | Include of Expr.t * t list Located.t option
@@ -417,6 +430,7 @@ module Toplevel = struct
         }
 
   let sexp_of_t = sexp_of_toplevel
+  let sexp_of_desc = sexp_of_toplevel_desc
   let compare = compare_toplevel
   let equal = equal_toplevel
 end

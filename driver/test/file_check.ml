@@ -13,7 +13,9 @@ let check_files ?(run = false) ?(filter_diagnostic = Fn.id) files =
       (filter_diagnostic (Diagnostic.to_string_hum ~contents diagnostic))
   in
   match Driver.check_files files with
-  | Error error -> print_diagnostic (Diagnostic.of_driver_error error)
+  | Error error ->
+    List.iter error ~f:(fun error ->
+      print_diagnostic (Diagnostic.of_driver_error error))
   | Ok driver ->
     print_string (Signature.to_string_hum (Driver.checked driver).signature);
     if run

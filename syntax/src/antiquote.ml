@@ -67,7 +67,7 @@ let map ?type_expr:replace_type_expr toplevels ~f =
     let annot = Option.map ~f:(type_expr depth) in
     let txt : Expr.desc =
       match e.txt with
-      | Lit _ | Expect _ -> e.txt
+      | Lit _ | Expect _ | Error -> e.txt
       | Var (p, a) -> Var (p, annot a)
       | App (a, b) ->
         let a = sub a in
@@ -132,8 +132,8 @@ let map ?type_expr:replace_type_expr toplevels ~f =
         let a = Option.map a ~f:type_expr in
         Let (n, bs, a, sub body)
       | Type { name; params; kind } ->
-        let kind : Type_decl.Kind.t =
-          match kind with
+        let rec decl_kind : Type_decl.Kind.t -> Type_decl.Kind.t = function
+          | Malformed kind -> Malformed (decl_kind kind)
           | Variant cs ->
             Variant
               (List.map cs ~f:(fun (n, ts) -> n, List.map ts ~f:type_expr))
@@ -153,8 +153,10 @@ let map ?type_expr:replace_type_expr toplevels ~f =
                     ~inner:expr
               }
         in
-        Type { name; params; kind }
+        Type { name; params; kind = decl_kind kind }
       | Exception (n, ts) -> Exception (n, List.map ts ~f:type_expr)
+      | Malformed_exception (n, ts) ->
+        Malformed_exception (n, List.map ts ~f:type_expr)
       | Module (n, ts) -> Module (n, List.map ts ~f:(toplevel depth))
       | Module_splice (n, e, expansion) ->
         let e = splice ~depth Item ~loc:t.loc ~has_subs:false e ~inner:expr in

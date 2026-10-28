@@ -40,8 +40,8 @@ let of_toplevels text toplevels =
       let member ~kind (name : Syntax.Name.t) =
         symbol ~kind ~loc:name.loc ~name_loc:name.loc name.txt
       in
-      let symbol_kind, children =
-        match kind with
+      let rec symbols : Syntax.Type_decl.Kind.t -> _ = function
+        | Malformed kind -> symbols kind
         | Variant constructors ->
           ( Lsp_types.SymbolKind.Enum
           , List.map constructors ~f:(fun (name, _) ->
@@ -50,8 +50,9 @@ let of_toplevels text toplevels =
           Struct, List.map fields ~f:(fun (name, _) -> member ~kind:Field name)
         | Alias _ | Abstract | Splice _ -> Class, []
       in
+      let symbol_kind, children = symbols kind in
       [ symbol ~children ~kind:symbol_kind ~loc ~name_loc:name.loc name.txt ]
-    | Exception (name, _) ->
+    | Exception (name, _) | Malformed_exception (name, _) ->
       [ symbol
           ~detail:"exception"
           ~kind:Constructor

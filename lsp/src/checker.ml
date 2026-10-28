@@ -32,15 +32,22 @@ let diagnostics_by_file ~path ~absolute ~files diagnostics =
   |> Map.map ~f:List.rev
 ;;
 
-(* [checked] is the program's modules and the program checked, or its
-   errors. *)
-let of_checked ?prelude ?(of_prelude = false) ~path ~absolute ~files checked =
+(* [checked] is the program's modules, if they parsed, and the program
+   checked, which with errors is what checked. *)
+let of_checked
+      ?prelude
+      ?(of_prelude = false)
+      ~path
+      ~absolute
+      ~files
+      ~errors
+      checked
+  =
   let diagnostics = diagnostics_by_file ~path ~absolute ~files in
   match checked with
-  | Error errors ->
+  | None ->
     { Result.diagnostics = diagnostics errors; index = None; depends_on = [] }
-  | Ok (groups, driver) ->
-    let checked = Driver.checked driver in
+  | Some (groups, (checked : Typecheck.Checked.t), type_errors) ->
     let index =
       Index.create
         ?prelude
@@ -51,7 +58,18 @@ let of_checked ?prelude ?(of_prelude = false) ~path ~absolute ~files checked =
         ()
       |> Index.relocate ~f:absolute
     in
-    { diagnostics = diagnostics []; index = Some index; depends_on = [] }
+    { diagnostics =
+        diagnostics
+          (Diagnostic.sort
+             (errors @ List.map type_errors ~f:Diagnostic.of_typecheck_error))
+    ; index = Some index
+    ; depends_on = []
+    }
+;;
+
+let of_driver = function
+  | Ok driver -> Driver.checked driver, []
+  | Error { Typecheck.Failed.errors; partial } -> partial, errors
 ;;
 
 (* The toplevels of [toplevels] located in files that [relocate] moves. *)
@@ -66,6 +84,7 @@ let rec relocated ~relocate (toplevels : Syntax.Toplevel.t list) =
     | Let _
     | Type _
     | Exception _
+    | Malformed_exception _
     | Module_splice _
     | Include _
     | Expect_test _
@@ -97,23 +116,6 @@ let source_paths checkout =
   |> Option.value ~default:[]
 ;;
 
-(* Errors in the prelude's sources, which are reported in them, leave
-   [path] unchecked, which is said in it. *)
-let with_prelude_errors diagnostics ~path ~depends_on =
-  if
-    List.exists depends_on ~f:(fun source ->
-      not (List.is_empty (Map.find_multi diagnostics source)))
-  then
-    Map.add_multi
-      diagnostics
-      ~key:path
-      ~data:
-        (Diagnostic.create
-           ~loc:(Loc.start_of_file path)
-           "This file is not checked: its checkout's prelude has errors")
-  else diagnostics
-;;
-
 let check_groups
       ~limits
       ~(prelude : Prelude_source.t)
@@ -123,16 +125,17 @@ let check_groups
       ~files
       groups
   =
+  let groups, errors = groups in
   let checked ?prelude groups =
-    let%bind.Core.Result groups = groups in
-    let%map.Core.Result driver =
-      Program.check_groups ~limits ~output:ignore ?prelude groups
-    in
-    groups, driver
+    Option.map groups ~f:(fun groups ->
+      let checked, type_errors =
+        of_driver (Driver.check_modules ~limits ~output:ignore ?prelude groups)
+      in
+      groups, checked, type_errors)
   in
   match prelude with
   | Embedded { stdlib = None } ->
-    of_checked ~path ~absolute ~files (checked groups)
+    of_checked ~path ~absolute ~files ~errors (checked groups)
   | Embedded { stdlib = Some checkout } ->
     let embedded = Stdlib_checkout.relocate_embedded ~contents checkout in
     { (of_checked
@@ -140,23 +143,38 @@ let check_groups
          ~path
          ~absolute:(Fn.compose absolute embedded)
          ~files
+         ~errors
          (checked groups))
       with
       depends_on = source_paths checkout
     }
   | Checkout checkout ->
-    let depends_on = source_paths checkout in
     let result =
       match Stdlib_checkout.prelude ~contents checkout with
       | Error diagnostic ->
-        of_checked ~path ~absolute ~files (Error [ diagnostic ])
+        (* The prelude's error is reported in its source, and the program
+           left unchecked, which is said in it. *)
+        of_checked
+          ~path
+          ~absolute
+          ~files
+          ~errors:
+            [ diagnostic
+            ; Diagnostic.create
+                ~loc:(Loc.start_of_file path)
+                "This file is not checked: its checkout's prelude has errors"
+            ]
+          None
       | Ok prelude ->
-        of_checked ~prelude ~path ~absolute ~files (checked ~prelude groups)
+        of_checked
+          ~prelude
+          ~path
+          ~absolute
+          ~files
+          ~errors
+          (checked ~prelude groups)
     in
-    { result with
-      diagnostics = with_prelude_errors result.diagnostics ~path ~depends_on
-    ; depends_on
-    }
+    { result with depends_on = source_paths checkout }
 ;;
 
 let in_stdlib ~limits ~contents checkout path =
@@ -165,21 +183,33 @@ let in_stdlib ~limits ~contents checkout path =
     | [] -> [ path ]
     | files -> files
   in
-  of_checked
-    ~of_prelude:true
-    ~path
-    ~absolute:Fn.id
-    ~files
-    (let%map.Core.Result { prelude; driver } =
-       Stdlib_checkout.check ~contents ~output:ignore ~limits checkout
-       |> Core.Result.map_error ~f:List.return
-     in
-     ( [ Driver.Module_group.Group
-           ( Located.create ~loc:Loc.none Prelude_path.root
-           , List.map prelude ~f:(fun toplevel ->
-               Driver.Module_group.File toplevel) )
-       ]
-     , driver ))
+  match Stdlib_checkout.prelude ~contents checkout with
+  | Error error ->
+    of_checked
+      ~of_prelude:true
+      ~path
+      ~absolute:Fn.id
+      ~files
+      ~errors:[ error ]
+      None
+  | Ok prelude ->
+    let checked, type_errors =
+      of_driver (Driver.check_prelude ~limits ~output:ignore prelude)
+    in
+    of_checked
+      ~of_prelude:true
+      ~path
+      ~absolute:Fn.id
+      ~files
+      ~errors:[]
+      (Some
+         ( [ Driver.Module_group.Group
+               ( Located.create ~loc:Loc.none Prelude_path.root
+               , List.map prelude ~f:(fun toplevel ->
+                   Driver.Module_group.File toplevel) )
+           ]
+         , checked
+         , type_errors ))
 ;;
 
 let standalone ~limits ~prelude ~contents path =
@@ -191,11 +221,10 @@ let standalone ~limits ~prelude ~contents path =
     ~path
     ~absolute:Fn.id
     ~files:[ path ]
-    (Source_file.parse file
-     |> Core.Result.map ~f:(fun toplevel ->
-       [ Driver.Module_group.File toplevel ])
-     |> Core.Result.map_error ~f:(fun error ->
-       [ Diagnostic.of_source_file_error error ]))
+    (let toplevel, errors = Source_file.parse_recovering file in
+     ( Option.map toplevel ~f:(fun toplevel ->
+         [ Driver.Module_group.File toplevel ])
+     , List.map errors ~f:Diagnostic.of_source_file_error ))
 ;;
 
 let absolute_loc ~root (loc : Loc.t) =
@@ -245,7 +274,7 @@ let in_project ~limits ~prelude ~contents ~root path =
       ~path
       ~absolute
       ~files
-      (Program.parse project target)
+      (Program.parse_recovering project target)
 ;;
 
 let check ?stdlib ~limits ~contents path =

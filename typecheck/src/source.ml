@@ -88,6 +88,8 @@ module Pattern = struct
     let sub pattern = Generated pattern in
     match desc with
     | Any -> Any
+    | Error (_ : Typed.Pattern.t list) ->
+      raise_s [%message "Generated code has a pattern that failed to check"]
     | Var ident -> Var (Ident ident)
     | Lit lit -> Lit lit
     | Tuple patterns -> Tuple (List.map patterns ~f:sub)
@@ -191,6 +193,7 @@ module Expr = struct
       | Expect of string Located.t
       | Type of Syntax.Type_expr.t
       | Struct_quote of Syntax.Toplevel.t list
+      | Error
   end
 
   let syntax_view (expr : Syntax.Expr.t) : View.t =
@@ -253,6 +256,7 @@ module Expr = struct
     | Expect expected -> Expect expected
     | Type ty -> Type ty
     | Struct_quote toplevels -> Struct_quote toplevels
+    | Error -> Error
   ;;
 
   let annotated_args args annots =
@@ -293,6 +297,7 @@ module Expr = struct
       Splice { code = sub code; subs = Providers providers }
     | Toplevel_splice _ ->
       raise_s [%message "Generated code has a toplevel splice"]
+    | Error _ -> raise_s [%message "Generated code has an error"]
     | Quote expr -> Quote (sub expr)
     | Tuple exprs -> Tuple (subs exprs)
     | Construct (constructor, exprs) -> Construct (Ref constructor, subs exprs)

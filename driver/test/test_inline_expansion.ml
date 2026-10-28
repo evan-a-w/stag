@@ -42,7 +42,8 @@ let test ?(others = []) ?(crlf = false) source =
     print_string (Diagnostic.to_string_hum ~contents:contents_of diagnostic)
   in
   match Driver.check_files files with
-  | Error error -> report (Diagnostic.of_driver_error error)
+  | Error error ->
+    List.iter error ~f:(fun error -> report (Diagnostic.of_driver_error error))
   | Ok driver ->
     let expansions = Inline_expansion.stale driver in
     List.iter expansions ~f:(fun expansion ->

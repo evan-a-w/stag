@@ -45,18 +45,33 @@ module Error = struct
   ;;
 end
 
-let parse { path; contents } =
-  let%bind.Result name =
-    module_name path
-    |> Result.map_error ~f:(fun message ->
-      Error.Invalid_file_name { path; message })
-  in
-  let%map.Result toplevels =
-    Parser.program ~file:path contents
-    |> Result.map_error ~f:(fun e -> Error.Parse e)
-  in
+let module_ path name toplevels =
   let loc = Loc.start_of_file path in
   Located.create
     ~loc
     (Syntax.Toplevel.Module (Located.create ~loc name, toplevels))
+;;
+
+let name path =
+  module_name path
+  |> Result.map_error ~f:(fun message ->
+    Error.Invalid_file_name { path; message })
+;;
+
+let parse { path; contents } =
+  let%bind.Result name = name path in
+  let%map.Result toplevels =
+    Parser.program ~file:path contents
+    |> Result.map_error ~f:(fun e -> Error.Parse e)
+  in
+  module_ path name toplevels
+;;
+
+let parse_recovering { path; contents } =
+  match name path with
+  | Error error -> None, [ error ]
+  | Ok name ->
+    let toplevels, errors = Parser.program_recovering ~file:path contents in
+    ( Some (module_ path name toplevels)
+    , List.map errors ~f:(fun error -> Error.Parse error) )
 ;;

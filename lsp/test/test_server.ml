@@ -314,18 +314,18 @@ let%expect_test "semantic tokens of a file that doesn't typecheck or parse" =
        Client.print_semantic_tokens client "a.stag";
        [%expect
          {|
-        0:0+3 Keyword "let"
-        0:4+1 Function (declaration) "f"
-        0:6+1 Parameter (declaration) "x"
-        0:8+1 Operator "="
-        0:10+1 Variable "x"
-        1:0+3 Keyword "let"
-        1:4+1 Variable (declaration) "y"
-        1:8+1 Type "t"
-        1:10+1 Operator "="
-        1:12+1 Variable "f"
-        1:14+1 Number "1"
-        |}];
+         0:0+3 Keyword "let"
+         0:4+1 Function (declaration) "f"
+         0:6+1 Parameter (declaration) "x"
+         0:8+1 Operator "="
+         0:10+1 Variable "x"
+         1:0+3 Keyword "let"
+         1:4+1 Variable (declaration) "y"
+         1:8+1 Type "t"
+         1:10+1 Operator "="
+         1:12+1 Function "f"
+         1:14+1 Number "1"
+         |}];
        Client.print_semantic_tokens client "b.stag";
        [%expect
          {|
@@ -421,6 +421,85 @@ let%expect_test "hover and definition" =
       2:39 -> a.stag 1:5-1:10
       20:13 no definition
       |}])
+;;
+
+let%expect_test "hover and definition in a file with errors" =
+  Client.with_server
+    ~files:
+      [ ( "a.stag"
+        , "let double x = Int.mul 2 x\n\
+           let bad : string = double (nope 1)\n\
+           let f y = Int.add (double y) true\n\
+           let g = in\n\
+           let h = double 4\n" )
+      ]
+    (fun client ->
+       Client.did_open client "a.stag";
+       [%expect
+         {|
+         diagnostics a.stag (version 1):
+           1:19-1:34 error: This expression has type int but an expression was expected of type string
+           1:27-1:31 error: Unbound value nope
+           2:29-2:33 error: This expression has type bool but an expression was expected of type int
+           3:8-3:10 error: Expected an expression, found `in`
+         |}];
+       List.iter
+         [ 1, 4; 1, 20; 2, 6; 2, 20; 2, 26; 4, 9 ]
+         ~f:(fun (line, character) ->
+           printf "%d:%d " line character;
+           hover client ~line ~character);
+       [%expect
+         {|
+         1:4 1:4-1:7 ```stag A.bad : string ```
+         1:20 1:19-1:25 ```stag A.double : int -> int ```
+         2:6 2:6-2:7 ```stag y : int ```
+         2:20 2:19-2:25 ```stag A.double : int -> int ```
+         2:26 2:26-2:27 ```stag y : int ```
+         4:9 4:8-4:14 ```stag A.double : int -> int ```
+         |}];
+       List.iter
+         [ 1, 20; 2, 20; 2, 27; 4, 9 ]
+         ~f:(fun (line, character) ->
+           printf "%d:%d " line character;
+           definition client "a.stag" ~line ~character);
+       [%expect
+         {|
+         1:20 -> a.stag 0:4-0:10
+         2:20 -> a.stag 0:4-0:10
+         2:27 -> a.stag 2:6-2:7
+         4:9 -> a.stag 0:4-0:10
+         |}])
+;;
+
+let%expect_test "hover on the variables of a pattern that failed to check" =
+  Client.with_server
+    ~files:
+      [ ( "a.stag"
+        , "type t = Foo of nope\n\
+           let f v = match v with | Foo z -> z\n\
+           let g n = match n with | Some w -> Int.add w 1 | None -> 0\n\
+           let h = g 3\n" )
+      ]
+    (fun client ->
+       Client.did_open client "a.stag";
+       [%expect
+         {|
+         diagnostics a.stag (version 1):
+           0:16-0:20 error: Unbound type nope
+           3:10-3:11 error: This expression has type int but an expression was expected of type option[int]
+         |}];
+       List.iter
+         [ 1, 29; 1, 34; 2, 30; 2, 43 ]
+         ~f:(fun (line, character) ->
+           printf "%d:%d " line character;
+           hover client ~line ~character);
+       [%expect
+         {|
+         1:29 1:29-1:30 ```stag z : 'a ```
+         1:34 1:34-1:35 ```stag z : 'a ```
+         2:30 2:30-2:31 ```stag w : int ```
+         2:43 2:43-2:44 ```stag w : int ```
+         |}])
 ;;
 
 let%expect_test "document symbols" =
@@ -745,7 +824,13 @@ let%expect_test "documents not of files nor untitled are not checked" =
     hover "untitled:/y/same";
     [%expect
       {|
-      null
+      {
+        "contents": { "kind": "markdown", "value": "```stag\nSame.y : int\n```" },
+        "range": {
+          "end": { "character": 5, "line": 0 },
+          "start": { "character": 4, "line": 0 }
+        }
+      }
       {
         "contents": { "kind": "markdown", "value": "```stag\nSame_2.y : int\n```" },
         "range": {

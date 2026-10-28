@@ -100,14 +100,78 @@ let%expect_test "errors in the prelude's sources are located in them" =
       {|
       diagnostics stag/core/list.stag (version 3):
         15:30-15:38 error: Unbound value Int.succ
+        79:20-79:28 error: Unbound value Int.succ
+        103:30-103:38 error: Unbound value Int.succ
+        120:12-120:20 error: Unbound value Int.succ
+        156:14-156:22 error: Unbound value Int.succ
+      diagnostics stag/core/sexp.stag:
+        61:28-61:36 error: Unbound value Int.succ
+        62:33-62:41 error: Unbound value Int.succ
+        450:43-450:51 error: Unbound value Int.succ
+        462:24-462:32 error: Unbound value Int.succ
+        466:30-466:38 error: Unbound value Int.succ
+        509:11-509:19 error: Unbound value Int.succ
+        525:51-525:59 error: Unbound value Int.succ
+        525:63-525:71 error: Unbound value Int.succ
+        536:56-536:64 error: Unbound value Int.succ
+        542:11-542:19 error: Unbound value Int.succ
+        548:55-548:63 error: Unbound value Int.succ
+        562:58-562:66 error: Unbound value Int.succ
+        718:35-718:43 error: Unbound value Int.succ
+        757:22-757:30 error: Unbound value Int.succ
+        841:29-841:37 error: Unbound value Int.succ
+        880:19-880:27 error: Unbound value Int.succ
+        904:29-904:37 error: Unbound value Int.succ
+        912:29-912:37 error: Unbound value Int.succ
+        913:30-913:38 error: Unbound value Int.succ
+        914:31-914:39 error: Unbound value Int.succ
+        936:35-936:43 error: Unbound value Int.succ
+        946:28-946:36 error: Unbound value Int.succ
+        947:34-947:42 error: Unbound value Int.succ
+        960:58-960:66 error: Unbound value Int.succ
+        961:28-961:36 error: Unbound value Int.succ
+        962:31-962:39 error: Unbound value Int.succ
+        974:19-974:27 error: Unbound value Int.succ
+        998:34-998:42 error: Unbound value Int.succ
+        1005:36-1005:44 error: Unbound value Int.succ
+        1006:37-1006:45 error: Unbound value Int.succ
+        1014:19-1014:27 error: Unbound value Int.succ
+        1021:35-1021:43 error: Unbound value Int.succ
+        1022:42-1022:50 error: Unbound value Int.succ
+        1026:42-1026:50 error: Unbound value Int.succ
+        1026:58-1026:66 error: Unbound value Int.succ
+        1038:34-1038:42 error: Unbound value Int.succ
+        1040:22-1040:30 error: Unbound value Int.succ
+        1045:49-1045:57 error: Unbound value Int.succ
+        1049:44-1049:52 error: Unbound value Int.succ
+        1050:33-1050:41 error: Unbound value Int.succ
+      diagnostics stag/core/string.stag:
+        51:23-51:31 error: Unbound value Int.succ
+        66:24-66:32 error: Unbound value Int.succ
+        114:23-114:31 error: Unbound value Int.succ
+        126:29-126:37 error: Unbound value Int.succ
+        151:15-151:23 error: Unbound value Int.succ
+        151:28-151:36 error: Unbound value Int.succ
+        152:30-152:38 error: Unbound value Int.succ
+        170:30-170:38 error: Unbound value Int.succ
+        193:28-193:36 error: Unbound value Int.succ
+        198:14-198:22 error: Unbound value Int.succ
+        198:27-198:35 error: Unbound value Int.succ
+        207:39-207:47 error: Unbound value Int.succ
       |}];
     Client.did_change client int ~version:3 (contents int);
     let prelude = "stag/prelude/prelude.stag" in
     Client.did_open client prelude;
-    Client.did_change client prelude ~version:2 "let x = Prim.Nope.nope\n";
+    Client.did_change
+      client
+      prelude
+      ~version:2
+      ("let x = Prim.Nope.nope\n" ^ contents prelude);
     [%expect
       {|
       diagnostics stag/core/list.stag (version 3): none
+      diagnostics stag/core/sexp.stag: none
+      diagnostics stag/core/string.stag: none
       diagnostics stag/prelude/prelude.stag (version 2):
         0:8-0:22 error: Unbound value Prim.Nope.nope
       |}])
@@ -327,6 +391,16 @@ let%expect_test
            1:0-1:0 error: Expected an expression, found end of file
          diagnostics stag/tests/c.stag (version 1):
            0:0-0:0 error: This file is not checked: its checkout's prelude has errors
+         |}];
+       Out_channel.write_all
+         (Client.path client "stag/core/broken.stag")
+         ~data:"let x = Int.nope\nlet z = Extra.nope\n";
+       watched_change client "stag/core/broken.stag";
+       [%expect
+         {|
+         diagnostics stag/tests/c.stag (version 1):
+           0:8-0:18 error: Unbound module Core.Extra
+         diagnostics stag/core/broken.stag: none
          |}])
 ;;
 

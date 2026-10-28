@@ -108,7 +108,7 @@ module Syntax_at = struct
     let recurse = expr t in
     let snds list = List.iter list ~f:(fun (_, e) -> recurse e) in
     match e.txt with
-    | Lit _ | Var _ | Type _ | Expect _ -> ()
+    | Lit _ | Var _ | Type _ | Expect _ | Error -> ()
     | App (a, b) ->
       recurse a;
       recurse b
@@ -236,6 +236,7 @@ let rec pattern t ~syntax ~program (p : Typed.Pattern.t) =
       ~ty:p.ty
       ~ident:(Some ident)
   | Any | Lit _ -> typed ()
+  | Error ps -> List.iter ps ~f:recurse
   | Tuple ps ->
     typed ();
     List.iter ps ~f:recurse
@@ -358,7 +359,8 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
    | Poly_update _
    | Poly_variant _
    | Expect _
-   | Type _ -> typed ());
+   | Type _
+   | Error _ -> typed ());
   match e.desc with
   | Toplevel_splice { code; expansion = _ } -> recurse code
   | _ -> List.iter (Typed.Expr.sub_exprs e) ~f:recurse
@@ -404,13 +406,17 @@ let rec declarations
       Hashtbl.set values ~key:(canonical name) ~data:(name, bindings, body)
     | Type { name; params = _; kind } ->
       set t.types name;
-      (match kind with
-       | Variant constructors ->
-         List.iter constructors ~f:(fun (name, _) -> set t.constructors name)
-       | Record fields ->
-         List.iter fields ~f:(fun (name, _) -> set t.fields name)
-       | Alias _ | Abstract | Splice _ -> ())
-    | Exception (name, _) -> set t.constructors name
+      let rec members : Syntax.Type_decl.Kind.t -> unit = function
+        | Variant constructors ->
+          List.iter constructors ~f:(fun (name, _) -> set t.constructors name)
+        | Record fields ->
+          List.iter fields ~f:(fun (name, _) -> set t.fields name)
+        | Malformed kind -> members kind
+        | Alias _ | Abstract | Splice _ -> ()
+      in
+      members kind
+    | Exception (name, _) | Malformed_exception (name, _) ->
+      set t.constructors name
     | Module (name, toplevels) ->
       declarations
         t
@@ -506,7 +512,7 @@ let create
         List.iter args ~f:(Syntax_at.expr syntax));
       Syntax_at.expr syntax body
     | Module (_, toplevels) -> List.iter toplevels ~f:syntax_of_toplevel
-    | Type _ | Exception _ -> ()
+    | Type _ | Exception _ | Malformed_exception _ -> ()
   in
   List.iter files ~f:(fun (_, toplevel) -> syntax_of_toplevel toplevel);
   List.iter files ~f:(fun (module_path, toplevel) ->

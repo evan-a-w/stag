@@ -143,6 +143,7 @@ let rec check_no_expansions (toplevels : Toplevel.t list) =
     | Let _
     | Type _
     | Exception _
+    | Malformed_exception _
     | Expect_test _
     | Bench _ -> ())
 ;;

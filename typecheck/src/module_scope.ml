@@ -59,8 +59,10 @@ type module_ =
     (* By the include generating them, [None] for the others. *)
   ; modules : module_ String.Table.t
   ; entries : entry Queue.t
-  ; includes : splice Queue.t (* Its own, and those they generate. *)
-  ; definitions : splice String.Table.t (* Of its types [type t = .~e]. *)
+  ; includes : splice Queue.t
+    (* Its own includes and types' definitions [type t = .~e], and those
+       they generate. *)
+  ; definitions : splice String.Table.t (* By type name. *)
   ; path : string list
   ; loc : Loc.t
   ; enclosing : t option
@@ -99,12 +101,13 @@ and state =
   | Pending
   | Forcing
   | Done of Toplevel.t list
-  | Failed of Typecheck_error.t
+  | Failed (* Its error reported. *)
 
 (* Shared by the modules of a root. *)
 and program =
   { declare : t -> Toplevel.t -> generated_by:splice option -> unit
   ; force : splice -> (Toplevel.t list, Force_error.t) Result.t
+  ; report : Typecheck_error.t -> unit
   ; outside : t option (* The root's enclosing scope. *)
   }
 
@@ -125,7 +128,7 @@ module Splice = struct
   let generated (t : t) =
     match t.state with
     | Done toplevels -> Some toplevels
-    | Pending | Forcing | Failed _ -> None
+    | Pending | Forcing | Failed -> None
   ;;
 end
 
@@ -151,14 +154,14 @@ let create ~path ~loc ~enclosing ~splice ~program =
   }
 ;;
 
-let create_root ?enclosing ?(path = []) ~types ~declare ~force () =
+let create_root ?enclosing ?(path = []) ~types ~declare ~force ~report () =
   let module_ =
     create
       ~path
       ~loc:Loc.none
       ~enclosing
       ~splice:None
-      ~program:{ declare; force; outside = enclosing }
+      ~program:{ declare; force; report; outside = enclosing }
   in
   List.iter types ~f:(fun name ->
     Hashtbl.set module_.members ~key:(Member Type, name) ~data:None);
@@ -176,7 +179,6 @@ let rec declarations_of entries =
 ;;
 
 let declarations t = declarations_of t.module_.entries
-let iter_result xs ~f = List.fold_result xs ~init:() ~f:(fun () x -> f x)
 
 (* The members [toplevel] adds to the module it is in. *)
 let members (toplevel : Toplevel.t) : (Member.t * Name.t) list =
@@ -188,75 +190,129 @@ let members (toplevel : Toplevel.t) : (Member.t * Name.t) list =
   | Type { name; params = _; kind } ->
     member Type name
     ::
-    (match kind with
-     | Alias _ | Abstract | Splice _ -> []
-     | Variant constructors ->
-       List.map constructors ~f:(fun (name, _) -> member Constructor name)
-     | Record fields -> List.map fields ~f:(fun (name, _) -> member Field name))
-  | Exception (name, _) -> [ member Constructor name ]
+    (let rec kind_members : Type_decl.Kind.t -> _ = function
+       | Alias _ | Abstract | Splice _ -> []
+       | Malformed kind -> kind_members kind
+       | Variant constructors ->
+         List.map constructors ~f:(fun (name, _) -> member Constructor name)
+       | Record fields ->
+         List.map fields ~f:(fun (name, _) -> member Field name)
+     in
+     kind_members kind)
+  | Exception (name, _) | Malformed_exception (name, _) ->
+    [ member Constructor name ]
   | Module (name, _) | Module_splice (name, _, _) ->
     [ (Module, name.txt), name ]
   | Expect_test _ | Bench _ | Include _ -> []
 ;;
 
-(* Checks that adding [toplevels] to the module [path], whose members are
-   [taken], keeps names unique: a member per module, a parameter per type. *)
-let rec check_unique ~path taken toplevels =
-  iter_result toplevels ~f:(fun (toplevel : Toplevel.t) ->
-    let%bind.Result () =
+(* [toplevels] but those whose names, or type parameters, are taken by those
+   before them or by [taken], the members of the module [path] they are added
+   to, and with types' constructors and fields so taken left out, each
+   reported. *)
+let rec unique_among ~path taken toplevels ~report =
+  List.filter_map toplevels ~f:(fun (toplevel : Toplevel.t) ->
+    let error ~loc kind =
+      report (Typecheck_error.create ~loc kind);
+      None
+    in
+    let params_unique =
       match toplevel.txt with
       | Type { name; params; kind = _ } ->
         let type_name = join (path @ [ name.txt ]) in
-        List.fold_result
+        List.fold_until
           params
           ~init:String.Set.empty
           ~f:(fun seen { txt = param; loc } ->
             let param = Type_decl.Param.name param in
             if Set.mem seen param
             then
-              Error
-                (Typecheck_error.create
-                   ~loc
-                   (Duplicate_type_parameter { type_name; param }))
-            else Ok (Set.add seen param))
-        |> Result.ignore_m
+              Stop (error ~loc (Duplicate_type_parameter { type_name; param }))
+            else Continue (Set.add seen param))
+          ~finish:(fun _ -> Some ())
       | Let _
       | Exception _
+      | Malformed_exception _
       | Module _
       | Module_splice _
       | Expect_test _
       | Bench _
-      | Include _ -> Ok ()
+      | Include _ -> Some ()
     in
-    let%bind.Result () =
-      iter_result (members toplevel) ~f:(fun (((kind, name) as member), at) ->
-        if Hash_set.mem taken member
-        then
-          Error
-            (Typecheck_error.create
-               ~loc:at.loc
-               (Member_kind.duplicate kind (join (path @ [ name ]))))
-        else Ok (Hash_set.add taken member))
+    let%bind.Option () = params_unique in
+    let added = Member.Hash_set.create () in
+    let duplicates =
+      List.filter (members toplevel) ~f:(fun (member, _) ->
+        Hash_set.mem taken member
+        || Hash_set.strict_add added member |> Result.is_error)
     in
-    match toplevel.txt with
-    | Module (name, toplevels) ->
-      check_unique
-        ~path:(path @ [ name.txt ])
-        (Member.Hash_set.create ())
-        toplevels
-    | Let _
-    | Type _
-    | Exception _
-    | Module_splice _
-    | Expect_test _
-    | Bench _
-    | Include _ -> Ok ())
+    let report_duplicate ((kind, name), (at : Name.t)) =
+      error ~loc:at.loc (Member_kind.duplicate kind (join (path @ [ name ])))
+    in
+    match duplicates, toplevel.txt with
+    | ((_, (at : Name.t)) as duplicate) :: _, _
+      when phys_equal at (snd (List.hd_exn (members toplevel))) ->
+      report_duplicate duplicate
+    | _ :: _, Type decl ->
+      (* Kept without its duplicate constructors or fields. *)
+      List.iter duplicates ~f:(fun duplicate ->
+        ignore (report_duplicate duplicate : unit option));
+      Hash_set.iter added ~f:(Hash_set.add taken);
+      let kept (name, _) =
+        not (List.exists duplicates ~f:(fun (_, at) -> phys_equal at name))
+      in
+      let rec kept_kind : Type_decl.Kind.t -> Type_decl.Kind.t = function
+        | Variant constructors -> Variant (List.filter constructors ~f:kept)
+        | Record fields -> Record (List.filter fields ~f:kept)
+        | Malformed kind -> Malformed (kept_kind kind)
+        | (Alias _ | Abstract | Splice _) as kind -> kind
+      in
+      Some
+        { toplevel with
+          txt = Toplevel.Type { decl with kind = kept_kind decl.kind }
+        }
+    | ( _ :: _
+      , ( Let _
+        | Exception _
+        | Malformed_exception _
+        | Module _
+        | Module_splice _
+        | Expect_test _
+        | Bench _
+        | Include _ ) ) ->
+      (* Their only member, if any, is their name. *)
+      assert false
+    | [], _ ->
+      Hash_set.iter added ~f:(Hash_set.add taken);
+      Some
+        (match toplevel.txt with
+         | Module (name, toplevels) ->
+           { toplevel with
+             txt =
+               Toplevel.Module
+                 ( name
+                 , unique_among
+                     ~path:(path @ [ name.txt ])
+                     (Member.Hash_set.create ())
+                     toplevels
+                     ~report )
+           }
+         | Let _
+         | Type _
+         | Exception _
+         | Malformed_exception _
+         | Module_splice _
+         | Expect_test _
+         | Bench _
+         | Include _ -> toplevel))
 ;;
 
-let check_unique ?(except = []) module_ toplevels =
-  let taken = Member.Hash_set.of_list (Hashtbl.keys module_.members) in
-  List.iter except ~f:(Hash_set.remove taken);
-  check_unique ~path:module_.path taken toplevels
+let unique module_ toplevels ~report =
+  unique_among
+    ~path:module_.path
+    (Member.Hash_set.of_list (Hashtbl.keys module_.members))
+    toplevels
+    ~report
 ;;
 
 let submodule (scope : t) (name : Name.t) ~splice =
@@ -301,6 +357,7 @@ let rec register module_ toplevels ~parent ~generated_by =
     | Let _
     | Type _
     | Exception _
+    | Malformed_exception _
     | Expect_test _
     | Bench _
     | Module _
@@ -322,24 +379,32 @@ let rec register module_ toplevels ~parent ~generated_by =
                 (Some (splice expr ~expansion ~into:(Into_module name.txt)))
             : module_)
        | Type ({ kind = Splice e; _ } as decl) ->
-         Hashtbl.add_exn
-           module_.definitions
-           ~key:decl.name.txt
-           ~data:
-             { expr = e.txt
-             ; toplevel
-             ; loc = e.loc
-             ; scope
-             ; into = Into_type decl
-             ; state = Pending
-             }
-       | Let _ | Type _ | Exception _ | Expect_test _ | Bench _ | Include _ ->
-         ()))
+         let splice =
+           { expr = e.txt
+           ; toplevel
+           ; loc = e.loc
+           ; scope
+           ; into = Into_type decl
+           ; state = Pending
+           }
+         in
+         Hashtbl.add_exn module_.definitions ~key:decl.name.txt ~data:splice;
+         Queue.enqueue module_.includes splice
+       | Let _
+       | Type _
+       | Exception _
+       | Malformed_exception _
+       | Expect_test _
+       | Bench _
+       | Include _ -> ()))
 ;;
 
 let add t toplevels =
-  let%map.Result () = check_unique t.module_ toplevels in
-  register t.module_ toplevels ~parent:None ~generated_by:None
+  register
+    t.module_
+    (unique t.module_ toplevels ~report:t.module_.program.report)
+    ~parent:None
+    ~generated_by:None
 ;;
 
 let in_scope (t : t) : Typecheck_error.In_scope.t =
@@ -405,69 +470,113 @@ let with_names (path : Decl_path.t) names : Decl_path.t =
 
 let within t error = Typecheck_error.within error ~in_scope:(lazy (in_scope t))
 
+let splice_kind (splice : splice) : Typecheck_error.Splice_kind.t =
+  match splice.into with
+  | Into_type _ -> Type_definition
+  | Into_include _ | Into_module _ -> Include
+;;
+
 (* [module_] is the canonical name of the module [splice] generates, if it is
    not an include. *)
 let cycle ?module_ (splice : splice) ~name ~loc =
   Typecheck_error.create
     ~loc
     (Declaration_splice_cycle
-       { name = Decl_path.to_string name; module_; splice = splice.loc })
+       { name = Decl_path.to_string name
+       ; module_
+       ; splice = splice.loc
+       ; splice_kind = splice_kind splice
+       })
 ;;
 
 (* Runs [splice], which is not running, adding what it generates to its
    module, or, for an include, to the module it is in, in its place. If it
    uses an unfinished toplevel, it is left pending. *)
-let force (splice : splice) : (unit, Force_error.t) Result.t =
+module Forced = struct
+  type t =
+    | Forced
+    | Failed
+    | Uses_unfinished
+end
+
+let force (splice : splice) : Forced.t =
   match splice.state with
-  | Done _ -> Ok ()
-  | Failed error -> Error (Failed error)
+  | Done _ -> Forced
+  | Failed -> Failed
   | Forcing -> raise_s [%message "Module_scope.force: already running"]
   | Pending ->
     splice.state <- Forcing;
     let in_module = splice.scope.module_ in
+    let failed () : Forced.t =
+      splice.state <- Failed;
+      Failed
+    in
+    let done_ toplevels : Forced.t =
+      splice.state <- Done toplevels;
+      Forced
+    in
     (match in_module.program.force splice with
      | Error Uses_unfinished ->
        splice.state <- Pending;
-       Error Uses_unfinished
+       Uses_unfinished
      | Error (Failed error) ->
-       splice.state <- Failed error;
-       Error (Failed error)
+       in_module.program.report error;
+       failed ()
      | Ok toplevels ->
-       let registered =
-         match splice.into with
-         | Into_type decl ->
-           let type_member = Member_kind.Member Type, decl.name.txt in
-           let%map.Result () =
-             check_unique in_module toplevels ~except:[ type_member ]
-           in
-           let visibility = Hashtbl.find_exn in_module.members type_member in
-           List.iter toplevels ~f:(fun toplevel ->
-             List.iter (members toplevel) ~f:(fun (member, _) ->
-               Hashtbl.set in_module.members ~key:member ~data:visibility))
-         | Into_include _ ->
-           let%map.Result () = check_unique in_module toplevels in
-           register
-             in_module
-             toplevels
-             ~parent:(Some splice)
-             ~generated_by:(Some splice)
-         | Into_module name ->
-           let module_ = Hashtbl.find_exn in_module.modules name in
-           let%map.Result () = check_unique module_ toplevels in
-           register module_ toplevels ~parent:None ~generated_by:(Some splice)
-       in
-       (match registered with
-        | Ok () ->
-          splice.state <- Done toplevels;
-          Ok ()
-        | Error error ->
-          let error = within splice.scope error in
-          splice.state <- Failed error;
-          Error (Failed error)))
+       let report error = in_module.program.report (within splice.scope error) in
+       (match splice.into with
+        | Into_type decl ->
+          let type_member = Member_kind.Member Type, decl.name.txt in
+          let taken = Member.Hash_set.of_list (Hashtbl.keys in_module.members) in
+          Hash_set.remove taken type_member;
+          (match unique_among ~path:in_module.path taken toplevels ~report with
+           | [] -> failed ()
+           | toplevels ->
+             List.iter toplevels ~f:(fun toplevel ->
+               in_module.program.declare
+                 splice.scope
+                 toplevel
+                 ~generated_by:(Some splice);
+               List.iter (members toplevel) ~f:(fun (member, _) ->
+                 if not ([%compare.equal: Member.t] member type_member)
+                 then
+                   Hashtbl.add_exn
+                     in_module.members
+                     ~key:member
+                     ~data:(Some splice)));
+             done_ toplevels)
+        | Into_include _ ->
+          let toplevels = unique in_module toplevels ~report in
+          register
+            in_module
+            toplevels
+            ~parent:(Some splice)
+            ~generated_by:(Some splice);
+          done_ toplevels
+        | Into_module name ->
+          let module_ = Hashtbl.find_exn in_module.modules name in
+          let toplevels = unique module_ toplevels ~report in
+          register module_ toplevels ~parent:None ~generated_by:(Some splice);
+          done_ toplevels))
+;;
+
+let is_failed (splice : splice) =
+  match splice.state with
+  | Failed -> true
+  | Pending | Forcing | Done _ -> false
 ;;
 
 let is_before (splice : splice) position =
   Position.before splice.scope.position position
+;;
+
+(* Whether [splice] may generate [member]: a type's definition generates only
+   constructors or fields. *)
+let may_generate (splice : splice) ((kind, _) : Member.t) =
+  match splice.into, kind with
+  | Into_type _, Member (Constructor | Field) -> true
+  | Into_type _, (Member (Value | Type) | Module) -> false
+  | (Into_include _ | Into_module _), _ -> true
 ;;
 
 let first splices =
@@ -478,52 +587,29 @@ let first splices =
 module Lookup = struct
   type t =
     | Visible
-    | Hidden of splice (* Generated by an include after the position. *)
+    | Hidden of splice (* Generated by a splice after the position. *)
     | Absent of { blocked : splice option }
 end
 
-(* Computes the definitions of the module's types [type t = .~e] neither
-   computed nor being computed, whose constructors or fields are then members,
-   and whether one is newly computed. One that fails is reported where its type
-   is checked. *)
-let force_definitions module_ =
-  Hashtbl.fold
-    module_.definitions
-    ~init:false
-    ~f:(fun ~key:_ ~data:splice forced ->
-      match splice.state with
-      | Pending ->
-        (match force splice with
-         | Ok () -> true
-         | Error (Failed _ | Uses_unfinished) -> forced)
-      | Forcing | Done _ | Failed _ -> forced)
-;;
-
-(* [member] of [t]'s module, seen from [t]. While a constructor or field is
-   not found, the module's types' definitions are computed. While it is not
-   found, the first include before [t] not yet forced is. Unless it is running
-   or uses an unfinished toplevel: then what it generates is unknown, and it is
-   [blocked]. *)
+(* [member] of [t]'s module, seen from [t]. While it is not found, the first
+   splice before [t] that may generate it, not yet forced, is. Unless it is
+   running or uses an unfinished toplevel: then what it generates is unknown,
+   and it is [blocked]. *)
 let rec lookup (t : t) member =
   match Hashtbl.find t.module_.members member with
   | Some None -> Ok Lookup.Visible
-  | Some (Some include_) ->
-    Ok
-      (if is_before include_ t.position then Lookup.Visible else Hidden include_)
-  | None
-    when (match member with
-          | Member (Constructor | Field), _ -> true
-          | Member (Value | Type), _ | Module, _ -> false)
-         && force_definitions t.module_ -> lookup t member
+  | Some (Some splice) ->
+    Ok (if is_before splice t.position then Lookup.Visible else Hidden splice)
   | None ->
     (match
        Queue.to_list t.module_.includes
        |> List.filter ~f:(fun splice ->
-         is_before splice t.position
+         may_generate splice member
+         && is_before splice t.position
          &&
          match splice.state with
-         | Done _ -> false
-         | Pending | Forcing | Failed _ -> true)
+         | Done _ | Failed -> false
+         | Pending | Forcing -> true)
        |> first
      with
      | None -> Ok (Absent { blocked = None })
@@ -531,9 +617,16 @@ let rec lookup (t : t) member =
        Ok (Absent { blocked = Some splice })
      | Some splice ->
        (match force splice with
-        | Ok () -> lookup t member
-        | Error (Failed error) -> Error error
-        | Error Uses_unfinished -> Ok (Absent { blocked = Some splice })))
+        | Forced | Failed -> lookup t member
+        | Uses_unfinished -> Ok (Absent { blocked = Some splice })))
+;;
+
+(* Whether a splice that failed may have generated [member], not found from
+   [t]. *)
+let rec after_failed_splice (t : t) member =
+  Queue.exists t.module_.includes ~f:(fun splice ->
+    is_failed splice && may_generate splice member && is_before splice t.position)
+  || Option.exists t.module_.enclosing ~f:(fun t -> after_failed_splice t member)
 ;;
 
 module Found = struct
@@ -559,23 +652,33 @@ let find_scope t member =
   search t ~blocked:None
 ;;
 
-(* The include generating [member] after [t], in its module or one enclosing
-   it, for messages: all their includes are forced, up to one that fails. *)
+(* The splice after [t] that generates [member] ([Hidden]), or may but is
+   blocked ([Absent]), in its module or one enclosing it, for messages: all
+   their splices are forced, up to one that fails. *)
 let rec generated_after (t : t) member =
   match lookup { t with position = End } member, lookup t member with
-  | Ok Visible, Ok (Hidden include_) -> Some include_
+  | Ok Visible, Ok (Hidden splice) -> Some (Lookup.Hidden splice)
+  | Ok (Absent { blocked = Some splice }), Ok (Absent { blocked = None }) ->
+    Some (Absent { blocked = Some splice })
   | _ -> Option.bind t.module_.enclosing ~f:(fun t -> generated_after t member)
 ;;
 
-let with_note (error : Typecheck_error.Kind.t) ~blocked ~hidden
+let with_note (error : Typecheck_error.Kind.t) ~blocked ~after
   : Typecheck_error.Kind.t
   =
-  match blocked, hidden with
-  | Some (include_ : splice), _ ->
-    Maybe_generated_by_running_include { error; include_ = include_.loc }
-  | None, Some (include_ : splice) ->
-    Generated_after_include { error; include_ = include_.loc }
-  | None, None -> error
+  match blocked, after with
+  | Some (splice : splice), _
+  | None, Some (Lookup.Absent { blocked = Some splice }) ->
+    Maybe_generated_by_running_include
+      { error
+      ; include_ = splice.loc
+      ; splice_kind = splice_kind splice
+      ; after = Option.is_none blocked
+      }
+  | None, Some (Hidden splice) ->
+    Generated_after_include
+      { error; include_ = splice.loc; splice_kind = splice_kind splice }
+  | None, (Some (Visible | Absent { blocked = None }) | None) -> error
 ;;
 
 (* The location of the module path [written] at the start of the path at
@@ -609,11 +712,11 @@ let open_module module_ name ~path ~loc =
     | Some splice ->
       (match splice.state with
        | Forcing -> Error (cycle splice)
-       | Pending | Done _ | Failed _ ->
+       | Pending | Done _ | Failed ->
          (match force splice with
-          | Ok () -> Ok ()
-          | Error (Failed error) -> Error error
-          | Error Uses_unfinished -> Error (cycle splice)))
+          | Forced -> Ok ()
+          | Failed -> Error Typecheck_error.already_reported
+          | Uses_unfinished -> Error (cycle splice)))
   in
   module_
 ;;
@@ -761,9 +864,12 @@ and find_written
         ( Typecheck_error.Kind.Unbound_module (with_names path written)
         , prefix_loc loc ~path ~written )
     in
-    Error
-      (hint
-         (Typecheck_error.create ~loc (with_note kind ~blocked ~hidden:None)))
+    if after_failed_splice { module_; position = End } member
+    then Error Typecheck_error.already_reported
+    else
+      Error
+        (hint
+           (Typecheck_error.create ~loc (with_note kind ~blocked ~after:None)))
 ;;
 
 let rec has_path module_ namespace = function
@@ -856,12 +962,15 @@ let unbound_head t namespace (path : Decl_path.t) ~loc ~unbound ~blocked =
       , Typecheck_error.Kind.Unbound_module (with_names path [ head ])
       , prefix_loc loc ~path ~written:[ head ] )
   in
-  let hidden =
-    match blocked with
-    | Some _ -> None
-    | None -> generated_after t member
-  in
-  Typecheck_error.create ~loc (with_note kind ~blocked ~hidden)
+  if after_failed_splice t member
+  then Typecheck_error.already_reported
+  else (
+    let after =
+      match blocked with
+      | Some _ -> None
+      | None -> generated_after t member
+    in
+    Typecheck_error.create ~loc (with_note kind ~blocked ~after))
 ;;
 
 let find t namespace path ~loc ~unbound =
@@ -925,34 +1034,34 @@ let unbound_value t path ~loc =
 let iter_declarations t ~f =
   let force splice =
     match force splice with
-    | Ok () -> Ok ()
-    | Error (Failed error) -> Error error
-    | Error Uses_unfinished ->
+    | Forced | Failed -> ()
+    | Uses_unfinished ->
       raise_s
         [%message
           "Module_scope.iter_declarations: a splice uses an unfinished toplevel"]
   in
   let rec iter_module module_ =
-    let%bind.Result () =
-      match module_.splice with
-      | Some splice -> force splice
-      | None -> Ok ()
-    in
+    Option.iter module_.splice ~f:force;
     iter_entries module_.entries
   and iter_entries entries =
-    iter_result (Queue.to_list entries) ~f:(function
+    Queue.iter entries ~f:(function
       | Included splice ->
-        let%bind.Result () = force splice in
+        force splice;
         (match splice.into with
          | Into_include entries -> iter_entries entries
-         | Into_module _ | Into_type _ -> Ok ())
+         | Into_module _ | Into_type _ -> ())
       | Written { toplevel; scope; generated_by } ->
-        let%bind.Result () = f scope toplevel ~generated_by in
+        f scope toplevel ~generated_by;
         (match toplevel.txt with
          | Module (name, _) | Module_splice (name, _, _) ->
            iter_module (Hashtbl.find_exn scope.module_.modules name.txt)
-         | Let _ | Type _ | Exception _ | Expect_test _ | Bench _ | Include _ ->
-           Ok ()))
+         | Let _
+         | Type _
+         | Exception _
+         | Malformed_exception _
+         | Expect_test _
+         | Bench _
+         | Include _ -> ()))
   in
   iter_module t.module_
 ;;
@@ -960,25 +1069,25 @@ let iter_declarations t ~f =
 let defining (t : t) name =
   match (Hashtbl.find_exn t.module_.definitions name).state with
   | Forcing -> true
-  | Pending | Done _ | Failed _ -> false
+  | Pending | Done _ | Failed -> false
 ;;
 
 let force_definition (t : t) name ~loc =
   let splice = Hashtbl.find_exn t.module_.definitions name in
-  match splice.state with
-  | Forcing ->
+  let cycle () =
     Error
       (Typecheck_error.create
          ~loc
          (Type_definition_cycle
             { name = canonical_name t name; splice = splice.loc }))
-  | Pending | Done _ | Failed _ ->
+  in
+  match splice.state with
+  | Forcing -> cycle ()
+  | Pending | Done _ | Failed ->
     (match force splice with
-     | Ok () -> Ok ()
-     | Error (Failed error) -> Error error
-     | Error Uses_unfinished ->
-       raise_s
-         [%message "Module_scope.force_definition: uses an unfinished toplevel"])
+     | Forced -> Ok ()
+     | Failed -> Error Typecheck_error.already_reported
+     | Uses_unfinished -> cycle ())
 ;;
 
 let splices t =

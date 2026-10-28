@@ -8,4 +8,8 @@ open! Import
 
     Errs on a variable bound outside the code that is not a toplevel, a local
     function the code embeds, as nothing names it where the code is spliced. *)
+(** Raised by [expr] on code with what did not check
+    ([Typed.Expr.Desc.Error]). *)
+exception Reached_error
+
 val expr : Typed.Expr.t -> Syntax.Expr.t Or_error.t

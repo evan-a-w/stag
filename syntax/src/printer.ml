@@ -208,7 +208,8 @@ let level (e : Expr.t) : Level.t =
   | Poly_extend _
   | Poly_update _
   | Record_update _
-  | Expect _ -> Atom
+  | Expect _
+  | Error -> Atom
 ;;
 
 let bare_at at e = Level.compare (level e) at >= 0
@@ -275,7 +276,7 @@ module Kind = struct
   let of_toplevel (t : Toplevel.t) =
     match t.txt with
     | Let _ -> Let
-    | Type _ | Exception _ -> Type
+    | Type _ | Exception _ | Malformed_exception _ -> Type
     | Module_splice _ -> Module_splice
     | Include _ -> Include
     | Module _ | Expect_test _ | Bench _ -> Other
@@ -633,6 +634,7 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
          field roots (decl_path roots p) value))
   | Expect { txt = ""; _ }, _ -> text "[%expect]"
   | Expect s, _ -> text "[%expect " ^^ text (quoted_string s.txt) ^^ text "]"
+  | Error, _ -> text "<error>"
 
 and update roots record fields =
   let record =
@@ -751,30 +753,33 @@ and type_decl roots ({ name; params; kind } : Type_decl.t) =
            (group (separate (text "," ^^ line) (List.map params ~f:type_param)))
       ^^ text "]"
   in
-  match kind with
-  | Abstract -> lhs
-  | Alias t when starts_with_splice t ->
-    definition lhs (parens (type_expr_doc roots t))
-  | Alias t -> definition lhs (type_expr_doc roots t)
-  | Splice e -> lhs ^^ text " = " ^^ spliced roots e.txt
-  | Variant [] -> lhs ^^ text " = |"
-  | Variant constructors ->
-    group
-      (lhs
-       ^^ text " ="
-       ^^ nest
-            2
-            (concat
-               (List.mapi constructors ~f:(fun i c ->
-                  line
-                  ^^ (if i = 0 then if_break "| " else text "| ")
-                  ^^ constructor_decl roots c))))
-  | Record fields ->
-    lhs
-    ^^ text " = "
-    ^^ braces
-         (List.map fields ~f:(fun ((name : Name.t), t) ->
-            definition ~sep:" :" (text name.txt) (type_expr_doc roots t)))
+  let rec kind_doc : Type_decl.Kind.t -> _ = function
+    | Abstract -> lhs
+    | Malformed kind -> kind_doc kind
+    | Alias t when starts_with_splice t ->
+      definition lhs (parens (type_expr_doc roots t))
+    | Alias t -> definition lhs (type_expr_doc roots t)
+    | Splice e -> lhs ^^ text " = " ^^ spliced roots e.txt
+    | Variant [] -> lhs ^^ text " = |"
+    | Variant constructors ->
+      group
+        (lhs
+         ^^ text " ="
+         ^^ nest
+              2
+              (concat
+                 (List.mapi constructors ~f:(fun i c ->
+                    line
+                    ^^ (if i = 0 then if_break "| " else text "| ")
+                    ^^ constructor_decl roots c))))
+    | Record fields ->
+      lhs
+      ^^ text " = "
+      ^^ braces
+           (List.map fields ~f:(fun ((name : Name.t), t) ->
+              definition ~sep:" :" (text name.txt) (type_expr_doc roots t)))
+  in
+  kind_doc kind
 
 and toplevel roots ~indent (t : Toplevel.t) =
   match t.txt with
@@ -784,7 +789,7 @@ and toplevel roots ~indent (t : Toplevel.t) =
       (let_lhs roots "let" name params annot)
       (expr_doc roots rhs)
   | Type decl -> type_decl roots decl
-  | Exception (name, args) ->
+  | Exception (name, args) | Malformed_exception (name, args) ->
     text "exception " ^^ constructor_decl roots (name, args)
   | Module (name, []) -> text ("module " ^ name.txt ^ " = struct end")
   | Module (name, members) ->

@@ -5,6 +5,8 @@ module Error : sig
     | Source of Source_file.Error.t
     | Typecheck of Typecheck_error.t
   [@@deriving sexp_of]
+
+  val loc : t -> Loc.t
 end
 
 (** A program checked, with the interpreter that ran its toplevel splices and
@@ -21,17 +23,18 @@ val check
   -> ?output:(string -> unit)
   -> ?prelude:Syntax.Toplevel.t list
   -> Syntax.Program.t
-  -> (t, Typecheck_error.t) Result.t
+  -> (t, Typecheck.Failed.t) Result.t
 
 (** As [check], for the program of [files], each the module named after it
     (see [Source_file]). Toplevels of different files may refer to each other
-    in any order. *)
+    in any order. Files with syntax errors are checked as far as they parse;
+    the errors are of all files, by location. *)
 val check_files
   :  ?limits:Limits.t
   -> ?output:(string -> unit)
   -> ?prelude:Syntax.Toplevel.t list
   -> Source_file.t list
-  -> (t, Error.t) Result.t
+  -> (t, Error.t list) Result.t
 
 (** The modules of a program, for [check_modules]. *)
 module Module_group : sig
@@ -49,7 +52,7 @@ val check_modules
   -> ?output:(string -> unit)
   -> ?prelude:Syntax.Toplevel.t list
   -> Module_group.t list
-  -> (t, Typecheck_error.t) Result.t
+  -> (t, Typecheck.Failed.t) Result.t
 
 (** Checks [prelude] (eg. [Prelude.parse] of sources being edited) as
     [Typecheck.check_prelude] does. Its toplevels are not evaluated. *)
@@ -57,7 +60,7 @@ val check_prelude
   :  ?limits:Limits.t
   -> ?output:(string -> unit)
   -> Syntax.Toplevel.t list
-  -> (t, Typecheck_error.t) Result.t
+  -> (t, Typecheck.Failed.t) Result.t
 
 val checked : t -> Typecheck.Checked.t
 val interpreter : t -> Treewalk.t

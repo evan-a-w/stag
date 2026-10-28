@@ -8,10 +8,9 @@ let contents project path =
 
 let report project diagnostics =
   Out_channel.flush stdout;
-  List.iter diagnostics ~f:(fun diagnostic ->
-    eprintf
-      "%s%!"
-      (Diagnostic.to_string_hum ~contents:(contents project) diagnostic))
+  eprintf
+    "%s%!"
+    (Diagnostic.list_to_string_hum ~contents:(contents project) diagnostics)
 ;;
 
 let warn project diagnostic =

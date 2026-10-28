@@ -235,6 +235,30 @@ let main = print_endline (show 3)|}
     1 | (library (name core))
                        ^^^^
     Note: The program's module Core is here
+    File "derive/sexp.stag", line 3, characters 45-54:
+    3 |     (Stag.Code.erase .< Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.List.init x Core.Int.succ)) >.), Nil)
+                                                     ^^^^^^^^^
+    Error: Unbound module Core.Sexp (the prelude's module Core is shadowed by the program's Core)
+    File "core/stag", line 1, characters 15-19:
+    1 | (library (name core))
+                       ^^^^
+    Note: The program's module Core is here
+    File "derive/sexp.stag", line 3, characters 68-77:
+    3 |     (Stag.Code.erase .< Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.List.init x Core.Int.succ)) >.), Nil)
+                                                                            ^^^^^^^^^
+    Error: Unbound module Core.Sexp (the prelude's module Core is shadowed by the program's Core)
+    File "core/stag", line 1, characters 15-19:
+    1 | (library (name core))
+                       ^^^^
+    Note: The program's module Core is here
+    File "derive/sexp.stag", line 3, characters 108-116:
+    3 |     (Stag.Code.erase .< Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.List.init x Core.Int.succ)) >.), Nil)
+                                                                                                                    ^^^^^^^^
+    Error: Unbound module Core.Int (the prelude's module Core is shadowed by the program's Core)
+    File "core/stag", line 1, characters 15-19:
+    1 | (library (name core))
+                       ^^^^
+    Note: The program's module Core is here
     |}]
 ;;
 

@@ -83,19 +83,22 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
       expr body
     | Type { name = type_name; params = _; kind } ->
       name ~declaration:true Type type_name;
-      (match kind with
-       | Variant constructors ->
-         List.iter constructors ~f:(fun (constructor, args) ->
-           name ~declaration:true Constructor constructor;
-           List.iter args ~f:type_expr)
-       | Record fields ->
-         List.iter fields ~f:(fun (field, ty) ->
-           name ~declaration:true Field field;
-           type_expr ty)
-       | Alias ty -> type_expr ty
-       | Splice e -> expr e.txt
-       | Abstract -> ())
-    | Exception (exn, args) ->
+      let rec decl_kind : Syntax.Type_decl.Kind.t -> unit = function
+        | Variant constructors ->
+          List.iter constructors ~f:(fun (constructor, args) ->
+            name ~declaration:true Constructor constructor;
+            List.iter args ~f:type_expr)
+        | Record fields ->
+          List.iter fields ~f:(fun (field, ty) ->
+            name ~declaration:true Field field;
+            type_expr ty)
+        | Alias ty -> type_expr ty
+        | Splice e -> expr e.txt
+        | Abstract -> ()
+        | Malformed kind -> decl_kind kind
+      in
+      decl_kind kind
+    | Exception (exn, args) | Malformed_exception (exn, args) ->
       name ~declaration:true Constructor exn;
       List.iter args ~f:type_expr
     | Module (module_name, toplevels) ->
@@ -207,7 +210,7 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
         recurse expr)
     in
     match expr.txt with
-    | Lit _ | Expect _ -> ()
+    | Lit _ | Expect _ | Error -> ()
     | Var (path, annot) ->
       decl_path ~add ~kind:Kind.Value ~loc:expr.loc path;
       Option.iter annot ~f:type_expr

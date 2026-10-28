@@ -179,7 +179,7 @@ let%expect_test "the signature of a source of the prelude" =
       let root = Filename_unix.realpath root in
       let checkout = Option.value_exn (Stdlib_checkout.find (root ^/ "stag")) in
       match Stdlib_checkout.check ~limits:Limits.unlimited checkout with
-      | Error diagnostic -> print_s [%sexp (diagnostic : Diagnostic.t)]
+      | Error diagnostics -> print_s [%sexp (diagnostics : Diagnostic.t list)]
       | Ok { driver; prelude = _ } ->
         let signature = (Driver.checked driver).signature in
         List.iter

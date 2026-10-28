@@ -5,6 +5,11 @@ module Error = struct
     | Source of Source_file.Error.t
     | Typecheck of Typecheck_error.t
   [@@deriving sexp_of]
+
+  let loc = function
+    | Source error -> Source_file.Error.loc error
+    | Typecheck error -> error.loc
+  ;;
 end
 
 type t =
@@ -41,6 +46,7 @@ module Module_group = struct
             ( Let _
             | Type _
             | Exception _
+            | Malformed_exception _
             | Module_splice _
             | Include _
             | Expect_test _
@@ -158,17 +164,29 @@ let eval ?(limits = Limits.unlimited) t =
 ;;
 
 let check_files ?limits ?output ?prelude files =
-  let%bind.Result modules =
-    List.map files ~f:Source_file.parse
-    |> Result.all
-    |> Result.map_error ~f:(fun error -> Error.Source error)
+  let parsed = List.map files ~f:Source_file.parse_recovering in
+  let source_errors =
+    List.concat_map parsed ~f:snd
+    |> List.map ~f:(fun error -> Error.Source error)
   in
-  check_modules
-    ?limits
-    ?output
-    ?prelude
-    (List.map modules ~f:(fun file -> Module_group.File file))
-  |> Result.map_error ~f:(fun error -> Error.Typecheck error)
+  match Option.all (List.map parsed ~f:fst) with
+  | None -> Result.Error (Loc.sort_by source_errors ~f:Error.loc)
+  | Some modules ->
+    (match
+       check_modules
+         ?limits
+         ?output
+         ?prelude
+         (List.map modules ~f:(fun file -> Module_group.File file))
+     with
+     | Ok t when List.is_empty source_errors -> Ok t
+     | Ok _ -> Error (Loc.sort_by source_errors ~f:Error.loc)
+     | Error { errors; partial = _ } ->
+       Error
+         (Loc.sort_by
+            (source_errors
+             @ List.map errors ~f:(fun error -> Error.Typecheck error))
+            ~f:Error.loc))
 ;;
 
 let check_prelude ?(limits = Limits.unlimited) ?output prelude =
