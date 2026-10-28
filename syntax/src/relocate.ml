@@ -37,6 +37,9 @@ let decl_path (g : Decl_path.t) (w : Decl_path.t) =
   | Resolved name, Path path
     when String.equal (Prelude_path.to_string_hum name) (Path.to_string path) ->
     Some g
+  | Resolved name, Root path
+    when String.equal (Prelude_path.root_path name) (Path.to_string path) ->
+    Some g
   | _ -> same Decl_path.equal g w
 ;;
 

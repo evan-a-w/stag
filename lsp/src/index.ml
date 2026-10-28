@@ -77,12 +77,19 @@ module Syntax_at = struct
 
   let set table loc data = Hashtbl.set table ~key:(Span.of_loc loc) ~data
 
+  (* A [Resolved] one, of a list literal, is not written. *)
+  let set_constructor t loc (path : Syntax.Decl_path.t Located.t) =
+    match path.txt with
+    | Resolved _ -> ()
+    | Path _ | Root _ -> set t.constructors loc path
+  ;;
+
   let rec pattern t (p : Syntax.Pattern.t) =
     match p.txt with
     | Any | Var _ | Lit _ -> ()
     | Tuple ps -> List.iter ps ~f:(pattern t)
     | Construct (path, ps) ->
-      set t.constructors p.loc path;
+      set_constructor t p.loc path;
       List.iter ps ~f:(pattern t)
     | Record fields ->
       set t.fields p.loc (List.map fields ~f:fst);
@@ -119,7 +126,7 @@ module Syntax_at = struct
     | Quote e -> recurse e
     | Tuple es -> List.iter es ~f:recurse
     | Construct (path, es) ->
-      set t.constructors e.loc path;
+      set_constructor t e.loc path;
       List.iter es ~f:recurse
     | Record fields ->
       set t.fields e.loc (List.map fields ~f:fst);

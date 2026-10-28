@@ -54,6 +54,10 @@ let map (t : Toplevel.t) ~f =
   in
   let binding (n, t) = n, Option.map t ~f:type_expr in
   let rec pattern (p : Pattern.t) : Pattern.t =
+    match List_literal.map_pattern_items p ~f:pattern with
+    | Some p -> p
+    | None -> pattern_desc p
+  and pattern_desc (p : Pattern.t) : Pattern.t =
     let txt : Pattern.desc =
       match p.txt with
       | Any | Var _ | Lit _ -> p.txt
@@ -70,6 +74,10 @@ let map (t : Toplevel.t) ~f =
     { p with txt }
   in
   let rec expr locals (e : Expr.t) : Expr.t =
+    match List_literal.map_expr_items e ~f:(expr locals) with
+    | Some e -> e
+    | None -> expr_desc locals e
+  and expr_desc locals (e : Expr.t) : Expr.t =
     let expr' = expr in
     let expr = expr locals in
     let fields = List.map ~f:(fun (p, value) -> field p, expr value) in

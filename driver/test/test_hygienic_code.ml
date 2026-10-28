@@ -624,7 +624,7 @@ let e_let =
     (fun x -> x) (fun (y : .int) -> y)
     (App (Fun ((x ())) (Var x ())) (Fun ((y ((Con <int> ())))) (Var y ())))
     e_let:
-    let f (x : .option[.Gen.r]) (y : 'a) : .list['a] = .Cons (y, .Nil) in
+    let f (x : .option[.Gen.r]) (y : 'a) : .list['a] = [y] in
     (f : .option[.Gen.r] -> .int -> .list[.int])
     (Let f ((x ((Con <option> ((Ty (Con <Gen.r> ())))))) (y ((Var a))))
      ((Con <list> ((Ty (Var a)))))
