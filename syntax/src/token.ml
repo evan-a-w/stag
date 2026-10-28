@@ -44,6 +44,7 @@ type t =
   | Arrow
   | Star
   | Dot
+  | Root
   | Dot_lbrace (** [.{], substitutions of a splice *)
   | Dotdot
   | Underscore
@@ -120,6 +121,7 @@ let to_string = function
   | Arrow -> "->"
   | Star -> "*"
   | Dot -> "."
+  | Root -> "."
   | Dot_lbrace -> ".{"
   | Dotdot -> ".."
   | Underscore -> "_"
@@ -149,6 +151,7 @@ let ends_code : t -> bool = function
   | Of
   | Star
   | Dot
+  | Root
   | Backslash
   | Less
   | Let

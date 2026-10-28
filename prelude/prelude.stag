@@ -45,9 +45,16 @@ module Stag = struct
     let name = Intrinsic.field_ref_name
   end
 
-  (* What names a type, constructor or field (['r] is [Type_ref.t],
-     [Constructor_ref.t] or [Field_ref.t]): a path, resolved where the syntax
-     is spliced, or a ref. *)
+  (* A toplevel value, or a prim. Only [Code.erase] makes them. *)
+  module Value_ref = struct
+    type t
+
+    let name = Intrinsic.value_ref_name
+  end
+
+  (* What names a type, constructor, field or value (['r] is [Type_ref.t],
+     [Constructor_ref.t], [Field_ref.t] or [Value_ref.t]): a path, resolved
+     where the syntax is spliced, or a ref. *)
   module Path = struct
     type t['r] = Name of string | Ref of 'r
   end
@@ -138,7 +145,7 @@ module Stag = struct
   module Expr = struct
     type t =
       | Lit of Lit.t
-      | Var of string * option[Type_expr.t]
+      | Var of Path.t[Value_ref.t] * option[Type_expr.t]
       | App of t * t
       | Let of string * list[Binding.t] * option[Type_expr.t] * t * t
       | Fun of list[Binding.t] * t
@@ -159,7 +166,7 @@ module Stag = struct
       | Poly_variant of string * option[t]
       | Expect of string
 
-    let var name = Var (name, None)
+    let var name = Var (Path.Name name, None)
     let construct name args = Construct (Path.Name name, args)
     let int n = Lit (Lit.Int n)
     let string s = Lit (Lit.String s)
@@ -204,6 +211,13 @@ module Stag = struct
 
   module Program = struct
     type t = list[Toplevel.t]
+  end
+
+  module Code = struct
+    (* The syntax of the code: its free variables by name, and what it refers
+       to outside it (values, prims, types, constructors and fields) by
+       [Path.Ref], so it means the same wherever it is spliced. *)
+    let erase = Intrinsic.erase
   end
 
   (* [type ty] is the type [ty] as a value, of type [Type.t[ty]]: the

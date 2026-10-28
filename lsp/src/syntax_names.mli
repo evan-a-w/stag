@@ -27,7 +27,7 @@ module Occurrence : sig
     ; declaration : bool
     ; module_path : string list
       (** Of the module it is in, eg. [["Foo"; "A"]] in [a.stag] of library
-          [foo], to resolve [path] lexically. *)
+          [foo], to resolve [path] lexically: [[]] for a root path. *)
     }
   [@@deriving sexp_of]
 end

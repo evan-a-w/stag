@@ -16,3 +16,4 @@ module Phase_bench = Stag_driver.Phase_bench
 module Measure = Stag_measure
 module Format = Stag_driver.Format
 module Limits = Stag_common.Limits
+module Prelude = Stag_eval.Prelude

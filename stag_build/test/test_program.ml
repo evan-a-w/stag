@@ -205,3 +205,120 @@ let%expect_test "every target sees Core, and a library named core shadows it" =
     Note: The program's module Core is here
     |}]
 ;;
+
+(* A library named core shadows Core program-wide, so derivers must quote the
+   prelude's Core elsewhere: refs only help where the splice site shadows it. *)
+let%expect_test "a library named core shadows Core for derivers too" =
+  check
+    [ "derive/stag", "(library (name derive))"
+    ; ( "derive/sexp.stag"
+      , {|let of_int name =
+  Cons (Stag.Toplevel.let_ name (Cons ("x", Nil))
+    (Stag.Code.erase .< Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.List.init x Core.Int.succ)) >.), Nil)|}
+      )
+    ; "core/stag", "(library (name core))"
+    ; "core/list.stag", "let init n f = Nil"
+    ; "b/stag", "(executable (name b) (libraries derive core))"
+    ; ( "b/b.stag"
+      , {|include .~(Derive.Sexp.of_int "show")
+let main = print_endline (show 3)|}
+      )
+    ]
+    ~target:"b";
+  [%expect
+    {|
+    File "derive/sexp.stag", line 3, characters 24-33:
+    3 |     (Stag.Code.erase .< Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.List.init x Core.Int.succ)) >.), Nil)
+                                ^^^^^^^^^
+    Error: Unbound module Core.Sexp (the prelude's module Core is shadowed by the program's Core)
+    File "core/stag", line 1, characters 15-19:
+    1 | (library (name core))
+                       ^^^^
+    Note: The program's module Core is here
+    File "derive/sexp.stag", line 3, characters 45-54:
+    3 |     (Stag.Code.erase .< Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.List.init x Core.Int.succ)) >.), Nil)
+                                                     ^^^^^^^^^
+    Error: Unbound module Core.Sexp (the prelude's module Core is shadowed by the program's Core)
+    File "core/stag", line 1, characters 15-19:
+    1 | (library (name core))
+                       ^^^^
+    Note: The program's module Core is here
+    File "derive/sexp.stag", line 3, characters 68-77:
+    3 |     (Stag.Code.erase .< Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.List.init x Core.Int.succ)) >.), Nil)
+                                                                            ^^^^^^^^^
+    Error: Unbound module Core.Sexp (the prelude's module Core is shadowed by the program's Core)
+    File "core/stag", line 1, characters 15-19:
+    1 | (library (name core))
+                       ^^^^
+    Note: The program's module Core is here
+    File "derive/sexp.stag", line 3, characters 108-116:
+    3 |     (Stag.Code.erase .< Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.List.init x Core.Int.succ)) >.), Nil)
+                                                                                                                    ^^^^^^^^
+    Error: Unbound module Core.Int (the prelude's module Core is shadowed by the program's Core)
+    File "core/stag", line 1, characters 15-19:
+    1 | (library (name core))
+                       ^^^^
+    Note: The program's module Core is here
+    |}]
+;;
+
+(* The deriver refers to its library's modules relatively; its generated code
+   refers to them by ref, printed as root paths, so the program's own [Helper]
+   does not capture them. *)
+let%expect_test "a deriver's relative refs survive root modules of their names" =
+  check
+    [ "gen/stag", "(library (name gen))"
+    ; "gen/helper.stag", {|let describe n = Core.Int.to_string n|}
+    ; ( "gen/derive.stag"
+      , {|let show name =
+  Cons (Stag.Toplevel.let_ name (Cons ("x", Nil))
+    (Stag.Code.erase .< Helper.describe x >.), Nil)|}
+      )
+    ; "b/stag", "(executable (name b) (libraries gen))"
+    ; "b/helper.stag", {|let describe n = "the program's helper"|}
+    ; ( "b/b.stag"
+      , {|include .~(Gen.Derive.show "show")
+let main = print_endline (show 3)|}
+      )
+    ]
+    ~target:"b";
+  check
+    [ "gen/stag", "(library (name gen))"
+    ; "gen/helper.stag", {|let describe n = n|}
+    ; ( "gen/derive.stag"
+      , {|let bad name =
+  Cons (Stag.Toplevel.let_ name Nil
+    (Stag.Expr.App (Stag.Expr.int 0, Stag.Code.erase .< Helper.describe >.)), Nil)|}
+      )
+    ; "b/stag", "(executable (name b) (libraries gen))"
+    ; "b/helper.stag", {|let describe n = n|}
+    ; "b/b.stag", {|include .~(Gen.Derive.bad "bad")|}
+    ]
+    ~target:"b";
+  [%expect
+    {|
+    module Gen : sig
+      module Derive : sig
+        val show : string -> list[Stag.Toplevel.t]
+      end
+      module Helper : sig
+        val describe : int -> string
+      end
+    end
+    module B : sig
+      val show : int -> string
+      val main : unit
+    end
+    module Helper : sig
+      val describe : 'a -> string
+    end
+    ---
+    3
+    File "b/b.stag", line 1, characters 0-32:
+    1 | include .~(Gen.Derive.bad "bad")
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: In the declaration `let bad` generated by this splice: This expression has type int but an expression was expected of type '_a -> '_b
+    Note: The generated declaration is:
+      let bad = 0 .Gen.Helper.describe
+    |}]
+;;

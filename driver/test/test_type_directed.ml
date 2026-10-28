@@ -795,7 +795,9 @@ let ran = .~(upd spliced)
     -- evaluated at compile time
     (spliced
      (Code
-      (Let (ident v/18) (args ()) (generalized false)
+      (Let (ident v/18) (args ())
+       (result_annot ((Con (<N.r> @ t.stag:12:35-38) ()) @ t.stag:12:35-38))
+       (generalized false)
        (body
         (Record
          ((((type_name N.r) (name N.x) (index 0)) (Lit (Int 1) : int))
@@ -807,7 +809,9 @@ let ran = .~(upd spliced)
     (M.t (M.t (a 1) (b (N.r (x 2) (y true)))))
     (spliced
      (Code
-      (Let (ident v/18) (args ()) (generalized false)
+      (Let (ident v/18) (args ())
+       (result_annot ((Con (<N.r> @ t.stag:12:35-38) ()) @ t.stag:12:35-38))
+       (generalized false)
        (body
         (Record
          ((((type_name N.r) (name N.x) (index 0)) (Lit (Int 1) : int))
@@ -855,7 +859,8 @@ type s = {x : string}
     (N.v (N.r (x 1) (y true)))
     (a
      (Code
-      (Field (Var (Free N.v) : s) ((type_name s) (name x) (index 0)) : string)))
+      (Field (Var (Free_toplevel N.v) : s) ((type_name s) (name x) (index 0)) :
+       string)))
     ((Unification_error
       (Type_mismatch (TCon string ()) (TCon int ())
        (Base_types_not_equal string int)))

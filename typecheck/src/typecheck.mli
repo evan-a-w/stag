@@ -9,8 +9,13 @@ type t
     and the rest when it is [Treewalk.eval]ed. Idents are made by its stamps,
     so are unique among those of every program it checks. Its budget (see
     [Treewalk.set_limits]) is shared by every program checked with [t], and
-    toplevels it evaluates keep their values when [Treewalk.eval]ed. *)
-val create : ?interpreter:Treewalk.t -> unit -> t
+    toplevels it evaluates keep their values when [Treewalk.eval]ed. Programs
+    see [prelude], by default [Prelude.toplevels]. *)
+val create
+  :  ?interpreter:Treewalk.t
+  -> ?prelude:Syntax.Toplevel.t list
+  -> unit
+  -> t
 
 module Checked : sig
   type t =
@@ -53,6 +58,11 @@ end
     so that what uses it is not in error too, and splices whose code did not
     check are not run, generating nothing. *)
 val typecheck : t -> program:Syntax.Program.t -> (Checked.t, Failed.t) Result.t
+
+(** Checks the prelude itself, as [typecheck] does a program, all of its
+    declarations, not only those a program uses: its [signature] is the
+    prelude's. *)
+val check_prelude : t -> (Checked.t, Failed.t) Result.t
 
 (** The signature of the prelude ([Prelude]), which every program sees. *)
 val prelude_signature : t -> Signature.t

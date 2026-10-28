@@ -63,7 +63,7 @@ let check_all counts ~widths (gen : unit -> Gen.t) =
       counts
       ~widths
       ~round_trip:Round_trip.type_expr
-      ~print:Printer.type_expr
+      ~print:(fun ?width t -> Printer.type_expr ?width t)
       type_expr
   in
   let counts =
@@ -71,11 +71,16 @@ let check_all counts ~widths (gen : unit -> Gen.t) =
       counts
       ~widths
       ~round_trip:Round_trip.pattern
-      ~print:Printer.pattern
+      ~print:(fun ?width t -> Printer.pattern ?width t)
       pattern
   in
   let counts =
-    check counts ~widths ~round_trip:Round_trip.expr ~print:Printer.expr expr
+    check
+      counts
+      ~widths
+      ~round_trip:Round_trip.expr
+      ~print:(fun ?width t -> Printer.expr ?width t)
+      expr
   in
   check
     counts
@@ -98,8 +103,8 @@ let%expect_test "random syntax round trips" =
   print_s [%sexp (!counts : Counts.t)];
   [%expect
     {|
-    ((30 ((lines 469730) (over_width 234470)))
-     (80 ((lines 345248) (over_width 47994))))
+    ((30 ((lines 470864) (over_width 237157)))
+     (80 ((lines 347141) (over_width 49748))))
     |}]
 ;;
 
@@ -114,7 +119,7 @@ let%expect_test "deep random syntax round trips" =
   print_s [%sexp (!counts : Counts.t)];
   [%expect
     {|
-    ((30 ((lines 97707) (over_width 84270)))
-     (80 ((lines 91360) (over_width 61898))))
+    ((30 ((lines 97755) (over_width 84479)))
+     (80 ((lines 91514) (over_width 62516))))
     |}]
 ;;

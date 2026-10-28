@@ -140,7 +140,7 @@ module Expr = struct
 
   module Var = struct
     type t =
-      | Path of Syntax.Path.t * Syntax.Type_expr.t option
+      | Path of Syntax.Decl_path.t * Syntax.Type_expr.t option
       | Ref of Typed.Var_ref.t
   end
 
@@ -255,7 +255,12 @@ module Expr = struct
     | Error -> Error
   ;;
 
-  let generated_view ({ desc; ty = _; loc } : Typed.Expr.t) : View.t =
+  let annotated_args args annots =
+    List.map args ~f:(fun ident ->
+      Binder.Ident ident, List.Assoc.find annots ident ~equal:Typed.Ident.equal)
+  ;;
+
+  let rec generated_view ({ desc; ty = _; loc } : Typed.Expr.t) : View.t =
     let sub expr = Generated expr in
     let subs = List.map ~f:sub in
     let fields =
@@ -265,19 +270,17 @@ module Expr = struct
     | Lit lit -> Lit lit
     | Var var_ref -> Var (Ref var_ref)
     | App (f, x) -> App (sub f, sub x)
-    | Let { ident; args; generalized = _; body; in_ } ->
+    | Annotated (expr, _) -> generated_view expr
+    | Let { ident; args; annots; result_annot; generalized = _; body; in_ } ->
       Let
         { binder = Ident ident
-        ; args = List.map args ~f:(fun ident -> Binder.Ident ident, None)
-        ; annot = None
+        ; args = annotated_args args annots
+        ; annot = result_annot
         ; body = sub body
         ; in_ = sub in_
         }
-    | Fun { args; body } ->
-      Fun
-        { args = List.map args ~f:(fun ident -> Binder.Ident ident, None)
-        ; body = sub body
-        }
+    | Fun { args; annots; body } ->
+      Fun { args = annotated_args args annots; body = sub body }
     | Splice { code; subs = Explicit subs } ->
       Splice
         { code = sub code

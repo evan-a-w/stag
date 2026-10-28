@@ -5,11 +5,13 @@ module Kind = struct
     | Type
     | Constructor
     | Field
+    | Value
 
   let to_string = function
     | Type -> "type"
     | Constructor -> "constructor"
     | Field -> "field"
+    | Value -> "value"
   ;;
 end
 

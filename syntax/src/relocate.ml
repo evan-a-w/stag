@@ -156,7 +156,7 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
   | Lit a, Lit b -> Option.some_if (Lit.equal a b) g
   | Error, Error -> Some Error
   | Var (p, t), Var (p', t') ->
-    let* p = same Path.equal p p' in
+    let* p = same Decl_path.equal p p' in
     let+ t = option type_expr t t' in
     Expr.Var (p, t)
   | App (f, x), App (f', x') ->

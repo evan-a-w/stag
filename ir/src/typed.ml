@@ -95,6 +95,7 @@ module Var_ref = struct
     | Bound of Binder.t
     | Persistent of Binder.t
     | Free of string
+    | Free_toplevel of string
     | Prim of Prim.t
     | Intrinsic of Intrinsic.t
   [@@deriving sexp_of]
@@ -177,6 +178,20 @@ module Pattern = struct
   let rec sexp_of_t' t = Hum.typed (Desc.sexp_of_t sexp_of_t' t.desc) t.ty
   let sexp_of_t t = Hum.scoped (fun () -> sexp_of_t' t)
 
+  let rec idents t =
+    match t.desc with
+    | Any | Lit _ | Poly_variant (_, None) -> []
+    | Var ident -> [ ident ]
+    | Tuple ps | Construct (_, ps) -> List.concat_map ps ~f:idents
+    | Record fields -> List.concat_map fields ~f:(fun (_, p) -> idents p)
+    | Poly_record { fields; rest } ->
+      (match rest with
+       | Closed | Open -> []
+       | Bind ident -> [ ident ])
+      @ List.concat_map fields ~f:(fun (_, p) -> idents p)
+    | Poly_variant (_, Some p) -> idents p
+  ;;
+
   let rec is_irrefutable t =
     match t.desc with
     | Any | Var _ -> true
@@ -203,14 +218,18 @@ module Expr = struct
       | Let of
           { ident : Ident.t
           ; args : Ident.t list
+          ; annots : (Ident.t * Syntax.Type_expr.t) list [@sexp.list]
+          ; result_annot : Syntax.Type_expr.t option [@sexp.option]
           ; generalized : bool
           ; body : 'e
           ; in_ : 'e
           }
       | Fun of
           { args : Ident.t list
+          ; annots : (Ident.t * Syntax.Type_expr.t) list [@sexp.list]
           ; body : 'e
           }
+      | Annotated of 'e * Syntax.Type_expr.t
       | Splice of
           { code : 'e
           ; subs : 'e Subs.t
@@ -264,6 +283,7 @@ module Expr = struct
     | Splice { code; subs = Explicit subs } -> code :: snds subs
     | Splice { code; subs = Implicit _ } -> [ code ]
     | Quote e
+    | Annotated (e, _)
     | Fun { body = e; _ }
     | Field (e, _)
     | Poly_field (e, _)
@@ -290,7 +310,8 @@ module Expr = struct
     match t.desc with
     | Lit _ | Var _ | Type _ | Fun _ | Error _ -> true
     | Quote expr -> splices_are_values expr ~depth:1
-    | Let { ident; args; body; in_; generalized = _ } ->
+    | Annotated (e, _) -> is_value e
+    | Let { ident; args; body; in_; _ } ->
       binding_is_value ~ident ~args ~body && is_value in_
     | Toplevel_splice { expansion; code = _ } -> is_value expansion
     | App _ | Splice _ | Expect _ -> false
@@ -325,6 +346,7 @@ module Expr = struct
       splices_are_values expansion ~depth
     | Lit _
     | Var _
+    | Annotated _
     | App _
     | Let _
     | Fun _

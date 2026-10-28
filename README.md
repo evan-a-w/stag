@@ -167,6 +167,20 @@ brackets and indentation for `.stag` files, and a client for the language
 server `stag lsp` (formatting falls back to `stag fmt` if it cannot start).
 `stag.serverPath` sets the stag executable (default: `stag` on PATH).
 
+To install it:
+
+```sh
+cd editors/vscode
+nix shell nixpkgs#nodejs_22 -c sh -c 'npm ci && npm run package'
+code --install-extension stag-*.vsix --force
+```
+
+Then either put `stag` on PATH (`dune build @install && dune install`) or
+set `stag.serverPath` to `_build/default/driver/bin/main.exe` in this
+checkout, so that `dune build` updates it. After rebuilding, run "stag:
+Restart Language Server" from the command palette. Rerun the commands above
+when `editors/vscode` changes.
+
 `stag lsp` speaks the Language Server Protocol over stdin and stdout
 (`lsp/`). It supports:
 

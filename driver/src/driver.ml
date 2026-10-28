@@ -186,3 +186,11 @@ let check_files ?limits ?output files =
             (List.map errors ~f:(fun error -> Error.Typecheck error))
             ~compare:(Comparable.lift Loc.compare ~f:Error.loc)))
 ;;
+
+let check_prelude ?(limits = Limits.unlimited) ?output prelude =
+  let interpreter = create_interpreter ~limits ~output in
+  let%map.Result checked =
+    Typecheck.check_prelude (Typecheck.create ~interpreter ~prelude ())
+  in
+  { checked; interpreter; eval_order = [] }
+;;

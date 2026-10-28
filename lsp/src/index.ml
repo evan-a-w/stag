@@ -195,7 +195,7 @@ let local_binders t (program : Typed.Program.t) names idents =
 
 let last_name (path : Syntax.Decl_path.t) =
   match path with
-  | Path path -> List.last_exn (path :> string list)
+  | Path path | Root path -> List.last_exn (path :> string list)
   | Resolved name -> name
 ;;
 
@@ -292,6 +292,7 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
           | Local ident -> ident.name, Some (Target.Local ident)
           | Toplevel ident -> ident.name, Some (Value ident.name))
        | Free name -> name, None
+       | Free_toplevel name -> name, Some (Value name)
        | Prim prim -> Sexp.to_string (Prim.sexp_of_t prim), None
        | Intrinsic intrinsic -> Intrinsic.public_name intrinsic, None
      in
@@ -333,6 +334,7 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
      typed ();
      List.iter (cases @ exception_cases) ~f:(fun (p, _) ->
        pattern t ~syntax ~program p)
+   | Annotated _ -> ()
    | Lit _
    | App _
    | Splice _
@@ -440,7 +442,7 @@ let resolve_type t ~module_path path =
     Option.some_if (Hashtbl.mem t.types name) name)
 ;;
 
-let create ~groups ~(program : Typed.Program.t) ~expansions =
+let create ?(prelude = []) ~groups ~(program : Typed.Program.t) ~expansions () =
   let up_to_date =
     List.filter_map expansions ~f:(fun (expansion : Expansion.t) ->
       match expansion.status with
@@ -459,6 +461,12 @@ let create ~groups ~(program : Typed.Program.t) ~expansions =
     ; splices = Span.Hash_set.create ()
     }
   in
+  declarations
+    t
+    ~up_to_date
+    ~values:(String.Table.create ())
+    ~prefix:[ Prelude_path.root ]
+    prelude;
   let files = List.concat_map groups ~f:(files ~prefix:[]) in
   let values = String.Table.create () in
   List.iter files ~f:(fun (prefix, toplevel) ->

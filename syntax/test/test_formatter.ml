@@ -532,7 +532,7 @@ let t = (x (* c *)).y
     let rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr =
       (* in redundant paren *) xxxxxxxxxxxxxxxxxxxxxx
     let s = .~ (* b *) q
-    let t = x (* c *) .y
+    let t = x. (* c *) y
     |}]
 ;;
 

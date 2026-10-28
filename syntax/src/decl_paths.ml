@@ -6,12 +6,31 @@ module Namespace = struct
     | Type
     | Constructor
     | Field
+    | Value
 end
 
+let rec pattern_binders (p : Pattern.t) =
+  match p.txt with
+  | Any | Lit _ -> []
+  | Var name -> [ name ]
+  | Tuple ps | Construct (_, ps) -> List.concat_map ps ~f:pattern_binders
+  | Record fs -> List.concat_map fs ~f:(fun (_, p) -> pattern_binders p)
+  | Poly_variant (_, p) -> Option.value_map p ~default:[] ~f:pattern_binders
+  | Poly_record { fields; rest } ->
+    List.concat_map fields ~f:(fun (_, p) -> pattern_binders p)
+    @
+      (match rest with
+      | Bind name -> [ name.txt ]
+      | Closed | Open -> [])
+  | Exception p -> pattern_binders p
+;;
+
 let map (t : Toplevel.t) ~f =
-  let type_path = f Namespace.Type in
-  let constructor = f Constructor in
-  let field = f Field in
+  let type_path = f Namespace.Type ~locals:String.Set.empty in
+  let constructor = f Constructor ~locals:String.Set.empty in
+  let field = f Field ~locals:String.Set.empty in
+  let bind locals names = Set.union locals (String.Set.of_list names) in
+  let binding_names = List.map ~f:(fun ((n : Name.t), _) -> n.txt) in
   let rec type_expr (t : Type_expr.t) : Type_expr.t =
     let txt : Type_expr.desc =
       match t.txt with
@@ -50,22 +69,28 @@ let map (t : Toplevel.t) ~f =
     in
     { p with txt }
   in
-  let rec expr (e : Expr.t) : Expr.t =
+  let rec expr locals (e : Expr.t) : Expr.t =
+    let expr' = expr in
+    let expr = expr locals in
     let fields = List.map ~f:(fun (p, value) -> field p, expr value) in
     let poly_fields = List.map ~f:(fun (n, value) -> n, expr value) in
     let txt : Expr.desc =
       match e.txt with
       | Lit _ | Expect _ | Error -> e.txt
-      | Var (p, t) -> Var (p, Option.map t ~f:type_expr)
+      | Var (p, t) ->
+        Var
+          ( (f Value ~locals { txt = p; loc = e.loc }).txt
+          , Option.map t ~f:type_expr )
       | App (a, b) -> App (expr a, expr b)
       | Let (n, bs, t, value, body) ->
         Let
           ( n
           , List.map bs ~f:binding
           , Option.map t ~f:type_expr
-          , expr value
-          , expr body )
-      | Fun (bs, body) -> Fun (List.map bs ~f:binding, expr body)
+          , expr' (bind locals (n.txt :: binding_names bs)) value
+          , expr' (bind locals [ n.txt ]) body )
+      | Fun (bs, body) ->
+        Fun (List.map bs ~f:binding, expr' (bind locals (binding_names bs)) body)
       | Splice { expr = e; subs } ->
         Splice
           { expr = expr e
@@ -82,7 +107,10 @@ let map (t : Toplevel.t) ~f =
       | Record_update (e, fs) -> Record_update (expr e, fields fs)
       | Type t -> Type (type_expr t)
       | Match (e, cases) ->
-        Match (expr e, List.map cases ~f:(fun (p, e) -> pattern p, expr e))
+        Match
+          ( expr e
+          , List.map cases ~f:(fun (p, e) ->
+              pattern p, expr' (bind locals (pattern_binders p)) e) )
       | Poly_record fs -> Poly_record (poly_fields fs)
       | Poly_field (e, n) -> Poly_field (expr e, n)
       | Poly_extend (fs, e) -> Poly_extend (poly_fields fs, expr e)
@@ -96,7 +124,11 @@ let map (t : Toplevel.t) ~f =
     let txt : Toplevel.desc =
       match t.txt with
       | Let (n, bs, ty, e) ->
-        Let (n, List.map bs ~f:binding, Option.map ty ~f:type_expr, expr e)
+        Let
+          ( n
+          , List.map bs ~f:binding
+          , Option.map ty ~f:type_expr
+          , expr (String.Set.of_list (binding_names bs)) e )
       | Type { name; params; kind } ->
         let kind : Type_decl.Kind.t =
           match kind with
@@ -110,16 +142,24 @@ let map (t : Toplevel.t) ~f =
         Type { name; params; kind }
       | Exception (n, ts) -> Exception (n, List.map ts ~f:type_expr)
       | Module (n, ts) -> Module (n, List.map ts ~f:toplevel)
-      | Module_splice (n, e, expansion) -> Module_splice (n, expr e, expansion)
-      | Include (e, expansion) -> Include (expr e, expansion)
-      | Expect_test { name; body } -> Expect_test { name; body = expr body }
+      | Module_splice (n, e, expansion) ->
+        Module_splice (n, expr String.Set.empty e, expansion)
+      | Include (e, expansion) -> Include (expr String.Set.empty e, expansion)
+      | Expect_test { name; body } ->
+        Expect_test { name; body = expr String.Set.empty body }
       | Bench { name; param; body } ->
         Bench
           { name
           ; param =
               Option.map param ~f:(fun { name; args } ->
-                { Bench_param.name; args = List.map args ~f:expr })
-          ; body = expr body
+                { Bench_param.name
+                ; args = List.map args ~f:(expr String.Set.empty)
+                })
+          ; body =
+              expr
+                (String.Set.of_list
+                   (Option.to_list (Option.map param ~f:(fun p -> p.name.txt))))
+                body
           }
     in
     { t with txt }

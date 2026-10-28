@@ -5,6 +5,7 @@
  (inline_tests)
  (libraries
   stag_lsp
+  stag_eval
   stag_common
   stag_syntax
   jsonrpc

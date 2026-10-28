@@ -6,11 +6,17 @@ let rec strip_locs : Sexp.t -> Sexp.t = function
   | Atom _ as atom -> atom
 ;;
 
-(* [Decl_path.Resolved]s are rendered as [<name>], where [Printer] prints
-   [name], which parses as a [Path]. *)
+(* [Decl_path.Resolved]s are rendered as [<name>], where [Printer] prints the
+   root path naming [name], which parses as a [Decl_path.Root]. *)
 let rec without_resolved : Sexp.t -> Sexp.t = function
   | Atom a when String.is_prefix a ~prefix:"<" && String.is_suffix a ~suffix:">"
-    -> Atom (String.sub a ~pos:1 ~len:(String.length a - 2))
+    ->
+    let name = String.sub a ~pos:1 ~len:(String.length a - 2) in
+    Atom
+      ("."
+       ^ Option.value
+           (String.chop_prefix name ~prefix:Prelude_path.prim_prefix)
+           ~default:name)
   | Atom _ as atom -> atom
   | List sexps -> List (List.map sexps ~f:without_resolved)
 ;;
@@ -63,7 +69,7 @@ let check
 let type_expr ?widths =
   check
     ?widths
-    ~print:Printer.type_expr
+    ~print:(fun ?width t -> Printer.type_expr ?width t)
     ~parse:Parser.type_expr
     ~equal:Syntax.Type_expr.equal
     ~sexp_of:Syntax.Type_expr.sexp_of_t
@@ -72,7 +78,7 @@ let type_expr ?widths =
 let pattern ?widths =
   check
     ?widths
-    ~print:Printer.pattern
+    ~print:(fun ?width t -> Printer.pattern ?width t)
     ~parse:Parser.pattern
     ~equal:Syntax.Pattern.equal
     ~sexp_of:Syntax.Pattern.sexp_of_t
@@ -81,7 +87,7 @@ let pattern ?widths =
 let expr ?widths =
   check
     ?widths
-    ~print:Printer.expr
+    ~print:(fun ?width t -> Printer.expr ?width t)
     ~parse:Parser.expr
     ~equal:Syntax.Expr.equal
     ~sexp_of:Syntax.Expr.sexp_of_t

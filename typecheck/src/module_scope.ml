@@ -380,8 +380,9 @@ let in_scope (t : t) : Typecheck_error.In_scope.t =
        modules enclosing
      | Some _ | None -> [])
   in
-  let names kind =
-    List.concat_map (modules t) ~f:(fun module_ ->
+  let modules = modules t in
+  let names ?(modules = modules) kind =
+    List.concat_map modules ~f:(fun module_ ->
       Hashtbl.to_alist module_.members
       |> List.filter_map ~f:(fun ((kind', name), generated_by) ->
         Option.some_if
@@ -389,7 +390,42 @@ let in_scope (t : t) : Typecheck_error.In_scope.t =
           name))
     |> String.Set.of_list
   in
-  { types = names (Member Type); modules = names Module }
+  { types = names (Member Type)
+  ; modules = names Module
+  ; root_modules = names ~modules:[ List.last_exn modules ] Module
+  }
+;;
+
+(* The program's root module, which root paths are found from: past it are the
+   prelude and the builtin types. *)
+let root t =
+  let outside = t.module_.program.outside in
+  let rec go (t : t) =
+    match t.module_.enclosing with
+    | Some enclosing
+      when not
+             (Option.exists outside ~f:(fun outside ->
+                phys_equal outside.module_ enclosing.module_)) -> go enclosing
+    | Some _ | None -> { t with position = End }
+  in
+  go t
+;;
+
+(* Where a written path is found from, and its names. *)
+let start t (path : Decl_path.t) =
+  match path with
+  | Path names -> t, names
+  | Root names -> root t, names
+  | Resolved _ ->
+    raise_s [%message "Module_scope: a resolved path is not looked up"]
+;;
+
+(* [path] with the names [names], from where it is. *)
+let with_names (path : Decl_path.t) names : Decl_path.t =
+  match path with
+  | Path _ -> Path (Path.of_list_exn names)
+  | Root _ -> Root (Path.of_list_exn names)
+  | Resolved _ -> path
 ;;
 
 let within t error = Typecheck_error.within error ~in_scope:(lazy (in_scope t))
@@ -400,7 +436,7 @@ let cycle ?module_ (splice : splice) ~name ~loc =
   Typecheck_error.create
     ~loc
     (Declaration_splice_cycle
-       { name = Path.to_string name; module_; splice = splice.loc })
+       { name = Decl_path.to_string name; module_; splice = splice.loc })
 ;;
 
 (* Runs [splice], which is not running, adding what it generates to its
@@ -548,11 +584,12 @@ let with_note (error : Typecheck_error.Kind.t) ~blocked ~hidden
 
 (* The location of the module path [written] at the start of the path at
    [loc], if written without spaces as for [path]. *)
-let prefix_loc (loc : Loc.t) ~(path : Path.t) ~written =
-  let len = String.length (Path.to_string (Path.of_list_exn written)) in
+let prefix_loc (loc : Loc.t) ~(path : Decl_path.t) ~written =
+  let len = String.length (Decl_path.to_string (with_names path written)) in
   if
     loc.start.line = loc.stop.line
-    && loc.stop.offset - loc.start.offset = String.length (Path.to_string path)
+    && loc.stop.offset - loc.start.offset
+       = String.length (Decl_path.to_string path)
   then
     { loc with
       stop =
@@ -632,7 +669,7 @@ let rec find_member
       match rest with
       | [] -> unbound path, loc
       | _ :: _ ->
-        ( Typecheck_error.Kind.Unbound_module (Path.of_list_exn written)
+        ( Typecheck_error.Kind.Unbound_module (with_names path written)
         , prefix_loc loc ~path ~written )
     in
     if after_failed_include { module_; position = End }
@@ -675,8 +712,9 @@ end
 
 (* What [path] refers to in the program from [t], and the innermost include
    looked past to find its first name. *)
-let find_path t namespace (path : Path.t) ~loc ~unbound =
-  match (path :> string list) with
+let find_path t namespace (path : Decl_path.t) ~loc ~unbound =
+  let t, names = start t path in
+  match (names :> string list) with
   | [] -> assert false
   | [ name ] ->
     let%map.Result { scope; blocked } = find_scope t (Member namespace, name) in
@@ -708,16 +746,17 @@ let find_path t namespace (path : Path.t) ~loc ~unbound =
 
 (* The error for [path], whose first name is not found from [t] past
    [blocked]. *)
-let unbound_head t namespace (path : Path.t) ~loc ~unbound ~blocked =
+let unbound_head t namespace (path : Decl_path.t) ~loc ~unbound ~blocked =
+  let t, names = start t path in
   let member, kind, loc =
-    match (path :> string list), namespace with
+    match (names :> string list), namespace with
     | [], _ -> assert false
     | [ name ], _ -> (Member_kind.Member namespace, name), unbound path, loc
     | head :: _, Namespace.Value when Prim.is_module head ->
       (Module, head), unbound path, loc
     | head :: _, _ ->
       ( (Module, head)
-      , Typecheck_error.Kind.Unbound_module (Path.of_list_exn [ head ])
+      , Typecheck_error.Kind.Unbound_module (with_names path [ head ])
       , prefix_loc loc ~path ~written:[ head ] )
   in
   if after_failed_include t
@@ -757,7 +796,12 @@ let find_value t path ~loc : (Value.t, _) Result.t =
   let in_prelude =
     lazy (Option.is_some (Prelude_path.relative (canonical_name t "_")))
   in
-  match (path : Path.t :> string list) with
+  let names =
+    match (path : Decl_path.t) with
+    | Path names | Root names -> names
+    | Resolved _ -> raise_s [%message "Module_scope.find_value: resolved"]
+  in
+  match (names :> string list) with
   | "Prim" :: (_ :: _ as prim) when Lazy.force in_prelude ->
     (match Prim.find (Path.of_list_exn prim) with
      | Some prim -> Ok (Prim prim)
@@ -768,13 +812,14 @@ let find_value t path ~loc : (Value.t, _) Result.t =
      | Found _, Some splice -> Error (cycle splice ~name:path ~loc)
      | Unbound, blocked ->
        let intrinsic =
-         if Lazy.force in_prelude then Intrinsic.find path else None
+         if Lazy.force in_prelude then Intrinsic.find names else None
        in
-       (match Prim.find path, blocked, intrinsic, (path :> string list) with
+       (match Prim.find names, blocked, intrinsic, (path : Decl_path.t) with
         | Some _, Some splice, _, _ -> Error (cycle splice ~name:path ~loc)
         | Some prim, None, _, _ -> Ok (Prim prim)
         | None, None, Some intrinsic, _ -> Ok (Intrinsic intrinsic)
-        | None, None, None, [ _ ] -> Ok Unbound
+        | None, None, None, Path names
+          when List.length (names :> string list) = 1 -> Ok Unbound
         | None, _, _, _ ->
           Error (unbound_head t Value path ~loc ~unbound:not_in_scope ~blocked)))
 ;;
@@ -822,7 +867,29 @@ let splices t =
   splices t.module_
 ;;
 
-let path_from_splice (splice : splice) toplevels namespace name =
+let path_from_splice (splice : splice) toplevels namespace ~locals name =
+  let resolves (path : Decl_path.t) =
+    let found =
+      match (namespace : Namespace.t) with
+      | Value ->
+        (match find_value splice.scope path ~loc:splice.loc with
+         | Ok (Toplevel found) -> String.equal found name
+         | Ok (Prim prim) -> String.equal (Prim.canonical_name prim) name
+         | Ok (Intrinsic _ | Unbound) | Error _ -> false)
+      | Type | Constructor | Field ->
+        (match
+           find
+             splice.scope
+             namespace
+             path
+             ~loc:splice.loc
+             ~unbound:(fun path -> Unbound_type path)
+         with
+         | Ok found -> String.equal found name
+         | Error _ -> false)
+    in
+    Option.some_if found path
+  in
   let declared = Member.Hash_set.create () in
   let rec declare (toplevels : Toplevel.t list) =
     List.iter toplevels ~f:(fun toplevel ->
@@ -849,14 +916,12 @@ let path_from_splice (splice : splice) toplevels namespace name =
       | head :: _ -> Module, head
       | [] -> assert false
     in
-    let path = Path.of_list_exn names in
-    if Hash_set.mem declared head
+    if
+      Hash_set.mem declared head
+      || (List.length names = 1 && Set.mem locals (List.hd_exn names))
     then None
-    else (
-      match
-        find splice.scope namespace path ~loc:splice.loc ~unbound:(fun path ->
-          Unbound_type path)
-      with
-      | Ok found when String.equal found name -> Some path
-      | Ok _ | Error _ -> None))
+    else resolves (Path (Path.of_list_exn names)))
+  |> function
+  | Some path -> Some path
+  | None -> resolves (Root (Path.of_string (Prelude_path.root_path name)))
 ;;

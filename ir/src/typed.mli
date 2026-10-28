@@ -45,6 +45,9 @@ module Var_ref : sig
     | Free of string
     (** A free variable of the enclosing quote: its context entry of this
         name. *)
+    | Free_toplevel of string
+    (** A toplevel, by canonical name, as a free variable of the enclosing
+        quote (see modes.md): its context entry of that name. *)
     | Prim of Prim.t (** Usable at any level, like a persistent toplevel. *)
     | Intrinsic of Intrinsic.t (** As [Prim]. *)
   [@@deriving sexp_of]
@@ -128,6 +131,9 @@ module Pattern : sig
   (** Nominal records and constructors are refutable, even when their type has
       only one constructor. *)
   val is_irrefutable : t -> bool
+
+  (** The variables it binds, in order. *)
+  val idents : t -> Ident.t list
 end
 
 (** [ty] is the type of the node, instantiated where it is a variable. *)
@@ -152,14 +158,21 @@ module Expr : sig
       | Let of
           { ident : Ident.t
           ; args : Ident.t list
+          ; annots : (Ident.t * Syntax.Type_expr.t) list
+            (** The annotated [args], their annotations as written but for
+                type names, which are canonical ([Resolved]). Likewise
+                [result_annot] and [Fun]'s and [Annotated]'s. *)
+          ; result_annot : Syntax.Type_expr.t option
           ; generalized : bool
           ; body : 'e (** [ident] is bound in [body]. *)
           ; in_ : 'e
           }
       | Fun of
           { args : Ident.t list (** Non-empty. *)
+          ; annots : (Ident.t * Syntax.Type_expr.t) list
           ; body : 'e
           }
+      | Annotated of 'e * Syntax.Type_expr.t (** [(x : t)], of a [Var]. *)
       | Splice of
           { code : 'e (** At the level outside the splice. *)
           ; subs : 'e Subs.t

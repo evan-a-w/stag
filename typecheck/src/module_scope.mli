@@ -102,7 +102,8 @@ module Namespace : sig
     | Field
 end
 
-(** The canonical name [path] refers to from [t], forcing the splices it
+(** The canonical name the written path [path] refers to from [t], or from the
+    program's root module for a root path, forcing the splices it
     needs, the need located at [loc]. Errs with [unbound path] if the last name
     of [path] is not a member, [Unbound_module] if a module on the way is not,
     noting an include after [t] that generates its first name. Needing what a
@@ -112,9 +113,9 @@ end
 val find
   :  t
   -> Namespace.t
-  -> Syntax.Path.t
+  -> Syntax.Decl_path.t
   -> loc:Loc.t
-  -> unbound:(Syntax.Path.t -> Typecheck_error.Kind.t)
+  -> unbound:(Syntax.Decl_path.t -> Typecheck_error.Kind.t)
   -> (string, Typecheck_error.t) Result.t
 
 module Value : sig
@@ -122,19 +123,19 @@ module Value : sig
     | Toplevel of string (** By canonical name. *)
     | Prim of Prim.t
     | Intrinsic of Intrinsic.t (** Found only from within the prelude. *)
-    | Unbound (** A name, not a path. *)
+    | Unbound (** A name, not a path or a root path. *)
 end
 
 (** As [find] for a value, then a prim, found only where the program has
     nothing of its name: no value, or no module for a path. *)
 val find_value
   :  t
-  -> Syntax.Path.t
+  -> Syntax.Decl_path.t
   -> loc:Loc.t
   -> (Value.t, Typecheck_error.t) Result.t
 
 (** The error for the name [path] that [find_value] finds [Unbound]. *)
-val unbound_value : t -> Syntax.Path.t -> loc:Loc.t -> Typecheck_error.t
+val unbound_value : t -> Syntax.Decl_path.t -> loc:Loc.t -> Typecheck_error.t
 
 (** [error] with the types and modules in scope at [t] that shadow the
     prelude's, unless it has them: those of the modules enclosing [t] in the
@@ -148,10 +149,12 @@ val splices : t -> Splice.t list
 (** A shortest path naming the canonical [name] of [namespace] from anywhere in
     [toplevels], which [splice] generated: one resolving to [name] where
     [splice] is written, whose first name [toplevels] (and their modules) do
-    not declare, if any. *)
+    not declare, nor [locals] if it is a single name, else the root path of
+    [name] if it resolves to [name] there, if any. *)
 val path_from_splice
   :  Splice.t
   -> Syntax.Toplevel.t list
   -> Namespace.t
+  -> locals:String.Set.t
   -> string
-  -> Syntax.Path.t option
+  -> Syntax.Decl_path.t option

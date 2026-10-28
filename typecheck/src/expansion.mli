@@ -25,5 +25,9 @@ val status
   :  written:Syntax.Toplevel.t list
   -> Syntax.Toplevel.t list
   -> column:int
-  -> path:(Decl_paths.Namespace.t -> string -> Syntax.Path.t option)
+  -> path:
+       (Decl_paths.Namespace.t
+        -> locals:String.Set.t
+        -> string
+        -> Syntax.Decl_path.t option)
   -> Status.t

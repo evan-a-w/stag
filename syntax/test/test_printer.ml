@@ -738,7 +738,7 @@ let%expect_test "the project's sources round trip and are formatted" =
 
 let%expect_test "syntax the parser does not produce" =
   let e txt : Syntax.Expr.t = Located.create txt in
-  let x = e (Var (Syntax.Path.name "x", None)) in
+  let x = e (Var (Path (Syntax.Path.name "x"), None)) in
   let c = Located.create (Syntax.Decl_path.Path (Syntax.Path.name "C")) in
   let show expr =
     let printed = Printer.expr expr in
@@ -793,14 +793,14 @@ module N = .~((.< x >.))
     |}]
 ;;
 
-let%expect_test "resolved paths are printed as paths" =
+let%expect_test "resolved paths are printed as root paths" =
   let at txt = Located.create txt in
   let resolved name = at (Syntax.Decl_path.Resolved name) in
   let ty name args = at (Syntax.Type_expr.Con (resolved name, args)) in
   let int = ty "prelude.int" [] in
   let option = ty "prelude.option" [ Ty int ] in
   let t = ty "Gen.M.t" [] in
-  let x = at (Syntax.Expr.Var (Syntax.Path.name "x", None)) in
+  let x = at (Syntax.Expr.Var (Path (Syntax.Path.name "x"), None)) in
   let program : Syntax.Program.t =
     [ at
         (Syntax.Toplevel.Let
@@ -830,8 +830,37 @@ let%expect_test "resolved paths are printed as paths" =
   Round_trip.program program;
   [%expect
     {|
-    let f (r : option[int]) : Gen.M.t =
-      match x.Gen.M.field with Some {Gen.M.x = _} -> Gen.M.A (type Gen.M.t)
+    let f (r : .option[.int]) : .Gen.M.t =
+      match x.(.Gen.M.field) with .Some {.Gen.M.x = _} -> .Gen.M.A (type .Gen.M.t)
+    |}]
+;;
+
+let%expect_test "resolved paths with no root path" =
+  let var name =
+    Located.create (Syntax.Expr.Var (Syntax.Decl_path.Resolved name, None))
+  in
+  List.iter
+    [ "prelude.Core.Int.to_string"
+    ; "prelude.Prim.String.length"
+    ; "prelude.raise"
+    ; "prelude.Intrinsic.raise"
+    ; "Core.x"
+    ]
+    ~f:(fun name ->
+      printf
+        "%s: %s, %s\n"
+        name
+        (Printer.expr (var name))
+        (Printer.expr
+           ~root_modules:(String.Set.of_list [ "Core"; "String" ])
+           (var name)));
+  [%expect
+    {|
+    prelude.Core.Int.to_string: .Core.Int.to_string, <prelude.Core.Int.to_string>
+    prelude.Prim.String.length: .String.length, <prelude.String.length>
+    prelude.raise: .raise, .raise
+    prelude.Intrinsic.raise: <prelude.Intrinsic.raise>, <prelude.Intrinsic.raise>
+    Core.x: .Core.x, .Core.x
     |}]
 ;;
 

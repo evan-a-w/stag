@@ -1,7 +1,7 @@
 // Differential test of the grammar against the lexer (`stag dump-tokens`):
 // over the repository's .stag files, test/corpus.txt and random snippets,
-// the comments, strings, quoted strings, chars, ints, labels and type
-// variables must span the same bytes, the lexer's other tokens must be outside
+// the comments, strings, quoted strings, chars, ints, labels, type
+// variables and root paths' dots must span the same bytes, the lexer's other tokens must be outside
 // them, and the grammar must mark something invalid exactly when the lexer
 // fails (up to the lexer's error, after which the lexer reports nothing).
 const { execFile, execFileSync } = require("child_process");
@@ -34,6 +34,7 @@ const compared = new Set([
   "label",
   "tyvar",
   "weak_tyvar",
+  "root",
 ]);
 // Most specific first.
 const classOfScope = [
@@ -45,6 +46,7 @@ const classOfScope = [
   ["variable.other.enummember.label", "label"],
   ["entity.name.type.parameter.weak", "weak_tyvar"],
   ["entity.name.type.parameter", "tyvar"],
+  ["punctuation.accessor.root", "root"],
   ["invalid", "invalid"],
 ];
 const scopeClass = (scope) =>
@@ -100,6 +102,8 @@ function inputs() {
     "\"a\\",
     "\"a\\\n",
     "x \r y \t\r\n z",
+    ".x f .M.x r.x M.x (e).x [a].x {}.x \"s\".x x'.x _.x 1.x (.x) [.x] {.x}",
+    ">.x ..x .<.x>. .~.x .{.x} (* *).x (* *) .x x(* *).x \n.x \t.x .é .1 .`a",
   ];
   edgeCases.forEach((text, i) =>
     result.push({ name: `edge case ${i}: ${JSON.stringify(text)}`, text }),

@@ -81,13 +81,21 @@ end
 type t =
   { fresh : Fresh.t
   ; interpreter : Treewalk.t
+  ; prelude : Syntax.Toplevel.t list Lazy.t
   }
 
 let create
       ?(interpreter = Treewalk.create ~stamps:(Stamp_counter.create ()) ())
+      ?prelude
       ()
   =
-  { fresh = Fresh.create (); interpreter }
+  { fresh = Fresh.create ()
+  ; interpreter
+  ; prelude =
+      (match prelude with
+       | Some prelude -> Lazy.from_val prelude
+       | None -> Prelude.toplevels)
+  }
 ;;
 
 let lift ~loc result =
@@ -269,10 +277,11 @@ module Scope = struct
     |> report_if_error t
   ;;
 
-  let elaborate t annot =
+  let elaborate_resolved t annot =
     Type_env.elaborate t.program.type_env t.module_ t.annotation_vars annot
-    |> Result.map ~f:fst
   ;;
+
+  let elaborate t annot = elaborate_resolved t annot |> Result.map ~f:fst
 end
 
 (* Where a name is used, given its entry if it has one. *)
@@ -315,7 +324,7 @@ module Resolution = struct
       Unusable
         (Variable_used_at_wrong_level
            { name; var_level = entry.level; used_at = scope.level })
-    | None, None -> Unusable (Not_in_scope (Syntax.Path.of_string name))
+    | None, None -> Unusable (Not_in_scope (Path (Syntax.Path.of_string name)))
   ;;
 end
 
@@ -338,6 +347,16 @@ let report_duplicates scope (names : Syntax.Name.t list) ~error:kind =
      : String.Set.t)
 ;;
 
+module Function_type = struct
+  type t =
+    { args : (Typed.Ident.t * Type.ty) list
+    ; annots : (Typed.Ident.t * Syntax.Type_expr.t) list
+    ; result_annot : Syntax.Type_expr.t option
+    ; res_ty : Type.ty
+    ; ty : Type.ty
+    }
+end
+
 (* An annotation that fails to elaborate is reported, and ignored. *)
 let function_type
       t
@@ -353,27 +372,36 @@ let function_type
        | Name _ | Ident _ -> None))
     ~error:(fun name -> Duplicate_parameter name);
   let annot_type = function
-    | None -> Scope.fresh_ty t scope
+    | None -> Scope.fresh_ty t scope, None
     | Some annot ->
-      (match Scope.elaborate scope annot with
-       | Ok ty -> ty
+      (match Scope.elaborate_resolved scope annot with
+       | Ok (ty, resolved) -> ty, Some resolved
        | Error error ->
          Scope.report scope error;
-         Scope.fresh_ty t scope)
+         Scope.fresh_ty t scope, None)
   in
   let args =
-    List.map args ~f:(fun (binder, annot) -> binder, annot_type annot)
+    List.map args ~f:(fun (binder, annot) ->
+      let ty, resolved = annot_type annot in
+      binder, ty, resolved)
   in
-  let res_ty = annot_type annot in
+  let res_ty, result_annot = annot_type annot in
   let ty =
-    List.fold_right args ~init:res_ty ~f:(fun (_, arg_ty) ty ->
+    List.fold_right args ~init:res_ty ~f:(fun (_, arg_ty, _) ty ->
       Type.TArrow (arg_ty, ty))
   in
-  let args =
-    List.map args ~f:(fun (binder, ty) ->
-      Program_env.bind scope.program binder ty ~level:scope.level, ty)
+  let args, annots =
+    List.map args ~f:(fun (binder, ty, resolved) ->
+      let ident = Program_env.bind scope.program binder ty ~level:scope.level in
+      (ident, ty), Option.map resolved ~f:(fun resolved -> ident, resolved))
+    |> List.unzip
   in
-  args, res_ty, ty
+  { Function_type.args
+  ; annots = List.filter_opt annots
+  ; result_annot
+  ; res_ty
+  ; ty
+  }
 ;;
 
 let constructor_ref (constructor : Type_env.Constructor.t) =
@@ -420,7 +448,7 @@ module Known = struct
       (match (path :> string list) with
        | [ name ] -> Some name
        | _ -> None)
-    | { txt = Resolved _; loc = _ } -> None
+    | { txt = Root _ | Resolved _; loc = _ } -> None
   ;;
 
   let unqualified_field : Source.Field.t -> string option = function
@@ -954,7 +982,7 @@ end
 
 (* [name] is the context entry the variable is provided as, if it becomes a
    free variable of the quote: a local's name or a toplevel's canonical name. *)
-let resolution_type t (scope : Scope.t) ~name ~loc : Resolution.t -> _
+let resolution_type t (scope : Scope.t) ~name ~toplevel ~loc : Resolution.t -> _
   = function
   | Local entry ->
     Ok (Scope.instantiate t scope entry.scheme, Typed.Var_ref.Bound entry.binder)
@@ -970,7 +998,7 @@ let resolution_type t (scope : Scope.t) ~name ~loc : Resolution.t -> _
       Unify.present_entry t ~row:quote.context ~name ~rank:quote.outside.rank
       |> lift ~loc
     in
-    ty, Typed.Var_ref.Free name
+    ty, if toplevel then Typed.Var_ref.Free_toplevel name else Free name
   | Unusable kind -> error ~loc kind
 ;;
 
@@ -1041,63 +1069,96 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) =
   Treewalk.add_scc program.interpreter scc
 ;;
 
-let rec var_type t (scope : Scope.t) ~(path : Syntax.Path.t) ~loc =
+let intrinsic_type t scope intrinsic =
+  Intrinsic.ty
+    intrinsic
+    ~var:(fun () -> Scope.fresh_ty t scope)
+    ~row:(fun () -> Scope.fresh_row t scope)
+;;
+
+let rec var_type t (scope : Scope.t) ~(path : Syntax.Decl_path.t) ~loc =
   let resolve ~name entry =
-    resolution_type t scope ~name ~loc (Resolution.of_entry scope ~name entry)
-  in
-  let prim prim = Ok (Prim.ty prim, Typed.Var_ref.Prim prim) in
-  let intrinsic intrinsic =
-    Ok
-      ( Intrinsic.ty intrinsic ~var:(fun () -> Scope.fresh_ty t scope)
-      , Typed.Var_ref.Intrinsic intrinsic )
+    resolution_type
+      t
+      scope
+      ~name
+      ~toplevel:false
+      ~loc
+      (Resolution.of_entry scope ~name entry)
   in
   let local =
-    match (path :> string list) with
-    | [ name ] ->
-      Env.find scope.locals name |> Option.map ~f:(fun entry -> name, entry)
-    | _ -> None
+    match path with
+    | Path path ->
+      (match (path :> string list) with
+       | [ name ] ->
+         Env.find scope.locals name |> Option.map ~f:(fun entry -> name, entry)
+       | _ -> None)
+    | Root _ | Resolved _ -> None
   in
   match local with
   | Some (name, entry) -> resolve ~name (Some entry)
   | None ->
     (match%bind.Result Module_scope.find_value scope.module_ path ~loc with
      | Toplevel name ->
-       let%bind.Result entry =
-         toplevel_entry t scope (Program_env.toplevel scope.program name) ~loc
-       in
-       resolve ~name (Some entry)
-     | Prim p -> prim p
-     | Intrinsic i -> intrinsic i
+       toplevel_type t scope (Program_env.toplevel scope.program name) ~loc
+     | Prim prim -> Ok (Prim.ty prim, Typed.Var_ref.Prim prim)
+     | Intrinsic intrinsic ->
+       Ok (intrinsic_type t scope intrinsic, Typed.Var_ref.Intrinsic intrinsic)
      | Unbound ->
        (match scope.quote with
-        | Some _ -> resolve ~name:(Syntax.Path.to_string path) None
+        | Some _ -> resolve ~name:(Syntax.Decl_path.to_string path) None
         | None -> Error (Module_scope.unbound_value scope.module_ path ~loc)))
+
+and toplevel_type t scope (toplevel : Toplevel.t) ~loc =
+  let%bind.Result entry = toplevel_entry t scope toplevel ~loc in
+  let name = toplevel.ident.name in
+  resolution_type
+    t
+    scope
+    ~name
+    ~toplevel:true
+    ~loc
+    (Resolution.of_entry scope ~name (Some entry))
+
+(* A [Stag.Value_ref.t]'s canonical name, resolved where the code it was
+   erased from was checked, so not looked up in [scope]. *)
+and resolved_value_type t (scope : Scope.t) name ~loc =
+  match
+    Prim.of_canonical_name name, Program_env.find_toplevel scope.program name
+  with
+  | Some prim, _ -> Ok (Prim.ty prim, Typed.Var_ref.Prim prim)
+  | None, Some toplevel -> toplevel_type t scope toplevel ~loc
+  | None, None -> error ~loc (Not_in_scope (Path (Syntax.Path.of_string name)))
 
 (* Generated code's variables are already resolved, so are found by binder
    rather than by name, which may be shadowed. *)
 and var_ref_type t (scope : Scope.t) (var_ref : Typed.Var_ref.t) ~loc =
-  let resolve ~name entry =
+  let resolve ~name ~toplevel entry =
     resolution_type
       t
       scope
       ~name
+      ~toplevel
       ~loc
       (Resolution.of_entry scope ~name (Some entry))
   in
   let not_in_scope name =
-    error ~loc (Not_in_scope (Syntax.Path.of_string name))
+    error ~loc (Not_in_scope (Path (Syntax.Path.of_string name)))
   in
   match var_ref with
   | Prim prim -> Ok (Prim.ty prim, var_ref)
-  | Intrinsic intrinsic ->
-    Ok (Intrinsic.ty intrinsic ~var:(fun () -> Scope.fresh_ty t scope), var_ref)
-  | Free name ->
+  | Intrinsic intrinsic -> Ok (intrinsic_type t scope intrinsic, var_ref)
+  | (Free name | Free_toplevel name) as var_ref ->
     (match scope.quote with
      | Some quote ->
        resolution_type
          t
          scope
          ~name
+         ~toplevel:
+           (match var_ref with
+            | Free_toplevel _ -> true
+            | _ -> false)
          ~loc
          (Outside_quote { quote; usable = None; unusable = None })
      | None -> not_in_scope name)
@@ -1109,10 +1170,10 @@ and var_ref_type t (scope : Scope.t) (var_ref : Typed.Var_ref.t) ~loc =
         (Program_env.toplevel scope.program ident.name)
         ~loc
     in
-    resolve ~name:ident.name entry
+    resolve ~name:ident.name ~toplevel:true entry
   | Bound (Local ident as binder) | Persistent (Local ident as binder) ->
     (match Env.find_binder scope.locals binder ~name:ident.name with
-     | Some entry -> resolve ~name:ident.name entry
+     | Some entry -> resolve ~name:ident.name ~toplevel:false entry
      | None ->
        (match Program_env.embedded scope.program ident with
         | Some info ->
@@ -1187,7 +1248,7 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
     ; generated = toplevel.generated
     }
   in
-  let args, res_ty, ty =
+  let { Function_type.args; res_ty; ty; annots = _; result_annot = _ } =
     function_type
       t
       scope
@@ -1288,14 +1349,24 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
          (Type resolved)
          (TCon (Prelude_path.canonical "Stag.Type.t", [ ATy elaborated ])))
   | Var (Path (path, annot)) ->
-    (match var_type t scope ~path ~loc with
+    (match
+       match path with
+       | Path _ | Root _ -> var_type t scope ~path ~loc
+       | Resolved name -> resolved_value_type t scope name ~loc
+     with
      | Error error -> fail error
      | Ok (ty, var_ref) ->
-       Option.iter annot ~f:(fun annot ->
-         match Scope.elaborate scope annot with
-         | Ok annot -> Scope.unify t scope ~ty1:ty ~ty2:annot ~loc
-         | Error error -> Scope.report scope error);
-       node (Var var_ref) ty)
+       let var = node (Var var_ref) ty in
+       (match annot with
+        | None -> var
+        | Some annot ->
+          (match Scope.elaborate_resolved scope annot with
+           | Ok (annot_ty, resolved) ->
+             Scope.unify t scope ~ty1:ty ~ty2:annot_ty ~loc;
+             node (Annotated (var, resolved)) ty
+           | Error error ->
+             Scope.report scope error;
+             var)))
   | Var (Ref var_ref) ->
     (match var_ref_type t scope var_ref ~loc with
      | Error error -> fail error
@@ -1308,7 +1379,9 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
     node (App (f, x)) b
   | Let { binder; args; annot; body; in_ } ->
     let inner = { scope with rank = scope.rank + 1 } in
-    let arg_types, res_ty, ty = function_type t inner ~args ~annot in
+    let { Function_type.args = arg_types; annots; result_annot; res_ty; ty } =
+      function_type t inner ~args ~annot
+    in
     let ident = Program_env.bind scope.program binder ty ~level:scope.level in
     let name = Source.Binder.name binder in
     let body =
@@ -1329,11 +1402,15 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
         [ name, Scope.entry scope ~ident ~scheme:ty ~persistent ]
         ~f:(fun () -> expr_type t scope ~expr:in_ ?expected)
     in
-    node (Let { ident; args; body; in_; generalized }) in_.ty
+    node
+      (Let { ident; args; annots; result_annot; body; in_; generalized })
+      in_.ty
   | Fun { args; body } ->
-    let args, res_ty, ty = function_type t scope ~args ~annot:None in
+    let { Function_type.args; annots; result_annot = _; res_ty; ty } =
+      function_type t scope ~args ~annot:None
+    in
     let body = check_body t scope ~args ~res_ty ~body in
-    node (Fun { args = List.map args ~f:fst; body }) ty
+    node (Fun { args = List.map args ~f:fst; annots; body }) ty
   | Quote expr ->
     let quote =
       { Scope.id = Fresh.id t
@@ -1702,7 +1779,16 @@ and expand t (scope : Scope.t) ~code ~subs ~ty ~loc =
         check_expr t scope ~expr:(Source.Expr.Generated generated) ~ty)
   in
   List.fold_right bindings ~init:expansion ~f:(fun (ident, body) in_ ->
-    { Typed.Expr.desc = Let { ident; args = []; generalized = false; body; in_ }
+    { Typed.Expr.desc =
+        Let
+          { ident
+          ; args = []
+          ; annots = []
+          ; result_annot = None
+          ; generalized = false
+          ; body
+          ; in_
+          }
     ; ty = in_.ty
     ; loc
     })
@@ -1902,12 +1988,30 @@ and substitute_explicitly t scope ~context ~subs ~loc =
           match expr with
           | None ->
             let%map.Result ty, var_ref =
-              var_type t scope ~path:(Syntax.Path.of_string name) ~loc:name_loc
+              var_type
+                t
+                scope
+                ~path:(Path (Syntax.Path.of_string name))
+                ~loc:name_loc
             in
             { Typed.Expr.desc = Var var_ref; ty; loc = name_loc }
           | Some expr -> Ok (expr_type t scope ~expr)
         in
         (name, expr) :: acc)
+  in
+  (* Toplevels, free by canonical name, which no sub can name. *)
+  let rec toplevels (row : Type.row) =
+    match Type.canonical_row row with
+    | RExtend (name, presence, _, rest) ->
+      (match Type.canonical_presence presence with
+       | (Present | PVar _) when String.mem name '.' -> name :: toplevels rest
+       | Present | PVar _ | Absent -> toplevels rest)
+    | REmpty | RVar _ -> []
+  in
+  let%bind.Result provided =
+    List.fold_result (toplevels context) ~init:provided ~f:(fun acc name ->
+      let%map.Result ty, var_ref = resolved_value_type t scope name ~loc in
+      (name, { Typed.Expr.desc = Var var_ref; ty; loc }) :: acc)
   in
   let row =
     List.fold provided ~init:Type.REmpty ~f:(fun rest (name, expr) ->
@@ -1975,7 +2079,7 @@ let check_bench t program module_ ~name ~param ~body ~loc ~generated =
     ; generated = Option.is_some generated
     }
   | Some { name = param; args } ->
-    let params, res_ty, (_ : Type.ty) =
+    let { Function_type.args = params; res_ty; _ } =
       function_type t scope ~args:[ Source.Binder.Name param, None ] ~annot:None
     in
     let ident, param_ty = List.hd_exn params in
@@ -2011,14 +2115,16 @@ let expansion_status splice generated =
           ~written:written.txt
           generated
           ~column:toplevel.loc.start.col
-          ~path:(fun namespace name ->
+          ~path:(fun namespace ~locals name ->
             Module_scope.path_from_splice
               splice
               generated
               (match namespace with
                | Type -> Type
                | Constructor -> Constructor
-               | Field -> Field)
+               | Field -> Field
+               | Value -> Value)
+              ~locals
               name) )
   | _ -> None
 ;;
@@ -2202,7 +2308,7 @@ let invalid_prelude error =
 
 (* The prelude, outside the program's root module, sees the builtin types as
    the program does. *)
-let add_prelude (program : Program_env.t) =
+let add_prelude (program : Program_env.t) toplevels =
   let builtins =
     Module_scope.create_root
       ~types:builtin_names
@@ -2218,10 +2324,10 @@ let add_prelude (program : Program_env.t) =
       ~types:[]
       ~declare:(declare program ~in_prelude:true)
       ~force:no_splices
-      ~report:invalid_prelude
+      ~report:(Program_env.report program)
       ()
   in
-  Module_scope.add prelude (force Prelude.toplevels);
+  Module_scope.add prelude toplevels;
   prelude
 ;;
 
@@ -2301,16 +2407,6 @@ let root t program_env ~enclosing =
   root
 ;;
 
-let prelude_signature { fresh = t; interpreter } =
-  let program_env = program_env t interpreter in
-  let prelude = add_prelude program_env in
-  let (_ : Module_scope.t) = root t program_env ~enclosing:prelude in
-  let (_ : _ list) = check_declarations t program_env prelude in
-  match program_env.errors with
-  | [] -> signature program_env prelude ~complete:true
-  | error :: _ -> invalid_prelude error
-;;
-
 (* Each once, by location, then in the order reported. A splice blocking one
    name its code uses blocks the others too, and doesn't run, so the first is
    enough. *)
@@ -2333,13 +2429,25 @@ let sorted_errors errors ~root =
        |> Result.is_ok)
 ;;
 
-let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
+let prelude_and_root t program_env =
+  let prelude = add_prelude program_env (force t.prelude) in
+  prelude, root t.fresh program_env ~enclosing:prelude
+;;
+
+let prelude_signature ({ fresh; interpreter; prelude = _ } as t) =
+  let program_env = program_env fresh interpreter in
+  let prelude, (_ : Module_scope.t) = prelude_and_root t program_env in
+  let (_ : _ list) = check_declarations fresh program_env prelude in
+  match program_env.errors with
+  | [] -> signature program_env prelude ~complete:true
+  | error :: _ -> invalid_prelude error
+;;
+
+(* Checks [module_]'s declarations, then its expect tests and benches. *)
+let check_module t (program_env : Program_env.t) module_
   : (Checked.t, Failed.t) Result.t
   =
-  let program_env = program_env t interpreter in
-  let root = root t program_env ~enclosing:(add_prelude program_env) in
-  Module_scope.add root program;
-  let deferred = check_declarations t program_env root in
+  let deferred = check_declarations t program_env module_ in
   let checked =
     List.map deferred ~f:(fun (module_, (kind : Deferred.t), loc, generated) ->
       match kind with
@@ -2351,10 +2459,10 @@ let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
           (check_bench t program_env module_ ~name ~param ~body ~loc ~generated))
   in
   let expect_tests, benches = List.partition_map checked ~f:Fn.id in
-  let errors = sorted_errors program_env.errors ~root in
+  let errors = sorted_errors program_env.errors ~root:module_ in
   let checked =
     { Checked.signature =
-        signature program_env root ~complete:(List.is_empty errors)
+        signature program_env module_ ~complete:(List.is_empty errors)
     ; program =
         { sccs = Queue.to_list program_env.sccs
         ; expect_tests
@@ -2362,10 +2470,23 @@ let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
         ; declaration_splices = Queue.to_list program_env.declaration_splices
         ; ident_info = program_env.ident_info
         }
-    ; expansions = expansions root
+    ; expansions = expansions module_
     }
   in
   match errors with
   | [] -> Ok checked
   | errors -> Error { Failed.errors; partial = checked }
+;;
+
+let typecheck ({ fresh; interpreter; prelude = _ } as t) ~program =
+  let program_env = program_env fresh interpreter in
+  let (_ : Module_scope.t), root = prelude_and_root t program_env in
+  Module_scope.add root program;
+  check_module fresh program_env root
+;;
+
+let check_prelude ({ fresh; interpreter; prelude = _ } as t) =
+  let program_env = program_env fresh interpreter in
+  let prelude, (_ : Module_scope.t) = prelude_and_root t program_env in
+  check_module fresh program_env prelude
 ;;

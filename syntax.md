@@ -28,6 +28,15 @@ node, for good errors.
   variables.
 - Paths: `M.N.x`, `M.t`, `M.C`. A path is a sequence of capitalized names
   followed by the final name; `r.x` with lowercase `r` is a field access.
+- Root paths: `.M.N.x`, `.int`, `.Some`: a path from the root scope (see
+  Root paths). A `.` directly followed by a letter or `_` is the root token,
+  unless the character directly before it (nothing between, not even a
+  comment) can end an atom: a letter, digit, `_`, `'`, `)`, `]`, `}`, `"` or
+  `.`; then it is a `.` (a path's or a field access's). So `f .M.x`,
+  `(.int)`, `.~.Gen.c`, `{.M.x = 1}`, `list[.option[int]]` and
+  `(* c *).x` start root paths, and `r.x`, `M.x`, `(e).x`, `"s".x` do not.
+  The longest tokens `.<` `.~` `..` `.{` are unaffected (`..x` is `..` then
+  `x`).
 - Keywords: `let rec in match with fun exception type of module struct end`,
   `true false`.
   `rec` is reserved, as lets are always recursive.
@@ -102,7 +111,7 @@ Precedence, loosest first:
 | `C e`, `` `A e ``, `type t`               | right (`C D x`)    |
 | application `f x`                          | left               |
 | splice `.~e`, `.~e.{...}`                  | prefix             |
-| `e.x`, `e.M.x`, `` e.`x ``, `` e \ `x ``   | left, postfix      |
+| `e.x`, `e.M.x`, `e.(.M.x)`, `` e.`x ``, `` e \ `x `` | left, postfix |
 
 `let`, `match` and `fun` may also start a tuple component (`a, let x = 1 in x, y` is
 `(a, let x = 1 in (x, y))`), but not an argument (`f (fun x -> x)`). Restriction is postfix like field access, so
@@ -122,6 +131,23 @@ the typechecker from the declaration (and so also for generated code: `C` of
 polymorphic variant has at most one argument, so `` `A (a, b) `` is always
 `` `A `` of a tuple. A parenthesized expression's location includes its
 parentheses.
+
+### Root paths
+
+A root path, `.M.x`, names a declaration from the root scope, which
+declarations of the program's modules, local or not, never shadow. The root
+scope holds the program's root modules (its files, or stag-build's libraries
+and an executable's files), then the prelude's root names that none of them
+shadows, then the prims' (`.String.length`, unless the program has a root
+module `String`) and builtin types (`.int`). A root path may name a value,
+constructor, field or type, through modules, wherever its path may be
+written: `.raise (.Failure "x")`, `match o with .Some x -> x`,
+`{.A.M.x = 1}`, `{r with .A.M.x = 1}`, `{.A.M.x = n}` in a pattern,
+`x : .option[.int]`. A field access by a root path is parenthesized, `r.(.A.M.x)`
+(only a root path may be). Binders are names, never root paths. In a file
+`a.stag`, `.A.x` is its toplevel `x` from anywhere in it, even under a local
+`x` or a module of its own `A`; `.x` alone is unbound unless a root module or
+the prelude declares `x`.
 
 `type` takes an atomic type: a name, possibly applied (`type M.t[int]`), or a
 parenthesized type (`type (int -> t)`); as an argument it is parenthesized
@@ -263,7 +289,8 @@ Bool.not : bool -> bool            Bool.equal : bool -> bool -> bool
 
 They are outside the program's root module, so the program's own definitions
 shadow them: a toplevel `print_int` hides the prim, and a module `Int` hides
-all of `Int.*`. Division by zero, out of bounds indices, unparsable
+all of `Int.*`. A root path still names them (`.Int.add`, `.print_int`),
+unless a root module of the program (eg. a file `int.stag`) shadows it. Division by zero, out of bounds indices, unparsable
 `Int.of_string_exn` and invalid `Char.of_code` raise exceptions (see
 Exceptions).
 
@@ -285,12 +312,17 @@ module Stag = struct ... end      (* the syntax as data, see below *)
 module Core = struct ... end      (* the core library, see below *)
 ```
 
-Its toplevels are checked only when used. Its names have no syntax of their
-own: once shadowed (eg. by a file `stag.stag`), the prelude's are not
-reachable, and an unbound path through the shadowing module says so.
-Messages and signatures write the prelude's names unqualified (`option[int]`),
-except where the program shadows them, as `prelude.option[int]`; its
-locations are in the file `<prelude>`. In a message, a prelude type or module
+Its toplevels are checked only when used. Its names are root paths too
+(`.option`, `.Core.Int.to_string`), reachable under local declarations of
+their names, until a root module of the program shadows them (eg. a file
+`stag.stag` shadows `.Stag`): then the prelude's are not reachable, and an
+unbound path through the shadowing module says so. Messages and signatures
+write the prelude's names unqualified (`option[int]`), except where the
+program shadows them, as their root path, `.option[int]`; where a root module
+shadows them, no syntax names them and they are written `prelude.Core.Sexp.t`
+(`<prelude.Core.Sexp.t>` for a ref in printed code, which does not parse).
+The program's shadowed names are written likewise, as their root path
+(`.A.t`). Its locations are in the file `<prelude>`. In a message, a prelude type or module
 is shadowed if a type or module of its name is declared in a module enclosing
 the error, other than by an include (so that it does not depend on which includes
 checking had run when it stopped); a spliced module's declarations count.
@@ -364,8 +396,8 @@ Declaration splices may be in any module, and may generate declaration
 splices. `e` is checked in the module the splice is written in, at compile
 time (as a toplevel splice). Names in generated declarations are as written
 (`"M.x"` is a path, `"A"` a constructor or tag), resolved where they are
-spliced, except that types, constructors and fields may be named by a
-`Stag.Path.Ref` (see Reflection), which names the same declaration wherever
+spliced, except that types, constructors, fields and values may be named by
+a `Stag.Path.Ref` (see Reflection and Hygienic code), which names the same declaration wherever
 it is spliced, and every node is located at the splice. Values that are not syntax
 (eg. a tuple of one component, an uppercase let name) are errors at the
 splice; negative int literals are allowed. Errors in generated declarations
@@ -417,9 +449,12 @@ file.
 
 An expansion is up to date when it prints as the generated declarations do
 (so modulo layout and comments), each resolved reference of the generated code
-to a declaration printed as the shortest suffix of its full path naming it from
-the splice. One that no suffix names there (eg. shadowed at the splice) is
-printed `<M.t>`, which doesn't parse, so its expansion is always stale. The
+(types, constructors, fields and values) printed as the shortest suffix of its
+full path naming it from the splice, whose first name the generated
+declarations do not declare (nor, for a single name, bind locally where it is
+used), else as its root path (`.M.t`) if that names it there. One that neither
+names (a prelude declaration a root module shadows) is printed
+`<prelude.M.t>`, which doesn't parse, so its expansion is always stale. The
 correction is the generated declarations printed so, indented by 2 from the
 leading whitespace of the splice's line, with the file's line endings,
 replacing the expansion and its comments but not comments on the splice's line
@@ -481,6 +516,62 @@ that need a running splice. Reflection values are ordinary values, so they
 can exist at run time too, eg. a `type τ` in a runtime function, and `expr`
 and the refs' `name` work there; only `decl`, which queries the typechecker,
 is a runtime error at run time.
+
+### Hygienic code
+
+Generated syntax refers to library values hygienically by erasing typed code:
+
+```ocaml
+Stag.Code.erase : <'a>{..'r} -> Stag.Expr.t
+Stag.Value_ref.name : Stag.Value_ref.t -> string
+```
+
+`erase c` is the syntax of `c` with what it refers to outside it resolved
+where the quote was checked, as `Stag.Path.Ref`s: toplevel values and prims
+(`Stag.Expr.Var (Ref r, None)`, `r : Stag.Value_ref.t`), constructors and
+fields. The code's free variables (its context entries) are
+`Stag.Path.Name`s, resolved where the syntax is spliced: they are the holes
+that generated binders, or the splice site, provide. Its own binders keep
+their names, but are renamed (eg. `x_1`) where one would capture a variable
+of the same name bound elsewhere, or a free one; a renamed binder providing
+an implicit splice `.~c` (in a nested quote) provides it explicitly,
+`.~c.{x = x_1}`. Type annotations (on parameters, a let's result, and
+`(x : t)`) are kept as written, the types they name as refs (printed as
+root paths, eg. `(y : .int)`), so generated code has the types its quote
+did; types as values are given as by `Stag.Type.expr`.
+
+```ocaml
+(* gen.stag *)
+let atom = .< Core.Sexp.Atom (Core.Int.to_string x) >.      (* free x *)
+let derive_int name =
+  Cons (Stag.Toplevel.let_ name (Cons ("x", Nil)) (Stag.Code.erase atom), Nil)
+
+(* a.stag *)
+module Core = struct end
+include .~(Gen.derive_int "sexp_of_n")   (* still the prelude's Core.Sexp.Atom *)
+```
+
+A `Value_ref` names the toplevel wherever it is spliced, even where its name
+is shadowed or not in scope, and its type is the toplevel's (generalized
+there), as if named by a path there. Whatever made it was visible where the
+quote was checked, so it exists by the time a splice can use it; checking it
+on demand is subject to the usual rules (eg. a toplevel that needs what the
+running splice generates is an error). Toplevels referred to from inside a
+quote but not yet checked are the quote's free variables by their canonical
+names, and are erased as refs too; a splice provides these from where it is
+even with explicit substitutions, which can't name them (so
+`.~(.<n>.).{n}` inside `module M` works while `M.n` is unchecked). A local the code embeds (a local function
+of the code that made it, used in the quote) has no name where the code is
+spliced: `erase` is a runtime error naming it. A splice inside a nested quote
+of the code takes its entries from what is in scope where spliced, by name,
+as written. `erase` works at run time too; only splicing needs compile time.
+Printed (eg. in a message about generated code), a ref is the root path of
+its declaration (`.A.helper`, `.Core.Sexp.Atom`, `.raise`, prims by their
+public path, `.String.length`), which reads back as the same declaration
+wherever it is spliced, even under binders or declarations of its name; a
+prelude's declaration whose root module the program shadows has no syntax and
+is printed `<prelude.Core.Sexp.Atom>`. Generated code may write root paths
+itself too, as names: `Stag.Expr.var ".raise"`, `Stag.Path.Name ".A.M.x"`.
 
 ## Files
 
@@ -556,14 +647,6 @@ the others still run.
 
 ### Declaration splices
 
-Typed code may be embedded as a leaf, keeping its hygiene: only the shape is
-untyped. Its context entries are provided at the declaration splice, as for
-implicit substitutions.
-
-```ocaml
-Stag.Code.erase : <'a>{..'r} -> Stag.Expr.t
-```
-
 Quotes of declarations are sugar for building these values, with antiquotes
 in item, type and expression positions:
 
@@ -589,10 +672,12 @@ val n : int @@ const      (* modalities on signature items and fields *)
 
 ### Other
 
-- Core for derived code: generated code naming `Core.Sexp.sexp_of_int` breaks
-  where the program shadows `Core` (a module or stag-build library of that
-  name). Either give the prelude an unshadowable path, or resolve spliced
-  references to canonical prelude names.
+- A stag-build library named `core` shadows the prelude's `Core` in the whole
+  program, `.Core` included. Derivers living in the prelude's `Core` (eg. a
+  `Sexp.derive` in `core/sexp.stag`) are unaffected: inside their quotes they
+  refer to sibling modules relatively (`Int.to_string`), and the code they
+  generate holds refs, so a user's `core` doesn't capture them. Code outside
+  `Core` can still not name it then.
 
 `if`, infix operators (`let (+) x y = ...`, OCaml precedences),
 interface files.

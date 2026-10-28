@@ -711,3 +711,95 @@ end%inline
       let x = print_int "a"
     |}]
 ;;
+
+let%expect_test
+    "refs in expansions: shortest suffix at the splice, else a root path"
+  =
+  test
+    ~others:
+      [ ( "gen.stag"
+        , {|
+type t = A | B
+let helper x = x
+let code = .< fun (x : t) -> match x with | A -> helper (String.length "a") | B -> Core.Int.succ 0 >.
+let gen = Cons (Stag.Toplevel.let_ "f" Nil (Stag.Code.erase code), Nil)
+|}
+        )
+      ]
+    {|
+module Core = struct end
+include%inline .~Gen.gen
+end%inline
+module M = struct
+  type t = A | B
+  let helper = 1
+  module String = struct end
+  include%inline .~Gen.gen
+  end%inline
+end
+|};
+  [%expect
+    {|
+    File "a.stag", line 17, characters 0-24:
+    17 | include%inline .~Gen.gen
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    File "a.stag", line 23, characters 2-26:
+    23 |   include%inline .~Gen.gen
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    --- a.stag corrected ---
+    module Core = struct end
+    include%inline .~Gen.gen
+      let f =
+        fun (x : Gen.t) ->
+          match x with
+          | Gen.A -> Gen.helper (String.length "a")
+          | Gen.B -> .Core.Int.succ 0
+    end%inline
+    module M = struct
+      type t = A | B
+      let helper = 1
+      module String = struct end
+      include%inline .~Gen.gen
+        let f =
+          fun (x : Gen.t) ->
+            match x with
+            | Gen.A -> Gen.helper (.String.length "a")
+            | Gen.B -> .Core.Int.succ 0
+      end%inline
+    end
+    (gen.stag up to date)
+    |}]
+;;
+
+let%expect_test "refs in expansions are not captured by generated binders" =
+  test
+    ~others:
+      [ ( "gen.stag"
+        , {|
+let code = .< fun raise -> let x = raise 1 in .raise (Failure x) >.
+let gen = Cons (Stag.Toplevel.let_ "f" Nil (Stag.Code.erase code), Nil)
+|}
+        )
+      ]
+    {|
+include%inline .~Gen.gen
+end%inline
+|};
+  [%expect
+    {|
+    File "a.stag", line 16, characters 0-24:
+    16 | include%inline .~Gen.gen
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    --- a.stag corrected ---
+    include%inline .~Gen.gen
+      let f =
+        fun raise ->
+          let x = raise 1 in
+          .raise (Failure x)
+    end%inline
+    (gen.stag up to date)
+    |}]
+;;

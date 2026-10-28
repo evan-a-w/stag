@@ -231,7 +231,7 @@ let with_server
   let sent = Queue.create () in
   let t =
     { root
-    ; server = Server.create ~limits ~send:(Queue.enqueue sent)
+    ; server = Server.create ~limits ~send:(Queue.enqueue sent) ()
     ; sent
     ; next_id = 0
     ; encoding = Utf_16

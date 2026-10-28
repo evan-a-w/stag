@@ -61,6 +61,7 @@ let of_lexical : Stag_syntax.Token.t -> Token_type.t option = function
   | Char _ | String _ -> Some String
   | Lident _ -> Some Variable
   | Uident _ -> Some Enum_member
+  | Root -> Some Namespace
   | Label _ -> Some Enum_member
   | Tyvar _ | Weak_tyvar _ -> Some Type_parameter
   | True
@@ -171,6 +172,11 @@ let compute text ~file ~occurrences ~is_function =
     with
     | None -> [||]
     | Some first ->
+      let first =
+        if Stag_syntax.Token.equal tokens.(first).token Root
+        then first + 1
+        else first
+      in
       let rec stop i =
         if
           i + 2 < Array.length tokens

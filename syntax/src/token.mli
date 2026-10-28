@@ -44,6 +44,7 @@ type t =
   | Arrow
   | Star
   | Dot
+  | Root (** [.] starting a path from the root scope, as [.M.x] *)
   | Dot_lbrace (** [.{], substitutions of a splice *)
   | Dotdot
   | Underscore

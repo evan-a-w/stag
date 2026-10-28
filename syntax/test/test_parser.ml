@@ -558,8 +558,8 @@ let%expect_test "types" =
     (Record (Extend x (Con int ()) Empty))
     (Variant Empty)
     (Variant (Var r))
-    (Variant (Extend A (Con int ()) (Extend B (Con unit ()) (Var r))))
-    (Variant (Extend A (Con unit ()) Empty))
+    (Variant (Extend A (Con int ()) (Extend B (Con .unit ()) (Var r))))
+    (Variant (Extend A (Con .unit ()) Empty))
     (Variant
      (Extend A (Arrow (Var a) (Var b))
       (Extend B (Tuple ((Con int ()) (Con int ()))) Empty)))
@@ -731,7 +731,7 @@ let%expect_test "locations" =
                 Extend "`B; ..'s"
                   B "`B"
                   Con "`B"
-                    unit "`B"
+                    .unit "`B"
                   Var "..'s"
                     s "'s"
             Empty ""
@@ -1020,7 +1020,7 @@ let%expect_test "slack and misplaced syntax" =
     t.stag:1:4-6: expected a polymorphic variant tag like `A, found `..`
     t.stag:1:6-8: expected a polymorphic variant tag like `A, found `..`
     (Variant (Var r))
-    (Variant (Extend A (Con unit ()) (Var r)))
+    (Variant (Extend A (Con .unit ()) (Var r)))
     ((Type ((name t) (params ()) (kind (Variant ())))))
     t.stag:1:18-20: a constructor argument of function type must be parenthesized: `C of (a -> b)`
     t.stag:1:24-26: a constructor argument of function type must be parenthesized: `C of (a -> b)`
@@ -1071,6 +1071,42 @@ let%expect_test "types as values" =
     t.stag:1:9-11: expected end of file, found `->`
     t.stag:1:4-4: expected a type, found end of file
     t.stag:1:10-13: type arguments are written after the name, in brackets: `list[int]`
+    |}]
+;;
+
+let%expect_test "root paths" =
+  expr ".x";
+  expr ".M.N.x";
+  expr ".M.C (.x, .C)";
+  expr "r.(.M.x).y.(.z)";
+  expr "{.M.x = 1; y = .y}";
+  expr "{r with .M.x = 1}";
+  expr ".< .x .~.y >.";
+  pat ".M.C {.M.x = .D; y = _}";
+  ty ".int -> .M.t[.list[.option[int]]]";
+  [%expect
+    {|
+    (Var .x ())
+    (Var .M.N.x ())
+    (Construct .M.C ((Var .x ()) (Construct .C ())))
+    (Field (Field (Field (Var r ()) .M.x) y) .z)
+    (Record ((.M.x (Lit (Int 1))) (y (Var .y ()))))
+    (Record_update (Var r ()) ((.M.x (Lit (Int 1)))))
+    (Quote (App (Var .x ()) (Splice (expr (Var .y ())) (subs ()))))
+    (Construct .M.C ((Record ((.M.x (Construct .D ())) (y Any)))))
+    (Arrow (Con .int ())
+     (Con .M.t ((Ty (Con .list ((Ty (Con .option ((Ty (Con int ())))))))))))
+    |}];
+  expr "r.(x)";
+  expr "r.(.M.x";
+  expr ". x";
+  pat ".x";
+  [%expect
+    {|
+    t.stag:1:3-4: expected a root path like `.M.x`: `e.(.M.x)`, found `x`
+    t.stag:1:7-7: expected `)` to close this `(` (opened at 1:2), found end of file
+    t.stag:1:0-1: expected an expression, found `.`
+    t.stag:1:1-2: expected a constructor, found `x`
     |}]
 ;;
 

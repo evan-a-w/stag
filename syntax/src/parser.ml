@@ -61,10 +61,6 @@ let advance t =
 
 let located ~loc txt = { Located.txt; loc }
 
-let decl_path (path : Path.t Located.t) =
-  { path with txt = Decl_path.Path path.txt }
-;;
-
 (** Located from [start] to the last token consumed. *)
 let since t start txt = located ~loc:(Loc.merge start (prev_loc t)) txt
 
@@ -183,9 +179,12 @@ let tyvar t =
   | _ -> expected t "a type variable like `'a`"
 ;;
 
-(** A path [M.N.x] or [M.N.C], and whether its last name is capitalized. *)
+(** A path [M.N.x] or [M.N.C], or a root path [.M.N.x], and whether its last
+    name is capitalized. *)
 let path t ~what =
   let start = loc t in
+  let root = is t Root in
+  if root then advance t;
   let rec go acc =
     match peek t, peek_at t 1, peek_at t 2 with
     | Uident name, Dot, (Uident _ | Lident _) ->
@@ -201,7 +200,9 @@ let path t ~what =
     | _ -> expected t what
   in
   let names, capitalized = go [] in
-  since t start (Path.of_list_exn names), capitalized
+  let path = Path.of_list_exn names in
+  ( since t start (if root then Decl_path.Root path else Decl_path.Path path)
+  , capitalized )
 ;;
 
 let lowercase_path t ~what =
@@ -301,9 +302,9 @@ and type_atom t : Type_expr.t =
   | Tyvar _ | Weak_tyvar _ ->
     let var = tyvar t in
     located ~loc:var.loc (Var var.txt : Type_expr.desc)
-  | Lident _ | Uident _ ->
+  | Lident _ | Uident _ | Root ->
     let path = lowercase_path t ~what:"a type name" in
-    located ~loc:path.loc (Type_expr.Con (decl_path path, []))
+    located ~loc:path.loc (Type_expr.Con (path, []))
   | Lparen ->
     advance t;
     if is t Rparen
@@ -414,7 +415,7 @@ and variant t : Type_expr.t =
           located
             ~loc:tag.loc
             (Type_expr.Con
-               (located ~loc:tag.loc (Decl_path.Path (Path.name "unit")), []))
+               (located ~loc:tag.loc (Decl_path.Root (Path.name "unit")), []))
       in
       let rest : Type_expr.row =
         match peek t with
@@ -443,6 +444,7 @@ let starts_pattern_atom : Token.t -> bool = function
   | Underscore
   | Lident _
   | Uident _
+  | Root
   | Label _
   | Int _
   | Char _
@@ -494,7 +496,7 @@ let rec pattern t : Pattern.t =
 and pattern_construct t : Pattern.t =
   let start = loc t in
   match peek t with
-  | Uident _ ->
+  | Uident _ | Root ->
     let path = uppercase_path t ~what:"a constructor" in
     let args =
       if starts_pattern_atom (peek t)
@@ -505,7 +507,7 @@ and pattern_construct t : Pattern.t =
           | _ -> None))
       else []
     in
-    since t start (Pattern.Construct (decl_path path, args))
+    since t start (Pattern.Construct (path, args))
   | Label tag ->
     let tag = located ~loc:start tag in
     advance t;
@@ -557,12 +559,12 @@ and pattern_atom t : Pattern.t =
 and record_pattern t : Pattern.t =
   let start = loc t in
   match peek_at t 1 with
-  | Lident _ | Uident _ ->
+  | Lident _ | Uident _ | Root ->
     let fields =
       delimited t ~opener:Lbrace ~close:Rbrace ~sep:Semi ~item:(fun t ->
         let path = lowercase_path t ~what:"a field name" in
         expect t Equal;
-        decl_path path, pattern t)
+        path, pattern t)
     in
     since t start (Pattern.Record fields)
   | _ ->
@@ -602,6 +604,7 @@ let starts_atom : Token.t -> bool = function
   | String _
   | Lident _
   | Uident _
+  | Root
   | Label _
   | True
   | False
@@ -621,7 +624,7 @@ let nominal_record_ahead t =
     | Lident _, Equal -> true
     | _ -> false
   in
-  go 1
+  go (if Token.equal (peek_at t 1) Root then 2 else 1)
 ;;
 
 let pattern_parameter =
@@ -779,7 +782,7 @@ and construct t : Expr.t =
   let start = loc t in
   let saved = t.pos in
   match peek t with
-  | Uident _ ->
+  | Uident _ | Root ->
     (match path t ~what:"" with
      | path, true ->
        let args =
@@ -791,7 +794,7 @@ and construct t : Expr.t =
              | _ -> None))
          else []
        in
-       expr_since t start (Construct (decl_path path, args))
+       expr_since t start (Construct (path, args))
      | _, false ->
        t.pos <- saved;
        app t)
@@ -862,9 +865,17 @@ and postfix t : Expr.t =
        | Label _ ->
          let label = label t ~what:"" in
          loop (expr_since t e.loc (Poly_field (e, label)))
+       | Lparen ->
+         let open_loc = loc t in
+         advance t;
+         if not (is t Root)
+         then expected t "a root path like `.M.x`: `e.(.M.x)`";
+         let field = lowercase_path t ~what:"a field name" in
+         close t Rparen ~opener:Lparen ~open_loc;
+         loop (expr_since t e.loc (Field (e, field)))
        | _ ->
          let field = lowercase_path t ~what:"a field name" in
-         loop (expr_since t e.loc (Field (e, decl_path field))))
+         loop (expr_since t e.loc (Field (e, field))))
     | Backslash ->
       advance t;
       let label = label t ~what:"a polymorphic record label like `x" in
@@ -885,9 +896,9 @@ and atom t : Expr.t =
   | String s -> lit (String s)
   | True -> lit (Bool true)
   | False -> lit (Bool false)
-  | Lident _ | Uident _ ->
+  | Lident _ | Uident _ | Root ->
     (match path t ~what:"" with
-     | path, true -> expr_since t start (Construct (decl_path path, []))
+     | path, true -> expr_since t start (Construct (path, []))
      | path, false -> expr_since t start (Var (path.txt, None)))
   | Label tag ->
     advance t;
@@ -945,7 +956,7 @@ and poly_field t =
 and nominal_field t =
   let path = lowercase_path t ~what:"a field name" in
   expect t Equal;
-  decl_path path, entry_value t
+  path, entry_value t
 
 and record t : Expr.t =
   let start = loc t in

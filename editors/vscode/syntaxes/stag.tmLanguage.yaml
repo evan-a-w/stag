@@ -30,6 +30,7 @@ repository:
       - include: '#keyword'
       - include: '#code-type'
       - include: '#code-type-context'
+      - include: '#root'
       - include: '#module-path'
       - include: '#constructor'
       - include: '#type-application'
@@ -238,6 +239,13 @@ repository:
     patterns:
       - include: '#braces'
       - include: '#code'
+
+  # As the lexer, a . before a name starts a root path (.M.x) unless right
+  # after what can end an atom, other than a comment.
+  root:
+    match: '(?:(?<=\*\))|(?<![A-Za-z0-9_''\)\]\}".>]))(\.)(?=[A-Za-z_])'
+    captures:
+      '1': { name: punctuation.accessor.root.stag }
 
   module-path:
     match: '\b([A-Z]{{ident_char}}*)(\.)(?=[A-Za-z_`])'

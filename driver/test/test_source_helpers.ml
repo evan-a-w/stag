@@ -53,7 +53,8 @@ let x = 1
     val y : int
     val z : int
     (y/5
-     (Toplevel_splice (code (Quote (Var (Free x) : int) : "<int>{x : int}"))
+     (Toplevel_splice
+      (code (Quote (Var (Free_toplevel x) : int) : "<int>{x : int}"))
       (expansion (Var (Bound (Toplevel x/4)) : int)) : int))
     -- evaluated at compile time
     -- evaluated

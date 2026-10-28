@@ -40,7 +40,14 @@ let path t ~last =
     (List.init (int t 3 / 2) ~f:(fun _ -> pick t [ "M"; "N" ]) @ [ last t ])
 ;;
 
-let decl_path t ~last = Decl_path.Path (path t ~last)
+(* Root or not by the path's hash, keeping the random sequence as it was
+   before root paths. *)
+let decl_path t ~last =
+  let path = path t ~last in
+  if String.hash (Path.to_string path) % 3 = 0
+  then Decl_path.Root path
+  else Path path
+;;
 
 let string t =
   pick
@@ -85,7 +92,7 @@ let rec row ?(label = label) t ~entry : Type_expr.row =
 
 let rec type_expr t : Type_expr.t =
   let unit =
-    loc (Type_expr.Con (loc (Decl_path.Path (Path.name "unit")), []))
+    loc (Type_expr.Con (loc (Decl_path.Root (Path.name "unit")), []))
   in
   loc
     (choose
@@ -156,8 +163,8 @@ let rec expr t : Expr.t =
        t
        ~leaves:
          [ (fun t -> Expr.Lit (lit t))
-         ; (fun t -> Var (path t ~last:lident, None))
-         ; (fun t -> Var (path t ~last:lident, Some (type_expr t)))
+         ; (fun t -> Var (decl_path t ~last:lident, None))
+         ; (fun t -> Var (decl_path t ~last:lident, Some (type_expr t)))
          ; (fun t -> Construct (loc (decl_path t ~last:uident), []))
          ; (fun t -> Poly_variant (label t, None))
          ; (fun t -> Expect (loc (string t)))

@@ -57,10 +57,14 @@ module To_value = struct
   let path (path : Path.t) = string (Path.to_string path)
   let pair f g (a, b) = Value.Tuple [ f a; g b ]
 
-  let decl_path kind ({ txt; loc = _ } : Decl_path.t Located.t) =
-    match txt with
+  let decl_path_txt kind : Decl_path.t -> Value.t = function
     | Path p -> con "Stag.Path.Name" [ path p ]
+    | Root p -> con "Stag.Path.Name" [ string ("." ^ Path.to_string p) ]
     | Resolved name -> con "Stag.Path.Ref" [ Value.Ref { kind; name } ]
+  ;;
+
+  let decl_path kind ({ txt; loc = _ } : Decl_path.t Located.t) =
+    decl_path_txt kind txt
   ;;
 
   let record fields = Value.Poly_record (String.Map.of_alist_exn fields)
@@ -158,7 +162,8 @@ module To_value = struct
     let fields = list (pair name expr) in
     match txt with
     | Lit l -> con "Lit" [ lit l ]
-    | Var (p, annot) -> con "Var" [ path p; option type_expr annot ]
+    | Var (p, annot) ->
+      con "Var" [ decl_path_txt Value p; option type_expr annot ]
     | App (f, x) -> con "App" [ expr f; expr x ]
     | Let (var, bindings, annot, equal, body) ->
       con
@@ -433,20 +438,29 @@ module Of_value = struct
 
   let name kind value ~loc = Located.create ~loc (ident kind value)
 
-  (* The modules of a path are capitalized, its last name of [kind]. *)
-  let path kind value =
+  (* The modules of a path are capitalized, its last name of [kind]. A leading
+     [.] makes it a root path. *)
+  let path kind value : Decl_path.t =
     let text = string value in
+    let root, text =
+      match String.chop_prefix text ~prefix:"." with
+      | Some text -> true, text
+      | None -> false, text
+    in
     let names = String.split text ~on:'.' in
     let modules, last = List.split_n names (List.length names - 1) in
     if
       List.for_all modules ~f:(Ident_kind.accepts Upper)
       && List.for_all last ~f:(Ident_kind.accepts kind)
-    then Path.of_list_exn names
+    then (
+      let path = Path.of_list_exn names in
+      if root then Root path else Path path)
     else
       unexpected
         ~expected:
           (sprintf
-             "a path of capitalized identifiers ending in %s"
+             "a path, optionally from the root ([.M.x]), of capitalized \
+              identifiers ending in %s"
              (Ident_kind.describe kind))
         value
   ;;
@@ -457,7 +471,7 @@ module Of_value = struct
       (variant "Stag.Path.t" value ~f:(fun constructor args : Decl_path.t ->
          let arg i read = Args.read args i read in
          match constructor, Args.count args with
-         | "Name", 1 -> Path (arg 0 (path kind))
+         | "Name", 1 -> arg 0 (path kind)
          | "Ref", 1 ->
            arg 0 (fun (value : Value.t) : Decl_path.t ->
              match value with
@@ -648,7 +662,10 @@ module Of_value = struct
          let arg i read = Args.read args i read in
          match constructor, Args.count args with
          | "Lit", 1 -> Lit (arg 0 lit)
-         | "Var", 2 -> Var (arg 0 (path Lower), arg 1 (option (type_expr ~loc)))
+         | "Var", 2 ->
+           Var
+             ( arg 0 (fun value -> (decl_path Lower value ~loc).txt)
+             , arg 1 (option (type_expr ~loc)) )
          | "App", 2 -> App (arg 0 (expr ~loc), arg 1 (expr ~loc))
          | "Let", 5 ->
            Let

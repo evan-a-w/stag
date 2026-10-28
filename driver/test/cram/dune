@@ -8,3 +8,10 @@
   %{bin:stag}
   (source_tree ../../../examples)
   (source_tree ../../../bench)))
+
+(cram
+ (applies_to stdlib)
+ (deps
+  ../../../stag-stdlib
+  (source_tree ../../../core)
+  (source_tree ../../../prelude)))

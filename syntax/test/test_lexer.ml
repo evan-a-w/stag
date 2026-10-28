@@ -777,3 +777,35 @@ let%expect_test "lexing past errors" =
     ((tokens (a "\"b\"" "end of file")) (comments 0))
     |}]
 ;;
+
+let%expect_test "a dot before a name starts a root path unless after an atom" =
+  let tokens src =
+    match Lexer.tokenize ~file:"t.stag" src with
+    | Error error -> print_endline (Lexer.Error.to_string error)
+    | Ok tokens ->
+      Array.iter tokens ~f:(fun { token; loc = _ } ->
+        match token with
+        | Eof -> print_endline ""
+        | Root -> print_string "ROOT "
+        | Dot -> print_string "DOT "
+        | token -> printf "%s " (Token.to_string token))
+  in
+  List.iter
+    [ ".x f .M.x r.x M.x"
+    ; "(e).x [a].x {}.x \"s\".x x'.x _.x 1.x"
+    ; "(.x) [.x] {.x} f(.x) a,.x =.x ->.x"
+    ; ">.x .~.x .<.x>. .{.x} ..x"
+    ; "(* c *).x x(* c *).x x .x"
+    ; ". x .1 .`a"
+    ]
+    ~f:tokens;
+  [%expect
+    {|
+    ROOT x f ROOT M DOT x r DOT x M DOT x
+    ( e ) DOT x [ a ] DOT x { } DOT x "s" DOT x x' DOT x _ DOT x 1 DOT x
+    ( ROOT x ) [ ROOT x ] { ROOT x } f ( ROOT x ) a , ROOT x = ROOT x -> ROOT x
+    >. x .~ ROOT x .< ROOT x >. .{ ROOT x } .. x
+    ROOT x x ROOT x x ROOT x
+    DOT x DOT 1 DOT `a
+    |}]
+;;
