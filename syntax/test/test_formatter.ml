@@ -832,3 +832,53 @@ let%expect_test "a comment before the arguments of a benchmark" =
       x
     |}]
 ;;
+
+let%expect_test "comments in list literals" =
+  test
+    {|let a = [ (* first *) 1; (* second *) 2 (* after two *) ; 3 (* after three *) ] (* end *)
+let b = [
+  1; (* one *)
+  2;
+  (* before three *)
+  3;
+]
+let c = [ (* empty *) ]
+let d = [ 1; 2; 3 ]
+let f l = match l with
+  | [ x (* x *) ; [ (* nothing *) ] ] -> x
+  | _ -> 0
+|};
+  [%expect
+    {|
+    let a = [
+      (* first *) 1;
+      (* second *) 2;
+      (* after two *) 3; (* after three *)
+    ] (* end *)
+    let b = [
+      1; (* one *)
+      2;
+      (* before three *)
+      3;
+    ]
+    let c = [(* empty *)]
+    let d = [1; 2; 3]
+
+    let f l =
+      match l with
+      | [x; (* x *) [(* nothing *)]] -> x
+      | _ -> 0
+    |}];
+  test
+    ~width:20
+    {|let x = [aaaaaaa; bbbbbbbb; (* c *) cccccccc; [dddddd; eeeeee]]|};
+  [%expect
+    {|
+    let x = [
+      aaaaaaa;
+      bbbbbbbb;
+      (* c *) cccccccc;
+      [dddddd; eeeeee];
+    ]
+    |}]
+;;

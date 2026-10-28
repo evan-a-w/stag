@@ -67,6 +67,9 @@ let string t =
     ]
 ;;
 
+(* Unlocated, as the rest. *)
+let list_items items = List.map items ~f:(fun item -> Loc.none, item)
+
 let lit t : Lit.t =
   pick
     t
@@ -133,9 +136,17 @@ and pattern t : Pattern.t =
          ; (fun t -> Lit (lit t))
          ; (fun t -> Construct (loc (decl_path t ~last:uident), []))
          ; (fun t -> Poly_variant (label t, None))
+         ; (fun _ -> Construct (loc List_literal.nil, []))
          ]
        ~nodes:
          [ (fun t -> Tuple (list t ~min:2 ~max:3 pattern))
+         ; (fun t ->
+             (List_literal.pattern
+                ~items:(list_items (list t ~min:1 ~max:4 pattern))
+                ~close:Loc.none)
+               .txt)
+         ; (fun t ->
+             Construct (loc List_literal.cons, [ pattern t; pattern t ]))
          ; (fun t -> Construct (loc (decl_path t ~last:uident), [ pattern t ]))
          ; (fun t ->
              Construct
@@ -167,6 +178,7 @@ and expr t : Expr.t =
          ; (fun t -> Poly_variant (label t, None))
          ; (fun t -> Expect (loc (string t)))
          ; (fun _ -> Poly_record [])
+         ; (fun _ -> Construct (loc List_literal.nil, []))
          ]
        ~nodes:
          [ (fun t -> App (expr t, expr t))
@@ -192,6 +204,12 @@ and expr t : Expr.t =
          ; (fun t -> Quote (expr t))
          ; (fun t -> Type (type_expr t))
          ; (fun t -> Tuple (list t ~min:2 ~max:3 expr))
+         ; (fun t ->
+             (List_literal.expr
+                ~items:(list_items (list t ~min:1 ~max:4 expr))
+                ~close:Loc.none)
+               .txt)
+         ; (fun t -> Construct (loc List_literal.cons, [ expr t; expr t ]))
          ; (fun t -> Construct (loc (decl_path t ~last:uident), [ expr t ]))
          ; (fun t ->
              Construct

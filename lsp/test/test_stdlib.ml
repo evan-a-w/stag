@@ -533,13 +533,9 @@ let%expect_test "semantic tokens of a source of the prelude" =
       25:7+7 Enum_member "Failure"
       26:10+6 Namespace "String"
       26:17+6 Function "concat"
-      27:12+2 String "\"\""
-      28:13+4 Enum_member "Cons"
-      29:16+37 String "\"Bool.of_string_exn: invalid bool \\\"\""
-      30:16+4 Enum_member "Cons"
-      30:22+1 Variable "s"
-      30:25+4 Enum_member "Cons"
-      30:31+4 String "\"\\\"\""
-      30:37+3 Enum_member "Nil"
+      26:24+2 String "\"\""
+      26:28+37 String "\"Bool.of_string_exn: invalid bool \\\"\""
+      26:67+1 Variable "s"
+      26:70+4 String "\"\\\"\""
       |}])
 ;;

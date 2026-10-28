@@ -17,7 +17,7 @@ checkout is made outside it.
   type result['a, 'b] = Ok of 'a | Error of 'b
   exception Division_by_zero
   $ cd core && stag check option.stag ../prelude/prelude.stag | grep -c . && cd ..
-  117
+  130
 
 Names in the prelude's sources are as within the prelude, and a file given
 twice is checked once.
@@ -94,8 +94,8 @@ Errors are located in their files.
   > let oops = Prim.Nope.nope
   > X
   $ stag check core/list.stag
-  File "prelude/prelude.stag", line 257, characters 11-25:
-  257 | let oops = Prim.Nope.nope
+  File "prelude/prelude.stag", line 297, characters 11-25:
+  297 | let oops = Prim.Nope.nope
                    ^^^^^^^^^^^^^^
   Error: Unbound value Prim.Nope.nope
   [1]
@@ -109,8 +109,8 @@ Prims are only the prelude's.
   Error: Unbound module Prim
   [1]
   $ stag check a.stag stag/core/list.stag
-  File "stag/prelude/prelude.stag", line 257, characters 11-25:
-  257 | let oops = Prim.Nope.nope
+  File "stag/prelude/prelude.stag", line 297, characters 11-25:
+  297 | let oops = Prim.Nope.nope
                    ^^^^^^^^^^^^^^
   Error: Unbound value Prim.Nope.nope
   [1]

@@ -624,7 +624,7 @@ let e_let =
     (fun x -> x) (fun (y : .int) -> y)
     (App (Fun ((x ())) (Var x ())) (Fun ((y ((Con <int> ())))) (Var y ())))
     e_let:
-    let f (x : .option[.Gen.r]) (y : 'a) : .list['a] = .Cons (y, .Nil) in
+    let f (x : .option[.Gen.r]) (y : 'a) : .list['a] = [y] in
     (f : .option[.Gen.r] -> .int -> .list[.int])
     (Let f ((x ((Con <option> ((Ty (Con <Gen.r> ())))))) (y ((Var a))))
      ((Con <list> ((Ty (Var a)))))
@@ -747,5 +747,30 @@ let shown = match f (fun n -> n) with | (_, s, _) -> print_endline s
     end
     --- output ---
     2
+    |}]
+;;
+
+let%expect_test "list literals are erased as the prelude's Cons and Nil" =
+  show_erased
+    {|
+type list['a] = Nil | Cons of 'a
+let e_literal = Stag.Code.erase .< match [x; [1]] with [y; []] -> [] | _ -> [y] >.
+|};
+  [%expect
+    {|
+    e_literal:
+    match [x; [1]] with
+    | [y; []] -> []
+    | _ -> [y]
+    (Match
+     (Construct <Cons>
+      ((Var x ())
+       (Construct <Cons>
+        ((Construct <Cons> ((Lit (Int 1)) (Construct <Nil> ())))
+         (Construct <Nil> ())))))
+     (((Construct <Cons>
+        ((Var y) (Construct <Cons> ((Construct <Nil> ()) (Construct <Nil> ())))))
+       (Construct <Nil> ()))
+      (Any (Construct <Cons> ((Var y ()) (Construct <Nil> ()))))))
     |}]
 ;;

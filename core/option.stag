@@ -83,8 +83,8 @@ let both o1 o2 =
 
 let to_list o =
   match o with
-  | Some x -> Cons (x, Nil)
-  | None -> Nil
+  | Some x -> [x]
+  | None -> []
 
 let equal equal_value o1 o2 =
   match (o1, o2) with

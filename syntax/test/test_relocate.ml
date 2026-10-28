@@ -11,8 +11,8 @@ let relocate_printed program =
      | Some relocated ->
        if
          [%equal: Sexp.t]
-           [%sexp (relocated : Program.t)]
-           [%sexp (written : Program.t)]
+           (Round_trip.without_resolved [%sexp (relocated : Program.t)])
+           (Round_trip.without_resolved [%sexp (written : Program.t)])
        then Ok ()
        else Error ("relocated differs:\n" ^ printed))
 ;;

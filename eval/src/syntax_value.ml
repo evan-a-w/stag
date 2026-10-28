@@ -626,3 +626,10 @@ module Program = struct
   let to_value t = To_value.program t
   let of_value = Of_value.(run program)
 end
+
+let type_ref_path path =
+  let names = To_value.list (fun s -> Value.String s) in
+  match path with
+  | `Prelude path -> To_value.con "Stag.Type_ref.Path.Prelude" [ names path ]
+  | `Program path -> To_value.con "Stag.Type_ref.Path.Program" [ names path ]
+;;

@@ -1,6 +1,6 @@
 open! Import
 
-let check_files ?(run = false) files =
+let check_files ?(run = false) ?(filter_diagnostic = Fn.id) files =
   let files =
     List.map files ~f:(fun (path, contents) -> { Source_file.path; contents })
   in
@@ -9,7 +9,8 @@ let check_files ?(run = false) files =
       Option.some_if (String.equal file.path path) file.contents)
   in
   let print_diagnostic diagnostic =
-    print_string (Diagnostic.to_string_hum ~contents diagnostic)
+    print_string
+      (filter_diagnostic (Diagnostic.to_string_hum ~contents diagnostic))
   in
   match Driver.check_files files with
   | Error error -> print_diagnostic (Diagnostic.of_driver_error error)
@@ -37,4 +38,6 @@ let check_files ?(run = false) files =
           ~f:(printf "--- corrected ---\n%s")))
 ;;
 
-let check ?run contents = check_files ?run [ "a.stag", contents ]
+let check ?run ?filter_diagnostic contents =
+  check_files ?run ?filter_diagnostic [ "a.stag", contents ]
+;;

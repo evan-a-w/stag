@@ -20,7 +20,7 @@ module Stag = struct
 
   let map f l =
     match l with
-    | Nil -> Nil
+    | [] -> []
     | Cons (x, rest) -> Cons (f x, map f rest)
 
   let append l tail =
@@ -36,6 +36,16 @@ module Stag = struct
     type t
 
     let name = Intrinsic.type_ref_name
+
+    (* The names of its path from the root scope: of the program's, eg.
+       [Program ["A"; "M"; "t"]] for the [t] of module [M] of file [a.stag], or
+       of the prelude's, eg. [Prelude ["Core"; "Sexp"; "t"]], and
+       [Prelude ["int"]] for a builtin type. *)
+    module Path = struct
+      type t = Program of list[string] | Prelude of list[string]
+    end
+
+    let path = Intrinsic.type_ref_path
   end
 
   module Constructor_ref = struct
@@ -62,6 +72,16 @@ module Stag = struct
      where the syntax is spliced, or a ref. *)
   module Path = struct
     type t['r] = Name of string | Ref of 'r
+  end
+
+  module Internal = struct
+    let constructor code =
+      match Intrinsic.erase code with
+      | Expr.Construct (c, _) -> c
+      | _ -> raise (Failure "Stag.Internal.constructor")
+
+    let cons = constructor .< [()] >.
+    let nil = constructor .< [] >.
   end
 
   module Lit = struct
@@ -97,8 +117,8 @@ module Stag = struct
     (* [tuple] of no types is [unit], of one is that type. *)
     let tuple ts =
       match ts with
-      | Nil -> con "unit" Nil
-      | Cons (t, Nil) -> t
+      | [] -> con "unit" []
+      | [t] -> t
       | _ -> Tuple ts
   end
 
@@ -141,11 +161,18 @@ module Stag = struct
 
     let construct name args = Construct (Path.Name name, args)
 
+    (* The list literal of [ps], [[p1; p2]], of the prelude's [Cons] and
+       [Nil] wherever it is spliced. *)
+    let list ps =
+      match ps with
+      | [] -> Construct (Internal.nil, [])
+      | Cons (p, rest) -> Construct (Internal.cons, [p; list rest])
+
     (* [tuple] of no patterns is [()], of one is that pattern. *)
     let tuple ps =
       match ps with
-      | Nil -> Lit Lit.Unit
-      | Cons (p, Nil) -> p
+      | [] -> Lit Lit.Unit
+      | [p] -> p
       | _ -> Tuple ps
   end
 
@@ -179,17 +206,30 @@ module Stag = struct
     let int n = Lit (Lit.Int n)
     let string s = Lit (Lit.String s)
 
+    (* [fun_ ["x"; "y"] body] is [fun x y -> body]. *)
+    let fun_ params body =
+      let param name = (name, None) in
+      Fun (map param params, body)
+
+    let match_ e arms = Match (e, arms)
+
+    (* The list literal of [es], [[e1; e2]], as [Pattern.list]. *)
+    let list es =
+      match es with
+      | [] -> Construct (Internal.nil, [])
+      | Cons (e, rest) -> Construct (Internal.cons, [e; list rest])
+
     (* [apply f [x; y]] is [f x y]. *)
     let apply f args =
       match args with
-      | Nil -> f
+      | [] -> f
       | Cons (x, rest) -> apply (App (f, x)) rest
 
     (* [tuple] of no expressions is [()], of one is that expression. *)
     let tuple es =
       match es with
-      | Nil -> Lit Lit.Unit
-      | Cons (e, Nil) -> e
+      | [] -> Lit Lit.Unit
+      | [e] -> e
       | _ -> Tuple es
 
     (* [let_ name params equal body] is [let name params = equal in body]. *)

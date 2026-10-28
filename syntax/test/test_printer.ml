@@ -707,13 +707,15 @@ let%expect_test "the project's sources round trip and are formatted" =
     {|
     (../../tests/basics.stag (formatted true) (long_lines 0))
     (../../tests/core_basics.stag (formatted true) (long_lines 0))
+    (../../tests/core_derive_sexp.stag (formatted true) (long_lines 11))
     (../../tests/core_exn.stag (formatted true) (long_lines 1))
     (../../tests/core_list.stag (formatted true) (long_lines 0))
     (../../tests/core_option.stag (formatted true) (long_lines 0))
-    (../../tests/core_sexp.stag (formatted true) (long_lines 2))
+    (../../tests/core_sexp.stag (formatted true) (long_lines 1))
     (../../tests/core_shadowing.stag (formatted true) (long_lines 0))
     (../../tests/core_string.stag (formatted true) (long_lines 0))
     (../../tests/evaluation.stag (formatted true) (long_lines 1))
+    (../../tests/list_literals.stag (formatted true) (long_lines 0))
     (../../examples/calc/bin/main.stag (formatted true) (long_lines 0))
     (../../examples/calc/fmt/show.stag (formatted true) (long_lines 0))
     (../../examples/calc/math/arith.stag (formatted true) (long_lines 0))
@@ -909,9 +911,9 @@ let%bench "a long benchmark name" some_parameter in [first_argument_value; (seco
       first_argument_value;
       (second, argument);
       (let x = 1 in x);
-      match x with
-      | A -> 1
-      | B -> 2
+      (match x with
+       | A -> 1
+       | B -> 2);
     ] =
       some_function some_parameter (and_another_argument some_parameter)
     |}];
@@ -923,7 +925,7 @@ let%bench "a long benchmark name" some_parameter in [first_argument_value; (seco
     let%bench "sort" n in [
       100;
       1000;
-      fun x -> x
+      (fun x -> x);
     ] =
       sort (random_list n)
     |}]
@@ -955,5 +957,112 @@ end
         let x = some_function with_a_long_argument and_another_long_argument
       end%inline
     end
+    |}]
+;;
+
+let%expect_test "list literals" =
+  print
+    {|let a = []
+let b = [x]
+let c = [[1]; []; [2; 3;]]
+let d = [1, "one"; 2, "two"]
+let e = Cons (x, Cons (y, Nil))
+let f = Cons (x, [y])
+let g l = match l with [] -> [] | [x] -> [x] | [[x]; (y, z)] -> f [x] [] | Cons (x, [_; _]) -> C [x]
+let h = [let x = 1 in x; fun x -> x; match x with A -> 1 | B -> 2; 3].x
+let long_name = [first_element; second_element; third_element; fourth_element]
+let long = {field = [first_element; second_element; third_element; fourth_element]}
+let nested = [[first_element; second_element]; [third_element; fourth_element; fifth]]
+|};
+  [%expect
+    {|
+    let a = []
+    let b = [x]
+    let c = [[1]; []; [2; 3]]
+    let d = [(1, "one"); (2, "two")]
+    let e = Cons (x, Cons (y, Nil))
+    let f = Cons (x, [y])
+
+    let g l =
+      match l with
+      | [] -> []
+      | [x] -> [x]
+      | [[x]; (y, z)] -> f [x] []
+      | Cons (x, [_; _]) -> C [x]
+
+    let h =
+      [
+        (let x = 1 in x);
+        (fun x -> x);
+        (match x with
+         | A -> 1
+         | B -> 2);
+        3;
+      ].x
+
+    let long_name = [first_element; second_element; third_element; fourth_element]
+
+    let long =
+      {field = [first_element; second_element; third_element; fourth_element]}
+
+    let nested =
+      [[first_element; second_element]; [third_element; fourth_element; fifth]]
+    |}];
+  print
+    ~width:20
+    {|let f = function_name [first; second] [third] (fun x -> [x; x; x; x; x; x])|};
+  [%expect
+    {|
+    let f =
+      function_name
+        [first; second]
+        [third]
+        (fun x ->
+           [
+             x;
+             x;
+             x;
+             x;
+             x;
+             x;
+           ])
+    |}]
+;;
+
+let%expect_test "resolved Cons and Nil not ending a list literal" =
+  let at txt = Located.create txt in
+  let cons args = at (Syntax.Expr.Construct (at List_literal.cons, args)) in
+  let nil = at (Syntax.Expr.Construct (at List_literal.nil, [])) in
+  let var name = at (Syntax.Expr.Var (Path (Syntax.Path.name name), None)) in
+  let pcons args = at (Syntax.Pattern.Construct (at List_literal.cons, args)) in
+  let pvar name = at (Syntax.Pattern.Var name) in
+  let show e =
+    Round_trip.expr e;
+    print_endline (Printer.expr e)
+  in
+  show (cons [ var "x"; var "rest" ]);
+  show (cons [ var "x"; cons [ var "y"; var "rest" ] ]);
+  show (cons [ var "x"; cons [ nil; nil ] ]);
+  show (cons [ var "x" ]);
+  show (cons [ var "x"; nil; nil ]);
+  show (at (Syntax.Expr.Construct (at List_literal.nil, [ var "x" ])));
+  show
+    (at
+       (Syntax.Expr.Field
+          ( cons [ var "x"; var "rest" ]
+          , at (Syntax.Decl_path.Path (Syntax.Path.name "f")) )));
+  let p = pcons [ pvar "x"; pcons [ pvar "y"; pvar "rest" ] ] in
+  Round_trip.pattern p;
+  print_endline (Printer.pattern p);
+  [%expect
+    {|
+    .Cons (x, rest)
+    .Cons (x, .Cons (y, rest))
+    [x; []]
+    .Cons x
+    .Cons (x, [], [])
+    .Nil x
+    (.Cons (x, rest)).f
+    .Cons (x, .Cons (y, rest))
     |}]
 ;;

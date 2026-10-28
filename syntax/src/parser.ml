@@ -129,6 +129,29 @@ let delimited t ~opener ~close:closer ~sep ~item =
   items
 ;;
 
+(** [[a; b]], with an optional trailing [;]: the items, each with the [[] or
+    [;] before it, and the [\]], or the whole [[]] if there are none. *)
+let list_items t ~item =
+  let open_loc = loc t in
+  expect t Lbracket;
+  let rec loop before acc =
+    if is t Rbracket
+    then List.rev acc
+    else (
+      let acc = (before, item t) :: acc in
+      if is t Semi
+      then (
+        let semi = loc t in
+        advance t;
+        loop semi acc)
+      else List.rev acc)
+  in
+  let items = loop open_loc [] in
+  let close_loc = loc t in
+  close t Rbracket ~opener:Lbracket ~open_loc;
+  items, if List.is_empty items then Loc.merge open_loc close_loc else close_loc
+;;
+
 let lident t ~what =
   match peek t with
   | Lident name ->
@@ -454,6 +477,7 @@ let starts_pattern_atom : Token.t -> bool = function
   | True
   | False
   | Lparen
+  | Lbracket
   | Lbrace -> true
   | _ -> false
 ;;
@@ -556,6 +580,9 @@ and pattern_atom t : Pattern.t =
         | _ -> None);
       since t start pattern.txt)
   | Lbrace -> record_pattern t
+  | Lbracket ->
+    let items, close = list_items t ~item:pattern in
+    List_literal.pattern ~items ~close
   | _ -> expected t "a pattern"
 
 and record_pattern t : Pattern.t =
@@ -611,6 +638,7 @@ let starts_atom : Token.t -> bool = function
   | True
   | False
   | Lparen
+  | Lbracket
   | Lbrace
   | Quote_open
   | Expect_open
@@ -726,8 +754,15 @@ and fun_ t ~seq : Expr.t =
   if List.is_empty params
   then (
     match peek t with
-    | Uident _ | Label _ | Int _ | Char _ | String _ | True | False | Lbrace ->
-      fail (loc t) pattern_parameter
+    | Uident _
+    | Label _
+    | Int _
+    | Char _
+    | String _
+    | True
+    | False
+    | Lbrace
+    | Lbracket -> fail (loc t) pattern_parameter
     | _ -> expected t "a parameter");
   expect t Arrow;
   let body = expr t ~seq in
@@ -937,6 +972,9 @@ and atom t : Expr.t =
     close t End ~opener:Struct ~open_loc:struct_loc;
     close t Quote_close ~opener:Quote_open ~open_loc:start;
     expr_since t start (Struct_quote toplevels)
+  | Lbracket ->
+    let items, close = list_items t ~item:entry_value in
+    List_literal.expr ~items ~close
   | Quote_open ->
     advance t;
     let e = expr t in
@@ -1199,14 +1237,7 @@ let rec toplevel t : Toplevel.t =
         let name = lident t ~what:"a parameter" in
         expect t In;
         let open_loc = loc t in
-        (match
-           delimited
-             t
-             ~opener:Lbracket
-             ~close:Rbracket
-             ~sep:Semi
-             ~item:entry_value
-         with
+        (match List.map (fst (list_items t ~item:entry_value)) ~f:snd with
          | [] -> fail open_loc "a parameterised benchmark needs an argument"
          | args -> Some { Bench_param.name; args })
       | _ -> None

@@ -21,15 +21,15 @@ let show to_sexp f =
 
 let int = Core.Sexp.sexp_of_int
 let ints = Core.Sexp.sexp_of_list int
-let l = Cons (1, Cons (2, Cons (3, Nil)))
+let l = [1; 2; 3]
 
 let%expect_test "List" =
   show int (fun _ -> Core.List.hd_exn l);
-  show int (fun _ -> Core.List.hd_exn Nil);
+  show int (fun _ -> Core.List.hd_exn []);
   show ints (fun _ -> Core.List.tl_exn l);
-  show ints (fun _ -> Core.List.tl_exn Nil);
+  show ints (fun _ -> Core.List.tl_exn []);
   show int (fun _ -> Core.List.last_exn l);
-  show int (fun _ -> Core.List.last_exn Nil);
+  show int (fun _ -> Core.List.last_exn []);
   show int (fun _ -> Core.List.nth_exn l 2);
   show int (fun _ -> Core.List.nth_exn l 3);
   show int (fun _ -> Core.List.nth_exn l (-1));
@@ -43,9 +43,9 @@ let%expect_test "List" =
     (fun _ -> Core.List.assoc_exn Core.Int.equal 4 (Core.List.zip_exn l l));
   show
     (Core.Sexp.sexp_of_list (Core.Sexp.sexp_of_pair int int))
-    (fun _ -> Core.List.zip_exn l (Cons (1, Nil)));
+    (fun _ -> Core.List.zip_exn l [1]);
   show ints (fun _ -> Core.List.map2_exn Core.Int.add l l);
-  show ints (fun _ -> Core.List.map2_exn Core.Int.add l Nil);
+  show ints (fun _ -> Core.List.map2_exn Core.Int.add l []);
   [%expect {|
     1
     Failure: List.hd_exn: empty list
