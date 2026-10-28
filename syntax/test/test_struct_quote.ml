@@ -67,13 +67,20 @@ let%expect_test "expansion" =
   expand {|.< struct type t = .~kind let x : .~ty = .~e include .~items end >.|};
   [%expect
     {|
+    let antiquote_0 : .Stag.Type_decl.Kind.t = kind in
+    let antiquote_1 : .Stag.Type_expr.t = ty in
+    let antiquote_2 : .Stag.Expr.t = e in
+    let antiquote_3 : .list[.Stag.Toplevel.t] = items in
     .Cons
-      (.Stag.Toplevel.Type {`name = "t"; `params = .Nil; `kind = kind},
-       .Cons (.Stag.Toplevel.Let ("x", .Nil, .Some ty, e), .Stag.append items .Nil))
+      (.Stag.Toplevel.Type {`name = "t"; `params = .Nil; `kind = antiquote_0},
+       .Cons
+         (.Stag.Toplevel.Let ("x", .Nil, .Some antiquote_1, antiquote_2),
+          antiquote_3))
     |}];
   expand {|.< struct let q = .< .~x >. module M = .~items end >.|};
   [%expect
     {|
+    let antiquote_0 : .list[.Stag.Toplevel.t] = items in
     .Cons
       (.Stag.Toplevel.Let
          ("q",
@@ -81,7 +88,7 @@ let%expect_test "expansion" =
           .None,
           .Stag.Expr.Quote (.Stag.Expr.Splice
             {`expr = .Stag.Expr.Var (.Stag.Path.Name "x", .None); `subs = .None})),
-       .Cons (.Stag.Toplevel.Module ("M", items), .Nil))
+       .Cons (.Stag.Toplevel.Module ("M", antiquote_0), .Nil))
     |}];
   expand {|.< struct include%inline .~e end%inline end >.|};
   [%expect

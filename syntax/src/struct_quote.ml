@@ -25,7 +25,22 @@ module Bound = struct
     | Expr -> con "Stag.Expr.t"
   ;;
 
-  (* No program can name it, so the antiquotes see the struct quote's scope. *)
+  (* Valid, so that erased code holding the expansion is syntax, and in no
+     antiquote, so that none captures the bindings before it. *)
+  let prefix antiquotes =
+    let sources =
+      List.map antiquotes ~f:(fun (antiquote : Antiquote.t) ->
+        Printer.expr antiquote.expr)
+    in
+    let rec go prefix =
+      if List.exists sources ~f:(fun source ->
+           String.is_substring source ~substring:prefix)
+      then go (prefix ^ "_")
+      else prefix
+    in
+    go "antiquote_"
+  ;;
+
   let var t ~loc : Expr.t =
     Located.create ~loc (Expr.Var (Path (Path.name t.name), None))
   ;;
@@ -55,10 +70,13 @@ let expand_exn toplevels ~loc =
              , "An antiquote of a struct quote takes no substitutions: write \
                 `.~e`, of a `Stag.Expr.t`" ));
       let index = Queue.length bound in
-      Queue.enqueue
-        bound
-        { Bound.antiquote; name = sprintf "%%antiquote%d" index };
+      Queue.enqueue bound antiquote;
       Antiquote.placeholder index)
+  in
+  let prefix = Bound.prefix (Queue.to_list bound) in
+  let bound =
+    Queue.mapi bound ~f:(fun i antiquote ->
+      { Bound.antiquote; name = sprintf "%s%d" prefix i })
   in
   let node txt = Located.create ~loc txt in
   let resolved name = Decl_path.Resolved (Prelude_path.canonical name) in
