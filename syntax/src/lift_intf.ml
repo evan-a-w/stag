@@ -26,7 +26,6 @@ end
 module type S = sig
   type t
 
-
   val lit : Syntax.Lit.t -> t
   val type_expr : Syntax.Type_expr.t -> t
   val type_param : Syntax.Type_decl.Param.t Located.t -> t
@@ -35,12 +34,14 @@ module type S = sig
   val pattern : Syntax.Pattern.t -> t
   val expr : Syntax.Expr.t -> t
   val toplevel : Syntax.Toplevel.t -> t
+
   (** [antiquote] replaces a splice in the position of the kind, unless
       [None]: an item's by the list of declarations it stands for. *)
   val program
     :  ?antiquote:(Antiquote.Kind.t -> Syntax.Expr.t -> t option)
     -> Syntax.Program.t
     -> t
+
   val list : ('a -> t) -> 'a list -> t
   val option : ('a -> t) -> 'a option -> t
 end
