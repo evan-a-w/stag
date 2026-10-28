@@ -21,3 +21,6 @@ val shadowed : string -> has:([ `Type | `Module ] -> string -> bool) -> bool
 (** A canonical name for humans: without [root] for the prelude's, unless
     [shadowed] (by default, never), with [root] (eg. [prelude.option]). *)
 val to_string_hum : ?shadowed:(string -> bool) -> string -> string
+
+(** The last name of a canonical name, as declared: [x] of [M.N.x]. *)
+val short_name : string -> string

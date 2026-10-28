@@ -72,7 +72,7 @@ let%expect_test "the prelude's signature" =
         val tuple : list[t] -> t
       end
       module Expr : sig
-        type t = Lit of Lit.t | Var of string * option[Type_expr.t] | App of t * t | Let of string * list[string * option[Type_expr.t]] * option[Type_expr.t] * t * t | Fun of list[string * option[Type_expr.t]] * t | Splice of {`expr : t; `subs : option[list[string * option[t]]]} | Quote of t | Tuple of list[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Field of t * Path.t[Field_ref.t] | Type of Type_expr.t | Match of t * list[Pattern.t * t] | Poly_record of list[string * t] | Poly_field of t * string | Poly_extend of list[string * t] * t | Poly_restrict of t * string | Poly_update of t * list[string * t] | Poly_variant of string * option[t] | Expect of string
+        type t = Lit of Lit.t | Var of string * option[Type_expr.t] | App of t * t | Let of string * list[string * option[Type_expr.t]] * option[Type_expr.t] * t * t | Fun of list[string * option[Type_expr.t]] * t | Splice of {`expr : t; `subs : option[list[string * option[t]]]} | Quote of t | Tuple of list[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Field of t * Path.t[Field_ref.t] | Record_update of t * list[Path.t[Field_ref.t] * t] | Type of Type_expr.t | Match of t * list[Pattern.t * t] | Poly_record of list[string * t] | Poly_field of t * string | Poly_extend of list[string * t] * t | Poly_restrict of t * string | Poly_update of t * list[string * t] | Poly_variant of string * option[t] | Expect of string
         val var : string -> t
         val construct : string -> list[t] -> t
         val int : int -> t
@@ -140,7 +140,7 @@ let app = f x y
 let fns = (fun x -> x, fun (x : int) _ -> fun y -> x)
 let l = let z = 1 in let w (a : int) : int = a in z; w
 let c = (C, C 1, C (1, 2), C ((1, 2)), M.C x)
-let r = ({x = 1; M.y = 2}, r.x, r.M.x)
+let r = ({x = 1; M.y = 2}, r.x, r.M.x, {r with x = 1; M.y = 2})
 let m = match e with | _ -> 1 | x -> 2 | 1 -> 3 | 'c' -> 4 | "s" -> 5 | true -> 6 | () -> 7
 let p = match e with (a, b) -> a | C -> 1 | C p -> 2 | M.C (p, q) -> 3 | C ((p, q)) -> 3 | {x = p; M.y = q} -> 4
 let q = match e with `A -> 1 | `A p -> 2 | {`x = p} -> 3 | {`x = p; ..} -> 4 | {`x = p; ..rest} -> 5
@@ -259,7 +259,7 @@ let%expect_test "constructors are made as the typechecker resolves them" =
            : bool)];
   [%expect
     {|
-    ((constructors 71)
+    ((constructors 72)
      (reflected
       (prelude.Stag.Path.Ref prelude.Stag.Type.Kind.Alias
        prelude.Stag.Type.Kind.Record prelude.Stag.Type.Kind.Variant))
@@ -300,6 +300,32 @@ let%expect_test "nodes are located where given" =
       ((Var x (((Con (int @ splice.stag:1:0-0) ()) @ splice.stag:1:0-0))) @
        splice.stag:1:0-0))
      @ splice.stag:1:0-0)
+    |}]
+;;
+
+let%expect_test "an update of fields by ref round trips" =
+  let at txt = Located.create ~loc:Loc.none txt in
+  let expr desc : Syntax.Expr.t = at desc in
+  let update =
+    expr
+      (Record_update
+         ( expr (Var (Syntax.Path.name "v", None))
+         , [ at (Syntax.Decl_path.Resolved "A.N.x"), expr (Lit (Int 1))
+           ; at (Syntax.Decl_path.Path (Syntax.Path.name "y")), expr (Lit Unit)
+           ] ))
+  in
+  let value = Syntax_value.Expr.to_value update in
+  print_endline (Treewalk.Value.to_string_hum value);
+  (match Syntax_value.Expr.of_value value ~loc:Loc.none with
+   | Ok update' ->
+     print_s [%sexp (update' : Syntax.Expr.t)];
+     print_s [%message "" ~equal:(Syntax.Expr.equal update update' : bool)]
+   | Error error -> print_error error);
+  [%expect
+    {|
+    Stag.Expr.Record_update (Stag.Expr.Var ("v", None), Cons ((Stag.Path.Ref <field A.N.x>, Stag.Expr.Lit (Stag.Lit.Int 1)), Cons ((Stag.Path.Name "y", Stag.Expr.Lit Stag.Lit.Unit), Nil)))
+    (Record_update (Var v ()) ((<A.N.x> (Lit (Int 1))) (y (Lit Unit))))
+    (equal true)
     |}]
 ;;
 

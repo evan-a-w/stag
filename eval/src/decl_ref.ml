@@ -23,7 +23,7 @@ let sexp_of_t { kind; name } =
     [ Atom (Kind.to_string kind); Atom (Prelude_path.to_string_hum name) ]
 ;;
 
-let short_name t = List.last_exn (String.split t.name ~on:'.')
+let short_name t = Prelude_path.short_name t.name
 
 let to_string_hum { kind; name } =
   sprintf "<%s %s>" (Kind.to_string kind) (Prelude_path.to_string_hum name)

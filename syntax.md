@@ -16,6 +16,8 @@ node, for good errors.
   minus, so `f -1` and `x-1` are `f (-1)` and `x (-1)` (write `Int.sub`).
   Printed values parenthesize negative arguments, `Some (-1)`, as OCaml does,
   so they will still parse once infix operators follow OCaml.
+  Nominal records print with their unqualified field names, `{x = 1; y = None}`,
+  which parse back where the record's type is known (see Type-directed fields).
 - Escapes, in chars and strings: `\n \t \r \b`, `\ ` (space), `\\ \" \'`,
   `\ddd` (3 decimal digits, at most 255) and `\xhh` (2 hex digits). In
   strings, a `\` at the end of a line skips the newline and the spaces and
@@ -70,6 +72,7 @@ f x y                               (* application, left assoc *)
 (a, b, c)   ()   (e)
 C   C e   C (a, b)   C ((a, b))     (* C (a, b): 2 args, or 1 tuple if C has 1 *)
 {x = 1; M.y = 2}   r.x   r.M.x      (* nominal records *)
+{r with x = 1; M.y = 2}             (* nominal update, may change type params *)
 {`x = 1; `y = true}   r.`x          (* polymorphic records *)
 {`x = v; `y = w | r}                (* extend *)
 r \ `x                              (* restrict *)
@@ -130,6 +133,48 @@ parentheses).
 (no patterns). `fun x y -> e` is `let f x y = e in f` for a fresh `f`: its
 type is that of such a let (so `let id = fun x -> x` is generalized, being a
 value), and it has no name to recurse by.
+
+### Type-directed fields and constructors
+
+As OCaml's disambiguation, an unqualified field (`x`, not `M.x`) or
+constructor (`A`) is looked up in the nominal type it is known to belong to,
+whether or not that type's names are in scope, and otherwise lexically (the
+innermost declaration in scope, as for other names). The known type wins over
+the lexical one: `v.x` with `v : N.r` is `N.r`'s `x` even where another type's
+`x` shadows it, and if `N.r` has no field `x` it is an error (`The record type
+N.r has no field x`, `The variant type M.v has no constructor C`), rather than
+a fallback. A qualified name or a `Stag.Path.Ref` always names its
+declaration. The known type is (after expanding aliases):
+
+- `e.x`: the type of `e`, which is checked first.
+- `{r with x = ...}`: the type of `r`, checked first, else the expected type.
+- `{x = ...}` and record patterns: the expected type if any, else the type of
+  the first qualified field if any, else the first of the types the fields
+  are of in scope, in field order, that has all of them. All fields must be
+  of that type: a qualified field of another is the error.
+- `C ...` and constructor patterns: the expected type.
+
+As in OCaml, `{r with x = ...}` is of `r`'s type but for the type parameters
+only in the types of the fields it gives: `{a with v = "s"}` with
+`a : p[int]` and `type p['a] = {v : 'a; w : int}` is a `p[string]`.
+
+The expected type of an expression is what its context is known to require
+at the point it is checked, as inference proceeds left to right: an annotated
+`let` or return type, a function's parameter type in an application (the
+function is checked first), a constructor's argument types or a field's type
+once the constructor or field is resolved, a component of an expected tuple,
+polymorphic record or variant, a `match` arm's or `let` body's or `e2` of
+`e1; e2` the type of the whole, `e` in `.< e >.` the code type's inner type,
+`e` in `.~e` the code type `<T>{..}` of the splice's type `T`.
+A pattern's expected type is the scrutinee's, and inside it each
+sub-pattern's that of its position. Where the type is only known later (eg. a
+parameter whose type is fixed by a later use), the lookup is lexical. So the
+order matters, and nothing warns of it (there is no `-principal`):
+`let f v = let _ = (v : N.r) in v.x` finds `N.r`'s `x`, but
+`let f v = let _ = v.x in (v : N.r)` the `x` in scope. Inside a quote, a
+non-function toplevel is a free variable of the quote, whose type is not its
+own (see modes.md), so in `.< N.v.x >.` the `x` is the one in scope whatever
+`N.v`'s type.
 
 ## Patterns
 

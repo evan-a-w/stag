@@ -748,7 +748,7 @@ end
     ((Constructor_arity_mismatch (constructor M.A) (expected 1) (got 0)) @
      t.stag:8:8-11)
     ((Missing_field M.y) @ t.stag:8:8-17)
-    ((Duplicate_field M.x) @ t.stag:8:27-30)
+    ((Repeated_field x) @ t.stag:8:27-30)
     ((Fields_of_different_types (field M.z) (expected_type M.r)
       (actual_type M.s))
      @ t.stag:8:18-21)
@@ -851,9 +851,9 @@ end
     val shorthand : int
     ((Unification_error
       (Row_mismatch
-       (RExtend M.n (PVar (Link Present)) (TVar (Unbound 25 1))
-        (RVar (Unbound 26 1)))
-       (RExtend n (PVar (Unbound 27 1)) (TVar (Link (TCon int ()))) REmpty)
+       (RExtend M.n (PVar (Link Present)) (TVar (Unbound 26 1))
+        (RVar (Unbound 27 1)))
+       (RExtend n (PVar (Unbound 28 1)) (TVar (Link (TCon int ()))) REmpty)
        (Missing_label M.n)))
      @ t.stag:4:19-30)
     |}]

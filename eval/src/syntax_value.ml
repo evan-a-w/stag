@@ -183,6 +183,10 @@ module To_value = struct
       con "Construct" [ decl_path Constructor p; list expr args ]
     | Record record_fields ->
       con "Record" [ list (pair (decl_path Field) expr) record_fields ]
+    | Record_update (e, record_fields) ->
+      con
+        "Record_update"
+        [ expr e; list (pair (decl_path Field) expr) record_fields ]
     | Field (e, p) -> con "Field" [ expr e; decl_path Field p ]
     | Type ty -> con "Type" [ type_expr ty ]
     | Match (e, arms) -> con "Match" [ expr e; list (pair pattern expr) arms ]
@@ -220,22 +224,24 @@ module To_value = struct
 
   let program = list toplevel
 
-  let reflected_decl =
-    option (fun ({ params; kind } : Reflected_decl.t) ->
-      let ref_ kind name = Value.Ref { kind; name } in
-      let kind =
-        match kind with
-        | Variant constructors ->
-          con
-            "Stag.Type.Kind.Variant"
-            [ list (pair (ref_ Constructor) (list type_expr)) constructors ]
-        | Record fields ->
-          con
-            "Stag.Type.Kind.Record"
-            [ list (pair (ref_ Field) type_expr) fields ]
-        | Alias ty -> con "Stag.Type.Kind.Alias" [ type_expr ty ]
-      in
-      Value.Record [| list type_param params; kind |])
+  let reflected_decl decl ~decl_type =
+    option
+      (fun ({ params; kind } : Reflected_decl.t) ->
+         let ref_ kind name = Value.Ref { kind; name } in
+         let kind =
+           match kind with
+           | Variant constructors ->
+             con
+               "Stag.Type.Kind.Variant"
+               [ list (pair (ref_ Constructor) (list type_expr)) constructors ]
+           | Record fields ->
+             con
+               "Stag.Type.Kind.Record"
+               [ list (pair (ref_ Field) type_expr) fields ]
+           | Alias ty -> con "Stag.Type.Kind.Alias" [ type_expr ty ]
+         in
+         Value.Record (decl_type, [| list type_param params; kind |]))
+      decl
   ;;
 end
 
@@ -654,6 +660,10 @@ module Of_value = struct
          | "Record", 1 ->
            Record (arg 0 (fields (pair (decl_path Lower ~loc) (expr ~loc))))
          | "Field", 2 -> Field (arg 0 (expr ~loc), arg 1 (decl_path Lower ~loc))
+         | "Record_update", 2 ->
+           Record_update
+             ( arg 0 (expr ~loc)
+             , arg 1 (fields (pair (decl_path Lower ~loc) (expr ~loc))) )
          | "Type", 1 -> Type (arg 0 (type_expr ~loc))
          | "Match", 2 ->
            Match

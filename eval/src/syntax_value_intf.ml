@@ -40,6 +40,9 @@ module type Syntax_value = sig
   module Toplevel : S with type t := Syntax.Toplevel.t
   module Program : S with type t := Syntax.Program.t
 
-  (** An [option[Stag.Type.Decl.t]]. *)
-  val reflected_decl : Reflected_decl.t option -> Value.t
+  (** An [option[Stag.Type.Decl.t]], given that record type. *)
+  val reflected_decl
+    :  Reflected_decl.t option
+    -> decl_type:Typed.Record_type.t
+    -> Value.t
 end

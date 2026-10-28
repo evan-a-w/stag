@@ -41,7 +41,7 @@ type t =
   ; mutable budget : Budget.t
   ; mutable output : string -> unit
   ; mutable on_expect : (string Located.t -> unit) option
-  ; mutable reflect : (string -> Reflected_decl.t option Or_error.t) option
+  ; mutable reflect : (string -> Value.t Or_error.t) option
     (** While evaluating at compile time. *)
   }
 
@@ -112,6 +112,9 @@ let captures t ~ident ~args ~body =
       go ~depth x
     | Tuple exprs | Construct (_, exprs) -> List.iter exprs ~f:(go ~depth)
     | Record fields -> go_fields ~depth fields
+    | Record_update (expr, fields) ->
+      go ~depth expr;
+      go_fields ~depth fields
     | Poly_record fields -> go_fields ~depth fields
     | Poly_extend (fields, expr) | Poly_update (expr, fields) ->
       go ~depth expr;
@@ -220,6 +223,10 @@ let map_children ~depth (expr : Typed.Expr.t) ~f =
     | Field (expr, field) ->
       let%map expr = same expr in
       Typed.Expr.Desc.Field (expr, field)
+    | Record_update (expr, fields) ->
+      let%bind expr = same expr in
+      let%map fields = map_fields fields ~f:same in
+      Typed.Expr.Desc.Record_update (expr, fields)
     | Match (expr, cases) ->
       let%bind expr = same expr in
       let%map cases = map_fields cases ~f:same in
@@ -403,7 +410,7 @@ let rec match_pattern env (pattern : Typed.Pattern.t) (value : Value.t) =
           || String.equal constructor.name constructor'.name)
     then match_all env pattern patterns values
     else Ok false
-  | Record fields, Record values ->
+  | Record fields, Record (_, values) ->
     if
       List.exists fields ~f:(fun ((field : Typed.Field_ref.t), _) ->
         field.index >= Array.length values)
@@ -605,19 +612,35 @@ and step t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
     Value.Construct (constructor, values)
   | Record fields ->
     let%map values = map_fields fields ~f:eval' in
-    let record = Array.create ~len:(List.length values) Value.Unit in
+    let record_type = (fst (List.hd_exn values) : Typed.Field_ref.t).record in
+    let record =
+      Array.create ~len:(Array.length record_type.fields) Value.Unit
+    in
     List.iter values ~f:(fun ((field : Typed.Field_ref.t), value) ->
       record.(field.index) <- value);
-    Value.Record record
+    Value.Record (record_type, record)
   | Field (expr, field) ->
     let%bind value = eval' expr in
     (match value with
-     | Record values when field.index < Array.length values ->
+     | Record (_, values) when field.index < Array.length values ->
        Ok values.(field.index)
      | _ ->
        Or_error.error_s
          [%message
            "Field of a non-record" (field : Typed.Field_ref.t) (value : Value.t)])
+  | Record_update (expr, fields) ->
+    let%bind value = eval' expr in
+    let%bind values = map_fields fields ~f:eval' in
+    (match value with
+     | Record (record_type, record)
+       when List.for_all values ~f:(fun ((field : Typed.Field_ref.t), _) ->
+              field.index < Array.length record) ->
+       let record = Array.copy record in
+       List.iter values ~f:(fun ((field : Typed.Field_ref.t), value) ->
+         record.(field.index) <- value);
+       Ok (Value.Record (record_type, record))
+     | _ ->
+       Or_error.error_s [%message "Update of a non-record" (value : Value.t)])
   | Match (scrutinee, cases) ->
     let value_cases, exception_cases =
       List.partition_map cases ~f:(fun ((pattern : Typed.Pattern.t), body) ->
@@ -704,9 +727,7 @@ and apply t (f : Value.t) arg ~loc =
      | Raise, exn -> raise_exn ~loc exn
      | Type_decl, Ref { kind = Type; name } ->
        (match t.reflect with
-        | Some reflect ->
-          let%map decl = reflect name in
-          Syntax_value.reflected_decl decl
+        | Some reflect -> reflect name
         | None ->
           runtime_error
             ~loc

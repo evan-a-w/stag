@@ -624,7 +624,7 @@ end
        ((Construct ((type_name t) (name B) (index 1)) () : t)
         (Record ((((type_name r) (name a) (index 0)) (Lit (Int 1) : int))) : r))
        : "t * r")))
-    (M.x (Tuple (B) (Record 1)))
+    (M.x (Tuple (B) (r (a 1))))
     (M.y 1)
     |}]
 ;;
@@ -925,7 +925,7 @@ let s = .~(w .<1>.)
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
         (RVar (Link (RVar (Link REmpty)))))
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 62 1)))
+        (RVar (Unbound 64 1)))
        (Presence_mismatch x)))
      @ t.stag:6:13-18)
     val x : int

@@ -106,13 +106,30 @@ module Constructor_ref = struct
   [@@deriving sexp_of]
 end
 
+module Record_type = struct
+  type t =
+    { name : string
+    ; fields : string array
+    }
+
+  let sexp_of_t t = Sexp.Atom t.name
+end
+
 module Field_ref = struct
   type t =
-    { type_name : string
-    ; name : string
+    { record : Record_type.t
     ; index : int
     }
-  [@@deriving sexp_of]
+
+  let name t = t.record.fields.(t.index)
+
+  let sexp_of_t t =
+    [%sexp
+      { type_name : string = t.record.name
+      ; name : string = name t
+      ; index : int = t.index
+      }]
+  ;;
 end
 
 module Pattern = struct
@@ -197,6 +214,7 @@ module Expr = struct
       | Construct of Constructor_ref.t * 'e list
       | Record of (Field_ref.t * 'e) list
       | Field of 'e * Field_ref.t
+      | Record_update of 'e * (Field_ref.t * 'e) list
       | Match of 'e * (Pattern.t * 'e) list
       | Poly_record of (string * 'e) list
       | Poly_field of 'e * string
@@ -238,6 +256,7 @@ module Expr = struct
     | Record fields -> snds fields
     | Poly_record fields -> snds fields
     | Poly_extend (fields, e) | Poly_update (e, fields) -> e :: snds fields
+    | Record_update (e, fields) -> e :: snds fields
     | Match (e, cases) -> e :: snds cases
   ;;
 
@@ -261,6 +280,7 @@ module Expr = struct
     | Construct _
     | Record _
     | Field _
+    | Record_update _
     | Match _
     | Poly_record _
     | Poly_field _
@@ -294,6 +314,7 @@ module Expr = struct
     | Construct _
     | Record _
     | Field _
+    | Record_update _
     | Match _
     | Poly_record _
     | Poly_field _

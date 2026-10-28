@@ -197,6 +197,11 @@ let rec expr t : Expr.t =
                   loc (decl_path t ~last:lident), expr t)))
          ; (fun t -> Field (expr t, loc (decl_path t ~last:lident)))
          ; (fun t ->
+             Record_update
+               ( expr t
+               , list t ~min:1 ~max:3 (fun t ->
+                   loc (decl_path t ~last:lident), expr t) ))
+         ; (fun t ->
              Match (expr t, list t ~min:1 ~max:3 (fun t -> pattern t, expr t)))
          ; (fun t ->
              Poly_record (list t ~min:1 ~max:3 (fun t -> label t, expr t)))

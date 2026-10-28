@@ -30,6 +30,14 @@ module Kind = struct
     | Type_variable_kind_mismatch of string
     | Unbound_constructor of Syntax.Path.t
     | Unbound_field of Syntax.Path.t
+    | No_such_constructor of
+        { type_name : string
+        ; constructor : string
+        }
+    | No_such_field of
+        { type_name : string
+        ; field : string
+        }
     | Type_arity_mismatch of
         { type_name : Syntax.Decl_path.t
         ; expected : int
@@ -49,6 +57,7 @@ module Kind = struct
         }
     | Duplicate_constructor of string
     | Duplicate_field of string
+    | Repeated_field of string
     | Constructor_arity_mismatch of
         { constructor : string
         ; expected : int
@@ -238,6 +247,13 @@ let rec kind_message (kind : Kind.t) ~show_type =
     sprintf "Unbound constructor %s" (Syntax.Path.to_string path)
   | Unbound_field path ->
     sprintf "Unbound record field %s" (Syntax.Path.to_string path)
+  | No_such_constructor { type_name; constructor } ->
+    sprintf
+      "The variant type %s has no constructor %s"
+      (show_type type_name)
+      constructor
+  | No_such_field { type_name; field } ->
+    sprintf "The record type %s has no field %s" (show_type type_name) field
   | Type_arity_mismatch { type_name; expected; got } ->
     sprintf
       "The type %s expects %d argument(s), but is given %d"
@@ -271,6 +287,8 @@ let rec kind_message (kind : Kind.t) ~show_type =
     sprintf "The constructor %s is defined more than once in this module" name
   | Duplicate_field name ->
     sprintf "The record field %s is defined more than once in this module" name
+  | Repeated_field name ->
+    sprintf "The field %s is given more than once in this record" name
   | Constructor_arity_mismatch { constructor; expected; got } ->
     sprintf
       "The constructor %s expects %d argument(s), but is applied to %d"

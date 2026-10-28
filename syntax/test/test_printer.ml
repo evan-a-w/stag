@@ -124,6 +124,9 @@ let%expect_test "minimal parentheses" =
     ; "{(f x) with `x = 1}"
     ; "{.~r with `x = 1; `y = (a; b)}"
     ; "{r.x with `x = 1}"
+    ; "{r with x = 1; M.y = (a; b)}"
+    ; "{(`A) with x = 1}"
+    ; "{r.M.x with M.y = {s with z = 2}}"
     ; "f r \\ `x"
     ; "(f r) \\ `x"
     ; ".~r \\ `x"
@@ -240,6 +243,9 @@ let%expect_test "minimal parentheses" =
     {(f x) with `x = 1}
     {.~r with `x = 1; `y = (a; b)}
     {r.x with `x = 1}
+    {r with x = 1; M.y = (a; b)}
+    {(`A) with x = 1}
+    {r.M.x with M.y = {s with z = 2}}
     f (r \ `x)
     (f r) \ `x
     .~r \ `x

@@ -326,6 +326,7 @@ let level (e : Expr.t) : Level.t =
   | Poly_record _
   | Poly_extend _
   | Poly_update _
+  | Record_update _
   | Expect _ -> Atom
 ;;
 
@@ -367,7 +368,8 @@ let needs_parens_before_postfix e =
 
 let is_record e =
   match (unwrap e).txt with
-  | Record _ | Poly_record _ | Poly_extend _ | Poly_update _ -> true
+  | Record _ | Record_update _ | Poly_record _ | Poly_extend _ | Poly_update _
+    -> true
   | _ -> false
 ;;
 
@@ -513,28 +515,30 @@ and bare (ctx : Ctx.t) (e : Expr.t) =
       ~trailing:false
       ~tail:(group (text " |" ^^ nest 2 (line ^^ entry record)))
       (poly_fields ~last_after:After.Bar fields)
-  | Poly_update (record, fields), _ ->
-    let record =
-      let parenthesize =
-        match (unwrap record).txt with
-        | Poly_variant _ -> true
-        | _ -> false
-      in
-      expr ~parenthesize (Ctx.at Splice) record
-    in
-    group
-      (text "{"
-       ^^ record
-       ^^ text " with"
-       ^^ nest
-            2
-            (line
-             ^^ separate (text ";" ^^ line) (poly_fields fields)
-             ^^ if_break ";")
-       ^^ cut
-       ^^ text "}")
+  | Poly_update (record, fields), _ -> update record (poly_fields fields)
+  | Record_update (record, fields), _ ->
+    update
+      record
+      (List.map fields ~f:(fun (p, value) -> field (decl_path p) value))
   | Expect { txt = ""; _ }, _ -> text "[%expect]"
   | Expect s, _ -> text "[%expect " ^^ text (quoted_string s.txt) ^^ text "]"
+
+and update record fields =
+  let record =
+    let parenthesize =
+      match (unwrap record).txt with
+      | Poly_variant _ -> true
+      | _ -> false
+    in
+    expr ~parenthesize (Ctx.at Splice) record
+  in
+  group
+    (text "{"
+     ^^ record
+     ^^ text " with"
+     ^^ nest 2 (line ^^ separate (text ";" ^^ line) fields ^^ if_break ";")
+     ^^ cut
+     ^^ text "}")
 
 (* [C1 (C2 (... Cn args))], with the heads on one line, as each would otherwise
    be indented further than the last, quadratically in deep chains. *)
