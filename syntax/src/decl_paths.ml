@@ -130,16 +130,16 @@ let map (t : Toplevel.t) ~f =
           , Option.map ty ~f:type_expr
           , expr (String.Set.of_list (binding_names bs)) e )
       | Type { name; params; kind } ->
-        let kind : Type_decl.Kind.t =
-          match kind with
+        let rec decl_kind : Type_decl.Kind.t -> Type_decl.Kind.t = function
           | Variant cs ->
             Variant
               (List.map cs ~f:(fun (n, ts) -> n, List.map ts ~f:type_expr))
           | Record fs -> Record (List.map fs ~f:(fun (n, t) -> n, type_expr t))
           | Alias t -> Alias (type_expr t)
           | Abstract -> Abstract
+          | Malformed kind -> Malformed (decl_kind kind)
         in
-        Type { name; params; kind }
+        Type { name; params; kind = decl_kind kind }
       | Exception (n, ts) -> Exception (n, List.map ts ~f:type_expr)
       | Module (n, ts) -> Module (n, List.map ts ~f:toplevel)
       | Module_splice (n, e, expansion) ->

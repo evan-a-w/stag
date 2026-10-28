@@ -317,7 +317,8 @@ and elaborate_con
   in
   let%map.Result ty =
     match decl.decl.kind with
-    | Variant _ | Record _ | Abstract -> Ok (Type.TCon (decl.name, args))
+    | Variant _ | Record _ | Abstract | Malformed _ ->
+      Ok (Type.TCon (decl.name, args))
     | Alias body ->
       let instances = Hashtbl.find_multi expansions decl.name in
       (match
@@ -395,7 +396,10 @@ let declare
       ; params
       ; wrap_error
       ; checked = None
-      ; failed = false
+      ; failed =
+          (match decl.kind with
+           | Malformed _ -> true
+           | Variant _ | Record _ | Alias _ | Abstract -> false)
       ; reflected = None
       };
   let declares names table =
@@ -405,10 +409,13 @@ let declare
         ~key:(Module_scope.canonical_name module_ member.txt)
         ~data:name)
   in
-  match decl.kind with
-  | Alias _ | Abstract -> ()
-  | Variant constructors -> declares constructors t.constructor_types
-  | Record fields -> declares fields t.field_types
+  let rec declare_members : Type_decl.Kind.t -> unit = function
+    | Alias _ | Abstract -> ()
+    | Malformed kind -> declare_members kind
+    | Variant constructors -> declares constructors t.constructor_types
+    | Record fields -> declares fields t.field_types
+  in
+  declare_members decl.kind
 ;;
 
 let declare_exception ?(wrap_error = Fn.id) t module_ (name : Name.t) args =
@@ -465,6 +472,8 @@ let define t (decl : Decl.t) =
       ( Signature.Type_decl.Kind.Alias body
       , Some (Reflected_decl.Kind.Alias syntax) )
     | Abstract -> Ok (Signature.Type_decl.Kind.Abstract, None)
+    | Malformed _ ->
+      raise_s [%message "Type_env.define: malformed" (decl.name : string)]
     | Variant constructors ->
       let%map.Result constructors =
         map_result constructors ~f:(fun ((name : Name.t), args) ->

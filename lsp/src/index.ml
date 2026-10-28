@@ -396,12 +396,15 @@ let rec declarations
       Hashtbl.set values ~key:(canonical name) ~data:(name, bindings, body)
     | Type { name; params = _; kind } ->
       set t.types name;
-      (match kind with
-       | Variant constructors ->
-         List.iter constructors ~f:(fun (name, _) -> set t.constructors name)
-       | Record fields ->
-         List.iter fields ~f:(fun (name, _) -> set t.fields name)
-       | Alias _ | Abstract -> ())
+      let rec members : Syntax.Type_decl.Kind.t -> unit = function
+        | Variant constructors ->
+          List.iter constructors ~f:(fun (name, _) -> set t.constructors name)
+        | Record fields ->
+          List.iter fields ~f:(fun (name, _) -> set t.fields name)
+        | Malformed kind -> members kind
+        | Alias _ | Abstract -> ()
+      in
+      members kind
     | Exception (name, _) -> set t.constructors name
     | Module (name, toplevels) ->
       declarations

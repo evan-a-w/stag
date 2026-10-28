@@ -275,7 +275,7 @@ let type_decl
       let+ t = type_expr t t' in
       Type_decl.Kind.Alias t
     | Abstract, Abstract -> Some kind
-    | (Variant _ | Record _ | Alias _ | Abstract), _ -> None
+    | (Variant _ | Record _ | Alias _ | Abstract | Malformed _), _ -> None
   in
   { Type_decl.name = n; params; kind }
 ;;

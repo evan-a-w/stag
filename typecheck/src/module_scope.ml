@@ -179,11 +179,15 @@ let members (toplevel : Toplevel.t) : (Member.t * Name.t) list =
   | Type { name; params = _; kind } ->
     member Type name
     ::
-    (match kind with
-     | Alias _ | Abstract -> []
-     | Variant constructors ->
-       List.map constructors ~f:(fun (name, _) -> member Constructor name)
-     | Record fields -> List.map fields ~f:(fun (name, _) -> member Field name))
+    (let rec kind_members : Type_decl.Kind.t -> _ = function
+       | Alias _ | Abstract -> []
+       | Malformed kind -> kind_members kind
+       | Variant constructors ->
+         List.map constructors ~f:(fun (name, _) -> member Constructor name)
+       | Record fields ->
+         List.map fields ~f:(fun (name, _) -> member Field name)
+     in
+     kind_members kind)
   | Exception (name, _) -> [ member Constructor name ]
   | Module (name, _) | Module_splice (name, _, _) ->
     [ (Module, name.txt), name ]
@@ -244,13 +248,16 @@ let rec unique ~path taken toplevels ~report =
       let kept (name, _) =
         not (List.exists duplicates ~f:(fun (_, at) -> phys_equal at name))
       in
-      let kind : Type_decl.Kind.t =
-        match decl.kind with
+      let rec kept_kind : Type_decl.Kind.t -> Type_decl.Kind.t = function
         | Variant constructors -> Variant (List.filter constructors ~f:kept)
         | Record fields -> Record (List.filter fields ~f:kept)
+        | Malformed kind -> Malformed (kept_kind kind)
         | (Alias _ | Abstract) as kind -> kind
       in
-      Some { toplevel with txt = Toplevel.Type { decl with kind } }
+      Some
+        { toplevel with
+          txt = Toplevel.Type { decl with kind = kept_kind decl.kind }
+        }
     | ( _ :: _
       , ( Let _
         | Exception _

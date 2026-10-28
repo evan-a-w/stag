@@ -109,7 +109,8 @@ module To_value = struct
   ;;
 
   let type_decl ({ name = decl_name; params; kind } : Type_decl.t) =
-    let decl_kind : Type_decl.Kind.t -> Value.t = function
+    let rec decl_kind : Type_decl.Kind.t -> Value.t = function
+      | Malformed kind -> decl_kind kind
       | Variant constructors ->
         con
           "Stag.Type_decl.Kind.Variant"

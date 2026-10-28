@@ -133,6 +133,9 @@ module Type_decl = struct
       | Record of (Name.t * Type_expr.t) list
       | Alias of Type_expr.t
       | Abstract
+      | Malformed of t
+      (** What parsed of a declaration with a syntax error, whose members'
+          types may be missing. *)
     [@@deriving sexp_of, compare, equal]
   end
 

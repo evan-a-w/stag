@@ -685,27 +685,30 @@ let type_decl roots ({ name; params; kind } : Type_decl.t) =
            (group (separate (text "," ^^ line) (List.map params ~f:type_param)))
       ^^ text "]"
   in
-  match kind with
-  | Abstract -> lhs
-  | Alias t -> definition lhs (type_expr_doc roots t)
-  | Variant [] -> lhs ^^ text " = |"
-  | Variant constructors ->
-    group
-      (lhs
-       ^^ text " ="
-       ^^ nest
-            2
-            (concat
-               (List.mapi constructors ~f:(fun i c ->
-                  line
-                  ^^ (if i = 0 then if_break "| " else text "| ")
-                  ^^ constructor_decl roots c))))
-  | Record fields ->
-    lhs
-    ^^ text " = "
-    ^^ braces
-         (List.map fields ~f:(fun ((name : Name.t), t) ->
-            definition ~sep:" :" (text name.txt) (type_expr_doc roots t)))
+  let rec kind_doc : Type_decl.Kind.t -> _ = function
+    | Abstract -> lhs
+    | Malformed kind -> kind_doc kind
+    | Alias t -> definition lhs (type_expr_doc roots t)
+    | Variant [] -> lhs ^^ text " = |"
+    | Variant constructors ->
+      group
+        (lhs
+         ^^ text " ="
+         ^^ nest
+              2
+              (concat
+                 (List.mapi constructors ~f:(fun i c ->
+                    line
+                    ^^ (if i = 0 then if_break "| " else text "| ")
+                    ^^ constructor_decl roots c))))
+    | Record fields ->
+      lhs
+      ^^ text " = "
+      ^^ braces
+           (List.map fields ~f:(fun ((name : Name.t), t) ->
+              definition ~sep:" :" (text name.txt) (type_expr_doc roots t)))
+  in
+  kind_doc kind
 ;;
 
 module Kind = struct
