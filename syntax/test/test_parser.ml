@@ -1195,7 +1195,8 @@ let%expect_test "a type splice defining a type is the whole definition" =
   prog "type r = .~t * int";
   prog "type r = .~t -> int";
   prog "type r = (.~t * int)";
-  [%expect {|
+  [%expect
+    {|
     t.stag:1:13-14: a type splice `.~e` defines the whole type: to splice part of an alias, write it in parentheses, as in `type t = (.~e * u)`
     t.stag:1:13-15: a type splice `.~e` defines the whole type: to splice part of an alias, write it in parentheses, as in `type t = (.~e * u)`
     ((Type

@@ -260,7 +260,8 @@ let%expect_test "a group with a line ended before a flat line breaks" =
         ^^ hardline
         ^^ group (text "a (* a *)" ^^ end_line ^^ nest 2 line)
         ^^ text "b"));
-  [%expect {|
+  [%expect
+    {|
     -- width 15
     x
     a (* a *)

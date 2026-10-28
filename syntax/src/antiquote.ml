@@ -42,7 +42,8 @@ let map ?type_expr:replace_type_expr toplevels ~f =
       | Splice e ->
         (match replace_type_expr with
          | Some replace when depth = 0 ->
-           (replace { kind = Type_expr; expr = e; loc = t.loc; has_subs = false }
+           (replace
+              { kind = Type_expr; expr = e; loc = t.loc; has_subs = false }
             : Type_expr.t)
              .txt
          | Some _ | None ->

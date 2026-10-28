@@ -336,7 +336,8 @@ let ann = Stag.Type_expr.Splice (Stag.Expr.var "t")
 include .~(Cons (Stag.Toplevel.Let ("x", Nil, Some ann, Stag.Code.erase .< helper >.), Nil))
 let shown = print_endline (Int.to_string x)
 |};
-  [%expect {|
+  [%expect
+    {|
     module A : sig
       val helper : int
       val t : Stag.Type_expr.t
@@ -360,7 +361,8 @@ let f (n : .~int_ty) = match n with 0 -> 0 | _ -> g (Int.sub n 1)
 let g n = match n with 0 -> 0 | _ -> f (Int.sub n 1)
 let shown = print_endline (Int.to_string (Int.add y (f 5)))
 |};
-  [%expect {|
+  [%expect
+    {|
     module A : sig
       val int_ty : Stag.Type_expr.t
       val y : int
@@ -385,7 +387,8 @@ module M = struct
 end
 let shown = print_endline (Int.to_string M.y)
 |};
-  [%expect {|
+  [%expect
+    {|
     module A : sig
       val x : string
       module M : sig
@@ -416,7 +419,8 @@ let shown = print_endline (Int.to_string (size (Node (F (Cons (Leaf, Cons (Leaf,
 exception E of .~tree
 let caught = match raise (E Leaf) with _ -> () | exception E Leaf -> print_endline "E Leaf"
 |};
-  [%expect {|
+  [%expect
+    {|
     module A : sig
       val tree : Stag.Type_expr.t
       val kind : Stag.Type_decl.Kind.t
@@ -441,7 +445,8 @@ let%expect_test "cycles through type splices" =
 let self (t : Stag.Type.t['a]) = Stag.Type.expr t
 type t = int * .~(self (type t))
 |};
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 3, characters 15-32:
     3 | type t = int * .~(self (type t))
                        ^^^^^^^^^^^^^^^^^
@@ -455,7 +460,8 @@ let kind_of (ty : Stag.Type.t['a]) =
   | _ -> Stag.Type_decl.Kind.Abstract
 type t = .~(kind_of (type t))
 |};
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 6, characters 5-6:
     6 | type t = .~(kind_of (type t))
              ^
@@ -466,7 +472,8 @@ type t = .~(kind_of (type t))
 let ty u = Stag.Type_expr.con (Int.to_string x) Nil
 let x : .~(ty 0) = 1
 |};
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 3, characters 11-13:
     3 | let x : .~(ty 0) = 1
                    ^^
@@ -485,7 +492,8 @@ let%expect_test "t" =
   print_endline (Int.to_string y);
   [%expect {| 4 |}]
 |x};
-  [%expect {xxx|
+  [%expect
+    {xxx|
     module A : sig
       val int_ty : Stag.Type_expr.t
     end
@@ -512,7 +520,8 @@ let f (n : .~int_ty) =
   let a = Int.add n 1 in
   Int.add a "oops"
 |};
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 5, characters 12-18:
     5 |   Int.add a "oops"
                     ^^^^^^
@@ -523,7 +532,8 @@ let f (n : .~int_ty) =
 let bad = Stag.Type_expr.con "nope" Nil
 exception E of .~bad
 |};
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 3, characters 15-20:
     3 | exception E of .~bad
                        ^^^^^
@@ -536,7 +546,8 @@ let kind = Stag.Type_decl.Kind.Variant (Cons (("A", Cons (Stag.Type_expr.con "no
 type t = .~kind
 let a = A
 |};
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 3, characters 9-15:
     3 | type t = .~kind
                  ^^^^^^
@@ -549,7 +560,8 @@ let a = A
 let n = 1
 type t = .~n
 |};
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 3, characters 11-12:
     3 | type t = .~n
                    ^
@@ -565,11 +577,14 @@ let%expect_test "antiquote errors are at the antiquote in each position" =
     ; sprintf ".< struct let x : code[.~%s] = 1 end >." bad
     ; sprintf ".< struct let x : {`a : .~%s} = 1 end >." bad
     ; sprintf ".< struct let x = .~(Stag.Type_expr.con \"int\" Nil) end >."
-    ; sprintf ".< struct let%%expect_test \"t\" = .~(Stag.Type_expr.con \"int\" Nil) end >."
+    ; sprintf
+        ".< struct let%%expect_test \"t\" = .~(Stag.Type_expr.con \"int\" Nil) \
+         end >."
     ; sprintf ".< struct module M = .~%s end >." bad
     ]
     ~f:(fun quote -> check (sprintf "let q = %s\n" quote));
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 1, characters 29-46:
     1 | let q = .< struct type t = .~(Stag.Expr.int 1) end >.
                                      ^^^^^^^^^^^^^^^^^
@@ -613,7 +628,8 @@ let y = 7
 module N = .~M.z
 let shown = print_endline (Int.to_string N.x)
 |};
-  [%expect {|
+  [%expect
+    {|
     module A : sig
       val v : Stag.Expr.t
       val quoted : <list[Stag.Toplevel.t]>{A.v : Stag.Expr.t; ..'a}
@@ -644,7 +660,8 @@ let q =
     include .~(say "items" Nil)
   end >.
 |};
-  [%expect {|
+  [%expect
+    {|
     module A : sig
       val say : string -> 'a -> 'a
       val q : list[Stag.Toplevel.t]
@@ -654,5 +671,46 @@ let q =
     type
     expr
     items
+    |}]
+;;
+
+let%expect_test "splices given by type splices" =
+  check
+    {|
+let kind = Stag.Type_decl.Kind.Splice (Stag.Expr.var "other")
+type t = .~kind
+|};
+  check
+    ~run:true
+    {|
+let int_ty = Stag.Type_expr.con "int" Nil
+let nested = Stag.Type_expr.Splice (Stag.Expr.var "int_ty")
+let x : .~nested = 1
+let shown = print_endline (Int.to_string x)
+|};
+  check
+    {|
+exception Fail
+let failing (u : unit) : Stag.Type_expr.t = raise Fail
+let x : .~(failing ()) = 1
+|};
+  [%expect
+    {|
+    File "a.stag", line 3, characters 9-15:
+    3 | type t = .~kind
+                 ^^^^^^
+    Error: This type splice gave a definition that is itself a splice, `Stag.Type_decl.Kind.Splice`
+    module A : sig
+      val int_ty : Stag.Type_expr.t
+      val nested : Stag.Type_expr.t
+      val x : int
+      val shown : unit
+    end
+    --- output ---
+    1
+    File "a.stag", line 4, characters 8-22:
+    4 | let x : .~(failing ()) = 1
+                ^^^^^^^^^^^^^^
+    Error: This type splice failed at compile time: Uncaught exception A.Fail
     |}]
 ;;

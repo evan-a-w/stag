@@ -91,7 +91,8 @@ type t =
 let create fresh =
   { fresh
   ; evaluate_splice =
-      (fun _ _ ~loc:_ -> raise_s [%message "Type_env: no type splice evaluator"])
+      (fun _ _ ~loc:_ ->
+        raise_s [%message "Type_env: no type splice evaluator"])
   ; type_splices = []
   ; types = String.Table.create ()
   ; exceptions = String.Table.create ()
@@ -286,7 +287,9 @@ let rec elaborate' t module_ vars ~splices ~expansions (expr : Type_expr.t)
       let%map.Result ty, syntax =
         elaborate generated
         |> Result.map_error ~f:(fun error ->
-          Typecheck_error.create ~loc (In_type_splice { generated; error = error.kind }))
+          Typecheck_error.create
+            ~loc
+            (In_type_splice { generated; error = error.kind }))
       in
       ty, syntax.txt
     | Splice _ -> Error (Typecheck_error.create ~loc Misplaced_type_splice)
@@ -340,7 +343,9 @@ and elaborate_con
     map_result (List.zip_exn decl.decl.params args) ~f:(fun (param, arg) ->
       match param.txt, arg with
       | Ty _, Ty ty ->
-        let%map.Result ty, syntax = elaborate' t module_ vars ~splices ~expansions ty in
+        let%map.Result ty, syntax =
+          elaborate' t module_ vars ~splices ~expansions ty
+        in
         Type.ATy ty, Type_expr.Ty syntax
       | Row _, Row row ->
         let%map.Result row, syntax =

@@ -2154,7 +2154,9 @@ let define_type t (program : Program_env.t) splice =
   in
   match toplevel.txt with
   | Type decl ->
-    let generated = { toplevel with txt = Syntax.Toplevel.Type { decl with kind } } in
+    let generated =
+      { toplevel with txt = Syntax.Toplevel.Type { decl with kind } }
+    in
     let%map.Result () =
       Type_env.set_definition
         program.type_env
@@ -2397,9 +2399,7 @@ let program_env t interpreter =
     ; unfinished = Stack.create ()
     }
   in
-  Type_env.set_evaluate_splice
-    program.type_env
-    (evaluate_type_splice t program);
+  Type_env.set_evaluate_splice program.type_env (evaluate_type_splice t program);
   program
 ;;
 

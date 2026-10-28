@@ -36,6 +36,7 @@ module type Syntax_value = sig
   module type S = S
 
   module Type_expr : S with type t := Syntax.Type_expr.t
+
   module Type_decl : sig
     include S with type t := Syntax.Type_decl.t
     module Kind : S with type t := Syntax.Type_decl.Kind.t

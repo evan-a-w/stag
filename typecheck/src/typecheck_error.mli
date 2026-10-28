@@ -104,8 +104,7 @@ module Kind : sig
     | In_type_splice of
         { generated : Syntax.Type_expr.t
         ; error : t
-        }
-    (** An error in the type [generated] the type splice here gave. *)
+        } (** An error in the type [generated] the type splice here gave. *)
     | Type_splice_cycle
     (** Evaluating the type splice needs the type it gives. *)
     | Nested_definition_splice

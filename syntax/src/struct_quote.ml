@@ -15,7 +15,9 @@ module Bound = struct
       Located.create
         ~loc
         (Type_expr.Con
-           ( Located.create ~loc (Decl_path.Resolved (Prelude_path.canonical name))
+           ( Located.create
+               ~loc
+               (Decl_path.Resolved (Prelude_path.canonical name))
            , args ))
     in
     match kind with
@@ -33,8 +35,9 @@ module Bound = struct
         Printer.expr antiquote.expr)
     in
     let rec go prefix =
-      if List.exists sources ~f:(fun source ->
-           String.is_substring source ~substring:prefix)
+      if
+        List.exists sources ~f:(fun source ->
+          String.is_substring source ~substring:prefix)
       then go (prefix ^ "_")
       else prefix
     in

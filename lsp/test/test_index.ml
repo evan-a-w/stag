@@ -305,8 +305,12 @@ let g = f 2
     (fun client ->
        Client.did_open client "a.stag";
        [%expect {| |}];
-       print_at client "a.stag" [ 2, 4; 2, 15; 2, 23; 2, 31; 3, 5; 3, 12; 4, 8; 5, 8 ];
-       [%expect {|
+       print_at
+         client
+         "a.stag"
+         [ 2, 4; 2, 15; 2, 23; 2, 31; 3, 5; 3, 12; 4, 8; 5, 8 ];
+       [%expect
+         {|
          2:4 2:4-2:5 ```stag A.f : int -> int ```
          2:4 -> a.stag 2:4-2:5
          2:15 2:13-2:19 ```stag A.int_ty : Stag.Type_expr.t ```
@@ -341,7 +345,8 @@ module M = .~q
        Client.did_open client "a.stag";
        [%expect {| |}];
        print_at client "a.stag" [ 2, 27; 2, 41 ];
-       [%expect {|
+       [%expect
+         {|
          2:27 2:8-2:53 ```stag list[Stag.Toplevel.t] ```
          2:27 no definition
          2:41 2:41-2:42 ```stag type t ```
