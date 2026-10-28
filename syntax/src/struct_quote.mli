@@ -9,3 +9,9 @@ val expand
   :  Syntax.Toplevel.t list
   -> loc:Loc.t
   -> (Syntax.Expr.t, Loc.t * string) Result.t
+
+(** The declarations splice that a declaration with splices in type
+    positions, as [type t = .~e] or [let x : .~ty = e], is sugar for: as
+    [include .~(.< struct toplevel end >.)], its type splices the antiquotes,
+    its expression splices kept. [None] without type splices. *)
+val of_type_splices : Syntax.Toplevel.t -> Syntax.Expr.t option

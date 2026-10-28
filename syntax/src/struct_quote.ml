@@ -3,10 +3,13 @@ open Syntax
 
 exception Error of Loc.t * string
 
-let expand_exn toplevels ~loc =
+let expand_exn ?(types_only = false) toplevels ~loc =
   let antiquotes = Queue.create () in
   let toplevels =
     Antiquote.map toplevels ~f:(fun antiquote ->
+      match antiquote.kind with
+      | (Item | Expr) when types_only -> antiquote.expr
+      | Item | Expr | Type_expr | Type_kind ->
       if antiquote.has_subs
       then
         raise
@@ -62,4 +65,18 @@ let expand toplevels ~loc =
   match expand_exn toplevels ~loc with
   | expr -> Ok expr
   | exception Error (loc, message) -> Error (loc, message)
+;;
+
+let of_type_splices (toplevel : Toplevel.t) =
+  match toplevel.txt with
+  | Module _ | Module_splice _ | Include _ -> None
+  | Let _ | Type _ | Exception _ | Expect_test _ | Bench _ ->
+    let has_type_splice = ref false in
+    Antiquote.iter [ toplevel ] ~f:(fun antiquote ->
+      match antiquote.kind with
+      | Type_expr | Type_kind -> has_type_splice := true
+      | Item | Expr -> ());
+    if !has_type_splice
+    then Some (expand_exn ~types_only:true [ toplevel ] ~loc:toplevel.loc)
+    else None
 ;;

@@ -283,20 +283,21 @@ let rec register module_ toplevels ~parent ~generated_by =
       in
       { expr; toplevel; loc; scope; into; state = Pending }
     in
-    match toplevel.txt with
-    | Include (expr, expansion) ->
+    let include_ =
+      match toplevel.txt with
+      | Include (expr, expansion) -> Some (expr, expansion)
+      | _ ->
+        Struct_quote.of_type_splices toplevel
+        |> Option.map ~f:(fun expr -> expr, None)
+    in
+    match include_, toplevel.txt with
+    | Some (expr, expansion), _ ->
       let splice =
         splice expr ~expansion ~into:(Into_include (Queue.create ()))
       in
       Queue.enqueue into (Included splice);
       Queue.enqueue module_.includes splice
-    | Let _
-    | Type _
-    | Exception _
-    | Expect_test _
-    | Bench _
-    | Module _
-    | Module_splice _ ->
+    | None, _ ->
       module_.program.declare scope toplevel ~generated_by;
       Queue.enqueue into (Written { toplevel; scope; generated_by });
       List.iter (members toplevel) ~f:(fun (member, _) ->
