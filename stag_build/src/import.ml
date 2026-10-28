@@ -2,6 +2,8 @@ include Core
 module Diagnostic = Stag_driver.Diagnostic
 module Driver = Stag_driver.Driver
 module Expect_test_runner = Stag_driver.Expect_test_runner
+module Inline_expansion = Stag_driver.Inline_expansion
+module Corrected_file = Stag_driver.Corrected_file
 module Loc = Stag_common.Loc
 module Located = Stag_common.Located
 module Source_file = Stag_syntax.Source_file

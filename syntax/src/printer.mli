@@ -22,6 +22,11 @@ val toplevel : ?width:int -> Syntax.Toplevel.t -> string
     between one line [let]s, and between one line [type]s. *)
 val program : ?width:int -> Syntax.Program.t -> string
 
+(** As [program] without the final newline, laid out as the members of a
+    module at column [indent], each line indented by [indent] (blank lines
+    empty). *)
+val toplevels : ?width:int -> indent:int -> Syntax.Toplevel.t list -> string
+
 (** As [program], without the final newline, and with a blank line between
     toplevels [blank_between] their locations even where [program] would have
     none. *)

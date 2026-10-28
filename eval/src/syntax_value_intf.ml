@@ -29,7 +29,9 @@ end
 
 module type Syntax_value = sig
   (** Conversions between [Syntax] and its representation as values of the
-      types of the [Prelude] ([Stag.Expr.t] etc.). *)
+      types of the [Prelude] ([Stag.Expr.t] etc.). The expansion of a
+      [module%inline] or [include%inline], only checked against what its
+      splice generates, has no representation: [to_value] drops it. *)
 
   module type S = S
 

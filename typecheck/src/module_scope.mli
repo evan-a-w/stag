@@ -19,6 +19,10 @@ module Splice : sig
   (** [e], which generates the declarations. *)
   val expr : t -> Syntax.Expr.t
 
+  (** The [Module_splice] or [Include] it is. *)
+  val toplevel : t -> Syntax.Toplevel.t
+
+  (** That of [toplevel], up to the end of [expr] if it has an expansion. *)
   val loc : t -> Loc.t
 
   (** Where the splice is written, where [expr] is checked: for an include,

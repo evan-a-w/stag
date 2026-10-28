@@ -19,7 +19,9 @@ let test ?(show = Fn.id) contents =
     let results = Expect_test_runner.run ~limits:Source_helpers.limits driver in
     List.iter results ~f:(fun result ->
       print_s [%sexp (result : Expect_test_runner.Test_result.t)]);
-    (match Expect_test_runner.corrected ~path ~contents results with
+    (match
+       Corrected_file.create ~path ~contents ~tests:results ~expansions:[]
+     with
      | None -> print_endline "(no corrections)"
      | Some corrected ->
        print_endline "corrected:";

@@ -174,21 +174,32 @@ end
 
 let test_target project ~check (target : Project.Target.t) =
   let root = Project.root project in
-  let results =
-    match check target with
-    | None -> None
-    | Some driver ->
-      if not (eval project driver)
-      then None
-      else (
-        let results = Expect_test_runner.run ~files:(files target) driver in
-        report project (List.concat_map results ~f:Diagnostic.of_test_result);
-        Some results)
+  let checked =
+    Option.map (check target) ~f:(fun driver ->
+      let files = files target in
+      let expansions =
+        List.filter (Inline_expansion.mismatches driver) ~f:(fun expansion ->
+          Set.mem files expansion.loc.file)
+      in
+      let results =
+        if not (eval project driver)
+        then None
+        else (
+          let results = Expect_test_runner.run ~files driver in
+          report project (List.concat_map results ~f:Diagnostic.of_test_result);
+          Some results)
+      in
+      results, expansions)
   in
   let corrections =
     List.map target.files ~f:(fun ({ path; contents } as file) ->
       match
-        Option.bind results ~f:(Expect_test_runner.corrected ~path ~contents)
+        Option.bind checked ~f:(fun (results, expansions) ->
+          Corrected_file.create
+            ~path
+            ~contents
+            ~tests:(Option.value results ~default:[])
+            ~expansions)
       with
       | None -> Correction.remove ~root path
       | Some corrected ->
@@ -210,9 +221,9 @@ let test_target project ~check (target : Project.Target.t) =
       report project diagnostics;
       false
   in
-  match results with
-  | None -> false
-  | Some results ->
+  match checked with
+  | None | Some (None, _) -> false
+  | Some (Some results, expansions) ->
     let failed =
       List.count results ~f:(Fn.non Expect_test_runner.Test_result.passed)
     in
@@ -223,7 +234,14 @@ let test_target project ~check (target : Project.Target.t) =
         (Project.Target.name target)
         failed
         (List.length results);
-    corrections_ok && failed = 0
+    let stale = List.length expansions in
+    if stale > 0
+    then
+      eprintf
+        "%s: %d inline expansion(s) out of date\n%!"
+        (Project.Target.name target)
+        stale;
+    corrections_ok && failed = 0 && stale = 0
 ;;
 
 (* Whether [corrections_dir] exists, erring if it is not a directory. *)

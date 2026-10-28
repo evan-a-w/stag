@@ -25,3 +25,6 @@ module Syntax_value = Stag_eval.Syntax_value
 module Prelude_path = Stag_types.Prelude_path
 module Bench_runner = Stag_driver.Bench_runner
 module Round_trip = Stag_syntax_round_trip.Round_trip
+module Inline_expansion = Stag_driver.Inline_expansion
+module Corrected_file = Stag_driver.Corrected_file
+module Source_edit = Stag_driver.Source_edit

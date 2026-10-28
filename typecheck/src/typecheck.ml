@@ -16,7 +16,7 @@ module Generated = struct
       | Let (name, _, _, _) -> "let " ^ name.txt
       | Type decl -> "type " ^ decl.name.txt
       | Exception (name, _) -> "exception " ^ name.txt
-      | Module (name, _) | Module_splice (name, _) -> "module " ^ name.txt
+      | Module (name, _) | Module_splice (name, _, _) -> "module " ^ name.txt
       | Include _ -> "include"
       | Expect_test { name; _ } -> sprintf "let%%expect_test %S" name.txt
       | Bench { name; _ } -> sprintf "let%%bench %S" name.txt
@@ -126,6 +126,7 @@ module Program_env = struct
       (** The latest free variable of a quote that a binding of its name,
           unusable there, did not bind, to explain an error if the code is
           spliced where the name is unbound. *)
+    ; expansions : Expansion.t Queue.t
     ; unfinished : Type.ty Stack.t
       (** The types of the toplevels and binders of components not yet
           finished. Code checked later can reach them, so once their
@@ -1845,6 +1846,7 @@ module Checked = struct
   type t =
     { signature : Signature.t
     ; program : Typed.Program.t
+    ; expansions : Expansion.t list
     }
 end
 
@@ -1971,9 +1973,17 @@ let generate t (program : Program_env.t) splice
       ~error:(fun error ->
         Typecheck_error.create ~loc (Declaration_splice_failed error))
   in
-  Syntax_value.Program.of_value value ~loc
-  |> Result.map_error ~f:(fun error ->
-    Typecheck_error.create ~loc (Malformed_declarations error))
+  let%map.Result generated =
+    Syntax_value.Program.of_value value ~loc
+    |> Result.map_error ~f:(fun error ->
+      Typecheck_error.create ~loc (Malformed_declarations error))
+  in
+  let toplevel = Module_scope.Splice.toplevel splice in
+  (match toplevel.txt with
+   | Include (_, Some _) | Module_splice (_, _, Some _) ->
+     Queue.enqueue program.expansions { Expansion.toplevel; generated }
+   | _ -> ());
+  generated
 ;;
 
 (* Declares the types and toplevels of declarations as they are added. *)
@@ -2137,7 +2147,7 @@ let rec signature (program_env : Program_env.t) module_ =
              [%message
                "typecheck: exception not checked" (error : Typecheck_error.t)])
       | Module ({ txt = name; loc = _ }, _)
-      | Module_splice ({ txt = name; loc = _ }, _) ->
+      | Module_splice ({ txt = name; loc = _ }, _, _) ->
         Some
           (Module
              { name
@@ -2152,6 +2162,7 @@ let program_env t interpreter =
   ; ident_info = Typed.Ident.Map.empty
   ; sccs = Queue.create ()
   ; unusable_in_quotes = String.Table.create ()
+  ; expansions = Queue.create ()
   ; unfinished = Stack.create ()
   }
 ;;
@@ -2208,5 +2219,9 @@ let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
       ; benches
       ; ident_info = program_env.ident_info
       }
+  ; expansions =
+      Queue.to_list program_env.expansions
+      |> List.sort ~compare:(fun (a : Expansion.t) (b : Expansion.t) ->
+        Loc.compare a.toplevel.loc b.toplevel.loc)
   }
 ;;

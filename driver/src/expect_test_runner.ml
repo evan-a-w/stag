@@ -213,7 +213,10 @@ let quoted actual ~indentation =
   sprintf "{%s|%s|%s}" id body id
 ;;
 
-let edits contents ({ loc; expected; actual; parenthesize } : Mismatch.t) =
+let mismatch_edits
+      contents
+      ({ loc; expected; actual; parenthesize } : Mismatch.t)
+  =
   let start = loc.start.offset in
   match expected, parenthesize with
   | Some _, _ ->
@@ -222,57 +225,44 @@ let edits contents ({ loc; expected; actual; parenthesize } : Mismatch.t) =
       leading_whitespace (String.sub contents ~pos:line ~len:(start - line))
     in
     let quoted = quoted actual ~indentation:(deeper indentation) in
-    [ ( start
-      , loc.stop.offset
-      , if loc.start.offset = loc.stop.offset then " " ^ quoted else quoted )
+    [ { Source_edit.start
+      ; stop = loc.stop.offset
+      ; replacement =
+          (if loc.start.offset = loc.stop.offset then " " ^ quoted else quoted)
+      }
     ]
   | None, None ->
     let line = line_start contents ~offset:start in
     let indentation =
       leading_whitespace (String.sub contents ~pos:line ~len:(start - line))
     in
-    [ ( start
-      , start
-      , sprintf
-          ";\n%s[%%expect %s]"
-          indentation
-          (quoted actual ~indentation:(deeper indentation)) )
+    [ { start
+      ; stop = start
+      ; replacement =
+          sprintf
+            ";\n%s[%%expect %s]"
+            indentation
+            (quoted actual ~indentation:(deeper indentation))
+      }
     ]
   | None, Some body ->
     let indentation = indentation contents ~offset:body.start.offset in
-    [ body.start.offset, body.start.offset, "("
-    ; ( start
-      , start
-      , sprintf
-          ");\n%s[%%expect %s]"
-          indentation
-          (quoted actual ~indentation:(deeper indentation)) )
+    [ { start = body.start.offset; stop = body.start.offset; replacement = "(" }
+    ; { start
+      ; stop = start
+      ; replacement =
+          sprintf
+            ");\n%s[%%expect %s]"
+            indentation
+            (quoted actual ~indentation:(deeper indentation))
+      }
     ]
 ;;
 
-let corrected ~path ~contents results =
-  let edits =
-    List.concat_map results ~f:(fun (result : Test_result.t) ->
-      if result.generated then [] else result.mismatches)
-    |> List.filter ~f:(fun (mismatch : Mismatch.t) ->
-      String.equal mismatch.loc.file path)
-    |> List.concat_map ~f:(edits contents)
-    |> List.stable_sort ~compare:(fun (a, _, _) (b, _, _) -> Int.compare a b)
-  in
-  if List.is_empty edits
-  then None
-  else (
-    let buffer = Buffer.create (String.length contents) in
-    let last =
-      List.fold edits ~init:0 ~f:(fun pos (start, stop, replacement) ->
-        Buffer.add_substring buffer contents ~pos ~len:(start - pos);
-        Buffer.add_string buffer replacement;
-        stop)
-    in
-    Buffer.add_substring
-      buffer
-      contents
-      ~pos:last
-      ~len:(String.length contents - last);
-    Some (Buffer.contents buffer))
+let edits ~path ~contents results =
+  List.concat_map results ~f:(fun (result : Test_result.t) ->
+    if result.generated then [] else result.mismatches)
+  |> List.filter ~f:(fun (mismatch : Mismatch.t) ->
+    String.equal mismatch.loc.file path)
+  |> List.concat_map ~f:(mismatch_edits contents)
 ;;

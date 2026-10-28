@@ -26,6 +26,9 @@ type t =
   | Struct
   | Include
   | End
+  | Module_inline (** [module%inline] *)
+  | Include_inline (** [include%inline] *)
+  | End_inline (** [end%inline] *)
   | Lparen
   | Rparen
   | Lbracket
@@ -99,6 +102,9 @@ let to_string = function
   | Struct -> "struct"
   | Include -> "include"
   | End -> "end"
+  | Module_inline -> "module%inline"
+  | Include_inline -> "include%inline"
+  | End_inline -> "end%inline"
   | Lparen -> "("
   | Rparen -> ")"
   | Lbracket -> "["
@@ -154,6 +160,8 @@ let ends_code : t -> bool = function
   | Type
   | Module
   | Include
+  | Module_inline
+  | Include_inline
   | At
   | At_at -> false
   | Int _
@@ -171,6 +179,7 @@ let ends_code : t -> bool = function
   | With
   | Struct
   | End
+  | End_inline
   | Rparen
   | Rbracket
   | Rbrace
@@ -188,6 +197,7 @@ let follows = function
   | Rbracket
   | Rbrace
   | End
+  | End_inline
   | Quote_close
   | Semi
   | Comma

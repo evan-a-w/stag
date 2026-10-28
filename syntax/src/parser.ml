@@ -1107,7 +1107,7 @@ let rec toplevel t : Toplevel.t =
     expect t Equal;
     (match peek t with
      | Splice ->
-       since t start (Toplevel.Module_splice (name, declaration_splice t))
+       since t start (Toplevel.Module_splice (name, declaration_splice t, None))
      | _ ->
        let struct_loc = loc t in
        expect t Struct;
@@ -1117,8 +1117,30 @@ let rec toplevel t : Toplevel.t =
   | Include ->
     advance t;
     (match peek t with
-     | Splice -> since t start (Toplevel.Include (declaration_splice t))
+     | Splice -> since t start (Toplevel.Include (declaration_splice t, None))
      | _ -> expected t "a declaration splice `.~e` after `include`")
+  | Module_inline ->
+    advance t;
+    let name = uident t ~what:"a module name" in
+    expect t Equal;
+    (match peek t with
+     | Splice ->
+       let expr = declaration_splice t in
+       let expansion =
+         expansion t ~opener:Token.Module_inline ~open_loc:start
+       in
+       since t start (Toplevel.Module_splice (name, expr, Some expansion))
+     | _ -> expected t "a declaration splice `.~e` after `module%inline M =`")
+  | Include_inline ->
+    advance t;
+    (match peek t with
+     | Splice ->
+       let expr = declaration_splice t in
+       let expansion =
+         expansion t ~opener:Token.Include_inline ~open_loc:start
+       in
+       since t start (Toplevel.Include (expr, Some expansion))
+     | _ -> expected t "a declaration splice `.~e` after `include%inline`")
   | Let_expect_test ->
     advance t;
     let name =
@@ -1173,6 +1195,15 @@ and declaration_splice t =
   advance t;
   postfix t
 
+(* The declarations up to [end%inline], from the end of the splice to the
+   start of [end%inline]. *)
+and expansion t ~opener ~open_loc =
+  let start = (prev_loc t).stop in
+  let toplevels = toplevels t ~stop:Token.End_inline in
+  let end_loc = loc t in
+  close t End_inline ~opener ~open_loc;
+  located ~loc:{ end_loc with start; stop = end_loc.start } toplevels
+
 and toplevels t ~stop =
   let rec loop acc =
     if is t stop || is t Eof then List.rev acc else loop (toplevel t :: acc)
@@ -1189,8 +1220,8 @@ let run_with_comments ~file source f =
        let result = f t in
        (match peek t with
         | Eof -> ()
-        | (Rparen | Rbracket | Rbrace | Quote_close | Greater | End) as token ->
-          fail (loc t) (sprintf "unmatched %s" (describe token))
+        | (Rparen | Rbracket | Rbrace | Quote_close | Greater | End | End_inline)
+          as token -> fail (loc t) (sprintf "unmatched %s" (describe token))
         | _ -> expected t "end of file");
        result
      with

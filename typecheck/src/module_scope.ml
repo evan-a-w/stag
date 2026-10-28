@@ -82,6 +82,7 @@ and entry =
 
 and splice =
   { expr : Expr.t
+  ; toplevel : Toplevel.t
   ; loc : Loc.t
   ; scope : t (* Where it is written, at its position. *)
   ; into : into
@@ -109,6 +110,7 @@ module Splice = struct
   type nonrec t = splice
 
   let expr (t : t) = t.expr
+  let toplevel (t : t) = t.toplevel
   let loc (t : t) = t.loc
   let module_ (t : t) = t.scope
 end
@@ -177,7 +179,8 @@ let members (toplevel : Toplevel.t) : (Member.t * Name.t) list =
        List.map constructors ~f:(fun (name, _) -> member Constructor name)
      | Record fields -> List.map fields ~f:(fun (name, _) -> member Field name))
   | Exception (name, _) -> [ member Constructor name ]
-  | Module (name, _) | Module_splice (name, _) -> [ (Module, name.txt), name ]
+  | Module (name, _) | Module_splice (name, _, _) ->
+    [ (Module, name.txt), name ]
   | Expect_test _ | Bench _ | Include _ -> []
 ;;
 
@@ -266,12 +269,19 @@ let rec register module_ toplevels ~parent ~generated_by =
   in
   List.iter toplevels ~f:(fun (toplevel : Toplevel.t) ->
     let scope = { module_; position = At (prefix @ [ Queue.length into ]) } in
-    let splice expr ~into =
-      { expr; loc = toplevel.loc; scope; into; state = Pending }
+    let splice (expr : Expr.t) ~expansion ~into =
+      let loc =
+        match expansion with
+        | None -> toplevel.loc
+        | Some _ -> { toplevel.loc with stop = expr.loc.stop }
+      in
+      { expr; toplevel; loc; scope; into; state = Pending }
     in
     match toplevel.txt with
-    | Include expr ->
-      let splice = splice expr ~into:(Into_include (Queue.create ())) in
+    | Include (expr, expansion) ->
+      let splice =
+        splice expr ~expansion ~into:(Into_include (Queue.create ()))
+      in
       Queue.enqueue into (Included splice);
       Queue.enqueue module_.includes splice
     | Let _
@@ -289,12 +299,13 @@ let rec register module_ toplevels ~parent ~generated_by =
        | Module (name, toplevels) ->
          let module_ = submodule scope name ~splice:None in
          register module_ toplevels ~parent:None ~generated_by
-       | Module_splice (name, expr) ->
+       | Module_splice (name, expr, expansion) ->
          ignore
            (submodule
               scope
               name
-              ~splice:(Some (splice expr ~into:(Into_module name.txt)))
+              ~splice:
+                (Some (splice expr ~expansion ~into:(Into_module name.txt)))
             : module_)
        | Let _ | Type _ | Exception _ | Expect_test _ | Bench _ | Include _ ->
          ()))
@@ -723,7 +734,7 @@ let iter_declarations t ~f =
       | Written { toplevel; scope; generated_by } ->
         let%bind.Result () = f scope toplevel ~generated_by in
         (match toplevel.txt with
-         | Module (name, _) | Module_splice (name, _) ->
+         | Module (name, _) | Module_splice (name, _, _) ->
            iter_module (Hashtbl.find_exn scope.module_.modules name.txt)
          | Let _ | Type _ | Exception _ | Expect_test _ | Bench _ | Include _ ->
            Ok ()))

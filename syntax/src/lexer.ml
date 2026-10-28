@@ -415,6 +415,13 @@ let token (t : State.t) : Located.t =
          then simple 12 Let_expect_test
          else if String.equal text "let" && is_word_at t ~pos:0 "%bench"
          then simple 6 Let_bench
+         else if is_word_at t ~pos:0 "%inline"
+         then (
+           match text with
+           | "module" -> simple 7 Module_inline
+           | "include" -> simple 7 Include_inline
+           | "end" -> simple 7 End_inline
+           | _ -> Option.value (Token.keyword text) ~default:(Lident text))
          else Option.value (Token.keyword text) ~default:(Lident text)
        | c, _ ->
          State.bump t;
