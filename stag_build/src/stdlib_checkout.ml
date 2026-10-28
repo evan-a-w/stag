@@ -3,58 +3,78 @@ open! Import
 type t = { root : string } [@@deriving sexp_of]
 
 let marker_file = "stag-stdlib"
+let prelude_file = "prelude/prelude.stag"
+let core_dir = "core"
 let root t = t.root
 
-let is_checkout dir =
+let create root =
+  { root =
+      Option.value
+        (Option.try_with (fun () -> Filename_unix.realpath root))
+        ~default:root
+  }
+;;
+
+let has_marker dir =
   match Fs.Kind.of_path (dir ^/ marker_file) with
   | File -> true
   | Directory | Other -> false
   | exception (Sys_error _ | Core_unix.Unix_error _) -> false
 ;;
 
+(* The checkout whose [_build] directory [path] is in. *)
+let rec building path =
+  let parent = Filename.dirname path in
+  if String.equal parent path
+  then None
+  else if String.equal (Filename.basename path) "_build" && has_marker parent
+  then Some (create parent)
+  else building parent
+;;
+
+let is_checkout dir = has_marker dir && Option.is_none (building dir)
+
 let of_source path =
   let dir = Filename.dirname path in
   let parent = Filename.dirname dir in
-  let root =
-    if String.equal path (parent ^/ Prelude.checkout_prelude)
+  let%bind.Option root =
+    if String.equal path (parent ^/ prelude_file)
     then Some parent
     else if
-      String.equal dir (parent ^/ Prelude.checkout_core_dir)
+      String.equal dir (parent ^/ core_dir)
       && String.is_suffix path ~suffix:Source_file.extension
     then Some parent
     else None
   in
-  let%bind.Option root = root in
-  Option.some_if (is_checkout root) { root }
+  Option.some_if (is_checkout root) (create root)
 ;;
 
-let rec find dir =
-  if is_checkout dir
-  then Some { root = dir }
-  else (
-    let parent = Filename.dirname dir in
-    if String.equal parent dir then None else find parent)
+let find dir =
+  let rec find dir =
+    if has_marker dir
+    then Some (create dir)
+    else (
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then None else find parent)
+  in
+  match building dir with
+  | Some _ -> None
+  | None -> find dir
 ;;
 
 let of_executable path =
   let dir = Filename.dirname path in
-  find
-    (match String.substr_index dir ~pattern:"/_build/" with
-     | Some index -> String.prefix dir index
-     | None -> dir)
+  Option.first_some (building dir) (find dir)
 ;;
 
 let core_paths t =
   let errors = Queue.create () in
   let core =
-    Fs.read_dir
-      ~error:(Queue.enqueue errors)
-      ~root:t.root
-      Prelude.checkout_core_dir
+    Fs.read_dir ~error:(Queue.enqueue errors) ~root:t.root core_dir
     |> List.filter_map ~f:(fun (name, (kind : Fs.Kind.t)) ->
       match kind with
       | File when String.is_suffix name ~suffix:Source_file.extension ->
-        Some (t.root ^/ Prelude.checkout_core_dir ^/ name)
+        Some (t.root ^/ core_dir ^/ name)
       | File | Directory | Other -> None)
   in
   match Queue.peek errors with
@@ -62,22 +82,23 @@ let core_paths t =
   | None -> Ok core
 ;;
 
-let prelude_path t = t.root ^/ Prelude.checkout_prelude
+let prelude_path t = t.root ^/ prelude_file
 
 let source_paths t =
   let%map.Result core = core_paths t in
   prelude_path t :: core
 ;;
 
+let read ~contents path =
+  match contents path with
+  | Some contents -> Ok contents
+  | None -> Fs.try_ ~path (fun () -> In_channel.read_all path)
+;;
+
 let sources ?(contents = Fn.const None) t =
   let read path =
-    match contents path with
-    | Some contents -> Ok { Source_file.path; contents }
-    | None ->
-      let%map.Result contents =
-        Fs.try_ ~path (fun () -> In_channel.read_all path)
-      in
-      { Source_file.path; contents }
+    let%map.Result contents = read ~contents path in
+    { Source_file.path; contents }
   in
   let%bind.Result prelude = read (prelude_path t) in
   let%bind.Result core_paths = core_paths t in
@@ -85,17 +106,73 @@ let sources ?(contents = Fn.const None) t =
   { Prelude.Sources.prelude; core }
 ;;
 
-let relocate_embedded t =
+let prelude ?contents t =
+  let%bind.Result sources = sources ?contents t in
+  Prelude.parse sources |> Result.map_error ~f:Diagnostic.of_source_file_error
+;;
+
+module Checked = struct
+  type t =
+    { prelude : Syntax.Toplevel.t list
+    ; driver : Driver.t
+    }
+end
+
+let check ?contents ?output ~limits t =
+  let%bind.Result prelude = prelude ?contents t in
+  let%map.Result driver =
+    Driver.check_prelude ~limits ?output prelude
+    |> Result.map_error ~f:Diagnostic.of_typecheck_error
+  in
+  { Checked.prelude; driver }
+;;
+
+let signature_of_source t (signature : Signature.t) path =
+  if String.equal path (prelude_path t)
+  then
+    Ok
+      (List.filter signature ~f:(function
+         | Module { name = "Core"; _ } -> false
+         | Module _ | Value _ | Type _ | Exception _ -> true))
+  else (
+    let%map.Result module_name =
+      Source_file.module_name path
+      |> Result.map_error ~f:(fun message ->
+        Diagnostic.of_source_file_error (Invalid_file_name { path; message }))
+    in
+    List.filter_map signature ~f:(function
+      | Module { name = "Core"; items } ->
+        Some
+          (Signature.Item.Module
+             { name = "Core"
+             ; items =
+                 List.filter items ~f:(function
+                   | Module { name; _ } -> String.equal name module_name
+                   | Value _ | Type _ | Exception _ -> false)
+             })
+      | Module _ | Value _ | Type _ | Exception _ -> None))
+;;
+
+let checkout_path embedded =
+  let { Prelude.Sources.prelude; core } = Prelude.Sources.embedded in
+  if String.equal embedded prelude.path
+  then Some prelude_file
+  else
+    List.find_map core ~f:(fun { path; contents = _ } ->
+      Option.some_if
+        (String.equal path embedded)
+        (core_dir ^/ Filename.basename path))
+;;
+
+let relocate_embedded ?(contents = Fn.const None) t =
   let sources =
     List.filter_map
       (Prelude.Sources.embedded.prelude :: Prelude.Sources.embedded.core)
-      ~f:(fun { path = embedded; contents } ->
-        let%bind.Option relative = Prelude.checkout_path embedded in
+      ~f:(fun { path = embedded; contents = embedded_contents } ->
+        let%bind.Option relative = checkout_path embedded in
         let path = t.root ^/ relative in
-        match In_channel.read_all path with
-        | on_disk ->
-          Option.some_if (String.equal on_disk contents) (embedded, path)
-        | exception Sys_error _ -> None)
+        let%bind.Option actual = read ~contents path |> Result.ok in
+        Option.some_if (String.equal actual embedded_contents) (embedded, path))
     |> String.Map.of_alist_exn
   in
   fun (loc : Loc.t) ->

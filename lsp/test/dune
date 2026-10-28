@@ -6,6 +6,7 @@
  (libraries
   stag_lsp
   stag_eval
+  stag_build
   stag_common
   stag_syntax
   jsonrpc

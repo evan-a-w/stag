@@ -8,9 +8,11 @@ type t
 
 (** [groups] are the program's modules, as checked into [program], and
     [prelude] the toplevels of the prelude it was checked with, to find
-    definitions in, if they are to be found. *)
+    definitions in, if they are to be found. With [of_prelude], the program
+    is the prelude itself, whose names hovers show relative to it. *)
 val create
   :  ?prelude:Syntax.Toplevel.t list
+  -> ?of_prelude:bool
   -> groups:Driver.Module_group.t list
   -> program:Typed.Program.t
   -> expansions:Expansion.t list
