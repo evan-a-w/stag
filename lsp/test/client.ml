@@ -234,3 +234,51 @@ let with_server ?(limits = Server.default_limits) ?(files = []) f =
       f t)
     ~finally:(fun () -> remove root)
 ;;
+
+let position_request t method_ file ~line ~character =
+  request
+    t
+    method_
+    (text_document t file ~extra:[ "position", position ~line ~character ])
+;;
+
+let print_range (range : Lsp_types.Range.t) =
+  sprintf
+    "%d:%d-%d:%d"
+    range.start.line
+    range.start.character
+    range.end_.line
+    range.end_.character
+;;
+
+let print_hover t file ~line ~character =
+  printf "%d:%d " line character;
+  match position_request t "textDocument/hover" file ~line ~character with
+  | None | Some `Null -> print_endline "no hover"
+  | Some json ->
+    let hover = Lsp_types.Hover.t_of_yojson json in
+    (match hover.contents with
+     | `MarkupContent { value; _ } ->
+       printf
+         "%s%s\n"
+         (Option.value_map hover.range ~default:"" ~f:(fun range ->
+            print_range range ^ " "))
+         (String.substr_replace_all value ~pattern:"\n" ~with_:" ")
+     | _ -> print_endline "unexpected hover")
+;;
+
+let print_definition t file ~line ~character =
+  printf "%d:%d " line character;
+  match position_request t "textDocument/definition" file ~line ~character with
+  | None | Some `Null -> print_endline "no definition"
+  | Some (`List locations) ->
+    List.iter locations ~f:(fun json ->
+      let { Lsp_types.Location.uri; range } =
+        Lsp_types.Location.t_of_yojson json
+      in
+      printf
+        "-> %s %s\n"
+        (relativize t (Lsp.Uri.to_string uri))
+        (print_range range))
+  | Some json -> print_json t json
+;;
