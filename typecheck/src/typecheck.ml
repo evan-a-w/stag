@@ -47,6 +47,25 @@ module Generated = struct
   ;;
 end
 
+(* The expression a toplevel splice of syntax gave, whose errors are reported
+   at the splice. *)
+module Syntax_splice = struct
+  type t =
+    { splice : Loc.t
+    ; generated : Syntax.Expr.t
+    }
+
+  let wrap_error t (error : Typecheck_error.t) =
+    match error.kind with
+    | In_syntax_splice _ -> error
+    | _ when not (Loc.equal error.loc t.splice) -> error
+    | kind ->
+      { error with
+        kind = In_syntax_splice { generated = t.generated; error = kind }
+      }
+  ;;
+end
+
 module Toplevel = struct
   module State = struct
     type t =
@@ -280,6 +299,7 @@ module Scope = struct
     ; annotation_vars : Type_env.Annotation_vars.t
     ; in_expect_test : bool
     ; generated : Generated.t option
+    ; syntax_splice : Syntax_splice.t option
     }
 
   and quote =
@@ -318,7 +338,12 @@ module Scope = struct
         ~frame
         (Module_scope.within
            t.module_
-           (match t.generated with
+           (let error =
+              match t.syntax_splice with
+              | None -> error
+              | Some splice -> Syntax_splice.wrap_error splice error
+            in
+            match t.generated with
             | None -> error
             | Some generated -> Generated.wrap_error generated error))
   ;;
@@ -1149,6 +1174,12 @@ let intrinsic_type t scope intrinsic =
     ~row:(fun () -> Scope.fresh_row t scope)
 ;;
 
+let is_syntax ty =
+  match Type.canonical_ty ty with
+  | TCon (name, []) -> String.equal name (Prelude_path.canonical "Stag.Expr.t")
+  | _ -> false
+;;
+
 let rec var_type t (scope : Scope.t) ~(path : Syntax.Decl_path.t) ~loc =
   let resolve ~name entry =
     resolution_type
@@ -1328,6 +1359,7 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
     ; annotation_vars = Type_env.Annotation_vars.create t ~rank
     ; in_expect_test = false
     ; generated = toplevel.generated
+    ; syntax_splice = None
     }
   in
   let { Function_type.args; res_ty; ty; annots = _; result_annot = _ } =
@@ -1557,16 +1589,34 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
     let reported = scope.program.reported in
     let inner = Scope.fresh_ty t scope in
     let context = Scope.fresh_row t scope in
-    let code =
-      check_expr
-        t
-        outside
-        ~expr:code
-        ~ty:(TCode { inner; context })
-        ?expected:
-          (Option.map expected ~f:(fun inner ->
-             Type.TCode { inner; context = Scope.fresh_row t outside }))
+    let code_expected =
+      Option.map expected ~f:(fun inner ->
+        Type.TCode { inner; context = Scope.fresh_row t outside })
     in
+    let code =
+      match scope.quote with
+      | Some _ ->
+        check_expr
+          t
+          outside
+          ~expr:code
+          ~ty:(TCode { inner; context })
+          ?expected:code_expected
+      | None ->
+        (* Outside quotes, a [Stag.Expr.t] is spliced as syntax. *)
+        let code = expr_type t outside ~expr:code ?expected:code_expected in
+        if
+          is_syntax code.ty
+          || Scope.unifies
+               t
+               outside
+               ~ty1:(TCode { inner; context })
+               ~ty2:code.ty
+               ~loc:code.loc
+        then code
+        else { desc = Error [ code ]; ty = Type.error; loc = code.loc }
+    in
+    let subs_written = subs in
     let subs =
       match subs with
       | Implicit ->
@@ -1596,6 +1646,20 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
     in
     (match subs with
      | Error error -> fail error ~children:[ code ]
+     | Ok _ when Option.is_none scope.quote && is_syntax code.ty ->
+       (match subs_written with
+        | Explicit _ ->
+          fail
+            (Typecheck_error.create ~loc Syntax_splice_with_substitutions)
+            ~children:[ code ]
+        | Implicit | Providers _ ->
+          if scope.program.reported > reported || Typed.Expr.has_error code
+          then node (Error [ code ]) Type.error
+          else (
+            match splice_syntax t scope ~code ~loc ?expected with
+            | Error error -> fail error ~children:[ code ]
+            | Ok expansion ->
+              node (Toplevel_splice { code; expansion }) expansion.ty))
      | Ok subs ->
        (match scope.quote with
         | Some _ -> node (Splice { code; subs }) inner
@@ -1872,6 +1936,30 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
         expr.ty)
     in
     node (Poly_variant (tag, arg)) (Poly_row.variant t scope ~tag ~arg:arg_ty)
+
+(* Runs the toplevel splice [code] of a [Stag.Expr.t], then infers the
+   expression it gives here. *)
+and splice_syntax ?expected t (scope : Scope.t) ~code ~loc =
+  let program = scope.program in
+  let%bind.Result value =
+    at_compile_time
+      ~loc
+      program
+      (fun ~reflect ->
+         Treewalk.run program.interpreter code ~level:(scope.level - 1) ~reflect)
+      ~error:(fun error ->
+        Typecheck_error.create ~loc (Splice_evaluation_failed { code; error }))
+  in
+  let%map.Result generated =
+    Syntax_value.Expr.of_value value ~loc
+    |> Result.map_error ~f:(fun error ->
+      Typecheck_error.create ~loc (Malformed_syntax_splice error))
+  in
+  expr_type
+    t
+    { scope with syntax_splice = Some { splice = loc; generated } }
+    ~expr:(Source.Expr.Syntax generated)
+    ?expected
 
 (* Runs the toplevel splice [code], then infers the code it generates here,
    with its explicit substitutions bound by lets around it. *)
@@ -2193,6 +2281,7 @@ let toplevel_scope ?generated t program module_ ~level ~in_expect_test =
   ; annotation_vars = Type_env.Annotation_vars.create t ~rank
   ; in_expect_test
   ; generated
+  ; syntax_splice = None
   }
 ;;
 

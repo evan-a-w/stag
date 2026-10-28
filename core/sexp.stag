@@ -313,6 +313,22 @@ let t_of_sexp_exn (t : t) = t
    generated beside the splice. See syntax.md. *)
 let derive ty = Internal.Derive.derive ty
 
+(* As ppx_sexp_conv's [[%sexp_of: t]]: the syntax of [t]'s conversion to a
+   sexp, for any type [t], eg. [sexp_of (type list[int * 'a])] is
+   [.Core.Sexp.sexp_of_list (fun v -> match v with (v0, v1) -> ...)]. Types
+   are converted as in [derive]'s code, each by its conversion named by its
+   root path, anonymous tuples and polymorphic variants matched in place, and
+   a type variable ['a] by [_of_a], where the syntax is spliced. *)
+let sexp_of ty = Internal.Derive.expr "sexp_of" Internal.Derive.Dir.To_sexp ty
+
+(* [[%of_sexp: t]], returning a [result], as [t_of_sexp] (and taking each
+   [_of_a] returning a [result]). Errors are of [of_sexp]. *)
+let of_sexp ty = Internal.Derive.expr "of_sexp" Internal.Derive.Dir.Of_sexp ty
+
+(* [of_sexp], raising [Of_sexp_error], as [t_of_sexp_exn]. *)
+let of_sexp_raising ty =
+  Internal.Derive.expr "of_sexp_raising" Internal.Derive.Dir.Of_sexp_exn ty
+
 (* What the code [derive] generates uses. [name] is the [of_sexp]'s, eg.
    ["t_of_sexp"], which errors start with. *)
 module Deriving = struct
@@ -1113,9 +1129,9 @@ module Internal = struct
     end
 
     module Context = struct
-      (* [self]: the derived type's root path, which is named bare; [name]: the
-         derived [of_sexp]'s, in errors. *)
-      type t = {self : list[string]; name : string}
+      (* [self]: the derived type's root path, if any, which is named bare;
+         [name]: the derived [of_sexp]'s, in errors. *)
+      type t = {self : option[list[string]]; name : string}
     end
 
     (* A constructor or polymorphic variant tag, and how to construct and
@@ -1129,7 +1145,15 @@ module Internal = struct
       }
     end
 
-    let fail message = raise (Failure (String.append "Sexp.derive: " message))
+    let fail message = raise (Failure message)
+
+    (* [f ()], its failures prefixed by the generator's [name]. *)
+    let failing_as name f =
+      match f () with
+      | x -> x
+      | exception Failure message ->
+        raise (Failure (String.concat "" ["Sexp."; name; ": "; message]))
+
     let erase code = Stag.Code.erase code
     let var name = Stag.Expr.var name
     let pvar name = Stag.Pattern.Var name
@@ -1271,7 +1295,12 @@ module Internal = struct
       | Stag.Type_ref.Path.Program path ->
         let modules = List.take (Int.pred (List.length path)) path in
         let name = Dir.conv_name dir (Stag.Type_ref.name r) in
-        match List.equal String.equal path ctx.self with
+        let is_self =
+          match ctx.self with
+          | Some self -> List.equal String.equal path self
+          | None -> false
+        in
+        match is_self with
         | true -> var name
         | false ->
           var (String.concat "." (Cons ("", List.append modules [name])))
@@ -1513,7 +1542,15 @@ module Internal = struct
              (List.map2_exn field fields (values_of ctx tys binders)));
         ]
 
-    let derive ty =
+    let expr name dir ty =
+      failing_as
+        name
+        (fun _ ->
+           conv {Context.self = None; name = name} dir (Stag.Type.expr ty))
+
+    let derive ty = failing_as "derive" (fun _ -> derive_exn ty)
+
+    let derive_exn ty =
       let r =
         match Stag.Type.expr ty with
         | Stag.Type_expr.Con (Stag.Path.Ref r, _) -> r
@@ -1544,7 +1581,7 @@ module Internal = struct
       let with_params last = List.append params [last] in
       let of_name = Dir.conv_name Dir.Of_sexp type_name in
       let exn_name = Dir.conv_name Dir.Of_sexp_exn type_name in
-      let ctx = {Context.self = self; name = of_name} in
+      let ctx = {Context.self = Some self; name = of_name} in
       let bodies =
         match decl.kind with
         | Stag.Type.Kind.Variant [] -> fail "empty variants are not supported"

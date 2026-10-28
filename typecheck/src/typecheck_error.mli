@@ -97,6 +97,15 @@ module Kind : sig
         { code : Typed.Expr.t (** The toplevel splice's. *)
         ; error : Error.t
         }
+    | Malformed_syntax_splice of Error.t
+    (** What a toplevel splice of a [Stag.Expr.t] evaluated to is not syntax. *)
+    | Syntax_splice_with_substitutions
+    | In_syntax_splice of
+        { generated : Syntax.Expr.t
+        ; error : t
+        }
+    (** An error in the expression [generated] a toplevel splice of a
+        [Stag.Expr.t] here gave. *)
     | Declaration_splice_failed of Error.t
     (** Evaluating the declaration splice's expression failed. *)
     | Malformed_declarations of Error.t

@@ -100,7 +100,8 @@ Splice binds tighter than application (`.~f x` is `(.~f) x`), and looser than
 field access (`.~r.x` is `.~(r.x)`). The substitutions `.{...}` follow the
 spliced expression (`.~r.x.{y}` is `.~(r.x)` providing `y`), and are only
 written after a splice; `.~f {x = 1}` applies `.~f` to a record. A splice
-outside any quote is a toplevel (compile-time) splice.
+outside any quote is a toplevel (compile-time) splice, of code or of
+syntax (see Syntax splices).
 
 Precedence, loosest first:
 
@@ -429,6 +430,22 @@ Each file's helpers are in its submodule `Internal`, not meant for use outside
   `a.ml.t_of_sexp: ...`), and there are no attributes (`[@sexp.option]`,
   `[@default]`, `[@@sexp.allow_extra_fields]`, ...). `tests/core_derive_sexp.stag`
   shows the generated code, by inline expansions.
+- `Core.Sexp.sexp_of (type τ)`, `Core.Sexp.of_sexp (type τ)` and
+  `Core.Sexp.of_sexp_raising (type τ)` (`Stag.Type.t['a] -> Stag.Expr.t`):
+  ppx_sexp_conv's `[%sexp_of: τ]` and `[%of_sexp: τ]`, the syntax of the
+  conversion of any type expression `τ` (`τ -> Sexp.t`,
+  `Sexp.t -> result[τ, Of_sexp_error.t]` and `Sexp.t -> τ`, raising
+  `Of_sexp_error`), as `derive` converts its fields: named types by their
+  conversions' root paths (`type list[int]` gives
+  `.Core.Sexp.sexp_of_list .Core.Sexp.sexp_of_int`), tuples and polymorphic
+  variants in place, and `'a` by `_of_a` where it is spliced (returning a
+  `result`, as for `derive`). They are used as syntax splices
+  (`let s = .~(Core.Sexp.sexp_of (type list[int])) [1; 2]`,
+  `let f _of_a v = .~(Core.Sexp.sexp_of (type list['a])) v`), or in
+  generated declarations. Errors name the generator (`of_sexp: ...`). What
+  `derive` can't convert fails the same way. (`of_sexp_raising`, as
+  `Core.Sexp.of_sexp_exn` is the function raising for an `of_sexp`.)
+  `tests/core_sexp_conv.stag` shows the generated code.
 
 Since a file of `core/` shadows the prims of its name (`Core.String` hides
 `String.length`), the prelude (only) can name any prim `Prim.<prim>`
@@ -621,6 +638,25 @@ before the declaration naming one of its constructors) can't see them: the
 name is unbound, noting the splice. A splice that fails (its errors are
 reported, and checking continues) makes its declaration failed: uses of it
 are not reported again, and compile-time code using it is not run.
+
+### Syntax splices
+
+Outside quotes, `.~e` with `e : Stag.Expr.t` is a syntax splice: `e` is
+evaluated at compile time, as a toplevel splice of code is, and the
+expression it gives is checked in place of the splice, as if written there:
+
+```ocaml
+let one = .~(Stag.Expr.int 1)
+let f x = .~(Stag.Expr.var "x")              (* the parameter x *)
+let s = .~(Core.Sexp.sexp_of (type list[int])) [1; 2]
+```
+
+Its names resolve where it is spliced (locals included; refs and root paths
+as such), and it is checked at the type expected there. Whether `.~e` splices
+syntax or code is decided by the type `e` has; a splice of syntax takes no
+substitutions `.{...}`. Errors in the expression are reported at the `.~`,
+with a note printing it. Within quotes, a splice is of code (a
+`Stag.Expr.t` there is a type error).
 
 ## Reflection
 

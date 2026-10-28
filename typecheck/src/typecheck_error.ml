@@ -88,6 +88,12 @@ module Kind = struct
         { code : Typed.Expr.t
         ; error : Error.t
         }
+    | Malformed_syntax_splice of Error.t
+    | Syntax_splice_with_substitutions
+    | In_syntax_splice of
+        { generated : Syntax.Expr.t [@sexp.opaque]
+        ; error : t
+        }
     | Declaration_splice_failed of Error.t
     | Malformed_declarations of Error.t
     | Malformed_struct_quote of string
@@ -364,6 +370,15 @@ let rec kind_message (kind : Kind.t) ~show_type =
     sprintf
       "This toplevel splice failed at compile time: %s"
       (runtime_message error)
+  | Malformed_syntax_splice error ->
+    sprintf "This splice gave malformed syntax: %s" (Error.to_string_hum error)
+  | Syntax_splice_with_substitutions ->
+    "A splice of syntax (a Stag.Expr.t) is checked where it is, so it takes no \
+     substitutions"
+  | In_syntax_splice { generated = _; error } ->
+    sprintf
+      "In the expression this splice gave: %s"
+      (kind_message error ~show_type)
   | Declaration_splice_failed error ->
     sprintf
       "This declaration splice failed at compile time: %s"

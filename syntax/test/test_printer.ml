@@ -712,6 +712,7 @@ let%expect_test "the project's sources round trip and are formatted" =
     (../../tests/core_list.stag (formatted true) (long_lines 0))
     (../../tests/core_option.stag (formatted true) (long_lines 0))
     (../../tests/core_sexp.stag (formatted true) (long_lines 1))
+    (../../tests/core_sexp_conv.stag (formatted true) (long_lines 2))
     (../../tests/core_shadowing.stag (formatted true) (long_lines 0))
     (../../tests/core_string.stag (formatted true) (long_lines 0))
     (../../tests/evaluation.stag (formatted true) (long_lines 1))

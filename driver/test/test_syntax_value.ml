@@ -324,6 +324,9 @@ let%expect_test "the prelude's signature" =
         val result_of_sexp_exn : (t -> result['a, Of_sexp_error.t]) -> (t -> result['b, Of_sexp_error.t]) -> t -> result['a, 'b]
         val t_of_sexp_exn : t -> t
         val derive : Stag.Type.t['a] -> list[Stag.Toplevel.t]
+        val sexp_of : Stag.Type.t['a] -> Stag.Expr.t
+        val of_sexp : Stag.Type.t['a] -> Stag.Expr.t
+        val of_sexp_raising : Stag.Type.t['a] -> Stag.Expr.t
         module Deriving : sig
           val field : string -> t -> t
           val catch : ('a -> 'b) -> 'a -> result['b, Of_sexp_error.t]
@@ -397,12 +400,13 @@ let%expect_test "the prelude's signature" =
               val conv_name : t -> string -> string
             end
             module Context : sig
-              type t = { self : list[string]; name : string }
+              type t = { self : option[list[string]]; name : string }
             end
             module Case : sig
               type t = { tag : string; args : list[Stag.Type_expr.t]; construct : list[Stag.Expr.t] -> Stag.Expr.t; pattern : list[Stag.Pattern.t] -> Stag.Pattern.t }
             end
             val fail : string -> 'a
+            val failing_as : string -> (unit -> 'a) -> 'a
             val erase : <'a>{..'b} -> Stag.Expr.t
             val var : string -> Stag.Expr.t
             val pvar : string -> Stag.Pattern.t
@@ -441,7 +445,9 @@ let%expect_test "the prelude's signature" =
             val variant_of_sexp : Context.t -> bool -> list[Case.t] -> string -> string -> Stag.Expr.t
             val record_to_sexp : Context.t -> list[Stag.Field_ref.t * Stag.Type_expr.t] -> Stag.Expr.t
             val record_of_sexp : Context.t -> list[Stag.Field_ref.t * Stag.Type_expr.t] -> string -> Stag.Expr.t
+            val expr : string -> Dir.t -> Stag.Type.t['a] -> Stag.Expr.t
             val derive : Stag.Type.t['a] -> list[Stag.Toplevel.t]
+            val derive_exn : Stag.Type.t['a] -> list[Stag.Toplevel.t]
           end
         end
       end
