@@ -30,6 +30,7 @@ exception Syntax_error of Loc.t * string
 
 type t =
   { tokens : Lexer.Located.t array
+  ; comments : Comment.t array
   ; mutable pos : int
   ; mutable bare_tuple_end : int
     (** The [pos] after the last [)] whose contents were a tuple without
@@ -1130,31 +1131,35 @@ let rec toplevel t : Toplevel.t =
     salvage t (fun _ -> Exception (name, []));
     let args = constructor_args t in
     since t start (Toplevel.Exception (name, args))
-  | Module ->
+  | (Module | Module_inline) as keyword ->
     advance t;
     let name = uident t ~what:"a module name" in
-    salvage t (fun error -> Module_splice (name, error));
+    salvage t (fun error -> Module_splice (name, error, None));
     expect t Equal;
-    (match peek t with
-     | Splice ->
-       since t start (Toplevel.Module_splice (name, declaration_splice t))
-     | _ ->
+    (match peek t, keyword with
+     | Splice, _ ->
+       let expr = declaration_splice t in
+       let expansion = expansion t ~keyword ~open_loc:start in
+       since t start (Toplevel.Module_splice (name, expr, expansion))
+     | _, Module ->
        let struct_loc = loc t in
        expect t Struct;
-       let toplevels = toplevels t ~stop:Token.End in
-       (match t.errors with
-        | None -> close t End ~opener:Struct ~open_loc:struct_loc
-        | Some errors ->
-          (try close t End ~opener:Struct ~open_loc:struct_loc with
-           | Syntax_error (loc, message) ->
-             Queue.enqueue errors (Syntax { loc; message })));
-       since t start (Toplevel.Module (name, toplevels)))
-  | Include ->
+       let toplevels = toplevels t ~in_struct:true in
+       close_recovering t End ~opener:Struct ~open_loc:struct_loc;
+       since t start (Toplevel.Module (name, toplevels))
+     | _ -> expected t "a declaration splice `.~e` after `module%inline M =`")
+  | (Include | Include_inline) as keyword ->
     advance t;
-    salvage t (fun error -> Include error);
+    salvage t (fun error -> Include (error, None));
     (match peek t with
-     | Splice -> since t start (Toplevel.Include (declaration_splice t))
-     | _ -> expected t "a declaration splice `.~e` after `include`")
+     | Splice ->
+       let expr = declaration_splice t in
+       let expansion = expansion t ~keyword ~open_loc:start in
+       since t start (Toplevel.Include (expr, expansion))
+     | _ ->
+       expected
+         t
+         (sprintf "a declaration splice `.~e` after %s" (describe keyword)))
   | Let_expect_test ->
     advance t;
     let name =
@@ -1218,18 +1223,29 @@ and resync t ~start ~in_struct =
     let first_on_line = loc.start.line > t.tokens.(i - 1).loc.stop.line in
     match token with
     | Eof -> i
-    | (Let | Type | Exception | Module | Include | Let_expect_test | Let_bench)
+    | Let
+    | Type
+    | Exception
+    | Module
+    | Module_inline
+    | Include
+    | Include_inline
+    | Let_expect_test
+    | Let_bench
       when first_on_line && loc.start.col <= col -> i
-    | End when in_struct && first_on_line && loc.start.col < col -> i
+    | (End | End_inline) when in_struct && first_on_line && loc.start.col < col
+      -> i
     | Lparen
     | Lbracket
     | Expect_open
     | Lbrace
     | Dot_lbrace
     | Struct
+    | Module_inline
+    | Include_inline
     | Quote_open -> go (i + 1) ~depth:(depth + 1)
-    | End when in_struct && depth = 0 -> i
-    | Rparen | Rbracket | Rbrace | End | Quote_close ->
+    | (End | End_inline) when in_struct && depth = 0 -> i
+    | Rparen | Rbracket | Rbrace | End | End_inline | Quote_close ->
       go (i + 1) ~depth:(Int.max 0 (depth - 1))
     | _ -> go (i + 1) ~depth
   in
@@ -1240,31 +1256,70 @@ and declaration_splice t =
   advance t;
   postfix t
 
-and toplevels t ~stop =
+(* After [include%inline] or [module%inline], the declarations up to
+   [end%inline], from the end of the splice (and comments on its line) to the
+   start of [end%inline]. *)
+and expansion t ~(keyword : Token.t) ~open_loc =
+  match keyword with
+  | Module_inline | Include_inline ->
+    let splice_end = (prev_loc t).stop in
+    let start =
+      Array.fold
+        t.comments
+        ~init:splice_end
+        ~f:(fun start (comment : Comment.t) ->
+          if
+            comment.next_token = t.pos
+            && comment.loc.start.line = splice_end.line
+            && comment.loc.start.offset >= splice_end.offset
+          then comment.loc.stop
+          else start)
+    in
+    let toplevels = toplevels t ~in_struct:true in
+    let end_loc = loc t in
+    close_recovering t End_inline ~opener:keyword ~open_loc;
+    Some (located ~loc:{ end_loc with start; stop = end_loc.start } toplevels)
+  | _ -> None
+
+and close_recovering t (token : Token.t) ~(opener : Token.t) ~open_loc =
+  match t.errors with
+  | None -> close t token ~opener ~open_loc
+  | Some errors ->
+    (try close t token ~opener ~open_loc with
+     | Syntax_error (loc, message) ->
+       Queue.enqueue errors (Syntax { loc; message }))
+
+and toplevels t ~in_struct =
+  let stop () =
+    match peek t with
+    | Eof -> true
+    | End | End_inline -> in_struct || Option.is_none t.errors
+    | _ -> false
+  in
   match t.errors with
   | None ->
     let rec loop acc =
-      if is t stop || is t Eof then List.rev acc else loop (toplevel t :: acc)
+      if stop () then List.rev acc else loop (toplevel t :: acc)
     in
     loop []
   | Some errors ->
     let rec loop acc =
-      if is t stop || is t Eof
+      if stop ()
       then List.rev acc
       else (
         let start = t.pos in
         t.salvage <- None;
         match
           match peek t with
-          | (Rparen | Rbracket | Rbrace | Quote_close | End) as token ->
-            fail (loc t) (sprintf "unmatched %s" (describe token))
+          | (Rparen | Rbracket | Rbrace | Quote_close | End | End_inline) as
+            token -> fail (loc t) (sprintf "unmatched %s" (describe token))
           | _ -> toplevel t
         with
         | toplevel -> loop (toplevel :: acc)
         | exception Syntax_error (loc, message) ->
           Queue.enqueue errors (Syntax { loc; message });
           let salvage = t.salvage in
-          t.pos <- resync t ~start ~in_struct:(Token.equal stop End);
+          t.pos <- resync t ~start ~in_struct;
           let loc = Loc.merge t.tokens.(start).loc (prev_loc t) in
           (match salvage with
            | None -> loop acc
@@ -1278,14 +1333,20 @@ let run_with_comments ~file source f =
   | Error error -> Error (Error.Lex error)
   | Ok (tokens, comments) ->
     let t =
-      { tokens; pos = 0; bare_tuple_end = -1; errors = None; salvage = None }
+      { tokens
+      ; comments = Array.of_list comments
+      ; pos = 0
+      ; bare_tuple_end = -1
+      ; errors = None
+      ; salvage = None
+      }
     in
     (match
        let result = f t in
        (match peek t with
         | Eof -> ()
-        | (Rparen | Rbracket | Rbrace | Quote_close | Greater | End) as token ->
-          fail (loc t) (sprintf "unmatched %s" (describe token))
+        | (Rparen | Rbracket | Rbrace | Quote_close | Greater | End | End_inline)
+          as token -> fail (loc t) (sprintf "unmatched %s" (describe token))
         | _ -> expected t "end of file");
        result
      with
@@ -1298,10 +1359,10 @@ let run ~file source f =
     result)
 ;;
 
-let program ~file source = run ~file source (toplevels ~stop:Token.Eof)
+let program ~file source = run ~file source (toplevels ~in_struct:false)
 
 let program_with_comments ~file source =
-  run_with_comments ~file source (toplevels ~stop:Token.Eof)
+  run_with_comments ~file source (toplevels ~in_struct:false)
 ;;
 
 let expr ~file source = run ~file source expr
@@ -1309,19 +1370,20 @@ let pattern ~file source = run ~file source pattern
 let type_expr ~file source = run ~file source type_expr
 
 let program_recovering ~file source =
-  let { Lexer.Recovered.tokens; comments = _; errors = lex_errors } =
+  let { Lexer.Recovered.tokens; comments; errors = lex_errors } =
     Lexer.tokenize_recovering ~file source
   in
   let errors = Queue.create () in
   let t =
     { tokens
+    ; comments = Array.of_list comments
     ; pos = 0
     ; bare_tuple_end = -1
     ; errors = Some errors
     ; salvage = None
     }
   in
-  let program = toplevels t ~stop:Token.Eof in
+  let program = toplevels t ~in_struct:false in
   (* A syntax error at the token after a lexer error is likely due to it. *)
   let after_lex_errors =
     List.filter_map lex_errors ~f:(fun error ->

@@ -11,3 +11,4 @@ module Doc = Stag_syntax.Doc
 module Formatter = Stag_syntax.Formatter
 module Alignment = Stag_syntax.Alignment
 module Source_file = Stag_syntax.Source_file
+module Relocate = Stag_syntax.Relocate

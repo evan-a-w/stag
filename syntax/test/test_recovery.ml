@@ -249,6 +249,39 @@ let%expect_test "a missing [end] of a [struct], with no other error" =
     |}]
 ;;
 
+let%expect_test "errors in inline expansions" =
+  parse
+    {|include%inline .~(gen 1)
+  let x = (1
+  let y = 2
+end%inline
+let z = 3
+end%inline
+module%inline M = .~e
+  let w = ]
+let v = 4
+|};
+  [%expect
+    {|
+    t.stag:3:2-5: expected `)` to close this `(` (opened at 2:10), found `let`
+    t.stag:6:0-10: unmatched `end%inline`
+    t.stag:8:10-11: expected an expression, found `]`
+    t.stag:10:0-0: expected `end%inline` to close this `module%inline` (opened at 7:0), found end of file
+    ---
+    include%inline .~(gen 1)
+      let x = <error>
+      let y = 2
+    end%inline
+
+    let z = 3
+
+    module%inline M = .~e
+      let w = <error>
+      let v = 4
+    end%inline
+    |}]
+;;
+
 let%expect_test "what of a broken declaration parsed is kept" =
   parse
     {|let f (x : int) : int = (x
@@ -366,8 +399,7 @@ let%expect_test "a single error, with and without recovery" =
      (strict
       ("t.stag:1:10-11: expected a declaration (`let`, `type`, `exception`, `module` or `include`), found `)`")))
     (end (recovering ("t.stag:1:0-3: unmatched `end`"))
-     (strict
-      ("t.stag:1:0-3: expected a declaration (`let`, `type`, `exception`, `module` or `include`), found `end`")))
+     (strict ("t.stag:1:0-3: unmatched `end`")))
     ("let x = \"a" (recovering ("t.stag:1:8-9: unterminated string literal"))
      (strict ("t.stag:1:8-9: unterminated string literal")))
     ("let x = 1 $" (recovering ("t.stag:1:10-11: illegal character '$'"))

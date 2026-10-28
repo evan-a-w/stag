@@ -79,6 +79,9 @@ let of_lexical : Stag_syntax.Token.t -> Token_type.t option = function
   | Module
   | Struct
   | Include
+  | Module_inline
+  | Include_inline
+  | End_inline
   | End
   | Expect_open -> Some Keyword
   | Quote_open | Quote_close | Splice | Dot_lbrace -> Some Macro

@@ -16,13 +16,18 @@ let read_files paths =
       exit 2)
 ;;
 
-let report files diagnostic =
+let report ?warning files diagnostic =
   let contents path =
     List.find_map files ~f:(fun (file : Source_file.t) ->
       Option.some_if (String.equal file.path path) file.contents)
   in
   Out_channel.flush stdout;
-  eprintf "%s%!" (Diagnostic.to_string_hum ~contents diagnostic)
+  eprintf "%s%!" (Diagnostic.to_string_hum ~contents ?warning diagnostic)
+;;
+
+let report_stale ?warning files expansions =
+  List.iter expansions ~f:(fun expansion ->
+    report ?warning files (Inline_expansion.diagnostic expansion))
 ;;
 
 let check ?output ~limits files =
@@ -104,6 +109,7 @@ let check_command =
      fun () ->
        let files = read_files paths in
        let driver = check ~limits files in
+       report_stale ~warning:true files (Inline_expansion.stale driver);
        print_string (Signature.to_string_hum (Driver.checked driver).signature))
 ;;
 
@@ -115,7 +121,9 @@ let run_command =
      and limits = limits_param () in
      fun () ->
        let files = read_files paths in
-       eval ~limits files (check ~limits files))
+       let driver = check ~limits files in
+       report_stale ~warning:true files (Inline_expansion.stale driver);
+       eval ~limits files driver)
 ;;
 
 let test_command =
@@ -126,6 +134,8 @@ let test_command =
        -promote, and the diff printed. With -print-corrected, the program is \
        one FILE, printed to stdout corrected (or as it is if it passes), \
        without writing any file, eg. for a dune rule diffing it with FILE. "
+      ^ "Stale inline expansions ([include%inline] and [module%inline]) are \
+         corrected likewise. "
       ^ limits_readme ~phases:"compile time, evaluation and each test")
     (let%map_open.Command paths = files_param
      and limits = limits_param ()
@@ -151,8 +161,18 @@ let test_command =
           exit 2
         | _ -> ());
        let driver = check ~limits files in
-       eval ~limits files driver;
-       let results = Expect_test_runner.run ~limits driver in
+       let expansions = Inline_expansion.stale driver in
+       report_stale files expansions;
+       let evaluated =
+         match Driver.eval ~limits driver with
+         | Ok () -> true
+         | Error error ->
+           report files (Diagnostic.of_runtime_error error);
+           false
+       in
+       let results =
+         if evaluated then Expect_test_runner.run ~limits driver else []
+       in
        List.iter results ~f:(fun result ->
          List.iter (Diagnostic.of_test_result result) ~f:(report files));
        let mismatched =
@@ -163,7 +183,7 @@ let test_command =
              then Sys_unix.remove corrected_path
            in
            let corrected =
-             Expect_test_runner.corrected ~path ~contents results
+             Corrected_file.create ~path ~contents ~tests:results ~expansions
            in
            match mode with
            | `Print_corrected ->
@@ -199,7 +219,16 @@ let test_command =
        let failed =
          List.count results ~f:(Fn.non Expect_test_runner.Test_result.passed)
        in
+       let stale = List.length expansions in
        Out_channel.flush stdout;
+       if stale > 0
+       then
+         eprintf
+           "%d inline expansion(s) out of date%s\n%!"
+           stale
+           (match mode with
+            | `Promote -> " (promoted)"
+            | `Print_corrected | `Write_corrected -> "");
        if failed > 0
        then
          eprintf
@@ -215,7 +244,11 @@ let test_command =
          | `Write_corrected -> true
          | `Promote | `Print_corrected -> false
        in
-       if errors > 0 || (failed_on_mismatch && failed > 0) then exit 1)
+       if
+         (not evaluated)
+         || errors > 0
+         || (failed_on_mismatch && (failed > 0 || stale > 0))
+       then exit 1)
 ;;
 
 let bench_command ~fake_clock =

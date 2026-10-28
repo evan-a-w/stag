@@ -16,7 +16,7 @@ module Generated = struct
       | Let (name, _, _, _) -> "let " ^ name.txt
       | Type decl -> "type " ^ decl.name.txt
       | Exception (name, _) -> "exception " ^ name.txt
-      | Module (name, _) | Module_splice (name, _) -> "module " ^ name.txt
+      | Module (name, _) | Module_splice (name, _, _) -> "module " ^ name.txt
       | Include _ -> "include"
       | Expect_test { name; _ } -> sprintf "let%%expect_test %S" name.txt
       | Bench { name; _ } -> sprintf "let%%bench %S" name.txt
@@ -1847,6 +1847,7 @@ module Checked = struct
   type t =
     { signature : Signature.t
     ; program : Typed.Program.t
+    ; expansions : Expansion.t list
     }
 end
 
@@ -1942,6 +1943,38 @@ let uses_unfinished
   | _ -> false
 ;;
 
+(* The expansion of [splice], if it has one, and whether it is [generated]. *)
+let expansion_status splice generated =
+  let toplevel = Module_scope.Splice.toplevel splice in
+  match toplevel.txt with
+  | Include (_, Some written) | Module_splice (_, _, Some written) ->
+    Some
+      ( written
+      , Expansion.status
+          ~written:written.txt
+          generated
+          ~column:toplevel.loc.start.col
+          ~path:(fun namespace name ->
+            Module_scope.path_from_splice
+              splice
+              generated
+              (match namespace with
+               | Type -> Type
+               | Constructor -> Constructor
+               | Field -> Field)
+              name) )
+  | _ -> None
+;;
+
+let expansions root =
+  Module_scope.splices root
+  |> List.filter_map ~f:(fun splice ->
+    let%bind.Option generated = Module_scope.Splice.generated splice in
+    let%map.Option expansion, status = expansion_status splice generated in
+    { Expansion.loc = Module_scope.Splice.loc splice; expansion; status })
+  |> List.sort ~compare:(fun (a : Expansion.t) b -> Loc.compare a.loc b.loc)
+;;
+
 (* Checks a declaration splice's expression in the module it is written in,
    and runs it at compile time, to the declarations it generates. *)
 let generate t (program : Program_env.t) splice
@@ -1974,9 +2007,17 @@ let generate t (program : Program_env.t) splice
         Typecheck_error.create ~loc (Declaration_splice_failed error))
   in
   Queue.enqueue program.declaration_splices expr;
-  Syntax_value.Program.of_value value ~loc
-  |> Result.map_error ~f:(fun error ->
-    Typecheck_error.create ~loc (Malformed_declarations error))
+  let%map.Result generated =
+    Syntax_value.Program.of_value value ~loc
+    |> Result.map_error ~f:(fun error ->
+      Typecheck_error.create ~loc (Malformed_declarations error))
+  in
+  match expansion_status splice generated with
+  | Some (written, Up_to_date) ->
+    Option.value
+      (Relocate.toplevels ~written:written.txt generated)
+      ~default:generated
+  | Some (_, Stale _) | None -> generated
 ;;
 
 (* Declares the types and toplevels of declarations as they are added. *)
@@ -2140,7 +2181,7 @@ let rec signature (program_env : Program_env.t) module_ =
              [%message
                "typecheck: exception not checked" (error : Typecheck_error.t)])
       | Module ({ txt = name; loc = _ }, _)
-      | Module_splice ({ txt = name; loc = _ }, _) ->
+      | Module_splice ({ txt = name; loc = _ }, _, _) ->
         Some
           (Module
              { name
@@ -2213,5 +2254,6 @@ let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
       ; declaration_splices = Queue.to_list program_env.declaration_splices
       ; ident_info = program_env.ident_info
       }
+  ; expansions = expansions root
   }
 ;;

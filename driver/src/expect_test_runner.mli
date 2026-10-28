@@ -64,12 +64,12 @@ val run
     and spaces are different). *)
 val normalize : string -> string
 
-(** [contents] of the file [path] with the mismatches in it corrected, if any
-    (except those of generated tests),
-    formatted as ppx_expect does: [{| 5 |}] for one line, else a block indented
-    from the line of the [[%expect]] by its leading whitespace. *)
-val corrected
+(** The edits of the contents [contents] of the file [path] correcting its
+    mismatches (except those of generated tests), formatted as ppx_expect
+    does: [{| 5 |}] for one line, else a block indented from the line of the
+    [[%expect]] by its leading whitespace. *)
+val edits
   :  path:string
   -> contents:string
   -> Test_result.t list
-  -> string option
+  -> Source_edit.t list

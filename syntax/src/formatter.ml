@@ -142,7 +142,8 @@ let render_before
       ^^ separate (text " ") (List.map run ~f:comment_doc)
     in
     match next with
-    | Some (End | Rbrace) -> leading (nest 2 (fresh_line ^^ doc) ^^ after)
+    | Some (End | End_inline | Rbrace) ->
+      leading (nest 2 (fresh_line ^^ doc) ^^ after)
     | _ -> leading (fresh_line ^^ doc ^^ after)
   in
   List.group comments ~break:(fun (a : Comment.t) (b : Comment.t) ->

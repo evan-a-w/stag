@@ -64,6 +64,12 @@ repository:
     patterns:
       - name: keyword.other.extension.$1.stag
         match: 'let%(expect_test|bench){{not_ident}}'
+      - match: '\b(module%inline)\s+([A-Z]{{ident_char}}*)'
+        captures:
+          '1': { name: keyword.other.extension.inline.stag }
+          '2': { name: entity.name.namespace.stag }
+      - name: keyword.other.extension.inline.stag
+        match: '\b(?:module|include|end)%inline{{not_ident}}'
       - name: meta.expect.stag
         begin: '(\[)(%expect){{not_ident}}'
         beginCaptures:
@@ -248,7 +254,7 @@ repository:
     match: '\b[a-z_]{{ident_char}}*(?=\[)'
 
   field:
-    match: '(\.)(?!let%(?:expect_test|bench){{not_ident}})([a-z_]{{ident_char}}*)'
+    match: '(\.)(?!(?:let%(?:expect_test|bench)|(?:module|include|end)%inline){{not_ident}})([a-z_]{{ident_char}}*)'
     captures:
       '1': { name: punctuation.accessor.stag }
       '2': { name: variable.other.property.stag }

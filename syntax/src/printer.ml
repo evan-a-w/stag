@@ -701,8 +701,24 @@ let rec toplevel ~width ~indent ~blank_between (t : Toplevel.t) =
           ^^ toplevels ~width ~indent:(indent + 2) ~blank_between members)
     ^^ hardline
     ^^ text "end"
-  | Module_splice (name, e) -> text ("module " ^ name.txt ^ " = ") ^^ spliced e
-  | Include e -> text "include " ^^ spliced e
+  | Module_splice (name, e, expansion) ->
+    splice_toplevel
+      ~width
+      ~indent
+      ~blank_between
+      ~keyword:"module"
+      ~prefix:(" " ^ name.txt ^ " = ")
+      e
+      expansion
+  | Include (e, expansion) ->
+    splice_toplevel
+      ~width
+      ~indent
+      ~blank_between
+      ~keyword:"include"
+      ~prefix:" "
+      e
+      expansion
   | Expect_test { name; body } ->
     definition
       (text ("let%expect_test " ^ string_literal name.txt))
@@ -716,21 +732,36 @@ let rec toplevel ~width ~indent ~blank_between (t : Toplevel.t) =
         let last = List.length args - 1 in
         lhs
         ^^ text (" " ^ x.txt ^ " in ")
+        ^^ text "["
         ^^ group
-             (text "["
-              ^^ nest
-                   2
-                   (cut
-                    ^^ separate
-                         (text ";" ^^ line)
-                         (List.mapi args ~f:(fun i arg ->
-                            entry
-                              ~after:(if i = last then Nothing else Semi)
-                              arg)))
-              ^^ cut
-              ^^ text "]")
+             (nest
+                2
+                (cut
+                 ^^ separate
+                      (text ";" ^^ line)
+                      (List.mapi args ~f:(fun i arg ->
+                         entry ~after:(if i = last then Nothing else Semi) arg))
+                )
+              ^^ cut)
+        ^^ text "]"
     in
     definition lhs (expr_doc body)
+
+and splice_toplevel ~width ~indent ~blank_between ~keyword ~prefix e expansion =
+  match (expansion : _ Located.t option) with
+  | None -> text (keyword ^ prefix) ^^ spliced e
+  | Some { txt = toplevels'; loc = _ } ->
+    text (keyword ^ "%inline" ^ prefix)
+    ^^ spliced e
+    ^^ nest
+         2
+         (match toplevels' with
+          | [] -> empty
+          | _ ->
+            hardline
+            ^^ toplevels ~width ~indent:(indent + 2) ~blank_between toplevels')
+    ^^ hardline
+    ^^ text "end%inline"
 
 and toplevels ~width ~indent ~blank_between ts =
   let one_line doc = fits_flat ~width:(width - indent) doc in
@@ -770,6 +801,18 @@ let toplevel ?(width = 80) t =
 
 let program_doc ~width ~blank_between ts =
   toplevels ~width ~indent:0 ~blank_between ts
+;;
+
+let toplevels ?(width = 80) ~indent ts =
+  match ts with
+  | [] -> ""
+  | ts ->
+    render
+      ~width
+      (text (String.make indent ' ')
+       ^^ nest
+            indent
+            (toplevels ~width ~indent ~blank_between:(fun _ _ -> false) ts))
 ;;
 
 let program ?(width = 80) ts =

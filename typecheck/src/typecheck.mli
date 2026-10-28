@@ -18,6 +18,8 @@ module Checked : sig
       (** The signature of the program, mirroring it item by item, without its
           expect tests. *)
     ; program : Typed.Program.t
+    ; expansions : Expansion.t list
+      (** Of each [include%inline] and [module%inline], in source order. *)
     }
 end
 

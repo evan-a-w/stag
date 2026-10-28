@@ -45,7 +45,8 @@ let check_groups ~limits ~path ~absolute ~files groups =
     let%map.Core.Result driver =
       Program.check_groups ~limits ~output:ignore groups
     in
-    Index.create ~groups ~program:(Driver.checked driver).program
+    let checked = Driver.checked driver in
+    Index.create ~groups ~program:checked.program ~expansions:checked.expansions
     |> Index.relocate ~f:absolute
   with
   | Error errors -> { Result.diagnostics = diagnostics errors; index = None }

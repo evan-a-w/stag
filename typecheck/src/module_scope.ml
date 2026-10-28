@@ -82,6 +82,7 @@ and entry =
 
 and splice =
   { expr : Expr.t
+  ; toplevel : Toplevel.t
   ; loc : Loc.t
   ; scope : t (* Where it is written, at its position. *)
   ; into : into
@@ -95,7 +96,7 @@ and into =
 and state =
   | Pending
   | Forcing
-  | Done
+  | Done of Toplevel.t list
   | Failed of Typecheck_error.t
 
 (* Shared by the modules of a root. *)
@@ -109,8 +110,15 @@ module Splice = struct
   type nonrec t = splice
 
   let expr (t : t) = t.expr
+  let toplevel (t : t) = t.toplevel
   let loc (t : t) = t.loc
   let module_ (t : t) = t.scope
+
+  let generated (t : t) =
+    match t.state with
+    | Done toplevels -> Some toplevels
+    | Pending | Forcing | Failed _ -> None
+  ;;
 end
 
 let join path = String.concat path ~sep:"."
@@ -177,7 +185,8 @@ let members (toplevel : Toplevel.t) : (Member.t * Name.t) list =
        List.map constructors ~f:(fun (name, _) -> member Constructor name)
      | Record fields -> List.map fields ~f:(fun (name, _) -> member Field name))
   | Exception (name, _) -> [ member Constructor name ]
-  | Module (name, _) | Module_splice (name, _) -> [ (Module, name.txt), name ]
+  | Module (name, _) | Module_splice (name, _, _) ->
+    [ (Module, name.txt), name ]
   | Expect_test _ | Bench _ | Include _ -> []
 ;;
 
@@ -266,12 +275,19 @@ let rec register module_ toplevels ~parent ~generated_by =
   in
   List.iter toplevels ~f:(fun (toplevel : Toplevel.t) ->
     let scope = { module_; position = At (prefix @ [ Queue.length into ]) } in
-    let splice expr ~into =
-      { expr; loc = toplevel.loc; scope; into; state = Pending }
+    let splice (expr : Expr.t) ~expansion ~into =
+      let loc =
+        match expansion with
+        | None -> toplevel.loc
+        | Some _ -> { toplevel.loc with stop = expr.loc.stop }
+      in
+      { expr; toplevel; loc; scope; into; state = Pending }
     in
     match toplevel.txt with
-    | Include expr ->
-      let splice = splice expr ~into:(Into_include (Queue.create ())) in
+    | Include (expr, expansion) ->
+      let splice =
+        splice expr ~expansion ~into:(Into_include (Queue.create ()))
+      in
       Queue.enqueue into (Included splice);
       Queue.enqueue module_.includes splice
     | Let _
@@ -289,12 +305,13 @@ let rec register module_ toplevels ~parent ~generated_by =
        | Module (name, toplevels) ->
          let module_ = submodule scope name ~splice:None in
          register module_ toplevels ~parent:None ~generated_by
-       | Module_splice (name, expr) ->
+       | Module_splice (name, expr, expansion) ->
          ignore
            (submodule
               scope
               name
-              ~splice:(Some (splice expr ~into:(Into_module name.txt)))
+              ~splice:
+                (Some (splice expr ~expansion ~into:(Into_module name.txt)))
             : module_)
        | Let _ | Type _ | Exception _ | Expect_test _ | Bench _ | Include _ ->
          ()))
@@ -346,7 +363,7 @@ let cycle ?module_ (splice : splice) ~name ~loc =
    uses an unfinished toplevel, it is left pending. *)
 let force (splice : splice) : (unit, Force_error.t) Result.t =
   match splice.state with
-  | Done -> Ok ()
+  | Done _ -> Ok ()
   | Failed error -> Error (Failed error)
   | Forcing -> raise_s [%message "Module_scope.force: already running"]
   | Pending ->
@@ -368,7 +385,7 @@ let force (splice : splice) : (unit, Force_error.t) Result.t =
        (match check_unique module_ toplevels with
         | Ok () ->
           register module_ toplevels ~parent ~generated_by:(Some splice);
-          splice.state <- Done;
+          splice.state <- Done toplevels;
           Ok ()
         | Error error ->
           let error = within splice.scope error in
@@ -409,7 +426,7 @@ let rec lookup (t : t) member =
          is_before splice t.position
          &&
          match splice.state with
-         | Done -> false
+         | Done _ -> false
          | Pending | Forcing | Failed _ -> true)
        |> first
      with
@@ -495,7 +512,7 @@ let open_module module_ name ~path ~loc =
     | Some splice ->
       (match splice.state with
        | Forcing -> Error (cycle splice)
-       | Pending | Done | Failed _ ->
+       | Pending | Done _ | Failed _ ->
          (match force splice with
           | Ok () -> Ok ()
           | Error (Failed error) -> Error error
@@ -723,10 +740,58 @@ let iter_declarations t ~f =
       | Written { toplevel; scope; generated_by } ->
         let%bind.Result () = f scope toplevel ~generated_by in
         (match toplevel.txt with
-         | Module (name, _) | Module_splice (name, _) ->
+         | Module (name, _) | Module_splice (name, _, _) ->
            iter_module (Hashtbl.find_exn scope.module_.modules name.txt)
          | Let _ | Type _ | Exception _ | Expect_test _ | Bench _ | Include _ ->
            Ok ()))
   in
   iter_module t.module_
+;;
+
+let splices t =
+  let rec splices module_ =
+    Option.to_list module_.splice
+    @ Queue.to_list module_.includes
+    @ List.concat_map (Hashtbl.data module_.modules) ~f:splices
+  in
+  splices t.module_
+;;
+
+let path_from_splice (splice : splice) toplevels namespace name =
+  let declared = Member.Hash_set.create () in
+  let rec declare (toplevels : Toplevel.t list) =
+    List.iter toplevels ~f:(fun toplevel ->
+      List.iter (members toplevel) ~f:(fun (member, _) ->
+        Hash_set.add declared member);
+      match toplevel.txt with
+      | Module (_, toplevels) -> declare toplevels
+      | Let _
+      | Type _
+      | Exception _
+      | Module_splice _
+      | Include _
+      | Expect_test _
+      | Bench _ -> ())
+  in
+  declare toplevels;
+  let names = String.split name ~on:'.' in
+  List.init (List.length names) ~f:(fun i ->
+    List.drop names (List.length names - i - 1))
+  |> List.find_map ~f:(fun names ->
+    let head : Member.t =
+      match names with
+      | [ name ] -> Member namespace, name
+      | head :: _ -> Module, head
+      | [] -> assert false
+    in
+    let path = Path.of_list_exn names in
+    if Hash_set.mem declared head
+    then None
+    else (
+      match
+        find splice.scope namespace path ~loc:splice.loc ~unbound:(fun path ->
+          Unbound_type path)
+      with
+      | Ok found when String.equal found name -> Some path
+      | Ok _ | Error _ -> None))
 ;;

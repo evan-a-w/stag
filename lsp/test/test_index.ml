@@ -138,3 +138,153 @@ let%expect_test "semantic tokens of a large typechecked file take linear time" =
          true
          |}])
 ;;
+
+let%expect_test "inline expansions" =
+  Client.with_server
+    ~files:
+      [ ( "a.stag"
+        , {|let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+include%inline .~(value "x" (Stag.Expr.int 1))
+  let x = 1
+end%inline
+module%inline M = .~(value "y" (Stag.Expr.var "x"))
+  let y = x
+end%inline
+include%inline .~(value "s" (Stag.Expr.int 2))
+  let s = 3
+end%inline
+let z = Int.add x M.y
+let w = s
+|}
+        )
+      ]
+    (fun client ->
+       Client.did_open client "a.stag";
+       [%expect {| |}];
+       print_at
+         client
+         "a.stag"
+         [ 2, 6; 4, 14; 5, 6; 5, 10; 8, 6; 10, 16; 10, 20; 11, 8 ];
+       [%expect
+         {|
+         2:6 2:6-2:7 ```stag A.x : int ```
+         2:6 -> a.stag 2:6-2:7
+         4:14 no hover
+         4:14 no definition
+         5:6 5:6-5:7 ```stag A.M.y : int ```
+         5:6 -> a.stag 5:6-5:7
+         5:10 5:10-5:11 ```stag A.x : int ```
+         5:10 -> a.stag 2:6-2:7
+         8:6 no hover
+         8:6 no definition
+         10:16 10:16-10:17 ```stag A.x : int ```
+         10:16 -> a.stag 2:6-2:7
+         10:20 10:18-10:21 ```stag A.M.y : int ```
+         10:20 -> a.stag 5:6-5:7
+         11:8 11:8-11:9 ```stag A.s : int ```
+         11:8 -> a.stag 7:0-7:46
+         |}];
+       (match
+          Client.request
+            client
+            "textDocument/documentSymbol"
+            (Client.text_document client "a.stag")
+        with
+        | Some (`List symbols) ->
+          let rec print indent (symbol : Lsp_types.DocumentSymbol.t) =
+            printf
+              "%s%s %d:%d-%d:%d\n"
+              indent
+              symbol.name
+              symbol.selectionRange.start.line
+              symbol.selectionRange.start.character
+              symbol.selectionRange.end_.line
+              symbol.selectionRange.end_.character;
+            List.iter
+              (Option.value symbol.children ~default:[])
+              ~f:(print (indent ^ "  "))
+          in
+          List.iter symbols ~f:(fun json ->
+            print "" (Lsp_types.DocumentSymbol.t_of_yojson json))
+        | _ -> print_endline "unexpected");
+       [%expect
+         {|
+         value 0:4-0:9
+         x 2:6-2:7
+         M 4:14-4:15
+           y 5:6-5:7
+         s 8:6-8:7
+         z 10:4-10:5
+         w 11:4-11:5
+         |}];
+       Client.print_semantic_tokens client "a.stag";
+       [%expect
+         {|
+         0:0+3 Keyword "let"
+         0:4+5 Function (declaration) "value"
+         0:10+4 Parameter (declaration) "name"
+         0:15+1 Parameter (declaration) "e"
+         0:17+1 Operator "="
+         0:19+4 Enum_member "Cons"
+         0:25+4 Namespace "Stag"
+         0:30+8 Namespace "Toplevel"
+         0:39+4 Function "let_"
+         0:44+4 Variable "name"
+         0:49+3 Enum_member "Nil"
+         0:53+1 Variable "e"
+         0:56+3 Enum_member "Nil"
+         1:0+14 Keyword "include%inline"
+         1:15+2 Macro ".~"
+         1:18+5 Function "value"
+         1:24+3 String "\"x\""
+         1:29+4 Namespace "Stag"
+         1:34+4 Namespace "Expr"
+         1:39+3 Function "int"
+         1:43+1 Number "1"
+         2:2+3 Keyword "let"
+         2:6+1 Variable (declaration) "x"
+         2:8+1 Operator "="
+         2:10+1 Number "1"
+         3:0+10 Keyword "end%inline"
+         4:0+13 Keyword "module%inline"
+         4:14+1 Namespace (declaration) "M"
+         4:16+1 Operator "="
+         4:18+2 Macro ".~"
+         4:21+5 Function "value"
+         4:27+3 String "\"y\""
+         4:32+4 Namespace "Stag"
+         4:37+4 Namespace "Expr"
+         4:42+3 Function "var"
+         4:46+3 String "\"x\""
+         5:2+3 Keyword "let"
+         5:6+1 Variable (declaration) "y"
+         5:8+1 Operator "="
+         5:10+1 Variable "x"
+         6:0+10 Keyword "end%inline"
+         7:0+14 Keyword "include%inline"
+         7:15+2 Macro ".~"
+         7:18+5 Function "value"
+         7:24+3 String "\"s\""
+         7:29+4 Namespace "Stag"
+         7:34+4 Namespace "Expr"
+         7:39+3 Function "int"
+         7:43+1 Number "2"
+         8:2+3 Keyword "let"
+         8:6+1 Variable (declaration) "s"
+         8:8+1 Operator "="
+         8:10+1 Number "3"
+         9:0+10 Keyword "end%inline"
+         10:0+3 Keyword "let"
+         10:4+1 Variable (declaration) "z"
+         10:6+1 Operator "="
+         10:8+3 Namespace "Int"
+         10:12+3 Function "add"
+         10:16+1 Variable "x"
+         10:18+1 Namespace "M"
+         10:20+1 Variable "y"
+         11:0+3 Keyword "let"
+         11:4+1 Variable (declaration) "w"
+         11:6+1 Operator "="
+         11:8+1 Variable "s"
+         |}])
+;;

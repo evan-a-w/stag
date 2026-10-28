@@ -14,3 +14,5 @@ module Lexer = Stag_syntax.Lexer
 module Token = Stag_syntax.Token
 module Comment = Stag_syntax.Comment
 module Loc = Stag_common.Loc
+module Inline_expansion = Stag_driver.Inline_expansion
+module Corrected_file = Stag_driver.Corrected_file

@@ -13,6 +13,7 @@ let kind ~src (located : Lexer.Located.t) =
   | Tyvar _ -> "tyvar"
   | Weak_tyvar _ -> "weak_tyvar"
   | Let_expect_test | Let_bench | Expect_open -> "expect"
+  | Module_inline | Include_inline | End_inline -> "inline"
   | token when Option.is_some (Token.keyword (Token.to_string token)) ->
     "keyword"
   | _ -> "punct"
