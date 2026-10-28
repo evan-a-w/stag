@@ -491,9 +491,12 @@ fields. The code's free variables (its context entries) are
 `Stag.Path.Name`s, resolved where the syntax is spliced: they are the holes
 that generated binders, or the splice site, provide. Its own binders keep
 their names, but are renamed (eg. `x_1`) where one would capture a variable
-of the same name bound elsewhere, or a free one. Type annotations are not
-kept (the typed code has none; spliced code is inferred anew), except types
-as values, which are given as by `Stag.Type.expr`.
+of the same name bound elsewhere, or a free one; a renamed binder providing
+an implicit splice `.~c` (in a nested quote) provides it explicitly,
+`.~c.{x = x_1}`. Type annotations (on parameters, a let's result, and
+`(x : t)`) are kept as written, the types they name as refs (printed as
+root paths, eg. `(y : .int)`), so generated code has the types its quote
+did; types as values are given as by `Stag.Type.expr`.
 
 ```ocaml
 (* gen.stag *)
@@ -513,7 +516,9 @@ quote was checked, so it exists by the time a splice can use it; checking it
 on demand is subject to the usual rules (eg. a toplevel that needs what the
 running splice generates is an error). Toplevels referred to from inside a
 quote but not yet checked are the quote's free variables by their canonical
-names, and are erased as refs too. A local the code embeds (a local function
+names, and are erased as refs too; a splice provides these from where it is
+even with explicit substitutions, which can't name them (so
+`.~(.<n>.).{n}` inside `module M` works while `M.n` is unchecked). A local the code embeds (a local function
 of the code that made it, used in the quote) has no name where the code is
 spliced: `erase` is a runtime error naming it. A splice inside a nested quote
 of the code takes its entries from what is in scope where spliced, by name,
