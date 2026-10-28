@@ -346,25 +346,16 @@ let%expect_test "random syntax round trips" =
 
 let%expect_test "deep random syntax round trips" =
   let random = Random.State.make [| 1 |] in
-  let start = Time_ns.now () in
-  let time_limit = Time_ns.Span.of_sec 60. in
   let counts = ref Int.Map.empty in
-  let count = ref 0 in
-  while
-    !count < 200
-    && Time_ns.Span.( < ) (Time_ns.diff (Time_ns.now ()) start) time_limit
-  do
+  for count = 0 to 199 do
     counts
     := check_all !counts ~widths:[ 80; 30 ] (fun () ->
-         { Gen.random; size = 20 + !count; deep = true });
-    incr count
+         { Gen.random; size = 20 + count; deep = true })
   done;
-  print_s [%message (count : int ref) (!counts : Counts.t)];
+  print_s [%sexp (!counts : Counts.t)];
   [%expect
     {|
-    ((count 200)
-     (!counts
-      ((30 ((lines 95172) (over_width 79873)))
-       (80 ((lines 88529) (over_width 57231))))))
+    ((30 ((lines 95172) (over_width 79873)))
+     (80 ((lines 88529) (over_width 57231))))
     |}]
 ;;
