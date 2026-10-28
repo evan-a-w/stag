@@ -251,6 +251,107 @@ let result_of_sexp ok_of_sexp error_of_sexp t =
     Result.map (fun e -> Error e) (error_of_sexp e)
   | _ -> Internal.of_sexp_error "result_of_sexp: (Ok _) or (Error _) needed" t
 
+let sexp_of_t (t : t) = t
+let t_of_sexp (t : t) = Ok t
+
+(* As ppx_sexp_conv's [[@@deriving sexp]]: [include .~(derive (type t))]
+   generates [sexp_of_t], [t_of_sexp_exn] (raising [Of_sexp_error]) and
+   [t_of_sexp] (returning a [result]) for the declared type [t], each taking
+   the conversions of [t]'s type parameters first. Other types [M.u] are
+   converted by [M.sexp_of_u] and [M.u_of_sexp] where the code is spliced, their
+   paths relative to [t]'s module. *)
+let derive ty = Internal.Derive.derive ty
+
+(* What the code [derive] generates uses. *)
+module Deriving = struct
+  let error message sexp =
+    raise (Of_sexp_error (Of_sexp_error.create message sexp))
+
+  (* [(name sexp)], a record's field. *)
+  let field name sexp = List (Cons (Atom name, Cons (sexp, Nil)))
+
+  let catch of_sexp_exn sexp =
+    match of_sexp_exn sexp with
+    | x -> Ok x
+    | exception Of_sexp_error e -> Error e
+
+  (* Raises the error of [name] (eg. ["t_of_sexp"]) on [sexp], which is not a
+     variant of the constructors [constants] and [with_args]. *)
+  let variant_error name constants with_args sexp =
+    let fail message = error (String.concat ": " (Cons (name, Cons (message, Nil)))) sexp in
+    let is_in tags tag = List.mem String.equal tag tags in
+    match sexp with
+    | Atom tag ->
+      (match is_in with_args tag with
+       | true -> fail "this constructor requires arguments"
+       | false -> fail "unexpected variant constructor")
+    | List (Cons (Atom tag, _)) ->
+      (match (is_in constants tag, is_in with_args tag) with
+       | true, _ -> fail "this constructor does not take arguments"
+       | _, true ->
+         fail
+           (String.concat
+              ""
+              (Cons
+                 ("sum tag \"",
+                  Cons
+                    (String.escaped tag,
+                     Cons ("\" has incorrect number of arguments", Nil)))))
+       | _ -> fail "unexpected variant constructor")
+    | List (Cons (List _, _)) -> fail "a nested list is an invalid sum"
+    | List Nil -> fail "the empty list is an invalid sum"
+
+  let tuple_error name size sexp =
+    error
+      (String.concat
+         ""
+         (Cons
+            (name,
+             Cons
+               (": tuple of size ",
+                Cons (Int.to_string size, Cons (" expected", Nil))))))
+      sexp
+
+  (* The values of the record [sexp]'s fields [names], in order. *)
+  let record_fields name names sexp =
+    let fail message = error (String.concat ": " (Cons (name, Cons (message, Nil)))) sexp in
+    let listed message names =
+      fail (String.append message (String.concat " " names))
+    in
+    let is_in names name = List.mem String.equal name names in
+    let pair item =
+      match item with
+      | List (Cons (Atom name, Cons (value, Nil))) -> (name, value)
+      | _ ->
+        fail
+          "record conversion: only pairs expected, their first element must be an atom"
+    in
+    (* [seen] and [repeated] in reverse. *)
+    let repeats names seen repeated =
+      match names with
+      | Nil -> List.rev repeated
+      | Cons (name, rest) ->
+        (match (is_in seen name, is_in repeated name) with
+         | true, false -> repeats rest seen (Cons (name, repeated))
+         | true, true -> repeats rest seen repeated
+         | false, _ -> repeats rest (Cons (name, seen)) repeated)
+    in
+    match sexp with
+    | Atom _ -> fail "list instead of atom for record expected"
+    | List items ->
+      let pairs = List.map pair items in
+      let given = List.map (fun p -> match p with name, _ -> name) pairs in
+      let duplicates = repeats given Nil Nil in
+      let extras = List.filter (fun name -> Bool.not (is_in names name)) given in
+      let missing = List.filter (fun name -> Bool.not (is_in given name)) names in
+      match (duplicates, extras, missing) with
+      | Cons (_, _), _, _ -> listed "duplicate fields: " duplicates
+      | _, Cons (_, _), _ -> listed "extra fields: " extras
+      | _, _, Cons (_, _) ->
+        listed "the following record elements were undefined: " missing
+      | _ -> List.map (fun name -> List.assoc_exn String.equal name pairs) names
+end
+
 (* Helpers of the functions above. *)
 module Internal = struct
   (* Whether [s] must be quoted to be read back as an atom: it is empty, or has
@@ -878,4 +979,371 @@ module Internal = struct
   end
 
   let of_sexp_error message sexp = Error (Of_sexp_error.create message sexp)
+
+  (* The code generator of [derive]. What it refers to in [Core] is named by
+     the refs of erased quotes, so the code means the same wherever it is
+     spliced. *)
+  module Derive = struct
+    module Dir = struct
+      type t = To_sexp | Of_sexp
+    end
+
+    let fail message = raise (Failure (String.append "Sexp.derive: " message))
+    let erase code = Stag.Code.erase code
+
+    let constructor code =
+      match Stag.Code.erase code with
+      | Stag.Expr.Construct (c, _) -> c
+
+    let atom_c = constructor .< Atom "" >.
+    let list_c = constructor .< List Nil >.
+    let cons_c = constructor .< Cons ((), Nil) >.
+    let nil_c = constructor .< Nil >.
+    let ok_c = constructor .< Ok () >.
+    let error_c = constructor .< Error () >.
+    let of_sexp_error_c = constructor .< Of_sexp_error e >.
+    let var name = Stag.Expr.var name
+    let pvar name = Stag.Pattern.Var name
+    let str s = Stag.Expr.Lit (Stag.Lit.String s)
+    let one x = Cons (x, Nil)
+    let two x y = Cons (x, Cons (y, Nil))
+    let apply f args = Stag.Expr.apply f args
+    let fun_ param body = Stag.Expr.Fun (one (param, None), body)
+    let match_ e arms = Stag.Expr.Match (e, arms)
+
+    let expr_list es =
+      match es with
+      | Nil -> Stag.Expr.Construct (nil_c, Nil)
+      | Cons (e, rest) -> Stag.Expr.Construct (cons_c, two e (expr_list rest))
+
+    let pattern_list ps =
+      match ps with
+      | Nil -> Stag.Pattern.Construct (nil_c, Nil)
+      | Cons (p, rest) ->
+        Stag.Pattern.Construct (cons_c, two p (pattern_list rest))
+
+    let string_list ss = expr_list (List.map str ss)
+    let atom tag = Stag.Expr.Construct (atom_c, one (str tag))
+
+    let atom_pattern tag =
+      Stag.Pattern.Construct
+        (atom_c, one (Stag.Pattern.Lit (Stag.Lit.String tag)))
+
+    let sexp_list es = Stag.Expr.Construct (list_c, one (expr_list es))
+
+    let list_pattern ps =
+      Stag.Pattern.Construct (list_c, one (pattern_list ps))
+
+    (* [v0], [v1], ... *)
+    let vars n = List.init n (fun i -> String.append "v" (Int.to_string i))
+    let catch e = apply (erase .< Deriving.catch >.) (one e)
+
+    let conv_name dir name =
+      match dir with
+      | Dir.To_sexp -> String.append "sexp_of_" name
+      | Dir.Of_sexp -> String.append name "_of_sexp"
+
+    let builtin dir path =
+      match (dir, path) with
+      | Dir.To_sexp, "unit" -> Some (erase .< sexp_of_unit >.)
+      | Dir.Of_sexp, "unit" -> Some (erase .< unit_of_sexp >.)
+      | Dir.To_sexp, "bool" -> Some (erase .< sexp_of_bool >.)
+      | Dir.Of_sexp, "bool" -> Some (erase .< bool_of_sexp >.)
+      | Dir.To_sexp, "int" -> Some (erase .< sexp_of_int >.)
+      | Dir.Of_sexp, "int" -> Some (erase .< int_of_sexp >.)
+      | Dir.To_sexp, "char" -> Some (erase .< sexp_of_char >.)
+      | Dir.Of_sexp, "char" -> Some (erase .< char_of_sexp >.)
+      | Dir.To_sexp, "string" -> Some (erase .< sexp_of_string >.)
+      | Dir.Of_sexp, "string" -> Some (erase .< string_of_sexp >.)
+      | Dir.To_sexp, "list" -> Some (erase .< sexp_of_list >.)
+      | Dir.Of_sexp, "list" -> Some (erase .< list_of_sexp >.)
+      | Dir.To_sexp, "option" -> Some (erase .< sexp_of_option >.)
+      | Dir.Of_sexp, "option" -> Some (erase .< option_of_sexp >.)
+      | Dir.To_sexp, "result" -> Some (erase .< sexp_of_result >.)
+      | Dir.Of_sexp, "result" -> Some (erase .< result_of_sexp >.)
+      | Dir.To_sexp, "Core.Sexp.t" -> Some (erase .< sexp_of_t >.)
+      | Dir.Of_sexp, "Core.Sexp.t" -> Some (erase .< t_of_sexp >.)
+      | _ -> None
+
+    (* The converter of the type of root path [path] (eg. ["A.M.u"]), named
+       from [self], the modules of the derived type (eg. [M.sexp_of_u] from
+       [A]). *)
+    let relative dir self path =
+      let strip self names =
+        match (self, names) with
+        | Cons (m, ms), Cons (n, Cons (next, rest)) ->
+          (match String.equal m n with
+           | true -> strip ms (Cons (next, rest))
+           | false -> names)
+        | _ -> names
+      in
+      let converter names =
+        match names with
+        | Nil -> Nil
+        | Cons (name, Nil) -> one (conv_name dir name)
+        | Cons (m, rest) -> Cons (m, converter rest)
+      in
+      String.concat "." (converter (strip self (String.split_on_char '.' path)))
+
+    (* A converter of [ty]: [ty -> Sexp.t], or
+       [Sexp.t -> result[ty, Of_sexp_error.t]]. [name] (eg. ["t_of_sexp"])
+       is in errors. *)
+    let conv dir self name ty =
+      let recur ty = conv dir self name ty in
+      match ty with
+      | Stag.Type_expr.Var a -> var (conv_name dir a)
+      | Stag.Type_expr.Con (path, args) ->
+        let arg a =
+          match a with
+          | Stag.Type_expr.Arg.Ty ty -> recur ty
+          | Stag.Type_expr.Arg.Row _ -> fail "row arguments are not supported"
+        in
+        let head =
+          match path with
+          | Stag.Path.Ref r ->
+            let path = Stag.Type_ref.path r in
+            (match builtin dir path with
+             | Some e -> e
+             | None -> var (relative dir self path))
+          | Stag.Path.Name path -> var (relative dir Nil path)
+        in
+        apply head (List.map arg args)
+      | Stag.Type_expr.Tuple tys ->
+        (match (dir, tys) with
+         | Dir.To_sexp, Cons (a, Cons (b, Nil)) ->
+           apply (erase .< sexp_of_pair >.) (two (recur a) (recur b))
+         | Dir.Of_sexp, Cons (a, Cons (b, Nil)) ->
+           apply (erase .< pair_of_sexp >.) (two (recur a) (recur b))
+         | Dir.To_sexp, Cons (a, Cons (b, Cons (c, Nil))) ->
+           apply
+             (erase .< sexp_of_triple >.)
+             (Cons (recur a, two (recur b) (recur c)))
+         | Dir.Of_sexp, Cons (a, Cons (b, Cons (c, Nil))) ->
+           apply
+             (erase .< triple_of_sexp >.)
+             (Cons (recur a, two (recur b) (recur c)))
+         | Dir.To_sexp, _ -> fun_ "v" (tuple_to_sexp self name tys)
+         | Dir.Of_sexp, _ -> catch (fun_ "sexp" (tuple_of_sexp self name tys)))
+      | Stag.Type_expr.Variant row ->
+        let cases = poly_cases row in
+        (match dir with
+         | Dir.To_sexp -> fun_ "v" (variant_to_sexp self name cases)
+         | Dir.Of_sexp -> catch (fun_ "sexp" (variant_of_sexp self name cases)))
+      | Stag.Type_expr.Arrow (_, _) -> fail "functions have no sexp conversion"
+      | Stag.Type_expr.Code _ -> fail "code has no sexp conversion"
+      | Stag.Type_expr.Record _ -> fail "polymorphic records are not supported"
+
+    let to_sexp self name ty e = apply (conv Dir.To_sexp self name ty) (one e)
+
+    let of_exn self name ty v =
+      apply
+        (erase .< of_sexp_exn >.)
+        (two (conv Dir.Of_sexp self name ty) (var v))
+
+    (* [v]'s components [(v0 v1 ...)]. *)
+    let tuple_to_sexp self name tys =
+      let vs = vars (List.length tys) in
+      let pattern = Stag.Pattern.Tuple (List.map pvar vs) in
+      let sexps =
+        List.map2_exn (fun ty v -> to_sexp self name ty (var v)) tys vs
+      in
+      match_ (var "v") (one (pattern, sexp_list sexps))
+
+    let tuple_of_sexp self name tys =
+      let n = List.length tys in
+      let vs = vars n in
+      let tuple = Stag.Expr.Tuple (List.map2_exn (of_exn self name) tys vs) in
+      let error =
+        apply
+          (erase .< Deriving.tuple_error >.)
+          (Cons (str name, two (Stag.Expr.int n) (var "sexp")))
+      in
+      match_
+        (var "sexp")
+        (two (list_pattern (List.map pvar vs), tuple) (Stag.Pattern.Any, error))
+
+    (* A constructor or tag: its name, arguments, and how to construct and
+       match it of its arguments. *)
+    let nominal_case c =
+      match c with
+      | r, args ->
+        (Stag.Constructor_ref.name r,
+         args,
+         (fun es -> Stag.Expr.Construct (Stag.Path.Ref r, es)),
+         fun ps -> Stag.Pattern.Construct (Stag.Path.Ref r, ps))
+
+    let poly_cases row =
+      let is_unit ty =
+        match ty with
+        | Stag.Type_expr.Con (Stag.Path.Ref r, Nil) ->
+          String.equal (Stag.Type_ref.path r) "unit"
+        | _ -> false
+      in
+      let first l = List.hd l in
+      match row with
+      | Stag.Type_expr.Row.Empty -> Nil
+      | Stag.Type_expr.Row.Var _ ->
+        fail "open polymorphic variants are not supported"
+      | Stag.Type_expr.Row.Extend (tag, ty, rest) ->
+        let args =
+          match is_unit ty with
+          | true -> Nil
+          | false -> one ty
+        in
+        let case =
+          (tag,
+           args,
+           (fun es -> Stag.Expr.Poly_variant (tag, first es)),
+           fun ps -> Stag.Pattern.Poly_variant (tag, first ps))
+        in
+        Cons (case, poly_cases rest)
+
+    let variant_to_sexp self name cases =
+      let arm case =
+        match case with
+        | tag, args, _, pattern ->
+          let vs = vars (List.length args) in
+          let sexp =
+            match args with
+            | Nil -> atom tag
+            | _ ->
+              let arg ty v = to_sexp self name ty (var v) in
+              sexp_list (Cons (atom tag, List.map2_exn arg args vs))
+          in
+          (pattern (List.map pvar vs), sexp)
+      in
+      match_ (var "v") (List.map arm cases)
+
+    let variant_of_sexp self name cases =
+      let arm case =
+        match case with
+        | tag, Nil, construct, _ -> (atom_pattern tag, construct Nil)
+        | tag, args, construct, _ ->
+          let vs = vars (List.length args) in
+          (list_pattern (Cons (atom_pattern tag, List.map pvar vs)),
+           construct (List.map2_exn (of_exn self name) args vs))
+      in
+      let tags with_args =
+        let tag case =
+          match case with
+          | tag, args, _, _ ->
+            (match Bool.equal (List.is_empty args) with_args with
+             | true -> None
+             | false -> Some tag)
+        in
+        string_list (List.filter_map tag cases)
+      in
+      let error =
+        apply
+          (erase .< Deriving.variant_error >.)
+          (Cons (str name, Cons (tags false, two (tags true) (var "sexp"))))
+      in
+      match_
+        (var "sexp")
+        (List.append (List.map arm cases) (one (Stag.Pattern.Any, error)))
+
+    let record_to_sexp self name fields =
+      let field f =
+        match f with
+        | r, ty ->
+          let value = Stag.Expr.Field (var "v", Stag.Path.Ref r) in
+          apply
+            (erase .< Deriving.field >.)
+            (two (str (Stag.Field_ref.name r)) (to_sexp self name ty value))
+      in
+      sexp_list (List.map field fields)
+
+    let record_of_sexp self name fields =
+      let names =
+        List.map (fun f -> match f with r, _ -> Stag.Field_ref.name r) fields
+      in
+      (* Field names, unless they would shadow a converter. *)
+      let binders =
+        let binder i field =
+          match
+            (String.starts_with "sexp_of_" field,
+             String.ends_with "_of_sexp" field)
+          with
+          | false, false -> field
+          | _ -> String.append "v" (Int.to_string i)
+        in
+        List.mapi binder names
+      in
+      let value f v =
+        match f with
+        | r, ty -> (Stag.Path.Ref r, of_exn self name ty v)
+      in
+      let fields_of_sexp =
+        apply
+          (erase .< Deriving.record_fields >.)
+          (Cons (str name, two (string_list names) (var "sexp")))
+      in
+      match_
+        fields_of_sexp
+        (one
+           (pattern_list (List.map pvar binders),
+            Stag.Expr.Record (List.map2_exn value fields binders)))
+
+    let derive ty =
+      let r =
+        match Stag.Type.expr ty with
+        | Stag.Type_expr.Con (Stag.Path.Ref r, _) -> r
+        | _ -> fail "a declared type is needed, as in [derive (type t)]"
+      in
+      let type_name = Stag.Type_ref.name r in
+      let path = String.split_on_char '.' (Stag.Type_ref.path r) in
+      let self = List.take (Int.pred (List.length path)) path in
+      let decl =
+        match Stag.Type.decl r with
+        | Some decl -> decl
+        | None -> fail (String.append type_name " is abstract")
+      in
+      let param p =
+        match p with
+        | Stag.Type_decl.Param.Ty a -> a
+        | Stag.Type_decl.Param.Row _ -> fail "row parameters are not supported"
+      in
+      let params = List.map param decl.params in
+      let to_name = conv_name Dir.To_sexp type_name in
+      let of_name = conv_name Dir.Of_sexp type_name in
+      let exn_name = String.append of_name "_exn" in
+      let of_params = List.map (conv_name Dir.Of_sexp) params in
+      let with_last l x = List.append l (one x) in
+      let bodies =
+        match decl.kind with
+        | Stag.Type.Kind.Variant Nil -> fail "empty variants are not supported"
+        | Stag.Type.Kind.Variant cs ->
+          let cases = List.map nominal_case cs in
+          (variant_to_sexp self of_name cases,
+           variant_of_sexp self of_name cases)
+        | Stag.Type.Kind.Record fields ->
+          (record_to_sexp self of_name fields,
+           record_of_sexp self of_name fields)
+        | Stag.Type.Kind.Alias (Stag.Type_expr.Variant row) ->
+          let cases = poly_cases row in
+          (variant_to_sexp self of_name cases,
+           variant_of_sexp self of_name cases)
+        | Stag.Type.Kind.Alias ty ->
+          (to_sexp self of_name ty (var "v"), of_exn self of_name ty "sexp")
+      in
+      let result =
+        match_
+          (apply (var exn_name) (with_last (List.map var of_params) (var "sexp")))
+          (two
+             (pvar "v", Stag.Expr.Construct (ok_c, one (var "v")))
+             (Stag.Pattern.Exception
+                (Stag.Pattern.Construct (of_sexp_error_c, one (pvar "e"))),
+              Stag.Expr.Construct (error_c, one (var "e"))))
+      in
+      match bodies with
+      | to_body, of_body ->
+        Cons
+          (Stag.Toplevel.let_
+             to_name
+             (with_last (List.map (conv_name Dir.To_sexp) params) "v")
+             to_body,
+           two
+             (Stag.Toplevel.let_ exn_name (with_last of_params "sexp") of_body)
+             (Stag.Toplevel.let_ of_name (with_last of_params "sexp") result))
+  end
 end

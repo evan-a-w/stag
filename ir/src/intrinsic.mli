@@ -9,6 +9,7 @@ open! Import
 type t =
   | Type_expr (** [Stag.Type.t['a] -> Stag.Type_expr.t] *)
   | Type_ref_name (** [Stag.Type_ref.t -> string] *)
+  | Type_ref_path (** [Stag.Type_ref.t -> string] *)
   | Constructor_ref_name (** [Stag.Constructor_ref.t -> string] *)
   | Field_ref_name (** [Stag.Field_ref.t -> string] *)
   | Type_decl (** [Stag.Type_ref.t -> option[Stag.Type.Decl.t]] *)

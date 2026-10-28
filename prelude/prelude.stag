@@ -31,6 +31,11 @@ module Stag = struct
     type t
 
     let name = Intrinsic.type_ref_name
+
+    (* The path naming it from the root scope, without the leading [.]: eg.
+       ["A.M.t"] for the [t] of module [M] of file [a.stag], ["int"],
+       ["Core.Sexp.t"]. *)
+    let path = Intrinsic.type_ref_path
   end
 
   module Constructor_ref = struct

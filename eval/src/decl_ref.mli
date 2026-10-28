@@ -22,5 +22,9 @@ type t =
 (** The last name of [name], as declared, eg. [C] of [M.C]. *)
 val short_name : t -> string
 
+(** The path naming it from the root scope, without the leading [.], as
+    [Prelude_path.root_path]. *)
+val root_path : t -> string
+
 (** Eg. [<constructor M.C>], with [name] as by [Prelude_path.to_string_hum]. *)
 val to_string_hum : t -> string
