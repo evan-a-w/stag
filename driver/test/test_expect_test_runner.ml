@@ -177,7 +177,7 @@ let%expect_test "next" = print_int 1; [%expect {| 1 |}]
     {xxx|
     ((name (error @ t.stag:1:16-23))
      (mismatches (((loc t.stag:3:11-18) (expected (" 2 ")) (actual 1))))
-     (error (("Division by zero" @ t.stag:4:12-25))))
+     (error (("Uncaught exception Division_by_zero" @ t.stag:4:12-25))))
     ((name (next @ t.stag:7:16-22)) (mismatches ()) (error ()))
     corrected:
     let%expect_test "error" =

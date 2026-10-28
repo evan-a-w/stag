@@ -147,7 +147,7 @@ let%expect_test "messages" =
     File "a.stag", line 1, characters 8-30:
     1 | let c = .~(Int.div 1 0; .<1>.)
                 ^^^^^^^^^^^^^^^^^^^^^^
-    Error: This toplevel splice failed at compile time: Division by zero
+    Error: This toplevel splice failed at compile time: Uncaught exception Division_by_zero
     File "a.stag", line 1, characters 11-22:
     1 | let c = .~(Int.div 1 0; .<1>.)
                    ^^^^^^^^^^^
@@ -298,7 +298,7 @@ let%expect_test "different, with no output" =
     File "a.stag", line 11, characters 12-25:
     11 |   print_int (Int.div 1 0)
                      ^^^^^^^^^^^^^
-    Error: Expect test "different, with no output" failed: Division by zero
+    Error: Expect test "different, with no output" failed: Uncaught exception Division_by_zero
     |xxx}]
 ;;
 
@@ -482,10 +482,10 @@ let%expect_test "end to end: source to rendered errors" =
     1 | let x : list[int, int] = 1
                 ^^^^^^^^^^^^^^
     Error: The type list expects 1 argument(s), but is given 2
-    File "a.stag", line 1, characters 26-34:
+    File "a.stag", line 1, characters 29-33:
     1 | type t = A of int let x = A (1, 2)
-                                  ^^^^^^^^
-    Error: The constructor A.A expects 1 argument(s), but is applied to 2
+                                     ^^^^
+    Error: This expression has type int * int but an expression was expected of type int
     File "a.stag", line 1, characters 25-33:
     1 | let f r = r.`x let y = f {`y = 1}
                                  ^^^^^^^^

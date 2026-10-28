@@ -242,6 +242,71 @@ let bench_command ~fake_clock =
        then exit 1)
 ;;
 
+let fmt_command =
+  Command.basic
+    ~summary:"Format the files"
+    ~readme:(fun () ->
+      "With one FILE and no flag, prints it formatted to stdout. With \
+       -inplace, rewrites each FILE that is not formatted. With -check, writes \
+       nothing, lists each FILE that is not formatted on stdout, and fails if \
+       there is one. Several FILEs need -inplace or -check.")
+    (let%map_open.Command paths = files_param
+     and mode =
+       choose_one
+         ~if_nothing_chosen:(Default_to `Print)
+         [ flag
+             "inplace"
+             ~aliases:[ "--inplace" ]
+             (no_arg_some (`Run Format.Mode.Inplace))
+             ~doc:" rewrite the files that are not formatted"
+         ; flag
+             "check"
+             ~aliases:[ "--check" ]
+             (no_arg_some (`Run Format.Mode.Check))
+             ~doc:" list the files that are not formatted, writing nothing"
+         ]
+     in
+     fun () ->
+       let files = read_files paths in
+       match mode, files with
+       | `Print, [ file ] ->
+         (match Format.file file with
+          | Ok formatted -> print_string formatted
+          | Error diagnostic ->
+            report files diagnostic;
+            exit 1)
+       | `Print, _ ->
+         eprintf "Error: several FILEs need -inplace or -check\n%!";
+         exit 2
+       | `Run mode, files ->
+         let { Format.Summary.unformatted; errors } = Format.run ~mode files in
+         List.iter errors ~f:(report files);
+         (match mode with
+          | Inplace -> ()
+          | Check ->
+            List.iter unformatted ~f:(fun { file; formatted = _ } ->
+              print_endline file.path));
+         let unformatted_fails =
+           match mode with
+           | Check -> not (List.is_empty unformatted)
+           | Inplace -> false
+         in
+         if unformatted_fails || not (List.is_empty errors) then exit 1)
+;;
+
+let dump_tokens_command =
+  Command.basic
+    ~summary:"Print the tokens of a file with their byte offsets"
+    ~readme:(fun () ->
+      "For tests of editor grammars against the lexer: one (kind start stop) \
+       per token and comment.")
+    (let%map_open.Command path = anon ("FILE" %: string) in
+     fun () ->
+       match read_files [ path ] with
+       | [ file ] -> Dump_tokens.print file.contents
+       | _ -> assert false)
+;;
+
 let () =
   let argv, fake_clock =
     Bench_command.take_fake_clock (Array.to_list (Sys.get_argv ()))
@@ -252,6 +317,8 @@ let () =
     ; "run", run_command
     ; "test", test_command
     ; "bench", bench_command ~fake_clock
+    ; "fmt", fmt_command
+    ; "dump-tokens", dump_tokens_command
     ]
   |> Command_unix.run ~argv
 ;;

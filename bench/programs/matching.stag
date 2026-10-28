@@ -1,11 +1,7 @@
 (* Pattern matching on variants and polymorphic variants: evaluating and
    simplifying arithmetic expressions. *)
 
-type expr =
-  | Num of int
-  | Var of string
-  | Add of expr * expr
-  | Mul of expr * expr
+type expr = Num of int | Var of string | Add of expr * expr | Mul of expr * expr
 
 let simplify e =
   match e with
@@ -32,13 +28,16 @@ let build depth =
   match Int.equal depth 0 with
   | true -> Add (Var "x", Num 0)
   | false ->
-    (match Int.rem depth 2 with
-     | 0 -> Add (build (Int.sub depth 1), Mul (Num 1, build (Int.sub depth 1)))
-     | _ -> Mul (build (Int.sub depth 1), Add (Num 0, Num 1)))
+    match Int.rem depth 2 with
+    | 0 -> Add (build (Int.sub depth 1), Mul (Num 1, build (Int.sub depth 1)))
+    | _ -> Mul (build (Int.sub depth 1), Add (Num 0, Num 1))
 
 let tree = build 10
 
-let env x = match String.equal x "x" with true -> 3 | false -> 0
+let env x =
+  match String.equal x "x" with
+  | true -> 3
+  | false -> 0
 
 let classify v =
   match v with
@@ -56,8 +55,8 @@ let classify_many n =
         match Int.rem i 4 with
         | 0 -> `Zero
         | 1 -> `One i
-        | 2 -> `Pair (i, i)
-        | _ -> `Triple (i, i, i)
+        | 2 -> `Pair ((i, i))
+        | _ -> `Triple ((i, i, i))
       in
       go (Int.add i 1) (Int.add acc (classify v))
   in

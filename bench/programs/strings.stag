@@ -13,7 +13,8 @@ let count_char c s =
     match Int.equal i (String.length s) with
     | true -> acc
     | false ->
-      go (Int.add i 1)
+      go
+        (Int.add i 1)
         (match Char.equal (String.get s i) c with
          | true -> Int.add acc 1
          | false -> acc)

@@ -21,10 +21,20 @@ let fact n =
   | true -> 1
   | false -> Int.mul n (fact (Int.sub n 1))
 
-let is_even n = match Int.equal n 0 with true -> true | false -> is_odd (Int.sub n 1)
-let is_odd n = match Int.equal n 0 with true -> false | false -> is_even (Int.sub n 1)
+let is_even n =
+  match Int.equal n 0 with
+  | true -> true
+  | false -> is_odd (Int.sub n 1)
 
-let print_bool b = match b with true -> print_endline "true" | false -> print_endline "false"
+let is_odd n =
+  match Int.equal n 0 with
+  | true -> false
+  | false -> is_even (Int.sub n 1)
+
+let print_bool b =
+  match b with
+  | true -> print_endline "true"
+  | false -> print_endline "false"
 
 let%expect_test "recursion" =
   print_int (fact 10);
@@ -41,28 +51,44 @@ let%expect_test "local recursion" =
   let count_down n =
     match Int.lt n 0 with
     | true -> ()
-    | false -> print_int n; print_char ' '; count_down (Int.sub n 1)
+    | false ->
+      print_int n;
+      print_char ' ';
+      count_down (Int.sub n 1)
   in
   count_down 5;
   [%expect {| 5 4 3 2 1 0 |}]
 
 let%expect_test "tuples" =
-  let swap p = match p with (a, b) -> (b, a) in
+  let swap p = match p with a, b -> (b, a) in
   match swap (1, "one") with
-  | (s, n) -> print_endline s; print_int n;
-  [%expect {|
+  | s, n ->
+    print_endline s;
+    print_int n;
+    [%expect {|
     one
     1
     |}]
 
 type list['a] = Nil | Cons of 'a * list['a]
 
-let map f l = match l with Nil -> Nil | Cons (x, rest) -> Cons (f x, map f rest)
+let map f l =
+  match l with
+  | Nil -> Nil
+  | Cons (x, rest) -> Cons (f x, map f rest)
 
-let iter f l = match l with Nil -> () | Cons (x, rest) -> f x; iter f rest
+let iter f l =
+  match l with
+  | Nil -> ()
+  | Cons (x, rest) ->
+    f x;
+    iter f rest
 
 let%expect_test "nominal variants" =
-  let print_item x = print_int x; print_char ' ' in
+  let print_item x =
+    print_int x;
+    print_char ' '
+  in
   iter print_item (map (Int.mul 10) (Cons (1, Cons (2, Cons (3, Nil)))));
   [%expect {| 10 20 30 |}]
 
@@ -75,7 +101,10 @@ let area s =
   | Empty -> 0
 
 let%expect_test "constructors with several arguments" =
-  let print_area s = print_int (area s); print_char ' ' in
+  let print_area s =
+    print_int (area s);
+    print_char ' '
+  in
   iter print_area (Cons (Circle 2, Cons (Rect (3, 4), Cons (Empty, Nil))));
   [%expect {| 12 12 0 |}]
 
@@ -85,8 +114,11 @@ let%expect_test "nominal records" =
   let p = {x = 1; y = 2} in
   let q = {x = Int.add p.x 10; y = Int.neg p.y} in
   match q with
-  | {x = a; y = b} -> print_int a; print_char ','; print_int b;
-  [%expect {| 11,-2 |}]
+  | {x = a; y = b} ->
+    print_int a;
+    print_char ',';
+    print_int b;
+    [%expect {| 11,-2 |}]
 
 let describe v =
   match v with
@@ -116,8 +148,10 @@ let%expect_test "polymorphic records" =
   print_int (tagged \ `id).`age;
   print_endline "";
   match tagged with
-  | {`name = n; ..rest} -> print_endline n; print_int rest.`id;
-  [%expect {|
+  | {`name = n; ..rest} ->
+    print_endline n;
+    print_int rest.`id;
+    [%expect {|
     ada
     37 1 37
     ada
@@ -125,12 +159,17 @@ let%expect_test "polymorphic records" =
     |}]
 
 let%expect_test "Int prims" =
-  print_int (Int.sub 10 3); print_char ' ';
-  print_int (Int.div 17 5); print_char ' ';
-  print_int (Int.rem 17 5); print_char ' ';
-  print_int (Int.neg 4); print_char ' ';
-  print_int (Int.compare 1 2); print_char ' ';
-  print_int (Int.of_string "123");
+  print_int (Int.sub 10 3);
+  print_char ' ';
+  print_int (Int.div 17 5);
+  print_char ' ';
+  print_int (Int.rem 17 5);
+  print_char ' ';
+  print_int (Int.neg 4);
+  print_char ' ';
+  print_int (Int.compare 1 2);
+  print_char ' ';
+  print_int (Int.of_string_exn "123");
   print_endline "";
   print_bool (Int.le 2 2);
   print_bool (Int.gt 1 2);
@@ -144,12 +183,16 @@ let%expect_test "Int prims" =
 
 let%expect_test "String, Char and Bool prims" =
   let s = "hello, world" in
-  print_int (String.length s); print_char ' ';
-  print_char (String.get s 7); print_char ' ';
+  print_int (String.length s);
+  print_char ' ';
+  print_char (String.get s 7);
+  print_char ' ';
   print_endline (String.sub s 0 5);
   print_bool (String.equal s "hello, world");
-  print_int (String.compare "a" "b"); print_char ' ';
-  print_int (Char.code 'A'); print_char ' ';
+  print_int (String.compare "a" "b");
+  print_char ' ';
+  print_int (Char.code 'A');
+  print_char ' ';
   print_endline (Char.to_string (Char.of_code 98));
   print_bool (Char.equal 'x' 'y');
   print_bool (Bool.not true);

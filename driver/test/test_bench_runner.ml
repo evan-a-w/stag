@@ -77,7 +77,8 @@ let%expect_test "not a bench" = ()
     (fib/5 (outcome ok))
     ("strings/\"a\"" (outcome ok))
     ("strings/\"b c\"" (outcome ok))
-    (fails (outcome "(\"Division by zero\" @ t.stag:11:20-31)"))
+    (fails
+     (outcome "(\"Uncaught exception Division_by_zero\" @ t.stag:11:20-31)"))
     |}]
 ;;
 
@@ -215,7 +216,7 @@ let%expect_test "an argument that fails" =
   [%expect
     {|
     (x/1 (outcome ok))
-    (x (error ("Division by zero" @ t.stag:1:23-34)))
+    (x (error ("Uncaught exception Division_by_zero" @ t.stag:1:23-34)))
     |}]
 ;;
 
@@ -255,7 +256,7 @@ let%bench "after" n in [1; 2] = n
           | Ok entry -> print_string (Measure.Report.human config entry)));
   [%expect
     {|
-    (fails (error ("Division by zero" @ t.stag:3:20-31)))
+    (fails (error ("Uncaught exception Division_by_zero" @ t.stag:3:20-31)))
     after/2
       time:      [0.1000 ns 0.1000 ns 0.1000 ns] (mean, 95% CI)
       median:    0.1000 ns   stddev: 0.000 ns   MADN: 0.000 ns

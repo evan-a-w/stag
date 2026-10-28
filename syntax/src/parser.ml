@@ -31,6 +31,9 @@ exception Syntax_error of Loc.t * string
 type t =
   { tokens : Lexer.Located.t array
   ; mutable pos : int
+  ; mutable bare_tuple_end : int
+    (** The [pos] after the last [)] whose contents were a tuple without
+          parentheses of its own, as in [(a, b)] but not [((a, b))]. *)
   }
 
 let peek_at t n =
@@ -443,11 +446,24 @@ let starts_pattern_atom : Token.t -> bool = function
   | _ -> false
 ;;
 
-(** [C (a, b)] has two arguments; [arg] started at [arg_start]. *)
-let construct_args (arg : _ Located.t) ~arg_start ~tuple_items =
-  match arg_start, tuple_items arg.txt with
-  | Token.Lparen, Some items -> items
+(** [C (a, b)] has two arguments (a tuple, if [C] is declared with one, which
+    the typechecker decides), and [C ((a, b))] one; [arg] was just parsed. *)
+let construct_args t (arg : _ Located.t) ~tuple_items =
+  match tuple_items arg.txt with
+  | Some items when t.bare_tuple_end = t.pos -> items
   | _ -> [ arg ]
+;;
+
+(** Closes the parentheses around [contents], recording if [contents] is a
+    tuple without parentheses of its own: one starting where its first item
+    does, as parentheses are part of a location. *)
+let close_parens t ~open_loc (contents : _ Located.t) ~tuple_items =
+  close t Rparen ~opener:Lparen ~open_loc;
+  match tuple_items contents.txt with
+  | Some ((first : _ Located.t) :: _)
+    when Loc.Pos.equal first.loc.start contents.loc.start ->
+    t.bare_tuple_end <- t.pos
+  | _ -> ()
 ;;
 
 let rec pattern t : Pattern.t =
@@ -475,9 +491,8 @@ and pattern_construct t : Pattern.t =
     let args =
       if starts_pattern_atom (peek t)
       then (
-        let arg_start = peek t in
         let arg = pattern_construct t in
-        construct_args arg ~arg_start ~tuple_items:(function
+        construct_args t arg ~tuple_items:(function
           | Pattern.Tuple items -> Some items
           | _ -> None))
       else []
@@ -490,6 +505,10 @@ and pattern_construct t : Pattern.t =
       if starts_pattern_atom (peek t) then Some (pattern_construct t) else None
     in
     since t start (Pattern.Poly_variant (tag, arg))
+  | Exception ->
+    advance t;
+    let pattern = pattern_construct t in
+    since t start (Pattern.Exception pattern)
   | _ -> pattern_atom t
 
 and pattern_atom t : Pattern.t =
@@ -520,7 +539,9 @@ and pattern_atom t : Pattern.t =
       let pattern = pattern t in
       if is t Colon
       then fail (loc t) "type annotations on patterns are not supported";
-      close t Rparen ~opener:Lparen ~open_loc:start;
+      close_parens t ~open_loc:start pattern ~tuple_items:(function
+        | Pattern.Tuple items -> Some items
+        | _ -> None);
       since t start pattern.txt)
   | Lbrace -> record_pattern t
   | _ -> expected t "a pattern"
@@ -595,6 +616,11 @@ let nominal_record_ahead t =
   go 1
 ;;
 
+let pattern_parameter =
+  "patterns are not allowed as parameters, only `x`, `_` or `(x : t)`; use \
+   `match`"
+;;
+
 (** [x], [_] or [(x : t)]. *)
 let param t : Binding.t =
   let binder t =
@@ -608,6 +634,9 @@ let param t : Binding.t =
   match peek t with
   | Lparen ->
     let open_loc = loc t in
+    (match peek_at t 1, peek_at t 2 with
+     | (Lident _ | Underscore), Colon -> ()
+     | _ -> fail open_loc pattern_parameter);
     advance t;
     let name = binder t in
     expect t Colon;
@@ -617,12 +646,22 @@ let param t : Binding.t =
   | _ -> binder t, None
 ;;
 
+let params t =
+  let rec loop acc =
+    match peek t with
+    | Lident _ | Underscore | Lparen -> loop (param t :: acc)
+    | _ -> List.rev acc
+  in
+  loop []
+;;
+
 (* With [~seq:false], as in a [{...}] entry, [e1; e2] is not parsed (also in
    the bodies of [let] and [match]), leaving the [;] as the separator. *)
 let rec expr ?(seq = true) t : Expr.t =
   match peek t with
   | Let -> let_ t ~seq
   | Match -> match_ t ~seq
+  | Fun -> fun_ t ~seq
   | _ ->
     let first = tuple t ~seq in
     if seq && is t Semi
@@ -646,12 +685,7 @@ and binding t =
       located ~loc "_"
     | _ -> lident t ~what:"a name to bind"
   in
-  let rec params acc =
-    match peek t with
-    | Lident _ | Underscore | Lparen -> params (param t :: acc)
-    | _ -> List.rev acc
-  in
-  let params = params [] in
+  let params = params t in
   let annot =
     if is t Colon
     then (
@@ -671,6 +705,20 @@ and let_ t ~seq : Expr.t =
   expr_at
     ~loc:(Loc.merge start body.loc)
     (Expr.Let (name, params, annot, equal, body))
+
+and fun_ t ~seq : Expr.t =
+  let start = loc t in
+  expect t Fun;
+  let params = params t in
+  if List.is_empty params
+  then (
+    match peek t with
+    | Uident _ | Label _ | Int _ | Char _ | String _ | True | False | Lbrace ->
+      fail (loc t) pattern_parameter
+    | _ -> expected t "a parameter");
+  expect t Arrow;
+  let body = expr t ~seq in
+  expr_at ~loc:(Loc.merge start body.loc) (Expr.Fun (params, body))
 
 and match_ t ~seq : Expr.t =
   let start = loc t in
@@ -711,6 +759,7 @@ and tuple_item t ~seq : Expr.t =
   match peek t with
   | Let -> let_ t ~seq
   | Match -> match_ t ~seq
+  | Fun -> fun_ t ~seq
   | _ -> construct t
 
 (** A value in [{...}]. *)
@@ -719,11 +768,6 @@ and entry_value t = tuple t ~seq:false
 and construct t : Expr.t =
   let start = loc t in
   let saved = t.pos in
-  let arg () =
-    let arg_start = peek t in
-    let arg = construct t in
-    arg_start, arg
-  in
   match peek t with
   | Uident _ ->
     (match path t ~what:"" with
@@ -731,8 +775,8 @@ and construct t : Expr.t =
        let args =
          if starts_atom (peek t)
          then (
-           let arg_start, arg = arg () in
-           construct_args arg ~arg_start ~tuple_items:(function
+           let arg = construct t in
+           construct_args t arg ~tuple_items:(function
              | Expr.Tuple items -> Some items
              | _ -> None))
          else []
@@ -744,7 +788,7 @@ and construct t : Expr.t =
   | Label tag ->
     let tag = located ~loc:start tag in
     advance t;
-    let arg = if starts_atom (peek t) then Some (snd (arg ())) else None in
+    let arg = if starts_atom (peek t) then Some (construct t) else None in
     expr_since t start (Poly_variant (tag, arg))
   | Type ->
     advance t;
@@ -859,7 +903,9 @@ and atom t : Expr.t =
              e.loc
              "type annotations are only supported on variables, as in `(x : t)`")
       | _ ->
-        close t Rparen ~opener:Lparen ~open_loc:start;
+        close_parens t ~open_loc:start e ~tuple_items:(function
+          | Expr.Tuple items -> Some items
+          | _ -> None);
         expr_since t start e.txt)
   | Lbrace -> record t
   | Quote_open ->
@@ -885,6 +931,11 @@ and poly_field t =
   let name = label t ~what:"a polymorphic record label like `x" in
   expect t Equal;
   name, entry_value t
+
+and nominal_field t =
+  let path = lowercase_path t ~what:"a field name" in
+  expect t Equal;
+  decl_path path, entry_value t
 
 and record t : Expr.t =
   let start = loc t in
@@ -915,10 +966,7 @@ and record t : Expr.t =
      | Some base -> expr_since t start (Poly_extend (fields, base)))
   | _ when nominal_record_ahead t ->
     let fields =
-      delimited t ~opener:Lbrace ~close:Rbrace ~sep:Semi ~item:(fun t ->
-        let path = lowercase_path t ~what:"a field name" in
-        expect t Equal;
-        decl_path path, entry_value t)
+      delimited t ~opener:Lbrace ~close:Rbrace ~sep:Semi ~item:nominal_field
     in
     expr_since t start (Record fields)
   | _ ->
@@ -926,17 +974,23 @@ and record t : Expr.t =
     let base = splice t in
     if not (is t With) then expected t "`with` or a record field";
     advance t;
-    let rec loop acc =
-      let acc = poly_field t :: acc in
+    let rec loop acc ~field =
+      let acc = field t :: acc in
       if is t Semi
       then (
         advance t;
-        if is t Rbrace then List.rev acc else loop acc)
+        if is t Rbrace then List.rev acc else loop acc ~field)
       else List.rev acc
     in
-    let fields = loop [] in
-    close t Rbrace ~opener:Lbrace ~open_loc:start;
-    expr_since t start (Poly_update (base, fields))
+    (match peek t with
+     | Label _ ->
+       let fields = loop [] ~field:poly_field in
+       close t Rbrace ~opener:Lbrace ~open_loc:start;
+       expr_since t start (Poly_update (base, fields))
+     | _ ->
+       let fields = loop [] ~field:nominal_field in
+       close t Rbrace ~opener:Lbrace ~open_loc:start;
+       expr_since t start (Record_update (base, fields)))
 ;;
 
 (* Declarations *)
@@ -1043,6 +1097,10 @@ let rec toplevel t : Toplevel.t =
   | Type ->
     advance t;
     since t start (Toplevel.Type (type_decl t))
+  | Exception ->
+    advance t;
+    let name, args = constructor_decl t in
+    since t start (Toplevel.Exception (name, args))
   | Module ->
     advance t;
     let name = uident t ~what:"a module name" in
@@ -1105,7 +1163,10 @@ let rec toplevel t : Toplevel.t =
     expect t Equal;
     let body = expr t in
     since t start (Toplevel.Bench { name; param; body })
-  | _ -> expected t "a declaration (`let`, `type`, `module` or `include`)"
+  | _ ->
+    expected
+      t
+      "a declaration (`let`, `type`, `exception`, `module` or `include`)"
 
 (* [.~e], the declarations [e] generates. *)
 and declaration_splice t =
@@ -1119,11 +1180,11 @@ and toplevels t ~stop =
   loop []
 ;;
 
-let run ~file source f =
-  match Lexer.tokenize ~file source with
+let run_with_comments ~file source f =
+  match Lexer.tokenize_with_comments ~file source with
   | Error error -> Error (Error.Lex error)
-  | Ok tokens ->
-    let t = { tokens; pos = 0 } in
+  | Ok (tokens, comments) ->
+    let t = { tokens; pos = 0; bare_tuple_end = -1 } in
     (match
        let result = f t in
        (match peek t with
@@ -1133,11 +1194,21 @@ let run ~file source f =
         | _ -> expected t "end of file");
        result
      with
-     | result -> Ok result
+     | result -> Ok (result, tokens, comments)
      | exception Syntax_error (loc, message) -> Error (Syntax { loc; message }))
 ;;
 
+let run ~file source f =
+  Result.map (run_with_comments ~file source f) ~f:(fun (result, _, _) ->
+    result)
+;;
+
 let program ~file source = run ~file source (toplevels ~stop:Token.Eof)
+
+let program_with_comments ~file source =
+  run_with_comments ~file source (toplevels ~stop:Token.Eof)
+;;
+
 let expr ~file source = run ~file source expr
 let pattern ~file source = run ~file source pattern
 let type_expr ~file source = run ~file source type_expr

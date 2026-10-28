@@ -1,5 +1,6 @@
 let pow x n =
-  let go acc n = match Int.equal n 0 with
+  let go acc n =
+    match Int.equal n 0 with
     | true -> acc
     | false -> go (Int.mul acc x) (Int.sub n 1)
   in

@@ -8,7 +8,7 @@ type t =
   | Unit
   | Tuple of t list
   | Construct of Typed.Constructor_ref.t * t list
-  | Record of t array (** By field index. *)
+  | Record of Typed.Record_type.t * t array (** By field index. *)
   | Poly_record of t String.Map.t
   | Poly_variant of string * t (** A tag without an argument has [Unit]. *)
   | Function of
@@ -42,5 +42,9 @@ val of_lit : Syntax.Lit.t -> t
 val sexp_of_t : t -> Sexp.t
 
 (** As stag syntax, eg. [C (1, `A)], for messages. Functions are [<fun>],
-    code [<code>] and nominal records [<record>]. *)
-val to_string_hum : t -> string
+    code [<code>]. If longer than [max_length],
+    it is cut there and followed by [...]. *)
+val to_string_hum : ?max_length:int -> t -> string
+
+(** [to_string_hum], cut at 1000 characters, followed by [...]. *)
+val to_string_for_message : t -> string

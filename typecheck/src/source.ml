@@ -54,6 +54,7 @@ module Pattern = struct
           { fields : (Syntax.Name.t * t) list
           ; rest : Rest.t
           }
+      | Exception of t
   end
 
   let syntax_view ({ txt; loc } : Syntax.Pattern.t) : View.t =
@@ -80,6 +81,7 @@ module Pattern = struct
              | Open -> Open
              | Bind name -> Bind (Name name))
         }
+    | Exception pattern -> Exception (sub pattern)
   ;;
 
   let generated_view ({ desc; ty = _; loc } : Typed.Pattern.t) : View.t =
@@ -118,6 +120,17 @@ module Pattern = struct
     | Syntax pattern -> pattern.loc
     | Generated pattern -> pattern.loc
   ;;
+
+  let tuple ts =
+    let loc = Loc.merge (loc (List.hd_exn ts)) (loc (List.last_exn ts)) in
+    let syntax =
+      List.map ts ~f:(function
+        | Syntax pattern -> pattern
+        | Generated _ ->
+          raise_s [%message "Generated arguments are never wrapped in a tuple"])
+    in
+    Syntax { txt = Tuple syntax; loc }
+  ;;
 end
 
 module Expr = struct
@@ -150,6 +163,10 @@ module Expr = struct
           ; body : t
           ; in_ : t
           }
+      | Fun of
+          { args : (Binder.t * Syntax.Type_expr.t option) list
+          ; body : t
+          }
       | Splice of
           { code : t
           ; subs : Subs.t
@@ -159,7 +176,12 @@ module Expr = struct
       | Construct of Constructor.t * t list
       | Record of (Field.t * t) list
       | Field of t * Field.t
-      | Match of t * (Pattern.t * t) list
+      | Record_update of t * (Field.t * t) list
+      | Match of
+          { scrutinee : t
+          ; cases : (Pattern.t * t) list
+          ; exception_cases : (Pattern.t * t) list
+          }
       | Poly_record of (Syntax.Name.t * t) list
       | Poly_field of t * string
       | Poly_extend of (Syntax.Name.t * t) list * t
@@ -186,6 +208,11 @@ module Expr = struct
         ; body = sub equal
         ; in_ = sub in_
         }
+    | Fun (args, body) ->
+      Fun
+        { args = List.map args ~f:(fun (name, annot) -> Binder.Name name, annot)
+        ; body = sub body
+        }
     | Splice { expr; subs } ->
       Splice
         { code = sub expr
@@ -204,11 +231,18 @@ module Expr = struct
       Record
         (List.map fields' ~f:(fun (path, expr) -> Field.Path path, sub expr))
     | Field (expr, path) -> Field (sub expr, Path path)
-    | Match (expr, cases) ->
-      Match
+    | Record_update (expr, fields') ->
+      Record_update
         ( sub expr
-        , List.map cases ~f:(fun (pattern, body) ->
-            Pattern.Syntax pattern, sub body) )
+        , List.map fields' ~f:(fun (path, expr) -> Field.Path path, sub expr) )
+    | Match (expr, arms) ->
+      let cases, exception_cases =
+        List.partition_map arms ~f:(fun ((pattern : Syntax.Pattern.t), body) ->
+          match pattern.txt with
+          | Exception pattern -> Second (Pattern.Syntax pattern, sub body)
+          | _ -> First (Pattern.Syntax pattern, sub body))
+      in
+      Match { scrutinee = sub expr; cases; exception_cases }
     | Poly_record fields' -> Poly_record (fields fields')
     | Poly_field (expr, label) -> Poly_field (sub expr, label.txt)
     | Poly_extend (fields', expr) -> Poly_extend (fields fields', sub expr)
@@ -237,6 +271,11 @@ module Expr = struct
         ; body = sub body
         ; in_ = sub in_
         }
+    | Fun { args; body } ->
+      Fun
+        { args = List.map args ~f:(fun ident -> Binder.Ident ident, None)
+        ; body = sub body
+        }
     | Splice { code; subs = Explicit subs } ->
       Splice
         { code = sub code
@@ -256,11 +295,20 @@ module Expr = struct
       Record
         (List.map fields' ~f:(fun (field, expr) -> Field.Ref field, sub expr))
     | Field (expr, field) -> Field (sub expr, Ref field)
-    | Match (expr, cases) ->
-      Match
+    | Record_update (expr, fields') ->
+      Record_update
         ( sub expr
-        , List.map cases ~f:(fun (pattern, body) ->
-            Pattern.Generated pattern, sub body) )
+        , List.map fields' ~f:(fun (field, expr) -> Field.Ref field, sub expr)
+        )
+    | Match { scrutinee; cases; exception_cases } ->
+      let generated =
+        List.map ~f:(fun (pattern, body) -> Pattern.Generated pattern, sub body)
+      in
+      Match
+        { scrutinee = sub scrutinee
+        ; cases = generated cases
+        ; exception_cases = generated exception_cases
+        }
     | Poly_record fields' -> Poly_record (fields fields')
     | Poly_field (expr, label) -> Poly_field (sub expr, label)
     | Poly_extend (fields', expr) -> Poly_extend (fields fields', sub expr)
@@ -279,5 +327,16 @@ module Expr = struct
   let loc = function
     | Syntax expr -> expr.loc
     | Generated expr -> expr.loc
+  ;;
+
+  let tuple ts =
+    let loc = Loc.merge (loc (List.hd_exn ts)) (loc (List.last_exn ts)) in
+    let syntax =
+      List.map ts ~f:(function
+        | Syntax expr -> expr
+        | Generated _ ->
+          raise_s [%message "Generated arguments are never wrapped in a tuple"])
+    in
+    Syntax { txt = Tuple syntax; loc }
   ;;
 end

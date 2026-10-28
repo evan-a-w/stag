@@ -117,10 +117,9 @@ let%expect_test "nominal types" =
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
      @ t.stag:5:10-14)
-    ((Unbound_field w) @ t.stag:5:16-17)
-    ((Fields_of_different_types (field z) (expected_type r) (actual_type s)) @
-     t.stag:5:16-17)
-    ((Duplicate_field x) @ t.stag:5:23-24)
+    ((No_such_field (type_name r) (field w)) @ t.stag:5:16-17)
+    ((No_such_field (type_name r) (field z)) @ t.stag:5:16-17)
+    ((Repeated_field x) @ t.stag:5:23-24)
     ((Missing_field y) @ t.stag:5:8-15)
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())
@@ -368,8 +367,9 @@ let%expect_test "staging" =
     ((Not_in_scope a) @ t.stag:1:19-20)
     ((Splice_evaluation_failed
       (code
-       (Match (Lit (Int 1) : int)
-        (((Lit (Int 2) : int) (Quote (Lit (Int 1) : int) : <int>{}))) : <int>{}))
+       (Match (scrutinee (Lit (Int 1) : int))
+        (cases (((Lit (Int 2) : int) (Quote (Lit (Int 1) : int) : <int>{})))) :
+        <int>{}))
       (error ("Match failure: no case matches the value 1" @ t.stag:1:10-35)))
      @ t.stag:1:8-35)
     |}]

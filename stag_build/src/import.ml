@@ -12,3 +12,4 @@ module Bench_command = Stag_driver.Bench_command
 module Bench_runner = Stag_driver.Bench_runner
 module Phase_bench = Stag_driver.Phase_bench
 module Measure = Stag_measure
+module Format = Stag_driver.Format

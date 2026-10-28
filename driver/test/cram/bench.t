@@ -232,7 +232,7 @@ A failing benchmark is reported, and the others still run.
   File "fail.stag", line 1, characters 18-29:
   1 | let%bench "div" = Int.div 1 0
                         ^^^^^^^^^^^
-  Error: Benchmark div failed: Division by zero
+  Error: Benchmark div failed: Uncaught exception Division_by_zero
   ok
     time:      [0.1000 ns 0.1000 ns 0.1000 ns] (mean, 95% CI)
     median:    0.1000 ns   stddev: 0.000 ns   MADN: 0.000 ns
@@ -254,7 +254,7 @@ before their arguments are evaluated, so the arguments of the others are not.
   File "args.stag", line 1, characters 22-33:
   1 | let%bench "div" n in [Int.div 1 0; 2] = n
                             ^^^^^^^^^^^
-  Error: Benchmark div failed: Division by zero
+  Error: Benchmark div failed: Uncaught exception Division_by_zero
   File "args.stag", line 2, characters 10-16:
   2 | let%bench "same" n in [1; Int.sub 2 1] = n
                 ^^^^^^

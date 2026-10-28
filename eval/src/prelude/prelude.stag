@@ -4,6 +4,13 @@
 type list['a] = Nil | Cons of 'a * list['a]
 type option['a] = None | Some of 'a
 
+(* Raised by prims on errors in their arguments. *)
+exception Division_by_zero
+exception Invalid_argument of string
+exception Failure of string
+
+let raise = Intrinsic.raise
+
 module Stag = struct
   (* The syntax of stag as data, mirroring [Syntax], for declarations generated
      at compile time. Names are as written, without backticks or quotes: [x],
@@ -115,6 +122,7 @@ module Stag = struct
       | Record of list[Path.t[Field_ref.t] * t]
       | Poly_variant of string * option[t]
       | Poly_record of {`fields : list[string * t]; `rest : Rest.t}
+      | Exception of t
 
     let construct name args = Construct (Path.Name name, args)
 
@@ -132,12 +140,14 @@ module Stag = struct
       | Var of string * option[Type_expr.t]
       | App of t * t
       | Let of string * list[Binding.t] * option[Type_expr.t] * t * t
+      | Fun of list[Binding.t] * t
       | Splice of {`expr : t; `subs : option[list[string * option[t]]]}
       | Quote of t
       | Tuple of list[t]
       | Construct of Path.t[Constructor_ref.t] * list[t]
       | Record of list[Path.t[Field_ref.t] * t]
       | Field of t * Path.t[Field_ref.t]
+      | Record_update of t * list[Path.t[Field_ref.t] * t]
       | Type of Type_expr.t
       | Match of t * list[Pattern.t * t]
       | Poly_record of list[string * t]
@@ -176,12 +186,14 @@ module Stag = struct
     type t =
       | Let of string * list[Binding.t] * option[Type_expr.t] * Expr.t
       | Type of Type_decl.t
+      | Exception of string * list[Type_expr.t]
       | Module of string * list[t]
       | Module_splice of string * Expr.t
       | Include of Expr.t
       | Expect_test of {`name : string; `body : Expr.t}
-      | Bench of
-          {`name : string; `param : option[string * list[Expr.t]]; `body : Expr.t}
+      | Bench of {`name : string;
+                  `param : option[string * list[Expr.t]];
+                  `body : Expr.t}
 
     (* [let_ name params body] is [let name params = body]. *)
     let let_ name params body =

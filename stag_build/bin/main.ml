@@ -87,6 +87,24 @@ let bench_command ~fake_clock =
      fun () -> exit_unless (Action.bench (load ()) options ~filters ~phases))
 ;;
 
+let fmt_command =
+  Command.basic
+    ~summary:"Format every source of the project"
+    ~readme:(fun () ->
+      "Rewrites each source that is not formatted, printing its diff. With \
+       -check, writes nothing, printing the diffs, and fails if there is one.")
+    (let%map_open.Command check =
+       flag
+         "check"
+         ~aliases:[ "--check" ]
+         no_arg
+         ~doc:" print the diffs without writing them, failing if any"
+     in
+     fun () ->
+       let mode : Format.Mode.t = if check then Check else Inplace in
+       exit_unless (Action.fmt (load ()) ~mode))
+;;
+
 let () =
   let argv, fake_clock =
     Bench_command.take_fake_clock (Array.to_list (Sys.get_argv ()))
@@ -98,6 +116,7 @@ let () =
     ; "test", test_command
     ; "promote", promote_command
     ; "bench", bench_command ~fake_clock
+    ; "fmt", fmt_command
     ]
   |> Command_unix.run ~argv
 ;;

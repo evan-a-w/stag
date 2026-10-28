@@ -67,13 +67,12 @@ let benches ?files driver =
                 claim (name ^ "/" ^ label) ~loc
                 |> Result.map_error ~f:(fun previous ->
                   Runtime_error.to_error
-                    { loc
-                    ; message =
-                        sprintf
+                    (Runtime_error.create
+                       ~loc
+                       (sprintf
                           "Two benchmarks are named %S, the other at %s"
                           (name ^ "/" ^ label)
-                          (Loc.to_string previous)
-                    })
+                          (Loc.to_string previous))))
               in
               label, routine [ ident, value ] bench.body)
         })

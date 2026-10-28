@@ -59,15 +59,37 @@ module Constructor_ref : sig
     ; index : int
     }
   [@@deriving sexp_of]
+
+  (** The exception [name], a canonical name. Exceptions are of type [exn]
+      and share an index, so are told apart by name. *)
+  val exception_ : string -> t
+
+  val is_exception : t -> bool
+end
+
+(** A nominal record type: its canonical name, and its fields' canonical
+    names by index. One per declaration, shared by its fields' refs and its
+    values. *)
+module Record_type : sig
+  type t =
+    { name : string
+    ; fields : string array
+    }
+
+  (** As its name. *)
+  val sexp_of_t : t -> Sexp.t
 end
 
 module Field_ref : sig
   type t =
-    { type_name : string
-    ; name : string
+    { record : Record_type.t
     ; index : int
     }
-  [@@deriving sexp_of]
+
+  val name : t -> string
+
+  (** As [((type_name T) (name f) (index i))]. *)
+  val sexp_of_t : t -> Sexp.t
 end
 
 (** [ty] is the type of the values the node matches. *)
@@ -134,6 +156,10 @@ module Expr : sig
           ; body : 'e (** [ident] is bound in [body]. *)
           ; in_ : 'e
           }
+      | Fun of
+          { args : Ident.t list (** Non-empty. *)
+          ; body : 'e
+          }
       | Splice of
           { code : 'e (** At the level outside the splice. *)
           ; subs : 'e Subs.t
@@ -149,7 +175,16 @@ module Expr : sig
       | Construct of Constructor_ref.t * 'e list
       | Record of (Field_ref.t * 'e) list
       | Field of 'e * Field_ref.t
-      | Match of 'e * (Pattern.t * 'e) list
+      | Record_update of 'e * (Field_ref.t * 'e) list
+      (** [{e with f = v; ...}], of [e]'s type but for the parameters only the
+          updated fields' types contain. *)
+      | Match of
+          { scrutinee : 'e
+          ; cases : (Pattern.t * 'e) list
+          ; exception_cases : (Pattern.t * 'e) list
+            (** The cases [exception p], as [p]: they match what the scrutinee
+              raises. *)
+          }
       | Poly_record of (string * 'e) list
       | Poly_field of 'e * string
       | Poly_extend of (string * 'e) list * 'e

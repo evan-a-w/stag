@@ -54,6 +54,7 @@ module Item : sig
   type t =
     | Value of Value.t
     | Type of Type_decl.t
+    | Exception of Constructor.t
     | Module of
         { name : string
         ; items : t list

@@ -21,8 +21,13 @@ let constructor_refs =
              refs
              ~key:name
              ~data:{ Typed.Constructor_ref.type_name; name; index })
-       | Type _ | Let _ | Expect_test _ | Bench _ | Module_splice _ | Include _
-         -> ()
+       | Type _
+       | Exception _
+       | Let _
+       | Expect_test _
+       | Bench _
+       | Module_splice _
+       | Include _ -> ()
      in
      List.iter (force Prelude.toplevels) ~f:(add ~path:[]);
      refs)
@@ -145,6 +150,7 @@ module To_value = struct
             ; "rest", rest_value rest
             ]
         ]
+    | Exception p -> con "Exception" [ pattern p ]
   ;;
 
   let rec expr ({ txt; loc = _ } : Expr.t) =
@@ -163,6 +169,7 @@ module To_value = struct
         ; expr equal
         ; expr body
         ]
+    | Fun (params, body) -> con "Fun" [ list binding params; expr body ]
     | Splice { expr = spliced; subs } ->
       con
         "Splice"
@@ -177,6 +184,10 @@ module To_value = struct
       con "Construct" [ decl_path Constructor p; list expr args ]
     | Record record_fields ->
       con "Record" [ list (pair (decl_path Field) expr) record_fields ]
+    | Record_update (e, record_fields) ->
+      con
+        "Record_update"
+        [ expr e; list (pair (decl_path Field) expr) record_fields ]
     | Field (e, p) -> con "Field" [ expr e; decl_path Field p ]
     | Type ty -> con "Type" [ type_expr ty ]
     | Match (e, arms) -> con "Match" [ expr e; list (pair pattern expr) arms ]
@@ -199,6 +210,8 @@ module To_value = struct
         "Let"
         [ name var; list binding bindings; option type_expr annot; expr body ]
     | Type decl -> con "Type" [ type_decl decl ]
+    | Exception (exn_name, args) ->
+      con "Exception" [ name exn_name; list type_expr args ]
     | Module (module_name, items) ->
       con "Module" [ name module_name; list toplevel items ]
     | Module_splice (module_name, e) ->
@@ -225,22 +238,24 @@ module To_value = struct
 
   let program = list toplevel
 
-  let reflected_decl =
-    option (fun ({ params; kind } : Reflected_decl.t) ->
-      let ref_ kind name = Value.Ref { kind; name } in
-      let kind =
-        match kind with
-        | Variant constructors ->
-          con
-            "Stag.Type.Kind.Variant"
-            [ list (pair (ref_ Constructor) (list type_expr)) constructors ]
-        | Record fields ->
-          con
-            "Stag.Type.Kind.Record"
-            [ list (pair (ref_ Field) type_expr) fields ]
-        | Alias ty -> con "Stag.Type.Kind.Alias" [ type_expr ty ]
-      in
-      Value.Record [| list type_param params; kind |])
+  let reflected_decl decl ~decl_type =
+    option
+      (fun ({ params; kind } : Reflected_decl.t) ->
+         let ref_ kind name = Value.Ref { kind; name } in
+         let kind =
+           match kind with
+           | Variant constructors ->
+             con
+               "Stag.Type.Kind.Variant"
+               [ list (pair (ref_ Constructor) (list type_expr)) constructors ]
+           | Record fields ->
+             con
+               "Stag.Type.Kind.Record"
+               [ list (pair (ref_ Field) type_expr) fields ]
+           | Alias ty -> con "Stag.Type.Kind.Alias" [ type_expr ty ]
+         in
+         Value.Record (decl_type, [| list type_param params; kind |]))
+      decl
   ;;
 end
 
@@ -286,7 +301,7 @@ module Of_value = struct
       sprintf
         "Malformed syntax: expected %s, got %s%s"
         expected
-        (Value.to_string_hum got)
+        (Value.to_string_for_message got)
         within
     ;;
   end
@@ -463,6 +478,12 @@ module Of_value = struct
     else components
   ;;
 
+  let params read value =
+    match list read value with
+    | [] -> unexpected ~expected:"at least one parameter" value
+    | params -> params
+  ;;
+
   let fields read value =
     match list read value with
     | [] -> unexpected ~expected:"at least one field" value
@@ -601,6 +622,7 @@ module Of_value = struct
                      record
                ; rest = field "rest" (rest ~loc) record
                })
+         | "Exception", 1 -> Exception (arg 0 (pattern ~loc))
          | _ -> raise Bad_arguments))
 
   and rest value ~loc =
@@ -633,6 +655,7 @@ module Of_value = struct
              , arg 2 (option (type_expr ~loc))
              , arg 3 (expr ~loc)
              , arg 4 (expr ~loc) )
+         | "Fun", 2 -> Fun (arg 0 (params (binding ~loc)), arg 1 (expr ~loc))
          | "Splice", 1 ->
            arg 0 (fun splice : Expr.desc ->
              Splice
@@ -651,6 +674,10 @@ module Of_value = struct
          | "Record", 1 ->
            Record (arg 0 (fields (pair (decl_path Lower ~loc) (expr ~loc))))
          | "Field", 2 -> Field (arg 0 (expr ~loc), arg 1 (decl_path Lower ~loc))
+         | "Record_update", 2 ->
+           Record_update
+             ( arg 0 (expr ~loc)
+             , arg 1 (fields (pair (decl_path Lower ~loc) (expr ~loc))) )
          | "Type", 1 -> Type (arg 0 (type_expr ~loc))
          | "Match", 2 ->
            Match
@@ -684,6 +711,8 @@ module Of_value = struct
                , arg 2 (option (type_expr ~loc))
                , arg 3 (expr ~loc) )
            | "Type", 1 -> Type (arg 0 (type_decl ~loc))
+           | "Exception", 2 ->
+             Exception (arg 0 (name Upper ~loc), arg 1 (list (type_expr ~loc)))
            | "Module", 2 ->
              Module (arg 0 (name Upper ~loc), arg 1 (list (toplevel ~loc)))
            | "Module_splice", 2 ->

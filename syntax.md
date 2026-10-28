@@ -16,6 +16,8 @@ node, for good errors.
   minus, so `f -1` and `x-1` are `f (-1)` and `x (-1)` (write `Int.sub`).
   Printed values parenthesize negative arguments, `Some (-1)`, as OCaml does,
   so they will still parse once infix operators follow OCaml.
+  Nominal records print with their unqualified field names, `{x = 1; y = None}`,
+  which parse back where the record's type is known (see Type-directed fields).
 - Escapes, in chars and strings: `\n \t \r \b`, `\ ` (space), `\\ \" \'`,
   `\ddd` (3 decimal digits, at most 255) and `\xhh` (2 hex digits). In
   strings, a `\` at the end of a line skips the newline and the spaces and
@@ -26,7 +28,8 @@ node, for good errors.
   variables.
 - Paths: `M.N.x`, `M.t`, `M.C`. A path is a sequence of capitalized names
   followed by the final name; `r.x` with lowercase `r` is a field access.
-- Keywords: `let rec in match with type of module struct end`, `true false`.
+- Keywords: `let rec in match with fun exception type of module struct end`,
+  `true false`.
   `rec` is reserved, as lets are always recursive.
 - `@` and `@@` are reserved (for modes, see below).
 - Staging tokens: `.<` `>.` `.~`, and `.{` (a splice's substitutions).
@@ -52,7 +55,8 @@ records, so their labels are written with backticks (`` with_x[{`y : int}] ``),
 everywhere except in the context of a code type, whose entries are variables,
 written without (`<int>{x : int}`). Type arguments are written once, after the
 name (`list[int]`, not `int list` or `list[a][b]`). A constructor's argument of
-function type is parenthesized: `C of (int -> int)`. Weak variables
+function type is parenthesized: `C of (int -> int)`. `C of int * int` has two
+arguments, `C of (int * int)` one, a tuple. Weak variables
 (`'_a`), presence variables (`` `x?'a ``), absent labels (`-x`), `as` cycles and
 `where` constraints are printed but never written.
 
@@ -61,12 +65,14 @@ function type is parenthesized: `C of (int -> int)`. Weak variables
 ```ocaml
 let f x (y : int) : t = e in body   (* lets are always recursive: no `rec` *)
 e1; e2                              (* sugar for let _ = e1 in e2 *)
+fun x (y : int) _ -> e              (* anonymous function, of let's params *)
 match e with | p -> e | ...         (* leading | optional; arms are e1; e2 level *)
 f x y                               (* application, left assoc *)
 (x : t)                             (* annotated variable: Expr.Var's annotation *)
 (a, b, c)   ()   (e)
-C   C e   C (a, b)                  (* constructor args are n-ary: C (a, b) has 2 *)
+C   C e   C (a, b)   C ((a, b))     (* C (a, b): 2 args, or 1 tuple if C has 1 *)
 {x = 1; M.y = 2}   r.x   r.M.x      (* nominal records *)
+{r with x = 1; M.y = 2}             (* nominal update, may change type params *)
 {`x = 1; `y = true}   r.`x          (* polymorphic records *)
 {`x = v; `y = w | r}                (* extend *)
 r \ `x                              (* restrict *)
@@ -89,7 +95,7 @@ Precedence, loosest first:
 
 | Construct                                  | Associativity      |
 | ------------------------------------------ | ------------------ |
-| `let ... in`, `match` (extend right)       |                    |
+| `let ... in`, `match`, `fun` (extend right) |                    |
 | `e1; e2`                                   | right              |
 | `e1, e2`                                   | n-ary              |
 | `C e`, `` `A e ``, `type t`               | right (`C D x`)    |
@@ -97,15 +103,24 @@ Precedence, loosest first:
 | splice `.~e`, `.~e.{...}`                  | prefix             |
 | `e.x`, `e.M.x`, `` e.`x ``, `` e \ `x ``   | left, postfix      |
 
-`let` and `match` may also start a tuple component (`a, let x = 1 in x, y` is
-`(a, let x = 1 in (x, y))`). Restriction is postfix like field access, so
+`let`, `match` and `fun` may also start a tuple component (`a, let x = 1 in x, y` is
+`(a, let x = 1 in (x, y))`), but not an argument (`f (fun x -> x)`). Restriction is postfix like field access, so
 `` f r \ `x `` is `` f (r \ `x) ``. Record field values, extended records (after `|`)
-and substitutions are at the tuple level (`{x = 1, 2}`), and a `let` or `match`
-there ends at the next `;` rather than sequencing (`{x = let a = 1 in a; y = 2}`
+and substitutions are at the tuple level (`{x = 1, 2}`), and a `let`, `match`
+or `fun` there ends at the next `;` rather than sequencing (`{x = let a = 1 in a; y = 2}`
 has two fields; parenthesize to sequence); the record of an update
 `{e with ...}` is at the splice level. Trailing `;` is allowed in `{...}`.
-`C (a, b)` and `C ((a, b))` both have two arguments. A parenthesized
-expression's location includes its parentheses.
+As in OCaml (and likewise in patterns), parentheses around a constructor's
+argument hold its arguments, unless they directly hold a tuple's own
+parentheses: `C (a, b)` is parsed as two arguments and `C ((a, b))` as one, a
+tuple. Several arguments given to a constructor declared with one (`Some (a,
+b)`, `C of (int * int)`, `C of 'a`) are that argument as a tuple, decided by
+the typechecker from the declaration (and so also for generated code: `C` of
+`[a; b]` in `Stag.Expr.Construct`). A constructor declared with several
+(`C of int * int`) takes exactly that many: `C ((a, b))` is an arity error. A
+polymorphic variant has at most one argument, so `` `A (a, b) `` is always
+`` `A `` of a tuple. A parenthesized expression's location includes its
+parentheses.
 
 `type` takes an atomic type: a name, possibly applied (`type M.t[int]`), or a
 parenthesized type (`type (int -> t)`); as an argument it is parenthesized
@@ -114,15 +129,102 @@ parenthesized type (`type (int -> t)`); as an argument it is parenthesized
 `match` arms extend as far as possible, as in OCaml (wrap nested matches in
 parentheses).
 
+`fun` takes at least one parameter, each as a `let`'s: `x`, `_` or `(x : t)`
+(no patterns; match instead), with distinct names. `fun x y -> e` is `let f x y = e in f` for a fresh `f`: its
+type is that of such a let (so `let id = fun x -> x` is generalized, being a
+value), and it has no name to recurse by.
+
+### Type-directed fields and constructors
+
+As OCaml's disambiguation, an unqualified field (`x`, not `M.x`) or
+constructor (`A`) is looked up in the nominal type it is known to belong to,
+whether or not that type's names are in scope, and otherwise lexically (the
+innermost declaration in scope, as for other names). The known type wins over
+the lexical one: `v.x` with `v : N.r` is `N.r`'s `x` even where another type's
+`x` shadows it, and if `N.r` has no field `x` it is an error (`The record type
+N.r has no field x`, `The variant type M.v has no constructor C`), rather than
+a fallback. A qualified name or a `Stag.Path.Ref` always names its
+declaration. The known type is (after expanding aliases):
+
+- `e.x`: the type of `e`, which is checked first.
+- `{r with x = ...}`: the type of `r`, checked first, else the expected type.
+- `{x = ...}` and record patterns: the expected type if any, else the type of
+  the first qualified field if any, else the first of the types the fields
+  are of in scope, in field order, that has all of them. All fields must be
+  of that type: a qualified field of another is the error.
+- `C ...` and constructor patterns: the expected type.
+
+As in OCaml, `{r with x = ...}` is of `r`'s type but for the type parameters
+only in the types of the fields it gives: `{a with v = "s"}` with
+`a : p[int]` and `type p['a] = {v : 'a; w : int}` is a `p[string]`.
+
+The expected type of an expression is what its context is known to require
+at the point it is checked, as inference proceeds left to right: an annotated
+`let` or return type, a function's parameter type in an application (the
+function is checked first), a constructor's argument types or a field's type
+once the constructor or field is resolved, a component of an expected tuple,
+polymorphic record or variant, a `match` arm's or `let` body's or `e2` of
+`e1; e2` the type of the whole, `e` in `.< e >.` the code type's inner type,
+`e` in `.~e` the code type `<T>{..}` of the splice's type `T`.
+A pattern's expected type is the scrutinee's, and inside it each
+sub-pattern's that of its position. Where the type is only known later (eg. a
+parameter whose type is fixed by a later use), the lookup is lexical. So the
+order matters, and nothing warns of it (there is no `-principal`):
+`let f v = let _ = (v : N.r) in v.x` finds `N.r`'s `x`, but
+`let f v = let _ = v.x in (v : N.r)` the `x` in scope. Inside a quote, a
+non-function toplevel is a free variable of the quote, whose type is not its
+own (see modes.md), so in `.< N.v.x >.` the `x` is the one in scope whatever
+`N.v`'s type.
+
 ## Patterns
 
 ```ocaml
 _   x   1   'c'   "s"   true   ()   (p, q)
-C   C p   C (p, q)
+C   C p   C (p, q)   C ((p, q))     (* as in expressions *)
 {x = p; M.y = q}                    (* nominal *)
 `A   `A p
 {`x = p}   {`x = p; ..}   {`x = p; ..rest}   (* closed, open, bind rest *)
+exception p                         (* only at the top of a match arm *)
 ```
+
+## Exceptions
+
+```ocaml
+exception E                         (* a declaration, like a constructor of exn *)
+exception F of int * string
+raise (F (1, "x"))                  (* raise : exn -> 'a *)
+match f x with
+| y -> y                            (* value arms *)
+| exception F (n, s) -> n           (* exception arms *)
+| exception e -> raise e            (* any exception, re-raised *)
+```
+
+`exn` is a builtin type, extended by each `exception` declaration (in a
+module, or generated by a declaration splice as `Stag.Toplevel.Exception`).
+Exceptions are told apart by declaration, not name: `M.E` and `N.E` differ.
+An exception's arguments may not mention type variables. `E args` is a value
+of type `exn`, matched like any constructor (there is no exhaustiveness
+checking: as for other types, an exception that no case matches is a match
+failure at run time, so a match on `exn` usually wants a catch-all); values
+print by path, as `M.E (1, "x")`.
+
+There is no `try`: exceptions are handled by `exception p` arms of a `match`,
+which catch what is raised while evaluating the scrutinee (not its arms), as
+in OCaml. A match needs at least one value arm; exception arms return the
+same type as value arms. `exception p` is a pattern only at the top of an arm
+(`(exception E, x)` is an error). An exception no arm matches propagates.
+
+Uncaught, an exception is an error at the `raise`: `Uncaught exception M.E (1,
+"x")`, failing its expect test, or, raised at compile time (in a toplevel or
+declaration splice), a compile error at the splice. Code quoted at one level
+and run at another raises and handles exceptions as any code does.
+
+Exceptions are for errors and the rare function that may fail in expected
+cases; such a function's name ends in `_exn` (`Int.of_string_exn`). Prims
+raise the prelude's `Division_by_zero`, `Invalid_argument of string` (bad
+indices, `Char.of_code` out of range) and `Failure of string`. Exceeding an
+evaluation limit (fuel, depth, time) and match failure are not exceptions,
+and can't be handled.
 
 ## Declarations
 
@@ -149,7 +251,7 @@ print_string : string -> unit      print_endline : string -> unit
 print_int : int -> unit            print_char : char -> unit
 Int.add sub mul div rem : int -> int -> int     Int.neg : int -> int
 Int.equal lt le gt ge : int -> int -> bool      Int.compare : int -> int -> int
-Int.to_string : int -> string      Int.of_string : string -> int
+Int.to_string : int -> string      Int.of_string_exn : string -> int
 String.append : string -> string -> string      String.length : string -> int
 String.get : string -> int -> char              String.sub : string -> int -> int -> string
 String.equal : string -> string -> bool         String.compare : string -> string -> int
@@ -161,8 +263,8 @@ Bool.not : bool -> bool            Bool.equal : bool -> bool -> bool
 They are outside the program's root module, so the program's own definitions
 shadow them: a toplevel `print_int` hides the prim, and a module `Int` hides
 all of `Int.*`. Division by zero, out of bounds indices, unparsable
-`Int.of_string` and invalid `Char.of_code` are runtime errors at the
-application.
+`Int.of_string_exn` and invalid `Char.of_code` raise exceptions (see
+Exceptions).
 
 ## Prelude
 
@@ -173,6 +275,10 @@ prims:
 ```ocaml
 type list['a] = Nil | Cons of 'a * list['a]
 type option['a] = None | Some of 'a
+exception Division_by_zero
+exception Invalid_argument of string
+exception Failure of string
+val raise : exn -> 'a
 module Stag = struct ... end      (* the syntax as data, see below *)
 ```
 
@@ -392,5 +498,5 @@ val n : int @@ const      (* modalities on signature items and fields *)
 
 ### Other
 
-`fun`, `if`, infix operators (`let (+) x y = ...`, OCaml precedences),
+`if`, infix operators (`let (+) x y = ...`, OCaml precedences),
 interface files.

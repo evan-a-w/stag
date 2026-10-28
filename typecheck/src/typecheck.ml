@@ -15,6 +15,7 @@ module Generated = struct
       match toplevel.txt with
       | Let (name, _, _, _) -> "let " ^ name.txt
       | Type decl -> "type " ^ decl.name.txt
+      | Exception (name, _) -> "exception " ^ name.txt
       | Module (name, _) | Module_splice (name, _) -> "module " ^ name.txt
       | Include _ -> "include"
       | Expect_test { name; _ } -> sprintf "let%%expect_test %S" name.txt
@@ -176,7 +177,16 @@ exception Reflection_failed of Typecheck_error.t [@@deriving sexp_of]
 (* Evaluates at compile time, reflecting on the program's types. *)
 let at_compile_time (program : Program_env.t) f ~error =
   let reflect name =
-    Type_env.reflect program.type_env name
+    let%bind.Result decl = Type_env.reflect program.type_env name in
+    let%map.Result decl_type =
+      Type_env.record_type
+        program.type_env
+        (Prelude_path.canonical "Stag.Type.Decl.t")
+    in
+    Syntax_value.reflected_decl decl ~decl_type
+  in
+  let reflect name =
+    reflect name
     |> Result.map_error ~f:(fun error -> Error.of_exn (Reflection_failed error))
   in
   f ~reflect
@@ -284,6 +294,14 @@ let function_type
       ~(args : (Source.Binder.t * Syntax.Type_expr.t option) list)
       ~annot
   =
+  let%bind.Result () =
+    check_no_duplicates
+      (List.filter_map args ~f:(fun ((binder : Source.Binder.t), _) ->
+         match binder with
+         | Name name when not (String.equal name.txt "_") -> Some name
+         | Name _ | Ident _ -> None))
+      ~error:(fun name -> Duplicate_parameter name)
+  in
   let annot_type = function
     | None -> Ok (Scope.fresh_ty t scope)
     | Some annot -> Scope.elaborate scope annot
@@ -314,16 +332,76 @@ let constructor_ref (constructor : Type_env.Constructor.t) =
 ;;
 
 let field_ref (field : Type_env.Field.t) =
-  { Typed.Field_ref.type_name = field.type_name
-  ; name = field.name
-  ; index = field.index
-  }
+  { Typed.Field_ref.record = field.record_type; index = field.index }
 ;;
 
-let find_constructor (scope : Scope.t) ~loc : Source.Constructor.t -> _
+(* Type-directed lookup: the declared type a constructor or field is known to
+   be of, by its canonical name, and its members. *)
+module Known = struct
+  type 'member t =
+    { type_name : string
+    ; members : 'member list
+    }
+
+  let find
+        (scope : Scope.t)
+        (ty : Type.ty option)
+        ~(members : Type_env.t -> string -> ('m list option, _) Result.t)
+    =
+    match Option.map ty ~f:Type.canonical_ty with
+    | Some (TCon (type_name, _)) ->
+      let%map.Result members = members scope.program.type_env type_name in
+      Option.map members ~f:(fun members -> { type_name; members })
+    | Some _ | None -> Ok None
+  ;;
+
+  let record scope ty = find scope ty ~members:Type_env.record_fields
+  let variant scope ty = find scope ty ~members:Type_env.variant_constructors
+
+  (* Only an unqualified name is looked up in the known type: a qualified one
+     or a ref names its declaration. *)
+  let unqualified : Syntax.Decl_path.t Located.t -> string option = function
+    | { txt = Path path; loc = _ } ->
+      (match (path :> string list) with
+       | [ name ] -> Some name
+       | _ -> None)
+    | { txt = Resolved _; loc = _ } -> None
+  ;;
+
+  let unqualified_field : Source.Field.t -> string option = function
+    | Path path -> unqualified path
+    | Ref _ -> None
+  ;;
+
+  let has t name ~member_name =
+    List.exists t.members ~f:(fun member ->
+      String.equal (Prelude_path.short_name (member_name member)) name)
+  ;;
+
+  let member t ~name ~member_name ~loc ~missing =
+    match
+      List.find t.members ~f:(fun member ->
+        String.equal (Prelude_path.short_name (member_name member)) name)
+    with
+    | Some member -> Ok member
+    | None -> error ~loc (missing ~type_name:t.type_name name)
+  ;;
+end
+
+let find_constructor (scope : Scope.t) ~loc ~known : Source.Constructor.t -> _
   = function
   | Path path ->
-    Type_env.find_constructor scope.program.type_env scope.module_ path
+    (match Known.unqualified path, known with
+     | Some name, Some (known : _ Known.t) ->
+       Known.member
+         known
+         ~name
+         ~member_name:(fun (constructor : Type_env.Constructor.t) ->
+           constructor.name)
+         ~loc:path.loc
+         ~missing:(fun ~type_name constructor ->
+           No_such_constructor { type_name; constructor })
+     | _ -> Type_env.find_constructor scope.program.type_env scope.module_ path)
   | Ref { name; _ } -> Type_env.constructor scope.program.type_env name ~loc
 ;;
 
@@ -333,17 +411,54 @@ let field_loc ~loc : Source.Field.t -> Loc.t = function
   | Ref _ -> loc
 ;;
 
-let find_field (scope : Scope.t) ~loc (field : Source.Field.t) =
+let find_field (scope : Scope.t) ~loc ~known (field : Source.Field.t) =
   match field with
-  | Path path -> Type_env.find_field scope.program.type_env scope.module_ path
-  | Ref { name; _ } -> Type_env.field scope.program.type_env name ~loc
+  | Path path ->
+    (match Known.unqualified path, known with
+     | Some name, Some (known : _ Known.t) ->
+       Known.member
+         known
+         ~name
+         ~member_name:Type_env.Field.name
+         ~loc:path.loc
+         ~missing:(fun ~type_name field -> No_such_field { type_name; field })
+     | _ -> Type_env.find_field scope.program.type_env scope.module_ path)
+  | Ref field ->
+    Type_env.field scope.program.type_env (Typed.Field_ref.name field) ~loc
+;;
+
+(* Unifies [ty], a fresh instance of a declared type, with [expected] if that
+   is known to be the same type, so that what is inside is known too. As
+   [expected] is always unified with what has [ty] later, it fails only where
+   that would. *)
+let unify_known t ~expected ty ~loc =
+  match Option.map expected ~f:Type.canonical_ty, Type.canonical_ty ty with
+  | Some (TCon (known, _) as expected), TCon (name, _)
+    when String.equal known name ->
+    Unify.unify_ty t ~ty1:ty ~ty2:expected |> lift ~loc
+  | _ -> Ok ()
 ;;
 
 (* Pairs each of [args] with its instantiated type, along with the
-   constructor and the result type. *)
-let constructor_types t (scope : Scope.t) constructor ~args ~loc =
+   constructor and the result type. Several [args] of a constructor declared
+   with one are a tuple ([tuple]), as in OCaml. *)
+let constructor_types
+      t
+      (scope : Scope.t)
+      constructor
+      ~args
+      ~tuple
+      ~expected
+      ~loc
+  =
+  let%bind.Result known = Known.variant scope expected in
   let%bind.Result (constructor : Type_env.Constructor.t) =
-    find_constructor scope constructor ~loc
+    find_constructor scope constructor ~loc ~known
+  in
+  let args =
+    match args, constructor.args with
+    | _ :: _ :: _, [ _ ] -> [ tuple args ]
+    | _ -> args
   in
   match List.zip args constructor.args with
   | Unequal_lengths ->
@@ -357,64 +472,133 @@ let constructor_types t (scope : Scope.t) constructor ~args ~loc =
   | Ok args ->
     let inst = Scope.instantiate t scope in
     let result = inst constructor.result in
-    Ok
-      ( constructor_ref constructor
-      , List.map args ~f:(fun (arg, ty) -> arg, inst ty)
-      , result )
+    let%map.Result () = unify_known t ~expected result ~loc in
+    ( constructor_ref constructor
+    , List.map args ~f:(fun (arg, ty) -> arg, inst ty)
+    , result )
+;;
+
+(* The record type [fields] (not empty) are of: [expected] if it is known to
+   be a record type, else that of the first qualified field (or ref), else the
+   first of the unqualified fields' types in scope that has all of them. *)
+let record_type (scope : Scope.t) fields ~expected ~loc =
+  let of_field field =
+    let%bind.Result (field : Type_env.Field.t) =
+      find_field scope field ~loc ~known:None
+    in
+    let%map.Result known = Known.record scope (Some field.record) in
+    Option.value_exn known
+  in
+  match%bind.Result Known.record scope expected with
+  | Some known -> Ok known
+  | None ->
+    (match
+       List.find fields ~f:(fun (field, _) ->
+         Option.is_none (Known.unqualified_field field))
+     with
+     | Some (field, _) -> of_field field
+     | None ->
+       let names =
+         List.filter_map fields ~f:(fun (field, _) ->
+           Known.unqualified_field field)
+       in
+       let has_all known =
+         List.for_all
+           names
+           ~f:(Known.has known ~member_name:Type_env.Field.name)
+       in
+       (match
+          List.find_map fields ~f:(fun (field, _) ->
+            match of_field field with
+            | Ok known when has_all known -> Some known
+            | Ok _ | Error _ -> None)
+        with
+        | Some known -> Ok known
+        | None -> of_field (fst (List.hd_exn fields))))
+;;
+
+let is_given fields (member : Type_env.Field.t) =
+  List.exists fields ~f:(fun ((field : Type_env.Field.t), _, _) ->
+    field.index = member.index)
+;;
+
+(* The record type of [fields], and each field with its location and its
+   [x]. *)
+let resolve_record_fields (scope : Scope.t) fields ~all_required ~expected ~loc =
+  let%bind.Result () =
+    if List.is_empty fields then error ~loc Empty_record else Ok ()
+  in
+  let%bind.Result (known : Type_env.Field.t Known.t) =
+    record_type scope fields ~expected ~loc
+  in
+  let find (field, x) =
+    let%bind.Result (found : Type_env.Field.t) =
+      find_field scope field ~loc ~known:(Some known)
+    in
+    let loc = field_loc field ~loc in
+    if String.equal found.record_type.name known.type_name
+    then Ok (found, loc, x)
+    else
+      error
+        ~loc
+        (Fields_of_different_types
+           { field = Type_env.Field.name found
+           ; expected_type = known.type_name
+           ; actual_type = found.record_type.name
+           })
+  in
+  (* A qualified field of another type is the error, rather than an
+     unqualified one the type lacks. *)
+  let%bind.Result (_ : _ list) =
+    List.filter fields ~f:(fun (field, _) ->
+      Option.is_none (Known.unqualified_field field))
+    |> List.map ~f:find
+    |> Result.all
+  in
+  let%bind.Result fields = List.map fields ~f:find |> Result.all in
+  let%bind.Result () =
+    check_no_duplicates
+      (List.map fields ~f:(fun (field, loc, _) ->
+         { Located.txt = Prelude_path.short_name (Type_env.Field.name field)
+         ; loc
+         }))
+      ~error:(fun name -> Repeated_field name)
+  in
+  let%map.Result () =
+    match List.find known.members ~f:(Fn.non (is_given fields)) with
+    | Some member when all_required ->
+      error ~loc (Missing_field (Type_env.Field.name member))
+    | Some _ | None -> Ok ()
+  in
+  known, fields
+;;
+
+let declared_record (known : Type_env.Field.t Known.t) =
+  (List.hd_exn known.members).record
 ;;
 
 (* Returns the instantiated record type, and each field with its [x] paired
    with its type. *)
-let record_fields t (scope : Scope.t) fields ~all_required ~loc =
-  let%bind.Result fields =
-    List.map fields ~f:(fun (field, x) ->
-      let%map.Result found = find_field scope field ~loc in
-      found, field_loc field ~loc, x)
-    |> Result.all
+let record_fields t (scope : Scope.t) fields ~all_required ~expected ~loc =
+  let%bind.Result known, fields =
+    resolve_record_fields scope fields ~all_required ~expected ~loc
   in
-  match fields with
-  | [] -> error ~loc Empty_record
-  | ((first : Type_env.Field.t), _, _) :: _ ->
-    let%bind.Result () =
-      List.fold_result fields ~init:() ~f:(fun () (field, loc, _) ->
-        if String.equal field.type_name first.type_name
-        then Ok ()
-        else
-          error
-            ~loc
-            (Fields_of_different_types
-               { field = field.name
-               ; expected_type = first.type_name
-               ; actual_type = field.type_name
-               }))
-    in
-    let%bind.Result () =
-      check_no_duplicates
-        (List.map fields ~f:(fun (field, loc, _) ->
-           { Located.txt = field.name; loc }))
-        ~error:(fun name -> Duplicate_field name)
-    in
-    let%map.Result () =
-      match
-        List.find first.all_fields ~f:(fun name ->
-          not
-            (List.exists fields ~f:(fun (field, _, _) ->
-               String.equal field.name name)))
-      with
-      | Some name when all_required -> error ~loc (Missing_field name)
-      | Some _ | None -> Ok ()
-    in
-    let inst = Scope.instantiate t scope in
-    let fields =
-      List.map fields ~f:(fun (field, _, x) ->
-        field_ref field, (x, inst field.ty))
-    in
-    inst first.record, fields
+  let inst = Scope.instantiate t scope in
+  let record = inst (declared_record known) in
+  let%map.Result () = unify_known t ~expected record ~loc in
+  let fields =
+    List.map fields ~f:(fun ((field : Type_env.Field.t), _, x) ->
+      field_ref field, (x, inst field.ty))
+  in
+  record, fields
 ;;
 
 (* Returns the field, the instantiated record type and the field's type. *)
-let field_type t (scope : Scope.t) field ~loc =
-  let%map.Result (field : Type_env.Field.t) = find_field scope field ~loc in
+let field_type t (scope : Scope.t) field ~record ~loc =
+  let%bind.Result known = Known.record scope record in
+  let%map.Result (field : Type_env.Field.t) =
+    find_field scope field ~loc ~known
+  in
   let inst = Scope.instantiate t scope in
   let ty = inst field.ty in
   field_ref field, inst field.record, ty
@@ -453,7 +637,39 @@ module Pattern_var = struct
   let bindings = List.map ~f:(fun t -> t.ident, t.ty)
 end
 
-let rec pattern_type t (scope : Scope.t) ~(pattern : Source.Pattern.t)
+(* The components of [expected], if it is known to be a tuple of [n]. *)
+let tuple_components (expected : Type.ty option) n =
+  match Option.map expected ~f:Type.canonical_ty with
+  | Some (TTuple tys) when List.length tys = n -> List.map tys ~f:Option.some
+  | Some _ | None -> List.init n ~f:(fun _ -> None)
+;;
+
+(* The type of [label] in [expected], if it is known to be a polymorphic
+   record ([`Record]) or variant ([`Variant]) with it. *)
+let row_entry (expected : Type.ty option) kind ~label =
+  let rec find (row : Type.row) =
+    match Type.canonical_row row with
+    | RExtend (label', _, ty, rest) ->
+      if String.equal label label' then Some ty else find rest
+    | REmpty | RVar _ -> None
+  in
+  match Option.map expected ~f:Type.canonical_ty, kind with
+  | Some (TRecord { row; _ }), `Record | Some (TVariant { row; _ }), `Variant ->
+    find row
+  | _ -> None
+;;
+
+(* [ty] if it is known, else [fallback]. *)
+let either_known ty fallback =
+  match Type.canonical_ty ty with
+  | TVar _ -> fallback
+  | _ -> Some ty
+;;
+
+(* [expected] is the type the pattern or expression is known to have where it
+   is (it is not unified with it here): constructors and fields are looked up
+   in it when it is a nominal type (see [Known]). *)
+let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
   : (Typed.Pattern.t * Pattern_var.t list, Typecheck_error.t) Result.t
   =
   let loc = Source.Pattern.loc pattern in
@@ -463,16 +679,24 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Source.Pattern.t)
     ( ident
     , { Pattern_var.ident; ty; loc = Source.Binder.loc binder ~enclosing:loc } )
   in
-  let sub_patterns patterns =
+  (* Each pattern of type [ty], known to be of [expected] (by default
+     [ty]). *)
+  let sub_patterns ?expected patterns =
+    let expected =
+      Option.value
+        expected
+        ~default:(List.map patterns ~f:(fun (_, ty) -> Some ty))
+    in
     let%map.Result typed, bindings =
       List.fold_result
-        patterns
+        (List.zip_exn patterns expected)
         ~init:([], [])
-        ~f:(fun (typed, bindings) (pattern, ty) ->
-          let%bind.Result pattern, bindings' = pattern_type t scope ~pattern in
+        ~f:(fun (typed, bindings) ((pattern, ty), expected) ->
+          let%bind.Result pattern, bindings' =
+            pattern_type t scope ~pattern ?expected
+          in
           let%map.Result () =
-            Unify.unify_ty t ~ty1:ty ~ty2:pattern.Typed.Pattern.ty
-            |> lift ~loc:pattern.loc
+            Unify.unify_ty t ~ty1:ty ~ty2:pattern.ty |> lift ~loc:pattern.loc
           in
           pattern :: typed, bindings @ bindings')
     in
@@ -488,18 +712,27 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Source.Pattern.t)
   | Tuple patterns ->
     let types = List.map patterns ~f:(fun _ -> Scope.fresh_ty t scope) in
     let%map.Result patterns, bindings =
-      sub_patterns (List.zip_exn patterns types)
+      sub_patterns
+        (List.zip_exn patterns types)
+        ~expected:(tuple_components expected (List.length patterns))
     in
     node (Tuple patterns) (Type.TTuple types), bindings
   | Construct (constructor, args) ->
     let%bind.Result constructor, args, result =
-      constructor_types t scope constructor ~args ~loc
+      constructor_types
+        t
+        scope
+        constructor
+        ~args
+        ~tuple:Source.Pattern.tuple
+        ~expected
+        ~loc
     in
     let%map.Result args, bindings = sub_patterns args in
     node (Construct (constructor, args)) result, bindings
   | Record fields ->
     let%bind.Result record, fields =
-      record_fields t scope fields ~all_required:false ~loc
+      record_fields t scope fields ~all_required:false ~expected ~loc
     in
     let%map.Result patterns, bindings = sub_patterns (List.map fields ~f:snd) in
     ( node (Record (List.zip_exn (List.map fields ~f:fst) patterns)) record
@@ -509,7 +742,13 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Source.Pattern.t)
       match arg with
       | None -> Ok (None, [])
       | Some pattern ->
-        let%map.Result pattern, bindings = pattern_type t scope ~pattern in
+        let%map.Result pattern, bindings =
+          pattern_type
+            t
+            scope
+            ~pattern
+            ?expected:(row_entry expected `Variant ~label:tag)
+        in
         Some pattern, bindings
     in
     let arg_ty =
@@ -524,7 +763,13 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Source.Pattern.t)
         fields
         ~init:([], [])
         ~f:(fun (fields, bindings) (label, pattern) ->
-          let%map.Result pattern, bindings' = pattern_type t scope ~pattern in
+          let%map.Result pattern, bindings' =
+            pattern_type
+              t
+              scope
+              ~pattern
+              ?expected:(row_entry expected `Record ~label:label.txt)
+          in
           (label.txt, pattern) :: fields, bindings @ bindings')
     in
     let fields = List.rev fields in
@@ -545,6 +790,7 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Source.Pattern.t)
     in
     ( node (Poly_record { fields; rest }) (Fresh.record t row)
     , bindings @ rest_bindings )
+  | Exception _ -> error ~loc Misplaced_exception_pattern
 ;;
 
 (* Closing of the scrutinee and residuals of catch-alls in matches on
@@ -557,7 +803,13 @@ module Variant_match = struct
 
   (* A top level variable pattern matches what the handled tags' cases have
      not: the scrutinee without their first entries. *)
-  let pattern_type t (scope : Scope.t) handled ~(pattern : Source.Pattern.t) =
+  let pattern_type
+        t
+        (scope : Scope.t)
+        handled
+        ~(pattern : Source.Pattern.t)
+        ~scrutinee
+    =
     match Source.Pattern.view pattern, handled with
     | Var binder, _ :: _ ->
       let row, rest =
@@ -581,7 +833,7 @@ module Variant_match = struct
                 Source.Binder.loc binder ~enclosing:(Source.Pattern.loc pattern)
             }
           ] )
-    | _ -> pattern_type t scope ~pattern
+    | _ -> pattern_type t scope ~pattern ~expected:scrutinee
   ;;
 
   let add_case handled ({ desc; ty = _; loc = _ } : Typed.Pattern.t) =
@@ -924,7 +1176,7 @@ and with_monomorphic_bindings (scope : Scope.t) bindings ~f =
        ident.name, Scope.entry scope ~ident ~scheme:ty ~persistent:false))
     ~f
 
-and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
+and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
   : (Typed.Expr.t, Typecheck_error.t) Result.t
   =
   let loc = Source.Expr.loc expr in
@@ -994,9 +1246,15 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
       Env.with_bindings
         scope.locals
         [ name, Scope.entry scope ~ident ~scheme:ty ~persistent ]
-        ~f:(fun () -> expr_type t scope ~expr:in_)
+        ~f:(fun () -> expr_type t scope ~expr:in_ ?expected)
     in
     node (Let { ident; args; body; in_; generalized }) in_.ty
+  | Fun { args; body } ->
+    let%bind.Result args, res_ty, ty =
+      function_type t scope ~args ~annot:None
+    in
+    let%map.Result body = check_body t scope ~args ~res_ty ~body in
+    node (Fun { args = List.map args ~f:fst; body }) ty
   | Quote expr ->
     let quote =
       { Scope.id = Fresh.id t
@@ -1004,11 +1262,17 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
       ; outside = scope
       }
     in
+    let expected =
+      match Option.map expected ~f:Type.canonical_ty with
+      | Some (TCode { inner; context = _ }) -> Some inner
+      | Some _ | None -> None
+    in
     let%map.Result inner =
       expr_type
         t
         { scope with level = scope.level + 1; quote = Some quote }
         ~expr
+        ?expected
     in
     node (Quote inner) (TCode { inner = inner.ty; context = quote.context })
   | Splice { code; subs } ->
@@ -1024,7 +1288,14 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
     let inner = Scope.fresh_ty t scope in
     let context = Scope.fresh_row t scope in
     let%bind.Result code =
-      check_expr t outside ~expr:code ~ty:(TCode { inner; context })
+      check_expr
+        t
+        outside
+        ~expr:code
+        ~ty:(TCode { inner; context })
+        ?expected:
+          (Option.map expected ~f:(fun inner ->
+             Type.TCode { inner; context = Scope.fresh_row t outside }))
     in
     let%bind.Result subs =
       match subs with
@@ -1060,58 +1331,163 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
        node (Toplevel_splice { code; expansion }) inner)
   | Tuple exprs ->
     let%map.Result exprs =
-      List.map exprs ~f:(fun expr -> expr_type t scope ~expr) |> Result.all
+      List.map2_exn
+        exprs
+        (tuple_components expected (List.length exprs))
+        ~f:(fun expr expected -> expr_type t scope ~expr ?expected)
+      |> Result.all
     in
     node (Tuple exprs) (Type.TTuple (tys exprs))
   | Construct (constructor, args) ->
     let%bind.Result constructor, args, result =
-      constructor_types t scope constructor ~args ~loc
+      constructor_types
+        t
+        scope
+        constructor
+        ~args
+        ~tuple:Source.Expr.tuple
+        ~expected
+        ~loc
     in
     let%map.Result args = check_exprs t scope args in
     node (Construct (constructor, args)) result
   | Record fields ->
     let%bind.Result record, fields =
-      record_fields t scope fields ~all_required:true ~loc
+      record_fields t scope fields ~all_required:true ~expected ~loc
     in
     let%map.Result exprs = check_exprs t scope (List.map fields ~f:snd) in
     node (Record (List.zip_exn (List.map fields ~f:fst) exprs)) record
+  | Field (expr, field) when Option.is_some (Known.unqualified_field field) ->
+    let%bind.Result expr = expr_type t scope ~expr in
+    let%bind.Result field, record, field_ty =
+      field_type t scope field ~record:(Some expr.ty) ~loc
+    in
+    let%map.Result () =
+      Unify.unify_ty t ~ty1:record ~ty2:expr.ty |> lift ~loc:expr.loc
+    in
+    node (Field (expr, field)) field_ty
   | Field (expr, field) ->
-    let%bind.Result field, record, field_ty = field_type t scope field ~loc in
+    let%bind.Result field, record, field_ty =
+      field_type t scope field ~record:None ~loc
+    in
     let%map.Result expr = check_expr t scope ~expr ~ty:record in
     node (Field (expr, field)) field_ty
-  | Match (expr, cases) ->
+  | Record_update (expr, fields) ->
+    (* As in OCaml, the result's type parameters are those of [expr]'s type
+       but for the ones only in the updated fields' types. *)
+    let%bind.Result known_expected = Known.record scope expected in
+    let%bind.Result expr =
+      expr_type
+        t
+        scope
+        ~expr
+        ?expected:
+          (Option.map known_expected ~f:(fun known ->
+             Scope.instantiate t scope (declared_record known)))
+    in
+    let%bind.Result known, fields =
+      resolve_record_fields
+        scope
+        fields
+        ~all_required:false
+        ~expected:(either_known expr.ty expected)
+        ~loc
+    in
+    let inst_in = Scope.instantiate t scope in
+    let inst_out = Scope.instantiate t scope in
+    let%bind.Result () =
+      Unify.unify_ty t ~ty1:(inst_in (declared_record known)) ~ty2:expr.ty
+      |> lift ~loc:expr.loc
+    in
+    let record = inst_out (declared_record known) in
+    let%bind.Result () = unify_known t ~expected record ~loc in
+    let%bind.Result () =
+      List.filter known.members ~f:(Fn.non (is_given fields))
+      |> List.fold_result ~init:() ~f:(fun () (member : Type_env.Field.t) ->
+        Unify.unify_ty t ~ty1:(inst_in member.ty) ~ty2:(inst_out member.ty)
+        |> lift ~loc)
+    in
+    let%map.Result exprs =
+      check_exprs
+        t
+        scope
+        (List.map fields ~f:(fun ((field : Type_env.Field.t), _, expr) ->
+           expr, inst_out field.ty))
+    in
+    node
+      (Record_update
+         ( expr
+         , List.zip_exn
+             (List.map fields ~f:(fun (field, _, _) -> field_ref field))
+             exprs ))
+      record
+  | Match { scrutinee = expr; cases; exception_cases } ->
     let%bind.Result scrutinee = expr_type t scope ~expr in
     let result = Scope.fresh_ty t scope in
-    let%bind.Result (_ : Variant_match.t), typed_cases =
+    (* A case of [pattern], typed with its [bindings], of type [ty]. *)
+    let case ~ty ((pattern : Typed.Pattern.t), bindings) body =
+      let%bind.Result () =
+        check_no_duplicates
+          (List.map bindings ~f:(fun (var : Pattern_var.t) ->
+             { Located.txt = var.ident.name; loc = var.loc }))
+          ~error:(fun name -> Duplicate_pattern_variable name)
+      in
+      let%bind.Result () =
+        Unify.unify_ty t ~ty1:ty ~ty2:pattern.Typed.Pattern.ty
+        |> lift ~loc:pattern.loc
+      in
+      let%map.Result body =
+        with_monomorphic_bindings
+          scope
+          (Pattern_var.bindings bindings)
+          ~f:(fun () ->
+            check_expr
+              t
+              scope
+              ~expr:body
+              ~ty:result
+              ?expected:(either_known result expected))
+      in
+      pattern, body
+    in
+    let%bind.Result () =
+      match cases, exception_cases with
+      | [], _ :: _ -> error ~loc Match_without_value_cases
+      | _ -> Ok ()
+    in
+    let%bind.Result (_ : Variant_match.t), cases =
       List.fold_result
         cases
         ~init:(Variant_match.empty, [])
         ~f:(fun (handled, typed_cases) (pattern, body) ->
-          let%bind.Result typed_pattern, bindings =
-            Variant_match.pattern_type t scope handled ~pattern
-          in
-          let%bind.Result () =
-            check_no_duplicates
-              (List.map bindings ~f:(fun (var : Pattern_var.t) ->
-                 { Located.txt = var.ident.name; loc = var.loc }))
-              ~error:(fun name -> Duplicate_pattern_variable name)
-          in
-          let%bind.Result () =
-            Unify.unify_ty t ~ty1:scrutinee.ty ~ty2:typed_pattern.ty
-            |> lift ~loc:typed_pattern.loc
-          in
-          let%map.Result body =
-            with_monomorphic_bindings
+          let%bind.Result typed_pattern =
+            Variant_match.pattern_type
+              t
               scope
-              (Pattern_var.bindings bindings)
-              ~f:(fun () -> check_expr t scope ~expr:body ~ty:result)
+              handled
+              ~pattern
+              ~scrutinee:scrutinee.ty
           in
-          ( Variant_match.add_case handled typed_pattern
-          , (typed_pattern, body) :: typed_cases ))
+          let%map.Result ((pattern, _) as typed_case) =
+            case ~ty:scrutinee.ty typed_pattern body
+          in
+          Variant_match.add_case handled pattern, typed_case :: typed_cases)
     in
-    let typed_cases = List.rev typed_cases in
+    let cases = List.rev cases in
+    let%bind.Result exception_cases =
+      List.fold_result
+        exception_cases
+        ~init:[]
+        ~f:(fun typed_cases (pattern, body) ->
+          let%bind.Result typed_pattern =
+            pattern_type t scope ~pattern ~expected:Type.exn
+          in
+          let%map.Result typed_case = case ~ty:Type.exn typed_pattern body in
+          typed_case :: typed_cases)
+      |> Result.map ~f:List.rev
+    in
     let%map.Result () =
-      match expr, typed_cases with
+      match expr, cases with
       | Generated _, [] ->
         (* Its scrutinee was closed, unless of an empty nominal type, which
            may have been known only from an annotation. *)
@@ -1122,11 +1498,11 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
           scope
           ~scrutinee:scrutinee.ty
           ~loc
-          (List.map typed_cases ~f:fst)
+          (List.map cases ~f:fst)
     in
-    node (Match (scrutinee, typed_cases)) result
+    node (Match { scrutinee; cases; exception_cases }) result
   | Poly_record fields ->
-    let%map.Result fields = labelled_types t scope fields in
+    let%map.Result fields = labelled_types t scope fields ~expected in
     node
       (Poly_record fields)
       (Fresh.record t (Poly_row.present (labelled_tys fields) ~tail:REmpty))
@@ -1137,7 +1513,7 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
     in
     node (Poly_field (expr, label)) ty
   | Poly_extend (fields, expr) ->
-    let%bind.Result fields = labelled_types t scope fields in
+    let%bind.Result fields = labelled_types t scope fields ~expected in
     let rest = Scope.fresh_row t scope in
     let%map.Result expr = check_expr t scope ~expr ~ty:(Fresh.record t rest) in
     node
@@ -1149,7 +1525,7 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
     in
     node (Poly_restrict (expr, label)) (Fresh.record t rest)
   | Poly_update (expr, fields) ->
-    let%bind.Result fields = labelled_types t scope fields in
+    let%bind.Result fields = labelled_types t scope fields ~expected in
     let%map.Result expr, rest =
       check_open_record
         t
@@ -1165,7 +1541,13 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
       match arg with
       | None -> Ok None
       | Some expr ->
-        let%map.Result expr = expr_type t scope ~expr in
+        let%map.Result expr =
+          expr_type
+            t
+            scope
+            ~expr
+            ?expected:(row_entry expected `Variant ~label:tag)
+        in
         Some expr
     in
     let arg_ty =
@@ -1240,15 +1622,25 @@ and expand t (scope : Scope.t) ~code ~subs ~ty ~loc =
        ; loc
        }))
 
-and labelled_types t scope fields =
+and labelled_types t scope fields ~expected =
   let%bind.Result () = Poly_row.check_distinct_labels fields in
   List.map fields ~f:(fun ((label : Syntax.Name.t), expr) ->
-    let%map.Result expr = expr_type t scope ~expr in
+    let%map.Result expr =
+      expr_type
+        t
+        scope
+        ~expr
+        ?expected:(row_entry expected `Record ~label:label.txt)
+    in
     label.txt, expr)
   |> Result.all
 
-and check_expr t scope ~expr ~ty =
-  let%bind.Result expr = expr_type t scope ~expr in
+(* Checks [expr] has type [ty], [expected] (by default [ty]) being what it is
+   known to be. *)
+and check_expr ?expected t scope ~expr ~ty =
+  let%bind.Result expr =
+    expr_type t scope ~expr ~expected:(Option.value expected ~default:ty)
+  in
   let%map.Result () =
     Unify.unify_ty t ~ty1:ty ~ty2:expr.ty |> lift ~loc:expr.loc
   in
@@ -1595,6 +1987,13 @@ let declare
   let generated =
     Option.map generated_by ~f:(fun splice -> Generated.create splice toplevel)
   in
+  let wrap_error error =
+    Module_scope.within
+      module_
+      (match generated with
+       | None -> error
+       | Some generated -> Generated.wrap_error generated error)
+  in
   match toplevel.txt with
   | Type decl ->
     Type_env.declare
@@ -1602,12 +2001,9 @@ let declare
       module_
       decl
       ~lazily:in_prelude
-      ~wrap_error:(fun error ->
-        Module_scope.within
-          module_
-          (match generated with
-           | None -> error
-           | Some generated -> Generated.wrap_error generated error))
+      ~wrap_error
+  | Exception (name, args) ->
+    Type_env.declare_exception program.type_env module_ name args ~wrap_error
   | Let (name, args, annot, expr) ->
     let name = Module_scope.canonical_name module_ name.txt in
     let toplevel =
@@ -1654,6 +2050,11 @@ let check_declarations t (program : Program_env.t) module_ =
           Type_env.check
             program.type_env
             (Module_scope.canonical_name module_ decl.name.txt)
+          |> Result.ignore_m
+        | Exception (name, _) ->
+          Type_env.check_exception
+            program.type_env
+            (Module_scope.canonical_name module_ name.txt)
           |> Result.ignore_m
         | Let (name, _, _, _) ->
           let toplevel =
@@ -1726,6 +2127,15 @@ let rec signature (program_env : Program_env.t) module_ =
              (Type_env.find_decl_exn
                 program_env.type_env
                 (canonical_name decl.name.txt)))
+      | Exception ({ txt = name; loc = _ }, _) ->
+        (match
+           Type_env.check_exception program_env.type_env (canonical_name name)
+         with
+         | Ok { args; _ } -> Some (Exception { name; args })
+         | Error error ->
+           raise_s
+             [%message
+               "typecheck: exception not checked" (error : Typecheck_error.t)])
       | Module ({ txt = name; loc = _ }, _)
       | Module_splice ({ txt = name; loc = _ }, _) ->
         Some

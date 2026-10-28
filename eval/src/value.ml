@@ -8,7 +8,7 @@ type t =
   | Unit
   | Tuple of t list
   | Construct of Typed.Constructor_ref.t * t list
-  | Record of t array
+  | Record of Typed.Record_type.t * t array
   | Poly_record of t String.Map.t
   | Poly_variant of string * t
   | Function of
@@ -64,6 +64,11 @@ let of_lit : Syntax.Lit.t -> t = function
   | Unit -> Unit
 ;;
 
+(* Unqualified, as fields are looked up in the record's type. *)
+let field_name (record_type : Typed.Record_type.t) index =
+  Prelude_path.short_name record_type.fields.(index)
+;;
+
 let rec sexp_of_t : t -> Sexp.t = function
   | Int n -> Atom (Int.to_string n)
   | Bool b -> sexp_of_bool b
@@ -73,8 +78,13 @@ let rec sexp_of_t : t -> Sexp.t = function
   | Tuple values -> List (Atom "Tuple" :: List.map values ~f:sexp_of_t)
   | Construct ({ name; _ }, values) ->
     List (Atom (Prelude_path.to_string_hum name) :: List.map values ~f:sexp_of_t)
-  | Record values ->
-    List (Atom "Record" :: Array.to_list (Array.map values ~f:sexp_of_t))
+  | Record (record_type, values) ->
+    List
+      (Atom (Prelude_path.to_string_hum record_type.name)
+       :: Array.to_list
+            (Array.mapi values ~f:(fun index value ->
+               Sexp.List
+                 [ Atom (field_name record_type index); sexp_of_t value ])))
   | Poly_record fields -> [%sexp (fields : t String.Map.t)]
   | Poly_variant (tag, Unit) -> Atom ("`" ^ tag)
   | Poly_variant (tag, arg) -> List [ Atom ("`" ^ tag); sexp_of_t arg ]
@@ -91,39 +101,83 @@ let rec sexp_of_t : t -> Sexp.t = function
         else [ [%sexp (persistent : t Typed.Ident.Map.t)] ]))
 ;;
 
-let rec to_string_hum : t -> string = function
-  | Int n -> Int.to_string n
-  | Bool b -> Bool.to_string b
-  | String s -> sprintf "%S" s
-  | Char c -> sprintf "%C" c
-  | Unit -> "()"
-  | Tuple values -> tuple values
-  | Construct ({ name; _ }, []) -> Prelude_path.to_string_hum name
-  | Construct ({ name; _ }, [ value ]) ->
-    Prelude_path.to_string_hum name ^ " " ^ argument value
-  | Construct ({ name; _ }, values) ->
-    Prelude_path.to_string_hum name ^ " " ^ tuple values
-  | Record _ -> "<record>"
-  | Poly_record fields ->
-    Map.to_alist fields
-    |> List.map ~f:(fun (label, value) ->
-      sprintf "`%s = %s" label (to_string_hum value))
-    |> String.concat ~sep:"; "
-    |> sprintf "{%s}"
-  | Poly_variant (tag, Unit) -> "`" ^ tag
-  | Poly_variant (tag, value) -> sprintf "`%s %s" tag (argument value)
-  | Function _ | Prim _ | Intrinsic _ -> "<fun>"
-  | Code _ -> "<code>"
-  | Type _ -> "<type>"
-  | Ref ref_ -> Decl_ref.to_string_hum ref_
+exception Too_long
 
-and tuple values =
-  sprintf "(%s)" (String.concat ~sep:", " (List.map values ~f:to_string_hum))
-
-and argument (value : t) =
-  match value with
-  | Construct (_, []) | Poly_variant (_, Unit) -> to_string_hum value
-  | Construct _ | Poly_variant _ -> "(" ^ to_string_hum value ^ ")"
-  | Int n when n < 0 -> "(" ^ to_string_hum value ^ ")"
-  | _ -> to_string_hum value
+let to_string_hum ?max_length value =
+  let buffer = Buffer.create 64 in
+  let add string =
+    Buffer.add_string buffer string;
+    match max_length with
+    | Some max_length when Buffer.length buffer > max_length -> raise Too_long
+    | Some _ | None -> ()
+  in
+  let rec value_ : t -> unit = function
+    | Int n -> add (Int.to_string n)
+    | Bool b -> add (Bool.to_string b)
+    | String s -> add (sprintf "%S" s)
+    | Char c -> add (sprintf "%C" c)
+    | Unit -> add "()"
+    | Tuple values -> tuple values
+    | Construct ({ name; _ }, []) -> add (Prelude_path.to_string_hum name)
+    | Construct ({ name; _ }, [ (Tuple _ as value) ]) ->
+      add (Prelude_path.to_string_hum name);
+      add " (";
+      value_ value;
+      add ")"
+    | Construct ({ name; _ }, [ value ]) ->
+      add (Prelude_path.to_string_hum name);
+      add " ";
+      argument value
+    | Construct ({ name; _ }, values) ->
+      add (Prelude_path.to_string_hum name);
+      add " ";
+      tuple values
+    | Record (record_type, values) ->
+      add "{";
+      Array.iteri values ~f:(fun index value ->
+        if index > 0 then add "; ";
+        add (sprintf "%s = " (field_name record_type index));
+        value_ value);
+      add "}"
+    | Poly_record fields ->
+      add "{";
+      List.iteri (Map.to_alist fields) ~f:(fun i (label, value) ->
+        if i > 0 then add "; ";
+        add (sprintf "`%s = " label);
+        value_ value);
+      add "}"
+    | Poly_variant (tag, Unit) -> add ("`" ^ tag)
+    | Poly_variant (tag, value) ->
+      add (sprintf "`%s " tag);
+      argument value
+    | Function _ | Prim _ | Intrinsic _ -> add "<fun>"
+    | Code _ -> add "<code>"
+    | Type _ -> add "<type>"
+    | Ref ref_ -> add (Decl_ref.to_string_hum ref_)
+  and tuple values =
+    add "(";
+    List.iteri values ~f:(fun i value ->
+      if i > 0 then add ", ";
+      value_ value);
+    add ")"
+  and argument (value : t) =
+    match value with
+    | Construct (_, []) | Poly_variant (_, Unit) -> value_ value
+    | Construct _ | Poly_variant _ ->
+      add "(";
+      value_ value;
+      add ")"
+    | Int n when n < 0 ->
+      add "(";
+      value_ value;
+      add ")"
+    | _ -> value_ value
+  in
+  match value_ value with
+  | () -> Buffer.contents buffer
+  | exception Too_long ->
+    Buffer.To_string.sub buffer ~pos:0 ~len:(Option.value_exn max_length)
+    ^ "..."
 ;;
+
+let to_string_for_message = to_string_hum ~max_length:1000

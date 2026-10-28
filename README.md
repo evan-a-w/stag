@@ -9,7 +9,13 @@ stag check FILE...            # typecheck, print the signature
 stag run FILE...              # typecheck and evaluate
 stag test [-promote] FILE...  # run let%expect_test tests, writing FILE.corrected
 stag bench FILE...            # run let%bench benchmarks (see Benchmarking)
+stag fmt FILE                 # print FILE formatted
+stag fmt -inplace FILE...     # format the files in place
+stag fmt -check FILE...       # list the unformatted files on stdout, failing if any
 ```
+
+`stag fmt` prints to 80 columns, keeping comments where they were (by the
+tokens around them) and blank lines between toplevels.
 
 `stag test -print-corrected FILE` prints the corrected file instead, writing
 nothing. `-fuel N`, `-max-depth N` and `-time-limit SPAN` bound each phase of
@@ -48,6 +54,8 @@ stag-build exec NAME         # typecheck and evaluate an executable
 stag-build test [NAME...]    # run the expect tests of libraries and tests
 stag-build promote           # accept the corrections of failed tests
 stag-build bench [FILTER...] # run the benchmarks of every target
+stag-build fmt [-check]      # format every source in place (or only check),
+                             # printing the diffs
 ```
 
 Each target is checked once per command, and not if a library it depends on
@@ -128,11 +136,12 @@ in `X/test`): `common`, `types`, `syntax`, `ir`, `eval`, `typecheck` and
 before it, and `measure`, depending on none. They provide the pieces for other tools: `Source_file` and
 `Driver.check_files` (files to a checked program; `Driver.check_modules` for
 modules already parsed), `Driver.eval`, `Expect_test_runner`, `Bench_runner`
-(a program's benches) and `Phase_bench`, `Diagnostic`
-(rendering errors) and `Text_diff`. `Prelude` is the stag module `Stag`
-([eval/src/prelude/stag.stag](eval/src/prelude/stag.stag)), the syntax as
-data, which `Syntax_value` converts to and from `Syntax`, for declarations
-generated at compile time (not yet in scope of programs).
+(a program's benches) and `Phase_bench`, `Diagnostic` (rendering errors),
+`Text_diff`, `Printer` (syntax to source) and `Formatter` (source to formatted
+source, keeping comments). `Prelude` is the prelude
+([eval/src/prelude/prelude.stag](eval/src/prelude/prelude.stag)), whose
+module `Stag` is the syntax as data, which `Syntax_value` converts to and from
+`Syntax`, for declarations generated at compile time.
 
 Tests: `dune build @runtest`, then `dune promote` to accept changes.
 
@@ -143,3 +152,20 @@ Tests: `dune build @runtest`, then `dune promote` to accept changes.
   source strings, using `driver/test/source_helpers.mli`.
 - Type internals and the parser: OCaml unit tests in `X/test/`.
 - The CLI: cram tests in `driver/test/cram/`.
+
+## Editor support
+
+[editors/vscode](editors/vscode) is a VS Code extension: highlighting,
+brackets and indentation for `.stag` files, and a client for the planned
+language server `stag lsp` (formatting falls back to `stag fmt` meanwhile).
+`stag.serverPath` sets the stag executable (default: `stag` on PATH).
+
+```sh
+cd editors/vscode
+npm ci && npm run package    # node from nix: nix shell nixpkgs#nodejs_22 -c ...
+code --install-extension stag-*.vsix
+./test.sh                    # grammar tests and tsc; --integration runs VS Code
+```
+
+Its tests need npm packages (and VS Code for `--integration`), so they are not
+part of `dune build @runtest`.

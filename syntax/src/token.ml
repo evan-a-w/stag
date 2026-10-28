@@ -18,6 +18,8 @@ type t =
   | In
   | Match
   | With
+  | Fun
+  | Exception
   | Type
   | Of
   | Module
@@ -61,6 +63,8 @@ let keyword = function
   | "in" -> Some In
   | "match" -> Some Match
   | "with" -> Some With
+  | "fun" -> Some Fun
+  | "exception" -> Some Exception
   | "type" -> Some Type
   | "of" -> Some Of
   | "module" -> Some Module
@@ -87,6 +91,8 @@ let to_string = function
   | In -> "in"
   | Match -> "match"
   | With -> "with"
+  | Fun -> "fun"
+  | Exception -> "exception"
   | Type -> "type"
   | Of -> "of"
   | Module -> "module"
@@ -120,4 +126,74 @@ let to_string = function
   | At -> "@"
   | At_at -> "@@"
   | Eof -> "end of file"
+;;
+
+let ends_code : t -> bool = function
+  | Lparen
+  | Lbracket
+  | Lbrace
+  | Dot_lbrace
+  | Expect_open
+  | Quote_open
+  | Splice
+  | Equal
+  | Arrow
+  | Colon
+  | Bar
+  | Of
+  | Star
+  | Dot
+  | Backslash
+  | Less
+  | Let
+  | Let_expect_test
+  | Let_bench
+  | Match
+  | Fun
+  | Exception
+  | Type
+  | Module
+  | Include
+  | At
+  | At_at -> false
+  | Int _
+  | Char _
+  | String _
+  | Lident _
+  | Uident _
+  | Label _
+  | Tyvar _
+  | Weak_tyvar _
+  | True
+  | False
+  | Rec
+  | In
+  | With
+  | Struct
+  | End
+  | Rparen
+  | Rbracket
+  | Rbrace
+  | Comma
+  | Semi
+  | Dotdot
+  | Underscore
+  | Quote_close
+  | Greater
+  | Eof -> true
+;;
+
+let follows = function
+  | Rparen
+  | Rbracket
+  | Rbrace
+  | End
+  | Quote_close
+  | Semi
+  | Comma
+  | In
+  | With
+  | Arrow
+  | Equal -> true
+  | _ -> false
 ;;

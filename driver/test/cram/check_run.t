@@ -97,7 +97,7 @@ Errors are reported like OCaml's.
   2 |   .~(let x = 1 in
   3 |      Int.div x 0;
   4 |      .<1>.)
-  Error: This toplevel splice failed at compile time: Division by zero
+  Error: This toplevel splice failed at compile time: Uncaught exception Division_by_zero
   File "multi.stag", line 3, characters 5-16:
   3 |      Int.div x 0;
            ^^^^^^^^^^^
@@ -110,7 +110,7 @@ Errors are reported like OCaml's.
   File "crash.stag", line 1, characters 8-28:
   1 | let s = String.sub "abc" 1 5
               ^^^^^^^^^^^^^^^^^^^^
-  Error: String.sub: invalid substring (position 1, length 5) of a string of length 3
+  Error: Uncaught exception Invalid_argument "String.sub: invalid substring (position 1, length 5) of a string of length 3"
   [1]
   $ stag check missing.stag
   Error: missing.stag: No such file or directory

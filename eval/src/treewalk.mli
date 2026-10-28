@@ -40,14 +40,14 @@ val add_scc : t -> Typed.Scc.t -> unit
     Instantiating takes a step per node, which stands for inferring the code
     too, so code too large to infer within the budget is an error.
 
-    It runs at compile time: [Stag.Type.decl] calls [reflect] with the
+    It runs at compile time: [Stag.Type.decl] is [reflect] of the
     canonical name of the type, which it is a runtime error to call otherwise. *)
 val splice
   :  t
   -> code:Typed.Expr.t
   -> level:int
   -> entry:(string -> Typed.Var_ref.t option)
-  -> reflect:(string -> Reflected_decl.t option Or_error.t)
+  -> reflect:(string -> Value.t Or_error.t)
   -> Typed.Expr.t Or_error.t
 
 (** Evaluates [expr] at compile time, as [splice], at [level] in an empty env,
@@ -56,7 +56,7 @@ val run
   :  t
   -> Typed.Expr.t
   -> level:int
-  -> reflect:(string -> Reflected_decl.t option Or_error.t)
+  -> reflect:(string -> Value.t Or_error.t)
   -> Value.t Or_error.t
 
 (** The info of [ident] if it is bound globally, eg. a value embedded by a

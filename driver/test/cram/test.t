@@ -106,7 +106,7 @@ Runtime errors fail the test.
   File "err.stag", line 2, characters 12-25:
   2 |   print_int (Int.div 1 0)
                   ^^^^^^^^^^^^^
-  Error: Expect test "boom" failed: Division by zero
+  Error: Expect test "boom" failed: Uncaught exception Division_by_zero
   1 of 1 test(s) failed
   [1]
 
@@ -207,7 +207,7 @@ Errors still fail, after printing the corrections of other tests.
   File "print.stag", line 2, characters 35-48:
   2 | let%expect_test "boom" = print_int (Int.div 1 0)
                                          ^^^^^^^^^^^^^
-  Error: Expect test "boom" failed: Division by zero
+  Error: Expect test "boom" failed: Uncaught exception Division_by_zero
   let%expect_test "p" = print_int 1; [%expect {| 1 |}]
   let%expect_test "boom" = print_int (Int.div 1 0)
   2 of 2 test(s) failed

@@ -1,0 +1,314 @@
+# Source of stag.tmLanguage.json (npm run build:grammar). Follows the lexer,
+# syntax/src/lexer.ml. Regexes are single quoted: only '' needs escaping.
+name: stag
+scopeName: source.stag
+fileTypes: [stag]
+
+variables:
+  ident_char: '[A-Za-z0-9_'']'
+  not_ident: '(?![A-Za-z0-9_''])'
+  keywords: '(?:let|rec|in|match|with|fun|exception|type|of|module|struct|include|end|true|false)'
+  escape: '\\(?:[ntrb \\"'']|x[0-9A-Fa-f]{2}|25[0-5]|2[0-4][0-9]|[01][0-9]{2})'
+
+patterns:
+  - include: '#code'
+
+repository:
+  code:
+    patterns:
+      - include: '#comment'
+      - include: '#expect'
+      - include: '#quote'
+      - include: '#splice'
+      - include: '#quoted-string'
+      - include: '#string'
+      - include: '#char'
+      - include: '#type-variable'
+      - include: '#label'
+      - include: '#number'
+      - include: '#declaration'
+      - include: '#keyword'
+      - include: '#code-type'
+      - include: '#code-type-context'
+      - include: '#module-path'
+      - include: '#constructor'
+      - include: '#type-application'
+      - include: '#field'
+      - include: '#wildcard'
+      - include: '#identifier'
+      - include: '#operator'
+      - include: '#punctuation'
+      - include: '#illegal'
+
+  # As the lexer, strings, quoted strings and chars are skipped in comments,
+  # so that a "*)" in them does not end the comment.
+  comment:
+    name: comment.block.stag
+    begin: '\(\*'
+    end: '\*\)'
+    captures:
+      '0': { name: punctuation.definition.comment.stag }
+    patterns:
+      - include: '#comment'
+      - name: comment.block.string.quoted.double.stag
+        begin: '"'
+        end: '"'
+        patterns:
+          - match: '\\[\s\S]?'
+      - name: comment.block.string.quoted.other.stag
+        begin: '\{([a-z_]*)\|'
+        end: '\|\1\}'
+      - match: '''(?:\\[^\x{80}-\x{10FFFF}]|[^\n\x{80}-\x{10FFFF}])'''
+
+  expect:
+    patterns:
+      - name: keyword.other.extension.$1.stag
+        match: 'let%(expect_test|bench){{not_ident}}'
+      - name: meta.expect.stag
+        begin: '(\[)(%expect){{not_ident}}'
+        beginCaptures:
+          '1': { name: punctuation.section.expect.begin.stag }
+          '2': { name: keyword.other.expect.stag }
+        end: '\]'
+        endCaptures:
+          '0': { name: punctuation.section.expect.end.stag }
+        patterns:
+          - include: '#code'
+
+  quote:
+    name: meta.quote.stag
+    begin: '\.<'
+    end: '>\.'
+    beginCaptures:
+      '0': { name: keyword.control.quote.begin.stag }
+    endCaptures:
+      '0': { name: keyword.control.quote.end.stag }
+    patterns:
+      - include: '#code'
+
+  splice:
+    patterns:
+      - name: meta.splice.stag
+        begin: '(\.~)\s*(\()(?!\*)'
+        beginCaptures:
+          '1': { name: keyword.control.splice.stag }
+          '2': { name: punctuation.section.parens.begin.stag }
+        end: '\)'
+        endCaptures:
+          '0': { name: punctuation.section.parens.end.stag }
+        patterns:
+          - include: '#parens'
+          - include: '#code'
+      - name: keyword.control.splice.stag
+        match: '\.~'
+
+  parens:
+    begin: '\((?!\*)'
+    end: '\)'
+    beginCaptures:
+      '0': { name: punctuation.section.parens.begin.stag }
+    endCaptures:
+      '0': { name: punctuation.section.parens.end.stag }
+    patterns:
+      - include: '#comment'
+      - include: '#parens'
+      - include: '#code'
+
+  quoted-string:
+    name: string.quoted.other.stag
+    begin: '\{([a-z_]*)\|'
+    end: '\|\1\}'
+    beginCaptures:
+      '0': { name: punctuation.definition.string.begin.stag }
+    endCaptures:
+      '0': { name: punctuation.definition.string.end.stag }
+
+  string:
+    name: string.quoted.double.stag
+    begin: '"'
+    end: '"'
+    beginCaptures:
+      '0': { name: punctuation.definition.string.begin.stag }
+    endCaptures:
+      '0': { name: punctuation.definition.string.end.stag }
+    patterns:
+      - name: constant.character.escape.line-continuation.stag
+        match: '\\$'
+      - name: constant.character.escape.stag
+        match: '{{escape}}'
+      - name: invalid.illegal.escape.stag
+        match: '\\(?:[0-9]{1,3}|x[0-9A-Fa-f]?|.)'
+
+  char:
+    patterns:
+      - name: string.quoted.single.stag
+        match: '('')(?:([^\\''\n\x{80}-\x{10FFFF}])|({{escape}}))('')'
+        captures:
+          '1': { name: punctuation.definition.string.begin.stag }
+          '3': { name: constant.character.escape.stag }
+          '4': { name: punctuation.definition.string.end.stag }
+      - name: invalid.illegal.char.stag
+        match: '''\\[^''\n]*'''
+
+  type-variable:
+    patterns:
+      - name: entity.name.type.parameter.weak.stag
+        match: '''_{{ident_char}}+'
+      - name: entity.name.type.parameter.stag
+        match: '''[A-Za-z]{{ident_char}}*'
+
+  label:
+    name: variable.other.enummember.label.stag
+    match: '`[A-Za-z_]{{ident_char}}*'
+
+  number:
+    patterns:
+      - name: constant.numeric.integer.stag
+        match: '-?[0-9][0-9_]*{{not_ident}}'
+      - name: invalid.illegal.numeric.stag
+        match: '-?[0-9]{{ident_char}}*'
+
+  declaration:
+    patterns:
+      - match: '\b(type)\s+([a-z_]{{ident_char}}*)'
+        captures:
+          '1': { name: storage.type.type.stag }
+          '2': { name: entity.name.type.stag }
+      - match: '\b(module)\s+([A-Z]{{ident_char}}*)'
+        captures:
+          '1': { name: storage.type.module.stag }
+          '2': { name: entity.name.namespace.stag }
+      - match: '\b(exception)\s+([A-Z]{{ident_char}}*)(?![A-Za-z0-9_''.])'
+        captures:
+          '1': { name: storage.type.exception.stag }
+          '2': { name: variable.other.enummember.stag }
+      - match: '\b(let)\s+(?!{{keywords}}{{not_ident}})([a-z]{{ident_char}}*|_{{ident_char}}+)'
+        captures:
+          '1': { name: keyword.other.let.stag }
+          '2': { name: entity.name.function.stag }
+
+  keyword:
+    patterns:
+      - name: keyword.control.$1.stag
+        match: '\b(match|with){{not_ident}}'
+      - name: storage.type.$1.stag
+        match: '\b(type|module|exception){{not_ident}}'
+      - name: constant.language.boolean.$1.stag
+        match: '\b(true|false){{not_ident}}'
+      - name: keyword.other.$1.stag
+        match: '\b({{keywords}}){{not_ident}}'
+
+  code-type:
+    name: meta.type.code.stag
+    begin: '<'
+    end: '>(?!\.)|(?=>\.)'
+    beginCaptures:
+      '0': { name: punctuation.definition.code-type.begin.stag }
+    endCaptures:
+      '0': { name: punctuation.definition.code-type.end.stag }
+    patterns:
+      - include: '#code'
+
+  # The context of a code type, directly after it, as in <int>{x : int}.
+  code-type-context:
+    name: meta.type.code.context.stag
+    begin: '(?<=[^-]>)\s*(\{)(?![a-z_]*\|)'
+    end: '\}'
+    beginCaptures:
+      '1': { name: punctuation.section.braces.begin.stag }
+    endCaptures:
+      '0': { name: punctuation.section.braces.end.stag }
+    patterns:
+      - include: '#braces'
+      - include: '#code'
+
+  braces:
+    begin: '\{(?![a-z_]*\|)'
+    end: '\}'
+    beginCaptures:
+      '0': { name: punctuation.section.braces.begin.stag }
+    endCaptures:
+      '0': { name: punctuation.section.braces.end.stag }
+    patterns:
+      - include: '#braces'
+      - include: '#code'
+
+  module-path:
+    match: '\b([A-Z]{{ident_char}}*)(\.)(?=[A-Za-z_`])'
+    captures:
+      '1': { name: entity.name.namespace.stag }
+      '2': { name: punctuation.accessor.stag }
+
+  constructor:
+    name: variable.other.enummember.stag
+    match: '\b[A-Z]{{ident_char}}*'
+
+  type-application:
+    name: entity.name.type.stag
+    match: '\b[a-z_]{{ident_char}}*(?=\[)'
+
+  field:
+    match: '(\.)(?!let%(?:expect_test|bench){{not_ident}})([a-z_]{{ident_char}}*)'
+    captures:
+      '1': { name: punctuation.accessor.stag }
+      '2': { name: variable.other.property.stag }
+
+  wildcard:
+    name: variable.language.wildcard.stag
+    match: '\b_{{not_ident}}'
+
+  identifier:
+    name: variable.other.stag
+    match: '\b[a-z_]{{ident_char}}*'
+
+  operator:
+    patterns:
+      - name: keyword.operator.arrow.stag
+        match: '->'
+      - name: keyword.control.quote.end.stag
+        match: '>\.'
+      - name: punctuation.section.substitutions.begin.stag
+        match: '\.\{'
+      - name: keyword.operator.row.stag
+        match: '\.\.'
+      - name: punctuation.accessor.stag
+        match: '\.'
+      - name: keyword.operator.equals.stag
+        match: '='
+      - name: keyword.operator.colon.stag
+        match: ':'
+      - name: keyword.operator.bar.stag
+        match: '\|'
+      - name: keyword.operator.product.stag
+        match: '\*'
+      - name: keyword.operator.restrict.stag
+        match: '\\'
+      - name: keyword.operator.mode.stag
+        match: '@@?'
+      - name: punctuation.definition.code-type.end.stag
+        match: '>'
+
+  punctuation:
+    patterns:
+      - name: constant.language.unit.stag
+        match: '\(\)'
+      - name: punctuation.separator.semicolon.stag
+        match: ';'
+      - name: punctuation.separator.comma.stag
+        match: ','
+      - name: punctuation.section.parens.begin.stag
+        match: '\('
+      - name: punctuation.section.parens.end.stag
+        match: '\)'
+      - name: punctuation.section.brackets.begin.stag
+        match: '\['
+      - name: punctuation.section.brackets.end.stag
+        match: '\]'
+      - name: punctuation.section.braces.begin.stag
+        match: '\{'
+      - name: punctuation.section.braces.end.stag
+        match: '\}'
+
+  illegal:
+    name: invalid.illegal.character.stag
+    match: '\S'
