@@ -19,6 +19,8 @@ let print_bool b = print_endline (Core.Bool.to_string b)
 let is_even n = Core.Int.equal (Core.Int.rem n 2) 0
 let double n = Core.Int.mul n 2
 
+let by_first p q = match (p, q) with (a, _), (b, _) -> Core.Int.compare a b
+
 let%expect_test "length, is_empty, hd, tl, last, nth" =
   print_endline (Core.Int.to_string (Core.List.length (ints "()")));
   print_endline (Core.Int.to_string (Core.List.length (ints "(1 2 3)")));
@@ -251,7 +253,6 @@ let%expect_test "sort" =
     |}]
 
 let%expect_test "sort is stable" =
-  let by_first p q = match (p, q) with (a, _), (b, _) -> Core.Int.compare a b in
   let pairs =
     Cons
       ((2, "a"),
@@ -342,13 +343,14 @@ let%expect_test "functions are called once per element, from left to right" =
     |}]
 
 let%expect_test "sort of runs" =
-  let scramble i = Core.Int.rem (Core.Int.mul i 37) 101 in
-  print_ints (Core.List.sort Core.Int.compare (Core.List.init 30 scramble));
+  print_ints
+    (Core.List.sort
+       Core.Int.compare
+       (Core.List.init 30 (fun i -> Core.Int.rem (Core.Int.mul i 37) 101)));
   print_ints (Core.List.sort Core.Int.compare (ints "(1 2 3 3 4)"));
   print_ints (Core.List.sort Core.Int.compare (ints "(4 3 3 2 1)"));
   print_ints
     (Core.List.sort Core.Int.compare (ints "(1 3 5 2 4 6 0 -1 -2 7 7)"));
-  let by_first p q = match (p, q) with (a, _), (b, _) -> Core.Int.compare a b in
   print_sexp
     (Core.Sexp.sexp_of_list
        (Core.Sexp.sexp_of_pair Core.Sexp.sexp_of_int Core.Sexp.sexp_of_string)
@@ -375,7 +377,6 @@ let%expect_test "sort is stable on many equal keys" =
   let key i = Core.Int.rem (Core.Int.mul i 3) 7 in
   let pair i = (key i, i) in
   let pairs = Core.List.init 200 pair in
-  let by_first p q = match (p, q) with (a, _), (b, _) -> Core.Int.compare a b in
   let sorted = Core.List.sort by_first pairs in
   let group k =
     let has_key p = match p with a, _ -> Core.Int.equal a k in
@@ -443,7 +444,6 @@ let%expect_test "max_elt, min_elt, dedup" =
   print_int_option (Core.List.min_elt Core.Int.compare (ints "(3 9 1 9 4)"));
   print_int_option (Core.List.max_elt Core.Int.compare (ints "()"));
   print_int_option (Core.List.min_elt Core.Int.compare (ints "()"));
-  let by_first p q = match (p, q) with (a, _), (b, _) -> Core.Int.compare a b in
   let print_pairs l =
     print_sexp
       (Core.Sexp.sexp_of_list
