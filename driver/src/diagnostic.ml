@@ -20,6 +20,17 @@ let create ?(notes = []) ?(whole_file = false) ~loc message =
   { loc; whole_file; message; notes }
 ;;
 
+let sort ts = Loc.sort_by ts ~f:(fun t -> t.loc)
+
+let relocate t ~f =
+  { t with
+    loc = f t.loc
+  ; notes =
+      List.map t.notes ~f:(fun (note : Note.t) ->
+        { note with loc = f note.loc })
+  }
+;;
+
 let of_parse_error error =
   create
     ~loc:(Parser.Error.loc error)
@@ -35,12 +46,35 @@ let of_source_file_error (error : Source_file.Error.t) =
     }
 ;;
 
+let max_declaration_lines = 12
+
+(* Indented, its first lines only if it is long. *)
+let declaration_source ?root_modules toplevel =
+  let lines =
+    String.split_lines (Printer.toplevel ~width:78 ?root_modules toplevel)
+  in
+  let lines =
+    if List.length lines <= max_declaration_lines
+    then lines
+    else (
+      let shown = max_declaration_lines - 1 in
+      List.take lines shown
+      @ [ sprintf "... (%d more lines)" (List.length lines - shown) ])
+  in
+  List.map lines ~f:(fun line ->
+    if String.is_empty line then line else "  " ^ line)
+  |> String.concat ~sep:"\n"
+;;
+
 let of_typecheck_error (error : Typecheck_error.t) =
-  let notes =
-    match error.kind with
-    | Splice_evaluation_failed { error; code = _ } ->
+  let root_modules =
+    Option.map error.in_scope ~f:(fun in_scope -> in_scope.root_modules)
+  in
+  let rec notes : Typecheck_error.Kind.t -> Note.t list = function
+    | Splice_evaluation_failed { error; code = _ }
+    | Declaration_splice_failed error ->
       (match Runtime_error.of_error error with
-       | Some { loc; message = _ } when not (Loc.is_none loc) ->
+       | Some { loc; kind = _ } when not (Loc.is_none loc) ->
          [ { Note.loc; message = "The error was raised here" } ]
        | Some _ | None -> [])
     | Free_in_spliced_code { name; unusable } ->
@@ -48,9 +82,84 @@ let of_typecheck_error (error : Typecheck_error.t) =
         ; message = sprintf "%s is a variable of the code's context here" name
         }
       ]
+    | Declaration_splice_cycle { splice; splice_kind; name = _; module_ = _ } ->
+      [ { Note.loc = splice
+        ; message =
+            (match splice_kind with
+             | Include -> "The declaration splice is here"
+             | Type_definition -> "The type splice is here")
+        }
+      ]
+    | Generated_after_include { error; include_; splice_kind } ->
+      notes error
+      @ [ { Note.loc = include_
+          ; message =
+              (match splice_kind with
+               | Include ->
+                 "This include generates it, but it is visible only after the \
+                  include"
+               | Type_definition ->
+                 "This type splice defines it, but it is visible only after \
+                  the type's declaration")
+          }
+        ]
+    | Maybe_generated_by_running_include { error; include_; splice_kind; after }
+      ->
+      let splice, being =
+        match splice_kind with
+        | Include -> "include", "generated"
+        | Type_definition -> "type splice", "computed"
+      in
+      notes error
+      @ [ { Note.loc = include_
+          ; message =
+              (if after
+               then
+                 sprintf
+                   "This %s, after this point, may define it, but is still \
+                    being %s because its expression uses this code"
+                   splice
+                   being
+               else
+                 sprintf
+                   "This %s, still being %s because its expression uses this \
+                    code, may define it: move this code before the %s or into \
+                    another module"
+                   splice
+                   being
+                   (match splice_kind with
+                    | Include -> "include"
+                    | Type_definition -> "type"))
+          }
+        ]
+    | Shadowed_prelude_module { error; module_; shadowed_by } ->
+      notes error
+      @ [ { Note.loc = shadowed_by
+          ; message = sprintf "The program's module %s is here" module_
+          }
+        ]
+    | In_type_splice { generated; error } ->
+      notes error
+      @ [ { Note.loc = Loc.none
+          ; message =
+              "The type splice gave the type: "
+              ^ Printer.type_expr ~width:78 ?root_modules generated
+          }
+        ]
+    | In_generated_declaration { generated; error; declaration = _ } ->
+      notes error
+      @ [ { Note.loc = Loc.none
+          ; message =
+              "The generated declaration is:\n"
+              ^ declaration_source ?root_modules generated
+          }
+        ]
     | _ -> []
   in
-  create ~notes ~loc:error.loc (Typecheck_error.message error)
+  create
+    ~notes:(notes error.kind)
+    ~loc:error.loc
+    (Typecheck_error.message error)
 ;;
 
 let of_driver_error : Driver.Error.t -> t = function
@@ -60,7 +169,8 @@ let of_driver_error : Driver.Error.t -> t = function
 
 let of_runtime_error error =
   match Runtime_error.of_error error with
-  | Some { loc; message } -> create ~loc message
+  | Some ({ loc; kind = _ } as error) ->
+    create ~loc (Runtime_error.message error)
   | None -> create ~loc:Loc.none (Error.to_string_hum error)
 ;;
 
@@ -190,10 +300,30 @@ let to_string_hum
       ?(warning = false)
       { loc; whole_file; message; notes }
   =
+  let contents file =
+    match contents file with
+    | Some contents -> Some contents
+    | None -> Prelude.source file
+  in
   (located ~contents ~whole_file loc
    @ [ (if warning then "Warning: " else "Error: ") ^ message ])
   @ List.concat_map notes ~f:(fun { loc; message } ->
     located ~contents ~whole_file:false loc @ [ "Note: " ^ message ])
   |> List.map ~f:(fun line -> line ^ "\n")
   |> String.concat
+;;
+
+let max_shown = 50
+
+let list_to_string_hum ?contents ?warning ts =
+  let shown, hidden = List.split_n ts max_shown in
+  String.concat (List.map shown ~f:(to_string_hum ?contents ?warning))
+  ^
+  match List.length hidden with
+  | 0 -> ""
+  | hidden ->
+    sprintf
+      "... and %d more %s\n"
+      hidden
+      (if Option.value warning ~default:false then "warnings" else "errors")
 ;;

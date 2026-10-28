@@ -1,0 +1,228 @@
+(* As OCaml's [Stdlib.String]: functions taking a function take it first, the
+   others the string. Out of bounds indices are runtime errors in [get] and
+   [sub]. *)
+
+let length = Prim.String.length
+let get = Prim.String.get
+
+(* [sub s pos len]. *)
+let sub = Prim.String.sub
+let append = Prim.String.append
+let equal = Prim.String.equal
+let compare = Prim.String.compare
+let is_empty s = Int.equal (length s) 0
+let of_char = Char.to_string
+
+(* Joins [parts], separated by [sep]. *)
+let concat = Prim.String.concat
+
+(* [init n f] is [f 0], ..., [f (n - 1)], calling [f] in that order; empty if
+   [n] is not positive. *)
+let init n f = concat "" (List.init n (fun i -> of_char (f i)))
+
+(* [n] copies of [c]; empty if [n] is not positive. *)
+let make n c = init n (fun _ -> c)
+
+let to_list s =
+  let loop i acc =
+    match Int.lt i 0 with
+    | true -> acc
+    | false -> loop (Int.pred i) (Cons (get s i, acc))
+  in
+  loop (Int.pred (length s)) []
+
+let of_list chars = concat "" (List.map of_char chars)
+
+let fold_left f acc s =
+  Internal.fold_range (fun acc i -> f acc (get s i)) acc 0 (length s)
+
+let iter (f : char -> unit) s =
+  Internal.fold_range (fun _ i -> f (get s i)) () 0 (length s)
+
+let map f s = init (length s) (fun i -> f (get s i))
+
+let lowercase s = map Char.lowercase s
+let uppercase s = map Char.uppercase s
+
+let for_all f s =
+  let loop i =
+    match Int.lt i (length s) with
+    | true ->
+      (match f (get s i) with
+       | true -> loop (Int.succ i)
+       | false -> false)
+    | false -> true
+  in
+  loop 0
+
+let exists f s = Bool.not (for_all (fun c -> Bool.not (f c)) s)
+
+(* The index of the first [c] in [s]. *)
+let index s c =
+  let loop i =
+    match Int.lt i (length s) with
+    | true ->
+      (match Char.equal (get s i) c with
+       | true -> Some i
+       | false -> loop (Int.succ i))
+    | false -> None
+  in
+  loop 0
+
+(* The index of the last [c] in [s]. *)
+let rindex s c =
+  let loop i =
+    match Int.lt i 0 with
+    | true -> None
+    | false ->
+      match Char.equal (get s i) c with
+      | true -> Some i
+      | false -> loop (Int.pred i)
+  in
+  loop (Int.pred (length s))
+
+let index_exn s c =
+  match index s c with
+  | Some i -> i
+  | None -> raise (Failure "String.index_exn: not found")
+
+let rindex_exn s c =
+  match rindex s c with
+  | Some i -> i
+  | None -> raise (Failure "String.rindex_exn: not found")
+
+let contains s c = Option.is_some (index s c)
+
+(* The first [n] characters of [s], or all of them if it has fewer. *)
+let prefix s n = sub s 0 (Int.max 0 (Int.min n (length s)))
+
+(* The last [n] characters of [s], or all of them if it has fewer. *)
+let suffix s n =
+  let len = Int.max 0 (Int.min n (length s)) in
+  sub s (Int.sub (length s) len) len
+
+let drop_prefix s n = suffix s (Int.sub (length s) n)
+let drop_suffix s n = prefix s (Int.sub (length s) n)
+let starts_with prefix_ s = equal (prefix s (length prefix_)) prefix_
+let ends_with suffix_ s = equal (suffix s (length suffix_)) suffix_
+
+(* [s] without its leading characters satisfying [f]. *)
+let drop_while f s =
+  let loop i =
+    match Int.lt i (length s) with
+    | true ->
+      (match f (get s i) with
+       | true -> loop (Int.succ i)
+       | false -> drop_prefix s i)
+    | false -> ""
+  in
+  loop 0
+
+(* [s] without leading and trailing whitespace. *)
+let strip s =
+  let first_kept i =
+    match Int.lt i (length s) with
+    | true ->
+      (match Char.is_whitespace (get s i) with
+       | true -> first_kept (Int.succ i)
+       | false -> i)
+    | false -> i
+  in
+  let last_kept i =
+    match Int.gt i 0 with
+    | true ->
+      (match Char.is_whitespace (get s (Int.pred i)) with
+       | true -> last_kept (Int.pred i)
+       | false -> i)
+    | false -> i
+  in
+  let start = first_kept 0 in
+  let stop = Int.max start (last_kept (length s)) in
+  sub s start (Int.sub stop start)
+
+(* The substrings between the [sep]s: [split_on_char ',' "a,,b"] is
+   ["a"; ""; "b"], and of [""] is [[""]]. *)
+let split_on_char sep s =
+  let loop start i acc =
+    match Int.lt i (length s) with
+    | true ->
+      (match Char.equal (get s i) sep with
+       | true ->
+         let part = sub s start (Int.sub i start) in
+         loop (Int.succ i) (Int.succ i) (Cons (part, acc))
+       | false -> loop start (Int.succ i) acc)
+    | false -> List.rev (Cons (sub s start (Int.sub i start), acc))
+  in
+  loop 0 0 []
+
+(* The substrings between the non-overlapping occurrences of [sep], found from
+   the left: [split_on_string ", " "a, b, "] is [["a"; "b"; ""]]. An empty
+   [sep] gives [[s]]. *)
+let split_on_string sep s =
+  let n = length sep in
+  let found i = equal (sub s i n) sep in
+  let loop start i acc =
+    match Int.le (Int.add i n) (length s) with
+    | true ->
+      (match found i with
+       | true ->
+         let part = sub s start (Int.sub i start) in
+         loop (Int.add i n) (Int.add i n) (Cons (part, acc))
+       | false -> loop start (Int.succ i) acc)
+    | false -> List.rev (Cons (drop_prefix s start, acc))
+  in
+  match is_empty sep with
+  | true -> [s]
+  | false -> loop 0 0 []
+
+(* As OCaml's [String.escaped], without the quotes. *)
+let escaped s =
+  let plain c =
+    match c with
+    | '"' -> false
+    | '\\' -> false
+    | _ -> Char.is_print c
+  in
+  (* [parts] in reverse, then the plain characters from [start] to [i]. *)
+  let loop start i parts =
+    let plain_part _ = sub s start (Int.sub i start) in
+    match Int.lt i (length s) with
+    | false -> concat "" (List.rev (Cons (plain_part (), parts)))
+    | true ->
+      let c = get s i in
+      match plain c with
+      | true -> loop start (Int.succ i) parts
+      | false ->
+        let escaped =
+          Cons (Internal.escape_char c, Cons (plain_part (), parts))
+        in
+        loop (Int.succ i) (Int.succ i) escaped
+  in
+  loop 0 0 []
+
+(* Helpers of the functions above. *)
+module Internal = struct
+  (* [fold_range f acc lo hi] is [f (... (f acc lo) ...) (hi - 1)]. *)
+  let fold_range f acc lo hi =
+    match Int.lt lo hi with
+    | true -> fold_range f (f acc lo) (Int.succ lo) hi
+    | false -> acc
+
+  (* [c] in OCaml's escaped syntax: backslash escapes for newline, tab, carriage
+     return, backspace, backslash and double quote, and decimal [\ddd] for other
+     characters that are not printable ASCII. *)
+  let escape_char c =
+    match c with
+    | '"' -> "\\\""
+    | '\\' -> "\\\\"
+    | '\n' -> "\\n"
+    | '\t' -> "\\t"
+    | '\r' -> "\\r"
+    | '\b' -> "\\b"
+    | _ ->
+      match Char.is_print c with
+      | true -> of_char c
+      | false ->
+        let digits = Int.to_string (Char.code c) in
+        append "\\" (append (make (Int.sub 3 (length digits)) '0') digits)
+end

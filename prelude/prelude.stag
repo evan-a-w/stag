@@ -1,0 +1,296 @@
+(* The prelude, in scope in every program, outside its root module, so the
+   program's declarations shadow it. *)
+
+type list['a] = Nil | Cons of 'a * list['a]
+type option['a] = None | Some of 'a
+type result['a, 'e] = Ok of 'a | Error of 'e
+
+(* Raised by prims on errors in their arguments. *)
+exception Division_by_zero
+exception Invalid_argument of string
+exception Failure of string
+
+let raise = Intrinsic.raise
+
+module Stag = struct
+  (* The syntax of stag as data, mirroring [Syntax], for declarations generated
+     at compile time. Names are as written, without backticks or quotes: [x],
+     [C], [`A] as ["A"], ['a] as ["a"]. Paths are names joined with [.], as
+     ["M.x"]. *)
+
+  let map f l =
+    match l with
+    | [] -> []
+    | Cons (x, rest) -> Cons (f x, map f rest)
+
+  let append l tail =
+    match l with
+    | Nil -> tail
+    | Cons (x, rest) -> Cons (x, append rest tail)
+
+  (* Declared types, constructors and fields, by identity: a ref names the
+     same declaration wherever it is spliced, whatever is in scope there. Only
+     reflection ([Type]) makes them. [name] is the name it is declared with,
+     eg. ["C"]. *)
+  module Type_ref = struct
+    type t
+
+    let name = Intrinsic.type_ref_name
+
+    (* The names of its path from the root scope: of the program's, eg.
+       [Program ["A"; "M"; "t"]] for the [t] of module [M] of file [a.stag], or
+       of the prelude's, eg. [Prelude ["Core"; "Sexp"; "t"]], and
+       [Prelude ["int"]] for a builtin type. *)
+    module Path = struct
+      type t = Program of list[string] | Prelude of list[string]
+    end
+
+    let path = Intrinsic.type_ref_path
+  end
+
+  module Constructor_ref = struct
+    type t
+
+    let name = Intrinsic.constructor_ref_name
+  end
+
+  module Field_ref = struct
+    type t
+
+    let name = Intrinsic.field_ref_name
+  end
+
+  (* A toplevel value, or a prim. Only [Code.erase] makes them. *)
+  module Value_ref = struct
+    type t
+
+    let name = Intrinsic.value_ref_name
+  end
+
+  (* What names a type, constructor, field or value (['r] is [Type_ref.t],
+     [Constructor_ref.t], [Field_ref.t] or [Value_ref.t]): a path, resolved
+     where the syntax is spliced, or a ref. *)
+  module Path = struct
+    type t['r] = Name of string | Ref of 'r
+  end
+
+  module Internal = struct
+    let constructor code =
+      match Intrinsic.erase code with
+      | Expr.Construct (c, _) -> c
+      | _ -> raise (Failure "Stag.Internal.constructor")
+
+    let cons = constructor .< [()] >.
+    let nil = constructor .< [] >.
+  end
+
+  module Lit = struct
+    type t = Int of int | Bool of bool | String of string | Char of char | Unit
+  end
+
+  module Type_expr = struct
+    type t =
+      | Var of string
+      | Con of Path.t[Type_ref.t] * list[Arg.t]
+      | Arrow of t * t
+      | Tuple of list[t]
+      | Code of {`inner : t; `context : Row.t}
+      | Record of Row.t
+      | Variant of Row.t
+      | Splice of Expr.t
+
+    (* Labels are those of polymorphic records and variants, except in the
+       context of a code type, whose entries are variables. *)
+    module Row = struct
+      type t = Empty | Extend of string * Type_expr.t * t | Var of string
+    end
+
+    module Arg = struct
+      type t = Ty of Type_expr.t | Row of Row.t
+    end
+
+    (* [con "list" [t]] is [list[t]]. *)
+    let con name args =
+      let ty t = Arg.Ty t in
+      Con (Path.Name name, map ty args)
+
+    (* [tuple] of no types is [unit], of one is that type. *)
+    let tuple ts =
+      match ts with
+      | [] -> con "unit" []
+      | [t] -> t
+      | _ -> Tuple ts
+  end
+
+  module Type_decl = struct
+    module Param = struct
+      type t = Ty of string | Row of string
+    end
+
+    module Kind = struct
+      type t =
+        | Variant of list[string * list[Type_expr.t]]
+        | Record of list[string * Type_expr.t]
+        | Alias of Type_expr.t
+        | Abstract
+        | Splice of Expr.t
+    end
+
+    type t = {`name : string; `params : list[Param.t]; `kind : Kind.t}
+  end
+
+  module Binding = struct
+    type t = string * option[Type_expr.t]
+  end
+
+  module Pattern = struct
+    module Rest = struct
+      type t = Closed | Open | Bind of string
+    end
+
+    type t =
+      | Any
+      | Var of string
+      | Lit of Lit.t
+      | Tuple of list[t]
+      | Construct of Path.t[Constructor_ref.t] * list[t]
+      | Record of list[Path.t[Field_ref.t] * t]
+      | Poly_variant of string * option[t]
+      | Poly_record of {`fields : list[string * t]; `rest : Rest.t}
+      | Exception of t
+
+    let construct name args = Construct (Path.Name name, args)
+
+    (* The list literal of [ps], [[p1; p2]], of the prelude's [Cons] and
+       [Nil] wherever it is spliced. *)
+    let list ps =
+      match ps with
+      | [] -> Construct (Internal.nil, [])
+      | Cons (p, rest) -> Construct (Internal.cons, [p; list rest])
+
+    (* [tuple] of no patterns is [()], of one is that pattern. *)
+    let tuple ps =
+      match ps with
+      | [] -> Lit Lit.Unit
+      | [p] -> p
+      | _ -> Tuple ps
+  end
+
+  module Expr = struct
+    type t =
+      | Lit of Lit.t
+      | Var of Path.t[Value_ref.t] * option[Type_expr.t]
+      | App of t * t
+      | Let of string * list[Binding.t] * option[Type_expr.t] * t * t
+      | Fun of list[Binding.t] * t
+      | Splice of {`expr : t; `subs : option[list[string * option[t]]]}
+      | Quote of t
+      | Tuple of list[t]
+      | Construct of Path.t[Constructor_ref.t] * list[t]
+      | Record of list[Path.t[Field_ref.t] * t]
+      | Field of t * Path.t[Field_ref.t]
+      | Record_update of t * list[Path.t[Field_ref.t] * t]
+      | Type of Type_expr.t
+      | Match of t * list[Pattern.t * t]
+      | Poly_record of list[string * t]
+      | Poly_field of t * string
+      | Poly_extend of list[string * t] * t
+      | Poly_restrict of t * string
+      | Poly_update of t * list[string * t]
+      | Poly_variant of string * option[t]
+      | Expect of string
+      | Struct_quote of list[Toplevel.t]
+
+    let var name = Var (Path.Name name, None)
+    let construct name args = Construct (Path.Name name, args)
+    let int n = Lit (Lit.Int n)
+    let string s = Lit (Lit.String s)
+
+    (* [fun_ ["x"; "y"] body] is [fun x y -> body]. *)
+    let fun_ params body =
+      let param name = (name, None) in
+      Fun (map param params, body)
+
+    let match_ e arms = Match (e, arms)
+
+    (* The list literal of [es], [[e1; e2]], as [Pattern.list]. *)
+    let list es =
+      match es with
+      | [] -> Construct (Internal.nil, [])
+      | Cons (e, rest) -> Construct (Internal.cons, [e; list rest])
+
+    (* [apply f [x; y]] is [f x y]. *)
+    let apply f args =
+      match args with
+      | [] -> f
+      | Cons (x, rest) -> apply (App (f, x)) rest
+
+    (* [tuple] of no expressions is [()], of one is that expression. *)
+    let tuple es =
+      match es with
+      | [] -> Lit Lit.Unit
+      | [e] -> e
+      | _ -> Tuple es
+
+    (* [let_ name params equal body] is [let name params = equal in body]. *)
+    let let_ name params equal body =
+      let param name = (name, None) in
+      Let (name, map param params, None, equal, body)
+  end
+
+  module Toplevel = struct
+    type t =
+      | Let of string * list[Binding.t] * option[Type_expr.t] * Expr.t
+      | Type of Type_decl.t
+      | Exception of string * list[Type_expr.t]
+      | Module of string * list[t]
+      | Module_splice of string * Expr.t
+      | Include of Expr.t
+      | Expect_test of {`name : string; `body : Expr.t}
+      | Bench of {`name : string;
+                  `param : option[string * list[Expr.t]];
+                  `body : Expr.t}
+
+    (* [let_ name params body] is [let name params = body]. *)
+    let let_ name params body =
+      let param name = (name, None) in
+      Let (name, map param params, None, body)
+  end
+
+  module Program = struct
+    type t = list[Toplevel.t]
+  end
+
+  module Code = struct
+    (* The syntax of the code: its free variables by name, and what it refers
+       to outside it (values, prims, types, constructors and fields) by
+       [Path.Ref], so it means the same wherever it is spliced. *)
+    let erase = Intrinsic.erase
+  end
+
+  (* [type ty] is the type [ty] as a value, of type [Type.t[ty]]: the
+     parameter is the reflected type, its variables standing for any type. *)
+  module Type = struct
+    type t['a]
+
+    module Kind = struct
+      type t =
+        | Variant of list[Constructor_ref.t * list[Type_expr.t]]
+        | Record of list[Field_ref.t * Type_expr.t]
+        | Alias of Type_expr.t
+    end
+
+    module Decl = struct
+      type t = {params : list[Type_decl.Param.t]; kind : Kind.t}
+    end
+
+    (* The type, its types by [Path.Ref]: [expr (type list[t])] is
+       [Con (Ref list, Cons (Arg.Ty (Con (Ref t, Nil)), Nil))]. *)
+    let expr = Intrinsic.type_expr
+
+    (* The declaration of a type, checking it, its types by [Path.Ref], or
+       [None] if it is abstract (as are [int] and the other builtin types).
+       Only at compile time. *)
+    let decl = Intrinsic.type_decl
+  end
+end

@@ -8,10 +8,9 @@ let contents project path =
 
 let report project diagnostics =
   Out_channel.flush stdout;
-  List.iter diagnostics ~f:(fun diagnostic ->
-    eprintf
-      "%s%!"
-      (Diagnostic.to_string_hum ~contents:(contents project) diagnostic))
+  eprintf
+    "%s%!"
+    (Diagnostic.list_to_string_hum ~contents:(contents project) diagnostics)
 ;;
 
 let warn project diagnostic =
@@ -56,10 +55,17 @@ let warn_unrun_tests project (target : Project.Target.t) driver =
                   (Project.Target.name target))))
 ;;
 
-(* The program of a target, checked once, reporting its errors once. A target
-   is not checked if a library it depends on fails. Output at compile time is
+let stale_expansions (target : Project.Target.t) driver =
+  let files = files target in
+  List.filter (Inline_expansion.stale driver) ~f:(fun expansion ->
+    Set.mem files expansion.loc.file)
+;;
+
+(* The program of a target, checked once, reporting its errors once, and its
+   stale expansions as warnings unless [stale_are_errors]. A target is not
+   checked if a library it depends on fails. Output at compile time is
    discarded. *)
-let checker project =
+let checker ?(stale_are_errors = false) project =
   let status = String.Table.create () in
   let rec check (target : Project.Target.t) =
     let name = Project.Target.name target in
@@ -77,6 +83,10 @@ let checker project =
           match Program.check ~output:ignore project target with
           | Ok driver ->
             warn_unrun_tests project target driver;
+            if not stale_are_errors
+            then
+              List.iter (stale_expansions target driver) ~f:(fun expansion ->
+                warn project (Inline_expansion.diagnostic expansion));
             Some driver
           | Error diagnostics ->
             report project diagnostics;
@@ -174,21 +184,29 @@ end
 
 let test_target project ~check (target : Project.Target.t) =
   let root = Project.root project in
-  let results =
-    match check target with
-    | None -> None
-    | Some driver ->
-      if not (eval project driver)
-      then None
-      else (
-        let results = Expect_test_runner.run ~files:(files target) driver in
-        report project (List.concat_map results ~f:Diagnostic.of_test_result);
-        Some results)
+  let checked =
+    Option.map (check target) ~f:(fun driver ->
+      let expansions = stale_expansions target driver in
+      report project (List.map expansions ~f:Inline_expansion.diagnostic);
+      let results =
+        if not (eval project driver)
+        then None
+        else (
+          let results = Expect_test_runner.run ~files:(files target) driver in
+          report project (List.concat_map results ~f:Diagnostic.of_test_result);
+          Some results)
+      in
+      results, expansions)
   in
   let corrections =
     List.map target.files ~f:(fun ({ path; contents } as file) ->
       match
-        Option.bind results ~f:(Expect_test_runner.corrected ~path ~contents)
+        Option.bind checked ~f:(fun (results, expansions) ->
+          Corrected_file.create
+            ~path
+            ~contents
+            ~tests:(Option.value results ~default:[])
+            ~expansions)
       with
       | None -> Correction.remove ~root path
       | Some corrected ->
@@ -210,20 +228,31 @@ let test_target project ~check (target : Project.Target.t) =
       report project diagnostics;
       false
   in
-  match results with
+  match checked with
   | None -> false
-  | Some results ->
+  | Some (results, expansions) ->
     let failed =
-      List.count results ~f:(Fn.non Expect_test_runner.Test_result.passed)
+      Option.value_map results ~default:1 ~f:(fun results ->
+        let failed =
+          List.count results ~f:(Fn.non Expect_test_runner.Test_result.passed)
+        in
+        if failed > 0
+        then
+          eprintf
+            "%s: %d of %d test(s) failed\n%!"
+            (Project.Target.name target)
+            failed
+            (List.length results);
+        failed)
     in
-    if failed > 0
+    let stale = List.length expansions in
+    if stale > 0
     then
       eprintf
-        "%s: %d of %d test(s) failed\n%!"
+        "%s: %d inline expansion(s) out of date\n%!"
         (Project.Target.name target)
-        failed
-        (List.length results);
-    corrections_ok && failed = 0
+        stale;
+    corrections_ok && failed = 0 && stale = 0
 ;;
 
 (* Whether [corrections_dir] exists, erring if it is not a directory. *)
@@ -261,7 +290,49 @@ let test project names =
     false
   | Ok _, Error () -> not_a_directory ()
   | Ok targets, Ok (_ : bool) ->
-    all targets ~f:(test_target project ~check:(checker project))
+    all
+      targets
+      ~f:(test_target project ~check:(checker ~stale_are_errors:true project))
+;;
+
+let bench_dir = corrections_dir ^/ "bench"
+
+let bench project options ~filters ~phases =
+  let check = checker project in
+  let benches (target : Project.Target.t) =
+    let name = Project.Target.name target in
+    let prefix = name ^ "/" in
+    if phases
+    then
+      Option.map (check target) ~f:(fun (_ : Driver.t) ->
+        Phase_bench.benches ~prefix (fun () -> Program.parse project target))
+    else (
+      let%bind.Option driver = check target in
+      Treewalk.set_output (Driver.interpreter driver) ignore;
+      match
+        let%bind.Result () =
+          Driver.eval driver |> Result.map_error ~f:Diagnostic.of_runtime_error
+        in
+        Bench_runner.benches ~files:(files target) driver
+      with
+      | Ok benches ->
+        Some
+          (List.map benches ~f:(fun bench ->
+             Measure.Suite.Bench.add_prefix bench prefix))
+      | Error diagnostic ->
+        report project [ diagnostic ];
+        None)
+  in
+  let benches = List.map (Project.targets project) ~f:benches in
+  let ok =
+    Bench_command.run
+      ~filters
+      options
+      ~baseline_dir:(Project.root project ^/ bench_dir)
+      ~report:(fun diagnostic -> report project [ diagnostic ])
+      (List.concat_map benches ~f:(Option.value ~default:[]))
+  in
+  ok && List.for_all benches ~f:Option.is_some
 ;;
 
 let corrections ~root ~error =
@@ -329,4 +400,22 @@ let promote project =
     report project (Queue.to_list errors);
     let promoted = all corrections ~f:(promote_one project ~sources) in
     promoted && Queue.is_empty errors
+;;
+
+let fmt project ~(mode : Format.Mode.t) =
+  let { Format.Summary.unformatted; errors } =
+    Format.run
+      ~root:(Project.root project)
+      ~mode
+      (List.concat_map (Project.targets project) ~f:(fun target -> target.files))
+  in
+  List.iter unformatted ~f:(fun unformatted ->
+    print_string (Format.Unformatted.diff unformatted));
+  report project errors;
+  let unformatted_fails =
+    match mode with
+    | Check -> not (List.is_empty unformatted)
+    | Inplace -> false
+  in
+  List.is_empty errors && not unformatted_fails
 ;;

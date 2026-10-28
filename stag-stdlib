@@ -1,0 +1,2 @@
+; The root of a stag checkout: prelude/prelude.stag and core/*.stag are the
+; sources of the prelude stag embeds, which editors check as such.

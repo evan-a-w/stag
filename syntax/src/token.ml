@@ -14,14 +14,21 @@ type t =
   | Let
   | Rec
   | Let_expect_test (** [let%expect_test] *)
+  | Let_bench (** [let%bench] *)
   | In
   | Match
   | With
+  | Fun
+  | Exception
   | Type
   | Of
   | Module
   | Struct
+  | Include
   | End
+  | Module_inline (** [module%inline] *)
+  | Include_inline (** [include%inline] *)
+  | End_inline (** [end%inline] *)
   | Lparen
   | Rparen
   | Lbracket
@@ -37,6 +44,7 @@ type t =
   | Arrow
   | Star
   | Dot
+  | Root
   | Dot_lbrace (** [.{], substitutions of a splice *)
   | Dotdot
   | Underscore
@@ -59,10 +67,13 @@ let keyword = function
   | "in" -> Some In
   | "match" -> Some Match
   | "with" -> Some With
+  | "fun" -> Some Fun
+  | "exception" -> Some Exception
   | "type" -> Some Type
   | "of" -> Some Of
   | "module" -> Some Module
   | "struct" -> Some Struct
+  | "include" -> Some Include
   | "end" -> Some End
   | _ -> None
 ;;
@@ -80,14 +91,21 @@ let to_string = function
   | Let -> "let"
   | Rec -> "rec"
   | Let_expect_test -> "let%expect_test"
+  | Let_bench -> "let%bench"
   | In -> "in"
   | Match -> "match"
   | With -> "with"
+  | Fun -> "fun"
+  | Exception -> "exception"
   | Type -> "type"
   | Of -> "of"
   | Module -> "module"
   | Struct -> "struct"
+  | Include -> "include"
   | End -> "end"
+  | Module_inline -> "module%inline"
+  | Include_inline -> "include%inline"
+  | End_inline -> "end%inline"
   | Lparen -> "("
   | Rparen -> ")"
   | Lbracket -> "["
@@ -103,6 +121,7 @@ let to_string = function
   | Arrow -> "->"
   | Star -> "*"
   | Dot -> "."
+  | Root -> "."
   | Dot_lbrace -> ".{"
   | Dotdot -> ".."
   | Underscore -> "_"
@@ -115,4 +134,79 @@ let to_string = function
   | At -> "@"
   | At_at -> "@@"
   | Eof -> "end of file"
+;;
+
+let ends_code : t -> bool = function
+  | Lparen
+  | Lbracket
+  | Lbrace
+  | Dot_lbrace
+  | Expect_open
+  | Quote_open
+  | Splice
+  | Equal
+  | Arrow
+  | Colon
+  | Bar
+  | Of
+  | Star
+  | Dot
+  | Root
+  | Backslash
+  | Less
+  | Let
+  | Let_expect_test
+  | Let_bench
+  | Match
+  | Fun
+  | Exception
+  | Type
+  | Module
+  | Include
+  | Module_inline
+  | Include_inline
+  | At
+  | At_at -> false
+  | Int _
+  | Char _
+  | String _
+  | Lident _
+  | Uident _
+  | Label _
+  | Tyvar _
+  | Weak_tyvar _
+  | True
+  | False
+  | Rec
+  | In
+  | With
+  | Struct
+  | End
+  | End_inline
+  | Rparen
+  | Rbracket
+  | Rbrace
+  | Comma
+  | Semi
+  | Dotdot
+  | Underscore
+  | Quote_close
+  | Greater
+  | Eof -> true
+;;
+
+let follows = function
+  | Rparen
+  | Rbracket
+  | Rbrace
+  | End
+  | End_inline
+  | Quote_close
+  | Semi
+  | Comma
+  | In
+  | With
+  | Arrow
+  | Equal -> true
+  | _ -> false
 ;;

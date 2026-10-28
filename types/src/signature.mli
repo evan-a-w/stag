@@ -54,6 +54,7 @@ module Item : sig
   type t =
     | Value of Value.t
     | Type of Type_decl.t
+    | Exception of Constructor.t
     | Module of
         { name : string
         ; items : t list
@@ -71,5 +72,8 @@ type t = Item.t list [@@deriving sexp_of]
     lexically from there, e.g. [M.N.t] is [t] inside [M.N], [N.t] inside [M]
     and [M.N.t] at the root. If no suffix does, as for a root type shadowed by
     a type of the same name in an enclosing module, it is the canonical name
-    after a leading [.], which stands for the root: [.t], [.M.t]. *)
-val to_string_hum : t -> string
+    after a leading [.], which stands for the root: [.t], [.M.t].
+
+    With [~of_prelude], [t] is the prelude's, so its names are named as the
+    program's are, relative to its root. *)
+val to_string_hum : ?of_prelude:bool -> t -> string

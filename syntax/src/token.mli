@@ -14,14 +14,21 @@ type t =
   | Let
   | Rec
   | Let_expect_test (** [let%expect_test] *)
+  | Let_bench (** [let%bench] *)
   | In
   | Match
   | With
+  | Fun
+  | Exception
   | Type
   | Of
   | Module
   | Struct
+  | Include
   | End
+  | Module_inline (** [module%inline] *)
+  | Include_inline (** [include%inline] *)
+  | End_inline (** [end%inline] *)
   | Lparen
   | Rparen
   | Lbracket
@@ -37,6 +44,7 @@ type t =
   | Arrow
   | Star
   | Dot
+  | Root (** [.] starting a path from the root scope, as [.M.x] *)
   | Dot_lbrace (** [.{], substitutions of a splice *)
   | Dotdot
   | Underscore
@@ -55,3 +63,11 @@ val keyword : string -> t option
 
 (** The token as written, for error messages. *)
 val to_string : t -> string
+
+(** Whether a comment after the token, ending its line, is about the code
+    before it, rather than what follows (as after [=] or [(]). *)
+val ends_code : t -> bool
+
+(** Whether the token only ends or continues what is before it, so that a
+    comment before it on its line is about that, eg. [)], [;] or [in]. *)
+val follows : t -> bool

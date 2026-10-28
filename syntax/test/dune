@@ -2,5 +2,11 @@
  (name test_syntax)
  (preprocess
   (pps ppx_jane))
- (inline_tests)
- (libraries core stag_common stag_syntax))
+ (inline_tests
+  (deps
+   (glob_files_rec %{project_root}/tests/*.stag)
+   (glob_files_rec %{project_root}/examples/*.stag)
+   (glob_files_rec %{project_root}/prelude/*.stag)
+   (glob_files_rec %{project_root}/core/*.stag)
+   (glob_files_rec %{project_root}/bench/*.stag)))
+ (libraries core stag_common stag_syntax stag_syntax_round_trip))

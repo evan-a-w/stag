@@ -2,8 +2,16 @@
  (deps %{bin:stag}))
 
 (cram
- (applies_to build)
+ (applies_to build build_bench build_inline build_errors)
  (deps
   %{bin:stag-build}
   %{bin:stag}
-  (source_tree ../../../examples)))
+  (source_tree ../../../examples)
+  (source_tree ../../../bench)))
+
+(cram
+ (applies_to stdlib)
+ (deps
+  ../../../stag-stdlib
+  (source_tree ../../../core)
+  (source_tree ../../../prelude)))

@@ -1,0 +1,74 @@
+(* List literals are always the prelude's list, whatever [Cons], [Nil] and
+   [list] name where they are written. *)
+
+let print_ints l =
+  print_endline
+    (Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int l))
+
+let%expect_test "literals" =
+  print_ints [];
+  print_ints [1];
+  print_ints [1; 2; 3];
+  print_ints (Core.List.concat [[1]; []; [2; 3]]);
+  print_ints (Cons (0, [1; 2]));
+  [%expect {|
+    ()
+    (1)
+    (1 2 3)
+    (1 2 3)
+    (0 1 2)
+    |}]
+
+let describe l =
+  match l with
+  | [] -> "empty"
+  | [x] -> "one"
+  | [[x]; [y; z]] -> "one then two"
+  | [_; _] -> "two"
+  | Cons (_, [_; _]) -> "three"
+  | _ -> "more"
+
+let%expect_test "patterns" =
+  print_endline (describe []);
+  print_endline (describe [[]]);
+  print_endline (describe [[1]; [2; 3]]);
+  print_endline (describe [[]; [2; 3]]);
+  print_endline (describe [[]; []; []]);
+  print_endline (describe [[]; []; []; []]);
+  [%expect {|
+    empty
+    one
+    one then two
+    two
+    three
+    more
+    |}]
+
+let%expect_test "tuples are items" =
+  match [(1, "one"); (2, "two")] with
+  | [(n, s); _] ->
+    print_int n;
+    print_endline s;
+    [%expect {| 1one |}]
+  | _ -> print_endline "unreachable"
+
+module Shadowing = struct
+  type list['a] = Nil | Cons of 'a
+
+  let local = Cons 1
+
+  let%expect_test "a local Cons, Nil and list do not change literals" =
+    print_ints [1; 2];
+    print_ints (Core.List.map (fun x -> Int.add x 1) [3]);
+    (match [4] with
+     | [x] -> print_int x
+     | _ -> print_endline "not a singleton");
+    (match local with
+     | Cons x -> print_int x
+     | Nil -> print_endline "local Nil");
+    [%expect {|
+      (1 2)
+      (4)
+      41
+      |}]
+end

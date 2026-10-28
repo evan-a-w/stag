@@ -1,0 +1,52 @@
+(* SYNTAX TEST "source.stag" "expect tests, operators and illegal characters"
+let%expect_test "name" =
+(* <--------------- keyword.other.extension.expect_test.stag
+(*              ^^^^^^ string.quoted.double.stag
+  print_int 5;
+  [%expect {| 5 |}];
+(*^ meta.expect.stag punctuation.section.expect.begin.stag
+(* ^^^^^^^ meta.expect.stag keyword.other.expect.stag
+(*         ^^^^^^^ meta.expect.stag string.quoted.other.stag
+(*                ^ meta.expect.stag punctuation.section.expect.end.stag
+(*                 ^ punctuation.separator.semicolon.stag - meta.expect
+  [%expect "]"]; [%expect]; [%expectx]
+(*         ^^^ meta.expect.stag string.quoted.double.stag
+(*            ^ meta.expect.stag punctuation.section.expect.end.stag
+(*               ^^^^^^^^^ meta.expect.stag
+(*                          ^ punctuation.section.brackets.begin.stag - meta.expect
+(*                           ^ invalid.illegal.character.stag
+let%bench "b" = () let%benchx
+(* <--------- keyword.other.extension.bench.stag
+(*                 ^^^ keyword.other.let.stag
+(*                    ^ invalid.illegal.character.stag
+x.let%expect_test
+(*^^^^^^^^^^^^^^^ keyword.other.extension.expect_test.stag
+include%inline .~(f x)
+(* <-------------- keyword.other.extension.inline.stag
+  let x = 1
+end%inline end%inlinex
+(* <------ keyword.other.extension.inline.stag
+(*         ^^^ keyword.other.end.stag
+(*            ^ invalid.illegal.character.stag
+module%inline M = .~e
+(* <------------- keyword.other.extension.inline.stag
+(*            ^ entity.name.namespace.stag
+x.end%inline
+(*^^^^^^^^^^ keyword.other.extension.inline.stag
+let%expect_testx let %expect_test
+(* <--- keyword.other.let.stag
+(* ^ invalid.illegal.character.stag
+(*  ^^^^^^^^^^^^ variable.other.stag
+(*                   ^ invalid.illegal.character.stag
+let x = (a, b) @ c @@ d
+(*      ^ punctuation.section.parens.begin.stag
+(*        ^ punctuation.separator.comma.stag
+(*           ^ punctuation.section.parens.end.stag
+(*             ^ keyword.operator.mode.stag
+(*                 ^^ keyword.operator.mode.stag
+let x = + ! ~ # é
+(*      ^ invalid.illegal.character.stag
+(*        ^ invalid.illegal.character.stag
+(*          ^ invalid.illegal.character.stag
+(*            ^ invalid.illegal.character.stag
+(*              ^ invalid.illegal.character.stag

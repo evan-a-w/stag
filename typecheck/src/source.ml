@@ -19,13 +19,13 @@ end
 
 module Constructor = struct
   type t =
-    | Path of Syntax.Path.t Located.t
+    | Path of Syntax.Decl_path.t Located.t
     | Ref of Typed.Constructor_ref.t
 end
 
 module Field = struct
   type t =
-    | Path of Syntax.Path.t Located.t
+    | Path of Syntax.Decl_path.t Located.t
     | Ref of Typed.Field_ref.t
 end
 
@@ -54,6 +54,7 @@ module Pattern = struct
           { fields : (Syntax.Name.t * t) list
           ; rest : Rest.t
           }
+      | Exception of t
   end
 
   let syntax_view ({ txt; loc } : Syntax.Pattern.t) : View.t =
@@ -80,12 +81,15 @@ module Pattern = struct
              | Open -> Open
              | Bind name -> Bind (Name name))
         }
+    | Exception pattern -> Exception (sub pattern)
   ;;
 
   let generated_view ({ desc; ty = _; loc } : Typed.Pattern.t) : View.t =
     let sub pattern = Generated pattern in
     match desc with
     | Any -> Any
+    | Error (_ : Typed.Pattern.t list) ->
+      raise_s [%message "Generated code has a pattern that failed to check"]
     | Var ident -> Var (Ident ident)
     | Lit lit -> Lit lit
     | Tuple patterns -> Tuple (List.map patterns ~f:sub)
@@ -118,6 +122,17 @@ module Pattern = struct
     | Syntax pattern -> pattern.loc
     | Generated pattern -> pattern.loc
   ;;
+
+  let tuple ts =
+    let loc = Loc.merge (loc (List.hd_exn ts)) (loc (List.last_exn ts)) in
+    let syntax =
+      List.map ts ~f:(function
+        | Syntax pattern -> pattern
+        | Generated _ ->
+          raise_s [%message "Generated arguments are never wrapped in a tuple"])
+    in
+    Syntax { txt = Tuple syntax; loc }
+  ;;
 end
 
 module Expr = struct
@@ -127,7 +142,7 @@ module Expr = struct
 
   module Var = struct
     type t =
-      | Path of Syntax.Path.t * Syntax.Type_expr.t option
+      | Path of Syntax.Decl_path.t * Syntax.Type_expr.t option
       | Ref of Typed.Var_ref.t
   end
 
@@ -150,6 +165,10 @@ module Expr = struct
           ; body : t
           ; in_ : t
           }
+      | Fun of
+          { args : (Binder.t * Syntax.Type_expr.t option) list
+          ; body : t
+          }
       | Splice of
           { code : t
           ; subs : Subs.t
@@ -159,7 +178,12 @@ module Expr = struct
       | Construct of Constructor.t * t list
       | Record of (Field.t * t) list
       | Field of t * Field.t
-      | Match of t * (Pattern.t * t) list
+      | Record_update of t * (Field.t * t) list
+      | Match of
+          { scrutinee : t
+          ; cases : (Pattern.t * t) list
+          ; exception_cases : (Pattern.t * t) list
+          }
       | Poly_record of (Syntax.Name.t * t) list
       | Poly_field of t * string
       | Poly_extend of (Syntax.Name.t * t) list * t
@@ -167,6 +191,9 @@ module Expr = struct
       | Poly_update of t * (Syntax.Name.t * t) list
       | Poly_variant of string * t option
       | Expect of string Located.t
+      | Type of Syntax.Type_expr.t
+      | Struct_quote of Syntax.Toplevel.t list
+      | Error
   end
 
   let syntax_view (expr : Syntax.Expr.t) : View.t =
@@ -184,6 +211,11 @@ module Expr = struct
         ; annot
         ; body = sub equal
         ; in_ = sub in_
+        }
+    | Fun (args, body) ->
+      Fun
+        { args = List.map args ~f:(fun (name, annot) -> Binder.Name name, annot)
+        ; body = sub body
         }
     | Splice { expr; subs } ->
       Splice
@@ -203,11 +235,18 @@ module Expr = struct
       Record
         (List.map fields' ~f:(fun (path, expr) -> Field.Path path, sub expr))
     | Field (expr, path) -> Field (sub expr, Path path)
-    | Match (expr, cases) ->
-      Match
+    | Record_update (expr, fields') ->
+      Record_update
         ( sub expr
-        , List.map cases ~f:(fun (pattern, body) ->
-            Pattern.Syntax pattern, sub body) )
+        , List.map fields' ~f:(fun (path, expr) -> Field.Path path, sub expr) )
+    | Match (expr, arms) ->
+      let cases, exception_cases =
+        List.partition_map arms ~f:(fun ((pattern : Syntax.Pattern.t), body) ->
+          match pattern.txt with
+          | Exception pattern -> Second (Pattern.Syntax pattern, sub body)
+          | _ -> First (Pattern.Syntax pattern, sub body))
+      in
+      Match { scrutinee = sub expr; cases; exception_cases }
     | Poly_record fields' -> Poly_record (fields fields')
     | Poly_field (expr, label) -> Poly_field (sub expr, label.txt)
     | Poly_extend (fields', expr) -> Poly_extend (fields fields', sub expr)
@@ -215,9 +254,17 @@ module Expr = struct
     | Poly_update (expr, fields') -> Poly_update (sub expr, fields fields')
     | Poly_variant (tag, arg) -> Poly_variant (tag.txt, Option.map arg ~f:sub)
     | Expect expected -> Expect expected
+    | Type ty -> Type ty
+    | Struct_quote toplevels -> Struct_quote toplevels
+    | Error -> Error
   ;;
 
-  let generated_view ({ desc; ty = _; loc } : Typed.Expr.t) : View.t =
+  let annotated_args args annots =
+    List.map args ~f:(fun ident ->
+      Binder.Ident ident, List.Assoc.find annots ident ~equal:Typed.Ident.equal)
+  ;;
+
+  let rec generated_view ({ desc; ty = _; loc } : Typed.Expr.t) : View.t =
     let sub expr = Generated expr in
     let subs = List.map ~f:sub in
     let fields =
@@ -227,14 +274,17 @@ module Expr = struct
     | Lit lit -> Lit lit
     | Var var_ref -> Var (Ref var_ref)
     | App (f, x) -> App (sub f, sub x)
-    | Let { ident; args; generalized = _; body; in_ } ->
+    | Annotated (expr, _) -> generated_view expr
+    | Let { ident; args; annots; result_annot; generalized = _; body; in_ } ->
       Let
         { binder = Ident ident
-        ; args = List.map args ~f:(fun ident -> Binder.Ident ident, None)
-        ; annot = None
+        ; args = annotated_args args annots
+        ; annot = result_annot
         ; body = sub body
         ; in_ = sub in_
         }
+    | Fun { args; annots; body } ->
+      Fun { args = annotated_args args annots; body = sub body }
     | Splice { code; subs = Explicit subs } ->
       Splice
         { code = sub code
@@ -247,6 +297,7 @@ module Expr = struct
       Splice { code = sub code; subs = Providers providers }
     | Toplevel_splice _ ->
       raise_s [%message "Generated code has a toplevel splice"]
+    | Error _ -> raise_s [%message "Generated code has an error"]
     | Quote expr -> Quote (sub expr)
     | Tuple exprs -> Tuple (subs exprs)
     | Construct (constructor, exprs) -> Construct (Ref constructor, subs exprs)
@@ -254,11 +305,20 @@ module Expr = struct
       Record
         (List.map fields' ~f:(fun (field, expr) -> Field.Ref field, sub expr))
     | Field (expr, field) -> Field (sub expr, Ref field)
-    | Match (expr, cases) ->
-      Match
+    | Record_update (expr, fields') ->
+      Record_update
         ( sub expr
-        , List.map cases ~f:(fun (pattern, body) ->
-            Pattern.Generated pattern, sub body) )
+        , List.map fields' ~f:(fun (field, expr) -> Field.Ref field, sub expr)
+        )
+    | Match { scrutinee; cases; exception_cases } ->
+      let generated =
+        List.map ~f:(fun (pattern, body) -> Pattern.Generated pattern, sub body)
+      in
+      Match
+        { scrutinee = sub scrutinee
+        ; cases = generated cases
+        ; exception_cases = generated exception_cases
+        }
     | Poly_record fields' -> Poly_record (fields fields')
     | Poly_field (expr, label) -> Poly_field (sub expr, label)
     | Poly_extend (fields', expr) -> Poly_extend (fields fields', sub expr)
@@ -266,6 +326,7 @@ module Expr = struct
     | Poly_update (expr, fields') -> Poly_update (sub expr, fields fields')
     | Poly_variant (tag, arg) -> Poly_variant (tag, Option.map arg ~f:sub)
     | Expect expected -> Expect expected
+    | Type ty -> Type ty
   ;;
 
   let view = function
@@ -276,5 +337,16 @@ module Expr = struct
   let loc = function
     | Syntax expr -> expr.loc
     | Generated expr -> expr.loc
+  ;;
+
+  let tuple ts =
+    let loc = Loc.merge (loc (List.hd_exn ts)) (loc (List.last_exn ts)) in
+    let syntax =
+      List.map ts ~f:(function
+        | Syntax expr -> expr
+        | Generated _ ->
+          raise_s [%message "Generated arguments are never wrapped in a tuple"])
+    in
+    Syntax { txt = Tuple syntax; loc }
   ;;
 end

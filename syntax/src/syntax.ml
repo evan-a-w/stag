@@ -44,17 +44,222 @@ end = struct
   let t_of_sexp sexp = of_string (string_of_sexp sexp)
 end
 
+(** What names a declared type, constructor, field or toplevel value: a path
+    as written, resolved where it is, or from the root scope ([.M.x], which
+    nothing local shadows), or a canonical name, which reflection and
+    [Stag.Code.erase] give (see [Stag.Type_ref] in the prelude) and the parser
+    never makes, naming the same declaration wherever it is. *)
+module Decl_path = struct
+  type t =
+    | Path of Path.t
+    | Root of Path.t
+    | Resolved of string
+  [@@deriving compare, equal]
+
+  (** As parsed, and a [Resolved] as [<name>]. *)
+  let to_string = function
+    | Path path -> Path.to_string path
+    | Root path -> "." ^ Path.to_string path
+    | Resolved name -> sprintf "<%s>" (Prelude_path.to_string_hum name)
+  ;;
+
+  let sexp_of_t t = Sexp.Atom (to_string t)
+
+  (** The source naming the declaration of canonical name [name] from
+      anywhere, given the program's root modules: its root path, unless the
+      first name of a prelude path is a root module (or it is an intrinsic,
+      named only within the prelude), where nothing names it, so as
+      [<prelude.P>], which does not parse, [P] its public path. *)
+  let resolved_source ~root_modules name =
+    let path = Prelude_path.root_path name in
+    let unnamed =
+      Option.is_some (Prelude_path.relative name)
+      &&
+      match String.split path ~on:'.' with
+      | first :: _ :: _ ->
+        Set.mem root_modules first || String.equal first "Intrinsic"
+      | _ -> false
+    in
+    if unnamed then sprintf "<%s>" (Prelude_path.canonical path) else "." ^ path
+  ;;
+end
+
 (** A name as written, eg. a binder or a label. *)
 module Name = struct
   type t = string Located.t [@@deriving sexp_of, compare, equal]
 end
 
-module Type_expr = struct
-  type t = desc Located.t
+(* The syntax's types are mutually recursive, as splices in type positions
+   hold expressions and struct quotes hold declarations; each is re-exported
+   by its module below. They are in [Defs], so that their constructors (eg.
+   [Error]) don't shadow others where [Syntax] is opened. *)
+module Defs = struct
+  [@@@warning "-30"]
 
-  and desc =
+  type type_expr = type_expr_desc Located.t
+
+  and type_expr_desc =
     | Var of string
-    | Con of Path.t Located.t * arg list
+    | Con of Decl_path.t Located.t * type_arg list
+    | Arrow of type_expr * type_expr
+    | Tuple of type_expr list
+    | Code of
+        { inner : type_expr
+        ; context : row
+        }
+    | Record of row
+    | Variant of row (** Each entry is a tag and its argument type. *)
+    | Splice of expr
+    (** [.~e]: the type [e : Stag.Type_expr.t] evaluates to at compile time, or
+      an antiquote in a struct quote. *)
+
+  and row = row_desc Located.t
+
+  and row_desc =
+    | Empty
+    | Extend of Name.t * type_expr * row
+    | Var of Name.t
+
+  and type_arg =
+    | Ty of type_expr
+    | Row of row
+
+  and type_decl_param =
+    | Ty of string
+    | Row of string
+
+  and type_decl_kind =
+    | Variant of (Name.t * type_expr list) list
+    | Record of (Name.t * type_expr) list
+    | Alias of type_expr
+    | Abstract
+    | Splice of expr Located.t
+    (** [type t = .~e], located at [.~e]: the definition
+      [e : Stag.Type_decl.Kind.t] evaluates to at compile time, or an
+      antiquote in a struct quote. *)
+    | Malformed of type_decl_kind
+    (** What parsed of a declaration with a syntax error, whose members' types
+      may be missing. *)
+
+  and type_decl =
+    { name : Name.t
+    ; params : type_decl_param Located.t list
+    ; kind : type_decl_kind
+    }
+
+  and binding = Name.t * type_expr option
+
+  and pattern_rest =
+    | Closed (** There are none. *)
+    | Open (** There may be some. *)
+    | Bind of Name.t (** Binds the record without the listed fields. *)
+
+  and pattern = pattern_desc Located.t
+
+  and pattern_desc =
+    | Any
+    | Var of string
+    | Lit of Lit.t
+    | Tuple of pattern list
+    | Construct of Decl_path.t Located.t * pattern list
+    | Record of (Decl_path.t Located.t * pattern) list
+    | Poly_variant of Name.t * pattern option
+    (** [None] matches a [unit] argument. *)
+    | Poly_record of
+        { fields : (Name.t * pattern) list
+        ; rest : pattern_rest
+        }
+    | Exception of pattern
+    (** [exception p], at the top of a match arm: matches an exception the
+      scrutinee raises. *)
+
+  and expr = expr_desc Located.t
+
+  and expr_desc =
+    | Lit of Lit.t
+    | Var of Decl_path.t * type_expr option
+    | App of expr * expr
+    | Let of Name.t * binding list * type_expr option * expr * expr
+    | Fun of binding list * expr (** [fun x (y : t) -> e], of some params. *)
+    | Splice of
+        { expr : expr
+        ; subs :
+            (Name.t * expr option) list
+              option (* [None] is all in scope, so is diff to [] *)
+        }
+    | Quote of expr
+    | Tuple of expr list
+    | Construct of Decl_path.t Located.t * expr list
+    | Record of (Decl_path.t Located.t * expr) list
+    | Field of expr * Decl_path.t Located.t
+    | Record_update of expr * (Decl_path.t Located.t * expr) list
+    (** [{e with f = v; ...}] *)
+    | Type of type_expr (** [type t]: the type as a value. *)
+    | Match of expr * (pattern * expr) list
+    | Poly_record of (Name.t * expr) list
+    | Poly_field of expr * Name.t
+    | Poly_extend of (Name.t * expr) list * expr (** [{x = v; ... | e}] *)
+    | Poly_restrict of expr * Name.t (** [e \ x] *)
+    | Poly_update of expr * (Name.t * expr) list (** [{e with x = v; ...}] *)
+    | Poly_variant of Name.t * expr option (** [None] is a [unit] argument. *)
+    | Expect of string Located.t
+    (** [[%expect {|...|}]], located at the string, or zero width after
+      [[%expect] if there is none. *)
+    | Struct_quote of toplevel list
+    (** [.< struct ... end >.]: the declarations as a
+      [list[Stag.Toplevel.t]], with antiquotes. *)
+    | Error (** In place of what did not parse. *)
+
+  and bench_param =
+    { name : Name.t
+    ; args : expr list (** Non-empty. *)
+    }
+
+  and toplevel = toplevel_desc Located.t
+
+  and toplevel_desc =
+    | Let of Name.t * binding list * type_expr option * expr
+    | Type of type_decl
+    | Exception of Name.t * type_expr list (** [exception E of t1 * t2]. *)
+    | Malformed_exception of Name.t * type_expr list
+    (** What parsed of an exception declaration with a syntax error, whose
+      arguments may be missing. *)
+    | Module of Name.t * toplevel list
+    | Module_splice of Name.t * expr * toplevel list Located.t option
+    (** [module M = .~e], or with its expansion
+      [module%inline M = .~e ... end%inline]. *)
+    | Include of expr * toplevel list Located.t option
+    (** [include .~e], or with its expansion
+      [include%inline .~e ... end%inline]. An expansion is the declarations
+      written between the splice and [end%inline], located from the end of
+      the splice to the start of [end%inline]. It is only checked against
+      what the splice generates, which is what is declared. *)
+    | Expect_test of
+        { name : string Located.t
+        ; body : expr
+        }
+    | Bench of
+        { name : string Located.t
+        ; param : bench_param option
+        ; body : expr
+        }
+  [@@deriving sexp_of, compare, equal]
+end
+
+open Defs
+
+module Type_expr = struct
+  type nonrec row = row
+
+  type arg = type_arg =
+    | Ty of type_expr
+    | Row of row
+
+  type t = type_expr
+
+  type desc = type_expr_desc =
+    | Var of string
+    | Con of Decl_path.t Located.t * arg list
     | Arrow of t * t
     | Tuple of t list
     | Code of
@@ -62,124 +267,172 @@ module Type_expr = struct
         ; context : row
         }
     | Record of row
-    | Variant of row (** Each entry is a tag and its argument type. *)
+    | Variant of row
+    | Splice of expr
 
-  and row = row_desc Located.t
-
-  and row_desc =
+  type nonrec row_desc = row_desc =
     | Empty
     | Extend of Name.t * t * row
     | Var of Name.t
 
-  and arg =
-    | Ty of t
-    | Row of row
-  [@@deriving sexp_of, compare, equal]
+  let sexp_of_t = sexp_of_type_expr
+  let compare = compare_type_expr
+  let equal = equal_type_expr
 end
 
 module Type_decl = struct
   module Param = struct
-    type t =
+    type t = type_decl_param =
       | Ty of string
       | Row of string
-    [@@deriving sexp_of, compare, equal]
 
+    let sexp_of_t = sexp_of_type_decl_param
+    let compare = compare_type_decl_param
+    let equal = equal_type_decl_param
     let name (Ty name | Row name) = name
   end
 
   module Kind = struct
-    type t =
+    type t = type_decl_kind =
       | Variant of (Name.t * Type_expr.t list) list
       | Record of (Name.t * Type_expr.t) list
       | Alias of Type_expr.t
       | Abstract
-    [@@deriving sexp_of, compare, equal]
+      | Splice of expr Located.t
+      | Malformed of t
+
+    let sexp_of_t = sexp_of_type_decl_kind
+    let compare = compare_type_decl_kind
+    let equal = equal_type_decl_kind
   end
 
-  type t =
+  type t = type_decl =
     { name : Name.t
     ; params : Param.t Located.t list
     ; kind : Kind.t
     }
-  [@@deriving sexp_of, compare, equal]
+
+  let sexp_of_t = sexp_of_type_decl
+  let compare = compare_type_decl
+  let equal = equal_type_decl
 end
 
 module Binding = struct
-  type t = Name.t * Type_expr.t option [@@deriving sexp_of, compare, equal]
+  type t = binding
+
+  let sexp_of_t = sexp_of_binding
+  let compare = compare_binding
+  let equal = equal_binding
 end
 
 module Pattern = struct
   (** What a polymorphic record pattern says about the fields it does not
       list. *)
   module Rest = struct
-    type t =
-      | Closed (** There are none. *)
-      | Open (** There may be some. *)
-      | Bind of Name.t (** Binds the record without the listed fields. *)
-    [@@deriving sexp_of, compare, equal]
+    type t = pattern_rest =
+      | Closed
+      | Open
+      | Bind of Name.t
+
+    let sexp_of_t = sexp_of_pattern_rest
+    let compare = compare_pattern_rest
+    let equal = equal_pattern_rest
   end
 
-  type t = desc Located.t
+  type t = pattern
 
-  and desc =
+  type desc = pattern_desc =
     | Any
     | Var of string
     | Lit of Lit.t
     | Tuple of t list
-    | Construct of Path.t Located.t * t list
-    | Record of (Path.t Located.t * t) list
-    | Poly_variant of Name.t * t option (** [None] matches a [unit] argument. *)
+    | Construct of Decl_path.t Located.t * t list
+    | Record of (Decl_path.t Located.t * t) list
+    | Poly_variant of Name.t * t option
     | Poly_record of
         { fields : (Name.t * t) list
         ; rest : Rest.t
         }
-  [@@deriving sexp_of, compare, equal]
+    | Exception of t
+
+  let sexp_of_t = sexp_of_pattern
+  let compare = compare_pattern
+  let equal = equal_pattern
 end
 
 module Expr = struct
-  type t = desc Located.t
+  type t = expr
 
-  and desc =
+  type desc = expr_desc =
     | Lit of Lit.t
-    | Var of Path.t * Type_expr.t option
+    | Var of Decl_path.t * Type_expr.t option
     | App of t * t
     | Let of Name.t * Binding.t list * Type_expr.t option * t * t
+    | Fun of Binding.t list * t
     | Splice of
         { expr : t
-        ; subs :
-            (Name.t * t option) list
-              option (* [None] is all in scope, so is diff to [] *)
+        ; subs : (Name.t * t option) list option
         }
     | Quote of t
     | Tuple of t list
-    | Construct of Path.t Located.t * t list
-    | Record of (Path.t Located.t * t) list
-    | Field of t * Path.t Located.t
+    | Construct of Decl_path.t Located.t * t list
+    | Record of (Decl_path.t Located.t * t) list
+    | Field of t * Decl_path.t Located.t
+    | Record_update of t * (Decl_path.t Located.t * t) list
+    | Type of Type_expr.t
     | Match of t * (Pattern.t * t) list
     | Poly_record of (Name.t * t) list
     | Poly_field of t * Name.t
-    | Poly_extend of (Name.t * t) list * t (** [{x = v; ... | e}] *)
-    | Poly_restrict of t * Name.t (** [e \ x] *)
-    | Poly_update of t * (Name.t * t) list (** [{e with x = v; ...}] *)
-    | Poly_variant of Name.t * t option (** [None] is a [unit] argument. *)
+    | Poly_extend of (Name.t * t) list * t
+    | Poly_restrict of t * Name.t
+    | Poly_update of t * (Name.t * t) list
+    | Poly_variant of Name.t * t option
     | Expect of string Located.t
-    (** [[%expect {|...|}]], located at the string, or zero width after
-        [[%expect] if there is none. *)
-  [@@deriving sexp_of, compare, equal]
+    | Struct_quote of toplevel list
+    | Error
+
+  let sexp_of_t = sexp_of_expr
+  let compare = compare_expr
+  let equal = equal_expr
+end
+
+(** [n in [a; b]] of [let%bench "name" n in [a; b] = e]. *)
+module Bench_param = struct
+  type t = bench_param =
+    { name : Name.t
+    ; args : Expr.t list
+    }
+
+  let sexp_of_t = sexp_of_bench_param
+  let compare = compare_bench_param
+  let equal = equal_bench_param
 end
 
 module Toplevel = struct
-  type t = desc Located.t
+  type t = toplevel
 
-  and desc =
+  type desc = toplevel_desc =
     | Let of Name.t * Binding.t list * Type_expr.t option * Expr.t
     | Type of Type_decl.t
+    | Exception of Name.t * Type_expr.t list
+    | Malformed_exception of Name.t * Type_expr.t list
     | Module of Name.t * t list
+    | Module_splice of Name.t * Expr.t * t list Located.t option
+    | Include of Expr.t * t list Located.t option
     | Expect_test of
         { name : string Located.t
         ; body : Expr.t
         }
-  [@@deriving sexp_of, compare, equal]
+    | Bench of
+        { name : string Located.t
+        ; param : Bench_param.t option
+        ; body : Expr.t
+        }
+
+  let sexp_of_t = sexp_of_toplevel
+  let sexp_of_desc = sexp_of_toplevel_desc
+  let compare = compare_toplevel
+  let equal = equal_toplevel
 end
 
 module Program = struct

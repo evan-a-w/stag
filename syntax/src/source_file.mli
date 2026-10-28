@@ -32,3 +32,7 @@ end
 (** The module of the file: [Toplevel.Module], named at the start of the file,
     of its toplevels. *)
 val parse : t -> (Syntax.Toplevel.t, Error.t) Result.t
+
+(** As [parse], past syntax errors ([Parser.program_recovering]): [None] only
+    for an invalid file name. *)
+val parse_recovering : t -> Syntax.Toplevel.t option * Error.t list

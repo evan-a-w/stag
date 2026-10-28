@@ -22,3 +22,16 @@ type t =
   | Row_mismatch of Type.row * Type.row * Row_mismatch_reason.t
   | Occurs_check_failed of Type.arg
 [@@deriving sexp_of]
+
+let snapshot t =
+  let snapshot = Type.Snapshot.create () in
+  match t with
+  | Type_mismatch (ty1, ty2, reason) ->
+    Type_mismatch
+      (Type.Snapshot.ty snapshot ty1, Type.Snapshot.ty snapshot ty2, reason)
+  | Row_mismatch (row1, row2, reason) ->
+    Row_mismatch
+      (Type.Snapshot.row snapshot row1, Type.Snapshot.row snapshot row2, reason)
+  | Occurs_check_failed arg ->
+    Occurs_check_failed (Type.Snapshot.arg snapshot arg)
+;;

@@ -950,7 +950,7 @@ let h (z : t%d[int]) = g z
              printf "%s : _ -> %s " name (Type.to_string_hum result);
              print_parts arg
            | _ -> assert false)
-        | Type _ | Module _ -> ()))
+        | Type _ | Exception _ | Module _ -> ()))
   in
   check ~step:(fun t -> sprintf "[`L of %s | `R of %s]" t t);
   check ~step:(fun t -> sprintf "%s * %s" t t);
@@ -996,8 +996,8 @@ type c = c * int
 |};
   [%expect
     {|
-    ((Cyclic_type_alias c) @ t.stag:2:14-15)
-    ((Cyclic_type_alias c) @ t.stag:2:9-10)
+    ((Cyclic_type_alias c) @ t.stag:4:5-6)
+    ((Cyclic_type_alias c) @ t.stag:3:5-6)
     |}]
 ;;
 

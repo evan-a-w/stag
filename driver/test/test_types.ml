@@ -46,8 +46,8 @@ let arity = Nil 1
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
-     @ t.stag:3:19-35)
-    ((Unbound_constructor Nil) @ t.stag:2:14-17)
+     @ t.stag:3:25-29)
+    val unbound : list['a]
     ((Constructor_arity_mismatch (constructor Cons) (expected 2) (got 1)) @
      t.stag:3:12-18)
     ((Constructor_arity_mismatch (constructor Nil) (expected 0) (got 1)) @
@@ -64,11 +64,7 @@ let a = A
 let mixed = match true with _ -> A | _ -> B
 |};
   [%expect
-    {|
-    ((Unification_error
-      (Type_mismatch (TCon a ()) (TCon b ()) (Base_types_not_equal a b)))
-     @ t.stag:5:42-43)
-    |}]
+    {| ((No_such_constructor (type_name a) (constructor B)) @ t.stag:5:42-43) |}]
 ;;
 
 let%expect_test "abstract types" =
@@ -151,10 +147,7 @@ let bad = Succ_even Zero
     type tree = Leaf | Node of list[tree]
     type forest = list[tree]
     type list['a] = Nil | Cons of 'a * list['a]
-    ((Unification_error
-      (Type_mismatch (TCon odd ()) (TCon even ())
-       (Base_types_not_equal odd even)))
-     @ t.stag:5:20-24)
+    ((No_such_constructor (type_name odd) (constructor Zero)) @ t.stag:5:20-24)
     |}]
 ;;
 
@@ -236,11 +229,9 @@ let wrong_record p = p.x.z
   [%expect
     {|
     ((Missing_field y) @ t.stag:3:14-21)
-    ((Duplicate_field x) @ t.stag:3:31-32)
-    ((Fields_of_different_types (field z) (expected_type point)
-      (actual_type point3))
-     @ t.stag:4:27-28)
-    ((Unbound_field w) @ t.stag:3:22-23)
+    ((Repeated_field x) @ t.stag:3:31-32)
+    ((No_such_field (type_name point) (field z)) @ t.stag:4:27-28)
+    ((No_such_field (type_name point) (field w)) @ t.stag:3:22-23)
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
@@ -375,11 +366,10 @@ let tuple_length = match (1, 2) with (_, _, _) -> 1
     val same_name_other_arms : int
     ((Constructor_arity_mismatch (constructor Some) (expected 1) (got 0)) @
      t.stag:3:25-29)
-    ((Unbound_constructor Some) @ t.stag:2:27-31)
-    ((Duplicate_field x) @ t.stag:3:45-46)
-    ((Fields_of_different_types (field contents) (expected_type point)
-      (actual_type box))
-     @ t.stag:4:42-50)
+    ((Constructor_arity_mismatch (constructor prelude.Some) (expected 1) (got 0))
+     @ t.stag:2:27-31)
+    ((Repeated_field x) @ t.stag:3:45-46)
+    ((No_such_field (type_name point) (field contents)) @ t.stag:4:42-50)
     Empty_record
     ((Unification_error
       (Type_mismatch (TTuple ((TCon int ()) (TCon int ())))
@@ -534,7 +524,7 @@ let f x : M.t = x
     type list['a] = Nil | Cons of 'a * list['a]
     type t = A of list[{}]
     ((Type_arg_kind_mismatch (type_name stmt) (param (Row r))) @ t.stag:3:19-22)
-    ((Unbound_type list) @ t.stag:2:10-14)
+    val f : list[int] -> list[int]
     ((Unbound_module M) @ t.stag:2:10-11)
     |}]
 ;;

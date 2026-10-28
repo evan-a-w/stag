@@ -6,7 +6,7 @@ module Pos = struct
     ; col : int
     ; offset : int
     }
-  [@@deriving sexp_of, compare, equal]
+  [@@deriving sexp_of, compare, equal, hash]
 
   let start = { line = 1; col = 0; offset = 0 }
 end
@@ -16,8 +16,9 @@ type t =
   ; start : Pos.t
   ; stop : Pos.t
   }
-[@@deriving compare, equal]
+[@@deriving compare, equal, hash]
 
+let sort_by l ~f = List.stable_sort l ~compare:(Comparable.lift compare ~f)
 let none = { file = "_none_"; start = Pos.start; stop = Pos.start }
 let is_none t = equal t none
 let start_of_file file = { file; start = Pos.start; stop = Pos.start }
@@ -55,3 +56,9 @@ let to_string t =
 ;;
 
 let sexp_of_t t = Sexp.Atom (to_string t)
+
+include Hashable.Make_plain (struct
+    type nonrec t = t [@@deriving compare, hash]
+
+    let sexp_of_t = sexp_of_t
+  end)

@@ -17,7 +17,9 @@ let%expect_test "typechecking twice with the same state" =
   let run source =
     match Typecheck.typecheck typecheck ~program:(parse_exn source) with
     | Ok { signature; _ } -> print_string (Signature.to_string_hum signature)
-    | Error error -> print_s [%sexp (error : Typecheck_error.t)]
+    | Error error ->
+      List.iter (error : Typecheck.Failed.t).errors ~f:(fun error ->
+        print_s [%sexp (error : Typecheck_error.t)])
   in
   run prelude;
   run
@@ -537,10 +539,11 @@ let wrong_type = .<let x = true in .~(.<add x 1>.)>.
          (App (Var (Bound (Local opaque/15)) : "'a -> 'b")
           (Var (Bound (Local u/14)) : 'a) : 'b))
         (in_
-         (Match (Lit (Int 1) : int)
-          (((Lit (Int 2) : int)
-            (App (Var (Bound (Local opaque/15)) : "int -> <'_c>{}")
-             (Lit (Int 1) : int) : <'_c>{})))
+         (Match (scrutinee (Lit (Int 1) : int))
+          (cases
+           (((Lit (Int 2) : int)
+             (App (Var (Bound (Local opaque/15)) : "int -> <'_c>{}")
+              (Lit (Int 1) : int) : <'_c>{}))))
           : <'_c>{}))
         : <'_c>{}))
       (error ("Match failure: no case matches the value 1" @ t.stag:3:32-58)))
@@ -602,10 +605,8 @@ let toplevel_splice_level x = .~x
 ;;
 
 let%expect_test "staged power" =
-  (* No negative literals: [-1] is [Int.neg 1]. *)
   let power =
-    "let power n x = cond (eq n 0) .<1>. .<add .~x .~(power (add n (Int.neg \
-     1)) x)>.\n"
+    "let power n x = cond (eq n 0) .<1>. .<add .~x .~(power (add n -1) x)>.\n"
   in
   check (power ^ "let cube = power 3 .<2>.\n");
   check (power ^ "let open = power 3 .<y>.\n");
@@ -725,9 +726,9 @@ let known_z c =
     val uses_z : <<int>{..'_a}>{..'_b}
     ((Unification_error
       (Row_mismatch
-       (RExtend z Absent (TVar (Unbound 43 1)) (RVar (Unbound 44 1)))
-       (RExtend z (PVar (Link Present)) (TVar (Unbound 52 1))
-        (RVar (Unbound 53 1)))
+       (RExtend z Absent (TVar (Unbound 44 1)) (RVar (Unbound 45 1)))
+       (RExtend z (PVar (Link Present)) (TVar (Unbound 53 1))
+        (RVar (Unbound 54 1)))
        (Presence_mismatch z)))
      @ t.stag:2:36-48)
     ((Variable_used_at_wrong_level (name z) (var_level 2) (used_at 1)) @
@@ -776,11 +777,10 @@ let after = .<add .~closed x>.
 ;;
 
 let%expect_test "mutually recursive staged functions" =
-  (* No negative literals: [-1] is [Int.neg 1]. *)
   let ping_pong =
     {|
 let ping n c = cond (eq n 0) c .<let x = 1 in .~(pong n c)>.
-let pong n c = .<add .~(ping (add n (Int.neg 1)) c) y>.
+let pong n c = .<add .~(ping (add n -1) c) y>.
 |}
   in
   check ping_pong;
@@ -800,7 +800,7 @@ let pong n c = .<add .~(ping (add n (Int.neg 1)) c) y>.
         (RVar
          (Link
           (RExtend z (PVar (Link Present)) (TVar (Link (TCon int ())))
-           (RVar (Unbound 95 1))))))
+           (RVar (Unbound 94 1))))))
        (Missing_label y)))
      @ t.stag:4:33-45)
     |}]
@@ -1017,14 +1017,14 @@ let partial e = let h c = .< let _ = .~e in .~c >. in let _ = h .< 1 >. in h
     val ok : <int>{..'_a}
     ((Unification_error
       (Row_mismatch REmpty
-       (RExtend y (PVar (Link Present)) (TVar (Unbound 108 1))
-        (RVar (Unbound 109 1)))
+       (RExtend y (PVar (Link Present)) (TVar (Unbound 110 1))
+        (RVar (Unbound 111 1)))
        (Missing_label y)))
      @ t.stag:4:18-29)
     ((Unification_error
       (Row_mismatch REmpty
-       (RExtend y (PVar (Link Present)) (TVar (Unbound 116 1))
-        (RVar (Unbound 117 1)))
+       (RExtend y (PVar (Link Present)) (TVar (Unbound 118 1))
+        (RVar (Unbound 119 1)))
        (Missing_label y)))
      @ t.stag:4:18-43)
     |}]
@@ -1073,7 +1073,7 @@ let use = conflict_later %s
     ((Unification_error
       (Row_mismatch
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon bool ())))
-        (RVar (Link (RVar (Link (RVar (Unbound 73 1)))))))
+        (RVar (Link (RVar (Unbound 73 1)))))
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon bool ())))
         (RVar (Unbound 91 1)))
        (Presence_mismatch x)))
@@ -1197,9 +1197,7 @@ let%expect_test "instances of a scheme bounded by an outer row" =
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
         (RVar
          (Link
-          (RVar
-           (Link
-            (RExtend y (PVar (Link Absent)) (TCon int ()) (RVar (Unbound 109 1))))))))
+          (RExtend y (PVar (Link Absent)) (TCon int ()) (RVar (Unbound 109 1))))))
        (Presence_mismatch y)))
      @ t.stag:4:77-78)
     |}]

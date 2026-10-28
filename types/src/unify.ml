@@ -229,6 +229,17 @@ let clash ty1 ty2 =
   clash ~depth:8 ty1 ty2
 ;;
 
+let poison ty =
+  let bind ~guarded:_ (var : _ Type.Var.t) =
+    (match var.state with
+     | Unbound _ -> var.state <- Link Type.error
+     | Generic | Link _ -> ());
+    Ok ()
+  in
+  let ignore ~guarded:_ _ = Ok () in
+  Type.iter_ty { ty = bind; row = ignore; presence = ignore } ty
+;;
+
 let rec unify_ty' state ~ty1 ~ty2 : (unit, Unification_error.t) Result.t =
   match ty1, ty2 with
   | ( Type.TVar { id = id1; state = Link _; _ }
@@ -249,6 +260,8 @@ and unify_structure state ~ty1 ~ty2 =
   in
   match ty1, ty2 with
   | _ when phys_equal ty1 ty2 -> Ok ()
+  | _, _ when Type.is_error ty1 -> poison ty2
+  | _, _ when Type.is_error ty2 -> poison ty1
   | TCon (name1, args1), TCon (name2, args2) ->
     if not (String.equal name1 name2)
     then Error (Type_mismatch (ty1, ty2, Base_types_not_equal (name1, name2)))

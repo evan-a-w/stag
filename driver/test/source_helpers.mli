@@ -21,7 +21,8 @@ let f v = match v with `A n -> n | `B -> 0
 
     A source string is checked by [Driver.check] as a program of toplevels (not
     wrapped in a module) after [prelude], unless [~prelude:false]. The prelude
-    is left out of everything printed. The files of [check_files] are checked
+    is left out of everything printed, as are the toplevels of the stag
+    prelude ([Prelude]), which every program sees. The files of [check_files] are checked
     by [Driver.check_files], without the prelude.
 
     Everything runs within [limits], unless given others.

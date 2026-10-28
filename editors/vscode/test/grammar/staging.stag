@@ -1,0 +1,87 @@
+(* SYNTAX TEST "source.stag" "quotes, splices and code types"
+let c = .< f .~x >. > y
+(*      ^^ meta.quote.stag keyword.control.quote.begin.stag
+(*         ^ meta.quote.stag variable.other.stag
+(*           ^^ meta.quote.stag keyword.control.splice.stag
+(*             ^ meta.quote.stag variable.other.stag
+(*               ^^ meta.quote.stag keyword.control.quote.end.stag
+(*                  ^ punctuation.definition.code-type.end.stag - meta.quote
+(*                    ^ variable.other.stag - meta.quote
+let c = .< .< 1 >. >. x
+(*      ^^ meta.quote.stag keyword.control.quote.begin.stag
+(*         ^^ meta.quote.stag meta.quote.stag keyword.control.quote.begin.stag
+(*            ^ meta.quote.stag meta.quote.stag constant.numeric.integer.stag
+(*              ^^ meta.quote.stag meta.quote.stag keyword.control.quote.end.stag
+(*                 ^^ meta.quote.stag keyword.control.quote.end.stag
+(*                    ^ variable.other.stag - meta.quote
+let c = .<
+  let x = 1 in
+(*^^^^^^^^^^^^ meta.quote.stag
+  .~(f (g x) .< x >.) x>. y
+(*^^ meta.quote.stag meta.splice.stag keyword.control.splice.stag
+(*  ^ meta.quote.stag meta.splice.stag punctuation.section.parens.begin.stag
+(*   ^ meta.quote.stag meta.splice.stag variable.other.stag
+(*     ^^^^^ meta.quote.stag meta.splice.stag
+(*           ^^^^^^^ meta.quote.stag meta.splice.stag meta.quote.stag
+(*         ^ meta.quote.stag meta.splice.stag punctuation.section.parens.end.stag
+(*                  ^ meta.quote.stag meta.splice.stag punctuation.section.parens.end.stag
+(*                    ^ meta.quote.stag variable.other.stag - meta.splice
+(*                     ^^ meta.quote.stag keyword.control.quote.end.stag
+(*                        ^ variable.other.stag - meta.quote
+let s = .~e.{} .~r.x.{x = 1; y} .~ (f) x
+(*      ^^ keyword.control.splice.stag
+(*         ^^ punctuation.section.substitutions.begin.stag
+(*           ^ punctuation.section.braces.end.stag
+(*                 ^ variable.other.property.stag
+(*                  ^^ punctuation.section.substitutions.begin.stag
+(*                              ^^^^^^ meta.splice.stag
+(*                                     ^ variable.other.stag - meta.splice
+let s = .~((* ) *) x) y
+(*         ^^^^^^^ meta.splice.stag comment.block.stag
+(*            ^ meta.splice.stag comment.block.stag
+(*                  ^ meta.splice.stag punctuation.section.parens.end.stag
+(*                    ^ variable.other.stag - meta.splice
+let s = .~(f ")" ')' {|)|}) y
+(*           ^^^ meta.splice.stag string.quoted.double.stag
+(*               ^^^ meta.splice.stag string.quoted.single.stag
+(*                   ^^^^^ meta.splice.stag string.quoted.other.stag
+(*                          ^ variable.other.stag - meta.splice
+let c : <int -> int>{x : int; ..'r} -> <'a>{} -> int ->{`x : int} = c
+(*      ^ meta.type.code.stag punctuation.definition.code-type.begin.stag
+(*       ^^^^^^^^^^ meta.type.code.stag
+(*           ^^ meta.type.code.stag keyword.operator.arrow.stag - punctuation.definition.code-type
+(*                 ^ meta.type.code.stag punctuation.definition.code-type.end.stag
+(*                  ^ meta.type.code.context.stag punctuation.section.braces.begin.stag
+(*                   ^^^^^^^^^^^^^ meta.type.code.context.stag
+(*                                ^ meta.type.code.context.stag punctuation.section.braces.end.stag
+(*           ^^ - meta.type.code
+(*                                     ^^^^ meta.type.code.stag
+(*                                         ^^ meta.type.code.context.stag
+(*                                                     ^^^^^^^^^^ source.stag - meta.type.code
+(*                                                                  ^ variable.other.stag - meta.type
+let c : <<int>{}>{y : <bool>{}} = .<(x : <int>{}) >. y
+(*      ^^^^^^^^^ meta.type.code.stag
+(*       ^^^^^ meta.type.code.stag meta.type.code.stag
+(*            ^^^ meta.type.code.stag
+(*            ^^ meta.type.code.stag meta.type.code.context.stag
+(*               ^^^^^^^^^^^^^^ meta.type.code.context.stag
+(*                    ^^^^^^ meta.type.code.context.stag meta.type.code.stag
+(*                           ^^ meta.type.code.context.stag punctuation.section.braces.end.stag
+(*                                       ^^^^^ meta.quote.stag meta.type.code.stag
+(*                                            ^^ meta.quote.stag meta.type.code.context.stag
+(*                                                ^^ meta.quote.stag keyword.control.quote.end.stag
+(*                ^ variable.other.stag - meta
+let b = x > {|s|} <int>{a|s|a} y
+(*          ^^^^^ string.quoted.other.stag - meta.type
+(*                     ^^^^^^^ string.quoted.other.stag - meta.type
+(*                             ^ variable.other.stag - meta
+let d = .< struct type t = .~k let x : .~ty = .~e end >. y
+(*      ^^ meta.quote.stag keyword.control.quote.begin.stag
+(*         ^^^^^^ meta.quote.stag keyword.other.struct.stag
+(*                         ^^ meta.quote.stag keyword.control.splice.stag
+(*                                     ^^ meta.quote.stag keyword.control.splice.stag
+(*                                                ^^^ meta.quote.stag keyword.other.end.stag
+(*                                                    ^^ meta.quote.stag keyword.control.quote.end.stag
+(*                                                       ^ variable.other.stag - meta.quote
+type t = .~(f x)
+(*       ^^ meta.splice.stag keyword.control.splice.stag

@@ -8,7 +8,7 @@ module Pos : sig
     ; col : int
     ; offset : int
     }
-  [@@deriving sexp_of, compare, equal]
+  [@@deriving sexp_of, compare, equal, hash]
 end
 
 (** A span of source, from [start] up to but excluding [stop]. *)
@@ -17,7 +17,7 @@ type t =
   ; start : Pos.t
   ; stop : Pos.t
   }
-[@@deriving compare, equal]
+[@@deriving compare, equal, hash]
 
 (** For syntax not written in a file, eg. built by tests or generated. *)
 val none : t
@@ -30,8 +30,14 @@ val start_of_file : string -> t
 (** The smallest span containing both, which must be in the same file. *)
 val merge : t -> t -> t
 
+(** Stably sorted by the locations [f] gives, which [compare] orders by file,
+    then position. *)
+val sort_by : 'a list -> f:('a -> t) -> 'a list
+
 (** [file:line:col-line:col], or [file:line:col-col] on one line. *)
 val to_string : t -> string
 
 (** As [to_string]: an atom, so locations don't drown out the rest of a sexp. *)
 val sexp_of_t : t -> Sexp.t
+
+include Hashable.S_plain with type t := t

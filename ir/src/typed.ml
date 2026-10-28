@@ -68,8 +68,11 @@ module Ident = struct
       { name : string
       ; stamp : int
       }
-    [@@deriving compare, hash]
+    [@@deriving compare]
 
+    (* Stamps are rarely shared, and hashing names is costly. *)
+    let hash_fold_t state t = Int.hash_fold_t state t.stamp
+    let hash t = Int.hash t.stamp
     let sexp_of_t t = Sexp.Atom [%string "%{t.name}/%{t.stamp#Int}"]
   end
 
@@ -92,7 +95,9 @@ module Var_ref = struct
     | Bound of Binder.t
     | Persistent of Binder.t
     | Free of string
+    | Free_toplevel of string
     | Prim of Prim.t
+    | Intrinsic of Intrinsic.t
   [@@deriving sexp_of]
 end
 
@@ -103,15 +108,40 @@ module Constructor_ref = struct
     ; index : int
     }
   [@@deriving sexp_of]
+
+  let exception_index = -1
+
+  let exception_ name =
+    { type_name = Type.exn_name; name; index = exception_index }
+  ;;
+
+  let is_exception t = t.index = exception_index
+end
+
+module Record_type = struct
+  type t =
+    { name : string
+    ; fields : string array
+    }
+
+  let sexp_of_t t = Sexp.Atom t.name
 end
 
 module Field_ref = struct
   type t =
-    { type_name : string
-    ; name : string
+    { record : Record_type.t
     ; index : int
     }
-  [@@deriving sexp_of]
+
+  let name t = t.record.fields.(t.index)
+
+  let sexp_of_t t =
+    [%sexp
+      { type_name : string = t.record.name
+      ; name : string = name t
+      ; index : int = t.index
+      }]
+  ;;
 end
 
 module Pattern = struct
@@ -136,6 +166,7 @@ module Pattern = struct
           { fields : (string * 'p) list
           ; rest : Rest.t
           }
+      | Error of 'p list
     [@@deriving sexp_of]
   end
 
@@ -148,10 +179,37 @@ module Pattern = struct
   let rec sexp_of_t' t = Hum.typed (Desc.sexp_of_t sexp_of_t' t.desc) t.ty
   let sexp_of_t t = Hum.scoped (fun () -> sexp_of_t' t)
 
+  let rec idents t =
+    match t.desc with
+    | Any | Lit _ | Poly_variant (_, None) -> []
+    | Var ident -> [ ident ]
+    | Tuple ps | Construct (_, ps) | Error ps -> List.concat_map ps ~f:idents
+    | Record fields -> List.concat_map fields ~f:(fun (_, p) -> idents p)
+    | Poly_record { fields; rest } ->
+      (match rest with
+       | Closed | Open -> []
+       | Bind ident -> [ ident ])
+      @ List.concat_map fields ~f:(fun (_, p) -> idents p)
+    | Poly_variant (_, Some p) -> idents p
+  ;;
+
+  let error patterns ~loc = { desc = Error patterns; ty = Type.error; loc }
+
+  let rec has_error t =
+    match t.desc with
+    | Error _ -> true
+    | Any | Var _ | Lit _ | Poly_variant (_, None) -> false
+    | Tuple ps | Construct (_, ps) -> List.exists ps ~f:has_error
+    | Poly_variant (_, Some p) -> has_error p
+    | Record fields -> List.exists fields ~f:(fun (_, p) -> has_error p)
+    | Poly_record { fields; rest = _ } ->
+      List.exists fields ~f:(fun (_, p) -> has_error p)
+  ;;
+
   let rec is_irrefutable t =
     match t.desc with
     | Any | Var _ -> true
-    | Lit _ | Construct _ | Record _ | Poly_variant _ -> false
+    | Lit _ | Construct _ | Record _ | Poly_variant _ | Error _ -> false
     | Tuple patterns -> List.for_all patterns ~f:is_irrefutable
     | Poly_record { fields; rest = _ } ->
       List.for_all fields ~f:(fun (_, pattern) -> is_irrefutable pattern)
@@ -174,10 +232,18 @@ module Expr = struct
       | Let of
           { ident : Ident.t
           ; args : Ident.t list
+          ; annots : (Ident.t * Syntax.Type_expr.t) list [@sexp.list]
+          ; result_annot : Syntax.Type_expr.t option [@sexp.option]
           ; generalized : bool
           ; body : 'e
           ; in_ : 'e
           }
+      | Fun of
+          { args : Ident.t list
+          ; annots : (Ident.t * Syntax.Type_expr.t) list [@sexp.list]
+          ; body : 'e
+          }
+      | Annotated of 'e * Syntax.Type_expr.t
       | Splice of
           { code : 'e
           ; subs : 'e Subs.t
@@ -191,7 +257,12 @@ module Expr = struct
       | Construct of Constructor_ref.t * 'e list
       | Record of (Field_ref.t * 'e) list
       | Field of 'e * Field_ref.t
-      | Match of 'e * (Pattern.t * 'e) list
+      | Record_update of 'e * (Field_ref.t * 'e) list
+      | Match of
+          { scrutinee : 'e
+          ; cases : (Pattern.t * 'e) list
+          ; exception_cases : (Pattern.t * 'e) list [@sexp.list]
+          }
       | Poly_record of (string * 'e) list
       | Poly_field of 'e * string
       | Poly_extend of (string * 'e) list * 'e
@@ -199,6 +270,11 @@ module Expr = struct
       | Poly_update of 'e * (string * 'e) list
       | Poly_variant of string * 'e option
       | Expect of string Located.t
+      | Type of Syntax.Type_expr.t
+      (** [type t], its types named by canonical names ([Resolved]). *)
+      | Error of 'e list
+      (** In place of what did not parse or check, with the parts of it that
+          did. *)
     [@@deriving sexp_of]
   end
 
@@ -214,22 +290,35 @@ module Expr = struct
   let sub_exprs t =
     let snds = List.map ~f:snd in
     match t.desc with
-    | Lit _ | Var _ | Poly_variant (_, None) | Expect _ -> []
+    | Lit _ | Var _ | Poly_variant (_, None) | Expect _ | Type _ -> []
     | App (a, b)
     | Let { body = a; in_ = b; _ }
     | Toplevel_splice { code = a; expansion = b } -> [ a; b ]
     | Splice { code; subs = Explicit subs } -> code :: snds subs
     | Splice { code; subs = Implicit _ } -> [ code ]
     | Quote e
+    | Annotated (e, _)
+    | Fun { body = e; _ }
     | Field (e, _)
     | Poly_field (e, _)
     | Poly_restrict (e, _)
     | Poly_variant (_, Some e) -> [ e ]
-    | Tuple es | Construct (_, es) -> es
+    | Tuple es | Construct (_, es) | Error es -> es
     | Record fields -> snds fields
     | Poly_record fields -> snds fields
     | Poly_extend (fields, e) | Poly_update (e, fields) -> e :: snds fields
-    | Match (e, cases) -> e :: snds cases
+    | Record_update (e, fields) -> e :: snds fields
+    | Match { scrutinee; cases; exception_cases } ->
+      (scrutinee :: snds cases) @ snds exception_cases
+  ;;
+
+  let rec has_error t =
+    match t.desc with
+    | Error _ -> true
+    | Match { cases; exception_cases; scrutinee = _ }
+      when List.exists (cases @ exception_cases) ~f:(fun (pattern, _) ->
+             Pattern.has_error pattern) -> true
+    | _ -> List.exists (sub_exprs t) ~f:has_error
   ;;
 
   let rec refers_to t ~f =
@@ -242,9 +331,10 @@ module Expr = struct
 
   let rec is_value t =
     match t.desc with
-    | Lit _ | Var _ -> true
+    | Lit _ | Var _ | Type _ | Fun _ | Error _ -> true
     | Quote expr -> splices_are_values expr ~depth:1
-    | Let { ident; args; body; in_; generalized = _ } ->
+    | Annotated (e, _) -> is_value e
+    | Let { ident; args; body; in_; _ } ->
       binding_is_value ~ident ~args ~body && is_value in_
     | Toplevel_splice { expansion; code = _ } -> is_value expansion
     | App _ | Splice _ | Expect _ -> false
@@ -252,6 +342,7 @@ module Expr = struct
     | Construct _
     | Record _
     | Field _
+    | Record_update _
     | Match _
     | Poly_record _
     | Poly_field _
@@ -278,12 +369,15 @@ module Expr = struct
       splices_are_values expansion ~depth
     | Lit _
     | Var _
+    | Annotated _
     | App _
     | Let _
+    | Fun _
     | Tuple _
     | Construct _
     | Record _
     | Field _
+    | Record_update _
     | Match _
     | Poly_record _
     | Poly_field _
@@ -291,7 +385,9 @@ module Expr = struct
     | Poly_restrict _
     | Poly_update _
     | Poly_variant _
-    | Expect _ -> List.for_all (sub_exprs t) ~f:(splices_are_values ~depth)
+    | Expect _
+    | Type _
+    | Error _ -> List.for_all (sub_exprs t) ~f:(splices_are_values ~depth)
 
   and binding_is_value ~ident ~args ~body =
     (not (List.is_empty args))
@@ -336,6 +432,18 @@ module Expect_test = struct
     { name : string Located.t
     ; body : Expr.t
     ; loc : Loc.t
+    ; generated : bool [@sexp.bool]
+    }
+  [@@deriving sexp_of]
+end
+
+module Bench = struct
+  type t =
+    { name : string Located.t
+    ; param : (Ident.t * Expr.t list) option
+    ; body : Expr.t
+    ; loc : Loc.t
+    ; generated : bool [@sexp.bool]
     }
   [@@deriving sexp_of]
 end
@@ -344,7 +452,22 @@ module Program = struct
   type t =
     { sccs : Scc.t list
     ; expect_tests : Expect_test.t list
+    ; benches : Bench.t list
+    ; declaration_splices : Expr.t list
     ; ident_info : Ident_info.t Ident.Map.t
     }
   [@@deriving sexp_of]
+
+  let exprs { sccs; expect_tests; benches; declaration_splices; ident_info = _ }
+    =
+    List.concat_map sccs ~f:(fun (scc : Scc.t) ->
+      List.map scc.members ~f:(fun (member : Toplevel.t) -> member.body))
+    @ List.map expect_tests ~f:(fun (test : Expect_test.t) -> test.body)
+    @ List.concat_map benches ~f:(fun (bench : Bench.t) ->
+      bench.body
+      :: Option.value_map bench.param ~default:[] ~f:(fun (_, args) -> args))
+    @ declaration_splices
+  ;;
+
+  let has_error t = List.exists (exprs t) ~f:Expr.has_error
 end

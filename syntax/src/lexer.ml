@@ -40,6 +40,16 @@ module Error = struct
 
   let message t = Kind.to_string t.kind
 
+  let skipped t =
+    match t.kind with
+    | Illegal_character _ | Unterminated_comment -> true
+    | Unterminated_string
+    | Unterminated_char
+    | Illegal_escape _
+    | Invalid_int_literal _
+    | Int_literal_out_of_range _ -> false
+  ;;
+
   let to_string { kind; loc } =
     sprintf "%s: %s" (Loc.to_string loc) (Kind.to_string kind)
   ;;
@@ -54,6 +64,9 @@ module State = struct
     ; mutable offset : int
     ; mutable line : int
     ; mutable bol : int
+    ; comments : (string * Loc.t) Queue.t
+    ; errors : Error.t Queue.t option
+      (** Where to record errors, to keep lexing after them, if any. *)
     }
 
   let peek_at t n =
@@ -86,14 +99,20 @@ module State = struct
     { file = t.file; start; stop = pos t }
   ;;
 
-  let error t start kind = raise (Lex_error { kind; loc = loc_from t start })
+  let report t (error : Error.t) =
+    match t.errors with
+    | None -> raise (Lex_error error)
+    | Some errors -> Queue.enqueue errors error
+  ;;
+
+  let error t start kind = report t { kind; loc = loc_from t start }
 
   (* For an opening delimiter of [len] bytes, which never spans lines. *)
   let error_opening t (start : Loc.Pos.t) ~len kind =
     let stop =
       { start with col = start.col + len; offset = start.offset + len }
     in
-    raise (Lex_error { kind; loc = { file = t.file; start; stop } })
+    report t { kind; loc = { file = t.file; start; stop } }
   ;;
 
   let text_from t (start : Loc.Pos.t) =
@@ -106,6 +125,18 @@ let is_ident_char c =
 ;;
 
 let is_ident_start c = Char.is_alpha c || Char.equal c '_'
+
+(* Whether a token that can end an atom ends just before the current
+   character, with no trivia between, so that a [.] here is a field access's
+   or a path's, not a root path's. *)
+let after_atom (t : State.t) ~glued =
+  glued
+  && t.offset > 0
+  &&
+  match t.src.[t.offset - 1] with
+  | ')' | ']' | '}' | '"' | '.' -> true
+  | c -> is_ident_char c
+;;
 
 let skip_while (t : State.t) ~f =
   while Option.exists (State.peek t) ~f do
@@ -124,7 +155,8 @@ let escape (t : State.t) =
   let start = State.pos t in
   State.bump t;
   let illegal () =
-    State.error t start (Illegal_escape (State.text_from t start))
+    State.error t start (Illegal_escape (State.text_from t start));
+    '?'
   in
   let simple c =
     State.bump t;
@@ -132,10 +164,16 @@ let escape (t : State.t) =
   in
   let digits ~n ~f =
     let digits_start = t.offset in
-    for _ = 1 to n do
-      if Option.exists (State.peek t) ~f then State.bump t else illegal ()
-    done;
-    String.sub t.src ~pos:digits_start ~len:n
+    let rec loop i =
+      if i = n
+      then Some (String.sub t.src ~pos:digits_start ~len:n)
+      else if Option.exists (State.peek t) ~f
+      then (
+        State.bump t;
+        loop (i + 1))
+      else None
+    in
+    loop 0
   in
   match State.peek t with
   | Some 'n' -> simple '\n'
@@ -148,11 +186,14 @@ let escape (t : State.t) =
   | Some '\'' -> simple '\''
   | Some 'x' ->
     State.bump t;
-    let digits = digits ~n:2 ~f:Char.is_hex_digit in
-    Char.of_int_exn (Int.of_string ("0x" ^ digits))
+    (match digits ~n:2 ~f:Char.is_hex_digit with
+     | Some digits -> Char.of_int_exn (Int.of_string ("0x" ^ digits))
+     | None -> illegal ())
   | Some c when Char.is_digit c ->
-    let digits = digits ~n:3 ~f:Char.is_digit in
-    (match Char.of_int (Int.of_string digits) with
+    (match
+       Option.bind (digits ~n:3 ~f:Char.is_digit) ~f:(fun digits ->
+         Char.of_int (Int.of_string digits))
+     with
      | Some c -> c
      | None -> illegal ())
   | Some '\n' | None -> illegal ()
@@ -186,7 +227,9 @@ let quoted_string (t : State.t) ~id =
   let contents_start = t.offset in
   let rec loop () =
     if State.at_end t
-    then State.error_opening t start ~len:open_len Unterminated_string
+    then (
+      State.error_opening t start ~len:open_len Unterminated_string;
+      String.sub t.src ~pos:contents_start ~len:(t.offset - contents_start))
     else if String.is_substring_at t.src ~pos:t.offset ~substring:close
     then (
       let contents =
@@ -225,6 +268,14 @@ let string (t : State.t) =
         | ' ' | '\t' -> true
         | _ -> false);
       loop ()
+    | Some '\\'
+      when Option.exists (State.peek_at t 1) ~f:(Char.equal '\r')
+           && Option.exists (State.peek_at t 2) ~f:(Char.equal '\n') ->
+      State.bump_n t 3;
+      skip_while t ~f:(function
+        | ' ' | '\t' -> true
+        | _ -> false);
+      loop ()
     | Some '\\' ->
       Buffer.add_char buf (escape t);
       loop ()
@@ -247,7 +298,7 @@ let comment (t : State.t) =
   in
   let rec skip_string () =
     match State.peek t with
-    | None -> unterminated ()
+    | None -> ()
     | Some '"' -> State.bump t
     | Some '\\' ->
       State.bump t;
@@ -275,8 +326,14 @@ let comment (t : State.t) =
         skip_string ();
         loop depth
       | Some '{', _, _, _ when Option.is_some (quoted_string_id t) ->
-        ignore (quoted_string t ~id:(Option.value_exn (quoted_string_id t)));
-        loop depth
+        let close = "|" ^ Option.value_exn (quoted_string_id t) ^ "}" in
+        (match String.substr_index t.src ~pos:t.offset ~pattern:close with
+         | Some i ->
+           State.bump_n t (i + String.length close - t.offset);
+           loop depth
+         | None ->
+           State.bump_n t (String.length t.src - t.offset);
+           unterminated ())
       | Some '\'', Some '\\', Some _, Some '\'' ->
         State.bump_n t 4;
         loop depth
@@ -290,6 +347,9 @@ let comment (t : State.t) =
   loop 1
 ;;
 
+(* After recording an error at a lexeme that is no token. *)
+exception Skipped
+
 (* At a single quote: a char literal, or a type variable. *)
 let quote (t : State.t) : Token.t =
   let start = State.pos t in
@@ -301,7 +361,9 @@ let quote (t : State.t) : Token.t =
      | Some '\'' ->
        State.bump t;
        Char c
-     | _ -> State.error t start Unterminated_char)
+     | _ ->
+       State.error t start Unterminated_char;
+       Char c)
   | Some c, Some '\'' when not (Char.equal c '\n' || Char.equal c '\'') ->
     State.bump_n t 3;
     Char c
@@ -313,7 +375,32 @@ let quote (t : State.t) : Token.t =
     Tyvar (ident t)
   | _ ->
     State.bump t;
-    State.error t start (Illegal_character '\'')
+    State.error t start (Illegal_character '\'');
+    raise Skipped
+;;
+
+(* At a digit, or at a [-] followed by one. The sign is parsed with the digits,
+   so that [min_int] does not overflow. *)
+let int_literal (t : State.t) (start : Loc.Pos.t) : Token.t =
+  let sign =
+    match State.peek t with
+    | Some '-' ->
+      State.bump t;
+      "-"
+    | _ -> ""
+  in
+  let digits = ident t in
+  let text = State.text_from t start in
+  if String.for_all digits ~f:(fun c -> Char.is_digit c || Char.equal c '_')
+  then (
+    match Int.of_string_opt (sign ^ String.filter digits ~f:Char.is_digit) with
+    | Some n -> Int n
+    | None ->
+      State.error t start (Int_literal_out_of_range text);
+      Int 0)
+  else (
+    State.error t start (Invalid_int_literal text);
+    Int 0)
 ;;
 
 let rec skip_trivia (t : State.t) =
@@ -322,13 +409,21 @@ let rec skip_trivia (t : State.t) =
     | _ -> false);
   match State.peek t, State.peek_at t 1 with
   | Some '(', Some '*' ->
+    let start = State.pos t in
     comment t;
+    Queue.enqueue t.comments (State.text_from t start, State.loc_from t start);
     skip_trivia t
   | _ -> ()
 ;;
 
-let token (t : State.t) : Located.t =
+let rec token (t : State.t) : Located.t =
+  try token_or_skip t with
+  | Skipped -> token t
+
+and token_or_skip (t : State.t) : Located.t =
+  let previous_end = t.offset in
   skip_trivia t;
+  let glued = t.offset = previous_end in
   let start = State.pos t in
   let simple n (token : Token.t) =
     State.bump_n t n;
@@ -365,6 +460,8 @@ let token (t : State.t) : Located.t =
        | '.', Some '~' -> simple 2 Splice
        | '.', Some '.' -> simple 2 Dotdot
        | '.', Some '{' -> simple 2 Dot_lbrace
+       | '.', Some c when is_ident_start c && not (after_atom t ~glued) ->
+         simple 1 Root
        | '.', _ -> simple 1 Dot
        | '@', Some '@' -> simple 2 At_at
        | '@', _ -> simple 1 At
@@ -375,41 +472,168 @@ let token (t : State.t) : Located.t =
          Label (ident t)
        | '_', c when not (Option.exists c ~f:is_ident_char) ->
          simple 1 Underscore
-       | c, _ when Char.is_digit c ->
-         let text = ident t in
-         if
-           String.for_all text ~f:(fun c -> Char.is_digit c || Char.equal c '_')
-         then (
-           match Int.of_string_opt (String.filter text ~f:Char.is_digit) with
-           | Some n -> Int n
-           | None -> State.error t start (Int_literal_out_of_range text))
-         else State.error t start (Invalid_int_literal text)
+       | '-', Some c when Char.is_digit c -> int_literal t start
+       | c, _ when Char.is_digit c -> int_literal t start
        | c, _ when Char.is_uppercase c -> Uident (ident t)
        | c, _ when is_ident_start c ->
          let text = ident t in
-         if String.equal text "let" && is_word_at t ~pos:0 "%expect_test"
-         then simple 12 Let_expect_test
-         else Option.value (Token.keyword text) ~default:(Lident text)
+         (match text with
+          | "let" when is_word_at t ~pos:0 "%expect_test" ->
+            simple 12 Let_expect_test
+          | "let" when is_word_at t ~pos:0 "%bench" -> simple 6 Let_bench
+          | "module" when is_word_at t ~pos:0 "%inline" ->
+            simple 7 Module_inline
+          | "include" when is_word_at t ~pos:0 "%inline" ->
+            simple 7 Include_inline
+          | "end" when is_word_at t ~pos:0 "%inline" -> simple 7 End_inline
+          | _ -> Option.value (Token.keyword text) ~default:(Lident text))
        | c, _ ->
          State.bump t;
-         State.error t start (Illegal_character c))
+         State.error t start (Illegal_character c);
+         raise Skipped)
   in
   { token; loc = State.loc_from t start }
 ;;
 
-let tokenize ~file src =
-  let t : State.t = { file; src; offset = 0; line = 1; bol = 0 } in
+(* A comment is [Trailing] after a token ending code on its line, or after
+   such a comment ending on its line. *)
+let comments ~(prev : Located.t option) ~(next : Located.t) ~next_index found =
+  let lines : Loc.t array = Array.of_list (List.map found ~f:snd) in
+  let n = Array.length lines in
+  (* Whether code follows on its last line, maybe after other comments. *)
+  let code_after = Array.create ~len:n false in
+  for i = n - 1 downto 0 do
+    code_after.(i)
+    <- (if i < n - 1
+        then
+          lines.(i + 1).start.line = lines.(i).stop.line && code_after.(i + 1)
+        else (
+          match next.token with
+          | Eof -> false
+          | _ -> next.loc.start.line = lines.(i).stop.line))
+  done;
+  let trailing_line =
+    Option.bind prev ~f:(fun prev ->
+      Option.some_if (Token.ends_code prev.token) prev.loc.stop.line)
+  in
+  List.folding_mapi
+    found
+    ~init:trailing_line
+    ~f:(fun i trailing_line (text, (loc : Loc.t)) ->
+      let code_before =
+        Option.exists prev ~f:(fun prev -> prev.loc.stop.line = loc.start.line)
+      in
+      let code_after = code_after.(i) in
+      let placement : Comment.Placement.t =
+        if code_after
+        then Inline
+        else if Option.equal Int.equal trailing_line (Some loc.start.line)
+        then Trailing
+        else (
+          let line_before =
+            if i > 0
+            then Some lines.(i - 1).stop.line
+            else Option.map prev ~f:(fun prev -> prev.loc.stop.line)
+          in
+          let line_after =
+            if i < n - 1
+            then Some lines.(i + 1).start.line
+            else (
+              match next.token with
+              | Eof -> None
+              | _ -> Some next.loc.start.line)
+          in
+          Own_line
+            { blank_before =
+                (not code_before)
+                && Option.exists line_before ~f:(fun line ->
+                  loc.start.line > line + 1)
+            ; blank_after =
+                Option.exists line_after ~f:(fun line ->
+                  line > loc.stop.line + 1)
+            })
+      in
+      let trailing_line =
+        match placement with
+        | Trailing -> Some loc.stop.line
+        | Own_line _ | Inline -> None
+      in
+      trailing_line, { Comment.text; loc; placement; next_token = next_index })
+;;
+
+let lex ~file src ~errors =
+  let t : State.t =
+    { file
+    ; src
+    ; offset = 0
+    ; line = 1
+    ; bol = 0
+    ; comments = Queue.create ()
+    ; errors
+    }
+  in
   let tokens = Queue.create () in
-  match
-    let rec loop () =
-      let located = token t in
-      Queue.enqueue tokens located;
-      match located.token with
-      | Eof -> ()
-      | _ -> loop ()
-    in
-    loop ()
-  with
-  | () -> Ok (Queue.to_array tokens)
+  let all_comments = Queue.create () in
+  let rec loop prev =
+    let next = token t in
+    Queue.enqueue_all
+      all_comments
+      (comments
+         ~prev
+         ~next
+         ~next_index:(Queue.length tokens)
+         (Queue.to_list t.comments));
+    Queue.clear t.comments;
+    Queue.enqueue tokens next;
+    match next.token with
+    | Eof -> ()
+    | _ -> loop (Some next)
+  in
+  loop None;
+  Queue.to_array tokens, Queue.to_list all_comments
+;;
+
+let tokenize_with_comments ~file src =
+  match lex ~file src ~errors:None with
+  | result -> Ok result
   | exception Lex_error error -> Error error
+;;
+
+module Recovered = struct
+  type t =
+    { tokens : Located.t array
+    ; comments : Comment.t list
+    ; errors : Error.t list
+    }
+end
+
+let tokenize_recovering ~file src =
+  let errors = Queue.create () in
+  let tokens, comments = lex ~file src ~errors:(Some errors) in
+  { Recovered.tokens; comments; errors = Queue.to_list errors }
+;;
+
+let tokenize ~file src = Result.map (tokenize_with_comments ~file src) ~f:fst
+
+module Prefix = struct
+  type t =
+    { tokens : Located.t array
+    ; comments : Comment.t list
+    ; error : Error.t option
+    }
+end
+
+let tokenize_prefix ~file src =
+  (* Lexing stops at the first error, so the tokens before it are as in the
+     whole source. *)
+  let rec loop prefix =
+    match tokenize_with_comments ~file (String.prefix src prefix) with
+    | Ok (tokens, comments) -> tokens, comments
+    | Error error -> loop (min (prefix - 1) error.loc.start.offset)
+  in
+  match tokenize_with_comments ~file src with
+  | Ok (tokens, comments) -> { Prefix.tokens; comments; error = None }
+  | Error error ->
+    let tokens, comments = loop error.loc.start.offset in
+    { tokens; comments; error = Some error }
 ;;

@@ -1,0 +1,40 @@
+open! Import
+
+(** Canonical names of the prelude's items. The prelude is outside the
+    program's root module, and its canonical names start with [root ^ "."],
+    which no program name does (a lowercase name is never a module). *)
+
+val root : string
+
+(** [canonical "Stag.Expr.t"] is the canonical name of the prelude's
+    [Stag.Expr.t]. *)
+val canonical : string -> string
+
+(** The path within the prelude of a canonical name, if it is the prelude's. *)
+val relative : string -> string option
+
+(** Whether the prelude's name [relative] is shadowed where [has] tells which
+    types and modules are in scope: by a type of its name, or a module of the
+    first name of its path. *)
+val shadowed : string -> has:([ `Type | `Module ] -> string -> bool) -> bool
+
+(** A canonical name for humans: without [root] for the prelude's, unless
+    [shadowed] (by default, never), as its root path (eg. [.option]), unless
+    the first name of its path is one of the program's [root_modules] too,
+    where no syntax names it, with [root] (eg. [prelude.Core.Sexp.t]). *)
+val to_string_hum
+  :  ?shadowed:(string -> bool)
+  -> ?root_modules:String.Set.t
+  -> string
+  -> string
+
+(** Prims' canonical names are the prelude's under its module [Prim]. *)
+val prim_prefix : string
+
+(** The path naming a canonical name from the root scope, without its leading
+    [.]: the prelude's within it, prims by their public path
+    ([prelude.Prim.String.length] is [String.length]), the program's as is. *)
+val root_path : string -> string
+
+(** The last name of a canonical name, as declared: [x] of [M.N.x]. *)
+val short_name : string -> string

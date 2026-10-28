@@ -56,7 +56,6 @@ let visible t =
 let with_bindings t bindings ~f =
   List.iter bindings ~f:(fun (name, entry) ->
     Hashtbl.add_multi t ~key:name ~data:entry);
-  let result = f () in
-  List.iter bindings ~f:(fun (name, _) -> Hashtbl.remove_multi t name);
-  result
+  Exn.protect ~f ~finally:(fun () ->
+    List.iter bindings ~f:(fun (name, _) -> Hashtbl.remove_multi t name))
 ;;

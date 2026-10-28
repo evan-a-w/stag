@@ -45,7 +45,11 @@ module Var_ref : sig
     | Free of string
     (** A free variable of the enclosing quote: its context entry of this
         name. *)
+    | Free_toplevel of string
+    (** A toplevel, by canonical name, as a free variable of the enclosing
+        quote (see modes.md): its context entry of that name. *)
     | Prim of Prim.t (** Usable at any level, like a persistent toplevel. *)
+    | Intrinsic of Intrinsic.t (** As [Prim]. *)
   [@@deriving sexp_of]
 end
 
@@ -58,15 +62,37 @@ module Constructor_ref : sig
     ; index : int
     }
   [@@deriving sexp_of]
+
+  (** The exception [name], a canonical name. Exceptions are of type [exn]
+      and share an index, so are told apart by name. *)
+  val exception_ : string -> t
+
+  val is_exception : t -> bool
+end
+
+(** A nominal record type: its canonical name, and its fields' canonical
+    names by index. One per declaration, shared by its fields' refs and its
+    values. *)
+module Record_type : sig
+  type t =
+    { name : string
+    ; fields : string array
+    }
+
+  (** As its name. *)
+  val sexp_of_t : t -> Sexp.t
 end
 
 module Field_ref : sig
   type t =
-    { type_name : string
-    ; name : string
+    { record : Record_type.t
     ; index : int
     }
-  [@@deriving sexp_of]
+
+  val name : t -> string
+
+  (** As [((type_name T) (name f) (index i))]. *)
+  val sexp_of_t : t -> Sexp.t
 end
 
 (** [ty] is the type of the values the node matches. *)
@@ -92,6 +118,9 @@ module Pattern : sig
           { fields : (string * 'p) list
           ; rest : Rest.t
           }
+      | Error of 'p list
+      (** What failed to check, of its parts that did. Matching it raises
+          [Reached_error]. *)
     [@@deriving sexp_of]
   end
 
@@ -105,6 +134,14 @@ module Pattern : sig
   (** Nominal records and constructors are refutable, even when their type has
       only one constructor. *)
   val is_irrefutable : t -> bool
+
+  (** The variables it binds, in order. *)
+  val idents : t -> Ident.t list
+
+  (** Of [Type.error]. *)
+  val error : t list -> loc:Loc.t -> t
+
+  val has_error : t -> bool
 end
 
 (** [ty] is the type of the node, instantiated where it is a variable. *)
@@ -129,10 +166,21 @@ module Expr : sig
       | Let of
           { ident : Ident.t
           ; args : Ident.t list
+          ; annots : (Ident.t * Syntax.Type_expr.t) list
+            (** The annotated [args], their annotations as written but for
+                type names, which are canonical ([Resolved]). Likewise
+                [result_annot] and [Fun]'s and [Annotated]'s. *)
+          ; result_annot : Syntax.Type_expr.t option
           ; generalized : bool
           ; body : 'e (** [ident] is bound in [body]. *)
           ; in_ : 'e
           }
+      | Fun of
+          { args : Ident.t list (** Non-empty. *)
+          ; annots : (Ident.t * Syntax.Type_expr.t) list
+          ; body : 'e
+          }
+      | Annotated of 'e * Syntax.Type_expr.t (** [(x : t)], of a [Var]. *)
       | Splice of
           { code : 'e (** At the level outside the splice. *)
           ; subs : 'e Subs.t
@@ -148,7 +196,16 @@ module Expr : sig
       | Construct of Constructor_ref.t * 'e list
       | Record of (Field_ref.t * 'e) list
       | Field of 'e * Field_ref.t
-      | Match of 'e * (Pattern.t * 'e) list
+      | Record_update of 'e * (Field_ref.t * 'e) list
+      (** [{e with f = v; ...}], of [e]'s type but for the parameters only the
+          updated fields' types contain. *)
+      | Match of
+          { scrutinee : 'e
+          ; cases : (Pattern.t * 'e) list
+          ; exception_cases : (Pattern.t * 'e) list
+            (** The cases [exception p], as [p]: they match what the scrutinee
+              raises. *)
+          }
       | Poly_record of (string * 'e) list
       | Poly_field of 'e * string
       | Poly_extend of (string * 'e) list * 'e
@@ -158,6 +215,11 @@ module Expr : sig
       | Expect of string Located.t
       (** Checks the output so far against the string, see
           [Expect_test_runner]. *)
+      | Type of Syntax.Type_expr.t
+      (** [type t], its types named by canonical names ([Resolved]). *)
+      | Error of 'e list
+      (** In place of what did not parse or check, with the parts of it that
+          did. *)
     [@@deriving sexp_of]
   end
 
@@ -170,6 +232,9 @@ module Expr : sig
 
   (** The children of [t], in order. *)
   val sub_exprs : t -> t list
+
+  (** Whether [t] has an [Error] node or pattern: what failed to check. *)
+  val has_error : t -> bool
 
   (** Whether [t] refers to a binder satisfying [f], by a [Bound] or
       [Persistent] variable or an [Implicit] substitution. *)
@@ -220,6 +285,20 @@ module Expect_test : sig
     { name : string Located.t
     ; body : Expr.t
     ; loc : Loc.t
+    ; generated : bool (** By a declaration splice, so located at the splice. *)
+    }
+  [@@deriving sexp_of]
+end
+
+(** [let%bench "name" = body], or [let%bench "name" x in [a; b] = body]. *)
+module Bench : sig
+  type t =
+    { name : string Located.t
+    ; param : (Ident.t * Expr.t list) option
+      (** The parameter bound in [body], and its arguments, at level 0. *)
+    ; body : Expr.t (** At level 0, of any type. *)
+    ; loc : Loc.t
+    ; generated : bool (** By a declaration splice, so located at the splice. *)
     }
   [@@deriving sexp_of]
 end
@@ -228,7 +307,13 @@ module Program : sig
   type t =
     { sccs : Scc.t list (** Each component after the ones it refers to. *)
     ; expect_tests : Expect_test.t list (** In program order. *)
+    ; benches : Bench.t list (** In program order. *)
+    ; declaration_splices : Expr.t list
+      (** The expression of each declaration splice that ran, at level -1. *)
     ; ident_info : Ident_info.t Ident.Map.t
     }
   [@@deriving sexp_of]
+
+  (** Whether any of its expressions [Expr.has_error]. *)
+  val has_error : t -> bool
 end

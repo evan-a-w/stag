@@ -1,0 +1,138 @@
+(* The [_exn] functions of [Core], raising and caught. *)
+
+let print_sexp t = print_endline (Core.Sexp.to_string_hum t)
+
+(* Prints [f ()], or the exception it raises. *)
+let show to_sexp f =
+  match f () with
+  | x -> print_sexp (to_sexp x)
+  | exception Failure message ->
+    print_endline (Core.String.append "Failure: " message)
+  | exception Invalid_argument message ->
+    print_endline (Core.String.append "Invalid_argument: " message)
+  | exception Core.Sexp.Parse_error e ->
+    print_endline
+      (Core.String.append "Parse_error: " (Core.Sexp.Parse_error.to_string e))
+  | exception Core.Sexp.Of_sexp_error e ->
+    print_endline
+      (Core.String.append
+         "Of_sexp_error: "
+         (Core.Sexp.Of_sexp_error.to_string e))
+
+let int = Core.Sexp.sexp_of_int
+let ints = Core.Sexp.sexp_of_list int
+let l = [1; 2; 3]
+
+let%expect_test "List" =
+  show int (fun _ -> Core.List.hd_exn l);
+  show int (fun _ -> Core.List.hd_exn []);
+  show ints (fun _ -> Core.List.tl_exn l);
+  show ints (fun _ -> Core.List.tl_exn []);
+  show int (fun _ -> Core.List.last_exn l);
+  show int (fun _ -> Core.List.last_exn []);
+  show int (fun _ -> Core.List.nth_exn l 2);
+  show int (fun _ -> Core.List.nth_exn l 3);
+  show int (fun _ -> Core.List.nth_exn l (-1));
+  show int (fun _ -> Core.List.find_exn (Core.Int.lt 1) l);
+  show int (fun _ -> Core.List.find_exn (Core.Int.lt 3) l);
+  show
+    int
+    (fun _ -> Core.List.assoc_exn Core.Int.equal 2 (Core.List.zip_exn l l));
+  show
+    int
+    (fun _ -> Core.List.assoc_exn Core.Int.equal 4 (Core.List.zip_exn l l));
+  show
+    (Core.Sexp.sexp_of_list (Core.Sexp.sexp_of_pair int int))
+    (fun _ -> Core.List.zip_exn l [1]);
+  show ints (fun _ -> Core.List.map2_exn Core.Int.add l l);
+  show ints (fun _ -> Core.List.map2_exn Core.Int.add l []);
+  [%expect {|
+    1
+    Failure: List.hd_exn: empty list
+    (2 3)
+    Failure: List.tl_exn: empty list
+    3
+    Failure: List.last_exn: empty list
+    3
+    Failure: List.nth_exn: no element 3
+    Failure: List.nth_exn: no element -1
+    2
+    Failure: List.find_exn: not found
+    2
+    Failure: List.assoc_exn: not found
+    Failure: List.zip_exn: lengths differ
+    (2 4 6)
+    Failure: List.map2_exn: lengths differ
+    |}]
+
+let%expect_test "Option, Result" =
+  show int (fun _ -> Core.Option.value_exn (Some 1));
+  show int (fun _ -> Core.Option.value_exn None);
+  show int (fun _ -> Core.Result.ok_exn (Ok 1));
+  show int (fun _ -> Core.Result.ok_exn (Error "e"));
+  [%expect {|
+    1
+    Failure: Option.value_exn: None
+    1
+    Failure: Result.ok_exn: Error
+    |}]
+
+let%expect_test "Int, Bool, Char, String" =
+  show int (fun _ -> Core.Int.of_string_exn "-12");
+  show int (fun _ -> Core.Int.of_string_exn "1x");
+  show int (fun _ -> Core.Int.of_string_exn "99999999999999999999");
+  show Core.Sexp.sexp_of_bool (fun _ -> Core.Bool.of_string_exn "true");
+  show Core.Sexp.sexp_of_bool (fun _ -> Core.Bool.of_string_exn "yes");
+  show Core.Sexp.sexp_of_char (fun _ -> Core.Char.of_code_exn 97);
+  show Core.Sexp.sexp_of_char (fun _ -> Core.Char.of_code_exn 256);
+  show int (fun _ -> Core.String.index_exn "abca" 'a');
+  show int (fun _ -> Core.String.rindex_exn "abca" 'a');
+  show int (fun _ -> Core.String.index_exn "abc" 'z');
+  show int (fun _ -> Core.String.rindex_exn "abc" 'z');
+  show Core.Sexp.sexp_of_char (fun _ -> Core.String.get "ab" 5);
+  show Core.Sexp.sexp_of_string (fun _ -> Core.String.sub "ab" 1 5);
+  [%expect {|
+    -12
+    Failure: Int.of_string_exn: invalid integer "1x"
+    Failure: Int.of_string_exn: invalid integer "99999999999999999999"
+    true
+    Failure: Bool.of_string_exn: invalid bool "yes"
+    a
+    Invalid_argument: Char.of_code: invalid character code 256
+    0
+    3
+    Failure: String.index_exn: not found
+    Failure: String.rindex_exn: not found
+    Invalid_argument: String.get: index 5 out of bounds of a string of length 2
+    Invalid_argument: String.sub: invalid substring (position 1, length 5) of a string of length 2
+    |}]
+
+let%expect_test "Sexp" =
+  let id t = t in
+  show id (fun _ -> Core.Sexp.of_string_exn "(a b)");
+  show id (fun _ -> Core.Sexp.of_string_exn "(a b");
+  show
+    (Core.Sexp.sexp_of_list id)
+    (fun _ -> Core.Sexp.of_string_many_exn "a (b)");
+  show
+    (Core.Sexp.sexp_of_list id)
+    (fun _ -> Core.Sexp.of_string_many_exn "a )");
+  let parse_ints s =
+    Core.Sexp.of_sexp_exn
+      (Core.Sexp.list_of_sexp Core.Sexp.int_of_sexp)
+      (Core.Sexp.of_string_exn s)
+  in
+  show ints (fun _ -> parse_ints "(1 2 3)");
+  show ints (fun _ -> parse_ints "(1 x 3)");
+  (match Core.Sexp.of_string_exn "(" with
+   | _ -> print_endline "parsed"
+   | exception Core.Sexp.Parse_error e -> print_int e.offset);
+  [%expect {|
+      (a b)
+      Parse_error: line 1, column 4: unclosed parentheses at end of input
+      (a (b))
+      Parse_error: line 1, column 2: unexpected character: ')'
+      (1 2 3)
+      Of_sexp_error: int_of_sexp: integer needed: x
+      1
+      |}]

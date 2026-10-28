@@ -11,7 +11,7 @@ let find_root () =
 
 let load () =
   let root = find_root () in
-  match Project.load ~root with
+  match Project.load ~root () with
   | Ok project -> project
   | Error diagnostics ->
     let contents path =
@@ -68,13 +68,55 @@ let promote_command =
      fun () -> exit_unless (Action.promote (load ())))
 ;;
 
+let bench_command ~fake_clock =
+  Command.basic
+    ~summary:"Run the benchmarks of every target, or those matching FILTERs"
+    ~readme:(fun () ->
+      sprintf
+        "Runs the let%%bench benchmarks of each library, executable and test, \
+         named TARGET/NAME, whose names contain any FILTER (all without), or \
+         with -phases benchmarks the interpreter on the program of each \
+         target: TARGET/parse, TARGET/typecheck and TARGET/eval. Baselines are \
+         saved in %s/."
+        Action.bench_dir)
+    (let%map_open.Command filters = anon (sequence ("FILTER" %: string))
+     and options = Bench_command.Options.param ~fake_clock
+     and phases =
+       flag "phases" no_arg ~doc:" benchmark the phases of the interpreter"
+     in
+     fun () -> exit_unless (Action.bench (load ()) options ~filters ~phases))
+;;
+
+let fmt_command =
+  Command.basic
+    ~summary:"Format every source of the project"
+    ~readme:(fun () ->
+      "Rewrites each source that is not formatted, printing its diff. With \
+       -check, writes nothing, printing the diffs, and fails if there is one.")
+    (let%map_open.Command check =
+       flag
+         "check"
+         ~aliases:[ "--check" ]
+         no_arg
+         ~doc:" print the diffs without writing them, failing if any"
+     in
+     fun () ->
+       let mode : Format.Mode.t = if check then Check else Inplace in
+       exit_unless (Action.fmt (load ()) ~mode))
+;;
+
 let () =
+  let argv, fake_clock =
+    Bench_command.take_fake_clock (Array.to_list (Sys.get_argv ()))
+  in
   Command.group
     ~summary:"Build stag projects"
     [ "build", build_command
     ; "exec", exec_command
     ; "test", test_command
     ; "promote", promote_command
+    ; "bench", bench_command ~fake_clock
+    ; "fmt", fmt_command
     ]
-  |> Command_unix.run
+  |> Command_unix.run ~argv
 ;;

@@ -1,0 +1,6465 @@
+%%%% driver/test/long/test_long_lists.ml:9
+
+let sexp_of_ints l = Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int l
+let double n = Core.Int.mul n 2
+let ok x = Ok x
+let odd n = Core.Bool.not (is_even n)
+let scramble i = Core.Int.rem (Core.Int.mul i 7919) 100003
+let is_even n = Core.Int.equal (Core.Int.rem n 2) 0
+
+let check name l =
+  let length = Core.List.length l in
+  print_endline
+    (Core.String.concat " "
+       (Cons (name, Cons (Core.Int.to_string length,
+        Cons (Core.Sexp.to_string (sexp_of_ints (Core.List.take 3 l)),
+        Cons (Core.Sexp.to_string (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_int (Core.List.last l)),
+        Nil))))))
+
+let l = Core.List.init LENGTH Core.Int.succ
+let a = check "init" l
+let b = check "map" (Core.List.map double l)
+let e = check "filter" (Core.List.filter is_even l)
+let f = check "append" (Core.List.append l l)
+let g = check "concat_map" (Core.List.concat_map Core.List.singleton l)
+let h = check "sort reversed" (Core.List.sort Core.Int.compare (Core.List.rev l))
+let evens_then_odds =
+  Core.List.append (Core.List.filter is_even l) (Core.List.filter odd l)
+let h2 = check "sort two runs" (Core.List.sort Core.Int.compare evens_then_odds)
+let scrambled =
+  Core.List.init 100000 scramble
+let h3 = check "sort scrambled" (Core.List.sort Core.Int.compare scrambled)
+let i = print_endline (Core.Int.to_string (Core.List.fold_right Core.Int.add l 0))
+let j =
+  match Core.List.zip l l with
+  | Some pairs -> (
+    match Core.List.unzip pairs with
+    | (a, _) -> check "zip, unzip" a)
+  | None -> print_endline "zip failed"
+let k =
+  match Core.Result.all (Core.List.map ok l) with
+  | Ok l -> check "Result.all" l
+  | Error () -> print_endline "Result.all failed"
+
+%%%% driver/test/source_helpers.ml:21
+let add (x : int) (y : int) : int = x
+let eq (x : int) (y : int) : bool = true
+let cond (c : bool) x y = cond c y x; x
+let id x = x
+
+%%%% driver/test/test_bench_runner.ml:59
+
+let fib n = match Int.lt n 2 with
+  | true -> n
+  | false -> Int.add (fib (Int.sub n 1)) (fib (Int.sub n 2))
+let%bench "fib" = fib 10
+module M = struct
+  let%bench "in a module" = ()
+end
+let%bench "fib" n in [1; Int.add 2 3] = fib n
+let%bench "strings" s in ["a"; "b c"] = String.length s
+let%bench "fails" = Int.div 1 0
+let%expect_test "not a bench" = ()
+
+%%%% driver/test/test_bench_runner.ml:87
+let%bench "x" = Int.add 1 "a"
+%%%% driver/test/test_bench_runner.ml:88
+let%bench "x" n in [1; "a"] = n
+%%%% driver/test/test_bench_runner.ml:89
+let%bench "x" n in [1] = String.length n
+%%%% driver/test/test_bench_runner.ml:90
+let%bench "x" = .<1>.
+%%%% driver/test/test_bench_runner.ml:91
+let%bench "x" = .~(.<1>.)
+%%%% driver/test/test_bench_runner.ml:92
+let%bench "x" = unbound
+%%%% driver/test/test_bench_runner.ml:94
+let%bench "x" n in [1] = n
+let y = n
+%%%% driver/test/test_bench_runner.ml:122
+
+let%bench "a" = 1
+let%bench "a" = 2
+
+%%%% driver/test/test_bench_runner.ml:127
+
+let%bench "a" n in [1; 1] = n
+
+%%%% driver/test/test_bench_runner.ml:131
+
+let%bench "a/1" = 1
+let%bench "a" n in [1] = n
+
+%%%% driver/test/test_bench_runner.ml:136
+
+let%bench "" = 1
+
+%%%% driver/test/test_bench_runner.ml:160
+
+let%bench "written" = ()
+include .~(Cons
+  (Stag.Toplevel.Bench
+     { `name = "generated"
+     ; `param =
+         (let p = ("n", Cons (Stag.Expr.int 1, Cons (Stag.Expr.int 2, Nil))) in Some p)
+     ; `body = Stag.Expr.App (Stag.Expr.var "Int.to_string", Stag.Expr.var "n") },
+   Nil))
+let%bench "after" = ()
+
+%%%% driver/test/test_bench_runner.ml:172
+
+include .~(Cons
+  (Stag.Toplevel.Bench
+     { `name = "bad"
+     ; `param = None
+     ; `body = Stag.Expr.App (Stag.Expr.var "Int.to_string", Stag.Expr.string "a") },
+   Nil))
+
+%%%% driver/test/test_bench_runner.ml:181
+
+include .~(Cons
+  (Stag.Toplevel.Bench
+     { `name = "none"; `param = (let p = ("n", Nil) in Some p); `body = Stag.Expr.var "n" },
+   Nil))
+
+%%%% driver/test/test_bench_runner.ml:215
+let%bench "x" n in [1; Int.div 1 0] = n
+%%%% driver/test/test_bench_runner.ml:225
+
+let%bench "x" = print_endline "never"
+let a = 1
+
+%%%% driver/test/test_bench_runner.ml:241
+
+let%bench "unit" = ()
+let%bench "fails" = Int.div 1 0
+let%bench "after" n in [1; 2] = n
+
+%%%% driver/test/test_compile_time.ml:9
+
+type nat = Z | S of nat
+type list['a] = Nil | Cons of 'a * list['a]
+let power n c = match n with Z -> .<Nil>. | S m -> .<Cons (.~c, .~(power m c))>.
+let three = S (S (S Z))
+let cube x = .~(power three .<x>.)
+let used = cube 7
+
+%%%% driver/test/test_compile_time.ml:39
+
+let wrap c = .<let y = .~c in (y, y)>.
+let wrapped = .~(wrap .<1>.)
+let generated = wrap .<1>.
+
+%%%% driver/test/test_compile_time.ml:82
+
+type nat = Z | S of nat
+let even n = match n with Z -> .<true>. | S m -> odd m
+let odd n = match n with Z -> .<false>. | S m -> even m
+let five_is_odd = .~(odd (S (S (S (S (S Z))))))
+
+%%%% driver/test/test_compile_time.ml:106
+
+let pair x = (x, x)
+let at_runtime = pair 1
+let at_compile_time = .~(match pair .<2>. with (a, _) -> a)
+let in_generated_code = .~(.<pair true>.)
+
+%%%% driver/test/test_compile_time.ml:130
+
+let f x = .~(f; .<x>.)
+
+%%%% driver/test/test_compile_time.ml:134
+
+let f x = g x
+let g x = .~(f; .<x>.)
+
+%%%% driver/test/test_compile_time.ml:139
+
+let f x = .~(.<f x>.)
+
+%%%% driver/test/test_compile_time.ml:155
+
+let f x = .~(x; .<1>.)
+
+%%%% driver/test/test_compile_time.ml:159
+
+let f = let x = 1 in .~(x; .<1>.)
+
+%%%% driver/test/test_compile_time.ml:174
+
+type abc = A | B
+let fails = match B with A -> 0
+let loops = let f x = f x in f ()
+let unused_code = .<0>.
+let used_code = .<1>.
+let spliced = .~used_code
+
+%%%% driver/test/test_compile_time.ml:183
+
+type abc = A | B
+let fails = match B with A -> 0
+let spliced = .~(.<1>.)
+
+%%%% driver/test/test_compile_time.ml:189
+
+type abc = A | B
+let fails = match B with A -> 0
+let spliced = .~(fails; .<1>.)
+
+%%%% driver/test/test_compile_time.ml:222
+
+type abc = A | B
+let x = .~(match B with A -> .<0>.)
+
+%%%% driver/test/test_compile_time.ml:244
+
+let n = 3
+let code = .<(n, x)>.
+let implicit x = .~code
+let explicit = .~code.{n = true; x = 1}
+let explicit_toplevel = .~code.{n; x = n}
+let applied = implicit false
+
+%%%% driver/test/test_compile_time.ml:319
+
+let inner = .< .<1>. >.
+let nested = .~(.~inner)
+let in_quote = .<.~(.~inner)>.
+
+%%%% driver/test/test_compile_time.ml:347
+
+let embeds = .~(let k x = (x, 1) in .<(k true, k 2)>.)
+
+%%%% driver/test/test_compile_time.ml:390
+
+type abc = A | B
+let fails = match B with A -> 0
+let n = 3
+let embeds =
+  .~(let never_called x = x; fails in
+     let k x = (x, n) in
+     .<k true>.)
+
+%%%% driver/test/test_compile_time.ml:400
+
+let n = 3
+let embeds = .~(let k x = (x, n) in .<k true>.)
+
+%%%% driver/test/test_compile_time.ml:423
+
+type nat = Z | S of nat
+let f n = match n with Z -> 0 | S m -> .~code
+let code = .<f m>.
+let used = f (S (S Z))
+
+%%%% driver/test/test_compile_time.ml:431
+
+type nat = Z | S of nat
+let code = .<f m>.
+let f n = match n with Z -> 0 | S m -> .~code
+let used = f (S (S Z))
+
+%%%% driver/test/test_compile_time.ml:474
+
+let gen c = .<let f = 1 in .~c>.; c
+let f = .~(.~(gen .< .<1>. >.))
+
+%%%% driver/test/test_compile_time.ml:480
+
+let gen c = .<let f = 1 in .~c>.; c
+let x = .~(.~(gen .< .<1>. >.))
+let f = .~(x; .<2>.)
+
+%%%% driver/test/test_compile_time.ml:509
+
+type abc = A | B
+let f x = v; .<x>.
+let v = f; match B with A -> 0
+let g y = .~(f; .<y>.)
+
+%%%% driver/test/test_compile_time.ml:517
+
+let a = b; 1
+let b = k; 2
+let k u = u; a
+let c = d; 3
+let d = k c
+
+%%%% driver/test/test_compile_time.ml:552
+
+let user = .~(gen ())
+let gen u = helper; .<helper>.
+let helper = .~(gen2 ())
+let gen2 u = .<5>.
+
+%%%% driver/test/test_compile_time.ml:579
+
+type t = A | B
+type r = {a : int}
+let code = .<(B, {a = 1})>.
+module M = struct
+  type t = B | C
+  type s = {a : bool}
+  let x = .~code
+  let y = match .~code with (A, _) -> 0 | _ -> 1
+end
+
+%%%% driver/test/test_compile_time.ml:648
+
+let id_code = .<let f x = x in f>.
+let twice = (.~id_code 1, .~id_code true)
+
+%%%% driver/test/test_compile_time.ml:695
+
+let id_code = .<let f x = x in f>.
+let spliced_id = .~id_code
+let used = (spliced_id 1, spliced_id true)
+let spliced_app = .~(.<id id>.)
+
+%%%% driver/test/test_compile_time.ml:728
+
+let n = 2
+let deep = .~(.~(n; .< .<n>. >.))
+
+%%%% driver/test/test_compile_time.ml:763
+
+let code u =
+  u;
+  .<let h c = .<let x = let g a = .~(c : <int>{}) in g in (x 1, x true)>. in h>.
+let user = .~(code ())
+let used = .~(user .<5>.)
+
+%%%% driver/test/test_compile_time.ml:789
+
+let code u =
+  u;
+  .<let h c =
+      .<let x = 1 in .~c>.;
+      .<let x = let g a = .~(c : <int>{}) in g in (x 1, x true)>.
+    in
+    h>.
+let user = .~(code ())
+let used = .~(user .<5>.)
+
+%%%% driver/test/test_compile_time.ml:851
+
+let gen c = .<let f = 1 in .~c>.; c
+let f = true
+let x = .~(.~(gen .< .<1>. >.))
+
+%%%% driver/test/test_compile_time.ml:857
+
+let gen c = .<let f = 1 in .~c>.; c
+let x = .~(.~(gen .< .<1>. >.))
+let f = true
+
+%%%% driver/test/test_compile_time.ml:892
+
+let gen u =
+  u;
+  .<let g d = .<let x = 1 in .~d>.; d in
+    let f (c : <int>{}) = let c2 = g c in .<add .~c2 x>. in
+    f>.
+let user = .~(gen ())
+
+%%%% driver/test/test_compile_time.ml:919
+
+let x = 5
+let k c = .<let x = 1 in .~c>.; c
+let w = id k
+let s = .~(w .<1>.)
+let t = .~(w .<x>.)
+
+%%%% driver/test/test_compile_time.ml:927
+
+let x = 5
+let k c = .<let x = 1 in .~c>.; c
+let w = id k
+let t = .~(w .<x>.)
+let s = .~(w .<1>.)
+
+%%%% driver/test/test_compile_time.ml:962
+let gen c = .<let f = 1 in .~c>.; c
+%%%% driver/test/test_compile_time.ml:963
+let f = 7
+%%%% driver/test/test_compile_time.ml:964
+let x = .~(gen .<add f 1>.)
+%%%% driver/test/test_compile_time.ml:965
+let y = .~(.~(gen .< .<1>. >.))
+%%%% driver/test/test_compile_time.ml:992
+
+let closeit (c : <int>{}) = ()
+let gen u =
+  u;
+  .<let f (e : <int>{x : int}) k =
+      let h d = .<let x = 1 in .~d>.; cond true .<.~d>. e in
+      h .<add x 1>.; h k; closeit k
+    in
+    f>.
+let user = .~(gen ())
+
+%%%% driver/test/test_compile_time.ml:1019
+let tw c = .<let x = 1 in .~c>.; .<.~c>.
+%%%% driver/test/test_compile_time.ml:1020
+let needx (e : <int>{x : int}) = ()
+%%%% driver/test/test_compile_time.ml:1021
+let closeit (c : <int>{}) = ()
+%%%% driver/test/test_compile_time.ml:1030
+let f %s k =
+    let h d = cond true (tw e1) d in
+    h .<add x y>.; h k; %s k
+  in
+  f
+%%%% driver/test/test_compile_time.ml:1107
+let f %s k =
+    .<.~e1.{x = 1}>.;
+    let h d = cond true (tw e1) d in
+    h .<add x y>.; h k; %s k
+  in
+  f
+%%%% driver/test/test_compile_time.ml:1187
+let f0 c d = d
+%%%% driver/test/test_compile_time.ml:1188
+let w0 = f0 .<y>. .<2>.
+%%%% driver/test/test_compile_time.ml:1189
+let substituted = .~w0.{x = 3}
+%%%% driver/test/test_compile_time.ml:1190
+let under_lets = let x = 1 in let y = 2 in .~w0
+%%%% driver/test/test_compile_time.ml:1191
+let use = needx w0
+%%%% driver/test/test_compile_time.ml:1230
+
+let weak = id id
+let gen u = u; .<weak>.
+let one = .~(gen ()) 1
+let two = .~(gen ()) 2
+
+%%%% driver/test/test_compile_time.ml:1237
+
+let weak = id id
+let gen u = u; .<weak>.
+let one = .~(gen ()) 1
+let other = .~(gen ()) true
+
+%%%% driver/test/test_compile_time.ml:1244
+
+let weak = id id
+let gen u = u; .<weak>.
+let one = weak 1
+let other = .~(gen ()) true
+
+%%%% driver/test/test_compile_time.ml:1278
+let ki c = .<let x = 1 in .~c>.; ()
+%%%% driver/test/test_compile_time.ml:1279
+let kb c = .<let x = true in .~c>.; ()
+%%%% driver/test/test_compile_time.ml:1280
+let use = .~(gen ())
+%%%% driver/test/test_compile_time.ml:1281
+let plain = let f (c : <int>{}) = ki c; kb c in 0
+%%%% driver/test/test_compile_time.ml:1286
+let gen u = u; .<let f (c : <int>{}) = ki c; kb c in 0>.
+%%%% driver/test/test_core_sexp.ml:47
+
+let a s = Core.Sexp.Atom s
+let l ts = Core.Sexp.List ts
+let end_chunk _ = print_string "\001"
+
+let parse_result r =
+  (match r with
+  | Ok ts -> print_string (Core.String.append "Ok " (Core.Sexp.to_string (l ts)))
+  | Error e ->
+    print_string
+      (Core.String.concat " "
+         (Cons ("Error", Cons (e.Core.Sexp.Parse_error.message,
+          Cons (Core.Int.to_string e.Core.Sexp.Parse_error.offset,
+          Cons (Core.Int.to_string e.Core.Sexp.Parse_error.line,
+          Cons (Core.Int.to_string e.Core.Sexp.Parse_error.col, Nil))))))));
+  end_chunk ()
+
+let print s =
+  print_string (Core.Sexp.to_string s);
+  end_chunk ();
+  print_string (Core.Sexp.to_string_hum s);
+  end_chunk ()
+
+let singleton t = Cons (t, Nil)
+
+let parse s =
+  parse_result (Core.Result.map singleton (Core.Sexp.of_string s));
+  parse_result (Core.Sexp.of_string_many s)
+
+%%%% driver/test/test_declaration_splices.ml:8
+
+let constructor name = (name, Nil)
+let arm name = (Stag.Pattern.construct name Nil, Stag.Expr.string name)
+
+let enum names =
+  Cons
+    ( Stag.Toplevel.Type
+        { `name = "t"
+        ; `params = Nil
+        ; `kind = Stag.Type_decl.Kind.Variant (Stag.map constructor names) }
+    , Cons
+        ( Stag.Toplevel.let_ "to_string" (Cons ("x", Nil))
+            (Stag.Expr.Match (Stag.Expr.var "x", Stag.map arm names))
+        , Nil ) )
+
+let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+
+%%%% driver/test/test_declaration_splices.ml:31
+
+module Color = .~(enum (Cons ("Red", Cons ("Green", Nil))))
+
+let shown = print_endline (Color.to_string Color.Green)
+
+%%%% driver/test/test_declaration_splices.ml:59
+
+module Outer = struct
+  let before = 0
+  include .~(value "x" (Stag.Expr.int 1))
+  module Inner = struct
+    include .~(value "y" (Stag.Expr.apply (Stag.Expr.var "Int.add") (Cons (Stag.Expr.var "x", Cons (Stag.Expr.int 1, Nil)))))
+    module E = .~(enum (Cons ("A", Nil)))
+  end
+  let after = Inner.y
+end
+
+let shown = print_int (Int.add Outer.x Outer.after)
+
+%%%% driver/test/test_declaration_splices.ml:105
+
+let a = print_endline "a"
+include .~(Cons (Stag.Toplevel.let_ "b" Nil (Stag.Expr.App (Stag.Expr.var "print_endline", Stag.Expr.string "b")), Nil))
+let c = print_endline "c"
+include .~(Cons
+  (Stag.Toplevel.Expect_test
+     { `name = "generated"
+     ; `body =
+         Stag.Expr.Let ("u", Nil, None,
+           Stag.Expr.App (Stag.Expr.var "print_endline", Stag.Expr.string "hi"),
+           Stag.Expr.Expect "wrong") },
+   Nil))
+let%expect_test "written" = print_endline "w"; [%expect "wrong"]
+
+%%%% driver/test/test_declaration_splices.ml:157
+
+let pair = Cons (Stag.Expr.int 1, Cons (Stag.Expr.int 2, Nil))
+include .~(value "some" (Stag.Expr.construct "Some" pair))
+include .~(value "swap"
+  (Stag.Expr.Fun
+    ( Cons (("o", None), Nil)
+    , Stag.Expr.Match
+        ( Stag.Expr.var "o"
+        , Cons
+            ( ( Stag.Pattern.construct "Some" (Cons (Stag.Pattern.Var "a", Cons (Stag.Pattern.Var "b", Nil)))
+              , Stag.Expr.construct "Some" (Cons (Stag.Expr.var "b", Cons (Stag.Expr.var "a", Nil))) )
+            , Nil ) ) )))
+let shown = match swap some with Some (a, b) -> print_int a; print_int b
+
+%%%% driver/test/test_declaration_splices.ml:192
+
+include .~(Cons (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int (Int.neg 1)), Nil))
+let shown = print_int x
+
+%%%% driver/test/test_declaration_splices.ml:212
+
+let a = M.x
+module M = .~(value "x" (Stag.Expr.int 1))
+include .~(value "y" (Stag.Expr.string "y"))
+let b = y
+
+%%%% driver/test/test_declaration_splices.ml:237
+
+let f (c : E.t) = E.to_string c
+module E = .~(enum (Cons ("A", Nil)))
+
+%%%% driver/test/test_declaration_splices.ml:265
+
+include .~(value "b" (Stag.Expr.int 1))
+include .~(value "a" (Stag.Expr.int (Int.add b 1)))
+module N = struct
+  let c = Int.add a b
+end
+let shown = print_int N.c
+
+%%%% driver/test/test_declaration_splices.ml:296
+
+let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+include .~(value "x" (Stag.Expr.int 1))
+let shown = print_int x
+
+%%%% driver/test/test_declaration_splices.ml:316
+
+module Gen = struct
+  let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+end
+include .~(Gen.value "x" (Stag.Expr.int 1))
+let shown = print_int x
+
+%%%% driver/test/test_declaration_splices.ml:337
+
+include .~(Gen.value "x" (Stag.Expr.int 1))
+module Gen = struct
+  let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+end
+
+%%%% driver/test/test_declaration_splices.ml:358
+
+include .~(value "x" (Stag.Expr.int 1))
+let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+
+%%%% driver/test/test_declaration_splices.ml:381
+
+let two a e b f =
+  Cons (Stag.Toplevel.let_ a Nil e, Cons (Stag.Toplevel.let_ b Nil f, Nil))
+let x = "outer"
+module N = struct
+  let before = x
+  let p_before = print_string
+  include .~(two "x" (Stag.Expr.int 1) "print_string" (Stag.Expr.int 2))
+  let after = x
+  let p_after = print_string
+end
+let outside = (N.x, N.print_string)
+let shown = N.p_before N.before; print_int (Int.add N.after N.p_after)
+
+%%%% driver/test/test_declaration_splices.ml:423
+
+let x = 1
+module N = struct
+  include .~(value "y" (Stag.Expr.int x))
+  include .~(value "x" (Stag.Expr.int 2))
+  let z = x
+end
+let shown = print_int N.y; print_int N.z
+
+%%%% driver/test/test_declaration_splices.ml:459
+
+let two a e b f =
+  Cons (Stag.Toplevel.let_ a Nil e, Cons (Stag.Toplevel.let_ b Nil f, Nil))
+let x = "outer"
+module N = struct
+  let before = x
+  include .~(let _ = before in two "x" (Stag.Expr.int 1) "y" (Stag.Expr.var "before"))
+end
+
+%%%% driver/test/test_declaration_splices.ml:510
+
+let a = M.x
+module M = .~(Int.div 1 0; Nil)
+let b = M.y
+
+%%%% driver/test/test_declaration_splices.ml:530
+
+let y = Int.add 1 2
+module Int = .~(let u = Nope.x in Nil)
+
+%%%% driver/test/test_declaration_splices.ml:547
+
+include .~(let u = typo in value "x" (Stag.Expr.int 1))
+
+%%%% driver/test/test_declaration_splices.ml:560
+
+module M = .~(let u = typo in value "x" (Stag.Expr.int 1))
+
+%%%% driver/test/test_declaration_splices.ml:579
+
+let call f args = Stag.Expr.apply (Stag.Expr.var f) args
+let int n = call "Stag.Expr.int" (Cons (Stag.Expr.int n, Nil))
+include .~(
+  Cons (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1),
+  Cons (Stag.Toplevel.Include (call "value" (Cons (Stag.Expr.string "y", Cons (int 2, Nil)))),
+  Cons (Stag.Toplevel.Module_splice ("Inner", call "value" (Cons (Stag.Expr.string "z", Cons (int 3, Nil)))),
+  Nil))))
+let shown = print_int x; print_int y; print_int Inner.z
+
+%%%% driver/test/test_declaration_splices.ml:613
+
+include .~(value "a" (Stag.Expr.var "M.x"))
+module M = .~(value "x" (Stag.Expr.int 1))
+let shown = print_int a
+
+%%%% driver/test/test_declaration_splices.ml:640
+
+module P = struct
+  include .~(let _ = Q.b in value "a" (Stag.Expr.int 1))
+end
+module Q = .~(let _ = P.a in value "b" (Stag.Expr.int 2))
+
+%%%% driver/test/test_declaration_splices.ml:667
+
+include .~(value "x" (Stag.Expr.string "outer, included"))
+module Inner = struct
+  let x = "inner, written"
+  let seen = x
+end
+module Inner2 = struct
+  include .~(value "x" (Stag.Expr.string "inner, included"))
+  let seen = x
+end
+let shown = print_endline Inner.seen; print_endline Inner2.seen; print_endline x
+
+%%%% driver/test/test_declaration_splices.ml:708
+
+let x = 1
+include .~(value "x" (Stag.Expr.int 2))
+
+%%%% driver/test/test_declaration_splices.ml:722
+
+include .~(value "x" (Stag.Expr.int 2))
+let x = 1
+
+%%%% driver/test/test_declaration_splices.ml:736
+
+module M = struct end
+module M = .~(value "x" (Stag.Expr.int 2))
+
+%%%% driver/test/test_declaration_splices.ml:750
+
+include .~(value "x" (Stag.Expr.int 2))
+include .~(value "x" (Stag.Expr.int 3))
+
+%%%% driver/test/test_declaration_splices.ml:768
+
+include .~(value "x" (Stag.Expr.int x))
+
+%%%% driver/test/test_declaration_splices.ml:782
+
+module E = .~(let f (e : E.t) = e in enum Nil)
+
+%%%% driver/test/test_declaration_splices.ml:800
+
+module A = struct
+  let a = B.b
+end
+module B = .~(value "b" (Stag.Expr.int A.a))
+
+%%%% driver/test/test_declaration_splices.ml:822
+
+let one = 1
+include .~(value "x" (Stag.Expr.int one))
+
+%%%% driver/test/test_declaration_splices.ml:843
+
+module A = .~(enum (Cons ("C", Nil)))
+module B = .~(enum (Cons ("C", Nil)))
+let ok = (A.to_string A.C, B.to_string B.C)
+let wrong = A.to_string B.C
+
+%%%% driver/test/test_declaration_splices.ml:864
+
+type list['a] = Nil | Cons of 'a * list['a] | Extra
+module Stag = struct
+  let mine = 1
+end
+let l = Extra
+let m = Stag.mine
+let o = Some 1
+
+%%%% driver/test/test_declaration_splices.ml:889
+
+type list['a] = Nil | Cons of 'a * list['a]
+include .~(Cons (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1), Nil))
+
+%%%% driver/test/test_declaration_splices.ml:905
+
+include .~(value "X" (Stag.Expr.int 1))
+
+%%%% driver/test/test_declaration_splices.ml:918
+
+include .~(Cons (Stag.Toplevel.Type { `name = "t"; `params = Nil; `kind = Stag.Type_decl.Kind.Record Nil }, Nil))
+
+%%%% driver/test/test_declaration_splices.ml:934
+
+module M = .~(value "x" (Stag.Expr.apply (Stag.Expr.var "Int.add") (Cons (Stag.Expr.int 1, Cons (Stag.Expr.string "a", Nil)))))
+
+%%%% driver/test/test_declaration_splices.ml:949
+
+include .~(value "x" (Stag.Expr.var "nope"))
+
+%%%% driver/test/test_declaration_splices.ml:965
+
+let arms n =
+  match Int.equal n 0 with
+  | true -> Cons ((Stag.Pattern.Any, Stag.Expr.var "nope"), Nil)
+  | false -> Cons ((Stag.Pattern.Lit (Stag.Lit.Int n), Stag.Expr.int n), arms (Int.sub n 1))
+include .~(value "x" (Stag.Expr.Match (Stag.Expr.var "Int.max_value", arms 20)))
+
+%%%% driver/test/test_declaration_splices.ml:996
+
+include .~(Int.div 1 0; Nil)
+
+%%%% driver/test/test_declaration_splices.ml:1013
+
+include .~1
+
+%%%% driver/test/test_declaration_splices.ml:1027
+
+type option['a] = None | Some of 'a
+let o = Some 1
+let v = Stag.Expr.Var (Stag.Path.Name "x", o)
+
+%%%% driver/test/test_declaration_splices.ml:1078
+let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+let module_ name decls = Cons (Stag.Toplevel.Module (name, decls), Nil)
+let call f args = Stag.Expr.apply (Stag.Expr.var f) args
+let include_value name e =
+  Stag.Toplevel.Include
+    (call "Gen.value" (Cons (Stag.Expr.string name, Cons (e, Nil))))
+let type_ name kind =
+  Cons (Stag.Toplevel.Type { `name = name; `params = Nil; `kind = kind }, Nil)
+
+%%%% driver/test/test_declaration_splices.ml:1109
+include .~(Gen.module_ "G"
+  (Cons (Stag.Toplevel.let_ "before" Nil (Stag.Expr.var "x"),
+   Cons (Gen.include_value "x" (Gen.call "Stag.Expr.int" (Cons (Stag.Expr.int 5, Nil))),
+   Cons (Stag.Toplevel.let_ "after" Nil (Stag.Expr.var "x"), Nil)))))
+
+%%%% driver/test/test_declaration_splices.ml:1118
+let x = "outer"
+
+%%%% driver/test/test_declaration_splices.ml:1121
+let r = (G.before, G.after, G.x)
+
+%%%% driver/test/test_declaration_splices.ml:1138
+let probe = G.after
+let x = "outer"
+
+%%%% driver/test/test_declaration_splices.ml:1157
+let a = b
+let probe = G.after
+let x = "outer"
+
+%%%% driver/test/test_declaration_splices.ml:1162
+let b = G.x
+
+%%%% driver/test/test_declaration_splices.ml:1179
+let probe = y
+include .~(Gen.value "y" (Stag.Expr.int 1))
+
+%%%% driver/test/test_declaration_splices.ml:1195
+module M = struct
+  let probe = y
+end
+include .~(Gen.value "y" (Stag.Expr.int 1))
+
+%%%% driver/test/test_declaration_splices.ml:1215
+module A = struct
+  include .~(Gen.value "a" (Stag.Expr.int B.k))
+  let k = 10
+  let use_b = B.b
+end
+module B = struct
+  include .~(Gen.value "b" (Stag.Expr.int A.k))
+  let k = 20
+  let use_a = A.a
+end
+
+%%%% driver/test/test_declaration_splices.ml:1264
+type t = A | B
+include .~(Gen.value "show" (Stag.Expr.string "t"))
+include .~(Gen.value "eq" (Stag.Expr.var "show"))
+module N = struct
+  type u = C
+  include .~(derive "nshow")
+  let z = nshow
+end
+let derive name = Gen.value name (Stag.Expr.int 3)
+let r = (show, eq, N.z)
+
+%%%% driver/test/test_declaration_splices.ml:1292
+let first = N.x
+let x = "outer"
+module N = struct
+  module Inner = struct let f = x let t = (Inner2.h, 1) end
+  include .~(Gen.value "x" (Stag.Expr.int 1))
+  module Inner2 = struct let h = x end
+  include .~(Gen.module_ "Inner3" (Gen.value "q" (Stag.Expr.var "x")))
+  include .~(Gen.value "w" (Stag.Expr.var "Inner3.q"))
+end
+
+%%%% driver/test/test_declaration_splices.ml:1324
+module N = struct
+  include .~(Gen.module_ "Sub" (Cons (Gen.include_value "k" (Gen.call "Stag.Expr.var" (Cons (Stag.Expr.string "outer_v", Nil))), Nil)))
+  let v = Sub.k
+end
+let outer_v = 1
+
+%%%% driver/test/test_declaration_splices.ml:1348
+module X = struct
+  include .~(Gen.value "a" (Stag.Expr.int (f 0)))
+  let f %s
+end
+
+%%%% driver/test/test_declaration_splices.ml:1420
+module X = struct
+  include .~(Gen.value "zzz" (Stag.Expr.int (f 0)))
+  let f n = zzz
+end
+
+%%%% driver/test/test_declaration_splices.ml:1438
+module N = struct
+  include .~(Gen.value "a" (Stag.Expr.int A.N.zzz))
+end
+
+%%%% driver/test/test_declaration_splices.ml:1457
+module X = struct
+  include .~(Gen.value "a" (Stag.Expr.int (f 0)))
+  let f n = Int.add n y
+end
+
+%%%% driver/test/test_declaration_splices.ml:1522
+module M = .~(Cons (Stag.Toplevel.Type {`name = "option"; `params = Nil; `kind = Stag.Type_decl.Kind.Abstract}, Gen.value "x" (Stag.Expr.int 1)))
+
+%%%% driver/test/test_declaration_splices.ml:1543
+module M = .~(Cons (Stag.Toplevel.Type {`name = "option"; `params = Nil; `kind = Stag.Type_decl.Kind.Abstract}, Gen.value "x" (Gen.call "Int.add" (Cons (Stag.Expr.construct "None" Nil, Nil)))))
+
+%%%% driver/test/test_declaration_splices.ml:1556
+include .~(Gen.type_ "option" Stag.Type_decl.Kind.Abstract)
+let bad : int = Some 1
+
+%%%% driver/test/test_declaration_splices.ml:1567
+let bad : int = Some 1
+include .~(Gen.type_ "option" Stag.Type_decl.Kind.Abstract)
+
+%%%% driver/test/test_declaration_splices.ml:1581
+module N = struct
+  type list = L
+  let bad : int = Cons (1, Nil)
+end
+let also_bad : int = Cons (1, Nil)
+
+%%%% driver/test/test_declaration_splices.ml:1595
+let bad : int = Cons (1, Nil)
+module N = struct
+  type list = L
+end
+
+%%%% driver/test/test_declaration_splices.ml:1608
+module N = struct
+  module Stag = struct end
+  let bad : int = Gen.call "f" Nil
+end
+
+%%%% driver/test/test_declaration_splices.ml:1621
+module N = struct
+  module Stag = struct end
+  let bad : int = Some 1
+end
+
+%%%% driver/test/test_declaration_splices.ml:1638
+
+let head ty = match Stag.Type.expr ty with Stag.Type_expr.Con (Stag.Path.Ref r, _) -> r
+let first_field ty =
+  match Stag.Type.decl (head ty) with
+  | Some d -> (match d.kind with Stag.Type.Kind.Record (Cons ((f, _), _)) -> f)
+let update field e = Stag.Expr.Record_update (Stag.Expr.var "N.v", Cons ((field, e), Nil))
+module N = struct
+  type r = {x : int; y : bool}
+  let v = {x = 1; y = true}
+end
+type s = {x : string}
+
+%%%% driver/test/test_declaration_splices.ml:1655
+
+include .~(value "by_ref" (update (Stag.Path.Ref (first_field (type N.r))) (Stag.Expr.int 5)))
+include .~(value "by_name" (update (Stag.Path.Name "x") (Stag.Expr.int 6)))
+let shown = print_endline (Int.to_string by_ref.x); print_endline (Int.to_string by_name.x)
+
+%%%% driver/test/test_declaration_splices.ml:1662
+
+include .~(value "wrong" (update (Stag.Path.Name "y") (Stag.Expr.int 5)))
+
+%%%% driver/test/test_declaration_splices.ml:1667
+
+include .~(value "other" (update (Stag.Path.Ref (first_field (type s))) (Stag.Expr.string "a")))
+
+%%%% driver/test/test_diagnostic.ml:249
+let%expect_test "error" =
+  print_string "before\n  indented";
+  match 2 with 1 -> ()
+
+let%expect_test "different" =
+  let f x = print_int x; [%expect {| 1 |}] in f 1; f 2; print_string ""
+
+let%expect_test "different, with no output" =
+  let f x = (match x with 0 -> () | _ -> print_int x); [%expect] in f 0; f 1;
+  print_string "x"; [%expect {| x |}];
+  print_int (Int.div 1 0)
+
+%%%% driver/test/test_diagnostic.ml:307
+let f x = Int.add 1 (f x)
+let%expect_test "deep" = print_int (f 1)
+
+%%%% driver/test/test_eval.ml:10
+
+let lits = (1, true, "s", 'c', ())
+let tags = (`A, `B 1)
+let poly_record = {`a = 1; `b = false}
+let fn x = x
+
+%%%% driver/test/test_eval.ml:28
+
+let y = f `A
+let f x = match x with `A -> 1 | `B -> y
+
+%%%% driver/test/test_eval.ml:39
+
+let x = add x 1
+
+%%%% driver/test/test_eval.ml:48
+
+let z = g `B
+let g x = match x with `A -> 1 | `B -> z
+
+%%%% driver/test/test_eval.ml:60
+
+let h = let k u = h; u in k
+let called = h 7
+
+%%%% driver/test/test_eval.ml:73
+
+type t = A | B of int * bool
+type r = {x : int; y : bool}
+let of_t t = match t with A -> 0 | B (n, _) -> n
+let constructed = (A, B (1, true), of_t (B (2, true)))
+let r = {y = true; x = 3}
+let fields = (r.x, r.y)
+let matched = match r with {y = y; x = x} -> (x, y)
+let only_a t = match t with A -> 0
+let failure = only_a (B (1, true))
+
+%%%% driver/test/test_eval.ml:98
+
+type t = A of int
+let lits = (-1, -4611686018427387904, Int.add -2 3, Int.neg -5)
+let sign n = match n with -1 -> `Minus_one | 0 -> `Zero | _ -> `Other
+let signs = (sign -1, sign 0, sign 1)
+let only_minus_one t = match t with A -1 -> 0
+let matched = only_minus_one (A -1)
+let failure = only_minus_one (A -2)
+
+%%%% driver/test/test_eval.ml:144
+
+module N = struct
+  type r = {x : int; y : option[r]}
+end
+type s = {x : bool}
+let v : N.r = {x = 1; y = Some {x = -2; y = None}}
+let only_none (v : N.r) = match v with {x = _; y = None} -> 0
+let failure = only_none v
+
+%%%% driver/test/test_eval.ml:166
+
+module N = struct
+  type r = {x : int; y : option[r]}
+  type t = A of r | B of {`a : r} * r
+end
+type s = {x : bool}
+
+%%%% driver/test/test_eval.ml:211
+
+type t = P of (int * int) | Q of int * int
+let one = match P ((1, 2)) with Q (_, _) -> 0
+
+%%%% driver/test/test_eval.ml:216
+
+type t = P of (int * int) | Q of int * int
+let two = match Q (1, 2) with P _ -> 0
+
+%%%% driver/test/test_eval.ml:229
+
+let field = {`a = 1; `b = true}.`b
+let extended = {`c = 2 | {`a = 1; `b = true}}
+let restricted = {`a = 1; `b = true} \ `a
+let updated = {{`a = 1; `b = true} with `a = 5}
+let rest = match {`a = 1; `b = true} with {`a = a; ..rest} -> (a, rest)
+let lits = match 2 with 1 -> `One | 2 -> `Two | _ -> `Other
+let variant = match `B 3 with `A -> 0 | `B n -> n
+
+%%%% driver/test/test_eval.ml:252
+
+let code = .<(1, x)>.
+let wrap c = .<(.~c, .~c)>.
+let wrapped = wrap .<2>.
+
+%%%% driver/test/test_eval.ml:268
+
+let copies =
+  .~(let c = .<let count m = match m with `Z -> x | `S k -> count k in count (`S (`S `Z))>. in
+     .<((match {`x = 1; `y = 0} with {`x = x; ..rest} -> (.~c, rest)),
+        (match {`x = 2; `y = 0} with {`x = x; ..rest} -> (.~c, rest)))>.)
+let open_rest = match {`a = 1; `b = 2} with {`a = a; ..} -> a
+
+%%%% driver/test/test_eval.ml:284
+
+let twice c = .<.<.~(.~c)>.>.
+let built = twice .<.<1>.>.
+let embedding x = let h u = x in .<h ()>.
+let embedded = embedding 7
+
+%%%% driver/test/test_eval.ml:310
+
+let five = .~(.<5>.)
+let captured x = .~(.<(x, x)>.)
+let explicit y = .~(.<let z = x in z>.).{x = y}
+let in_quote = .<.~(.~(.<.<1>.>.))>.
+
+%%%% driver/test/test_eval.ml:364
+
+type abc = A | B | C
+let fails_at_runtime = match B with A -> 0
+let fails_at_expansion = .~(match C with A -> .<0>.)
+
+%%%% driver/test/test_eval.ml:386
+
+type t = C of (int * int)
+type u = D of int * int
+type box['a] = Box of 'a
+let c = C ((1, 2))
+let c2 = C (1, 2)
+let d = D (1, 2)
+let pair = (3, 4)
+let c' = C pair
+let first = match c with C ((a, b)) -> a
+let first2 = match c2 with C (a, b) -> a
+let whole = match c' with C p -> p
+let second = match d with D (a, b) -> b
+let some = Some (1, true)
+let boxed = Box (1, 2, 3)
+let nested = match Some (Box (1, 2), D (3, 4)) with Some (Box (a, b), D (c, d)) -> (a, b, c, d)
+let none = match some with None -> 0 | Some (n, _) -> n
+
+%%%% driver/test/test_exceptions.ml:34
+
+exception E
+exception F of int
+exception G of int * string
+exception H of (int * string)
+exception L of list[option[int]]
+module M = struct
+  exception E of bool
+  let e = E true
+end
+let e : exn = E
+let f = F 1
+let g = G (1, "x")
+let h = H (1, "x")
+let l = L (Cons (None, Nil))
+let es = Cons (E, Cons (M.E false, Cons (M.e, Nil)))
+
+%%%% driver/test/test_exceptions.ml:75
+
+exception E
+exception F of int
+exception G of int * string
+exception H of (int * string)
+let show s = print_endline s
+let describe f =
+  match f () with
+  | n -> show (String.append "returned " (Int.to_string n))
+  | exception E -> show "E"
+  | exception F 0 -> show "F 0"
+  | exception F n -> show (String.append "F " (Int.to_string n))
+  | exception G (n, s) -> print_string "G "; print_int n; show (String.append " " s)
+  | exception H p -> (match p with (n, s) -> print_string "H "; print_int n; show (String.append " " s))
+let main =
+  describe (fun u -> 1);
+  describe (fun u -> raise E);
+  describe (fun u -> raise (F 0));
+  describe (fun u -> raise (F 7));
+  describe (fun u -> raise (G (1, "g")));
+  describe (fun u -> raise (H (2, "h")));
+  describe (fun u -> Int.add 1 (raise E));
+  describe (fun u -> match raise (F 3) with () -> 0)
+
+%%%% driver/test/test_exceptions.ml:114
+
+exception E of int
+exception F
+let show s = print_endline s
+let name e =
+  match e with
+  | E n -> String.append "E " (Int.to_string n)
+  | F -> "F"
+  | _ -> "another"
+let inner f =
+  match f () with
+  | () -> show "inner: returned"
+  | exception F -> show "inner: F"
+  | exception e -> show (String.append "inner: re-raising " (name e)); raise e
+let outer f =
+  match inner f with
+  | () -> show "outer: returned"
+  | exception e -> show (String.append "outer: " (name e))
+let main =
+  outer (fun u -> ());
+  outer (fun u -> raise F);
+  outer (fun u -> raise (E 1));
+  outer (fun u -> raise Division_by_zero)
+
+%%%% driver/test/test_exceptions.ml:153
+
+exception E of string
+let show s = print_endline s
+let f x =
+  match x with
+  | 0 -> raise (E "value arm")
+  | n -> n
+  | exception E s -> show (String.append "caught " s); 0
+let g u =
+  match f 0 with
+  | n -> n
+  | exception E s -> show (String.append "outer caught " s); 1
+let h u =
+  match raise (E "scrutinee") with
+  | () -> ()
+  | exception E s -> raise (E (String.append "handler, after " s))
+let main =
+  print_int (g ());
+  show "";
+  match h () with
+  | () -> ()
+  | exception E s -> show (String.append "outer caught " s)
+
+%%%% driver/test/test_exceptions.ml:186
+
+exception E of int
+let show s = print_endline s
+let main =
+  match
+    (match raise (E 1) with
+     | () -> 0
+     | exception E n -> raise (E (Int.add n 10)))
+  with
+  | n -> show "unreachable"
+  | exception E n ->
+    (match (match n with 11 -> raise (E 100) | n -> n) with
+     | n -> show "unreachable"
+     | exception E m -> print_int n; print_string " then "; print_int m)
+
+%%%% driver/test/test_exceptions.ml:206
+
+exception E
+exception F
+let main =
+  match (match raise F with () -> 0 | exception E -> 1) with
+  | n -> print_int n
+  | exception F -> print_endline "F passed through"
+
+%%%% driver/test/test_exceptions.ml:219
+
+module M = struct
+  exception E
+  let raise_ u = raise E
+end
+module N = struct
+  exception E
+end
+exception E
+let which f =
+  match f () with
+  | () -> "none"
+  | exception N.E -> "N.E"
+  | exception E -> "E"
+  | exception M.E -> "M.E"
+let main =
+  print_endline (which M.raise_);
+  print_endline (which (fun u -> raise N.E));
+  print_endline (which (fun u -> raise E));
+  print_endline (match M.E with N.E -> "same" | E -> "same" | _ -> "different")
+
+%%%% driver/test/test_exceptions.ml:251
+
+let show s = print_endline s
+let try_ f =
+  match f () with
+  | s -> show s
+  | exception Division_by_zero -> show "Division_by_zero"
+  | exception Invalid_argument s -> show (String.append "Invalid_argument: " s)
+  | exception Failure s -> show (String.append "Failure: " s)
+let main =
+  try_ (fun u -> Int.to_string (Int.div 1 0));
+  try_ (fun u -> Int.to_string (Int.rem 1 0));
+  try_ (fun u -> Char.to_string (String.get "abc" 3));
+  try_ (fun u -> String.sub "abc" 2 2);
+  try_ (fun u -> Char.to_string (Char.of_code 256));
+  try_ (fun u -> Int.to_string (Int.of_string_exn "12a"));
+  try_ (fun u -> Int.to_string (Int.of_string_exn "12"))
+
+%%%% driver/test/test_exceptions.ml:282
+
+module M = struct
+  exception E of int * string
+  exception F of list[int]
+end
+exception G
+let main = raise (M.E (1, "x"))
+
+%%%% driver/test/test_exceptions.ml:297
+let main = raise (Invalid_argument "bad")
+%%%% driver/test/test_exceptions.ml:306
+
+module M = struct exception F of list[int] * option[exn] end
+exception G
+let main = raise (M.F (Cons (1, Nil), Some G))
+
+%%%% driver/test/test_exceptions.ml:322
+
+exception E of int * string
+let%expect_test "boom" =
+  print_endline "before";
+  [%expect {| before |}];
+  print_endline "after";
+  raise (E (1, "x"))
+let%expect_test "fine" = print_endline "fine"; [%expect {| fine |}]
+
+%%%% driver/test/test_exceptions.ml:345
+
+exception E of int
+let f x = match x with 0 -> raise (E 0) | n -> n
+let g x = match f x with n -> Some n | exception E n -> None
+let h e = match e with E n -> n | e -> raise e
+let reraise f = match f 0 with x -> x | exception e -> raise e
+let any = raise
+
+%%%% driver/test/test_exceptions.ml:462
+
+exception E
+exception F of int
+let name e = match e with E -> "E" | F n -> "F"
+let main = print_endline (name Division_by_zero)
+
+%%%% driver/test/test_exceptions.ml:476
+
+exception E
+exception F of int
+let name e = match e with E -> "E" | F 1 -> "F 1" | _ -> "other"
+let main =
+  print_endline (name E);
+  print_endline (name (F 1));
+  print_endline (name (F 2));
+  print_endline (name Division_by_zero)
+
+%%%% driver/test/test_exceptions.ml:507
+
+let loop n = loop n
+let main = match loop 0 with n -> n | exception e -> 0
+
+%%%% driver/test/test_exceptions.ml:519
+
+let deep n = Int.add 1 (deep n)
+let main = match deep 0 with n -> n | exception e -> 0
+
+%%%% driver/test/test_exceptions.ml:534
+
+exception E of int
+let code = .<fun x -> match Int.div 10 x with n -> n | exception Division_by_zero -> raise (E x)>.
+let f = .~code
+let main =
+  print_int (f 2);
+  print_endline "";
+  match f 0 with
+  | n -> print_int n
+  | exception E n -> print_string "E "; print_int n
+let raising = .<raise (E 5)>.
+let g = .~(.<fun u -> .~raising>.)
+let main2 = match g 0 with n -> n | exception E n -> print_endline " caught 5"; n
+
+%%%% driver/test/test_exceptions.ml:557
+
+exception E of int
+let c = .~(match raise (E 1) with () -> .<0>. | exception E n -> print_int n; print_endline " at compile time"; .<1>.)
+let main = print_int c
+
+%%%% driver/test/test_exceptions.ml:568
+
+exception E of int
+let c = .~(raise (E 1); .<0>.)
+
+%%%% driver/test/test_exceptions.ml:584
+
+exception E of int * string
+module M = .~(raise (E (1, "x")); Nil)
+
+%%%% driver/test/test_exceptions.ml:619
+
+module M = .~(
+  Cons (Stag.Toplevel.Exception ("E", Cons (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Nil)),
+  Cons (Stag.Toplevel.Exception ("F", Nil), Nil)))
+let main =
+  match raise (M.E 3) with
+  | () -> ()
+  | exception M.F -> print_endline "F"
+  | exception M.E n -> print_int n
+
+%%%% driver/test/test_exceptions.ml:646
+
+type tree = Leaf | Node of tree * tree
+exception E of tree
+let big n = match n with 0 -> Leaf | _ -> let t = big (Int.sub n 1) in Node (t, t)
+let t = big 60
+
+%%%% driver/test/test_exceptions.ml:657
+
+let catch n acc = match n with 0 -> acc | _ -> catch (Int.sub n 1) (match raise (E t) with () -> acc | exception E _ -> Int.add acc 1)
+let main = print_int (catch 1000 0)
+
+%%%% driver/test/test_exceptions.ml:690
+
+exception E
+let x = raise E
+let y = .~(match x with n -> .<1>. | exception E -> .<2>.)
+let z = .~(match x with n -> .<1>. | exception E -> .<3>.)
+
+%%%% driver/test/test_exceptions.ml:708
+
+exception E
+let x = Int.add 1 (raise E)
+let main = match x with n -> print_int n | exception E -> print_endline "caught"
+
+%%%% driver/test/test_exceptions.ml:722
+
+exception E
+let x = Int.add 1 (raise E)
+let%expect_test "first" = match x with n -> print_int n | exception E -> print_endline "caught"
+let%expect_test "second" = match x with n -> print_int n | exception E -> print_endline "caught"
+let%expect_test "unrelated" = print_endline "fine"; [%expect {| fine |}]
+
+%%%% driver/test/test_exceptions.ml:747
+
+type t = A | B
+let describe f = match f () with A -> "A" | B -> "B" | exception Failure s -> String.append "Failure " s
+let main =
+  print_endline (describe (fun u -> A));
+  print_endline (describe (fun u -> Int.of_string_exn "x"; B))
+
+%%%% driver/test/test_exceptions.ml:760
+
+exception A
+module M = struct type t = A | B end
+let describe (f : unit -> M.t) = match f () with A -> "M.A" | B -> "M.B" | exception A -> "exception A"
+let main =
+  print_endline (describe (fun u -> M.A));
+  print_endline (describe (fun u -> raise A))
+
+%%%% driver/test/test_exceptions.ml:774
+
+module N = struct exception A end
+type t = A | B
+let describe (v : t) = match v with A -> 1 | B -> 2 | exception N.A -> 3
+let lexical (v : t) = match v with A -> 1 | B -> 2 | exception A -> 3
+
+%%%% driver/test/test_exceptions.ml:792
+
+type r = {x : int}
+module T = struct type t = A | B end
+type u = B | C
+let v : option[r * T.t] = Some ({x = 1}, B)
+let n = match v with Some ({x = n}, B) -> n | Some _ -> 2 | None -> 3
+let main = print_int n
+
+%%%% driver/test/test_exceptions.ml:852
+
+include .~(Cons (Stag.Toplevel.let_ "f" (Cons ("x", Nil)) (Stag.Expr.Match (Stag.Expr.App (Stag.Expr.var "Int.of_string_exn", Stag.Expr.var "x"), %s)), Nil))
+let main = print_int (f "1"); print_int (f "x")
+
+%%%% driver/test/test_exceptions.ml:859
+Cons ((Stag.Pattern.Var "n", Stag.Expr.var "n"),
+        Cons ((Stag.Pattern.Exception (Stag.Pattern.construct "Failure" (Cons (Stag.Pattern.Any, Nil))), Stag.Expr.int 0), Nil))
+%%%% driver/test/test_exceptions.ml:863
+Cons ((Stag.Pattern.construct "Some" (Cons (Stag.Pattern.Exception Stag.Pattern.Any, Nil)), Stag.Expr.int 1), Nil)
+%%%% driver/test/test_exceptions.ml:874
+Cons ((Stag.Pattern.Exception Stag.Pattern.Any, Stag.Expr.int 1), Nil)
+%%%% driver/test/test_exceptions.ml:892
+
+let f x = match x with `A -> 1 | exception _ -> 2
+let g x = match x with `A -> 1 | _ -> 2 | exception _ -> 3
+
+%%%% driver/test/test_expect_test_runner.ml:65
+let%expect_test "pass" =
+  print_int (Int.add 3 2);
+  [%expect {| 5 |}];
+  print_endline "a";
+  print_endline "  b";
+  [%expect {|
+    a
+      b
+  |}]
+
+let%expect_test "fail" =
+  print_int 1;
+  [%expect {| 2 |}];
+  print_string "x";
+  [%expect];
+  [%expect {| unexpected |}];
+  print_string "a\nb\n\nc";
+  [%expect {| |}];
+  print_string "|}";
+  [%expect {| |}]
+
+%%%% driver/test/test_expect_test_runner.ml:131
+let%expect_test "t" =
+  print_int 1;
+  [%expect {| 1 |}];
+  print_string "late"
+
+module M = struct
+  let%expect_test "nested" =
+    print_string "a\nb"
+end
+
+%%%% driver/test/test_expect_test_runner.ml:170
+let%expect_test "error" =
+  print_int 1;
+  [%expect {| 2 |}];
+  print_int (Int.div 1 0);
+  [%expect {| never checked |}]
+
+let%expect_test "next" = print_int 1; [%expect {| 1 |}]
+
+%%%% driver/test/test_expect_test_runner.ml:197
+let x = print_endline "toplevel"; 3
+let%expect_test "uses x" = print_int x; [%expect {| 3 |}]
+let%expect_test "splice" = print_int .~(print_endline "compile"; .<1>.); [%expect {| 1 |}]
+
+%%%% driver/test/test_expect_test_runner.ml:211
+let%expect_test "t" = print_int 1
+%%%% driver/test/test_expect_test_runner.ml:223
+let%expect_test "not unit" = 1
+%%%% driver/test/test_expect_test_runner.ml:224
+let f x = [%expect {| |}]
+%%%% driver/test/test_expect_test_runner.ml:225
+let%expect_test "in quote" = let c = .<[%expect {| |}]>. in ()
+%%%% driver/test/test_expect_test_runner.ml:226
+let%expect_test "at compile time" = .~([%expect {| |}]; .<()>.)
+%%%% driver/test/test_expect_test_runner.ml:228
+let%expect_test "in a splice at runtime" = let c = .<.~([%expect]; .<()>.)>. in ()
+%%%% driver/test/test_expect_test_runner.ml:229
+let%expect_test "local" = let f x = [%expect] in f 1; f 2
+%%%% driver/test/test_expect_test_runner.ml:231
+let%expect_test "reached twice" =
+  let f x = print_int x; [%expect] in f 1; f 2
+
+%%%% driver/test/test_expect_test_runner.ml:234
+let%expect_test "unbound" = print_int y
+%%%% driver/test/test_expect_test_runner.ml:236
+let x = 1 let%expect_test "a" = () let%expect_test "a" = () let y = 2
+%%%% driver/test/test_expect_test_runner.ml:262
+let%expect_test "different" =
+  let f x = print_int x; [%expect {| 1 |}] in f 1; f 2; f 1
+
+let%expect_test "same, wrong" =
+  let f x = print_int x; [%expect {| 2 |}] in f 1; f 1
+
+let%expect_test "same, right" =
+  let f x = print_int x; [%expect {| 1 |}] in f 1; f 1
+
+%%%% driver/test/test_expect_test_runner.ml:293
+let%expect_test "match" =
+  match 1 with
+  | 1 -> print_int 1
+  | _ -> ()
+
+let%expect_test "let" =
+  let x = 2 in
+  print_int x
+
+let%expect_test "let then match" = let x = 3 in match x with _ -> print_int x
+
+let%expect_test "match then more" =
+  (match 4 with _ -> print_int 4);
+  print_int 5
+
+%%%% driver/test/test_expect_test_runner.ml:348
+let%expect_test "error" =
+  print_int 1;
+  [%expect {| 1 |}];
+  print_string "before";
+  match 2 with 1 -> ()
+
+%%%% driver/test/test_expect_test_runner.ml:396
+let%expect_test "t" = let x = 1 in print_int x; [%expect {| 1 |}]
+%%%% driver/test/test_expect_test_runner.ml:427
+let%expect_test "loops" = let loop x = loop x in loop ()
+%%%% driver/test/test_expect_test_runner.ml:429
+let%expect_test "b" = print_int 1
+%%%% driver/test/test_files.ml:59
+
+let x = B.y
+type t = B.u
+let f (n : t) = n
+
+%%%% driver/test/test_files.ml:66
+
+type u = int
+let y = 1
+let g = A.f
+
+%%%% driver/test/test_files.ml:92
+
+let p1 = print_endline "a1"
+let p2 = print_endline (B.s)
+
+%%%% driver/test/test_files.ml:98
+
+let p = print_endline "b"
+let s = "a2 (from b)"
+
+%%%% driver/test/test_files.ml:102
+ let p = print_endline "c" 
+%%%% driver/test/test_files.ml:105
+
+let p = print_endline "d"
+let f x = E.f x
+
+%%%% driver/test/test_files.ml:111
+
+let p = print_endline "e"
+let f x = D.f x
+
+%%%% driver/test/test_files.ml:147
+ let p = print_endline "a" 
+%%%% driver/test/test_files.ml:148
+ let p = print_endline "b" 
+%%%% driver/test/test_files.ml:149
+ let p = print_endline "c" let q = B.p 
+%%%% driver/test/test_files.ml:150
+ let p = print_endline "d" let q = A.p 
+%%%% driver/test/test_files.ml:180
+
+let p = print_endline "a1"
+let q = .~(print_endline "compile time"; .<B.r>.)
+
+%%%% driver/test/test_files.ml:184
+ let r = print_endline "b" 
+%%%% driver/test/test_files.ml:233
+
+let x = print_endline "a.x"; Int.add y (B.n)
+let y = print_endline "a.y"; 1
+let z = print_endline "a.z"; print_int x; print_endline ""
+
+%%%% driver/test/test_files.ml:240
+
+let m = print_endline "b.m"; 2
+let n = print_endline "b.n"; Int.add m (A.y)
+
+%%%% driver/test/test_files.ml:282
+ let p = print_endline "Lib.A"; B.q 
+%%%% driver/test/test_files.ml:285
+
+let p = print_endline "Lib.B"
+let q = print_endline "Lib.B.q"
+
+%%%% driver/test/test_files.ml:291
+ let p = print_endline "Lib.Sub.C"; D.p 
+%%%% driver/test/test_files.ml:292
+ let p = print_endline "Lib.Sub.D" 
+%%%% driver/test/test_files.ml:295
+ let p = print_endline "Main"; Lib.A.p 
+%%%% driver/test/test_files.ml:296
+ let p = print_endline "First" 
+%%%% driver/test/test_functions.ml:6
+
+let ident = fun x -> x
+let both = (ident 1, ident true)
+let k = fun x _ -> x
+let annotated = fun (x : int) (y : bool) -> cond y x x
+let curried = fun x -> fun y -> (x, y)
+let applied = (fun x -> add x 1) 2
+let weak = ident (fun x -> x)
+let local = let f = fun x -> x in (f 1, f true)
+let higher f = f 1
+let passed = higher (fun x -> eq x 2)
+
+%%%% driver/test/test_functions.ml:35
+
+let bad = fun (x : int) -> cond x 1 2
+
+%%%% driver/test/test_functions.ml:39
+
+let bad = (fun x -> add x 1) true
+
+%%%% driver/test/test_functions.ml:43
+
+let unbound = fun x -> y
+
+%%%% driver/test/test_functions.ml:62
+
+let adder = fun n -> fun x -> Int.add x n
+let add2 = adder 2
+let sums = (add2 1, add2 5, adder 10 1)
+let shadow = let x = 1 in (fun x -> x) 2
+let captured = let x = 1 in let f = fun y -> Int.add x y in let x = 100 in f x
+let twice f x = f (f x)
+let four = twice (fun x -> Int.add x x) 1
+
+%%%% driver/test/test_functions.ml:95
+
+let make c = .<fun x -> Int.add x .~c>.
+let made = .~(make .<1>.)
+let inc = .~(.<fun x -> .~((fun y -> .<Int.add .~y 1>.) .<x>.)>.)
+let applied = (made 2, inc 5)
+let hygiene = .~(let wrap c = .<fun x -> Int.add x .~c>. in wrap .<x>.)
+let x = 10
+let hygienic = hygiene 1
+
+%%%% driver/test/test_hygienic_code.ml:54
+let e_lib = Stag.Code.erase .< Core.Sexp.Atom (Core.Int.to_string x) >.
+%%%% driver/test/test_hygienic_code.ml:63
+
+let helper x = x
+let n = 1
+let e_lib = Stag.Code.erase .< Core.Sexp.Atom (Core.Int.to_string x) >.
+let e_function = Stag.Code.erase .< fun x -> Core.Sexp.sexp_of_int x >.
+let e_prim = Stag.Code.erase .< String.length "a" >.
+let e_own = Stag.Code.erase .< helper n >.
+let e_poly = Stag.Code.erase .< Core.List.map >.
+let e_binders =
+  Stag.Code.erase
+    .< let y = x in
+       match Some y with
+       | Some z -> (fun w -> {`a = w; `b = `B z}) y
+       | None -> raise (Failure "none")
+       | exception Failure s -> helper {`a = s; `b = `C} >.
+type r = { f : int }
+let e_record = Stag.Code.erase .< fun x -> { f = x.f } >.
+let e_nested = Stag.Code.erase .< .< Core.Int.to_string 3 >. >.
+let e_type = Stag.Code.erase .< type list[r] >.
+
+%%%% driver/test/test_hygienic_code.ml:134
+
+let under_z = .< fun z -> x >.
+let e_explicit = Stag.Code.erase .< fun z -> .~under_z.{x = z} >.
+let e_bound_in_let = Stag.Code.erase .< fun x -> .~under_z.{x = x} >.
+let e_free_in_let = Stag.Code.erase .< .~under_z.{x = x} >.
+let e_taken = Stag.Code.erase .< fun x_1 -> .~under_z.{x = (x, x_1)} >.
+let e_implicit = Stag.Code.erase .< fun x -> .~under_z >.
+let e_shadowing = Stag.Code.erase .< fun x -> fun x -> x >.
+
+%%%% driver/test/test_hygienic_code.ml:177
+
+let e_local = let k y = y in Stag.Code.erase .< k 1 >.
+
+%%%% driver/test/test_hygienic_code.ml:191
+
+let value name params code = Stag.Toplevel.let_ name params (Stag.Code.erase code)
+
+let sexp_of_pair =
+  .< fun p ->
+       match p with
+       | (a, b) ->
+         Core.Sexp.List
+           (Cons (Core.Sexp.Atom (Core.Int.to_string a), Cons (Core.Sexp.sexp_of_int b, Nil))) >.
+
+let to_string_x = .< Core.Int.to_string x >.
+
+let derive =
+  Cons (value "sexp_of_pair" Nil sexp_of_pair,
+  Cons (value "show" Nil .< fun s -> Core.Sexp.to_string s >.,
+  Cons (value "local" (Cons ("to_string", Nil)) .< Core.Int.to_string to_string >.,
+  Cons (value "helped" Nil .< H.helper 1 >.,
+  Cons (value "map" Nil .< Core.List.map >.,
+  Cons (value "code" Nil .< .< Core.Int.to_string 3 >. >., Nil))))))
+
+%%%% driver/test/test_hygienic_code.ml:214
+let helper x = Core.Int.succ x
+%%%% driver/test/test_hygienic_code.ml:223
+
+module Core = struct let x = 1 end
+module Sexp = struct end
+module List = struct end
+module Int = struct let to_string x = "shadowed" end
+module H = struct end
+type list['a] = Nil | Cons of 'a
+let to_string x = "shadowed"
+let sexp_of_int x = x
+include .~(Gen.derive)
+let%expect_test "derived" =
+  print_endline (show (sexp_of_pair (1, 2)));
+  print_endline (local 3);
+  print_endline (show (sexp_of_pair (helped, 0)));
+  print_endline (.~code);
+  map (fun x -> x) (Cons (1, Nil));
+  map (fun x -> x) (Cons ("a", Nil));
+  [%expect]
+
+%%%% driver/test/test_hygienic_code.ml:314
+
+let value name code = Cons (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)
+let before = 1
+module M = struct
+  include .~(value "g" .< "generated" >.)
+  let decls = value "of_g" .< (before, after, g, Inner.z) >.
+  module Inner = struct let z = 'z' end
+end
+module Inner = struct end
+let g = "outer g"
+include .~(M.decls)
+let after = "after"
+let%expect_test "values" =
+  match of_g with
+  | (a, b, c, d) ->
+    print_endline
+      (Core.String.concat ", "
+        (Cons (Core.Int.to_string a, Cons (b, Cons (c, Cons (Core.Char.to_string d, Nil))))));
+  [%expect]
+
+%%%% driver/test/test_hygienic_code.ml:384
+
+let value name code = Cons (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)
+include .~(value "h" .< g >.)
+include .~(value "g" .< 1 >.)
+
+%%%% driver/test/test_hygienic_code.ml:411
+
+let value name code = Cons (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)
+include .~(value "h" .< f >.)
+let f x = h
+
+%%%% driver/test/test_hygienic_code.ml:435
+
+let value name code = Cons (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)
+include .~(value "h" .< v >.)
+let v = Core.Int.succ h
+
+%%%% driver/test/test_hygienic_code.ml:462
+
+module Core = struct end
+include .~(Cons (Stag.Toplevel.let_ "bad" Nil
+  (Stag.Expr.Let ("x", Nil, None, Stag.Expr.string "s", Stag.Code.erase Gen.to_string_x)), Nil))
+
+%%%% driver/test/test_hygienic_code.ml:486
+
+let name e =
+  match e with
+  | Stag.Expr.App (Stag.Expr.Var (Stag.Path.Ref r, _), _) -> Stag.Value_ref.name r
+  | _ -> "?"
+let%expect_test "names" =
+  print_endline (name (Stag.Code.erase .< Core.Int.to_string x >.));
+  print_endline (name (Stag.Code.erase .< String.length x >.));
+  [%expect]
+
+%%%% driver/test/test_hygienic_code.ml:527
+
+let e_provider = Stag.Code.erase .< fun c -> .< fun x -> (.~c, .< x >.) >. >.
+let e_nested = Stag.Code.erase .< fun c -> .< fun x -> .< (.~(.~c), .< x >.) >. >. >.
+let e_kept = Stag.Code.erase .< fun c -> .< fun x -> .~c >. >.
+let e_reversed = Stag.Code.erase .< fun x -> fun y -> .~(.< (x, y) >.).{y = x; x = y} >.
+
+%%%% driver/test/test_hygienic_code.ml:569
+
+let value name code = Cons (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)
+let c1 = .< fun c -> .< fun x -> (.~c, .< x >.) >. >.
+
+%%%% driver/test/test_hygienic_code.ml:575
+include .~(Gen.value "shown" Gen.c1)
+%%%% driver/test/test_hygienic_code.ml:590
+
+let around c = Stag.Code.erase .< fun x -> (x, .~c) >.
+let e_free = around .< x >.
+let e_closed = around .< 1 >.
+let twice c = .< (.~c, .~c) >.
+let e_twice = Stag.Code.erase (twice .< fun x -> x >.)
+
+%%%% driver/test/test_hygienic_code.ml:613
+
+type r = { f : int }
+let e_fun = Stag.Code.erase .< (fun x -> x) (fun (y : int) -> y) >.
+let e_let =
+  Stag.Code.erase
+    .< let f (x : option[r]) (y : 'a) : list['a] = Cons (y, Nil) in
+       (f : option[r] -> int -> list[int]) >.
+
+%%%% driver/test/test_hygienic_code.ml:638
+
+let value name code = Cons (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)
+type r = { f : int }
+let v = .< (fun x -> x) (fun (y : int) -> y) >.
+let w =
+  .< let f (x : option[r]) (y : 'a) : list['a] = Cons (y, Nil) in
+     (f : option[r] -> int -> list[int]) >.
+
+%%%% driver/test/test_hygienic_code.ml:648
+
+type int = bool
+type option['a] = int
+type list['a] = int
+type r = int
+include .~(Gen.value "v" Gen.v)
+include .~(Gen.value "w" Gen.w)
+
+%%%% driver/test/test_hygienic_code.ml:680
+
+let value name code = Cons (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)
+let w = (fun x -> x) (fun x -> x)
+
+%%%% driver/test/test_hygienic_code.ml:686
+
+include .~(Gen.value "u1" .< Gen.w 1 >.)
+include .~(Gen.value "u2" .< Gen.w "a" >.)
+
+%%%% driver/test/test_hygienic_code.ml:705
+
+let e_raise = Stag.Code.erase .< fun raise -> (raise 1, Int.to_string (String.length "ab"), fun x -> .raise (Failure x)) >.
+
+%%%% driver/test/test_hygienic_code.ml:726
+
+module String = struct end
+module Int = struct end
+let raise = 1
+exception Failure
+let f =
+  fun raise ->
+    (raise 1, .Int.to_string (.String.length "ab"), fun x -> .raise (.Failure x))
+let shown = match f (fun n -> n) with | (_, s, _) -> print_endline s
+
+%%%% driver/test/test_inline_expansion.ml:4
+
+let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+let enum names =
+  Cons
+    ( Stag.Toplevel.Type
+        { `name = "t"
+        ; `params = Nil
+        ; `kind = Stag.Type_decl.Kind.Variant (Stag.map (fun name -> (name, Nil)) names) }
+    , Cons
+        ( Stag.Toplevel.let_ "to_string" (Cons ("x", Nil))
+            (Stag.Expr.Match
+               ( Stag.Expr.var "x"
+               , Stag.map (fun name -> (Stag.Pattern.construct name Nil, Stag.Expr.string name)) names ))
+        , Nil ) )
+
+%%%% driver/test/test_inline_expansion.ml:83
+
+include%inline .~(value "x" (Stag.Expr.int 1))
+end%inline
+
+let y = x
+
+%%%% driver/test/test_inline_expansion.ml:106
+
+include%inline .~(value "x" (Stag.Expr.int 1))
+  let x = 1
+end%inline
+
+%%%% driver/test/test_inline_expansion.ml:116
+
+include%inline .~(enum (Cons ("Red", Cons ("Green", Nil))))
+  (* The colors. *)
+  type t =
+    | Red
+    | Green
+  let to_string x = match x with
+    | Red -> "Red" (* first *)
+    | Green -> "Green"
+end%inline
+
+%%%% driver/test/test_inline_expansion.ml:134
+
+include%inline .~(value "x" (Stag.Expr.int 2))
+  let x = 1
+  let y = 2
+end%inline
+module M = struct
+  include%inline .~(enum (Cons ("A", Cons ("B", Nil))))
+    type t = A
+  end%inline
+end
+
+%%%% driver/test/test_inline_expansion.ml:174
+
+include%inline .~Nil
+  let x = 1
+end%inline
+include%inline .~Nil
+end%inline
+
+%%%% driver/test/test_inline_expansion.ml:197
+
+module%inline Color = .~(enum (Cons ("Red", Nil)))
+end%inline
+module Outer = struct
+  module%inline Inner = .~(value "x" (Stag.Expr.int 1))
+  end%inline
+end
+let shown = print_endline (Color.to_string Color.Red)
+
+%%%% driver/test/test_inline_expansion.ml:236
+
+let names = Cons ("A_long_constructor_name", Cons ("Another_long_constructor_name", Cons ("Yet_another_one", Nil)))
+module A = struct
+  module B = struct
+    include%inline .~(enum names)
+    end%inline
+  end
+end
+
+%%%% driver/test/test_inline_expansion.ml:276
+
+include%inline .~(value "x" (Stag.Expr.int 1))
+  let x = Int.add "not checked" 1
+  let y = 2
+end%inline
+let shown = print_int x
+
+%%%% driver/test/test_inline_expansion.ml:301
+
+include%inline .~(value "x" (Stag.Expr.int 1))
+  let x =
+end%inline
+
+%%%% driver/test/test_inline_expansion.ml:317
+
+include%inline .~(value "x" (Stag.Expr.int 1))
+  let x = 1
+
+%%%% driver/test/test_inline_expansion.ml:332
+
+include%inline .~(value "x" (Stag.Expr.int "one"))
+  let x = 1
+end%inline
+
+%%%% driver/test/test_inline_expansion.ml:348
+
+include%inline .~(raise (Failure "no"))
+end%inline
+
+%%%% driver/test/test_inline_expansion.ml:367
+
+let%expect_test "before" = print_endline "hi"; [%expect {| |}]
+include%inline .~(value "x" (Stag.Expr.int 1))
+end%inline
+let%expect_test "after" = print_int x; [%expect {| 2 |}]
+
+%%%% driver/test/test_inline_expansion.ml:396
+
+include%inline .~(value "x" (Stag.Expr.int 1))
+end%inline
+let crash = raise (Failure "boom")
+
+%%%% driver/test/test_inline_expansion.ml:421
+
+include%inline .~(value "x" (Stag.Expr.int 1))
+  let x = 1
+  include%inline .~(value "y" (Stag.Expr.int 2))
+  end%inline
+end%inline
+
+%%%% driver/test/test_inline_expansion.ml:484
+
+include%inline .~(value "x" (Stag.Expr.int 1)) (* derived *)
+end%inline
+include%inline .~(value "y" (Stag.Expr.int 2)) (* derived *) end%inline
+
+%%%% driver/test/test_inline_expansion.ml:512
+
+include%inline .~(value "x" (Stag.Expr.int 1))
+end%inline
+module M = struct
+  include%inline .~(value "y" (Stag.Expr.int 2))
+    let y = 3
+  end%inline
+end
+let%expect_test "y" = print_int M.y
+
+%%%% driver/test/test_inline_expansion.ml:548
+
+module M = struct
+  include%inline .~(value "y" (Stag.Expr.int 2))
+    let y = 2
+  end%inline
+end
+
+%%%% driver/test/test_inline_expansion.ml:560
+
+include%inline .~(Cons (Stag.Toplevel.Expect_test { `name = "t"; `body = Stag.Expr.apply (Stag.Expr.var "print_int") (Cons (Stag.Expr.int 1, Nil)) }, Nil))
+end%inline
+
+%%%% driver/test/test_inline_expansion.ml:584
+let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+include%inline .~(value "y" (Stag.Expr.int 2))
+end%inline
+module%inline M = .~(value "z" (Stag.Expr.int 3))
+  let z = 3
+end%inline
+
+%%%% driver/test/test_inline_expansion.ml:593
+
+include%inline .~(value "x" (Stag.Expr.int 1))
+end%inline
+
+%%%% driver/test/test_inline_expansion.ml:624
+
+let alias e = Cons (Stag.Toplevel.Type { `name = "u"; `params = Nil; `kind = Stag.Type_decl.Kind.Alias e }, Nil)
+type t = A
+let by_ref = Stag.Type.expr (type t)
+module N = struct
+  module A = struct type t = C end
+  include%inline .~(alias by_ref)
+    type u = A.t
+  end%inline
+  let f (x : u) = match x with A -> 1
+end
+module P = struct
+  module A = struct type t = C end
+  include%inline .~(alias (Stag.Type_expr.Con (Stag.Path.Name "A.t", Nil)))
+    type u = A.t
+  end%inline
+  let f (x : u) = match x with A.C -> 1
+end
+module Q = struct
+  type t = D
+  include%inline .~(alias by_ref)
+    type u = t
+  end%inline
+end
+
+%%%% driver/test/test_inline_expansion.ml:688
+
+include%inline .~(value "x" (Stag.Expr.apply (Stag.Expr.var "print_int") (Cons (Stag.Expr.string "a", Nil))))
+  let x = print_int "a"
+end%inline
+
+%%%% driver/test/test_inline_expansion.ml:694
+
+include%inline .~(value "x" (Stag.Expr.apply (Stag.Expr.var "print_int") (Cons (Stag.Expr.string "a", Nil))))
+  let x = print_int "b"
+end%inline
+
+%%%% driver/test/test_inline_expansion.ml:720
+
+type t = A | B
+let helper x = x
+let code = .< fun (x : t) -> match x with | A -> helper (String.length "a") | B -> Core.Int.succ 0 >.
+let gen = Cons (Stag.Toplevel.let_ "f" Nil (Stag.Code.erase code), Nil)
+
+%%%% driver/test/test_inline_expansion.ml:728
+
+module Core = struct end
+include%inline .~Gen.gen
+end%inline
+module M = struct
+  type t = A | B
+  let helper = 1
+  module String = struct end
+  include%inline .~Gen.gen
+  end%inline
+end
+
+%%%% driver/test/test_inline_expansion.ml:779
+
+let code = .< fun raise -> let x = raise 1 in .raise (Failure x) >.
+let gen = Cons (Stag.Toplevel.let_ "f" Nil (Stag.Code.erase code), Nil)
+
+%%%% driver/test/test_inline_expansion.ml:785
+
+include%inline .~Gen.gen
+end%inline
+
+%%%% driver/test/test_inline_expansion.ml:808
+
+let int = Stag.Type_expr.Con (Stag.Path.Name "int", Nil)
+let counter start =
+  .< struct
+    type t = {count : .~int}
+    let start = {count = .~(Stag.Expr.int start)}
+    let next c = {count = Int.add c.count 1}
+  end >.
+
+include%inline .~(counter 10)
+end%inline
+
+let shown = print_endline (Int.to_string (next start).count)
+
+%%%% driver/test/test_limits.ml:69
+
+let loop x = loop x
+let x = loop ()
+
+%%%% driver/test/test_limits.ml:82
+
+let x = .~(spin (%{nat 5}); .<1>.)
+let y = spin (%{nat 5})
+
+%%%% driver/test/test_limits.ml:101
+
+let double n = match n with Z -> Z | S m -> S (S (double m))
+let deep = %{String.concat (List.init 14 ~f:(fun _ -> "double ("))}%{nat 1}%{String.make 14 ')'}; 0
+
+%%%% driver/test/test_locations.ml:9
+let x = unbound
+%%%% driver/test/test_locations.ml:11
+let x = id M.y
+%%%% driver/test/test_locations.ml:13
+let x = add true 1
+%%%% driver/test/test_locations.ml:15
+let x = 1 2
+%%%% driver/test/test_locations.ml:17
+let x : int = true
+%%%% driver/test/test_locations.ml:19
+let x = (id : int -> bool)
+%%%% driver/test/test_locations.ml:21
+let x = (id : unbound)
+%%%% driver/test/test_locations.ml:24
+
+let x = 1
+let y = 2
+let x = 3
+
+%%%% driver/test/test_locations.ml:30
+let x = let f (a : nope) = 1 in 2
+%%%% driver/test/test_locations.ml:32
+let x = let f : bool = 1 in 2
+%%%% driver/test/test_locations.ml:64
+
+type t = A | B of int
+type r = {x : int; y : int}
+type s = {z : int}
+
+%%%% driver/test/test_locations.ml:267
+type t = 'a
+%%%% driver/test/test_locations.ml:269
+type t = {..'r}
+%%%% driver/test/test_locations.ml:271
+type t['a] = {..'a}
+%%%% driver/test/test_locations.ml:273
+type t[{..'r}] = 'r
+%%%% driver/test/test_locations.ml:276
+
+type t
+type u
+type t
+
+%%%% driver/test/test_locations.ml:283
+
+type t = A
+type u = B | A
+
+%%%% driver/test/test_locations.ml:288
+type t = {x : int; x : int}
+%%%% driver/test/test_locations.ml:290
+type t['a, 'b, {..'a}]
+%%%% driver/test/test_locations.ml:292
+type t = A of unbound
+%%%% driver/test/test_locations.ml:294
+type t = t * int
+%%%% driver/test/test_locations.ml:297
+
+type u = t
+type t = u * int
+
+%%%% driver/test/test_locations.ml:302
+type t['a] = 'a -> t['a * 'a]
+%%%% driver/test/test_locations.ml:305
+
+module M = struct end
+module N = struct end
+module M = struct end
+
+%%%% driver/test/test_locations.ml:312
+
+module M = struct
+  let x = 1
+  let x = 1
+end
+
+%%%% driver/test/test_locations.ml:339
+let x = .<let y = 1 in .~y>.
+%%%% driver/test/test_locations.ml:341
+let x = .~x
+%%%% driver/test/test_locations.ml:343
+let f = .~(id f)
+%%%% driver/test/test_locations.ml:345
+let x = .~1
+%%%% driver/test/test_locations.ml:347
+let x = .~(.<y>.)
+%%%% driver/test/test_locations.ml:349
+let x = .<.~(.<1>.).{a = 1; b; a}>.
+%%%% driver/test/test_locations.ml:351
+let x = .~(.<1>.).{a}
+%%%% driver/test/test_locations.ml:353
+let x = .~(match 1 with 2 -> .<1>.)
+%%%% driver/test/test_locations.ml:400
+let x = let y = 1 in match y with _ -> (y, true)
+%%%% driver/test/test_locations.ml:403
+let x = .~(.<a 1>.).{a = id}
+%%%% driver/test/test_modules.ml:6
+
+module M = struct
+  let x = 1
+  let f y = add y x
+  let g y = M.f y
+end
+let a = M.x
+let b = M.f 2
+
+%%%% driver/test/test_modules.ml:29
+
+let root = "s"
+module A = struct
+  let v = 1
+  module B = struct
+    let x = true
+    let from_a = v
+    let from_root = root
+    let self = B.x
+    let absolute = A.v
+  end
+  let y = B.x
+end
+let z = A.B.x
+let w = A.y
+
+%%%% driver/test/test_modules.ml:66
+
+let a = 1
+module A = struct
+  let b = 2
+  module B = struct
+    let c = A.d
+  end
+  let d = 3
+end
+let e = A.B.c
+
+%%%% driver/test/test_modules.ml:93
+
+let x = 1
+module M = struct
+  let x = true
+  let y = x
+  module N = struct
+    let z = x
+  end
+  let local x = x
+  let local_let = let x = () in x
+  let qualified_ignores_locals x = M.x
+end
+let root_x = x
+
+%%%% driver/test/test_modules.ml:126
+
+module N = struct
+  let x = 1
+end
+module M = struct
+  module N = struct
+    let x = true
+  end
+  let inner = N.x
+  module K = struct
+    let inner_too = N.x
+  end
+end
+let outer = N.x
+let explicit = M.N.x
+
+%%%% driver/test/test_modules.ml:163
+
+let x = 1
+module M = struct end
+let y = M.x
+
+%%%% driver/test/test_modules.ml:169
+
+module N = struct
+  let x = 1
+end
+module M = struct end
+let y = M.N.x
+
+%%%% driver/test/test_modules.ml:177
+
+module M = struct
+  module N = struct end
+end
+let y = M.N.K.x
+
+%%%% driver/test/test_modules.ml:186
+
+module M = struct
+  let x = 1
+end
+
+%%%% driver/test/test_modules.ml:193
+
+type t = A
+module M = struct end
+let y = M.A
+
+%%%% driver/test/test_modules.ml:199
+
+type t = A
+module M = struct end
+let y : M.t = A
+
+%%%% driver/test/test_modules.ml:205
+
+module N = struct
+  type r = {x : int}
+end
+module M = struct end
+let y r = r.M.N.x
+
+%%%% driver/test/test_modules.ml:246
+
+let main = (A.even 4, B.later)
+module A = struct
+  let even n = cond (eq n 0) true (B.odd n)
+end
+module B = struct
+  let odd n = cond (eq n 0) false (A.even n)
+  let later = C.value
+end
+module C = struct
+  let value = 'c'
+end
+
+%%%% driver/test/test_modules.ml:277
+
+module A = struct
+  let f x = B.g x
+end
+module B = struct
+  let g x = A.f; x
+end
+let use = (A.f 1, B.g true)
+
+%%%% driver/test/test_modules.ml:287
+
+module A = struct
+  let f x = B.g 1
+  let h = f true; B.g
+end
+module B = struct
+  let g y = A.f true; y
+end
+
+%%%% driver/test/test_modules.ml:297
+
+module A = struct
+  let w = B.g (id id)
+end
+module B = struct
+  let g y = A.w; y
+end
+
+%%%% driver/test/test_modules.ml:332
+
+module M = struct
+  type t = A | B of int
+  type r = {x : int; y : t}
+  let a = A
+  let mk n = {x = n; y = B n}
+  let get r = r.x
+  let annotated v : M.t = v
+end
+let b = M.B 1
+let r = {M.y = M.A; M.x = 2}
+let get_x r = r.M.x
+let annotated v : M.r = v
+let matched v = match v with M.B n -> n | M.A -> 0
+let record_pattern r = match r with {M.y = y} -> y
+
+%%%% driver/test/test_modules.ml:369
+
+type t = A
+module M = struct
+  type t = A
+  let inner = A
+  let outer : t = M.A
+end
+let root = A
+let qualified = M.A
+
+%%%% driver/test/test_modules.ml:380
+
+type t = A
+module M = struct
+  type t = A
+end
+let mixed : t = M.A
+
+%%%% driver/test/test_modules.ml:405
+
+type t = R
+type u = U
+module M = struct
+  type t = T
+  module N = struct
+    type s = S of t * u
+    let s = S (T, U)
+  end
+  let t : t = T
+  let root_u : u = U
+end
+let s = M.N.S (M.T, U)
+
+%%%% driver/test/test_modules.ml:438
+
+let tree = A.Node (B.Cons (A.Leaf, B.Nil))
+module A = struct
+  type tree = Leaf | Node of B.forest
+end
+module B = struct
+  type forest = Nil | Cons of A.tree * forest
+  type trees = A.tree * A.tree
+end
+let pair : B.trees = (A.Leaf, tree)
+
+%%%% driver/test/test_modules.ml:465
+
+module A = struct
+  type t = B.u
+end
+module B = struct
+  type u = int -> A.t
+end
+
+%%%% driver/test/test_modules.ml:474
+
+module A = struct
+  type t = u
+  type u = int
+end
+type u = A.t
+let x : u = 1
+
+%%%% driver/test/test_modules.ml:496
+
+type int = I
+
+%%%% driver/test/test_modules.ml:500
+
+type unit = bool
+
+%%%% driver/test/test_modules.ml:504
+
+module M = struct
+  type bool = B
+end
+type bool = int
+
+%%%% driver/test/test_modules.ml:511
+
+module M = struct
+  type unit = U
+  type int = bool
+  let u : unit = U
+  let i : int = true
+  module N = struct
+    let nested : unit = U
+  end
+end
+let root : unit = ()
+let qualified : M.unit = M.U
+
+%%%% driver/test/test_modules.ml:525
+
+module M = struct
+  type unit = U
+  let lit : unit = ()
+end
+
+%%%% driver/test/test_modules.ml:556
+
+module M = struct
+  let x = 1
+  type t = A
+  type r = {f : int}
+  module N = struct end
+end
+module K = struct
+  let x = true
+  type t = A
+  type r = {f : bool}
+  module N = struct end
+end
+let x = ()
+type t = A
+type r = {f : unit}
+module N = struct end
+let fields = ({M.f = 1}.M.f, {K.f = true}.K.f)
+
+%%%% driver/test/test_modules.ml:576
+
+module M = struct end
+module M = struct end
+
+%%%% driver/test/test_modules.ml:581
+
+module M = struct
+  module N = struct end
+  module N = struct end
+end
+
+%%%% driver/test/test_modules.ml:588
+
+module M = struct
+  let x = 1
+  let x = 2
+end
+
+%%%% driver/test/test_modules.ml:595
+
+module M = struct
+  type t = |
+  type t = int
+end
+
+%%%% driver/test/test_modules.ml:602
+
+module M = struct
+  type t = A
+  type u = A
+end
+
+%%%% driver/test/test_modules.ml:609
+
+module M = struct
+  type t = {x : int; x : int}
+end
+
+%%%% driver/test/test_modules.ml:615
+
+module M = struct
+  type t['a, 'a] = |
+end
+
+%%%% driver/test/test_modules.ml:651
+
+let v = M.x
+
+%%%% driver/test/test_modules.ml:655
+
+let v : M.t = 1
+
+%%%% driver/test/test_modules.ml:659
+
+let c = M.A
+
+%%%% driver/test/test_modules.ml:663
+
+let f p = p.M.x
+
+%%%% driver/test/test_modules.ml:667
+
+let r = {M.x = 1}
+
+%%%% driver/test/test_modules.ml:671
+
+let p v = match v with M.A -> 1
+
+%%%% driver/test/test_modules.ml:675
+
+let p v = match v with {M.x = _} -> 1
+
+%%%% driver/test/test_modules.ml:679
+
+type t = A of M.t
+
+%%%% driver/test/test_modules.ml:683
+
+module M = struct end
+let v = M.x
+
+%%%% driver/test/test_modules.ml:688
+
+module M = struct end
+let v : M.t = 1
+
+%%%% driver/test/test_modules.ml:693
+
+module M = struct end
+let c = M.A
+
+%%%% driver/test/test_modules.ml:698
+
+module M = struct end
+let f p = p.M.x
+
+%%%% driver/test/test_modules.ml:703
+
+module M = struct
+  let x = y
+end
+
+%%%% driver/test/test_modules.ml:728
+
+module M = struct
+  type t = A of int
+  type r = {x : int; y : int}
+  type s = {z : int}
+  type p['a] = |
+end
+
+%%%% driver/test/test_modules.ml:765
+
+module M = struct
+  let f x = add x 1
+  let inner = .<f 1>.
+end
+let outer = .<M.f 1>.
+
+%%%% driver/test/test_modules.ml:784
+
+let n = true
+module M = struct
+  let n = 5
+  let q u = .<n>.
+  let both = .<(n, M.n)>.
+  let local = .<let n = () in n>.
+  let root_code = .<.~(q_root ())>.
+end
+let q u = .<M.n>.
+let q_root u = .<n>.
+let spliced = .<.~(M.q ())>.
+let not_captured = .<let n = () in .~(M.q ())>.
+let captured = .<let n = () in .~(q_root ())>.
+
+%%%% driver/test/test_modules.ml:822
+
+module M = struct
+  let n = 5
+end
+let implicit = .~.<M.n>.
+let local_does_not_provide n = cond n () (); .~.<M.n>.
+
+%%%% driver/test/test_modules.ml:837
+
+module M = struct
+  let n = 5
+  let as_written = .~.<n>..{n}
+end
+
+%%%% driver/test/test_modules.ml:861
+
+module M = struct
+  let n = 1
+  let code = .<add n 1>.
+end
+let x = .~M.code
+
+%%%% driver/test/test_modules.ml:869
+
+module M = struct
+  let n = 1
+end
+let x = .~M.n
+
+%%%% driver/test/test_on_demand_types.ml:6
+
+let a = M.A 1
+let get r = r.M.x
+module M = struct
+  type t = A of int | B
+  type r = {x : t}
+end
+let b = get {M.x = a}
+
+%%%% driver/test/test_on_demand_types.ml:52
+
+let x = .~(print_endline "splice"; gen (M.S M.Z))
+let gen n = match n with M.Z -> .<{N.v = 0}>. | M.S _ -> .<{N.v = 1}>.
+module M = struct
+  type nat = Z | S of nat
+end
+module N = struct
+  type r = {v : int}
+end
+
+%%%% driver/test/test_on_demand_types.ml:83
+
+let x = A
+let y = add 1 true
+type t = A of unbound
+
+%%%% driver/test/test_on_demand_types.ml:93
+
+let x (v : t) = v
+let y = add 1 true
+type t = A of unbound
+
+%%%% driver/test/test_on_demand_types.ml:109
+
+let y = add 1 true
+type t = A of unbound
+
+%%%% driver/test/test_on_demand_types.ml:121
+
+type t = A of unbound
+let y = add 1 true
+
+%%%% driver/test/test_on_demand_types.ml:130
+
+let x = .~(print_endline "splice"; .<1>.)
+type t = A of unbound
+
+%%%% driver/test/test_on_demand_types.ml:143
+
+let f (x : a) = x
+let y = add 1 true
+type a = a
+
+%%%% driver/test/test_on_demand_types.ml:149
+
+let f (x : b) = x
+let y = add 1 true
+type a = b
+type b = a
+
+%%%% driver/test/test_on_demand_types.ml:165
+
+let x = .~(gen 0)
+let gen n = .<({M.f = M.A 1}).M.f>.
+module M = struct
+  type t = A of int
+  type r = {f : t}
+end
+
+%%%% driver/test/test_on_demand_types.ml:206
+
+module M = struct
+  let%expect_test "later" =
+    print_int (match N.A 2 with N.A n -> n);
+    [%expect {| 2 |}]
+end
+module N = struct
+  type t = A of int
+end
+
+%%%% driver/test/test_on_demand_types.ml:234
+
+let a = M.N.A
+module M = struct
+  type before = int
+  module N = struct
+    type t = A
+    type u = B of int
+  end
+  type after = { x : N.t }
+end
+
+%%%% driver/test/test_on_demand_types.ml:264
+
+let y = add 1 true
+type t['a, 'a] = int
+
+%%%% driver/test/test_on_demand_types.ml:269
+
+let y = add 1 true
+module M = struct
+  type t = A | A
+end
+module M = struct end
+
+%%%% driver/test/test_parse_and_check.ml:6
+type nat = Z | S of nat
+type list['a] = Nil | Cons of 'a * list['a]
+type option['a] = None | Some of 'a
+type stmt[{..'a}] = Stmt of <unit>{..'a} * list[stmt[{..'a}]]
+
+%%%% driver/test/test_parse_and_check.ml:76
+type point = {`x : int; `y : int}
+type with_x[{..'a}] = {`x : int; ..'a}
+type holder = { p : {`x : int; `y : int} }
+type stream['a] = {`head : 'a; `tail : unit -> stream['a]}
+type tree = [`Leaf of int | `Node of list[tree]]
+type pair = [`A of pair] * int
+type rows[{..'a}] = {`x : rows[{..'a}]; ..'a}
+type e = |
+type abstract
+
+%%%% driver/test/test_parse_and_check.ml:139
+
+      type nat = Z | S of nat
+      type list['a] = Nil | Cons of 'a * list['a]
+
+      (* [power n c] is a list of [n] copies of [c]. *)
+      let power n c =
+        match n with
+        | Z -> .< Nil >.
+        | S m -> .< Cons (.~c, .~(power m c)) >.
+
+      let three = S (S (S Z))
+      let cube x = .~(power three .<x>.)
+      let used = cube 7
+      
+%%%% driver/test/test_parse_and_check.ml:177
+
+          let lit = {`x = 1; `y = true}
+          let empty = {}
+          let get_x r = r.`x
+          let extend r = {`z = 1 | r}
+          let restrict r = r \ `x
+          let update r = {r with `x = true}
+          let nested r = r.`a.`b
+          let rest r = match r with {`a = a; `b = _; ..others} -> (a, others)
+          let open_ r = match r with {`a = a; ..} -> a
+          let tags x = match x with `A n -> n | `B -> 0 | `C (a, b) -> add a b
+          let sequence x = id x; eq x 1
+
+          type point = {x : int; y : int}
+          let origin = {x = 0; y = 0}
+          let get_y p = p.y
+
+          module M = struct
+            type t = A | B of int * bool
+            let make n = B (n, true)
+            let first t = match t with A -> 0 | B (n, _) -> n
+            module N = struct let deep = first (make 1) end
+          end
+          let deep = M.N.deep
+          let annotated (t : M.t) = t
+          let quoted (c : <int>{..'r}) = .< (.~c.{}, x) >.
+          
+%%%% driver/test/test_poly_records.ml:6
+
+let lit = {`x = 1; `y = true}
+let empty = {}
+let get_x r = r.`x
+let extend r = {`z = 1 | r}
+let extend_many r a = {`y = a; `z = 1 | r}
+let restrict r = r \ `x
+let update r = {r with `x = true}
+let nested r = r.`a.`b
+let lit_x = {`x = 1; `y = 2}.`x
+let extend_lit = {`z = 'c' | {`x = 1}}
+let restrict_lit = {`x = 1; `y = 2} \ `x
+let two_fields r = add r.`x r.`y
+
+%%%% driver/test/test_poly_records.ml:39
+
+let shadow = {`x = true | {`x = 1}}
+let shadow_x = {`x = true | {`x = 1}}.`x
+let revealed = ({`x = true | {`x = 1}} \ `x).`x
+let update_shadow = {{`x = true | {`x = 1}} with `x = 'c'}
+let update_shadow_inner = ({{`x = true | {`x = 1}} with `x = 'c'} \ `x).`x
+let restrict_twice = {`x = true | {`x = 1}} \ `x \ `x
+let extend_restrict r = {`x = 1 | r} \ `x
+let extend_get r = {`x = 1 | r}.`x
+let reveal r = ({`x = 1 | r} \ `x).`x
+
+%%%% driver/test/test_poly_records.ml:66
+
+let update_missing = {{`y = 1} with `x = 1}
+
+%%%% driver/test/test_poly_records.ml:70
+
+let restrict_missing = {`y = 1} \ `x
+
+%%%% driver/test/test_poly_records.ml:74
+
+let access_missing = {}.`x
+
+%%%% driver/test/test_poly_records.ml:78
+
+let get_y r = r.`y
+let closed = get_y {`x = 1}
+
+%%%% driver/test/test_poly_records.ml:83
+
+let restrict_all r = ({`x = 1 | {}} \ `x).`x
+
+%%%% driver/test/test_poly_records.ml:118
+
+let changed = {{`x = 1; `y = 2; `z = 3} with `x = true; `y = "s"}
+let update_fn r v = {r with `x = v}
+
+%%%% driver/test/test_poly_records.ml:131
+
+let literal = {`x = 1; `y = 2; `x = 2}
+
+%%%% driver/test/test_poly_records.ml:135
+
+let extension r = {`x = 1; `x = 2 | r}
+
+%%%% driver/test/test_poly_records.ml:139
+
+let update r = {r with `x = 1; `x = 2}
+
+%%%% driver/test/test_poly_records.ml:143
+
+let pattern r = match r with {`x = a; `x = b} -> a
+
+%%%% driver/test/test_poly_records.ml:147
+
+let annotation (r : {`x : int; `x : bool}) = r
+
+%%%% driver/test/test_poly_records.ml:151
+
+type t = {`x : int; `x : int; ..'r}
+
+%%%% driver/test/test_poly_records.ml:167
+
+let closed r = match r with {`x = a; `y = b} -> add a b
+let open r = match r with {`x = a; ..} -> a
+let rest r = match r with {`x = a; ..rest} -> (a, rest)
+let rest_reveals_shadowed =
+  match {`x = true | {`x = 1}} with {`x = a; ..rest} -> (a, rest.`x)
+let nested r = match r with {`p = {`x = a; ..}; ..} -> a
+let empty r = match r with {} -> 1
+let with_literals r = match r with {`x = 1; ..} -> true | _ -> false
+
+%%%% driver/test/test_poly_records.ml:178
+
+let closed_mismatch = match {`x = 1; `y = 2} with {`x = a} -> a
+
+%%%% driver/test/test_poly_records.ml:182
+
+let duplicate_rest r = match r with {`x = a; ..a} -> a
+
+%%%% driver/test/test_poly_records.ml:204
+
+type point = {`x : int; `y : int}
+type with_x[{..'r}] = {`x : int; ..'r}
+type box['a] = {`contents : 'a}
+type holder = {p : point}
+let origin : point = {`x = 0; `y = 0}
+let get (b : box[int]) = b.`contents
+let x_of (r : with_x[{..'r}]) = r.`x
+let x_of_origin = x_of origin
+let hold = {p = origin}
+module M = struct
+  type t = A
+  type r = {`f : t}
+  type v[{..'r}] = [`A of t | `B of unit; ..'r]
+end
+let m r = (r : M.r)
+
+%%%% driver/test/test_poly_records.ml:222
+
+let not_a_point : point = {`x = 0}
+type point = {`x : int; `y : int}
+
+%%%% driver/test/test_poly_records.ml:252
+
+let r = {`f = id}
+let weak = {`f = id id}
+let ext = {`g = id | r}
+let ext_weak = {`g = id | id r}
+let field = r.`f
+let restricted = ext \ `g
+let updated = {r with `f = {}}
+let used_twice = (r.`f 1, r.`f true)
+let local = let p = {`f = id} in (p.`f 1, p.`f true)
+
+%%%% driver/test/test_poly_records.ml:279
+
+let recursive = let p = {`a = id; `b = p.`a} in p
+let rest_binds = let y = match {`x = id} with {`x = _; ..y} -> (y, id) in y
+let tag_binds = let y = match `A id with `A y -> y in y
+let splice_value = .<{`f = .~.<id>.}>.
+let splice_not_value = .<{`f = .~(id .<id>.) | {}}>.
+
+%%%% driver/test/test_poly_records.ml:298
+
+let label = .<{`x = 1}.`x>.
+let var_and_label = .<{`y = y}>.
+let outside = let r = {`x = 1} in .<r.`x>.
+let extend_inside c = .<{`z = 1 | .~c} \ `z>.
+let pattern_rest = .<match r with {`x = x; ..rest} -> (x, rest)>.
+
+%%%% driver/test/test_poly_records.ml:317
+
+let same_row (c : <int>{..'r}) (r : {..'r}) = c
+let ok = same_row .<x>. {`x = 1}
+let captured c (r : {..'r}) = .<let y = 1 in .~(c : <int>{..'r})>.; r
+
+%%%% driver/test/test_poly_records.ml:323
+
+let same_row (c : <int>{..'r}) (r : {..'r}) = c
+let missing = same_row .<x>. {}
+
+%%%% driver/test/test_poly_records.ml:343
+
+let record_vs_variant = (`A).`x
+
+%%%% driver/test/test_poly_records.ml:347
+
+let record_vs_int = 1.`x
+
+%%%% driver/test/test_poly_records.ml:351
+
+let record_vs_code = .<1>. \ `x
+
+%%%% driver/test/test_poly_records.ml:355
+
+let field_type = add {`x = true}.`x 1
+
+%%%% driver/test/test_poly_records.ml:359
+
+let different_rows r =
+  ((match r with {`x = _} -> 1), (match r with {`y = _} -> 1))
+
+%%%% driver/test/test_poly_records.ml:395
+
+let access = let get r = r.`x in (get {`x = 1}, get {`x = true; `y = 1})
+let restriction =
+  let drop r = r \ `x in (drop {`x = 1}, drop {`x = true; `y = 1})
+let update =
+  let set r = {r with `x = 0} in (set {`x = true}, set {`x = (); `y = 1})
+let pattern =
+  let rest r = match r with {`x = _; ..rest} -> rest in
+  (rest {`x = 1}, rest {`x = 1; `y = 1})
+
+%%%% driver/test/test_poly_records.ml:416
+
+let r = {`f = id; `g = id}
+let field = (id r).`f
+let restricted = id r \ `g
+
+%%%% driver/test/test_poly_records.ml:431
+
+let absent c (r : {..'d}) =
+  .<.<let z = 1 in .~.~(c : <<'a>{..'c}>{..'d})>.>.; r
+
+%%%% driver/test/test_poly_records.ml:441
+
+let occurs r = cond true r.`x r
+
+%%%% driver/test/test_poly_records.ml:445
+
+let cyclic r = cond true {`x = 1 | r} {`y = 1 | r}
+
+%%%% driver/test/test_poly_records.ml:449
+
+type t = {`next : t}
+
+%%%% driver/test/test_poly_records.ml:453
+
+type a = {`b : b}
+type b = [`A of a]
+
+%%%% driver/test/test_poly_records.ml:458
+
+type t = T of {`next : t}
+let deref t = match t with T r -> r.`next
+
+%%%% driver/test/test_poly_variants.ml:10
+
+let a = `A 1
+let b = `B
+let unit_arg = `B ()
+let c x = `C x
+let nested = `A (`B 1)
+let pair = (`A, `B)
+let same_type = cond true `A `B
+
+%%%% driver/test/test_poly_variants.ml:33
+
+let f v = match v with `A n -> n | `B -> 0
+let applied = f `B
+
+%%%% driver/test/test_poly_variants.ml:40
+
+let with_any v = match v with `A -> 1 | _ -> 0
+let with_var v = match v with `A -> 1 | x -> 0
+let var_first v = match v with x -> x | `A -> `B
+let repeated v = match v with `A 1 -> 1 | `A _ -> 2
+
+%%%% driver/test/test_poly_variants.ml:47
+
+let f v = match v with `A n -> n | `B -> 0
+let unhandled = f `C
+
+%%%% driver/test/test_poly_variants.ml:53
+
+let argument_mismatch v = match v with `A 1 -> 1 | `A -> 2
+
+%%%% driver/test/test_poly_variants.ml:144
+
+type option['a] = None | Some of 'a
+let two_tags v k = match v with `A -> 1 | `B -> 2 | other -> k other
+let refutable v k = match v with `A 0 -> 0 | other -> k other
+let refutable_then_irrefutable v k =
+  match v with `A 0 -> 0 | `A _ -> 1 | other -> k other
+let tuple v k = match v with `A (x, _) -> x | other -> k other
+let refutable_tuple v k = match v with `A (x, 1) -> x | other -> k other
+let record v k = match v with `A {`x = x; ..r} -> x | other -> k other
+let nominal v k = match v with `A (Some x) -> x | other -> k other
+let nested_variant v k = match v with `A `B -> 1 | other -> k other
+let removed_once v k = match v with `A x -> x | `A y -> y | other -> k other
+let shadowed_tag v =
+  match v with
+  | `A n -> n
+  | other -> (match other with `A b -> cond b 1 2 | _ -> 0)
+let later_cases v k = match v with `A -> 1 | other -> k other | `B -> 2
+
+%%%% driver/test/test_poly_variants.ml:181
+
+type option['a] = None | Some of 'a
+let pair p = match p with (`A, `B) -> 1
+let inner v = match v with `A `B -> 1
+let in_option o = match o with Some `A -> 1 | None -> 0
+let option_in_tag v = match v with `Some (Some x) -> x | `None -> 0
+let in_record r = match r with {`x = `A} -> 1
+let tuple_of_tags = (`A (Some 1), `B (1, true))
+
+%%%% driver/test/test_poly_variants.ml:204
+
+type ab = [`A of int | `B]
+type with_c[{..'r}] = [`C of bool; ..'r]
+type wrapper = W of ab
+let a : ab = `A 1
+let c : with_c[{`D : unit}] = `D
+let w = W `B
+let open_param (v : with_c[{..'r}]) = v
+
+%%%% driver/test/test_poly_variants.ml:214
+
+type ab = [`A of int | `B]
+let bad : ab = `C
+
+%%%% driver/test/test_poly_variants.ml:219
+
+type dup = [`A of int | `A of bool]
+
+%%%% driver/test/test_poly_variants.ml:242
+
+let v = `A id
+let weak = `A (id id)
+let weak_row = id `A
+let matched = match `A with `A -> id
+let use = (cond true v `B, cond true v `C)
+
+%%%% driver/test/test_poly_variants.ml:261
+
+let inject = .< `A x >.
+let match_inside = .< match `A 1 with `A x -> x | other -> 0 >.
+let residual_spliced k = .< match v with `A -> 0 | other -> .~(k .< other >.) >.
+
+%%%% driver/test/test_poly_variants.ml:276
+
+let unknown c (v : [..'r]) =
+  .< let y = 1 in .~(c : <int>{..'r}) >.;
+  v
+let absent c (v : [..'d]) =
+  .< .< let z = 1 in .~(.~(c : <<'a>{..'c}>{..'d})) >. >.;
+  v
+
+%%%% driver/test/test_poly_variants.ml:293
+
+let variant_vs_record = match {} with `A -> 1
+
+%%%% driver/test/test_poly_variants.ml:297
+
+let variant_vs_tuple = add `A 1
+
+%%%% driver/test/test_poly_variants.ml:301
+
+let argument = cond true (`A 1) (`A true)
+
+%%%% driver/test/test_poly_variants.ml:305
+
+let closed = match `C with `A -> 1 | `B -> 2
+
+%%%% driver/test/test_poly_variants.ml:309
+
+let maybe_c v =
+  cond true v `C;
+  match v with `A -> 1
+
+%%%% driver/test/test_poly_variants.ml:348
+
+let unit_arg = `A ()
+type t = [`A of ()]
+type c = C of ()
+
+%%%% driver/test/test_poly_variants.ml:365
+
+let unit_literal v k = match v with `A () -> 0 | other -> k other
+let closed_record v k = match v with `A {`x = n} -> n | other -> k other
+
+%%%% driver/test/test_poly_variants.ml:378
+
+let closed =
+  let f v = match v with `A x -> x in
+  (f (`A 1), f (`A true))
+let residual =
+  let f v k = match v with `A -> 1 | other -> k other in
+  ( f (`B 1) (let fn o = match o with `B n -> n in fn),
+    f (`C true) (let fn o = match o with `C b -> cond b 1 2 in fn) )
+
+%%%% driver/test/test_poly_variants.ml:396
+
+type t[{..'r}] = [`A of int; ..'r]
+
+%%%% driver/test/test_poly_variants.ml:402
+
+let residual (v : t[{`A : bool}]) =
+  match v with
+  | `A n -> n
+  | other -> (match other with `A b -> cond b 1 2)
+
+%%%% driver/test/test_poly_variants.ml:413
+
+let closed (v : t[{`A : bool}]) = match v with `A n -> 1
+
+%%%% driver/test/test_poly_variants.ml:419
+
+let repeated_tag (v : t[{`A : bool}]) = match v with `A n -> 1 | `A b -> 2
+
+%%%% driver/test/test_poly_variants.ml:440
+
+let same (r : {..'r}) (v : [..'r]) = (r, v)
+let ok = same {`A = 1} (`A 2)
+let matched r v =
+  same r v;
+  cond true r.`A (match v with `A n -> n)
+
+%%%% driver/test/test_poly_variants.ml:448
+
+let same (r : {..'r}) (v : [..'r]) = (r, v)
+let missing = same {`A = 1} `B
+
+%%%% driver/test/test_poly_variants.ml:467
+
+let occurs v = cond true v (`A v)
+
+%%%% driver/test/test_poly_variants.ml:471
+
+let cyclic (a : [`A; ..'r]) (b : [`B; ..'r]) = cond true a b
+
+%%%% driver/test/test_poly_variants.ml:475
+
+type t = [`Nil | `Cons of int * t]
+
+%%%% driver/test/test_poly_variants.ml:479
+
+type t = T of [`Nil | `Cons of int * t]
+let two = T (`Cons (1, T `Nil))
+
+%%%% driver/test/test_prims.ml:21
+
+let main1 = print_string "a"; print_char 'b'; print_int 42; print_endline "!"
+let main2 = print_int (Int.neg 7); print_endline ""
+
+%%%% driver/test/test_prims.ml:37
+
+let show x = print_endline (Int.to_string x)
+let show_bool b = match b with true -> print_endline "true" | false -> print_endline "false"
+let main3 =
+  show (Int.add 3 4); show (Int.sub 3 4); show (Int.mul 3 4);
+  show (Int.div 7 2); show (Int.div -7 2); show (Int.rem -7 2);
+  show (Int.compare 1 2); show (Int.compare 2 2); show (Int.compare 3 2);
+  show_bool (Int.equal 1 1); show_bool (Int.lt 1 2); show_bool (Int.le 2 2);
+  show_bool (Int.gt 1 2); show_bool (Int.ge 1 2);
+  show (Int.of_string_exn "-12"); show (Int.of_string_exn "4611686018427387903");
+  show (Int.add 4611686018427387903 1)
+
+%%%% driver/test/test_prims.ml:78
+
+let show_bool b = match b with true -> print_endline "true" | false -> print_endline "false"
+let main4 =
+  print_endline (String.append "ab" "cd");
+  print_int (String.length "hello"); print_endline "";
+  print_char (String.get "hello" 1); print_endline "";
+  print_endline (String.sub "hello" 1 3);
+  show_bool (String.equal "a" "a");
+  print_int (String.compare "a" "b"); print_endline "";
+  show_bool (Char.equal 'a' 'b');
+  print_int (Char.code 'a'); print_endline "";
+  print_char (Char.of_code 98); print_endline "";
+  print_endline (Char.to_string 'c');
+  show_bool (Bool.not true);
+  show_bool (Bool.equal false false)
+
+%%%% driver/test/test_prims.ml:117
+
+let add = Int.add
+let incr = Int.add 1
+let sub = String.sub
+
+%%%% driver/test/test_prims.ml:128
+ let x = Int.add true 
+%%%% driver/test/test_prims.ml:200
+
+let div = Int.div 10
+let main5 = print_int (div 3)
+let boom = div 0
+
+%%%% driver/test/test_prims.ml:217
+
+let x = .~(print_endline "compiling"; .<Int.add 1 2>.)
+let f n = .<print_int .~n>.
+let main6 = .~(f .<Int.mul x 10>.)
+let g = .<Int.div 1 0>.
+let main9 = print_int (Int.add x 1)
+
+%%%% driver/test/test_prims.ml:235
+ let h = .~(Int.div 1 0; .<0>.) 
+%%%% driver/test/test_prims.ml:254
+
+module Int = struct
+  let add x y = x
+end
+let a = Int.add 1 2
+let print_int x = print_endline "shadowed"
+let main7 = print_int a
+let main8 = let print_endline s = print_string "local" in print_endline "x"
+
+%%%% driver/test/test_prims.ml:278
+
+module Int = struct
+  let add x y = x
+end
+let a = Int.sub 1 2
+
+%%%% driver/test/test_prims.ml:285
+ let a = Int.foo 
+%%%% driver/test/test_prims.ml:287
+ let a = Foo.foo 
+%%%% driver/test/test_prims.ml:291
+
+module M = struct
+  module String = struct let length = 0 end
+  let n = String.length
+end
+let m = String.length
+
+%%%% driver/test/test_prims.ml:315
+
+let x = .~(print_string "compile "; .<1>.)
+let y = print_string "run"
+
+%%%% driver/test/test_prims.ml:336
+ let a = Prim.String.length 
+%%%% driver/test/test_prims.ml:339
+
+module Prim = struct
+  module String = struct let length s = 7 end
+end
+module String = struct let length s = 8 end
+let a = Prim.String.length "ab"
+let b = String.length "ab"
+let c = Core.String.length "ab"
+let main = print_int a; print_int b; print_int c
+
+%%%% driver/test/test_recursive_types.ml:40
+
+let len l = match l with `Nil -> 0 | `Cons (_, t) -> add 1 (len t)
+let map f l = match l with `Nil -> `Nil | `Cons (x, t) -> `Cons (f x, map f t)
+let two = len (`Cons (1, `Cons (2, `Nil)))
+let lengths = (len (`Cons (1, `Nil)), len (`Cons (true, `Nil)))
+let mapped = map id (`Cons (1, `Nil))
+
+%%%% driver/test/test_recursive_types.ml:59
+
+let sum r = add r.`v (sum r.`next)
+let next r = r.`next
+let both r = cond true r r.`next.`next
+let self r = cond true r r.`self
+let pair r = (self r, r)
+
+%%%% driver/test/test_recursive_types.ml:78
+
+let ones = `Cons (1, ones)
+let loop = {`next = loop; `v = id}
+
+%%%% driver/test/test_recursive_types.ml:91
+
+let strip e = match e with `Wrap x -> strip x | other -> other
+let count e = match e with `S x -> add 1 (count x) | _ -> 0
+
+%%%% driver/test/test_recursive_types.ml:109
+
+let eval_num self k e = match e with `Num n -> n | other -> k other
+let eval_add self k e = match e with `Add (a, b) -> add (self a) (self b) | other -> k other
+let eval_neg self k e = match e with `Neg a -> add 0 (self a) | other -> k other
+
+%%%% driver/test/test_recursive_types.ml:126
+
+let example = eval (`Add (`Num 1, `Neg (`Num 2)))
+
+%%%% driver/test/test_recursive_types.ml:132
+
+let eval_num self k e = match e with `Num n -> n | other -> k other
+
+%%%% driver/test/test_recursive_types.ml:138
+
+let bad = eval (`Add (`Num 1, `Num 2))
+
+%%%% driver/test/test_recursive_types.ml:163
+
+let compile e =
+  match e with
+  | `Code c -> c
+  | `Add (a, b) -> .<add .~(compile a) .~(compile b)>.
+let len l = match l with `Nil -> 0 | `Cons (_, t) -> add 1 (len t)
+let free = .<len l>.
+let provided = .<.~free.{l = `Cons (1, `Nil)}>.
+let spliced_in l = .<.~free.{l = l}>.
+let quoted_ones = .<let ones = `Cons (1, ones) in ones>.
+
+%%%% driver/test/test_recursive_types.ml:434
+
+type l['a] = [`Nil | `Cons of 'a * l['a]]
+let len l = match l with `Nil -> 0 | `Cons (_, t) -> add 1 (len t)
+let len_ints (l : l[int]) = len l
+let len_any (l : l['a]) = len l
+let nil : l[bool] = `Nil
+let one : l[int] = `Cons (1, `Nil)
+type ints = l[int]
+type n = N of l[int]
+let wrapped = N one
+
+%%%% driver/test/test_recursive_types.ml:446
+
+type l['a] = [`Nil | `Cons of 'a * l['a]]
+let bad : l[int] = `Cons (true, `Nil)
+
+%%%% driver/test/test_recursive_types.ml:451
+
+type l['a] = [`Nil | `Cons of 'a * l['a]]
+let open : l[int] = `Other
+
+%%%% driver/test/test_recursive_types.ml:480
+
+type stream['a] = {`head : 'a; `tail : unit -> stream['a]}
+type list['a] = Nil | Cons of 'a * list['a]
+type tree = [`Leaf of int | `Node of list[tree]]
+type pair = [`A of pair] * int
+type id['a] = 'a
+type through_id = id[[`A of through_id]]
+type rows[{..'r}] = {`x : rows[{..'r}]; ..'r}
+let heads (s : stream[int]) = (s.`head, (s.`tail ()).`head)
+let leaf (t : tree) = match t with `Leaf n -> n | _ -> 0
+
+%%%% driver/test/test_recursive_types.ml:507
+
+type a['x] = {`b : b['x]; `v : 'x}
+type b['y] = [`End | `More of a['y]]
+type c = a[int]
+let a x : a['t] = {`b = `End; `v = x}
+let more = {`b = `More (a 1); `v = 2}
+let c : c = more
+
+%%%% driver/test/test_recursive_types.ml:516
+
+module M = struct
+type l['a] = [`Nil | `Cons of 'a * l['a]]
+end
+type u = [`U of M.l[u]]
+
+%%%% driver/test/test_recursive_types.ml:539
+
+type t['a] = [`A of t['a * 'a]]
+
+%%%% driver/test/test_recursive_types.ml:543
+
+type t['a] = [`A of t[int]]
+
+%%%% driver/test/test_recursive_types.ml:547
+
+type t['a, 'b] = [`A of t['b, 'a]]
+
+%%%% driver/test/test_recursive_types.ml:551
+
+type a['x] = {`b : b['x]}
+type b['y] = [`A of a[int]]
+
+%%%% driver/test/test_recursive_types.ml:556
+
+type t[{..'r}] = {`x : t[{`y : int; ..'r}]}
+
+%%%% driver/test/test_recursive_types.ml:560
+
+type t = t * int
+
+%%%% driver/test/test_recursive_types.ml:564
+
+type list['a] = Nil | Cons of 'a * list['a]
+type t = list[t]
+
+%%%% driver/test/test_recursive_types.ml:569
+
+type id['a] = 'a
+type t = id[t]
+
+%%%% driver/test/test_recursive_types.ml:574
+
+type t = <t>{}
+
+%%%% driver/test/test_recursive_types.ml:578
+
+type t = <int>{x : t}
+
+%%%% driver/test/test_recursive_types.ml:582
+
+type t = [`A of int] -> t
+
+%%%% driver/test/test_recursive_types.ml:605
+
+type l['a] = [`Nil | `Cons of 'a * l['a]]
+
+%%%% driver/test/test_recursive_types.ml:727
+
+type f['a] = [`A of 'a]
+type g = f[g]
+
+%%%% driver/test/test_recursive_types.ml:732
+
+type g = f[g]
+type f['a] = [`A of 'a]
+
+%%%% driver/test/test_recursive_types.ml:737
+
+type f['a] = {`x : 'a}
+type g = f[g]
+
+%%%% driver/test/test_recursive_types.ml:742
+
+type g = f[g]
+type f['a] = {`x : 'a}
+
+%%%% driver/test/test_recursive_types.ml:747
+
+type f['a] = [`A of 'a]
+type g = f[g]
+let v (x : g) = x
+let a : g = `A (`A a)
+
+%%%% driver/test/test_recursive_types.ml:754
+
+type a = b * int
+type b = [`A of a]
+
+%%%% driver/test/test_recursive_types.ml:776
+
+type t = t
+
+%%%% driver/test/test_recursive_types.ml:780
+
+type f['a] = 'a * int
+type g = f[g]
+
+%%%% driver/test/test_recursive_types.ml:785
+
+type list['a] = Nil | Cons of 'a * list['a]
+type f['a] = list['a]
+type g = f[g]
+
+%%%% driver/test/test_recursive_types.ml:791
+
+type f['a] = <'a>{}
+type g = f[g]
+
+%%%% driver/test/test_recursive_types.ml:796
+
+type a = b
+type b = a
+
+%%%% driver/test/test_recursive_types.ml:801
+
+type id['a] = 'a
+type t = [`A of t] * id[t]
+
+%%%% driver/test/test_recursive_types.ml:937
+let f (x : t%d['a]) = 1
+let g y = f y
+let h (z : t%d[int]) = g z
+
+%%%% driver/test/test_recursive_types.ml:970
+
+type l['a] = [`Cons of 'a * l['a] | `Nil]
+type s['a] = {c : l['a]; d : l['a]}
+type v['a] = V of l['a] * l['a]
+let pair (x : l['a] * l['a]) = x
+
+%%%% driver/test/test_recursive_types.ml:987
+
+type v = A of c | B of c
+type u = c * c
+type c = c * int
+
+%%%% driver/test/test_recursive_types.ml:993
+
+type u = c * c
+type c = c * int
+
+%%%% driver/test/test_reflection.ml:8
+
+type t = A
+module M = struct
+  type u['a] = {x : 'a}
+end
+let a = type int
+let b = type t
+let c = type M.u[t]
+let d = type list['a]
+let e = type (int * t -> M.u[string])
+let f = type {`x : int; ..'r}
+let g (x : Stag.Type.t[list[int]]) = x
+let h = g (type list[int])
+
+%%%% driver/test/test_reflection.ml:42
+let a = type u
+%%%% driver/test/test_reflection.ml:43
+let a = type list
+%%%% driver/test/test_reflection.ml:44
+let a = type list[int, int]
+%%%% driver/test/test_reflection.ml:45
+let a = type M.t
+%%%% driver/test/test_reflection.ml:47
+
+let g (x : Stag.Type.t[list[int]]) = x
+let h = g (type list[string])
+
+%%%% driver/test/test_reflection.ml:78
+
+let head ty =
+  match Stag.Type.expr ty with
+  | Stag.Type_expr.Con (Stag.Path.Ref r, _) -> r
+let decl ty = Stag.Type.decl (head ty)
+
+%%%% driver/test/test_reflection.ml:89
+
+module M = struct
+  type t = A | B of int * t
+end
+type t = M.t
+type point = {x : int; y : M.t}
+type tree['a] = Leaf | Node of tree['a] * 'a * tree['a]
+type row[{..'r}] = {`x : int; ..'r}
+type abstract
+let types =
+  ( Stag.Type.expr (type int)
+  , Stag.Type.expr (type list[M.t])
+  , Stag.Type.expr (type (t * (int -> string)))
+  , Stag.Type.expr (type tree['a])
+  , Stag.Type.expr (type row[{`y : bool}]) )
+let decls =
+  ( decl (type M.t)
+  , decl (type t)
+  , decl (type point)
+  , decl (type tree[int])
+  , decl (type row[{}])
+  , decl (type list[int]) )
+let abstract = (decl (type abstract), decl (type int), decl (type string))
+include .~(let _ = (types, decls, abstract) in Nil)
+
+%%%% driver/test/test_reflection.ml:236
+
+type t = A of int
+let shown =
+  match Stag.Type.expr (type list[t]) with
+  | Stag.Type_expr.Con (Stag.Path.Ref r, Cons (Stag.Type_expr.Arg.Ty (Stag.Type_expr.Con (Stag.Path.Ref t, _)), Nil)) ->
+    print_endline (Stag.Type_ref.name r);
+    print_endline (Stag.Type_ref.name t)
+let failed =
+  print_endline "before";
+  Stag.Type.decl (head (type t))
+
+%%%% driver/test/test_reflection.ml:272
+
+let append a b = Stag.Expr.apply (Stag.Expr.var "String.append") (Cons (a, Cons (b, Nil)))
+
+let show_arg self ty v =
+  match ty with
+  | Stag.Type_expr.Con (Stag.Path.Ref r, _) ->
+    (match String.equal (Stag.Type_ref.name r) "int" with
+     | true -> Stag.Expr.apply (Stag.Expr.var "Int.to_string") (Cons (v, Nil))
+     | false ->
+       (match String.equal (Stag.Type_ref.name r) self with
+        | true -> Stag.Expr.apply (Stag.Expr.var "to_string") (Cons (v, Nil))
+        | false -> Stag.Expr.string "?"))
+  | _ -> Stag.Expr.string "?"
+
+let vars i args =
+  match args with
+  | Nil -> Nil
+  | Cons (_, rest) -> Cons (String.append "a" (Int.to_string i), vars (Int.add i 1) rest)
+
+let show_args self acc args vars =
+  match (args, vars) with
+  | (Cons (ty, args), Cons (v, vars)) ->
+    show_args self (append acc (append (Stag.Expr.string " ") (show_arg self ty (Stag.Expr.var v)))) args vars
+  | _ -> acc
+
+let pattern_var v = Stag.Pattern.Var v
+
+let arm self constructor =
+  match constructor with
+  | (r, args) ->
+    let names = vars 0 args in
+    ( Stag.Pattern.Construct (Stag.Path.Ref r, Stag.map pattern_var names)
+    , show_args self (Stag.Expr.string (Stag.Constructor_ref.name r)) args names )
+
+let derive ty =
+  let r = head ty in
+  match decl ty with
+  | Some d ->
+    (match d.kind with
+     | Variant constructors ->
+       Cons
+         ( Stag.Toplevel.let_ "to_string" (Cons ("x", Nil))
+             (Stag.Expr.Match (Stag.Expr.var "x", Stag.map (arm (Stag.Type_ref.name r)) constructors))
+         , Nil ))
+
+%%%% driver/test/test_reflection.ml:323
+
+type tree['a] = Leaf | Node of tree['a] * int * tree['a]
+include .~(derive (type tree['a]))
+let shown = print_endline (to_string (Node (Node (Leaf, 1, Leaf), 2, Leaf)))
+
+%%%% driver/test/test_reflection.ml:354
+
+type t = A | B of int * t
+type r = {x : int}
+let t_type = type t
+module M = struct
+  type t = A | B
+  type int = string
+  type s = {x : bool}
+  let from_t (y : t) = y
+  include .~(derive t_type)
+  include .~(Cons (Stag.Toplevel.Let ("id", Cons (("y", Some (Stag.Type.expr t_type)), Nil), None, Stag.Expr.var "y"), Nil))
+  include .~(
+    match decl (type r) with
+    | Some d ->
+      (match d.kind with
+       | Stag.Type.Kind.Record (Cons ((x, _), Nil)) ->
+         Cons
+           ( Stag.Toplevel.let_ "get_x" (Cons ("v", Nil)) (Stag.Expr.Field (Stag.Expr.var "v", Stag.Path.Ref x))
+           , Cons
+               ( Stag.Toplevel.let_ "make" Nil
+                   (Stag.Expr.Record (Cons ((Stag.Path.Ref x, Stag.Expr.int 1), Nil)))
+               , Cons
+                   ( Stag.Toplevel.let_ "b" Nil
+                       (match decl t_type with
+                        | Some d ->
+                          (match d.kind with
+                           | Stag.Type.Kind.Variant (Cons ((a, _), _)) ->
+                             Stag.Expr.Construct (Stag.Path.Ref a, Nil)))
+                   , Cons
+                       ( Stag.Toplevel.let_ "c" Nil (Stag.Expr.construct "A" Nil)
+                       , Nil ) ) ) ) ))
+end
+let shown =
+  print_endline (M.to_string (B (1, B (2, A))));
+  print_endline (M.to_string (M.id M.b));
+  print_endline (Int.to_string (M.get_x M.make))
+
+%%%% driver/test/test_reflection.ml:431
+
+type t = A of M.u
+module M = .~(derive (type t))
+
+%%%% driver/test/test_reflection.ml:438
+
+include .~(derive (type t))
+type t = A of u
+
+%%%% driver/test/test_reflection.ml:467
+
+type t = A
+include .~(Cons (Stag.Toplevel.let_ "a" Nil (Stag.Expr.Construct (Stag.Path.Ref (head (type t)), Nil)), Nil))
+
+%%%% driver/test/test_reflection.ml:474
+
+type t = A
+type r = {x : int}
+let c =
+  match decl (type t) with
+  | Some d ->
+    (match d.kind with
+     | Stag.Type.Kind.Variant (Cons ((c, _), _)) -> Stag.Type.decl c)
+
+%%%% driver/test/test_reflection.ml:486
+
+type r = {x : int}
+let f =
+  match decl (type r) with
+  | Some d ->
+    (match d.kind with
+     | Stag.Type.Kind.Record (Cons ((f, _), _)) -> Stag.Type.decl f)
+
+%%%% driver/test/test_reflection.ml:514
+
+let f (x : 'a) = type 'a
+let one = f 1
+let l : Stag.Type.t[list[int]] = type list['a]
+let b (x : 'b) : Stag.Type.t[int] = type 'b
+let pair = type ('a * 'a)
+let same (x : Stag.Type.t['a * 'a]) = x
+let p = same (type (int * 'a))
+
+%%%% driver/test/test_reflection.ml:541
+
+let some_ref =
+  match decl (type option[int]) with
+  | Some d ->
+    (match d.kind with
+     | Stag.Type.Kind.Variant (Cons (_, Cons ((some, _), Nil))) -> some)
+let gen =
+  Cons
+    ( Stag.Toplevel.Let
+        ( "x"
+        , Nil
+        , Some (Stag.Type.expr (type list[option[int]]))
+        , Stag.Expr.construct "Cons" (Cons (Stag.Expr.Construct (Stag.Path.Ref some_ref, Cons (Stag.Expr.int 1, Nil)), Cons (Stag.Expr.construct "Nil" Nil, Nil))) )
+    , Nil )
+module M = struct
+  type option = Some | None
+  type list = int
+  type int = bool
+  include .~gen
+end
+let shown =
+  match M.x with
+  | Cons (Some n, Nil) -> print_endline (Int.to_string n)
+
+%%%% driver/test/test_reflection.ml:590
+
+module M = .~(Cons (Stag.Toplevel.Type { `name = "t"; `params = Nil; `kind = Stag.Type_decl.Kind.Variant (Cons (("C", Cons (Stag.Type_expr.con "int" Nil, Nil)), Nil)) }, Nil))
+include .~(Cons (Stag.Toplevel.Type { `name = "u"; `params = Nil; `kind = Stag.Type_decl.Kind.Variant (Cons (("D", Cons (Stag.Type_expr.con "M.t" Nil, Nil)), Nil)) }, Nil))
+module N = struct
+  include .~(derive (type M.t))
+end
+module O = struct
+  type u = D
+  include .~(derive (type A.u))
+end
+let shown =
+  print_endline (N.to_string (M.C 1));
+  print_endline (O.to_string (D (M.C 2)))
+
+%%%% driver/test/test_reflection.ml:641
+type t = A | B of int * t
+let ty = type t
+
+%%%% driver/test/test_reflection.ml:646
+type t = string
+type int = bool
+include .~(Show.derive Types.ty)
+let shown = print_endline (to_string (Types.B (1, Types.A)))
+
+%%%% driver/test/test_reflection.ml:685
+
+type t = A
+let code = .<type t>.
+let spliced = .~(.<Stag.Type.expr (type list[t])>.)
+let gen name = Cons (Stag.Toplevel.let_ name Nil (Stag.Expr.Type (Stag.Type.expr (type t))), Nil)
+include .~(gen "generated")
+module M = struct
+  type t = B
+  include .~(gen "same")
+  let check_same : Stag.Type.t[A.t] = same
+end
+let shown = print_endline (Stag.Type_ref.name (head M.same))
+
+%%%% driver/test/test_reflection.ml:724
+
+module M = struct
+  type t['a] = A
+end
+type t = int
+include .~(Cons (Stag.Toplevel.Let ("x", Nil, Some (Stag.Type_expr.Con (Stag.Path.Ref (head (type list[int])), Nil)), Stag.Expr.construct "Nil" Nil), Nil))
+
+%%%% driver/test/test_reflection.ml:734
+
+module M = struct
+  type t['a] = A
+end
+include .~(Cons (Stag.Toplevel.Let ("x", Nil, Some (Stag.Type_expr.Con (Stag.Path.Ref (head (type M.t[int])), Nil)), Stag.Expr.Construct (Stag.Path.Name "M.A", Nil)), Nil))
+
+%%%% driver/test/test_reflection.ml:761
+
+type pv['a] = [`A of 'a | `B]
+let d = decl (type pv[int])
+include .~(let _ = d in Nil)
+
+%%%% driver/test/test_reflection.ml:793
+
+type t = A of N.u
+module M = .~(let _ = decl (type t) in Nil)
+type s = B of M.v
+module N = .~(let _ = decl (type s) in Nil)
+
+%%%% driver/test/test_root_paths.ml:9
+
+type int = bool
+type option = Some | None
+type r = { x : .int }
+let raise = 3
+module M = struct
+  type r = { x : bool }
+  let v = { .A.x = 1 }
+  let w = { v with .A.x = 2 }
+  let x = 5
+  module A = struct let x = true end
+  let field = v.(.A.x)
+  let from_root = .A.M.x
+  let matched = match .Some w with .Some { .A.x = n } -> n | .None -> 0
+  let local = A.x
+end
+let a : .int = 1
+let b : .option[.int] = .None
+let f (x : .int) : .list[.int] = Cons (x, Nil)
+let s = .String.length "abc"
+let t = .Core.Int.to_string 3
+let caught =
+  match .raise (.Failure "boom") with
+  | () -> ""
+  | exception .Failure m -> m
+let c = .< .Some (.String.length "ab") >.
+let d = match .~c with .Some n -> n | .None -> 0
+let shown = print_endline (.Core.Int.to_string (.Int.add M.field (.Int.add M.from_root d)))
+
+%%%% driver/test/test_root_paths.ml:74
+let f x = .x
+%%%% driver/test/test_root_paths.ml:83
+module M = struct let x = 1 end
+let y = M.x
+let z = .M.x
+%%%% driver/test/test_root_paths.ml:93
+let y = .Nope.x
+%%%% driver/test/test_root_paths.ml:101
+let y : .Nope.t = 1
+%%%% driver/test/test_root_paths.ml:109
+let y = match 1 with .Nope.C -> 1
+%%%% driver/test/test_root_paths.ml:117
+let y r = r.(.Nope.x)
+%%%% driver/test/test_root_paths.ml:125
+let y r = r.(x)
+%%%% driver/test/test_root_paths.ml:138
+let x = 1
+module B = struct let x = "inner" end
+%%%% driver/test/test_root_paths.ml:142
+let x = "b"
+let y = .Int.add .A.x 1
+let z = .Core.String.concat "" (Cons (.B.x, Cons (A.B.x, Nil)))
+%%%% driver/test/test_root_paths.ml:165
+let x = 1
+%%%% driver/test/test_root_paths.ml:167
+let y = .Core.x
+let z = .Core.Int.to_string 1
+%%%% driver/test/test_root_paths.ml:187
+
+let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+type option = Some | None
+let raise = 0
+include .~(value "x" (Stag.Expr.var ".raise"))
+include .~(value "y" (Stag.Expr.construct ".Some" (Cons (Stag.Expr.int 1, Nil))))
+include .~(value "z" (Stag.Expr.var ".A.raise"))
+let shown = print_endline (.Core.Int.to_string z)
+
+%%%% driver/test/test_root_paths.ml:211
+
+let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+include .~(value "bad" (Stag.Expr.var ".a.b"))
+
+%%%% driver/test/test_root_paths.ml:226
+
+let r = .< raise >.
+let captured = .< fun raise -> (raise, .~r, Some 1, String.length "s") >.
+let declare name code =
+  Cons
+    ( Stag.Toplevel.let_ name Nil
+        (Stag.Expr.App (Stag.Expr.int 0, Stag.Code.erase code))
+    , Nil )
+
+%%%% driver/test/test_root_paths.ml:242
+
+type option = Some | None
+let raise = 1
+module String = struct end
+include .~(Gen.declare "bad" Gen.captured)
+
+%%%% driver/test/test_signature.ml:7
+
+let first = M.N.Leaf
+type list['a] = Nil | Cons of 'a * list['a]
+type stmt[{..'r}, 'a] = Stmt of <'a>{..'r}
+type point = {x : int; y : list[int]}
+type pair['b, 'a] = 'a * 'b
+type void = |
+type args = Arrow of (int -> int) | Tuple of (int * bool) | Two of int * (int -> int)
+module M = struct
+  module Empty = struct end
+  module N = struct
+    type tree = Leaf | Node of tree
+  end
+  let id x = x
+  let code c = .<.~c>.
+  type t = pair[int, bool]
+end
+let weak = M.id M.id
+let code c = .<.~c>.
+
+%%%% driver/test/test_signature.ml:53
+
+let f x y = y
+type t['z] = T of 'z
+let weak = f 1
+let weak_too = f true
+
+%%%% driver/test/test_signature.ml:76
+
+type r = R
+module M = struct
+  type m = Mk of r * N.n
+  module N = struct
+    type n = Nn of n * m * r * P.p
+  end
+  module P = struct
+    type p = Pp
+  end
+  type a = N.n -> P.p
+end
+module Sibling = struct
+  type b = M.N.n
+end
+type c = M.N.n * M.m * r
+
+%%%% driver/test/test_signature.ml:116
+
+module M = struct
+  type t['a] = T of 'a
+  type v['a] = V of t['a]
+  type f = {x : t[int]}
+  let wrap x = T x
+  let use (x : t[int]) y = y
+  let code c = .<use free .~c>.
+end
+
+%%%% driver/test/test_signature.ml:142
+
+type t = Root
+module N = struct
+  type n = Outer
+end
+let root_outer = N.Outer
+module M = struct
+  type t = Inner
+  module N = struct
+    type u = U
+  end
+  let root = Root
+  let inner = Inner
+  let outer = root_outer
+  module Deeper = struct
+    let root = Root
+  end
+end
+let root = Root
+
+%%%% driver/test/test_signature.ml:188
+
+module A = struct
+  module N = struct
+    type tree = Leaf
+  end
+  let leaf = N.Leaf
+  module P = struct
+    module N = struct
+      type tree = P_leaf
+    end
+    let outer = leaf
+    let inner = N.P_leaf
+  end
+end
+module M = struct
+  module N = struct
+    type tree = Leaf
+  end
+  let leaf = N.Leaf
+  module M = struct
+    module N = struct
+      type tree = M_leaf
+    end
+    let outer = leaf
+    let inner = N.M_leaf
+  end
+end
+
+%%%% driver/test/test_signature.ml:250
+
+let root = 1
+module M = struct
+  type int = I
+  let mine = I
+  let builtin = 1
+  module N = struct
+    let mine = I
+    let builtin = 1
+  end
+end
+let mine = M.I
+
+%%%% driver/test/test_signature.ml:283
+
+type box['a] = {contents : 'a}
+module M = struct
+  let f x = {contents = x}
+  let n = 1
+end
+
+%%%% driver/test/test_source_helpers.ml:6
+
+let a = `A 1
+let f x = add x 1
+
+%%%% driver/test/test_source_helpers.ml:12
+
+let add = 1
+
+%%%% driver/test/test_source_helpers.ml:16
+
+let x = add true
+
+%%%% driver/test/test_source_helpers.ml:20
+
+let x =
+
+%%%% driver/test/test_source_helpers.ml:39
+
+let x = .~(print_endline "compiling"; .<1>.)
+let y = .~(.<x>.)
+let z = print_endline "running"; x
+
+%%%% driver/test/test_source_helpers.ml:46
+
+let x = 1
+
+%%%% driver/test/test_source_helpers.ml:72
+
+type ab = A | B
+let a = 1
+let b = match B with A -> 0
+
+%%%% driver/test/test_source_helpers.ml:93
+
+let x = B.y
+
+%%%% driver/test/test_source_helpers.ml:98
+
+let y = 1
+
+%%%% driver/test/test_source_helpers.ml:127
+
+let f x =
+  let x = 1 in
+  match (x, x) with x -> let g y = y in g x
+
+%%%% driver/test/test_source_helpers.ml:189
+
+module M = struct let add x = x end
+let id2 = M.add 1
+
+%%%% driver/test/test_source_helpers.ml:196
+
+let add x = x
+
+%%%% driver/test/test_struct_quotes.ml:8
+
+let point = .< struct
+  type t = {x : int; y : int}
+  let origin = {x = 0; y = 0}
+  let show p = Int.to_string p.x
+end >.
+
+module P = .~point
+
+let shown = print_endline (P.show P.origin)
+
+%%%% driver/test/test_struct_quotes.ml:37
+
+let variants names = Stag.Type_decl.Kind.Variant (Stag.map (fun name -> (name, Nil)) names)
+let int = Stag.Type_expr.con "int" Nil
+
+let make names extra =
+  .< struct
+    type t = .~(variants names)
+    type boxed = {value : .~int}
+    let f (x : .~int) = .~(Stag.Expr.var "x")
+    include .~extra
+    module Inner = .~extra
+  end >.
+
+include .~(make (Cons ("A", Cons ("B", Nil))) .< struct let y = 2 end >.)
+
+let shown = print_endline (Int.to_string (Int.add (f y) Inner.y))
+
+%%%% driver/test/test_struct_quotes.ml:76
+
+let names = .< struct let x = .~(Stag.Expr.int 1) end >.
+let shown =
+  match names with
+  | Cons (Stag.Toplevel.Let (name, _, _, _), Nil) -> print_endline name
+  | _ -> print_endline "?"
+
+%%%% driver/test/test_struct_quotes.ml:96
+
+let quoted = .< struct
+  let code = .< Int.add 1 .~(Stag.Expr.int 2) >.
+  let decls = .< struct let z = .~(Stag.Expr.int 3) end >.
+end >.
+
+let shown =
+  match quoted with
+  | Cons (Stag.Toplevel.Let (_, _, _, Stag.Expr.Quote _), Cons (Stag.Toplevel.Let (_, _, _, Stag.Expr.Struct_quote _), Nil)) ->
+    print_endline "quoted"
+  | _ -> print_endline "?"
+
+%%%% driver/test/test_struct_quotes.ml:119
+
+let bad = .< struct let x = .~1 end >.
+
+%%%% driver/test/test_struct_quotes.ml:131
+
+let bad = .< struct include .~(Stag.Expr.int 1) end >.
+
+%%%% driver/test/test_struct_quotes.ml:143
+
+let bad = .< struct let x = .~(Stag.Expr.int 1).{y} end >.
+
+%%%% driver/test/test_struct_quotes.ml:156
+
+let decls = .< struct let x : int = "no" end >.
+include .~decls
+
+%%%% driver/test/test_struct_quotes.ml:173
+
+let helper = "generator's"
+let decls = .< struct
+  let a = helper
+  let b = .A.helper
+  let c = .~(Stag.Code.erase .<helper>.)
+end >.
+
+module M = struct
+  let helper = "splice site's"
+  include .~decls
+end
+
+let shown = print_endline M.a
+let shown_b = print_endline M.b
+let shown_c = print_endline M.c
+
+%%%% driver/test/test_struct_quotes.ml:214
+
+let int = Stag.Type_expr.Con (Stag.Path.Name "int", Nil)
+let fields names =
+  Stag.Type_decl.Kind.Record (Stag.map (fun name -> (name, int)) names)
+
+type point = .~(fields (Cons ("x", Cons ("y", Nil))))
+
+let x : .~int = 1
+let two = 2
+let p = {x = x; y = (two : .~int)}
+let f (q : point) : .~int = Int.add q.x q.y
+type pair = (.~int * .~int)
+let pair : pair = (1, 2)
+exception E of .~int
+
+let shown = print_endline (Int.to_string (f p))
+
+%%%% driver/test/test_struct_quotes.ml:251
+
+let x : .~1 = 1
+
+%%%% driver/test/test_struct_quotes.ml:261
+
+let ty = Stag.Type_expr.Con (Stag.Path.Name "string", Nil)
+let x : .~ty = 1
+
+%%%% driver/test/test_struct_quotes.ml:274
+
+let ty = Stag.Type_expr.Con (Stag.Path.Name "nope", Nil)
+type t = list[.~ty]
+
+%%%% driver/test/test_struct_quotes.ml:287
+
+let ty = Stag.Type_expr.Con (Stag.Path.Name "int", Nil)
+let one = 1
+let quoted = .< (one : .~ty) >.
+
+%%%% driver/test/test_struct_quotes.ml:299
+
+let kind = Stag.Type_decl.Kind.Splice (Stag.Expr.int 1)
+type t = .~kind
+
+%%%% driver/test/test_syntax_value.ml:415
+
+type nat = Z | S of nat
+type list['a] = Nil | Cons of 'a * list['a]
+type with_x[{..'r}] = {`x : int; ..'r}
+type point = {x : int; y : M.t}
+type void = |
+type t
+type f = int -> bool * string
+type tags[{..'r}] = [`A of int | `B; ..'r]
+type closed = [`A | `B of {}]
+type code['a] = <'a>{x : int; y : bool; ..'r} -> <int>{}
+type args = with_x[{`y : int}] * list[{}] * list['a] * with_x[{..'r}]
+
+%%%% driver/test/test_syntax_value.ml:428
+
+let f x (y : int) (_ : bool) : t = x
+let lits = (1, true, false, 'c', "s\n", ())
+let g = M.N.x
+let h = (x : list['a])
+let app = f x y
+let fns = (fun x -> x, fun (x : int) _ -> fun y -> x)
+let l = let z = 1 in let w (a : int) : int = a in z; w
+let c = (C, C 1, C (1, 2), C ((1, 2)), M.C x)
+let r = ({x = 1; M.y = 2}, r.x, r.M.x, {r with x = 1; M.y = 2})
+let m = match e with | _ -> 1 | x -> 2 | 1 -> 3 | 'c' -> 4 | "s" -> 5 | true -> 6 | () -> 7
+let p = match e with (a, b) -> a | C -> 1 | C p -> 2 | M.C (p, q) -> 3 | C ((p, q)) -> 3 | {x = p; M.y = q} -> 4
+let q = match e with `A -> 1 | `A p -> 2 | {`x = p} -> 3 | {`x = p; ..} -> 4 | {`x = p; ..rest} -> 5
+let poly = ({`x = 1; `y = true}, r.`x, {`x = v; `y = w | r}, r \ `x, {r with `x = v}, `A, `A e)
+let staged = .< .~e >.
+let splices = (.~(f x), .~e.{}, .~e.{x = e1; y})
+let types = (type t, type M.t, type list['a], type (int * t), f (type t))
+let exns = match f x with y -> y | exception E -> 1 | exception M.F (a, b) -> 2 | exception e -> raise e
+let%bench "fib" = fib 20
+let%bench "sort" n in [100; f 1000] = sort n
+
+%%%% driver/test/test_syntax_value.ml:449
+
+module M = struct
+  let x = 1
+  module N = struct
+    type t = A
+  end
+end
+let%expect_test "power" =
+  print_int (Int.add 3 2);
+  [%expect {| 5 |}];
+  [%expect]
+module G = .~(gen 1)
+include .~gen
+exception E
+exception F of int * list['a]
+exception G of (int * string)
+
+%%%% driver/test/test_syntax_value.ml:466
+
+type spliced = .~kind
+let quoted = .< struct type t = .~kind let x : .~ty = .~e include .~items end >.
+
+%%%% driver/test/test_syntax_value.ml:582
+let f (x : int) = `A x
+%%%% driver/test/test_syntax_value.ml:583
+type t['a] = A | B of 'a * t['a]
+%%%% driver/test/test_syntax_value.ml:659
+
+let arm name = (Stag.Pattern.construct name Nil, Stag.Expr.string name)
+let constructor name = (name, Nil)
+
+(* type t = <names>  let to_string x = match x with <name> -> "<name>" ... *)
+let enum names =
+  Cons
+    ( Stag.Toplevel.Type
+        {`name = "t"; `params = Nil; `kind = Stag.Type_decl.Kind.Variant (Stag.map constructor names)}
+    , Cons
+        ( Stag.Toplevel.let_
+            "to_string"
+            (Cons ("x", Nil))
+            (Stag.Expr.Match (Stag.Expr.var "x", Stag.map arm names))
+        , Nil ) )
+
+let names = Cons ("Red", Cons ("Green", Cons ("Blue", Nil)))
+let decls = enum names
+let bad = enum (Cons ("Red", Cons ("light blue", Nil)))
+let keyword = Cons (Stag.Toplevel.let_ "match" Nil (Stag.Expr.var "x"), Nil)
+let bad_path = Cons (Stag.Toplevel.let_ "x" Nil (Stag.Expr.var "M..y"), Nil)
+
+(* Shapes the parser does not make itself, eg. a constructor of one tuple. *)
+let pair = Stag.Expr.Tuple (Cons (Stag.Expr.int 1, Cons (Stag.Expr.construct "D" (Cons (Stag.Expr.int 2, Nil)), Nil)))
+let one_tuple = Stag.Expr.construct "C" (Cons (pair, Nil))
+let var x = Stag.Pattern.Var x
+let pair_pattern = Stag.Pattern.Tuple (Cons (var "a", Cons (var "b", Nil)))
+let first =
+  Stag.Expr.Match
+    ( Stag.Expr.var "one_tuple"
+    , Cons ((Stag.Pattern.construct "C" (Cons (pair_pattern, Nil)), Stag.Expr.var "a"), Nil) )
+let int = Stag.Type_expr.con "int" Nil
+let shapes =
+  Cons
+    ( Stag.Toplevel.Type
+        {`name = "t"; `params = Nil; `kind = Stag.Type_decl.Kind.Variant (Cons (("C", Cons (Stag.Type_expr.Tuple (Cons (int, Cons (Stag.Type_expr.con "t" Nil, Nil))), Nil)), Cons (("D", Cons (int, Nil)), Nil)))}
+    , Cons
+        ( Stag.Toplevel.let_ "one_tuple" Nil one_tuple
+        , Cons
+            ( Stag.Toplevel.let_ "first" Nil first
+            , Nil ) ) )
+
+%%%% driver/test/test_syntax_value.ml:731
+
+let print_all = print_endline (to_string Red); print_endline (to_string Blue)
+
+%%%% driver/test/test_syntax_value.ml:801
+
+module M = struct type t['a] = A of 'a end
+module N = struct type option = Local end
+let reflected = Stag.Type.expr (type (option[M.t[int]] * N.option * list[int]))
+
+%%%% driver/test/test_syntax_value.ml:835
+
+module Mine = struct type option['a] = None | Some of 'a end
+let decls = Cons (Stag.Toplevel.Let ("x", Nil, None, Stag.Expr.Lit (Stag.Lit.Int 1)), Nil)
+let other = Mine.Some 1
+
+%%%% driver/test/test_syntax_value.ml:1151
+
+let unit = Stag.Type_expr.con "unit" Nil
+let int = Stag.Type_expr.con "int" Nil
+let decls =
+  Cons (Stag.Toplevel.Type {`name = "void"; `params = Nil; `kind = Stag.Type_decl.Kind.Variant Nil},
+  Cons (Stag.Toplevel.Type {`name = "pair"; `params = Nil;
+     `kind = Stag.Type_decl.Kind.Variant (Cons (("P", Cons (Stag.Type_expr.Tuple (Cons (int, Cons (int, Nil))), Nil)), Nil))},
+  Cons (Stag.Toplevel.Let ("absurd", Cons (("v", Some (Stag.Type_expr.con "void" Nil)), Nil), Some int,
+     Stag.Expr.Match (Stag.Expr.var "v", Nil)),
+  Cons (Stag.Toplevel.let_ "p" Nil
+     (Stag.Expr.construct "P" (Cons (Stag.Expr.Tuple (Cons (Stag.Expr.int 1, Cons (Stag.Expr.int 2, Nil))), Nil))),
+  Cons (Stag.Toplevel.let_ "first" (Cons ("p", Nil))
+     (Stag.Expr.Match (Stag.Expr.var "p", Cons ((Stag.Pattern.construct "P" (Cons (Stag.Pattern.Var "q", Nil)), Stag.Expr.var "q"), Nil))),
+  Cons (Stag.Toplevel.let_ "extended" Nil (Stag.Expr.Poly_extend (Nil, Stag.Expr.Poly_record (Cons (("x", Stag.Expr.int 1), Nil)))),
+  Cons (Stag.Toplevel.let_ "updated" Nil (Stag.Expr.Poly_update (Stag.Expr.var "extended", Nil)),
+  Nil)))))))
+
+%%%% driver/test/test_syntax_value.ml:1190
+let both = match first p with (a, b) -> print_int (Int.add a b); print_endline ""
+%%%% driver/test/test_syntax_value.ml:1240
+
+let decls = Cons (Stag.Toplevel.let_ "minus_one" Nil (Stag.Expr.int (Int.neg 1)), Nil)
+
+%%%% driver/test/test_syntax_value.ml:1251
+let printed = print_int minus_one; print_endline ""
+%%%% driver/test/test_syntax_value.ml:1267
+
+let int = Stag.Type_expr.con "int" Nil
+let types =
+  Cons (Stag.Type_expr.tuple Nil,
+  Cons (Stag.Type_expr.tuple (Cons (int, Nil)),
+  Cons (Stag.Type_expr.tuple (Cons (int, Cons (int, Nil))),
+  Cons (Stag.Type_expr.con "list" (Cons (int, Nil)), Nil))))
+let patterns =
+  Cons (Stag.Pattern.tuple Nil,
+  Cons (Stag.Pattern.tuple (Cons (Stag.Pattern.Any, Nil)),
+  Cons (Stag.Pattern.tuple (Cons (Stag.Pattern.Var "a", Cons (Stag.Pattern.Var "b", Nil))), Nil)))
+let one = Stag.Expr.int 1
+let exprs =
+  Cons (Stag.Expr.tuple Nil,
+  Cons (Stag.Expr.tuple (Cons (one, Nil)),
+  Cons (Stag.Expr.tuple (Cons (one, Cons (Stag.Expr.string "s", Nil))),
+  Cons (Stag.Expr.apply (Stag.Expr.var "f") Nil,
+  Cons (Stag.Expr.apply (Stag.Expr.var "f") (Cons (one, Cons (Stag.Expr.var "x", Nil))), Nil)))))
+let decls =
+  Cons (Stag.Toplevel.let_ "add" (Cons ("x", Cons ("y", Nil)))
+    (Stag.Expr.apply (Stag.Expr.var "Int.add") (Cons (Stag.Expr.var "x", Cons (Stag.Expr.var "y", Nil)))),
+  Cons (Stag.Toplevel.let_ "seven" Nil
+    (Stag.Expr.let_ "double" (Cons ("n", Nil))
+       (Stag.Expr.apply (Stag.Expr.var "add") (Cons (Stag.Expr.var "n", Cons (Stag.Expr.var "n", Nil))))
+       (Stag.Expr.Match (Stag.Expr.tuple (Cons (Stag.Expr.int 3, Cons (one, Nil))),
+          Cons ((Stag.Pattern.tuple (Cons (Stag.Pattern.Var "a", Cons (Stag.Pattern.Var "b", Nil))),
+                      Stag.Expr.apply (Stag.Expr.var "add") (Cons (Stag.Expr.App (Stag.Expr.var "double", Stag.Expr.var "a"), Cons (Stag.Expr.var "b", Nil)))),
+                     Nil)))),
+  Nil))
+
+%%%% driver/test/test_syntax_value.ml:1352
+let printed = print_int seven; print_endline ""
+%%%% driver/test/test_treewalk.ml:33
+
+let k = 1
+let g a b =
+  let f x = add x a in
+  let unused = b in
+  let h y = add (f y) k in
+  0
+
+%%%% driver/test/test_treewalk.ml:51
+
+let loop x = loop x
+let even x = odd x
+let odd x = even x
+let local n = let go x = go n in go
+
+%%%% driver/test/test_treewalk.ml:69
+
+let f p c =
+  let g q = match q with (x, _) -> add x c in
+  let h r = match r with {`a = a; ..rest} -> (a, rest, p) in
+  let v w = match w with `A z -> z | other -> c in
+  0
+
+%%%% driver/test/test_treewalk.ml:87
+
+let f r s x =
+  let g u = ({`a = x | r}, {s with `b = u}, r \ `c, s.`d, {`e = x}, `T x) in
+  0
+
+%%%% driver/test/test_treewalk.ml:101
+
+let q c = .<let inner z = add z .~c in 0>.
+let h u = .<let w = 1 in .~u>.
+let build c = let mk x = .<add .~c x>. in 0
+let persistent n = let k y = y in .<let g x = k x in g 1>.
+let explicit c d = let e x = .<.~c.{y = .~d}>. in 0
+
+%%%% driver/test/test_treewalk.ml:125
+
+let n = 3
+let f x = let g y = .~(.<add x y>.) in 0
+
+%%%% driver/test/test_type_directed.ml:6
+
+module N = struct
+  type r = {x : int; y : bool}
+end
+module M = struct
+  type t = {a : int; b : N.r}
+  type v = A | B of int
+  let t = {a = 1; b = {x = 2; y = true}}
+end
+type s = {x : string; z : int}
+
+%%%% driver/test/test_type_directed.ml:22
+
+let a = M.t.a
+let bx = M.t.b.x
+let annotated (t : M.t) = t.b.y
+let shadowed (v : N.r) = v.x
+let lexical v = v.x
+
+%%%% driver/test/test_type_directed.ml:60
+
+let annotated : M.t = {a = 3; b = {x = 4; y = false}}
+let argument = M.B 1
+let in_constructor : option[N.r] = Some {x = 7; y = false}
+let in_tuple : N.r * M.t = ({x = 5; y = true}, {a = 6; b = M.t.b})
+let returned n : N.r = {x = n; y = true}
+let lexical = {x = "s"; z = 7}
+let qualified : N.r = {M.a = 1; b = M.t.b}.b
+let first_qualified = {b = M.t.b; M.a = 8}
+let get_a (t : M.t) = t.a
+let argument_of_known = get_a {a = 9; b = M.t.b}
+let in_poly_record : {`p : N.r} = {`p = {x = 10; y = true}}
+let in_poly_variant : [`T of N.r] = `T {x = 11; y = true}
+let extended : {`q : N.r; `p : N.r} = {`q = {x = 12; y = true} | in_poly_record}
+let in_poly_update : {`p : N.r} = {in_poly_record with `p = {x = 13; y = true}}
+
+%%%% driver/test/test_type_directed.ml:126
+
+let updated = {M.t with a = 10}
+let nested = {M.t with b = {M.t.b with x = 11}}
+let by_expected (v : N.r) = {v with x = 12}
+let by_annotation v : N.r = {v with x = 13}
+let lexical v = {v with x = "t"}
+
+%%%% driver/test/test_type_directed.ml:164
+
+let a = match M.t with {a = n; b = {x = x; y = _}} -> (n, x)
+let annotated (v : N.r) = match v with {x = n} -> n
+let in_constructor = match Some M.t.b with Some {x = n} -> n | None -> 0
+let in_tuple = match (M.t, 1) with ({a = n}, _) -> n
+let lexical v = match v with {x = n} -> n
+let variant = match M.B 2 with A -> 0 | B n -> n
+let in_poly_record = match {`p = M.t} with {`p = {a = n; b = _}} -> n
+let in_poly_variant (v : [`T of M.t | `U]) = match v with `T {a = n; b = _} -> n | `U -> 0
+
+%%%% driver/test/test_type_directed.ml:213
+
+let late v = (v.x, (v : N.r))
+
+%%%% driver/test/test_type_directed.ml:221
+
+let apply f = f (M.t.b)
+let y v = v.y
+let late = apply y
+
+%%%% driver/test/test_type_directed.ml:230
+
+let early v = let _ = (v : N.r) in v.x
+
+%%%% driver/test/test_type_directed.ml:262
+
+let wrong (v : N.r) = v.M.a
+
+%%%% driver/test/test_type_directed.ml:268
+
+let wrong : N.r = {M.a = 1; b = M.t.b}
+
+%%%% driver/test/test_type_directed.ml:274
+
+let wrong : option[int] = M.A
+
+%%%% driver/test/test_type_directed.ml:296
+
+let missing = M.t.z
+
+%%%% driver/test/test_type_directed.ml:302
+
+let missing : N.r = {x = 1; z = 2}
+
+%%%% driver/test/test_type_directed.ml:308
+
+let missing (v : N.r) = {v with z = 1}
+
+%%%% driver/test/test_type_directed.ml:314
+
+let missing (v : N.r) = match v with {z = n} -> n
+
+%%%% driver/test/test_type_directed.ml:320
+
+let missing : M.v = C
+
+%%%% driver/test/test_type_directed.ml:326
+
+let missing (v : M.v) = match v with Some _ -> 1 | _ -> 0
+
+%%%% driver/test/test_type_directed.ml:333
+
+let not_nominal = (1, 2).x
+
+%%%% driver/test/test_type_directed.ml:354
+
+type r = {x : int}
+let missing (v : r) = v.y
+
+%%%% driver/test/test_type_directed.ml:359
+
+type v = A
+let missing : v = B
+
+%%%% driver/test/test_type_directed.ml:381
+
+let fst p = match p with (a, _) -> a
+
+let getter ty r =
+  let name = Stag.Field_ref.name r in
+  Stag.Toplevel.let_ (String.append "get_" name) Nil
+    (Stag.Expr.Let ("f", Cons (("v", Some (Stag.Type.expr ty)), Nil), None,
+       Stag.Expr.Field (Stag.Expr.var "v", Stag.Path.Name name),
+       Stag.Expr.var "f"))
+
+let getters ty =
+  let head = match Stag.Type.expr ty with Stag.Type_expr.Con (Stag.Path.Ref r, _) -> r in
+  match Stag.Type.decl head with
+  | Some d ->
+    (match d.kind with
+     | Record fields -> Stag.map (getter ty) (Stag.map fst fields)
+     | _ -> Nil)
+  | None -> Nil
+
+module N = struct
+  type r = {x : int; y : bool}
+  let v = {x = 1; y = true}
+end
+type s = {x : string}
+include .~(getters (type N.r))
+let shown = print_int (get_x N.v)
+
+%%%% driver/test/test_type_directed.ml:431
+
+let annotated : M.v = B 1
+let in_list : list[M.v] = Cons (A, Cons (B 2, Nil))
+let returned n : M.v = B n
+let in_match b : M.v = match b with true -> A | false -> B 3
+let pattern (v : M.v) = match v with A -> 0 | B n -> n
+let nested (l : list[M.v]) = match l with Cons (B n, _) -> n | _ -> 0
+let ran = (pattern (B 5), nested (Cons (B 6, Nil)), in_match false)
+
+%%%% driver/test/test_type_directed.ml:475
+
+type alias = N.r
+module P = struct
+  type p['a] = {v : 'a; w : int}
+end
+let via_alias (v : alias) = v.y
+let alias_built : alias = {x = 1; y = true}
+let param (p : P.p[bool]) = p.v
+let param_built : P.p[string] = {v = "s"; w = 1}
+let param_updated (p : P.p[int]) = {p with v = 5}
+let quoted : <N.r>{} = .< {x = 2; y = false} >.
+let arms b : N.r = match b with true -> {x = 3; y = true} | false -> {M.t.b with y = false}
+let seq : N.r = (); {x = 4; y = true}
+let ran = (via_alias alias_built, param {v = true; w = 2}, (param_updated {v = 1; w = 2}).v, arms false)
+
+%%%% driver/test/test_type_directed.ml:537
+
+module K = struct
+  type u = {x : int; y : int}
+  module L = struct
+    type w = {x : bool}
+    let latest v = v.x
+    let picked (v : u) = v.x
+    let built : u = {x = 1; y = 2}
+    let updated (v : u) = {v with x = 3}
+    let matched (v : u) = match v with {x = n} -> n
+    let ran = (picked built, (updated built).x, matched built, latest {x = true})
+  end
+end
+
+%%%% driver/test/test_type_directed.ml:579
+
+let mixed = {M.a = 1; N.x = 2}
+
+%%%% driver/test/test_type_directed.ml:585
+
+let mixed : M.t = {a = 1; N.x = 2}
+
+%%%% driver/test/test_type_directed.ml:592
+
+let mixed : M.t = {y = true; N.x = 2}
+
+%%%% driver/test/test_type_directed.ml:598
+
+let mixed (v : M.t) = {v with N.x = 2}
+
+%%%% driver/test/test_type_directed.ml:624
+
+module K = struct
+  type u = {x : int; y : int}
+  module L = struct
+    type w = {x : bool}
+    let x_first = {x = 1; y = 2}
+    let y_first = {y = 3; x = 4}
+    let only_x = {x = true}
+    let x_first_pattern v = match v with {x = n; y = m} -> Int.add n m
+    let y_first_pattern v = match v with {y = m; x = n} -> Int.add n m
+    let ran = (x_first_pattern x_first, y_first_pattern y_first)
+  end
+end
+
+%%%% driver/test/test_type_directed.ml:640
+
+module K = struct
+  type u = {x : int; y : int}
+  module L = struct
+    type w = {x : bool; z : int}
+    let none = {x = true; y = 1; z = 2}
+  end
+end
+
+%%%% driver/test/test_type_directed.ml:679
+
+type p['a] = {v : 'a; w : int}
+type q['a] = {s : 'a; t : 'a}
+let a : p[int] = {v = 1; w = 2}
+let changed = {a with v = "s"}
+let kept = {a with w = 3}
+let change r = {r with v = true}
+let q : q[int] = {s = 1; t = 2}
+let both = {q with s = "a"; t = "b"}
+let ran = ((change a).v, changed.w)
+
+%%%% driver/test/test_type_directed.ml:692
+
+type q['a] = {s : 'a; t : 'a}
+let q : q[int] = {s = 1; t = 2}
+let one = {q with s = "a"}
+
+%%%% driver/test/test_type_directed.ml:698
+
+type p['a] = {v : 'a; w : int}
+let a : p[int] = {v = 1; w = 2}
+let annotated : p[string] = {a with w = 3}
+
+%%%% driver/test/test_type_directed.ml:742
+
+type r = {v : int; w : int}
+let b (a : r) = {a with v = 1; v = 2}
+
+%%%% driver/test/test_type_directed.ml:762
+
+let missing : N.r = {x = 1}
+
+%%%% driver/test/test_type_directed.ml:773
+
+let spliced : <N.r>{} = .< let v : N.r = .~(.< {x = 1; y = true} >.) in v >.
+let upd (c : <N.r>{}) = .< {.~c with x = 7} >.
+let updated = upd .< {x = 1; y = true} >.
+let ran = .~(upd spliced)
+
+%%%% driver/test/test_type_directed.ml:838
+
+module N = struct
+  type r = {x : int; y : bool}
+  let v = {x = 1; y = true}
+end
+type s = {x : string}
+
+%%%% driver/test/test_typecheck.ml:24
+
+let id x = x
+let n = id 1
+
+%%%% driver/test/test_typecheck.ml:41
+
+let i = 1
+let b = false
+let s = "s"
+let c = 'c'
+let u = ()
+let sum = add 1 2
+let partial = add 1
+
+%%%% driver/test/test_typecheck.ml:64
+
+let bad = add true
+
+%%%% driver/test/test_typecheck.ml:68
+
+let bad = 1 2
+
+%%%% driver/test/test_typecheck.ml:86
+
+let k x y = x
+let flip f x y = f y x
+let both = k 1 true; k true 1
+
+%%%% driver/test/test_typecheck.ml:101
+
+let weak = id id
+
+%%%% driver/test/test_typecheck.ml:105
+
+let weak = id id
+let use = weak 1; weak true
+
+%%%% driver/test/test_typecheck.ml:121
+
+let f u =
+  let weak = id id in
+  let through c = weak c in
+  (through 1, through true)
+
+%%%% driver/test/test_typecheck.ml:162
+
+let f x : int = x
+
+%%%% driver/test/test_typecheck.ml:166
+
+let f = (id : bool -> bool)
+
+%%%% driver/test/test_typecheck.ml:170
+
+let f x : bool = add x 1
+
+%%%% driver/test/test_typecheck.ml:186
+
+let f = nope
+
+%%%% driver/test/test_typecheck.ml:190
+
+let f x = x
+let f = 1
+
+%%%% driver/test/test_typecheck.ml:195
+
+let f x = g
+let g y = x
+
+%%%% driver/test/test_typecheck.ml:209
+
+let main = f 1; f true
+let f x = g x
+let g x = x
+
+%%%% driver/test/test_typecheck.ml:224
+
+let a x = b 1
+let b y = a true; y
+let c = a true; b 2
+
+%%%% driver/test/test_typecheck.ml:230
+
+let a x = b 1
+let b y = a true; a 1
+
+%%%% driver/test/test_typecheck.ml:248
+
+let x = f 1
+let f y = x; y
+
+%%%% driver/test/test_typecheck.ml:261
+
+let a x = b a; c 1
+let b x = x
+let c x = d x
+let d x = c x; a x; x
+let e = b 1; b true
+
+%%%% driver/test/test_typecheck.ml:319
+let w = let k c = c in id k
+let pre d e = .< let y = .~d in let x = .~e in .~(w .<2>.) >.
+%%%% driver/test/test_typecheck.ml:364
+
+let poly = let i x = x in i 1; i true
+let rec_ = let loop x = loop x in loop
+let shadow x = let x = 1 in x
+let arg_scope x = (let f x = true in f); x
+
+%%%% driver/test/test_typecheck.ml:371
+
+let mono = let i = id id in i 1; i true
+
+%%%% driver/test/test_typecheck.ml:375
+
+let mono_rec = let f x = f 1; f true in f
+
+%%%% driver/test/test_typecheck.ml:397
+
+let closed = .<1>.
+let open = .<add y (add x y)>.
+let local = .<let y = 1 in add y y>.
+let persistent = .<id 1>.
+let n = 5
+let not_persistent = .<n>.
+let outer_arg x = .<x>.
+let nested = .< .<add x 1>. >.
+
+%%%% driver/test/test_typecheck.ml:422
+
+let f u = .<let g v = x in add (g 1) 1; g true>.
+
+%%%% driver/test/test_typecheck.ml:430
+
+let values = .<.~(.<add x y>.).{x = 1; y = 2}>.
+let reorder = .<.~(.<add x y>.).{y = 1; x = 2}>.
+let from_scope = .<let x = 1 in .~(.<add x y>.).{x; y}>.
+let infers_sub = .<.~(.<add x y>.).{x = z; y = 1}>.
+let closed = .<.~(.<1>.).{}>.
+
+%%%% driver/test/test_typecheck.ml:449
+
+let wrong_type = .<.~(.<add x 1>.).{x = true}>.
+
+%%%% driver/test/test_typecheck.ml:453
+
+let missing = .<.~(.<add x 1>.).{}>.
+
+%%%% driver/test/test_typecheck.ml:457
+
+let extra = .<.~(.<add x 1>.).{x = 1; y = 1}>.
+
+%%%% driver/test/test_typecheck.ml:461
+
+let dup = .<.~(.<add x 1>.).{x = 1; x = 1}>.
+
+%%%% driver/test/test_typecheck.ml:465
+
+let not_code = .<.~(1).{}>.
+
+%%%% driver/test/test_typecheck.ml:492
+
+let bound = .<let x = 1 in .~(.<add x 1>.)>.
+let propagates = .<.~(.<add x 1>.)>.
+let unknown_context c = .<.~c>.
+let explicit_unknown c = .<.~c.{x = 1}>.
+
+%%%% driver/test/test_typecheck.ml:499
+
+let two_unknown c1 c2 = .<add .~c1 .~c2>.
+let known_and_unknown c = .<let x = 1 in .~(c : <int>{x : int; ..'r})>.
+let with_free_var c = .<add y .~c>.
+let instantiated = with_free_var .<z>.
+
+%%%% driver/test/test_typecheck.ml:506
+
+let two_unknown c1 c2 = .<add .~c1 .~c2>.
+let conflict = two_unknown .<add y 1>. .<cond y 1 1>.
+
+%%%% driver/test/test_typecheck.ml:511
+
+let toplevel_unknown =
+  .~(let opaque u = opaque u in match 1 with 2 -> opaque 1)
+
+%%%% driver/test/test_typecheck.ml:516
+
+let wrong_type = .<let x = true in .~(.<add x 1>.)>.
+
+%%%% driver/test/test_typecheck.ml:558
+
+let inner_in_splice = .<let y = 1 in .~y>.
+
+%%%% driver/test/test_typecheck.ml:562
+
+let outer_in_splice c = .<.~(id c)>.
+let rebind_inner = .<let y = 1 in .~(.<y>.)>.
+let toplevel_splice = .~(.<1>.)
+
+%%%% driver/test/test_typecheck.ml:568
+
+let toplevel_splice_arg x = .~(.<x>.)
+let not_captured = .<let x = 1 in .~(.<x>.).{x}>.
+
+%%%% driver/test/test_typecheck.ml:573
+
+let toplevel_splice_open = .~(.<x>.)
+
+%%%% driver/test/test_typecheck.ml:577
+
+let captured = .<let x = true in .~(.<x>.).{}>.
+
+%%%% driver/test/test_typecheck.ml:581
+
+let toplevel_splice_level x = .~x
+
+%%%% driver/test/test_typecheck.ml:638
+let closed : <int>{} = .<1>.
+let uses_x = captures_x .<cond x 1 2>.
+let uses_y = captures_x .<add y 1>.
+let uses_closed = captures_x closed
+
+%%%% driver/test/test_typecheck.ml:661
+
+let known = .<let x = 1 in .~(.<add x y>.)>.
+let unknown c = .<let x = 1 in .~c>.
+let unknown_applied = unknown .<add x y>.
+
+%%%% driver/test/test_typecheck.ml:676
+
+let twice c = .<let x = true in .~c>.; .<.~c>.
+let propagates = twice .<cond x 1 2>.
+let not_used = twice .<1>.
+(* Instantiation keeps the order of bounds. *)
+let instance c = twice c
+
+%%%% driver/test/test_typecheck.ml:684
+
+let direct_use c = .<let y = .~(.<let x = true in .~c>.) in x>.
+
+%%%% driver/test/test_typecheck.ml:699
+
+let outer_persistent c = let g v = v in .<.~c>.
+let add_free add = .<add>.
+let not_toplevel = .<.~(add_free 1)>.
+
+%%%% driver/test/test_typecheck.ml:717
+
+let known_z c =
+  .< .<let z = 1 in .~(.~(c : <<int>{..'r1}>{z : int; ..'r2}))>. >.
+
+%%%% driver/test/test_typecheck.ml:742
+
+let later_use c = .<add .~c x>.
+let conflict = later_use .<cond x 1 1>.
+
+%%%% driver/test/test_typecheck.ml:764
+
+let closed : <int>{} = .<1>.
+let before = .<add x .~closed>.
+let after = .<add .~closed x>.
+
+%%%% driver/test/test_typecheck.ml:779
+
+let ping n c = cond (eq n 0) c .<let x = 1 in .~(pong n c)>.
+let pong n c = .<add .~(ping (add n -1) c) y>.
+
+%%%% driver/test/test_typecheck.ml:809
+
+let unused = .~(let g c = .<let x = true in .~c>.; c in g .<1>.)
+
+%%%% driver/test/test_typecheck.ml:813
+
+let used = .~(let g c = .<let x = true in .~c>.; c in g .<cond x 1 2>.)
+
+%%%% driver/test/test_typecheck.ml:818
+
+let x = true
+let used_toplevel = .~(let g c = .<let x = true in .~c>.; c in g .<x>.)
+
+%%%% driver/test/test_typecheck.ml:825
+
+let unused_of_another_type =
+  .~(let g c = .<let id = true in .~c>.; c in g .<1>.)
+
+%%%% driver/test/test_typecheck.ml:872
+
+let closeit (c : <int>{}) = ()
+let g d = .<let x = 1 in .~d>.; d
+let f c = 
+%%%% driver/test/test_typecheck.ml:971
+let closeit (c : <int>{}) = ()
+let unused e = let h c = .< let _ = .~e in .~c >. in e
+let used e = let h c = .< let _ = .~e in .~c >. in let _ = h .< 1 >. in e
+let partial e = let h c = .< let _ = .~e in .~c >. in let _ = h .< 1 >. in h
+let lh e = .< let h d = let _ = .< let x = 1 in .~d >. in cond true .< .~d >. e in h >.
+let not_spliced e k =
+  let r = .< let h d = let _ = .< let x = 1 in .~d >. in cond true .< .~d >. e in 0 >. in
+  let _ = closeit k in r
+let spliced e k =
+  let r = .< let h d = let _ = .< let x = 1 in .~d >. in cond true .< .~d >. e in .~k >. in
+  let _ = closeit k in r
+%%%% driver/test/test_typecheck.ml:998
+let closeit (c : <int>{}) = ()
+let f e = let h c = .< let _ = .~e in .~c >. in h .< 1 >.
+let partial e = let h c = .< let _ = .~e in .~c >. in let _ = h .< 1 >. in h
+
+%%%% driver/test/test_typecheck.ml:1038
+let arg_uses_x = twice %s
+let result_closed c = closeit (twice c); c
+let arg_closed (c : <int>{}) = twice c
+
+%%%% driver/test/test_typecheck.ml:1059
+let conflict_later c = let r = twice c in closeit r; .<.~c>.
+let use = conflict_later %s
+
+%%%% driver/test/test_typed.ml:47
+
+let use = let pair x = (x, x) in (id 1, id true, pair (), pair)
+
+%%%% driver/test/test_typed.ml:78
+
+module M = struct
+  type t = A | B of int | C of bool * int
+  type r = {x : int; y : bool}
+  let in_m = C (true, 1)
+end
+let outside v =
+  match v with
+  | M.A -> {M.y = true; M.x = 1}
+  | M.B n -> {M.x = n; M.y = false}
+  | M.C (_, 2) -> let r = {M.x = 2; M.y = true} in (match r with {M.y = y} -> r)
+let get r = r.M.x
+
+%%%% driver/test/test_typed.ml:148
+
+let ops r = (r.`a, {`c = 1 | r}, r \ `b, {r with `a = true}, {`a = 1; `b = ()})
+let rest r = match r with {`a = a; `b = _; ..others} -> (a, others)
+let open_ r = match r with {`a = a; ..} -> a
+
+%%%% driver/test/test_typed.ml:213
+
+let tags = (`A, `B 1)
+let handle v = match v with `A -> 0 | `B n -> n | other -> 2
+
+%%%% driver/test/test_typed.ml:247
+
+let closed = .<let y = 1 in y>.
+let nested = .<.<add x 1>.>.
+
+%%%% driver/test/test_typed.ml:281
+
+let n = 3
+let not_persistent = .<n>.
+let persistent = .<id 1>.
+let outer_arg x = .<x>.
+let local_persistent n = let g x = add x n in .<g 1>.
+let local_not_persistent = let k = 1 in .<k>.
+
+%%%% driver/test/test_typed.ml:338
+
+let explicit = .<let x = 1 in .~(.<add x y>.).{x; y = z}>.
+
+%%%% driver/test/test_typed.ml:371
+
+let bound = .<let x = 1 in .~(.<add x 1>.)>.
+let propagates = .<.~(.<add x 1>.)>.
+let tail c = let outer = 1 in .<let y = 1 in let f a = a in .~c>.
+let later_level c = .<.<let y = 1 in .~(.~c)>.>.
+
+%%%% driver/test/test_typed.ml:482
+
+let n = 3
+let m = n
+let f x = .~(.<add x (add n 1)>.)
+let closed = .~(.<1>.)
+
+%%%% driver/test/test_typed.ml:535
+
+let main = even 3
+let even n = cond (eq n 0) true (odd n)
+let odd n = cond (eq n 0) false (even n)
+let a = b
+let b = 1
+let gen n = .<gen n>.
+
+%%%% driver/test/test_typed.ml:600
+
+let gen n = .<gen n>.
+let a = .<b>.
+let b = .<a>.
+let loop x = loop x
+let captured x = .~(.<captured x>.)
+
+%%%% driver/test/test_typed.ml:650
+
+let lits s = match s with "\0000" -> ('\000', "\0003")
+
+%%%% driver/test/test_typed.ml:671
+
+let n = 3
+let persistent_local = .<let f x = x in .~(id .<f 1>.)>.
+let outside_binder = let x = 1 in .<.~(.<x>.)>.
+let shadowed c = .<let x = 1 in let x = 2 in .~c>.
+let n_shadowed = let n = 1 in .~(.<n>.)
+
+%%%% driver/test/test_typed.ml:759
+
+let n = 3
+let deep =
+  .~(let x = .<1>. in
+     .~(let k c = (.<let n = 1 in .~c>.; c) in k .<x>.))
+
+%%%% driver/test/test_typed.ml:816
+
+let n = 3
+let deep = .~(let x = .<1>. in .~(let n = 5 in .<n; x>.))
+
+%%%% driver/test/test_typed.ml:856
+
+let n = 3
+let persistent_shorthand = let f y = y in .<.~(.<id (f 1)>.).{f; id}>.
+let at_toplevel = .~(.<add n y>.).{n; y = 1}
+
+%%%% driver/test/test_typed.ml:919
+
+let direct y = let f x = f x in f y
+let in_quote = let f x = .<f x>. in .<f>.
+
+%%%% driver/test/test_typed.ml:958
+
+let first p = match p with (a, _) -> (a : int)
+
+%%%% driver/test/test_types.ml:9
+
+type list['a] = Nil | Cons of 'a * list['a]
+type option['a] = None | Some of 'a
+let nil = Nil
+let one = Cons (1, Nil)
+let some x = Some x
+let none = None
+let nested = Some (Cons (true, Nil))
+
+%%%% driver/test/test_types.ml:19
+
+type list['a] = Nil | Cons of 'a * list['a]
+let bad = Cons (1, Cons (true, Nil))
+
+%%%% driver/test/test_types.ml:24
+
+let unbound = Nil
+
+%%%% driver/test/test_types.ml:28
+
+type list['a] = Nil | Cons of 'a * list['a]
+let arity = Cons 1
+
+%%%% driver/test/test_types.ml:33
+
+type list['a] = Nil | Cons of 'a * list['a]
+let arity = Nil 1
+
+%%%% driver/test/test_types.ml:60
+
+type a = A
+type b = B
+let a = A
+let mixed = match true with _ -> A | _ -> B
+
+%%%% driver/test/test_types.ml:72
+
+type t
+type box['a, {..'r}]
+let id_t (x : t) = x
+module M = struct
+  type int
+  let id_int (x : int) = x
+end
+let id_int (x : int) = x
+
+%%%% driver/test/test_types.ml:83
+
+type t
+let id_t (x : t) = x
+let bad = id_t 1
+
+%%%% driver/test/test_types.ml:94
+
+type t
+let bad = T
+
+%%%% driver/test/test_types.ml:99
+
+module M = struct
+  type int
+  let id_int (x : int) = x
+end
+let bad = M.id_int 1
+
+%%%% driver/test/test_types.ml:131
+
+let tree = Node (Cons (Leaf, Nil))
+type tree = Leaf | Node of forest
+type forest = list[tree]
+type list['a] = Nil | Cons of 'a * list['a]
+
+%%%% driver/test/test_types.ml:138
+
+type even = Zero | Succ_even of odd
+type odd = Succ_odd of even
+let two = Succ_even (Succ_odd Zero)
+let bad = Succ_even Zero
+
+%%%% driver/test/test_types.ml:156
+
+type point = {x : int; y : int}
+type box['a] = {contents : 'a}
+let origin = {y = 0; x = 0}
+let get_x p = p.x
+let boxed v = {contents = v}
+let unbox b = b.contents
+let boxed_nil = {contents = Nil}
+let unboxed = boxed_nil.contents
+type list['a] = Nil | Cons of 'a * list['a]
+
+%%%% driver/test/test_types.ml:183
+
+type point = {x : int; y : int}
+let missing = {x = 0}
+
+%%%% driver/test/test_types.ml:188
+
+type point = {x : int; y : int}
+let duplicate = {x = 0; y = 0; x = 1}
+
+%%%% driver/test/test_types.ml:193
+
+type point = {x : int; y : int}
+type point3 = {z : int}
+let mixed = {x = 0; y = 0; z = 0}
+
+%%%% driver/test/test_types.ml:199
+
+type point = {x : int; y : int}
+let unbound = {x = 0; w = 0}
+
+%%%% driver/test/test_types.ml:204
+
+type point = {x : int; y : int}
+let wrong_type = {x = 0; y = true}
+
+%%%% driver/test/test_types.ml:214
+
+type point = {x : int; y : int}
+let unbound_field p = p.w
+
+%%%% driver/test/test_types.ml:219
+
+type point = {x : int; y : int}
+let not_a_record = (1).x
+
+%%%% driver/test/test_types.ml:224
+
+type point = {x : int; y : int}
+type point3 = {z : int}
+let wrong_record p = p.x.z
+
+%%%% driver/test/test_types.ml:254
+
+let pair = (1, true)
+let nested x = (x, (x, ()))
+let fn = (id, add 1)
+
+%%%% driver/test/test_types.ml:269
+
+type list['a] = Nil | Cons of 'a * list['a]
+type option['a] = None | Some of 'a
+type point = {x : int; y : int}
+let sum2 xs =
+  match xs with
+  | Cons (x, Cons (y, _)) -> add x y
+  | Cons (x, Nil) -> x
+  | Nil -> 0
+let is_zero n = match n with 0 -> true | _ -> false
+let fst p = match p with (a, _) -> a
+let get_y p = match p with {y = y} -> y
+let get_opt o default = match o with Some x -> x | None -> default
+let shadows x = match 1 with x -> x
+let nested_record o = match o with Some {x = a; y = 2} -> a
+
+%%%% driver/test/test_types.ml:305
+
+type option['a] = None | Some of 'a
+let arm_types o = match o with Some _ -> 1 | None -> true
+
+%%%% driver/test/test_types.ml:310
+
+type option['a] = None | Some of 'a
+let pattern_types o = match o with Some _ -> 1 | 1 -> 2
+
+%%%% driver/test/test_types.ml:315
+
+let duplicate = match (1, 2) with (x, x) -> x
+
+%%%% driver/test/test_types.ml:319
+
+type option['a] = None | Some of 'a
+let nested_duplicate = match (1, None) with (x, Some x) -> x
+
+%%%% driver/test/test_types.ml:324
+
+let same_name_other_arms = match 1 with x -> x | x -> x
+
+%%%% driver/test/test_types.ml:328
+
+type option['a] = None | Some of 'a
+let arity = match 1 with Some -> 1
+
+%%%% driver/test/test_types.ml:333
+
+let unbound = match 1 with Some -> 1
+
+%%%% driver/test/test_types.ml:337
+
+type point = {x : int; y : int}
+let duplicate_field p = match p with {x = _; x = _} -> 1
+
+%%%% driver/test/test_types.ml:342
+
+type point = {x : int; y : int}
+type box['a] = {contents : 'a}
+let mixed_fields p = match p with {x = _; contents = _} -> 1
+
+%%%% driver/test/test_types.ml:351
+
+let tuple_length = match (1, 2) with (_, _, _) -> 1
+
+%%%% driver/test/test_types.ml:386
+
+type t = A
+type t = {x : int}
+
+%%%% driver/test/test_types.ml:391
+
+type t['a, {..'a}] = |
+
+%%%% driver/test/test_types.ml:395
+
+type t = A | A of int
+
+%%%% driver/test/test_types.ml:399
+
+type t = A
+type u = A
+
+%%%% driver/test/test_types.ml:404
+
+type t = {x : int; x : bool}
+
+%%%% driver/test/test_types.ml:408
+
+type point = {x : int; y : int}
+type u = {x : int}
+
+%%%% driver/test/test_types.ml:413
+
+type t = A of 'a
+
+%%%% driver/test/test_types.ml:417
+
+type t['a] = A of <int>{..'a}
+
+%%%% driver/test/test_types.ml:421
+
+type t[{..'r}] = A of 'r
+
+%%%% driver/test/test_types.ml:425
+
+type t = A of nope
+
+%%%% driver/test/test_types.ml:429
+
+type t = nope
+
+%%%% driver/test/test_types.ml:450
+
+let f c : <int>{x : int; x : bool} = c
+
+%%%% driver/test/test_types.ml:454
+
+let f c = (c : <int>{x : int; x : bool})
+
+%%%% driver/test/test_types.ml:458
+
+type t = A of <int>{x : int; x : bool}
+
+%%%% driver/test/test_types.ml:462
+
+type t = <int>{x : int; x : bool}
+
+%%%% driver/test/test_types.ml:466
+
+type code[{..'r}] = <int>{..'r}
+let f c : code[{`x : int; `x : int; ..'r}] = c
+
+%%%% driver/test/test_types.ml:471
+
+let nested c : <<int>{x : int}>{x : bool} = c
+
+%%%% driver/test/test_types.ml:487
+
+type list['a] = Nil | Cons of 'a * list['a]
+type t = A of list
+
+%%%% driver/test/test_types.ml:492
+
+type t = A of int[int]
+
+%%%% driver/test/test_types.ml:496
+
+let f x : bool[int] = x
+
+%%%% driver/test/test_types.ml:500
+
+type list['a] = Nil | Cons of 'a * list['a]
+type t = A of list[{}]
+
+%%%% driver/test/test_types.ml:505
+
+type stmt[{..'r}] = Stmt of <unit>{..'r}
+type t = A of stmt[int]
+
+%%%% driver/test/test_types.ml:510
+
+let f x : list[int] = x
+
+%%%% driver/test/test_types.ml:514
+
+let f x : M.t = x
+
+%%%% driver/test/test_types.ml:535
+
+type pair['a] = 'a * 'a
+type code[{..'r}] = <int>{..'r}
+type int_pair = pair[int]
+type unused['a] = bool
+type t = A of int_pair
+let f p : int_pair = p
+let a = let p = (1, 2) in A p
+let g c : code[{`x : int; ..'r}] = c
+let h : unused[int] = true
+
+%%%% driver/test/test_types.ml:547
+
+type pair['a] = 'a * 'a
+let bad : pair[int] = (1, true)
+
+%%%% driver/test/test_types.ml:575
+
+type t = u
+type u = int -> t
+
+%%%% driver/test/test_types.ml:589
+
+type list['a] = Nil | Cons of 'a * list['a]
+type t = list[u]
+type u = U of t
+let ok = U Nil
+
+%%%% driver/test/test_types.ml:610
+
+let annotated x y : 'a = let z : 'a = (x : 'a) in y
+let other_toplevel x = (x : 'a); add x 1
+let independent x y = (x : 'a); (y : 'b)
+let context c d = (c : <int>{x : int; ..'r}); (d : <int>{..'r})
+let ty_and_context_named_alike c = (c : <'r>{..'r})
+
+%%%% driver/test/test_types.ml:629
+
+let f = let g y = (y : 'a) in g 1; g true
+
+%%%% driver/test/test_types.ml:643
+
+type list['a] = Nil | Cons of 'a * list['a]
+type stmt[{..'r}] = Stmt of <unit>{..'r} * list[stmt[{..'r}]]
+let single c = Stmt (c, Nil)
+let uses_x = Stmt (.<x; ()>., Nil)
+let nested = Stmt (.<add x 1; ()>., Cons (uses_x, Nil))
+let annotated s : stmt[{`y : bool; ..'r}] = s
+let body s = match s with Stmt (c, _) -> c
+
+%%%% driver/test/test_types.ml:666
+
+let captures c = .<match 1 with x -> .~c>.
+let applied = captures .<add x 1>.
+let local = .<match (1, true) with (x, y) -> add x 1>.
+let bound_outside = match 1 with x -> .<x>.
+
+%%%% driver/test/test_types.ml:673
+
+let wrong_type = captures .<cond x 1 2>.
+let captures c = .<match 1 with x -> .~c>.
+
+%%%% driver/test/test_types.ml:678
+
+let level = .<match 1 with x -> .~x>.
+
+%%%% driver/test/test_types.ml:698
+
+type list['a] = Nil | Cons of 'a * list['a]
+type point = {x : int; y : int}
+let closed = .<Cons (1, Nil)>.
+let open = .<Cons (y, Nil)>.
+let record = .<{x = 1; y = y}.x>.
+let pattern = .<match l with Cons (h, _) -> h | Nil -> 0>.
+let in_splice = .<.~(.<Nil>.)>.
+
+%%%% driver/test/test_types.ml:721
+
+type list['a] = Nil | Cons of 'a * list['a]
+type box['a] = {contents : 'a}
+let nil = Nil
+let uses = (Cons (1, nil), Cons (true, nil))
+let pair = (Nil, id)
+let boxed = {contents = Nil}
+let contents = boxed.contents
+let matched = match nil with Nil -> Nil | _ -> nil
+let local = let a = Nil in Cons (a, a)
+let local_fn = let f x = x in f
+let quoted = .<Nil>.
+let weak_app = id id
+let weak_cons = Cons (id id, Nil)
+let weak_let = let a = id Nil in a
+let weak_match = match id Nil with _ -> Nil
+let weak_arm = match Nil with _ -> id Nil
+let weak_field = (id boxed).contents
+let spliced_value = .~(.<Nil>.)
+
+%%%% driver/test/test_types.ml:766
+
+type list['a] = Nil | Cons of 'a * list['a]
+let poly = let n = Nil in (Cons (1, n), Cons (true, n))
+
+%%%% driver/test/test_types.ml:771
+
+type list['a] = Nil | Cons of 'a * list['a]
+let mono = let n = id Nil in (Cons (1, n), Cons (true, n))
+
+%%%% driver/test/test_types.ml:788
+
+type list['a] = Nil | Cons of 'a * list['a]
+let nil = Nil
+let f x = x
+let uses_nil = .<nil>.
+let uses_f = .<f>.
+
+%%%% driver/test/test_types.ml:807
+
+type list['a] = Nil | Cons of 'a * list['a]
+let nil = Nil
+let f x = g x
+let g x = nil; f x
+
+%%%% driver/test/test_types.ml:814
+
+type list['a] = Nil | Cons of 'a * list['a]
+let a x = b
+let b = a; id Nil
+
+%%%% driver/test/test_types.ml:833
+
+type list['a] = Nil | Cons of 'a * list['a]
+let a x = b
+let b = a; Nil
+let quoted = .<a 1>.
+
+%%%% driver/test/test_types.ml:840
+
+type list['a] = Nil | Cons of 'a * list['a]
+let xs = Cons (1, ys)
+let ys = Cons (2, xs)
+
+%%%% driver/test/test_types.ml:846
+
+let x = x
+
+%%%% driver/test/test_types.ml:850
+
+let x = y
+let y = x
+
+%%%% driver/test/test_types.ml:855
+
+module M = struct let x = M.x end
+
+%%%% driver/test/test_types.ml:859
+
+let x = x
+let use = x 1; x true
+
+%%%% driver/test/test_types.ml:924
+
+type list['a] = Nil | Cons of 'a * list['a]
+let no_splice = .<Nil>.
+let value_splice = .<.~(.<Nil>.)>.
+let app_splice = .<.~(id .<Nil>.)>.
+let nested_app_splice = .<.<.~(id .<Nil>.)>.>.
+let escaping_app_splice = .<.<.~(.~(id .<.<Nil>.>.))>.>.
+let substitution = .<.~(.<x>.).{x = id Nil}>.
+
+%%%% lsp/test/test_index.ml:13
+let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+let x = 1
+include .~(value "y" (Stag.Expr.var "x"))
+let z = y
+
+%%%% lsp/test/test_index.ml:47
+let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+let y = "written"
+module M = .~(value "y" (Stag.Expr.int 1))
+let z = M.y
+let w = y
+
+%%%% lsp/test/test_index.ml:80
+let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+let y = "written"
+module N = struct
+  include .~(value "y" (Stag.Expr.int 1))
+  let inner = y
+end
+let outer = y
+let y2 = N.y
+
+%%%% lsp/test/test_index.ml:146
+let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+include%inline .~(value "x" (Stag.Expr.int 1))
+  let x = 1
+end%inline
+module%inline M = .~(value "y" (Stag.Expr.var "x"))
+  let y = x
+end%inline
+include%inline .~(value "s" (Stag.Expr.int 2))
+  let s = 3
+end%inline
+let z = Int.add x M.y
+let w = s
+
+%%%% lsp/test/test_root_paths.ml:7
+type t = int
+module M = struct
+  type t = string
+  let x : .A.t = 1
+  let y = .A.M.x
+end
+let z : t = M.y
+
+%%%% lsp/test/test_server.ml:4
+(* a ü comment *)
+type point = {x : int; y : int}
+type shape = Circle of int | Square of point
+exception Bad of string
+
+module Geometry = struct
+  let area s =
+    match s with
+    | Circle r -> Int.mul r r
+    | Square p -> Int.mul p.x p.y
+end
+
+let label = "é😊"
+let code = .< Int.add 1 2 >.
+let total = Geometry.area (Square {x = 2; y = 3})
+let poly = {`a = 1}
+let tagged = `Tag 1
+
+let%expect_test "area" =
+  print_int total;
+  [%expect {| 6 |}]
+
+let%bench "bench" = total
+
+%%%% lsp/test/test_transport.ml:119
+{"jsonrpc":"2.0","id":3,"params":[1]}
+%%%% lsp/test/test_transport.ml:120
+{"jsonrpc":"2.0","id":4,"method":"m","params":1}
+%%%% lsp/test/test_transport.ml:121
+{"jsonrpc":"2.0","id":5,"method":"m","params":null}
+%%%% lsp/test/test_transport.ml:122
+{"jsonrpc":"2.0","method":"n","params":null}
+%%%% lsp/test/test_transport.ml:228
+{"jsonrpc":"2.0","id":2}
+%%%% lsp/test/test_transport.ml:231
+{"jsonrpc":"2.0","id":4,"method":"shutdown","params":null}
+%%%% lsp/test/test_transport.ml:232
+{"jsonrpc":"2.0","method":"exit","params":null}
+%%%% stag_build/test/test_program.ml:29
+let y = print_endline "Util.B"; 1
+type u = int
+let f x = A.g x
+%%%% stag_build/test/test_program.ml:34
+let x = print_endline "Util.A"; B.y
+type t = B.u
+let g (n : t) = Int.add n x
+%%%% stag_build/test/test_program.ml:40
+let p = print_endline "Lib.Lib"
+let z = Util.B.f 2
+%%%% stag_build/test/test_program.ml:45
+let main = print_endline "Main"; print_int (Lib.Lib.z); print_endline ""
+let u = Util.A.x
+%%%% stag_build/test/test_program.ml:48
+let p = print_endline "Helper"
+%%%% stag_build/test/test_program.ml:166
+let main = print_endline (Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.List.init 3 Core.Int.succ)))
+%%%% stag_build/test/test_program.ml:215
+let of_int name =
+  Cons (Stag.Toplevel.let_ name (Cons ("x", Nil))
+    (Stag.Code.erase .< Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.List.init x Core.Int.succ)) >.), Nil)
+%%%% stag_build/test/test_program.ml:223
+include .~(Derive.Sexp.of_int "show")
+let main = print_endline (show 3)
+%%%% stag_build/test/test_program.ml:247
+let describe n = Core.Int.to_string n
+%%%% stag_build/test/test_program.ml:249
+let show name =
+  Cons (Stag.Toplevel.let_ name (Cons ("x", Nil))
+    (Stag.Code.erase .< Helper.describe x >.), Nil)
+%%%% stag_build/test/test_program.ml:254
+let describe n = "the program's helper"
+%%%% stag_build/test/test_program.ml:256
+include .~(Gen.Derive.show "show")
+let main = print_endline (show 3)
+%%%% stag_build/test/test_program.ml:263
+let describe n = n
+%%%% stag_build/test/test_program.ml:265
+let bad name =
+  Cons (Stag.Toplevel.let_ name Nil
+    (Stag.Expr.App (Stag.Expr.int 0, Stag.Code.erase .< Helper.describe >.)), Nil)
+%%%% stag_build/test/test_program.ml:271
+include .~(Gen.Derive.bad "bad")
+%%%% stag_build/test/test_stanza.ml:22
+; a comment
+(executable
+ (name main) #;(ignored)
+ (libraries foo))
+%%%% syntax/test/gen.ml:59
+"
+    ; "a |x} b 
+%%%% syntax/test/test_formatter.ml:14
+(* header *)
+
+(* second header,
+   on two lines *)
+let x = 1
+(* before y *)
+let y = 2
+
+
+(* after two blank lines *)
+
+let z = 3
+(* end of file *)
+
+%%%% syntax/test/test_formatter.ml:59
+let a = 1
+let b = 2
+
+let c = 3
+let f x =
+  match x with A -> a | B -> b
+let d = 4
+
+%%%% syntax/test/test_formatter.ml:85
+include .~A.decls
+include .~(gen (type t))
+module M = .~A.m
+module N = .~B.n
+include .~C.decls
+
+include .~D.decls
+module O = struct end
+module P = .~(f x)
+let x = 1
+let%expect_test "t" = ()
+let%expect_test "u" = ()
+include .~(f
+  (type t))
+include .~E.decls
+
+%%%% syntax/test/test_formatter.ml:139
+let x = 1 (* one *)
+let y = (2, 3) (* a tuple *) (* and another *)
+type t =
+  | A (* the a *)
+  | B of int (* the b *)
+let z = 4
+
+%%%% syntax/test/test_formatter.ml:161
+let x = f a (* a *)
+  b
+
+%%%% syntax/test/test_formatter.ml:175
+let f x =
+  a x (* after a *)
+  ; b x (* after b *)
+  ; c
+let r = (1 (* one *)
+  , 2)
+
+%%%% syntax/test/test_formatter.ml:197
+let f a b = (* after = *)
+  match a with (* after with *)
+  (* before A *)
+  | A -> b (* trailing A *)
+  | B (* in B *) -> (* after -> *) 2
+  (* before C *)
+
+  | C -> 3
+
+%%%% syntax/test/test_formatter.ml:222
+let r = { a = 1; (* after a *)
+  (* before b *)
+  b = (* in b *) 2;
+  c = 3 (* after c *) }
+type t = {
+  x : int; (* the x *)
+  (* before y *)
+  y : string;
+}
+let f r = match r with { a = x; (* a *) b = y } -> x
+
+%%%% syntax/test/test_formatter.ml:254
+module M = struct (* after struct *)
+  (* first *)
+  let x = 1
+  module N = struct
+    let y = 2 (* y *)
+    (* last of N *)
+  end
+  (* last *)
+end
+module E = struct (* empty *) end
+module F = struct
+  (* only a comment *)
+end
+
+%%%% syntax/test/test_formatter.ml:291
+let g x =
+  foo x; (* after foo *)
+  (* before bar *)
+  bar x;
+  let y = (* rhs *) x in (* after in *)
+  (* body *)
+  baz y
+
+%%%% syntax/test/test_formatter.ml:313
+let x = f (* arg *) a (b (* in parens *)) (* after *)
+let y = Int.add (* a *) 1 (* b *) 2
+let z = .< (* quoted *) x >. (* code *)
+let w = (a, (* second *) b, c (* third *))
+let t : (* type *) int = 1
+let p (* param *) q = q
+
+%%%% syntax/test/test_formatter.ml:333
+let x = ((* in redundant parens *) a)
+let y = match x with | (* first bar *) A -> a
+
+%%%% syntax/test/test_formatter.ml:345
+(* outer (* inner (* innermost *) *) "*)" '"' *)
+let s = "(* not a comment *)" (* "a string *) in a comment" *)
+let c = '"' (* after a quote char *)
+let e = [%expect {| (* in an expect *) |}]
+
+%%%% syntax/test/test_formatter.ml:361
+(** The module. *)
+
+(** [f x] is [x]. *)
+let f x = x
+
+(** A type,
+    documented. *)
+type t = A (** the a *) | B
+
+%%%% syntax/test/test_formatter.ml:385
+let f x =
+      (* indented
+         over lines *)
+  x
+
+%%%% syntax/test/test_formatter.ml:402
+let f x = (* f *) g (* g *) x (* x *) (* y *) y
+let r = { a = 1; (* a *) b = 2 }
+
+%%%% syntax/test/test_formatter.ml:421
+type t['a
+(* own line *)
+, 'b] = int
+let x = (a
+(* own line *)
+, b)
+let y = f (a (* inline *) ; b)
+let z =
+  let v = 1
+  (* own line *)
+  in
+  v
+
+%%%% syntax/test/test_formatter.ml:458
+let x = (a, (* one
+   two *) (* three
+   four *) b)
+let y = (a, (* one
+   two *) (* three *)
+  b)
+
+%%%% syntax/test/test_formatter.ml:483
+let f x =
+          (* moved left
+             with its second line *)
+          x
+let g x = (* far right
+   then left of the start *) x
+let h x =
+(* moved right
+   with its second line *)
+x
+
+%%%% syntax/test/test_formatter.ml:512
+let x =
+  iter print_item (map (Int.mul 10) (Cons (1, Cons (2, Cons (3 (* c *), Nil)))))
+
+%%%% syntax/test/test_formatter.ml:526
+let rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr = ((* in redundant paren *) (xxxxxxxxxxxxxxxxxxxxxx))
+let s = .~ (* b *) (q)
+let t = (x (* c *)).y
+
+%%%% syntax/test/test_formatter.ml:541
+let f x = match x with a, b -> a, b (* c *)
+let g x = match x with a, b -> a, b (* c *)
+  | _ -> x
+
+%%%% syntax/test/test_formatter.ml:558
+(* a *) (* b *)
+let x = 1
+(* c *) (* d
+   e *) (* f *)
+
+let y =
+  (* g *) (* h *)
+  2
+
+%%%% syntax/test/test_formatter.ml:582
+let x = ( (* c *) h, 2)
+let y = .~f.{ (* s *) x = y (* t *)}
+let z = { (* r *) a = 1 }
+
+%%%% syntax/test/test_formatter.ml:675
+type t = A of (* a *)(
+(* own line *)
+'b)
+let x = (
+(* b *)( (** c *)
+
+))
+type u = (('a (** d *)))
+
+type v[{..'r},
+       'a] =
+  'a
+let y = {`a = -4 (* e *).`f | z}
+let w = ({x with `l = y} \ `a
+(* f *)  ) \ `a
+
+%%%% syntax/test/test_formatter.ml:716
+let x = {
+  `a = 1;
+  `b = 1
+
+(* own line *)
+
+(* then before a separator *);
+}
+let y = {
+  `a = 1;
+  `b = 1 (* inline *)
+  (* before a separator *) ;
+}
+let z = {`a = (0
+(* in redundant parens
+   on its own line *) ) | `b}
+let v = (0
+(* f *) )
+
+%%%% syntax/test/test_formatter.ml:760
+
+include%inline .~(gen (type t))
+(* first *)
+type t = A
+      let x =   1 (* trailing *)
+  (* last *)
+end%inline
+module M = struct
+  module%inline N = .~e
+      let x = 1
+
+
+      (* before y *)
+      let y = 2
+    (* before the end *)
+  end%inline
+  include%inline .~e   end%inline
+end
+
+%%%% syntax/test/test_formatter.ml:806
+
+include%inline .~e (* derived *)
+let x = 1
+end%inline
+include%inline .~e (* empty *) end%inline
+
+%%%% syntax/test/test_formatter.ml:826
+let%bench "b" x (* a comment
+  on two lines *) in [ 1; 2 ] = x
+%%%% syntax/test/test_lexer.ml:335
+"" "abc" "a\nb\tc\\d\"e\'f" "\065\x41\x7a\xFF\000" "\ " "(* not a comment *)"
+%%%% syntax/test/test_lexer.ml:694
+{|a "b" \n|} {id|x |} y|id} {||} let%expect_test [%expect {| 1 |}]
+%%%% syntax/test/test_lexer.ml:697
+abc";
+  lex "(* {| *) 
+%%%% syntax/test/test_parser.ml:83
+"s\n"
+%%%% syntax/test/test_parser.ml:442
+"s"
+%%%% syntax/test/test_parser.ml:574
+
+    let f x y = e
+    let g : int = 1
+    type nat = Z | S of nat
+    type list['a] = Nil | Cons of 'a * list['a]
+    type pair = P of ('a * 'b)
+    type with_x[{..'r}] = {`x : int; ..'r}
+    type point = {x : int; y : int}
+    type t
+    type m = M.t
+    type e = |
+    type b = | A | B
+    type c = A
+    exception E
+    exception F of int * M.t
+    exception G of (int * string)
+    module M = struct
+      let x = 1
+      module N = struct end
+    end
+    
+%%%% syntax/test/test_parser.ml:873
+
+let%expect_test "add" =
+  print_int 1;
+  [%expect {| 1 |}];
+  [%expect];
+  [%expect "s"]
+let%expect_test {|q|} = ()
+
+%%%% syntax/test/test_parser.ml:881
+let%expect_test name = ()
+%%%% syntax/test/test_parser.ml:882
+let%expect_test "x" ()
+%%%% syntax/test/test_parser.ml:883
+[%expect 1]
+%%%% syntax/test/test_parser.ml:901
+
+let%bench "fib" = fib 20
+let%bench "sort" n in [10; (f x, 3); g y] = sort (list n)
+let%bench "one" n in [1;] = n
+
+%%%% syntax/test/test_parser.ml:906
+let % bench "x" = 1
+%%%% syntax/test/test_parser.ml:907
+let%bench name = ()
+%%%% syntax/test/test_parser.ml:908
+let%bench "x" ()
+%%%% syntax/test/test_parser.ml:909
+let%bench "x" n = n
+%%%% syntax/test/test_parser.ml:910
+let%bench "x" n in [] = n
+%%%% syntax/test/test_parser.ml:911
+let%bench "x" n in 1 = n
+%%%% syntax/test/test_parser.ml:912
+let%bench "x" N in [1] = n
+%%%% syntax/test/test_parser.ml:913
+let%bench "x" n in [1; 2 = n
+%%%% syntax/test/test_parser.ml:1115
+
+include%inline .~(gen (type t))
+  type t = A
+  let x = 1
+end%inline
+module%inline M = .~e end%inline
+
+%%%% syntax/test/test_printer.ml:26
+
+let x = 1
+let f x (y : int) : int = g x y
+let s = "a\"b\\c\n\t\001é"
+let bytes = "\255é"
+let c = '\''
+let d = '\\'
+let chars = ('\n', '\t', '\000', '\255', '"', 'a', ' ')
+let n = -1
+let e = (f (-1), Some (-1), `A (-1), (-1).x, f x, ())
+let a = (x : 'a -> 'b)
+type t = A | B of int | C of (int -> int) * (int * int) | D of list['a]
+type r = {x : int; y : list[int]}
+type v = |
+type abs
+type p['a, {..'r}] = <'a>{x : int; ..'r}
+type q = {`x : int; `y : bool; ..'r} -> [`A of int | `B; ..'r] -> [..'r] * []
+type w = with_x[({`x : int}), {`y : int}, {}]
+
+%%%% syntax/test/test_printer.ml:298
+
+let f x =
+  match x with
+  | _ -> 1
+  | (a, (b, c)) -> 1
+  | C ((a, b)) -> 1
+  | C ((a, b), c) -> 1
+  | C (D x) -> 1
+  | C (-1) -> 1
+  | `A (`B (-1)) -> 1
+  | (-1, 'c', "s", true, ()) -> 1
+  | {x = (a, b); M.y = C z} -> 1
+  | {`x = a; `y = b} -> 1
+  | {`x = a; ..} -> 1
+  | {`x = a; ..rest} -> 1
+  | {..} -> 1
+  | {} -> 1
+  | exception E -> 1
+  | exception (E x) -> 1
+  | exception M.E (a, b) -> 1
+  | exception `A x -> 1
+  | exception (a, b) -> 1
+  | exception exception e -> 1
+  | (exception e, exception C x) -> 1
+  | C (exception e) -> 1
+
+%%%% syntax/test/test_printer.ml:355
+
+let f x = some_function with_a_long_argument (and_another one) (and_a_third two three)
+let g x = Some_constructor (with_a_long_argument, and_another one, and_a_third two three)
+let h = {first_field = some_value; second_field = another_value; third = f x y z}
+let nested = {first_field = {inner = some_value; other = another_value}; second_field = 1}
+let poly = {`first = some_value; `second = another_value; `third = yet_another | rest}
+let update = {record with `first = some_value; `second = another_value; `third = f x}
+let quote = .< some_function with_a_long_argument (.~(splice_this here) and_another) >.
+let splice = .~(make_code something).{first = some_value; second = another_value; third}
+let lets =
+  let x = some_function with_a_long_argument (and_another one) (and_a_third two) in
+  let y = match x with A -> 1 | B -> 2 in
+  let z = {first_field = some_value; second_field = another_value; third = 1} in
+  x; y; z
+let deep = f (g (h (some_function with_a_long_argument (and_another one) (and_a_third two))))
+type t = First_constructor of int | Second_constructor of string * list[int] | Third
+type r = {first_field : int; second_field : list[string]; third_field : int -> int}
+type a = {`first : int; `second : string; `third : int -> int -> int; ..'r} -> int
+let%expect_test "a test" =
+  print_endline (String.append "some long string" (String.append "another" "more"));
+  [%expect {|
+    some long string
+    |}];
+  print_endline "x";
+  [%expect {| x |}];
+  [%expect]
+
+%%%% syntax/test/test_printer.ml:460
+
+let a = {x = 1; y = 2}
+let h = {first_field = some_value; second_field = another_value; third = f x y z}
+let docked = {first_field = some_value; second_field = another_value; third_field = f x y z}
+let poly = {`first = some_value; `second = another_value; `third = yet_another_value | rest}
+let update = {record with `first = some_value; `second = another_value; `third = f x y z}
+let lets =
+  let z = {first_field = some_value; second_field = another_value; third = 1} in
+  let z = {first_field = some_value; second_field = another_value; third = 1, 2} in
+  {first_field = {inner = some_value; other = another_value}; second = {a = 1; b = 2}}
+
+%%%% syntax/test/test_printer.ml:507
+
+let f = List.map (fun element -> some_function element (another_function element)) list
+let g = fun (a_long_parameter : int) (another_long_parameter : string) (third : bool) -> body
+let h = fun a -> fun b -> match a with A -> b | B -> fun c -> c
+
+%%%% syntax/test/test_printer.ml:537
+
+let s = S (S (S (S Z)))
+let c = Some_constructor (Other_constructor (with_a_long_argument, and_another one, and_a_third two three))
+let v = `Some_tag (`Other_tag (`Third_tag (Fourth (with_a_long_argument, and_another one))))
+let t = Some_constructor (Other_constructor ((with_a_long_argument, and_another one, and_a_third two)))
+let f = Some_constructor (some_function with_a_long_argument (and_another one) (and_a_third two))
+let l = Lit (Lit.Int n)
+
+%%%% syntax/test/test_printer.ml:579
+
+let some_function (first_argument : int) (second_argument : list[string]) third : int = first_argument
+let f x y = let some_local_function first_argument second_argument (third : int) : int = x in f
+
+%%%% syntax/test/test_printer.ml:602
+
+let f x = match g x with A (a, b) -> h a b | B -> some_function with_an_argument
+let r = {a = f x y; b = .< g .~(h x) >.; c = C (x, y, z)}
+
+%%%% syntax/test/test_printer.ml:625
+
+let a = 1
+let b = 2
+type t = A
+type u = B
+let c = 3
+module M = struct
+  let x = 1
+  let y = 2
+  module N = struct end
+  let z = match x with A -> 1 | B -> 2
+  type t = int
+end
+let%expect_test "t" = [%expect]
+let%expect_test "u" = [%expect]
+
+%%%% syntax/test/test_printer.ml:771
+
+let types = (type t, f (type M.t[int]) (type (int -> t)), C (type (a * b)), (type 'a).x, [%expect])
+module M = .~(gen (type t))
+include .~Gen.decls
+include .~(.~x)
+module N = .~((.< x >.))
+
+%%%% syntax/test/test_printer.ml:869
+let f x =
+  (match x with a, b -> g a; h b);
+  (match partial_twice with a, b -> print_pair a; print_string " "; print_pair b);
+  (match x with A -> a; b | B -> c);
+  (let x = 1 in g x; h x);
+  ((a; b), c)
+
+%%%% syntax/test/test_printer.ml:897
+
+let%bench "fib" = fib 20
+let%bench "sort" n in [100; 1000] = sort (random_list n)
+let%bench "a long benchmark name" some_parameter in [first_argument_value; (second, argument); let x = 1 in x; match x with A -> 1 | B -> 2] = some_function some_parameter (and_another_argument some_parameter)
+
+%%%% syntax/test/test_printer.ml:920
+let%bench "sort" n in [100; 1000; fun x -> x] = sort (random_list n)
+%%%% syntax/test/test_printer.ml:934
+
+include%inline .~(gen (type t)) type t = A let x = 1 let y = 2 end%inline
+include%inline .~e end%inline
+module M = struct
+  module%inline N = .~(e) let x = some_function with_a_long_argument and_another_long_argument end%inline
+end
+
+%%%% syntax/test/test_struct_quote.ml:17
+
+let ds = .< struct type t = .~(variants names) let f (x : .~ty) = .~body include .~items end >.
+type t = .~(Gen.record fields)
+let x : .~ty = (e : .~(Stag.Type_expr.con "int" Nil))
+let nested = .< struct let q = .< struct module M = .~a end >. include .~(gen .~names) end >.
+let e = .< struct end >.
+let types = (type .~t, type list[.~t], f (type .~t))
+
+%%%% syntax/test/test_struct_quote.ml:66
+.< struct type t = .~kind let x : .~ty = .~e include .~items end >.
+%%%% syntax/test/test_struct_quote.ml:72
+.< struct let q = .< .~x >. module M = .~items end >.
+%%%% syntax/test/test_struct_quote.ml:83
+.< struct include%inline .~e end%inline end >.
+%%%% syntax/test/test_struct_quote.ml:85
+.< struct let x = .~e.{y} end >.

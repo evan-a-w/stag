@@ -1,0 +1,27 @@
+let not = Prim.Bool.not
+let equal = Prim.Bool.equal
+
+let compare a b =
+  match (a, b) with
+  | false, true -> -1
+  | true, false -> 1
+  | _ -> 0
+
+let to_string b =
+  match b with
+  | true -> "true"
+  | false -> "false"
+
+let of_string s =
+  match s with
+  | "true" -> Some true
+  | "false" -> Some false
+  | _ -> None
+
+let of_string_exn s =
+  match of_string s with
+  | Some b -> b
+  | None ->
+    raise
+      (Failure
+         (String.concat "" ["Bool.of_string_exn: invalid bool \""; s; "\""]))

@@ -1,0 +1,618 @@
+{
+  "name": "stag",
+  "scopeName": "source.stag",
+  "fileTypes": [
+    "stag"
+  ],
+  "patterns": [
+    {
+      "include": "#code"
+    }
+  ],
+  "repository": {
+    "code": {
+      "patterns": [
+        {
+          "include": "#comment"
+        },
+        {
+          "include": "#expect"
+        },
+        {
+          "include": "#quote"
+        },
+        {
+          "include": "#splice"
+        },
+        {
+          "include": "#quoted-string"
+        },
+        {
+          "include": "#string"
+        },
+        {
+          "include": "#char"
+        },
+        {
+          "include": "#type-variable"
+        },
+        {
+          "include": "#label"
+        },
+        {
+          "include": "#number"
+        },
+        {
+          "include": "#declaration"
+        },
+        {
+          "include": "#keyword"
+        },
+        {
+          "include": "#code-type"
+        },
+        {
+          "include": "#code-type-context"
+        },
+        {
+          "include": "#root"
+        },
+        {
+          "include": "#module-path"
+        },
+        {
+          "include": "#constructor"
+        },
+        {
+          "include": "#type-application"
+        },
+        {
+          "include": "#field"
+        },
+        {
+          "include": "#wildcard"
+        },
+        {
+          "include": "#identifier"
+        },
+        {
+          "include": "#operator"
+        },
+        {
+          "include": "#punctuation"
+        },
+        {
+          "include": "#illegal"
+        }
+      ]
+    },
+    "comment": {
+      "name": "comment.block.stag",
+      "begin": "\\(\\*",
+      "end": "\\*\\)",
+      "captures": {
+        "0": {
+          "name": "punctuation.definition.comment.stag"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#comment"
+        },
+        {
+          "name": "comment.block.string.quoted.double.stag",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "match": "\\\\[\\s\\S]?"
+            }
+          ]
+        },
+        {
+          "name": "comment.block.string.quoted.other.stag",
+          "begin": "\\{([a-z_]*)\\|",
+          "end": "\\|\\1\\}"
+        },
+        {
+          "match": "'(?:\\\\[^\\x{80}-\\x{10FFFF}]|[^\\n\\x{80}-\\x{10FFFF}])'"
+        }
+      ]
+    },
+    "expect": {
+      "patterns": [
+        {
+          "name": "keyword.other.extension.$1.stag",
+          "match": "let%(expect_test|bench)(?![A-Za-z0-9_'])"
+        },
+        {
+          "match": "\\b(module%inline)\\s+([A-Z][A-Za-z0-9_']*)",
+          "captures": {
+            "1": {
+              "name": "keyword.other.extension.inline.stag"
+            },
+            "2": {
+              "name": "entity.name.namespace.stag"
+            }
+          }
+        },
+        {
+          "name": "keyword.other.extension.inline.stag",
+          "match": "\\b(?:module|include|end)%inline(?![A-Za-z0-9_'])"
+        },
+        {
+          "name": "meta.expect.stag",
+          "begin": "(\\[)(%expect)(?![A-Za-z0-9_'])",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.section.expect.begin.stag"
+            },
+            "2": {
+              "name": "keyword.other.expect.stag"
+            }
+          },
+          "end": "\\]",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.expect.end.stag"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#code"
+            }
+          ]
+        }
+      ]
+    },
+    "quote": {
+      "name": "meta.quote.stag",
+      "begin": "\\.<",
+      "end": ">\\.",
+      "beginCaptures": {
+        "0": {
+          "name": "keyword.control.quote.begin.stag"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "keyword.control.quote.end.stag"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#code"
+        }
+      ]
+    },
+    "splice": {
+      "patterns": [
+        {
+          "name": "meta.splice.stag",
+          "begin": "(\\.~)\\s*(\\()(?!\\*)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.control.splice.stag"
+            },
+            "2": {
+              "name": "punctuation.section.parens.begin.stag"
+            }
+          },
+          "end": "\\)",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.parens.end.stag"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#parens"
+            },
+            {
+              "include": "#code"
+            }
+          ]
+        },
+        {
+          "name": "keyword.control.splice.stag",
+          "match": "\\.~"
+        }
+      ]
+    },
+    "parens": {
+      "begin": "\\((?!\\*)",
+      "end": "\\)",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.parens.begin.stag"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.parens.end.stag"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#comment"
+        },
+        {
+          "include": "#parens"
+        },
+        {
+          "include": "#code"
+        }
+      ]
+    },
+    "quoted-string": {
+      "name": "string.quoted.other.stag",
+      "begin": "\\{([a-z_]*)\\|",
+      "end": "\\|\\1\\}",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.begin.stag"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.stag"
+        }
+      }
+    },
+    "string": {
+      "name": "string.quoted.double.stag",
+      "begin": "\"",
+      "end": "\"",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.begin.stag"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.stag"
+        }
+      },
+      "patterns": [
+        {
+          "name": "constant.character.escape.line-continuation.stag",
+          "match": "\\\\$"
+        },
+        {
+          "name": "constant.character.escape.stag",
+          "match": "\\\\(?:[ntrb \\\\\"']|x[0-9A-Fa-f]{2}|25[0-5]|2[0-4][0-9]|[01][0-9]{2})"
+        },
+        {
+          "name": "invalid.illegal.escape.stag",
+          "match": "\\\\(?:[0-9]{1,3}|x[0-9A-Fa-f]?|.)"
+        }
+      ]
+    },
+    "char": {
+      "patterns": [
+        {
+          "name": "string.quoted.single.stag",
+          "match": "(')(?:([^\\\\'\\n\\x{80}-\\x{10FFFF}])|(\\\\(?:[ntrb \\\\\"']|x[0-9A-Fa-f]{2}|25[0-5]|2[0-4][0-9]|[01][0-9]{2})))(')",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.string.begin.stag"
+            },
+            "3": {
+              "name": "constant.character.escape.stag"
+            },
+            "4": {
+              "name": "punctuation.definition.string.end.stag"
+            }
+          }
+        },
+        {
+          "name": "invalid.illegal.char.stag",
+          "match": "'\\\\[^'\\n]*'"
+        }
+      ]
+    },
+    "type-variable": {
+      "patterns": [
+        {
+          "name": "entity.name.type.parameter.weak.stag",
+          "match": "'_[A-Za-z0-9_']+"
+        },
+        {
+          "name": "entity.name.type.parameter.stag",
+          "match": "'[A-Za-z][A-Za-z0-9_']*"
+        }
+      ]
+    },
+    "label": {
+      "name": "variable.other.enummember.label.stag",
+      "match": "`[A-Za-z_][A-Za-z0-9_']*"
+    },
+    "number": {
+      "patterns": [
+        {
+          "name": "constant.numeric.integer.stag",
+          "match": "-?[0-9][0-9_]*(?![A-Za-z0-9_'])"
+        },
+        {
+          "name": "invalid.illegal.numeric.stag",
+          "match": "-?[0-9][A-Za-z0-9_']*"
+        }
+      ]
+    },
+    "declaration": {
+      "patterns": [
+        {
+          "match": "\\b(type)\\s+([a-z_][A-Za-z0-9_']*)",
+          "captures": {
+            "1": {
+              "name": "storage.type.type.stag"
+            },
+            "2": {
+              "name": "entity.name.type.stag"
+            }
+          }
+        },
+        {
+          "match": "\\b(module)\\s+([A-Z][A-Za-z0-9_']*)",
+          "captures": {
+            "1": {
+              "name": "storage.type.module.stag"
+            },
+            "2": {
+              "name": "entity.name.namespace.stag"
+            }
+          }
+        },
+        {
+          "match": "\\b(exception)\\s+([A-Z][A-Za-z0-9_']*)(?![A-Za-z0-9_'.])",
+          "captures": {
+            "1": {
+              "name": "storage.type.exception.stag"
+            },
+            "2": {
+              "name": "variable.other.enummember.stag"
+            }
+          }
+        },
+        {
+          "match": "\\b(let)\\s+(?!(?:let|rec|in|match|with|fun|exception|type|of|module|struct|include|end|true|false)(?![A-Za-z0-9_']))([a-z][A-Za-z0-9_']*|_[A-Za-z0-9_']+)",
+          "captures": {
+            "1": {
+              "name": "keyword.other.let.stag"
+            },
+            "2": {
+              "name": "entity.name.function.stag"
+            }
+          }
+        }
+      ]
+    },
+    "keyword": {
+      "patterns": [
+        {
+          "name": "keyword.control.$1.stag",
+          "match": "\\b(match|with)(?![A-Za-z0-9_'])"
+        },
+        {
+          "name": "storage.type.$1.stag",
+          "match": "\\b(type|module|exception)(?![A-Za-z0-9_'])"
+        },
+        {
+          "name": "constant.language.boolean.$1.stag",
+          "match": "\\b(true|false)(?![A-Za-z0-9_'])"
+        },
+        {
+          "name": "keyword.other.$1.stag",
+          "match": "\\b((?:let|rec|in|match|with|fun|exception|type|of|module|struct|include|end|true|false))(?![A-Za-z0-9_'])"
+        }
+      ]
+    },
+    "code-type": {
+      "name": "meta.type.code.stag",
+      "begin": "<",
+      "end": ">(?!\\.)|(?=>\\.)",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.code-type.begin.stag"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.code-type.end.stag"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#code"
+        }
+      ]
+    },
+    "code-type-context": {
+      "name": "meta.type.code.context.stag",
+      "begin": "(?<=[^-]>)\\s*(\\{)(?![a-z_]*\\|)",
+      "end": "\\}",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.section.braces.begin.stag"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.braces.end.stag"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#braces"
+        },
+        {
+          "include": "#code"
+        }
+      ]
+    },
+    "braces": {
+      "begin": "\\{(?![a-z_]*\\|)",
+      "end": "\\}",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.braces.begin.stag"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.braces.end.stag"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#braces"
+        },
+        {
+          "include": "#code"
+        }
+      ]
+    },
+    "root": {
+      "match": "(?:(?<=\\*\\))|(?<![A-Za-z0-9_'\\)\\]\\}\".>]))(\\.)(?=[A-Za-z_])",
+      "captures": {
+        "1": {
+          "name": "punctuation.accessor.root.stag"
+        }
+      }
+    },
+    "module-path": {
+      "match": "\\b([A-Z][A-Za-z0-9_']*)(\\.)(?=[A-Za-z_`])",
+      "captures": {
+        "1": {
+          "name": "entity.name.namespace.stag"
+        },
+        "2": {
+          "name": "punctuation.accessor.stag"
+        }
+      }
+    },
+    "constructor": {
+      "name": "variable.other.enummember.stag",
+      "match": "\\b[A-Z][A-Za-z0-9_']*"
+    },
+    "type-application": {
+      "name": "entity.name.type.stag",
+      "match": "\\b[a-z_][A-Za-z0-9_']*(?=\\[)"
+    },
+    "field": {
+      "match": "(\\.)(?!(?:let%(?:expect_test|bench)|(?:module|include|end)%inline)(?![A-Za-z0-9_']))([a-z_][A-Za-z0-9_']*)",
+      "captures": {
+        "1": {
+          "name": "punctuation.accessor.stag"
+        },
+        "2": {
+          "name": "variable.other.property.stag"
+        }
+      }
+    },
+    "wildcard": {
+      "name": "variable.language.wildcard.stag",
+      "match": "\\b_(?![A-Za-z0-9_'])"
+    },
+    "identifier": {
+      "name": "variable.other.stag",
+      "match": "\\b[a-z_][A-Za-z0-9_']*"
+    },
+    "operator": {
+      "patterns": [
+        {
+          "name": "keyword.operator.arrow.stag",
+          "match": "->"
+        },
+        {
+          "name": "keyword.control.quote.end.stag",
+          "match": ">\\."
+        },
+        {
+          "name": "punctuation.section.substitutions.begin.stag",
+          "match": "\\.\\{"
+        },
+        {
+          "name": "keyword.operator.row.stag",
+          "match": "\\.\\."
+        },
+        {
+          "name": "punctuation.accessor.stag",
+          "match": "\\."
+        },
+        {
+          "name": "keyword.operator.equals.stag",
+          "match": "="
+        },
+        {
+          "name": "keyword.operator.colon.stag",
+          "match": ":"
+        },
+        {
+          "name": "keyword.operator.bar.stag",
+          "match": "\\|"
+        },
+        {
+          "name": "keyword.operator.product.stag",
+          "match": "\\*"
+        },
+        {
+          "name": "keyword.operator.restrict.stag",
+          "match": "\\\\"
+        },
+        {
+          "name": "keyword.operator.mode.stag",
+          "match": "@@?"
+        },
+        {
+          "name": "punctuation.definition.code-type.end.stag",
+          "match": ">"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "constant.language.unit.stag",
+          "match": "\\(\\)"
+        },
+        {
+          "name": "punctuation.separator.semicolon.stag",
+          "match": ";"
+        },
+        {
+          "name": "punctuation.separator.comma.stag",
+          "match": ","
+        },
+        {
+          "name": "punctuation.section.parens.begin.stag",
+          "match": "\\("
+        },
+        {
+          "name": "punctuation.section.parens.end.stag",
+          "match": "\\)"
+        },
+        {
+          "name": "punctuation.section.brackets.begin.stag",
+          "match": "\\["
+        },
+        {
+          "name": "punctuation.section.brackets.end.stag",
+          "match": "\\]"
+        },
+        {
+          "name": "punctuation.section.braces.begin.stag",
+          "match": "\\{"
+        },
+        {
+          "name": "punctuation.section.braces.end.stag",
+          "match": "\\}"
+        }
+      ]
+    },
+    "illegal": {
+      "name": "invalid.illegal.character.stag",
+      "match": "\\S"
+    }
+  }
+}

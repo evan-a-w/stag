@@ -3,7 +3,7 @@ open! Import
 let check_files files =
   match Driver.check_files ~limits:Source_helpers.limits files with
   | Error error ->
-    print_s [%sexp (error : Driver.Error.t)];
+    List.iter error ~f:(fun error -> print_s [%sexp (error : Driver.Error.t)]);
     None
   | Ok driver -> Some driver
 ;;
@@ -19,7 +19,9 @@ let test ?(show = Fn.id) contents =
     let results = Expect_test_runner.run ~limits:Source_helpers.limits driver in
     List.iter results ~f:(fun result ->
       print_s [%sexp (result : Expect_test_runner.Test_result.t)]);
-    (match Expect_test_runner.corrected ~path ~contents results with
+    (match
+       Corrected_file.create ~path ~contents ~tests:results ~expansions:[]
+     with
      | None -> print_endline "(no corrections)"
      | Some corrected ->
        print_endline "corrected:";
@@ -177,7 +179,7 @@ let%expect_test "next" = print_int 1; [%expect {| 1 |}]
     {xxx|
     ((name (error @ t.stag:1:16-23))
      (mismatches (((loc t.stag:3:11-18) (expected (" 2 ")) (actual 1))))
-     (error (("Division by zero" @ t.stag:4:12-25))))
+     (error (("Uncaught exception Division_by_zero" @ t.stag:4:12-25))))
     ((name (next @ t.stag:7:16-22)) (mismatches ()) (error ()))
     corrected:
     let%expect_test "error" =

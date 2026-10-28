@@ -1,0 +1,59 @@
+let equal = Prim.Char.equal
+let code = Prim.Char.code
+let compare a b = Int.compare (code a) (code b)
+
+(* [None] unless [0 <= n <= 255]. *)
+let of_code n =
+  match (Int.ge n 0, Int.le n 255) with
+  | true, true -> Some (Prim.Char.of_code n)
+  | _ -> None
+
+(* Raises [Invalid_argument] unless [0 <= n <= 255]. *)
+let of_code_exn = Prim.Char.of_code
+
+let to_string = Prim.Char.to_string
+
+let is_digit c = Internal.is_between '0' '9' c
+let is_lowercase c = Internal.is_between 'a' 'z' c
+let is_uppercase c = Internal.is_between 'A' 'Z' c
+
+let is_alpha c =
+  match is_lowercase c with
+  | true -> true
+  | false -> is_uppercase c
+
+let is_alphanum c =
+  match is_alpha c with
+  | true -> true
+  | false -> is_digit c
+
+(* Space, tab, newline, carriage return, form feed and vertical tab. *)
+let is_whitespace c =
+  match c with
+  | ' ' -> true
+  | '\t' -> true
+  | '\n' -> true
+  | '\r' -> true
+  | '\012' -> true
+  | '\011' -> true
+  | _ -> false
+
+(* Printable ASCII, from space to [~]. *)
+let is_print c = Internal.is_between ' ' '~' c
+
+let lowercase c =
+  match is_uppercase c with
+  | true -> Prim.Char.of_code (Int.add (code c) 32)
+  | false -> c
+
+let uppercase c =
+  match is_lowercase c with
+  | true -> Prim.Char.of_code (Int.sub (code c) 32)
+  | false -> c
+
+module Internal = struct
+  let is_between low high c =
+    match Int.ge (code c) (code low) with
+    | true -> Int.le (code c) (code high)
+    | false -> false
+end

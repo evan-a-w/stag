@@ -53,7 +53,8 @@ let x = 1
     val y : int
     val z : int
     (y/5
-     (Toplevel_splice (code (Quote (Var (Free x) : int) : "<int>{x : int}"))
+     (Toplevel_splice
+      (code (Quote (Var (Free_toplevel x) : int) : "<int>{x : int}"))
       (expansion (Var (Bound (Toplevel x/4)) : int)) : int))
     -- evaluated at compile time
     -- evaluated
@@ -138,16 +139,18 @@ let f x =
           (body (Lit (Int 1) : int))
           (in_
            (Match
-            (Tuple
-             ((Var (Bound (Local x/15)) : int) (Var (Bound (Local x/15)) : int))
-             : "int * int")
-            (((Var x/16 : "int * int")
-              (Let (ident g/18) (args (y/17)) (generalized true)
-               (body (Var (Bound (Local y/17)) : 'b))
-               (in_
-                (App (Var (Bound (Local g/18)) : "int * int -> int * int")
-                 (Var (Bound (Local x/16)) : "int * int") : "int * int"))
-               : "int * int")))
+            (scrutinee
+             (Tuple
+              ((Var (Bound (Local x/15)) : int) (Var (Bound (Local x/15)) : int))
+              : "int * int"))
+            (cases
+             (((Var x/16 : "int * int")
+               (Let (ident g/18) (args (y/17)) (generalized true)
+                (body (Var (Bound (Local y/17)) : 'b))
+                (in_
+                 (App (Var (Bound (Local g/18)) : "int * int -> int * int")
+                  (Var (Bound (Local x/16)) : "int * int") : "int * int"))
+                : "int * int"))))
             : "int * int"))
           : "int * int")))))
      (recursive false))
@@ -161,7 +164,9 @@ let%expect_test "program" =
   List.iter [ "let n = add 1 2"; "let n = id true" ] ~f:(fun source ->
     match Typecheck.typecheck typecheck ~program:(program source) with
     | Ok { signature; _ } -> print_string (Signature.to_string_hum signature)
-    | Error error -> print_s [%sexp (error : Typecheck_error.t)]);
+    | Error error ->
+      List.iter (error : Typecheck.Failed.t).errors ~f:(fun error ->
+        print_s [%sexp (error : Typecheck_error.t)]));
   print_s
     [%sexp (List.length (program ~prelude:false "let n = 1 let m = 2") : int)];
   [%expect

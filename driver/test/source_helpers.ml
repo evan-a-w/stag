@@ -25,8 +25,23 @@ let id x = x
 |}
 ;;
 
-let parse_exn ?(file = file) source =
-  match Parser.program ~file source with
+(* Every program parsed from source is also checked to round trip through
+   [Printer], which is silent unless it does not. Only at one width, and not
+   for long sources (eg. the deep nesting of [test_limits]), to keep tests
+   fast. *)
+let round_trip ~source program =
+  if String.length source <= 10_000
+  then Round_trip.program ~widths:[ 80 ] program
+;;
+
+let parse ?(file = file) source =
+  let result = Parser.program ~file source in
+  Result.iter result ~f:(round_trip ~source);
+  result
+;;
+
+let parse_exn ?file source =
+  match parse ?file source with
   | Ok program -> program
   | Error error -> raise_s [%sexp (Parser.Error.to_string error : string)]
 ;;
@@ -41,13 +56,14 @@ let typecheck_program ?(limits = limits) ?(prelude = true) program =
   let prelude = prelude_if prelude in
   match Driver.check ~limits (prelude @ program) with
   | Error error ->
-    print_s [%sexp (error : Typecheck_error.t)];
+    List.iter (error : Typecheck.Failed.t).errors ~f:(fun error ->
+      print_s [%sexp (error : Typecheck_error.t)]);
     None
   | Ok driver -> Some { driver; prelude }
 ;;
 
 let typecheck ?limits ?prelude source =
-  match Parser.program ~file source with
+  match parse source with
   | Error error ->
     print_endline (Parser.Error.to_string error);
     None
@@ -55,20 +71,39 @@ let typecheck ?limits ?prelude source =
 ;;
 
 let check_files ?(limits = limits) files =
-  match
-    Driver.check_files
-      ~limits
-      (List.map files ~f:(fun (path, contents) ->
-         { Source_file.path; contents }))
-  with
+  let parse (path, contents) =
+    let%map.Result (toplevel : Syntax.Toplevel.t) =
+      Source_file.parse { path; contents }
+    in
+    (match toplevel.txt with
+     | Module (_, toplevels) -> round_trip ~source:contents toplevels
+     | _ -> ());
+    Driver.Module_group.File toplevel
+  in
+  let result =
+    let%bind.Result modules =
+      List.map files ~f:parse
+      |> Result.all
+      |> Result.map_error ~f:(fun error -> [ Driver.Error.Source error ])
+    in
+    Driver.check_modules ~limits modules
+    |> Result.map_error
+         ~f:(fun ({ errors; partial = _ } : Typecheck.Failed.t) ->
+           List.map errors ~f:(fun error -> Driver.Error.Typecheck error))
+  in
+  match result with
   | Error error ->
-    print_s [%sexp (error : Driver.Error.t)];
+    List.iter error ~f:(fun error -> print_s [%sexp (error : Driver.Error.t)]);
     None
   | Ok driver -> Some { driver; prelude = [] }
 ;;
 
-(* Toplevels get stamps in program order, from 0, so the prelude's come first. *)
-let is_prelude t (ident : Typed.Ident.t) = ident.stamp < List.length t.prelude
+(* Toplevels get stamps in program order, from 0, so the test prelude's come
+   first. The real prelude's are named within it. *)
+let is_prelude t (ident : Typed.Ident.t) =
+  ident.stamp < List.length t.prelude
+  || Option.is_some (Prelude_path.relative ident.name)
+;;
 
 let members t =
   List.concat_map (checked t).program.sccs ~f:(fun scc -> scc.members)
@@ -117,7 +152,9 @@ let toplevel_idents (program : Typed.Program.t) =
 let prelude_locals =
   lazy
     (match Driver.check (force prelude_program) with
-     | Error error -> raise_s [%sexp (error : Typecheck_error.t)]
+     | Error error ->
+       raise_s
+         [%sexp ((error : Typecheck.Failed.t).errors : Typecheck_error.t list)]
      | Ok driver ->
        let program = (Driver.checked driver).program in
        Map.length program.ident_info - Set.length (toplevel_idents program))

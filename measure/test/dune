@@ -1,0 +1,6 @@
+(library
+ (name test_stag_measure)
+ (preprocess
+  (pps ppx_jane))
+ (inline_tests)
+ (libraries core stag_measure))

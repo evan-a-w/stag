@@ -13,6 +13,17 @@ module Value : sig
     | String of string
     | Char of char
     | Unit
+    | String_list of string list
+    (** The prelude's [list[string]], only taken. *)
+  [@@deriving sexp_of]
+end
+
+(** The exceptions prims raise, declared by the prelude. *)
+module Exception : sig
+  type t =
+    | Division_by_zero
+    | Invalid_argument of string
+    | Failure of string
   [@@deriving sexp_of]
 end
 
@@ -25,15 +36,21 @@ val ty : t -> Type.ty
 val arity : t -> int
 
 (** Applies [t] to [arity t] arguments, of the types of [ty]. Printing goes to
-    [output]. Errors are messages, eg. for division by zero. *)
+    [output]. *)
 val apply
   :  t
   -> output:(string -> unit)
   -> Value.t list
-  -> (Value.t, string) Result.t
+  -> (Value.t, Exception.t) Result.t
 
 (** By full path. *)
 val find : Syntax.Path.t -> t option
+
+(** The name of [t] as a resolved value ([Syntax.Decl_path.Resolved]):
+    [Prim.<prim>] in the prelude, as the prelude itself writes it. *)
+val canonical_name : t -> string
+
+val of_canonical_name : string -> t option
 
 (** Whether [name] is a built-in module, eg. [Int]. *)
 val is_module : string -> bool

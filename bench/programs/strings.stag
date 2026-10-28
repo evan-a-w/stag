@@ -1,0 +1,36 @@
+(* String building and inspection. *)
+
+let concat_ints n =
+  let go i acc =
+    match Int.equal i n with
+    | true -> acc
+    | false -> go (Int.add i 1) (String.append acc (Int.to_string i))
+  in
+  go 0 ""
+
+let count_char c s =
+  let go i acc =
+    match Int.equal i (String.length s) with
+    | true -> acc
+    | false ->
+      go
+        (Int.add i 1)
+        (match Char.equal (String.get s i) c with
+         | true -> Int.add acc 1
+         | false -> acc)
+  in
+  go 0 0
+
+let digits = concat_ints 1000
+
+let%bench "concat_ints" n in [100; 1000] = concat_ints n
+
+let%bench "count_char" = count_char '7' digits
+
+let%expect_test "strings" =
+  print_endline (concat_ints 12);
+  print_int (count_char '7' digits);
+  [%expect {|
+    01234567891011
+    300
+    |}]

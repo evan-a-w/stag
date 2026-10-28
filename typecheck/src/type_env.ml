@@ -14,89 +14,193 @@ end
 
 module Field = struct
   type t =
-    { name : string
-    ; type_name : string
+    { record_type : Typed.Record_type.t
     ; record : Type.ty
     ; index : int
     ; ty : Type.ty
-    ; all_fields : string list
     }
   [@@deriving sexp_of]
+
+  let name t = t.record_type.fields.(t.index)
 end
 
 module Decl = struct
   type t =
-    { decl : Type_decl.t
+    { mutable decl : Type_decl.t (* Its definition once computed, if spliced. *)
     ; name : string
     ; module_ : Module_scope.t
-    ; params : Type.arg list
+    ; params : Type.arg list Lazy.t
+    ; mutable wrap_error : Typecheck_error.t -> Typecheck_error.t
+    ; mutable used_while_defined : bool
+    ; mutable checked : Signature.Type_decl.t option
+    ; mutable failed : bool (** Checking it reported an error. *)
+    ; mutable reflected : Reflected_decl.t option
+      (** Once checked, unless abstract. *)
     }
 
-  let param_map t =
+  let params t = force t.params
+
+  let param_map t ~params =
     List.zip_exn
       (List.map t.decl.params ~f:(fun param -> Type_decl.Param.name param.txt))
-      t.params
+      params
     |> String.Map.of_alist_exn
   ;;
 end
 
+module Exception_decl = struct
+  type t =
+    { args : Type_expr.t list
+    ; malformed : bool
+    ; module_ : Module_scope.t
+    ; wrap_error : Typecheck_error.t -> Typecheck_error.t
+    ; mutable checked : Constructor.t option
+    }
+end
+
+module Type_splice = struct
+  module State = struct
+    type t =
+      | Evaluating
+      | Evaluated of (Type_expr.t, Typecheck_error.t) Result.t
+  end
+
+  type t =
+    { expr : Expr.t
+    ; mutable state : State.t
+    }
+end
+
 type t =
   { fresh : Fresh.t
-  ; types : Decl.t String.Map.t
-  ; constructors : Constructor.t String.Map.t
-  ; fields : Field.t String.Map.t
-  ; checked : Signature.Type_decl.t String.Map.t
+  ; mutable evaluate_splice :
+      Module_scope.t
+      -> Expr.t
+      -> loc:Loc.t
+      -> (Type_expr.t, Typecheck_error.t) Result.t
+  ; type_splices : Type_splice.t list Loc.Table.t
+    (* By location, then physically: each splice is evaluated once. *)
+  ; types : Decl.t String.Table.t
+  ; exceptions : Exception_decl.t String.Table.t
+  ; constructors : Constructor.t String.Table.t
+  ; fields : Field.t String.Table.t
+  ; constructor_types : string String.Table.t
+  ; field_types : string String.Table.t
+    (** The type declaring each constructor and field, whose entry in
+        [constructors] or [fields] is added once it is checked. *)
+  ; report : Typecheck_error.t -> unit
   }
 
-let builtins =
-  List.map [ "int"; "bool"; "string"; "char"; "unit" ] ~f:(fun name ->
-    { Type_decl.name = Located.create name; params = []; kind = Abstract })
+let create fresh ~report =
+  { fresh
+  ; evaluate_splice =
+      (fun _ _ ~loc:_ ->
+        raise_s [%message "Type_env: no type splice evaluator"])
+  ; type_splices = Loc.Table.create ()
+  ; report
+  ; types = String.Table.create ()
+  ; exceptions = String.Table.create ()
+  ; constructors = String.Table.create ()
+  ; fields = String.Table.create ()
+  ; constructor_types = String.Table.create ()
+  ; field_types = String.Table.create ()
+  }
 ;;
 
-let find_in map module_ namespace path ~loc ~unbound
-  : (_, Typecheck_error.t) Result.t
-  =
-  match%bind.Result Module_scope.find module_ namespace path ~loc with
-  | None -> Error (Typecheck_error.create ~loc (unbound path))
-  | Some name -> Ok (Map.find_exn map name)
+let builtins =
+  List.map
+    [ "int"; "bool"; "string"; "char"; "unit"; Type.exn_name; Type.error_name ]
+    ~f:(fun name ->
+      { Type_decl.name = Located.create name; params = []; kind = Abstract })
+;;
+
+let find_resolved t module_ namespace path ~loc ~unbound ~find =
+  let%bind.Result name =
+    Module_scope.find module_ namespace path ~loc ~unbound
+  in
+  find t name ~loc
+;;
+
+let resolve_type module_ (path : Decl_path.t) ~loc =
+  match path with
+  | Resolved name -> Ok name
+  | Path _ | Root _ ->
+    Module_scope.find module_ Type path ~loc ~unbound:(fun path ->
+      Unbound_type path)
+;;
+
+let set_evaluate_splice t f = t.evaluate_splice <- f
+
+let rec has_splice (expr : Type_expr.t) =
+  match expr.txt with
+  | Splice _ -> true
+  | Var _ -> false
+  | Con (_, args) ->
+    List.exists args ~f:(function
+      | Ty ty -> has_splice ty
+      | Row row -> row_has_splice row)
+  | Arrow (ty1, ty2) -> has_splice ty1 || has_splice ty2
+  | Tuple tys -> List.exists tys ~f:has_splice
+  | Code { inner; context } -> has_splice inner || row_has_splice context
+  | Record row | Variant row -> row_has_splice row
+
+and row_has_splice (row : Type_expr.row) =
+  match row.txt with
+  | Empty | Var _ -> false
+  | Extend (_, ty, rest) -> has_splice ty || row_has_splice rest
+;;
+
+let rec kind_has_splice : Type_decl.Kind.t -> bool = function
+  | Splice _ -> true
+  | Abstract -> false
+  | Alias ty -> has_splice ty
+  | Variant constructors ->
+    List.exists constructors ~f:(fun (_, args) ->
+      List.exists args ~f:has_splice)
+  | Record fields -> List.exists fields ~f:(fun (_, ty) -> has_splice ty)
+  | Malformed kind -> kind_has_splice kind
+;;
+
+(* What a splice gives may not contain splices, so that evaluating splices
+   ends. If its evaluation is abandoned (raising [Uses_unfinished]), it is
+   evaluated anew. *)
+let evaluate_splice t module_ (expr : Expr.t) ~loc =
+  let splices = Hashtbl.find_multi t.type_splices expr.loc in
+  match List.find splices ~f:(fun splice -> phys_equal splice.expr expr) with
+  | Some { state = Evaluated result; _ } -> result
+  | Some { state = Evaluating; _ } ->
+    Error (Typecheck_error.create ~loc Type_splice_cycle)
+  | None ->
+    let splice = { Type_splice.expr; state = Evaluating } in
+    Hashtbl.add_multi t.type_splices ~key:expr.loc ~data:splice;
+    (match t.evaluate_splice module_ expr ~loc with
+     | exception exn ->
+       Hashtbl.change t.type_splices expr.loc ~f:(fun splices ->
+         match
+           List.filter (Option.value splices ~default:[]) ~f:(fun splice' ->
+             not (phys_equal splice splice'))
+         with
+         | [] -> None
+         | splices -> Some splices);
+       raise exn
+     | result ->
+       let result =
+         match result with
+         | Ok generated when has_splice generated ->
+           Result.Error (Typecheck_error.create ~loc Nested_type_splice)
+         | Ok _ | Error _ -> result
+       in
+       splice.state <- Evaluated result;
+       result)
 ;;
 
 let find_type t module_ path ~loc =
-  find_in t.types module_ Type path ~loc ~unbound:(fun path ->
-    Unbound_type path)
-;;
-
-let find_constructor t module_ ({ txt = path; loc } : Path.t Located.t) =
-  find_in t.constructors module_ Constructor path ~loc ~unbound:(fun path ->
-    Unbound_constructor path)
-;;
-
-let find_field t module_ ({ txt = path; loc } : Path.t Located.t) =
-  find_in t.fields module_ Field path ~loc ~unbound:(fun path ->
-    Unbound_field path)
-;;
-
-let find_canonical map name ~loc ~unbound : (_, Typecheck_error.t) Result.t =
-  match Map.find map name with
-  | Some found -> Ok found
-  | None -> Error (Typecheck_error.create ~loc (unbound (Path.of_string name)))
-;;
-
-let constructor t name ~loc =
-  find_canonical t.constructors name ~loc ~unbound:(fun path ->
-    Unbound_constructor path)
-;;
-
-let field t name ~loc =
-  find_canonical t.fields name ~loc ~unbound:(fun path -> Unbound_field path)
-;;
-
-let find_decl_exn t name = Map.find_exn t.checked name
-
-let is_empty_variant t name =
-  match (find_decl_exn t name).kind with
-  | Variant [] -> true
-  | Variant (_ :: _) | Record _ | Alias _ | Abstract -> false
+  let%bind.Result name = resolve_type module_ path ~loc in
+  match Hashtbl.find t.types name with
+  | Some decl -> Ok decl
+  | None ->
+    Error
+      (Typecheck_error.create ~loc (Unbound_type (Path (Path.of_string name))))
 ;;
 
 module Annotation_vars = struct
@@ -195,45 +299,76 @@ let map_result xs ~f =
   |> Result.map ~f:List.rev
 ;;
 
-let rec elaborate' t module_ vars ~expansions (expr : Type_expr.t)
-  : (Type.ty, Typecheck_error.t) Result.t
+(* Each elaborates to the type and the syntax with each type it names by its
+   canonical name ([Resolved]), so that it names the same types wherever it
+   is. *)
+let rec elaborate' t module_ vars ~splices ~expansions (expr : Type_expr.t)
+  : (Type.ty * Type_expr.t, Typecheck_error.t) Result.t
   =
-  let elaborate = elaborate' t module_ vars ~expansions in
+  let elaborate = elaborate' t module_ vars ~splices ~expansions in
+  let elaborate_row = elaborate_row t module_ vars ~splices ~expansions in
   let loc = expr.loc in
-  match expr.txt with
-  | Var name -> Vars.ty vars name ~loc
-  | Con (path, args) -> elaborate_con t module_ vars ~expansions path args ~loc
-  | Arrow (ty1, ty2) ->
-    let%bind.Result ty1 = elaborate ty1 in
-    let%map.Result ty2 = elaborate ty2 in
-    Type.TArrow (ty1, ty2)
-  | Tuple tys ->
-    let%map.Result tys = map_result tys ~f:elaborate in
-    Type.TTuple tys
-  | Code { inner; context } ->
-    let%bind.Result inner = elaborate inner in
-    let%map.Result context = elaborate_row t module_ vars ~expansions context in
-    Type.TCode { inner; context }
-  | Record row ->
-    let%map.Result row = elaborate_row t module_ vars ~expansions row in
-    Fresh.record t.fresh row
-  | Variant row ->
-    let%map.Result row = elaborate_row t module_ vars ~expansions row in
-    Fresh.variant t.fresh row
+  let%map.Result ty, txt =
+    match expr.txt with
+    | Var name ->
+      let%map.Result ty = Vars.ty vars name ~loc in
+      ty, expr.txt
+    | Con (path, args) ->
+      elaborate_con t module_ vars ~splices ~expansions path args ~loc
+    | Arrow (ty1, ty2) ->
+      let%bind.Result ty1, syntax1 = elaborate ty1 in
+      let%map.Result ty2, syntax2 = elaborate ty2 in
+      Type.TArrow (ty1, ty2), Type_expr.Arrow (syntax1, syntax2)
+    | Tuple tys ->
+      let%map.Result tys = map_result tys ~f:elaborate in
+      let tys, syntax = List.unzip tys in
+      Type.TTuple tys, Type_expr.Tuple syntax
+    | Code { inner; context } ->
+      let%bind.Result inner, inner_syntax = elaborate inner in
+      let%map.Result context, context_syntax = elaborate_row context in
+      ( Type.TCode { inner; context }
+      , Type_expr.Code { inner = inner_syntax; context = context_syntax } )
+    | Record row ->
+      let%map.Result row, syntax = elaborate_row row in
+      Fresh.record t.fresh row, Type_expr.Record syntax
+    | Variant row ->
+      let%map.Result row, syntax = elaborate_row row in
+      Fresh.variant t.fresh row, Type_expr.Variant syntax
+    | Splice e when splices ->
+      let%bind.Result generated = evaluate_splice t module_ e ~loc in
+      let%map.Result ty, syntax =
+        elaborate generated
+        |> Result.map_error ~f:(fun error ->
+          Typecheck_error.create
+            ~loc
+            (In_type_splice { generated; error = error.kind }))
+      in
+      ty, syntax.txt
+    | Splice _ -> Error (Typecheck_error.create ~loc Misplaced_type_splice)
+  in
+  ty, { expr with txt }
 
-and elaborate_row t module_ vars ~expansions (row : Type_expr.row)
-  : (Type.row, Typecheck_error.t) Result.t
+and elaborate_row t module_ vars ~splices ~expansions (row : Type_expr.row)
+  : (Type.row * Type_expr.row, Typecheck_error.t) Result.t
   =
-  let rec go ({ txt = row; loc = _ } : Type_expr.row) ~seen =
-    match row with
-    | Empty -> Ok Type.REmpty
-    | Extend ({ txt = name; loc }, _, _) when Set.mem seen name ->
-      Error (Typecheck_error.create ~loc (Duplicate_row_entry name))
-    | Extend ({ txt = name; loc = _ }, ty, rest) ->
-      let%bind.Result ty = elaborate' t module_ vars ~expansions ty in
-      let%map.Result rest = go rest ~seen:(Set.add seen name) in
-      Type.RExtend (name, Present, ty, rest)
-    | Var { txt = name; loc } -> Vars.row vars name ~loc
+  let rec go (row : Type_expr.row) ~seen =
+    let%map.Result elaborated, txt =
+      match row.txt with
+      | Empty -> Ok (Type.REmpty, row.txt)
+      | Extend ({ txt = name; loc }, _, _) when Set.mem seen name ->
+        Error (Typecheck_error.create ~loc (Duplicate_row_entry name))
+      | Extend (({ txt = name; loc = _ } as label), ty, rest) ->
+        let%bind.Result ty, ty_syntax =
+          elaborate' t module_ vars ~splices ~expansions ty
+        in
+        let%map.Result rest, rest_syntax = go rest ~seen:(Set.add seen name) in
+        ( Type.RExtend (name, Present, ty, rest)
+        , Type_expr.Extend (label, ty_syntax, rest_syntax) )
+      | Var { txt = name; loc } ->
+        let%map.Result var = Vars.row vars name ~loc in
+        var, row.txt
+    in
+    elaborated, { row with txt }
   in
   go row ~seen:String.Set.empty
 
@@ -241,14 +376,18 @@ and elaborate_con
       t
       module_
       vars
+      ~splices
       ~expansions
-      ({ txt = path; loc = path_loc } : Path.t Located.t)
+      ({ txt = path; loc = path_loc } as located_path : Decl_path.t Located.t)
       args
       ~loc
   =
   let error ~loc kind = Error (Typecheck_error.create ~loc kind) in
   let%bind.Result decl = find_type t module_ path ~loc:path_loc in
-  let expected = List.length decl.params in
+  let%bind.Result () =
+    if decl.failed then Error Typecheck_error.already_reported else Ok ()
+  in
+  let expected = List.length decl.decl.params in
   let got = List.length args in
   let%bind.Result () =
     if expected = got
@@ -259,198 +398,448 @@ and elaborate_con
     map_result (List.zip_exn decl.decl.params args) ~f:(fun (param, arg) ->
       match param.txt, arg with
       | Ty _, Ty ty ->
-        elaborate' t module_ vars ~expansions ty
-        |> Result.map ~f:(fun ty -> Type.ATy ty)
+        let%map.Result ty, syntax =
+          elaborate' t module_ vars ~splices ~expansions ty
+        in
+        Type.ATy ty, Type_expr.Ty syntax
       | Row _, Row row ->
-        elaborate_row t module_ vars ~expansions row
-        |> Result.map ~f:(fun row -> Type.ARow row)
+        let%map.Result row, syntax =
+          elaborate_row t module_ vars ~splices ~expansions row
+        in
+        Type.ARow row, Type_expr.Row syntax
       (* [{...}] parses as a row, but is a record type for a type parameter. *)
       | Ty _, Row row ->
-        elaborate_row t module_ vars ~expansions row
-        |> Result.map ~f:(fun row -> Type.ATy (Fresh.record t.fresh row))
+        let%map.Result row, syntax =
+          elaborate_row t module_ vars ~splices ~expansions row
+        in
+        Type.ATy (Fresh.record t.fresh row), Type_expr.Row syntax
       | Row _, Ty { loc; _ } ->
         error
           ~loc
           (Type_arg_kind_mismatch { type_name = path; param = param.txt }))
   in
-  match decl.decl.kind with
-  | Variant _ | Record _ | Abstract -> Ok (Type.TCon (decl.name, args))
-  | Alias body ->
-    let instances = Hashtbl.find_multi expansions decl.name in
-    (match
-       List.find instances ~f:(fun expansion ->
-         Expansion.same_args expansion args)
-     with
-     | Some expansion ->
-       if not expansion.expanded then expansion.reached_back <- true;
-       Ok (Type.TVar expansion.knot)
-     | None ->
-       if List.exists instances ~f:(fun expansion -> not expansion.expanded)
-       then error ~loc (Non_regular_recursive_alias decl.name)
-       else expand t decl ~args ~expansions body ~loc)
+  let args, args_syntax = List.unzip args in
+  let syntax =
+    Type_expr.Con ({ located_path with txt = Resolved decl.name }, args_syntax)
+  in
+  let%bind.Result kind = definition decl ~loc in
+  let%map.Result ty =
+    match (kind : Type_decl.Kind.t) with
+    | Variant _ | Record _ | Abstract | Splice _ | Malformed _ ->
+      Ok (Type.TCon (decl.name, args))
+    | Alias body ->
+      let instances = Hashtbl.find_multi expansions decl.name in
+      (match
+         List.find instances ~f:(fun expansion ->
+           Expansion.same_args expansion args)
+       with
+       | Some expansion ->
+         if not expansion.expanded then expansion.reached_back <- true;
+         Ok (Type.TVar expansion.knot)
+       | None ->
+         if List.exists instances ~f:(fun expansion -> not expansion.expanded)
+         then error ~loc (Non_regular_recursive_alias decl.name)
+         else Result.map (expand t decl ~args ~expansions body) ~f:fst)
+  in
+  ty, syntax
 
-and expand t (decl : Decl.t) ~args ~expansions body ~loc =
+(* Its definition, computed if spliced. While being computed, it is taken to
+   be nominal, which [set_definition] checks. *)
+and definition (decl : Decl.t) ~loc =
+  match decl.decl.kind with
+  | Splice _ when Module_scope.defining decl.module_ decl.decl.name.txt ->
+    decl.used_while_defined <- true;
+    Ok decl.decl.kind
+  | Splice _ ->
+    let%bind.Result () =
+      Module_scope.force_definition decl.module_ decl.decl.name.txt ~loc
+      |> Result.map_error ~f:(fun error ->
+        if Typecheck_error.is_already_reported error then decl.failed <- true;
+        error)
+    in
+    if decl.failed
+    then Error Typecheck_error.already_reported
+    else Ok decl.decl.kind
+  | Variant _ | Record _ | Alias _ | Abstract | Malformed _ -> Ok decl.decl.kind
+
+and expand t (decl : Decl.t) ~args ~expansions body =
   let knot = Type.Var.create (Fresh.id t.fresh) Generic in
   let expansion =
     { Expansion.args; knot; expanded = false; reached_back = false }
   in
   Hashtbl.add_multi expansions ~key:decl.name ~data:expansion;
-  let%bind.Result body =
+  let%bind.Result body, syntax =
     elaborate'
       t
       decl.module_
-      (Params (Decl.param_map { decl with params = args }))
+      (Params (Decl.param_map decl ~params:args))
+      ~splices:true
       ~expansions
       body
   in
   if expansion.reached_back && not (Expansion.guarded body ~knot)
-  then Error (Typecheck_error.create ~loc (Cyclic_type_alias decl.name))
+  then
+    Error
+      (Typecheck_error.create
+         ~loc:decl.decl.name.loc
+         (Cyclic_type_alias decl.name))
   else (
     knot.state <- Link body;
     expansion.expanded <- true;
-    Ok (Type.TVar knot))
+    Ok (Type.TVar knot, syntax))
 ;;
 
-let elaborate t module_ vars expr =
+let elaborate t module_ vars expr ~splices =
   elaborate'
     t
     module_
     (Annotation vars)
+    ~splices
     ~expansions:(String.Table.create ())
     expr
 ;;
 
-let declare module_ (decl : Type_decl.t) ~fresh =
-  let%map.Result () =
-    List.fold_result
-      decl.params
-      ~init:String.Set.empty
-      ~f:(fun seen { txt = param; loc } ->
-        let param = Type_decl.Param.name param in
-        if Set.mem seen param
-        then
-          Error
-            (Typecheck_error.create
-               ~loc
-               (Duplicate_type_parameter
-                  { type_name =
-                      Module_scope.canonical_name module_ decl.name.txt
-                  ; param
-                  }))
-        else Ok (Set.add seen param))
-    |> Result.ignore_m
+let declare_members t module_ (decl : Type_decl.t) ~name =
+  let declares names table =
+    List.iter names ~f:(fun ((member : Name.t), _) ->
+      Hashtbl.add_exn
+        table
+        ~key:(Module_scope.canonical_name module_ member.txt)
+        ~data:name)
   in
+  let rec declare_members : Type_decl.Kind.t -> unit = function
+    | Alias _ | Abstract | Splice _ -> ()
+    | Malformed kind -> declare_members kind
+    | Variant constructors -> declares constructors t.constructor_types
+    | Record fields -> declares fields t.field_types
+  in
+  declare_members decl.kind
+;;
+
+let declare
+      ?(lazily = false)
+      ?(wrap_error = Fn.id)
+      t
+      module_
+      (decl : Type_decl.t)
+  =
+  let name = Module_scope.canonical_name module_ decl.name.txt in
   let params =
-    List.map decl.params ~f:(fun param ->
-      match param.txt with
-      | Ty _ -> Type.ATy (TVar (Type.Var.create (Fresh.id fresh) Generic))
-      | Row _ -> ARow (RVar (Type.Var.create (Fresh.id fresh) Generic)))
+    lazy
+      (List.map decl.params ~f:(fun param ->
+         match param.txt with
+         | Ty _ -> Type.ATy (TVar (Type.Var.create (Fresh.id t.fresh) Generic))
+         | Row _ -> ARow (RVar (Type.Var.create (Fresh.id t.fresh) Generic))))
   in
-  { Decl.decl
-  ; name = Module_scope.canonical_name module_ decl.name.txt
-  ; module_
-  ; params
-  }
+  if not lazily then ignore (force params : Type.arg list);
+  Hashtbl.add_exn
+    t.types
+    ~key:name
+    ~data:
+      { Decl.decl
+      ; name
+      ; module_
+      ; params
+      ; wrap_error
+      ; used_while_defined = false
+      ; checked = None
+      ; failed =
+          (match decl.kind with
+           | Malformed _ -> true
+           | Variant _ | Record _ | Alias _ | Abstract | Splice _ -> false)
+      ; reflected = None
+      };
+  declare_members t module_ decl ~name
+;;
+
+(* Reported, as the type's definition, once its splice is evaluated. *)
+let set_definition t name (kind : Type_decl.Kind.t) ~wrap_error ~loc =
+  let decl = Hashtbl.find_exn t.types name in
+  let error kind =
+    decl.failed <- true;
+    t.report (decl.wrap_error (Typecheck_error.create ~loc kind))
+  in
+  match kind with
+  | Alias _ when decl.used_while_defined ->
+    error (Type_definition_cycle { name; splice = loc })
+  | _ when kind_has_splice kind -> error Nested_type_splice
+  | Alias _ | Variant _ | Record _ | Abstract | Malformed _ | Splice _ ->
+    decl.decl <- { decl.decl with kind };
+    decl.wrap_error <- Fn.compose decl.wrap_error wrap_error;
+    declare_members t decl.module_ decl.decl ~name
+;;
+
+let declare_exception
+      ?(wrap_error = Fn.id)
+      t
+      module_
+      (name : Name.t)
+      args
+      ~malformed
+  =
+  Hashtbl.add_exn
+    t.exceptions
+    ~key:(Module_scope.canonical_name module_ name.txt)
+    ~data:
+      { Exception_decl.args; malformed; module_; wrap_error; checked = None }
+;;
+
+(* Its arguments have no type variables, which nothing would bind. *)
+let check_exception t name =
+  let decl = Hashtbl.find_exn t.exceptions name in
+  match decl.checked with
+  | Some checked -> Ok checked
+  | None when decl.malformed -> Error Typecheck_error.already_reported
+  | None ->
+    Result.map_error ~f:decl.wrap_error
+    @@
+    let%map.Result args =
+      map_result decl.args ~f:(fun arg ->
+        elaborate'
+          t
+          decl.module_
+          (Params String.Map.empty)
+          ~splices:true
+          ~expansions:(String.Table.create ())
+          arg
+        |> Result.map ~f:fst)
+    in
+    let { Typed.Constructor_ref.type_name; index; name = _ } =
+      Typed.Constructor_ref.exception_ name
+    in
+    let checked =
+      { Constructor.name; type_name; index; args; result = Type.exn }
+    in
+    decl.checked <- Some checked;
+    checked
 ;;
 
 let define t (decl : Decl.t) =
   let expansions = String.Table.create () in
   let elaborate =
-    elaborate' t decl.module_ (Params (Decl.param_map decl)) ~expansions
+    elaborate'
+      t
+      decl.module_
+      (Params (Decl.param_map decl ~params:(Decl.params decl)))
+      ~splices:true
+      ~expansions
   in
   let canonical_name = Module_scope.canonical_name decl.module_ in
-  let%map.Result kind =
+  let%map.Result kind, reflected =
     match decl.decl.kind with
     | Alias body ->
-      let%map.Result body =
-        expand t decl ~args:decl.params ~expansions body ~loc:decl.decl.name.loc
+      let%map.Result body, syntax =
+        expand t decl ~args:(Decl.params decl) ~expansions body
       in
-      Signature.Type_decl.Kind.Alias body
-    | Abstract -> Ok Signature.Type_decl.Kind.Abstract
+      ( Signature.Type_decl.Kind.Alias body
+      , Some (Reflected_decl.Kind.Alias syntax) )
+    | Abstract -> Ok (Signature.Type_decl.Kind.Abstract, None)
+    | Splice _ ->
+      raise_s [%message "Type_env.define: definition not computed" decl.name]
+    | Malformed _ ->
+      raise_s [%message "Type_env.define: malformed" (decl.name : string)]
     | Variant constructors ->
       let%map.Result constructors =
         map_result constructors ~f:(fun ((name : Name.t), args) ->
           let%map.Result args = map_result args ~f:elaborate in
-          { Signature.Constructor.name = name.txt; args })
+          let args, syntax = List.unzip args in
+          ( { Signature.Constructor.name = name.txt; args }
+          , (canonical_name name.txt, syntax) ))
       in
-      Signature.Type_decl.Kind.Variant constructors
+      let constructors, reflected = List.unzip constructors in
+      ( Signature.Type_decl.Kind.Variant constructors
+      , Some (Reflected_decl.Kind.Variant reflected) )
     | Record fields ->
       let%map.Result fields =
         map_result fields ~f:(fun ((name : Name.t), ty) ->
-          let%map.Result ty = elaborate ty in
-          { Signature.Field.name = name.txt; ty })
+          let%map.Result ty, syntax = elaborate ty in
+          ( { Signature.Field.name = name.txt; ty }
+          , (canonical_name name.txt, syntax) ))
       in
-      Signature.Type_decl.Kind.Record fields
+      let fields, reflected = List.unzip fields in
+      ( Signature.Type_decl.Kind.Record fields
+      , Some (Reflected_decl.Kind.Record reflected) )
   in
+  decl.reflected
+  <- Option.map reflected ~f:(fun kind ->
+       { Reflected_decl.params = decl.decl.params; kind });
   let checked =
-    Map.add_exn
-      t.checked
-      ~key:decl.name
-      ~data:
-        { Signature.Type_decl.name = decl.decl.name.txt
-        ; params = decl.params
-        ; kind
-        }
-  in
-  let t = { t with checked } in
-  match kind with
-  | Alias _ | Abstract -> t
-  | Variant constructors ->
-    let result = Type.TCon (decl.name, decl.params) in
-    let constructors =
-      List.foldi
-        constructors
-        ~init:t.constructors
-        ~f:(fun index constructors { name; args } ->
-          let name = canonical_name name in
-          Map.add_exn
-            constructors
-            ~key:name
-            ~data:
-              { Constructor.name; type_name = decl.name; index; args; result })
-    in
-    { t with constructors }
-  | Record fields ->
-    let all_fields =
-      List.map fields ~f:(fun (field : Signature.Field.t) ->
-        canonical_name field.name)
-    in
-    let fields =
-      List.foldi fields ~init:t.fields ~f:(fun index fields { name; ty } ->
-        let name = canonical_name name in
-        Map.add_exn
-          fields
-          ~key:name
-          ~data:
-            { Field.name
-            ; type_name = decl.name
-            ; index
-            ; record = TCon (decl.name, decl.params)
-            ; ty
-            ; all_fields
-            })
-    in
-    { t with fields }
-;;
-
-let create root fresh =
-  let%bind.Result decls =
-    Module_scope.toplevels root
-    |> List.filter_map ~f:(fun (module_, (toplevel : Toplevel.t)) ->
-      match toplevel.txt with
-      | Type decl -> Some (declare module_ decl ~fresh)
-      | Let _ | Module _ | Expect_test _ -> None)
-    |> Result.all
-  in
-  let t =
-    { fresh
-    ; types =
-        List.map decls ~f:(fun (decl : Decl.t) -> decl.name, decl)
-        |> String.Map.of_alist_exn
-    ; constructors = String.Map.empty
-    ; fields = String.Map.empty
-    ; checked = String.Map.empty
+    { Signature.Type_decl.name = decl.decl.name.txt
+    ; params = Decl.params decl
+    ; kind
     }
   in
-  List.fold_result decls ~init:t ~f:define
+  decl.checked <- Some checked;
+  (match kind with
+   | Alias _ | Abstract -> ()
+   | Variant constructors ->
+     let result = Type.TCon (decl.name, Decl.params decl) in
+     List.iteri constructors ~f:(fun index { name; args } ->
+       let name = canonical_name name in
+       Hashtbl.add_exn
+         t.constructors
+         ~key:name
+         ~data:{ Constructor.name; type_name = decl.name; index; args; result })
+   | Record fields ->
+     let record_type =
+       { Typed.Record_type.name = decl.name
+       ; fields =
+           Array.of_list_map fields ~f:(fun (field : Signature.Field.t) ->
+             canonical_name field.name)
+       }
+     in
+     List.iteri fields ~f:(fun index { name = _; ty } ->
+       Hashtbl.add_exn
+         t.fields
+         ~key:record_type.fields.(index)
+         ~data:
+           { Field.record_type
+           ; index
+           ; record = TCon (decl.name, Decl.params decl)
+           ; ty
+           }));
+  checked
+;;
+
+let check t name =
+  let decl = Hashtbl.find_exn t.types name in
+  match decl.checked with
+  | Some checked -> Ok checked
+  | None when decl.failed -> Error Typecheck_error.already_reported
+  | None ->
+    (match decl.decl.kind with
+     | Splice _ ->
+       Module_scope.force_definition
+         decl.module_
+         decl.decl.name.txt
+         ~loc:decl.decl.name.loc
+       |> Result.map_error ~f:decl.wrap_error
+     | Variant _ | Record _ | Alias _ | Abstract | Malformed _ -> Ok ())
+    |> Result.bind ~f:(fun () ->
+      if decl.failed then Error Typecheck_error.already_reported else Ok ())
+    |> Result.bind ~f:(fun () -> define t decl)
+    |> Result.map_error ~f:(fun error ->
+      decl.failed <- true;
+      (* Reported here, as the code that first used the declaration may be
+         abandoned, and later uses are [Already_reported]. *)
+      if not (Typecheck_error.is_already_reported error)
+      then t.report (decl.wrap_error error);
+      Typecheck_error.already_reported)
+;;
+
+let find_decl_exn t name =
+  Option.value_exn (Hashtbl.find_exn t.types name).checked
+;;
+
+let members t type_name ~kind ~members =
+  match Hashtbl.find t.types type_name with
+  | None -> Ok None
+  | Some decl ->
+    let%map.Result checked = check t type_name in
+    kind checked.kind
+    |> Option.map ~f:(fun names ->
+      List.map names ~f:(fun name ->
+        Hashtbl.find_exn members (Module_scope.canonical_name decl.module_ name)))
+;;
+
+let record_fields t type_name =
+  members t type_name ~members:t.fields ~kind:(function
+    | Record fields ->
+      Some (List.map fields ~f:(fun (field : Signature.Field.t) -> field.name))
+    | Variant _ | Alias _ | Abstract -> None)
+;;
+
+let record_type t type_name =
+  let%map.Result fields = record_fields t type_name in
+  match fields with
+  | Some (field :: _) -> field.record_type
+  | Some [] | None ->
+    raise_s [%message "Not a record type" (type_name : string)]
+;;
+
+let variant_constructors t type_name =
+  members t type_name ~members:t.constructors ~kind:(function
+    | Variant constructors ->
+      Some
+        (List.map
+           constructors
+           ~f:(fun (constructor : Signature.Constructor.t) -> constructor.name))
+    | Record _ | Alias _ | Abstract -> None)
+;;
+
+let is_empty_variant t name =
+  let%map.Result checked = check t name in
+  match checked.kind with
+  | Variant [] -> true
+  | Variant (_ :: _) | Record _ | Alias _ | Abstract -> false
+;;
+
+(* The entry of the constructor or field of canonical name [name], checking
+   its type. *)
+let find_member t ~types ~members name ~loc ~unbound =
+  match Hashtbl.find types name with
+  | None ->
+    Error
+      (Typecheck_error.create
+         ~loc
+         (unbound (Decl_path.Path (Path.of_string name))))
+  | Some type_name ->
+    let%map.Result (_ : Signature.Type_decl.t) = check t type_name in
+    Hashtbl.find_exn members name
+;;
+
+let constructor t name ~loc =
+  if Hashtbl.mem t.exceptions name
+  then check_exception t name
+  else
+    find_member
+      t
+      ~types:t.constructor_types
+      ~members:t.constructors
+      name
+      ~loc
+      ~unbound:(fun path -> Unbound_constructor path)
+;;
+
+let field t name ~loc =
+  find_member
+    t
+    ~types:t.field_types
+    ~members:t.fields
+    name
+    ~loc
+    ~unbound:(fun path -> Unbound_field path)
+;;
+
+let find_constructor t module_ ({ txt = path; loc } : Decl_path.t Located.t) =
+  match path with
+  | Resolved name -> constructor t name ~loc
+  | Path _ | Root _ ->
+    find_resolved
+      t
+      module_
+      Constructor
+      path
+      ~loc
+      ~unbound:(fun path -> Unbound_constructor path)
+      ~find:constructor
+;;
+
+let find_field t module_ ({ txt = path; loc } : Decl_path.t Located.t) =
+  match path with
+  | Resolved name -> field t name ~loc
+  | Path _ | Root _ ->
+    find_resolved
+      t
+      module_
+      Field
+      path
+      ~loc
+      ~unbound:(fun path -> Unbound_field path)
+      ~find:field
+;;
+
+let reflect t name =
+  let%map.Result (_ : Signature.Type_decl.t) = check t name in
+  (Hashtbl.find_exn t.types name).reflected
 ;;

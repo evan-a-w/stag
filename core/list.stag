@@ -1,0 +1,384 @@
+(* Functions take the function first, as OCaml's [Stdlib.List], and run in
+   constant stack. Those that could fail return an option, and have an [_exn]
+   variant raising [Failure]. *)
+
+let is_empty l =
+  match l with
+  | [] -> true
+  | Cons (_, _) -> false
+
+let singleton x = [x]
+
+let length l =
+  let loop acc l =
+    match l with
+    | [] -> acc
+    | Cons (_, rest) -> loop (Int.succ acc) rest
+  in
+  loop 0 l
+
+let hd l =
+  match l with
+  | [] -> None
+  | Cons (x, _) -> Some x
+
+let hd_exn l =
+  match l with
+  | [] -> raise (Failure "List.hd_exn: empty list")
+  | Cons (x, _) -> x
+
+let tl l =
+  match l with
+  | [] -> None
+  | Cons (_, rest) -> Some rest
+
+let tl_exn l =
+  match l with
+  | [] -> raise (Failure "List.tl_exn: empty list")
+  | Cons (_, rest) -> rest
+
+let last l =
+  match l with
+  | [] -> None
+  | [x] -> Some x
+  | Cons (_, rest) -> last rest
+
+let last_exn l =
+  match last l with
+  | Some x -> x
+  | None -> raise (Failure "List.last_exn: empty list")
+
+let nth l n =
+  match l with
+  | [] -> None
+  | Cons (x, rest) ->
+    match Int.equal n 0 with
+    | true -> Some x
+    | false ->
+      match Int.lt n 0 with
+      | true -> None
+      | false -> nth rest (Int.pred n)
+
+let nth_exn l n =
+  match nth l n with
+  | Some x -> x
+  | None ->
+    raise
+      (Failure (String.append "List.nth_exn: no element " (Int.to_string n)))
+
+let rev_append l tail =
+  match l with
+  | [] -> tail
+  | Cons (x, rest) -> rev_append rest (Cons (x, tail))
+
+let rev l = rev_append l []
+
+(* [init n f] is [f 0; ...; f (n - 1)], calling [f] in that order. *)
+let init n f =
+  let loop i acc =
+    match Int.lt i n with
+    | true -> loop (Int.succ i) (Cons (f i, acc))
+    | false -> rev acc
+  in
+  loop 0 []
+
+let append l1 l2 = rev_append (rev l1) l2
+
+(* [fold_left f init [a; b]] is [f (f init a) b]. *)
+let fold_left f acc l =
+  match l with
+  | [] -> acc
+  | Cons (x, rest) -> fold_left f (f acc x) rest
+
+(* [fold_right f [a; b] init] is [f a (f b init)]. *)
+let fold_right f l acc = fold_left (fun acc x -> f x acc) acc (rev l)
+
+let rev_map f l = fold_left (fun acc x -> Cons (f x, acc)) [] l
+
+let map f l = rev (rev_map f l)
+
+let mapi f l =
+  let loop i l acc =
+    match l with
+    | [] -> rev acc
+    | Cons (x, rest) -> loop (Int.succ i) rest (Cons (f i x, acc))
+  in
+  loop 0 l []
+
+let iter (f : 'a -> unit) l =
+  match l with
+  | [] -> ()
+  | Cons (x, rest) ->
+    f x;
+    iter f rest
+
+let iteri (f : int -> 'a -> unit) l =
+  let loop i l =
+    match l with
+    | [] -> ()
+    | Cons (x, rest) ->
+      f i x;
+      loop (Int.succ i) rest
+  in
+  loop 0 l
+
+let filter_map f l =
+  let step acc x =
+    match f x with
+    | Some y -> Cons (y, acc)
+    | None -> acc
+  in
+  rev (fold_left step [] l)
+
+let filter f l =
+  let step acc x =
+    match f x with
+    | true -> Cons (x, acc)
+    | false -> acc
+  in
+  rev (fold_left step [] l)
+
+(* [(those satisfying f, the others)]. *)
+let partition f l =
+  let step acc x =
+    match (acc, f x) with
+    | (yes, no), true -> (Cons (x, yes), no)
+    | (yes, no), false -> (yes, Cons (x, no))
+  in
+  match fold_left step ([], []) l with yes, no -> (rev yes, rev no)
+
+let concat ls = rev (fold_left (fun acc l -> rev_append l acc) [] ls)
+
+let concat_map f l = rev (fold_left (fun acc x -> rev_append (f x) acc) [] l)
+
+let count f l =
+  let step n x =
+    match f x with
+    | true -> Int.succ n
+    | false -> n
+  in
+  fold_left step 0 l
+
+let find f l =
+  match l with
+  | [] -> None
+  | Cons (x, rest) ->
+    match f x with
+    | true -> Some x
+    | false -> find f rest
+
+let find_exn f l =
+  match find f l with
+  | Some x -> x
+  | None -> raise (Failure "List.find_exn: not found")
+
+let find_map f l =
+  match l with
+  | [] -> None
+  | Cons (x, rest) ->
+    match f x with
+    | Some y -> Some y
+    | None -> find_map f rest
+
+let exists f l =
+  match l with
+  | [] -> false
+  | Cons (x, rest) ->
+    match f x with
+    | true -> true
+    | false -> exists f rest
+
+let for_all f l =
+  match l with
+  | [] -> true
+  | Cons (x, rest) ->
+    match f x with
+    | true -> for_all f rest
+    | false -> false
+
+let mem equal x l = exists (fun y -> equal x y) l
+
+let equal equal_elt l1 l2 =
+  match (l1, l2) with
+  | [], [] -> true
+  | Cons (x, rest1), Cons (y, rest2) ->
+    (match equal_elt x y with
+     | true -> equal equal_elt rest1 rest2
+     | false -> false)
+  | _ -> false
+
+(* Lexicographic: a proper prefix is less. *)
+let compare compare_elt l1 l2 =
+  match (l1, l2) with
+  | [], [] -> 0
+  | [], _ -> -1
+  | _, [] -> 1
+  | Cons (x, rest1), Cons (y, rest2) ->
+    match Int.equal (compare_elt x y) 0 with
+    | true -> compare compare_elt rest1 rest2
+    | false -> compare_elt x y
+
+(* The first [n] elements, or all of them if there are fewer. *)
+let take n l =
+  let loop l n acc =
+    match (l, Int.gt n 0) with
+    | Cons (x, rest), true -> loop rest (Int.pred n) (Cons (x, acc))
+    | _ -> rev acc
+  in
+  loop l n []
+
+(* Without the first [n] elements. *)
+let drop n l =
+  match (l, Int.gt n 0) with
+  | Cons (_, rest), true -> drop (Int.pred n) rest
+  | _ -> l
+
+(* [None] if the lists' lengths differ. *)
+let zip l1 l2 =
+  let loop l1 l2 acc =
+    match (l1, l2) with
+    | [], [] -> Some (rev acc)
+    | Cons (x, rest1), Cons (y, rest2) -> loop rest1 rest2 (Cons ((x, y), acc))
+    | _ -> None
+  in
+  loop l1 l2 []
+
+let zip_exn l1 l2 =
+  match zip l1 l2 with
+  | Some l -> l
+  | None -> raise (Failure "List.zip_exn: lengths differ")
+
+let unzip l =
+  let step acc p =
+    match (acc, p) with (xs, ys), (x, y) -> (Cons (x, xs), Cons (y, ys))
+  in
+  match fold_left step ([], []) l with xs, ys -> (rev xs, rev ys)
+
+(* [None] if the lists' lengths differ, as for [map2], [iter2] and
+   [fold_left2]. *)
+let map2 f l1 l2 =
+  let loop l1 l2 acc =
+    match (l1, l2) with
+    | [], [] -> Some (rev acc)
+    | Cons (x, rest1), Cons (y, rest2) -> loop rest1 rest2 (Cons (f x y, acc))
+    | _ -> None
+  in
+  loop l1 l2 []
+
+let map2_exn f l1 l2 =
+  match map2 f l1 l2 with
+  | Some l -> l
+  | None -> raise (Failure "List.map2_exn: lengths differ")
+
+(* Stops at the end of the shorter list, so [f] is called on all pairs only if
+   the lengths are equal. *)
+let iter2 (f : 'a -> 'b -> unit) l1 l2 =
+  match (l1, l2) with
+  | [], [] -> Some ()
+  | Cons (x, rest1), Cons (y, rest2) ->
+    f x y;
+    iter2 f rest1 rest2
+  | _ -> None
+
+let fold_left2 f acc l1 l2 =
+  match (l1, l2) with
+  | [], [] -> Some acc
+  | Cons (x, rest1), Cons (y, rest2) -> fold_left2 f (f acc x y) rest1 rest2
+  | _ -> None
+
+(* [max_elt compare l] is the first greatest element, [None] if [l] is empty. *)
+let max_elt compare l =
+  let step best x =
+    match Int.gt (compare x best) 0 with
+    | true -> x
+    | false -> best
+  in
+  match l with
+  | [] -> None
+  | Cons (x, rest) -> Some (fold_left step x rest)
+
+(* [min_elt compare l] is the first least element, [None] if [l] is empty. *)
+let min_elt compare l =
+  let step best x =
+    match Int.lt (compare x best) 0 with
+    | true -> x
+    | false -> best
+  in
+  match l with
+  | [] -> None
+  | Cons (x, rest) -> Some (fold_left step x rest)
+
+(* The value of the first pair whose key is [equal] to [key]. *)
+let assoc equal key l =
+  match l with
+  | [] -> None
+  | Cons ((k, v), rest) ->
+    match equal key k with
+    | true -> Some v
+    | false -> assoc equal key rest
+
+let assoc_exn equal key l =
+  match assoc equal key l with
+  | Some v -> v
+  | None -> raise (Failure "List.assoc_exn: not found")
+
+(* Stable merge sort, by [compare] (negative, zero or positive, as
+   [Int.compare]), of the list's ascending and strictly descending runs: linear
+   on a sorted or reversed list. *)
+let sort compare l =
+  let merge l1 l2 acc =
+    match (l1, l2) with
+    | [], l -> rev_append acc l
+    | l, [] -> rev_append acc l
+    | Cons (x, rest1), Cons (y, rest2) ->
+      match Int.gt (compare x y) 0 with
+      | true -> merge l1 rest2 (Cons (y, acc))
+      | false -> merge rest1 l2 (Cons (x, acc))
+  in
+  (* [run] is the current run before [x] (reversed unless [descending]). *)
+  let runs descending run x l acc =
+    let close run =
+      match descending with
+      | true -> run
+      | false -> rev run
+    in
+    match l with
+    | [] -> rev (Cons (close (Cons (x, run)), acc))
+    | Cons (y, rest) ->
+      let down = Int.gt (compare x y) 0 in
+      match run with
+      | [] -> runs down [x] y rest acc
+      | Cons (_, _) ->
+        match Bool.equal descending down with
+        | true -> runs descending (Cons (x, run)) y rest acc
+        | false -> runs false [] y rest (Cons (close (Cons (x, run)), acc))
+  in
+  (* Merges neighbouring runs, keeping their order. *)
+  let merge_pairs runs acc =
+    match runs with
+    | Cons (r1, Cons (r2, rest)) ->
+      merge_pairs rest (Cons (merge r1 r2 [], acc))
+    | [r] -> rev (Cons (r, acc))
+    | [] -> rev acc
+  in
+  let merge_all runs =
+    match runs with
+    | [] -> []
+    | [r] -> r
+    | _ -> merge_all (merge_pairs runs [])
+  in
+  match l with
+  | [] -> []
+  | Cons (x, rest) -> merge_all (runs false [] x rest [])
+
+(* Sorted by [compare], keeping the first of the elements it says are equal. *)
+let dedup compare l =
+  let step acc x =
+    match acc with
+    | Cons (y, _) ->
+      (match Int.equal (compare y x) 0 with
+       | true -> acc
+       | false -> Cons (x, acc))
+    | [] -> Cons (x, acc)
+  in
+  rev (fold_left step [] (sort compare l))

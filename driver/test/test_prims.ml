@@ -5,7 +5,9 @@ let run ?(eval = true) src =
   | Error error -> print_endline (Parser.Error.to_string error)
   | Ok program ->
     (match Driver.check ~limits:Source_helpers.limits program with
-     | Error error -> print_s [%sexp (error : Typecheck_error.t)]
+     | Error error ->
+       List.iter (error : Typecheck.Failed.t).errors ~f:(fun error ->
+         print_s [%sexp (error : Typecheck_error.t)])
      | Ok driver ->
        print_string (Signature.to_string_hum (Driver.checked driver).signature);
        if eval
@@ -39,11 +41,11 @@ let show x = print_endline (Int.to_string x)
 let show_bool b = match b with true -> print_endline "true" | false -> print_endline "false"
 let main3 =
   show (Int.add 3 4); show (Int.sub 3 4); show (Int.mul 3 4);
-  show (Int.div 7 2); show (Int.div (Int.neg 7) 2); show (Int.rem (Int.neg 7) 2);
+  show (Int.div 7 2); show (Int.div -7 2); show (Int.rem -7 2);
   show (Int.compare 1 2); show (Int.compare 2 2); show (Int.compare 3 2);
   show_bool (Int.equal 1 1); show_bool (Int.lt 1 2); show_bool (Int.le 2 2);
   show_bool (Int.gt 1 2); show_bool (Int.ge 1 2);
-  show (Int.of_string "-12"); show (Int.of_string "4611686018427387903");
+  show (Int.of_string_exn "-12"); show (Int.of_string_exn "4611686018427387903");
   show (Int.add 4611686018427387903 1)
 |};
   [%expect
@@ -140,11 +142,11 @@ let%expect_test "runtime errors are located at the application" =
     [ "Int.div 1 0"
     ; "Int.rem 1 0"
     ; "String.get \"abc\" 3"
-    ; "String.get \"abc\" (Int.neg 1)"
+    ; "String.get \"abc\" -1"
     ; "String.sub \"abc\" 2 2"
-    ; "Int.of_string \"12a\""
-    ; "Int.of_string \"0x12\""
-    ; "Int.of_string \"\""
+    ; "Int.of_string_exn \"12a\""
+    ; "Int.of_string_exn \"0x12\""
+    ; "Int.of_string_exn \"\""
     ; "Char.of_code 256"
     ]
   in
@@ -153,38 +155,45 @@ let%expect_test "runtime errors are located at the application" =
     {|
     val x : int
     ---
-    ("Runtime error" ("Division by zero" @ t.stag:1:8-19))
+    ("Runtime error" ("Uncaught exception Division_by_zero" @ t.stag:1:8-19))
     val x : int
     ---
-    ("Runtime error" ("Division by zero" @ t.stag:1:8-19))
+    ("Runtime error" ("Uncaught exception Division_by_zero" @ t.stag:1:8-19))
     val x : char
     ---
     ("Runtime error"
-     ("String.get: index 3 out of bounds of a string of length 3" @
-      t.stag:1:8-26))
+     ("Uncaught exception Invalid_argument \"String.get: index 3 out of bounds of a string of length 3\""
+      @ t.stag:1:8-26))
     val x : char
     ---
     ("Runtime error"
-     ("String.get: index -1 out of bounds of a string of length 3" @
-      t.stag:1:8-36))
+     ("Uncaught exception Invalid_argument \"String.get: index -1 out of bounds of a string of length 3\""
+      @ t.stag:1:8-27))
     val x : string
     ---
     ("Runtime error"
-     ("String.sub: invalid substring (position 2, length 2) of a string of length 3"
+     ("Uncaught exception Invalid_argument \"String.sub: invalid substring (position 2, length 2) of a string of length 3\""
       @ t.stag:1:8-28))
     val x : int
     ---
-    ("Runtime error" ("Int.of_string: invalid integer \"12a\"" @ t.stag:1:8-27))
+    ("Runtime error"
+     ("Uncaught exception Failure \"Int.of_string_exn: invalid integer \\\"12a\\\"\""
+      @ t.stag:1:8-31))
     val x : int
     ---
-    ("Runtime error" ("Int.of_string: invalid integer \"0x12\"" @ t.stag:1:8-28))
+    ("Runtime error"
+     ("Uncaught exception Failure \"Int.of_string_exn: invalid integer \\\"0x12\\\"\""
+      @ t.stag:1:8-32))
     val x : int
     ---
-    ("Runtime error" ("Int.of_string: invalid integer \"\"" @ t.stag:1:8-24))
+    ("Runtime error"
+     ("Uncaught exception Failure \"Int.of_string_exn: invalid integer \\\"\\\"\""
+      @ t.stag:1:8-28))
     val x : char
     ---
     ("Runtime error"
-     ("Char.of_code: invalid character code 256" @ t.stag:1:8-24))
+     ("Uncaught exception Invalid_argument \"Char.of_code: invalid character code 256\""
+      @ t.stag:1:8-24))
     |}]
 ;;
 
@@ -201,7 +210,7 @@ let boom = div 0
     val main5 : unit
     val boom : int
     ---
-    3("Runtime error" ("Division by zero" @ t.stag:4:11-16))
+    3("Runtime error" ("Uncaught exception Division_by_zero" @ t.stag:4:11-16))
     |}]
 ;;
 
@@ -237,7 +246,7 @@ let main9 = print_int (Int.add x 1)
            "int -> int")
           (Lit (Int 0) : int) : int))
         (in_ (Quote (Lit (Int 0) : int) : <int>{})) : <int>{}))
-      (error ("Division by zero" @ t.stag:1:12-23)))
+      (error ("Uncaught exception Division_by_zero" @ t.stag:1:12-23)))
      @ t.stag:1:9-31)
     |}]
 ;;
@@ -323,4 +332,37 @@ let y = print_string "run"
       ("after check" "compile ")
       ("after eval" "compile run")
       |}]
+;;
+
+let%expect_test "only the prelude names prims as [Prim.*]" =
+  run ~eval:false {| let a = Prim.String.length |};
+  [%expect {| ((Unbound_module Prim) @ t.stag:1:9-13) |}];
+  run
+    {|
+module Prim = struct
+  module String = struct let length s = 7 end
+end
+module String = struct let length s = 8 end
+let a = Prim.String.length "ab"
+let b = String.length "ab"
+let c = Core.String.length "ab"
+let main = print_int a; print_int b; print_int c
+|};
+  [%expect
+    {|
+    module Prim : sig
+      module String : sig
+        val length : 'a -> int
+      end
+    end
+    module String : sig
+      val length : 'a -> int
+    end
+    val a : int
+    val b : int
+    val c : int
+    val main : unit
+    ---
+    782
+    |}]
 ;;

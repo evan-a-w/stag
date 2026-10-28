@@ -1,0 +1,194 @@
+(* [Core.Int], [Core.Bool] and [Core.Char]. *)
+
+let print_bool b = print_endline (Core.Bool.to_string b)
+let print_sexp t = print_endline (Core.Sexp.to_string_hum t)
+
+let print_int_option o =
+  print_sexp (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_int o)
+
+let print_ints l = print_sexp (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int l)
+
+let%expect_test "Int: the prims" =
+  print_ints
+    [
+      Core.Int.add 7 3;
+      Core.Int.sub 7 3;
+      Core.Int.mul 7 3;
+      Core.Int.div 7 3;
+      Core.Int.rem 7 3;
+      Core.Int.neg 7;
+    ];
+  print_ints [Core.Int.compare 1 2; Core.Int.compare 2 2; Core.Int.compare 3 2];
+  print_bool (Core.Int.equal 1 1);
+  print_bool (Core.Int.lt 1 2);
+  print_bool (Core.Int.le 2 2);
+  print_bool (Core.Int.gt 1 2);
+  print_bool (Core.Int.ge 1 2);
+  print_endline (Core.Int.to_string (-12));
+  print_int_option (Core.Int.of_string "-12");
+  [%expect {|
+    (10 4 21 2 1 -7)
+    (-1 0 1)
+    true
+    true
+    true
+    false
+    false
+    -12
+    (-12)
+    |}]
+
+let%expect_test "Int: succ, pred, abs, min, max, bounds" =
+  print_ints
+    [
+      Core.Int.succ 1;
+      Core.Int.pred 1;
+      Core.Int.abs (-3);
+      Core.Int.abs 3;
+      Core.Int.min 1 2;
+      Core.Int.max 1 2;
+    ];
+  print_ints [Core.Int.max_value; Core.Int.min_value];
+  print_int (Core.Int.add Core.Int.max_value 1);
+  [%expect {|
+    (2 0 3 3 1 2)
+    (4611686018427387903 -4611686018427387904)
+    -4611686018427387904
+    |}]
+
+let%expect_test "Int: of_string" =
+  let test s =
+    print_string s;
+    print_string " -> ";
+    print_int_option (Core.Int.of_string s)
+  in
+  test "0";
+  test "42";
+  test "-42";
+  test "007";
+  test "-0";
+  test "4611686018427387903";
+  test "4611686018427387904";
+  test "-4611686018427387904";
+  test "-4611686018427387905";
+  test "0004611686018427387903";
+  test "99999999999999999999";
+  test "";
+  test "-";
+  test "+1";
+  test "1_000";
+  test " 1";
+  test "0x10";
+  [%expect {|
+    0 -> (0)
+    42 -> (42)
+    -42 -> (-42)
+    007 -> (7)
+    -0 -> (0)
+    4611686018427387903 -> (4611686018427387903)
+    4611686018427387904 -> ()
+    -4611686018427387904 -> (-4611686018427387904)
+    -4611686018427387905 -> ()
+    0004611686018427387903 -> (4611686018427387903)
+    99999999999999999999 -> ()
+     -> ()
+    - -> ()
+    +1 -> ()
+    1_000 -> ()
+     1 -> ()
+    0x10 -> ()
+    |}]
+
+let%expect_test "Bool" =
+  print_bool (Core.Bool.not true);
+  print_bool (Core.Bool.equal true true);
+  print_bool (Core.Bool.equal true false);
+  print_ints
+    [
+      Core.Bool.compare false true;
+      Core.Bool.compare true true;
+      Core.Bool.compare true false;
+    ];
+  let print_bool_option o =
+    print_sexp (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_bool o)
+  in
+  print_bool_option (Core.Bool.of_string "true");
+  print_bool_option (Core.Bool.of_string "false");
+  print_bool_option (Core.Bool.of_string "True");
+  [%expect {|
+    false
+    true
+    false
+    (-1 0 1)
+    (true)
+    (false)
+    ()
+    |}]
+
+let%expect_test "Char" =
+  print_bool (Core.Char.equal 'a' 'a');
+  print_bool (Core.Char.equal 'a' 'b');
+  print_ints
+    [
+      Core.Char.compare 'a' 'b';
+      Core.Char.compare 'b' 'b';
+      Core.Char.compare 'c' 'b';
+      Core.Char.code 'A';
+    ];
+  let print_char_option o =
+    print_sexp (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_char o)
+  in
+  print_char_option (Core.Char.of_code 65);
+  print_char_option (Core.Char.of_code 256);
+  print_char_option (Core.Char.of_code (-1));
+  print_endline (Core.Char.to_string 'z');
+  let classes = [
+    ("digit", Core.Char.is_digit);
+    ("lowercase", Core.Char.is_lowercase);
+    ("uppercase", Core.Char.is_uppercase);
+    ("alpha", Core.Char.is_alpha);
+    ("alphanum", Core.Char.is_alphanum);
+    ("whitespace", Core.Char.is_whitespace);
+    ("print", Core.Char.is_print);
+  ] in
+  let classify c =
+    let class_ p =
+      match p with
+      | name, f ->
+        match f c with
+        | true -> Some (Core.Sexp.Atom name)
+        | false -> None
+    in
+    print_sexp
+      (Core.Sexp.List (Cons
+         (Core.Sexp.sexp_of_char c, Core.List.filter_map class_ classes)))
+  in
+  Core.List.iter
+    classify
+    (Core.String.to_list "09azAZ_ \t\n\r\012\011~\127\128\255");
+  [%expect {|
+    true
+    false
+    (-1 0 1 65)
+    (A)
+    ()
+    ()
+    z
+    (0 digit alphanum print)
+    (9 digit alphanum print)
+    (a lowercase alpha alphanum print)
+    (z lowercase alpha alphanum print)
+    (A uppercase alpha alphanum print)
+    (Z uppercase alpha alphanum print)
+    (_ print)
+    (" " whitespace print)
+    ("\t" whitespace)
+    ("\n" whitespace)
+    ("\r" whitespace)
+    ("\012" whitespace)
+    ("\011" whitespace)
+    (~ print)
+    ("\127")
+    ("\128")
+    ("\255")
+    |}]

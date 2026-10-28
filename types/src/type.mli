@@ -146,6 +146,30 @@ val string : ty
 val char : ty
 val unit : ty
 
+(** The extensible type of exceptions, declared by [exception]. *)
+val exn : ty
+
+val exn_name : string
+
+(** The type of what did not check, which unifies with any type, binding its
+    variables to [error], so that what uses it is not in error too. *)
+val error : ty
+
+val error_name : string
+val is_error : ty -> bool
+
+(** Copies of types as they are now, unaffected by later unification, eg. for
+    an error to show them as they were when it arose. Variables keep their
+    ids, and only their state is copied, not their bounds. *)
+module Snapshot : sig
+  type t
+
+  val create : unit -> t
+  val ty : t -> ty -> ty
+  val row : t -> row -> row
+  val arg : t -> arg -> arg
+end
+
 (** Follows [Link]s, compressing the path. *)
 val canonical_ty : ty -> ty
 
@@ -221,8 +245,9 @@ val iter_row : 'e Iter.t -> row -> (unit, 'e) Result.t
 module Printer : sig
   type t
 
-  (** [type_name] renders the canonical name of a type constructor, as is by
-      default. *)
+  (** [type_name] renders the canonical name of a type constructor: by
+      default as is, except the prelude's, which are as within the prelude
+      ([Prelude_path.to_string_hum]). *)
   val create : ?type_name:(string -> string) -> unit -> t
 
   val ty : t -> ty -> string

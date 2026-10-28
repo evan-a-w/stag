@@ -227,9 +227,11 @@ let x = .~(match B with A -> .<0>.)
     {|
     ((Splice_evaluation_failed
       (code
-       (Match (Construct ((type_name abc) (name B) (index 1)) () : abc)
-        (((Construct ((type_name abc) (name A) (index 0)) () : abc)
-          (Quote (Lit (Int 0) : int) : <int>{})))
+       (Match
+        (scrutinee (Construct ((type_name abc) (name B) (index 1)) () : abc))
+        (cases
+         (((Construct ((type_name abc) (name A) (index 0)) () : abc)
+           (Quote (Lit (Int 0) : int) : <int>{}))))
         : <int>{}))
       (error ("Match failure: no case matches the value B" @ t.stag:3:10-35)))
      @ t.stag:3:8-35)
@@ -296,10 +298,14 @@ let applied = implicit false
         : "int * int"))
       : "int * int"))
     -- evaluated at compile time
-    (code (Code (Tuple ((Var (Free n) : 'a) (Var (Free x) : 'b)) : "'a * 'b")))
+    (code
+     (Code
+      (Tuple ((Var (Free_toplevel n) : 'a) (Var (Free x) : 'b)) : "'a * 'b")))
     -- evaluated
     (n 3)
-    (code (Code (Tuple ((Var (Free n) : 'a) (Var (Free x) : 'b)) : "'a * 'b")))
+    (code
+     (Code
+      (Tuple ((Var (Free_toplevel n) : 'a) (Var (Free x) : 'b)) : "'a * 'b")))
     (implicit <fun>)
     (explicit (Tuple true 1))
     (explicit_toplevel (Tuple 3 3))
@@ -435,22 +441,26 @@ let used = f (S (S Z))
     val code : <'a>{f : 'b -> 'a; m : 'b; ..'c}
     val used : int
     (f/4
-     (Match (Var (Bound (Local n/16)) : nat)
-      (((Construct ((type_name nat) (name Z) (index 0)) () : nat)
-        (Lit (Int 0) : int))
-       ((Construct ((type_name nat) (name S) (index 1)) ((Var m/17 : nat)) : nat)
-        (Toplevel_splice
-         (code
-          (Var (Bound (Toplevel code/5)) : "<int>{f : nat -> int; m : nat}"))
-         (expansion
-          (App (Var (Bound (Toplevel f/4)) : "nat -> int")
-           (Var (Bound (Local m/17)) : nat) : int))
-         : int)))
+     (Match (scrutinee (Var (Bound (Local n/16)) : nat))
+      (cases
+       (((Construct ((type_name nat) (name Z) (index 0)) () : nat)
+         (Lit (Int 0) : int))
+        ((Construct ((type_name nat) (name S) (index 1)) ((Var m/17 : nat)) :
+          nat)
+         (Toplevel_splice
+          (code
+           (Var (Bound (Toplevel code/5)) : "<int>{f : nat -> int; m : nat}"))
+          (expansion
+           (App (Var (Bound (Toplevel f/4)) : "nat -> int")
+            (Var (Bound (Local m/17)) : nat) : int))
+          : int))))
       : int))
     -- evaluated at compile time
-    (code (Code (App (Var (Free f) : "'a -> 'b") (Var (Free m) : 'a) : 'b)))
+    (code
+     (Code (App (Var (Free_toplevel f) : "'a -> 'b") (Var (Free m) : 'a) : 'b)))
     -- evaluated
-    (code (Code (App (Var (Free f) : "'a -> 'b") (Var (Free m) : 'a) : 'b)))
+    (code
+     (Code (App (Var (Free_toplevel f) : "'a -> 'b") (Var (Free m) : 'a) : 'b)))
     (f <fun>)
     (used 0)
     ((Compile_time_use_of_toplevel_being_checked code) @ t.stag:4:41-45)
@@ -598,17 +608,20 @@ end
       : "t * r"))
     (M.y/6
      (Match
-      (Toplevel_splice (code (Var (Bound (Toplevel code/4)) : "<t * r>{}"))
-       (expansion
-        (Tuple
-         ((Construct ((type_name t) (name B) (index 1)) () : t)
-          (Record ((((type_name r) (name a) (index 0)) (Lit (Int 1) : int))) : r))
-         : "t * r"))
-       : "t * r")
-      (((Tuple ((Construct ((type_name t) (name A) (index 0)) () : t) (Any : r))
-         : "t * r")
-        (Lit (Int 0) : int))
-       ((Any : "t * r") (Lit (Int 1) : int)))
+      (scrutinee
+       (Toplevel_splice (code (Var (Bound (Toplevel code/4)) : "<t * r>{}"))
+        (expansion
+         (Tuple
+          ((Construct ((type_name t) (name B) (index 1)) () : t)
+           (Record ((((type_name r) (name a) (index 0)) (Lit (Int 1) : int))) :
+            r))
+          : "t * r"))
+        : "t * r"))
+      (cases
+       (((Tuple ((Construct ((type_name t) (name A) (index 0)) () : t) (Any : r))
+          : "t * r")
+         (Lit (Int 0) : int))
+        ((Any : "t * r") (Lit (Int 1) : int))))
       : int))
     -- evaluated at compile time
     (code
@@ -624,7 +637,7 @@ end
        ((Construct ((type_name t) (name B) (index 1)) () : t)
         (Record ((((type_name r) (name a) (index 0)) (Lit (Int 1) : int))) : r))
        : "t * r")))
-    (M.x (Tuple (B) (Record 1)))
+    (M.x (Tuple (B) (r (a 1))))
     (M.y 1)
     |}]
 ;;
@@ -728,10 +741,10 @@ let deep = .~(.~(n; .< .<n>. >.))
          (Let (ident _/15) (args ()) (generalized true)
           (body (Var (Bound (Toplevel n/4)) : int))
           (in_
-           (Quote (Quote (Var (Free n) : int) : "<int>{n : int}") :
+           (Quote (Quote (Var (Free_toplevel n) : int) : "<int>{n : int}") :
             "<<int>{n : int}>{}"))
           : "<<int>{n : int}>{}"))
-        (expansion (Quote (Var (Free n) : int) : "<int>{n : int}")) :
+        (expansion (Quote (Var (Free_toplevel n) : int) : "<int>{n : int}")) :
         "<int>{n : int}"))
       (expansion (Var (Bound (Toplevel n/4)) : int)) : int))
     -- evaluated at compile time
@@ -923,9 +936,9 @@ let s = .~(w .<1>.)
     ((Unification_error
       (Row_mismatch
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
-        (RVar (Link (RVar (Link REmpty)))))
+        (RVar (Link REmpty)))
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 62 1)))
+        (RVar (Unbound 64 1)))
        (Presence_mismatch x)))
      @ t.stag:6:13-18)
     val x : int
