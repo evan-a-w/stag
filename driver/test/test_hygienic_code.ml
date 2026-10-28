@@ -699,3 +699,53 @@ include .~(Gen.value "u2" .< Gen.w "a" >.)
       let u2 = .Gen.w "a"
     |}]
 ;;
+
+let%expect_test "printed refs read back, past binders and shadowing" =
+  show_erased
+    {|
+let e_raise = Stag.Code.erase .< fun raise -> (raise 1, Int.to_string (String.length "ab"), fun x -> .raise (Failure x)) >.
+|};
+  [%expect
+    {|
+    e_raise:
+    fun raise ->
+      (raise 1, .Int.to_string (.String.length "ab"), fun x -> .raise (.Failure x))
+    (Fun ((raise ()))
+     (Tuple
+      ((App (Var raise ()) (Lit (Int 1)))
+       (App (Var <Prim.Int.to_string> ())
+        (App (Var <Prim.String.length> ()) (Lit (String ab))))
+       (Fun ((x ())) (App (Var <raise> ()) (Construct <Failure> ((Var x ()))))))))
+    |}]
+;;
+
+let%expect_test "the printed refs read back where their names are shadowed" =
+  check_files
+    ~run:true
+    [ ( "a.stag"
+      , {|
+module String = struct end
+module Int = struct end
+let raise = 1
+exception Failure
+let f =
+  fun raise ->
+    (raise 1, .Int.to_string (.String.length "ab"), fun x -> .raise (.Failure x))
+let shown = match f (fun n -> n) with | (_, s, _) -> print_endline s
+|}
+      )
+    ];
+  [%expect
+    {|
+    module A : sig
+      module String : sig end
+      module Int : sig end
+      val raise : int
+      exception Failure
+      val f : (int -> 'a) -> 'a * string * (string -> 'b)
+      val shown : unit
+    end
+    --- output ---
+    2
+    |}]
+;;
