@@ -123,6 +123,21 @@
           "match": "let%(expect_test|bench)(?![A-Za-z0-9_'])"
         },
         {
+          "match": "\\b(module%inline)\\s+([A-Z][A-Za-z0-9_']*)",
+          "captures": {
+            "1": {
+              "name": "keyword.other.extension.inline.stag"
+            },
+            "2": {
+              "name": "entity.name.namespace.stag"
+            }
+          }
+        },
+        {
+          "name": "keyword.other.extension.inline.stag",
+          "match": "\\b(?:module|include|end)%inline(?![A-Za-z0-9_'])"
+        },
+        {
           "name": "meta.expect.stag",
           "begin": "(\\[)(%expect)(?![A-Za-z0-9_'])",
           "beginCaptures": {
@@ -474,7 +489,7 @@
       "match": "\\b[a-z_][A-Za-z0-9_']*(?=\\[)"
     },
     "field": {
-      "match": "(\\.)(?!let%(?:expect_test|bench)(?![A-Za-z0-9_']))([a-z_][A-Za-z0-9_']*)",
+      "match": "(\\.)(?!(?:let%(?:expect_test|bench)|(?:module|include|end)%inline)(?![A-Za-z0-9_']))([a-z_][A-Za-z0-9_']*)",
       "captures": {
         "1": {
           "name": "punctuation.accessor.stag"

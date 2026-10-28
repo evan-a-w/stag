@@ -411,18 +411,16 @@ let token (t : State.t) : Located.t =
        | c, _ when Char.is_uppercase c -> Uident (ident t)
        | c, _ when is_ident_start c ->
          let text = ident t in
-         if String.equal text "let" && is_word_at t ~pos:0 "%expect_test"
-         then simple 12 Let_expect_test
-         else if String.equal text "let" && is_word_at t ~pos:0 "%bench"
-         then simple 6 Let_bench
-         else if is_word_at t ~pos:0 "%inline"
-         then (
-           match text with
-           | "module" -> simple 7 Module_inline
-           | "include" -> simple 7 Include_inline
-           | "end" -> simple 7 End_inline
-           | _ -> Option.value (Token.keyword text) ~default:(Lident text))
-         else Option.value (Token.keyword text) ~default:(Lident text)
+         (match text with
+          | "let" when is_word_at t ~pos:0 "%expect_test" ->
+            simple 12 Let_expect_test
+          | "let" when is_word_at t ~pos:0 "%bench" -> simple 6 Let_bench
+          | "module" when is_word_at t ~pos:0 "%inline" ->
+            simple 7 Module_inline
+          | "include" when is_word_at t ~pos:0 "%inline" ->
+            simple 7 Include_inline
+          | "end" when is_word_at t ~pos:0 "%inline" -> simple 7 End_inline
+          | _ -> Option.value (Token.keyword text) ~default:(Lident text))
        | c, _ ->
          State.bump t;
          State.error t start (Illegal_character c))

@@ -91,6 +91,7 @@ function inputs() {
     "(*) *) (**) (* *)*)",
     "[%expect] [%expectx] [%expect_test] let%expect_test let%expect_testx",
     "let%bench x.let%expect_test M.let%bench",
+    "include%inline .~e end%inline x.end%inline module%inline M module%inlinex",
     ".~(* *)( .~ ( .~( (* ( *) ) .<.<x>.>.",
     "<a -> b>{..} <int>{x : int} a->b",
     "x > {|s|} <int>{a|b|a}",
@@ -116,6 +117,7 @@ function inputs() {
     ..."'\"\\(*){}|.<>~-_aA0`\n é%[]",
     "(*", "*)", "{|", "|}", "{a|", "|a}", ".<", ">.", ".~", "\r\n", "\\\n",
     "let", "%expect", "%expect_test", "'a'", "'\\", "\\x4", "12",
+    "end", "%inline",
   ];
   for (let i = 0; i < randomCount; i++) {
     const length = 1 + Math.floor(random() * 16);

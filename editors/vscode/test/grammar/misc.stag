@@ -21,6 +21,18 @@ let%bench "b" = () let%benchx
 (*                    ^ invalid.illegal.character.stag
 x.let%expect_test
 (*^^^^^^^^^^^^^^^ keyword.other.extension.expect_test.stag
+include%inline .~(f x)
+(* <-------------- keyword.other.extension.inline.stag
+  let x = 1
+end%inline end%inlinex
+(* <------ keyword.other.extension.inline.stag
+(*         ^^^ keyword.other.end.stag
+(*            ^ invalid.illegal.character.stag
+module%inline M = .~e
+(* <------------- keyword.other.extension.inline.stag
+(*            ^ entity.name.namespace.stag
+x.end%inline
+(*^^^^^^^^^^ keyword.other.extension.inline.stag
 let%expect_testx let %expect_test
 (* <--- keyword.other.let.stag
 (* ^ invalid.illegal.character.stag
