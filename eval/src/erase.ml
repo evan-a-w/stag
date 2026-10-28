@@ -162,8 +162,8 @@ let expr (expr : Typed.Expr.t) =
           | None ->
             Or_error.error_string
               (sprintf
-                 "the code uses %s, a local of the code that made it, which \
-                  nothing names where the code is spliced"
+                 "the code embeds %s, a local from outside it, which nothing \
+                  names where the code is spliced"
                  ident.name))
        | Bound (Toplevel ident) | Persistent (Toplevel ident) ->
          var (resolved ident.name)
