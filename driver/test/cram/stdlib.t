@@ -14,7 +14,7 @@ are checked as the prelude: Core's modules see each other, and prims.
   type result['a, 'b] = Ok of 'a | Error of 'b
   exception Division_by_zero
   $ cd core && stag check option.stag ../prelude/prelude.stag | grep -c . && cd ..
-  116
+  117
 
 Errors are located in their files.
 
@@ -29,8 +29,8 @@ Errors are located in their files.
   > let oops = Prim.Nope.nope
   > X
   $ stag check core/list.stag
-  File "prelude/prelude.stag", line 249, characters 11-25:
-  249 | let oops = Prim.Nope.nope
+  File "prelude/prelude.stag", line 254, characters 11-25:
+  254 | let oops = Prim.Nope.nope
                    ^^^^^^^^^^^^^^
   Error: Unbound value Prim.Nope.nope
   [1]
