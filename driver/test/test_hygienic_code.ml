@@ -521,3 +521,181 @@ let%expect_test "names" =
         |}]
     |xxx}]
 ;;
+
+let%expect_test "a renamed binder still provides the implicit splices it did" =
+  show_erased
+    {|
+let e_provider = Stag.Code.erase .< fun c -> .< fun x -> (.~c, .< x >.) >. >.
+let e_nested = Stag.Code.erase .< fun c -> .< fun x -> .< (.~(.~c), .< x >.) >. >. >.
+let e_kept = Stag.Code.erase .< fun c -> .< fun x -> .~c >. >.
+let e_reversed = Stag.Code.erase .< fun x -> fun y -> .~(.< (x, y) >.).{y = x; x = y} >.
+|};
+  [%expect
+    {|
+    e_provider:
+    fun c -> .< fun x_1 -> (.~c.{x = x_1}, .< x >.) >.
+    (Fun ((c ()))
+     (Quote
+      (Fun ((x_1 ()))
+       (Tuple
+        ((Splice (expr (Var c ())) (subs (((x ((Var x_1 ())))))))
+         (Quote (Var x ())))))))
+    e_nested:
+    fun c -> .< fun x_1 -> .< (.~(.~c.{x = x_1}), .< x >.) >. >.
+    (Fun ((c ()))
+     (Quote
+      (Fun ((x_1 ()))
+       (Quote
+        (Tuple
+         ((Splice (expr (Splice (expr (Var c ())) (subs (((x ((Var x_1 ()))))))))
+           (subs ()))
+          (Quote (Var x ()))))))))
+    e_kept:
+    fun c -> .< fun x -> .~c >.
+    (Fun ((c ())) (Quote (Fun ((x ())) (Splice (expr (Var c ())) (subs ())))))
+    e_reversed:
+    fun x ->
+      fun y ->
+        let y_1 = x in
+        let x = y in
+        (x, y_1)
+    (Fun ((x ()))
+     (Fun ((y ()))
+      (Let y_1 () () (Var x ())
+       (Let x () () (Var y ()) (Tuple ((Var x ()) (Var y_1 ())))))))
+    |}];
+  let gen =
+    ( "gen.stag"
+    , {|
+let value name code = Cons (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)
+let c1 = .< fun c -> .< fun x -> (.~c, .< x >.) >. >.
+|}
+    )
+  in
+  check_files [ gen; "a.stag", {|include .~(Gen.value "shown" Gen.c1)|} ];
+  [%expect
+    {|
+    module Gen : sig
+      val value : string -> <'a>{..'b} -> list[Stag.Toplevel.t]
+      val c1 : <<'a>{x?'b : 'c; ..'d} -> <'c -> 'a * <'e>{x : 'e; ..'f}>{..'g}>{..'h} where ..'d <= {..'g}
+    end
+    module A : sig
+      val shown : <'a>{x?'b : 'c} -> <'c -> 'a * <'d>{x : 'd; ..'e}>{..'f}
+    end
+    |}]
+;;
+
+let%expect_test "code built from parameters, erased at run time" =
+  show_erased
+    {|
+let around c = Stag.Code.erase .< fun x -> (x, .~c) >.
+let e_free = around .< x >.
+let e_closed = around .< 1 >.
+let twice c = .< (.~c, .~c) >.
+let e_twice = Stag.Code.erase (twice .< fun x -> x >.)
+|};
+  [%expect
+    {|
+    e_free:
+    fun x -> (x, x)
+    (Fun ((x ())) (Tuple ((Var x ()) (Var x ()))))
+    e_closed:
+    fun x -> (x, 1)
+    (Fun ((x ())) (Tuple ((Var x ()) (Lit (Int 1)))))
+    e_twice:
+    ((fun x -> x), fun x -> x)
+    (Tuple ((Fun ((x ())) (Var x ())) (Fun ((x ())) (Var x ()))))
+    |}]
+;;
+
+let%expect_test "annotations are kept, their types as refs" =
+  show_erased
+    {|
+type r = { f : int }
+let e_fun = Stag.Code.erase .< (fun x -> x) (fun (y : int) -> y) >.
+let e_let =
+  Stag.Code.erase
+    .< let f (x : option[r]) (y : 'a) : list['a] = Cons (y, Nil) in
+       (f : option[r] -> int -> list[int]) >.
+|};
+  [%expect
+    {|
+    e_fun:
+    (fun x -> x) (fun (y : .int) -> y)
+    (App (Fun ((x ())) (Var x ())) (Fun ((y ((Con <int> ())))) (Var y ())))
+    e_let:
+    let f (x : .option[.Gen.r]) (y : 'a) : .list['a] = .Cons (y, .Nil) in
+    (f : .option[.Gen.r] -> .int -> .list[.int])
+    (Let f ((x ((Con <option> ((Ty (Con <Gen.r> ())))))) (y ((Var a))))
+     ((Con <list> ((Ty (Var a)))))
+     (Construct <Cons> ((Var y ()) (Construct <Nil> ())))
+     (Var f
+      ((Arrow (Con <option> ((Ty (Con <Gen.r> ()))))
+        (Arrow (Con <int> ()) (Con <list> ((Ty (Con <int> ())))))))))
+    |}];
+  check_files
+    [ ( "gen.stag"
+      , {|
+let value name code = Cons (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)
+type r = { f : int }
+let v = .< (fun x -> x) (fun (y : int) -> y) >.
+let w =
+  .< let f (x : option[r]) (y : 'a) : list['a] = Cons (y, Nil) in
+     (f : option[r] -> int -> list[int]) >.
+|}
+      )
+    ; ( "a.stag"
+      , {|
+type int = bool
+type option['a] = int
+type list['a] = int
+type r = int
+include .~(Gen.value "v" Gen.v)
+include .~(Gen.value "w" Gen.w)
+|}
+      )
+    ];
+  [%expect
+    {|
+    module Gen : sig
+      val value : string -> <'a>{..'b} -> list[Stag.Toplevel.t]
+      type r = { f : int }
+      val v : <int -> int>{..'a}
+      val w : <option[r] -> int -> list[int]>{..'a}
+    end
+    module A : sig
+      type int = bool
+      type option['a] = bool
+      type list['a] = bool
+      type r = bool
+      val v : .int -> .int
+      val w : .option[Gen.r] -> .int -> .list[.int]
+    end
+    |}]
+;;
+
+let%expect_test "a weak toplevel, referred to at two types" =
+  check_files
+    [ ( "gen.stag"
+      , {|
+let value name code = Cons (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)
+let w = (fun x -> x) (fun x -> x)
+|}
+      )
+    ; ( "a.stag"
+      , {|
+include .~(Gen.value "u1" .< Gen.w 1 >.)
+include .~(Gen.value "u2" .< Gen.w "a" >.)
+|}
+      )
+    ];
+  [%expect
+    {|
+    File "a.stag", line 3, characters 0-42:
+    3 | include .~(Gen.value "u2" .< Gen.w "a" >.)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: In the declaration `let u2` generated by this splice: This expression has type string but an expression was expected of type int
+    Note: The generated declaration is:
+      let u2 = .Gen.w "a"
+    |}]
+;;
