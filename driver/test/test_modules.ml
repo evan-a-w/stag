@@ -849,13 +849,10 @@ end
     val local_does_not_provide : bool -> int
     val explicit : string
     val shorthand : int
-    ((Unification_error
-      (Row_mismatch
-       (RExtend M.n (PVar (Link Present)) (TVar (Unbound 26 1))
-        (RVar (Unbound 27 1)))
-       (RExtend n (PVar (Unbound 28 1)) (TVar (Link (TCon int ()))) REmpty)
-       (Missing_label M.n)))
-     @ t.stag:4:19-30)
+    module M : sig
+      val n : int
+      val as_written : int
+    end
     |}]
 ;;
 

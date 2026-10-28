@@ -26,9 +26,3 @@ val ty : t -> var:(unit -> Type.ty) -> row:(unit -> Type.row) -> Type.ty
 
 (** [Intrinsic.x] by its full path. *)
 val find : Syntax.Path.t -> t option
-
-(** The name of [t] as a resolved value ([Syntax.Decl_path.Resolved]):
-    [Intrinsic.x] in the prelude, as the prelude itself writes it. *)
-val canonical_name : t -> string
-
-val of_canonical_name : string -> t option

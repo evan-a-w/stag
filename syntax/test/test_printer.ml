@@ -857,7 +857,7 @@ let%expect_test "resolved paths with no root path" =
   [%expect
     {|
     prelude.Core.Int.to_string: .Core.Int.to_string, <prelude.Core.Int.to_string>
-    prelude.Prim.String.length: .String.length, <prelude.Prim.String.length>
+    prelude.Prim.String.length: .String.length, <prelude.String.length>
     prelude.raise: .raise, .raise
     prelude.Intrinsic.raise: <prelude.Intrinsic.raise>, <prelude.Intrinsic.raise>
     Core.x: .Core.x, .Core.x

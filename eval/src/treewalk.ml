@@ -88,18 +88,21 @@ let captures t ~ident ~args ~body =
   in
   let rec go ~depth ({ desc; _ } : Typed.Expr.t) =
     match desc with
-    | Lit _ | Var (Free _ | Prim _ | Intrinsic _) | Expect _ | Type _ -> ()
+    | Lit _
+    | Var (Free _ | Free_toplevel _ | Prim _ | Intrinsic _)
+    | Expect _ | Type _ -> ()
     | Var
         ( Bound (Toplevel ident | Local ident)
         | Persistent (Toplevel ident | Local ident) ) -> use ~depth ident
-    | Let { ident; args; generalized = _; body; in_ } ->
+    | Let { ident; args; body; in_; _ } ->
       def ident;
       List.iter args ~f:def;
       go ~depth body;
       go ~depth in_
-    | Fun { args; body } ->
+    | Fun { args; annots = _; body } ->
       List.iter args ~f:def;
       go ~depth body
+    | Annotated (expr, _) -> go ~depth expr
     | Splice { code; subs } ->
       go ~depth:(depth - 1) code;
       (match subs with
@@ -206,6 +209,9 @@ let map_children ~depth (expr : Typed.Expr.t) ~f =
     | Fun fun_ ->
       let%map body = same fun_.body in
       Typed.Expr.Desc.Fun { fun_ with body }
+    | Annotated (expr, ty) ->
+      let%map expr = same expr in
+      Typed.Expr.Desc.Annotated (expr, ty)
     | Splice { code; subs } ->
       let%bind code = f ~depth:(depth - 1) code in
       let%map subs : Typed.Expr.t Typed.Expr.Subs.t =
@@ -290,6 +296,9 @@ let instantiate t (code : Typed.Expr.t) ~entry =
       Local (Hashtbl.find renames ident |> Option.value ~default:ident)
     | Toplevel _ as binder -> binder
   in
+  let rename_annots =
+    List.map ~f:(fun (ident, annot) -> Hashtbl.find_exn renames ident, annot)
+  in
   let rec pattern ({ desc; _ } as node : Typed.Pattern.t) =
     let desc : Typed.Pattern.t Typed.Pattern.Desc.t =
       match desc with
@@ -317,14 +326,17 @@ let instantiate t (code : Typed.Expr.t) ~entry =
   and go_step ~depth (expr : Typed.Expr.t) =
     let desc : Typed.Expr.t Typed.Expr.Desc.t =
       match expr.desc with
-      | Var (Free name) when depth = 0 ->
-        Var (Option.value (entry name) ~default:(Typed.Var_ref.Free name))
+      | Var ((Free name | Free_toplevel name) as var_ref) when depth = 0 ->
+        Var (Option.value (entry name) ~default:var_ref)
       | Var (Bound binder) -> Var (Bound (rename_binder binder))
       | Var (Persistent binder) -> Var (Persistent (rename_binder binder))
       | Let let_ ->
         let ident = fresh let_.ident in
-        Let { let_ with ident; args = List.map let_.args ~f:fresh }
-      | Fun fun_ -> Fun { fun_ with args = List.map fun_.args ~f:fresh }
+        let args = List.map let_.args ~f:fresh in
+        Let { let_ with ident; args; annots = rename_annots let_.annots }
+      | Fun fun_ ->
+        let args = List.map fun_.args ~f:fresh in
+        Fun { fun_ with args; annots = rename_annots fun_.annots }
       | Match { scrutinee; cases; exception_cases } ->
         let rename = List.map ~f:(fun (p, body) -> pattern p, body) in
         Match
@@ -375,7 +387,15 @@ let splice_code
     in
     List.fold_right subs ~init:code ~f:(fun (_, ident, sub) in_ ->
       { Typed.Expr.desc =
-          Let { ident; args = []; generalized = false; body = sub; in_ }
+          Let
+            { ident
+            ; args = []
+            ; annots = []
+            ; result_annot = None
+            ; generalized = false
+            ; body = sub
+            ; in_
+            }
       ; ty = in_.ty
       ; loc = in_.loc
       })
@@ -598,7 +618,8 @@ and step t ~env ~level (expr : Typed.Expr.t) : Next.t Or_error.t =
     let%bind f = eval' f in
     let%bind arg = eval' arg in
     apply t f arg ~loc:expr.loc
-  | Let { ident; args; generalized = _; body; in_ } ->
+  | Annotated (expr, _) -> tail expr
+  | Let { ident; args; body; in_; _ } ->
     let%bind () = bind_let t ~env ~level ~ident ~args ~body in
     tail in_
   | Toplevel_splice { code = _; expansion } -> tail expansion
@@ -628,14 +649,14 @@ and step_value t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
   | Var (Bound (Local ident | Toplevel ident))
   | Var (Persistent (Local ident | Toplevel ident)) ->
     lookup t env ident ~loc:expr.loc
-  | Var (Free name) ->
+  | Var (Free name | Free_toplevel name) ->
     Or_error.error_s [%message "Free variable of code evaluated" name]
   | Var (Prim prim) -> Ok (Value.Prim { prim; applied = [] })
   | Var (Intrinsic intrinsic) -> Ok (Value.Intrinsic intrinsic)
   | Type ty -> Ok (Value.Type ty)
-  | App _ | Let _ | Toplevel_splice _ | Match _ ->
+  | App _ | Let _ | Annotated _ | Toplevel_splice _ | Match _ ->
     run_next t (step t ~env ~level expr)
-  | Fun { args; body } ->
+  | Fun { args; annots = _; body } ->
     (* Its first parameter identifies it, as a let's name does. *)
     closure t ~env ~level ~ident:(List.hd_exn args) ~args ~body
   | Splice _ -> Or_error.error_s [%message "Splice outside a quote evaluated"]

@@ -60,10 +60,3 @@ let find path =
     List.find all ~f:(fun t -> String.equal (name t) member)
   | _ -> None
 ;;
-
-let canonical_name t = Prelude_path.canonical ("Intrinsic." ^ name t)
-
-let of_canonical_name name =
-  let%bind.Option relative = Prelude_path.relative name in
-  find (Syntax.Path.of_string relative)
-;;

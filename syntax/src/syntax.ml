@@ -69,7 +69,7 @@ module Decl_path = struct
       anywhere, given the program's root modules: its root path, unless the
       first name of a prelude path is a root module (or it is an intrinsic,
       named only within the prelude), where nothing names it, so as
-      [<prelude.P>], which does not parse. *)
+      [<prelude.P>], which does not parse, [P] its public path. *)
   let resolved_source ~root_modules name =
     let path = Prelude_path.root_path name in
     let unnamed =
@@ -80,7 +80,7 @@ module Decl_path = struct
         Set.mem root_modules first || String.equal first "Intrinsic"
       | _ -> false
     in
-    if unnamed then sprintf "<%s>" name else "." ^ path
+    if unnamed then sprintf "<%s>" (Prelude_path.canonical path) else "." ^ path
   ;;
 end
 

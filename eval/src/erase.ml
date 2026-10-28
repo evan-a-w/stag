@@ -1,18 +1,5 @@
 open! Import
 
-let rec pattern_idents (p : Typed.Pattern.t) =
-  match p.desc with
-  | Any | Lit _ | Poly_variant (_, None) -> []
-  | Var ident -> [ ident ]
-  | Tuple ps | Construct (_, ps) -> List.concat_map ps ~f:pattern_idents
-  | Record fields -> List.concat_map fields ~f:(fun (_, p) -> pattern_idents p)
-  | Poly_record { fields; rest = Closed | Open } ->
-    List.concat_map fields ~f:(fun (_, p) -> pattern_idents p)
-  | Poly_record { fields; rest = Bind ident } ->
-    ident :: List.concat_map fields ~f:(fun (_, p) -> pattern_idents p)
-  | Poly_variant (_, Some p) -> pattern_idents p
-;;
-
 module Uses = struct
   type t =
     { idents : Typed.Ident.Set.t
@@ -30,15 +17,18 @@ module Uses = struct
       List.fold (Typed.Expr.sub_exprs expr) ~init:empty ~f:(fun acc e ->
         union acc (of_expr e))
     in
-    let cases cases =
-      List.fold cases ~init:empty ~f:(fun acc (_, e) -> union acc (of_expr e))
-    in
     match expr.desc with
     | Var (Bound (Local ident) | Persistent (Local ident)) ->
       { children with idents = Set.add children.idents ident }
     | Var (Free name) -> { children with free = Set.add children.free name }
-    | Match { scrutinee; cases = c; exception_cases } ->
-      union (of_expr scrutinee) (union (cases c) (cases exception_cases))
+    | Splice { subs = Implicit providers; _ } ->
+      { children with
+        idents =
+          Map.fold providers ~init:children.idents ~f:(fun ~key:_ ~data acc ->
+            match (data : Typed.Binder.t) with
+            | Local ident -> Set.add acc ident
+            | Toplevel _ -> acc)
+      }
     | _ -> children
   ;;
 end
@@ -63,7 +53,7 @@ module Names = struct
        | Fun { args; _ } -> add_idents args
        | Match { cases; exception_cases; _ } ->
          List.iter (cases @ exception_cases) ~f:(fun (p, _) ->
-           add_idents (pattern_idents p))
+           add_idents (Typed.Pattern.idents p))
        | _ -> ());
       List.iter (Typed.Expr.sub_exprs expr) ~f:add
     in
@@ -148,8 +138,9 @@ let expr (expr : Typed.Expr.t) =
       |> Or_error.all
     in
     let field_path f = located loc (resolved (Typed.Field_ref.name f)) in
-    let binding names ident : Syntax.Binding.t =
-      label (name names ident), None
+    let binding names annots ident : Syntax.Binding.t =
+      ( label (name names ident)
+      , List.Assoc.find annots ident ~equal:Typed.Ident.equal )
     in
     match e.desc with
     | Lit lit -> node (Lit lit)
@@ -167,19 +158,26 @@ let expr (expr : Typed.Expr.t) =
                  ident.name))
        | Bound (Toplevel ident) | Persistent (Toplevel ident) ->
          var (resolved ident.name)
-       | Free name ->
-         (* Toplevels not yet checked are free, by canonical name. *)
-         if String.mem name '.'
-         then var (resolved name)
-         else var (Path (Syntax.Path.name name))
+       | Free name -> var (Path (Syntax.Path.of_string name))
+       | Free_toplevel name -> var (resolved name)
        | Prim prim -> var (resolved (Prim.canonical_name prim))
        | Intrinsic intrinsic ->
-         var (resolved (Intrinsic.canonical_name intrinsic)))
+         Or_error.error_s
+           [%message
+             "intrinsics are named only in the prelude, which quotes none"
+               (intrinsic : Intrinsic.t)])
+    | Annotated (e, annot) ->
+      let%bind e = go names e in
+      (match e.txt with
+       | Var (path, None) -> node (Var (path, Some annot))
+       | _ ->
+         Or_error.error_s
+           [%message "annotated non-variable" (e : Syntax.Expr.t)])
     | App (f, x) ->
       let%bind f = go names f in
       let%bind x = go names x in
       node (App (f, x))
-    | Let { ident; args; body; in_; generalized = _ } ->
+    | Let { ident; args; annots; result_annot; body; in_; generalized = _ } ->
       let outer =
         Names.bind
           names
@@ -192,19 +190,43 @@ let expr (expr : Typed.Expr.t) =
       node
         (Let
            ( label (name outer ident)
-           , List.map args ~f:(binding inner)
-           , None
+           , List.map args ~f:(binding inner annots)
+           , result_annot
            , body
            , in_ ))
-    | Fun { args; body } ->
+    | Fun { args; annots; body } ->
       let names = Names.bind names args ~scope:(Uses.of_expr body) in
       let%bind body = go names body in
-      node (Fun (List.map args ~f:(binding names), body))
+      node (Fun (List.map args ~f:(binding names annots), body))
     | Splice { code; subs } ->
       let%bind code = go names code in
       let%bind subs =
         match subs with
-        | Implicit _ -> Ok None
+        | Implicit providers ->
+          let renamed =
+            Map.existsi providers ~f:(fun ~key ~data ->
+              match (data : Typed.Binder.t) with
+              | Local ident -> not (String.equal (name names ident) key)
+              | Toplevel _ -> false)
+          in
+          (* Toplevels free by canonical name are provided even so. *)
+          let sub ~key (binder : Typed.Binder.t) =
+            match binder with
+            | Local ident ->
+              Some (Syntax.Decl_path.Path (Syntax.Path.name (name names ident)))
+            | Toplevel _ when String.mem key '.' -> None
+            | Toplevel ident -> Some (resolved ident.name)
+          in
+          if not renamed
+          then Ok None
+          else
+            Ok
+              (Some
+                 (Map.to_alist providers
+                  |> List.filter_map ~f:(fun (key, binder) ->
+                    let%map.Option path = sub ~key binder in
+                    label key, Some (located loc (Syntax.Expr.Var (path, None))))
+                 ))
         | Explicit subs ->
           let%map subs = fields subs ~key:label in
           Some (List.map subs ~f:(fun (name, e) -> name, Some e))
@@ -234,7 +256,7 @@ let expr (expr : Typed.Expr.t) =
       let%bind scrutinee = go names scrutinee in
       let case ~exception_ (p, body) =
         let names =
-          Names.bind names (pattern_idents p) ~scope:(Uses.of_expr body)
+          Names.bind names (Typed.Pattern.idents p) ~scope:(Uses.of_expr body)
         in
         let%map body = go names body in
         let p = pattern names p in

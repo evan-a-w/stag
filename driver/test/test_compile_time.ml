@@ -298,10 +298,14 @@ let applied = implicit false
         : "int * int"))
       : "int * int"))
     -- evaluated at compile time
-    (code (Code (Tuple ((Var (Free n) : 'a) (Var (Free x) : 'b)) : "'a * 'b")))
+    (code
+     (Code
+      (Tuple ((Var (Free_toplevel n) : 'a) (Var (Free x) : 'b)) : "'a * 'b")))
     -- evaluated
     (n 3)
-    (code (Code (Tuple ((Var (Free n) : 'a) (Var (Free x) : 'b)) : "'a * 'b")))
+    (code
+     (Code
+      (Tuple ((Var (Free_toplevel n) : 'a) (Var (Free x) : 'b)) : "'a * 'b")))
     (implicit <fun>)
     (explicit (Tuple true 1))
     (explicit_toplevel (Tuple 3 3))
@@ -452,9 +456,11 @@ let used = f (S (S Z))
           : int))))
       : int))
     -- evaluated at compile time
-    (code (Code (App (Var (Free f) : "'a -> 'b") (Var (Free m) : 'a) : 'b)))
+    (code
+     (Code (App (Var (Free_toplevel f) : "'a -> 'b") (Var (Free m) : 'a) : 'b)))
     -- evaluated
-    (code (Code (App (Var (Free f) : "'a -> 'b") (Var (Free m) : 'a) : 'b)))
+    (code
+     (Code (App (Var (Free_toplevel f) : "'a -> 'b") (Var (Free m) : 'a) : 'b)))
     (f <fun>)
     (used 0)
     ((Compile_time_use_of_toplevel_being_checked code) @ t.stag:4:41-45)
@@ -735,10 +741,10 @@ let deep = .~(.~(n; .< .<n>. >.))
          (Let (ident _/15) (args ()) (generalized true)
           (body (Var (Bound (Toplevel n/4)) : int))
           (in_
-           (Quote (Quote (Var (Free n) : int) : "<int>{n : int}") :
+           (Quote (Quote (Var (Free_toplevel n) : int) : "<int>{n : int}") :
             "<<int>{n : int}>{}"))
           : "<<int>{n : int}>{}"))
-        (expansion (Quote (Var (Free n) : int) : "<int>{n : int}")) :
+        (expansion (Quote (Var (Free_toplevel n) : int) : "<int>{n : int}")) :
         "<int>{n : int}"))
       (expansion (Var (Bound (Toplevel n/4)) : int)) : int))
     -- evaluated at compile time

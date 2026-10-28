@@ -292,7 +292,7 @@ let local_not_persistent = let k = 1 in .<k>.
      (recursive false))
     ((members
       (((ident not_persistent/5) (args ()) (scheme "<'a>{n : 'a; ..'b}")
-        (body (Quote (Var (Free n) : 'a) : "<'a>{n : 'a; ..'b}")))))
+        (body (Quote (Var (Free_toplevel n) : 'a) : "<'a>{n : 'a; ..'b}")))))
      (recursive false))
     ((members
       (((ident persistent/6) (args ()) (scheme <int>{..'a})
@@ -504,7 +504,7 @@ let closed = .~(.<1>.)
               (Var (Free x) : int) : "int -> int")
              (App
               (App (Var (Persistent (Toplevel add/0)) : "int -> int -> int")
-               (Var (Free n) : int) : "int -> int")
+               (Var (Free_toplevel n) : int) : "int -> int")
               (Lit (Int 1) : int) : int)
              : int)
             : "<int>{n : int; x : int}"))
@@ -588,7 +588,8 @@ let gen n = .<gen n>.
       (((ident gen/9) (args (n/21))
         (scheme "'a -> <'b>{gen : 'c -> 'b; n : 'c; ..'d}")
         (body
-         (Quote (App (Var (Free gen) : "'c -> 'b") (Var (Free n) : 'c) : 'b) :
+         (Quote
+          (App (Var (Free_toplevel gen) : "'c -> 'b") (Var (Free n) : 'c) : 'b) :
           "<'b>{gen : 'c -> 'b; n : 'c; ..'d}")))))
      (recursive false))
     |}]
@@ -609,16 +610,17 @@ let captured x = .~(.<captured x>.)
       (((ident gen/4) (args (n/18))
         (scheme "'a -> <'b>{gen : 'c -> 'b; n : 'c; ..'d}")
         (body
-         (Quote (App (Var (Free gen) : "'c -> 'b") (Var (Free n) : 'c) : 'b) :
+         (Quote
+          (App (Var (Free_toplevel gen) : "'c -> 'b") (Var (Free n) : 'c) : 'b) :
           "<'b>{gen : 'c -> 'b; n : 'c; ..'d}")))))
      (recursive false))
     ((members
       (((ident a/5) (args ()) (scheme "<'a>{b : 'a; ..'b}")
-        (body (Quote (Var (Free b) : 'a) : "<'a>{b : 'a; ..'b}")))))
+        (body (Quote (Var (Free_toplevel b) : 'a) : "<'a>{b : 'a; ..'b}")))))
      (recursive false))
     ((members
       (((ident b/6) (args ()) (scheme "<'a>{a : 'a; ..'b}")
-        (body (Quote (Var (Free a) : 'a) : "<'a>{a : 'a; ..'b}")))))
+        (body (Quote (Var (Free_toplevel a) : 'a) : "<'a>{a : 'a; ..'b}")))))
      (recursive false))
     ((members
       (((ident loop/7) (args (x/19)) (scheme "'a -> 'b")
@@ -632,8 +634,9 @@ let captured x = .~(.<captured x>.)
          (Toplevel_splice
           (code
            (Quote
-            (App (Var (Free captured) : "'a -> 'b") (Var (Free x) : 'a) : 'b) :
-            "<'b>{captured : 'a -> 'b; x : 'a}"))
+            (App (Var (Free_toplevel captured) : "'a -> 'b") (Var (Free x) : 'a)
+             : 'b)
+            : "<'b>{captured : 'a -> 'b; x : 'a}"))
           (expansion
            (App (Var (Bound (Toplevel captured/8)) : "'a -> 'b")
             (Var (Bound (Local x/20)) : 'a) : 'b))
@@ -890,7 +893,7 @@ let at_toplevel = .~(.<add n y>.).{n; y = 1}
            (Quote
             (App
              (App (Var (Persistent (Toplevel add/0)) : "int -> int -> int")
-              (Var (Free n) : int) : "int -> int")
+              (Var (Free_toplevel n) : int) : "int -> int")
              (Var (Free y) : int) : int)
             : "<int>{n : int; y : int}"))
           (expansion
@@ -963,7 +966,8 @@ let first p = match p with (a, _) -> (a : int)
          (Match (scrutinee (Var (Bound (Local p/14)) : "int * 'a"))
           (cases
            (((Tuple ((Var a/15 : int) (Any : 'a)) : "int * 'a")
-             (Var (Bound (Local a/15)) : int))))
+             (Annotated (Var (Bound (Local a/15)) : int)
+              ((Con (<int> @ t.stag:2:42-45) ()) @ t.stag:2:42-45) : int))))
           : int)))))
      (recursive false))
     ((a/15 (int 0)) (first/4 ("int * 'a -> int" 0)) (p/14 ("int * 'a" 0)))
