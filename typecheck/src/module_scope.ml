@@ -629,9 +629,71 @@ let open_module module_ name ~path ~loc =
   module_
 ;;
 
+(* The declarations a splice generates, which are, or will be, those of the
+   module [path] or in it, which is the spliced module if [spliced]. *)
+module Generated = struct
+  type t =
+    { path : string list
+    ; toplevels : Toplevel.t list
+    ; spliced : bool
+    }
+
+  module Found = struct
+    type t =
+      | Found of string
+      | Absent (* Its first name is not declared. *)
+      | Unbound
+  end
+
+  let rec find toplevels ~path namespace names : Found.t =
+    match names with
+    | [] -> assert false
+    | name :: rest ->
+      let member : Member.t =
+        match rest with
+        | [] -> Member namespace, name
+        | _ :: _ -> Module, name
+      in
+      (match
+         List.find toplevels ~f:(fun toplevel ->
+           List.exists (members toplevel) ~f:(fun (member', _) ->
+             [%compare.equal: Member.t] member member'))
+       with
+       | None -> Absent
+       | Some toplevel ->
+         (match rest, toplevel.txt with
+          | [], _ -> Found (join (path @ [ name ]))
+          | _ :: _, Module (_, toplevels) ->
+            (match find toplevels ~path:(path @ [ name ]) namespace rest with
+             | Found name -> Found name
+             | Absent | Unbound -> Unbound)
+          | _ :: _, _ -> Unbound))
+  ;;
+
+  (* [names] from within [module_], if they name [t]'s declarations, so that
+     they are found before [t] is added to its module. *)
+  let find_from t (module_ : module_) namespace names : Found.t =
+    match t with
+    | None -> Absent
+    | Some t ->
+      if List.equal String.equal module_.path t.path
+      then find t.toplevels ~path:t.path namespace names
+      else (
+        match names with
+        | head :: (_ :: _ as rest)
+          when t.spliced
+               && List.equal String.equal (module_.path @ [ head ]) t.path ->
+          (match find t.toplevels ~path:t.path namespace rest with
+           | Found name -> Found name
+           | Absent | Unbound -> Unbound)
+        | _ -> Absent)
+  ;;
+end
+
 (* [name] of [module_] then [rest], from outside it, past [blocked]. Errors of
    names not found are passed through [hint]. *)
 let rec find_member
+          ?generated
           module_
           namespace
           name
@@ -642,6 +704,36 @@ let rec find_member
           ~unbound
           ~blocked
           ~hint
+  =
+  match Generated.find_from generated module_ namespace (name :: rest) with
+  | Found name -> Ok name
+  | Unbound -> Error (Typecheck_error.create ~loc (unbound path))
+  | Absent ->
+    find_written
+      ?generated
+      module_
+      namespace
+      name
+      rest
+      ~path
+      ~written
+      ~loc
+      ~unbound
+      ~blocked
+      ~hint
+
+and find_written
+      ?generated
+      module_
+      namespace
+      name
+      rest
+      ~path
+      ~written
+      ~loc
+      ~unbound
+      ~blocked
+      ~hint
   =
   let written = written @ [ name ] in
   let member : Member.t =
@@ -656,6 +748,7 @@ let rec find_member
      | next :: rest ->
        let%bind.Result module_ = open_module module_ name ~path ~loc in
        find_member
+         ?generated
          module_
          namespace
          next
@@ -719,7 +812,7 @@ end
 
 (* What [path] refers to in the program from [t], and the innermost include
    looked past to find its first name. *)
-let find_path t namespace (path : Decl_path.t) ~loc ~unbound =
+let find_path ?generated t namespace (path : Decl_path.t) ~loc ~unbound =
   let t, names = start t path in
   match (names :> string list) with
   | [] -> assert false
@@ -733,22 +826,33 @@ let find_path t namespace (path : Decl_path.t) ~loc ~unbound =
     (match%bind.Result find_scope t (Module, head) with
      | { scope = None; blocked } -> Ok (Resolved.Unbound, blocked)
      | { scope = Some found; blocked } ->
-       let%bind.Result module_ = open_module found.module_ head ~path ~loc in
-       let%map.Result name =
-         find_member
-           module_
-           namespace
-           member
-           rest
-           ~path
-           ~written:[ head ]
-           ~loc
-           ~unbound
-           ~blocked
-           ~hint:
-             (with_prelude_hint found ~head ~rest:(member :: rest) namespace)
-       in
-       Resolved.Found name, blocked)
+       (match
+          Generated.find_from
+            generated
+            found.module_
+            namespace
+            (names :> string list)
+        with
+        | Found name -> Ok (Resolved.Found name, blocked)
+        | Unbound -> Error (Typecheck_error.create ~loc (unbound path))
+        | Absent ->
+          let%bind.Result module_ = open_module found.module_ head ~path ~loc in
+          let%map.Result name =
+            find_member
+              ?generated
+              module_
+              namespace
+              member
+              rest
+              ~path
+              ~written:[ head ]
+              ~loc
+              ~unbound
+              ~blocked
+              ~hint:
+                (with_prelude_hint found ~head ~rest:(member :: rest) namespace)
+          in
+          Resolved.Found name, blocked))
 ;;
 
 (* The error for [path], whose first name is not found from [t] past
@@ -874,60 +978,94 @@ let splices t =
   splices t.module_
 ;;
 
-let path_from_splice (splice : splice) toplevels namespace ~locals name =
-  let resolves (path : Decl_path.t) =
-    let found =
-      match (namespace : Namespace.t) with
-      | Value ->
-        (match find_value splice.scope path ~loc:splice.loc with
-         | Ok (Toplevel found) -> String.equal found name
-         | Ok (Prim prim) -> String.equal (Prim.canonical_name prim) name
-         | Ok (Intrinsic _ | Unbound) | Error _ -> false)
-      | Type | Constructor | Field ->
-        (match
-           find
-             splice.scope
-             namespace
-             path
-             ~loc:splice.loc
-             ~unbound:(fun path -> Unbound_type path)
-         with
-         | Ok found -> String.equal found name
-         | Error _ -> false)
+(* What [path] names where it is used in [toplevels], which [splice]
+   generated, within their modules [modules] where [locals] are bound. *)
+let resolve_in_expansion
+      (splice : splice)
+      toplevels
+      namespace
+      ~modules
+      ~locals
+      (path : Decl_path.t)
+  =
+  let generated =
+    let in_module = splice.scope.module_.path in
+    match splice.into with
+    | Into_include _ ->
+      { Generated.path = in_module; toplevels; spliced = false }
+    | Into_module name ->
+      { path = in_module @ [ name ]; toplevels; spliced = true }
+  in
+  let from_splice (path : Decl_path.t) =
+    match
+      find_path
+        ~generated
+        splice.scope
+        namespace
+        path
+        ~loc:splice.loc
+        ~unbound:not_in_scope
+    with
+    | Ok (Found name, None) -> Some name
+    | Ok (Unbound, None) ->
+      (match namespace, path with
+       | Value, (Path names | Root names) ->
+         Option.map (Prim.find names) ~f:Prim.canonical_name
+       | _ -> None)
+    | Ok (_, Some _) | Error _ -> None
+  in
+  match path with
+  | Resolved _ ->
+    raise_s [%message "Module_scope: a resolved path is not looked up"]
+  | Root _ -> from_splice path
+  | Path names ->
+    let names = (names :> string list) in
+    let body modules =
+      List.fold modules ~init:toplevels ~f:(fun toplevels name ->
+        List.find_map_exn toplevels ~f:(fun (toplevel : Toplevel.t) ->
+          match toplevel.txt with
+          | Module (name', toplevels) when String.equal name'.txt name ->
+            Some toplevels
+          | _ -> None))
     in
-    Option.some_if found path
+    let rec within depth =
+      if depth < 0
+      then from_splice path
+      else (
+        let modules = List.take modules depth in
+        match
+          Generated.find
+            (body modules)
+            ~path:(generated.path @ modules)
+            namespace
+            names
+        with
+        | Found name -> Some name
+        | Unbound -> None
+        | Absent -> within (depth - 1))
+    in
+    (match names with
+     | [ name ] when Set.mem locals name -> None
+     | _ -> within (List.length modules))
+;;
+
+let path_from_splice splice toplevels namespace ~modules ~locals path =
+  let resolve =
+    resolve_in_expansion splice toplevels namespace ~modules ~locals
   in
-  let declared = Member.Hash_set.create () in
-  let rec declare (toplevels : Toplevel.t list) =
-    List.iter toplevels ~f:(fun toplevel ->
-      List.iter (members toplevel) ~f:(fun (member, _) ->
-        Hash_set.add declared member);
-      match toplevel.txt with
-      | Module (_, toplevels) -> declare toplevels
-      | Let _
-      | Type _
-      | Exception _
-      | Module_splice _
-      | Include _
-      | Expect_test _
-      | Bench _ -> ())
+  let%bind.Option name =
+    match (path : Decl_path.t) with
+    | Resolved name -> Some name
+    | Path _ | Root _ -> resolve path
   in
-  declare toplevels;
+  let resolves path =
+    Option.some_if (Option.equal String.equal (resolve path) (Some name)) path
+  in
   let names = String.split name ~on:'.' in
   List.init (List.length names) ~f:(fun i ->
-    List.drop names (List.length names - i - 1))
-  |> List.find_map ~f:(fun names ->
-    let head : Member.t =
-      match names with
-      | [ name ] -> Member namespace, name
-      | head :: _ -> Module, head
-      | [] -> assert false
-    in
-    if
-      Hash_set.mem declared head
-      || (List.length names = 1 && Set.mem locals (List.hd_exn names))
-    then None
-    else resolves (Path (Path.of_list_exn names)))
+    Decl_path.Path
+      (Path.of_list_exn (List.drop names (List.length names - i - 1))))
+  |> List.find_map ~f:resolves
   |> function
   | Some path -> Some path
   | None -> resolves (Root (Path.of_string (Prelude_path.root_path name)))

@@ -21,3 +21,6 @@ val source_errors : ?widths:int list -> string -> Sexp.t list
 
 (** Without the [@ loc]s of [Located.t]s. *)
 val strip_locs : Sexp.t -> Sexp.t
+
+(** With each [Decl_path.Resolved] as the path [Printer] prints for it. *)
+val without_resolved : Sexp.t -> Sexp.t

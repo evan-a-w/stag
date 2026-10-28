@@ -80,6 +80,7 @@ match e with | p -> e | ...         (* leading | optional; arms are e1; e2 level
 f x y                               (* application, left assoc *)
 (x : t)                             (* annotated variable: Expr.Var's annotation *)
 (a, b, c)   ()   (e)
+[a; b; c]   []                      (* the prelude's list, see List literals *)
 C   C e   C (a, b)   C ((a, b))     (* C (a, b): 2 args, or 1 tuple if C has 1 *)
 {x = 1; M.y = 2}   r.x   r.M.x      (* nominal records *)
 {r with x = 1; M.y = 2}             (* nominal update, may change type params *)
@@ -131,6 +132,26 @@ the typechecker from the declaration (and so also for generated code: `C` of
 polymorphic variant has at most one argument, so `` `A (a, b) `` is always
 `` `A `` of a tuple. A parenthesized expression's location includes its
 parentheses.
+
+### List literals
+
+`[a; b; c]` is sugar for `Cons (a, Cons (b, Cons (c, Nil)))` and `[]` for
+`Nil`, in expressions and patterns, always naming the prelude's `Cons` and
+`Nil` (as refs, like `Stag.Code.erase`'s, see Hygienic code): what
+`Cons`, `Nil` or `list` name where the literal is written doesn't change it,
+so `[1; 2]` is a `.list[int]` even beside a local `type list['a] = Nil | Cons`.
+Items are at the tuple level, as record field values (`[a, b; c]` is
+`[(a, b); c]`), and a `let`, `match` or `fun` item ends at the next `;`. A
+trailing `;` is allowed. The literal's outer `Cons` spans the whole literal,
+each inner one from the `;` before its item to the `]`, and the final `Nil`
+the `]` (or the whole `[]`).
+
+The printer prints a chain of the prelude's resolved `Cons` ending in its
+`Nil` as a literal (so erased code shows lists as literals, eg. `[.A.x; y]`),
+broken like records, one item per line with a trailing `;`, and docked after
+`=` or a constructor (`Core.Sexp.List [`). A resolved `Cons` not ending in
+`Nil` is printed as a root path, `.Cons (x, rest)`, and `Cons (a, Nil)` as
+written stays as written.
 
 ### Root paths
 
@@ -208,6 +229,7 @@ own (see modes.md), so in `.< N.v.x >.` the `x` is the one in scope whatever
 ```ocaml
 _   x   1   'c'   "s"   true   ()   (p, q)
 C   C p   C (p, q)   C ((p, q))     (* as in expressions *)
+[p; q]   []                         (* list literals, as in expressions *)
 {x = p; M.y = q}                    (* nominal *)
 `A   `A p
 {`x = p}   {`x = p; ..}   {`x = p; ..rest}   (* closed, open, bind rest *)
@@ -365,12 +387,48 @@ Each file's helpers are in its submodule `Internal`, not meant for use outside
   `of_string_many` accept what Parsexp's `Single` and `Many` do, comments
   included, and fail with its messages, as `result[_, Parse_error.t]`: a
   message with the offset, line (from 1) and column (from 0) of the error.
-- Conversions for derived code: `sexp_of_X` and `X_of_sexp` for `unit`,
-  `bool`, `int`, `char`, `string`, `list`, `option`, `result` and pairs and
-  triples (`sexp_of_pair`, `triple_of_sexp`), the container ones taking those
-  of their elements. `X_of_sexp` returns `result[X, Of_sexp_error.t]`: a
-  message and the sexp that failed, which for containers is the innermost
-  failing element.
+- Conversions for derived code: `sexp_of_X`, `X_of_sexp` and
+  `X_of_sexp_exn` for `unit`, `bool`, `int`, `char`, `string`, `list`,
+  `option` and `result` (and `sexp_of_pair`, `pair_of_sexp`, and the same
+  for triples), the container ones taking those of their elements (the
+  `of_sexp` ones, for both). `X_of_sexp` returns `result[X, Of_sexp_error.t]`:
+  a message and the sexp that failed, which for containers is the innermost
+  failing element; `X_of_sexp_exn` raises `Of_sexp_error` with it.
+  `bool_of_sexp` accepts `true`, `false`, `True` and `False`, as Sexplib does.
+  `Sexp.sexp_of_t` and `Sexp.t_of_sexp` are the identity, and
+  `Of_sexp_error.t` and `Parse_error.t` have conversions as records.
+- `Core.Sexp.derive (type t)`: ppx_sexp_conv's `[@@deriving sexp]`, a
+  declaration splice (`include .~(Core.Sexp.derive (type t))`) generating
+  `sexp_of_t`, `t_of_sexp_exn` (raising `Sexp.Of_sexp_error`) and `t_of_sexp`
+  (`Core.Sexp.Deriving.catch t_of_sexp_exn`, returning `result`) from the
+  reflected declaration; for type `foo`, `sexp_of_foo` etc. The encoding and
+  error messages are ppx_sexp_conv's: `A`, `(B x)`, `(C x y)` for constructors
+  (also read with a lowercase first letter, `(c x y)`; a polymorphic variant
+  tag's argument is one value, `(D (x y))`), `((x 1) (y 2))` for records
+  (fields in any order, read fastest in the declared one; missing, extra and
+  duplicate fields are errors), `(a b)` for tuples, and Core's conversions for
+  the types above. Anonymous tuples and polymorphic variants are converted in
+  place. A parameterised type's conversions take those of its parameters
+  first, named `_of_a` for `'a` (`sexp_of_t _of_a v`, `t_of_sexp _of_a sexp`,
+  `_of_a` returning a `result` for both `of_sexp`s). Other types are
+  converted by name and root path, `u` of `a.stag` by `.A.sexp_of_u` and
+  `.A.u_of_sexp_exn`, so a local module or value of the same name where the
+  code is spliced doesn't capture them, and `M.t` can be derived outside
+  `M`; `t` itself is named bare, as it is generated beside the splice, so
+  recursive types work, and mutually recursive ones when derived in one
+  include (`include .~(List.append (derive (type a)) (derive (type b)))`). A
+  hand-written conversion of a type `u` must provide `sexp_of_u`,
+  `u_of_sexp` and `u_of_sexp_exn`. As with ppx_sexp_conv, non-regular
+  recursive types (`B of t[list['a]]`) fail to type the generated code.
+  What the code refers to in `Core` and the prelude is by ref, so shadowing
+  `Core`, `List`, `Cons` etc. where it is spliced doesn't change it. Abstract
+  types, functions, code, row parameters and arguments, polymorphic records,
+  empty variants, open polymorphic variants, the prelude's types and a type
+  named `sexp` fail at compile time. Unlike ppx_sexp_conv, error messages
+  name the conversion without the file (`t_of_sexp: ...`, not
+  `a.ml.t_of_sexp: ...`), and there are no attributes (`[@sexp.option]`,
+  `[@default]`, `[@@sexp.allow_extra_fields]`, ...). `tests/core_derive_sexp.stag`
+  shows the generated code, by inline expansions.
 
 Since a file of `core/` shadows the prims of its name (`Core.String` hides
 `String.length`), the prelude (only) can name any prim `Prim.<prim>`
@@ -382,7 +440,8 @@ prims have no types or modules.
 Declarations are generated as data: the syntax is defined in stag, in the
 prelude's module `Stag` (`Stag.Type_expr.t`, `Stag.Expr.t`, `Stag.Toplevel.t`,
 etc., mirroring `Syntax`, with helpers such as `Stag.Expr.var`,
-`Stag.Toplevel.let_`), and a declaration splice of a list of declarations is
+`Stag.Expr.fun_`, `Stag.Expr.list` (a list literal, of the prelude's `Cons`
+and `Nil` wherever spliced), `Stag.Toplevel.let_`), and a declaration splice of a list of declarations is
 run at compile time, converted to syntax and checked where it is spliced, as a
 ppx's output would be. Shapes may be computed (constructors from data), which
 typed quotes cannot express.
@@ -448,13 +507,18 @@ fails on them, and corrects them as expect tests are, in the same corrected
 file.
 
 An expansion is up to date when it prints as the generated declarations do
-(so modulo layout and comments), each resolved reference of the generated code
-(types, constructors, fields and values) printed as the shortest suffix of its
-full path naming it from the splice, whose first name the generated
-declarations do not declare (nor, for a single name, bind locally where it is
-used), else as its root path (`.M.t`) if that names it there. One that neither
-names (a prelude declaration a root module shadows) is printed
-`<prelude.M.t>`, which doesn't parse, so its expansion is always stale. The
+(so modulo layout and comments), each resolved reference and root path of the
+generated code (types, constructors, fields, values and modules) printed as the
+shortest suffix of its declaration's full path naming it where it is used in
+the expansion, read as if written in place of the splice: the generated
+declarations (of earlier expansions, and of this one, also within its modules)
+are in scope there, and a single name is not one bound locally where it is
+used. Else it is printed as its root path (`.M.t`) if that names it there. One
+that neither names (a prelude declaration a root module shadows) is printed
+`<prelude.M.t>`, which doesn't parse, so its expansion is always stale. So
+`.A.sexp_of_u` written by a generator in `a.stag` prints as `sexp_of_u` where
+nothing shadows it, `M.sexp_of_u` for `u` of `M` from outside `M`, and stays
+`.A.sexp_of_u` where a local `sexp_of_u` would capture it. The
 correction is the generated declarations printed so, indented by 2 from the
 leading whitespace of the splice's line, with the file's line endings,
 replacing the expansion and its comments but not comments on the splice's line
@@ -481,6 +545,8 @@ and `Stag.Field_ref.t` are abstract: only reflection makes them.
 Stag.Type.expr : Stag.Type.t['a] -> Stag.Type_expr.t
 Stag.Type.decl : Stag.Type_ref.t -> option[Stag.Type.Decl.t]
 Stag.Type_ref.name : Stag.Type_ref.t -> string   (* also Constructor_ref, Field_ref *)
+Stag.Type_ref.path : Stag.Type_ref.t -> Stag.Type_ref.Path.t
+  (* Program ["A"; "M"; "t"], Prelude ["int"], Prelude ["Core"; "Sexp"; "t"] *)
 
 module Stag.Type.Kind : sig
   type t =
@@ -494,7 +560,12 @@ end
 ```
 
 A ref is a declared type, constructor or field, by identity, and `name` is
-the name it is declared with. `expr` gives the type with each type it names
+the name it is declared with. A type ref's `path` is the names of its path
+from the root scope: `Program` for the program's, the file's module, then
+the modules it is in (`.A.M.t`), and `Prelude` for the prelude's, which
+the program's root modules may shadow (a file `core.stag` beside the
+prelude's `Core`), as a path from within the prelude, a builtin's just its
+name. `expr` gives the type with each type it names
 as a `Stag.Path.Ref` (`Stag.Type_expr.Con (Ref list, ...)`); `decl` gives a
 type's declaration (its constructors and fields as refs, its types as for
 `expr`), or `None` if it is abstract, as are the builtin types. A type
@@ -544,7 +615,7 @@ did; types as values are given as by `Stag.Type.expr`.
 (* gen.stag *)
 let atom = .< Core.Sexp.Atom (Core.Int.to_string x) >.      (* free x *)
 let derive_int name =
-  Cons (Stag.Toplevel.let_ name (Cons ("x", Nil)) (Stag.Code.erase atom), Nil)
+  [Stag.Toplevel.let_ name ["x"] (Stag.Code.erase atom)]
 
 (* a.stag *)
 module Core = struct end
@@ -632,7 +703,8 @@ let%bench "sort" n in [100; 1000] = sort (random_list n)  (* times random_list t
 
 `let%bench "name" = e` is a toplevel (in any module) whose body `e` may have
 any type; its value is discarded. `let%bench "name" x in [a; b; ...] = e` (at
-least one argument, all of one type) is a bench per argument, named
+least one argument, all of one type, written as a list literal) is a bench
+per argument, named
 `name/A` after the argument's value as printed (`sort/100`, `str/"a"`,
 truncated with `...` past 40 characters), with `x` bound to it in `e` only.
 Bodies and arguments are checked at level 0 as toplevel lets are, and like

@@ -107,44 +107,44 @@ let%expect_test "errors in the prelude's sources are located in them" =
       diagnostics stag/core/sexp.stag:
         61:28-61:36 error: Unbound value Int.succ
         62:33-62:41 error: Unbound value Int.succ
-        270:43-270:51 error: Unbound value Int.succ
-        282:24-282:32 error: Unbound value Int.succ
-        286:30-286:38 error: Unbound value Int.succ
-        330:11-330:19 error: Unbound value Int.succ
-        346:51-346:59 error: Unbound value Int.succ
-        346:63-346:71 error: Unbound value Int.succ
-        357:56-357:64 error: Unbound value Int.succ
-        363:11-363:19 error: Unbound value Int.succ
-        369:55-369:63 error: Unbound value Int.succ
-        383:58-383:66 error: Unbound value Int.succ
-        544:35-544:43 error: Unbound value Int.succ
-        583:22-583:30 error: Unbound value Int.succ
-        667:29-667:37 error: Unbound value Int.succ
-        706:19-706:27 error: Unbound value Int.succ
-        730:29-730:37 error: Unbound value Int.succ
-        738:29-738:37 error: Unbound value Int.succ
-        739:30-739:38 error: Unbound value Int.succ
-        740:31-740:39 error: Unbound value Int.succ
-        762:35-762:43 error: Unbound value Int.succ
-        772:28-772:36 error: Unbound value Int.succ
-        773:34-773:42 error: Unbound value Int.succ
-        786:58-786:66 error: Unbound value Int.succ
-        787:28-787:36 error: Unbound value Int.succ
-        788:31-788:39 error: Unbound value Int.succ
-        800:19-800:27 error: Unbound value Int.succ
-        824:34-824:42 error: Unbound value Int.succ
-        831:36-831:44 error: Unbound value Int.succ
-        832:37-832:45 error: Unbound value Int.succ
-        840:19-840:27 error: Unbound value Int.succ
-        847:35-847:43 error: Unbound value Int.succ
-        848:42-848:50 error: Unbound value Int.succ
-        852:42-852:50 error: Unbound value Int.succ
-        852:58-852:66 error: Unbound value Int.succ
-        864:34-864:42 error: Unbound value Int.succ
-        866:22-866:30 error: Unbound value Int.succ
-        871:49-871:57 error: Unbound value Int.succ
-        875:44-875:52 error: Unbound value Int.succ
-        876:33-876:41 error: Unbound value Int.succ
+        450:43-450:51 error: Unbound value Int.succ
+        462:24-462:32 error: Unbound value Int.succ
+        466:30-466:38 error: Unbound value Int.succ
+        509:11-509:19 error: Unbound value Int.succ
+        525:51-525:59 error: Unbound value Int.succ
+        525:63-525:71 error: Unbound value Int.succ
+        536:56-536:64 error: Unbound value Int.succ
+        542:11-542:19 error: Unbound value Int.succ
+        548:55-548:63 error: Unbound value Int.succ
+        562:58-562:66 error: Unbound value Int.succ
+        718:35-718:43 error: Unbound value Int.succ
+        757:22-757:30 error: Unbound value Int.succ
+        841:29-841:37 error: Unbound value Int.succ
+        880:19-880:27 error: Unbound value Int.succ
+        904:29-904:37 error: Unbound value Int.succ
+        912:29-912:37 error: Unbound value Int.succ
+        913:30-913:38 error: Unbound value Int.succ
+        914:31-914:39 error: Unbound value Int.succ
+        936:35-936:43 error: Unbound value Int.succ
+        946:28-946:36 error: Unbound value Int.succ
+        947:34-947:42 error: Unbound value Int.succ
+        960:58-960:66 error: Unbound value Int.succ
+        961:28-961:36 error: Unbound value Int.succ
+        962:31-962:39 error: Unbound value Int.succ
+        974:19-974:27 error: Unbound value Int.succ
+        998:34-998:42 error: Unbound value Int.succ
+        1005:36-1005:44 error: Unbound value Int.succ
+        1006:37-1006:45 error: Unbound value Int.succ
+        1014:19-1014:27 error: Unbound value Int.succ
+        1021:35-1021:43 error: Unbound value Int.succ
+        1022:42-1022:50 error: Unbound value Int.succ
+        1026:42-1026:50 error: Unbound value Int.succ
+        1026:58-1026:66 error: Unbound value Int.succ
+        1038:34-1038:42 error: Unbound value Int.succ
+        1040:22-1040:30 error: Unbound value Int.succ
+        1045:49-1045:57 error: Unbound value Int.succ
+        1049:44-1049:52 error: Unbound value Int.succ
+        1050:33-1050:41 error: Unbound value Int.succ
       diagnostics stag/core/string.stag:
         51:23-51:31 error: Unbound value Int.succ
         66:24-66:32 error: Unbound value Int.succ
@@ -607,13 +607,9 @@ let%expect_test "semantic tokens of a source of the prelude" =
       25:7+7 Enum_member "Failure"
       26:10+6 Namespace "String"
       26:17+6 Function "concat"
-      27:12+2 String "\"\""
-      28:13+4 Enum_member "Cons"
-      29:16+37 String "\"Bool.of_string_exn: invalid bool \\\"\""
-      30:16+4 Enum_member "Cons"
-      30:22+1 Variable "s"
-      30:25+4 Enum_member "Cons"
-      30:31+4 String "\"\\\"\""
-      30:37+3 Enum_member "Nil"
+      26:24+2 String "\"\""
+      26:28+37 String "\"Bool.of_string_exn: invalid bool \\\"\""
+      26:67+1 Variable "s"
+      26:70+4 String "\"\\\"\""
       |}])
 ;;

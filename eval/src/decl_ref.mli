@@ -22,5 +22,10 @@ type t =
 (** The last name of [name], as declared, eg. [C] of [M.C]. *)
 val short_name : t -> string
 
+(** The names of the path naming it from the root scope, as
+    [Prelude_path.root_path]: the prelude's (and the builtin types') from
+    the prelude's. *)
+val root_path : t -> [ `Prelude of string list | `Program of string list ]
+
 (** Eg. [<constructor M.C>], with [name] as by [Prelude_path.to_string_hum]. *)
 val to_string_hum : t -> string

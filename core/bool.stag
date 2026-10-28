@@ -24,8 +24,4 @@ let of_string_exn s =
   | None ->
     raise
       (Failure
-         (String.concat
-            ""
-            (Cons
-               ("Bool.of_string_exn: invalid bool \"",
-                Cons (s, Cons ("\"", Nil))))))
+         (String.concat "" ["Bool.of_string_exn: invalid bool \""; s; "\""]))

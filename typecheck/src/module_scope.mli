@@ -146,15 +146,17 @@ val within : t -> Typecheck_error.t -> Typecheck_error.t
 (** The splices of [t]'s module and its modules, those generated included. *)
 val splices : t -> Splice.t list
 
-(** A shortest path naming the canonical [name] of [namespace] from anywhere in
-    [toplevels], which [splice] generated: one resolving to [name] where
-    [splice] is written, whose first name [toplevels] (and their modules) do
-    not declare, nor [locals] if it is a single name, else the root path of
-    [name] if it resolves to [name] there, if any. *)
+(** A shortest path naming what [path] names (a [Decl_path.Resolved] its
+    canonical name) where it is used in [toplevels], which [splice] generated,
+    within their modules [modules] (outermost first) where the values [locals]
+    are bound, as if [toplevels] were written in place of [splice] and their
+    declarations added there: a suffix of its full path naming it there, else
+    its root path if that does, if any. *)
 val path_from_splice
   :  Splice.t
   -> Syntax.Toplevel.t list
   -> Namespace.t
+  -> modules:string list
   -> locals:String.Set.t
-  -> string
+  -> Syntax.Decl_path.t
   -> Syntax.Decl_path.t option

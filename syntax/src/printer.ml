@@ -61,26 +61,28 @@ let lit : Lit.t -> Doc.t = function
 
 (* [{a; b}], or broken with each item on its own line, followed by a [;]
    unless [~trailing:false], then the [tail]. *)
-let braces ?(opener = "{") ?(trailing = true) ?tail items =
+let braces ?(opener = "{") ?(closer = "}") ?(trailing = true) ?tail items =
   match items, tail with
-  | [], None -> text (opener ^ "}")
+  | [], None -> text (opener ^ closer)
   | _ ->
     let tail =
       match tail with
       | None -> empty
       | Some tail -> tail
     in
-    group
-      (text opener
-       ^^ nest
+    text opener
+    ^^ group
+         (nest
             2
             (cut
              ^^ separate (text ";" ^^ line) items
              ^^ (if trailing then if_break ";" else empty)
              ^^ tail)
-       ^^ cut
-       ^^ text "}")
+          ^^ cut
+          ^^ text closer)
 ;;
+
+let list_literal items = braces ~opener:"[" ~closer:"]" items
 
 (* [lhs = rhs ending], with [rhs] on the next line if it does not fit, or a
    [record] docked, breaking within its braces if it does not fit on the next
@@ -207,6 +209,11 @@ let type_expr_doc roots = type_expr roots ~prec:0
    constructor's argument. *)
 
 let rec pattern roots ~prec (p : Pattern.t) =
+  match List_literal.pattern_items p with
+  | Some items -> list_literal (List.map items ~f:(pattern roots ~prec:1))
+  | None -> pattern_desc roots ~prec p
+
+and pattern_desc roots ~prec (p : Pattern.t) =
   match p.txt with
   | Any -> text "_"
   | Var name -> text name
@@ -318,9 +325,12 @@ let seq (e : Expr.t) =
   | _ -> None
 ;;
 
+let is_list_literal e = Option.is_some (List_literal.expr_items e)
+
 let is_construct (e : Expr.t) =
   match e.txt with
-  | Construct (_, _ :: _) | Poly_variant (_, Some _) -> true
+  | Construct (_, _ :: _) -> not (is_list_literal e)
+  | Poly_variant (_, Some _) -> true
   | _ -> false
 ;;
 
@@ -380,17 +390,20 @@ let takes_after (ctx : Ctx.t) e =
 
 (* Postfix operators would extend these to paths, or just look wrong. *)
 let needs_parens_before_postfix e =
-  match (unwrap e).txt with
-  | Construct (_, []) | Poly_variant (_, None) | Quote _ | Poly_restrict _ ->
-    true
+  let e = unwrap e in
+  match e.txt with
+  | Construct (_, []) -> not (is_list_literal e)
+  | Poly_variant (_, None) | Quote _ | Poly_restrict _ -> true
   | _ -> false
 ;;
 
-let is_record e =
-  match (unwrap e).txt with
+(* Whether [e] is written in braces or brackets, which [definition] docks. *)
+let is_bracketed e =
+  let e = unwrap e in
+  match e.txt with
   | Record _ | Record_update _ | Poly_record _ | Poly_extend _ | Poly_update _
     -> true
-  | _ -> false
+  | _ -> is_list_literal e
 ;;
 
 let binding roots ((name : Name.t), annot) =
@@ -422,6 +435,11 @@ let rec expr roots ?(parenthesize = false) (ctx : Ctx.t) e =
 and flat roots e = group (bare roots { Ctx.top with flat = true } e)
 
 and bare roots (ctx : Ctx.t) (e : Expr.t) =
+  match List_literal.expr_items e with
+  | Some items -> list_literal (list_items roots items)
+  | None -> bare_desc roots ctx e
+
+and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
   match e.txt, seq e with
   | Let _, Some (first, second) ->
     expr roots (Ctx.item Semi) first
@@ -430,7 +448,7 @@ and bare roots (ctx : Ctx.t) (e : Expr.t) =
     ^^ expr roots { ctx with level = Seq } second
   | Let (name, params, annot, rhs, body), None ->
     definition
-      ~record:(is_record rhs)
+      ~record:(is_bracketed rhs)
       ~ending:"in"
       (let_lhs roots "let" name params annot)
       (expr roots Ctx.top rhs)
@@ -498,8 +516,9 @@ and bare roots (ctx : Ctx.t) (e : Expr.t) =
     let f, args = spine e [] in
     let f =
       match (unwrap f).txt with
-      | Construct (_, []) | Poly_variant (_, None) ->
+      | Construct (_, []) when not (is_list_literal (unwrap f)) ->
         expr roots ~parenthesize:true (Ctx.at App) f
+      | Poly_variant (_, None) -> expr roots ~parenthesize:true (Ctx.at App) f
       | _ -> expr roots (Ctx.at App) f
     in
     group
@@ -585,7 +604,8 @@ and update roots record fields =
      ^^ text "}")
 
 (* [C1 (C2 (... Cn args))], with the heads on one line, as each would otherwise
-   be indented further than the last, quadratically in deep chains. *)
+   be indented further than the last, quadratically in deep chains, and a list
+   literal [args] docked. *)
 and construct roots e =
   let head_and_args (e : Expr.t) =
     match e.txt with
@@ -603,16 +623,18 @@ and construct roots e =
   let heads, head, args = chain e [] in
   let args =
     match args with
+    | [ arg ] when is_list_literal (unwrap arg) ->
+      text " " ^^ expr roots (Ctx.at Splice) arg
     | [ arg ] ->
       (match (unwrap arg).txt with
-       | Tuple (_ :: _ :: _) -> parens (expr roots Ctx.top arg)
-       | _ -> expr roots (Ctx.at Splice) arg)
-    | args -> parens (tuple_items roots args)
+       | Tuple (_ :: _ :: _) -> nest 2 (line ^^ parens (expr roots Ctx.top arg))
+       | _ -> nest 2 (line ^^ expr roots (Ctx.at Splice) arg))
+    | args -> nest 2 (line ^^ parens (tuple_items roots args))
   in
   group
     (concat (List.map heads ~f:(fun head -> head ^^ text " ("))
      ^^ head
-     ^^ nest 2 (line ^^ args)
+     ^^ args
      ^^ text (String.make (List.length heads) ')'))
 
 and spliced roots inner =
@@ -643,8 +665,12 @@ and tuple_items roots es =
 and entry roots ?(after = After.Nothing) e =
   expr roots (Ctx.item ~seq:false after) e
 
+(* A [let], [match] or [fun] item is parenthesized, though the [;] would end
+   it, so items read as separate. *)
+and list_items roots items = List.map items ~f:(entry roots ~after:Semi)
+
 and field roots ?after lhs value =
-  definition ~record:(is_record value) lhs (entry roots ?after value)
+  definition ~record:(is_bracketed value) lhs (entry roots ?after value)
 
 and poly_fields roots ?(last_after = After.Nothing) fields =
   let last = List.length fields - 1 in
@@ -734,7 +760,7 @@ let rec toplevel roots ~width ~indent ~blank_between (t : Toplevel.t) =
   match t.txt with
   | Let (name, params, annot, rhs) ->
     definition
-      ~record:(is_record rhs)
+      ~record:(is_bracketed rhs)
       (let_lhs roots "let" name params annot)
       (expr_doc roots rhs)
   | Type decl -> type_decl roots decl
@@ -780,23 +806,9 @@ let rec toplevel roots ~width ~indent ~blank_between (t : Toplevel.t) =
       match param with
       | None -> lhs
       | Some { name = x; args } ->
-        let last = List.length args - 1 in
         lhs
         ^^ text (" " ^ x.txt ^ " in ")
-        ^^ text "["
-        ^^ group
-             (nest
-                2
-                (cut
-                 ^^ separate
-                      (text ";" ^^ line)
-                      (List.mapi args ~f:(fun i arg ->
-                         entry
-                           roots
-                           ~after:(if i = last then Nothing else Semi)
-                           arg)))
-              ^^ cut)
-        ^^ text "]"
+        ^^ list_literal (list_items roots args)
     in
     definition lhs (expr_doc roots body)
 

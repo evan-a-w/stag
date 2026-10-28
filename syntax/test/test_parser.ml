@@ -1190,3 +1190,97 @@ let%expect_test "an expansion starts after the comments on its splice's line" =
     " "
     |}]
 ;;
+
+let%expect_test "list literals" =
+  expr "[]";
+  expr "[a]";
+  expr "[a; b; c;]";
+  expr "[[a]; []; [b; c]]";
+  expr "[a, b; c]";
+  expr "[let x = a in x; fun y -> y; match z with _ -> z; d]";
+  expr "f [a] [] x";
+  expr "C [a]";
+  expr "[a].x";
+  pat "[]";
+  pat "[a; (b, c);]";
+  pat "Cons (a, [b; [_]])";
+  pat "[A; B (a, b); a, b]";
+  expr "fun [x] -> x";
+  expr "[a; b";
+  expr "[;]";
+  [%expect
+    {|
+    (Construct <Nil> ())
+    (Construct <Cons> ((Var a ()) (Construct <Nil> ())))
+    (Construct <Cons>
+     ((Var a ())
+      (Construct <Cons>
+       ((Var b ()) (Construct <Cons> ((Var c ()) (Construct <Nil> ())))))))
+    (Construct <Cons>
+     ((Construct <Cons> ((Var a ()) (Construct <Nil> ())))
+      (Construct <Cons>
+       ((Construct <Nil> ())
+        (Construct <Cons>
+         ((Construct <Cons>
+           ((Var b ()) (Construct <Cons> ((Var c ()) (Construct <Nil> ())))))
+          (Construct <Nil> ())))))))
+    (Construct <Cons>
+     ((Tuple ((Var a ()) (Var b ())))
+      (Construct <Cons> ((Var c ()) (Construct <Nil> ())))))
+    (Construct <Cons>
+     ((Let x () () (Var a ()) (Var x ()))
+      (Construct <Cons>
+       ((Fun ((y ())) (Var y ()))
+        (Construct <Cons>
+         ((Match (Var z ()) ((Any (Var z ()))))
+          (Construct <Cons> ((Var d ()) (Construct <Nil> ())))))))))
+    (App
+     (App (App (Var f ()) (Construct <Cons> ((Var a ()) (Construct <Nil> ()))))
+      (Construct <Nil> ()))
+     (Var x ()))
+    (Construct C ((Construct <Cons> ((Var a ()) (Construct <Nil> ())))))
+    (Field (Construct <Cons> ((Var a ()) (Construct <Nil> ()))) x)
+    (Construct <Nil> ())
+    (Construct <Cons>
+     ((Var a)
+      (Construct <Cons> ((Tuple ((Var b) (Var c))) (Construct <Nil> ())))))
+    (Construct Cons
+     ((Var a)
+      (Construct <Cons>
+       ((Var b)
+        (Construct <Cons>
+         ((Construct <Cons> (Any (Construct <Nil> ()))) (Construct <Nil> ())))))))
+    (Construct <Cons>
+     ((Construct A ())
+      (Construct <Cons>
+       ((Construct B ((Var a) (Var b)))
+        (Construct <Cons> ((Tuple ((Var a) (Var b))) (Construct <Nil> ())))))))
+    t.stag:1:4-5: patterns are not allowed as parameters, only `x`, `_` or `(x : t)`; use `match`
+    t.stag:1:5-5: expected `]` to close this `[` (opened at 1:0), found end of file
+    t.stag:1:1-2: expected an expression, found `;`
+    |}]
+;;
+
+let%expect_test "list literal locations" =
+  show_locs Expr.sexp_of_t Parser.expr "[a; b;]";
+  show_locs Expr.sexp_of_t Parser.expr "[ ]";
+  show_locs Pattern.sexp_of_t Parser.pattern "[a]";
+  [%expect
+    {|
+    Construct "[a; b;]"
+      <Cons> "["
+      Var "a"
+      Construct "; b;]"
+        <Cons> ";"
+        Var "b"
+        Construct "]"
+          <Nil> "]"
+    Construct "[ ]"
+      <Nil> "[ ]"
+    Construct "[a]"
+      <Cons> "["
+      Var "a"
+      Construct "]"
+        <Nil> "]"
+    |}]
+;;

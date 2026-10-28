@@ -803,3 +803,306 @@ end%inline
     (gen.stag up to date)
     |}]
 ;;
+
+let root_paths =
+  {|
+let def name params body = Stag.Toplevel.let_ name params body
+let v = Stag.Expr.var
+let app f x = Stag.Expr.apply (v f) [v x]
+let one = 1
+|}
+;;
+
+let%expect_test "root paths in expansions: shortest suffix where they are used" =
+  test
+    (root_paths
+     ^ {|
+include%inline .~[def "succ" ["x"] (app ".A.plus" "x")]
+end%inline
+include%inline .~[
+  def "two" [] (app ".A.succ" ".A.one");
+  def "plus" ["x"] (v "x");
+  def "three" [] (app ".A.plus" ".A.two");
+]
+end%inline
+module M = struct
+  let one = "one"
+  include%inline .~[def "m" [] (app ".A.succ" ".A.one")]
+  end%inline
+end
+module N = struct
+  module A = struct end
+  include%inline .~[def "n" ["one"] (app ".A.succ" ".A.one")]
+  end%inline
+end
+module P = struct
+  include%inline .~[def "one" [] (Stag.Expr.int 2); def "p" [] (v ".A.one")]
+  end%inline
+end
+module Q = struct
+  include%inline .~[
+    Stag.Toplevel.Module ("A", []);
+    def "one" [] (Stag.Expr.int 3);
+    Stag.Toplevel.Module ("Inner", [def "x" [] (v ".A.one"); def "y" [] (v ".A.Q.Inner.x")]);
+    def "q" [] (v ".A.Q.Inner.y");
+  ]
+  end%inline
+end
+module%inline S = .~[def "x" [] (v ".A.one"); def "y" [] (v ".A.S.x")]
+end%inline
+let s = S.y
+|}
+    );
+  [%expect
+    {|
+    File "a.stag", line 21, characters 0-55:
+    21 | include%inline .~[def "succ" ["x"] (app ".A.plus" "x")]
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    File "a.stag", lines 23-27, characters 0-1:
+    23 | include%inline .~[
+    24 |   def "two" [] (app ".A.succ" ".A.one");
+    25 |   def "plus" ["x"] (v "x");
+    26 |   def "three" [] (app ".A.plus" ".A.two");
+    27 | ]
+    Error: This inline expansion is out of date
+    File "a.stag", line 31, characters 2-56:
+    31 |   include%inline .~[def "m" [] (app ".A.succ" ".A.one")]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    File "a.stag", line 36, characters 2-61:
+    36 |   include%inline .~[def "n" ["one"] (app ".A.succ" ".A.one")]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    File "a.stag", line 40, characters 2-76:
+    40 |   include%inline .~[def "one" [] (Stag.Expr.int 2); def "p" [] (v ".A.one")]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    File "a.stag", lines 44-49, characters 2-3:
+    44 |   include%inline .~[
+    45 |     Stag.Toplevel.Module ("A", []);
+    46 |     def "one" [] (Stag.Expr.int 3);
+    47 |     Stag.Toplevel.Module ("Inner", [def "x" [] (v ".A.one"); def "y" [] (v ".A.Q.Inner.x")]);
+    48 |     def "q" [] (v ".A.Q.Inner.y");
+    49 |   ]
+    Error: This inline expansion is out of date
+    File "a.stag", line 52, characters 0-70:
+    52 | module%inline S = .~[def "x" [] (v ".A.one"); def "y" [] (v ".A.S.x")]
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    --- a.stag corrected ---
+    let def name params body = Stag.Toplevel.let_ name params body
+    let v = Stag.Expr.var
+    let app f x = Stag.Expr.apply (v f) [v x]
+    let one = 1
+
+    include%inline .~[def "succ" ["x"] (app ".A.plus" "x")]
+      let succ x = A.plus x
+    end%inline
+    include%inline .~[
+      def "two" [] (app ".A.succ" ".A.one");
+      def "plus" ["x"] (v "x");
+      def "three" [] (app ".A.plus" ".A.two");
+    ]
+      let two = succ one
+      let plus x = x
+      let three = plus two
+    end%inline
+    module M = struct
+      let one = "one"
+      include%inline .~[def "m" [] (app ".A.succ" ".A.one")]
+        let m = succ A.one
+      end%inline
+    end
+    module N = struct
+      module A = struct end
+      include%inline .~[def "n" ["one"] (app ".A.succ" ".A.one")]
+        let n one = succ .A.one
+      end%inline
+    end
+    module P = struct
+      include%inline .~[def "one" [] (Stag.Expr.int 2); def "p" [] (v ".A.one")]
+        let one = 2
+        let p = A.one
+      end%inline
+    end
+    module Q = struct
+      include%inline .~[
+        Stag.Toplevel.Module ("A", []);
+        def "one" [] (Stag.Expr.int 3);
+        Stag.Toplevel.Module ("Inner", [def "x" [] (v ".A.one"); def "y" [] (v ".A.Q.Inner.x")]);
+        def "q" [] (v ".A.Q.Inner.y");
+      ]
+        module A = struct end
+
+        let one = 3
+
+        module Inner = struct
+          let x = .A.one
+          let y = x
+        end
+
+        let q = Inner.y
+      end%inline
+    end
+    module%inline S = .~[def "x" [] (v ".A.one"); def "y" [] (v ".A.S.x")]
+      let x = one
+      let y = x
+    end%inline
+    let s = S.y
+    |}]
+;;
+
+let%expect_test "an up to date expansion with root paths shortened is located" =
+  test
+    (root_paths
+     ^ {|
+include%inline .~[
+  def "succ" ["x"] (app ".A.plus" "x");
+  def "plus" ["x"] (Stag.Expr.apply (v ".A.one") [v "x"]);
+]
+  let succ x = plus x
+  let plus x = one x
+end%inline
+|}
+    );
+  [%expect
+    {|
+    File "a.stag", line 26, characters 15-18:
+    26 |   let plus x = one x
+                        ^^^
+    Error: This expression has type int but an expression was expected of type '_a -> '_b
+    |}]
+;;
+
+let%expect_test "shortened root paths are up to date when re-read" =
+  test
+    (root_paths
+     ^ {|
+include%inline .~[def "succ" ["x"] (app ".A.plus" "x")]
+  let succ x = A.plus x
+end%inline
+include%inline .~[
+  def "two" [] (app ".A.succ" ".A.one");
+  def "plus" ["x"] (v "x");
+  def "three" [] (app ".A.plus" ".A.two");
+]
+  let two = succ one
+  let plus x = x
+  let three = plus two
+end%inline
+module M = struct
+  let one = "one"
+  include%inline .~[def "m" [] (app ".A.succ" ".A.one")]
+    let m = succ A.one
+  end%inline
+end
+module N = struct
+  module A = struct end
+  include%inline .~[def "n" ["one"] (app ".A.succ" ".A.one")]
+    let n one = succ .A.one
+  end%inline
+end
+module P = struct
+  include%inline .~[def "one" [] (Stag.Expr.int 2); def "p" [] (v ".A.one")]
+    let one = 2
+    let p = A.one
+  end%inline
+end
+module Q = struct
+  include%inline .~[
+    Stag.Toplevel.Module ("A", []);
+    def "one" [] (Stag.Expr.int 3);
+    Stag.Toplevel.Module ("Inner", [def "x" [] (v ".A.one"); def "y" [] (v ".A.Q.Inner.x")]);
+    def "q" [] (v ".A.Q.Inner.y");
+  ]
+    module A = struct end
+
+    let one = 3
+
+    module Inner = struct
+      let x = .A.one
+      let y = x
+    end
+
+    let q = Inner.y
+  end%inline
+end
+module%inline S = .~[def "x" [] (v ".A.one"); def "y" [] (v ".A.S.x")]
+  let x = one
+  let y = x
+end%inline
+let s = S.y
+let%expect_test "values" =
+  print_int (Int.add M.m (Int.add three (Int.add (N.n 0) (Int.add P.p (Int.add Q.q s)))))
+|}
+    );
+  [%expect
+    {xxx|
+    ((name (values @ a.stag:75:16-24))
+     (mismatches (((loc a.stag:76:89-89) (expected ()) (actual 6)))) (error ()))
+    --- a.stag corrected ---
+    let def name params body = Stag.Toplevel.let_ name params body
+    let v = Stag.Expr.var
+    let app f x = Stag.Expr.apply (v f) [v x]
+    let one = 1
+
+    include%inline .~[def "succ" ["x"] (app ".A.plus" "x")]
+      let succ x = A.plus x
+    end%inline
+    include%inline .~[
+      def "two" [] (app ".A.succ" ".A.one");
+      def "plus" ["x"] (v "x");
+      def "three" [] (app ".A.plus" ".A.two");
+    ]
+      let two = succ one
+      let plus x = x
+      let three = plus two
+    end%inline
+    module M = struct
+      let one = "one"
+      include%inline .~[def "m" [] (app ".A.succ" ".A.one")]
+        let m = succ A.one
+      end%inline
+    end
+    module N = struct
+      module A = struct end
+      include%inline .~[def "n" ["one"] (app ".A.succ" ".A.one")]
+        let n one = succ .A.one
+      end%inline
+    end
+    module P = struct
+      include%inline .~[def "one" [] (Stag.Expr.int 2); def "p" [] (v ".A.one")]
+        let one = 2
+        let p = A.one
+      end%inline
+    end
+    module Q = struct
+      include%inline .~[
+        Stag.Toplevel.Module ("A", []);
+        def "one" [] (Stag.Expr.int 3);
+        Stag.Toplevel.Module ("Inner", [def "x" [] (v ".A.one"); def "y" [] (v ".A.Q.Inner.x")]);
+        def "q" [] (v ".A.Q.Inner.y");
+      ]
+        module A = struct end
+
+        let one = 3
+
+        module Inner = struct
+          let x = .A.one
+          let y = x
+        end
+
+        let q = Inner.y
+      end%inline
+    end
+    module%inline S = .~[def "x" [] (v ".A.one"); def "y" [] (v ".A.S.x")]
+      let x = one
+      let y = x
+    end%inline
+    let s = S.y
+    let%expect_test "values" =
+      print_int (Int.add M.m (Int.add three (Int.add (N.n 0) (Int.add P.p (Int.add Q.q s)))));
+      [%expect {| 6 |}]
+    |xxx}]
+;;

@@ -766,6 +766,8 @@ and apply t (f : Value.t) arg ~loc : Next.t Or_error.t =
      | Type_expr, Type ty -> value (Syntax_value.Type_expr.to_value ty)
      | ( (Type_ref_name | Constructor_ref_name | Field_ref_name | Value_ref_name)
        , Ref ref_ ) -> value (String (Decl_ref.short_name ref_))
+     | Type_ref_path, Ref ref_ ->
+       value (Syntax_value.type_ref_path (Decl_ref.root_path ref_))
      | Raise, exn -> raise_exn ~loc exn
      | Erase, Code { expr; persistent = _ } ->
        (match Erase.expr expr with

@@ -103,8 +103,8 @@ let%expect_test "random syntax round trips" =
   print_s [%sexp (!counts : Counts.t)];
   [%expect
     {|
-    ((30 ((lines 470864) (over_width 237157)))
-     (80 ((lines 347141) (over_width 49748))))
+    ((30 ((lines 512053) (over_width 269760)))
+     (80 ((lines 389349) (over_width 64602))))
     |}]
 ;;
 
@@ -119,7 +119,7 @@ let%expect_test "deep random syntax round trips" =
   print_s [%sexp (!counts : Counts.t)];
   [%expect
     {|
-    ((30 ((lines 97755) (over_width 84479)))
-     (80 ((lines 91514) (over_width 62516))))
+    ((30 ((lines 100698) (over_width 87078)))
+     (80 ((lines 94712) (over_width 64426))))
     |}]
 ;;

@@ -5,8 +5,8 @@ let ints s =
   | Ok t ->
     (match Core.Sexp.list_of_sexp Core.Sexp.int_of_sexp t with
      | Ok l -> l
-     | Error _ -> Nil)
-  | Error _ -> Nil
+     | Error _ -> [])
+  | Error _ -> []
 
 let sexp_of_ints l = Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int l
 let print_sexp t = print_endline (Core.Sexp.to_string_hum t)
@@ -63,9 +63,7 @@ let%expect_test "init, rev, rev_append, append, concat" =
   print_ints (Core.List.append (ints "(1 2 3)") (ints "(4 5)"));
   print_ints (Core.List.append (ints "()") (ints "(4 5)"));
   print_ints (Core.List.append (ints "(1)") (ints "()"));
-  print_ints
-    (Core.List.concat
-       (Cons (ints "(1 2)", Cons (ints "()", Cons (ints "(3)", Nil)))));
+  print_ints (Core.List.concat [ints "(1 2)"; ints "()"; ints "(3)"]);
   [%expect {|
     (0 2 4 6 8)
     ()
@@ -110,11 +108,7 @@ let%expect_test "map and iter go from left to right" =
   [%expect {| 123(1 2 3) |}]
 
 let%expect_test "fold_left, fold_right" =
-  let pair a b =
-    Core.String.concat
-      ""
-      (Cons ("(", Cons (a, Cons (" ", Cons (b, Cons (")", Nil))))))
-  in
+  let pair a b = Core.String.concat "" ["("; a; " "; b; ")"] in
   let show acc n = pair acc (Core.Int.to_string n) in
   print_endline (Core.List.fold_left show "init" (ints "(1 2 3)"));
   let show_right n acc = pair (Core.Int.to_string n) acc in
@@ -146,7 +140,7 @@ let%expect_test "filter, filter_map, partition" =
     |}]
 
 let%expect_test "concat_map" =
-  let twice n = Cons (n, Cons (n, Nil)) in
+  let twice n = [n; n] in
   print_ints (Core.List.concat_map twice (ints "(1 2 3)"));
   [%expect {| (1 1 2 2 3 3) |}]
 
@@ -201,7 +195,7 @@ let%expect_test "zip, unzip, assoc" =
       (Core.Sexp.sexp_of_pair Core.Sexp.sexp_of_int Core.Sexp.sexp_of_string)
       l
   in
-  let strings = Cons ("a", Cons ("b", Nil)) in
+  let strings = ["a"; "b"] in
   let zipped = Core.List.zip (ints "(1 2)") strings in
   print_sexp (Core.Sexp.sexp_of_option sexp_of_pairs zipped);
   print_sexp
@@ -212,7 +206,7 @@ let%expect_test "zip, unzip, assoc" =
     (Core.Sexp.sexp_of_option
        sexp_of_pairs
        (Core.List.zip (ints "(1)") strings));
-  let pairs = Core.Option.value zipped Nil in
+  let pairs = Core.Option.value zipped [] in
   print_sexp
     (Core.Sexp.sexp_of_pair
        sexp_of_ints
@@ -253,11 +247,7 @@ let%expect_test "sort" =
     |}]
 
 let%expect_test "sort is stable" =
-  let pairs =
-    Cons
-      ((2, "a"),
-       Cons ((1, "b"), Cons ((2, "c"), Cons ((1, "d"), Cons ((0, "e"), Nil)))))
-  in
+  let pairs = [(2, "a"); (1, "b"); (2, "c"); (1, "d"); (0, "e")] in
   print_sexp
     (Core.Sexp.sexp_of_list
        (Core.Sexp.sexp_of_pair Core.Sexp.sexp_of_int Core.Sexp.sexp_of_string)
@@ -307,7 +297,7 @@ let%expect_test "functions are called once per element, from left to right" =
     | true -> Some (Core.Int.div n 2)
     | false -> None
   in
-  let noisy_twice n = Cons (noisy n, Cons (n, Nil)) in
+  let noisy_twice n = [noisy n; n] in
   let show name l =
     print_endline (Core.String.append " " name);
     print_ints l
@@ -356,14 +346,7 @@ let%expect_test "sort of runs" =
        (Core.Sexp.sexp_of_pair Core.Sexp.sexp_of_int Core.Sexp.sexp_of_string)
        (Core.List.sort
           by_first
-          (Cons
-             ((3, "a"),
-              Cons
-                ((2, "b"),
-                 Cons
-                   ((2, "c"),
-                    Cons
-                      ((1, "d"), Cons ((1, "e"), Cons ((0, "f"), Nil)))))))));
+          [(3, "a"); (2, "b"); (2, "c"); (1, "d"); (1, "e"); (0, "f")]));
   [%expect {|
     (0 3 6 10 13 16 20 23 26 30 33 37 40 43 47 50 53 57 60 63 67 70 74 77 80 84
      87 90 94 97)
@@ -450,11 +433,7 @@ let%expect_test "max_elt, min_elt, dedup" =
          (Core.Sexp.sexp_of_pair Core.Sexp.sexp_of_int Core.Sexp.sexp_of_string)
          l)
   in
-  let pairs =
-    Cons
-      ((2, "a"),
-       Cons ((1, "b"), Cons ((2, "c"), Cons ((1, "d"), Cons ((0, "e"), Nil)))))
-  in
+  let pairs = [(2, "a"); (1, "b"); (2, "c"); (1, "d"); (0, "e")] in
   print_sexp
     (Core.Sexp.sexp_of_option
        (Core.Sexp.sexp_of_pair Core.Sexp.sexp_of_int Core.Sexp.sexp_of_string)

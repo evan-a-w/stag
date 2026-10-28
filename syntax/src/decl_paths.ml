@@ -25,7 +25,8 @@ let rec pattern_binders (p : Pattern.t) =
   | Exception p -> pattern_binders p
 ;;
 
-let map (t : Toplevel.t) ~f =
+let rec map' (t : Toplevel.t) ~modules ~f:f' =
+  let f namespace ~locals path = f' namespace ~modules ~locals path in
   let type_path = f Namespace.Type ~locals:String.Set.empty in
   let constructor = f Constructor ~locals:String.Set.empty in
   let field = f Field ~locals:String.Set.empty in
@@ -54,6 +55,10 @@ let map (t : Toplevel.t) ~f =
   in
   let binding (n, t) = n, Option.map t ~f:type_expr in
   let rec pattern (p : Pattern.t) : Pattern.t =
+    match List_literal.map_pattern_items p ~f:pattern with
+    | Some p -> p
+    | None -> pattern_desc p
+  and pattern_desc (p : Pattern.t) : Pattern.t =
     let txt : Pattern.desc =
       match p.txt with
       | Any | Var _ | Lit _ -> p.txt
@@ -70,6 +75,10 @@ let map (t : Toplevel.t) ~f =
     { p with txt }
   in
   let rec expr locals (e : Expr.t) : Expr.t =
+    match List_literal.map_expr_items e ~f:(expr locals) with
+    | Some e -> e
+    | None -> expr_desc locals e
+  and expr_desc locals (e : Expr.t) : Expr.t =
     let expr' = expr in
     let expr = expr locals in
     let fields = List.map ~f:(fun (p, value) -> field p, expr value) in
@@ -120,7 +129,7 @@ let map (t : Toplevel.t) ~f =
     in
     { e with txt }
   in
-  let rec toplevel (t : Toplevel.t) : Toplevel.t =
+  let toplevel (t : Toplevel.t) : Toplevel.t =
     let txt : Toplevel.desc =
       match t.txt with
       | Let (n, bs, ty, e) ->
@@ -141,7 +150,8 @@ let map (t : Toplevel.t) ~f =
         in
         Type { name; params; kind = decl_kind kind }
       | Exception (n, ts) -> Exception (n, List.map ts ~f:type_expr)
-      | Module (n, ts) -> Module (n, List.map ts ~f:toplevel)
+      | Module (n, ts) ->
+        Module (n, List.map ts ~f:(map' ~modules:(modules @ [ n.txt ]) ~f:f'))
       | Module_splice (n, e, expansion) ->
         Module_splice (n, expr String.Set.empty e, expansion)
       | Include (e, expansion) -> Include (expr String.Set.empty e, expansion)
@@ -166,3 +176,5 @@ let map (t : Toplevel.t) ~f =
   in
   toplevel t
 ;;
+
+let map t ~f = map' t ~modules:[] ~f

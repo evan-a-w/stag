@@ -1,0 +1,1273 @@
+(* [Core.Sexp.derive]: ppx_sexp_conv's [[@@deriving sexp]], written in stag.
+   The expansions show the code it generates. *)
+
+let print_sexp t = print_endline (Core.Sexp.to_string_hum t)
+
+let print_error e =
+  print_endline
+    (Core.String.append "Error " (Core.Sexp.Of_sexp_error.to_string e))
+
+(* Prints [v]'s sexp, and checks that it converts back to a value of the same
+   sexp, from the sexp and from its printed form. *)
+let round_trip sexp_of of_sexp v =
+  let sexp = sexp_of v in
+  let check r =
+    match r with
+    | Ok w ->
+      (match Core.Sexp.equal (sexp_of w) sexp with
+       | true -> ()
+       | false -> print_endline "DOES NOT ROUND TRIP")
+    | Error e -> print_error e
+  in
+  print_sexp sexp;
+  check (of_sexp sexp);
+  check (of_sexp (Core.Sexp.of_string_exn (Core.Sexp.to_string sexp)))
+
+(* Parses [s], converts it by [of_sexp], and prints the result as a sexp. *)
+let parse sexp_of of_sexp s =
+  match of_sexp (Core.Sexp.of_string_exn s) with
+  | Ok v -> print_sexp (sexp_of v)
+  | Error e -> print_error e
+
+type color = Red | Green | Blue
+
+include%inline .~(Core.Sexp.derive (type color))
+  let sexp_of_color v =
+    match v with
+    | Red -> Core.Sexp.Atom "Red"
+    | Green -> Core.Sexp.Atom "Green"
+    | Blue -> Core.Sexp.Atom "Blue"
+
+  let color_of_sexp_exn sexp =
+    match Core.Sexp.Deriving.capitalize sexp with
+    | Core.Sexp.Atom "Red" -> Red
+    | Core.Sexp.Atom "Green" -> Green
+    | Core.Sexp.Atom "Blue" -> Blue
+    | _ ->
+      Core.Sexp.Deriving.variant_error
+        "color_of_sexp"
+        ["Red"; "Green"; "Blue"]
+        []
+        sexp
+
+  let color_of_sexp sexp = Core.Sexp.Deriving.catch color_of_sexp_exn sexp
+end%inline
+
+let%expect_test "constant constructors are atoms" =
+  round_trip sexp_of_color color_of_sexp Red;
+  round_trip sexp_of_color color_of_sexp Blue;
+  [%expect {|
+    Red
+    Blue
+    |}]
+
+let%expect_test "variant errors" =
+  parse sexp_of_color color_of_sexp "Purple";
+  parse sexp_of_color color_of_sexp "(Red)";
+  parse sexp_of_color color_of_sexp "()";
+  parse sexp_of_color color_of_sexp "((Red))";
+  parse sexp_of_color color_of_sexp "red";
+  parse sexp_of_color color_of_sexp "rED";
+  [%expect {|
+    Error color_of_sexp: unexpected variant constructor: Purple
+    Error color_of_sexp: this constructor does not take arguments: (Red)
+    Error color_of_sexp: the empty list is an invalid sum: ()
+    Error color_of_sexp: a nested list is an invalid sum: ((Red))
+    Red
+    Error color_of_sexp: unexpected variant constructor: rED
+    |}]
+
+type shape =
+  | Circle of int
+  | Rect of int * int
+  | Segment of (int * int) * (int * int)
+  | Label of string * color
+
+include%inline .~(Core.Sexp.derive (type shape))
+  let sexp_of_shape v =
+    match v with
+    | Circle v0 ->
+      Core.Sexp.List [Core.Sexp.Atom "Circle"; Core.Sexp.sexp_of_int v0]
+    | Rect (v0, v1) ->
+      Core.Sexp.List [
+        Core.Sexp.Atom "Rect";
+        Core.Sexp.sexp_of_int v0;
+        Core.Sexp.sexp_of_int v1;
+      ]
+    | Segment ((v0_0, v0_1), (v1_0, v1_1)) ->
+      Core.Sexp.List [
+        Core.Sexp.Atom "Segment";
+        Core.Sexp.List [Core.Sexp.sexp_of_int v0_0; Core.Sexp.sexp_of_int v0_1];
+        Core.Sexp.List [Core.Sexp.sexp_of_int v1_0; Core.Sexp.sexp_of_int v1_1];
+      ]
+    | Label (v0, v1) ->
+      Core.Sexp.List [
+        Core.Sexp.Atom "Label";
+        Core.Sexp.sexp_of_string v0;
+        sexp_of_color v1;
+      ]
+
+  let shape_of_sexp_exn sexp =
+    match Core.Sexp.Deriving.capitalize sexp with
+    | Core.Sexp.List [Core.Sexp.Atom "Circle"; v0] ->
+      Circle (Core.Sexp.int_of_sexp_exn v0)
+    | Core.Sexp.List [Core.Sexp.Atom "Rect"; v0; v1] ->
+      Rect (Core.Sexp.int_of_sexp_exn v0, Core.Sexp.int_of_sexp_exn v1)
+    | Core.Sexp.List [Core.Sexp.Atom "Segment"; v0; v1] ->
+      Segment
+        ((match v0 with
+          | Core.Sexp.List [v0_0; v0_1] ->
+            (Core.Sexp.int_of_sexp_exn v0_0, Core.Sexp.int_of_sexp_exn v0_1)
+          | _ -> Core.Sexp.Deriving.tuple_error "shape_of_sexp" 2 v0),
+         match v1 with
+         | Core.Sexp.List [v1_0; v1_1] ->
+           (Core.Sexp.int_of_sexp_exn v1_0, Core.Sexp.int_of_sexp_exn v1_1)
+         | _ -> Core.Sexp.Deriving.tuple_error "shape_of_sexp" 2 v1)
+    | Core.Sexp.List [Core.Sexp.Atom "Label"; v0; v1] ->
+      Label (Core.Sexp.string_of_sexp_exn v0, color_of_sexp_exn v1)
+    | _ ->
+      Core.Sexp.Deriving.variant_error
+        "shape_of_sexp"
+        []
+        ["Circle"; "Rect"; "Segment"; "Label"]
+        sexp
+
+  let shape_of_sexp sexp = Core.Sexp.Deriving.catch shape_of_sexp_exn sexp
+end%inline
+
+let%expect_test "constructors with arguments are lists" =
+  round_trip sexp_of_shape shape_of_sexp (Circle 3);
+  round_trip sexp_of_shape shape_of_sexp (Rect (2, -1));
+  round_trip sexp_of_shape shape_of_sexp (Segment ((0, 0), (1, 2)));
+  round_trip sexp_of_shape shape_of_sexp (Label ("two words", Green));
+  [%expect {|
+    (Circle 3)
+    (Rect 2 -1)
+    (Segment (0 0) (1 2))
+    (Label "two words" Green)
+    |}]
+
+let%expect_test "constructor argument errors" =
+  parse sexp_of_shape shape_of_sexp "(rect 1 2)";
+  parse sexp_of_shape shape_of_sexp "Circle";
+  parse sexp_of_shape shape_of_sexp "(Rect 1)";
+  parse sexp_of_shape shape_of_sexp "(Rect 1 2 3)";
+  parse sexp_of_shape shape_of_sexp "(Circle x)";
+  parse sexp_of_shape shape_of_sexp "(Segment (0 0) (1))";
+  parse sexp_of_shape shape_of_sexp "(Label hi Purple)";
+  [%expect {|
+    (Rect 1 2)
+    Error shape_of_sexp: this constructor requires arguments: Circle
+    Error shape_of_sexp: sum tag "Rect" has incorrect number of arguments: (Rect 1)
+    Error shape_of_sexp: sum tag "Rect" has incorrect number of arguments: (Rect 1 2 3)
+    Error int_of_sexp: integer needed: x
+    Error shape_of_sexp: tuple of size 2 expected: (1)
+    Error color_of_sexp: unexpected variant constructor: Purple
+    |}]
+
+type point = {x : int; y : int}
+
+include%inline .~(Core.Sexp.derive (type point))
+  let sexp_of_point v =
+    Core.Sexp.List [
+      Core.Sexp.Deriving.field "x" (Core.Sexp.sexp_of_int v.x);
+      Core.Sexp.Deriving.field "y" (Core.Sexp.sexp_of_int v.y);
+    ]
+
+  let point_of_sexp_exn sexp =
+    match Core.Sexp.Deriving.record_fields "point_of_sexp" ["x"; "y"] sexp with
+    | [x; y] ->
+      {x = Core.Sexp.int_of_sexp_exn x; y = Core.Sexp.int_of_sexp_exn y}
+
+  let point_of_sexp sexp = Core.Sexp.Deriving.catch point_of_sexp_exn sexp
+end%inline
+
+let%expect_test "records are lists of fields" =
+  round_trip sexp_of_point point_of_sexp {x = 1; y = 2};
+  parse sexp_of_point point_of_sexp "((y 2) (x 1))";
+  [%expect {|
+    ((x 1) (y 2))
+    ((x 1) (y 2))
+    |}]
+
+let%expect_test "record errors" =
+  parse sexp_of_point point_of_sexp "a";
+  parse sexp_of_point point_of_sexp "((x 1))";
+  parse sexp_of_point point_of_sexp "()";
+  parse sexp_of_point point_of_sexp "((x 1) (y 2) (z 3) (w 4))";
+  parse sexp_of_point point_of_sexp "((x 1) (x 2) (y 3))";
+  parse sexp_of_point point_of_sexp "((x 1 2) (y 3))";
+  parse sexp_of_point point_of_sexp "((x 1) y)";
+  parse sexp_of_point point_of_sexp "((x 1) (y two))";
+  [%expect {|
+    Error point_of_sexp: list instead of atom for record expected: a
+    Error point_of_sexp: the following record elements were undefined: y: ((x 1))
+    Error point_of_sexp: the following record elements were undefined: x y: ()
+    Error point_of_sexp: extra fields: z w: ((x 1)(y 2)(z 3)(w 4))
+    Error point_of_sexp: duplicate fields: x: ((x 1)(x 2)(y 3))
+    Error point_of_sexp: record conversion: only pairs expected, their first element must be an atom: ((x 1 2)(y 3))
+    Error point_of_sexp: record conversion: only pairs expected, their first element must be an atom: ((x 1)y)
+    Error int_of_sexp: integer needed: two
+    |}]
+
+(* Fields of other derived types, of Core's types, and of containers. *)
+type item = {
+  name : string;
+  at : point;
+  shape : shape;
+  tags : list[string];
+  note : option[string];
+  status : result[unit, string];
+  flags : bool * char;
+  raw : Core.Sexp.t;
+}
+
+include%inline .~(Core.Sexp.derive (type item))
+  let sexp_of_item v =
+    Core.Sexp.List [
+      Core.Sexp.Deriving.field "name" (Core.Sexp.sexp_of_string v.name);
+      Core.Sexp.Deriving.field "at" (sexp_of_point v.at);
+      Core.Sexp.Deriving.field "shape" (sexp_of_shape v.shape);
+      Core.Sexp.Deriving.field
+        "tags"
+        (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_string v.tags);
+      Core.Sexp.Deriving.field
+        "note"
+        (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_string v.note);
+      Core.Sexp.Deriving.field
+        "status"
+        (Core.Sexp.sexp_of_result
+           Core.Sexp.sexp_of_unit
+           Core.Sexp.sexp_of_string
+           v.status);
+      Core.Sexp.Deriving.field
+        "flags"
+        (match v.flags with
+         | v6_0, v6_1 ->
+           Core.Sexp.List [
+             Core.Sexp.sexp_of_bool v6_0;
+             Core.Sexp.sexp_of_char v6_1;
+           ]);
+      Core.Sexp.Deriving.field "raw" v.raw;
+    ]
+
+  let item_of_sexp_exn sexp =
+    match
+      Core.Sexp.Deriving.record_fields
+        "item_of_sexp"
+        ["name"; "at"; "shape"; "tags"; "note"; "status"; "flags"; "raw"]
+        sexp
+    with
+    | [name; at; shape; tags; note; status; flags; raw] ->
+      {
+        name = Core.Sexp.string_of_sexp_exn name;
+        at = point_of_sexp_exn at;
+        shape = shape_of_sexp_exn shape;
+        tags = Core.Sexp.list_of_sexp_exn Core.Sexp.string_of_sexp tags;
+        note = Core.Sexp.option_of_sexp_exn Core.Sexp.string_of_sexp note;
+        status =
+          Core.Sexp.result_of_sexp_exn
+            Core.Sexp.unit_of_sexp
+            Core.Sexp.string_of_sexp
+            status;
+        flags =
+          match flags with
+          | Core.Sexp.List [flags_0; flags_1] ->
+            (Core.Sexp.bool_of_sexp_exn flags_0,
+             Core.Sexp.char_of_sexp_exn flags_1)
+          | _ -> Core.Sexp.Deriving.tuple_error "item_of_sexp" 2 flags;
+        raw = raw;
+      }
+
+  let item_of_sexp sexp = Core.Sexp.Deriving.catch item_of_sexp_exn sexp
+end%inline
+
+let item = {
+  name = "box";
+  at = {x = 0; y = 5};
+  shape = Rect (3, 4);
+  tags = ["big"; "red"];
+  note = None;
+  status = Ok ();
+  flags = (true, 'c');
+  raw = Core.Sexp.List [Core.Sexp.Atom "any"];
+}
+
+let%expect_test "nested types" =
+  round_trip sexp_of_item item_of_sexp item;
+  round_trip
+    sexp_of_item
+    item_of_sexp
+    {item with note = Some "fragile"; status = Error "lost"; tags = []};
+  [%expect {|
+    ((name box) (at ((x 0) (y 5))) (shape (Rect 3 4)) (tags (big red)) (note ())
+     (status (Ok ())) (flags (true c)) (raw (any)))
+    ((name box) (at ((x 0) (y 5))) (shape (Rect 3 4)) (tags ()) (note (fragile))
+     (status (Error lost)) (flags (true c)) (raw (any)))
+    |}]
+
+let%expect_test "errors within fields are of the innermost failing sexp" =
+  parse
+    sexp_of_item
+    item_of_sexp
+    "((name box) (at ((x 0) (y 5))) (shape (Rect 3 four)) (tags ()) (note ()) (status (Ok ())) (flags (true c)) (raw ()))";
+  parse
+    sexp_of_item
+    item_of_sexp
+    "((name box) (at ((x 0) (y 5))) (shape (Rect 3 4)) (tags (a (b))) (note ()) (status (Ok ())) (flags (true c)) (raw ()))";
+  [%expect {|
+    Error int_of_sexp: integer needed: four
+    Error string_of_sexp: atom needed: (b)
+    |}]
+
+let%expect_test "the _exn conversion raises Of_sexp_error" =
+  (match point_of_sexp_exn (Core.Sexp.of_string_exn "((x 1) (y 2))") with
+   | p -> print_sexp (sexp_of_point p));
+  (match point_of_sexp_exn (Core.Sexp.of_string_exn "((x 1))") with
+   | p -> print_sexp (sexp_of_point p)
+   | exception Core.Sexp.Of_sexp_error e -> print_error e);
+  [%expect {|
+    ((x 1) (y 2))
+    Error point_of_sexp: the following record elements were undefined: y: ((x 1))
+    |}]
+
+(* Parameterised types take the conversions of their parameters first. *)
+type labelled['a] = {label : string; value : 'a}
+
+include%inline .~(Core.Sexp.derive (type labelled['a]))
+  let sexp_of_labelled _of_a v =
+    Core.Sexp.List [
+      Core.Sexp.Deriving.field "label" (Core.Sexp.sexp_of_string v.label);
+      Core.Sexp.Deriving.field "value" (_of_a v.value);
+    ]
+
+  let labelled_of_sexp_exn _of_a sexp =
+    match
+      Core.Sexp.Deriving.record_fields
+        "labelled_of_sexp"
+        ["label"; "value"]
+        sexp
+    with
+    | [label; value] ->
+      {
+        label = Core.Sexp.string_of_sexp_exn label;
+        value = Core.Sexp.of_sexp_exn _of_a value;
+      }
+
+  let labelled_of_sexp _of_a sexp =
+    Core.Sexp.Deriving.catch (labelled_of_sexp_exn _of_a) sexp
+end%inline
+
+type either['a, 'b] = Left of 'a | Right of 'b
+
+include%inline .~(Core.Sexp.derive (type either['a, 'b]))
+  let sexp_of_either _of_a _of_b v =
+    match v with
+    | Left v0 -> Core.Sexp.List [Core.Sexp.Atom "Left"; _of_a v0]
+    | Right v0 -> Core.Sexp.List [Core.Sexp.Atom "Right"; _of_b v0]
+
+  let either_of_sexp_exn _of_a _of_b sexp =
+    match Core.Sexp.Deriving.capitalize sexp with
+    | Core.Sexp.List [Core.Sexp.Atom "Left"; v0] ->
+      Left (Core.Sexp.of_sexp_exn _of_a v0)
+    | Core.Sexp.List [Core.Sexp.Atom "Right"; v0] ->
+      Right (Core.Sexp.of_sexp_exn _of_b v0)
+    | _ ->
+      Core.Sexp.Deriving.variant_error
+        "either_of_sexp"
+        []
+        ["Left"; "Right"]
+        sexp
+
+  let either_of_sexp _of_a _of_b sexp =
+    Core.Sexp.Deriving.catch (either_of_sexp_exn _of_a _of_b) sexp
+end%inline
+
+let%expect_test "parameterised types" =
+  let sexp_of l =
+    sexp_of_labelled (sexp_of_either Core.Sexp.sexp_of_int sexp_of_color) l
+  in
+  let of_sexp s =
+    labelled_of_sexp (either_of_sexp Core.Sexp.int_of_sexp color_of_sexp) s
+  in
+  round_trip sexp_of of_sexp {label = "left"; value = Left 1};
+  round_trip sexp_of of_sexp {label = "right"; value = Right Blue};
+  parse sexp_of of_sexp "((label l) (value (Right 1)))";
+  [%expect {|
+    ((label left) (value (Left 1)))
+    ((label right) (value (Right Blue)))
+    Error color_of_sexp: unexpected variant constructor: 1
+    |}]
+
+(* Recursive types: the conversions are recursive, as lets are. *)
+type tree['a] = Leaf | Node of tree['a] * 'a * tree['a]
+
+include%inline .~(Core.Sexp.derive (type tree['a]))
+  let sexp_of_tree _of_a v =
+    match v with
+    | Leaf -> Core.Sexp.Atom "Leaf"
+    | Node (v0, v1, v2) ->
+      Core.Sexp.List [
+        Core.Sexp.Atom "Node";
+        sexp_of_tree _of_a v0;
+        _of_a v1;
+        sexp_of_tree _of_a v2;
+      ]
+
+  let tree_of_sexp_exn _of_a sexp =
+    match Core.Sexp.Deriving.capitalize sexp with
+    | Core.Sexp.Atom "Leaf" -> Leaf
+    | Core.Sexp.List [Core.Sexp.Atom "Node"; v0; v1; v2] ->
+      Node
+        (tree_of_sexp_exn _of_a v0,
+         Core.Sexp.of_sexp_exn _of_a v1,
+         tree_of_sexp_exn _of_a v2)
+    | _ ->
+      Core.Sexp.Deriving.variant_error "tree_of_sexp" ["Leaf"] ["Node"] sexp
+
+  let tree_of_sexp _of_a sexp =
+    Core.Sexp.Deriving.catch (tree_of_sexp_exn _of_a) sexp
+end%inline
+
+let%expect_test "recursive types" =
+  let leaf x = Node (Leaf, x, Leaf) in
+  round_trip
+    (sexp_of_tree Core.Sexp.sexp_of_string)
+    (tree_of_sexp Core.Sexp.string_of_sexp)
+    (Node (leaf "a", "b", Node (Leaf, "c", leaf "d")));
+  parse
+    (sexp_of_tree Core.Sexp.sexp_of_int)
+    (tree_of_sexp Core.Sexp.int_of_sexp)
+    "(Node Leaf 1 (Node Leaf x Leaf))";
+  [%expect {|
+    (Node (Node Leaf a Leaf) b (Node Leaf c (Node Leaf d Leaf)))
+    Error int_of_sexp: integer needed: x
+    |}]
+
+(* Mutually recursive types are derived by one include, so that each's
+   conversions see the other's. *)
+type expr = Num of int | Block of list[stmt]
+type stmt = {title : option[string]; body : expr}
+
+include%inline .~(Core.List.append
+                    (Core.Sexp.derive (type expr))
+                    (Core.Sexp.derive (type stmt)))
+  let sexp_of_expr v =
+    match v with
+    | Num v0 -> Core.Sexp.List [Core.Sexp.Atom "Num"; Core.Sexp.sexp_of_int v0]
+    | Block v0 ->
+      Core.Sexp.List [
+        Core.Sexp.Atom "Block";
+        Core.Sexp.sexp_of_list sexp_of_stmt v0;
+      ]
+
+  let expr_of_sexp_exn sexp =
+    match Core.Sexp.Deriving.capitalize sexp with
+    | Core.Sexp.List [Core.Sexp.Atom "Num"; v0] ->
+      Num (Core.Sexp.int_of_sexp_exn v0)
+    | Core.Sexp.List [Core.Sexp.Atom "Block"; v0] ->
+      Block (Core.Sexp.list_of_sexp_exn stmt_of_sexp v0)
+    | _ ->
+      Core.Sexp.Deriving.variant_error "expr_of_sexp" [] ["Num"; "Block"] sexp
+
+  let expr_of_sexp sexp = Core.Sexp.Deriving.catch expr_of_sexp_exn sexp
+
+  let sexp_of_stmt v =
+    Core.Sexp.List [
+      Core.Sexp.Deriving.field
+        "title"
+        (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_string v.title);
+      Core.Sexp.Deriving.field "body" (sexp_of_expr v.body);
+    ]
+
+  let stmt_of_sexp_exn sexp =
+    match
+      Core.Sexp.Deriving.record_fields "stmt_of_sexp" ["title"; "body"] sexp
+    with
+    | [title; body] ->
+      {
+        title = Core.Sexp.option_of_sexp_exn Core.Sexp.string_of_sexp title;
+        body = expr_of_sexp_exn body;
+      }
+
+  let stmt_of_sexp sexp = Core.Sexp.Deriving.catch stmt_of_sexp_exn sexp
+end%inline
+
+let%expect_test "mutually recursive types" =
+  round_trip
+    sexp_of_expr
+    expr_of_sexp
+    (Block [{title = Some "a"; body = Num 1}; {title = None; body = Block []}]);
+  [%expect {| (Block (((title (a)) (body (Num 1))) ((title ()) (body (Block ()))))) |}]
+
+(* Aliases convert as the type they stand for. *)
+type id = int
+type points = list[point]
+type quad = int * string * bool * char
+
+include%inline .~(Core.List.concat
+                    [
+                      Core.Sexp.derive (type id);
+                      Core.Sexp.derive (type points);
+                      Core.Sexp.derive (type quad);
+                    ])
+  let sexp_of_id v = Core.Sexp.sexp_of_int v
+  let id_of_sexp_exn sexp = Core.Sexp.int_of_sexp_exn sexp
+  let id_of_sexp sexp = Core.Sexp.int_of_sexp sexp
+  let sexp_of_points v = Core.Sexp.sexp_of_list sexp_of_point v
+  let points_of_sexp_exn sexp = Core.Sexp.list_of_sexp_exn point_of_sexp sexp
+  let points_of_sexp sexp = Core.Sexp.list_of_sexp point_of_sexp sexp
+
+  let sexp_of_quad v =
+    match v with
+    | v0, v1, v2, v3 ->
+      Core.Sexp.List [
+        Core.Sexp.sexp_of_int v0;
+        Core.Sexp.sexp_of_string v1;
+        Core.Sexp.sexp_of_bool v2;
+        Core.Sexp.sexp_of_char v3;
+      ]
+
+  let quad_of_sexp_exn sexp =
+    match sexp with
+    | Core.Sexp.List [v0; v1; v2; v3] ->
+      (Core.Sexp.int_of_sexp_exn v0,
+       Core.Sexp.string_of_sexp_exn v1,
+       Core.Sexp.bool_of_sexp_exn v2,
+       Core.Sexp.char_of_sexp_exn v3)
+    | _ -> Core.Sexp.Deriving.tuple_error "quad_of_sexp" 4 sexp
+
+  let quad_of_sexp sexp = Core.Sexp.Deriving.catch quad_of_sexp_exn sexp
+end%inline
+
+let%expect_test "aliases" =
+  round_trip sexp_of_id id_of_sexp 7;
+  round_trip sexp_of_points points_of_sexp [{x = 1; y = 2}; {x = 3; y = 4}];
+  round_trip sexp_of_quad quad_of_sexp (1, "b", false, 'd');
+  parse sexp_of_quad quad_of_sexp "(1 b false)";
+  parse sexp_of_id id_of_sexp "(7)";
+  [%expect {|
+    7
+    (((x 1) (y 2)) ((x 3) (y 4)))
+    (1 b false d)
+    Error quad_of_sexp: tuple of size 4 expected: (1 b false)
+    Error int_of_sexp: atom needed: (7)
+    |}]
+
+(* Polymorphic variants, as ppx_sexp_conv's: a tag's argument is one value. *)
+type move = [`Stop | `Go of int | `Turn of int * color]
+
+include%inline .~(Core.Sexp.derive (type move))
+  let sexp_of_move v =
+    match v with
+    | `Stop -> Core.Sexp.Atom "Stop"
+    | `Go v0 -> Core.Sexp.List [Core.Sexp.Atom "Go"; Core.Sexp.sexp_of_int v0]
+    | `Turn (v0_0, v0_1) ->
+      Core.Sexp.List [
+        Core.Sexp.Atom "Turn";
+        Core.Sexp.List [Core.Sexp.sexp_of_int v0_0; sexp_of_color v0_1];
+      ]
+
+  let move_of_sexp_exn sexp =
+    match sexp with
+    | Core.Sexp.Atom "Stop" -> `Stop
+    | Core.Sexp.List [Core.Sexp.Atom "Go"; v0] ->
+      `Go (Core.Sexp.int_of_sexp_exn v0)
+    | Core.Sexp.List [Core.Sexp.Atom "Turn"; v0] ->
+      `Turn
+        (match v0 with
+         | Core.Sexp.List [v0_0; v0_1] ->
+           (Core.Sexp.int_of_sexp_exn v0_0, color_of_sexp_exn v0_1)
+         | _ -> Core.Sexp.Deriving.tuple_error "move_of_sexp" 2 v0)
+    | _ ->
+      Core.Sexp.Deriving.poly_variant_error
+        "move_of_sexp"
+        ["Stop"]
+        ["Go"; "Turn"]
+        sexp
+
+  let move_of_sexp sexp = Core.Sexp.Deriving.catch move_of_sexp_exn sexp
+end%inline
+
+let%expect_test "polymorphic variants" =
+  round_trip sexp_of_move move_of_sexp `Stop;
+  round_trip sexp_of_move move_of_sexp (`Go 3);
+  round_trip sexp_of_move move_of_sexp (`Turn ((90, Red)));
+  parse sexp_of_move move_of_sexp "(Turn 90 Red)";
+  parse sexp_of_move move_of_sexp "Go";
+  [%expect {|
+    Stop
+    (Go 3)
+    (Turn (90 Red))
+    Error move_of_sexp: polymorphic variant tag "Turn" has incorrect number of arguments: (Turn 90 Red)
+    Error move_of_sexp: polymorphic variant tag takes an argument: Go
+    |}]
+
+(* Types of other modules are converted by the conversions of those modules,
+   by their path from the derived type's module. *)
+module Geometry = struct
+  type vec = {dx : int; dy : int}
+
+  include%inline .~(Core.Sexp.derive (type vec))
+    let sexp_of_vec v =
+      Core.Sexp.List [
+        Core.Sexp.Deriving.field "dx" (Core.Sexp.sexp_of_int v.dx);
+        Core.Sexp.Deriving.field "dy" (Core.Sexp.sexp_of_int v.dy);
+      ]
+
+    let vec_of_sexp_exn sexp =
+      match
+        Core.Sexp.Deriving.record_fields "vec_of_sexp" ["dx"; "dy"] sexp
+      with
+      | [dx; dy] ->
+        {dx = Core.Sexp.int_of_sexp_exn dx; dy = Core.Sexp.int_of_sexp_exn dy}
+
+    let vec_of_sexp sexp = Core.Sexp.Deriving.catch vec_of_sexp_exn sexp
+  end%inline
+end
+
+type step = {by : Geometry.vec; times : int}
+
+include%inline .~(Core.Sexp.derive (type step))
+  let sexp_of_step v =
+    Core.Sexp.List [
+      Core.Sexp.Deriving.field "by" (Geometry.sexp_of_vec v.by);
+      Core.Sexp.Deriving.field "times" (Core.Sexp.sexp_of_int v.times);
+    ]
+
+  let step_of_sexp_exn sexp =
+    match
+      Core.Sexp.Deriving.record_fields "step_of_sexp" ["by"; "times"] sexp
+    with
+    | [by; times] ->
+      {
+        by = Geometry.vec_of_sexp_exn by;
+        times = Core.Sexp.int_of_sexp_exn times;
+      }
+
+  let step_of_sexp sexp = Core.Sexp.Deriving.catch step_of_sexp_exn sexp
+end%inline
+
+let%expect_test "types of other modules" =
+  round_trip
+    sexp_of_step
+    step_of_sexp
+    {by = {Geometry.dx = 1; dy = -1}; times = 2};
+  [%expect {| ((by ((dx 1) (dy -1))) (times 2)) |}]
+
+(* The generated code refers to Core and the prelude by refs, so a program's
+   own [Core], [Sexp], [List], [Some], [Cons], [Ok], [raise] etc. where it is
+   spliced don't change its meaning; types it refers to by name, such as
+   [shape] and [point], are those where it is spliced. *)
+module Shadowing = struct
+  module Core = struct end
+
+  module Sexp = struct end
+
+  module List = struct end
+
+  module Deriving = struct end
+
+  type mine = Some | None | Ok | Error | Cons | Nil | Atom
+  exception Of_sexp_error
+
+  let raise x = x
+  let of_sexp_exn x = x
+  let sexp_of_int x = x
+
+  type t = {
+    shape : shape;
+    count : int;
+    maybe : .option[.list[int]];
+    either : either[point, .result[string, unit]];
+  }
+
+  include%inline .~(.Core.Sexp.derive (type t))
+    let sexp_of_t v =
+      .Core.Sexp.List [
+        .Core.Sexp.Deriving.field "shape" (sexp_of_shape v.shape);
+        .Core.Sexp.Deriving.field "count" (.Core.Sexp.sexp_of_int v.count);
+        .Core.Sexp.Deriving.field
+          "maybe"
+          (.Core.Sexp.sexp_of_option
+             (.Core.Sexp.sexp_of_list .Core.Sexp.sexp_of_int)
+             v.maybe);
+        .Core.Sexp.Deriving.field
+          "either"
+          (sexp_of_either
+             sexp_of_point
+             (.Core.Sexp.sexp_of_result
+                .Core.Sexp.sexp_of_string
+                .Core.Sexp.sexp_of_unit)
+             v.either);
+      ]
+
+    let t_of_sexp_exn sexp =
+      match
+        .Core.Sexp.Deriving.record_fields
+          "t_of_sexp"
+          ["shape"; "count"; "maybe"; "either"]
+          sexp
+      with
+      | [shape; count; maybe; either] ->
+        {
+          shape = shape_of_sexp_exn shape;
+          count = .Core.Sexp.int_of_sexp_exn count;
+          maybe =
+            .Core.Sexp.option_of_sexp_exn
+              (.Core.Sexp.list_of_sexp .Core.Sexp.int_of_sexp)
+              maybe;
+          either =
+            either_of_sexp_exn
+              point_of_sexp
+              (.Core.Sexp.result_of_sexp
+                 .Core.Sexp.string_of_sexp
+                 .Core.Sexp.unit_of_sexp)
+              either;
+        }
+
+    let t_of_sexp sexp = .Core.Sexp.Deriving.catch t_of_sexp_exn sexp
+  end%inline
+
+  let%expect_test "shadowing at the splice" =
+    round_trip
+      sexp_of_t
+      t_of_sexp
+      {
+        shape = Circle 1;
+        count = 2;
+        maybe = .Some [3];
+        either = Right (.Error ());
+      };
+    parse
+      sexp_of_t
+      t_of_sexp
+      "((shape Circle) (count 1) (maybe ()) (either (Left ((x 1)))))";
+    [%expect {|
+      ((shape (Circle 1)) (count 2) (maybe ((3))) (either (Right (Error ()))))
+      Error shape_of_sexp: this constructor requires arguments: Circle
+      |}]
+end
+
+(* Anonymous tuples and polymorphic variants within a type are matched in
+   place. *)
+type inline = {big : int * int * int * int; dir : [`L | `R of int]}
+
+include%inline .~(Core.Sexp.derive (type inline))
+  let sexp_of_inline v =
+    Core.Sexp.List [
+      Core.Sexp.Deriving.field
+        "big"
+        (match v.big with
+         | v0_0, v0_1, v0_2, v0_3 ->
+           Core.Sexp.List [
+             Core.Sexp.sexp_of_int v0_0;
+             Core.Sexp.sexp_of_int v0_1;
+             Core.Sexp.sexp_of_int v0_2;
+             Core.Sexp.sexp_of_int v0_3;
+           ]);
+      Core.Sexp.Deriving.field
+        "dir"
+        (match v.dir with
+         | `L -> Core.Sexp.Atom "L"
+         | `R v1_0 ->
+           Core.Sexp.List [Core.Sexp.Atom "R"; Core.Sexp.sexp_of_int v1_0]);
+    ]
+
+  let inline_of_sexp_exn sexp =
+    match
+      Core.Sexp.Deriving.record_fields "inline_of_sexp" ["big"; "dir"] sexp
+    with
+    | [big; dir] ->
+      {
+        big =
+          match big with
+          | Core.Sexp.List [big_0; big_1; big_2; big_3] ->
+            (Core.Sexp.int_of_sexp_exn big_0,
+             Core.Sexp.int_of_sexp_exn big_1,
+             Core.Sexp.int_of_sexp_exn big_2,
+             Core.Sexp.int_of_sexp_exn big_3)
+          | _ -> Core.Sexp.Deriving.tuple_error "inline_of_sexp" 4 big;
+        dir =
+          match dir with
+          | Core.Sexp.Atom "L" -> `L
+          | Core.Sexp.List [Core.Sexp.Atom "R"; dir_0] ->
+            `R (Core.Sexp.int_of_sexp_exn dir_0)
+          | _ ->
+            Core.Sexp.Deriving.poly_variant_error
+              "inline_of_sexp"
+              ["L"]
+              ["R"]
+              dir;
+      }
+
+  let inline_of_sexp sexp = Core.Sexp.Deriving.catch inline_of_sexp_exn sexp
+end%inline
+
+let%expect_test "anonymous tuples and polymorphic variants" =
+  round_trip sexp_of_inline inline_of_sexp {big = (1, 2, 3, 4); dir = `R 5};
+  parse sexp_of_inline inline_of_sexp "((big (1 2 3)) (dir L))";
+  parse sexp_of_inline inline_of_sexp "((big (1 2 3 4)) (dir (L)))";
+  [%expect {|
+    ((big (1 2 3 4)) (dir (R 5)))
+    Error inline_of_sexp: tuple of size 4 expected: (1 2 3)
+    Error inline_of_sexp: polymorphic variant does not take arguments: (L)
+    |}]
+
+(* A parameter's conversion doesn't capture that of a type of its name. *)
+type a = A
+
+include%inline .~(Core.Sexp.derive (type a))
+  let sexp_of_a v = match v with A -> Core.Sexp.Atom "A"
+
+  let a_of_sexp_exn sexp =
+    match Core.Sexp.Deriving.capitalize sexp with
+    | Core.Sexp.Atom "A" -> A
+    | _ -> Core.Sexp.Deriving.variant_error "a_of_sexp" ["A"] [] sexp
+
+  let a_of_sexp sexp = Core.Sexp.Deriving.catch a_of_sexp_exn sexp
+end%inline
+
+type with_a['a] = {an_a : a; param : 'a}
+
+include%inline .~(Core.Sexp.derive (type with_a['a]))
+  let sexp_of_with_a _of_a v =
+    Core.Sexp.List [
+      Core.Sexp.Deriving.field "an_a" (sexp_of_a v.an_a);
+      Core.Sexp.Deriving.field "param" (_of_a v.param);
+    ]
+
+  let with_a_of_sexp_exn _of_a sexp =
+    match
+      Core.Sexp.Deriving.record_fields "with_a_of_sexp" ["an_a"; "param"] sexp
+    with
+    | [an_a; param] ->
+      {an_a = a_of_sexp_exn an_a; param = Core.Sexp.of_sexp_exn _of_a param}
+
+  let with_a_of_sexp _of_a sexp =
+    Core.Sexp.Deriving.catch (with_a_of_sexp_exn _of_a) sexp
+end%inline
+
+let%expect_test "parameters named as types" =
+  round_trip
+    (sexp_of_with_a Core.Sexp.sexp_of_int)
+    (with_a_of_sexp Core.Sexp.int_of_sexp)
+    {an_a = A; param = 1};
+  [%expect {| ((an_a A) (param 1)) |}]
+
+(* Fields named as conversions are bound as [v0], [v1], ..., even one named
+   [v0]. *)
+type odd = {sexp_of_x : int; v0 : int; v1 : string}
+
+include%inline .~(Core.Sexp.derive (type odd))
+  let sexp_of_odd v =
+    Core.Sexp.List [
+      Core.Sexp.Deriving.field "sexp_of_x" (Core.Sexp.sexp_of_int v.sexp_of_x);
+      Core.Sexp.Deriving.field "v0" (Core.Sexp.sexp_of_int v.v0);
+      Core.Sexp.Deriving.field "v1" (Core.Sexp.sexp_of_string v.v1);
+    ]
+
+  let odd_of_sexp_exn sexp =
+    match
+      Core.Sexp.Deriving.record_fields
+        "odd_of_sexp"
+        ["sexp_of_x"; "v0"; "v1"]
+        sexp
+    with
+    | [v0; v1; v2] ->
+      {
+        sexp_of_x = Core.Sexp.int_of_sexp_exn v0;
+        v0 = Core.Sexp.int_of_sexp_exn v1;
+        v1 = Core.Sexp.string_of_sexp_exn v2;
+      }
+
+  let odd_of_sexp sexp = Core.Sexp.Deriving.catch odd_of_sexp_exn sexp
+end%inline
+
+let%expect_test "fields named as conversions or binders" =
+  round_trip sexp_of_odd odd_of_sexp {sexp_of_x = 1; v0 = 2; v1 = "3"};
+  [%expect {| ((sexp_of_x 1) (v0 2) (v1 3)) |}]
+
+(* Types other than the derived one are converted by the shortest path to their
+   conversions, which a local module of the same name doesn't capture. *)
+module X = struct
+  module Z = struct
+    type s = S of int
+
+    include%inline .~(Core.Sexp.derive (type s))
+      let sexp_of_s v =
+        match v with
+        | S v0 -> Core.Sexp.List [Core.Sexp.Atom "S"; Core.Sexp.sexp_of_int v0]
+
+      let s_of_sexp_exn sexp =
+        match Core.Sexp.Deriving.capitalize sexp with
+        | Core.Sexp.List [Core.Sexp.Atom "S"; v0] ->
+          S (Core.Sexp.int_of_sexp_exn v0)
+        | _ -> Core.Sexp.Deriving.variant_error "s_of_sexp" [] ["S"] sexp
+
+      let s_of_sexp sexp = Core.Sexp.Deriving.catch s_of_sexp_exn sexp
+    end%inline
+  end
+
+  module Y = struct
+    module Z = struct end
+
+    type u = U
+    type t = {s : .Core_derive_sexp.X.Z.s; u : u; color : color}
+
+    include%inline .~(Core.Sexp.derive (type u))
+      let sexp_of_u v = match v with U -> Core.Sexp.Atom "U"
+
+      let u_of_sexp_exn sexp =
+        match Core.Sexp.Deriving.capitalize sexp with
+        | Core.Sexp.Atom "U" -> U
+        | _ -> Core.Sexp.Deriving.variant_error "u_of_sexp" ["U"] [] sexp
+
+      let u_of_sexp sexp = Core.Sexp.Deriving.catch u_of_sexp_exn sexp
+    end%inline
+
+    include%inline .~(Core.Sexp.derive (type t))
+      let sexp_of_t v =
+        Core.Sexp.List [
+          Core.Sexp.Deriving.field "s" (X.Z.sexp_of_s v.s);
+          Core.Sexp.Deriving.field "u" (sexp_of_u v.u);
+          Core.Sexp.Deriving.field "color" (sexp_of_color v.color);
+        ]
+
+      let t_of_sexp_exn sexp =
+        match
+          Core.Sexp.Deriving.record_fields "t_of_sexp" ["s"; "u"; "color"] sexp
+        with
+        | [s; u; color] ->
+          {
+            s = X.Z.s_of_sexp_exn s;
+            u = u_of_sexp_exn u;
+            color = color_of_sexp_exn color;
+          }
+
+      let t_of_sexp sexp = Core.Sexp.Deriving.catch t_of_sexp_exn sexp
+    end%inline
+  end
+end
+
+let%expect_test "types of other modules" =
+  round_trip
+    X.Y.sexp_of_t
+    X.Y.t_of_sexp
+    {X.Y.s = X.Z.S 1; u = X.Y.U; color = Green};
+  [%expect {| ((s (S 1)) (u U) (color Green)) |}]
+
+(* An alias of a parameterised derived type. *)
+(* A conversion shadowed where the expansion is printed is named by its root
+   path. *)
+module Shadowed_conversion = struct
+  let sexp_of_color _ = Core.Sexp.Atom "shadowed"
+
+  type paint = {hue : color}
+
+  include%inline .~(Core.Sexp.derive (type paint))
+    let sexp_of_paint v =
+      Core.Sexp.List [
+        Core.Sexp.Deriving.field "hue" (Core_derive_sexp.sexp_of_color v.hue);
+      ]
+
+    let paint_of_sexp_exn sexp =
+      match Core.Sexp.Deriving.record_fields "paint_of_sexp" ["hue"] sexp with
+      | [hue] -> {hue = color_of_sexp_exn hue}
+
+    let paint_of_sexp sexp = Core.Sexp.Deriving.catch paint_of_sexp_exn sexp
+  end%inline
+
+  let%expect_test "shadowed" =
+    print_sexp (sexp_of_paint {hue = Red});
+    [%expect {| ((hue Red)) |}]
+end
+
+(* A type of another module derived from outside it. *)
+module Palette = struct
+  type swatch = {color : color; vec : Geometry.vec}
+
+  include%inline .~(Core.Sexp.derive (type swatch))
+    let sexp_of_swatch v =
+      Core.Sexp.List [
+        Core.Sexp.Deriving.field "color" (sexp_of_color v.color);
+        Core.Sexp.Deriving.field "vec" (Geometry.sexp_of_vec v.vec);
+      ]
+
+    let swatch_of_sexp_exn sexp =
+      match
+        Core.Sexp.Deriving.record_fields "swatch_of_sexp" ["color"; "vec"] sexp
+      with
+      | [color; vec] ->
+        {color = color_of_sexp_exn color; vec = Geometry.vec_of_sexp_exn vec}
+
+    let swatch_of_sexp sexp = Core.Sexp.Deriving.catch swatch_of_sexp_exn sexp
+  end%inline
+
+  type t = Swatches of list[swatch]
+end
+
+include%inline .~(Core.Sexp.derive (type Palette.t))
+  let sexp_of_t v =
+    match v with
+    | Palette.Swatches v0 ->
+      Core.Sexp.List [
+        Core.Sexp.Atom "Swatches";
+        Core.Sexp.sexp_of_list Palette.sexp_of_swatch v0;
+      ]
+
+  let t_of_sexp_exn sexp =
+    match Core.Sexp.Deriving.capitalize sexp with
+    | Core.Sexp.List [Core.Sexp.Atom "Swatches"; v0] ->
+      Palette.Swatches (Core.Sexp.list_of_sexp_exn Palette.swatch_of_sexp v0)
+    | _ -> Core.Sexp.Deriving.variant_error "t_of_sexp" [] ["Swatches"] sexp
+
+  let t_of_sexp sexp = Core.Sexp.Deriving.catch t_of_sexp_exn sexp
+end%inline
+
+let%expect_test "palette" =
+  round_trip
+    sexp_of_t
+    t_of_sexp
+    (Palette.Swatches [
+       {Palette.color = Green; vec = {Geometry.dx = 1; dy = 2}};
+     ]);
+  [%expect {| (Swatches (((color Green) (vec ((dx 1) (dy 2)))))) |}]
+
+type choice = either[int, list[string]]
+
+include%inline .~(Core.Sexp.derive (type choice))
+  let sexp_of_choice v =
+    sexp_of_either
+      Core.Sexp.sexp_of_int
+      (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_string)
+      v
+
+  let choice_of_sexp_exn sexp =
+    either_of_sexp_exn
+      Core.Sexp.int_of_sexp
+      (Core.Sexp.list_of_sexp Core.Sexp.string_of_sexp)
+      sexp
+
+  let choice_of_sexp sexp =
+    either_of_sexp
+      Core.Sexp.int_of_sexp
+      (Core.Sexp.list_of_sexp Core.Sexp.string_of_sexp)
+      sexp
+end%inline
+
+let%expect_test "aliases of parameterised types" =
+  round_trip sexp_of_choice choice_of_sexp (Right ["a"; "b"]);
+  parse sexp_of_choice choice_of_sexp "(Left x)";
+  [%expect {|
+    (Right (a b))
+    Error int_of_sexp: integer needed: x
+    |}]
+
+(* Recursive polymorphic variants. *)
+type pv = [`Leaf | `Node of pv * pv]
+
+include%inline .~(Core.Sexp.derive (type pv))
+  let sexp_of_pv v =
+    match v with
+    | `Leaf -> Core.Sexp.Atom "Leaf"
+    | `Node (v0_0, v0_1) ->
+      Core.Sexp.List [
+        Core.Sexp.Atom "Node";
+        Core.Sexp.List [sexp_of_pv v0_0; sexp_of_pv v0_1];
+      ]
+
+  let pv_of_sexp_exn sexp =
+    match sexp with
+    | Core.Sexp.Atom "Leaf" -> `Leaf
+    | Core.Sexp.List [Core.Sexp.Atom "Node"; v0] ->
+      `Node
+        (match v0 with
+         | Core.Sexp.List [v0_0; v0_1] ->
+           (pv_of_sexp_exn v0_0, pv_of_sexp_exn v0_1)
+         | _ -> Core.Sexp.Deriving.tuple_error "pv_of_sexp" 2 v0)
+    | _ ->
+      Core.Sexp.Deriving.poly_variant_error "pv_of_sexp" ["Leaf"] ["Node"] sexp
+
+  let pv_of_sexp sexp = Core.Sexp.Deriving.catch pv_of_sexp_exn sexp
+end%inline
+
+let%expect_test "recursive polymorphic variants" =
+  round_trip sexp_of_pv pv_of_sexp (`Node ((`Leaf, `Node ((`Leaf, `Leaf)))));
+  parse sexp_of_pv pv_of_sexp "(Node Leaf)";
+  parse sexp_of_pv pv_of_sexp "(Node (Leaf) Leaf)";
+  [%expect {|
+    (Node (Leaf (Node (Leaf Leaf))))
+    Error pv_of_sexp: tuple of size 2 expected: Leaf
+    Error pv_of_sexp: polymorphic variant tag "Node" has incorrect number of arguments: (Node(Leaf)Leaf)
+    |}]
+
+(* Tuples of every size, in place, with ppx_sexp_conv's error. *)
+type tuples = {two : int * string; three : bool * char * int}
+
+include%inline .~(Core.Sexp.derive (type tuples))
+  let sexp_of_tuples v =
+    Core.Sexp.List [
+      Core.Sexp.Deriving.field
+        "two"
+        (match v.two with
+         | v0_0, v0_1 ->
+           Core.Sexp.List [
+             Core.Sexp.sexp_of_int v0_0;
+             Core.Sexp.sexp_of_string v0_1;
+           ]);
+      Core.Sexp.Deriving.field
+        "three"
+        (match v.three with
+         | v1_0, v1_1, v1_2 ->
+           Core.Sexp.List [
+             Core.Sexp.sexp_of_bool v1_0;
+             Core.Sexp.sexp_of_char v1_1;
+             Core.Sexp.sexp_of_int v1_2;
+           ]);
+    ]
+
+  let tuples_of_sexp_exn sexp =
+    match
+      Core.Sexp.Deriving.record_fields "tuples_of_sexp" ["two"; "three"] sexp
+    with
+    | [two; three] ->
+      {
+        two =
+          match two with
+          | Core.Sexp.List [two_0; two_1] ->
+            (Core.Sexp.int_of_sexp_exn two_0,
+             Core.Sexp.string_of_sexp_exn two_1)
+          | _ -> Core.Sexp.Deriving.tuple_error "tuples_of_sexp" 2 two;
+        three =
+          match three with
+          | Core.Sexp.List [three_0; three_1; three_2] ->
+            (Core.Sexp.bool_of_sexp_exn three_0,
+             Core.Sexp.char_of_sexp_exn three_1,
+             Core.Sexp.int_of_sexp_exn three_2)
+          | _ -> Core.Sexp.Deriving.tuple_error "tuples_of_sexp" 3 three;
+      }
+
+  let tuples_of_sexp sexp = Core.Sexp.Deriving.catch tuples_of_sexp_exn sexp
+end%inline
+
+let%expect_test "tuple errors" =
+  round_trip
+    sexp_of_tuples
+    tuples_of_sexp
+    {two = (1, "a"); three = (true, 'c', 2)};
+  parse sexp_of_tuples tuples_of_sexp "((two (1)) (three (true c 2)))";
+  parse sexp_of_tuples tuples_of_sexp "((two (1 a)) (three x))";
+  parse sexp_of_tuples tuples_of_sexp "((two (1 a)) (three (True c 2)))";
+  [%expect {|
+    ((two (1 a)) (three (true c 2)))
+    Error tuples_of_sexp: tuple of size 2 expected: (1)
+    Error tuples_of_sexp: tuple of size 3 expected: x
+    ((two (1 a)) (three (true c 2)))
+    |}]
+
+(* Core's error types have conversions. *)
+type errors = {
+  of_sexp : Core.Sexp.Of_sexp_error.t;
+  parse : Core.Sexp.Parse_error.t;
+}
+
+include%inline .~(Core.Sexp.derive (type errors))
+  let sexp_of_errors v =
+    Core.Sexp.List [
+      Core.Sexp.Deriving.field
+        "of_sexp"
+        (Core.Sexp.Of_sexp_error.sexp_of_t v.of_sexp);
+      Core.Sexp.Deriving.field
+        "parse"
+        (Core.Sexp.Parse_error.sexp_of_t v.parse);
+    ]
+
+  let errors_of_sexp_exn sexp =
+    match
+      Core.Sexp.Deriving.record_fields
+        "errors_of_sexp"
+        ["of_sexp"; "parse"]
+        sexp
+    with
+    | [of_sexp; parse] ->
+      {
+        of_sexp = Core.Sexp.Of_sexp_error.t_of_sexp_exn of_sexp;
+        parse = Core.Sexp.Parse_error.t_of_sexp_exn parse;
+      }
+
+  let errors_of_sexp sexp = Core.Sexp.Deriving.catch errors_of_sexp_exn sexp
+end%inline
+
+let%expect_test "Core's error types" =
+  let parse_error = match Core.Sexp.of_string "(a" with Error e -> e in
+  let of_sexp_error =
+    match Core.Sexp.int_of_sexp (Core.Sexp.Atom "x") with Error e -> e
+  in
+  round_trip
+    sexp_of_errors
+    errors_of_sexp
+    {of_sexp = of_sexp_error; parse = parse_error};
+  [%expect {|
+    ((of_sexp ((message "int_of_sexp: integer needed") (sexp x)))
+     (parse
+      ((message "unclosed parentheses at end of input") (offset 2) (line 1)
+       (col 2))))
+    |}]
+
+(* A list of records in declared order, as [sexp_of] gives them, is read
+   without checking for missing, extra or duplicate fields. *)
+type row = {
+  row_id : int;
+  row_label : string;
+  score : int;
+  flag : bool;
+  mark : char;
+}
+
+include%inline .~(Core.Sexp.derive (type row))
+  let sexp_of_row v =
+    Core.Sexp.List [
+      Core.Sexp.Deriving.field "row_id" (Core.Sexp.sexp_of_int v.row_id);
+      Core.Sexp.Deriving.field
+        "row_label"
+        (Core.Sexp.sexp_of_string v.row_label);
+      Core.Sexp.Deriving.field "score" (Core.Sexp.sexp_of_int v.score);
+      Core.Sexp.Deriving.field "flag" (Core.Sexp.sexp_of_bool v.flag);
+      Core.Sexp.Deriving.field "mark" (Core.Sexp.sexp_of_char v.mark);
+    ]
+
+  let row_of_sexp_exn sexp =
+    match
+      Core.Sexp.Deriving.record_fields
+        "row_of_sexp"
+        ["row_id"; "row_label"; "score"; "flag"; "mark"]
+        sexp
+    with
+    | [row_id; row_label; score; flag; mark] ->
+      {
+        row_id = Core.Sexp.int_of_sexp_exn row_id;
+        row_label = Core.Sexp.string_of_sexp_exn row_label;
+        score = Core.Sexp.int_of_sexp_exn score;
+        flag = Core.Sexp.bool_of_sexp_exn flag;
+        mark = Core.Sexp.char_of_sexp_exn mark;
+      }
+
+  let row_of_sexp sexp = Core.Sexp.Deriving.catch row_of_sexp_exn sexp
+end%inline
+
+let rows n =
+  Core.List.init
+    n
+    (fun i ->
+       {
+         row_id = i;
+         row_label = "row";
+         score = Core.Int.mul i 2;
+         flag = true;
+         mark = 'r';
+       })
+
+let%bench "records of sexps" n in [100; 1000] =
+  let sexp = Core.Sexp.sexp_of_list sexp_of_row (rows n) in
+  Core.Sexp.list_of_sexp row_of_sexp sexp

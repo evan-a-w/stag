@@ -808,3 +808,10 @@ module Program = struct
   let to_value = To_value.program
   let of_value = Of_value.(run program)
 end
+
+let type_ref_path path =
+  let names = To_value.list To_value.string in
+  match path with
+  | `Prelude path -> To_value.con "Stag.Type_ref.Path.Prelude" [ names path ]
+  | `Program path -> To_value.con "Stag.Type_ref.Path.Program" [ names path ]
+;;

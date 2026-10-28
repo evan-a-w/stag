@@ -2,20 +2,20 @@
 
 let rev_append l acc =
   match l with
-  | Nil -> acc
+  | [] -> acc
   | Cons (x, rest) -> rev_append rest (Cons (x, acc))
 
 let split l =
   match l with
-  | Nil -> (Nil, Nil)
-  | Cons (x, Nil) -> (Cons (x, Nil), Nil)
+  | [] -> ([], [])
+  | [x] -> ([x], [])
   | Cons (x, Cons (y, rest)) ->
     match split rest with a, b -> (Cons (x, a), Cons (y, b))
 
 let merge a b =
   match (a, b) with
-  | Nil, b -> b
-  | a, Nil -> a
+  | [], b -> b
+  | a, [] -> a
   | Cons (x, xs), Cons (y, ys) ->
     match Int.le x y with
     | true -> Cons (x, merge xs b)
@@ -23,8 +23,8 @@ let merge a b =
 
 let sort l =
   match l with
-  | Nil -> Nil
-  | Cons (_, Nil) -> l
+  | [] -> []
+  | [_] -> l
   | _ -> match split l with a, b -> merge (sort a) (sort b)
 
 (* Pseudo-random, by a linear congruential generator. *)
@@ -36,17 +36,17 @@ let random_list n =
       let next = Int.rem (Int.add (Int.mul seed 1103515245) 12345) 1000003 in
       go (Int.sub n 1) next (Cons (next, acc))
   in
-  go n 42 Nil
+  go n 42 []
 
 let length l =
   match l with
-  | Nil -> 0
+  | [] -> 0
   | Cons (_, rest) -> Int.add 1 (length rest)
 
 let sorted l =
   match l with
-  | Nil -> true
-  | Cons (_, Nil) -> true
+  | [] -> true
+  | [_] -> true
   | Cons (x, Cons (y, rest)) ->
     match Int.le x y with
     | true -> sorted (Cons (y, rest))
@@ -59,7 +59,7 @@ let%bench "sort 100" = sort list_100
 
 let%bench "sort 1000" = sort list_1000
 
-let%bench "rev_append 1000" = rev_append list_1000 Nil
+let%bench "rev_append 1000" = rev_append list_1000 []
 
 let%expect_test "sort" =
   let l = sort (random_list 1000) in
