@@ -1067,6 +1067,14 @@ let type_kind t : Type_decl.Kind.t =
     let start = loc t in
     advance t;
     let e = postfix t in
+    (match peek t with
+     | Star | Arrow ->
+       fail
+         (loc t)
+         (sprintf
+            "a type splice `.~e` defines the whole type: to splice part of an \
+             alias, write it in parentheses, as in `type t = (.~e * u)`")
+     | _ -> ());
     Splice (since t start e)
   | Uident _, Dot -> Alias (type_expr t)
   | (Bar | Uident _), _ ->

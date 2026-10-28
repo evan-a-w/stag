@@ -1190,3 +1190,16 @@ let%expect_test "an expansion starts after the comments on its splice's line" =
     " "
     |}]
 ;;
+
+let%expect_test "a type splice defining a type is the whole definition" =
+  prog "type r = .~t * int";
+  prog "type r = .~t -> int";
+  prog "type r = (.~t * int)";
+  [%expect {|
+    t.stag:1:13-14: a type splice `.~e` defines the whole type: to splice part of an alias, write it in parentheses, as in `type t = (.~e * u)`
+    t.stag:1:13-15: a type splice `.~e` defines the whole type: to splice part of an alias, write it in parentheses, as in `type t = (.~e * u)`
+    ((Type
+      ((name r) (params ())
+       (kind (Alias (Tuple ((Splice (Var t ())) (Con int ()))))))))
+    |}]
+;;
