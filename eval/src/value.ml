@@ -35,6 +35,18 @@ let of_prim : Prim.Value.t -> t = function
   | String s -> String s
   | Char c -> Char c
   | Unit -> Unit
+  | String_list _ -> raise_s [%message "Value.of_prim: prims return no lists"]
+;;
+
+(* A list is [Nil] or [Cons] of an element and a list: constructors without and
+   with arguments. *)
+let string_list value =
+  let rec loop acc : t -> _ = function
+    | Construct (_, []) -> Some (Prim.Value.String_list (List.rev acc))
+    | Construct (_, [ String s; rest ]) -> loop (s :: acc) rest
+    | _ -> None
+  in
+  loop [] value
 ;;
 
 let to_prim : t -> Prim.Value.t option = function
@@ -43,8 +55,8 @@ let to_prim : t -> Prim.Value.t option = function
   | String s -> Some (String s)
   | Char c -> Some (Char c)
   | Unit -> Some Unit
+  | Construct _ as value -> string_list value
   | Tuple _
-  | Construct _
   | Record _
   | Poly_record _
   | Poly_variant _

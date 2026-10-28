@@ -49,13 +49,13 @@ let of_option o error =
 
 (* [Ok] of all the values, or the first [Error]. *)
 let all rs =
-  match rs with
-  | Nil -> Ok Nil
-  | Cons (Ok x, rest) -> (
-    match all rest with
-    | Ok xs -> Ok (Cons (x, xs))
-    | Error e -> Error e)
-  | Cons (Error e, _) -> Error e
+  let loop rs acc =
+    match rs with
+    | Nil -> Ok (List.rev acc)
+    | Cons (Ok x, rest) -> loop rest (Cons (x, acc))
+    | Cons (Error e, _) -> Error e
+  in
+  loop rs Nil
 
 let equal equal_ok equal_error r1 r2 =
   match (r1, r2) with

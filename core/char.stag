@@ -1,14 +1,14 @@
-let equal = Intrinsic.Char.equal
+let equal = Prim.Char.equal
+let code = Prim.Char.code
 let compare a b = Int.compare (code a) (code b)
-let code = Intrinsic.Char.code
 
 (* [None] unless [0 <= n <= 255]. *)
 let of_code n =
   match (Int.ge n 0, Int.le n 255) with
-  | (true, true) -> Some (Intrinsic.Char.of_code n)
+  | (true, true) -> Some (Prim.Char.of_code n)
   | _ -> None
 
-let to_string = Intrinsic.Char.to_string
+let to_string = Prim.Char.to_string
 
 let is_between low high c =
   match Int.ge (code c) (code low) with
@@ -42,3 +42,13 @@ let is_whitespace c =
 
 (* Printable ASCII, from space to [~]. *)
 let is_print c = is_between ' ' '~' c
+
+let lowercase c =
+  match is_uppercase c with
+  | true -> Prim.Char.of_code (Int.add (code c) 32)
+  | false -> c
+
+let uppercase c =
+  match is_lowercase c with
+  | true -> Prim.Char.of_code (Int.sub (code c) 32)
+  | false -> c

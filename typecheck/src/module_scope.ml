@@ -654,11 +654,11 @@ let find_value t path ~loc : (Value.t, _) Result.t =
     in
     let intrinsic = if in_prelude then Intrinsic.find path else None in
     (* The prelude reaches the prims it shadows (eg. [Core.String] hides
-       [String.length]) as [Intrinsic.String.length]. *)
+       [String.length]) as [Prim.String.length]. *)
     let prim =
       match Prim.find path, (path :> string list) with
       | Some prim, _ -> Some prim
-      | None, "Intrinsic" :: (_ :: _ as prim) when in_prelude ->
+      | None, "Prim" :: (_ :: _ :: _ as prim) when in_prelude ->
         Prim.find (Path.of_list_exn prim)
       | None, _ -> None
     in

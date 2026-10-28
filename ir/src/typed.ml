@@ -68,8 +68,11 @@ module Ident = struct
       { name : string
       ; stamp : int
       }
-    [@@deriving compare, hash]
+    [@@deriving compare]
 
+    (* Stamps are rarely shared, and hashing names is costly. *)
+    let hash_fold_t state t = Int.hash_fold_t state t.stamp
+    let hash t = Int.hash t.stamp
     let sexp_of_t t = Sexp.Atom [%string "%{t.name}/%{t.stamp#Int}"]
   end
 

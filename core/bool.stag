@@ -1,5 +1,5 @@
-let not = Intrinsic.Bool.not
-let equal = Intrinsic.Bool.equal
+let not = Prim.Bool.not
+let equal = Prim.Bool.equal
 
 let compare a b =
   match (a, b) with

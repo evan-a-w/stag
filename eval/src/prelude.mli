@@ -11,8 +11,9 @@ open! Import
 (** The file of the prelude's locations. *)
 val path : string
 
-(** The directory of [Core]'s files, in their locations, eg. [<core>/list.stag]. *)
-val core_dir : string
+(** The contents of a file of the prelude's or [Core]'s locations (eg.
+    [<core>/list.stag]). *)
+val source : string -> string option
 
 (** Parsed once. *)
 val toplevels : Syntax.Toplevel.t list Lazy.t

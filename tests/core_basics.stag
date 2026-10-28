@@ -1,7 +1,7 @@
 (* [Core.Int], [Core.Bool] and [Core.Char]. *)
 
 let print_bool b = print_endline (Core.Bool.to_string b)
-let print_sexp t = print_endline (Core.Sexp.to_string t)
+let print_sexp t = print_endline (Core.Sexp.to_string_hum t)
 let print_int_option o = print_sexp (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_int o)
 
 let print_ints l =
@@ -19,7 +19,7 @@ let%expect_test "Int: the prims" =
   print_bool (Core.Int.gt 1 2);
   print_bool (Core.Int.ge 1 2);
   print_endline (Core.Int.to_string -12);
-  print_int (Core.Int.of_string "-12");
+  print_int_option (Core.Int.of_string "-12");
   [%expect {|
     (10 4 21 2 1 -7)
     (-1 0 1)
@@ -29,7 +29,7 @@ let%expect_test "Int: the prims" =
     false
     false
     -12
-    -12
+    (-12)
     |}]
 
 let%expect_test "Int: succ, pred, abs, min, max, bounds" =
@@ -44,11 +44,11 @@ let%expect_test "Int: succ, pred, abs, min, max, bounds" =
     -4611686018427387904
     |}]
 
-let%expect_test "Int: of_string_opt" =
+let%expect_test "Int: of_string" =
   let test s =
     print_string s;
     print_string " -> ";
-    print_int_option (Core.Int.of_string_opt s)
+    print_int_option (Core.Int.of_string s)
   in
   test "0";
   test "42";

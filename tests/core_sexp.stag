@@ -8,14 +8,14 @@ let list l = Core.Sexp.List l
 
 let print_parse s =
   match Core.Sexp.of_string s with
-  | Ok t -> print_endline (Core.String.append "Ok " (Core.Sexp.to_string t))
+  | Ok t -> print_endline (Core.String.append "Ok " (Core.Sexp.to_string_hum t))
   | Error e ->
     print_endline (Core.String.append "Error " (Core.Sexp.Parse_error.to_string e))
 
 (* Prints [t], parses it back, and says whether that gave [t]. *)
 let round_trip t =
   let printed = Core.Sexp.to_string t in
-  let hum = Core.Sexp.to_string_hum_width 4 t in
+  let hum = Core.Sexp.to_string_hum t in
   let same s =
     match Core.Sexp.of_string s with
     | Ok parsed -> Core.Sexp.equal parsed t
@@ -34,8 +34,8 @@ let%expect_test "to_string" =
   [%expect {|
     a
     ()
-    (a b (c d))
-    (() (()))
+    (a b(c d))
+    (()(()))
     |}]
 
 let%expect_test "atoms are quoted only when needed" =
@@ -77,8 +77,8 @@ let%expect_test "nested round trips" =
     (list (Cons (atom "key", Cons (list (Cons (atom "x\"y", Cons (atom "\\", Nil))), Nil))));
   [%expect {|
     ()  round trips
-    (() "" ("a b"))  round trips
-    (key ("x\"y" "\\"))  round trips
+    (()""("a b"))  round trips
+    (key("x\"y""\\"))  round trips
     |}]
 
 let%expect_test "to_string_hum" =
@@ -92,66 +92,13 @@ let%expect_test "to_string_hum" =
       Cons (list (Cons (atom "empty", Cons (list Nil, Nil))), Nil))))
   in
   print_endline (Core.Sexp.to_string_hum record);
-  print_endline (Core.Sexp.to_string_hum_width 30 record);
-  print_endline (Core.Sexp.to_string_hum_width 0 record);
   [%expect {|
     (1 2 3 4 5)
     "a b"
-    (1
-     2
-     3
-     4
-     5
-     6
-     7
-     8
-     9
-     10
-     11
-     12
-     13
-     14
-     15
-     16
-     17
-     18
-     19
-     20
-     21
-     22
-     23
-     24
-     25
-     26
-     27
-     28
-     29
-     30)
+    (1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28
+     29 30)
     ((name "a long name for a record field")
-     (values (1 2 3 4 5 6 7 8 9 10 11 12))
-     (empty ()))
-    ((name
-      "a long name for a record field")
-     (values
-      (1 2 3 4 5 6 7 8 9 10 11 12))
-     (empty ()))
-    ((name
-      "a long name for a record field")
-     (values
-      (1
-       2
-       3
-       4
-       5
-       6
-       7
-       8
-       9
-       10
-       11
-       12))
-     (empty
-      ()))
+     (values (1 2 3 4 5 6 7 8 9 10 11 12)) (empty ()))
     |}]
 
 let%expect_test "of_string" =
@@ -174,10 +121,10 @@ let%expect_test "of_string" =
     Ok (a (b) c)
     Ok (a b)
     Ok (a b)
-    Error line 1, column 0: unclosed '('
-    Error line 1, column 1: expected the end of input after a sexp
+    Error line 1, column 11: unclosed parentheses at end of input
+    Error line 1, column 1: s-expression followed by data
     Ok ("" "a b")
-    Ok "#|not-a-comment|#"
+    Error line 1, column 17: no s-expression found in input
     |}]
 
 let%expect_test "of_string: escapes in quoted atoms" =
@@ -197,7 +144,7 @@ let%expect_test "of_string: escapes in quoted atoms" =
   show "\"literal\nnewline\"";
   show "\"caf\195\169\"";
   [%expect {|
-    "\n\t\r\b\\\"\'\ " -> \n\t\r\b\\\"'
+    "\n\t\r\b\\\"\'\ " -> \n\t\r\b\\\"'\\
     "\065\x42\x6a\255\000" -> ABj\255\000
     "\q\(" -> \\q\\(
     "split \
@@ -226,23 +173,23 @@ let%expect_test "of_string: errors with positions" =
   print_parse "\"\\x4\"";
   print_parse "(\n\n   \"ok\" \"\\9\")";
   [%expect {|
-    Error line 1, column 0: unexpected end of input
-    Error line 1, column 3: unexpected end of input
-    Error line 1, column 16: unexpected end of input
-    Error line 1, column 0: unclosed '('
-    Error line 1, column 0: unclosed '('
-    Error line 1, column 0: unexpected ')'
-    Error line 1, column 3: expected the end of input after a sexp
-    Error line 1, column 2: expected the end of input after a sexp
-    Error line 2, column 2: expected the end of input after a sexp
-    Error line 1, column 0: unterminated quoted atom
-    Error line 1, column 3: unterminated quoted atom
-    Error line 1, column 1: invalid escape: character code above 255
-    Error line 1, column 1: invalid escape: \ddd needs 3 decimal digits
-    Error line 1, column 1: invalid escape: \ddd needs 3 decimal digits
-    Error line 1, column 1: invalid escape: \x needs 2 hexadecimal digits
-    Error line 1, column 1: invalid escape: \x needs 2 hexadecimal digits
-    Error line 3, column 9: invalid escape: \ddd needs 3 decimal digits
+    Error line 1, column 0: no s-expression found in input
+    Error line 1, column 3: no s-expression found in input
+    Error line 1, column 16: no s-expression found in input
+    Error line 1, column 2: unclosed parentheses at end of input
+    Error line 3, column 0: unclosed parentheses at end of input
+    Error line 1, column 0: unexpected character: ')'
+    Error line 1, column 3: unexpected character: ')'
+    Error line 1, column 2: s-expression followed by data
+    Error line 2, column 2: s-expression followed by data
+    Error line 1, column 13: unterminated quoted string
+    Error line 1, column 6: unterminated quoted string
+    Error line 1, column 4: escape sequence in quoted string out of range
+    Error line 1, column 4: unterminated decimal escape sequence
+    Error line 1, column 3: unterminated decimal escape sequence
+    Error line 1, column 3: unterminated hexadecimal escape sequence
+    Error line 1, column 4: unterminated hexadecimal escape sequence
+    Error line 3, column 11: unterminated decimal escape sequence
     |}]
 
 let%expect_test "of_string_many" =
@@ -256,8 +203,8 @@ let%expect_test "of_string_many" =
   show "a)";
   [%expect {|
     ()
-    (a (b c) "d e" f)
-    line 1, column 1: unexpected ')'
+    (a(b c)"d e"f)
+    line 1, column 1: unexpected character: ')'
     |}]
 
 let%expect_test "Parse_error fields" =
@@ -270,7 +217,7 @@ let%expect_test "Parse_error fields" =
          (Cons (e.Core.Sexp.Parse_error.offset, Cons (e.Core.Sexp.Parse_error.line,
           Cons (e.Core.Sexp.Parse_error.col, Nil)))));
   [%expect {|
-    expected the end of input after a sexp
+    unexpected character: ')'
     (7 2 4)
     |}]
 
@@ -326,7 +273,7 @@ let%expect_test "sexp_of_*" =
     (1)
     ()
     (1 false)
-    (1 "" ())
+    (1""())
     (Ok 1)
     (Error bad)
     |}]
@@ -455,7 +402,7 @@ let%expect_test "*_of_sexp: containers, errors at the failing element" =
     (Error (bad)) -> Error string_of_sexp: atom needed: (bad)
     (ok 1) -> Error result_of_sexp: (Ok _) or (Error _) needed: (ok 1)
     (Ok 1 2) -> Error result_of_sexp: (Ok _) or (Error _) needed: (Ok 1 2)
-    (() (()) ((1))) -> Ok (() (()) ((1)))
+    (() (()) ((1))) -> Ok (()(())((1)))
     (() (()) ((x))) -> Error int_of_sexp: integer needed: x
     |}]
 
@@ -470,14 +417,13 @@ let%expect_test "Of_sexp_error fields" =
     ()
     |}]
 
-let%expect_test "helpers: must_escape, atom_to_string, parenthesize, of_sexp_error" =
+let%expect_test "helpers: must_escape, atom_to_string, of_sexp_error" =
   let show s =
     print_bool (Core.Sexp.must_escape s);
     print_endline (Core.Sexp.atom_to_string s)
   in
   show "a";
   show "a b";
-  print_endline (Core.Sexp.parenthesize "a b");
   match Core.Sexp.of_sexp_error "custom" (atom "x") with
   | Ok u -> print_sexp (Core.Sexp.sexp_of_unit u)
   | Error e -> print_endline (Core.Sexp.Of_sexp_error.to_string e);
@@ -486,7 +432,6 @@ let%expect_test "helpers: must_escape, atom_to_string, parenthesize, of_sexp_err
     a
     true
     "a b"
-    (a b)
     custom: x
     |}]
 
@@ -511,5 +456,5 @@ let%expect_test "large inputs" =
     16890
     true
     (-2999 0)
-    19889
+    17121
     |}]

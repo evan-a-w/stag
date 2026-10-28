@@ -1,6 +1,6 @@
 (* [Core.String], its strings printed as sexp atoms, quoted when needed. *)
 
-let print_sexp t = print_endline (Core.Sexp.to_string t)
+let print_sexp t = print_endline (Core.Sexp.to_string_hum t)
 let print_s s = print_sexp (Core.Sexp.sexp_of_string s)
 let print_strings l = print_sexp (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_string l)
 let print_bool b = print_endline (Core.Bool.to_string b)
@@ -68,7 +68,7 @@ let%expect_test "construction" =
 let%expect_test "traversal" =
   let push acc c = Cons (c, acc) in
   print_sexp
-    (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_char (Core.String.fold push Nil abc));
+    (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_char (Core.String.fold_left push Nil abc));
   Core.String.iter print_char abc;
   print_endline "";
   let next c = Core.Option.value (Core.Char.of_code (Core.Int.succ (Core.Char.code c))) c in

@@ -1,6 +1,6 @@
 (* [Core.Option] and [Core.Result], printed as sexps. *)
 
-let print_sexp t = print_endline (Core.Sexp.to_string t)
+let print_sexp t = print_endline (Core.Sexp.to_string_hum t)
 let print_int_option o = print_sexp (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_int o)
 let print_bool b = print_endline (Core.Bool.to_string b)
 let is_even n = Core.Int.equal (Core.Int.rem n 2) 0

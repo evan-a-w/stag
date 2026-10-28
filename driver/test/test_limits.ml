@@ -109,7 +109,7 @@ let deep = %{String.concat (List.init 14 ~f:(fun _ -> "double ("))}%{nat 1}%{Str
   [%expect
     {|
     eval failed: ("Stack depth exceeded: evaluation nested more than 10000 steps deep" @
-     t.stag:3:21-22)
+     t.stag:3:50-56)
     (deep 0)
     |}]
 ;;

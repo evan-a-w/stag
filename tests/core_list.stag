@@ -9,7 +9,7 @@ let ints s =
   | Error _ -> Nil
 
 let sexp_of_ints l = Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int l
-let print_sexp t = print_endline (Core.Sexp.to_string t)
+let print_sexp t = print_endline (Core.Sexp.to_string_hum t)
 let print_ints l = print_sexp (sexp_of_ints l)
 let print_int_option o = print_sexp (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_int o)
 let print_bool b = print_endline (Core.Bool.to_string b)
@@ -253,3 +253,136 @@ let%expect_test "sort is stable" =
        (Core.Sexp.sexp_of_pair Core.Sexp.sexp_of_int Core.Sexp.sexp_of_string)
        (Core.List.sort by_first pairs));
   [%expect {| ((0 e) (1 b) (1 d) (2 a) (2 c)) |}]
+
+let%expect_test "rev_map, count, compare, take, drop" =
+  print_ints (Core.List.rev_map double (ints "(1 2 3)"));
+  print_int (Core.List.count is_even (ints "(1 2 3 4 6)"));
+  print_endline "";
+  let compare a b = print_int (Core.List.compare Core.Int.compare (ints a) (ints b)) in
+  compare "(1 2)" "(1 2)";
+  compare "(1 2)" "(1 3)";
+  compare "(1 3)" "(1 2)";
+  compare "(1)" "(1 2)";
+  compare "(1 2)" "(1)";
+  compare "()" "()";
+  print_endline "";
+  print_ints (Core.List.take 2 (ints "(1 2 3)"));
+  print_ints (Core.List.take 5 (ints "(1 2 3)"));
+  print_ints (Core.List.take (-1) (ints "(1 2 3)"));
+  print_ints (Core.List.drop 2 (ints "(1 2 3)"));
+  print_ints (Core.List.drop 5 (ints "(1 2 3)"));
+  print_ints (Core.List.drop (-1) (ints "(1 2 3)"));
+  [%expect {|
+    (6 4 2)
+    3
+    0-11-110
+    (1 2)
+    (1 2 3)
+    ()
+    (3)
+    ()
+    (1 2 3)
+    |}]
+
+let%expect_test "functions are called once per element, from left to right" =
+  let noisy n =
+    print_int n;
+    n
+  in
+  let noisy_even n = is_even (noisy n) in
+  let noisy_half n =
+    match noisy_even n with
+    | true -> Some (Core.Int.div n 2)
+    | false -> None
+  in
+  let noisy_twice n = Cons (noisy n, Cons (n, Nil)) in
+  let show name l =
+    print_endline (Core.String.append " " name);
+    print_ints l
+  in
+  show "init" (Core.List.init 4 noisy);
+  show "mapi" (Core.List.mapi Core.Int.add (Core.List.map noisy (ints "(1 2 3)")));
+  show "filter" (Core.List.filter noisy_even (ints "(1 2 3 4)"));
+  show "filter_map" (Core.List.filter_map noisy_half (ints "(1 2 3 4)"));
+  show "concat_map" (Core.List.concat_map noisy_twice (ints "(1 2 3)"));
+  show "rev_map" (Core.List.rev_map noisy (ints "(1 2 3)"));
+  print_endline (Core.Int.to_string (Core.List.count noisy_even (ints "(1 2 3 4)")));
+  (match Core.List.partition noisy_even (ints "(1 2 3 4 5)") with
+   | (yes, no) -> show "partition" (Core.List.append yes no));
+  [%expect {|
+    0123 init
+    (0 1 2 3)
+    123 mapi
+    (1 3 5)
+    1234 filter
+    (2 4)
+    1234 filter_map
+    (1 2)
+    123 concat_map
+    (1 1 2 2 3 3)
+    123 rev_map
+    (3 2 1)
+    12342
+    12345 partition
+    (2 4 1 3 5)
+    |}]
+
+let%expect_test "sort of runs" =
+  let scramble i = Core.Int.rem (Core.Int.mul i 37) 101 in
+  print_ints (Core.List.sort Core.Int.compare (Core.List.init 30 scramble));
+  print_ints (Core.List.sort Core.Int.compare (ints "(1 2 3 3 4)"));
+  print_ints (Core.List.sort Core.Int.compare (ints "(4 3 3 2 1)"));
+  print_ints (Core.List.sort Core.Int.compare (ints "(1 3 5 2 4 6 0 -1 -2 7 7)"));
+  let by_first p q =
+    match (p, q) with
+    | ((a, _), (b, _)) -> Core.Int.compare a b
+  in
+  print_sexp
+    (Core.Sexp.sexp_of_list
+       (Core.Sexp.sexp_of_pair Core.Sexp.sexp_of_int Core.Sexp.sexp_of_string)
+       (Core.List.sort by_first
+          (Cons ((3, "a"), Cons ((2, "b"), Cons ((2, "c"), Cons ((1, "d"),
+           Cons ((1, "e"), Cons ((0, "f"), Nil)))))))));
+  [%expect {|
+    (0 3 6 10 13 16 20 23 26 30 33 37 40 43 47 50 53 57 60 63 67 70 74 77 80 84
+     87 90 94 97)
+    (1 2 3 3 4)
+    (1 2 3 3 4)
+    (-2 -1 0 1 2 3 4 5 6 7 7)
+    ((0 f) (1 d) (1 e) (2 b) (2 c) (3 a))
+    |}]
+
+let%expect_test "sort is stable on many equal keys" =
+  let key i = Core.Int.rem (Core.Int.mul i 3) 7 in
+  let pair i = (key i, i) in
+  let pairs = Core.List.init 200 pair in
+  let by_first p q =
+    match (p, q) with
+    | ((a, _), (b, _)) -> Core.Int.compare a b
+  in
+  let sorted = Core.List.sort by_first pairs in
+  let group k =
+    let has_key p =
+      match p with
+      | (a, _) -> Core.Int.equal a k
+    in
+    Core.List.filter has_key pairs
+  in
+  let expected = Core.List.concat_map group (ints "(0 1 2 3 4 5 6)") in
+  let same p q =
+    match (p, q) with
+    | ((a, b), (c, d)) -> (
+      match Core.Int.equal a c with
+      | true -> Core.Int.equal b d
+      | false -> false)
+  in
+  print_bool (Core.List.equal same sorted expected);
+  print_sexp
+    (Core.Sexp.sexp_of_list
+       (Core.Sexp.sexp_of_pair Core.Sexp.sexp_of_int Core.Sexp.sexp_of_int)
+       (Core.List.take 12 sorted));
+  [%expect {|
+    true
+    ((0 0) (0 7) (0 14) (0 21) (0 28) (0 35) (0 42) (0 49) (0 56) (0 63)
+     (0 70) (0 77))
+    |}]

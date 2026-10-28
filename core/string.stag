@@ -1,13 +1,14 @@
-(* Out of bounds indices are runtime errors in [get], [sub] and [make]. *)
+(* Functions take the function first, as OCaml's [Stdlib.String]. Out of bounds
+   indices are runtime errors in [get] and [sub]. *)
 
-let length = Intrinsic.String.length
-let get = Intrinsic.String.get
+let length = Prim.String.length
+let get = Prim.String.get
 
 (* [sub s pos len]. *)
-let sub = Intrinsic.String.sub
-let append = Intrinsic.String.append
-let equal = Intrinsic.String.equal
-let compare = Intrinsic.String.compare
+let sub = Prim.String.sub
+let append = Prim.String.append
+let equal = Prim.String.equal
+let compare = Prim.String.compare
 let is_empty s = Int.equal (length s) 0
 let of_char = Char.to_string
 
@@ -18,17 +19,15 @@ let fold_range f acc lo hi =
   | false -> acc
 
 (* Joins [parts], separated by [sep]. *)
-let concat sep parts =
-  match parts with
-  | Nil -> ""
-  | Cons (first, rest) ->
-    let add acc part = append acc (append sep part) in
-    List.fold_left add first rest
+let concat = Prim.String.concat
 
+(* [init n f] is [f 0], ..., [f (n - 1)], calling [f] in that order; empty if
+   [n] is not positive. *)
 let init n f =
-  let add acc i = append acc (of_char (f i)) in
-  fold_range add "" 0 n
+  let char i = of_char (f i) in
+  concat "" (List.init n char)
 
+(* [n] copies of [c]; empty if [n] is not positive. *)
 let make n c =
   let const _ = c in
   init n const
@@ -43,7 +42,7 @@ let to_list s =
 
 let of_list chars = concat "" (List.map of_char chars)
 
-let fold f acc s =
+let fold_left f acc s =
   let step acc i = f acc (get s i) in
   fold_range step acc 0 (length s)
 
@@ -54,6 +53,9 @@ let iter (f : char -> unit) s =
 let map f s =
   let char i = f (get s i) in
   init (length s) char
+
+let lowercase s = map Char.lowercase s
+let uppercase s = map Char.uppercase s
 
 let for_all f s =
   let loop i =
@@ -165,4 +167,24 @@ let escape_char c =
       append "\\" (append (make (Int.sub 3 (length digits)) '0') digits))
 
 (* As OCaml's [String.escaped], without the quotes. *)
-let escaped s = concat "" (List.map escape_char (to_list s))
+let escaped s =
+  let plain c =
+    match c with
+    | '"' -> false
+    | '\\' -> false
+    | _ -> Char.is_print c
+  in
+  (* [parts] in reverse, then the plain characters from [start] to [i]. *)
+  let loop start i parts =
+    let plain_part _ = sub s start (Int.sub i start) in
+    match Int.lt i (length s) with
+    | false -> concat "" (List.rev (Cons (plain_part (), parts)))
+    | true -> (
+      let c = get s i in
+      match plain c with
+      | true -> loop start (Int.succ i) parts
+      | false ->
+        let escaped = Cons (escape_char c, Cons (plain_part (), parts)) in
+        loop (Int.succ i) (Int.succ i) escaped)
+  in
+  loop 0 0 Nil
