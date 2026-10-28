@@ -18,7 +18,7 @@ let wrapped (library : Project.Target.t) =
   ]
 ;;
 
-let check ?output project (target : Project.Target.t) =
+let check ?limits ?output project (target : Project.Target.t) =
   let own =
     match target.stanza.kind with
     | Library -> wrapped target
@@ -30,6 +30,6 @@ let check ?output project (target : Project.Target.t) =
     |> Result.map ~f:List.concat
     |> Result.map_error ~f:List.concat
   in
-  Driver.check_modules ?output groups
+  Driver.check_modules ?limits ?output groups
   |> Result.map_error ~f:(fun error -> [ Diagnostic.of_typecheck_error error ])
 ;;

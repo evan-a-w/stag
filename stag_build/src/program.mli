@@ -7,9 +7,10 @@ open! Import
     a [Driver.Module_group.Group], so its files are evaluated in dependency
     order as a program's are. *)
 
-(** Prims print to [output], stdout by default, as for [Driver.check]. *)
+(** [limits] and [output] are as for [Driver.check]. *)
 val check
-  :  ?output:(string -> unit)
+  :  ?limits:Limits.t
+  -> ?output:(string -> unit)
   -> Project.t
   -> Project.Target.t
   -> (Driver.t, Diagnostic.t list) Result.t

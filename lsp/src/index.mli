@@ -1,0 +1,32 @@
+open! Import
+
+(** What is at each position of the files of a checked program: types for
+    hover and definitions, from the typed tree, matched with the syntax by
+    location. Files are named as in locations. *)
+
+type t
+
+(** [groups] are the program's modules, as checked into [program]. *)
+val create : groups:Driver.Module_group.t list -> program:Typed.Program.t -> t
+
+module Hover : sig
+  type t =
+    { loc : Loc.t
+    ; text : string (** Markdown. *)
+    }
+  [@@deriving sexp_of]
+end
+
+(** About the innermost node or name at [offset] of [file]: its type, with its
+    name if it is a variable or binder, or the type it names. *)
+val hover : t -> file:string -> offset:int -> Hover.t option
+
+(** Where the variable, constructor, field or type at [offset] is declared, if
+    in the program's source (not the prelude's, nor generated). Declared types
+    named in type expressions are resolved lexically, from the module they are
+    in outwards. *)
+val definition : t -> file:string -> offset:int -> Loc.t option
+
+(** Whether the variable or binder starting at [offset] is of a function
+    type. *)
+val is_function : t -> file:string -> offset:int -> bool

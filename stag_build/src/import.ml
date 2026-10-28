@@ -9,3 +9,4 @@ module Text_diff = Stag_common.Text_diff
 module Treewalk = Stag_eval.Treewalk
 module Typed = Stag_ir.Typed
 module Format = Stag_driver.Format
+module Limits = Stag_common.Limits
