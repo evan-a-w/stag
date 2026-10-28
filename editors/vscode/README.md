@@ -15,12 +15,14 @@ stag (`.stag` files).
   }
   ```
 
-  Highlighting is context free, so a bare type name (`int` in `x : int`) is
+  The grammar is context free, so a bare type name (`int` in `x : int`) is
   coloured as a variable, while an applied one (`list[int]`) is coloured as a
-  type. Semantic tokens from the language server should fix this.
-- The language server is `stag lsp` (planned). Until it exists, the client
-  reports once that it could not start, and formatting runs `stag fmt`.
-  Syntax errors from `stag fmt` show in the status bar and the `stag` output.
+  type. Semantic tokens from the language server fix this.
+- The language server is `stag lsp`: diagnostics, formatting, semantic
+  tokens, hover, go to definition and the outline (see the repository's
+  README). If it cannot start, the client reports so once, and formatting
+  runs `stag fmt`, whose syntax errors show in the status bar and the `stag`
+  output.
 - `stag.serverPath` (default `stag`, looked up on PATH) is the stag executable.
   A relative path is resolved against the workspace folder of the active stag
   document (or else of any open one), or else the first workspace folder.

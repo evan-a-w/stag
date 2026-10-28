@@ -564,3 +564,50 @@ let%expect_test "errors in unopened files of the project are published for them"
        Client.did_change client "lib/a.stag" ~version:2 "let x = 1\n";
        [%expect {| |}])
 ;;
+
+let%expect_test "documents without a file are checked standalone" =
+  Client.with_server (fun client ->
+    let open_untitled uri text =
+      Client.notify
+        client
+        "textDocument/didOpen"
+        (`Assoc
+            [ ( "textDocument"
+              , `Assoc
+                  [ "uri", `String uri
+                  ; "languageId", `String "stag"
+                  ; "version", `Int 1
+                  ; "text", `String text
+                  ] )
+            ])
+    in
+    open_untitled "untitled:Untitled-1" "let y = Int.add 1 \"s\"\n";
+    open_untitled "untitled:Untitled-2" "let y = Int.add 1 2\n";
+    [%expect
+      {|
+      diagnostics untitled:Untitled-1 (version 1):
+        0:18-0:21 error: This expression has type string but an expression was expected of type int
+      |}];
+    Option.iter
+      (Client.request
+         client
+         "textDocument/hover"
+         (`Assoc
+             [ "textDocument", `Assoc [ "uri", `String "untitled:Untitled-2" ]
+             ; "position", Client.position ~line:0 ~character:5
+             ]))
+      ~f:(Client.print_json client);
+    [%expect
+      {|
+      {
+        "contents": {
+          "kind": "markdown",
+          "value": "```stag\nUntitled_2.y : int\n```"
+        },
+        "range": {
+          "end": { "character": 5, "line": 0 },
+          "start": { "character": 4, "line": 0 }
+        }
+      }
+      |}])
+;;

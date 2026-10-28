@@ -36,6 +36,7 @@ type t =
   ; documents : Document.t String.Table.t
   ; pending : String.Hash_set.t
   ; published : Yojson.Safe.t String.Table.t
+  ; virtual_uris : Lsp.Uri.t String.Table.t
   ; mutable state : State.t
   ; mutable refresh_semantic_tokens : bool
   ; mutable next_request_id : int
@@ -54,6 +55,7 @@ let create ~limits ~send =
   ; documents = String.Table.create ()
   ; pending = String.Hash_set.create ()
   ; published = String.Table.create ()
+  ; virtual_uris = String.Table.create ()
   ; state = Uninitialized
   ; refresh_semantic_tokens = false
   ; next_request_id = 0
@@ -76,8 +78,35 @@ let request t request =
   t.send (Request (Lsp.Server_request.to_jsonrpc_request request ~id))
 ;;
 
-let path_of_uri uri = Lsp.Uri.to_path uri
-let uri_of_path path = Lsp.Uri.of_path path
+(* Documents without a file, eg. [untitled:Untitled-1], are checked
+   standalone as [/untitled_1.stag]. *)
+let path_of_uri t uri =
+  let string = Lsp.Uri.to_string uri in
+  if String.is_prefix string ~prefix:"file:"
+  then Lsp.Uri.to_path uri
+  else (
+    let name =
+      String.map
+        (Lsp.Uri.to_path uri |> Filename.basename)
+        ~f:(fun c -> if Char.is_alphanum c then Char.lowercase c else '_')
+    in
+    let path =
+      sprintf
+        "/%s%s.stag"
+        (if String.is_empty name || not (Char.is_alpha name.[0])
+         then "untitled_"
+         else "")
+        name
+    in
+    Hashtbl.set t.virtual_uris ~key:path ~data:uri;
+    path)
+;;
+
+let uri_of_path t path =
+  match Hashtbl.find t.virtual_uris path with
+  | Some uri -> uri
+  | None -> Lsp.Uri.of_path path
+;;
 
 let text_of_file t path =
   match Hashtbl.find t.documents path with
@@ -125,7 +154,7 @@ let lsp_diagnostic t (diagnostic : Diagnostic.t) =
          Types.DiagnosticRelatedInformation.create
            ~location:
              (Types.Location.create
-                ~uri:(uri_of_path note.loc.file)
+                ~uri:(uri_of_path t note.loc.file)
                 ~range:(range_in note.loc))
            ~message:note.message))
     ()
@@ -134,7 +163,7 @@ let lsp_diagnostic t (diagnostic : Diagnostic.t) =
 let publish t ~path diagnostics =
   let params =
     Types.PublishDiagnosticsParams.create
-      ~uri:(uri_of_path path)
+      ~uri:(uri_of_path t path)
       ?version:
         (Option.map (Hashtbl.find t.documents path) ~f:(fun document ->
            document.version))
@@ -186,8 +215,8 @@ let check_pending t =
   then request t SemanticTokensRefresh
 ;;
 
-let document_path (text_document : Types.TextDocumentIdentifier.t) =
-  path_of_uri text_document.uri
+let document_path t (text_document : Types.TextDocumentIdentifier.t) =
+  path_of_uri t text_document.uri
 ;;
 
 let offset_at t ~path position =
@@ -252,7 +281,7 @@ let definition t ~path position =
   let%map.Option loc = Index.definition index ~file:path ~offset in
   `Location
     [ Types.Location.create
-        ~uri:(uri_of_path loc.file)
+        ~uri:(uri_of_path t loc.file)
         ~range:(Text.range_of_loc (text_of_file t loc.file) loc)
     ]
 ;;
@@ -332,19 +361,19 @@ let handle_request t (jsonrpc : Jsonrpc.Request.t) =
         t.state <- Shut_down;
         Ok ()
       | Running, TextDocumentFormatting params ->
-        Ok (formatting t ~path:(document_path params.textDocument))
+        Ok (formatting t ~path:(document_path t params.textDocument))
       | Running, SemanticTokensFull params ->
-        Ok (semantic_tokens t ~path:(document_path params.textDocument))
+        Ok (semantic_tokens t ~path:(document_path t params.textDocument))
       | Running, TextDocumentHover params ->
-        Ok (hover t ~path:(document_path params.textDocument) params.position)
+        Ok (hover t ~path:(document_path t params.textDocument) params.position)
       | Running, TextDocumentDefinition params ->
         Ok
           (definition
              t
-             ~path:(document_path params.textDocument)
+             ~path:(document_path t params.textDocument)
              params.position)
       | Running, DocumentSymbol params ->
-        Ok (document_symbols t ~path:(document_path params.textDocument))
+        Ok (document_symbols t ~path:(document_path t params.textDocument))
       | Running, _ -> Error (MethodNotFound, jsonrpc.method_)
     in
     (match result request with
@@ -376,10 +405,10 @@ let handle_notification t (jsonrpc : Jsonrpc.Notification.t) =
   | Ok notification, Running ->
     (match notification with
      | TextDocumentDidOpen { textDocument = { uri; version; text; _ } } ->
-       open_document t ~path:(path_of_uri uri) ~version (Text.create text)
+       open_document t ~path:(path_of_uri t uri) ~version (Text.create text)
      | TextDocumentDidChange { textDocument = { uri; version }; contentChanges }
        ->
-       let path = path_of_uri uri in
+       let path = path_of_uri t uri in
        Option.iter (Hashtbl.find t.documents path) ~f:(fun document ->
          open_document
            t
@@ -387,9 +416,9 @@ let handle_notification t (jsonrpc : Jsonrpc.Notification.t) =
            ~version
            (List.fold contentChanges ~init:document.text ~f:Text.apply_change))
      | DidSaveTextDocument { textDocument; _ } ->
-       Hash_set.add t.pending (document_path textDocument)
+       Hash_set.add t.pending (document_path t textDocument)
      | TextDocumentDidClose { textDocument } ->
-       let path = document_path textDocument in
+       let path = document_path t textDocument in
        Hashtbl.remove t.documents path;
        Hash_set.remove t.pending path;
        publish t ~path []
