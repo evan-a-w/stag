@@ -788,12 +788,15 @@ let program_doc ~width ~blank_between ts =
 ;;
 
 let toplevels ?(width = 80) ~indent ts =
-  render
-    ~width
-    (text (String.make indent ' ')
-     ^^ nest
-          indent
-          (toplevels ~width ~indent ~blank_between:(fun _ _ -> false) ts))
+  match ts with
+  | [] -> ""
+  | ts ->
+    render
+      ~width
+      (text (String.make indent ' ')
+       ^^ nest
+            indent
+            (toplevels ~width ~indent ~blank_between:(fun _ _ -> false) ts))
 ;;
 
 let program ?(width = 80) ts =
