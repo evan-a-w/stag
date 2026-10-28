@@ -67,8 +67,15 @@ let of_toplevels text toplevels =
           ~name_loc:name.loc
           name.txt
       ]
-    | Module_splice (name, _) ->
-      [ symbol ~detail:"splice" ~kind:Module ~loc ~name_loc:name.loc name.txt ]
+    | Module_splice (name, _, expansion) ->
+      [ symbol
+          ~children:(of_expansion expansion)
+          ~detail:"splice"
+          ~kind:Module
+          ~loc
+          ~name_loc:name.loc
+          name.txt
+      ]
     | Expect_test { name; body = _ } ->
       [ symbol
           ~detail:"expect test"
@@ -79,7 +86,10 @@ let of_toplevels text toplevels =
       ]
     | Bench { name; param = _; body = _ } ->
       [ symbol ~detail:"bench" ~kind:Event ~loc ~name_loc:name.loc name.txt ]
-    | Include _ -> []
+    | Include (_, expansion) -> of_expansion expansion
+  and of_expansion expansion =
+    Option.value_map expansion ~default:[] ~f:(fun expansion ->
+      List.concat_map expansion.txt ~f:of_toplevel)
   in
   List.concat_map toplevels ~f:of_toplevel
 ;;

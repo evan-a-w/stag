@@ -754,3 +754,81 @@ let v = (0
     let v = 0 (* f *)
     |}]
 ;;
+
+let%expect_test "inline expansions" =
+  test
+    {|
+include%inline .~(gen (type t))
+(* first *)
+type t = A
+      let x =   1 (* trailing *)
+  (* last *)
+end%inline
+module M = struct
+  module%inline N = .~e
+      let x = 1
+
+
+      (* before y *)
+      let y = 2
+    (* before the end *)
+  end%inline
+  include%inline .~e   end%inline
+end
+|};
+  [%expect
+    {|
+    include%inline .~(gen (type t))
+      (* first *)
+      type t = A
+
+      let x = 1 (* trailing *)
+      (* last *)
+    end%inline
+
+    module M = struct
+      module%inline N = .~e
+        let x = 1
+
+        (* before y *)
+        let y = 2
+        (* before the end *)
+      end%inline
+
+      include%inline .~e
+      end%inline
+    end
+    |}]
+;;
+
+let%expect_test "a comment after a splice on its line" =
+  test
+    {|
+include%inline .~e (* derived *)
+let x = 1
+end%inline
+include%inline .~e (* empty *) end%inline
+|};
+  [%expect
+    {|
+    include%inline .~e (* derived *)
+      let x = 1
+    end%inline
+
+    include%inline .~e (* empty *)
+    end%inline
+    |}]
+;;
+
+let%expect_test "a comment before the arguments of a benchmark" =
+  test
+    ~width:30
+    {|let%bench "b" x (* a comment
+  on two lines *) in [ 1; 2 ] = x|};
+  [%expect
+    {|
+    let%bench "b" x in (* a comment
+         on two lines *) [1; 2] =
+      x
+    |}]
+;;

@@ -26,6 +26,9 @@ type t =
   | Struct
   | Include
   | End
+  | Module_inline (** [module%inline] *)
+  | Include_inline (** [include%inline] *)
+  | End_inline (** [end%inline] *)
   | Lparen
   | Rparen
   | Lbracket

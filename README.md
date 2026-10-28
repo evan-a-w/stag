@@ -7,7 +7,7 @@ quotes (`.< e >.`) and splices (`.~e`), including compile time splices. See
 ```
 stag check FILE...            # typecheck, print the signature
 stag run FILE...              # typecheck and evaluate
-stag test [-promote] FILE...  # run let%expect_test tests, writing FILE.corrected
+stag test [-promote] FILE...  # run let%expect_test tests and inline expansions, writing FILE.corrected
 stag bench FILE...            # run let%bench benchmarks (see Benchmarking)
 stag fmt FILE                 # print FILE formatted
 stag fmt -inplace FILE...     # format the files in place

@@ -29,7 +29,11 @@ let check_files ?(run = false) files =
         then print_s [%sexp (result : Expect_test_runner.Test_result.t)]);
       List.iter files ~f:(fun { path; contents } ->
         Option.iter
-          (Expect_test_runner.corrected ~path ~contents results)
+          (Corrected_file.create
+             ~path
+             ~contents
+             ~tests:results
+             ~expansions:(Inline_expansion.stale driver))
           ~f:(printf "--- corrected ---\n%s")))
 ;;
 

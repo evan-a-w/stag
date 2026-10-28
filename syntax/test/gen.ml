@@ -255,8 +255,8 @@ let rec toplevel t : Toplevel.t =
      | 4 when t.size > 0 ->
        t.size <- t.size - 1;
        Module (loc (uident t), list t ~min:0 ~max:3 toplevel)
-     | 5 -> Module_splice (loc (uident t), expr t)
-     | 6 -> Include (expr t)
+     | 5 -> Module_splice (loc (uident t), expr t, expansion t)
+     | 6 -> Include (expr t, expansion t)
      | 7 -> Exception (loc (uident t), list t ~min:0 ~max:3 type_expr)
      | 8 ->
        Bench
@@ -272,4 +272,11 @@ let rec toplevel t : Toplevel.t =
          ; body = expr t
          }
      | _ -> Let (name t, [], None, expr t))
+
+and expansion t =
+  if t.size > 0 && bool t
+  then (
+    t.size <- t.size - 1;
+    Some (loc (list t ~min:0 ~max:3 toplevel)))
+  else None
 ;;

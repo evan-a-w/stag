@@ -18,3 +18,6 @@ module Syntax_value = Stag_eval.Syntax_value
 module Prelude = Stag_eval.Prelude
 module Intrinsic = Stag_ir.Intrinsic
 module Reflected_decl = Stag_eval.Reflected_decl
+module Printer = Stag_syntax.Printer
+module Decl_paths = Stag_syntax.Decl_paths
+module Relocate = Stag_syntax.Relocate

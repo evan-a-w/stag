@@ -219,9 +219,9 @@ module To_value = struct
       con "Exception" [ name exn_name; list type_expr args ]
     | Module (module_name, items) ->
       con "Module" [ name module_name; list toplevel items ]
-    | Module_splice (module_name, e) ->
+    | Module_splice (module_name, e, _) ->
       con "Module_splice" [ name module_name; expr e ]
-    | Include e -> con "Include" [ expr e ]
+    | Include (e, _) -> con "Include" [ expr e ]
     | Expect_test { name = test_name; body } ->
       con
         "Expect_test"
@@ -733,8 +733,8 @@ module Of_value = struct
            | "Module", 2 ->
              Module (arg 0 (name Upper ~loc), arg 1 (list (toplevel ~loc)))
            | "Module_splice", 2 ->
-             Module_splice (arg 0 (name Upper ~loc), arg 1 (expr ~loc))
-           | "Include", 1 -> Include (arg 0 (expr ~loc))
+             Module_splice (arg 0 (name Upper ~loc), arg 1 (expr ~loc), None)
+           | "Include", 1 -> Include (arg 0 (expr ~loc), None)
            | "Expect_test", 1 ->
              arg 0 (fun test : Toplevel.desc ->
                Expect_test

@@ -928,3 +928,32 @@ let%bench "a long benchmark name" some_parameter in [first_argument_value; (seco
       sort (random_list n)
     |}]
 ;;
+
+let%expect_test "inline expansions" =
+  print
+    {|
+include%inline .~(gen (type t)) type t = A let x = 1 let y = 2 end%inline
+include%inline .~e end%inline
+module M = struct
+  module%inline N = .~(e) let x = some_function with_a_long_argument and_another_long_argument end%inline
+end
+|};
+  [%expect
+    {|
+    include%inline .~(gen (type t))
+      type t = A
+
+      let x = 1
+      let y = 2
+    end%inline
+
+    include%inline .~e
+    end%inline
+
+    module M = struct
+      module%inline N = .~e
+        let x = some_function with_a_long_argument and_another_long_argument
+      end%inline
+    end
+    |}]
+;;

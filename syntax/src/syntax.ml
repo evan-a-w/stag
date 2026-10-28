@@ -232,8 +232,15 @@ module Toplevel = struct
     | Type of Type_decl.t
     | Exception of Name.t * Type_expr.t list (** [exception E of t1 * t2]. *)
     | Module of Name.t * t list
-    | Module_splice of Name.t * Expr.t (** [module M = .~e]. *)
-    | Include of Expr.t (** [include .~e]. *)
+    | Module_splice of Name.t * Expr.t * t list Located.t option
+    (** [module M = .~e], or with its expansion
+        [module%inline M = .~e ... end%inline]. *)
+    | Include of Expr.t * t list Located.t option
+    (** [include .~e], or with its expansion
+        [include%inline .~e ... end%inline]. An expansion is the declarations
+        written between the splice and [end%inline], located from the end of
+        the splice to the start of [end%inline]. It is only checked against
+        what the splice generates, which is what is declared. *)
     | Expect_test of
         { name : string Located.t
         ; body : Expr.t
