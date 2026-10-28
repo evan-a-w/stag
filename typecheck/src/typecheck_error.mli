@@ -156,9 +156,11 @@ type t =
 val sexp_of_t : t -> Sexp.t
 
 val create : loc:Loc.t -> Kind.t -> t
+
 (** With the types of [error] as they are now, so later unification doesn't
     change it. *)
 val unification_error : loc:Loc.t -> Unification_error.t -> t
+
 val already_reported : t
 val is_already_reported : t -> bool
 
