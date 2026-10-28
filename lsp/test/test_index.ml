@@ -288,3 +288,62 @@ let w = s
          11:8+1 Variable "s"
          |}])
 ;;
+
+let%expect_test "a declaration with type splices" =
+  Client.with_server
+    ~files:
+      [ ( "a.stag"
+        , {|let int_ty = Stag.Type_expr.con "int" Nil
+let kind = Stag.Type_decl.Kind.Variant (Cons (("A", Nil), Nil))
+let f (n : .~int_ty) = Int.add n 1
+type t = .~kind
+let a = A
+let g = f 2
+|}
+        )
+      ]
+    (fun client ->
+       Client.did_open client "a.stag";
+       [%expect {| |}];
+       print_at client "a.stag" [ 2, 4; 2, 15; 2, 23; 2, 31; 3, 5; 3, 12; 4, 8; 5, 8 ];
+       [%expect {|
+         2:4 2:4-2:5 ```stag A.f : int -> int ```
+         2:4 -> a.stag 2:4-2:5
+         2:15 2:13-2:19 ```stag A.int_ty : Stag.Type_expr.t ```
+         2:15 -> a.stag 0:4-0:10
+         2:23 2:23-2:30 ```stag Int.add : int -> int -> int ```
+         2:23 no definition
+         2:31 2:31-2:32 ```stag n : int ```
+         2:31 -> a.stag 2:7-2:8
+         3:5 3:5-3:6 ```stag type A.t ```
+         3:5 -> a.stag 3:5-3:6
+         3:12 3:11-3:15 ```stag A.kind : Stag.Type_decl.Kind.t ```
+         3:12 -> a.stag 1:4-1:8
+         4:8 4:8-4:9 ```stag A.A : A.t ```
+         4:8 no definition
+         5:8 5:8-5:9 ```stag A.f : int -> int ```
+         5:8 -> a.stag 2:4-2:5
+         |}])
+;;
+
+let%expect_test "free names in a struct quote are not references" =
+  Client.with_server
+    ~files:
+      [ ( "a.stag"
+        , {|let helper = 1
+let q = .< struct let x = helper end >.
+module M = .~q
+|}
+        )
+      ]
+    (fun client ->
+       Client.did_open client "a.stag";
+       [%expect {| |}];
+       print_at client "a.stag" [ 1, 22; 1, 27 ];
+       [%expect {|
+         1:22 1:8-1:39 ```stag list[Stag.Toplevel.t] ```
+         1:22 no definition
+         1:27 1:8-1:39 ```stag list[Stag.Toplevel.t] ```
+         1:27 no definition
+         |}])
+;;
