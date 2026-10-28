@@ -23,6 +23,17 @@ module Checked : sig
     }
 end
 
+(** What checked of a program with errors. *)
+module Failed : sig
+  type t =
+    { errors : Typecheck_error.t list
+      (** Not empty, each once, by location, then in the order found. *)
+    ; partial : Checked.t
+      (** What did not check is [Typed.Expr.Desc.Error] of its parts that
+          did, and is left out of [signature]. *)
+    }
+end
+
 (** Declarations, in any module, may refer to each other in any order. Names
     are first checked unique: members per module, parameters per type. Then
     declarations are checked in order, depth first, except those used before
@@ -36,11 +47,12 @@ end
     A toplevel splice is checked, run and replaced by the code it generates,
     inferred anew where it is spliced. Code run at compile time may use any
     toplevel whose component is checked. So a splice may run before later type
-    declarations are checked, and if it fails, their errors are not reported. *)
-val typecheck
-  :  t
-  -> program:Syntax.Program.t
-  -> (Checked.t, Typecheck_error.t) Result.t
+    declarations are checked.
+
+    Checking goes on past errors: what did not check has type [Type.error],
+    so that what uses it is not in error too, and splices whose code did not
+    check are not run, generating nothing. *)
+val typecheck : t -> program:Syntax.Program.t -> (Checked.t, Failed.t) Result.t
 
 (** The signature of the prelude ([Prelude]), which every program sees. *)
 val prelude_signature : t -> Signature.t

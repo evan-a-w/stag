@@ -17,7 +17,9 @@ let%expect_test "typechecking twice with the same state" =
   let run source =
     match Typecheck.typecheck typecheck ~program:(parse_exn source) with
     | Ok { signature; _ } -> print_string (Signature.to_string_hum signature)
-    | Error error -> print_s [%sexp (error : Typecheck_error.t)]
+    | Error error ->
+      List.iter (error : Typecheck.Failed.t).errors ~f:(fun error ->
+        print_s [%sexp (error : Typecheck_error.t)])
   in
   run prelude;
   run
@@ -1071,7 +1073,7 @@ let use = conflict_later %s
     ((Unification_error
       (Row_mismatch
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon bool ())))
-        (RVar (Link (RVar (Link (RVar (Unbound 73 1)))))))
+        (RVar (Link (RVar (Unbound 73 1)))))
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon bool ())))
         (RVar (Unbound 91 1)))
        (Presence_mismatch x)))
@@ -1195,9 +1197,7 @@ let%expect_test "instances of a scheme bounded by an outer row" =
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
         (RVar
          (Link
-          (RVar
-           (Link
-            (RExtend y (PVar (Link Absent)) (TCon int ()) (RVar (Unbound 109 1))))))))
+          (RExtend y (PVar (Link Absent)) (TCon int ()) (RVar (Unbound 109 1))))))
        (Presence_mismatch y)))
      @ t.stag:4:77-78)
     |}]

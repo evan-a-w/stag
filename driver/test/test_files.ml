@@ -4,7 +4,8 @@ let file path contents = { Source_file.path; contents }
 
 let run files =
   match Driver.check_files ~limits:Source_helpers.limits files with
-  | Error error -> print_s [%sexp (error : Driver.Error.t)]
+  | Error error ->
+    List.iter error ~f:(fun error -> print_s [%sexp (error : Driver.Error.t)])
   | Ok driver ->
     print_string (Signature.to_string_hum (Driver.checked driver).signature);
     print_endline "---";
@@ -296,7 +297,9 @@ let q = print_endline "Lib.B.q"
       ; parse "first.stag" {| let p = print_endline "First" |}
       ]
   with
-  | Error error -> print_s [%sexp (error : Typecheck_error.t)]
+  | Error error ->
+    List.iter (error : Typecheck.Failed.t).errors ~f:(fun error ->
+      print_s [%sexp (error : Typecheck_error.t)])
   | Ok driver ->
     Driver.eval driver |> ok_exn;
     [%expect

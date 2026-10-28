@@ -32,6 +32,7 @@ module Decl = struct
     ; params : Type.arg list Lazy.t
     ; wrap_error : Typecheck_error.t -> Typecheck_error.t
     ; mutable checked : Signature.Type_decl.t option
+    ; mutable failed : bool (** Checking it reported an error. *)
     ; mutable reflected : Reflected_decl.t option
       (** Once checked, unless abstract. *)
     }
@@ -80,7 +81,7 @@ let create fresh =
 
 let builtins =
   List.map
-    [ "int"; "bool"; "string"; "char"; "unit"; Type.exn_name ]
+    [ "int"; "bool"; "string"; "char"; "unit"; Type.exn_name; Type.error_name ]
     ~f:(fun name ->
       { Type_decl.name = Located.create name; params = []; kind = Abstract })
 ;;
@@ -277,6 +278,9 @@ and elaborate_con
   =
   let error ~loc kind = Error (Typecheck_error.create ~loc kind) in
   let%bind.Result decl = find_type t module_ path ~loc:path_loc in
+  let%bind.Result () =
+    if decl.failed then Error Typecheck_error.already_reported else Ok ()
+  in
   let expected = List.length decl.decl.params in
   let got = List.length args in
   let%bind.Result () =
@@ -390,6 +394,7 @@ let declare
       ; params
       ; wrap_error
       ; checked = None
+      ; failed = false
       ; reflected = None
       };
   let declares names table =
@@ -526,7 +531,14 @@ let check t name =
   let decl = Hashtbl.find_exn t.types name in
   match decl.checked with
   | Some checked -> Ok checked
-  | None -> define t decl |> Result.map_error ~f:decl.wrap_error
+  | None when decl.failed -> Error Typecheck_error.already_reported
+  | None ->
+    define t decl
+    |> Result.map_error ~f:(fun error ->
+      decl.failed <- true;
+      if Typecheck_error.is_already_reported error
+      then error
+      else decl.wrap_error error)
 ;;
 
 let find_decl_exn t name =

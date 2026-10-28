@@ -184,6 +184,10 @@ The expansion is parsed, so syntax errors in it are reported.
   > end%inline
   > EOF
   $ stag test bad.stag
+  File "bad.stag", line 1, characters 17-18:
+  1 | include%inline .~e
+                       ^
+  Error: Unbound value e
   File "bad.stag", line 3, characters 0-10:
   3 | end%inline
       ^^^^^^^^^^

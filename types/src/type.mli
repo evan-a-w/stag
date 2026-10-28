@@ -155,7 +155,20 @@ val exn_name : string
     variables to [error], so that what uses it is not in error too. *)
 val error : ty
 
+val error_name : string
 val is_error : ty -> bool
+
+(** Copies of types as they are now, unaffected by later unification, eg. for
+    an error to show them as they were when it arose. Variables keep their
+    ids, and only their state is copied, not their bounds. *)
+module Snapshot : sig
+  type t
+
+  val create : unit -> t
+  val ty : t -> ty -> ty
+  val row : t -> row -> row
+  val arg : t -> arg -> arg
+end
 
 (** Follows [Link]s, compressing the path. *)
 val canonical_ty : ty -> ty

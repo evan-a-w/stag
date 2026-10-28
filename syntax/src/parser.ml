@@ -41,6 +41,7 @@ type t =
   ; mutable salvage : (Expr.t -> Toplevel.desc) option
     (** What of the toplevel being parsed parsed, given an [Expr.Error] for
           the rest. *)
+  ; lex_errors : int list (** The offsets of lexer errors, if recovering. *)
   }
 
 let peek_at t n =
@@ -1099,6 +1100,23 @@ let type_decl t ~salvage : Type_decl.t =
   { name; params; kind }
 ;;
 
+(* What follows a lexer error in a toplevel parsed as if it were not there,
+   so the toplevel is salvaged as if the error were a syntax error. Those in a
+   [struct] are in the toplevels in it. *)
+let with_lex_errors t (toplevel : Toplevel.t) ~start =
+  let start = t.tokens.(start).loc.start.offset in
+  let stop = (loc t).start.offset in
+  match toplevel.txt, t.salvage with
+  | (Module _ | Module_splice (_, _, Some _) | Include (_, Some _)), _ | _, None
+    -> toplevel
+  | _, Some desc ->
+    if
+      List.exists t.lex_errors ~f:(fun offset ->
+        offset >= start && offset < stop)
+    then { toplevel with txt = desc (expr_at ~loc:toplevel.loc Error) }
+    else toplevel
+;;
+
 let rec toplevel t : Toplevel.t =
   let start = loc t in
   match peek t with
@@ -1315,7 +1333,7 @@ and toplevels t ~in_struct =
             token -> fail (loc t) (sprintf "unmatched %s" (describe token))
           | _ -> toplevel t
         with
-        | toplevel -> loop (toplevel :: acc)
+        | toplevel -> loop (with_lex_errors t toplevel ~start :: acc)
         | exception Syntax_error (loc, message) ->
           Queue.enqueue errors (Syntax { loc; message });
           let salvage = t.salvage in
@@ -1339,6 +1357,7 @@ let run_with_comments ~file source f =
       ; bare_tuple_end = -1
       ; errors = None
       ; salvage = None
+      ; lex_errors = []
       }
     in
     (match
@@ -1381,6 +1400,9 @@ let program_recovering ~file source =
     ; bare_tuple_end = -1
     ; errors = Some errors
     ; salvage = None
+    ; lex_errors =
+        List.map lex_errors ~f:(fun (error : Lexer.Error.t) ->
+          error.loc.start.offset)
     }
   in
   let program = toplevels t ~in_struct:false in

@@ -163,7 +163,9 @@ let%expect_test "program" =
   List.iter [ "let n = add 1 2"; "let n = id true" ] ~f:(fun source ->
     match Typecheck.typecheck typecheck ~program:(program source) with
     | Ok { signature; _ } -> print_string (Signature.to_string_hum signature)
-    | Error error -> print_s [%sexp (error : Typecheck_error.t)]);
+    | Error error ->
+      List.iter (error : Typecheck.Failed.t).errors ~f:(fun error ->
+        print_s [%sexp (error : Typecheck_error.t)]));
   print_s
     [%sexp (List.length (program ~prelude:false "let n = 1 let m = 2") : int)];
   [%expect

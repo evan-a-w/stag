@@ -7,20 +7,22 @@ open! Import
     a [Driver.Module_group.Group], so its files are evaluated in dependency
     order as a program's are. *)
 
+(** The program as far as it parses ([Source_file.parse_recovering]), unless
+    a file's name is invalid, and the errors of all its files. *)
+val parse_recovering
+  :  Project.t
+  -> Project.Target.t
+  -> Driver.Module_group.t list option * Diagnostic.t list
+
+(** [parse_recovering], if without errors. *)
 val parse
   :  Project.t
   -> Project.Target.t
   -> (Driver.Module_group.t list, Diagnostic.t list) Result.t
 
-(** [Driver.check_modules], its error as diagnostics. [limits] and [output]
-    are as for [Driver.check]. *)
-val check_groups
-  :  ?limits:Limits.t
-  -> ?output:(string -> unit)
-  -> Driver.Module_group.t list
-  -> (Driver.t, Diagnostic.t list) Result.t
-
-(** [parse], then [check_groups]. *)
+(** [parse_recovering], then [Driver.check_modules] if a program parsed,
+    failing with all the errors of both, by location. [output] is as for
+    [Driver.check]. *)
 val check
   :  ?output:(string -> unit)
   -> Project.t

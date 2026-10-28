@@ -62,9 +62,9 @@ let%expect_test "messages" =
     | Ok _ -> print_endline "ok"
     | Error error ->
       print_string
-        (Diagnostic.to_string_hum
+        (Diagnostic.list_to_string_hum
            ~contents:(fun _ -> Some contents)
-           (Diagnostic.of_driver_error error))
+           (List.map error ~f:Diagnostic.of_driver_error))
   in
   List.iter
     ~f:check
@@ -262,7 +262,7 @@ let%expect_test "different, with no output" =
   let driver =
     Driver.check_files [ { Source_file.path = "a.stag"; contents } ]
     |> Result.map_error ~f:(fun error ->
-      Error.create_s [%sexp (error : Driver.Error.t)])
+      Error.create_s [%sexp (error : Driver.Error.t list)])
     |> ok_exn
   in
   Driver.eval driver |> ok_exn;
@@ -311,7 +311,7 @@ let%expect_test "deep" = print_int (f 1)
   let driver =
     Driver.check_files [ { Source_file.path = "a.stag"; contents } ]
     |> Result.map_error ~f:(fun error ->
-      Error.create_s [%sexp (error : Driver.Error.t)])
+      Error.create_s [%sexp (error : Driver.Error.t list)])
     |> ok_exn
   in
   Driver.eval driver |> ok_exn;
@@ -345,9 +345,9 @@ let%expect_test "end to end: source to rendered errors" =
     | Ok _ -> print_endline "ok"
     | Error error ->
       print_string
-        (Diagnostic.to_string_hum
+        (Diagnostic.list_to_string_hum
            ~contents:(fun _ -> Some contents)
-           (Diagnostic.of_driver_error error))
+           (List.map error ~f:Diagnostic.of_driver_error))
   in
   List.iter
     ~f:check

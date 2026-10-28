@@ -38,33 +38,45 @@ let diagnostics_by_file ~path ~absolute ~files diagnostics =
   |> Map.map ~f:List.rev
 ;;
 
-let check_groups ~limits ~path ~absolute ~files groups =
+let by_loc diagnostics =
+  List.stable_sort diagnostics ~compare:(fun (a : Diagnostic.t) b ->
+    Loc.compare a.loc b.loc)
+;;
+
+(* With errors, the index is of what checked. *)
+let check_groups ~limits ~path ~absolute ~files (groups, parse_errors) =
   let diagnostics = diagnostics_by_file ~path ~absolute ~files in
-  match
-    let%bind.Core.Result groups = groups in
-    let%map.Core.Result driver =
-      Program.check_groups ~limits ~output:ignore groups
+  match groups with
+  | None -> { Result.diagnostics = diagnostics parse_errors; index = None }
+  | Some groups ->
+    let (checked : Typecheck.Checked.t), errors =
+      match Driver.check_modules ~limits ~output:ignore groups with
+      | Ok driver -> Driver.checked driver, []
+      | Error { errors; partial } ->
+        partial, List.map errors ~f:Diagnostic.of_typecheck_error
     in
-    let checked = Driver.checked driver in
-    Index.create ~groups ~program:checked.program ~expansions:checked.expansions
-    |> Index.relocate ~f:absolute
-  with
-  | Error errors -> { Result.diagnostics = diagnostics errors; index = None }
-  | Ok index -> { diagnostics = diagnostics []; index = Some index }
+    { diagnostics = diagnostics (by_loc (parse_errors @ errors))
+    ; index =
+        Some
+          (Index.create
+             ~groups
+             ~program:checked.program
+             ~expansions:checked.expansions
+           |> Index.relocate ~f:absolute)
+    }
 ;;
 
 let standalone ~limits ~contents path =
   let file = { Source_file.path; contents = read ~contents path } in
+  let toplevel, errors = Source_file.parse_recovering file in
   check_groups
     ~limits
     ~path
     ~absolute:Fn.id
     ~files:[ path ]
-    (Source_file.parse file
-     |> Core.Result.map ~f:(fun toplevel ->
-       [ Driver.Module_group.File toplevel ])
-     |> Core.Result.map_error ~f:(fun error ->
-       [ Diagnostic.of_source_file_error error ]))
+    ( Option.map toplevel ~f:(fun toplevel ->
+        [ Driver.Module_group.File toplevel ])
+    , List.map errors ~f:Diagnostic.of_source_file_error )
 ;;
 
 let absolute_loc ~root (loc : Loc.t) =
@@ -106,7 +118,12 @@ let in_project ~limits ~contents ~root path =
         ~f:(fun target ->
           List.map target.files ~f:(fun source -> root ^/ source.path))
     in
-    check_groups ~limits ~path ~absolute ~files (Program.parse project target)
+    check_groups
+      ~limits
+      ~path
+      ~absolute
+      ~files
+      (Program.parse_recovering project target)
 ;;
 
 let check ~limits ~contents path =

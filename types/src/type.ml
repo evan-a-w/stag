@@ -1037,3 +1037,57 @@ let to_string_hum ty =
   let ty = Printer.ty printer ty in
   ty ^ Printer.where printer
 ;;
+
+module Snapshot = struct
+  type t =
+    { tys : (ty, Nothing.t) var Int.Table.t
+    ; rows : (row, bound) var Int.Table.t
+    ; presences : (presence, presence_bound) var Int.Table.t
+    }
+
+  let create () =
+    { tys = Int.Table.create ()
+    ; rows = Int.Table.create ()
+    ; presences = Int.Table.create ()
+    }
+  ;;
+
+  (* Shares the copy of each variable, so cycles through links end. *)
+  let var table (var : (_, _) var) ~copy =
+    match Hashtbl.find table var.id with
+    | Some copied -> copied
+    | None ->
+      let copied = { var with state = Generic } in
+      Hashtbl.set table ~key:var.id ~data:copied;
+      copied.state
+      <- (match var.state with
+          | Link linked -> Link (copy linked)
+          | (Unbound _ | Generic) as state -> state);
+      copied
+  ;;
+
+  let rec ty t = function
+    | TCon (name, args) -> TCon (name, List.map args ~f:(arg t))
+    | TArrow (a, b) -> TArrow (ty t a, ty t b)
+    | TTuple tys -> TTuple (List.map tys ~f:(ty t))
+    | TCode { inner; context } ->
+      TCode { inner = ty t inner; context = row t context }
+    | TRecord { id; row = r } -> TRecord { id; row = row t r }
+    | TVariant { id; row = r } -> TVariant { id; row = row t r }
+    | TVar v -> TVar (var t.tys v ~copy:(ty t))
+
+  and row t = function
+    | REmpty -> REmpty
+    | RExtend (label, p, entry, rest) ->
+      RExtend (label, presence t p, ty t entry, row t rest)
+    | RVar v -> RVar (var t.rows v ~copy:(row t))
+
+  and presence t = function
+    | (Present | Absent) as p -> p
+    | PVar v -> PVar (var t.presences v ~copy:(presence t))
+
+  and arg t = function
+    | ATy a -> ATy (ty t a)
+    | ARow r -> ARow (row t r)
+  ;;
+end

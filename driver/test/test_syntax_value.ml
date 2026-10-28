@@ -520,7 +520,7 @@ let%expect_test "constructors are made as the typechecker resolves them" =
   in
   let typechecker =
     match Driver.check_files [ { path = "probe.stag"; contents = source } ] with
-    | Error error -> raise_s [%sexp (error : Driver.Error.t)]
+    | Error error -> raise_s [%sexp (error : Driver.Error.t list)]
     | Ok driver ->
       List.concat_map (Driver.checked driver).program.sccs ~f:(fun scc ->
         List.concat_map scc.members ~f:(fun (member : Typed.Toplevel.t) ->
@@ -630,7 +630,7 @@ let eval_values ?(file = "gen.stag") source =
       ~limits:Source_helpers.limits
       [ { path = file; contents = source } ]
   with
-  | Error error -> raise_s [%sexp (error : Driver.Error.t)]
+  | Error error -> raise_s [%sexp (error : Driver.Error.t list)]
   | Ok driver ->
     Driver.eval ~limits:Source_helpers.limits driver |> ok_exn;
     fun name ->

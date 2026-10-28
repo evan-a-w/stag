@@ -16,13 +16,23 @@ let read_files paths =
       exit 2)
 ;;
 
+let contents files path =
+  List.find_map files ~f:(fun (file : Source_file.t) ->
+    Option.some_if (String.equal file.path path) file.contents)
+;;
+
 let report ?warning files diagnostic =
-  let contents path =
-    List.find_map files ~f:(fun (file : Source_file.t) ->
-      Option.some_if (String.equal file.path path) file.contents)
-  in
   Out_channel.flush stdout;
-  eprintf "%s%!" (Diagnostic.to_string_hum ~contents ?warning diagnostic)
+  eprintf
+    "%s%!"
+    (Diagnostic.to_string_hum ~contents:(contents files) ?warning diagnostic)
+;;
+
+let report_all files diagnostics =
+  Out_channel.flush stdout;
+  eprintf
+    "%s%!"
+    (Diagnostic.list_to_string_hum ~contents:(contents files) diagnostics)
 ;;
 
 let report_stale ?warning files expansions =
@@ -33,8 +43,8 @@ let report_stale ?warning files expansions =
 let check ?output ~limits files =
   match Driver.check_files ?output ~limits files with
   | Ok driver -> driver
-  | Error error ->
-    report files (Diagnostic.of_driver_error error);
+  | Error errors ->
+    report_all files (List.map errors ~f:Diagnostic.of_driver_error);
     exit 1
 ;;
 

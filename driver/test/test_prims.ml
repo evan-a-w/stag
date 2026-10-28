@@ -5,7 +5,9 @@ let run ?(eval = true) src =
   | Error error -> print_endline (Parser.Error.to_string error)
   | Ok program ->
     (match Driver.check ~limits:Source_helpers.limits program with
-     | Error error -> print_s [%sexp (error : Typecheck_error.t)]
+     | Error error ->
+       List.iter (error : Typecheck.Failed.t).errors ~f:(fun error ->
+         print_s [%sexp (error : Typecheck_error.t)])
      | Ok driver ->
        print_string (Signature.to_string_hum (Driver.checked driver).signature);
        if eval

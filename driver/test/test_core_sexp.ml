@@ -36,7 +36,7 @@ let run_chunks source =
       ~output:(Buffer.add_string output)
       [ { Source_file.path = "t.stag"; contents = source } ]
   with
-  | Error error -> raise_s [%sexp (error : Driver.Error.t)]
+  | Error error -> raise_s [%sexp (error : Driver.Error.t list)]
   | Ok driver ->
     Driver.eval ~limits driver |> ok_exn;
     let chunks = String.split (Buffer.contents output) ~on:'\001' in

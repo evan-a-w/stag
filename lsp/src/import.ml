@@ -20,3 +20,4 @@ module Lsp_types = Lsp.Types
 module Prim = Stag_ir.Prim
 module Intrinsic = Stag_ir.Intrinsic
 module Expansion = Stag_typecheck.Expansion
+module Typecheck = Stag_typecheck.Typecheck

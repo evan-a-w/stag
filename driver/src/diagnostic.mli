@@ -51,3 +51,14 @@ val to_string_hum
   -> ?warning:bool
   -> t
   -> string
+
+(** Each as [to_string_hum], the first [max_shown] only, then a line of how
+    many more there are. *)
+val list_to_string_hum
+  :  ?contents:(string -> string option)
+  -> ?warning:bool
+  -> t list
+  -> string
+
+(** 50. *)
+val max_shown : int

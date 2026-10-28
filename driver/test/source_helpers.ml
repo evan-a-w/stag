@@ -56,7 +56,8 @@ let typecheck_program ?(limits = limits) ?(prelude = true) program =
   let prelude = prelude_if prelude in
   match Driver.check ~limits (prelude @ program) with
   | Error error ->
-    print_s [%sexp (error : Typecheck_error.t)];
+    List.iter (error : Typecheck.Failed.t).errors ~f:(fun error ->
+      print_s [%sexp (error : Typecheck_error.t)]);
     None
   | Ok driver -> Some { driver; prelude }
 ;;
@@ -83,14 +84,16 @@ let check_files ?(limits = limits) files =
     let%bind.Result modules =
       List.map files ~f:parse
       |> Result.all
-      |> Result.map_error ~f:(fun error -> Driver.Error.Source error)
+      |> Result.map_error ~f:(fun error -> [ Driver.Error.Source error ])
     in
     Driver.check_modules ~limits modules
-    |> Result.map_error ~f:(fun error -> Driver.Error.Typecheck error)
+    |> Result.map_error
+         ~f:(fun ({ errors; partial = _ } : Typecheck.Failed.t) ->
+           List.map errors ~f:(fun error -> Driver.Error.Typecheck error))
   in
   match result with
   | Error error ->
-    print_s [%sexp (error : Driver.Error.t)];
+    List.iter error ~f:(fun error -> print_s [%sexp (error : Driver.Error.t)]);
     None
   | Ok driver -> Some { driver; prelude = [] }
 ;;
@@ -149,7 +152,9 @@ let toplevel_idents (program : Typed.Program.t) =
 let prelude_locals =
   lazy
     (match Driver.check (force prelude_program) with
-     | Error error -> raise_s [%sexp (error : Typecheck_error.t)]
+     | Error error ->
+       raise_s
+         [%sexp ((error : Typecheck.Failed.t).errors : Typecheck_error.t list)]
      | Ok driver ->
        let program = (Driver.checked driver).program in
        Map.length program.ident_info - Set.length (toplevel_idents program))

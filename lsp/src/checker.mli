@@ -10,7 +10,8 @@ module Result : sig
           load because of), empty if fine. Locations name files by absolute
           path. *)
     ; index : Index.t option
-      (** If it typechecked. Locations name files by absolute path. *)
+      (** Of what typechecked, even with errors, if the program parsed into
+          modules. Locations name files by absolute path. *)
     }
 end
 

@@ -100,7 +100,7 @@ let b = "abc
     t.stag:2:8-9: unterminated string literal
     ---
     let a = <error>
-    let b = "abc\n"
+    let b = <error>
     |}]
 ;;
 
@@ -136,9 +136,9 @@ let f = 5
     t.stag:4:8-10: expected an expression, found `'x`
     t.stag:5:10-12: unexpected `in`: a toplevel `let` is a declaration, without `in`
     ---
-    let a = 1 2
-    let b = "a?b"
-    let c = 0
+    let a = <error>
+    let b = <error>
+    let c = <error>
     let d = <error>
     let e = 4
     let f = 5
@@ -162,7 +162,7 @@ let d = {|abc
     let a = <error>
     let b = <error>
     let c = 3
-    let d = "abc\n"
+    let d = <error>
     |}]
 ;;
 

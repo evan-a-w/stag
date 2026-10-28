@@ -144,7 +144,10 @@ let within t ~in_scope =
   | None -> { t with in_scope = Some (force in_scope) }
 ;;
 
-let unification_error ~loc error = create ~loc (Unification_error error)
+let unification_error ~loc error =
+  create ~loc (Unification_error (Unification_error.snapshot error))
+;;
+
 let already_reported = create ~loc:Loc.none Already_reported
 
 let is_already_reported t =

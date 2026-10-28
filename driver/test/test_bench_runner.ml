@@ -17,7 +17,7 @@ let benches ?files source =
       [ { Source_file.path = "t.stag"; contents = source } ]
   with
   | Error error ->
-    print_s [%sexp (error : Driver.Error.t)];
+    List.iter error ~f:(fun error -> print_s [%sexp (error : Driver.Error.t)]);
     None
   | Ok driver ->
     Driver.eval ~limits:Source_helpers.limits driver |> ok_exn;

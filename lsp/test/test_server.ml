@@ -314,18 +314,18 @@ let%expect_test "semantic tokens of a file that doesn't typecheck or parse" =
        Client.print_semantic_tokens client "a.stag";
        [%expect
          {|
-        0:0+3 Keyword "let"
-        0:4+1 Function (declaration) "f"
-        0:6+1 Parameter (declaration) "x"
-        0:8+1 Operator "="
-        0:10+1 Variable "x"
-        1:0+3 Keyword "let"
-        1:4+1 Variable (declaration) "y"
-        1:8+1 Type "t"
-        1:10+1 Operator "="
-        1:12+1 Variable "f"
-        1:14+1 Number "1"
-        |}];
+         0:0+3 Keyword "let"
+         0:4+1 Function (declaration) "f"
+         0:6+1 Parameter (declaration) "x"
+         0:8+1 Operator "="
+         0:10+1 Variable "x"
+         1:0+3 Keyword "let"
+         1:4+1 Variable (declaration) "y"
+         1:8+1 Type "t"
+         1:10+1 Operator "="
+         1:12+1 Function "f"
+         1:14+1 Number "1"
+         |}];
        Client.print_semantic_tokens client "b.stag";
        [%expect
          {|
@@ -745,7 +745,13 @@ let%expect_test "documents not of files nor untitled are not checked" =
     hover "untitled:/y/same";
     [%expect
       {|
-      null
+      {
+        "contents": { "kind": "markdown", "value": "```stag\nSame.y : int\n```" },
+        "range": {
+          "end": { "character": 5, "line": 0 },
+          "start": { "character": 4, "line": 0 }
+        }
+      }
       {
         "contents": { "kind": "markdown", "value": "```stag\nSame_2.y : int\n```" },
         "range": {
