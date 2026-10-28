@@ -60,6 +60,7 @@ module Pattern : sig
           { fields : (Syntax.Name.t * t) list
           ; rest : Rest.t
           }
+      | Exception of t
   end
 
   val view : t -> View.t

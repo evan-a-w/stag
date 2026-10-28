@@ -21,7 +21,12 @@ let constructor_refs =
              refs
              ~key:name
              ~data:{ Typed.Constructor_ref.type_name; name; index })
-       | Type _ | Let _ | Expect_test _ | Module_splice _ | Include _ -> ()
+       | Type _
+       | Exception _
+       | Let _
+       | Expect_test _
+       | Module_splice _
+       | Include _ -> ()
      in
      List.iter (force Prelude.toplevels) ~f:(add ~path:[]);
      refs)
@@ -144,6 +149,7 @@ module To_value = struct
             ; "rest", rest_value rest
             ]
         ]
+    | Exception p -> con "Exception" [ pattern p ]
   ;;
 
   let rec expr ({ txt; loc = _ } : Expr.t) =
@@ -199,6 +205,8 @@ module To_value = struct
         "Let"
         [ name var; list binding bindings; option type_expr annot; expr body ]
     | Type decl -> con "Type" [ type_decl decl ]
+    | Exception (exn_name, args) ->
+      con "Exception" [ name exn_name; list type_expr args ]
     | Module (module_name, items) ->
       con "Module" [ name module_name; list toplevel items ]
     | Module_splice (module_name, e) ->
@@ -594,6 +602,7 @@ module Of_value = struct
                      record
                ; rest = field "rest" (rest ~loc) record
                })
+         | "Exception", 1 -> Exception (arg 0 (pattern ~loc))
          | _ -> raise Bad_arguments))
 
   and rest value ~loc =
@@ -678,6 +687,8 @@ module Of_value = struct
                , arg 2 (option (type_expr ~loc))
                , arg 3 (expr ~loc) )
            | "Type", 1 -> Type (arg 0 (type_decl ~loc))
+           | "Exception", 2 ->
+             Exception (arg 0 (name Upper ~loc), arg 1 (list (type_expr ~loc)))
            | "Module", 2 ->
              Module (arg 0 (name Upper ~loc), arg 1 (list (toplevel ~loc)))
            | "Module_splice", 2 ->

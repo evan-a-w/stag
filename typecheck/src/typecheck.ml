@@ -15,6 +15,7 @@ module Generated = struct
       match toplevel.txt with
       | Let (name, _, _, _) -> "let " ^ name.txt
       | Type decl -> "type " ^ decl.name.txt
+      | Exception (name, _) -> "exception " ^ name.txt
       | Module (name, _) | Module_splice (name, _) -> "module " ^ name.txt
       | Include _ -> "include"
       | Expect_test { name; _ } -> sprintf "let%%expect_test %S" name.txt
@@ -556,6 +557,7 @@ let rec pattern_type t (scope : Scope.t) ~(pattern : Source.Pattern.t)
     in
     ( node (Poly_record { fields; rest }) (Fresh.record t row)
     , bindings @ rest_bindings )
+  | Exception _ -> error ~loc Misplaced_exception_pattern
 ;;
 
 (* Closing of the scrutinee and residuals of catch-alls in matches on
@@ -650,6 +652,23 @@ module Variant_match = struct
       Unify.unify_ty t ~ty1:(Fresh.variant t closed) ~ty2:scrutinee |> lift ~loc)
   ;;
 end
+
+(* A case's pattern, which may be [exception p], matching what the scrutinee
+   raises rather than its value. *)
+let case_pattern_type t (scope : Scope.t) handled ~(pattern : Source.Pattern.t) =
+  match Source.Pattern.view pattern with
+  | Exception inner ->
+    let%bind.Result inner, bindings = pattern_type t scope ~pattern:inner in
+    let%map.Result () =
+      Unify.unify_ty t ~ty1:Type.exn ~ty2:inner.ty |> lift ~loc:inner.loc
+    in
+    ( { Typed.Pattern.desc = Exception inner
+      ; ty = Type.exn
+      ; loc = Source.Pattern.loc pattern
+      }
+    , bindings )
+  | _ -> Variant_match.pattern_type t scope handled ~pattern
+;;
 
 (* [name] is the context entry the variable is provided as, if it becomes a
    free variable of the quote: a local's name or a toplevel's canonical name. *)
@@ -1105,7 +1124,7 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
         ~init:(Variant_match.empty, [])
         ~f:(fun (handled, typed_cases) (pattern, body) ->
           let%bind.Result typed_pattern, bindings =
-            Variant_match.pattern_type t scope handled ~pattern
+            case_pattern_type t scope handled ~pattern
           in
           let%bind.Result () =
             check_no_duplicates
@@ -1114,8 +1133,11 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
               ~error:(fun name -> Duplicate_pattern_variable name)
           in
           let%bind.Result () =
-            Unify.unify_ty t ~ty1:scrutinee.ty ~ty2:typed_pattern.ty
-            |> lift ~loc:typed_pattern.loc
+            match typed_pattern.desc with
+            | Exception _ -> Ok ()
+            | _ ->
+              Unify.unify_ty t ~ty1:scrutinee.ty ~ty2:typed_pattern.ty
+              |> lift ~loc:typed_pattern.loc
           in
           let%map.Result body =
             with_monomorphic_bindings
@@ -1127,8 +1149,19 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
           , (typed_pattern, body) :: typed_cases ))
     in
     let typed_cases = List.rev typed_cases in
+    let value_cases =
+      List.filter typed_cases ~f:(fun ((pattern : Typed.Pattern.t), _) ->
+        match pattern.desc with
+        | Exception _ -> false
+        | _ -> true)
+    in
+    let%bind.Result () =
+      match typed_cases, value_cases with
+      | _ :: _, [] -> error ~loc Match_without_value_cases
+      | _ -> Ok ()
+    in
     let%map.Result () =
-      match expr, typed_cases with
+      match expr, value_cases with
       | Generated _, [] ->
         (* Its scrutinee was closed, unless of an empty nominal type, which
            may have been known only from an annotation. *)
@@ -1139,7 +1172,7 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
           scope
           ~scrutinee:scrutinee.ty
           ~loc
-          (List.map typed_cases ~f:fst)
+          (List.map value_cases ~f:fst)
     in
     node (Match (scrutinee, typed_cases)) result
   | Poly_record fields ->
@@ -1571,6 +1604,13 @@ let declare
   let generated =
     Option.map generated_by ~f:(fun splice -> Generated.create splice toplevel)
   in
+  let wrap_error error =
+    Module_scope.within
+      module_
+      (match generated with
+       | None -> error
+       | Some generated -> Generated.wrap_error generated error)
+  in
   match toplevel.txt with
   | Type decl ->
     Type_env.declare
@@ -1578,12 +1618,9 @@ let declare
       module_
       decl
       ~lazily:in_prelude
-      ~wrap_error:(fun error ->
-        Module_scope.within
-          module_
-          (match generated with
-           | None -> error
-           | Some generated -> Generated.wrap_error generated error))
+      ~wrap_error
+  | Exception (name, args) ->
+    Type_env.declare_exception program.type_env module_ name args ~wrap_error
   | Let (name, args, annot, expr) ->
     let name = Module_scope.canonical_name module_ name.txt in
     let toplevel =
@@ -1615,6 +1652,11 @@ let check_declarations t (program : Program_env.t) module_ =
           Type_env.check
             program.type_env
             (Module_scope.canonical_name module_ decl.name.txt)
+          |> Result.ignore_m
+        | Exception (name, _) ->
+          Type_env.check_exception
+            program.type_env
+            (Module_scope.canonical_name module_ name.txt)
           |> Result.ignore_m
         | Let (name, _, _, _) ->
           let toplevel =
@@ -1692,6 +1734,15 @@ let rec signature (program_env : Program_env.t) module_ =
              (Type_env.find_decl_exn
                 program_env.type_env
                 (canonical_name decl.name.txt)))
+      | Exception ({ txt = name; loc = _ }, _) ->
+        (match
+           Type_env.check_exception program_env.type_env (canonical_name name)
+         with
+         | Ok { args; _ } -> Some (Exception { name; args })
+         | Error error ->
+           raise_s
+             [%message
+               "typecheck: exception not checked" (error : Typecheck_error.t)])
       | Module ({ txt = name; loc = _ }, _)
       | Module_splice ({ txt = name; loc = _ }, _) ->
         Some

@@ -63,7 +63,7 @@ let%expect_test "the prelude's signature" =
         module Rest : sig
           type t = Closed | Open | Bind of string
         end
-        type t = Any | Var of string | Lit of Lit.t | Tuple of list[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Poly_variant of string * option[t] | Poly_record of {`fields : list[string * t]; `rest : Rest.t}
+        type t = Any | Var of string | Lit of Lit.t | Tuple of list[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Poly_variant of string * option[t] | Poly_record of {`fields : list[string * t]; `rest : Rest.t} | Exception of t
         val construct : string -> list[t] -> t
         val tuple : list[t] -> t
       end
@@ -78,7 +78,7 @@ let%expect_test "the prelude's signature" =
         val let_ : string -> list[string] -> t -> t -> t
       end
       module Toplevel : sig
-        type t = Let of string * list[string * option[Type_expr.t]] * option[Type_expr.t] * Expr.t | Type of {`kind : Type_decl.Kind.t; `name : string; `params : list[Type_decl.Param.t]} | Module of string * list[t] | Module_splice of string * Expr.t | Include of Expr.t | Expect_test of {`body : Expr.t; `name : string}
+        type t = Let of string * list[string * option[Type_expr.t]] * option[Type_expr.t] * Expr.t | Type of {`kind : Type_decl.Kind.t; `name : string; `params : list[Type_decl.Param.t]} | Exception of string * list[Type_expr.t] | Module of string * list[t] | Module_splice of string * Expr.t | Include of Expr.t | Expect_test of {`body : Expr.t; `name : string}
         val let_ : string -> list[string] -> Expr.t -> t
       end
       module Program : sig
@@ -209,7 +209,7 @@ let%expect_test "constructors are made as the typechecker resolves them" =
             sprintf "%s%s -> 0" (String.concat ~sep:"." (path @ [ name ])) args)
           |> String.concat ~sep:" | "
         ]
-      | Type _ | Value _ -> [])
+      | Type _ | Exception _ | Value _ -> [])
   in
   let source =
     List.mapi
@@ -251,9 +251,10 @@ let%expect_test "constructors are made as the typechecker resolves them" =
            : bool)];
   [%expect
     {|
-    ((constructors 69)
+    ((constructors 71)
      (reflected
-      (prelude.Stag.Path.Ref prelude.Stag.Type.Kind.Alias
+      (prelude.Stag.Path.Ref prelude.Stag.Pattern.Exception
+       prelude.Stag.Toplevel.Exception prelude.Stag.Type.Kind.Alias
        prelude.Stag.Type.Kind.Record prelude.Stag.Type.Kind.Variant))
      (others_same_as_to_value true))
     |}]

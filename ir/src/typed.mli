@@ -93,6 +93,9 @@ module Pattern : sig
           { fields : (string * 'p) list
           ; rest : Rest.t
           }
+      | Exception of 'p
+      (** [exception p], at the top of a match case: matches what the
+          scrutinee raises. Its type is [exn]. *)
     [@@deriving sexp_of]
   end
 

@@ -24,6 +24,17 @@ val declare
   -> Syntax.Type_decl.t
   -> unit
 
+(** Declares the exception [name], a constructor of [exn], a member of
+    [module_]. Its constructor's [index] is [0]: exceptions are told apart by
+    canonical name. *)
+val declare_exception
+  :  ?wrap_error:(Typecheck_error.t -> Typecheck_error.t)
+  -> t
+  -> Module_scope.t
+  -> Syntax.Name.t
+  -> Syntax.Type_expr.t list
+  -> unit
+
 (** The checked declaration of the type of canonical name [name]. *)
 val check : t -> string -> (Signature.Type_decl.t, Typecheck_error.t) Result.t
 
@@ -65,6 +76,9 @@ val find_field
   -> Module_scope.t
   -> Syntax.Decl_path.t Located.t
   -> (Field.t, Typecheck_error.t) Result.t
+
+(** The exception of canonical name [name], checking it. *)
+val check_exception : t -> string -> (Constructor.t, Typecheck_error.t) Result.t
 
 (** By canonical name, erring at [loc]. *)
 val constructor

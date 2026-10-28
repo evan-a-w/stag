@@ -505,6 +505,10 @@ and pattern_construct t : Pattern.t =
       if starts_pattern_atom (peek t) then Some (pattern_construct t) else None
     in
     since t start (Pattern.Poly_variant (tag, arg))
+  | Exception ->
+    advance t;
+    let pattern = pattern_construct t in
+    since t start (Pattern.Exception pattern)
   | _ -> pattern_atom t
 
 and pattern_atom t : Pattern.t =
@@ -1072,6 +1076,10 @@ let rec toplevel t : Toplevel.t =
   | Type ->
     advance t;
     since t start (Toplevel.Type (type_decl t))
+  | Exception ->
+    advance t;
+    let name, args = constructor_decl t in
+    since t start (Toplevel.Exception (name, args))
   | Module ->
     advance t;
     let name = uident t ~what:"a module name" in
@@ -1103,7 +1111,10 @@ let rec toplevel t : Toplevel.t =
     expect t Equal;
     let body = expr t in
     since t start (Toplevel.Expect_test { name; body })
-  | _ -> expected t "a declaration (`let`, `type`, `module` or `include`)"
+  | _ ->
+    expected
+      t
+      "a declaration (`let`, `type`, `exception`, `module` or `include`)"
 
 (* [.~e], the declarations [e] generates. *)
 and declaration_splice t =

@@ -1,15 +1,26 @@
 open! Import
 
-(** An error raised by the program being evaluated, eg. division by zero, at
-    the application that raised it. *)
+(** An error raised by the program being evaluated, eg. an exception it does
+    not handle or an exceeded limit, at the expression that raised it. *)
 type t =
   { loc : Loc.t
   ; message : string
+  ; raised : Value.t option
+    (** The exception, of type [exn], which a [match] may handle. Other errors
+        can't be handled. *)
   }
 [@@deriving sexp_of]
+
+val create : loc:Loc.t -> string -> t
+
+(** Raising [exn], with the message [Uncaught exception E args]. *)
+val raise_ : loc:Loc.t -> Value.t -> t
 
 (** Sexps as [(message @ loc)]. *)
 val to_error : t -> Error.t
 
 (** The [t] an error was made from by [to_error], if any. *)
 val of_error : Error.t -> t option
+
+(** The exception an error raises, if it is one. *)
+val raised : Error.t -> Value.t option

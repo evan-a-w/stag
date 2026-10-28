@@ -54,6 +54,7 @@ module Pattern = struct
           { fields : (Syntax.Name.t * t) list
           ; rest : Rest.t
           }
+      | Exception of t
   end
 
   let syntax_view ({ txt; loc } : Syntax.Pattern.t) : View.t =
@@ -80,6 +81,7 @@ module Pattern = struct
              | Open -> Open
              | Bind name -> Bind (Name name))
         }
+    | Exception pattern -> Exception (sub pattern)
   ;;
 
   let generated_view ({ desc; ty = _; loc } : Typed.Pattern.t) : View.t =
@@ -107,6 +109,7 @@ module Pattern = struct
              | Open -> Open
              | Bind ident -> Bind (Ident ident))
         }
+    | Exception pattern -> Exception (sub pattern)
   ;;
 
   let view = function

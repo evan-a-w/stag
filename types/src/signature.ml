@@ -25,6 +25,11 @@ module Field = struct
   [@@deriving sexp_of]
 end
 
+(* A tuple parenthesizes its components as constructor arguments need. *)
+let constructor_args printer name args =
+  sprintf "%s of %s" name (Type.Printer.ty printer (TTuple args))
+;;
+
 module Type_decl = struct
   module Kind = struct
     type t =
@@ -53,9 +58,7 @@ module Type_decl = struct
         List.map constructors ~f:(fun { name; args } ->
           match args with
           | [] -> name
-          (* A tuple parenthesizes its components as constructor arguments
-             need. *)
-          | args -> sprintf "%s of %s" name (ty (TTuple args)))
+          | args -> constructor_args printer name args)
         |> String.concat ~sep:" | "
         |> Some
       | Record fields ->
@@ -76,6 +79,7 @@ module Item = struct
   type t =
     | Value of Value.t
     | Type of Type_decl.t
+    | Exception of Constructor.t
     | Module of
         { name : string
         ; items : t list
@@ -95,12 +99,12 @@ module Scope = struct
     ; types =
         List.filter_map items ~f:(function
           | Type { name; _ } -> Some name
-          | Value _ | Module _ -> None)
+          | Value _ | Exception _ | Module _ -> None)
         |> String.Set.of_list
     ; modules =
         List.filter_map items ~f:(function
           | Module { name; _ } -> Some name
-          | Value _ | Type _ -> None)
+          | Value _ | Type _ | Exception _ -> None)
         |> String.Set.of_list
     }
   ;;
@@ -181,6 +185,9 @@ let rec lines ~of_prelude enclosing : Item.t -> _ =
         printer
         decl
         ~canonical_name:(Scope.canonical_name scope decl.name))
+  | Exception { name; args = [] } -> [ "exception " ^ name ]
+  | Exception { name; args } ->
+    line (fun printer -> "exception " ^ constructor_args printer name args)
   | Module { name; items = [] } -> [ sprintf "module %s : sig end" name ]
   | Module { name; items } ->
     let enclosing = Scope.create (scope.path @ [ name ]) items :: enclosing in

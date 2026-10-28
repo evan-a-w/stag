@@ -16,6 +16,15 @@ module Value : sig
   [@@deriving sexp_of]
 end
 
+(** The exceptions prims raise, declared by the prelude. *)
+module Exception : sig
+  type t =
+    | Division_by_zero
+    | Invalid_argument of string
+    | Failure of string
+  [@@deriving sexp_of]
+end
+
 type t [@@deriving sexp_of, equal]
 
 (** Monomorphic, so needs no instantiation. *)
@@ -25,12 +34,12 @@ val ty : t -> Type.ty
 val arity : t -> int
 
 (** Applies [t] to [arity t] arguments, of the types of [ty]. Printing goes to
-    [output]. Errors are messages, eg. for division by zero. *)
+    [output]. *)
 val apply
   :  t
   -> output:(string -> unit)
   -> Value.t list
-  -> (Value.t, string) Result.t
+  -> (Value.t, Exception.t) Result.t
 
 (** By full path. *)
 val find : Syntax.Path.t -> t option

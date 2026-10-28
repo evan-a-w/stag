@@ -169,7 +169,7 @@ let%expect_test "Int prims" =
   print_char ' ';
   print_int (Int.compare 1 2);
   print_char ' ';
-  print_int (Int.of_string "123");
+  print_int (Int.of_string_exn "123");
   print_endline "";
   print_bool (Int.le 2 2);
   print_bool (Int.gt 1 2);

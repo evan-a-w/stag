@@ -213,7 +213,7 @@ Runtime errors:
   File "bin/main.stag", line 1, characters 47-60:
   1 | let main = print_endline "dividing"; print_int (Int.div 1 0)
                                                      ^^^^^^^^^^^^^
-  Error: Division by zero
+  Error: Uncaught exception Division_by_zero
   [1]
   $ cat > test/calc_test.stag <<'X'
   > let%expect_test "div" = print_endline "before"; print_int (Int.div 1 0)
@@ -223,7 +223,7 @@ Runtime errors:
   File "test/calc_test.stag", line 1, characters 58-71:
   1 | let%expect_test "div" = print_endline "before"; print_int (Int.div 1 0)
                                                                 ^^^^^^^^^^^^^
-  Error: Expect test "div" failed: Division by zero
+  Error: Expect test "div" failed: Uncaught exception Division_by_zero
   Output since the last [%expect]:
     before
   calc_test: 1 of 2 test(s) failed
@@ -320,7 +320,7 @@ Expect test failures other than mismatches are reported:
   File "t/t.stag", line 12, characters 12-25:
   12 |   print_int (Int.div 1 0)
                    ^^^^^^^^^^^^^
-  Error: Expect test "error" failed: Division by zero
+  Error: Expect test "error" failed: Uncaught exception Division_by_zero
   Output since the last [%expect]:
     after
   t: 2 of 2 test(s) failed

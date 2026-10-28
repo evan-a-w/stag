@@ -61,7 +61,7 @@ let captures t ~ident ~args ~body =
     | Tuple patterns | Construct (_, patterns) ->
       List.iter patterns ~f:def_pattern
     | Record fields -> List.iter fields ~f:(fun (_, p) -> def_pattern p)
-    | Poly_variant (_, Some pattern) -> def_pattern pattern
+    | Poly_variant (_, Some pattern) | Exception pattern -> def_pattern pattern
     | Poly_record { fields; rest } ->
       List.iter fields ~f:(fun (_, p) -> def_pattern p);
       (match rest with
@@ -275,6 +275,7 @@ let instantiate t (code : Typed.Expr.t) ~entry =
       | Record fields ->
         Record (List.map fields ~f:(fun (field, p) -> field, pattern p))
       | Poly_variant (tag, arg) -> Poly_variant (tag, Option.map arg ~f:pattern)
+      | Exception p -> Exception (pattern p)
       | Poly_record { fields; rest } ->
         let fields = List.map fields ~f:(fun (label, p) -> label, pattern p) in
         let rest : Typed.Pattern.Rest.t =
@@ -350,7 +351,25 @@ let splice_code
       })
 ;;
 
-let runtime_error ~loc message = Error (Runtime_error.to_error { loc; message })
+let runtime_error ~loc message =
+  Error (Runtime_error.to_error (Runtime_error.create ~loc message))
+;;
+
+let raise_ ~loc exn =
+  Error (Runtime_error.to_error (Runtime_error.raise_ ~loc exn))
+;;
+
+let prelude_exception name : Typed.Constructor_ref.t =
+  { type_name = "exn"; name = Prelude_path.canonical name; index = 0 }
+;;
+
+let prim_exception : Prim.Exception.t -> Value.t = function
+  | Division_by_zero -> Construct (prelude_exception "Division_by_zero", [])
+  | Invalid_argument message ->
+    Construct (prelude_exception "Invalid_argument", [ String message ])
+  | Failure message ->
+    Construct (prelude_exception "Failure", [ String message ])
+;;
 
 let pattern_mismatch pattern value =
   Or_error.error_s
@@ -372,7 +391,10 @@ let rec match_pattern env (pattern : Typed.Pattern.t) (value : Value.t) =
   | Lit Unit, Unit -> Ok true
   | Tuple patterns, Tuple values -> match_all env pattern patterns values
   | Construct (constructor, patterns), Construct (constructor', values) ->
-    if constructor.index = constructor'.index
+    if
+      constructor.index = constructor'.index
+      && ((not (String.equal constructor.type_name "exn"))
+          || String.equal constructor.name constructor'.name)
     then match_all env pattern patterns values
     else Ok false
   | Record fields, Record values ->
@@ -413,7 +435,13 @@ let rec match_pattern env (pattern : Typed.Pattern.t) (value : Value.t) =
           Env.set env ~ident ~value:(Poly_record rest)
         | Bind _ | Closed | Open -> ());
        matched)
-  | ( (Lit _ | Tuple _ | Construct _ | Record _ | Poly_variant _ | Poly_record _)
+  | ( ( Lit _
+      | Tuple _
+      | Construct _
+      | Record _
+      | Poly_variant _
+      | Poly_record _
+      | Exception _ )
     , _ ) -> pattern_mismatch pattern value
 
 and match_all env pattern patterns values =
@@ -560,8 +588,19 @@ and step t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
          [%message
            "Field of a non-record" (field : Typed.Field_ref.t) (value : Value.t)])
   | Match (scrutinee, cases) ->
-    let%bind value = eval' scrutinee in
-    eval_match t ~env ~level value cases ~loc:expr.loc
+    let value_cases, exception_cases =
+      List.partition_map cases ~f:(fun ((pattern : Typed.Pattern.t), body) ->
+        match pattern.desc with
+        | Exception pattern -> Second (pattern, body)
+        | _ -> First (pattern, body))
+    in
+    (match eval' scrutinee with
+     | Ok value -> eval_match t ~env ~level value value_cases ~loc:expr.loc
+     | Error error as result ->
+       (match exception_cases, Runtime_error.raised error with
+        | _ :: _, Some exn ->
+          handle t ~env ~level exn exception_cases ~unhandled:result
+        | _ -> result))
   | Poly_record fields ->
     let%bind fields = map_fields fields ~f:eval' in
     let%map fields = String.Map.of_alist_or_error fields in
@@ -625,12 +664,13 @@ and apply t (f : Value.t) arg ~loc =
       | Some args ->
         (match Prim.apply prim ~output:t.output args with
          | Ok value -> Ok (Value.of_prim value)
-         | Error message -> runtime_error ~loc message))
+         | Error exn -> raise_ ~loc (prim_exception exn)))
   | Intrinsic intrinsic ->
     (match intrinsic, arg with
      | Type_expr, Type ty -> Ok (Syntax_value.Type_expr.to_value ty)
      | (Type_ref_name | Constructor_ref_name | Field_ref_name), Ref ref_ ->
        Ok (String (Decl_ref.short_name ref_))
+     | Raise, exn -> raise_ ~loc exn
      | Type_decl, Ref { kind = Type; name } ->
        (match t.reflect with
         | Some reflect ->
@@ -666,6 +706,14 @@ and eval_match t ~env ~level value cases ~loc =
     (match%bind match_pattern env pattern value with
      | true -> eval t ~env ~level body
      | false -> eval_match t ~env ~level value cases ~loc)
+
+and handle t ~env ~level exn cases ~unhandled =
+  match cases with
+  | [] -> unhandled
+  | (pattern, body) :: cases ->
+    (match%bind match_pattern env pattern exn with
+     | true -> eval t ~env ~level body
+     | false -> handle t ~env ~level exn cases ~unhandled)
 
 (* The code [expr] is in a quote built at [level], [depth] quotes in. Splices at
    [depth] 1 are evaluated now, and the values of persistent binders of [level]

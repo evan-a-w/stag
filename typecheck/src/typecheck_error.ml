@@ -61,6 +61,8 @@ module Kind = struct
         ; actual_type : string
         }
     | Empty_record
+    | Misplaced_exception_pattern
+    | Match_without_value_cases
     | Duplicate_pattern_variable of string
     | Duplicate_row_entry of string
     | Compile_time_use_of_toplevel_being_checked of string
@@ -135,7 +137,7 @@ let unification_error ~loc error = create ~loc (Unification_error error)
 
 let runtime_message error =
   match Runtime_error.of_error error with
-  | Some { message; loc = _ } -> message
+  | Some { message; loc = _; raised = _ } -> message
   | None -> Error.to_string_hum error
 ;;
 
@@ -284,6 +286,11 @@ let rec kind_message (kind : Kind.t) ~show_type =
       (show_type actual_type)
       (show_type expected_type)
   | Empty_record -> "A record must have at least one field"
+  | Misplaced_exception_pattern ->
+    "An exception pattern is only allowed at the top of a match case, as in \
+     [match e with | exception E -> ...]"
+  | Match_without_value_cases ->
+    "A match must have a case for the value, not only exception cases"
   | Duplicate_pattern_variable name ->
     sprintf "The variable %s is bound several times in this matching" name
   | Duplicate_row_entry name ->

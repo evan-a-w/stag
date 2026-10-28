@@ -67,6 +67,8 @@ module Kind : sig
         ; actual_type : string
         }
     | Empty_record
+    | Misplaced_exception_pattern
+    | Match_without_value_cases
     | Duplicate_pattern_variable of string
     | Duplicate_row_entry of string
     | Compile_time_use_of_toplevel_being_checked of string

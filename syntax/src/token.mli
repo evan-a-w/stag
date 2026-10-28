@@ -18,6 +18,7 @@ type t =
   | Match
   | With
   | Fun
+  | Exception
   | Type
   | Of
   | Module

@@ -518,7 +518,7 @@ let b = M.y
     File "a.stag", line 19, characters 0-31:
     19 | module M = .~(Int.div 1 0; Nil)
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: This declaration splice failed at compile time: Division by zero
+    Error: This declaration splice failed at compile time: Uncaught exception Division_by_zero
     File "a.stag", line 19, characters 14-25:
     19 | module M = .~(Int.div 1 0; Nil)
                        ^^^^^^^^^^^
@@ -1002,7 +1002,7 @@ include .~(Int.div 1 0; Nil)
     File "a.stag", line 18, characters 0-28:
     18 | include .~(Int.div 1 0; Nil)
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: This declaration splice failed at compile time: Division by zero
+    Error: This declaration splice failed at compile time: Uncaught exception Division_by_zero
     File "a.stag", line 18, characters 11-22:
     18 | include .~(Int.div 1 0; Nil)
                     ^^^^^^^^^^^

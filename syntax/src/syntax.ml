@@ -152,6 +152,9 @@ module Pattern = struct
         { fields : (Name.t * t) list
         ; rest : Rest.t
         }
+    | Exception of t
+    (** [exception p], at the top of a match arm: matches an exception the
+        scrutinee raises. *)
   [@@deriving sexp_of, compare, equal]
 end
 
@@ -195,6 +198,7 @@ module Toplevel = struct
   and desc =
     | Let of Name.t * Binding.t list * Type_expr.t option * Expr.t
     | Type of Type_decl.t
+    | Exception of Name.t * Type_expr.t list (** [exception E of t1 * t2]. *)
     | Module of Name.t * t list
     | Module_splice of Name.t * Expr.t (** [module M = .~e]. *)
     | Include of Expr.t (** [include .~e]. *)

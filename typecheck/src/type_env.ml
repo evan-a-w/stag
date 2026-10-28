@@ -46,9 +46,19 @@ module Decl = struct
   ;;
 end
 
+module Exception_decl = struct
+  type t =
+    { args : Type_expr.t list
+    ; module_ : Module_scope.t
+    ; wrap_error : Typecheck_error.t -> Typecheck_error.t
+    ; mutable checked : Constructor.t option
+    }
+end
+
 type t =
   { fresh : Fresh.t
   ; types : Decl.t String.Table.t
+  ; exceptions : Exception_decl.t String.Table.t
   ; constructors : Constructor.t String.Table.t
   ; fields : Field.t String.Table.t
   ; constructor_types : string String.Table.t
@@ -60,6 +70,7 @@ type t =
 let create fresh =
   { fresh
   ; types = String.Table.create ()
+  ; exceptions = String.Table.create ()
   ; constructors = String.Table.create ()
   ; fields = String.Table.create ()
   ; constructor_types = String.Table.create ()
@@ -68,7 +79,7 @@ let create fresh =
 ;;
 
 let builtins =
-  List.map [ "int"; "bool"; "string"; "char"; "unit" ] ~f:(fun name ->
+  List.map [ "int"; "bool"; "string"; "char"; "unit"; "exn" ] ~f:(fun name ->
     { Type_decl.name = Located.create name; params = []; kind = Abstract })
 ;;
 
@@ -392,6 +403,43 @@ let declare
   | Record fields -> declares fields t.field_types
 ;;
 
+let declare_exception ?(wrap_error = Fn.id) t module_ (name : Name.t) args =
+  Hashtbl.add_exn
+    t.exceptions
+    ~key:(Module_scope.canonical_name module_ name.txt)
+    ~data:{ Exception_decl.args; module_; wrap_error; checked = None }
+;;
+
+(* Its arguments have no type variables, which nothing would bind. *)
+let check_exception t name =
+  let decl = Hashtbl.find_exn t.exceptions name in
+  match decl.checked with
+  | Some checked -> Ok checked
+  | None ->
+    Result.map_error ~f:decl.wrap_error
+    @@
+    let%map.Result args =
+      map_result decl.args ~f:(fun arg ->
+        elaborate'
+          t
+          decl.module_
+          (Params String.Map.empty)
+          ~expansions:(String.Table.create ())
+          arg
+        |> Result.map ~f:fst)
+    in
+    let checked =
+      { Constructor.name
+      ; type_name = "exn"
+      ; index = 0
+      ; args
+      ; result = Type.exn
+      }
+    in
+    decl.checked <- Some checked;
+    checked
+;;
+
 let define t (decl : Decl.t) =
   let expansions = String.Table.create () in
   let elaborate =
@@ -503,13 +551,16 @@ let find_member t ~types ~members name ~loc ~unbound =
 ;;
 
 let constructor t name ~loc =
-  find_member
-    t
-    ~types:t.constructor_types
-    ~members:t.constructors
-    name
-    ~loc
-    ~unbound:(fun path -> Unbound_constructor path)
+  if Hashtbl.mem t.exceptions name
+  then check_exception t name
+  else
+    find_member
+      t
+      ~types:t.constructor_types
+      ~members:t.constructors
+      name
+      ~loc
+      ~unbound:(fun path -> Unbound_constructor path)
 ;;
 
 let field t name ~loc =

@@ -58,7 +58,7 @@ let of_typecheck_error (error : Typecheck_error.t) =
     | Splice_evaluation_failed { error; code = _ }
     | Declaration_splice_failed error ->
       (match Runtime_error.of_error error with
-       | Some { loc; message = _ } when not (Loc.is_none loc) ->
+       | Some { loc; message = _; raised = _ } when not (Loc.is_none loc) ->
          [ { Note.loc; message = "The error was raised here" } ]
        | Some _ | None -> [])
     | Free_in_spliced_code { name; unusable } ->
@@ -113,7 +113,7 @@ let of_driver_error : Driver.Error.t -> t = function
 
 let of_runtime_error error =
   match Runtime_error.of_error error with
-  | Some { loc; message } -> create ~loc message
+  | Some { loc; message; raised = _ } -> create ~loc message
   | None -> create ~loc:Loc.none (Error.to_string_hum error)
 ;;
 

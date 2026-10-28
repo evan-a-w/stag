@@ -6,6 +6,7 @@ type t =
   | Constructor_ref_name
   | Field_ref_name
   | Type_decl
+  | Raise
 [@@deriving sexp_of, equal, enumerate]
 
 let name = function
@@ -14,6 +15,7 @@ let name = function
   | Constructor_ref_name -> "constructor_ref_name"
   | Field_ref_name -> "field_ref_name"
   | Type_decl -> "type_decl"
+  | Raise -> "raise"
 ;;
 
 let public_name = function
@@ -22,6 +24,7 @@ let public_name = function
   | Constructor_ref_name -> "Stag.Constructor_ref.name"
   | Field_ref_name -> "Stag.Field_ref.name"
   | Type_decl -> "Stag.Type.decl"
+  | Raise -> "raise"
 ;;
 
 let prelude ?(args = []) name = Type.TCon (Prelude_path.canonical name, args)
@@ -39,6 +42,7 @@ let ty t ~var =
     TArrow
       ( prelude "Stag.Type_ref.t"
       , prelude "option" ~args:[ ATy (prelude "Stag.Type.Decl.t") ] )
+  | Raise -> TArrow (Type.exn, var ())
 ;;
 
 let find path =

@@ -115,6 +115,7 @@ module Stag = struct
       | Record of list[Path.t[Field_ref.t] * t]
       | Poly_variant of string * option[t]
       | Poly_record of {`fields : list[string * t]; `rest : Rest.t}
+      | Exception of t
 
     let construct name args = Construct (Path.Name name, args)
 
@@ -177,6 +178,7 @@ module Stag = struct
     type t =
       | Let of string * list[Binding.t] * option[Type_expr.t] * Expr.t
       | Type of Type_decl.t
+      | Exception of string * list[Type_expr.t]
       | Module of string * list[t]
       | Module_splice of string * Expr.t
       | Include of Expr.t

@@ -137,6 +137,7 @@ module Pattern = struct
           { fields : (string * 'p) list
           ; rest : Rest.t
           }
+      | Exception of 'p
     [@@deriving sexp_of]
   end
 
@@ -152,7 +153,7 @@ module Pattern = struct
   let rec is_irrefutable t =
     match t.desc with
     | Any | Var _ -> true
-    | Lit _ | Construct _ | Record _ | Poly_variant _ -> false
+    | Lit _ | Construct _ | Record _ | Poly_variant _ | Exception _ -> false
     | Tuple patterns -> List.for_all patterns ~f:is_irrefutable
     | Poly_record { fields; rest = _ } ->
       List.for_all fields ~f:(fun (_, pattern) -> is_irrefutable pattern)

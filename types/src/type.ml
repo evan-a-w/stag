@@ -124,6 +124,7 @@ let bool = TCon ("bool", [])
 let string = TCon ("string", [])
 let char = TCon ("char", [])
 let unit = TCon ("unit", [])
+let exn = TCon ("exn", [])
 
 let canonical_ty =
   Var.canonical ~var:(function

@@ -38,7 +38,8 @@ let exceeded t =
 
 let step t ~loc ~f =
   match exceeded t with
-  | Some message -> Error (Runtime_error.to_error { loc; message })
+  | Some message ->
+    Error (Runtime_error.to_error (Runtime_error.create ~loc message))
   | None ->
     t.steps <- t.steps + 1;
     t.depth <- t.depth + 1;

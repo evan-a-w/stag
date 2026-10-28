@@ -176,6 +176,7 @@ let members (toplevel : Toplevel.t) : (Member.t * Name.t) list =
      | Variant constructors ->
        List.map constructors ~f:(fun (name, _) -> member Constructor name)
      | Record fields -> List.map fields ~f:(fun (name, _) -> member Field name))
+  | Exception (name, _) -> [ member Constructor name ]
   | Module (name, _) | Module_splice (name, _) -> [ (Module, name.txt), name ]
   | Expect_test _ | Include _ -> []
 ;;
@@ -201,7 +202,12 @@ let rec check_unique ~path taken toplevels =
                    (Duplicate_type_parameter { type_name; param }))
             else Ok (Set.add seen param))
         |> Result.ignore_m
-      | Let _ | Module _ | Module_splice _ | Expect_test _ | Include _ -> Ok ()
+      | Let _
+      | Exception _
+      | Module _
+      | Module_splice _
+      | Expect_test _
+      | Include _ -> Ok ()
     in
     let%bind.Result () =
       iter_result (members toplevel) ~f:(fun (((kind, name) as member), at) ->
@@ -219,7 +225,8 @@ let rec check_unique ~path taken toplevels =
         ~path:(path @ [ name.txt ])
         (Member.Hash_set.create ())
         toplevels
-    | Let _ | Type _ | Module_splice _ | Expect_test _ | Include _ -> Ok ())
+    | Let _ | Type _ | Exception _ | Module_splice _ | Expect_test _ | Include _
+      -> Ok ())
 ;;
 
 let check_unique module_ toplevels =
@@ -261,7 +268,8 @@ let rec register module_ toplevels ~parent ~generated_by =
       let splice = splice expr ~into:(Into_include (Queue.create ())) in
       Queue.enqueue into (Included splice);
       Queue.enqueue module_.includes splice
-    | Let _ | Type _ | Expect_test _ | Module _ | Module_splice _ ->
+    | Let _ | Type _ | Exception _ | Expect_test _ | Module _ | Module_splice _
+      ->
       module_.program.declare scope toplevel ~generated_by;
       Queue.enqueue into (Written { toplevel; scope; generated_by });
       List.iter (members toplevel) ~f:(fun (member, _) ->
@@ -277,7 +285,7 @@ let rec register module_ toplevels ~parent ~generated_by =
               name
               ~splice:(Some (splice expr ~into:(Into_module name.txt)))
             : module_)
-       | Let _ | Type _ | Expect_test _ | Include _ -> ()))
+       | Let _ | Type _ | Exception _ | Expect_test _ | Include _ -> ()))
 ;;
 
 let add t toplevels =
@@ -696,7 +704,7 @@ let iter_declarations t ~f =
         (match toplevel.txt with
          | Module (name, _) | Module_splice (name, _) ->
            iter_module (Hashtbl.find_exn scope.module_.modules name.txt)
-         | Let _ | Type _ | Expect_test _ | Include _ -> Ok ()))
+         | Let _ | Type _ | Exception _ | Expect_test _ | Include _ -> Ok ()))
   in
   iter_module t.module_
 ;;

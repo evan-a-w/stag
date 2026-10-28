@@ -237,6 +237,7 @@ let rec pattern ~prec (p : Pattern.t) =
      | Closed -> braces fields
      | Open -> braces ~trailing:false (fields @ [ text ".." ])
      | Bind name -> braces ~trailing:false (fields @ [ text (".." ^ name.txt) ]))
+  | Exception p -> paren_if (prec > 1) (text "exception " ^^ pattern ~prec:1 p)
 ;;
 
 let pattern_doc = pattern ~prec:0
@@ -610,6 +611,18 @@ let type_param (param : Type_decl.Param.t Located.t) =
   | Row name -> text ("{..'" ^ name ^ "}")
 ;;
 
+let constructor_decl ((name : Name.t), args) =
+  match args with
+  | [] -> text name.txt
+  | args ->
+    text (name.txt ^ " of ")
+    ^^ align
+         (group
+            (separate
+               (text " *" ^^ line)
+               (List.map args ~f:(type_expr ~prec:2))))
+;;
+
 let type_decl ({ name; params; kind } : Type_decl.t) =
   let lhs =
     text ("type " ^ name.txt)
@@ -627,17 +640,6 @@ let type_decl ({ name; params; kind } : Type_decl.t) =
   | Alias t -> definition lhs (type_expr_doc t)
   | Variant [] -> lhs ^^ text " = |"
   | Variant constructors ->
-    let constructor ((name : Name.t), args) =
-      match args with
-      | [] -> text name.txt
-      | args ->
-        text (name.txt ^ " of ")
-        ^^ align
-             (group
-                (separate
-                   (text " *" ^^ line)
-                   (List.map args ~f:(type_expr ~prec:2))))
-    in
     group
       (lhs
        ^^ text " ="
@@ -647,7 +649,7 @@ let type_decl ({ name; params; kind } : Type_decl.t) =
                (List.mapi constructors ~f:(fun i c ->
                   line
                   ^^ (if i = 0 then if_break "| " else text "| ")
-                  ^^ constructor c))))
+                  ^^ constructor_decl c))))
   | Record fields ->
     lhs
     ^^ text " = "
@@ -666,7 +668,7 @@ module Kind = struct
   let of_toplevel (t : Toplevel.t) =
     match t.txt with
     | Let _ -> Let
-    | Type _ -> Type
+    | Type _ | Exception _ -> Type
     | Module _ | Module_splice _ | Include _ | Expect_test _ -> Other
   ;;
 end
@@ -679,6 +681,7 @@ let rec toplevel ~width ~indent ~blank_between (t : Toplevel.t) =
       (let_lhs "let" name params annot)
       (expr_doc rhs)
   | Type decl -> type_decl decl
+  | Exception (name, args) -> text "exception " ^^ constructor_decl (name, args)
   | Module (name, []) -> text ("module " ^ name.txt ^ " = struct end")
   | Module (name, members) ->
     text ("module " ^ name.txt ^ " = struct")
