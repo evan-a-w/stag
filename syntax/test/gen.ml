@@ -88,9 +88,8 @@ let rec row ?(label = label) t ~entry : Type_expr.row =
      | 0 -> Type_expr.Empty
      | 1 -> Var (loc "r")
      | _ -> Extend (label t, entry t, row ~label t ~entry))
-;;
 
-let rec type_expr t : Type_expr.t =
+and type_expr t : Type_expr.t =
   let unit =
     loc (Type_expr.Con (loc (Decl_path.Root (Path.name "unit")), []))
   in
@@ -121,10 +120,10 @@ let rec type_expr t : Type_expr.t =
          ; (fun t ->
              Variant
                (row t ~entry:(fun t -> if bool t then unit else type_expr t)))
+         ; (fun t -> Splice (expr t))
          ])
-;;
 
-let rec pattern t : Pattern.t =
+and pattern t : Pattern.t =
   loc
     (choose
        t
@@ -153,11 +152,10 @@ let rec pattern t : Pattern.t =
                })
          ; (fun t -> Exception (pattern t))
          ])
-;;
 
-let binding t : Binding.t = name t, Option.some_if (bool t) (type_expr t)
+and binding t : Binding.t = name t, Option.some_if (bool t) (type_expr t)
 
-let rec expr t : Expr.t =
+and expr t : Expr.t =
   loc
     (choose
        t
@@ -221,27 +219,27 @@ let rec expr t : Expr.t =
              Poly_update
                (expr t, list t ~min:1 ~max:3 (fun t -> label t, expr t)))
          ; (fun t -> Poly_variant (label t, Some (expr t)))
+         ; (fun t -> Struct_quote (list t ~min:0 ~max:3 toplevel))
          ])
-;;
 
-let type_decl t : Type_decl.t =
+and type_decl t : Type_decl.t =
   { name = name t
   ; params =
       list t ~min:0 ~max:2 (fun t ->
         loc (if bool t then Type_decl.Param.Ty "a" else Row "r"))
   ; kind =
-      (match int t 4 with
+      (match int t 5 with
        | 0 -> Abstract
        | 1 -> Alias (type_expr t)
        | 2 ->
          Variant
            (list t ~min:0 ~max:3 (fun t ->
               loc (uident t), list t ~min:0 ~max:3 type_expr))
-       | _ -> Record (list t ~min:1 ~max:3 (fun t -> name t, type_expr t)))
+       | 3 -> Record (list t ~min:1 ~max:3 (fun t -> name t, type_expr t))
+       | _ -> Splice (expr t))
   }
-;;
 
-let rec toplevel t : Toplevel.t =
+and toplevel t : Toplevel.t =
   loc
     (match int t 10 with
      | 0 ->

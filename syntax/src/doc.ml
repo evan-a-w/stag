@@ -169,7 +169,11 @@ let rec fits ?(ended = false) ~spaced width (commands : (int * Mode.t * t) list)
      | Line s ->
        (match mode with
         | Flat ->
-          fits
+          (* A flat line after an ended one would be broken anyway: the group
+             is broken instead, to lay it out as when the comment ending the
+             line is already there. *)
+          (not ended)
+          && fits
             ~ended
             ~spaced:(spaced_after s ~spaced)
             (width - String.length s)

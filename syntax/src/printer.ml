@@ -336,6 +336,14 @@ and starts_with_record (t : Type_expr.t) =
   | Arrow (first, _) | Tuple (first :: _) -> starts_with_record first
   | Var _ | Con _ | Tuple [] | Code _ | Variant _ | Splice _ -> false
 
+(* Whether [t], printed at precedence 0, starts with a splice, which would read
+   as a definition's splice after [type t =]. *)
+and starts_with_splice (t : Type_expr.t) =
+  match t.txt with
+  | Splice _ -> true
+  | Arrow (first, _) | Tuple (first :: _) -> starts_with_splice first
+  | Var _ | Con _ | Tuple [] | Code _ | Record _ | Variant _ -> false
+
 and row_entries roots (r : Type_expr.row) =
   match r.txt with
   | Empty -> [], None
@@ -721,6 +729,8 @@ and type_decl roots ({ name; params; kind } : Type_decl.t) =
   in
   match kind with
   | Abstract -> lhs
+  | Alias t when starts_with_splice t ->
+    definition lhs (parens (type_expr_doc roots t))
   | Alias t -> definition lhs (type_expr_doc roots t)
   | Splice e -> lhs ^^ text " = " ^^ spliced roots e
   | Variant [] -> lhs ^^ text " = |"
