@@ -22,7 +22,11 @@ nothing. `-fuel N`, `-max-depth N` and `-time-limit SPAN` bound each phase of
 evaluation (compile time, evaluation, each test); they are unlimited by default.
 
 A program is a set of files, each a module named after the file
-(`foo_bar.stag` is `Foo_bar`). Errors are reported as OCaml's compiler does.
+(`foo_bar.stag` is `Foo_bar`). Errors are reported as OCaml's compiler does:
+all of them, by location (the first 50, then how many more), each once, and
+not those that only follow from another (uses of what failed to check, names a
+failed splice might have defined). A program with errors is not evaluated, nor
+are its tests run.
 
 ## stag-build
 
@@ -187,15 +191,13 @@ server `stag lsp` (formatting falls back to `stag fmt` if it cannot start).
 - Hover (the type of the name or expression under the cursor) and go to
   definition (of variables, toplevel values across files, types,
   constructors and record fields), from the typed tree of the document's
-  check, so not while it has an error.
+  check, which, with errors, has what did check: inside an expression that
+  failed to check, its parts that did.
 - Only documents of files (`file:`) and new ones (`untitled:`) are checked:
   others, eg. a diff's old version, could not be checked as in their
   project.
 - The outline (`textDocument/documentSymbol`): modules, types and their
   constructors and fields, exceptions, lets, expect tests and benches.
-
-The checker stops at the first error, so a document with an error has only
-that diagnostic, and no hover or definition until it checks again.
 
 ```sh
 cd editors/vscode

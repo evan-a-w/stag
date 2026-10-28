@@ -423,6 +423,54 @@ let%expect_test "hover and definition" =
       |}])
 ;;
 
+let%expect_test "hover and definition in a file with errors" =
+  Client.with_server
+    ~files:
+      [ ( "a.stag"
+        , "let double x = Int.mul 2 x\n\
+           let bad : string = double (nope 1)\n\
+           let f y = Int.add (double y) true\n\
+           let g = in\n\
+           let h = double 4\n" )
+      ]
+    (fun client ->
+       Client.did_open client "a.stag";
+       [%expect
+         {|
+         diagnostics a.stag (version 1):
+           1:19-1:34 error: This expression has type int but an expression was expected of type string
+           1:27-1:31 error: Unbound value nope
+           2:29-2:33 error: This expression has type bool but an expression was expected of type int
+           3:8-3:10 error: Expected an expression, found `in`
+         |}];
+       List.iter
+         [ 1, 4; 1, 20; 2, 6; 2, 20; 2, 26; 4, 9 ]
+         ~f:(fun (line, character) ->
+           printf "%d:%d " line character;
+           hover client ~line ~character);
+       [%expect
+         {|
+         1:4 1:4-1:7 ```stag A.bad : string ```
+         1:20 1:19-1:25 ```stag A.double : int -> int ```
+         2:6 2:6-2:7 ```stag y : int ```
+         2:20 2:19-2:25 ```stag A.double : int -> int ```
+         2:26 2:26-2:27 ```stag y : int ```
+         4:9 4:8-4:14 ```stag A.double : int -> int ```
+         |}];
+       List.iter
+         [ 1, 20; 2, 20; 2, 27; 4, 9 ]
+         ~f:(fun (line, character) ->
+           printf "%d:%d " line character;
+           definition client "a.stag" ~line ~character);
+       [%expect
+         {|
+         1:20 -> a.stag 0:4-0:10
+         2:20 -> a.stag 0:4-0:10
+         2:27 -> a.stag 2:6-2:7
+         4:9 -> a.stag 0:4-0:10
+         |}])
+;;
+
 let%expect_test "document symbols" =
   Client.with_server
     ~files:[ "a.stag", source ]

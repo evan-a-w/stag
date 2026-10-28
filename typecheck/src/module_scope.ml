@@ -192,7 +192,8 @@ let members (toplevel : Toplevel.t) : (Member.t * Name.t) list =
 
 (* [toplevels] but those whose names, or type parameters, are taken by those
    before them or by [taken], the members of the module [path] they are added
-   to, which are reported. *)
+   to, and with types' constructors and fields so taken left out, each
+   reported. *)
 let rec unique ~path taken toplevels ~report =
   List.filter_map toplevels ~f:(fun (toplevel : Toplevel.t) ->
     let error ~loc kind =
@@ -222,16 +223,45 @@ let rec unique ~path taken toplevels ~report =
       | Include _ -> Some ()
     in
     let%bind.Option () = params_unique in
-    let members = members toplevel in
     let added = Member.Hash_set.create () in
-    match
-      List.find members ~f:(fun (member, _) ->
+    let duplicates =
+      List.filter (members toplevel) ~f:(fun (member, _) ->
         Hash_set.mem taken member
         || Hash_set.strict_add added member |> Result.is_error)
-    with
-    | Some ((kind, name), at) ->
+    in
+    let report_duplicate ((kind, name), (at : Name.t)) =
       error ~loc:at.loc (Member_kind.duplicate kind (join (path @ [ name ])))
-    | None ->
+    in
+    match duplicates, toplevel.txt with
+    | ((_, (at : Name.t)) as duplicate) :: _, _
+      when phys_equal at (snd (List.hd_exn (members toplevel))) ->
+      report_duplicate duplicate
+    | _ :: _, Type decl ->
+      (* Kept without its duplicate constructors or fields. *)
+      List.iter duplicates ~f:(fun duplicate ->
+        ignore (report_duplicate duplicate : unit option));
+      Hash_set.iter added ~f:(Hash_set.add taken);
+      let kept (name, _) =
+        not (List.exists duplicates ~f:(fun (_, at) -> phys_equal at name))
+      in
+      let kind : Type_decl.Kind.t =
+        match decl.kind with
+        | Variant constructors -> Variant (List.filter constructors ~f:kept)
+        | Record fields -> Record (List.filter fields ~f:kept)
+        | (Alias _ | Abstract) as kind -> kind
+      in
+      Some { toplevel with txt = Toplevel.Type { decl with kind } }
+    | ( _ :: _
+      , ( Let _
+        | Exception _
+        | Module _
+        | Module_splice _
+        | Expect_test _
+        | Bench _
+        | Include _ ) ) ->
+      (* Their only member, if any, is their name. *)
+      assert false
+    | [], _ ->
       Hash_set.iter added ~f:(Hash_set.add taken);
       Some
         (match toplevel.txt with
