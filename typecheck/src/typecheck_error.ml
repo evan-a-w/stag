@@ -31,12 +31,12 @@ module Kind = struct
     | Unbound_constructor of Syntax.Path.t
     | Unbound_field of Syntax.Path.t
     | Type_arity_mismatch of
-        { type_name : Syntax.Path.t
+        { type_name : Syntax.Decl_path.t
         ; expected : int
         ; got : int
         }
     | Type_arg_kind_mismatch of
-        { type_name : Syntax.Path.t
+        { type_name : Syntax.Decl_path.t
         ; param : Syntax.Type_decl.Param.t
         }
     | Cyclic_type_alias of string
@@ -198,6 +198,10 @@ let unification_message (error : Unification_error.t) ~show_type =
 ;;
 
 let rec kind_message (kind : Kind.t) ~show_type =
+  let decl_path : Syntax.Decl_path.t -> string = function
+    | Path path -> Syntax.Path.to_string path
+    | Resolved name -> show_type name
+  in
   match kind with
   | Unification_error error -> unification_message error ~show_type
   | Not_in_scope path -> sprintf "Unbound value %s" (Syntax.Path.to_string path)
@@ -235,7 +239,7 @@ let rec kind_message (kind : Kind.t) ~show_type =
   | Type_arity_mismatch { type_name; expected; got } ->
     sprintf
       "The type %s expects %d argument(s), but is given %d"
-      (Syntax.Path.to_string type_name)
+      (decl_path type_name)
       expected
       got
   | Type_arg_kind_mismatch { type_name; param } ->
@@ -247,7 +251,7 @@ let rec kind_message (kind : Kind.t) ~show_type =
     sprintf
       "The parameter %s of type %s expects %s"
       (Syntax.Type_decl.Param.name param)
-      (Syntax.Path.to_string type_name)
+      (decl_path type_name)
       expected
   | Cyclic_type_alias name -> sprintf "The type abbreviation %s is cyclic" name
   | Non_regular_recursive_alias name ->

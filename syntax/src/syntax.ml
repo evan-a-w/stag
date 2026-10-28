@@ -46,7 +46,7 @@ end
 
 (** What names a declared type, constructor or field: a path as written,
     resolved where it is, or a canonical name, which reflection gives (see
-    [Stag.Ref] in the prelude) and the parser never makes, naming the same
+    [Stag.Type_ref] in the prelude) and the parser never makes, naming the same
     declaration wherever it is. *)
 module Decl_path = struct
   type t =
@@ -54,16 +54,13 @@ module Decl_path = struct
     | Resolved of string
   [@@deriving compare, equal]
 
-  (** A [Path] as its path, so as parsed. *)
-  let sexp_of_t = function
-    | Path path -> Path.sexp_of_t path
-    | Resolved name -> Sexp.List [ Atom "Resolved"; Atom name ]
+  (** A [Path] as its path, so as parsed, and a [Resolved] as [<name>]. *)
+  let to_string = function
+    | Path path -> Path.to_string path
+    | Resolved name -> sprintf "<%s>" (Prelude_path.to_string_hum name)
   ;;
 
-  let to_path = function
-    | Path path -> path
-    | Resolved name -> Path.of_string name
-  ;;
+  let sexp_of_t t = Sexp.Atom (to_string t)
 end
 
 (** A name as written, eg. a binder or a label. *)

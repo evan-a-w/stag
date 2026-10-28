@@ -32,6 +32,8 @@ module Decl = struct
     ; params : Type.arg list Lazy.t
     ; wrap_error : Typecheck_error.t -> Typecheck_error.t
     ; mutable checked : Signature.Type_decl.t option
+    ; mutable reflected : Reflected_decl.t option
+      (** Once checked, unless abstract. *)
     }
 
   let params t = force t.params
@@ -189,45 +191,65 @@ let map_result xs ~f =
   |> Result.map ~f:List.rev
 ;;
 
+(* Each elaborates to the type and the syntax with each type it names by its
+   canonical name ([Resolved]), so that it names the same types wherever it
+   is. *)
 let rec elaborate' t module_ vars ~expansions (expr : Type_expr.t)
-  : (Type.ty, Typecheck_error.t) Result.t
+  : (Type.ty * Type_expr.t, Typecheck_error.t) Result.t
   =
   let elaborate = elaborate' t module_ vars ~expansions in
+  let elaborate_row = elaborate_row t module_ vars ~expansions in
   let loc = expr.loc in
-  match expr.txt with
-  | Var name -> Vars.ty vars name ~loc
-  | Con (path, args) -> elaborate_con t module_ vars ~expansions path args ~loc
-  | Arrow (ty1, ty2) ->
-    let%bind.Result ty1 = elaborate ty1 in
-    let%map.Result ty2 = elaborate ty2 in
-    Type.TArrow (ty1, ty2)
-  | Tuple tys ->
-    let%map.Result tys = map_result tys ~f:elaborate in
-    Type.TTuple tys
-  | Code { inner; context } ->
-    let%bind.Result inner = elaborate inner in
-    let%map.Result context = elaborate_row t module_ vars ~expansions context in
-    Type.TCode { inner; context }
-  | Record row ->
-    let%map.Result row = elaborate_row t module_ vars ~expansions row in
-    Fresh.record t.fresh row
-  | Variant row ->
-    let%map.Result row = elaborate_row t module_ vars ~expansions row in
-    Fresh.variant t.fresh row
+  let%map.Result ty, txt =
+    match expr.txt with
+    | Var name ->
+      let%map.Result ty = Vars.ty vars name ~loc in
+      ty, expr.txt
+    | Con (path, args) ->
+      elaborate_con t module_ vars ~expansions path args ~loc
+    | Arrow (ty1, ty2) ->
+      let%bind.Result ty1, syntax1 = elaborate ty1 in
+      let%map.Result ty2, syntax2 = elaborate ty2 in
+      Type.TArrow (ty1, ty2), Type_expr.Arrow (syntax1, syntax2)
+    | Tuple tys ->
+      let%map.Result tys = map_result tys ~f:elaborate in
+      let tys, syntax = List.unzip tys in
+      Type.TTuple tys, Type_expr.Tuple syntax
+    | Code { inner; context } ->
+      let%bind.Result inner, inner_syntax = elaborate inner in
+      let%map.Result context, context_syntax = elaborate_row context in
+      ( Type.TCode { inner; context }
+      , Type_expr.Code { inner = inner_syntax; context = context_syntax } )
+    | Record row ->
+      let%map.Result row, syntax = elaborate_row row in
+      Fresh.record t.fresh row, Type_expr.Record syntax
+    | Variant row ->
+      let%map.Result row, syntax = elaborate_row row in
+      Fresh.variant t.fresh row, Type_expr.Variant syntax
+  in
+  ty, { expr with txt }
 
 and elaborate_row t module_ vars ~expansions (row : Type_expr.row)
-  : (Type.row, Typecheck_error.t) Result.t
+  : (Type.row * Type_expr.row, Typecheck_error.t) Result.t
   =
-  let rec go ({ txt = row; loc = _ } : Type_expr.row) ~seen =
-    match row with
-    | Empty -> Ok Type.REmpty
-    | Extend ({ txt = name; loc }, _, _) when Set.mem seen name ->
-      Error (Typecheck_error.create ~loc (Duplicate_row_entry name))
-    | Extend ({ txt = name; loc = _ }, ty, rest) ->
-      let%bind.Result ty = elaborate' t module_ vars ~expansions ty in
-      let%map.Result rest = go rest ~seen:(Set.add seen name) in
-      Type.RExtend (name, Present, ty, rest)
-    | Var { txt = name; loc } -> Vars.row vars name ~loc
+  let rec go (row : Type_expr.row) ~seen =
+    let%map.Result elaborated, txt =
+      match row.txt with
+      | Empty -> Ok (Type.REmpty, row.txt)
+      | Extend ({ txt = name; loc }, _, _) when Set.mem seen name ->
+        Error (Typecheck_error.create ~loc (Duplicate_row_entry name))
+      | Extend (({ txt = name; loc = _ } as label), ty, rest) ->
+        let%bind.Result ty, ty_syntax =
+          elaborate' t module_ vars ~expansions ty
+        in
+        let%map.Result rest, rest_syntax = go rest ~seen:(Set.add seen name) in
+        ( Type.RExtend (name, Present, ty, rest)
+        , Type_expr.Extend (label, ty_syntax, rest_syntax) )
+      | Var { txt = name; loc } ->
+        let%map.Result var = Vars.row vars name ~loc in
+        var, row.txt
+    in
+    elaborated, { row with txt }
   in
   go row ~seen:String.Set.empty
 
@@ -236,7 +258,7 @@ and elaborate_con
       module_
       vars
       ~expansions
-      ({ txt = path; loc = path_loc } : Decl_path.t Located.t)
+      ({ txt = path; loc = path_loc } as located_path : Decl_path.t Located.t)
       args
       ~loc
   =
@@ -247,46 +269,52 @@ and elaborate_con
   let%bind.Result () =
     if expected = got
     then Ok ()
-    else
-      error
-        ~loc
-        (Type_arity_mismatch
-           { type_name = Decl_path.to_path path; expected; got })
+    else error ~loc (Type_arity_mismatch { type_name = path; expected; got })
   in
   let%bind.Result args =
     map_result (List.zip_exn decl.decl.params args) ~f:(fun (param, arg) ->
       match param.txt, arg with
       | Ty _, Ty ty ->
-        elaborate' t module_ vars ~expansions ty
-        |> Result.map ~f:(fun ty -> Type.ATy ty)
+        let%map.Result ty, syntax = elaborate' t module_ vars ~expansions ty in
+        Type.ATy ty, Type_expr.Ty syntax
       | Row _, Row row ->
-        elaborate_row t module_ vars ~expansions row
-        |> Result.map ~f:(fun row -> Type.ARow row)
+        let%map.Result row, syntax =
+          elaborate_row t module_ vars ~expansions row
+        in
+        Type.ARow row, Type_expr.Row syntax
       (* [{...}] parses as a row, but is a record type for a type parameter. *)
       | Ty _, Row row ->
-        elaborate_row t module_ vars ~expansions row
-        |> Result.map ~f:(fun row -> Type.ATy (Fresh.record t.fresh row))
+        let%map.Result row, syntax =
+          elaborate_row t module_ vars ~expansions row
+        in
+        Type.ATy (Fresh.record t.fresh row), Type_expr.Row syntax
       | Row _, Ty { loc; _ } ->
         error
           ~loc
-          (Type_arg_kind_mismatch
-             { type_name = Decl_path.to_path path; param = param.txt }))
+          (Type_arg_kind_mismatch { type_name = path; param = param.txt }))
   in
-  match decl.decl.kind with
-  | Variant _ | Record _ | Abstract -> Ok (Type.TCon (decl.name, args))
-  | Alias body ->
-    let instances = Hashtbl.find_multi expansions decl.name in
-    (match
-       List.find instances ~f:(fun expansion ->
-         Expansion.same_args expansion args)
-     with
-     | Some expansion ->
-       if not expansion.expanded then expansion.reached_back <- true;
-       Ok (Type.TVar expansion.knot)
-     | None ->
-       if List.exists instances ~f:(fun expansion -> not expansion.expanded)
-       then error ~loc (Non_regular_recursive_alias decl.name)
-       else expand t decl ~args ~expansions body)
+  let args, args_syntax = List.unzip args in
+  let syntax =
+    Type_expr.Con ({ located_path with txt = Resolved decl.name }, args_syntax)
+  in
+  let%map.Result ty =
+    match decl.decl.kind with
+    | Variant _ | Record _ | Abstract -> Ok (Type.TCon (decl.name, args))
+    | Alias body ->
+      let instances = Hashtbl.find_multi expansions decl.name in
+      (match
+         List.find instances ~f:(fun expansion ->
+           Expansion.same_args expansion args)
+       with
+       | Some expansion ->
+         if not expansion.expanded then expansion.reached_back <- true;
+         Ok (Type.TVar expansion.knot)
+       | None ->
+         if List.exists instances ~f:(fun expansion -> not expansion.expanded)
+         then error ~loc (Non_regular_recursive_alias decl.name)
+         else Result.map (expand t decl ~args ~expansions body) ~f:fst)
+  in
+  ty, syntax
 
 and expand t (decl : Decl.t) ~args ~expansions body =
   let knot = Type.Var.create (Fresh.id t.fresh) Generic in
@@ -294,7 +322,7 @@ and expand t (decl : Decl.t) ~args ~expansions body =
     { Expansion.args; knot; expanded = false; reached_back = false }
   in
   Hashtbl.add_multi expansions ~key:decl.name ~data:expansion;
-  let%bind.Result body =
+  let%bind.Result body, syntax =
     elaborate'
       t
       decl.module_
@@ -311,7 +339,7 @@ and expand t (decl : Decl.t) ~args ~expansions body =
   else (
     knot.state <- Link body;
     expansion.expanded <- true;
-    Ok (Type.TVar knot))
+    Ok (Type.TVar knot, syntax))
 ;;
 
 let elaborate t module_ vars expr =
@@ -342,7 +370,15 @@ let declare
   Hashtbl.add_exn
     t.types
     ~key:name
-    ~data:{ Decl.decl; name; module_; params; wrap_error; checked = None };
+    ~data:
+      { Decl.decl
+      ; name
+      ; module_
+      ; params
+      ; wrap_error
+      ; checked = None
+      ; reflected = None
+      };
   let declares names table =
     List.iter names ~f:(fun ((member : Name.t), _) ->
       Hashtbl.add_exn
@@ -366,29 +402,40 @@ let define t (decl : Decl.t) =
       ~expansions
   in
   let canonical_name = Module_scope.canonical_name decl.module_ in
-  let%map.Result kind =
+  let%map.Result kind, reflected =
     match decl.decl.kind with
     | Alias body ->
-      let%map.Result body =
+      let%map.Result body, syntax =
         expand t decl ~args:(Decl.params decl) ~expansions body
       in
-      Signature.Type_decl.Kind.Alias body
-    | Abstract -> Ok Signature.Type_decl.Kind.Abstract
+      ( Signature.Type_decl.Kind.Alias body
+      , Some (Reflected_decl.Kind.Alias syntax) )
+    | Abstract -> Ok (Signature.Type_decl.Kind.Abstract, None)
     | Variant constructors ->
       let%map.Result constructors =
         map_result constructors ~f:(fun ((name : Name.t), args) ->
           let%map.Result args = map_result args ~f:elaborate in
-          { Signature.Constructor.name = name.txt; args })
+          let args, syntax = List.unzip args in
+          ( { Signature.Constructor.name = name.txt; args }
+          , (canonical_name name.txt, syntax) ))
       in
-      Signature.Type_decl.Kind.Variant constructors
+      let constructors, reflected = List.unzip constructors in
+      ( Signature.Type_decl.Kind.Variant constructors
+      , Some (Reflected_decl.Kind.Variant reflected) )
     | Record fields ->
       let%map.Result fields =
         map_result fields ~f:(fun ((name : Name.t), ty) ->
-          let%map.Result ty = elaborate ty in
-          { Signature.Field.name = name.txt; ty })
+          let%map.Result ty, syntax = elaborate ty in
+          ( { Signature.Field.name = name.txt; ty }
+          , (canonical_name name.txt, syntax) ))
       in
-      Signature.Type_decl.Kind.Record fields
+      let fields, reflected = List.unzip fields in
+      ( Signature.Type_decl.Kind.Record fields
+      , Some (Reflected_decl.Kind.Record reflected) )
   in
+  decl.reflected
+  <- Option.map reflected ~f:(fun kind ->
+       { Reflected_decl.params = decl.decl.params; kind });
   let checked =
     { Signature.Type_decl.name = decl.decl.name.txt
     ; params = Decl.params decl
@@ -503,79 +550,7 @@ let find_field t module_ ({ txt = path; loc } : Decl_path.t Located.t) =
       ~find:field
 ;;
 
-let rec resolve t module_ (expr : Type_expr.t) =
-  let resolve = resolve t module_ in
-  let%map.Result txt =
-    match expr.txt with
-    | Var _ as desc -> Ok desc
-    | Con (path, args) ->
-      let%bind.Result name = resolve_type module_ path.txt ~loc:path.loc in
-      let%map.Result args =
-        map_result args ~f:(function
-          | Ty ty -> Result.map (resolve ty) ~f:(fun ty -> Type_expr.Ty ty)
-          | Row row ->
-            Result.map (resolve_row t module_ row) ~f:(fun row ->
-              Type_expr.Row row))
-      in
-      Type_expr.Con ({ path with txt = Resolved name }, args)
-    | Arrow (a, b) ->
-      let%bind.Result a = resolve a in
-      let%map.Result b = resolve b in
-      Type_expr.Arrow (a, b)
-    | Tuple tys ->
-      let%map.Result tys = map_result tys ~f:resolve in
-      Type_expr.Tuple tys
-    | Code { inner; context } ->
-      let%bind.Result inner = resolve inner in
-      let%map.Result context = resolve_row t module_ context in
-      Type_expr.Code { inner; context }
-    | Record row ->
-      let%map.Result row = resolve_row t module_ row in
-      Type_expr.Record row
-    | Variant row ->
-      let%map.Result row = resolve_row t module_ row in
-      Type_expr.Variant row
-  in
-  { expr with txt }
-
-and resolve_row t module_ (row : Type_expr.row) =
-  let%map.Result txt =
-    match row.txt with
-    | (Empty | Var _) as desc -> Ok desc
-    | Extend (label, ty, rest) ->
-      let%bind.Result ty = resolve t module_ ty in
-      let%map.Result rest = resolve_row t module_ rest in
-      Type_expr.Extend (label, ty, rest)
-  in
-  { row with txt }
-;;
-
 let reflect t name =
-  let%bind.Result (_ : Signature.Type_decl.t) = check t name in
-  let decl = Hashtbl.find_exn t.types name in
-  let resolve ty =
-    resolve t decl.module_ ty |> Result.map_error ~f:decl.wrap_error
-  in
-  let%map.Result kind =
-    match decl.decl.kind with
-    | Abstract -> Ok None
-    | Alias ty ->
-      let%map.Result ty = resolve ty in
-      Some (Type_decl.Kind.Alias ty)
-    | Variant constructors ->
-      let%map.Result constructors =
-        map_result constructors ~f:(fun (name, args) ->
-          let%map.Result args = map_result args ~f:resolve in
-          name, args)
-      in
-      Some (Type_decl.Kind.Variant constructors)
-    | Record fields ->
-      let%map.Result fields =
-        map_result fields ~f:(fun (name, ty) ->
-          let%map.Result ty = resolve ty in
-          name, ty)
-      in
-      Some (Type_decl.Kind.Record fields)
-  in
-  Option.map kind ~f:(fun kind -> { decl.decl with kind })
+  let%map.Result (_ : Signature.Type_decl.t) = check t name in
+  (Hashtbl.find_exn t.types name).reflected
 ;;

@@ -1,6 +1,5 @@
 open! Import
 include Syntax_value_intf
-module Value = Treewalk.Value
 
 (* By canonical name, from the prelude's declarations, so they agree with the
    refs the typechecker makes. *)
@@ -212,28 +211,22 @@ module To_value = struct
 
   let program = list toplevel
 
-  let reflected_decl decl ~(canonical : string -> string) =
-    option
-      (fun ({ name = _; params; kind } : Type_decl.t) ->
-         let ref_ kind (name : Name.t) =
-           Value.Ref { kind; name = canonical name.txt }
-         in
-         let kind =
-           match kind with
-           | Variant constructors ->
-             con
-               "Stag.Type.Kind.Variant"
-               [ list (pair (ref_ Constructor) (list type_expr)) constructors ]
-           | Record fields ->
-             con
-               "Stag.Type.Kind.Record"
-               [ list (pair (ref_ Field) type_expr) fields ]
-           | Alias ty -> con "Stag.Type.Kind.Alias" [ type_expr ty ]
-           | Abstract ->
-             raise_s [%message "Syntax_value: reflected an abstract type"]
-         in
-         record [ "params", list type_param params; "kind", kind ])
-      decl
+  let reflected_decl =
+    option (fun ({ params; kind } : Reflected_decl.t) ->
+      let ref_ kind name = Value.Ref { kind; name } in
+      let kind =
+        match kind with
+        | Variant constructors ->
+          con
+            "Stag.Type.Kind.Variant"
+            [ list (pair (ref_ Constructor) (list type_expr)) constructors ]
+        | Record fields ->
+          con
+            "Stag.Type.Kind.Record"
+            [ list (pair (ref_ Field) type_expr) fields ]
+        | Alias ty -> con "Stag.Type.Kind.Alias" [ type_expr ty ]
+      in
+      Value.Record [| list type_param params; kind |])
   ;;
 end
 
@@ -427,7 +420,7 @@ module Of_value = struct
         value
   ;;
 
-  let decl_path ref_kind kind value ~loc =
+  let decl_path kind value ~loc =
     Located.create
       ~loc
       (variant "Stag.Path.t" value ~f:(fun constructor args : Decl_path.t ->
@@ -437,13 +430,8 @@ module Of_value = struct
          | "Ref", 1 ->
            arg 0 (fun (value : Value.t) : Decl_path.t ->
              match value with
-             | Ref { kind; name } when Decl_ref.Kind.equal kind ref_kind ->
-               Resolved name
-             | _ ->
-               unexpected
-                 ~expected:
-                   (sprintf "a ref to a %s" (Decl_ref.Kind.to_string ref_kind))
-                 value)
+             | Ref { name; kind = _ } -> Resolved name
+             | _ -> unexpected ~expected:"a ref" value)
          | _ -> raise Bad_arguments))
   ;;
 
@@ -492,8 +480,7 @@ module Of_value = struct
            match constructor, Args.count args with
            | "Var", 1 -> Var (arg 0 (ident Tyvar))
            | "Con", 2 ->
-             Con
-               (arg 0 (decl_path Type Lower ~loc), arg 1 (list (type_arg ~loc)))
+             Con (arg 0 (decl_path Lower ~loc), arg 1 (list (type_arg ~loc)))
            | "Arrow", 2 -> Arrow (arg 0 (type_expr ~loc), arg 1 (type_expr ~loc))
            | "Tuple", 1 -> Tuple (arg 0 (components ~min:0 (type_expr ~loc)))
            | "Code", 1 ->
@@ -585,12 +572,9 @@ module Of_value = struct
          | "Lit", 1 -> Lit (arg 0 lit)
          | "Tuple", 1 -> Tuple (arg 0 (components ~min:2 (pattern ~loc)))
          | "Construct", 2 ->
-           Construct
-             ( arg 0 (decl_path Constructor Upper ~loc)
-             , arg 1 (list (pattern ~loc)) )
+           Construct (arg 0 (decl_path Upper ~loc), arg 1 (list (pattern ~loc)))
          | "Record", 1 ->
-           Record
-             (arg 0 (fields (pair (decl_path Field Lower ~loc) (pattern ~loc))))
+           Record (arg 0 (fields (pair (decl_path Lower ~loc) (pattern ~loc))))
          | "Poly_variant", 2 ->
            Poly_variant (arg 0 (name Label ~loc), arg 1 (option (pattern ~loc)))
          | "Poly_record", 1 ->
@@ -649,13 +633,10 @@ module Of_value = struct
          | "Quote", 1 -> Quote (arg 0 (expr ~loc))
          | "Tuple", 1 -> Tuple (arg 0 (components ~min:2 (expr ~loc)))
          | "Construct", 2 ->
-           Construct
-             (arg 0 (decl_path Constructor Upper ~loc), arg 1 (list (expr ~loc)))
+           Construct (arg 0 (decl_path Upper ~loc), arg 1 (list (expr ~loc)))
          | "Record", 1 ->
-           Record
-             (arg 0 (fields (pair (decl_path Field Lower ~loc) (expr ~loc))))
-         | "Field", 2 ->
-           Field (arg 0 (expr ~loc), arg 1 (decl_path Field Lower ~loc))
+           Record (arg 0 (fields (pair (decl_path Lower ~loc) (expr ~loc))))
+         | "Field", 2 -> Field (arg 0 (expr ~loc), arg 1 (decl_path Lower ~loc))
          | "Type", 1 -> Type (arg 0 (type_expr ~loc))
          | "Match", 2 ->
            Match

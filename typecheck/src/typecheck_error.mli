@@ -37,12 +37,12 @@ module Kind : sig
     | Unbound_constructor of Syntax.Path.t
     | Unbound_field of Syntax.Path.t
     | Type_arity_mismatch of
-        { type_name : Syntax.Path.t
+        { type_name : Syntax.Decl_path.t
         ; expected : int
         ; got : int
         }
     | Type_arg_kind_mismatch of
-        { type_name : Syntax.Path.t
+        { type_name : Syntax.Decl_path.t
         ; param : Syntax.Type_decl.Param.t
         }
     | Cyclic_type_alias of string

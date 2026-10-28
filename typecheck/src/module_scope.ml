@@ -654,13 +654,12 @@ let find_value t path ~loc : (Value.t, _) Result.t =
       then Intrinsic.find path
       else None
     in
-    (match Prim.find path, blocked, (path :> string list) with
-     | Some _, Some splice, _ -> Error (cycle splice ~name:path ~loc)
-     | Some prim, None, _ -> Ok (Prim prim)
-     | None, None, _ when Option.is_some intrinsic ->
-       Ok (Intrinsic (Option.value_exn intrinsic))
-     | None, None, [ _ ] -> Ok Unbound
-     | None, _, _ ->
+    (match Prim.find path, blocked, intrinsic, (path :> string list) with
+     | Some _, Some splice, _, _ -> Error (cycle splice ~name:path ~loc)
+     | Some prim, None, _, _ -> Ok (Prim prim)
+     | None, None, Some intrinsic, _ -> Ok (Intrinsic intrinsic)
+     | None, None, None, [ _ ] -> Ok Unbound
+     | None, _, _, _ ->
        Error (unbound_head t Value path ~loc ~unbound:not_in_scope ~blocked))
 ;;
 

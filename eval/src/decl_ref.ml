@@ -5,7 +5,6 @@ module Kind = struct
     | Type
     | Constructor
     | Field
-  [@@deriving sexp_of, equal]
 
   let to_string = function
     | Type -> "type"
@@ -18,7 +17,6 @@ type t =
   { kind : Kind.t
   ; name : string
   }
-[@@deriving equal]
 
 let sexp_of_t { kind; name } =
   Sexp.List

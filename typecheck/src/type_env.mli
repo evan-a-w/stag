@@ -91,25 +91,19 @@ module Annotation_vars : sig
   val create : Fresh.t -> rank:Type.rank -> t
 end
 
+(** The type, and the syntax with each type it names by its canonical name
+    ([Resolved]), so that it names the same types wherever it is. *)
 val elaborate
   :  t
   -> Module_scope.t
   -> Annotation_vars.t
   -> Syntax.Type_expr.t
-  -> (Type.ty, Typecheck_error.t) Result.t
+  -> (Type.ty * Syntax.Type_expr.t, Typecheck_error.t) Result.t
 
-(** [expr] with each type it names by its canonical name ([Resolved]), so it
-    names the same types wherever it is. *)
-val resolve
-  :  t
-  -> Module_scope.t
-  -> Syntax.Type_expr.t
-  -> (Syntax.Type_expr.t, Typecheck_error.t) Result.t
-
-(** The declaration of the type of canonical name [name], checking it, with
-    the types in it [resolve]d where it is declared. [None] if it is
-    abstract, as are the builtin types. *)
+(** The declaration of the type of canonical name [name], checking it, its
+    types [Resolved] where it is declared. [None] if it is abstract, as are
+    the builtin types. *)
 val reflect
   :  t
   -> string
-  -> (Syntax.Type_decl.t option, Typecheck_error.t) Result.t
+  -> (Reflected_decl.t option, Typecheck_error.t) Result.t

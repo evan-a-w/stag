@@ -124,9 +124,6 @@ module Program_env = struct
       (** The latest free variable of a quote that a binding of its name,
           unusable there, did not bind, to explain an error if the code is
           spliced where the name is unbound. *)
-    ; mutable reflection_error : Typecheck_error.t option
-      (** Why reflection failed, eg. a cycle, while evaluating at compile time,
-          to be the error of that evaluation. *)
     ; unfinished : Type.ty Stack.t
       (** The types of the toplevels and binders of components not yet
           finished. Code checked later can reach them, so once their
@@ -171,46 +168,21 @@ module Program_env = struct
   ;;
 end
 
-(* Evaluates at compile time, the error being that of reflection if it
-   failed. *)
-let at_compile_time (program : Program_env.t) f ~error =
-  let outer = program.reflection_error in
-  program.reflection_error <- None;
-  let result = f () in
-  let reflection_error = program.reflection_error in
-  program.reflection_error <- outer;
-  Result.map_error result ~f:(fun runtime_error ->
-    match reflection_error with
-    | Some reflection_error -> reflection_error
-    | None -> error runtime_error)
-;;
+(* Carries why reflection failed, eg. a cycle, through the evaluation, to be
+   the error of that evaluation. *)
+exception Reflection_failed of Typecheck_error.t [@@deriving sexp_of]
 
-let intrinsics (program : Program_env.t) intrinsic (value : Treewalk.Value.t)
-  : Treewalk.Value.t Or_error.t
-  =
-  match intrinsic, value with
-  | Intrinsic.Type_expr, Type ty -> Ok (Syntax_value.Type_expr.to_value ty)
-  | Ref_name, Ref ref_ -> Ok (String (Decl_ref.short_name ref_))
-  | Type_decl, Ref { kind = Type; name } ->
-    (match Type_env.reflect program.type_env name with
-     | Ok decl ->
-       let prefix =
-         match String.rsplit2 name ~on:'.' with
-         | Some (prefix, _) -> prefix ^ "."
-         | None -> ""
-       in
-       Ok
-         (Syntax_value.reflected_decl decl ~canonical:(fun name ->
-            prefix ^ name))
-     | Error error ->
-       program.reflection_error <- Some error;
-       Or_error.error_string "Reflection failed")
-  | _ ->
-    raise_s
-      [%message
-        "Intrinsic applied to an ill-typed argument"
-          (intrinsic : Intrinsic.t)
-          (value : Treewalk.Value.t)]
+(* Evaluates at compile time, reflecting on the program's types. *)
+let at_compile_time (program : Program_env.t) f ~error =
+  let reflect name =
+    Type_env.reflect program.type_env name
+    |> Result.map_error ~f:(fun error -> Error.of_exn (Reflection_failed error))
+  in
+  f ~reflect
+  |> Result.map_error ~f:(fun runtime_error ->
+    match Error.to_exn runtime_error with
+    | Reflection_failed reflection_error -> reflection_error
+    | _ -> error runtime_error)
 ;;
 
 module Scope = struct
@@ -250,6 +222,7 @@ module Scope = struct
 
   let elaborate t annot =
     Type_env.elaborate t.program.type_env t.module_ t.annotation_vars annot
+    |> Result.map ~f:fst
   ;;
 end
 
@@ -762,10 +735,7 @@ let rec var_type t (scope : Scope.t) ~(path : Syntax.Path.t) ~loc =
   let prim prim = Ok (Prim.ty prim, Typed.Var_ref.Prim prim) in
   let intrinsic intrinsic =
     Ok
-      ( Intrinsic.ty
-          intrinsic
-          ~var:(fun () -> Scope.fresh_ty t scope)
-          ~record:(Fresh.record t)
+      ( Intrinsic.ty intrinsic ~var:(fun () -> Scope.fresh_ty t scope)
       , Typed.Var_ref.Intrinsic intrinsic )
   in
   let local =
@@ -807,12 +777,7 @@ and var_ref_type t (scope : Scope.t) (var_ref : Typed.Var_ref.t) ~loc =
   match var_ref with
   | Prim prim -> Ok (Prim.ty prim, var_ref)
   | Intrinsic intrinsic ->
-    Ok
-      ( Intrinsic.ty
-          intrinsic
-          ~var:(fun () -> Scope.fresh_ty t scope)
-          ~record:(Fresh.record t)
-      , var_ref )
+    Ok (Intrinsic.ty intrinsic ~var:(fun () -> Scope.fresh_ty t scope), var_ref)
   | Free name ->
     (match scope.quote with
      | Some quote ->
@@ -976,9 +941,12 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
     then Ok (node (Expect expected) Type.unit)
     else error ~loc Expect_outside_expect_test
   | Type ty ->
-    let%bind.Result elaborated = Scope.elaborate scope ty in
-    let%map.Result resolved =
-      Type_env.resolve scope.program.type_env scope.module_ ty
+    let%map.Result elaborated, resolved =
+      Type_env.elaborate
+        scope.program.type_env
+        scope.module_
+        (Type_env.Annotation_vars.create t ~rank:scope.rank)
+        ty
     in
     node
       (Type resolved)
@@ -1236,12 +1204,13 @@ and expand t (scope : Scope.t) ~code ~subs ~ty ~loc =
   let%bind.Result generated =
     at_compile_time
       program
-      (fun () ->
+      (fun ~reflect ->
          Treewalk.splice
            program.interpreter
            ~code
            ~level:(scope.level - 1)
-           ~entry)
+           ~entry
+           ~reflect)
       ~error:(fun error ->
         Typecheck_error.create ~loc (Splice_evaluation_failed { code; error }))
   in
@@ -1563,7 +1532,8 @@ let generate t (program : Program_env.t) splice
   let%bind.Result value =
     at_compile_time
       program
-      (fun () -> Treewalk.run program.interpreter expr ~level:(-1))
+      (fun ~reflect ->
+         Treewalk.run program.interpreter expr ~level:(-1) ~reflect)
       ~error:(fun error ->
         Typecheck_error.create ~loc (Declaration_splice_failed error))
   in
@@ -1714,19 +1684,14 @@ let rec signature (program_env : Program_env.t) module_ =
 ;;
 
 let program_env t interpreter =
-  let program_env =
-    { Program_env.type_env = Type_env.create t
-    ; toplevels = String.Table.create ()
-    ; interpreter
-    ; ident_info = Typed.Ident.Map.empty
-    ; sccs = Queue.create ()
-    ; unusable_in_quotes = String.Table.create ()
-    ; reflection_error = None
-    ; unfinished = Stack.create ()
-    }
-  in
-  Treewalk.set_intrinsics interpreter (intrinsics program_env);
-  program_env
+  { Program_env.type_env = Type_env.create t
+  ; toplevels = String.Table.create ()
+  ; interpreter
+  ; ident_info = Typed.Ident.Map.empty
+  ; sccs = Queue.create ()
+  ; unusable_in_quotes = String.Table.create ()
+  ; unfinished = Stack.create ()
+  }
 ;;
 
 (* The program's root module, within the prelude. *)

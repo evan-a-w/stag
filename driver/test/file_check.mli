@@ -4,3 +4,6 @@ open! Import
     diagnostic. With [run], also evaluates it, printing its output, and runs
     its expect tests, printing those that fail and the corrected file. *)
 val check : ?run:bool -> string -> unit
+
+(** As [check], for the files given as [(path, contents)]. *)
+val check_files : ?run:bool -> (string * string) list -> unit

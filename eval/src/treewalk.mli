@@ -1,78 +1,6 @@
 open! Import
-
-(** The bindings of one activation: a closure's captures and arguments, and
-    the locals bound while evaluating its body (or the toplevels). Idents are
-    unique, so a binding is never shadowed or removed. Lookups fall back to
-    [fallback] (the toplevels). *)
-module Env : sig
-  type 'value t
-
-  val create : unit -> _ t
-
-  (** Errors if [ident] is unbound, or declared but not yet [set]. *)
-  val lookup
-    :  ?fallback:'value t
-    -> 'value t
-    -> ident:Typed.Ident.t
-    -> 'value Or_error.t
-
-  (** Binds [ident] to an empty slot, to be [set] later, eg. for each member
-      of a recursive binding before evaluating their bodies. *)
-  val declare : _ t -> ident:Typed.Ident.t -> unit
-
-  (** Fills the slot of [ident], binding it first if needed. *)
-  val set : 'value t -> ident:Typed.Ident.t -> value:'value -> unit
-
-  (** A new env sharing the slots of [captures] with [t], so slots filled
-      later are seen by both. *)
-  val of_captures
-    :  ?fallback:'value t
-    -> 'value t
-    -> captures:Typed.Ident.Hash_set.t
-    -> 'value t Or_error.t
-end
-
-module Value : sig
-  type t =
-    | Int of int
-    | Bool of bool
-    | String of string
-    | Char of char
-    | Unit
-    | Tuple of t list
-    | Construct of Typed.Constructor_ref.t * t list
-    | Record of t array (** By field index. *)
-    | Poly_record of t String.Map.t
-    | Poly_variant of string * t (** A tag without an argument has [Unit]. *)
-    | Function of
-        { args : Typed.Ident.t list (** Those not yet applied, non-empty. *)
-        ; body : Typed.Expr.t
-        ; env : t Env.t
-        ; level : int
-        }
-    | Code of
-        { expr : Typed.Expr.t
-        ; persistent : t Typed.Ident.Map.t
-          (** The values of the persistent binders [expr] embeds. *)
-        }
-    | Prim of
-        { prim : Prim.t
-        ; applied : t list (** Fewer than its arity, latest first. *)
-        }
-    | Intrinsic of Intrinsic.t
-    | Type of Syntax.Type_expr.t
-    (** A [Stag.Type.t], its types named by canonical names. *)
-    | Ref of Decl_ref.t (** A [Stag.Ref.t]. *)
-
-  (** Functions are [<fun>], as their envs may contain themselves. Here and in
-      [to_string_hum], constructors of the prelude are named as within it
-      ([Prelude_path.to_string_hum]). *)
-  val sexp_of_t : t -> Sexp.t
-
-  (** As stag syntax, eg. [C (1, `A)], for messages. Functions are [<fun>],
-      code [<code>] and nominal records [<record>]. *)
-  val to_string_hum : t -> string
-end
+module Env = Env
+module Value = Value
 
 type t
 
@@ -106,25 +34,30 @@ val add_ident_info : t -> ident:Typed.Ident.t -> info:Typed.Ident_info.t -> unit
     first used, and the component's functions are bound when any member is. *)
 val add_scc : t -> Typed.Scc.t -> unit
 
-(** How intrinsics apply to their argument. They are runtime errors but while
-    evaluating at compile time ([splice] and [run]). *)
-val set_intrinsics : t -> (Intrinsic.t -> Value.t -> Value.t Or_error.t) -> unit
-
 (** Evaluates the toplevel splice [code], at [level] in an empty env, to code,
     binding the values it embeds globally. Returns that code with fresh
     binders and the free variables outside its quotes replaced by [entry].
     Instantiating takes a step per node, which stands for inferring the code
-    too, so code too large to infer within the budget is an error. *)
+    too, so code too large to infer within the budget is an error.
+
+    It runs at compile time: [Stag.Type.decl] calls [reflect] with the
+    canonical name of the type, which it is a runtime error to call otherwise. *)
 val splice
   :  t
   -> code:Typed.Expr.t
   -> level:int
   -> entry:(string -> Typed.Var_ref.t option)
+  -> reflect:(string -> Reflected_decl.t option Or_error.t)
   -> Typed.Expr.t Or_error.t
 
-(** Evaluates [expr] at compile time, at [level] in an empty env, eg. a
-    declaration splice's expression. *)
-val run : t -> Typed.Expr.t -> level:int -> Value.t Or_error.t
+(** Evaluates [expr] at compile time, as [splice], at [level] in an empty env,
+    eg. a declaration splice's expression. *)
+val run
+  :  t
+  -> Typed.Expr.t
+  -> level:int
+  -> reflect:(string -> Reflected_decl.t option Or_error.t)
+  -> Value.t Or_error.t
 
 (** The info of [ident] if it is bound globally, eg. a value embedded by a
     toplevel splice's code. *)

@@ -3,7 +3,7 @@ open! Import
 module type S = sig
   type t
 
-  val to_value : t -> Treewalk.Value.t
+  val to_value : t -> Value.t
 
   (** Every node is located at [loc], as syntax generated where it is spliced.
 
@@ -24,7 +24,7 @@ module type S = sig
       type), a constructor applied to one tuple (of a
       constructor declared [C of (a * b)]), a polymorphic record extended or
       updated with no fields. *)
-  val of_value : Treewalk.Value.t -> loc:Loc.t -> t Or_error.t
+  val of_value : Value.t -> loc:Loc.t -> t Or_error.t
 end
 
 module type Syntax_value = sig
@@ -40,10 +40,6 @@ module type Syntax_value = sig
   module Toplevel : S with type t := Syntax.Toplevel.t
   module Program : S with type t := Syntax.Program.t
 
-  (** An [option[Stag.Type.Decl.t]], of a declaration that is not abstract,
-      its constructors and fields [Stag.Ref.t]s of their [canonical] names. *)
-  val reflected_decl
-    :  Syntax.Type_decl.t option
-    -> canonical:(string -> string)
-    -> Treewalk.Value.t
+  (** An [option[Stag.Type.Decl.t]]. *)
+  val reflected_decl : Reflected_decl.t option -> Value.t
 end

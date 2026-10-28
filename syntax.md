@@ -239,23 +239,39 @@ declarations in its place.
 Types are values, for deriving: `type τ` has type `Stag.Type.t[τ]`, where `τ`
 is checked as an annotation where it is written (so unbound names and arity
 errors are reported there; a parameterised type is written applied, eg.
-`type tree['a]`). `Stag.Type.t['a]` and `Stag.Ref.t` are abstract: only
-reflection makes them.
+`type tree['a]`). The parameter is the reflected type, its variables standing
+for any type: each `type` expression has its own type variables, so
+`let f (x : 'a) = type 'a` has type `'a -> Stag.Type.t['b]`.
+`Stag.Type.t['a]` and the refs `Stag.Type_ref.t`, `Stag.Constructor_ref.t`
+and `Stag.Field_ref.t` are abstract: only reflection makes them.
 
 ```ocaml
 Stag.Type.expr : Stag.Type.t['a] -> Stag.Type_expr.t
-Stag.Type.decl : Stag.Ref.t -> option[{`params : list[Stag.Type_decl.Param.t]; `kind : Stag.Type.Kind.t}]
-Stag.Ref.name : Stag.Ref.t -> string
+Stag.Type.decl : Stag.Type_ref.t -> option[Stag.Type.Decl.t]
+Stag.Type_ref.name : Stag.Type_ref.t -> string   (* also Constructor_ref, Field_ref *)
+
+module Stag.Type.Kind : sig
+  type t =
+    | Variant of list[Constructor_ref.t * list[Type_expr.t]]
+    | Record of list[Field_ref.t * Type_expr.t]
+    | Alias of Type_expr.t
+end
+module Stag.Type.Decl : sig
+  type t = { params : list[Type_decl.Param.t]; kind : Kind.t }
+end
 ```
 
-A `Stag.Ref.t` is a declared type, constructor or field, by identity. `expr`
-gives the type with each type it names as a `Stag.Path.Ref` (`Stag.Type_expr.Con
-(Ref list, ...)`); `decl` gives a type's declaration (its constructors and
-fields as refs, its types as for `expr`), or `None` if it is abstract, as are
-the builtin types. `Stag.Path.t` (`Name of string | Ref of Stag.Ref.t`) names
-types, constructors and fields in generated syntax: a `Ref` names its
-declaration wherever it is spliced, even where its name is shadowed or not in
-scope, and must be of the right kind (a type ref is not a constructor).
+A ref is a declared type, constructor or field, by identity, and `name` is
+the name it is declared with. `expr` gives the type with each type it names
+as a `Stag.Path.Ref` (`Stag.Type_expr.Con (Ref list, ...)`); `decl` gives a
+type's declaration (its constructors and fields as refs, its types as for
+`expr`), or `None` if it is abstract, as are the builtin types. A type
+variable is given as `Stag.Type_expr.Var "a"`, deliberately unhygienic: where
+it is spliced, it is the type parameter (or annotation variable) of that
+name there. `Stag.Path.t['r]` (`Name of string | Ref of 'r`) names types
+(`Path.t[Type_ref.t]`), constructors (`Path.t[Constructor_ref.t]`) and fields
+(`Path.t[Field_ref.t]`) in generated syntax: a `Ref` names its declaration
+wherever it is spliced, even where its name is shadowed or not in scope.
 
 ```ocaml
 type t = A | B of int * t
@@ -264,8 +280,10 @@ include .~(Show.derive (type t))     (* t's to_string, in the same module *)
 
 Reflecting a declaration checks it, on demand: a declaration that depends on
 what the splice reflecting it generates is an error, as for other lookups
-that need a running splice. Reflection runs only at compile time: at run time
-it is an error.
+that need a running splice. Reflection values are ordinary values, so they
+can exist at run time too, eg. a `type τ` in a runtime function, and `expr`
+and the refs' `name` work there; only `decl`, which queries the typechecker,
+is a runtime error at run time.
 
 ## Files
 

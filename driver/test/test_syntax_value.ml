@@ -18,25 +18,32 @@ let%expect_test "the prelude's signature" =
     type option['a] = None | Some of 'a
     module Stag : sig
       val map : ('a -> 'b) -> list['a] -> list['b]
-      module Ref : sig
+      module Type_ref : sig
+        type t
+        val name : t -> string
+      end
+      module Constructor_ref : sig
+        type t
+        val name : t -> string
+      end
+      module Field_ref : sig
         type t
         val name : t -> string
       end
       module Path : sig
-        type t = Name of string | Ref of Ref.t
+        type t['a] = Name of string | Ref of 'a
       end
       module Lit : sig
         type t = Int of int | Bool of bool | String of string | Char of char | Unit
       end
       module Type_expr : sig
-        type t = Var of string | Con of Path.t * list[Arg.t] | Arrow of t * t | Tuple of list[t] | Code of {`context : Row.t; `inner : t} | Record of Row.t | Variant of Row.t
+        type t = Var of string | Con of Path.t[Type_ref.t] * list[Arg.t] | Arrow of t * t | Tuple of list[t] | Code of {`context : Row.t; `inner : t} | Record of Row.t | Variant of Row.t
         module Row : sig
           type t = Empty | Extend of string * Type_expr.t * t | Var of string
         end
         module Arg : sig
           type t = Ty of Type_expr.t | Row of Row.t
         end
-        val con_ref : Path.t -> list[t] -> t
         val con : string -> list[t] -> t
         val tuple : list[t] -> t
       end
@@ -56,12 +63,12 @@ let%expect_test "the prelude's signature" =
         module Rest : sig
           type t = Closed | Open | Bind of string
         end
-        type t = Any | Var of string | Lit of Lit.t | Tuple of list[t] | Construct of Path.t * list[t] | Record of list[Path.t * t] | Poly_variant of string * option[t] | Poly_record of {`fields : list[string * t]; `rest : Rest.t}
+        type t = Any | Var of string | Lit of Lit.t | Tuple of list[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Poly_variant of string * option[t] | Poly_record of {`fields : list[string * t]; `rest : Rest.t}
         val construct : string -> list[t] -> t
         val tuple : list[t] -> t
       end
       module Expr : sig
-        type t = Lit of Lit.t | Var of string * option[Type_expr.t] | App of t * t | Let of string * list[string * option[Type_expr.t]] * option[Type_expr.t] * t * t | Splice of {`expr : t; `subs : option[list[string * option[t]]]} | Quote of t | Tuple of list[t] | Construct of Path.t * list[t] | Record of list[Path.t * t] | Field of t * Path.t | Type of Type_expr.t | Match of t * list[Pattern.t * t] | Poly_record of list[string * t] | Poly_field of t * string | Poly_extend of list[string * t] * t | Poly_restrict of t * string | Poly_update of t * list[string * t] | Poly_variant of string * option[t] | Expect of string
+        type t = Lit of Lit.t | Var of string * option[Type_expr.t] | App of t * t | Let of string * list[string * option[Type_expr.t]] * option[Type_expr.t] * t * t | Splice of {`expr : t; `subs : option[list[string * option[t]]]} | Quote of t | Tuple of list[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Field of t * Path.t[Field_ref.t] | Type of Type_expr.t | Match of t * list[Pattern.t * t] | Poly_record of list[string * t] | Poly_field of t * string | Poly_extend of list[string * t] * t | Poly_restrict of t * string | Poly_update of t * list[string * t] | Poly_variant of string * option[t] | Expect of string
         val var : string -> t
         val construct : string -> list[t] -> t
         val int : int -> t
@@ -80,13 +87,13 @@ let%expect_test "the prelude's signature" =
       module Type : sig
         type t['a]
         module Kind : sig
-          type t = Variant of list[Ref.t * list[Type_expr.t]] | Record of list[Ref.t * Type_expr.t] | Alias of Type_expr.t
+          type t = Variant of list[Constructor_ref.t * list[Type_expr.t]] | Record of list[Field_ref.t * Type_expr.t] | Alias of Type_expr.t
         end
         module Decl : sig
-          type t = {`kind : Kind.t; `params : list[Type_decl.Param.t]}
+          type t = { params : list[Type_decl.Param.t]; kind : Kind.t }
         end
         val expr : t['a] -> Type_expr.t
-        val decl : Ref.t -> option[{`kind : Kind.t; `params : list[Type_decl.Param.t]}]
+        val decl : Type_ref.t -> option[Decl.t]
       end
     end
     |}]

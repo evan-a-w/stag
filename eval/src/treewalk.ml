@@ -1,187 +1,7 @@
 open! Import
 open Or_error.Let_syntax
-
-module Env = struct
-  type 'value t = { values : 'value option ref Typed.Ident.Table.t }
-
-  let create () = { values = Typed.Ident.Table.create () }
-  let copy t = { values = Hashtbl.copy t.values }
-
-  let find_slot ?fallback t ident =
-    match Hashtbl.find t.values ident with
-    | Some _ as slot -> slot
-    | None ->
-      Option.bind fallback ~f:(fun fallback ->
-        Hashtbl.find fallback.values ident)
-  ;;
-
-  let lookup ?fallback t ~ident =
-    match find_slot ?fallback t ident with
-    | None ->
-      Or_error.error_s [%message "Unbound ident" (ident : Typed.Ident.t)]
-    | Some { contents = None } ->
-      Or_error.error_s
-        [%message
-          "Used value before it was defined (eg. because of recursion on \
-           values)"
-            (ident : Typed.Ident.t)]
-    | Some { contents = Some value } -> Ok value
-  ;;
-
-  let declare t ~ident = Hashtbl.set t.values ~key:ident ~data:(ref None)
-
-  let set t ~ident ~value =
-    let slot =
-      Hashtbl.find_or_add t.values ident ~default:(fun () -> ref None)
-    in
-    slot := Some value
-  ;;
-
-  let of_captures ?fallback t ~captures =
-    let env = create () in
-    let%map () =
-      Hash_set.to_list captures
-      |> List.fold_result ~init:() ~f:(fun () ident ->
-        match find_slot ?fallback t ident with
-        | Some slot -> Ok (Hashtbl.set env.values ~key:ident ~data:slot)
-        | None ->
-          Or_error.error_s
-            [%message "Captured ident not in scope" (ident : Typed.Ident.t)])
-    in
-    env
-  ;;
-end
-
-module Value = struct
-  type t =
-    | Int of int
-    | Bool of bool
-    | String of string
-    | Char of char
-    | Unit
-    | Tuple of t list
-    | Construct of Typed.Constructor_ref.t * t list
-    | Record of t array
-    | Poly_record of t String.Map.t
-    | Poly_variant of string * t
-    | Function of
-        { args : Typed.Ident.t list
-        ; body : Typed.Expr.t
-        ; env : t Env.t
-        ; level : int
-        }
-    | Code of
-        { expr : Typed.Expr.t
-        ; persistent : t Typed.Ident.Map.t
-        }
-    | Prim of
-        { prim : Prim.t
-        ; applied : t list
-        }
-    | Intrinsic of Intrinsic.t
-    | Type of Syntax.Type_expr.t
-    | Ref of Decl_ref.t
-
-  let of_prim : Prim.Value.t -> t = function
-    | Int n -> Int n
-    | Bool b -> Bool b
-    | String s -> String s
-    | Char c -> Char c
-    | Unit -> Unit
-  ;;
-
-  let to_prim : t -> Prim.Value.t option = function
-    | Int n -> Some (Int n)
-    | Bool b -> Some (Bool b)
-    | String s -> Some (String s)
-    | Char c -> Some (Char c)
-    | Unit -> Some Unit
-    | Tuple _
-    | Construct _
-    | Record _
-    | Poly_record _
-    | Poly_variant _
-    | Function _
-    | Code _
-    | Prim _
-    | Intrinsic _
-    | Type _
-    | Ref _ -> None
-  ;;
-
-  let of_lit : Syntax.Lit.t -> t = function
-    | Int n -> Int n
-    | Bool b -> Bool b
-    | String s -> String s
-    | Char c -> Char c
-    | Unit -> Unit
-  ;;
-
-  let rec sexp_of_t : t -> Sexp.t = function
-    | Int n -> Atom (Int.to_string n)
-    | Bool b -> sexp_of_bool b
-    | String s -> List [ Atom "String"; Atom s ]
-    | Char c -> List [ Atom "Char"; sexp_of_char c ]
-    | Unit -> Atom "()"
-    | Tuple values -> List (Atom "Tuple" :: List.map values ~f:sexp_of_t)
-    | Construct ({ name; _ }, values) ->
-      List
-        (Atom (Prelude_path.to_string_hum name) :: List.map values ~f:sexp_of_t)
-    | Record values ->
-      List (Atom "Record" :: Array.to_list (Array.map values ~f:sexp_of_t))
-    | Poly_record fields -> [%sexp (fields : t String.Map.t)]
-    | Poly_variant (tag, Unit) -> Atom ("`" ^ tag)
-    | Poly_variant (tag, arg) -> List [ Atom ("`" ^ tag); sexp_of_t arg ]
-    | Function _ | Prim _ | Intrinsic _ -> Atom "<fun>"
-    | Type ty -> List [ Atom "Type"; Syntax.Type_expr.sexp_of_t ty ]
-    | Ref ref_ -> List [ Atom "Ref"; Decl_ref.sexp_of_t ref_ ]
-    | Code { expr; persistent } ->
-      List
-        (Atom "Code"
-         :: Typed.Expr.sexp_of_t expr
-         ::
-         (if Map.is_empty persistent
-          then []
-          else [ [%sexp (persistent : t Typed.Ident.Map.t)] ]))
-  ;;
-
-  let rec to_string_hum : t -> string = function
-    | Int n -> Int.to_string n
-    | Bool b -> Bool.to_string b
-    | String s -> sprintf "%S" s
-    | Char c -> sprintf "%C" c
-    | Unit -> "()"
-    | Tuple values -> tuple values
-    | Construct ({ name; _ }, []) -> Prelude_path.to_string_hum name
-    | Construct ({ name; _ }, [ value ]) ->
-      Prelude_path.to_string_hum name ^ " " ^ argument value
-    | Construct ({ name; _ }, values) ->
-      Prelude_path.to_string_hum name ^ " " ^ tuple values
-    | Record _ -> "<record>"
-    | Poly_record fields ->
-      Map.to_alist fields
-      |> List.map ~f:(fun (label, value) ->
-        sprintf "`%s = %s" label (to_string_hum value))
-      |> String.concat ~sep:"; "
-      |> sprintf "{%s}"
-    | Poly_variant (tag, Unit) -> "`" ^ tag
-    | Poly_variant (tag, value) -> sprintf "`%s %s" tag (argument value)
-    | Function _ | Prim _ | Intrinsic _ -> "<fun>"
-    | Code _ -> "<code>"
-    | Type _ -> "<type>"
-    | Ref ref_ -> Decl_ref.to_string_hum ref_
-
-  and tuple values =
-    sprintf "(%s)" (String.concat ~sep:", " (List.map values ~f:to_string_hum))
-
-  and argument (value : t) =
-    match value with
-    | Construct (_, []) | Poly_variant (_, Unit) -> to_string_hum value
-    | Construct _ | Poly_variant _ -> "(" ^ to_string_hum value ^ ")"
-    | Int n when n < 0 -> "(" ^ to_string_hum value ^ ")"
-    | _ -> to_string_hum value
-  ;;
-end
+module Env = Env
+module Value = Value
 
 (* The values embedded by a quote being built. [renames] are its own
    embeddings, of binders it refers to. *)
@@ -215,8 +35,8 @@ type t =
   ; mutable budget : Budget.t
   ; mutable output : string -> unit
   ; mutable on_expect : (string Located.t -> unit) option
-  ; mutable intrinsics : Intrinsic.t -> Value.t -> Value.t Or_error.t
-  ; mutable at_compile_time : bool
+  ; mutable reflect : (string -> Reflected_decl.t option Or_error.t) option
+    (** While evaluating at compile time. *)
   }
 
 let captures t ~ident ~args ~body =
@@ -305,11 +125,7 @@ let create ~stamps () =
   ; budget = Budget.create Limits.unlimited
   ; output = Out_channel.output_string stdout
   ; on_expect = None
-  ; intrinsics =
-      (fun intrinsic _ ->
-        Or_error.error_s
-          [%message "Intrinsic without a typechecker" (intrinsic : Intrinsic.t)])
-  ; at_compile_time = false
+  ; reflect = None
   }
 ;;
 
@@ -329,9 +145,7 @@ let add_scc t (scc : Typed.Scc.t) =
 ;;
 
 let global_info t ~ident =
-  if Hashtbl.mem t.env.values ident
-  then Hashtbl.find t.ident_info ident
-  else None
+  if Env.mem t.env ident then Hashtbl.find t.ident_info ident else None
 ;;
 
 let map_result list ~f =
@@ -634,7 +448,7 @@ let code_of_value (value : Value.t) =
 (* Closures capturing a toplevel not yet evaluated share its slot, so it is
    kept. *)
 let declare_toplevel t ident =
-  if not (Hashtbl.mem t.env.values ident) then Env.declare t.env ~ident
+  if not (Env.mem t.env ident) then Env.declare t.env ~ident
 ;;
 
 (* Toplevels are evaluated on first use, so compile time evaluation only runs
@@ -803,14 +617,27 @@ and apply t (f : Value.t) arg ~loc =
          | Ok value -> Ok (Value.of_prim value)
          | Error message -> runtime_error ~loc message))
   | Intrinsic intrinsic ->
-    if t.at_compile_time
-    then t.intrinsics intrinsic arg
-    else
-      runtime_error
-        ~loc
-        (sprintf
-           "%s is only available at compile time"
-           (Intrinsic.public_name intrinsic))
+    (match intrinsic, arg with
+     | Type_expr, Type ty -> Ok (Syntax_value.Type_expr.to_value ty)
+     | (Type_ref_name | Constructor_ref_name | Field_ref_name), Ref ref_ ->
+       Ok (String (Decl_ref.short_name ref_))
+     | Type_decl, Ref { kind = Type; name } ->
+       (match t.reflect with
+        | Some reflect ->
+          let%map decl = reflect name in
+          Syntax_value.reflected_decl decl
+        | None ->
+          runtime_error
+            ~loc
+            (sprintf
+               "%s is only available at compile time"
+               (Intrinsic.public_name intrinsic)))
+     | _ ->
+       raise_s
+         [%message
+           "Intrinsic applied to an ill-typed argument"
+             (intrinsic : Intrinsic.t)
+             (arg : Value.t)])
   | Function { args = param :: args; body; env; level } ->
     let env = Env.copy env in
     Env.set env ~ident:param ~value:arg;
@@ -881,16 +708,14 @@ and build_step
       build t ~env ~level ~embedded ~depth)
 ;;
 
-let set_intrinsics t intrinsics = t.intrinsics <- intrinsics
-
-let at_compile_time t ~f =
-  let outer = t.at_compile_time in
-  t.at_compile_time <- true;
-  Exn.protect ~f ~finally:(fun () -> t.at_compile_time <- outer)
+let at_compile_time t ~reflect ~f =
+  let outer = t.reflect in
+  t.reflect <- Some reflect;
+  Exn.protect ~f ~finally:(fun () -> t.reflect <- outer)
 ;;
 
-let splice t ~code ~level ~entry =
-  at_compile_time t ~f:(fun () ->
+let splice t ~code ~level ~entry ~reflect =
+  at_compile_time t ~reflect ~f:(fun () ->
     let%bind code, embedded =
       eval t ~env:(Env.create ()) ~level code >>= code_of_value
     in
@@ -899,8 +724,9 @@ let splice t ~code ~level ~entry =
     instantiate t code ~entry)
 ;;
 
-let run t expr ~level =
-  at_compile_time t ~f:(fun () -> eval t ~env:(Env.create ()) ~level expr)
+let run t expr ~level ~reflect =
+  at_compile_time t ~reflect ~f:(fun () ->
+    eval t ~env:(Env.create ()) ~level expr)
 ;;
 
 let run_expect_test t ({ body; _ } : Typed.Expect_test.t) ~on_expect =

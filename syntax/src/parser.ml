@@ -50,11 +50,11 @@ let advance t =
 
 let located ~loc txt = { Located.txt; loc }
 
-(** Located from [start] to the last token consumed. *)
 let decl_path (path : Path.t Located.t) =
   { path with txt = Decl_path.Path path.txt }
 ;;
 
+(** Located from [start] to the last token consumed. *)
 let since t start txt = located ~loc:(Loc.merge start (prev_loc t)) txt
 
 let describe : Token.t -> string = function

@@ -1,12 +1,17 @@
 open! Import
 
-let check ?(run = false) contents =
-  let file = { Source_file.path = "a.stag"; contents } in
-  let print_diagnostic diagnostic =
-    print_string
-      (Diagnostic.to_string_hum ~contents:(fun _ -> Some contents) diagnostic)
+let check_files ?(run = false) files =
+  let files =
+    List.map files ~f:(fun (path, contents) -> { Source_file.path; contents })
   in
-  match Driver.check_files [ file ] with
+  let contents path =
+    List.find_map files ~f:(fun (file : Source_file.t) ->
+      Option.some_if (String.equal file.path path) file.contents)
+  in
+  let print_diagnostic diagnostic =
+    print_string (Diagnostic.to_string_hum ~contents diagnostic)
+  in
+  match Driver.check_files files with
   | Error error -> print_diagnostic (Diagnostic.of_driver_error error)
   | Ok driver ->
     print_string (Signature.to_string_hum (Driver.checked driver).signature);
@@ -22,7 +27,10 @@ let check ?(run = false) contents =
       List.iter results ~f:(fun result ->
         if not (Expect_test_runner.Test_result.passed result)
         then print_s [%sexp (result : Expect_test_runner.Test_result.t)]);
-      Option.iter
-        (Expect_test_runner.corrected ~path:file.path ~contents results)
-        ~f:(printf "--- corrected ---\n%s"))
+      List.iter files ~f:(fun { path; contents } ->
+        Option.iter
+          (Expect_test_runner.corrected ~path ~contents results)
+          ~f:(printf "--- corrected ---\n%s")))
 ;;
+
+let check ?run contents = check_files ?run [ "a.stag", contents ]

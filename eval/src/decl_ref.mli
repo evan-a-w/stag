@@ -1,23 +1,21 @@
 open! Import
 
-(** The value of a [Stag.Ref.t]: a declared type, constructor or field by its
-    canonical name, as reflection gives. Programs can't make one otherwise. *)
+(** The value of a [Stag.Type_ref.t], [Stag.Constructor_ref.t] or
+    [Stag.Field_ref.t]: a declared type, constructor or field by its canonical
+    name, as reflection gives. Programs can't make one otherwise. *)
 
 module Kind : sig
   type t =
     | Type
     | Constructor
     | Field
-  [@@deriving sexp_of, equal]
-
-  val to_string : t -> string
 end
 
 type t =
   { kind : Kind.t
   ; name : string (** Canonical. *)
   }
-[@@deriving sexp_of, equal]
+[@@deriving sexp_of]
 
 (** The last name of [name], as declared, eg. [C] of [M.C]. *)
 val short_name : t -> string

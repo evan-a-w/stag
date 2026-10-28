@@ -2,49 +2,43 @@ open! Import
 
 type t =
   | Type_expr
+  | Type_ref_name
+  | Constructor_ref_name
+  | Field_ref_name
   | Type_decl
-  | Ref_name
 [@@deriving sexp_of, equal, enumerate]
 
 let name = function
   | Type_expr -> "type_expr"
+  | Type_ref_name -> "type_ref_name"
+  | Constructor_ref_name -> "constructor_ref_name"
+  | Field_ref_name -> "field_ref_name"
   | Type_decl -> "type_decl"
-  | Ref_name -> "ref_name"
 ;;
 
 let public_name = function
   | Type_expr -> "Stag.Type.expr"
+  | Type_ref_name -> "Stag.Type_ref.name"
+  | Constructor_ref_name -> "Stag.Constructor_ref.name"
+  | Field_ref_name -> "Stag.Field_ref.name"
   | Type_decl -> "Stag.Type.decl"
-  | Ref_name -> "Stag.Ref.name"
 ;;
 
-let prelude name = Type.TCon (Prelude_path.canonical name, [])
+let prelude ?(args = []) name = Type.TCon (Prelude_path.canonical name, args)
 
-let ty t ~var ~record =
-  let ref_ = prelude "Stag.Ref.t" in
+let ty t ~var =
+  let name ref_ = Type.TArrow (prelude ref_, Type.string) in
   match t with
   | Type_expr ->
     Type.TArrow
-      ( TCon (Prelude_path.canonical "Stag.Type.t", [ ATy (var ()) ])
-      , prelude "Stag.Type_expr.t" )
+      (prelude "Stag.Type.t" ~args:[ ATy (var ()) ], prelude "Stag.Type_expr.t")
+  | Type_ref_name -> name "Stag.Type_ref.t"
+  | Constructor_ref_name -> name "Stag.Constructor_ref.t"
+  | Field_ref_name -> name "Stag.Field_ref.t"
   | Type_decl ->
     TArrow
-      ( ref_
-      , TCon
-          ( Prelude_path.canonical "option"
-          , [ ATy
-                (record
-                   (Type.RExtend
-                      ( "params"
-                      , Present
-                      , TCon
-                          ( Prelude_path.canonical "list"
-                          , [ ATy (prelude "Stag.Type_decl.Param.t") ] )
-                      , RExtend
-                          ("kind", Present, prelude "Stag.Type.Kind.t", REmpty)
-                      )))
-            ] ) )
-  | Ref_name -> TArrow (ref_, Type.string)
+      ( prelude "Stag.Type_ref.t"
+      , prelude "option" ~args:[ ATy (prelude "Stag.Type.Decl.t") ] )
 ;;
 
 let find path =
