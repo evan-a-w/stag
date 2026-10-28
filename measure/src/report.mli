@@ -10,13 +10,21 @@ module Format : sig
   [@@deriving sexp, enumerate]
 
   val to_string : t -> string
-  val of_string : string -> t
+end
+
+(** Against the baseline. *)
+module Change : sig
+  type t =
+    | Not_compared (** There is no baseline. *)
+    | Not_in_baseline
+    | Compared of Comparison.t
+  [@@deriving sexp_of]
 end
 
 module Entry : sig
   type t =
     { result : Bench_result.t
-    ; comparison : Comparison.t option (** Against the baseline, if any. *)
+    ; change : Change.t
     }
   [@@deriving sexp_of]
 end

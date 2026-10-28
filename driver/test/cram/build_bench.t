@@ -27,8 +27,7 @@ own program, named TARGET/NAME.
 
 A fake clock (see stag bench) makes the output reproducible.
 
-  $ export STAG_BENCH_FAKE_CLOCK=100ns
-  $ alias bench='stag-build bench -warm-up 1us -time 1us -samples 3 -no-alloc'
+  $ alias bench='stag-build bench -warm-up 1us -time 1us -samples 3 -no-alloc -fake-clock 100ns'
   $ bench | grep -E '^[a-z]|time:'
   lib/sum/1
     time:      [0.1000 ns 0.1000 ns 0.1000 ns] (mean, 95% CI)

@@ -1,8 +1,18 @@
 open! Import
 
+let max_label_length = 40
+
+let label value =
+  let label = Value.to_string_hum value in
+  if String.length label <= max_label_length
+  then label
+  else String.prefix label (max_label_length - 3) ^ "..."
+;;
+
 let benches ?files driver =
   let interpreter = Driver.interpreter driver in
   Treewalk.set_output interpreter ignore;
+  Treewalk.set_limits interpreter Limits.unlimited;
   let in_files (bench : Typed.Bench.t) =
     Option.for_all files ~f:(fun files -> Set.mem files bench.name.loc.file)
   in
@@ -11,36 +21,60 @@ let benches ?files driver =
       (fun () ->
         Treewalk.eval_expr interpreter ~bindings body |> Or_error.ignore_m)
   in
-  let cases (bench : Typed.Bench.t) =
-    match bench.param with
-    | None -> Ok [ bench.name.txt, routine [] bench.body ]
-    | Some (ident, args) ->
-      List.map args ~f:(fun arg ->
-        let%map.Result value =
-          Treewalk.eval_expr interpreter arg
-          |> Result.map_error ~f:Diagnostic.of_runtime_error
-        in
-        ( bench.name.txt ^ "/" ^ Value.to_string_hum value
-        , routine [ ident, value ] bench.body ))
-      |> Result.all
-  in
   let seen = String.Table.create () in
-  (Driver.checked driver).program.benches
-  |> List.filter ~f:in_files
-  |> List.map ~f:(fun (bench : Typed.Bench.t) ->
-    let%bind.Result cases = cases bench in
-    List.map cases ~f:(fun (name, routine) ->
-      match Hashtbl.find seen name with
-      | Some (previous : Loc.t) ->
-        Error
-          (Diagnostic.create
-             ~loc:bench.name.loc
-             ~notes:[ { loc = previous; message = "The other is here" } ]
-             (sprintf "Two benchmarks are named %S" name))
+  let claim name ~(loc : Loc.t) =
+    match Hashtbl.find seen name with
+    | Some (previous : Loc.t) -> Error previous
+    | None ->
+      Hashtbl.set seen ~key:name ~data:loc;
+      Ok ()
+  in
+  let duplicate name ~loc ~previous =
+    Diagnostic.create
+      ~loc
+      ~notes:[ { loc = previous; message = "The other is here" } ]
+      (sprintf "Two benchmarks are named %S" name)
+  in
+  let benches =
+    (Driver.checked driver).program.benches |> List.filter ~f:in_files
+  in
+  let%map.Result () =
+    List.filter_map benches ~f:(fun (bench : Typed.Bench.t) ->
+      match bench.param with
+      | Some _ -> None
       | None ->
-        Hashtbl.set seen ~key:name ~data:bench.name.loc;
-        Ok { Measure.Suite.Bench.name; elements = None; routine })
-    |> Result.all)
-  |> Result.all
-  |> Result.map ~f:List.concat
+        let name = bench.name.txt
+        and loc = bench.name.loc in
+        Some
+          (claim name ~loc
+           |> Result.map_error ~f:(fun previous ->
+             duplicate name ~loc ~previous)))
+    |> Result.all_unit
+  in
+  List.map benches ~f:(fun (bench : Typed.Bench.t) : Measure.Suite.Bench.t ->
+    let name = bench.name.txt in
+    match bench.param with
+    | None -> Single { name; routine = routine [] bench.body }
+    | Some (ident, args) ->
+      Parameterised
+        { name
+        ; args =
+            List.map args ~f:(fun arg () ->
+              let%bind.Or_error value = Treewalk.eval_expr interpreter arg in
+              let label = label value in
+              let loc = bench.name.loc in
+              let%map.Or_error () =
+                claim (name ^ "/" ^ label) ~loc
+                |> Result.map_error ~f:(fun previous ->
+                  Runtime_error.to_error
+                    { loc
+                    ; message =
+                        sprintf
+                          "Two benchmarks are named %S, the other at %s"
+                          (name ^ "/" ^ label)
+                          (Loc.to_string previous)
+                    })
+              in
+              label, routine [ ident, value ] bench.body)
+        })
 ;;

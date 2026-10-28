@@ -5,8 +5,6 @@ type t =
   ; now : unit -> Time_ns.Span.t
   }
 
-let create ~resolution ~now = { resolution; now }
-
 let monotonic () =
   match Core_unix.Clock.gettime, Core_unix.Clock.getres with
   | Ok gettime, Ok getres ->
@@ -26,12 +24,9 @@ let monotonic () =
 
 let now t = t.now ()
 let resolution t = t.resolution
+let make ~resolution ~now = { resolution; now }
 
 module Fake = struct
-  type clock = t
-
-  let create_clock = create
-
   type t =
     { mutable time : Time_ns.Span.t
     ; tick : Time_ns.Span.t
@@ -48,8 +43,8 @@ module Fake = struct
 
   let advance t span = t.time <- Time_ns.Span.( + ) t.time span
 
-  let clock t : clock =
-    create_clock ~resolution:t.resolution ~now:(fun () ->
+  let clock t =
+    make ~resolution:t.resolution ~now:(fun () ->
       let now = t.time in
       advance t t.tick;
       now)

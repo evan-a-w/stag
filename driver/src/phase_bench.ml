@@ -16,7 +16,7 @@ let benches ?(prefix = "") parse =
       to_error [ Diagnostic.of_typecheck_error error ])
   in
   let bench name routine =
-    { Measure.Suite.Bench.name = prefix ^ name; elements = None; routine }
+    Measure.Suite.Bench.Single { name = prefix ^ name; routine }
   in
   let parsed = lazy (parse ()) in
   [ bench "parse" (Plain (fun () -> parse () |> Or_error.ignore_m))

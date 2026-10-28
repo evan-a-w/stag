@@ -2,7 +2,6 @@ open! Import
 
 type t =
   { name : string
-  ; elements : int option
   ; measurement : Measurement.t
   ; stats : Stats.t
   ; alloc : Alloc.t option
@@ -15,7 +14,7 @@ let per_iteration_ns_of_measurement (measurement : Measurement.t) =
 
 let per_iteration_ns t = per_iteration_ns_of_measurement t.measurement
 
-let create ?elements config ~name (measurement : Measurement.t) =
+let create config ~name (measurement : Measurement.t) =
   let stats =
     Stats.summarize config (per_iteration_ns_of_measurement measurement)
   in
@@ -32,5 +31,5 @@ let create ?elements config ~name (measurement : Measurement.t) =
       (List.fold allocs ~init:Alloc.zero ~f:Alloc.add)
       ~by:(Float.of_int iterations)
   in
-  { name; elements; measurement; stats; alloc }
+  { name; measurement; stats; alloc }
 ;;

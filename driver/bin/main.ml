@@ -236,7 +236,6 @@ let bench_command =
            (Bench_command.run
               ~filters
               options
-              (Bench_command.clock ())
               ~baseline_dir
               ~report:(report files)
               benches)

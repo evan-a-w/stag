@@ -38,7 +38,6 @@ type t =
   ; max : float
   ; stddev : float
   ; mad : float
-  ; p50 : float
   ; p90 : float
   ; p99 : float
   ; outliers : Outliers.t
@@ -56,7 +55,8 @@ val percentile : float array -> float -> float
 
 val median : float array -> float
 
-(** The median absolute deviation from the median, unscaled. *)
+(** The median absolute deviation from the median, scaled by 1.4826 to
+    estimate the standard deviation of normal data, as criterion does. *)
 val mad : float array -> float
 
 (** [f data], with the [confidence] interval of the percentile bootstrap:
@@ -68,6 +68,17 @@ val bootstrap
   -> confidence:float
   -> float array
   -> f:(float array -> float)
+  -> Estimate.t
+
+(** As [bootstrap], of [f a b], resampling [a] and [b] independently. [f] is
+    given resamples of the same lengths as [a] and [b]. *)
+val bootstrap2
+  :  random:Random.State.t
+  -> resamples:int
+  -> confidence:float
+  -> float array
+  -> float array
+  -> f:(float array -> float array -> float)
   -> Estimate.t
 
 (** Bootstrapping with [Config.resamples], [confidence] and [seed]. *)

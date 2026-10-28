@@ -8,23 +8,20 @@ module Format = struct
   [@@deriving sexp, enumerate]
 
   let to_string t = String.lowercase (Sexp.to_string (sexp_of_t t))
+end
 
-  let of_string string =
-    match List.find all ~f:(fun t -> String.equal (to_string t) string) with
-    | Some t -> t
-    | None ->
-      raise_s
-        [%message
-          "unknown report format, expected one of"
-            ~_:(List.map all ~f:to_string : string list)
-            ~got:string]
-  ;;
+module Change = struct
+  type t =
+    | Not_compared
+    | Not_in_baseline
+    | Compared of Comparison.t
+  [@@deriving sexp_of]
 end
 
 module Entry = struct
   type t =
     { result : Bench_result.t
-    ; comparison : Comparison.t option
+    ; change : Change.t
     }
   [@@deriving sexp_of]
 end
@@ -66,15 +63,6 @@ let time ns =
   number ^ " " ^ unit
 ;;
 
-let throughput ~elements ns =
-  let number, unit =
-    scaled
-      (Float.of_int elements /. (ns /. 1e9))
-      ~units:[ "elem/s"; "Kelem/s"; "Melem/s"; "Gelem/s"; "Telem/s" ]
-  in
-  number ^ " " ^ unit
-;;
-
 let count value =
   if Float.equal value 0.
   then "0"
@@ -110,8 +98,8 @@ let outliers (outliers : Stats.Outliers.t) ~count =
       (String.concat categories ~sep:", ")
 ;;
 
-let human (config : Config.t) ({ result; comparison } : Entry.t) =
-  let { Bench_result.name; elements; measurement; stats; alloc } = result in
+let human (config : Config.t) ({ result; change } : Entry.t) =
+  let { Bench_result.name; measurement; stats; alloc } = result in
   let confidence = sprintf "%g%% CI" (100. *. config.confidence) in
   let line label value = sprintf "  %-10s %s" (label ^ ":") value in
   let lines =
@@ -129,7 +117,7 @@ let human (config : Config.t) ({ result; comparison } : Entry.t) =
         (line
            "median"
            (sprintf
-              "%s   stddev: %s   MAD: %s"
+              "%s   stddev: %s   MADN: %s"
               (time stats.median)
               (time stats.stddev)
               (time stats.mad)))
@@ -137,20 +125,11 @@ let human (config : Config.t) ({ result; comparison } : Entry.t) =
         (line
            "range"
            (sprintf
-              "[%s %s]   p50: %s   p90: %s   p99: %s"
+              "[%s %s]   p90: %s   p99: %s"
               (time stats.min)
               (time stats.max)
-              (time stats.p50)
               (time stats.p90)
               (time stats.p99)))
-    ; Option.map elements ~f:(fun elements ->
-        line
-          "thrpt"
-          (sprintf
-             "[%s %s %s]"
-             (throughput ~elements stats.mean.upper)
-             (throughput ~elements stats.mean.point)
-             (throughput ~elements stats.mean.lower)))
     ; Option.map alloc ~f:(fun (alloc : Alloc.t) ->
         line
           "alloc"
@@ -171,16 +150,22 @@ let human (config : Config.t) ({ result; comparison } : Entry.t) =
               (plural measurement.warm_up_iterations "iteration")
               (time (Time_ns.Span.to_ns measurement.warm_up_time))))
     ; Some (line "outliers" (outliers stats.outliers ~count:stats.count))
-    ; Option.map comparison ~f:(fun { change; verdict } ->
-        line
-          "change"
-          (sprintf
-             "[%s %s %s] (%s) %s"
-             (percent change.lower)
-             (percent change.point)
-             (percent change.upper)
-             confidence
-             (Comparison.Verdict.to_string verdict)))
+    ; (match change with
+       | Not_compared -> None
+       | Not_in_baseline -> Some (line "change" "not in the baseline")
+       | Compared { change = _; verdict = Cannot_compare as verdict } ->
+         Some (line "change" (Comparison.Verdict.to_string verdict))
+       | Compared { change; verdict } ->
+         Some
+           (line
+              "change"
+              (sprintf
+                 "[%s %s %s] (%s) %s"
+                 (percent change.lower)
+                 (percent change.point)
+                 (percent change.upper)
+                 confidence
+                 (Comparison.Verdict.to_string verdict))))
     ]
   in
   String.concat (List.filter_opt lines) ~sep:"\n" ^ "\n"
@@ -262,15 +247,13 @@ module Json = struct
   ;;
 end
 
-let json_of_entry ({ result; comparison } : Entry.t) : Json.t =
-  let { Bench_result.name; elements; measurement; stats; alloc } = result in
+let json_of_entry ({ result; change } : Entry.t) : Json.t =
+  let { Bench_result.name; measurement; stats; alloc } = result in
   let estimate ({ point; lower; upper } : Stats.Estimate.t) =
     [ "point", Json.Number point; "lower", Number lower; "upper", Number upper ]
   in
   Object
     [ "name", String name
-    ; ( "elements"
-      , Option.value_map elements ~default:Json.Null ~f:(fun e -> Int e) )
     ; "samples", Int (List.length measurement.samples)
     ; "iterations", Int measurement.plan.iterations
     ; "mean", Object (estimate stats.mean)
@@ -279,7 +262,6 @@ let json_of_entry ({ result; comparison } : Entry.t) : Json.t =
     ; "max", Number stats.max
     ; "stddev", Number stats.stddev
     ; "mad", Number stats.mad
-    ; "p50", Number stats.p50
     ; "p90", Number stats.p90
     ; "p99", Number stats.p99
     ; ( "outliers"
@@ -299,18 +281,18 @@ let json_of_entry ({ result; comparison } : Entry.t) : Json.t =
             ; "major_collections", Number alloc.major_collections
             ]) )
     ; ( "change"
-      , Option.value_map
-          comparison
-          ~default:Json.Null
-          ~f:(fun ({ change; verdict } : Comparison.t) ->
-            Object
-              (estimate change
-               @ [ ( "verdict"
-                   , String
-                       (String.lowercase
-                          (Sexp.to_string
-                             (Comparison.Verdict.sexp_of_t verdict))) )
-                 ])) )
+      , match change with
+        | Not_compared -> Json.Null
+        | Not_in_baseline -> Object [ "verdict", String "not_in_baseline" ]
+        | Compared { change; verdict } ->
+          Object
+            (estimate change
+             @ [ ( "verdict"
+                 , String
+                     (String.lowercase
+                        (Sexp.to_string (Comparison.Verdict.sexp_of_t verdict)))
+                 )
+               ]) )
     ]
 ;;
 

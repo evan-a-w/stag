@@ -32,3 +32,25 @@ let quick =
   ; min_samples = 5
   }
 ;;
+
+let validate t =
+  let check ok message = if ok then Ok () else Or_error.error_string message in
+  let non_negative span = Time_ns.Span.( >= ) span Time_ns.Span.zero in
+  Or_error.combine_errors_unit
+    [ check (t.samples >= 2) "the number of samples must be at least 2"
+    ; check
+        (t.min_samples >= 2 && t.min_samples <= t.samples)
+        "the minimum number of samples must be from 2 to the number of samples"
+    ; check (non_negative t.warm_up) "the warm-up time must not be negative"
+    ; check
+        (non_negative t.measurement_time)
+        "the measurement time must not be negative"
+    ; check (t.resamples >= 0) "the number of resamples must not be negative"
+    ; check
+        (Float.( > ) t.confidence 0. && Float.( < ) t.confidence 1.)
+        "the confidence level must be between 0 and 1"
+    ; check
+        (Float.is_finite t.noise_threshold && Float.( >= ) t.noise_threshold 0.)
+        "the noise threshold must be a number, not negative"
+    ]
+;;

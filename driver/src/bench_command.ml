@@ -8,6 +8,7 @@ module Options = struct
     ; alloc : bool
     ; baseline : string option
     ; save_baseline : string option
+    ; clock : Clock.t
     }
 
   let baseline_name =
@@ -61,6 +62,13 @@ module Options = struct
         "save-baseline"
         (optional baseline_name)
         ~doc:"NAME save the results as the baseline NAME"
+    and fake_clock =
+      flag
+        "fake-clock"
+        (optional Time_ns.Span.arg_type)
+        ~doc:
+          "SPAN for tests: time with a fake clock moving SPAN at each read, \
+           not the real one"
     in
     let base = if quick then Config.quick else Config.default in
     let samples = Option.value samples ~default:base.samples in
@@ -78,34 +86,46 @@ module Options = struct
             ~f:(fun percent -> percent /. 100.)
       }
     in
-    { config; format; alloc = not no_alloc; baseline; save_baseline }
+    let clock =
+      match fake_clock with
+      | None -> Clock.monotonic ()
+      | Some tick -> Clock.Fake.clock (Clock.Fake.create ~tick ())
+    in
+    { config; format; alloc = not no_alloc; baseline; save_baseline; clock }
   ;;
 end
-
-let clock () =
-  match Sys.getenv "STAG_BENCH_FAKE_CLOCK" with
-  | None -> Clock.monotonic ()
-  | Some tick ->
-    Clock.Fake.clock (Clock.Fake.create ~tick:(Time_ns.Span.of_string tick) ())
-;;
 
 let error_diagnostic error =
   Diagnostic.create ~loc:Loc.none (Error.to_string_hum error)
 ;;
 
+let warn message =
+  Out_channel.flush stdout;
+  eprintf "Warning: %s\n%!" message
+;;
+
+let load_baseline ~baseline_dir name =
+  let path = Baseline.path ~dir:baseline_dir ~name in
+  Baseline.load ~path
+  |> Or_error.tag_s ~tag:[%message "delete the baseline or save it again" path]
+;;
+
 let run
       ?filters
-      { Options.config; format; alloc; baseline; save_baseline }
-      clock
+      { Options.config; format; alloc; baseline; save_baseline; clock }
       ~baseline_dir
       ~report
       benches
   =
-  let load name = Baseline.load ~path:(Baseline.path ~dir:baseline_dir ~name) in
   let baseline =
+    let%bind.Or_error () = Config.validate config in
     match baseline with
     | None -> Ok None
-    | Some name -> load name |> Or_error.map ~f:Option.some
+    | Some name ->
+      let%map.Or_error baseline = load_baseline ~baseline_dir name in
+      if Option.is_none baseline
+      then warn (sprintf "no baseline %s to compare with" name);
+      baseline
   in
   match baseline with
   | Error error ->
@@ -115,6 +135,9 @@ let run
     let on_outcome ({ name; entry } : Suite.Outcome.t) =
       match entry with
       | Ok entry ->
+        Option.iter
+          (Measurement.Plan.warning entry.result.measurement.plan config)
+          ~f:(fun message -> warn (sprintf "%s: %s" name message));
         (match format with
          | Human -> print_string (Report.human config entry)
          | Sexp | Json -> ())
@@ -146,18 +169,23 @@ let run
       match save_baseline with
       | None -> true
       | Some name ->
-        let path = Baseline.path ~dir:baseline_dir ~name in
-        let saved =
-          let%bind.Or_error previous =
-            if Stdlib.Sys.file_exists path then load name else Ok Baseline.empty
-          in
-          Baseline.save
-            (Baseline.update
-               previous
-               (List.map entries ~f:(fun entry -> entry.result)))
-            ~path
+        let previous =
+          match load_baseline ~baseline_dir name with
+          | Ok previous -> Option.value previous ~default:Baseline.empty
+          | Error error ->
+            warn
+              (sprintf
+                 "overwriting a malformed baseline: %s"
+                 (Error.to_string_hum error));
+            Baseline.empty
         in
-        (match saved with
+        (match
+           Baseline.save
+             (Baseline.update
+                previous
+                (List.map entries ~f:(fun entry -> entry.result)))
+             ~path:(Baseline.path ~dir:baseline_dir ~name)
+         with
          | Ok () -> true
          | Error error ->
            report (error_diagnostic error);

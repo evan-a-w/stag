@@ -21,19 +21,18 @@ the iterations too fast to see); a short warm-up and measurement time keep it
 fast, as the fake time passes much slower than real time. The program's output
 is discarded.
 
-  $ export STAG_BENCH_FAKE_CLOCK=100ns
-  $ alias bench='stag bench -warm-up 1us -time 1us'
+  $ alias bench='stag bench -warm-up 1us -time 1us -fake-clock 100ns'
   $ bench fib.stag -samples 5 -no-alloc -filter fib/
   fib/1
     time:      [0.1000 ns 0.1000 ns 0.1000 ns] (mean, 95% CI)
-    median:    0.1000 ns   stddev: 0.000 ns   MAD: 0.000 ns
-    range:     [0.1000 ns 0.1000 ns]   p50: 0.1000 ns   p90: 0.1000 ns   p99: 0.1000 ns
+    median:    0.1000 ns   stddev: 0.000 ns   MADN: 0.000 ns
+    range:     [0.1000 ns 0.1000 ns]   p90: 0.1000 ns   p99: 0.1000 ns
     samples:   5 x 1000 iterations (warm-up: 1023 iterations in 1.000 us)
     outliers:  none
   fib/3
     time:      [0.1000 ns 0.1000 ns 0.1000 ns] (mean, 95% CI)
-    median:    0.1000 ns   stddev: 0.000 ns   MAD: 0.000 ns
-    range:     [0.1000 ns 0.1000 ns]   p50: 0.1000 ns   p90: 0.1000 ns   p99: 0.1000 ns
+    median:    0.1000 ns   stddev: 0.000 ns   MADN: 0.000 ns
+    range:     [0.1000 ns 0.1000 ns]   p90: 0.1000 ns   p99: 0.1000 ns
     samples:   5 x 1000 iterations (warm-up: 1023 iterations in 1.000 us)
     outliers:  none
 
@@ -46,10 +45,10 @@ Machine readable formats.
 
   $ bench fib.stag -samples 3 -no-alloc -filter fib/1 -sexp
   (((result
-     ((name fib/1) (elements ())
+     ((name fib/1)
       (measurement
        ((warm_up_iterations 1023) (warm_up_time 1us)
-        (plan ((iterations 1000) (samples 3)))
+        (plan ((iterations 1000) (samples 3) (expected_time 3us)))
         (samples
          (((iterations 1000) (time 100ns) (alloc ()))
           ((iterations 1000) (time 100ns) (alloc ()))
@@ -60,15 +59,14 @@ Machine readable formats.
          ((point 0.10000000000000002) (lower 0.10000000000000002)
           (upper 0.10000000000000002)))
         (median 0.1) (min 0.1) (max 0.1) (stddev 1.6996749443881478E-17)
-        (mad 0) (p50 0.1) (p90 0.1) (p99 0.1)
+        (mad 0) (p90 0.1) (p99 0.1)
         (outliers ((low_severe 0) (low_mild 0) (high_mild 0) (high_severe 0)))))
       (alloc ())))
-    (comparison ())))
+    (change Not_compared)))
   $ bench fib.stag -samples 3 -no-alloc -filter fib/1 -json
   [
     {
       "name": "fib/1",
-      "elements": null,
       "samples": 3,
       "iterations": 1000,
       "mean": {
@@ -81,7 +79,6 @@ Machine readable formats.
       "max": 0.1,
       "stddev": 1.6996749443881478e-17,
       "mad": 0,
-      "p50": 0.1,
       "p90": 0.1,
       "p99": 0.1,
       "outliers": {
@@ -100,25 +97,30 @@ Baselines are saved in _stag/bench, and compared with.
   $ bench fib.stag -samples 5 -no-alloc -save-baseline before > /dev/null
   $ ls _stag/bench
   before.sexp
-  $ STAG_BENCH_FAKE_CLOCK=200ns bench fib.stag -samples 5 -no-alloc -baseline before -filter fib/3
+  $ stag bench -warm-up 1us -time 1us -fake-clock 200ns fib.stag -samples 5 -no-alloc -baseline before -filter fib/3
   fib/3
-    time:      [6.250 ns 6.250 ns 6.250 ns] (mean, 95% CI)
-    median:    6.250 ns   stddev: 0.000 ns   MAD: 0.000 ns
-    range:     [6.250 ns 6.250 ns]   p50: 6.250 ns   p90: 6.250 ns   p99: 6.250 ns
-    samples:   5 x 32 iterations (warm-up: 31 iterations in 1.000 us)
+    time:      [2.597 ns 2.597 ns 2.597 ns] (mean, 95% CI)
+    median:    2.597 ns   stddev: 0.000 ns   MADN: 0.000 ns
+    range:     [2.597 ns 2.597 ns]   p90: 2.597 ns   p99: 2.597 ns
+    samples:   5 x 77 iterations (warm-up: 31 iterations in 1.000 us)
     outliers:  none
-    change:    [+6150.000% +6150.000% +6150.000%] (95% CI) Performance has regressed.
+    change:    [+2497.403% +2497.403% +2497.403%] (95% CI) Performance has regressed.
   $ bench fib.stag -samples 5 -no-alloc -baseline before -filter fib/3
   fib/3
     time:      [0.1000 ns 0.1000 ns 0.1000 ns] (mean, 95% CI)
-    median:    0.1000 ns   stddev: 0.000 ns   MAD: 0.000 ns
-    range:     [0.1000 ns 0.1000 ns]   p50: 0.1000 ns   p90: 0.1000 ns   p99: 0.1000 ns
+    median:    0.1000 ns   stddev: 0.000 ns   MADN: 0.000 ns
+    range:     [0.1000 ns 0.1000 ns]   p90: 0.1000 ns   p99: 0.1000 ns
     samples:   5 x 1000 iterations (warm-up: 1023 iterations in 1.000 us)
     outliers:  none
     change:    [+0.000% +0.000% +0.000%] (95% CI) No change in performance detected.
-  $ bench fib.stag -baseline missing
-  Error: ("no baseline at" _stag/bench/missing.sexp)
-  [1]
+  $ bench fib.stag -samples 3 -no-alloc -filter fib/1 -baseline missing
+  Warning: no baseline missing to compare with
+  fib/1
+    time:      [0.1000 ns 0.1000 ns 0.1000 ns] (mean, 95% CI)
+    median:    0.1000 ns   stddev: 0.000 ns   MADN: 0.000 ns
+    range:     [0.1000 ns 0.1000 ns]   p90: 0.1000 ns   p99: 0.1000 ns
+    samples:   3 x 1000 iterations (warm-up: 1023 iterations in 1.000 us)
+    outliers:  none
   $ bench fib.stag -save-baseline ../x
   Error parsing command line:
   
@@ -144,8 +146,8 @@ A failing benchmark is reported, and the others still run.
   Error: Benchmark div failed: Division by zero
   ok
     time:      [0.1000 ns 0.1000 ns 0.1000 ns] (mean, 95% CI)
-    median:    0.1000 ns   stddev: 0.000 ns   MAD: 0.000 ns
-    range:     [0.1000 ns 0.1000 ns]   p50: 0.1000 ns   p90: 0.1000 ns   p99: 0.1000 ns
+    median:    0.1000 ns   stddev: 0.000 ns   MADN: 0.000 ns
+    range:     [0.1000 ns 0.1000 ns]   p90: 0.1000 ns   p99: 0.1000 ns
     samples:   5 x 1000 iterations (warm-up: 1023 iterations in 1.000 us)
     outliers:  none
   [1]
@@ -174,19 +176,19 @@ program.
   $ bench fib.stag -samples 3 -no-alloc -phases
   parse
     time:      [0.1000 ns 0.1000 ns 0.1000 ns] (mean, 95% CI)
-    median:    0.1000 ns   stddev: 0.000 ns   MAD: 0.000 ns
-    range:     [0.1000 ns 0.1000 ns]   p50: 0.1000 ns   p90: 0.1000 ns   p99: 0.1000 ns
+    median:    0.1000 ns   stddev: 0.000 ns   MADN: 0.000 ns
+    range:     [0.1000 ns 0.1000 ns]   p90: 0.1000 ns   p99: 0.1000 ns
     samples:   3 x 1000 iterations (warm-up: 1023 iterations in 1.000 us)
     outliers:  none
   typecheck
     time:      [0.1000 ns 0.1000 ns 0.1000 ns] (mean, 95% CI)
-    median:    0.1000 ns   stddev: 0.000 ns   MAD: 0.000 ns
-    range:     [0.1000 ns 0.1000 ns]   p50: 0.1000 ns   p90: 0.1000 ns   p99: 0.1000 ns
+    median:    0.1000 ns   stddev: 0.000 ns   MADN: 0.000 ns
+    range:     [0.1000 ns 0.1000 ns]   p90: 0.1000 ns   p99: 0.1000 ns
     samples:   3 x 1000 iterations (warm-up: 1023 iterations in 1.000 us)
     outliers:  none
   eval
-    time:      [1.587 ns 1.587 ns 1.587 ns] (mean, 95% CI)
-    median:    1.587 ns   stddev: 0.000 ns   MAD: 0.000 ns
-    range:     [1.587 ns 1.587 ns]   p50: 1.587 ns   p90: 1.587 ns   p99: 1.587 ns
-    samples:   3 x 63 iterations (warm-up: 31 iterations in 500.0 ns)
+    time:      [1.600 ns 1.600 ns 1.600 ns] (mean, 95% CI)
+    median:    1.600 ns   stddev: 0.000 ns   MADN: 0.000 ns
+    range:     [1.600 ns 1.600 ns]   p90: 1.600 ns   p99: 1.600 ns
+    samples:   3 x 500 iterations (warm-up: 511 iterations in 1.300 us)
     outliers:  none

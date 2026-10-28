@@ -53,7 +53,7 @@ let stddev data =
 
 let mad data =
   let m = median data in
-  median (Array.map data ~f:(fun x -> Float.abs (x -. m)))
+  1.4826 *. median (Array.map data ~f:(fun x -> Float.abs (x -. m)))
 ;;
 
 module Outliers = struct
@@ -97,25 +97,13 @@ type t =
   ; max : float
   ; stddev : float
   ; mad : float
-  ; p50 : float
   ; p90 : float
   ; p99 : float
   ; outliers : Outliers.t
   }
 [@@deriving sexp]
 
-let bootstrap ~random ~resamples ~confidence data ~f : Estimate.t =
-  check_nonempty data;
-  let n = Array.length data in
-  let point = f data in
-  let resample = Array.create ~len:n 0. in
-  let statistics =
-    Array.init resamples ~f:(fun _ ->
-      for i = 0 to n - 1 do
-        resample.(i) <- data.(Random.State.int random n)
-      done;
-      f resample)
-  in
+let interval ~confidence ~point statistics : Estimate.t =
   if Array.is_empty statistics
   then { point; lower = point; upper = point }
   else (
@@ -125,6 +113,36 @@ let bootstrap ~random ~resamples ~confidence data ~f : Estimate.t =
     ; lower = percentile_of_sorted statistics tail
     ; upper = percentile_of_sorted statistics (1. -. tail)
     })
+;;
+
+let resampler random data =
+  check_nonempty data;
+  let n = Array.length data in
+  let resample = Array.create ~len:n 0. in
+  fun () ->
+    for i = 0 to n - 1 do
+      resample.(i) <- data.(Random.State.int random n)
+    done;
+    resample
+;;
+
+let bootstrap ~random ~resamples ~confidence data ~f =
+  let resample = resampler random data in
+  interval
+    ~confidence
+    ~point:(f data)
+    (Array.init resamples ~f:(fun _ -> f (resample ())))
+;;
+
+let bootstrap2 ~random ~resamples ~confidence a b ~f =
+  let resample_a = resampler random a in
+  let resample_b = resampler random b in
+  interval
+    ~confidence
+    ~point:(f a b)
+    (Array.init resamples ~f:(fun _ ->
+       let a = resample_a () in
+       f a (resample_b ())))
 ;;
 
 let summarize (config : Config.t) data =
@@ -145,7 +163,6 @@ let summarize (config : Config.t) data =
   ; max = sorted.(Array.length sorted - 1)
   ; stddev = stddev data
   ; mad = mad data
-  ; p50 = median
   ; p90 = percentile_of_sorted sorted 0.9
   ; p99 = percentile_of_sorted sorted 0.99
   ; outliers = Outliers.classify data

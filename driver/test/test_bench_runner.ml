@@ -31,19 +31,25 @@ let benches ?files source =
 (* The names of the benches, and the result of an iteration of each, by
    running it once. *)
 let print_benches ?files source =
+  let print name (routine : Measure.Routine.t) =
+    let outcome =
+      match routine with
+      | Plain run ->
+        (match run () with
+         | Ok () -> "ok"
+         | Error error -> Error.to_string_hum error)
+      | Batched _ -> "batched"
+    in
+    print_s [%message name (outcome : string)]
+  in
   Option.iter (benches ?files source) ~f:(fun benches ->
-    List.iter benches ~f:(fun { Measure.Suite.Bench.name; elements; routine } ->
-      let outcome =
-        match routine with
-        | Plain run ->
-          (match run () with
-           | Ok () -> "ok"
-           | Error error -> Error.to_string_hum error)
-        | Batched _ -> "batched"
-      in
-      print_s
-        [%message
-          name (elements : (int option[@sexp.option])) (outcome : string)]))
+    List.iter benches ~f:(function
+      | Single { name; routine } -> print name routine
+      | Parameterised { name; args } ->
+        List.iter args ~f:(fun arg ->
+          match arg () with
+          | Ok (label, routine) -> print (name ^ "/" ^ label) routine
+          | Error error -> print_s [%message name (error : Error.t)])))
 ;;
 
 let%expect_test
@@ -134,12 +140,16 @@ let%bench "" = 1
     ((loc t.stag:3:10-13) (whole_file false)
      (message "Two benchmarks are named \"a\"")
      (notes (((loc t.stag:2:10-13) (message "The other is here")))))
-    ((loc t.stag:2:10-13) (whole_file false)
-     (message "Two benchmarks are named \"a/1\"")
-     (notes (((loc t.stag:2:10-13) (message "The other is here")))))
-    ((loc t.stag:3:10-13) (whole_file false)
-     (message "Two benchmarks are named \"a/1\"")
-     (notes (((loc t.stag:2:10-15) (message "The other is here")))))
+    (a/1 (outcome ok))
+    (a
+     (error
+      ("Two benchmarks are named \"a/1\", the other at t.stag:2:10-13" @
+       t.stag:2:10-13)))
+    (a/1 (outcome ok))
+    (a
+     (error
+      ("Two benchmarks are named \"a/1\", the other at t.stag:2:10-15" @
+       t.stag:3:10-13)))
     ("" (outcome ok))
     |}]
 ;;
@@ -204,8 +214,8 @@ let%expect_test "an argument that fails" =
   print_benches {|let%bench "x" n in [1; Int.div 1 0] = n|};
   [%expect
     {|
-    ((loc t.stag:1:23-34) (whole_file false) (message "Division by zero")
-     (notes ()))
+    (x/1 (outcome ok))
+    (x (error ("Division by zero" @ t.stag:1:23-34)))
     |}]
 ;;
 
@@ -248,8 +258,8 @@ let%bench "after" n in [1; 2] = n
     (fails (error ("Division by zero" @ t.stag:3:20-31)))
     after/2
       time:      [0.1000 ns 0.1000 ns 0.1000 ns] (mean, 95% CI)
-      median:    0.1000 ns   stddev: 0.000 ns   MAD: 0.000 ns
-      range:     [0.1000 ns 0.1000 ns]   p50: 0.1000 ns   p90: 0.1000 ns   p99: 0.1000 ns
+      median:    0.1000 ns   stddev: 0.000 ns   MADN: 0.000 ns
+      range:     [0.1000 ns 0.1000 ns]   p90: 0.1000 ns   p99: 0.1000 ns
       samples:   5 x 1000 iterations (warm-up: 1023 iterations in 1.000 us)
       outliers:  none
     |}]

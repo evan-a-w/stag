@@ -6,11 +6,14 @@ open! Import
 module Verdict : sig
   type t =
     | Improved
-    | Regressed
+    (** The whole confidence interval of the change is below minus the noise
+        threshold, as criterion decides. *)
+    | Regressed (** It is all above the noise threshold. *)
     | No_change (** The confidence interval of the change contains 0. *)
     | Within_noise
-    (** The change is significant, but its estimate is within the noise
-        threshold. *)
+    (** The interval excludes 0 but reaches within the noise threshold. *)
+    | Cannot_compare
+    (** The baseline's mean is 0, eg. of iterations faster than the clock. *)
   [@@deriving sexp]
 
   (** As criterion: ["Performance has improved."], etc. *)

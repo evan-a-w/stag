@@ -32,7 +32,6 @@ val bench_dir : string
 val bench
   :  Project.t
   -> Bench_command.Options.t
-  -> clock:Measure.Clock.t
   -> filters:string list
   -> phases:bool
   -> bool

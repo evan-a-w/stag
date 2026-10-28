@@ -22,7 +22,8 @@ let%expect_test "percentiles, median, MAD and stddev of 1..10" =
     ((p 0.9) (percentile 9.1))
     ((p 0.99) (percentile 9.91))
     ((p 1) (percentile 10))
-    ((mean 5.5) (median 5.5) (mad 2.5) (stddev 3.0276503540974917))
+    ((mean 5.5) (median 5.5) (mad 3.7064999999999997)
+     (stddev 3.0276503540974917))
     |}]
 ;;
 
@@ -51,7 +52,7 @@ let%expect_test "a single value" =
     {|
     ((p0 42) (p90 42) (stddev 0) (mad 0))
     ((count 1) (mean ((point 42) (lower 42) (upper 42))) (median 42) (min 42)
-     (max 42) (stddev 0) (mad 0) (p50 42) (p90 42) (p99 42)
+     (max 42) (stddev 0) (mad 0) (p90 42) (p99 42)
      (outliers ((low_severe 0) (low_mild 0) (high_mild 0) (high_severe 0))))
     |}]
 ;;
@@ -158,7 +159,7 @@ let%expect_test "summarize is deterministic" =
      (mean
       ((point 7.7272727272727275) (lower 4.0909090909090908)
        (upper 13.002272727272725)))
-     (median 6) (min 1) (max 30) (stddev 7.925792188682582) (mad 3) (p50 6)
+     (median 6) (min 1) (max 30) (stddev 7.925792188682582) (mad 4.4478)
      (p90 10) (p99 28.000000000000007)
      (outliers ((low_severe 0) (low_mild 0) (high_mild 0) (high_severe 1))))
     (same true)

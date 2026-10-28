@@ -27,8 +27,6 @@ let update t results =
     Map.set t ~key:result.name ~data:(Bench_result.per_iteration_ns result))
 ;;
 
-let find = Map.find
-
 let validate_name name =
   let valid_char c =
     Char.is_alphanum c || List.mem [ '-'; '_'; '.' ] c ~equal:Char.equal
@@ -49,10 +47,10 @@ let path ~dir ~name = Filename.concat dir (name ^ ".sexp")
 
 let load ~path =
   if not (Stdlib.Sys.file_exists path)
-  then Or_error.error_s [%message "no baseline at" path]
+  then Ok None
   else (
     match Sexp.load_sexp_conv_exn path t_of_sexp with
-    | t -> Ok t
+    | t -> Ok (Some t)
     | exception exn ->
       Or_error.error_s [%message "malformed baseline" path (exn : exn)])
 ;;
@@ -68,7 +66,19 @@ let rec mkdir_p dir =
 let save t ~path =
   Or_error.try_with (fun () ->
     mkdir_p (Filename.dirname path);
-    let tmp = path ^ ".tmp" in
-    Out_channel.write_all tmp ~data:(Sexp.to_string_hum (sexp_of_t t) ^ "\n");
-    Stdlib.Sys.rename tmp path)
+    let tmp =
+      Filename_unix.temp_file
+        ~in_dir:(Filename.dirname path)
+        (Filename.basename path)
+        ".tmp"
+    in
+    match
+      Out_channel.write_all tmp ~data:(Sexp.to_string_hum (sexp_of_t t) ^ "\n");
+      Stdlib.Sys.rename tmp path
+    with
+    | () -> ()
+    | exception exn ->
+      (try Stdlib.Sys.remove tmp with
+       | Sys_error _ -> ());
+      raise exn)
 ;;

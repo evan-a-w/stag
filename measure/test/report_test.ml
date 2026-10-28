@@ -59,23 +59,14 @@ let%expect_test "time" =
     |}]
 ;;
 
-let%expect_test "Format" =
+let%expect_test "Format.to_string" =
   List.iter Report.Format.all ~f:(fun format ->
-    let string = Report.Format.to_string format in
-    print_s
-      [%message
-        string ~round_trips:(Report.Format.of_string string : Report.Format.t)]);
-  print_s
-    [%sexp
-      (Or_error.try_with (fun () -> Report.Format.of_string "xml")
-       : Report.Format.t Or_error.t)];
+    print_endline (Report.Format.to_string format));
   [%expect
     {|
-    (human (round_trips Human))
-    (sexp (round_trips Sexp))
-    (json (round_trips Json))
-    (Error
-     ("unknown report format, expected one of" (human sexp json) (got xml)))
+    human
+    sexp
+    json
     |}]
 ;;
 
@@ -85,7 +76,11 @@ let config = { Config.default with resamples = 1000 }
 let measurement ?(alloc = false) per_iteration_us : Measurement.t =
   { warm_up_iterations = 1023
   ; warm_up_time = Time_ns.Span.of_int_ms 1001
-  ; plan = { iterations = 12; samples = List.length per_iteration_us }
+  ; plan =
+      { iterations = 12
+      ; samples = List.length per_iteration_us
+      ; expected_time = Time_ns.Span.zero
+      }
   ; samples =
       List.map per_iteration_us ~f:(fun us ->
         { Sample.iterations = 12
@@ -110,19 +105,15 @@ let fib_times =
   @ [ 1270.; 1310. ]
 ;;
 
-let fib ?elements ?alloc () =
-  Bench_result.create
-    ?elements
-    config
-    ~name:"fib/20"
-    (measurement ?alloc fib_times)
+let fib ?alloc () =
+  Bench_result.create config ~name:"fib/20" (measurement ?alloc fib_times)
 ;;
 
 let%expect_test "human" =
   let result = fib () in
   print_s [%sexp (Bench_result.per_iteration_ns result : float array)];
   print_s [%sexp (result.stats : Stats.t)];
-  print_string (Report.human config { result; comparison = None });
+  print_string (Report.human config { result; change = Not_compared });
   [%expect
     {|
     (1230000 1237000 1244000 1232000 1239000 1246000 1234000 1241000 1248000
@@ -130,19 +121,19 @@ let%expect_test "human" =
      1270000 1310000)
     ((count 20) (mean ((point 1243950) (lower 1237900) (upper 1252400)))
      (median 1239500) (min 1230000) (max 1310000) (stddev 17878.169575446504)
-     (mad 5500) (p50 1239500) (p90 1250200) (p99 1302400)
+     (mad 8154.2999999999993) (p90 1250200) (p99 1302400)
      (outliers ((low_severe 0) (low_mild 0) (high_mild 1) (high_severe 1))))
     fib/20
       time:      [1.238 ms 1.244 ms 1.252 ms] (mean, 95% CI)
-      median:    1.240 ms   stddev: 17.88 us   MAD: 5.500 us
-      range:     [1.230 ms 1.310 ms]   p50: 1.240 ms   p90: 1.250 ms   p99: 1.302 ms
+      median:    1.240 ms   stddev: 17.88 us   MADN: 8.154 us
+      range:     [1.230 ms 1.310 ms]   p90: 1.250 ms   p99: 1.302 ms
       samples:   20 x 12 iterations (warm-up: 1023 iterations in 1.001 s)
       outliers:  2 of 20 (10.00%): 1 high mild, 1 high severe
     |}]
 ;;
 
-let%expect_test "human, with throughput, allocation and change" =
-  let result = fib ~elements:10 ~alloc:true () in
+let%expect_test "human, with allocation and change" =
+  let result = fib ~alloc:true () in
   let comparison =
     Comparison.compare
       config
@@ -151,14 +142,13 @@ let%expect_test "human, with throughput, allocation and change" =
            ns *. 0.95))
       ~current:(Bench_result.per_iteration_ns result)
   in
-  print_string (Report.human config { result; comparison = Some comparison });
+  print_string (Report.human config { result; change = Compared comparison });
   [%expect
     {|
     fib/20
       time:      [1.238 ms 1.244 ms 1.252 ms] (mean, 95% CI)
-      median:    1.240 ms   stddev: 17.88 us   MAD: 5.500 us
-      range:     [1.230 ms 1.310 ms]   p50: 1.240 ms   p90: 1.250 ms   p99: 1.302 ms
-      thrpt:     [7.985 Kelem/s 8.039 Kelem/s 8.078 Kelem/s]
+      median:    1.240 ms   stddev: 17.88 us   MADN: 8.154 us
+      range:     [1.230 ms 1.310 ms]   p90: 1.250 ms   p99: 1.302 ms
       alloc:     12.35k minor words, 0 major words, 0.01000 minor GCs, 0 major GCs per iteration
       samples:   20 x 12 iterations (warm-up: 1023 iterations in 1.001 s)
       outliers:  2 of 20 (10.00%): 1 high mild, 1 high severe
@@ -173,7 +163,8 @@ let%expect_test "human, without outliers, with one iteration per sample" =
       ~name:"slow"
       { warm_up_iterations = 1
       ; warm_up_time = Time_ns.Span.of_int_sec 2
-      ; plan = { iterations = 1; samples = 3 }
+      ; plan =
+          { iterations = 1; samples = 3; expected_time = Time_ns.Span.zero }
       ; samples =
           List.map [ 2; 3; 4 ] ~f:(fun s ->
             { Sample.iterations = 1
@@ -188,13 +179,13 @@ let%expect_test "human, without outliers, with one iteration per sample" =
       ~baseline:(Bench_result.per_iteration_ns result)
       ~current:(Bench_result.per_iteration_ns result)
   in
-  print_string (Report.human config { result; comparison = Some comparison });
+  print_string (Report.human config { result; change = Compared comparison });
   [%expect
     {|
     slow
       time:      [2.000 s 3.000 s 4.000 s] (mean, 95% CI)
-      median:    3.000 s   stddev: 1.000 s   MAD: 1.000 s
-      range:     [2.000 s 4.000 s]   p50: 3.000 s   p90: 3.800 s   p99: 3.980 s
+      median:    3.000 s   stddev: 1.000 s   MADN: 1.483 s
+      range:     [2.000 s 4.000 s]   p90: 3.800 s   p99: 3.980 s
       samples:   3 x 1 iteration (warm-up: 1 iteration in 2.000 s)
       outliers:  none
       change:    [-33.333% +0.000% +57.143%] (95% CI) No change in performance detected.
@@ -208,7 +199,8 @@ let entries () : Report.Entry.t list =
       ~name:"tiny \"quoted\"\n"
       { warm_up_iterations = 3
       ; warm_up_time = Time_ns.Span.of_int_ns 30
-      ; plan = { iterations = 4; samples = 2 }
+      ; plan =
+          { iterations = 4; samples = 2; expected_time = Time_ns.Span.zero }
       ; samples =
           [ { iterations = 4
             ; time = Time_ns.Span.of_int_ns 10
@@ -221,21 +213,21 @@ let entries () : Report.Entry.t list =
           ]
       }
   in
+  let one name =
+    Bench_result.create
+      { config with resamples = 10 }
+      ~name
+      (measurement [ 1. ])
+  in
   [ { result = tiny
-    ; comparison =
-        Some
+    ; change =
+        Compared
           { change = { point = 0.5; lower = 0.25; upper = 0.75 }
           ; verdict = Regressed
           }
     }
-  ; { result =
-        Bench_result.create
-          { config with resamples = 10 }
-          ~elements:3
-          ~name:"one"
-          (measurement [ 1. ])
-    ; comparison = None
-    }
+  ; { result = one "one"; change = Not_compared }
+  ; { result = one "new"; change = Not_in_baseline }
   ]
 ;;
 
@@ -246,7 +238,6 @@ let%expect_test "machine" =
     [
       {
         "name": "tiny \"quoted\"\n",
-        "elements": null,
         "samples": 2,
         "iterations": 4,
         "mean": {
@@ -258,8 +249,7 @@ let%expect_test "machine" =
         "min": 2.5,
         "max": 3.5,
         "stddev": 0.7071067811865476,
-        "mad": 0.5,
-        "p50": 3,
+        "mad": 0.7413,
         "p90": 3.4,
         "p99": 3.49,
         "outliers": {
@@ -284,7 +274,6 @@ let%expect_test "machine" =
       },
       {
         "name": "one",
-        "elements": 3,
         "samples": 1,
         "iterations": 12,
         "mean": {
@@ -297,7 +286,6 @@ let%expect_test "machine" =
         "max": 1000,
         "stddev": 0,
         "mad": 0,
-        "p50": 1000,
         "p90": 1000,
         "p99": 1000,
         "outliers": {
@@ -308,6 +296,33 @@ let%expect_test "machine" =
         },
         "alloc": null,
         "change": null
+      },
+      {
+        "name": "new",
+        "samples": 1,
+        "iterations": 12,
+        "mean": {
+          "point": 1000,
+          "lower": 1000,
+          "upper": 1000
+        },
+        "median": 1000,
+        "min": 1000,
+        "max": 1000,
+        "stddev": 0,
+        "mad": 0,
+        "p90": 1000,
+        "p99": 1000,
+        "outliers": {
+          "low_severe": 0,
+          "low_mild": 0,
+          "high_mild": 0,
+          "high_severe": 0
+        },
+        "alloc": null,
+        "change": {
+          "verdict": "not_in_baseline"
+        }
       }
     ]
     |}];
@@ -317,10 +332,10 @@ let%expect_test "machine" =
   [%expect
     {|
     (((result
-       ((name "tiny \"quoted\"\n") (elements ())
+       ((name "tiny \"quoted\"\n")
         (measurement
          ((warm_up_iterations 3) (warm_up_time 30ns)
-          (plan ((iterations 4) (samples 2)))
+          (plan ((iterations 4) (samples 2) (expected_time 0s)))
           (samples
            (((iterations 4) (time 10ns)
              (alloc
@@ -332,27 +347,39 @@ let%expect_test "machine" =
                 (minor_collections 0) (major_collections 0)))))))))
         (stats
          ((count 2) (mean ((point 3) (lower 2.5) (upper 3.5))) (median 3)
-          (min 2.5) (max 3.5) (stddev 0.70710678118654757) (mad 0.5) (p50 3)
-          (p90 3.4) (p99 3.49)
+          (min 2.5) (max 3.5) (stddev 0.70710678118654757) (mad 0.7413) (p90 3.4)
+          (p99 3.49)
           (outliers ((low_severe 0) (low_mild 0) (high_mild 0) (high_severe 0)))))
         (alloc
          (((minor_words 0) (promoted_words 0) (major_words 0)
            (minor_collections 0) (major_collections 0))))))
-      (comparison
-       (((change ((point 0.5) (lower 0.25) (upper 0.75))) (verdict Regressed)))))
+      (change
+       (Compared
+        ((change ((point 0.5) (lower 0.25) (upper 0.75))) (verdict Regressed)))))
      ((result
-       ((name one) (elements (3))
+       ((name one)
         (measurement
          ((warm_up_iterations 1023) (warm_up_time 1.001s)
-          (plan ((iterations 12) (samples 1)))
+          (plan ((iterations 12) (samples 1) (expected_time 0s)))
           (samples (((iterations 12) (time 12us) (alloc ()))))))
         (stats
          ((count 1) (mean ((point 1000) (lower 1000) (upper 1000))) (median 1000)
-          (min 1000) (max 1000) (stddev 0) (mad 0) (p50 1000) (p90 1000)
-          (p99 1000)
+          (min 1000) (max 1000) (stddev 0) (mad 0) (p90 1000) (p99 1000)
           (outliers ((low_severe 0) (low_mild 0) (high_mild 0) (high_severe 0)))))
         (alloc ())))
-      (comparison ())))
+      (change Not_compared))
+     ((result
+       ((name new)
+        (measurement
+         ((warm_up_iterations 1023) (warm_up_time 1.001s)
+          (plan ((iterations 12) (samples 1) (expected_time 0s)))
+          (samples (((iterations 12) (time 12us) (alloc ()))))))
+        (stats
+         ((count 1) (mean ((point 1000) (lower 1000) (upper 1000))) (median 1000)
+          (min 1000) (max 1000) (stddev 0) (mad 0) (p90 1000) (p99 1000)
+          (outliers ((low_severe 0) (low_mild 0) (high_mild 0) (high_severe 0)))))
+        (alloc ())))
+      (change Not_in_baseline)))
     |}];
   print_s
     [%sexp

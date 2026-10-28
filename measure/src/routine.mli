@@ -9,5 +9,5 @@ type t =
       }
       -> t
   (** [setup] makes the input of each iteration, outside the timing, eg. for
-      a routine that consumes its input. All inputs of a sample are made
-      before it is timed. *)
+      a routine that consumes its input. Inputs are made in chunks, each
+      just before it is timed, see [Measurement]. *)

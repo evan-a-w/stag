@@ -16,7 +16,10 @@ let%expect_test "Plan.create" =
           (per_iteration : Time_ns.Span.t)
           (setup : (Time_ns.Span.t option[@sexp.option]))
           (resolution : Time_ns.Span.t)
-          (plan : Measurement.Plan.t)]
+          (plan : Measurement.Plan.t)
+          ~warning:
+            (Measurement.Plan.warning plan config
+             : (string option[@sexp.option]))]
   in
   (* 3s over 100 samples: 30ms a sample. *)
   plan (Time_ns.Span.of_int_ns 100);
@@ -25,9 +28,11 @@ let%expect_test "Plan.create" =
   [%expect
     {|
     ((per_iteration 100ns) (resolution 1ns)
-     (plan ((iterations 300000) (samples 100))))
-    ((per_iteration 20ms) (resolution 1ns) (plan ((iterations 2) (samples 100))))
-    ((per_iteration 30ms) (resolution 1ns) (plan ((iterations 1) (samples 100))))
+     (plan ((iterations 300000) (samples 100) (expected_time 3s))))
+    ((per_iteration 20ms) (resolution 1ns)
+     (plan ((iterations 2) (samples 100) (expected_time 4s))))
+    ((per_iteration 30ms) (resolution 1ns)
+     (plan ((iterations 1) (samples 100) (expected_time 3s))))
     |}];
   (* A single iteration overruns the samples' share of [measurement_time]. *)
   plan (Time_ns.Span.of_int_ms 31);
@@ -36,10 +41,22 @@ let%expect_test "Plan.create" =
   plan (Time_ns.Span.of_int_sec 60);
   [%expect
     {|
-    ((per_iteration 31ms) (resolution 1ns) (plan ((iterations 1) (samples 96))))
-    ((per_iteration 100ms) (resolution 1ns) (plan ((iterations 1) (samples 30))))
-    ((per_iteration 1s) (resolution 1ns) (plan ((iterations 1) (samples 10))))
-    ((per_iteration 1m) (resolution 1ns) (plan ((iterations 1) (samples 10))))
+    ((per_iteration 31ms) (resolution 1ns)
+     (plan ((iterations 1) (samples 96) (expected_time 2.976s)))
+     (warning
+      "Unable to take 100 samples in 3s: taking 96, which should take 3s"))
+    ((per_iteration 100ms) (resolution 1ns)
+     (plan ((iterations 1) (samples 30) (expected_time 3s)))
+     (warning
+      "Unable to take 100 samples in 3s: taking 30, which should take 3s"))
+    ((per_iteration 1s) (resolution 1ns)
+     (plan ((iterations 1) (samples 10) (expected_time 10s)))
+     (warning
+      "Unable to take 100 samples in 3s: taking 10, which should take 10s"))
+    ((per_iteration 1m) (resolution 1ns)
+     (plan ((iterations 1) (samples 10) (expected_time 10m)))
+     (warning
+      "Unable to take 100 samples in 3s: taking 10, which should take 10m"))
     |}];
   (* Samples last at least 1000 resolutions. *)
   plan ~resolution:(Time_ns.Span.of_int_us 100) (Time_ns.Span.of_int_us 1);
@@ -47,9 +64,11 @@ let%expect_test "Plan.create" =
   [%expect
     {|
     ((per_iteration 1us) (resolution 100us)
-     (plan ((iterations 100000) (samples 100))))
+     (plan ((iterations 100000) (samples 100) (expected_time 10s))))
     ((per_iteration 200ms) (resolution 100us)
-     (plan ((iterations 1) (samples 15))))
+     (plan ((iterations 1) (samples 15) (expected_time 3s)))
+     (warning
+      "Unable to take 100 samples in 3s: taking 15, which should take 3s"))
     |}];
   (* The untimed setup of each iteration counts towards the samples' time,
      but not towards the 1000 resolutions of their timed part. *)
@@ -62,11 +81,13 @@ let%expect_test "Plan.create" =
   [%expect
     {|
     ((per_iteration 100us) (setup 900us) (resolution 1ns)
-     (plan ((iterations 30) (samples 100))))
+     (plan ((iterations 30) (samples 100) (expected_time 3s))))
     ((per_iteration 2us) (setup 100ms) (resolution 1ns)
-     (plan ((iterations 1) (samples 29))))
+     (plan ((iterations 1) (samples 29) (expected_time 2.900058s)))
+     (warning
+      "Unable to take 100 samples in 3s: taking 29, which should take 2.9s"))
     ((per_iteration 2us) (setup 100ms) (resolution 1us)
-     (plan ((iterations 500) (samples 100))))
+     (plan ((iterations 500) (samples 100) (expected_time 1h23m20.1s))))
     |}];
   (* An iteration too fast to see takes 1ns. *)
   plan Time_ns.Span.zero;
@@ -74,9 +95,9 @@ let%expect_test "Plan.create" =
   [%expect
     {|
     ((per_iteration 0s) (resolution 1ns)
-     (plan ((iterations 30000000) (samples 100))))
+     (plan ((iterations 30000000) (samples 100) (expected_time 3s))))
     ((per_iteration 0s) (resolution 1ns)
-     (plan ((iterations 25000000) (samples 20))))
+     (plan ((iterations 25000000) (samples 20) (expected_time 500ms))))
     |}]
 ;;
 
@@ -113,7 +134,7 @@ let%expect_test "a routine of constant time" =
     {|
     (Ok
      ((warm_up_iterations 127) (warm_up_time 1.27us)
-      (plan ((iterations 200) (samples 5)))
+      (plan ((iterations 200) (samples 5) (expected_time 10us)))
       (samples
        (((iterations 200) (time 2us) (alloc ()))
         ((iterations 200) (time 2us) (alloc ()))
@@ -137,7 +158,7 @@ let%expect_test "a routine of varying time" =
     {|
     (Ok
      ((warm_up_iterations 63) (warm_up_time 1.26us)
-      (plan ((iterations 100) (samples 5)))
+      (plan ((iterations 100) (samples 5) (expected_time 10us)))
       (samples
        (((iterations 100) (time 1.99us) (alloc ()))
         ((iterations 100) (time 2us) (alloc ()))
@@ -161,7 +182,7 @@ let%expect_test "slow iterations take fewer samples" =
     {|
     (Ok
      ((warm_up_iterations 1) (warm_up_time 3us)
-      (plan ((iterations 1) (samples 3)))
+      (plan ((iterations 1) (samples 3) (expected_time 9us)))
       (samples
        (((iterations 1) (time 3us) (alloc ()))
         ((iterations 1) (time 3us) (alloc ()))
@@ -182,7 +203,7 @@ let%expect_test "the clock's ticks" =
     {|
     (Ok
      ((warm_up_iterations 15) (warm_up_time 1.504us)
-      (plan ((iterations 20) (samples 5)))
+      (plan ((iterations 20) (samples 5) (expected_time 10us)))
       (samples
        (((iterations 20) (time 2.001us) (alloc ()))
         ((iterations 20) (time 2.001us) (alloc ()))
@@ -206,16 +227,10 @@ let%expect_test "a routine faster than the clock" =
      samples of 2us have 2000. *)
   [%expect
     {|
-    (Ok
-     ((warm_up_iterations 1023) (warm_up_time 0s)
-      (plan ((iterations 2000) (samples 5)))
-      (samples
-       (((iterations 2000) (time 0s) (alloc ()))
-        ((iterations 2000) (time 0s) (alloc ()))
-        ((iterations 2000) (time 0s) (alloc ()))
-        ((iterations 2000) (time 0s) (alloc ()))
-        ((iterations 2000) (time 0s) (alloc ()))))))
-    (calls 11023)
+    (Error
+     ("the clock did not move while timing a batch of iterations, so it cannot time them"
+      (iterations 65536)))
+    (calls 131071)
     |}]
 ;;
 
@@ -250,13 +265,13 @@ let%expect_test "batched routines make their inputs outside of the timing" =
   [%expect
     {|
     (Ok
-     ((warm_up_iterations 1) (warm_up_time 10ns)
-      (plan ((iterations 100) (samples 3)))
+     ((warm_up_iterations 15) (warm_up_time 150ns)
+      (plan ((iterations 100) (samples 3) (expected_time 303us)))
       (samples
        (((iterations 100) (time 1us) (alloc ()))
         ((iterations 100) (time 1us) (alloc ()))
         ((iterations 100) (time 1us) (alloc ()))))))
-    ((inputs 301) (used_in_order true))
+    ((inputs 315) (used_in_order true))
     |}]
 ;;
 

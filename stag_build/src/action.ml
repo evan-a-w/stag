@@ -266,7 +266,7 @@ let test project names =
 
 let bench_dir = corrections_dir ^/ "bench"
 
-let bench project options ~clock ~filters ~phases =
+let bench project options ~filters ~phases =
   let check = checker project in
   let benches (target : Project.Target.t) =
     let name = Project.Target.name target in
@@ -287,7 +287,7 @@ let bench project options ~clock ~filters ~phases =
       | Ok benches ->
         Some
           (List.map benches ~f:(fun bench ->
-             { bench with name = prefix ^ bench.name }))
+             Measure.Suite.Bench.add_prefix bench prefix))
       | Error diagnostic ->
         report project [ diagnostic ];
         None)
@@ -297,7 +297,6 @@ let bench project options ~clock ~filters ~phases =
     Bench_command.run
       ~filters
       options
-      clock
       ~baseline_dir:(Project.root project ^/ bench_dir)
       ~report:(fun diagnostic -> report project [ diagnostic ])
       (List.concat_map benches ~f:(Option.value ~default:[]))

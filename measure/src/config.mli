@@ -26,3 +26,7 @@ val default : t
 (** As [default], with warm-up 100ms, measurement 500ms, 20 samples (at least
     5). *)
 val quick : t
+
+(** At least 2 samples (and [min_samples]), spans and the noise threshold not
+    negative, confidence in (0, 1). *)
+val validate : t -> unit Or_error.t

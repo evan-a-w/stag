@@ -84,14 +84,7 @@ let bench_command =
      and phases =
        flag "phases" no_arg ~doc:" benchmark the phases of the interpreter"
      in
-     fun () ->
-       exit_unless
-         (Action.bench
-            (load ())
-            options
-            ~clock:(Bench_command.clock ())
-            ~filters
-            ~phases))
+     fun () -> exit_unless (Action.bench (load ()) options ~filters ~phases))
 ;;
 
 let () =

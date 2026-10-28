@@ -6,7 +6,11 @@ let result name times =
   let measurement : Measurement.t =
     { warm_up_iterations = 1
     ; warm_up_time = Time_ns.Span.of_int_ns 10
-    ; plan = { iterations = 2; samples = List.length times }
+    ; plan =
+        { iterations = 2
+        ; samples = List.length times
+        ; expected_time = Time_ns.Span.zero
+        }
     ; samples =
         List.map times ~f:(fun ns ->
           { Sample.iterations = 2
@@ -27,7 +31,7 @@ let%expect_test "update and find" =
   let t = Baseline.update t [ result "b" [ 40 ]; result "c" [ 2; 4; 6 ] ] in
   print_s [%sexp (t : Baseline.t)];
   List.iter [ "a"; "b"; "c"; "d" ] ~f:(fun name ->
-    print_s [%message name ~_:(Baseline.find t name : float array option)]);
+    print_s [%message name ~_:(Map.find t name : float array option)]);
   [%expect
     {|
     ((version 1) (benches ((a (1.5)) (b (20)) (c (1 2 3)))))
@@ -61,7 +65,7 @@ let%expect_test "save and load" =
     in
     print_s [%sexp (Baseline.save t ~path : unit Or_error.t)];
     print_string (In_channel.read_all path);
-    let loaded = Baseline.load ~path |> Or_error.ok_exn in
+    let loaded = Baseline.load ~path |> Or_error.ok_exn |> Option.value_exn in
     print_s
       [%message
         ""
@@ -72,7 +76,7 @@ let%expect_test "save and load" =
     (* Saving again overwrites. *)
     let t = Baseline.update t [ result "alloc" [ 5 ] ] in
     print_s [%sexp (Baseline.save t ~path : unit Or_error.t)];
-    print_s [%sexp (Baseline.load ~path : Baseline.t Or_error.t)]);
+    print_s [%sexp (Baseline.load ~path : Baseline.t option Or_error.t)]);
   [%expect
     {|
     /nested/baselines/main.sexp
@@ -80,7 +84,7 @@ let%expect_test "save and load" =
     ((version 1) (benches ((alloc (0.5 1.5)) (fib/20 (1234.5 1240.5)))))
     ((round_trips true) (files (main.sexp)))
     (Ok ())
-    (Ok ((version 1) (benches ((alloc (2.5)) (fib/20 (1234.5 1240.5))))))
+    (Ok (((version 1) (benches ((alloc (2.5)) (fib/20 (1234.5 1240.5)))))))
     |}]
 ;;
 
@@ -90,7 +94,7 @@ let%expect_test "loading a missing or malformed file" =
       let path = Filename.concat dir name in
       Option.iter contents ~f:(fun data -> Out_channel.write_all path ~data);
       match Baseline.load ~path with
-      | Ok t -> print_s [%message "loaded" (t : Baseline.t)]
+      | Ok t -> print_s [%message "loaded" (t : Baseline.t option)]
       | Error error ->
         print_endline
           (String.substr_replace_all
@@ -107,8 +111,7 @@ let%expect_test "loading a missing or malformed file" =
     load "ok.sexp" (Some "((version 1) (benches ((a (1 2.5)))))"));
   [%expect
     {|
-    ("no baseline at"
-     $DIR/missing.sexp)
+    (loaded (t ()))
     ("malformed baseline"
      $DIR/unbalanced.sexp
      (exn
@@ -133,7 +136,7 @@ let%expect_test "loading a missing or malformed file" =
     ("malformed baseline"
      $DIR/version.sexp
      (exn ("unsupported baseline version" (version 2))))
-    (loaded (t ((version 1) (benches ((a (1 2.5)))))))
+    (loaded (t (((version 1) (benches ((a (1 2.5))))))))
     |}]
 ;;
 
