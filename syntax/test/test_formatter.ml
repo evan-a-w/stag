@@ -809,7 +809,8 @@ let x = 1
 end%inline
 include%inline .~e (* empty *) end%inline
 |};
-  [%expect {|
+  [%expect
+    {|
     include%inline .~e (* derived *)
       let x = 1
     end%inline
@@ -824,7 +825,8 @@ let%expect_test "a comment before the arguments of a benchmark" =
     ~width:30
     {|let%bench "b" x (* a comment
   on two lines *) in [ 1; 2 ] = x|};
-  [%expect {|
+  [%expect
+    {|
     let%bench "b" x in (* a comment
          on two lines *) [1; 2] =
       x

@@ -127,7 +127,6 @@ module Program_env = struct
       (** The latest free variable of a quote that a binding of its name,
           unusable there, did not bind, to explain an error if the code is
           spliced where the name is unbound. *)
-    ; expansions : Expansion.t Queue.t
     ; unfinished : Type.ty Stack.t
       (** The types of the toplevels and binders of components not yet
           finished. Code checked later can reach them, so once their
@@ -1943,6 +1942,38 @@ let uses_unfinished
   | _ -> false
 ;;
 
+(* The expansion of [splice], if it has one, and whether it is [generated]. *)
+let expansion_status splice generated =
+  let toplevel = Module_scope.Splice.toplevel splice in
+  match toplevel.txt with
+  | Include (_, Some written) | Module_splice (_, _, Some written) ->
+    Some
+      ( written
+      , Expansion.status
+          ~written:written.txt
+          generated
+          ~column:toplevel.loc.start.col
+          ~path:(fun namespace name ->
+            Module_scope.path_from_splice
+              splice
+              generated
+              (match namespace with
+               | Type -> Type
+               | Constructor -> Constructor
+               | Field -> Field)
+              name) )
+  | _ -> None
+;;
+
+let expansions root =
+  Module_scope.splices root
+  |> List.filter_map ~f:(fun splice ->
+    let%bind.Option generated = Module_scope.Splice.generated splice in
+    let%map.Option expansion, status = expansion_status splice generated in
+    { Expansion.loc = Module_scope.Splice.loc splice; expansion; status })
+  |> List.sort ~compare:(fun (a : Expansion.t) b -> Loc.compare a.loc b.loc)
+;;
+
 (* Checks a declaration splice's expression in the module it is written in,
    and runs it at compile time, to the declarations it generates. *)
 let generate t (program : Program_env.t) splice
@@ -1980,12 +2011,12 @@ let generate t (program : Program_env.t) splice
     |> Result.map_error ~f:(fun error ->
       Typecheck_error.create ~loc (Malformed_declarations error))
   in
-  let toplevel = Module_scope.Splice.toplevel splice in
-  (match toplevel.txt with
-   | Include (_, Some _) | Module_splice (_, _, Some _) ->
-     Queue.enqueue program.expansions { Expansion.toplevel; generated }
-   | _ -> ());
-  generated
+  match expansion_status splice generated with
+  | Some (written, Up_to_date) ->
+    Option.value
+      (Relocate.toplevels ~written:written.txt generated)
+      ~default:generated
+  | Some (_, Stale _) | None -> generated
 ;;
 
 (* Declares the types and toplevels of declarations as they are added. *)
@@ -2165,7 +2196,6 @@ let program_env t interpreter =
   ; sccs = Queue.create ()
   ; declaration_splices = Queue.create ()
   ; unusable_in_quotes = String.Table.create ()
-  ; expansions = Queue.create ()
   ; unfinished = Stack.create ()
   }
 ;;
@@ -2223,9 +2253,6 @@ let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
       ; declaration_splices = Queue.to_list program_env.declaration_splices
       ; ident_info = program_env.ident_info
       }
-  ; expansions =
-      Queue.to_list program_env.expansions
-      |> List.sort ~compare:(fun (a : Expansion.t) (b : Expansion.t) ->
-        Loc.compare a.toplevel.loc b.toplevel.loc)
+  ; expansions = expansions root
   }
 ;;

@@ -56,10 +56,17 @@ let warn_unrun_tests project (target : Project.Target.t) driver =
                   (Project.Target.name target))))
 ;;
 
-(* The program of a target, checked once, reporting its errors once. A target
-   is not checked if a library it depends on fails. Output at compile time is
+let stale_expansions (target : Project.Target.t) driver =
+  let files = files target in
+  List.filter (Inline_expansion.stale driver) ~f:(fun expansion ->
+    Set.mem files expansion.loc.file)
+;;
+
+(* The program of a target, checked once, reporting its errors once, and its
+   stale expansions as warnings unless [stale_are_errors]. A target is not
+   checked if a library it depends on fails. Output at compile time is
    discarded. *)
-let checker project =
+let checker ?(stale_are_errors = false) project =
   let status = String.Table.create () in
   let rec check (target : Project.Target.t) =
     let name = Project.Target.name target in
@@ -77,6 +84,10 @@ let checker project =
           match Program.check ~output:ignore project target with
           | Ok driver ->
             warn_unrun_tests project target driver;
+            if not stale_are_errors
+            then
+              List.iter (stale_expansions target driver) ~f:(fun expansion ->
+                warn project (Inline_expansion.diagnostic expansion));
             Some driver
           | Error diagnostics ->
             report project diagnostics;
@@ -176,16 +187,13 @@ let test_target project ~check (target : Project.Target.t) =
   let root = Project.root project in
   let checked =
     Option.map (check target) ~f:(fun driver ->
-      let files = files target in
-      let expansions =
-        List.filter (Inline_expansion.mismatches driver) ~f:(fun expansion ->
-          Set.mem files expansion.loc.file)
-      in
+      let expansions = stale_expansions target driver in
+      report project (List.map expansions ~f:Inline_expansion.diagnostic);
       let results =
         if not (eval project driver)
         then None
         else (
-          let results = Expect_test_runner.run ~files driver in
+          let results = Expect_test_runner.run ~files:(files target) driver in
           report project (List.concat_map results ~f:Diagnostic.of_test_result);
           Some results)
       in
@@ -222,18 +230,22 @@ let test_target project ~check (target : Project.Target.t) =
       false
   in
   match checked with
-  | None | Some (None, _) -> false
-  | Some (Some results, expansions) ->
+  | None -> false
+  | Some (results, expansions) ->
     let failed =
-      List.count results ~f:(Fn.non Expect_test_runner.Test_result.passed)
+      Option.value_map results ~default:1 ~f:(fun results ->
+        let failed =
+          List.count results ~f:(Fn.non Expect_test_runner.Test_result.passed)
+        in
+        if failed > 0
+        then
+          eprintf
+            "%s: %d of %d test(s) failed\n%!"
+            (Project.Target.name target)
+            failed
+            (List.length results);
+        failed)
     in
-    if failed > 0
-    then
-      eprintf
-        "%s: %d of %d test(s) failed\n%!"
-        (Project.Target.name target)
-        failed
-        (List.length results);
     let stale = List.length expansions in
     if stale > 0
     then
@@ -279,7 +291,9 @@ let test project names =
     false
   | Ok _, Error () -> not_a_directory ()
   | Ok targets, Ok (_ : bool) ->
-    all targets ~f:(test_target project ~check:(checker project))
+    all
+      targets
+      ~f:(test_target project ~check:(checker ~stale_are_errors:true project))
 ;;
 
 let bench_dir = corrections_dir ^/ "bench"

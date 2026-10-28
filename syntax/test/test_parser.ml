@@ -1142,7 +1142,8 @@ let%expect_test "an expansion starts after the comments on its splice's line" =
                ~len:(expansion.loc.stop.offset - expansion.loc.start.offset)
              : string)]
       | _ -> print_endline "unexpected");
-  [%expect {|
+  [%expect
+    {|
      "\
     \n  let x = 1\
     \n"

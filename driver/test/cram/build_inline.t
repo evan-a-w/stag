@@ -16,6 +16,10 @@ stag-build corrects inline expansions like expect tests, in libraries and tests.
   > let%expect_test "x" = print_int (Int.add M.x Gen.Gen.base)
   > EOF
   $ stag-build test
+  File "gen/gen.stag", line 3, characters 0-34:
+  3 | include%inline .~(value "base" 10)
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: this inline expansion is out of date: the declarations written differ from those its splice generates
   --- gen/gen.stag
   +++ _stag/gen/gen.stag.corrected
   @@ -1,4 +1,5 @@
@@ -25,6 +29,10 @@ stag-build corrects inline expansions like expect tests, in libraries and tests.
   +  let base = 10
    end%inline
   gen: 1 inline expansion(s) out of date
+  File "t/t.stag", line 1, characters 0-41:
+  1 | module%inline M = .~(Gen.Gen.value "x" 1)
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: this inline expansion is out of date: the declarations written differ from those its splice generates
   --- t/t.stag
   +++ _stag/t/t.stag.corrected
   @@ -1,4 +1,6 @@
@@ -62,6 +70,10 @@ A changed generator makes the expansions using it stale.
 
   $ sed -i.bak 's/Stag.Expr.int n/Stag.Expr.int (Int.mul 2 n)/' gen/gen.stag && rm gen/gen.stag.bak
   $ stag-build test
+  File "gen/gen.stag", line 3, characters 0-34:
+  3 | include%inline .~(value "base" 10)
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: this inline expansion is out of date: the declarations written differ from those its splice generates
   --- gen/gen.stag
   +++ _stag/gen/gen.stag.corrected
   @@ -1,5 +1,5 @@
@@ -72,6 +84,10 @@ A changed generator makes the expansions using it stale.
   +  let base = 20
    end%inline
   gen: 1 inline expansion(s) out of date
+  File "t/t.stag", line 1, characters 0-41:
+  1 | module%inline M = .~(Gen.Gen.value "x" 1)
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: this inline expansion is out of date: the declarations written differ from those its splice generates
   --- t/t.stag
   +++ _stag/t/t.stag.corrected
   @@ -1,6 +1,6 @@

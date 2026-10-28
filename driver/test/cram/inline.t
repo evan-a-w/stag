@@ -17,6 +17,14 @@ Inline expansions show what a declaration splice generates in the source.
 A fresh expansion is filled in, with the expect tests' corrections.
 
   $ stag test gen.stag
+  File "gen.stag", line 3, characters 0-46:
+  3 | include%inline .~(value "x" (Stag.Expr.int 1))
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+  File "gen.stag", line 7, characters 2-48:
+  7 |   include%inline .~(value "y" (Stag.Expr.int 2))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: this inline expansion is out of date: the declarations written differ from those its splice generates
   --- gen.stag
   +++ gen.stag.corrected
   @@ -1,11 +1,13 @@
@@ -38,6 +46,14 @@ A fresh expansion is filled in, with the expect tests' corrections.
   1 of 1 test(s) failed
   [1]
   $ stag test --promote gen.stag
+  File "gen.stag", line 3, characters 0-46:
+  3 | include%inline .~(value "x" (Stag.Expr.int 1))
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+  File "gen.stag", line 7, characters 2-48:
+  7 |   include%inline .~(value "y" (Stag.Expr.int 2))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: this inline expansion is out of date: the declarations written differ from those its splice generates
   --- gen.stag
   +++ gen.stag.corrected
   @@ -1,11 +1,13 @@
@@ -77,6 +93,10 @@ Editing the expansion makes it stale.
 
   $ sed -i.bak 's/let y = 2/let y = 3 (* edited *)/' gen.stag
   $ stag test gen.stag
+  File "gen.stag", line 8, characters 2-48:
+  8 |   include%inline .~(value "y" (Stag.Expr.int 2))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: this inline expansion is out of date: the declarations written differ from those its splice generates
   --- gen.stag
   +++ gen.stag.corrected
   @@ -6,7 +6,7 @@
@@ -105,11 +125,19 @@ Editing the expansion makes it stale.
   
   let%expect_test "x" = print_int (Int.add x M.y); [%expect {| 3 |}]
   $ stag test -print-corrected gen.stag | diff - gen.stag.corrected
+  File "gen.stag", line 8, characters 2-48:
+  8 |   include%inline .~(value "y" (Stag.Expr.int 2))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: this inline expansion is out of date: the declarations written differ from those its splice generates
   1 inline expansion(s) out of date
 
-Checking and running a program don't compare its expansions.
+Checking and running a program only warn of stale expansions.
 
   $ stag check gen.stag
+  File "gen.stag", line 8, characters 2-48:
+  8 |   include%inline .~(value "y" (Stag.Expr.int 2))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Warning: this inline expansion is out of date: the declarations written differ from those its splice generates
   module Gen : sig
     val value : string -> Stag.Expr.t -> list[Stag.Toplevel.t]
     val x : int
@@ -118,6 +146,10 @@ Checking and running a program don't compare its expansions.
     end
   end
   $ stag run gen.stag
+  File "gen.stag", line 8, characters 2-48:
+  8 |   include%inline .~(value "y" (Stag.Expr.int 2))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Warning: this inline expansion is out of date: the declarations written differ from those its splice generates
 
 Formatting formats the expansion.
 

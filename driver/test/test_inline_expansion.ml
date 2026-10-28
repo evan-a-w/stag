@@ -18,21 +18,28 @@ let enum names =
 |}
 ;;
 
-(* Checks, runs and tests [source] as [a.stag] (after [generators]), printing
-   the stale expansions, output, failing tests and the corrected source. *)
-let test source =
-  let path = "a.stag" in
-  let contents = generators ^ source in
-  let contents_of p = Option.some_if (String.equal p path) contents in
+(* Checks, runs and tests [source] as [a.stag] (after [generators]), with
+   [others] files, printing the stale expansions, output, failing tests and the
+   corrected sources. *)
+let test ?(others = []) source =
+  let files =
+    { Source_file.path = "a.stag"; contents = generators ^ source }
+    :: List.map others ~f:(fun (path, contents) ->
+      { Source_file.path; contents })
+  in
+  let contents_of p =
+    List.find_map files ~f:(fun (file : Source_file.t) ->
+      Option.some_if (String.equal file.path p) file.contents)
+  in
   let report diagnostic =
     print_string (Diagnostic.to_string_hum ~contents:contents_of diagnostic)
   in
-  match Driver.check_files [ { Source_file.path; contents } ] with
+  match Driver.check_files files with
   | Error error -> report (Diagnostic.of_driver_error error)
   | Ok driver ->
-    let expansions = Inline_expansion.mismatches driver in
+    let expansions = Inline_expansion.stale driver in
     List.iter expansions ~f:(fun expansion ->
-      print_s [%message "stale" ~_:(expansion.loc : Loc.t)]);
+      report (Inline_expansion.diagnostic expansion));
     let output = Buffer.create 64 in
     Treewalk.set_output (Driver.interpreter driver) (Buffer.add_string output);
     let tests =
@@ -52,13 +59,14 @@ let test source =
     List.iter tests ~f:(fun result ->
       if not (Expect_test_runner.Test_result.passed result)
       then print_s [%sexp (result : Expect_test_runner.Test_result.t)]);
-    (match Corrected_file.create ~path ~contents ~tests ~expansions with
-     | None -> print_endline "(up to date)"
-     | Some corrected ->
-       print_endline "--- corrected ---";
-       print_string
-         (String.chop_prefix_exn corrected ~prefix:generators
-          |> String.chop_prefix_if_exists ~prefix:"\n"))
+    List.iter files ~f:(fun { path; contents } ->
+      match Corrected_file.create ~path ~contents ~tests ~expansions with
+      | None -> printf "(%s up to date)\n" path
+      | Some corrected ->
+        printf "--- %s corrected ---\n" path;
+        print_string
+          (String.chop_prefix_if_exists corrected ~prefix:generators
+           |> String.chop_prefix_if_exists ~prefix:"\n"))
 ;;
 
 let%expect_test "an empty expansion is filled" =
@@ -71,8 +79,11 @@ let y = x
 |};
   [%expect
     {|
-    (stale a.stag:16:46-17:0)
-    --- corrected ---
+    File "a.stag", line 16, characters 0-46:
+    16 | include%inline .~(value "x" (Stag.Expr.int 1))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+    --- a.stag corrected ---
     include%inline .~(value "x" (Stag.Expr.int 1))
       let x = 1
     end%inline
@@ -88,7 +99,7 @@ include%inline .~(value "x" (Stag.Expr.int 1))
   let x = 1
 end%inline
 |};
-  [%expect {| (up to date) |}]
+  [%expect {| (a.stag up to date) |}]
 ;;
 
 let%expect_test "expansions are compared modulo layout and comments" =
@@ -104,7 +115,7 @@ include%inline .~(enum (Cons ("Red", Cons ("Green", Nil))))
     | Green -> "Green"
 end%inline
 |};
-  [%expect {| (up to date) |}]
+  [%expect {| (a.stag up to date) |}]
 ;;
 
 let%expect_test
@@ -124,9 +135,15 @@ end
 |};
   [%expect
     {|
-    (stale a.stag:16:46-19:0)
-    (stale a.stag:21:55-23:2)
-    --- corrected ---
+    File "a.stag", line 16, characters 0-46:
+    16 | include%inline .~(value "x" (Stag.Expr.int 2))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+    File "a.stag", line 21, characters 2-55:
+    21 |   include%inline .~(enum (Cons ("A", Cons ("B", Nil))))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+    --- a.stag corrected ---
     include%inline .~(value "x" (Stag.Expr.int 2))
       let x = 2
     end%inline
@@ -154,8 +171,11 @@ end%inline
 |};
   [%expect
     {|
-    (stale a.stag:16:20-18:0)
-    --- corrected ---
+    File "a.stag", line 16, characters 0-20:
+    16 | include%inline .~Nil
+         ^^^^^^^^^^^^^^^^^^^^
+    Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+    --- a.stag corrected ---
     include%inline .~Nil
     end%inline
     include%inline .~Nil
@@ -176,11 +196,17 @@ let shown = print_endline (Color.to_string Color.Red)
 |};
   [%expect
     {|
-    (stale a.stag:16:50-17:0)
-    (stale a.stag:19:55-20:2)
+    File "a.stag", line 16, characters 0-50:
+    16 | module%inline Color = .~(enum (Cons ("Red", Nil)))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+    File "a.stag", line 19, characters 2-55:
+    19 |   module%inline Inner = .~(value "x" (Stag.Expr.int 1))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: this inline expansion is out of date: the declarations written differ from those its splice generates
     --- output ---
     Red
-    --- corrected ---
+    --- a.stag corrected ---
     module%inline Color = .~(enum (Cons ("Red", Nil)))
       type t = Red
 
@@ -209,8 +235,11 @@ end
 |};
   [%expect
     {|
-    (stale a.stag:19:33-20:4)
-    --- corrected ---
+    File "a.stag", line 19, characters 4-33:
+    19 |     include%inline .~(enum names)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+    --- a.stag corrected ---
     let names = Cons ("A_long_constructor_name", Cons ("Another_long_constructor_name", Cons ("Yet_another_one", Nil)))
     module A = struct
       module B = struct
@@ -244,10 +273,13 @@ let shown = print_int x
 |};
   [%expect
     {|
-    (stale a.stag:16:46-19:0)
+    File "a.stag", line 16, characters 0-46:
+    16 | include%inline .~(value "x" (Stag.Expr.int 1))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: this inline expansion is out of date: the declarations written differ from those its splice generates
     --- output ---
     1
-    --- corrected ---
+    --- a.stag corrected ---
     include%inline .~(value "x" (Stag.Expr.int 1))
       let x = 1
     end%inline
@@ -331,14 +363,17 @@ let%expect_test "after" = print_int x; [%expect {| 2 |}]
 |xx};
   [%expect
     {xxx|
-    (stale a.stag:17:46-18:0)
+    File "a.stag", line 17, characters 0-46:
+    17 | include%inline .~(value "x" (Stag.Expr.int 1))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: this inline expansion is out of date: the declarations written differ from those its splice generates
     ((name (before @ a.stag:16:16-24))
      (mismatches (((loc a.stag:16:56-61) (expected (" ")) (actual hi))))
      (error ()))
     ((name (after @ a.stag:19:16-23))
      (mismatches (((loc a.stag:19:48-55) (expected (" 2 ")) (actual 1))))
      (error ()))
-    --- corrected ---
+    --- a.stag corrected ---
     let%expect_test "before" = print_endline "hi"; [%expect {| hi |}]
     include%inline .~(value "x" (Stag.Expr.int 1))
       let x = 1
@@ -356,12 +391,15 @@ let crash = raise (Failure "boom")
 |};
   [%expect
     {|
-    (stale a.stag:16:46-17:0)
+    File "a.stag", line 16, characters 0-46:
+    16 | include%inline .~(value "x" (Stag.Expr.int 1))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: this inline expansion is out of date: the declarations written differ from those its splice generates
     File "a.stag", line 18, characters 12-34:
     18 | let crash = raise (Failure "boom")
                      ^^^^^^^^^^^^^^^^^^^^^^
     Error: Uncaught exception Failure "boom"
-    --- corrected ---
+    --- a.stag corrected ---
     include%inline .~(value "x" (Stag.Expr.int 1))
       let x = 1
     end%inline
@@ -380,8 +418,11 @@ end%inline
 |};
   [%expect
     {|
-    (stale a.stag:16:46-20:0)
-    --- corrected ---
+    File "a.stag", line 16, characters 0-46:
+    16 | include%inline .~(value "x" (Stag.Expr.int 1))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: this inline expansion is out of date: the declarations written differ from those its splice generates
+    --- a.stag corrected ---
     include%inline .~(value "x" (Stag.Expr.int 1))
       let x = 1
     end%inline

@@ -16,13 +16,18 @@ let read_files paths =
       exit 2)
 ;;
 
-let report files diagnostic =
+let report ?warning files diagnostic =
   let contents path =
     List.find_map files ~f:(fun (file : Source_file.t) ->
       Option.some_if (String.equal file.path path) file.contents)
   in
   Out_channel.flush stdout;
-  eprintf "%s%!" (Diagnostic.to_string_hum ~contents diagnostic)
+  eprintf "%s%!" (Diagnostic.to_string_hum ~contents ?warning diagnostic)
+;;
+
+let report_stale ?warning files expansions =
+  List.iter expansions ~f:(fun expansion ->
+    report ?warning files (Inline_expansion.diagnostic expansion))
 ;;
 
 let check ?output ~limits files =
@@ -104,6 +109,7 @@ let check_command =
      fun () ->
        let files = read_files paths in
        let driver = check ~limits files in
+       report_stale ~warning:true files (Inline_expansion.stale driver);
        print_string (Signature.to_string_hum (Driver.checked driver).signature))
 ;;
 
@@ -115,7 +121,9 @@ let run_command =
      and limits = limits_param () in
      fun () ->
        let files = read_files paths in
-       eval ~limits files (check ~limits files))
+       let driver = check ~limits files in
+       report_stale ~warning:true files (Inline_expansion.stale driver);
+       eval ~limits files driver)
 ;;
 
 let test_command =
@@ -153,7 +161,8 @@ let test_command =
           exit 2
         | _ -> ());
        let driver = check ~limits files in
-       let expansions = Inline_expansion.mismatches driver in
+       let expansions = Inline_expansion.stale driver in
+       report_stale files expansions;
        let evaluated =
          match Driver.eval ~limits driver with
          | Ok () -> true

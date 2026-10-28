@@ -7,5 +7,5 @@ val create
   :  path:string
   -> contents:string
   -> tests:Expect_test_runner.Test_result.t list
-  -> expansions:Inline_expansion.t list
+  -> expansions:Expansion.t list
   -> string option

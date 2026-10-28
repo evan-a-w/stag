@@ -33,7 +33,7 @@ let check_files ?(run = false) files =
              ~path
              ~contents
              ~tests:results
-             ~expansions:(Inline_expansion.mismatches driver))
+             ~expansions:(Inline_expansion.stale driver))
           ~f:(printf "--- corrected ---\n%s")))
 ;;
 

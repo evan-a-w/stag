@@ -46,13 +46,6 @@ module Reached = struct
     }
 end
 
-let leading_whitespace line =
-  String.prefix
-    line
-    (String.lfindi line ~f:(fun _ c -> not (Char.is_whitespace c))
-     |> Option.value ~default:(String.length line))
-;;
-
 let common_prefix a b =
   let rec go i =
     if i < String.length a && i < String.length b && Char.equal a.[i] b.[i]
@@ -73,7 +66,7 @@ let normalize string =
   in
   let common =
     List.filter lines ~f:(Fn.non String.is_empty)
-    |> List.map ~f:leading_whitespace
+    |> List.map ~f:Source_edit.leading_whitespace
     |> List.reduce ~f:common_prefix
     |> Option.value ~default:""
   in
@@ -169,19 +162,11 @@ let run ?(limits = Limits.unlimited) ?files driver =
   |> List.map ~f:(run_test ~limits driver)
 ;;
 
-let line_start contents ~offset =
-  match String.rindex_from contents (offset - 1) '\n' with
-  | Some i -> i + 1
-  | None | (exception _) -> 0
-;;
-
 (* The indentation of what starts at [offset]: that of its line, deeper if
    [offset] is not the first thing on it. *)
 let indentation contents ~offset =
-  let start = line_start contents ~offset in
-  let before = String.sub contents ~pos:start ~len:(offset - start) in
-  let indentation = leading_whitespace before in
-  if String.length indentation = String.length before
+  let indentation = Source_edit.indentation contents ~offset in
+  if Source_edit.first_on_line contents ~offset
   then indentation
   else indentation ^ "  "
 ;;
@@ -220,10 +205,7 @@ let mismatch_edits
   let start = loc.start.offset in
   match expected, parenthesize with
   | Some _, _ ->
-    let line = line_start contents ~offset:start in
-    let indentation =
-      leading_whitespace (String.sub contents ~pos:line ~len:(start - line))
-    in
+    let indentation = Source_edit.indentation contents ~offset:start in
     let quoted = quoted actual ~indentation:(deeper indentation) in
     [ { Source_edit.start
       ; stop = loc.stop.offset
@@ -232,10 +214,7 @@ let mismatch_edits
       }
     ]
   | None, None ->
-    let line = line_start contents ~offset:start in
-    let indentation =
-      leading_whitespace (String.sub contents ~pos:line ~len:(start - line))
-    in
+    let indentation = Source_edit.indentation contents ~offset:start in
     [ { start
       ; stop = start
       ; replacement =
