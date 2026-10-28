@@ -59,6 +59,12 @@ async function typed(keys) {
 }
 
 exports.run = async function () {
+  // The language configuration, with its auto-closing pairs, applies only
+  // once loaded: the first stag buffers can be typed in without it.
+  const start = Date.now();
+  while ((await typed(["("])) !== "()") {
+    if (Date.now() - start > 20_000) throw new Error("timed out: auto-closing");
+  }
   const typing = {};
   for (const keys of ["(*", "{|", "(", "{", ".<", "x `"]) {
     typing[keys] = await typed([...keys]);
