@@ -16,3 +16,5 @@ module Runtime_error = Stag_eval.Runtime_error
 module Treewalk = Stag_eval.Treewalk
 module Typecheck = Stag_typecheck.Typecheck
 module Typecheck_error = Stag_typecheck.Typecheck_error
+module Value = Stag_eval.Value
+module Measure = Stag_measure

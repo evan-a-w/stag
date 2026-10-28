@@ -1,0 +1,12 @@
+(* Calls and integer arithmetic. *)
+
+let fib n =
+  match Int.lt n 2 with
+  | true -> n
+  | false -> Int.add (fib (Int.sub n 1)) (fib (Int.sub n 2))
+
+let%bench "fib" n in [10; 15; 20] = fib n
+
+let%expect_test "fib" =
+  print_int (fib 20);
+  [%expect {| 6765 |}]

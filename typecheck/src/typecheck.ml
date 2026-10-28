@@ -19,6 +19,7 @@ module Generated = struct
       | Module (name, _) | Module_splice (name, _) -> "module " ^ name.txt
       | Include _ -> "include"
       | Expect_test { name; _ } -> sprintf "let%%expect_test %S" name.txt
+      | Bench { name; _ } -> sprintf "let%%bench %S" name.txt
     in
     { splice = Module_scope.Splice.loc splice
     ; declaration
@@ -1871,6 +1872,47 @@ let check_expect_test t program module_ ~name ~body ~loc ~generated =
   { Typed.Expect_test.name; body; loc; generated = Option.is_some generated }
 ;;
 
+let check_bench t program module_ ~name ~param ~body ~loc ~generated =
+  let scope = toplevel_scope t program module_ ~level:0 ~in_expect_test:false in
+  Result.map_error ~f:(Module_scope.within module_)
+  @@ Generated.wrap_result generated
+  @@
+  match (param : Syntax.Bench_param.t option) with
+  | None ->
+    let%map.Result body =
+      check_expr
+        t
+        scope
+        ~expr:(Source.Expr.Syntax body)
+        ~ty:(Scope.fresh_ty t scope)
+    in
+    { Typed.Bench.name
+    ; param = None
+    ; body
+    ; loc
+    ; generated = Option.is_some generated
+    }
+  | Some { name = param; args } ->
+    let%bind.Result params, res_ty, (_ : Type.ty) =
+      function_type t scope ~args:[ Source.Binder.Name param, None ] ~annot:None
+    in
+    let ident, param_ty = List.hd_exn params in
+    let%bind.Result args =
+      List.map args ~f:(fun arg ->
+        check_expr t scope ~expr:(Source.Expr.Syntax arg) ~ty:param_ty)
+      |> Result.all
+    in
+    let%map.Result body =
+      check_body t scope ~args:params ~res_ty ~body:(Source.Expr.Syntax body)
+    in
+    { Typed.Bench.name
+    ; param = Some (ident, args)
+    ; body
+    ; loc
+    ; generated = Option.is_some generated
+    }
+;;
+
 let declarations_type =
   Type.TCon
     ( Prelude_path.canonical "list"
@@ -1977,17 +2019,32 @@ let declare
     in
     if not in_prelude then ignore (force toplevel : Toplevel.t);
     Hashtbl.add_exn program.toplevels ~key:name ~data:toplevel
-  | Module _ | Module_splice _ | Include _ | Expect_test _ -> ()
+  | Module _ | Module_splice _ | Include _ | Expect_test _ | Bench _ -> ()
 ;;
 
+module Deferred = struct
+  type t =
+    | Expect_test of Syntax.Name.t * Syntax.Expr.t
+    | Bench of Syntax.Name.t * Syntax.Bench_param.t option * Syntax.Expr.t
+end
+
 (* Checks the declarations of [module_] and its modules not yet checked on
-   demand, depth first in order, returning the expect tests to check after. *)
+   demand, depth first in order, returning the expect tests and benches to
+   check after. *)
 let check_declarations t (program : Program_env.t) module_ =
-  let expect_tests = Queue.create () in
+  let deferred = Queue.create () in
   let%map.Result () =
     Module_scope.iter_declarations
       module_
       ~f:(fun module_ (toplevel : Syntax.Toplevel.t) ~generated_by ->
+        let defer (kind : Deferred.t) =
+          let generated =
+            Option.map generated_by ~f:(fun splice ->
+              Generated.create splice toplevel)
+          in
+          Queue.enqueue deferred (module_, kind, toplevel.loc, generated);
+          Ok ()
+        in
         match toplevel.txt with
         | Type decl ->
           Type_env.check
@@ -2009,17 +2066,12 @@ let check_declarations t (program : Program_env.t) module_ =
            | Unchecked -> check_toplevel t program toplevel |> Result.ignore_m
            | In_progress _ | Done _ -> Ok ())
         | Expect_test { name; body } ->
-          let generated =
-            Option.map generated_by ~f:(fun splice ->
-              Generated.create splice toplevel)
-          in
-          Queue.enqueue
-            expect_tests
-            (module_, name, body, toplevel.loc, generated);
-          Ok ()
+          defer (Deferred.Expect_test (name, body))
+        | Bench { name; param; body } ->
+          defer (Deferred.Bench (name, param, body))
         | Module _ | Module_splice _ | Include _ -> Ok ())
   in
-  Queue.to_list expect_tests
+  Queue.to_list deferred
 ;;
 
 let builtin_names =
@@ -2060,7 +2112,7 @@ let rec signature (program_env : Program_env.t) module_ =
     (Module_scope.declarations module_)
     ~f:(fun (toplevel : Syntax.Toplevel.t) : Signature.Item.t option ->
       match toplevel.txt with
-      | Expect_test _ | Include _ -> None
+      | Expect_test _ | Bench _ | Include _ -> None
       | Let ({ txt = name; loc = _ }, _, _, _) ->
         let toplevel = Program_env.toplevel program_env (canonical_name name) in
         (match toplevel.state with
@@ -2136,17 +2188,24 @@ let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
   Result.map_error ~f:(Module_scope.within root)
   @@
   let%bind.Result () = Module_scope.add root program in
-  let%bind.Result expect_tests = check_declarations t program_env root in
-  let%map.Result expect_tests =
-    expect_tests
-    |> List.map ~f:(fun (module_, name, body, loc, generated) ->
-      check_expect_test t program_env module_ ~name ~body ~loc ~generated)
+  let%bind.Result deferred = check_declarations t program_env root in
+  let%map.Result checked =
+    List.map deferred ~f:(fun (module_, (kind : Deferred.t), loc, generated) ->
+      match kind with
+      | Expect_test (name, body) ->
+        check_expect_test t program_env module_ ~name ~body ~loc ~generated
+        |> Result.map ~f:Either.first
+      | Bench (name, param, body) ->
+        check_bench t program_env module_ ~name ~param ~body ~loc ~generated
+        |> Result.map ~f:Either.second)
     |> Result.all
   in
+  let expect_tests, benches = List.partition_map checked ~f:Fn.id in
   { Checked.signature = signature program_env root
   ; program =
       { sccs = Queue.to_list program_env.sccs
       ; expect_tests
+      ; benches
       ; ident_info = program_env.ident_info
       }
   }

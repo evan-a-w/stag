@@ -9,4 +9,5 @@
   stag_syntax
   stag_ir
   stag_eval
-  stag_typecheck))
+  stag_typecheck
+  stag_measure))

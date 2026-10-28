@@ -6,7 +6,8 @@ module Kind = struct
     | Type
     | Constructor
     | Field
-    | Poly_label
+    | Poly_field
+    | Poly_tag
     | Value
     | Let of { is_function : bool }
     | Parameter
@@ -36,7 +37,10 @@ let of_toplevels ~module_path toplevels =
   let occurrences = Queue.create () in
   let add ?(declaration = false) ~module_path ~kind ~loc path =
     if not (Loc.is_none loc)
-    then Queue.enqueue occurrences { Occurrence.loc; kind; path; declaration; module_path }
+    then
+      Queue.enqueue
+        occurrences
+        { Occurrence.loc; kind; path; declaration; module_path }
   in
   let rec walk_toplevels ~module_path toplevels =
     List.iter toplevels ~f:(walk_toplevel ~module_path)
@@ -75,6 +79,11 @@ let of_toplevels ~module_path toplevels =
       expr body
     | Include body -> expr body
     | Expect_test { name = _; body } -> expr body
+    | Bench { name = _; param; body } ->
+      Option.iter param ~f:(fun { name = param; args } ->
+        name ~declaration:true Kind.Parameter param;
+        List.iter args ~f:expr);
+      expr body
   and let_ ~(add : add) ~type_expr (binder : Syntax.Name.t) bindings annot body =
     let is_function =
       (not (List.is_empty bindings))
@@ -83,7 +92,11 @@ let of_toplevels ~module_path toplevels =
       | Fun _ -> true
       | _ -> false
     in
-    add ~declaration:true ~kind:(Kind.Let { is_function }) ~loc:binder.loc [ binder.txt ];
+    add
+      ~declaration:true
+      ~kind:(Kind.Let { is_function })
+      ~loc:binder.loc
+      [ binder.txt ];
     walk_bindings ~add ~type_expr bindings;
     Option.iter annot ~f:type_expr
   and walk_bindings ~(add : add) ~type_expr bindings =
@@ -98,41 +111,45 @@ let of_toplevels ~module_path toplevels =
       Option.iter (decl_path path.txt) ~f:(add ~kind:Kind.Type ~loc:path.loc);
       List.iter args ~f:(function
         | Ty ty -> recurse ty
-        | Row row -> walk_row ~add row)
+        | Row row -> walk_row ~add ~kind:Kind.Poly_field row)
     | Arrow (a, b) ->
       recurse a;
       recurse b
     | Tuple tys -> List.iter tys ~f:recurse
     | Code { inner; context } ->
       recurse inner;
-      walk_row ~add context
-    | Record row | Variant row -> walk_row ~add row
-  and walk_row ~(add : add) (row : Syntax.Type_expr.row) =
+      walk_row ~add ~kind:Kind.Poly_field context
+    | Record row -> walk_row ~add ~kind:Kind.Poly_field row
+    | Variant row -> walk_row ~add ~kind:Kind.Poly_tag row
+  and walk_row ~(add : add) ~kind (row : Syntax.Type_expr.row) =
     match row.txt with
     | Empty | Var _ -> ()
     | Extend (label, ty, rest) ->
-      add ~kind:Kind.Poly_label ~loc:label.loc [ label.txt ];
+      add ~kind ~loc:label.loc [ label.txt ];
       walk_type_expr ~add ty;
-      walk_row ~add rest
+      walk_row ~add ~kind rest
   and walk_pattern ~(add : add) (pattern : Syntax.Pattern.t) =
     let recurse = walk_pattern ~add in
     match pattern.txt with
     | Any | Lit _ -> ()
-    | Var name -> add ~declaration:true ~kind:Kind.Pattern_var ~loc:pattern.loc [ name ]
+    | Var name ->
+      add ~declaration:true ~kind:Kind.Pattern_var ~loc:pattern.loc [ name ]
     | Tuple patterns -> List.iter patterns ~f:recurse
     | Construct (path, args) ->
-      Option.iter (decl_path path.txt) ~f:(add ~kind:Kind.Constructor ~loc:path.loc);
+      Option.iter
+        (decl_path path.txt)
+        ~f:(add ~kind:Kind.Constructor ~loc:path.loc);
       List.iter args ~f:recurse
     | Record fields ->
       List.iter fields ~f:(fun (path, pattern) ->
         Option.iter (decl_path path.txt) ~f:(add ~kind:Kind.Field ~loc:path.loc);
         recurse pattern)
     | Poly_variant (tag, arg) ->
-      add ~kind:Kind.Poly_label ~loc:tag.loc [ tag.txt ];
+      add ~kind:Kind.Poly_tag ~loc:tag.loc [ tag.txt ];
       Option.iter arg ~f:recurse
     | Poly_record { fields; rest } ->
       List.iter fields ~f:(fun ((label : Syntax.Name.t), pattern) ->
-        add ~kind:Kind.Poly_label ~loc:label.loc [ label.txt ];
+        add ~kind:Kind.Poly_field ~loc:label.loc [ label.txt ];
         recurse pattern);
       (match rest with
        | Closed | Open -> ()
@@ -143,7 +160,7 @@ let of_toplevels ~module_path toplevels =
     let recurse = walk_expr ~add ~type_expr in
     let labelled fields =
       List.iter fields ~f:(fun ((label : Syntax.Name.t), expr) ->
-        add ~kind:Kind.Poly_label ~loc:label.loc [ label.txt ];
+        add ~kind:Kind.Poly_field ~loc:label.loc [ label.txt ];
         recurse expr)
     in
     let fields fields =
@@ -173,12 +190,18 @@ let of_toplevels ~module_path toplevels =
           match expr with
           | None -> add ~kind:Kind.Value ~loc:name.loc [ name.txt ]
           | Some expr ->
-            add ~declaration:true ~kind:Kind.Parameter ~loc:name.loc [ name.txt ];
+            add
+              ~declaration:true
+              ~kind:Kind.Parameter
+              ~loc:name.loc
+              [ name.txt ];
             recurse expr))
     | Quote expr -> recurse expr
     | Tuple exprs -> List.iter exprs ~f:recurse
     | Construct (path, args) ->
-      Option.iter (decl_path path.txt) ~f:(add ~kind:Kind.Constructor ~loc:path.loc);
+      Option.iter
+        (decl_path path.txt)
+        ~f:(add ~kind:Kind.Constructor ~loc:path.loc);
       List.iter args ~f:recurse
     | Record record -> fields record
     | Field (expr, path) ->
@@ -196,7 +219,7 @@ let of_toplevels ~module_path toplevels =
     | Poly_record record -> labelled record
     | Poly_field (expr, label) | Poly_restrict (expr, label) ->
       recurse expr;
-      add ~kind:Kind.Poly_label ~loc:label.loc [ label.txt ]
+      add ~kind:Kind.Poly_field ~loc:label.loc [ label.txt ]
     | Poly_extend (record, expr) ->
       labelled record;
       recurse expr
@@ -204,7 +227,7 @@ let of_toplevels ~module_path toplevels =
       recurse expr;
       labelled record
     | Poly_variant (tag, arg) ->
-      add ~kind:Kind.Poly_label ~loc:tag.loc [ tag.txt ];
+      add ~kind:Kind.Poly_tag ~loc:tag.loc [ tag.txt ];
       Option.iter arg ~f:recurse
   in
   walk_toplevels ~module_path toplevels;

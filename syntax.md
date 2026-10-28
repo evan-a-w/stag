@@ -33,7 +33,7 @@ node, for good errors.
   `rec` is reserved, as lets are always recursive.
 - `@` and `@@` are reserved (for modes, see below).
 - Staging tokens: `.<` `>.` `.~`, and `.{` (a splice's substitutions).
-- Expect test tokens: `let%expect_test`, `[%expect`.
+- Expect test tokens: `let%expect_test`, `[%expect`. Benchmarks: `let%bench`.
 
 ## Types
 
@@ -438,6 +438,28 @@ runtime error fails the test, and stops it; the output since the last
 by its leading whitespace, and trailing output as a new `[%expect]` after the
 test's body (parenthesized if it ends in a `match`). A test's local bindings
 are not visible to other tests.
+
+## Benchmarks
+
+As OCaml's ppx_bench:
+
+```ocaml
+let%bench "fib" = fib 20                  (* e is evaluated once per iteration *)
+let%bench "sort" n in [100; 1000] = sort (random_list n)  (* times random_list too *)
+```
+
+`let%bench "name" = e` is a toplevel (in any module) whose body `e` may have
+any type; its value is discarded. `let%bench "name" x in [a; b; ...] = e` (at
+least one argument, all of one type) is a bench per argument, named
+`name/A` after the argument's value as printed (`sort/100`, `str/"a"`,
+truncated with `...` past 40 characters), with `x` bound to it in `e` only.
+Bodies and arguments are checked at level 0 as toplevel lets are, and like
+expect tests are evaluated only when benchmarking (`stag bench`, `stag-build
+bench`), after the program's toplevels, each argument just before its bench
+runs, and only if that bench is selected. Unparameterised names are unique in
+a program; a parameterised bench whose expanded name another has fails. A
+runtime error, in the body or an argument, stops its bench and is reported;
+the others still run.
 
 ## Later
 

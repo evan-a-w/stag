@@ -30,3 +30,6 @@ val definition : t -> file:string -> offset:int -> Loc.t option
 (** Whether the variable or binder starting at [offset] is of a function
     type. *)
 val is_function : t -> file:string -> offset:int -> bool
+
+(** With each location [f loc], eg. to name files differently. *)
+val relocate : t -> f:(Loc.t -> Loc.t) -> t

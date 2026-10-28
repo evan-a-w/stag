@@ -30,3 +30,7 @@ val utf16_length : t -> pos:int -> len:int -> int
 
 (** The text with a change of [textDocument/didChange] applied. *)
 val apply_change : t -> Lsp_types.TextDocumentContentChangeEvent.t -> t
+
+(** The bytes [start, stop) split into the pieces on each line, without line
+    terminators, empty pieces dropped. *)
+val split_lines : t -> start:int -> stop:int -> (int * int) list

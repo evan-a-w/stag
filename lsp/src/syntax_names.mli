@@ -8,7 +8,8 @@ module Kind : sig
     | Type (** A declared type, in a type expression or declaration. *)
     | Constructor (** Also of an exception. *)
     | Field
-    | Poly_label (** A polymorphic record field or variant tag. *)
+    | Poly_field (** Of a polymorphic record. *)
+    | Poly_tag (** Of a polymorphic variant. *)
     | Value (** A variable used. *)
     | Let of { is_function : bool } (** A [let]'s name. *)
     | Parameter

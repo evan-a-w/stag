@@ -1,0 +1,27 @@
+(* Staged power against unstaged: the staged one is specialised at compile
+   time, by a toplevel splice, to a chain of multiplications. *)
+
+let power x n =
+  match Int.equal n 0 with
+  | true -> 1
+  | false -> Int.mul x (power x (Int.sub n 1))
+
+let spower x n =
+  match Int.equal n 0 with
+  | true -> .< 1 >.
+  | false -> .< Int.mul .~x .~(spower x (Int.sub n 1)) >.
+
+let power16 x = .~(spower .< x >. 16)
+
+let%bench "power 16" = power 3 16
+
+let%bench "staged power 16" = power16 3
+
+(* Building the code at runtime, without running it. *)
+let%bench "spower 16" = spower .< 3 >. 16
+
+let%expect_test "power" =
+  print_int (power 3 16);
+  print_string " ";
+  print_int (power16 3);
+  [%expect {| 43046721 43046721 |}]

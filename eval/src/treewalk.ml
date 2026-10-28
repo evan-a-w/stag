@@ -841,6 +841,12 @@ let run_expect_test t ({ body; _ } : Typed.Expect_test.t) ~on_expect =
     ~finally:(fun () -> t.on_expect <- None)
 ;;
 
+let eval_expr ?(bindings = []) t expr =
+  let env = Env.create () in
+  List.iter bindings ~f:(fun (ident, value) -> Env.set env ~ident ~value);
+  eval t ~env ~level:0 expr
+;;
+
 let find t ~ident = Env.lookup t.env ~ident
 
 let eval t =

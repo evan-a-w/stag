@@ -194,6 +194,15 @@ module Expr = struct
   [@@deriving sexp_of, compare, equal]
 end
 
+(** [n in [a; b]] of [let%bench "name" n in [a; b] = e]. *)
+module Bench_param = struct
+  type t =
+    { name : Name.t
+    ; args : Expr.t list (** Non-empty. *)
+    }
+  [@@deriving sexp_of, compare, equal]
+end
+
 module Toplevel = struct
   type t = desc Located.t
 
@@ -206,6 +215,11 @@ module Toplevel = struct
     | Include of Expr.t (** [include .~e]. *)
     | Expect_test of
         { name : string Located.t
+        ; body : Expr.t
+        }
+    | Bench of
+        { name : string Located.t
+        ; param : Bench_param.t option
         ; body : Expr.t
         }
   [@@deriving sexp_of, compare, equal]

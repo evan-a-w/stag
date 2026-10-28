@@ -82,7 +82,7 @@ let%expect_test "the prelude's signature" =
         val let_ : string -> list[string] -> t -> t -> t
       end
       module Toplevel : sig
-        type t = Let of string * list[string * option[Type_expr.t]] * option[Type_expr.t] * Expr.t | Type of {`kind : Type_decl.Kind.t; `name : string; `params : list[Type_decl.Param.t]} | Exception of string * list[Type_expr.t] | Module of string * list[t] | Module_splice of string * Expr.t | Include of Expr.t | Expect_test of {`body : Expr.t; `name : string}
+        type t = Let of string * list[string * option[Type_expr.t]] * option[Type_expr.t] * Expr.t | Type of {`kind : Type_decl.Kind.t; `name : string; `params : list[Type_decl.Param.t]} | Exception of string * list[Type_expr.t] | Module of string * list[t] | Module_splice of string * Expr.t | Include of Expr.t | Expect_test of {`body : Expr.t; `name : string} | Bench of {`body : Expr.t; `name : string; `param : option[string * list[Expr.t]]}
         val let_ : string -> list[string] -> Expr.t -> t
       end
       module Program : sig
@@ -149,6 +149,8 @@ let staged = .< .~e >.
 let splices = (.~(f x), .~e.{}, .~e.{x = e1; y})
 let types = (type t, type M.t, type list['a], type (int * t), f (type t))
 let exns = match f x with y -> y | exception E -> 1 | exception M.F (a, b) -> 2 | exception e -> raise e
+let%bench "fib" = fib 20
+let%bench "sort" n in [100; f 1000] = sort n
 |}
   ; {stag|
 module M = struct
@@ -259,7 +261,7 @@ let%expect_test "constructors are made as the typechecker resolves them" =
            : bool)];
   [%expect
     {|
-    ((constructors 72)
+    ((constructors 73)
      (reflected
       (prelude.Stag.Path.Ref prelude.Stag.Type.Kind.Alias
        prelude.Stag.Type.Kind.Record prelude.Stag.Type.Kind.Variant))

@@ -236,7 +236,7 @@ let type_decl t : Type_decl.t =
 
 let rec toplevel t : Toplevel.t =
   loc
-    (match int t 9 with
+    (match int t 10 with
      | 0 ->
        Toplevel.Let
          ( name t
@@ -251,5 +251,18 @@ let rec toplevel t : Toplevel.t =
      | 5 -> Module_splice (loc (uident t), expr t)
      | 6 -> Include (expr t)
      | 7 -> Exception (loc (uident t), list t ~min:0 ~max:3 type_expr)
+     | 8 ->
+       Bench
+         { name = loc (string t)
+         ; param =
+             (if bool t
+              then
+                Some
+                  { Bench_param.name = name t
+                  ; args = list t ~min:1 ~max:3 expr
+                  }
+              else None)
+         ; body = expr t
+         }
      | _ -> Let (name t, [], None, expr t))
 ;;

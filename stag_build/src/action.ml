@@ -264,6 +264,46 @@ let test project names =
     all targets ~f:(test_target project ~check:(checker project))
 ;;
 
+let bench_dir = corrections_dir ^/ "bench"
+
+let bench project options ~filters ~phases =
+  let check = checker project in
+  let benches (target : Project.Target.t) =
+    let name = Project.Target.name target in
+    let prefix = name ^ "/" in
+    if phases
+    then
+      Option.map (check target) ~f:(fun (_ : Driver.t) ->
+        Phase_bench.benches ~prefix (fun () -> Program.parse project target))
+    else (
+      let%bind.Option driver = check target in
+      Treewalk.set_output (Driver.interpreter driver) ignore;
+      match
+        let%bind.Result () =
+          Driver.eval driver |> Result.map_error ~f:Diagnostic.of_runtime_error
+        in
+        Bench_runner.benches ~files:(files target) driver
+      with
+      | Ok benches ->
+        Some
+          (List.map benches ~f:(fun bench ->
+             Measure.Suite.Bench.add_prefix bench prefix))
+      | Error diagnostic ->
+        report project [ diagnostic ];
+        None)
+  in
+  let benches = List.map (Project.targets project) ~f:benches in
+  let ok =
+    Bench_command.run
+      ~filters
+      options
+      ~baseline_dir:(Project.root project ^/ bench_dir)
+      ~report:(fun diagnostic -> report project [ diagnostic ])
+      (List.concat_map benches ~f:(Option.value ~default:[]))
+  in
+  ok && List.for_all benches ~f:Option.is_some
+;;
+
 let corrections ~root ~error =
   let rec walk dir =
     Fs.read_dir ~error ~root dir

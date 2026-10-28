@@ -13,7 +13,9 @@ let create ~input ~output =
 
 (* Reads more into the buffer, returning false at the end of the input. *)
 let fill t =
-  match Core_unix.read t.input ~buf:t.chunk ~pos:0 ~len:(Bytes.length t.chunk) with
+  match
+    Core_unix.read t.input ~buf:t.chunk ~pos:0 ~len:(Bytes.length t.chunk)
+  with
   | 0 -> false
   | n ->
     Buffer.add_subbytes t.buffer t.chunk ~pos:0 ~len:n;
@@ -66,7 +68,14 @@ let rec read t =
 let has_pending_input t =
   Buffer.length t.buffer > 0
   ||
-  match Core_unix.select ~read:[ t.input ] ~write:[] ~except:[] ~timeout:`Immediately () with
+  match
+    Core_unix.select
+      ~read:[ t.input ]
+      ~write:[]
+      ~except:[]
+      ~timeout:`Immediately
+      ()
+  with
   | { read = _ :: _; _ } -> true
   | { read = []; _ } -> false
   | exception Core_unix.Unix_error (EINTR, _, _) -> false
@@ -83,7 +92,11 @@ let write t packet =
     if pos < String.length data
     then (
       let n =
-        Core_unix.single_write_substring t.output ~buf:data ~pos ~len:(String.length data - pos)
+        Core_unix.single_write_substring
+          t.output
+          ~buf:data
+          ~pos
+          ~len:(String.length data - pos)
       in
       loop (pos + n))
   in

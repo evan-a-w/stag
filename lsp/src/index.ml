@@ -112,7 +112,9 @@ module Syntax_at = struct
       recurse body
     | Splice { expr; subs } ->
       recurse expr;
-      Option.iter subs ~f:(List.iter ~f:(fun (_, e) -> Option.iter e ~f:recurse))
+      Option.iter
+        subs
+        ~f:(List.iter ~f:(fun (_, e) -> Option.iter e ~f:recurse))
     | Quote e -> recurse e
     | Tuple es -> List.iter es ~f:recurse
     | Construct (path, es) ->
@@ -157,9 +159,16 @@ let is_arrow ty =
 ;;
 
 let add_binder t (name : Syntax.Name.t) ~label ~ty ~ident =
-  Option.iter ident ~f:(fun ident -> Hashtbl.set t.locals ~key:ident ~data:name.loc);
+  Option.iter ident ~f:(fun ident ->
+    Hashtbl.set t.locals ~key:ident ~data:name.loc);
   if is_arrow ty then Hash_set.add t.functions (Span.of_loc name.loc);
-  add t { loc = name.loc; label = Some label; ty = Some ty; target = Some (Loc name.loc) }
+  add
+    t
+    { loc = name.loc
+    ; label = Some label
+    ; ty = Some ty
+    ; target = Some (Loc name.loc)
+    }
 ;;
 
 let local_binders t (program : Typed.Program.t) names idents =
@@ -192,7 +201,9 @@ let field_path fields (field : Typed.Field_ref.t) =
 let rec pattern t ~syntax ~program (p : Typed.Pattern.t) =
   let recurse = pattern t ~syntax ~program in
   let at table = Hashtbl.find table (Span.of_loc p.loc) in
-  let typed () = add t { loc = p.loc; label = None; ty = Some p.ty; target = None } in
+  let typed () =
+    add t { loc = p.loc; label = None; ty = Some p.ty; target = None }
+  in
   match p.desc with
   | Var ident ->
     add_binder
@@ -202,8 +213,12 @@ let rec pattern t ~syntax ~program (p : Typed.Pattern.t) =
       ~ty:p.ty
       ~ident:(Some ident)
   | Any | Lit _ -> typed ()
-  | Tuple ps -> typed (); List.iter ps ~f:recurse
-  | Poly_variant (_, p) -> typed (); Option.iter p ~f:recurse
+  | Tuple ps ->
+    typed ();
+    List.iter ps ~f:recurse
+  | Poly_variant (_, p) ->
+    typed ();
+    Option.iter p ~f:recurse
   | Construct (constructor, ps) ->
     typed ();
     Option.iter (at syntax.Syntax_at.constructors) ~f:(fun path ->
@@ -239,17 +254,21 @@ let rec pattern t ~syntax ~program (p : Typed.Pattern.t) =
 let rec expr t ~syntax ~program (e : Typed.Expr.t) =
   let recurse = expr t ~syntax ~program in
   let at table = Hashtbl.find table (Span.of_loc e.loc) in
-  let typed ?label ?target () = add t { loc = e.loc; label; ty = Some e.ty; target } in
+  let typed ?label ?target () =
+    add t { loc = e.loc; label; ty = Some e.ty; target }
+  in
   let fields paths fields =
-    List.iter fields ~f:(fun ((field : Typed.Field_ref.t), (value : Typed.Expr.t)) ->
-      Option.iter (field_path paths field) ~f:(fun path ->
-        add
-          t
-          { loc = path.loc
-          ; label = None
-          ; ty = Some value.ty
-          ; target = Some (Field (Typed.Field_ref.name field))
-          }))
+    List.iter
+      fields
+      ~f:(fun ((field : Typed.Field_ref.t), (value : Typed.Expr.t)) ->
+        Option.iter (field_path paths field) ~f:(fun path ->
+          add
+            t
+            { loc = path.loc
+            ; label = None
+            ; ty = Some value.ty
+            ; target = Some (Field (Typed.Field_ref.name field))
+            }))
   in
   (match e.desc with
    | Var var ->
@@ -261,7 +280,8 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
           | Toplevel ident -> ident.name, Some (Value ident.name))
        | Free name -> name, None
        | Prim prim -> Sexp.to_string (Typed.Var_ref.sexp_of_t (Prim prim)), None
-       | Intrinsic _ as var -> Sexp.to_string (Typed.Var_ref.sexp_of_t var), None
+       | Intrinsic _ as var ->
+         Sexp.to_string (Typed.Var_ref.sexp_of_t var), None
      in
      if is_arrow e.ty then Hash_set.add t.functions (Span.of_loc e.loc);
      typed ~label ?target ()
@@ -299,7 +319,8 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
            }))
    | Match { cases; exception_cases; _ } ->
      typed ();
-     List.iter (cases @ exception_cases) ~f:(fun (p, _) -> pattern t ~syntax ~program p)
+     List.iter (cases @ exception_cases) ~f:(fun (p, _) ->
+       pattern t ~syntax ~program p)
    | Lit _
    | App _
    | Splice _
@@ -338,12 +359,13 @@ let rec declarations t ~values ~prefix (toplevels : Syntax.Toplevel.t list) =
       (match kind with
        | Variant constructors ->
          List.iter constructors ~f:(fun (name, _) -> set t.constructors name)
-       | Record fields -> List.iter fields ~f:(fun (name, _) -> set t.fields name)
+       | Record fields ->
+         List.iter fields ~f:(fun (name, _) -> set t.fields name)
        | Alias _ | Abstract -> ())
     | Exception (name, _) -> set t.constructors name
     | Module (name, toplevels) ->
       declarations t ~values ~prefix:(prefix @ [ name.txt ]) toplevels
-    | Module_splice _ | Include _ | Expect_test _ -> ())
+    | Module_splice _ | Include _ | Expect_test _ | Bench _ -> ())
 ;;
 
 let rec files ~prefix (group : Driver.Module_group.t) =
@@ -376,10 +398,18 @@ let create ~groups ~(program : Typed.Program.t) =
   List.iter files ~f:(fun (prefix, toplevel) ->
     declarations t ~values ~prefix [ toplevel ]);
   let syntax = Syntax_at.create () in
+  let bench_params = Span.Table.create () in
   let rec syntax_of_toplevel (toplevel : Syntax.Toplevel.t) =
     match toplevel.txt with
-    | Let (_, _, _, e) | Module_splice (_, e) | Include e | Expect_test { body = e; _ } ->
-      Syntax_at.expr syntax e
+    | Let (_, _, _, e)
+    | Module_splice (_, e)
+    | Include e
+    | Expect_test { body = e; _ } -> Syntax_at.expr syntax e
+    | Bench { param; body; name = _ } ->
+      Option.iter param ~f:(fun { args; name } ->
+        Hashtbl.set bench_params ~key:(Span.of_loc toplevel.loc) ~data:name;
+        List.iter args ~f:(Syntax_at.expr syntax));
+      Syntax_at.expr syntax body
     | Module (_, toplevels) -> List.iter toplevels ~f:syntax_of_toplevel
     | Type _ | Exception _ -> ()
   in
@@ -397,14 +427,16 @@ let create ~groups ~(program : Typed.Program.t) =
             ; label =
                 Some
                   ("type "
-                   ^ Option.value target ~default:(String.concat ~sep:"." path))
+                   ^ Option.value target ~default:(String.concat ~sep:"." path)
+                  )
             ; ty = None
             ; target = Option.map target ~f:(fun name -> Target.Type name)
             }
         | Module
         | Constructor
         | Field
-        | Poly_label
+        | Poly_field
+        | Poly_tag
         | Value
         | Let _
         | Parameter
@@ -415,8 +447,43 @@ let create ~groups ~(program : Typed.Program.t) =
         add_binder t name ~label:ident.name ~ty:scheme ~ident:None;
         local_binders t program (List.map bindings ~f:fst) args);
       expr t ~syntax ~program body));
-  List.iter program.expect_tests ~f:(fun test -> expr t ~syntax ~program test.body);
+  List.iter program.expect_tests ~f:(fun test ->
+    expr t ~syntax ~program test.body);
+  List.iter program.benches ~f:(fun bench ->
+    Option.iter bench.param ~f:(fun (ident, args) ->
+      List.iter args ~f:(expr t ~syntax ~program);
+      Option.iter (Map.find program.ident_info ident) ~f:(fun info ->
+        Option.iter
+          (Hashtbl.find bench_params (Span.of_loc bench.loc))
+          ~f:(fun name ->
+            add_binder t name ~label:ident.name ~ty:info.ty ~ident:(Some ident))));
+    expr t ~syntax ~program bench.body);
   t
+;;
+
+let relocate t ~f =
+  let entries = String.Table.create () in
+  Hashtbl.iter t.entries ~f:(fun queue ->
+    Queue.iter queue ~f:(fun (entry : Entry.t) ->
+      let loc = f entry.loc in
+      let target : Target.t option =
+        match entry.target with
+        | Some (Loc target) -> Some (Loc (f target))
+        | target -> target
+      in
+      add { t with entries } { entry with loc; target }));
+  let functions = Span.Hash_set.create () in
+  Hash_set.iter t.functions ~f:(fun span ->
+    let file = (f (Loc.start_of_file span.file)).file in
+    Hash_set.add functions { span with file });
+  { entries
+  ; locals = Hashtbl.map t.locals ~f
+  ; values = Hashtbl.map t.values ~f
+  ; types = Hashtbl.map t.types ~f
+  ; constructors = Hashtbl.map t.constructors ~f
+  ; fields = Hashtbl.map t.fields ~f
+  ; functions
+  }
 ;;
 
 let contains (loc : Loc.t) offset =
@@ -430,7 +497,9 @@ let entry_at t ~file ~offset =
     if not (contains entry.loc offset)
     then best
     else (
-      let size (entry : Entry.t) = entry.loc.stop.offset - entry.loc.start.offset in
+      let size (entry : Entry.t) =
+        entry.loc.stop.offset - entry.loc.start.offset
+      in
       match best with
       | Some best when size best < size entry -> Some best
       | Some _ | None -> Some entry))
@@ -440,7 +509,8 @@ let hover t ~file ~offset =
   let%bind.Option entry = entry_at t ~file ~offset in
   let text =
     match entry.label, entry.ty with
-    | Some label, Some ty -> Some (sprintf "%s : %s" label (Type.to_string_hum ty))
+    | Some label, Some ty ->
+      Some (sprintf "%s : %s" label (Type.to_string_hum ty))
     | None, Some ty -> Some (Type.to_string_hum ty)
     | Some label, None -> Some label
     | None, None -> None

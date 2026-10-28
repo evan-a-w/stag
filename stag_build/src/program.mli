@@ -7,7 +7,12 @@ open! Import
     a [Driver.Module_group.Group], so its files are evaluated in dependency
     order as a program's are. *)
 
-(** [limits] and [output] are as for [Driver.check]. *)
+val parse
+  :  Project.t
+  -> Project.Target.t
+  -> (Driver.Module_group.t list, Diagnostic.t list) Result.t
+
+(** [parse], then [Driver.check_modules]. [limits] and [output] are as for [Driver.check]. *)
 val check
   :  ?limits:Limits.t
   -> ?output:(string -> unit)

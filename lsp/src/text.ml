@@ -19,7 +19,10 @@ let char_at t offset =
   let decode = Stdlib.String.get_utf_8_uchar t.contents offset in
   let bytes = Stdlib.Uchar.utf_decode_length decode in
   if Stdlib.Uchar.utf_decode_is_valid decode
-  then bytes, Stdlib.Uchar.utf_16_byte_length (Stdlib.Uchar.utf_decode_uchar decode) / 2
+  then
+    ( bytes
+    , Stdlib.Uchar.utf_16_byte_length (Stdlib.Uchar.utf_decode_uchar decode) / 2
+    )
   else bytes, bytes
 ;;
 
@@ -46,7 +49,9 @@ let offset_of_position t ({ line; character } : Lsp_types.Position.t) =
       then stop
       else (
         let bytes, width = char_at t offset in
-        if units + width > character then offset else walk (offset + bytes) (units + width))
+        if units + width > character
+        then offset
+        else walk (offset + bytes) (units + width))
     in
     walk t.line_starts.(line) 0)
 ;;
@@ -102,7 +107,8 @@ let full_range t = range_of_offsets t ~start:0 ~stop:(String.length t.contents)
 
 let apply_change
       t
-      ({ range; rangeLength = _; text } : Lsp_types.TextDocumentContentChangeEvent.t)
+      ({ range; rangeLength = _; text } :
+        Lsp_types.TextDocumentContentChangeEvent.t)
   =
   match range with
   | None -> create text
@@ -113,4 +119,14 @@ let apply_change
       (String.prefix t.contents start
        ^ text
        ^ String.drop_prefix t.contents stop)
+;;
+
+let split_lines t ~start ~stop =
+  let first = (position_of_offset t start).line in
+  let last = (position_of_offset t stop).line in
+  List.range first last ~stop:`inclusive
+  |> List.filter_map ~f:(fun line ->
+    let piece_start = Int.max start t.line_starts.(line) in
+    let piece_stop = Int.min stop (line_stop t line) in
+    Option.some_if (piece_start < piece_stop) (piece_start, piece_stop))
 ;;

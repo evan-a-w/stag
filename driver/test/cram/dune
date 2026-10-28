@@ -2,8 +2,9 @@
  (deps %{bin:stag}))
 
 (cram
- (applies_to build)
+ (applies_to build build_bench)
  (deps
   %{bin:stag-build}
   %{bin:stag}
-  (source_tree ../../../examples)))
+  (source_tree ../../../examples)
+  (source_tree ../../../bench)))

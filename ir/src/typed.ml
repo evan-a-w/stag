@@ -385,10 +385,22 @@ module Expect_test = struct
   [@@deriving sexp_of]
 end
 
+module Bench = struct
+  type t =
+    { name : string Located.t
+    ; param : (Ident.t * Expr.t list) option
+    ; body : Expr.t
+    ; loc : Loc.t
+    ; generated : bool [@sexp.bool]
+    }
+  [@@deriving sexp_of]
+end
+
 module Program = struct
   type t =
     { sccs : Scc.t list
     ; expect_tests : Expect_test.t list
+    ; benches : Bench.t list
     ; ident_info : Ident_info.t Ident.Map.t
     }
   [@@deriving sexp_of]

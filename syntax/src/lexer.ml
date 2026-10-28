@@ -413,6 +413,8 @@ let token (t : State.t) : Located.t =
          let text = ident t in
          if String.equal text "let" && is_word_at t ~pos:0 "%expect_test"
          then simple 12 Let_expect_test
+         else if String.equal text "let" && is_word_at t ~pos:0 "%bench"
+         then simple 6 Let_bench
          else Option.value (Token.keyword text) ~default:(Lident text)
        | c, _ ->
          State.bump t;

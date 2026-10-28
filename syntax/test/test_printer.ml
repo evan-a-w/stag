@@ -682,7 +682,7 @@ let stag_files () =
       then [ path ]
       else [])
   in
-  List.concat_map [ "tests"; "examples"; "eval" ] ~f:(fun dir ->
+  List.concat_map [ "tests"; "examples"; "eval"; "bench" ] ~f:(fun dir ->
     walk ("../.." ^/ dir))
 ;;
 
@@ -712,6 +712,11 @@ let%expect_test "the project's sources round trip and are formatted" =
     (../../examples/calc/math/power.stag (formatted true) (long_lines 0))
     (../../examples/calc/test/calc_test.stag (formatted true) (long_lines 0))
     (../../eval/src/prelude/prelude.stag (formatted true) (long_lines 0))
+    (../../bench/programs/fib.stag (formatted true) (long_lines 0))
+    (../../bench/programs/matching.stag (formatted true) (long_lines 0))
+    (../../bench/programs/power.stag (formatted true) (long_lines 0))
+    (../../bench/programs/sort.stag (formatted true) (long_lines 0))
+    (../../bench/programs/strings.stag (formatted true) (long_lines 0))
     |}]
 ;;
 
@@ -840,5 +845,42 @@ let%expect_test "sequences in parentheses stay on one line only if all fits" =
        | B -> c);
       (let x = 1 in g x; h x);
       ((a; b), c)
+    |}]
+;;
+
+let%expect_test "benches" =
+  print
+    {|
+let%bench "fib" = fib 20
+let%bench "sort" n in [100; 1000] = sort (random_list n)
+let%bench "a long benchmark name" some_parameter in [first_argument_value; (second, argument); let x = 1 in x; match x with A -> 1 | B -> 2] = some_function some_parameter (and_another_argument some_parameter)
+|};
+  [%expect
+    {|
+    let%bench "fib" = fib 20
+
+    let%bench "sort" n in [100; 1000] = sort (random_list n)
+
+    let%bench "a long benchmark name" some_parameter in [
+      first_argument_value;
+      (second, argument);
+      (let x = 1 in x);
+      match x with
+      | A -> 1
+      | B -> 2
+    ] =
+      some_function some_parameter (and_another_argument some_parameter)
+    |}];
+  print
+    ~width:30
+    {|let%bench "sort" n in [100; 1000; fun x -> x] = sort (random_list n)|};
+  [%expect
+    {|
+    let%bench "sort" n in [
+      100;
+      1000;
+      fun x -> x
+    ] =
+      sort (random_list n)
     |}]
 ;;
