@@ -21,3 +21,4 @@ module Driver = Stag_driver.Driver
 module Expect_test_runner = Stag_driver.Expect_test_runner
 module Prelude = Stag_eval.Prelude
 module Syntax_value = Stag_eval.Syntax_value
+module Round_trip = Stag_syntax_round_trip.Round_trip

@@ -2,22 +2,30 @@ open! Import
 open Syntax
 
 let file = "t.stag"
+let strip_locs = Round_trip.strip_locs
 
-let rec strip_locs : Sexp.t -> Sexp.t = function
-  | List [ txt; Atom "@"; Atom _ ] -> strip_locs txt
-  | List sexps -> List (List.map sexps ~f:strip_locs)
-  | Atom _ as atom -> atom
-;;
-
-let show sexp_of_t = function
-  | Ok t -> print_s (strip_locs (sexp_of_t t))
+(* Successfully parsed syntax is also checked to round trip through
+   [Printer]. *)
+let show sexp_of_t round_trip = function
+  | Ok t ->
+    print_s (strip_locs (sexp_of_t t));
+    round_trip t
   | Error error -> print_endline (Parser.Error.to_string error)
 ;;
 
-let expr source = show Expr.sexp_of_t (Parser.expr ~file source)
-let pat source = show Pattern.sexp_of_t (Parser.pattern ~file source)
-let ty source = show Type_expr.sexp_of_t (Parser.type_expr ~file source)
-let prog source = show Program.sexp_of_t (Parser.program ~file source)
+let expr source = show Expr.sexp_of_t Round_trip.expr (Parser.expr ~file source)
+
+let pat source =
+  show Pattern.sexp_of_t Round_trip.pattern (Parser.pattern ~file source)
+;;
+
+let ty source =
+  show Type_expr.sexp_of_t Round_trip.type_expr (Parser.type_expr ~file source)
+;;
+
+let prog source =
+  show Program.sexp_of_t Round_trip.program (Parser.program ~file source)
+;;
 
 (* The source a [Loc.to_string] spans. *)
 let slice source loc =

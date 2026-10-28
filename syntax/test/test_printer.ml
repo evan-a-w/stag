@@ -1,0 +1,582 @@
+open! Import
+
+let parse source =
+  match Parser.program ~file:"t.stag" source with
+  | Ok program -> program
+  | Error error -> raise_s [%sexp (Parser.Error.to_string error : string)]
+;;
+
+(* Prints [source] at [width], checking it round trips. *)
+let print ?(width = 80) source =
+  let program = parse source in
+  Round_trip.program program;
+  print_string (Printer.program ~width program)
+;;
+
+let print_expr ?(width = 80) source =
+  match Parser.expr ~file:"t.stag" source with
+  | Error error -> print_endline (Parser.Error.to_string error)
+  | Ok expr ->
+    Round_trip.expr expr;
+    print_endline (Printer.expr ~width expr)
+;;
+
+let%expect_test "short forms" =
+  print
+    {|
+let x = 1
+let f x (y : int) : int = g x y
+let s = "a\"b\\c\n\t\001é"
+let bytes = "\255é"
+let c = '\''
+let d = '\\'
+let chars = ('\n', '\t', '\000', '\255', '"', 'a', ' ')
+let n = -1
+let e = (f (-1), Some (-1), `A (-1), (-1).x, f x, ())
+let a = (x : 'a -> 'b)
+type t = A | B of int | C of (int -> int) * (int * int) | D of list['a]
+type r = {x : int; y : list[int]}
+type v = |
+type abs
+type p['a, {..'r}] = <'a>{x : int; ..'r}
+type q = {`x : int; `y : bool; ..'r} -> [`A of int | `B; ..'r] -> [..'r] * []
+type w = with_x[({`x : int}), {`y : int}, {}]
+|};
+  [%expect
+    {|
+    let x = 1
+    let f x (y : int) : int = g x y
+    let s = "a\"b\\c\n\t\001é"
+    let bytes = "\255\195\169"
+    let c = '\''
+    let d = '\\'
+    let chars = '\n', '\t', '\000', '\255', '"', 'a', ' '
+    let n = -1
+    let e = f (-1), Some (-1), `A (-1), (-1).x, f x, ()
+    let a = (x : 'a -> 'b)
+
+    type t = A | B of int | C of (int -> int) * (int * int) | D of list['a]
+    type r = {x : int; y : list[int]}
+    type v = |
+    type abs
+    type p['a, {..'r}] = <'a>{x : int; ..'r}
+    type q = {`x : int; `y : bool; ..'r} -> [`A of int | `B; ..'r] -> [..'r] * []
+    type w = with_x[({`x : int}), {`y : int}, {}]
+    |}]
+;;
+
+let%expect_test "minimal parentheses" =
+  List.iter
+    ~f:print_expr
+    [ "f (g x) (h (-1)) .~y (.~z w)"
+    ; "(f x).y"
+    ; "(C).x"
+    ; "(M.C).M.x"
+    ; "(C).`x"
+    ; "(C) \\ `x"
+    ; "(C) x"
+    ; "(`A) x"
+    ; "C (D x)"
+    ; "C (f x)"
+    ; "`A (`B x)"
+    ; "C ((a, b))"
+    ; "C ((a, b), c)"
+    ; "C (let x = 1 in x)"
+    ; "(a, b), c"
+    ; "a, (b, c)"
+    ; "(a; b), c"
+    ; "(a; b); c"
+    ; "a; (b; c)"
+    ; "(let x = 1 in x), y"
+    ; "a, (let x = 1 in x)"
+    ; "(a, let x = 1 in x); y"
+    ; "(match x with A -> a), b"
+    ; "(match x with A -> a); b"
+    ; "match x with A -> (match y with B -> b) | C -> c"
+    ; "match x with A -> (let y = 1 in match y with B -> b) | C -> c"
+    ; "match x with A -> (a, match y with B -> b) | C -> c"
+    ; "match x with A -> (let y = 1 in y) | C -> c"
+    ; "match x with A -> match y with B -> b | C -> c"
+    ; "match match x with A -> a with B -> b"
+    ; "let x = let y = 1 in y in x"
+    ; ".~(.~e)"
+    ; ".~(.~e.{x})"
+    ; ".~(.~e).{x}"
+    ; ".~(.~e.{x}).{y}"
+    ; ".~(r.x).{y; z = 1, 2}"
+    ; ".~(f x)"
+    ; "(.~f) x"
+    ; "(.~e).x"
+    ; ".~e.{}"
+    ; "{x = (a; b); M.y = let z = 1 in z; w = match a with B -> b}"
+    ; "{`x = a, b; `y = (match a with B -> b) | r}"
+    ; "{`x = 1 | match r with A -> a}"
+    ; "{(`A) with `x = 1}"
+    ; "{(`A).`b with `x = 1}"
+    ; "{(`A (f x)) with `x = 1}"
+    ; "{C with `x = 1}"
+    ; "{x = match a with B -> b; y = let z = 1 in z; w = 2}"
+    ; "{x = (match a with B -> b; c); y = (let z = 1 in z; w)}"
+    ; "(`A).`x"
+    ; "f (`A).x (C).`y"
+    ; ".~(C).x"
+    ; "(.< x >.) \\ `x"
+    ; "{(f x) with `x = 1}"
+    ; "{.~r with `x = 1; `y = (a; b)}"
+    ; "{r.x with `x = 1}"
+    ; "f r \\ `x"
+    ; "(f r) \\ `x"
+    ; ".~r \\ `x"
+    ; "r.`x.y \\ `z"
+    ; ".< .< .~(.~x) >. >."
+    ; "(.< x >.).x"
+    ; "f (x : int) (M.y : list['a])"
+    ; "(-1, -2)"
+    ; "Some (-1)"
+    ; "f [%expect] [%expect {|a|}]"
+    ; "let _ = a in b"
+    ; "let _ x = a in b"
+    ; "let _ : int = a in b"
+    ]
+  [@ocamlformat "disable"];
+  [%expect
+    {xxx|
+    f (g x) (h (-1)) .~y (.~z w)
+    (f x).y
+    (C).x
+    (M.C).M.x
+    (C).`x
+    (C) \ `x
+    (C) x
+    (`A) x
+    C D x
+    C f x
+    `A `B x
+    C (a, b)
+    C ((a, b), c)
+    C
+      (let x = 1 in
+       x)
+    (a, b), c
+    a, (b, c)
+    (a;
+     b),
+    c
+    (a;
+     b);
+    c
+    a;
+    b;
+    c
+    (let x = 1 in
+     x),
+    y
+    a,
+    let x = 1 in
+    x
+    (a,
+     let x = 1 in
+     x);
+    y
+    (match x with A -> a), b
+    (match x with A -> a);
+    b
+    match x with
+    | A -> (match y with B -> b)
+    | C -> c
+    match x with
+    | A ->
+      (let y = 1 in
+       match y with B -> b)
+    | C -> c
+    match x with
+    | A -> (a, match y with B -> b)
+    | C -> c
+    match x with
+    | A ->
+      let y = 1 in
+      y
+    | C -> c
+    match x with
+    | A ->
+      match y with
+      | B -> b
+      | C -> c
+    match match x with A -> a with B -> b
+    let x =
+      let y = 1 in
+      y
+    in
+    x
+    .~.~e
+    .~.~e.{x}
+    .~(.~e).{x}
+    .~.~e.{x}.{y}
+    .~r.x.{y; z = 1, 2}
+    .~(f x)
+    .~f x
+    (.~e).x
+    .~e.{}
+    {
+      x =
+        (a;
+         b);
+      M.y =
+        let z = 1 in
+        z;
+      w = match a with B -> b;
+    }
+    {`x = a, b; `y = (match a with B -> b) | r}
+    {`x = 1 | match r with A -> a}
+    {(`A) with `x = 1}
+    {(`A).`b with `x = 1}
+    {(`A f x) with `x = 1}
+    {C with `x = 1}
+    {
+      x = match a with B -> b;
+      y =
+        let z = 1 in
+        z;
+      w = 2;
+    }
+    {
+      x =
+        match a with
+        | B ->
+          (b;
+           c);
+      y =
+        let z = 1 in
+        (z;
+         w);
+    }
+    (`A).`x
+    f (`A).x (C).`y
+    .~(C).x
+    (.< x >.) \ `x
+    {(f x) with `x = 1}
+    {.~r with
+      `x = 1;
+      `y =
+        (a;
+         b);
+    }
+    {r.x with `x = 1}
+    f r \ `x
+    (f r) \ `x
+    .~r \ `x
+    r.`x.y \ `z
+    .< .< .~.~x >. >.
+    (.< x >.).x
+    f (x : int) (M.y : list['a])
+    -1, -2
+    Some (-1)
+    f [%expect] [%expect {|a|}]
+    a;
+    b
+    let _ x = a in
+    b
+    let _ : int = a in
+    b
+    |xxx}]
+;;
+
+let%expect_test "patterns" =
+  print
+    {|
+let f x =
+  match x with
+  | _ -> 1
+  | (a, (b, c)) -> 1
+  | C ((a, b)) -> 1
+  | C ((a, b), c) -> 1
+  | C (D x) -> 1
+  | C (-1) -> 1
+  | `A (`B (-1)) -> 1
+  | (-1, 'c', "s", true, ()) -> 1
+  | {x = (a, b); M.y = C z} -> 1
+  | {`x = a; `y = b} -> 1
+  | {`x = a; ..} -> 1
+  | {`x = a; ..rest} -> 1
+  | {..} -> 1
+  | {} -> 1
+|};
+  [%expect
+    {|
+    let f x =
+      match x with
+      | _ -> 1
+      | a, (b, c) -> 1
+      | C (a, b) -> 1
+      | C ((a, b), c) -> 1
+      | C D x -> 1
+      | C (-1) -> 1
+      | `A `B (-1) -> 1
+      | -1, 'c', "s", true, () -> 1
+      | {x = a, b; M.y = C z} -> 1
+      | {`x = a; `y = b} -> 1
+      | {`x = a; ..} -> 1
+      | {`x = a; ..rest} -> 1
+      | {..} -> 1
+      | {} -> 1
+    |}]
+;;
+
+let%expect_test "long forms" =
+  print
+    {xx|
+let f x = some_function with_a_long_argument (and_another one) (and_a_third two three)
+let g x = Some_constructor (with_a_long_argument, and_another one, and_a_third two three)
+let h = {first_field = some_value; second_field = another_value; third = f x y z}
+let nested = {first_field = {inner = some_value; other = another_value}; second_field = 1}
+let poly = {`first = some_value; `second = another_value; `third = yet_another | rest}
+let update = {record with `first = some_value; `second = another_value; `third = f x}
+let quote = .< some_function with_a_long_argument (.~(splice_this here) and_another) >.
+let splice = .~(make_code something).{first = some_value; second = another_value; third}
+let lets =
+  let x = some_function with_a_long_argument (and_another one) (and_a_third two) in
+  let y = match x with A -> 1 | B -> 2 in
+  let z = {first_field = some_value; second_field = another_value; third = 1} in
+  x; y; z
+let deep = f (g (h (some_function with_a_long_argument (and_another one) (and_a_third two))))
+type t = First_constructor of int | Second_constructor of string * list[int] | Third
+type r = {first_field : int; second_field : list[string]; third_field : int -> int}
+type a = {`first : int; `second : string; `third : int -> int -> int; ..'r} -> int
+let%expect_test "a test" =
+  print_endline (String.append "some long string" (String.append "another" "more"));
+  [%expect {|
+    some long string
+    |}];
+  print_endline "x";
+  [%expect {| x |}];
+  [%expect]
+|xx};
+  [%expect
+    {xxx|
+    let f x =
+      some_function with_a_long_argument (and_another one) (and_a_third two three)
+
+    let g x =
+      Some_constructor
+        (with_a_long_argument, and_another one, and_a_third two three)
+
+    let h = {
+      first_field = some_value;
+      second_field = another_value;
+      third = f x y z;
+    }
+
+    let nested = {
+      first_field = {inner = some_value; other = another_value};
+      second_field = 1;
+    }
+
+    let poly = {
+      `first = some_value;
+      `second = another_value;
+      `third = yet_another
+      | rest
+    }
+
+    let update = {record with
+      `first = some_value;
+      `second = another_value;
+      `third = f x;
+    }
+
+    let quote =
+      .< some_function with_a_long_argument (.~(splice_this here) and_another) >.
+
+    let splice =
+      .~(make_code something).{first = some_value; second = another_value; third}
+
+    let lets =
+      let x =
+        some_function with_a_long_argument (and_another one) (and_a_third two)
+      in
+      let y =
+        match x with
+        | A -> 1
+        | B -> 2
+      in
+      let z = {first_field = some_value; second_field = another_value; third = 1} in
+      x;
+      y;
+      z
+
+    let deep =
+      f
+        (g
+           (h
+              (some_function
+                 with_a_long_argument
+                 (and_another one)
+                 (and_a_third two))))
+
+    type t =
+      | First_constructor of int
+      | Second_constructor of string * list[int]
+      | Third
+
+    type r = {
+      first_field : int;
+      second_field : list[string];
+      third_field : int -> int;
+    }
+
+    type a =
+      {`first : int; `second : string; `third : int -> int -> int; ..'r} -> int
+
+    let%expect_test "a test" =
+      print_endline
+        (String.append "some long string" (String.append "another" "more"));
+      [%expect {|
+        some long string
+        |}];
+      print_endline "x";
+      [%expect {| x |}];
+      [%expect]
+    |xxx}]
+;;
+
+let%expect_test "narrow" =
+  print
+    ~width:30
+    {|
+let f x = match g x with A (a, b) -> h a b | B -> some_function with_an_argument
+let r = {a = f x y; b = .< g .~(h x) >.; c = C (x, y, z)}
+|};
+  [%expect
+    {|
+    let f x =
+      match g x with
+      | A (a, b) -> h a b
+      | B ->
+        some_function
+          with_an_argument
+
+    let r = {
+      a = f x y;
+      b = .< g .~(h x) >.;
+      c = C (x, y, z);
+    }
+    |}]
+;;
+
+let%expect_test "modules and spacing" =
+  print
+    {|
+let a = 1
+let b = 2
+type t = A
+type u = B
+let c = 3
+module M = struct
+  let x = 1
+  let y = 2
+  module N = struct end
+  let z = match x with A -> 1 | B -> 2
+  type t = int
+end
+let%expect_test "t" = [%expect]
+let%expect_test "u" = [%expect]
+|};
+  [%expect
+    {|
+    let a = 1
+    let b = 2
+
+    type t = A
+    type u = B
+
+    let c = 3
+
+    module M = struct
+      let x = 1
+      let y = 2
+
+      module N = struct end
+
+      let z =
+        match x with
+        | A -> 1
+        | B -> 2
+
+      type t = int
+    end
+
+    let%expect_test "t" = [%expect]
+
+    let%expect_test "u" = [%expect]
+    |}]
+;;
+
+(* Every [.stag] file of the project, which [dune] copies here. *)
+let stag_files () =
+  let rec walk dir =
+    Stdlib.Sys.readdir dir
+    |> Array.to_list
+    |> List.sort ~compare:String.compare
+    |> List.concat_map ~f:(fun name ->
+      let path = dir ^/ name in
+      if Stdlib.Sys.is_directory path
+      then walk path
+      else if String.is_suffix name ~suffix:".stag"
+      then [ path ]
+      else [])
+  in
+  List.concat_map [ "tests"; "examples"; "eval" ] ~f:(fun dir ->
+    walk ("../.." ^/ dir))
+;;
+
+let%expect_test "the project's sources round trip" =
+  List.iter (stag_files ()) ~f:(fun path ->
+    let program = parse (In_channel.read_all path) in
+    Round_trip.program ~widths:[ 80; 40; 20; 1 ] program;
+    let long_lines =
+      String.split_lines (Printer.program program)
+      |> List.count ~f:(fun line -> String.length line > 80)
+    in
+    print_s [%message path (long_lines : int)]);
+  [%expect
+    {|
+    (../../tests/basics.stag (long_lines 0))
+    (../../tests/evaluation.stag (long_lines 1))
+    (../../examples/calc/bin/main.stag (long_lines 0))
+    (../../examples/calc/fmt/show.stag (long_lines 0))
+    (../../examples/calc/math/arith.stag (long_lines 0))
+    (../../examples/calc/math/power.stag (long_lines 0))
+    (../../examples/calc/test/calc_test.stag (long_lines 0))
+    (../../eval/src/prelude/stag.stag (long_lines 0))
+    |}]
+;;
+
+let%expect_test "syntax the parser does not produce" =
+  let e txt : Syntax.Expr.t = Located.create txt in
+  let x = e (Var (Syntax.Path.name "x", None)) in
+  let c = Located.create (Syntax.Path.name "C") in
+  let show expr =
+    let printed = Printer.expr expr in
+    let reparsed =
+      match Parser.expr ~file:"t.stag" printed with
+      | Ok parsed -> Round_trip.strip_locs (Syntax.Expr.sexp_of_t parsed)
+      | Error error -> Atom (Parser.Error.to_string error)
+    in
+    print_s [%message printed (reparsed : Sexp.t)]
+  in
+  show (e (Tuple [ x ]));
+  show (e (Tuple []));
+  show (e (Record []));
+  show (e (Construct (c, [ e (Tuple [ x; x ]) ])));
+  show (e (App (x, e (Tuple [ e (Tuple [ x; x ]) ]))));
+  show (e (Expect (Located.create "a |} b |x} c")));
+  [%expect
+    {xxx|
+    (x (reparsed (Var x ())))
+    ("()" (reparsed (Lit Unit)))
+    ({} (reparsed (Poly_record ())))
+    ("C (x, x)" (reparsed (Construct C ((Var x ()) (Var x ())))))
+    ("x (x, x)" (reparsed (App (Var x ()) (Tuple ((Var x ()) (Var x ()))))))
+    ("[%expect {xx|a |} b |x} c|xx}]" (reparsed (Expect "a |} b |x} c")))
+    |xxx}]
+;;

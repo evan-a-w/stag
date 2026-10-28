@@ -25,8 +25,16 @@ let id x = x
 |}
 ;;
 
-let parse_exn ?(file = file) source =
-  match Parser.program ~file source with
+(* Every program parsed from source is also checked to round trip through
+   [Printer], which is silent unless it does not. *)
+let parse ?(file = file) source =
+  let result = Parser.program ~file source in
+  Result.iter result ~f:(fun program -> Round_trip.program program);
+  result
+;;
+
+let parse_exn ?file source =
+  match parse ?file source with
   | Ok program -> program
   | Error error -> raise_s [%sexp (Parser.Error.to_string error : string)]
 ;;
@@ -47,7 +55,7 @@ let typecheck_program ?(limits = limits) ?(prelude = true) program =
 ;;
 
 let typecheck ?limits ?prelude source =
-  match Parser.program ~file source with
+  match parse source with
   | Error error ->
     print_endline (Parser.Error.to_string error);
     None
@@ -55,6 +63,8 @@ let typecheck ?limits ?prelude source =
 ;;
 
 let check_files ?(limits = limits) files =
+  List.iter files ~f:(fun (path, contents) ->
+    ignore (parse ~file:path contents));
   match
     Driver.check_files
       ~limits
