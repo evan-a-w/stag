@@ -158,94 +158,121 @@ include%inline .~(conversions
                     "tag"
                     (type [`A | `B of int | `C of int * string]))
   let sexp_of_tag =
-    fun v ->
-      match v with
-      | `A -> Core.Sexp.Atom "A"
-      | `B v0 -> Core.Sexp.List [Core.Sexp.Atom "B"; Core.Sexp.sexp_of_int v0]
-      | `C (v0_0, v0_1) ->
-        Core.Sexp.List [
-          Core.Sexp.Atom "C";
+    let sexp_of : [`A of unit | `B of int | `C of int * string] -> Core.Sexp.t =
+      fun v ->
+        match v with
+        | `A -> Core.Sexp.Atom "A"
+        | `B v0 -> Core.Sexp.List [Core.Sexp.Atom "B"; Core.Sexp.sexp_of_int v0]
+        | `C (v0_0, v0_1) ->
           Core.Sexp.List [
-            Core.Sexp.sexp_of_int v0_0;
-            Core.Sexp.sexp_of_string v0_1;
-          ];
-        ]
+            Core.Sexp.Atom "C";
+            Core.Sexp.List [
+              Core.Sexp.sexp_of_int v0_0;
+              Core.Sexp.sexp_of_string v0_1;
+            ];
+          ]
+    in
+    sexp_of
 
   let tag_of_sexp =
-    Core.Sexp.Deriving.catch
-      (fun sexp ->
-         match sexp with
-         | Core.Sexp.Atom "A" -> `A
-         | Core.Sexp.List [Core.Sexp.Atom "B"; v0] ->
-           `B (Core.Sexp.int_of_sexp_exn v0)
-         | Core.Sexp.List [Core.Sexp.Atom "C"; v0] ->
-           `C
-             (match v0 with
-              | Core.Sexp.List [v0_0; v0_1] ->
-                (Core.Sexp.int_of_sexp_exn v0_0,
-                 Core.Sexp.string_of_sexp_exn v0_1)
-              | _ -> Core.Sexp.Deriving.tuple_error "of_sexp" 2 v0)
-         | _ ->
-           Core.Sexp.Deriving.poly_variant_error
-             "of_sexp"
-             ["A"]
-             ["B"; "C"]
-             sexp)
+    let of_sexp : Core.Sexp.t ->
+        result[[`A of unit | `B of int | `C of int * string],
+               Core.Sexp.Of_sexp_error.t] =
+      Core.Sexp.Deriving.catch
+        (fun sexp ->
+           match sexp with
+           | Core.Sexp.Atom "A" -> `A
+           | Core.Sexp.List [Core.Sexp.Atom "B"; v0] ->
+             `B (Core.Sexp.int_of_sexp_exn v0)
+           | Core.Sexp.List [Core.Sexp.Atom "C"; v0] ->
+             `C
+               (match v0 with
+                | Core.Sexp.List [v0_0; v0_1] ->
+                  (Core.Sexp.int_of_sexp_exn v0_0,
+                   Core.Sexp.string_of_sexp_exn v0_1)
+                | _ -> Core.Sexp.Deriving.tuple_error "of_sexp" 2 v0)
+           | _ ->
+             Core.Sexp.Deriving.poly_variant_error
+               "of_sexp"
+               ["A"]
+               ["B"; "C"]
+               sexp)
+    in
+    of_sexp
 
   let tag_of_sexp_raising =
-    fun sexp ->
-      match sexp with
-      | Core.Sexp.Atom "A" -> `A
-      | Core.Sexp.List [Core.Sexp.Atom "B"; v0] ->
-        `B (Core.Sexp.int_of_sexp_exn v0)
-      | Core.Sexp.List [Core.Sexp.Atom "C"; v0] ->
-        `C
-          (match v0 with
-           | Core.Sexp.List [v0_0; v0_1] ->
-             (Core.Sexp.int_of_sexp_exn v0_0, Core.Sexp.string_of_sexp_exn v0_1)
-           | _ -> Core.Sexp.Deriving.tuple_error "of_sexp_raising" 2 v0)
-      | _ ->
-        Core.Sexp.Deriving.poly_variant_error
-          "of_sexp_raising"
-          ["A"]
-          ["B"; "C"]
-          sexp
+    let of_sexp_raising : Core.Sexp.t ->
+        [`A of unit | `B of int | `C of int * string] =
+      fun sexp ->
+        match sexp with
+        | Core.Sexp.Atom "A" -> `A
+        | Core.Sexp.List [Core.Sexp.Atom "B"; v0] ->
+          `B (Core.Sexp.int_of_sexp_exn v0)
+        | Core.Sexp.List [Core.Sexp.Atom "C"; v0] ->
+          `C
+            (match v0 with
+             | Core.Sexp.List [v0_0; v0_1] ->
+               (Core.Sexp.int_of_sexp_exn v0_0,
+                Core.Sexp.string_of_sexp_exn v0_1)
+             | _ -> Core.Sexp.Deriving.tuple_error "of_sexp_raising" 2 v0)
+        | _ ->
+          Core.Sexp.Deriving.poly_variant_error
+            "of_sexp_raising"
+            ["A"]
+            ["B"; "C"]
+            sexp
+    in
+    of_sexp_raising
 end%inline
 
 include%inline .~(conversions "tags" (type list[[`A | `B of int]]))
   let sexp_of_tags =
-    Core.Sexp.sexp_of_list
-      (fun v ->
-         match v with
-         | `A -> Core.Sexp.Atom "A"
-         | `B v0 ->
-           Core.Sexp.List [Core.Sexp.Atom "B"; Core.Sexp.sexp_of_int v0])
+    let sexp_of : list[[`A of unit | `B of int]] -> Core.Sexp.t =
+      Core.Sexp.sexp_of_list
+        (fun v ->
+           match v with
+           | `A -> Core.Sexp.Atom "A"
+           | `B v0 ->
+             Core.Sexp.List [Core.Sexp.Atom "B"; Core.Sexp.sexp_of_int v0])
+    in
+    sexp_of
 
   let tags_of_sexp =
-    Core.Sexp.list_of_sexp
-      (Core.Sexp.Deriving.catch
-         (fun sexp ->
-            match sexp with
-            | Core.Sexp.Atom "A" -> `A
-            | Core.Sexp.List [Core.Sexp.Atom "B"; v0] ->
-              `B (Core.Sexp.int_of_sexp_exn v0)
-            | _ ->
-              Core.Sexp.Deriving.poly_variant_error "of_sexp" ["A"] ["B"] sexp))
+    let of_sexp : Core.Sexp.t ->
+        result[list[[`A of unit | `B of int]], Core.Sexp.Of_sexp_error.t] =
+      Core.Sexp.list_of_sexp
+        (Core.Sexp.Deriving.catch
+           (fun sexp ->
+              match sexp with
+              | Core.Sexp.Atom "A" -> `A
+              | Core.Sexp.List [Core.Sexp.Atom "B"; v0] ->
+                `B (Core.Sexp.int_of_sexp_exn v0)
+              | _ ->
+                Core.Sexp.Deriving.poly_variant_error
+                  "of_sexp"
+                  ["A"]
+                  ["B"]
+                  sexp))
+    in
+    of_sexp
 
   let tags_of_sexp_raising =
-    Core.Sexp.list_of_sexp_exn
-      (Core.Sexp.Deriving.catch
-         (fun sexp ->
-            match sexp with
-            | Core.Sexp.Atom "A" -> `A
-            | Core.Sexp.List [Core.Sexp.Atom "B"; v0] ->
-              `B (Core.Sexp.int_of_sexp_exn v0)
-            | _ ->
-              Core.Sexp.Deriving.poly_variant_error
-                "of_sexp_raising"
-                ["A"]
-                ["B"]
-                sexp))
+    let of_sexp_raising : Core.Sexp.t -> list[[`A of unit | `B of int]] =
+      Core.Sexp.list_of_sexp_exn
+        (Core.Sexp.Deriving.catch
+           (fun sexp ->
+              match sexp with
+              | Core.Sexp.Atom "A" -> `A
+              | Core.Sexp.List [Core.Sexp.Atom "B"; v0] ->
+                `B (Core.Sexp.int_of_sexp_exn v0)
+              | _ ->
+                Core.Sexp.Deriving.poly_variant_error
+                  "of_sexp_raising"
+                  ["A"]
+                  ["B"]
+                  sexp))
+    in
+    of_sexp_raising
 end%inline
 
 let%expect_test "tuples and polymorphic variants are converted in place" =
@@ -360,16 +387,19 @@ include%inline .~.< struct
   let shown = .~(Core.Sexp.sexp_of (type list[int * [`X | `Y]])) pairs
 end >.
   let shown =
-    Core.Sexp.sexp_of_list
-      (fun v ->
-         match v with
-         | v0, v1 ->
-           Core.Sexp.List [
-             Core.Sexp.sexp_of_int v0;
-             (match v1 with
-              | `X -> Core.Sexp.Atom "X"
-              | `Y -> Core.Sexp.Atom "Y");
-           ])
+    (let sexp_of : list[int * [`X of unit | `Y of unit]] -> Core.Sexp.t =
+       Core.Sexp.sexp_of_list
+         (fun v ->
+            match v with
+            | v0, v1 ->
+              Core.Sexp.List [
+                Core.Sexp.sexp_of_int v0;
+                (match v1 with
+                 | `X -> Core.Sexp.Atom "X"
+                 | `Y -> Core.Sexp.Atom "Y");
+              ])
+     in
+     sexp_of)
       pairs
 end%inline
 
@@ -391,11 +421,17 @@ module Shadowing = struct
     let ints_of_sexp_raising =
       .Core.Sexp.list_of_sexp_exn .Core.Sexp.int_of_sexp
   end%inline
+
+  let direct = .~(.Core.Sexp.sexp_of (type list[int])) [3; 4]
 end
 
 let%expect_test "shadowing" =
   print_sexp (Shadowing.sexp_of_ints [1; 2]);
-  [%expect {| (1 2) |}]
+  print_sexp Shadowing.direct;
+  [%expect {|
+    (1 2)
+    (3 4)
+    |}]
 
 (* Spliced directly as expressions, as [[%sexp_of: t]] is used. *)
 let direct =
@@ -432,3 +468,19 @@ let%expect_test "spliced as expressions" =
     (a ((x 1) (y 2)))
     ((a true))
     |}]
+
+(* A conversion using itself, by a splice in its own body. *)
+type tree = Leaf of int | Node of list[tree]
+
+let sexp_of_tree t =
+  match t with
+  | Leaf n -> .~(Core.Sexp.sexp_of (type (string * int))) ("Leaf", n)
+  | Node ts ->
+    Core.Sexp.List [
+      Core.Sexp.Atom "Node";
+      .~(Core.Sexp.sexp_of (type list[tree])) ts;
+    ]
+
+let%expect_test "recursive" =
+  print_sexp (sexp_of_tree (Node [Leaf 1; Node [Leaf 2]; Node []]));
+  [%expect {| (Node ((Leaf 1) (Node ((Leaf 2))) (Node ()))) |}]

@@ -879,10 +879,6 @@ let x = .~M.n
       val code : <int>{M.n : int; ..'a}
     end
     val x : int
-    ((Unification_error
-      (Type_mismatch
-       (TCode (inner (TVar (Unbound 20 1))) (context (RVar (Unbound 21 1))))
-       (TCon int ()) Structural_mismatch))
-     @ t.stag:5:10-13)
+    ((Toplevel_splice_of_neither (TCon int ())) @ t.stag:5:10-13)
     |}]
 ;;

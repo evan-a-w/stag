@@ -1468,7 +1468,10 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
   | Expect expected ->
     (* Only where it runs as part of the test: not at compile time nor in
        code. *)
-    if scope.in_expect_test && scope.level = 0 && Option.is_none scope.quote
+    if Option.is_some scope.syntax_splice
+    then fail (Typecheck_error.create ~loc Expect_in_syntax_splice)
+    else if
+      scope.in_expect_test && scope.level = 0 && Option.is_none scope.quote
     then node (Expect expected) Type.unit
     else fail (Typecheck_error.create ~loc Expect_outside_expect_test)
   | Struct_quote toplevels ->
@@ -1593,31 +1596,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
       Option.map expected ~f:(fun inner ->
         Type.TCode { inner; context = Scope.fresh_row t outside })
     in
-    let code =
-      match scope.quote with
-      | Some _ ->
-        check_expr
-          t
-          outside
-          ~expr:code
-          ~ty:(TCode { inner; context })
-          ?expected:code_expected
-      | None ->
-        (* Outside quotes, a [Stag.Expr.t] is spliced as syntax. *)
-        let code = expr_type t outside ~expr:code ?expected:code_expected in
-        if
-          is_syntax code.ty
-          || Scope.unifies
-               t
-               outside
-               ~ty1:(TCode { inner; context })
-               ~ty2:code.ty
-               ~loc:code.loc
-        then code
-        else { desc = Error [ code ]; ty = Type.error; loc = code.loc }
-    in
-    let subs_written = subs in
-    let subs =
+    let substitutions () =
       match subs with
       | Implicit ->
         let%map.Result captures =
@@ -1644,40 +1623,72 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
         in
         Typed.Expr.Subs.Explicit subs
     in
-    (match subs with
-     | Error error -> fail error ~children:[ code ]
-     | Ok _ when Option.is_none scope.quote && is_syntax code.ty ->
-       (match subs_written with
-        | Explicit _ ->
-          fail
-            (Typecheck_error.create ~loc Syntax_splice_with_substitutions)
-            ~children:[ code ]
-        | Implicit | Providers _ ->
-          if scope.program.reported > reported || Typed.Expr.has_error code
-          then node (Error [ code ]) Type.error
-          else (
-            match splice_syntax t scope ~code ~loc ?expected with
+    let failed code =
+      scope.program.reported > reported || Typed.Expr.has_error code
+    in
+    (match scope.quote with
+     | Some _ ->
+       let code =
+         check_expr
+           t
+           outside
+           ~expr:code
+           ~ty:(TCode { inner; context })
+           ?expected:code_expected
+       in
+       (match substitutions () with
+        | Error error -> fail error ~children:[ code ]
+        | Ok subs -> node (Splice { code; subs }) inner)
+     | None ->
+       let code = expr_type t outside ~expr:code ?expected:code_expected in
+       if is_syntax code.ty
+       then (
+         match subs with
+         | Explicit _ ->
+           fail
+             (Typecheck_error.create ~loc Syntax_splice_with_substitutions)
+             ~children:[ code ]
+         | Implicit | Providers _ ->
+           if failed code
+           then node (Error [ code ]) Type.error
+           else (
+             match splice_syntax t scope ~code ~loc ?expected with
+             | Error error -> fail error ~children:[ code ]
+             | Ok expansion ->
+               node (Toplevel_splice { code; expansion }) expansion.ty))
+       else (
+         match
+           Unify.unify_ty t ~ty1:(TCode { inner; context }) ~ty2:code.ty
+         with
+         | Error _ ->
+           fail
+             (Typecheck_error.create
+                ~loc:code.loc
+                (Toplevel_splice_of_neither
+                   (Type.Snapshot.ty
+                      (Type.Snapshot.create ())
+                      (Type.canonical_ty code.ty))))
+             ~children:[ code ]
+         | Ok () ->
+           (match substitutions () with
             | Error error -> fail error ~children:[ code ]
-            | Ok expansion ->
-              node (Toplevel_splice { code; expansion }) expansion.ty))
-     | Ok subs ->
-       (match scope.quote with
-        | Some _ -> node (Splice { code; subs }) inner
-        | None
-          when scope.program.reported > reported || Typed.Expr.has_error code ->
-          (* Code that did not check is not run. *)
-          node
-            (Error
-               (code
-                ::
-                (match subs with
-                 | Explicit subs -> List.map subs ~f:snd
-                 | Implicit _ -> [])))
-            Type.error
-        | None ->
-          (match expand t scope ~code ~subs ~ty:inner ~loc with
-           | Error error -> fail error ~children:[ code ]
-           | Ok expansion -> node (Toplevel_splice { code; expansion }) inner)))
+            | Ok subs ->
+              if failed code
+              then
+                (* Code that did not check is not run. *)
+                node
+                  (Error
+                     (code
+                      ::
+                      (match subs with
+                       | Explicit subs -> List.map subs ~f:snd
+                       | Implicit _ -> [])))
+                  Type.error
+              else (
+                match expand t scope ~code ~subs ~ty:inner ~loc with
+                | Error error -> fail error ~children:[ code ]
+                | Ok expansion ->
+                  node (Toplevel_splice { code; expansion }) inner))))
   | Tuple exprs ->
     let exprs =
       List.map2_exn
@@ -1938,7 +1949,8 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
     node (Poly_variant (tag, arg)) (Poly_row.variant t scope ~tag ~arg:arg_ty)
 
 (* Runs the toplevel splice [code] of a [Stag.Expr.t], then infers the
-   expression it gives here. *)
+   expression it gives here, checking it against [expected] so that a
+   mismatch is reported as the expression's. *)
 and splice_syntax ?expected t (scope : Scope.t) ~code ~loc =
   let program = scope.program in
   let%bind.Result value =
@@ -1955,11 +1967,11 @@ and splice_syntax ?expected t (scope : Scope.t) ~code ~loc =
     |> Result.map_error ~f:(fun error ->
       Typecheck_error.create ~loc (Malformed_syntax_splice error))
   in
-  expr_type
-    t
-    { scope with syntax_splice = Some { splice = loc; generated } }
-    ~expr:(Source.Expr.Syntax generated)
-    ?expected
+  let scope = { scope with syntax_splice = Some { splice = loc; generated } } in
+  let expr = Source.Expr.Syntax generated in
+  match expected with
+  | None -> expr_type t scope ~expr
+  | Some ty -> check_expr t scope ~expr ~ty
 
 (* Runs the toplevel splice [code], then infers the code it generates here,
    with its explicit substitutions bound by lets around it. *)

@@ -1130,8 +1130,9 @@ module Internal = struct
 
     module Context = struct
       (* [self]: the derived type's root path, if any, which is named bare;
-         [name]: the derived [of_sexp]'s, in errors. *)
-      type t = {self : option[list[string]]; name : string}
+         [name]: the derived [of_sexp]'s, in errors; [generator]: the
+         [Sexp] function generating, which its failures name. *)
+      type t = {self : option[list[string]]; name : string; generator : string}
     end
 
     (* A constructor or polymorphic variant tag, and how to construct and
@@ -1145,14 +1146,9 @@ module Internal = struct
       }
     end
 
-    let fail message = raise (Failure message)
-
-    (* [f ()], its failures prefixed by the generator's [name]. *)
-    let failing_as name f =
-      match f () with
-      | x -> x
-      | exception Failure message ->
-        raise (Failure (String.concat "" ["Sexp."; name; ": "; message]))
+    (* Raised where a generator fails, so that its error notes where. *)
+    let failure generator message =
+      Failure (String.concat "" ["Sexp."; generator; ": "; message])
 
     let erase code = Stag.Code.erase code
     let var name = Stag.Expr.var name
@@ -1290,8 +1286,12 @@ module Internal = struct
         (match Builtin.find path with
          | Some b -> Builtin.conv b dir
          | None ->
-           fail
-             (String.append "no sexp conversion of " (String.concat "." path)))
+           raise
+             (failure
+                ctx.generator
+                (String.append
+                   "no sexp conversion of "
+                   (String.concat "." path))))
       | Stag.Type_ref.Path.Program path ->
         let modules = List.take (Int.pred (List.length path)) path in
         let name = Dir.conv_name dir (Stag.Type_ref.name r) in
@@ -1307,7 +1307,7 @@ module Internal = struct
 
     (* A converter of [ty], as a function. Its arguments are [To_sexp] or
        [Of_sexp] ones. *)
-    let conv ctx dir ty =
+    let conv (ctx : Context.t) dir ty =
       match ty with
       | Stag.Type_expr.Var a ->
         (match dir with
@@ -1323,16 +1323,20 @@ module Internal = struct
         let arg a =
           match a with
           | Stag.Type_expr.Arg.Ty ty -> conv ctx arg_dir ty
-          | Stag.Type_expr.Arg.Row _ -> fail "row arguments are not supported"
+          | Stag.Type_expr.Arg.Row _ ->
+            raise (failure ctx.generator "row arguments are not supported")
         in
         apply (named ctx dir r) (List.map arg args)
       | Stag.Type_expr.Con (Stag.Path.Name path, _) ->
-        fail (String.append "unresolved type " path)
+        raise (failure ctx.generator (String.append "unresolved type " path))
       | Stag.Type_expr.Tuple _ -> inline_conv ctx dir ty
       | Stag.Type_expr.Variant _ -> inline_conv ctx dir ty
-      | Stag.Type_expr.Arrow (_, _) -> fail "functions have no sexp conversion"
-      | Stag.Type_expr.Code _ -> fail "code has no sexp conversion"
-      | Stag.Type_expr.Record _ -> fail "polymorphic records are not supported"
+      | Stag.Type_expr.Arrow (_, _) ->
+        raise (failure ctx.generator "functions have no sexp conversion")
+      | Stag.Type_expr.Code _ ->
+        raise (failure ctx.generator "code has no sexp conversion")
+      | Stag.Type_expr.Record _ ->
+        raise (failure ctx.generator "polymorphic records are not supported")
 
     (* The conversion of [ty] matched in place, as a function. *)
     let inline_conv ctx dir ty =
@@ -1352,7 +1356,7 @@ module Internal = struct
         (match bind_tuple ctx tys prefix with
          | pattern, sexp -> Stag.Expr.match_ e [(pattern, sexp)])
       | Stag.Type_expr.Variant row ->
-        variant_to_sexp ctx (poly_cases row) e prefix
+        variant_to_sexp ctx (poly_cases ctx row) e prefix
       | _ ->
         match is_sexp ty with
         | true -> e
@@ -1378,7 +1382,7 @@ module Internal = struct
       match ty with
       | Stag.Type_expr.Tuple tys -> tuple_of_sexp ctx tys v prefix
       | Stag.Type_expr.Variant row ->
-        variant_of_sexp ctx true (poly_cases row) v prefix
+        variant_of_sexp ctx true (poly_cases ctx row) v prefix
       | _ ->
         match is_sexp ty with
         | true -> var v
@@ -1416,7 +1420,7 @@ module Internal = struct
           pattern = fun ps -> Stag.Pattern.Construct (Stag.Path.Ref r, ps);
         }
 
-    let poly_cases row =
+    let poly_cases (ctx : Context.t) row =
       let is_unit ty =
         match ty with
         | Stag.Type_expr.Con (Stag.Path.Ref r, []) ->
@@ -1428,7 +1432,8 @@ module Internal = struct
       match row with
       | Stag.Type_expr.Row.Empty -> []
       | Stag.Type_expr.Row.Var _ ->
-        fail "open polymorphic variants are not supported"
+        raise
+          (failure ctx.generator "open polymorphic variants are not supported")
       | Stag.Type_expr.Row.Extend (tag, ty, rest) ->
         let args =
           match is_unit ty with
@@ -1441,7 +1446,7 @@ module Internal = struct
           construct = fun es -> Stag.Expr.Poly_variant (tag, List.hd es);
           pattern = fun ps -> Stag.Pattern.Poly_variant (tag, List.hd ps);
         } in
-        Cons (case, poly_cases rest)
+        Cons (case, poly_cases ctx rest)
 
     let variant_to_sexp ctx cases e prefix =
       let arm (case : Case.t) =
@@ -1542,49 +1547,86 @@ module Internal = struct
              (List.map2_exn field fields (values_of ctx tys binders)));
         ]
 
-    let expr name dir ty =
-      failing_as
-        name
-        (fun _ ->
-           conv {Context.self = None; name = name} dir (Stag.Type.expr ty))
+    (* The type of [dir]'s converter of [ty]. *)
+    let conv_type dir ty =
+      let sexp = Stag.Type.expr (type Sexp.t) in
+      match dir with
+      | Dir.To_sexp -> Stag.Type_expr.Arrow (ty, sexp)
+      | Dir.Of_sexp_exn -> Stag.Type_expr.Arrow (sexp, ty)
+      | Dir.Of_sexp ->
+        match Stag.Type.expr (type result[unit, Of_sexp_error.t]) with
+        | Stag.Type_expr.Con (result, [_; error]) ->
+          Stag.Type_expr.Arrow
+            (sexp,
+             Stag.Type_expr.Con (result, [Stag.Type_expr.Arg.Ty ty; error]))
 
-    let derive ty = failing_as "derive" (fun _ -> derive_exn ty)
+    (* Whether [ty] has a polymorphic variant, whose row its conversion
+       leaves open. *)
+    let has_variant ty =
+      let arg a =
+        match a with
+        | Stag.Type_expr.Arg.Ty ty -> has_variant ty
+        | Stag.Type_expr.Arg.Row _ -> false
+      in
+      match ty with
+      | Stag.Type_expr.Variant _ -> true
+      | Stag.Type_expr.Tuple tys -> List.exists has_variant tys
+      | Stag.Type_expr.Con (_, args) -> List.exists arg args
+      | _ -> false
 
-    let derive_exn ty =
+    (* [name]'s converter of [ty], of exactly its type: annotated if it has a
+       polymorphic variant. *)
+    let expr name dir t =
+      let ty = Stag.Type.expr t in
+      let ctx = {Context.self = None; name = name; generator = name} in
+      let e = conv ctx dir ty in
+      match has_variant ty with
+      | false -> e
+      | true -> Stag.Expr.Let (name, [], Some (conv_type dir ty), e, var name)
+
+    let derive ty =
+      let failure message = Derive.failure "derive" message in
       let r =
         match Stag.Type.expr ty with
         | Stag.Type_expr.Con (Stag.Path.Ref r, _) -> r
-        | _ -> fail "a declared type is needed, as in [derive (type t)]"
+        | _ ->
+          raise (failure "a declared type is needed, as in [derive (type t)]")
       in
       let type_name = Stag.Type_ref.name r in
       let decl =
         match Stag.Type.decl r with
         | Some decl -> decl
-        | None -> fail (String.append type_name " is abstract")
+        | None -> raise (failure (String.append type_name " is abstract"))
       in
       let self =
         match Stag.Type_ref.path r with
         | Stag.Type_ref.Path.Program path -> path
         | Stag.Type_ref.Path.Prelude _ ->
-          fail (String.append type_name " is the prelude's")
+          raise (failure (String.append type_name " is the prelude's"))
       in
       (match String.equal type_name "sexp" with
        | true ->
-         fail "a type named sexp would have two conversions named sexp_of_sexp"
+         raise
+           (failure
+              "a type named sexp would have two conversions named sexp_of_sexp")
        | false -> ());
       let param p =
         match p with
         | Stag.Type_decl.Param.Ty a -> param_conv a
-        | Stag.Type_decl.Param.Row _ -> fail "row parameters are not supported"
+        | Stag.Type_decl.Param.Row _ ->
+          raise (failure "row parameters are not supported")
       in
       let params = List.map param decl.params in
       let with_params last = List.append params [last] in
       let of_name = Dir.conv_name Dir.Of_sexp type_name in
       let exn_name = Dir.conv_name Dir.Of_sexp_exn type_name in
-      let ctx = {Context.self = Some self; name = of_name} in
+      let ctx =
+        {Context.self = Some self; name = of_name; generator = "derive"}
+      in
       let bodies =
         match decl.kind with
-        | Stag.Type.Kind.Variant [] -> fail "empty variants are not supported"
+        | Stag.Type.Kind.Variant [] ->
+          raise (failure "empty variants are not supported")
         | Stag.Type.Kind.Variant cs ->
           let cases = List.map nominal_case cs in
           (variant_to_sexp ctx cases (var "v") "v",

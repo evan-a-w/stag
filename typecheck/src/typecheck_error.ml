@@ -90,6 +90,8 @@ module Kind = struct
         }
     | Malformed_syntax_splice of Error.t
     | Syntax_splice_with_substitutions
+    | Expect_in_syntax_splice
+    | Toplevel_splice_of_neither of Type.ty
     | In_syntax_splice of
         { generated : Syntax.Expr.t [@sexp.opaque]
         ; error : t
@@ -375,6 +377,17 @@ let rec kind_message (kind : Kind.t) ~show_type =
   | Syntax_splice_with_substitutions ->
     "A splice of syntax (a Stag.Expr.t) is checked where it is, so it takes no \
      substitutions"
+  | Expect_in_syntax_splice ->
+    "A splice of syntax can't give an [%expect]: its expected output is \
+     generated, so it could not be corrected"
+  | Toplevel_splice_of_neither ty ->
+    let printer = Type.Printer.create ~type_name:show_type () in
+    let ty = Type.Printer.ty printer ty in
+    sprintf
+      "This expression has type %s, but a toplevel splice is of code (of type \
+       <'a>{..'r}) or of syntax (of type Stag.Expr.t)%s"
+      ty
+      (Type.Printer.where printer)
   | In_syntax_splice { generated = _; error } ->
     sprintf
       "In the expression this splice gave: %s"

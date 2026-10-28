@@ -442,9 +442,14 @@ Each file's helpers are in its submodule `Internal`, not meant for use outside
   `result`, as for `derive`). They are used as syntax splices
   (`let s = .~(Core.Sexp.sexp_of (type list[int])) [1; 2]`,
   `let f _of_a v = .~(Core.Sexp.sexp_of (type list['a])) v`), or in
-  generated declarations. Errors name the generator (`of_sexp: ...`). What
-  `derive` can't convert fails the same way. (`of_sexp_raising`, as
-  `Core.Sexp.of_sexp_exn` is the function raising for an `of_sexp`.)
+  generated declarations. A type with a polymorphic variant is annotated
+  in the expression, so that it has exactly its converter's type (rather
+  than an open row). The generator is named `of_sexp_raising`, not
+  `of_sexp_exn`, as `Core.Sexp.of_sexp_exn` is already taken (it runs an
+  `of_sexp` conversion, raising its error). What can't be converted fails
+  at compile time naming the generator (`Sexp.of_sexp: functions have no
+  sexp conversion`, `Sexp.derive: ...` for `derive`), while the generated
+  code's parse errors at runtime name the conversion (`of_sexp: ...`).
   `tests/core_sexp_conv.stag` shows the generated code.
 
 Since a file of `core/` shadows the prims of its name (`Core.String` hides
@@ -652,11 +657,14 @@ let s = .~(Core.Sexp.sexp_of (type list[int])) [1; 2]
 ```
 
 Its names resolve where it is spliced (locals included; refs and root paths
-as such), and it is checked at the type expected there. Whether `.~e` splices
-syntax or code is decided by the type `e` has; a splice of syntax takes no
-substitutions `.{...}`. Errors in the expression are reported at the `.~`,
-with a note printing it. Within quotes, a splice is of code (a
-`Stag.Expr.t` there is a type error).
+as such), and it is checked at the type expected there (an annotation's, a
+constructor's argument's, ...), which also tells its constructors and fields
+apart. Whether `.~e` splices syntax or code is decided by the type `e` has
+(of neither is an error); a splice of syntax takes no substitutions `.{...}`
+and can't give an `[%expect]` (all of it is at the splice, so it could not be
+corrected). Errors in the expression, a mismatch with the expected type
+included, are reported at the `.~`, with a note printing it. Within quotes,
+a splice is of code (a `Stag.Expr.t` there is a type error).
 
 ## Reflection
 

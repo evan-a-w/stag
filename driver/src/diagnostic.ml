@@ -153,7 +153,7 @@ let of_typecheck_error (error : Typecheck_error.t) =
       @ [ { Note.loc = Loc.none
           ; message =
               "The splice gave the expression:\n"
-              ^ indented_source (Printer.expr ~width:76 ?root_modules generated)
+              ^ indented_source (Printer.expr ~width:78 ?root_modules generated)
           }
         ]
     | In_generated_declaration { generated; error; declaration = _ } ->

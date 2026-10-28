@@ -100,6 +100,12 @@ module Kind : sig
     | Malformed_syntax_splice of Error.t
     (** What a toplevel splice of a [Stag.Expr.t] evaluated to is not syntax. *)
     | Syntax_splice_with_substitutions
+    | Expect_in_syntax_splice
+    (** All of a splice of syntax is at the splice, so its [[%expect]]s could
+        not be told apart nor corrected. *)
+    | Toplevel_splice_of_neither of Type.ty
+    (** The type of a toplevel splice's expression, neither code nor
+        [Stag.Expr.t]. *)
     | In_syntax_splice of
         { generated : Syntax.Expr.t
         ; error : t
