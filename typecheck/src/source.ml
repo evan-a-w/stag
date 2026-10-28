@@ -19,13 +19,13 @@ end
 
 module Constructor = struct
   type t =
-    | Path of Syntax.Path.t Located.t
+    | Path of Syntax.Decl_path.t Located.t
     | Ref of Typed.Constructor_ref.t
 end
 
 module Field = struct
   type t =
-    | Path of Syntax.Path.t Located.t
+    | Path of Syntax.Decl_path.t Located.t
     | Ref of Typed.Field_ref.t
 end
 
@@ -167,6 +167,7 @@ module Expr = struct
       | Poly_update of t * (Syntax.Name.t * t) list
       | Poly_variant of string * t option
       | Expect of string Located.t
+      | Type of Syntax.Type_expr.t
   end
 
   let syntax_view (expr : Syntax.Expr.t) : View.t =
@@ -215,6 +216,7 @@ module Expr = struct
     | Poly_update (expr, fields') -> Poly_update (sub expr, fields fields')
     | Poly_variant (tag, arg) -> Poly_variant (tag.txt, Option.map arg ~f:sub)
     | Expect expected -> Expect expected
+    | Type ty -> Type ty
   ;;
 
   let generated_view ({ desc; ty = _; loc } : Typed.Expr.t) : View.t =
@@ -266,6 +268,7 @@ module Expr = struct
     | Poly_update (expr, fields') -> Poly_update (sub expr, fields fields')
     | Poly_variant (tag, arg) -> Poly_variant (tag, Option.map arg ~f:sub)
     | Expect expected -> Expect expected
+    | Type ty -> Type ty
   ;;
 
   let view = function

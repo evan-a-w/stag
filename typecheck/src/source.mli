@@ -24,13 +24,13 @@ end
 
 module Constructor : sig
   type t =
-    | Path of Syntax.Path.t Located.t
+    | Path of Syntax.Decl_path.t Located.t
     | Ref of Typed.Constructor_ref.t
 end
 
 module Field : sig
   type t =
-    | Path of Syntax.Path.t Located.t
+    | Path of Syntax.Decl_path.t Located.t
     | Ref of Typed.Field_ref.t
 end
 
@@ -117,6 +117,7 @@ module Expr : sig
       | Poly_update of t * (Syntax.Name.t * t) list
       | Poly_variant of string * t option
       | Expect of string Located.t
+      | Type of Syntax.Type_expr.t
   end
 
   (** Generated code is code values, so has no [Toplevel_splice]. *)

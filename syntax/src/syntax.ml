@@ -44,6 +44,28 @@ end = struct
   let t_of_sexp sexp = of_string (string_of_sexp sexp)
 end
 
+(** What names a declared type, constructor or field: a path as written,
+    resolved where it is, or a canonical name, which reflection gives (see
+    [Stag.Ref] in the prelude) and the parser never makes, naming the same
+    declaration wherever it is. *)
+module Decl_path = struct
+  type t =
+    | Path of Path.t
+    | Resolved of string
+  [@@deriving compare, equal]
+
+  (** A [Path] as its path, so as parsed. *)
+  let sexp_of_t = function
+    | Path path -> Path.sexp_of_t path
+    | Resolved name -> Sexp.List [ Atom "Resolved"; Atom name ]
+  ;;
+
+  let to_path = function
+    | Path path -> path
+    | Resolved name -> Path.of_string name
+  ;;
+end
+
 (** A name as written, eg. a binder or a label. *)
 module Name = struct
   type t = string Located.t [@@deriving sexp_of, compare, equal]
@@ -54,7 +76,7 @@ module Type_expr = struct
 
   and desc =
     | Var of string
-    | Con of Path.t Located.t * arg list
+    | Con of Decl_path.t Located.t * arg list
     | Arrow of t * t
     | Tuple of t list
     | Code of
@@ -126,8 +148,8 @@ module Pattern = struct
     | Var of string
     | Lit of Lit.t
     | Tuple of t list
-    | Construct of Path.t Located.t * t list
-    | Record of (Path.t Located.t * t) list
+    | Construct of Decl_path.t Located.t * t list
+    | Record of (Decl_path.t Located.t * t) list
     | Poly_variant of Name.t * t option (** [None] matches a [unit] argument. *)
     | Poly_record of
         { fields : (Name.t * t) list
@@ -152,9 +174,10 @@ module Expr = struct
         }
     | Quote of t
     | Tuple of t list
-    | Construct of Path.t Located.t * t list
-    | Record of (Path.t Located.t * t) list
-    | Field of t * Path.t Located.t
+    | Construct of Decl_path.t Located.t * t list
+    | Record of (Decl_path.t Located.t * t) list
+    | Field of t * Decl_path.t Located.t
+    | Type of Type_expr.t (** [type t]: the type as a value. *)
     | Match of t * (Pattern.t * t) list
     | Poly_record of (Name.t * t) list
     | Poly_field of t * Name.t

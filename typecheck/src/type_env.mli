@@ -57,13 +57,13 @@ end
 val find_constructor
   :  t
   -> Module_scope.t
-  -> Syntax.Path.t Located.t
+  -> Syntax.Decl_path.t Located.t
   -> (Constructor.t, Typecheck_error.t) Result.t
 
 val find_field
   :  t
   -> Module_scope.t
-  -> Syntax.Path.t Located.t
+  -> Syntax.Decl_path.t Located.t
   -> (Field.t, Typecheck_error.t) Result.t
 
 (** By canonical name, erring at [loc]. *)
@@ -97,3 +97,19 @@ val elaborate
   -> Annotation_vars.t
   -> Syntax.Type_expr.t
   -> (Type.ty, Typecheck_error.t) Result.t
+
+(** [expr] with each type it names by its canonical name ([Resolved]), so it
+    names the same types wherever it is. *)
+val resolve
+  :  t
+  -> Module_scope.t
+  -> Syntax.Type_expr.t
+  -> (Syntax.Type_expr.t, Typecheck_error.t) Result.t
+
+(** The declaration of the type of canonical name [name], checking it, with
+    the types in it [resolve]d where it is declared. [None] if it is
+    abstract, as are the builtin types. *)
+val reflect
+  :  t
+  -> string
+  -> (Syntax.Type_decl.t option, Typecheck_error.t) Result.t

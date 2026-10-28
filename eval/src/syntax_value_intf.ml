@@ -39,4 +39,11 @@ module type Syntax_value = sig
   module Expr : S with type t := Syntax.Expr.t
   module Toplevel : S with type t := Syntax.Toplevel.t
   module Program : S with type t := Syntax.Program.t
+
+  (** An [option[Stag.Type.Decl.t]], of a declaration that is not abstract,
+      its constructors and fields [Stag.Ref.t]s of their [canonical] names. *)
+  val reflected_decl
+    :  Syntax.Type_decl.t option
+    -> canonical:(string -> string)
+    -> Treewalk.Value.t
 end

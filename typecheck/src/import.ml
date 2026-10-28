@@ -16,3 +16,5 @@ module Treewalk = Stag_eval.Treewalk
 module Prelude_path = Stag_types.Prelude_path
 module Syntax_value = Stag_eval.Syntax_value
 module Prelude = Stag_eval.Prelude
+module Intrinsic = Stag_ir.Intrinsic
+module Decl_ref = Stag_eval.Decl_ref

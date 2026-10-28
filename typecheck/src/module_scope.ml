@@ -636,6 +636,7 @@ module Value = struct
   type t =
     | Toplevel of string
     | Prim of Prim.t
+    | Intrinsic of Intrinsic.t
     | Unbound
 end
 
@@ -648,9 +649,16 @@ let find_value t path ~loc : (Value.t, _) Result.t =
   | Found name, None -> Ok (Value.Toplevel name)
   | Found _, Some splice -> Error (cycle splice ~name:path ~loc)
   | Unbound, blocked ->
+    let intrinsic =
+      if Option.is_some (Prelude_path.relative (canonical_name t "_"))
+      then Intrinsic.find path
+      else None
+    in
     (match Prim.find path, blocked, (path :> string list) with
      | Some _, Some splice, _ -> Error (cycle splice ~name:path ~loc)
      | Some prim, None, _ -> Ok (Prim prim)
+     | None, None, _ when Option.is_some intrinsic ->
+       Ok (Intrinsic (Option.value_exn intrinsic))
      | None, None, [ _ ] -> Ok Unbound
      | None, _, _ ->
        Error (unbound_head t Value path ~loc ~unbound:not_in_scope ~blocked))

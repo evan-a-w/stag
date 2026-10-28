@@ -39,3 +39,6 @@ val typecheck
   :  t
   -> program:Syntax.Program.t
   -> (Checked.t, Typecheck_error.t) Result.t
+
+(** The signature of the prelude ([Prelude]), which every program sees. *)
+val prelude_signature : t -> Signature.t

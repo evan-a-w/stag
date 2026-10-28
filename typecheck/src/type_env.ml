@@ -77,12 +77,20 @@ let find_resolved t module_ namespace path ~loc ~unbound ~find =
   find t name ~loc
 ;;
 
-let find_type t module_ path ~loc =
-  let%map.Result name =
+let resolve_type module_ (path : Decl_path.t) ~loc =
+  match path with
+  | Resolved name -> Ok name
+  | Path path ->
     Module_scope.find module_ Type path ~loc ~unbound:(fun path ->
       Unbound_type path)
-  in
-  Hashtbl.find_exn t.types name
+;;
+
+let find_type t module_ path ~loc =
+  let%bind.Result name = resolve_type module_ path ~loc in
+  match Hashtbl.find t.types name with
+  | Some decl -> Ok decl
+  | None ->
+    Error (Typecheck_error.create ~loc (Unbound_type (Path.of_string name)))
 ;;
 
 module Annotation_vars = struct
@@ -228,7 +236,7 @@ and elaborate_con
       module_
       vars
       ~expansions
-      ({ txt = path; loc = path_loc } : Path.t Located.t)
+      ({ txt = path; loc = path_loc } : Decl_path.t Located.t)
       args
       ~loc
   =
@@ -239,7 +247,11 @@ and elaborate_con
   let%bind.Result () =
     if expected = got
     then Ok ()
-    else error ~loc (Type_arity_mismatch { type_name = path; expected; got })
+    else
+      error
+        ~loc
+        (Type_arity_mismatch
+           { type_name = Decl_path.to_path path; expected; got })
   in
   let%bind.Result args =
     map_result (List.zip_exn decl.decl.params args) ~f:(fun (param, arg) ->
@@ -257,7 +269,8 @@ and elaborate_con
       | Row _, Ty { loc; _ } ->
         error
           ~loc
-          (Type_arg_kind_mismatch { type_name = path; param = param.txt }))
+          (Type_arg_kind_mismatch
+             { type_name = Decl_path.to_path path; param = param.txt }))
   in
   match decl.decl.kind with
   | Variant _ | Record _ | Abstract -> Ok (Type.TCon (decl.name, args))
@@ -462,8 +475,11 @@ let field t name ~loc =
     ~unbound:(fun path -> Unbound_field path)
 ;;
 
-let find_constructor t module_ ({ txt = path; loc } : Path.t Located.t) =
-  find_resolved
+let find_constructor t module_ ({ txt = path; loc } : Decl_path.t Located.t) =
+  match path with
+  | Resolved name -> constructor t name ~loc
+  | Path path ->
+    find_resolved
     t
     module_
     Constructor
@@ -473,8 +489,11 @@ let find_constructor t module_ ({ txt = path; loc } : Path.t Located.t) =
     ~find:constructor
 ;;
 
-let find_field t module_ ({ txt = path; loc } : Path.t Located.t) =
-  find_resolved
+let find_field t module_ ({ txt = path; loc } : Decl_path.t Located.t) =
+  match path with
+  | Resolved name -> field t name ~loc
+  | Path path ->
+    find_resolved
     t
     module_
     Field
@@ -482,4 +501,81 @@ let find_field t module_ ({ txt = path; loc } : Path.t Located.t) =
     ~loc
     ~unbound:(fun path -> Unbound_field path)
     ~find:field
+;;
+
+let rec resolve t module_ (expr : Type_expr.t) =
+  let resolve = resolve t module_ in
+  let%map.Result txt =
+    match expr.txt with
+    | Var _ as desc -> Ok desc
+    | Con (path, args) ->
+      let%bind.Result name = resolve_type module_ path.txt ~loc:path.loc in
+      let%map.Result args =
+        map_result args ~f:(function
+          | Ty ty -> Result.map (resolve ty) ~f:(fun ty -> Type_expr.Ty ty)
+          | Row row ->
+            Result.map (resolve_row t module_ row) ~f:(fun row ->
+              Type_expr.Row row))
+      in
+      Type_expr.Con ({ path with txt = Resolved name }, args)
+    | Arrow (a, b) ->
+      let%bind.Result a = resolve a in
+      let%map.Result b = resolve b in
+      Type_expr.Arrow (a, b)
+    | Tuple tys ->
+      let%map.Result tys = map_result tys ~f:resolve in
+      Type_expr.Tuple tys
+    | Code { inner; context } ->
+      let%bind.Result inner = resolve inner in
+      let%map.Result context = resolve_row t module_ context in
+      Type_expr.Code { inner; context }
+    | Record row ->
+      let%map.Result row = resolve_row t module_ row in
+      Type_expr.Record row
+    | Variant row ->
+      let%map.Result row = resolve_row t module_ row in
+      Type_expr.Variant row
+  in
+  { expr with txt }
+
+and resolve_row t module_ (row : Type_expr.row) =
+  let%map.Result txt =
+    match row.txt with
+    | (Empty | Var _) as desc -> Ok desc
+    | Extend (label, ty, rest) ->
+      let%bind.Result ty = resolve t module_ ty in
+      let%map.Result rest = resolve_row t module_ rest in
+      Type_expr.Extend (label, ty, rest)
+  in
+  { row with txt }
+;;
+
+let reflect t name =
+  let%bind.Result (_ : Signature.Type_decl.t) = check t name in
+  let decl = Hashtbl.find_exn t.types name in
+  let resolve ty =
+    resolve t decl.module_ ty |> Result.map_error ~f:decl.wrap_error
+  in
+  let%map.Result kind =
+    match decl.decl.kind with
+    | Abstract -> Ok None
+    | Alias ty ->
+      let%map.Result ty = resolve ty in
+      Some (Type_decl.Kind.Alias ty)
+    | Variant constructors ->
+      let%map.Result constructors =
+        map_result constructors ~f:(fun (name, args) ->
+          let%map.Result args = map_result args ~f:resolve in
+          name, args)
+      in
+      Some (Type_decl.Kind.Variant constructors)
+    | Record fields ->
+      let%map.Result fields =
+        map_result fields ~f:(fun (name, ty) ->
+          let%map.Result ty = resolve ty in
+          name, ty)
+      in
+      Some (Type_decl.Kind.Record fields)
+  in
+  Option.map kind ~f:(fun kind -> { decl.decl with kind })
 ;;

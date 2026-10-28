@@ -93,6 +93,7 @@ module Var_ref = struct
     | Persistent of Binder.t
     | Free of string
     | Prim of Prim.t
+    | Intrinsic of Intrinsic.t
   [@@deriving sexp_of]
 end
 
@@ -199,6 +200,8 @@ module Expr = struct
       | Poly_update of 'e * (string * 'e) list
       | Poly_variant of string * 'e option
       | Expect of string Located.t
+      | Type of Syntax.Type_expr.t
+      (** [type t], its types named by canonical names ([Resolved]). *)
     [@@deriving sexp_of]
   end
 
@@ -214,7 +217,7 @@ module Expr = struct
   let sub_exprs t =
     let snds = List.map ~f:snd in
     match t.desc with
-    | Lit _ | Var _ | Poly_variant (_, None) | Expect _ -> []
+    | Lit _ | Var _ | Poly_variant (_, None) | Expect _ | Type _ -> []
     | App (a, b)
     | Let { body = a; in_ = b; _ }
     | Toplevel_splice { code = a; expansion = b } -> [ a; b ]
@@ -242,7 +245,7 @@ module Expr = struct
 
   let rec is_value t =
     match t.desc with
-    | Lit _ | Var _ -> true
+    | Lit _ | Var _ | Type _ -> true
     | Quote expr -> splices_are_values expr ~depth:1
     | Let { ident; args; body; in_; generalized = _ } ->
       binding_is_value ~ident ~args ~body && is_value in_
@@ -291,7 +294,8 @@ module Expr = struct
     | Poly_restrict _
     | Poly_update _
     | Poly_variant _
-    | Expect _ -> List.for_all (sub_exprs t) ~f:(splices_are_values ~depth)
+    | Expect _
+    | Type _ -> List.for_all (sub_exprs t) ~f:(splices_are_values ~depth)
 
   and binding_is_value ~ident ~args ~body =
     (not (List.is_empty args))

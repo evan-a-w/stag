@@ -3,7 +3,7 @@ open Syntax
 
 let none = Located.create
 let name : string -> Name.t = none
-let located_path name = none (Path.of_string name)
+let located_path name = none (Decl_path.Path (Path.of_string name))
 let labelled = List.map ~f:(fun (label, x) -> name label, x)
 
 module Ty = struct

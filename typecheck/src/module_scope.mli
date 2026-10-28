@@ -113,6 +113,7 @@ module Value : sig
   type t =
     | Toplevel of string (** By canonical name. *)
     | Prim of Prim.t
+    | Intrinsic of Intrinsic.t (** Found only from within the prelude. *)
     | Unbound (** A name, not a path. *)
 end
 

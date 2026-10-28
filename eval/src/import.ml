@@ -10,3 +10,4 @@ module Lexer = Stag_syntax.Lexer
 module Source_file = Stag_syntax.Source_file
 module Prelude_path = Stag_types.Prelude_path
 module Parser = Stag_syntax.Parser
+module Intrinsic = Stag_ir.Intrinsic

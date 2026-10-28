@@ -124,6 +124,9 @@ module Program_env = struct
       (** The latest free variable of a quote that a binding of its name,
           unusable there, did not bind, to explain an error if the code is
           spliced where the name is unbound. *)
+    ; mutable reflection_error : Typecheck_error.t option
+      (** Why reflection failed, eg. a cycle, while evaluating at compile time,
+          to be the error of that evaluation. *)
     ; unfinished : Type.ty Stack.t
       (** The types of the toplevels and binders of components not yet
           finished. Code checked later can reach them, so once their
@@ -167,6 +170,47 @@ module Program_env = struct
       info)
   ;;
 end
+
+(* Evaluates at compile time, the error being that of reflection if it
+   failed. *)
+let at_compile_time (program : Program_env.t) f ~error =
+  let outer = program.reflection_error in
+  program.reflection_error <- None;
+  let result = f () in
+  let reflection_error = program.reflection_error in
+  program.reflection_error <- outer;
+  Result.map_error result ~f:(fun runtime_error ->
+    match reflection_error with
+    | Some reflection_error -> reflection_error
+    | None -> error runtime_error)
+;;
+
+let intrinsics (program : Program_env.t) intrinsic (value : Treewalk.Value.t)
+  : Treewalk.Value.t Or_error.t
+  =
+  match intrinsic, value with
+  | Intrinsic.Type_expr, Type ty -> Ok (Syntax_value.Type_expr.to_value ty)
+  | Ref_name, Ref ref_ -> Ok (String (Decl_ref.short_name ref_))
+  | Type_decl, Ref { kind = Type; name } ->
+    (match Type_env.reflect program.type_env name with
+     | Ok decl ->
+       let prefix =
+         match String.rsplit2 name ~on:'.' with
+         | Some (prefix, _) -> prefix ^ "."
+         | None -> ""
+       in
+       Ok (Syntax_value.reflected_decl decl ~canonical:(fun name -> prefix ^ name))
+     | Error error ->
+       program.reflection_error <- Some error;
+       Or_error.error_string "Reflection failed")
+  | _ ->
+    raise_s
+      [%message
+        "Intrinsic applied to an ill-typed argument"
+          (intrinsic : Intrinsic.t)
+          (value : Treewalk.Value.t)]
+;;
+
 
 module Scope = struct
   type t =
@@ -715,6 +759,11 @@ let rec var_type t (scope : Scope.t) ~(path : Syntax.Path.t) ~loc =
     resolution_type t scope ~name ~loc (Resolution.of_entry scope ~name entry)
   in
   let prim prim = Ok (Prim.ty prim, Typed.Var_ref.Prim prim) in
+  let intrinsic intrinsic =
+    Ok
+      ( Intrinsic.ty intrinsic ~var:(fun () -> Scope.fresh_ty t scope)
+      , Typed.Var_ref.Intrinsic intrinsic )
+  in
   let local =
     match (path :> string list) with
     | [ name ] ->
@@ -731,6 +780,7 @@ let rec var_type t (scope : Scope.t) ~(path : Syntax.Path.t) ~loc =
        in
        resolve ~name (Some entry)
      | Prim p -> prim p
+     | Intrinsic i -> intrinsic i
      | Unbound ->
        (match scope.quote with
         | Some _ -> resolve ~name:(Syntax.Path.to_string path) None
@@ -752,6 +802,8 @@ and var_ref_type t (scope : Scope.t) (var_ref : Typed.Var_ref.t) ~loc =
   in
   match var_ref with
   | Prim prim -> Ok (Prim.ty prim, var_ref)
+  | Intrinsic intrinsic ->
+    Ok (Intrinsic.ty intrinsic ~var:(fun () -> Scope.fresh_ty t scope), var_ref)
   | Free name ->
     (match scope.quote with
      | Some quote ->
@@ -914,6 +966,14 @@ and expr_type t (scope : Scope.t) ~(expr : Source.Expr.t)
     if scope.in_expect_test && scope.level = 0 && Option.is_none scope.quote
     then Ok (node (Expect expected) Type.unit)
     else error ~loc Expect_outside_expect_test
+  | Type ty ->
+    let%bind.Result elaborated = Scope.elaborate scope ty in
+    let%map.Result resolved =
+      Type_env.resolve scope.program.type_env scope.module_ ty
+    in
+    node
+      (Type resolved)
+      (TCon (Prelude_path.canonical "Stag.Type.t", [ ATy elaborated ]))
   | Var (Path (path, annot)) ->
     let%bind.Result ty, var_ref = var_type t scope ~path ~loc in
     let%map.Result () =
@@ -1165,9 +1225,12 @@ and expand t (scope : Scope.t) ~code ~subs ~ty ~loc =
       )
   in
   let%bind.Result generated =
-    Treewalk.splice program.interpreter ~code ~level:(scope.level - 1) ~entry
-    |> Result.map_error ~f:(fun error ->
-      Typecheck_error.create ~loc (Splice_evaluation_failed { code; error }))
+    at_compile_time
+      program
+      (fun () ->
+        Treewalk.splice program.interpreter ~code ~level:(scope.level - 1) ~entry)
+      ~error:(fun error ->
+        Typecheck_error.create ~loc (Splice_evaluation_failed { code; error }))
   in
   let expansion =
     match
@@ -1485,9 +1548,11 @@ let generate t (program : Program_env.t) splice
       ~ty:declarations_type
   in
   let%bind.Result value =
-    Treewalk.run program.interpreter expr ~level:(-1)
-    |> Result.map_error ~f:(fun error ->
-      Typecheck_error.create ~loc (Declaration_splice_failed error))
+    at_compile_time
+      program
+      (fun () -> Treewalk.run program.interpreter expr ~level:(-1))
+      ~error:(fun error ->
+        Typecheck_error.create ~loc (Declaration_splice_failed error))
   in
   Syntax_value.Program.of_value value ~loc
   |> Result.map_error ~f:(fun error ->
@@ -1605,9 +1670,39 @@ let add_prelude (program : Program_env.t) =
     raise_s [%message "The prelude is invalid" (error : Typecheck_error.t)]
 ;;
 
-let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
-  : (Checked.t, Typecheck_error.t) Result.t
-  =
+let rec signature (program_env : Program_env.t) module_ =
+  let canonical_name = Module_scope.canonical_name module_ in
+  List.filter_map
+    (Module_scope.declarations module_)
+    ~f:(fun (toplevel : Syntax.Toplevel.t) : Signature.Item.t option ->
+      match toplevel.txt with
+      | Expect_test _ | Include _ -> None
+      | Let ({ txt = name; loc = _ }, _, _, _) ->
+        let toplevel =
+          Program_env.toplevel program_env (canonical_name name)
+        in
+        (match toplevel.state with
+         | Done { entry = { scheme; persistent; _ }; _ } ->
+           Some (Value { name; scheme; persistent })
+         | Unchecked | In_progress _ ->
+           raise_s
+             [%message "typecheck: toplevel not done" (toplevel : Toplevel.t)])
+      | Type decl ->
+        Some
+          (Type
+             (Type_env.find_decl_exn
+                program_env.type_env
+                (canonical_name decl.name.txt)))
+      | Module ({ txt = name; loc = _ }, _)
+      | Module_splice ({ txt = name; loc = _ }, _) ->
+        Some
+          (Module
+             { name
+             ; items = signature program_env (Module_scope.enter module_ name)
+             }))
+;;
+
+let program_env t interpreter =
   let program_env =
     { Program_env.type_env = Type_env.create t
     ; toplevels = String.Table.create ()
@@ -1615,18 +1710,43 @@ let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
     ; ident_info = Typed.Ident.Map.empty
     ; sccs = Queue.create ()
     ; unusable_in_quotes = String.Table.create ()
+    ; reflection_error = None
     ; unfinished = Stack.create ()
     }
   in
+  Treewalk.set_intrinsics interpreter (intrinsics program_env);
+  program_env
+;;
+
+(* The program's root module, within the prelude. *)
+let root t program_env ~enclosing =
   let root =
     Module_scope.create_root
-      ~enclosing:(add_prelude program_env)
+      ~enclosing
       ~types:builtin_names
       ~declare:(declare program_env ~in_prelude:false)
       ~force:(generate t program_env)
       ()
   in
   List.iter Type_env.builtins ~f:(Type_env.declare program_env.type_env root);
+  root
+;;
+
+let prelude_signature { fresh = t; interpreter } =
+  let program_env = program_env t interpreter in
+  let prelude = add_prelude program_env in
+  let (_ : Module_scope.t) = root t program_env ~enclosing:prelude in
+  match check_declarations t program_env prelude with
+  | Ok (_ : _ list) -> signature program_env prelude
+  | Error error ->
+    raise_s [%message "The prelude is invalid" (error : Typecheck_error.t)]
+;;
+
+let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
+  : (Checked.t, Typecheck_error.t) Result.t
+  =
+  let program_env = program_env t interpreter in
+  let root = root t program_env ~enclosing:(add_prelude program_env) in
   Result.map_error ~f:(Module_scope.within root)
   @@
   let%bind.Result () = Module_scope.add root program in
@@ -1637,35 +1757,7 @@ let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
       check_expect_test t program_env module_ ~name ~body ~loc ~generated)
     |> Result.all
   in
-  let type_env = program_env.type_env in
-  let rec signature module_ =
-    let canonical_name = Module_scope.canonical_name module_ in
-    List.filter_map
-      (Module_scope.declarations module_)
-      ~f:(fun (toplevel : Syntax.Toplevel.t) : Signature.Item.t option ->
-        match toplevel.txt with
-        | Expect_test _ | Include _ -> None
-        | Let ({ txt = name; loc = _ }, _, _, _) ->
-          let toplevel =
-            Program_env.toplevel program_env (canonical_name name)
-          in
-          (match toplevel.state with
-           | Done { entry = { scheme; persistent; _ }; _ } ->
-             Some (Value { name; scheme; persistent })
-           | Unchecked | In_progress _ ->
-             raise_s
-               [%message "typecheck: toplevel not done" (toplevel : Toplevel.t)])
-        | Type decl ->
-          Some
-            (Type
-               (Type_env.find_decl_exn type_env (canonical_name decl.name.txt)))
-        | Module ({ txt = name; loc = _ }, _)
-        | Module_splice ({ txt = name; loc = _ }, _) ->
-          Some
-            (Module
-               { name; items = signature (Module_scope.enter module_ name) }))
-  in
-  { Checked.signature = signature root
+  { Checked.signature = signature program_env root
   ; program =
       { sccs = Queue.to_list program_env.sccs
       ; expect_tests

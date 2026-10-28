@@ -15,6 +15,22 @@ module Stag = struct
     | Nil -> Nil
     | Cons (x, rest) -> Cons (f x, map f rest)
 
+  (* A declared type, constructor or field, by identity: it names the same
+     declaration wherever it is spliced, whatever is in scope there. Only
+     reflection ([Type]) makes them. *)
+  module Ref = struct
+    type t
+
+    (* The name it is declared with, eg. ["C"]. *)
+    let name r = Intrinsic.ref_name r
+  end
+
+  (* What names a type, constructor or field: a path, resolved where the
+     syntax is spliced, or a ref. *)
+  module Path = struct
+    type t = Name of string | Ref of Ref.t
+  end
+
   module Lit = struct
     type t = Int of int | Bool of bool | String of string | Char of char | Unit
   end
@@ -22,7 +38,7 @@ module Stag = struct
   module Type_expr = struct
     type t =
       | Var of string
-      | Con of string * list[Arg.t]
+      | Con of Path.t * list[Arg.t]
       | Arrow of t * t
       | Tuple of list[t]
       | Code of {`inner : t; `context : Row.t}
@@ -39,15 +55,18 @@ module Stag = struct
       type t = Ty of Type_expr.t | Row of Row.t
     end
 
-    (* [con "list" [t]] is [list[t]]. *)
-    let con name args =
+    (* [con_ref path [t]] is [path[t]]. *)
+    let con_ref path args =
       let ty t = Arg.Ty t in
-      Con (name, map ty args)
+      Con (path, map ty args)
+
+    (* [con "list" [t]] is [list[t]]. *)
+    let con name args = con_ref (Path.Name name) args
 
     (* [tuple] of no types is [unit], of one is that type. *)
     let tuple ts =
       match ts with
-      | Nil -> Con ("unit", Nil)
+      | Nil -> con "unit" Nil
       | Cons (t, Nil) -> t
       | _ -> Tuple ts
   end
@@ -82,10 +101,12 @@ module Stag = struct
       | Var of string
       | Lit of Lit.t
       | Tuple of list[t]
-      | Construct of string * list[t]
-      | Record of list[string * t]
+      | Construct of Path.t * list[t]
+      | Record of list[Path.t * t]
       | Poly_variant of string * option[t]
       | Poly_record of {`fields : list[string * t]; `rest : Rest.t}
+
+    let construct name args = Construct (Path.Name name, args)
 
     (* [tuple] of no patterns is [()], of one is that pattern. *)
     let tuple ps =
@@ -104,9 +125,10 @@ module Stag = struct
       | Splice of {`expr : t; `subs : option[list[string * option[t]]]}
       | Quote of t
       | Tuple of list[t]
-      | Construct of string * list[t]
-      | Record of list[string * t]
-      | Field of t * string
+      | Construct of Path.t * list[t]
+      | Record of list[Path.t * t]
+      | Field of t * Path.t
+      | Type of Type_expr.t
       | Match of t * list[Pattern.t * t]
       | Poly_record of list[string * t]
       | Poly_field of t * string
@@ -117,6 +139,7 @@ module Stag = struct
       | Expect of string
 
     let var name = Var (name, None)
+    let construct name args = Construct (Path.Name name, args)
     let int n = Lit (Lit.Int n)
     let string s = Lit (Lit.String s)
 
@@ -156,5 +179,30 @@ module Stag = struct
 
   module Program = struct
     type t = list[Toplevel.t]
+  end
+
+  (* [type ty] is the type [ty] as a value of type [Type.t[ty]]. Reflection
+     only runs at compile time. *)
+  module Type = struct
+    type t['a]
+
+    module Kind = struct
+      type t =
+        | Variant of list[Ref.t * list[Type_expr.t]]
+        | Record of list[Ref.t * Type_expr.t]
+        | Alias of Type_expr.t
+    end
+
+    module Decl = struct
+      type t = {`params : list[Type_decl.Param.t]; `kind : Kind.t}
+    end
+
+    (* The type, its types by [Path.Ref]: [expr (type list[t])] is
+       [Con (Ref list, Cons (Arg.Ty (Con (Ref t, Nil)), Nil))]. *)
+    let expr ty = Intrinsic.type_expr ty
+
+    (* The declaration of a type, checking it, its types by [Path.Ref], or
+       [None] if it is abstract (as are [int] and the other builtin types). *)
+    let decl r = Intrinsic.type_decl r
   end
 end

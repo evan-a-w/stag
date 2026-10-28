@@ -59,6 +59,10 @@ module Value : sig
         { prim : Prim.t
         ; applied : t list (** Fewer than its arity, latest first. *)
         }
+    | Intrinsic of Intrinsic.t
+    | Type of Syntax.Type_expr.t
+    (** A [Stag.Type.t], its types named by canonical names. *)
+    | Ref of Decl_ref.t (** A [Stag.Ref.t]. *)
 
   (** Functions are [<fun>], as their envs may contain themselves. Here and in
       [to_string_hum], constructors of the prelude are named as within it
@@ -102,6 +106,10 @@ val add_ident_info : t -> ident:Typed.Ident.t -> info:Typed.Ident_info.t -> unit
     first used, and the component's functions are bound when any member is. *)
 val add_scc : t -> Typed.Scc.t -> unit
 
+(** How intrinsics apply to their argument. They are runtime errors but while
+    evaluating at compile time ([splice] and [run]). *)
+val set_intrinsics : t -> (Intrinsic.t -> Value.t -> Value.t Or_error.t) -> unit
+
 (** Evaluates the toplevel splice [code], at [level] in an empty env, to code,
     binding the values it embeds globally. Returns that code with fresh
     binders and the free variables outside its quotes replaced by [entry].
@@ -114,8 +122,8 @@ val splice
   -> entry:(string -> Typed.Var_ref.t option)
   -> Typed.Expr.t Or_error.t
 
-(** Evaluates [expr] at [level] in an empty env, eg. a declaration splice's
-    expression at compile time. *)
+(** Evaluates [expr] at compile time, at [level] in an empty env, eg. a
+    declaration splice's expression. *)
 val run : t -> Typed.Expr.t -> level:int -> Value.t Or_error.t
 
 (** The info of [ident] if it is bound globally, eg. a value embedded by a

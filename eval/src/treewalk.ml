@@ -78,6 +78,9 @@ module Value = struct
         { prim : Prim.t
         ; applied : t list
         }
+    | Intrinsic of Intrinsic.t
+    | Type of Syntax.Type_expr.t
+    | Ref of Decl_ref.t
 
   let of_prim : Prim.Value.t -> t = function
     | Int n -> Int n
@@ -100,7 +103,10 @@ module Value = struct
     | Poly_variant _
     | Function _
     | Code _
-    | Prim _ -> None
+    | Prim _
+    | Intrinsic _
+    | Type _
+    | Ref _ -> None
   ;;
 
   let of_lit : Syntax.Lit.t -> t = function
@@ -126,7 +132,9 @@ module Value = struct
     | Poly_record fields -> [%sexp (fields : t String.Map.t)]
     | Poly_variant (tag, Unit) -> Atom ("`" ^ tag)
     | Poly_variant (tag, arg) -> List [ Atom ("`" ^ tag); sexp_of_t arg ]
-    | Function _ | Prim _ -> Atom "<fun>"
+    | Function _ | Prim _ | Intrinsic _ -> Atom "<fun>"
+    | Type ty -> List [ Atom "Type"; Syntax.Type_expr.sexp_of_t ty ]
+    | Ref ref_ -> List [ Atom "Ref"; Decl_ref.sexp_of_t ref_ ]
     | Code { expr; persistent } ->
       List
         (Atom "Code"
@@ -158,8 +166,10 @@ module Value = struct
       |> sprintf "{%s}"
     | Poly_variant (tag, Unit) -> "`" ^ tag
     | Poly_variant (tag, value) -> sprintf "`%s %s" tag (argument value)
-    | Function _ | Prim _ -> "<fun>"
+    | Function _ | Prim _ | Intrinsic _ -> "<fun>"
     | Code _ -> "<code>"
+    | Type _ -> "<type>"
+    | Ref ref_ -> Decl_ref.to_string_hum ref_
 
   and tuple values =
     sprintf "(%s)" (String.concat ~sep:", " (List.map values ~f:to_string_hum))
@@ -205,6 +215,8 @@ type t =
   ; mutable budget : Budget.t
   ; mutable output : string -> unit
   ; mutable on_expect : (string Located.t -> unit) option
+  ; mutable intrinsics : Intrinsic.t -> Value.t -> Value.t Or_error.t
+  ; mutable at_compile_time : bool
   }
 
 let captures t ~ident ~args ~body =
@@ -238,7 +250,7 @@ let captures t ~ident ~args ~body =
   in
   let rec go ~depth ({ desc; _ } : Typed.Expr.t) =
     match desc with
-    | Lit _ | Var (Free _ | Prim _) | Expect _ -> ()
+    | Lit _ | Var (Free _ | Prim _ | Intrinsic _) | Expect _ | Type _ -> ()
     | Var
         ( Bound (Toplevel ident | Local ident)
         | Persistent (Toplevel ident | Local ident) ) -> use ~depth ident
@@ -293,6 +305,11 @@ let create ~stamps () =
   ; budget = Budget.create Limits.unlimited
   ; output = Out_channel.output_string stdout
   ; on_expect = None
+  ; intrinsics =
+      (fun intrinsic _ ->
+        Or_error.error_s
+          [%message "Intrinsic without a typechecker" (intrinsic : Intrinsic.t)])
+  ; at_compile_time = false
   }
 ;;
 
@@ -338,7 +355,8 @@ let map_children ~depth (expr : Typed.Expr.t) ~f =
   let same = f ~depth in
   let%map desc : Typed.Expr.t Typed.Expr.Desc.t =
     match expr.desc with
-    | (Lit _ | Var _ | Poly_variant (_, None) | Expect _) as desc -> Ok desc
+    | (Lit _ | Var _ | Poly_variant (_, None) | Expect _ | Type _) as desc ->
+      Ok desc
     | App (a, b) ->
       let%bind a = same a in
       let%map b = same b in
@@ -681,6 +699,8 @@ and step t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
   | Var (Free name) ->
     Or_error.error_s [%message "Free variable of code evaluated" name]
   | Var (Prim prim) -> Ok (Value.Prim { prim; applied = [] })
+  | Var (Intrinsic intrinsic) -> Ok (Value.Intrinsic intrinsic)
+  | Type ty -> Ok (Value.Type ty)
   | App (f, arg) ->
     let%bind f = eval' f in
     let%bind arg = eval' arg in
@@ -782,6 +802,15 @@ and apply t (f : Value.t) arg ~loc =
         (match Prim.apply prim ~output:t.output args with
          | Ok value -> Ok (Value.of_prim value)
          | Error message -> runtime_error ~loc message))
+  | Intrinsic intrinsic ->
+    if t.at_compile_time
+    then t.intrinsics intrinsic arg
+    else
+      runtime_error
+        ~loc
+        (sprintf
+           "%s is only available at compile time"
+           (Intrinsic.public_name intrinsic))
   | Function { args = param :: args; body; env; level } ->
     let env = Env.copy env in
     Env.set env ~ident:param ~value:arg;
@@ -852,15 +881,27 @@ and build_step
       build t ~env ~level ~embedded ~depth)
 ;;
 
-let splice t ~code ~level ~entry =
-  let%bind code, embedded =
-    eval t ~env:(Env.create ()) ~level code >>= code_of_value
-  in
-  Map.iteri embedded ~f:(fun ~key ~data -> Env.set t.env ~ident:key ~value:data);
-  instantiate t code ~entry
+let set_intrinsics t intrinsics = t.intrinsics <- intrinsics
+
+let at_compile_time t ~f =
+  let outer = t.at_compile_time in
+  t.at_compile_time <- true;
+  Exn.protect ~f ~finally:(fun () -> t.at_compile_time <- outer)
 ;;
 
-let run t expr ~level = eval t ~env:(Env.create ()) ~level expr
+let splice t ~code ~level ~entry =
+  at_compile_time t ~f:(fun () ->
+    let%bind code, embedded =
+      eval t ~env:(Env.create ()) ~level code >>= code_of_value
+    in
+    Map.iteri embedded ~f:(fun ~key ~data ->
+      Env.set t.env ~ident:key ~value:data);
+    instantiate t code ~entry)
+;;
+
+let run t expr ~level =
+  at_compile_time t ~f:(fun () -> eval t ~env:(Env.create ()) ~level expr)
+;;
 
 let run_expect_test t ({ body; _ } : Typed.Expect_test.t) ~on_expect =
   t.on_expect <- Some on_expect;

@@ -51,6 +51,12 @@ module To_value = struct
   let name (name : Name.t) = string name.txt
   let path (path : Path.t) = string (Path.to_string path)
   let pair f g (a, b) = Value.Tuple [ f a; g b ]
+
+  let decl_path kind ({ txt; loc = _ } : Decl_path.t Located.t) =
+    match txt with
+    | Path p -> con "Stag.Path.Name" [ path p ]
+    | Resolved name -> con "Stag.Path.Ref" [ Value.Ref { kind; name } ]
+  ;;
   let record fields = Value.Poly_record (String.Map.of_alist_exn fields)
 
   let lit : Lit.t -> Value.t = function
@@ -65,7 +71,7 @@ module To_value = struct
     let con name = con ("Stag.Type_expr." ^ name) in
     match txt with
     | Var var -> con "Var" [ string var ]
-    | Con (p, args) -> con "Con" [ path p.txt; list type_arg args ]
+    | Con (p, args) -> con "Con" [ decl_path Type p; list type_arg args ]
     | Arrow (a, b) -> con "Arrow" [ type_expr a; type_expr b ]
     | Tuple ts -> con "Tuple" [ list type_expr ts ]
     | Code { inner; context } ->
@@ -86,12 +92,13 @@ module To_value = struct
     | Row r -> con "Stag.Type_expr.Arg.Row" [ row r ]
   ;;
 
+  let type_param ({ txt; loc = _ } : Type_decl.Param.t Located.t) =
+    match txt with
+    | Ty var -> con "Stag.Type_decl.Param.Ty" [ string var ]
+    | Row var -> con "Stag.Type_decl.Param.Row" [ string var ]
+  ;;
+
   let type_decl ({ name = decl_name; params; kind } : Type_decl.t) =
-    let param ({ txt; loc = _ } : Type_decl.Param.t Located.t) =
-      match txt with
-      | Ty var -> con "Stag.Type_decl.Param.Ty" [ string var ]
-      | Row var -> con "Stag.Type_decl.Param.Row" [ string var ]
-    in
     let decl_kind : Type_decl.Kind.t -> Value.t = function
       | Variant constructors ->
         con
@@ -104,7 +111,7 @@ module To_value = struct
     in
     record
       [ "name", name decl_name
-      ; "params", list param params
+      ; "params", list type_param params
       ; "kind", decl_kind kind
       ]
   ;;
@@ -118,11 +125,10 @@ module To_value = struct
     | Var var -> con "Var" [ string var ]
     | Lit l -> con "Lit" [ lit l ]
     | Tuple ps -> con "Tuple" [ list pattern ps ]
-    | Construct (p, args) -> con "Construct" [ path p.txt; list pattern args ]
+    | Construct (p, args) ->
+      con "Construct" [ decl_path Constructor p; list pattern args ]
     | Record fields ->
-      con
-        "Record"
-        [ list (pair (fun (p : _ Located.t) -> path p.txt) pattern) fields ]
+      con "Record" [ list (pair (decl_path Field) pattern) fields ]
     | Poly_variant (tag, arg) ->
       con "Poly_variant" [ name tag; option pattern arg ]
     | Poly_record { fields; rest } ->
@@ -166,12 +172,12 @@ module To_value = struct
         ]
     | Quote e -> con "Quote" [ expr e ]
     | Tuple es -> con "Tuple" [ list expr es ]
-    | Construct (p, args) -> con "Construct" [ path p.txt; list expr args ]
+    | Construct (p, args) ->
+      con "Construct" [ decl_path Constructor p; list expr args ]
     | Record record_fields ->
-      con
-        "Record"
-        [ list (pair (fun (p : _ Located.t) -> path p.txt) expr) record_fields ]
-    | Field (e, p) -> con "Field" [ expr e; path p.txt ]
+      con "Record" [ list (pair (decl_path Field) expr) record_fields ]
+    | Field (e, p) -> con "Field" [ expr e; decl_path Field p ]
+    | Type ty -> con "Type" [ type_expr ty ]
     | Match (e, arms) -> con "Match" [ expr e; list (pair pattern expr) arms ]
     | Poly_record poly_fields -> con "Poly_record" [ fields poly_fields ]
     | Poly_field (e, label) -> con "Poly_field" [ expr e; name label ]
@@ -204,6 +210,30 @@ module To_value = struct
   ;;
 
   let program = list toplevel
+
+  let reflected_decl decl ~(canonical : string -> string) =
+    option
+      (fun ({ name = _; params; kind } : Type_decl.t) ->
+         let ref_ kind (name : Name.t) =
+           Value.Ref { kind; name = canonical name.txt }
+         in
+         let kind =
+           match kind with
+           | Variant constructors ->
+             con
+               "Stag.Type.Kind.Variant"
+               [ list (pair (ref_ Constructor) (list type_expr)) constructors ]
+           | Record fields ->
+             con
+               "Stag.Type.Kind.Record"
+               [ list (pair (ref_ Field) type_expr) fields ]
+           | Alias ty -> con "Stag.Type.Kind.Alias" [ type_expr ty ]
+           | Abstract ->
+             raise_s [%message "Syntax_value: reflected an abstract type"]
+         in
+         record [ "params", list type_param params; "kind", kind ])
+      decl
+  ;;
 end
 
 module Of_value = struct
@@ -396,7 +426,27 @@ module Of_value = struct
         value
   ;;
 
-  let located_path kind value ~loc = Located.create ~loc (path kind value)
+  let decl_path ref_kind kind value ~loc =
+    Located.create
+      ~loc
+      (variant "Stag.Path.t" value ~f:(fun constructor args : Decl_path.t ->
+         let arg i read = Args.read args i read in
+         match constructor, Args.count args with
+         | "Name", 1 -> Path (arg 0 (path kind))
+         | "Ref", 1 ->
+           arg 0 (fun (value : Value.t) : Decl_path.t ->
+             match value with
+             | Ref { kind; name } when Decl_ref.Kind.equal kind ref_kind ->
+               Resolved name
+             | _ ->
+               unexpected
+                 ~expected:
+                   (sprintf
+                      "a ref to a %s"
+                      (Decl_ref.Kind.to_string ref_kind))
+                 value)
+         | _ -> raise Bad_arguments))
+  ;;
 
   (* [Tuple []] is the type [()], but [Lit Unit] in patterns and expressions. *)
   let components ~min read value =
@@ -443,7 +493,9 @@ module Of_value = struct
            match constructor, Args.count args with
            | "Var", 1 -> Var (arg 0 (ident Tyvar))
            | "Con", 2 ->
-             Con (arg 0 (located_path Lower ~loc), arg 1 (list (type_arg ~loc)))
+             Con
+               ( arg 0 (decl_path Type Lower ~loc)
+               , arg 1 (list (type_arg ~loc)) )
            | "Arrow", 2 -> Arrow (arg 0 (type_expr ~loc), arg 1 (type_expr ~loc))
            | "Tuple", 1 -> Tuple (arg 0 (components ~min:0 (type_expr ~loc)))
            | "Code", 1 ->
@@ -536,10 +588,13 @@ module Of_value = struct
          | "Tuple", 1 -> Tuple (arg 0 (components ~min:2 (pattern ~loc)))
          | "Construct", 2 ->
            Construct
-             (arg 0 (located_path Upper ~loc), arg 1 (list (pattern ~loc)))
+             ( arg 0 (decl_path Constructor Upper ~loc)
+             , arg 1 (list (pattern ~loc)) )
          | "Record", 1 ->
            Record
-             (arg 0 (fields (pair (located_path Lower ~loc) (pattern ~loc))))
+             (arg
+                0
+                (fields (pair (decl_path Field Lower ~loc) (pattern ~loc))))
          | "Poly_variant", 2 ->
            Poly_variant (arg 0 (name Label ~loc), arg 1 (option (pattern ~loc)))
          | "Poly_record", 1 ->
@@ -598,11 +653,15 @@ module Of_value = struct
          | "Quote", 1 -> Quote (arg 0 (expr ~loc))
          | "Tuple", 1 -> Tuple (arg 0 (components ~min:2 (expr ~loc)))
          | "Construct", 2 ->
-           Construct (arg 0 (located_path Upper ~loc), arg 1 (list (expr ~loc)))
+           Construct
+             ( arg 0 (decl_path Constructor Upper ~loc)
+             , arg 1 (list (expr ~loc)) )
          | "Record", 1 ->
-           Record (arg 0 (fields (pair (located_path Lower ~loc) (expr ~loc))))
+           Record
+             (arg 0 (fields (pair (decl_path Field Lower ~loc) (expr ~loc))))
          | "Field", 2 ->
-           Field (arg 0 (expr ~loc), arg 1 (located_path Lower ~loc))
+           Field (arg 0 (expr ~loc), arg 1 (decl_path Field Lower ~loc))
+         | "Type", 1 -> Type (arg 0 (type_expr ~loc))
          | "Match", 2 ->
            Match
              (arg 0 (expr ~loc), arg 1 (list (pair (pattern ~loc) (expr ~loc))))
@@ -658,6 +717,8 @@ module Of_value = struct
       Error (Error.of_string (Malformed.to_string malformed))
   ;;
 end
+
+let reflected_decl = To_value.reflected_decl
 
 module Type_expr = struct
   let to_value = To_value.type_expr

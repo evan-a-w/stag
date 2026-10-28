@@ -46,6 +46,7 @@ module Var_ref : sig
     (** A free variable of the enclosing quote: its context entry of this
         name. *)
     | Prim of Prim.t (** Usable at any level, like a persistent toplevel. *)
+    | Intrinsic of Intrinsic.t (** As [Prim]. *)
   [@@deriving sexp_of]
 end
 
@@ -158,6 +159,8 @@ module Expr : sig
       | Expect of string Located.t
       (** Checks the output so far against the string, see
           [Expect_test_runner]. *)
+      | Type of Syntax.Type_expr.t
+      (** [type t], its types named by canonical names ([Resolved]). *)
     [@@deriving sexp_of]
   end
 

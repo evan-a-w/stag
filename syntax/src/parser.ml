@@ -51,6 +51,10 @@ let advance t =
 let located ~loc txt = { Located.txt; loc }
 
 (** Located from [start] to the last token consumed. *)
+let decl_path (path : Path.t Located.t) =
+  { path with txt = Decl_path.Path path.txt }
+;;
+
 let since t start txt = located ~loc:(Loc.merge start (prev_loc t)) txt
 
 let describe : Token.t -> string = function
@@ -288,7 +292,7 @@ and type_atom t : Type_expr.t =
     located ~loc:var.loc (Var var.txt : Type_expr.desc)
   | Lident _ | Uident _ ->
     let path = lowercase_path t ~what:"a type name" in
-    located ~loc:path.loc (Type_expr.Con (path, []))
+    located ~loc:path.loc (Type_expr.Con (decl_path path, []))
   | Lparen ->
     advance t;
     if is t Rparen
@@ -398,7 +402,8 @@ and variant t : Type_expr.t =
         else
           located
             ~loc:tag.loc
-            (Type_expr.Con (located ~loc:tag.loc (Path.name "unit"), []))
+            (Type_expr.Con
+               (located ~loc:tag.loc (Decl_path.Path (Path.name "unit")), []))
       in
       let rest : Type_expr.row =
         match peek t with
@@ -477,7 +482,7 @@ and pattern_construct t : Pattern.t =
           | _ -> None))
       else []
     in
-    since t start (Pattern.Construct (path, args))
+    since t start (Pattern.Construct (decl_path path, args))
   | Label tag ->
     let tag = located ~loc:start tag in
     advance t;
@@ -528,7 +533,7 @@ and record_pattern t : Pattern.t =
       delimited t ~opener:Lbrace ~close:Rbrace ~sep:Semi ~item:(fun t ->
         let path = lowercase_path t ~what:"a field name" in
         expect t Equal;
-        path, pattern t)
+        decl_path path, pattern t)
     in
     since t start (Pattern.Record fields)
   | _ ->
@@ -732,7 +737,7 @@ and construct t : Expr.t =
              | _ -> None))
          else []
        in
-       expr_since t start (Construct (path, args))
+       expr_since t start (Construct (decl_path path, args))
      | _, false ->
        t.pos <- saved;
        app t)
@@ -741,6 +746,9 @@ and construct t : Expr.t =
     advance t;
     let arg = if starts_atom (peek t) then Some (snd (arg ())) else None in
     expr_since t start (Poly_variant (tag, arg))
+  | Type ->
+    advance t;
+    expr_since t start (Type (type_app t))
   | _ -> app t
 
 and app t : Expr.t =
@@ -802,7 +810,7 @@ and postfix t : Expr.t =
          loop (expr_since t e.loc (Poly_field (e, label)))
        | _ ->
          let field = lowercase_path t ~what:"a field name" in
-         loop (expr_since t e.loc (Field (e, field))))
+         loop (expr_since t e.loc (Field (e, decl_path field))))
     | Backslash ->
       advance t;
       let label = label t ~what:"a polymorphic record label like `x" in
@@ -825,7 +833,7 @@ and atom t : Expr.t =
   | False -> lit (Bool false)
   | Lident _ | Uident _ ->
     (match path t ~what:"" with
-     | path, true -> expr_since t start (Construct (path, []))
+     | path, true -> expr_since t start (Construct (decl_path path, []))
      | path, false -> expr_since t start (Var (path.txt, None)))
   | Label tag ->
     advance t;
@@ -910,7 +918,7 @@ and record t : Expr.t =
       delimited t ~opener:Lbrace ~close:Rbrace ~sep:Semi ~item:(fun t ->
         let path = lowercase_path t ~what:"a field name" in
         expect t Equal;
-        path, entry_value t)
+        decl_path path, entry_value t)
     in
     expr_since t start (Record fields)
   | _ ->
