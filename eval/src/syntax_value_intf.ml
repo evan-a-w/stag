@@ -42,6 +42,11 @@ module type Syntax_value = sig
   module Toplevel : S with type t := Syntax.Toplevel.t
   module Program : S with type t := Syntax.Program.t
 
+  (** A [Stag.Type_ref.Path.t]. *)
+  val type_ref_path
+    :  [ `Prelude of string list | `Program of string list ]
+    -> Value.t
+
   (** An [option[Stag.Type.Decl.t]], given that record type. *)
   val reflected_decl
     :  Reflected_decl.t option

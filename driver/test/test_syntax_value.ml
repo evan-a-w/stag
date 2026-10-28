@@ -26,7 +26,10 @@ let%expect_test "the prelude's signature" =
       module Type_ref : sig
         type t
         val name : t -> string
-        val path : t -> string
+        module Path : sig
+          type t = Program of list[string] | Prelude of list[string]
+        end
+        val path : t -> Path.t
       end
       module Constructor_ref : sig
         type t
@@ -42,6 +45,11 @@ let%expect_test "the prelude's signature" =
       end
       module Path : sig
         type t['a] = Name of string | Ref of 'a
+      end
+      module Internal : sig
+        val constructor : <'a>{..'b} -> Path.t[Constructor_ref.t]
+        val cons : Path.t[Constructor_ref.t]
+        val nil : Path.t[Constructor_ref.t]
       end
       module Lit : sig
         type t = Int of int | Bool of bool | String of string | Char of char | Unit
@@ -75,6 +83,7 @@ let%expect_test "the prelude's signature" =
         end
         type t = Any | Var of string | Lit of Lit.t | Tuple of list[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Poly_variant of string * option[t] | Poly_record of {`fields : list[string * t]; `rest : Rest.t} | Exception of t
         val construct : string -> list[t] -> t
+        val list : list[t] -> t
         val tuple : list[t] -> t
       end
       module Expr : sig
@@ -83,6 +92,9 @@ let%expect_test "the prelude's signature" =
         val construct : string -> list[t] -> t
         val int : int -> t
         val string : string -> t
+        val fun_ : list[string] -> t -> t
+        val match_ : t -> list[Pattern.t * t] -> t
+        val list : list[t] -> t
         val apply : t -> list[t] -> t
         val tuple : list[t] -> t
         val let_ : string -> list[string] -> t -> t -> t
@@ -260,6 +272,9 @@ let%expect_test "the prelude's signature" =
           type t = { message : string; offset : int; line : int; col : int }
           val create : string -> int -> string -> t
           val to_string : t -> string
+          val sexp_of_t : t -> Sexp.t
+          val t_of_sexp_exn : Sexp.t -> t
+          val t_of_sexp : Sexp.t -> result[t, Of_sexp_error.t]
         end
         val of_string : string -> result[t, Parse_error.t]
         val of_string_many : string -> result[list[t], Parse_error.t]
@@ -270,6 +285,9 @@ let%expect_test "the prelude's signature" =
           type t = { message : string; sexp : Sexp.t }
           val create : string -> Sexp.t -> t
           val to_string : t -> string
+          val sexp_of_t : t -> Sexp.t
+          val t_of_sexp_exn : Sexp.t -> t
+          val t_of_sexp : Sexp.t -> result[t, t]
         end
         exception Of_sexp_error of Of_sexp_error.t
         val of_sexp_exn : ('a -> result['b, Of_sexp_error.t]) -> 'a -> 'b
@@ -295,12 +313,22 @@ let%expect_test "the prelude's signature" =
         val result_of_sexp : (t -> result['a, Of_sexp_error.t]) -> (t -> result['b, Of_sexp_error.t]) -> t -> result[result['a, 'b], Of_sexp_error.t]
         val sexp_of_t : t -> t
         val t_of_sexp : t -> result[t, Of_sexp_error.t]
+        val unit_of_sexp_exn : t -> unit
+        val bool_of_sexp_exn : t -> bool
+        val int_of_sexp_exn : t -> int
+        val char_of_sexp_exn : t -> char
+        val string_of_sexp_exn : t -> string
+        val list_of_sexp_exn : (t -> result['a, Of_sexp_error.t]) -> t -> list['a]
+        val option_of_sexp_exn : (t -> result['a, Of_sexp_error.t]) -> t -> option['a]
+        val result_of_sexp_exn : (t -> result['a, Of_sexp_error.t]) -> (t -> result['b, Of_sexp_error.t]) -> t -> result['a, 'b]
+        val t_of_sexp_exn : t -> t
         val derive : Stag.Type.t['a] -> list[Stag.Toplevel.t]
         module Deriving : sig
-          val error : string -> t -> 'a
           val field : string -> t -> t
           val catch : ('a -> 'b) -> 'a -> result['b, Of_sexp_error.t]
+          val capitalize : t -> t
           val variant_error : string -> list[string] -> list[string] -> t -> 'a
+          val poly_variant_error : string -> list[string] -> list[string] -> t -> 'a
           val tuple_error : string -> int -> t -> 'a
           val record_fields : string -> list[string] -> t -> list[t]
         end
@@ -360,51 +388,58 @@ let%expect_test "the prelude's signature" =
             val comment_string : string -> int -> int -> Context.t[t] -> result[list[t], Parse_error.t]
           end
           val of_sexp_error : string -> t -> result['a, Of_sexp_error.t]
+          val of_sexp_fail : string -> string -> t -> 'a
+          val record_fields : string -> list[string] -> list[t] -> t -> list[t]
           module Derive : sig
             module Dir : sig
-              type t = To_sexp | Of_sexp
+              type t = To_sexp | Of_sexp | Of_sexp_exn
+              val conv_name : t -> string -> string
+            end
+            module Context : sig
+              type t = { self : list[string]; name : string }
+            end
+            module Case : sig
+              type t = { tag : string; args : list[Stag.Type_expr.t]; construct : list[Stag.Expr.t] -> Stag.Expr.t; pattern : list[Stag.Pattern.t] -> Stag.Pattern.t }
             end
             val fail : string -> 'a
             val erase : <'a>{..'b} -> Stag.Expr.t
+            val var : string -> Stag.Expr.t
+            val pvar : string -> Stag.Pattern.t
+            val apply : Stag.Expr.t -> list[Stag.Expr.t] -> Stag.Expr.t
             val constructor : <'a>{..'b} -> Stag.Path.t[Stag.Constructor_ref.t]
             val atom_c : Stag.Path.t[Stag.Constructor_ref.t]
             val list_c : Stag.Path.t[Stag.Constructor_ref.t]
-            val cons_c : Stag.Path.t[Stag.Constructor_ref.t]
-            val nil_c : Stag.Path.t[Stag.Constructor_ref.t]
-            val ok_c : Stag.Path.t[Stag.Constructor_ref.t]
-            val error_c : Stag.Path.t[Stag.Constructor_ref.t]
-            val of_sexp_error_c : Stag.Path.t[Stag.Constructor_ref.t]
-            val var : string -> Stag.Expr.t
-            val pvar : string -> Stag.Pattern.t
-            val str : string -> Stag.Expr.t
-            val one : 'a -> list['a]
-            val two : 'a -> 'a -> list['a]
-            val apply : Stag.Expr.t -> list[Stag.Expr.t] -> Stag.Expr.t
-            val fun_ : string -> Stag.Expr.t -> Stag.Expr.t
-            val match_ : Stag.Expr.t -> list[Stag.Pattern.t * Stag.Expr.t] -> Stag.Expr.t
-            val expr_list : list[Stag.Expr.t] -> Stag.Expr.t
-            val pattern_list : list[Stag.Pattern.t] -> Stag.Pattern.t
-            val string_list : list[string] -> Stag.Expr.t
             val atom : string -> Stag.Expr.t
             val atom_pattern : string -> Stag.Pattern.t
             val sexp_list : list[Stag.Expr.t] -> Stag.Expr.t
             val list_pattern : list[Stag.Pattern.t] -> Stag.Pattern.t
-            val vars : int -> list[string]
-            val catch : Stag.Expr.t -> Stag.Expr.t
-            val conv_name : Dir.t -> string -> string
-            val builtin : Dir.t -> string -> option[Stag.Expr.t]
-            val relative : Dir.t -> list[string] -> string -> string
-            val conv : Dir.t -> list[string] -> string -> Stag.Type_expr.t -> Stag.Expr.t
-            val to_sexp : list[string] -> string -> Stag.Type_expr.t -> Stag.Expr.t -> Stag.Expr.t
-            val of_exn : list[string] -> string -> Stag.Type_expr.t -> string -> Stag.Expr.t
-            val tuple_to_sexp : list[string] -> string -> list[Stag.Type_expr.t] -> Stag.Expr.t -> Stag.Expr.t
-            val tuple_of_sexp : list[string] -> string -> list[Stag.Type_expr.t] -> Stag.Expr.t
-            val nominal_case : Stag.Constructor_ref.t * 'a -> string * 'a * (list[Stag.Expr.t] -> Stag.Expr.t) * (list[Stag.Pattern.t] -> Stag.Pattern.t)
-            val poly_cases : Stag.Type_expr.Row.t -> list[string * list[Stag.Type_expr.t] * (list[Stag.Expr.t] -> Stag.Expr.t) * (list[Stag.Pattern.t] -> Stag.Pattern.t)]
-            val variant_to_sexp : list[string] -> string -> list[string * list[Stag.Type_expr.t] * (list[Stag.Expr.t] -> Stag.Expr.t) * (list[Stag.Pattern.t] -> Stag.Pattern.t)] -> Stag.Expr.t -> Stag.Expr.t
-            val variant_of_sexp : list[string] -> string -> list[string * list[Stag.Type_expr.t] * (list[Stag.Expr.t] -> Stag.Expr.t) * (list[Stag.Pattern.t] -> Stag.Pattern.t)] -> Stag.Expr.t
-            val record_to_sexp : list[string] -> string -> list[Stag.Field_ref.t * Stag.Type_expr.t] -> Stag.Expr.t
-            val record_of_sexp : list[string] -> string -> list[Stag.Field_ref.t * Stag.Type_expr.t] -> Stag.Expr.t
+            val strings : list[string] -> Stag.Expr.t
+            val fst : 'a * 'b -> 'a
+            val snd : 'a * 'b -> 'b
+            val vars : string -> int -> list[string]
+            val param_conv : string -> string
+            module Builtin : sig
+              type t = { path : list[string]; to_sexp : Stag.Expr.t; of_sexp : Stag.Expr.t; of_sexp_exn : Stag.Expr.t }
+              val all : list[t]
+              val find : list[string] -> option[t]
+              val conv : t -> Dir.t -> Stag.Expr.t
+            end
+            val is_sexp : Stag.Type_expr.t -> bool
+            val named : Context.t -> Dir.t -> Stag.Type_ref.t -> Stag.Expr.t
+            val conv : Context.t -> Dir.t -> Stag.Type_expr.t -> Stag.Expr.t
+            val inline_conv : Context.t -> Dir.t -> Stag.Type_expr.t -> Stag.Expr.t
+            val to_sexp : Context.t -> Stag.Type_expr.t -> Stag.Expr.t -> string -> Stag.Expr.t
+            val bind : Context.t -> Stag.Type_expr.t -> string -> Stag.Pattern.t * Stag.Expr.t
+            val bind_tuple : Context.t -> list[Stag.Type_expr.t] -> string -> Stag.Pattern.t * Stag.Expr.t
+            val value_of : Context.t -> Stag.Type_expr.t -> string -> string -> Stag.Expr.t
+            val values_of : Context.t -> list[Stag.Type_expr.t] -> list[string] -> list[Stag.Expr.t]
+            val tuple_of_sexp : Context.t -> list[Stag.Type_expr.t] -> string -> string -> Stag.Expr.t
+            val nominal_case : Stag.Constructor_ref.t * list[Stag.Type_expr.t] -> Case.t
+            val poly_cases : Stag.Type_expr.Row.t -> list[Case.t]
+            val variant_to_sexp : Context.t -> list[Case.t] -> Stag.Expr.t -> string -> Stag.Expr.t
+            val variant_of_sexp : Context.t -> bool -> list[Case.t] -> string -> string -> Stag.Expr.t
+            val record_to_sexp : Context.t -> list[Stag.Field_ref.t * Stag.Type_expr.t] -> Stag.Expr.t
+            val record_of_sexp : Context.t -> list[Stag.Field_ref.t * Stag.Type_expr.t] -> string -> Stag.Expr.t
             val derive : Stag.Type.t['a] -> list[Stag.Toplevel.t]
           end
         end
@@ -618,10 +653,11 @@ let%expect_test "constructors are made as the typechecker resolves them" =
            : bool)];
   [%expect
     {|
-    ((constructors 73)
+    ((constructors 75)
      (reflected
       (prelude.Stag.Path.Ref prelude.Stag.Type.Kind.Alias
-       prelude.Stag.Type.Kind.Record prelude.Stag.Type.Kind.Variant))
+       prelude.Stag.Type.Kind.Record prelude.Stag.Type.Kind.Variant
+       prelude.Stag.Type_ref.Path.Prelude prelude.Stag.Type_ref.Path.Program))
      (others_same_as_to_value true))
     |}]
 ;;

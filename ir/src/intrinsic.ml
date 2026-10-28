@@ -45,7 +45,8 @@ let ty t ~var ~row =
     Type.TArrow
       (prelude "Stag.Type.t" ~args:[ ATy (var ()) ], prelude "Stag.Type_expr.t")
   | Type_ref_name -> name "Stag.Type_ref.t"
-  | Type_ref_path -> name "Stag.Type_ref.t"
+  | Type_ref_path ->
+    TArrow (prelude "Stag.Type_ref.t", prelude "Stag.Type_ref.Path.t")
   | Constructor_ref_name -> name "Stag.Constructor_ref.t"
   | Field_ref_name -> name "Stag.Field_ref.t"
   | Type_decl ->

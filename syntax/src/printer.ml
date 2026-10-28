@@ -435,7 +435,7 @@ and flat roots e = group (bare roots { Ctx.top with flat = true } e)
 
 and bare roots (ctx : Ctx.t) (e : Expr.t) =
   match List_literal.expr_items e with
-  | Some items -> list_literal (List.map items ~f:(fun e -> entry roots e))
+  | Some items -> list_literal (list_items roots items)
   | None -> bare_desc roots ctx e
 
 and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
@@ -663,6 +663,10 @@ and tuple_items roots es =
 and entry roots ?(after = After.Nothing) e =
   expr roots (Ctx.item ~seq:false after) e
 
+(* A [let], [match] or [fun] item is parenthesized, though the [;] would end
+   it, so items read as separate. *)
+and list_items roots items = List.map items ~f:(entry roots ~after:Semi)
+
 and field roots ?after lhs value =
   definition ~record:(is_bracketed value) lhs (entry roots ?after value)
 
@@ -799,7 +803,7 @@ let rec toplevel roots ~width ~indent ~blank_between (t : Toplevel.t) =
       | Some { name = x; args } ->
         lhs
         ^^ text (" " ^ x.txt ^ " in ")
-        ^^ list_literal (List.map args ~f:(fun e -> entry roots e))
+        ^^ list_literal (list_items roots args)
     in
     definition lhs (expr_doc roots body)
 

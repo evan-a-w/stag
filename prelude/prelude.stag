@@ -32,9 +32,14 @@ module Stag = struct
 
     let name = Intrinsic.type_ref_name
 
-    (* The path naming it from the root scope, without the leading [.]: eg.
-       ["A.M.t"] for the [t] of module [M] of file [a.stag], ["int"],
-       ["Core.Sexp.t"]. *)
+    (* The names of its path from the root scope: of the program's, eg.
+       [Program ["A"; "M"; "t"]] for the [t] of module [M] of file [a.stag], or
+       of the prelude's, eg. [Prelude ["Core"; "Sexp"; "t"]], and
+       [Prelude ["int"]] for a builtin type. *)
+    module Path = struct
+      type t = Program of list[string] | Prelude of list[string]
+    end
+
     let path = Intrinsic.type_ref_path
   end
 
@@ -62,6 +67,16 @@ module Stag = struct
      where the syntax is spliced, or a ref. *)
   module Path = struct
     type t['r] = Name of string | Ref of 'r
+  end
+
+  module Internal = struct
+    let constructor code =
+      match Intrinsic.erase code with
+      | Expr.Construct (c, _) -> c
+      | _ -> raise (Failure "Stag.Internal.constructor")
+
+    let cons = constructor .< [()] >.
+    let nil = constructor .< [] >.
   end
 
   module Lit = struct
@@ -139,6 +154,13 @@ module Stag = struct
 
     let construct name args = Construct (Path.Name name, args)
 
+    (* The list literal of [ps], [[p1; p2]], of the prelude's [Cons] and
+       [Nil] wherever it is spliced. *)
+    let list ps =
+      match ps with
+      | [] -> Construct (Internal.nil, [])
+      | Cons (p, rest) -> Construct (Internal.cons, [p; list rest])
+
     (* [tuple] of no patterns is [()], of one is that pattern. *)
     let tuple ps =
       match ps with
@@ -175,6 +197,19 @@ module Stag = struct
     let construct name args = Construct (Path.Name name, args)
     let int n = Lit (Lit.Int n)
     let string s = Lit (Lit.String s)
+
+    (* [fun_ ["x"; "y"] body] is [fun x y -> body]. *)
+    let fun_ params body =
+      let param name = (name, None) in
+      Fun (map param params, body)
+
+    let match_ e arms = Match (e, arms)
+
+    (* The list literal of [es], [[e1; e2]], as [Pattern.list]. *)
+    let list es =
+      match es with
+      | [] -> Construct (Internal.nil, [])
+      | Cons (e, rest) -> Construct (Internal.cons, [e; list rest])
 
     (* [apply f [x; y]] is [f x y]. *)
     let apply f args =

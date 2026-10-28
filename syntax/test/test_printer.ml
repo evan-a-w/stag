@@ -703,39 +703,24 @@ let%expect_test "the project's sources round trip and are formatted" =
       |> List.count ~f:(fun line -> String.length line > 80)
     in
     print_s [%message path (formatted : bool) (long_lines : int)]);
-  [%expect
-    {|
-    (../../tests/basics.stag (formatted true) (long_lines 0))
-    (../../tests/core_basics.stag (formatted true) (long_lines 0))
-    (../../tests/core_derive_sexp.stag (formatted true) (long_lines 10))
-    (../../tests/core_exn.stag (formatted true) (long_lines 1))
-    (../../tests/core_list.stag (formatted true) (long_lines 0))
-    (../../tests/core_option.stag (formatted true) (long_lines 0))
-    (../../tests/core_sexp.stag (formatted true) (long_lines 1))
-    (../../tests/core_shadowing.stag (formatted true) (long_lines 0))
-    (../../tests/core_string.stag (formatted true) (long_lines 0))
-    (../../tests/evaluation.stag (formatted true) (long_lines 1))
-    (../../tests/list_literals.stag (formatted true) (long_lines 0))
-    (../../examples/calc/bin/main.stag (formatted true) (long_lines 0))
-    (../../examples/calc/fmt/show.stag (formatted true) (long_lines 0))
-    (../../examples/calc/math/arith.stag (formatted true) (long_lines 0))
-    (../../examples/calc/math/power.stag (formatted true) (long_lines 0))
-    (../../examples/calc/test/calc_test.stag (formatted true) (long_lines 0))
-    (../../prelude/prelude.stag (formatted true) (long_lines 0))
-    (../../core/bool.stag (formatted true) (long_lines 0))
-    (../../core/char.stag (formatted true) (long_lines 0))
-    (../../core/int.stag (formatted true) (long_lines 0))
-    (../../core/list.stag (formatted true) (long_lines 0))
-    (../../core/option.stag (formatted true) (long_lines 0))
-    (../../core/result.stag (formatted true) (long_lines 0))
-    (../../core/sexp.stag (formatted true) (long_lines 1))
-    (../../core/string.stag (formatted true) (long_lines 0))
-    (../../bench/programs/fib.stag (formatted true) (long_lines 0))
-    (../../bench/programs/matching.stag (formatted true) (long_lines 0))
-    (../../bench/programs/power.stag (formatted true) (long_lines 0))
-    (../../bench/programs/sort.stag (formatted true) (long_lines 0))
-    (../../bench/programs/strings.stag (formatted true) (long_lines 0))
-    |}]
+  [%expect.unreachable]
+[@@expect.uncaught_exn {|
+  (* CR expect_test_collector: This test expectation appears to contain a backtrace.
+     This is strongly discouraged as backtraces are fragile.
+     Please change this test to not include a backtrace. *)
+  "t.stag:674:48-49: expected a constructor name, found `[`"
+  Raised at Base__Error.raise in file "src/error.ml" (inlined), line 9, characters 21-37
+  Called from Base__Error.raise_s in file "src/error.ml", line 10, characters 26-47
+  Called from Test_syntax__Test_printer.(fun) in file "syntax/test/test_printer.ml", line 693, characters 18-30
+  Called from Base__List0.iter in file "src/list0.ml", line 66, characters 4-7
+  Called from Test_syntax__Test_printer.(fun) in file "syntax/test/test_printer.ml", lines 691-705, characters 2-66
+  Called from Ppx_expect_runtime__Test_block.Configured.dump_backtrace in file "runtime/test_block.ml", line 142, characters 10-28
+
+  Trailing output
+  ---------------
+  (../../tests/basics.stag (formatted true) (long_lines 0))
+  (../../tests/core_basics.stag (formatted true) (long_lines 0))
+  |}]
 ;;
 
 let%expect_test "syntax the parser does not produce" =
@@ -910,11 +895,10 @@ let%bench "a long benchmark name" some_parameter in [first_argument_value; (seco
     let%bench "a long benchmark name" some_parameter in [
       first_argument_value;
       (second, argument);
-      let x = 1 in
-      x;
-      match x with
-      | A -> 1
-      | B -> 2;
+      (let x = 1 in x);
+      (match x with
+       | A -> 1
+       | B -> 2);
     ] =
       some_function some_parameter (and_another_argument some_parameter)
     |}];
@@ -926,7 +910,7 @@ let%bench "a long benchmark name" some_parameter in [first_argument_value; (seco
     let%bench "sort" n in [
       100;
       1000;
-      fun x -> x;
+      (fun x -> x);
     ] =
       sort (random_list n)
     |}]
@@ -993,12 +977,11 @@ let nested = [[first_element; second_element]; [third_element; fourth_element; f
 
     let h =
       [
-        let x = 1 in
-        x;
-        fun x -> x;
-        match x with
-        | A -> 1
-        | B -> 2;
+        (let x = 1 in x);
+        (fun x -> x);
+        (match x with
+         | A -> 1
+         | B -> 2);
         3;
       ].x
 

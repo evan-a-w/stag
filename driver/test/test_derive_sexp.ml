@@ -17,9 +17,9 @@ include .~(Core.Sexp.derive (type t))
     3 | include .~(Core.Sexp.derive (type t))
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: This declaration splice failed at compile time: Uncaught exception Failure "Sexp.derive: functions have no sexp conversion"
-    File "<core>/sexp.stag", line 999, characters 23-78:
-    999 |     let fail message = raise (Failure (String.append "Sexp.derive: " message))
-                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "<core>/sexp.stag", line 1132, characters 23-78:
+    1132 |     let fail message = raise (Failure (String.append "Sexp.derive: " message))
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Note: The error was raised here
     |}]
 ;;
@@ -36,9 +36,9 @@ include .~(Core.Sexp.derive (type t))
     3 | include .~(Core.Sexp.derive (type t))
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: This declaration splice failed at compile time: Uncaught exception Failure "Sexp.derive: t is abstract"
-    File "<core>/sexp.stag", line 999, characters 23-78:
-    999 |     let fail message = raise (Failure (String.append "Sexp.derive: " message))
-                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "<core>/sexp.stag", line 1132, characters 23-78:
+    1132 |     let fail message = raise (Failure (String.append "Sexp.derive: " message))
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Note: The error was raised here
     |}]
 ;;
@@ -55,9 +55,9 @@ include .~(Core.Sexp.derive (type t[{`B : unit}]))
     3 | include .~(Core.Sexp.derive (type t[{`B : unit}]))
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: This declaration splice failed at compile time: Uncaught exception Failure "Sexp.derive: row parameters are not supported"
-    File "<core>/sexp.stag", line 999, characters 23-78:
-    999 |     let fail message = raise (Failure (String.append "Sexp.derive: " message))
-                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "<core>/sexp.stag", line 1132, characters 23-78:
+    1132 |     let fail message = raise (Failure (String.append "Sexp.derive: " message))
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Note: The error was raised here
     |}]
 ;;
@@ -73,9 +73,9 @@ include .~(Core.Sexp.derive (type 'a))
     2 | include .~(Core.Sexp.derive (type 'a))
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: This declaration splice failed at compile time: Uncaught exception Failure "Sexp.derive: a declared type is needed, as in [derive (type t)]"
-    File "<core>/sexp.stag", line 999, characters 23-78:
-    999 |     let fail message = raise (Failure (String.append "Sexp.derive: " message))
-                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "<core>/sexp.stag", line 1132, characters 23-78:
+    1132 |     let fail message = raise (Failure (String.append "Sexp.derive: " message))
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Note: The error was raised here
     |}]
 ;;

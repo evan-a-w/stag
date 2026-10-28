@@ -345,7 +345,7 @@ let%expect_test "*_of_sexp: atoms" =
     unit -> Error unit_of_sexp: empty list needed: unit
     true -> Ok true
     false -> Ok false
-    True -> Error bool_of_sexp: true or false needed: True
+    True -> Ok true
     (true) -> Error bool_of_sexp: atom needed: (true)
     42 -> Ok 42
     -4611686018427387904 -> Ok -4611686018427387904
