@@ -2300,7 +2300,14 @@ let builtin_names =
     decl.name.txt)
 ;;
 
-let no_splices _ = raise_s [%message "The prelude has no declaration splices"]
+let no_splices splice : (_, Module_scope.Force_error.t) Result.t =
+  Error
+    (Failed
+       (Typecheck_error.create
+          ~loc:(Module_scope.Splice.loc splice)
+          (Declaration_splice_failed
+             (Error.of_string "the prelude cannot have declaration splices"))))
+;;
 
 let invalid_prelude error =
   raise_s [%message "The prelude is invalid" (error : Typecheck_error.t)]
@@ -2317,6 +2324,7 @@ let add_prelude (program : Program_env.t) toplevels =
       ~report:invalid_prelude
       ()
   in
+  List.iter Type_env.builtins ~f:(Type_env.declare program.type_env builtins);
   let prelude =
     Module_scope.create_root
       ~enclosing:builtins
@@ -2394,17 +2402,13 @@ let program_env t interpreter =
 
 (* The program's root module, within the prelude. *)
 let root t program_env ~enclosing =
-  let root =
-    Module_scope.create_root
-      ~enclosing
-      ~types:builtin_names
-      ~declare:(declare program_env ~in_prelude:false)
-      ~force:(generate t program_env)
-      ~report:(Program_env.report program_env)
-      ()
-  in
-  List.iter Type_env.builtins ~f:(Type_env.declare program_env.type_env root);
-  root
+  Module_scope.create_root
+    ~enclosing
+    ~types:builtin_names
+    ~declare:(declare program_env ~in_prelude:false)
+    ~force:(generate t program_env)
+    ~report:(Program_env.report program_env)
+    ()
 ;;
 
 (* Each once, by location, then in the order reported. A splice blocking one
@@ -2485,8 +2489,8 @@ let typecheck ({ fresh; interpreter; prelude = _ } as t) ~program =
   check_module fresh program_env root
 ;;
 
-let check_prelude ({ fresh; interpreter; prelude = _ } as t) =
+let check_prelude { fresh; interpreter; prelude } =
   let program_env = program_env fresh interpreter in
-  let prelude, (_ : Module_scope.t) = prelude_and_root t program_env in
+  let prelude = add_prelude program_env (force prelude) in
   check_module fresh program_env prelude
 ;;

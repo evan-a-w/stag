@@ -7,11 +7,15 @@ open! Import
 type t
 
 (** Initializes a server for a client of [capabilities] over the [files]
-    (relative path, contents), and removes them after [f]. *)
+    (relative path, contents) and [symlinks] (relative link, relative
+    target), and removes them after [f]. Its [stdlib] is that of [executable]
+    (relative), as [Server.run]'s is. *)
 val with_server
   :  ?limits:Limits.t
   -> ?capabilities:Yojson.Safe.t
   -> ?files:(string * string) list
+  -> ?symlinks:(string * string) list
+  -> ?executable:string
   -> (t -> unit)
   -> unit
 

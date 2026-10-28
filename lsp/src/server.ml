@@ -91,13 +91,26 @@ let document_of_path t path =
   Option.bind (Hashtbl.find t.paths path) ~f:(Hashtbl.find t.documents)
 ;;
 
+(* Symlinks resolved, as [Stdlib_checkout]'s are, so that a file has one
+   path. A file that does not exist is in its directory's canonical path. *)
+let canonical path =
+  let realpath path = Option.try_with (fun () -> Filename_unix.realpath path) in
+  match realpath path with
+  | Some path -> path
+  | None ->
+    Option.value_map
+      (realpath (Filename.dirname path))
+      ~default:path
+      ~f:(fun dir -> dir ^/ Filename.basename path)
+;;
+
 (* Documents without a file, eg. [untitled:Untitled-1], are named by a path
    of their own, eg. [/untitled_1.stag]. Only those of [file:] and
    [untitled:] are checked: others, eg. [git:], are views of files. *)
 let path_of_uri t uri =
   let string = Lsp.Uri.to_string uri in
   if String.is_prefix string ~prefix:"file:"
-  then Lsp.Uri.to_path uri, true
+  then canonical (Lsp.Uri.to_path uri), true
   else (
     let name =
       String.map
@@ -252,7 +265,10 @@ let check t ~uri (document : Document.t) =
     eprintf "stag lsp: checking %s: %s\n%!" document.path (Exn.to_string exn)
   | result ->
     let generations =
-      Map.mapi result.diagnostics ~f:(fun ~key ~data:_ -> generation t key)
+      Set.union
+        (Map.key_set result.diagnostics)
+        (String.Set.of_list result.depends_on)
+      |> Set.to_map ~f:(generation t)
     in
     Map.iter_keys result.diagnostics ~f:(fun path ->
       Option.iter (Hashtbl.find t.paths path) ~f:(fun uri ->
@@ -567,7 +583,7 @@ let close_document t (text_document : Types.TextDocumentIdentifier.t) =
    check may be out of date. *)
 let files_changed t (changes : Types.FileEvent.t list) =
   List.iter changes ~f:(fun change ->
-    let path = Lsp.Uri.to_path change.uri in
+    let path = canonical (Lsp.Uri.to_path change.uri) in
     if Option.is_none (document_of_path t path)
     then Hashtbl.incr t.generations path);
   Hashtbl.iteri t.documents ~f:(fun ~key ~data:(document : Document.t) ->

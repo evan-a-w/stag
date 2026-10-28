@@ -26,10 +26,10 @@ let create_interpreter ~limits ~output =
   interpreter
 ;;
 
-let check ?(limits = Limits.unlimited) ?output program =
+let check ?(limits = Limits.unlimited) ?output ?prelude program =
   let interpreter = create_interpreter ~limits ~output in
   let%map.Result checked =
-    Typecheck.typecheck (Typecheck.create ~interpreter ()) ~program
+    Typecheck.typecheck (Typecheck.create ~interpreter ?prelude ()) ~program
   in
   { checked; interpreter; eval_order = [] }
 ;;
@@ -130,11 +130,11 @@ let rec eval_order ~prefix ~references ~(items : Signature.t) members =
     | Group (_, members) -> eval_order ~prefix ~references ~items members)
 ;;
 
-let check_modules ?(limits = Limits.unlimited) ?output groups =
+let check_modules ?(limits = Limits.unlimited) ?output ?prelude groups =
   let interpreter = create_interpreter ~limits ~output in
   let%map.Result checked =
     Typecheck.typecheck
-      (Typecheck.create ~interpreter ())
+      (Typecheck.create ~interpreter ?prelude ())
       ~program:(List.map groups ~f:Module_group.to_toplevel)
   in
   let idents =
@@ -162,7 +162,7 @@ let eval ?(limits = Limits.unlimited) t =
   Treewalk.eval t.interpreter
 ;;
 
-let check_files ?limits ?output files =
+let check_files ?limits ?output ?prelude files =
   let parsed = List.map files ~f:Source_file.parse_recovering in
   let source_errors =
     List.concat_map parsed ~f:snd
@@ -175,6 +175,7 @@ let check_files ?limits ?output files =
        check_modules
          ?limits
          ?output
+         ?prelude
          (List.map modules ~f:(fun file -> Module_group.File file))
      with
      | Ok t when List.is_empty source_errors -> Ok t
