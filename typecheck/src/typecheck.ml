@@ -2221,7 +2221,14 @@ let builtin_names =
     decl.name.txt)
 ;;
 
-let no_splices _ = raise_s [%message "The prelude has no declaration splices"]
+let no_splices splice : (_, Module_scope.Force_error.t) Result.t =
+  Error
+    (Failed
+       (Typecheck_error.create
+          ~loc:(Module_scope.Splice.loc splice)
+          (Declaration_splice_failed
+             (Error.of_string "the prelude cannot have declaration splices"))))
+;;
 
 (* The prelude, outside the program's root module, sees the builtin types as
    the program does. *)

@@ -6,6 +6,7 @@
  (libraries
   stag_build
   stag_types
+  stag_common
   stag_driver
   core
   core_unix

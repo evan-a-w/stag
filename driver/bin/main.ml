@@ -158,13 +158,11 @@ let check_with_prelude_sources ~limits ~sources ~program =
            (Stdlib_checkout.root checkout))
     then (
       eprintf
-        "Error: %s and %s are sources of the preludes of different checkouts, \
-         %s and %s, which are not checked together\n\
+        "Error: %s and %s are sources of the preludes of different \
+         checkouts, which are not checked together\n\
          %!"
         (fst (List.hd_exn sources))
-        path
-        (Stdlib_checkout.root checkout)
-        (Stdlib_checkout.root other);
+        path;
       exit 1));
   match Stdlib_checkout.check ~limits checkout with
   | Error diagnostic ->
