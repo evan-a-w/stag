@@ -507,13 +507,18 @@ fails on them, and corrects them as expect tests are, in the same corrected
 file.
 
 An expansion is up to date when it prints as the generated declarations do
-(so modulo layout and comments), each resolved reference of the generated code
-(types, constructors, fields and values) printed as the shortest suffix of its
-full path naming it from the splice, whose first name the generated
-declarations do not declare (nor, for a single name, bind locally where it is
-used), else as its root path (`.M.t`) if that names it there. One that neither
-names (a prelude declaration a root module shadows) is printed
-`<prelude.M.t>`, which doesn't parse, so its expansion is always stale. The
+(so modulo layout and comments), each resolved reference and root path of the
+generated code (types, constructors, fields, values and modules) printed as the
+shortest suffix of its declaration's full path naming it where it is used in
+the expansion, read as if written in place of the splice: the generated
+declarations (of earlier expansions, and of this one, also within its modules)
+are in scope there, and a single name is not one bound locally where it is
+used. Else it is printed as its root path (`.M.t`) if that names it there. One
+that neither names (a prelude declaration a root module shadows) is printed
+`<prelude.M.t>`, which doesn't parse, so its expansion is always stale. So
+`.A.sexp_of_u` written by a generator in `a.stag` prints as `sexp_of_u` where
+nothing shadows it, `M.sexp_of_u` for `u` of `M` from outside `M`, and stays
+`.A.sexp_of_u` where a local `sexp_of_u` would capture it. The
 correction is the generated declarations printed so, indented by 2 from the
 leading whitespace of the splice's line, with the file's line endings,
 replacing the expansion and its comments but not comments on the splice's line

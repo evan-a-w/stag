@@ -26,14 +26,14 @@ let status ~written generated ~column ~path =
           | Root _ -> Option.value (shortest ()) ~default:decl_path.txt
           | Resolved name ->
             Option.value_or_thunk (shortest ()) ~default:(fun () ->
-            let name =
-              if Option.is_some (Prelude_path.relative name)
-              then Prelude_path.canonical (Prelude_path.root_path name)
-              else name
-            in
-            Path (Syntax.Path.name (sprintf "<%s>" name)))
+              let name =
+                if Option.is_some (Prelude_path.relative name)
+                then Prelude_path.canonical (Prelude_path.root_path name)
+                else name
+              in
+              Path (Syntax.Path.name (sprintf "<%s>" name)))
         in
-          { decl_path with txt = path }))
+        { decl_path with txt = path }))
     |> print
   in
   if String.equal (print written) generated

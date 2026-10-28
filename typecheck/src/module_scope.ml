@@ -762,23 +762,23 @@ let find_path ?generated t namespace (path : Decl_path.t) ~loc ~unbound =
         | Found name -> Ok (Resolved.Found name, blocked)
         | Unbound -> Error (Typecheck_error.create ~loc (unbound path))
         | Absent ->
-       let%bind.Result module_ = open_module found.module_ head ~path ~loc in
-       let%map.Result name =
-         find_member
-           ?generated
-           module_
-           namespace
-           member
-           rest
-           ~path
-           ~written:[ head ]
-           ~loc
-           ~unbound
-           ~blocked
-           ~hint:
-             (with_prelude_hint found ~head ~rest:(member :: rest) namespace)
-       in
-       Resolved.Found name, blocked))
+          let%bind.Result module_ = open_module found.module_ head ~path ~loc in
+          let%map.Result name =
+            find_member
+              ?generated
+              module_
+              namespace
+              member
+              rest
+              ~path
+              ~written:[ head ]
+              ~loc
+              ~unbound
+              ~blocked
+              ~hint:
+                (with_prelude_hint found ~head ~rest:(member :: rest) namespace)
+          in
+          Resolved.Found name, blocked))
 ;;
 
 (* The error for [path], whose first name is not found from [t] past
@@ -943,7 +943,8 @@ let resolve_in_expansion
     | Ok (_, Some _) | Error _ -> None
   in
   match path with
-  | Resolved _ -> raise_s [%message "Module_scope: a resolved path is not looked up"]
+  | Resolved _ ->
+    raise_s [%message "Module_scope: a resolved path is not looked up"]
   | Root _ -> from_splice path
   | Path names ->
     let names = (names :> string list) in
@@ -986,9 +987,7 @@ let path_from_splice splice toplevels namespace ~modules ~locals path =
     | Path _ | Root _ -> resolve path
   in
   let resolves path =
-    Option.some_if
-      (Option.equal String.equal (resolve path) (Some name))
-      path
+    Option.some_if (Option.equal String.equal (resolve path) (Some name)) path
   in
   let names = String.split name ~on:'.' in
   List.init (List.length names) ~f:(fun i ->

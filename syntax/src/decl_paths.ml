@@ -151,8 +151,7 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
         Type { name; params; kind }
       | Exception (n, ts) -> Exception (n, List.map ts ~f:type_expr)
       | Module (n, ts) ->
-        Module
-          (n, List.map ts ~f:(map' ~modules:(modules @ [ n.txt ]) ~f:f'))
+        Module (n, List.map ts ~f:(map' ~modules:(modules @ [ n.txt ]) ~f:f'))
       | Module_splice (n, e, expansion) ->
         Module_splice (n, expr String.Set.empty e, expansion)
       | Include (e, expansion) -> Include (expr String.Set.empty e, expansion)

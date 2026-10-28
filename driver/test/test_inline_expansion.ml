@@ -850,8 +850,10 @@ end
 module%inline S = .~[def "x" [] (v ".A.one"); def "y" [] (v ".A.S.x")]
 end%inline
 let s = S.y
-|});
-  [%expect {|
+|}
+    );
+  [%expect
+    {|
     File "a.stag", line 21, characters 0-55:
     21 | include%inline .~[def "succ" ["x"] (app ".A.plus" "x")]
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -961,8 +963,10 @@ include%inline .~[
   let succ x = plus x
   let plus x = one x
 end%inline
-|});
-  [%expect {|
+|}
+    );
+  [%expect
+    {|
     File "a.stag", line 26, characters 15-18:
     26 |   let plus x = one x
                         ^^^
@@ -1030,8 +1034,10 @@ end%inline
 let s = S.y
 let%expect_test "values" =
   print_int (Int.add M.m (Int.add three (Int.add (N.n 0) (Int.add P.p (Int.add Q.q s)))))
-|});
-  [%expect {xxx|
+|}
+    );
+  [%expect
+    {xxx|
     ((name (values @ a.stag:75:16-24))
      (mismatches (((loc a.stag:76:89-89) (expected ()) (actual 6)))) (error ()))
     --- a.stag corrected ---
