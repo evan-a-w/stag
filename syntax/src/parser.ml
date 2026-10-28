@@ -616,6 +616,11 @@ let nominal_record_ahead t =
   go 1
 ;;
 
+let pattern_parameter =
+  "patterns are not allowed as parameters, only `x`, `_` or `(x : t)`; use \
+   `match`"
+;;
+
 (** [x], [_] or [(x : t)]. *)
 let param t : Binding.t =
   let binder t =
@@ -629,6 +634,9 @@ let param t : Binding.t =
   match peek t with
   | Lparen ->
     let open_loc = loc t in
+    (match peek_at t 1, peek_at t 2 with
+     | (Lident _ | Underscore), Colon -> ()
+     | _ -> fail open_loc pattern_parameter);
     advance t;
     let name = binder t in
     expect t Colon;
@@ -702,7 +710,12 @@ and fun_ t ~seq : Expr.t =
   let start = loc t in
   expect t Fun;
   let params = params t in
-  if List.is_empty params then expected t "a parameter";
+  if List.is_empty params
+  then (
+    match peek t with
+    | Uident _ | Label _ | Int _ | Char _ | String _ | True | False | Lbrace ->
+      fail (loc t) pattern_parameter
+    | _ -> expected t "a parameter");
   expect t Arrow;
   let body = expr t ~seq in
   expr_at ~loc:(Loc.merge start body.loc) (Expr.Fun (params, body))

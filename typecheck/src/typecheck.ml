@@ -293,6 +293,14 @@ let function_type
       ~(args : (Source.Binder.t * Syntax.Type_expr.t option) list)
       ~annot
   =
+  let%bind.Result () =
+    check_no_duplicates
+      (List.filter_map args ~f:(fun ((binder : Source.Binder.t), _) ->
+         match binder with
+         | Name name when not (String.equal name.txt "_") -> Some name
+         | Name _ | Ident _ -> None))
+      ~error:(fun name -> Duplicate_parameter name)
+  in
   let annot_type = function
     | None -> Ok (Scope.fresh_ty t scope)
     | Some annot -> Scope.elaborate scope annot

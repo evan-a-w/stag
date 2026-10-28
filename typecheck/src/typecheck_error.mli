@@ -79,6 +79,7 @@ module Kind : sig
     | Misplaced_exception_pattern
     | Match_without_value_cases
     | Duplicate_pattern_variable of string
+    | Duplicate_parameter of string
     | Duplicate_row_entry of string
     | Compile_time_use_of_toplevel_being_checked of string
     (** It can't be evaluated yet. *)

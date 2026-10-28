@@ -800,3 +800,35 @@ let main = print_int n
     1
     |}]
 ;;
+
+let%expect_test "parameters are distinct" =
+  run "let f x x = x";
+  [%expect
+    {|
+    File "a.stag", line 1, characters 8-9:
+    1 | let f x x = x
+                ^
+    Error: The parameter x is bound several times in this function
+    |}];
+  run "let f = fun x y x -> x";
+  [%expect
+    {|
+    File "a.stag", line 1, characters 16-17:
+    1 | let f = fun x y x -> x
+                        ^
+    Error: The parameter x is bound several times in this function
+    |}];
+  run "let f (x : int) (x : int) = x";
+  [%expect
+    {|
+    File "a.stag", line 1, characters 17-18:
+    1 | let f (x : int) (x : int) = x
+                         ^
+    Error: The parameter x is bound several times in this function
+    |}];
+  run
+    "let f _ _ = 1\n\
+     let g = fun _ _ -> 2\n\
+     let main = print_int (Int.add (f 1 2) (g 3 4))";
+  [%expect {| 3 |}]
+;;

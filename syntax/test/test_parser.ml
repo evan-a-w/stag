@@ -293,6 +293,11 @@ let%expect_test "anonymous functions" =
   expr "fun x";
   expr "fun 1 -> x";
   expr "fun (x, y) -> x";
+  expr "fun () -> x";
+  expr "fun (x) -> x";
+  expr "fun x (A y) -> x";
+  expr "fun {x = y} -> y";
+  expr "fun in";
   expr "f fun x -> x";
   [%expect
     {|
@@ -308,8 +313,13 @@ let%expect_test "anonymous functions" =
     (Record ((x (Fun ((y ())) (Var y ()))) (z (Lit (Int 1)))))
     t.stag:1:4-6: expected a parameter, found `->`
     t.stag:1:5-5: expected `->`, found end of file
-    t.stag:1:4-5: expected a parameter, found `1`
-    t.stag:1:6-7: expected `:`, found `,`
+    t.stag:1:4-5: patterns are not allowed as parameters, only `x`, `_` or `(x : t)`; use `match`
+    t.stag:1:4-5: patterns are not allowed as parameters, only `x`, `_` or `(x : t)`; use `match`
+    t.stag:1:4-5: patterns are not allowed as parameters, only `x`, `_` or `(x : t)`; use `match`
+    t.stag:1:4-5: patterns are not allowed as parameters, only `x`, `_` or `(x : t)`; use `match`
+    t.stag:1:6-7: patterns are not allowed as parameters, only `x`, `_` or `(x : t)`; use `match`
+    t.stag:1:4-5: patterns are not allowed as parameters, only `x`, `_` or `(x : t)`; use `match`
+    t.stag:1:4-6: expected a parameter, found `in`
     t.stag:1:2-5: expected end of file, found `fun`
     |}]
 ;;

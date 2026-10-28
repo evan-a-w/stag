@@ -73,6 +73,7 @@ module Kind = struct
     | Misplaced_exception_pattern
     | Match_without_value_cases
     | Duplicate_pattern_variable of string
+    | Duplicate_parameter of string
     | Duplicate_row_entry of string
     | Compile_time_use_of_toplevel_being_checked of string
     | Expect_outside_expect_test
@@ -311,6 +312,8 @@ let rec kind_message (kind : Kind.t) ~show_type =
     "A match must have a case for the value, not only exception cases"
   | Duplicate_pattern_variable name ->
     sprintf "The variable %s is bound several times in this matching" name
+  | Duplicate_parameter name ->
+    sprintf "The parameter %s is bound several times in this function" name
   | Duplicate_row_entry name ->
     sprintf "The label %s is given more than once" name
   | Compile_time_use_of_toplevel_being_checked name ->
