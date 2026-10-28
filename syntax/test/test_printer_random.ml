@@ -10,6 +10,8 @@ module Gen = struct
   type t =
     { random : Random.State.t
     ; mutable size : int
+    ; deep : bool
+      (** Whether to take the recursive choices while size is left. *)
     }
 
   let int t n = Random.State.int t.random n
@@ -23,16 +25,19 @@ module Gen = struct
   (* Each choice is weighted, and the recursive ones are only taken while
      there is size left, which they use up. *)
   let choose t ~leaves ~nodes =
-    if t.size <= 0 || int t 4 = 0
+    if t.size <= 0 || ((not t.deep) && int t 4 = 0)
     then (pick t leaves) t
     else (
       t.size <- t.size - 1;
       (pick t nodes) t)
   ;;
 
-  let lident t = pick t [ "x"; "y"; "long_name"; "f" ]
-  let uident t = pick t [ "A"; "B"; "Some_constructor" ]
-  let label t = loc (pick t [ "a"; "b"; "long_label" ])
+  let lident t =
+    pick t [ "x"; "y"; "long_name"; "f"; "x'"; "_x"; "in_"; "letx"; "with'" ]
+  ;;
+
+  let uident t = pick t [ "A"; "B"; "Some_constructor"; "A'"; "B_" ]
+  let label t = loc (pick t [ "a"; "b"; "long_label"; "A"; "Some_tag"; "_x'" ])
   let name t = loc (lident t)
 
   let path t ~last =
@@ -41,7 +46,21 @@ module Gen = struct
   ;;
 
   let string t =
-    pick t [ ""; "s"; "a\"b\\c\n\t\001é"; "|}"; "a long string literal" ]
+    pick
+      t
+      [ ""
+      ; "s"
+      ; "a\"b\\c\n\t\001é"
+      ; "|}"
+      ; "{|"
+      ; "a |x} b |} c"
+      ; "\r\n"
+      ; "\255\254 bytes"
+      ; "a long string literal"
+      ; "\n\nleading and trailing blank lines\n\n"
+      ; "\n  indented\n    more\n  less\n"
+      ; "line one\nline two"
+      ]
   ;;
 
   let lit t : Lit.t =
@@ -59,12 +78,12 @@ module Gen = struct
       ]
   ;;
 
-  let rec row t ~entry : Type_expr.row =
+  let rec row ?(label = label) t ~entry : Type_expr.row =
     loc
       (match int t 3 with
        | 0 -> Type_expr.Empty
        | 1 -> Var (loc "r")
-       | _ -> Extend (label t, entry t, row t ~entry))
+       | _ -> Extend (label t, entry t, row ~label t ~entry))
   ;;
 
   let rec type_expr t : Type_expr.t =
@@ -88,7 +107,10 @@ module Gen = struct
            ; (fun t -> Arrow (type_expr t, type_expr t))
            ; (fun t -> Tuple (list t ~min:2 ~max:3 type_expr))
            ; (fun t ->
-               Code { inner = type_expr t; context = row t ~entry:type_expr })
+               Code
+                 { inner = type_expr t
+                 ; context = row ~label:name t ~entry:type_expr
+                 })
            ; (fun t -> Record (row t ~entry:type_expr))
            ; (fun t ->
                Variant
@@ -109,7 +131,7 @@ module Gen = struct
            ]
          ~nodes:
            [ (fun t -> Tuple (list t ~min:2 ~max:3 pattern))
-           ; (fun t -> Construct (loc (path t ~last:uident), [ non_tuple t ]))
+           ; (fun t -> Construct (loc (path t ~last:uident), [ pattern t ]))
            ; (fun t ->
                Construct
                  (loc (path t ~last:uident), list t ~min:2 ~max:3 pattern))
@@ -124,11 +146,6 @@ module Gen = struct
                  ; rest = pick t [ Pattern.Rest.Closed; Open; Bind (name t) ]
                  })
            ])
-
-  and non_tuple t =
-    match pattern t with
-    | { txt = Tuple _; _ } -> non_tuple t
-    | p -> p
   ;;
 
   let binding t : Binding.t = name t, Option.some_if (bool t) (type_expr t)
@@ -168,7 +185,7 @@ module Gen = struct
                  })
            ; (fun t -> Quote (expr t))
            ; (fun t -> Tuple (list t ~min:2 ~max:3 expr))
-           ; (fun t -> Construct (loc (path t ~last:uident), [ non_tuple t ]))
+           ; (fun t -> Construct (loc (path t ~last:uident), [ expr t ]))
            ; (fun t ->
                Construct (loc (path t ~last:uident), list t ~min:2 ~max:3 expr))
            ; (fun t ->
@@ -190,12 +207,6 @@ module Gen = struct
                  (expr t, list t ~min:1 ~max:3 (fun t -> label t, expr t)))
            ; (fun t -> Poly_variant (label t, Some (expr t)))
            ])
-
-  (* A tuple argument would be taken as several. *)
-  and non_tuple t =
-    match expr t with
-    | { txt = Tuple _; _ } -> non_tuple t
-    | e -> e
   ;;
 
   let type_decl t : Type_decl.t =
@@ -233,16 +244,127 @@ module Gen = struct
   ;;
 end
 
+module Line_counts = struct
+  type t =
+    { lines : int
+    ; over_width : int
+    }
+  [@@deriving sexp_of]
+
+  let zero = { lines = 0; over_width = 0 }
+
+  let ( + ) a b =
+    { lines = a.lines + b.lines; over_width = a.over_width + b.over_width }
+  ;;
+
+  let of_string s ~width =
+    let lines = String.split_lines s in
+    { lines = List.length lines
+    ; over_width = List.count lines ~f:(fun line -> String.length line > width)
+    }
+  ;;
+end
+
+(* Each width's line counts, summed. *)
+module Counts = struct
+  type t = Line_counts.t Int.Map.t [@@deriving sexp_of]
+
+  let add t ~width counts =
+    Map.update t width ~f:(fun existing ->
+      Line_counts.(Option.value existing ~default:zero + counts))
+  ;;
+end
+
+(* Round trips [t] at each width, counting the printed lines. *)
+let check
+      counts
+      ~widths
+      ~(round_trip : ?widths:int list -> 'a -> unit)
+      ~(print : ?width:int -> 'a -> string)
+      t
+  =
+  round_trip ~widths t;
+  List.fold widths ~init:counts ~f:(fun counts width ->
+    if width < 10
+    then counts
+    else
+      Counts.add counts ~width (Line_counts.of_string (print ~width t) ~width))
+;;
+
+let check_all counts ~widths (gen : unit -> Gen.t) =
+  let type_expr = Gen.type_expr (gen ()) in
+  let pattern = Gen.pattern (gen ()) in
+  let expr = Gen.expr (gen ()) in
+  let program =
+    let gen = gen () in
+    List.init 3 ~f:(fun _ -> Gen.toplevel gen)
+  in
+  let counts =
+    check
+      counts
+      ~widths
+      ~round_trip:Round_trip.type_expr
+      ~print:Printer.type_expr
+      type_expr
+  in
+  let counts =
+    check
+      counts
+      ~widths
+      ~round_trip:Round_trip.pattern
+      ~print:Printer.pattern
+      pattern
+  in
+  let counts =
+    check counts ~widths ~round_trip:Round_trip.expr ~print:Printer.expr expr
+  in
+  check
+    counts
+    ~widths
+    ~round_trip:Round_trip.program
+    ~print:Printer.program
+    program
+;;
+
+(* Lines over the width are mostly from nesting deeper than the width, and
+   chains of long constructor names. *)
 let%expect_test "random syntax round trips" =
   let random = Random.State.make [| 0 |] in
-  let widths = [ 80; 30; 1 ] in
+  let counts = ref Int.Map.empty in
   for size = 0 to 5000 do
-    let gen () = { Gen.random; size = size % 60 } in
-    Round_trip.type_expr ~widths (Gen.type_expr (gen ()));
-    Round_trip.pattern ~widths (Gen.pattern (gen ()));
-    Round_trip.expr ~widths (Gen.expr (gen ()));
-    let gen = gen () in
-    Round_trip.program ~widths (List.init 3 ~f:(fun _ -> Gen.toplevel gen))
+    counts
+    := check_all !counts ~widths:[ 80; 30; 1 ] (fun () ->
+         { Gen.random; size = size % 60; deep = false })
   done;
-  [%expect {| |}]
+  print_s [%sexp (!counts : Counts.t)];
+  [%expect
+    {|
+    ((30 ((lines 521108) (over_width 266269)))
+     (80 ((lines 397110) (over_width 64579))))
+    |}]
+;;
+
+let%expect_test "deep random syntax round trips" =
+  let random = Random.State.make [| 1 |] in
+  let start = Time_ns.now () in
+  let time_limit = Time_ns.Span.of_sec 60. in
+  let counts = ref Int.Map.empty in
+  let count = ref 0 in
+  while
+    !count < 200
+    && Time_ns.Span.( < ) (Time_ns.diff (Time_ns.now ()) start) time_limit
+  do
+    counts
+    := check_all !counts ~widths:[ 80; 30 ] (fun () ->
+         { Gen.random; size = 20 + !count; deep = true });
+    incr count
+  done;
+  print_s [%message (count : int ref) (!counts : Counts.t)];
+  [%expect
+    {|
+    ((count 200)
+     (!counts
+      ((30 ((lines 95172) (over_width 79873)))
+       (80 ((lines 88529) (over_width 57231))))))
+    |}]
 ;;

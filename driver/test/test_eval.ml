@@ -293,3 +293,46 @@ let fails_at_expansion = .~(match C with A -> .<0>.)
      @ t.stag:4:25-52)
     |}]
 ;;
+
+let%expect_test "a constructor of one tuple argument, and one of two" =
+  eval
+    {|
+type t = C of (int * int)
+type u = D of int * int
+let c = C ((1, 2))
+let d = D (1, 2)
+let pair = (3, 4)
+let c' = C pair
+let first = match c with C ((a, b)) -> a
+let whole = match c' with C p -> p
+let second = match d with D (a, b) -> b
+|};
+  [%expect
+    {|
+    (c (C (Tuple 1 2)))
+    (d (D 1 2))
+    (pair (Tuple 3 4))
+    (c' (C (Tuple 3 4)))
+    (first 1)
+    (whole (Tuple 3 4))
+    (second 2)
+    |}];
+  List.iter
+    ~f:(fun source -> ignore (typecheck (source ^ "\n") : _ option))
+    [ "type t = C of (int * int)\nlet c = C (1, 2)"
+    ; "type t = C of (int * int)\nlet f x = match x with C (a, b) -> a"
+    ; "type u = D of int * int\nlet d = D ((1, 2))"
+    ; "type u = D of int * int\nlet f x = match x with D ((a, b)) -> a"
+    ];
+  [%expect
+    {|
+    ((Constructor_arity_mismatch (constructor C) (expected 1) (got 2)) @
+     t.stag:2:8-16)
+    ((Constructor_arity_mismatch (constructor C) (expected 1) (got 2)) @
+     t.stag:2:23-31)
+    ((Constructor_arity_mismatch (constructor D) (expected 2) (got 1)) @
+     t.stag:2:8-18)
+    ((Constructor_arity_mismatch (constructor D) (expected 2) (got 1)) @
+     t.stag:2:23-33)
+    |}]
+;;

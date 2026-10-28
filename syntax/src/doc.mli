@@ -36,5 +36,15 @@ val align : t -> t
 
 val group : t -> t
 
+(** [a] if it fits, otherwise [b]. In a flat group, [a] (flat). In a broken
+    one, [a] fits if, laid out with its groups flat and its other [line]s
+    broken, each of its lines fits, as does the rest of the line after it.
+    Then [a]'s groups decide for themselves as usual. Deciding looks at no
+    more of [a] than a group does, per line of [a] outside its groups. *)
+val alt : t -> t -> t
+
+(** Whether [t] fits on one line of [width], flat. *)
+val fits_flat : width:int -> t -> bool
+
 (** Lines end without trailing spaces (but those of texts). *)
 val render : ?width:int -> t -> string

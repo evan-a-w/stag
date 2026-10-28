@@ -300,6 +300,26 @@ let decls = enum names
 let bad = enum (Stag.Cons ("Red", Stag.Cons ("light blue", Stag.Nil)))
 let keyword = Stag.Cons (Stag.Toplevel.let_ "match" Stag.Nil (Stag.Expr.var "x"), Stag.Nil)
 let bad_path = Stag.Cons (Stag.Toplevel.let_ "x" Stag.Nil (Stag.Expr.var "M..y"), Stag.Nil)
+
+(* Shapes the parser does not make itself, eg. a constructor of one tuple. *)
+let int n = Stag.Expr.Lit (Stag.Lit.Int n)
+let pair = Stag.Expr.Tuple (Stag.Cons (int 1, Stag.Cons (Stag.Expr.Construct ("D", Stag.Cons (int 2, Stag.Nil)), Stag.Nil)))
+let one_tuple = Stag.Expr.Construct ("C", Stag.Cons (pair, Stag.Nil))
+let var x = Stag.Pattern.Var x
+let pair_pattern = Stag.Pattern.Tuple (Stag.Cons (var "a", Stag.Cons (var "b", Stag.Nil)))
+let first =
+  Stag.Expr.Match
+    ( Stag.Expr.var "one_tuple"
+    , Stag.Cons ((Stag.Pattern.Construct ("C", Stag.Cons (pair_pattern, Stag.Nil)), Stag.Expr.var "a"), Stag.Nil) )
+let shapes =
+  Stag.Cons
+    ( Stag.Toplevel.Type
+        {`name = "t"; `params = Stag.Nil; `kind = Stag.Type_decl.Kind.Variant (Stag.Cons (("C", Stag.Cons (Stag.Type_expr.Tuple (Stag.Cons (Stag.Type_expr.Con ("int", Stag.Nil), Stag.Cons (Stag.Type_expr.Con ("t", Stag.Nil), Stag.Nil))), Stag.Nil)), Stag.Cons (("D", Stag.Cons (Stag.Type_expr.Con ("int", Stag.Nil), Stag.Nil)), Stag.Nil)))}
+    , Stag.Cons
+        ( Stag.Toplevel.let_ "one_tuple" Stag.Nil one_tuple
+        , Stag.Cons
+            ( Stag.Toplevel.let_ "first" Stag.Nil first
+            , Stag.Nil ) ) )
 |}
 ;;
 
@@ -307,6 +327,8 @@ let%expect_test "declarations computed by a stag program" =
   let value = eval_values generator "Gen.decls" in
   let program = Syntax_value.Program.of_value value ~loc:Loc.none |> ok_exn in
   print_s [%sexp (program : Syntax.Program.t)];
+  Round_trip.program program;
+  print_string (Printer.program program);
   [%expect
     {|
     ((Type
@@ -316,6 +338,13 @@ let%expect_test "declarations computed by a stag program" =
        (((Construct Red ()) (Lit (String Red)))
         ((Construct Green ()) (Lit (String Green)))
         ((Construct Blue ()) (Lit (String Blue)))))))
+    type t = Red | Green | Blue
+
+    let to_string x =
+      match x with
+      | Red -> "Red"
+      | Green -> "Green"
+      | Blue -> "Blue"
     |}];
   (* The generated declarations check, and work, as written. *)
   Source_helpers.run_program
@@ -340,10 +369,53 @@ let print_all = print_endline (to_string Red); print_endline (to_string Blue)
     |}]
 ;;
 
+(* Generated syntax is also checked to round trip through [Printer], as it may
+   have shapes the parser does not make. *)
 let print_program value =
   match Syntax_value.Program.of_value value ~loc:Loc.none with
-  | Ok program -> print_s [%sexp (program : Syntax.Program.t)]
+  | Ok program ->
+    print_s [%sexp (program : Syntax.Program.t)];
+    Round_trip.program program
   | Error error -> print_error error
+;;
+
+let%expect_test "generated syntax the parser does not make" =
+  let program =
+    Syntax_value.Program.of_value
+      (eval_values generator "Gen.shapes")
+      ~loc:Loc.none
+    |> ok_exn
+  in
+  print_s (Round_trip.strip_locs [%sexp (program : Syntax.Program.t)]);
+  Round_trip.program program;
+  print_string (Printer.program program);
+  [%expect
+    {|
+    ((Type
+      ((name t) (params ())
+       (kind
+        (Variant ((C ((Tuple ((Con int ()) (Con t ()))))) (D ((Con int ()))))))))
+     (Let one_tuple () ()
+      (Construct C ((Tuple ((Lit (Int 1)) (Construct D ((Lit (Int 2)))))))))
+     (Let first () ()
+      (Match (Var one_tuple ())
+       (((Construct C ((Tuple ((Var a) (Var b))))) (Var a ()))))))
+    type t = C of (int * t) | D of int
+
+    let one_tuple = C ((1, D 2))
+    let first = match one_tuple with C ((a, b)) -> a
+    |}];
+  Source_helpers.run_program ~prelude:false program;
+  [%expect
+    {|
+    type t = C of (int * t) | D of int
+    val one_tuple : t
+    val first : int
+    -- evaluated at compile time
+    -- evaluated
+    (one_tuple (C (Tuple 1 (D 2))))
+    (first 1)
+    |}]
 ;;
 
 let%expect_test "malformed values" =
@@ -382,7 +454,9 @@ let other = Some 1
 
 let print_expr value =
   match Syntax_value.Expr.of_value value ~loc:Loc.none with
-  | Ok expr -> print_s [%sexp (expr : Syntax.Expr.t)]
+  | Ok expr ->
+    print_s [%sexp (expr : Syntax.Expr.t)];
+    Round_trip.expr expr
   | Error error -> print_error error
 ;;
 

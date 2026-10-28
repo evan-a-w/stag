@@ -91,3 +91,131 @@ let%expect_test "if_break, cut and hardline" =
         d
     |}]
 ;;
+
+let%expect_test "a group fits only if the text after it, up to a line, fits too"
+  =
+  let doc after = group (text "f" ^^ nest 2 (line ^^ text "x")) ^^ after in
+  List.iter
+    [ text "+tail"
+    ; group (text "+tail" ^^ line ^^ text "more")
+    ; text "+tail" ^^ hardline ^^ text "more"
+    ]
+    ~f:(fun after ->
+      List.iter [ 8; 7 ] ~f:(fun width ->
+        printf "-- width %d\n%s\n" width (render ~width (doc after))));
+  [%expect
+    {|
+    -- width 8
+    f x+tail
+    -- width 7
+    f
+      x+tail
+    -- width 8
+    f x+tail
+    more
+    -- width 7
+    f
+      x+tail
+    more
+    -- width 8
+    f x+tail
+    more
+    -- width 7
+    f
+      x+tail
+    more
+    |}]
+;;
+
+let%expect_test
+    "nest indents from the enclosing indentation, align from the column"
+  =
+  let body = text "a" ^^ line ^^ text "b" in
+  show (text "xyz(" ^^ nest 2 (align body) ^^ text ")");
+  show (text "xyz(" ^^ align (nest 2 body) ^^ text ")");
+  show (text "xyz(" ^^ nest 2 (line ^^ align body) ^^ text ")");
+  [%expect
+    {|
+    -- width 15
+    xyz(a
+        b)
+    -- width 12
+    xyz(a
+        b)
+    -- width 5
+    xyz(a
+        b)
+    -- width 15
+    xyz(a
+          b)
+    -- width 12
+    xyz(a
+          b)
+    -- width 5
+    xyz(a
+          b)
+    -- width 15
+    xyz(
+      a
+      b)
+    -- width 12
+    xyz(
+      a
+      b)
+    -- width 5
+    xyz(
+      a
+      b)
+    |}]
+;;
+
+let%expect_test "alt: [a] while its lines all fit with its groups flat" =
+  let record =
+    group
+      (text "{"
+       ^^ nest
+            2
+            (cut ^^ separate (text ";" ^^ line) [ text "x = 1"; text "y = 2" ])
+       ^^ cut
+       ^^ text "}")
+  in
+  let definition =
+    group
+      (text "let r ="
+       ^^ alt
+            (nest 2 (line ^^ record) ^^ line ^^ text "in")
+            (text " " ^^ record ^^ text " in"))
+  in
+  List.iter [ 30; 20; 15 ] ~f:(fun width ->
+    printf "-- width %d\n%s\n" width (render ~width definition));
+  [%expect
+    {|
+    -- width 30
+    let r = {x = 1; y = 2} in
+    -- width 20
+    let r =
+      {x = 1; y = 2}
+    in
+    -- width 15
+    let r = {
+      x = 1;
+      y = 2
+    } in
+    |}]
+;;
+
+let%expect_test "fits_flat" =
+  let doc = group (text "abc" ^^ line ^^ text "def") in
+  List.iter [ 7; 6 ] ~f:(fun width ->
+    printf "%d %b\n" width (fits_flat ~width doc));
+  print_s
+    [%sexp (fits_flat ~width:80 (text "a" ^^ hardline ^^ text "b") : bool)];
+  print_s [%sexp (fits_flat ~width:80 (text "a\nb") : bool)];
+  [%expect
+    {|
+    7 true
+    6 false
+    false
+    false
+    |}]
+;;

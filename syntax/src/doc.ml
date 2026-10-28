@@ -10,6 +10,7 @@ type t =
   | Nest of int * t
   | Align of t
   | Group of t
+  | Alt of t * t
 
 let empty = Empty
 let text s = Text s
@@ -35,6 +36,7 @@ let if_break s = If_break s
 let nest n t = Nest (n, t)
 let align t = Align t
 let group t = Group t
+let alt a b = Alt (a, b)
 
 module Mode = struct
   type t =
@@ -67,7 +69,58 @@ let rec fits width (commands : (int * Mode.t * t) list) =
         | Flat -> fits width rest
         | Break -> fits (width - String.length s) rest)
      | Cat (a, b) -> fits width ((indent, mode, a) :: (indent, mode, b) :: rest)
-     | Nest (_, t) | Align t | Group t -> fits width ((indent, mode, t) :: rest))
+     | Nest (_, t) | Align t | Group t -> fits width ((indent, mode, t) :: rest)
+     | Alt (a, b) ->
+       let t =
+         match mode with
+         | Flat -> a
+         | Break -> b
+       in
+       fits width ((indent, mode, t) :: rest))
+;;
+
+let fits_flat ~width t = fits width [ 0, Flat, t ]
+
+(* Whether [t], starting at [col] and laid out with its groups flat (its other
+   lines broken), fits in [width] on each of its lines: the column it ends at
+   if so. Only the lines of [t] are looked at, each up to the width. *)
+let fits_all ~width ~col ~indent t =
+  let rec go col (commands : (int * Mode.t * t) list) =
+    if col > width
+    then None
+    else (
+      match commands with
+      | [] -> Some col
+      | (indent, mode, t) :: rest ->
+        (match t with
+         | Empty -> go col rest
+         | Text s ->
+           (match String.rindex s '\n' with
+            | None -> go (col + String.length s) rest
+            | Some i ->
+              (match mode, String.index s '\n' with
+               | Break, Some first when col + first <= width ->
+                 go (String.length s - i - 1) rest
+               | _ -> None))
+         | Line s ->
+           (match mode with
+            | Flat -> go (col + String.length s) rest
+            | Break -> go indent rest)
+         | Hardline ->
+           (match mode with
+            | Flat -> None
+            | Break -> go indent rest)
+         | If_break s ->
+           (match mode with
+            | Flat -> go col rest
+            | Break -> go (col + String.length s) rest)
+         | Cat (a, b) -> go col ((indent, mode, a) :: (indent, mode, b) :: rest)
+         | Nest (n, t) -> go col ((indent + n, mode, t) :: rest)
+         | Align t -> go col ((col, mode, t) :: rest)
+         | Group t -> go col ((indent, Flat, t) :: rest)
+         | Alt (a, _) -> go col ((indent, Flat, a) :: rest)))
+  in
+  go col [ indent, Break, t ]
 ;;
 
 let render ?(width = 80) t =
@@ -124,7 +177,17 @@ let render ?(width = 80) t =
              then Flat
              else Break
          in
-         go ((indent, mode, t) :: rest))
+         go ((indent, mode, t) :: rest)
+       | Alt (a, b) ->
+         let chosen : t * Mode.t =
+           match mode with
+           | Flat -> a, Flat
+           | Break ->
+             (match fits_all ~width ~col:!col ~indent a with
+              | Some col when fits (width - col) rest -> a, Break
+              | _ -> b, Break)
+         in
+         go ((indent, snd chosen, fst chosen) :: rest))
   in
   go [ 0, Break, t ];
   Buffer.contents buf

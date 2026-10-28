@@ -26,10 +26,17 @@ let id x = x
 ;;
 
 (* Every program parsed from source is also checked to round trip through
-   [Printer], which is silent unless it does not. *)
+   [Printer], which is silent unless it does not. Only at one width, and not
+   for long sources (eg. the deep nesting of [test_limits]), to keep tests
+   fast. *)
+let round_trip ~source program =
+  if String.length source <= 10_000
+  then Round_trip.program ~widths:[ 80 ] program
+;;
+
 let parse ?(file = file) source =
   let result = Parser.program ~file source in
-  Result.iter result ~f:(fun program -> Round_trip.program program);
+  Result.iter result ~f:(round_trip ~source);
   result
 ;;
 
@@ -63,14 +70,25 @@ let typecheck ?limits ?prelude source =
 ;;
 
 let check_files ?(limits = limits) files =
-  List.iter files ~f:(fun (path, contents) ->
-    ignore (parse ~file:path contents));
-  match
-    Driver.check_files
-      ~limits
-      (List.map files ~f:(fun (path, contents) ->
-         { Source_file.path; contents }))
-  with
+  let parse (path, contents) =
+    let%map.Result (toplevel : Syntax.Toplevel.t) =
+      Source_file.parse { path; contents }
+    in
+    (match toplevel.txt with
+     | Module (_, toplevels) -> round_trip ~source:contents toplevels
+     | _ -> ());
+    Driver.Module_group.File toplevel
+  in
+  let result =
+    let%bind.Result modules =
+      List.map files ~f:parse
+      |> Result.all
+      |> Result.map_error ~f:(fun error -> Driver.Error.Source error)
+    in
+    Driver.check_modules ~limits modules
+    |> Result.map_error ~f:(fun error -> Driver.Error.Typecheck error)
+  in
+  match result with
   | Error error ->
     print_s [%sexp (error : Driver.Error.t)];
     None

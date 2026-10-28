@@ -50,9 +50,9 @@ type w = with_x[({`x : int}), {`y : int}, {}]
     let bytes = "\255\195\169"
     let c = '\''
     let d = '\\'
-    let chars = '\n', '\t', '\000', '\255', '"', 'a', ' '
+    let chars = ('\n', '\t', '\000', '\255', '"', 'a', ' ')
     let n = -1
-    let e = f (-1), Some (-1), `A (-1), (-1).x, f x, ()
+    let e = (f (-1), Some (-1), `A (-1), (-1).x, f x, ())
     let a = (x : 'a -> 'b)
 
     type t = A | B of int | C of (int -> int) * (int * int) | D of list['a]
@@ -149,36 +149,36 @@ let%expect_test "minimal parentheses" =
     (C) \ `x
     (C) x
     (`A) x
-    C D x
-    C f x
-    `A `B x
-    C (a, b)
+    C (D x)
+    C (f x)
+    `A (`B x)
+    C ((a, b))
     C ((a, b), c)
     C
       (let x = 1 in
        x)
-    (a, b), c
-    a, (b, c)
-    (a;
-     b),
-    c
+    ((a, b), c)
+    (a, (b, c))
+    ((a;
+      b),
+     c)
     (a;
      b);
     c
     a;
     b;
     c
-    (let x = 1 in
-     x),
-    y
-    a,
-    let x = 1 in
-    x
+    ((let x = 1 in
+      x),
+     y)
+    (a,
+     let x = 1 in
+     x)
     (a,
      let x = 1 in
      x);
     y
-    (match x with A -> a), b
+    ((match x with A -> a), b)
     (match x with A -> a);
     b
     match x with
@@ -202,7 +202,7 @@ let%expect_test "minimal parentheses" =
       match y with
       | B -> b
       | C -> c
-    match match x with A -> a with B -> b
+    match (match x with A -> a) with B -> b
     let x =
       let y = 1 in
       y
@@ -212,7 +212,7 @@ let%expect_test "minimal parentheses" =
     .~.~e.{x}
     .~(.~e).{x}
     .~.~e.{x}.{y}
-    .~r.x.{y; z = 1, 2}
+    .~r.x.{y; z = (1, 2)}
     .~(f x)
     .~f x
     (.~e).x
@@ -226,11 +226,11 @@ let%expect_test "minimal parentheses" =
         z;
       w = match a with B -> b;
     }
-    {`x = a, b; `y = (match a with B -> b) | r}
+    {`x = (a, b); `y = (match a with B -> b) | r}
     {`x = 1 | match r with A -> a}
     {(`A) with `x = 1}
     {(`A).`b with `x = 1}
-    {(`A f x) with `x = 1}
+    {(`A (f x)) with `x = 1}
     {C with `x = 1}
     {
       x = match a with B -> b;
@@ -269,7 +269,7 @@ let%expect_test "minimal parentheses" =
     .< .< .~.~x >. >.
     (.< x >.).x
     f (x : int) (M.y : list['a])
-    -1, -2
+    (-1, -2)
     Some (-1)
     f [%expect] [%expect {|a|}]
     a;
@@ -307,13 +307,13 @@ let f x =
       match x with
       | _ -> 1
       | a, (b, c) -> 1
-      | C (a, b) -> 1
+      | C ((a, b)) -> 1
       | C ((a, b), c) -> 1
-      | C D x -> 1
+      | C (D x) -> 1
       | C (-1) -> 1
-      | `A `B (-1) -> 1
+      | `A (`B (-1)) -> 1
       | -1, 'c', "s", true, () -> 1
-      | {x = a, b; M.y = C z} -> 1
+      | {x = (a, b); M.y = C z} -> 1
       | {`x = a; `y = b} -> 1
       | {`x = a; ..} -> 1
       | {`x = a; ..rest} -> 1
@@ -360,29 +360,17 @@ let%expect_test "a test" =
       Some_constructor
         (with_a_long_argument, and_another one, and_a_third two three)
 
-    let h = {
-      first_field = some_value;
-      second_field = another_value;
-      third = f x y z;
-    }
+    let h =
+      {first_field = some_value; second_field = another_value; third = f x y z}
 
-    let nested = {
-      first_field = {inner = some_value; other = another_value};
-      second_field = 1;
-    }
+    let nested =
+      {first_field = {inner = some_value; other = another_value}; second_field = 1}
 
-    let poly = {
-      `first = some_value;
-      `second = another_value;
-      `third = yet_another
-      | rest
-    }
+    let poly =
+      {`first = some_value; `second = another_value; `third = yet_another | rest}
 
-    let update = {record with
-      `first = some_value;
-      `second = another_value;
-      `third = f x;
-    }
+    let update =
+      {record with `first = some_value; `second = another_value; `third = f x}
 
     let quote =
       .< some_function with_a_long_argument (.~(splice_this here) and_another) >.
@@ -437,6 +425,117 @@ let%expect_test "a test" =
       [%expect {| x |}];
       [%expect]
     |xxx}]
+;;
+
+let%expect_test "records after =, on the line, the next line, or docked" =
+  print
+    {|
+let a = {x = 1; y = 2}
+let h = {first_field = some_value; second_field = another_value; third = f x y z}
+let docked = {first_field = some_value; second_field = another_value; third_field = f x y z}
+let poly = {`first = some_value; `second = another_value; `third = yet_another_value | rest}
+let update = {record with `first = some_value; `second = another_value; `third = f x y z}
+let lets =
+  let z = {first_field = some_value; second_field = another_value; third = 1} in
+  let z = {first_field = some_value; second_field = another_value; third = 1, 2} in
+  {first_field = {inner = some_value; other = another_value}; second = {a = 1; b = 2}}
+|};
+  [%expect
+    {|
+    let a = {x = 1; y = 2}
+
+    let h =
+      {first_field = some_value; second_field = another_value; third = f x y z}
+
+    let docked = {
+      first_field = some_value;
+      second_field = another_value;
+      third_field = f x y z;
+    }
+
+    let poly = {
+      `first = some_value;
+      `second = another_value;
+      `third = yet_another_value | rest
+    }
+
+    let update =
+      {record with `first = some_value; `second = another_value; `third = f x y z}
+
+    let lets =
+      let z = {first_field = some_value; second_field = another_value; third = 1} in
+      let z =
+        {first_field = some_value; second_field = another_value; third = (1, 2)}
+      in
+      {
+        first_field = {inner = some_value; other = another_value};
+        second = {a = 1; b = 2};
+      }
+    |}]
+;;
+
+let%expect_test "constructor chains" =
+  print
+    {|
+let s = S (S (S (S Z)))
+let c = Some_constructor (Other_constructor (with_a_long_argument, and_another one, and_a_third two three))
+let v = `Some_tag (`Other_tag (`Third_tag (Fourth (with_a_long_argument, and_another one))))
+let t = Some_constructor (Other_constructor ((with_a_long_argument, and_another one, and_a_third two)))
+let f = Some_constructor (some_function with_a_long_argument (and_another one) (and_a_third two))
+let l = Lit (Lit.Int n)
+|};
+  [%expect
+    {|
+    let s = S (S (S (S Z)))
+
+    let c =
+      Some_constructor (Other_constructor
+        (with_a_long_argument, and_another one, and_a_third two three))
+
+    let v =
+      `Some_tag (`Other_tag (`Third_tag (Fourth
+        (with_a_long_argument, and_another one))))
+
+    let t =
+      Some_constructor (Other_constructor
+        ((with_a_long_argument, and_another one, and_a_third two)))
+
+    let f =
+      Some_constructor
+        (some_function with_a_long_argument (and_another one) (and_a_third two))
+
+    let l = Lit (Lit.Int n)
+    |}];
+  let rec nat n = if n = 0 then "Z" else [%string "S (%{nat (n - 1)})"] in
+  print ~width:20 ("let deep = " ^ nat 12);
+  [%expect
+    {|
+    let deep =
+      S (S (S (S (S (S (S (S (S (S (S (S
+        Z)))))))))))
+    |}]
+;;
+
+let%expect_test "long parameter lists" =
+  print
+    {|
+let some_function (first_argument : int) (second_argument : list[string]) third : int = first_argument
+let f x y = let some_local_function first_argument second_argument (third : int) : int = x in f
+|};
+  [%expect
+    {|
+    let some_function
+        (first_argument : int)
+        (second_argument : list[string])
+        third : int =
+      first_argument
+
+    let f x y =
+      let some_local_function first_argument second_argument (third : int) : int =
+        x
+      in
+      f
+    |}]
 ;;
 
 let%expect_test "narrow" =
@@ -575,7 +674,7 @@ let%expect_test "syntax the parser does not produce" =
     (x (reparsed (Var x ())))
     ("()" (reparsed (Lit Unit)))
     ({} (reparsed (Poly_record ())))
-    ("C (x, x)" (reparsed (Construct C ((Var x ()) (Var x ())))))
+    ("C ((x, x))" (reparsed (Construct C ((Tuple ((Var x ()) (Var x ())))))))
     ("x (x, x)" (reparsed (App (Var x ()) (Tuple ((Var x ()) (Var x ()))))))
     ("[%expect {xx|a |} b |x} c|xx}]" (reparsed (Expect "a |} b |x} c")))
     |xxx}]

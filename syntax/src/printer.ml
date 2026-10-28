@@ -50,7 +50,7 @@ let lit : Lit.t -> Doc.t = function
 ;;
 
 (* [{a; b}], or broken with each item on its own line, followed by a [;]
-   unless [~trailing:false]. *)
+   unless [~trailing:false], then the [tail]. *)
 let braces ?(opener = "{") ?(trailing = true) ?tail items =
   match items, tail with
   | [], None -> text (opener ^ "}")
@@ -58,7 +58,7 @@ let braces ?(opener = "{") ?(trailing = true) ?tail items =
     let tail =
       match tail with
       | None -> empty
-      | Some tail -> line ^^ tail
+      | Some tail -> tail
     in
     group
       (text opener
@@ -72,15 +72,24 @@ let braces ?(opener = "{") ?(trailing = true) ?tail items =
        ^^ text "}")
 ;;
 
-(* [lhs = rhs], with [rhs] on the next line if it does not fit, unless it is
-   [docked] (a record, which breaks within its braces). *)
-let definition ?(docked = false) ?(sep = " =") lhs rhs =
-  if docked
-  then lhs ^^ text sep ^^ text " " ^^ rhs
-  else group (lhs ^^ text sep ^^ nest 2 (line ^^ rhs))
+(* [lhs = rhs ending], with [rhs] on the next line if it does not fit, or a
+   [record] docked, breaking within its braces if it does not fit on the next
+   line either. *)
+let definition ?(record = false) ?(sep = " =") ?ending lhs rhs =
+  let ending space =
+    match ending with
+    | None -> empty
+    | Some ending -> space ^^ text ending
+  in
+  let next_line = nest 2 (line ^^ rhs) ^^ ending line in
+  group
+    (lhs
+     ^^ text sep
+     ^^
+     if record
+     then alt next_line (text " " ^^ rhs ^^ ending (text " "))
+     else next_line)
 ;;
-
-(* Types *)
 
 let tyvar name = text ("'" ^ name)
 
@@ -124,8 +133,15 @@ let rec type_expr ~prec (t : Type_expr.t) =
 and type_arg : Type_expr.arg -> Doc.t = function
   | Ty t ->
     let doc = type_expr ~prec:0 t in
-    if String.is_prefix (render doc) ~prefix:"{" then parens doc else doc
+    if starts_with_record t then parens doc else doc
   | Row r -> row ~label:(fun name -> "`" ^ name) r
+
+(* Whether [t], printed at precedence 0, starts with a record type. *)
+and starts_with_record (t : Type_expr.t) =
+  match t.txt with
+  | Record _ -> true
+  | Arrow (first, _) | Tuple (first :: _) -> starts_with_record first
+  | Var _ | Con _ | Tuple [] | Code _ | Variant _ -> false
 
 and row_entries (r : Type_expr.row) =
   match r.txt with
@@ -164,7 +180,7 @@ and variant r =
   text "[" ^^ align (group body) ^^ text "]"
 ;;
 
-let type_expr' = type_expr ~prec:0
+let type_expr_doc = type_expr ~prec:0
 
 (* Patterns: [prec] 0 is a whole pattern, 1 a tuple's component, 2 a
    constructor's argument. *)
@@ -182,24 +198,34 @@ let rec pattern ~prec (p : Pattern.t) =
       (prec > 0)
       (group (separate (text "," ^^ line) (List.map ps ~f:(pattern ~prec:1))))
   | Construct (c, []) -> located_path c
-  | Construct (c, [ arg ]) -> located_path c ^^ text " " ^^ pattern ~prec:2 arg
   | Construct (c, args) ->
-    located_path c
-    ^^ text " "
-    ^^ parens
-         (group
-            (separate (text "," ^^ line) (List.map args ~f:(pattern ~prec:1))))
+    let rec unwrap (p : Pattern.t) =
+      match p.txt with
+      | Tuple [ p ] -> unwrap p
+      | _ -> p
+    in
+    let args =
+      match List.map args ~f:unwrap with
+      | [ ({ txt = Tuple (_ :: _ :: _); _ } as arg) ] ->
+        parens (pattern ~prec:2 arg)
+      | [ arg ] -> pattern ~prec:2 arg
+      | args ->
+        parens
+          (group
+             (separate (text "," ^^ line) (List.map args ~f:(pattern ~prec:1))))
+    in
+    paren_if (prec > 1) (located_path c ^^ text " " ^^ args)
   | Poly_variant (tag, None) -> text ("`" ^ tag.txt)
   | Poly_variant (tag, Some arg) ->
-    text ("`" ^ tag.txt ^ " ") ^^ pattern ~prec:2 arg
+    paren_if (prec > 1) (text ("`" ^ tag.txt ^ " ") ^^ pattern ~prec:2 arg)
   | Record fields ->
     braces
       (List.map fields ~f:(fun (p, value) ->
-         definition (located_path p) (pattern ~prec:0 value)))
+         definition (located_path p) (pattern ~prec:1 value)))
   | Poly_record { fields; rest } ->
     let fields =
       List.map fields ~f:(fun (label, value) ->
-        definition (text ("`" ^ label.txt)) (pattern ~prec:0 value))
+        definition (text ("`" ^ label.txt)) (pattern ~prec:1 value))
     in
     (match rest with
      | Closed -> braces fields
@@ -207,17 +233,16 @@ let rec pattern ~prec (p : Pattern.t) =
      | Bind name -> braces ~trailing:false (fields @ [ text (".." ^ name.txt) ]))
 ;;
 
-let pattern' = pattern ~prec:0
-
-(* Expressions *)
+let pattern_doc = pattern ~prec:0
 
 (** How tightly an expression binds, loosest first: the expressions that may be
     written at each, without parentheses. *)
 module Level = struct
   type t =
     | Seq
-    | Tuple
-    | Tuple_item (** And [let] and [match]. *)
+    | Item
+    (** A tuple's item, or a value in [{...}]: also [let], [match] and
+        negative literals. *)
     | Construct
     | App
     | Splice
@@ -247,7 +272,7 @@ module Ctx = struct
   let at level = { level; seq = true; after = Nothing }
 
   (* The level of the bodies of [let]s and [match]es. *)
-  let body t = if t.seq then Level.Seq else Tuple
+  let body t = if t.seq then Level.Seq else Item
 end
 
 let rec unwrap (e : Expr.t) =
@@ -262,20 +287,27 @@ let seq (e : Expr.t) =
   | _ -> None
 ;;
 
+let is_construct (e : Expr.t) =
+  match e.txt with
+  | Construct (_, _ :: _) | Poly_variant (_, Some _) -> true
+  | _ -> false
+;;
+
 let level (e : Expr.t) : Level.t =
   let e = unwrap e in
   match e.txt with
   | Let _ when Option.is_some (seq e) -> Seq
-  | Let _ | Match _ -> Tuple_item
-  | Tuple (_ :: _ :: _) -> Tuple
-  | Lit (Int n) when n < 0 -> Tuple_item
-  | Construct (_, _ :: _) | Poly_variant (_, Some _) -> Construct
+  | Let _ | Match _ -> Item
+  | Lit (Int n) when n < 0 -> Item
+  | _ when is_construct e -> Construct
   | App _ -> App
   | Splice _ -> Splice
   | Field _ | Poly_field _ | Poly_restrict _ -> Postfix
-  | Lit _ | Var _ | Tuple _
-  | Construct (_, [])
-  | Poly_variant (_, None)
+  | Lit _
+  | Var _
+  | Tuple _
+  | Construct _
+  | Poly_variant _
   | Quote _
   | Record _
   | Poly_record _
@@ -284,20 +316,16 @@ let level (e : Expr.t) : Level.t =
   | Expect _ -> Atom
 ;;
 
-let bare_at level' e = Level.compare (level e) level' >= 0
+let bare_at at e = Level.compare (level e) at >= 0
 
-(* For [e] written without parentheses: whether it ends with a [let] or
-   [match], which takes a following [,] (or [;]) as its own... *)
-let rec is_open e =
+let is_let_or_match e =
   match (unwrap e).txt with
   | Let _ | Match _ -> true
-  | Tuple (_ :: _ :: _ as es) ->
-    let last = List.last_exn es in
-    bare_at Tuple_item last && is_open last
   | _ -> false
 ;;
 
-(* ...and whether it ends with a [match], which takes a following [|]. *)
+(* For [e] written without parentheses: whether it ends with a [match], which
+   takes a following [|]. *)
 let rec ends_with_match ~seq:in_seq e =
   let e = unwrap e in
   match e.txt, seq e with
@@ -306,16 +334,13 @@ let rec ends_with_match ~seq:in_seq e =
   | Let (_, _, _, _, body), None ->
     bare_at (Ctx.body { Ctx.top with seq = in_seq }) body
     && ends_with_match ~seq:in_seq body
-  | Tuple (_ :: _ :: _ as es), _ ->
-    let last = List.last_exn es in
-    bare_at Tuple_item last && ends_with_match ~seq:in_seq last
   | _ -> false
 ;;
 
 let takes_after (ctx : Ctx.t) e =
   match ctx.after with
   | Nothing -> false
-  | Comma | Semi -> is_open e
+  | Comma | Semi -> is_let_or_match e
   | Bar -> ends_with_match ~seq:ctx.seq e
 ;;
 
@@ -335,16 +360,20 @@ let is_record e =
 let binding ((name : Name.t), annot) =
   match annot with
   | None -> text name.txt
-  | Some t -> parens (text (name.txt ^ " : ") ^^ type_expr' t)
+  | Some t -> parens (text (name.txt ^ " : ") ^^ type_expr_doc t)
 ;;
 
 let let_lhs keyword (name : Name.t) params annot =
-  text (keyword ^ " ")
-  ^^ space_separated (text name.txt :: List.map params ~f:binding)
-  ^^
-  match annot with
-  | None -> empty
-  | Some t -> text " : " ^^ type_expr' t
+  let annot =
+    match annot with
+    | None -> empty
+    | Some t -> text " : " ^^ type_expr_doc t
+  in
+  group
+    (text (keyword ^ " " ^ name.txt)
+     ^^ nest
+          4
+          (concat (List.map params ~f:(fun p -> line ^^ binding p)) ^^ annot))
 ;;
 
 let rec expr ?(parenthesize = false) (ctx : Ctx.t) e =
@@ -356,17 +385,16 @@ let rec expr ?(parenthesize = false) (ctx : Ctx.t) e =
 and bare (ctx : Ctx.t) (e : Expr.t) =
   match e.txt, seq e with
   | Let _, Some (first, second) ->
-    expr { level = Tuple; seq = true; after = Semi } first
+    expr { level = Item; seq = true; after = Semi } first
     ^^ text ";"
     ^^ hardline
     ^^ expr { ctx with level = Seq } second
   | Let (name, params, annot, rhs, body), None ->
-    let lhs = let_lhs "let" name params annot in
-    let rhs_doc = expr Ctx.top rhs in
-    (if is_record rhs
-     then lhs ^^ text " = " ^^ rhs_doc ^^ text " in"
-     else
-       group (lhs ^^ text " =" ^^ nest 2 (line ^^ rhs_doc) ^^ line ^^ text "in"))
+    definition
+      ~record:(is_record rhs)
+      ~ending:"in"
+      (let_lhs "let" name params annot)
+      (expr Ctx.top rhs)
     ^^ hardline
     ^^ expr { ctx with level = Ctx.body ctx } body
   | Match (scrutinee, arms), _ ->
@@ -374,7 +402,7 @@ and bare (ctx : Ctx.t) (e : Expr.t) =
     let arm i (p, body) =
       let after : After.t = if i = last then ctx.after else Bar in
       group
-        (align (pattern' p)
+        (align (pattern_doc p)
          ^^ text " ->"
          ^^ nest 2 (line ^^ expr { ctx with level = Ctx.body ctx; after } body)
         )
@@ -382,7 +410,13 @@ and bare (ctx : Ctx.t) (e : Expr.t) =
     let head =
       group
         (text "match"
-         ^^ nest 2 (line ^^ expr Ctx.top scrutinee)
+         ^^ nest
+              2
+              (line
+               ^^ expr
+                    ~parenthesize:(is_let_or_match scrutinee)
+                    Ctx.top
+                    scrutinee)
          ^^ line
          ^^ text "with")
     in
@@ -392,12 +426,12 @@ and bare (ctx : Ctx.t) (e : Expr.t) =
        head
        ^^ concat
             (List.mapi arms ~f:(fun i a -> hardline ^^ text "| " ^^ arm i a)))
-  | Tuple (_ :: _ :: _ as es), _ -> tuple ctx es
+  | Tuple (_ :: _ :: _ as es), _ -> parens (tuple_items es)
   | Tuple _, _ -> text "()"
   | Lit l, _ -> lit l
   | Var (p, None), _ -> path p
   | Var (p, Some t), _ ->
-    parens (text (Path.to_string p ^ " : ") ^^ type_expr' t)
+    parens (text (Path.to_string p ^ " : ") ^^ type_expr_doc t)
   | App _, _ ->
     let rec spine (e : Expr.t) args =
       match e.txt with
@@ -419,13 +453,8 @@ and bare (ctx : Ctx.t) (e : Expr.t) =
                (List.map args ~f:(fun arg -> line ^^ expr (Ctx.at Splice) arg)))
       )
   | Construct (c, []), _ -> located_path c
-  | Construct (c, [ arg ]), _ ->
-    group (located_path c ^^ nest 2 (line ^^ expr (Ctx.at Construct) arg))
-  | Construct (c, args), _ ->
-    group (located_path c ^^ nest 2 (line ^^ parens (tuple Ctx.top args)))
   | Poly_variant (tag, None), _ -> text ("`" ^ tag.txt)
-  | Poly_variant (tag, Some arg), _ ->
-    group (text ("`" ^ tag.txt) ^^ nest 2 (line ^^ expr (Ctx.at Construct) arg))
+  | (Construct _ | Poly_variant _), _ -> construct e
   | Splice { expr = inner; subs }, _ ->
     let inner =
       match (unwrap inner).txt, subs with
@@ -458,7 +487,7 @@ and bare (ctx : Ctx.t) (e : Expr.t) =
   | Poly_extend (fields, record), _ ->
     braces
       ~trailing:false
-      ~tail:(text "| " ^^ entry record)
+      ~tail:(group (text " |" ^^ nest 2 (line ^^ entry record)))
       (poly_fields ~last_after:After.Bar fields)
   | Poly_update (record, fields), _ ->
     let record =
@@ -483,27 +512,58 @@ and bare (ctx : Ctx.t) (e : Expr.t) =
   | Expect { txt = ""; _ }, _ -> text "[%expect]"
   | Expect s, _ -> text "[%expect " ^^ text (quoted_string s.txt) ^^ text "]"
 
+(* [C1 (C2 (... Cn args))], with the heads on one line, as each would otherwise
+   be indented further than the last, quadratically in deep chains. *)
+and construct e =
+  let head_and_args (e : Expr.t) =
+    match e.txt with
+    | Construct (c, args) -> located_path c, args
+    | Poly_variant (tag, arg) -> text ("`" ^ tag.txt), Option.to_list arg
+    | _ -> assert false
+  in
+  let rec chain e heads =
+    let head, args = head_and_args e in
+    match args with
+    | [ arg ] when is_construct (unwrap arg) ->
+      chain (unwrap arg) (head :: heads)
+    | _ -> List.rev heads, head, args
+  in
+  let heads, head, args = chain e [] in
+  let args =
+    match args with
+    | [ arg ] ->
+      (match (unwrap arg).txt with
+       | Tuple (_ :: _ :: _) -> parens (expr Ctx.top arg)
+       | _ -> expr (Ctx.at Splice) arg)
+    | args -> parens (tuple_items args)
+  in
+  group
+    (concat (List.map heads ~f:(fun head -> head ^^ text " ("))
+     ^^ head
+     ^^ nest 2 (line ^^ args)
+     ^^ text (String.make (List.length heads) ')'))
+
 and postfix record =
   expr
     ~parenthesize:(needs_parens_before_postfix record)
     (Ctx.at Postfix)
     record
 
-and tuple (ctx : Ctx.t) es =
+and tuple_items es =
   let last = List.length es - 1 in
   group
     (separate
        (text "," ^^ line)
        (List.mapi es ~f:(fun i e ->
-          let after : After.t = if i = last then ctx.after else Comma in
-          expr { ctx with level = Tuple_item; after } e)))
+          let after : After.t = if i = last then Nothing else Comma in
+          expr { level = Item; seq = true; after } e)))
 
 (* A value in [{...}]. *)
 and entry ?(after = After.Nothing) e =
-  expr { level = Tuple; seq = false; after } e
+  expr { level = Item; seq = false; after } e
 
 and field ?after lhs value =
-  definition ~docked:(is_record value) lhs (entry ?after value)
+  definition ~record:(is_record value) lhs (entry ?after value)
 
 and poly_fields ?(last_after = After.Nothing) fields =
   let last = List.length fields - 1 in
@@ -512,9 +572,7 @@ and poly_fields ?(last_after = After.Nothing) fields =
     field ~after (text ("`" ^ label.txt)) value)
 ;;
 
-let expr' = expr Ctx.top
-
-(* Declarations *)
+let expr_doc = expr Ctx.top
 
 let type_param (param : Type_decl.Param.t Located.t) =
   match param.txt with
@@ -535,7 +593,7 @@ let type_decl ({ name; params; kind } : Type_decl.t) =
   in
   match kind with
   | Abstract -> lhs
-  | Alias t -> definition lhs (type_expr' t)
+  | Alias t -> definition lhs (type_expr_doc t)
   | Variant [] -> lhs ^^ text " = |"
   | Variant constructors ->
     let constructor ((name : Name.t), args) =
@@ -564,7 +622,7 @@ let type_decl ({ name; params; kind } : Type_decl.t) =
     ^^ text " = "
     ^^ braces
          (List.map fields ~f:(fun ((name : Name.t), t) ->
-            definition ~sep:" :" (text name.txt) (type_expr' t)))
+            definition ~sep:" :" (text name.txt) (type_expr_doc t)))
 ;;
 
 module Kind = struct
@@ -586,25 +644,23 @@ let rec toplevel ~width ~indent (t : Toplevel.t) =
   match t.txt with
   | Let (name, params, annot, rhs) ->
     definition
-      ~docked:(is_record rhs)
+      ~record:(is_record rhs)
       (let_lhs "let" name params annot)
-      (expr' rhs)
+      (expr_doc rhs)
   | Type decl -> type_decl decl
   | Module (name, []) -> text ("module " ^ name.txt ^ " = struct end")
-  | Module (name, toplevels') ->
+  | Module (name, members) ->
     text ("module " ^ name.txt ^ " = struct")
-    ^^ nest 2 (hardline ^^ toplevels ~width ~indent:(indent + 2) toplevels')
+    ^^ nest 2 (hardline ^^ toplevels ~width ~indent:(indent + 2) members)
     ^^ hardline
     ^^ text "end"
   | Expect_test { name; body } ->
     definition
       (text ("let%expect_test " ^ string_literal name.txt))
-      (expr' body)
+      (expr_doc body)
 
 and toplevels ~width ~indent ts =
-  let one_line doc =
-    not (String.mem (render ~width:(width - indent) doc) '\n')
-  in
+  let one_line doc = fits_flat ~width:(width - indent) doc in
   let docs =
     List.map ts ~f:(fun t ->
       let doc = toplevel ~width ~indent t in
@@ -616,19 +672,19 @@ and toplevels ~width ~indent ts =
     List.fold
       (List.zip_exn (List.drop_last_exn docs) (List.tl_exn docs))
       ~init:first
-      ~f:(fun acc ((kind, one_line, _), (kind', one_line', doc)) ->
+      ~f:(fun acc ((prev_kind, prev_one_line, _), (kind, one_line, doc)) ->
         let compact =
-          one_line
-          && one_line'
-          && Kind.equal kind kind'
-          && not (Kind.equal kind Other)
+          prev_one_line
+          && one_line
+          && Kind.equal prev_kind kind
+          && not (Kind.equal prev_kind Other)
         in
         acc ^^ hardline ^^ (if compact then empty else hardline) ^^ doc)
 ;;
 
-let type_expr ?width t = render ?width (type_expr' t)
-let pattern ?width p = render ?width (pattern' p)
-let expr ?width e = render ?width (expr' e)
+let type_expr ?width t = render ?width (type_expr_doc t)
+let pattern ?width p = render ?width (pattern_doc p)
+let expr ?width e = render ?width (expr_doc e)
 let toplevel ?(width = 80) t = render ~width (toplevel ~width ~indent:0 t)
 
 let program ?(width = 80) ts =
