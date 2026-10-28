@@ -1211,11 +1211,7 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
     with
     | body -> body
     | exception Uses_unfinished ->
-      (* Abandoned with the splice, to be checked anew. *)
-      toplevel.state <- Unchecked;
-      while Stack.length program.unfinished > unfinished do
-        ignore (Stack.pop_exn program.unfinished : Type.ty)
-      done;
+      abandon program scc ~unfinished;
       raise Uses_unfinished
   in
   (match toplevel.state with
@@ -1231,6 +1227,16 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
       Unify.lower_ty ~rank:0 (Stack.pop_exn program.unfinished)
     done);
   scc
+
+(* Abandons the toplevels of [scc] with the splice whose code reached them,
+   to be checked anew. *)
+and abandon (program : Program_env.t) (scc : Scc_frame.t) ~unfinished =
+  List.iter scc.pending ~f:(fun (toplevel : Toplevel.t) ->
+    toplevel.state <- Unchecked);
+  scc.pending <- [];
+  while Stack.length program.unfinished > unfinished do
+    ignore (Stack.pop_exn program.unfinished : Type.ty)
+  done
 
 and check_body t (scope : Scope.t) ~args ~res_ty ~body =
   with_monomorphic_bindings scope args ~f:(fun () ->
@@ -2038,6 +2044,7 @@ let generate t (program : Program_env.t) splice
   in
   let reported = program.reported in
   let errors = program.errors in
+  let unfinished = Stack.length program.unfinished in
   Stack.push program.splice_starts scope.scc.lowlink;
   match
     check_expr
@@ -2049,6 +2056,7 @@ let generate t (program : Program_env.t) splice
   | exception Uses_unfinished ->
     (* Checked again once what it uses is finished. *)
     ignore (Stack.pop_exn program.splice_starts : int);
+    abandon program scope.scc ~unfinished;
     program.errors <- errors;
     program.reported <- reported;
     Error Uses_unfinished

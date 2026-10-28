@@ -1542,6 +1542,29 @@ end
     |}]
 ;;
 
+let%expect_test "an include reaching a toplevel being checked through another" =
+  check_with_gen
+    {|let first = X.g
+let y = 1
+module X = struct
+  include .~(Gen.value "a" (Stag.Expr.int (u 0)))
+  let u n = Int.add n (g 0)
+  let g n = Int.add n first
+end
+|};
+  [%expect
+    {|
+    File "a.stag", line 5, characters 12-19:
+    5 |   let u n = Int.add n (g 0)
+                    ^^^^^^^
+    Error: Int.add can't be resolved here: the include at a.stag:4:2-49 comes before this point and may define it, but it is still being generated (its expression uses this code). Move this code before the include or into another module
+    File "a.stag", line 4, characters 2-49:
+    4 |   include .~(Gen.value "a" (Stag.Expr.int (u 0)))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: The declaration splice is here
+    |}]
+;;
+
 let%expect_test "prelude names in messages, with generated shadowing types" =
   let m =
     {|module M = .~(Cons (Stag.Toplevel.Type {`name = "option"; `params = Nil; `kind = Stag.Type_decl.Kind.Abstract}, Gen.value "x" (Stag.Expr.int 1)))
