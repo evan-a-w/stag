@@ -1339,6 +1339,12 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
            Source.Binder.Name name, annot))
       ~annot:toplevel.annot
   in
+  match toplevel.state with
+  | In_progress _ | Done _ ->
+    (* Checked while elaborating its annotations, through a type splice that
+       uses it: the cycle is reported. *)
+    Scc_frame.create index ~pending:[]
+  | Unchecked ->
   Stack.push program.unfinished ty;
   toplevel.state
   <- In_progress

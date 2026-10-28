@@ -73,15 +73,6 @@ module Make (B : Builder) = struct
     | Exception p -> con "Exception" [ pattern p ]
   ;;
 
-  module type Lifter_s = sig
-    val type_expr : Type_expr.t -> B.t
-    val type_decl : Type_decl.t -> B.t
-    val type_decl_kind : Type_decl.Kind.t -> B.t
-    val expr : Expr.t -> B.t
-    val toplevel : Toplevel.t -> B.t
-    val program : Toplevel.t list -> B.t
-  end
-
   (* [antiquote] replaces splices, the expression of each splice it doesn't
      being lifted as any other. *)
   module Lifter (A : sig
@@ -247,39 +238,19 @@ module Make (B : Builder) = struct
     ;;
   end
 
-  let lifter antiquote =
-    (module Lifter (struct
-         let antiquote = Option.value antiquote ~default:no_antiquote
-       end) : Lifter_s)
-  ;;
-
-  let type_expr ?antiquote t =
-    let (module L) = lifter antiquote in
-    L.type_expr t
-  ;;
-
-  let type_decl ?antiquote t =
-    let (module L) = lifter antiquote in
-    L.type_decl t
-  ;;
-
-  let type_decl_kind ?antiquote t =
-    let (module L) = lifter antiquote in
-    L.type_decl_kind t
-  ;;
-
-  let expr ?antiquote t =
-    let (module L) = lifter antiquote in
-    L.expr t
-  ;;
-
-  let toplevel ?antiquote t =
-    let (module L) = lifter antiquote in
-    L.toplevel t
-  ;;
+  include Lifter (struct
+      let antiquote = no_antiquote
+    end)
 
   let program ?antiquote t =
-    let (module L) = lifter antiquote in
-    L.program t
+    match antiquote with
+    | None -> program t
+    | Some antiquote ->
+      let module L =
+        Lifter (struct
+          let antiquote = antiquote
+        end)
+      in
+      L.program t
   ;;
 end

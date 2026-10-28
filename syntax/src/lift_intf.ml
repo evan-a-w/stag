@@ -19,26 +19,28 @@ module type Builder = sig
   (** A [Stag.Path.Ref]'s ref, of the declaration of canonical name [name]. *)
   val ref_ : Decl_ref.Kind.t -> string -> t
 
-  (** The concatenation of two lists. *)
+  (** The concatenation of two lists, for an antiquoted item. *)
   val append : t -> t -> t
 end
 
 module type S = sig
   type t
 
-  (** Replaces a splice in the position of the kind, unless [None]: an item's
-      by the list of declarations it stands for. *)
-  type antiquote := Antiquote.Kind.t -> Syntax.Expr.t -> t option
 
   val lit : Syntax.Lit.t -> t
-  val type_expr : ?antiquote:antiquote -> Syntax.Type_expr.t -> t
+  val type_expr : Syntax.Type_expr.t -> t
   val type_param : Syntax.Type_decl.Param.t Located.t -> t
-  val type_decl : ?antiquote:antiquote -> Syntax.Type_decl.t -> t
-  val type_decl_kind : ?antiquote:antiquote -> Syntax.Type_decl.Kind.t -> t
+  val type_decl : Syntax.Type_decl.t -> t
+  val type_decl_kind : Syntax.Type_decl.Kind.t -> t
   val pattern : Syntax.Pattern.t -> t
-  val expr : ?antiquote:antiquote -> Syntax.Expr.t -> t
-  val toplevel : ?antiquote:antiquote -> Syntax.Toplevel.t -> t
-  val program : ?antiquote:antiquote -> Syntax.Program.t -> t
+  val expr : Syntax.Expr.t -> t
+  val toplevel : Syntax.Toplevel.t -> t
+  (** [antiquote] replaces a splice in the position of the kind, unless
+      [None]: an item's by the list of declarations it stands for. *)
+  val program
+    :  ?antiquote:(Antiquote.Kind.t -> Syntax.Expr.t -> t option)
+    -> Syntax.Program.t
+    -> t
   val list : ('a -> t) -> 'a list -> t
   val option : ('a -> t) -> 'a option -> t
 end

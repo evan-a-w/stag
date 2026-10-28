@@ -602,12 +602,25 @@ the declaration is checked, on demand, each type splice is evaluated as a
 compile-time expression (the usual rules on which toplevels it may use apply,
 and its errors are at the `.~`), and the syntax it gives takes its place. An
 error in that syntax is reported at the `.~` with a note printing it. Types
-may refer to each other through splices, in any order; a splice that needs the
-type it is defining (eg. by reflecting on it) is an error. Generated
-declarations may hold type splices (`Stag.Type_expr.Splice`,
-`Stag.Type_decl.Kind.Splice`), evaluated the same way when checked. A type
-splice within a quote or compile-time code is an error, as nothing evaluates
-it there.
+may refer to each other through splices, in any order. While `type t = .~e` is
+being computed, `t` is nominal: `e` may name it, but needing its definition
+(eg. reflecting on its declaration, or `e` giving an alias, which would then
+have been used as nominal) is an error. Each type splice is evaluated once,
+however often its declaration is used. What a splice gives may not itself hold
+type splices (so evaluation ends); generated declarations may hold them
+(`Stag.Type_expr.Splice`, `Stag.Type_decl.Kind.Splice`), evaluated the same
+way when checked where they are included. A type splice within a quote or
+compile-time code is an error, as nothing evaluates it there.
+
+The constructors and fields `type t = .~e` defines are only known once `e` is
+evaluated, so, like an include's declarations, they are visible only after the
+declaration: a lookup of a constructor or field not otherwise found evaluates
+the module's definition splices before it (in order, as it forces includes),
+and none after it. Code `e` uses that is still being checked (eg. a function
+before the declaration naming one of its constructors) can't see them: the
+name is unbound, noting the splice. A splice that fails (its errors are
+reported, and checking continues) makes its declaration failed: uses of it
+are not reported again, and compile-time code using it is not run.
 
 ## Reflection
 
