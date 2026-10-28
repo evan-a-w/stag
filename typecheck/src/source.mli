@@ -67,8 +67,8 @@ module Pattern : sig
   val view : t -> View.t
   val loc : t -> Loc.t
 
-  (** The tuple of [ts], of at least two, all written or all generated, as are
-      the arguments of one node. *)
+  (** The tuple of [ts], of at least two written ones: generated nodes are
+      typed, so have their constructor's arity. *)
   val tuple : t list -> t
 end
 
@@ -141,7 +141,7 @@ module Expr : sig
 
   val loc : t -> Loc.t
 
-  (** The tuple of [ts], of at least two, all written or all generated, as are
-      the arguments of one node. *)
+  (** The tuple of [ts], of at least two written ones: generated nodes are
+      typed, so have their constructor's arity. *)
   val tuple : t list -> t
 end

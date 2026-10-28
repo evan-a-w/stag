@@ -123,24 +123,13 @@ module Pattern = struct
 
   let tuple ts =
     let loc = Loc.merge (loc (List.hd_exn ts)) (loc (List.last_exn ts)) in
-    let syntax, generated =
-      List.partition_map ts ~f:(function
-        | Syntax pattern -> First pattern
-        | Generated pattern -> Second pattern)
+    let syntax =
+      List.map ts ~f:(function
+        | Syntax pattern -> pattern
+        | Generated _ ->
+          raise_s [%message "Generated arguments are never wrapped in a tuple"])
     in
-    match syntax, generated with
-    | syntax, [] -> Syntax { txt = Tuple syntax; loc }
-    | [], generated ->
-      Generated
-        { desc = Tuple generated
-        ; ty =
-            TTuple
-              (List.map generated ~f:(fun (pattern : Typed.Pattern.t) ->
-                 pattern.ty))
-        ; loc
-        }
-    | _ :: _, _ :: _ ->
-      raise_s [%message "Tuple of syntax and generated patterns"]
+    Syntax { txt = Tuple syntax; loc }
   ;;
 end
 
@@ -342,21 +331,12 @@ module Expr = struct
 
   let tuple ts =
     let loc = Loc.merge (loc (List.hd_exn ts)) (loc (List.last_exn ts)) in
-    let syntax, generated =
-      List.partition_map ts ~f:(function
-        | Syntax expr -> First expr
-        | Generated expr -> Second expr)
+    let syntax =
+      List.map ts ~f:(function
+        | Syntax expr -> expr
+        | Generated _ ->
+          raise_s [%message "Generated arguments are never wrapped in a tuple"])
     in
-    match syntax, generated with
-    | syntax, [] -> Syntax { txt = Tuple syntax; loc }
-    | [], generated ->
-      Generated
-        { desc = Tuple generated
-        ; ty =
-            TTuple
-              (List.map generated ~f:(fun (expr : Typed.Expr.t) -> expr.ty))
-        ; loc
-        }
-    | _ :: _, _ :: _ -> raise_s [%message "Tuple of syntax and generated exprs"]
+    Syntax { txt = Tuple syntax; loc }
   ;;
 end
