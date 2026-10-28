@@ -130,17 +130,14 @@ let%expect_test "changes are checked once, at their last version" =
 
 let%expect_test "a looping splice is stopped by the limits" =
   Client.with_server
-    ~limits:
-      { Server.default_limits with
-        time_limit = Some (Time_ns.Span.of_int_ms 200)
-      }
+    ~limits:{ Server.default_limits with fuel = Some 100_000 }
     ~files:[ "a.stag", "let loop x = loop x\nlet y = .~(loop 0)\n" ]
     (fun client ->
        Client.did_open client "a.stag";
        [%expect
          {|
          diagnostics a.stag (version 1):
-           1:8-1:18 error: This toplevel splice failed at compile time: Time limit exceeded: evaluation took more than 200ms
+           1:8-1:18 error: This toplevel splice failed at compile time: Out of fuel: evaluation took more than 100000 steps
              related a.stag 0:13-0:17: The error was raised here
          |}])
 ;;

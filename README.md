@@ -139,7 +139,7 @@ modules already parsed), `Driver.eval`, `Expect_test_runner`, `Bench_runner`
 (a program's benches) and `Phase_bench`, `Diagnostic` (rendering errors),
 `Text_diff`, `Printer` (syntax to source) and `Formatter` (source to formatted
 source, keeping comments). `Prelude` is the prelude
-([eval/src/prelude/prelude.stag](eval/src/prelude/prelude.stag)), whose
+([prelude/prelude.stag](prelude/prelude.stag)), whose
 module `Stag` is the syntax as data, which `Syntax_value` converts to and from
 `Syntax`, for declarations generated at compile time. The core library, the
 stag module `Core`, is the files of [core/](core) (each a submodule,
