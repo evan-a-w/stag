@@ -169,7 +169,7 @@ let of_toplevels ~module_path toplevels =
         recurse expr)
     in
     match expr.txt with
-    | Lit _ | Expect _ -> ()
+    | Lit _ | Expect _ | Error -> ()
     | Var (path, annot) ->
       add ~kind:Kind.Value ~loc:expr.loc (path :> string list);
       Option.iter annot ~f:type_expr

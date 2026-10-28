@@ -327,7 +327,8 @@ let level (e : Expr.t) : Level.t =
   | Poly_extend _
   | Poly_update _
   | Record_update _
-  | Expect _ -> Atom
+  | Expect _
+  | Error -> Atom
 ;;
 
 let bare_at at e = Level.compare (level e) at >= 0
@@ -522,6 +523,7 @@ and bare (ctx : Ctx.t) (e : Expr.t) =
       (List.map fields ~f:(fun (p, value) -> field (decl_path p) value))
   | Expect { txt = ""; _ }, _ -> text "[%expect]"
   | Expect s, _ -> text "[%expect " ^^ text (quoted_string s.txt) ^^ text "]"
+  | Error, _ -> text "<error>"
 
 and update record fields =
   let record =

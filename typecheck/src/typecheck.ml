@@ -1188,6 +1188,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
   in
   match Source.Expr.view expr with
   | Lit l -> Ok (node (Lit l) (Syntax.Lit.ty l))
+  | Error -> Ok (node (Error []) (Scope.fresh_ty t scope))
   | Expect expected ->
     (* Only where it runs as part of the test: not at compile time nor in
        code. *)

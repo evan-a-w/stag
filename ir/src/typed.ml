@@ -239,6 +239,9 @@ module Expr = struct
       | Expect of string Located.t
       | Type of Syntax.Type_expr.t
       (** [type t], its types named by canonical names ([Resolved]). *)
+      | Error of 'e list
+      (** In place of what did not parse or check, with the parts of it that
+          did. *)
     [@@deriving sexp_of]
   end
 
@@ -266,7 +269,7 @@ module Expr = struct
     | Poly_field (e, _)
     | Poly_restrict (e, _)
     | Poly_variant (_, Some e) -> [ e ]
-    | Tuple es | Construct (_, es) -> es
+    | Tuple es | Construct (_, es) | Error es -> es
     | Record fields -> snds fields
     | Poly_record fields -> snds fields
     | Poly_extend (fields, e) | Poly_update (e, fields) -> e :: snds fields
@@ -285,7 +288,7 @@ module Expr = struct
 
   let rec is_value t =
     match t.desc with
-    | Lit _ | Var _ | Type _ | Fun _ -> true
+    | Lit _ | Var _ | Type _ | Fun _ | Error _ -> true
     | Quote expr -> splices_are_values expr ~depth:1
     | Let { ident; args; body; in_; generalized = _ } ->
       binding_is_value ~ident ~args ~body && is_value in_
@@ -338,7 +341,8 @@ module Expr = struct
     | Poly_update _
     | Poly_variant _
     | Expect _
-    | Type _ -> List.for_all (sub_exprs t) ~f:(splices_are_values ~depth)
+    | Type _
+    | Error _ -> List.for_all (sub_exprs t) ~f:(splices_are_values ~depth)
 
   and binding_is_value ~ident ~args ~body =
     (not (List.is_empty args))

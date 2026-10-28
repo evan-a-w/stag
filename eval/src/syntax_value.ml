@@ -200,6 +200,8 @@ module To_value = struct
     | Poly_variant (tag, arg) ->
       con "Poly_variant" [ name tag; option expr arg ]
     | Expect expected -> con "Expect" [ string expected.txt ]
+    | Error ->
+      raise_s [%message "Syntax_value: an expression that did not parse"]
   ;;
 
   let rec toplevel ({ txt; loc = _ } : Toplevel.t) =

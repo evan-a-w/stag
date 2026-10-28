@@ -100,7 +100,7 @@ module Syntax_at = struct
     let recurse = expr t in
     let snds list = List.iter list ~f:(fun (_, e) -> recurse e) in
     match e.txt with
-    | Lit _ | Var _ | Type _ | Expect _ -> ()
+    | Lit _ | Var _ | Type _ | Expect _ | Error -> ()
     | App (a, b) ->
       recurse a;
       recurse b
@@ -346,7 +346,8 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
    | Poly_update _
    | Poly_variant _
    | Expect _
-   | Type _ -> typed ());
+   | Type _
+   | Error _ -> typed ());
   match e.desc with
   | Toplevel_splice { code; expansion = _ } -> recurse code
   | _ -> List.iter (Typed.Expr.sub_exprs e) ~f:recurse

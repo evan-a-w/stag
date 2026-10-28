@@ -190,6 +190,7 @@ module Expr = struct
       | Poly_variant of string * t option
       | Expect of string Located.t
       | Type of Syntax.Type_expr.t
+      | Error
   end
 
   let syntax_view (expr : Syntax.Expr.t) : View.t =
@@ -251,6 +252,7 @@ module Expr = struct
     | Poly_variant (tag, arg) -> Poly_variant (tag.txt, Option.map arg ~f:sub)
     | Expect expected -> Expect expected
     | Type ty -> Type ty
+    | Error -> Error
   ;;
 
   let generated_view ({ desc; ty = _; loc } : Typed.Expr.t) : View.t =
@@ -288,6 +290,7 @@ module Expr = struct
       Splice { code = sub code; subs = Providers providers }
     | Toplevel_splice _ ->
       raise_s [%message "Generated code has a toplevel splice"]
+    | Error _ -> raise_s [%message "Generated code has an error"]
     | Quote expr -> Quote (sub expr)
     | Tuple exprs -> Tuple (subs exprs)
     | Construct (constructor, exprs) -> Construct (Ref constructor, subs exprs)

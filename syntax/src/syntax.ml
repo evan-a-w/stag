@@ -191,6 +191,7 @@ module Expr = struct
     | Expect of string Located.t
     (** [[%expect {|...|}]], located at the string, or zero width after
         [[%expect] if there is none. *)
+    | Error (** In place of what did not parse. *)
   [@@deriving sexp_of, compare, equal]
 end
 

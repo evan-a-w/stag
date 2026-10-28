@@ -196,6 +196,9 @@ module Expr : sig
           [Expect_test_runner]. *)
       | Type of Syntax.Type_expr.t
       (** [type t], its types named by canonical names ([Resolved]). *)
+      | Error of 'e list
+      (** In place of what did not parse or check, with the parts of it that
+          did. *)
     [@@deriving sexp_of]
   end
 
