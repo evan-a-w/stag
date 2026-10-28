@@ -26,6 +26,7 @@ let sexp_of_t { kind; name } =
 ;;
 
 let short_name t = Prelude_path.short_name t.name
+
 let root_path t =
   let names path = String.split path ~on:'.' in
   match Prelude_path.relative t.name with

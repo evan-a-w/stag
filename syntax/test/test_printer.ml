@@ -703,7 +703,8 @@ let%expect_test "the project's sources round trip and are formatted" =
       |> List.count ~f:(fun line -> String.length line > 80)
     in
     print_s [%message path (formatted : bool) (long_lines : int)]);
-  [%expect {|
+  [%expect
+    {|
     (../../tests/basics.stag (formatted true) (long_lines 0))
     (../../tests/core_basics.stag (formatted true) (long_lines 0))
     (../../tests/core_derive_sexp.stag (formatted true) (long_lines 11))

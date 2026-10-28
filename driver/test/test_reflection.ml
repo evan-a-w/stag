@@ -809,3 +809,44 @@ module N = .~(let _ = decl (type s) in Nil)
     Note: The declaration splice is here
     |}]
 ;;
+
+let%expect_test "type refs' root paths" =
+  check
+    ~run:true
+    (reflect
+     ^ {|
+module M = struct
+  type t = A
+end
+let show ty =
+  let names path = Core.String.concat "." path in
+  match Stag.Type_ref.path (head ty) with
+  | Stag.Type_ref.Path.Program path -> print_endline (Core.String.append "program " (names path))
+  | Stag.Type_ref.Path.Prelude path -> print_endline (Core.String.append "prelude " (names path))
+let shown =
+  show (type M.t);
+  show (type int);
+  show (type list[int]);
+  show (type Core.Sexp.t);
+  show (type Stag.Type_expr.t)
+|}
+    );
+  [%expect
+    {|
+    module A : sig
+      val head : Stag.Type.t['a] -> Stag.Type_ref.t
+      val decl : Stag.Type.t['a] -> option[Stag.Type.Decl.t]
+      module M : sig
+        type t = A
+      end
+      val show : Stag.Type.t['a] -> unit
+      val shown : unit
+    end
+    --- output ---
+    program A.M.t
+    prelude int
+    prelude list
+    prelude Core.Sexp.t
+    prelude Stag.Type_expr.t
+    |}]
+;;

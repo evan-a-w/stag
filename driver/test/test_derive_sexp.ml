@@ -55,7 +55,8 @@ include .~(Core.Sexp.derive (type t))
 type t = |
 include .~(Core.Sexp.derive (type t))
 |};
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 3, characters 0-37:
     3 | include .~(Core.Sexp.derive (type t))
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -81,7 +82,8 @@ let%expect_test "abstract types" =
 type t
 include .~(Core.Sexp.derive (type t))
 |};
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 3, characters 0-37:
     3 | include .~(Core.Sexp.derive (type t))
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -95,7 +97,8 @@ let%expect_test "open polymorphic variants" =
 type t[{..'r}] = [`A; ..'r]
 include .~(Core.Sexp.derive (type t[{`B : unit}]))
 |};
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 3, characters 0-50:
     3 | include .~(Core.Sexp.derive (type t[{`B : unit}]))
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -108,7 +111,8 @@ let%expect_test "not a declared type" =
     {|
 include .~(Core.Sexp.derive (type 'a))
 |};
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 2, characters 0-38:
     2 | include .~(Core.Sexp.derive (type 'a))
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -122,7 +126,8 @@ let%expect_test "a type named sexp" =
 type sexp = S
 include .~(Core.Sexp.derive (type sexp))
 |};
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 3, characters 0-40:
     3 | include .~(Core.Sexp.derive (type sexp))
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -135,7 +140,8 @@ let%expect_test "the prelude's types" =
     {|
 include .~(Core.Sexp.derive (type option[int]))
 |};
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 2, characters 0-47:
     2 | include .~(Core.Sexp.derive (type option[int]))
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -150,7 +156,8 @@ type u = A
 type t = B of u
 include .~(Core.Sexp.derive (type t))
 |};
-  [%expect {|
+  [%expect
+    {|
     File "a.stag", line 4, characters 0-37:
     4 | include .~(Core.Sexp.derive (type t))
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -171,7 +178,8 @@ module M = struct
   type u = U
   include .~(Core.Sexp.derive (type u))
 end
-|} )
+|}
+      )
     ; ( "a.stag"
       , {|
 module B = struct end
@@ -181,7 +189,8 @@ let main = print_endline (Core.Sexp.to_string (sexp_of_t {u = .B.M.U}))
 |}
       )
     ];
-  [%expect {|
+  [%expect
+    {|
     module B : sig
       module M : sig
         type u = U
@@ -217,7 +226,8 @@ end
 include .~(Core.Sexp.derive (type M.t))
 let main = print_endline (Core.Sexp.to_string (sexp_of_t (M.T M.U)))
 |};
-  [%expect {|
+  [%expect
+    {|
     module A : sig
       module M : sig
         type u = U

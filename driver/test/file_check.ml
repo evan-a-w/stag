@@ -9,7 +9,8 @@ let check_files ?(run = false) ?(filter_diagnostic = Fn.id) files =
       Option.some_if (String.equal file.path path) file.contents)
   in
   let print_diagnostic diagnostic =
-    print_string (filter_diagnostic (Diagnostic.to_string_hum ~contents diagnostic))
+    print_string
+      (filter_diagnostic (Diagnostic.to_string_hum ~contents diagnostic))
   in
   match Driver.check_files files with
   | Error error -> print_diagnostic (Diagnostic.of_driver_error error)
