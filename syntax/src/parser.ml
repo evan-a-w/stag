@@ -34,6 +34,12 @@ type t =
   ; mutable bare_tuple_end : int
     (** The [pos] after the last [)] whose contents were a tuple without
           parentheses of its own, as in [(a, b)] but not [((a, b))]. *)
+  ; errors : Error.t Queue.t option
+    (** Where to record errors, to keep parsing toplevels after them, if
+          any. *)
+  ; mutable salvage : (Expr.t -> Toplevel.desc) option
+    (** What of the toplevel being parsed parsed, given an [Expr.Error] for
+          the rest. *)
   }
 
 let peek_at t n =
@@ -674,25 +680,27 @@ let rec expr ?(seq = true) t : Expr.t =
         (Let (located ~loc:semi "_", [], None, first, second)))
     else first
 
+and binding_name t =
+  if is t Rec then fail (loc t) "lets are always recursive; remove `rec`";
+  match peek t with
+  | Underscore ->
+    let loc = loc t in
+    advance t;
+    located ~loc "_"
+  | _ -> lident t ~what:"a name to bind"
+
+and binding_annot t =
+  if is t Colon
+  then (
+    advance t;
+    Some (type_expr t))
+  else None
+
 (** [name params : t = e], after [let]. *)
 and binding t =
-  if is t Rec then fail (loc t) "lets are always recursive; remove `rec`";
-  let name =
-    match peek t with
-    | Underscore ->
-      let loc = loc t in
-      advance t;
-      located ~loc "_"
-    | _ -> lident t ~what:"a name to bind"
-  in
+  let name = binding_name t in
   let params = params t in
-  let annot =
-    if is t Colon
-    then (
-      advance t;
-      Some (type_expr t))
-    else None
-  in
+  let annot = binding_annot t in
   expect t Equal;
   name, params, annot, expr t
 
@@ -995,6 +1003,8 @@ and record t : Expr.t =
 
 (* Declarations *)
 
+let salvage t f = t.salvage <- Some f
+
 let type_param t : Type_decl.Param.t Located.t =
   let start = loc t in
   match peek t with
@@ -1010,8 +1020,7 @@ let type_param t : Type_decl.Param.t Located.t =
   | _ -> expected t "a type parameter like `'a` or `{..'r}`"
 ;;
 
-let constructor_decl t =
-  let name = uident t ~what:"a constructor name" in
+let constructor_args t =
   if is t Of
   then (
     advance t;
@@ -1028,8 +1037,13 @@ let constructor_decl t =
            of (a -> b)`"
       | _ -> List.rev acc
     in
-    name, args [])
-  else name, []
+    args [])
+  else []
+;;
+
+let constructor_decl t =
+  let name = uident t ~what:"a constructor name" in
+  name, constructor_args t
 ;;
 
 let type_kind t : Type_decl.Kind.t =
@@ -1059,8 +1073,9 @@ let type_kind t : Type_decl.Kind.t =
   | _ -> Alias (type_expr t)
 ;;
 
-let type_decl t : Type_decl.t =
+let type_decl t ~salvage : Type_decl.t =
   let name = lident t ~what:"a type name" in
+  salvage { Type_decl.name; params = []; kind = Abstract };
   let params =
     if is t Lbracket
     then (
@@ -1072,6 +1087,7 @@ let type_decl t : Type_decl.t =
       params)
     else []
   in
+  salvage { name; params; kind = Abstract };
   let kind =
     if is t Equal
     then (
@@ -1087,23 +1103,37 @@ let rec toplevel t : Toplevel.t =
   match peek t with
   | Let ->
     advance t;
-    let name, params, annot, equal = binding t in
+    let name = binding_name t in
+    salvage t (fun error -> Let (name, [], None, error));
+    let params = params t in
+    salvage t (fun error -> Let (name, params, None, error));
+    let annot = binding_annot t in
+    salvage t (fun error -> Let (name, params, annot, error));
+    expect t Equal;
+    let equal = expr t in
     if is t In
-    then
+    then (
+      salvage t (fun _ -> Let (name, params, annot, equal));
       fail
         (loc t)
-        "unexpected `in`: a toplevel `let` is a declaration, without `in`";
+        "unexpected `in`: a toplevel `let` is a declaration, without `in`");
     since t start (Toplevel.Let (name, params, annot, equal))
   | Type ->
     advance t;
-    since t start (Toplevel.Type (type_decl t))
+    let decl =
+      type_decl t ~salvage:(fun decl -> salvage t (fun _ -> Type decl))
+    in
+    since t start (Toplevel.Type decl)
   | Exception ->
     advance t;
-    let name, args = constructor_decl t in
+    let name = uident t ~what:"a constructor name" in
+    salvage t (fun _ -> Exception (name, []));
+    let args = constructor_args t in
     since t start (Toplevel.Exception (name, args))
   | Module ->
     advance t;
     let name = uident t ~what:"a module name" in
+    salvage t (fun error -> Module_splice (name, error));
     expect t Equal;
     (match peek t with
      | Splice ->
@@ -1112,10 +1142,16 @@ let rec toplevel t : Toplevel.t =
        let struct_loc = loc t in
        expect t Struct;
        let toplevels = toplevels t ~stop:Token.End in
-       close t End ~opener:Struct ~open_loc:struct_loc;
+       (match t.errors with
+        | None -> close t End ~opener:Struct ~open_loc:struct_loc
+        | Some errors ->
+          (try close t End ~opener:Struct ~open_loc:struct_loc with
+           | Syntax_error (loc, message) ->
+             Queue.enqueue errors (Syntax { loc; message })));
        since t start (Toplevel.Module (name, toplevels)))
   | Include ->
     advance t;
+    salvage t (fun error -> Include error);
     (match peek t with
      | Splice -> since t start (Toplevel.Include (declaration_splice t))
      | _ -> expected t "a declaration splice `.~e` after `include`")
@@ -1129,6 +1165,7 @@ let rec toplevel t : Toplevel.t =
         located ~loc s
       | _ -> expected t "the name of the test, a string"
     in
+    salvage t (fun body -> Expect_test { name; body });
     expect t Equal;
     let body = expr t in
     since t start (Toplevel.Expect_test { name; body })
@@ -1142,6 +1179,7 @@ let rec toplevel t : Toplevel.t =
         located ~loc s
       | _ -> expected t "the name of the benchmark, a string"
     in
+    salvage t (fun body -> Bench { name; param = None; body });
     let param =
       match peek t with
       | Lident _ ->
@@ -1160,6 +1198,7 @@ let rec toplevel t : Toplevel.t =
          | args -> Some { Bench_param.name; args })
       | _ -> None
     in
+    salvage t (fun body -> Bench { name; param; body });
     expect t Equal;
     let body = expr t in
     since t start (Toplevel.Bench { name; param; body })
@@ -1168,23 +1207,79 @@ let rec toplevel t : Toplevel.t =
       t
       "a declaration (`let`, `type`, `exception`, `module` or `include`)"
 
+(* The next toplevel after the broken one at [start]: the next toplevel
+   keyword first on its line and not indented more than the broken one, or, in
+   a [struct], the [end] closing it, by nesting or by being less indented.
+   Unmatched closing brackets are skipped. *)
+and resync t ~start ~in_struct =
+  let col = t.tokens.(start).loc.start.col in
+  let rec go i ~depth =
+    let ({ token; loc } : Lexer.Located.t) = t.tokens.(i) in
+    let first_on_line = loc.start.line > t.tokens.(i - 1).loc.stop.line in
+    match token with
+    | Eof -> i
+    | (Let | Type | Exception | Module | Include | Let_expect_test | Let_bench)
+      when first_on_line && loc.start.col <= col -> i
+    | End when in_struct && first_on_line && loc.start.col < col -> i
+    | Lparen
+    | Lbracket
+    | Expect_open
+    | Lbrace
+    | Dot_lbrace
+    | Struct
+    | Quote_open -> go (i + 1) ~depth:(depth + 1)
+    | End when in_struct && depth = 0 -> i
+    | Rparen | Rbracket | Rbrace | End | Quote_close ->
+      go (i + 1) ~depth:(Int.max 0 (depth - 1))
+    | _ -> go (i + 1) ~depth
+  in
+  go (start + 1) ~depth:0
+
 (* [.~e], the declarations [e] generates. *)
 and declaration_splice t =
   advance t;
   postfix t
 
 and toplevels t ~stop =
-  let rec loop acc =
-    if is t stop || is t Eof then List.rev acc else loop (toplevel t :: acc)
-  in
-  loop []
+  match t.errors with
+  | None ->
+    let rec loop acc =
+      if is t stop || is t Eof then List.rev acc else loop (toplevel t :: acc)
+    in
+    loop []
+  | Some errors ->
+    let rec loop acc =
+      if is t stop || is t Eof
+      then List.rev acc
+      else (
+        let start = t.pos in
+        t.salvage <- None;
+        match
+          match peek t with
+          | (Rparen | Rbracket | Rbrace | Quote_close | End) as token ->
+            fail (loc t) (sprintf "unmatched %s" (describe token))
+          | _ -> toplevel t
+        with
+        | toplevel -> loop (toplevel :: acc)
+        | exception Syntax_error (loc, message) ->
+          Queue.enqueue errors (Syntax { loc; message });
+          let salvage = t.salvage in
+          t.pos <- resync t ~start ~in_struct:(Token.equal stop End);
+          let loc = Loc.merge t.tokens.(start).loc (prev_loc t) in
+          (match salvage with
+           | None -> loop acc
+           | Some desc -> loop (located ~loc (desc (expr_at ~loc Error)) :: acc)))
+    in
+    loop []
 ;;
 
 let run_with_comments ~file source f =
   match Lexer.tokenize_with_comments ~file source with
   | Error error -> Error (Error.Lex error)
   | Ok (tokens, comments) ->
-    let t = { tokens; pos = 0; bare_tuple_end = -1 } in
+    let t =
+      { tokens; pos = 0; bare_tuple_end = -1; errors = None; salvage = None }
+    in
     (match
        let result = f t in
        (match peek t with
@@ -1212,3 +1307,38 @@ let program_with_comments ~file source =
 let expr ~file source = run ~file source expr
 let pattern ~file source = run ~file source pattern
 let type_expr ~file source = run ~file source type_expr
+
+let program_recovering ~file source =
+  let { Lexer.Recovered.tokens; comments = _; errors = lex_errors } =
+    Lexer.tokenize_recovering ~file source
+  in
+  let errors = Queue.create () in
+  let t =
+    { tokens
+    ; pos = 0
+    ; bare_tuple_end = -1
+    ; errors = Some errors
+    ; salvage = None
+    }
+  in
+  let program = toplevels t ~stop:Token.Eof in
+  (* A syntax error at the token after a lexer error is likely due to it. *)
+  let after_lex_errors =
+    List.filter_map lex_errors ~f:(fun error ->
+      Array.find tokens ~f:(fun token ->
+        token.loc.start.offset >= error.loc.stop.offset)
+      |> Option.map ~f:(fun token -> token.loc.start.offset))
+    |> Int.Set.of_list
+  in
+  let start (error : Error.t) = (Error.loc error).start.offset in
+  let errors =
+    List.map lex_errors ~f:(fun error -> Error.Lex error)
+    @ List.filter (Queue.to_list errors) ~f:(fun error ->
+      not (Set.mem after_lex_errors (start error)))
+    |> List.stable_sort ~compare:(Comparable.lift Int.compare ~f:start)
+    |> List.remove_consecutive_duplicates
+         ~which_to_keep:`First
+         ~equal:(fun a b -> start a = start b)
+  in
+  program, errors
+;;

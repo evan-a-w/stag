@@ -21,6 +21,16 @@ end
 (** The toplevels of a file. *)
 val program : file:string -> string -> (Syntax.Program.t, Error.t) Result.t
 
+(** The toplevels of a file, parsed past errors, and the errors, in order.
+    A toplevel with an error is dropped, or, if it parsed far enough to
+    declare something, kept with [Expr.Error] for the rest: a [let] with its
+    name, a [type] abstract, a [module] or [include] as a splice of
+    [Expr.Error], a [struct] with the toplevels in it. *)
+val program_recovering
+  :  file:string
+  -> string
+  -> Syntax.Program.t * Error.t list
+
 (** Also the tokens and the comments, in order. *)
 val program_with_comments
   :  file:string

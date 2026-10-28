@@ -43,6 +43,18 @@ val tokenize_with_comments
   -> string
   -> (Located.t array * Comment.t list, Error.t) Result.t
 
+module Recovered : sig
+  type t =
+    { tokens : Located.t array (** Without the lexemes with errors. *)
+    ; comments : Comment.t list
+    ; errors : Error.t list (** In order. *)
+    }
+end
+
+(** Lexes past errors: skips illegal characters, and ends unterminated strings
+    and comments at the end of the file. *)
+val tokenize_recovering : file:string -> string -> Recovered.t
+
 module Prefix : sig
   type t =
     { tokens : Located.t array (** Ending in [Eof], at the error if any. *)
