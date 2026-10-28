@@ -793,7 +793,7 @@ module N = .~((.< x >.))
     |}]
 ;;
 
-let%expect_test "resolved paths are printed as paths" =
+let%expect_test "resolved paths are printed as root paths" =
   let at txt = Located.create txt in
   let resolved name = at (Syntax.Decl_path.Resolved name) in
   let ty name args = at (Syntax.Type_expr.Con (resolved name, args)) in
@@ -832,6 +832,35 @@ let%expect_test "resolved paths are printed as paths" =
     {|
     let f (r : .option[.int]) : .Gen.M.t =
       match x.(.Gen.M.field) with .Some {.Gen.M.x = _} -> .Gen.M.A (type .Gen.M.t)
+    |}]
+;;
+
+let%expect_test "resolved paths with no root path" =
+  let var name =
+    Located.create (Syntax.Expr.Var (Syntax.Decl_path.Resolved name, None))
+  in
+  List.iter
+    [ "prelude.Core.Int.to_string"
+    ; "prelude.Prim.String.length"
+    ; "prelude.raise"
+    ; "prelude.Intrinsic.raise"
+    ; "Core.x"
+    ]
+    ~f:(fun name ->
+      printf
+        "%s: %s, %s\n"
+        name
+        (Printer.expr (var name))
+        (Printer.expr
+           ~root_modules:(String.Set.of_list [ "Core"; "String" ])
+           (var name)));
+  [%expect
+    {|
+    prelude.Core.Int.to_string: .Core.Int.to_string, <prelude.Core.Int.to_string>
+    prelude.Prim.String.length: .String.length, <prelude.Prim.String.length>
+    prelude.raise: .raise, .raise
+    prelude.Intrinsic.raise: <prelude.Intrinsic.raise>, <prelude.Intrinsic.raise>
+    Core.x: .Core.x, .Core.x
     |}]
 ;;
 

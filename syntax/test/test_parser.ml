@@ -1073,3 +1073,39 @@ let%expect_test "types as values" =
     t.stag:1:10-13: type arguments are written after the name, in brackets: `list[int]`
     |}]
 ;;
+
+let%expect_test "root paths" =
+  expr ".x";
+  expr ".M.N.x";
+  expr ".M.C (.x, .C)";
+  expr "r.(.M.x).y.(.z)";
+  expr "{.M.x = 1; y = .y}";
+  expr "{r with .M.x = 1}";
+  expr ".< .x .~.y >.";
+  pat ".M.C {.M.x = .D; y = _}";
+  ty ".int -> .M.t[.list[.option[int]]]";
+  [%expect
+    {|
+    (Var .x ())
+    (Var .M.N.x ())
+    (Construct .M.C ((Var .x ()) (Construct .C ())))
+    (Field (Field (Field (Var r ()) .M.x) y) .z)
+    (Record ((.M.x (Lit (Int 1))) (y (Var .y ()))))
+    (Record_update (Var r ()) ((.M.x (Lit (Int 1)))))
+    (Quote (App (Var .x ()) (Splice (expr (Var .y ())) (subs ()))))
+    (Construct .M.C ((Record ((.M.x (Construct .D ())) (y Any)))))
+    (Arrow (Con .int ())
+     (Con .M.t ((Ty (Con .list ((Ty (Con .option ((Ty (Con int ())))))))))))
+    |}];
+  expr "r.(x)";
+  expr "r.(.M.x";
+  expr ". x";
+  pat ".x";
+  [%expect
+    {|
+    t.stag:1:3-4: expected a root path like `.M.x`: `e.(.M.x)`, found `x`
+    t.stag:1:7-7: expected `)` to close this `(` (opened at 1:2), found end of file
+    t.stag:1:0-1: expected an expression, found `.`
+    t.stag:1:1-2: expected a constructor, found `x`
+    |}]
+;;
