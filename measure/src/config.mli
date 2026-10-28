@@ -27,6 +27,6 @@ val default : t
     5). *)
 val quick : t
 
-(** At least 2 samples (and [min_samples]), spans and the noise threshold not
-    negative, confidence in (0, 1). *)
+(** At least 1 sample, [min_samples] from 1 to [samples], spans, resamples
+    and the noise threshold not negative, confidence in (0, 1). *)
 val validate : t -> unit Or_error.t

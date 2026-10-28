@@ -37,10 +37,10 @@ let validate t =
   let check ok message = if ok then Ok () else Or_error.error_string message in
   let non_negative span = Time_ns.Span.( >= ) span Time_ns.Span.zero in
   Or_error.combine_errors_unit
-    [ check (t.samples >= 2) "the number of samples must be at least 2"
+    [ check (t.samples >= 1) "the number of samples must be at least 1"
     ; check
-        (t.min_samples >= 2 && t.min_samples <= t.samples)
-        "the minimum number of samples must be from 2 to the number of samples"
+        (t.min_samples >= 1 && t.min_samples <= t.samples)
+        "the minimum number of samples must be from 1 to the number of samples"
     ; check (non_negative t.warm_up) "the warm-up time must not be negative"
     ; check
         (non_negative t.measurement_time)

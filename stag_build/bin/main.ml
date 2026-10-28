@@ -68,7 +68,7 @@ let promote_command =
      fun () -> exit_unless (Action.promote (load ())))
 ;;
 
-let bench_command =
+let bench_command ~fake_clock =
   Command.basic
     ~summary:"Run the benchmarks of every target, or those matching FILTERs"
     ~readme:(fun () ->
@@ -80,7 +80,7 @@ let bench_command =
          saved in %s/."
         Action.bench_dir)
     (let%map_open.Command filters = anon (sequence ("FILTER" %: string))
-     and options = Bench_command.Options.param
+     and options = Bench_command.Options.param ~fake_clock
      and phases =
        flag "phases" no_arg ~doc:" benchmark the phases of the interpreter"
      in
@@ -88,13 +88,14 @@ let bench_command =
 ;;
 
 let () =
+  let argv, fake_clock = Bench_command.take_fake_clock (Array.to_list (Sys.get_argv ())) in
   Command.group
     ~summary:"Build stag projects"
     [ "build", build_command
     ; "exec", exec_command
     ; "test", test_command
     ; "promote", promote_command
-    ; "bench", bench_command
+    ; "bench", bench_command ~fake_clock
     ]
-  |> Command_unix.run
+  |> Command_unix.run ~argv
 ;;

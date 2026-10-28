@@ -98,7 +98,6 @@ A target with errors is reported, and the others still run.
 
 The interpreter benchmarks of bench/ build, and their expect tests pass.
 
-  $ unset STAG_BENCH_FAKE_CLOCK
   $ cp -RL ../../../bench interpreter && chmod -R u+w interpreter && cd interpreter
   $ stag-build build
   $ stag-build test

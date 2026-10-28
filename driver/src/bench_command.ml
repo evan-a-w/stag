@@ -17,7 +17,7 @@ module Options = struct
       name)
   ;;
 
-  let param =
+  let param ~fake_clock =
     let%map_open.Command quick =
       flag "quick" no_arg ~doc:" shorter warm-up and measurement, fewer samples"
     and samples =
@@ -62,13 +62,6 @@ module Options = struct
         "save-baseline"
         (optional baseline_name)
         ~doc:"NAME save the results as the baseline NAME"
-    and fake_clock =
-      flag
-        "fake-clock"
-        (optional Time_ns.Span.arg_type)
-        ~doc:
-          "SPAN for tests: time with a fake clock moving SPAN at each read, \
-           not the real one"
     in
     let base = if quick then Config.quick else Config.default in
     let samples = Option.value samples ~default:base.samples in
@@ -94,6 +87,27 @@ module Options = struct
     { config; format; alloc = not no_alloc; baseline; save_baseline; clock }
   ;;
 end
+
+let fake_clock_flag = "-fake-clock"
+
+let take_fake_clock argv =
+  let rec loop acc fake_clock = function
+    | [] -> List.rev acc, fake_clock
+    | flag :: rest when String.equal flag fake_clock_flag ->
+      (match rest with
+       | span :: rest ->
+         (match Time_ns.Span.of_string span with
+          | span -> loop acc (Some span) rest
+          | exception _ ->
+            eprintf "Error: %s: invalid span %S\n" fake_clock_flag span;
+            exit 2)
+       | [] ->
+         eprintf "Error: %s needs a SPAN\n" fake_clock_flag;
+         exit 2)
+    | arg :: rest -> loop (arg :: acc) fake_clock rest
+  in
+  loop [] None argv
+;;
 
 let error_diagnostic error =
   Diagnostic.create ~loc:Loc.none (Error.to_string_hum error)

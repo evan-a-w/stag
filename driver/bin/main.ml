@@ -192,7 +192,7 @@ let test_command =
        if errors > 0 || (failed_on_mismatch && failed > 0) then exit 1)
 ;;
 
-let bench_command =
+let bench_command ~fake_clock =
   Command.basic
     ~summary:"Run the benchmarks of the program of the files"
     ~readme:(fun () ->
@@ -203,7 +203,7 @@ let bench_command =
        unlimited; limits apply to compile time and evaluation.")
     (let%map_open.Command paths = files_param
      and limits = limits_param
-     and options = Bench_command.Options.param
+     and options = Bench_command.Options.param ~fake_clock
      and filters =
        flag
          "filter"
@@ -243,12 +243,13 @@ let bench_command =
 ;;
 
 let () =
+  let argv, fake_clock = Bench_command.take_fake_clock (Array.to_list (Sys.get_argv ())) in
   Command.group
     ~summary:"The stag language"
     [ "check", check_command
     ; "run", run_command
     ; "test", test_command
-    ; "bench", bench_command
+    ; "bench", bench_command ~fake_clock
     ]
-  |> Command_unix.run
+  |> Command_unix.run ~argv
 ;;

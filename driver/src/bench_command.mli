@@ -14,11 +14,14 @@ module Options : sig
 
   (** [-quick], [-samples N], [-warm-up SPAN], [-time SPAN],
       [-noise-threshold PERCENT], [-no-alloc], [-format FORMAT] (or [-json],
-      [-sexp]), [-baseline NAME], [-save-baseline NAME] and, for tests, the
-      hidden [-fake-clock SPAN]: a fake clock moving by [SPAN] at each
-      read. *)
-  val param : t Command.Param.t
+      [-sexp]), [-baseline NAME] and [-save-baseline NAME]. With
+      [fake_clock], a fake clock moving by it at each read. *)
+  val param : fake_clock:Time_ns.Span.t option -> t Command.Param.t
 end
+
+(** Takes the hidden [-fake-clock SPAN] out of a command line, for tests: Core
+    commands cannot hide flags from [-help]. Exits on a malformed [SPAN]. *)
+val take_fake_clock : string list -> string list * Time_ns.Span.t option
 
 (** Measures the [benches] matching [filters] (see [Suite.selected]), printing
     the report to stdout: each bench as it is measured, or all at the end in a

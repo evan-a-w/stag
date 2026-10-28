@@ -133,6 +133,95 @@ Baselines are saved in _stag/bench, and compared with.
   
   [1]
 
+A malformed baseline is an error when comparing, and replaced with a warning
+when saving.
+
+  $ echo '(' > _stag/bench/broken.sexp
+  $ bench fib.stag -samples 3 -no-alloc -filter fib/1 -baseline broken
+  Error: (("delete the baseline or save it again" _stag/bench/broken.sexp)
+   ("malformed baseline" _stag/bench/broken.sexp
+    (exn
+     (Failure
+      "Sexplib.Sexp.gen_load_sexp: EOF in _stag/bench/broken.sexp while in state Parsing_list"))))
+  [1]
+  $ bench fib.stag -samples 3 -no-alloc -filter fib/1 -save-baseline broken > /dev/null
+  Warning: overwriting a malformed baseline: (("delete the baseline or save it again" _stag/bench/broken.sexp)
+   ("malformed baseline" _stag/bench/broken.sexp
+    (exn
+     (Failure
+      "Sexplib.Sexp.gen_load_sexp: EOF in _stag/bench/broken.sexp while in state Parsing_list"))))
+  $ bench fib.stag -samples 3 -no-alloc -filter fib/1 -baseline broken | grep change
+    change:    [+0.000% +0.000% +0.000%] (95% CI) No change in performance detected.
+
+Benchmarks not in the baseline are noted.
+
+  $ bench fib.stag -samples 3 -no-alloc -filter fib/3 -baseline broken
+  fib/3
+    time:      [0.1000 ns 0.1000 ns 0.1000 ns] (mean, 95% CI)
+    median:    0.1000 ns   stddev: 0.000 ns   MADN: 0.000 ns
+    range:     [0.1000 ns 0.1000 ns]   p90: 0.1000 ns   p99: 0.1000 ns
+    samples:   3 x 1000 iterations (warm-up: 1023 iterations in 1.000 us)
+    outliers:  none
+    change:    not in the baseline
+
+Invalid options are errors.
+
+  $ bench fib.stag -samples 0
+  Error: ("the number of samples must be at least 1"
+   "the minimum number of samples must be from 1 to the number of samples")
+  [1]
+  $ stag bench fib.stag -warm-up -1s
+  Error: "the warm-up time must not be negative"
+  [1]
+  $ stag bench fib.stag -time -1s
+  Error: "the measurement time must not be negative"
+  [1]
+  $ bench fib.stag -noise-threshold -1
+  Error: "the noise threshold must be a number, not negative"
+  [1]
+  $ bench fib.stag -noise-threshold nan
+  Error: "the noise threshold must be a number, not negative"
+  [1]
+  $ stag bench fib.stag -fake-clock
+  Error: -fake-clock needs a SPAN
+  [2]
+  $ stag bench fib.stag -fake-clock soon
+  Error: -fake-clock: invalid span "soon"
+  [2]
+
+The fake clock is hidden from -help.
+
+  $ stag bench -help | grep -c fake
+  0
+  [1]
+
+A clock that does not move ends the warm-up after a bounded number of
+iterations, and fails the benchmark.
+
+  $ stag bench -warm-up 1s -time 1s -fake-clock 0ns fib.stag -samples 3 -no-alloc -filter fib/1
+  Error: Benchmark fib/1 failed: ("the clock did not move while timing a batch of iterations, so it cannot time them"
+   (iterations 65536))
+  [1]
+
+Benchmarks are not limited by -fuel, which applies to evaluating the program.
+
+  $ cat > long.stag <<'EOF'
+  > let count n = match Int.equal n 0 with true -> 0 | false -> count (Int.sub n 1)
+  > let%bench "count" = count 100000
+  > EOF
+  $ bench long.stag -samples 1 -no-alloc -fuel 1000 | head -1
+  count
+  $ cat > long_main.stag <<'EOF'
+  > let count n = match Int.equal n 0 with true -> 0 | false -> count (Int.sub n 1)
+  > let main = count 100000
+  > EOF
+  $ bench long_main.stag -fuel 1000
+  File "long_main.stag", line 1, characters 67-76:
+  1 | let count n = match Int.equal n 0 with true -> 0 | false -> count (Int.sub n 1)
+                                                                         ^^^^^^^^^
+  Error: Out of fuel: evaluation took more than 1000 steps
+  [1]
+
 A failing benchmark is reported, and the others still run.
 
   $ cat > fail.stag <<'EOF'
@@ -151,6 +240,36 @@ A failing benchmark is reported, and the others still run.
     samples:   5 x 1000 iterations (warm-up: 1023 iterations in 1.000 us)
     outliers:  none
   [1]
+
+A failing argument fails only its benchmark; -filter selects benchmarks
+before their arguments are evaluated, so the arguments of the others are not.
+
+  $ cat > args.stag <<'EOF'
+  > let%bench "div" n in [Int.div 1 0; 2] = n
+  > let%bench "same" n in [1; Int.sub 2 1] = n
+  > let%bench "long" s in ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"] = s
+  > let%bench "ok" = ()
+  > EOF
+  $ bench args.stag -samples 1 -no-alloc | grep -E '^[a-zF]|Error'
+  File "args.stag", line 1, characters 22-33:
+  1 | let%bench "div" n in [Int.div 1 0; 2] = n
+                            ^^^^^^^^^^^
+  Error: Benchmark div failed: Division by zero
+  File "args.stag", line 2, characters 10-16:
+  2 | let%bench "same" n in [1; Int.sub 2 1] = n
+                ^^^^^^
+  Error: Benchmark same failed: Two benchmarks are named "same/1", the other at args.stag:2:10-16
+  div/2
+  same/1
+  long/"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa...
+  ok
+  $ bench args.stag -samples 1 -no-alloc -filter ok
+  ok
+    time:      [0.1000 ns 0.1000 ns 0.1000 ns] (mean, 95% CI)
+    median:    0.1000 ns   stddev: 0.000 ns   MADN: 0.000 ns
+    range:     [0.1000 ns 0.1000 ns]   p90: 0.1000 ns   p99: 0.1000 ns
+    samples:   1 x 1000 iterations (warm-up: 1023 iterations in 1.000 us)
+    outliers:  none
 
 Errors in benchmarks are type errors of the program.
 
