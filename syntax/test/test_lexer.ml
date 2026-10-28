@@ -730,3 +730,50 @@ let%expect_test "quoted strings and expect tokens" =
     (Eof t.stag:1:16-16 "")
     |xxx}]
 ;;
+
+let%expect_test "lexing past errors" =
+  let lex src =
+    let { Lexer.Recovered.tokens; comments; errors } =
+      Lexer.tokenize_recovering ~file:"t.stag" src
+    in
+    List.iter errors ~f:(fun error ->
+      print_endline (Lexer.Error.to_string error));
+    print_s
+      [%message
+        ""
+          ~tokens:
+            (Array.map tokens ~f:(fun token -> Token.to_string token.token)
+             : string array)
+          ~comments:(List.length comments : int)]
+  in
+  lex "a $ b ` c '\\q' 'd 99999999999999999999 '\\n \"x\\yz\" 1x";
+  [%expect
+    {|
+    t.stag:1:2-3: illegal character '$'
+    t.stag:1:6-7: illegal character '`'
+    t.stag:1:11-13: illegal escape sequence \q
+    t.stag:1:18-38: integer literal 99999999999999999999 exceeds the range of int
+    t.stag:1:39-42: unterminated character literal
+    t.stag:1:45-47: illegal escape sequence \y
+    t.stag:1:50-52: invalid integer literal 1x
+    ((tokens (a b c '?' 'd 0 "'\\n'" "\"x?z\"" 0 "end of file")) (comments 0))
+    |}];
+  lex "a (* b {|c *)";
+  [%expect
+    {|
+    t.stag:1:2-4: unterminated comment
+    ((tokens (a "end of file")) (comments 1))
+    |}];
+  lex "a \"b";
+  [%expect
+    {|
+    t.stag:1:2-3: unterminated string literal
+    ((tokens (a "\"b\"" "end of file")) (comments 0))
+    |}];
+  lex "a {x|b";
+  [%expect
+    {|
+    t.stag:1:2-5: unterminated string literal
+    ((tokens (a "\"b\"" "end of file")) (comments 0))
+    |}]
+;;

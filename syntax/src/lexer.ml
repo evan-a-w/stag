@@ -304,8 +304,14 @@ let comment (t : State.t) =
         skip_string ();
         loop depth
       | Some '{', _, _, _ when Option.is_some (quoted_string_id t) ->
-        ignore (quoted_string t ~id:(Option.value_exn (quoted_string_id t)));
-        loop depth
+        let close = "|" ^ Option.value_exn (quoted_string_id t) ^ "}" in
+        (match String.substr_index t.src ~pos:t.offset ~pattern:close with
+         | Some i ->
+           State.bump_n t (i + String.length close - t.offset);
+           loop depth
+         | None ->
+           State.bump_n t (String.length t.src - t.offset);
+           unterminated ())
       | Some '\'', Some '\\', Some _, Some '\'' ->
         State.bump_n t 4;
         loop depth
