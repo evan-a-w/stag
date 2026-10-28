@@ -25,8 +25,14 @@ end
 type t
 
 (** Relative paths are relative to [root]. Skips directories starting with [.]
-    or [_]. Errs with every error found. *)
-val load : root:string -> (t, Diagnostic.t list) Result.t
+    or [_]. Errs with every error found. A file's contents are [contents path]
+    (its path relative to [root]) if some, eg. an editor's unsaved buffer, else
+    read from disk. *)
+val load
+  :  ?contents:(string -> string option)
+  -> root:string
+  -> unit
+  -> (t, Diagnostic.t list) Result.t
 
 val root : t -> string
 

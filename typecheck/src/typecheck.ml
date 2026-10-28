@@ -122,6 +122,7 @@ module Program_env = struct
     ; interpreter : Treewalk.t
     ; mutable ident_info : Typed.Ident_info.t Typed.Ident.Map.t
     ; sccs : Typed.Scc.t Queue.t
+    ; declaration_splices : Typed.Expr.t Queue.t
     ; unusable_in_quotes : Typecheck_error.Unusable_in_quote.t String.Table.t
       (** The latest free variable of a quote that a binding of its name,
           unusable there, did not bind, to explain an error if the code is
@@ -1973,6 +1974,7 @@ let generate t (program : Program_env.t) splice
       ~error:(fun error ->
         Typecheck_error.create ~loc (Declaration_splice_failed error))
   in
+  Queue.enqueue program.declaration_splices expr;
   let%map.Result generated =
     Syntax_value.Program.of_value value ~loc
     |> Result.map_error ~f:(fun error ->
@@ -2161,6 +2163,7 @@ let program_env t interpreter =
   ; interpreter
   ; ident_info = Typed.Ident.Map.empty
   ; sccs = Queue.create ()
+  ; declaration_splices = Queue.create ()
   ; unusable_in_quotes = String.Table.create ()
   ; expansions = Queue.create ()
   ; unfinished = Stack.create ()
@@ -2217,6 +2220,7 @@ let typecheck { fresh = t; interpreter } ~(program : Syntax.Program.t)
       { sccs = Queue.to_list program_env.sccs
       ; expect_tests
       ; benches
+      ; declaration_splices = Queue.to_list program_env.declaration_splices
       ; ident_info = program_env.ident_info
       }
   ; expansions =

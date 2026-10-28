@@ -291,7 +291,10 @@ class Server {
         child.once("exit", () => this.liveProcesses.delete(child));
       });
     const clientOptions: LanguageClientOptions = {
-      documentSelector: [{ language: "stag" }],
+      documentSelector: [
+        { scheme: "file", language: "stag" },
+        { scheme: "untitled", language: "stag" },
+      ],
       outputChannel: this.output,
       errorHandler: {
         error: () => ({ action: ErrorAction.Shutdown, handled: true }),

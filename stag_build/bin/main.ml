@@ -11,7 +11,7 @@ let find_root () =
 
 let load () =
   let root = find_root () in
-  match Project.load ~root with
+  match Project.load ~root () with
   | Ok project -> project
   | Error diagnostics ->
     let contents path =

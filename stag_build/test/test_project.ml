@@ -18,7 +18,7 @@ let print_project project =
 
 let load files =
   Helpers.with_dir (("stag-project", "") :: files) ~f:(fun root ->
-    match Project.load ~root with
+    match Project.load ~root () with
     | Ok project -> print_project project
     | Error diagnostics -> Helpers.print_diagnostics ~root diagnostics)
 ;;

@@ -404,6 +404,7 @@ module Program = struct
     { sccs : Scc.t list
     ; expect_tests : Expect_test.t list
     ; benches : Bench.t list
+    ; declaration_splices : Expr.t list
     ; ident_info : Ident_info.t Ident.Map.t
     }
   [@@deriving sexp_of]

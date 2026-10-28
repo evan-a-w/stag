@@ -523,3 +523,26 @@ let tokenize_with_comments ~file src =
 ;;
 
 let tokenize ~file src = Result.map (tokenize_with_comments ~file src) ~f:fst
+
+module Prefix = struct
+  type t =
+    { tokens : Located.t array
+    ; comments : Comment.t list
+    ; error : Error.t option
+    }
+end
+
+let tokenize_prefix ~file src =
+  (* Lexing stops at the first error, so the tokens before it are as in the
+     whole source. *)
+  let rec loop prefix =
+    match tokenize_with_comments ~file (String.prefix src prefix) with
+    | Ok (tokens, comments) -> tokens, comments
+    | Error error -> loop (min (prefix - 1) error.loc.start.offset)
+  in
+  match tokenize_with_comments ~file src with
+  | Ok (tokens, comments) -> { Prefix.tokens; comments; error = None }
+  | Error error ->
+    let tokens, comments = loop error.loc.start.offset in
+    { tokens; comments; error = Some error }
+;;

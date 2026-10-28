@@ -3,7 +3,7 @@ open Stag_build
 
 let check ?(eval = true) files ~target =
   Helpers.with_dir (("stag-project", "") :: files) ~f:(fun root ->
-    match Project.load ~root with
+    match Project.load ~root () with
     | Error diagnostics -> Helpers.print_diagnostics ~root diagnostics
     | Ok project ->
       let target = Option.value_exn (Project.find project target) in

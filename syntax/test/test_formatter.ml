@@ -80,6 +80,60 @@ let d = 4
     |}]
 ;;
 
+let%expect_test "consecutive one line includes and modules are kept together" =
+  test
+    {|include .~A.decls
+include .~(gen (type t))
+module M = .~A.m
+module N = .~B.n
+include .~C.decls
+
+include .~D.decls
+module O = struct end
+module P = .~(f x)
+let x = 1
+let%expect_test "t" = ()
+let%expect_test "u" = ()
+include .~(f
+  (type t))
+include .~E.decls
+|};
+  [%expect
+    {|
+    include .~A.decls
+    include .~(gen (type t))
+
+    module M = .~A.m
+    module N = .~B.n
+
+    include .~C.decls
+
+    include .~D.decls
+
+    module O = struct end
+
+    module P = .~(f x)
+
+    let x = 1
+
+    let%expect_test "t" = ()
+
+    let%expect_test "u" = ()
+
+    include .~(f (type t))
+    include .~E.decls
+    |}];
+  test ~width:30 "include .~(generate (type t) (type u))\ninclude .~A.decls\n";
+  [%expect
+    {|
+    include .~(generate
+                 (type t)
+                 (type u))
+
+    include .~A.decls
+    |}]
+;;
+
 let%expect_test "trailing comments" =
   test
     {|let x = 1 (* one *)
