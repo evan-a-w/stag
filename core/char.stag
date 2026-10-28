@@ -5,7 +5,7 @@ let compare a b = Int.compare (code a) (code b)
 (* [None] unless [0 <= n <= 255]. *)
 let of_code n =
   match (Int.ge n 0, Int.le n 255) with
-  | (true, true) -> Some (Prim.Char.of_code n)
+  | true, true -> Some (Prim.Char.of_code n)
   | _ -> None
 
 let to_string = Prim.Char.to_string

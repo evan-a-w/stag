@@ -10,13 +10,17 @@ type result['a] = Ok of 'a | Error
 let lengths = Core.List.map Core.String.length (Cons ("ab", Cons ("c", Nil)))
 
 let%expect_test "Core is unaffected by the program's List and result" =
-  (print_endline (Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int lengths));
-  print_endline (Core.Bool.to_string (Core.Result.is_error (Core.Sexp.of_string "(")));
-  let mine = Ok 1 in
-  match mine with
-  | Ok n -> print_int n
-  | Error -> print_endline "the program's Error";
-  [%expect]);
+  (print_endline
+     (Core.Sexp.to_string
+        (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int lengths));
+   print_endline
+     (Core.Bool.to_string (Core.Result.is_error (Core.Sexp.of_string "(")));
+   let mine = Ok 1 in
+   match mine with
+   | Ok n -> print_int n
+   | Error ->
+     print_endline "the program's Error";
+     [%expect]);
   [%expect {|
     (2 1)
     true

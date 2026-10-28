@@ -55,10 +55,10 @@ let uppercase s = map Char.uppercase s
 let for_all f s =
   let loop i =
     match Int.lt i (length s) with
-    | true -> (
-      match f (get s i) with
-      | true -> loop (Int.succ i)
-      | false -> false)
+    | true ->
+      (match f (get s i) with
+       | true -> loop (Int.succ i)
+       | false -> false)
     | false -> true
   in
   loop 0
@@ -71,10 +71,10 @@ let exists f s =
 let index s c =
   let loop i =
     match Int.lt i (length s) with
-    | true -> (
-      match Char.equal (get s i) c with
-      | true -> Some i
-      | false -> loop (Int.succ i))
+    | true ->
+      (match Char.equal (get s i) c with
+       | true -> Some i
+       | false -> loop (Int.succ i))
     | false -> None
   in
   loop 0
@@ -84,10 +84,10 @@ let rindex s c =
   let loop i =
     match Int.lt i 0 with
     | true -> None
-    | false -> (
+    | false ->
       match Char.equal (get s i) c with
       | true -> Some i
-      | false -> loop (Int.pred i))
+      | false -> loop (Int.pred i)
   in
   loop (Int.pred (length s))
 
@@ -110,10 +110,10 @@ let ends_with suffix_ s = equal (suffix s (length suffix_)) suffix_
 let drop_while f s =
   let loop i =
     match Int.lt i (length s) with
-    | true -> (
-      match f (get s i) with
-      | true -> loop (Int.succ i)
-      | false -> drop_prefix s i)
+    | true ->
+      (match f (get s i) with
+       | true -> loop (Int.succ i)
+       | false -> drop_prefix s i)
     | false -> ""
   in
   loop 0
@@ -122,18 +122,18 @@ let drop_while f s =
 let strip s =
   let first_kept i =
     match Int.lt i (length s) with
-    | true -> (
-      match Char.is_whitespace (get s i) with
-      | true -> first_kept (Int.succ i)
-      | false -> i)
+    | true ->
+      (match Char.is_whitespace (get s i) with
+       | true -> first_kept (Int.succ i)
+       | false -> i)
     | false -> i
   in
   let last_kept i =
     match Int.gt i 0 with
-    | true -> (
-      match Char.is_whitespace (get s (Int.pred i)) with
-      | true -> last_kept (Int.pred i)
-      | false -> i)
+    | true ->
+      (match Char.is_whitespace (get s (Int.pred i)) with
+       | true -> last_kept (Int.pred i)
+       | false -> i)
     | false -> i
   in
   let start = first_kept 0 in
@@ -145,12 +145,12 @@ let strip s =
 let split_on_char sep s =
   let loop start i acc =
     match Int.lt i (length s) with
-    | true -> (
-      match Char.equal (get s i) sep with
-      | true ->
-        let part = sub s start (Int.sub i start) in
-        loop (Int.succ i) (Int.succ i) (Cons (part, acc))
-      | false -> loop start (Int.succ i) acc)
+    | true ->
+      (match Char.equal (get s i) sep with
+       | true ->
+         let part = sub s start (Int.sub i start) in
+         loop (Int.succ i) (Int.succ i) (Cons (part, acc))
+       | false -> loop start (Int.succ i) acc)
     | false -> List.rev (Cons (sub s start (Int.sub i start), acc))
   in
   loop 0 0 Nil
@@ -163,12 +163,12 @@ let split_on_string sep s =
   let found i = equal (sub s i n) sep in
   let loop start i acc =
     match Int.le (Int.add i n) (length s) with
-    | true -> (
-      match found i with
-      | true ->
-        let part = sub s start (Int.sub i start) in
-        loop (Int.add i n) (Int.add i n) (Cons (part, acc))
-      | false -> loop start (Int.succ i) acc)
+    | true ->
+      (match found i with
+       | true ->
+         let part = sub s start (Int.sub i start) in
+         loop (Int.add i n) (Int.add i n) (Cons (part, acc))
+       | false -> loop start (Int.succ i) acc)
     | false -> List.rev (Cons (drop_prefix s start, acc))
   in
   match is_empty sep with
@@ -188,13 +188,15 @@ let escaped s =
     let plain_part _ = sub s start (Int.sub i start) in
     match Int.lt i (length s) with
     | false -> concat "" (List.rev (Cons (plain_part (), parts)))
-    | true -> (
+    | true ->
       let c = get s i in
       match plain c with
       | true -> loop start (Int.succ i) parts
       | false ->
-        let escaped = Cons (Internal.escape_char c, Cons (plain_part (), parts)) in
-        loop (Int.succ i) (Int.succ i) escaped)
+        let escaped =
+          Cons (Internal.escape_char c, Cons (plain_part (), parts))
+        in
+        loop (Int.succ i) (Int.succ i) escaped
   in
   loop 0 0 Nil
 
@@ -217,10 +219,10 @@ module Internal = struct
     | '\t' -> "\\t"
     | '\r' -> "\\r"
     | '\b' -> "\\b"
-    | _ -> (
+    | _ ->
       match Char.is_print c with
       | true -> of_char c
       | false ->
         let digits = Int.to_string (Char.code c) in
-        append "\\" (append (make (Int.sub 3 (length digits)) '0') digits))
+        append "\\" (append (make (Int.sub 3 (length digits)) '0') digits)
 end

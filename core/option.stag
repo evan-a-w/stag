@@ -57,10 +57,10 @@ let for_all f o =
 
 let filter f o =
   match o with
-  | Some x -> (
-    match f x with
-    | true -> o
-    | false -> None)
+  | Some x ->
+    (match f x with
+     | true -> o
+     | false -> None)
   | None -> None
 
 (* [o1] if it is [Some], otherwise [o2]. *)
@@ -71,7 +71,7 @@ let first_some o1 o2 =
 
 let both o1 o2 =
   match (o1, o2) with
-  | (Some x, Some y) ->
+  | Some x, Some y ->
     let p = (x, y) in
     Some p
   | _ -> None
@@ -83,6 +83,6 @@ let to_list o =
 
 let equal equal_value o1 o2 =
   match (o1, o2) with
-  | (Some x, Some y) -> equal_value x y
-  | (None, None) -> true
+  | Some x, Some y -> equal_value x y
+  | None, None -> true
   | _ -> false

@@ -1,7 +1,10 @@
 (* [Core.Option] and [Core.Result], printed as sexps. *)
 
 let print_sexp t = print_endline (Core.Sexp.to_string_hum t)
-let print_int_option o = print_sexp (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_int o)
+
+let print_int_option o =
+  print_sexp (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_int o)
+
 let print_bool b = print_endline (Core.Bool.to_string b)
 let is_even n = Core.Int.equal (Core.Int.rem n 2) 0
 let double n = Core.Int.mul n 2
@@ -92,8 +95,12 @@ let%expect_test "Option: first_some, both, to_list, equal" =
   print_pair_option (Core.Option.both (Some 1) (Some "a"));
   print_pair_option (Core.Option.both None (Some "a"));
   print_pair_option (Core.Option.both (Some 1) None);
-  print_sexp (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.Option.to_list (Some 1)));
-  print_sexp (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.Option.to_list None));
+  print_sexp
+    (Core.Sexp.sexp_of_list
+       Core.Sexp.sexp_of_int
+       (Core.Option.to_list (Some 1)));
+  print_sexp
+    (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.Option.to_list None));
   print_bool (Core.Option.equal Core.Int.equal (Some 1) (Some 1));
   print_bool (Core.Option.equal Core.Int.equal (Some 1) (Some 2));
   print_bool (Core.Option.equal Core.Int.equal (Some 1) None);
@@ -181,16 +188,24 @@ let%expect_test "Result: all, equal" =
     print_sexp
       (Core.Sexp.sexp_of_result
          (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int)
-         Core.Sexp.sexp_of_string r)
+         Core.Sexp.sexp_of_string
+         r)
   in
   print_results (Core.Result.all (Cons (Ok 1, Cons (Ok 2, Nil))));
   print_results (Core.Result.all Nil);
   print_results
-    (Core.Result.all (Cons (Ok 1, Cons (Error "first", Cons (Error "second", Nil)))));
+    (Core.Result.all
+       (Cons (Ok 1, Cons (Error "first", Cons (Error "second", Nil)))));
   print_bool (Core.Result.equal Core.Int.equal Core.String.equal (Ok 1) (Ok 1));
   print_bool (Core.Result.equal Core.Int.equal Core.String.equal (Ok 1) (Ok 2));
-  print_bool (Core.Result.equal Core.Int.equal Core.String.equal (Error "a") (Error "a"));
-  print_bool (Core.Result.equal Core.Int.equal Core.String.equal (Ok 1) (Error "a"));
+  print_bool
+    (Core.Result.equal
+       Core.Int.equal
+       Core.String.equal
+       (Error "a")
+       (Error "a"));
+  print_bool
+    (Core.Result.equal Core.Int.equal Core.String.equal (Ok 1) (Error "a"));
   [%expect {|
     (Ok (1 2))
     (Ok ())
@@ -206,9 +221,15 @@ let%expect_test "Option.value_map, Result.combine" =
   print_int (Core.Option.value_map double 0 None);
   print_endline "";
   let show r =
-    print_sexp (Core.Sexp.sexp_of_result Core.Sexp.sexp_of_int Core.Sexp.sexp_of_string r)
+    print_sexp
+      (Core.Sexp.sexp_of_result
+         Core.Sexp.sexp_of_int
+         Core.Sexp.sexp_of_string
+         r)
   in
-  let combine r1 r2 = show (Core.Result.combine Core.Int.add Core.String.append r1 r2) in
+  let combine r1 r2 =
+    show (Core.Result.combine Core.Int.add Core.String.append r1 r2)
+  in
   combine (Ok 1) (Ok 2);
   combine (Ok 1) (Error "b");
   combine (Error "a") (Ok 2);

@@ -682,7 +682,7 @@ let stag_files () =
       then [ path ]
       else [])
   in
-  List.concat_map [ "tests"; "examples"; "eval" ] ~f:(fun dir ->
+  List.concat_map [ "tests"; "examples"; "eval"; "core" ] ~f:(fun dir ->
     walk ("../.." ^/ dir))
 ;;
 
@@ -705,6 +705,12 @@ let%expect_test "the project's sources round trip and are formatted" =
   [%expect
     {|
     (../../tests/basics.stag (formatted true) (long_lines 0))
+    (../../tests/core_basics.stag (formatted true) (long_lines 0))
+    (../../tests/core_list.stag (formatted true) (long_lines 0))
+    (../../tests/core_option.stag (formatted true) (long_lines 0))
+    (../../tests/core_sexp.stag (formatted true) (long_lines 2))
+    (../../tests/core_shadowing.stag (formatted true) (long_lines 0))
+    (../../tests/core_string.stag (formatted true) (long_lines 0))
     (../../tests/evaluation.stag (formatted true) (long_lines 1))
     (../../examples/calc/bin/main.stag (formatted true) (long_lines 0))
     (../../examples/calc/fmt/show.stag (formatted true) (long_lines 0))
@@ -712,6 +718,14 @@ let%expect_test "the project's sources round trip and are formatted" =
     (../../examples/calc/math/power.stag (formatted true) (long_lines 0))
     (../../examples/calc/test/calc_test.stag (formatted true) (long_lines 0))
     (../../eval/src/prelude/prelude.stag (formatted true) (long_lines 0))
+    (../../core/bool.stag (formatted true) (long_lines 0))
+    (../../core/char.stag (formatted true) (long_lines 0))
+    (../../core/int.stag (formatted true) (long_lines 0))
+    (../../core/list.stag (formatted true) (long_lines 0))
+    (../../core/option.stag (formatted true) (long_lines 0))
+    (../../core/result.stag (formatted true) (long_lines 0))
+    (../../core/sexp.stag (formatted true) (long_lines 0))
+    (../../core/string.stag (formatted true) (long_lines 0))
     |}]
 ;;
 

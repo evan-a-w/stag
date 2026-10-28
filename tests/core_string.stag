@@ -2,17 +2,29 @@
 
 let print_sexp t = print_endline (Core.Sexp.to_string_hum t)
 let print_s s = print_sexp (Core.Sexp.sexp_of_string s)
-let print_strings l = print_sexp (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_string l)
+
+let print_strings l =
+  print_sexp (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_string l)
+
 let print_bool b = print_endline (Core.Bool.to_string b)
-let print_int_option o = print_sexp (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_int o)
+
+let print_int_option o =
+  print_sexp (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_int o)
+
 let print_ints l = print_sexp (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int l)
 let abc = "abc"
 
 let%expect_test "the prims" =
   print_ints
-    (Cons (Core.String.length "", Cons (Core.String.length abc,
-     Cons (Core.String.compare "a" "b", Cons (Core.String.compare "b" "b",
-     Cons (Core.String.compare "b" "a", Nil))))));
+    (Cons
+       (Core.String.length "",
+        Cons
+          (Core.String.length abc,
+           Cons
+             (Core.String.compare "a" "b",
+              Cons
+                (Core.String.compare "b" "b",
+                 Cons (Core.String.compare "b" "a", Nil))))));
   print_char (Core.String.get abc 1);
   print_endline "";
   print_s (Core.String.sub abc 1 2);
@@ -68,10 +80,14 @@ let%expect_test "construction" =
 let%expect_test "traversal" =
   let push acc c = Cons (c, acc) in
   print_sexp
-    (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_char (Core.String.fold_left push Nil abc));
+    (Core.Sexp.sexp_of_list
+       Core.Sexp.sexp_of_char
+       (Core.String.fold_left push Nil abc));
   Core.String.iter print_char abc;
   print_endline "";
-  let next c = Core.Option.value (Core.Char.of_code (Core.Int.succ (Core.Char.code c))) c in
+  let next c =
+    Core.Option.value (Core.Char.of_code (Core.Int.succ (Core.Char.code c))) c
+  in
   print_s (Core.String.map next abc);
   print_s (Core.String.map next "");
   print_bool (Core.String.for_all Core.Char.is_alpha abc);
@@ -126,7 +142,9 @@ let%expect_test "search" =
 let%expect_test "prefix, suffix, drop_prefix, drop_suffix" =
   let each f =
     print_strings
-      (Core.List.map (f "hello") (Cons (-1, Cons (0, Cons (2, Cons (5, Cons (6, Nil)))))))
+      (Core.List.map
+         (f "hello")
+         (Cons (-1, Cons (0, Cons (2, Cons (5, Cons (6, Nil)))))))
   in
   each Core.String.prefix;
   each Core.String.suffix;
@@ -175,7 +193,7 @@ let%expect_test "escaped" =
   print_endline (Core.String.escaped "plain");
   print_endline (Core.String.escaped "tab\there \"quoted\" back\\slash");
   print_endline (Core.String.escaped "\n\r\b\000\031\127");
-  print_endline (Core.String.escaped "caf\195\169 ~");
+  print_endline (Core.String.escaped "café ~");
   print_endline (Core.String.escaped "");
   [%expect {|
     plain
