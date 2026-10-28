@@ -32,7 +32,8 @@ let%expect_test "validate" =
   validate { Config.default with confidence = 1. };
   validate { Config.default with noise_threshold = -0.01 };
   validate { Config.default with noise_threshold = Float.nan };
-  [%expect {|
+  [%expect
+    {|
     (Error
      ("the number of samples must be at least 1"
       "the minimum number of samples must be from 1 to the number of samples"))

@@ -47,9 +47,11 @@ let sorted l =
   | Cons (x, Cons (y, rest)) ->
     (match Int.le x y with true -> sorted (Cons (y, rest)) | false -> false)
 
-let%bench "sort" n in [100; 1000] = sort (random_list n)
-
-let%bench "rev_append 1000" = rev_append (random_list 1000) Nil
+let list_100 = random_list 100
+let list_1000 = random_list 1000
+let%bench "sort 100" = sort list_100
+let%bench "sort 1000" = sort list_1000
+let%bench "rev_append 1000" = rev_append list_1000 Nil
 
 let%expect_test "sort" =
   let l = sort (random_list 1000) in

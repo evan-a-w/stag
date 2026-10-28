@@ -88,7 +88,9 @@ let bench_command ~fake_clock =
 ;;
 
 let () =
-  let argv, fake_clock = Bench_command.take_fake_clock (Array.to_list (Sys.get_argv ())) in
+  let argv, fake_clock =
+    Bench_command.take_fake_clock (Array.to_list (Sys.get_argv ()))
+  in
   Command.group
     ~summary:"Build stag projects"
     [ "build", build_command

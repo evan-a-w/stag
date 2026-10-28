@@ -243,7 +243,9 @@ let bench_command ~fake_clock =
 ;;
 
 let () =
-  let argv, fake_clock = Bench_command.take_fake_clock (Array.to_list (Sys.get_argv ())) in
+  let argv, fake_clock =
+    Bench_command.take_fake_clock (Array.to_list (Sys.get_argv ()))
+  in
   Command.group
     ~summary:"The stag language"
     [ "check", check_command

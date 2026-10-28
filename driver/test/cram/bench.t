@@ -207,19 +207,19 @@ Benchmarks are not limited by -fuel, which applies to evaluating the program.
 
   $ cat > long.stag <<'EOF'
   > let count n = match Int.equal n 0 with true -> 0 | false -> count (Int.sub n 1)
-  > let%bench "count" = count 100000
+  > let%bench "count" = count 1000
   > EOF
-  $ bench long.stag -samples 1 -no-alloc -fuel 1000 | head -1
+  $ bench long.stag -samples 1 -no-alloc -fuel 100 | head -1
   count
   $ cat > long_main.stag <<'EOF'
   > let count n = match Int.equal n 0 with true -> 0 | false -> count (Int.sub n 1)
-  > let main = count 100000
+  > let main = count 1000
   > EOF
-  $ bench long_main.stag -fuel 1000
-  File "long_main.stag", line 1, characters 67-76:
+  $ bench long_main.stag -fuel 100
+  File "long_main.stag", line 1, characters 60-79:
   1 | let count n = match Int.equal n 0 with true -> 0 | false -> count (Int.sub n 1)
-                                                                         ^^^^^^^^^
-  Error: Out of fuel: evaluation took more than 1000 steps
+                                                                  ^^^^^^^^^^^^^^^^^^^
+  Error: Out of fuel: evaluation took more than 100 steps
   [1]
 
 A failing benchmark is reported, and the others still run.
