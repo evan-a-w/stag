@@ -626,3 +626,34 @@ let main =
     3
     |}]
 ;;
+
+(* [big 60] shares its subtrees, so it is built in 60 steps but shows as 2^60
+   leaves: a raise must not show its exception unless it is uncaught, and then
+   only the start of it. *)
+let big_tree =
+  {|
+type tree = Leaf | Node of tree * tree
+exception E of tree
+let big n = match n with 0 -> Leaf | _ -> let t = big (Int.sub n 1) in Node (t, t)
+let t = big 60
+|}
+;;
+
+let%expect_test "raising a big value is cheap" =
+  run
+    (big_tree
+     ^ {|
+let catch n acc = match n with 0 -> acc | _ -> catch (Int.sub n 1) (match raise (E t) with () -> acc | exception E _ -> Int.add acc 1)
+let main = print_int (catch 1000 0)
+|}
+    );
+  [%expect {| 1000 |}];
+  run (big_tree ^ "let main = raise (E t)\n");
+  [%expect
+    {|
+    File "a.stag", line 6, characters 11-22:
+    6 | let main = raise (E t)
+                   ^^^^^^^^^^^
+    Error: Uncaught exception A.E (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf)), A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf))), A.Node (A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf)), A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf)))), A.Node (A.Node (A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf)), A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf))), A.Node (A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf)), A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf))))), A.Node (A.Node (A.No...
+    |}]
+;;

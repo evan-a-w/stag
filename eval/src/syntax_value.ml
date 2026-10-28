@@ -281,7 +281,7 @@ module Of_value = struct
       sprintf
         "Malformed syntax: expected %s, got %s%s"
         expected
-        (Value.to_string_hum got)
+        (Value.to_string_for_message got)
         within
     ;;
   end

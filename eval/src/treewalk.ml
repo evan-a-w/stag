@@ -355,8 +355,8 @@ let runtime_error ~loc message =
   Error (Runtime_error.to_error (Runtime_error.create ~loc message))
 ;;
 
-let raise_ ~loc exn =
-  Error (Runtime_error.to_error (Runtime_error.raise_ ~loc exn))
+let raise_exn ~loc exn =
+  Error (Runtime_error.to_error (Runtime_error.raise_exn ~loc exn))
 ;;
 
 let prelude_exception name : Typed.Constructor_ref.t =
@@ -664,13 +664,13 @@ and apply t (f : Value.t) arg ~loc =
       | Some args ->
         (match Prim.apply prim ~output:t.output args with
          | Ok value -> Ok (Value.of_prim value)
-         | Error exn -> raise_ ~loc (prim_exception exn)))
+         | Error exn -> raise_exn ~loc (prim_exception exn)))
   | Intrinsic intrinsic ->
     (match intrinsic, arg with
      | Type_expr, Type ty -> Ok (Syntax_value.Type_expr.to_value ty)
      | (Type_ref_name | Constructor_ref_name | Field_ref_name), Ref ref_ ->
        Ok (String (Decl_ref.short_name ref_))
-     | Raise, exn -> raise_ ~loc exn
+     | Raise, exn -> raise_exn ~loc exn
      | Type_decl, Ref { kind = Type; name } ->
        (match t.reflect with
         | Some reflect ->
@@ -701,7 +701,8 @@ and eval_match t ~env ~level value cases ~loc =
   | [] ->
     runtime_error
       ~loc
-      ("Match failure: no case matches the value " ^ Value.to_string_hum value)
+      ("Match failure: no case matches the value "
+       ^ Value.to_string_for_message value)
   | (pattern, body) :: cases ->
     (match%bind match_pattern env pattern value with
      | true -> eval t ~env ~level body

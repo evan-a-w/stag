@@ -137,7 +137,7 @@ let unification_error ~loc error = create ~loc (Unification_error error)
 
 let runtime_message error =
   match Runtime_error.of_error error with
-  | Some { message; loc = _; raised = _ } -> message
+  | Some error -> Runtime_error.message error
   | None -> Error.to_string_hum error
 ;;
 

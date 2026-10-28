@@ -1,19 +1,25 @@
 open! Import
 
+module Kind = struct
+  type t =
+    | Message of string
+    | Raised of Value.t
+  [@@deriving sexp_of]
+end
+
 type t =
   { loc : Loc.t
-  ; message : string
-  ; raised : Value.t option
+  ; kind : Kind.t
   }
 [@@deriving sexp_of]
 
-let create ~loc message = { loc; message; raised = None }
+let create ~loc message = { loc; kind = Message message }
+let raise_exn ~loc exn = { loc; kind = Raised exn }
 
-let raise_ ~loc exn =
-  { loc
-  ; message = "Uncaught exception " ^ Value.to_string_hum exn
-  ; raised = Some exn
-  }
+let message t =
+  match t.kind with
+  | Message message -> message
+  | Raised exn -> "Uncaught exception " ^ Value.to_string_for_message exn
 ;;
 
 exception Runtime_error of t
@@ -22,8 +28,8 @@ let () =
   Sexplib0.Sexp_conv.Exn_converter.add
     [%extension_constructor Runtime_error]
     (function
-    | Runtime_error { loc; message; raised = _ } ->
-      Sexp.List [ Atom message; Atom "@"; Loc.sexp_of_t loc ]
+    | Runtime_error t ->
+      Sexp.List [ Atom (message t); Atom "@"; Loc.sexp_of_t t.loc ]
     | _ -> assert false)
 ;;
 
@@ -35,4 +41,8 @@ let of_error error =
   | _ -> None
 ;;
 
-let raised error = Option.bind (of_error error) ~f:(fun t -> t.raised)
+let raised error =
+  match of_error error with
+  | Some { kind = Raised exn; loc = _ } -> Some exn
+  | Some { kind = Message _; loc = _ } | None -> None
+;;
