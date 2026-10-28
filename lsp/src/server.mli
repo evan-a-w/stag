@@ -21,8 +21,9 @@ val check_pending : t -> unit
 val exit_code : t -> int option
 
 (** Serves the client on [transport] until [exit] or the end of its input,
-    returning the exit code. *)
-val run : limits:Limits.t -> Transport.t -> int
+    returning the exit code. Changed documents are checked once the client
+    has sent nothing for [debounce] (default: 150ms). *)
+val run : ?debounce:Time_ns.Span.t -> limits:Limits.t -> Transport.t -> int
 
 (** Limits for checks: a bad splice must not hang the editor. *)
 val default_limits : Limits.t

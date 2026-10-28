@@ -436,13 +436,14 @@ let handle t (packet : Jsonrpc.Packet.t) =
   | Response _ | Batch_response _ -> ()
 ;;
 
-let run ~limits transport =
+let run ?(debounce = Time_ns.Span.of_int_ms 150) ~limits transport =
   let t = create ~limits ~send:(Transport.write transport) in
   let rec loop () =
     match exit_code t with
     | Some code -> code
     | None ->
-      if not (Transport.has_pending_input transport) then check_pending t;
+      if not (Transport.has_pending_input transport ~within:debounce)
+      then check_pending t;
       (match Transport.read transport with
        | None -> 1
        | Some (Error message) ->
