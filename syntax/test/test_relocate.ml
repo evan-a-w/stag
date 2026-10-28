@@ -26,7 +26,7 @@ let%expect_test "random programs relocate to themselves printed and parsed" =
     |> List.filter_map ~f:Result.error
   in
   print_s [%sexp (List.take failures 3 : string list)];
-  [%expect {| |}]
+  [%expect {| () |}]
 ;;
 
 let parse source =
@@ -44,11 +44,17 @@ let show ~written generated =
 
 let%expect_test "relocating" =
   show ~written:"let x =\n  f   (y)" "let x = f y";
-  [%expect {| |}];
+  [%expect
+    {|
+    ((((Let (x @ t.stag:1:4-5) () ()
+        ((App ((Var f ()) @ t.stag:2:2-3) ((Var y ()) @ t.stag:2:6-9)) @
+         t.stag:2:2-9))
+       @ t.stag:1:0-2:9)))
+    |}];
   show ~written:"let x = f y" "let x = f z";
-  [%expect {| |}];
+  [%expect {| () |}];
   show ~written:"let x = 1 let y = 2" "let x = 1";
-  [%expect {| |}];
+  [%expect {| () |}];
   let resolved =
     match parse "type u = t" with
     | [ ({ txt =
@@ -75,5 +81,11 @@ let%expect_test "relocating" =
     [%sexp
       (Relocate.toplevels ~written:(parse "\ntype u = M.t") resolved
        : Program.t option)];
-  [%expect {| |}]
+  [%expect
+    {|
+    ((((Type
+        ((name (u @ t.stag:2:5-6)) (params ())
+         (kind (Alias ((Con (<M.t> @ t.stag:2:9-12) ()) @ t.stag:2:9-12)))))
+       @ t.stag:2:0-12)))
+    |}]
 ;;

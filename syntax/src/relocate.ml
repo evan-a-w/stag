@@ -299,13 +299,15 @@ and toplevel_desc (g : Toplevel.desc) (w : Toplevel.desc) =
     let* n = name n n' in
     let+ ts = toplevels ts ts' in
     Toplevel.Module (n, ts)
-  | Module_splice (n, e, None), Module_splice (n', e', None) ->
+  | Module_splice (n, e, x), Module_splice (n', e', x') ->
     let* n = name n n' in
-    let+ e = expr e e' in
-    Toplevel.Module_splice (n, e, None)
-  | Include (e, None), Include (e', None) ->
-    let+ e = expr e e' in
-    Toplevel.Include (e, None)
+    let* e = expr e e' in
+    let+ x = option (located toplevels) x x' in
+    Toplevel.Module_splice (n, e, x)
+  | Include (e, x), Include (e', x') ->
+    let* e = expr e e' in
+    let+ x = option (located toplevels) x x' in
+    Toplevel.Include (e, x)
   | Expect_test { name = n; body }, Expect_test { name = n'; body = body' } ->
     let* n = located (same String.equal) n n' in
     let+ body = expr body body' in
