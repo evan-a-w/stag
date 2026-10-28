@@ -100,17 +100,112 @@ let limits_readme ~phases =
   sprintf "Limits apply to each phase of evaluation on its own: %s." phases
 ;;
 
+(* The signature of [path], a source of the prelude of [checkout]: of the
+   prelude, but [Core], or of a module of [Core]. *)
+let prelude_source_signature checkout (signature : Signature.t) path =
+  if
+    String.equal
+      (canonical path)
+      (Stdlib_checkout.root checkout ^/ Prelude.checkout_prelude)
+  then
+    List.filter signature ~f:(function
+      | Module { name = "Core"; _ } -> false
+      | Module _ | Value _ | Type _ | Exception _ -> true)
+  else (
+    let module_name = Source_file.module_name path |> Result.ok in
+    List.filter_map signature ~f:(function
+      | Module { name = "Core"; items } ->
+        Some
+          (Signature.Item.Module
+             { name = "Core"
+             ; items =
+                 List.filter items ~f:(function
+                   | Module { name; _ } ->
+                     Option.equal String.equal (Some name) module_name
+                   | Value _ | Type _ | Exception _ -> false)
+             })
+      | Module _ | Value _ | Type _ | Exception _ -> None))
+;;
+
+(* Sources of the prelude in a stag checkout are checked as the prelude, with
+   their contents on disk. *)
+let check_prelude_sources ~limits checkout paths =
+  let cwd = Sys_unix.getcwd () ^ "/" in
+  let relative (file : Source_file.t) =
+    { file with
+      path =
+        Option.value
+          (String.chop_prefix file.path ~prefix:cwd)
+          ~default:file.path
+    }
+  in
+  let fail ?(files = []) diagnostic =
+    report files diagnostic;
+    exit 1
+  in
+  match Stdlib_checkout.sources checkout with
+  | Error diagnostic -> fail diagnostic
+  | Ok sources ->
+    let sources =
+      { Prelude.Sources.prelude = relative sources.prelude
+      ; core = List.map sources.core ~f:relative
+      }
+    in
+    let fail = fail ~files:(sources.prelude :: sources.core) in
+    (match Prelude.parse sources with
+     | Error error -> fail (Diagnostic.of_source_file_error error)
+     | Ok prelude ->
+       (match Driver.check_prelude ~limits prelude with
+        | Error error -> fail (Diagnostic.of_typecheck_error error)
+        | Ok driver ->
+          let signature = (Driver.checked driver).signature in
+          List.iter paths ~f:(fun path ->
+            print_string
+              (Signature.to_string_hum
+                 (prelude_source_signature checkout signature path)))))
+;;
+
 let check_command =
   Command.basic
     ~summary:"Typecheck the program of the files and print its signature"
-    ~readme:(fun () -> limits_readme ~phases:"compile time and evaluation")
+    ~readme:(fun () ->
+      limits_readme ~phases:"compile time and evaluation"
+      ^ sprintf
+          "\n\n\
+           Files of the prelude in a stag checkout (a directory with a %s \
+           file), %s and %s/*.stag, are checked as the prelude."
+          Stdlib_checkout.marker_file
+          Prelude.checkout_prelude
+          Prelude.checkout_core_dir)
     (let%map_open.Command paths = files_param
      and limits = limits_param () in
      fun () ->
-       let files = read_files paths in
-       let driver = check ~limits files in
-       report_stale ~warning:true files (Inline_expansion.stale driver);
-       print_string (Signature.to_string_hum (Driver.checked driver).signature))
+       let checkouts =
+         List.map paths ~f:(fun path ->
+           Stdlib_checkout.of_source (canonical path))
+       in
+       match List.filter_opt checkouts with
+       | checkout :: _ ->
+         if
+           not
+             (List.for_all checkouts ~f:(function
+                | Some other ->
+                  String.equal
+                    (Stdlib_checkout.root other)
+                    (Stdlib_checkout.root checkout)
+                | None -> false))
+         then (
+           eprintf
+             "Error: sources of the prelude are checked only with each other\n\
+              %!";
+           exit 2);
+         check_prelude_sources ~limits checkout paths
+       | [] ->
+         let files = read_files paths in
+         let driver = check ~limits files in
+         report_stale ~warning:true files (Inline_expansion.stale driver);
+         print_string
+           (Signature.to_string_hum (Driver.checked driver).signature))
 ;;
 
 let run_command =

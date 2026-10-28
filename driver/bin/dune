@@ -7,6 +7,8 @@
   stag_syntax
   stag_driver
   stag_lsp
+  stag_eval
+  stag_build
   core
   core_unix.command_unix
   core_unix.sys_unix

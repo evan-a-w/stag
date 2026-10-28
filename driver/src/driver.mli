@@ -47,6 +47,14 @@ val check_modules
   -> Module_group.t list
   -> (t, Typecheck_error.t) Result.t
 
+(** Checks [prelude] (eg. [Prelude.parse] of sources being edited) as
+    [Typecheck.check_prelude] does. Its toplevels are not evaluated. *)
+val check_prelude
+  :  ?limits:Limits.t
+  -> ?output:(string -> unit)
+  -> Syntax.Toplevel.t list
+  -> (t, Typecheck_error.t) Result.t
+
 val checked : t -> Typecheck.Checked.t
 val interpreter : t -> Treewalk.t
 

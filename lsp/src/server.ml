@@ -29,6 +29,7 @@ end
 
 type t =
   { limits : Limits.t
+  ; stdlib : Stdlib_checkout.t option
   ; send : Jsonrpc.Packet.t -> unit
   ; documents : Document.t String.Table.t
   ; paths : string String.Table.t
@@ -51,8 +52,9 @@ let default_limits =
   }
 ;;
 
-let create ~limits ~send =
+let create ?stdlib ~limits ~send () =
   { limits
+  ; stdlib
   ; send
   ; documents = String.Table.create ()
   ; paths = String.Table.create ()
@@ -239,7 +241,13 @@ let cover t ~uri files =
 ;;
 
 let check t ~uri (document : Document.t) =
-  match Checker.check ~limits:t.limits ~contents:(contents t) document.path with
+  match
+    Checker.check
+      ?stdlib:t.stdlib
+      ~limits:t.limits
+      ~contents:(contents t)
+      document.path
+  with
   | exception exn ->
     eprintf "stag lsp: checking %s: %s\n%!" document.path (Exn.to_string exn)
   | result ->
@@ -611,7 +619,16 @@ let handle t (packet : Jsonrpc.Packet.t) =
 ;;
 
 let run ?(debounce = Time_ns.Span.of_int_ms 150) ~limits transport =
-  let t = create ~limits ~send:(Transport.write transport) in
+  let t =
+    create
+      ?stdlib:
+        (Option.try_with (fun () ->
+           Filename_unix.realpath Sys_unix.executable_name)
+         |> Option.bind ~f:Stdlib_checkout.of_executable)
+      ~limits
+      ~send:(Transport.write transport)
+      ()
+  in
   let rec loop () =
     match exit_code t with
     | Some code -> code
