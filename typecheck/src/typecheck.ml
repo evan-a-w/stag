@@ -2233,6 +2233,7 @@ let add_prelude (program : Program_env.t) toplevels =
       ~force:no_splices
       ()
   in
+  List.iter Type_env.builtins ~f:(Type_env.declare program.type_env builtins);
   let prelude =
     Module_scope.create_root
       ~enclosing:builtins
@@ -2302,16 +2303,12 @@ let program_env t interpreter =
 
 (* The program's root module, within the prelude. *)
 let root t program_env ~enclosing =
-  let root =
-    Module_scope.create_root
-      ~enclosing
-      ~types:builtin_names
-      ~declare:(declare program_env ~in_prelude:false)
-      ~force:(generate t program_env)
-      ()
-  in
-  List.iter Type_env.builtins ~f:(Type_env.declare program_env.type_env root);
-  root
+  Module_scope.create_root
+    ~enclosing
+    ~types:builtin_names
+    ~declare:(declare program_env ~in_prelude:false)
+    ~force:(generate t program_env)
+    ()
 ;;
 
 let prelude_and_root t program_env =
@@ -2374,10 +2371,8 @@ let typecheck ({ fresh; interpreter; prelude = _ } as t) ~program =
   check_module fresh program_env root
 ;;
 
-let check_prelude ({ fresh; interpreter; prelude = _ } as t) =
+let check_prelude { fresh; interpreter; prelude } =
   let program_env = program_env fresh interpreter in
-  let%bind.Result prelude, (_ : Module_scope.t) =
-    prelude_and_root t program_env
-  in
+  let%bind.Result prelude = add_prelude program_env (force prelude) in
   check_module fresh program_env prelude
 ;;

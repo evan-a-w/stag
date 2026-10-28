@@ -2,8 +2,6 @@ open! Import
 
 let path = "<prelude>"
 let core_dir = "<core>"
-let checkout_prelude = "prelude/prelude.stag"
-let checkout_core_dir = "core"
 
 module Sources = struct
   type t =
@@ -27,13 +25,20 @@ module Sources = struct
   ;;
 end
 
-let parse ({ prelude; core } : Sources.t) =
+let parse ({ prelude = prelude_file; core = core_files } : Sources.t) =
   let%bind.Result prelude =
-    Parser.program ~file:prelude.path prelude.contents
+    Parser.program ~file:prelude_file.path prelude_file.contents
     |> Result.map_error ~f:(fun error -> Source_file.Error.Parse error)
   in
-  let%map.Result core = List.map core ~f:Source_file.parse |> Result.all in
-  let loc = Loc.start_of_file core_dir in
+  let%map.Result core =
+    List.map core_files ~f:Source_file.parse |> Result.all
+  in
+  let loc =
+    Loc.start_of_file
+      (match core_files with
+       | first :: _ -> first.path
+       | [] -> prelude_file.path)
+  in
   prelude
   @ [ Located.create
         ~loc
@@ -46,15 +51,6 @@ let source file =
     (Sources.embedded.prelude :: Sources.embedded.core)
     ~f:(fun { path; contents } ->
       Option.some_if (String.equal file path) contents)
-;;
-
-let checkout_path file =
-  if String.equal file path
-  then Some checkout_prelude
-  else (
-    let%bind.Option name = String.chop_prefix file ~prefix:(core_dir ^ "/") in
-    let%map.Option _ = source file in
-    Filename.concat checkout_core_dir name)
 ;;
 
 let toplevels =

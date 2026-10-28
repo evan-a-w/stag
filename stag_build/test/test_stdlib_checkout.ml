@@ -56,7 +56,7 @@ let%expect_test "finding checkouts and their sources" =
         stag/tests: /stag
         stag: /stag
         other/core: none
-        stag/_build/default/bin: /stag/_build/default
+        stag/_build/default/bin: none
         stag/_build/default/bin/stag: /stag
         stag/bin/stag: /stag
         other/bin/stag: none

@@ -10,7 +10,10 @@ type t =
   }
 
 let rec remove path =
-  if Sys_unix.is_directory_exn path
+  if
+    (match (Core_unix.lstat path).st_kind with
+     | S_DIR -> true
+     | _ -> false)
   then (
     Array.iter (Sys_unix.readdir path) ~f:(fun name -> remove (path ^/ name));
     Core_unix.rmdir path)
@@ -222,16 +225,28 @@ let with_server
       ?(limits = Server.default_limits)
       ?(capabilities = `Assoc [])
       ?(files = [])
+      ?(symlinks = [])
+      ?executable
       f
   =
   let root = Filename_unix.realpath (Filename_unix.temp_dir "stag_lsp" "") in
   List.iter files ~f:(fun (file, contents) ->
     Core_unix.mkdir_p (Filename.dirname (root ^/ file));
     Out_channel.write_all (root ^/ file) ~data:contents);
+  List.iter symlinks ~f:(fun (link, target) ->
+    Core_unix.mkdir_p (Filename.dirname (root ^/ link));
+    Core_unix.symlink ~target:(root ^/ target) ~link_name:(root ^/ link));
   let sent = Queue.create () in
   let t =
     { root
-    ; server = Server.create ~limits ~send:(Queue.enqueue sent) ()
+    ; server =
+        Server.create
+          ?stdlib:
+            (Option.bind executable ~f:(fun executable ->
+               Stdlib_checkout.of_executable (root ^/ executable)))
+          ~limits
+          ~send:(Queue.enqueue sent)
+          ()
     ; sent
     ; next_id = 0
     ; encoding = Utf_16

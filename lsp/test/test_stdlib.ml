@@ -6,7 +6,7 @@ let checkout =
   :: List.map
        (Prelude.Sources.embedded.prelude :: Prelude.Sources.embedded.core)
        ~f:(fun { path; contents } ->
-         "stag/" ^ Option.value_exn (Prelude.checkout_path path), contents)
+         "stag/" ^ Option.value_exn (Stdlib_checkout.checkout_path path), contents)
 ;;
 
 let stdlib_files = List.tl_exn checkout |> List.map ~f:fst
@@ -60,9 +60,9 @@ let%expect_test "the prelude's sources check cleanly, as the prelude" =
       {|
       12:12 12:12-12:27 ```stag raise : exn -> 'a ```
       12:22 12:12-12:27 ```stag raise : exn -> 'a ```
-      15:34 15:30-15:38 ```stag prelude.Core.Int.succ : int -> int ```
+      15:34 15:30-15:38 ```stag Core.Int.succ : int -> int ```
       15:34 -> stag/core/int.stag 14:4-14:8
-      11:4 11:4-11:10 ```stag prelude.Core.List.length : list['a] -> int ```
+      11:4 11:4-11:10 ```stag Core.List.length : list['a] -> int ```
       |}])
 ;;
 
@@ -178,7 +178,7 @@ let%expect_test "definitions are not in sources that differ from the prelude's" 
        Client.print_definition client "stag/tests/b.stag" ~line ~character;
        [%expect
          {|
-         0:18 no definition
+         0:18 -> stag/core/list.stag 12:4-12:10
          1:8 -> stag/prelude/prelude.stag 4:25-4:29
          |}])
 ;;

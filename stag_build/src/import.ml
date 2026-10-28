@@ -17,3 +17,5 @@ module Measure = Stag_measure
 module Format = Stag_driver.Format
 module Limits = Stag_common.Limits
 module Prelude = Stag_eval.Prelude
+module Signature = Stag_types.Signature
+module Syntax = Stag_syntax.Syntax

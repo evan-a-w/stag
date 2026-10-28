@@ -54,6 +54,7 @@ type t =
   ; fields : Loc.t String.Table.t
   ; functions : Int.Hash_set.t String.Table.t
   ; splices : Span.Hash_set.t
+  ; of_prelude : bool
   }
 
 (* The syntax at a typed node's location that names what it doesn't keep. *)
@@ -441,7 +442,7 @@ let resolve_type t ~module_path path =
     Option.some_if (Hashtbl.mem t.types name) name)
 ;;
 
-let create ?(prelude = []) ~groups ~(program : Typed.Program.t) ~expansions () =
+let create ?(prelude = []) ?(of_prelude = false) ~groups ~(program : Typed.Program.t) ~expansions () =
   let up_to_date =
     List.filter_map expansions ~f:(fun (expansion : Expansion.t) ->
       match expansion.status with
@@ -458,6 +459,7 @@ let create ?(prelude = []) ~groups ~(program : Typed.Program.t) ~expansions () =
     ; fields = String.Table.create ()
     ; functions = String.Table.create ()
     ; splices = Span.Hash_set.create ()
+    ; of_prelude
     }
   in
   declarations
@@ -574,6 +576,7 @@ let relocate t ~f =
       Hash_set.to_list t.splices
       |> List.map ~f:(fun span -> { span with Span.file = file span.file })
       |> Span.Hash_set.of_list
+  ; of_prelude = t.of_prelude
   }
 ;;
 
@@ -598,11 +601,30 @@ let entry_at t ~file ~offset =
 
 let hover t ~file ~offset =
   let%bind.Option entry = entry_at t ~file ~offset in
+  (* In the prelude's own sources, its names are relative to it. *)
+  let name name =
+    if t.of_prelude
+    then Option.value (Prelude_path.relative name) ~default:name
+    else name
+  in
+  let label =
+    Option.map entry.label ~f:(fun label ->
+      match String.chop_prefix label ~prefix:"type " with
+      | Some type_ -> "type " ^ name type_
+      | None -> name label)
+  in
+  let ty ty =
+    let printer =
+      Type.Printer.create
+        ?type_name:(Option.some_if t.of_prelude name)
+        ()
+    in
+    Type.Printer.ty printer ty ^ Type.Printer.where printer
+  in
   let text =
-    match entry.label, entry.ty with
-    | Some label, Some ty ->
-      Some (sprintf "%s : %s" label (Type.to_string_hum ty))
-    | None, Some ty -> Some (Type.to_string_hum ty)
+    match label, entry.ty with
+    | Some label, Some ty' -> Some (sprintf "%s : %s" label (ty ty'))
+    | None, Some ty' -> Some (ty ty')
     | Some label, None -> Some label
     | None, None -> None
   in
