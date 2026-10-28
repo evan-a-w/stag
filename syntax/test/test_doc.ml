@@ -251,3 +251,27 @@ let%expect_test "a space that prints nothing is not measured" =
     9 false
     |}]
 ;;
+
+let%expect_test "a group with a line ended before a flat line breaks" =
+  (* Kept flat, [b] would be at the outer indentation, not the line's. *)
+  show
+    (group
+       (text "x"
+        ^^ hardline
+        ^^ group (text "a (* a *)" ^^ end_line ^^ nest 2 line)
+        ^^ text "b"));
+  [%expect {|
+    -- width 15
+    x
+    a (* a *)
+      b
+    -- width 12
+    x
+    a (* a *)
+      b
+    -- width 5
+    x
+    a (* a *)
+      b
+    |}]
+;;
