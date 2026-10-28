@@ -16,6 +16,10 @@ val with_server
   -> unit
 
 val server : t -> Server.t
+
+(** As negotiated by [initialize]. *)
+val encoding : t -> Text.Encoding.t
+
 val path : t -> string -> string
 val uri : t -> string -> string
 

@@ -25,7 +25,7 @@ end
 module Token : sig
   type t =
     { line : int
-    ; character : int (** In UTF-16 code units, as [length]. *)
+    ; character : int (** In code units of the text's encoding, as [length]. *)
     ; length : int
     ; token_type : Token_type.t
     ; declaration : bool
@@ -36,7 +36,7 @@ end
 val legend : Lsp_types.SemanticTokensLegend.t
 
 (** The tokens of [text] (of [file], as named in locations), each on one
-    line, in order. No tokens if it doesn't lex. [occurrences] are those of the
+    line, in order. If it doesn't lex, those before the error. [occurrences] are those of the
     syntax, if it parses. [is_function offset] is whether the name or
     path starting at [offset] is of a function. *)
 val compute

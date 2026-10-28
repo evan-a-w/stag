@@ -39,6 +39,7 @@ type t =
   ; owners : string String.Table.t
   ; mutable client_capabilities : Types.ClientCapabilities.t option
   ; mutable state : State.t
+  ; mutable encoding : Text.Encoding.t
   ; mutable refresh_semantic_tokens : bool
   ; mutable next_request_id : int
   }
@@ -62,6 +63,7 @@ let create ~limits ~send =
   ; owners = String.Table.create ()
   ; client_capabilities = None
   ; state = Uninitialized
+  ; encoding = Utf_16
   ; refresh_semantic_tokens = false
   ; next_request_id = 0
   }
@@ -128,7 +130,7 @@ let read_file path =
 let text_of_file t path =
   match document_of_path t path with
   | Some document -> document.text
-  | None -> Text.create (read_file path)
+  | None -> Text.create ~encoding:t.encoding (read_file path)
 ;;
 
 let contents t path =
@@ -303,16 +305,29 @@ let semantic_tokens t (document : Document.t) =
 ;;
 
 let formatting (document : Document.t) =
-  match
-    Format.file { path = document.path; contents = Text.contents document.text }
-  with
+  let contents = Text.contents document.text in
+  let crlf =
+    match String.index contents '\n' with
+    | Some i -> i > 0 && Char.equal contents.[i - 1] '\r'
+    | None -> false
+  in
+  match Format.file { path = document.path; contents } with
   | Error _ -> []
-  | Ok formatted when String.equal formatted (Text.contents document.text) -> []
   | Ok formatted ->
-    [ Types.TextEdit.create
-        ~newText:formatted
-        ~range:(Text.full_range document.text)
-    ]
+    let formatted =
+      if crlf
+      then
+        String.substr_replace_all formatted ~pattern:"\r\n" ~with_:"\n"
+        |> String.substr_replace_all ~pattern:"\n" ~with_:"\r\n"
+      else formatted
+    in
+    if String.equal formatted contents
+    then []
+    else
+      [ Types.TextEdit.create
+          ~newText:formatted
+          ~range:(Text.full_range document.text)
+      ]
 ;;
 
 (* Checks first, so that the index is of the current contents. *)
@@ -357,8 +372,9 @@ let document_symbols (document : Document.t) =
   `DocumentSymbol (Document_symbols.of_toplevels document.text toplevels)
 ;;
 
-let capabilities =
+let capabilities ~encoding =
   Types.ServerCapabilities.create
+    ~positionEncoding:(Text.Encoding.to_lsp encoding)
     ~textDocumentSync:
       (`TextDocumentSyncOptions
           (Types.TextDocumentSyncOptions.create
@@ -387,8 +403,13 @@ let initialize t (params : Types.InitializeParams.t) =
       let%bind.Option semantic_tokens = workspace.semanticTokens in
       semantic_tokens.refreshSupport)
      |> Option.value ~default:false;
+  t.encoding
+  <- Text.Encoding.negotiate
+       ((let%bind.Option general = params.capabilities.general in
+         general.positionEncodings)
+        |> Option.value ~default:[]);
   Types.InitializeResult.create
-    ~capabilities
+    ~capabilities:(capabilities ~encoding:t.encoding)
     ~serverInfo:(Types.InitializeResult.create_serverInfo ~name:"stag" ())
     ()
 ;;
@@ -558,7 +579,7 @@ let handle_notification t (jsonrpc : Jsonrpc.Notification.t) =
     (match notification with
      | Initialized -> watch_files t
      | TextDocumentDidOpen { textDocument = { uri; version; text; _ } } ->
-       open_document t ~uri ~version (Text.create text)
+       open_document t ~uri ~version (Text.create ~encoding:t.encoding text)
      | TextDocumentDidChange { textDocument = { uri; version }; contentChanges }
        ->
        Option.iter
