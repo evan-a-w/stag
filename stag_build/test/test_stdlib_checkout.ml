@@ -121,7 +121,7 @@ let%expect_test "_build directories, nested ones, and symlinks" =
         {|
         stag/_build/default/core/a.stag: none
         outer/_build/default/stag/core/a.stag: none
-        link/core/a.stag: /link
+        link/core/a.stag: /stag
         outer/_build/default/stag/_build/default/bin/stag: /outer/_build/default/stag
         |}])
 ;;
@@ -161,7 +161,8 @@ let%expect_test "core files that are not modules" =
         ~src:(root ^/ "stag/core/bad-name.stag")
         ~dst:(root ^/ "stag/core/good.stag");
       print (Stdlib_checkout.prelude checkout);
-      [%expect {|
+      [%expect
+        {|
         File "core/good.stag", line 2, characters 0-0:
         Error: Expected an expression, found end of file
         |}])
@@ -198,7 +199,8 @@ let%expect_test "the signature of a source of the prelude" =
             | Ok signature ->
               print_string (Signature.to_string_hum ~of_prelude:true signature)
             | Error diagnostic -> print_s [%sexp (diagnostic : Diagnostic.t)]);
-        [%expect {|
+        [%expect
+          {|
           stag/prelude/prelude.stag:
           type t = A
           val x : t

@@ -7,6 +7,14 @@ let prelude_file = "prelude/prelude.stag"
 let core_dir = "core"
 let root t = t.root
 
+let create root =
+  { root =
+      Option.value
+        (Option.try_with (fun () -> Filename_unix.realpath root))
+        ~default:root
+  }
+;;
+
 let has_marker dir =
   match Fs.Kind.of_path (dir ^/ marker_file) with
   | File -> true
@@ -20,7 +28,7 @@ let rec building path =
   if String.equal parent path
   then None
   else if String.equal (Filename.basename path) "_build" && has_marker parent
-  then Some { root = parent }
+  then Some (create parent)
   else building parent
 ;;
 
@@ -38,13 +46,13 @@ let of_source path =
     then Some parent
     else None
   in
-  Option.some_if (is_checkout root) { root }
+  Option.some_if (is_checkout root) (create root)
 ;;
 
 let find dir =
   let rec find dir =
     if has_marker dir
-    then Some { root = dir }
+    then Some (create dir)
     else (
       let parent = Filename.dirname dir in
       if String.equal parent dir then None else find parent)

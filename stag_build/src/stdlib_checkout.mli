@@ -17,6 +17,7 @@ val prelude_file : string
 (** [core]. *)
 val core_dir : string
 
+(** Its directory, symlinks resolved. *)
 val root : t -> string
 
 (** The checkout that [path] is a source of the prelude of. *)

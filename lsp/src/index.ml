@@ -437,12 +437,21 @@ let rec files ~prefix (group : Driver.Module_group.t) =
 
 let resolve_type t ~module_path path =
   List.range ~stride:(-1) (List.length module_path) 0 ~stop:`inclusive
-  |> List.find_map ~f:(fun depth ->
-    let name = String.concat ~sep:"." (List.take module_path depth @ path) in
+  |> List.map ~f:(List.take module_path)
+  |> Fn.flip List.append [ [ Prelude_path.root ] ]
+  |> List.find_map ~f:(fun enclosing ->
+    let name = String.concat ~sep:"." (enclosing @ path) in
     Option.some_if (Hashtbl.mem t.types name) name)
 ;;
 
-let create ?(prelude = []) ?(of_prelude = false) ~groups ~(program : Typed.Program.t) ~expansions () =
+let create
+      ?(prelude = [])
+      ?(of_prelude = false)
+      ~groups
+      ~(program : Typed.Program.t)
+      ~expansions
+      ()
+  =
   let up_to_date =
     List.filter_map expansions ~f:(fun (expansion : Expansion.t) ->
       match expansion.status with
@@ -508,8 +517,15 @@ let create ?(prelude = []) ?(of_prelude = false) ~groups ~(program : Typed.Progr
             ; label =
                 Some
                   ("type "
-                   ^ Option.value target ~default:(String.concat ~sep:"." path)
-                  )
+                   ^
+                   match target with
+                   | Some target
+                     when (not
+                             (String.is_prefix
+                                target
+                                ~prefix:(Prelude_path.root ^ ".")))
+                          || t.of_prelude -> target
+                   | Some _ | None -> String.concat ~sep:"." path)
             ; ty = None
             ; target = Option.map target ~f:(fun name -> Target.Type name)
             }
@@ -615,9 +631,7 @@ let hover t ~file ~offset =
   in
   let ty ty =
     let printer =
-      Type.Printer.create
-        ?type_name:(Option.some_if t.of_prelude name)
-        ()
+      Type.Printer.create ?type_name:(Option.some_if t.of_prelude name) ()
     in
     Type.Printer.ty printer ty ^ Type.Printer.where printer
   in

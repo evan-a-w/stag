@@ -158,8 +158,8 @@ let check_with_prelude_sources ~limits ~sources ~program =
            (Stdlib_checkout.root checkout))
     then (
       eprintf
-        "Error: %s and %s are sources of the preludes of different \
-         checkouts, which are not checked together\n\
+        "Error: %s and %s are sources of the preludes of different checkouts, \
+         which are not checked together\n\
          %!"
         (fst (List.hd_exn sources))
         path;
@@ -197,9 +197,9 @@ let check_command =
           "\n\n\
            Files of the prelude in a stag checkout (a directory with a %s \
            file), %s and %s/*.stag, are checked as the prelude, and their \
-           signatures printed, then the other files as a program that sees \
-           it. A program in a checkout sees the prelude of its sources, not \
-           the embedded one."
+           signatures printed, then the other files as a program that sees it. \
+           A program in a checkout sees the prelude of its sources, not the \
+           embedded one."
           Stdlib_checkout.marker_file
           Stdlib_checkout.prelude_file
           Stdlib_checkout.core_dir)

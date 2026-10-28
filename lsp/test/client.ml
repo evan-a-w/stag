@@ -11,9 +11,9 @@ type t =
 
 let rec remove path =
   if
-    (match (Core_unix.lstat path).st_kind with
-     | S_DIR -> true
-     | _ -> false)
+    match (Core_unix.lstat path).st_kind with
+    | S_DIR -> true
+    | _ -> false
   then (
     Array.iter (Sys_unix.readdir path) ~f:(fun name -> remove (path ^/ name));
     Core_unix.rmdir path)

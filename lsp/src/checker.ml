@@ -61,7 +61,8 @@ let rec relocated ~relocate (toplevels : Syntax.Toplevel.t list) =
     | Module (name, members) ->
       (match relocated ~relocate members with
        | [] -> None
-       | members -> Some { toplevel with txt = Syntax.Toplevel.Module (name, members) })
+       | members ->
+         Some { toplevel with txt = Syntax.Toplevel.Module (name, members) })
     | Let _
     | Type _
     | Exception _
@@ -96,6 +97,23 @@ let source_paths checkout =
   |> Option.value ~default:[]
 ;;
 
+(* Errors in the prelude's sources, which are reported in them, leave
+   [path] unchecked, which is said in it. *)
+let with_prelude_errors diagnostics ~path ~depends_on =
+  if
+    List.exists depends_on ~f:(fun source ->
+      not (List.is_empty (Map.find_multi diagnostics source)))
+  then
+    Map.add_multi
+      diagnostics
+      ~key:path
+      ~data:
+        (Diagnostic.create
+           ~loc:(Loc.start_of_file path)
+           "This file is not checked: its checkout's prelude has errors")
+  else diagnostics
+;;
+
 let check_groups
       ~limits
       ~(prelude : Prelude_source.t)
@@ -128,16 +146,17 @@ let check_groups
     }
   | Checkout checkout ->
     let depends_on = source_paths checkout in
-    (match Stdlib_checkout.prelude ~contents checkout with
-     | Error diagnostic ->
-       { (of_checked ~path ~absolute ~files (Error [ diagnostic ])) with
-         depends_on
-       }
-     | Ok prelude ->
-       { (of_checked ~prelude ~path ~absolute ~files (checked ~prelude groups))
-         with
-         depends_on
-       })
+    let result =
+      match Stdlib_checkout.prelude ~contents checkout with
+      | Error diagnostic ->
+        of_checked ~path ~absolute ~files (Error [ diagnostic ])
+      | Ok prelude ->
+        of_checked ~prelude ~path ~absolute ~files (checked ~prelude groups)
+    in
+    { result with
+      diagnostics = with_prelude_errors result.diagnostics ~path ~depends_on
+    ; depends_on
+    }
 ;;
 
 let in_stdlib ~limits ~contents checkout path =
