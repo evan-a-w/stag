@@ -6,15 +6,20 @@ open! Import
 
 type t
 
-(** Initializes a server over the [files] (relative path, contents), and
-    removes them after [f]. *)
+(** Initializes a server, with the client's [capabilities], over the [files]
+    (relative path, contents), and removes them after [f]. *)
 val with_server
   :  ?limits:Limits.t
+  -> ?capabilities:Yojson.Safe.t
   -> ?files:(string * string) list
   -> (t -> unit)
   -> unit
 
 val server : t -> Server.t
+
+(** As negotiated by [initialize]. *)
+val encoding : t -> Text.Encoding.t
+
 val path : t -> string -> string
 val uri : t -> string -> string
 

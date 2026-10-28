@@ -6,6 +6,7 @@ type t =
   ; sent : Jsonrpc.Packet.t Queue.t
   ; mutable next_id : int
   ; contents : string String.Table.t
+  ; mutable encoding : Text.Encoding.t
   }
 
 let rec remove path =
@@ -17,6 +18,7 @@ let rec remove path =
 ;;
 
 let server t = t.server
+let encoding t = t.encoding
 let path t file = t.root ^/ file
 let uri t file = Lsp.Uri.to_string (Lsp.Uri.of_path (path t file))
 
@@ -185,7 +187,9 @@ let print_semantic_tokens t file =
   | None -> ()
   | Some result ->
     let tokens = Lsp_types.SemanticTokens.t_of_yojson result in
-    let text = Text.create (Hashtbl.find_exn t.contents file) in
+    let text =
+      Text.create ~encoding:t.encoding (Hashtbl.find_exn t.contents file)
+    in
     List.iter (Semantic_tokens.decode tokens.data) ~f:(fun token ->
       let start =
         Text.offset_of_position
@@ -211,7 +215,12 @@ let print_semantic_tokens t file =
         (String.sub (Text.contents text) ~pos:start ~len:(stop - start)))
 ;;
 
-let with_server ?(limits = Server.default_limits) ?(files = []) f =
+let with_server
+      ?(limits = Server.default_limits)
+      ?(capabilities = `Assoc [])
+      ?(files = [])
+      f
+  =
   let root = Filename_unix.realpath (Filename_unix.temp_dir "stag_lsp" "") in
   List.iter files ~f:(fun (file, contents) ->
     Core_unix.mkdir_p (Filename.dirname (root ^/ file));
@@ -222,14 +231,21 @@ let with_server ?(limits = Server.default_limits) ?(files = []) f =
     ; server = Server.create ~limits ~send:(Queue.enqueue sent)
     ; sent
     ; next_id = 0
+    ; encoding = Utf_16
     ; contents = String.Table.create ()
     }
   in
   Exn.protect
     ~f:(fun () ->
-      ignore
-        (request t "initialize" (`Assoc [ "capabilities", `Assoc [] ])
-         : _ option);
+      Option.iter
+        (request t "initialize" (`Assoc [ "capabilities", capabilities ]))
+        ~f:(fun result ->
+          match
+            (Lsp_types.InitializeResult.t_of_yojson result).capabilities
+              .positionEncoding
+          with
+          | Some UTF8 -> t.encoding <- Utf_8
+          | Some (UTF16 | UTF32 | Other _) | None -> t.encoding <- Utf_16);
       notify t "initialized" (`Assoc []);
       f t)
     ~finally:(fun () -> remove root)

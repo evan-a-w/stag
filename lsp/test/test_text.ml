@@ -8,7 +8,7 @@ let show_position (position : Lsp_types.Position.t) =
 
 let%expect_test "offsets and UTF-16 positions" =
   (* é is 2 bytes and 1 unit, 😊 4 bytes and 2 units. *)
-  let text = Text.create "let s = \"é😊x\" (* ü *)\r\nnext\n" in
+  let text = Text.create ~encoding:Utf_16 "let s = \"é😊x\" (* ü *)\r\nnext\n" in
   List.iter [ 0; 9; 11; 15; 16; 17; 22; 26; 28; 34; 99 ] ~f:(fun offset ->
     let position = Text.position_of_offset text offset in
     printf
@@ -46,14 +46,37 @@ let%expect_test "offsets and UTF-16 positions" =
     1:2 -> 30
     7:0 -> 33
     |}];
-  printf "%d\n" (Text.utf16_length text ~pos:8 ~len:9);
+  printf "%d\n" (Text.length text ~pos:8 ~len:9);
   [%expect {| 6 |}];
   print_s [%sexp (Text.split_lines text ~start:16 ~stop:32 : (int * int) list)];
   [%expect {| ((16 26) (28 32)) |}]
 ;;
 
+let%expect_test "UTF-8 positions are byte offsets in the line" =
+  let text = Text.create ~encoding:Utf_8 "let s = \"é😊x\"\r\nnext\n" in
+  List.iter [ 9; 10; 11; 15; 16; 20; 99 ] ~f:(fun offset ->
+    let position = Text.position_of_offset text offset in
+    printf
+      "%2d -> %s -> %d\n"
+      offset
+      (show_position position)
+      (Text.offset_of_position text position));
+  [%expect
+    {|
+     9 -> 0:9 -> 9
+    10 -> 0:9 -> 9
+    11 -> 0:11 -> 11
+    15 -> 0:15 -> 15
+    16 -> 0:16 -> 16
+    20 -> 1:1 -> 20
+    99 -> 2:0 -> 24
+    |}];
+  printf "%d\n" (Text.length text ~pos:8 ~len:9);
+  [%expect {| 9 |}]
+;;
+
 let%expect_test "invalid UTF-8 counts a unit per byte" =
-  let text = Text.create "a\xffb" in
+  let text = Text.create ~encoding:Utf_16 "a\xffb" in
   printf
     "%s %d\n"
     (show_position (Text.position_of_offset text 2))
@@ -68,7 +91,7 @@ let%expect_test "changes" =
   let range (l1, c1) (l2, c2) =
     Lsp_types.Range.create ~start:(position l1 c1) ~end_:(position l2 c2)
   in
-  let text = Text.create "let x = \"😊\"\nlet y = 2\n" in
+  let text = Text.create ~encoding:Utf_16 "let x = \"😊\"\nlet y = 2\n" in
   let show text = print_endline (String.escaped (Text.contents text)) in
   let text =
     Text.apply_change text (change ~range:(range (0, 11) (0, 11)) "é")
@@ -84,7 +107,7 @@ let%expect_test "changes" =
     let y = 2\n
     whole
     |}];
-  Text.full_range (Text.create "a\n😊")
+  Text.full_range (Text.create ~encoding:Utf_16 "a\n😊")
   |> Lsp_types.Range.yojson_of_t
   |> Yojson.Safe.to_string
   |> print_endline;

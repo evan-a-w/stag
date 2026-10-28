@@ -90,7 +90,7 @@ let%expect_test "serving over pipes, until exit" =
   [%expect
     {|
     0
-    Content-Length: 518
+    Content-Length: 546
 
     {"id":1,"jsonrpc":"2.0","result":{"capabilities":{"definitionProvider":true,"documentFormattingProvi
 

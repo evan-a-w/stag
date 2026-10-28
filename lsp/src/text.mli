@@ -2,15 +2,29 @@ open! Import
 
 (** A document's contents, with positions converted between byte offsets
     (stag's) and LSP positions: lines split at [\n], characters counted in
-    UTF-16 code units. Invalid UTF-8 counts one unit per byte. *)
+    code units of the negotiated encoding. Invalid UTF-8 counts one unit per
+    byte. *)
+
+module Encoding : sig
+  type t =
+    | Utf_8
+    | Utf_16
+  [@@deriving sexp_of]
+
+  (** UTF-8 if the client offers it, else UTF-16, which all clients
+      support. *)
+  val negotiate : Lsp_types.PositionEncodingKind.t list -> t
+
+  val to_lsp : t -> Lsp_types.PositionEncodingKind.t
+end
 
 type t
 
-val create : string -> t
+val create : encoding:Encoding.t -> string -> t
 val contents : t -> string
 
 (** Clamped to the line, whose [\r\n] or [\n] is not in it, and to the
-    document. A character inside a surrogate pair is the pair's start. *)
+    document. A position inside a character's code units is the character's start. *)
 val offset_of_position : t -> Lsp_types.Position.t -> int
 
 (** Clamped to the document. An offset inside a UTF-8 sequence is the
@@ -25,8 +39,8 @@ val range_of_offsets : t -> start:int -> stop:int -> Lsp_types.Range.t
 (** The whole document, eg. to replace it. *)
 val full_range : t -> Lsp_types.Range.t
 
-(** UTF-16 code units of the bytes [pos, pos + len). *)
-val utf16_length : t -> pos:int -> len:int -> int
+(** Code units of the bytes [pos, pos + len). *)
+val length : t -> pos:int -> len:int -> int
 
 (** The text with a change of [textDocument/didChange] applied. *)
 val apply_change : t -> Lsp_types.TextDocumentContentChangeEvent.t -> t

@@ -1,29 +1,46 @@
 open! Import
 
+module Encoding = struct
+  type t =
+    | Utf_8
+    | Utf_16
+  [@@deriving sexp_of]
+
+  let negotiate (offered : Lsp_types.PositionEncodingKind.t list) =
+    if List.mem offered UTF8 ~equal:Poly.equal then Utf_8 else Utf_16
+  ;;
+
+  let to_lsp : t -> Lsp_types.PositionEncodingKind.t = function
+    | Utf_8 -> UTF8
+    | Utf_16 -> UTF16
+  ;;
+end
+
 type t =
   { contents : string
   ; line_starts : int array
+  ; encoding : Encoding.t
   }
 
-let create contents =
+let create ~encoding contents =
   let starts = Queue.of_list [ 0 ] in
   String.iteri contents ~f:(fun i c ->
     if Char.equal c '\n' then Queue.enqueue starts (i + 1));
-  { contents; line_starts = Queue.to_array starts }
+  { contents; line_starts = Queue.to_array starts; encoding }
 ;;
 
 let contents t = t.contents
 
-(* Bytes and UTF-16 code units of the character at [offset]. *)
+(* Bytes and code units of the character at [offset]. *)
 let char_at t offset =
   let decode = Stdlib.String.get_utf_8_uchar t.contents offset in
   let bytes = Stdlib.Uchar.utf_decode_length decode in
-  if Stdlib.Uchar.utf_decode_is_valid decode
-  then
+  match t.encoding with
+  | Utf_16 when Stdlib.Uchar.utf_decode_is_valid decode ->
     ( bytes
     , Stdlib.Uchar.utf_16_byte_length (Stdlib.Uchar.utf_decode_uchar decode) / 2
     )
-  else bytes, bytes
+  | Utf_8 | Utf_16 -> bytes, bytes
 ;;
 
 (* Excluding its line terminator. *)
@@ -56,7 +73,7 @@ let offset_of_position t ({ line; character } : Lsp_types.Position.t) =
     walk t.line_starts.(line) 0)
 ;;
 
-let utf16_length t ~pos ~len =
+let length t ~pos ~len =
   let stop = pos + len in
   let rec walk offset units =
     if offset >= stop
@@ -111,11 +128,12 @@ let apply_change
         Lsp_types.TextDocumentContentChangeEvent.t)
   =
   match range with
-  | None -> create text
+  | None -> create ~encoding:t.encoding text
   | Some { start; end_ } ->
     let start = offset_of_position t start in
     let stop = Int.max start (offset_of_position t end_) in
     create
+      ~encoding:t.encoding
       (String.prefix t.contents start
        ^ text
        ^ String.drop_prefix t.contents stop)
