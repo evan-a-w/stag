@@ -588,5 +588,9 @@ val n : int @@ const      (* modalities on signature items and fields *)
 
 ### Other
 
+- A stag-build library named `core` shadows `Core` in the whole program,
+  including derivers' quotes, so they can't name the prelude's `Core`: give
+  the prelude an unshadowable path (eg. `Stag.Core`).
+
 `if`, infix operators (`let (+) x y = ...`, OCaml precedences),
 interface files.
