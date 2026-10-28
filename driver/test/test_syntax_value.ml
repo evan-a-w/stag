@@ -7,7 +7,6 @@ let parse source =
 ;;
 
 let print_error error = print_endline (Error.to_string_hum error)
-
 let prelude_signature = lazy (Typecheck.prelude_signature (Typecheck.create ()))
 
 let%expect_test "the prelude's signature" =
@@ -87,7 +86,7 @@ let%expect_test "the prelude's signature" =
           type t = {`kind : Kind.t; `params : list[Type_decl.Param.t]}
         end
         val expr : t['a] -> Type_expr.t
-        val decl : Ref.t -> option[Decl.t]
+        val decl : Ref.t -> option[{`kind : Kind.t; `params : list[Type_decl.Param.t]}]
       end
     end
     |}]
@@ -242,7 +241,8 @@ let%expect_test "constructors are made as the typechecker resolves them" =
              Option.exists (Map.find typechecker key) ~f:(fun ref ->
                Sexp.equal (sexp_of_ref ref) (sexp_of_ref data)))
            : bool)];
-  [%expect {|
+  [%expect
+    {|
     ((constructors 68)
      (reflected
       (prelude.Stag.Path.Ref prelude.Stag.Type.Kind.Alias
@@ -533,7 +533,8 @@ let%expect_test "names" =
       , of_expr (fun name ->
           expr
             (Construct
-               (at (Syntax.Decl_path.Path (Syntax.Path.of_list_exn [ name ])), []))) )
+               ( at (Syntax.Decl_path.Path (Syntax.Path.of_list_exn [ name ]))
+               , [] ))) )
     ]
   in
   let texts =
@@ -625,7 +626,9 @@ let%expect_test "shapes" =
   let at txt = Located.create ~loc:Loc.none txt in
   let unit : Syntax.Expr.t = at (Syntax.Expr.Lit Unit) in
   let int_ty : Syntax.Type_expr.t =
-    at (Syntax.Type_expr.Con (at (Syntax.Decl_path.Path (Syntax.Path.name "int")), []))
+    at
+      (Syntax.Type_expr.Con
+         (at (Syntax.Decl_path.Path (Syntax.Path.name "int")), []))
   in
   let any : Syntax.Pattern.t = at Syntax.Pattern.Any in
   let show ~to_value ~of_value sexp_of x =

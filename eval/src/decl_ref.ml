@@ -21,7 +21,8 @@ type t =
 [@@deriving equal]
 
 let sexp_of_t { kind; name } =
-  Sexp.List [ Atom (Kind.to_string kind); Atom (Prelude_path.to_string_hum name) ]
+  Sexp.List
+    [ Atom (Kind.to_string kind); Atom (Prelude_path.to_string_hum name) ]
 ;;
 
 let short_name t = List.last_exn (String.split t.name ~on:'.')

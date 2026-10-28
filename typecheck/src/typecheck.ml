@@ -199,7 +199,9 @@ let intrinsics (program : Program_env.t) intrinsic (value : Treewalk.Value.t)
          | Some (prefix, _) -> prefix ^ "."
          | None -> ""
        in
-       Ok (Syntax_value.reflected_decl decl ~canonical:(fun name -> prefix ^ name))
+       Ok
+         (Syntax_value.reflected_decl decl ~canonical:(fun name ->
+            prefix ^ name))
      | Error error ->
        program.reflection_error <- Some error;
        Or_error.error_string "Reflection failed")
@@ -210,7 +212,6 @@ let intrinsics (program : Program_env.t) intrinsic (value : Treewalk.Value.t)
           (intrinsic : Intrinsic.t)
           (value : Treewalk.Value.t)]
 ;;
-
 
 module Scope = struct
   type t =
@@ -761,7 +762,10 @@ let rec var_type t (scope : Scope.t) ~(path : Syntax.Path.t) ~loc =
   let prim prim = Ok (Prim.ty prim, Typed.Var_ref.Prim prim) in
   let intrinsic intrinsic =
     Ok
-      ( Intrinsic.ty intrinsic ~var:(fun () -> Scope.fresh_ty t scope)
+      ( Intrinsic.ty
+          intrinsic
+          ~var:(fun () -> Scope.fresh_ty t scope)
+          ~record:(Fresh.record t)
       , Typed.Var_ref.Intrinsic intrinsic )
   in
   let local =
@@ -803,7 +807,12 @@ and var_ref_type t (scope : Scope.t) (var_ref : Typed.Var_ref.t) ~loc =
   match var_ref with
   | Prim prim -> Ok (Prim.ty prim, var_ref)
   | Intrinsic intrinsic ->
-    Ok (Intrinsic.ty intrinsic ~var:(fun () -> Scope.fresh_ty t scope), var_ref)
+    Ok
+      ( Intrinsic.ty
+          intrinsic
+          ~var:(fun () -> Scope.fresh_ty t scope)
+          ~record:(Fresh.record t)
+      , var_ref )
   | Free name ->
     (match scope.quote with
      | Some quote ->
@@ -1228,7 +1237,11 @@ and expand t (scope : Scope.t) ~code ~subs ~ty ~loc =
     at_compile_time
       program
       (fun () ->
-        Treewalk.splice program.interpreter ~code ~level:(scope.level - 1) ~entry)
+         Treewalk.splice
+           program.interpreter
+           ~code
+           ~level:(scope.level - 1)
+           ~entry)
       ~error:(fun error ->
         Typecheck_error.create ~loc (Splice_evaluation_failed { code; error }))
   in
@@ -1678,9 +1691,7 @@ let rec signature (program_env : Program_env.t) module_ =
       match toplevel.txt with
       | Expect_test _ | Include _ -> None
       | Let ({ txt = name; loc = _ }, _, _, _) ->
-        let toplevel =
-          Program_env.toplevel program_env (canonical_name name)
-        in
+        let toplevel = Program_env.toplevel program_env (canonical_name name) in
         (match toplevel.state with
          | Done { entry = { scheme; persistent; _ }; _ } ->
            Some (Value { name; scheme; persistent })

@@ -480,13 +480,13 @@ let find_constructor t module_ ({ txt = path; loc } : Decl_path.t Located.t) =
   | Resolved name -> constructor t name ~loc
   | Path path ->
     find_resolved
-    t
-    module_
-    Constructor
-    path
-    ~loc
-    ~unbound:(fun path -> Unbound_constructor path)
-    ~find:constructor
+      t
+      module_
+      Constructor
+      path
+      ~loc
+      ~unbound:(fun path -> Unbound_constructor path)
+      ~find:constructor
 ;;
 
 let find_field t module_ ({ txt = path; loc } : Decl_path.t Located.t) =
@@ -494,13 +494,13 @@ let find_field t module_ ({ txt = path; loc } : Decl_path.t Located.t) =
   | Resolved name -> field t name ~loc
   | Path path ->
     find_resolved
-    t
-    module_
-    Field
-    path
-    ~loc
-    ~unbound:(fun path -> Unbound_field path)
-    ~find:field
+      t
+      module_
+      Field
+      path
+      ~loc
+      ~unbound:(fun path -> Unbound_field path)
+      ~find:field
 ;;
 
 let rec resolve t module_ (expr : Type_expr.t) =

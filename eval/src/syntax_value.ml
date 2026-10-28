@@ -57,6 +57,7 @@ module To_value = struct
     | Path p -> con "Stag.Path.Name" [ path p ]
     | Resolved name -> con "Stag.Path.Ref" [ Value.Ref { kind; name } ]
   ;;
+
   let record fields = Value.Poly_record (String.Map.of_alist_exn fields)
 
   let lit : Lit.t -> Value.t = function
@@ -441,9 +442,7 @@ module Of_value = struct
              | _ ->
                unexpected
                  ~expected:
-                   (sprintf
-                      "a ref to a %s"
-                      (Decl_ref.Kind.to_string ref_kind))
+                   (sprintf "a ref to a %s" (Decl_ref.Kind.to_string ref_kind))
                  value)
          | _ -> raise Bad_arguments))
   ;;
@@ -494,8 +493,7 @@ module Of_value = struct
            | "Var", 1 -> Var (arg 0 (ident Tyvar))
            | "Con", 2 ->
              Con
-               ( arg 0 (decl_path Type Lower ~loc)
-               , arg 1 (list (type_arg ~loc)) )
+               (arg 0 (decl_path Type Lower ~loc), arg 1 (list (type_arg ~loc)))
            | "Arrow", 2 -> Arrow (arg 0 (type_expr ~loc), arg 1 (type_expr ~loc))
            | "Tuple", 1 -> Tuple (arg 0 (components ~min:0 (type_expr ~loc)))
            | "Code", 1 ->
@@ -592,9 +590,7 @@ module Of_value = struct
              , arg 1 (list (pattern ~loc)) )
          | "Record", 1 ->
            Record
-             (arg
-                0
-                (fields (pair (decl_path Field Lower ~loc) (pattern ~loc))))
+             (arg 0 (fields (pair (decl_path Field Lower ~loc) (pattern ~loc))))
          | "Poly_variant", 2 ->
            Poly_variant (arg 0 (name Label ~loc), arg 1 (option (pattern ~loc)))
          | "Poly_record", 1 ->
@@ -654,8 +650,7 @@ module Of_value = struct
          | "Tuple", 1 -> Tuple (arg 0 (components ~min:2 (expr ~loc)))
          | "Construct", 2 ->
            Construct
-             ( arg 0 (decl_path Constructor Upper ~loc)
-             , arg 1 (list (expr ~loc)) )
+             (arg 0 (decl_path Constructor Upper ~loc), arg 1 (list (expr ~loc)))
          | "Record", 1 ->
            Record
              (arg 0 (fields (pair (decl_path Field Lower ~loc) (expr ~loc))))

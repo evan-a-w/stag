@@ -20,7 +20,7 @@ let public_name = function
 
 let prelude name = Type.TCon (Prelude_path.canonical name, [])
 
-let ty t ~var =
+let ty t ~var ~record =
   let ref_ = prelude "Stag.Ref.t" in
   match t with
   | Type_expr ->
@@ -31,8 +31,19 @@ let ty t ~var =
     TArrow
       ( ref_
       , TCon
-          (Prelude_path.canonical "option", [ ATy (prelude "Stag.Type.Decl.t") ])
-      )
+          ( Prelude_path.canonical "option"
+          , [ ATy
+                (record
+                   (Type.RExtend
+                      ( "params"
+                      , Present
+                      , TCon
+                          ( Prelude_path.canonical "list"
+                          , [ ATy (prelude "Stag.Type_decl.Param.t") ] )
+                      , RExtend
+                          ("kind", Present, prelude "Stag.Type.Kind.t", REmpty)
+                      )))
+            ] ) )
   | Ref_name -> TArrow (ref_, Type.string)
 ;;
 

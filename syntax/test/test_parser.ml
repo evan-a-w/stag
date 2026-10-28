@@ -884,3 +884,36 @@ let%expect_test "slack and misplaced syntax" =
     (Code (inner (Con int ())) (context (Extend x (Con int ()) (Var r))))
     |}]
 ;;
+
+let%expect_test "types as values" =
+  expr "type t";
+  expr "type M.t";
+  expr "type list[int]";
+  expr "type (int * t)";
+  expr "type (int -> t)";
+  (* At constructor application's precedence: an argument needs parens. *)
+  expr "f (type t) x";
+  expr "f type t";
+  expr "C (type t)";
+  expr "(type t, type u)";
+  expr "type t; x";
+  expr "type int -> t";
+  expr "type";
+  expr "type list int";
+  [%expect
+    {|
+    (Type (Con t ()))
+    (Type (Con M.t ()))
+    (Type (Con list ((Ty (Con int ())))))
+    (Type (Tuple ((Con int ()) (Con t ()))))
+    (Type (Arrow (Con int ()) (Con t ())))
+    (App (App (Var f ()) (Type (Con t ()))) (Var x ()))
+    t.stag:1:2-6: expected end of file, found `type`
+    (Construct C ((Type (Con t ()))))
+    (Tuple ((Type (Con t ())) (Type (Con u ()))))
+    (Let _ () () (Type (Con t ())) (Var x ()))
+    t.stag:1:9-11: expected end of file, found `->`
+    t.stag:1:4-4: expected a type, found end of file
+    t.stag:1:10-13: type arguments are written after the name, in brackets: `list[int]`
+    |}]
+;;

@@ -186,7 +186,8 @@ let rec lines ~of_prelude enclosing : Item.t -> _ =
     let enclosing = Scope.create (scope.path @ [ name ]) items :: enclosing in
     (sprintf "module %s : sig" name
      :: List.concat_map items ~f:(fun item ->
-       List.map (lines ~of_prelude enclosing item) ~f:(fun line -> "  " ^ line)))
+       List.map (lines ~of_prelude enclosing item) ~f:(fun line -> "  " ^ line))
+    )
     @ [ "end" ]
 ;;
 

@@ -7,15 +7,17 @@ open! Import
 
 type t =
   | Type_expr (** [Stag.Type.t['a] -> Stag.Type_expr.t] *)
-  | Type_decl (** [Stag.Ref.t -> option[Stag.Type.Decl.t]] *)
+  | Type_decl
+  (** [Stag.Ref.t -> option[{`params : list[Stag.Type_decl.Param.t]; `kind : Stag.Type.Kind.t}]] *)
   | Ref_name (** [Stag.Ref.t -> string] *)
 [@@deriving sexp_of, equal]
 
 (** Its name in the prelude, eg. [Stag.Type.expr]. *)
 val public_name : t -> string
 
-(** [var] makes the type of each type variable, so [ty] is an instance. *)
-val ty : t -> var:(unit -> Type.ty) -> Type.ty
+(** [var] makes the type of each type variable, so [ty] is an instance, and
+    [record] the record type of a row. *)
+val ty : t -> var:(unit -> Type.ty) -> record:(Type.row -> Type.ty) -> Type.ty
 
 (** [Intrinsic.x] by its full path. *)
 val find : Syntax.Path.t -> t option
