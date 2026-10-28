@@ -1064,8 +1064,10 @@ let constructor_decl t =
 let type_kind t : Type_decl.Kind.t =
   match peek t, peek_at t 1 with
   | Splice, _ ->
+    let start = loc t in
     advance t;
-    Splice (postfix t)
+    let e = postfix t in
+    Splice (since t start e)
   | Uident _, Dot -> Alias (type_expr t)
   | (Bar | Uident _), _ ->
     let leading_bar = is t Bar in

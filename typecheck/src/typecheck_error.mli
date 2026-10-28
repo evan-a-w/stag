@@ -91,10 +91,31 @@ module Kind : sig
     | Declaration_splice_failed of Error.t
     (** Evaluating the declaration splice's expression failed. *)
     | Malformed_declarations of Error.t
-    | Malformed_struct_quote of string
-    | Misplaced_type_splice
     (** What the declaration splice's expression evaluated to is not syntax
         (see [Syntax_value]). *)
+    | Malformed_struct_quote of string
+    | Misplaced_type_splice
+    (** A type splice within a quote or compile-time code, where nothing
+        evaluates it. *)
+    | Type_splice_failed of Error.t
+    (** Evaluating the type splice's expression failed. *)
+    | Malformed_type_splice of Error.t
+    (** What the type splice's expression evaluated to is not syntax. *)
+    | In_type_splice of
+        { generated : Syntax.Type_expr.t
+        ; error : t
+        }
+    (** An error in the type [generated] the type splice here gave. *)
+    | Type_splice_cycle
+    (** Evaluating the type splice needs the type it gives. *)
+    | Nested_definition_splice
+    (** A type splice gave a definition that is itself a splice. *)
+    | Type_definition_cycle of
+        { name : string
+        ; splice : Loc.t
+        }
+    (** The type [name] is needed here while the splice at [splice] computes
+        its definition. *)
     | Declaration_splice_cycle of
         { name : string (** The path looked up. *)
         ; module_ : string option

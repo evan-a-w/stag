@@ -85,6 +85,18 @@ module Kind = struct
     | Malformed_declarations of Error.t
     | Malformed_struct_quote of string
     | Misplaced_type_splice
+    | Type_splice_failed of Error.t
+    | Malformed_type_splice of Error.t
+    | In_type_splice of
+        { generated : Syntax.Type_expr.t [@sexp.opaque]
+        ; error : t
+        }
+    | Type_splice_cycle
+    | Nested_definition_splice
+    | Type_definition_cycle of
+        { name : string
+        ; splice : Loc.t
+        }
     | Declaration_splice_cycle of
         { name : string
         ; module_ : string option
@@ -337,6 +349,30 @@ let rec kind_message (kind : Kind.t) ~show_type =
   | Misplaced_type_splice ->
     "A type splice runs at compile time, so it may be in a declaration, but \
      not within a quote or a compile-time expression"
+  | Type_splice_failed error ->
+    sprintf
+      "This type splice failed at compile time: %s"
+      (runtime_message error)
+  | Malformed_type_splice error ->
+    sprintf
+      "This type splice gave malformed syntax: %s"
+      (Error.to_string_hum error)
+  | In_type_splice { generated = _; error } ->
+    sprintf
+      "In the type this type splice gave: %s"
+      (kind_message error ~show_type)
+  | Type_splice_cycle ->
+    "This type splice's expression needs the type it gives, which is being \
+     computed"
+  | Nested_definition_splice ->
+    "This type splice gave a definition that is itself a splice, \
+     `Stag.Type_decl.Kind.Splice`"
+  | Type_definition_cycle { name; splice } ->
+    sprintf
+      "The type %s is needed here while its definition is being computed by \
+       the type splice at %s, whose expression uses this code"
+      name
+      (Loc.to_string splice)
   | Malformed_declarations error ->
     sprintf
       "This declaration splice generated malformed declarations: %s"

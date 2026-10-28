@@ -126,13 +126,39 @@ module Annotation_vars : sig
 end
 
 (** The type, and the syntax with each type it names by its canonical name
-    ([Resolved]), so that it names the same types wherever it is. *)
+    ([Resolved]), so that it names the same types wherever it is. With
+    [splices], each type splice [.~e] is the type [e] evaluates to (once per
+    splice); without, it is an error, as in quotes and compile-time code. *)
 val elaborate
   :  t
   -> Module_scope.t
   -> Annotation_vars.t
   -> Syntax.Type_expr.t
+  -> splices:bool
   -> (Type.ty * Syntax.Type_expr.t, Typecheck_error.t) Result.t
+
+(** How a type splice [.~e] at [loc] is evaluated, in the scope it is written
+    in, to the type it gives (located at [loc]). Types and exceptions are
+    always declarations, so evaluate theirs. *)
+val set_evaluate_splice
+  :  t
+  -> (Module_scope.t
+      -> Syntax.Expr.t
+      -> loc:Loc.t
+      -> (Syntax.Type_expr.t, Typecheck_error.t) Result.t)
+  -> unit
+
+(** Gives the type [name], declared as [type t = .~e], the definition [e]
+    evaluated to, erring if it is itself a splice, or an alias while the type
+    was used while computing it. Errors checking it are then passed through
+    [wrap_error], then as before. *)
+val set_definition
+  :  t
+  -> string
+  -> Syntax.Type_decl.Kind.t
+  -> wrap_error:(Typecheck_error.t -> Typecheck_error.t)
+  -> loc:Loc.t
+  -> (unit, Typecheck_error.t) Result.t
 
 (** The declaration of the type of canonical name [name], checking it, its
     types [Resolved] where it is declared. [None] if it is abstract, as are

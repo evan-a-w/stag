@@ -730,7 +730,7 @@ and type_decl roots ({ name; params; kind } : Type_decl.t) =
   | Alias t when starts_with_splice t ->
     definition lhs (parens (type_expr_doc roots t))
   | Alias t -> definition lhs (type_expr_doc roots t)
-  | Splice e -> lhs ^^ text " = " ^^ spliced roots e
+  | Splice e -> lhs ^^ text " = " ^^ spliced roots e.txt
   | Variant [] -> lhs ^^ text " = |"
   | Variant constructors ->
     group

@@ -240,8 +240,17 @@ module Scope = struct
   let fresh_presence ids t = Type.PVar (Fresh.var ids ~rank:t.rank)
   let instantiate ids t = Scheme.instantiate ids ~rank:t.rank
 
+  (* Type splices are evaluated in declarations, not in what is evaluated or
+     quoted then. *)
+  let splices t = Option.is_none t.quote && t.level >= 0
+
   let elaborate_resolved t annot =
-    Type_env.elaborate t.program.type_env t.module_ t.annotation_vars annot
+    Type_env.elaborate
+      t.program.type_env
+      t.module_
+      t.annotation_vars
+      annot
+      ~splices:(splices t)
   ;;
 
   let elaborate t annot = elaborate_resolved t annot |> Result.map ~f:fst
@@ -1267,6 +1276,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
         scope.module_
         (Type_env.Annotation_vars.create t ~rank:scope.rank)
         ty
+        ~splices:(Scope.splices scope)
     in
     node
       (Type resolved)
@@ -2078,49 +2088,123 @@ let expansions root =
   |> List.sort ~compare:(fun (a : Expansion.t) b -> Loc.compare a.loc b.loc)
 ;;
 
+let stag_type name = Type.TCon (Prelude_path.canonical name, [])
+
+(* Checks [expr], written in [scope], and runs it at compile time. *)
+let run_at_compile_time t (program : Program_env.t) scope ~expr ~ty ~error =
+  let%bind.Result expr =
+    check_expr t scope ~expr:(Source.Expr.Syntax expr) ~ty
+  in
+  let%map.Result value =
+    at_compile_time
+      program
+      (fun ~reflect ->
+         Treewalk.run program.interpreter expr ~level:(-1) ~reflect)
+      ~error
+  in
+  Queue.enqueue program.declaration_splices expr;
+  value
+;;
+
+let compile_time_scope t program module_ =
+  toplevel_scope t program module_ ~level:(-1) ~in_expect_test:false
+;;
+
+(* The type a type splice [.~expr] at [loc] gives. *)
+let evaluate_type_splice t program module_ expr ~loc =
+  Result.map_error ~f:(Module_scope.within module_)
+  @@
+  let%bind.Result value =
+    run_at_compile_time
+      t
+      program
+      (compile_time_scope t program module_)
+      ~expr
+      ~ty:(stag_type "Stag.Type_expr.t")
+      ~error:(fun error ->
+        Typecheck_error.create ~loc (Type_splice_failed error))
+  in
+  Syntax_value.Type_expr.of_value value ~loc
+  |> Result.map_error ~f:(fun error ->
+    Typecheck_error.create ~loc (Malformed_type_splice error))
+;;
+
+(* The type declaration [type t = .~e] defined by what [e] evaluates to. *)
+let define_type t (program : Program_env.t) splice =
+  let loc = Module_scope.Splice.loc splice in
+  let module_ = Module_scope.Splice.module_ splice in
+  let toplevel = Module_scope.Splice.toplevel splice in
+  Result.map_error ~f:(fun error : Module_scope.Force_error.t ->
+    Failed (Module_scope.within module_ error))
+  @@
+  let%bind.Result value =
+    run_at_compile_time
+      t
+      program
+      (compile_time_scope t program module_)
+      ~expr:(Module_scope.Splice.expr splice)
+      ~ty:(stag_type "Stag.Type_decl.Kind.t")
+      ~error:(fun error ->
+        Typecheck_error.create ~loc (Type_splice_failed error))
+  in
+  let%bind.Result kind =
+    Syntax_value.Type_decl.Kind.of_value value ~loc
+    |> Result.map_error ~f:(fun error ->
+      Typecheck_error.create ~loc (Malformed_type_splice error))
+  in
+  match toplevel.txt with
+  | Type decl ->
+    let generated = { toplevel with txt = Syntax.Toplevel.Type { decl with kind } } in
+    let%map.Result () =
+      Type_env.set_definition
+        program.type_env
+        (Module_scope.canonical_name module_ decl.name.txt)
+        kind
+        ~loc
+        ~wrap_error:(Generated.wrap_error (Generated.create splice generated))
+    in
+    [ generated ]
+  | _ -> raise_s [%message "Typecheck.define_type: not a type declaration"]
+;;
+
 (* Checks a declaration splice's expression in the module it is written in,
    and runs it at compile time, to the declarations it generates. *)
 let generate t (program : Program_env.t) splice
   : (Syntax.Toplevel.t list, Module_scope.Force_error.t) Result.t
   =
-  let loc = Module_scope.Splice.loc splice in
-  let module_ = Module_scope.Splice.module_ splice in
-  let scope =
-    toplevel_scope t program module_ ~level:(-1) ~in_expect_test:false
-  in
-  let start = scope.scc.lowlink in
-  Result.map_error ~f:(fun error : Module_scope.Force_error.t ->
-    if uses_unfinished program scope ~start error
-    then Uses_unfinished
-    else Failed (Module_scope.within module_ error))
-  @@
-  let%bind.Result expr =
-    check_expr
-      t
-      scope
-      ~expr:(Source.Expr.Syntax (Module_scope.Splice.expr splice))
-      ~ty:declarations_type
-  in
-  let%bind.Result value =
-    at_compile_time
-      program
-      (fun ~reflect ->
-         Treewalk.run program.interpreter expr ~level:(-1) ~reflect)
-      ~error:(fun error ->
-        Typecheck_error.create ~loc (Declaration_splice_failed error))
-  in
-  Queue.enqueue program.declaration_splices expr;
-  let%map.Result generated =
-    Syntax_value.Program.of_value value ~loc
-    |> Result.map_error ~f:(fun error ->
-      Typecheck_error.create ~loc (Malformed_declarations error))
-  in
-  match expansion_status splice generated with
-  | Some (written, Up_to_date) ->
-    Option.value
-      (Relocate.toplevels ~written:written.txt generated)
-      ~default:generated
-  | Some (_, Stale _) | None -> generated
+  if Module_scope.Splice.defines_type splice
+  then define_type t program splice
+  else (
+    let loc = Module_scope.Splice.loc splice in
+    let module_ = Module_scope.Splice.module_ splice in
+    let scope = compile_time_scope t program module_ in
+    let start = scope.scc.lowlink in
+    Result.map_error ~f:(fun error : Module_scope.Force_error.t ->
+      if uses_unfinished program scope ~start error
+      then Uses_unfinished
+      else Failed (Module_scope.within module_ error))
+    @@
+    let%bind.Result value =
+      run_at_compile_time
+        t
+        program
+        scope
+        ~expr:(Module_scope.Splice.expr splice)
+        ~ty:declarations_type
+        ~error:(fun error ->
+          Typecheck_error.create ~loc (Declaration_splice_failed error))
+    in
+    let%map.Result generated =
+      Syntax_value.Program.of_value value ~loc
+      |> Result.map_error ~f:(fun error ->
+        Typecheck_error.create ~loc (Malformed_declarations error))
+    in
+    match expansion_status splice generated with
+    | Some (written, Up_to_date) ->
+      Option.value
+        (Relocate.toplevels ~written:written.txt generated)
+        ~default:generated
+    | Some (_, Stale _) | None -> generated)
 ;;
 
 (* Declares the types and toplevels of declarations as they are added. *)
@@ -2302,15 +2386,21 @@ let rec signature (program_env : Program_env.t) module_ =
 ;;
 
 let program_env t interpreter =
-  { Program_env.type_env = Type_env.create t
-  ; toplevels = String.Table.create ()
-  ; interpreter
-  ; ident_info = Typed.Ident.Map.empty
-  ; sccs = Queue.create ()
-  ; declaration_splices = Queue.create ()
-  ; unusable_in_quotes = String.Table.create ()
-  ; unfinished = Stack.create ()
-  }
+  let program =
+    { Program_env.type_env = Type_env.create t
+    ; toplevels = String.Table.create ()
+    ; interpreter
+    ; ident_info = Typed.Ident.Map.empty
+    ; sccs = Queue.create ()
+    ; declaration_splices = Queue.create ()
+    ; unusable_in_quotes = String.Table.create ()
+    ; unfinished = Stack.create ()
+    }
+  in
+  Type_env.set_evaluate_splice
+    program.type_env
+    (evaluate_type_splice t program);
+  program
 ;;
 
 (* The program's root module, within the prelude. *)

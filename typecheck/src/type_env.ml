@@ -26,11 +26,12 @@ end
 
 module Decl = struct
   type t =
-    { decl : Type_decl.t
+    { mutable decl : Type_decl.t (* Its definition once computed, if spliced. *)
     ; name : string
     ; module_ : Module_scope.t
     ; params : Type.arg list Lazy.t
-    ; wrap_error : Typecheck_error.t -> Typecheck_error.t
+    ; mutable wrap_error : Typecheck_error.t -> Typecheck_error.t
+    ; mutable used_while_defined : bool
     ; mutable checked : Signature.Type_decl.t option
     ; mutable reflected : Reflected_decl.t option
       (** Once checked, unless abstract. *)
@@ -55,8 +56,28 @@ module Exception_decl = struct
     }
 end
 
+module Type_splice = struct
+  module State = struct
+    type t =
+      | Evaluating
+      | Evaluated of (Type_expr.t, Typecheck_error.t) Result.t
+  end
+
+  type t =
+    { expr : Expr.t
+    ; mutable state : State.t
+    }
+end
+
 type t =
   { fresh : Fresh.t
+  ; mutable evaluate_splice :
+      Module_scope.t
+      -> Expr.t
+      -> loc:Loc.t
+      -> (Type_expr.t, Typecheck_error.t) Result.t
+  ; mutable type_splices : Type_splice.t list
+    (* Physically keyed: each splice is evaluated once. *)
   ; types : Decl.t String.Table.t
   ; exceptions : Exception_decl.t String.Table.t
   ; constructors : Constructor.t String.Table.t
@@ -69,6 +90,9 @@ type t =
 
 let create fresh =
   { fresh
+  ; evaluate_splice =
+      (fun _ _ ~loc:_ -> raise_s [%message "Type_env: no type splice evaluator"])
+  ; type_splices = []
   ; types = String.Table.create ()
   ; exceptions = String.Table.create ()
   ; constructors = String.Table.create ()
@@ -98,6 +122,23 @@ let resolve_type module_ (path : Decl_path.t) ~loc =
   | Path _ | Root _ ->
     Module_scope.find module_ Type path ~loc ~unbound:(fun path ->
       Unbound_type path)
+;;
+
+let set_evaluate_splice t f = t.evaluate_splice <- f
+
+let evaluate_splice t module_ expr ~loc =
+  match
+    List.find t.type_splices ~f:(fun splice -> phys_equal splice.expr expr)
+  with
+  | Some { state = Evaluated result; _ } -> result
+  | Some { state = Evaluating; _ } ->
+    Error (Typecheck_error.create ~loc Type_splice_cycle)
+  | None ->
+    let splice = { Type_splice.expr; state = Evaluating } in
+    t.type_splices <- splice :: t.type_splices;
+    let result = t.evaluate_splice module_ expr ~loc in
+    splice.state <- Evaluated result;
+    result
 ;;
 
 let find_type t module_ path ~loc =
@@ -208,11 +249,11 @@ let map_result xs ~f =
 (* Each elaborates to the type and the syntax with each type it names by its
    canonical name ([Resolved]), so that it names the same types wherever it
    is. *)
-let rec elaborate' t module_ vars ~expansions (expr : Type_expr.t)
+let rec elaborate' t module_ vars ~splices ~expansions (expr : Type_expr.t)
   : (Type.ty * Type_expr.t, Typecheck_error.t) Result.t
   =
-  let elaborate = elaborate' t module_ vars ~expansions in
-  let elaborate_row = elaborate_row t module_ vars ~expansions in
+  let elaborate = elaborate' t module_ vars ~splices ~expansions in
+  let elaborate_row = elaborate_row t module_ vars ~splices ~expansions in
   let loc = expr.loc in
   let%map.Result ty, txt =
     match expr.txt with
@@ -220,7 +261,7 @@ let rec elaborate' t module_ vars ~expansions (expr : Type_expr.t)
       let%map.Result ty = Vars.ty vars name ~loc in
       ty, expr.txt
     | Con (path, args) ->
-      elaborate_con t module_ vars ~expansions path args ~loc
+      elaborate_con t module_ vars ~splices ~expansions path args ~loc
     | Arrow (ty1, ty2) ->
       let%bind.Result ty1, syntax1 = elaborate ty1 in
       let%map.Result ty2, syntax2 = elaborate ty2 in
@@ -240,11 +281,19 @@ let rec elaborate' t module_ vars ~expansions (expr : Type_expr.t)
     | Variant row ->
       let%map.Result row, syntax = elaborate_row row in
       Fresh.variant t.fresh row, Type_expr.Variant syntax
+    | Splice e when splices ->
+      let%bind.Result generated = evaluate_splice t module_ e ~loc in
+      let%map.Result ty, syntax =
+        elaborate generated
+        |> Result.map_error ~f:(fun error ->
+          Typecheck_error.create ~loc (In_type_splice { generated; error = error.kind }))
+      in
+      ty, syntax.txt
     | Splice _ -> Error (Typecheck_error.create ~loc Misplaced_type_splice)
   in
   ty, { expr with txt }
 
-and elaborate_row t module_ vars ~expansions (row : Type_expr.row)
+and elaborate_row t module_ vars ~splices ~expansions (row : Type_expr.row)
   : (Type.row * Type_expr.row, Typecheck_error.t) Result.t
   =
   let rec go (row : Type_expr.row) ~seen =
@@ -255,7 +304,7 @@ and elaborate_row t module_ vars ~expansions (row : Type_expr.row)
         Error (Typecheck_error.create ~loc (Duplicate_row_entry name))
       | Extend (({ txt = name; loc = _ } as label), ty, rest) ->
         let%bind.Result ty, ty_syntax =
-          elaborate' t module_ vars ~expansions ty
+          elaborate' t module_ vars ~splices ~expansions ty
         in
         let%map.Result rest, rest_syntax = go rest ~seen:(Set.add seen name) in
         ( Type.RExtend (name, Present, ty, rest)
@@ -272,6 +321,7 @@ and elaborate_con
       t
       module_
       vars
+      ~splices
       ~expansions
       ({ txt = path; loc = path_loc } as located_path : Decl_path.t Located.t)
       args
@@ -290,17 +340,17 @@ and elaborate_con
     map_result (List.zip_exn decl.decl.params args) ~f:(fun (param, arg) ->
       match param.txt, arg with
       | Ty _, Ty ty ->
-        let%map.Result ty, syntax = elaborate' t module_ vars ~expansions ty in
+        let%map.Result ty, syntax = elaborate' t module_ vars ~splices ~expansions ty in
         Type.ATy ty, Type_expr.Ty syntax
       | Row _, Row row ->
         let%map.Result row, syntax =
-          elaborate_row t module_ vars ~expansions row
+          elaborate_row t module_ vars ~splices ~expansions row
         in
         Type.ARow row, Type_expr.Row syntax
       (* [{...}] parses as a row, but is a record type for a type parameter. *)
       | Ty _, Row row ->
         let%map.Result row, syntax =
-          elaborate_row t module_ vars ~expansions row
+          elaborate_row t module_ vars ~splices ~expansions row
         in
         Type.ATy (Fresh.record t.fresh row), Type_expr.Row syntax
       | Row _, Ty { loc; _ } ->
@@ -312,8 +362,9 @@ and elaborate_con
   let syntax =
     Type_expr.Con ({ located_path with txt = Resolved decl.name }, args_syntax)
   in
+  let%bind.Result kind = definition decl ~loc in
   let%map.Result ty =
-    match decl.decl.kind with
+    match kind with
     | Variant _ | Record _ | Abstract | Splice _ ->
       Ok (Type.TCon (decl.name, args))
     | Alias body ->
@@ -332,6 +383,20 @@ and elaborate_con
   in
   ty, syntax
 
+(* Its definition, computed if spliced. While being computed, it is taken to
+   be nominal, which [set_definition] checks. *)
+and definition (decl : Decl.t) ~loc =
+  match decl.decl.kind with
+  | Splice _ when Module_scope.defining decl.module_ decl.decl.name.txt ->
+    decl.used_while_defined <- true;
+    Ok decl.decl.kind
+  | Splice _ ->
+    let%map.Result () =
+      Module_scope.force_definition decl.module_ decl.decl.name.txt ~loc
+    in
+    decl.decl.kind
+  | Variant _ | Record _ | Alias _ | Abstract -> Ok decl.decl.kind
+
 and expand t (decl : Decl.t) ~args ~expansions body =
   let knot = Type.Var.create (Fresh.id t.fresh) Generic in
   let expansion =
@@ -343,6 +408,7 @@ and expand t (decl : Decl.t) ~args ~expansions body =
       t
       decl.module_
       (Params (Decl.param_map decl ~params:args))
+      ~splices:true
       ~expansions
       body
   in
@@ -358,13 +424,28 @@ and expand t (decl : Decl.t) ~args ~expansions body =
     Ok (Type.TVar knot, syntax))
 ;;
 
-let elaborate t module_ vars expr =
+let elaborate t module_ vars expr ~splices =
   elaborate'
     t
     module_
     (Annotation vars)
+    ~splices
     ~expansions:(String.Table.create ())
     expr
+;;
+
+let declare_members t module_ (decl : Type_decl.t) ~name =
+  let declares names table =
+    List.iter names ~f:(fun ((member : Name.t), _) ->
+      Hashtbl.add_exn
+        table
+        ~key:(Module_scope.canonical_name module_ member.txt)
+        ~data:name)
+  in
+  match decl.kind with
+  | Alias _ | Abstract | Splice _ -> ()
+  | Variant constructors -> declares constructors t.constructor_types
+  | Record fields -> declares fields t.field_types
 ;;
 
 let declare
@@ -392,20 +473,28 @@ let declare
       ; module_
       ; params
       ; wrap_error
+      ; used_while_defined = false
       ; checked = None
       ; reflected = None
       };
-  let declares names table =
-    List.iter names ~f:(fun ((member : Name.t), _) ->
-      Hashtbl.add_exn
-        table
-        ~key:(Module_scope.canonical_name module_ member.txt)
-        ~data:name)
-  in
-  match decl.kind with
-  | Alias _ | Abstract | Splice _ -> ()
-  | Variant constructors -> declares constructors t.constructor_types
-  | Record fields -> declares fields t.field_types
+  declare_members t module_ decl ~name
+;;
+
+let set_definition t name (kind : Type_decl.Kind.t) ~wrap_error ~loc =
+  let decl = Hashtbl.find_exn t.types name in
+  match kind with
+  | Alias _ when decl.used_while_defined ->
+    Error
+      (Typecheck_error.create
+         ~loc
+         (Type_definition_cycle { name; splice = loc }))
+  | Splice e ->
+    Error (Typecheck_error.create ~loc:e.loc Nested_definition_splice)
+  | Alias _ | Variant _ | Record _ | Abstract ->
+    decl.decl <- { decl.decl with kind };
+    decl.wrap_error <- Fn.compose decl.wrap_error wrap_error;
+    declare_members t decl.module_ decl.decl ~name;
+    Ok ()
 ;;
 
 let declare_exception ?(wrap_error = Fn.id) t module_ (name : Name.t) args =
@@ -429,6 +518,7 @@ let check_exception t name =
           t
           decl.module_
           (Params String.Map.empty)
+          ~splices:true
           ~expansions:(String.Table.create ())
           arg
         |> Result.map ~f:fst)
@@ -450,6 +540,7 @@ let define t (decl : Decl.t) =
       t
       decl.module_
       (Params (Decl.param_map decl ~params:(Decl.params decl)))
+      ~splices:true
       ~expansions
   in
   let canonical_name = Module_scope.canonical_name decl.module_ in
@@ -462,8 +553,8 @@ let define t (decl : Decl.t) =
       ( Signature.Type_decl.Kind.Alias body
       , Some (Reflected_decl.Kind.Alias syntax) )
     | Abstract -> Ok (Signature.Type_decl.Kind.Abstract, None)
-    | Splice e ->
-      Error (Typecheck_error.create ~loc:e.loc Misplaced_type_splice)
+    | Splice _ ->
+      raise_s [%message "Type_env.define: definition not computed" decl.name]
     | Variant constructors ->
       let%map.Result constructors =
         map_result constructors ~f:(fun ((name : Name.t), args) ->
@@ -531,7 +622,20 @@ let check t name =
   let decl = Hashtbl.find_exn t.types name in
   match decl.checked with
   | Some checked -> Ok checked
-  | None -> define t decl |> Result.map_error ~f:decl.wrap_error
+  | None ->
+    let%bind.Result () =
+      match decl.decl.kind with
+      | Splice _ ->
+        Module_scope.force_definition
+          decl.module_
+          decl.decl.name.txt
+          ~loc:decl.decl.name.loc
+        |> Result.map_error ~f:decl.wrap_error
+      | Variant _ | Record _ | Alias _ | Abstract -> Ok ()
+    in
+    (match define t decl with
+     | Ok checked -> Ok checked
+     | Error error -> Error (decl.wrap_error error))
 ;;
 
 let find_decl_exn t name =

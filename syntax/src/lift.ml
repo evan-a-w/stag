@@ -76,6 +76,7 @@ module Make (B : Builder) = struct
   module type Lifter_s = sig
     val type_expr : Type_expr.t -> B.t
     val type_decl : Type_decl.t -> B.t
+    val type_decl_kind : Type_decl.Kind.t -> B.t
     val expr : Expr.t -> B.t
     val toplevel : Toplevel.t -> B.t
     val program : Toplevel.t list -> B.t
@@ -118,25 +119,25 @@ module Make (B : Builder) = struct
       | Row r -> con "Stag.Type_expr.Arg.Row" [ row r ]
 
     and type_decl ({ name = decl_name; params; kind } : Type_decl.t) =
-      let decl_kind : Type_decl.Kind.t -> B.t = function
-        | Variant constructors ->
-          con
-            "Stag.Type_decl.Kind.Variant"
-            [ list (pair name (list type_expr)) constructors ]
-        | Record fields ->
-          con "Stag.Type_decl.Kind.Record" [ list (pair name type_expr) fields ]
-        | Alias ty -> con "Stag.Type_decl.Kind.Alias" [ type_expr ty ]
-        | Abstract -> con "Stag.Type_decl.Kind.Abstract" []
-        | Splice e ->
-          (match A.antiquote Type_kind e with
-           | Some lifted -> lifted
-           | None -> con "Stag.Type_decl.Kind.Splice" [ expr e ])
-      in
       B.record
         [ "name", name decl_name
         ; "params", list type_param params
-        ; "kind", decl_kind kind
+        ; "kind", type_decl_kind kind
         ]
+
+    and type_decl_kind : Type_decl.Kind.t -> B.t = function
+      | Variant constructors ->
+        con
+          "Stag.Type_decl.Kind.Variant"
+          [ list (pair name (list type_expr)) constructors ]
+      | Record fields ->
+        con "Stag.Type_decl.Kind.Record" [ list (pair name type_expr) fields ]
+      | Alias ty -> con "Stag.Type_decl.Kind.Alias" [ type_expr ty ]
+      | Abstract -> con "Stag.Type_decl.Kind.Abstract" []
+      | Splice { txt = e; loc = _ } ->
+        (match A.antiquote Type_kind e with
+         | Some lifted -> lifted
+         | None -> con "Stag.Type_decl.Kind.Splice" [ expr e ])
 
     and binding b = pair name (option type_expr) b
 
@@ -228,19 +229,19 @@ module Make (B : Builder) = struct
               ]
           ]
 
-    and program toplevels =
-      List.fold_right
-        toplevels
-        ~init:(con "Nil" [])
-        ~f:(fun (item : Toplevel.t) tail ->
-          let antiquoted =
-            match item.txt with
-            | Include (e, _) -> A.antiquote Item e
-            | _ -> None
-          in
-          match antiquoted with
-          | Some items -> B.append items tail
-          | None -> con "Cons" [ toplevel item; tail ])
+    and program (toplevels : Toplevel.t list) =
+      match toplevels with
+      | [] -> con "Nil" []
+      | item :: rest ->
+        let antiquoted =
+          match item.txt with
+          | Include (e, _) -> A.antiquote Item e
+          | _ -> None
+        in
+        (match antiquoted, rest with
+         | Some items, [] -> items
+         | Some items, _ :: _ -> B.append items (program rest)
+         | None, _ -> con "Cons" [ toplevel item; program rest ])
     ;;
   end
 
@@ -258,6 +259,11 @@ module Make (B : Builder) = struct
   let type_decl ?antiquote t =
     let (module L) = lifter antiquote in
     L.type_decl t
+  ;;
+
+  let type_decl_kind ?antiquote t =
+    let (module L) = lifter antiquote in
+    L.type_decl_kind t
   ;;
 
   let expr ?antiquote t =

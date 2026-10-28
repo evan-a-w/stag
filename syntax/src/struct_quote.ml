@@ -3,22 +3,62 @@ open Syntax
 
 exception Error of Loc.t * string
 
-let expand_exn ?(types_only = false) toplevels ~loc =
-  let antiquotes = Queue.create () in
+(* Its value, of the type of a splice of its kind. *)
+module Bound = struct
+  type t =
+    { antiquote : Antiquote.t
+    ; name : string
+    }
+
+  let type_ (kind : Antiquote.Kind.t) ~loc : Type_expr.t =
+    let con ?(args = []) name : Type_expr.t =
+      Located.create
+        ~loc
+        (Type_expr.Con
+           ( Located.create ~loc (Decl_path.Resolved (Prelude_path.canonical name))
+           , args ))
+    in
+    match kind with
+    | Item -> con "list" ~args:[ Ty (con "Stag.Toplevel.t") ]
+    | Type_expr -> con "Stag.Type_expr.t"
+    | Type_kind -> con "Stag.Type_decl.Kind.t"
+    | Expr -> con "Stag.Expr.t"
+  ;;
+
+  (* No program can name it, so the antiquotes see the struct quote's scope. *)
+  let var t ~loc : Expr.t =
+    Located.create ~loc (Expr.Var (Path (Path.name t.name), None))
+  ;;
+
+  let bind t ~(in_ : Expr.t) : Expr.t =
+    let loc = t.antiquote.loc in
+    Located.create
+      ~loc:in_.loc
+      (Expr.Let
+         ( Located.create ~loc t.name
+         , []
+         , Some (type_ t.antiquote.kind ~loc)
+         , t.antiquote.expr
+         , in_ ))
+  ;;
+end
+
+let expand_exn toplevels ~loc =
+  let bound = Queue.create () in
   let toplevels =
     Antiquote.map toplevels ~f:(fun antiquote ->
-      match antiquote.kind with
-      | (Item | Expr) when types_only -> antiquote.expr
-      | Item | Expr | Type_expr | Type_kind ->
-        if antiquote.has_subs
-        then
-          raise
-            (Error
-               ( antiquote.loc
-               , "An antiquote of a struct quote takes no substitutions: write \
-                  `.~e`, of a `Stag.Expr.t`" ));
-        Queue.enqueue antiquotes antiquote.expr;
-        Antiquote.placeholder (Queue.length antiquotes - 1))
+      if antiquote.has_subs
+      then
+        raise
+          (Error
+             ( antiquote.loc
+             , "An antiquote of a struct quote takes no substitutions: write \
+                `.~e`, of a `Stag.Expr.t`" ));
+      let index = Queue.length bound in
+      Queue.enqueue
+        bound
+        { Bound.antiquote; name = sprintf "%%antiquote%d" index };
+      Antiquote.placeholder index)
   in
   let node txt = Located.create ~loc txt in
   let resolved name = Decl_path.Resolved (Prelude_path.canonical name) in
@@ -41,7 +81,7 @@ let expand_exn ?(types_only = false) toplevels ~loc =
              (List.map fields ~f:(fun (name, e) -> Located.create ~loc name, e)))
       ;;
 
-      let ref_ (_ : Lift.Ref_kind.t) name =
+      let ref_ (_ : Decl_ref.Kind.t) name =
         raise
           (Error
              ( loc
@@ -56,8 +96,15 @@ let expand_exn ?(types_only = false) toplevels ~loc =
       ;;
     end)
   in
-  Lift.program toplevels ~antiquote:(fun _ e ->
-    Antiquote.index e |> Option.map ~f:(Queue.get antiquotes))
+  let lifted =
+    Lift.program toplevels ~antiquote:(fun _ e ->
+      Antiquote.index e
+      |> Option.map ~f:(fun i ->
+        let bound = Queue.get bound i in
+        Bound.var bound ~loc:bound.antiquote.loc))
+  in
+  List.fold_right (Queue.to_list bound) ~init:lifted ~f:(fun bound in_ ->
+    Bound.bind bound ~in_)
 ;;
 
 let rec check_no_expansions (toplevels : Toplevel.t list) =
@@ -86,18 +133,4 @@ let expand toplevels ~loc =
   with
   | expr -> Ok expr
   | exception Error (loc, message) -> Error (loc, message)
-;;
-
-let of_type_splices (toplevel : Toplevel.t) =
-  match toplevel.txt with
-  | Module _ | Module_splice _ | Include _ -> None
-  | Let _ | Type _ | Exception _ | Expect_test _ | Bench _ ->
-    let has_type_splice = ref false in
-    Antiquote.iter [ toplevel ] ~f:(fun antiquote ->
-      match antiquote.kind with
-      | Type_expr | Type_kind -> has_type_splice := true
-      | Item | Expr -> ());
-    if !has_type_splice
-    then Some (expand_exn ~types_only:true [ toplevel ] ~loc:toplevel.loc)
-    else None
 ;;

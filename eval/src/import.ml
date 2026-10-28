@@ -12,3 +12,4 @@ module Prelude_path = Stag_types.Prelude_path
 module Parser = Stag_syntax.Parser
 module Intrinsic = Stag_ir.Intrinsic
 module Lift = Stag_syntax.Lift
+module Decl_ref = Stag_syntax.Decl_ref

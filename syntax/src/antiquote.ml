@@ -18,7 +18,7 @@ type t =
   }
 [@@deriving sexp_of]
 
-let map toplevels ~f =
+let map ?type_expr:replace_type_expr toplevels ~f =
   let splice ~depth kind ~loc ~has_subs (e : Expr.t) ~inner =
     if depth = 0
     then f { kind; expr = e; loc; has_subs }
@@ -40,8 +40,14 @@ let map toplevels ~f =
       | Record r -> Record (row depth r)
       | Variant r -> Variant (row depth r)
       | Splice e ->
-        Splice
-          (splice ~depth Type_expr ~loc:t.loc ~has_subs:false e ~inner:expr)
+        (match replace_type_expr with
+         | Some replace when depth = 0 ->
+           (replace { kind = Type_expr; expr = e; loc = t.loc; has_subs = false }
+            : Type_expr.t)
+             .txt
+         | Some _ | None ->
+           Splice
+             (splice ~depth Type_expr ~loc:t.loc ~has_subs:false e ~inner:expr))
     in
     { t with txt }
   and row depth (r : Type_expr.row) : Type_expr.row =
@@ -135,7 +141,16 @@ let map toplevels ~f =
           | Abstract -> Abstract
           | Splice e ->
             Splice
-              (splice ~depth Type_kind ~loc:t.loc ~has_subs:false e ~inner:expr)
+              { e with
+                txt =
+                  splice
+                    ~depth
+                    Type_kind
+                    ~loc:e.loc
+                    ~has_subs:false
+                    e.txt
+                    ~inner:expr
+              }
         in
         Type { name; params; kind }
       | Exception (n, ts) -> Exception (n, List.map ts ~f:type_expr)

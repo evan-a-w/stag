@@ -60,6 +60,7 @@ type module_ =
   ; modules : module_ String.Table.t
   ; entries : entry Queue.t
   ; includes : splice Queue.t (* Its own, and those they generate. *)
+  ; definitions : splice String.Table.t (* Of its types [type t = .~e]. *)
   ; path : string list
   ; loc : Loc.t
   ; enclosing : t option
@@ -92,6 +93,7 @@ and splice =
 and into =
   | Into_include of entry Queue.t
   | Into_module of string
+  | Into_type of Type_decl.t (* The definition of this written type. *)
 
 and state =
   | Pending
@@ -114,6 +116,12 @@ module Splice = struct
   let loc (t : t) = t.loc
   let module_ (t : t) = t.scope
 
+  let defines_type (t : t) =
+    match t.into with
+    | Into_type _ -> true
+    | Into_include _ | Into_module _ -> false
+  ;;
+
   let generated (t : t) =
     match t.state with
     | Done toplevels -> Some toplevels
@@ -134,6 +142,7 @@ let create ~path ~loc ~enclosing ~splice ~program =
   ; modules = String.Table.create ()
   ; entries = Queue.create ()
   ; includes = Queue.create ()
+  ; definitions = String.Table.create ()
   ; path
   ; loc
   ; enclosing
@@ -163,7 +172,7 @@ let rec declarations_of entries =
     | Included splice ->
       (match splice.into with
        | Into_include entries -> declarations_of entries
-       | Into_module _ -> []))
+       | Into_module _ | Into_type _ -> []))
 ;;
 
 let declarations t = declarations_of t.module_.entries
@@ -244,11 +253,10 @@ let rec check_unique ~path taken toplevels =
     | Include _ -> Ok ())
 ;;
 
-let check_unique module_ toplevels =
-  check_unique
-    ~path:module_.path
-    (Member.Hash_set.of_list (Hashtbl.keys module_.members))
-    toplevels
+let check_unique ?(except = []) module_ toplevels =
+  let taken = Member.Hash_set.of_list (Hashtbl.keys module_.members) in
+  List.iter except ~f:(Hash_set.remove taken);
+  check_unique ~path:module_.path taken toplevels
 ;;
 
 let submodule (scope : t) (name : Name.t) ~splice =
@@ -283,21 +291,20 @@ let rec register module_ toplevels ~parent ~generated_by =
       in
       { expr; toplevel; loc; scope; into; state = Pending }
     in
-    let include_ =
-      match toplevel.txt with
-      | Include (expr, expansion) -> Some (expr, expansion)
-      | _ ->
-        Struct_quote.of_type_splices toplevel
-        |> Option.map ~f:(fun expr -> expr, None)
-    in
-    match include_, toplevel.txt with
-    | Some (expr, expansion), _ ->
+    match toplevel.txt with
+    | Include (expr, expansion) ->
       let splice =
         splice expr ~expansion ~into:(Into_include (Queue.create ()))
       in
       Queue.enqueue into (Included splice);
       Queue.enqueue module_.includes splice
-    | None, _ ->
+    | Let _
+    | Type _
+    | Exception _
+    | Expect_test _
+    | Bench _
+    | Module _
+    | Module_splice _ ->
       module_.program.declare scope toplevel ~generated_by;
       Queue.enqueue into (Written { toplevel; scope; generated_by });
       List.iter (members toplevel) ~f:(fun (member, _) ->
@@ -314,6 +321,18 @@ let rec register module_ toplevels ~parent ~generated_by =
               ~splice:
                 (Some (splice expr ~expansion ~into:(Into_module name.txt)))
             : module_)
+       | Type ({ kind = Splice e; _ } as decl) ->
+         Hashtbl.add_exn
+           module_.definitions
+           ~key:decl.name.txt
+           ~data:
+             { expr = e.txt
+             ; toplevel
+             ; loc = e.loc
+             ; scope
+             ; into = Into_type decl
+             ; state = Pending
+             }
        | Let _ | Type _ | Exception _ | Expect_test _ | Bench _ | Include _ ->
          ()))
 ;;
@@ -414,14 +433,31 @@ let force (splice : splice) : (unit, Force_error.t) Result.t =
        splice.state <- Failed error;
        Error (Failed error)
      | Ok toplevels ->
-       let module_, parent =
+       let registered =
          match splice.into with
-         | Into_include _ -> in_module, Some splice
-         | Into_module name -> Hashtbl.find_exn in_module.modules name, None
+         | Into_type decl ->
+           let type_member = Member_kind.Member Type, decl.name.txt in
+           let%map.Result () =
+             check_unique in_module toplevels ~except:[ type_member ]
+           in
+           let visibility = Hashtbl.find_exn in_module.members type_member in
+           List.iter toplevels ~f:(fun toplevel ->
+             List.iter (members toplevel) ~f:(fun (member, _) ->
+               Hashtbl.set in_module.members ~key:member ~data:visibility))
+         | Into_include _ ->
+           let%map.Result () = check_unique in_module toplevels in
+           register
+             in_module
+             toplevels
+             ~parent:(Some splice)
+             ~generated_by:(Some splice)
+         | Into_module name ->
+           let module_ = Hashtbl.find_exn in_module.modules name in
+           let%map.Result () = check_unique module_ toplevels in
+           register module_ toplevels ~parent:None ~generated_by:(Some splice)
        in
-       (match check_unique module_ toplevels with
+       (match registered with
         | Ok () ->
-          register module_ toplevels ~parent ~generated_by:(Some splice);
           splice.state <- Done toplevels;
           Ok ()
         | Error error ->
@@ -446,9 +482,27 @@ module Lookup = struct
     | Absent of { blocked : splice option }
 end
 
-(* [member] of [t]'s module, seen from [t]. While it is not found, the first
-   include before [t] not yet forced is. Unless it is running or uses an
-   unfinished toplevel: then what it generates is unknown, and it is
+(* Computes the definitions of the module's types [type t = .~e] neither
+   computed nor being computed, whose constructors or fields are then members,
+   and whether one is newly computed. One that fails is reported where its type
+   is checked. *)
+let force_definitions module_ =
+  Hashtbl.fold
+    module_.definitions
+    ~init:false
+    ~f:(fun ~key:_ ~data:splice forced ->
+      match splice.state with
+      | Pending ->
+        (match force splice with
+         | Ok () -> true
+         | Error (Failed _ | Uses_unfinished) -> forced)
+      | Forcing | Done _ | Failed _ -> forced)
+;;
+
+(* [member] of [t]'s module, seen from [t]. While a constructor or field is
+   not found, the module's types' definitions are computed. While it is not
+   found, the first include before [t] not yet forced is. Unless it is running
+   or uses an unfinished toplevel: then what it generates is unknown, and it is
    [blocked]. *)
 let rec lookup (t : t) member =
   match Hashtbl.find t.module_.members member with
@@ -456,6 +510,11 @@ let rec lookup (t : t) member =
   | Some (Some include_) ->
     Ok
       (if is_before include_ t.position then Lookup.Visible else Hidden include_)
+  | None
+    when (match member with
+          | Member (Constructor | Field), _ -> true
+          | Member (Value | Type), _ | Module, _ -> false)
+         && force_definitions t.module_ -> lookup t member
   | None ->
     (match
        Queue.to_list t.module_.includes
@@ -782,7 +841,7 @@ let iter_declarations t ~f =
         let%bind.Result () = force splice in
         (match splice.into with
          | Into_include entries -> iter_entries entries
-         | Into_module _ -> Ok ())
+         | Into_module _ | Into_type _ -> Ok ())
       | Written { toplevel; scope; generated_by } ->
         let%bind.Result () = f scope toplevel ~generated_by in
         (match toplevel.txt with
@@ -792,6 +851,30 @@ let iter_declarations t ~f =
            Ok ()))
   in
   iter_module t.module_
+;;
+
+let defining (t : t) name =
+  match (Hashtbl.find_exn t.module_.definitions name).state with
+  | Forcing -> true
+  | Pending | Done _ | Failed _ -> false
+;;
+
+let force_definition (t : t) name ~loc =
+  let splice = Hashtbl.find_exn t.module_.definitions name in
+  match splice.state with
+  | Forcing ->
+    Error
+      (Typecheck_error.create
+         ~loc
+         (Type_definition_cycle
+            { name = canonical_name t name; splice = splice.loc }))
+  | Pending | Done _ | Failed _ ->
+    (match force splice with
+     | Ok () -> Ok ()
+     | Error (Failed error) -> Error error
+     | Error Uses_unfinished ->
+       raise_s
+         [%message "Module_scope.force_definition: uses an unfinished toplevel"])
 ;;
 
 let splices t =

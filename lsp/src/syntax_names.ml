@@ -81,7 +81,7 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
            name ~declaration:true Field field;
            type_expr ty)
        | Alias ty -> type_expr ty
-       | Splice e -> expr e
+       | Splice e -> expr e.txt
        | Abstract -> ())
     | Exception (exn, args) ->
       name ~declaration:true Constructor exn;

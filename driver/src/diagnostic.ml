@@ -105,6 +105,14 @@ let of_typecheck_error (error : Typecheck_error.t) =
           ; message = sprintf "The program's module %s is here" module_
           }
         ]
+    | In_type_splice { generated; error } ->
+      notes error
+      @ [ { Note.loc = Loc.none
+          ; message =
+              "The type splice gave the type: "
+              ^ Printer.type_expr ~width:78 ?root_modules generated
+          }
+        ]
     | In_generated_declaration { generated; error; declaration = _ } ->
       notes error
       @ [ { Note.loc = Loc.none

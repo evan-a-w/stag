@@ -24,9 +24,11 @@ type t =
   }
 [@@deriving sexp_of]
 
-(** Replaces the expression of each splice, in order. *)
+(** Replaces the expression of each splice, in order, or with [type_expr],
+    each type splice by the type it gives. *)
 val map
-  :  Syntax.Toplevel.t list
+  :  ?type_expr:(t -> Syntax.Type_expr.t)
+  -> Syntax.Toplevel.t list
   -> f:(t -> Syntax.Expr.t)
   -> Syntax.Toplevel.t list
 

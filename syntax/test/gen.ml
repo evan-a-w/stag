@@ -236,7 +236,7 @@ and type_decl t : Type_decl.t =
            (list t ~min:0 ~max:3 (fun t ->
               loc (uident t), list t ~min:0 ~max:3 type_expr))
        | 3 -> Record (list t ~min:1 ~max:3 (fun t -> name t, type_expr t))
-       | _ -> Splice (expr t))
+       | _ -> Splice (Located.create (expr t)))
   }
 
 and toplevel t : Toplevel.t =

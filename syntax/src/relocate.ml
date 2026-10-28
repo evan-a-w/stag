@@ -284,8 +284,8 @@ and type_decl
       Type_decl.Kind.Alias t
     | Abstract, Abstract -> Some kind
     | Splice e, Splice e' ->
-      let+ e = expr e e' in
-      Type_decl.Kind.Splice e
+      let+ txt = expr e.txt e'.txt in
+      Type_decl.Kind.Splice { e' with txt }
     | (Variant _ | Record _ | Alias _ | Abstract | Splice _), _ -> None
   in
   { Type_decl.name = n; params; kind }

@@ -1,13 +1,5 @@
 open! Import
 
-module Ref_kind = struct
-  type t =
-    | Type
-    | Constructor
-    | Field
-    | Value
-end
-
 (** How to build the representation of syntax as the prelude's [Stag] types. *)
 module type Builder = sig
   type t
@@ -25,7 +17,7 @@ module type Builder = sig
   val record : (string * t) list -> t
 
   (** A [Stag.Path.Ref]'s ref, of the declaration of canonical name [name]. *)
-  val ref_ : Ref_kind.t -> string -> t
+  val ref_ : Decl_ref.Kind.t -> string -> t
 
   (** The concatenation of two lists. *)
   val append : t -> t -> t
@@ -42,6 +34,7 @@ module type S = sig
   val type_expr : ?antiquote:antiquote -> Syntax.Type_expr.t -> t
   val type_param : Syntax.Type_decl.Param.t Located.t -> t
   val type_decl : ?antiquote:antiquote -> Syntax.Type_decl.t -> t
+  val type_decl_kind : ?antiquote:antiquote -> Syntax.Type_decl.Kind.t -> t
   val pattern : Syntax.Pattern.t -> t
   val expr : ?antiquote:antiquote -> Syntax.Expr.t -> t
   val toplevel : ?antiquote:antiquote -> Syntax.Toplevel.t -> t
@@ -55,8 +48,6 @@ module type Lift = sig
       ([Stag.Expr.t] etc.), built by a [Builder]: as values, or as expressions
       building them. The expansion of a [module%inline] or [include%inline] is
       dropped. *)
-
-  module Ref_kind = Ref_kind
 
   module type Builder = Builder
   module type S = S

@@ -131,10 +131,10 @@ and type_decl_kind =
   | Record of (Name.t * type_expr) list
   | Alias of type_expr
   | Abstract
-  | Splice of expr
-  (** [type t = .~e]: the definition [e : Stag.Type_decl.Kind.t] evaluates to
-      at compile time, declared as an include of it, or an antiquote in a
-      struct quote. *)
+  | Splice of expr Located.t
+  (** [type t = .~e], located at [.~e]: the definition
+      [e : Stag.Type_decl.Kind.t] evaluates to at compile time, or an
+      antiquote in a struct quote. *)
 
 and type_decl =
   { name : Name.t
@@ -288,7 +288,7 @@ module Type_decl = struct
       | Record of (Name.t * Type_expr.t) list
       | Alias of Type_expr.t
       | Abstract
-      | Splice of expr
+      | Splice of expr Located.t
 
     let sexp_of_t = sexp_of_type_decl_kind
     let compare = compare_type_decl_kind

@@ -51,16 +51,7 @@ module To_value = struct
       let tuple vs = Value.Tuple vs
       let record fields = Value.Poly_record (String.Map.of_alist_exn fields)
 
-      let ref_ (kind : Lift.Ref_kind.t) name =
-        let kind : Decl_ref.Kind.t =
-          match kind with
-          | Type -> Type
-          | Constructor -> Constructor
-          | Field -> Field
-          | Value -> Value
-        in
-        Value.Ref { kind; name }
-      ;;
+      let ref_ kind name = Value.Ref { kind; name }
 
       let rec append (xs : Value.t) ys =
         match xs with
@@ -413,27 +404,27 @@ module Of_value = struct
              | "Row", 1 -> Row (arg 0 (ident Tyvar))
              | _ -> raise Bad_arguments))
     in
-    let kind value =
-      variant
-        "Stag.Type_decl.Kind.t"
-        value
-        ~f:(fun constructor args : Type_decl.Kind.t ->
-          let arg i read = Args.read args i read in
-          match constructor, Args.count args with
-          | "Variant", 1 ->
-            Variant
-              (arg 0 (list (pair (name Upper ~loc) (list (type_expr ~loc)))))
-          | "Record", 1 ->
-            Record (arg 0 (fields (pair (name Lower ~loc) (type_expr ~loc))))
-          | "Alias", 1 -> Alias (arg 0 (type_expr ~loc))
-          | "Abstract", 0 -> Abstract
-          | "Splice", 1 -> Splice (arg 0 (expr ~loc))
-          | _ -> raise Bad_arguments)
-    in
     { name = field "name" (name Lower ~loc) value
     ; params = field "params" (list param) value
-    ; kind = field "kind" kind value
+    ; kind = field "kind" (type_decl_kind ~loc) value
     }
+
+  and type_decl_kind value ~loc : Type_decl.Kind.t =
+    variant
+      "Stag.Type_decl.Kind.t"
+      value
+      ~f:(fun constructor args : Type_decl.Kind.t ->
+        let arg i read = Args.read args i read in
+        match constructor, Args.count args with
+        | "Variant", 1 ->
+          Variant
+            (arg 0 (list (pair (name Upper ~loc) (list (type_expr ~loc)))))
+        | "Record", 1 ->
+          Record (arg 0 (fields (pair (name Lower ~loc) (type_expr ~loc))))
+        | "Alias", 1 -> Alias (arg 0 (type_expr ~loc))
+        | "Abstract", 0 -> Abstract
+        | "Splice", 1 -> Splice (Located.create ~loc (arg 0 (expr ~loc)))
+        | _ -> raise Bad_arguments)
 
   and binding ~loc = pair (name Binder ~loc) (option (type_expr ~loc))
 
@@ -610,6 +601,11 @@ end
 module Type_decl = struct
   let to_value t = To_value.type_decl t
   let of_value = Of_value.(run type_decl)
+
+  module Kind = struct
+    let to_value t = To_value.type_decl_kind t
+    let of_value = Of_value.(run type_decl_kind)
+  end
 end
 
 module Pattern = struct

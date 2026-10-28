@@ -137,7 +137,7 @@ let map (t : Toplevel.t) ~f =
           | Record fs -> Record (List.map fs ~f:(fun (n, t) -> n, type_expr t))
           | Alias t -> Alias (type_expr t)
           | Abstract -> Abstract
-          | Splice e -> Splice (expr String.Set.empty e)
+          | Splice e -> Splice { e with txt = expr String.Set.empty e.txt }
         in
         Type { name; params; kind }
       | Exception (n, ts) -> Exception (n, List.map ts ~f:type_expr)
