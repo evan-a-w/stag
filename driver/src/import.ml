@@ -8,6 +8,7 @@ module Text_diff = Stag_common.Text_diff
 module Signature = Stag_types.Signature
 module Parser = Stag_syntax.Parser
 module Printer = Stag_syntax.Printer
+module Formatter = Stag_syntax.Formatter
 module Source_file = Stag_syntax.Source_file
 module Syntax = Stag_syntax.Syntax
 module Typed = Stag_ir.Typed

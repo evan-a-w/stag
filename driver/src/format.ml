@@ -1,7 +1,7 @@
 open! Import
 
 let file ({ path; contents } : Source_file.t) =
-  Printer.format ~file:path contents
+  Formatter.format ~file:path contents
   |> Result.map_error ~f:Diagnostic.of_parse_error
 ;;
 

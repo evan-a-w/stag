@@ -640,7 +640,7 @@ module Kind = struct
   ;;
 end
 
-let rec toplevel ~width ~indent (t : Toplevel.t) =
+let rec toplevel ~width ~indent ~blank_between (t : Toplevel.t) =
   match t.txt with
   | Let (name, params, annot, rhs) ->
     definition
@@ -651,7 +651,10 @@ let rec toplevel ~width ~indent (t : Toplevel.t) =
   | Module (name, []) -> text ("module " ^ name.txt ^ " = struct end")
   | Module (name, members) ->
     text ("module " ^ name.txt ^ " = struct")
-    ^^ nest 2 (hardline ^^ toplevels ~width ~indent:(indent + 2) members)
+    ^^ nest
+         2
+         (hardline
+          ^^ toplevels ~width ~indent:(indent + 2) ~blank_between members)
     ^^ hardline
     ^^ text "end"
   | Expect_test { name; body } ->
@@ -659,25 +662,30 @@ let rec toplevel ~width ~indent (t : Toplevel.t) =
       (text ("let%expect_test " ^ string_literal name.txt))
       (expr_doc body)
 
-and toplevels ~width ~indent ts =
+and toplevels ~width ~indent ~blank_between ts =
   let one_line doc = fits_flat ~width:(width - indent) doc in
   let docs =
-    List.map ts ~f:(fun t ->
-      let doc = toplevel ~width ~indent t in
-      Kind.of_toplevel t, one_line doc, doc)
+    List.map ts ~f:(fun (t : Toplevel.t) ->
+      let doc = toplevel ~width ~indent ~blank_between t in
+      (Kind.of_toplevel t, one_line doc, t.loc), doc)
   in
   match docs with
   | [] -> empty
-  | (_, _, first) :: _ ->
+  | (_, first) :: _ ->
     List.fold
       (List.zip_exn (List.drop_last_exn docs) (List.tl_exn docs))
       ~init:first
-      ~f:(fun acc ((prev_kind, prev_one_line, _), (kind, one_line, doc)) ->
+      ~f:
+        (fun
+          acc
+          ( ((prev_kind, prev_one_line, prev_loc), _)
+          , ((kind, one_line, loc), doc) ) ->
         let compact =
           prev_one_line
           && one_line
           && Kind.equal prev_kind kind
-          && not (Kind.equal prev_kind Other)
+          && (not (Kind.equal prev_kind Other))
+          && not (blank_between prev_loc loc)
         in
         acc ^^ hardline ^^ (if compact then empty else hardline) ^^ doc)
 ;;
@@ -685,15 +693,20 @@ and toplevels ~width ~indent ts =
 let type_expr ?width t = render ?width (type_expr_doc t)
 let pattern ?width p = render ?width (pattern_doc p)
 let expr ?width e = render ?width (expr_doc e)
-let toplevel ?(width = 80) t = render ~width (toplevel ~width ~indent:0 t)
+
+let toplevel ?(width = 80) t =
+  render ~width (toplevel ~width ~indent:0 ~blank_between:(fun _ _ -> false) t)
+;;
+
+let program_doc ~width ~blank_between ts =
+  toplevels ~width ~indent:0 ~blank_between ts
+;;
 
 let program ?(width = 80) ts =
   match ts with
   | [] -> ""
-  | ts -> render ~width (toplevels ~width ~indent:0 ts ^^ hardline)
-;;
-
-let format ?width ~file source =
-  Result.map (Parser.program ~file source) ~f:(fun toplevels ->
-    program ?width toplevels)
+  | ts ->
+    render
+      ~width
+      (program_doc ~width ~blank_between:(fun _ _ -> false) ts ^^ hardline)
 ;;

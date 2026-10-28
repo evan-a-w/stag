@@ -1,6 +1,6 @@
 open! Import
 
-(** Formatting source files with [Stag_syntax.Printer.format]. *)
+(** Formatting source files with [Stag_syntax.Formatter.format]. *)
 
 (** [file]'s contents formatted, or its parse error. *)
 val file : Source_file.t -> (string, Diagnostic.t) Result.t

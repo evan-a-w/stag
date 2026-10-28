@@ -16,10 +16,11 @@ val toplevel : ?width:int -> Syntax.Toplevel.t -> string
     between one line [let]s, and between one line [type]s. *)
 val program : ?width:int -> Syntax.Program.t -> string
 
-(** [source], a file's contents, formatted: printed as [program], keeping its
-    comments. *)
-val format
-  :  ?width:int
-  -> file:string
-  -> string
-  -> (string, Parser.Error.t) Result.t
+(** As [program], without the final newline, and with a blank line between
+    toplevels [blank_between] their locations even where [program] would have
+    none. *)
+val program_doc
+  :  width:int
+  -> blank_between:(Loc.t -> Loc.t -> bool)
+  -> Syntax.Program.t
+  -> Doc.t

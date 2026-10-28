@@ -1080,10 +1080,10 @@ and toplevels t ~stop =
   loop []
 ;;
 
-let run ~file source f =
-  match Lexer.tokenize ~file source with
+let run_with_comments ~file source f =
+  match Lexer.tokenize_with_comments ~file source with
   | Error error -> Error (Error.Lex error)
-  | Ok tokens ->
+  | Ok (tokens, comments) ->
     let t = { tokens; pos = 0; bare_tuple_end = -1 } in
     (match
        let result = f t in
@@ -1094,11 +1094,17 @@ let run ~file source f =
         | _ -> expected t "end of file");
        result
      with
-     | result -> Ok result
+     | result -> Ok (result, comments)
      | exception Syntax_error (loc, message) -> Error (Syntax { loc; message }))
 ;;
 
+let run ~file source f = Result.map (run_with_comments ~file source f) ~f:fst
 let program ~file source = run ~file source (toplevels ~stop:Token.Eof)
+
+let program_with_comments ~file source =
+  run_with_comments ~file source (toplevels ~stop:Token.Eof)
+;;
+
 let expr ~file source = run ~file source expr
 let pattern ~file source = run ~file source pattern
 let type_expr ~file source = run ~file source type_expr

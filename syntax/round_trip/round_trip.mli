@@ -10,5 +10,12 @@ val pattern : ?widths:int list -> Syntax.Pattern.t -> unit
 val expr : ?widths:int list -> Syntax.Expr.t -> unit
 val program : ?widths:int list -> Syntax.Program.t -> unit
 
+(** As the others, for source text: formats it with [Printer.format], which
+    must keep its comment texts in order as well as its syntax. *)
+val source : ?widths:int list -> string -> unit
+
+(** What [source] prints. *)
+val source_errors : ?widths:int list -> string -> Sexp.t list
+
 (** Without the [@ loc]s of [Located.t]s. *)
 val strip_locs : Sexp.t -> Sexp.t

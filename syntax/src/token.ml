@@ -116,3 +116,54 @@ let to_string = function
   | At_at -> "@@"
   | Eof -> "end of file"
 ;;
+
+let ends_code : t -> bool = function
+  | Lparen
+  | Lbracket
+  | Lbrace
+  | Dot_lbrace
+  | Expect_open
+  | Quote_open
+  | Splice
+  | Equal
+  | Arrow
+  | Colon
+  | Bar
+  | Of
+  | Star
+  | Dot
+  | Backslash
+  | Less
+  | Let
+  | Let_expect_test
+  | Match
+  | Type
+  | Module
+  | At
+  | At_at -> false
+  | Int _
+  | Char _
+  | String _
+  | Lident _
+  | Uident _
+  | Label _
+  | Tyvar _
+  | Weak_tyvar _
+  | True
+  | False
+  | Rec
+  | In
+  | With
+  | Struct
+  | End
+  | Rparen
+  | Rbracket
+  | Rbrace
+  | Comma
+  | Semi
+  | Dotdot
+  | Underscore
+  | Quote_close
+  | Greater
+  | Eof -> true
+;;

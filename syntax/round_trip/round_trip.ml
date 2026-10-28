@@ -80,3 +80,71 @@ let program ?widths =
     ~equal:Syntax.Program.equal
     ~sexp_of:Syntax.Program.sexp_of_t
 ;;
+
+let source_errors ?(widths = [ 80; 40; 10 ]) source =
+  let errors = Queue.create () in
+  let print_s sexp = Queue.enqueue errors sexp in
+  (match Parser.program_with_comments ~file:"source.stag" source with
+   | Error error ->
+     print_s
+       [%message
+         "source does not parse" ~error:(Parser.Error.to_string error : string)]
+   | Ok (program, comments) ->
+     let texts comments =
+       List.map comments ~f:(fun (c : Comment.t) -> c.text)
+     in
+     let format ~width source =
+       match Formatter.format ~width ~file:"printed.stag" source with
+       | Ok formatted -> Some formatted
+       | Error error ->
+         print_s
+           [%message
+             "formatted source does not parse"
+               (width : int)
+               (source : string)
+               ~error:(Parser.Error.to_string error : string)];
+         None
+     in
+     List.iter widths ~f:(fun width ->
+       Option.iter (format ~width source) ~f:(fun printed ->
+         match Parser.program_with_comments ~file:"printed.stag" printed with
+         | Error _ -> ignore (format ~width printed : string option)
+         | Ok (parsed, parsed_comments) ->
+           if not (Syntax.Program.equal program parsed)
+           then
+             print_s
+               [%message
+                 "formatted source parses differently"
+                   (width : int)
+                   (printed : string)
+                   ~syntax:
+                     (strip_locs (Syntax.Program.sexp_of_t program) : Sexp.t)
+                   ~parsed:
+                     (strip_locs (Syntax.Program.sexp_of_t parsed) : Sexp.t)];
+           if
+             not
+               (List.equal
+                  String.equal
+                  (texts comments)
+                  (texts parsed_comments))
+           then
+             print_s
+               [%message
+                 "formatting changes the comments"
+                   (width : int)
+                   (printed : string)
+                   ~comments:(texts comments : string list)
+                   ~formatted:(texts parsed_comments : string list)];
+           Option.iter (format ~width printed) ~f:(fun reprinted ->
+             if not (String.equal printed reprinted)
+             then
+               print_s
+                 [%message
+                   "formatting is not idempotent"
+                     (width : int)
+                     (printed : string)
+                     (reprinted : string)]))));
+  Queue.to_list errors
+;;
+
+let source ?widths s = List.iter (source_errors ?widths s) ~f:print_s

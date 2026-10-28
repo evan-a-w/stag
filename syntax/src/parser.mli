@@ -21,6 +21,12 @@ end
 (** The toplevels of a file. *)
 val program : file:string -> string -> (Syntax.Program.t, Error.t) Result.t
 
+(** Also the comments, in order. *)
+val program_with_comments
+  :  file:string
+  -> string
+  -> (Syntax.Program.t * Comment.t list, Error.t) Result.t
+
 val expr : file:string -> string -> (Syntax.Expr.t, Error.t) Result.t
 val pattern : file:string -> string -> (Syntax.Pattern.t, Error.t) Result.t
 val type_expr : file:string -> string -> (Syntax.Type_expr.t, Error.t) Result.t
