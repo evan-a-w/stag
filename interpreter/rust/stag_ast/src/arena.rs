@@ -106,45 +106,50 @@ impl<T: fmt::Debug> fmt::Debug for Store<T> {
     }
 }
 
-/// A [`Store`] being converted: an id is reserved for an OCaml value before
-/// it is converted, so that cycles through it get the same id.
+/// Values being converted into a [`Store`], after its own: an id is
+/// reserved for an OCaml value before it is converted, so that cycles
+/// through it get the same id.
 pub struct Pending<T> {
+    offset: u32,
     slots: Vec<Option<T>>,
     ids: HashMap<usize, u32>,
 }
 
-impl<T> Default for Pending<T> {
-    fn default() -> Self {
+impl<T> Pending<T> {
+    pub fn after(store: &Store<T>) -> Self {
         Pending {
+            offset: store.len() as u32,
             slots: Vec::new(),
             ids: HashMap::new(),
         }
     }
-}
 
-impl<T> Pending<T> {
     /// The id of the value at `address`, and whether it is new, so needs
     /// [`Pending::fill`]ing.
     pub fn reserve(&mut self, address: usize) -> (Ref<T>, bool) {
         if let Some(&i) = self.ids.get(&address) {
             return (Ref::new(i), false);
         }
-        let i = self.slots.len() as u32;
+        let i = self.offset + self.slots.len() as u32;
         self.slots.push(None);
         self.ids.insert(address, i);
         (Ref::new(i), true)
     }
 
     pub fn fill(&mut self, id: Ref<T>, x: T) {
-        self.slots[id.index()] = Some(x);
+        self.slots[id.index() - self.offset as usize] = Some(x);
     }
 
-    pub fn finish(self) -> Store<T> {
-        Store(
+    pub fn finish_into(self, store: &mut Store<T>) {
+        assert_eq!(
+            store.len(),
+            self.offset as usize,
+            "arena changed while converting into it"
+        );
+        store.0.extend(
             self.slots
                 .into_iter()
-                .map(|x| x.expect("unfilled arena slot"))
-                .collect(),
-        )
+                .map(|x| x.expect("unfilled arena slot")),
+        );
     }
 }

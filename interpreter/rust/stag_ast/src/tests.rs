@@ -1,5 +1,5 @@
 use crate::test_heap::{int, Heap};
-use crate::{convert, type_, Map, Ref, Set, Str};
+use crate::{convert, convert_into, type_, Arena, Map, Ref, Set, Str};
 
 #[test]
 fn everything_is_send_and_sync() {
@@ -72,6 +72,32 @@ fn cycles_and_sharing_through_vars() {
         format!("{ty:?} {:?} {:?}", arena.type_ty, arena.type_var_ty_nothing),
         "#0 {#0: TVar(#0), #1: TArrow(#0, #0)} \
          {#0: Var { id: 7, state: Link(#1), bounds: [], in_bounds_of: [], kept: [] }}"
+    );
+}
+
+#[test]
+fn conversions_into_one_arena_append() {
+    let mut heap = Heap::default();
+    let first = var(&mut heap, 1);
+    let first = heap.block(6, &[first]);
+    let second = var(&mut heap, 2);
+    let second = heap.block(6, &[second]);
+    let mut arena = Arena::default();
+    let a = unsafe { convert_into::<Ref<type_::Ty>>(first, &mut arena) }.unwrap();
+    let b = unsafe { convert_into::<Ref<type_::Ty>>(second, &mut arena) }.unwrap();
+    let again = unsafe { convert_into::<Ref<type_::Ty>>(first, &mut arena) }.unwrap();
+    let wrong = unsafe { convert_into::<Ref<type_::Ty>>(int(0), &mut arena) };
+    assert_eq!(
+        format!(
+            "{a:?} {b:?} {again:?} {} {:?} {:?}",
+            wrong.is_err(),
+            arena.type_ty,
+            arena.type_var_ty_nothing
+        ),
+        "#0 #1 #2 true {#0: TVar(#0), #1: TVar(#1), #2: TVar(#2)} \
+         {#0: Var { id: 1, state: Generic, bounds: [], in_bounds_of: [], kept: [] }, \
+         #1: Var { id: 2, state: Generic, bounds: [], in_bounds_of: [], kept: [] }, \
+         #2: Var { id: 1, state: Generic, bounds: [], in_bounds_of: [], kept: [] }}"
     );
 }
 

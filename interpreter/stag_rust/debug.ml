@@ -25,6 +25,13 @@ external typed_ident_info
 
 include Debug_intf
 
+external tys_into_one_arena
+  :  Type.ty
+  -> Type.ty
+  -> gc_stress:Gc_stress.t
+  -> int * Type.ty * Type.ty
+  = "stag_rust_debug_round_trip_tys_into_one_arena"
+
 external missing_callback : unit -> string = "stag_rust_debug_missing_callback"
 
 module Round_trip = struct

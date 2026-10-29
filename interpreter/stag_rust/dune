@@ -10,6 +10,8 @@
   stag_syntax
   stag_ir
   rust_bindgen_example
+  stag_common
+  stag_eval
   interp_value))
 
 (rule

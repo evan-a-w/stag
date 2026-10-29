@@ -15,8 +15,10 @@ type t =
 [@@deriving rust, sexp_of]
 
 module Outcome : sig
-  type nonrec t =
-    | Value of t
+  type 'a t =
+    | Ok of 'a
     | Error of string
   [@@deriving rust]
+
+  val to_or_error : 'a t -> 'a Or_error.t
 end

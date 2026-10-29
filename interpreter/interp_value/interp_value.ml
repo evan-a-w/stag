@@ -15,8 +15,13 @@ type t =
 [@@deriving rust, sexp_of]
 
 module Outcome = struct
-  type nonrec t =
-    | Value of t
+  type 'a t =
+    | Ok of 'a
     | Error of string
   [@@deriving rust]
+
+  let to_or_error = function
+    | Ok x -> Or_error.return x
+    | Error message -> Or_error.error_string message
+  ;;
 end

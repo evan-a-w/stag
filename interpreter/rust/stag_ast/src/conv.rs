@@ -74,16 +74,31 @@ fn quiet_panics_of_conversions() {
 ///
 /// # Safety
 ///
+/// As [`convert_into`].
+pub unsafe fn convert<T: FromOcaml>(v: Value) -> Result<(T, Arena), Error> {
+    let mut arena = Arena::default();
+    let x = convert_into(v, &mut arena)?;
+    Ok((x, arena))
+}
+
+/// Converts `v` as [`convert`], its stored values appended to `arena`
+/// (unchanged if it fails). Values are shared within one conversion only:
+/// one converted again, by another call, is stored again.
+///
+/// # Safety
+///
 /// `v` must be a value of the OCaml type of `T`: other values are reported
 /// as [`Error`]s only where they could not be one (eg. an unexpected tag),
 /// and may otherwise crash. No OCaml code may run until it returns, so that
 /// the GC does not move values.
-pub unsafe fn convert<T: FromOcaml>(v: Value) -> Result<(T, Arena), Error> {
-    catching(|| {
-        let mut builder = ArenaBuilder::default();
+pub unsafe fn convert_into<T: FromOcaml>(v: Value, arena: &mut Arena) -> Result<T, Error> {
+    let (x, builder) = catching(|| {
+        let mut builder = ArenaBuilder::after(arena);
         let x = T::from_ocaml(v, &mut builder);
-        (x, builder.finish())
-    })
+        (x, builder)
+    })?;
+    builder.finish_into(arena);
+    Ok(x)
 }
 
 /// Runs `f`, of OCaml code called from a conversion, printing its panics as

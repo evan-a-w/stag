@@ -48,6 +48,15 @@ module type Debug = sig
   (** The program's [ident_info] map. *)
   val typed_ident_info : Typed.Program.t -> string
 
+  (** [a] and [b] converted one after the other into one arena, the number
+      of types it has, and both built back. Raises [Failure] if converting or
+      building fails. *)
+  val tys_into_one_arena
+    :  Type.ty
+    -> Type.ty
+    -> gc_stress:Gc_stress.t
+    -> int * Type.ty * Type.ty
+
   (** Why building a map of a key type whose OCaml callbacks are not
       registered fails. *)
   val missing_callback : unit -> string

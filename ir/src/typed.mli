@@ -16,6 +16,7 @@ module Ident : sig
     { name : string
     ; stamp : int
     }
+  [@@deriving rust]
 
   (** As [name/stamp]. *)
   val sexp_of_t : t -> Sexp.t

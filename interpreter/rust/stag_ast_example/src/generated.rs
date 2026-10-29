@@ -8,8 +8,7 @@ pub struct Arena {
     pub example_var_ty: crate::Store<example::Var<crate::Ref<example::Ty>>>,
 }
 
-/// An [`Arena`] being converted.
-#[derive(Default)]
+/// Values being converted into an [`Arena`], after its own.
 pub struct ArenaBuilder {
     example_record_type: crate::Pending<example::RecordType>,
     example_ty: crate::Pending<example::Ty>,
@@ -17,12 +16,18 @@ pub struct ArenaBuilder {
 }
 
 impl ArenaBuilder {
-    pub fn finish(self) -> Arena {
-        Arena {
-            example_record_type: self.example_record_type.finish(),
-            example_ty: self.example_ty.finish(),
-            example_var_ty: self.example_var_ty.finish(),
+    pub fn after(arena: &Arena) -> Self {
+        ArenaBuilder {
+            example_record_type: crate::Pending::after(&arena.example_record_type),
+            example_ty: crate::Pending::after(&arena.example_ty),
+            example_var_ty: crate::Pending::after(&arena.example_var_ty),
         }
+    }
+
+    pub fn finish_into(self, arena: &mut Arena) {
+        self.example_record_type.finish_into(&mut arena.example_record_type);
+        self.example_ty.finish_into(&mut arena.example_ty);
+        self.example_var_ty.finish_into(&mut arena.example_var_ty);
     }
 }
 

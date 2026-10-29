@@ -335,8 +335,7 @@ pub struct Arena {
     pub typed_record_type: crate::Store<typed::RecordType>,
 }
 
-/// An [`Arena`] being converted.
-#[derive(Default)]
+/// Values being converted into an [`Arena`], after its own.
 pub struct ArenaBuilder {
     prim: crate::Pending<Prim>,
     type_row: crate::Pending<type_::Row>,
@@ -348,16 +347,26 @@ pub struct ArenaBuilder {
 }
 
 impl ArenaBuilder {
-    pub fn finish(self) -> Arena {
-        Arena {
-            prim: self.prim.finish(),
-            type_row: self.type_row.finish(),
-            type_ty: self.type_ty.finish(),
-            type_var_presence_presence_bound: self.type_var_presence_presence_bound.finish(),
-            type_var_row_bound: self.type_var_row_bound.finish(),
-            type_var_ty_nothing: self.type_var_ty_nothing.finish(),
-            typed_record_type: self.typed_record_type.finish(),
+    pub fn after(arena: &Arena) -> Self {
+        ArenaBuilder {
+            prim: crate::Pending::after(&arena.prim),
+            type_row: crate::Pending::after(&arena.type_row),
+            type_ty: crate::Pending::after(&arena.type_ty),
+            type_var_presence_presence_bound: crate::Pending::after(&arena.type_var_presence_presence_bound),
+            type_var_row_bound: crate::Pending::after(&arena.type_var_row_bound),
+            type_var_ty_nothing: crate::Pending::after(&arena.type_var_ty_nothing),
+            typed_record_type: crate::Pending::after(&arena.typed_record_type),
         }
+    }
+
+    pub fn finish_into(self, arena: &mut Arena) {
+        self.prim.finish_into(&mut arena.prim);
+        self.type_row.finish_into(&mut arena.type_row);
+        self.type_ty.finish_into(&mut arena.type_ty);
+        self.type_var_presence_presence_bound.finish_into(&mut arena.type_var_presence_presence_bound);
+        self.type_var_row_bound.finish_into(&mut arena.type_var_row_bound);
+        self.type_var_ty_nothing.finish_into(&mut arena.type_var_ty_nothing);
+        self.typed_record_type.finish_into(&mut arena.typed_record_type);
     }
 }
 
@@ -489,7 +498,6 @@ impl crate::OcamlKey for typed::Ident {
 fn assert_send_sync() {
     fn is_send_sync<T: Send + Sync>() {}
     is_send_sync::<Arena>();
-    is_send_sync::<interp_value::Outcome>();
     is_send_sync::<InterpValue>();
     is_send_sync::<Intrinsic>();
     is_send_sync::<loc::Pos>();
@@ -566,18 +574,18 @@ fn assert_send_sync() {
 pub mod interp_value {
     /// OCaml: [Interp_value.Outcome.t].
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-    pub enum Outcome {
-        Value(crate::InterpValue),
+    pub enum Outcome<A> {
+        Ok(A),
         Error(crate::Str),
     }
 
-    impl crate::FromOcaml for Outcome {
+    impl<A: crate::FromOcaml> crate::FromOcaml for Outcome<A> {
         unsafe fn from_ocaml(v: crate::raw::Value, cx: &mut crate::ArenaBuilder) -> Self {
             if crate::raw::is_long(v) {
                 crate::raw::bad("Interp_value.Outcome.t", v)
             } else {
                 match crate::raw::tag(v) {
-                    0 => Self::Value(
+                    0 => Self::Ok(
                         crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                     ),
                     1 => Self::Error(
@@ -589,25 +597,25 @@ pub mod interp_value {
         }
     }
 
-    impl crate::ToOcaml for Outcome {
+    impl<A: crate::ToOcaml> crate::ToOcaml for Outcome<A> {
         unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
             cx.construct(self)
         }
     }
 
-    impl crate::Construct for Outcome {
+    impl<A: crate::ToOcaml> crate::Construct for Outcome<A> {
         const REBUILD: Option<&'static str> = None;
 
         unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
             match self {
-                Self::Value { .. } => cx.block(1, 0),
+                Self::Ok { .. } => cx.block(1, 0),
                 Self::Error { .. } => cx.block(1, 1),
             }
         }
 
         unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
             match self {
-                Self::Value(v0) => {
+                Self::Ok(v0) => {
                     let built = crate::ToOcaml::to_ocaml(v0, cx);
                     cx.set(slot, 0, built);
                 }

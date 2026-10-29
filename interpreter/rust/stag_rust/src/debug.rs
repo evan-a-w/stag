@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 
 use ocaml_sys::Value;
-use stag_ast::{convert, to_ocaml, type_, typed, FromOcaml, GcStress, ToOcaml};
+use stag_ast::{
+    convert, convert_into, to_ocaml, type_, typed, Arena, FromOcaml, GcStress, ToOcaml,
+};
 use stag_ast_example as example;
 
 use crate::ocaml_string;
@@ -108,6 +110,31 @@ unsafe fn round_trip<T: FromOcaml + ToOcaml>(v: Value, gc_stress: Value) -> Valu
         Ok(v) => return v,
         Err(error) => ocaml_string::of_str(&error.0),
     };
+    caml_failwith_value(message)
+}
+
+/// `a` and `b` converted one after the other into one arena, the number of
+/// types it has, and both built back.
+///
+/// # Safety
+///
+/// `a` and `b` must be `Type.ty`s.
+#[no_mangle]
+pub unsafe extern "C" fn stag_rust_debug_round_trip_tys_into_one_arena(
+    a: Value,
+    b: Value,
+    gc_stress: Value,
+) -> Value {
+    let gc_stress = GcStress::of_ocaml(gc_stress);
+    let mut arena = Arena::default();
+    let message = match convert_into::<stag_ast::Ref<type_::Ty>>(a, &mut arena)
+        .and_then(|a| Ok((a, convert_into::<stag_ast::Ref<type_::Ty>>(b, &mut arena)?)))
+        .and_then(|(a, b)| to_ocaml(&(arena.type_ty.len() as i64, a, b), &arena, gc_stress))
+    {
+        Ok(v) => return v,
+        Err(error) => ocaml_string::of_str(&error.0),
+    };
+    drop(arena);
     caml_failwith_value(message)
 }
 

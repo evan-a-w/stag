@@ -695,15 +695,16 @@ let arena (gen : Gen.t) instances =
      #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]\n\
      pub struct Arena {\n\
      %s}\n\n\
-     /// An [`Arena`] being converted.\n\
-     #[derive(Default)]\n\
+     /// Values being converted into an [`Arena`], after its own.\n\
      pub struct ArenaBuilder {\n\
      %s}\n\n\
      impl ArenaBuilder {\n\
-    \    pub fn finish(self) -> Arena {\n\
-    \        Arena {\n\
+    \    pub fn after(arena: &Arena) -> Self {\n\
+    \        ArenaBuilder {\n\
      %s        }\n\
-    \    }\n\
+    \    }\n\n\
+    \    pub fn finish_into(self, arena: &mut Arena) {\n\
+     %s    }\n\
      }\n\n\
      impl Arena {\n\
     \    /// The lengths of its stores, by [`crate::Indexed::STORE`].\n\
@@ -716,7 +717,10 @@ let arena (gen : Gen.t) instances =
     (fields ~pub_:false ~ty:(fun rust ->
        sprintf "crate::Pending<%s>" (inner rust)))
     (List.map instances ~f:(fun (name, _) ->
-       sprintf "            %s: self.%s.finish(),\n" name name)
+       sprintf "            %s: crate::Pending::after(&arena.%s),\n" name name)
+     |> String.concat)
+    (List.map instances ~f:(fun (name, _) ->
+       sprintf "        self.%s.finish_into(&mut arena.%s);\n" name name)
      |> String.concat)
     (List.map instances ~f:(fun (name, _) -> sprintf "self.%s.len()" name)
      |> String.concat ~sep:", ")
