@@ -1,0 +1,7 @@
+(library
+ (name ppx_rust)
+ (kind ppx_deriver)
+ (ppx_runtime_libraries ppx_rust_runtime)
+ (preprocess
+  (pps ppxlib.metaquot))
+ (libraries ppxlib))

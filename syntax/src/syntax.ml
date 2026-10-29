@@ -7,7 +7,7 @@ module Lit = struct
     | String of string
     | Char of char
     | Unit
-  [@@deriving sexp, compare, equal, variants]
+  [@@deriving sexp, compare, equal, variants, rust]
 
   let ty = function
     | Int _ -> Type.int
@@ -20,7 +20,7 @@ end
 
 module Path : sig
   (** Non-empty. Rendered as its names joined with [.]. *)
-  type t = private string list [@@deriving sexp, compare, equal]
+  type t = private string list [@@deriving sexp, compare, equal, rust]
 
   val of_list_exn : string list -> t
   val name : string -> t
@@ -30,7 +30,7 @@ module Path : sig
 
   val to_string : t -> string
 end = struct
-  type t = string list [@@deriving compare, equal]
+  type t = string list [@@deriving compare, equal, rust]
 
   let of_list_exn = function
     | [] -> raise_s [%message "Path.of_list_exn: empty path"]
@@ -54,7 +54,7 @@ module Decl_path = struct
     | Path of Path.t
     | Root of Path.t
     | Resolved of string
-  [@@deriving compare, equal]
+  [@@deriving compare, equal, rust]
 
   (** As parsed, and a [Resolved] as [<name>]. *)
   let to_string = function
@@ -86,7 +86,7 @@ end
 
 (** A name as written, eg. a binder or a label. *)
 module Name = struct
-  type t = string Located.t [@@deriving sexp_of, compare, equal]
+  type t = string Located.t [@@deriving sexp_of, compare, equal, rust]
 end
 
 (* The syntax's types are mutually recursive, as splices in type positions
@@ -243,19 +243,20 @@ module Defs = struct
         ; param : bench_param option
         ; body : expr
         }
-  [@@deriving sexp_of, compare, equal]
+  [@@deriving sexp_of, compare, equal, rust]
 end
 
 open Defs
 
 module Type_expr = struct
-  type nonrec row = row
+  type nonrec row = row [@@deriving rust]
 
   type arg = type_arg =
     | Ty of type_expr
     | Row of row
+  [@@deriving rust]
 
-  type t = type_expr
+  type t = type_expr [@@deriving rust]
 
   type desc = type_expr_desc =
     | Var of string
@@ -269,11 +270,13 @@ module Type_expr = struct
     | Record of row
     | Variant of row
     | Splice of expr
+  [@@deriving rust]
 
   type nonrec row_desc = row_desc =
     | Empty
     | Extend of Name.t * t * row
     | Var of Name.t
+  [@@deriving rust]
 
   let sexp_of_t = sexp_of_type_expr
   let compare = compare_type_expr
@@ -285,6 +288,7 @@ module Type_decl = struct
     type t = type_decl_param =
       | Ty of string
       | Row of string
+    [@@deriving rust]
 
     let sexp_of_t = sexp_of_type_decl_param
     let compare = compare_type_decl_param
@@ -300,6 +304,7 @@ module Type_decl = struct
       | Abstract
       | Splice of expr Located.t
       | Malformed of t
+    [@@deriving rust]
 
     let sexp_of_t = sexp_of_type_decl_kind
     let compare = compare_type_decl_kind
@@ -311,6 +316,7 @@ module Type_decl = struct
     ; params : Param.t Located.t list
     ; kind : Kind.t
     }
+  [@@deriving rust]
 
   let sexp_of_t = sexp_of_type_decl
   let compare = compare_type_decl
@@ -318,7 +324,7 @@ module Type_decl = struct
 end
 
 module Binding = struct
-  type t = binding
+  type t = binding [@@deriving rust]
 
   let sexp_of_t = sexp_of_binding
   let compare = compare_binding
@@ -333,13 +339,14 @@ module Pattern = struct
       | Closed
       | Open
       | Bind of Name.t
+    [@@deriving rust]
 
     let sexp_of_t = sexp_of_pattern_rest
     let compare = compare_pattern_rest
     let equal = equal_pattern_rest
   end
 
-  type t = pattern
+  type t = pattern [@@deriving rust]
 
   type desc = pattern_desc =
     | Any
@@ -354,6 +361,7 @@ module Pattern = struct
         ; rest : Rest.t
         }
     | Exception of t
+  [@@deriving rust]
 
   let sexp_of_t = sexp_of_pattern
   let compare = compare_pattern
@@ -361,7 +369,7 @@ module Pattern = struct
 end
 
 module Expr = struct
-  type t = expr
+  type t = expr [@@deriving rust]
 
   type desc = expr_desc =
     | Lit of Lit.t
@@ -390,6 +398,7 @@ module Expr = struct
     | Expect of string Located.t
     | Struct_quote of toplevel list
     | Error
+  [@@deriving rust]
 
   let sexp_of_t = sexp_of_expr
   let compare = compare_expr
@@ -402,6 +411,7 @@ module Bench_param = struct
     { name : Name.t
     ; args : Expr.t list
     }
+  [@@deriving rust]
 
   let sexp_of_t = sexp_of_bench_param
   let compare = compare_bench_param
@@ -409,7 +419,7 @@ module Bench_param = struct
 end
 
 module Toplevel = struct
-  type t = toplevel
+  type t = toplevel [@@deriving rust]
 
   type desc = toplevel_desc =
     | Let of Name.t * Binding.t list * Type_expr.t option * Expr.t
@@ -428,6 +438,7 @@ module Toplevel = struct
         ; param : Bench_param.t option
         ; body : Expr.t
         }
+  [@@deriving rust]
 
   let sexp_of_t = sexp_of_toplevel
   let sexp_of_desc = sexp_of_toplevel_desc
@@ -436,5 +447,5 @@ module Toplevel = struct
 end
 
 module Program = struct
-  type t = Toplevel.t list [@@deriving sexp_of, compare, equal]
+  type t = Toplevel.t list [@@deriving sexp_of, compare, equal, rust]
 end

@@ -1,0 +1,6 @@
+(library
+ (name test_rust_bindgen)
+ (preprocess
+  (pps ppx_jane))
+ (inline_tests)
+ (libraries core ppx_rust_runtime rust_bindgen rust_bindgen_example))

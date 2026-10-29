@@ -6,7 +6,7 @@ module Pos = struct
     ; col : int
     ; offset : int
     }
-  [@@deriving sexp_of, compare, equal, hash]
+  [@@deriving sexp_of, compare, equal, hash, rust]
 
   let start = { line = 1; col = 0; offset = 0 }
 end
@@ -16,7 +16,7 @@ type t =
   ; start : Pos.t
   ; stop : Pos.t
   }
-[@@deriving compare, equal, hash]
+[@@deriving compare, equal, hash, rust]
 
 let sort_by l ~f = List.stable_sort l ~compare:(Comparable.lift compare ~f)
 let none = { file = "_none_"; start = Pos.start; stop = Pos.start }

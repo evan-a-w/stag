@@ -1,0 +1,9 @@
+[workspace]
+resolver = "2"
+members = ["stag_ast", "stag_ast_example", "stag_rust"]
+
+[workspace.dependencies]
+ocaml-sys = "0.26"
+
+[profile.release]
+debug = 1

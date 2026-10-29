@@ -1,0 +1,19 @@
+(dirs :standard \ target)
+
+(rule
+ (alias runtest)
+ (deps
+  (source_tree .))
+ (action
+  (setenv
+   RUSTC_WRAPPER
+   ""
+   (run
+    cargo
+    test
+    --offline
+    --locked
+    --quiet
+    --workspace
+    --target-dir
+    target))))

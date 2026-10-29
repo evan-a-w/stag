@@ -8,7 +8,7 @@ module Pos : sig
     ; col : int
     ; offset : int
     }
-  [@@deriving sexp_of, compare, equal, hash]
+  [@@deriving sexp_of, compare, equal, hash, rust]
 end
 
 (** A span of source, from [start] up to but excluding [stop]. *)
@@ -17,7 +17,7 @@ type t =
   ; start : Pos.t
   ; stop : Pos.t
   }
-[@@deriving compare, equal, hash]
+[@@deriving compare, equal, hash, rust]
 
 (** For syntax not written in a file, eg. built by tests or generated. *)
 val none : t

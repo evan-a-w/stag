@@ -1,12 +1,13 @@
 open! Import
 
-type id = int [@@deriving sexp, compare, equal]
-type rank = int [@@deriving sexp, compare, equal]
+type id = int [@@deriving sexp, compare, equal, rust]
+type rank = int [@@deriving sexp, compare, equal, rust]
 
 type 'a var_state =
   | Unbound of rank
   | Generic
   | Link of 'a
+[@@deriving rust]
 
 type ('a, 'bound) var =
   { id : id
@@ -33,11 +34,13 @@ and ty =
       ; row : row
       }
   | TVar of (ty, Nothing.t) var
+[@@rust.shared]
 
 and row =
   | REmpty
   | RExtend of string * presence * ty * row
   | RVar of (row, bound) var
+[@@rust.shared]
 
 and presence =
   | Present
@@ -74,6 +77,7 @@ and kept =
       ; ty1 : ty
       ; ty2 : ty
       }
+[@@deriving rust]
 
 let kept_id = function
   | Row_bound { id; _ } | If_present_kept { id; _ } -> id
@@ -84,6 +88,7 @@ module Var = struct
     | Unbound of rank
     | Generic
     | Link of 'a
+  [@@deriving rust]
 
   type ('a, 'bound) t = ('a, 'bound) var =
     { id : id
@@ -92,6 +97,7 @@ module Var = struct
     ; mutable in_bounds_of : bounded list
     ; mutable kept : kept list
     }
+  [@@deriving rust]
 
   let create id state = { id; state; bounds = []; in_bounds_of = []; kept = [] }
 

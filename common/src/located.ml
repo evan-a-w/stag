@@ -4,6 +4,7 @@ type 'a t =
   { txt : 'a
   ; loc : Loc.t
   }
+[@@deriving rust]
 
 let compare compare_txt a b = compare_txt a.txt b.txt
 let equal equal_txt a b = equal_txt a.txt b.txt

@@ -49,7 +49,7 @@ module Hum = struct
   ;;
 
   module Ty = struct
-    type t = Type.ty
+    type t = Type.ty [@@deriving rust]
 
     let sexp_of_t = sexp_of_ty
   end
@@ -68,7 +68,7 @@ module Ident = struct
       { name : string
       ; stamp : int
       }
-    [@@deriving compare]
+    [@@deriving compare, rust]
 
     (* Stamps are rarely shared, and hashing names is costly. *)
     let hash_fold_t state t = Int.hash_fold_t state t.stamp
@@ -87,7 +87,7 @@ module Binder = struct
   type t =
     | Local of Ident.t
     | Toplevel of Ident.t
-  [@@deriving sexp_of, equal]
+  [@@deriving sexp_of, equal, rust]
 end
 
 module Var_ref = struct
@@ -98,7 +98,7 @@ module Var_ref = struct
     | Free_toplevel of string
     | Prim of Prim.t
     | Intrinsic of Intrinsic.t
-  [@@deriving sexp_of]
+  [@@deriving sexp_of, rust]
 end
 
 module Constructor_ref = struct
@@ -107,7 +107,7 @@ module Constructor_ref = struct
     ; name : string
     ; index : int
     }
-  [@@deriving sexp_of]
+  [@@deriving sexp_of, rust]
 
   let exception_index = -1
 
@@ -123,6 +123,7 @@ module Record_type = struct
     { name : string
     ; fields : string array
     }
+  [@@deriving rust] [@@rust.shared]
 
   let sexp_of_t t = Sexp.Atom t.name
 end
@@ -132,6 +133,7 @@ module Field_ref = struct
     { record : Record_type.t
     ; index : int
     }
+  [@@deriving rust]
 
   let name t = t.record.fields.(t.index)
 
@@ -150,7 +152,7 @@ module Pattern = struct
       | Closed
       | Open
       | Bind of Ident.t
-    [@@deriving sexp_of]
+    [@@deriving sexp_of, rust]
   end
 
   module Desc = struct
@@ -167,7 +169,7 @@ module Pattern = struct
           ; rest : Rest.t
           }
       | Error of 'p list
-    [@@deriving sexp_of]
+    [@@deriving sexp_of, rust]
   end
 
   type t =
@@ -175,6 +177,7 @@ module Pattern = struct
     ; ty : Type.ty
     ; loc : Loc.t
     }
+  [@@deriving rust]
 
   let rec sexp_of_t' t = Hum.typed (Desc.sexp_of_t sexp_of_t' t.desc) t.ty
   let sexp_of_t t = Hum.scoped (fun () -> sexp_of_t' t)
@@ -221,7 +224,7 @@ module Expr = struct
     type 'e t =
       | Explicit of (string * 'e) list
       | Implicit of Binder.t String.Map.t
-    [@@deriving sexp_of]
+    [@@deriving sexp_of, rust]
   end
 
   module Desc = struct
@@ -275,7 +278,7 @@ module Expr = struct
       | Error of 'e list
       (** In place of what did not parse or check, with the parts of it that
           did. *)
-    [@@deriving sexp_of]
+    [@@deriving sexp_of, rust]
   end
 
   type t =
@@ -283,6 +286,7 @@ module Expr = struct
     ; ty : Type.ty
     ; loc : Loc.t
     }
+  [@@deriving rust]
 
   let rec sexp_of_t' t = Hum.typed (Desc.sexp_of_t sexp_of_t' t.desc) t.ty
   let sexp_of_t t = Hum.scoped (fun () -> sexp_of_t' t)
@@ -406,7 +410,7 @@ module Toplevel = struct
     ; scheme : Hum.Ty.t
     ; body : Expr.t
     }
-  [@@deriving sexp_of]
+  [@@deriving sexp_of, rust]
 
   let sexp_of_t t = Hum.scoped (fun () -> sexp_of_t t)
 end
@@ -416,7 +420,7 @@ module Scc = struct
     { members : Toplevel.t list
     ; recursive : bool
     }
-  [@@deriving sexp_of]
+  [@@deriving sexp_of, rust]
 end
 
 module Ident_info = struct
@@ -424,7 +428,7 @@ module Ident_info = struct
     { ty : Hum.Ty.t
     ; level : int
     }
-  [@@deriving sexp_of]
+  [@@deriving sexp_of, rust]
 end
 
 module Expect_test = struct
@@ -434,7 +438,7 @@ module Expect_test = struct
     ; loc : Loc.t
     ; generated : bool [@sexp.bool]
     }
-  [@@deriving sexp_of]
+  [@@deriving sexp_of, rust]
 end
 
 module Bench = struct
@@ -445,7 +449,7 @@ module Bench = struct
     ; loc : Loc.t
     ; generated : bool [@sexp.bool]
     }
-  [@@deriving sexp_of]
+  [@@deriving sexp_of, rust]
 end
 
 module Program = struct
@@ -456,7 +460,7 @@ module Program = struct
     ; declaration_splices : Expr.t list
     ; ident_info : Ident_info.t Ident.Map.t
     }
-  [@@deriving sexp_of]
+  [@@deriving sexp_of, rust]
 
   let exprs { sccs; expect_tests; benches; declaration_splices; ident_info = _ }
     =

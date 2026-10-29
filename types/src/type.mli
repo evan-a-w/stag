@@ -1,12 +1,13 @@
 open! Import
 
-type id = int [@@deriving sexp, compare, equal]
-type rank = int [@@deriving sexp, compare, equal]
+type id = int [@@deriving sexp, compare, equal, rust]
+type rank = int [@@deriving sexp, compare, equal, rust]
 
 type 'a var_state =
   | Unbound of rank
   | Generic
   | Link of 'a
+[@@deriving rust]
 
 (** A unification variable standing for an ['a]. Only row and presence
     variables have bounds: for the other kinds, ['bound] is [Nothing.t].
@@ -97,6 +98,7 @@ and kept =
       ; ty1 : ty
       ; ty2 : ty
       }
+[@@deriving rust]
 
 val kept_id : kept -> id
 
@@ -105,6 +107,7 @@ module Var : sig
     | Unbound of rank
     | Generic
     | Link of 'a
+  [@@deriving rust]
 
   type ('a, 'bound) t = ('a, 'bound) var =
     { id : id
@@ -113,6 +116,7 @@ module Var : sig
     ; mutable in_bounds_of : bounded list
     ; mutable kept : kept list
     }
+  [@@deriving rust]
 
   val create : id -> 'a state -> ('a, _) t
 

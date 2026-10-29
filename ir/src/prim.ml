@@ -27,6 +27,7 @@ module Base_type = struct
     | Char
     | Unit
     | String_list
+  [@@deriving rust]
 
   let ty : t -> Type.ty = function
     | Int -> Type.int
@@ -44,7 +45,9 @@ type t =
   ; result : Base_type.t
   ; impl :
       output:(string -> unit) -> Value.t list -> (Value.t, Exception.t) Result.t
+        [@rust.skip]
   }
+[@@deriving rust] [@@rust.shared]
 
 let equal a b = String.equal a.name b.name
 let sexp_of_t t = Sexp.Atom t.name

@@ -1,0 +1,5 @@
+(library
+ (name rust_bindgen)
+ (preprocess
+  (pps ppx_jane))
+ (libraries core ppx_rust_runtime))

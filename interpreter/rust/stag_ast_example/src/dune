@@ -1,0 +1,6 @@
+(rule
+ (mode promote)
+ (action
+  (with-stdout-to
+   generated.rs
+   (run %{exe:../../../gen/example/main.exe}))))

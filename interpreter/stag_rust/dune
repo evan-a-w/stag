@@ -1,0 +1,32 @@
+(library
+ (name stag_rust)
+ (modes native)
+ (foreign_archives stag_rust)
+ (preprocess
+  (pps ppx_jane))
+ (libraries core stag_types stag_syntax stag_ir))
+
+(rule
+ (targets libstag_rust.a)
+ (deps
+  (source_tree ../rust))
+ (action
+  (progn
+   (chdir
+    ../rust
+    ; sccache fails under dune's temporary directories.
+    (setenv
+     RUSTC_WRAPPER
+     ""
+     (run
+      cargo
+      build
+      --offline
+      --locked
+      --release
+      --quiet
+      --target-dir
+      target
+      -p
+      stag_rust)))
+   (run cp ../rust/target/release/libstag_rust.a .))))

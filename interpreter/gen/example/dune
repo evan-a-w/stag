@@ -1,0 +1,15 @@
+; Declarations exercising what stag's own types do not, whose Rust is
+; compiled by the stag_ast_example crate.
+
+(library
+ (name rust_bindgen_example)
+ (modules example)
+ (preprocess
+  (pps ppx_jane ppx_rust))
+ (libraries core ppx_rust_runtime))
+
+(executable
+ (name main)
+ (modules main)
+ (link_flags (-linkall))
+ (libraries core ppx_rust_runtime rust_bindgen rust_bindgen_example))

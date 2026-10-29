@@ -1,0 +1,13 @@
+[package]
+name = "stag_rust"
+version = "0.1.0"
+edition = "2021"
+
+# The one static library of Rust code linked into OCaml (so that its
+# dependencies, std included, are linked once).
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+ocaml-sys.workspace = true
+stag_ast = { path = "../stag_ast" }

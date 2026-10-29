@@ -16,7 +16,7 @@ type t =
   | Value_ref_name (** [Stag.Value_ref.t -> string] *)
   | Erase (** [<'a>{..'r} -> Stag.Expr.t] *)
   | Raise (** [exn -> 'a] *)
-[@@deriving sexp_of, equal]
+[@@deriving sexp_of, equal, rust]
 
 (** Its name in the prelude, eg. [Stag.Type.expr]. *)
 val public_name : t -> string

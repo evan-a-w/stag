@@ -1,0 +1,8 @@
+[package]
+name = "stag_ast_example"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+ocaml-sys.workspace = true

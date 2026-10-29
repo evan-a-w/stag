@@ -5,6 +5,7 @@ type 'a t =
   { txt : 'a
   ; loc : Loc.t
   }
+[@@deriving rust]
 
 (** Locations are ignored, so syntax built without them (eg. by tests) equals
     parsed syntax. *)

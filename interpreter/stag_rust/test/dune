@@ -1,0 +1,14 @@
+(library
+ (name test_stag_rust)
+ (modes native)
+ (preprocess
+  (pps ppx_jane))
+ (inline_tests)
+ (libraries
+  core
+  stag_types
+  stag_syntax
+  stag_ir
+  stag_typecheck
+  stag_rust
+  test_driver))

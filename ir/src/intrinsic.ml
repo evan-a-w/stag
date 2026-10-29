@@ -10,7 +10,7 @@ type t =
   | Value_ref_name
   | Erase
   | Raise
-[@@deriving sexp_of, equal, enumerate]
+[@@deriving sexp_of, equal, enumerate, rust]
 
 let name = function
   | Type_expr -> "type_expr"

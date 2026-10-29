@@ -27,7 +27,7 @@ module Exception : sig
   [@@deriving sexp_of]
 end
 
-type t [@@deriving sexp_of, equal]
+type t [@@deriving sexp_of, equal, rust]
 
 (** Monomorphic, so needs no instantiation. *)
 val ty : t -> Type.ty

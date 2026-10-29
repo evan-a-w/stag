@@ -1,0 +1,9 @@
+(executable
+ (name driver)
+ (libraries ppx_rust ppxlib))
+
+(cram
+ (deps
+  driver.exe
+  %{cmi:../runtime/ppx_rust_runtime}
+  %{cma:../runtime/ppx_rust_runtime}))
