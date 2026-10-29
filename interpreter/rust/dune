@@ -1,27 +1,17 @@
 (dirs :standard \ target)
 
+(include dune.inc)
+
 (rule
- (targets
-  stag_ast.src.tests.rs.corrected
-  stag_ast_example.src.tests.rs.corrected)
  (deps
-  expect_tests.sh
+  gen_dune_inc.sh
   (source_tree .))
  (action
-  (run
-   bash
-   expect_tests.sh
-   stag_ast/src/tests.rs
-   stag_ast_example/src/tests.rs)))
+  (with-stdout-to
+   dune.inc.gen
+   (run bash gen_dune_inc.sh))))
 
 (rule
  (alias runtest)
  (action
-  (diff stag_ast/src/tests.rs stag_ast.src.tests.rs.corrected)))
-
-(rule
- (alias runtest)
- (action
-  (diff
-   stag_ast_example/src/tests.rs
-   stag_ast_example.src.tests.rs.corrected)))
+  (diff dune.inc dune.inc.gen)))
