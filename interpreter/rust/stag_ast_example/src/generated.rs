@@ -26,6 +26,13 @@ impl ArenaBuilder {
     }
 }
 
+impl Arena {
+    /// The lengths of its stores, by [`crate::Indexed::STORE`].
+    pub fn store_lens(&self) -> Vec<usize> {
+        vec![self.example_record_type.len(), self.example_ty.len(), self.example_var_ty.len()]
+    }
+}
+
 impl crate::Stored for example::RecordType {
     fn pending(builder: &mut ArenaBuilder) -> &mut crate::Pending<Self> {
         &mut builder.example_record_type
@@ -36,6 +43,10 @@ impl crate::Stored for example::RecordType {
     fn store_mut(arena: &mut Arena) -> &mut crate::Store<Self> {
         &mut arena.example_record_type
     }
+}
+
+impl crate::Indexed for example::RecordType {
+    const STORE: usize = 0;
 }
 
 impl crate::Stored for example::Ty {
@@ -50,6 +61,10 @@ impl crate::Stored for example::Ty {
     }
 }
 
+impl crate::Indexed for example::Ty {
+    const STORE: usize = 1;
+}
+
 impl crate::Stored for example::Var<crate::Ref<example::Ty>> {
     fn pending(builder: &mut ArenaBuilder) -> &mut crate::Pending<Self> {
         &mut builder.example_var_ty
@@ -61,6 +76,12 @@ impl crate::Stored for example::Var<crate::Ref<example::Ty>> {
         &mut arena.example_var_ty
     }
 }
+
+impl crate::Indexed for example::Var<crate::Ref<example::Ty>> {
+    const STORE: usize = 2;
+}
+
+
 
 #[allow(dead_code)]
 fn assert_send_sync() {
@@ -107,6 +128,35 @@ pub mod example {
         }
     }
 
+    impl crate::ToOcaml for Expr {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for Expr {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.block(6, 0)
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            let built = crate::ToOcaml::to_ocaml(&self.desc, cx);
+            cx.set(slot, 0, built);
+            let built = crate::ToOcaml::to_ocaml(&self.ty, cx);
+            cx.set(slot, 1, built);
+            let built = crate::ToOcaml::to_ocaml(&self.env, cx);
+            cx.set(slot, 2, built);
+            let built = crate::ToOcaml::to_ocaml(&self.free, cx);
+            cx.set(slot, 3, built);
+            let built = crate::ToOcaml::to_ocaml(&self.ids, cx);
+            cx.set(slot, 4, built);
+            let built = crate::ToOcaml::to_ocaml(&self.next, cx);
+            cx.set(slot, 5, built);
+        }
+    }
+
     /// OCaml: [Example.Name.t].
     pub type Name = Located<String>;
 
@@ -123,6 +173,27 @@ pub mod example {
                 line: crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                 col: crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
             }
+        }
+    }
+
+    impl crate::ToOcaml for Pos {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for Pos {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.block(2, 0)
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            let built = crate::ToOcaml::to_ocaml(&self.line, cx);
+            cx.set(slot, 0, built);
+            let built = crate::ToOcaml::to_ocaml(&self.col, cx);
+            cx.set(slot, 1, built);
         }
     }
 
@@ -147,6 +218,29 @@ pub mod example {
         }
     }
 
+    impl crate::ToOcaml for RecordType {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for RecordType {
+        const REBUILD: Option<&'static str> = Some("ppx_rust.rebuild.Example.Record_type.t");
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.block(4, 0)
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            let built = crate::ToOcaml::to_ocaml(&self.name, cx);
+            cx.set(slot, 0, built);
+            let built = crate::ToOcaml::to_ocaml(&self.fields, cx);
+            cx.set(slot, 1, built);
+            let built = crate::ToOcaml::to_ocaml(&self.arity, cx);
+            cx.set(slot, 3, built);
+        }
+    }
+
     /// OCaml: [Example.chained].
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub struct Chained {
@@ -158,6 +252,25 @@ pub mod example {
             Self {
                 var: crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
             }
+        }
+    }
+
+    impl crate::ToOcaml for Chained {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for Chained {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.block(1, 0)
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            let built = crate::ToOcaml::to_ocaml(&self.var, cx);
+            cx.set(slot, 0, built);
         }
     }
 
@@ -177,6 +290,27 @@ pub mod example {
                 txt: crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                 pos: crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
             }
+        }
+    }
+
+    impl<A: crate::ToOcaml> crate::ToOcaml for Located<A> {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl<A: crate::ToOcaml> crate::Construct for Located<A> {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.block(2, 0)
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            let built = crate::ToOcaml::to_ocaml(&self.txt, cx);
+            cx.set(slot, 0, built);
+            let built = crate::ToOcaml::to_ocaml(&self.pos, cx);
+            cx.set(slot, 1, built);
         }
     }
 
@@ -229,6 +363,61 @@ pub mod example {
         }
     }
 
+    impl crate::ToOcaml for Ty {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for Ty {
+        const REBUILD: Option<&'static str> = Some("ppx_rust.rebuild.Example.ty");
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            match self {
+                Self::Int => crate::raw::immediate(0),
+                Self::Arrow { .. } => cx.block(2, 0),
+                Self::Var { .. } => cx.block(1, 1),
+                Self::Record { .. } => cx.block(3, 2),
+                Self::Unit => crate::raw::immediate(1),
+                Self::Tuple { .. } => cx.block(1, 3),
+                Self::Chars { .. } => cx.block(2, 4),
+            }
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            match self {
+                Self::Int => {}
+                Self::Arrow(v0, v1) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                    let built = crate::ToOcaml::to_ocaml(v1, cx);
+                    cx.set(slot, 1, built);
+                }
+                Self::Var(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                }
+                Self::Record { record: v_record, fields: v_fields, .. } => {
+                    let built = crate::ToOcaml::to_ocaml(v_record, cx);
+                    cx.set(slot, 0, built);
+                    let built = crate::ToOcaml::to_ocaml(v_fields, cx);
+                    cx.set(slot, 2, built);
+                }
+                Self::Unit => {}
+                Self::Tuple(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                }
+                Self::Chars(v0, v1) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                    let built = crate::ToOcaml::to_ocaml(v1, cx);
+                    cx.set(slot, 1, built);
+                }
+            }
+        }
+    }
+
     /// OCaml: [Example.var].
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub struct Var<A> {
@@ -242,6 +431,27 @@ pub mod example {
                 id: crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                 link: crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
             }
+        }
+    }
+
+    impl<A: crate::ToOcaml> crate::ToOcaml for Var<A> {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl<A: crate::ToOcaml> crate::Construct for Var<A> {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.block(2, 0)
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            let built = crate::ToOcaml::to_ocaml(&self.id, cx);
+            cx.set(slot, 0, built);
+            let built = crate::ToOcaml::to_ocaml(&self.link, cx);
+            cx.set(slot, 1, built);
         }
     }
 
@@ -283,6 +493,50 @@ pub mod example {
                 }
             }
         }
+
+        impl crate::ToOcaml for ExprDesc {
+            unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                cx.construct(self)
+            }
+        }
+
+        impl crate::Construct for ExprDesc {
+            const REBUILD: Option<&'static str> = None;
+
+            unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                match self {
+                    Self::Const { .. } => cx.block(2, 0),
+                    Self::Pair { .. } => cx.block(2, 1),
+                    Self::Never { .. } => cx.block(1, 2),
+                    Self::Absurd { .. } => cx.block(1, 3),
+                }
+            }
+
+            unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+                match self {
+                    Self::Const(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Pair(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Never(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Absurd(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                }
+            }
+        }
     }
 
     pub mod expr {
@@ -317,6 +571,47 @@ pub mod example {
                             in_: crate::FromOcaml::from_ocaml(crate::raw::field(v, 2), cx),
                         },
                         _ => crate::raw::bad("Example.Expr.Desc.t", v),
+                    }
+                }
+            }
+        }
+
+        impl<E: crate::ToOcaml> crate::ToOcaml for Desc<E> {
+            unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                cx.construct(self)
+            }
+        }
+
+        impl<E: crate::ToOcaml> crate::Construct for Desc<E> {
+            const REBUILD: Option<&'static str> = None;
+
+            unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                match self {
+                    Self::Lit { .. } => cx.block(1, 0),
+                    Self::App { .. } => cx.block(2, 1),
+                    Self::Let { .. } => cx.block(3, 2),
+                }
+            }
+
+            unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+                match self {
+                    Self::Lit(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::App(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Let { name: v_name, body: v_body, in_: v_in_, .. } => {
+                        let built = crate::ToOcaml::to_ocaml(v_name, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v_body, cx);
+                        cx.set(slot, 1, built);
+                        let built = crate::ToOcaml::to_ocaml(v_in_, cx);
+                        cx.set(slot, 2, built);
                     }
                 }
             }

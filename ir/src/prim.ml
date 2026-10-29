@@ -260,6 +260,12 @@ let all =
 ;;
 
 let by_name = String.Map.of_alist_exn (List.map all ~f:(fun t -> t.name, t))
+
+let () =
+  Ppx_rust_runtime.register_rebuild rust_t (fun t ->
+    Map.find_exn by_name t.name)
+;;
+
 let find path = Map.find by_name (Syntax.Path.to_string path)
 let canonical_name t = Prelude_path.canonical (Prelude_path.prim_prefix ^ t.name)
 

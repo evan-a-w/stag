@@ -27,6 +27,10 @@ let runtime ~loc name arg =
 
 let type_expr_ ~loc name arg = runtime ~loc ("Type_expr." ^ name) arg
 
+(** The registrations of how to build the maps and sets of the declarations
+    being derived, made after them. *)
+let collections : expression list ref = ref []
+
 let rec module_named (m : longident) name =
   match m with
   | Lident n | Ldot (_, n) -> String.equal n name
@@ -122,6 +126,15 @@ and builtin ~loc ~type_expr (txt : longident) args =
     Some ([%type: Base.Nothing.t], type_expr_ ~loc "Nothing" None)
   | _, _, Ldot (Ldot (k, "Map"), "t"), [ data ] ->
     let key = in_ k "t" in
+    let comparator = pexp_ident ~loc { txt = Ldot (k, "comparator"); loc } in
+    collections
+    := [%expr
+         Ppx_rust_runtime.register_map ~key:[%e type_expr key] (fun alist ->
+           Obj.repr
+             (Base.Map.Using_comparator.of_alist_exn
+                ~comparator:[%e comparator]
+                (Obj.obj alist)))]
+       :: !collections;
     Some
       ( [%type: ([%t key], _, [%t in_ k "comparator_witness"]) Base.Map.t]
       , type_expr_
@@ -130,6 +143,15 @@ and builtin ~loc ~type_expr (txt : longident) args =
           (Some (pexp_tuple ~loc [ type_expr key; type_expr data ])) )
   | _, _, Ldot (Ldot (k, "Set"), "t"), [] ->
     let elt = in_ k "t" in
+    let comparator = pexp_ident ~loc { txt = Ldot (k, "comparator"); loc } in
+    collections
+    := [%expr
+         Ppx_rust_runtime.register_set ~elt:[%e type_expr elt] (fun elts ->
+           Obj.repr
+             (Base.Set.Using_comparator.of_list
+                ~comparator:[%e comparator]
+                (Obj.obj elts)))]
+       :: !collections;
     Some
       ( [%type: ([%t elt], [%t in_ k "comparator_witness"]) Base.Set.t]
       , type_expr_ ~loc "Set" (Some (type_expr elt)) )
@@ -273,13 +295,13 @@ let str_type_decl =
       | Nonrecursive -> names
       | Recursive -> []
     in
+    collections := [];
+    let decls = elist ~loc (List.map (decl ~code_path ~unchecked) tds) in
     let register =
-      [%stri
-        let () =
-          Ppx_rust_runtime.register
-            [%e elist ~loc (List.map (decl ~code_path ~unchecked) tds)]
-        ;;]
+      [%stri let () = Ppx_rust_runtime.register [%e decls]]
+      :: List.rev_map (fun e -> [%stri let () = [%e e]]) !collections
     in
+    collections := [];
     let witnesses =
       List.map
         (fun td ->
@@ -295,8 +317,8 @@ let str_type_decl =
     (* The declarations of a [type nonrec] group refer to the witnesses of
        before it. *)
     match rec_flag with
-    | Recursive -> witnesses @ [ register ]
-    | Nonrecursive -> register :: witnesses)
+    | Recursive -> witnesses @ register
+    | Nonrecursive -> register @ witnesses)
 ;;
 
 let sig_type_decl =

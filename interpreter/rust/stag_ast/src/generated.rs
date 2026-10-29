@@ -35,6 +35,44 @@ impl crate::FromOcaml for Intrinsic {
     }
 }
 
+impl crate::ToOcaml for Intrinsic {
+    unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+        cx.construct(self)
+    }
+}
+
+impl crate::Construct for Intrinsic {
+    const REBUILD: Option<&'static str> = None;
+
+    unsafe fn shell(&self, _cx: &mut crate::Builder) -> crate::raw::Value {
+        match self {
+            Self::TypeExpr => crate::raw::immediate(0),
+            Self::TypeRefName => crate::raw::immediate(1),
+            Self::TypeRefPath => crate::raw::immediate(2),
+            Self::ConstructorRefName => crate::raw::immediate(3),
+            Self::FieldRefName => crate::raw::immediate(4),
+            Self::TypeDecl => crate::raw::immediate(5),
+            Self::ValueRefName => crate::raw::immediate(6),
+            Self::Erase => crate::raw::immediate(7),
+            Self::Raise => crate::raw::immediate(8),
+        }
+    }
+
+    unsafe fn fill(&self, _slot: crate::Slot, _cx: &mut crate::Builder) {
+        match self {
+            Self::TypeExpr => {}
+            Self::TypeRefName => {}
+            Self::TypeRefPath => {}
+            Self::ConstructorRefName => {}
+            Self::FieldRefName => {}
+            Self::TypeDecl => {}
+            Self::ValueRefName => {}
+            Self::Erase => {}
+            Self::Raise => {}
+        }
+    }
+}
+
 /// OCaml: [Loc.t].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Loc {
@@ -50,6 +88,29 @@ impl crate::FromOcaml for Loc {
             start: crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
             stop: crate::FromOcaml::from_ocaml(crate::raw::field(v, 2), cx),
         }
+    }
+}
+
+impl crate::ToOcaml for Loc {
+    unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+        cx.construct(self)
+    }
+}
+
+impl crate::Construct for Loc {
+    const REBUILD: Option<&'static str> = None;
+
+    unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+        cx.block(3, 0)
+    }
+
+    unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+        let built = crate::ToOcaml::to_ocaml(&self.file, cx);
+        cx.set(slot, 0, built);
+        let built = crate::ToOcaml::to_ocaml(&self.start, cx);
+        cx.set(slot, 1, built);
+        let built = crate::ToOcaml::to_ocaml(&self.stop, cx);
+        cx.set(slot, 2, built);
     }
 }
 
@@ -69,6 +130,27 @@ impl<A: crate::FromOcaml> crate::FromOcaml for Located<A> {
     }
 }
 
+impl<A: crate::ToOcaml> crate::ToOcaml for Located<A> {
+    unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+        cx.construct(self)
+    }
+}
+
+impl<A: crate::ToOcaml> crate::Construct for Located<A> {
+    const REBUILD: Option<&'static str> = None;
+
+    unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+        cx.block(2, 0)
+    }
+
+    unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+        let built = crate::ToOcaml::to_ocaml(&self.txt, cx);
+        cx.set(slot, 0, built);
+        let built = crate::ToOcaml::to_ocaml(&self.loc, cx);
+        cx.set(slot, 1, built);
+    }
+}
+
 /// OCaml: [Prim.t].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Prim {
@@ -84,6 +166,29 @@ impl crate::FromOcaml for Prim {
             args: crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
             result: crate::FromOcaml::from_ocaml(crate::raw::field(v, 2), cx),
         }
+    }
+}
+
+impl crate::ToOcaml for Prim {
+    unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+        cx.construct(self)
+    }
+}
+
+impl crate::Construct for Prim {
+    const REBUILD: Option<&'static str> = Some("ppx_rust.rebuild.Prim.t");
+
+    unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+        cx.block(4, 0)
+    }
+
+    unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+        let built = crate::ToOcaml::to_ocaml(&self.name, cx);
+        cx.set(slot, 0, built);
+        let built = crate::ToOcaml::to_ocaml(&self.args, cx);
+        cx.set(slot, 1, built);
+        let built = crate::ToOcaml::to_ocaml(&self.result, cx);
+        cx.set(slot, 2, built);
     }
 }
 
@@ -125,6 +230,13 @@ impl ArenaBuilder {
     }
 }
 
+impl Arena {
+    /// The lengths of its stores, by [`crate::Indexed::STORE`].
+    pub fn store_lens(&self) -> Vec<usize> {
+        vec![self.prim.len(), self.type_row.len(), self.type_ty.len(), self.type_var_presence_presence_bound.len(), self.type_var_row_bound.len(), self.type_var_ty_nothing.len(), self.typed_record_type.len()]
+    }
+}
+
 impl crate::Stored for Prim {
     fn pending(builder: &mut ArenaBuilder) -> &mut crate::Pending<Self> {
         &mut builder.prim
@@ -135,6 +247,10 @@ impl crate::Stored for Prim {
     fn store_mut(arena: &mut Arena) -> &mut crate::Store<Self> {
         &mut arena.prim
     }
+}
+
+impl crate::Indexed for Prim {
+    const STORE: usize = 0;
 }
 
 impl crate::Stored for type_::Row {
@@ -149,6 +265,10 @@ impl crate::Stored for type_::Row {
     }
 }
 
+impl crate::Indexed for type_::Row {
+    const STORE: usize = 1;
+}
+
 impl crate::Stored for type_::Ty {
     fn pending(builder: &mut ArenaBuilder) -> &mut crate::Pending<Self> {
         &mut builder.type_ty
@@ -159,6 +279,10 @@ impl crate::Stored for type_::Ty {
     fn store_mut(arena: &mut Arena) -> &mut crate::Store<Self> {
         &mut arena.type_ty
     }
+}
+
+impl crate::Indexed for type_::Ty {
+    const STORE: usize = 2;
 }
 
 impl crate::Stored for type_::Var<type_::Presence, type_::PresenceBound> {
@@ -173,6 +297,10 @@ impl crate::Stored for type_::Var<type_::Presence, type_::PresenceBound> {
     }
 }
 
+impl crate::Indexed for type_::Var<type_::Presence, type_::PresenceBound> {
+    const STORE: usize = 3;
+}
+
 impl crate::Stored for type_::Var<crate::Ref<type_::Row>, type_::Bound> {
     fn pending(builder: &mut ArenaBuilder) -> &mut crate::Pending<Self> {
         &mut builder.type_var_row_bound
@@ -183,6 +311,10 @@ impl crate::Stored for type_::Var<crate::Ref<type_::Row>, type_::Bound> {
     fn store_mut(arena: &mut Arena) -> &mut crate::Store<Self> {
         &mut arena.type_var_row_bound
     }
+}
+
+impl crate::Indexed for type_::Var<crate::Ref<type_::Row>, type_::Bound> {
+    const STORE: usize = 4;
 }
 
 impl crate::Stored for type_::Var<crate::Ref<type_::Ty>, crate::Nothing> {
@@ -197,6 +329,10 @@ impl crate::Stored for type_::Var<crate::Ref<type_::Ty>, crate::Nothing> {
     }
 }
 
+impl crate::Indexed for type_::Var<crate::Ref<type_::Ty>, crate::Nothing> {
+    const STORE: usize = 5;
+}
+
 impl crate::Stored for typed::RecordType {
     fn pending(builder: &mut ArenaBuilder) -> &mut crate::Pending<Self> {
         &mut builder.typed_record_type
@@ -207,6 +343,15 @@ impl crate::Stored for typed::RecordType {
     fn store_mut(arena: &mut Arena) -> &mut crate::Store<Self> {
         &mut arena.typed_record_type
     }
+}
+
+impl crate::Indexed for typed::RecordType {
+    const STORE: usize = 6;
+}
+
+impl crate::OcamlKey for typed::Ident {
+    const MAP: &'static str = "ppx_rust.map.Typed.Ident.t";
+    const SET: &'static str = "ppx_rust.set.Typed.Ident.t";
 }
 
 #[allow(dead_code)]
@@ -303,6 +448,29 @@ pub mod loc {
             }
         }
     }
+
+    impl crate::ToOcaml for Pos {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for Pos {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.block(3, 0)
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            let built = crate::ToOcaml::to_ocaml(&self.line, cx);
+            cx.set(slot, 0, built);
+            let built = crate::ToOcaml::to_ocaml(&self.col, cx);
+            cx.set(slot, 1, built);
+            let built = crate::ToOcaml::to_ocaml(&self.offset, cx);
+            cx.set(slot, 2, built);
+        }
+    }
 }
 
 pub mod prim {
@@ -331,6 +499,38 @@ pub mod prim {
                 }
             } else {
                 crate::raw::bad("Prim.Base_type.t", v)
+            }
+        }
+    }
+
+    impl crate::ToOcaml for BaseType {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for BaseType {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, _cx: &mut crate::Builder) -> crate::raw::Value {
+            match self {
+                Self::Int => crate::raw::immediate(0),
+                Self::Bool => crate::raw::immediate(1),
+                Self::String => crate::raw::immediate(2),
+                Self::Char => crate::raw::immediate(3),
+                Self::Unit => crate::raw::immediate(4),
+                Self::StringList => crate::raw::immediate(5),
+            }
+        }
+
+        unsafe fn fill(&self, _slot: crate::Slot, _cx: &mut crate::Builder) {
+            match self {
+                Self::Int => {}
+                Self::Bool => {}
+                Self::String => {}
+                Self::Char => {}
+                Self::Unit => {}
+                Self::StringList => {}
             }
         }
     }
@@ -367,6 +567,41 @@ pub mod syntax {
                         crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                     ),
                     _ => crate::raw::bad("Syntax.Decl_path.t", v),
+                }
+            }
+        }
+    }
+
+    impl crate::ToOcaml for DeclPath {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for DeclPath {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            match self {
+                Self::Path { .. } => cx.block(1, 0),
+                Self::Root { .. } => cx.block(1, 1),
+                Self::Resolved { .. } => cx.block(1, 2),
+            }
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            match self {
+                Self::Path(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                }
+                Self::Root(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                }
+                Self::Resolved(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
                 }
             }
         }
@@ -412,6 +647,48 @@ pub mod syntax {
         }
     }
 
+    impl crate::ToOcaml for Lit {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for Lit {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            match self {
+                Self::Int { .. } => cx.block(1, 0),
+                Self::Bool { .. } => cx.block(1, 1),
+                Self::String { .. } => cx.block(1, 2),
+                Self::Char { .. } => cx.block(1, 3),
+                Self::Unit => crate::raw::immediate(0),
+            }
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            match self {
+                Self::Int(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                }
+                Self::Bool(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                }
+                Self::String(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                }
+                Self::Char(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                }
+                Self::Unit => {}
+            }
+        }
+    }
+
     /// OCaml: [Syntax.Name.t].
     pub type Name = crate::Located<String>;
 
@@ -447,6 +724,27 @@ pub mod syntax {
                     name: crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                     args: crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                 }
+            }
+        }
+
+        impl crate::ToOcaml for BenchParam {
+            unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                cx.construct(self)
+            }
+        }
+
+        impl crate::Construct for BenchParam {
+            const REBUILD: Option<&'static str> = None;
+
+            unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                cx.block(2, 0)
+            }
+
+            unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+                let built = crate::ToOcaml::to_ocaml(&self.name, cx);
+                cx.set(slot, 0, built);
+                let built = crate::ToOcaml::to_ocaml(&self.args, cx);
+                cx.set(slot, 1, built);
             }
         }
 
@@ -585,6 +883,172 @@ pub mod syntax {
             }
         }
 
+        impl crate::ToOcaml for ExprDesc {
+            unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                cx.construct(self)
+            }
+        }
+
+        impl crate::Construct for ExprDesc {
+            const REBUILD: Option<&'static str> = None;
+
+            unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                match self {
+                    Self::Lit { .. } => cx.block(1, 0),
+                    Self::Var { .. } => cx.block(2, 1),
+                    Self::App { .. } => cx.block(2, 2),
+                    Self::Let { .. } => cx.block(5, 3),
+                    Self::Fun { .. } => cx.block(2, 4),
+                    Self::Splice { .. } => cx.block(2, 5),
+                    Self::Quote { .. } => cx.block(1, 6),
+                    Self::Tuple { .. } => cx.block(1, 7),
+                    Self::Construct { .. } => cx.block(2, 8),
+                    Self::Record { .. } => cx.block(1, 9),
+                    Self::Field { .. } => cx.block(2, 10),
+                    Self::RecordUpdate { .. } => cx.block(2, 11),
+                    Self::Type { .. } => cx.block(1, 12),
+                    Self::Match { .. } => cx.block(2, 13),
+                    Self::PolyRecord { .. } => cx.block(1, 14),
+                    Self::PolyField { .. } => cx.block(2, 15),
+                    Self::PolyExtend { .. } => cx.block(2, 16),
+                    Self::PolyRestrict { .. } => cx.block(2, 17),
+                    Self::PolyUpdate { .. } => cx.block(2, 18),
+                    Self::PolyVariant { .. } => cx.block(2, 19),
+                    Self::Expect { .. } => cx.block(1, 20),
+                    Self::StructQuote { .. } => cx.block(1, 21),
+                    Self::Error => crate::raw::immediate(0),
+                }
+            }
+
+            unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+                match self {
+                    Self::Lit(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Var(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::App(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Let(v0, v1, v2, v3, v4) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                        let built = crate::ToOcaml::to_ocaml(v2, cx);
+                        cx.set(slot, 2, built);
+                        let built = crate::ToOcaml::to_ocaml(v3, cx);
+                        cx.set(slot, 3, built);
+                        let built = crate::ToOcaml::to_ocaml(v4, cx);
+                        cx.set(slot, 4, built);
+                    }
+                    Self::Fun(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Splice { expr: v_expr, subs: v_subs, .. } => {
+                        let built = crate::ToOcaml::to_ocaml(v_expr, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v_subs, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Quote(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Tuple(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Construct(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Record(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Field(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::RecordUpdate(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Type(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Match(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::PolyRecord(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::PolyField(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::PolyExtend(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::PolyRestrict(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::PolyUpdate(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::PolyVariant(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Expect(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::StructQuote(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Error => {}
+                }
+            }
+        }
+
         /// OCaml: [Syntax.Defs.pattern].
         pub type Pattern = crate::Located<PatternDesc>;
 
@@ -647,6 +1111,74 @@ pub mod syntax {
             }
         }
 
+        impl crate::ToOcaml for PatternDesc {
+            unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                cx.construct(self)
+            }
+        }
+
+        impl crate::Construct for PatternDesc {
+            const REBUILD: Option<&'static str> = None;
+
+            unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                match self {
+                    Self::Any => crate::raw::immediate(0),
+                    Self::Var { .. } => cx.block(1, 0),
+                    Self::Lit { .. } => cx.block(1, 1),
+                    Self::Tuple { .. } => cx.block(1, 2),
+                    Self::Construct { .. } => cx.block(2, 3),
+                    Self::Record { .. } => cx.block(1, 4),
+                    Self::PolyVariant { .. } => cx.block(2, 5),
+                    Self::PolyRecord { .. } => cx.block(2, 6),
+                    Self::Exception { .. } => cx.block(1, 7),
+                }
+            }
+
+            unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+                match self {
+                    Self::Any => {}
+                    Self::Var(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Lit(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Tuple(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Construct(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Record(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::PolyVariant(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::PolyRecord { fields: v_fields, rest: v_rest, .. } => {
+                        let built = crate::ToOcaml::to_ocaml(v_fields, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v_rest, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Exception(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                }
+            }
+        }
+
         /// OCaml: [Syntax.Defs.pattern_rest].
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         pub enum PatternRest {
@@ -669,6 +1201,35 @@ pub mod syntax {
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                         ),
                         _ => crate::raw::bad("Syntax.Defs.pattern_rest", v),
+                    }
+                }
+            }
+        }
+
+        impl crate::ToOcaml for PatternRest {
+            unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                cx.construct(self)
+            }
+        }
+
+        impl crate::Construct for PatternRest {
+            const REBUILD: Option<&'static str> = None;
+
+            unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                match self {
+                    Self::Closed => crate::raw::immediate(0),
+                    Self::Open => crate::raw::immediate(1),
+                    Self::Bind { .. } => cx.block(1, 0),
+                }
+            }
+
+            unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+                match self {
+                    Self::Closed => {}
+                    Self::Open => {}
+                    Self::Bind(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
                     }
                 }
             }
@@ -703,6 +1264,42 @@ pub mod syntax {
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                         ),
                         _ => crate::raw::bad("Syntax.Defs.row_desc", v),
+                    }
+                }
+            }
+        }
+
+        impl crate::ToOcaml for RowDesc {
+            unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                cx.construct(self)
+            }
+        }
+
+        impl crate::Construct for RowDesc {
+            const REBUILD: Option<&'static str> = None;
+
+            unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                match self {
+                    Self::Empty => crate::raw::immediate(0),
+                    Self::Extend { .. } => cx.block(3, 0),
+                    Self::Var { .. } => cx.block(1, 1),
+                }
+            }
+
+            unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+                match self {
+                    Self::Empty => {}
+                    Self::Extend(v0, v1, v2) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                        let built = crate::ToOcaml::to_ocaml(v2, cx);
+                        cx.set(slot, 2, built);
+                    }
+                    Self::Var(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
                     }
                 }
             }
@@ -783,6 +1380,95 @@ pub mod syntax {
             }
         }
 
+        impl crate::ToOcaml for ToplevelDesc {
+            unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                cx.construct(self)
+            }
+        }
+
+        impl crate::Construct for ToplevelDesc {
+            const REBUILD: Option<&'static str> = None;
+
+            unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                match self {
+                    Self::Let { .. } => cx.block(4, 0),
+                    Self::Type { .. } => cx.block(1, 1),
+                    Self::Exception { .. } => cx.block(2, 2),
+                    Self::MalformedException { .. } => cx.block(2, 3),
+                    Self::Module { .. } => cx.block(2, 4),
+                    Self::ModuleSplice { .. } => cx.block(3, 5),
+                    Self::Include { .. } => cx.block(2, 6),
+                    Self::ExpectTest { .. } => cx.block(2, 7),
+                    Self::Bench { .. } => cx.block(3, 8),
+                }
+            }
+
+            unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+                match self {
+                    Self::Let(v0, v1, v2, v3) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                        let built = crate::ToOcaml::to_ocaml(v2, cx);
+                        cx.set(slot, 2, built);
+                        let built = crate::ToOcaml::to_ocaml(v3, cx);
+                        cx.set(slot, 3, built);
+                    }
+                    Self::Type(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Exception(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::MalformedException(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Module(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::ModuleSplice(v0, v1, v2) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                        let built = crate::ToOcaml::to_ocaml(v2, cx);
+                        cx.set(slot, 2, built);
+                    }
+                    Self::Include(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::ExpectTest { name: v_name, body: v_body, .. } => {
+                        let built = crate::ToOcaml::to_ocaml(v_name, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v_body, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Bench { name: v_name, param: v_param, body: v_body, .. } => {
+                        let built = crate::ToOcaml::to_ocaml(v_name, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v_param, cx);
+                        cx.set(slot, 1, built);
+                        let built = crate::ToOcaml::to_ocaml(v_body, cx);
+                        cx.set(slot, 2, built);
+                    }
+                }
+            }
+        }
+
         /// OCaml: [Syntax.Defs.type_arg].
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         pub enum TypeArg {
@@ -808,6 +1494,36 @@ pub mod syntax {
             }
         }
 
+        impl crate::ToOcaml for TypeArg {
+            unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                cx.construct(self)
+            }
+        }
+
+        impl crate::Construct for TypeArg {
+            const REBUILD: Option<&'static str> = None;
+
+            unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                match self {
+                    Self::Ty { .. } => cx.block(1, 0),
+                    Self::Row { .. } => cx.block(1, 1),
+                }
+            }
+
+            unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+                match self {
+                    Self::Ty(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Row(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                }
+            }
+        }
+
         /// OCaml: [Syntax.Defs.type_decl].
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         pub struct TypeDecl {
@@ -823,6 +1539,29 @@ pub mod syntax {
                     params: crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                     kind: crate::FromOcaml::from_ocaml(crate::raw::field(v, 2), cx),
                 }
+            }
+        }
+
+        impl crate::ToOcaml for TypeDecl {
+            unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                cx.construct(self)
+            }
+        }
+
+        impl crate::Construct for TypeDecl {
+            const REBUILD: Option<&'static str> = None;
+
+            unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                cx.block(3, 0)
+            }
+
+            unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+                let built = crate::ToOcaml::to_ocaml(&self.name, cx);
+                cx.set(slot, 0, built);
+                let built = crate::ToOcaml::to_ocaml(&self.params, cx);
+                cx.set(slot, 1, built);
+                let built = crate::ToOcaml::to_ocaml(&self.kind, cx);
+                cx.set(slot, 2, built);
             }
         }
 
@@ -867,6 +1606,53 @@ pub mod syntax {
             }
         }
 
+        impl crate::ToOcaml for TypeDeclKind {
+            unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                cx.construct(self)
+            }
+        }
+
+        impl crate::Construct for TypeDeclKind {
+            const REBUILD: Option<&'static str> = None;
+
+            unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                match self {
+                    Self::Variant { .. } => cx.block(1, 0),
+                    Self::Record { .. } => cx.block(1, 1),
+                    Self::Alias { .. } => cx.block(1, 2),
+                    Self::Abstract => crate::raw::immediate(0),
+                    Self::Splice { .. } => cx.block(1, 3),
+                    Self::Malformed { .. } => cx.block(1, 4),
+                }
+            }
+
+            unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+                match self {
+                    Self::Variant(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Record(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Alias(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Abstract => {}
+                    Self::Splice(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Malformed(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                }
+            }
+        }
+
         /// OCaml: [Syntax.Defs.type_decl_param].
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         pub enum TypeDeclParam {
@@ -887,6 +1673,36 @@ pub mod syntax {
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                         ),
                         _ => crate::raw::bad("Syntax.Defs.type_decl_param", v),
+                    }
+                }
+            }
+        }
+
+        impl crate::ToOcaml for TypeDeclParam {
+            unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                cx.construct(self)
+            }
+        }
+
+        impl crate::Construct for TypeDeclParam {
+            const REBUILD: Option<&'static str> = None;
+
+            unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                match self {
+                    Self::Ty { .. } => cx.block(1, 0),
+                    Self::Row { .. } => cx.block(1, 1),
+                }
+            }
+
+            unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+                match self {
+                    Self::Ty(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Row(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
                     }
                 }
             }
@@ -945,6 +1761,72 @@ pub mod syntax {
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                         ),
                         _ => crate::raw::bad("Syntax.Defs.type_expr_desc", v),
+                    }
+                }
+            }
+        }
+
+        impl crate::ToOcaml for TypeExprDesc {
+            unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                cx.construct(self)
+            }
+        }
+
+        impl crate::Construct for TypeExprDesc {
+            const REBUILD: Option<&'static str> = None;
+
+            unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                match self {
+                    Self::Var { .. } => cx.block(1, 0),
+                    Self::Con { .. } => cx.block(2, 1),
+                    Self::Arrow { .. } => cx.block(2, 2),
+                    Self::Tuple { .. } => cx.block(1, 3),
+                    Self::Code { .. } => cx.block(2, 4),
+                    Self::Record { .. } => cx.block(1, 5),
+                    Self::Variant { .. } => cx.block(1, 6),
+                    Self::Splice { .. } => cx.block(1, 7),
+                }
+            }
+
+            unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+                match self {
+                    Self::Var(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Con(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Arrow(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Tuple(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Code { inner: v_inner, context: v_context, .. } => {
+                        let built = crate::ToOcaml::to_ocaml(v_inner, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v_context, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Record(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Variant(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Splice(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
                     }
                 }
             }
@@ -1018,6 +1900,36 @@ pub mod type_ {
         }
     }
 
+    impl crate::ToOcaml for Arg {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for Arg {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            match self {
+                Self::ATy { .. } => cx.block(1, 0),
+                Self::ARow { .. } => cx.block(1, 1),
+            }
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            match self {
+                Self::ATy(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                }
+                Self::ARow(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                }
+            }
+        }
+    }
+
     /// OCaml: [Type.bound].
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub struct Bound {
@@ -1031,6 +1943,27 @@ pub mod type_ {
                 row: crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                 shadowed: crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
             }
+        }
+    }
+
+    impl crate::ToOcaml for Bound {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for Bound {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.block(2, 0)
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            let built = crate::ToOcaml::to_ocaml(&self.row, cx);
+            cx.set(slot, 0, built);
+            let built = crate::ToOcaml::to_ocaml(&self.shadowed, cx);
+            cx.set(slot, 1, built);
         }
     }
 
@@ -1054,6 +1987,36 @@ pub mod type_ {
                         crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                     ),
                     _ => crate::raw::bad("Type.bounded", v),
+                }
+            }
+        }
+    }
+
+    impl crate::ToOcaml for Bounded {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for Bounded {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            match self {
+                Self::RowVar { .. } => cx.block(1, 0),
+                Self::PresenceVar { .. } => cx.block(1, 1),
+            }
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            match self {
+                Self::RowVar(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                }
+                Self::PresenceVar(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
                 }
             }
         }
@@ -1101,6 +2064,46 @@ pub mod type_ {
         }
     }
 
+    impl crate::ToOcaml for Kept {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for Kept {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            match self {
+                Self::RowBound { .. } => cx.block(3, 0),
+                Self::IfPresentKept { .. } => cx.block(4, 1),
+            }
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            match self {
+                Self::RowBound { id: v_id, lower: v_lower, bound: v_bound, .. } => {
+                    let built = crate::ToOcaml::to_ocaml(v_id, cx);
+                    cx.set(slot, 0, built);
+                    let built = crate::ToOcaml::to_ocaml(v_lower, cx);
+                    cx.set(slot, 1, built);
+                    let built = crate::ToOcaml::to_ocaml(v_bound, cx);
+                    cx.set(slot, 2, built);
+                }
+                Self::IfPresentKept { id: v_id, presence: v_presence, ty1: v_ty1, ty2: v_ty2, .. } => {
+                    let built = crate::ToOcaml::to_ocaml(v_id, cx);
+                    cx.set(slot, 0, built);
+                    let built = crate::ToOcaml::to_ocaml(v_presence, cx);
+                    cx.set(slot, 1, built);
+                    let built = crate::ToOcaml::to_ocaml(v_ty1, cx);
+                    cx.set(slot, 2, built);
+                    let built = crate::ToOcaml::to_ocaml(v_ty2, cx);
+                    cx.set(slot, 3, built);
+                }
+            }
+        }
+    }
+
     /// OCaml: [Type.presence].
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub enum Presence {
@@ -1123,6 +2126,35 @@ pub mod type_ {
                         crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                     ),
                     _ => crate::raw::bad("Type.presence", v),
+                }
+            }
+        }
+    }
+
+    impl crate::ToOcaml for Presence {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for Presence {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            match self {
+                Self::Present => crate::raw::immediate(0),
+                Self::Absent => crate::raw::immediate(1),
+                Self::PVar { .. } => cx.block(1, 0),
+            }
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            match self {
+                Self::Present => {}
+                Self::Absent => {}
+                Self::PVar(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
                 }
             }
         }
@@ -1158,6 +2190,43 @@ pub mod type_ {
         }
     }
 
+    impl crate::ToOcaml for PresenceBound {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for PresenceBound {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            match self {
+                Self::AtMost { .. } => cx.block(1, 0),
+                Self::AtLeast { .. } => cx.block(1, 1),
+                Self::IfPresent { .. } => cx.block(2, 2),
+            }
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            match self {
+                Self::AtMost(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                }
+                Self::AtLeast(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                }
+                Self::IfPresent(v0, v1) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                    let built = crate::ToOcaml::to_ocaml(v1, cx);
+                    cx.set(slot, 1, built);
+                }
+            }
+        }
+    }
+
     /// OCaml: [Type.rank].
     pub type Rank = i64;
 
@@ -1188,6 +2257,44 @@ pub mod type_ {
                         crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                     ),
                     _ => crate::raw::bad("Type.row", v),
+                }
+            }
+        }
+    }
+
+    impl crate::ToOcaml for Row {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for Row {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            match self {
+                Self::REmpty => crate::raw::immediate(0),
+                Self::RExtend { .. } => cx.block(4, 0),
+                Self::RVar { .. } => cx.block(1, 1),
+            }
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            match self {
+                Self::REmpty => {}
+                Self::RExtend(v0, v1, v2, v3) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                    let built = crate::ToOcaml::to_ocaml(v1, cx);
+                    cx.set(slot, 1, built);
+                    let built = crate::ToOcaml::to_ocaml(v2, cx);
+                    cx.set(slot, 2, built);
+                    let built = crate::ToOcaml::to_ocaml(v3, cx);
+                    cx.set(slot, 3, built);
+                }
+                Self::RVar(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
                 }
             }
         }
@@ -1252,6 +2359,71 @@ pub mod type_ {
         }
     }
 
+    impl crate::ToOcaml for Ty {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for Ty {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            match self {
+                Self::TCon { .. } => cx.block(2, 0),
+                Self::TArrow { .. } => cx.block(2, 1),
+                Self::TTuple { .. } => cx.block(1, 2),
+                Self::TCode { .. } => cx.block(2, 3),
+                Self::TRecord { .. } => cx.block(2, 4),
+                Self::TVariant { .. } => cx.block(2, 5),
+                Self::TVar { .. } => cx.block(1, 6),
+            }
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            match self {
+                Self::TCon(v0, v1) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                    let built = crate::ToOcaml::to_ocaml(v1, cx);
+                    cx.set(slot, 1, built);
+                }
+                Self::TArrow(v0, v1) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                    let built = crate::ToOcaml::to_ocaml(v1, cx);
+                    cx.set(slot, 1, built);
+                }
+                Self::TTuple(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                }
+                Self::TCode { inner: v_inner, context: v_context, .. } => {
+                    let built = crate::ToOcaml::to_ocaml(v_inner, cx);
+                    cx.set(slot, 0, built);
+                    let built = crate::ToOcaml::to_ocaml(v_context, cx);
+                    cx.set(slot, 1, built);
+                }
+                Self::TRecord { id: v_id, row: v_row, .. } => {
+                    let built = crate::ToOcaml::to_ocaml(v_id, cx);
+                    cx.set(slot, 0, built);
+                    let built = crate::ToOcaml::to_ocaml(v_row, cx);
+                    cx.set(slot, 1, built);
+                }
+                Self::TVariant { id: v_id, row: v_row, .. } => {
+                    let built = crate::ToOcaml::to_ocaml(v_id, cx);
+                    cx.set(slot, 0, built);
+                    let built = crate::ToOcaml::to_ocaml(v_row, cx);
+                    cx.set(slot, 1, built);
+                }
+                Self::TVar(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                }
+            }
+        }
+    }
+
     /// OCaml: [Type.var].
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub struct Var<A, Bound> {
@@ -1271,6 +2443,33 @@ pub mod type_ {
                 in_bounds_of: crate::FromOcaml::from_ocaml(crate::raw::field(v, 3), cx),
                 kept: crate::FromOcaml::from_ocaml(crate::raw::field(v, 4), cx),
             }
+        }
+    }
+
+    impl<A: crate::ToOcaml, Bound: crate::ToOcaml> crate::ToOcaml for Var<A, Bound> {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl<A: crate::ToOcaml, Bound: crate::ToOcaml> crate::Construct for Var<A, Bound> {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.block(5, 0)
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            let built = crate::ToOcaml::to_ocaml(&self.id, cx);
+            cx.set(slot, 0, built);
+            let built = crate::ToOcaml::to_ocaml(&self.state, cx);
+            cx.set(slot, 1, built);
+            let built = crate::ToOcaml::to_ocaml(&self.bounds, cx);
+            cx.set(slot, 2, built);
+            let built = crate::ToOcaml::to_ocaml(&self.in_bounds_of, cx);
+            cx.set(slot, 3, built);
+            let built = crate::ToOcaml::to_ocaml(&self.kept, cx);
+            cx.set(slot, 4, built);
         }
     }
 
@@ -1298,6 +2497,38 @@ pub mod type_ {
                         crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                     ),
                     _ => crate::raw::bad("Type.var_state", v),
+                }
+            }
+        }
+    }
+
+    impl<A: crate::ToOcaml> crate::ToOcaml for VarState<A> {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl<A: crate::ToOcaml> crate::Construct for VarState<A> {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            match self {
+                Self::Unbound { .. } => cx.block(1, 0),
+                Self::Generic => crate::raw::immediate(0),
+                Self::Link { .. } => cx.block(1, 1),
+            }
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            match self {
+                Self::Unbound(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                }
+                Self::Generic => {}
+                Self::Link(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
                 }
             }
         }
@@ -1332,6 +2563,33 @@ pub mod typed {
         }
     }
 
+    impl crate::ToOcaml for Bench {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for Bench {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.block(5, 0)
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            let built = crate::ToOcaml::to_ocaml(&self.name, cx);
+            cx.set(slot, 0, built);
+            let built = crate::ToOcaml::to_ocaml(&self.param, cx);
+            cx.set(slot, 1, built);
+            let built = crate::ToOcaml::to_ocaml(&self.body, cx);
+            cx.set(slot, 2, built);
+            let built = crate::ToOcaml::to_ocaml(&self.loc, cx);
+            cx.set(slot, 3, built);
+            let built = crate::ToOcaml::to_ocaml(&self.generated, cx);
+            cx.set(slot, 4, built);
+        }
+    }
+
     /// OCaml: [Typed.Binder.t].
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub enum Binder {
@@ -1357,6 +2615,36 @@ pub mod typed {
         }
     }
 
+    impl crate::ToOcaml for Binder {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for Binder {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            match self {
+                Self::Local { .. } => cx.block(1, 0),
+                Self::Toplevel { .. } => cx.block(1, 1),
+            }
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            match self {
+                Self::Local(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                }
+                Self::Toplevel(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                }
+            }
+        }
+    }
+
     /// OCaml: [Typed.Constructor_ref.t].
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub struct ConstructorRef {
@@ -1372,6 +2660,29 @@ pub mod typed {
                 name: crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                 index: crate::FromOcaml::from_ocaml(crate::raw::field(v, 2), cx),
             }
+        }
+    }
+
+    impl crate::ToOcaml for ConstructorRef {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for ConstructorRef {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.block(3, 0)
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            let built = crate::ToOcaml::to_ocaml(&self.type_name, cx);
+            cx.set(slot, 0, built);
+            let built = crate::ToOcaml::to_ocaml(&self.name, cx);
+            cx.set(slot, 1, built);
+            let built = crate::ToOcaml::to_ocaml(&self.index, cx);
+            cx.set(slot, 2, built);
         }
     }
 
@@ -1395,6 +2706,31 @@ pub mod typed {
         }
     }
 
+    impl crate::ToOcaml for ExpectTest {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for ExpectTest {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.block(4, 0)
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            let built = crate::ToOcaml::to_ocaml(&self.name, cx);
+            cx.set(slot, 0, built);
+            let built = crate::ToOcaml::to_ocaml(&self.body, cx);
+            cx.set(slot, 1, built);
+            let built = crate::ToOcaml::to_ocaml(&self.loc, cx);
+            cx.set(slot, 2, built);
+            let built = crate::ToOcaml::to_ocaml(&self.generated, cx);
+            cx.set(slot, 3, built);
+        }
+    }
+
     /// OCaml: [Typed.Expr.t].
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub struct Expr {
@@ -1410,6 +2746,29 @@ pub mod typed {
                 ty: crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                 loc: crate::FromOcaml::from_ocaml(crate::raw::field(v, 2), cx),
             }
+        }
+    }
+
+    impl crate::ToOcaml for Expr {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for Expr {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.block(3, 0)
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            let built = crate::ToOcaml::to_ocaml(&self.desc, cx);
+            cx.set(slot, 0, built);
+            let built = crate::ToOcaml::to_ocaml(&self.ty, cx);
+            cx.set(slot, 1, built);
+            let built = crate::ToOcaml::to_ocaml(&self.loc, cx);
+            cx.set(slot, 2, built);
         }
     }
 
@@ -1429,6 +2788,27 @@ pub mod typed {
         }
     }
 
+    impl crate::ToOcaml for FieldRef {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for FieldRef {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.block(2, 0)
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            let built = crate::ToOcaml::to_ocaml(&self.record, cx);
+            cx.set(slot, 0, built);
+            let built = crate::ToOcaml::to_ocaml(&self.index, cx);
+            cx.set(slot, 1, built);
+        }
+    }
+
     /// OCaml: [Typed.Ident.t].
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub struct Ident {
@@ -1442,6 +2822,27 @@ pub mod typed {
                 name: crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                 stamp: crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
             }
+        }
+    }
+
+    impl crate::ToOcaml for Ident {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for Ident {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.block(2, 0)
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            let built = crate::ToOcaml::to_ocaml(&self.name, cx);
+            cx.set(slot, 0, built);
+            let built = crate::ToOcaml::to_ocaml(&self.stamp, cx);
+            cx.set(slot, 1, built);
         }
     }
 
@@ -1461,6 +2862,27 @@ pub mod typed {
         }
     }
 
+    impl crate::ToOcaml for IdentInfo {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for IdentInfo {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.block(2, 0)
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            let built = crate::ToOcaml::to_ocaml(&self.ty, cx);
+            cx.set(slot, 0, built);
+            let built = crate::ToOcaml::to_ocaml(&self.level, cx);
+            cx.set(slot, 1, built);
+        }
+    }
+
     /// OCaml: [Typed.Pattern.t].
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub struct Pattern {
@@ -1476,6 +2898,29 @@ pub mod typed {
                 ty: crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                 loc: crate::FromOcaml::from_ocaml(crate::raw::field(v, 2), cx),
             }
+        }
+    }
+
+    impl crate::ToOcaml for Pattern {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for Pattern {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.block(3, 0)
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            let built = crate::ToOcaml::to_ocaml(&self.desc, cx);
+            cx.set(slot, 0, built);
+            let built = crate::ToOcaml::to_ocaml(&self.ty, cx);
+            cx.set(slot, 1, built);
+            let built = crate::ToOcaml::to_ocaml(&self.loc, cx);
+            cx.set(slot, 2, built);
         }
     }
 
@@ -1501,6 +2946,33 @@ pub mod typed {
         }
     }
 
+    impl crate::ToOcaml for Program {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for Program {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.block(5, 0)
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            let built = crate::ToOcaml::to_ocaml(&self.sccs, cx);
+            cx.set(slot, 0, built);
+            let built = crate::ToOcaml::to_ocaml(&self.expect_tests, cx);
+            cx.set(slot, 1, built);
+            let built = crate::ToOcaml::to_ocaml(&self.benches, cx);
+            cx.set(slot, 2, built);
+            let built = crate::ToOcaml::to_ocaml(&self.declaration_splices, cx);
+            cx.set(slot, 3, built);
+            let built = crate::ToOcaml::to_ocaml(&self.ident_info, cx);
+            cx.set(slot, 4, built);
+        }
+    }
+
     /// OCaml: [Typed.Record_type.t].
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub struct RecordType {
@@ -1517,6 +2989,27 @@ pub mod typed {
         }
     }
 
+    impl crate::ToOcaml for RecordType {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for RecordType {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.block(2, 0)
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            let built = crate::ToOcaml::to_ocaml(&self.name, cx);
+            cx.set(slot, 0, built);
+            let built = crate::ToOcaml::to_ocaml(&self.fields, cx);
+            cx.set(slot, 1, built);
+        }
+    }
+
     /// OCaml: [Typed.Scc.t].
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub struct Scc {
@@ -1530,6 +3023,27 @@ pub mod typed {
                 members: crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                 recursive: crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
             }
+        }
+    }
+
+    impl crate::ToOcaml for Scc {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for Scc {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.block(2, 0)
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            let built = crate::ToOcaml::to_ocaml(&self.members, cx);
+            cx.set(slot, 0, built);
+            let built = crate::ToOcaml::to_ocaml(&self.recursive, cx);
+            cx.set(slot, 1, built);
         }
     }
 
@@ -1550,6 +3064,31 @@ pub mod typed {
                 scheme: crate::FromOcaml::from_ocaml(crate::raw::field(v, 2), cx),
                 body: crate::FromOcaml::from_ocaml(crate::raw::field(v, 3), cx),
             }
+        }
+    }
+
+    impl crate::ToOcaml for Toplevel {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for Toplevel {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.block(4, 0)
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            let built = crate::ToOcaml::to_ocaml(&self.ident, cx);
+            cx.set(slot, 0, built);
+            let built = crate::ToOcaml::to_ocaml(&self.args, cx);
+            cx.set(slot, 1, built);
+            let built = crate::ToOcaml::to_ocaml(&self.scheme, cx);
+            cx.set(slot, 2, built);
+            let built = crate::ToOcaml::to_ocaml(&self.body, cx);
+            cx.set(slot, 3, built);
         }
     }
 
@@ -1589,6 +3128,56 @@ pub mod typed {
                         crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                     ),
                     _ => crate::raw::bad("Typed.Var_ref.t", v),
+                }
+            }
+        }
+    }
+
+    impl crate::ToOcaml for VarRef {
+        unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            cx.construct(self)
+        }
+    }
+
+    impl crate::Construct for VarRef {
+        const REBUILD: Option<&'static str> = None;
+
+        unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+            match self {
+                Self::Bound { .. } => cx.block(1, 0),
+                Self::Persistent { .. } => cx.block(1, 1),
+                Self::Free { .. } => cx.block(1, 2),
+                Self::FreeToplevel { .. } => cx.block(1, 3),
+                Self::Prim { .. } => cx.block(1, 4),
+                Self::Intrinsic { .. } => cx.block(1, 5),
+            }
+        }
+
+        unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+            match self {
+                Self::Bound(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                }
+                Self::Persistent(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                }
+                Self::Free(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                }
+                Self::FreeToplevel(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                }
+                Self::Prim(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
+                }
+                Self::Intrinsic(v0) => {
+                    let built = crate::ToOcaml::to_ocaml(v0, cx);
+                    cx.set(slot, 0, built);
                 }
             }
         }
@@ -1752,6 +3341,190 @@ pub mod typed {
             }
         }
 
+        impl<E: crate::ToOcaml> crate::ToOcaml for Desc<E> {
+            unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                cx.construct(self)
+            }
+        }
+
+        impl<E: crate::ToOcaml> crate::Construct for Desc<E> {
+            const REBUILD: Option<&'static str> = None;
+
+            unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                match self {
+                    Self::Lit { .. } => cx.block(1, 0),
+                    Self::Var { .. } => cx.block(1, 1),
+                    Self::App { .. } => cx.block(2, 2),
+                    Self::Let { .. } => cx.block(7, 3),
+                    Self::Fun { .. } => cx.block(3, 4),
+                    Self::Annotated { .. } => cx.block(2, 5),
+                    Self::Splice { .. } => cx.block(2, 6),
+                    Self::ToplevelSplice { .. } => cx.block(2, 7),
+                    Self::Quote { .. } => cx.block(1, 8),
+                    Self::Tuple { .. } => cx.block(1, 9),
+                    Self::Construct { .. } => cx.block(2, 10),
+                    Self::Record { .. } => cx.block(1, 11),
+                    Self::Field { .. } => cx.block(2, 12),
+                    Self::RecordUpdate { .. } => cx.block(2, 13),
+                    Self::Match { .. } => cx.block(3, 14),
+                    Self::PolyRecord { .. } => cx.block(1, 15),
+                    Self::PolyField { .. } => cx.block(2, 16),
+                    Self::PolyExtend { .. } => cx.block(2, 17),
+                    Self::PolyRestrict { .. } => cx.block(2, 18),
+                    Self::PolyUpdate { .. } => cx.block(2, 19),
+                    Self::PolyVariant { .. } => cx.block(2, 20),
+                    Self::Expect { .. } => cx.block(1, 21),
+                    Self::Type { .. } => cx.block(1, 22),
+                    Self::Error { .. } => cx.block(1, 23),
+                }
+            }
+
+            unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+                match self {
+                    Self::Lit(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Var(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::App(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Let { ident: v_ident, args: v_args, annots: v_annots, result_annot: v_result_annot, generalized: v_generalized, body: v_body, in_: v_in_, .. } => {
+                        let built = crate::ToOcaml::to_ocaml(v_ident, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v_args, cx);
+                        cx.set(slot, 1, built);
+                        let built = crate::ToOcaml::to_ocaml(v_annots, cx);
+                        cx.set(slot, 2, built);
+                        let built = crate::ToOcaml::to_ocaml(v_result_annot, cx);
+                        cx.set(slot, 3, built);
+                        let built = crate::ToOcaml::to_ocaml(v_generalized, cx);
+                        cx.set(slot, 4, built);
+                        let built = crate::ToOcaml::to_ocaml(v_body, cx);
+                        cx.set(slot, 5, built);
+                        let built = crate::ToOcaml::to_ocaml(v_in_, cx);
+                        cx.set(slot, 6, built);
+                    }
+                    Self::Fun { args: v_args, annots: v_annots, body: v_body, .. } => {
+                        let built = crate::ToOcaml::to_ocaml(v_args, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v_annots, cx);
+                        cx.set(slot, 1, built);
+                        let built = crate::ToOcaml::to_ocaml(v_body, cx);
+                        cx.set(slot, 2, built);
+                    }
+                    Self::Annotated(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Splice { code: v_code, subs: v_subs, .. } => {
+                        let built = crate::ToOcaml::to_ocaml(v_code, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v_subs, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::ToplevelSplice { code: v_code, expansion: v_expansion, .. } => {
+                        let built = crate::ToOcaml::to_ocaml(v_code, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v_expansion, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Quote(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Tuple(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Construct(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Record(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Field(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::RecordUpdate(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Match { scrutinee: v_scrutinee, cases: v_cases, exception_cases: v_exception_cases, .. } => {
+                        let built = crate::ToOcaml::to_ocaml(v_scrutinee, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v_cases, cx);
+                        cx.set(slot, 1, built);
+                        let built = crate::ToOcaml::to_ocaml(v_exception_cases, cx);
+                        cx.set(slot, 2, built);
+                    }
+                    Self::PolyRecord(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::PolyField(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::PolyExtend(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::PolyRestrict(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::PolyUpdate(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::PolyVariant(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Expect(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Type(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Error(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                }
+            }
+        }
+
         /// OCaml: [Typed.Expr.Subs.t].
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         pub enum Subs<E> {
@@ -1772,6 +3545,36 @@ pub mod typed {
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                         ),
                         _ => crate::raw::bad("Typed.Expr.Subs.t", v),
+                    }
+                }
+            }
+        }
+
+        impl<E: crate::ToOcaml> crate::ToOcaml for Subs<E> {
+            unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                cx.construct(self)
+            }
+        }
+
+        impl<E: crate::ToOcaml> crate::Construct for Subs<E> {
+            const REBUILD: Option<&'static str> = None;
+
+            unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                match self {
+                    Self::Explicit { .. } => cx.block(1, 0),
+                    Self::Implicit { .. } => cx.block(1, 1),
+                }
+            }
+
+            unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+                match self {
+                    Self::Explicit(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Implicit(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
                     }
                 }
             }
@@ -1843,6 +3646,74 @@ pub mod typed {
             }
         }
 
+        impl<P: crate::ToOcaml> crate::ToOcaml for Desc<P> {
+            unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                cx.construct(self)
+            }
+        }
+
+        impl<P: crate::ToOcaml> crate::Construct for Desc<P> {
+            const REBUILD: Option<&'static str> = None;
+
+            unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                match self {
+                    Self::Any => crate::raw::immediate(0),
+                    Self::Var { .. } => cx.block(1, 0),
+                    Self::Lit { .. } => cx.block(1, 1),
+                    Self::Tuple { .. } => cx.block(1, 2),
+                    Self::Construct { .. } => cx.block(2, 3),
+                    Self::Record { .. } => cx.block(1, 4),
+                    Self::PolyVariant { .. } => cx.block(2, 5),
+                    Self::PolyRecord { .. } => cx.block(2, 6),
+                    Self::Error { .. } => cx.block(1, 7),
+                }
+            }
+
+            unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+                match self {
+                    Self::Any => {}
+                    Self::Var(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Lit(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Tuple(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Construct(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Record(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::PolyVariant(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::PolyRecord { fields: v_fields, rest: v_rest, .. } => {
+                        let built = crate::ToOcaml::to_ocaml(v_fields, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v_rest, cx);
+                        cx.set(slot, 1, built);
+                    }
+                    Self::Error(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                }
+            }
+        }
+
         /// OCaml: [Typed.Pattern.Rest.t].
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         pub enum Rest {
@@ -1865,6 +3736,35 @@ pub mod typed {
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                         ),
                         _ => crate::raw::bad("Typed.Pattern.Rest.t", v),
+                    }
+                }
+            }
+        }
+
+        impl crate::ToOcaml for Rest {
+            unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                cx.construct(self)
+            }
+        }
+
+        impl crate::Construct for Rest {
+            const REBUILD: Option<&'static str> = None;
+
+            unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
+                match self {
+                    Self::Closed => crate::raw::immediate(0),
+                    Self::Open => crate::raw::immediate(1),
+                    Self::Bind { .. } => cx.block(1, 0),
+                }
+            }
+
+            unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
+                match self {
+                    Self::Closed => {}
+                    Self::Open => {}
+                    Self::Bind(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
                     }
                 }
             }

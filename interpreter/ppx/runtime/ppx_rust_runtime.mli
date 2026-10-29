@@ -37,6 +37,11 @@ module Type_expr : sig
     | Map of t * t (** A Base map, of its key and data. *)
     | Set of t (** A Base set. *)
   [@@deriving sexp_of]
+
+  (** The name of a map key or set element type, [None] for those that
+      cannot be: [Decl]s without arguments, [int], [string], [char] and
+      [bool]. *)
+  val key_name : t -> string option
 end
 
 module Field : sig
@@ -89,3 +94,33 @@ val register : Decl.t list -> unit
 
 (** Every declaration registered so far, in order. *)
 val all : unit -> Decl.t list
+
+(** The names of the OCaml callbacks ([Callback.register]) that Rust code
+    building OCaml values calls. *)
+module Callback_name : sig
+  (** Builds the map of an association list of a key type, by its
+      [Type_expr.key_name]. *)
+  val map : string -> string
+
+  (** Builds the set of a list of an element type. *)
+  val set : string -> string
+
+  (** Rebuilds a value of a declaration with [[@rust.skip]] fields. *)
+  val rebuild : Key.t -> string
+end
+
+(** [[@@deriving rust]] registers, with these, how to build the maps and sets
+    its declarations contain, from their comparators: the name of a key type
+    stands for one comparator. *)
+val register_map : key:Type_expr.t -> (Obj.t -> Obj.t) -> unit
+
+val register_set : elt:Type_expr.t -> (Obj.t -> Obj.t) -> unit
+
+(** [register_rebuild rust_u f] registers how to rebuild a [u] whose
+    [[@rust.skip]] fields are [()], as values built from Rust are, eg. by
+    looking it up by name. Declarations with [[@rust.skip]] fields need one,
+    which may not read those fields. *)
+val register_rebuild : 'a Witness.t -> ('a -> 'a) -> unit
+
+(** The declarations [register_rebuild] was called for. *)
+val rebuilt : unit -> Key.t list

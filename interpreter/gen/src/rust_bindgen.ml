@@ -20,6 +20,7 @@ module Constructor = struct
     { name : string
     ; constant : bool
     ; tag : int (** Among the constant constructors, or the others. *)
+    ; size : int (** Of its block, skipped fields included. *)
     ; args : Args.t
     }
 end
@@ -48,7 +49,20 @@ module Item = struct
     ; rust : string list * string
     ; body : Body.t
     ; stored : bool
+    ; rebuilt : bool (** Has [[@rust.skip]] fields, so is rebuilt by OCaml. *)
     }
+
+  let has_skipped_fields (decl : R.Decl.t) =
+    let skipped = List.exists ~f:(fun (field : R.Field.t) -> field.skip) in
+    match decl.kind with
+    | Alias _ -> false
+    | Record fields -> skipped fields
+    | Variant constructors ->
+      List.exists constructors ~f:(fun (constructor : R.Constructor.t) ->
+        match constructor.args with
+        | Tuple _ -> false
+        | Record fields -> skipped fields)
+  ;;
 end
 
 (** Checks that [ty] is well-formed in [decl]. *)
@@ -120,6 +134,7 @@ let body ~check (decl : R.Decl.t) =
             { Constructor.name
             ; constant = true
             ; tag = next constant
+            ; size = 0
             ; args = Tuple []
             }
         | Tuple tys ->
@@ -130,7 +145,12 @@ let body ~check (decl : R.Decl.t) =
               { Field.name = ""; index; ty })
             |> Or_error.all
           in
-          { Constructor.name; constant = false; tag; args = Tuple fields }
+          { Constructor.name
+          ; constant = false
+          ; tag
+          ; size = List.length tys
+          ; args = Tuple fields
+          }
         | Record record_fields ->
           let tag = next block in
           if List.exists record_fields ~f:(fun field -> field.mutable_)
@@ -141,7 +161,12 @@ let body ~check (decl : R.Decl.t) =
                   ~constructor:name]
           else (
             let%map fields = fields ~check record_fields in
-            { Constructor.name; constant = false; tag; args = Record fields }))
+            { Constructor.name
+            ; constant = false
+            ; tag
+            ; size = List.length record_fields
+            ; args = Record fields
+            }))
       |> Or_error.all
     in
     Body.Variant constructors
@@ -214,6 +239,152 @@ module Gen = struct
 
   let derive = "#[derive(Debug, Clone, PartialEq, Eq, Hash)]"
 
+  let bounds (item : Item.t) ~trait =
+    if List.is_empty item.decl.params
+    then ""
+    else
+      "<"
+      ^ String.concat
+          ~sep:", "
+          (List.map item.decl.params ~f:(fun param ->
+             Rust_name.camel param ^ ": " ^ trait))
+      ^ ">"
+  ;;
+
+  (** Builds [fields] of the block at [slot], each bound to [binding]. *)
+  let fill_fields fields ~binding ~indent =
+    List.map fields ~f:(fun (field : Field.t) ->
+      sprintf
+        "%slet built = crate::ToOcaml::to_ocaml(%s, cx);\n\
+         %scx.set(slot, %d, built);\n"
+        indent
+        (binding field)
+        indent
+        field.index)
+    |> String.concat
+  ;;
+
+  (** The [ToOcaml] and [Construct] impls of [item]. *)
+  let to_ocaml (item : Item.t) ~name ~generics =
+    let bounds = bounds item ~trait:"crate::ToOcaml" in
+    let rebuild =
+      if item.rebuilt
+      then sprintf "Some(%S)" (R.Callback_name.rebuild item.key)
+      else "None"
+    in
+    let shell, fill =
+      match item.body with
+      | Alias _ -> assert false
+      | Record fields ->
+        let size =
+          match item.decl.kind with
+          | Record fields -> List.length fields
+          | Alias _ | Variant _ -> assert false
+        in
+        ( sprintf "        cx.block(%d, 0)" size
+        , fill_fields
+            fields
+            ~binding:(fun field -> "&self." ^ Rust_name.field field.name)
+            ~indent:"        " )
+      | Variant constructors ->
+        let binding (field : Field.t) =
+          if String.is_empty field.name
+          then sprintf "v%d" field.index
+          else "v_" ^ Rust_name.field field.name
+        in
+        let pattern (constructor : Constructor.t) =
+          let name = Rust_name.camel constructor.name in
+          match constructor.args with
+          | Tuple [] -> sprintf "Self::%s" name
+          | Tuple fields ->
+            sprintf
+              "Self::%s(%s)"
+              name
+              (String.concat ~sep:", " (List.map fields ~f:binding))
+          | Record fields ->
+            sprintf
+              "Self::%s { %s }"
+              name
+              (String.concat
+                 ~sep:", "
+                 (List.map fields ~f:(fun field ->
+                    sprintf
+                      "%s: %s"
+                      (Rust_name.field field.name)
+                      (binding field))
+                  @ [ ".." ]))
+        in
+        let fields (constructor : Constructor.t) =
+          match constructor.args with
+          | Tuple fields | Record fields -> fields
+        in
+        ( sprintf
+            "        match self {\n%s        }"
+            (List.map constructors ~f:(fun constructor ->
+               let name = Rust_name.camel constructor.name in
+               if constructor.constant
+               then
+                 sprintf
+                   "            Self::%s => crate::raw::immediate(%d),\n"
+                   name
+                   constructor.tag
+               else
+                 sprintf
+                   "            Self::%s { .. } => cx.block(%d, %d),\n"
+                   name
+                   constructor.size
+                   constructor.tag)
+             |> String.concat)
+        , sprintf
+            "        match self {\n%s        }\n"
+            (List.map constructors ~f:(fun constructor ->
+               match fields constructor with
+               | [] -> sprintf "            %s => {}\n" (pattern constructor)
+               | fields ->
+                 sprintf
+                   "            %s => {\n%s            }\n"
+                   (pattern constructor)
+                   (fill_fields fields ~binding ~indent:"                "))
+             |> String.concat) )
+    in
+    let uses_fields = not (List.is_empty (Body.field_types item.body)) in
+    let shell_uses_cx =
+      match item.body with
+      | Variant constructors ->
+        List.exists constructors ~f:(fun (constructor : Constructor.t) ->
+          not constructor.constant)
+      | Alias _ | Record _ -> true
+    in
+    String.concat
+      ~sep:"\n"
+      [ sprintf "impl%s crate::ToOcaml for %s%s {" bounds name generics
+      ; "    unsafe fn to_ocaml(&self, cx: &mut crate::Builder) -> \
+         crate::raw::Value {"
+      ; "        cx.construct(self)"
+      ; "    }"
+      ; "}"
+      ; ""
+      ; sprintf "impl%s crate::Construct for %s%s {" bounds name generics
+      ; sprintf "    const REBUILD: Option<&'static str> = %s;" rebuild
+      ; ""
+      ; sprintf
+          "    unsafe fn shell(&self, %s: &mut crate::Builder) -> \
+           crate::raw::Value {"
+          (if shell_uses_cx then "cx" else "_cx")
+      ; shell
+      ; "    }"
+      ; ""
+      ; sprintf
+          "    unsafe fn fill(&self, %s: crate::Slot, %s: &mut crate::Builder) \
+           {"
+          (if uses_fields then "slot" else "_slot")
+          (if uses_fields then "cx" else "_cx")
+      ; fill ^ "    }"
+      ; "}"
+      ; ""
+      ]
+  ;;
+
   let item t (item : Item.t) =
     let from = fst item.rust in
     let ty = ty ~from in
@@ -283,6 +454,8 @@ module Gen = struct
            (sprintf
               "        Self {\n%s        }"
               (init fields ~indent:"            ")))
+      ^ "\n"
+      ^ to_ocaml item ~name ~generics
     | Variant constructors ->
       let variant (constructor : Constructor.t) =
         let name = Rust_name.camel constructor.name in
@@ -352,6 +525,8 @@ module Gen = struct
               \        }"
               (matching ~constant:true ~scrutinee:"crate::raw::long(v)")
               (matching ~constant:false ~scrutinee:"crate::raw::tag(v)")))
+      ^ "\n"
+      ^ to_ocaml item ~name ~generics
   ;;
 end
 
@@ -485,7 +660,7 @@ let arena (gen : Gen.t) instances =
     |> String.concat
   in
   let stored =
-    List.map instances ~f:(fun (name, rust) ->
+    List.mapi instances ~f:(fun index (name, rust) ->
       let stored = String.chop_prefix_exn rust ~prefix:"crate::Ref<" in
       let stored = String.drop_suffix stored 1 in
       sprintf
@@ -500,11 +675,16 @@ let arena (gen : Gen.t) instances =
         \    fn store_mut(arena: &mut Arena) -> &mut crate::Store<Self> {\n\
         \        &mut arena.%s\n\
         \    }\n\
+         }\n\n\
+         impl crate::Indexed for %s {\n\
+        \    const STORE: usize = %d;\n\
          }\n"
         stored
         name
         name
-        name)
+        name
+        stored
+        index)
     |> String.concat ~sep:"\n"
   in
   let inner rust =
@@ -525,6 +705,12 @@ let arena (gen : Gen.t) instances =
      %s        }\n\
     \    }\n\
      }\n\n\
+     impl Arena {\n\
+    \    /// The lengths of its stores, by [`crate::Indexed::STORE`].\n\
+    \    pub fn store_lens(&self) -> Vec<usize> {\n\
+    \        vec![%s]\n\
+    \    }\n\
+     }\n\n\
      %s"
     (fields ~pub_:true ~ty:(fun rust -> sprintf "crate::Store<%s>" (inner rust)))
     (fields ~pub_:false ~ty:(fun rust ->
@@ -532,6 +718,8 @@ let arena (gen : Gen.t) instances =
     (List.map instances ~f:(fun (name, _) ->
        sprintf "            %s: self.%s.finish(),\n" name name)
      |> String.concat)
+    (List.map instances ~f:(fun (name, _) -> sprintf "self.%s.len()" name)
+     |> String.concat ~sep:", ")
     stored
 ;;
 
@@ -576,8 +764,46 @@ module Tree = struct
   ;;
 end
 
-let generate (decls : R.Decl.t list) =
+(** Every map key and set element type in [ty]. *)
+let rec keys (ty : Ty.t) =
+  match ty with
+  | Var _ | Int | Bool | Char | Unit | String | Nothing -> []
+  | List ty | Array ty | Option ty -> keys ty
+  | Set elt -> elt :: keys elt
+  | Map (key, data) -> (key :: keys key) @ keys data
+  | Tuple tys | Decl (_, tys) -> List.concat_map tys ~f:keys
+;;
+
+(** The [OcamlKey] impls of the declarations [keys] gives. *)
+let ocaml_keys (gen : Gen.t) ~follow tys =
+  List.filter_map tys ~f:(fun (ty : Ty.t) ->
+    match ty with
+    | Int | Bool | Char | String -> None
+    | _ ->
+      Some
+        (match R.Type_expr.key_name ty with
+         | None ->
+           Or_error.error_s
+             [%message "Unsupported map key or set element" (ty : Ty.t)]
+         | Some name -> Ok (Gen.ty gen ~from:[] (follow ty), name)))
+  |> Or_error.all
+  |> Or_error.map ~f:(fun keys ->
+    List.dedup_and_sort keys ~compare:(fun (a, _) (b, _) -> String.compare a b)
+    |> List.map ~f:(fun (rust, name) ->
+      sprintf
+        "impl crate::OcamlKey for %s {\n\
+        \    const MAP: &'static str = %S;\n\
+        \    const SET: &'static str = %S;\n\
+         }\n"
+        rust
+        (R.Callback_name.map name)
+        (R.Callback_name.set name))
+    |> String.concat ~sep:"\n")
+;;
+
+let generate ~rebuilt (decls : R.Decl.t list) =
   let open Or_error.Let_syntax in
+  let rebuilt = Key.Set.of_list rebuilt in
   let%bind decls =
     match
       Key.Map.of_alist
@@ -596,7 +822,7 @@ let generate (decls : R.Decl.t list) =
         | Record fields -> List.exists fields ~f:(fun field -> field.mutable_)
         | Alias _ | Variant _ -> false
       in
-      let%map () =
+      let%bind () =
         let used =
           List.concat_map (Body.field_types body) ~f:params
           |> String.Set.of_list
@@ -612,6 +838,22 @@ let generate (decls : R.Decl.t list) =
                 ~type_:(Key.to_string key)
                 (unused : string list)]
       in
+      let%map () =
+        let skipped = Item.has_skipped_fields decl in
+        match skipped, Set.mem rebuilt key with
+        | true, true | false, false -> Ok ()
+        | true, false ->
+          Or_error.error_s
+            [%message
+              "Declarations with [@rust.skip] fields need \
+               Ppx_rust_runtime.register_rebuild"
+                ~type_:(Key.to_string key)]
+        | false, true ->
+          Or_error.error_s
+            [%message
+              "Rebuilt declarations need [@rust.skip] fields"
+                ~type_:(Key.to_string key)]
+      in
       ( key
       , { Item.decl
         ; key
@@ -621,6 +863,7 @@ let generate (decls : R.Decl.t list) =
               ~name:(List.last_exn key)
         ; body
         ; stored = decl.shared || mutable_
+        ; rebuilt = Set.mem rebuilt key
         } ))
     |> Or_error.all
     |> Or_error.map ~f:Key.Map.of_alist_exn
@@ -639,6 +882,11 @@ let generate (decls : R.Decl.t list) =
     | _ -> false
   in
   let reexports, items = Map.partition_tf items ~f:reexport in
+  let key_types =
+    Map.data items
+    |> List.concat_map ~f:(fun (item : Item.t) ->
+      List.concat_map (Body.field_types item.body) ~f:keys)
+  in
   let rec follow (ty : Ty.t) : Ty.t =
     match ty with
     | Var _ | Int | Bool | Char | Unit | String | Nothing -> ty
@@ -746,8 +994,10 @@ let generate (decls : R.Decl.t list) =
     |> List.fold ~init:Tree.empty ~f:(fun tree (item : Item.t) ->
       Tree.add tree (fst item.rust) (Gen.item gen item))
   in
+  let%bind ocaml_keys = ocaml_keys gen ~follow key_types in
   let%map arena = arena gen instances in
   let tree = Tree.add tree [] arena in
+  let tree = Tree.add tree [] ocaml_keys in
   let send_sync =
     Map.data items
     |> List.filter ~f:(fun (item : Item.t) -> List.is_empty item.decl.params)

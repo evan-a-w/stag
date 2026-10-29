@@ -126,8 +126,8 @@ let field ?(mutable_ = false) name ty : Ppx_rust_runtime.Field.t =
   { name; ty; mutable_; skip = false }
 ;;
 
-let print_error decls =
-  match Rust_bindgen.generate decls with
+let print_error ?(rebuilt = []) decls =
+  match Rust_bindgen.generate ~rebuilt decls with
   | Ok _ -> print_endline "ok"
   | Error error -> print_s [%sexp (error : Error.t)]
 ;;
@@ -156,6 +156,10 @@ let%expect_test "errors" =
         (Variant
            [ { name = "A"; args = Record [ field ~mutable_:true "x" Int ] } ])
     ];
+  print_error [ decl "t" (Record [ { (field "x" Int) with skip = true } ]) ];
+  print_error ~rebuilt:[ [ "M"; "t" ] ] [ decl "t" (Record [ field "x" Int ]) ];
+  print_error
+    [ decl "t" (Record [ field "x" (Map (Tuple [ Int; Int ], Int)) ]) ];
   [%expect
     {|
     ("Unknown type (is its library linked?)" (type_ Unknown.t) (in_ M.t))
@@ -167,5 +171,14 @@ let%expect_test "errors" =
     ("Rust name clashes with the crate's own" (rust raw::X) (type_ Raw.X.t))
     ("Stored types must be instantiated without type parameters" (type_ M.r))
     ("Mutable fields of inline records are unsupported" (constructor A))
+    ("Declarations with [@rust.skip] fields need Ppx_rust_runtime.register_rebuild"
+     (type_ M.t))
+    ("Rebuilt declarations need [@rust.skip] fields" (type_ M.t))
+    ("Unsupported map key or set element" (ty (Tuple (Int Int))))
     |}]
+;;
+
+let%expect_test "declarations rebuilt by OCaml callbacks" =
+  print_s [%sexp (Ppx_rust_runtime.rebuilt () : Ppx_rust_runtime.Key.t list)];
+  [%expect {| ((Example Record_type t) (Example ty)) |}]
 ;;

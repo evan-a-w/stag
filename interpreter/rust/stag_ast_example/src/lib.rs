@@ -8,9 +8,12 @@ mod arena;
 mod conv;
 #[path = "../../stag_ast/src/raw.rs"]
 pub mod raw;
+#[path = "../../stag_ast/src/to_ocaml.rs"]
+mod to_ocaml;
 
 pub use arena::{Pending, Ref, Store};
 pub use conv::{convert, Error, FromOcaml, Map, Nothing, Set, Stored};
+pub use to_ocaml::{to_ocaml, Builder, Construct, Indexed, OcamlKey, Slot, ToOcaml};
 
 #[allow(clippy::all)]
 mod generated {

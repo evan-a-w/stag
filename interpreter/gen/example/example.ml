@@ -105,3 +105,14 @@ module Chain = struct
 end
 
 type chained = { var : ty Chain.t } [@@deriving rust]
+
+let () =
+  Ppx_rust_runtime.register_rebuild Record_type.rust_t (fun t ->
+    { t with ignored = (fun () -> ()) })
+;;
+
+let () =
+  Ppx_rust_runtime.register_rebuild rust_ty (function
+    | Record r -> Record { r with skipped = Fn.id }
+    | t -> t)
+;;

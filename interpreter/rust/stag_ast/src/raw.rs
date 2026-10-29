@@ -20,6 +20,12 @@ pub unsafe fn long(v: Value) -> i64 {
     ocaml_sys::int_val(v) as i64
 }
 
+/// The immediate of `n`, eg. of a constant constructor.
+#[inline]
+pub fn immediate(n: i64) -> Value {
+    unsafe { ocaml_sys::val_int(n as isize) }
+}
+
 #[inline]
 pub unsafe fn tag(v: Value) -> u8 {
     ocaml_sys::tag_val(v)

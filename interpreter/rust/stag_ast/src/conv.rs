@@ -56,7 +56,7 @@ thread_local! {
     static CONVERTING: Cell<bool> = const { Cell::new(false) };
 }
 
-/// Panics of conversions are returned as [`Error`]s, so are not printed.
+/// Panics of conversions (both ways) are returned as [`Error`]s, so are not printed.
 fn quiet_panics_of_conversions() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
@@ -79,14 +79,19 @@ fn quiet_panics_of_conversions() {
 /// and may otherwise crash. No OCaml code may run until it returns, so that
 /// the GC does not move values.
 pub unsafe fn convert<T: FromOcaml>(v: Value) -> Result<(T, Arena), Error> {
-    quiet_panics_of_conversions();
-    CONVERTING.with(|converting| converting.set(true));
-    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+    catching(|| {
         let mut builder = ArenaBuilder::default();
         let x = T::from_ocaml(v, &mut builder);
         (x, builder.finish())
-    }));
-    CONVERTING.with(|converting| converting.set(false));
+    })
+}
+
+/// Runs `f`, giving its panic as an [`Error`], unprinted.
+pub(crate) fn catching<T>(f: impl FnOnce() -> T) -> Result<T, Error> {
+    quiet_panics_of_conversions();
+    let was = CONVERTING.with(|converting| converting.replace(true));
+    let result = panic::catch_unwind(panic::AssertUnwindSafe(f));
+    CONVERTING.with(|converting| converting.set(was));
     result.map_err(|panic| {
         let message = panic
             .downcast_ref::<String>()

@@ -1,9 +1,10 @@
 //! OCaml externals showing what values are converted to, for tests.
 
+use std::ffi::CString;
 use std::fmt::Debug;
 
 use ocaml_sys::Value;
-use stag_ast::{convert, type_, typed, FromOcaml};
+use stag_ast::{convert, to_ocaml, type_, typed, FromOcaml, ToOcaml};
 
 use crate::ocaml_string;
 
@@ -94,3 +95,70 @@ pub unsafe extern "C" fn stag_rust_debug_typed_ident_info(v: Value) -> Value {
     };
     ocaml_string::of_str(&shown)
 }
+
+/// `v` converted to Rust and built back, raising `Failure` if either fails.
+/// With `gc_stress`, the GC runs before every allocation of the building.
+unsafe fn round_trip<T: FromOcaml + ToOcaml>(v: Value, gc_stress: Value) -> Value {
+    let built = convert::<T>(v)
+        .and_then(|(x, arena)| to_ocaml(&x, &arena, ocaml_sys::int_val(gc_stress) != 0));
+    match built {
+        Ok(v) => v,
+        Err(error) => {
+            let message = CString::new(error.to_string()).unwrap_or_default();
+            ocaml_sys::caml_failwith(message.as_ptr());
+            unreachable!()
+        }
+    }
+}
+
+/// Whether `a` and `b` convert to equal values with equal arenas, so are
+/// equal, and share and are cyclic through stored values alike.
+unsafe fn same<T: FromOcaml + PartialEq>(a: Value, b: Value) -> Value {
+    let shown = match (convert::<T>(a), convert::<T>(b)) {
+        (Ok(a), Ok(b)) if a == b => "same".to_owned(),
+        (Ok(_), Ok(_)) => "different".to_owned(),
+        (Err(error), _) | (_, Err(error)) => format!("error: {error}"),
+    };
+    ocaml_string::of_str(&shown)
+}
+
+macro_rules! round_trip {
+    ($ty:ty, $round_trip:ident, $same:ident, $ocaml:literal) => {
+        #[doc = concat!("# Safety\n\n`v` must be a `", $ocaml, "`.")]
+        #[no_mangle]
+        pub unsafe extern "C" fn $round_trip(v: Value, gc_stress: Value) -> Value {
+            round_trip::<$ty>(v, gc_stress)
+        }
+
+        #[doc = concat!("# Safety\n\n`a` and `b` must be `", $ocaml, "`s.")]
+        #[no_mangle]
+        pub unsafe extern "C" fn $same(a: Value, b: Value) -> Value {
+            same::<$ty>(a, b)
+        }
+    };
+}
+
+round_trip!(
+    Vec<typed::Toplevel>,
+    stag_rust_debug_round_trip_typed_toplevels,
+    stag_rust_debug_same_typed_toplevels,
+    "Typed.Toplevel.t list"
+);
+round_trip!(
+    typed::Program,
+    stag_rust_debug_round_trip_typed_program,
+    stag_rust_debug_same_typed_program,
+    "Typed.Program.t"
+);
+round_trip!(
+    stag_ast::Ref<type_::Ty>,
+    stag_rust_debug_round_trip_ty,
+    stag_rust_debug_same_ty,
+    "Type.ty"
+);
+round_trip!(
+    stag_ast::syntax::Program,
+    stag_rust_debug_round_trip_syntax_program,
+    stag_rust_debug_same_syntax_program,
+    "Syntax.Program.t"
+);

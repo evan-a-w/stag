@@ -1,7 +1,8 @@
 # Rust bindings
 
 Rust versions of stag's OCaml types (`Typed`, `Type`, `Syntax`, ...),
-converted once from OCaml values, for Rust code linked into stag.
+converted once from OCaml values, and built back into OCaml values, for
+Rust code linked into stag.
 
 ## Layout
 
@@ -13,7 +14,11 @@ converted once from OCaml values, for Rust code linked into stag.
   - `[@@rust.shared]`: each OCaml value of the type is converted once, into
     the arena, and referred to by a `Ref` (as for types with mutable fields).
     Use it for values shared in OCaml, eg. `Type.ty`.
-  - `[@rust.skip]` on a field: left out (eg. functions).
+  - `[@rust.skip]` on a field: left out (eg. functions). Values built back
+    have `()` there, so the declaration needs an OCaml function rebuilding
+    them, registered with `Ppx_rust_runtime.register_rebuild rust_u f`
+    (eg. `Prim.t` is looked up by name); the generator rejects declarations
+    without one.
   `ppx/test/errors.t` shows what is rejected.
 - `gen/`: `Rust_bindgen`, which generates Rust from the registered
   declarations; `gen/bin` prints it for stag's libraries. `gen/example`
@@ -22,7 +27,8 @@ converted once from OCaml values, for Rust code linked into stag.
 - `rust/`: the cargo workspace.
   - `stag_ast`: the generated types (`src/generated.rs`, promoted by dune)
     and the conversion: `convert::<T>(value)` returns the converted value and
-    its `Arena`. `typed::Expr` is OCaml's `Typed.Expr.t`, `type_::Ty` is
+    its `Arena`, and `to_ocaml(&x, &arena, gc_stress)` builds the OCaml
+    value back. `typed::Expr` is OCaml's `Typed.Expr.t`, `type_::Ty` is
     `Type.ty`, `typed::expr::Desc` is `Typed.Expr.Desc.t`, etc.
   - `stag_rust`: the one static library linked into OCaml. Rust code called
     from OCaml (eg. an interpreter) goes here, as modules, so that std and
@@ -30,7 +36,8 @@ converted once from OCaml values, for Rust code linked into stag.
   - `stag_ast_example`: the generated Rust of `gen/example`, for tests.
 - `stag_rust/`: the OCaml library linking the static library, declaring its
   externals. `stag_rust/test` converts typechecked programs and prints what
-  Rust sees.
+  Rust sees, and round-trips them (OCaml to Rust to OCaml), checking that
+  the result is equal and shares and is cyclic alike, also under GC stress.
 
 ## Conversion
 
@@ -43,6 +50,27 @@ converted once from OCaml values, for Rust code linked into stag.
 - Values not of the type converted to may crash. Where it can tell (eg. an
   unexpected tag), conversion returns an `Error`.
 - Core `Map`s and `Set`s become `HashMap`s and `HashSet`s (`Map`, `Set`).
+
+## Building OCaml values
+
+- `to_ocaml` must be called from OCaml (eg. in an external). The value it
+  returns is unrooted: return it, or root it before anything allocates.
+- Each `Ref` becomes one OCaml block, so OCaml values share as Rust ones do,
+  and cycles (through mutable records) are rebuilt: a stored value's block is
+  allocated and recorded before its fields are built.
+- Rooting: any allocation may move every young OCaml value, so Rust holds
+  none across one. The builder has one global root, an OCaml array: first a
+  block per store of the `Arena`, of the values built so far by `Ref`, then
+  a stack of the blocks being filled. Blocks are allocated before their
+  fields (initialised to `()`), pushed, and each field is written
+  (`caml_modify`) as soon as it is built, so the stack is as deep as the
+  value, not as wide.
+- Core maps and sets are built by OCaml callbacks that `[@@deriving rust]`
+  registers for each key type, with its comparator (`of_alist_exn`,
+  `of_list`), so they are real maps and sets, of which Rust builds the list.
+- `gc_stress` (for tests) collects the minor heap before every allocation,
+  then fills it with garbage, so that a value held unrooted across an
+  allocation is overwritten: set the minor heap small when using it.
 
 ## Building
 

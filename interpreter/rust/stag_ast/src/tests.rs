@@ -122,3 +122,30 @@ fn values_of_the_wrong_type_are_errors() {
         ]
     );
 }
+
+/// [`crate::to_ocaml`] keeps the built values of each store at the
+/// [`crate::Indexed::STORE`] position of [`crate::Arena::store_lens`].
+#[test]
+fn store_indices_match_store_lens() {
+    use crate::{Arena, Indexed};
+    fn check<T: Indexed>(arena: &Arena, seen: &mut Vec<usize>) {
+        assert_eq!(arena.store_lens()[T::STORE], T::store(arena).len());
+        seen.push(T::STORE);
+    }
+    let mut arena = Arena::default();
+    // Distinct lengths, so that a store at the wrong index is noticed.
+    for n in 0..3 {
+        arena.type_ty.push(type_::Ty::TCon(n.to_string(), vec![]));
+    }
+    arena.type_row.push(type_::Row::REmpty);
+    let mut seen = vec![];
+    check::<crate::Prim>(&arena, &mut seen);
+    check::<type_::Row>(&arena, &mut seen);
+    check::<type_::Ty>(&arena, &mut seen);
+    check::<type_::Var<type_::Presence, type_::PresenceBound>>(&arena, &mut seen);
+    check::<type_::Var<Ref<type_::Row>, type_::Bound>>(&arena, &mut seen);
+    check::<type_::Var<Ref<type_::Ty>, crate::Nothing>>(&arena, &mut seen);
+    check::<crate::typed::RecordType>(&arena, &mut seen);
+    seen.sort();
+    assert_eq!(seen, (0..arena.store_lens().len()).collect::<Vec<_>>());
+}
