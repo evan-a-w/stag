@@ -109,8 +109,8 @@ pub mod example {
     pub struct Expr {
         pub desc: Box<expr::Desc<Expr>>,
         pub ty: crate::Ref<Ty>,
-        pub env: crate::Map<String, crate::Ref<Ty>>,
-        pub free: crate::Set<String>,
+        pub env: crate::Map<crate::Str, crate::Ref<Ty>>,
+        pub free: crate::Set<crate::Str>,
         pub ids: crate::Map<i64, i64>,
         pub next: Option<Box<Expr>>,
     }
@@ -158,7 +158,7 @@ pub mod example {
     }
 
     /// OCaml: [Example.Name.t].
-    pub type Name = Located<String>;
+    pub type Name = Located<crate::Str>;
 
     /// OCaml: [Example.Pos.t].
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -203,8 +203,8 @@ pub mod example {
     /// OCaml: [Example.Record_type.t].
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub struct RecordType {
-        pub name: String,
-        pub fields: Box<[String]>,
+        pub name: crate::Str,
+        pub fields: Box<[crate::Str]>,
         pub arity: i64,
     }
 
@@ -322,7 +322,7 @@ pub mod example {
         Var(crate::Ref<Var<crate::Ref<Ty>>>),
         Record {
             record: crate::Ref<RecordType>,
-            fields: Vec<(String, crate::Ref<Ty>)>,
+            fields: Vec<(crate::Str, crate::Ref<Ty>)>,
         },
         Unit,
         Tuple((crate::Ref<Ty>, Name)),

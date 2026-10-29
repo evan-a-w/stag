@@ -11,4 +11,5 @@
   stag_ir
   stag_typecheck
   stag_rust
+  rust_bindgen_example
   test_driver))

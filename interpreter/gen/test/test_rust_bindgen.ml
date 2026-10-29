@@ -160,6 +160,20 @@ let%expect_test "errors" =
   print_error ~rebuilt:[ [ "M"; "t" ] ] [ decl "t" (Record [ field "x" Int ]) ];
   print_error
     [ decl "t" (Record [ field "x" (Map (Tuple [ Int; Int ], Int)) ]) ];
+  print_error
+    [ decl "k" (Variant [ { name = "K"; args = Tuple [] } ])
+    ; decl "alias" (Alias (con [ "M"; "k" ]))
+    ; decl
+        "t"
+        (Record
+           [ field "x" (Set (con [ "M"; "k" ]))
+           ; field "y" (Set (con [ "M"; "alias" ]))
+           ])
+    ];
+  print_error
+    [ decl "name" (Alias String)
+    ; decl "t" (Record [ field "x" (Set (con [ "M"; "name" ])) ])
+    ];
   [%expect
     {|
     ("Unknown type (is its library linked?)" (type_ Unknown.t) (in_ M.t))
@@ -175,6 +189,10 @@ let%expect_test "errors" =
      (type_ M.t))
     ("Rebuilt declarations need [@rust.skip] fields" (type_ M.t))
     ("Unsupported map key or set element" (ty (Tuple (Int Int))))
+    ("Map keys or set elements of distinct OCaml types (so maybe comparators) are of one Rust type"
+     (rust m::K) (types (M.alias M.k)))
+    ("Map keys or set elements of distinct OCaml types (so maybe comparators) are of one Rust type"
+     (rust crate::Str) (types (M.name string)))
     |}]
 ;;
 

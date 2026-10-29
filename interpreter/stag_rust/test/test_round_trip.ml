@@ -43,37 +43,42 @@ let f = fun x y -> let z = (x, y, 'c', "s") in z
   ]
 ;;
 
+module Gc_stress = Debug.Gc_stress
+
 let round_trip
       (type t)
       (module M : Debug.Round_trip with type t = t)
       (t : t)
-      ~gc_stress
+      ~(gc_stress : Gc_stress.t)
   =
-  if not gc_stress
-  then M.round_trip t ~gc_stress
-  else (
+  match gc_stress with
+  | Off -> M.round_trip t ~gc_stress
+  | Minor | Compact ->
     let control = Gc.get () in
     Gc.set { control with minor_heap_size = 4096 };
-    let back = M.round_trip t ~gc_stress in
-    Gc.set control;
-    back)
+    let back =
+      Exn.protect
+        ~f:(fun () -> M.round_trip t ~gc_stress)
+        ~finally:(fun () -> Gc.set control)
+    in
+    back
 ;;
 
-(** [(sexp_equal same)] of [t] and [t] built back, with and without
-    [gc_stress]. *)
+(** [(sexp_equal same)] of [t] and [t] built back, at each of [gc_stress]. *)
 let check_round_trip
+      ?(gc_stress = [ Gc_stress.Off; Minor ])
       (type t)
       (module M : Debug.Round_trip with type t = t)
       ~sexp_of_t
       (t : t)
   =
-  List.iter [ false; true ] ~f:(fun gc_stress ->
+  List.iter gc_stress ~f:(fun gc_stress ->
     let back = round_trip (module M) t ~gc_stress in
     Gc.compact ();
     print_s
       [%message
         ""
-          (gc_stress : bool)
+          (gc_stress : Gc_stress.t)
           ~sexp_equal:(Sexp.equal (sexp_of_t t) (sexp_of_t back) : bool)
           ~same:(M.same t back : string)])
 ;;
@@ -83,29 +88,36 @@ let%expect_test "typed toplevels" =
     print_endline name;
     let t = Option.value_exn (Source_helpers.typecheck source) in
     check_round_trip
+      ~gc_stress:Gc_stress.all
       (module Round_trip.Typed_toplevels)
       ~sexp_of_t:[%sexp_of: Typed.Toplevel.t list]
       (Source_helpers.members t));
   [%expect
     {|
     a scheme
-    ((gc_stress false) (sexp_equal true) (same same))
-    ((gc_stress true) (sexp_equal true) (same same))
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    ((gc_stress Compact) (sexp_equal true) (same same))
     records and prims
-    ((gc_stress false) (sexp_equal true) (same same))
-    ((gc_stress true) (sexp_equal true) (same same))
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    ((gc_stress Compact) (sexp_equal true) (same same))
     constructors, matches, polymorphic variants and records
-    ((gc_stress false) (sexp_equal true) (same same))
-    ((gc_stress true) (sexp_equal true) (same same))
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    ((gc_stress Compact) (sexp_equal true) (same same))
     quotes, splices, expect tests and benches
-    ((gc_stress false) (sexp_equal true) (same same))
-    ((gc_stress true) (sexp_equal true) (same same))
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    ((gc_stress Compact) (sexp_equal true) (same same))
     splices within quotes
-    ((gc_stress false) (sexp_equal true) (same same))
-    ((gc_stress true) (sexp_equal true) (same same))
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    ((gc_stress Compact) (sexp_equal true) (same same))
     recursion, lets, funs, chars and strings
-    ((gc_stress false) (sexp_equal true) (same same))
-    ((gc_stress true) (sexp_equal true) (same same))
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    ((gc_stress Compact) (sexp_equal true) (same same))
     |}]
 ;;
 
@@ -118,31 +130,41 @@ let%expect_test "whole programs, with the prelude and ident_info maps" =
       (module Round_trip.Typed_program)
       ~sexp_of_t:Typed.Program.sexp_of_t
       program;
-    let back = Round_trip.Typed_program.round_trip program ~gc_stress:false in
-    (* A real map, with the comparator, so lookups work. *)
-    Map.invariants back.ident_info |> [%test_result: bool] ~expect:true;
-    Map.iter_keys program.ident_info ~f:(fun ident ->
-      assert (Map.mem back.ident_info ident)));
+    let back = Round_trip.Typed_program.round_trip program ~gc_stress:Off in
+    print_s
+      [%message
+        "ident_info"
+          ~invariants:(Map.invariants back.ident_info : bool)
+          ~all_found:
+            (Map.for_alli program.ident_info ~f:(fun ~key ~data:_ ->
+               Map.mem back.ident_info key)
+             : bool)]);
   [%expect
     {|
     a scheme
-    ((gc_stress false) (sexp_equal true) (same same))
-    ((gc_stress true) (sexp_equal true) (same same))
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    (ident_info (invariants true) (all_found true))
     records and prims
-    ((gc_stress false) (sexp_equal true) (same same))
-    ((gc_stress true) (sexp_equal true) (same same))
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    (ident_info (invariants true) (all_found true))
     constructors, matches, polymorphic variants and records
-    ((gc_stress false) (sexp_equal true) (same same))
-    ((gc_stress true) (sexp_equal true) (same same))
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    (ident_info (invariants true) (all_found true))
     quotes, splices, expect tests and benches
-    ((gc_stress false) (sexp_equal true) (same same))
-    ((gc_stress true) (sexp_equal true) (same same))
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    (ident_info (invariants true) (all_found true))
     splices within quotes
-    ((gc_stress false) (sexp_equal true) (same same))
-    ((gc_stress true) (sexp_equal true) (same same))
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    (ident_info (invariants true) (all_found true))
     recursion, lets, funs, chars and strings
-    ((gc_stress false) (sexp_equal true) (same same))
-    ((gc_stress true) (sexp_equal true) (same same))
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    (ident_info (invariants true) (all_found true))
     |}]
 ;;
 
@@ -150,29 +172,36 @@ let%expect_test "syntax programs" =
   List.iter sources ~f:(fun (name, source) ->
     print_endline name;
     check_round_trip
+      ~gc_stress:Gc_stress.all
       (module Round_trip.Syntax_program)
       ~sexp_of_t:Syntax.Program.sexp_of_t
       (Source_helpers.parse_exn source));
   [%expect
     {|
     a scheme
-    ((gc_stress false) (sexp_equal true) (same same))
-    ((gc_stress true) (sexp_equal true) (same same))
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    ((gc_stress Compact) (sexp_equal true) (same same))
     records and prims
-    ((gc_stress false) (sexp_equal true) (same same))
-    ((gc_stress true) (sexp_equal true) (same same))
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    ((gc_stress Compact) (sexp_equal true) (same same))
     constructors, matches, polymorphic variants and records
-    ((gc_stress false) (sexp_equal true) (same same))
-    ((gc_stress true) (sexp_equal true) (same same))
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    ((gc_stress Compact) (sexp_equal true) (same same))
     quotes, splices, expect tests and benches
-    ((gc_stress false) (sexp_equal true) (same same))
-    ((gc_stress true) (sexp_equal true) (same same))
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    ((gc_stress Compact) (sexp_equal true) (same same))
     splices within quotes
-    ((gc_stress false) (sexp_equal true) (same same))
-    ((gc_stress true) (sexp_equal true) (same same))
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    ((gc_stress Compact) (sexp_equal true) (same same))
     recursion, lets, funs, chars and strings
-    ((gc_stress false) (sexp_equal true) (same same))
-    ((gc_stress true) (sexp_equal true) (same same))
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    ((gc_stress Compact) (sexp_equal true) (same same))
     |}]
 ;;
 
@@ -182,7 +211,7 @@ let%expect_test "a generalised scheme shares its variable" =
   in
   let members = Source_helpers.members t in
   let back =
-    round_trip (module Round_trip.Typed_toplevels) members ~gc_stress:true
+    round_trip (module Round_trip.Typed_toplevels) members ~gc_stress:Compact
   in
   let rec resolve : Type.ty -> Type.ty = function
     | TVar { state = Link ty; _ } -> resolve ty
@@ -206,7 +235,7 @@ let%expect_test "a cyclic type stays cyclic" =
   let var = Type.Var.create 7 (Unbound 0) in
   let ty = Type.TVar var in
   var.state <- Link (TArrow (ty, TTuple [ ty; TCon ("int", []) ]));
-  let back = round_trip (module Round_trip.Ty) ty ~gc_stress:true in
+  let back = round_trip (module Round_trip.Ty) ty ~gc_stress:Compact in
   (match back with
    | TVar ({ state = Link (TArrow (a, TTuple [ b; _ ])); _ } as var') ->
      print_s
@@ -228,7 +257,7 @@ let%expect_test "types shared as a DAG stay shared" =
       (fun ty -> Type.TTuple [ ty; ty ])
       (Type.TCon ("int", []))
   in
-  let back = round_trip (module Round_trip.Ty) ty ~gc_stress:true in
+  let back = round_trip (module Round_trip.Ty) ty ~gc_stress:Compact in
   let rec shared ty =
     match ty with
     | Type.TTuple [ a; b ] -> phys_equal a b && shared a
@@ -251,18 +280,19 @@ let%expect_test "a set, in a row variable's bound" =
        }
      ];
   let ty = Type.TRecord { id = 2; row = RVar row_var } in
-  let back = round_trip (module Round_trip.Ty) ty ~gc_stress:true in
+  let back = round_trip (module Round_trip.Ty) ty ~gc_stress:Compact in
   (match back with
    | TRecord { row = RVar { bounds = [ { shadowed; _ } ]; _ }; _ } ->
-     Set.invariants shadowed |> [%test_result: bool] ~expect:true;
      print_s
        [%message
          ""
            (shadowed : String.Set.t)
+           ~invariants:(Set.invariants shadowed : bool)
            ~mem_c:(Set.mem shadowed "c" : bool)
            ~same:(Round_trip.Ty.same ty back : string)]
    | _ -> print_s [%message "unexpected" (back : Type.ty)]);
-  [%expect {| ((shadowed (a b c d e)) (mem_c true) (same same)) |}]
+  [%expect
+    {| ((shadowed (a b c d e)) (invariants true) (mem_c true) (same same)) |}]
 ;;
 
 let rec exprs (e : Typed.Expr.t) =
@@ -287,7 +317,7 @@ let q = { p with y = 4 }
   in
   let members = Source_helpers.members t in
   let back =
-    round_trip (module Round_trip.Typed_toplevels) members ~gc_stress:true
+    round_trip (module Round_trip.Typed_toplevels) members ~gc_stress:Compact
   in
   let record_types =
     List.concat_map (toplevel_exprs back) ~f:(fun e ->
@@ -327,18 +357,197 @@ let%expect_test "the implicit substitutions of splices are real maps" =
     round_trip
       (module Round_trip.Typed_toplevels)
       (Source_helpers.members t)
-      ~gc_stress:true
+      ~gc_stress:Compact
   in
   List.iter (toplevel_exprs back) ~f:(fun e ->
     match e.desc with
     | Splice { subs = Implicit providers; _ } ->
-      Map.invariants providers |> [%test_result: bool] ~expect:true;
       print_s
         [%message
           ""
             (providers : Typed.Binder.t String.Map.t)
+            ~invariants:(Map.invariants providers : bool)
             ~find_z:(Map.find providers "z" : Typed.Binder.t option)]
     | _ -> ());
   [%expect
-    {| ((providers ((y (Local y/15)) (z (Local z/16)))) (find_z ((Local z/16)))) |}]
+    {|
+    ((providers ((y (Local y/15)) (z (Local z/16)))) (invariants true)
+     (find_z ((Local z/16))))
+    |}]
+;;
+
+let%expect_test "strings are bytes, not necessarily UTF-8" =
+  let ty = Type.TCon ("\255\000\xe9", []) in
+  check_round_trip
+    ~gc_stress:Gc_stress.all
+    (module Round_trip.Ty)
+    ~sexp_of_t:Type.sexp_of_ty
+    ty;
+  print_s [%sexp (Round_trip.Ty.round_trip ty ~gc_stress:Off : Type.ty)];
+  print_endline (Debug.ty ty);
+  let t =
+    Option.value_exn
+      (Source_helpers.typecheck ~prelude:false {|let s = "\255\000 \xe9"|})
+  in
+  check_round_trip
+    ~gc_stress:Gc_stress.all
+    (module Round_trip.Typed_toplevels)
+    ~sexp_of_t:[%sexp_of: Typed.Toplevel.t list]
+    (Source_helpers.members t);
+  [%expect
+    {|
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    ((gc_stress Compact) (sexp_equal true) (same same))
+    (TCon "\255\000\233" ())
+    #0
+    Arena {
+        prim: {},
+        type_row: {},
+        type_ty: {
+            #0: TCon(
+                "\255\000\233",
+                [],
+            ),
+        },
+        type_var_presence_presence_bound: {},
+        type_var_row_bound: {},
+        type_var_ty_nothing: {},
+        typed_record_type: {},
+    }
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    ((gc_stress Compact) (sexp_equal true) (same same))
+    |}]
+;;
+
+let pos : Example.Pos.t = { line = 1; col = 2 }
+let name txt : Example.Name.t = { txt; pos }
+
+let record_type name : Example.Record_type.t =
+  { name; fields = [| "x"; "y" |]; ignored = (fun () -> ()); arity = 2 }
+;;
+
+let example_ty () : Example.ty =
+  let record = record_type "point" in
+  let var : Example.ty Example.var = { id = 3; link = Some Int } in
+  Tuple
+    ( Arrow
+        ( Record { record; skipped = Fn.id; fields = [ "x", Int; "y", Var var ] }
+        , Record { record; skipped = Fn.id; fields = [] } )
+    , name "n" )
+;;
+
+let%expect_test "example declarations" =
+  let ty = example_ty () in
+  check_round_trip
+    ~gc_stress:Gc_stress.all
+    (module Round_trip.Example_ty)
+    ~sexp_of_t:Example.sexp_of_ty
+    ty;
+  (match Round_trip.Example_ty.round_trip ty ~gc_stress:Compact with
+   | Tuple (Arrow (Record a, Record b), _) ->
+     print_s
+       [%message
+         "rebuilt"
+           ~shared_record_type:(phys_equal a.record b.record : bool)
+           ~skipped_rebuilt:(a.skipped 5 : int)]
+   | back -> print_s [%message "unexpected" (back : Example.ty)]);
+  let rec expr n : Example.Expr.t =
+    { desc =
+        (if n = 0
+         then Lit 0
+         else if n % 2 = 0
+         then App (expr (n - 1), expr (n - 1))
+         else Let { name = name "x"; body = expr (n - 1); in_ = expr (n - 1) })
+    ; ty
+    ; env = String.Map.of_alist_exn [ "a", Example.Int; "b", ty; "\255", Unit ]
+    ; free = String.Set.of_list [ "c"; "d" ]
+    ; ids = Int.Map.of_alist_exn [ 1, 10; 2, 20 ]
+    ; next = (if n = 1 then Some (expr 0) else None)
+    }
+  in
+  let expr = expr 3 in
+  check_round_trip
+    ~gc_stress:Gc_stress.all
+    (module Round_trip.Example_expr)
+    ~sexp_of_t:Example.Expr.sexp_of_t
+    expr;
+  let back = Round_trip.Example_expr.round_trip expr ~gc_stress:Minor in
+  print_s
+    [%message
+      "maps"
+        ~env:(Map.invariants back.env : bool)
+        ~free:(Set.invariants back.free : bool)
+        ~ids:(Map.invariants back.ids : bool)
+        ~find:(Map.find back.ids 2 : int option)];
+  let defs : Example.Defs.expr =
+    { txt =
+        Pair
+          ( { txt = Const ('c', true); pos }
+          , Some { txt = Absurd []; pos = { line = 3; col = 4 } } )
+    ; pos
+    }
+  in
+  check_round_trip
+    ~gc_stress:Gc_stress.all
+    (module Round_trip.Example_defs_expr)
+    ~sexp_of_t:Example.Defs.sexp_of_expr
+    defs;
+  let chained : Example.chained = { var = { id = 1; link = Some ty } } in
+  check_round_trip
+    ~gc_stress:Gc_stress.all
+    (module Round_trip.Example_chained)
+    ~sexp_of_t:Example.sexp_of_chained
+    chained;
+  [%expect
+    {|
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    ((gc_stress Compact) (sexp_equal true) (same same))
+    (rebuilt (shared_record_type true) (skipped_rebuilt 5))
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    ((gc_stress Compact) (sexp_equal true) (same same))
+    (maps (env true) (free true) (ids true) (find (20)))
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    ((gc_stress Compact) (sexp_equal true) (same same))
+    ((gc_stress Off) (sexp_equal true) (same same))
+    ((gc_stress Minor) (sexp_equal true) (same same))
+    ((gc_stress Compact) (sexp_equal true) (same same))
+    |}]
+;;
+
+let%expect_test "errors building" =
+  let show f =
+    match f () with
+    | (_ : _) -> print_endline "built"
+    | exception Failure message -> print_endline message
+  in
+  (* A callback raising. *)
+  show (fun () ->
+    Round_trip.Example_ty.round_trip
+      (Record { record = record_type "raise"; skipped = Fn.id; fields = [] })
+      ~gc_stress:Off);
+  (* A cycle through a value rebuilt by a callback. *)
+  let var : Example.ty Example.var = { id = 1; link = None } in
+  let ty : Example.ty = Var var in
+  var.link
+  <- Some
+       (Record
+          { record = record_type "r"; skipped = Fn.id; fields = [ "self", ty ] });
+  show (fun () -> Round_trip.Example_ty.round_trip ty ~gc_stress:Off);
+  (* A callback not registered. *)
+  print_endline (Debug.missing_callback ());
+  (* Building after errors still works. *)
+  show (fun () ->
+    Round_trip.Example_ty.round_trip (example_ty ()) ~gc_stress:Off);
+  [%expect
+    {|
+    OCaml callback ppx_rust.rebuild.Example.Record_type.t raised Failure("rebuilding raise")
+    a cycle through a value rebuilt by an OCaml callback
+    error: no OCaml callback ppx_rust.map.unregistered (is its library linked?)
+    built
+    |}]
 ;;

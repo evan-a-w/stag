@@ -23,12 +23,9 @@ external typed_ident_info
   -> string
   = "stag_rust_debug_typed_ident_info"
 
-module type Round_trip = sig
-  type t
+include Debug_intf
 
-  val round_trip : t -> gc_stress:bool -> t
-  val same : t -> t -> string
-end
+external missing_callback : unit -> string = "stag_rust_debug_missing_callback"
 
 module Round_trip = struct
   module Typed_toplevels = struct
@@ -36,7 +33,7 @@ module Round_trip = struct
 
     external round_trip
       :  t
-      -> gc_stress:bool
+      -> gc_stress:Gc_stress.t
       -> t
       = "stag_rust_debug_round_trip_typed_toplevels"
 
@@ -48,7 +45,7 @@ module Round_trip = struct
 
     external round_trip
       :  t
-      -> gc_stress:bool
+      -> gc_stress:Gc_stress.t
       -> t
       = "stag_rust_debug_round_trip_typed_program"
 
@@ -60,7 +57,7 @@ module Round_trip = struct
 
     external round_trip
       :  t
-      -> gc_stress:bool
+      -> gc_stress:Gc_stress.t
       -> t
       = "stag_rust_debug_round_trip_ty"
 
@@ -72,10 +69,58 @@ module Round_trip = struct
 
     external round_trip
       :  t
-      -> gc_stress:bool
+      -> gc_stress:Gc_stress.t
       -> t
       = "stag_rust_debug_round_trip_syntax_program"
 
     external same : t -> t -> string = "stag_rust_debug_same_syntax_program"
+  end
+
+  module Example_expr = struct
+    type t = Example.Expr.t
+
+    external round_trip
+      :  t
+      -> gc_stress:Gc_stress.t
+      -> t
+      = "stag_rust_debug_round_trip_example_expr"
+
+    external same : t -> t -> string = "stag_rust_debug_same_example_expr"
+  end
+
+  module Example_ty = struct
+    type t = Example.ty
+
+    external round_trip
+      :  t
+      -> gc_stress:Gc_stress.t
+      -> t
+      = "stag_rust_debug_round_trip_example_ty"
+
+    external same : t -> t -> string = "stag_rust_debug_same_example_ty"
+  end
+
+  module Example_defs_expr = struct
+    type t = Example.Defs.expr
+
+    external round_trip
+      :  t
+      -> gc_stress:Gc_stress.t
+      -> t
+      = "stag_rust_debug_round_trip_example_defs_expr"
+
+    external same : t -> t -> string = "stag_rust_debug_same_example_defs_expr"
+  end
+
+  module Example_chained = struct
+    type t = Example.chained
+
+    external round_trip
+      :  t
+      -> gc_stress:Gc_stress.t
+      -> t
+      = "stag_rust_debug_round_trip_example_chained"
+
+    external same : t -> t -> string = "stag_rust_debug_same_example_chained"
   end
 end

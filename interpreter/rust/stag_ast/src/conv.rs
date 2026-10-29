@@ -9,7 +9,7 @@ use std::sync::Once;
 
 use crate::arena::{Pending, Ref, Store};
 use crate::raw::{self, Value};
-use crate::{Arena, ArenaBuilder};
+use crate::{Arena, ArenaBuilder, Str};
 
 /// A Rust type converted from OCaml values of its OCaml type.
 pub trait FromOcaml: Sized {
@@ -86,6 +86,15 @@ pub unsafe fn convert<T: FromOcaml>(v: Value) -> Result<(T, Arena), Error> {
     })
 }
 
+/// Runs `f`, of OCaml code called from a conversion, printing its panics as
+/// usual.
+pub(crate) fn not_converting<T>(f: impl FnOnce() -> T) -> T {
+    let was = CONVERTING.with(|converting| converting.replace(false));
+    let x = f();
+    CONVERTING.with(|converting| converting.set(was));
+    x
+}
+
 /// Runs `f`, giving its panic as an [`Error`], unprinted.
 pub(crate) fn catching<T>(f: impl FnOnce() -> T) -> Result<T, Error> {
     quiet_panics_of_conversions();
@@ -136,10 +145,9 @@ impl FromOcaml for () {
     unsafe fn from_ocaml(_: Value, _: &mut ArenaBuilder) -> Self {}
 }
 
-/// OCaml strings are bytes: those that are not UTF-8 are converted lossily.
-impl FromOcaml for String {
+impl FromOcaml for Str {
     unsafe fn from_ocaml(v: Value, _: &mut ArenaBuilder) -> Self {
-        String::from_utf8_lossy(raw::bytes(v)).into_owned()
+        Str::from(raw::bytes(v))
     }
 }
 

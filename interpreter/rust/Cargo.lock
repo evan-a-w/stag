@@ -60,4 +60,5 @@ version = "0.1.0"
 dependencies = [
  "ocaml-sys",
  "stag_ast",
+ "stag_ast_example",
 ]

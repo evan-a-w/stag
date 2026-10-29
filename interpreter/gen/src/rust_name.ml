@@ -90,16 +90,27 @@ let crate_types =
   String.Set.of_list
     [ "Arena"
     ; "ArenaBuilder"
+    ; "Builder"
+    ; "Construct"
     ; "Error"
     ; "FromOcaml"
+    ; "GcStress"
+    ; "Indexed"
     ; "Map"
     ; "Nothing"
+    ; "OcamlKey"
     ; "Pending"
     ; "Ref"
     ; "Set"
+    ; "Slot"
     ; "Store"
     ; "Stored"
+    ; "Str"
+    ; "ToOcaml"
     ]
 ;;
 
-let crate_modules = String.Set.of_list [ "arena"; "conv"; "raw"; "tests" ]
+let crate_modules =
+  String.Set.of_list
+    [ "arena"; "conv"; "ostring"; "raw"; "test_heap"; "tests"; "to_ocaml" ]
+;;

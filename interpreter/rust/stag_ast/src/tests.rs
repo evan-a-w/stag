@@ -1,5 +1,5 @@
 use crate::test_heap::{int, Heap};
-use crate::{convert, type_, Map, Ref, Set};
+use crate::{convert, type_, Map, Ref, Set, Str};
 
 #[test]
 fn everything_is_send_and_sync() {
@@ -16,9 +16,9 @@ fn strings_lists_and_options() {
     let values: Vec<_> = strings.iter().map(|s| heap.string(s)).collect();
     let list = heap.list(&values);
     let some = heap.block(0, &[list]);
-    let (converted, _) = unsafe { convert::<Option<Vec<String>>>(some) }.unwrap();
-    assert_eq!(converted, Some(strings.map(String::from).to_vec()));
-    let (none, _) = unsafe { convert::<Option<Vec<String>>>(int(0)) }.unwrap();
+    let (converted, _) = unsafe { convert::<Option<Vec<Str>>>(some) }.unwrap();
+    assert_eq!(converted, Some(strings.map(Str::from).to_vec()));
+    let (none, _) = unsafe { convert::<Option<Vec<Str>>>(int(0)) }.unwrap();
     assert_eq!(none, None);
 }
 
@@ -32,9 +32,9 @@ fn maps_and_sets() {
     let right = heap.block(1, &[int(0), int(3), c, leaf4, int(2)]);
     let tree = heap.block(1, &[leaf1, int(2), b, right, int(3)]);
     let map = heap.block(0, &[int(0), tree, int(4)]);
-    let (map, _) = unsafe { convert::<Map<i64, String>>(map) }.unwrap();
+    let (map, _) = unsafe { convert::<Map<i64, Str>>(map) }.unwrap();
     assert_eq!(format!("{map:?}"), r#"{1: "a", 2: "b", 3: "c", 4: "d"}"#);
-    assert_eq!(map.get(&3).map(String::as_str), Some("c"));
+    assert_eq!(map.get(&3).map(Str::as_bytes), Some(&b"c"[..]));
     assert_eq!(map.get(&5), None);
 
     let leaf = heap.block(0, &[int(5)]);
@@ -103,8 +103,8 @@ fn values_of_the_wrong_type_are_errors() {
         unsafe { convert::<Ref<type_::Ty>>(int(3)) }.map(drop),
         unsafe { convert::<Ref<type_::Ty>>(block) }.map(drop),
         unsafe { convert::<Ref<type_::Ty>>(small) }.map(drop),
-        unsafe { convert::<String>(int(1)) }.map(drop),
-        unsafe { convert::<String>(block) }.map(drop),
+        unsafe { convert::<Str>(int(1)) }.map(drop),
+        unsafe { convert::<Str>(block) }.map(drop),
         unsafe { convert::<Vec<i64>>(s) }.map(drop),
         unsafe { convert::<crate::Nothing>(int(0)) }.map(drop),
     ];
@@ -135,7 +135,9 @@ fn store_indices_match_store_lens() {
     let mut arena = Arena::default();
     // Distinct lengths, so that a store at the wrong index is noticed.
     for n in 0..3 {
-        arena.type_ty.push(type_::Ty::TCon(n.to_string(), vec![]));
+        arena
+            .type_ty
+            .push(type_::Ty::TCon(n.to_string().into(), vec![]));
     }
     arena.type_row.push(type_::Row::REmpty);
     let mut seen = vec![];
@@ -148,4 +150,16 @@ fn store_indices_match_store_lens() {
     check::<crate::typed::RecordType>(&arena, &mut seen);
     seen.sort();
     assert_eq!(seen, (0..arena.store_lens().len()).collect::<Vec<_>>());
+}
+
+#[test]
+fn strings_are_bytes() {
+    let mut heap = Heap::default();
+    let v = heap.bytes(b"\xff\x00\"\\\n\xc3\xa9 ok");
+    let (s, _) = unsafe { convert::<Str>(v) }.unwrap();
+    assert_eq!(s.as_bytes(), b"\xff\x00\"\\\n\xc3\xa9 ok");
+    assert!(s.to_str().is_err());
+    assert_eq!(format!("{s:?}"), r#""\255\000\"\\\n\195\169 ok""#);
+    assert_eq!(format!("{s}"), "\u{fffd}\0\"\\\n\u{e9} ok");
+    assert_eq!(Str::from("é").to_str(), Ok("é"));
 }

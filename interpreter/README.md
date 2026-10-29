@@ -50,6 +50,7 @@ Rust code linked into stag.
 - Values not of the type converted to may crash. Where it can tell (eg. an
   unexpected tag), conversion returns an `Error`.
 - Core `Map`s and `Set`s become `HashMap`s and `HashSet`s (`Map`, `Set`).
+- OCaml strings are bytes: they become `Str`s, not necessarily UTF-8.
 
 ## Building OCaml values
 
@@ -68,9 +69,16 @@ Rust code linked into stag.
 - Core maps and sets are built by OCaml callbacks that `[@@deriving rust]`
   registers for each key type, with its comparator (`of_alist_exn`,
   `of_list`), so they are real maps and sets, of which Rust builds the list.
-- `gc_stress` (for tests) collects the minor heap before every allocation,
-  then fills it with garbage, so that a value held unrooted across an
-  allocation is overwritten: set the minor heap small when using it.
+- `GcStress` (for tests), before every allocation:
+  - `Minor` collects the minor heap, then fills it with garbage, so that a
+    young value held unrooted across an allocation is overwritten. Set the
+    minor heap small when using it.
+  - `Compact` also compacts the major heap, and moves the builder's root
+    blocks (its stack and stores) to new blocks, overwriting the old ones'
+    fields, which catches major values held unrooted. It is slow (quadratic),
+    so for small values.
+  - Neither runs pending actions (signal handlers, finalisers), so no OCaml
+    exception can cross Rust frames.
 
 ## Building
 

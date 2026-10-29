@@ -11,3 +11,4 @@ crate-type = ["staticlib"]
 [dependencies]
 ocaml-sys.workspace = true
 stag_ast = { path = "../stag_ast" }
+stag_ast_example = { path = "../stag_ast_example" }

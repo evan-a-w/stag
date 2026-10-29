@@ -1,12 +1,17 @@
 //! OCaml externals showing what values are converted to, for tests.
 
-use std::ffi::CString;
+use std::collections::HashMap;
 use std::fmt::Debug;
 
 use ocaml_sys::Value;
-use stag_ast::{convert, to_ocaml, type_, typed, FromOcaml, ToOcaml};
+use stag_ast::{convert, to_ocaml, type_, typed, FromOcaml, GcStress, ToOcaml};
+use stag_ast_example as example;
 
 use crate::ocaml_string;
+
+extern "C" {
+    fn caml_failwith_value(message: Value) -> !;
+}
 
 /// `v` converted, and the arena of the conversion, or why it failed.
 unsafe fn show<T: FromOcaml + Debug>(v: Value) -> Value {
@@ -97,18 +102,72 @@ pub unsafe extern "C" fn stag_rust_debug_typed_ident_info(v: Value) -> Value {
 }
 
 /// `v` converted to Rust and built back, raising `Failure` if either fails.
-/// With `gc_stress`, the GC runs before every allocation of the building.
 unsafe fn round_trip<T: FromOcaml + ToOcaml>(v: Value, gc_stress: Value) -> Value {
-    let built = convert::<T>(v)
-        .and_then(|(x, arena)| to_ocaml(&x, &arena, ocaml_sys::int_val(gc_stress) != 0));
-    match built {
-        Ok(v) => v,
-        Err(error) => {
-            let message = CString::new(error.to_string()).unwrap_or_default();
-            ocaml_sys::caml_failwith(message.as_ptr());
-            unreachable!()
-        }
+    let gc_stress = GcStress::of_ocaml(gc_stress);
+    let message = match convert::<T>(v).and_then(|(x, arena)| to_ocaml(&x, &arena, gc_stress)) {
+        Ok(v) => return v,
+        Err(error) => ocaml_string::of_str(&error.0),
+    };
+    caml_failwith_value(message)
+}
+
+/// As [`round_trip`], of the example declarations' crate.
+unsafe fn example_round_trip<T: example::FromOcaml + example::ToOcaml>(
+    v: Value,
+    gc_stress: Value,
+) -> Value {
+    let gc_stress = match GcStress::of_ocaml(gc_stress) {
+        GcStress::Off => example::GcStress::Off,
+        GcStress::Minor => example::GcStress::Minor,
+        GcStress::Compact => example::GcStress::Compact,
+    };
+    let message = match example::convert::<T>(v)
+        .and_then(|(x, arena)| example::to_ocaml(&x, &arena, gc_stress))
+    {
+        Ok(v) => return v,
+        Err(error) => ocaml_string::of_str(&error.0),
+    };
+    caml_failwith_value(message)
+}
+
+/// As [`same`], of the example declarations' crate.
+unsafe fn example_same<T: example::FromOcaml + PartialEq>(a: Value, b: Value) -> Value {
+    let shown = match (example::convert::<T>(a), example::convert::<T>(b)) {
+        (Ok(a), Ok(b)) if a == b => "same".to_owned(),
+        (Ok(_), Ok(_)) => "different".to_owned(),
+        (Err(error), _) | (_, Err(error)) => format!("error: {error}"),
+    };
+    ocaml_string::of_str(&shown)
+}
+
+/// A key type whose OCaml map callback is not registered.
+#[derive(PartialEq, Eq, Hash)]
+struct Unregistered;
+
+impl ToOcaml for Unregistered {
+    unsafe fn to_ocaml(&self, _: &mut stag_ast::Builder) -> Value {
+        ocaml_sys::val_int(0)
     }
+}
+
+impl stag_ast::OcamlKey for Unregistered {
+    const MAP: &'static str = "ppx_rust.map.unregistered";
+    const SET: &'static str = "ppx_rust.set.unregistered";
+}
+
+/// Why building a map of a key type without callbacks fails.
+///
+/// # Safety
+///
+/// Must be called from OCaml.
+#[no_mangle]
+pub unsafe extern "C" fn stag_rust_debug_missing_callback(_: Value) -> Value {
+    let map = stag_ast::Map(HashMap::from([(Unregistered, 1i64)]));
+    let shown = match to_ocaml(&map, &stag_ast::Arena::default(), GcStress::Off) {
+        Ok(_) => "built".to_owned(),
+        Err(error) => format!("error: {error}"),
+    };
+    ocaml_string::of_str(&shown)
 }
 
 /// Whether `a` and `b` convert to equal values with equal arenas, so are
@@ -161,4 +220,45 @@ round_trip!(
     stag_rust_debug_round_trip_syntax_program,
     stag_rust_debug_same_syntax_program,
     "Syntax.Program.t"
+);
+
+macro_rules! example_round_trip {
+    ($ty:ty, $round_trip:ident, $same:ident, $ocaml:literal) => {
+        #[doc = concat!("# Safety\n\n`v` must be a `", $ocaml, "`.")]
+        #[no_mangle]
+        pub unsafe extern "C" fn $round_trip(v: Value, gc_stress: Value) -> Value {
+            example_round_trip::<$ty>(v, gc_stress)
+        }
+
+        #[doc = concat!("# Safety\n\n`a` and `b` must be `", $ocaml, "`s.")]
+        #[no_mangle]
+        pub unsafe extern "C" fn $same(a: Value, b: Value) -> Value {
+            example_same::<$ty>(a, b)
+        }
+    };
+}
+
+example_round_trip!(
+    example::example::Expr,
+    stag_rust_debug_round_trip_example_expr,
+    stag_rust_debug_same_example_expr,
+    "Example.Expr.t"
+);
+example_round_trip!(
+    example::Ref<example::example::Ty>,
+    stag_rust_debug_round_trip_example_ty,
+    stag_rust_debug_same_example_ty,
+    "Example.ty"
+);
+example_round_trip!(
+    example::example::defs::Expr,
+    stag_rust_debug_round_trip_example_defs_expr,
+    stag_rust_debug_same_example_defs_expr,
+    "Example.Defs.expr"
+);
+example_round_trip!(
+    example::example::Chained,
+    stag_rust_debug_round_trip_example_chained,
+    stag_rust_debug_same_example_chained,
+    "Example.chained"
 );

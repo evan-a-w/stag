@@ -4,7 +4,7 @@
  (foreign_archives stag_rust)
  (preprocess
   (pps ppx_jane))
- (libraries core stag_types stag_syntax stag_ir))
+ (libraries core stag_types stag_syntax stag_ir rust_bindgen_example))
 
 (rule
  (targets libstag_rust.a)

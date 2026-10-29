@@ -12,13 +12,13 @@ use std::collections::HashMap;
 use std::ffi::CString;
 
 use ocaml_sys::{
-    caml_alloc, caml_alloc_string, caml_callback_exn, caml_modify, caml_named_value,
-    caml_register_generational_global_root, caml_remove_generational_global_root,
+    caml_alloc, caml_alloc_initialized_string, caml_alloc_string, caml_callback_exn, caml_modify,
+    caml_named_value, caml_register_generational_global_root, caml_remove_generational_global_root,
     extract_exception, is_exception_result, val_int, Value,
 };
 
-use crate::conv::{catching, Map, Nothing, Set, Stored};
-use crate::{Arena, Error, Ref};
+use crate::conv::{catching, not_converting, Map, Nothing, Set, Stored};
+use crate::{Arena, Error, Ref, Str};
 
 /// A Rust type of which OCaml values of its OCaml type are built.
 pub trait ToOcaml {
@@ -70,6 +70,39 @@ pub trait OcamlKey {
     const SET: &'static str;
 }
 
+/// How hard [`to_ocaml`] makes the GC work, for tests: so that OCaml values
+/// Rust holds unrooted across an allocation are moved, and their old
+/// locations overwritten.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GcStress {
+    Off,
+    /// Before every allocation, collects the minor heap, then fills all of it
+    /// with garbage, so set the minor heap small. Catches young values held
+    /// unrooted.
+    Minor,
+    /// As [`GcStress::Minor`], and before every allocation also compacts the
+    /// major heap, and moves the blocks of the builder's roots (its stack and
+    /// stores), which compaction may not, overwriting their old fields.
+    /// Catches major values held unrooted; slow, so for small values.
+    Compact,
+}
+
+impl GcStress {
+    /// Of the OCaml variant `Off | Minor | Compact`.
+    ///
+    /// # Safety
+    ///
+    /// `v` must be an immediate.
+    pub unsafe fn of_ocaml(v: Value) -> Self {
+        match ocaml_sys::int_val(v) {
+            0 => GcStress::Off,
+            1 => GcStress::Minor,
+            2 => GcStress::Compact,
+            n => panic!("GcStress: unexpected {n}"),
+        }
+    }
+}
+
 /// A position in the roots of a [`Builder`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Slot(usize);
@@ -90,39 +123,63 @@ pub struct Builder<'a> {
     len: usize,
     states: Vec<Vec<State>>,
     callbacks: HashMap<&'static str, *const Value>,
-    /// Whether to collect the minor heap before every allocation (and compact
-    /// sometimes), so that values Rust holds unrooted move, then fill the
-    /// minor heap with garbage, so that they are overwritten.
-    gc_stress: bool,
-    /// The size of the minor heap, in words, if `gc_stress`.
+    gc_stress: GcStress,
+    /// The size of the minor heap, in words, with `gc_stress`.
     minor_heap_words: usize,
-    allocations: usize,
 }
 
 impl Builder<'_> {
+    /// A block of `size` fields, all `()`.
+    ///
     /// # Safety
     ///
     /// Allocates.
-    unsafe fn alloc(&mut self, size: usize, tag: u8) -> Value {
+    pub unsafe fn block(&mut self, size: usize, tag: u8) -> Value {
         self.stress();
         caml_alloc(size, tag)
     }
 
+    /// Neither collection runs pending actions (signal handlers, finalisers),
+    /// so no OCaml code runs, nor raises through Rust frames.
     unsafe fn stress(&mut self) {
-        if self.gc_stress {
-            self.allocations += 1;
-            if self.allocations.is_multiple_of(4096) {
-                caml_gc_compaction(val_int(0));
-            } else {
-                caml_gc_minor(val_int(0));
-            }
-            // Without this, the next minor collection would find values held
-            // unrooted, but stored since, by their forwarding pointers.
-            for _ in 0..(self.minor_heap_words / POISON_WORDS).saturating_sub(2) {
-                let poison = caml_alloc_string(POISON_BYTES);
-                std::ptr::write_bytes(poison as *mut u8, 0xAB, POISON_BYTES);
+        if self.gc_stress == GcStress::Off {
+            return;
+        }
+        if self.gc_stress == GcStress::Compact {
+            caml_finish_major_cycle(1);
+            self.move_roots();
+        }
+        caml_minor_collection();
+        // Values held unrooted, but stored since, would otherwise still be
+        // found by the next minor collection, by their forwarding pointers.
+        // The minor heap is empty: the big strings fill most of it, and the
+        // small ones the rest, until they make the next minor collection.
+        let collections = std::ptr::read_volatile(&raw const caml_minor_collections_count);
+        for _ in 0..(self.minor_heap_words / POISON_WORDS).saturating_sub(1) {
+            poison(POISON_BYTES);
+        }
+        while std::ptr::read_volatile(&raw const caml_minor_collections_count) == collections {
+            poison(8);
+        }
+    }
+
+    /// Copies the root stack and the arena's stores to new blocks, and
+    /// overwrites the old ones' fields with [`MOVED`].
+    unsafe fn move_roots(&mut self) {
+        for store in 0..self.states.len().min(self.len) {
+            let len = ocaml_sys::wosize_val(self.get(Slot(store)));
+            if len > 0 {
+                let new = caml_alloc(len, 0);
+                let old = self.get(Slot(store));
+                move_fields(old, new, len);
+                self.set_root(Slot(store), new);
             }
         }
+        let capacity = self.capacity();
+        let new = caml_alloc(capacity, 0);
+        let old = self.roots();
+        move_fields(old, new, capacity);
+        ocaml_sys::caml_modify_generational_global_root(&mut *self.roots, new);
     }
 
     fn roots(&self) -> Value {
@@ -138,7 +195,7 @@ impl Builder<'_> {
     /// # Safety
     ///
     /// May allocate, keeping `v` alive.
-    pub unsafe fn push(&mut self, v: Value) -> Slot {
+    pub(crate) unsafe fn push(&mut self, v: Value) -> Slot {
         let v = if self.len == self.capacity() {
             self.grow(v)
         } else {
@@ -156,7 +213,7 @@ impl Builder<'_> {
         let mut v = Box::new(v);
         caml_register_generational_global_root(&mut *v);
         let old = self.capacity();
-        let bigger = self.alloc(old * 2, 0);
+        let bigger = self.block(old * 2, 0);
         for i in 0..old {
             caml_modify(
                 ocaml_sys::field(bigger, i),
@@ -168,8 +225,8 @@ impl Builder<'_> {
         *v
     }
 
-    /// Pops `slot`, the top of the root stack, giving its value.
-    pub fn pop(&mut self, slot: Slot) -> Value {
+    /// Pops `slot`, the top of the root stack, giving its value, unrooted.
+    pub(crate) fn pop(&mut self, slot: Slot) -> Value {
         assert_eq!(slot.0 + 1, self.len, "popping a slot not on top");
         let v = self.get(slot);
         unsafe { self.set_root(slot, val_int(0)) };
@@ -177,7 +234,8 @@ impl Builder<'_> {
         v
     }
 
-    pub fn get(&self, slot: Slot) -> Value {
+    /// The value at `slot`, unrooted.
+    pub(crate) fn get(&self, slot: Slot) -> Value {
         unsafe { *ocaml_sys::field(self.roots(), slot.0) }
     }
 
@@ -185,22 +243,11 @@ impl Builder<'_> {
         caml_modify(ocaml_sys::field(self.roots(), slot.0), v)
     }
 
-    /// Sets field `i` of the block at `slot` to `x`.
-    ///
     /// # Safety
     ///
     /// The block must have the field.
     pub unsafe fn set(&mut self, slot: Slot, i: usize, x: Value) {
         caml_modify(ocaml_sys::field(self.get(slot), i), x)
-    }
-
-    /// A block of `size` fields, all `()`.
-    ///
-    /// # Safety
-    ///
-    /// Allocates.
-    pub unsafe fn block(&mut self, size: usize, tag: u8) -> Value {
-        self.alloc(size, tag)
     }
 
     /// Builds `x`'s value, with [`Construct::REBUILD`] if any.
@@ -219,7 +266,6 @@ impl Builder<'_> {
         }
     }
 
-    /// Calls the OCaml callback registered as `name` with `arg`.
     unsafe fn call(&mut self, name: &'static str, arg: Value) -> Value {
         let f = *self.callbacks.entry(name).or_insert_with(|| {
             let c_name = CString::new(name).unwrap();
@@ -228,14 +274,14 @@ impl Builder<'_> {
         if f.is_null() {
             panic!("no OCaml callback {name} (is its library linked?)")
         }
-        let arg = if self.gc_stress {
+        let arg = if self.gc_stress != GcStress::Off {
             let slot = self.push(arg);
             self.stress();
             self.pop(slot)
         } else {
             arg
         };
-        let result = caml_callback_exn(*f, arg);
+        let result = not_converting(|| caml_callback_exn(*f, arg));
         if is_exception_result(result) {
             panic!(
                 "OCaml callback {name} raised {}",
@@ -272,7 +318,6 @@ impl Builder<'_> {
         v
     }
 
-    /// Builds a list of the values of `xs`.
     unsafe fn list<X>(
         &mut self,
         xs: impl ExactSizeIterator<Item = X>,
@@ -302,36 +347,58 @@ impl Builder<'_> {
 const POISON_BYTES: usize = 255 * 8;
 const POISON_WORDS: usize = 257;
 
+/// What the fields of blocks [`Builder::move_roots`] moved are overwritten
+/// with.
+const MOVED: Value = 0x4d4f_5645_445f_6d6f_u64 as Value | 1;
+
+unsafe fn move_fields(old: Value, new: Value, len: usize) {
+    for i in 0..len {
+        caml_modify(ocaml_sys::field(new, i), *ocaml_sys::field(old, i));
+        caml_modify(ocaml_sys::field(old, i), MOVED);
+    }
+}
+
+unsafe fn poison(bytes: usize) {
+    let v = caml_alloc_string(bytes);
+    std::ptr::write_bytes(v as *mut u8, 0xAB, bytes);
+}
+
 extern "C" {
     fn caml_gc_get(v: Value) -> Value;
-    fn caml_gc_minor(v: Value) -> Value;
-    fn caml_gc_compaction(v: Value) -> Value;
+    fn caml_minor_collection();
+    fn caml_finish_major_cycle(force_compaction: std::ffi::c_int);
+    static caml_minor_collections_count: usize;
     fn caml_format_exception(v: Value) -> *mut std::ffi::c_char;
-    fn free(p: *mut std::ffi::c_void);
+    fn caml_stat_free(p: *mut std::ffi::c_void);
 }
 
 unsafe fn exception_name(exn: Value) -> String {
     let s = caml_format_exception(exn);
+    if s.is_null() {
+        return "an exception".to_owned();
+    }
     let name = std::ffi::CStr::from_ptr(s).to_string_lossy().into_owned();
-    free(s.cast());
+    caml_stat_free(s.cast());
     name
 }
 
 /// Builds the OCaml value of `x`, whose [`Ref`]s are into `arena`. Values of
 /// the arena are built once each, so OCaml values share them as Rust ones do,
-/// and cycles through them are rebuilt. With `gc_stress`, for tests, the GC
-/// runs before every allocation, then fills the minor heap with garbage (so
-/// set the minor heap small).
+/// and cycles through them are rebuilt.
 ///
 /// # Safety
 ///
 /// Must be called from OCaml (eg. in an external), holding the runtime lock.
 /// The value returned is not rooted: it must be returned or rooted before
 /// anything allocates.
-pub unsafe fn to_ocaml<T: ToOcaml>(x: &T, arena: &Arena, gc_stress: bool) -> Result<Value, Error> {
+pub unsafe fn to_ocaml<T: ToOcaml>(
+    x: &T,
+    arena: &Arena,
+    gc_stress: GcStress,
+) -> Result<Value, Error> {
     catching(|| {
         let lens = arena.store_lens();
-        let minor_heap_words = if gc_stress {
+        let minor_heap_words = if gc_stress != GcStress::Off {
             ocaml_sys::int_val(*ocaml_sys::field(caml_gc_get(val_int(0)), 0)) as usize
         } else {
             0
@@ -346,7 +413,6 @@ pub unsafe fn to_ocaml<T: ToOcaml>(x: &T, arena: &Arena, gc_stress: bool) -> Res
             callbacks: HashMap::new(),
             gc_stress,
             minor_heap_words,
-            allocations: 0,
         });
         let cx = &mut cx.0;
         for len in lens {
@@ -396,12 +462,10 @@ impl ToOcaml for () {
     }
 }
 
-impl ToOcaml for String {
+impl ToOcaml for Str {
     unsafe fn to_ocaml(&self, cx: &mut Builder) -> Value {
         cx.stress();
-        let v = caml_alloc_string(self.len());
-        std::ptr::copy_nonoverlapping(self.as_ptr(), v as *mut u8, self.len());
-        v
+        caml_alloc_initialized_string(self.len(), self.as_ptr().cast())
     }
 }
 
@@ -504,6 +568,6 @@ macro_rules! key {
 }
 
 key!(i64, "int");
-key!(String, "string");
+key!(Str, "string");
 key!(u8, "char");
 key!(bool, "bool");

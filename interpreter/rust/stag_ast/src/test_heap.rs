@@ -18,10 +18,14 @@ impl Heap {
     }
 
     pub fn string(&mut self, s: &str) -> Value {
+        self.bytes(s.as_bytes())
+    }
+
+    pub fn bytes(&mut self, s: &[u8]) -> Value {
         let word = std::mem::size_of::<usize>();
         let words = s.len() / word + 1;
         let mut bytes = vec![0u8; words * word];
-        bytes[..s.len()].copy_from_slice(s.as_bytes());
+        bytes[..s.len()].copy_from_slice(s);
         bytes[words * word - 1] = (words * word - 1 - s.len()) as u8;
         let fields: Vec<Value> = bytes
             .chunks(word)

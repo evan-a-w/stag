@@ -205,7 +205,7 @@ module Gen = struct
     | Bool -> "bool"
     | Char -> "u8"
     | Unit -> "()"
-    | String -> "String"
+    | String -> "crate::Str"
     | Nothing -> "crate::Nothing"
     | List elt -> sprintf "Vec<%s>" (ty elt)
     | Array elt -> sprintf "Box<[%s]>" (ty elt)
@@ -774,31 +774,59 @@ let rec keys (ty : Ty.t) =
   | Tuple tys | Decl (_, tys) -> List.concat_map tys ~f:keys
 ;;
 
-(** The [OcamlKey] impls of the declarations [keys] gives. *)
+(** The [OcamlKey] impls of the map key and set element types [tys]. Each
+    names the OCaml callbacks of its key type, so distinct key types of one
+    Rust type (eg. an alias and what it aliases) would share comparators. *)
 let ocaml_keys (gen : Gen.t) ~follow tys =
-  List.filter_map tys ~f:(fun (ty : Ty.t) ->
-    match ty with
-    | Int | Bool | Char | String -> None
-    | _ ->
-      Some
-        (match R.Type_expr.key_name ty with
-         | None ->
-           Or_error.error_s
-             [%message "Unsupported map key or set element" (ty : Ty.t)]
-         | Some name -> Ok (Gen.ty gen ~from:[] (follow ty), name)))
-  |> Or_error.all
-  |> Or_error.map ~f:(fun keys ->
-    List.dedup_and_sort keys ~compare:(fun (a, _) (b, _) -> String.compare a b)
-    |> List.map ~f:(fun (rust, name) ->
-      sprintf
-        "impl crate::OcamlKey for %s {\n\
-        \    const MAP: &'static str = %S;\n\
-        \    const SET: &'static str = %S;\n\
-         }\n"
-        rust
-        (R.Callback_name.map name)
-        (R.Callback_name.set name))
-    |> String.concat ~sep:"\n")
+  let open Or_error.Let_syntax in
+  let rec expand ty =
+    match (follow ty : Ty.t) with
+    | Decl (key, []) as ty ->
+      (match (Map.find_exn gen.items key).body with
+       | Alias ty -> expand ty
+       | Record _ | Variant _ -> ty)
+    | ty -> ty
+  in
+  let%bind keys =
+    List.map tys ~f:(fun (ty : Ty.t) ->
+      match R.Type_expr.key_name ty with
+      | None ->
+        Or_error.error_s
+          [%message "Unsupported map key or set element" (ty : Ty.t)]
+      | Some name -> Ok (Gen.ty gen ~from:[] (expand ty), name))
+    |> Or_error.all
+  in
+  let builtins =
+    List.map [ Ty.Int; Bool; Char; String ] ~f:(fun ty ->
+      Gen.ty gen ~from:[] ty, Option.value_exn (R.Type_expr.key_name ty))
+  in
+  let%map keys =
+    List.dedup_and_sort (keys @ builtins) ~compare:[%compare: string * string]
+    |> List.sort_and_group ~compare:(fun (a, _) (b, _) -> String.compare a b)
+    |> List.map ~f:(function
+      | [ key ] -> Ok key
+      | (rust, _) :: _ as group ->
+        Or_error.error_s
+          [%message
+            "Map keys or set elements of distinct OCaml types (so maybe \
+             comparators) are of one Rust type"
+              (rust : string)
+              ~types:(List.map group ~f:snd : string list)]
+      | [] -> assert false)
+    |> Or_error.combine_errors
+  in
+  List.filter keys ~f:(fun key ->
+    not (List.mem builtins key ~equal:[%equal: string * string]))
+  |> List.map ~f:(fun (rust, name) ->
+    sprintf
+      "impl crate::OcamlKey for %s {\n\
+      \    const MAP: &'static str = %S;\n\
+      \    const SET: &'static str = %S;\n\
+       }\n"
+      rust
+      (R.Callback_name.map name)
+      (R.Callback_name.set name))
+  |> String.concat ~sep:"\n"
 ;;
 
 let generate ~rebuilt (decls : R.Decl.t list) =

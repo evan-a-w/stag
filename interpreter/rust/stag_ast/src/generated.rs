@@ -76,7 +76,7 @@ impl crate::Construct for Intrinsic {
 /// OCaml: [Loc.t].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Loc {
-    pub file: String,
+    pub file: crate::Str,
     pub start: loc::Pos,
     pub stop: loc::Pos,
 }
@@ -154,7 +154,7 @@ impl<A: crate::ToOcaml> crate::Construct for Located<A> {
 /// OCaml: [Prim.t].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Prim {
-    pub name: String,
+    pub name: crate::Str,
     pub args: Vec<prim::BaseType>,
     pub result: prim::BaseType,
 }
@@ -548,7 +548,7 @@ pub mod syntax {
     pub enum DeclPath {
         Path(Path),
         Root(Path),
-        Resolved(String),
+        Resolved(crate::Str),
     }
 
     impl crate::FromOcaml for DeclPath {
@@ -615,7 +615,7 @@ pub mod syntax {
     pub enum Lit {
         Int(i64),
         Bool(bool),
-        String(String),
+        String(crate::Str),
         Char(u8),
         Unit,
     }
@@ -690,10 +690,10 @@ pub mod syntax {
     }
 
     /// OCaml: [Syntax.Name.t].
-    pub type Name = crate::Located<String>;
+    pub type Name = crate::Located<crate::Str>;
 
     /// OCaml: [Syntax.Path.t].
-    pub type Path = Vec<String>;
+    pub type Path = Vec<crate::Str>;
 
     /// OCaml: [Syntax.Pattern.t].
     pub type Pattern = defs::Pattern;
@@ -780,7 +780,7 @@ pub mod syntax {
             PolyRestrict(Box<Expr>, crate::syntax::Name),
             PolyUpdate(Box<Expr>, Vec<(crate::syntax::Name, Expr)>),
             PolyVariant(crate::syntax::Name, Option<Box<Expr>>),
-            Expect(crate::Located<String>),
+            Expect(crate::Located<crate::Str>),
             StructQuote(Vec<Toplevel>),
             Error,
         }
@@ -1056,7 +1056,7 @@ pub mod syntax {
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         pub enum PatternDesc {
             Any,
-            Var(String),
+            Var(crate::Str),
             Lit(crate::syntax::Lit),
             Tuple(Vec<Pattern>),
             Construct(crate::Located<crate::syntax::DeclPath>, Vec<Pattern>),
@@ -1319,11 +1319,11 @@ pub mod syntax {
             ModuleSplice(crate::syntax::Name, Expr, Option<crate::Located<Vec<Toplevel>>>),
             Include(Expr, Option<crate::Located<Vec<Toplevel>>>),
             ExpectTest {
-                name: crate::Located<String>,
+                name: crate::Located<crate::Str>,
                 body: Expr,
             },
             Bench {
-                name: crate::Located<String>,
+                name: crate::Located<crate::Str>,
                 param: Option<BenchParam>,
                 body: Expr,
             },
@@ -1656,8 +1656,8 @@ pub mod syntax {
         /// OCaml: [Syntax.Defs.type_decl_param].
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         pub enum TypeDeclParam {
-            Ty(String),
-            Row(String),
+            Ty(crate::Str),
+            Row(crate::Str),
         }
 
         impl crate::FromOcaml for TypeDeclParam {
@@ -1714,7 +1714,7 @@ pub mod syntax {
         /// OCaml: [Syntax.Defs.type_expr_desc].
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         pub enum TypeExprDesc {
-            Var(String),
+            Var(crate::Str),
             Con(crate::Located<crate::syntax::DeclPath>, Vec<TypeArg>),
             Arrow(Box<TypeExpr>, Box<TypeExpr>),
             Tuple(Vec<TypeExpr>),
@@ -1934,7 +1934,7 @@ pub mod type_ {
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub struct Bound {
         pub row: crate::Ref<Row>,
-        pub shadowed: crate::Set<String>,
+        pub shadowed: crate::Set<crate::Str>,
     }
 
     impl crate::FromOcaml for Bound {
@@ -2234,7 +2234,7 @@ pub mod type_ {
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub enum Row {
         REmpty,
-        RExtend(String, Presence, crate::Ref<Ty>, crate::Ref<Row>),
+        RExtend(crate::Str, Presence, crate::Ref<Ty>, crate::Ref<Row>),
         RVar(crate::Ref<Var<crate::Ref<Row>, Bound>>),
     }
 
@@ -2303,7 +2303,7 @@ pub mod type_ {
     /// OCaml: [Type.ty].
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub enum Ty {
-        TCon(String, Vec<Arg>),
+        TCon(crate::Str, Vec<Arg>),
         TArrow(crate::Ref<Ty>, crate::Ref<Ty>),
         TTuple(Vec<crate::Ref<Ty>>),
         TCode {
@@ -2544,7 +2544,7 @@ pub mod typed {
     /// OCaml: [Typed.Bench.t].
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub struct Bench {
-        pub name: crate::Located<String>,
+        pub name: crate::Located<crate::Str>,
         pub param: Option<(Ident, Vec<Expr>)>,
         pub body: Expr,
         pub loc: crate::Loc,
@@ -2648,8 +2648,8 @@ pub mod typed {
     /// OCaml: [Typed.Constructor_ref.t].
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub struct ConstructorRef {
-        pub type_name: String,
-        pub name: String,
+        pub type_name: crate::Str,
+        pub name: crate::Str,
         pub index: i64,
     }
 
@@ -2689,7 +2689,7 @@ pub mod typed {
     /// OCaml: [Typed.Expect_test.t].
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub struct ExpectTest {
-        pub name: crate::Located<String>,
+        pub name: crate::Located<crate::Str>,
         pub body: Expr,
         pub loc: crate::Loc,
         pub generated: bool,
@@ -2812,7 +2812,7 @@ pub mod typed {
     /// OCaml: [Typed.Ident.t].
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub struct Ident {
-        pub name: String,
+        pub name: crate::Str,
         pub stamp: i64,
     }
 
@@ -2976,8 +2976,8 @@ pub mod typed {
     /// OCaml: [Typed.Record_type.t].
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub struct RecordType {
-        pub name: String,
-        pub fields: Box<[String]>,
+        pub name: crate::Str,
+        pub fields: Box<[crate::Str]>,
     }
 
     impl crate::FromOcaml for RecordType {
@@ -3097,8 +3097,8 @@ pub mod typed {
     pub enum VarRef {
         Bound(Binder),
         Persistent(Binder),
-        Free(String),
-        FreeToplevel(String),
+        Free(crate::Str),
+        FreeToplevel(crate::Str),
         Prim(crate::Ref<crate::Prim>),
         Intrinsic(crate::Intrinsic),
     }
@@ -3224,13 +3224,13 @@ pub mod typed {
                 cases: Vec<(crate::typed::Pattern, E)>,
                 exception_cases: Vec<(crate::typed::Pattern, E)>,
             },
-            PolyRecord(Vec<(String, E)>),
-            PolyField(E, String),
-            PolyExtend(Vec<(String, E)>, E),
-            PolyRestrict(E, String),
-            PolyUpdate(E, Vec<(String, E)>),
-            PolyVariant(String, Option<E>),
-            Expect(crate::Located<String>),
+            PolyRecord(Vec<(crate::Str, E)>),
+            PolyField(E, crate::Str),
+            PolyExtend(Vec<(crate::Str, E)>, E),
+            PolyRestrict(E, crate::Str),
+            PolyUpdate(E, Vec<(crate::Str, E)>),
+            PolyVariant(crate::Str, Option<E>),
+            Expect(crate::Located<crate::Str>),
             Type(crate::syntax::TypeExpr),
             Error(Vec<E>),
         }
@@ -3528,8 +3528,8 @@ pub mod typed {
         /// OCaml: [Typed.Expr.Subs.t].
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         pub enum Subs<E> {
-            Explicit(Vec<(String, E)>),
-            Implicit(crate::Map<String, crate::typed::Binder>),
+            Explicit(Vec<(crate::Str, E)>),
+            Implicit(crate::Map<crate::Str, crate::typed::Binder>),
         }
 
         impl<E: crate::FromOcaml> crate::FromOcaml for Subs<E> {
@@ -3596,9 +3596,9 @@ pub mod typed {
             Tuple(Vec<P>),
             Construct(crate::typed::ConstructorRef, Vec<P>),
             Record(Vec<(crate::typed::FieldRef, P)>),
-            PolyVariant(String, Option<P>),
+            PolyVariant(crate::Str, Option<P>),
             PolyRecord {
-                fields: Vec<(String, P)>,
+                fields: Vec<(crate::Str, P)>,
                 rest: Rest,
             },
             Error(Vec<P>),
