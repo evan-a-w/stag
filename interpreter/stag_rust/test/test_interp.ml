@@ -53,21 +53,11 @@ let%expect_test "the driver's sequence of operations" =
     [%sexp
       "global_info"
     , (Interp.global_info interp ~ident:cube.ident : Typed.Ident_info.t option)];
-  print_result
-    "captures"
-    (Or_error.try_with (fun () ->
-       Interp.captures interp ~ident:cube.ident ~args:cube.args ~body:cube.body
-       |> Hash_set.length
-       |> [%sexp_of: int]));
   print_result "eval" (Interp.eval interp |> Or_error.map ~f:[%sexp_of: unit]);
   let used = (member "used").ident in
   print_result
     "eval_toplevel"
     (Interp.eval_toplevel interp ~ident:used |> Or_error.map ~f:[%sexp_of: unit]);
-  print_result
-    "find"
-    (Interp.find interp ~ident:used
-     |> Or_error.map ~f:[%sexp_of: Interp_value.t]);
   List.iter program.expect_tests ~f:(fun test ->
     print_result
       "run_expect_test"
@@ -88,13 +78,11 @@ let%expect_test "the driver's sequence of operations" =
     (splice (Error "not implemented: splice"))
     (run (Error "not implemented: run"))
     (global_info ())
-    (captures (Error "not implemented: captures"))
     (eval (Error "not implemented: eval"))
     (eval_toplevel (Error "not implemented: eval_toplevel"))
-    (find (Error "not implemented: find"))
     (run_expect_test (Error "not implemented: run_expect_test"))
     (eval_expr (Error "not implemented: eval_expr"))
-    sccs: 3, members: 3, ident infos: 8, arena: [5, 54, 161, 8, 43, 86, 0]
+    sccs: 3, members: 3, ident infos: 8, arena: [4, 44, 131, 6, 36, 69, 0]
     |}]
 ;;
 

@@ -103,16 +103,14 @@ end
 
 type t =
   { fresh : Fresh.t
+  ; stamps : Stamp_counter.t
   ; interpreter : Treewalk.t
   ; prelude : Syntax.Toplevel.t list Lazy.t
   }
 
-let create
-      ?(interpreter = Treewalk.create ~stamps:(Stamp_counter.create ()) ())
-      ?prelude
-      ()
-  =
+let create ~stamps ~interpreter ?prelude () =
   { fresh = Fresh.create ()
+  ; stamps
   ; interpreter
   ; prelude =
       (match prelude with
@@ -158,6 +156,7 @@ module Program_env = struct
     ; toplevels : Toplevel.t Lazy.t String.Table.t
       (** By canonical name. The prelude's are made when first used, so that
           those unused take no idents. *)
+    ; stamps : Stamp_counter.t
     ; interpreter : Treewalk.t
     ; mutable ident_info : Typed.Ident_info.t Typed.Ident.Map.t
     ; sccs : Typed.Scc.t Queue.t
@@ -205,9 +204,7 @@ module Program_env = struct
               ~f:(List.mem frames ~equal:Int.equal)))
   ;;
 
-  let fresh_ident t name =
-    Typed.Ident.fresh (Treewalk.stamps t.interpreter) name
-  ;;
+  let fresh_ident t name = Typed.Ident.fresh t.stamps name
 
   let find_toplevel t name =
     Hashtbl.find t.toplevels name |> Option.map ~f:force
@@ -2739,12 +2736,13 @@ let rec signature (program_env : Program_env.t) module_ ~complete =
              }))
 ;;
 
-let program_env t interpreter =
+let program_env t ~stamps interpreter =
   let report = ref (fun (_ : Typecheck_error.t) -> ()) in
   let program_env =
     { Program_env.type_env =
         Type_env.create t ~report:(fun error -> !report error)
     ; toplevels = String.Table.create ()
+    ; stamps
     ; interpreter
     ; ident_info = Typed.Ident.Map.empty
     ; sccs = Queue.create ()
@@ -2802,8 +2800,8 @@ let prelude_and_root t program_env =
   prelude, root t.fresh program_env ~enclosing:prelude
 ;;
 
-let prelude_signature ({ fresh; interpreter; prelude = _ } as t) =
-  let program_env = program_env fresh interpreter in
+let prelude_signature ({ fresh; stamps; interpreter; prelude = _ } as t) =
+  let program_env = program_env fresh ~stamps interpreter in
   let prelude, (_ : Module_scope.t) = prelude_and_root t program_env in
   let (_ : _ list) = check_declarations fresh program_env prelude in
   match Program_env.errors program_env with
@@ -2863,15 +2861,15 @@ let check_module t (program_env : Program_env.t) module_
   | errors -> Error { Failed.errors; partial = checked }
 ;;
 
-let typecheck ({ fresh; interpreter; prelude = _ } as t) ~program =
-  let program_env = program_env fresh interpreter in
+let typecheck ({ fresh; stamps; interpreter; prelude = _ } as t) ~program =
+  let program_env = program_env fresh ~stamps interpreter in
   let (_ : Module_scope.t), root = prelude_and_root t program_env in
   Module_scope.add root program;
   check_module fresh program_env root
 ;;
 
-let check_prelude { fresh; interpreter; prelude } =
-  let program_env = program_env fresh interpreter in
+let check_prelude { fresh; stamps; interpreter; prelude } =
+  let program_env = program_env fresh ~stamps interpreter in
   let prelude = add_prelude program_env (force prelude) in
   check_module fresh program_env prelude
 ;;

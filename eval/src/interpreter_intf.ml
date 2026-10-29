@@ -16,12 +16,11 @@ module type S = sig
       evaluated, so idents minted while evaluating are distinct from theirs. *)
   val create : stamps:Stamp_counter.t -> unit -> t
 
-  val stamps : t -> Stamp_counter.t
-
   (** Where prims print to, stdout by default. *)
   val set_output : t -> (string -> unit) -> unit
 
-  val output : t -> string -> unit
+  (** Runs [f] with prims printing to [output], then restores the previous. *)
+  val with_output : t -> (string -> unit) -> f:(unit -> 'a) -> 'a
 
   (** Evaluation from now on, until [set_limits] again, is bounded by [limits],
       counted from now: one budget shared by everything evaluated meanwhile, eg.
@@ -75,16 +74,6 @@ module type S = sig
       toplevel splice's code. *)
   val global_info : t -> ident:Typed.Ident.t -> Typed.Ident_info.t option
 
-  (** The binders from outside the closure [ident] that it reads when called,
-      including itself if it is recursive and those embedded by quotes it builds.
-      Only the expansions of toplevel splices are read. *)
-  val captures
-    :  t
-    -> ident:Typed.Ident.t
-    -> args:Typed.Ident.t list
-    -> body:Typed.Expr.t
-    -> Typed.Ident.Hash_set.t
-
   (** Evaluates the components queued not yet evaluated, in order. *)
   val eval : t -> unit Or_error.t
 
@@ -107,7 +96,4 @@ module type S = sig
   (** Evaluates the toplevel [ident], of a component queued, unless it already
       is. *)
   val eval_toplevel : t -> ident:Typed.Ident.t -> unit Or_error.t
-
-  (** The value of a toplevel, once evaluated. *)
-  val find : t -> ident:Typed.Ident.t -> Value.t Or_error.t
 end

@@ -37,14 +37,6 @@ external global_info
   -> Typed.Ident_info.t option
   = "stag_rust_interp_global_info"
 
-external captures
-  :  handle
-  -> Typed.Ident.t
-  -> Typed.Ident.t list
-  -> Typed.Expr.t
-  -> Typed.Ident.t list Value.Outcome.t
-  = "stag_rust_interp_captures"
-
 external eval : handle -> unit Value.Outcome.t = "stag_rust_interp_eval"
 
 external run_expect_test
@@ -66,30 +58,28 @@ external eval_toplevel
   -> unit Value.Outcome.t
   = "stag_rust_interp_eval_toplevel"
 
-external find
-  :  handle
-  -> Typed.Ident.t
-  -> Value.t Value.Outcome.t
-  = "stag_rust_interp_find"
-
 external summary : handle -> string = "stag_rust_interp_summary"
 
 type t =
   { handle : handle
-  ; stamps : Stamp_counter.t
   ; mutable output : string -> unit
   }
 
 exception Reached_error [@@deriving sexp_of]
 
-let create_with_gc_stress gc_stress ~stamps =
-  { handle = create_handle gc_stress; stamps; output = print_string }
+let create_with_gc_stress gc_stress =
+  { handle = create_handle gc_stress; output = print_string }
 ;;
 
-let create ~stamps () = create_with_gc_stress Off ~stamps
-let stamps t = t.stamps
+let create ~stamps:_ () = create_with_gc_stress Off
 let set_output t output = t.output <- output
-let output t s = t.output s
+
+let with_output t output ~f =
+  let previous = t.output in
+  t.output <- output;
+  Exn.protect ~f ~finally:(fun () -> t.output <- previous)
+;;
+
 let set_limits (_ : t) (_ : Limits.t) = ()
 let add_ident_info t ~ident ~info = add_ident_info t.handle ident info
 let add_scc t scc = add_scc t.handle scc
@@ -103,14 +93,6 @@ let run t expr ~level ~reflect:_ =
 ;;
 
 let global_info t ~ident = global_info t.handle ident
-
-let captures t ~ident ~args ~body =
-  captures t.handle ident args body
-  |> Value.Outcome.to_or_error
-  |> ok_exn
-  |> Typed.Ident.Hash_set.of_list
-;;
-
 let eval t = eval t.handle |> Value.Outcome.to_or_error
 
 let run_expect_test t test ~on_expect:_ =
@@ -125,5 +107,4 @@ let eval_toplevel t ~ident =
   eval_toplevel t.handle ident |> Value.Outcome.to_or_error
 ;;
 
-let find t ~ident = find t.handle ident |> Value.Outcome.to_or_error
 let summary t = summary t.handle

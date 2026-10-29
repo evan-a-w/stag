@@ -36,15 +36,6 @@ impl Interp {
         None
     }
 
-    pub fn captures(
-        &mut self,
-        _ident: &typed::Ident,
-        _args: &[typed::Ident],
-        _body: &typed::Expr,
-    ) -> Result<Vec<typed::Ident>, String> {
-        not_implemented("captures")
-    }
-
     pub fn eval(&mut self) -> Result<(), String> {
         not_implemented("eval")
     }
@@ -63,10 +54,6 @@ impl Interp {
 
     pub fn eval_toplevel(&mut self, _ident: &typed::Ident) -> Result<(), String> {
         not_implemented("eval_toplevel")
-    }
-
-    pub fn find(&self, _ident: &typed::Ident) -> Result<InterpValue, String> {
-        not_implemented("find")
     }
 }
 
@@ -236,30 +223,6 @@ pub unsafe extern "C" fn stag_rust_interp_global_info(
 
 /// # Safety
 ///
-/// `handle` must be from `stag_rust_interp_create`, `ident` a
-/// `Typed.Ident.t`, `args` a `Typed.Ident.t list` and `body` a
-/// `Typed.Expr.t`.
-#[no_mangle]
-pub unsafe extern "C" fn stag_rust_interp_captures(
-    handle: OcamlValue,
-    ident: OcamlValue,
-    args: OcamlValue,
-    body: OcamlValue,
-) -> OcamlValue {
-    let interp = interp(handle);
-    let (ident, args, body): (_, Vec<_>, _) = converted(|| {
-        Ok((
-            convert_into(ident, &mut interp.arena)?,
-            convert_into(args, &mut interp.arena)?,
-            convert_into(body, &mut interp.arena)?,
-        ))
-    });
-    let result = outcome(interp.captures(&ident, &args, &body));
-    reply(interp, result)
-}
-
-/// # Safety
-///
 /// `handle` must be from `stag_rust_interp_create`.
 #[no_mangle]
 pub unsafe extern "C" fn stag_rust_interp_eval(handle: OcamlValue) -> OcamlValue {
@@ -316,21 +279,6 @@ pub unsafe extern "C" fn stag_rust_interp_eval_toplevel(
     let interp = interp(handle);
     let ident = converted(|| convert_into(ident, &mut interp.arena));
     let result = outcome(interp.eval_toplevel(&ident));
-    reply(interp, result)
-}
-
-/// # Safety
-///
-/// `handle` must be from `stag_rust_interp_create` and `ident` a
-/// `Typed.Ident.t`.
-#[no_mangle]
-pub unsafe extern "C" fn stag_rust_interp_find(
-    handle: OcamlValue,
-    ident: OcamlValue,
-) -> OcamlValue {
-    let interp = interp(handle);
-    let ident = converted(|| convert_into(ident, &mut interp.arena));
-    let result = outcome(interp.find(&ident));
     reply(interp, result)
 }
 

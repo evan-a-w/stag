@@ -104,13 +104,10 @@ let run_test ~limits driver (test : Typed.Expect_test.t) =
     in
     reached.outputs <- output :: reached.outputs
   in
-  let output = Treewalk.output interpreter in
-  Treewalk.set_output interpreter (Buffer.add_string buffer);
   Treewalk.set_limits interpreter limits;
   let result =
-    Exn.protect
-      ~f:(fun () -> Treewalk.run_expect_test interpreter test ~on_expect)
-      ~finally:(fun () -> Treewalk.set_output interpreter output)
+    Treewalk.with_output interpreter (Buffer.add_string buffer) ~f:(fun () ->
+      Treewalk.run_expect_test interpreter test ~on_expect)
   in
   let mismatches = Queue.create () in
   let different_outputs = Queue.create () in

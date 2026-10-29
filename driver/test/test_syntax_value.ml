@@ -7,7 +7,13 @@ let parse source =
 ;;
 
 let print_error error = print_endline (Error.to_string_hum error)
-let prelude_signature = lazy (Typecheck.prelude_signature (Typecheck.create ()))
+
+let prelude_signature =
+  lazy
+    (let stamps = Stamp_counter.create () in
+     Typecheck.prelude_signature
+       (Typecheck.create ~stamps ~interpreter:(Treewalk.create ~stamps ()) ()))
+;;
 
 let%expect_test "the prelude's signature" =
   print_string

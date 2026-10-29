@@ -145,9 +145,14 @@ let create ~stamps () =
   }
 ;;
 
-let stamps t = t.stamps
 let set_output t output = t.output <- output
-let output t = t.output
+
+let with_output t output ~f =
+  let previous = t.output in
+  t.output <- output;
+  Exn.protect ~f ~finally:(fun () -> t.output <- previous)
+;;
+
 let set_limits t limits = t.budget <- Budget.create limits
 
 let add_ident_info t ~ident ~info =
