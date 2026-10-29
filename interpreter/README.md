@@ -114,74 +114,11 @@ Rules for externals:
 does: `dune build @interpreter/stag_rust/test/runtest`, then `dune promote`
 to accept changes.
 
-## Building OCaml values
-
-- `to_ocaml` must be called from OCaml (eg. in an external). The value it
-  returns is unrooted: return it, or root it before anything allocates.
-- Each `Ref` becomes one OCaml block, so OCaml values share as Rust ones do,
-  and cycles (through mutable records) are rebuilt: a stored value's block is
-  allocated and recorded before its fields are built.
-- Rooting: any allocation may move every young OCaml value, so Rust holds
-  none across one. The builder has one global root, an OCaml array: first a
-  block per store of the `Arena`, of the values built so far by `Ref`, then
-  a stack of the blocks being filled. Blocks are allocated before their
-  fields (initialised to `()`), pushed, and each field is written
-  (`caml_modify`) as soon as it is built, so the stack is as deep as the
-  value, not as wide.
-- Core maps and sets are built by OCaml callbacks that `[@@deriving rust]`
-  registers for each key type, with its comparator (`of_alist_exn`,
-  `of_list`), so they are real maps and sets, of which Rust builds the list.
-- `GcStress` (for tests), before every allocation:
-  - `Minor` collects the minor heap, then fills it with garbage, so that a
-    young value held unrooted across an allocation is overwritten. Set the
-    minor heap small when using it.
-  - `Compact` also compacts the major heap, and moves the builder's root
-    blocks (its stack and stores) to new blocks, overwriting the old ones'
-    fields, which catches major values held unrooted. It is slow (quadratic),
-    so for small values.
-  - Neither runs pending actions (signal handlers, finalisers), so no OCaml
-    exception can cross Rust frames.
-
-## Writing the interpreter
-
-`Stag_rust.Interp` implements `Stag_eval.Interpreter_intf.S`, as
-`Treewalk` does, so the typechecker and driver can use either. Its `t` holds
-an OCaml custom block owning the Rust `Interp` (`rust/stag_rust/src/interp.rs`),
-which lives as long as it:
-
-- Each operation is an external that converts its OCaml arguments with
-  `convert_into` into the interp's `Arena`, then calls a method of `Interp`.
-  Values are shared within one conversion only, so types are read with
-  `arena[expr.ty]` but are not shared between calls.
-- `add_ident_info` and `add_scc` store what they convert; the evaluating
-  methods are not implemented.
-- Results are `Interp_value.Outcome.t`s (errors as values, so no OCaml
-  exception crosses Rust frames), built with `to_ocaml` and the interp's
-  arena. Values are `Interp_value.t`.
-- `splice`'s and `run`'s `entry` and `reflect` stay in OCaml for now.
-
-Rules for externals:
-
-- Convert every OCaml argument before anything allocates on the OCaml heap
-  (`to_ocaml`, `ocaml_string::of_str`, callbacks): allocating may move them.
-- Return what `to_ocaml` built at once: it is not rooted.
-- To fail, raise with `caml_failwith_value` only after dropping what Rust
-  owns, as it does not unwind; prefer returning errors as values.
-- Panics must not unwind into OCaml: `convert` and `to_ocaml` catch theirs.
-
-To keep state across calls (eg. add components as the typechecker checks
-them, as `Treewalk.add_scc`), hold it in an OCaml custom block (a boxed Rust
-value with a finaliser) rather than converting everything per call.
-
-`stag_rust/test/test_interp.ml` evaluates programs with the Rust interpreter and with
-`Treewalk`, printing both: `dune build @interpreter/stag_rust/test/runtest`,
-then `dune promote` to accept changes.
-
 ## Building
 
 `dune build` regenerates `generated.rs` and builds the static library with
-`cargo build --offline --locked`. `dune build @runtest` also runs
-`cargo test`. Cargo runs offline, so fetch the dependencies once:
+`cargo build --offline --locked`. Cargo runs offline, so fetch the
+dependencies once:
 
 ```sh
 cd interpreter/rust && cargo fetch --locked
@@ -189,3 +126,11 @@ cd interpreter/rust && cargo fetch --locked
 
 With the generated files up to date, cargo also works on its own from
 `interpreter/rust` (`cargo test`, `cargo clippy`).
+
+Rust tests are expect tests (the `expect-test` crate: `expect![[...]]`).
+`dune build @runtest` runs them with `UPDATE_EXPECT` on copies of the test
+files listed in `rust/dune` and diffs the results against the originals, so
+`dune promote` accepts changes, as for OCaml expect tests. A test file must
+be listed there (both in the rule running them and as a `diff`) for its
+expectations to be updated. `UPDATE_EXPECT=1 cargo test` also updates them
+in place.

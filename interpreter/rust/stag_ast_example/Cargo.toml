@@ -6,3 +6,6 @@ publish = false
 
 [dependencies]
 ocaml-sys.workspace = true
+
+[dev-dependencies]
+expect-test.workspace = true

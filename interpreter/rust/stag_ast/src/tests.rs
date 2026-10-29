@@ -1,3 +1,5 @@
+use expect_test::expect;
+
 use crate::test_heap::{int, Heap};
 use crate::{convert, convert_into, type_, Arena, Map, Ref, Set, Str};
 
@@ -16,10 +18,13 @@ fn strings_lists_and_options() {
     let values: Vec<_> = strings.iter().map(|s| heap.string(s)).collect();
     let list = heap.list(&values);
     let some = heap.block(0, &[list]);
-    let (converted, _) = unsafe { convert::<Option<Vec<Str>>>(some) }.unwrap();
-    assert_eq!(converted, Some(strings.map(Str::from).to_vec()));
+    let (some, _) = unsafe { convert::<Option<Vec<Str>>>(some) }.unwrap();
     let (none, _) = unsafe { convert::<Option<Vec<Str>>>(int(0)) }.unwrap();
-    assert_eq!(none, None);
+    expect![[r#"
+        Some(["", "a", "1234567", "12345678", "a longer string"])
+        None
+    "#]]
+    .assert_eq(&format!("{some:?}\n{none:?}\n"));
 }
 
 #[test]
@@ -33,20 +38,29 @@ fn maps_and_sets() {
     let tree = heap.block(1, &[leaf1, int(2), b, right, int(3)]);
     let map = heap.block(0, &[int(0), tree, int(4)]);
     let (map, _) = unsafe { convert::<Map<i64, Str>>(map) }.unwrap();
-    assert_eq!(format!("{map:?}"), r#"{1: "a", 2: "b", 3: "c", 4: "d"}"#);
-    assert_eq!(map.get(&3).map(Str::as_bytes), Some(&b"c"[..]));
-    assert_eq!(map.get(&5), None);
 
     let leaf = heap.block(0, &[int(5)]);
     let tree = heap.block(1, &[int(0), int(6), leaf, int(2), int(2)]);
     let set = heap.block(0, &[int(0), tree]);
     let (set, _) = unsafe { convert::<Set<i64>>(set) }.unwrap();
-    assert_eq!(format!("{set:?}"), "{5, 6}");
-    assert!(set.contains(&5) && !set.contains(&4));
 
     let empty = heap.block(0, &[int(0), int(0)]);
     let (empty, _) = unsafe { convert::<Set<i64>>(empty) }.unwrap();
-    assert_eq!(format!("{empty:?}"), "{}");
+    expect![[r#"
+        map: {1: "a", 2: "b", 3: "c", 4: "d"}
+        get 3: Some("c")
+        get 5: None
+        set: {5, 6}
+        contains 5: true
+        contains 4: false
+        empty: {}
+    "#]].assert_eq(&format!(
+        "map: {map:?}\nget 3: {:?}\nget 5: {:?}\nset: {set:?}\ncontains 5: {}\ncontains 4: {}\nempty: {empty:?}\n",
+        map.get(&3),
+        map.get(&5),
+        set.contains(&5),
+        set.contains(&4),
+    ));
 }
 
 /// `{ id; state; bounds = []; in_bounds_of = []; kept = [] }`, with its state
@@ -65,14 +79,34 @@ fn cycles_and_sharing_through_vars() {
     let link = heap.block(1, &[arrow]);
     heap.set(var, 1, link);
     let pair = heap.block(0, &[tvar, tvar]);
-    let ((ty, again), arena) =
-        unsafe { convert::<(Ref<type_::Ty>, Ref<type_::Ty>)>(pair) }.unwrap();
-    assert_eq!(ty, again);
-    assert_eq!(
-        format!("{ty:?} {:?} {:?}", arena.type_ty, arena.type_var_ty_nothing),
-        "#0 {#0: TVar(#0), #1: TArrow(#0, #0)} \
-         {#0: Var { id: 7, state: Link(#1), bounds: [], in_bounds_of: [], kept: [] }}"
-    );
+    let (pair, arena) = unsafe { convert::<(Ref<type_::Ty>, Ref<type_::Ty>)>(pair) }.unwrap();
+    expect![[r#"
+        (#0, #0)
+        {
+            #0: TVar(
+                #0,
+            ),
+            #1: TArrow(
+                #0,
+                #0,
+            ),
+        }
+        {
+            #0: Var {
+                id: 7,
+                state: Link(
+                    #1,
+                ),
+                bounds: [],
+                in_bounds_of: [],
+                kept: [],
+            },
+        }
+    "#]]
+    .assert_eq(&format!(
+        "{pair:?}\n{:#?}\n{:#?}\n",
+        arena.type_ty, arena.type_var_ty_nothing
+    ));
 }
 
 #[test]
@@ -83,26 +117,57 @@ fn conversions_into_one_arena_append() {
     let second = var(&mut heap, 2);
     let second = heap.block(6, &[second]);
     let mut arena = Arena::default();
-    let a = unsafe { convert_into::<Ref<type_::Ty>>(first, &mut arena) }.unwrap();
-    let b = unsafe { convert_into::<Ref<type_::Ty>>(second, &mut arena) }.unwrap();
-    let again = unsafe { convert_into::<Ref<type_::Ty>>(first, &mut arena) }.unwrap();
-    let wrong = unsafe { convert_into::<Ref<type_::Ty>>(int(0), &mut arena) };
-    assert_eq!(
-        format!(
-            "{a:?} {b:?} {again:?} {} {:?} {:?}",
-            wrong.is_err(),
-            arena.type_ty,
-            arena.type_var_ty_nothing
-        ),
-        "#0 #1 #2 true {#0: TVar(#0), #1: TVar(#1), #2: TVar(#2)} \
-         {#0: Var { id: 1, state: Generic, bounds: [], in_bounds_of: [], kept: [] }, \
-         #1: Var { id: 2, state: Generic, bounds: [], in_bounds_of: [], kept: [] }, \
-         #2: Var { id: 1, state: Generic, bounds: [], in_bounds_of: [], kept: [] }}"
-    );
+    let mut out = String::new();
+    for v in [first, second, first, int(0)] {
+        let r = unsafe { convert_into::<Ref<type_::Ty>>(v, &mut arena) };
+        out += &format!("{r:?}\n");
+    }
+    out += &format!("{:#?}\n{:#?}\n", arena.type_ty, arena.type_var_ty_nothing);
+    expect![[r#"
+        Ok(#0)
+        Ok(#1)
+        Ok(#2)
+        Err(Error("Type.ty: unexpected immediate 0"))
+        {
+            #0: TVar(
+                #0,
+            ),
+            #1: TVar(
+                #1,
+            ),
+            #2: TVar(
+                #2,
+            ),
+        }
+        {
+            #0: Var {
+                id: 1,
+                state: Generic,
+                bounds: [],
+                in_bounds_of: [],
+                kept: [],
+            },
+            #1: Var {
+                id: 2,
+                state: Generic,
+                bounds: [],
+                in_bounds_of: [],
+                kept: [],
+            },
+            #2: Var {
+                id: 1,
+                state: Generic,
+                bounds: [],
+                in_bounds_of: [],
+                kept: [],
+            },
+        }
+    "#]]
+    .assert_eq(&out);
 }
 
-/// `TTuple [t; t]` nested `depth` times around a var: as shared as it is in
-/// OCaml, rather than `2^depth` types.
+/// `TTuple [t; t]` nested 64 times around a var: as shared as it is in OCaml,
+/// rather than `2^64` types.
 #[test]
 fn shared_types_stay_shared() {
     let mut heap = Heap::default();
@@ -114,9 +179,15 @@ fn shared_types_stay_shared() {
         ty = heap.block(2, &[list]);
     }
     let (ty, arena) = unsafe { convert::<Ref<type_::Ty>>(ty) }.unwrap();
-    assert_eq!(format!("{ty:?}"), "#0");
-    assert_eq!(arena.type_ty.len(), 65);
-    assert_eq!(format!("{:?}", arena[ty]), "TTuple([#1, #1])");
+    expect![[r#"
+        #0: TTuple([#1, #1])
+        types: 65
+    "#]]
+    .assert_eq(&format!(
+        "{ty:?}: {:?}\ntypes: {}\n",
+        arena[ty],
+        arena.type_ty.len()
+    ));
 }
 
 #[test]
@@ -134,19 +205,17 @@ fn values_of_the_wrong_type_are_errors() {
         unsafe { convert::<Vec<i64>>(s) }.map(drop),
         unsafe { convert::<crate::Nothing>(int(0)) }.map(drop),
     ];
-    let errors: Vec<String> = errors.into_iter().map(|e| e.unwrap_err().0).collect();
-    assert_eq!(
-        errors,
-        [
-            "Type.ty: unexpected immediate 3",
-            "Type.ty: unexpected block of tag 9 and size 1",
-            "expected a block with field 0, got one of size 0",
-            "string: unexpected immediate 1",
-            "string: unexpected block of tag 9 and size 1",
-            "list: unexpected block of tag 252 and size 2",
-            "Nothing.t: unexpected immediate 0",
-        ]
-    );
+    let out: String = errors.iter().map(|e| format!("{e:?}\n")).collect();
+    expect![[r#"
+        Err(Error("Type.ty: unexpected immediate 3"))
+        Err(Error("Type.ty: unexpected block of tag 9 and size 1"))
+        Err(Error("expected a block with field 0, got one of size 0"))
+        Err(Error("string: unexpected immediate 1"))
+        Err(Error("string: unexpected block of tag 9 and size 1"))
+        Err(Error("list: unexpected block of tag 252 and size 2"))
+        Err(Error("Nothing.t: unexpected immediate 0"))
+    "#]]
+    .assert_eq(&out);
 }
 
 /// [`crate::to_ocaml`] keeps the built values of each store at the
@@ -154,9 +223,8 @@ fn values_of_the_wrong_type_are_errors() {
 #[test]
 fn store_indices_match_store_lens() {
     use crate::{Arena, Indexed};
-    fn check<T: Indexed>(arena: &Arena, seen: &mut Vec<usize>) {
-        assert_eq!(arena.store_lens()[T::STORE], T::store(arena).len());
-        seen.push(T::STORE);
+    fn row<T: Indexed>(arena: &Arena, name: &str) -> String {
+        format!("{} {name}: {}\n", T::STORE, T::store(arena).len())
     }
     let mut arena = Arena::default();
     // Distinct lengths, so that a store at the wrong index is noticed.
@@ -166,16 +234,31 @@ fn store_indices_match_store_lens() {
             .push(type_::Ty::TCon(n.to_string().into(), vec![]));
     }
     arena.type_row.push(type_::Row::REmpty);
-    let mut seen = vec![];
-    check::<crate::Prim>(&arena, &mut seen);
-    check::<type_::Row>(&arena, &mut seen);
-    check::<type_::Ty>(&arena, &mut seen);
-    check::<type_::Var<type_::Presence, type_::PresenceBound>>(&arena, &mut seen);
-    check::<type_::Var<Ref<type_::Row>, type_::Bound>>(&arena, &mut seen);
-    check::<type_::Var<Ref<type_::Ty>, crate::Nothing>>(&arena, &mut seen);
-    check::<crate::typed::RecordType>(&arena, &mut seen);
-    seen.sort();
-    assert_eq!(seen, (0..arena.store_lens().len()).collect::<Vec<_>>());
+    let mut rows = [
+        row::<crate::Prim>(&arena, "Prim"),
+        row::<type_::Row>(&arena, "Row"),
+        row::<type_::Ty>(&arena, "Ty"),
+        row::<type_::Var<type_::Presence, type_::PresenceBound>>(&arena, "presence var"),
+        row::<type_::Var<Ref<type_::Row>, type_::Bound>>(&arena, "row var"),
+        row::<type_::Var<Ref<type_::Ty>, crate::Nothing>>(&arena, "ty var"),
+        row::<crate::typed::RecordType>(&arena, "RecordType"),
+    ];
+    rows.sort();
+    expect![[r#"
+        store_lens: [0, 1, 3, 0, 0, 0, 0]
+        0 Prim: 0
+        1 Row: 1
+        2 Ty: 3
+        3 presence var: 0
+        4 row var: 0
+        5 ty var: 0
+        6 RecordType: 0
+    "#]]
+    .assert_eq(&format!(
+        "store_lens: {:?}\n{}",
+        arena.store_lens(),
+        rows.concat()
+    ));
 }
 
 #[test]
@@ -183,9 +266,18 @@ fn strings_are_bytes() {
     let mut heap = Heap::default();
     let v = heap.bytes(b"\xff\x00\"\\\n\xc3\xa9 ok");
     let (s, _) = unsafe { convert::<Str>(v) }.unwrap();
-    assert_eq!(s.as_bytes(), b"\xff\x00\"\\\n\xc3\xa9 ok");
-    assert!(s.to_str().is_err());
-    assert_eq!(format!("{s:?}"), r#""\255\000\"\\\n\195\169 ok""#);
-    assert_eq!(format!("{s}"), "\u{fffd}\0\"\\\n\u{e9} ok");
-    assert_eq!(Str::from("é").to_str(), Ok("é"));
+    expect![[r#"
+        bytes: [255, 0, 34, 92, 10, 195, 169, 32, 111, 107]
+        valid utf-8: false
+        debug: "\255\000\"\\\n\195\169 ok"
+        display: "�\0\"\\\né ok"
+        to_str of "é": Ok("é")
+    "#]]
+    .assert_eq(&format!(
+        "bytes: {:?}\nvalid utf-8: {:?}\ndebug: {s:?}\ndisplay: {:?}\nto_str of \"é\": {:?}\n",
+        s.as_bytes(),
+        s.to_str().is_ok(),
+        s.to_string(),
+        Str::from("é").to_str()
+    ));
 }

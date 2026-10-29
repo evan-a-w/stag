@@ -4,6 +4,7 @@ members = ["stag_ast", "stag_ast_example", "stag_rust"]
 
 [workspace.dependencies]
 ocaml-sys = "0.26"
+expect-test = "1.5.1"
 
 [profile.release]
 debug = 1

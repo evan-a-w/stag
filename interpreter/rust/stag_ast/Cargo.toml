@@ -5,3 +5,6 @@ edition = "2021"
 
 [dependencies]
 ocaml-sys.workspace = true
+
+[dev-dependencies]
+expect-test.workspace = true
