@@ -50,3 +50,5 @@ bench/*.json.gz
 */perf.data*
 
 .pi-subagents/
+
+*.corrected
