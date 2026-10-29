@@ -33,7 +33,7 @@ Rust code linked into stag.
   - `stag_rust`: the one static library linked into OCaml. Rust code called
     from OCaml (eg. an interpreter) goes here, as modules, so that std and
     the dependencies are linked once. `debug.rs` has externals for tests,
-    `interp/` the interpreter.
+    `interp.rs` the interpreter.
   - `stag_ast_example`: the generated Rust of `gen/example`, for tests.
 - `interp_value/`: `Interp_value.t`, the values the interpreter returns to
   OCaml (its own values are Rust's).
@@ -85,17 +85,14 @@ Rust code linked into stag.
 
 ## Writing the interpreter
 
-The flow of `rust/stag_rust/src/interp/`:
+`rust/stag_rust/src/interp.rs` is a stub with the plumbing:
 
 1. An OCaml external (`Stag_rust.Interp.eval_toplevel`, declared in
-   `stag_rust/interp.ml`) passes OCaml values to Rust (`interp/external.rs`).
+   `stag_rust/interp.ml`) passes OCaml values to Rust.
 2. Rust `convert`s them first: a `typed::Program` and its `Arena`, owned by
-   Rust, so the OCaml values are not needed after.
-3. `Interp` (`interp/mod.rs`) evaluates the program, borrowing it: values
-   (`interp/value.rs`) refer to its expressions by `&'p` references, and
-   types are read with `arena[expr.ty]` (see `show_ty`). Toplevels are
-   evaluated when first used. Prims are matched by name (`interp/prims.rs`),
-   as their OCaml implementations are not converted.
+   Rust, so the OCaml values are not needed after. Types are read with
+   `arena[expr.ty]`.
+3. `Interp::eval_toplevel` evaluates (not implemented).
 4. The result is turned into the generated Rust type of OCaml's
    `Interp_value.Outcome.t`, errors included (as values, so no OCaml
    exception crosses Rust frames), and built with `to_ocaml`, with the

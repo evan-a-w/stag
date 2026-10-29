@@ -1,11 +1,25 @@
 use ocaml_sys::Value as OcamlValue;
-use stag_ast::{convert, interp_value, to_ocaml, typed, GcStress, Str};
+use stag_ast::{convert, interp_value, to_ocaml, typed, Arena, GcStress, InterpValue, Str};
 
-use super::{error, Interp, Result};
 use crate::ocaml_string;
 
 extern "C" {
     fn caml_failwith_value(message: OcamlValue) -> !;
+}
+
+pub struct Interp<'p> {
+    pub program: &'p typed::Program,
+    pub arena: &'p Arena,
+}
+
+impl<'p> Interp<'p> {
+    pub fn new(program: &'p typed::Program, arena: &'p Arena) -> Self {
+        Interp { program, arena }
+    }
+
+    pub fn eval_toplevel(&mut self, name: &Str) -> Result<InterpValue, String> {
+        Err(format!("not implemented: eval_toplevel {name:?}"))
+    }
 }
 
 /// # Safety
@@ -27,9 +41,9 @@ pub unsafe extern "C" fn stag_rust_interp_eval_toplevel(
         Ok(converted) => converted,
         Err(error) => caml_failwith_value(ocaml_string::of_str(&error.0)),
     };
-    let outcome = match eval_toplevel(&program, &arena, &name) {
+    let outcome = match Interp::new(&program, &arena).eval_toplevel(&name) {
         Ok(value) => interp_value::Outcome::Value(value),
-        Err(error) => interp_value::Outcome::Error(error.0.into()),
+        Err(error) => interp_value::Outcome::Error(error.into()),
     };
     // [Code] values refer to types in [arena], so it is built with it.
     let message = match to_ocaml(&outcome, &arena, gc_stress) {
@@ -38,23 +52,4 @@ pub unsafe extern "C" fn stag_rust_interp_eval_toplevel(
     };
     drop((program, arena, outcome));
     caml_failwith_value(message)
-}
-
-fn eval_toplevel(
-    program: &typed::Program,
-    arena: &stag_ast::Arena,
-    name: &Str,
-) -> Result<stag_ast::InterpValue> {
-    let toplevel = program
-        .sccs
-        .iter()
-        .flat_map(|scc| &scc.members)
-        .rev()
-        .find(|toplevel| toplevel.ident.name == *name);
-    let Some(toplevel) = toplevel else {
-        return error(format!("no toplevel {name:?}"));
-    };
-    let mut interp = Interp::new(program, arena);
-    let value = interp.toplevel(&toplevel.ident)?;
-    Ok(value.to_interp_value(arena))
 }
