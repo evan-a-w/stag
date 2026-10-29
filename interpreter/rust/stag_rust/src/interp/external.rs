@@ -1,6 +1,3 @@
-//! The OCaml externals of [`super`]: each converts its OCaml arguments,
-//! evaluates in Rust, then builds its result back into OCaml.
-
 use ocaml_sys::Value as OcamlValue;
 use stag_ast::{convert, interp_value, to_ocaml, typed, GcStress, Str};
 
@@ -11,8 +8,6 @@ extern "C" {
     fn caml_failwith_value(message: OcamlValue) -> !;
 }
 
-/// Evaluates the last toplevel of `program` named `name`.
-///
 /// # Safety
 ///
 /// `program` must be a `Typed.Program.t`, `name` a `string` and

@@ -1,6 +1,3 @@
-(** The Rust interpreter ([interpreter/rust/stag_rust/src/interp]), a stub
-    for now. *)
-
 open! Import
 
 (** Evaluates the last toplevel of [program] named [name], and the toplevels

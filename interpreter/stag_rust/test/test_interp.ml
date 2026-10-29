@@ -1,7 +1,5 @@
 open! Import
 
-(* Evaluates the toplevel [name] of [source] with the Rust stub, under each
-   [gc_stress] (printing it once if all agree), and with [Treewalk]. *)
 let compare ?(gc_stress = Debug.Gc_stress.all) source ~name =
   match Source_helpers.typecheck ~prelude:false source with
   | None -> ()
@@ -150,7 +148,7 @@ let result = .< Int.add 1 2 >.
     |}]
 ;;
 
-let%expect_test "what the stub does not implement" =
+let%expect_test "what is not implemented" =
   compare
     ~name:"result"
     {|
@@ -163,10 +161,9 @@ let result = print_int 1
 |};
   [%expect
     {|
-    ((rust
-      ((Error "not implemented in the stub: PolyVariant (of type [..]), at 2:13")))
+    ((rust ((Error "not implemented: PolyVariant (of type [..]), at 2:13")))
      (treewalk (Ok (`A 1))))
-    1((rust ((Error "not implemented in the stub: prim print_int on [1]")))
+    1((rust ((Error "not implemented: prim print_int on [1]")))
      (treewalk (Ok "()")))
     |}]
 ;;

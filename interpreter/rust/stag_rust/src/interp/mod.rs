@@ -1,7 +1,3 @@
-//! A stub of the interpreter, showing its shape: evaluates a converted
-//! [`typed::Program`] by walking it, borrowing it for the lifetime `'p`, with
-//! "not implemented in the stub" errors for what it does not cover.
-
 mod env;
 mod external;
 mod prims;
@@ -32,7 +28,6 @@ fn error<T>(message: impl Into<String>) -> Result<T> {
     Err(Error(message.into()))
 }
 
-/// Toplevels are evaluated when first used, as by the OCaml interpreter.
 enum Global<'p> {
     Pending(&'p typed::Toplevel),
     Evaluating,
@@ -223,7 +218,7 @@ impl<'p> Interp<'p> {
             .next()
             .unwrap_or("");
         error(format!(
-            "not implemented in the stub: {node} (of type {}), at {}:{}",
+            "not implemented: {node} (of type {}), at {}:{}",
             show_ty(self.arena, expr.ty),
             expr.loc.start.line,
             expr.loc.start.col,
@@ -231,7 +226,6 @@ impl<'p> Interp<'p> {
     }
 }
 
-/// Binds the variables of `pattern` in `env` if it matches `value`.
 fn matches<'p>(pattern: &'p typed::Pattern, value: &Value<'p>, env: &mut Env<'p>) -> bool {
     match (&*pattern.desc, value) {
         (PDesc::Any, _) => true,
@@ -271,7 +265,6 @@ pub fn show_ident(ident: &typed::Ident) -> String {
     String::from_utf8_lossy(ident.name.as_bytes()).into_owned()
 }
 
-/// Types, as available while evaluating: [`typed::Expr::ty`] in the arena.
 pub fn show_ty(arena: &Arena, ty: Ref<type_::Ty>) -> String {
     let name = |s: &stag_ast::Str| String::from_utf8_lossy(s.as_bytes()).into_owned();
     match &arena[ty] {

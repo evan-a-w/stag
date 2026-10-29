@@ -4,8 +4,6 @@ use stag_ast::typed;
 
 use super::Value;
 
-/// The locals in scope. A list for the stub: the real interpreter could
-/// resolve locals to slots beforehand.
 #[derive(Clone, Default)]
 pub struct Env<'p>(Option<Rc<Frame<'p>>>);
 

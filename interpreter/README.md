@@ -33,7 +33,7 @@ Rust code linked into stag.
   - `stag_rust`: the one static library linked into OCaml. Rust code called
     from OCaml (eg. an interpreter) goes here, as modules, so that std and
     the dependencies are linked once. `debug.rs` has externals for tests,
-    `interp/` the interpreter (a stub for now).
+    `interp/` the interpreter.
   - `stag_ast_example`: the generated Rust of `gen/example`, for tests.
 - `interp_value/`: `Interp_value.t`, the values the interpreter returns to
   OCaml (its own values are Rust's).
@@ -85,7 +85,7 @@ Rust code linked into stag.
 
 ## Writing the interpreter
 
-The stub in `rust/stag_rust/src/interp/` shows the shape, end to end:
+The flow of `rust/stag_rust/src/interp/`:
 
 1. An OCaml external (`Stag_rust.Interp.eval_toplevel`, declared in
    `stag_rust/interp.ml`) passes OCaml values to Rust (`interp/external.rs`).
@@ -114,7 +114,7 @@ To keep state across calls (eg. add components as the typechecker checks
 them, as `Treewalk.add_scc`), hold it in an OCaml custom block (a boxed Rust
 value with a finaliser) rather than converting everything per call.
 
-`stag_rust/test/test_interp.ml` evaluates programs with the stub and with
+`stag_rust/test/test_interp.ml` evaluates programs with the Rust interpreter and with
 `Treewalk`, printing both: `dune build @interpreter/stag_rust/test/runtest`,
 then `dune promote` to accept changes.
 

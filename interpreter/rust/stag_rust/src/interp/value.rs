@@ -5,7 +5,6 @@ use stag_ast::{typed, Arena, InterpValue, Prim, Ref, Str};
 
 use super::Env;
 
-/// Values while evaluating, borrowing the program they come from (`'p`).
 #[derive(Clone)]
 pub enum Value<'p> {
     Int(i64),
@@ -51,7 +50,6 @@ impl<'p> Value<'p> {
         }))
     }
 
-    /// The value returned to OCaml, of `Interp_value.t`.
     pub fn to_interp_value(&self, arena: &Arena) -> InterpValue {
         let all = |values: &[Value]| values.iter().map(|v| v.to_interp_value(arena)).collect();
         match self {

@@ -1,7 +1,3 @@
-(** The values the Rust interpreter ([interpreter/rust/stag_rust/src/interp])
-    returns to OCaml: a printable mirror of its own values, built by
-    [stag_ast::to_ocaml]. *)
-
 open! Core
 
 type t =
