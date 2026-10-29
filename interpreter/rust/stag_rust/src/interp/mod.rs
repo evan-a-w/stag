@@ -112,8 +112,6 @@ impl<'p> Interp<'p> {
             Desc::Fun { args, body, .. } => Ok(Value::closure(None, args, body, env.clone())),
             Desc::Annotated(expr, _) => self.eval(expr, env),
             Desc::ToplevelSplice { expansion, .. } => self.eval(expansion, env),
-            // TODO: evaluate the splices within [body], and embed the values
-            // of its persistent variables, as [Treewalk]'s [build] does.
             Desc::Quote(body) => Ok(Value::Code(body)),
             Desc::Tuple(exprs) => Ok(Value::Tuple(self.eval_all(exprs, env)?)),
             Desc::Construct(constructor, exprs) => {

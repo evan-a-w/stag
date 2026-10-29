@@ -2,7 +2,6 @@ use stag_ast::Prim;
 
 use super::{error, Result, Value};
 
-/// TODO: OCaml's ints are 63-bit, so overflow should wrap there instead.
 pub fn call<'p>(prim: &Prim, args: &[Value<'p>]) -> Result<Value<'p>> {
     let name = prim.name.as_bytes();
     match (name, args) {
