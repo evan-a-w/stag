@@ -6,3 +6,7 @@ module Prim = Stag_ir.Prim
 module Source_helpers = Test_driver.Source_helpers
 module Debug = Stag_rust.Debug
 module Example = Rust_bindgen_example.Example
+module Interp = Stag_rust.Interp
+module Interp_value = Interp_value
+module Driver = Stag_driver.Driver
+module Treewalk = Stag_eval.Treewalk

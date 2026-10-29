@@ -32,10 +32,13 @@ Rust code linked into stag.
     `Type.ty`, `typed::expr::Desc` is `Typed.Expr.Desc.t`, etc.
   - `stag_rust`: the one static library linked into OCaml. Rust code called
     from OCaml (eg. an interpreter) goes here, as modules, so that std and
-    the dependencies are linked once. `debug.rs` has externals for tests.
+    the dependencies are linked once. `debug.rs` has externals for tests,
+    `interp/` the interpreter (a stub for now).
   - `stag_ast_example`: the generated Rust of `gen/example`, for tests.
+- `interp_value/`: `Interp_value.t`, the values the interpreter returns to
+  OCaml (its own values are Rust's).
 - `stag_rust/`: the OCaml library linking the static library, declaring its
-  externals. `stag_rust/test` converts typechecked programs and prints what
+  externals (`Stag_rust.Interp` for the interpreter). `stag_rust/test` converts typechecked programs and prints what
   Rust sees, and round-trips them (OCaml to Rust to OCaml), checking that
   the result is equal and shares and is cyclic alike, also under GC stress.
 
@@ -79,6 +82,41 @@ Rust code linked into stag.
     so for small values.
   - Neither runs pending actions (signal handlers, finalisers), so no OCaml
     exception can cross Rust frames.
+
+## Writing the interpreter
+
+The stub in `rust/stag_rust/src/interp/` shows the shape, end to end:
+
+1. An OCaml external (`Stag_rust.Interp.eval_toplevel`, declared in
+   `stag_rust/interp.ml`) passes OCaml values to Rust (`interp/external.rs`).
+2. Rust `convert`s them first: a `typed::Program` and its `Arena`, owned by
+   Rust, so the OCaml values are not needed after.
+3. `Interp` (`interp/mod.rs`) evaluates the program, borrowing it: values
+   (`interp/value.rs`) refer to its expressions by `&'p` references, and
+   types are read with `arena[expr.ty]` (see `show_ty`). Toplevels are
+   evaluated when first used. Prims are matched by name (`interp/prims.rs`),
+   as their OCaml implementations are not converted.
+4. The result is turned into the generated Rust type of OCaml's
+   `Interp_value.Outcome.t`, errors included (as values, so no OCaml
+   exception crosses Rust frames), and built with `to_ocaml`, with the
+   program's arena, as `Code` values refer to its types.
+
+Rules for externals:
+
+- Convert every OCaml argument before anything allocates on the OCaml heap
+  (`to_ocaml`, `ocaml_string::of_str`, callbacks): allocating may move them.
+- Return what `to_ocaml` built at once: it is not rooted.
+- To fail, raise with `caml_failwith_value` only after dropping what Rust
+  owns, as it does not unwind; prefer returning errors as values.
+- Panics must not unwind into OCaml: `convert` and `to_ocaml` catch theirs.
+
+To keep state across calls (eg. add components as the typechecker checks
+them, as `Treewalk.add_scc`), hold it in an OCaml custom block (a boxed Rust
+value with a finaliser) rather than converting everything per call.
+
+`stag_rust/test/test_interp.ml` evaluates programs with the stub and with
+`Treewalk`, printing both: `dune build @interpreter/stag_rust/test/runtest`,
+then `dune promote` to accept changes.
 
 ## Building
 

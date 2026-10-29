@@ -12,4 +12,7 @@
   stag_typecheck
   stag_rust
   rust_bindgen_example
-  test_driver))
+  test_driver
+  stag_driver
+  stag_eval
+  interp_value))

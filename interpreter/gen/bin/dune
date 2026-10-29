@@ -10,4 +10,5 @@
   stag_common
   stag_types
   stag_syntax
-  stag_ir))
+  stag_ir
+  interp_value))

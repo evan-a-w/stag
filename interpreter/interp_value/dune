@@ -1,0 +1,7 @@
+; Outside stag_rust, as interpreter/gen links it to generate its Rust type.
+
+(library
+ (name interp_value)
+ (preprocess
+  (pps ppx_jane ppx_rust))
+ (libraries core ppx_rust_runtime stag_ir))

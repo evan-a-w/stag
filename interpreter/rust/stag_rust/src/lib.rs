@@ -3,6 +3,7 @@
 //! externals.
 
 pub mod debug;
+pub mod interp;
 
 /// Converts OCaml strings to Rust ones and back, for externals.
 pub(crate) mod ocaml_string {

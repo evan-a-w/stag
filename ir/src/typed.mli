@@ -228,7 +228,7 @@ module Expr : sig
     ; ty : Type.ty
     ; loc : Loc.t (** Of the syntax it was inferred from. *)
     }
-  [@@deriving sexp_of]
+  [@@deriving sexp_of, rust]
 
   (** The children of [t], in order. *)
   val sub_exprs : t -> t list
