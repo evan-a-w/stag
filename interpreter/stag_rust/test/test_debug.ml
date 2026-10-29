@@ -1965,22 +1965,3 @@ let%expect_test "types shared as a DAG stay shared" =
   print_endline (Debug.ty_count ty);
   [%expect {| tys: 65 |}]
 ;;
-
-let%expect_test "deep programs convert" =
-  let depth = 100_000 in
-  let source =
-    String.concat
-      [ "let x =\n"
-      ; String.concat (List.init depth ~f:(sprintf "let a%d = 0 in\n"))
-      ; "a0\n"
-      ; "let l = ["
-      ; String.concat ~sep:"; " (List.init depth ~f:Int.to_string)
-      ; "]\n"
-      ]
-  in
-  match Source_helpers.typecheck ~prelude:false source with
-  | None -> ()
-  | Some t ->
-    print_endline (Debug.typed_toplevels_summary (Source_helpers.members t));
-    [%expect {| toplevels: 2, tys: 200006 |}]
-;;

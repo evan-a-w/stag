@@ -8,7 +8,7 @@ use stag_ast::{convert, type_, typed, FromOcaml};
 use crate::ocaml_string;
 
 /// `v` converted, and the arena of the conversion, or why it failed.
-unsafe fn show<T: FromOcaml + Debug + Send>(v: Value) -> Value {
+unsafe fn show<T: FromOcaml + Debug>(v: Value) -> Value {
     let shown = match convert::<T>(v) {
         Ok((x, arena)) => format!("{x:#?}\n{arena:#?}"),
         Err(error) => format!("error: {error}"),
@@ -22,26 +22,6 @@ unsafe fn show<T: FromOcaml + Debug + Send>(v: Value) -> Value {
 #[no_mangle]
 pub unsafe extern "C" fn stag_rust_debug_typed_toplevels(v: Value) -> Value {
     show::<Vec<typed::Toplevel>>(v)
-}
-
-/// How many toplevels and types there are, for programs too big to print.
-///
-/// # Safety
-///
-/// `v` must be a `Typed.Toplevel.t list`.
-#[no_mangle]
-pub unsafe extern "C" fn stag_rust_debug_typed_toplevels_summary(v: Value) -> Value {
-    let shown = match convert::<Vec<typed::Toplevel>>(v) {
-        Ok((toplevels, arena)) => {
-            format!(
-                "toplevels: {}, tys: {}",
-                toplevels.len(),
-                arena.type_ty.len()
-            )
-        }
-        Err(error) => format!("error: {error}"),
-    };
-    ocaml_string::of_str(&shown)
 }
 
 /// How much of the program there is, as it is too big to print.

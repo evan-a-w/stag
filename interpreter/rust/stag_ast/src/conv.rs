@@ -39,11 +39,6 @@ impl<T: Stored> std::ops::IndexMut<Ref<T>> for Arena {
     }
 }
 
-/// The stack of the thread converting: as deep as OCaml 5's default limit,
-/// so that whatever OCaml built recursively converts too. It is only
-/// reserved, not allocated, up front.
-const STACK_SIZE: usize = 1 << 30;
-
 /// Why a conversion failed: a value that is not of its type, where it could
 /// tell.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,23 +77,16 @@ fn quiet_panics_of_conversions() {
 /// `v` must be a value of the OCaml type of `T`: other values are reported
 /// as [`Error`]s only where they could not be one (eg. an unexpected tag),
 /// and may otherwise crash. No OCaml code may run until it returns, so that
-/// the GC does not move values, as the OCaml thread calling it (from an
-/// external) waits for it.
-pub unsafe fn convert<T: FromOcaml + Send>(v: Value) -> Result<(T, Arena), Error> {
+/// the GC does not move values.
+pub unsafe fn convert<T: FromOcaml>(v: Value) -> Result<(T, Arena), Error> {
     quiet_panics_of_conversions();
-    let result = std::thread::scope(|scope| {
-        std::thread::Builder::new()
-            .name("stag_ast::convert".into())
-            .stack_size(STACK_SIZE)
-            .spawn_scoped(scope, move || {
-                CONVERTING.with(|converting| converting.set(true));
-                let mut builder = ArenaBuilder::default();
-                let x = T::from_ocaml(v, &mut builder);
-                (x, builder.finish())
-            })
-            .expect("spawning the converting thread")
-            .join()
-    });
+    CONVERTING.with(|converting| converting.set(true));
+    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        let mut builder = ArenaBuilder::default();
+        let x = T::from_ocaml(v, &mut builder);
+        (x, builder.finish())
+    }));
+    CONVERTING.with(|converting| converting.set(false));
     result.map_err(|panic| {
         let message = panic
             .downcast_ref::<String>()

@@ -6,9 +6,6 @@ open! Import
 
 val typed_toplevels : Typed.Toplevel.t list -> string
 
-(** Only how many toplevels and types there are. *)
-val typed_toplevels_summary : Typed.Toplevel.t list -> string
-
 val ty : Type.ty -> string
 
 (** Only how many types the arena of the conversion has. *)

@@ -93,21 +93,6 @@ fn shared_types_stay_shared() {
     assert_eq!(format!("{:?}", arena[ty]), "TTuple([#1, #1])");
 }
 
-/// Deeper than the default stacks of threads allow.
-#[test]
-fn deep_values() {
-    let mut heap = Heap::default();
-    let var = var(&mut heap, 0);
-    heap.set(var, 1, int(0));
-    let mut ty = heap.block(6, &[var]);
-    let depth = 100_000;
-    for _ in 0..depth {
-        ty = heap.block(1, &[ty, ty]);
-    }
-    let (_, arena) = unsafe { convert::<Ref<type_::Ty>>(ty) }.unwrap();
-    assert_eq!(arena.type_ty.len(), depth + 1);
-}
-
 #[test]
 fn values_of_the_wrong_type_are_errors() {
     let mut heap = Heap::default();

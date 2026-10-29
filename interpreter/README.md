@@ -40,7 +40,6 @@ converted once from OCaml values, for Rust code linked into stag.
   linear in the size of the OCaml value.
 - No OCaml code may run during a conversion (the GC would move values):
   convert within the external, before anything allocates on the OCaml heap.
-  It runs on a thread with a 1GB stack, like OCaml 5's limit, waiting for it.
 - Values not of the type converted to may crash. Where it can tell (eg. an
   unexpected tag), conversion returns an `Error`.
 - Core `Map`s and `Set`s become `HashMap`s and `HashSet`s (`Map`, `Set`).

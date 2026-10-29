@@ -5,11 +5,6 @@ external typed_toplevels
   -> string
   = "stag_rust_debug_typed_toplevels"
 
-external typed_toplevels_summary
-  :  Typed.Toplevel.t list
-  -> string
-  = "stag_rust_debug_typed_toplevels_summary"
-
 external ty : Type.ty -> string = "stag_rust_debug_ty"
 external ty_count : Type.ty -> string = "stag_rust_debug_ty_count"
 
