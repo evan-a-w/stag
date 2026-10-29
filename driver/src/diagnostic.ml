@@ -46,24 +46,26 @@ let of_source_file_error (error : Source_file.Error.t) =
     }
 ;;
 
-let max_declaration_lines = 12
+let max_source_lines = 12
 
 (* Indented, its first lines only if it is long. *)
-let declaration_source ?root_modules toplevel =
+let indented_source source =
+  let lines = String.split_lines source in
   let lines =
-    String.split_lines (Printer.toplevel ~width:78 ?root_modules toplevel)
-  in
-  let lines =
-    if List.length lines <= max_declaration_lines
+    if List.length lines <= max_source_lines
     then lines
     else (
-      let shown = max_declaration_lines - 1 in
+      let shown = max_source_lines - 1 in
       List.take lines shown
       @ [ sprintf "... (%d more lines)" (List.length lines - shown) ])
   in
   List.map lines ~f:(fun line ->
     if String.is_empty line then line else "  " ^ line)
   |> String.concat ~sep:"\n"
+;;
+
+let declaration_source ?root_modules toplevel =
+  indented_source (Printer.toplevel ~width:78 ?root_modules toplevel)
 ;;
 
 let of_typecheck_error (error : Typecheck_error.t) =
@@ -144,6 +146,14 @@ let of_typecheck_error (error : Typecheck_error.t) =
           ; message =
               "The type splice gave the type: "
               ^ Printer.type_expr ~width:78 ?root_modules generated
+          }
+        ]
+    | In_syntax_splice { generated; error } ->
+      notes error
+      @ [ { Note.loc = Loc.none
+          ; message =
+              "The splice gave the expression:\n"
+              ^ indented_source (Printer.expr ~width:78 ?root_modules generated)
           }
         ]
     | In_generated_declaration { generated; error; declaration = _ } ->

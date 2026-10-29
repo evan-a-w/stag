@@ -381,11 +381,7 @@ let%expect_test "staging" =
      t.stag:1:25-26)
     ((Compile_time_use_of_toplevel_being_checked x) @ t.stag:1:10-11)
     ((Compile_time_use_of_toplevel_being_checked f) @ t.stag:1:14-15)
-    ((Unification_error
-      (Type_mismatch
-       (TCode (inner (TVar (Unbound 18 1))) (context (RVar (Unbound 19 1))))
-       (TCon int ()) Structural_mismatch))
-     @ t.stag:1:10-11)
+    ((Toplevel_splice_of_neither (TCon int ())) @ t.stag:1:10-11)
     ((Not_in_scope y) @ t.stag:1:8-17)
     ((Duplicate_substitution a) @ t.stag:1:31-32)
     ((Not_in_scope a) @ t.stag:1:19-20)

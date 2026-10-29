@@ -142,6 +142,38 @@ let%expect_test "a looping splice is stopped by the limits" =
          |}])
 ;;
 
+let%expect_test "a syntax splice: diagnostics and hover" =
+  Client.with_server
+    ~files:
+      [ ( "a.stag"
+        , "let one = .~(Stag.Expr.int 1)\n\
+           let s = .~(Core.Sexp.sexp_of (type list[int])) [one]\n\
+           let bad : string = .~(Stag.Expr.int 1)\n" )
+      ]
+    (fun client ->
+       Client.did_open client "a.stag";
+       [%expect
+         {|
+         diagnostics a.stag (version 1):
+           2:19-2:38 error: In the expression this splice gave: This expression has type int but an expression was expected of type string
+             Note: The splice gave the expression:
+               1
+         |}];
+       List.iter
+         [ 0, 4; 0, 10; 0, 20; 1, 13; 1, 48 ]
+         ~f:(fun (line, character) ->
+           printf "%d:%d " line character;
+           hover client ~line ~character);
+       [%expect
+         {|
+         0:4 0:4-0:7 ```stag A.one : int ```
+         0:10 0:10-0:29 ```stag int ```
+         0:20 0:13-0:26 ```stag prelude.Stag.Expr.int : int -> Stag.Expr.t ```
+         1:13 1:11-1:28 ```stag prelude.Core.Sexp.sexp_of : Stag.Type.t[list[int]] -> Stag.Expr.t ```
+         1:48 1:48-1:51 ```stag A.one : int ```
+         |}])
+;;
+
 let%expect_test "formatting" =
   Client.with_server
     ~files:

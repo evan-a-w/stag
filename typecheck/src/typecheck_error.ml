@@ -88,6 +88,14 @@ module Kind = struct
         { code : Typed.Expr.t
         ; error : Error.t
         }
+    | Malformed_syntax_splice of Error.t
+    | Syntax_splice_with_substitutions
+    | Expect_in_syntax_splice
+    | Toplevel_splice_of_neither of Type.ty
+    | In_syntax_splice of
+        { generated : Syntax.Expr.t [@sexp.opaque]
+        ; error : t
+        }
     | Declaration_splice_failed of Error.t
     | Malformed_declarations of Error.t
     | Malformed_struct_quote of string
@@ -364,6 +372,26 @@ let rec kind_message (kind : Kind.t) ~show_type =
     sprintf
       "This toplevel splice failed at compile time: %s"
       (runtime_message error)
+  | Malformed_syntax_splice error ->
+    sprintf "This splice gave malformed syntax: %s" (Error.to_string_hum error)
+  | Syntax_splice_with_substitutions ->
+    "A splice of syntax (a Stag.Expr.t) is checked where it is, so it takes no \
+     substitutions"
+  | Expect_in_syntax_splice ->
+    "A splice of syntax can't give an [%expect]: its expected output is \
+     generated, so it could not be corrected"
+  | Toplevel_splice_of_neither ty ->
+    let printer = Type.Printer.create ~type_name:show_type () in
+    let ty = Type.Printer.ty printer ty in
+    sprintf
+      "This expression has type %s, but a toplevel splice is of code (of type \
+       <'a>{..'r}) or of syntax (of type Stag.Expr.t)%s"
+      ty
+      (Type.Printer.where printer)
+  | In_syntax_splice { generated = _; error } ->
+    sprintf
+      "In the expression this splice gave: %s"
+      (kind_message error ~show_type)
   | Declaration_splice_failed error ->
     sprintf
       "This declaration splice failed at compile time: %s"

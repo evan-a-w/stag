@@ -377,6 +377,7 @@ and variant roots r =
       match t.txt with
       | Con ({ txt = Root p; _ }, []) when Path.equal p (Path.name "unit") ->
         text ("`" ^ tag.txt)
+      | Con ({ txt = Resolved "unit"; _ }, []) -> text ("`" ^ tag.txt)
       | _ ->
         definition ~sep:" of" (text ("`" ^ tag.txt)) (type_expr roots ~prec:0 t))
   in
