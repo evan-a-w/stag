@@ -32,9 +32,9 @@ impl ArenaBuilder {
 }
 
 impl Arena {
-    /// The lengths of its stores, by [`crate::Indexed::STORE`].
-    pub fn store_lens(&self) -> Vec<usize> {
-        vec![self.example_record_type.len(), self.example_ty.len(), self.example_var_ty.len()]
+    /// The slot counts of its stores, by [`crate::Indexed::STORE`].
+    pub fn slot_counts(&self) -> Vec<usize> {
+        vec![self.example_record_type.slot_count(), self.example_ty.slot_count(), self.example_var_ty.slot_count()]
     }
 }
 

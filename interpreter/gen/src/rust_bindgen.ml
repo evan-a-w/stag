@@ -707,8 +707,8 @@ let arena (gen : Gen.t) instances =
      %s    }\n\
      }\n\n\
      impl Arena {\n\
-    \    /// The lengths of its stores, by [`crate::Indexed::STORE`].\n\
-    \    pub fn store_lens(&self) -> Vec<usize> {\n\
+    \    /// The slot counts of its stores, by [`crate::Indexed::STORE`].\n\
+    \    pub fn slot_counts(&self) -> Vec<usize> {\n\
     \        vec![%s]\n\
     \    }\n\
      }\n\n\
@@ -722,7 +722,8 @@ let arena (gen : Gen.t) instances =
     (List.map instances ~f:(fun (name, _) ->
        sprintf "        self.%s.finish_into(&mut arena.%s);\n" name name)
      |> String.concat)
-    (List.map instances ~f:(fun (name, _) -> sprintf "self.%s.len()" name)
+    (List.map instances ~f:(fun (name, _) ->
+       sprintf "self.%s.slot_count()" name)
      |> String.concat ~sep:", ")
     stored
 ;;

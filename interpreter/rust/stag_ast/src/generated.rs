@@ -371,9 +371,9 @@ impl ArenaBuilder {
 }
 
 impl Arena {
-    /// The lengths of its stores, by [`crate::Indexed::STORE`].
-    pub fn store_lens(&self) -> Vec<usize> {
-        vec![self.prim.len(), self.type_row.len(), self.type_ty.len(), self.type_var_presence_presence_bound.len(), self.type_var_row_bound.len(), self.type_var_ty_nothing.len(), self.typed_record_type.len()]
+    /// The slot counts of its stores, by [`crate::Indexed::STORE`].
+    pub fn slot_counts(&self) -> Vec<usize> {
+        vec![self.prim.slot_count(), self.type_row.slot_count(), self.type_ty.slot_count(), self.type_var_presence_presence_bound.slot_count(), self.type_var_row_bound.slot_count(), self.type_var_ty_nothing.slot_count(), self.typed_record_type.slot_count()]
     }
 }
 

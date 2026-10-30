@@ -397,7 +397,7 @@ pub unsafe fn to_ocaml<T: ToOcaml>(
     gc_stress: GcStress,
 ) -> Result<Value, Error> {
     catching(|| {
-        let lens = arena.store_lens();
+        let lens = arena.slot_counts();
         let minor_heap_words = if gc_stress != GcStress::Off {
             ocaml_sys::int_val(*ocaml_sys::field(caml_gc_get(val_int(0)), 0)) as usize
         } else {

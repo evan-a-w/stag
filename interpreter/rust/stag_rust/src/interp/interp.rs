@@ -31,7 +31,7 @@ impl Interp {
             "sccs: {}, members: {members}, ident infos: {}, arena: {:?}",
             self.sccs.len(),
             self.ident_info.len(),
-            self.arena.store_lens()
+            self.arena.slot_counts()
         )
     }
 

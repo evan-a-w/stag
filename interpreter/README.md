@@ -49,9 +49,9 @@ Rust code linked into stag.
   the `Arena`, once per OCaml value (by address), and are referred to by
   `Ref<T>`s (`arena[r]`). So sharing and cycles are kept, and conversion is
   linear in the size of the OCaml value.
-- The `Arena` is a struct of `Store<T>`s, which only grow. For values of
-  your own, keep `Store<T>`s beside it, or `Pool<T>`s, whose values can be
-  removed (eg. by a GC: `retain`) and their slots reused.
+- The `Arena` is a struct of `Store<T>`s, whose values can be removed (eg.
+  by a GC: `retain`) and their slots reused. For values of your own, keep
+  `Store<T>`s beside it.
 - No OCaml code may run during a conversion (the GC would move values):
   convert within the external, before anything allocates on the OCaml heap.
 - Values not of the type converted to may crash. Where it can tell (eg. an

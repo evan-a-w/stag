@@ -100,7 +100,6 @@ let crate_types =
     ; "Nothing"
     ; "OcamlKey"
     ; "Pending"
-    ; "Pool"
     ; "Ref"
     ; "Set"
     ; "Slot"

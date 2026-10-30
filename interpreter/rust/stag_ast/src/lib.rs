@@ -9,14 +9,12 @@
 mod arena;
 mod conv;
 mod ostring;
-mod pool;
 pub mod raw;
 mod to_ocaml;
 
 pub use arena::{Pending, Ref, Store};
 pub use conv::{convert, convert_into, Error, FromOcaml, Map, Nothing, Set, Stored};
 pub use ostring::Str;
-pub use pool::Pool;
 pub use to_ocaml::{to_ocaml, Builder, Construct, GcStress, Indexed, OcamlKey, Slot, ToOcaml};
 
 #[allow(clippy::all)]

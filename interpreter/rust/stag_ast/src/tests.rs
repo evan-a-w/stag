@@ -219,21 +219,21 @@ fn values_of_the_wrong_type_are_errors() {
 }
 
 /// [`crate::to_ocaml`] keeps the built values of each store at the
-/// [`crate::Indexed::STORE`] position of [`crate::Arena::store_lens`].
+/// [`crate::Indexed::STORE`] position of [`crate::Arena::slot_counts`].
 #[test]
-fn store_indices_match_store_lens() {
+fn store_indices_match_slot_counts() {
     use crate::{Arena, Indexed};
     fn row<T: Indexed>(arena: &Arena, name: &str) -> String {
-        format!("{} {name}: {}\n", T::STORE, T::store(arena).len())
+        format!("{} {name}: {}\n", T::STORE, T::store(arena).slot_count())
     }
     let mut arena = Arena::default();
     // Distinct lengths, so that a store at the wrong index is noticed.
     for n in 0..3 {
         arena
             .type_ty
-            .push(type_::Ty::TCon(n.to_string().into(), vec![]));
+            .insert(type_::Ty::TCon(n.to_string().into(), vec![]));
     }
-    arena.type_row.push(type_::Row::REmpty);
+    arena.type_row.insert(type_::Row::REmpty);
     let mut rows = [
         row::<crate::Prim>(&arena, "Prim"),
         row::<type_::Row>(&arena, "Row"),
@@ -245,7 +245,7 @@ fn store_indices_match_store_lens() {
     ];
     rows.sort();
     expect![[r#"
-        store_lens: [0, 1, 3, 0, 0, 0, 0]
+        slot_counts: [0, 1, 3, 0, 0, 0, 0]
         0 Prim: 0
         1 Row: 1
         2 Ty: 3
@@ -255,8 +255,8 @@ fn store_indices_match_store_lens() {
         6 RecordType: 0
     "#]]
     .assert_eq(&format!(
-        "store_lens: {:?}\n{}",
-        arena.store_lens(),
+        "slot_counts: {:?}\n{}",
+        arena.slot_counts(),
         rows.concat()
     ));
 }
@@ -283,30 +283,30 @@ fn strings_are_bytes() {
 }
 
 #[test]
-fn pools_reuse_removed_slots() {
-    use crate::Pool;
-    let mut pool = Pool::default();
+fn stores_reuse_removed_slots() {
+    use crate::Store;
+    let mut store = Store::default();
     let mut log = String::new();
-    let mut show = |what: &str, pool: &Pool<&str>| {
-        log += &format!("{what}: {pool:?} (len {})\n", pool.len());
+    let mut show = |what: &str, store: &Store<&str>| {
+        log += &format!("{what}: {store:?} (len {})\n", store.len());
     };
-    let a = pool.insert("a");
-    let b = pool.insert("b");
-    let c = pool.insert("c");
-    show("inserted a b c", &pool);
-    let removed = (pool.remove(b), pool.remove(b), pool.remove(a));
-    show(&format!("removed b, b again, a: {removed:?}"), &pool);
-    let (got_a, got_c) = (pool.get(a), pool.get(c));
-    show(&format!("get a, c: {got_a:?} {got_c:?}"), &pool);
-    let d = pool.insert("d");
-    let e = pool.insert("e");
-    let f = pool.insert("f");
-    show(&format!("inserted d e f at {d:?} {e:?} {f:?}"), &pool);
-    pool[c] = "C";
-    pool.retain(|_, x| *x != "e");
-    show("set c to C, retained all but e", &pool);
-    let g = pool.insert("g");
-    show(&format!("inserted g at {g:?}"), &pool);
+    let a = store.insert("a");
+    let b = store.insert("b");
+    let c = store.insert("c");
+    show("inserted a b c", &store);
+    let removed = (store.remove(b), store.remove(b), store.remove(a));
+    show(&format!("removed b, b again, a: {removed:?}"), &store);
+    let (got_a, got_c) = (store.get(a), store.get(c));
+    show(&format!("get a, c: {got_a:?} {got_c:?}"), &store);
+    let d = store.insert("d");
+    let e = store.insert("e");
+    let f = store.insert("f");
+    show(&format!("inserted d e f at {d:?} {e:?} {f:?}"), &store);
+    store[c] = "C";
+    store.retain(|_, x| *x != "e");
+    show("set c to C, retained all but e", &store);
+    let g = store.insert("g");
+    show(&format!("inserted g at {g:?}"), &store);
     expect![[r#"
         inserted a b c: {#0: "a", #1: "b", #2: "c"} (len 3)
         removed b, b again, a: (Some("b"), None, Some("a")): {#2: "c"} (len 1)
@@ -316,4 +316,29 @@ fn pools_reuse_removed_slots() {
         inserted g at #1: {#0: "d", #1: "g", #2: "C", #3: "f"} (len 4)
     "#]]
     .assert_eq(&log);
+}
+
+#[test]
+fn converting_appends_after_free_slots() {
+    use crate::{Pending, Store};
+    let mut store = Store::default();
+    let a = store.insert("a");
+    store.insert("b");
+    store.remove(a);
+    let mut pending = Pending::after(&store);
+    let (x, _) = pending.reserve(0x100);
+    let (y, _) = pending.reserve(0x200);
+    let (x_again, new) = pending.reserve(0x100);
+    pending.fill(x, "x");
+    pending.fill(y, "y");
+    pending.finish_into(&mut store);
+    let reused = store.insert("c");
+    expect![[r#"
+        reserved #2 #3, #2 again (new: false)
+        inserted c at #0
+        {#0: "c", #1: "b", #2: "x", #3: "y"} (len 4)
+    "#]].assert_eq(&format!(
+        "reserved {x:?} {y:?}, {x_again:?} again (new: {new})\ninserted c at {reused:?}\n{store:?} (len {})\n",
+        store.len()
+    ));
 }
