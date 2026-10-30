@@ -22,7 +22,7 @@ impl Stamps {
         Stamps { counter }
     }
 
-    pub fn next(&mut self) -> i64 {
+    pub fn stamp(&mut self) -> i64 {
         unsafe {
             let next = field(*self.counter, 0);
             let stamp = int_val(*next) as i64;
@@ -34,7 +34,7 @@ impl Stamps {
     pub fn fresh(&mut self, name: Str) -> typed::Ident {
         typed::Ident {
             name,
-            stamp: self.next(),
+            stamp: self.stamp(),
         }
     }
 }
