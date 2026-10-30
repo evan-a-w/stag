@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use stag_ast::{typed, Arena, GcStress, InterpValue};
+use stag_ast::{
+    typed::{self, Ident},
+    Arena, GcStress, InterpValue,
+};
 
 use super::Stamps;
 
@@ -24,6 +27,14 @@ impl Interp {
             gc_stress,
         }
     }
+
+    // fn compile(&mut self, scc: usize) {
+    //     let scc = &self.sccs[scc];
+    //     scc.members
+
+    // let mut compiled_toplevels: HashMap<Ident, CompiledToplevel> = HashMap::new() ;
+
+    // }
 
     pub fn summary(&self) -> String {
         let members: usize = self.sccs.iter().map(|scc| scc.members.len()).sum();

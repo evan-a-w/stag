@@ -1,6 +1,7 @@
 #[allow(clippy::module_inception)]
 mod interp;
 
+pub mod bytecode;
 pub mod entry;
 pub mod stamps;
 
