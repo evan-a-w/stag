@@ -281,3 +281,38 @@ fn strings_are_bytes() {
         Str::from("é").to_str()
     ));
 }
+
+#[test]
+fn pools_reuse_removed_slots() {
+    use crate::Pool;
+    let mut pool = Pool::default();
+    let mut log = String::new();
+    let mut show = |what: &str, pool: &Pool<&str>| {
+        log += &format!("{what}: {pool:?} (len {})\n", pool.len());
+    };
+    let a = pool.insert("a");
+    let b = pool.insert("b");
+    let c = pool.insert("c");
+    show("inserted a b c", &pool);
+    let removed = (pool.remove(b), pool.remove(b), pool.remove(a));
+    show(&format!("removed b, b again, a: {removed:?}"), &pool);
+    let (got_a, got_c) = (pool.get(a), pool.get(c));
+    show(&format!("get a, c: {got_a:?} {got_c:?}"), &pool);
+    let d = pool.insert("d");
+    let e = pool.insert("e");
+    let f = pool.insert("f");
+    show(&format!("inserted d e f at {d:?} {e:?} {f:?}"), &pool);
+    pool[c] = "C";
+    pool.retain(|_, x| *x != "e");
+    show("set c to C, retained all but e", &pool);
+    let g = pool.insert("g");
+    show(&format!("inserted g at {g:?}"), &pool);
+    expect![[r#"
+        inserted a b c: {#0: "a", #1: "b", #2: "c"} (len 3)
+        removed b, b again, a: (Some("b"), None, Some("a")): {#2: "c"} (len 1)
+        get a, c: None Some("c"): {#2: "c"} (len 1)
+        inserted d e f at #0 #1 #3: {#0: "d", #1: "e", #2: "c", #3: "f"} (len 4)
+        set c to C, retained all but e: {#0: "d", #2: "C", #3: "f"} (len 3)
+        inserted g at #1: {#0: "d", #1: "g", #2: "C", #3: "f"} (len 4)
+    "#]].assert_eq(&log);
+}
