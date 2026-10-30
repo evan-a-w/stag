@@ -15,5 +15,5 @@ if ! out=$(RUSTC_WRAPPER="" UPDATE_EXPECT=1 CARGO_WORKSPACE_DIR="$scratch" \
   exit 1
 fi
 for f in "$@"; do
-  cat "$scratch/$f" >"${f//\//.}.corrected"
+  rustfmt --edition 2021 <"$scratch/$f" >"${f//\//.}.corrected"
 done

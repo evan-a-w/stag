@@ -314,5 +314,6 @@ fn pools_reuse_removed_slots() {
         inserted d e f at #0 #1 #3: {#0: "d", #1: "e", #2: "c", #3: "f"} (len 4)
         set c to C, retained all but e: {#0: "d", #2: "C", #3: "f"} (len 3)
         inserted g at #1: {#0: "d", #1: "g", #2: "C", #3: "f"} (len 4)
-    "#]].assert_eq(&log);
+    "#]]
+    .assert_eq(&log);
 }
