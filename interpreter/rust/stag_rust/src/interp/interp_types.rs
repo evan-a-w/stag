@@ -23,52 +23,6 @@ impl PolyId {
 pub struct VarInfo {
     pub size: StackOffset,
     pub stack_offset: StackOffset,
-}
-
-#[repr(C)]
-pub struct UpValue {
-    next: Option<NonNull<UpValue>>,
-    value: NonNull<u8>,
-    size: StackOffset,
-    inline_value: [u64; 0], // start of the inline bytes (8-aligned)
-}
-
-pub enum FunctionLocal {
-    UpValue(UpValueId),
-    Local(StackOffset),
-}
-
-impl UpValue {
-    fn layout(size: usize) -> Layout {
-        Layout::from_size_align(size_of::<Self>() + size, align_of::<Self>())
-            .unwrap()
-            .pad_to_align()
-    }
-
-    /// `value: None` points `value` at the inline bytes.
-    pub fn new(
-        size: StackOffset,
-        value: Option<NonNull<u8>>,
-        next: Option<NonNull<UpValue>>,
-    ) -> NonNull<UpValue> {
-        let layout = Self::layout(size as usize);
-        unsafe {
-            let p = std::alloc::alloc_zeroed(layout) as *mut UpValue;
-            if p.is_null() {
-                handle_alloc_error(layout);
-            }
-            let inline = NonNull::new_unchecked((&raw mut (*p).inline_value).cast::<u8>());
-            // .write doesn't destruct, so is good for uninitialized stuff
-            (&raw mut (*p).next).write(next);
-            (&raw mut (*p).value).write(value.unwrap_or(inline));
-            (&raw mut (*p).size).write(size);
-            NonNull::new_unchecked(p)
-        }
-    }
-
-    // frees only one node
-    pub unsafe fn free(p: NonNull<UpValue>) {
-        let size = (*p.as_ptr()).size as usize;
-        std::alloc::dealloc(p.as_ptr().cast(), Self::layout(size));
-    }
+    pub ty: Ty,
+    pub boxed: bool, // instead of changing types and stuff for boxed locals, we just have this flag
 }
