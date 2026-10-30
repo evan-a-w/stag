@@ -1,6 +1,6 @@
 open! Import
 
-(** Evaluates in Rust ([interpreter/rust/stag_rust/src/interp.rs]). Failing to
+(** Evaluates in Rust ([interpreter/rust/stag_rust/src/interp/]). Failing to
     convert raises. *)
 include Stag_eval.Interpreter_intf.S with module Value = Interp_value
 

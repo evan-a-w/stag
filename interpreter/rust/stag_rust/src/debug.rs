@@ -9,8 +9,8 @@ use stag_ast::{
 };
 use stag_ast_example as example;
 
+use crate::interp::Stamps;
 use crate::ocaml_string;
-use crate::stamps::Stamps;
 
 extern "C" {
     fn caml_failwith_value(message: Value) -> !;

@@ -1,66 +1,11 @@
-use std::collections::HashMap;
-
 use ocaml_sys::{caml_alloc_custom, custom_operations, field, Value as OcamlValue};
-use stag_ast::{
-    convert_into, interp_value::Outcome, to_ocaml, typed, Arena, Error, GcStress, InterpValue,
-    ToOcaml,
-};
+use stag_ast::{convert_into, interp_value::Outcome, to_ocaml, Error, GcStress, ToOcaml};
 
+use super::{Interp, Stamps};
 use crate::ocaml_string;
-use crate::stamps::Stamps;
 
 extern "C" {
     fn caml_failwith_value(message: OcamlValue) -> !;
-}
-
-pub struct Interp {
-    pub arena: Arena,
-    pub ident_info: HashMap<typed::Ident, typed::IdentInfo>,
-    pub sccs: Vec<typed::Scc>,
-    gc_stress: GcStress,
-}
-
-fn not_implemented<T>(op: &str) -> Result<T, String> {
-    Err(format!("not implemented: {op}"))
-}
-
-impl Interp {
-    pub fn splice(
-        &mut self,
-        _code: &typed::Expr,
-        _level: i64,
-        _stamps: &mut Stamps,
-    ) -> Result<typed::Expr, String> {
-        not_implemented("splice")
-    }
-
-    pub fn run(&mut self, _expr: &typed::Expr, _level: i64) -> Result<InterpValue, String> {
-        not_implemented("run")
-    }
-
-    pub fn global_info(&self, _ident: &typed::Ident) -> Option<typed::IdentInfo> {
-        None
-    }
-
-    pub fn eval(&mut self) -> Result<(), String> {
-        not_implemented("eval")
-    }
-
-    pub fn run_expect_test(&mut self, _test: &typed::ExpectTest) -> Result<(), String> {
-        not_implemented("run_expect_test")
-    }
-
-    pub fn eval_expr(
-        &mut self,
-        _bindings: &[(typed::Ident, InterpValue)],
-        _expr: &typed::Expr,
-    ) -> Result<InterpValue, String> {
-        not_implemented("eval_expr")
-    }
-
-    pub fn eval_toplevel(&mut self, _ident: &typed::Ident) -> Result<(), String> {
-        not_implemented("eval_toplevel")
-    }
 }
 
 struct Ops(custom_operations);
@@ -123,12 +68,7 @@ fn outcome<T>(result: Result<T, String>) -> Outcome<T> {
 /// `gc_stress` must be a `Debug.Gc_stress.t`.
 #[no_mangle]
 pub unsafe extern "C" fn stag_rust_interp_create(gc_stress: OcamlValue) -> OcamlValue {
-    let interp = Box::new(Interp {
-        arena: Arena::default(),
-        ident_info: HashMap::new(),
-        sccs: Vec::new(),
-        gc_stress: GcStress::of_ocaml(gc_stress),
-    });
+    let interp = Box::new(Interp::new(GcStress::of_ocaml(gc_stress)));
     let handle = caml_alloc_custom(&OPS.0, std::mem::size_of::<*mut Interp>(), 0, 1);
     *slot(handle) = Box::into_raw(interp);
     handle
@@ -298,12 +238,5 @@ pub unsafe extern "C" fn stag_rust_interp_eval_toplevel(
 /// `handle` must be from `stag_rust_interp_create`.
 #[no_mangle]
 pub unsafe extern "C" fn stag_rust_interp_summary(handle: OcamlValue) -> OcamlValue {
-    let interp = interp(handle);
-    let members: usize = interp.sccs.iter().map(|scc| scc.members.len()).sum();
-    ocaml_string::of_str(&format!(
-        "sccs: {}, members: {members}, ident infos: {}, arena: {:?}",
-        interp.sccs.len(),
-        interp.ident_info.len(),
-        interp.arena.store_lens()
-    ))
+    ocaml_string::of_str(&interp(handle).summary())
 }

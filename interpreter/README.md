@@ -33,7 +33,8 @@ Rust code linked into stag.
   - `stag_rust`: the one static library linked into OCaml. Rust code called
     from OCaml (eg. an interpreter) goes here, as modules, so that std and
     the dependencies are linked once. `debug.rs` has externals for tests,
-    `interp.rs` the interpreter.
+    `interp/` the interpreter: `interp.rs` its logic, `entry.rs` its
+    externals, `stamps.rs` the typechecker's stamp counter.
   - `stag_ast_example`: the generated Rust of `gen/example`, for tests.
 - `interp_value/`: `Interp_value.t`, the values the interpreter returns to
   OCaml (its own values are Rust's).
@@ -87,10 +88,10 @@ Rust code linked into stag.
 
 `Stag_rust.Interp` implements `Stag_eval.Interpreter_intf.S`, as
 `Treewalk` does, so the typechecker and driver can use either. Its `t` holds
-an OCaml custom block owning the Rust `Interp` (`rust/stag_rust/src/interp.rs`),
-which lives as long as it:
+an OCaml custom block owning the Rust `Interp`
+(`rust/stag_rust/src/interp/interp.rs`), which lives as long as it:
 
-- Each operation is an external that converts its OCaml arguments with
+- Each operation is an external (`interp/entry.rs`) that converts its OCaml arguments with
   `convert_into` into the interp's `Arena`, then calls a method of `Interp`.
   Values are shared within one conversion only, so types are read with
   `arena[expr.ty]` but are not shared between calls.
