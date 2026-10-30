@@ -1,25 +1,8 @@
-use std::hash::Hash;
-use std::{collections::HashMap, hash::Hasher};
+use crate::interp::interp_types::*;
+
+use std::collections::{HashMap, HashSet};
 
 use stag_ast::{syntax::Lit, type_::Ty, typed::Ident};
-
-pub type StackOffset = usize;
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PolyId(usize);
-
-impl PolyId {
-    pub fn new(s: &str) -> Self {
-        let mut hasher = std::hash::DefaultHasher::new();
-        s.hash(&mut hasher);
-        Self(hasher.finish() as usize)
-    }
-}
-
-pub struct VarInfo {
-    pub size: StackOffset,
-    pub stack_offset: StackOffset,
-}
 
 pub enum Instruction {
     Move(StackOffset, StackOffset), // dest <- src
@@ -29,12 +12,26 @@ pub enum Instruction {
     PolyGet(StackOffset, PolyId),
     Deref(StackOffset, StackOffset, StackOffset), // (dst, src, offset): dst <- *(src + offset)
     CloseUpValuesAfter(StackOffset), // upvalues sorted decreasing by stack slot. Pop while >= this
+    MakeClosure(StackOffset, ClosureId),
 }
 
 pub struct CompiledToplevel {
     instructions: Vec<Instruction>,
     var_info: HashMap<Ident, VarInfo>,
     stack_frame_size: StackOffset,
+    closure_id: Option<ClosureId>, // [None] when it's not a closure
+}
+
+pub struct Closure {
+    up_values: Vec<*mut UpValue>,
+}
+
+pub struct ClosureTemplate {
+    up_values: Vec<FunctionLocal>,
+}
+
+pub struct Compiler {
+    closures: HashMap<ClosureId, ClosureTemplate>,
 }
 
 // #[derive(Default, Clone)]
