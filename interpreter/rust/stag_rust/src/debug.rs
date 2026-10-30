@@ -5,11 +5,12 @@ use std::fmt::Debug;
 
 use ocaml_sys::Value;
 use stag_ast::{
-    convert, convert_into, to_ocaml, type_, typed, Arena, FromOcaml, GcStress, ToOcaml,
+    convert, convert_into, to_ocaml, type_, typed, Arena, FromOcaml, GcStress, Str, ToOcaml,
 };
 use stag_ast_example as example;
 
 use crate::ocaml_string;
+use crate::stamps::Stamps;
 
 extern "C" {
     fn caml_failwith_value(message: Value) -> !;
@@ -30,6 +31,26 @@ unsafe fn show<T: FromOcaml + Debug>(v: Value) -> Value {
 #[no_mangle]
 pub unsafe extern "C" fn stag_rust_debug_typed_toplevels(v: Value) -> Value {
     show::<Vec<typed::Toplevel>>(v)
+}
+
+/// # Safety
+///
+/// `stamps` must be a `Stamp_counter.t`, `name` a `string` and `n` an `int`.
+#[no_mangle]
+pub unsafe extern "C" fn stag_rust_debug_fresh_idents(
+    stamps: Value,
+    name: Value,
+    n: Value,
+) -> Value {
+    let (name, n) =
+        match (|| Ok::<_, stag_ast::Error>((convert::<Str>(name)?.0, convert::<i64>(n)?.0)))() {
+            Ok(x) => x,
+            Err(error) => return ocaml_string::of_str(&format!("error: {error}")),
+        };
+    let mut stamps = Stamps::new(stamps);
+    let idents: Vec<_> = (0..n).map(|_| stamps.fresh(name.clone())).collect();
+    drop(stamps);
+    ocaml_string::of_str(&format!("{idents:?}"))
 }
 
 /// How much of the program there is, as it is too big to print.

@@ -19,6 +19,7 @@ external add_scc : handle -> Typed.Scc.t -> unit = "stag_rust_interp_add_scc"
 
 external splice
   :  handle
+  -> Stamp_counter.t
   -> Typed.Expr.t
   -> int
   -> Typed.Expr.t Value.Outcome.t
@@ -62,16 +63,17 @@ external summary : handle -> string = "stag_rust_interp_summary"
 
 type t =
   { handle : handle
+  ; stamps : Stamp_counter.t
   ; mutable output : string -> unit
   }
 
 exception Reached_error [@@deriving sexp_of]
 
-let create_with_gc_stress gc_stress =
-  { handle = create_handle gc_stress; output = print_string }
+let create_with_gc_stress ~stamps gc_stress =
+  { handle = create_handle gc_stress; stamps; output = print_string }
 ;;
 
-let create ~stamps:_ () = create_with_gc_stress Off
+let create ~stamps () = create_with_gc_stress ~stamps Off
 let set_output t output = t.output <- output
 
 let with_output t output ~f =
@@ -85,7 +87,7 @@ let add_ident_info t ~ident ~info = add_ident_info t.handle ident info
 let add_scc t scc = add_scc t.handle scc
 
 let splice t ~code ~level ~entry:_ ~reflect:_ =
-  splice t.handle code level |> Value.Outcome.to_or_error
+  splice t.handle t.stamps code level |> Value.Outcome.to_or_error
 ;;
 
 let run t expr ~level ~reflect:_ =

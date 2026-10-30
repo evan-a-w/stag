@@ -6,6 +6,16 @@ external typed_toplevels
   = "stag_rust_debug_typed_toplevels"
 
 external ty : Type.ty -> string = "stag_rust_debug_ty"
+
+external fresh_idents
+  :  Stamp_counter.t
+  -> string
+  -> int
+  -> string
+  = "stag_rust_debug_fresh_idents"
+
+let fresh_idents stamps ~name ~n = fresh_idents stamps name n
+
 external ty_count : Type.ty -> string = "stag_rust_debug_ty_count"
 
 external syntax_program

@@ -7,6 +7,7 @@ use stag_ast::{
 };
 
 use crate::ocaml_string;
+use crate::stamps::Stamps;
 
 extern "C" {
     fn caml_failwith_value(message: OcamlValue) -> !;
@@ -24,7 +25,12 @@ fn not_implemented<T>(op: &str) -> Result<T, String> {
 }
 
 impl Interp {
-    pub fn splice(&mut self, _code: &typed::Expr, _level: i64) -> Result<typed::Expr, String> {
+    pub fn splice(
+        &mut self,
+        _code: &typed::Expr,
+        _level: i64,
+        _stamps: &mut Stamps,
+    ) -> Result<typed::Expr, String> {
         not_implemented("splice")
     }
 
@@ -166,11 +172,12 @@ pub unsafe extern "C" fn stag_rust_interp_add_scc(
 
 /// # Safety
 ///
-/// `handle` must be from `stag_rust_interp_create`, `code` a
-/// `Typed.Expr.t` and `level` an `int`.
+/// `handle` must be from `stag_rust_interp_create`, `stamps` a
+/// `Stamp_counter.t`, `code` a `Typed.Expr.t` and `level` an `int`.
 #[no_mangle]
 pub unsafe extern "C" fn stag_rust_interp_splice(
     handle: OcamlValue,
+    stamps: OcamlValue,
     code: OcamlValue,
     level: OcamlValue,
 ) -> OcamlValue {
@@ -181,7 +188,9 @@ pub unsafe extern "C" fn stag_rust_interp_splice(
             convert_into(level, &mut interp.arena)?,
         ))
     });
-    let result = outcome(interp.splice(&code, level));
+    let mut stamps = Stamps::new(stamps);
+    let result = outcome(interp.splice(&code, level, &mut stamps));
+    drop(stamps);
     reply(interp, result)
 }
 

@@ -1965,3 +1965,17 @@ let%expect_test "types shared as a DAG stay shared" =
   print_endline (Debug.ty_count ty);
   [%expect {| tys: 65 |}]
 ;;
+
+let%expect_test "idents minted in Rust share the typechecker's stamps" =
+  let stamps = Stag_common.Stamp_counter.create () in
+  let ocaml () = Stag_common.Stamp_counter.next stamps in
+  let before = ocaml () in
+  let rust = Debug.fresh_idents stamps ~name:"x" ~n:3 in
+  let after = ocaml () in
+  print_s [%message (before : int) rust (after : int)];
+  [%expect {|
+    ((before 0)
+     "[Ident { name: \"x\", stamp: 1 }, Ident { name: \"x\", stamp: 2 }, Ident { name: \"x\", stamp: 3 }]"
+     (after 4))
+    |}]
+;;

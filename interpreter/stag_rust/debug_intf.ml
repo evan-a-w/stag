@@ -42,6 +42,9 @@ module type Debug = sig
 
   val syntax_program : Syntax.Program.t -> string
 
+  (** [n] idents named [name] minted in Rust with [stamps]. *)
+  val fresh_idents : Stamp_counter.t -> name:string -> n:int -> string
+
   (** Only how many of its parts and stored values there are. *)
   val typed_program_summary : Typed.Program.t -> string
 
