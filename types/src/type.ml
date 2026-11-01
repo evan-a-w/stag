@@ -38,7 +38,7 @@ and ty =
 
 and row =
   | REmpty
-  | RExtend of string * presence * ty * row
+  | RExtend of string * presence * presence * ty * row
   | RVar of (row, bound) var
 [@@rust.shared]
 
@@ -162,7 +162,7 @@ let canonical_presence =
 let rec tail_var row =
   match row with
   | REmpty -> None
-  | RExtend (_, _, _, row') | RVar { state = Link row'; _ } -> tail_var row'
+  | RExtend (_, _, _, _, row') | RVar { state = Link row'; _ } -> tail_var row'
   | RVar var -> Some var
 ;;
 
@@ -192,9 +192,10 @@ and same_row row1 row2 =
   match canonical_row row1, canonical_row row2 with
   | REmpty, REmpty -> true
   | RVar var1, RVar var2 -> var1.id = var2.id
-  | RExtend (name1, p1, ty1, rest1), RExtend (name2, p2, ty2, rest2) ->
+  | RExtend (name1, p1, a1, ty1, rest1), RExtend (name2, p2, a2, ty2, rest2) ->
     String.equal name1 name2
     && same_presence p1 p2
+    && same_presence a1 a2
     && same_ty ty1 ty2
     && same_row rest1 rest2
   | (REmpty | RVar _ | RExtend _), _ -> false
@@ -215,9 +216,11 @@ and same_arg arg1 arg2 =
 let same_bound ?(same_entry_ty = fun (_ : presence) -> same_ty) bound1 bound2 =
   let rec same_rows row1 row2 =
     match canonical_row row1, canonical_row row2 with
-    | RExtend (name1, p1, ty1, rest1), RExtend (name2, p2, ty2, rest2) ->
+    | RExtend (name1, p1, a1, ty1, rest1), RExtend (name2, p2, a2, ty2, rest2)
+      ->
       String.equal name1 name2
       && same_presence p1 p2
+      && same_presence a1 a2
       && (same_ty ty1 ty2 || same_entry_ty p1 ty1 ty2)
       && same_rows rest1 rest2
     | row1, row2 -> same_row row1 row2
@@ -291,8 +294,9 @@ let iterator (f : _ Iter.t) =
   and iter_row ~guarded row =
     match row with
     | REmpty -> Ok ()
-    | RExtend (_, presence, ty, rest) ->
+    | RExtend (_, presence, assigned, ty, rest) ->
       let%bind.Result () = iter_presence ~guarded presence in
+      let%bind.Result () = iter_presence ~guarded assigned in
       let%bind.Result () = iter_ty ~guarded ty in
       iter_row ~guarded rest
     | RVar ({ state = Link target; _ } as var) ->
@@ -416,13 +420,15 @@ module Changes = struct
   and row t row' =
     match row' with
     | REmpty -> none
-    | RExtend (_, presence, ty', rest) ->
-      let presence =
+    | RExtend (_, presence, assigned, ty', rest) ->
+      let presence_var presence =
         match canonical_presence presence with
         | Present | Absent -> none
         | PVar var' -> var t var'
       in
-      both presence (both (ty t ty') (row t rest))
+      both
+        (both (presence_var presence) (presence_var assigned))
+        (both (ty t ty') (row t rest))
     | RVar ({ state = Link target; _ } as var') ->
       vertex t t.rows var'.id ~target:(fun () -> row t target)
     | RVar var' -> var t var'
@@ -532,16 +538,18 @@ let mapper (f : Mapper.t) =
   and map_row row =
     match row with
     | REmpty -> row
-    | RExtend (name, presence, ty, rest) ->
+    | RExtend (name, presence, assigned, ty, rest) ->
       let presence' = map_presence presence in
+      let assigned' = map_presence assigned in
       let ty' = map_ty ty in
       let rest' = map_row rest in
       if
         phys_equal presence presence'
+        && phys_equal assigned assigned'
         && phys_equal ty ty'
         && phys_equal rest rest'
       then row
-      else RExtend (name, presence', ty', rest')
+      else RExtend (name, presence', assigned', ty', rest')
     | RVar ({ state = Link target; _ } as var) ->
       link
         rows
@@ -674,8 +682,17 @@ module Sexper = struct
   and row t row' : Sexp.t =
     match row' with
     | REmpty -> Atom "REmpty"
-    | RExtend (name, p, ty', rest) ->
-      List [ Atom "RExtend"; Atom name; presence p; ty t ty'; row t rest ]
+    | RExtend (name, p, assigned, ty', rest) ->
+      (* Only [Present] is shown, as unknown is the usual case in contexts. *)
+      let assigned : Sexp.t list =
+        match canonical_presence assigned with
+        | Present -> [ Sexp.Atom "Assigned" ]
+        | Absent | PVar _ -> []
+      in
+      Sexp.List
+        ([ Sexp.Atom "RExtend"; Atom name; presence p ]
+         @ assigned
+         @ [ ty t ty'; row t rest ])
     | RVar v -> List [ Atom "RVar"; var t t.rows v ~sexp_of_link:(row t) ]
 
   and presence p : Sexp.t =
@@ -798,9 +815,9 @@ module Printer = struct
   let rec row_entries row =
     match canonical_row row with
     | REmpty -> [], None
-    | RExtend (name, presence, ty, rest) ->
+    | RExtend (name, presence, assigned, ty, rest) ->
       let entries, tail = row_entries rest in
-      (name, presence, ty) :: entries, tail
+      (name, presence, assigned, ty) :: entries, tail
     | RVar var -> [], Some var
   ;;
 
@@ -808,12 +825,12 @@ module Printer = struct
   let rec drop_implied_absent entries =
     match entries with
     | [] -> []
-    | ((name, presence, _) as entry) :: rest ->
+    | ((name, presence, _, _) as entry) :: rest ->
       let rest' = drop_implied_absent rest in
       (match canonical_presence presence with
        | Absent
          when not
-                (List.exists rest ~f:(fun (name', _, _) ->
+                (List.exists rest ~f:(fun (name', _, _, _) ->
                    String.equal name name')) -> rest'
        | Present | Absent | PVar _ -> entry :: rest')
   ;;
@@ -824,10 +841,19 @@ module Printer = struct
       (match tail with
        | None -> drop_implied_absent entries
        | Some _ -> entries)
-      |> List.stable_sort ~compare:(fun (a, _, _) (b, _, _) ->
+      |> List.stable_sort ~compare:(fun (a, _, _, _) (b, _, _, _) ->
         String.compare a b)
-      |> List.map ~f:(fun (name, presence, ty) ->
+      |> List.map ~f:(fun (name, presence, assigned, ty) ->
         let name = label name in
+        let entry name ty =
+          entry
+            name
+            ty
+            ~assigned:
+              (match canonical_presence assigned with
+               | Present -> true
+               | Absent | PVar _ -> false)
+        in
         match canonical_presence presence with
         | Present -> entry name ty
         | Absent -> "-" ^ name
@@ -894,7 +920,7 @@ module Printer = struct
         ~label:(fun tag -> "`" ^ tag)
         ~row_var_name
         ~presence_var_name
-        ~entry:(fun tag ty ->
+        ~entry:(fun tag ty ~assigned:_ ->
           match canonical_ty ty with
           | TCon ("unit", []) -> tag
           | ty -> sprintf "%s of %s" tag (ty_to_string t ~prec:0 ty))
@@ -977,8 +1003,12 @@ module Printer = struct
         ~label
         ~row_var_name
         ~presence_var_name
-        ~entry:(fun name ty ->
-          sprintf "%s : %s" name (ty_to_string t ~prec:0 ty))
+        ~entry:(fun name ty ~assigned ->
+          sprintf
+            "%s : %s%s"
+            name
+            (if assigned then "mut " else "")
+            (ty_to_string t ~prec:0 ty))
     in
     "{" ^ String.concat ~sep:"; " (entries @ Option.to_list tail) ^ "}"
   ;;
@@ -1084,8 +1114,8 @@ module Snapshot = struct
 
   and row t = function
     | REmpty -> REmpty
-    | RExtend (label, p, entry, rest) ->
-      RExtend (label, presence t p, ty t entry, row t rest)
+    | RExtend (label, p, assigned, entry, rest) ->
+      RExtend (label, presence t p, presence t assigned, ty t entry, row t rest)
     | RVar v -> RVar (var t.rows v ~copy:(row t))
 
   and presence t = function

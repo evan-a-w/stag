@@ -246,6 +246,13 @@ let fits_flat ~width t = fits ~spaced:true width [ 0, Flat, hoist t ]
 (* Whether [t], starting at [col] and laid out with its groups flat (its other
    lines broken), fits in [width] on each of its lines: the column it ends at
    if so, and whether a [Space] there would print nothing. Only the lines of [t] are looked at, each up to the width. *)
+let rec is_blank = function
+  | Empty -> true
+  | Cat (a, b) -> is_blank a && is_blank b
+  | Nest (_, t) | Align t | Group t -> is_blank t
+  | _ -> false
+;;
+
 let fits_all ~width ~col ~spaced ~indent t =
   let rec go col ~spaced (commands : (int * Mode.t * t) list) =
     if col > width
@@ -275,6 +282,9 @@ let fits_all ~width ~col ~spaced ~indent t =
             | Flat ->
               go (col + String.length s) ~spaced:(spaced_after s ~spaced) rest
             | Break -> go indent ~spaced:true rest)
+         (* A comment ending [t] ends its last line, flat or not. *)
+         | End_line when List.for_all rest ~f:(fun (_, _, t) -> is_blank t) ->
+           go col ~spaced []
          | Hardline | Fresh_line | End_line | Blank_line ->
            (match mode with
             | Flat -> None

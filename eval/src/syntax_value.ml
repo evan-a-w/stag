@@ -25,6 +25,7 @@ let constructor_refs =
        | Exception _
        | Malformed_exception _
        | Let _
+       | Let_mut _
        | Expect_test _
        | Bench _
        | Module_splice _
@@ -358,6 +359,7 @@ module Of_value = struct
                  })
            | "Record", 1 -> Record (arg 0 (row ~labels:Label ~loc))
            | "Variant", 1 -> Variant (arg 0 (row ~labels:Label ~loc))
+           | "Mut", 1 -> Mut (arg 0 (type_expr ~loc))
            | "Splice", 1 -> Splice (arg 0 (expr ~loc))
            | _ -> raise Bad_arguments))
 
@@ -489,6 +491,14 @@ module Of_value = struct
              , arg 2 (option (type_expr ~loc))
              , arg 3 (expr ~loc)
              , arg 4 (expr ~loc) )
+         | "Let_mut", 4 ->
+           Let_mut
+             ( arg 0 (name Binder ~loc)
+             , arg 1 (option (type_expr ~loc))
+             , arg 2 (expr ~loc)
+             , arg 3 (expr ~loc) )
+         | "Assign", 2 ->
+           Assign (arg 0 (decl_path Lower ~loc), arg 1 (expr ~loc))
          | "Fun", 2 -> Fun (arg 0 (params (binding ~loc)), arg 1 (expr ~loc))
          | "Splice", 1 ->
            arg 0 (fun splice : Expr.desc ->
@@ -544,6 +554,11 @@ module Of_value = struct
                , arg 1 (list (binding ~loc))
                , arg 2 (option (type_expr ~loc))
                , arg 3 (expr ~loc) )
+           | "Let_mut", 3 ->
+             Let_mut
+               ( arg 0 (name Binder ~loc)
+               , arg 1 (option (type_expr ~loc))
+               , arg 2 (expr ~loc) )
            | "Type", 1 -> Type (arg 0 (type_decl ~loc))
            | "Exception", 2 ->
              Exception (arg 0 (name Upper ~loc), arg 1 (list (type_expr ~loc)))

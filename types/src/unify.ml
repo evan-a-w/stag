@@ -153,6 +153,15 @@ let fits ty ~(var : (Type.row, Type.bound) Type.Var.t) =
   Type.iter_ty { ty = check; row = check; presence = check } ty |> Result.is_ok
 ;;
 
+let fits_presence presence ~(var : (Type.row, Type.bound) Type.Var.t) =
+  match Type.canonical_presence presence with
+  | Present | Absent -> true
+  | PVar var' ->
+    (match var'.state with
+     | Unbound rank' -> rank' <= Type.Var.rank_exn var
+     | Generic | Link _ -> false)
+;;
+
 (* Whether entries of [presence] of types [ty1] and [ty2] are known to have
    equal types when present, so bounds with either are equivalent. *)
 let bounded_id : Type.bounded -> Type.id = function
@@ -322,9 +331,11 @@ and unify_row' state ~row1 ~row2 : (unit, Unification_error.t) Result.t =
   let row2 = Type.canonical_row row2 in
   match row1, row2 with
   | REmpty, REmpty -> Ok ()
-  | RExtend (x, p1, t1, rest1), c2 ->
+  | RExtend (x, p1, a1, t1, rest1), c2 ->
     let tail1 = Type.tail_var rest1 in
-    let%bind.Result p2, t2, rest2 = rewrite state x c2 ~entry:t1 in
+    let%bind.Result p2, a2, t2, rest2 =
+      rewrite state x c2 ~entry:t1 ~assigned:a1
+    in
     let%bind.Result () =
       match tail1 with
       | Some { state = Link _; _ } ->
@@ -341,12 +352,19 @@ and unify_row' state ~row1 ~row2 : (unit, Unification_error.t) Result.t =
              (row1, row2, presence_mismatch_reason x ~found:t2))
     in
     let%bind.Result () =
+      unify_presence'
+        state
+        ~presence1:a1
+        ~presence2:a2
+        ~error:(Unification_error.Row_mismatch (row1, row2, Assigned x))
+    in
+    let%bind.Result () =
       match t2 with
       | None -> Ok ()
       | Some t2 -> unify_if_present' state ~presence:p1 ~ty1:t1 ~ty2:t2
     in
     unify_row' state ~row1:rest1 ~row2:rest2
-  | REmpty, RExtend (x, p2, _, rest2) ->
+  | REmpty, RExtend (x, p2, _, _, rest2) ->
     let%bind.Result () =
       unify_presence'
         state
@@ -361,41 +379,65 @@ and unify_row' state ~row1 ~row2 : (unit, Unification_error.t) Result.t =
 (* Finds the first entry for [name], which has no type if [row] lacks
    [name] entirely. A variable tail gets the entry, with type [entry] if
    given and it can be bound there as is: the entry has that type if
-   present, so this is as general as a fresh type equal to it if present. *)
-and rewrite ?entry state name (row : Type.row)
-  : (Type.presence * Type.ty option * Type.row, Unification_error.t) Result.t
+   present, so this is as general as a fresh type equal to it if present. Its
+   [assigned] is the one given if so (the entry is to be unified with one
+   that has it), else fresh. *)
+and rewrite ?entry ?assigned state name (row : Type.row)
+  : ( Type.presence * Type.presence * Type.ty option * Type.row
+      , Unification_error.t )
+      Result.t
   =
   match Type.canonical_row row with
-  | REmpty -> Ok (Absent, None, REmpty)
-  | RExtend (x, presence, ty, rest) ->
+  | REmpty -> Ok (Absent, Absent, None, REmpty)
+  | RExtend (x, presence, assigned', ty, rest) ->
     (match String.equal x name with
-     | true -> Ok (presence, Some ty, rest)
+     | true -> Ok (presence, assigned', Some ty, rest)
      | false ->
-       let%map.Result presence', ty', rest' = rewrite ?entry state name rest in
-       presence', ty', Type.RExtend (x, presence, ty, rest'))
+       let%map.Result presence', assigned'', ty', rest' =
+         rewrite ?entry ?assigned state name rest
+       in
+       ( presence'
+       , assigned''
+       , ty'
+       , Type.RExtend (x, presence, assigned', ty, rest') ))
   | RVar var ->
     let rank = Type.Var.rank_exn var in
     let px = Type.PVar (Fresh.var state.fresh ~rank) in
+    let ax =
+      match assigned with
+      | Some assigned when fits_presence assigned ~var -> assigned
+      | Some _ | None -> Type.PVar (Fresh.var state.fresh ~rank)
+    in
     let tx =
       match entry with
       | Some ty when fits ty ~var -> ty
       | Some _ | None -> Type.TVar (Fresh.var state.fresh ~rank)
     in
     let rest = Type.RVar (Fresh.var state.fresh ~rank) in
-    let%map.Result () = bind_rvar state var (RExtend (name, px, tx, rest)) in
-    px, Some tx, rest
+    let%map.Result () =
+      bind_rvar state var (RExtend (name, px, ax, tx, rest))
+    in
+    px, ax, Some tx, rest
 
 and constrain_row' state ~row ~bound ~shadowed =
   match Type.canonical_row row with
   | REmpty -> Ok ()
-  | RExtend (name, presence, ty, rest) ->
+  | RExtend (name, presence, assigned, ty, rest) ->
     let%bind.Result () =
       match Type.canonical_presence presence with
       | _ when Set.mem shadowed name -> Ok ()
       | Absent -> Ok ()
       | Present | PVar _ ->
-        let%bind.Result bound_presence, bound_ty, (_ : Type.row) =
+        let%bind.Result bound_presence, bound_assigned, bound_ty, (_ : Type.row)
+          =
           rewrite state name bound
+        in
+        let%bind.Result () =
+          presence_at_most'
+            state
+            ~presence:assigned
+            ~bound:bound_assigned
+            ~error:(Unification_error.Row_mismatch (row, bound, Assigned name))
         in
         let%bind.Result () =
           presence_at_most'
@@ -546,23 +588,35 @@ let constrain_row fresh ~row ~bound ~shadowed =
   constrain_row' (State.create fresh) ~row ~bound ~shadowed
 ;;
 
-let present_entry fresh ~row ~name ~rank =
+let present_entry ?(assigned = false) fresh ~row ~name ~rank =
   let state = State.create fresh in
-  let%bind.Result presence, found, (_ : Type.row) = rewrite state name row in
+  let%bind.Result presence, assigned', found, (_ : Type.row) =
+    rewrite state name row
+  in
   let ty =
     Option.value_or_thunk found ~default:(fun () ->
       Type.TVar (Fresh.var fresh ~rank))
   in
-  let%map.Result () =
+  let%bind.Result () =
     unify_presence'
       state
       ~presence1:Present
       ~presence2:presence
       ~error:
         (Unification_error.Row_mismatch
-           ( RExtend (name, Present, ty, REmpty)
+           ( RExtend (name, Present, assigned', ty, REmpty)
            , row
            , presence_mismatch_reason name ~found ))
   in
-  ty
+  if assigned
+  then
+    unify_presence'
+      state
+      ~presence1:Present
+      ~presence2:assigned'
+      ~error:
+        (Unification_error.Row_mismatch
+           (RExtend (name, Present, Present, ty, REmpty), row, Assigned name))
+    |> Result.map ~f:(fun () -> ty)
+  else Ok ty
 ;;

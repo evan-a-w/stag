@@ -55,6 +55,7 @@ int    list['a]    M.t    with_x[{..'a}]        (* args postfix in brackets *)
 {`x : int; `y : bool; ..'r}   {..'r}   {}       (* polymorphic record *)
 [`A of int | `B; ..'r]   [..'r]   []             (* polymorphic variant *)
 <'a>{x : int; ..'r}                              (* code type and context *)
+<unit>{x : mut int; ..'r}                        (* code assigning x *)
 ```
 
 A type argument in brackets is a type, or a row `{...}` (record-style row,
@@ -63,7 +64,8 @@ a type parameter (rather than a row parameter) it is the record type of that
 row (so `list[{}]` is a list of empty records). Rows are of polymorphic
 records, so their labels are written with backticks (`` with_x[{`y : int}] ``),
 everywhere except in the context of a code type, whose entries are variables,
-written without (`<int>{x : int}`). Type arguments are written once, after the
+written without (`<int>{x : int}`). A context entry of type `mut t` is a
+variable the code assigns; `mut` is only allowed there. Type arguments are written once, after the
 name (`list[int]`, not `int list` or `list[a][b]`). A constructor's argument of
 function type is parenthesized: `C of (int -> int)`. `C of int * int` has two
 arguments, `C of (int * int)` one, a tuple. Weak variables
@@ -74,6 +76,8 @@ arguments, `C of (int * int)` one, a tuple. Weak variables
 
 ```ocaml
 let f x (y : int) : t = e in body   (* lets are always recursive: no `rec` *)
+let mut x = e in body   let mut x : t = e in body  (* mutable variable, see below *)
+x <- e   M.x <- e                   (* assignment, of type unit *)
 e1; e2                              (* sugar for let _ = e1 in e2 *)
 fun x (y : int) _ -> e              (* anonymous function, of let's params *)
 match e with | p -> e | ...         (* leading | optional; arms are e1; e2 level *)
@@ -109,6 +113,7 @@ Precedence, loosest first:
 | ------------------------------------------ | ------------------ |
 | `let ... in`, `match`, `fun` (extend right) |                    |
 | `e1; e2`                                   | right              |
+| `x <- e`                                   | right              |
 | `e1, e2`                                   | n-ary              |
 | `C e`, `` `A e ``, `type t`               | right (`C D x`)    |
 | application `f x`                          | left               |
@@ -276,10 +281,53 @@ indices, `Char.of_code` out of range) and `Failure of string`. Exceeding an
 evaluation limit (fuel, depth, time) and match failure are not exceptions,
 and can't be handled.
 
+### Mutable variables
+
+`let mut x = e` binds a variable that `x <- e'` assigns. It binds only a
+variable, optionally annotated (`let mut x : t = e`), with no parameters. It is
+the one `let` that is not recursive: in `let mut x = x + 1 in ...` the `x` on
+the right is the outer one. Its type is never generalized (`let mut l = []`
+has a weak type, fixed by its uses). Only a variable bound by `let mut` can be
+assigned; `<-` takes a path (`x`, `M.x`), not a field (records are immutable).
+
+A closure captures a mutable local by reference: it shares the variable with
+the code that binds it. Mutable locals are values of their level only: a
+quote can't use one bound outside it, nor can compile-time code use a runtime
+one. A local function is persistent (usable in quotes, see Staging) only if
+it can't reach a mutable local through what it captures: not a mutable local,
+nor a non-persistent local function, nor a non-function local whose
+definition mentions one of those, nor a variable (a parameter or a pattern
+variable) whose type may hold a function, ie. has an arrow, a type variable or
+an abstract type in it (`int`, `list[string]` and code types can't).
+
+Toplevel `let mut x = e` declares a mutable global, assignable from anywhere
+it is in scope (`M.x <- 1`). Its value can't need itself (see Evaluation),
+but a function it holds may use it. It is
+initialized in file order, or on demand when used earlier, like other
+toplevels. It exists only at runtime: compile-time code (a toplevel splice)
+may not use it, nor any toplevel that reaches one through the toplevels it
+refers to. Mentioning one inside a quote is fine, even in compile-time code
+(`.~(.<counter <- 1>.)`): code refers to a mutable global by ref, not as a
+variable of the quote's context, so the generated code updates the program's
+global when it runs. Expect tests run in order on one instance of the
+program, so they see each other's assignments.
+
+Code may assign a free variable of its quote: `.<x <- x + 1>.` has type
+`<unit>{x : mut int; ..'r}`. Its context entry is then `mut`, which uses
+of the entry raise like its presence (reading and assigning code combined
+assign it). Where the code is spliced, a `mut` entry must be provided by a
+mutable variable: a `let mut` local in scope at the splice (implicitly, or
+by name in a substitution, `.{x}` or `.{x = y}`), or a mutable toplevel
+(`.{x = M.counter}`); the code then assigns that variable. Any other
+provider (`.{x = 1}`, an immutable variable) is an error. Entries that are
+not `mut` accept anything, a mutable variable included: a substituted
+variable is the variable itself, so the code reads its current value.
+
 ## Declarations
 
 ```ocaml
 let f x y = e                          (* toplevels are order independent *)
+let mut counter = 0                    (* mutable global *)
 type nat = Z | S of nat
 type list['a] = Nil | Cons of 'a * list['a]
 type with_x[{..'r}] = {`x : int; ..'r} (* alias *)
@@ -796,6 +844,15 @@ Within a file, toplevels are evaluated top to bottom. A toplevel used before
 its turn (eg. by an earlier one, or one in an earlier file of a cycle) is
 evaluated on demand at that point, once. Toplevels used by toplevel splices
 are evaluated at compile time, once.
+
+Computing a toplevel's value may not need that value: this is checked, not
+found when run. A value needs the toplevels it uses, except functions it only
+refers to (not calls) and those in closures it only builds or in the code a
+quote builds; calling, matching on or passing a toplevel to a function is taken
+to need everything that toplevel refers to when run. So `let x = f 1` with `let
+f y = x` is rejected (`The value of x may be needed to compute itself: x -> f
+-> x`), even if `f` would not read `x`, while `let xs = `Cons (1, fun _ -> xs)`
+and recursive functions are fine.
 
 ## Expect tests
 

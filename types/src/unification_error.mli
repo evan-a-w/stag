@@ -14,6 +14,9 @@ module Row_mismatch_reason : sig
     | Missing_label of string
     | Presence_mismatch of string
     (** Both rows have the name, but one has it [Absent]. *)
+    | Assigned of string
+    (** One code context assigns the name, which the other has as not
+        assigned. *)
     | Cyclic_row
   [@@deriving sexp_of]
 end

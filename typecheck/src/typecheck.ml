@@ -14,6 +14,7 @@ module Generated = struct
     let declaration =
       match toplevel.txt with
       | Let (name, _, _, _) -> "let " ^ name.txt
+      | Let_mut (name, _, _) -> "let mut " ^ name.txt
       | Type decl -> "type " ^ decl.name.txt
       | Exception (name, _) | Malformed_exception (name, _) ->
         "exception " ^ name.txt
@@ -83,6 +84,9 @@ module Toplevel = struct
           ; failed : bool
             (** Its component, or one it uses, had an error, so it is not run
               at compile time. *)
+          ; runtime_only : string option
+            (** The mutable toplevel it may use when run, if any, so it can't
+              be run at compile time, where there is none. *)
           }
     [@@deriving sexp_of]
   end
@@ -93,12 +97,42 @@ module Toplevel = struct
     ; args : Syntax.Binding.t list
     ; annot : Syntax.Type_expr.t option
     ; expr : Syntax.Expr.t
+    ; mut : bool
     ; generated : Generated.t option
     ; mutable state : State.t
     }
   [@@deriving sexp_of]
 
   let is_function t = not (List.is_empty t.args)
+
+  (* Usable in quotes once checked: a mutable toplevel is referred to by name,
+     like a function, rather than lifted. *)
+  let is_persistent t = is_function t || t.mut
+end
+
+(* Whether a local may reach a mutable local's cell, so that a closure
+   capturing it may not be persistent: it is lifted by value into code. *)
+module Reach = struct
+  type t =
+    | Mutable
+    | Function of Typed.Ident.Set.t
+    (** The locals it captures: it reaches one if one of those does. *)
+    | Value of Typed.Ident.Set.t
+    (** The locals its definition mentions: if one of those reaches one, it
+        does if its type may hold a closure. *)
+end
+
+(* A use of a local function at a level other than its own, which it may only
+   be if it reaches no mutable local, which is known once the types of what it
+   captures are. *)
+module Persistent_use = struct
+  type t =
+    { ident : Typed.Ident.t
+    ; loc : Loc.t
+    ; used_at : Env.Level.t
+    ; wrap_error : Typecheck_error.t -> Typecheck_error.t
+      (** As errors where it is used. *)
+    }
 end
 
 type t =
@@ -180,6 +214,12 @@ module Program_env = struct
     ; splice_starts : int Stack.t
       (** The index each declaration splice being generated began at,
           innermost first. *)
+    ; mutable_idents : Typed.Ident.Hash_set.t
+      (** Of the [let mut]s, local and toplevel. *)
+    ; reach : Reach.t Typed.Ident.Table.t
+      (** Of the [let]-bound locals: the others reach a mutable local if their
+          type may hold a closure. *)
+    ; persistent_uses : Persistent_use.t Queue.t
     }
 
   let report ?frame t error =
@@ -235,7 +275,75 @@ module Program_env = struct
     Treewalk.global_info t.interpreter ~ident
     |> Option.map ~f:(fun info ->
       t.ident_info <- Map.set t.ident_info ~key:ident ~data:info;
+      Hashtbl.set t.reach ~key:ident ~data:(Function Typed.Ident.Set.empty);
       info)
+  ;;
+
+  let is_mutable t ident = Hash_set.mem t.mutable_idents ident
+
+  (* How [ident] may reach a mutable local, if it may: the locals in between
+     and what it reaches. *)
+  let reaches_mutable t ident =
+    let visited = Typed.Ident.Hash_set.create () in
+    let rec reaches ident ~via =
+      if Result.is_error (Hash_set.strict_add visited ident)
+      then None
+      else (
+        let ty = Map.find t.ident_info ident in
+        let by_type () =
+          match ty with
+          | Some { ty; level = _ } -> May_hold_closure.ty t.type_env ty
+          | None -> true
+        in
+        let through idents =
+          Set.to_list idents
+          |> List.find_map ~f:(reaches ~via:(ident.Typed.Ident.name :: via))
+        in
+        match Hashtbl.find t.reach ident with
+        | Some Mutable -> Some (List.rev via, `Mutable ident.name)
+        | Some (Function captures) -> through captures
+        | Some (Value mentions) -> if by_type () then through mentions else None
+        | None ->
+          Option.some_if
+            (by_type ())
+            ( List.rev via
+            , `Variable
+                ( ident.name
+                , Option.value_map ty ~default:Type.unit ~f:(fun info ->
+                    info.ty) ) ))
+    in
+    reaches ident ~via:[]
+  ;;
+
+  (* Reports the uses of local functions at other levels whose functions turn
+     out to reach a mutable local. *)
+  let check_persistent_uses t =
+    Queue.iter
+      t.persistent_uses
+      ~f:(fun { Persistent_use.ident; loc; used_at; wrap_error } ->
+        match reaches_mutable t ident with
+        | None -> ()
+        | Some (via, reached) ->
+          let var_level =
+            match Map.find t.ident_info ident with
+            | Some { level; ty = _ } -> level
+            | None -> used_at
+          in
+          let via = List.drop via 1 in
+          let name = ident.name in
+          report
+            t
+            (wrap_error
+               (Typecheck_error.create
+                  ~loc
+                  (match reached with
+                   | `Mutable mutable_ ->
+                     Captures_mutable
+                       { name; var_level; used_at; via; mutable_ }
+                   | `Variable (variable, ty) ->
+                     May_capture_mutable
+                       { name; var_level; used_at; via; variable; ty }))));
+    Queue.clear t.persistent_uses
   ;;
 end
 
@@ -325,24 +433,24 @@ module Scope = struct
      quoted then. *)
   let splices t = Option.is_none t.quote && t.level >= 0
 
+  let wrap_error t error =
+    Module_scope.within
+      t.module_
+      (let error =
+         match t.syntax_splice with
+         | None -> error
+         | Some splice -> Syntax_splice.wrap_error splice error
+       in
+       match t.generated with
+       | None -> error
+       | Some generated -> Generated.wrap_error generated error)
+  ;;
+
   let report t (error : Typecheck_error.t) =
     let frame = t.scc.id in
     if Typecheck_error.is_already_reported error
     then Program_env.report t.program error ~frame
-    else
-      Program_env.report
-        t.program
-        ~frame
-        (Module_scope.within
-           t.module_
-           (let error =
-              match t.syntax_splice with
-              | None -> error
-              | Some splice -> Syntax_splice.wrap_error splice error
-            in
-            match t.generated with
-            | None -> error
-            | Some generated -> Generated.wrap_error generated error))
+    else Program_env.report t.program ~frame (wrap_error t error)
   ;;
 
   let report_if_error t = function
@@ -394,10 +502,19 @@ module Resolution = struct
         ~used_at:scope.level
         ~quote_id:(Scope.quote_id scope)
     in
+    let is_mutable_local (entry : Env.Entry.t) =
+      match entry.binder with
+      | Local ident -> Program_env.is_mutable scope.program ident
+      | Toplevel _ -> false
+    in
     match scope.quote, entry with
     | None, Some entry when usable entry -> Local entry
     | Some quote, Some entry
       when [%equal: int option] entry.quote_id (Some quote.id) -> Local entry
+    | _, Some entry when is_mutable_local entry && entry.level <> scope.level ->
+      Unusable
+        (Mutable_used_outside_its_code
+           { name; var_level = entry.level; used_at = scope.level })
     | Some quote, Some entry when entry.level <= scope.level ->
       let usable = usable entry in
       Outside_quote
@@ -783,7 +900,7 @@ let field_type t (scope : Scope.t) field ~record ~loc =
 module Poly_row = struct
   let present entries ~tail =
     List.fold_right entries ~init:tail ~f:(fun (label, ty) rest ->
-      Type.RExtend (label, Present, ty, rest))
+      Type.RExtend (label, Present, Absent, ty, rest))
   ;;
 
   (* [entries] before a fresh tail, which is also returned. *)
@@ -824,7 +941,7 @@ let tuple_components (expected : Type.ty option) n =
 let row_entry (expected : Type.ty option) kind ~label =
   let rec find (row : Type.row) =
     match Type.canonical_row row with
-    | RExtend (label', _, ty, rest) ->
+    | RExtend (label', _, _, ty, rest) ->
       if String.equal label label' then Some ty else find rest
     | REmpty | RVar _ -> None
   in
@@ -1074,13 +1191,28 @@ module Variant_match = struct
   ;;
 end
 
+let note_persistent_use (scope : Scope.t) (entry : Env.Entry.t) ~loc =
+  match entry.binder with
+  | Local ident when entry.level <> scope.level ->
+    Queue.enqueue
+      scope.program.persistent_uses
+      { Persistent_use.ident
+      ; loc
+      ; used_at = scope.level
+      ; wrap_error = Scope.wrap_error scope
+      }
+  | Local _ | Toplevel _ -> ()
+;;
+
 (* [name] is the context entry the variable is provided as, if it becomes a
    free variable of the quote: a local's name or a toplevel's canonical name. *)
 let resolution_type t (scope : Scope.t) ~name ~toplevel ~loc : Resolution.t -> _
   = function
   | Local entry ->
+    note_persistent_use scope entry ~loc;
     Ok (Scope.instantiate t scope entry.scheme, Typed.Var_ref.Bound entry.binder)
   | Outside_quote { usable = Some entry; _ } ->
+    note_persistent_use scope entry ~loc;
     Ok (Scope.instantiate t scope entry.scheme, Persistent entry.binder)
   | Outside_quote { quote; usable = None; unusable } ->
     Option.iter unusable ~f:(fun entry ->
@@ -1096,8 +1228,241 @@ let resolution_type t (scope : Scope.t) ~name ~toplevel ~loc : Resolution.t -> _
   | Unusable kind -> error ~loc kind
 ;;
 
+(* Calls [f] on each use of a toplevel that evaluating [expr] (at [depth]
+   quotes in) may need: not those in a function it only builds, nor in the code
+   a quote builds (but those in the splices that run while it does). [built] is
+   whether [expr]'s value is only built by what encloses it, rather than maybe
+   called (or otherwise looked into): [f ~called:false] uses only need the
+   toplevel's value. *)
+let rec eager_uses (expr : Typed.Expr.t) ~depth ~built ~f =
+  let go = eager_uses ~f in
+  let all ~built exprs = List.iter exprs ~f:(go ~depth ~built) in
+  let use ~built binder =
+    match (binder : Typed.Binder.t) with
+    | Toplevel ident when depth = 0 -> f ident ~called:(not built) expr.loc
+    | Toplevel _ | Local _ -> ()
+  in
+  match expr.desc with
+  | Var (Bound binder | Persistent binder) -> use ~built binder
+  | Assign ((Bound binder | Persistent binder), value) ->
+    use ~built:true binder;
+    go value ~depth ~built:false
+  | Quote body -> go body ~depth:(depth + 1) ~built:false
+  | Splice { code; subs } ->
+    go code ~depth:(depth - 1) ~built:false;
+    (match subs with
+     | Explicit subs -> all ~built:false (List.map subs ~f:snd)
+     | Implicit providers ->
+       Map.data providers |> List.iter ~f:(use ~built:false))
+  | Toplevel_splice { expansion; code = _ } -> go expansion ~depth ~built
+  | Fun _ when depth = 0 && built -> ()
+  | Let { ident; args; body; in_; _ } when depth = 0 ->
+    (* [ident]'s value is only built if [in_] doesn't use it, or is it. *)
+    let only_built =
+      (not
+         (Typed.Expr.refers_to in_ ~f:(function
+            | Local local -> Typed.Ident.equal local ident
+            | Toplevel _ -> false)))
+      ||
+      match in_.desc with
+      | Var (Bound (Local var)) -> built && Typed.Ident.equal var ident
+      | _ -> false
+    in
+    if List.is_empty args
+    then go body ~depth ~built:only_built
+    else if not only_built
+    then go body ~depth ~built:false;
+    go in_ ~depth ~built
+  | Let_mut { body; in_; _ } ->
+    go body ~depth ~built:false;
+    go in_ ~depth ~built
+  | Match { scrutinee; cases; exception_cases } ->
+    go scrutinee ~depth ~built:false;
+    all ~built (List.map (cases @ exception_cases) ~f:snd)
+  | Annotated _
+  | Tuple _
+  | Construct _
+  | Record _
+  | Poly_record _
+  | Poly_variant _ -> all ~built (Typed.Expr.sub_exprs expr)
+  | _ -> all ~built:false (Typed.Expr.sub_exprs expr)
+;;
+
+(* The toplevels [expr] uses when run, rather than in the code it builds or
+   at compile time. *)
+let rec run_toplevels (expr : Typed.Expr.t) ~depth ~f =
+  let go = run_toplevels ~f in
+  match expr.desc with
+  | Var (Bound (Toplevel ident) | Persistent (Toplevel ident)) ->
+    if depth = 0 then f ident
+  | Assign ((Bound (Toplevel ident) | Persistent (Toplevel ident)), value) ->
+    if depth = 0 then f ident;
+    go value ~depth
+  | Quote body -> go body ~depth:(depth + 1)
+  | Splice { code; subs } ->
+    go code ~depth:(depth - 1);
+    (match subs with
+     | Explicit subs -> List.iter subs ~f:(fun (_, sub) -> go sub ~depth)
+     | Implicit _ -> ())
+  | Toplevel_splice { code = _; expansion } -> go expansion ~depth
+  | _ -> List.iter (Typed.Expr.sub_exprs expr) ~f:(go ~depth)
+;;
+
+module Init_need = struct
+  module T = struct
+    (* A toplevel's value, or everything calling (or looking into) it may
+       need. *)
+    type t =
+      | Value of Typed.Ident.t
+      | Call of Typed.Ident.t
+    [@@deriving compare, sexp_of]
+  end
+
+  include T
+  include Comparable.Make_plain (T)
+
+  let ident (Value ident | Call ident) = ident
+end
+
+(* A toplevel's value is computed when first needed, after its component's
+   functions are bound: it can't be if computing it may need it again. Calls
+   are assumed to need everything the callee refers to. *)
+let check_initialization_cycles
+      (program : Program_env.t)
+      (members : Typed.Toplevel.t list)
+  =
+  let member ident =
+    List.find members ~f:(fun (member : Typed.Toplevel.t) ->
+      Typed.Ident.equal member.ident ident)
+  in
+  let is_function (member : Typed.Toplevel.t) =
+    not (List.is_empty member.args)
+  in
+  (* Each need's direct needs, with where they are needed. *)
+  let needs (need : Init_need.t) =
+    let found = Queue.create () in
+    let add need loc = Queue.enqueue found (need, loc) in
+    (match need with
+     | Value ident ->
+       let toplevel = Option.value_exn (member ident) in
+       if not (is_function toplevel)
+       then
+         eager_uses
+           toplevel.body
+           ~depth:0
+           ~built:true
+           ~f:(fun ident ~called loc ->
+             match member ident with
+             | None -> ()
+             | Some used ->
+               if called
+               then add (Init_need.Call ident) loc
+               else if not (is_function used)
+               then add (Init_need.Value ident) loc)
+     | Call ident ->
+       let toplevel = Option.value_exn (member ident) in
+       add (Value ident) toplevel.body.loc;
+       run_toplevels toplevel.body ~depth:0 ~f:(fun used ->
+         if Option.is_some (member used) then add (Call used) toplevel.body.loc));
+    Queue.to_list found
+  in
+  List.fold members ~init:false ~f:(fun failed (toplevel : Typed.Toplevel.t) ->
+    if failed || is_function toplevel
+    then failed
+    else (
+      let start = Init_need.Value toplevel.ident in
+      (* Breadth first, for the shortest cycle. *)
+      let parent = ref Init_need.Map.empty in
+      let queue = Queue.create () in
+      let found = ref None in
+      Queue.enqueue queue start;
+      while Option.is_none !found && not (Queue.is_empty queue) do
+        let current = Queue.dequeue_exn queue in
+        List.iter (needs current) ~f:(fun (need, loc) ->
+          if Option.is_none !found
+          then
+            if [%compare.equal: Init_need.t] need start
+            then found := Some (current, loc)
+            else if not (Map.mem !parent need)
+            then (
+              parent := Map.set !parent ~key:need ~data:(current, loc);
+              Queue.enqueue queue need))
+      done;
+      match !found with
+      | None -> failed
+      | Some (last, last_loc) ->
+        let rec path need acc =
+          if [%compare.equal: Init_need.t] need start
+          then need :: acc
+          else path (fst (Map.find_exn !parent need)) (need :: acc)
+        in
+        let chain = path last [] in
+        (* Where the first step is needed, in [toplevel]'s own body. *)
+        let loc =
+          match chain with
+          | _ :: second :: _ -> snd (Map.find_exn !parent second)
+          | [ _ ] | [] -> last_loc
+        in
+        let names =
+          List.remove_consecutive_duplicates
+            (List.map chain ~f:(fun need -> (Init_need.ident need).name)
+             @ [ toplevel.ident.name ])
+            ~equal:String.equal
+        in
+        let names =
+          match names with
+          | [ name ] -> [ name; name ]
+          | names -> names
+        in
+        Program_env.report
+          program
+          (Typecheck_error.create ~loc (Toplevel_initialization_cycle names));
+        true))
+;;
+
+(* The mutable toplevel a component may use when run, if any. *)
+let runtime_only (program : Program_env.t) (members : Toplevel.t list) =
+  let in_component (ident : Typed.Ident.t) =
+    List.exists members ~f:(fun member -> Typed.Ident.equal member.ident ident)
+  in
+  List.find_map members ~f:(fun member ->
+    if member.mut
+    then Some member.ident.name
+    else (
+      match member.state with
+      | In_progress { body = Some body; _ } ->
+        With_return.with_return (fun { return } ->
+          run_toplevels body ~depth:0 ~f:(fun ident ->
+            if not (in_component ident)
+            then (
+              match (Program_env.toplevel program ident.name).state with
+              | Done { runtime_only = Some global; _ } -> return (Some global)
+              | Done { runtime_only = None; _ } | Unchecked | In_progress _ ->
+                ()));
+          None)
+      | In_progress { body = None; _ } | Unchecked | Done _ -> None))
+;;
+
 let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
-  let persistent = List.for_all members ~f:Toplevel.is_function in
+  Program_env.check_persistent_uses program;
+  let failed =
+    failed
+    || check_initialization_cycles
+         program
+         (List.filter_map members ~f:(fun member ->
+            match member.state with
+            | In_progress { ty; args; body = Some body; _ } ->
+              Some
+                { Typed.Toplevel.ident = member.ident
+                ; mut = member.mut
+                ; args
+                ; scheme = ty
+                ; body
+                }
+            | In_progress { body = None; _ } | Unchecked | Done _ -> None))
+  in
+  let runtime_only = runtime_only program members in
+  let persistent = List.for_all members ~f:Toplevel.is_persistent in
   let recursive =
     List.exists members ~f:(fun member ->
       match member.state with
@@ -1108,10 +1473,11 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
   let generalize =
     List.for_all members ~f:(fun member ->
       Toplevel.is_function member
-      ||
-      match member.state with
-      | In_progress { body = Some body; _ } -> Typed.Expr.is_value body
-      | In_progress { body = None; _ } | Unchecked | Done _ -> false)
+      || ((not member.mut)
+          &&
+          match member.state with
+          | In_progress { body = Some body; _ } -> Typed.Expr.is_value body
+          | In_progress { body = None; _ } | Unchecked | Done _ -> false))
     && (persistent || not recursive)
   in
   if generalize
@@ -1131,14 +1497,23 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
       | In_progress { index; ty; args; body = Some body; _ } ->
         Program_env.add_info program member.ident ~ty ~level:0;
         let typed =
-          { Typed.Toplevel.ident = member.ident; args; scheme = ty; body }
+          { Typed.Toplevel.ident = member.ident
+          ; mut = member.mut
+          ; args
+          ; scheme = ty
+          ; body
+          }
         in
         member.state
         <- Done
              { entry =
-                 Env.Entry.toplevel ~ident:member.ident ~scheme:ty ~persistent
+                 Env.Entry.toplevel
+                   ~ident:member.ident
+                   ~scheme:ty
+                   ~persistent:(persistent || member.mut)
              ; typed
              ; failed
+             ; runtime_only
              };
         index, typed
       | In_progress { body = None; _ } | Unchecked | Done _ ->
@@ -1293,7 +1668,13 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
     (* Code that did not check is not run. *)
     scope.scc.failed <- true;
     Error Typecheck_error.already_reported
-  | Done { entry; failed; typed = _ } ->
+  | Done { runtime_only = Some global; _ }
+    when scope.level < 0 && Option.is_none scope.quote ->
+    error
+      ~loc
+      (Compile_time_use_of_mutable
+         { toplevel = toplevel.ident.name; mutable_ = global })
+  | Done { entry; failed; typed = _; runtime_only = _ } ->
     if failed then scope.scc.failed <- true;
     Ok (at_scope_level entry)
   | In_progress in_progress ->
@@ -1301,10 +1682,10 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
       Env.Entry.toplevel
         ~ident:toplevel.ident
         ~scheme:in_progress.ty
-        ~persistent:false
+        ~persistent:toplevel.mut
     in
     (match scope.quote with
-     | Some _ ->
+     | Some _ when not toplevel.mut ->
        (* Not persistent, so a free variable of the quote: the quote's value
           doesn't depend on [toplevel]. *)
        Ok (at_scope_level entry)
@@ -1316,14 +1697,14 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
           error
             ~loc
             (Compile_time_use_of_toplevel_being_checked toplevel.ident.name))
-     | None ->
+     | Some _ | None ->
        (* [toplevel] is in the component being checked, so this is a
           recursive reference. *)
        in_progress.recursive <- true;
        scope.scc.lowlink <- Int.min scope.scc.lowlink in_progress.index;
        Ok entry)
   | Unchecked
-    when Option.is_some scope.quote && not (Toplevel.is_function toplevel) ->
+    when Option.is_some scope.quote && not (Toplevel.is_persistent toplevel) ->
     (* A free variable of the quote, like an [In_progress] toplevel. A function
        is checked, as it is persistent once its component is. *)
     Ok
@@ -1535,8 +1916,17 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
         [ name, Scope.entry scope ~ident ~scheme:ty ~persistent:false ]
         ~f:(fun () -> check_body t inner ~args:arg_types ~res_ty ~body)
     in
-    let persistent = not (List.is_empty args) in
     let args = List.map arg_types ~f:fst in
+    let mentions =
+      Set.diff
+        (Typed.Expr.free_locals body)
+        (Typed.Ident.Set.of_list (ident :: args))
+    in
+    Hashtbl.set
+      scope.program.reach
+      ~key:ident
+      ~data:(if List.is_empty args then Value mentions else Function mentions);
+    let persistent = not (List.is_empty args) in
     let generalized = Typed.Expr.binding_is_value ~ident ~args ~body in
     if generalized
     then Scheme.generalize t ~rank:scope.rank [ ty ]
@@ -1550,6 +1940,81 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
     node
       (Let { ident; args; annots; result_annot; body; in_; generalized })
       in_.ty
+  | Let_mut { binder; annot; body; in_ } ->
+    let ty, annot =
+      match annot with
+      | None -> Scope.fresh_ty t scope, None
+      | Some annot ->
+        (match Scope.elaborate_resolved scope annot with
+         | Ok (ty, resolved) -> ty, Some resolved
+         | Error error ->
+           Scope.report scope error;
+           Scope.fresh_ty t scope, None)
+    in
+    let body = check_expr t scope ~expr:body ~ty in
+    let ident = Program_env.bind scope.program binder ty ~level:scope.level in
+    Hash_set.add scope.program.mutable_idents ident;
+    Hashtbl.set scope.program.reach ~key:ident ~data:Mutable;
+    let in_ =
+      Env.with_bindings
+        scope.locals
+        [ ( Source.Binder.name binder
+          , Scope.entry scope ~ident ~scheme:ty ~persistent:false )
+        ]
+        ~f:(fun () -> expr_type t scope ~expr:in_ ?expected)
+    in
+    node (Let_mut { ident; annot; body; in_ }) in_.ty
+  | Assign (var, value) ->
+    let target =
+      match var with
+      | Path (path, _) ->
+        (match path with
+         | Path _ | Root _ -> var_type t scope ~path ~loc
+         | Resolved name -> resolved_value_type t scope name ~loc)
+      | Ref var_ref -> var_ref_type t scope var_ref ~loc
+    in
+    let name =
+      match var with
+      | Path (path, _) -> Syntax.Decl_path.to_string path
+      | Ref (Bound (Local ident | Toplevel ident))
+      | Ref (Persistent (Local ident | Toplevel ident)) -> ident.name
+      | Ref (Free name | Free_toplevel name) -> name
+      | Ref (Prim prim) -> Prim.canonical_name prim
+      | Ref (Intrinsic intrinsic) -> Intrinsic.public_name intrinsic
+    in
+    let assignable : Typed.Var_ref.t -> _ = function
+      | (Bound binder | Persistent binder) as var_ref ->
+        let (Local ident | Toplevel ident) = binder in
+        if Program_env.is_mutable scope.program ident
+        then Ok var_ref
+        else error ~loc (Assign_to_immutable name)
+      | Free free_name as var_ref ->
+        (match scope.quote with
+         | None -> error ~loc (Assign_to_immutable name)
+         | Some quote ->
+           let%map.Result (_ : Type.ty) =
+             Unify.present_entry
+               ~assigned:true
+               t
+               ~row:quote.context
+               ~name:free_name
+               ~rank:quote.outside.rank
+             |> lift ~loc
+           in
+           var_ref)
+      | Free_toplevel _ -> error ~loc (Assign_to_immutable name)
+      | Prim _ | Intrinsic _ -> error ~loc (Assign_to_immutable name)
+    in
+    (match
+       Result.bind target ~f:(fun (ty, var_ref) ->
+         Result.map (assignable var_ref) ~f:(fun var_ref -> ty, var_ref))
+     with
+     | Error error ->
+       let value = expr_type t scope ~expr:value in
+       fail ~children:[ value ] error
+     | Ok (ty, var_ref) ->
+       let value = check_expr t scope ~expr:value ~ty in
+       node (Assign (var_ref, value)) Type.unit)
   | Fun { args; body } ->
     let { Function_type.args; annots; result_annot = _; res_ty; ty } =
       function_type t scope ~args ~annot:None
@@ -2069,13 +2534,21 @@ and substitute_from_scope t (scope : Scope.t) ~context ~loc ~may_capture =
   let rec go context ~seen ~captures =
     match Type.canonical_row context with
     | REmpty -> Ok captures
-    | RExtend (name, presence, ty, rest) ->
+    | RExtend (name, presence, assigned, ty, rest) ->
       let%bind.Result captured =
         match Type.canonical_presence presence with
         | _ when Set.mem seen name -> Ok None
         | Absent -> Ok None
         | Present | PVar _ ->
-          substitute_entry t scope ~name ~presence ~ty ~loc ~may_capture
+          substitute_entry
+            t
+            scope
+            ~name
+            ~presence
+            ~assigned
+            ~ty
+            ~loc
+            ~may_capture
       in
       let captures =
         Option.fold captured ~init:captures ~f:(fun captures binder ->
@@ -2098,7 +2571,16 @@ and substitute_from_scope t (scope : Scope.t) ~context ~loc ~may_capture =
   let%map.Result captures = go context ~seen:String.Set.empty ~captures:[] in
   String.Map.of_alist_exn captures
 
-and substitute_entry t (scope : Scope.t) ~name ~presence ~ty ~loc ~may_capture =
+and substitute_entry
+      t
+      (scope : Scope.t)
+      ~name
+      ~presence
+      ~assigned
+      ~ty
+      ~loc
+      ~may_capture
+  =
   let%bind.Result entry =
     match Env.find scope.locals name, scope.quote with
     | Some entry, _ -> Ok (Some entry)
@@ -2139,6 +2621,15 @@ and substitute_entry t (scope : Scope.t) ~name ~presence ~ty ~loc ~may_capture =
     in
     None
   | Local entry when may_capture name entry.binder ->
+    let%bind.Result () =
+      provides_assigned
+        t
+        scope
+        ~name
+        ~assigned
+        ~mutable_:(binder_is_mutable scope entry.binder)
+        ~loc
+    in
     let%map.Result () =
       Unify.unify_if_present
         t
@@ -2152,8 +2643,8 @@ and substitute_entry t (scope : Scope.t) ~name ~presence ~ty ~loc ~may_capture =
     let%map.Result () =
       Unify.unify_row
         t
-        ~row1:(RExtend (name, presence, ty, REmpty))
-        ~row2:(RExtend (name, Absent, ty, REmpty))
+        ~row1:(RExtend (name, presence, assigned, ty, REmpty))
+        ~row2:(RExtend (name, Absent, assigned, ty, REmpty))
       |> lift ~loc
     in
     None
@@ -2161,7 +2652,7 @@ and substitute_entry t (scope : Scope.t) ~name ~presence ~ty ~loc ~may_capture =
     let%map.Result () =
       Unify.constrain_row
         t
-        ~row:(RExtend (name, presence, ty, REmpty))
+        ~row:(RExtend (name, presence, assigned, ty, REmpty))
         ~bound:quote.context
         ~shadowed:String.Set.empty
       |> lift ~loc
@@ -2184,10 +2675,11 @@ and substitute_tail t scope (quote : Scope.quote) ~tail ~seen ~loc ~may_capture 
           Some
             ( name
             , Scope.fresh_presence t scope
+            , may_be_assigned t scope entry.binder
             , Scope.instantiate t scope entry.scheme
             , Some entry.binder )
         | Local _ | Unusable _ ->
-          Some (name, Absent, Scope.fresh_ty t scope, None)
+          Some (name, Absent, Absent, Scope.fresh_ty t scope, None)
         | Outside_quote _ -> None))
   in
   let rest = Scope.fresh_row t scope in
@@ -2199,8 +2691,8 @@ and substitute_tail t scope (quote : Scope.quote) ~tail ~seen ~loc ~may_capture 
         (List.fold_right
            captured
            ~init:rest
-           ~f:(fun (name, presence, ty, _) rest ->
-             Type.RExtend (name, presence, ty, rest)))
+           ~f:(fun (name, presence, assigned, ty, _) rest ->
+             Type.RExtend (name, presence, assigned, ty, rest)))
     |> lift ~loc
   in
   let%map.Result () =
@@ -2209,11 +2701,11 @@ and substitute_tail t scope (quote : Scope.quote) ~tail ~seen ~loc ~may_capture 
       ~row:rest
       ~bound:quote.context
       ~shadowed:
-        (List.fold captured ~init:seen ~f:(fun seen (name, _, _, _) ->
+        (List.fold captured ~init:seen ~f:(fun seen (name, _, _, _, _) ->
            Set.add seen name))
     |> lift ~loc
   in
-  List.filter_map captured ~f:(fun (name, _, _, binder) ->
+  List.filter_map captured ~f:(fun (name, _, _, _, binder) ->
     Option.map binder ~f:(fun binder -> name, binder))
 
 and substitute_explicitly t scope ~context ~subs ~loc =
@@ -2244,7 +2736,7 @@ and substitute_explicitly t scope ~context ~subs ~loc =
   (* Toplevels, free by canonical name, which no sub can name. *)
   let rec toplevels (row : Type.row) =
     match Type.canonical_row row with
-    | RExtend (name, presence, _, rest) ->
+    | RExtend (name, presence, _, _, rest) ->
       (match Type.canonical_presence presence with
        | (Present | PVar _) when String.mem name '.' -> name :: toplevels rest
        | Present | PVar _ | Absent -> toplevels rest)
@@ -2255,12 +2747,46 @@ and substitute_explicitly t scope ~context ~subs ~loc =
       let%map.Result ty, var_ref = resolved_value_type t scope name ~loc in
       (name, { Typed.Expr.desc = Var var_ref; ty; loc }) :: acc)
   in
+  (* Only a variable that is mutable can be assigned, as itself. *)
+  let assigned (expr : Typed.Expr.t) : Type.presence =
+    match expr.desc with
+    | Var (Bound binder | Persistent binder) -> may_be_assigned t scope binder
+    | _ -> Absent
+  in
   let row =
     List.fold provided ~init:Type.REmpty ~f:(fun rest (name, expr) ->
-      Type.RExtend (name, Scope.fresh_presence t scope, expr.ty, rest))
+      Type.RExtend
+        (name, Scope.fresh_presence t scope, assigned expr, expr.ty, rest))
   in
-  let%map.Result () = Unify.unify_row t ~row1:context ~row2:row |> lift ~loc in
+  let%map.Result () =
+    Unify.unify_row t ~row1:context ~row2:row
+    |> Result.map_error ~f:(fun (error : Unification_error.t) ->
+      match error with
+      | Row_mismatch (_, _, Assigned name) ->
+        Typecheck_error.create ~loc (Spliced_code_assigns_immutable name)
+      | error -> Typecheck_error.unification_error ~loc error)
+  in
   List.rev provided
+
+and binder_is_mutable (scope : Scope.t) (binder : Typed.Binder.t) =
+  let (Local ident | Toplevel ident) = binder in
+  Program_env.is_mutable scope.program ident
+
+(* The assignedness of an entry provided by [binder]: code may assign it only
+   if it is mutable. *)
+and may_be_assigned t scope binder : Type.presence =
+  if binder_is_mutable scope binder
+  then Scope.fresh_presence t scope
+  else Absent
+
+and provides_assigned t _scope ~name ~assigned ~mutable_ ~loc =
+  if mutable_
+  then Ok ()
+  else
+    Unify.make_absent
+      t
+      assigned
+      ~error:(Typecheck_error.create ~loc (Spliced_code_assigns_immutable name))
 ;;
 
 module Checked = struct
@@ -2534,6 +3060,25 @@ let declare
        | None -> error
        | Some generated -> Generated.wrap_error generated error)
   in
+  let add_toplevel ~mut (name : Syntax.Name.t) args annot expr =
+    let name = Module_scope.canonical_name module_ name.txt in
+    let toplevel =
+      lazy
+        (let ident = Program_env.fresh_ident program name in
+         if mut then Hash_set.add program.mutable_idents ident;
+         { Toplevel.ident
+         ; module_
+         ; args
+         ; annot
+         ; expr
+         ; mut
+         ; generated
+         ; state = Unchecked
+         })
+    in
+    if not in_prelude then ignore (force toplevel : Toplevel.t);
+    Hashtbl.add_exn program.toplevels ~key:name ~data:toplevel
+  in
   match toplevel.txt, generated_by with
   | Type decl, Some splice when Module_scope.Splice.defines_type splice ->
     Type_env.set_definition
@@ -2569,20 +3114,8 @@ let declare
       ~malformed:true
       ~wrap_error
   | Let (name, args, annot, expr), _ ->
-    let name = Module_scope.canonical_name module_ name.txt in
-    let toplevel =
-      lazy
-        { Toplevel.ident = Program_env.fresh_ident program name
-        ; module_
-        ; args
-        ; annot
-        ; expr
-        ; generated
-        ; state = Unchecked
-        }
-    in
-    if not in_prelude then ignore (force toplevel : Toplevel.t);
-    Hashtbl.add_exn program.toplevels ~key:name ~data:toplevel
+    add_toplevel ~mut:false name args annot expr
+  | Let_mut (name, annot, expr), _ -> add_toplevel ~mut:true name [] annot expr
   | (Module _ | Module_splice _ | Include _ | Expect_test _ | Bench _), _ -> ()
 ;;
 
@@ -2626,7 +3159,7 @@ let check_declarations t (program : Program_env.t) module_ =
           program.type_env
           (Module_scope.canonical_name module_ name.txt)
         |> report_if_error
-      | Let (name, _, _, _) ->
+      | Let (name, _, _, _) | Let_mut (name, _, _) ->
         let toplevel =
           Program_env.toplevel
             program
@@ -2699,7 +3232,8 @@ let rec signature (program_env : Program_env.t) module_ ~complete =
     ~f:(fun (toplevel : Syntax.Toplevel.t) : Signature.Item.t option ->
       match toplevel.txt with
       | Expect_test _ | Bench _ | Include _ -> None
-      | Let ({ txt = name; loc = _ }, _, _, _) ->
+      | Let ({ txt = name; loc = _ }, _, _, _)
+      | Let_mut ({ txt = name; loc = _ }, _, _) ->
         let toplevel = Program_env.toplevel program_env (canonical_name name) in
         (match toplevel.state with
          | Done { entry = { scheme; persistent; _ }; _ } ->
@@ -2753,6 +3287,9 @@ let program_env t ~stamps interpreter =
     ; reported = 0
     ; syntax_errors = false
     ; splice_starts = Stack.create ()
+    ; mutable_idents = Typed.Ident.Hash_set.create ()
+    ; reach = Typed.Ident.Table.create ()
+    ; persistent_uses = Queue.create ()
     }
   in
   (report := fun error -> Program_env.report program_env error);
@@ -2824,6 +3361,7 @@ let check_module t (program_env : Program_env.t) module_
         Either.Second
           (check_bench t program_env module_ ~name ~param ~body ~loc ~generated))
   in
+  Program_env.check_persistent_uses program_env;
   let expect_tests, benches = List.partition_map checked ~f:Fn.id in
   let program =
     { Typed.Program.sccs = Queue.to_list program_env.sccs

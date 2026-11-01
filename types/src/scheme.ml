@@ -30,8 +30,8 @@ let presence_at_most_exn fresh ~presence ~bound =
     ~bound
     ~error:
       (Row_mismatch
-         ( RExtend ("", presence, Type.unit, REmpty)
-         , RExtend ("", bound, Type.unit, REmpty)
+         ( RExtend ("", presence, Absent, Type.unit, REmpty)
+         , RExtend ("", bound, Absent, Type.unit, REmpty)
          , Presence_mismatch "" ))
   |> ok_exn ~what:"presence"
 ;;
@@ -494,10 +494,11 @@ let outside_witnessed ~kept =
   in
   let rec match_row row row' =
     match Type.canonical_row row, Type.canonical_row row' with
-    | ( RExtend (label, presence, ty, rest)
-      , RExtend (label', presence', ty', rest') ) ->
+    | ( RExtend (label, presence, assigned, ty, rest)
+      , RExtend (label', presence', assigned', ty', rest') ) ->
       String.equal label label'
       && match_presence presence presence'
+      && match_presence assigned assigned'
       && match_ty ty ty'
       && match_row rest rest'
     | RVar ({ state = Generic; bounds = []; _ } as var), row' ->
@@ -594,7 +595,7 @@ let drop_subsumed_row_bounds (var : Row_var.t) =
   let rec empty row =
     match Type.canonical_row row with
     | REmpty -> true
-    | RExtend (_, presence, _, rest) ->
+    | RExtend (_, presence, _, _, rest) ->
       (match Type.canonical_presence presence with
        | Absent -> empty rest
        | Present | PVar _ -> false)
@@ -654,13 +655,16 @@ let iter_used_vars
       if Hash_set.strict_add links id |> Result.is_ok then iter_row target
     | RVar var -> f var.id
     | REmpty -> ()
-    | RExtend (_, presence, ty, rest) ->
+    | RExtend (_, presence, assigned, ty, rest) ->
       (match Type.canonical_presence presence with
        | Absent -> ()
        | Present -> iter_ty ty
        | PVar var ->
          f var.id;
          iter_ty ty);
+      (match Type.canonical_presence assigned with
+       | Absent | Present -> ()
+       | PVar var -> f var.id);
       iter_row rest
   in
   List.iter tys ~f:iter_ty;
@@ -919,14 +923,20 @@ let drop_witnessed_row_bounds
      nowhere else, as [iter_used_vars] counts what they reach once. *)
   let rec witness row (row' : Type.row) ~presences ~tys =
     match unshared_row row, Type.canonical_row row' with
-    | ( RExtend (label, presence, ty, rest)
-      , RExtend (label', presence', ty', rest') )
+    | ( RExtend (label, presence, assigned, ty, rest)
+      , RExtend (label', presence', assigned', ty', rest') )
       when String.equal label label' ->
-      let%bind.Option presences =
+      let witness_presence presence presence' presences =
         match local_presence presence with
         | Some var -> Some ((var, presence') :: presences)
         | None ->
           Option.some_if (Type.same_presence presence presence') presences
+      in
+      let%bind.Option presences =
+        witness_presence presence presence' presences
+      in
+      let%bind.Option presences =
+        witness_presence assigned assigned' presences
       in
       let%bind.Option tys =
         match local_ty presence ty with

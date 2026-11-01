@@ -117,7 +117,11 @@ and type_expr t : Type_expr.t =
          ; (fun t ->
              Code
                { inner = type_expr t
-               ; context = row ~label:name t ~entry:type_expr
+               ; context =
+                   row ~label:name t ~entry:(fun t ->
+                     if int t 4 = 0
+                     then loc (Type_expr.Mut (type_expr t))
+                     else type_expr t)
                })
          ; (fun t -> Record (row t ~entry:type_expr))
          ; (fun t ->
@@ -191,6 +195,10 @@ and expr t : Expr.t =
                , expr t
                , expr t ))
          ; (fun t -> Let (loc "_", [], None, expr t, expr t))
+         ; (fun t ->
+             Let_mut
+               (name t, Option.some_if (bool t) (type_expr t), expr t, expr t))
+         ; (fun t -> Assign (loc (decl_path t ~last:lident), expr t))
          ; (fun t -> Fun (list t ~min:1 ~max:2 binding, expr t))
          ; (fun t ->
              Splice
@@ -259,7 +267,7 @@ and type_decl t : Type_decl.t =
 
 and toplevel t : Toplevel.t =
   loc
-    (match int t 10 with
+    (match int t 11 with
      | 0 ->
        Toplevel.Let
          ( name t
@@ -287,6 +295,7 @@ and toplevel t : Toplevel.t =
               else None)
          ; body = expr t
          }
+     | 10 -> Let_mut (name t, Option.some_if (bool t) (type_expr t), expr t)
      | _ -> Let (name t, [], None, expr t))
 
 and expansion t =

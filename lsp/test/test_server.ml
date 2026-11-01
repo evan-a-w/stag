@@ -503,6 +503,56 @@ let%expect_test "hover and definition in a file with errors" =
          |}])
 ;;
 
+let%expect_test "mutable variables: hover and definition" =
+  Client.with_server
+    ~files:
+      [ ( "a.stag"
+        , "let mut count = 0\n\
+           module M = struct let mut total = 1 end\n\
+           let bump u = count <- Int.add count 1; M.total <- 2\n\
+           let local u = let mut n = 3 in n <- Int.add n 1; n\n" )
+      ]
+    (fun client ->
+       Client.did_open client "a.stag";
+       [%expect {| |}];
+       let positions = [ 0, 8; 2, 13; 2, 31; 2, 41; 3, 22; 3, 31; 3, 44 ] in
+       List.iter positions ~f:(fun (line, character) ->
+         printf "%d:%d " line character;
+         hover client ~line ~character);
+       [%expect
+         {|
+         0:8 0:8-0:13 ```stag A.count : int ```
+         2:13 2:13-2:18 ```stag A.count : int ```
+         2:31 2:30-2:35 ```stag A.count : int ```
+         2:41 2:39-2:46 ```stag A.M.total : int ```
+         3:22 3:22-3:23 ```stag n : int ```
+         3:31 3:31-3:32 ```stag n : int ```
+         3:44 3:44-3:45 ```stag n : int ```
+         |}];
+       List.iter positions ~f:(fun (line, character) ->
+         printf "%d:%d " line character;
+         definition client "a.stag" ~line ~character);
+       [%expect
+         {|
+         0:8 -> a.stag 0:8-0:13
+         2:13 -> a.stag 0:8-0:13
+         2:31 -> a.stag 0:8-0:13
+         2:41 -> a.stag 1:26-1:31
+         3:22 -> a.stag 3:22-3:23
+         3:31 -> a.stag 3:22-3:23
+         3:44 -> a.stag 3:22-3:23
+         |}])
+;;
+
+let%expect_test "hover on code that assigns a free variable" =
+  Client.with_server
+    ~files:[ "a.stag", "let incr = .<x <- Int.add x 1>.\n" ]
+    (fun client ->
+       Client.did_open client "a.stag";
+       hover client ~line:0 ~character:4;
+       [%expect {| 0:4-0:8 ```stag A.incr : <unit>{x : mut int; ..'a} ``` |}])
+;;
+
 let%expect_test "hover on the variables of a pattern that failed to check" =
   Client.with_server
     ~files:

@@ -1067,3 +1067,87 @@ let%expect_test "resolved Cons and Nil not ending a list literal" =
     .Cons (x, .Cons (y, rest))
     |}]
 ;;
+
+let%expect_test "mutable variables" =
+  print
+    {|
+let mut counter = 0
+let mut xs : list[int] = []
+let incr u = counter <- add counter 1
+let f u =
+  let mut x = 1 in
+  let mut y : int = 2 in
+  x <- y <- 3;
+  ((x <- 1), 2, f (x <- 2), (x <- 1; 2), (M.x <- (1, 2)), (x <- (let z = 1 in z)))
+let g u = x <- (match u with _ -> 1); x <- (fun u -> u)
+let h u = x <- match u with _ -> 1
+let i u = ([x <- 2; y <- (3, 4); (x <- let z = 1 in z); 5], {`a = x <- 2; `b = 1})
+let c : <unit>{x : mut int; y : int; z : mut (int -> int); w : mut <int>{a : mut int}; ..'r} = c
+|};
+  [%expect
+    {|
+    let mut counter = 0
+    let mut xs : list[int] = []
+    let incr u = counter <- add counter 1
+
+    let f u =
+      let mut x = 1 in
+      let mut y : int = 2 in
+      x <- y <- 3;
+      ((x <- 1), 2, f (x <- 2), (x <- 1; 2), (M.x <- (1, 2)), (x <- let z = 1 in z))
+
+    let g u =
+      (x <- match u with _ -> 1);
+      x <- fun u -> u
+
+    let h u = x <- match u with _ -> 1
+
+    let i u =
+      ([x <- 2; y <- (3, 4); (x <- let z = 1 in z); 5], {`a = x <- 2; `b = 1})
+
+    let c : <unit>{x : mut int;
+                   y : int;
+                   z : mut int -> int;
+                   w : mut <int>{a : mut int};
+                   ..'r} =
+      c
+    |}];
+  print
+    ~width:30
+    {|
+let f u =
+  let mut a_long_name = some_function with_arguments that_are_long in
+  a_long_name <- some_function with_arguments that_are_long and_more;
+  a_long_name
+|};
+  [%expect
+    {|
+    let f u =
+      let mut a_long_name =
+        some_function
+          with_arguments
+          that_are_long
+      in
+      a_long_name <-
+        some_function
+          with_arguments
+          that_are_long
+          and_more;
+      a_long_name
+    |}]
+;;
+
+let%expect_test "assignments in a broken tuple" =
+  print_expr
+    ~width:40
+    "((x <- 1), f (x <- 2), (x <- 1; 2), (M.x <- (1, 2)), (x <- let z = 1 in \
+     z))";
+  [%expect
+    {|
+    ((x <- 1),
+     f (x <- 2),
+     (x <- 1; 2),
+     (M.x <- (1, 2)),
+     (x <- let z = 1 in z))
+    |}]
+;;

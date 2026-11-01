@@ -82,6 +82,7 @@ let rec relocated ~relocate (toplevels : Syntax.Toplevel.t list) =
        | members ->
          Some { toplevel with txt = Syntax.Toplevel.Module (name, members) })
     | Let _
+    | Let_mut _
     | Type _
     | Exception _
     | Malformed_exception _

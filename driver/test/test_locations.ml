@@ -259,7 +259,7 @@ let%expect_test "polymorphic records and variants" =
 
 let%expect_test "type expressions" =
   let annotated ?(decls = "") annot =
-    check (decls ^ "let x : " ^ annot ^ " = x")
+    check (decls ^ "let x : " ^ annot ^ " = raise (Failure \"x\")")
   in
   let list = "type list['a]\n" in
   let rows = "type rows[{..'r}]\n" in

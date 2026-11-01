@@ -81,6 +81,9 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
     | Let (binder, bindings, annot, body) ->
       let_ ~add ~type_expr binder bindings annot body;
       expr body
+    | Let_mut (binder, annot, body) ->
+      let_ ~add ~type_expr binder [] annot body;
+      expr body
     | Type { name = type_name; params = _; kind } ->
       name ~declaration:true Type type_name;
       let rec decl_kind : Syntax.Type_decl.Kind.t -> unit = function
@@ -163,6 +166,7 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
       walk_row ~add ~expr ~kind:Kind.Poly_field context
     | Record row -> walk_row ~add ~expr ~kind:Kind.Poly_field row
     | Variant row -> walk_row ~add ~expr ~kind:Kind.Poly_tag row
+    | Mut ty -> recurse ty
     | Splice e -> expr e
   and walk_row ~(add : add) ~expr ~kind (row : Syntax.Type_expr.row) =
     match row.txt with
@@ -221,6 +225,13 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
       let_ ~add ~type_expr binder bindings annot body;
       recurse body;
       recurse in_
+    | Let_mut (binder, annot, body, in_) ->
+      let_ ~add ~type_expr binder [] annot body;
+      recurse body;
+      recurse in_
+    | Assign (path, value) ->
+      decl_path ~add ~kind:Kind.Value ~loc:path.loc path.txt;
+      recurse value
     | Fun (bindings, body) ->
       walk_bindings ~add ~type_expr bindings;
       recurse body

@@ -302,6 +302,15 @@ module B = struct
   let g y = A.w; y
 end
 |};
+  check
+    {|
+module A = struct
+  let w = fun u -> B.g u
+end
+module B = struct
+  let g y = A.w; y
+end
+|};
   [%expect
     {|
     module A : sig
@@ -318,11 +327,12 @@ end
     module B : sig
       val g : int -> int
     end
+    ((Toplevel_initialization_cycle (A.w B.g A.w)) @ t.stag:3:10-13)
     module A : sig
       val w : '_a -> '_a
     end
     module B : sig
-      val g : ('_a -> '_a) -> '_a -> '_a
+      val g : '_a -> '_a
     end
     |}]
 ;;

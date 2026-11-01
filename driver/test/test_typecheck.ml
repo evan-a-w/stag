@@ -245,16 +245,93 @@ let b y = a true; a 1
     |}]
 ;;
 
-let%expect_test "SCC containing a non-value is not generalized" =
+let%expect_test "initialization cycles" =
+  (* Recursion through functions, and values only building closures, are
+     fine. *)
+  run
+    {|
+let even n = match n with 0 -> true | _ -> odd (Int.sub n 1)
+let odd n = match n with 0 -> false | _ -> even (Int.sub n 1)
+let fns = `Fns (even, fun u -> fns)
+let stream = `Cons (1, fun u -> stream)
+let first = match stream with `Cons (n, _) -> n
+let local = let h (u : int) = Int.add 1 (local u) in h
+let unused = let f u = unused in 1
+let called = even 4
+|};
+  (* A value needing itself, directly or through other toplevels. *)
+  check "let x = Int.add x 1";
+  check
+    {|
+let x = y
+let y = Int.add x 1
+|};
   check
     {|
 let x = f 1
+let f n = g n
+let g n = Int.add x n
+|};
+  (* Calls are assumed to need all the callee refers to, and passing a closure
+     to a function, to call it. *)
+  check
+    {|
+let x = f `A
+let f t = match t with `A -> 1 | `B -> x
+|};
+  check
+    {|
+let x = Int.add (id (fun u -> x) ()) 1
+|};
+  check
+    {|
+let x = let h u = x in h 1
+|};
+  check
+    {|
+let x = ((fun u -> Int.add y 1), 1)
+let y = match x with (f, _) -> f ()
+|};
+  [%expect
+    {|
+    val even : int -> bool
+    val odd : int -> bool
+    val fns : ([`Fns of (int -> bool) * ('_a -> '_b); ..'_c] as '_b)
+    val stream : ([`Cons of int * ('_a -> '_b)] as '_b)
+    val first : int
+    val local : int -> int
+    val unused : int
+    val called : bool
+    -- evaluated at compile time
+    -- evaluated
+    (even <fun>)
+    (odd <fun>)
+    (fns (`Fns (Tuple <fun> <fun>)))
+    (stream (`Cons (Tuple 1 <fun>)))
+    (first 1)
+    (local <fun>)
+    (unused 1)
+    (called true)
+    ((Toplevel_initialization_cycle (x x)) @ t.stag:1:16-17)
+    ((Toplevel_initialization_cycle (y x y)) @ t.stag:3:16-17)
+    ((Toplevel_initialization_cycle (x f g x)) @ t.stag:2:8-9)
+    ((Toplevel_initialization_cycle (x f x)) @ t.stag:2:8-9)
+    ((Toplevel_initialization_cycle (x x)) @ t.stag:2:30-31)
+    ((Toplevel_initialization_cycle (x x)) @ t.stag:2:18-19)
+    ((Toplevel_initialization_cycle (y x y)) @ t.stag:3:14-15)
+    |}]
+;;
+
+let%expect_test "SCC containing a non-value is not generalized" =
+  check
+    {|
+let x = (id 1, fun u -> f u)
 let f y = x; y
 |};
   [%expect
     {|
-    val x : int
-    val f : int -> int
+    val x : int * ('_a -> '_a)
+    val f : '_a -> '_a
     |}]
 ;;
 
@@ -476,7 +553,7 @@ let not_code = .<.~(1).{}>.
     ((Unification_error
       (Row_mismatch
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 30 1)))
+        (RVar (Unbound 31 1)))
        REmpty (Missing_label x)))
      @ t.stag:2:16-34)
     val extra : <int>{..'a}
@@ -595,8 +672,8 @@ let toplevel_splice_level x = .~x
     ((Not_in_scope x) @ t.stag:2:27-36)
     ((Unification_error
       (Row_mismatch
-       (RExtend x (PVar (Link Present)) (TVar (Unbound 26 1))
-        (RVar (Unbound 27 1)))
+       (RExtend x (PVar (Link Present)) (TVar (Unbound 27 1))
+        (RVar (Unbound 28 1)))
        REmpty (Missing_label x)))
      @ t.stag:2:33-45)
     ((Variable_used_at_wrong_level (name x) (var_level 0) (used_at -1)) @
@@ -621,7 +698,7 @@ let%expect_test "staged power" =
     ((Unification_error
       (Row_mismatch REmpty
        (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 76 1)))
+        (RVar (Unbound 78 1)))
        (Missing_label y)))
      @ t.stag:2:31-44)
     ((Unification_error
@@ -727,8 +804,8 @@ let known_z c =
     ((Unification_error
       (Row_mismatch
        (RExtend z Absent (TVar (Unbound 44 1)) (RVar (Unbound 45 1)))
-       (RExtend z (PVar (Link Present)) (TVar (Unbound 53 1))
-        (RVar (Unbound 54 1)))
+       (RExtend z (PVar (Link Present)) (TVar (Unbound 54 1))
+        (RVar (Unbound 55 1)))
        (Presence_mismatch z)))
      @ t.stag:2:36-48)
     ((Variable_used_at_wrong_level (name z) (var_level 2) (used_at 1)) @
@@ -800,7 +877,7 @@ let pong n c = .<add .~(ping (add n -1) c) y>.
         (RVar
          (Link
           (RExtend z (PVar (Link Present)) (TVar (Link (TCon int ())))
-           (RVar (Unbound 94 1))))))
+           (RVar (Unbound 99 1))))))
        (Missing_label y)))
      @ t.stag:4:33-45)
     |}]
@@ -955,9 +1032,9 @@ let%expect_test "instances of a scheme bounded by an outer presence" =
     ((Unification_error
       (Row_mismatch
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
-        (RVar (Link (RVar (Unbound 58 1)))))
+        (RVar (Link (RVar (Unbound 59 1)))))
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 67 1)))
+        (RVar (Unbound 69 1)))
        (Presence_mismatch x)))
      @ t.stag:2:78-89)
     val closeit : <int>{} -> unit
@@ -1017,14 +1094,14 @@ let partial e = let h c = .< let _ = .~e in .~c >. in let _ = h .< 1 >. in h
     val ok : <int>{..'_a}
     ((Unification_error
       (Row_mismatch REmpty
-       (RExtend y (PVar (Link Present)) (TVar (Unbound 110 1))
-        (RVar (Unbound 111 1)))
+       (RExtend y (PVar (Link Present)) (TVar (Unbound 112 1))
+        (RVar (Unbound 113 1)))
        (Missing_label y)))
      @ t.stag:4:18-29)
     ((Unification_error
       (Row_mismatch REmpty
-       (RExtend y (PVar (Link Present)) (TVar (Unbound 118 1))
-        (RVar (Unbound 119 1)))
+       (RExtend y (PVar (Link Present)) (TVar (Unbound 120 1))
+        (RVar (Unbound 121 1)))
        (Missing_label y)))
      @ t.stag:4:18-43)
     |}]
@@ -1067,15 +1144,15 @@ let use = conflict_later %s
     ((Unification_error
       (Row_mismatch REmpty
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon bool ())))
-        (RVar (Unbound 55 1)))
+        (RVar (Unbound 57 1)))
        (Missing_label x)))
      @ t.stag:3:23-45)
     ((Unification_error
       (Row_mismatch
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon bool ())))
-        (RVar (Link (RVar (Unbound 73 1)))))
+        (RVar (Link (RVar (Unbound 75 1)))))
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon bool ())))
-        (RVar (Unbound 91 1)))
+        (RVar (Unbound 95 1)))
        (Presence_mismatch x)))
      @ t.stag:4:25-39)
     |}]
@@ -1188,16 +1265,16 @@ let%expect_test "instances of a scheme bounded by an outer row" =
     ((Unification_error
       (Row_mismatch REmpty
        (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 115 1)))
+        (RVar (Unbound 124 1)))
        (Missing_label y)))
      @ t.stag:4:77-78)
     used after, k closed
     ((Unification_error
-      (Row_mismatch (RExtend y Present (TCon int ()) (RVar (Unbound 107 1)))
+      (Row_mismatch (RExtend y Present (TCon int ()) (RVar (Unbound 112 1)))
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
         (RVar
          (Link
-          (RExtend y (PVar (Link Absent)) (TCon int ()) (RVar (Unbound 109 1))))))
+          (RExtend y (PVar (Link Absent)) (TCon int ()) (RVar (Unbound 114 1))))))
        (Presence_mismatch y)))
      @ t.stag:4:77-78)
     |}]

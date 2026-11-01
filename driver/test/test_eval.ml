@@ -23,38 +23,26 @@ let fn x = x
 ;;
 
 let%expect_test "recursive values" =
-  (* [y] is evaluated after [f], whatever the order of the component. *)
+  (* Computing a value may not use its own component, even through a call
+     that wouldn't need the value: calls aren't followed. *)
   eval
     {|
 let y = f `A
 let f x = match x with `A -> 1 | `B -> y
 |};
-  [%expect
-    {|
-    (y 1)
-    (f <fun>)
-    |}];
+  [%expect {| ((Toplevel_initialization_cycle (y f y)) @ t.stag:2:8-9) |}];
   (* A value used by its own definition is an error. *)
   eval
     {|
 let x = add x 1
 |};
-  [%expect
-    {|
-    ("x is used before its value is defined (a value may not depend on itself)" @
-     t.stag:2:12-13)
-    |}];
+  [%expect {| ((Toplevel_initialization_cycle (x x)) @ t.stag:2:12-13) |}];
   eval
     {|
 let z = g `B
 let g x = match x with `A -> 1 | `B -> z
 |};
-  [%expect
-    {|
-    (g <fun>)
-    ("z is used before its value is defined (a value may not depend on itself)" @
-     t.stag:3:39-40)
-    |}];
+  [%expect {| ((Toplevel_initialization_cycle (z g z)) @ t.stag:2:8-9) |}];
   (* A closure may refer to the value it is part of. *)
   eval
     {|
@@ -284,7 +272,7 @@ let%expect_test "nested quotes at runtime" =
     {|
 let twice c = .<.<.~(.~c)>.>.
 let built = twice .<.<1>.>.
-let embedding x = let h u = x in .<h ()>.
+let embedding (x : int) = let h u = x in .<h ()>.
 let embedded = embedding 7
 |};
   [%expect
@@ -299,7 +287,8 @@ let embedded = embedding 7
     (embedding <fun>)
     (embedded
      (Code
-      (App (Var (Persistent (Local h/21)) : "unit -> 'a") (Lit Unit : unit) : 'a)
+      (App (Var (Persistent (Local h/21)) : "unit -> int") (Lit Unit : unit) :
+       int)
       ((h/21 <fun>))))
     |}]
 ;;

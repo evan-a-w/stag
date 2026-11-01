@@ -62,7 +62,7 @@ let%expect_test "the prelude's signature" =
         type t = Int of int | Bool of bool | String of string | Char of char | Unit
       end
       module Type_expr : sig
-        type t = Var of string | Con of Path.t[Type_ref.t] * list[Arg.t] | Arrow of t * t | Tuple of list[t] | Code of {`context : Row.t; `inner : t} | Record of Row.t | Variant of Row.t | Splice of Expr.t
+        type t = Var of string | Con of Path.t[Type_ref.t] * list[Arg.t] | Arrow of t * t | Tuple of list[t] | Code of {`context : Row.t; `inner : t} | Record of Row.t | Variant of Row.t | Mut of t | Splice of Expr.t
         module Row : sig
           type t = Empty | Extend of string * Type_expr.t * t | Var of string
         end
@@ -94,7 +94,7 @@ let%expect_test "the prelude's signature" =
         val tuple : list[t] -> t
       end
       module Expr : sig
-        type t = Lit of Lit.t | Var of Path.t[Value_ref.t] * option[Type_expr.t] | App of t * t | Let of string * list[string * option[Type_expr.t]] * option[Type_expr.t] * t * t | Fun of list[string * option[Type_expr.t]] * t | Splice of {`expr : t; `subs : option[list[string * option[t]]]} | Quote of t | Tuple of list[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Field of t * Path.t[Field_ref.t] | Record_update of t * list[Path.t[Field_ref.t] * t] | Type of Type_expr.t | Match of t * list[Pattern.t * t] | Poly_record of list[string * t] | Poly_field of t * string | Poly_extend of list[string * t] * t | Poly_restrict of t * string | Poly_update of t * list[string * t] | Poly_variant of string * option[t] | Expect of string | Struct_quote of list[Toplevel.t]
+        type t = Lit of Lit.t | Var of Path.t[Value_ref.t] * option[Type_expr.t] | App of t * t | Let of string * list[string * option[Type_expr.t]] * option[Type_expr.t] * t * t | Let_mut of string * option[Type_expr.t] * t * t | Assign of Path.t[Value_ref.t] * t | Fun of list[string * option[Type_expr.t]] * t | Splice of {`expr : t; `subs : option[list[string * option[t]]]} | Quote of t | Tuple of list[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Field of t * Path.t[Field_ref.t] | Record_update of t * list[Path.t[Field_ref.t] * t] | Type of Type_expr.t | Match of t * list[Pattern.t * t] | Poly_record of list[string * t] | Poly_field of t * string | Poly_extend of list[string * t] * t | Poly_restrict of t * string | Poly_update of t * list[string * t] | Poly_variant of string * option[t] | Expect of string | Struct_quote of list[Toplevel.t]
         val var : string -> t
         val construct : string -> list[t] -> t
         val int : int -> t
@@ -107,7 +107,7 @@ let%expect_test "the prelude's signature" =
         val let_ : string -> list[string] -> t -> t -> t
       end
       module Toplevel : sig
-        type t = Let of string * list[string * option[Type_expr.t]] * option[Type_expr.t] * Expr.t | Type of {`kind : Type_decl.Kind.t; `name : string; `params : list[Type_decl.Param.t]} | Exception of string * list[Type_expr.t] | Module of string * list[t] | Module_splice of string * Expr.t | Include of Expr.t | Expect_test of {`body : Expr.t; `name : string} | Bench of {`body : Expr.t; `name : string; `param : option[string * list[Expr.t]]}
+        type t = Let of string * list[string * option[Type_expr.t]] * option[Type_expr.t] * Expr.t | Let_mut of string * option[Type_expr.t] * Expr.t | Type of {`kind : Type_decl.Kind.t; `name : string; `params : list[Type_decl.Param.t]} | Exception of string * list[Type_expr.t] | Module of string * list[t] | Module_splice of string * Expr.t | Include of Expr.t | Expect_test of {`body : Expr.t; `name : string} | Bench of {`body : Expr.t; `name : string; `param : option[string * list[Expr.t]]}
         val let_ : string -> list[string] -> Expr.t -> t
       end
       module Program : sig
@@ -529,6 +529,7 @@ type f = int -> bool * string
 type tags[{..'r}] = [`A of int | `B; ..'r]
 type closed = [`A | `B of {}]
 type code['a] = <'a>{x : int; y : bool; ..'r} -> <int>{}
+type assigns = <unit>{x : mut int; y : mut (int -> int)}
 type args = with_x[{`y : int}] * list[{}] * list['a] * with_x[{..'r}]
 |}
   ; {|
@@ -551,6 +552,9 @@ let types = (type t, type M.t, type list['a], type (int * t), f (type t))
 let exns = match f x with y -> y | exception E -> 1 | exception M.F (a, b) -> 2 | exception e -> raise e
 let%bench "fib" = fib 20
 let%bench "sort" n in [100; f 1000] = sort n
+let mut counter = 0
+let mut xs : list[int] = []
+let mutation = let mut x = 1 in let mut y : int = 2 in x <- y; M.counter <- x
 |}
   ; {stag|
 module M = struct
@@ -671,11 +675,11 @@ let%expect_test "constructors are made as the typechecker resolves them" =
            : bool)];
   [%expect
     {|
-    ((constructors 78)
+    ((constructors 82)
      (reflected
-      (prelude.Stag.Path.Ref prelude.Stag.Type.Kind.Alias
-       prelude.Stag.Type.Kind.Record prelude.Stag.Type.Kind.Variant
-       prelude.Stag.Type_ref.Path.Prelude prelude.Stag.Type_ref.Path.Program))
+      (prelude.Stag.Type.Kind.Alias prelude.Stag.Type.Kind.Record
+       prelude.Stag.Type.Kind.Variant prelude.Stag.Type_ref.Path.Prelude
+       prelude.Stag.Type_ref.Path.Program))
      (others_same_as_to_value true))
     |}]
 ;;

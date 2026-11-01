@@ -80,7 +80,7 @@ let normalize string =
 let rec ends_in_match (expr : Typed.Expr.t) =
   match expr.desc with
   | Match _ -> true
-  | Let { in_; _ } -> ends_in_match in_
+  | Let { in_; _ } | Let_mut { in_; _ } -> ends_in_match in_
   | _ -> false
 ;;
 

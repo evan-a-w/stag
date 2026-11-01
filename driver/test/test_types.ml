@@ -860,20 +860,46 @@ module M = struct let x = M.x end
 let x = x
 let use = x 1; x true
 |};
+  (* Without initialization cycles. *)
+  check
+    {|
+type list['a] = Nil | Cons of 'a * list['a]
+let xs = fun u -> Cons (1, ys u)
+let ys = fun u -> Cons (2, xs u)
+|};
+  check
+    {|
+let x = fun u -> y u
+let y = fun u -> x u
+module M = struct let x = fun u -> M.x u end
+|};
+  check
+    {|
+let x = fun u -> x u
+let use = x 1; x true
+|};
   [%expect
     {|
     type list['a] = Nil | Cons of 'a * list['a]
     val a : '_a -> list['_b]
     val b : list['_a]
     val quoted : <'a>{a : int -> 'a; ..'b}
+    ((Toplevel_initialization_cycle (ys xs ys)) @ t.stag:4:18-20)
+    ((Toplevel_initialization_cycle (x x)) @ t.stag:2:8-9)
+    ((Toplevel_initialization_cycle (y x y)) @ t.stag:3:8-9)
+    ((Toplevel_initialization_cycle (M.x M.x)) @ t.stag:2:26-29)
+    ((Toplevel_initialization_cycle (x x)) @ t.stag:2:8-9)
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:3:17-21)
     type list['a] = Nil | Cons of 'a * list['a]
-    val xs : list[int]
-    val ys : list[int]
-    val x : '_a
-    val x : '_a
-    val y : '_a
+    val xs : '_a -> list[int]
+    val ys : '_a -> list[int]
+    val x : '_a -> '_b
+    val y : '_a -> '_b
     module M : sig
-      val x : '_a
+      val x : '_a -> '_b
     end
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())

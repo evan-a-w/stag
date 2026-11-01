@@ -74,7 +74,7 @@ let%expect_test "the driver's sequence of operations" =
   [%expect
     {|
     sccs: 0, members: 0, ident infos: 0, arena: [0, 0, 0, 0, 0, 0, 0]
-    sccs: 3, members: 3, ident infos: 8, arena: [2, 24, 89, 2, 22, 47, 0]
+    sccs: 3, members: 3, ident infos: 8, arena: [2, 24, 89, 4, 22, 47, 0]
     (splice (Error "not implemented: splice"))
     (run (Error "not implemented: run"))
     (global_info ())
@@ -82,7 +82,7 @@ let%expect_test "the driver's sequence of operations" =
     (eval_toplevel (Error "not implemented: eval_toplevel"))
     (run_expect_test (Error "not implemented: run_expect_test"))
     (eval_expr (Error "not implemented: eval_expr"))
-    sccs: 3, members: 3, ident infos: 8, arena: [4, 44, 131, 6, 36, 69, 0]
+    sccs: 3, members: 3, ident infos: 8, arena: [4, 44, 131, 12, 36, 69, 0]
     |}]
 ;;
 
@@ -96,8 +96,8 @@ let%expect_test "adding again appends to the arena" =
   print_endline (Interp.summary interp);
   [%expect
     {|
-    sccs: 3, members: 3, ident infos: 0, arena: [2, 16, 60, 2, 13, 33, 0]
-    sccs: 6, members: 6, ident infos: 0, arena: [4, 32, 120, 4, 26, 66, 0]
+    sccs: 3, members: 3, ident infos: 0, arena: [2, 16, 60, 4, 13, 33, 0]
+    sccs: 6, members: 6, ident infos: 0, arena: [4, 32, 120, 8, 26, 66, 0]
     |}]
 ;;
 

@@ -301,6 +301,10 @@ let%expect_test "let" =
 
 let%expect_test "let then match" = let x = 3 in match x with _ -> print_int x
 
+let%expect_test "let mut then match" =
+  let mut x = 6 in
+  match x with _ -> print_int x
+
 let%expect_test "match then more" =
   (match 4 with _ -> print_int 4);
   print_int 5
@@ -319,8 +323,13 @@ let%expect_test "match then more" =
       (((loc t.stag:10:77-77) (expected ()) (actual 3)
         (parenthesize t.stag:10:35-77))))
      (error ()))
-    ((name ("match then more" @ t.stag:12:16-33))
-     (mismatches (((loc t.stag:14:13-13) (expected ()) (actual 45)))) (error ()))
+    ((name ("let mut then match" @ t.stag:12:16-36))
+     (mismatches
+      (((loc t.stag:14:31-31) (expected ()) (actual 6)
+        (parenthesize t.stag:13:2-14:31))))
+     (error ()))
+    ((name ("match then more" @ t.stag:16:16-33))
+     (mismatches (((loc t.stag:18:13-13) (expected ()) (actual 45)))) (error ()))
     corrected:
     let%expect_test "match" =
       (match 1 with
@@ -335,6 +344,11 @@ let%expect_test "match then more" =
 
     let%expect_test "let then match" = (let x = 3 in match x with _ -> print_int x);
       [%expect {| 3 |}]
+
+    let%expect_test "let mut then match" =
+      (let mut x = 6 in
+      match x with _ -> print_int x);
+      [%expect {| 6 |}]
 
     let%expect_test "match then more" =
       (match 4 with _ -> print_int 4);

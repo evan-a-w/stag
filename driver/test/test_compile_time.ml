@@ -512,14 +512,13 @@ let f x = v; .<x>.
 let v = f; match B with A -> 0
 let g y = .~(f; .<y>.)
 |};
-  (* [a] reads [b], evaluated when first read, and [c] reads itself. *)
+  (* [a] needs [b], computed when first needed, which only refers to [a]
+     through [k] without calling it. *)
   run
     {|
 let a = b; 1
 let b = k; 2
 let k u = u; a
-let c = d; 3
-let d = k c
 |};
   [%expect
     {|
@@ -534,16 +533,12 @@ let d = k c
     ("Match failure: no case matches the value B" @ t.stag:4:11-30)
     val a : int
     val b : int
-    val k : int -> int
-    val c : int
-    val d : int
+    val k : '_a -> int
     -- evaluated at compile time
     -- evaluated
     (a 1)
     (b 2)
     (k <fun>)
-    ("c is used before its value is defined (a value may not depend on itself)" @
-     t.stag:6:10-11)
     |}]
 ;;
 
@@ -938,7 +933,7 @@ let s = .~(w .<1>.)
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
         (RVar (Link REmpty)))
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 64 1)))
+        (RVar (Unbound 65 1)))
        (Presence_mismatch x)))
      @ t.stag:6:13-18)
     val x : int

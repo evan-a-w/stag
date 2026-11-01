@@ -66,9 +66,10 @@ val constrain_row
 
 (** The type of the first entry for [name] in [row], which must be present.
     [rank] is that of the variable standing for the type in the error if
-    [row] lacks [name]. *)
+    [row] lacks [name]. If [assigned], the entry must be assigned too. *)
 val present_entry
-  :  Fresh.t
+  :  ?assigned:bool
+  -> Fresh.t
   -> row:Type.row
   -> name:string
   -> rank:Type.rank

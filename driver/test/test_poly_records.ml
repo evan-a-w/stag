@@ -332,7 +332,7 @@ let missing = same_row .<x>. {}
     ((Unification_error
       (Row_mismatch
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 33 1)))
+        (RVar (Unbound 34 1)))
        REmpty (Missing_label x)))
      @ t.stag:3:29-31)
     |}]

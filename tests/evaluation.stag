@@ -140,7 +140,7 @@ module Persistent = struct
 
   (* Each call of [mk] embeds its own [h]. *)
   let per_build =
-    .~(let mk n =
+    .~(let mk (n : int) =
          let h u = n in
          .< h () >.
        in

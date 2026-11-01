@@ -109,6 +109,9 @@ module Defs = struct
         }
     | Record of row
     | Variant of row (** Each entry is a tag and its argument type. *)
+    | Mut of type_expr
+    (** [mut t]: the type of an entry of a code type's context the code
+        assigns. *)
     | Splice of expr
     (** [.~e]: the type [e : Stag.Type_expr.t] evaluates to at compile time, or
       an antiquote in a struct quote. *)
@@ -180,6 +183,9 @@ module Defs = struct
     | Var of Decl_path.t * type_expr option
     | App of expr * expr
     | Let of Name.t * binding list * type_expr option * expr * expr
+    | Let_mut of Name.t * type_expr option * expr * expr
+    (** [let mut x = e in body]: not recursive. *)
+    | Assign of Decl_path.t Located.t * expr (** [x <- e] *)
     | Fun of binding list * expr (** [fun x (y : t) -> e], of some params. *)
     | Splice of
         { expr : expr
@@ -219,6 +225,7 @@ module Defs = struct
 
   and toplevel_desc =
     | Let of Name.t * binding list * type_expr option * expr
+    | Let_mut of Name.t * type_expr option * expr
     | Type of type_decl
     | Exception of Name.t * type_expr list (** [exception E of t1 * t2]. *)
     | Malformed_exception of Name.t * type_expr list
@@ -269,6 +276,7 @@ module Type_expr = struct
         }
     | Record of row
     | Variant of row
+    | Mut of t
     | Splice of expr
   [@@deriving rust]
 
@@ -376,6 +384,8 @@ module Expr = struct
     | Var of Decl_path.t * Type_expr.t option
     | App of t * t
     | Let of Name.t * Binding.t list * Type_expr.t option * t * t
+    | Let_mut of Name.t * Type_expr.t option * t * t
+    | Assign of Decl_path.t Located.t * t
     | Fun of Binding.t list * t
     | Splice of
         { expr : t
@@ -423,6 +433,7 @@ module Toplevel = struct
 
   type desc = toplevel_desc =
     | Let of Name.t * Binding.t list * Type_expr.t option * Expr.t
+    | Let_mut of Name.t * Type_expr.t option * Expr.t
     | Type of Type_decl.t
     | Exception of Name.t * Type_expr.t list
     | Malformed_exception of Name.t * Type_expr.t list

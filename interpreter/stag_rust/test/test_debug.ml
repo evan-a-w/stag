@@ -16,6 +16,7 @@ let%expect_test "a generalised scheme shares its variable" =
                 name: "id",
                 stamp: 0,
             },
+            mut_: false,
             args: [
                 Ident {
                     name: "x",
@@ -154,6 +155,7 @@ let x = p.x
                 name: "p",
                 stamp: 4,
             },
+            mut_: false,
             args: [],
             scheme: #0,
             body: Expr {
@@ -314,6 +316,7 @@ let x = p.x
                 name: "x",
                 stamp: 5,
             },
+            mut_: false,
             args: [],
             scheme: #7,
             body: Expr {
@@ -480,6 +483,7 @@ let g x = match x with `Some n -> n | _ -> 0
                 name: "f",
                 stamp: 4,
             },
+            mut_: false,
             args: [
                 Ident {
                     name: "v",
@@ -699,6 +703,7 @@ let g x = match x with `Some n -> n | _ -> 0
                 name: "g",
                 stamp: 5,
             },
+            mut_: false,
             args: [
                 Ident {
                     name: "x",
@@ -872,6 +877,7 @@ let g x = match x with `Some n -> n | _ -> 0
             #0: RExtend(
                 "None",
                 Present,
+                Absent,
                 #5,
                 #1,
             ),
@@ -881,6 +887,7 @@ let g x = match x with `Some n -> n | _ -> 0
             #2: RExtend(
                 "Some",
                 Present,
+                Absent,
                 #6,
                 #3,
             ),
@@ -890,6 +897,7 @@ let g x = match x with `Some n -> n | _ -> 0
             #4: RExtend(
                 "Some",
                 Present,
+                Absent,
                 #6,
                 #5,
             ),
@@ -901,12 +909,14 @@ let g x = match x with `Some n -> n | _ -> 0
                 PVar(
                     #0,
                 ),
+                Absent,
                 #5,
                 #3,
             ),
             #7: RExtend(
                 "Some",
                 Present,
+                Absent,
                 #15,
                 #8,
             ),
@@ -1143,6 +1153,7 @@ let%bench "b" n in [1; 2] = n
                 name: "two",
                 stamp: 4,
             },
+            mut_: false,
             args: [],
             scheme: #0,
             body: Expr {

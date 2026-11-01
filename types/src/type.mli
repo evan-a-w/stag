@@ -42,8 +42,11 @@ and ty =
 
 and row =
   | REmpty
-  | RExtend of string * presence * ty * row
-  (** Labels are scoped: the first entry for a name shadows later ones. *)
+  | RExtend of string * presence * presence * ty * row
+  (** [RExtend (name, presence, assigned, ty, rest)]. Labels are scoped: the
+      first entry for a name shadows later ones. [assigned] is [Present] for an
+      entry of a context the code assigns, which only a mutable variable can
+      provide, and [Absent] in records and variants. *)
   | RVar of (row, bound) var
 
 (** Whether an entry is in the row (for a context, whether code uses it). An

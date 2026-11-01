@@ -66,6 +66,9 @@ and type_desc (g : Type_expr.desc) (w : Type_expr.desc) : Type_expr.desc option 
   | Variant r, Variant r' ->
     let+ r = row r r' in
     Type_expr.Variant r
+  | Mut t, Mut t' ->
+    let+ t = type_expr t t' in
+    Type_expr.Mut t
   | Splice e, Splice e' ->
     let+ e = expr e e' in
     Type_expr.Splice e
@@ -76,6 +79,7 @@ and type_desc (g : Type_expr.desc) (w : Type_expr.desc) : Type_expr.desc option 
       | Code _
       | Record _
       | Variant _
+      | Mut _
       | Splice _ )
     , _ ) -> None
 
@@ -175,6 +179,16 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
     let* e = expr e e' in
     let+ in_ = expr in_ in_' in
     Expr.Let (n, bs, t, e, in_)
+  | Let_mut (n, t, e, in_), Let_mut (n', t', e', in_') ->
+    let* n = name n n' in
+    let* t = option type_expr t t' in
+    let* e = expr e e' in
+    let+ in_ = expr in_ in_' in
+    Expr.Let_mut (n, t, e, in_)
+  | Assign (p, e), Assign (p', e') ->
+    let* p = decl_path p p' in
+    let+ e = expr e e' in
+    Expr.Assign (p, e)
   | Fun (bs, e), Fun (bs', e') ->
     let* bs = list binding bs bs' in
     let+ e = expr e e' in
@@ -244,6 +258,8 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
       | Var _
       | App _
       | Let _
+      | Let_mut _
+      | Assign _
       | Fun _
       | Splice _
       | Quote _
@@ -301,6 +317,11 @@ and toplevel_desc (g : Toplevel.desc) (w : Toplevel.desc) =
     let* t = option type_expr t t' in
     let+ e = expr e e' in
     Toplevel.Let (n, bs, t, e)
+  | Let_mut (n, t, e), Let_mut (n', t', e') ->
+    let* n = name n n' in
+    let* t = option type_expr t t' in
+    let+ e = expr e e' in
+    Toplevel.Let_mut (n, t, e)
   | Type d, Type d' ->
     let+ d = type_decl d d' in
     Toplevel.Type d
@@ -341,6 +362,7 @@ and toplevel_desc (g : Toplevel.desc) (w : Toplevel.desc) =
     let+ body = expr body body' in
     Toplevel.Bench { name = n; param; body }
   | ( ( Let _
+      | Let_mut _
       | Type _
       | Exception _
       | Malformed_exception _

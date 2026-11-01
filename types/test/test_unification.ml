@@ -9,7 +9,10 @@ let code ?(inner = int) context = TCode { inner; context }
 let tvar fresh ~rank = TVar (Fresh.var fresh ~rank)
 let rvar fresh ~rank = RVar (Fresh.var fresh ~rank)
 let pvar fresh ~rank = PVar (Fresh.var fresh ~rank)
-let ext ?(presence = Present) name ty rest = RExtend (name, presence, ty, rest)
+
+let ext ?(presence = Present) ?(assigned = Absent) name ty rest =
+  RExtend (name, presence, assigned, ty, rest)
+;;
 
 (** Present entries, in order, before [tail]. *)
 let row ?(tail = REmpty) entries =
@@ -562,7 +565,7 @@ let%expect_test "context bounds" =
     (RVar
      (Link
       (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-       (RVar (Unbound 5 1)))))
+       (RVar (Unbound 6 1)))))
     (Ok ())
     (RVar
      (Link
@@ -570,7 +573,7 @@ let%expect_test "context bounds" =
        (RVar
         (Link
          (RExtend y (PVar (Link Present)) (TVar (Link (TCon bool ())))
-          (RVar (Unbound 9 1))))))))
+          (RVar (Unbound 11 1))))))))
     (Error
      (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
     |}]
@@ -983,8 +986,8 @@ let%expect_test
   let instance () =
     match Scheme.instantiate fresh ~rank:1 ty with
     | TTuple
-        [ TCode { context = RExtend (_, p, a, _); _ }
-        ; TCode { context = RExtend (_, _, g, _); _ }
+        [ TCode { context = RExtend (_, p, _, a, _); _ }
+        ; TCode { context = RExtend (_, _, _, g, _); _ }
         ; _
         ; _
         ] -> p, a, g
@@ -1275,8 +1278,8 @@ let%expect_test "presence bounds are generalized and instantiated together" =
   let instance () =
     match Scheme.instantiate fresh ~rank:1 (pair p q) with
     | TTuple
-        [ TCode { context = RExtend (_, p, _, _); _ }
-        ; TCode { context = RExtend (_, q, _, _); _ }
+        [ TCode { context = RExtend (_, p, _, _, _); _ }
+        ; TCode { context = RExtend (_, q, _, _, _); _ }
         ] -> p, q
     | ty -> raise_s [%message "unexpected instance" (ty : ty)]
   in
@@ -1323,7 +1326,7 @@ let bounded_through_generalized fresh =
   print_presences [ l1; l2; u ];
   let instance () =
     match Scheme.instantiate fresh ~rank:1 ty with
-    | TCode { context = RExtend (_, presence, _, _); _ } -> presence
+    | TCode { context = RExtend (_, presence, _, _, _); _ } -> presence
     | ty -> raise_s [%message "unexpected instance" (ty : ty)]
   in
   l1, l2, u, instance
@@ -1510,11 +1513,11 @@ let%expect_test "cyclic bounds" =
     (Ok ())
     <int>{..'_a} * <int>{..'_b} * <int>{} where ..'_a <= {..'_b}, ..'_b <= {}
     (Error
-     (Row_mismatch (RExtend x Present (TCon int ()) (RVar (Unbound 23 1)))
+     (Row_mismatch (RExtend x Present (TCon int ()) (RVar (Unbound 27 1)))
       (RVar
        (Link
-        (RExtend x (PVar (Link Absent)) (TVar (Unbound 25 1))
-         (RVar (Unbound 26 1)))))
+        (RExtend x (PVar (Link Absent)) (TVar (Unbound 30 1))
+         (RVar (Unbound 31 1)))))
       (Presence_mismatch x)))
     |}]
 ;;
@@ -1570,13 +1573,13 @@ let%expect_test "bounds do not constrain shadowed entries" =
      (RVar
       (Link
        (RExtend y (PVar (Link Present)) (TVar (Link (TCon bool ())))
-        (RVar (Unbound 5 1))))))
+        (RVar (Unbound 6 1))))))
     (Ok ())
     (RExtend x Present (TCon int ())
      (RVar
       (Link
        (RExtend y (PVar (Link Present)) (TVar (Link (TCon bool ())))
-        (RVar (Unbound 5 1))))))
+        (RVar (Unbound 6 1))))))
     |}]
 ;;
 
@@ -1680,7 +1683,7 @@ let%expect_test
     (Error
      (Row_mismatch
       (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
-       (RVar (Unbound 11 1)))
+       (RVar (Unbound 13 1)))
       REmpty (Missing_label y)))
     |}]
 ;;
