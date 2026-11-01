@@ -265,9 +265,9 @@ let residual_spliced k = .< match v with `A -> 0 | other -> .~(k .< other >.) >.
 |};
   [%expect
     {|
-    val inject : <[`A of 'a; ..'b]>{x : 'a; ..'c}
+    val inject : <[`A of 'a; ..'b]>{x : mut?'c 'a; ..'d}
     val match_inside : <int>{..'a}
-    val residual_spliced : (<'a>{other : 'a; ..'b} -> <int>{other?'c : [..'d]; ..'e}) -> <int>{v : [`A; ..'d]; ..'f} where ..'e <= {v : [`A; ..'d]; ..'f}
+    val residual_spliced : (<'a>{other : mut?'b 'a; ..'c} -> <int>{other?'d : [..'e]; ..'f}) -> <int>{v : mut?'g [`A; ..'e]; ..'h} where ..'f <= {v : mut?'g [`A; ..'e]; ..'h}
     |}]
 ;;
 

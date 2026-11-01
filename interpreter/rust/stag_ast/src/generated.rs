@@ -2687,6 +2687,7 @@ pub mod type_ {
         pub bounds: Vec<Bound>,
         pub in_bounds_of: Vec<Bounded>,
         pub kept: Vec<Kept>,
+        pub in_record: bool,
     }
 
     impl<A: crate::FromOcaml, Bound: crate::FromOcaml> crate::FromOcaml for Var<A, Bound> {
@@ -2697,6 +2698,7 @@ pub mod type_ {
                 bounds: crate::FromOcaml::from_ocaml(crate::raw::field(v, 2), cx),
                 in_bounds_of: crate::FromOcaml::from_ocaml(crate::raw::field(v, 3), cx),
                 kept: crate::FromOcaml::from_ocaml(crate::raw::field(v, 4), cx),
+                in_record: crate::FromOcaml::from_ocaml(crate::raw::field(v, 5), cx),
             }
         }
     }
@@ -2711,7 +2713,7 @@ pub mod type_ {
         const REBUILD: Option<&'static str> = None;
 
         unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
-            cx.block(5, 0)
+            cx.block(6, 0)
         }
 
         unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
@@ -2725,6 +2727,8 @@ pub mod type_ {
             cx.set(slot, 3, built);
             let built = crate::ToOcaml::to_ocaml(&self.kept, cx);
             cx.set(slot, 4, built);
+            let built = crate::ToOcaml::to_ocaml(&self.in_record, cx);
+            cx.set(slot, 5, built);
         }
     }
 

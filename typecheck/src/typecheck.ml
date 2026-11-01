@@ -1233,52 +1233,56 @@ let resolution_type t (scope : Scope.t) ~name ~toplevel ~loc : Resolution.t -> _
    a quote builds (but those in the splices that run while it does). [built] is
    whether [expr]'s value is only built by what encloses it, rather than maybe
    called (or otherwise looked into): [f ~called:false] uses only need the
-   toplevel's value. *)
-let rec eager_uses (expr : Typed.Expr.t) ~depth ~built ~f =
+   toplevel's value. Returns the locals it may call (or look into). *)
+let rec eager_uses (expr : Typed.Expr.t) ~depth ~built ~f : Typed.Ident.Set.t =
   let go = eager_uses ~f in
-  let all ~built exprs = List.iter exprs ~f:(go ~depth ~built) in
-  let use ~built binder =
-    match (binder : Typed.Binder.t) with
-    | Toplevel ident when depth = 0 -> f ident ~called:(not built) expr.loc
-    | Toplevel _ | Local _ -> ()
+  let all ~built exprs =
+    Typed.Ident.Set.union_list (List.map exprs ~f:(go ~depth ~built))
+  in
+  let use ~built (binder : Typed.Binder.t) =
+    match binder with
+    | _ when depth <> 0 -> Typed.Ident.Set.empty
+    | Toplevel ident ->
+      f ident ~called:(not built) expr.loc;
+      Typed.Ident.Set.empty
+    | Local ident ->
+      if built then Typed.Ident.Set.empty else Typed.Ident.Set.singleton ident
   in
   match expr.desc with
   | Var (Bound binder | Persistent binder) -> use ~built binder
   | Assign ((Bound binder | Persistent binder), value) ->
-    use ~built:true binder;
-    go value ~depth ~built:false
+    Set.union (use ~built:true binder) (go value ~depth ~built:false)
   | Quote body -> go body ~depth:(depth + 1) ~built:false
   | Splice { code; subs } ->
-    go code ~depth:(depth - 1) ~built:false;
-    (match subs with
-     | Explicit subs -> all ~built:false (List.map subs ~f:snd)
-     | Implicit providers ->
-       Map.data providers |> List.iter ~f:(use ~built:false))
+    Set.union
+      (go code ~depth:(depth - 1) ~built:false)
+      (match subs with
+       | Explicit subs -> all ~built:false (List.map subs ~f:snd)
+       | Implicit providers ->
+         Map.data providers
+         |> List.map ~f:(use ~built:false)
+         |> Typed.Ident.Set.union_list)
   | Toplevel_splice { expansion; code = _ } -> go expansion ~depth ~built
-  | Fun _ when depth = 0 && built -> ()
+  | Fun _ when depth = 0 && built -> Typed.Ident.Set.empty
   | Let { ident; args; body; in_; _ } when depth = 0 ->
-    (* [ident]'s value is only built if [in_] doesn't use it, or is it. *)
-    let only_built =
-      (not
-         (Typed.Expr.refers_to in_ ~f:(function
-            | Local local -> Typed.Ident.equal local ident
-            | Toplevel _ -> false)))
-      ||
-      match in_.desc with
-      | Var (Bound (Local var)) -> built && Typed.Ident.equal var ident
-      | _ -> false
+    let called = go in_ ~depth ~built in
+    (* [ident]'s value is only built if [in_] only builds what it uses it
+       in. *)
+    let only_built = not (Set.mem called ident) in
+    let body =
+      if List.is_empty args
+      then go body ~depth ~built:only_built
+      else if not only_built
+      then go body ~depth ~built:false
+      else Typed.Ident.Set.empty
     in
-    if List.is_empty args
-    then go body ~depth ~built:only_built
-    else if not only_built
-    then go body ~depth ~built:false;
-    go in_ ~depth ~built
+    Set.remove (Set.union called body) ident
   | Let_mut { body; in_; _ } ->
-    go body ~depth ~built:false;
-    go in_ ~depth ~built
+    Set.union (go body ~depth ~built:false) (go in_ ~depth ~built)
   | Match { scrutinee; cases; exception_cases } ->
-    go scrutinee ~depth ~built:false;
-    all ~built (List.map (cases @ exception_cases) ~f:snd)
+    Set.union
+      (go scrutinee ~depth ~built:false)
+      (all ~built (List.map (cases @ exception_cases) ~f:snd))
   | Annotated _
   | Tuple _
   | Construct _
@@ -1359,6 +1363,7 @@ let check_initialization_cycles
                then add (Init_need.Call ident) loc
                else if not (is_function used)
                then add (Init_need.Value ident) loc)
+         |> (ignore : Typed.Ident.Set.t -> unit)
      | Call ident ->
        let toplevel = Option.value_exn (member ident) in
        add (Value ident) toplevel.body.loc;
@@ -2447,21 +2452,34 @@ and expand t (scope : Scope.t) ~code ~subs ~ty ~loc =
           Map.find providers name
           |> Option.map ~f:(fun binder -> Typed.Var_ref.Bound binder) )
     | Explicit subs ->
-      let bindings =
+      (* As [Treewalk.splice_code] does: a variable is substituted as itself,
+         so that the code may assign it. *)
+      let subs =
         List.map subs ~f:(fun (name, (sub : Typed.Expr.t)) ->
-          ( Program_env.bind
-              program
-              (Name (Located.create ~loc name))
-              sub.ty
-              ~level:scope.level
-          , sub ))
+          match sub.desc with
+          | Var ((Bound _ | Persistent _) as var_ref) -> name, First var_ref
+          | _ ->
+            ( name
+            , Second
+                ( Program_env.bind
+                    program
+                    (Name (Located.create ~loc name))
+                    sub.ty
+                    ~level:scope.level
+                , sub ) ))
       in
-      ( bindings
-      , fun name ->
-          List.find bindings ~f:(fun ((ident : Typed.Ident.t), _) ->
-            String.equal ident.name name)
-          |> Option.map ~f:(fun (ident, _) -> Typed.Var_ref.Bound (Local ident))
-      )
+      let entries =
+        String.Map.of_alist_reduce
+          (List.map subs ~f:(fun (name, sub) ->
+             ( name
+             , match sub with
+               | First var_ref -> var_ref
+               | Second ((ident : Typed.Ident.t), _) ->
+                 Typed.Var_ref.Bound (Local ident) )))
+          ~f:(fun first _ -> first)
+      in
+      ( List.filter_map subs ~f:(fun (_, sub) -> Either.Second.to_option sub)
+      , Map.find entries )
   in
   let%map.Result generated =
     at_compile_time
@@ -2624,7 +2642,6 @@ and substitute_entry
     let%bind.Result () =
       provides_assigned
         t
-        scope
         ~name
         ~assigned
         ~mutable_:(binder_is_mutable scope entry.binder)
@@ -2779,7 +2796,7 @@ and may_be_assigned t scope binder : Type.presence =
   then Scope.fresh_presence t scope
   else Absent
 
-and provides_assigned t _scope ~name ~assigned ~mutable_ ~loc =
+and provides_assigned t ~name ~assigned ~mutable_ ~loc =
   if mutable_
   then Ok ()
   else

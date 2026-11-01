@@ -325,13 +325,9 @@ let in_quote = .<.~(.~(.<.<1>.>.))>.
          (in_ (Var (Bound (Local z/19)) : 'a)) : 'a)
         : "<'a>{x : 'a}"))
       (expansion
-       (Let (ident x/20) (args ()) (generalized false)
+       (Let (ident z/20) (args ()) (generalized true)
         (body (Var (Bound (Local y/18)) : 'a))
-        (in_
-         (Let (ident z/21) (args ()) (generalized true)
-          (body (Var (Bound (Local x/20)) : 'a))
-          (in_ (Var (Bound (Local z/21)) : 'a)) : 'a))
-        : 'a))
+        (in_ (Var (Bound (Local z/20)) : 'a)) : 'a))
       : 'a))
     (in_quote/7
      (Quote

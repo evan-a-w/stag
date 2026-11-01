@@ -1679,7 +1679,7 @@ let%expect_test
     <int>{..'a} where ..'a <= {..'_b}, ..'_c <= {..'a}, ..'_c <= {..'_d}, ..'_d <= {..'_b}
     <int>{..'_a} * <int>{..'_b} where ..'_a <= {..'_c}, ..'_c <= {..'_b}
     (Ok ())
-    <int>{y : int; ..'_a} * <int>{y : int; ..'_b} where ..'_a <= {y : int; ..'_c}, ..'_c <= {y : int; ..'_b}
+    <int>{y : int; ..'_a} * <int>{y : mut?'_b int; ..'_c} where ..'_a <= {y : mut?'_d int; ..'_e}, '_d <= '_b, ..'_e <= {y : mut?'_b int; ..'_c}
     (Error
      (Row_mismatch
       (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))

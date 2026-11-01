@@ -175,9 +175,9 @@ let quoted_ones = .<let ones = `Cons (1, ones) in ones>.
     {|
     val compile : ([`Add of 'a * 'a | `Code of <int>{..'b}] as 'a) -> <int>{..'b}
     val len : ([`Cons of 'a * 'b | `Nil] as 'b) -> int
-    val free : <int>{l : ([`Cons of 'a * 'b | `Nil] as 'b); ..'c}
+    val free : <int>{l : mut?'a ([`Cons of 'b * 'c | `Nil] as 'c); ..'d}
     val provided : <int>{..'a}
-    val spliced_in : 'a -> <int>{l : ([`Cons of 'b * 'c | `Nil] as 'c); ..'d}
+    val spliced_in : 'a -> <int>{l : mut?'b ([`Cons of 'c * 'd | `Nil] as 'd); ..'e}
     val quoted_ones : <([`Cons of int * 'a; ..'b] as 'a)>{..'c}
     |}]
 ;;

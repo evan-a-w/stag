@@ -227,6 +227,6 @@ let%expect_test "polymorphic records, variants and modules" =
     end
     val deep : int
     val annotated : M.t -> M.t
-    val quoted : <int>{} -> <int * 'a>{x : 'a; ..'b}
+    val quoted : <int>{} -> <int * 'a>{x : mut?'b 'a; ..'c}
     |}]
 ;;

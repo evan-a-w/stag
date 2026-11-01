@@ -819,7 +819,7 @@ let spliced
   [%expect
     {|
     val incr : <unit>{x : mut int; ..'a}
-    val read : <'a>{x : 'a; ..'b}
+    val read : <'a>{x : mut?'b 'a; ..'c}
     val ran : <int>{..'a}
     val ran_value : int
     val mixed : <unit>{x : mut int; ..'a}
@@ -892,5 +892,163 @@ let wrong_place : {`a : mut int} -> int = fun r -> 1
        (Assigned x)))
      @ t.stag:3:30-34)
     (Misplaced_mut @ t.stag:3:24-31)
+    |}]
+;;
+
+let%expect_test "records' and variants' entries are never mut" =
+  check
+    {|
+let f (c : <unit>{..'r}) (r : {..'r}) = r
+let g = f .<y <- 1>.
+|};
+  check
+    {|
+let f (r : {..'r}) (c : <unit>{..'r}) = r
+let g = f {`y = 1} .<y <- 1>.
+|};
+  check
+    {|
+let f (c : <unit>{..'r}) (v : [..'r]) = v
+let g = f .<y <- 1>.
+|};
+  check
+    {|
+type with_x[{..'r}] = {`x : int; ..'r}
+let f (r : with_x[{`a : mut int}]) = r
+|};
+  check
+    {|
+type ctx[{..'r}] = <unit>{..'r}
+let fine : ctx[{`x : mut int}] = .<x <- 1>.
+|};
+  check
+    {|
+let f (c : <unit>{..'r}) = let _ = (c : <unit>{y : mut int}) in fun (r : {..'r}) -> r
+|};
+  [%expect
+    {|
+    ((Unification_error
+      (Assigned_in_record y
+       (RExtend y (PVar (Link Present)) Assigned (TVar (Link (TCon int ())))
+        (RVar (Unbound 32 1)))))
+     @ t.stag:3:10-20)
+    ((Unification_error
+      (Row_mismatch (RExtend y Present (TCon int ()) REmpty)
+       (RExtend y (PVar (Link Present)) Assigned (TVar (Link (TCon int ())))
+        (RVar (Unbound 35 1)))
+       (Assigned y)))
+     @ t.stag:3:19-29)
+    ((Unification_error
+      (Assigned_in_record y
+       (RExtend y (PVar (Link Present)) Assigned (TVar (Link (TCon int ())))
+        (RVar (Unbound 32 1)))))
+     @ t.stag:3:10-20)
+    ((Unification_error
+      (Assigned_in_record a
+       (RExtend x Present (TCon int ())
+        (RExtend a Present Assigned (TCon int ()) REmpty))))
+     @ t.stag:3:11-33)
+    type ctx[{..'a}] = <unit>{..'a}
+    val fine : <unit>{x : mut int}
+    ((Unification_error
+      (Assigned_in_record y
+       (RVar (Link (RExtend y Present Assigned (TCon int ()) REmpty)))))
+     @ t.stag:2:73-79)
+    |}]
+;;
+
+let%expect_test "explicit substitutions at toplevel splices" =
+  run
+    {|
+let incr = .<x <- Int.add x 1>.
+let read = .<fun u -> x>.
+let pair = .<(a, b)>.
+let mut g = 10
+let renamed = let mut y = 0 in .~incr.{x = y}; .~incr.{x = y}; y
+let same_name = let mut x = 5 in .~incr.{x}; x
+let global = .~incr.{x = g}; g
+let reads_current = let mut y = 0 in let f = .~read.{x = y} in y <- 5; f ()
+let in_quote = .~(.<let mut y = 0 in let f = .~read.{x = y} in y <- 5; f ()>.)
+let order = let mut y = 0 in .~pair.{a = y; b = y <- 5}
+let order_in_quote = .~(.<let mut y = 0 in .~pair.{a = y; b = y <- 5}>.)
+let value_once =
+  let mut n = 0 in
+  let next u = n <- Int.add n 1; n in
+  let p = .~pair.{a = next (); b = next ()} in
+  (p, n)
+|};
+  [%expect
+    {|
+    val incr : <unit>{x : mut int; ..'a}
+    val read : <'a -> 'b>{x : mut?'c 'b; ..'d}
+    val pair : <'a * 'b>{a : mut?'c 'a; b : mut?'d 'b; ..'e}
+    val g : int
+    val renamed : int
+    val same_name : int
+    val global : int
+    val reads_current : int
+    val in_quote : int
+    val order : int * unit
+    val order_in_quote : int * unit
+    val value_once : (int * int) * int
+    -- evaluated at compile time
+    (incr
+     (Code
+      (Assign (Free x)
+       (App
+        (App (Var (Prim Int.add) : "int -> int -> int") (Var (Free x) : int) :
+         "int -> int")
+        (Lit (Int 1) : int) : int)
+       : unit)))
+    (read (Code (Fun (args (u/25)) (body (Var (Free x) : 'a)) : "'b -> 'a")))
+    (pair (Code (Tuple ((Var (Free a) : 'a) (Var (Free b) : 'b)) : "'a * 'b")))
+    -- evaluated
+    (incr
+     (Code
+      (Assign (Free x)
+       (App
+        (App (Var (Prim Int.add) : "int -> int -> int") (Var (Free x) : int) :
+         "int -> int")
+        (Lit (Int 1) : int) : int)
+       : unit)))
+    (read (Code (Fun (args (u/25)) (body (Var (Free x) : 'a)) : "'b -> 'a")))
+    (pair (Code (Tuple ((Var (Free a) : 'a) (Var (Free b) : 'b)) : "'a * 'b")))
+    (g 11)
+    (renamed 2)
+    (same_name 6)
+    (global 11)
+    (reads_current 5)
+    (in_quote 5)
+    (order (Tuple 5 "()"))
+    (order_in_quote (Tuple 5 "()"))
+    (value_once (Tuple (Tuple 1 2) 2))
+    |}];
+  check
+    {|
+let incr = .<x <- Int.add x 1>.
+let immutable = let y = 0 in .~incr.{x = y}
+let expression = .~incr.{x = 1}
+|};
+  [%expect
+    {|
+    ((Spliced_code_assigns_immutable x) @ t.stag:3:29-43)
+    ((Spliced_code_assigns_immutable x) @ t.stag:4:17-31)
+    |}]
+;;
+
+let%expect_test "closures assigning through spliced code are not persistent" =
+  check
+    {|
+let incr = .<x <- Int.add x 1>.
+let implicit = .<let mut x = 0 in let g u = .~incr in .<g ()>.>.
+let explicit = .<let mut y = 0 in let g u = .~incr.{x = y} in .<g ()>.>.
+let fine = .<let mut x = 0 in let g u = .~incr in g (); x>.
+|};
+  [%expect
+    {|
+    ((Captures_mutable (name g) (var_level 1) (used_at 2) (via ()) (mutable_ x))
+     @ t.stag:3:56-57)
+    ((Captures_mutable (name g) (var_level 1) (used_at 2) (via ()) (mutable_ y))
+     @ t.stag:4:64-65)
     |}]
 ;;

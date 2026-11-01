@@ -15,6 +15,7 @@ type ('a, 'bound) var =
   ; mutable bounds : 'bound list
   ; mutable in_bounds_of : bounded list
   ; mutable kept : kept list
+  ; mutable in_record : bool
   }
 
 and ty =
@@ -96,10 +97,13 @@ module Var = struct
     ; mutable bounds : 'bound list
     ; mutable in_bounds_of : bounded list
     ; mutable kept : kept list
+    ; mutable in_record : bool
     }
   [@@deriving rust]
 
-  let create id state = { id; state; bounds = []; in_bounds_of = []; kept = [] }
+  let create id state =
+    { id; state; bounds = []; in_bounds_of = []; kept = []; in_record = false }
+  ;;
 
   let rank_exn t =
     match t.state with
@@ -851,8 +855,9 @@ module Printer = struct
             ty
             ~assigned:
               (match canonical_presence assigned with
-               | Present -> true
-               | Absent | PVar _ -> false)
+               | Present -> "mut "
+               | Absent -> ""
+               | PVar var -> sprintf "mut?%s " (presence_var_name t var))
         in
         match canonical_presence presence with
         | Present -> entry name ty
@@ -1004,11 +1009,7 @@ module Printer = struct
         ~row_var_name
         ~presence_var_name
         ~entry:(fun name ty ~assigned ->
-          sprintf
-            "%s : %s%s"
-            name
-            (if assigned then "mut " else "")
-            (ty_to_string t ~prec:0 ty))
+          sprintf "%s : %s%s" name assigned (ty_to_string t ~prec:0 ty))
     in
     "{" ^ String.concat ~sep:"; " (entries @ Option.to_list tail) ^ "}"
   ;;

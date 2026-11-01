@@ -288,6 +288,12 @@ let unification_message (error : Unification_error.t) ~show_type =
         reason
     | Occurs_check_failed var ->
       sprintf "The type variable %s occurs inside its own definition" (arg var)
+    | Assigned_in_record (name, assigned) ->
+      sprintf
+        "The row %s has %s assigned by code, but it is also the row of a \
+         record or variant, whose entries can't be [mut]"
+        (row assigned)
+        name
   in
   message ^ Type.Printer.where printer
 ;;

@@ -243,15 +243,17 @@ and split_leading t =
 
 let fits_flat ~width t = fits ~spaced:true width [ 0, Flat, hoist t ]
 
-(* Whether [t], starting at [col] and laid out with its groups flat (its other
-   lines broken), fits in [width] on each of its lines: the column it ends at
-   if so, and whether a [Space] there would print nothing. Only the lines of [t] are looked at, each up to the width. *)
 let rec is_blank = function
   | Empty -> true
   | Cat (a, b) -> is_blank a && is_blank b
   | Nest (_, t) | Align t | Group t -> is_blank t
   | _ -> false
 ;;
+
+(* Whether [t], starting at [col] and laid out with its groups flat (its other
+   lines broken), fits in [width] on each of its lines: the column it ends at
+   if so, and whether a [Space] there would print nothing. Only the lines of
+   [t] are looked at, each up to the width. *)
 
 let fits_all ~width ~col ~spaced ~indent t =
   let rec go col ~spaced (commands : (int * Mode.t * t) list) =

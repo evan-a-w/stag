@@ -26,6 +26,9 @@ type t =
   | Row_mismatch of Type.row * Type.row * Row_mismatch_reason.t
   | Occurs_check_failed of Type.arg
   (** The variable that would occur in the type it is bound to. *)
+  | Assigned_in_record of string * Type.row
+  (** The row has the name [assigned], but is also a record's or variant's,
+      whose entries can't be. *)
 [@@deriving sexp_of]
 
 (** With its types as they are now ([Type.Snapshot]). *)

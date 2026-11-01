@@ -64,6 +64,7 @@ let instantiator fresh ~rank ~(pending : Pending.t Queue.t) ~seen_kept
        | Some instance -> instance
        | None ->
          let var' = Fresh.var fresh ~rank in
+         var'.in_record <- var.in_record;
          let instance = wrap var' in
          Hashtbl.set table ~key:var.id ~data:instance;
          bounds var var';

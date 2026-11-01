@@ -321,10 +321,29 @@ and bind_rvar state (var : _ Type.Var.t) row =
       row
   in
   var.state <- Link row;
+  let%bind.Result () =
+    if var.in_record then in_record' state row ~whole:row else Ok ()
+  in
   let bounds = var.bounds in
   var.bounds <- [];
   List.fold_result bounds ~init:() ~f:(fun () (bound : Type.bound) ->
     constrain_row' state ~row ~bound:bound.row ~shadowed:bound.shadowed)
+
+and in_record' state row ~whole =
+  match Type.canonical_row row with
+  | REmpty -> Ok ()
+  | RExtend (name, _, assigned, _, rest) ->
+    let%bind.Result () =
+      unify_presence'
+        state
+        ~presence1:assigned
+        ~presence2:Type.Absent
+        ~error:(Unification_error.Assigned_in_record (name, whole))
+    in
+    in_record' state rest ~whole
+  | RVar var ->
+    var.in_record <- true;
+    Ok ()
 
 and unify_row' state ~row1 ~row2 : (unit, Unification_error.t) Result.t =
   let row1 = Type.canonical_row row1 in
@@ -583,6 +602,8 @@ let presence_at_most fresh ~presence ~bound ~error =
 let unify_if_present fresh ~presence ~ty1 ~ty2 =
   unify_if_present' (State.create fresh) ~presence ~ty1 ~ty2
 ;;
+
+let in_record fresh row = in_record' (State.create fresh) row ~whole:row
 
 let constrain_row fresh ~row ~bound ~shadowed =
   constrain_row' (State.create fresh) ~row ~bound ~shadowed

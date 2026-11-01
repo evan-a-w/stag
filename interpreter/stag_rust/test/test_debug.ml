@@ -76,6 +76,7 @@ let%expect_test "a generalised scheme shares its variable" =
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
             #1: Var {
                 id: 2,
@@ -85,6 +86,7 @@ let%expect_test "a generalised scheme shares its variable" =
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
         },
         typed_record_type: {},
@@ -133,6 +135,7 @@ let%expect_test "a cyclic type" =
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
         },
         typed_record_type: {},
@@ -426,6 +429,7 @@ let x = p.x
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
             #1: Var {
                 id: 21,
@@ -435,6 +439,7 @@ let x = p.x
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
             #2: Var {
                 id: 19,
@@ -444,6 +449,7 @@ let x = p.x
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
             #3: Var {
                 id: 23,
@@ -453,6 +459,7 @@ let x = p.x
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
         },
         typed_record_type: {
@@ -1005,6 +1012,7 @@ let g x = match x with `Some n -> n | _ -> 0
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
         },
         type_var_row_bound: {
@@ -1016,6 +1024,7 @@ let g x = match x with `Some n -> n | _ -> 0
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: true,
             },
             #1: Var {
                 id: 27,
@@ -1023,6 +1032,7 @@ let g x = match x with `Some n -> n | _ -> 0
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: true,
             },
             #2: Var {
                 id: 24,
@@ -1032,6 +1042,7 @@ let g x = match x with `Some n -> n | _ -> 0
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: true,
             },
             #3: Var {
                 id: 33,
@@ -1039,6 +1050,7 @@ let g x = match x with `Some n -> n | _ -> 0
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: true,
             },
         },
         type_var_ty_nothing: {
@@ -1050,6 +1062,7 @@ let g x = match x with `Some n -> n | _ -> 0
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
             #1: Var {
                 id: 18,
@@ -1059,6 +1072,7 @@ let g x = match x with `Some n -> n | _ -> 0
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
             #2: Var {
                 id: 22,
@@ -1068,6 +1082,7 @@ let g x = match x with `Some n -> n | _ -> 0
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
             #3: Var {
                 id: 23,
@@ -1077,6 +1092,7 @@ let g x = match x with `Some n -> n | _ -> 0
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
             #4: Var {
                 id: 19,
@@ -1086,6 +1102,7 @@ let g x = match x with `Some n -> n | _ -> 0
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
             #5: Var {
                 id: 29,
@@ -1095,6 +1112,7 @@ let g x = match x with `Some n -> n | _ -> 0
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
             #6: Var {
                 id: 32,
@@ -1104,6 +1122,7 @@ let g x = match x with `Some n -> n | _ -> 0
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
             #7: Var {
                 id: 30,
@@ -1113,6 +1132,7 @@ let g x = match x with `Some n -> n | _ -> 0
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
             #8: Var {
                 id: 35,
@@ -1122,6 +1142,7 @@ let g x = match x with `Some n -> n | _ -> 0
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
             #9: Var {
                 id: 31,
@@ -1131,6 +1152,7 @@ let g x = match x with `Some n -> n | _ -> 0
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
         },
         typed_record_type: {},
@@ -1270,6 +1292,7 @@ let%bench "b" n in [1; 2] = n
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
         },
         type_var_ty_nothing: {
@@ -1281,6 +1304,7 @@ let%bench "b" n in [1; 2] = n
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
             #1: Var {
                 id: 18,
@@ -1290,6 +1314,7 @@ let%bench "b" n in [1; 2] = n
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
         },
         typed_record_type: {},
@@ -1958,6 +1983,7 @@ let%expect_test "a set, in a row variable's bound" =
                 ],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
         },
         type_var_ty_nothing: {},
@@ -1984,7 +2010,8 @@ let%expect_test "idents minted in Rust share the typechecker's stamps" =
   let rust = Debug.fresh_idents stamps ~name:"x" ~n:3 in
   let after = ocaml () in
   print_s [%message (before : int) rust (after : int)];
-  [%expect {|
+  [%expect
+    {|
     ((before 0)
      "[Ident { name: \"x\", stamp: 1 }, Ident { name: \"x\", stamp: 2 }, Ident { name: \"x\", stamp: 3 }]"
      (after 4))

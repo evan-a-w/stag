@@ -69,7 +69,7 @@ variable the code assigns; `mut` is only allowed there. Type arguments are writt
 name (`list[int]`, not `int list` or `list[a][b]`). A constructor's argument of
 function type is parenthesized: `C of (int -> int)`. `C of int * int` has two
 arguments, `C of (int * int)` one, a tuple. Weak variables
-(`'_a`), presence variables (`` `x?'a ``), absent labels (`-x`), `as` cycles and
+(`'_a`), presence variables (`` `x?'a ``), assignment variables (`mut?'a`), absent labels (`-x`), `as` cycles and
 `where` constraints are printed but never written.
 
 ## Expressions
@@ -313,15 +313,24 @@ global when it runs. Expect tests run in order on one instance of the
 program, so they see each other's assignments.
 
 Code may assign a free variable of its quote: `.<x <- x + 1>.` has type
-`<unit>{x : mut int; ..'r}`. Its context entry is then `mut`, which uses
-of the entry raise like its presence (reading and assigning code combined
-assign it). Where the code is spliced, a `mut` entry must be provided by a
-mutable variable: a `let mut` local in scope at the splice (implicitly, or
-by name in a substitution, `.{x}` or `.{x = y}`), or a mutable toplevel
-(`.{x = M.counter}`); the code then assigns that variable. Any other
-provider (`.{x = 1}`, an immutable variable) is an error. Entries that are
-not `mut` accept anything, a mutable variable included: a substituted
-variable is the variable itself, so the code reads its current value.
+`<unit>{x : mut int; ..'r}`. Its context entry is then `mut`, and code
+combining it with code that only reads `x` assigns `x` too. Where the code is
+spliced, a `mut` entry must be provided by a mutable variable: a `let mut`
+local in scope at the splice (implicitly, or by name in a substitution, `.{x}`
+or `.{x = y}`), or a mutable toplevel (`.{x = M.counter}`); the code then
+assigns that variable. Any other provider (`.{x = 1}`, an immutable variable)
+is an error. An entry that is not known to be assigned or not prints as
+`x : mut?'a t` (like `x?'a` for presence): code that only reads `x` may be
+combined with code assigning it, or spliced where `x` is immutable. An
+annotation's `x : t` is an entry the code does not assign. Records' and
+variants' entries are never `mut`, also through a row variable shared with a
+context.
+
+A substitution that is a variable is the variable itself: the code assigns it
+if it is mutable, and reads its current value. Any other substitution is
+evaluated once, in the order written, before the code runs, so
+`.~c.{a = y; b = y <- 5}` gives `a` the value `y` has after `b`'s assignment.
+This is the same at a toplevel splice and in a quote.
 
 ## Declarations
 

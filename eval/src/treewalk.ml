@@ -389,34 +389,34 @@ let splice_code
   | Explicit subs ->
     (* A variable is substituted as itself, so that the code assigns it if it
        is mutable, and reads its value when it does. *)
-    let variables, subs =
-      List.partition_map subs ~f:(fun (name, (sub : Typed.Expr.t)) ->
-        match sub.desc with
-        | Var ((Bound _ | Persistent _) as var_ref) -> First (name, var_ref)
-        | _ -> Second (name, sub))
-    in
-    let variables = String.Map.of_alist_exn variables in
     let subs =
       List.map subs ~f:(fun (name, (sub : Typed.Expr.t)) ->
-        let ident =
-          fresh_like
-            t
-            { name; stamp = 0 }
-            ~info:{ Typed.Ident_info.ty = sub.ty; level }
-        in
-        name, ident, sub)
+        match sub.desc with
+        | Var ((Bound _ | Persistent _) as var_ref) -> name, First var_ref
+        | _ ->
+          ( name
+          , Second
+              ( fresh_like
+                  t
+                  { name; stamp = 0 }
+                  ~info:{ Typed.Ident_info.ty = sub.ty; level }
+              , sub ) ))
     in
-    let idents =
-      List.map subs ~f:(fun (name, ident, _) -> name, ident)
-      |> String.Map.of_alist_exn
+    let entries =
+      String.Map.of_alist_reduce
+        (List.map subs ~f:(fun (name, sub) ->
+           ( name
+           , match sub with
+             | First var_ref -> var_ref
+             | Second ((ident : Typed.Ident.t), _) ->
+               Typed.Var_ref.Bound (Local ident) )))
+        ~f:(fun first _ -> first)
     in
-    let%map code =
-      instantiate t code ~entry:(fun name ->
-        match Map.find variables name with
-        | Some var_ref -> Some var_ref
-        | None ->
-          Map.find idents name
-          |> Option.map ~f:(fun ident -> Typed.Var_ref.Bound (Local ident)))
+    let%map code = instantiate t code ~entry:(Map.find entries) in
+    let subs =
+      List.filter_map subs ~f:(fun (name, sub) ->
+        Either.Second.to_option sub
+        |> Option.map ~f:(fun (ident, sub) -> name, ident, sub))
     in
     List.fold_right subs ~init:code ~f:(fun (_, ident, sub) in_ ->
       { Typed.Expr.desc =

@@ -131,7 +131,7 @@ end
       type f = { x : t[int] }
       val wrap : 'a -> t['a]
       val use : t[int] -> 'a -> 'a
-      val code : <'a>{..'b} -> <'a>{free : t[int]; ..'c} where ..'b <= {free : t[int]; ..'c}
+      val code : <'a>{..'b} -> <'a>{free : mut?'c t[int]; ..'d} where ..'b <= {free : mut?'c t[int]; ..'d}
     end
     |}]
 ;;

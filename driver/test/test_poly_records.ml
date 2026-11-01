@@ -305,10 +305,10 @@ let pattern_rest = .<match r with {`x = x; ..rest} -> (x, rest)>.
   [%expect
     {|
     val label : <int>{..'a}
-    val var_and_label : <{`y : 'a}>{y : 'a; ..'b}
-    val outside : <'a>{r : {`x : 'a; ..'b}; ..'c}
+    val var_and_label : <{`y : 'a}>{y : mut?'b 'a; ..'c}
+    val outside : <'a>{r : mut?'b {`x : 'a; ..'c}; ..'d}
     val extend_inside : <{..'a}>{..'b} -> <{..'a}>{..'c} where ..'b <= {..'c}
-    val pattern_rest : <'a * {..'b}>{r : {`x : 'a; ..'b}; ..'c}
+    val pattern_rest : <'a * {..'b}>{r : mut?'c {`x : 'a; ..'b}; ..'d}
     |}]
 ;;
 

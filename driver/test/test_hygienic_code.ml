@@ -241,8 +241,8 @@ let%expect_test "derived" =
     {xxx|
     module Gen : sig
       val value : string -> list[string] -> <'a>{..'b} -> Stag.Toplevel.t
-      val sexp_of_pair : <'a * int -> Core.Sexp.t>{prelude.Core.Int.to_string : 'a -> string; ..'b}
-      val to_string_x : <'a>{prelude.Core.Int.to_string : 'b -> 'a; x : 'b; ..'c}
+      val sexp_of_pair : <'a * int -> Core.Sexp.t>{prelude.Core.Int.to_string : mut?'b 'a -> string; ..'c}
+      val to_string_x : <'a>{prelude.Core.Int.to_string : mut?'b 'c -> 'a; x : mut?'d 'c; ..'e}
       val derive : list[Stag.Toplevel.t]
     end
     module H : sig
@@ -266,7 +266,7 @@ let%expect_test "derived" =
       val local : int -> string
       val helped : int
       val map : ('a -> 'b) -> .list['a] -> .list['b]
-      val code : <'a>{prelude.Core.Int.to_string : int -> 'a; ..'b}
+      val code : <'a>{prelude.Core.Int.to_string : mut?'b int -> 'a; ..'c}
     end
     --- output ---
     ((name (derived @ a.stag:11:16-25))
@@ -560,10 +560,10 @@ let c1 = .< fun c -> .< fun x -> (.~c, .< x >.) >. >.
     {|
     module Gen : sig
       val value : string -> <'a>{..'b} -> list[Stag.Toplevel.t]
-      val c1 : <<'a>{x?'b : 'c; ..'d} -> <'c -> 'a * <'e>{x : 'e; ..'f}>{..'g}>{..'h} where ..'d <= {..'g}
+      val c1 : <<'a>{x?'b : 'c; ..'d} -> <'c -> 'a * <'e>{x : mut?'f 'e; ..'g}>{..'h}>{..'i} where ..'d <= {..'h}
     end
     module A : sig
-      val shown : <'a>{x?'b : 'c} -> <'c -> 'a * <'d>{x : 'd; ..'e}>{..'f}
+      val shown : <'a>{x?'b : 'c} -> <'c -> 'a * <'d>{x : mut?'e 'd; ..'f}>{..'g}
     end
     |}]
 ;;

@@ -13,13 +13,15 @@ type 'a var_state =
     variables have bounds: for the other kinds, ['bound] is [Nothing.t].
     [in_bounds_of] has the variables with a bound that has this variable
     (and maybe others: it is only added to), so that generalizing it can
-    find them. *)
+    find them. [in_record] is for a row variable of a record or variant (or
+    bound to one), whose entries are never [assigned]. *)
 type ('a, 'bound) var =
   { id : id
   ; mutable state : 'a var_state
   ; mutable bounds : 'bound list
   ; mutable in_bounds_of : bounded list
   ; mutable kept : kept list
+  ; mutable in_record : bool
   }
 
 and ty =
@@ -118,6 +120,7 @@ module Var : sig
     ; mutable bounds : 'bound list
     ; mutable in_bounds_of : bounded list
     ; mutable kept : kept list
+    ; mutable in_record : bool
     }
   [@@deriving rust]
 

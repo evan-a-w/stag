@@ -332,10 +332,12 @@ let rec elaborate' t module_ vars ~splices ~expansions (expr : Type_expr.t)
       ( Type.TCode { inner; context }
       , Type_expr.Code { inner = inner_syntax; context = context_syntax } )
     | Record row ->
-      let%map.Result row, syntax = elaborate_row row ~allow_mut:false in
+      let%bind.Result row, syntax = elaborate_row row ~allow_mut:false in
+      let%map.Result () = in_record t row ~loc in
       Fresh.record t.fresh row, Type_expr.Record syntax
     | Variant row ->
-      let%map.Result row, syntax = elaborate_row row ~allow_mut:false in
+      let%bind.Result row, syntax = elaborate_row row ~allow_mut:false in
+      let%map.Result () = in_record t row ~loc in
       Fresh.variant t.fresh row, Type_expr.Variant syntax
     | Splice e when splices ->
       let%bind.Result generated = evaluate_splice t module_ e ~loc in
@@ -351,6 +353,13 @@ let rec elaborate' t module_ vars ~splices ~expansions (expr : Type_expr.t)
     | Mut _ -> Error (Typecheck_error.create ~loc Misplaced_mut)
   in
   ty, { expr with txt }
+
+(* A row variable named in a code context may be in a record's too, and a row
+   argument may be [mut], so a record's row may have been given assigned
+   entries. *)
+and in_record t row ~loc =
+  Unify.in_record t.fresh row
+  |> Result.map_error ~f:(Typecheck_error.unification_error ~loc)
 
 (* Entries are [mut] only in contexts, and in row arguments, which may be. *)
 and elaborate_row
@@ -461,7 +470,14 @@ and elaborate_con
        | None ->
          if List.exists instances ~f:(fun expansion -> not expansion.expanded)
          then error ~loc (Non_regular_recursive_alias decl.name)
-         else Result.map (expand t decl ~args ~expansions body) ~f:fst)
+         else
+           expand t decl ~args ~expansions body
+           |> Result.map ~f:fst
+           |> Result.map_error ~f:(fun (error : Typecheck_error.t) ->
+             (* Only a [mut] argument gets a record assigned entries. *)
+             match error.kind with
+             | Unification_error (Assigned_in_record _) -> { error with loc }
+             | _ -> error))
   in
   ty, syntax
 
