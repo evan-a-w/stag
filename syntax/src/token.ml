@@ -13,6 +13,7 @@ type t =
   | False
   | Let
   | Rec
+  | Mut
   | Let_expect_test (** [let%expect_test] *)
   | Let_bench (** [let%bench] *)
   | In
@@ -42,6 +43,7 @@ type t =
   | Equal
   | Bar
   | Arrow
+  | Larrow
   | Star
   | Dot
   | Root
@@ -64,6 +66,7 @@ let keyword = function
   | "false" -> Some False
   | "let" -> Some Let
   | "rec" -> Some Rec
+  | "mut" -> Some Mut
   | "in" -> Some In
   | "match" -> Some Match
   | "with" -> Some With
@@ -90,6 +93,7 @@ let to_string = function
   | False -> "false"
   | Let -> "let"
   | Rec -> "rec"
+  | Mut -> "mut"
   | Let_expect_test -> "let%expect_test"
   | Let_bench -> "let%bench"
   | In -> "in"
@@ -119,6 +123,7 @@ let to_string = function
   | Equal -> "="
   | Bar -> "|"
   | Arrow -> "->"
+  | Larrow -> "<-"
   | Star -> "*"
   | Dot -> "."
   | Root -> "."
@@ -146,6 +151,7 @@ let ends_code : t -> bool = function
   | Splice
   | Equal
   | Arrow
+  | Larrow
   | Colon
   | Bar
   | Of
@@ -178,6 +184,7 @@ let ends_code : t -> bool = function
   | True
   | False
   | Rec
+  | Mut
   | In
   | With
   | Struct

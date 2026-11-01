@@ -455,6 +455,7 @@ and token_or_skip (t : State.t) : Located.t =
        | '-', Some '>' -> simple 2 Arrow
        | '>', Some '.' -> simple 2 Quote_close
        | '>', _ -> simple 1 Greater
+       | '<', Some '-' -> simple 2 Larrow
        | '<', _ -> simple 1 Less
        | '.', Some '<' -> simple 2 Quote_open
        | '.', Some '~' -> simple 2 Splice

@@ -11,5 +11,18 @@ let id t =
 ;;
 
 let var t ~rank = Type.Var.create (id t) (Unbound rank)
-let record t row = Type.TRecord { id = id t; row }
-let variant t row = Type.TVariant { id = id t; row }
+
+let mark_in_record row =
+  Option.iter (Type.tail_var row) ~f:(fun (var : _ Type.Var.t) ->
+    var.in_record <- true)
+;;
+
+let record t row =
+  mark_in_record row;
+  Type.TRecord { id = id t; row }
+;;
+
+let variant t row =
+  mark_in_record row;
+  Type.TVariant { id = id t; row }
+;;

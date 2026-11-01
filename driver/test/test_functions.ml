@@ -103,7 +103,7 @@ let hygienic = hygiene 1
 |};
   [%expect
     {|
-    val make : <int>{x?'a : int; ..'b} -> <int -> int>{..'c} where ..'b <= {..'c}
+    val make : <int>{x?'a : immut int; ..'b} -> <int -> int>{..'c} where ..'b <= {..'c}
     val made : int -> int
     val inc : int -> int
     val applied : int * int
@@ -115,8 +115,8 @@ let hygienic = hygiene 1
       (code
        (App
         (Var (Bound (Toplevel make/4)) :
-         "<int>{x?'_a : int; ..'_b} -> <int -> int>{}")
-        (Quote (Lit (Int 1) : int) : "<int>{x?'_a : int; ..'_b}") :
+         "<int>{x?'_a : immut int; ..'_b} -> <int -> int>{}")
+        (Quote (Lit (Int 1) : int) : "<int>{x?'_a : immut int; ..'_b}") :
         "<int -> int>{}"))
       (expansion
        (Fun (args (x/22))

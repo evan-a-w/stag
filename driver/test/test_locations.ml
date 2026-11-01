@@ -259,7 +259,7 @@ let%expect_test "polymorphic records and variants" =
 
 let%expect_test "type expressions" =
   let annotated ?(decls = "") annot =
-    check (decls ^ "let x : " ^ annot ^ " = x")
+    check (decls ^ "let x : " ^ annot ^ " = raise (Failure \"x\")")
   in
   let list = "type list['a]\n" in
   let rows = "type rows[{..'r}]\n" in
@@ -429,7 +429,6 @@ let%expect_test "typed nodes keep their syntax's locations" =
     (Toplevel_splice t.stag:1:8-28
      (Quote t.stag:1:10-19
       (App t.stag:1:13-16 (Var t.stag:1:13-14) (Lit t.stag:1:15-16)))
-     (Let t.stag:1:8-28 (Var t.stag:1:25-27)
-      (App t.stag:1:13-16 (Var t.stag:1:13-14) (Lit t.stag:1:15-16))))
+     (App t.stag:1:13-16 (Var t.stag:1:13-14) (Lit t.stag:1:15-16)))
     |}]
 ;;

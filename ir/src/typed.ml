@@ -241,6 +241,13 @@ module Expr = struct
           ; body : 'e
           ; in_ : 'e
           }
+      | Let_mut of
+          { ident : Ident.t
+          ; annot : Syntax.Type_expr.t option [@sexp.option]
+          ; body : 'e
+          ; in_ : 'e
+          }
+      | Assign of Var_ref.t * 'e
       | Fun of
           { args : Ident.t list
           ; annots : (Ident.t * Syntax.Type_expr.t) list [@sexp.list]
@@ -297,11 +304,13 @@ module Expr = struct
     | Lit _ | Var _ | Poly_variant (_, None) | Expect _ | Type _ -> []
     | App (a, b)
     | Let { body = a; in_ = b; _ }
+    | Let_mut { body = a; in_ = b; _ }
     | Toplevel_splice { code = a; expansion = b } -> [ a; b ]
     | Splice { code; subs = Explicit subs } -> code :: snds subs
     | Splice { code; subs = Implicit _ } -> [ code ]
     | Quote e
     | Annotated (e, _)
+    | Assign (_, e)
     | Fun { body = e; _ }
     | Field (e, _)
     | Poly_field (e, _)
@@ -328,9 +337,38 @@ module Expr = struct
   let rec refers_to t ~f =
     match t.desc with
     | Var (Bound binder | Persistent binder) -> f binder
+    | Assign ((Bound binder | Persistent binder), _) when f binder -> true
     | Splice { subs = Implicit providers; _ } when Map.exists providers ~f ->
       true
     | _ -> List.exists (sub_exprs t) ~f:(refers_to ~f)
+  ;;
+
+  let free_locals t =
+    let bound = Ident.Hash_set.create () in
+    let used = Ident.Hash_set.create () in
+    let binder = function
+      | Binder.Local ident -> Hash_set.add used ident
+      | Toplevel _ -> ()
+    in
+    let rec go t =
+      (match t.desc with
+       | Var (Bound b | Persistent b) | Assign ((Bound b | Persistent b), _) ->
+         binder b
+       | Splice { subs = Implicit providers; _ } -> Map.iter providers ~f:binder
+       | Let { ident; args; _ } ->
+         List.iter (ident :: args) ~f:(Hash_set.add bound)
+       | Let_mut { ident; _ } -> Hash_set.add bound ident
+       | Fun { args; _ } -> List.iter args ~f:(Hash_set.add bound)
+       | Match { cases; exception_cases; _ } ->
+         List.iter (cases @ exception_cases) ~f:(fun (pattern, _) ->
+           List.iter (Pattern.idents pattern) ~f:(Hash_set.add bound))
+       | _ -> ());
+      List.iter (sub_exprs t) ~f:go
+    in
+    go t;
+    Hash_set.to_list used
+    |> List.filter ~f:(fun ident -> not (Hash_set.mem bound ident))
+    |> Ident.Set.of_list
   ;;
 
   let rec is_value t =
@@ -341,7 +379,7 @@ module Expr = struct
     | Let { ident; args; body; in_; _ } ->
       binding_is_value ~ident ~args ~body && is_value in_
     | Toplevel_splice { expansion; code = _ } -> is_value expansion
-    | App _ | Splice _ | Expect _ -> false
+    | App _ | Splice _ | Expect _ | Let_mut _ | Assign _ -> false
     | Tuple _
     | Construct _
     | Record _
@@ -376,6 +414,8 @@ module Expr = struct
     | Annotated _
     | App _
     | Let _
+    | Let_mut _
+    | Assign _
     | Fun _
     | Tuple _
     | Construct _
@@ -406,6 +446,7 @@ end
 module Toplevel = struct
   type t =
     { ident : Ident.t
+    ; mut : bool [@sexp.bool]
     ; args : Ident.t list
     ; scheme : Hum.Ty.t
     ; body : Expr.t

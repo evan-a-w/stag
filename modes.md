@@ -109,7 +109,7 @@ A compiler flag, e.g. `Typecheck.create ~const_toplevels:bool`:
 - **Off (interpreter)**: any toplevel is allowed. Generalization is still
   decided by mode. Toplevels are order independent, so initialization needs an
   order: cycles through non-functions (e.g. `let x = f 1` and `let f y = x`)
-  must be reported at check time, using the existing SCC information.
+  are reported at check time (see syntax.md, Evaluation).
 
 ## Toplevel splices
 
@@ -127,6 +127,48 @@ toplevel splice is not `const`.
 - Toplevel constants like `n` resolve directly inside quotes (they are
   `const`), instead of becoming free variables filled in at the splice.
 - Local closures capturing arguments no longer cross levels.
+
+## Mutable variables
+
+A `let mut` variable has two modes: the variable's own (its identity, shared
+by the code that uses it) and that of the value it holds.
+
+- **The variable** is always `nonportable`, never `const` (`const` values are
+  deeply immutable, and lifting copies them). So it crosses neither a quote
+  lock nor a toplevel splice lock, and capturing it makes a closure
+  `nonportable`. That join propagates through closures and data, and with
+  arguments `nonportable` by default (and mode crossing by kind for plain
+  data), it replaces the hand-written check that decides persistence today
+  (a closure that may reach a mutable local, through what it captures or
+  parameters whose type may hold a function, is not persistent; see
+  syntax.md). Not `const`, it is never generalized either.
+- **The value held** has a mode variable `m` fixed at the binding, as
+  OxCaml's `let mutable`: `x <- e` requires `mode e ≤ m`, and reading `x` is
+  at `m`. Locality: a value local to an inner region (each function body,
+  closures included, is one) must not be stored in a variable of an outer
+  one, so a variable captured by a closure holds `global` values, unless the
+  closure is `local`. An uncaptured variable may hold values local to its own
+  region.
+- **Representation** (see semantics.md): uncaptured, a stack slot; captured
+  only by `local` closures, on the data stack; captured by a `gc` closure, a
+  heap box, whose stores have a write barrier unless the value is `static`.
+
+Mutable globals are `static`, referred to by symbol (so code may assign them:
+`.< counter <- 1 >.` captures nothing), and hold `global` values (a global
+is a GC root). They are not `const`, so compile-time code can't use them: the
+toplevel splice lock, applied to the toplevels a splice reaches, replaces the
+hand-written "runtime-only toplevel" check. Under `const_toplevels`, their
+initializer must be `const` (static data), not the global.
+
+Code that assigns a free variable has it as a `mut` entry of its context
+(`<unit>{x : mut int}`), provided at the splice only by a mutable variable of
+the splice's level. Modes don't change this: the entry is a variable of the
+level the code is spliced at, never one crossing a lock, so the provider's
+value mode is checked against `m` as for any assignment there.
+
+Later: `&x` of a mutable variable, and writes through pointers, need a
+writable/read-only distinction on pointers; and with mutation, effect purity
+(eg. a `const fn` may not assign a global) starts to matter.
 
 ## Implementation plan
 

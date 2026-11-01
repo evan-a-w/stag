@@ -12,7 +12,9 @@ val id : t -> Type.id
 (** An [Unbound] variable with a fresh id. *)
 val var : t -> rank:Type.rank -> (_, _) Type.Var.t
 
-(** A record or variant with a fresh id. *)
+(** A record or variant with a fresh id. Its row's variable gets
+    [in_record]: its entries must not be [assigned] already
+    ([Unify.in_record] checks that). *)
 val record : t -> Type.row -> Type.ty
 
 val variant : t -> Type.row -> Type.ty

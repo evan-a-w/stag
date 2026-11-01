@@ -65,6 +65,7 @@ module Syntax_at = struct
     ; constructors : Syntax.Decl_path.t Located.t Span.Table.t
     ; fields : Syntax.Decl_path.t Located.t list Span.Table.t
     ; rests : Syntax.Name.t Span.Table.t
+    ; assigned : Syntax.Decl_path.t Located.t Span.Table.t
     }
 
   let create () =
@@ -73,6 +74,7 @@ module Syntax_at = struct
     ; constructors = Span.Table.create ()
     ; fields = Span.Table.create ()
     ; rests = Span.Table.create ()
+    ; assigned = Span.Table.create ()
     }
   ;;
 
@@ -116,6 +118,13 @@ module Syntax_at = struct
       set t.lets e.loc (name, bindings);
       recurse body;
       recurse in_
+    | Let_mut (name, _, body, in_) ->
+      set t.lets e.loc (name, []);
+      recurse body;
+      recurse in_
+    | Assign (path, value) ->
+      set t.assigned e.loc path;
+      recurse value
     | Fun (bindings, body) ->
       set t.funs e.loc bindings;
       recurse body
@@ -294,25 +303,34 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
             ; target = Some (Field (Typed.Field_ref.name field))
             }))
   in
+  let var_target : Typed.Var_ref.t -> _ = function
+    | Bound binder | Persistent binder ->
+      (match binder with
+       | Local ident -> ident.name, Some (Target.Local ident)
+       | Toplevel ident -> ident.name, Some (Value ident.name))
+    | Free name -> name, None
+    | Free_toplevel name -> name, Some (Value name)
+    | Prim prim -> Sexp.to_string (Prim.sexp_of_t prim), None
+    | Intrinsic intrinsic -> Intrinsic.public_name intrinsic, None
+  in
   (match e.desc with
    | Var var ->
-     let label, target =
-       match var with
-       | Bound binder | Persistent binder ->
-         (match binder with
-          | Local ident -> ident.name, Some (Target.Local ident)
-          | Toplevel ident -> ident.name, Some (Value ident.name))
-       | Free name -> name, None
-       | Free_toplevel name -> name, Some (Value name)
-       | Prim prim -> Sexp.to_string (Prim.sexp_of_t prim), None
-       | Intrinsic intrinsic -> Intrinsic.public_name intrinsic, None
-     in
+     let label, target = var_target var in
      if is_arrow e.ty then add_function t e.loc;
      typed ~label ?target ()
    | Let { ident; args; _ } ->
      typed ();
      Option.iter (at syntax.Syntax_at.lets) ~f:(fun (name, bindings) ->
        local_binders t program (name :: List.map bindings ~f:fst) (ident :: args))
+   | Let_mut { ident; _ } ->
+     typed ();
+     Option.iter (at syntax.Syntax_at.lets) ~f:(fun (name, _) ->
+       local_binders t program [ name ] [ ident ])
+   | Assign (var, value) ->
+     typed ();
+     Option.iter (at syntax.assigned) ~f:(fun path ->
+       let label, target = var_target var in
+       add t { loc = path.loc; label = Some label; ty = Some value.ty; target })
    | Fun { args; _ } ->
      typed ();
      Option.iter (at syntax.funs) ~f:(fun bindings ->
@@ -404,6 +422,9 @@ let rec declarations
     | Let (name, bindings, _, body) ->
       set t.values name;
       Hashtbl.set values ~key:(canonical name) ~data:(name, bindings, body)
+    | Let_mut (name, _, body) ->
+      set t.values name;
+      Hashtbl.set values ~key:(canonical name) ~data:(name, [], body)
     | Type { name; params = _; kind } ->
       set t.types name;
       let rec members : Syntax.Type_decl.Kind.t -> unit = function
@@ -505,7 +526,8 @@ let create
       List.iter
         (up_to_date_expansion ~up_to_date toplevel)
         ~f:syntax_of_toplevel
-    | Let (_, _, _, e) | Expect_test { body = e; _ } -> Syntax_at.expr syntax e
+    | Let (_, _, _, e) | Let_mut (_, _, e) | Expect_test { body = e; _ } ->
+      Syntax_at.expr syntax e
     | Bench { param; body; name = _ } ->
       Option.iter param ~f:(fun { args; name } ->
         Hashtbl.set bench_params ~key:(Span.of_loc toplevel.loc) ~data:name;

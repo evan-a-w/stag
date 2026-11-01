@@ -25,6 +25,9 @@ is rejected by the backend (the interpreter supports everything).
   [Recursive types](#recursive-types)).
 - Mutation: mutable fields and stores through pointers. A store into a GC
   object has a write barrier, unless the stored value is at most `static`.
+- Mutable variables (`let mut`, see syntax.md): a local is a stack slot,
+  boxed only when a closure captures it; a toplevel is a static global, with
+  no compile-time instance.
 - Integers: `i8 i16 i32 i64` (and unsigned variants), wrapping arithmetic.
   `int` is `i64`. Division by zero and overflowing shifts are checked runtime
   errors, never UB.

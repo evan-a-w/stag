@@ -1228,3 +1228,48 @@ let%expect_test "list literal locations" =
         <Nil> "]"
     |}]
 ;;
+
+let%expect_test "mutable variables" =
+  expr "let mut x = 1 in x <- add x 1; x";
+  expr "let mut x : int = 1 in x";
+  expr "M.x <- 1, 2";
+  expr "x <- y <- 1";
+  expr "f (x <- 1)";
+  expr "match x with _ -> x <- 1; 2";
+  expr "fun u -> x <- 1; 2";
+  expr "[x <- 2; y <- 3, 4]";
+  expr "{`a = x <- 2; `b = 1}";
+  expr "{r with M.f = x <- 2}";
+  expr "let mut f x = 1 in f";
+  expr "let mut (x : int) = 1 in x";
+  expr "f x <- 1";
+  prog "let mut x = 1\nlet mut y : list[int] = []\nlet f u = x <- add x 1";
+  prog "let mut f x = 1";
+  [%expect
+    {|
+    (Let_mut x () (Lit (Int 1))
+     (Let _ () () (Assign x (App (App (Var add ()) (Var x ())) (Lit (Int 1))))
+      (Var x ())))
+    (Let_mut x ((Con int ())) (Lit (Int 1)) (Var x ()))
+    (Assign M.x (Tuple ((Lit (Int 1)) (Lit (Int 2)))))
+    (Assign x (Assign y (Lit (Int 1))))
+    (App (Var f ()) (Assign x (Lit (Int 1))))
+    (Match (Var x ())
+     ((Any (Let _ () () (Assign x (Lit (Int 1))) (Lit (Int 2))))))
+    (Fun ((u ())) (Let _ () () (Assign x (Lit (Int 1))) (Lit (Int 2))))
+    (Construct <Cons>
+     ((Assign x (Lit (Int 2)))
+      (Construct <Cons>
+       ((Assign y (Tuple ((Lit (Int 3)) (Lit (Int 4))))) (Construct <Nil> ())))))
+    (Poly_record ((a (Assign x (Lit (Int 2)))) (b (Lit (Int 1)))))
+    (Record_update (Var r ()) ((M.f (Assign x (Lit (Int 2))))))
+    t.stag:1:8-9: a mutable variable has no parameters
+    t.stag:1:8-9: expected a name to bind, found `(`
+    t.stag:1:0-3: only a variable can be assigned to
+    ((Let_mut x () (Lit (Int 1)))
+     (Let_mut y ((Con list ((Ty (Con int ()))))) (Construct <Nil> ()))
+     (Let f ((u ())) ()
+      (Assign x (App (App (Var add ()) (Var x ())) (Lit (Int 1))))))
+    t.stag:1:8-9: a mutable variable has no parameters
+    |}]
+;;

@@ -264,6 +264,20 @@ let struct_toplevels : (t -> Toplevel.t list) ref = ref (fun _ -> assert false)
 
 (* Types *)
 
+let starts_type : Token.t -> bool = function
+  | Tyvar _
+  | Weak_tyvar _
+  | Lident _
+  | Uident _
+  | Root
+  | Lparen
+  | Lbrace
+  | Lbracket
+  | Less
+  | Splice -> true
+  | _ -> false
+;;
+
 let rec type_expr t : Type_expr.t =
   let domain = type_tuple t in
   if is t Arrow
@@ -410,7 +424,9 @@ and row_tail t : Type_expr.row =
   let var = tyvar t in
   since t start (Type_expr.Var var)
 
-(** [{l : t; ...; ..'r}], located with its braces. *)
+(** [{l : t; ...; ..'r}], located with its braces. An entry's type may be
+    [mut t] or [immut t], for a context: [immut] is a keyword only there,
+    before a type. *)
 and row t ~entry_label ~what : Type_expr.row =
   let open_loc = loc t in
   expect t Lbrace;
@@ -421,7 +437,20 @@ and row t ~entry_label ~what : Type_expr.row =
     | Label _ | Lident _ ->
       let name = entry_label t in
       expect t Colon;
-      let ty = type_expr t in
+      let ty =
+        match peek t with
+        | Mut ->
+          let start = loc t in
+          advance t;
+          let ty = type_expr t in
+          since t start (Type_expr.Mut ty)
+        | Lident "immut" when starts_type (peek_at t 1) ->
+          let start = loc t in
+          advance t;
+          let ty = type_expr t in
+          since t start (Type_expr.Immut ty)
+        | _ -> type_expr t
+      in
       let rest =
         match peek t with
         | Semi ->
@@ -724,7 +753,7 @@ let rec expr ?(seq = true) t : Expr.t =
   | Match -> match_ t ~seq
   | Fun -> fun_ t ~seq
   | _ ->
-    let first = tuple t ~seq in
+    let first = assignment t ~seq in
     if seq && is t Semi
     then (
       let semi = loc t in
@@ -759,15 +788,51 @@ and binding t =
   expect t Equal;
   name, params, annot, expr t
 
+(** [name : t = e], after [let mut]. *)
+and mut_binding t =
+  expect t Mut;
+  let name = binding_name t in
+  if not (List.is_empty (params t))
+  then fail name.loc "a mutable variable has no parameters";
+  let annot = binding_annot t in
+  expect t Equal;
+  name, annot, expr t
+
 and let_ t ~seq : Expr.t =
   let start = loc t in
   expect t Let;
-  let name, params, annot, equal = binding t in
-  expect_for t In ~opener:Let ~open_loc:start;
-  let body = expr t ~seq in
-  expr_at
-    ~loc:(Loc.merge start body.loc)
-    (Expr.Let (name, params, annot, equal, body))
+  match peek t with
+  | Mut ->
+    let name, annot, equal = mut_binding t in
+    expect_for t In ~opener:Let ~open_loc:start;
+    let body = expr t ~seq in
+    expr_at
+      ~loc:(Loc.merge start body.loc)
+      (Expr.Let_mut (name, annot, equal, body))
+  | _ ->
+    let name, params, annot, equal = binding t in
+    expect_for t In ~opener:Let ~open_loc:start;
+    let body = expr t ~seq in
+    expr_at
+      ~loc:(Loc.merge start body.loc)
+      (Expr.Let (name, params, annot, equal, body))
+
+(** [x <- e], right associative, looser than [,]. *)
+and assignment t ~seq : Expr.t =
+  let target = tuple t ~seq in
+  match peek t with
+  | Larrow ->
+    let path =
+      match target.txt with
+      | Var (path, None) -> located ~loc:target.loc path
+      | Field _ ->
+        fail target.loc "record fields are not mutable: only variables are"
+      | _ -> fail target.loc "only a variable can be assigned to"
+    in
+    advance t;
+    let value = assignment t ~seq in
+    expr_at ~loc:(Loc.merge target.loc value.loc) (Assign (path, value))
+  | _ -> target
 
 and fun_ t ~seq : Expr.t =
   let start = loc t in
@@ -833,7 +898,7 @@ and tuple_item t ~seq : Expr.t =
   | _ -> construct t
 
 (** A value in [{...}]. *)
-and entry_value t = tuple t ~seq:false
+and entry_value t = assignment t ~seq:false
 
 and construct t : Expr.t =
   let start = loc t in
@@ -1294,6 +1359,15 @@ let unclosed t ~start ~stop =
 let rec toplevel t : Toplevel.t =
   let start = loc t in
   match peek t with
+  | Let when Token.equal (peek_at t 1) Mut ->
+    advance t;
+    let name, annot, equal = mut_binding t in
+    if is t In
+    then
+      fail
+        (loc t)
+        "unexpected `in`: a toplevel `let` is a declaration, without `in`";
+    since t start (Toplevel.Let_mut (name, annot, equal))
   | Let ->
     advance t;
     let name = binding_name t in

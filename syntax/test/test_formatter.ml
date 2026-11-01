@@ -850,11 +850,8 @@ let f l = match l with
 |};
   [%expect
     {|
-    let a = [
-      (* first *) 1;
-      (* second *) 2;
-      (* after two *) 3; (* after three *)
-    ] (* end *)
+    let a =
+      [(* first *) 1; (* second *) 2; (* after two *) 3 (* after three *)] (* end *)
     let b = [
       1; (* one *)
       2;
@@ -880,5 +877,28 @@ let f l = match l with
       (* c *) cccccccc;
       [dddddd; eeeeee];
     ]
+    |}]
+;;
+
+let%expect_test "a comment ending a definition's line doesn't make it dock" =
+  test
+    ~width:40
+    {|module A' = struct
+  let _x
+      (x : ())
+      (f : .letx) : M.letx =
+    [true; {}]
+
+
+(** doc 20 *) end
+|};
+  [%expect
+    {|
+    module A' = struct
+      let _x
+          (x : ())
+          (f : .letx) : M.letx =
+        [true; {}] (** doc 20 *)
+    end
     |}]
 ;;

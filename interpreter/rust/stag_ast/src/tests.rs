@@ -63,10 +63,10 @@ fn maps_and_sets() {
     ));
 }
 
-/// `{ id; state; bounds = []; in_bounds_of = []; kept = [] }`, with its state
+/// `{ id; state; bounds = []; in_bounds_of = []; kept = []; in_record = false }`, with its state
 /// to be set.
 fn var(heap: &mut Heap, id: isize) -> crate::raw::Value {
-    heap.block(0, &[int(id), int(0), int(0), int(0), int(0)])
+    heap.block(0, &[int(id), int(0), int(0), int(0), int(0), int(0)])
 }
 
 #[test]
@@ -100,6 +100,7 @@ fn cycles_and_sharing_through_vars() {
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
         }
     "#]]
@@ -146,6 +147,7 @@ fn conversions_into_one_arena_append() {
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
             #1: Var {
                 id: 2,
@@ -153,6 +155,7 @@ fn conversions_into_one_arena_append() {
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
             #2: Var {
                 id: 1,
@@ -160,6 +163,7 @@ fn conversions_into_one_arena_append() {
                 bounds: [],
                 in_bounds_of: [],
                 kept: [],
+                in_record: false,
             },
         }
     "#]]

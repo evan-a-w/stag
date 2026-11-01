@@ -959,6 +959,8 @@ pub mod syntax {
             Var(crate::syntax::DeclPath, Option<Box<TypeExpr>>),
             App(Box<Expr>, Box<Expr>),
             Let(crate::syntax::Name, Vec<Binding>, Option<Box<TypeExpr>>, Box<Expr>, Box<Expr>),
+            LetMut(crate::syntax::Name, Option<Box<TypeExpr>>, Box<Expr>, Box<Expr>),
+            Assign(crate::Located<crate::syntax::DeclPath>, Box<Expr>),
             Fun(Vec<Binding>, Box<Expr>),
             Splice {
                 expr: Box<Expr>,
@@ -1010,69 +1012,79 @@ pub mod syntax {
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 3), cx),
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 4), cx),
                         ),
-                        4 => Self::Fun(
+                        4 => Self::LetMut(
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 2), cx),
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 3), cx),
+                        ),
+                        5 => Self::Assign(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                         ),
-                        5 => Self::Splice {
+                        6 => Self::Fun(
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
+                        ),
+                        7 => Self::Splice {
                             expr: crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             subs: crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                         },
-                        6 => Self::Quote(
+                        8 => Self::Quote(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                         ),
-                        7 => Self::Tuple(
+                        9 => Self::Tuple(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                         ),
-                        8 => Self::Construct(
-                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
-                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
-                        ),
-                        9 => Self::Record(
-                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
-                        ),
-                        10 => Self::Field(
+                        10 => Self::Construct(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                         ),
-                        11 => Self::RecordUpdate(
+                        11 => Self::Record(
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
+                        ),
+                        12 => Self::Field(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                         ),
-                        12 => Self::Type(
-                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
-                        ),
-                        13 => Self::Match(
+                        13 => Self::RecordUpdate(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                         ),
-                        14 => Self::PolyRecord(
+                        14 => Self::Type(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                         ),
-                        15 => Self::PolyField(
-                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
-                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
-                        ),
-                        16 => Self::PolyExtend(
+                        15 => Self::Match(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                         ),
-                        17 => Self::PolyRestrict(
+                        16 => Self::PolyRecord(
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
+                        ),
+                        17 => Self::PolyField(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                         ),
-                        18 => Self::PolyUpdate(
+                        18 => Self::PolyExtend(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                         ),
-                        19 => Self::PolyVariant(
+                        19 => Self::PolyRestrict(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                         ),
-                        20 => Self::Expect(
+                        20 => Self::PolyUpdate(
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
+                        ),
+                        21 => Self::PolyVariant(
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
+                        ),
+                        22 => Self::Expect(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                         ),
-                        21 => Self::StructQuote(
+                        23 => Self::StructQuote(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                         ),
                         _ => crate::raw::bad("Syntax.Defs.expr_desc", v),
@@ -1096,24 +1108,26 @@ pub mod syntax {
                     Self::Var { .. } => cx.block(2, 1),
                     Self::App { .. } => cx.block(2, 2),
                     Self::Let { .. } => cx.block(5, 3),
-                    Self::Fun { .. } => cx.block(2, 4),
-                    Self::Splice { .. } => cx.block(2, 5),
-                    Self::Quote { .. } => cx.block(1, 6),
-                    Self::Tuple { .. } => cx.block(1, 7),
-                    Self::Construct { .. } => cx.block(2, 8),
-                    Self::Record { .. } => cx.block(1, 9),
-                    Self::Field { .. } => cx.block(2, 10),
-                    Self::RecordUpdate { .. } => cx.block(2, 11),
-                    Self::Type { .. } => cx.block(1, 12),
-                    Self::Match { .. } => cx.block(2, 13),
-                    Self::PolyRecord { .. } => cx.block(1, 14),
-                    Self::PolyField { .. } => cx.block(2, 15),
-                    Self::PolyExtend { .. } => cx.block(2, 16),
-                    Self::PolyRestrict { .. } => cx.block(2, 17),
-                    Self::PolyUpdate { .. } => cx.block(2, 18),
-                    Self::PolyVariant { .. } => cx.block(2, 19),
-                    Self::Expect { .. } => cx.block(1, 20),
-                    Self::StructQuote { .. } => cx.block(1, 21),
+                    Self::LetMut { .. } => cx.block(4, 4),
+                    Self::Assign { .. } => cx.block(2, 5),
+                    Self::Fun { .. } => cx.block(2, 6),
+                    Self::Splice { .. } => cx.block(2, 7),
+                    Self::Quote { .. } => cx.block(1, 8),
+                    Self::Tuple { .. } => cx.block(1, 9),
+                    Self::Construct { .. } => cx.block(2, 10),
+                    Self::Record { .. } => cx.block(1, 11),
+                    Self::Field { .. } => cx.block(2, 12),
+                    Self::RecordUpdate { .. } => cx.block(2, 13),
+                    Self::Type { .. } => cx.block(1, 14),
+                    Self::Match { .. } => cx.block(2, 15),
+                    Self::PolyRecord { .. } => cx.block(1, 16),
+                    Self::PolyField { .. } => cx.block(2, 17),
+                    Self::PolyExtend { .. } => cx.block(2, 18),
+                    Self::PolyRestrict { .. } => cx.block(2, 19),
+                    Self::PolyUpdate { .. } => cx.block(2, 20),
+                    Self::PolyVariant { .. } => cx.block(2, 21),
+                    Self::Expect { .. } => cx.block(1, 22),
+                    Self::StructQuote { .. } => cx.block(1, 23),
                     Self::Error => crate::raw::immediate(0),
                 }
             }
@@ -1147,6 +1161,22 @@ pub mod syntax {
                         cx.set(slot, 3, built);
                         let built = crate::ToOcaml::to_ocaml(v4, cx);
                         cx.set(slot, 4, built);
+                    }
+                    Self::LetMut(v0, v1, v2, v3) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                        let built = crate::ToOcaml::to_ocaml(v2, cx);
+                        cx.set(slot, 2, built);
+                        let built = crate::ToOcaml::to_ocaml(v3, cx);
+                        cx.set(slot, 3, built);
+                    }
+                    Self::Assign(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
                     }
                     Self::Fun(v0, v1) => {
                         let built = crate::ToOcaml::to_ocaml(v0, cx);
@@ -1510,6 +1540,7 @@ pub mod syntax {
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         pub enum ToplevelDesc {
             Let(crate::syntax::Name, Vec<Binding>, Option<TypeExpr>, Expr),
+            LetMut(crate::syntax::Name, Option<TypeExpr>, Expr),
             Type(TypeDecl),
             Exception(crate::syntax::Name, Vec<TypeExpr>),
             MalformedException(crate::syntax::Name, Vec<TypeExpr>),
@@ -1539,35 +1570,40 @@ pub mod syntax {
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 2), cx),
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 3), cx),
                         ),
-                        1 => Self::Type(
-                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
-                        ),
-                        2 => Self::Exception(
-                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
-                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
-                        ),
-                        3 => Self::MalformedException(
-                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
-                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
-                        ),
-                        4 => Self::Module(
-                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
-                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
-                        ),
-                        5 => Self::ModuleSplice(
+                        1 => Self::LetMut(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 2), cx),
                         ),
-                        6 => Self::Include(
+                        2 => Self::Type(
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
+                        ),
+                        3 => Self::Exception(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                         ),
-                        7 => Self::ExpectTest {
+                        4 => Self::MalformedException(
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
+                        ),
+                        5 => Self::Module(
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
+                        ),
+                        6 => Self::ModuleSplice(
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 2), cx),
+                        ),
+                        7 => Self::Include(
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
+                        ),
+                        8 => Self::ExpectTest {
                             name: crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             body: crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                         },
-                        8 => Self::Bench {
+                        9 => Self::Bench {
                             name: crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             param: crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                             body: crate::FromOcaml::from_ocaml(crate::raw::field(v, 2), cx),
@@ -1590,14 +1626,15 @@ pub mod syntax {
             unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
                 match self {
                     Self::Let { .. } => cx.block(4, 0),
-                    Self::Type { .. } => cx.block(1, 1),
-                    Self::Exception { .. } => cx.block(2, 2),
-                    Self::MalformedException { .. } => cx.block(2, 3),
-                    Self::Module { .. } => cx.block(2, 4),
-                    Self::ModuleSplice { .. } => cx.block(3, 5),
-                    Self::Include { .. } => cx.block(2, 6),
-                    Self::ExpectTest { .. } => cx.block(2, 7),
-                    Self::Bench { .. } => cx.block(3, 8),
+                    Self::LetMut { .. } => cx.block(3, 1),
+                    Self::Type { .. } => cx.block(1, 2),
+                    Self::Exception { .. } => cx.block(2, 3),
+                    Self::MalformedException { .. } => cx.block(2, 4),
+                    Self::Module { .. } => cx.block(2, 5),
+                    Self::ModuleSplice { .. } => cx.block(3, 6),
+                    Self::Include { .. } => cx.block(2, 7),
+                    Self::ExpectTest { .. } => cx.block(2, 8),
+                    Self::Bench { .. } => cx.block(3, 9),
                 }
             }
 
@@ -1612,6 +1649,14 @@ pub mod syntax {
                         cx.set(slot, 2, built);
                         let built = crate::ToOcaml::to_ocaml(v3, cx);
                         cx.set(slot, 3, built);
+                    }
+                    Self::LetMut(v0, v1, v2) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
+                        let built = crate::ToOcaml::to_ocaml(v2, cx);
+                        cx.set(slot, 2, built);
                     }
                     Self::Type(v0) => {
                         let built = crate::ToOcaml::to_ocaml(v0, cx);
@@ -1922,6 +1967,8 @@ pub mod syntax {
             },
             Record(Box<Row>),
             Variant(Box<Row>),
+            Mut(Box<TypeExpr>),
+            Immut(Box<TypeExpr>),
             Splice(Box<Expr>),
         }
 
@@ -1955,7 +2002,13 @@ pub mod syntax {
                         6 => Self::Variant(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                         ),
-                        7 => Self::Splice(
+                        7 => Self::Mut(
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
+                        ),
+                        8 => Self::Immut(
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
+                        ),
+                        9 => Self::Splice(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                         ),
                         _ => crate::raw::bad("Syntax.Defs.type_expr_desc", v),
@@ -1982,7 +2035,9 @@ pub mod syntax {
                     Self::Code { .. } => cx.block(2, 4),
                     Self::Record { .. } => cx.block(1, 5),
                     Self::Variant { .. } => cx.block(1, 6),
-                    Self::Splice { .. } => cx.block(1, 7),
+                    Self::Mut { .. } => cx.block(1, 7),
+                    Self::Immut { .. } => cx.block(1, 8),
+                    Self::Splice { .. } => cx.block(1, 9),
                 }
             }
 
@@ -2019,6 +2074,14 @@ pub mod syntax {
                         cx.set(slot, 0, built);
                     }
                     Self::Variant(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Mut(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Immut(v0) => {
                         let built = crate::ToOcaml::to_ocaml(v0, cx);
                         cx.set(slot, 0, built);
                     }
@@ -2432,7 +2495,7 @@ pub mod type_ {
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub enum Row {
         REmpty,
-        RExtend(crate::Str, Presence, crate::Ref<Ty>, crate::Ref<Row>),
+        RExtend(crate::Str, Presence, Presence, crate::Ref<Ty>, crate::Ref<Row>),
         RVar(crate::Ref<Var<crate::Ref<Row>, Bound>>),
     }
 
@@ -2450,6 +2513,7 @@ pub mod type_ {
                         crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                         crate::FromOcaml::from_ocaml(crate::raw::field(v, 2), cx),
                         crate::FromOcaml::from_ocaml(crate::raw::field(v, 3), cx),
+                        crate::FromOcaml::from_ocaml(crate::raw::field(v, 4), cx),
                     ),
                     1 => Self::RVar(
                         crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
@@ -2472,7 +2536,7 @@ pub mod type_ {
         unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
             match self {
                 Self::REmpty => crate::raw::immediate(0),
-                Self::RExtend { .. } => cx.block(4, 0),
+                Self::RExtend { .. } => cx.block(5, 0),
                 Self::RVar { .. } => cx.block(1, 1),
             }
         }
@@ -2480,7 +2544,7 @@ pub mod type_ {
         unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
             match self {
                 Self::REmpty => {}
-                Self::RExtend(v0, v1, v2, v3) => {
+                Self::RExtend(v0, v1, v2, v3, v4) => {
                     let built = crate::ToOcaml::to_ocaml(v0, cx);
                     cx.set(slot, 0, built);
                     let built = crate::ToOcaml::to_ocaml(v1, cx);
@@ -2489,6 +2553,8 @@ pub mod type_ {
                     cx.set(slot, 2, built);
                     let built = crate::ToOcaml::to_ocaml(v3, cx);
                     cx.set(slot, 3, built);
+                    let built = crate::ToOcaml::to_ocaml(v4, cx);
+                    cx.set(slot, 4, built);
                 }
                 Self::RVar(v0) => {
                     let built = crate::ToOcaml::to_ocaml(v0, cx);
@@ -2630,6 +2696,7 @@ pub mod type_ {
         pub bounds: Vec<Bound>,
         pub in_bounds_of: Vec<Bounded>,
         pub kept: Vec<Kept>,
+        pub in_record: bool,
     }
 
     impl<A: crate::FromOcaml, Bound: crate::FromOcaml> crate::FromOcaml for Var<A, Bound> {
@@ -2640,6 +2707,7 @@ pub mod type_ {
                 bounds: crate::FromOcaml::from_ocaml(crate::raw::field(v, 2), cx),
                 in_bounds_of: crate::FromOcaml::from_ocaml(crate::raw::field(v, 3), cx),
                 kept: crate::FromOcaml::from_ocaml(crate::raw::field(v, 4), cx),
+                in_record: crate::FromOcaml::from_ocaml(crate::raw::field(v, 5), cx),
             }
         }
     }
@@ -2654,7 +2722,7 @@ pub mod type_ {
         const REBUILD: Option<&'static str> = None;
 
         unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
-            cx.block(5, 0)
+            cx.block(6, 0)
         }
 
         unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
@@ -2668,6 +2736,8 @@ pub mod type_ {
             cx.set(slot, 3, built);
             let built = crate::ToOcaml::to_ocaml(&self.kept, cx);
             cx.set(slot, 4, built);
+            let built = crate::ToOcaml::to_ocaml(&self.in_record, cx);
+            cx.set(slot, 5, built);
         }
     }
 
@@ -3249,6 +3319,7 @@ pub mod typed {
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub struct Toplevel {
         pub ident: Ident,
+        pub mut_: bool,
         pub args: Vec<Ident>,
         pub scheme: hum::Ty,
         pub body: Expr,
@@ -3258,9 +3329,10 @@ pub mod typed {
         unsafe fn from_ocaml(v: crate::raw::Value, cx: &mut crate::ArenaBuilder) -> Self {
             Self {
                 ident: crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
-                args: crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
-                scheme: crate::FromOcaml::from_ocaml(crate::raw::field(v, 2), cx),
-                body: crate::FromOcaml::from_ocaml(crate::raw::field(v, 3), cx),
+                mut_: crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
+                args: crate::FromOcaml::from_ocaml(crate::raw::field(v, 2), cx),
+                scheme: crate::FromOcaml::from_ocaml(crate::raw::field(v, 3), cx),
+                body: crate::FromOcaml::from_ocaml(crate::raw::field(v, 4), cx),
             }
         }
     }
@@ -3275,18 +3347,20 @@ pub mod typed {
         const REBUILD: Option<&'static str> = None;
 
         unsafe fn shell(&self, cx: &mut crate::Builder) -> crate::raw::Value {
-            cx.block(4, 0)
+            cx.block(5, 0)
         }
 
         unsafe fn fill(&self, slot: crate::Slot, cx: &mut crate::Builder) {
             let built = crate::ToOcaml::to_ocaml(&self.ident, cx);
             cx.set(slot, 0, built);
-            let built = crate::ToOcaml::to_ocaml(&self.args, cx);
+            let built = crate::ToOcaml::to_ocaml(&self.mut_, cx);
             cx.set(slot, 1, built);
-            let built = crate::ToOcaml::to_ocaml(&self.scheme, cx);
+            let built = crate::ToOcaml::to_ocaml(&self.args, cx);
             cx.set(slot, 2, built);
-            let built = crate::ToOcaml::to_ocaml(&self.body, cx);
+            let built = crate::ToOcaml::to_ocaml(&self.scheme, cx);
             cx.set(slot, 3, built);
+            let built = crate::ToOcaml::to_ocaml(&self.body, cx);
+            cx.set(slot, 4, built);
         }
     }
 
@@ -3397,6 +3471,13 @@ pub mod typed {
                 body: E,
                 in_: E,
             },
+            LetMut {
+                ident: crate::typed::Ident,
+                annot: Option<crate::syntax::TypeExpr>,
+                body: E,
+                in_: E,
+            },
+            Assign(crate::typed::VarRef, E),
             Fun {
                 args: Vec<crate::typed::Ident>,
                 annots: Vec<(crate::typed::Ident, crate::syntax::TypeExpr)>,
@@ -3458,79 +3539,89 @@ pub mod typed {
                             body: crate::FromOcaml::from_ocaml(crate::raw::field(v, 5), cx),
                             in_: crate::FromOcaml::from_ocaml(crate::raw::field(v, 6), cx),
                         },
-                        4 => Self::Fun {
+                        4 => Self::LetMut {
+                            ident: crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
+                            annot: crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
+                            body: crate::FromOcaml::from_ocaml(crate::raw::field(v, 2), cx),
+                            in_: crate::FromOcaml::from_ocaml(crate::raw::field(v, 3), cx),
+                        },
+                        5 => Self::Assign(
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
+                        ),
+                        6 => Self::Fun {
                             args: crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             annots: crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                             body: crate::FromOcaml::from_ocaml(crate::raw::field(v, 2), cx),
                         },
-                        5 => Self::Annotated(
+                        7 => Self::Annotated(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                         ),
-                        6 => Self::Splice {
+                        8 => Self::Splice {
                             code: crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             subs: crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                         },
-                        7 => Self::ToplevelSplice {
+                        9 => Self::ToplevelSplice {
                             code: crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             expansion: crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                         },
-                        8 => Self::Quote(
+                        10 => Self::Quote(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                         ),
-                        9 => Self::Tuple(
+                        11 => Self::Tuple(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                         ),
-                        10 => Self::Construct(
-                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
-                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
-                        ),
-                        11 => Self::Record(
-                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
-                        ),
-                        12 => Self::Field(
+                        12 => Self::Construct(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                         ),
-                        13 => Self::RecordUpdate(
+                        13 => Self::Record(
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
+                        ),
+                        14 => Self::Field(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                         ),
-                        14 => Self::Match {
+                        15 => Self::RecordUpdate(
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
+                        ),
+                        16 => Self::Match {
                             scrutinee: crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             cases: crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                             exception_cases: crate::FromOcaml::from_ocaml(crate::raw::field(v, 2), cx),
                         },
-                        15 => Self::PolyRecord(
+                        17 => Self::PolyRecord(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                         ),
-                        16 => Self::PolyField(
-                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
-                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
-                        ),
-                        17 => Self::PolyExtend(
+                        18 => Self::PolyField(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                         ),
-                        18 => Self::PolyRestrict(
+                        19 => Self::PolyExtend(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                         ),
-                        19 => Self::PolyUpdate(
+                        20 => Self::PolyRestrict(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                         ),
-                        20 => Self::PolyVariant(
+                        21 => Self::PolyUpdate(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
                         ),
-                        21 => Self::Expect(
+                        22 => Self::PolyVariant(
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 1), cx),
+                        ),
+                        23 => Self::Expect(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                         ),
-                        22 => Self::Type(
+                        24 => Self::Type(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                         ),
-                        23 => Self::Error(
+                        25 => Self::Error(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                         ),
                         _ => crate::raw::bad("Typed.Expr.Desc.t", v),
@@ -3554,26 +3645,28 @@ pub mod typed {
                     Self::Var { .. } => cx.block(1, 1),
                     Self::App { .. } => cx.block(2, 2),
                     Self::Let { .. } => cx.block(7, 3),
-                    Self::Fun { .. } => cx.block(3, 4),
-                    Self::Annotated { .. } => cx.block(2, 5),
-                    Self::Splice { .. } => cx.block(2, 6),
-                    Self::ToplevelSplice { .. } => cx.block(2, 7),
-                    Self::Quote { .. } => cx.block(1, 8),
-                    Self::Tuple { .. } => cx.block(1, 9),
-                    Self::Construct { .. } => cx.block(2, 10),
-                    Self::Record { .. } => cx.block(1, 11),
-                    Self::Field { .. } => cx.block(2, 12),
-                    Self::RecordUpdate { .. } => cx.block(2, 13),
-                    Self::Match { .. } => cx.block(3, 14),
-                    Self::PolyRecord { .. } => cx.block(1, 15),
-                    Self::PolyField { .. } => cx.block(2, 16),
-                    Self::PolyExtend { .. } => cx.block(2, 17),
-                    Self::PolyRestrict { .. } => cx.block(2, 18),
-                    Self::PolyUpdate { .. } => cx.block(2, 19),
-                    Self::PolyVariant { .. } => cx.block(2, 20),
-                    Self::Expect { .. } => cx.block(1, 21),
-                    Self::Type { .. } => cx.block(1, 22),
-                    Self::Error { .. } => cx.block(1, 23),
+                    Self::LetMut { .. } => cx.block(4, 4),
+                    Self::Assign { .. } => cx.block(2, 5),
+                    Self::Fun { .. } => cx.block(3, 6),
+                    Self::Annotated { .. } => cx.block(2, 7),
+                    Self::Splice { .. } => cx.block(2, 8),
+                    Self::ToplevelSplice { .. } => cx.block(2, 9),
+                    Self::Quote { .. } => cx.block(1, 10),
+                    Self::Tuple { .. } => cx.block(1, 11),
+                    Self::Construct { .. } => cx.block(2, 12),
+                    Self::Record { .. } => cx.block(1, 13),
+                    Self::Field { .. } => cx.block(2, 14),
+                    Self::RecordUpdate { .. } => cx.block(2, 15),
+                    Self::Match { .. } => cx.block(3, 16),
+                    Self::PolyRecord { .. } => cx.block(1, 17),
+                    Self::PolyField { .. } => cx.block(2, 18),
+                    Self::PolyExtend { .. } => cx.block(2, 19),
+                    Self::PolyRestrict { .. } => cx.block(2, 20),
+                    Self::PolyUpdate { .. } => cx.block(2, 21),
+                    Self::PolyVariant { .. } => cx.block(2, 22),
+                    Self::Expect { .. } => cx.block(1, 23),
+                    Self::Type { .. } => cx.block(1, 24),
+                    Self::Error { .. } => cx.block(1, 25),
                 }
             }
 
@@ -3608,6 +3701,22 @@ pub mod typed {
                         cx.set(slot, 5, built);
                         let built = crate::ToOcaml::to_ocaml(v_in_, cx);
                         cx.set(slot, 6, built);
+                    }
+                    Self::LetMut { ident: v_ident, annot: v_annot, body: v_body, in_: v_in_, .. } => {
+                        let built = crate::ToOcaml::to_ocaml(v_ident, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v_annot, cx);
+                        cx.set(slot, 1, built);
+                        let built = crate::ToOcaml::to_ocaml(v_body, cx);
+                        cx.set(slot, 2, built);
+                        let built = crate::ToOcaml::to_ocaml(v_in_, cx);
+                        cx.set(slot, 3, built);
+                    }
+                    Self::Assign(v0, v1) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                        let built = crate::ToOcaml::to_ocaml(v1, cx);
+                        cx.set(slot, 1, built);
                     }
                     Self::Fun { args: v_args, annots: v_annots, body: v_body, .. } => {
                         let built = crate::ToOcaml::to_ocaml(v_args, cx);

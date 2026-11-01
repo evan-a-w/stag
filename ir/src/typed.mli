@@ -176,6 +176,14 @@ module Expr : sig
           ; body : 'e (** [ident] is bound in [body]. *)
           ; in_ : 'e
           }
+      | Let_mut of
+          { ident : Ident.t
+          ; annot : Syntax.Type_expr.t option
+          ; body : 'e (** [ident] is not bound in [body]. *)
+          ; in_ : 'e
+          }
+      | Assign of Var_ref.t * 'e
+      (** Of a [let mut] bound in the same quote, or a mutable toplevel. *)
       | Fun of
           { args : Ident.t list (** Non-empty. *)
           ; annots : (Ident.t * Syntax.Type_expr.t) list
@@ -238,8 +246,11 @@ module Expr : sig
   val has_error : t -> bool
 
   (** Whether [t] refers to a binder satisfying [f], by a [Bound] or
-      [Persistent] variable or an [Implicit] substitution. *)
+      [Persistent] variable, an [Assign] or an [Implicit] substitution. *)
   val refers_to : t -> f:(Binder.t -> bool) -> bool
+
+  (** The local idents [t] refers to (as [refers_to]) that it doesn't bind. *)
+  val free_locals : t -> Ident.Set.t
 
   (** Syntactic values, which may be generalized (the relaxed value
       restriction). A toplevel splice is judged by its expansion. *)
@@ -253,6 +264,7 @@ end
 module Toplevel : sig
   type t =
     { ident : Ident.t
+    ; mut : bool (** [let mut], so [args] is empty. *)
     ; args : Ident.t list
     ; scheme : Type.ty
     ; body : Expr.t
