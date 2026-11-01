@@ -13,6 +13,7 @@ type t =
   | False
   | Let
   | Rec
+  | Mut
   | Let_expect_test (** [let%expect_test] *)
   | Let_bench (** [let%bench] *)
   | In
@@ -42,6 +43,7 @@ type t =
   | Equal
   | Bar
   | Arrow
+  | Larrow
   | Star
   | Dot
   | Root (** [.] starting a path from the root scope, as [.M.x] *)

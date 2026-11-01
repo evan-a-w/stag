@@ -143,15 +143,11 @@ let e_shadowing = Stag.Code.erase .< fun x -> fun x -> x >.
   [%expect
     {|
     e_explicit:
-    fun z ->
-      let x = z in
-      fun z -> x
-    (Fun ((z ())) (Let x () () (Var z ()) (Fun ((z ())) (Var x ()))))
+    fun z -> fun z_1 -> z
+    (Fun ((z ())) (Fun ((z_1 ())) (Var z ())))
     e_bound_in_let:
-    fun x ->
-      let x_1 = x in
-      fun z -> x_1
-    (Fun ((x ())) (Let x_1 () () (Var x ()) (Fun ((z ())) (Var x_1 ()))))
+    fun x -> fun z -> x
+    (Fun ((x ())) (Fun ((z ())) (Var x ())))
     e_free_in_let:
     let x_1 = x in
     fun z -> x_1
@@ -441,16 +437,10 @@ let v = Core.Int.succ h
     ];
   [%expect
     {|
-    module A : sig
-      val value : string -> <'a>{..'b} -> list[Stag.Toplevel.t]
-      val h : int
-      val v : int
-    end
     File "a.stag", line 4, characters 22-23:
     4 | let v = Core.Int.succ h
                               ^
-    Error: A.h is used before its value is defined (a value may not depend on itself)
-    --- output ---
+    Error: The value of A.v may be needed to compute itself: A.v -> A.h -> A.v
     |}]
 ;;
 
@@ -554,15 +544,8 @@ let e_reversed = Stag.Code.erase .< fun x -> fun y -> .~(.< (x, y) >.).{y = x; x
     fun c -> .< fun x -> .~c >.
     (Fun ((c ())) (Quote (Fun ((x ())) (Splice (expr (Var c ())) (subs ())))))
     e_reversed:
-    fun x ->
-      fun y ->
-        let y_1 = x in
-        let x = y in
-        (x, y_1)
-    (Fun ((x ()))
-     (Fun ((y ()))
-      (Let y_1 () () (Var x ())
-       (Let x () () (Var y ()) (Tuple ((Var x ()) (Var y_1 ())))))))
+    fun x -> fun y -> (y, x)
+    (Fun ((x ())) (Fun ((y ())) (Tuple ((Var y ()) (Var x ())))))
     |}];
   let gen =
     ( "gen.stag"
@@ -577,10 +560,10 @@ let c1 = .< fun c -> .< fun x -> (.~c, .< x >.) >. >.
     {|
     module Gen : sig
       val value : string -> <'a>{..'b} -> list[Stag.Toplevel.t]
-      val c1 : <<'a>{x?'b : 'c; ..'d} -> <'c -> 'a * <'e>{x : 'e; ..'f}>{..'g}>{..'h} where ..'d <= {..'g}
+      val c1 : <<'a>{x?'b : immut 'c; ..'d} -> <'c -> 'a * <'e>{x : 'e; ..'f}>{..'g}>{..'h} where ..'d <= {..'g}
     end
     module A : sig
-      val shown : <'a>{x?'b : 'c} -> <'c -> 'a * <'d>{x : 'd; ..'e}>{..'f}
+      val shown : <'a>{x?'b : immut 'c} -> <'c -> 'a * <'d>{x : 'd; ..'e}>{..'f}
     end
     |}]
 ;;

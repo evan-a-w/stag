@@ -106,6 +106,13 @@ module Expr : sig
           ; body : t
           ; in_ : t
           }
+      | Let_mut of
+          { binder : Binder.t
+          ; annot : Syntax.Type_expr.t option
+          ; body : t
+          ; in_ : t
+          }
+      | Assign of Var.t * t
       | Fun of
           { args : (Binder.t * Syntax.Type_expr.t option) list
           ; body : t

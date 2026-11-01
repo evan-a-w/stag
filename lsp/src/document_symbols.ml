@@ -36,6 +36,8 @@ let of_toplevels text toplevels =
           ~name_loc:name.loc
           name.txt
       ]
+    | Let_mut (name, _, _) ->
+      [ symbol ~kind:Variable ~loc ~name_loc:name.loc name.txt ]
     | Type { name; params = _; kind } ->
       let member ~kind (name : Syntax.Name.t) =
         symbol ~kind ~loc:name.loc ~name_loc:name.loc name.txt

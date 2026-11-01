@@ -90,6 +90,42 @@ module Kind : sig
     | Duplicate_pattern_variable of string
     | Duplicate_parameter of string
     | Duplicate_row_entry of string
+    | Assign_to_immutable of string
+    | Captures_mutable of
+        { name : string
+        ; var_level : Env.Level.t
+        ; used_at : Env.Level.t
+        ; via : string list
+        ; mutable_ : string
+        }
+    (** A local function used at another level that reaches [mutable_], a
+        [let mut] local, through what it captures ([via], the locals in
+        between), as its cell can't be shared with code. *)
+    | May_capture_mutable of
+        { name : string
+        ; var_level : Env.Level.t
+        ; used_at : Env.Level.t
+        ; via : string list
+        ; variable : string
+        ; ty : Type.ty
+        }
+    (** As [Captures_mutable], but it reaches no [let mut] local, only
+        [variable], a parameter or pattern variable whose type may hold a
+        closure, so one capturing a [let mut] local. *)
+    | Compile_time_use_of_mutable of
+        { toplevel : string
+        ; mutable_ : string
+        }
+    (** Of [toplevel], which may use the mutable toplevel [mutable_] when
+        run: mutable toplevels have only a runtime instance. *)
+    | Mutable_used_outside_its_code of
+        { name : string
+        ; var_level : Env.Level.t
+        ; used_at : Env.Level.t
+        }
+    (** A [let mut] local used in a quote or at compile time, outside the
+        code that binds it. *)
+    | Toplevel_initialization_cycle of string list
     | Compile_time_use_of_toplevel_being_checked of string
     (** It can't be evaluated yet. *)
     | Expect_outside_expect_test
@@ -124,6 +160,10 @@ module Kind : sig
     | Misplaced_type_splice
     (** A type splice within a quote or compile-time code, where nothing
         evaluates it. *)
+    | Misplaced_mut
+    (** [mut t] other than as the type of an entry of a code type's context. *)
+    | Spliced_code_assigns_immutable of string
+    (** Code spliced where the variable it assigns is not mutable. *)
     | Type_splice_failed of Error.t
     (** Evaluating the type splice's expression failed. *)
     | Malformed_type_splice of Error.t

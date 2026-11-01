@@ -68,6 +68,7 @@ let of_lexical : Stag_syntax.Token.t -> Token_type.t option = function
   | False
   | Let
   | Rec
+  | Mut
   | Let_expect_test
   | Let_bench
   | In
@@ -87,6 +88,7 @@ let of_lexical : Stag_syntax.Token.t -> Token_type.t option = function
   | Expect_open -> Some Keyword
   | Quote_open | Quote_close | Splice | Dot_lbrace -> Some Macro
   | Arrow
+  | Larrow
   | Star
   | Bar
   | Equal

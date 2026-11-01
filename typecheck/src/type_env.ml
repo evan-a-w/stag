@@ -143,6 +143,7 @@ let rec has_splice (expr : Type_expr.t) =
   | Tuple tys -> List.exists tys ~f:has_splice
   | Code { inner; context } -> has_splice inner || row_has_splice context
   | Record row | Variant row -> row_has_splice row
+  | Mut ty | Immut ty -> has_splice ty
 
 and row_has_splice (row : Type_expr.row) =
   match row.txt with
@@ -243,6 +244,13 @@ module Vars = struct
        | None -> error ~loc (Unbound_type_variable name))
   ;;
 
+  (* Whether an unmarked context entry is assigned: either, in an annotation,
+     but not in a declaration, which can't introduce a variable. *)
+  let assigned : t -> Type.presence = function
+    | Annotation vars -> PVar (Fresh.var vars.fresh ~rank:vars.rank)
+    | Params _ -> Absent
+  ;;
+
   let row t name ~loc : (Type.row, Typecheck_error.t) Result.t =
     match t with
     | Annotation vars -> Ok (Annotation_vars.row vars name)
@@ -306,7 +314,9 @@ let rec elaborate' t module_ vars ~splices ~expansions (expr : Type_expr.t)
   : (Type.ty * Type_expr.t, Typecheck_error.t) Result.t
   =
   let elaborate = elaborate' t module_ vars ~splices ~expansions in
-  let elaborate_row = elaborate_row t module_ vars ~splices ~expansions in
+  let elaborate_row ?allow_mut row =
+    elaborate_row ?allow_mut t module_ vars ~splices ~expansions row
+  in
   let loc = expr.loc in
   let%map.Result ty, txt =
     match expr.txt with
@@ -329,10 +339,12 @@ let rec elaborate' t module_ vars ~splices ~expansions (expr : Type_expr.t)
       ( Type.TCode { inner; context }
       , Type_expr.Code { inner = inner_syntax; context = context_syntax } )
     | Record row ->
-      let%map.Result row, syntax = elaborate_row row in
+      let%bind.Result row, syntax = elaborate_row row ~allow_mut:false in
+      let%map.Result () = in_record t row ~loc in
       Fresh.record t.fresh row, Type_expr.Record syntax
     | Variant row ->
-      let%map.Result row, syntax = elaborate_row row in
+      let%bind.Result row, syntax = elaborate_row row ~allow_mut:false in
+      let%map.Result () = in_record t row ~loc in
       Fresh.variant t.fresh row, Type_expr.Variant syntax
     | Splice e when splices ->
       let%bind.Result generated = evaluate_splice t module_ e ~loc in
@@ -345,10 +357,26 @@ let rec elaborate' t module_ vars ~splices ~expansions (expr : Type_expr.t)
       in
       ty, syntax.txt
     | Splice _ -> Error (Typecheck_error.create ~loc Misplaced_type_splice)
+    | Mut _ | Immut _ -> Error (Typecheck_error.create ~loc Misplaced_mut)
   in
   ty, { expr with txt }
 
-and elaborate_row t module_ vars ~splices ~expansions (row : Type_expr.row)
+(* A row variable named in a code context may be in a record's too, and a row
+   argument may be [mut], so a record's row may have been given assigned
+   entries. *)
+and in_record t row ~loc =
+  Unify.in_record t.fresh row
+  |> Result.map_error ~f:(Typecheck_error.unification_error ~loc)
+
+(* Entries are [mut] only in contexts, and in row arguments, which may be. *)
+and elaborate_row
+      ?(allow_mut = true)
+      t
+      module_
+      vars
+      ~splices
+      ~expansions
+      (row : Type_expr.row)
   : (Type.row * Type_expr.row, Typecheck_error.t) Result.t
   =
   let rec go (row : Type_expr.row) ~seen =
@@ -357,12 +385,29 @@ and elaborate_row t module_ vars ~splices ~expansions (row : Type_expr.row)
       | Empty -> Ok (Type.REmpty, row.txt)
       | Extend ({ txt = name; loc }, _, _) when Set.mem seen name ->
         Error (Typecheck_error.create ~loc (Duplicate_row_entry name))
-      | Extend (({ txt = name; loc = _ } as label), ty, rest) ->
-        let%bind.Result ty, ty_syntax =
-          elaborate' t module_ vars ~splices ~expansions ty
+      | Extend (({ txt = name; loc = _ } as label), entry, rest) ->
+        let marked (assigned : Type.presence) inner ~mark =
+          let%map.Result ty, inner_syntax =
+            elaborate' t module_ vars ~splices ~expansions inner
+          in
+          assigned, ty, { entry with txt = mark inner_syntax }
+        in
+        let%bind.Result (assigned : Type.presence), ty, ty_syntax =
+          match entry.txt with
+          | Mut inner when allow_mut ->
+            marked Present inner ~mark:(fun ty -> Type_expr.Mut ty)
+          | Immut inner when allow_mut ->
+            marked Absent inner ~mark:(fun ty -> Type_expr.Immut ty)
+          | _ ->
+            let%map.Result ty, ty_syntax =
+              elaborate' t module_ vars ~splices ~expansions entry
+            in
+            ( (if allow_mut then Vars.assigned vars else Type.Absent)
+            , ty
+            , ty_syntax )
         in
         let%map.Result rest, rest_syntax = go rest ~seen:(Set.add seen name) in
-        ( Type.RExtend (name, Present, ty, rest)
+        ( Type.RExtend (name, Present, assigned, ty, rest)
         , Type_expr.Extend (label, ty_syntax, rest_syntax) )
       | Var { txt = name; loc } ->
         let%map.Result var = Vars.row vars name ~loc in
@@ -439,7 +484,14 @@ and elaborate_con
        | None ->
          if List.exists instances ~f:(fun expansion -> not expansion.expanded)
          then error ~loc (Non_regular_recursive_alias decl.name)
-         else Result.map (expand t decl ~args ~expansions body) ~f:fst)
+         else
+           expand t decl ~args ~expansions body
+           |> Result.map ~f:fst
+           |> Result.map_error ~f:(fun (error : Typecheck_error.t) ->
+             (* Only a [mut] argument gets a record assigned entries. *)
+             match error.kind with
+             | Unification_error (Assigned_in_record _) -> { error with loc }
+             | _ -> error))
   in
   ty, syntax
 

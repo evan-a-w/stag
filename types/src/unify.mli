@@ -53,6 +53,10 @@ val unify_if_present
     are not generalized at greater ranks. *)
 val lower_ty : rank:Type.rank -> Type.ty -> unit
 
+(** Makes [row] a record's or variant's: none of its entries, including those
+    it later gets, is [assigned]. *)
+val in_record : Fresh.t -> Type.row -> (unit, Unification_error.t) Result.t
+
 (** Constrains every entry [row] has, or later gets, to also be an entry of
     [bound]. Names in [shadowed] are hidden by earlier entries of the row
     the constraint is about, so are not constrained. A variable [row] gets
@@ -66,9 +70,10 @@ val constrain_row
 
 (** The type of the first entry for [name] in [row], which must be present.
     [rank] is that of the variable standing for the type in the error if
-    [row] lacks [name]. *)
+    [row] lacks [name]. If [assigned], the entry must be assigned too. *)
 val present_entry
-  :  Fresh.t
+  :  ?assigned:bool
+  -> Fresh.t
   -> row:Type.row
   -> name:string
   -> rank:Type.rank

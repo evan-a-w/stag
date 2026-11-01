@@ -267,7 +267,7 @@ let residual_spliced k = .< match v with `A -> 0 | other -> .~(k .< other >.) >.
     {|
     val inject : <[`A of 'a; ..'b]>{x : 'a; ..'c}
     val match_inside : <int>{..'a}
-    val residual_spliced : (<'a>{other : 'a; ..'b} -> <int>{other?'c : [..'d]; ..'e}) -> <int>{v : [`A; ..'d]; ..'f} where ..'e <= {v : [`A; ..'d]; ..'f}
+    val residual_spliced : (<'a>{other : 'a; ..'b} -> <int>{other?'c : immut [..'d]; ..'e}) -> <int>{v : mut?'f [`A; ..'d]; ..'g} where ..'e <= {v : mut?'f [`A; ..'d]; ..'g}
     |}]
 ;;
 
@@ -283,8 +283,8 @@ let absent c (v : [..'d]) =
 |};
   [%expect
     {|
-    val unknown : <int>{y?'a : int; ..'b} -> [`y?'a of int; ..'b] -> [`y?'a of int; ..'b]
-    val absent : <<'a>{z?'b : int; ..'c}>{-z; ..'d} -> [-`z; ..'d] -> [-`z; ..'d]
+    val unknown : <int>{y?'a : immut int; ..'b} -> [`y?'a of int; ..'b] -> [`y?'a of int; ..'b]
+    val absent : <<'a>{z?'b : immut int; ..'c}>{-z; ..'d} -> [-`z; ..'d] -> [-`z; ..'d]
     |}]
 ;;
 

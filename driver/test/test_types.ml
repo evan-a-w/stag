@@ -478,7 +478,7 @@ let nested c : <<int>{x : int}>{x : bool} = c
     ((Duplicate_row_entry x) @ t.stag:2:29-30)
     ((Duplicate_row_entry x) @ t.stag:2:24-25)
     ((Duplicate_row_entry x) @ t.stag:3:26-28)
-    val nested : <<int>{x : int}>{x : bool} -> <<int>{x : int}>{x : bool}
+    val nested : <<int>{x : mut?'a int}>{x : mut?'b bool} -> <<int>{x : mut?'a int}>{x : mut?'b bool}
     |}]
 ;;
 
@@ -557,7 +557,7 @@ let bad : pair[int] = (1, true)
     type t = A of (int * int)
     val f : int * int -> int * int
     val a : t
-    val g : <int>{x : int; ..'a} -> <int>{x : int; ..'a}
+    val g : <int>{x : mut?'a int; ..'b} -> <int>{x : mut?'a int; ..'b}
     val h : bool
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())
@@ -680,7 +680,7 @@ let level = .<match 1 with x -> .~x>.
 |};
   [%expect
     {|
-    val captures : <'a>{x?'b : int; ..'c} -> <'a>{..'d} where ..'c <= {..'d}
+    val captures : <'a>{x?'b : immut int; ..'c} -> <'a>{..'d} where ..'c <= {..'d}
     val applied : <int>{..'_a}
     val local : <int>{..'a}
     val bound_outside : <'a>{x : 'a; ..'b}
@@ -860,20 +860,46 @@ module M = struct let x = M.x end
 let x = x
 let use = x 1; x true
 |};
+  (* Without initialization cycles. *)
+  check
+    {|
+type list['a] = Nil | Cons of 'a * list['a]
+let xs = fun u -> Cons (1, ys u)
+let ys = fun u -> Cons (2, xs u)
+|};
+  check
+    {|
+let x = fun u -> y u
+let y = fun u -> x u
+module M = struct let x = fun u -> M.x u end
+|};
+  check
+    {|
+let x = fun u -> x u
+let use = x 1; x true
+|};
   [%expect
     {|
     type list['a] = Nil | Cons of 'a * list['a]
     val a : '_a -> list['_b]
     val b : list['_a]
     val quoted : <'a>{a : int -> 'a; ..'b}
+    ((Toplevel_initialization_cycle (ys xs ys)) @ t.stag:4:18-20)
+    ((Toplevel_initialization_cycle (x x)) @ t.stag:2:8-9)
+    ((Toplevel_initialization_cycle (y x y)) @ t.stag:3:8-9)
+    ((Toplevel_initialization_cycle (M.x M.x)) @ t.stag:2:26-29)
+    ((Toplevel_initialization_cycle (x x)) @ t.stag:2:8-9)
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:3:17-21)
     type list['a] = Nil | Cons of 'a * list['a]
-    val xs : list[int]
-    val ys : list[int]
-    val x : '_a
-    val x : '_a
-    val y : '_a
+    val xs : '_a -> list[int]
+    val ys : '_a -> list[int]
+    val x : '_a -> '_b
+    val y : '_a -> '_b
     module M : sig
-      val x : '_a
+      val x : '_a -> '_b
     end
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())

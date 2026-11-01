@@ -12,13 +12,15 @@ type 'a var_state =
     variables have bounds: for the other kinds, ['bound] is [Nothing.t].
     [in_bounds_of] has the variables with a bound that has this variable
     (and maybe others: it is only added to), so that generalizing it can
-    find them. *)
+    find them. [in_record] is for a row variable of a record or variant (or
+    bound to one), whose entries are never [assigned]. *)
 type ('a, 'bound) var =
   { id : id
   ; mutable state : 'a var_state
   ; mutable bounds : 'bound list
   ; mutable in_bounds_of : bounded list
   ; mutable kept : kept list
+  ; mutable in_record : bool
   }
 
 and ty =
@@ -41,8 +43,11 @@ and ty =
 
 and row =
   | REmpty
-  | RExtend of string * presence * ty * row
-  (** Labels are scoped: the first entry for a name shadows later ones. *)
+  | RExtend of string * presence * presence * ty * row
+  (** [RExtend (name, presence, assigned, ty, rest)]. Labels are scoped: the
+      first entry for a name shadows later ones. [assigned] is [Present] for an
+      entry of a context the code assigns, which only a mutable variable can
+      provide, and [Absent] in records and variants. *)
   | RVar of (row, bound) var
 
 (** Whether an entry is in the row (for a context, whether code uses it). An
@@ -112,6 +117,7 @@ module Var : sig
     ; mutable bounds : 'bound list
     ; mutable in_bounds_of : bounded list
     ; mutable kept : kept list
+    ; mutable in_record : bool
     }
 
   val create : id -> 'a state -> ('a, _) t
@@ -251,6 +257,9 @@ module Printer : sig
   val create : ?type_name:(string -> string) -> unit -> t
 
   val ty : t -> ty -> string
+
+  (** Renders [row] as the context of a code type. *)
+  val context : t -> row -> string
 
   (** Renders [ty] with the occurrences of itself within it as [name]. *)
   val recursive : t -> ty -> name:string -> string

@@ -20,9 +20,11 @@ module Uses = struct
         union acc (of_expr e))
     in
     match expr.desc with
-    | Var (Bound (Local ident) | Persistent (Local ident)) ->
+    | Var (Bound (Local ident) | Persistent (Local ident))
+    | Assign ((Bound (Local ident) | Persistent (Local ident)), _) ->
       { children with idents = Set.add children.idents ident }
-    | Var (Free name) -> { children with free = Set.add children.free name }
+    | Var (Free name) | Assign (Free name, _) ->
+      { children with free = Set.add children.free name }
     | Splice { subs = Implicit providers; _ } ->
       { children with
         idents =
@@ -48,10 +50,12 @@ module Names = struct
     in
     let rec add (expr : Typed.Expr.t) =
       (match expr.desc with
-       | Var (Free name) -> Hash_set.add taken name
-       | Var (Bound (Local ident) | Persistent (Local ident)) ->
+       | Var (Free name) | Assign (Free name, _) -> Hash_set.add taken name
+       | Var (Bound (Local ident) | Persistent (Local ident))
+       | Assign ((Bound (Local ident) | Persistent (Local ident)), _) ->
          add_idents [ ident ]
        | Let { ident; args; _ } -> add_idents (ident :: args)
+       | Let_mut { ident; _ } -> add_idents [ ident ]
        | Fun { args; _ } -> add_idents args
        | Match { cases; exception_cases; _ } ->
          List.iter (cases @ exception_cases) ~f:(fun (p, _) ->
@@ -129,6 +133,27 @@ let expr (expr : Typed.Expr.t) =
                 | Bind ident -> Bind (located p.loc (name names ident)))
            })
   in
+  let var_path (names : Names.t) : Typed.Var_ref.t -> _ = function
+    | Bound (Local ident) | Persistent (Local ident) ->
+      (match Map.find names.names ident with
+       | Some name -> Ok (Syntax.Decl_path.Path (Syntax.Path.name name))
+       | None ->
+         Or_error.error_string
+           (sprintf
+              "the code embeds %s, a local from outside it, which nothing \
+               names where the code is spliced"
+              ident.name))
+    | Bound (Toplevel ident) | Persistent (Toplevel ident) ->
+      Ok (resolved ident.name)
+    | Free name -> Ok (Path (Syntax.Path.of_string name))
+    | Free_toplevel name -> Ok (resolved name)
+    | Prim prim -> Ok (resolved (Prim.canonical_name prim))
+    | Intrinsic intrinsic ->
+      Or_error.error_s
+        [%message
+          "intrinsics are named only in the prelude, which quotes none"
+            (intrinsic : Intrinsic.t)]
+  in
   let rec go (names : Names.t) (e : Typed.Expr.t) : Syntax.Expr.t Or_error.t =
     let loc = e.loc in
     let node (desc : Syntax.Expr.desc) = Ok (located loc desc) in
@@ -148,27 +173,17 @@ let expr (expr : Typed.Expr.t) =
     match e.desc with
     | Lit lit -> node (Lit lit)
     | Var var_ref ->
-      let var path = node (Var (path, None)) in
-      (match var_ref with
-       | Bound (Local ident) | Persistent (Local ident) ->
-         (match Map.find names.names ident with
-          | Some name -> var (Path (Syntax.Path.name name))
-          | None ->
-            Or_error.error_string
-              (sprintf
-                 "the code embeds %s, a local from outside it, which nothing \
-                  names where the code is spliced"
-                 ident.name))
-       | Bound (Toplevel ident) | Persistent (Toplevel ident) ->
-         var (resolved ident.name)
-       | Free name -> var (Path (Syntax.Path.of_string name))
-       | Free_toplevel name -> var (resolved name)
-       | Prim prim -> var (resolved (Prim.canonical_name prim))
-       | Intrinsic intrinsic ->
-         Or_error.error_s
-           [%message
-             "intrinsics are named only in the prelude, which quotes none"
-               (intrinsic : Intrinsic.t)])
+      let%bind path = var_path names var_ref in
+      node (Var (path, None))
+    | Assign (var_ref, value) ->
+      let%bind path = var_path names var_ref in
+      let%bind value = go names value in
+      node (Assign (located loc path, value))
+    | Let_mut { ident; annot; body; in_ } ->
+      let%bind body = go names body in
+      let names = Names.bind names [ ident ] ~scope:(Uses.of_expr in_) in
+      let%bind in_ = go names in_ in
+      node (Let_mut (label (name names ident), annot, body, in_))
     | Annotated (e, annot) ->
       let%bind e = go names e in
       (match e.txt with

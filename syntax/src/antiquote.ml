@@ -39,6 +39,8 @@ let map ?type_expr:replace_type_expr toplevels ~f =
         Code { inner; context = row depth context }
       | Record r -> Record (row depth r)
       | Variant r -> Variant (row depth r)
+      | Mut t -> Mut (type_expr t)
+      | Immut t -> Immut (type_expr t)
       | Splice e ->
         (match replace_type_expr with
          | Some replace when depth = 0 ->
@@ -77,6 +79,11 @@ let map ?type_expr:replace_type_expr toplevels ~f =
         let a = annot a in
         let body = sub body in
         Let (n, bs, a, body, sub in_)
+      | Let_mut (n, a, body, in_) ->
+        let a = annot a in
+        let body = sub body in
+        Let_mut (n, a, body, sub in_)
+      | Assign (p, value) -> Assign (p, sub value)
       | Fun (bs, body) ->
         let bs = List.map bs ~f:(binding depth) in
         Fun (bs, sub body)
@@ -131,6 +138,9 @@ let map ?type_expr:replace_type_expr toplevels ~f =
         let bs = List.map bs ~f:(binding depth) in
         let a = Option.map a ~f:type_expr in
         Let (n, bs, a, sub body)
+      | Let_mut (n, a, body) ->
+        let a = Option.map a ~f:type_expr in
+        Let_mut (n, a, sub body)
       | Type { name; params; kind } ->
         let rec decl_kind : Type_decl.Kind.t -> Type_decl.Kind.t = function
           | Malformed kind -> Malformed (decl_kind kind)
