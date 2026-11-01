@@ -92,6 +92,8 @@ module Make (B : Builder) = struct
           [ B.record [ "inner", type_expr inner; "context", row context ] ]
       | Record r -> con "Record" [ row r ]
       | Variant r -> con "Variant" [ row r ]
+      | Mut t -> con "Mut" [ type_expr t ]
+      | Immut t -> con "Immut" [ type_expr t ]
       | Splice e ->
         (match A.antiquote Type_expr e with
          | Some lifted -> lifted
@@ -150,6 +152,12 @@ module Make (B : Builder) = struct
           ; expr equal
           ; expr body
           ]
+      | Let_mut (var, annot, equal, body) ->
+        con
+          "Let_mut"
+          [ name var; option type_expr annot; expr equal; expr body ]
+      | Assign (p, value) ->
+        con "Assign" [ decl_path_txt Value p.txt; expr value ]
       | Fun (params, body) -> con "Fun" [ list binding params; expr body ]
       | Splice { expr = spliced; subs } ->
         (match A.antiquote Expr spliced with
@@ -194,6 +202,8 @@ module Make (B : Builder) = struct
         con
           "Let"
           [ name var; list binding bindings; option type_expr annot; expr body ]
+      | Let_mut (var, annot, body) ->
+        con "Let_mut" [ name var; option type_expr annot; expr body ]
       | Type decl -> con "Type" [ type_decl decl ]
       | Exception (exn_name, args) | Malformed_exception (exn_name, args) ->
         con "Exception" [ name exn_name; list type_expr args ]

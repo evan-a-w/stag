@@ -11,7 +11,7 @@ module T = struct
 
   let row ?(tail = REmpty) entries =
     List.fold_right entries ~init:tail ~f:(fun (name, ty) rest ->
-      RExtend (name, Present, ty, rest))
+      RExtend (name, Present, Absent, ty, rest))
   ;;
 
   let variant fresh ?tail entries = Fresh.variant fresh (row ?tail entries)
@@ -76,13 +76,13 @@ let pair r = (self r, r)
 let%expect_test "recursive values are weak" =
   check
     {|
-let ones = `Cons (1, ones)
-let loop = {`next = loop; `v = id}
+let ones = `Cons (1, fun _ -> ones)
+let loop = {`next = fun _ -> loop; `v = id}
 |};
   [%expect
     {|
-    val ones : ([`Cons of int * '_a; ..'_b] as '_a)
-    val loop : ({`next : '_a; `v : '_b -> '_b} as '_a)
+    val ones : ([`Cons of int * ('_a -> '_b); ..'_c] as '_b)
+    val loop : ({`next : '_a -> '_b; `v : '_c -> '_c} as '_b)
     |}]
 ;;
 
@@ -264,7 +264,7 @@ let%expect_test "guarded cycles" =
     (Ok ())
     ([`A of 'a -> int] as 'a)
     (Ok ())
-    <int>{x : ({`y : <int>{x : 'a}} as 'a)}
+    <int>{x : immut ({`y : <int>{x : immut 'a}} as 'a)}
     (Ok ())
     ([`A of 'a -> int] as 'a) -> int
     (Ok ())
@@ -668,7 +668,7 @@ let%expect_test "bounds with cyclic types" =
   [%expect
     {|
     (Ok ())
-    {..'_a} where ..'_a <= {x : ([`Cons of int * 'b | `Nil] as 'b); ..'_c}
+    {..'_a} where ..'_a <= {x : immut ([`Cons of int * 'b | `Nil] as 'b); ..'_c}
     (Ok ())
     (Ok ())
     {`x : ([`Cons of int * 'a | `Nil] as 'a)}
@@ -748,7 +748,7 @@ type f['a] = {`x : 'a}
 type f['a] = [`A of 'a]
 type g = f[g]
 let v (x : g) = x
-let a : g = `A (`A a)
+let a (x : g) : g = `A (`A x)
 |};
   check
     {|
@@ -768,7 +768,7 @@ type b = [`A of a]
     type f['a] = [`A of 'a]
     type g = [`A of g]
     val v : ([`A of 'a] as 'a) -> 'a
-    val a : ([`A of 'a] as 'a)
+    val a : ([`A of 'a] as 'a) -> ([`A of 'b] as 'b)
     type a = [`A of a] * int
     type b = [`A of b * int]
     |}];
@@ -912,7 +912,7 @@ let print_parts ty =
   and go_row (row : Type.row) =
     match row with
     | REmpty -> ()
-    | RExtend (_, _, ty, rest) ->
+    | RExtend (_, _, _, ty, rest) ->
       go_ty ty;
       go_row rest
     | RVar ({ state = Link target; _ } as var) ->
@@ -1108,7 +1108,7 @@ let field ty name =
   | TRecord { row; _ } | TVariant { row; _ } ->
     let rec find row =
       match Type.canonical_row row with
-      | Type.RExtend (name', _, ty, rest) ->
+      | Type.RExtend (name', _, _, ty, rest) ->
         if String.equal name name' then ty else find rest
       | REmpty | RVar _ -> raise_s [%message "no field" name]
     in
@@ -1179,7 +1179,11 @@ let%expect_test "instantiation copies generic presences and bounds" =
     (Fresh.record
        fresh
        (RExtend
-          ("x", PVar (generic ()), int, RExtend ("self", Present, knot, REmpty))));
+          ( "x"
+          , PVar (generic ())
+          , Absent
+          , int
+          , RExtend ("self", Present, Absent, knot, REmpty) )));
   (* [{..'r} where ..'r <= {x : 'g}] *)
   let r = generic () in
   print_s
@@ -1206,10 +1210,10 @@ let%expect_test "instantiation copies generic presences and bounds" =
     {|
     (Ok ())
     (Ok ())
-    ({`self : 'a; `x?'b : int} as 'a) * {..'c} where ..'c <= {x : 'd}
-    (({`self : '_a; `x?'_b : int} as '_a) * {..'_c}) * (({`self : '_d; `x?'_e : int} as '_d) * {..'_f}) where ..'_c <= {x : '_g}, ..'_f <= {x : '_h}
+    ({`self : 'a; `x?'b : int} as 'a) * {..'c} where ..'c <= {x : immut 'd}
+    (({`self : '_a; `x?'_b : int} as '_a) * {..'_c}) * (({`self : '_d; `x?'_e : int} as '_d) * {..'_f}) where ..'_c <= {x : immut '_g}, ..'_f <= {x : immut '_h}
     (Ok ())
     (Ok ())
-    (({`self : 'a} as 'a) * {..'_b}) * (({`self : 'c; `x : int} as 'c) * {..'_d}) * (({`self : 'e; `x?'f : int} as 'e) * {..'g}) where ..'_b <= {x : '_h}, ..'_d <= {x : '_i}, ..'g <= {x : 'j}
+    (({`self : 'a} as 'a) * {..'_b}) * (({`self : 'c; `x : int} as 'c) * {..'_d}) * (({`self : 'e; `x?'f : int} as 'e) * {..'g}) where ..'_b <= {x : immut '_h}, ..'_d <= {x : immut '_i}, ..'g <= {x : immut 'j}
     |}]
 ;;

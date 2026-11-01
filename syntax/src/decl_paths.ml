@@ -43,6 +43,8 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
         Code { inner = type_expr inner; context = row context }
       | Record r -> Record (row r)
       | Variant r -> Variant (row r)
+      | Mut t -> Mut (type_expr t)
+      | Immut t -> Immut (type_expr t)
       | Splice e -> Splice (expr String.Set.empty e)
     in
     { t with txt }
@@ -97,6 +99,13 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
           , Option.map t ~f:type_expr
           , expr' (bind locals (n.txt :: binding_names bs)) value
           , expr' (bind locals [ n.txt ]) body )
+      | Let_mut (n, t, value, body) ->
+        Let_mut
+          ( n
+          , Option.map t ~f:type_expr
+          , expr value
+          , expr' (bind locals [ n.txt ]) body )
+      | Assign (p, value) -> Assign (f Value ~locals p, expr value)
       | Fun (bs, body) ->
         Fun (List.map bs ~f:binding, expr' (bind locals (binding_names bs)) body)
       | Splice { expr = e; subs } ->
@@ -137,6 +146,8 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
           , List.map bs ~f:binding
           , Option.map ty ~f:type_expr
           , expr (String.Set.of_list (binding_names bs)) e )
+      | Let_mut (n, ty, e) ->
+        Let_mut (n, Option.map ty ~f:type_expr, expr String.Set.empty e)
       | Type { name; params; kind } ->
         let rec decl_kind : Type_decl.Kind.t -> Type_decl.Kind.t = function
           | Variant cs ->

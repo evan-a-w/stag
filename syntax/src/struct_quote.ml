@@ -141,6 +141,7 @@ let rec check_no_expansions (toplevels : Toplevel.t list) =
     | Include _
     | Module_splice _
     | Let _
+    | Let_mut _
     | Type _
     | Exception _
     | Malformed_exception _

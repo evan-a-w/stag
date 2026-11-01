@@ -327,12 +327,12 @@ let missing = same_row .<x>. {}
   [%expect
     {|
     val same_row : <int>{..'a} -> {..'a} -> <int>{..'a}
-    val ok : <int>{x : int}
-    val captured : <int>{y?'a : int; ..'b} -> {`y?'a : int; ..'b} -> {`y?'a : int; ..'b}
+    val ok : <int>{x : immut int}
+    val captured : <int>{y?'a : immut int; ..'b} -> {`y?'a : int; ..'b} -> {`y?'a : int; ..'b}
     ((Unification_error
       (Row_mismatch
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 33 1)))
+        (RVar (Unbound 34 1)))
        REmpty (Missing_label x)))
      @ t.stag:3:29-31)
     |}]
@@ -433,7 +433,7 @@ let absent c (r : {..'d}) =
   .<.<let z = 1 in .~.~(c : <<'a>{..'c}>{..'d})>.>.; r
 |};
   [%expect
-    {| val absent : <<'a>{z?'b : int; ..'c}>{-z; ..'d} -> {-`z; ..'d} -> {-`z; ..'d} |}]
+    {| val absent : <<'a>{z?'b : immut int; ..'c}>{-z; ..'d} -> {-`z; ..'d} -> {-`z; ..'d} |}]
 ;;
 
 let%expect_test "structural types may be recursive" =

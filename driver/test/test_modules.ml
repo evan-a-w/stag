@@ -302,6 +302,15 @@ module B = struct
   let g y = A.w; y
 end
 |};
+  check
+    {|
+module A = struct
+  let w = fun u -> B.g u
+end
+module B = struct
+  let g y = A.w; y
+end
+|};
   [%expect
     {|
     module A : sig
@@ -318,11 +327,12 @@ end
     module B : sig
       val g : int -> int
     end
+    ((Toplevel_initialization_cycle (A.w B.g A.w)) @ t.stag:3:10-13)
     module A : sig
       val w : '_a -> '_a
     end
     module B : sig
-      val g : ('_a -> '_a) -> '_a -> '_a
+      val g : '_a -> '_a
     end
     |}]
 ;;
@@ -804,12 +814,12 @@ let captured = .<let n = () in .~(q_root ())>.
       val q : 'a -> <'b>{M.n : 'b; ..'c}
       val both : <'a * 'a>{M.n : 'a; ..'b}
       val local : <unit>{..'a}
-      val root_code : <'_a>{n : '_a; ..'_b}
+      val root_code : <'_a>{n : mut?'_b '_a; ..'_c} where '_d <= '_b
     end
     val q : 'a -> <'b>{M.n : 'b; ..'c}
     val q_root : 'a -> <'b>{n : 'b; ..'c}
-    val spliced : <'_a>{M.n : '_a; ..'_b}
-    val not_captured : <'_a>{M.n : '_a; ..'_b}
+    val spliced : <'_a>{M.n : mut?'_b '_a; ..'_c} where '_d <= '_b
+    val not_captured : <'_a>{M.n : mut?'_b '_a; ..'_c} where '_d <= '_b
     val captured : <unit>{..'_a}
     |}]
 ;;

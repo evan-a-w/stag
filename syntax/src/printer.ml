@@ -124,6 +124,7 @@ let tyvar name = text ("'" ^ name)
 module Level = struct
   type t =
     | Seq
+    | Assign
     | Item
     (** A tuple's item, or a value in [{...}]: also [let], [match], [fun] and
         negative literals. *)
@@ -189,7 +190,8 @@ let level (e : Expr.t) : Level.t =
   let e = unwrap e in
   match e.txt with
   | Let _ when Option.is_some (seq e) -> Seq
-  | Let _ | Match _ | Fun _ -> Item
+  | Let _ | Let_mut _ | Match _ | Fun _ -> Item
+  | Assign _ -> Assign
   | Lit (Int n) when n < 0 -> Item
   | _ when is_construct e -> Construct
   | App _ -> App
@@ -214,9 +216,10 @@ let level (e : Expr.t) : Level.t =
 
 let bare_at at e = Level.compare (level e) at >= 0
 
-let extends_right e =
+let rec extends_right e =
   match (unwrap e).txt with
-  | Let _ | Match _ | Fun _ -> true
+  | Let _ | Let_mut _ | Match _ | Fun _ -> true
+  | Assign (_, value) -> extends_right value
   | _ -> false
 ;;
 
@@ -227,9 +230,11 @@ let rec ends_with_match ~seq:in_seq e =
   match e.txt, seq e with
   | Match _, _ -> true
   | Let _, Some (_, second) -> ends_with_match ~seq:true second
-  | (Let (_, _, _, _, body) | Fun (_, body)), None ->
+  | (Let (_, _, _, _, body) | Let_mut (_, _, _, body) | Fun (_, body)), _ ->
     bare_at (Ctx.body { Ctx.top with seq = in_seq }) body
     && ends_with_match ~seq:in_seq body
+  | Assign (_, value), _ ->
+    bare_at Assign value && ends_with_match ~seq:in_seq value
   | _ -> false
 ;;
 
@@ -275,7 +280,7 @@ module Kind = struct
 
   let of_toplevel (t : Toplevel.t) =
     match t.txt with
-    | Let _ -> Let
+    | Let _ | Let_mut _ -> Let
     | Type _ | Exception _ | Malformed_exception _ -> Type
     | Module_splice _ -> Module_splice
     | Include _ -> Include
@@ -327,6 +332,8 @@ let rec type_expr roots ~prec (t : Type_expr.t) =
     ^^ row roots ~label:Fn.id context
   | Record r -> row roots ~label:(fun name -> "`" ^ name) r
   | Variant r -> variant roots r
+  | Mut t -> paren_if (prec > 0) (text "mut " ^^ type_expr roots ~prec:0 t)
+  | Immut t -> paren_if (prec > 0) (text "immut " ^^ type_expr roots ~prec:0 t)
   | Splice e -> spliced roots e
 
 (* A [{...}] argument is a row, so a type argument starting with a record type
@@ -342,7 +349,8 @@ and starts_with_record (t : Type_expr.t) =
   match t.txt with
   | Record _ -> true
   | Arrow (first, _) | Tuple (first :: _) -> starts_with_record first
-  | Var _ | Con _ | Tuple [] | Code _ | Variant _ | Splice _ -> false
+  | Var _ | Con _ | Tuple [] | Code _ | Variant _ | Mut _ | Immut _ | Splice _
+    -> false
 
 (* Whether [t], printed at precedence 0, starts with a splice, which would read
    as a definition's splice after [type t =]. *)
@@ -350,7 +358,8 @@ and starts_with_splice (t : Type_expr.t) =
   match t.txt with
   | Splice _ -> true
   | Arrow (first, _) | Tuple (first :: _) -> starts_with_splice first
-  | Var _ | Con _ | Tuple [] | Code _ | Record _ | Variant _ -> false
+  | Var _ | Con _ | Tuple [] | Code _ | Record _ | Variant _ | Mut _ | Immut _
+    -> false
 
 and row_entries roots (r : Type_expr.row) =
   match r.txt with
@@ -487,7 +496,7 @@ and bare roots (ctx : Ctx.t) (e : Expr.t) =
 and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
   match e.txt, seq e with
   | Let _, Some (first, second) ->
-    expr roots (Ctx.item Semi) first
+    expr roots { (Ctx.item Semi) with level = Assign } first
     ^^ text ";"
     ^^ (if ctx.flat then line else hardline)
     ^^ expr roots { ctx with level = Seq } second
@@ -499,6 +508,19 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
       (expr roots Ctx.top rhs)
     ^^ (if ctx.flat then line else hardline)
     ^^ expr roots { ctx with level = Ctx.body ctx } body
+  | Let_mut (name, annot, rhs, body), _ ->
+    definition
+      ~record:(is_bracketed rhs)
+      ~ending:"in"
+      (let_lhs roots "let mut" name [] annot)
+      (expr roots Ctx.top rhs)
+    ^^ (if ctx.flat then line else hardline)
+    ^^ expr roots { ctx with level = Ctx.body ctx } body
+  | Assign (p, value), _ ->
+    group
+      (decl_path roots p
+       ^^ text " <-"
+       ^^ nest 2 (line ^^ expr roots { ctx with level = Assign } value))
   | Fun (params, body), _ ->
     group
       (group
@@ -521,7 +543,7 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
       in
       (* A flat [let] or sequence is only kept on the line of a flat match. *)
       match ctx.flat, (unwrap body).txt with
-      | true, Let _ -> doc
+      | true, (Let _ | Let_mut _) -> doc
       | _ -> group doc
     in
     let head =
@@ -714,7 +736,7 @@ and tuple_items roots es =
 
 (* A value in [{...}]. *)
 and entry roots ?(after = After.Nothing) e =
-  expr roots (Ctx.item ~seq:false after) e
+  expr roots { (Ctx.item ~seq:false after) with level = Assign } e
 
 (* A [let], [match] or [fun] item is parenthesized, though the [;] would end
    it, so items read as separate. *)
@@ -788,6 +810,11 @@ and toplevel roots ~indent (t : Toplevel.t) =
     definition
       ~record:(is_bracketed rhs)
       (let_lhs roots "let" name params annot)
+      (expr_doc roots rhs)
+  | Let_mut (name, annot, rhs) ->
+    definition
+      ~record:(is_bracketed rhs)
+      (let_lhs roots "let mut" name [] annot)
       (expr_doc roots rhs)
   | Type decl -> type_decl roots decl
   | Exception (name, args) | Malformed_exception (name, args) ->

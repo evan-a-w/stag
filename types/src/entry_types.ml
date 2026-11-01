@@ -111,7 +111,7 @@ let simplify ~is_generalized ~tys ~presences ~rows ~kept =
     | RVar ({ state = Link target; _ } as var) ->
       if Hash_set.strict_add links var.id |> Result.is_ok then walk_row target
     | RVar _ -> ()
-    | RExtend (_, presence, ty, rest) ->
+    | RExtend (_, presence, _, ty, rest) ->
       entry presence ty;
       walk_row rest
   and entry presence ty =

@@ -14,6 +14,7 @@ type ('a, 'bound) var =
   ; mutable bounds : 'bound list
   ; mutable in_bounds_of : bounded list
   ; mutable kept : kept list
+  ; mutable in_record : bool
   }
 
 and ty =
@@ -36,7 +37,7 @@ and ty =
 
 and row =
   | REmpty
-  | RExtend of string * presence * ty * row
+  | RExtend of string * presence * presence * ty * row
   | RVar of (row, bound) var
 
 and presence =
@@ -91,9 +92,12 @@ module Var = struct
     ; mutable bounds : 'bound list
     ; mutable in_bounds_of : bounded list
     ; mutable kept : kept list
+    ; mutable in_record : bool
     }
 
-  let create id state = { id; state; bounds = []; in_bounds_of = []; kept = [] }
+  let create id state =
+    { id; state; bounds = []; in_bounds_of = []; kept = []; in_record = false }
+  ;;
 
   let rank_exn t =
     match t.state with
@@ -156,7 +160,7 @@ let canonical_presence =
 let rec tail_var row =
   match row with
   | REmpty -> None
-  | RExtend (_, _, _, row') | RVar { state = Link row'; _ } -> tail_var row'
+  | RExtend (_, _, _, _, row') | RVar { state = Link row'; _ } -> tail_var row'
   | RVar var -> Some var
 ;;
 
@@ -186,9 +190,10 @@ and same_row row1 row2 =
   match canonical_row row1, canonical_row row2 with
   | REmpty, REmpty -> true
   | RVar var1, RVar var2 -> var1.id = var2.id
-  | RExtend (name1, p1, ty1, rest1), RExtend (name2, p2, ty2, rest2) ->
+  | RExtend (name1, p1, a1, ty1, rest1), RExtend (name2, p2, a2, ty2, rest2) ->
     String.equal name1 name2
     && same_presence p1 p2
+    && same_presence a1 a2
     && same_ty ty1 ty2
     && same_row rest1 rest2
   | (REmpty | RVar _ | RExtend _), _ -> false
@@ -209,9 +214,11 @@ and same_arg arg1 arg2 =
 let same_bound ?(same_entry_ty = fun (_ : presence) -> same_ty) bound1 bound2 =
   let rec same_rows row1 row2 =
     match canonical_row row1, canonical_row row2 with
-    | RExtend (name1, p1, ty1, rest1), RExtend (name2, p2, ty2, rest2) ->
+    | RExtend (name1, p1, a1, ty1, rest1), RExtend (name2, p2, a2, ty2, rest2)
+      ->
       String.equal name1 name2
       && same_presence p1 p2
+      && same_presence a1 a2
       && (same_ty ty1 ty2 || same_entry_ty p1 ty1 ty2)
       && same_rows rest1 rest2
     | row1, row2 -> same_row row1 row2
@@ -285,8 +292,9 @@ let iterator (f : _ Iter.t) =
   and iter_row ~guarded row =
     match row with
     | REmpty -> Ok ()
-    | RExtend (_, presence, ty, rest) ->
+    | RExtend (_, presence, assigned, ty, rest) ->
       let%bind.Result () = iter_presence ~guarded presence in
+      let%bind.Result () = iter_presence ~guarded assigned in
       let%bind.Result () = iter_ty ~guarded ty in
       iter_row ~guarded rest
     | RVar ({ state = Link target; _ } as var) ->
@@ -410,13 +418,15 @@ module Changes = struct
   and row t row' =
     match row' with
     | REmpty -> none
-    | RExtend (_, presence, ty', rest) ->
-      let presence =
+    | RExtend (_, presence, assigned, ty', rest) ->
+      let presence_var presence =
         match canonical_presence presence with
         | Present | Absent -> none
         | PVar var' -> var t var'
       in
-      both presence (both (ty t ty') (row t rest))
+      both
+        (both (presence_var presence) (presence_var assigned))
+        (both (ty t ty') (row t rest))
     | RVar ({ state = Link target; _ } as var') ->
       vertex t t.rows var'.id ~target:(fun () -> row t target)
     | RVar var' -> var t var'
@@ -526,16 +536,18 @@ let mapper (f : Mapper.t) =
   and map_row row =
     match row with
     | REmpty -> row
-    | RExtend (name, presence, ty, rest) ->
+    | RExtend (name, presence, assigned, ty, rest) ->
       let presence' = map_presence presence in
+      let assigned' = map_presence assigned in
       let ty' = map_ty ty in
       let rest' = map_row rest in
       if
         phys_equal presence presence'
+        && phys_equal assigned assigned'
         && phys_equal ty ty'
         && phys_equal rest rest'
       then row
-      else RExtend (name, presence', ty', rest')
+      else RExtend (name, presence', assigned', ty', rest')
     | RVar ({ state = Link target; _ } as var) ->
       link
         rows
@@ -668,8 +680,17 @@ module Sexper = struct
   and row t row' : Sexp.t =
     match row' with
     | REmpty -> Atom "REmpty"
-    | RExtend (name, p, ty', rest) ->
-      List [ Atom "RExtend"; Atom name; presence p; ty t ty'; row t rest ]
+    | RExtend (name, p, assigned, ty', rest) ->
+      (* Only [Present] is shown, as unknown is the usual case in contexts. *)
+      let assigned : Sexp.t list =
+        match canonical_presence assigned with
+        | Present -> [ Sexp.Atom "Assigned" ]
+        | Absent | PVar _ -> []
+      in
+      Sexp.List
+        ([ Sexp.Atom "RExtend"; Atom name; presence p ]
+         @ assigned
+         @ [ ty t ty'; row t rest ])
     | RVar v -> List [ Atom "RVar"; var t t.rows v ~sexp_of_link:(row t) ]
 
   and presence p : Sexp.t =
@@ -730,6 +751,12 @@ module Printer = struct
       (* The bounds of the variables reached, in order of appearance, to
          print after the types. *)
     ; kept : Int.Hash_set.t
+    ; elided : Int.Hash_set.t
+      (* The assignment variables written as an unmarked entry, as each is
+         the only occurrence of an unconstrained one, so reads back as it. *)
+    ; mutable counting : int Int.Table.t option
+      (* Set while rendering only to count how often each presence variable
+         is named. *)
     }
 
   let create ?(type_name = fun name -> Prelude_path.to_string_hum name) () =
@@ -742,6 +769,8 @@ module Printer = struct
     ; recursive = None
     ; bounded = Queue.create ()
     ; kept = Int.Hash_set.create ()
+    ; elided = Int.Hash_set.create ()
+    ; counting = None
     }
   ;;
 
@@ -792,9 +821,9 @@ module Printer = struct
   let rec row_entries row =
     match canonical_row row with
     | REmpty -> [], None
-    | RExtend (name, presence, ty, rest) ->
+    | RExtend (name, presence, assigned, ty, rest) ->
       let entries, tail = row_entries rest in
-      (name, presence, ty) :: entries, tail
+      (name, presence, assigned, ty) :: entries, tail
     | RVar var -> [], Some var
   ;;
 
@@ -802,26 +831,54 @@ module Printer = struct
   let rec drop_implied_absent entries =
     match entries with
     | [] -> []
-    | ((name, presence, _) as entry) :: rest ->
+    | ((name, presence, _, _) as entry) :: rest ->
       let rest' = drop_implied_absent rest in
       (match canonical_presence presence with
        | Absent
          when not
-                (List.exists rest ~f:(fun (name', _, _) ->
+                (List.exists rest ~f:(fun (name', _, _, _) ->
                    String.equal name name')) -> rest'
        | Present | Absent | PVar _ -> entry :: rest')
   ;;
 
-  let sorted_row_entries t row ~label ~entry ~row_var_name ~presence_var_name =
+  let assigned_marker t assigned ~presence_var_name =
+    match canonical_presence assigned with
+    | Present -> "mut "
+    | Absent -> "immut "
+    | PVar var ->
+      if Hash_set.mem t.elided var.id
+      then ""
+      else sprintf "mut?%s " (presence_var_name t var)
+  ;;
+
+  let sorted_row_entries
+        t
+        row
+        ~context
+        ~label
+        ~entry
+        ~row_var_name
+        ~presence_var_name
+    =
     let entries, tail = row_entries row in
     let entries =
       (match tail with
        | None -> drop_implied_absent entries
        | Some _ -> entries)
-      |> List.stable_sort ~compare:(fun (a, _, _) (b, _, _) ->
+      |> List.stable_sort ~compare:(fun (a, _, _, _) (b, _, _, _) ->
         String.compare a b)
-      |> List.map ~f:(fun (name, presence, ty) ->
+      |> List.map ~f:(fun (name, presence, assigned, ty) ->
         let name = label name in
+        let entry name ty =
+          entry
+            name
+            ty
+            ~assigned:
+              (match context, canonical_presence assigned with
+               | true, _ -> assigned_marker t assigned ~presence_var_name
+               | false, Present -> "mut "
+               | false, (Absent | PVar _) -> "")
+        in
         match canonical_presence presence with
         | Present -> entry name ty
         | Absent -> "-" ^ name
@@ -875,7 +932,10 @@ module Printer = struct
         (List.map tys ~f:(ty_to_string t ~prec:2) |> String.concat ~sep:" * ")
     | TCode { inner; context } ->
       let inner = ty_to_string t ~prec:0 inner in
-      sprintf "<%s>%s" inner (row_to_string t context ~label:Fn.id)
+      sprintf
+        "<%s>%s"
+        inner
+        (row_to_string t context ~label:Fn.id ~context:true)
     | TRecord { row; _ } -> record_to_string t row
     | TVariant { row; _ } -> variant_to_string t row
     | TVar var -> bounded_var_name t var ~prefix:"" ~bounds:(fun _ -> [])
@@ -885,10 +945,11 @@ module Printer = struct
       sorted_row_entries
         t
         row
+        ~context:false
         ~label:(fun tag -> "`" ^ tag)
         ~row_var_name
         ~presence_var_name
-        ~entry:(fun tag ty ->
+        ~entry:(fun tag ty ~assigned:_ ->
           match canonical_ty ty with
           | TCon ("unit", []) -> tag
           | ty -> sprintf "%s of %s" tag (ty_to_string t ~prec:0 ty))
@@ -902,13 +963,17 @@ module Printer = struct
   and row_var_name t var =
     bounded_var_name t var ~prefix:".." ~bounds:(fun name ->
       List.map var.bounds ~f:(fun bound ->
-        sprintf "%s <= %s" name (row_to_string t bound.row ~label:Fn.id)))
+        sprintf
+          "%s <= %s"
+          name
+          (row_to_string t bound.row ~label:Fn.id ~context:true)))
 
   (* A bound is printed with its lower variable, unless only the upper one
      keeps it, as a generic variable does for a variable it is not generalized
      with. A lower variable not printed otherwise is named here, so prints its
      bounds later. *)
   and presence_var_name t (var : (presence, presence_bound) Var.t) =
+    Option.iter t.counting ~f:(fun counts -> Hashtbl.incr counts var.id);
     let others side =
       List.filter_map var.bounds ~f:(fun bound ->
         match side, bound with
@@ -961,34 +1026,21 @@ module Printer = struct
       (ty_to_string t ~prec:0 ty2)
 
   and record_to_string t row =
-    row_to_string t row ~label:(fun name -> "`" ^ name)
+    row_to_string t row ~label:(fun name -> "`" ^ name) ~context:false
 
-  and row_to_string t row ~label =
+  and row_to_string t row ~label ~context =
     let entries, tail =
       sorted_row_entries
         t
         row
+        ~context
         ~label
         ~row_var_name
         ~presence_var_name
-        ~entry:(fun name ty ->
-          sprintf "%s : %s" name (ty_to_string t ~prec:0 ty))
+        ~entry:(fun name ty ~assigned ->
+          sprintf "%s : %s%s" name assigned (ty_to_string t ~prec:0 ty))
     in
     "{" ^ String.concat ~sep:"; " (entries @ Option.to_list tail) ^ "}"
-  ;;
-
-  let ty t ty =
-    Hashtbl.clear t.introduced;
-    ty_to_string t ~prec:0 ty
-  ;;
-
-  let recursive t ty ~name =
-    Hashtbl.clear t.introduced;
-    let body = canonical_ty ty in
-    t.recursive <- Some (body, name);
-    let printed = structure t ~prec:0 body in
-    t.recursive <- None;
-    printed
   ;;
 
   let rec bounds t =
@@ -1001,10 +1053,13 @@ module Printer = struct
       let lower =
         match canonical_row (RVar lower) with
         | RVar var -> row_var_name t var
-        | row -> row_to_string t row ~label:Fn.id
+        | row -> row_to_string t row ~label:Fn.id ~context:true
       in
       let this =
-        sprintf "%s <= %s" lower (row_to_string t bound.row ~label:Fn.id)
+        sprintf
+          "%s <= %s"
+          lower
+          (row_to_string t bound.row ~label:Fn.id ~context:true)
       in
       this :: bounds t
     | Some (Kept (If_present_kept { ty1; ty2; _ })) when same_ty ty1 ty2 ->
@@ -1023,6 +1078,53 @@ module Printer = struct
          in
          this :: bounds t
        | Absent -> bounds t)
+  ;;
+
+  (* Renders with [render] once, on a copy, to find the assignment variables
+     named once, so in no bound either, to elide, then for real. The copy
+     prints the bounds it reaches, not those queued before, which print with
+     [t]. *)
+  let eliding t ~render =
+    let counts = Int.Table.create () in
+    let copy =
+      { t with
+        names = Hashtbl.copy t.names
+      ; cycle_names = Hashtbl.copy t.cycle_names
+      ; printing = Hashtbl.copy t.printing
+      ; introduced = Hashtbl.copy t.introduced
+      ; bounded = Queue.create ()
+      ; kept = Hash_set.copy t.kept
+      ; elided = Hash_set.copy t.elided
+      ; counting = Some counts
+      }
+    in
+    ignore (render copy : string);
+    ignore (bounds copy : string list);
+    Hashtbl.iteri counts ~f:(fun ~key:id ~data:count ->
+      if count = 1 && not (Hashtbl.mem t.names id) then Hash_set.add t.elided id);
+    render t
+  ;;
+
+  let ty t ty =
+    eliding t ~render:(fun t ->
+      Hashtbl.clear t.introduced;
+      ty_to_string t ~prec:0 ty)
+  ;;
+
+  let context t row =
+    eliding t ~render:(fun t ->
+      Hashtbl.clear t.introduced;
+      row_to_string t row ~label:Fn.id ~context:true)
+  ;;
+
+  let recursive t ty ~name =
+    eliding t ~render:(fun t ->
+      Hashtbl.clear t.introduced;
+      let body = canonical_ty ty in
+      t.recursive <- Some (body, name);
+      let printed = structure t ~prec:0 body in
+      t.recursive <- None;
+      printed)
   ;;
 
   let where t =
@@ -1078,8 +1180,8 @@ module Snapshot = struct
 
   and row t = function
     | REmpty -> REmpty
-    | RExtend (label, p, entry, rest) ->
-      RExtend (label, presence t p, ty t entry, row t rest)
+    | RExtend (label, p, assigned, entry, rest) ->
+      RExtend (label, presence t p, presence t assigned, ty t entry, row t rest)
     | RVar v -> RVar (var t.rows v ~copy:(row t))
 
   and presence t = function

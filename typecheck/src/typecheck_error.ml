@@ -82,6 +82,32 @@ module Kind = struct
     | Duplicate_pattern_variable of string
     | Duplicate_parameter of string
     | Duplicate_row_entry of string
+    | Assign_to_immutable of string
+    | Captures_mutable of
+        { name : string
+        ; var_level : Env.Level.t
+        ; used_at : Env.Level.t
+        ; via : string list
+        ; mutable_ : string
+        }
+    | May_capture_mutable of
+        { name : string
+        ; var_level : Env.Level.t
+        ; used_at : Env.Level.t
+        ; via : string list
+        ; variable : string
+        ; ty : Type.ty
+        }
+    | Compile_time_use_of_mutable of
+        { toplevel : string
+        ; mutable_ : string
+        }
+    | Mutable_used_outside_its_code of
+        { name : string
+        ; var_level : Env.Level.t
+        ; used_at : Env.Level.t
+        }
+    | Toplevel_initialization_cycle of string list
     | Compile_time_use_of_toplevel_being_checked of string
     | Expect_outside_expect_test
     | Splice_evaluation_failed of
@@ -100,6 +126,8 @@ module Kind = struct
     | Malformed_declarations of Error.t
     | Malformed_struct_quote of string
     | Misplaced_type_splice
+    | Misplaced_mut
+    | Spliced_code_assigns_immutable of string
     | Type_splice_failed of Error.t
     | Malformed_type_splice of Error.t
     | In_type_splice of
@@ -204,6 +232,11 @@ let level_name level =
   | level -> sprintf "inside %d quote(s) (level %d)" level level
 ;;
 
+let through = function
+  | [] -> ""
+  | via -> sprintf " (through %s)" (String.concat via ~sep:", ")
+;;
+
 let unification_message (error : Unification_error.t) ~show_type =
   let printer = Type.Printer.create ~type_name:show_type () in
   let ty = Type.Printer.ty printer in
@@ -233,6 +266,11 @@ let unification_message (error : Unification_error.t) ~show_type =
         expected
         reason
     | Row_mismatch (expected, actual, reason) ->
+      let row =
+        match reason with
+        | Assigned _ -> Type.Printer.context printer
+        | Missing_label _ | Presence_mismatch _ | Cyclic_row -> row
+      in
       let expected = row expected in
       let actual = row actual in
       let reason =
@@ -241,6 +279,10 @@ let unification_message (error : Unification_error.t) ~show_type =
         | Presence_mismatch label ->
           sprintf
             "\nThe label %s is present in one and absent in the other."
+            label
+        | Assigned label ->
+          sprintf
+            "\nThe code of one assigns %s, which the other requires it not to."
             label
         | Cyclic_row -> "\nThe row would be cyclic."
       in
@@ -251,6 +293,12 @@ let unification_message (error : Unification_error.t) ~show_type =
         reason
     | Occurs_check_failed var ->
       sprintf "The type variable %s occurs inside its own definition" (arg var)
+    | Assigned_in_record (name, assigned) ->
+      sprintf
+        "The row %s has %s assigned by code, but it is also the row of a \
+         record or variant, whose entries can't be [mut]"
+        (row assigned)
+        name
   in
   message ^ Type.Printer.where printer
 ;;
@@ -360,6 +408,59 @@ let rec kind_message (kind : Kind.t) ~show_type =
     sprintf "The parameter %s is bound several times in this function" name
   | Duplicate_row_entry name ->
     sprintf "The label %s is given more than once" name
+  | Mutable_used_outside_its_code { name; var_level; used_at } ->
+    sprintf
+      "The mutable variable %s is bound at %s but used at %s: a [let mut] \
+       local can only be used by the code that binds it, not in a quote or at \
+       compile time"
+      name
+      (level_name var_level)
+      (level_name used_at)
+  | Compile_time_use_of_mutable { toplevel; mutable_ } ->
+    if String.equal toplevel mutable_
+    then
+      sprintf
+        "The mutable toplevel %s is used at compile time: mutable toplevels \
+         exist only at runtime"
+        toplevel
+    else
+      sprintf
+        "The toplevel %s is used at compile time, but it may use the mutable \
+         toplevel %s when run: mutable toplevels exist only at runtime"
+        toplevel
+        mutable_
+  | Captures_mutable { name; var_level; used_at; via; mutable_ } ->
+    sprintf
+      "The function %s is bound at %s but used at %s, which it can't be as it \
+       reaches the mutable variable %s%s: its cell can't be shared with code"
+      name
+      (level_name var_level)
+      (level_name used_at)
+      mutable_
+      (through via)
+  | May_capture_mutable { name; var_level; used_at; via; variable; ty } ->
+    let printer = Type.Printer.create ~type_name:show_type () in
+    sprintf
+      "The function %s is bound at %s but used at %s, which it can't be as it \
+       captures %s%s, of type %s, which may hold a closure capturing a mutable \
+       variable: annotate %s with a type holding no function, if it is one"
+      name
+      (level_name var_level)
+      (level_name used_at)
+      variable
+      (through via)
+      (Type.Printer.ty printer ty)
+      variable
+  | Assign_to_immutable name ->
+    sprintf
+      "The variable %s is not mutable: only one bound by [let mut] can be \
+       assigned to"
+      name
+  | Toplevel_initialization_cycle cycle ->
+    sprintf
+      "The value of %s may be needed to compute itself: %s"
+      (List.hd_exn cycle)
+      (String.concat cycle ~sep:" -> ")
   | Compile_time_use_of_toplevel_being_checked name ->
     sprintf
       "The toplevel %s is used at compile time before it is fully checked (it \
@@ -397,6 +498,15 @@ let rec kind_message (kind : Kind.t) ~show_type =
       "This declaration splice failed at compile time: %s"
       (runtime_message error)
   | Malformed_struct_quote message -> message
+  | Spliced_code_assigns_immutable name ->
+    sprintf
+      "The spliced code assigns %s (its context has %s : mut ...), so it must \
+       be provided by a variable bound by [let mut] or a mutable toplevel"
+      name
+      name
+  | Misplaced_mut ->
+    "Only an entry of a code type's context can be [mut] or [immut], for a \
+     variable the code assigns or doesn't"
   | Misplaced_type_splice ->
     "A type splice runs at compile time, so it may be in a declaration, but \
      not within a quote or a compile-time expression"

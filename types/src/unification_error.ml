@@ -13,6 +13,9 @@ module Row_mismatch_reason = struct
   type t =
     | Missing_label of string
     | Presence_mismatch of string
+    | Assigned of string
+    (** One code context assigns the name, which the other has as not
+        assigned. *)
     | Cyclic_row
   [@@deriving sexp_of]
 end
@@ -21,6 +24,7 @@ type t =
   | Type_mismatch of Type.ty * Type.ty * Type_mismatch_reason.t
   | Row_mismatch of Type.row * Type.row * Row_mismatch_reason.t
   | Occurs_check_failed of Type.arg
+  | Assigned_in_record of string * Type.row
 [@@deriving sexp_of]
 
 let snapshot t =
@@ -34,4 +38,6 @@ let snapshot t =
       (Type.Snapshot.row snapshot row1, Type.Snapshot.row snapshot row2, reason)
   | Occurs_check_failed arg ->
     Occurs_check_failed (Type.Snapshot.arg snapshot arg)
+  | Assigned_in_record (name, row) ->
+    Assigned_in_record (name, Type.Snapshot.row snapshot row)
 ;;

@@ -74,17 +74,25 @@ let captures t ~ident ~args ~body =
       && level ident <= closure_level
     then Hash_set.add captures ident
   in
+  let var ~depth : Typed.Var_ref.t -> unit = function
+    | Free _ | Free_toplevel _ | Prim _ | Intrinsic _ -> ()
+    | Bound (Toplevel ident | Local ident)
+    | Persistent (Toplevel ident | Local ident) -> use ~depth ident
+  in
   let rec go ~depth ({ desc; _ } : Typed.Expr.t) =
     match desc with
-    | Lit _
-    | Var (Free _ | Free_toplevel _ | Prim _ | Intrinsic _)
-    | Expect _ | Type _ -> ()
-    | Var
-        ( Bound (Toplevel ident | Local ident)
-        | Persistent (Toplevel ident | Local ident) ) -> use ~depth ident
+    | Lit _ | Expect _ | Type _ -> ()
+    | Var var_ref -> var ~depth var_ref
+    | Assign (var_ref, value) ->
+      var ~depth var_ref;
+      go ~depth value
     | Let { ident; args; body; in_; _ } ->
       def ident;
       List.iter args ~f:def;
+      go ~depth body;
+      go ~depth in_
+    | Let_mut { ident; body; in_; annot = _ } ->
+      def ident;
       go ~depth body;
       go ~depth in_
     | Fun { args; annots = _; body } ->
@@ -195,6 +203,13 @@ let map_children ~depth (expr : Typed.Expr.t) ~f =
       let%bind body = same let_.body in
       let%map in_ = same let_.in_ in
       Typed.Expr.Desc.Let { let_ with body; in_ }
+    | Let_mut let_ ->
+      let%bind body = same let_.body in
+      let%map in_ = same let_.in_ in
+      Typed.Expr.Desc.Let_mut { let_ with body; in_ }
+    | Assign (var_ref, value) ->
+      let%map value = same value in
+      Typed.Expr.Desc.Assign (var_ref, value)
     | Fun fun_ ->
       let%map body = same fun_.body in
       Typed.Expr.Desc.Fun { fun_ with body }
@@ -321,8 +336,16 @@ let instantiate t (code : Typed.Expr.t) ~entry =
       match expr.desc with
       | Var ((Free name | Free_toplevel name) as var_ref) when depth = 0 ->
         Var (Option.value (entry name) ~default:var_ref)
+      | Assign (((Free name | Free_toplevel name) as var_ref), value)
+        when depth = 0 ->
+        Assign (Option.value (entry name) ~default:var_ref, value)
       | Var (Bound binder) -> Var (Bound (rename_binder binder))
       | Var (Persistent binder) -> Var (Persistent (rename_binder binder))
+      | Assign (Bound binder, value) ->
+        Assign (Bound (rename_binder binder), value)
+      | Assign (Persistent binder, value) ->
+        Assign (Persistent (rename_binder binder), value)
+      | Let_mut let_ -> Let_mut { let_ with ident = fresh let_.ident }
       | Let let_ ->
         let ident = fresh let_.ident in
         let args = List.map let_.args ~f:fresh in
@@ -359,24 +382,36 @@ let splice_code
       Map.find providers name
       |> Option.map ~f:(fun binder -> Typed.Var_ref.Bound binder))
   | Explicit subs ->
+    (* A variable is substituted as itself, so that the code assigns it if it
+       is mutable, and reads its value when it does. *)
     let subs =
       List.map subs ~f:(fun (name, (sub : Typed.Expr.t)) ->
-        let ident =
-          fresh_like
-            t
-            { name; stamp = 0 }
-            ~info:{ Typed.Ident_info.ty = sub.ty; level }
-        in
-        name, ident, sub)
+        match sub.desc with
+        | Var ((Bound _ | Persistent _) as var_ref) -> name, First var_ref
+        | _ ->
+          ( name
+          , Second
+              ( fresh_like
+                  t
+                  { name; stamp = 0 }
+                  ~info:{ Typed.Ident_info.ty = sub.ty; level }
+              , sub ) ))
     in
-    let idents =
-      List.map subs ~f:(fun (name, ident, _) -> name, ident)
-      |> String.Map.of_alist_exn
+    let entries =
+      String.Map.of_alist_reduce
+        (List.map subs ~f:(fun (name, sub) ->
+           ( name
+           , match sub with
+             | First var_ref -> var_ref
+             | Second ((ident : Typed.Ident.t), _) ->
+               Typed.Var_ref.Bound (Local ident) )))
+        ~f:(fun first _ -> first)
     in
-    let%map code =
-      instantiate t code ~entry:(fun name ->
-        Map.find idents name
-        |> Option.map ~f:(fun ident -> Typed.Var_ref.Bound (Local ident)))
+    let%map code = instantiate t code ~entry:(Map.find entries) in
+    let subs =
+      List.filter_map subs ~f:(fun (name, sub) ->
+        Either.Second.to_option sub
+        |> Option.map ~f:(fun (ident, sub) -> name, ident, sub))
     in
     List.fold_right subs ~init:code ~f:(fun (_, ident, sub) in_ ->
       { Typed.Expr.desc =
@@ -616,6 +651,11 @@ and step t ~env ~level (expr : Typed.Expr.t) : Next.t Or_error.t =
   | Let { ident; args; body; in_; _ } ->
     let%bind () = bind_let t ~env ~level ~ident ~args ~body in
     tail in_
+  | Let_mut { ident; body; in_; annot = _ } ->
+    let%bind value = eval' body in
+    Env.declare env ~ident;
+    Env.set env ~ident ~value;
+    tail in_
   | Toplevel_splice { code = _; expansion } -> tail expansion
   | Match { scrutinee; cases; exception_cases } ->
     (match eval' scrutinee with
@@ -648,7 +688,23 @@ and step_value t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
   | Var (Prim prim) -> Ok (Value.Prim { prim; applied = [] })
   | Var (Intrinsic intrinsic) -> Ok (Value.Intrinsic intrinsic)
   | Type ty -> Ok (Value.Type ty)
-  | App _ | Let _ | Annotated _ | Toplevel_splice _ | Match _ ->
+  | Assign (var_ref, value) ->
+    let%bind value = eval' value in
+    (match var_ref with
+     | Bound (Local ident | Toplevel ident)
+     | Persistent (Local ident | Toplevel ident) ->
+       let%bind () = force t ident in
+       (match Env.find_slot ~fallback:t.env env ident with
+        | Some slot ->
+          slot := Some value;
+          Ok Value.Unit
+        | None ->
+          Or_error.error_s
+            [%message "Assigned an unbound ident" (ident : Typed.Ident.t)])
+     | Free _ | Free_toplevel _ | Prim _ | Intrinsic _ ->
+       Or_error.error_s
+         [%message "Assigned a non-variable" (var_ref : Typed.Var_ref.t)])
+  | App _ | Let _ | Let_mut _ | Annotated _ | Toplevel_splice _ | Match _ ->
     run_next t (step t ~env ~level expr)
   | Fun { args; annots = _; body } ->
     (* Its first parameter identifies it, as a let's name does. *)

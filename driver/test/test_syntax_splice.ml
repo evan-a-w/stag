@@ -416,3 +416,51 @@ let raising = .~(Core.Sexp.of_sexp_raising (type [`A]))
     end
     |}]
 ;;
+
+let%expect_test "mutable variables in generated syntax and declarations" =
+  check
+    ~run:true
+    {|
+let counted =
+  .~(Stag.Expr.Let_mut
+       ( "n"
+       , None
+       , Stag.Expr.int 1
+       , Stag.Expr.Let
+           ( "_"
+           , Nil
+           , None
+           , Stag.Expr.Assign
+               ( Stag.Path.Name "n"
+               , Stag.Expr.apply (Stag.Expr.var "Core.Int.add") (Cons (Stag.Expr.var "n", Cons (Stag.Expr.int 2, Nil))) )
+           , Stag.Expr.var "n" ) ))
+include .~(.< struct
+  let mut total = 0
+  let add_to_total n = total <- Core.Int.add total n
+end >.)
+module Generated = .~(Cons (Stag.Toplevel.Let_mut ("count", None, Stag.Expr.int 5), Nil))
+let main =
+  add_to_total 3;
+  add_to_total 4;
+  Generated.count <- Core.Int.add Generated.count 1;
+  print_endline (Core.Int.to_string counted);
+  print_endline (Core.Int.to_string total);
+  print_endline (Core.Int.to_string Generated.count)
+|};
+  [%expect
+    {|
+    module A : sig
+      val counted : int
+      val total : int
+      val add_to_total : int -> unit
+      module Generated : sig
+        val count : int
+      end
+      val main : unit
+    end
+    --- output ---
+    3
+    7
+    6
+    |}]
+;;

@@ -44,6 +44,7 @@ module Module_group = struct
     | File
         { txt =
             ( Let _
+            | Let_mut _
             | Type _
             | Exception _
             | Malformed_exception _

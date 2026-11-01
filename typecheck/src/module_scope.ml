@@ -186,7 +186,7 @@ let members (toplevel : Toplevel.t) : (Member.t * Name.t) list =
     (Member_kind.Member namespace, name.txt), name
   in
   match toplevel.txt with
-  | Let (name, _, _, _) -> [ member Value name ]
+  | Let (name, _, _, _) | Let_mut (name, _, _) -> [ member Value name ]
   | Type { name; params = _; kind } ->
     member Type name
     ::
@@ -231,6 +231,7 @@ let rec unique_among ~path taken toplevels ~report =
             else Continue (Set.add seen param))
           ~finish:(fun _ -> Some ())
       | Let _
+      | Let_mut _
       | Exception _
       | Malformed_exception _
       | Module _
@@ -273,6 +274,7 @@ let rec unique_among ~path taken toplevels ~report =
         }
     | ( _ :: _
       , ( Let _
+        | Let_mut _
         | Exception _
         | Malformed_exception _
         | Module _
@@ -298,6 +300,7 @@ let rec unique_among ~path taken toplevels ~report =
                      ~report )
            }
          | Let _
+         | Let_mut _
          | Type _
          | Exception _
          | Malformed_exception _
@@ -355,6 +358,7 @@ let rec register module_ toplevels ~parent ~generated_by =
       Queue.enqueue into (Included splice);
       Queue.enqueue module_.includes splice
     | Let _
+    | Let_mut _
     | Type _
     | Exception _
     | Malformed_exception _
@@ -391,6 +395,7 @@ let rec register module_ toplevels ~parent ~generated_by =
          Hashtbl.add_exn module_.definitions ~key:decl.name.txt ~data:splice;
          Queue.enqueue module_.includes splice
        | Let _
+       | Let_mut _
        | Type _
        | Exception _
        | Malformed_exception _
@@ -1064,6 +1069,7 @@ let iter_declarations t ~f =
          | Module (name, _) | Module_splice (name, _, _) ->
            iter_module (Hashtbl.find_exn scope.module_.modules name.txt)
          | Let _
+         | Let_mut _
          | Type _
          | Exception _
          | Malformed_exception _
