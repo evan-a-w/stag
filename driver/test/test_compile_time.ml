@@ -43,7 +43,7 @@ let generated = wrap .<1>.
 |};
   [%expect
     {|
-    val wrap : <'a>{y?'b : 'a; ..'c} -> <'a * 'a>{..'d} where ..'c <= {..'d}
+    val wrap : <'a>{y?'b : immut 'a; ..'c} -> <'a * 'a>{..'d} where ..'c <= {..'d}
     val wrapped : int * int
     val generated : <int * int>{..'_a}
     (wrapped/5
@@ -51,8 +51,8 @@ let generated = wrap .<1>.
       (code
        (App
         (Var (Bound (Toplevel wrap/4)) :
-         "<int>{y?'_a : int; ..'_b} -> <int * int>{}")
-        (Quote (Lit (Int 1) : int) : "<int>{y?'_a : int; ..'_b}") :
+         "<int>{y?'_a : immut int; ..'_b} -> <int * int>{}")
+        (Quote (Lit (Int 1) : int) : "<int>{y?'_a : immut int; ..'_b}") :
         "<int * int>{}"))
       (expansion
        (Let (ident y/18) (args ()) (generalized true) (body (Lit (Int 1) : int))
@@ -252,14 +252,16 @@ let applied = implicit false
   [%expect
     {|
     val n : int
-    val code : <'a * 'b>{n : mut?'c 'a; x : mut?'d 'b; ..'e}
+    val code : <'a * 'b>{n : 'a; x : 'b; ..'c}
     val implicit : 'a -> int * 'a
     val explicit : bool * int
     val explicit_toplevel : int * int
     val applied : int * bool
     (implicit/6
      (Toplevel_splice
-      (code (Var (Bound (Toplevel code/5)) : "<int * 'a>{n : int; x : 'a}"))
+      (code
+       (Var (Bound (Toplevel code/5)) :
+        "<int * 'a>{n : immut int; x : immut 'a}"))
       (expansion
        (Tuple
         ((Var (Bound (Toplevel n/4)) : int) (Var (Bound (Local x/19)) : 'a)) :
@@ -267,7 +269,9 @@ let applied = implicit false
       : "int * 'a"))
     (explicit/7
      (Toplevel_splice
-      (code (Var (Bound (Toplevel code/5)) : "<bool * int>{n : bool; x : int}"))
+      (code
+       (Var (Bound (Toplevel code/5)) :
+        "<bool * int>{n : immut bool; x : immut int}"))
       (expansion
        (Let (ident n/20) (args ()) (generalized false)
         (body (Lit (Bool true) : bool))
@@ -283,7 +287,9 @@ let applied = implicit false
       : "bool * int"))
     (explicit_toplevel/8
      (Toplevel_splice
-      (code (Var (Bound (Toplevel code/5)) : "<int * int>{n : int; x : int}"))
+      (code
+       (Var (Bound (Toplevel code/5)) :
+        "<int * int>{n : immut int; x : immut int}"))
       (expansion
        (Tuple
         ((Var (Bound (Toplevel n/4)) : int) (Var (Bound (Toplevel n/4)) : int)) :
@@ -430,7 +436,7 @@ let used = f (S (S Z))
     {|
     type nat = Z | S of nat
     val f : nat -> int
-    val code : <'a>{f : mut?'b 'c -> 'a; m : mut?'d 'c; ..'e}
+    val code : <'a>{f : 'b -> 'a; m : 'b; ..'c}
     val used : int
     (f/4
      (Match (scrutinee (Var (Bound (Local n/16)) : nat))
@@ -441,7 +447,8 @@ let used = f (S (S Z))
           nat)
          (Toplevel_splice
           (code
-           (Var (Bound (Toplevel code/5)) : "<int>{f : nat -> int; m : nat}"))
+           (Var (Bound (Toplevel code/5)) :
+            "<int>{f : immut nat -> int; m : immut nat}"))
           (expansion
            (App (Var (Bound (Toplevel f/4)) : "nat -> int")
             (Var (Bound (Local m/17)) : nat) : int))
@@ -476,14 +483,14 @@ let f = .~(x; .<2>.)
 |};
   [%expect
     {|
-    val gen : <'a>{f?'b : int; ..'c} -> <'a>{f?'b : int; ..'c}
+    val gen : <'a>{f?'b : immut int; ..'c} -> <'a>{f?'b : immut int; ..'c}
     val f : int
     -- evaluated at compile time
     (gen <fun>)
     -- evaluated
     (gen <fun>)
     (f 1)
-    val gen : <'a>{f?'b : int; ..'c} -> <'a>{f?'b : int; ..'c}
+    val gen : <'a>{f?'b : immut int; ..'c} -> <'a>{f?'b : immut int; ..'c}
     val x : int
     val f : int
     -- evaluated at compile time
@@ -515,7 +522,7 @@ let k u = u; a
   [%expect
     {|
     type abc = A | B
-    val f : '_a -> <'_b>{x : mut?'_c '_b; ..'_d}
+    val f : '_a -> <'_b>{x : '_b; ..'_c}
     val v : int
     val g : 'a -> 'a
     -- evaluated at compile time
@@ -545,7 +552,7 @@ let gen2 u = .<5>.
   [%expect
     {|
     val user : int
-    val gen : 'a -> <'b>{helper : mut?'c 'b; ..'d}
+    val gen : 'a -> <'b>{helper : 'b; ..'c}
     val helper : int
     val gen2 : 'a -> <int>{..'b}
     -- evaluated at compile time
@@ -728,11 +735,12 @@ let deep = .~(.~(n; .< .<n>. >.))
          (Let (ident _/15) (args ()) (generalized true)
           (body (Var (Bound (Toplevel n/4)) : int))
           (in_
-           (Quote (Quote (Var (Free_toplevel n) : int) : "<int>{n : int}") :
-            "<<int>{n : int}>{}"))
-          : "<<int>{n : int}>{}"))
-        (expansion (Quote (Var (Free_toplevel n) : int) : "<int>{n : int}")) :
-        "<int>{n : int}"))
+           (Quote (Quote (Var (Free_toplevel n) : int) : "<int>{n : immut int}")
+            : "<<int>{n : immut int}>{}"))
+          : "<<int>{n : immut int}>{}"))
+        (expansion
+         (Quote (Var (Free_toplevel n) : int) : "<int>{n : immut int}"))
+        : "<int>{n : immut int}"))
       (expansion (Var (Bound (Toplevel n/4)) : int)) : int))
     -- evaluated at compile time
     (n 2)
@@ -848,7 +856,7 @@ let f = true
 |};
   [%expect
     {|
-    val gen : <'a>{f?'b : int; ..'c} -> <'a>{f?'b : int; ..'c}
+    val gen : <'a>{f?'b : immut int; ..'c} -> <'a>{f?'b : immut int; ..'c}
     val f : bool
     val x : int
     -- evaluated at compile time
@@ -857,7 +865,7 @@ let f = true
     (gen <fun>)
     (f true)
     (x 1)
-    val gen : <'a>{f?'b : int; ..'c} -> <'a>{f?'b : int; ..'c}
+    val gen : <'a>{f?'b : immut int; ..'c} -> <'a>{f?'b : immut int; ..'c}
     val x : int
     val f : bool
     -- evaluated at compile time
@@ -886,8 +894,8 @@ let user = .~(gen ())
 |};
   [%expect
     {|
-    val gen : 'a -> <<int>{} -> <int>{x : mut?'b int; ..'c}>{..'d}
-    val user : <int>{} -> <int>{x : mut?'a int; ..'b}
+    val gen : 'a -> <<int>{} -> <int>{x : int; ..'b}>{..'c}
+    val user : <int>{} -> <int>{x : int; ..'a}
     -- evaluated at compile time
     (gen <fun>)
     -- evaluated
@@ -929,8 +937,8 @@ let s = .~(w .<1>.)
        (Presence_mismatch x)))
      @ t.stag:6:13-18)
     val x : int
-    val k : <'a>{x?'b : int; ..'c} -> <'a>{x?'b : int; ..'c}
-    val w : <int>{x : int} -> <int>{x : int}
+    val k : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'b : immut int; ..'c}
+    val w : <int>{x : immut int} -> <int>{x : immut int}
     val t : int
     val s : int
     -- evaluated at compile time
@@ -1038,20 +1046,20 @@ let%expect_test "re-inference of a local bounded by an outer row" =
   [%expect
     {|
     -- annotated
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
     val needx : <int>{x : int} -> unit
-    val direct : <int>{x : int} -> <int>{x : int} -> unit
+    val direct : <int>{x : immut int} -> <int>{x : int} -> unit
     -- evaluated at compile time
     -- not annotated
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
     val needx : <int>{x : int} -> unit
-    val direct : <int>{x?'a : int; ..'b} -> <int>{x : int} -> unit where ..'b <= {x : int}, ..'b <= {x : mut?'c int; y : mut?'d int; ..'e}
+    val direct : <int>{x?'a : immut int; ..'b} -> <int>{x : mut?'c int} -> unit where ..'b <= {x : mut?'c int}, ..'b <= {x : int; y : int; ..'d}
     -- evaluated at compile time
     -- generated
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
     val needx : <int>{x : int} -> unit
-    val gen : 'a -> <<int>{x : int} -> <int>{x : int} -> unit>{..'b}
-    val user : <int>{x : int} -> <int>{x : int} -> unit
+    val gen : 'a -> <<int>{x : immut int} -> <int>{x : int} -> unit>{..'b}
+    val user : <int>{x : immut int} -> <int>{x : int} -> unit
     -- evaluated at compile time
     (gen <fun>)
     -- evaluated
@@ -1060,17 +1068,17 @@ let%expect_test "re-inference of a local bounded by an outer row" =
     (gen <fun>)
     (user <fun>)
     -- annotated
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
     val closeit : <int>{} -> unit
     val direct : <int>{} -> <int>{} -> unit
     -- evaluated at compile time
     -- not annotated
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
     val closeit : <int>{} -> unit
     val direct : <int>{-x; ..'a} -> <int>{} -> unit where ..'a <= {}
     -- evaluated at compile time
     -- generated
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
     val closeit : <int>{} -> unit
     val gen : 'a -> <<int>{} -> <int>{} -> unit>{..'b}
     val user : <int>{} -> <int>{} -> unit
@@ -1121,20 +1129,20 @@ let%expect_test "re-inference of a local bounded by an outer closed row" =
   [%expect
     {|
     -- annotated
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
     val needx : <int>{x : int} -> unit
-    val direct : <int>{x : int} -> <int>{x : int} -> unit
+    val direct : <int>{x : immut int} -> <int>{x : int} -> unit
     -- evaluated at compile time
     -- not annotated
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
     val needx : <int>{x : int} -> unit
-    val direct : <int>{x?'a : int} -> <int>{x : int} -> unit
+    val direct : <int>{x?'a : immut int} -> <int>{x : int} -> unit
     -- evaluated at compile time
     -- generated
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
     val needx : <int>{x : int} -> unit
-    val gen : 'a -> <<int>{x : int} -> <int>{x : int} -> unit>{..'b}
-    val user : <int>{x : int} -> <int>{x : int} -> unit
+    val gen : 'a -> <<int>{x : immut int} -> <int>{x : int} -> unit>{..'b}
+    val user : <int>{x : immut int} -> <int>{x : int} -> unit
     -- evaluated at compile time
     (gen <fun>)
     -- evaluated
@@ -1143,17 +1151,17 @@ let%expect_test "re-inference of a local bounded by an outer closed row" =
     (gen <fun>)
     (user <fun>)
     -- annotated
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
     val closeit : <int>{} -> unit
     val direct : <int>{} -> <int>{} -> unit
     -- evaluated at compile time
     -- not annotated
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
     val closeit : <int>{} -> unit
     val direct : <int>{} -> <int>{} -> unit
     -- evaluated at compile time
     -- generated
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
     val closeit : <int>{} -> unit
     val gen : 'a -> <<int>{} -> <int>{} -> unit>{..'b}
     val user : <int>{} -> <int>{} -> unit
@@ -1184,7 +1192,7 @@ let%expect_test "the order of splices deciding a weak variable matters" =
     {|
     val needx : <int>{x : int} -> unit
     val f0 : 'a -> 'b -> 'b
-    val w0 : <int>{x : int}
+    val w0 : <int>{x : immut int}
     val substituted : int
     val under_lets : int
     val use : unit
@@ -1197,7 +1205,7 @@ let%expect_test "the order of splices deciding a weak variable matters" =
      @ t.stag:7:16-18)
     val needx : <int>{x : int} -> unit
     val f0 : 'a -> 'b -> 'b
-    val w0 : <int>{x?'_a : int}
+    val w0 : <int>{x?'_a : immut int}
     val substituted : int
     -- evaluated at compile time
     (f0 <fun>)
@@ -1237,7 +1245,7 @@ let other = .~(gen ()) true
   [%expect
     {|
     val weak : int -> int
-    val gen : 'a -> <'b>{weak : mut?'c 'b; ..'d}
+    val gen : 'a -> <'b>{weak : 'b; ..'c}
     val one : int
     val two : int
     -- evaluated at compile time
@@ -1297,16 +1305,16 @@ let%expect_test "entries of different types code may use, then closed" =
            ]));
   [%expect
     {|
-    val ki : <'a>{x?'b : int; ..'c} -> unit
-    val kb : <'a>{x?'b : bool; ..'c} -> unit
+    val ki : <'a>{x?'b : immut int; ..'c} -> unit
+    val kb : <'a>{x?'b : immut bool; ..'c} -> unit
     val plain : int
     -- evaluated at compile time
     -- evaluated
     (ki <fun>)
     (kb <fun>)
     (plain 0)
-    val ki : <'a>{x?'b : int; ..'c} -> unit
-    val kb : <'a>{x?'b : bool; ..'c} -> unit
+    val ki : <'a>{x?'b : immut int; ..'c} -> unit
+    val kb : <'a>{x?'b : immut bool; ..'c} -> unit
     val gen : 'a -> <int>{..'b}
     val use : int
     -- evaluated at compile time
@@ -1318,8 +1326,8 @@ let%expect_test "entries of different types code may use, then closed" =
     (use 0)
     -- closeit; ki; kb
     val closeit : <int>{} -> unit
-    val ki : <'a>{x?'b : int; ..'c} -> unit
-    val kb : <'a>{x?'b : bool; ..'c} -> unit
+    val ki : <'a>{x?'b : immut int; ..'c} -> unit
+    val kb : <'a>{x?'b : immut bool; ..'c} -> unit
     val f : <int>{} -> unit
     -- evaluated at compile time
     -- evaluated
@@ -1328,8 +1336,8 @@ let%expect_test "entries of different types code may use, then closed" =
     (kb <fun>)
     (f <fun>)
     val closeit : <int>{} -> unit
-    val ki : <'a>{x?'b : int; ..'c} -> unit
-    val kb : <'a>{x?'b : bool; ..'c} -> unit
+    val ki : <'a>{x?'b : immut int; ..'c} -> unit
+    val kb : <'a>{x?'b : immut bool; ..'c} -> unit
     val gen : 'a -> <int>{..'b}
     val use : int
     -- evaluated at compile time
@@ -1342,8 +1350,8 @@ let%expect_test "entries of different types code may use, then closed" =
     (use 0)
     -- ki; closeit; kb
     val closeit : <int>{} -> unit
-    val ki : <'a>{x?'b : int; ..'c} -> unit
-    val kb : <'a>{x?'b : bool; ..'c} -> unit
+    val ki : <'a>{x?'b : immut int; ..'c} -> unit
+    val kb : <'a>{x?'b : immut bool; ..'c} -> unit
     val f : <int>{} -> unit
     -- evaluated at compile time
     -- evaluated
@@ -1352,8 +1360,8 @@ let%expect_test "entries of different types code may use, then closed" =
     (kb <fun>)
     (f <fun>)
     val closeit : <int>{} -> unit
-    val ki : <'a>{x?'b : int; ..'c} -> unit
-    val kb : <'a>{x?'b : bool; ..'c} -> unit
+    val ki : <'a>{x?'b : immut int; ..'c} -> unit
+    val kb : <'a>{x?'b : immut bool; ..'c} -> unit
     val gen : 'a -> <int>{..'b}
     val use : int
     -- evaluated at compile time
@@ -1366,8 +1374,8 @@ let%expect_test "entries of different types code may use, then closed" =
     (use 0)
     -- ki; kb; closeit
     val closeit : <int>{} -> unit
-    val ki : <'a>{x?'b : int; ..'c} -> unit
-    val kb : <'a>{x?'b : bool; ..'c} -> unit
+    val ki : <'a>{x?'b : immut int; ..'c} -> unit
+    val kb : <'a>{x?'b : immut bool; ..'c} -> unit
     val f : <int>{} -> unit
     -- evaluated at compile time
     -- evaluated
@@ -1376,8 +1384,8 @@ let%expect_test "entries of different types code may use, then closed" =
     (kb <fun>)
     (f <fun>)
     val closeit : <int>{} -> unit
-    val ki : <'a>{x?'b : int; ..'c} -> unit
-    val kb : <'a>{x?'b : bool; ..'c} -> unit
+    val ki : <'a>{x?'b : immut int; ..'c} -> unit
+    val kb : <'a>{x?'b : immut bool; ..'c} -> unit
     val gen : 'a -> <int>{..'b}
     val use : int
     -- evaluated at compile time

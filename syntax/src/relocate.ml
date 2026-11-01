@@ -69,6 +69,9 @@ and type_desc (g : Type_expr.desc) (w : Type_expr.desc) : Type_expr.desc option 
   | Mut t, Mut t' ->
     let+ t = type_expr t t' in
     Type_expr.Mut t
+  | Immut t, Immut t' ->
+    let+ t = type_expr t t' in
+    Type_expr.Immut t
   | Splice e, Splice e' ->
     let+ e = expr e e' in
     Type_expr.Splice e
@@ -80,6 +83,7 @@ and type_desc (g : Type_expr.desc) (w : Type_expr.desc) : Type_expr.desc option 
       | Record _
       | Variant _
       | Mut _
+      | Immut _
       | Splice _ )
     , _ ) -> None
 

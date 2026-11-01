@@ -819,7 +819,7 @@ let spliced
   [%expect
     {|
     val incr : <unit>{x : mut int; ..'a}
-    val read : <'a>{x : mut?'b 'a; ..'c}
+    val read : <'a>{x : 'a; ..'b}
     val ran : <int>{..'a}
     val ran_value : int
     val mixed : <unit>{x : mut int; ..'a}
@@ -871,12 +871,16 @@ let f y = .<.~incr.{x = g}>.
   check
     {|
 let incr = .<x <- Int.add x 1>.
-let wrong : <unit>{x : int} = incr
+let wrong : <unit>{x : immut int} = incr
 |};
   check
     {|
 let reading_is_fine : <int>{x : mut int} = .<x>.
 let wrong_place : {`a : mut int} -> int = fun r -> 1
+|};
+  check
+    {|
+let wrong_place : {`a : immut int} -> int = fun r -> 1
 |};
   [%expect
     {|
@@ -890,8 +894,71 @@ let wrong_place : {`a : mut int} -> int = fun r -> 1
        (RExtend x (PVar (Link Present)) Assigned (TVar (Link (TCon int ())))
         (RVar (Unbound 31 1)))
        (Assigned x)))
-     @ t.stag:3:30-34)
+     @ t.stag:3:36-40)
     (Misplaced_mut @ t.stag:3:24-31)
+    (Misplaced_mut @ t.stag:2:24-33)
+    |}]
+;;
+
+let%expect_test "assignment markers in code types" =
+  check
+    {|
+let f c = .<let mut x = 1 in .~c>.
+let g c = .<let x = 1 in .~c>.
+let reads = .<x>.
+let assigns = .<x <- 1>.
+let shared c = .<.~c; x>.
+let unmarked_reads : <int>{x : int} = reads
+let unmarked_assigns : <unit>{x : int} = assigns
+let marked : <unit>{x : mut int} = assigns
+let immut_reads : <int>{x : immut int} = reads
+let unknown (c : <unit>{x : int}) = .<let x = 1 in .~c>.
+let unknown_mut (c : <unit>{x : int}) = .<let mut x = 1 in .~c>.
+let applied = unknown_mut assigns
+|};
+  [%expect
+    {|
+    val f : <'a>{x?'b : int; ..'c} -> <'a>{..'d} where ..'c <= {..'d}
+    val g : <'a>{x?'b : immut int; ..'c} -> <'a>{..'d} where ..'c <= {..'d}
+    val reads : <'a>{x : 'a; ..'b}
+    val assigns : <unit>{x : mut int; ..'a}
+    val shared : <'a>{_?'b : immut 'a; ..'c} -> <'d>{x : mut?'e 'd; ..'f} where ..'c <= {x : mut?'e 'd; ..'f}
+    val unmarked_reads : <int>{x : int}
+    val unmarked_assigns : <unit>{x : mut int}
+    val marked : <unit>{x : mut int}
+    val immut_reads : <int>{x : immut int}
+    val unknown : <unit>{x : immut int} -> <unit>{..'a}
+    val unknown_mut : <unit>{x : int} -> <unit>{..'a}
+    val applied : <unit>{..'_a}
+    |}];
+  check
+    {|
+let assigns = .<x <- 1>.
+let g c = .<let x = 1 in .~c>.
+let rejected = g assigns
+|};
+  check
+    {|
+let assigns = .<x <- 1>.
+let unknown (c : <unit>{x : int}) = .<let x = 1 in .~c>.
+let rejected = unknown assigns
+|};
+  [%expect
+    {|
+    ((Unification_error
+      (Row_mismatch
+       (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
+        (RVar (Unbound 42 1)))
+       (RExtend x (PVar (Link Present)) Assigned (TVar (Link (TCon int ())))
+        (RVar (Unbound 47 1)))
+       (Assigned x)))
+     @ t.stag:4:17-24)
+    ((Unification_error
+      (Row_mismatch (RExtend x Present (TCon int ()) REmpty)
+       (RExtend x (PVar (Link Present)) Assigned (TVar (Link (TCon int ())))
+        (RVar (Unbound 40 1)))
+       (Assigned x)))
+     @ t.stag:4:23-30)
     |}]
 ;;
 
@@ -980,8 +1047,8 @@ let value_once =
   [%expect
     {|
     val incr : <unit>{x : mut int; ..'a}
-    val read : <'a -> 'b>{x : mut?'c 'b; ..'d}
-    val pair : <'a * 'b>{a : mut?'c 'a; b : mut?'d 'b; ..'e}
+    val read : <'a -> 'b>{x : 'b; ..'c}
+    val pair : <'a * 'b>{a : 'a; b : 'b; ..'c}
     val g : int
     val renamed : int
     val same_name : int

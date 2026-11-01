@@ -403,22 +403,22 @@ let%expect_test "a recursive group is generalized at once, in any order" =
     "let g c d = let _ = .< .~c >. in let _ = .< let x = 1 in .~c >. in f c d";
   [%expect
     {|
-    val f : <'a>{x?'b : 'c; ..'d} -> <'c>{x?'e : 'c; ..'f} -> 'g where 'b => 'c = int, ..'d <= {..'h}, ..'f <= {..'h}
-    val g : <'a>{x?'b : int; ..'c} -> <'d>{x?'e : 'd; ..'f} -> 'g where 'b => 'd = int, ..'c <= {..'h}, ..'f <= {..'h}
+    val f : <'a>{x?'b : immut 'c; ..'d} -> <'c>{x?'e : immut 'c; ..'f} -> 'g where 'b => 'c = int, ..'d <= {..'h}, ..'f <= {..'h}
+    val g : <'a>{x?'b : immut int; ..'c} -> <'d>{x?'e : immut 'd; ..'f} -> 'g where 'b => 'd = int, ..'c <= {..'h}, ..'f <= {..'h}
     ---
-    val g : <'a>{x?'b : int; ..'c} -> <'d>{x?'e : 'd; ..'f} -> 'g where 'b => int = 'd, ..'c <= {..'h}, ..'f <= {..'h}
-    val f : <'a>{x?'b : 'c; ..'d} -> <'c>{x?'e : 'c; ..'f} -> 'g where 'b => int = 'c, ..'d <= {..'h}, ..'f <= {..'h}
+    val g : <'a>{x?'b : immut int; ..'c} -> <'d>{x?'e : immut 'd; ..'f} -> 'g where 'b => int = 'd, ..'c <= {..'h}, ..'f <= {..'h}
+    val f : <'a>{x?'b : immut 'c; ..'d} -> <'c>{x?'e : immut 'c; ..'f} -> 'g where 'b => int = 'c, ..'d <= {..'h}, ..'f <= {..'h}
     |}];
   both_orders
     "let f c = let _ = g c in .< let x = 1 in .~c >."
     "let g c y = cond true (f c) .< let x = .~y in .~c >.";
   [%expect
     {|
-    val f : <'a>{x?'b : 'c; ..'d} -> <'a>{..'e} where 'b => 'c = int, ..'d <= {..'e}
-    val g : <'a>{x?'b : 'c; ..'d} -> <'c>{x?'e : 'c; ..'f} -> <'a>{..'g} where 'b => 'c = int, ..'d <= {..'g}, ..'f <= {..'g}
+    val f : <'a>{x?'b : immut 'c; ..'d} -> <'a>{..'e} where 'b => 'c = int, ..'d <= {..'e}
+    val g : <'a>{x?'b : immut 'c; ..'d} -> <'c>{x?'e : immut 'c; ..'f} -> <'a>{..'g} where 'b => 'c = int, ..'d <= {..'g}, ..'f <= {..'g}
     ---
-    val g : <'a>{x?'b : int; ..'c} -> <'d>{x?'e : 'd; ..'f} -> <'a>{..'g} where 'b => int = 'd, ..'c <= {..'g}, ..'f <= {..'g}
-    val f : <'a>{x?'b : int; ..'c} -> <'a>{..'d} where 'b => int = 'e, ..'c <= {..'d}
+    val g : <'a>{x?'b : immut int; ..'c} -> <'d>{x?'e : immut 'd; ..'f} -> <'a>{..'g} where 'b => int = 'd, ..'c <= {..'g}, ..'f <= {..'g}
+    val f : <'a>{x?'b : immut int; ..'c} -> <'a>{..'d} where 'b => int = 'e, ..'c <= {..'d}
     |}]
 ;;
 
@@ -462,13 +462,13 @@ let pre d e = .< let y = .~d in let x = .~e in .~(w .<2>.) >.|}
        (Base_types_not_equal bool int)))
      @ t.stag:5:24-56)
     ---
-    val w : <int>{x?'_a : '_b; y?'_c : '_d; ..'_e} -> <int>{x?'_a : '_b; y?'_c : '_d; ..'_e} where '_a => '_b = ('_f -> '_f) * bool, '_a => '_b = (bool -> bool) * '_g, '_a => '_b = ('_h -> '_h) * '_i, '_c => '_d = bool, '_c => '_d = '_g, '_c => '_d = '_i, ..'_e <= {..'_j}, ..'_e <= {..'_k}
-    val pre : <'_a>{y?'b : '_a; ..'c} -> <'_d>{x?'e : '_d; y?'f : '_a; ..'g} -> <int>{..'h} where ..'c <= {..'h}, ..'g <= {..'h}, ..'_i <= {..'h}, ..'_i <= {..'_j}, ..'_i <= {..'_k}
-    val f : <'a>{y?'b : 'a; ..'c} -> <int>{x?'_d : '_e; y?'_f : '_g; ..'_h} -> <int>{..'i} where '_f => '_g = 'a, '_d => '_e = ('j -> 'j) * 'a, ..'c <= {..'i}, '_d => '_e = ('_k -> '_k) * bool, '_d => '_e = (bool -> bool) * '_l, '_d => '_e = ('_m -> '_m) * '_n, '_f => '_g = bool, '_f => '_g = '_l, '_f => '_g = '_n, ..'_h <= {..'_o}, ..'_h <= {..'_p}, ..'_h <= {..'i}
-    val g : unit -> <'a -> 'a>{x?'b : ('a -> 'a) * 'c; y?'d : 'c; ..'e} where '_f => '_g = ('a -> 'a) * 'c, '_h => '_i = 'c, ..'e <= {..'j}, '_f => '_g = ('_k -> '_k) * bool, '_f => '_g = (bool -> bool) * '_l, '_f => '_g = ('_m -> '_m) * '_n, '_h => '_i = bool, '_h => '_i = '_l, '_h => '_i = '_n, ..'_o <= {..'j}, ..'_o <= {..'_p}, ..'_o <= {..'_q}
+    val w : <int>{x?'_a : immut '_b; y?'_c : immut '_d; ..'_e} -> <int>{x?'_a : immut '_b; y?'_c : immut '_d; ..'_e} where '_a => '_b = ('_f -> '_f) * bool, '_a => '_b = (bool -> bool) * '_g, '_a => '_b = ('_h -> '_h) * '_i, '_c => '_d = bool, '_c => '_d = '_g, '_c => '_d = '_i, ..'_e <= {..'_j}, ..'_e <= {..'_k}
+    val pre : <'_a>{y?'b : immut '_a; ..'c} -> <'_d>{x?'e : immut '_d; y?'f : immut '_a; ..'g} -> <int>{..'h} where ..'c <= {..'h}, ..'g <= {..'h}, ..'_i <= {..'h}, ..'_i <= {..'_j}, ..'_i <= {..'_k}
+    val f : <'a>{y?'b : immut 'a; ..'c} -> <int>{x?'_d : immut '_e; y?'_f : immut '_g; ..'_h} -> <int>{..'i} where '_f => '_g = 'a, '_d => '_e = ('j -> 'j) * 'a, ..'c <= {..'i}, '_d => '_e = ('_k -> '_k) * bool, '_d => '_e = (bool -> bool) * '_l, '_d => '_e = ('_m -> '_m) * '_n, '_f => '_g = bool, '_f => '_g = '_l, '_f => '_g = '_n, ..'_h <= {..'_o}, ..'_h <= {..'_p}, ..'_h <= {..'i}
+    val g : unit -> <'a -> 'a>{x?'b : immut ('a -> 'a) * 'c; y?'d : immut 'c; ..'e} where '_f => '_g = ('a -> 'a) * 'c, '_h => '_i = 'c, ..'e <= {..'j}, '_f => '_g = ('_k -> '_k) * bool, '_f => '_g = (bool -> bool) * '_l, '_f => '_g = ('_m -> '_m) * '_n, '_h => '_i = bool, '_h => '_i = '_l, '_h => '_i = '_n, ..'_o <= {..'j}, ..'_o <= {..'_p}, ..'_o <= {..'_q}
     val r : <bool -> bool>{}
     val t : bool
-    val q : <int>{x?'_a : '_b; y?'_c : '_d; ..'_e} -> <int>{..'_f} where '_a => '_b = ('_g -> '_g) * bool, '_a => '_b = (bool -> bool) * '_h, '_a => '_b = ('_i -> '_i) * '_j, '_c => '_d = bool, '_c => '_d = '_h, '_c => '_d = '_j, ..'_e <= {..'_f}, ..'_e <= {..'_k}
+    val q : <int>{x?'_a : immut '_b; y?'_c : immut '_d; ..'_e} -> <int>{..'_f} where '_a => '_b = ('_g -> '_g) * bool, '_a => '_b = (bool -> bool) * '_h, '_a => '_b = ('_i -> '_i) * '_j, '_c => '_d = bool, '_c => '_d = '_h, '_c => '_d = '_j, ..'_e <= {..'_f}, ..'_e <= {..'_k}
     |}]
 ;;
 
@@ -520,13 +520,13 @@ let nested = .< .<add x 1>. >.
   [%expect
     {|
     val closed : <int>{..'a}
-    val open : <int>{x : mut?'a int; y : mut?'b int; ..'c}
+    val open : <int>{x : int; y : int; ..'a}
     val local : <int>{..'a}
     val persistent : <int>{..'a}
     val n : int
-    val not_persistent : <'a>{n : mut?'b 'a; ..'c}
-    val outer_arg : 'a -> <'b>{x : mut?'c 'b; ..'d}
-    val nested : <<int>{x : mut?'a int; ..'b}>{..'c}
+    val not_persistent : <'a>{n : 'a; ..'b}
+    val outer_arg : 'a -> <'b>{x : 'b; ..'c}
+    val nested : <<int>{x : int; ..'a}>{..'b}
     |}]
 ;;
 
@@ -535,7 +535,7 @@ let%expect_test "free variables of a quote are not generalized by inner lets" =
     {|
 let f u = .<let g v = x in add (g 1) 1; g true>.
 |};
-  [%expect {| val f : 'a -> <int>{x : mut?'b int; ..'c} |}]
+  [%expect {| val f : 'a -> <int>{x : int; ..'b} |}]
 ;;
 
 let%expect_test "splice with explicit substitutions" =
@@ -551,8 +551,8 @@ let closed = .<.~(.<1>.).{}>.
     {|
     val values : <int>{..'a}
     val reorder : <int>{..'a}
-    val from_scope : <int>{y : mut?'a int; ..'b}
-    val infers_sub : <int>{z : mut?'a int; ..'b}
+    val from_scope : <int>{y : int; ..'a}
+    val infers_sub : <int>{z : int; ..'a}
     val closed : <int>{..'a}
     |}]
 ;;
@@ -632,13 +632,13 @@ let wrong_type = .<let x = true in .~(.<add x 1>.)>.
   [%expect
     {|
     val bound : <int>{..'a}
-    val propagates : <int>{x : mut?'a int; ..'b}
+    val propagates : <int>{x : int; ..'a}
     val unknown_context : <'a>{..'b} -> <'a>{..'c} where ..'b <= {..'c}
-    val explicit_unknown : <'a>{x?'b : int} -> <'a>{..'c}
+    val explicit_unknown : <'a>{x?'b : immut int} -> <'a>{..'c}
     val two_unknown : <int>{..'a} -> <int>{..'b} -> <int>{..'c} where ..'a <= {..'c}, ..'b <= {..'c}
-    val known_and_unknown : <int>{x : int; ..'a} -> <int>{..'b} where ..'a <= {..'b}
+    val known_and_unknown : <int>{x : immut int; ..'a} -> <int>{..'b} where ..'a <= {..'b}
     val with_free_var : <int>{..'a} -> <int>{y : mut?'b int; ..'c} where ..'a <= {y : mut?'b int; ..'c}
-    val instantiated : <int>{y : mut?'_a int; z : mut?'_b int; ..'_c} where '_d <= '_b
+    val instantiated : <int>{y : int; z : mut?'_a int; ..'_b} where '_c <= '_a
     ((Unification_error
       (Type_mismatch (TCon bool ()) (TCon int ())
        (Base_types_not_equal bool int)))
@@ -757,7 +757,7 @@ let uses_closed = captures_x closed
   check (captures_x ^ "let wrong_type = captures_x .<add x 1>.\n");
   [%expect
     {|
-    val captures_x : <'a>{x?'b : bool; ..'c} -> <'a>{..'d} where ..'c <= {..'d}
+    val captures_x : <'a>{x?'b : immut bool; ..'c} -> <'a>{..'d} where ..'c <= {..'d}
     val closed : <int>{}
     val uses_x : <int>{..'_a}
     val uses_y : <int>{y : mut?'_a int; ..'_b} where '_c <= '_a
@@ -778,8 +778,8 @@ let unknown_applied = unknown .<add x y>.
 |};
   [%expect
     {|
-    val known : <int>{y : mut?'a int; ..'b}
-    val unknown : <'a>{x?'b : int; ..'c} -> <'a>{..'d} where ..'c <= {..'d}
+    val known : <int>{y : int; ..'a}
+    val unknown : <'a>{x?'b : immut int; ..'c} -> <'a>{..'d} where ..'c <= {..'d}
     val unknown_applied : <int>{y : mut?'_a int; ..'_b} where '_c <= '_a
     |}]
 ;;
@@ -799,11 +799,11 @@ let direct_use c = .<let y = .~(.<let x = true in .~c>.) in x>.
 |};
   [%expect
     {|
-    val twice : <'a>{x?'b : bool; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => bool = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
-    val propagates : <int>{x : mut?'_a bool; ..'_b}
-    val not_used : <int>{x?'_a : mut?'_b '_c; ..'_d} where '_e <= '_a, '_e => bool = '_c
-    val instance : <'a>{x?'b : bool; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => bool = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
-    val direct_use : <'a>{x?'b : bool; ..'c} -> <'d>{x : mut?'e 'd; ..'f} where ..'c <= {y?'g : 'a; ..'h}, ..'h <= {x : mut?'e 'd; ..'f}
+    val twice : <'a>{x?'b : immut bool; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => bool = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val propagates : <int>{x : bool; ..'_a}
+    val not_used : <int>{x?'_a : '_b; ..'_c} where '_d <= '_a, '_d => bool = '_b
+    val instance : <'a>{x?'b : immut bool; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => bool = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val direct_use : <'a>{x?'b : immut bool; ..'c} -> <'d>{x : mut?'e 'd; ..'f} where ..'c <= {y?'g : immut 'a; ..'h}, ..'h <= {x : mut?'e 'd; ..'f}
     |}]
 ;;
 
@@ -817,7 +817,7 @@ let not_toplevel = .<.~(add_free 1)>.
   [%expect
     {|
     val outer_persistent : <'a>{..'b} -> <'a>{..'c} where ..'b <= {..'c}
-    val add_free : 'a -> <'b>{add : mut?'c 'b; ..'d}
+    val add_free : 'a -> <'b>{add : 'b; ..'c}
     val not_toplevel : <'_a>{add : mut?'_b '_a; ..'_c} where '_d <= '_b
     |}]
 ;;
@@ -833,7 +833,7 @@ let known_z c =
 |};
   [%expect
     {|
-    val inner_splice : <<'a>{z?'b : int; ..'c}>{-z; ..'d} -> <<'a>{..'e}>{..'f} where ..'c <= {..'e}, ..'d <= {..'f}
+    val inner_splice : <<'a>{z?'b : immut int; ..'c}>{-z; ..'d} -> <<'a>{..'e}>{..'f} where ..'c <= {..'e}, ..'d <= {..'f}
     val uses_z : <<int>{..'_a}>{..'_b}
     ((Unification_error
       (Row_mismatch
@@ -860,7 +860,7 @@ let conflict = later_use .<cond x 1 1>.
     {|
     val f : <int>{..'a} -> <int>{x : mut?'b int; ..'c} where ..'a <= {x : mut?'b int; ..'c}
     val same : <int>{x : mut?'_a int; ..'_b} where '_c <= '_a
-    val other : <int>{x : mut?'_a int; y : mut?'_b int; ..'_c} where '_d <= '_b
+    val other : <int>{x : int; y : mut?'_a int; ..'_b} where '_c <= '_a
     ((Unification_error
       (Type_mismatch (TCon bool ()) (TCon int ())
        (Base_types_not_equal bool int)))
@@ -882,8 +882,8 @@ let after = .<add .~closed x>.
   [%expect
     {|
     val closed : <int>{}
-    val before : <int>{x : mut?'a int; ..'b}
-    val after : <int>{x : mut?'a int; ..'b}
+    val before : <int>{x : int; ..'a}
+    val after : <int>{x : int; ..'a}
     |}]
 ;;
 
@@ -899,12 +899,12 @@ let pong n c = .<add .~(ping (add n -1) c) y>.
   check (ping_pong ^ "let uses_z_as_closed : <int>{} = ping 2 .<z>.\n");
   [%expect
     {|
-    val ping : int -> <int>{y : mut?'a int; ..'b} -> <int>{y : mut?'a int; ..'b} where 'a <= 'c, ..'b <= {x?'d : int; y : mut?'c int; ..'e}, 'c <= 'a, ..'e <= {y : mut?'a int; ..'b}
-    val pong : int -> <int>{y : mut?'a int; ..'b} -> <int>{x?'c : int; y : mut?'d int; ..'e} where 'a <= 'd, ..'b <= {x?'c : int; y : mut?'d int; ..'e}, 'd <= 'a, ..'e <= {y : mut?'a int; ..'b}
-    val ping : int -> <int>{y : mut?'a int; ..'b} -> <int>{y : mut?'a int; ..'b} where 'a <= 'c, ..'b <= {x?'d : int; y : mut?'c int; ..'e}, 'c <= 'a, ..'e <= {y : mut?'a int; ..'b}
-    val pong : int -> <int>{y : mut?'a int; ..'b} -> <int>{x?'c : int; y : mut?'d int; ..'e} where 'a <= 'd, ..'b <= {x?'c : int; y : mut?'d int; ..'e}, 'd <= 'a, ..'e <= {y : mut?'a int; ..'b}
-    val uses_x : <int>{x : int; y : mut?'_a int; ..'_b} where '_a <= '_c, ..'_b <= {x : int; y : mut?'_c int; ..'_d}, '_c <= '_a, ..'_d <= {x : int; y : mut?'_a int; ..'_b}
-    val uses_z : <int>{y : mut?'_a int; z : mut?'_b int; ..'_c} where '_a <= '_d, '_b <= '_e, ..'_c <= {x?'_f : int; y : mut?'_d int; z : mut?'_e int; ..'_g}, '_d <= '_a, '_e <= '_b, ..'_g <= {y : mut?'_a int; z : mut?'_b int; ..'_c}
+    val ping : int -> <int>{y : mut?'a int; ..'b} -> <int>{y : mut?'a int; ..'b} where 'a <= 'c, ..'b <= {x?'d : immut int; y : mut?'c int; ..'e}, 'c <= 'a, ..'e <= {y : mut?'a int; ..'b}
+    val pong : int -> <int>{y : mut?'a int; ..'b} -> <int>{x?'c : immut int; y : mut?'d int; ..'e} where 'a <= 'd, ..'b <= {x?'c : immut int; y : mut?'d int; ..'e}, 'd <= 'a, ..'e <= {y : mut?'a int; ..'b}
+    val ping : int -> <int>{y : mut?'a int; ..'b} -> <int>{y : mut?'a int; ..'b} where 'a <= 'c, ..'b <= {x?'d : immut int; y : mut?'c int; ..'e}, 'c <= 'a, ..'e <= {y : mut?'a int; ..'b}
+    val pong : int -> <int>{y : mut?'a int; ..'b} -> <int>{x?'c : immut int; y : mut?'d int; ..'e} where 'a <= 'd, ..'b <= {x?'c : immut int; y : mut?'d int; ..'e}, 'd <= 'a, ..'e <= {y : mut?'a int; ..'b}
+    val uses_x : <int>{x : immut int; y : mut?'_a int; ..'_b} where '_a <= '_c, ..'_b <= {x : immut int; y : mut?'_c int; ..'_d}, '_c <= '_a, ..'_d <= {x : immut int; y : mut?'_a int; ..'_b}
+    val uses_z : <int>{y : mut?'_a int; z : mut?'_b int; ..'_c} where '_a <= '_d, '_b <= '_e, ..'_c <= {x?'_f : immut int; y : mut?'_d int; z : mut?'_e int; ..'_g}, '_d <= '_a, '_e <= '_b, ..'_g <= {y : mut?'_a int; z : mut?'_b int; ..'_c}
     ((Unification_error
       (Row_mismatch REmpty
        (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
@@ -971,11 +971,11 @@ let%expect_test "using a name before or after splicing code that may use it" =
   [%expect
     {|
     val closed : <int>{}
-    val uses_x_then_splices : <int>{x?'a : int; ..'b} -> <int>{x?'a : int; ..'b} where ..'b <= {x : mut?'c int; ..'d}
-    val splices_then_uses_x : <int>{x?'a : int; ..'b} -> <int>{x?'a : int; ..'b} where ..'b <= {x : mut?'c int; ..'d}
+    val uses_x_then_splices : <int>{x?'a : immut int; ..'b} -> <int>{x?'a : immut int; ..'b} where ..'b <= {x : int; ..'c}
+    val splices_then_uses_x : <int>{x?'a : immut int; ..'b} -> <int>{x?'a : immut int; ..'b} where ..'b <= {x : int; ..'c}
     val uses_x_then_splices_closed : <int>{}
     val closed : <int>{}
-    val splices_then_uses_x : <int>{x?'a : int; ..'b} -> <int>{x?'a : int; ..'b} where ..'b <= {x : mut?'c int; ..'d}
+    val splices_then_uses_x : <int>{x?'a : immut int; ..'b} -> <int>{x?'a : immut int; ..'b} where ..'b <= {x : int; ..'c}
     val splices_then_uses_x_closed : <int>{}
     |}]
 ;;
@@ -1003,16 +1003,16 @@ let f c = |}
     {|
     close first
     val closeit : <int>{} -> unit
-    val g : <'a>{x?'b : int; ..'c} -> <'a>{x?'b : int; ..'c}
-    val f : <int>{} -> <int>{x : mut?'a int; ..'b}
+    val g : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'b : immut int; ..'c}
+    val f : <int>{} -> <int>{x : int; ..'a}
     close last
     val closeit : <int>{} -> unit
-    val g : <'a>{x?'b : int; ..'c} -> <'a>{x?'b : int; ..'c}
-    val f : <int>{} -> <int>{x : mut?'a int; ..'b}
+    val g : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'b : immut int; ..'c}
+    val f : <int>{} -> <int>{x : int; ..'a}
     close between
     val closeit : <int>{} -> unit
-    val g : <'a>{x?'b : int; ..'c} -> <'a>{x?'b : int; ..'c}
-    val f : <int>{} -> <int>{x : mut?'a int; ..'b}
+    val g : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'b : immut int; ..'c}
+    val f : <int>{} -> <int>{x : int; ..'a}
     |}]
 ;;
 
@@ -1046,7 +1046,7 @@ let%expect_test
     val needx : <int>{x : int} -> unit
     val known_before : <int>{x : int} -> <int>{} -> unit
     val known_after : <int>{x : int} -> <int>{} -> unit
-    val never_known : <int>{x : mut?'a int; ..'b} -> <int>{} -> unit
+    val never_known : <int>{x : int; ..'a} -> <int>{} -> unit
     |}]
 ;;
 
@@ -1073,7 +1073,7 @@ let%expect_test "instances of a scheme bounded by an outer presence" =
      @ t.stag:2:78-89)
     val closeit : <int>{} -> unit
     val needx : <int>{x : int} -> unit
-    val f : <int>{x : int} -> <int>{x : int}
+    val f : <int>{x : mut?'a int} -> <int>{x : mut?'a int}
     |}]
 ;;
 
@@ -1095,12 +1095,12 @@ let spliced e k =
   [%expect
     {|
     val closeit : <int>{} -> unit
-    val unused : <'a>{_?'b : 'a; ..'c} -> <'a>{_?'b : 'a; ..'c}
-    val used : <'a>{_?'b : 'a; ..'c} -> <'a>{_?'b : 'a; ..'c}
-    val partial : <'a>{_?'b : 'a; ..'c} -> <'d>{_?'e : 'a; ..'f} -> <'d>{..'g} where ..'c <= {..'g}, ..'f <= {..'g}
-    val lh : 'a -> <<'b>{x?'c : int; ..'d} -> <'b>{x?'e : mut?'f 'g; ..'h}>{e : mut?'i <'b>{x?'e : mut?'f 'g; ..'h}; ..'j} where 'c <= 'e, 'c => int = 'g, ..'d <= {x?'e : mut?'f 'g; ..'h}
-    val not_spliced : 'a -> <int>{} -> <int>{e : mut?'b <'c>{x?'d : mut?'e 'f; ..'g}; ..'h}
-    val spliced : 'a -> <int>{} -> <int>{e : mut?'b <'c>{x?'d : mut?'e 'f; ..'g}; ..'h}
+    val unused : <'a>{_?'b : immut 'a; ..'c} -> <'a>{_?'b : immut 'a; ..'c}
+    val used : <'a>{_?'b : immut 'a; ..'c} -> <'a>{_?'b : immut 'a; ..'c}
+    val partial : <'a>{_?'b : immut 'a; ..'c} -> <'d>{_?'e : immut 'a; ..'f} -> <'d>{..'g} where ..'c <= {..'g}, ..'f <= {..'g}
+    val lh : 'a -> <<'b>{x?'c : immut int; ..'d} -> <'b>{x?'e : mut?'f 'g; ..'h}>{e : <'b>{x?'e : mut?'f 'g; ..'h}; ..'i} where 'c <= 'e, 'c => int = 'g, ..'d <= {x?'e : mut?'f 'g; ..'h}
+    val not_spliced : 'a -> <int>{} -> <int>{e : <'b>{x?'c : 'd; ..'e}; ..'f}
+    val spliced : 'a -> <int>{} -> <int>{e : <'b>{x?'c : 'd; ..'e}; ..'f}
     |}]
 ;;
 
@@ -1120,11 +1120,11 @@ let partial e = let h c = .< let _ = .~e in .~c >. in let _ = h .< 1 >. in h
   [%expect
     {|
     val closeit : <int>{} -> unit
-    val f : <'a>{_?'b : 'a; ..'c} -> <int>{..'d} where ..'c <= {..'d}
-    val partial : <'a>{_?'b : 'a; ..'c} -> <'d>{_?'e : 'a; ..'f} -> <'d>{..'g} where ..'c <= {..'g}, ..'f <= {..'g}
+    val f : <'a>{_?'b : immut 'a; ..'c} -> <int>{..'d} where ..'c <= {..'d}
+    val partial : <'a>{_?'b : immut 'a; ..'c} -> <'d>{_?'e : immut 'a; ..'f} -> <'d>{..'g} where ..'c <= {..'g}, ..'f <= {..'g}
     val closeit : <int>{} -> unit
-    val f : <'a>{_?'b : 'a; ..'c} -> <int>{..'d} where ..'c <= {..'d}
-    val partial : <'a>{_?'b : 'a; ..'c} -> <'d>{_?'e : 'a; ..'f} -> <'d>{..'g} where ..'c <= {..'g}, ..'f <= {..'g}
+    val f : <'a>{_?'b : immut 'a; ..'c} -> <int>{..'d} where ..'c <= {..'d}
+    val partial : <'a>{_?'b : immut 'a; ..'c} -> <'d>{_?'e : immut 'a; ..'f} -> <'d>{..'g} where ..'c <= {..'g}, ..'f <= {..'g}
     val ok : <int>{..'_a}
     ((Unification_error
       (Row_mismatch REmpty
@@ -1155,11 +1155,11 @@ let arg_closed (c : <int>{}) = twice c
          uses_x);
   [%expect
     {|
-    val twice : <'a>{x?'b : bool; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => bool = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val twice : <'a>{x?'b : immut bool; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => bool = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
     val closeit : <int>{} -> unit
-    val arg_uses_x : <int>{x : mut?'_a bool; ..'_b}
+    val arg_uses_x : <int>{x : bool; ..'_a}
     val result_closed : <int>{-x; ..'a} -> <int>{-x; ..'a} where ..'a <= {}
-    val arg_closed : <int>{} -> <int>{x?'a : mut?'b 'c; ..'d}
+    val arg_closed : <int>{} -> <int>{x?'a : 'b; ..'c}
     |}]
 ;;
 
@@ -1199,10 +1199,10 @@ let%expect_test "references to toplevels in quotes don't join their components" 
   check (b ^ a);
   [%expect
     {|
-    val a : <'a>{b : mut?'b 'a; ..'c}
-    val b : <'a>{b : mut?'b 'a; ..'c} * int
-    val b : <'a>{b : mut?'b 'a; ..'c} * int
-    val a : <'a>{b : mut?'b 'a; ..'c}
+    val a : <'a>{b : 'a; ..'b}
+    val b : <'a>{b : 'a; ..'b} * int
+    val b : <'a>{b : 'a; ..'b} * int
+    val a : <'a>{b : 'a; ..'b}
     |}]
 ;;
 
@@ -1235,22 +1235,22 @@ let%expect_test "row bounds are solved in any order" =
     closed before
     val closeit : <int>{} -> unit
     val needx : <int>{x : int} -> unit
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
     val f : <int>{} -> <int>{} -> unit
     closed between
     val closeit : <int>{} -> unit
     val needx : <int>{x : int} -> unit
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
     val f : <int>{} -> <int>{} -> unit
     closed after
     val closeit : <int>{} -> unit
     val needx : <int>{x : int} -> unit
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
     val f : <int>{} -> <int>{} -> unit
     never closed
     val closeit : <int>{} -> unit
     val needx : <int>{x : int} -> unit
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
     val f : <int>{-x; ..'a} -> <int>{} -> unit where ..'a <= {}
     |}]
 ;;
@@ -1278,37 +1278,37 @@ let%expect_test "instances of a scheme bounded by an outer row" =
     unused
     val closeit : <int>{} -> unit
     val needy : <int>{y : int; ..'a} -> unit
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
-    val f : <int>{x?'a : int; ..'b} -> <int>{x?'c : mut?'d 'e; ..'f} -> <int>{x?'c : mut?'d 'e; ..'f} where 'a <= 'c, 'a => int = 'e, ..'b <= {x?'c : mut?'d 'e; ..'f}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val f : <int>{x?'a : immut int; ..'b} -> <int>{x?'c : mut?'d 'e; ..'f} -> <int>{x?'c : mut?'d 'e; ..'f} where 'a <= 'c, 'a => int = 'e, ..'b <= {x?'c : mut?'d 'e; ..'f}
     unused, k closed
     val closeit : <int>{} -> unit
     val needy : <int>{y : int; ..'a} -> unit
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
     val f : <int>{-x; ..'a} -> <int>{} -> unit where ..'a <= {}
     used before
     val closeit : <int>{} -> unit
     val needy : <int>{y : int; ..'a} -> unit
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
-    val f : <int>{x?'a : int; y : int; ..'b} -> <int>{x?'c : mut?'d 'e; y : mut?'f int; ..'g} -> <int>{x?'c : mut?'d 'e; y : mut?'f int; ..'g} where 'a <= 'c, 'a => int = 'e, ..'b <= {x?'c : mut?'d 'e; y : mut?'f int; ..'g}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val f : <int>{x?'a : immut int; y : int; ..'b} -> <int>{x?'c : mut?'d 'e; y : mut?'f int; ..'g} -> <int>{x?'c : mut?'d 'e; y : mut?'f int; ..'g} where 'a <= 'c, 'a => int = 'e, ..'b <= {x?'c : mut?'d 'e; y : mut?'f int; ..'g}, 'h <= 'f
     used after
     val closeit : <int>{} -> unit
     val needy : <int>{y : int; ..'a} -> unit
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
-    val f : <int>{x?'a : int; y : int; ..'b} -> <int>{x?'c : mut?'d 'e; y : mut?'f int; ..'g} -> unit where 'a <= 'c, 'a => int = 'e, ..'b <= {x?'c : mut?'d 'e; y : mut?'f int; ..'g}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val f : <int>{x?'a : immut int; y : int; ..'b} -> <int>{x?'c : mut?'d 'e; y : mut?'f int; ..'g} -> unit where 'a <= 'c, 'a => int = 'e, ..'b <= {x?'c : mut?'d 'e; y : mut?'f int; ..'g}, 'h <= 'f
     used before, k closed
     ((Unification_error
       (Row_mismatch REmpty
        (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 124 1)))
+        (RVar (Unbound 126 1)))
        (Missing_label y)))
      @ t.stag:4:77-78)
     used after, k closed
     ((Unification_error
-      (Row_mismatch (RExtend y Present (TCon int ()) (RVar (Unbound 112 1)))
+      (Row_mismatch (RExtend y Present (TCon int ()) (RVar (Unbound 114 1)))
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
         (RVar
          (Link
-          (RExtend y (PVar (Link Absent)) (TCon int ()) (RVar (Unbound 114 1))))))
+          (RExtend y (PVar (Link Absent)) (TCon int ()) (RVar (Unbound 116 1))))))
        (Presence_mismatch y)))
      @ t.stag:4:77-78)
     |}]
@@ -1364,17 +1364,17 @@ let%expect_test "an entry code may use only gets a type if it is present" =
   [%expect
     {|
     val closeit : <int>{} -> unit
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
     val closed_first : <int>{} -> <int>{..'a}
     val closeit : <int>{} -> unit
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
     val closed_between : <int>{} -> <int>{..'a}
     val closeit : <int>{} -> unit
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
     val closed_last : <int>{} -> unit
     val closeit : <int>{} -> unit
-    val tw : <'a>{x?'b : int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
-    val never_closed : <'a>{-x; ..'b} -> <'a>{..'c} where ..'b <= {..'c}, ..'b <= {x?'d : mut?'e 'f; ..'g}
+    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
+    val never_closed : <'a>{-x; ..'b} -> <'a>{..'c} where ..'b <= {..'c}, ..'b <= {x?'d : 'e; ..'f}
     |}]
 ;;
 
@@ -1401,7 +1401,7 @@ let%expect_test "a chain of lets each instantiating the previous one" =
   print_s [%message (constraints : int)];
   [%expect
     {|
-    val f : <int>{x?'a : int; ..'b} -> <int>{x?'c : mut?'d 'e; ..'f} -> <int>{x?'c : mut?'d 'e; ..'f} where 'a <= 'c, 'a => int = 'e, ..'b <= {x?'c : mut?'d 'e; ..'f}
+    val f : <int>{x?'a : immut int; ..'b} -> <int>{x?'c : mut?'d 'e; ..'f} -> <int>{x?'c : mut?'d 'e; ..'f} where 'a <= 'c, 'a => int = 'e, ..'b <= {x?'c : mut?'d 'e; ..'f}
     (constraints 3)
     |}]
 ;;

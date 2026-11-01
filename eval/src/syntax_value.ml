@@ -360,6 +360,7 @@ module Of_value = struct
            | "Record", 1 -> Record (arg 0 (row ~labels:Label ~loc))
            | "Variant", 1 -> Variant (arg 0 (row ~labels:Label ~loc))
            | "Mut", 1 -> Mut (arg 0 (type_expr ~loc))
+           | "Immut", 1 -> Immut (arg 0 (type_expr ~loc))
            | "Splice", 1 -> Splice (arg 0 (expr ~loc))
            | _ -> raise Bad_arguments))
 

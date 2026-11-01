@@ -1082,7 +1082,9 @@ let f u =
 let g u = x <- (match u with _ -> 1); x <- (fun u -> u)
 let h u = x <- match u with _ -> 1
 let i u = ([x <- 2; y <- (3, 4); (x <- let z = 1 in z); 5], {`a = x <- 2; `b = 1})
-let c : <unit>{x : mut int; y : int; z : mut (int -> int); w : mut <int>{a : mut int}; ..'r} = c
+let c : <unit>{x : mut int; y : int; z : mut (int -> int); w : mut <int>{a : immut int}; v : immut bool; ..'r} = c
+type immut = int
+let d : <int>{x : immut; y : immut immut} = d
 |};
   [%expect
     {|
@@ -1108,9 +1110,14 @@ let c : <unit>{x : mut int; y : int; z : mut (int -> int); w : mut <int>{a : mut
     let c : <unit>{x : mut int;
                    y : int;
                    z : mut int -> int;
-                   w : mut <int>{a : mut int};
+                   w : mut <int>{a : immut int};
+                   v : immut bool;
                    ..'r} =
       c
+
+    type immut = int
+
+    let d : <int>{x : immut; y : immut immut} = d
     |}];
   print
     ~width:30

@@ -312,7 +312,7 @@ let in_quote = .<.~(.~(.<.<1>.>.))>.
      (Toplevel_splice
       (code
        (Quote (Tuple ((Var (Free x) : 'a) (Var (Free x) : 'a)) : "'a * 'a") :
-        "<'a * 'a>{x : 'a}"))
+        "<'a * 'a>{x : immut 'a}"))
       (expansion
        (Tuple ((Var (Bound (Local x/17)) : 'a) (Var (Bound (Local x/17)) : 'a)) :
         "'a * 'a"))
@@ -323,7 +323,7 @@ let in_quote = .<.~(.~(.<.<1>.>.))>.
        (Quote
         (Let (ident z/19) (args ()) (generalized true) (body (Var (Free x) : 'a))
          (in_ (Var (Bound (Local z/19)) : 'a)) : 'a)
-        : "<'a>{x : 'a}"))
+        : "<'a>{x : immut 'a}"))
       (expansion
        (Let (ident z/20) (args ()) (generalized true)
         (body (Var (Bound (Local y/18)) : 'a))

@@ -853,7 +853,7 @@ type s = {x : string}
       val v : r
     end
     type s = { x : string }
-    val a : <string>{N.v : mut?'a s; ..'b}
+    val a : <string>{N.v : s; ..'a}
     -- evaluated at compile time
     -- evaluated
     (N.v (N.r (x 1) (y true)))

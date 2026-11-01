@@ -14,7 +14,7 @@ Messages of errors about mutable variables.
   > let assigns = .<z <- 1>.
   > let plain = .<let z = 0 in .~assigns>.
   > let by_expr = .<.~assigns.{z = 1}>.
-  > let annotated : <unit>{z : int} = assigns
+  > let annotated : <unit>{z : immut int} = assigns
   > X
   $ stag check a.stag
   File "a.stag", line 1, characters 29-30:
@@ -49,9 +49,9 @@ Messages of errors about mutable variables.
   13 | let by_expr = .<.~assigns.{z = 1}>.
                        ^^^^^^^^^^^^^^^^^
   Error: The spliced code assigns z (its context has z : mut ...), so it must be provided by a variable bound by [let mut] or a mutable toplevel
-  File "a.stag", line 14, characters 34-41:
-  14 | let annotated : <unit>{z : int} = assigns
-                                         ^^^^^^^
-  Error: The row {`z : mut int; ..'_a} is incompatible with the row {`z : int}
+  File "a.stag", line 14, characters 40-47:
+  14 | let annotated : <unit>{z : immut int} = assigns
+                                               ^^^^^^^
+  Error: The row {z : mut int; ..'_a} is incompatible with the row {z : immut int}
   The code of one assigns z, which the other requires it not to.
   [1]

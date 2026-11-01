@@ -97,8 +97,10 @@ module Stag = struct
       | Code of {`inner : t; `context : Row.t}
       | Record of Row.t
       | Variant of Row.t
-      (* [mut t], the type of a context entry the code assigns. *)
+      (* [mut t] and [immut t], the type of a context entry the code assigns
+         and doesn't assign. Without either, it may or may not. *)
       | Mut of t
+      | Immut of t
       | Splice of Expr.t
 
     (* Labels are those of polymorphic records and variants, except in the

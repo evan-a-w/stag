@@ -757,6 +757,12 @@ module Printer = struct
       (* The bounds of the variables reached, in order of appearance, to
          print after the types. *)
     ; kept : Int.Hash_set.t
+    ; elided : Int.Hash_set.t
+      (* The assignment variables written as an unmarked entry, as each is
+         the only occurrence of an unconstrained one, so reads back as it. *)
+    ; mutable counting : int Int.Table.t option
+      (* Set while rendering only to count how often each presence variable
+         is named. *)
     }
 
   let create ?(type_name = fun name -> Prelude_path.to_string_hum name) () =
@@ -769,6 +775,8 @@ module Printer = struct
     ; recursive = None
     ; bounded = Queue.create ()
     ; kept = Int.Hash_set.create ()
+    ; elided = Int.Hash_set.create ()
+    ; counting = None
     }
   ;;
 
@@ -839,7 +847,25 @@ module Printer = struct
        | Present | Absent | PVar _ -> entry :: rest')
   ;;
 
-  let sorted_row_entries t row ~label ~entry ~row_var_name ~presence_var_name =
+  let assigned_marker t assigned ~presence_var_name =
+    match canonical_presence assigned with
+    | Present -> "mut "
+    | Absent -> "immut "
+    | PVar var ->
+      if Hash_set.mem t.elided var.id
+      then ""
+      else sprintf "mut?%s " (presence_var_name t var)
+  ;;
+
+  let sorted_row_entries
+        t
+        row
+        ~context
+        ~label
+        ~entry
+        ~row_var_name
+        ~presence_var_name
+    =
     let entries, tail = row_entries row in
     let entries =
       (match tail with
@@ -854,10 +880,10 @@ module Printer = struct
             name
             ty
             ~assigned:
-              (match canonical_presence assigned with
-               | Present -> "mut "
-               | Absent -> ""
-               | PVar var -> sprintf "mut?%s " (presence_var_name t var))
+              (match context, canonical_presence assigned with
+               | true, _ -> assigned_marker t assigned ~presence_var_name
+               | false, Present -> "mut "
+               | false, (Absent | PVar _) -> "")
         in
         match canonical_presence presence with
         | Present -> entry name ty
@@ -912,7 +938,10 @@ module Printer = struct
         (List.map tys ~f:(ty_to_string t ~prec:2) |> String.concat ~sep:" * ")
     | TCode { inner; context } ->
       let inner = ty_to_string t ~prec:0 inner in
-      sprintf "<%s>%s" inner (row_to_string t context ~label:Fn.id)
+      sprintf
+        "<%s>%s"
+        inner
+        (row_to_string t context ~label:Fn.id ~context:true)
     | TRecord { row; _ } -> record_to_string t row
     | TVariant { row; _ } -> variant_to_string t row
     | TVar var -> bounded_var_name t var ~prefix:"" ~bounds:(fun _ -> [])
@@ -922,6 +951,7 @@ module Printer = struct
       sorted_row_entries
         t
         row
+        ~context:false
         ~label:(fun tag -> "`" ^ tag)
         ~row_var_name
         ~presence_var_name
@@ -939,13 +969,17 @@ module Printer = struct
   and row_var_name t var =
     bounded_var_name t var ~prefix:".." ~bounds:(fun name ->
       List.map var.bounds ~f:(fun bound ->
-        sprintf "%s <= %s" name (row_to_string t bound.row ~label:Fn.id)))
+        sprintf
+          "%s <= %s"
+          name
+          (row_to_string t bound.row ~label:Fn.id ~context:true)))
 
   (* A bound is printed with its lower variable, unless only the upper one
      keeps it, as a generic variable does for a variable it is not generalized
      with. A lower variable not printed otherwise is named here, so prints its
      bounds later. *)
   and presence_var_name t (var : (presence, presence_bound) Var.t) =
+    Option.iter t.counting ~f:(fun counts -> Hashtbl.incr counts var.id);
     let others side =
       List.filter_map var.bounds ~f:(fun bound ->
         match side, bound with
@@ -998,13 +1032,14 @@ module Printer = struct
       (ty_to_string t ~prec:0 ty2)
 
   and record_to_string t row =
-    row_to_string t row ~label:(fun name -> "`" ^ name)
+    row_to_string t row ~label:(fun name -> "`" ^ name) ~context:false
 
-  and row_to_string t row ~label =
+  and row_to_string t row ~label ~context =
     let entries, tail =
       sorted_row_entries
         t
         row
+        ~context
         ~label
         ~row_var_name
         ~presence_var_name
@@ -1012,20 +1047,6 @@ module Printer = struct
           sprintf "%s : %s%s" name assigned (ty_to_string t ~prec:0 ty))
     in
     "{" ^ String.concat ~sep:"; " (entries @ Option.to_list tail) ^ "}"
-  ;;
-
-  let ty t ty =
-    Hashtbl.clear t.introduced;
-    ty_to_string t ~prec:0 ty
-  ;;
-
-  let recursive t ty ~name =
-    Hashtbl.clear t.introduced;
-    let body = canonical_ty ty in
-    t.recursive <- Some (body, name);
-    let printed = structure t ~prec:0 body in
-    t.recursive <- None;
-    printed
   ;;
 
   let rec bounds t =
@@ -1038,10 +1059,13 @@ module Printer = struct
       let lower =
         match canonical_row (RVar lower) with
         | RVar var -> row_var_name t var
-        | row -> row_to_string t row ~label:Fn.id
+        | row -> row_to_string t row ~label:Fn.id ~context:true
       in
       let this =
-        sprintf "%s <= %s" lower (row_to_string t bound.row ~label:Fn.id)
+        sprintf
+          "%s <= %s"
+          lower
+          (row_to_string t bound.row ~label:Fn.id ~context:true)
       in
       this :: bounds t
     | Some (Kept (If_present_kept { ty1; ty2; _ })) when same_ty ty1 ty2 ->
@@ -1060,6 +1084,53 @@ module Printer = struct
          in
          this :: bounds t
        | Absent -> bounds t)
+  ;;
+
+  (* Renders with [render] once, on a copy, to find the assignment variables
+     named once, so in no bound either, to elide, then for real. The copy
+     prints the bounds it reaches, not those queued before, which print with
+     [t]. *)
+  let eliding t ~render =
+    let counts = Int.Table.create () in
+    let copy =
+      { t with
+        names = Hashtbl.copy t.names
+      ; cycle_names = Hashtbl.copy t.cycle_names
+      ; printing = Hashtbl.copy t.printing
+      ; introduced = Hashtbl.copy t.introduced
+      ; bounded = Queue.create ()
+      ; kept = Hash_set.copy t.kept
+      ; elided = Hash_set.copy t.elided
+      ; counting = Some counts
+      }
+    in
+    ignore (render copy : string);
+    ignore (bounds copy : string list);
+    Hashtbl.iteri counts ~f:(fun ~key:id ~data:count ->
+      if count = 1 && not (Hashtbl.mem t.names id) then Hash_set.add t.elided id);
+    render t
+  ;;
+
+  let ty t ty =
+    eliding t ~render:(fun t ->
+      Hashtbl.clear t.introduced;
+      ty_to_string t ~prec:0 ty)
+  ;;
+
+  let context t row =
+    eliding t ~render:(fun t ->
+      Hashtbl.clear t.introduced;
+      row_to_string t row ~label:Fn.id ~context:true)
+  ;;
+
+  let recursive t ty ~name =
+    eliding t ~render:(fun t ->
+      Hashtbl.clear t.introduced;
+      let body = canonical_ty ty in
+      t.recursive <- Some (body, name);
+      let printed = structure t ~prec:0 body in
+      t.recursive <- None;
+      printed)
   ;;
 
   let where t =

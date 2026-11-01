@@ -62,7 +62,7 @@ let%expect_test "the prelude's signature" =
         type t = Int of int | Bool of bool | String of string | Char of char | Unit
       end
       module Type_expr : sig
-        type t = Var of string | Con of Path.t[Type_ref.t] * list[Arg.t] | Arrow of t * t | Tuple of list[t] | Code of {`context : Row.t; `inner : t} | Record of Row.t | Variant of Row.t | Mut of t | Splice of Expr.t
+        type t = Var of string | Con of Path.t[Type_ref.t] * list[Arg.t] | Arrow of t * t | Tuple of list[t] | Code of {`context : Row.t; `inner : t} | Record of Row.t | Variant of Row.t | Mut of t | Immut of t | Splice of Expr.t
         module Row : sig
           type t = Empty | Extend of string * Type_expr.t * t | Var of string
         end
@@ -529,7 +529,7 @@ type f = int -> bool * string
 type tags[{..'r}] = [`A of int | `B; ..'r]
 type closed = [`A | `B of {}]
 type code['a] = <'a>{x : int; y : bool; ..'r} -> <int>{}
-type assigns = <unit>{x : mut int; y : mut (int -> int)}
+type assigns = <unit>{x : mut int; y : mut (int -> int); z : immut int}
 type args = with_x[{`y : int}] * list[{}] * list['a] * with_x[{..'r}]
 |}
   ; {|
@@ -675,7 +675,7 @@ let%expect_test "constructors are made as the typechecker resolves them" =
            : bool)];
   [%expect
     {|
-    ((constructors 82)
+    ((constructors 83)
      (reflected
       (prelude.Stag.Type.Kind.Alias prelude.Stag.Type.Kind.Record
        prelude.Stag.Type.Kind.Variant prelude.Stag.Type_ref.Path.Prelude

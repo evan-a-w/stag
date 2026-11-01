@@ -546,11 +546,23 @@ let%expect_test "mutable variables: hover and definition" =
 
 let%expect_test "hover on code that assigns a free variable" =
   Client.with_server
-    ~files:[ "a.stag", "let incr = .<x <- Int.add x 1>.\n" ]
+    ~files:
+      [ ( "a.stag"
+        , "let incr = .<x <- Int.add x 1>.\n\
+           let g c = .<let x = 1 in .~c>.\n\
+           let read = .<x>.\n" )
+      ]
     (fun client ->
        Client.did_open client "a.stag";
        hover client ~line:0 ~character:4;
-       [%expect {| 0:4-0:8 ```stag A.incr : <unit>{x : mut int; ..'a} ``` |}])
+       hover client ~line:1 ~character:4;
+       hover client ~line:2 ~character:4;
+       [%expect
+         {|
+         0:4-0:8 ```stag A.incr : <unit>{x : mut int; ..'a} ```
+         1:4-1:5 ```stag A.g : <'a>{x?'b : immut int; ..'c} -> <'a>{..'d} ```
+         2:4-2:8 ```stag A.read : <'a>{x : 'a; ..'b} ```
+         |}])
 ;;
 
 let%expect_test "hover on the variables of a pattern that failed to check" =

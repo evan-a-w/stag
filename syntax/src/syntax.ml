@@ -112,6 +112,9 @@ module Defs = struct
     | Mut of type_expr
     (** [mut t]: the type of an entry of a code type's context the code
         assigns. *)
+    | Immut of type_expr
+    (** [immut t]: the type of an entry of a code type's context the code
+        doesn't assign. Without either, it may or may not. *)
     | Splice of expr
     (** [.~e]: the type [e : Stag.Type_expr.t] evaluates to at compile time, or
       an antiquote in a struct quote. *)
@@ -277,6 +280,7 @@ module Type_expr = struct
     | Record of row
     | Variant of row
     | Mut of t
+    | Immut of t
     | Splice of expr
   [@@deriving rust]
 

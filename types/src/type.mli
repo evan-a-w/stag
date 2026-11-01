@@ -262,6 +262,9 @@ module Printer : sig
 
   val ty : t -> ty -> string
 
+  (** Renders [row] as the context of a code type. *)
+  val context : t -> row -> string
+
   (** Renders [ty] with the occurrences of itself within it as [name]. *)
   val recursive : t -> ty -> name:string -> string
 

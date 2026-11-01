@@ -44,6 +44,7 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
       | Record r -> Record (row r)
       | Variant r -> Variant (row r)
       | Mut t -> Mut (type_expr t)
+      | Immut t -> Immut (type_expr t)
       | Splice e -> Splice (expr String.Set.empty e)
     in
     { t with txt }

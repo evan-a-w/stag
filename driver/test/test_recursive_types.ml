@@ -175,9 +175,9 @@ let quoted_ones = .<let ones = `Cons (1, ones) in ones>.
     {|
     val compile : ([`Add of 'a * 'a | `Code of <int>{..'b}] as 'a) -> <int>{..'b}
     val len : ([`Cons of 'a * 'b | `Nil] as 'b) -> int
-    val free : <int>{l : mut?'a ([`Cons of 'b * 'c | `Nil] as 'c); ..'d}
+    val free : <int>{l : ([`Cons of 'a * 'b | `Nil] as 'b); ..'c}
     val provided : <int>{..'a}
-    val spliced_in : 'a -> <int>{l : mut?'b ([`Cons of 'c * 'd | `Nil] as 'd); ..'e}
+    val spliced_in : 'a -> <int>{l : ([`Cons of 'b * 'c | `Nil] as 'c); ..'d}
     val quoted_ones : <([`Cons of int * 'a; ..'b] as 'a)>{..'c}
     |}]
 ;;
@@ -264,7 +264,7 @@ let%expect_test "guarded cycles" =
     (Ok ())
     ([`A of 'a -> int] as 'a)
     (Ok ())
-    <int>{x : ({`y : <int>{x : 'a}} as 'a)}
+    <int>{x : immut ({`y : <int>{x : immut 'a}} as 'a)}
     (Ok ())
     ([`A of 'a -> int] as 'a) -> int
     (Ok ())
@@ -668,7 +668,7 @@ let%expect_test "bounds with cyclic types" =
   [%expect
     {|
     (Ok ())
-    {..'_a} where ..'_a <= {x : ([`Cons of int * 'b | `Nil] as 'b); ..'_c}
+    {..'_a} where ..'_a <= {x : immut ([`Cons of int * 'b | `Nil] as 'b); ..'_c}
     (Ok ())
     (Ok ())
     {`x : ([`Cons of int * 'a | `Nil] as 'a)}
@@ -1210,10 +1210,10 @@ let%expect_test "instantiation copies generic presences and bounds" =
     {|
     (Ok ())
     (Ok ())
-    ({`self : 'a; `x?'b : int} as 'a) * {..'c} where ..'c <= {x : 'd}
-    (({`self : '_a; `x?'_b : int} as '_a) * {..'_c}) * (({`self : '_d; `x?'_e : int} as '_d) * {..'_f}) where ..'_c <= {x : '_g}, ..'_f <= {x : '_h}
+    ({`self : 'a; `x?'b : int} as 'a) * {..'c} where ..'c <= {x : immut 'd}
+    (({`self : '_a; `x?'_b : int} as '_a) * {..'_c}) * (({`self : '_d; `x?'_e : int} as '_d) * {..'_f}) where ..'_c <= {x : immut '_g}, ..'_f <= {x : immut '_h}
     (Ok ())
     (Ok ())
-    (({`self : 'a} as 'a) * {..'_b}) * (({`self : 'c; `x : int} as 'c) * {..'_d}) * (({`self : 'e; `x?'f : int} as 'e) * {..'g}) where ..'_b <= {x : '_h}, ..'_d <= {x : '_i}, ..'g <= {x : 'j}
+    (({`self : 'a} as 'a) * {..'_b}) * (({`self : 'c; `x : int} as 'c) * {..'_d}) * (({`self : 'e; `x?'f : int} as 'e) * {..'g}) where ..'_b <= {x : immut '_h}, ..'_d <= {x : immut '_i}, ..'g <= {x : immut 'j}
     |}]
 ;;

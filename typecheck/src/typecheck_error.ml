@@ -266,6 +266,11 @@ let unification_message (error : Unification_error.t) ~show_type =
         expected
         reason
     | Row_mismatch (expected, actual, reason) ->
+      let row =
+        match reason with
+        | Assigned _ -> Type.Printer.context printer
+        | Missing_label _ | Presence_mismatch _ | Cyclic_row -> row
+      in
       let expected = row expected in
       let actual = row actual in
       let reason =
@@ -500,8 +505,8 @@ let rec kind_message (kind : Kind.t) ~show_type =
       name
       name
   | Misplaced_mut ->
-    "Only an entry of a code type's context can be [mut], for a variable the \
-     code assigns"
+    "Only an entry of a code type's context can be [mut] or [immut], for a \
+     variable the code assigns or doesn't"
   | Misplaced_type_splice ->
     "A type splice runs at compile time, so it may be in a declaration, but \
      not within a quote or a compile-time expression"

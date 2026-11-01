@@ -1968,6 +1968,7 @@ pub mod syntax {
             Record(Box<Row>),
             Variant(Box<Row>),
             Mut(Box<TypeExpr>),
+            Immut(Box<TypeExpr>),
             Splice(Box<Expr>),
         }
 
@@ -2004,7 +2005,10 @@ pub mod syntax {
                         7 => Self::Mut(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                         ),
-                        8 => Self::Splice(
+                        8 => Self::Immut(
+                            crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
+                        ),
+                        9 => Self::Splice(
                             crate::FromOcaml::from_ocaml(crate::raw::field(v, 0), cx),
                         ),
                         _ => crate::raw::bad("Syntax.Defs.type_expr_desc", v),
@@ -2032,7 +2036,8 @@ pub mod syntax {
                     Self::Record { .. } => cx.block(1, 5),
                     Self::Variant { .. } => cx.block(1, 6),
                     Self::Mut { .. } => cx.block(1, 7),
-                    Self::Splice { .. } => cx.block(1, 8),
+                    Self::Immut { .. } => cx.block(1, 8),
+                    Self::Splice { .. } => cx.block(1, 9),
                 }
             }
 
@@ -2073,6 +2078,10 @@ pub mod syntax {
                         cx.set(slot, 0, built);
                     }
                     Self::Mut(v0) => {
+                        let built = crate::ToOcaml::to_ocaml(v0, cx);
+                        cx.set(slot, 0, built);
+                    }
+                    Self::Immut(v0) => {
                         let built = crate::ToOcaml::to_ocaml(v0, cx);
                         cx.set(slot, 0, built);
                     }

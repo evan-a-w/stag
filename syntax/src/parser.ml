@@ -264,6 +264,20 @@ let struct_toplevels : (t -> Toplevel.t list) ref = ref (fun _ -> assert false)
 
 (* Types *)
 
+let starts_type : Token.t -> bool = function
+  | Tyvar _
+  | Weak_tyvar _
+  | Lident _
+  | Uident _
+  | Root
+  | Lparen
+  | Lbrace
+  | Lbracket
+  | Less
+  | Splice -> true
+  | _ -> false
+;;
+
 let rec type_expr t : Type_expr.t =
   let domain = type_tuple t in
   if is t Arrow
@@ -411,7 +425,8 @@ and row_tail t : Type_expr.row =
   since t start (Type_expr.Var var)
 
 (** [{l : t; ...; ..'r}], located with its braces. An entry's type may be
-    [mut t], for a context. *)
+    [mut t] or [immut t], for a context: [immut] is a keyword only there,
+    before a type. *)
 and row t ~entry_label ~what : Type_expr.row =
   let open_loc = loc t in
   expect t Lbrace;
@@ -429,6 +444,11 @@ and row t ~entry_label ~what : Type_expr.row =
           advance t;
           let ty = type_expr t in
           since t start (Type_expr.Mut ty)
+        | Lident "immut" when starts_type (peek_at t 1) ->
+          let start = loc t in
+          advance t;
+          let ty = type_expr t in
+          since t start (Type_expr.Immut ty)
         | _ -> type_expr t
       in
       let rest =

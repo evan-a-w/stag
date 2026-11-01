@@ -333,6 +333,7 @@ let rec type_expr roots ~prec (t : Type_expr.t) =
   | Record r -> row roots ~label:(fun name -> "`" ^ name) r
   | Variant r -> variant roots r
   | Mut t -> paren_if (prec > 0) (text "mut " ^^ type_expr roots ~prec:0 t)
+  | Immut t -> paren_if (prec > 0) (text "immut " ^^ type_expr roots ~prec:0 t)
   | Splice e -> spliced roots e
 
 (* A [{...}] argument is a row, so a type argument starting with a record type
@@ -348,7 +349,8 @@ and starts_with_record (t : Type_expr.t) =
   match t.txt with
   | Record _ -> true
   | Arrow (first, _) | Tuple (first :: _) -> starts_with_record first
-  | Var _ | Con _ | Tuple [] | Code _ | Variant _ | Mut _ | Splice _ -> false
+  | Var _ | Con _ | Tuple [] | Code _ | Variant _ | Mut _ | Immut _ | Splice _
+    -> false
 
 (* Whether [t], printed at precedence 0, starts with a splice, which would read
    as a definition's splice after [type t =]. *)
@@ -356,7 +358,8 @@ and starts_with_splice (t : Type_expr.t) =
   match t.txt with
   | Splice _ -> true
   | Arrow (first, _) | Tuple (first :: _) -> starts_with_splice first
-  | Var _ | Con _ | Tuple [] | Code _ | Record _ | Variant _ | Mut _ -> false
+  | Var _ | Con _ | Tuple [] | Code _ | Record _ | Variant _ | Mut _ | Immut _
+    -> false
 
 and row_entries roots (r : Type_expr.row) =
   match r.txt with

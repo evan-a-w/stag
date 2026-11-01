@@ -478,7 +478,7 @@ let nested c : <<int>{x : int}>{x : bool} = c
     ((Duplicate_row_entry x) @ t.stag:2:29-30)
     ((Duplicate_row_entry x) @ t.stag:2:24-25)
     ((Duplicate_row_entry x) @ t.stag:3:26-28)
-    val nested : <<int>{x : int}>{x : bool} -> <<int>{x : int}>{x : bool}
+    val nested : <<int>{x : mut?'a int}>{x : mut?'b bool} -> <<int>{x : mut?'a int}>{x : mut?'b bool}
     |}]
 ;;
 
@@ -557,7 +557,7 @@ let bad : pair[int] = (1, true)
     type t = A of (int * int)
     val f : int * int -> int * int
     val a : t
-    val g : <int>{x : int; ..'a} -> <int>{x : int; ..'a}
+    val g : <int>{x : mut?'a int; ..'b} -> <int>{x : mut?'a int; ..'b}
     val h : bool
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())
@@ -654,8 +654,8 @@ let body s = match s with Stmt (c, _) -> c
     type list['a] = Nil | Cons of 'a * list['a]
     type stmt[{..'a}] = Stmt of <unit>{..'a} * list[stmt[{..'a}]]
     val single : <unit>{..'a} -> stmt[{..'a}]
-    val uses_x : stmt[{`x : mut?'a 'b; ..'c}]
-    val nested : stmt[{`x : mut?'a int; ..'b}]
+    val uses_x : stmt[{`x : 'a; ..'b}]
+    val nested : stmt[{`x : int; ..'a}]
     val annotated : stmt[{`y : bool; ..'a}] -> stmt[{`y : bool; ..'a}]
     val body : stmt[{..'a}] -> <unit>{..'a}
     |}]
@@ -680,10 +680,10 @@ let level = .<match 1 with x -> .~x>.
 |};
   [%expect
     {|
-    val captures : <'a>{x?'b : int; ..'c} -> <'a>{..'d} where ..'c <= {..'d}
+    val captures : <'a>{x?'b : immut int; ..'c} -> <'a>{..'d} where ..'c <= {..'d}
     val applied : <int>{..'_a}
     val local : <int>{..'a}
-    val bound_outside : <'a>{x : mut?'b 'a; ..'c}
+    val bound_outside : <'a>{x : 'a; ..'b}
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
@@ -709,9 +709,9 @@ let in_splice = .<.~(.<Nil>.)>.
     type list['a] = Nil | Cons of 'a * list['a]
     type point = { x : int; y : int }
     val closed : <list[int]>{..'a}
-    val open : <list['a]>{y : mut?'b 'a; ..'c}
-    val record : <int>{y : mut?'a int; ..'b}
-    val pattern : <int>{l : mut?'a list[int]; ..'b}
+    val open : <list['a]>{y : 'a; ..'b}
+    val record : <int>{y : int; ..'a}
+    val pattern : <int>{l : list[int]; ..'a}
     val in_splice : <list['a]>{..'b}
     |}]
 ;;
@@ -797,7 +797,7 @@ let uses_f = .<f>.
     type list['a] = Nil | Cons of 'a * list['a]
     val nil : list['a]
     val f : 'a -> 'a
-    val uses_nil : <'a>{nil : mut?'b 'a; ..'c}
+    val uses_nil : <'a>{nil : 'a; ..'b}
     val uses_f : <'a -> 'a>{..'b}
     |}]
 ;;
@@ -883,7 +883,7 @@ let use = x 1; x true
     type list['a] = Nil | Cons of 'a * list['a]
     val a : '_a -> list['_b]
     val b : list['_a]
-    val quoted : <'a>{a : mut?'b int -> 'a; ..'c}
+    val quoted : <'a>{a : int -> 'a; ..'b}
     ((Toplevel_initialization_cycle (ys xs ys)) @ t.stag:4:18-20)
     ((Toplevel_initialization_cycle (x x)) @ t.stag:2:8-9)
     ((Toplevel_initialization_cycle (y x y)) @ t.stag:3:8-9)
@@ -935,13 +935,13 @@ let%expect_test "recursive local non-functions are not generalized" =
     val local : list['_a] * list['_a]
     val local : list['_a] * list['_a]
     val local : <list['a]>{..'b} * <list['c]>{..'d}
-    val local : <'a>{x : mut?'b 'a; ..'c} * <'d>{x : mut?'e 'd; ..'f}
+    val local : <'a>{x : 'a; ..'b} * <'c>{x : 'c; ..'d}
     val local : list['a] * list['b]
     val local : list['a] * list['b]
     val local : list['a] * list['b]
     val local : list['a] * list['b]
-    val local : <list['a]>{y : mut?'b 'c; ..'d} * <list['e]>{y : mut?'f 'g; ..'h}
-    val local : <list['a]>{x : mut?'b 'c; ..'d} * <list['e]>{x : mut?'f 'g; ..'h}
+    val local : <list['a]>{y : 'b; ..'c} * <list['d]>{y : 'e; ..'f}
+    val local : <list['a]>{x : 'b; ..'c} * <list['d]>{x : 'e; ..'f}
     |}]
 ;;
 

@@ -305,10 +305,10 @@ let pattern_rest = .<match r with {`x = x; ..rest} -> (x, rest)>.
   [%expect
     {|
     val label : <int>{..'a}
-    val var_and_label : <{`y : 'a}>{y : mut?'b 'a; ..'c}
-    val outside : <'a>{r : mut?'b {`x : 'a; ..'c}; ..'d}
+    val var_and_label : <{`y : 'a}>{y : 'a; ..'b}
+    val outside : <'a>{r : {`x : 'a; ..'b}; ..'c}
     val extend_inside : <{..'a}>{..'b} -> <{..'a}>{..'c} where ..'b <= {..'c}
-    val pattern_rest : <'a * {..'b}>{r : mut?'c {`x : 'a; ..'b}; ..'d}
+    val pattern_rest : <'a * {..'b}>{r : {`x : 'a; ..'b}; ..'c}
     |}]
 ;;
 
@@ -327,8 +327,8 @@ let missing = same_row .<x>. {}
   [%expect
     {|
     val same_row : <int>{..'a} -> {..'a} -> <int>{..'a}
-    val ok : <int>{x : int}
-    val captured : <int>{y?'a : int; ..'b} -> {`y?'a : int; ..'b} -> {`y?'a : int; ..'b}
+    val ok : <int>{x : immut int}
+    val captured : <int>{y?'a : immut int; ..'b} -> {`y?'a : int; ..'b} -> {`y?'a : int; ..'b}
     ((Unification_error
       (Row_mismatch
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
@@ -433,7 +433,7 @@ let absent c (r : {..'d}) =
   .<.<let z = 1 in .~.~(c : <<'a>{..'c}>{..'d})>.>.; r
 |};
   [%expect
-    {| val absent : <<'a>{z?'b : int; ..'c}>{-z; ..'d} -> {-`z; ..'d} -> {-`z; ..'d} |}]
+    {| val absent : <<'a>{z?'b : immut int; ..'c}>{-z; ..'d} -> {-`z; ..'d} -> {-`z; ..'d} |}]
 ;;
 
 let%expect_test "structural types may be recursive" =

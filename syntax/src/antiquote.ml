@@ -40,6 +40,7 @@ let map ?type_expr:replace_type_expr toplevels ~f =
       | Record r -> Record (row depth r)
       | Variant r -> Variant (row depth r)
       | Mut t -> Mut (type_expr t)
+      | Immut t -> Immut (type_expr t)
       | Splice e ->
         (match replace_type_expr with
          | Some replace when depth = 0 ->

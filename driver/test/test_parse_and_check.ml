@@ -10,7 +10,9 @@ type stmt[{..'a}] = Stmt of <unit>{..'a} * list[stmt[{..'a}]]
 |}
 ;;
 
-(* [let f (x : ty) = x] has type [ty -> ty], printed as [ty] is. *)
+(* [let f (x : ty) = x] has type [ty -> ty], printed as [ty] is. A context
+   entry is marked: an unmarked one's assignment variable is shared by both
+   sides, so printed. *)
 let%expect_test "printed types parse back" =
   List.map
     [ "{`x : 'a; ..'b} -> 'a"
@@ -20,9 +22,9 @@ let%expect_test "printed types parse back" =
     ; "option[[`A; ..'a]] -> int"
     ; "[`None | `Some of option[int]] -> int"
     ; "{`x : [`A; ..'a]} -> int"
-    ; "<{`y : 'a}>{y : 'a; ..'b}"
-    ; "<'a>{r : {`x : 'a; ..'b}; ..'c}"
-    ; "<'a * {..'b}>{r : {`x : 'a; ..'b}; ..'c}"
+    ; "<{`y : 'a}>{y : immut 'a; ..'b}"
+    ; "<'a>{r : mut {`x : 'a; ..'b}; ..'c}"
+    ; "<'a * {..'b}>{r : immut {`x : 'a; ..'b}; ..'c}"
     ; "stmt[{`x : int; ..'a}]"
     ; "stmt[{..'a}] -> <unit>{..'a}"
     ; "{`A : int} * [`A of int]"
@@ -56,9 +58,9 @@ let%expect_test "printed types parse back" =
     option[[`A; ..'a]] -> int
     [`None | `Some of option[int]] -> int
     {`x : [`A; ..'a]} -> int
-    <{`y : 'a}>{y : 'a; ..'b}
-    <'a>{r : {`x : 'a; ..'b}; ..'c}
-    <'a * {..'b}>{r : {`x : 'a; ..'b}; ..'c}
+    <{`y : 'a}>{y : immut 'a; ..'b}
+    <'a>{r : mut {`x : 'a; ..'b}; ..'c}
+    <'a * {..'b}>{r : immut {`x : 'a; ..'b}; ..'c}
     stmt[{`x : int; ..'a}]
     stmt[{..'a}] -> <unit>{..'a}
     {`A : int} * [`A of int]
@@ -227,6 +229,6 @@ let%expect_test "polymorphic records, variants and modules" =
     end
     val deep : int
     val annotated : M.t -> M.t
-    val quoted : <int>{} -> <int * 'a>{x : mut?'b 'a; ..'c}
+    val quoted : <int>{} -> <int * 'a>{x : 'a; ..'b}
     |}]
 ;;

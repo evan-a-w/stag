@@ -93,6 +93,7 @@ module Make (B : Builder) = struct
       | Record r -> con "Record" [ row r ]
       | Variant r -> con "Variant" [ row r ]
       | Mut t -> con "Mut" [ type_expr t ]
+      | Immut t -> con "Immut" [ type_expr t ]
       | Splice e ->
         (match A.antiquote Type_expr e with
          | Some lifted -> lifted

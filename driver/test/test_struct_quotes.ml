@@ -632,7 +632,7 @@ let shown = print_endline (Int.to_string N.x)
     {|
     module A : sig
       val v : Stag.Expr.t
-      val quoted : <list[Stag.Toplevel.t]>{A.v : mut?'a Stag.Expr.t; ..'b}
+      val quoted : <list[Stag.Toplevel.t]>{A.v : Stag.Expr.t; ..'a}
       val erased : Stag.Expr.t
       module M : sig
         val z : list[Stag.Toplevel.t]

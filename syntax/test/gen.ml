@@ -119,9 +119,10 @@ and type_expr t : Type_expr.t =
                { inner = type_expr t
                ; context =
                    row ~label:name t ~entry:(fun t ->
-                     if int t 4 = 0
-                     then loc (Type_expr.Mut (type_expr t))
-                     else type_expr t)
+                     match int t 6 with
+                     | 0 -> loc (Type_expr.Mut (type_expr t))
+                     | 1 -> loc (Type_expr.Immut (type_expr t))
+                     | _ -> type_expr t)
                })
          ; (fun t -> Record (row t ~entry:type_expr))
          ; (fun t ->

@@ -664,15 +664,15 @@ let%expect_test "unknown presences are bounded, not unified" =
   [%expect
     {|
     (Ok ())
-    <int>{x?'_a : int} * <int>{x?'_b : int} where '_a <= '_b
+    <int>{x?'_a : immut int} * <int>{x?'_b : immut int} where '_a <= '_b
     (Ok ())
-    <int>{} * <int>{x?'_a : int}
-    (Ok ())
-    (Ok ())
-    <int>{x?'_a : int} * <int>{x : int}
+    <int>{} * <int>{x?'_a : immut int}
     (Ok ())
     (Ok ())
-    <int>{x : int} * <int>{x : int}
+    <int>{x?'_a : immut int} * <int>{x : immut int}
+    (Ok ())
+    (Ok ())
+    <int>{x : immut int} * <int>{x : immut int}
     (Ok ())
     (Ok ())
     <int>{} * <int>{}
@@ -722,9 +722,9 @@ let%expect_test "equalities wait for their presence" =
   [%expect
     {|
     (Ok ())
-    <int>{x?'_a : '_b} where '_a => '_b = int
+    <int>{x?'_a : immut '_b} where '_a => '_b = int
     (Ok ())
-    <int>{x : int}
+    <int>{x : immut int}
     (Ok ())
     (Ok ())
     <int>{}
@@ -735,7 +735,7 @@ let%expect_test "equalities wait for their presence" =
      (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
     (Ok ())
     (Ok ())
-    <int>{x?'_a : '_b} where '_a => '_b = bool, '_a => '_b = int
+    <int>{x?'_a : immut '_b} where '_a => '_b = bool, '_a => '_b = int
     (Error ())
     |}]
 ;;
@@ -857,13 +857,13 @@ let%expect_test "an equality between clashing types makes its presence Absent" =
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     (Ok ())
     (Ok ())
-    <int>{x?'_a : bool} * <int>{x?'_b : int} where '_a => bool = int
-    <int>{} * <int>{x?'a : int}
+    <int>{x?'_a : immut bool} * <int>{x?'_b : immut int} where '_a => bool = int
+    <int>{} * <int>{x?'a : immut int}
     (Ok ())
     (Ok ())
     (Ok ())
-    <int>{x?'_a : bool} * <int>{x?'_b : int} where '_a => bool = int, '_b <= '_a
-    <int>{x?'a : bool} * <int>{x?'b : int} where 'a => bool = int, 'b <= 'a
+    <int>{x?'_a : immut bool} * <int>{x?'_b : immut int} where '_a => bool = int, '_b <= '_a
+    <int>{x?'a : immut bool} * <int>{x?'b : immut int} where 'a => bool = int, 'b <= 'a
     |}]
 ;;
 
@@ -884,9 +884,9 @@ let%expect_test "unifying presences merges their equalities" =
     (Ok ())
     (Ok ())
     (Ok ())
-    <int>{x?'_a : '_b} * <int>{x?'_a : '_c} where '_a => '_b = int, '_a => '_c = bool
+    <int>{x?'_a : immut '_b} * <int>{x?'_a : immut '_c} where '_a => '_b = int, '_a => '_c = bool
     (Ok ())
-    <int>{x : int} * <int>{x : bool}
+    <int>{x : immut int} * <int>{x : immut bool}
     |}]
 ;;
 
@@ -917,7 +917,7 @@ let%expect_test "equalities follow presence bounds" =
     (Ok ())
     (Ok ())
     (Ok ())
-    <int>{x : int} * <int>{x : int}
+    <int>{x : immut int} * <int>{x : immut int}
     (Ok ())
     (Ok ())
     (Ok ())
@@ -925,7 +925,7 @@ let%expect_test "equalities follow presence bounds" =
     (Ok ())
     (Ok ())
     (Ok ())
-    <int>{} * <int>{x?'_a : '_b} where '_a => '_b = int
+    <int>{} * <int>{x?'_a : immut '_b} where '_a => '_b = int
     |}]
 ;;
 
@@ -950,12 +950,12 @@ let%expect_test "a row bound equates entry types if present" =
   [%expect
     {|
     (Ok ())
-    <int>{x?'_a : '_b} * <int>{x?'_c : bool} where '_a <= '_c, '_a => '_b = bool
+    <int>{x?'_a : immut '_b} * <int>{x?'_c : immut bool} where '_a <= '_c, '_a => '_b = bool
     (Ok ())
     (Ok ())
-    <int>{x?'_a : '_b} * <int>{x?'_a : '_c} where '_a <= '_d, '_a => int = '_c, '_a => '_b = bool
+    <int>{x?'_a : immut '_b} * <int>{x?'_a : immut '_c} where '_a <= '_d, '_a => int = '_c, '_a => '_b = bool
     (Ok ())
-    <int>{} * <int>{} * <int>{x?'_a : bool}
+    <int>{} * <int>{} * <int>{x?'_a : immut bool}
     |}]
 ;;
 
@@ -1003,12 +1003,12 @@ let%expect_test
     {|
     (Ok ())
     (Ok ())
-    <int>{x?'a : 'b} * <int>{x?'_c : 'd} * 'b * 'd where 'a => 'b = '_e -> int, '_c => '_f = bool, '_c => 'd = bool
-    <int>{x?'_a : '_b} where '_a => '_c = bool
+    <int>{x?'a : immut 'b} * <int>{x?'_c : immut 'd} * 'b * 'd where 'a => 'b = '_e -> int, '_c => '_f = bool, '_c => 'd = bool
+    <int>{x?'_a : immut '_b} where '_a => '_c = bool
     (Ok ())
-    <int>{x : '_a -> int} * <int>{x?'_b : '_c} * <int>{x?'_d : '_e} * <int>{x?'_d : '_f} where '_b => '_c = '_a -> int, '_d => '_f = bool, '_d => '_e = bool, '_d => '_g = bool
+    <int>{x : immut '_a -> int} * <int>{x?'_b : immut '_c} * <int>{x?'_d : immut '_e} * <int>{x?'_d : immut '_f} where '_b => '_c = '_a -> int, '_d => '_f = bool, '_d => '_e = bool, '_d => '_g = bool
     (Ok ())
-    <int>{x : '_a -> int} * <int>{x?'_b : '_c} * <int>{x : bool} * <int>{x : bool} where '_b => '_c = '_a -> int
+    <int>{x : immut '_a -> int} * <int>{x?'_b : immut '_c} * <int>{x : immut bool} * <int>{x : immut bool} where '_b => '_c = '_a -> int
     |}]
 ;;
 
@@ -1057,10 +1057,10 @@ let%expect_test "entry types that only matter where their presence is present" =
     (Ok ())
     (Ok ())
     (Ok ())
-    <int>{x?'a : int} * <int>{x?'a : 'b; y?'c : 'b} * <int>{x?'a : 'd} * ('d -> 'd) * <int>{x?'_e : bool} where 'a => 'd = int, 'a => 'b = int
+    <int>{x?'a : immut int} * <int>{x?'a : immut 'b; y?'c : immut 'b} * <int>{x?'a : immut 'd} * ('d -> 'd) * <int>{x?'_e : immut bool} where 'a => 'd = int, 'a => 'b = int
     (Ok ())
     (Ok ())
-    <int>{x?'a : int; y?'b : int} where 'b <= 'a
+    <int>{x?'a : immut int; y?'b : immut int} where 'b <= 'a
     |}]
 ;;
 
@@ -1121,25 +1121,25 @@ let%expect_test "presence bounds are solved in any order" =
   [%expect
     {|
     (("p <= q" (Ok ())) ("p = Absent" (Ok ())) ("q = Present" (Ok ())))
-    <int>{} * <int>{x : int}
+    <int>{} * <int>{x : immut int}
     (("p <= q" (Ok ())) ("q = Present" (Ok ())) ("p = Absent" (Ok ())))
-    <int>{} * <int>{x : int}
+    <int>{} * <int>{x : immut int}
     (("p = Absent" (Ok ())) ("p <= q" (Ok ())) ("q = Present" (Ok ())))
-    <int>{} * <int>{x : int}
+    <int>{} * <int>{x : immut int}
     (("p = Absent" (Ok ())) ("q = Present" (Ok ())) ("p <= q" (Ok ())))
-    <int>{} * <int>{x : int}
+    <int>{} * <int>{x : immut int}
     (("q = Present" (Ok ())) ("p <= q" (Ok ())) ("p = Absent" (Ok ())))
-    <int>{} * <int>{x : int}
+    <int>{} * <int>{x : immut int}
     (("q = Present" (Ok ())) ("p = Absent" (Ok ())) ("p <= q" (Ok ())))
-    <int>{} * <int>{x : int}
+    <int>{} * <int>{x : immut int}
     |}];
   in_every_order [ `Bound; `P Present ];
   [%expect
     {|
     (("p <= q" (Ok ())) ("p = Present" (Ok ())))
-    <int>{x : int} * <int>{x : int}
+    <int>{x : immut int} * <int>{x : immut int}
     (("p = Present" (Ok ())) ("p <= q" (Ok ())))
-    <int>{x : int} * <int>{x : int}
+    <int>{x : immut int} * <int>{x : immut int}
     |}];
   in_every_order [ `Bound; `Q Absent ];
   [%expect
@@ -1154,17 +1154,17 @@ let%expect_test "presence bounds are solved in any order" =
   [%expect
     {|
     (("p <= q" (Ok ())) ("p = Present" (Ok ())) ("q = Absent" (Error ())))
-    <int>{x : int} * <int>{x : int}
+    <int>{x : immut int} * <int>{x : immut int}
     (("p <= q" (Ok ())) ("q = Absent" (Ok ())) ("p = Present" (Error ())))
     <int>{} * <int>{}
     (("p = Present" (Ok ())) ("p <= q" (Ok ())) ("q = Absent" (Error ())))
-    <int>{x : int} * <int>{x : int}
+    <int>{x : immut int} * <int>{x : immut int}
     (("p = Present" (Ok ())) ("q = Absent" (Ok ())) ("p <= q" (Error ())))
-    <int>{x : int} * <int>{}
+    <int>{x : immut int} * <int>{}
     (("q = Absent" (Ok ())) ("p <= q" (Ok ())) ("p = Present" (Error ())))
     <int>{} * <int>{}
     (("q = Absent" (Ok ())) ("p = Present" (Ok ())) ("p <= q" (Error ())))
-    <int>{x : int} * <int>{}
+    <int>{x : immut int} * <int>{}
     |}]
 ;;
 
@@ -1204,9 +1204,9 @@ let%expect_test "presence bounds through chains and cycles" =
     {|
     (Ok ())
     (Ok ())
-    <int>{x?'_a : int} * <int>{x?'_b : int} * <int>{x?'_c : int} where '_a <= '_b, '_b <= '_c
+    <int>{x?'_a : immut int} * <int>{x?'_b : immut int} * <int>{x?'_c : immut int} where '_a <= '_b, '_b <= '_c
     (Ok ())
-    <int>{x : int} * <int>{x : int} * <int>{x : int}
+    <int>{x : immut int} * <int>{x : immut int} * <int>{x : immut int}
     (Ok ())
     (Ok ())
     (Ok ())
@@ -1214,9 +1214,9 @@ let%expect_test "presence bounds through chains and cycles" =
     (Ok ())
     (Ok ())
     (Ok ())
-    <int>{x?'_a : int} * <int>{x?'_b : int} * <int>{x?'_c : int} where '_a <= '_b, '_b <= '_c, '_c <= '_a
+    <int>{x?'_a : immut int} * <int>{x?'_b : immut int} * <int>{x?'_c : immut int} where '_a <= '_b, '_b <= '_c, '_c <= '_a
     (Ok ())
-    <int>{x : int} * <int>{x : int} * <int>{x : int}
+    <int>{x : immut int} * <int>{x : immut int} * <int>{x : immut int}
     (Ok ())
     (Ok ())
     (Ok ())
@@ -1245,11 +1245,11 @@ let%expect_test "unifying bounded presences merges their bounds" =
     (Ok ())
     (Ok ())
     (Ok ())
-    <int>{x?'_a : int} * <int>{x?'_b : int} * <int>{x?'_c : int} * <int>{x?'_d : int} where '_a <= '_b, '_c <= '_d, '_d <= '_b
+    <int>{x?'_a : immut int} * <int>{x?'_b : immut int} * <int>{x?'_c : immut int} * <int>{x?'_d : immut int} where '_a <= '_b, '_c <= '_d, '_d <= '_b
     (Ok ())
-    <int>{x?'_a : int} * <int>{x?'_b : int} * <int>{x?'_b : int} * <int>{x?'_c : int} where '_a <= '_b, '_b <= '_c, '_c <= '_b
+    <int>{x?'_a : immut int} * <int>{x?'_b : immut int} * <int>{x?'_b : immut int} * <int>{x?'_c : immut int} where '_a <= '_b, '_b <= '_c, '_c <= '_b
     (Ok ())
-    <int>{x : int} * <int>{x : int} * <int>{x : int} * <int>{x : int}
+    <int>{x : immut int} * <int>{x : immut int} * <int>{x : immut int} * <int>{x : immut int}
     |}]
 ;;
 
@@ -1291,13 +1291,13 @@ let%expect_test "presence bounds are generalized and instantiated together" =
   [%expect
     {|
     (Ok ())
-    <int>{x?'a : int} * <int>{x?'_b : int} where 'a <= '_b
-    <int>{x?'_a : int}
+    <int>{x?'a : immut int} * <int>{x?'_b : immut int} where 'a <= '_b
+    <int>{x?'_a : immut int}
     (Ok ())
-    <int>{x?'a : int} * <int>{x?'b : int} where 'a <= 'b
+    <int>{x?'a : immut int} * <int>{x?'b : immut int} where 'a <= 'b
     (Ok ())
     (Ok ())
-    <int>{x : int} * <int>{x : int} * <int>{} * <int>{} * <int>{x?'a : int} * <int>{x?'b : int} where 'a <= 'b
+    <int>{x : immut int} * <int>{x : immut int} * <int>{} * <int>{} * <int>{x?'a : immut int} * <int>{x?'b : immut int} where 'a <= 'b
     |}]
 ;;
 
@@ -1344,13 +1344,13 @@ let%expect_test
   print_presences [ l1; l2; u; i1; i2 ];
   [%expect
     {|
-    <int>{x?'_a : int} * <int>{x?'_b : int} * <int>{x?'_c : int} where '_a <= '_d, '_b <= '_e, '_d <= '_f, '_e <= '_c, '_e <= '_f, '_f <= '_e
-    <int>{x?'_a : int} where '_a <= '_b, '_b <= '_d, '_c <= '_a, '_d <= '_e, '_d <= '_b, '_f <= '_d
-    <int>{x?'a : int} where 'a <= 'b, '_c <= 'a, 'b <= 'd, '_c <= '_e, 'd <= '_e, 'd <= 'b, '_f <= 'd, '_f <= '_e
-    <int>{x?'_a : int} * <int>{x?'_b : int} * <int>{x?'_c : int} where '_a <= '_c, '_b <= '_c
-    <int>{x?'_a : int} * <int>{x?'_b : int} * <int>{x?'_c : int} * <int>{x?'_d : int} * <int>{x?'_e : int} where '_a <= '_c, '_a <= '_d, '_a <= '_e, '_b <= '_c, '_b <= '_f, '_b <= '_g, '_d <= '_h, '_e <= '_i, '_f <= '_c, '_f <= '_h, '_g <= '_c, '_g <= '_i, '_h <= '_f, '_i <= '_g
+    <int>{x?'_a : immut int} * <int>{x?'_b : immut int} * <int>{x?'_c : immut int} where '_a <= '_d, '_b <= '_e, '_d <= '_f, '_e <= '_c, '_e <= '_f, '_f <= '_e
+    <int>{x?'_a : immut int} where '_a <= '_b, '_b <= '_d, '_c <= '_a, '_d <= '_e, '_d <= '_b, '_f <= '_d
+    <int>{x?'a : immut int} where 'a <= 'b, '_c <= 'a, 'b <= 'd, '_c <= '_e, 'd <= '_e, 'd <= 'b, '_f <= 'd, '_f <= '_e
+    <int>{x?'_a : immut int} * <int>{x?'_b : immut int} * <int>{x?'_c : immut int} where '_a <= '_c, '_b <= '_c
+    <int>{x?'_a : immut int} * <int>{x?'_b : immut int} * <int>{x?'_c : immut int} * <int>{x?'_d : immut int} * <int>{x?'_e : immut int} where '_a <= '_c, '_a <= '_d, '_a <= '_e, '_b <= '_c, '_b <= '_f, '_b <= '_g, '_d <= '_h, '_e <= '_i, '_f <= '_c, '_f <= '_h, '_g <= '_c, '_g <= '_i, '_h <= '_f, '_i <= '_g
     (Ok ())
-    <int>{x : int} * <int>{x?'_a : int} * <int>{x : int} * <int>{x : int} * <int>{x : int}
+    <int>{x : immut int} * <int>{x?'_a : immut int} * <int>{x : immut int} * <int>{x : immut int} * <int>{x : immut int}
     |}]
 ;;
 
@@ -1364,18 +1364,18 @@ let%expect_test "instances of a scheme get the presences already known" =
   print_presences [ l1; l2; u; instance () ];
   [%expect
     {|
-    <int>{x?'_a : int} * <int>{x?'_b : int} * <int>{x?'_c : int} where '_a <= '_d, '_b <= '_e, '_d <= '_f, '_e <= '_c, '_e <= '_f, '_f <= '_e
-    <int>{x?'_a : int} where '_a <= '_b, '_b <= '_d, '_c <= '_a, '_d <= '_e, '_d <= '_b, '_f <= '_d
-    <int>{x?'a : int} where 'a <= 'b, '_c <= 'a, 'b <= 'd, '_c <= '_e, 'd <= '_e, 'd <= 'b, '_f <= 'd, '_f <= '_e
-    <int>{x?'_a : int} * <int>{x?'_b : int} * <int>{x?'_c : int} where '_a <= '_c, '_b <= '_c
+    <int>{x?'_a : immut int} * <int>{x?'_b : immut int} * <int>{x?'_c : immut int} where '_a <= '_d, '_b <= '_e, '_d <= '_f, '_e <= '_c, '_e <= '_f, '_f <= '_e
+    <int>{x?'_a : immut int} where '_a <= '_b, '_b <= '_d, '_c <= '_a, '_d <= '_e, '_d <= '_b, '_f <= '_d
+    <int>{x?'a : immut int} where 'a <= 'b, '_c <= 'a, 'b <= 'd, '_c <= '_e, 'd <= '_e, 'd <= 'b, '_f <= 'd, '_f <= '_e
+    <int>{x?'_a : immut int} * <int>{x?'_b : immut int} * <int>{x?'_c : immut int} where '_a <= '_c, '_b <= '_c
     (Ok ())
     <int>{} * <int>{} * <int>{} * <int>{}
-    <int>{x?'_a : int} * <int>{x?'_b : int} * <int>{x?'_c : int} where '_a <= '_d, '_b <= '_e, '_d <= '_f, '_e <= '_c, '_e <= '_f, '_f <= '_e
-    <int>{x?'_a : int} where '_a <= '_b, '_b <= '_d, '_c <= '_a, '_d <= '_e, '_d <= '_b, '_f <= '_d
-    <int>{x?'a : int} where 'a <= 'b, '_c <= 'a, 'b <= 'd, '_c <= '_e, 'd <= '_e, 'd <= 'b, '_f <= 'd, '_f <= '_e
-    <int>{x?'_a : int} * <int>{x?'_b : int} * <int>{x?'_c : int} where '_a <= '_c, '_b <= '_c
+    <int>{x?'_a : immut int} * <int>{x?'_b : immut int} * <int>{x?'_c : immut int} where '_a <= '_d, '_b <= '_e, '_d <= '_f, '_e <= '_c, '_e <= '_f, '_f <= '_e
+    <int>{x?'_a : immut int} where '_a <= '_b, '_b <= '_d, '_c <= '_a, '_d <= '_e, '_d <= '_b, '_f <= '_d
+    <int>{x?'a : immut int} where 'a <= 'b, '_c <= 'a, 'b <= 'd, '_c <= '_e, 'd <= '_e, 'd <= 'b, '_f <= 'd, '_f <= '_e
+    <int>{x?'_a : immut int} * <int>{x?'_b : immut int} * <int>{x?'_c : immut int} where '_a <= '_c, '_b <= '_c
     (Ok ())
-    <int>{x?'_a : int} * <int>{x : int} * <int>{x : int} * <int>{x?'_b : int} where '_a <= '_b
+    <int>{x?'_a : immut int} * <int>{x : immut int} * <int>{x : immut int} * <int>{x?'_b : immut int} where '_a <= '_b
     |}]
 ;;
 
@@ -1502,9 +1502,9 @@ let%expect_test "cyclic bounds" =
     (Ok ())
     <int>{..'_a} * <int>{..'_b} * <int>{..'_c} where ..'_a <= {..'_b}, ..'_b <= {..'_c}, ..'_c <= {..'_a}
     (Ok ())
-    <int>{x : int; ..'_a} * <int>{x : int; ..'_b} * <int>{x : int; ..'_c} where ..'_a <= {x : int; ..'_b}, ..'_b <= {x : int; ..'_c}, ..'_c <= {x : int; ..'_a}
+    <int>{x : immut int; ..'_a} * <int>{x : immut int; ..'_b} * <int>{x : immut int; ..'_c} where ..'_a <= {x : immut int; ..'_b}, ..'_b <= {x : immut int; ..'_c}, ..'_c <= {x : immut int; ..'_a}
     (Ok ())
-    <int>{x : int; y : bool; ..'_a} * <int>{x : int; y : bool; ..'_b} * <int>{x : int; y : bool; ..'_c} where ..'_a <= {x : int; y : bool; ..'_b}, ..'_b <= {x : int; y : bool; ..'_c}, ..'_c <= {x : int; y : bool; ..'_a}
+    <int>{x : immut int; y : immut bool; ..'_a} * <int>{x : immut int; y : immut bool; ..'_b} * <int>{x : immut int; y : immut bool; ..'_c} where ..'_a <= {x : immut int; y : immut bool; ..'_b}, ..'_b <= {x : immut int; y : immut bool; ..'_c}, ..'_c <= {x : immut int; y : immut bool; ..'_a}
     (Error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
     (Ok ())
@@ -1540,11 +1540,11 @@ let%expect_test "bounds referring to the bounded variable" =
     (Ok ())
     <int>{..'_a}
     (Ok ())
-    <int>{..'_a} where ..'_a <= {x : int; ..'_a}
+    <int>{..'_a} where ..'_a <= {x : immut int; ..'_a}
     (Ok ())
-    <int>{y : bool; ..'_a} where ..'_a <= {x : int; y : bool; ..'_a}
+    <int>{y : immut bool; ..'_a} where ..'_a <= {x : immut int; y : immut bool; ..'_a}
     (Ok ())
-    <int>{x : int; y : bool}
+    <int>{x : immut int; y : immut bool}
     |}]
 ;;
 
@@ -1649,10 +1649,10 @@ let%expect_test "a scheme keeps the bounds of outer rows to its variables" =
   [%expect
     {|
     (Ok ())
-    <int>{x?'a : int; ..'b} where ..'_c <= {x?'a : int; ..'b}, ..'_c <= {x?'_d : int; ..'_e}
-    <int>{..'_a} * <int>{x?'_b : int; ..'_c} * <int>{x?'_d : int; ..'_e} where ..'_a <= {x?'_d : int; ..'_e}, ..'_a <= {x?'_b : int; ..'_c}, ..'_a <= {x?'_f : int; ..'_g}
+    <int>{x?'a : immut int; ..'b} where ..'_c <= {x?'a : immut int; ..'b}, ..'_c <= {x?'_d : immut int; ..'_e}
+    <int>{..'_a} * <int>{x?'_b : immut int; ..'_c} * <int>{x?'_d : immut int; ..'_e} where ..'_a <= {x?'_d : immut int; ..'_e}, ..'_a <= {x?'_b : immut int; ..'_c}, ..'_a <= {x?'_f : immut int; ..'_g}
     (Ok ())
-    <int>{x : int; ..'_a} * <int>{x : int; ..'_b} * <int>{x : int; ..'_c} * <int>{x : int; ..'_d} where ..'_a <= {x : int; ..'_d}, ..'_a <= {x : int; ..'_e}, ..'_a <= {x : int; ..'_b}, ..'_a <= {x : int; ..'_c}
+    <int>{x : immut int; ..'_a} * <int>{x : immut int; ..'_b} * <int>{x : immut int; ..'_c} * <int>{x : immut int; ..'_d} where ..'_a <= {x : immut int; ..'_d}, ..'_a <= {x : immut int; ..'_e}, ..'_a <= {x : immut int; ..'_b}, ..'_a <= {x : immut int; ..'_c}
     |}]
 ;;
 
@@ -1679,7 +1679,7 @@ let%expect_test
     <int>{..'a} where ..'a <= {..'_b}, ..'_c <= {..'a}, ..'_c <= {..'_d}, ..'_d <= {..'_b}
     <int>{..'_a} * <int>{..'_b} where ..'_a <= {..'_c}, ..'_c <= {..'_b}
     (Ok ())
-    <int>{y : int; ..'_a} * <int>{y : mut?'_b int; ..'_c} where ..'_a <= {y : mut?'_d int; ..'_e}, '_d <= '_b, ..'_e <= {y : mut?'_b int; ..'_c}
+    <int>{y : immut int; ..'_a} * <int>{y : mut?'_b int; ..'_c} where ..'_a <= {y : int; ..'_d}, ..'_d <= {y : mut?'_b int; ..'_c}, '_e <= '_b
     (Error
      (Row_mismatch
       (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))

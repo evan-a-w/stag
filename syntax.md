@@ -56,6 +56,7 @@ int    list['a]    M.t    with_x[{..'a}]        (* args postfix in brackets *)
 [`A of int | `B; ..'r]   [..'r]   []             (* polymorphic variant *)
 <'a>{x : int; ..'r}                              (* code type and context *)
 <unit>{x : mut int; ..'r}                        (* code assigning x *)
+<int>{x : immut int; ..'r}                       (* code not assigning x *)
 ```
 
 A type argument in brackets is a type, or a row `{...}` (record-style row,
@@ -65,7 +66,9 @@ row (so `list[{}]` is a list of empty records). Rows are of polymorphic
 records, so their labels are written with backticks (`` with_x[{`y : int}] ``),
 everywhere except in the context of a code type, whose entries are variables,
 written without (`<int>{x : int}`). A context entry of type `mut t` is a
-variable the code assigns; `mut` is only allowed there. Type arguments are written once, after the
+variable the code assigns, one of type `immut t` a variable it doesn't, and
+one of type `t` either (`immut` is a keyword only there, before a type);
+`mut` and `immut` are only allowed there. Type arguments are written once, after the
 name (`list[int]`, not `int list` or `list[a][b]`). A constructor's argument of
 function type is parenthesized: `C of (int -> int)`. `C of int * int` has two
 arguments, `C of (int * int)` one, a tuple. Weak variables
@@ -319,10 +322,13 @@ spliced, a `mut` entry must be provided by a mutable variable: a `let mut`
 local in scope at the splice (implicitly, or by name in a substitution, `.{x}`
 or `.{x = y}`), or a mutable toplevel (`.{x = M.counter}`); the code then
 assigns that variable. Any other provider (`.{x = 1}`, an immutable variable)
-is an error. An entry that is not known to be assigned or not prints as
-`x : mut?'a t` (like `x?'a` for presence): code that only reads `x` may be
-combined with code assigning it, or spliced where `x` is immutable. An
-annotation's `x : t` is an entry the code does not assign. Records' and
+is an error. Code that only reads `x` may be combined with code assigning it, or
+spliced where `x` is immutable, so whether it assigns `x` is a variable,
+like `x?'a` for presence: an entry `x : t`, in an annotation or printed, may
+be assigned or not. An entry that may not be assigned, as code spliced under
+a plain `let x` has, is `x : immut t`. A printed type names the variable,
+`x : mut?'a t`, only where two entries share it or it is in a bound, so a
+printed `x : t` reads back as the same type. Records' and
 variants' entries are never `mut`, also through a row variable shared with a
 context.
 

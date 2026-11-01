@@ -143,7 +143,7 @@ let rec has_splice (expr : Type_expr.t) =
   | Tuple tys -> List.exists tys ~f:has_splice
   | Code { inner; context } -> has_splice inner || row_has_splice context
   | Record row | Variant row -> row_has_splice row
-  | Mut ty -> has_splice ty
+  | Mut ty | Immut ty -> has_splice ty
 
 and row_has_splice (row : Type_expr.row) =
   match row.txt with
@@ -242,6 +242,13 @@ module Vars = struct
        | Some (ATy ty) -> Ok ty
        | Some (ARow _) -> error ~loc (Type_variable_kind_mismatch name)
        | None -> error ~loc (Unbound_type_variable name))
+  ;;
+
+  (* Whether an unmarked context entry is assigned: either, in an annotation,
+     but not in a declaration, which can't introduce a variable. *)
+  let assigned : t -> Type.presence = function
+    | Annotation vars -> PVar (Fresh.var vars.fresh ~rank:vars.rank)
+    | Params _ -> Absent
   ;;
 
   let row t name ~loc : (Type.row, Typecheck_error.t) Result.t =
@@ -350,7 +357,7 @@ let rec elaborate' t module_ vars ~splices ~expansions (expr : Type_expr.t)
       in
       ty, syntax.txt
     | Splice _ -> Error (Typecheck_error.create ~loc Misplaced_type_splice)
-    | Mut _ -> Error (Typecheck_error.create ~loc Misplaced_mut)
+    | Mut _ | Immut _ -> Error (Typecheck_error.create ~loc Misplaced_mut)
   in
   ty, { expr with txt }
 
@@ -379,18 +386,25 @@ and elaborate_row
       | Extend ({ txt = name; loc }, _, _) when Set.mem seen name ->
         Error (Typecheck_error.create ~loc (Duplicate_row_entry name))
       | Extend (({ txt = name; loc = _ } as label), entry, rest) ->
+        let marked (assigned : Type.presence) inner ~mark =
+          let%map.Result ty, inner_syntax =
+            elaborate' t module_ vars ~splices ~expansions inner
+          in
+          assigned, ty, { entry with txt = mark inner_syntax }
+        in
         let%bind.Result (assigned : Type.presence), ty, ty_syntax =
           match entry.txt with
           | Mut inner when allow_mut ->
-            let%map.Result ty, inner_syntax =
-              elaborate' t module_ vars ~splices ~expansions inner
-            in
-            Type.Present, ty, { entry with txt = Type_expr.Mut inner_syntax }
+            marked Present inner ~mark:(fun ty -> Type_expr.Mut ty)
+          | Immut inner when allow_mut ->
+            marked Absent inner ~mark:(fun ty -> Type_expr.Immut ty)
           | _ ->
             let%map.Result ty, ty_syntax =
               elaborate' t module_ vars ~splices ~expansions entry
             in
-            Type.Absent, ty, ty_syntax
+            ( (if allow_mut then Vars.assigned vars else Type.Absent)
+            , ty
+            , ty_syntax )
         in
         let%map.Result rest, rest_syntax = go rest ~seen:(Set.add seen name) in
         ( Type.RExtend (name, Present, assigned, ty, rest)
