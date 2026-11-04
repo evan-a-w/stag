@@ -17,6 +17,9 @@ pkgs.mkShell {
     ppx_optional
     ppx_expect
     ppx_inline_test
+    yojson
+    lsp
+    jsonrpc
     ocaml-lsp
     utop
     pkgs.ocamlformat
