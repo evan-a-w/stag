@@ -151,7 +151,7 @@ A correction is removed once its tests pass.
   +[%expect {| x |}]
   calc_test: 1 of 1 test(s) failed
   [1]
-  $ find _stag -type f
+  $ find _stag -type f | sort
   _stag/test/calc_test.stag.corrected
   _stag/test/calc_test.stag.digest
   $ cat > test/calc_test.stag <<'X'
@@ -500,7 +500,7 @@ A target that no longer checks has its corrections removed, as they are stale:
   $ echo 'let%expect_test "a" = print_int 1' > t/a.stag
   $ stag-build test > /dev/null 2>&1
   [1]
-  $ find _stag -type f
+  $ find _stag -type f | sort
   _stag/t/a.stag.corrected
   _stag/t/a.stag.digest
   $ echo 'let%expect_test "a" = print_int "1"' > t/a.stag
