@@ -56,3 +56,6 @@ bench/*.json.gz
 # Rust (Cargo.lock is kept, for reproducible offline builds)
 target/
 **/*.rs.bk
+
+# direnv / nix-direnv
+.direnv/
