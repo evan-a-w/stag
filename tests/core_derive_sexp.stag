@@ -604,7 +604,7 @@ let%expect_test "polymorphic variants" =
     |}]
 
 (* Types of other modules are converted by the conversions of those modules,
-   by their path from the derived type's module. *)
+   named by their root paths (printed here by the shortest path). *)
 module Geometry = struct
   type vec = {dx : int; dy : int}
 
@@ -888,8 +888,9 @@ let%expect_test "fields named as conversions or binders" =
   round_trip sexp_of_odd odd_of_sexp {sexp_of_x = 1; v0 = 2; v1 = "3"};
   [%expect {| ((sexp_of_x 1) (v0 2) (v1 3)) |}]
 
-(* Types other than the derived one are converted by the shortest path to their
-   conversions, which a local module of the same name doesn't capture. *)
+(* Types other than the derived one are converted by their conversions' root
+   paths, which a local module of the same name doesn't capture (printed here by
+   the shortest path that isn't captured). *)
 module X = struct
   module Z = struct
     type s = S of int
@@ -950,14 +951,13 @@ module X = struct
   end
 end
 
-let%expect_test "types of other modules" =
+let%expect_test "types of other modules, by the shortest path" =
   round_trip
     X.Y.sexp_of_t
     X.Y.t_of_sexp
     {X.Y.s = X.Z.S 1; u = X.Y.U; color = Green};
   [%expect {| ((s (S 1)) (u U) (color Green)) |}]
 
-(* An alias of a parameterised derived type. *)
 (* A conversion shadowed where the expansion is printed is named by its root
    path. *)
 module Shadowed_conversion = struct
@@ -1034,6 +1034,7 @@ let%expect_test "palette" =
      ]);
   [%expect {| (Swatches (((color Green) (vec ((dx 1) (dy 2)))))) |}]
 
+(* An alias of a parameterised derived type. *)
 type choice = either[int, list[string]]
 
 include%inline .~(Core.Sexp.derive (type choice))

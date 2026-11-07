@@ -383,7 +383,8 @@ let main = print_endline s; print_endline (.Core.Sexp.to_string M.shown)
 ;;
 
 let%expect_test "compile-time failures of the generators" =
-  check
+  File_check.check
+    ~filter_diagnostic:File_check.without_core_location
     {|
 let f = .~(Core.Sexp.sexp_of (type (int -> int)))
 |};
@@ -393,10 +394,6 @@ let f = .~(Core.Sexp.sexp_of (type (int -> int)))
     2 | let f = .~(Core.Sexp.sexp_of (type (int -> int)))
                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: This toplevel splice failed at compile time: Uncaught exception Failure "Sexp.sexp_of: functions have no sexp conversion"
-    File "<core>/sexp.stag", line 1335, characters 8-73:
-    1335 |         raise (failure ctx.generator "functions have no sexp conversion")
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Note: The error was raised here
     |}]
 ;;
 

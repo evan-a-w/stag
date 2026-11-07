@@ -107,6 +107,11 @@ let%expect_test "traversal" =
     false
     |}]
 
+let%expect_test "capitalize" =
+  print_strings
+    (Core.List.map Core.String.capitalize ["abc"; "Abc"; "a"; ""; "1a"; "aBC"]);
+  [%expect {| (Abc Abc A "" 1a ABC) |}]
+
 let%expect_test "search" =
   print_int_option (Core.String.index "banana" 'n');
   print_int_option (Core.String.index "banana" 'b');

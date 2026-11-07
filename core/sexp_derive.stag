@@ -1,0 +1,539 @@
+(* The code generator of [Sexp.derive], [Sexp.sexp_of], [Sexp.of_sexp] and
+   [Sexp.of_sexp_raising]. What it refers to in [Core] is named by the refs of
+   erased quotes, so the code means the same wherever it is spliced. *)
+
+(* [Sexp.derive]: [sexp_of_t], [t_of_sexp_exn] and [t_of_sexp] of the declared
+   type [ty]. *)
+let derive ty =
+  match declared ty with
+  | type_name, decl, self ->
+    let param_convs = params decl in
+    let with_params last = List.append param_convs [last] in
+    let of_name = Dir.conv_name Dir.Of_sexp type_name in
+    let exn_name = Dir.conv_name Dir.Of_sexp_exn type_name in
+    let ctx =
+      {Context.self = Some self; name = of_name; generator = "derive"}
+    in
+    match decl_bodies ctx decl with
+    | to_body, of_body ->
+      [
+        Stag.Toplevel.let_
+          (Dir.conv_name Dir.To_sexp type_name)
+          (with_params "v")
+          to_body;
+        Stag.Toplevel.let_ exn_name (with_params "sexp") of_body;
+        Stag.Toplevel.let_
+          of_name
+          (with_params "sexp")
+          (decl_of_sexp ctx decl exn_name param_convs);
+      ]
+
+(* [name]'s converter of [ty], of exactly its type: annotated if it has a
+   polymorphic variant. *)
+let expr name dir t =
+  let ty = Stag.Type.expr t in
+  let ctx = {Context.self = None; name = name; generator = name} in
+  let e = conv ctx dir ty in
+  match has_variant ty with
+  | false -> e
+  | true -> Stag.Expr.Let (name, [], Some (conv_type dir ty), e, var name)
+
+module Dir = struct
+  type t = To_sexp | Of_sexp | Of_sexp_exn
+
+  (* The converter's name of the type [name], eg. [sexp_of_t]. *)
+  let conv_name dir name =
+    match dir with
+    | To_sexp -> String.append "sexp_of_" name
+    | Of_sexp -> String.append name "_of_sexp"
+    | Of_sexp_exn -> String.append name "_of_sexp_exn"
+end
+
+module Context = struct
+  (* [self]: the derived type's root path, if any, which is named bare;
+     [name]: the [of_sexp]'s, which its errors start with; [generator]: the
+     [Sexp] function generating, which its failures name. They differ only
+     for [derive]. *)
+  type t = {self : option[list[string]]; name : string; generator : string}
+end
+
+(* A constructor or polymorphic variant tag, and how to construct and match it
+   of its arguments. *)
+module Case = struct
+  type t = {
+    tag : string;
+    args : list[Stag.Type_expr.t];
+    construct : list[Stag.Expr.t] -> Stag.Expr.t;
+    pattern : list[Stag.Pattern.t] -> Stag.Pattern.t;
+  }
+end
+
+(* Raised where a generator fails, so that its error notes where. *)
+let failure generator message =
+  Failure (String.concat "" ["Sexp."; generator; ": "; message])
+
+let erase code = Stag.Code.erase code
+let var name = Stag.Expr.var name
+let pvar name = Stag.Pattern.Var name
+let apply f args = Stag.Expr.apply f args
+let atom_c = Stag.Internal.constructor .< Sexp.Atom "" >.
+let list_c = Stag.Internal.constructor .< Sexp.List [] >.
+let atom tag = Stag.Expr.Construct (atom_c, [Stag.Expr.string tag])
+
+let atom_pattern tag =
+  Stag.Pattern.Construct (atom_c, [Stag.Pattern.Lit (Stag.Lit.String tag)])
+
+let sexp_list es = Stag.Expr.Construct (list_c, [Stag.Expr.list es])
+let list_pattern ps = Stag.Pattern.Construct (list_c, [Stag.Pattern.list ps])
+let strings ss = Stag.Expr.list (List.map Stag.Expr.string ss)
+let fst p = match p with x, _ -> x
+let snd p = match p with _, y -> y
+
+(* [prefix0], [prefix1], ... *)
+let vars prefix n =
+  List.init n (fun i -> String.append prefix (Int.to_string i))
+
+(* The conversion of a type parameter ['a]. *)
+let param_conv a = String.append "_of_" a
+
+(* Whether [ty] is the prelude's type [path], without arguments. *)
+let is_prelude_type path ty =
+  match ty with
+  | Stag.Type_expr.Con (Stag.Path.Ref r, []) ->
+    (match Stag.Type_ref.path r with
+     | Stag.Type_ref.Path.Prelude p -> List.equal String.equal p path
+     | Stag.Type_ref.Path.Program _ -> false)
+  | _ -> false
+
+(* The prelude's types that have conversions, by path. *)
+module Builtin = struct
+  type t = {
+    path : list[string];
+    to_sexp : Stag.Expr.t;
+    of_sexp : Stag.Expr.t;
+    of_sexp_exn : Stag.Expr.t;
+  }
+
+  let create path to_sexp of_sexp of_sexp_exn = {
+    path = path;
+    to_sexp = erase to_sexp;
+    of_sexp = erase of_sexp;
+    of_sexp_exn = erase of_sexp_exn;
+  }
+
+  let all = [
+    create
+      ["unit"]
+      .< Sexp.sexp_of_unit >.
+      .< Sexp.unit_of_sexp >.
+      .< Sexp.unit_of_sexp_exn >.;
+    create
+      ["bool"]
+      .< Sexp.sexp_of_bool >.
+      .< Sexp.bool_of_sexp >.
+      .< Sexp.bool_of_sexp_exn >.;
+    create
+      ["int"]
+      .< Sexp.sexp_of_int >.
+      .< Sexp.int_of_sexp >.
+      .< Sexp.int_of_sexp_exn >.;
+    create
+      ["char"]
+      .< Sexp.sexp_of_char >.
+      .< Sexp.char_of_sexp >.
+      .< Sexp.char_of_sexp_exn >.;
+    create
+      ["string"]
+      .< Sexp.sexp_of_string >.
+      .< Sexp.string_of_sexp >.
+      .< Sexp.string_of_sexp_exn >.;
+    create
+      ["list"]
+      .< Sexp.sexp_of_list >.
+      .< Sexp.list_of_sexp >.
+      .< Sexp.list_of_sexp_exn >.;
+    create
+      ["option"]
+      .< Sexp.sexp_of_option >.
+      .< Sexp.option_of_sexp >.
+      .< Sexp.option_of_sexp_exn >.;
+    create
+      ["result"]
+      .< Sexp.sexp_of_result >.
+      .< Sexp.result_of_sexp >.
+      .< Sexp.result_of_sexp_exn >.;
+    create
+      ["Core"; "Sexp"; "t"]
+      .< Sexp.sexp_of_t >.
+      .< Sexp.t_of_sexp >.
+      .< Sexp.t_of_sexp_exn >.;
+    create
+      ["Core"; "Sexp"; "Of_sexp_error"; "t"]
+      .< Sexp.Of_sexp_error.sexp_of_t >.
+      .< Sexp.Of_sexp_error.t_of_sexp >.
+      .< Sexp.Of_sexp_error.t_of_sexp_exn >.;
+    create
+      ["Core"; "Sexp"; "Parse_error"; "t"]
+      .< Sexp.Parse_error.sexp_of_t >.
+      .< Sexp.Parse_error.t_of_sexp >.
+      .< Sexp.Parse_error.t_of_sexp_exn >.;
+  ]
+
+  let find path =
+    List.find (fun (b : t) -> List.equal String.equal b.path path) all
+
+  let conv (b : t) dir =
+    match dir with
+    | Dir.To_sexp -> b.to_sexp
+    | Dir.Of_sexp -> b.of_sexp
+    | Dir.Of_sexp_exn -> b.of_sexp_exn
+end
+
+(* Whether [ty] is [Sexp.t], whose conversions are the identity. *)
+let is_sexp ty = is_prelude_type ["Core"; "Sexp"; "t"] ty
+
+(* The converter of the declared type [r]. *)
+let named (ctx : Context.t) dir r =
+  match Stag.Type_ref.path r with
+  | Stag.Type_ref.Path.Prelude path ->
+    (match Builtin.find path with
+     | Some b -> Builtin.conv b dir
+     | None ->
+       raise
+         (failure
+            ctx.generator
+            (String.append "no sexp conversion of " (String.concat "." path))))
+  | Stag.Type_ref.Path.Program path ->
+    let modules = List.take (Int.pred (List.length path)) path in
+    let name = Dir.conv_name dir (Stag.Type_ref.name r) in
+    let is_self =
+      match ctx.self with
+      | Some self -> List.equal String.equal path self
+      | None -> false
+    in
+    match is_self with
+    | true -> var name
+    | false -> var (String.concat "." (Cons ("", List.append modules [name])))
+
+(* A converter of [ty], as a function. Its arguments are [To_sexp] or [Of_sexp]
+   ones. *)
+let conv (ctx : Context.t) dir ty =
+  match ty with
+  | Stag.Type_expr.Var a ->
+    (match dir with
+     | Dir.Of_sexp_exn ->
+       apply (erase .< Sexp.of_sexp_exn >.) [var (param_conv a)]
+     | _ -> var (param_conv a))
+  | Stag.Type_expr.Con (Stag.Path.Ref r, args) ->
+    let arg_dir =
+      match dir with
+      | Dir.To_sexp -> Dir.To_sexp
+      | _ -> Dir.Of_sexp
+    in
+    let arg a =
+      match a with
+      | Stag.Type_expr.Arg.Ty ty -> conv ctx arg_dir ty
+      | Stag.Type_expr.Arg.Row _ ->
+        raise (failure ctx.generator "row arguments are not supported")
+    in
+    apply (named ctx dir r) (List.map arg args)
+  | Stag.Type_expr.Con (Stag.Path.Name path, _) ->
+    raise (failure ctx.generator (String.append "unresolved type " path))
+  | Stag.Type_expr.Tuple _ -> conv_in_place ctx dir ty
+  | Stag.Type_expr.Variant _ -> conv_in_place ctx dir ty
+  | Stag.Type_expr.Arrow (_, _) ->
+    raise (failure ctx.generator "functions have no sexp conversion")
+  | Stag.Type_expr.Code _ ->
+    raise (failure ctx.generator "code has no sexp conversion")
+  | Stag.Type_expr.Record _ ->
+    raise (failure ctx.generator "polymorphic records are not supported")
+
+(* The conversion of [ty] matched in place, as a function. *)
+let conv_in_place ctx dir ty =
+  match dir with
+  | Dir.To_sexp -> Stag.Expr.fun_ ["v"] (to_sexp ctx ty (var "v") "v")
+  | Dir.Of_sexp ->
+    apply
+      (erase .< Sexp.Deriving.catch >.)
+      [Stag.Expr.fun_ ["sexp"] (of_sexp ctx ty "sexp" "v")]
+  | Dir.Of_sexp_exn -> Stag.Expr.fun_ ["sexp"] (of_sexp ctx ty "sexp" "v")
+
+(* [e]'s sexp, [e] of type [ty]. Anonymous tuples and polymorphic variants are
+   matched in place, binding [prefix0], [prefix1], ... *)
+let to_sexp ctx ty e prefix =
+  match ty with
+  | Stag.Type_expr.Tuple tys ->
+    (match bind_tuple ctx tys prefix with
+     | pattern, sexp -> Stag.Expr.match_ e [(pattern, sexp)])
+  | Stag.Type_expr.Variant row ->
+    variant_to_sexp ctx (poly_cases ctx row) e prefix
+  | _ ->
+    match is_sexp ty with
+    | true -> e
+    | false -> apply (conv ctx Dir.To_sexp ty) [e]
+
+(* The pattern binding a value of type [ty] as [name], tuples destructured in
+   place, and the value's sexp. *)
+let bind ctx ty name =
+  let prefix = String.append name "_" in
+  match ty with
+  | Stag.Type_expr.Tuple tys -> bind_tuple ctx tys prefix
+  | _ -> (pvar name, to_sexp ctx ty (var name) prefix)
+
+let bind_tuple ctx tys prefix =
+  let binds = List.map2_exn (bind ctx) tys (vars prefix (List.length tys)) in
+  (Stag.Pattern.Tuple (List.map fst binds), sexp_list (List.map snd binds))
+
+(* The value of type [ty] of the sexp of variable [v], raising
+   [Of_sexp_error]. *)
+let of_sexp ctx ty v prefix =
+  match ty with
+  | Stag.Type_expr.Tuple tys -> tuple_of_sexp ctx tys v prefix
+  | Stag.Type_expr.Variant row ->
+    variant_of_sexp ctx true (poly_cases ctx row) v prefix
+  | _ ->
+    match is_sexp ty with
+    | true -> var v
+    | false -> apply (conv ctx Dir.Of_sexp_exn ty) [var v]
+
+(* The values of the variables [vs] of types [tys], each [v]'s components bound
+   as [v_0], [v_1], ... *)
+let of_sexps ctx tys vs =
+  let value ty v = of_sexp ctx ty v (String.append v "_") in
+  List.map2_exn value tys vs
+
+let tuple_of_sexp (ctx : Context.t) tys v prefix =
+  let n = List.length tys in
+  let vs = vars prefix n in
+  let error =
+    apply
+      (erase .< Sexp.Deriving.tuple_error >.)
+      [Stag.Expr.string ctx.name; Stag.Expr.int n; var v]
+  in
+  Stag.Expr.match_
+    (var v)
+    [
+      (list_pattern (List.map pvar vs), Stag.Expr.Tuple (of_sexps ctx tys vs));
+      (Stag.Pattern.Any, error);
+    ]
+
+let nominal_case c =
+  match c with
+  | r, args ->
+    {
+      Case.tag = Stag.Constructor_ref.name r;
+      args = args;
+      construct = fun es -> Stag.Expr.Construct (Stag.Path.Ref r, es);
+      pattern = fun ps -> Stag.Pattern.Construct (Stag.Path.Ref r, ps);
+    }
+
+let poly_cases (ctx : Context.t) row =
+  match row with
+  | Stag.Type_expr.Row.Empty -> []
+  | Stag.Type_expr.Row.Var _ ->
+    raise (failure ctx.generator "open polymorphic variants are not supported")
+  | Stag.Type_expr.Row.Extend (tag, ty, rest) ->
+    let args =
+      match is_prelude_type ["unit"] ty with
+      | true -> []
+      | false -> [ty]
+    in
+    let case = {
+      Case.tag = tag;
+      args = args;
+      construct = fun es -> Stag.Expr.Poly_variant (tag, List.hd es);
+      pattern = fun ps -> Stag.Pattern.Poly_variant (tag, List.hd ps);
+    } in
+    Cons (case, poly_cases ctx rest)
+
+let variant_to_sexp ctx cases e prefix =
+  let arm (case : Case.t) =
+    let binds =
+      List.map2_exn (bind ctx) case.args (vars prefix (List.length case.args))
+    in
+    let sexp =
+      match binds with
+      | [] -> atom case.tag
+      | _ -> sexp_list (Cons (atom case.tag, List.map snd binds))
+    in
+    (case.pattern (List.map fst binds), sexp)
+  in
+  Stag.Expr.match_ e (List.map arm cases)
+
+(* Constructors are also matched uncapitalized, unless [poly], of a polymorphic
+   variant's tags. *)
+let variant_of_sexp (ctx : Context.t) poly cases v prefix =
+  let arm (case : Case.t) =
+    match case.args with
+    | [] -> (atom_pattern case.tag, case.construct [])
+    | args ->
+      let vs = vars prefix (List.length args) in
+      (list_pattern (Cons (atom_pattern case.tag, List.map pvar vs)),
+       case.construct (of_sexps ctx args vs))
+  in
+  let tags with_args =
+    let tag (case : Case.t) =
+      match Bool.equal (List.is_empty case.args) with_args with
+      | true -> None
+      | false -> Some case.tag
+    in
+    strings (List.filter_map tag cases)
+  in
+  let error =
+    match poly with
+    | true -> erase .< Sexp.Deriving.poly_variant_error >.
+    | false -> erase .< Sexp.Deriving.variant_error >.
+  in
+  let scrutinee =
+    match poly with
+    | true -> var v
+    | false -> apply (erase .< Sexp.Deriving.capitalize >.) [var v]
+  in
+  let otherwise =
+    (Stag.Pattern.Any,
+     apply error [Stag.Expr.string ctx.name; tags false; tags true; var v])
+  in
+  Stag.Expr.match_ scrutinee (List.append (List.map arm cases) [otherwise])
+
+let record_to_sexp ctx fields =
+  let field i f =
+    match f with
+    | r, ty ->
+      let value = Stag.Expr.Field (var "v", Stag.Path.Ref r) in
+      let prefix = String.concat "" ["v"; Int.to_string i; "_"] in
+      apply
+        (erase .< Sexp.Deriving.field >.)
+        [Stag.Expr.string (Stag.Field_ref.name r); to_sexp ctx ty value prefix]
+  in
+  sexp_list (List.mapi field fields)
+
+let record_of_sexp (ctx : Context.t) fields v =
+  let names =
+    List.map (fun f -> match f with r, _ -> Stag.Field_ref.name r) fields
+  in
+  (* The field names, unless one would shadow a conversion. *)
+  let binders =
+    let shadows name =
+      List.exists
+        (fun affix -> affix name)
+        [
+          String.starts_with "sexp_of_";
+          String.starts_with "_of_";
+          String.ends_with "_of_sexp";
+          String.ends_with "_of_sexp_exn";
+        ]
+    in
+    match List.exists shadows names with
+    | true -> vars "v" (List.length names)
+    | false -> names
+  in
+  let tys = List.map snd fields in
+  let field f value = match f with r, _ -> (Stag.Path.Ref r, value) in
+  Stag.Expr.match_
+    (apply
+       (erase .< Sexp.Deriving.record_fields >.)
+       [Stag.Expr.string ctx.name; strings names; var v])
+    [
+      (Stag.Pattern.list (List.map pvar binders),
+       Stag.Expr.Record
+         (List.map2_exn field fields (of_sexps ctx tys binders)));
+    ]
+
+(* The type of [dir]'s converter of [ty]. *)
+let conv_type dir ty =
+  let sexp = Stag.Type.expr (type Sexp.t) in
+  match dir with
+  | Dir.To_sexp -> Stag.Type_expr.Arrow (ty, sexp)
+  | Dir.Of_sexp_exn -> Stag.Type_expr.Arrow (sexp, ty)
+  | Dir.Of_sexp ->
+    match Stag.Type.expr (type result[unit, Sexp.Of_sexp_error.t]) with
+    | Stag.Type_expr.Con (result, [_; error]) ->
+      Stag.Type_expr.Arrow
+        (sexp, Stag.Type_expr.Con (result, [Stag.Type_expr.Arg.Ty ty; error]))
+
+(* Whether [ty] has a polymorphic variant, whose row its conversion leaves
+   open. *)
+let has_variant ty =
+  let arg a =
+    match a with
+    | Stag.Type_expr.Arg.Ty ty -> has_variant ty
+    | Stag.Type_expr.Arg.Row _ -> false
+  in
+  match ty with
+  | Stag.Type_expr.Variant _ -> true
+  | Stag.Type_expr.Tuple tys -> List.exists has_variant tys
+  | Stag.Type_expr.Con (_, args) -> List.exists arg args
+  | _ -> false
+
+let derive_failure message = failure "derive" message
+
+(* The name, declaration and root path of the type [ty] that [derive] derives
+   conversions of. *)
+let declared ty =
+  let r =
+    match Stag.Type.expr ty with
+    | Stag.Type_expr.Con (Stag.Path.Ref r, _) -> r
+    | _ ->
+      raise
+        (derive_failure "a declared type is needed, as in [derive (type t)]")
+  in
+  let type_name = Stag.Type_ref.name r in
+  let decl =
+    match Stag.Type.decl r with
+    | Some decl -> decl
+    | None -> raise (derive_failure (String.append type_name " is abstract"))
+  in
+  let self =
+    match Stag.Type_ref.path r with
+    | Stag.Type_ref.Path.Program path -> path
+    | Stag.Type_ref.Path.Prelude _ ->
+      raise (derive_failure (String.append type_name " is the prelude's"))
+  in
+  match String.equal type_name "sexp" with
+  | true ->
+    raise
+      (derive_failure
+         "a type named sexp would have two conversions named sexp_of_sexp")
+  | false -> (type_name, decl, self)
+
+(* The parameters of [derive]'s conversions: those of [decl]'s type
+   parameters. *)
+let params (decl : Stag.Type.Decl.t) =
+  let param p =
+    match p with
+    | Stag.Type_decl.Param.Ty a -> param_conv a
+    | Stag.Type_decl.Param.Row _ ->
+      raise (derive_failure "row parameters are not supported")
+  in
+  List.map param decl.params
+
+(* The bodies of [derive]'s [sexp_of] and [of_sexp_exn] of [decl]. *)
+let decl_bodies ctx (decl : Stag.Type.Decl.t) =
+  match decl.kind with
+  | Stag.Type.Kind.Variant [] ->
+    raise (derive_failure "empty variants are not supported")
+  | Stag.Type.Kind.Variant cs ->
+    let cases = List.map nominal_case cs in
+    (variant_to_sexp ctx cases (var "v") "v",
+     variant_of_sexp ctx false cases "sexp" "v")
+  | Stag.Type.Kind.Record fields ->
+    (record_to_sexp ctx fields, record_of_sexp ctx fields "sexp")
+  | Stag.Type.Kind.Alias ty ->
+    (to_sexp ctx ty (var "v") "v", of_sexp ctx ty "sexp" "v")
+
+(* The body of [derive]'s [of_sexp] of [decl]: catching its [of_sexp_exn]'s
+   error, except that an alias of a named type or a parameter converts by its
+   conversion. *)
+let decl_of_sexp ctx (decl : Stag.Type.Decl.t) exn_name params =
+  let catch _ =
+    apply
+      (erase .< Sexp.Deriving.catch >.)
+      [apply (var exn_name) (List.map var params); var "sexp"]
+  in
+  match decl.kind with
+  | Stag.Type.Kind.Alias ty ->
+    (match ty with
+     | Stag.Type_expr.Var _ -> apply (conv ctx Dir.Of_sexp ty) [var "sexp"]
+     | Stag.Type_expr.Con (_, _) -> apply (conv ctx Dir.Of_sexp ty) [var "sexp"]
+     | _ -> catch ())
+  | _ -> catch ()
