@@ -950,10 +950,10 @@ val n : int @@ const      (* modalities on signature items and fields *)
 
 - A stag-build library named `core` shadows the prelude's `Core` in the whole
   program, `.Core` included. Derivers living in the prelude's `Core` (eg. a
-  `Sexp.derive` in `core/sexp.stag`) are unaffected: inside their quotes they
-  refer to sibling modules relatively (`Int.to_string`), and the code they
-  generate holds refs, so a user's `core` doesn't capture them. Code outside
-  `Core` can still not name it then.
+  `Sexp.derive` in `core/sexp_derive.stag`) are unaffected: inside their
+  quotes they refer to sibling modules relatively (`Int.to_string`), and the
+  code they generate holds refs, so a user's `core` doesn't capture them. Code
+  outside `Core` can still not name it then.
 
 `if`, infix operators (`let (+) x y = ...`, OCaml precedences),
 interface files.

@@ -155,6 +155,10 @@ let%expect_test "constructor argument errors" =
   parse sexp_of_shape shape_of_sexp "(Circle x)";
   parse sexp_of_shape shape_of_sexp "(Segment (0 0) (1))";
   parse sexp_of_shape shape_of_sexp "(Label hi Purple)";
+  parse sexp_of_shape shape_of_sexp "(rect 1)";
+  parse sexp_of_shape shape_of_sexp "circle";
+  parse sexp_of_color color_of_sexp "(red)";
+  parse sexp_of_color color_of_sexp "(dOt)";
   [%expect {|
     (Rect 1 2)
     Error shape_of_sexp: this constructor requires arguments: Circle
@@ -163,6 +167,10 @@ let%expect_test "constructor argument errors" =
     Error int_of_sexp: integer needed: x
     Error shape_of_sexp: tuple of size 2 expected: (1)
     Error color_of_sexp: unexpected variant constructor: Purple
+    Error shape_of_sexp: sum tag "Rect" has incorrect number of arguments: (rect 1)
+    Error shape_of_sexp: this constructor requires arguments: circle
+    Error color_of_sexp: this constructor does not take arguments: (red)
+    Error color_of_sexp: unexpected variant constructor: (dOt)
     |}]
 
 type point = {x : int; y : int}
@@ -595,12 +603,16 @@ let%expect_test "polymorphic variants" =
   round_trip sexp_of_move move_of_sexp (`Turn ((90, Red)));
   parse sexp_of_move move_of_sexp "(Turn 90 Red)";
   parse sexp_of_move move_of_sexp "Go";
+  parse sexp_of_move move_of_sexp "()";
+  parse sexp_of_move move_of_sexp "((Stop))";
   [%expect {|
     Stop
     (Go 3)
     (Turn (90 Red))
     Error move_of_sexp: polymorphic variant tag "Turn" has incorrect number of arguments: (Turn 90 Red)
     Error move_of_sexp: polymorphic variant tag takes an argument: Go
+    Error move_of_sexp: the empty list is an invalid polymorphic variant: ()
+    Error move_of_sexp: a nested list is an invalid polymorphic variant: ((Stop))
     |}]
 
 (* Types of other modules are converted by the conversions of those modules,

@@ -60,11 +60,7 @@ module Parse_error = struct
   let t_of_sexp sexp = Deriving.catch t_of_sexp_exn sexp
 end
 
-(* Parsexp's [Single.parse_string]: the one sexp of [s], possibly surrounded by
-   whitespace and comments. *)
 let of_string s = Sexp_parser.one s
-
-(* Parsexp's [Many.parse_string]: the sexps of [s]. *)
 let of_string_many s = Sexp_parser.many s
 
 exception Parse_error of Parse_error.t

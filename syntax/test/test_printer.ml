@@ -707,7 +707,7 @@ let%expect_test "the project's sources round trip and are formatted" =
     {|
     (../../tests/basics.stag (formatted true) (long_lines 0))
     (../../tests/core_basics.stag (formatted true) (long_lines 0))
-    (../../tests/core_derive_sexp.stag (formatted true) (long_lines 11))
+    (../../tests/core_derive_sexp.stag (formatted true) (long_lines 13))
     (../../tests/core_exn.stag (formatted true) (long_lines 1))
     (../../tests/core_list.stag (formatted true) (long_lines 0))
     (../../tests/core_option.stag (formatted true) (long_lines 0))
