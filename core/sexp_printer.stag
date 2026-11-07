@@ -1,0 +1,303 @@
+(* [Sexp]'s printers, as Sexplib's. *)
+
+(* Sexplib's machine format: a space only between unquoted atoms, as in
+   [(a"b c"(d)e()f)]. *)
+let to_string t =
+  (* [parts] in reverse; [space]: whether the last is an unquoted atom. *)
+  let add parts space t =
+    match t with
+    | Sexp.Atom s ->
+      (match (must_escape s, space) with
+       | true, _ -> (Cons (quote s, parts), false)
+       | false, true -> (Cons (s, Cons (" ", parts)), true)
+       | false, false -> (Cons (s, parts), true))
+    | Sexp.List [] -> (Cons ("()", parts), false)
+    | Sexp.List ts ->
+      let step acc t = match acc with parts, space -> add parts space t in
+      match List.fold_left step (Cons ("(", parts), false) ts with
+      | parts, _ -> (Cons (")", parts), false)
+  in
+  match add [] false t with parts, _ -> String.concat "" (List.rev parts)
+
+(* Sexplib's [to_string_hum]: lists that do not fit on the line are broken,
+   their elements packed onto lines indented by one more than the [(], as
+   OCaml's [Format] does with Sexplib's boxes. *)
+let to_string_hum t =
+  match Pretty.tokens t [] 0 with
+  | tokens, n, _ ->
+    let outermost = Pretty.Token.Begin (Pretty.Box.Hov, 0, 0, -2) in
+    let st = Pretty.run Pretty.State.init (Cons (outermost, tokens)) n in
+    String.concat "" (List.rev st.out)
+
+(* Whether [s] must be quoted to be read back as an atom: it is empty, or has
+   whitespace, a non-ASCII or control character, a parenthesis, semicolon,
+   double quote or backslash, or the start or end of a block comment (hash and
+   bar, either way round). *)
+let must_escape s =
+  let delimits i =
+    match String.get s i with
+    | '(' -> true
+    | ')' -> true
+    | ';' -> true
+    | '"' -> true
+    | '\\' -> true
+    | c -> Bool.not (Char.Internal.is_between '!' '~' c)
+  in
+  let block_comment i =
+    match (String.get s i, String.get s (Int.succ i)) with
+    | '#', '|' -> true
+    | '|', '#' -> true
+    | _ -> false
+  in
+  let loop i =
+    match Int.lt i (String.length s) with
+    | false -> false
+    | true ->
+      match delimits i with
+      | true -> true
+      | false ->
+        match Int.lt (Int.succ i) (String.length s) with
+        | true ->
+          (match block_comment i with
+           | true -> true
+           | false -> loop (Int.succ i))
+        | false -> false
+  in
+  match String.is_empty s with
+  | true -> true
+  | false -> loop 0
+
+let quote s = String.concat "" ["\""; String.escaped s; "\""]
+
+(* [to_string_hum]'s, as OCaml's [Format] prints what Sexplib gives it. *)
+module Pretty = struct
+  module Box = struct
+    (* [Format]'s [hov] (of its outermost box), [b] (of Sexplib's), and boxes
+       that fit on the line. *)
+    type t = Hov | B | Fits
+  end
+
+  module Token = struct
+    (* [known] is, of a box or break, the number of tokens after the one whose
+       enqueueing makes [Format] know its [size]. *)
+    type t =
+      | Text of string
+      | Begin of Box.t * int * int * int
+      | End
+      | Break of int * int
+      | Newline
+
+    let length t =
+      match t with
+      | Text s -> String.length s
+      | Break (_, _) -> 1
+      | _ -> 0
+  end
+
+  let margin = 78
+  let max_indent = 68
+  let infinity = 1000000010
+
+  (* [Format]'s state: [boxes] open, innermost first, each with its kind and
+     the space left at its indentation; the queue of tokens not yet printed,
+     [front] then [back] in reverse, of total sizes [left] and [right] so far;
+     [out], the text printed, in reverse. *)
+  module State = struct
+    type t = {
+      space_left : int;
+      indent : int;
+      new_line : bool;
+      boxes : list[Box.t * int];
+      front : list[Token.t];
+      back : list[Token.t];
+      left : int;
+      right : int;
+      out : list[string];
+    }
+
+    let init = {
+      space_left = margin;
+      indent = 0;
+      new_line = true;
+      boxes = [];
+      front = [];
+      back = [];
+      left = 0;
+      right = 0;
+      out = [];
+    }
+
+    let output (st : t) s = {st with out = Cons (s, st.out)}
+
+    let new_line st width offset =
+      let indent = Int.min max_indent (Int.add (Int.sub margin width) offset) in
+      let out = output (output st "\n") (String.make indent ' ') in
+      {out with
+        new_line = true;
+        indent = indent;
+        space_left = Int.sub margin indent;
+      }
+
+    let same_line (st : t) =
+      let out = output st " " in
+      {out with space_left = Int.pred st.space_left}
+  end
+
+  (* [t]'s tokens consed onto [after], of [n] tokens, with their number and
+     [t]'s length on one line. A list is a box indented by 1 of its elements,
+     separated by breaks. A multi-line atom is a box of its lines, all but the
+     last ending with a backslash, all but the first starting with [\n]. *)
+  let tokens t after n =
+    let text s acc =
+      match acc with
+      | after, n, width ->
+        (Cons (Token.Text s, after),
+         Int.succ n,
+         Int.add width (String.length s))
+    in
+    (* [setter]: the number of tokens after the end of the box or the break
+       after the last element. *)
+    let elements rev_ts acc setter =
+      match (rev_ts, acc) with
+      | [], _ -> acc
+      | Cons (t, rest), (after, n, width) ->
+        match tokens t after n with
+        | after, m, t_width ->
+          let total = Int.add width t_width in
+          match rest with
+          | [] -> (after, m, total)
+          | Cons (_, _) ->
+            let break = Token.Break (Int.add t_width 2, setter) in
+            elements rest (Cons (break, after), Int.succ m, Int.succ total) m
+    in
+    let lines rev_lines acc =
+      match rev_lines with
+      | [] -> acc
+      | [l] -> text (String.escaped l) acc
+      | Cons (l, rest) ->
+        match text "\\n" (text (String.escaped l) acc) with
+        | after, n, width ->
+          lines
+            rest
+            (text "\\" (Cons (Token.Newline, after), Int.succ n, width))
+    in
+    let box offset acc =
+      match acc with
+      | after, m, width ->
+        (Cons (Token.Begin (Box.B, offset, width, n), after), Int.succ m, width)
+    in
+    match t with
+    | Sexp.List [] -> text "()" (after, n, 0)
+    | Sexp.List ts ->
+      let close = text ")" (Cons (Token.End, after), Int.succ n, 0) in
+      box 1 (text "(" (elements (List.rev ts) close n))
+    | Sexp.Atom s ->
+      let rev_lines = List.rev (String.split_on_char '\n' s) in
+      let one_line =
+        match rev_lines with
+        | [_] -> true
+        | [""; _] -> true
+        | _ -> false
+      in
+      match (must_escape s, one_line) with
+      | false, _ -> text s (after, n, 0)
+      | true, true -> text (quote s) (after, n, 0)
+      | true, false ->
+        let close = text "\"" (Cons (Token.End, after), Int.succ n, 0) in
+        box 0 (text " \"" (lines rev_lines close))
+
+  (* [Format]'s [format_pp_token]. *)
+  let format (st : State.t) token size =
+    match token with
+    | Token.Text s ->
+      let out = State.output st s in
+      {out with space_left = Int.sub st.space_left size; new_line = false}
+    | Token.Begin (box, offset, _, _) ->
+      let indented =
+        match (Int.gt (Int.sub margin st.space_left) max_indent, st.boxes) with
+        | false, _ -> st
+        | true, [] -> State.output st "\n"
+        | true, Cons ((Box.Fits, _), _) -> st
+        | true, Cons ((_, width), _) ->
+          match Int.gt width st.space_left with
+          | true -> State.new_line st width 0
+          | false -> st
+      in
+      let kind =
+        match Int.gt size indented.space_left with
+        | true -> box
+        | false -> Box.Fits
+      in
+      let opened = (kind, Int.sub indented.space_left offset) in
+      {indented with boxes = Cons (opened, indented.boxes)}
+    | Token.End ->
+      (match st.boxes with
+       | [] -> st
+       | Cons (_, rest) -> {st with boxes = rest})
+    | Token.Newline ->
+      (match st.boxes with
+       | [] -> State.output st "\n"
+       | Cons ((_, width), _) -> State.new_line st width 0)
+    | Token.Break (_, _) ->
+      match st.boxes with
+      | [] -> st
+      | Cons ((box, width), _) ->
+        let fits = Int.le size st.space_left in
+        let deeper = Int.gt st.indent (Int.sub margin width) in
+        match (box, st.new_line, fits, deeper) with
+        | Box.Fits, _, _, _ -> State.same_line st
+        | Box.Hov, _, true, _ -> State.same_line st
+        | Box.Hov, _, false, _ -> State.new_line st width 0
+        | Box.B, true, _, _ -> State.same_line st
+        | Box.B, false, true, false -> State.same_line st
+        | Box.B, false, _, _ -> State.new_line st width 0
+
+  (* [Format]'s [advance_left], [now] tokens before the end: prints the
+     enqueued tokens whose size is known, or that cannot fit anyway. *)
+  let advance (st : State.t) now =
+    let queue =
+      match (st.front, st.back) with
+      | [], Cons (_, _) -> {st with front = List.rev st.back; back = []}
+      | _ -> st
+    in
+    match queue.front with
+    | [] -> st
+    | Cons (token, rest) ->
+      let known_size =
+        match token with
+        | Token.Begin (_, _, size, known) ->
+          (match Int.ge known now with
+           | true -> Some size
+           | false -> None)
+        | Token.Break (size, known) ->
+          (match Int.ge known now with
+           | true -> Some size
+           | false -> None)
+        | _ -> Some (Token.length token)
+      in
+      let pending = Int.sub queue.right queue.left in
+      let size =
+        match (known_size, Int.ge pending queue.space_left) with
+        | Some size, _ -> Some size
+        | None, true -> Some infinity
+        | None, false -> None
+      in
+      match size with
+      | None -> st
+      | Some size ->
+        let left = Int.add queue.left (Token.length token) in
+        advance (format {queue with front = rest; left = left} token size) now
+
+  (* Enqueues [tokens], the first [now] tokens before the end, advancing after
+     texts, then flushes. *)
+  let run (st : State.t) tokens now =
+    match tokens with
+    | [] -> advance {st with right = infinity} (-1)
+    | Cons (token, rest) ->
+      let right = Int.add st.right (Token.length token) in
+      let queued = {st with back = Cons (token, st.back); right = right} in
+      match token with
+      | Token.Text _ -> run (advance queued now) rest (Int.pred now)
+      | Token.Newline -> run (advance queued now) rest (Int.pred now)
+      | _ -> run queued rest (Int.pred now)
+end

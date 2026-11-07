@@ -1,0 +1,367 @@
+(* [Sexp]'s parser: Parsexp's automaton, its states functions of the offset [i]
+   of the next character. *)
+
+(* Parsexp's [Single.parse_string]: the one sexp of [s], possibly surrounded by
+   whitespace and comments. *)
+let one s =
+  match between s 0 (Context.create true) with
+  | Ok (Cons (t, _)) -> Ok t
+  | Ok [] -> fail s 0 "no s-expression found in input"
+  | Error e -> Error e
+
+(* Parsexp's [Many.parse_string]: the sexps of [s]. *)
+let many s = between s 0 (Context.create false)
+
+let fail s i message = Error (Sexp.Parse_error.create s i message)
+
+module Context = struct
+  (* [frames]: the elements so far, in reverse, of each list open, innermost
+     first, then of the toplevel; lists in sexp comments have none.
+     [ignoring]: the depths of the sexp comments ([#;]) awaiting their sexp,
+     innermost first. [full]: the number of toplevel sexps. [single]: whether
+     there must be exactly one. *)
+  type t['sexp] = {
+    single : bool;
+    frames : list[list['sexp]];
+    depth : int;
+    ignoring : list[int];
+    full : int;
+  }
+
+  let create single =
+    {single = single; frames = [[]]; depth = 0; ignoring = []; full = 0}
+
+  let ignoring ctx = Bool.not (List.is_empty ctx.ignoring)
+
+  (* Before a sexp starts at [i]. *)
+  let check_new s i ctx =
+    match (ctx.single, Int.gt ctx.full 0, ignoring ctx) with
+    | true, true, false -> fail s i "s-expression followed by data"
+    | _ -> Ok ctx
+
+  (* After a sexp ends at [i], in [frames] unless in a sexp comment. *)
+  let added s i ctx frames depth =
+    let finish ignoring comment =
+      let full =
+        match (comment, List.is_empty ignoring, Int.equal depth 0) with
+        | false, true, true -> Int.succ ctx.full
+        | _ -> ctx.full
+      in
+      Ok
+        {
+          single = ctx.single;
+          frames = frames;
+          depth = depth;
+          ignoring = ignoring;
+          full = full;
+        }
+    in
+    match ctx.ignoring with
+    | [] -> finish [] false
+    | Cons (d, rest) ->
+      match (Int.gt d depth, Int.equal d depth) with
+      | true, _ -> fail s i "unterminated sexp comment"
+      | _, true -> finish rest true
+      | _ -> finish ctx.ignoring false
+
+  let add s i ctx t =
+    let frames =
+      match (ignoring ctx, ctx.frames) with
+      | false, Cons (frame, rest) -> Cons (Cons (t, frame), rest)
+      | _ -> ctx.frames
+    in
+    added s i ctx frames ctx.depth
+
+  let open_ s i ctx =
+    let frames =
+      match ignoring ctx with
+      | false -> Cons ([], ctx.frames)
+      | true -> ctx.frames
+    in
+    let opened ctx =
+      Ok
+        {
+          single = ctx.single;
+          frames = frames;
+          depth = Int.succ ctx.depth;
+          ignoring = ctx.ignoring;
+          full = ctx.full;
+        }
+    in
+    Result.bind (check_new s i ctx) opened
+
+  let close s i ctx =
+    match (Int.equal ctx.depth 0, ignoring ctx, ctx.frames) with
+    | true, _, _ -> fail s i "unexpected character: ')'"
+    | false, false, Cons (frame, Cons (parent, rest)) ->
+      let t = Sexp.List (List.rev frame) in
+      added s i ctx (Cons (Cons (t, parent), rest)) (Int.pred ctx.depth)
+    | false, _, _ -> added s i ctx ctx.frames (Int.pred ctx.depth)
+
+  let start_comment ctx = {
+    single = ctx.single;
+    frames = ctx.frames;
+    depth = ctx.depth;
+    ignoring = Cons (ctx.depth, ctx.ignoring);
+    full = ctx.full;
+  }
+
+  (* At the end of [s]: the toplevel sexps. *)
+  let finish s ctx =
+    let i = String.length s in
+    match
+      (Int.gt ctx.depth 0, ignoring ctx, ctx.single, ctx.full, ctx.frames)
+    with
+    | true, _, _, _, _ -> fail s i "unclosed parentheses at end of input"
+    | _, true, _, _, _ -> fail s i "unterminated sexp comment"
+    | _, _, true, 0, _ -> fail s i "no s-expression found in input"
+    | _, _, _, _, Cons (top, _) -> Ok (List.rev top)
+    | _, _, _, _, [] -> Ok []
+end
+
+let at_end s i = Bool.not (Int.lt i (String.length s))
+
+let next_char s i =
+  match at_end s i with
+  | true -> None
+  | false -> Some (String.get s i)
+
+let is_blank c =
+  match c with
+  | ' ' -> true
+  | '\t' -> true
+  | '\012' -> true
+  | _ -> false
+
+let ends_atom c =
+  match c with
+  | '\n' -> true
+  | '\r' -> true
+  | '(' -> true
+  | ')' -> true
+  | '"' -> true
+  | ';' -> true
+  | _ -> is_blank c
+
+(* [n] digits in [base] from [i]: their value and the offset after them. *)
+let escape_digits s i n base message eof_message =
+  let digit c =
+    let from low = Int.sub (Char.code c) (Char.code low) in
+    match
+      (Char.is_digit c,
+       Char.Internal.is_between 'a' 'f' c,
+       Char.Internal.is_between 'A' 'F' c)
+    with
+    | true, _, _ -> Some (from '0')
+    | _, true, _ -> Some (Int.add 10 (from 'a'))
+    | _, _, true -> Some (Int.add 10 (from 'A'))
+    | _ -> None
+  in
+  let loop j value =
+    match (Int.equal j (Int.add i n), at_end s j) with
+    | true, _ ->
+      let p = (value, j) in
+      Ok p
+    | _, true -> fail s j eof_message
+    | _ ->
+      match digit (String.get s j) with
+      | Some d ->
+        (match Int.lt d base with
+         | true -> loop (Int.succ j) (Int.add (Int.mul value base) d)
+         | false -> fail s j message)
+      | None -> fail s j message
+  in
+  loop i 0
+
+let decimal_escape s i eof_message =
+  let in_range p =
+    match p with
+    | value, j ->
+      match Int.gt value 255 with
+      | true ->
+        fail s (Int.pred j) "escape sequence in quoted string out of range"
+      | false -> Ok p
+  in
+  Result.bind
+    (escape_digits s i 3 10 "unterminated decimal escape sequence" eof_message)
+    in_range
+
+let hex_escape s i eof_message =
+  escape_digits s i 2 16 "unterminated hexadecimal escape sequence" eof_message
+
+(* Between sexps. *)
+let between s i ctx =
+  match at_end s i with
+  | true -> Context.finish s ctx
+  | false ->
+    let next = Int.succ i in
+    let start_atom ctx = atom s i next ctx in
+    match String.get s i with
+    | '\n' -> between s next ctx
+    | '\r' -> after_cr s next ctx
+    | '#' -> after_hash s next ctx
+    | ';' -> line_comment s next ctx
+    | '(' -> Result.bind (Context.open_ s i ctx) (between s next)
+    | ')' -> Result.bind (Context.close s i ctx) (between s next)
+    | '"' ->
+      Result.bind
+        (Context.check_new s i ctx)
+        (fun ctx -> quoted s next next [] ctx)
+    | c ->
+      match is_blank c with
+      | true -> between s next ctx
+      | false -> Result.bind (Context.check_new s i ctx) start_atom
+
+(* A carriage return must start a CRLF. *)
+let after_cr s i ctx =
+  match at_end s i with
+  | true -> fail s i "unexpected end of input after carriage return"
+  | false ->
+    match String.get s i with
+    | '\n' -> between s (Int.succ i) ctx
+    | _ -> fail s i "unexpected character after carriage return"
+
+let line_comment s i ctx =
+  match at_end s i with
+  | true -> Context.finish s ctx
+  | false ->
+    match String.get s i with
+    | '\n' -> between s (Int.succ i) ctx
+    | '\r' -> after_cr s (Int.succ i) ctx
+    | _ -> line_comment s (Int.succ i) ctx
+
+(* An unquoted atom from [start], which cannot have [#|] or [|#]. *)
+let atom s start i ctx =
+  let push _ =
+    Context.add s i ctx (Sexp.Atom (String.sub s start (Int.sub i start)))
+  in
+  match at_end s i with
+  | true -> Result.bind (push ()) (Context.finish s)
+  | false ->
+    let c = String.get s i in
+    let comment_token _ =
+      match String.equal (String.sub s start (Int.sub i start)) "|" with
+      | true -> fail s i "illegal end of comment"
+      | false -> fail s i "comment tokens in unquoted atom"
+    in
+    match (String.get s (Int.pred i), c) with
+    | '#', '|' -> comment_token ()
+    | '|', '#' -> comment_token ()
+    | _ ->
+      match ends_atom c with
+      | true -> Result.bind (push ()) (between s i)
+      | false -> atom s start (Int.succ i) ctx
+
+(* After a [#] starting a sexp: a sexp comment [#;], a block comment [#|],
+   or an atom. *)
+let after_hash s i ctx =
+  let start_atom ctx = atom s (Int.pred i) i ctx in
+  match at_end s i with
+  | true -> Result.bind (Context.check_new s i ctx) start_atom
+  | false ->
+    match String.get s i with
+    | ';' -> between s (Int.succ i) (Context.start_comment ctx)
+    | '|' -> block_comment s (Int.succ i) 1 ctx
+    | _ -> Result.bind (Context.check_new s i ctx) start_atom
+
+(* A quoted atom, its parts so far in reverse in [parts], then the
+   characters from [start]. *)
+let quoted s start i parts ctx =
+  let with_chunk _ = Cons (String.sub s start (Int.sub i start), parts) in
+  match at_end s i with
+  | true -> fail s i "unterminated quoted string"
+  | false ->
+    match String.get s i with
+    | '"' ->
+      let t = Sexp.Atom (String.concat "" (List.rev (with_chunk ()))) in
+      Result.bind (Context.add s i ctx t) (between s (Int.succ i))
+    | '\\' -> escape s (Int.succ i) (with_chunk ()) ctx
+    | _ -> quoted s start (Int.succ i) parts ctx
+
+(* After a backslash in a quoted atom. *)
+let escape s i parts ctx =
+  let eof = "unterminated quoted string" in
+  let char part i = quoted s i i (Cons (part, parts)) ctx in
+  let code p =
+    match p with code, j -> char (Char.to_string (Prim.Char.of_code code)) j
+  in
+  match at_end s i with
+  | true -> fail s i eof
+  | false ->
+    let next = Int.succ i in
+    match String.get s i with
+    | '\n' -> continuation s next parts ctx
+    | '\r' -> escaped_cr s next parts ctx
+    | 'x' -> Result.bind (hex_escape s next eof) code
+    | 'n' -> char "\n" next
+    | 'r' -> char "\r" next
+    | 'b' -> char "\b" next
+    | 't' -> char "\t" next
+    | '\\' -> char "\\" next
+    | '\'' -> char "'" next
+    | '"' -> char "\"" next
+    | c ->
+      match Char.is_digit c with
+      | true -> Result.bind (decimal_escape s i eof) code
+      | false -> char (String.sub s (Int.pred i) 2) next
+
+(* After a backslash and a carriage return: a continuation if a newline
+   follows, otherwise the carriage return. *)
+let escaped_cr s i parts ctx =
+  match at_end s i with
+  | true -> fail s i "unterminated quoted string"
+  | false ->
+    match String.get s i with
+    | '\n' -> continuation s (Int.succ i) parts ctx
+    | _ -> quoted s i i (Cons ("\r", parts)) ctx
+
+(* After a backslash and a newline, which skip the spaces and tabs
+   following. *)
+let continuation s i parts ctx =
+  match next_char s i with
+  | Some ' ' -> continuation s (Int.succ i) parts ctx
+  | Some '\t' -> continuation s (Int.succ i) parts ctx
+  | _ -> quoted s i i parts ctx
+
+(* In [depth] nested block comments. *)
+let block_comment s i depth ctx =
+  match at_end s i with
+  | true -> fail s i "unterminated block comment"
+  | false ->
+    let next = Int.succ i in
+    match String.get s i with
+    | '"' -> comment_string s next depth ctx
+    | '|' ->
+      (match next_char s next with
+       | Some '#' ->
+         (match Int.equal depth 1 with
+          | true -> between s (Int.succ next) ctx
+          | false -> block_comment s (Int.succ next) (Int.pred depth) ctx)
+       | _ -> block_comment s next depth ctx)
+    | '#' ->
+      (match next_char s next with
+       | Some '|' -> block_comment s (Int.succ next) (Int.succ depth) ctx
+       | _ -> block_comment s next depth ctx)
+    | _ -> block_comment s next depth ctx
+
+(* A quoted string in a block comment, whose escapes must be valid. *)
+let comment_string s i depth ctx =
+  let eof = "unterminated block comment" in
+  let after p = match p with _, j -> comment_string s j depth ctx in
+  match at_end s i with
+  | true -> fail s i eof
+  | false ->
+    match String.get s i with
+    | '"' -> block_comment s (Int.succ i) depth ctx
+    | '\\' ->
+      (let next = Int.succ i in
+       match at_end s next with
+       | true -> fail s next eof
+       | false ->
+         match String.get s next with
+         | 'x' -> Result.bind (hex_escape s (Int.succ next) eof) after
+         | c ->
+           match Char.is_digit c with
+           | true -> Result.bind (decimal_escape s next eof) after
+           | false -> comment_string s (Int.succ next) depth ctx)
+    | _ -> comment_string s (Int.succ i) depth ctx

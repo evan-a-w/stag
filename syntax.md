@@ -434,7 +434,8 @@ int_of_sexp t` raises `Sexp.Of_sexp_error of Sexp.Of_sexp_error.t`. Out of
 range indices (`String.get`, `String.sub`) and division by zero are
 programming errors, raising the prelude's `Invalid_argument` and
 `Division_by_zero` as the prims do. Functions on lists run in constant stack.
-Each file's helpers are in its submodule `Internal`, not meant for use outside
+Each file's helpers are in its submodule `Internal`, and `Sexp_printer`,
+`Sexp_parser` and `Sexp_derive` are `Sexp`'s, not meant for use outside
 `core/`.
 
 - `Core.List`, `Core.Option`, `Core.Result`: the usual combinators on the
@@ -442,7 +443,7 @@ Each file's helpers are in its submodule `Internal`, not meant for use outside
   stable `sort`, `Option.value`, `Result.bind`, `Result.all`, ...).
 - `Core.Int`, `Core.Char`, `Core.Bool`, `Core.String`: the prims of their
   name, re-exported, and helpers on them (`String.concat sep parts`,
-  `split_on_char`, `strip`, `escaped`, `Char.is_digit`, ...).
+  `split_on_char`, `strip`, `escaped`, `capitalize`, `Char.is_digit`, ...).
 - `Core.Sexp`: `type t = Atom of string | List of list[t]`, printed and parsed
   exactly as by OCaml's Sexplib and Parsexp (checked against them in
   `driver/test/test_core_sexp.ml`). `to_string` is Sexplib's machine format
@@ -451,6 +452,8 @@ Each file's helpers are in its submodule `Internal`, not meant for use outside
   `of_string_many` accept what Parsexp's `Single` and `Many` do, comments
   included, and fail with its messages, as `result[_, Parse_error.t]`: a
   message with the offset, line (from 1) and column (from 0) of the error.
+  The printers, the parser and the deriver below are `Sexp_printer`,
+  `Sexp_parser` and `Sexp_derive` (`core/sexp_*.stag`), which `Sexp` calls.
 - Conversions for derived code: `sexp_of_X`, `X_of_sexp` and
   `X_of_sexp_exn` for `unit`, `bool`, `int`, `char`, `string`, `list`,
   `option` and `result` (and `sexp_of_pair`, `pair_of_sexp`, and the same
@@ -947,10 +950,10 @@ val n : int @@ const      (* modalities on signature items and fields *)
 
 - A stag-build library named `core` shadows the prelude's `Core` in the whole
   program, `.Core` included. Derivers living in the prelude's `Core` (eg. a
-  `Sexp.derive` in `core/sexp.stag`) are unaffected: inside their quotes they
-  refer to sibling modules relatively (`Int.to_string`), and the code they
-  generate holds refs, so a user's `core` doesn't capture them. Code outside
-  `Core` can still not name it then.
+  `Sexp.derive` in `core/sexp_derive.stag`) are unaffected: inside their
+  quotes they refer to sibling modules relatively (`Int.to_string`), and the
+  code they generate holds refs, so a user's `core` doesn't capture them. Code
+  outside `Core` can still not name it then.
 
 `if`, infix operators (`let (+) x y = ...`, OCaml precedences),
 interface files.

@@ -44,6 +44,12 @@ let map f s = init (length s) (fun i -> f (get s i))
 let lowercase s = map Char.lowercase s
 let uppercase s = map Char.uppercase s
 
+(* [s] with its first character uppercased. *)
+let capitalize s =
+  match is_empty s with
+  | true -> s
+  | false -> append (of_char (Char.uppercase (get s 0))) (drop_prefix s 1)
+
 let for_all f s =
   let loop i =
     match Int.lt i (length s) with

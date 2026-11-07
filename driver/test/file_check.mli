@@ -12,3 +12,7 @@ val check_files
   -> ?filter_diagnostic:(string -> string)
   -> (string * string) list
   -> unit
+
+(** A [filter_diagnostic]: without the lines locating a raise within the core
+    library's sources, which move as they change. *)
+val without_core_location : string -> string

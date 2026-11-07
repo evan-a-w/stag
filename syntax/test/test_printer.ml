@@ -707,7 +707,7 @@ let%expect_test "the project's sources round trip and are formatted" =
     {|
     (../../tests/basics.stag (formatted true) (long_lines 0))
     (../../tests/core_basics.stag (formatted true) (long_lines 0))
-    (../../tests/core_derive_sexp.stag (formatted true) (long_lines 11))
+    (../../tests/core_derive_sexp.stag (formatted true) (long_lines 13))
     (../../tests/core_exn.stag (formatted true) (long_lines 1))
     (../../tests/core_list.stag (formatted true) (long_lines 0))
     (../../tests/core_option.stag (formatted true) (long_lines 0))
@@ -730,6 +730,9 @@ let%expect_test "the project's sources round trip and are formatted" =
     (../../core/option.stag (formatted true) (long_lines 0))
     (../../core/result.stag (formatted true) (long_lines 0))
     (../../core/sexp.stag (formatted true) (long_lines 0))
+    (../../core/sexp_derive.stag (formatted true) (long_lines 0))
+    (../../core/sexp_parser.stag (formatted true) (long_lines 0))
+    (../../core/sexp_printer.stag (formatted true) (long_lines 0))
     (../../core/string.stag (formatted true) (long_lines 0))
     (../../bench/programs/fib.stag (formatted true) (long_lines 0))
     (../../bench/programs/matching.stag (formatted true) (long_lines 0))

@@ -43,3 +43,11 @@ let check_files ?(run = false) ?(filter_diagnostic = Fn.id) files =
 let check ?run ?filter_diagnostic contents =
   check_files ?run ?filter_diagnostic [ "a.stag", contents ]
 ;;
+
+let without_core_location diagnostic =
+  String.split_lines diagnostic
+  |> List.take_while ~f:(fun line ->
+    not (String.is_prefix line ~prefix:"File \"<core>"))
+  |> List.map ~f:(fun line -> line ^ "\n")
+  |> String.concat
+;;

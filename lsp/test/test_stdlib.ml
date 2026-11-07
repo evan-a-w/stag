@@ -48,6 +48,9 @@ let%expect_test "the prelude's sources check cleanly, as the prelude" =
       opened stag/core/option.stag
       opened stag/core/result.stag
       opened stag/core/sexp.stag
+      opened stag/core/sexp_derive.stag
+      opened stag/core/sexp_parser.stag
+      opened stag/core/sexp_printer.stag
       opened stag/core/string.stag
       |}];
     let prelude = "stag/prelude/prelude.stag" in
@@ -105,59 +108,61 @@ let%expect_test "errors in the prelude's sources are located in them" =
         120:12-120:20 error: Unbound value Int.succ
         156:14-156:22 error: Unbound value Int.succ
       diagnostics stag/core/sexp.stag:
-        61:28-61:36 error: Unbound value Int.succ
-        62:33-62:41 error: Unbound value Int.succ
-        466:43-466:51 error: Unbound value Int.succ
-        478:24-478:32 error: Unbound value Int.succ
-        482:30-482:38 error: Unbound value Int.succ
-        525:11-525:19 error: Unbound value Int.succ
-        541:51-541:59 error: Unbound value Int.succ
-        541:63-541:71 error: Unbound value Int.succ
-        552:56-552:64 error: Unbound value Int.succ
-        558:11-558:19 error: Unbound value Int.succ
-        564:55-564:63 error: Unbound value Int.succ
-        578:58-578:66 error: Unbound value Int.succ
-        734:35-734:43 error: Unbound value Int.succ
-        773:22-773:30 error: Unbound value Int.succ
-        857:29-857:37 error: Unbound value Int.succ
-        896:19-896:27 error: Unbound value Int.succ
-        920:29-920:37 error: Unbound value Int.succ
-        928:29-928:37 error: Unbound value Int.succ
-        929:30-929:38 error: Unbound value Int.succ
-        930:31-930:39 error: Unbound value Int.succ
-        952:35-952:43 error: Unbound value Int.succ
-        962:28-962:36 error: Unbound value Int.succ
-        963:34-963:42 error: Unbound value Int.succ
-        976:58-976:66 error: Unbound value Int.succ
-        977:28-977:36 error: Unbound value Int.succ
-        978:31-978:39 error: Unbound value Int.succ
-        990:19-990:27 error: Unbound value Int.succ
-        1014:34-1014:42 error: Unbound value Int.succ
-        1021:36-1021:44 error: Unbound value Int.succ
-        1022:37-1022:45 error: Unbound value Int.succ
-        1030:19-1030:27 error: Unbound value Int.succ
-        1037:35-1037:43 error: Unbound value Int.succ
-        1038:42-1038:50 error: Unbound value Int.succ
-        1042:42-1042:50 error: Unbound value Int.succ
-        1042:58-1042:66 error: Unbound value Int.succ
-        1054:34-1054:42 error: Unbound value Int.succ
-        1056:22-1056:30 error: Unbound value Int.succ
-        1061:49-1061:57 error: Unbound value Int.succ
-        1065:44-1065:52 error: Unbound value Int.succ
-        1066:33-1066:41 error: Unbound value Int.succ
+        22:28-22:36 error: Unbound value Int.succ
+        23:33-23:41 error: Unbound value Int.succ
+      diagnostics stag/core/sexp_parser.stag:
+        46:31-46:39 error: Unbound value Int.succ
+        85:18-85:26 error: Unbound value Int.succ
+        169:25-169:33 error: Unbound value Int.succ
+        196:15-196:23 error: Unbound value Int.succ
+        220:25-220:33 error: Unbound value Int.succ
+        228:25-228:33 error: Unbound value Int.succ
+        229:26-229:34 error: Unbound value Int.succ
+        230:27-230:35 error: Unbound value Int.succ
+        252:31-252:39 error: Unbound value Int.succ
+        262:24-262:32 error: Unbound value Int.succ
+        263:30-263:38 error: Unbound value Int.succ
+        276:54-276:62 error: Unbound value Int.succ
+        277:24-277:32 error: Unbound value Int.succ
+        278:27-278:35 error: Unbound value Int.succ
+        290:15-290:23 error: Unbound value Int.succ
+        314:30-314:38 error: Unbound value Int.succ
+        321:32-321:40 error: Unbound value Int.succ
+        322:33-322:41 error: Unbound value Int.succ
+        330:15-330:23 error: Unbound value Int.succ
+        337:31-337:39 error: Unbound value Int.succ
+        338:38-338:46 error: Unbound value Int.succ
+        342:38-342:46 error: Unbound value Int.succ
+        342:54-342:62 error: Unbound value Int.succ
+        354:30-354:38 error: Unbound value Int.succ
+        356:18-356:26 error: Unbound value Int.succ
+        361:45-361:53 error: Unbound value Int.succ
+        365:40-365:48 error: Unbound value Int.succ
+        366:29-366:37 error: Unbound value Int.succ
+      diagnostics stag/core/sexp_printer.stag:
+        46:41-46:49 error: Unbound value Int.succ
+        58:22-58:30 error: Unbound value Int.succ
+        62:28-62:36 error: Unbound value Int.succ
+        154:9-154:17 error: Unbound value Int.succ
+        170:48-170:56 error: Unbound value Int.succ
+        170:60-170:68 error: Unbound value Int.succ
+        181:53-181:61 error: Unbound value Int.succ
+        186:62-186:70 error: Unbound value Int.succ
+        191:53-191:61 error: Unbound value Int.succ
+        205:56-205:64 error: Unbound value Int.succ
       diagnostics stag/core/string.stag:
-        51:23-51:31 error: Unbound value Int.succ
-        66:24-66:32 error: Unbound value Int.succ
-        114:23-114:31 error: Unbound value Int.succ
-        126:29-126:37 error: Unbound value Int.succ
-        151:15-151:23 error: Unbound value Int.succ
-        151:28-151:36 error: Unbound value Int.succ
-        152:30-152:38 error: Unbound value Int.succ
-        170:30-170:38 error: Unbound value Int.succ
-        193:28-193:36 error: Unbound value Int.succ
-        198:14-198:22 error: Unbound value Int.succ
-        198:27-198:35 error: Unbound value Int.succ
-        207:39-207:47 error: Unbound value Int.succ
+        57:23-57:31 error: Unbound value Int.succ
+        72:24-72:32 error: Unbound value Int.succ
+        120:23-120:31 error: Unbound value Int.succ
+        132:29-132:37 error: Unbound value Int.succ
+        157:15-157:23 error: Unbound value Int.succ
+        157:28-157:36 error: Unbound value Int.succ
+        158:30-158:38 error: Unbound value Int.succ
+        176:30-176:38 error: Unbound value Int.succ
+        199:28-199:36 error: Unbound value Int.succ
+        204:14-204:22 error: Unbound value Int.succ
+        204:27-204:35 error: Unbound value Int.succ
+        213:39-213:47 error: Unbound value Int.succ
       |}];
     Client.did_change client int ~version:3 (contents int);
     let prelude = "stag/prelude/prelude.stag" in
@@ -171,6 +176,8 @@ let%expect_test "errors in the prelude's sources are located in them" =
       {|
       diagnostics stag/core/list.stag (version 3): none
       diagnostics stag/core/sexp.stag: none
+      diagnostics stag/core/sexp_parser.stag: none
+      diagnostics stag/core/sexp_printer.stag: none
       diagnostics stag/core/string.stag: none
       diagnostics stag/prelude/prelude.stag (version 2):
         0:8-0:22 error: Unbound value Prim.Nope.nope
@@ -500,11 +507,11 @@ let%expect_test "definitions of the prelude's types, constructors and fields" =
          0:11 0:11-0:17 ```stag type option ```
          0:11 -> stag/prelude/prelude.stag 4:5-4:11
          1:30 1:8-1:31 ```stag type Core.Sexp.Parse_error.t ```
-         1:30 -> stag/core/sexp.stag 56:7-56:8
+         1:30 -> stag/core/sexp.stag 17:7-17:8
          1:36 1:36-1:43 ```stag prelude.Core.Sexp.Parse_error.message : string ```
-         1:36 -> stag/core/sexp.stag 56:12-56:19
+         1:36 -> stag/core/sexp.stag 17:12-17:19
          2:10 2:10-2:17 ```stag prelude.Core.Sexp.Parse_error.message : string ```
-         2:10 -> stag/core/sexp.stag 56:12-56:19
+         2:10 -> stag/core/sexp.stag 17:12-17:19
          3:18 3:8-3:19 ```stag type Core.Sexp.t ```
          3:18 -> stag/core/sexp.stag 3:5-3:6
          3:32 3:22-3:36 ```stag prelude.Core.Sexp.Atom : Core.Sexp.t ```

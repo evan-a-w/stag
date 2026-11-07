@@ -3,17 +3,11 @@ open! Import
 (* [Core.Sexp.derive]'s errors, at the splice, and what it generates across
    modules and files. Its expansions are in [tests/core_derive_sexp.stag]. *)
 
-(* Without the lines locating the raise within [core/sexp.stag]. *)
-let without_core_location diagnostic =
-  String.split_lines diagnostic
-  |> List.take_while ~f:(fun line ->
-    not (String.is_prefix line ~prefix:"File \"<core>"))
-  |> List.map ~f:(fun line -> line ^ "\n")
-  |> String.concat
-;;
-
 let check_files ?run files =
-  File_check.check_files ?run ~filter_diagnostic:without_core_location files
+  File_check.check_files
+    ?run
+    ~filter_diagnostic:File_check.without_core_location
+    files
 ;;
 
 let check ?run contents = check_files ?run [ "a.stag", contents ]
