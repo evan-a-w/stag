@@ -129,7 +129,7 @@ let index targets ~error =
                 "The name %s is already used by the %s in %s"
                 name.txt
                 (Stanza.Kind.to_string other.stanza.kind)
-                other.stanza.name.loc.file);
+                (Loc.file_name other.stanza.name.loc));
         by_name
       | None -> Map.set by_name ~key:name.txt ~data:target)
 ;;

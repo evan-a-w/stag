@@ -1173,8 +1173,8 @@ let%expect_test "an expansion starts after the comments on its splice's line" =
           [%sexp
             (String.sub
                source
-               ~pos:expansion.loc.start.offset
-               ~len:(expansion.loc.stop.offset - expansion.loc.start.offset)
+               ~pos:expansion.loc.start.#offset
+               ~len:(expansion.loc.stop.#offset - expansion.loc.start.#offset)
              : string)]
       | _ -> print_endline "unexpected");
   [%expect

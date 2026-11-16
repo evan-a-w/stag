@@ -143,9 +143,10 @@ let%expect_test "core files that are not modules" =
                (Diagnostic.relocate diagnostic ~f:(fun loc ->
                   { loc with
                     file =
-                      String.chop_prefix_exn
-                        loc.file
-                        ~prefix:(Stdlib_checkout.root checkout ^ "/")
+                      Stag_common.Loc.File.of_string
+                        (String.chop_prefix_exn
+                           (Stag_common.Loc.file_name loc)
+                           ~prefix:(Stdlib_checkout.root checkout ^ "/"))
                   })))
       in
       print (Stdlib_checkout.prelude checkout);

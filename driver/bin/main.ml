@@ -25,8 +25,8 @@ let read_files paths =
 let relative_loc =
   let cwd = lazy (Sys_unix.getcwd () ^ "/") in
   fun (loc : Loc.t) ->
-    match String.chop_prefix loc.file ~prefix:(force cwd) with
-    | Some file -> { loc with file }
+    match String.chop_prefix (Loc.file_name loc) ~prefix:(force cwd) with
+    | Some file -> { loc with file = Loc.File.of_string file }
     | None -> loc
 ;;
 

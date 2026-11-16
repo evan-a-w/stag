@@ -59,7 +59,7 @@ exception Lex_error of Error.t
 
 module State = struct
   type t =
-    { file : string
+    { file : Loc.File.t
     ; src : string
     ; mutable offset : int
     ; mutable line : int
@@ -92,7 +92,7 @@ module State = struct
   ;;
 
   let pos t : Loc.Pos.t =
-    { line = t.line; col = t.offset - t.bol; offset = t.offset }
+    #{ line = t.line; col = t.offset - t.bol; offset = t.offset }
   ;;
 
   let loc_from t (start : Loc.Pos.t) : Loc.t =
@@ -110,13 +110,13 @@ module State = struct
   (* For an opening delimiter of [len] bytes, which never spans lines. *)
   let error_opening t (start : Loc.Pos.t) ~len kind =
     let stop =
-      { start with col = start.col + len; offset = start.offset + len }
+      #{ start with col = start.#col + len; offset = start.#offset + len }
     in
     report t { kind; loc = { file = t.file; start; stop } }
   ;;
 
   let text_from t (start : Loc.Pos.t) =
-    String.sub t.src ~pos:start.offset ~len:(t.offset - start.offset)
+    String.sub t.src ~pos:start.#offset ~len:(t.offset - start.#offset)
   ;;
 end
 
@@ -507,56 +507,57 @@ let comments ~(prev : Located.t option) ~(next : Located.t) ~next_index found =
     code_after.(i)
     <- (if i < n - 1
         then
-          lines.(i + 1).start.line = lines.(i).stop.line && code_after.(i + 1)
+          lines.(i + 1).start.#line = lines.(i).stop.#line && code_after.(i + 1)
         else (
           match next.token with
           | Eof -> false
-          | _ -> next.loc.start.line = lines.(i).stop.line))
+          | _ -> next.loc.start.#line = lines.(i).stop.#line))
   done;
   let trailing_line =
     Option.bind prev ~f:(fun prev ->
-      Option.some_if (Token.ends_code prev.token) prev.loc.stop.line)
+      Option.some_if (Token.ends_code prev.token) prev.loc.stop.#line)
   in
   List.folding_mapi
     found
     ~init:trailing_line
     ~f:(fun i trailing_line (text, (loc : Loc.t)) ->
       let code_before =
-        Option.exists prev ~f:(fun prev -> prev.loc.stop.line = loc.start.line)
+        Option.exists prev ~f:(fun prev ->
+          prev.loc.stop.#line = loc.start.#line)
       in
       let code_after = code_after.(i) in
       let placement : Comment.Placement.t =
         if code_after
         then Inline
-        else if Option.equal Int.equal trailing_line (Some loc.start.line)
+        else if Option.equal Int.equal trailing_line (Some loc.start.#line)
         then Trailing
         else (
           let line_before =
             if i > 0
-            then Some lines.(i - 1).stop.line
-            else Option.map prev ~f:(fun prev -> prev.loc.stop.line)
+            then Some lines.(i - 1).stop.#line
+            else Option.map prev ~f:(fun prev -> prev.loc.stop.#line)
           in
           let line_after =
             if i < n - 1
-            then Some lines.(i + 1).start.line
+            then Some lines.(i + 1).start.#line
             else (
               match next.token with
               | Eof -> None
-              | _ -> Some next.loc.start.line)
+              | _ -> Some next.loc.start.#line)
           in
           Own_line
             { blank_before =
                 (not code_before)
                 && Option.exists line_before ~f:(fun line ->
-                  loc.start.line > line + 1)
+                  loc.start.#line > line + 1)
             ; blank_after =
                 Option.exists line_after ~f:(fun line ->
-                  line > loc.stop.line + 1)
+                  line > loc.stop.#line + 1)
             })
       in
       let trailing_line =
         match placement with
-        | Trailing -> Some loc.stop.line
+        | Trailing -> Some loc.stop.#line
         | Own_line _ | Inline -> None
       in
       trailing_line, { Comment.text; loc; placement; next_token = next_index })
@@ -564,7 +565,7 @@ let comments ~(prev : Located.t option) ~(next : Located.t) ~next_index found =
 
 let lex ~file src ~errors =
   let t : State.t =
-    { file
+    { file = Loc.File.of_string file
     ; src
     ; offset = 0
     ; line = 1
@@ -630,11 +631,11 @@ let tokenize_prefix ~file src =
   let rec loop prefix =
     match tokenize_with_comments ~file (String.prefix src prefix) with
     | Ok (tokens, comments) -> tokens, comments
-    | Error error -> loop (min (prefix - 1) error.loc.start.offset)
+    | Error error -> loop (min (prefix - 1) error.loc.start.#offset)
   in
   match tokenize_with_comments ~file src with
   | Ok (tokens, comments) -> { Prefix.tokens; comments; error = None }
   | Error error ->
-    let tokens, comments = loop error.loc.start.offset in
+    let tokens, comments = loop error.loc.start.#offset in
     { tokens; comments; error = Some error }
 ;;

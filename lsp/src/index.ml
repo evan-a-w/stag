@@ -3,7 +3,7 @@ open! Import
 module Span = struct
   module T = struct
     type t =
-      { file : string
+      { file : Loc.File.t
       ; start : int
       ; stop : int
       }
@@ -14,7 +14,7 @@ module Span = struct
   include Hashable.Make_plain (T)
 
   let of_loc (loc : Loc.t) =
-    { file = loc.file; start = loc.start.offset; stop = loc.stop.offset }
+    { file = loc.file; start = loc.start.#offset; stop = loc.stop.#offset }
   ;;
 end
 
@@ -172,15 +172,21 @@ let add_function t (loc : Loc.t) =
   if not (at_splice t loc)
   then
     Hash_set.add
-      (Hashtbl.find_or_add t.functions loc.file ~default:Int.Hash_set.create)
-      loc.start.offset
+      (Hashtbl.find_or_add
+         t.functions
+         (Loc.file_name loc)
+         ~default:Int.Hash_set.create)
+      loc.start.#offset
 ;;
 
 let add t (entry : Entry.t) =
   if not (Loc.is_none entry.loc || at_splice t entry.loc)
   then
     Queue.enqueue
-      (Hashtbl.find_or_add t.entries entry.loc.file ~default:Queue.create)
+      (Hashtbl.find_or_add
+         t.entries
+         (Loc.file_name entry.loc)
+         ~default:Queue.create)
       entry
 ;;
 
@@ -616,7 +622,7 @@ let relocate t ~f =
         | target -> target
       in
       add { t with entries } { entry with loc; target }));
-  let file name = (f (Loc.start_of_file name)).file in
+  let file name = Loc.file_name (f (Loc.start_of_file name)) in
   let functions = String.Table.create () in
   Hashtbl.iteri t.functions ~f:(fun ~key ~data ->
     Hashtbl.set functions ~key:(file key) ~data);
@@ -629,14 +635,17 @@ let relocate t ~f =
   ; functions
   ; splices =
       Hash_set.to_list t.splices
-      |> List.map ~f:(fun span -> { span with Span.file = file span.file })
+      |> List.map ~f:(fun span ->
+        { span with
+          Span.file = Loc.File.of_string (file (Loc.File.to_string span.file))
+        })
       |> Span.Hash_set.of_list
   ; of_prelude = t.of_prelude
   }
 ;;
 
 let contains (loc : Loc.t) offset =
-  loc.start.offset <= offset && offset <= loc.stop.offset
+  loc.start.#offset <= offset && offset <= loc.stop.#offset
 ;;
 
 (* The innermost entry at [offset], the last added of those as small. *)
@@ -647,7 +656,7 @@ let entry_at t ~file ~offset =
     then best
     else (
       let size (entry : Entry.t) =
-        entry.loc.stop.offset - entry.loc.start.offset
+        entry.loc.stop.#offset - entry.loc.start.#offset
       in
       match best with
       | Some best when size best < size entry -> Some best

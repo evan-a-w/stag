@@ -307,7 +307,7 @@ let q = print_endline "Lib.B.q"
 let%expect_test "a file named prelude.stag" =
   (* The prelude's locations are not in a file of the program. *)
   let toplevel = List.hd_exn (force Prelude.toplevels) in
-  print_endline toplevel.loc.file;
+  print_endline (Loc.file_name toplevel.loc);
   run [ file "prelude.stag" "let x = 1"; file "a.stag" "let y = Prelude.x" ];
   [%expect
     {|

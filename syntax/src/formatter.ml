@@ -22,8 +22,8 @@ let tokens_of_text () =
         | token ->
           Some
             { Printed_token.token
-            ; start = loc.start.offset
-            ; stop = loc.stop.offset
+            ; start = loc.start.#offset
+            ; stop = loc.stop.#offset
             }))
 ;;
 
@@ -62,7 +62,7 @@ let cut_points
       Array.binary_search
         source
         ~compare:(fun (t : Lexer.Located.t) offset ->
-          Int.compare t.loc.start.offset offset)
+          Int.compare t.loc.start.#offset offset)
         `First_greater_than_or_equal_to
         offset
     with
@@ -71,12 +71,12 @@ let cut_points
   in
   let rec cuts (ts : Syntax.Toplevel.t list) ~start acc =
     List.fold ts ~init:(start, acc) ~f:(fun (p, acc) (t : Syntax.Toplevel.t) ->
-      let acc = (first_at t.loc.start.offset, p) :: acc in
+      let acc = (first_at t.loc.start.#offset, p) :: acc in
       match t.txt with
       | Module (_, (_ :: _ as members)) ->
         (* After [module M = struct]. *)
         let p, acc = cuts members ~start:(p + 4) acc in
-        p + 1, (first_at t.loc.stop.offset - 1, p) :: acc
+        p + 1, (first_at t.loc.stop.#offset - 1, p) :: acc
       | _ -> p + count t, acc)
   in
   let stop, cuts = cuts program ~start:0 [ 0, 0 ] in
@@ -110,7 +110,7 @@ let align source printed ~cuts =
 let comment_doc (comment : Comment.t) =
   Doc.block
     (String.substr_replace_all comment.text ~pattern:"\r\n" ~with_:"\n")
-    ~col:comment.loc.start.col
+    ~col:comment.loc.start.#col
 ;;
 
 let is_inline (comment : Comment.t) =
@@ -148,7 +148,7 @@ let render_before
     | _ -> leading (fresh_line ^^ doc ^^ after)
   in
   List.group comments ~break:(fun (a : Comment.t) (b : Comment.t) ->
-    is_inline a || is_inline b || b.loc.start.line <> a.loc.stop.line)
+    is_inline a || is_inline b || b.loc.start.#line <> a.loc.stop.#line)
   |> List.map ~f:(function
     | [ comment ] when is_inline comment ->
       let space =
@@ -392,14 +392,14 @@ let blank_between
     Array.binary_search
       comments
       ~compare:(fun (c : Comment.t) offset ->
-        Int.compare c.loc.start.offset offset)
+        Int.compare c.loc.start.#offset offset)
       `First_greater_than_or_equal_to
-      prev.stop.offset
+      prev.stop.#offset
     |> Option.globalize Int.globalize
     |> Option.value_map ~default:[] ~f:(fun first ->
       let rec from i =
         if i < Array.length comments
-           && comments.(i).loc.start.offset < next.start.offset
+           && comments.(i).loc.start.#offset < next.start.#offset
         then comments.(i) :: from (i + 1)
         else []
       in
@@ -407,21 +407,21 @@ let blank_between
   in
   (* After the comments trailing [prev], on its line. *)
   let start =
-    List.fold between ~init:prev.stop.offset ~f:(fun start comment ->
-      let offset = comment.loc.start.offset in
+    List.fold between ~init:prev.stop.#offset ~f:(fun start comment ->
+      let offset = comment.loc.start.#offset in
       if offset >= start
          && not
               (String.mem
                  (String.sub source ~pos:start ~len:(offset - start))
                  '\n')
-      then comment.loc.stop.offset
+      then comment.loc.stop.#offset
       else start)
   in
   let stop =
     List.find_map between ~f:(fun comment ->
-      let offset = comment.loc.start.offset in
+      let offset = comment.loc.start.#offset in
       Option.some_if (offset >= start) offset)
-    |> Option.value ~default:next.start.offset
+    |> Option.value ~default:next.start.#offset
   in
   match
     String.split (String.sub source ~pos:start ~len:(stop - start)) ~on:'\n'

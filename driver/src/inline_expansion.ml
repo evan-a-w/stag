@@ -12,7 +12,7 @@ let edit ({ loc; expansion; status } : Expansion.t) ~contents =
   | Up_to_date -> None
   | Stale { generated } ->
     let indentation =
-      Source_edit.indentation contents ~offset:loc.start.offset
+      Source_edit.indentation contents ~offset:loc.start.#offset
     in
     let lines =
       String.split_lines generated
@@ -20,8 +20,8 @@ let edit ({ loc; expansion; status } : Expansion.t) ~contents =
         (if String.is_empty line then "" else indentation ^ "  " ^ line) ^ "\n")
     in
     Some
-      { Source_edit.start = expansion.loc.start.offset
-      ; stop = expansion.loc.stop.offset
+      { Source_edit.start = expansion.loc.start.#offset
+      ; stop = expansion.loc.stop.#offset
       ; replacement = String.concat ("\n" :: lines) ^ indentation
       }
 ;;

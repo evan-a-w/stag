@@ -2,7 +2,7 @@ open! Import
 
 let kind ~src (located : Lexer.Located.t) =
   match located.token with
-  | String _ when Char.equal src.[located.loc.start.offset] '{' ->
+  | String _ when Char.equal src.[located.loc.start.#offset] '{' ->
     "quoted_string"
   | String _ -> "string"
   | Int _ -> "int"
@@ -24,7 +24,7 @@ let print src =
   let { Lexer.Prefix.tokens; comments; error } =
     Lexer.tokenize_prefix ~file:"" src
   in
-  let line kind (loc : Loc.t) = loc.start.offset, kind, loc.stop.offset in
+  let line kind (loc : Loc.t) = loc.start.#offset, kind, loc.stop.#offset in
   let lines =
     List.map comments ~f:(fun (comment : Comment.t) ->
       line "comment" comment.loc)
@@ -39,7 +39,7 @@ let print src =
   Option.iter error ~f:(fun error ->
     printf
       "(error %d %d %s)\n"
-      error.loc.start.offset
-      error.loc.stop.offset
+      error.loc.start.#offset
+      error.loc.stop.#offset
       (Sexp.to_string [%sexp (Lexer.Error.message error : string)]))
 ;;

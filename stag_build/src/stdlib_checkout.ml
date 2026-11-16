@@ -178,7 +178,7 @@ let relocate_embedded ?(contents = Fn.const None) t =
     |> String.Map.of_alist_exn
   in
   fun (loc : Loc.t) ->
-    match Map.find sources loc.file with
-    | Some file -> { loc with file }
+    match Map.find sources (Loc.file_name loc) with
+    | Some file -> { loc with file = Loc.File.of_string file }
     | None -> loc
 ;;
