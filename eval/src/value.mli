@@ -34,7 +34,7 @@ type t =
       [Stag.Value_ref.t]. *)
 
 val of_prim : Prim.Value.t -> t
-val to_prim : t -> Prim.Value.t option
+val to_prim : t -> Prim.Value.t or_null
 val of_lit : Syntax.Lit.t -> t
 
 (** Functions are [<fun>], as their envs may contain themselves. Here and in
