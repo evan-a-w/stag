@@ -42,19 +42,19 @@ let of_prim : Prim.Value.t -> t = function
    with arguments. *)
 let string_list value =
   let rec loop acc : t -> _ = function
-    | Construct (_, []) -> Some (Prim.Value.String_list (List.rev acc))
+    | Construct (_, []) -> This (Prim.Value.String_list (List.rev acc))
     | Construct (_, [ String s; rest ]) -> loop (s :: acc) rest
-    | _ -> None
+    | _ -> Null
   in
   loop [] value
 ;;
 
-let to_prim : t -> Prim.Value.t option = function
-  | Int n -> Some (Int n)
-  | Bool b -> Some (Bool b)
-  | String s -> Some (String s)
-  | Char c -> Some (Char c)
-  | Unit -> Some Unit
+let to_prim : t -> Prim.Value.t or_null = function
+  | Int n -> This (Int n)
+  | Bool b -> This (Bool b)
+  | String s -> This (String s)
+  | Char c -> This (Char c)
+  | Unit -> This Unit
   | Construct _ as value -> string_list value
   | Tuple _
   | Record _
@@ -65,7 +65,7 @@ let to_prim : t -> Prim.Value.t option = function
   | Prim _
   | Intrinsic _
   | Type _
-  | Ref _ -> None
+  | Ref _ -> Null
 ;;
 
 let of_lit : Syntax.Lit.t -> t = function
