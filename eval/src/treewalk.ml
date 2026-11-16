@@ -657,28 +657,16 @@ and eval t ~env ~level expr =
   Budget.step t.budget ~loc:expr.loc ~f:(fun () -> run t ~env ~level expr)
   [@nontail]
 
-(* Steps until a value, each tail step counted but no deeper, its [Next.t] on
-   the stack of an iteration. *)
+(* Steps until a value, each tail step counted but no deeper. The [Next.t] of a
+   step is on [run]'s stack, freed by the tail call, its fields being global. *)
 and run t ~env ~level expr =
-  let mutable env = env in
-  let mutable level = level in
-  let mutable expr = expr in
-  let mutable result = Null in
-  while Or_null.is_null result do
-    match step t ~env ~level expr with
-    | Value value -> result <- This (Ok value)
-    | Failed error -> result <- This (Error error)
-    | Eval next ->
-      (match Budget.tail_step t.budget ~loc:next.expr.loc with
-       | Error error -> result <- This (Error error)
-       | Ok () ->
-         env <- next.env;
-         level <- next.level;
-         expr <- next.expr)
-  done;
-  match result with
-  | This result -> result
-  | Null -> assert false
+  match step t ~env ~level expr with
+  | Value value -> Ok value
+  | Failed error -> Error error
+  | Eval { env; level; expr } ->
+    (match Budget.tail_step t.budget ~loc:expr.loc with
+     | Error error -> Error error
+     | Ok () -> run t ~env ~level expr)
 
 and step t ~env ~level (expr : Typed.Expr.t) : Next.t =
   let eval' expr = eval t ~env ~level expr in
