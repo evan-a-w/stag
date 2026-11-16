@@ -53,7 +53,7 @@ let visible t =
   |> List.sort ~compare:(Comparable.lift String.compare ~f:fst)
 ;;
 
-let with_bindings t bindings ~f =
+let with_bindings t bindings ~(local_ f) =
   List.iter bindings ~f:(fun (name, entry) ->
     Hashtbl.add_multi t ~key:name ~data:entry);
   Exn.protect ~f ~finally:(fun () ->

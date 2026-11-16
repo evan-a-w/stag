@@ -243,7 +243,7 @@ module Expr : sig
 
   (** Whether [t] refers to a binder satisfying [f], by a [Bound] or
       [Persistent] variable, an [Assign] or an [Implicit] substitution. *)
-  val refers_to : t -> f:(Binder.t -> bool) -> bool
+  val refers_to : t -> f:(Binder.t -> bool) @ local -> bool
 
   (** The local idents [t] refers to (as [refers_to]) that it doesn't bind. *)
   val free_locals : t -> Ident.Set.t

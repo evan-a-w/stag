@@ -21,13 +21,20 @@ end
 (* What a step evaluates to: a value, or an expression in tail position, to
    evaluate in place of the step so that tail calls take no stack. *)
 module Next = struct
+  (* Usually stack allocated, by [step]. *)
   type t =
-    | Value of Value.t
+    | Value of Value.t @@ global
     | Eval of
-        { env : Value.t Env.t
+        { env : Value.t Env.t @@ global
         ; level : int
-        ; expr : Typed.Expr.t
+        ; expr : Typed.Expr.t @@ global
         }
+    | Failed of Error.t @@ global
+
+  let of_or_error : Value.t Or_error.t -> t = function
+    | Ok value -> Value value
+    | Error error -> Failed error
+  ;;
 end
 
 (* A toplevel not yet evaluated. *)
@@ -171,107 +178,110 @@ let global_info t ~ident =
   if Env.mem t.env ident then Hashtbl.find t.ident_info ident else None
 ;;
 
-let map_result list ~f =
+let map_result list ~(f @ local) =
   List.fold_result list ~init:[] ~f:(fun acc x ->
     let%map y = f x in
     y :: acc)
   >>| List.rev
 ;;
 
-let iter_result list ~f = List.fold_result list ~init:() ~f:(fun () x -> f x)
+let iter_result list ~(f @ local) =
+  List.fold_result list ~init:() ~f:(fun () x -> f x) [@nontail]
+;;
 
-let map_fields fields ~f =
+let map_fields fields ~(f @ local) =
   map_result fields ~f:(fun (key, expr) ->
     let%map expr = f expr in
     key, expr)
+  [@nontail]
 ;;
 
 (* [expr] with [f ~depth] applied to its children, where [depth] is that of
    [expr], counting quotes up and splices down. Children are visited in order. *)
-let map_children ~depth (expr : Typed.Expr.t) ~f =
-  let same = f ~depth in
-  let%map (desc : Typed.Expr.t Typed.Expr.Desc.t) =
+let map_children ~depth (expr : Typed.Expr.t) ~(f @ local) =
+  let same expr = f ~depth expr in
+  let%mapl_fun (desc : Typed.Expr.t Typed.Expr.Desc.t) =
     match expr.desc with
     | (Lit _ | Var _ | Poly_variant (_, None) | Expect _ | Type _) as desc ->
       Ok desc
     | App (a, b) ->
-      let%bind a = same a in
-      let%map b = same b in
+      let%bindl_fun a = same a in
+      let%mapl_fun b = same b in
       Typed.Expr.Desc.App (a, b)
     | Let let_ ->
-      let%bind body = same let_.body in
-      let%map in_ = same let_.in_ in
+      let%bindl_fun body = same let_.body in
+      let%mapl_fun in_ = same let_.in_ in
       Typed.Expr.Desc.Let { let_ with body; in_ }
     | Let_mut let_ ->
-      let%bind body = same let_.body in
-      let%map in_ = same let_.in_ in
+      let%bindl_fun body = same let_.body in
+      let%mapl_fun in_ = same let_.in_ in
       Typed.Expr.Desc.Let_mut { let_ with body; in_ }
     | Assign (var_ref, value) ->
-      let%map value = same value in
+      let%mapl_fun value = same value in
       Typed.Expr.Desc.Assign (var_ref, value)
     | Fun fun_ ->
-      let%map body = same fun_.body in
+      let%mapl_fun body = same fun_.body in
       Typed.Expr.Desc.Fun { fun_ with body }
     | Annotated (expr, ty) ->
-      let%map expr = same expr in
+      let%mapl_fun expr = same expr in
       Typed.Expr.Desc.Annotated (expr, ty)
     | Splice { code; subs } ->
-      let%bind code = f ~depth:(depth - 1) code in
-      let%map (subs : Typed.Expr.t Typed.Expr.Subs.t) =
+      let%bindl_fun code = f ~depth:(depth - 1) code in
+      let%mapl_fun (subs : Typed.Expr.t Typed.Expr.Subs.t) =
         match subs with
         | Explicit subs ->
-          let%map subs = map_fields subs ~f:same in
+          let%mapl_fun subs = map_fields subs ~f:same in
           Typed.Expr.Subs.Explicit subs
         | Implicit _ -> Ok subs
       in
       Typed.Expr.Desc.Splice { code; subs }
     | Toplevel_splice { code; expansion } ->
-      let%bind code = f ~depth:(depth - 1) code in
-      let%map expansion = same expansion in
+      let%bindl_fun code = f ~depth:(depth - 1) code in
+      let%mapl_fun expansion = same expansion in
       Typed.Expr.Desc.Toplevel_splice { code; expansion }
     | Quote body ->
-      let%map body = f ~depth:(depth + 1) body in
+      let%mapl_fun body = f ~depth:(depth + 1) body in
       Typed.Expr.Desc.Quote body
     | Tuple exprs ->
-      let%map exprs = map_result exprs ~f:same in
+      let%mapl_fun exprs = map_result exprs ~f:same in
       Typed.Expr.Desc.Tuple exprs
     | Construct (constructor, exprs) ->
-      let%map exprs = map_result exprs ~f:same in
+      let%mapl_fun exprs = map_result exprs ~f:same in
       Typed.Expr.Desc.Construct (constructor, exprs)
     | Error exprs ->
-      let%map exprs = map_result exprs ~f:same in
+      let%mapl_fun exprs = map_result exprs ~f:same in
       Typed.Expr.Desc.Error exprs
     | Record fields ->
-      let%map fields = map_fields fields ~f:same in
+      let%mapl_fun fields = map_fields fields ~f:same in
       Typed.Expr.Desc.Record fields
     | Field (expr, field) ->
-      let%map expr = same expr in
+      let%mapl_fun expr = same expr in
       Typed.Expr.Desc.Field (expr, field)
     | Record_update (expr, fields) ->
-      let%bind expr = same expr in
-      let%map fields = map_fields fields ~f:same in
+      let%bindl_fun expr = same expr in
+      let%mapl_fun fields = map_fields fields ~f:same in
       Typed.Expr.Desc.Record_update (expr, fields)
     | Match { scrutinee; cases; exception_cases } ->
-      let%bind scrutinee = same scrutinee in
-      let%bind cases = map_fields cases ~f:same in
-      let%map exception_cases = map_fields exception_cases ~f:same in
+      let%bindl_fun scrutinee = same scrutinee in
+      let%bindl_fun cases = map_fields cases ~f:same in
+      let%mapl_fun exception_cases = map_fields exception_cases ~f:same in
       Typed.Expr.Desc.Match { scrutinee; cases; exception_cases }
     | Poly_record fields ->
-      let%map fields = map_fields fields ~f:same in
+      let%mapl_fun fields = map_fields fields ~f:same in
       Typed.Expr.Desc.Poly_record fields
     | Poly_field (expr, label) ->
-      let%map expr = same expr in
+      let%mapl_fun expr = same expr in
       Typed.Expr.Desc.Poly_field (expr, label)
     | Poly_extend (fields, expr) ->
-      let%bind fields = map_fields fields ~f:same in
-      let%map expr = same expr in
+      let%bindl_fun fields = map_fields fields ~f:same in
+      let%mapl_fun expr = same expr in
       Typed.Expr.Desc.Poly_extend (fields, expr)
     | Poly_restrict (expr, label) ->
-      let%map expr = same expr in
+      let%mapl_fun expr = same expr in
       Typed.Expr.Desc.Poly_restrict (expr, label)
     | Poly_update (expr, fields) ->
-      let%bind expr = same expr in
-      let%map fields = map_fields fields ~f:same in
+      let%bindl_fun expr = same expr in
+      let%mapl_fun fields = map_fields fields ~f:same in
       Typed.Expr.Desc.Poly_update (expr, fields)
     | Poly_variant (tag, Some expr) ->
       let%map expr = same expr in
@@ -330,6 +340,7 @@ let instantiate t (code : Typed.Expr.t) ~entry =
   in
   let rec go ~depth (expr : Typed.Expr.t) =
     Budget.step t.budget ~loc:expr.loc ~f:(fun () -> go_step ~depth expr)
+    [@nontail]
   and go_step ~depth (expr : Typed.Expr.t) =
     let desc : Typed.Expr.t Typed.Expr.Desc.t =
       match expr.desc with
@@ -529,6 +540,18 @@ and match_all env pattern patterns values =
       ~finish:(fun () -> Ok true)
 ;;
 
+(* [applied], latest first, as prim values in order, or [Null] if one isn't. *)
+let prim_args applied =
+  List.fold_until
+    applied
+    ~init:[]
+    ~f:(fun args value ->
+      match Value.to_prim value with
+      | This arg -> Continue (arg :: args)
+      | Null -> Stop Null)
+    ~finish:(fun args -> This args)
+;;
+
 let poly_record (value : Value.t) =
   match value with
   | Poly_record fields -> Ok fields
@@ -588,7 +611,13 @@ let rec force t ident =
        Hashtbl.set t.pending ~key:ident ~data:(Failed { error; uncatchable });
        Error error)
 
+(* A filled slot's ident is never pending, so needs no [force]. *)
 and lookup t env ident ~loc =
+  match Env.find_slot env ~fallback:t.env ident with
+  | This { value = This value } -> Ok value
+  | This { value = Null } | Null -> lookup_forcing t env ident ~loc
+
+and lookup_forcing t env ident ~loc =
   let%bind () =
     match force t ident with
     | Ok () -> Ok ()
@@ -597,15 +626,16 @@ and lookup t env ident ~loc =
        | Some (Failed { uncatchable; error = _ }) -> Error uncatchable
        | Some (Component _ | Value _) | None -> Error error)
   in
-  match Env.find_slot ~fallback:t.env env ident with
-  | Some { contents = None } ->
+  match Env.find_slot env ~fallback:t.env ident with
+  | This { value = This value } -> Ok value
+  | This { value = Null } ->
     runtime_error
       ~loc
       (sprintf
          "%s is used before its value is defined (a value may not depend on \
           itself)"
          ident.name)
-  | Some _ | None -> Env.lookup env ~fallback:t.env ~ident
+  | Null -> Env.lookup env ~fallback:t.env ~ident
 
 (* Making closures reads nothing, so a component's functions are all bound at
    once, and its values evaluated each when first used. *)
@@ -624,50 +654,56 @@ and bind_functions t ({ members; recursive } : Typed.Scc.t) =
 
 (* [env] has the bindings of the current activation, at [level]. *)
 and eval t ~env ~level expr =
-  Budget.step t.budget ~loc:expr.loc ~f:(fun () ->
-    run_next t (step t ~env ~level expr))
+  Budget.step t.budget ~loc:expr.loc ~f:(fun () -> run t ~env ~level expr)
+  [@nontail]
 
-and run_next t (next : Next.t Or_error.t) =
-  match next with
-  | Error _ as error -> error
-  | Ok (Value value) -> Ok value
-  | Ok (Eval { env; level; expr }) ->
+(* Steps until a value, each tail step counted but no deeper. The [Next.t] of a
+   step is on [run]'s stack, freed by the tail call, its fields being global. *)
+and run t ~env ~level expr =
+  match step t ~env ~level expr with
+  | Value value -> Ok value
+  | Failed error -> Error error
+  | Eval { env; level; expr } ->
     (match Budget.tail_step t.budget ~loc:expr.loc with
-     | Error _ as error -> error
-     | Ok () -> run_next t (step t ~env ~level expr))
+     | Error error -> Error error
+     | Ok () -> run t ~env ~level expr)
 
-and step t ~env ~level (expr : Typed.Expr.t) : Next.t Or_error.t =
-  let eval' = eval t ~env ~level in
-  let tail expr = Ok (Next.Eval { env; level; expr }) in
+and step t ~env ~level (expr : Typed.Expr.t) : Next.t =
+  let eval' expr = eval t ~env ~level expr in
   match expr.desc with
   | App (f, arg) ->
-    let%bind f = eval' f in
-    let%bind arg = eval' arg in
-    apply t f arg ~loc:expr.loc
-  | Annotated (expr, _) -> tail expr
+    (match eval' f with
+     | Error error -> Failed error
+     | Ok f ->
+       (match eval' arg with
+        | Error error -> Failed error
+        | Ok arg -> exclave_ apply t f arg ~loc:expr.loc))
+  | Annotated (expr, _) -> exclave_ Eval { env; level; expr }
   | Let { ident; args; body; in_; _ } ->
-    let%bind () = bind_let t ~env ~level ~ident ~args ~body in
-    tail in_
+    (match bind_let t ~env ~level ~ident ~args ~body with
+     | Error error -> Failed error
+     | Ok () -> exclave_ Eval { env; level; expr = in_ })
   | Let_mut { ident; body; in_; annot = _ } ->
-    let%bind value = eval' body in
-    Env.declare env ~ident;
-    Env.set env ~ident ~value;
-    tail in_
-  | Toplevel_splice { code = _; expansion } -> tail expansion
+    (match eval' body with
+     | Error error -> Failed error
+     | Ok value ->
+       Env.declare env ~ident;
+       Env.set env ~ident ~value;
+       exclave_ Eval { env; level; expr = in_ })
+  | Toplevel_splice { code = _; expansion } ->
+    exclave_ Eval { env; level; expr = expansion }
   | Match { scrutinee; cases; exception_cases } ->
     (match eval' scrutinee with
-     | Ok value -> eval_match t ~env ~level value cases ~loc:expr.loc
+     | Ok value -> exclave_ eval_match t ~env ~level value cases ~loc:expr.loc
      | Error error ->
        (match exception_cases, Runtime_error.raised error with
         | _ :: _, Some exn ->
-          handle t ~env ~level exn exception_cases ~unhandled:(Error error)
-        | _ -> Error error))
-  | _ ->
-    let%map value = step_value t ~env ~level expr in
-    Next.Value value
+          exclave_ handle t ~env ~level exn exception_cases ~unhandled:error
+        | _ -> Failed error))
+  | _ -> Next.of_or_error (step_value t ~env ~level expr)
 
 and step_value t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
-  let eval' = eval t ~env ~level in
+  let eval' expr = eval t ~env ~level expr in
   match expr.desc with
   | Lit lit -> Ok (Value.of_lit lit)
   | Expect expected ->
@@ -691,18 +727,18 @@ and step_value t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
      | Bound (Local ident | Toplevel ident)
      | Persistent (Local ident | Toplevel ident) ->
        let%bind () = force t ident in
-       (match Env.find_slot ~fallback:t.env env ident with
-        | Some slot ->
-          slot := Some value;
+       (match Env.find_slot env ~fallback:t.env ident with
+        | This slot ->
+          slot.value <- This value;
           Ok Value.Unit
-        | None ->
+        | Null ->
           Or_error.error_s
             [%message "Assigned an unbound ident" (ident : Typed.Ident.t)])
      | Free _ | Free_toplevel _ | Prim _ | Intrinsic _ ->
        Or_error.error_s
          [%message "Assigned a non-variable" (var_ref : Typed.Var_ref.t)])
   | App _ | Let _ | Let_mut _ | Annotated _ | Toplevel_splice _ | Match _ ->
-    run_next t (step t ~env ~level expr)
+    run t ~env ~level expr
   | Fun { args; annots = _; body } ->
     (* Its first parameter identifies it, as a let's name does. *)
     closure t ~env ~level ~ident:(List.hd_exn args) ~args ~body
@@ -795,22 +831,32 @@ and closure t ~env ~level ~ident ~args ~body =
   let%map env = Env.of_captures env ~fallback:t.env ~captures in
   Value.Function { args; body; env; level }
 
-and apply t (f : Value.t) arg ~loc : Next.t Or_error.t =
-  let value value = Ok (Next.Value value) in
+and apply t (f : Value.t) arg ~loc : Next.t =
+  match f with
+  | Function { args = param :: args; body; env; level } ->
+    let env = Env.extend env in
+    Env.set env ~ident:param ~value:arg;
+    (match args with
+     | [] -> exclave_ Eval { env; level; expr = body }
+     | _ :: _ -> Value (Function { args; body; env; level }))
+  | _ -> Next.of_or_error (apply_non_function t f arg ~loc)
+
+and apply_non_function t (f : Value.t) arg ~loc : Value.t Or_error.t =
+  let value (value : Value.t) = Ok value in
   match f with
   | Prim { prim; applied } ->
     let applied = arg :: applied in
     if List.length applied < Prim.arity prim
     then value (Value.Prim { prim; applied })
     else (
-      match List.rev applied |> List.map ~f:Value.to_prim |> Option.all with
-      | None ->
+      match prim_args applied with
+      | Null ->
         Or_error.error_s
           [%message
             "Prim applied to a non-base value"
               (prim : Prim.t)
               (applied : Value.t list)]
-      | Some args ->
+      | This args ->
         (match Prim.apply prim ~output:t.output args with
          | Ok result -> value (Value.of_prim result)
          | Error exn -> raise_exn ~loc (prim_exception exn)))
@@ -835,9 +881,7 @@ and apply t (f : Value.t) arg ~loc : Next.t Or_error.t =
                (Error.to_string_hum error)))
      | Type_decl, Ref { kind = Type; name } ->
        (match t.reflect with
-        | Some reflect ->
-          let%map decl = reflect name in
-          Next.Value decl
+        | Some reflect -> reflect name
         | None ->
           runtime_error
             ~loc
@@ -850,33 +894,30 @@ and apply t (f : Value.t) arg ~loc : Next.t Or_error.t =
            "Intrinsic applied to an ill-typed argument"
              (intrinsic : Intrinsic.t)
              (arg : Value.t)])
-  | Function { args = param :: args; body; env; level } ->
-    let env = Env.copy env in
-    Env.set env ~ident:param ~value:arg;
-    (match args with
-     | [] -> Ok (Next.Eval { env; level; expr = body })
-     | _ :: _ -> value (Value.Function { args; body; env; level }))
   | _ -> Or_error.error_s [%message "Applied a non-function" (f : Value.t)]
 
-and eval_match t ~env ~level value cases ~loc =
+and eval_match t ~env ~level value cases ~loc : Next.t =
   match cases with
   | [] ->
-    runtime_error
-      ~loc
-      ("Match failure: no case matches the value "
-       ^ Value.to_string_for_message value)
+    Next.of_or_error
+      (runtime_error
+         ~loc
+         ("Match failure: no case matches the value "
+          ^ Value.to_string_for_message value))
   | (pattern, body) :: cases ->
-    (match%bind match_pattern env pattern value with
-     | true -> Ok (Next.Eval { env; level; expr = body })
-     | false -> eval_match t ~env ~level value cases ~loc)
+    (match match_pattern env pattern value with
+     | Error error -> Failed error
+     | Ok true -> exclave_ Eval { env; level; expr = body }
+     | Ok false -> exclave_ eval_match t ~env ~level value cases ~loc)
 
-and handle t ~env ~level exn cases ~unhandled =
+and handle t ~env ~level exn cases ~unhandled : Next.t =
   match cases with
-  | [] -> unhandled
+  | [] -> Failed unhandled
   | (pattern, body) :: cases ->
-    (match%bind match_pattern env pattern exn with
-     | true -> Ok (Next.Eval { env; level; expr = body })
-     | false -> handle t ~env ~level exn cases ~unhandled)
+    (match match_pattern env pattern exn with
+     | Error error -> Failed error
+     | Ok true -> exclave_ Eval { env; level; expr = body }
+     | Ok false -> exclave_ handle t ~env ~level exn cases ~unhandled)
 
 (* The code [expr] is in a quote built at [level], [depth] quotes in. Splices at
    [depth] 1 are evaluated now, and the values of persistent binders of [level]
@@ -884,6 +925,7 @@ and handle t ~env ~level exn cases ~unhandled =
 and build t ~env ~level ~embedded ~depth expr =
   Budget.step t.budget ~loc:expr.loc ~f:(fun () ->
     build_step t ~env ~level ~embedded ~depth expr)
+  [@nontail]
 
 and build_step
   t

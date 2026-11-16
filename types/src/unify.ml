@@ -95,18 +95,6 @@ let adjuster ~rank ~(occurs : (Type.id * Type.arg) option) ~in_bounds_of
   { ty = adjust; row = adjust; presence = adjust }
 ;;
 
-(* An unordered pair of ids. *)
-module Id_pair = struct
-  module T = struct
-    type t = int * int [@@deriving compare, hash, sexp_of]
-  end
-
-  include T
-  include Hashable.Make_plain (T)
-
-  let create id1 id2 = Int.min id1 id2, Int.max id1 id2
-end
-
 (* The pairs of records or variants, and of [Link]s, being or already unified,
    assumed equal when reached again: as each cycle passes through a record or
    variant, and unification creates none, unifying cyclic types terminates, and
@@ -126,9 +114,7 @@ module State = struct
   ;;
 
   let assume set id1 id2 =
-    match Hash_set.strict_add set (Id_pair.create id1 id2) with
-    | Ok -> false
-    | Duplicate -> true
+    Id_pair.Hash_set.mem_or_add set (Id_pair.create id1 id2)
   ;;
 end
 
@@ -200,15 +186,37 @@ let equal_if_present presence ty1 ty2 =
       | At_most _ | At_least _ -> false)
 ;;
 
+(* Applies [f] to the pairs of elements in order, stopping at the first error. *)
+let rec iter2_result xs ys ~(local_ f) =
+  match xs, ys with
+  | x :: xs, y :: ys ->
+    (match f x y with
+     | Ok () -> iter2_result xs ys ~f
+     | Error _ as error -> error)
+  | _ -> Ok ()
+;;
+
+(* Applies [f] to all the pairs of elements in order, returning the first error. *)
+let rec iter2_all xs ys ~first ~(local_ f) =
+  match xs, ys with
+  | x :: xs, y :: ys ->
+    let result = f x y in
+    let first =
+      match first with
+      | Ok () -> result
+      | Error _ -> first
+    in
+    iter2_all xs ys ~first ~f
+  | _ -> first
+;;
+
 (* Whether two types can't be unified whatever their variables are. The depth
    bounds the search through cyclic types. *)
 let clash ty1 ty2 =
   let rec clash ~depth ty1 ty2 =
     let all tys1 tys2 =
-      match List.zip tys1 tys2 with
-      | Unequal_lengths -> true
-      | Ok tys ->
-        List.exists tys ~f:(fun (ty1, ty2) -> clash ~depth:(depth - 1) ty1 ty2)
+      List.length tys1 <> List.length tys2
+      || List.exists2_exn tys1 tys2 ~f:(clash ~depth:(depth - 1))
     in
     depth > 0
     &&
@@ -216,16 +224,14 @@ let clash ty1 ty2 =
     | TVar _, _ | _, TVar _ -> false
     | TCon (name1, args1), TCon (name2, args2) ->
       (not (String.equal name1 name2))
-      ||
-        (match List.zip args1 args2 with
-        | Unequal_lengths -> true
-        | Ok args ->
-          List.exists args ~f:(function
-            | ATy ty1, ATy ty2 -> clash ~depth:(depth - 1) ty1 ty2
-            | ARow _, ARow _ -> false
-            | ATy _, ARow _ | ARow _, ATy _ -> true))
+      || List.length args1 <> List.length args2
+      || List.exists2_exn args1 args2 ~f:(fun arg1 arg2 ->
+        match arg1, arg2 with
+        | ATy ty1, ATy ty2 -> clash ~depth:(depth - 1) ty1 ty2
+        | ARow _, ARow _ -> false
+        | ATy _, ARow _ | ARow _, ATy _ -> true)
     | TArrow (arg1, res1), TArrow (arg2, res2) ->
-      all [ arg1; res1 ] [ arg2; res2 ]
+      clash ~depth:(depth - 1) arg1 arg2 || clash ~depth:(depth - 1) res1 res2
     | TTuple tys1, TTuple tys2 -> all tys1 tys2
     | TCode { inner = inner1; _ }, TCode { inner = inner2; _ } ->
       clash ~depth:(depth - 1) inner1 inner2
@@ -257,13 +263,13 @@ let rec unify_ty' state ~ty1 ~ty2 : (unit, Unification_error.t) Result.t =
 and unify_structure state ~ty1 ~ty2 =
   let ty1 = Type.canonical_ty ty1 in
   let ty2 = Type.canonical_ty ty2 in
-  let zip xs ys : (_, Unification_error.t) Result.t =
-    match List.zip xs ys with
-    | Ok pairs -> Ok pairs
-    | Unequal_lengths ->
-      Error
-        (Type_mismatch
-           (ty1, ty2, Args_length_mismatch (List.length xs, List.length ys)))
+  let same_length xs ys : (unit, Unification_error.t) Result.t =
+    let length1 = List.length xs in
+    let length2 = List.length ys in
+    if length1 = length2
+    then Ok ()
+    else
+      Error (Type_mismatch (ty1, ty2, Args_length_mismatch (length1, length2)))
   in
   match ty1, ty2 with
   | _ when phys_equal ty1 ty2 -> Ok ()
@@ -273,8 +279,8 @@ and unify_structure state ~ty1 ~ty2 =
     if not (String.equal name1 name2)
     then Error (Type_mismatch (ty1, ty2, Base_types_not_equal (name1, name2)))
     else (
-      let%bind.Result args = zip args1 args2 in
-      List.fold_result args ~init:() ~f:(fun () (arg1, arg2) ->
+      let%bind.Result () = same_length args1 args2 in
+      iter2_result args1 args2 ~f:(fun arg1 arg2 ->
         match arg1, arg2 with
         | ATy ty1, ATy ty2 -> unify_ty' state ~ty1 ~ty2
         | ARow row1, ARow row2 -> unify_row' state ~row1 ~row2
@@ -284,9 +290,9 @@ and unify_structure state ~ty1 ~ty2 =
     let%bind.Result () = unify_ty' state ~ty1:arg1 ~ty2:arg2 in
     unify_ty' state ~ty1:res1 ~ty2:res2
   | TTuple tys1, TTuple tys2 ->
-    let%bind.Result tys = zip tys1 tys2 in
-    List.map tys ~f:(fun (ty1, ty2) -> unify_ty' state ~ty1 ~ty2)
-    |> Result.all_unit
+    let%bind.Result () = same_length tys1 tys2 in
+    iter2_all tys1 tys2 ~first:(Ok ()) ~f:(fun ty1 ty2 ->
+      unify_ty' state ~ty1 ~ty2)
   | ( TCode { inner = inner1; context = row1 }
     , TCode { inner = inner2; context = row2 } ) ->
     let%bind.Result () = unify_ty' state ~ty1:inner1 ~ty2:inner2 in

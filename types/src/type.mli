@@ -239,8 +239,8 @@ module Iter : sig
     }
 end
 
-val iter_ty : 'e Iter.t -> ty -> (unit, 'e) Result.t
-val iter_row : 'e Iter.t -> row -> (unit, 'e) Result.t
+val iter_ty : 'e Iter.t @ local -> ty -> (unit, 'e) Result.t
+val iter_row : 'e Iter.t @ local -> row -> (unit, 'e) Result.t
 
 (** Renders types for humans. Variables are named in order of appearance,
     consistently across the types one printer renders; weak (unbound) ones are

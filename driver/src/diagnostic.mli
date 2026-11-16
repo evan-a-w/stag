@@ -27,7 +27,7 @@ val create : ?notes:Note.t list -> ?whole_file:bool -> loc:Loc.t -> string -> t
 val sort : t list -> t list
 
 (** With each location [f loc], eg. to name files differently. *)
-val relocate : t -> f:(Loc.t -> Loc.t) -> t
+val relocate : t -> f:(Loc.t -> Loc.t) @ local -> t
 
 val of_parse_error : Parser.Error.t -> t
 val of_source_file_error : Source_file.Error.t -> t

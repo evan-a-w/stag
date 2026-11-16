@@ -1,7 +1,7 @@
 open! Import
 
-(** The GC's counters, or their differences: what a routine allocated. Floats,
-    so that they can be averaged per iteration. *)
+(** The GC's counters, or their differences: what a routine allocated on the
+    heap (not on the stack). Floats, so that they can be averaged per iteration. *)
 type t =
   { minor_words : float
   ; promoted_words : float

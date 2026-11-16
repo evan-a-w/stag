@@ -118,7 +118,7 @@ module Timed = struct
     }
   ;;
 
-  let measure ?alloc clock f =
+  let measure ?alloc clock (local_ f) =
     let alloc_before = Option.map alloc ~f:(fun read -> read ()) in
     let before = Clock.now clock in
     let result = f () in
