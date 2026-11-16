@@ -37,4 +37,4 @@ val visible : t -> (string * Entry.t) list
 
 (** Binds [bindings] (later ones shadowing earlier ones) for the duration of
     [f]. *)
-val with_bindings : t -> (string * Entry.t) list -> f:(unit -> 'a) -> 'a
+val with_bindings : t -> (string * Entry.t) list -> f:(unit -> 'a) @ local -> 'a

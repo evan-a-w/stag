@@ -154,6 +154,62 @@ let%expect_test "tuple length mismatch" =
     |}]
 ;;
 
+let%expect_test "tuples unify every element, reporting the first error" =
+  let fresh = Fresh.create () in
+  let a = tvar fresh ~rank:1 in
+  let b = tvar fresh ~rank:1 in
+  unify_ty
+    fresh
+    ~ty1:(TTuple [ int; a; string; b ])
+    ~ty2:(TTuple [ bool; int; int; bool ]);
+  print_ty a;
+  print_ty b;
+  [%expect
+    {|
+    (Error
+     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    (TVar (Link (TCon int ())))
+    (TVar (Link (TCon bool ())))
+    |}]
+;;
+
+let%expect_test "constructor arguments stop at the first error" =
+  let fresh = Fresh.create () in
+  let a = tvar fresh ~rank:1 in
+  unify_ty
+    fresh
+    ~ty1:(con "pair" ~args:[ ATy int; ATy a ])
+    ~ty2:(con "pair" ~args:[ ATy bool; ATy int ]);
+  print_ty a;
+  [%expect
+    {|
+    (Error
+     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    (TVar (Unbound 0 1))
+    |}]
+;;
+
+let%expect_test "length mismatches unify no element" =
+  let fresh = Fresh.create () in
+  let a = tvar fresh ~rank:1 in
+  unify_ty fresh ~ty1:(TTuple [ a; int ]) ~ty2:(TTuple [ int ]);
+  unify_ty
+    fresh
+    ~ty1:(con "pair" ~args:[ ATy a; ATy int ])
+    ~ty2:(con "pair" ~args:[ ATy int ]);
+  print_ty a;
+  [%expect
+    {|
+    (Error
+     (Type_mismatch (TTuple ((TVar (Unbound 0 1)) (TCon int ())))
+      (TTuple ((TCon int ()))) (Args_length_mismatch 2 1)))
+    (Error
+     (Type_mismatch (TCon pair ((ATy (TVar (Unbound 0 1))) (ATy (TCon int ()))))
+      (TCon pair ((ATy (TCon int ())))) (Args_length_mismatch 2 1)))
+    (TVar (Unbound 0 1))
+    |}]
+;;
+
 let%expect_test "structural mismatch" =
   let fresh = Fresh.create () in
   unify_ty fresh ~ty1:(TArrow (int, int)) ~ty2:(TTuple [ int; int ]);

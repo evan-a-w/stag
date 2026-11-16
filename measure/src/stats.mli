@@ -65,7 +65,7 @@ val bootstrap
   -> resamples:int
   -> confidence:float
   -> float array
-  -> f:(float array -> float)
+  -> f:(float array -> float) @ local
   -> Estimate.t
 
 (** As [bootstrap], of [f a b], resampling [a] and [b] independently. [f] is
@@ -76,7 +76,7 @@ val bootstrap2
   -> confidence:float
   -> float array
   -> float array
-  -> f:(float array -> float array -> float)
+  -> f:(float array -> float array -> float) @ local
   -> Estimate.t
 
 (** Bootstrapping with [Config.resamples], [confidence] and [seed]. *)

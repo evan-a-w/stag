@@ -1167,7 +1167,7 @@ let generalize fresh ~rank tys =
     }
   in
   (match
-     List.fold_result tys ~init:() ~f:(fun () -> Type.iter_ty generalizer)
+     List.fold_result tys ~init:() ~f:(fun () ty -> Type.iter_ty generalizer ty)
    with
    | Ok () -> ()
    | Error _ -> .);

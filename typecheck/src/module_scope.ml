@@ -28,12 +28,9 @@ module Member_kind = struct
 end
 
 module Member = struct
-  module T = struct
-    type t = Member_kind.t * string [@@deriving sexp_of, compare, hash]
-  end
+  type t = Member_kind.t * string [@@deriving sexp_of, compare, hash]
 
-  include T
-  include Hashable.Make_plain (T)
+  include functor Hashable.Make_plain
 end
 
 (* The k-th entry of a module is at [At [k]], the j-th an include at [At p]

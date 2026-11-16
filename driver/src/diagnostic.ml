@@ -22,7 +22,7 @@ let create ?(notes = []) ?(whole_file = false) ~loc message =
 
 let sort ts = Loc.sort_by ts ~f:(fun t -> t.loc)
 
-let relocate t ~f =
+let relocate t ~(local_ f) =
   { t with
     loc = f t.loc
   ; notes =

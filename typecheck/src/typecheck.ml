@@ -1323,16 +1323,13 @@ let rec run_toplevels (expr : Typed.Expr.t) ~depth ~f =
 ;;
 
 module Init_need = struct
-  module T = struct
-    (* A toplevel's value, or everything calling (or looking into) it may need. *)
-    type t =
-      | Value of Typed.Ident.t
-      | Call of Typed.Ident.t
-    [@@deriving compare, sexp_of]
-  end
+  (* A toplevel's value, or everything calling (or looking into) it may need. *)
+  type t =
+    | Value of Typed.Ident.t
+    | Call of Typed.Ident.t
+  [@@deriving compare, sexp_of]
 
-  include T
-  include Comparable.Make_plain (T)
+  include functor Comparable.Make_plain
 
   let ident (Value ident | Call ident) = ident
 end

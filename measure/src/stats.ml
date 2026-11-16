@@ -126,7 +126,7 @@ let resampler random data =
     resample
 ;;
 
-let bootstrap ~random ~resamples ~confidence data ~f =
+let bootstrap ~random ~resamples ~confidence data ~(local_ f) =
   let resample = resampler random data in
   interval
     ~confidence
@@ -134,7 +134,7 @@ let bootstrap ~random ~resamples ~confidence data ~f =
     (Array.init resamples ~f:(fun _ -> f (resample ())))
 ;;
 
-let bootstrap2 ~random ~resamples ~confidence a b ~f =
+let bootstrap2 ~random ~resamples ~confidence a b ~(local_ f) =
   let resample_a = resampler random a in
   let resample_b = resampler random b in
   interval
