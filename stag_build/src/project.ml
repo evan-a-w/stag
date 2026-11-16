@@ -110,7 +110,7 @@ let check_file_names (target : Target.t) ~error =
       error
         (Diagnostic.create
            ~whole_file:true
-           ~loc:(Loc.start_of_file path)
+           ~loc:(Loc.start_of_file (Loc.File.of_string path))
            message))
 ;;
 
@@ -223,7 +223,7 @@ let check_module_clashes targets ~by_name ~error =
           error
           @@ Diagnostic.create
                ~whole_file:true
-               ~loc:(Loc.start_of_file path)
+               ~loc:(Loc.start_of_file (Loc.File.of_string path))
                (sprintf
                   "The module %s is also the library %s"
                   module_name

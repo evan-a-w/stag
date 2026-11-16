@@ -26,7 +26,9 @@ module Definitions = struct
       Pools and handles are branded with ['brand], fresh for each pool, so a
       handle is only usable with the pool it came from, and neither outlives the
       scope the brand is introduced in. A handle freed (or cleared) is stale:
-      using it raises, until its slot has been reused 2^30 times. *)
+      using it raises, until its slot has been reused 2^30 times (generations
+      wrap around, 31 bits, each reuse taking two). A pool holds at most 2^32
+      slots. *)
   module type%template S = sig
     type elt : k
 
@@ -89,4 +91,17 @@ module type Ext_pool = sig
 
   module%template Make (E : Element [@kind k]) : S [@kind k] with type elt = E.t
   [@@kind k = pointer_free]]
+
+  module For_testing : sig
+    module type Config = sig
+      val index_bits : int
+      val generation_bits : int
+    end
+
+    (** As [Make], with handles of [index_bits] and [generation_bits] (by
+        default 32 and 31), so that running out of slots and generations
+        wrapping around can be shown. *)
+    module%template Make (_ : Config) (E : Element [@kind immediate]) :
+      S [@kind immediate] with type elt = E.t
+  end
 end

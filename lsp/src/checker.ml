@@ -163,7 +163,7 @@ let check_groups
           ~errors:
             [ diagnostic
             ; Diagnostic.create
-                ~loc:(Loc.start_of_file path)
+                ~loc:(Loc.start_of_file (Loc.File.of_string path))
                 "This file is not checked: its checkout's prelude has errors"
             ]
           None

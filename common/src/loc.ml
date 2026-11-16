@@ -45,12 +45,8 @@ type t =
 let create ~file ~start ~stop = { file = File.of_string file; start; stop }
 let file_name t = File.to_string t.file
 let sort_by l ~f = List.stable_sort l ~compare:(Comparable.lift compare ~f)
-
-let start_of_file file =
-  { file = File.of_string file; start = Pos.start (); stop = Pos.start () }
-;;
-
-let none = start_of_file "_none_"
+let start_of_file file = { file; start = Pos.start (); stop = Pos.start () }
+let none = start_of_file (File.of_string "_none_")
 let is_none t = equal t none
 
 let merge a b =

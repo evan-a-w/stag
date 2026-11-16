@@ -1,10 +1,15 @@
 open! Import
 include Ext_pool_intf.Definitions
 
-(* A slot's generation is odd while it is live, so a handle (carrying the
-   generation it was allocated at) is live exactly when the generations match. *)
-let index_bits = 32
-let generation_mask = (1 lsl 30) - 1
+module type Config = sig
+  val index_bits : int
+  val generation_bits : int
+end
+
+module Default_config = struct
+  let index_bits = 32
+  let generation_bits = Int.num_bits - index_bits
+end
 
 [%%template
 [@@@kind_set.define
@@ -19,15 +24,32 @@ let generation_mask = (1 lsl 30) - 1
     , float64 & float64
     , bits64 & bits64 )]
 
-module%template Make (E : Element [@kind k]) = struct
+(* A slot's generation is odd while it is live, so a handle (carrying the
+   generation it was allocated at) is live exactly when the generations match. *)
+module%template Make_with (C : Config) (E : Element [@kind k]) = struct
+  let () =
+    if C.index_bits < 1
+       || C.generation_bits < 2
+       || C.index_bits + C.generation_bits > Int.num_bits
+    then
+      raise_s
+        [%message
+          "Ext_pool: invalid config"
+            ~index_bits:(C.index_bits : int)
+            ~generation_bits:(C.generation_bits : int)]
+  ;;
+
+  let max_slots = 1 lsl C.index_bits
+  let generation_mask = (1 lsl C.generation_bits) - 1
+
   type elt = E.t
 
   module Handle = struct
     type 'brand t = int
 
-    let index t = t land ((1 lsl index_bits) - 1)
-    let generation t = t lsr index_bits
-    let create ~index ~generation = index lor (generation lsl index_bits)
+    let index t = t land (max_slots - 1)
+    let generation t = t lsr C.index_bits
+    let create ~index ~generation = index lor (generation lsl C.index_bits)
     let equal = Int.equal
     let compare = Int.compare
     let hash = Int.hash
@@ -65,7 +87,9 @@ module%template Make (E : Element [@kind k]) = struct
   (* Unboxed arrays need an element to be created with, so the slab grows on
      [alloc], from the element being allocated. *)
   let grow t (x : E.t) =
-    let length = Int.max 16 (2 * Array.length t.slab) in
+    if t.used = max_slots
+    then raise_s [%message "Ext_pool: full" (max_slots : int)];
+    let length = Int.min max_slots (Int.max 16 (2 * Array.length t.slab)) in
     let slab = Array.create ~len:length x in
     for i = 0 to t.used - 1 do
       Array.unsafe_set slab i (Array.unsafe_get t.slab i)
@@ -159,4 +183,14 @@ module%template Make (E : Element [@kind k]) = struct
     done
   ;;
 end
+[@@kind k = pointer_free]
+
+module%template Make (E : Element [@kind k]) =
+  Make_with [@kind k] (Default_config) (E)
 [@@kind k = pointer_free]]
+
+module For_testing = struct
+  module type Config = Config
+
+  module%template Make = Make_with [@kind immediate]
+end

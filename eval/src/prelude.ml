@@ -35,9 +35,10 @@ let parse ({ prelude = prelude_file; core = core_files } : Sources.t) =
   in
   let loc =
     Loc.start_of_file
-      (match core_files with
-       | first :: _ -> first.path
-       | [] -> prelude_file.path)
+      (Loc.File.of_string
+         (match core_files with
+          | first :: _ -> first.path
+          | [] -> prelude_file.path))
   in
   prelude
   @ [ Located.create

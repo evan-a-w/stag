@@ -717,7 +717,7 @@ let%expect_test "values" =
 ;;
 
 let%expect_test "nodes are located where given" =
-  let loc = Loc.start_of_file "splice.stag" in
+  let loc = Loc.start_of_file (Loc.File.of_string "splice.stag") in
   (match
      Syntax_value.Expr.of_value
        (Syntax_value.Expr.to_value

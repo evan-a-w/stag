@@ -1,6 +1,8 @@
 open! Import
 
-(** A file name, interned: equal names are the same [t]. Ordered by name. *)
+(** A file name, interned: equal names are the same [t]. Ordered by name. The
+    table of names is global, never shrinks, and is not safe to use from more
+    than one domain. *)
 module File : sig
   type t : immediate [@@deriving compare, equal, hash, sexp_of]
 
@@ -9,8 +11,7 @@ module File : sig
 end
 
 (** A position in a source file. [line] is 1-based, [col] and [offset] (from the
-    start of the file) are 0-based, in bytes. Unboxed, so held inline by
-    locations. *)
+    start of the file) are 0-based, in bytes. *)
 module Pos : sig
   type t =
     #{ line : int
@@ -37,7 +38,7 @@ val none : t
 val is_none : t -> bool
 
 (** Zero width, at the start of [file]. *)
-val start_of_file : string -> t
+val start_of_file : File.t -> t
 
 (** The smallest span containing both, which must be in the same file. *)
 val merge : t -> t -> t

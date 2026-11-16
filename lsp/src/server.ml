@@ -194,7 +194,7 @@ let lsp_diagnostic t (diagnostic : Diagnostic.t) =
   in
   let range =
     if diagnostic.whole_file
-    then range_in (Loc.start_of_file (Loc.file_name diagnostic.loc))
+    then range_in (Loc.start_of_file diagnostic.loc.file)
     else range_in diagnostic.loc
   in
   Types.Diagnostic.create
@@ -267,7 +267,7 @@ let check t ~uri (document : Document.t) =
       ~path:document.path
       [ Diagnostic.create
           ~whole_file:true
-          ~loc:(Loc.start_of_file document.path)
+          ~loc:(Loc.start_of_file (Loc.File.of_string document.path))
           ("Internal error in the checker: " ^ Exn.to_string exn)
       ];
     cover t ~uri (String.Set.singleton document.path)

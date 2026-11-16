@@ -622,7 +622,8 @@ let relocate t ~f =
         | target -> target
       in
       add { t with entries } { entry with loc; target }));
-  let file name = Loc.file_name (f (Loc.start_of_file name)) in
+  let relocate_file file = (f (Loc.start_of_file file)).file in
+  let file name = Loc.File.(to_string (relocate_file (of_string name))) in
   let functions = String.Table.create () in
   Hashtbl.iteri t.functions ~f:(fun ~key ~data ->
     Hashtbl.set functions ~key:(file key) ~data);
@@ -636,9 +637,7 @@ let relocate t ~f =
   ; splices =
       Hash_set.to_list t.splices
       |> List.map ~f:(fun span ->
-        { span with
-          Span.file = Loc.File.of_string (file (Loc.File.to_string span.file))
-        })
+        { span with Span.file = relocate_file span.file })
       |> Span.Hash_set.of_list
   ; of_prelude = t.of_prelude
   }
