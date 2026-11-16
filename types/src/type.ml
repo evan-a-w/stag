@@ -257,15 +257,15 @@ module Visited = struct
      unguarded visit covers a guarded one. *)
   type t =
     { mutable unremembered : int
-    ; mutable table : bool Int.Table.t option
+    ; mutable table : bool Int.Table.t or_null
     }
 
   let table t =
     match t.table with
-    | Some table -> table
-    | None ->
+    | This table -> table
+    | Null ->
       let table = Int.Table.create () in
-      t.table <- Some table;
+      t.table <- This table;
       table
   ;;
 
@@ -299,7 +299,7 @@ module Visited = struct
 end
 
 let iterate (local_ (f : _ Iter.t)) (local_ (start : Iter_start.t)) =
-  let visited = stack_ { Visited.unremembered = 64; table = None } in
+  let visited = stack_ { Visited.unremembered = 64; table = Null } in
   let rec iter_ty ~guarded ty =
     match ty with
     | TVar ({ state = Link target; _ } as var) ->

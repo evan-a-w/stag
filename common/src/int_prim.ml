@@ -1,0 +1,5 @@
+external ( = ) : int -> int -> bool = "%equal"
+external ( <> ) : int -> int -> bool = "%notequal"
+external ( <= ) : int -> int -> bool = "%lessequal"
+external ( >= ) : int -> int -> bool = "%greaterequal"
+external ( land ) : int -> int -> int = "%andint"

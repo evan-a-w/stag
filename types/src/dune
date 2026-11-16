@@ -2,4 +2,4 @@
  (name stag_types)
  (preprocess
   (pps ppx_jane))
- (libraries core))
+ (libraries core stag_common))

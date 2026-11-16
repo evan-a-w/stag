@@ -186,28 +186,38 @@ let equal_if_present presence ty1 ty2 =
       | At_most _ | At_least _ -> false)
 ;;
 
-(* Applies [f] to the pairs of elements in order, stopping at the first error. *)
-let rec iter2_result xs ys ~(local_ f) =
-  match xs, ys with
-  | x :: xs, y :: ys ->
-    (match f x y with
-     | Ok () -> iter2_result xs ys ~f
-     | Error _ as error -> error)
-  | _ -> Ok ()
+(* The lists must have the same length. *)
+let iter2_result xs ys ~(local_ f) =
+  let rec loop xs ys =
+    match xs, ys with
+    | x :: xs, y :: ys ->
+      (match f x y with
+       | Ok () -> loop xs ys
+       | Error _ as error -> error)
+    | [], [] -> Ok ()
+    | _ -> raise_s [%message "Unify.iter2_result: lengths differ"]
+  in
+  loop xs ys [@nontail]
 ;;
 
-(* Applies [f] to all the pairs of elements in order, returning the first error. *)
-let rec iter2_all xs ys ~first ~(local_ f) =
-  match xs, ys with
-  | x :: xs, y :: ys ->
-    let result = f x y in
-    let first =
-      match first with
-      | Ok () -> result
-      | Error _ -> first
-    in
-    iter2_all xs ys ~first ~f
-  | _ -> first
+(* Like [iter2_result], but applying [f] to every pair, returning the first
+   error. *)
+let iter2_all xs ys ~(local_ f) =
+  let rec loop xs ys ~first =
+    match xs, ys with
+    | x :: xs, y :: ys ->
+      let result = f x y in
+      loop
+        xs
+        ys
+        ~first:
+          (match first with
+           | Ok () -> result
+           | Error _ -> first)
+    | [], [] -> first
+    | _ -> raise_s [%message "Unify.iter2_all: lengths differ"]
+  in
+  loop xs ys ~first:(Ok ()) [@nontail]
 ;;
 
 (* Whether two types can't be unified whatever their variables are. The depth
@@ -291,8 +301,7 @@ and unify_structure state ~ty1 ~ty2 =
     unify_ty' state ~ty1:res1 ~ty2:res2
   | TTuple tys1, TTuple tys2 ->
     let%bind.Result () = same_length tys1 tys2 in
-    iter2_all tys1 tys2 ~first:(Ok ()) ~f:(fun ty1 ty2 ->
-      unify_ty' state ~ty1 ~ty2)
+    iter2_all tys1 tys2 ~f:(fun ty1 ty2 -> unify_ty' state ~ty1 ~ty2)
   | ( TCode { inner = inner1; context = row1 }
     , TCode { inner = inner2; context = row2 } ) ->
     let%bind.Result () = unify_ty' state ~ty1:inner1 ~ty2:inner2 in

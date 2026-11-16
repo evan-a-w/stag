@@ -15,8 +15,8 @@ end
 val create : unit -> _ t
 
 (** An env whose own bindings are seen only by it, falling back to [t]'s. [t]
-    must get no new bindings afterwards (though its slots may be set), as they
-    would be seen through the new env: closures' envs never do. *)
+    gets no new bindings afterwards, as they would be seen through the new env
+    (its slots may still be set): [declare] or [set] binding in it raise. *)
 val extend : 'value t -> 'value t
 
 val mem : _ t -> Typed.Ident.t -> bool

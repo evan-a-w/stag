@@ -1,5 +1,6 @@
 include Core
 module Limits = Stag_common.Limits
+module Int_prim = Stag_common.Int_prim
 module Loc = Stag_common.Loc
 module Located = Stag_common.Located
 module Stamp_counter = Stag_common.Stamp_counter

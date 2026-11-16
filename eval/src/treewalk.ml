@@ -31,9 +31,9 @@ module Next = struct
         }
     | Failed of Error.t @@ global
 
-  let of_or_error : Value.t Or_error.t -> t = function
-    | Ok value -> Value value
-    | Error error -> Failed error
+  let of_or_error : Value.t Or_error.t -> t @ local = function
+    | Ok value -> exclave_ Value value
+    | Error error -> exclave_ Failed error
   ;;
 end
 
@@ -168,7 +168,15 @@ let add_ident_info t ~ident ~info =
   Hashtbl.set t.ident_info ~key:ident ~data:info
 ;;
 
+(* [lookup] relies on a filled slot's ident never being pending. *)
 let add_scc t (scc : Typed.Scc.t) =
+  List.iter scc.members ~f:(fun { ident; _ } ->
+    match Env.find_slot t.env ~fallback:t.env ident with
+    | This { value = This _ } ->
+      raise_s
+        [%message
+          "Treewalk.add_scc: toplevel already evaluated" (ident : Typed.Ident.t)]
+    | This { value = Null } | Null -> ());
   Queue.enqueue t.sccs scc;
   List.iter scc.members ~f:(fun { ident; _ } ->
     Hashtbl.set t.pending ~key:ident ~data:(Component scc))
@@ -284,7 +292,7 @@ let map_children ~depth (expr : Typed.Expr.t) ~(f @ local) =
       let%mapl_fun fields = map_fields fields ~f:same in
       Typed.Expr.Desc.Poly_update (expr, fields)
     | Poly_variant (tag, Some expr) ->
-      let%map expr = same expr in
+      let%mapl_fun expr = same expr in
       Typed.Expr.Desc.Poly_variant (tag, Some expr)
   in
   { expr with desc }
@@ -700,7 +708,7 @@ and step t ~env ~level (expr : Typed.Expr.t) : Next.t =
         | _ :: _, Some exn ->
           exclave_ handle t ~env ~level exn exception_cases ~unhandled:error
         | _ -> Failed error))
-  | _ -> Next.of_or_error (step_value t ~env ~level expr)
+  | _ -> exclave_ Next.of_or_error (step_value t ~env ~level expr)
 
 and step_value t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
   let eval' expr = eval t ~env ~level expr in
@@ -838,8 +846,8 @@ and apply t (f : Value.t) arg ~loc : Next.t =
     Env.set env ~ident:param ~value:arg;
     (match args with
      | [] -> exclave_ Eval { env; level; expr = body }
-     | _ :: _ -> Value (Function { args; body; env; level }))
-  | _ -> Next.of_or_error (apply_non_function t f arg ~loc)
+     | _ :: _ -> exclave_ Value (Function { args; body; env; level }))
+  | _ -> exclave_ Next.of_or_error (apply_non_function t f arg ~loc)
 
 and apply_non_function t (f : Value.t) arg ~loc : Value.t Or_error.t =
   let value (value : Value.t) = Ok value in
@@ -899,6 +907,7 @@ and apply_non_function t (f : Value.t) arg ~loc : Value.t Or_error.t =
 and eval_match t ~env ~level value cases ~loc : Next.t =
   match cases with
   | [] ->
+    exclave_
     Next.of_or_error
       (runtime_error
          ~loc

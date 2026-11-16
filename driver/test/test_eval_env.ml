@@ -174,3 +174,24 @@ let%expect_test "tail calls run in constant depth" =
       t.stag:8:11-18))
     |}]
 ;;
+
+let%expect_test "a toplevel already evaluated can't be queued again" =
+  Option.iter (typecheck "let x = 1\nlet y = x\n") ~f:(fun t ->
+    let driver = driver t in
+    print_s [%sexp (Driver.eval ~limits driver : unit Or_error.t)];
+    let interpreter = Driver.interpreter driver in
+    List.iter (members t) ~f:(fun member ->
+      print_s
+        [%sexp
+          (Or_error.try_with (fun () ->
+             Treewalk.add_scc
+               interpreter
+               { members = [ member ]; recursive = false })
+           : unit Or_error.t)]));
+  [%expect
+    {|
+    (Ok ())
+    (Error ("Treewalk.add_scc: toplevel already evaluated" (ident x/4)))
+    (Error ("Treewalk.add_scc: toplevel already evaluated" (ident y/5)))
+    |}]
+;;

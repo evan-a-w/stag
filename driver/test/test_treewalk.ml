@@ -220,6 +220,38 @@ let%expect_test "extended envs" =
     |}]
 ;;
 
+let%expect_test "binding in an extended env raises" =
+  let stamps = Stamp_counter.create () in
+  let ident name = Typed.Ident.fresh stamps name in
+  let bound = ident "bound" in
+  let later = ident "later" in
+  let env = Treewalk.Env.create () in
+  Treewalk.Env.set env ~ident:bound ~value:0;
+  let extended = Treewalk.Env.extend env in
+  let attempt name f =
+    print_s [%sexp (name : string), (Or_error.try_with f : unit Or_error.t)]
+  in
+  attempt "set bound" (fun () -> Treewalk.Env.set env ~ident:bound ~value:1);
+  attempt "set later" (fun () -> Treewalk.Env.set env ~ident:later ~value:2);
+  attempt "declare later" (fun () -> Treewalk.Env.declare env ~ident:later);
+  attempt "set later in extension" (fun () ->
+    Treewalk.Env.set extended ~ident:later ~value:3);
+  print_s
+    [%sexp
+      (Treewalk.Env.lookup extended ~ident:bound : int Or_error.t)
+      , (Treewalk.Env.lookup env ~ident:later : int Or_error.t)];
+  [%expect
+    {|
+    ("set bound" (Ok ()))
+    ("set later"
+     (Error ("Env: binding in an env already extended" (ident later/1))))
+    ("declare later"
+     (Error ("Env: binding in an env already extended" (ident later/1))))
+    ("set later in extension" (Ok ()))
+    ((Ok 1) (Error ("Unbound ident" (ident later/1))))
+    |}]
+;;
+
 let%expect_test "a shared stamp counter" =
   let stamps = Stamp_counter.create () in
   let interpreter = Treewalk.create ~stamps () in

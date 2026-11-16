@@ -17,12 +17,6 @@ let create (limits : Limits.t) =
 
 let steps_per_clock_check = 4096
 
-(* Primitives, which the [zero_alloc] check sees through without cross-module
-   information (unlike [Core]'s comparisons). *)
-external ( >= ) : int -> int -> bool = "%greaterequal"
-external ( land ) : int -> int -> int = "%andint"
-external ( = ) : int -> int -> bool = "%equal"
-
 (* The clock doesn't allocate. *)
 let[@zero_alloc assume] past_deadline t =
   match t.deadline with
@@ -32,18 +26,18 @@ let[@zero_alloc assume] past_deadline t =
 
 let[@inline] out_of_fuel t =
   match t.limits.fuel with
-  | Some fuel -> t.steps >= fuel
+  | Some fuel -> Int_prim.(t.steps >= fuel)
   | None -> false
 ;;
 
 let[@inline] too_deep t =
   match t.limits.max_depth with
-  | Some max_depth -> t.depth >= max_depth
+  | Some max_depth -> Int_prim.(t.depth >= max_depth)
   | None -> false
 ;;
 
 let[@inline] out_of_time t =
-  t.steps land (steps_per_clock_check - 1) = 0 && past_deadline t
+  Int_prim.(t.steps land (steps_per_clock_check - 1) = 0) && past_deadline t
 ;;
 
 let[@cold] [@zero_alloc assume error] exceeded t ~loc =

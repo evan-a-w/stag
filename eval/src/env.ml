@@ -8,10 +8,32 @@ end
 type 'value t =
   { values : 'value Slot.t Typed.Ident.Table.t
   ; parent : 'value t or_null
+  ; mutable extended : bool
   }
 
-let create () = { values = Typed.Ident.Table.create ~size:4 (); parent = Null }
-let extend t = { values = Typed.Ident.Table.create ~size:4 (); parent = This t }
+let create () =
+  { values = Typed.Ident.Table.create ~size:4 ()
+  ; parent = Null
+  ; extended = false
+  }
+;;
+
+let extend t =
+  t.extended <- true;
+  { values = Typed.Ident.Table.create ~size:4 ()
+  ; parent = This t
+  ; extended = false
+  }
+;;
+
+let bind t ~ident slot =
+  if t.extended
+  then
+    raise_s
+      [%message
+        "Env: binding in an env already extended" (ident : Typed.Ident.t)];
+  Hashtbl.set t.values ~key:ident ~data:slot
+;;
 
 (* Ident's hash and compare don't allocate. *)
 let[@inline] find_own t ident =
@@ -55,14 +77,12 @@ let lookup ?fallback t ~ident =
   | This { value = This value } -> Ok value
 ;;
 
-let declare t ~ident =
-  Hashtbl.set t.values ~key:ident ~data:{ Slot.value = Null }
-;;
+let declare t ~ident = bind t ~ident { Slot.value = Null }
 
 let set t ~ident ~value =
   match find_slot_or_null t ident with
   | This slot -> slot.value <- This value
-  | Null -> Hashtbl.set t.values ~key:ident ~data:{ Slot.value = This value }
+  | Null -> bind t ~ident { Slot.value = This value }
 ;;
 
 let of_captures t ~fallback ~captures =
