@@ -12,8 +12,8 @@ let lex src =
       let text =
         String.sub
           src
-          ~pos:loc.start.offset
-          ~len:(loc.stop.offset - loc.start.offset)
+          ~pos:loc.start.#offset
+          ~len:(loc.stop.#offset - loc.start.#offset)
       in
       print_s [%sexp (token : Token.t), (loc : Loc.t), (text : string)])
 ;;

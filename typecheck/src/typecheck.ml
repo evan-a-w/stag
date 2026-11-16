@@ -2908,7 +2908,7 @@ let expansion_status splice generated =
       , Expansion.status
           ~written:written.txt
           generated
-          ~column:toplevel.loc.start.col
+          ~column:toplevel.loc.start.#col
           ~path:(fun namespace ~modules ~locals path ->
             Module_scope.path_from_splice
               splice

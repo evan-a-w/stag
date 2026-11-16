@@ -697,16 +697,16 @@ let with_note (error : Typecheck_error.Kind.t) ~blocked ~after
    if written without spaces as for [path]. *)
 let prefix_loc (loc : Loc.t) ~(path : Decl_path.t) ~written =
   let len = String.length (Decl_path.to_string (with_names path written)) in
-  if loc.start.line = loc.stop.line
-     && loc.stop.offset - loc.start.offset
+  if loc.start.#line = loc.stop.#line
+     && loc.stop.#offset - loc.start.#offset
         = String.length (Decl_path.to_string path)
   then
     { loc with
       stop =
-        { loc.start with
-          col = loc.start.col + len
-        ; offset = loc.start.offset + len
-        }
+        #{ loc.start with
+           col = loc.start.#col + len
+         ; offset = loc.start.#offset + len
+         }
     }
   else loc
 ;;

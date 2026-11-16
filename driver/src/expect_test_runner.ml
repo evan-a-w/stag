@@ -157,7 +157,8 @@ let run_test ~limits driver (test : Typed.Expect_test.t) =
 let run ?(limits = Limits.unlimited) ?files driver =
   (Driver.checked driver).program.expect_tests
   |> List.filter ~f:(fun (test : Typed.Expect_test.t) ->
-    Option.for_all files ~f:(fun files -> Set.mem files test.name.loc.file))
+    Option.for_all files ~f:(fun files ->
+      Set.mem files (Loc.file_name test.name.loc)))
   |> List.map ~f:(run_test ~limits driver)
 ;;
 
@@ -201,15 +202,15 @@ let mismatch_edits
   contents
   ({ loc; expected; actual; parenthesize } : Mismatch.t)
   =
-  let start = loc.start.offset in
+  let start = loc.start.#offset in
   match expected, parenthesize with
   | Some _, _ ->
     let indentation = Source_edit.indentation contents ~offset:start in
     let quoted = quoted actual ~indentation:(deeper indentation) in
     [ { Source_edit.start
-      ; stop = loc.stop.offset
+      ; stop = loc.stop.#offset
       ; replacement =
-          (if loc.start.offset = loc.stop.offset then " " ^ quoted else quoted)
+          (if loc.start.#offset = loc.stop.#offset then " " ^ quoted else quoted)
       }
     ]
   | None, None ->
@@ -224,8 +225,11 @@ let mismatch_edits
       }
     ]
   | None, Some body ->
-    let indentation = indentation contents ~offset:body.start.offset in
-    [ { start = body.start.offset; stop = body.start.offset; replacement = "(" }
+    let indentation = indentation contents ~offset:body.start.#offset in
+    [ { start = body.start.#offset
+      ; stop = body.start.#offset
+      ; replacement = "("
+      }
     ; { start
       ; stop = start
       ; replacement =
@@ -241,6 +245,6 @@ let edits ~path ~contents results =
   List.concat_map results ~f:(fun (result : Test_result.t) ->
     if result.generated then [] else result.mismatches)
   |> List.filter ~f:(fun (mismatch : Mismatch.t) ->
-    String.equal mismatch.loc.file path)
+    String.equal (Loc.file_name mismatch.loc) path)
   |> List.concat_map ~f:(mismatch_edits contents)
 ;;

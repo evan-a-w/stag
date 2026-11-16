@@ -177,7 +177,7 @@ let touch t path =
 
 let lsp_diagnostic t (diagnostic : Diagnostic.t) =
   let range_in (loc : Loc.t) =
-    let text = text_of_file t loc.file in
+    let text = text_of_file t (Loc.file_name loc) in
     if Loc.is_none loc
     then Text.range_of_offsets text ~start:0 ~stop:0
     else Text.range_of_loc text loc
@@ -194,7 +194,7 @@ let lsp_diagnostic t (diagnostic : Diagnostic.t) =
   in
   let range =
     if diagnostic.whole_file
-    then range_in (Loc.start_of_file diagnostic.loc.file)
+    then range_in (Loc.start_of_file (Loc.file_name diagnostic.loc))
     else range_in diagnostic.loc
   in
   Types.Diagnostic.create
@@ -207,7 +207,7 @@ let lsp_diagnostic t (diagnostic : Diagnostic.t) =
          Types.DiagnosticRelatedInformation.create
            ~location:
              (Types.Location.create
-                ~uri:(uri_of_path t note.loc.file)
+                ~uri:(uri_of_path t (Loc.file_name note.loc))
                 ~range:(range_in note.loc))
            ~message:note.message))
     ()
@@ -389,8 +389,8 @@ let definition t text_document position =
     let%map.Option loc = Index.definition index ~file ~offset in
     `Location
       [ Types.Location.create
-          ~uri:(uri_of_path t loc.file)
-          ~range:(Text.range_of_loc (text_of_file t loc.file) loc)
+          ~uri:(uri_of_path t (Loc.file_name loc))
+          ~range:(Text.range_of_loc (text_of_file t (Loc.file_name loc)) loc)
       ])
 ;;
 

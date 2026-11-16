@@ -106,8 +106,8 @@ let close t token ~opener ~open_loc =
          "expected %s to close this %s (opened at %d:%d), found %s"
          (describe token)
          (describe opener)
-         open_loc.Loc.start.line
-         open_loc.start.col
+         open_loc.Loc.start.#line
+         open_loc.start.#col
          (describe (found t)))
 ;;
 
@@ -122,8 +122,8 @@ let expect_for t token ~opener ~open_loc =
          "expected %s for the %s at %d:%d, found %s"
          (describe token)
          (describe opener)
-         open_loc.Loc.start.line
-         open_loc.start.col
+         open_loc.Loc.start.#line
+         open_loc.start.#col
          (describe (found t)))
 ;;
 
@@ -1277,8 +1277,8 @@ let type_decl t ~salvage : Type_decl.t =
    so the toplevel is salvaged as if it were a syntax error. Those in a [struct]
    are in the toplevels in it. *)
 let with_lex_errors t (toplevel : Toplevel.t) ~start =
-  let start = t.tokens.(start).loc.start.offset in
-  let stop = (loc t).start.offset in
+  let start = t.tokens.(start).loc.start.#offset in
+  let stop = (loc t).start.#offset in
   match toplevel.txt, t.salvage with
   | (Module _ | Module_splice (_, _, Some _) | Include (_, Some _)), _ | _, None
     -> toplevel
@@ -1296,7 +1296,7 @@ let with_lex_errors t (toplevel : Toplevel.t) ~start =
 ;;
 
 let first_on_line t i =
-  i = 0 || t.tokens.(i).loc.start.line > t.tokens.(i - 1).loc.stop.line
+  i = 0 || t.tokens.(i).loc.start.#line > t.tokens.(i - 1).loc.stop.#line
 ;;
 
 (* Whether the token at [i] is a toplevel keyword first on its line and not
@@ -1311,7 +1311,7 @@ let starts_toplevel_at t i ~col =
   | Include
   | Include_inline
   | Let_expect_test
-  | Let_bench -> first_on_line t i && t.tokens.(i).loc.start.col <= col
+  | Let_bench -> first_on_line t i && t.tokens.(i).loc.start.#col <= col
   | _ -> false
 ;;
 
@@ -1477,7 +1477,7 @@ let rec toplevel t : Toplevel.t =
    [struct], the [end] closing it, by nesting or by being less indented.
    Unmatched closing brackets are skipped. *)
 and resync t ~start ~in_struct =
-  let col = t.tokens.(start).loc.start.col in
+  let col = t.tokens.(start).loc.start.#col in
   let rec go i ~depth =
     incr steps;
     let ({ token; loc } : Lexer.Located.t) = t.tokens.(i) in
@@ -1485,7 +1485,7 @@ and resync t ~start ~in_struct =
     | Eof -> i
     | _ when starts_toplevel_at t i ~col -> i
     | (End | End_inline)
-      when in_struct && first_on_line t i && loc.start.col < col -> i
+      when in_struct && first_on_line t i && loc.start.#col < col -> i
     | token when Option.is_some (closer token) -> go (i + 1) ~depth:(depth + 1)
     | (End | End_inline) when in_struct && depth = 0 -> i
     | Rparen | Rbracket | Rbrace | End | End_inline | Quote_close ->
@@ -1506,16 +1506,18 @@ and expansion t ~(keyword : Token.t) ~open_loc =
   match keyword with
   | Module_inline | Include_inline ->
     let splice_end = (prev_loc t).stop in
+    let last_comment =
+      Array.fold t.comments ~init:None ~f:(fun last (comment : Comment.t) ->
+        if comment.next_token = t.pos
+           && comment.loc.start.#line = splice_end.#line
+           && comment.loc.start.#offset >= splice_end.#offset
+        then Some comment
+        else last)
+    in
     let start =
-      Array.fold
-        t.comments
-        ~init:splice_end
-        ~f:(fun start (comment : Comment.t) ->
-          if comment.next_token = t.pos
-             && comment.loc.start.line = splice_end.line
-             && comment.loc.start.offset >= splice_end.offset
-          then comment.loc.stop
-          else start)
+      match last_comment with
+      | Some comment -> comment.loc.stop
+      | None -> splice_end
     in
     let toplevels = toplevels t ~in_struct:true in
     let end_loc = loc t in
@@ -1557,7 +1559,7 @@ and toplevels t ~in_struct =
       else (
         let start = t.pos in
         t.salvage <- None;
-        t.col <- t.tokens.(start).loc.start.col;
+        t.col <- t.tokens.(start).loc.start.#col;
         t.limit <- Int.min limit (next_toplevel t ~from:(start + 1) ~col:t.col);
         match
           match peek t with
@@ -1582,8 +1584,8 @@ and toplevels t ~in_struct =
                    "expected %s to close this %s (opened at %d:%d), found %s"
                    (describe closer)
                    (describe opener)
-                   open_loc.start.line
-                   open_loc.start.col
+                   open_loc.start.#line
+                   open_loc.start.#col
                    (describe (found t)))
           in
           Queue.enqueue errors (Syntax { loc; message });
@@ -1673,7 +1675,7 @@ let program_recovering ~file source =
       ; errors = Some errors
       ; salvage = None
       ; lex_errors =
-          List.map skipped ~f:(fun loc -> loc.start.offset) |> Array.of_list
+          List.map skipped ~f:(fun loc -> loc.start.#offset) |> Array.of_list
       ; limit = Array.length tokens - 1
       ; col = 0
       }
@@ -1685,14 +1687,14 @@ let program_recovering ~file source =
         Array.binary_search
           tokens
           ~compare:(fun (token : Lexer.Located.t) offset ->
-            Int.compare token.loc.start.offset offset)
+            Int.compare token.loc.start.#offset offset)
           `First_greater_than_or_equal_to
-          loc.stop.offset
+          loc.stop.#offset
         |> Option.globalize Int.globalize
-        |> Option.map ~f:(fun i -> tokens.(i).loc.start.offset))
+        |> Option.map ~f:(fun i -> tokens.(i).loc.start.#offset))
       |> Int.Set.of_list
     in
-    let start (error : Error.t) = (Error.loc error).start.offset in
+    let start (error : Error.t) = (Error.loc error).start.#offset in
     let errors =
       List.map lex_errors ~f:(fun error -> Error.Lex error)
       @ List.filter (Queue.to_list errors) ~f:(fun error ->

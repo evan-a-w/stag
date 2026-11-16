@@ -4,7 +4,7 @@ let create ~path ~contents ~tests ~expansions =
   let edits =
     Expect_test_runner.edits ~path ~contents tests
     @ List.filter_map expansions ~f:(fun (expansion : Expansion.t) ->
-      if String.equal expansion.loc.file path
+      if String.equal (Loc.file_name expansion.loc) path
       then Inline_expansion.edit expansion ~contents
       else None)
   in

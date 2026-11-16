@@ -25,7 +25,7 @@ let diagnostics_by_file ~path ~absolute ~files diagnostics =
   List.fold diagnostics ~init ~f:(fun map (diagnostic : Diagnostic.t) ->
     let diagnostic = Diagnostic.relocate diagnostic ~f:absolute in
     let file =
-      if Loc.is_none diagnostic.loc then path else diagnostic.loc.file
+      if Loc.is_none diagnostic.loc then path else Loc.file_name diagnostic.loc
     in
     Map.add_multi map ~key:file ~data:diagnostic)
   |> Map.map ~f:List.rev
@@ -91,7 +91,9 @@ let rec relocated ~relocate (toplevels : Syntax.Toplevel.t list) =
     | Bench _ ->
       Option.some_if
         (not
-           (String.equal (relocate toplevel.loc : Loc.t).file toplevel.loc.file))
+           (Loc.File.equal
+              (relocate toplevel.loc : Loc.t).file
+              toplevel.loc.file))
         toplevel)
 ;;
 
@@ -228,9 +230,9 @@ let standalone ~limits ~prelude ~contents path =
 ;;
 
 let absolute_loc ~root (loc : Loc.t) =
-  if Loc.is_none loc || Filename.is_absolute loc.file
+  if Loc.is_none loc || Filename.is_absolute (Loc.file_name loc)
   then loc
-  else { loc with file = root ^/ loc.file }
+  else { loc with file = Loc.File.of_string (root ^/ Loc.file_name loc) }
 ;;
 
 let relative ~root path =

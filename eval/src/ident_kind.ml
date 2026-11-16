@@ -26,8 +26,8 @@ let accepts t text =
   let written = prefix ^ text in
   match Lexer.tokenize ~file:"" written with
   | Ok [| { token; loc }; { token = Eof; _ } |] ->
-    loc.start.offset = 0
-    && loc.stop.offset = String.length written
+    loc.start.#offset = 0
+    && loc.stop.#offset = String.length written
     &&
       (match t, token with
       | (Lower | Binder), Lident _ | Binder, Underscore -> true

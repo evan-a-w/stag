@@ -14,7 +14,8 @@ let benches ?files driver =
   Treewalk.set_output interpreter ignore;
   Treewalk.set_limits interpreter Limits.unlimited;
   let in_files (bench : Typed.Bench.t) =
-    Option.for_all files ~f:(fun files -> Set.mem files bench.name.loc.file)
+    Option.for_all files ~f:(fun files ->
+      Set.mem files (Loc.file_name bench.name.loc))
   in
   let routine bindings body : Measure.Routine.t =
     Plain
