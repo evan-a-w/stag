@@ -10,8 +10,8 @@ module Entry : sig
     ; level : Level.t
     ; quote_id : int option (** The innermost quote the entry is bound in. *)
     ; persistent : bool
-      (** Persistent entries (generalized syntactic functions) may also be used
-          at any later level, from within any quote. *)
+    (** Persistent entries (generalized syntactic functions) may also be used at
+        any later level, from within any quote. *)
     ; binder : Typed.Binder.t
     }
   [@@deriving sexp_of]

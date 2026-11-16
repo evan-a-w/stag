@@ -88,12 +88,10 @@ let x = 10
 let outer = let mut x = Int.add x 1 in x
 let weak = let mut l = [] in l <- [1]; l
 |};
-  check
-    {|
+  check {|
 let bad = let mut l = [] in l <- [1]; l <- [true]
 |};
-  check
-    {|
+  check {|
 let bad = let mut id = fun x -> x in (id 1, id true)
 |};
   [%expect
@@ -118,29 +116,23 @@ let bad = let mut id = fun x -> x in (id 1, id true)
 ;;
 
 let%expect_test "assigning what isn't mutable" =
-  check
-    {|
+  check {|
 let bad = let x = 1 in x <- 2
 |};
-  check
-    {|
+  check {|
 let x = 1
 let bad u = x <- 2
 |};
-  check
-    {|
+  check {|
 let bad u = Int.add <- Int.sub
 |};
-  check
-    {|
+  check {|
 let bad u = nope <- 1
 |};
-  check
-    {|
+  check {|
 let bad = let mut x = 1 in x <- true
 |};
-  check
-    {|
+  check {|
 let bad f = (fun x -> x <- 1) 2
 |};
   [%expect
@@ -158,20 +150,16 @@ let bad f = (fun x -> x <- 1) 2
 ;;
 
 let%expect_test "mutable locals can't cross levels" =
-  check
-    {|
+  check {|
 let bad = let mut x = 1 in .<x>.
 |};
-  check
-    {|
+  check {|
 let bad = let mut x = 1 in .<x <- 2>.
 |};
-  check
-    {|
+  check {|
 let bad = let mut x = 1 in .~(let _ = x in .<1>.)
 |};
-  check
-    {|
+  check {|
 let bad = .~(let mut x = 1 in .<x>.)
 |};
   run
@@ -231,8 +219,7 @@ let at_compile_time =
 
 let%expect_test "closures reaching a mutable local are not persistent" =
   (* Directly. *)
-  check
-    {|
+  check {|
 let bad = let mut n = 0 in let f u = n in .<f ()>.
 |};
   (* Through a closure it captures. *)
@@ -266,16 +253,13 @@ let bad =
   .<g ()>.
 |};
   (* Through an argument, which a caller could make capture one. *)
-  check
-    {|
+  check {|
 let bad (h : unit -> int) = let g u = h () in .<g ()>.
 |};
-  check
-    {|
+  check {|
 let bad x = let g u = x in .<g ()>.
 |};
-  check
-    {|
+  check {|
 let bad (x : option[unit -> int]) = let g u = x in .<g ()>.
 |};
   (* Arguments that can't hold a closure. *)
@@ -391,16 +375,13 @@ let late = counter
 ;;
 
 let%expect_test "a mutable toplevel can't need itself" =
-  check
-    {|
+  check {|
 let mut x = Int.add x 1
 |};
-  check
-    {|
+  check {|
 let mut x = (fun u -> x) ()
 |};
-  run
-    {|
+  run {|
 let mut x = y
 let y = x
 |};
@@ -499,13 +480,11 @@ let bumped_again = bump ()
 ;;
 
 let%expect_test "mutable toplevels can't be used at compile time" =
-  check
-    {|
+  check {|
 let mut counter = 0
 let bad = .~(counter <- 1; .<1>.)
 |};
-  check
-    {|
+  check {|
 let mut counter = 0
 let bad = .~(let _ = counter in .<1>.)
 |};
@@ -610,8 +589,7 @@ let%expect_test "b" =
 ;;
 
 let%expect_test "same-level mutable locals in code built by a splice" =
-  (* Read through a free variable of the inner quote, provided at the
-     splice. *)
+  (* Read through a free variable of the inner quote, provided at the splice. *)
   run
     {|
 let read = .<let mut x = 3 in x <- 4; .~(.<x>.)>.
@@ -673,8 +651,7 @@ let ran_assigned = .~assigned
 ;;
 
 let%expect_test "may capture a mutable" =
-  check
-    {|
+  check {|
 let bad x = let g u = x in .<g ()>.
 |};
   check
@@ -685,8 +662,7 @@ let bad (h : unit -> int) = let k = h in let g u = k () in .<g ()>.
     {|
 let bad = let mut n = 0 in let f u = n in let g u = f () in .<g ()>.
 |};
-  run
-    {|
+  run {|
 let ok (x : int) = let g u = x in .<g ()>.
 let ran = .~(ok 1)
 |};
@@ -770,8 +746,7 @@ let bad =
     |}]
 ;;
 
-(* The signature, then the values of the toplevels named [*_value] at
-   runtime. *)
+(* The signature, then the values of the toplevels named [*_value] at runtime. *)
 let run_values source =
   Option.iter (typecheck source) ~f:(fun t ->
     print_signature t;
@@ -847,8 +822,7 @@ let spliced
 let incr = .<x <- Int.add x 1>.
 let plain = .<let x = 0 in .~incr; x>.
 |};
-  check
-    {|
+  check {|
 let incr = .<x <- Int.add x 1>.
 let f y = .<.~incr.{x = 1}>.
 |};
@@ -878,8 +852,7 @@ let wrong : <unit>{x : immut int} = incr
 let reading_is_fine : <int>{x : mut int} = .<x>.
 let wrong_place : {`a : mut int} -> int = fun r -> 1
 |};
-  check
-    {|
+  check {|
 let wrong_place : {`a : immut int} -> int = fun r -> 1
 |};
   [%expect
@@ -963,8 +936,7 @@ let rejected = unknown assigns
 ;;
 
 let%expect_test "records' and variants' entries are never mut" =
-  check
-    {|
+  check {|
 let f (c : <unit>{..'r}) (r : {..'r}) = r
 let g = f .<y <- 1>.
 |};
@@ -973,8 +945,7 @@ let g = f .<y <- 1>.
 let f (r : {..'r}) (c : <unit>{..'r}) = r
 let g = f {`y = 1} .<y <- 1>.
 |};
-  check
-    {|
+  check {|
 let f (c : <unit>{..'r}) (v : [..'r]) = v
 let g = f .<y <- 1>.
 |};

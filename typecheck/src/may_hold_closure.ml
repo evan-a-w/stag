@@ -29,9 +29,8 @@ let ty type_env ty =
     | RVar _ -> true
   (* Its parameters are checked as the arguments, so are safe here. *)
   and decl name =
-    if
-      List.mem safe_builtins name ~equal:String.equal
-      || Hash_set.mem visited name
+    if List.mem safe_builtins name ~equal:String.equal
+       || Hash_set.mem visited name
     then false
     else (
       Hash_set.add visited name;

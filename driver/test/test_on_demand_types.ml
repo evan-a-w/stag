@@ -79,8 +79,7 @@ end
 ;;
 
 let%expect_test "a type is checked once its constructors are used" =
-  check
-    {|
+  check {|
 let x = A
 let y = add 1 true
 type t = A of unbound
@@ -96,8 +95,7 @@ type t = A of unbound
 ;;
 
 let%expect_test "a type is not checked when only named" =
-  check
-    {|
+  check {|
 let x (v : t) = v
 let y = add 1 true
 type t = A of unbound
@@ -113,8 +111,7 @@ type t = A of unbound
 ;;
 
 let%expect_test "errors are in order of declarations, used or not" =
-  check
-    {|
+  check {|
 let y = add 1 true
 type t = A of unbound
 |};
@@ -126,8 +123,7 @@ type t = A of unbound
      @ t.stag:2:14-18)
     ((Unbound_type unbound) @ t.stag:3:14-21)
     |}];
-  check
-    {|
+  check {|
 type t = A of unbound
 let y = add 1 true
 |};
@@ -142,27 +138,23 @@ let y = add 1 true
 ;;
 
 let%expect_test "toplevel splices run before later declarations are checked" =
-  check
-    {|
+  check {|
 let x = .~(print_endline "splice"; .<1>.)
 type t = A of unbound
 |};
-  [%expect
-    {|
+  [%expect {|
     splice
     ((Unbound_type unbound) @ t.stag:3:14-21)
     |}]
 ;;
 
 let%expect_test "an alias cycle reached first through an annotation" =
-  check
-    {|
+  check {|
 let f (x : a) = x
 let y = add 1 true
 type a = a
 |};
-  check
-    {|
+  check {|
 let f (x : b) = x
 let y = add 1 true
 type a = b
@@ -285,8 +277,7 @@ end
 ;;
 
 let%expect_test "names are checked unique before anything else" =
-  check
-    {|
+  check {|
 let y = add 1 true
 type t['a, 'a] = int
 |};

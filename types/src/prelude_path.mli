@@ -1,8 +1,8 @@
 open! Import
 
-(** Canonical names of the prelude's items. The prelude is outside the
-    program's root module, and its canonical names start with [root ^ "."],
-    which no program name does (a lowercase name is never a module). *)
+(** Canonical names of the prelude's items. The prelude is outside the program's
+    root module, and its canonical names start with [root ^ "."], which no
+    program name does (a lowercase name is never a module). *)
 
 val root : string
 
@@ -19,9 +19,9 @@ val relative : string -> string option
 val shadowed : string -> has:([ `Type | `Module ] -> string -> bool) -> bool
 
 (** A canonical name for humans: without [root] for the prelude's, unless
-    [shadowed] (by default, never), as its root path (eg. [.option]), unless
-    the first name of its path is one of the program's [root_modules] too,
-    where no syntax names it, with [root] (eg. [prelude.Core.Sexp.t]). *)
+    [shadowed] (by default, never), as its root path (eg. [.option]), unless the
+    first name of its path is one of the program's [root_modules] too, where no
+    syntax names it, with [root] (eg. [prelude.Core.Sexp.t]). *)
 val to_string_hum
   :  ?shadowed:(string -> bool)
   -> ?root_modules:String.Set.t

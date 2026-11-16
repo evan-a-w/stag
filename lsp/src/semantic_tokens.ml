@@ -180,11 +180,10 @@ let compute text ~file ~occurrences ~is_function =
         else first
       in
       let rec stop i =
-        if
-          i + 2 < Array.length tokens
-          && Stag_syntax.Token.equal tokens.(i + 1).token Dot
-          && is_name (i + 2)
-          && tokens.(i + 2).loc.stop.offset <= loc.stop.offset
+        if i + 2 < Array.length tokens
+           && Stag_syntax.Token.equal tokens.(i + 1).token Dot
+           && is_name (i + 2)
+           && tokens.(i + 2).loc.stop.offset <= loc.stop.offset
         then stop (i + 2)
         else i
       in

@@ -7,18 +7,18 @@ let show ?capabilities ~add () =
     ?capabilities
     ~files:[ "a.stag", source ]
     (fun client ->
-       print_s [%sexp (Client.encoding client : Text.Encoding.t)];
-       Client.did_open client "a.stag";
-       Client.print_semantic_tokens client "a.stag";
-       Option.iter
-         (Client.request
-            client
-            "textDocument/hover"
-            (Client.text_document
-               client
-               "a.stag"
-               ~extra:[ "position", Client.position ~line:0 ~character:add ]))
-         ~f:(Client.print_json client))
+      print_s [%sexp (Client.encoding client : Text.Encoding.t)];
+      Client.did_open client "a.stag";
+      Client.print_semantic_tokens client "a.stag";
+      Option.iter
+        (Client.request
+           client
+           "textDocument/hover"
+           (Client.text_document
+              client
+              "a.stag"
+              ~extra:[ "position", Client.position ~line:0 ~character:add ]))
+        ~f:(Client.print_json client))
 ;;
 
 let%expect_test "UTF-16 positions, by default" =
@@ -48,9 +48,8 @@ let%expect_test "UTF-16 positions, by default" =
   show
     ~capabilities:
       (`Assoc
-          [ ( "general"
-            , `Assoc [ "positionEncodings", `List [ `String "utf-16" ] ] )
-          ])
+        [ "general", `Assoc [ "positionEncodings", `List [ `String "utf-16" ] ]
+        ])
     ~add:21
     ();
   [%expect
@@ -81,12 +80,11 @@ let%expect_test "UTF-8 positions, if the client offers them" =
   show
     ~capabilities:
       (`Assoc
-          [ ( "general"
-            , `Assoc
-                [ ( "positionEncodings"
-                  , `List [ `String "utf-16"; `String "utf-8" ] )
-                ] )
-          ])
+        [ ( "general"
+          , `Assoc
+              [ "positionEncodings", `List [ `String "utf-16"; `String "utf-8" ]
+              ] )
+        ])
     ~add:24
     ();
   [%expect
@@ -145,8 +143,8 @@ let%expect_test "formatting keeps CRLF line endings" =
       Client.with_server
         ~files:[ "a.stag", contents ]
         (fun client ->
-           Client.did_open client "a.stag";
-           format client));
+          Client.did_open client "a.stag";
+          format client));
   [%expect
     {|
     let x = 1\r\nlet y = \"a\\r\\nb\"\r\n

@@ -66,7 +66,7 @@ module State = struct
     ; mutable bol : int
     ; comments : (string * Loc.t) Queue.t
     ; errors : Error.t Queue.t option
-      (** Where to record errors, to keep lexing after them, if any. *)
+    (** Where to record errors, to keep lexing after them, if any. *)
     }
 
   let peek_at t n =
@@ -126,9 +126,9 @@ let is_ident_char c =
 
 let is_ident_start c = Char.is_alpha c || Char.equal c '_'
 
-(* Whether a token that can end an atom ends just before the current
-   character, with no trivia between, so that a [.] here is a field access's
-   or a path's, not a root path's. *)
+(* Whether a token that can end an atom ends just before the current character,
+   with no trivia between, so that a [.] here is a field access's or a path's,
+   not a root path's. *)
 let after_atom (t : State.t) ~glued =
   glued
   && t.offset > 0
@@ -496,8 +496,8 @@ and token_or_skip (t : State.t) : Located.t =
   { token; loc = State.loc_from t start }
 ;;
 
-(* A comment is [Trailing] after a token ending code on its line, or after
-   such a comment ending on its line. *)
+(* A comment is [Trailing] after a token ending code on its line, or after such
+   a comment ending on its line. *)
 let comments ~(prev : Located.t option) ~(next : Located.t) ~next_index found =
   let lines : Loc.t array = Array.of_list (List.map found ~f:snd) in
   let n = Array.length lines in

@@ -48,10 +48,9 @@ let add_in_bounds_of (var : _ Type.Var.t) bounded =
       match unbound_id bounded with
       | None -> ()
       | Some id ->
-        if
-          not
-            (List.exists var.in_bounds_of ~f:(fun bounded ->
-               [%equal: int option] (unbound_id bounded) (Some id)))
+        if not
+             (List.exists var.in_bounds_of ~f:(fun bounded ->
+                [%equal: int option] (unbound_id bounded) (Some id)))
         then
           var.in_bounds_of
           <- bounded
@@ -62,8 +61,8 @@ let add_in_bounds_of (var : _ Type.Var.t) bounded =
 
 (* Records [bounded] in the variables of a bound it gets. *)
 let record_in_bounds_of
-      (iter : Nothing.t Type.Iter.t -> (unit, Nothing.t) Result.t)
-      bounded
+  (iter : Nothing.t Type.Iter.t -> (unit, Nothing.t) Result.t)
+  bounded
   =
   let record ~guarded:_ var : (unit, Nothing.t) Result.t =
     add_in_bounds_of var [ bounded ];
@@ -77,9 +76,8 @@ let record_in_bounds_of
 (* Lowers ranks to at most [rank], for a variable bound to the type iterated,
    which passes on [in_bounds_of]. [occurs] is the id of the variable being
    bound, if any, with the variable to report if it is reached other than
-   through a record or variant, which would make an unguarded cycle. Bounds
-   may relate variables of any ranks (see [Scheme.generalize]), so are not
-   followed. *)
+   through a record or variant, which would make an unguarded cycle. Bounds may
+   relate variables of any ranks (see [Scheme.generalize]), so are not followed. *)
 let adjuster ~rank ~(occurs : (Type.id * Type.arg) option) ~in_bounds_of
   : Unification_error.t Type.Iter.t
   =
@@ -109,10 +107,10 @@ module Id_pair = struct
   let create id1 id2 = Int.min id1 id2, Int.max id1 id2
 end
 
-(* The pairs of records or variants, and of [Link]s, being or already
-   unified, assumed equal when reached again: as each cycle passes through a
-   record or variant, and unification creates none, unifying cyclic types
-   terminates, and shared parts are unified once. *)
+(* The pairs of records or variants, and of [Link]s, being or already unified,
+   assumed equal when reached again: as each cycle passes through a record or
+   variant, and unification creates none, unifying cyclic types terminates, and
+   shared parts are unified once. *)
 module State = struct
   type t =
     { fresh : Fresh.t
@@ -395,12 +393,11 @@ and unify_row' state ~row1 ~row2 : (unit, Unification_error.t) Result.t =
   | RVar var1, RVar var2 when phys_equal var1 var2 -> Ok ()
   | RVar var, row | row, RVar var -> bind_rvar state var row
 
-(* Finds the first entry for [name], which has no type if [row] lacks
-   [name] entirely. A variable tail gets the entry, with type [entry] if
-   given and it can be bound there as is: the entry has that type if
-   present, so this is as general as a fresh type equal to it if present. Its
-   [assigned] is the one given if so (the entry is to be unified with one
-   that has it), else fresh. *)
+(* Finds the first entry for [name], which has no type if [row] lacks [name]
+   entirely. A variable tail gets the entry, with type [entry] if given and it
+   can be bound there as is: the entry has that type if present, so this is as
+   general as a fresh type equal to it if present. Its [assigned] is the one
+   given if so (the entry is to be unified with one that has it), else fresh. *)
 and rewrite ?entry ?assigned state name (row : Type.row)
   : ( Type.presence * Type.presence * Type.ty option * Type.row
       , Unification_error.t )
@@ -544,9 +541,8 @@ and presence_at_most' state ~presence ~bound ~error =
       upper.bounds <- At_least (PVar lower) :: upper.bounds);
     Ok ()
 
-(* The types of entries with [presence] matter only if it is [Present], so
-   their equality waits until it is known, or is [Absent] if they can't be
-   equal. *)
+(* The types of entries with [presence] matter only if it is [Present], so their
+   equality waits until it is known, or is [Absent] if they can't be equal. *)
 and unify_if_present' state ~presence ~ty1 ~ty2 =
   if Type.same_ty ty1 ty2
   then Ok ()

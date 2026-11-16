@@ -40,9 +40,8 @@ let of_source path =
   let%bind.Option root =
     if String.equal path (parent ^/ prelude_file)
     then Some parent
-    else if
-      String.equal dir (parent ^/ core_dir)
-      && String.is_suffix path ~suffix:Source_file.extension
+    else if String.equal dir (parent ^/ core_dir)
+            && String.is_suffix path ~suffix:Source_file.extension
     then Some parent
     else None
   in
@@ -135,8 +134,8 @@ let signature_of_source t (signature : Signature.t) path =
   then
     Ok
       (List.filter signature ~f:(function
-         | Module { name = "Core"; _ } -> false
-         | Module _ | Value _ | Type _ | Exception _ -> true))
+        | Module { name = "Core"; _ } -> false
+        | Module _ | Value _ | Type _ | Exception _ -> true))
   else (
     let%map.Result module_name =
       Source_file.module_name path

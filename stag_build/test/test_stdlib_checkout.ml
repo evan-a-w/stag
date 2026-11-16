@@ -76,7 +76,7 @@ let%expect_test "finding checkouts and their sources" =
          print_s
            [%sexp
              (relative prelude : string * string)
-           , (List.map core ~f:relative : (string * string) list)]);
+             , (List.map core ~f:relative : (string * string) list)]);
       [%expect
         {|
         ((stag/prelude/prelude.stag "let x = 1\n")

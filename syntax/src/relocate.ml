@@ -286,8 +286,8 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
     , _ ) -> None
 
 and type_decl
-      ({ name = n; params; kind } : Type_decl.t)
-      ({ name = n'; params = params'; kind = kind' } : Type_decl.t)
+  ({ name = n; params; kind } : Type_decl.t)
+  ({ name = n'; params = params'; kind = kind' } : Type_decl.t)
   =
   let* n = name n n' in
   let* params = list (located (same Type_decl.Param.equal)) params params' in
@@ -357,9 +357,9 @@ and toplevel_desc (g : Toplevel.desc) (w : Toplevel.desc) =
       option
         (fun ({ name = x; args } : Bench_param.t)
           ({ name = x'; args = args' } : Bench_param.t) ->
-           let* x = name x x' in
-           let+ args = list expr args args' in
-           { Bench_param.name = x; args })
+          let* x = name x x' in
+          let+ args = list expr args args' in
+          { Bench_param.name = x; args })
         param
         param'
     in

@@ -126,17 +126,14 @@ let in_generated_code = .~(.<pair true>.)
 ;;
 
 let%expect_test "compile time use of a toplevel being checked" =
-  run
-    {|
+  run {|
 let f x = .~(f; .<x>.)
 |};
-  run
-    {|
+  run {|
 let f x = g x
 let g x = .~(f; .<x>.)
 |};
-  run
-    {|
+  run {|
 let f x = .~(.<f x>.)
 |};
   [%expect
@@ -151,12 +148,10 @@ let f x = .~(.<f x>.)
 ;;
 
 let%expect_test "level 0 locals are not usable at compile time" =
-  run
-    {|
+  run {|
 let f x = .~(x; .<1>.)
 |};
-  run
-    {|
+  run {|
 let f = let x = 1 in .~(x; .<1>.)
 |};
   [%expect
@@ -218,8 +213,7 @@ let spliced = .~(fails; .<1>.)
 ;;
 
 let%expect_test "splice evaluation failures" =
-  run
-    {|
+  run {|
 type abc = A | B
 let x = .~(match B with A -> .<0>.)
 |};
@@ -379,9 +373,8 @@ let embeds = .~(let k x = (x, 1) in .<(k true, k 2)>.)
     |}]
 ;;
 
-let%expect_test
-    "closures made at compile time read the toplevels they capture only when \
-     called"
+let%expect_test "closures made at compile time read the toplevels they capture \
+                 only when called"
   =
   run
     ~eval:false
@@ -394,8 +387,7 @@ let embeds =
      let k x = (x, n) in
      .<k true>.)
 |};
-  run
-    {|
+  run {|
 let n = 3
 let embeds = .~(let k x = (x, n) in .<k true>.)
 |};
@@ -467,10 +459,9 @@ let used = f (S (S Z))
 ;;
 
 let%expect_test "maybe-used entries at a toplevel splice" =
-  (* [gen]'s result may use [f], so [f?] is in the context of the code
-     spliced at level -1. *)
-  run
-    {|
+  (* [gen]'s result may use [f], so [f?] is in the context of the code spliced
+     at level -1. *)
+  run {|
 let gen c = .<let f = 1 in .~c>.; c
 let f = .~(.~(gen .< .<1>. >.))
 |};
@@ -511,10 +502,9 @@ let f x = v; .<x>.
 let v = f; match B with A -> 0
 let g y = .~(f; .<y>.)
 |};
-  (* [a] needs [b], computed when first needed, which only refers to [a]
-     through [k] without calling it. *)
-  run
-    {|
+  (* [a] needs [b], computed when first needed, which only refers to [a] through
+     [k] without calling it. *)
+  run {|
 let a = b; 1
 let b = k; 2
 let k u = u; a
@@ -717,9 +707,7 @@ let spliced_app = .~(.<id id>.)
 ;;
 
 let%expect_test "toplevels used at level -2" =
-  run
-    ~bodies:[ "deep" ]
-    {|
+  run ~bodies:[ "deep" ] {|
 let n = 2
 let deep = .~(.~(n; .< .<n>. >.))
 |};
@@ -751,9 +739,9 @@ let deep = .~(.~(n; .< .<n>. >.))
 ;;
 
 let%expect_test "re-inference keeps the providers of implicit splices" =
-  (* The annotation closes [c]'s context, so [x] doesn't provide its entries
-     and is generalized. Without the annotation, re-inferring the generated
-     code would make [x] a provider. *)
+  (* The annotation closes [c]'s context, so [x] doesn't provide its entries and
+     is generalized. Without the annotation, re-inferring the generated code
+     would make [x] a provider. *)
   run
     {|
 let code u =
@@ -877,12 +865,11 @@ let f = true
     |}]
 ;;
 
-let%expect_test
-    "re-inference without annotations meets presence constraints in another \
-     order"
+let%expect_test "re-inference without annotations meets presence constraints \
+                 in another order"
   =
-  (* [f]'s annotation decides that [c] doesn't use [x] before [c2]'s quote
-     uses it; re-inferred without it, the quote's use comes first. *)
+  (* [f]'s annotation decides that [c] doesn't use [x] before [c2]'s quote uses
+     it; re-inferred without it, the quote's use comes first. *)
   run
     {|
 let gen u =
@@ -904,8 +891,8 @@ let user = .~(gen ())
     |}]
 ;;
 
-let%expect_test
-    "weak generators decide presences at their first toplevel splice"
+let%expect_test "weak generators decide presences at their first toplevel \
+                 splice"
   =
   (* [w]'s presence of [x] is weak. Splicing [w <1>] at toplevel forces it
      [Absent], as nothing there provides an [x] the code only may use, so a
@@ -968,7 +955,7 @@ let%expect_test "splices of code from a generator with presence bounds" =
           print_s
             [%sexp
               (List.map (members t) ~f:(fun m -> m.ident.name) : string list)
-            , (Driver.eval ~limits (driver t) : unit Or_error.t)]));
+              , (Driver.eval ~limits (driver t) : unit Or_error.t)]));
   [%expect
     {|
     ((gen f x y) (Ok ()))
@@ -978,11 +965,11 @@ let%expect_test "splices of code from a generator with presence bounds" =
     |}]
 ;;
 
-let%expect_test
-    "re-inference of a local polymorphic in a presence bounded by an annotation"
+let%expect_test "re-inference of a local polymorphic in a presence bounded by \
+                 an annotation"
   =
-  (* [h]'s [d] may use [x] only if [e] does, which its annotation decides
-     before [h] is generalized, but re-inference only after. *)
+  (* [h]'s [d] may use [x] only if [e] does, which its annotation decides before
+     [h] is generalized, but re-inference only after. *)
   run
     {|
 let closeit (c : <int>{}) = ()
@@ -1009,8 +996,8 @@ let user = .~(gen ())
     |}]
 ;;
 
-(* [tw c] bounds [c]'s row by a row with [x] and an unknown tail, so a local
-   [h] using [tw e1] is bounded by [e1]'s row. *)
+(* [tw c] bounds [c]'s row by a row with [x] and an unknown tail, so a local [h]
+   using [tw e1] is bounded by [e1]'s row. *)
 let tw = {|let tw c = .<let x = 1 in .~c>.; .<.~c>.|}
 let needx = {|let needx (e : <int>{x : int}) = ()|}
 let closeit = {|let closeit (c : <int>{}) = ()|}
@@ -1094,9 +1081,8 @@ let%expect_test "re-inference of a local bounded by an outer row" =
 
 let%expect_test "re-inference of a local bounded by an outer closed row" =
   (* Splicing [e1] with only [x] substituted closes its row, so [h]'s presence
-     of [x] is only bounded below by [e1]'s, which must not keep [h] from
-     being generalized: without [k]'s annotation, [h] is used with and without
-     [x]. *)
+     of [x] is only bounded below by [e1]'s, which must not keep [h] from being
+     generalized: without [k]'s annotation, [h] is used with and without [x]. *)
   let f e1 ~use_k =
     sprintf
       {|let f %s k =
@@ -1177,8 +1163,8 @@ let%expect_test "re-inference of a local bounded by an outer closed row" =
 
 let%expect_test "the order of splices deciding a weak variable matters" =
   (* [w0]'s row is weak. Spliced under local [x] and [y] first, it is closed
-     with neither, as nothing it may use is known; spliced with [x]
-     substituted first, it may use [x], which [needx] then makes [Present]. *)
+     with neither, as nothing it may use is known; spliced with [x] substituted
+     first, it may use [x], which [needx] then makes [Present]. *)
   let f0 = {|let f0 c d = d|} in
   let w0 = {|let w0 = f0 .<y>. .<2>.|} in
   let substituted = {|let substituted = .~w0.{x = 3}|} in
@@ -1267,9 +1253,9 @@ let other = .~(gen ()) true
 ;;
 
 let%expect_test "entries of different types code may use, then closed" =
-  (* [ki c] and [kb c] give [c]'s [x] the types [int] and [bool], which is
-     fine as [c] is closed, so has no [x]: the generated [f] has lost the
-     annotation, and closing [c] may come before or after. *)
+  (* [ki c] and [kb c] give [c]'s [x] the types [int] and [bool], which is fine
+     as [c] is closed, so has no [x]: the generated [f] has lost the annotation,
+     and closing [c] may come before or after. *)
   let ki = {|let ki c = .<let x = 1 in .~c>.; ()|} in
   let kb = {|let kb c = .<let x = true in .~c>.; ()|} in
   let use = {|let use = .~(gen ())|} in

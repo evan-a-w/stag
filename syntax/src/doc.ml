@@ -104,8 +104,8 @@ module Mode = struct
 end
 
 (* [text], written at column [from], with its later lines moved alike as its
-   first is to [col], as far as they can go. Not if one is indented with a
-   tab, whose width is not known. *)
+   first is to [col], as far as they can go. Not if one is indented with a tab,
+   whose width is not known. *)
 let shift_block text ~from ~col =
   let blank line = String.is_empty (String.strip line) in
   let leading line =
@@ -145,8 +145,8 @@ let spaced_after s ~spaced =
 
 (* Whether the commands fit in [width], up to the first newline (of a broken
    [line] or a text). After an [End_line], only if a newline comes before any
-   more of the flat text. [spaced]: whether a [Space] would print nothing, as
-   at the start of a line or after a space. *)
+   more of the flat text. [spaced]: whether a [Space] would print nothing, as at
+   the start of a line or after a space. *)
 let rec fits ?(ended = false) ~spaced width (commands : (int * Mode.t * t) list)
   =
   width >= 0
@@ -169,9 +169,9 @@ let rec fits ?(ended = false) ~spaced width (commands : (int * Mode.t * t) list)
      | Line s ->
        (match mode with
         | Flat ->
-          (* A flat line after an ended one would be broken anyway: the group
-             is broken instead, to lay it out as when the comment ending the
-             line is already there. *)
+          (* A flat line after an ended one would be broken anyway: the group is
+             broken instead, to lay it out as when the comment ending the line
+             is already there. *)
           (not ended)
           && fits
                ~ended
@@ -251,9 +251,9 @@ let rec is_blank = function
 ;;
 
 (* Whether [t], starting at [col] and laid out with its groups flat (its other
-   lines broken), fits in [width] on each of its lines: the column it ends at
-   if so, and whether a [Space] there would print nothing. Only the lines of
-   [t] are looked at, each up to the width. *)
+   lines broken), fits in [width] on each of its lines: the column it ends at if
+   so, and whether a [Space] there would print nothing. Only the lines of [t]
+   are looked at, each up to the width. *)
 
 let fits_all ~width ~col ~spaced ~indent t =
   let rec go col ~spaced (commands : (int * Mode.t * t) list) =
@@ -336,8 +336,8 @@ let render ?(width = 80) t =
     line_empty := true;
     end_line := false
   in
-  (* Spaces before a newline that [Fresh_line] or [End_line] adds, eg. between
-     a comment and the comment it is followed by. *)
+  (* Spaces before a newline that [Fresh_line] or [End_line] adds, eg. between a
+     comment and the comment it is followed by. *)
   let strip_and_newline indent =
     let rec strip () =
       let n = Buffer.length buf in
@@ -415,11 +415,10 @@ let render ?(width = 80) t =
            match mode with
            | Flat -> Flat
            | Break ->
-             if
-               fits
-                 ~spaced:(spaced ())
-                 (width - !col)
-                 ((indent, Flat, t) :: rest)
+             if fits
+                  ~spaced:(spaced ())
+                  (width - !col)
+                  ((indent, Flat, t) :: rest)
              then Flat
              else Break
          in

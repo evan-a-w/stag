@@ -6,8 +6,8 @@ type t
 
 (** Toplevel splices are run by [interpreter] while checking, which also gets
     every checked toplevel, to evaluate those used at compile time on demand,
-    and the rest when it is [Treewalk.eval]ed. Idents are made by its stamps,
-    so are unique among those of every program it checks. Its budget (see
+    and the rest when it is [Treewalk.eval]ed. Idents are made by its stamps, so
+    are unique among those of every program it checks. Its budget (see
     [Treewalk.set_limits]) is shared by every program checked with [t], and
     toplevels it evaluates keep their values when [Treewalk.eval]ed. Programs
     see [prelude], by default [Prelude.toplevels]. *)
@@ -20,11 +20,11 @@ val create
 module Checked : sig
   type t =
     { signature : Signature.t
-      (** The signature of the program, mirroring it item by item, without its
-          expect tests. *)
+    (** The signature of the program, mirroring it item by item, without its
+        expect tests. *)
     ; program : Typed.Program.t
     ; expansions : Expansion.t list
-      (** Of each [include%inline] and [module%inline], in source order. *)
+    (** Of each [include%inline] and [module%inline], in source order. *)
     }
 end
 
@@ -32,15 +32,15 @@ end
 module Failed : sig
   type t =
     { errors : Typecheck_error.t list
-      (** Not empty, each once, by location, then in the order found. *)
+    (** Not empty, each once, by location, then in the order found. *)
     ; partial : Checked.t
-      (** What did not check is [Typed.Expr.Desc.Error] of its parts that
-          did, and is left out of [signature]. *)
+    (** What did not check is [Typed.Expr.Desc.Error] of its parts that did, and
+        is left out of [signature]. *)
     }
 end
 
-(** Declarations, in any module, may refer to each other in any order. Names
-    are first checked unique: members per module, parameters per type. Then
+(** Declarations, in any module, may refer to each other in any order. Names are
+    first checked unique: members per module, parameters per type. Then
     declarations are checked in order, depth first, except those used before
     their turn, which are checked on demand: a type declaration once its
     constructors, fields or emptiness are used, a toplevel binding once used.
@@ -54,9 +54,9 @@ end
     toplevel whose component is checked. So a splice may run before later type
     declarations are checked.
 
-    Checking goes on past errors: what did not check has type [Type.error],
-    so that what uses it is not in error too, and splices whose code did not
-    check are not run, generating nothing. *)
+    Checking goes on past errors: what did not check has type [Type.error], so
+    that what uses it is not in error too, and splices whose code did not check
+    are not run, generating nothing. *)
 val typecheck : t -> program:Syntax.Program.t -> (Checked.t, Failed.t) Result.t
 
 (** Checks the prelude itself, as [typecheck] does a program, all of its

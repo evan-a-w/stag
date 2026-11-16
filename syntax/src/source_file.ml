@@ -16,10 +16,9 @@ let module_name path =
     let is_ident_char c =
       Char.is_alphanum c || Char.equal c '_' || Char.equal c '\''
     in
-    if
-      String.is_empty name
-      || (not (Char.is_alpha name.[0]))
-      || not (String.for_all name ~f:is_ident_char)
+    if String.is_empty name
+       || (not (Char.is_alpha name.[0]))
+       || not (String.for_all name ~f:is_ident_char)
     then
       Error
         (sprintf

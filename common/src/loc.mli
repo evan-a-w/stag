@@ -1,7 +1,7 @@
 open! Import
 
-(** A position in a source file. [line] is 1-based, [col] and [offset] (from
-    the start of the file) are 0-based, in bytes. *)
+(** A position in a source file. [line] is 1-based, [col] and [offset] (from the
+    start of the file) are 0-based, in bytes. *)
 module Pos : sig
   type t =
     { line : int

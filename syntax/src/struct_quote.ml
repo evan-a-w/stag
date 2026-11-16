@@ -35,9 +35,8 @@ module Bound = struct
         Printer.expr antiquote.expr)
     in
     let rec go prefix =
-      if
-        List.exists sources ~f:(fun source ->
-          String.is_substring source ~substring:prefix)
+      if List.exists sources ~f:(fun source ->
+           String.is_substring source ~substring:prefix)
       then go (prefix ^ "_")
       else prefix
     in
@@ -83,7 +82,8 @@ let expand_exn toplevels ~loc =
   in
   let node txt = Located.create ~loc txt in
   let resolved name = Decl_path.Resolved (Prelude_path.canonical name) in
-  let module Lift = Lift.Make (struct
+  let module Lift =
+    Lift.Make (struct
       type t = Expr.t
 
       let con name args =

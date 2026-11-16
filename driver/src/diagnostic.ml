@@ -195,8 +195,8 @@ let indented output =
 ;;
 
 let of_test_result
-      ({ name; error; output_before_error; different_outputs; _ } :
-        Expect_test_runner.Test_result.t)
+  ({ name; error; output_before_error; different_outputs; _ } :
+    Expect_test_runner.Test_result.t)
   =
   let in_test = sprintf "Expect test %S" name.txt in
   let error =
@@ -306,9 +306,9 @@ let located ~contents ~whole_file (loc : Loc.t) =
 ;;
 
 let to_string_hum
-      ?(contents = fun _ -> None)
-      ?(warning = false)
-      { loc; whole_file; message; notes }
+  ?(contents = fun _ -> None)
+  ?(warning = false)
+  { loc; whole_file; message; notes }
   =
   let contents file =
     match contents file with

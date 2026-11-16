@@ -1,9 +1,8 @@
 open! Import
 
 (** A document's contents, with positions converted between byte offsets
-    (stag's) and LSP positions: lines split at [\n], characters counted in
-    code units of the negotiated encoding. Invalid UTF-8 counts one unit per
-    byte. *)
+    (stag's) and LSP positions: lines split at [\n], characters counted in code
+    units of the negotiated encoding. Invalid UTF-8 counts one unit per byte. *)
 
 module Encoding : sig
   type t =
@@ -11,8 +10,7 @@ module Encoding : sig
     | Utf_16
   [@@deriving sexp_of]
 
-  (** UTF-8 if the client offers it, else UTF-16, which all clients
-      support. *)
+  (** UTF-8 if the client offers it, else UTF-16, which all clients support. *)
   val negotiate : Lsp_types.PositionEncodingKind.t list -> t
 
   val to_lsp : t -> Lsp_types.PositionEncodingKind.t
@@ -23,12 +21,12 @@ type t
 val create : encoding:Encoding.t -> string -> t
 val contents : t -> string
 
-(** Clamped to the line, whose [\r\n] or [\n] is not in it, and to the
-    document. A position inside a character's code units is the character's start. *)
+(** Clamped to the line, whose [\r\n] or [\n] is not in it, and to the document.
+    A position inside a character's code units is the character's start. *)
 val offset_of_position : t -> Lsp_types.Position.t -> int
 
-(** Clamped to the document. An offset inside a UTF-8 sequence is the
-    sequence's start. *)
+(** Clamped to the document. An offset inside a UTF-8 sequence is the sequence's
+    start. *)
 val position_of_offset : t -> int -> Lsp_types.Position.t
 
 (** The span of [loc]'s offsets. *)

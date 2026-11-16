@@ -389,8 +389,7 @@ let%expect_test "line continuations in strings" =
     t.stag:1:1-2: illegal escape sequence \
     |}];
   lex "(* \"\\\n\" *) x";
-  [%expect
-    {|
+  [%expect {|
     ((Lident x) t.stag:2:5-6 x)
     (Eof t.stag:2:6-6 "")
     |}]

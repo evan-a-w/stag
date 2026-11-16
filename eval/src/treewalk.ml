@@ -3,8 +3,8 @@ open Or_error.Let_syntax
 module Env = Env
 module Value = Value
 
-(* The values embedded by a quote being built. [renames] are its own
-   embeddings, of binders it refers to. *)
+(* The values embedded by a quote being built. [renames] are its own embeddings,
+   of binders it refers to. *)
 module Embedded = struct
   type t =
     { renames : Typed.Ident.t Typed.Ident.Table.t
@@ -38,8 +38,8 @@ module Pending = struct
     | Failed of
         { error : Error.t
         ; uncatchable : Error.t
-          (** As [error], but no [match] can handle it, as the toplevel's
-            users can't handle its failure. *)
+        (** As [error], but no [match] can handle it, as the toplevel's users
+            can't handle its failure. *)
         }
 end
 
@@ -56,7 +56,7 @@ type t =
   ; mutable output : string -> unit
   ; mutable on_expect : (string Located.t -> unit) option
   ; mutable reflect : (string -> Value.t Or_error.t) option
-    (** While evaluating at compile time. *)
+  (** While evaluating at compile time. *)
   }
 
 let captures t ~ident ~args ~body =
@@ -68,10 +68,9 @@ let captures t ~ident ~args ~body =
   let captures = Typed.Ident.Hash_set.create () in
   let def ident = Hash_set.add defined ident in
   let use ~depth ident =
-    if
-      depth >= 0
-      && (not (Hash_set.mem defined ident))
-      && level ident <= closure_level
+    if depth >= 0
+       && (not (Hash_set.mem defined ident))
+       && level ident <= closure_level
     then Hash_set.add captures ident
   in
   let var ~depth : Typed.Var_ref.t -> unit = function
@@ -371,10 +370,10 @@ let instantiate t (code : Typed.Expr.t) ~entry =
 
 (* [code], spliced at [level] with [subs]. *)
 let splice_code
-      t
-      (code : Typed.Expr.t)
-      ~(subs : Typed.Expr.t Typed.Expr.Subs.t)
-      ~level
+  t
+  (code : Typed.Expr.t)
+  ~(subs : Typed.Expr.t Typed.Expr.Subs.t)
+  ~level
   =
   match subs with
   | Implicit providers ->
@@ -382,8 +381,8 @@ let splice_code
       Map.find providers name
       |> Option.map ~f:(fun binder -> Typed.Var_ref.Bound binder))
   | Explicit subs ->
-    (* A variable is substituted as itself, so that the code assigns it if it
-       is mutable, and reads its value when it does. *)
+    (* A variable is substituted as itself, so that the code assigns it if it is
+       mutable, and reads its value when it does. *)
     let subs =
       List.map subs ~f:(fun (name, (sub : Typed.Expr.t)) ->
         match sub.desc with
@@ -470,16 +469,14 @@ let rec match_pattern env (pattern : Typed.Pattern.t) (value : Value.t) =
   | Lit Unit, Unit -> Ok true
   | Tuple patterns, Tuple values -> match_all env pattern patterns values
   | Construct (constructor, patterns), Construct (constructor', values) ->
-    if
-      constructor.index = constructor'.index
-      && ((not (Typed.Constructor_ref.is_exception constructor))
-          || String.equal constructor.name constructor'.name)
+    if constructor.index = constructor'.index
+       && ((not (Typed.Constructor_ref.is_exception constructor))
+           || String.equal constructor.name constructor'.name)
     then match_all env pattern patterns values
     else Ok false
   | Record fields, Record (_, values) ->
-    if
-      List.exists fields ~f:(fun ((field : Typed.Field_ref.t), _) ->
-        field.index >= Array.length values)
+    if List.exists fields ~f:(fun ((field : Typed.Field_ref.t), _) ->
+         field.index >= Array.length values)
     then pattern_mismatch pattern value
     else
       match_all
@@ -889,12 +886,12 @@ and build t ~env ~level ~embedded ~depth expr =
     build_step t ~env ~level ~embedded ~depth expr)
 
 and build_step
-      t
-      ~env
-      ~level
-      ~(embedded : Embedded.t)
-      ~depth
-      (expr : Typed.Expr.t)
+  t
+  ~env
+  ~level
+  ~(embedded : Embedded.t)
+  ~depth
+  (expr : Typed.Expr.t)
   : Typed.Expr.t Or_error.t
   =
   match expr.desc with

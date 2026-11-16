@@ -43,8 +43,7 @@ let f x =
 ;;
 
 let%expect_test "instantiation at variables" =
-  print
-    {|
+  print {|
 let use = let pair x = (x, x) in (id 1, id true, pair (), pair)
 |};
   [%expect
@@ -334,8 +333,7 @@ let local_not_persistent = let k = 1 in .<k>.
 ;;
 
 let%expect_test "explicit splices" =
-  print
-    {|
+  print {|
 let explicit = .<let x = 1 in .~(.<add x y>.).{x; y = z}>.
 |};
   [%expect
@@ -649,8 +647,7 @@ let captured x = .~(.<captured x>.)
 ;;
 
 let%expect_test "literals that look like placeholders" =
-  print
-    {|
+  print {|
 let lits s = match s with "\0000" -> ('\000', "\0003")
 |};
   [%expect
@@ -957,9 +954,7 @@ let in_quote = let f x = .<f x>. in .<f>.
 ;;
 
 let%expect_test "tuple patterns and annotations" =
-  print
-    ~idents:true
-    {|
+  print ~idents:true {|
 let first p = match p with (a, _) -> (a : int)
 |};
   [%expect

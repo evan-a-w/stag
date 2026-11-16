@@ -20,7 +20,7 @@ type t =
   | Code of
       { expr : Typed.Expr.t
       ; persistent : t Typed.Ident.Map.t
-        (** The values of the persistent binders [expr] embeds. *)
+      (** The values of the persistent binders [expr] embeds. *)
       }
   | Prim of
       { prim : Prim.t
@@ -42,9 +42,9 @@ val of_lit : Syntax.Lit.t -> t
     ([Prelude_path.to_string_hum]). *)
 val sexp_of_t : t -> Sexp.t
 
-(** As stag syntax, eg. [C (1, `A)], for messages. Functions are [<fun>],
-    code [<code>]. If longer than [max_length],
-    it is cut there and followed by [...]. *)
+(** As stag syntax, eg. [C (1, `A)], for messages. Functions are [<fun>], code
+    [<code>]. If longer than [max_length], it is cut there and followed by
+    [...]. *)
 val to_string_hum : ?max_length:int -> t -> string
 
 (** [to_string_hum], cut at 1000 characters, followed by [...]. *)

@@ -12,8 +12,7 @@ type t =
 val extension : string
 
 (** [Foo_bar] for [dir/foo_bar.stag] or [dir/Foo_bar.stag]. Errs unless the
-    basename is [.stag] after a letter followed by letters, digits, [_] and
-    [']. *)
+    basename is [.stag] after a letter followed by letters, digits, [_] and [']. *)
 val module_name : string -> (string, string) Result.t
 
 module Error : sig

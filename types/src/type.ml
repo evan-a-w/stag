@@ -541,11 +541,10 @@ let mapper (f : Mapper.t) =
       let assigned' = map_presence assigned in
       let ty' = map_ty ty in
       let rest' = map_row rest in
-      if
-        phys_equal presence presence'
-        && phys_equal assigned assigned'
-        && phys_equal ty ty'
-        && phys_equal rest rest'
+      if phys_equal presence presence'
+         && phys_equal assigned assigned'
+         && phys_equal ty ty'
+         && phys_equal rest rest'
       then row
       else RExtend (name, presence', assigned', ty', rest')
     | RVar ({ state = Link target; _ } as var) ->
@@ -588,15 +587,15 @@ module Sexper = struct
 
   type t =
     { printing : Printing.t Int.Table.t
-      (* The records and variants being printed, by id, labelled once a
-         cycle reaches them again. *)
+        (* The records and variants being printed, by id, labelled once a cycle
+           reaches them again. *)
     ; nodes : Sexp.t Int.Table.t
     ; tys : Sexp.t Int.Table.t
     ; rows : Sexp.t Int.Table.t
     ; mutable depth : int
     ; mutable low : int
-      (* The lowest depth of a record or variant being printed that the
-         current part refers to. *)
+        (* The lowest depth of a record or variant being printed that the
+           current part refers to. *)
     ; mutable next_label : int
     }
 
@@ -611,8 +610,8 @@ module Sexper = struct
     }
   ;;
 
-  (* Memoizes the sexp of a part unless it refers to a record or variant
-     being printed around it, as it would then print differently elsewhere. *)
+  (* Memoizes the sexp of a part unless it refers to a record or variant being
+     printed around it, as it would then print differently elsewhere. *)
   let closed t table key ~sexp =
     match Hashtbl.find table key with
     | Some sexp -> sexp
@@ -737,26 +736,26 @@ module Printer = struct
     ; names : int Int.Table.t
     ; mutable next_index : int
     ; cycle_names : string Int.Table.t
-      (* The names of the records and variants reached again within
-         themselves, by id, kept across types for consistency. *)
+        (* The names of the records and variants reached again within
+           themselves, by id, kept across types for consistency. *)
     ; printing : bool ref Int.Table.t
-      (* The records and variants being printed, and whether they were
-         reached again within themselves. *)
+        (* The records and variants being printed, and whether they were reached
+           again within themselves. *)
     ; introduced : string Int.Table.t
-      (* The records and variants whose name the type being printed has
-         introduced, which later occurrences use. *)
+        (* The records and variants whose name the type being printed has
+           introduced, which later occurrences use. *)
     ; mutable recursive : (ty * string) option
-      (* The body [recursive] prints, and the name of its occurrences. *)
+        (* The body [recursive] prints, and the name of its occurrences. *)
     ; bounded : Bounded.t Queue.t
-      (* The bounds of the variables reached, in order of appearance, to
-         print after the types. *)
+        (* The bounds of the variables reached, in order of appearance, to print
+           after the types. *)
     ; kept : Int.Hash_set.t
     ; elided : Int.Hash_set.t
-      (* The assignment variables written as an unmarked entry, as each is
-         the only occurrence of an unconstrained one, so reads back as it. *)
+        (* The assignment variables written as an unmarked entry, as each is the
+           only occurrence of an unconstrained one, so reads back as it. *)
     ; mutable counting : int Int.Table.t option
-      (* Set while rendering only to count how often each presence variable
-         is named. *)
+    (* Set while rendering only to count how often each presence variable is
+       named. *)
     }
 
   let create ?(type_name = fun name -> Prelude_path.to_string_hum name) () =
@@ -813,9 +812,8 @@ module Printer = struct
       if not (List.is_empty var.bounds)
       then Queue.enqueue t.bounded (Bounds (fun () -> bounds name));
       List.iter var.kept ~f:(fun kept ->
-        if
-          Hash_set.strict_add t.kept (kept_id kept)
-          |> Hash_set.Ok_or_duplicate.is_ok
+        if Hash_set.strict_add t.kept (kept_id kept)
+           |> Hash_set.Ok_or_duplicate.is_ok
         then Queue.enqueue t.bounded (Kept kept)));
     name
   ;;
@@ -854,13 +852,13 @@ module Printer = struct
   ;;
 
   let sorted_row_entries
-        t
-        row
-        ~context
-        ~label
-        ~entry
-        ~row_var_name
-        ~presence_var_name
+    t
+    row
+    ~context
+    ~label
+    ~entry
+    ~row_var_name
+    ~presence_var_name
     =
     let entries, tail = row_entries row in
     let entries =
@@ -970,10 +968,10 @@ module Printer = struct
           name
           (row_to_string t bound.row ~label:Fn.id ~context:true)))
 
-  (* A bound is printed with its lower variable, unless only the upper one
-     keeps it, as a generic variable does for a variable it is not generalized
-     with. A lower variable not printed otherwise is named here, so prints its
-     bounds later. *)
+  (* A bound is printed with its lower variable, unless only the upper one keeps
+     it, as a generic variable does for a variable it is not generalized with. A
+     lower variable not printed otherwise is named here, so prints its bounds
+     later. *)
   and presence_var_name t (var : (presence, presence_bound) Var.t) =
     Option.iter t.counting ~f:(fun counts -> Hashtbl.incr counts var.id);
     let others side =
@@ -1083,9 +1081,8 @@ module Printer = struct
   ;;
 
   (* Renders with [render] once, on a copy, to find the assignment variables
-     named once, so in no bound either, to elide, then for real. The copy
-     prints the bounds it reaches, not those queued before, which print with
-     [t]. *)
+     named once, so in no bound either, to elide, then for real. The copy prints
+     the bounds it reaches, not those queued before, which print with [t]. *)
   let eliding t ~render =
     let counts = Int.Table.create () in
     let copy =

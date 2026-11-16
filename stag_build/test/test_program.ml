@@ -28,18 +28,15 @@ let project =
   ; ( "util/b.stag"
     , {|let y = print_endline "Util.B"; 1
 type u = int
-let f x = A.g x|}
-    )
+let f x = A.g x|} )
   ; ( "util/a.stag"
     , {|let x = print_endline "Util.A"; B.y
 type t = B.u
 let g (n : t) = Int.add n x|}
     )
   ; "lib/stag", "(library (name lib) (libraries util))"
-  ; ( "lib/lib.stag"
-    , {|let p = print_endline "Lib.Lib"
+  ; "lib/lib.stag", {|let p = print_endline "Lib.Lib"
 let z = Util.B.f 2|}
-    )
   ; "bin/stag", "(executable (name main) (libraries lib))"
   ; ( "bin/main.stag"
     , {|let main = print_endline "Main"; print_int (Lib.Lib.z); print_endline ""

@@ -1,7 +1,7 @@
 open! Import
 
-(* While a value is converted, its types are left as placeholders, rendered
-   in reading order once it is done, so variables are named as they are read. *)
+(* While a value is converted, its types are left as placeholders, rendered in
+   reading order once it is done, so variables are named as they are read. *)
 module Hum = struct
   let pending : Type.ty Queue.t option ref = ref None
 
@@ -434,8 +434,8 @@ module Expr = struct
     || (is_value body
         && not
              (refers_to body ~f:(function
-                | Local ident' -> Ident.equal ident ident'
-                | Toplevel _ -> false)))
+               | Local ident' -> Ident.equal ident ident'
+               | Toplevel _ -> false)))
   ;;
 end
 

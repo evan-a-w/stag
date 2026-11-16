@@ -10,10 +10,9 @@ type t =
   }
 
 let rec remove path =
-  if
-    match (Core_unix.lstat path).st_kind with
-    | S_DIR -> true
-    | _ -> false
+  if match (Core_unix.lstat path).st_kind with
+     | S_DIR -> true
+     | _ -> false
   then (
     Array.iter (Sys_unix.readdir path) ~f:(fun name -> remove (path ^/ name));
     Core_unix.rmdir path)
@@ -165,14 +164,14 @@ let did_open t file =
     t
     "textDocument/didOpen"
     (`Assoc
-        [ ( "textDocument"
-          , `Assoc
-              [ "uri", `String (uri t file)
-              ; "languageId", `String "stag"
-              ; "version", `Int 1
-              ; "text", `String text
-              ] )
-        ])
+      [ ( "textDocument"
+        , `Assoc
+            [ "uri", `String (uri t file)
+            ; "languageId", `String "stag"
+            ; "version", `Int 1
+            ; "text", `String text
+            ] )
+      ])
 ;;
 
 let did_change ?check t file ~version text =
@@ -182,10 +181,10 @@ let did_change ?check t file ~version text =
     t
     "textDocument/didChange"
     (`Assoc
-        [ ( "textDocument"
-          , `Assoc [ "uri", `String (uri t file); "version", `Int version ] )
-        ; "contentChanges", `List [ `Assoc [ "text", `String text ] ]
-        ])
+      [ ( "textDocument"
+        , `Assoc [ "uri", `String (uri t file); "version", `Int version ] )
+      ; "contentChanges", `List [ `Assoc [ "text", `String text ] ]
+      ])
 ;;
 
 let print_semantic_tokens t file =
@@ -222,12 +221,12 @@ let print_semantic_tokens t file =
 ;;
 
 let with_server
-      ?(limits = Server.default_limits)
-      ?(capabilities = `Assoc [])
-      ?(files = [])
-      ?(symlinks = [])
-      ?executable
-      f
+  ?(limits = Server.default_limits)
+  ?(capabilities = `Assoc [])
+  ?(files = [])
+  ?(symlinks = [])
+  ?executable
+  f
   =
   let root = Filename_unix.realpath (Filename_unix.temp_dir "stag_lsp" "") in
   List.iter files ~f:(fun (file, contents) ->

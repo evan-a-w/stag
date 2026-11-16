@@ -46,9 +46,8 @@ let constrain_row_exn fresh ~row ~(bound : Type.bound) =
 ;;
 
 let enqueue_kept ~pending ~seen_kept kept =
-  if
-    Hash_set.strict_add seen_kept (Type.kept_id kept)
-    |> Hash_set.Ok_or_duplicate.is_ok
+  if Hash_set.strict_add seen_kept (Type.kept_id kept)
+     |> Hash_set.Ok_or_duplicate.is_ok
   then Queue.enqueue pending (Pending.Kept kept)
 ;;
 
@@ -198,11 +197,11 @@ let outside (var : Presence_var.t) =
 ;;
 
 (* Bounds are not transitively closed, so a bound [l <= u] between variables
-   that are not generalized may only hold through generalized ones, which
-   leave the bounds of the others, as instances get their own. Returns the
-   generalized variables that may become [Present] through a variable that is
-   not generalized, and then have equalities, which only an instance can
-   impose on the others. *)
+   that are not generalized may only hold through generalized ones, which leave
+   the bounds of the others, as instances get their own. Returns the generalized
+   variables that may become [Present] through a variable that is not
+   generalized, and then have equalities, which only an instance can impose on
+   the others. *)
 let close_presence_bounds fresh (generalized : Presence_var.t list) =
   let ids =
     Int.Hash_set.of_list (List.map generalized ~f:(fun var -> var.id))
@@ -361,10 +360,10 @@ let keep_equalities fresh (var : Presence_var.t) ~rank =
 ;;
 
 (* Whether a variable may be reached once the variables of rank greater than
-   [rank] that are not generalized are out of scope: reaching them from
-   outside goes through bounds, as variables in a type have at most its rank.
-   Answers are remembered: a variable a search reaches outside from may be
-   used, and all those a failed search visits can't be. *)
+   [rank] that are not generalized are out of scope: reaching them from outside
+   goes through bounds, as variables in a type have at most its rank. Answers
+   are remembered: a variable a search reaches outside from may be used, and all
+   those a failed search visits can't be. *)
 let may_be_used ~rank =
   let known = Int.Table.create () in
   let visited = Int.Hash_set.create () in
@@ -401,9 +400,9 @@ let may_be_used ~rank =
     used
 ;;
 
-(* Whether the witness of a kept bound [l <= {..g}] can be left out: if [g]
-   has no bounds and nothing else in the witness has it, an instance of [g]
-   can be [l]. *)
+(* Whether the witness of a kept bound [l <= {..g}] can be left out: if [g] has
+   no bounds and nothing else in the witness has it, an instance of [g] can be
+   [l]. *)
 let trivial_witnesses ~kept ~(with_equalities : Presence_var.t list) =
   let occurrences = Int.Table.create () in
   let rec counter : Nothing.t Type.Iter.t =
@@ -452,13 +451,13 @@ let trivial_witnesses ~kept ~(with_equalities : Presence_var.t list) =
     | RVar _ | REmpty | RExtend _ -> false
 ;;
 
-(* A row within a bound without entries has only entries the bound shadows,
-   so is within every bound shadowing them too. *)
-(* Whether the outer bounds already imply an instance of [kept]: an
-   assignment of its generalized variables makes each kept bound one of the
-   outer bounds, and the bounds of the variables assigned hold, so the
-   variables of the instance, used nowhere else, can be chosen as such. Only
-   bounds that are the same once assigned are recognized. *)
+(* A row within a bound without entries has only entries the bound shadows, so
+   is within every bound shadowing them too. *)
+(* Whether the outer bounds already imply an instance of [kept]: an assignment
+   of its generalized variables makes each kept bound one of the outer bounds,
+   and the bounds of the variables assigned hold, so the variables of the
+   instance, used nowhere else, can be chosen as such. Only bounds that are the
+   same once assigned are recognized. *)
 let outside_witnessed ~kept =
   let tys = Int.Table.create () in
   let rows = Int.Table.create () in
@@ -618,18 +617,18 @@ let drop_subsumed_row_bounds (var : Row_var.t) =
 
 (* Calls [f] on the variables in [tys], [kept], and the bounds of [rows] and
    [presences] that [except_row] and [except_presence] don't accept, for each
-   occurrence that is not reached again through a [Link], record or variant,
-   and [link] on each occurrence of a [Link]. *)
+   occurrence that is not reached again through a [Link], record or variant, and
+   [link] on each occurrence of a [Link]. *)
 let iter_used_vars
-      ?(link = fun (_ : Type.id) -> ())
-      ?(except_row = fun (_ : Type.bound) -> false)
-      ?(except_presence = fun (_ : Type.presence_bound) -> false)
-      ~tys
-      ~(presences : Presence_var.t list)
-      ~(rows : Row_var.t list)
-      ~kept
-      ~f
-      ()
+  ?(link = fun (_ : Type.id) -> ())
+  ?(except_row = fun (_ : Type.bound) -> false)
+  ?(except_presence = fun (_ : Type.presence_bound) -> false)
+  ~tys
+  ~(presences : Presence_var.t list)
+  ~(rows : Row_var.t list)
+  ~kept
+  ~f
+  ()
   =
   let nodes = Int.Hash_set.create () in
   let links = Int.Hash_set.create () in
@@ -708,9 +707,9 @@ let used_vars ?except_row ?except_presence ~tys ~presences ~rows ~kept () =
 ;;
 
 let only_generalized_bounds_have
-      (var : _ Type.Var.t)
-      ~is_generalized
-      ~may_be_used
+  (var : _ Type.Var.t)
+  ~is_generalized
+  ~may_be_used
   =
   List.for_all var.in_bounds_of ~f:(fun bounded ->
     match bounded with
@@ -718,15 +717,15 @@ let only_generalized_bounds_have
       is_generalized id || not (may_be_used bounded))
 ;;
 
-(* A bound [..'g] of a generalized row, where ['g] is generalized, has no
-   bounds and is used nowhere else, holds whatever the row: ['g] can be it. *)
+(* A bound [..'g] of a generalized row, where ['g] is generalized, has no bounds
+   and is used nowhere else, holds whatever the row: ['g] can be it. *)
 let drop_trivial_row_bounds
-      ~tys
-      ~is_generalized
-      ~may_be_used
-      ~presences
-      ~(rows : Row_var.t list)
-      ~kept
+  ~tys
+  ~is_generalized
+  ~may_be_used
+  ~presences
+  ~(rows : Row_var.t list)
+  ~kept
   =
   let bare_var (bound : Type.bound) =
     match Type.canonical_row bound.row with
@@ -759,15 +758,15 @@ let drop_trivial_row_bounds
     var.bounds <- List.filter var.bounds ~f:(fun bound -> not (trivial bound)))
 ;;
 
-(* Likewise an equality [p => t = 'a] holds whatever [p] and [t] if ['a] is
-   used nowhere else: ['a] can be [t]. *)
+(* Likewise an equality [p => t = 'a] holds whatever [p] and [t] if ['a] is used
+   nowhere else: ['a] can be [t]. *)
 let drop_trivial_equalities
-      ~tys
-      ~is_generalized
-      ~may_be_used
-      ~(presences : Presence_var.t list)
-      ~rows
-      ~kept
+  ~tys
+  ~is_generalized
+  ~may_be_used
+  ~(presences : Presence_var.t list)
+  ~rows
+  ~kept
   =
   let free (ty : Type.ty) =
     match Type.canonical_ty ty with
@@ -825,21 +824,21 @@ let drop_trivial_equalities
          | Some _ | None -> Some bound))
 ;;
 
-(* A bound [B] of a generalized row whose entries' presences and types and
-   tail may be variables [L] used nowhere else, but in bounds between the
-   presences of [L] and others and in equalities [q => s = t] with [t] in
-   [L], holds whenever another bound [B'] of the row does, if [L] can be the
-   corresponding parts of [B'] with those bounds and equalities then ones
-   the scheme has: an instance can choose [L] so. Instances of schemes with
-   such bounds pile them up. *)
+(* A bound [B] of a generalized row whose entries' presences and types and tail
+   may be variables [L] used nowhere else, but in bounds between the presences
+   of [L] and others and in equalities [q => s = t] with [t] in [L], holds
+   whenever another bound [B'] of the row does, if [L] can be the corresponding
+   parts of [B'] with those bounds and equalities then ones the scheme has: an
+   instance can choose [L] so. Instances of schemes with such bounds pile them
+   up. *)
 let drop_witnessed_row_bounds
-      ~tys
-      ~is_generalized
-      ~may_be_used
-      ~(presences : Presence_var.t list)
-      ~(rows : Row_var.t list)
-      ~kept
-      ~(with_equalities : Presence_var.t list)
+  ~tys
+  ~is_generalized
+  ~may_be_used
+  ~(presences : Presence_var.t list)
+  ~(rows : Row_var.t list)
+  ~kept
+  ~(with_equalities : Presence_var.t list)
   =
   let counts = Int.Table.create () in
   let links = Int.Table.create () in
@@ -925,9 +924,9 @@ let drop_witnessed_row_bounds
       when count var.id = 1 && usable var -> true
     | RVar _ | REmpty | RExtend _ -> false
   in
-  (* The variables of [L] with what they are in [row'], if [row] is [row']
-     but for them. The positions of [L] are reached through [Link]s used
-     nowhere else, as [iter_used_vars] counts what they reach once. *)
+  (* The variables of [L] with what they are in [row'], if [row] is [row'] but
+     for them. The positions of [L] are reached through [Link]s used nowhere
+     else, as [iter_used_vars] counts what they reach once. *)
   let rec witness row (row' : Type.row) ~presences ~tys =
     match unshared_row row, Type.canonical_row row' with
     | ( RExtend (label, presence, assigned, ty, rest)
@@ -1043,9 +1042,8 @@ let drop_witnessed_row_bounds
     List.iter row.bounds ~f:(fun (bound : Type.bound) ->
       let witness =
         List.find_map row.bounds ~f:(fun (other : Type.bound) ->
-          if
-            phys_equal other bound
-            || not (Set.equal other.shadowed bound.shadowed)
+          if phys_equal other bound
+             || not (Set.equal other.shadowed bound.shadowed)
           then None
           else (
             match witness bound.row other.row ~presences:[] ~tys:[] with
@@ -1064,12 +1062,12 @@ let drop_witnessed_row_bounds
    bounds then hold. Such presences come from instances whose types were
    dropped, or are of absent entries, whose types don't matter. *)
 let rec drop_unused_presences
-          ~tys
-          ~is_generalized
-          ~may_be_used
-          ~(presences : Presence_var.t list)
-          ~(rows : Row_var.t list)
-          ~kept
+  ~tys
+  ~is_generalized
+  ~may_be_used
+  ~(presences : Presence_var.t list)
+  ~(rows : Row_var.t list)
+  ~kept
   =
   let used = used_vars ~tys ~presences ~rows ~kept () in
   let unused (var : Presence_var.t) =
@@ -1099,17 +1097,17 @@ let rec drop_unused_presences
       ~kept
 ;;
 
-(* A generalized presence with an equality between types that [clash] can
-   only be [Absent]. One that is the upper bound of others is left as is, as
-   they would have to be [Absent] too. *)
+(* A generalized presence with an equality between types that [clash] can only
+   be [Absent]. One that is the upper bound of others is left as is, as they
+   would have to be [Absent] too. *)
 let decide_clashing_presences (presences : Presence_var.t list) =
   List.iter presences ~f:(fun var ->
     match var.state with
     | Generic
       when (not
               (List.exists var.bounds ~f:(function
-                 | At_least _ -> true
-                 | At_most _ | If_present _ -> false)))
+                | At_least _ -> true
+                | At_most _ | If_present _ -> false)))
            && List.exists var.bounds ~f:(function
              | If_present (ty1, ty2) -> Unify.clash ty1 ty2
              | At_most _ | At_least _ -> false) ->
@@ -1243,10 +1241,9 @@ let generalize fresh ~rank tys =
   attach_kept ~is_generalized kept;
   (* The outside constraints the kept bounds and equalities imply are those of
      an instance, whose variables are not used elsewhere. *)
-  if
-    not
-      ((List.is_empty kept && List.is_empty with_equalities)
-       || (List.is_empty with_equalities && outside_witnessed ~kept))
+  if not
+       ((List.is_empty kept && List.is_empty with_equalities)
+        || (List.is_empty with_equalities && outside_witnessed ~kept))
   then (
     let pending = Queue.create () in
     let seen_kept = Int.Hash_set.create () in

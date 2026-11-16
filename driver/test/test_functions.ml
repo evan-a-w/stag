@@ -31,16 +31,13 @@ let passed = higher (fun x -> eq x 2)
 ;;
 
 let%expect_test "type errors in anonymous functions" =
-  check
-    {|
+  check {|
 let bad = fun (x : int) -> cond x 1 2
 |};
-  check
-    {|
+  check {|
 let bad = (fun x -> add x 1) true
 |};
-  check
-    {|
+  check {|
 let unbound = fun x -> y
 |};
   [%expect

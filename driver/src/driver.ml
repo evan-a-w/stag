@@ -65,8 +65,7 @@ module Module_group = struct
   ;;
 end
 
-(* Pairs of toplevels, by canonical name, where the first refers to the
-   second. *)
+(* Pairs of toplevels, by canonical name, where the first refers to the second. *)
 let references (program : Typed.Program.t) =
   List.concat_map program.sccs ~f:(fun scc ->
     List.concat_map scc.members ~f:(fun member ->
@@ -81,9 +80,9 @@ let references (program : Typed.Program.t) =
       Queue.to_list to_ |> List.map ~f:(fun to_ -> member.ident.name, to_)))
 ;;
 
-(* The members of a group depend on those their toplevels refer to.
-   Components of members come after those they depend on, and otherwise in
-   [members] order, as do members within a component. *)
+(* The members of a group depend on those their toplevels refer to. Components
+   of members come after those they depend on, and otherwise in [members] order,
+   as do members within a component. *)
 let group_order ~prefix ~references (members : Module_group.t list) =
   let index = String.Table.create () in
   List.iteri members ~f:(fun i member ->

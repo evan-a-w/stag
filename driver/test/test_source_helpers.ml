@@ -2,22 +2,17 @@ open! Import
 open Source_helpers
 
 let%expect_test "check" =
-  check
-    {|
+  check {|
 let a = `A 1
 let f x = add x 1
 |};
-  check
-    ~prelude:false
-    {|
+  check ~prelude:false {|
 let add = 1
 |};
-  check
-    {|
+  check {|
 let x = add true
 |};
-  check
-    {|
+  check {|
 let x =
 |};
   [%expect
@@ -41,9 +36,7 @@ let x = .~(print_endline "compiling"; .<1>.)
 let y = .~(.<x>.)
 let z = print_endline "running"; x
 |};
-  run
-    ~eval:false
-    {|
+  run ~eval:false {|
 let x = 1
 |};
   [%expect
@@ -68,8 +61,7 @@ let x = 1
 ;;
 
 let%expect_test "runtime errors" =
-  run
-    {|
+  run {|
 type ab = A | B
 let a = 1
 let b = match B with A -> 0
@@ -88,18 +80,11 @@ let b = match B with A -> 0
 
 let%expect_test "files" =
   Option.iter
-    (check_files
-       [ ( "a.stag"
-         , {|
+    (check_files [ "a.stag", {|
 let x = B.y
-|}
-         )
-       ; ( "b.stag"
-         , {|
+|}; "b.stag", {|
 let y = 1
-|}
-         )
-       ])
+|} ])
     ~f:(fun t ->
       print_signature t;
       print_bodies t;
@@ -192,14 +177,10 @@ let%expect_test "toplevels named like the prelude's" =
 module M = struct let add x = x end
 let id2 = M.add 1
 |};
-  run
-    ~prelude:false
-    ~bodies:[ "add" ]
-    {|
+  run ~prelude:false ~bodies:[ "add" ] {|
 let add x = x
 |};
-  check
-    {|
+  check {|
 let add x = x
 |};
   [%expect

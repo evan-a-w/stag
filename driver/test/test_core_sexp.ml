@@ -20,8 +20,8 @@ let rec expr : Sexp.t -> string = function
     |> sprintf "l (%s)"
 ;;
 
-(* Runs the stag program [source], whose output is chunks each ended by a
-   line [-]. *)
+(* Runs the stag program [source], whose output is chunks each ended by a line
+   [-]. *)
 let run_chunks source =
   let output = Buffer.create 1024 in
   let limits =

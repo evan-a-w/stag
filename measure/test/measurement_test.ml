@@ -2,10 +2,10 @@ open! Import
 
 let%expect_test "Plan.create" =
   let plan
-        ?(config = Config.default)
-        ?(resolution = Time_ns.Span.nanosecond)
-        ?setup
-        per_iteration
+    ?(config = Config.default)
+    ?(resolution = Time_ns.Span.nanosecond)
+    ?setup
+    per_iteration
     =
     let plan =
       Measurement.Plan.create ?setup config ~resolution ~per_iteration
@@ -70,8 +70,8 @@ let%expect_test "Plan.create" =
      (warning
       "Unable to take 100 samples in 3s: taking 15, which should take 3s"))
     |}];
-  (* The untimed setup of each iteration counts towards the samples' time,
-     but not towards the 1000 resolutions of their timed part. *)
+  (* The untimed setup of each iteration counts towards the samples' time, but
+     not towards the 1000 resolutions of their timed part. *)
   plan ~setup:(Time_ns.Span.of_int_us 900) (Time_ns.Span.of_int_us 100);
   plan ~setup:(Time_ns.Span.of_int_ms 100) (Time_ns.Span.of_int_us 2);
   plan
@@ -176,8 +176,8 @@ let%expect_test "slow iterations take fewer samples" =
        (fun () ->
          Clock.Fake.advance clock (Time_ns.Span.of_int_us 3);
          Ok ()));
-  (* One iteration warms up for 3us, which is enough. 5 samples would take
-     15us, but only 10us / 3us = 3 fit. *)
+  (* One iteration warms up for 3us, which is enough. 5 samples would take 15us,
+     but only 10us / 3us = 3 fit. *)
   [%expect
     {|
     (Ok
@@ -292,8 +292,7 @@ let%expect_test "errors stop the run" =
   (* In warm-up. *)
   print_run clock (Plain (counting (fail_on_call 5)));
   print_s [%message (calls : int ref)];
-  [%expect
-    {|
+  [%expect {|
     (Error (failed (call 5)))
     (calls 5)
     |}];
@@ -307,8 +306,7 @@ let%expect_test "errors stop the run" =
           Clock.Fake.advance clock (ns 10);
           fail ())));
   print_s [%message (calls : int ref)];
-  [%expect
-    {|
+  [%expect {|
     (Error (failed (call 400)))
     (calls 400)
     |}];
@@ -318,8 +316,7 @@ let%expect_test "errors stop the run" =
     clock
     (Batched { setup = fail_on_call 3; run = counting (fun () -> Ok ()) });
   print_s [%message (calls : int ref)];
-  [%expect
-    {|
+  [%expect {|
     (Error (failed (call 3)))
     (calls 1)
     |}]

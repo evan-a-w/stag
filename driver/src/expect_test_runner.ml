@@ -36,8 +36,7 @@ module Test_result = struct
   ;;
 end
 
-(* An [[%expect]] reached, with the outputs it was reached with, latest
-   first. *)
+(* An [[%expect]] reached, with the outputs it was reached with, latest first. *)
 module Reached = struct
   type t =
     { loc : Loc.t
@@ -199,8 +198,8 @@ let quoted actual ~indentation =
 ;;
 
 let mismatch_edits
-      contents
-      ({ loc; expected; actual; parenthesize } : Mismatch.t)
+  contents
+  ({ loc; expected; actual; parenthesize } : Mismatch.t)
   =
   let start = loc.start.offset in
   match expected, parenthesize with

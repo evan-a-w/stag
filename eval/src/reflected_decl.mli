@@ -1,8 +1,8 @@
 open! Import
 
 (** A declaration that is not abstract, as reflection gives it
-    ([Stag.Type.Decl.t]): its constructors and fields by canonical name, and
-    the types in it by canonical name ([Syntax.Decl_path.Resolved]). *)
+    ([Stag.Type.Decl.t]): its constructors and fields by canonical name, and the
+    types in it by canonical name ([Syntax.Decl_path.Resolved]). *)
 
 module Kind : sig
   type t =

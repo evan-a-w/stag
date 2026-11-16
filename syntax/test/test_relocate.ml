@@ -9,10 +9,9 @@ let relocate_printed program =
     (match Relocate.toplevels ~written program with
      | None -> Error ("not relocated:\n" ^ printed)
      | Some relocated ->
-       if
-         [%equal: Sexp.t]
-           (Round_trip.without_resolved [%sexp (relocated : Program.t)])
-           (Round_trip.without_resolved [%sexp (written : Program.t)])
+       if [%equal: Sexp.t]
+            (Round_trip.without_resolved [%sexp (relocated : Program.t)])
+            (Round_trip.without_resolved [%sexp (written : Program.t)])
        then Ok ()
        else Error ("relocated differs:\n" ^ printed))
 ;;

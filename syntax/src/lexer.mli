@@ -67,6 +67,6 @@ module Prefix : sig
     }
 end
 
-(** The tokens and comments of the longest prefix of the file that lexes,
-    which ends at the first error, if any. *)
+(** The tokens and comments of the longest prefix of the file that lexes, which
+    ends at the first error, if any. *)
 val tokenize_prefix : file:string -> string -> Prefix.t

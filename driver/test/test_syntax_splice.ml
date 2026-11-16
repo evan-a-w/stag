@@ -60,8 +60,7 @@ let x = .~(Stag.Expr.apply (Stag.Expr.var "Core.Int.add") [Stag.Expr.var "nope";
     {|
 let x = .~(Stag.Expr.apply (Stag.Expr.var "Core.Int.add") [Stag.Expr.string "s"; Stag.Expr.int 1])
 |};
-  check
-    {|
+  check {|
 let x : int = .~(Stag.Expr.string "s")
 |};
   [%expect
@@ -93,8 +92,7 @@ let%expect_test "evaluation errors" =
 let fail _ : Stag.Expr.t = raise (Failure "no")
 let x = .~(fail ())
 |};
-  check
-    {|
+  check {|
 let x = .~(Stag.Expr.var "not a name")
 |};
   [%expect
@@ -115,12 +113,10 @@ let x = .~(Stag.Expr.var "not a name")
 ;;
 
 let%expect_test "the splice's expression is at compile time" =
-  check
-    {|
+  check {|
 let f e = .~e
 |};
-  check
-    {|
+  check {|
 let e = Stag.Expr.int 1
 let f (x : Stag.Expr.t) = .~x
 |};
@@ -138,8 +134,7 @@ let f (x : Stag.Expr.t) = .~x
 ;;
 
 let%expect_test "substitutions" =
-  check
-    {|
+  check {|
 let x = .~(Stag.Expr.var "y").{y = 1}
 |};
   [%expect
@@ -152,8 +147,7 @@ let x = .~(Stag.Expr.var "y").{y = 1}
 ;;
 
 let%expect_test "within quotes, splices are of code" =
-  check
-    {|
+  check {|
 let c = .< .~(Stag.Expr.int 1) >.
 |};
   [%expect
@@ -166,12 +160,10 @@ let c = .< .~(Stag.Expr.int 1) >.
 ;;
 
 let%expect_test "a toplevel being checked" =
-  check
-    {|
+  check {|
 let gen _ = Stag.Expr.int .~(gen ())
 |};
-  check
-    {|
+  check {|
 let a = .~(gen ())
 let gen _ = Stag.Expr.int 1
 |};
@@ -189,8 +181,7 @@ let gen _ = Stag.Expr.int 1
 ;;
 
 let%expect_test "a type variable's conversion is needed where it is spliced" =
-  check
-    {|
+  check {|
 let f v = .~(Core.Sexp.sexp_of (type list['a])) v
 |};
   [%expect
@@ -204,8 +195,8 @@ let f v = .~(Core.Sexp.sexp_of (type list['a])) v
     |}]
 ;;
 
-let%expect_test
-    "a splice of syntax can't give an [%expect], which could not be corrected"
+let%expect_test "a splice of syntax can't give an [%expect], which could not \
+                 be corrected"
   =
   check
     ~run:true
@@ -236,8 +227,7 @@ let%expect_test "nested" =
 ;;
 
 let%expect_test "a mismatch with the expected type is the expression's" =
-  check
-    {|
+  check {|
 let g : string -> Core.Sexp.t = .~(Core.Sexp.sexp_of (type int))
 |};
   [%expect
@@ -278,8 +268,7 @@ let main = print_endline (match z with M.A -> "A" | M.B -> "M.B")
 ;;
 
 let%expect_test "a toplevel splice of neither code nor syntax" =
-  check
-    {|
+  check {|
 let x = .~1
 |};
   [%expect
@@ -292,12 +281,10 @@ let x = .~1
 ;;
 
 let%expect_test "substitutions are rejected before being checked" =
-  check
-    {|
+  check {|
 let x = .~(Stag.Expr.var "y").{y = nope}
 |};
-  check
-    {|
+  check {|
 let x = .~(Stag.Expr.var "y").{y = 1; y = 2}
 |};
   [%expect

@@ -8,6 +8,6 @@ type t =
       ; run : 'input -> unit Or_error.t
       }
       -> t
-  (** [setup] makes the input of each iteration, outside the timing, eg. for
-      a routine that consumes its input. Inputs are made in chunks, each
-      just before it is timed, see [Measurement]. *)
+  (** [setup] makes the input of each iteration, outside the timing, eg. for a
+      routine that consumes its input. Inputs are made in chunks, each just
+      before it is timed, see [Measurement]. *)

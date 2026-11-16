@@ -34,9 +34,9 @@ module Fake = struct
     }
 
   let create
-        ?(resolution = Time_ns.Span.nanosecond)
-        ?(tick = Time_ns.Span.zero)
-        ()
+    ?(resolution = Time_ns.Span.nanosecond)
+    ?(tick = Time_ns.Span.zero)
+    ()
     =
     { time = Time_ns.Span.zero; tick; resolution }
   ;;

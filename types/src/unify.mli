@@ -1,10 +1,10 @@
 open! Import
 
-(** Unification of types, rows and presences, and row bounds. Variables
-    bound are rank lowered and occurs checked, allowing cycles through
-    records and variants. Cyclic types are unified coinductively. The types
-    of entries with the same presence are only unified if it is [Present],
-    as an entry's type doesn't matter when it is [Absent]. *)
+(** Unification of types, rows and presences, and row bounds. Variables bound
+    are rank lowered and occurs checked, allowing cycles through records and
+    variants. Cyclic types are unified coinductively. The types of entries with
+    the same presence are only unified if it is [Present], as an entry's type
+    doesn't matter when it is [Absent]. *)
 
 val unify_ty
   :  Fresh.t
@@ -26,8 +26,7 @@ val make_absent
   -> (unit, 'error) Result.t
 
 (** Constrains [presence <= bound]: if [presence] is [Present] so is [bound].
-    Between unknown presences, this adds a bound to both, whatever their
-    ranks. *)
+    Between unknown presences, this adds a bound to both, whatever their ranks. *)
 val presence_at_most
   :  Fresh.t
   -> presence:Type.presence
@@ -53,14 +52,14 @@ val unify_if_present
     are not generalized at greater ranks. *)
 val lower_ty : rank:Type.rank -> Type.ty -> unit
 
-(** Makes [row] a record's or variant's: none of its entries, including those
-    it later gets, is [assigned]. *)
+(** Makes [row] a record's or variant's: none of its entries, including those it
+    later gets, is [assigned]. *)
 val in_record : Fresh.t -> Type.row -> (unit, Unification_error.t) Result.t
 
 (** Constrains every entry [row] has, or later gets, to also be an entry of
-    [bound]. Names in [shadowed] are hidden by earlier entries of the row
-    the constraint is about, so are not constrained. A variable [row] gets
-    the bound whatever the ranks of the variables in it. *)
+    [bound]. Names in [shadowed] are hidden by earlier entries of the row the
+    constraint is about, so are not constrained. A variable [row] gets the bound
+    whatever the ranks of the variables in it. *)
 val constrain_row
   :  Fresh.t
   -> row:Type.row
@@ -69,8 +68,8 @@ val constrain_row
   -> (unit, Unification_error.t) Result.t
 
 (** The type of the first entry for [name] in [row], which must be present.
-    [rank] is that of the variable standing for the type in the error if
-    [row] lacks [name]. If [assigned], the entry must be assigned too. *)
+    [rank] is that of the variable standing for the type in the error if [row]
+    lacks [name]. If [assigned], the entry must be assigned too. *)
 val present_entry
   :  ?assigned:bool
   -> Fresh.t

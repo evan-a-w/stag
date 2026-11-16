@@ -6,8 +6,8 @@ let print_diagnostic ~contents diagnostic =
 ;;
 
 (* Checks and runs [contents] as the file [a.stag], then its expect tests,
-   printing the signature with [~signature], the program's output and the
-   errors as the command line does. *)
+   printing the signature with [~signature], the program's output and the errors
+   as the command line does. *)
 let run ?(signature = false) contents =
   match
     Driver.check_files
@@ -239,8 +239,7 @@ let main =
   print_endline (which (fun u -> raise E));
   print_endline (match M.E with N.E -> "same" | E -> "same" | _ -> "different")
 |};
-  [%expect
-    {|
+  [%expect {|
     M.E
     N.E
     E
@@ -485,8 +484,7 @@ let main =
   print_endline (name (F 2));
   print_endline (name Division_by_zero)
 |};
-  [%expect
-    {|
+  [%expect {|
     E
     F 1
     other
@@ -547,8 +545,7 @@ let raising = .<raise (E 5)>.
 let g = .~(.<fun u -> .~raising>.)
 let main2 = match g 0 with n -> n | exception E n -> print_endline " caught 5"; n
 |};
-  [%expect
-    {|
+  [%expect {|
     5
     E 0 caught 5
     |}]
@@ -561,13 +558,11 @@ exception E of int
 let c = .~(match raise (E 1) with () -> .<0>. | exception E n -> print_int n; print_endline " at compile time"; .<1>.)
 let main = print_int c
 |};
-  [%expect
-    {|
+  [%expect {|
     1 at compile time
     1
     |}];
-  run
-    {|
+  run {|
 exception E of int
 let c = .~(raise (E 1); .<0>.)
 |};
@@ -582,8 +577,7 @@ let c = .~(raise (E 1); .<0>.)
                    ^^^^^^^^^^^
     Note: The error was raised here
     |}];
-  run
-    {|
+  run {|
 exception E of int * string
 module M = .~(raise (E (1, "x")); Nil)
 |};
@@ -598,8 +592,7 @@ module M = .~(raise (E (1, "x")); Nil)
                       ^^^^^^^^^^^^^^^^^^
     Note: The error was raised here
     |}];
-  run
-    {|
+  run {|
 include .~(Int.div 1 0; Nil)
 |};
   [%expect
@@ -687,8 +680,8 @@ let run_tests_only contents =
     |> List.iter ~f:(print_diagnostic ~contents)
 ;;
 
-let%expect_test
-    "a toplevel's initialization raising can't be handled by its users"
+let%expect_test "a toplevel's initialization raising can't be handled by its \
+                 users"
   =
   run
     {|
@@ -751,9 +744,8 @@ let%expect_test "unrelated" = print_endline "fine"; [%expect {| fine |}]
     |}]
 ;;
 
-let%expect_test
-    "exception patterns are looked up as exceptions, not in the scrutinee's \
-     type"
+let%expect_test "exception patterns are looked up as exceptions, not in the \
+                 scrutinee's type"
   =
   run
     {|
@@ -763,8 +755,7 @@ let main =
   print_endline (describe (fun u -> A));
   print_endline (describe (fun u -> Int.of_string_exn "x"; B))
 |};
-  [%expect
-    {|
+  [%expect {|
     A
     Failure Int.of_string_exn: invalid integer "x"
     |}];
@@ -777,8 +768,7 @@ let main =
   print_endline (describe (fun u -> M.A));
   print_endline (describe (fun u -> raise A))
 |};
-  [%expect
-    {|
+  [%expect {|
     M.A
     exception A
     |}];
@@ -901,9 +891,8 @@ let main = print_int (f "1"); print_int (f "x")
     |}]
 ;;
 
-let%expect_test
-    "an exception catch-all doesn't handle the other tags of a polymorphic \
-     variant"
+let%expect_test "an exception catch-all doesn't handle the other tags of a \
+                 polymorphic variant"
   =
   run
     ~signature:true

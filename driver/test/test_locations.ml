@@ -20,8 +20,7 @@ let%expect_test "values" =
   (* the annotation *)
   check {|let x = (id : unbound)|};
   (* the second [x] *)
-  check
-    {|
+  check {|
 let x = 1
 let y = 2
 let x = 3
@@ -89,8 +88,8 @@ let%expect_test "nominal types" =
   (* the [true] *)
   check_v "{x = 1; y = true}";
   (* Source can't write a nominal record without fields ([{}] is the empty
-     polymorphic record), so its fields are removed after parsing. The error
-     is at the record. *)
+     polymorphic record), so its fields are removed after parsing. The error is
+     at the record. *)
   check_program
     (List.map
        (parse_exn (nominal_decls ^ "let v = {x = 1}"))
@@ -296,15 +295,13 @@ let%expect_test "declarations" =
   (* the variable *)
   check {|type t[{..'r}] = 'r|};
   (* the second [t] *)
-  check
-    {|
+  check {|
 type t
 type u
 type t
 |};
   (* the second [A] *)
-  check
-    {|
+  check {|
 type t = A
 type u = B | A
 |};
@@ -317,23 +314,20 @@ type u = B | A
   (* the declaration of [t] *)
   check {|type t = t * int|};
   (* the declaration of [u] *)
-  check
-    {|
+  check {|
 type u = t
 type t = u * int
 |};
   (* the recursive use *)
   check {|type t['a] = 'a -> t['a * 'a]|};
   (* the second [M] *)
-  check
-    {|
+  check {|
 module M = struct end
 module N = struct end
 module M = struct end
 |};
   (* the second [x] *)
-  check
-    {|
+  check {|
 module M = struct
   let x = 1
   let x = 1

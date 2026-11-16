@@ -25,27 +25,27 @@ val output : t -> string -> unit
     instantiating code takes a step per node. Evaluation is unlimited until
     [set_limits] is first called.
 
-    Toplevels are evaluated at most once, so those evaluated while one budget
-    is in force are not evaluated, nor charged, again under the next. *)
+    Toplevels are evaluated at most once, so those evaluated while one budget is
+    in force are not evaluated, nor charged, again under the next. *)
 val set_limits : t -> Limits.t -> unit
 
-(** Every ident evaluated needs its info: the typechecker adds each as it
-    binds it. *)
+(** Every ident evaluated needs its info: the typechecker adds each as it binds
+    it. *)
 val add_ident_info : t -> ident:Typed.Ident.t -> info:Typed.Ident_info.t -> unit
 
-(** Queues [scc] to [eval]. Its toplevels are evaluated earlier if used
-    before, eg. by a toplevel splice: each is evaluated at most once, when
-    first used, and the component's functions are bound when any member is. *)
+(** Queues [scc] to [eval]. Its toplevels are evaluated earlier if used before,
+    eg. by a toplevel splice: each is evaluated at most once, when first used,
+    and the component's functions are bound when any member is. *)
 val add_scc : t -> Typed.Scc.t -> unit
 
 (** Evaluates the toplevel splice [code], at [level] in an empty env, to code,
-    binding the values it embeds globally. Returns that code with fresh
-    binders and the free variables outside its quotes replaced by [entry].
-    Instantiating takes a step per node, which stands for inferring the code
-    too, so code too large to infer within the budget is an error.
+    binding the values it embeds globally. Returns that code with fresh binders
+    and the free variables outside its quotes replaced by [entry]. Instantiating
+    takes a step per node, which stands for inferring the code too, so code too
+    large to infer within the budget is an error.
 
-    It runs at compile time: [Stag.Type.decl] is [reflect] of the
-    canonical name of the type, which it is a runtime error to call otherwise. *)
+    It runs at compile time: [Stag.Type.decl] is [reflect] of the canonical name
+    of the type, which it is a runtime error to call otherwise. *)
 val splice
   :  t
   -> code:Typed.Expr.t
@@ -96,8 +96,7 @@ val eval_expr
   -> Typed.Expr.t
   -> Value.t Or_error.t
 
-(** Evaluates the toplevel [ident], of a component queued, unless it already
-    is. *)
+(** Evaluates the toplevel [ident], of a component queued, unless it already is. *)
 val eval_toplevel : t -> ident:Typed.Ident.t -> unit Or_error.t
 
 (** The value of a toplevel, once evaluated. *)

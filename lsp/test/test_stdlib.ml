@@ -12,8 +12,7 @@ let checkout =
 
 let stdlib_files = List.tl_exn checkout |> List.map ~f:fst
 
-(* The line and character of the first [pattern] in [contents], plus
-   [offset]. *)
+(* The line and character of the first [pattern] in [contents], plus [offset]. *)
 let position ?(offset = 0) contents pattern =
   let index = String.substr_index_exn contents ~pattern + offset in
   let before = String.prefix contents index in
@@ -184,9 +183,8 @@ let%expect_test "errors in the prelude's sources are located in them" =
       |}])
 ;;
 
-let%expect_test
-    "programs in a checkout: prims are the prelude's, definitions in its \
-     sources"
+let%expect_test "programs in a checkout: prims are the prelude's, definitions \
+                 in its sources"
   =
   let a =
     "let x = Prim.String.length \"a\"\n\
@@ -195,35 +193,35 @@ let%expect_test
   Client.with_server
     ~files:(checkout @ [ "stag/tests/a.stag", a; "elsewhere/b.stag", a ])
     (fun client ->
-       Client.did_open client "stag/tests/a.stag";
-       Client.did_open client "elsewhere/b.stag";
-       [%expect
-         {|
+      Client.did_open client "stag/tests/a.stag";
+      Client.did_open client "elsewhere/b.stag";
+      [%expect
+        {|
          diagnostics stag/tests/a.stag (version 1):
            0:8-0:12 error: Unbound module Prim
          diagnostics elsewhere/b.stag (version 1):
            0:8-0:12 error: Unbound module Prim
          |}];
-       let b =
-         "let y = Core.List.length (Core.List.singleton 1)\nlet z = Some 1\n"
-       in
-       Client.did_change client "stag/tests/a.stag" ~version:2 b;
-       Client.did_change client "elsewhere/b.stag" ~version:2 b;
-       [%expect
-         {|
+      let b =
+        "let y = Core.List.length (Core.List.singleton 1)\nlet z = Some 1\n"
+      in
+      Client.did_change client "stag/tests/a.stag" ~version:2 b;
+      Client.did_change client "elsewhere/b.stag" ~version:2 b;
+      [%expect
+        {|
          diagnostics stag/tests/a.stag (version 2): none
          diagnostics elsewhere/b.stag (version 2): none
          |}];
-       let definitions file =
-         let line, character = position b "length" in
-         Client.print_definition client file ~line ~character;
-         let line, character = position b "Some" in
-         Client.print_definition client file ~line ~character
-       in
-       definitions "stag/tests/a.stag";
-       definitions "elsewhere/b.stag";
-       [%expect
-         {|
+      let definitions file =
+        let line, character = position b "length" in
+        Client.print_definition client file ~line ~character;
+        let line, character = position b "Some" in
+        Client.print_definition client file ~line ~character
+      in
+      definitions "stag/tests/a.stag";
+      definitions "elsewhere/b.stag";
+      [%expect
+        {|
          0:18 -> stag/core/list.stag 11:4-11:10
          1:8 -> stag/prelude/prelude.stag 4:25-4:29
          0:18 no definition
@@ -236,17 +234,15 @@ let watched_change client file =
     client
     "workspace/didChangeWatchedFiles"
     (`Assoc
-        [ ( "changes"
-          , `List
-              [ `Assoc
-                  [ "uri", `String (Client.uri client file); "type", `Int 2 ]
-              ] )
-        ])
+      [ ( "changes"
+        , `List
+            [ `Assoc [ "uri", `String (Client.uri client file); "type", `Int 2 ]
+            ] )
+      ])
 ;;
 
-let%expect_test
-    "programs outside a checkout: definitions are in the server's checkout, if \
-     it matches the embedded prelude"
+let%expect_test "programs outside a checkout: definitions are in the server's \
+                 checkout, if it matches the embedded prelude"
   =
   let b =
     "let y = Core.List.length (Core.List.singleton 1)\nlet z = Some 1\n"
@@ -261,29 +257,29 @@ let%expect_test
     ~files:(checkout @ [ "elsewhere/b.stag", b ])
     ~executable:"stag/_build/default/bin/main.exe"
     (fun client ->
-       Client.did_open client "elsewhere/b.stag";
-       [%expect {| |}];
-       definitions client;
-       [%expect
-         {|
+      Client.did_open client "elsewhere/b.stag";
+      [%expect {| |}];
+      definitions client;
+      [%expect
+        {|
          0:18 -> stag/core/list.stag 11:4-11:10
          1:8 -> stag/prelude/prelude.stag 4:25-4:29
          |}];
-       let list = "stag/core/list.stag" in
-       Client.did_open client list;
-       Client.did_change client list ~version:2 ("\n" ^ contents list);
-       [%expect {| |}];
-       definitions client;
-       [%expect
-         {|
+      let list = "stag/core/list.stag" in
+      Client.did_open client list;
+      Client.did_change client list ~version:2 ("\n" ^ contents list);
+      [%expect {| |}];
+      definitions client;
+      [%expect
+        {|
          0:18 no definition
          1:8 -> stag/prelude/prelude.stag 4:25-4:29
          |}];
-       Client.did_change client list ~version:3 (contents list);
-       [%expect {| |}];
-       definitions client;
-       [%expect
-         {|
+      Client.did_change client list ~version:3 (contents list);
+      [%expect {| |}];
+      definitions client;
+      [%expect
+        {|
          0:18 -> stag/core/list.stag 11:4-11:10
          1:8 -> stag/prelude/prelude.stag 4:25-4:29
          |}]);
@@ -297,19 +293,18 @@ let%expect_test
        @ [ "elsewhere/b.stag", b ])
     ~executable:"stag/bin/stag"
     (fun client ->
-       Client.did_open client "elsewhere/b.stag";
-       [%expect {| |}];
-       definitions client;
-       [%expect
-         {|
+      Client.did_open client "elsewhere/b.stag";
+      [%expect {| |}];
+      definitions client;
+      [%expect
+        {|
          0:18 no definition
          1:8 -> stag/prelude/prelude.stag 4:25-4:29
          |}])
 ;;
 
-let%expect_test
-    "programs in a checkout see its sources, with unsaved edits, whatever they \
-     are"
+let%expect_test "programs in a checkout see its sources, with unsaved edits, \
+                 whatever they are"
   =
   let b =
     "let y = Core.List.length_plus_one Nil\nlet z = Core.List.length Nil\n"
@@ -320,29 +315,29 @@ let%expect_test
       (checkout
        @ [ "stag/tests/b.stag", b; "stag/_build/default/tests/b.stag", b ])
     (fun client ->
-       Client.did_open client "stag/tests/b.stag";
-       Client.did_open client "stag/_build/default/tests/b.stag";
-       [%expect
-         {|
+      Client.did_open client "stag/tests/b.stag";
+      Client.did_open client "stag/_build/default/tests/b.stag";
+      [%expect
+        {|
          diagnostics stag/tests/b.stag (version 1):
            0:8-0:33 error: Unbound value Core.List.length_plus_one
          diagnostics stag/_build/default/tests/b.stag (version 1):
            0:8-0:33 error: Unbound value Core.List.length_plus_one
          |}];
-       Client.did_open client list;
-       Client.did_change
-         client
-         list
-         ~version:2
-         ("let length_plus_one l = Int.succ (length l)\n" ^ contents list);
-       [%expect {| diagnostics stag/tests/b.stag (version 1): none |}];
-       let line, character = position b "length_plus_one" in
-       Client.print_definition client "stag/tests/b.stag" ~line ~character;
-       Client.print_hover client "stag/tests/b.stag" ~line ~character;
-       let line, character = position b "length Nil" in
-       Client.print_definition client "stag/tests/b.stag" ~line ~character;
-       [%expect
-         {|
+      Client.did_open client list;
+      Client.did_change
+        client
+        list
+        ~version:2
+        ("let length_plus_one l = Int.succ (length l)\n" ^ contents list);
+      [%expect {| diagnostics stag/tests/b.stag (version 1): none |}];
+      let line, character = position b "length_plus_one" in
+      Client.print_definition client "stag/tests/b.stag" ~line ~character;
+      Client.print_hover client "stag/tests/b.stag" ~line ~character;
+      let line, character = position b "length Nil" in
+      Client.print_definition client "stag/tests/b.stag" ~line ~character;
+      [%expect
+        {|
          0:18 -> stag/core/list.stag 0:4-0:19
          0:18 0:8-0:33 ```stag prelude.Core.List.length_plus_one : list['_a] -> int ```
          1:18 -> stag/core/list.stag 12:4-12:10
@@ -351,46 +346,46 @@ let%expect_test
   Client.with_server
     ~files:(checkout @ [ "stag/tests/c.stag", c ])
     (fun client ->
-       Client.did_open client "stag/tests/c.stag";
-       [%expect
-         {|
+      Client.did_open client "stag/tests/c.stag";
+      [%expect
+        {|
          diagnostics stag/tests/c.stag (version 1):
            0:8-0:18 error: Unbound module Core.Extra
          |}];
-       Out_channel.write_all
-         (Client.path client "stag/core/extra.stag")
-         ~data:"let plus_one = Int.succ\n";
-       watched_change client "stag/core/extra.stag";
-       [%expect {| diagnostics stag/tests/c.stag (version 1): none |}];
-       let line, character = position c "plus_one" in
-       Client.print_definition client "stag/tests/c.stag" ~line ~character;
-       [%expect {| 0:19 -> stag/core/extra.stag 0:4-0:12 |}];
-       Sys_unix.remove (Client.path client "stag/core/extra.stag");
-       watched_change client "stag/core/extra.stag";
-       [%expect
-         {|
+      Out_channel.write_all
+        (Client.path client "stag/core/extra.stag")
+        ~data:"let plus_one = Int.succ\n";
+      watched_change client "stag/core/extra.stag";
+      [%expect {| diagnostics stag/tests/c.stag (version 1): none |}];
+      let line, character = position c "plus_one" in
+      Client.print_definition client "stag/tests/c.stag" ~line ~character;
+      [%expect {| 0:19 -> stag/core/extra.stag 0:4-0:12 |}];
+      Sys_unix.remove (Client.path client "stag/core/extra.stag");
+      watched_change client "stag/core/extra.stag";
+      [%expect
+        {|
          diagnostics stag/tests/c.stag (version 1):
            0:8-0:18 error: Unbound module Core.Extra
          |}];
-       Out_channel.write_all
-         (Client.path client "stag/core/bad-name.stag")
-         ~data:"let x = 1\n";
-       watched_change client "stag/core/bad-name.stag";
-       [%expect
-         {|
+      Out_channel.write_all
+        (Client.path client "stag/core/bad-name.stag")
+        ~data:"let x = 1\n";
+      watched_change client "stag/core/bad-name.stag";
+      [%expect
+        {|
          diagnostics stag/core/bad-name.stag:
            0:0-0:0 error: bad-name.stag is not a valid module file name: it should be a letter followed by letters, digits, _ and ', then .stag
          diagnostics stag/tests/c.stag (version 1):
            0:0-0:0 error: This file is not checked: its checkout's prelude has errors
          |}];
-       Sys_unix.remove (Client.path client "stag/core/bad-name.stag");
-       watched_change client "stag/core/bad-name.stag";
-       Out_channel.write_all
-         (Client.path client "stag/core/broken.stag")
-         ~data:"let x =\n";
-       watched_change client "stag/core/broken.stag";
-       [%expect
-         {|
+      Sys_unix.remove (Client.path client "stag/core/bad-name.stag");
+      watched_change client "stag/core/bad-name.stag";
+      Out_channel.write_all
+        (Client.path client "stag/core/broken.stag")
+        ~data:"let x =\n";
+      watched_change client "stag/core/broken.stag";
+      [%expect
+        {|
          diagnostics stag/tests/c.stag (version 1):
            0:8-0:18 error: Unbound module Core.Extra
          diagnostics stag/core/bad-name.stag: none
@@ -399,12 +394,12 @@ let%expect_test
          diagnostics stag/tests/c.stag (version 1):
            0:0-0:0 error: This file is not checked: its checkout's prelude has errors
          |}];
-       Out_channel.write_all
-         (Client.path client "stag/core/broken.stag")
-         ~data:"let x = Int.nope\nlet z = Extra.nope\n";
-       watched_change client "stag/core/broken.stag";
-       [%expect
-         {|
+      Out_channel.write_all
+        (Client.path client "stag/core/broken.stag")
+        ~data:"let x = Int.nope\nlet z = Extra.nope\n";
+      watched_change client "stag/core/broken.stag";
+      [%expect
+        {|
          diagnostics stag/tests/c.stag (version 1):
            0:8-0:18 error: Unbound module Core.Extra
          diagnostics stag/core/broken.stag: none
@@ -418,26 +413,26 @@ let%expect_test "a symlinked checkout is its canonical path" =
     ~symlinks:[ "link", "stag" ]
     ~executable:"link/bin/stag"
     (fun client ->
-       Client.did_open client "elsewhere/b.stag";
-       let line, character = position b "length" in
-       Client.print_definition client "elsewhere/b.stag" ~line ~character;
-       [%expect {| 0:18 -> stag/core/list.stag 11:4-11:10 |}];
-       let list = "stag/core/list.stag" in
-       Client.did_open client "link/core/list.stag";
-       Client.did_change
-         client
-         "link/core/list.stag"
-         ~version:2
-         ("\n" ^ contents list);
-       Client.print_definition client "elsewhere/b.stag" ~line ~character;
-       [%expect {| 0:18 no definition |}];
-       let line, character =
-         position ("\n" ^ contents list) "let length" ~offset:4
-       in
-       Client.print_hover client "link/core/list.stag" ~line ~character;
-       Client.print_definition client "link/core/list.stag" ~line ~character;
-       [%expect
-         {|
+      Client.did_open client "elsewhere/b.stag";
+      let line, character = position b "length" in
+      Client.print_definition client "elsewhere/b.stag" ~line ~character;
+      [%expect {| 0:18 -> stag/core/list.stag 11:4-11:10 |}];
+      let list = "stag/core/list.stag" in
+      Client.did_open client "link/core/list.stag";
+      Client.did_change
+        client
+        "link/core/list.stag"
+        ~version:2
+        ("\n" ^ contents list);
+      Client.print_definition client "elsewhere/b.stag" ~line ~character;
+      [%expect {| 0:18 no definition |}];
+      let line, character =
+        position ("\n" ^ contents list) "let length" ~offset:4
+      in
+      Client.print_hover client "link/core/list.stag" ~line ~character;
+      Client.print_definition client "link/core/list.stag" ~line ~character;
+      [%expect
+        {|
          12:4 12:4-12:10 ```stag Core.List.length : list['a] -> int ```
          12:4 -> link/core/list.stag 12:4-12:10
          |}])
@@ -458,17 +453,17 @@ let%expect_test "two checkouts" =
        @ other
        @ [ "stag/tests/a.stag", program; "other/tests/a.stag", program ])
     (fun client ->
-       Client.did_open client "stag/tests/a.stag";
-       Client.did_open client "other/tests/a.stag";
-       Client.did_open client "other/core/list.stag";
-       [%expect
-         {|
+      Client.did_open client "stag/tests/a.stag";
+      Client.did_open client "other/tests/a.stag";
+      Client.did_open client "other/core/list.stag";
+      [%expect
+        {|
          diagnostics stag/tests/a.stag (version 1):
            0:8-0:33 error: Unbound value Core.List.length_plus_one
          |}];
-       let line, character = position program "length_plus_one" in
-       Client.print_definition client "other/tests/a.stag" ~line ~character;
-       [%expect {| 0:18 -> other/core/list.stag 384:4-384:19 |}])
+      let line, character = position program "length_plus_one" in
+      Client.print_definition client "other/tests/a.stag" ~line ~character;
+      [%expect {| 0:18 -> other/core/list.stag 384:4-384:19 |}])
 ;;
 
 let%expect_test "definitions of the prelude's types, constructors and fields" =
@@ -482,28 +477,22 @@ let%expect_test "definitions of the prelude's types, constructors and fields" =
   Client.with_server
     ~files:(checkout @ [ "stag/tests/a.stag", a ])
     (fun client ->
-       Client.did_open client "stag/tests/a.stag";
-       [%expect {| |}];
-       List.iter
-         [ "option"
-         ; "Parse_error.t"
-         ; "message ="
-         ; ".message"
-         ; "Sexp.t"
-         ; "Atom"
-         ]
-         ~f:(fun pattern ->
-           let offset =
-             match pattern with
-             | "Parse_error.t" | "Sexp.t" -> String.length pattern - 1
-             | ".message" -> 1
-             | _ -> 0
-           in
-           let line, character = position a pattern ~offset in
-           Client.print_hover client "stag/tests/a.stag" ~line ~character;
-           Client.print_definition client "stag/tests/a.stag" ~line ~character);
-       [%expect
-         {|
+      Client.did_open client "stag/tests/a.stag";
+      [%expect {| |}];
+      List.iter
+        [ "option"; "Parse_error.t"; "message ="; ".message"; "Sexp.t"; "Atom" ]
+        ~f:(fun pattern ->
+          let offset =
+            match pattern with
+            | "Parse_error.t" | "Sexp.t" -> String.length pattern - 1
+            | ".message" -> 1
+            | _ -> 0
+          in
+          let line, character = position a pattern ~offset in
+          Client.print_hover client "stag/tests/a.stag" ~line ~character;
+          Client.print_definition client "stag/tests/a.stag" ~line ~character);
+      [%expect
+        {|
          0:11 0:11-0:17 ```stag type option ```
          0:11 -> stag/prelude/prelude.stag 4:5-4:11
          1:30 1:8-1:31 ```stag type Core.Sexp.Parse_error.t ```

@@ -13,10 +13,10 @@ end
     the toplevels they used, ready to evaluate the rest. *)
 type t
 
-(** Typechecks [program], running its toplevel splices as they are reached.
-    All evaluation at compile time shares [limits], unlimited by default.
-    Prims print to [output], stdout by default, at compile time and when
-    evaluated. The program sees [prelude], by default the embedded one
+(** Typechecks [program], running its toplevel splices as they are reached. All
+    evaluation at compile time shares [limits], unlimited by default. Prims
+    print to [output], stdout by default, at compile time and when evaluated.
+    The program sees [prelude], by default the embedded one
     ([Prelude.toplevels]). *)
 val check
   :  ?limits:Limits.t
@@ -25,10 +25,10 @@ val check
   -> Syntax.Program.t
   -> (t, Typecheck.Failed.t) Result.t
 
-(** As [check], for the program of [files], each the module named after it
-    (see [Source_file]). Toplevels of different files may refer to each other
-    in any order. Files with syntax errors are checked as far as they parse;
-    the errors are of all files, by location. *)
+(** As [check], for the program of [files], each the module named after it (see
+    [Source_file]). Toplevels of different files may refer to each other in any
+    order. Files with syntax errors are checked as far as they parse; the errors
+    are of all files, by location. *)
 val check_files
   :  ?limits:Limits.t
   -> ?output:(string -> unit)
@@ -66,14 +66,14 @@ val checked : t -> Typecheck.Checked.t
 val interpreter : t -> Treewalk.t
 
 (** Evaluates the toplevels not yet evaluated at compile time, within [limits]
-    of its own, unlimited by default. Those evaluated at compile time keep
-    their values, charged to the limits of [check].
+    of its own, unlimited by default. Those evaluated at compile time keep their
+    values, charged to the limits of [check].
 
-    Toplevels are evaluated top to bottom: those of [check]'s program in
-    order, and the files of [check_files] (and the members of each
-    [Module_group]) in dependency order, each top to bottom. A file depends on those its toplevels refer to, and each
-    strongly connected component of files comes after those it depends on,
-    else in the order given, with its files in the order given. A toplevel
-    used before its turn, eg. by one earlier, is evaluated then, on demand,
-    and not again. Those used at compile time were evaluated then. *)
+    Toplevels are evaluated top to bottom: those of [check]'s program in order,
+    and the files of [check_files] (and the members of each [Module_group]) in
+    dependency order, each top to bottom. A file depends on those its toplevels
+    refer to, and each strongly connected component of files comes after those
+    it depends on, else in the order given, with its files in the order given. A
+    toplevel used before its turn, eg. by one earlier, is evaluated then, on
+    demand, and not again. Those used at compile time were evaluated then. *)
 val eval : ?limits:Limits.t -> t -> unit Or_error.t

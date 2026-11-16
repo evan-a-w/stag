@@ -8,12 +8,12 @@ type 'a var_state =
   | Generic
   | Link of 'a
 
-(** A unification variable standing for an ['a]. Only row and presence
-    variables have bounds: for the other kinds, ['bound] is [Nothing.t].
-    [in_bounds_of] has the variables with a bound that has this variable
-    (and maybe others: it is only added to), so that generalizing it can
-    find them. [in_record] is for a row variable of a record or variant (or
-    bound to one), whose entries are never [assigned]. *)
+(** A unification variable standing for an ['a]. Only row and presence variables
+    have bounds: for the other kinds, ['bound] is [Nothing.t]. [in_bounds_of]
+    has the variables with a bound that has this variable (and maybe others: it
+    is only added to), so that generalizing it can find them. [in_record] is for
+    a row variable of a record or variant (or bound to one), whose entries are
+    never [assigned]. *)
 type ('a, 'bound) var =
   { id : id
   ; mutable state : 'a var_state
@@ -51,18 +51,18 @@ and row =
   | RVar of (row, bound) var
 
 (** Whether an entry is in the row (for a context, whether code uses it). An
-    [Absent] entry may be dropped, so a row with entries of unknown presence
-    can still unify with one that lacks them. *)
+    [Absent] entry may be dropped, so a row with entries of unknown presence can
+    still unify with one that lacks them. *)
 and presence =
   | Present
   | Absent
   | PVar of (presence, presence_bound) var
 
-(** [p <= q], as [At_most q] in the bounds of [p] and
-    [At_least p] in those of [q]: if [p] is [Present] so is [q], and if [q] is
-    [Absent] so is [p]. Bounds may relate variables of different ranks: a
-    generic variable keeps its bounds to variables that are not generalized,
-    which drop theirs to it (see [Scheme.generalize]). *)
+(** [p <= q], as [At_most q] in the bounds of [p] and [At_least p] in those of
+    [q]: if [p] is [Present] so is [q], and if [q] is [Absent] so is [p]. Bounds
+    may relate variables of different ranks: a generic variable keeps its bounds
+    to variables that are not generalized, which drop theirs to it (see
+    [Scheme.generalize]). *)
 and presence_bound =
   | At_most of presence
   | At_least of presence
@@ -74,9 +74,9 @@ and arg =
   | ATy of ty
   | ARow of row
 
-(** An upper bound of a row variable: every entry the variable gets must
-    also be an entry of [row], unless shadowed where the bound arose. The
-    variables of [row] may have any ranks. *)
+(** An upper bound of a row variable: every entry the variable gets must also be
+    an entry of [row], unless shadowed where the bound arose. The variables of
+    [row] may have any ranks. *)
 and bound =
   { row : row
   ; shadowed : String.Set.t
@@ -86,10 +86,9 @@ and bounded =
   | Row_var of (row, bound) var
   | Presence_var of (presence, presence_bound) var
 
-(** A bound of a variable that is not generalized, with [Generic]
-    variables: each of them keeps it rather than the variable, and each
-    instance of the scheme adds it to the variable once (see
-    [Scheme.generalize]). *)
+(** A bound of a variable that is not generalized, with [Generic] variables:
+    each of them keeps it rather than the variable, and each instance of the
+    scheme adds it to the variable once (see [Scheme.generalize]). *)
 and kept =
   | Row_bound of
       { id : id
@@ -164,9 +163,9 @@ val error : ty
 val error_name : string
 val is_error : ty -> bool
 
-(** Copies of types as they are now, unaffected by later unification, eg. for
-    an error to show them as they were when it arose. Variables keep their
-    ids, and only their state is copied, not their bounds. *)
+(** Copies of types as they are now, unaffected by later unification, eg. for an
+    error to show them as they were when it arose. Variables keep their ids, and
+    only their state is copied, not their bounds. *)
 module Snapshot : sig
   type t
 
@@ -190,8 +189,8 @@ val presence_bound_var
   :  presence_bound
   -> (presence, presence_bound) Var.t option
 
-(** Whether two types are the same up to [Link]s: records and variants are
-    only the same if they are the same node, so this is conservative. *)
+(** Whether two types are the same up to [Link]s: records and variants are only
+    the same if they are the same node, so this is conservative. *)
 val same_ty : ty -> ty -> bool
 
 val same_row : row -> row -> bool
@@ -199,8 +198,8 @@ val same_presence : presence -> presence -> bool
 
 (** Whether two bounds have the same entries, in order, and shadow the same
     names. Entries of types that are not the same are still the same if
-    [same_entry_ty presence ty1 ty2] says those of [presence] of types [ty1]
-    and [ty2] are interchangeable in a bound. *)
+    [same_entry_ty presence ty1 ty2] says those of [presence] of types [ty1] and
+    [ty2] are interchangeable in a bound. *)
 val same_bound
   :  ?same_entry_ty:(presence -> ty -> ty -> bool)
   -> bound
@@ -209,11 +208,11 @@ val same_bound
 
 (** Rebuilds a type, replacing each variable that is not a [Link] by the result
     of the callback for its kind. A [Link], record or variant whose variables
-    all satisfy [keeps], so would be unchanged, is kept as is; others are
-    copied once each, preserving sharing through them: a [Link] to a new
-    [Link], of id [id ()], which closes the copy of a cycle (as does one to
-    the copy of a record or variant reached again within itself). Copied
-    records and variants get ids [id ()]. *)
+    all satisfy [keeps], so would be unchanged, is kept as is; others are copied
+    once each, preserving sharing through them: a [Link] to a new [Link], of id
+    [id ()], which closes the copy of a cycle (as does one to the copy of a
+    record or variant reached again within itself). Copied records and variants
+    get ids [id ()]. *)
 module Mapper : sig
   type t =
     { ty : (ty, Nothing.t) Var.t -> ty
@@ -251,8 +250,8 @@ val iter_row : 'e Iter.t -> row -> (unit, 'e) Result.t
 module Printer : sig
   type t
 
-  (** [type_name] renders the canonical name of a type constructor: by
-      default as is, except the prelude's, which are as within the prelude
+  (** [type_name] renders the canonical name of a type constructor: by default
+      as is, except the prelude's, which are as within the prelude
       ([Prelude_path.to_string_hum]). *)
   val create : ?type_name:(string -> string) -> unit -> t
 

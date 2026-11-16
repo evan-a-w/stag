@@ -198,8 +198,7 @@ let%expect_test "runtime errors are located at the application" =
 ;;
 
 let%expect_test "partial application" =
-  run
-    {|
+  run {|
 let div = Int.div 10
 let main5 = print_int (div 3)
 let boom = div 0

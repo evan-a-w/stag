@@ -26,8 +26,7 @@ let with_input ?read_size input ~f =
   result, written
 ;;
 
-(* The bodies of framed messages, one per line, with initialize's result
-   elided. *)
+(* The bodies of framed messages, one per line, with initialize's result elided. *)
 let print_frames output =
   let rec loop output =
     if not (String.is_empty output)
@@ -190,14 +189,14 @@ let did_open uri text =
           ~method_:"textDocument/didOpen"
           ~params:
             (`Assoc
-                [ ( "textDocument"
-                  , `Assoc
-                      [ "uri", `String uri
-                      ; "languageId", `String "stag"
-                      ; "version", `Int 1
-                      ; "text", `String text
-                      ] )
-                ])
+              [ ( "textDocument"
+                , `Assoc
+                    [ "uri", `String uri
+                    ; "languageId", `String "stag"
+                    ; "version", `Int 1
+                    ; "text", `String text
+                    ] )
+              ])
           ()))
 ;;
 
@@ -209,9 +208,9 @@ let hover id uri =
           ~method_:"textDocument/hover"
           ~params:
             (`Assoc
-                [ "textDocument", `Assoc [ "uri", `String uri ]
-                ; "position", `Assoc [ "line", `Int 0; "character", `Int 4 ]
-                ])
+              [ "textDocument", `Assoc [ "uri", `String uri ]
+              ; "position", `Assoc [ "line", `Int 0; "character", `Int 4 ]
+              ])
           ()))
 ;;
 

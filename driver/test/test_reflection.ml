@@ -426,20 +426,14 @@ let shown =
 ;;
 
 let%expect_test "a declaration that depends on the splice reflecting it" =
-  check
-    (derive
-     ^ {|
+  check (derive ^ {|
 type t = A of M.u
 module M = .~(derive (type t))
-|}
-    );
-  check
-    (derive
-     ^ {|
+|});
+  check (derive ^ {|
 include .~(derive (type t))
 type t = A of u
-|}
-    );
+|});
   [%expect
     {|
     File "a.stag", line 51, characters 14-17:
@@ -637,11 +631,9 @@ let%expect_test "refs across files" =
   File_check.check_files
     ~run:true
     [ "show.stag", derive
-    ; ( "types.stag"
-      , {|type t = A | B of int * t
+    ; "types.stag", {|type t = A | B of int * t
 let ty = type t
 |}
-      )
     ; ( "a.stag"
       , {|type t = string
 type int = bool

@@ -426,8 +426,7 @@ let%expect_test "locals of tests are not toplevels" =
                |> Result.map ~f:Treewalk.Value.to_string_hum
                : string Or_error.t)]
         | _ -> print_endline "not a let"));
-  [%expect
-    {|
+  [%expect {|
     true
     (Error ("Unbound ident" (ident x/0)))
     |}]

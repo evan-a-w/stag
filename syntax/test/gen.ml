@@ -17,8 +17,8 @@ let list t ~min ~max f =
   List.init (min + int t (max - min + 1)) ~f:(fun _ -> f t)
 ;;
 
-(* Each choice is weighted, and the recursive ones are only taken while
-   there is size left, which they use up. *)
+(* Each choice is weighted, and the recursive ones are only taken while there is
+   size left, which they use up. *)
 let choose t ~leaves ~nodes =
   if t.size <= 0 || ((not t.deep) && int t 4 = 0)
   then (pick t leaves) t
@@ -40,8 +40,8 @@ let path t ~last =
     (List.init (int t 3 / 2) ~f:(fun _ -> pick t [ "M"; "N" ]) @ [ last t ])
 ;;
 
-(* Root or not by the path's hash, keeping the random sequence as it was
-   before root paths. *)
+(* Root or not by the path's hash, keeping the random sequence as it was before
+   root paths. *)
 let decl_path t ~last =
   let path = path t ~last in
   if String.hash (Path.to_string path) % 3 = 0

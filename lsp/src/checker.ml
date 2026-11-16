@@ -16,8 +16,7 @@ let read ~contents path =
      | Sys_error _ -> "")
 ;;
 
-(* [absolute] locates in absolute paths, and those without a location in
-   [path]. *)
+(* [absolute] locates in absolute paths, and those without a location in [path]. *)
 let diagnostics_by_file ~path ~absolute ~files diagnostics =
   let init =
     List.map files ~f:(fun file -> file, [])
@@ -32,16 +31,16 @@ let diagnostics_by_file ~path ~absolute ~files diagnostics =
   |> Map.map ~f:List.rev
 ;;
 
-(* [checked] is the program's modules, if they parsed, and the program
-   checked, which with errors is what checked. *)
+(* [checked] is the program's modules, if they parsed, and the program checked,
+   which with errors is what checked. *)
 let of_checked
-      ?prelude
-      ?(of_prelude = false)
-      ~path
-      ~absolute
-      ~files
-      ~errors
-      checked
+  ?prelude
+  ?(of_prelude = false)
+  ~path
+  ~absolute
+  ~files
+  ~errors
+  checked
   =
   let diagnostics = diagnostics_by_file ~path ~absolute ~files in
   match checked with
@@ -97,9 +96,9 @@ let rec relocated ~relocate (toplevels : Syntax.Toplevel.t list) =
 ;;
 
 module Prelude_source = struct
-  (* The prelude a program is checked with: the embedded one, whose
-     definitions are found in [stdlib]'s sources that are the same, or the
-     sources of the checkout the program is in. *)
+  (* The prelude a program is checked with: the embedded one, whose definitions
+     are found in [stdlib]'s sources that are the same, or the sources of the
+     checkout the program is in. *)
   type t =
     | Embedded of { stdlib : Stdlib_checkout.t option }
     | Checkout of Stdlib_checkout.t
@@ -118,13 +117,13 @@ let source_paths checkout =
 ;;
 
 let check_groups
-      ~limits
-      ~(prelude : Prelude_source.t)
-      ~contents
-      ~path
-      ~absolute
-      ~files
-      groups
+  ~limits
+  ~(prelude : Prelude_source.t)
+  ~contents
+  ~path
+  ~absolute
+  ~files
+  groups
   =
   let groups, errors = groups in
   let checked ?prelude groups =
@@ -153,8 +152,8 @@ let check_groups
     let result =
       match Stdlib_checkout.prelude ~contents checkout with
       | Error diagnostic ->
-        (* The prelude's error is reported in its source, and the program
-           left unchecked, which is said in it. *)
+        (* The prelude's error is reported in its source, and the program left
+           unchecked, which is said in it. *)
         of_checked
           ~path
           ~absolute

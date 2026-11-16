@@ -18,11 +18,11 @@ let z = y
         )
       ]
     (fun client ->
-       Client.did_open client "a.stag";
-       [%expect {| |}];
-       print_at client "a.stag" [ 2, 0; 2, 12; 2, 18; 2, 30; 2, 37; 3, 4; 3, 8 ];
-       [%expect
-         {|
+      Client.did_open client "a.stag";
+      [%expect {| |}];
+      print_at client "a.stag" [ 2, 0; 2, 12; 2, 18; 2, 30; 2, 37; 3, 4; 3, 8 ];
+      [%expect
+        {|
          2:0 no hover
          2:0 no definition
          2:12 2:11-2:16 ```stag A.value : string -> Stag.Expr.t -> list[Stag.Toplevel.t] ```
@@ -53,11 +53,11 @@ let w = y
         )
       ]
     (fun client ->
-       Client.did_open client "a.stag";
-       [%expect {| |}];
-       print_at client "a.stag" [ 1, 4; 2, 7; 2, 15; 3, 4; 3, 10; 4, 8 ];
-       [%expect
-         {|
+      Client.did_open client "a.stag";
+      [%expect {| |}];
+      print_at client "a.stag" [ 1, 4; 2, 7; 2, 15; 3, 4; 3, 10; 4, 8 ];
+      [%expect
+        {|
          1:4 1:4-1:5 ```stag A.y : string ```
          1:4 -> a.stag 1:4-1:5
          2:7 no hover
@@ -89,11 +89,11 @@ let y2 = N.y
         )
       ]
     (fun client ->
-       Client.did_open client "a.stag";
-       [%expect {| |}];
-       print_at client "a.stag" [ 1, 4; 4, 14; 6, 12; 7, 11 ];
-       [%expect
-         {|
+      Client.did_open client "a.stag";
+      [%expect {| |}];
+      print_at client "a.stag" [ 1, 4; 4, 14; 6, 12; 7, 11 ];
+      [%expect
+        {|
          1:4 1:4-1:5 ```stag A.y : string ```
          1:4 -> a.stag 1:4-1:5
          4:14 4:14-4:15 ```stag A.N.y : int ```
@@ -114,25 +114,25 @@ let%expect_test "semantic tokens of a large typechecked file take linear time" =
   Client.with_server
     ~files:[ "a.stag", source ]
     (fun client ->
-       Client.did_open client "a.stag";
-       Client.print_hover client "a.stag" ~line:0 ~character:12;
-       let start = Time_ns.now () in
-       let tokens =
-         Client.request
-           client
-           "textDocument/semanticTokens/full"
-           (Client.text_document client "a.stag")
-       in
-       let elapsed = Time_ns.diff (Time_ns.now ()) start in
-       (match tokens with
-        | Some json ->
-          let tokens = Lsp_types.SemanticTokens.t_of_yojson json in
-          printf "%d tokens\n" (Array.length tokens.data / 5)
-        | None -> ());
-       print_s
-         [%sexp (Time_ns.Span.( < ) elapsed (Time_ns.Span.of_int_sec 5) : bool)];
-       [%expect
-         {|
+      Client.did_open client "a.stag";
+      Client.print_hover client "a.stag" ~line:0 ~character:12;
+      let start = Time_ns.now () in
+      let tokens =
+        Client.request
+          client
+          "textDocument/semanticTokens/full"
+          (Client.text_document client "a.stag")
+      in
+      let elapsed = Time_ns.diff (Time_ns.now ()) start in
+      (match tokens with
+       | Some json ->
+         let tokens = Lsp_types.SemanticTokens.t_of_yojson json in
+         printf "%d tokens\n" (Array.length tokens.data / 5)
+       | None -> ());
+      print_s
+        [%sexp (Time_ns.Span.( < ) elapsed (Time_ns.Span.of_int_sec 5) : bool)];
+      [%expect
+        {|
          0:12 0:9-0:16 ```stag Int.add : int -> int -> int ```
          140000 tokens
          true
@@ -159,14 +159,14 @@ let w = s
         )
       ]
     (fun client ->
-       Client.did_open client "a.stag";
-       [%expect {| |}];
-       print_at
-         client
-         "a.stag"
-         [ 2, 6; 4, 14; 5, 6; 5, 10; 8, 6; 10, 16; 10, 20; 11, 8 ];
-       [%expect
-         {|
+      Client.did_open client "a.stag";
+      [%expect {| |}];
+      print_at
+        client
+        "a.stag"
+        [ 2, 6; 4, 14; 5, 6; 5, 10; 8, 6; 10, 16; 10, 20; 11, 8 ];
+      [%expect
+        {|
          2:6 2:6-2:7 ```stag A.x : int ```
          2:6 -> a.stag 2:6-2:7
          4:14 no hover
@@ -184,31 +184,31 @@ let w = s
          11:8 11:8-11:9 ```stag A.s : int ```
          11:8 -> a.stag 7:0-7:46
          |}];
-       (match
-          Client.request
-            client
-            "textDocument/documentSymbol"
-            (Client.text_document client "a.stag")
-        with
-        | Some (`List symbols) ->
-          let rec print indent (symbol : Lsp_types.DocumentSymbol.t) =
-            printf
-              "%s%s %d:%d-%d:%d\n"
-              indent
-              symbol.name
-              symbol.selectionRange.start.line
-              symbol.selectionRange.start.character
-              symbol.selectionRange.end_.line
-              symbol.selectionRange.end_.character;
-            List.iter
-              (Option.value symbol.children ~default:[])
-              ~f:(print (indent ^ "  "))
-          in
-          List.iter symbols ~f:(fun json ->
-            print "" (Lsp_types.DocumentSymbol.t_of_yojson json))
-        | _ -> print_endline "unexpected");
-       [%expect
-         {|
+      (match
+         Client.request
+           client
+           "textDocument/documentSymbol"
+           (Client.text_document client "a.stag")
+       with
+       | Some (`List symbols) ->
+         let rec print indent (symbol : Lsp_types.DocumentSymbol.t) =
+           printf
+             "%s%s %d:%d-%d:%d\n"
+             indent
+             symbol.name
+             symbol.selectionRange.start.line
+             symbol.selectionRange.start.character
+             symbol.selectionRange.end_.line
+             symbol.selectionRange.end_.character;
+           List.iter
+             (Option.value symbol.children ~default:[])
+             ~f:(print (indent ^ "  "))
+         in
+         List.iter symbols ~f:(fun json ->
+           print "" (Lsp_types.DocumentSymbol.t_of_yojson json))
+       | _ -> print_endline "unexpected");
+      [%expect
+        {|
          value 0:4-0:9
          x 2:6-2:7
          M 4:14-4:15
@@ -217,9 +217,9 @@ let w = s
          z 10:4-10:5
          w 11:4-11:5
          |}];
-       Client.print_semantic_tokens client "a.stag";
-       [%expect
-         {|
+      Client.print_semantic_tokens client "a.stag";
+      [%expect
+        {|
          0:0+3 Keyword "let"
          0:4+5 Function (declaration) "value"
          0:10+4 Parameter (declaration) "name"
@@ -303,14 +303,14 @@ let g = f 2
         )
       ]
     (fun client ->
-       Client.did_open client "a.stag";
-       [%expect {| |}];
-       print_at
-         client
-         "a.stag"
-         [ 2, 4; 2, 15; 2, 23; 2, 31; 3, 5; 3, 12; 4, 8; 5, 8 ];
-       [%expect
-         {|
+      Client.did_open client "a.stag";
+      [%expect {| |}];
+      print_at
+        client
+        "a.stag"
+        [ 2, 4; 2, 15; 2, 23; 2, 31; 3, 5; 3, 12; 4, 8; 5, 8 ];
+      [%expect
+        {|
          2:4 2:4-2:5 ```stag A.f : int -> int ```
          2:4 -> a.stag 2:4-2:5
          2:15 2:13-2:19 ```stag A.int_ty : Stag.Type_expr.t ```
@@ -342,11 +342,11 @@ module M = .~q
         )
       ]
     (fun client ->
-       Client.did_open client "a.stag";
-       [%expect {| |}];
-       print_at client "a.stag" [ 2, 27; 2, 41 ];
-       [%expect
-         {|
+      Client.did_open client "a.stag";
+      [%expect {| |}];
+      print_at client "a.stag" [ 2, 27; 2, 41 ];
+      [%expect
+        {|
          2:27 2:8-2:53 ```stag list[Stag.Toplevel.t] ```
          2:27 no definition
          2:41 2:41-2:42 ```stag type t ```

@@ -35,8 +35,8 @@ module type S = sig
   val expr : Syntax.Expr.t -> t
   val toplevel : Syntax.Toplevel.t -> t
 
-  (** [antiquote] replaces a splice in the position of the kind, unless
-      [None]: an item's by the list of declarations it stands for. *)
+  (** [antiquote] replaces a splice in the position of the kind, unless [None]:
+      an item's by the list of declarations it stands for. *)
   val program
     :  ?antiquote:(Antiquote.Kind.t -> Syntax.Expr.t -> t option)
     -> Syntax.Program.t

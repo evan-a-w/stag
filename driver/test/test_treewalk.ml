@@ -89,8 +89,7 @@ let f r s x =
   let g u = ({`a = x | r}, {s with `b = u}, r \ `c, s.`d, {`e = x}, `T x) in
   0
 |};
-  [%expect
-    {|
+  [%expect {|
     (f/4 ())
     (g/18 (r/14 s/15 x/16))
     |}]
@@ -121,13 +120,11 @@ let explicit c d = let e x = .<.~c.{y = .~d}>. in 0
 ;;
 
 let%expect_test "toplevel splices" =
-  print
-    {|
+  print {|
 let n = 3
 let f x = let g y = .~(.<add x y>.) in 0
 |};
-  [%expect
-    {|
+  [%expect {|
     (f/5 (add/0))
     (g/17 (add/0 x/15))
     |}]
@@ -187,8 +184,7 @@ let%expect_test "a shared stamp counter" =
   print_s [%sexp (idents (parse_exn "let f x = x") : Typed.Ident.t list)];
   print_s [%sexp (idents (parse_exn "let g y = y") : Typed.Ident.t list)];
   print_s [%sexp (Typed.Ident.fresh stamps "minted" : Typed.Ident.t)];
-  [%expect
-    {|
+  [%expect {|
     (f/0 x/1)
     (g/2 y/3)
     minted/4

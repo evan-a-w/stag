@@ -1,15 +1,15 @@
 open! Import
 
-(** Simplifies the types of entries in a scheme being generalized. An entry
-    type that is a variable [a] used only as the type of entries whose
-    presence makes [p] [Present], with an equality [p => a = t], is replaced
-    by [t]: where [p] is [Present] they are equal, and where it is [Absent]
-    so are those entries, whose types don't matter. This keeps instances from
-    piling up equivalent bounds. *)
+(** Simplifies the types of entries in a scheme being generalized. An entry type
+    that is a variable [a] used only as the type of entries whose presence makes
+    [p] [Present], with an equality [p => a = t], is replaced by [t]: where [p]
+    is [Present] they are equal, and where it is [Absent] so are those entries,
+    whose types don't matter. This keeps instances from piling up equivalent
+    bounds. *)
 
 (** [is_generalized] says which variables are generalized: [tys] are all the
-    types generalized together, [presences] and [rows] the generalized
-    variables with bounds, and [kept] the bounds kept with them. *)
+    types generalized together, [presences] and [rows] the generalized variables
+    with bounds, and [kept] the bounds kept with them. *)
 val simplify
   :  is_generalized:(Type.id -> bool)
   -> tys:Type.ty list

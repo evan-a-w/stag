@@ -33,20 +33,19 @@ type t =
   ; comments : Comment.t array
   ; mutable pos : int
   ; mutable bare_tuple_end : int
-    (** The [pos] after the last [)] whose contents were a tuple without
-          parentheses of its own, as in [(a, b)] but not [((a, b))]. *)
+  (** The [pos] after the last [)] whose contents were a tuple without
+      parentheses of its own, as in [(a, b)] but not [((a, b))]. *)
   ; errors : Error.t Queue.t option
-    (** Where to record errors, to keep parsing toplevels after them, if
-          any. *)
+  (** Where to record errors, to keep parsing toplevels after them, if any. *)
   ; mutable salvage : (Expr.t -> Toplevel.desc) option
-    (** What of the toplevel being parsed parsed, given an [Expr.Error] for
-          the rest. *)
+  (** What of the toplevel being parsed parsed, given an [Expr.Error] for the
+      rest. *)
   ; lex_errors : int array
-    (** The offsets of the lexemes skipped by lexer errors, in order, if
-          recovering. *)
+  (** The offsets of the lexemes skipped by lexer errors, in order, if
+      recovering. *)
   ; mutable limit : int
-    (** When recovering, the index of the next token that ends the toplevel
-        being parsed (it appears as [Eof]), else that of [Eof]. *)
+  (** When recovering, the index of the next token that ends the toplevel being
+      parsed (it appears as [Eof]), else that of [Eof]. *)
   ; mutable col : int (** That of the toplevel being parsed, if recovering. *)
   }
 
@@ -128,8 +127,8 @@ let expect_for t token ~opener ~open_loc =
          (describe (found t)))
 ;;
 
-(** Parses [opener items close], with [item]s separated by [sep] and an
-    optional trailing [sep]. *)
+(** Parses [opener items close], with [item]s separated by [sep] and an optional
+    trailing [sep]. *)
 let delimited t ~opener ~close:closer ~sep ~item =
   let open_loc = loc t in
   expect t opener;
@@ -425,8 +424,8 @@ and row_tail t : Type_expr.row =
   since t start (Type_expr.Var var)
 
 (** [{l : t; ...; ..'r}], located with its braces. An entry's type may be
-    [mut t] or [immut t], for a context: [immut] is a keyword only there,
-    before a type. *)
+    [mut t] or [immut t], for a context: [immut] is a keyword only there, before
+    a type. *)
 and row t ~entry_label ~what : Type_expr.row =
   let open_loc = loc t in
   expect t Lbrace;
@@ -539,9 +538,9 @@ let construct_args t (arg : _ Located.t) ~tuple_items =
   | _ -> [ arg ]
 ;;
 
-(** Closes the parentheses around [contents], recording if [contents] is a
-    tuple without parentheses of its own: one starting where its first item
-    does, as parentheses are part of a location. *)
+(** Closes the parentheses around [contents], recording if [contents] is a tuple
+    without parentheses of its own: one starting where its first item does, as
+    parentheses are part of a location. *)
 let close_parens t ~open_loc (contents : _ Located.t) ~tuple_items =
   close t Rparen ~opener:Lparen ~open_loc;
   match tuple_items contents.txt with
@@ -745,8 +744,8 @@ let params t =
   loop []
 ;;
 
-(* With [~seq:false], as in a [{...}] entry, [e1; e2] is not parsed (also in
-   the bodies of [let] and [match]), leaving the [;] as the separator. *)
+(* With [~seq:false], as in a [{...}] entry, [e1; e2] is not parsed (also in the
+   bodies of [let] and [match]), leaving the [;] as the separator. *)
 let rec expr ?(seq = true) t : Expr.t =
   match peek t with
   | Let -> let_ t ~seq
@@ -1274,9 +1273,9 @@ let type_decl t ~salvage : Type_decl.t =
   { name; params; kind }
 ;;
 
-(* What follows a skipped lexeme in a toplevel parsed as if it were not
-   there, so the toplevel is salvaged as if it were a syntax error. Those in a
-   [struct] are in the toplevels in it. *)
+(* What follows a skipped lexeme in a toplevel parsed as if it were not there,
+   so the toplevel is salvaged as if it were a syntax error. Those in a [struct]
+   are in the toplevels in it. *)
 let with_lex_errors t (toplevel : Toplevel.t) ~start =
   let start = t.tokens.(start).loc.start.offset in
   let stop = (loc t).start.offset in
@@ -1284,15 +1283,14 @@ let with_lex_errors t (toplevel : Toplevel.t) ~start =
   | (Module _ | Module_splice (_, _, Some _) | Include (_, Some _)), _ | _, None
     -> toplevel
   | _, Some desc ->
-    if
-      Array.binary_search
-        t.lex_errors
-        ~compare:Int.compare
-        `First_greater_than_or_equal_to
-        start
-      |> function
-      | None -> false
-      | Some i -> t.lex_errors.(i) < stop
+    if Array.binary_search
+         t.lex_errors
+         ~compare:Int.compare
+         `First_greater_than_or_equal_to
+         start
+       |> function
+       | None -> false
+       | Some i -> t.lex_errors.(i) < stop
     then { toplevel with txt = desc (expr_at ~loc:toplevel.loc Error) }
     else toplevel
 ;;
@@ -1317,8 +1315,8 @@ let starts_toplevel_at t i ~col =
   | _ -> false
 ;;
 
-(* The index of the first token from [from] that starts a toplevel not
-   indented more than [col], or of [Eof]. *)
+(* The index of the first token from [from] that starts a toplevel not indented
+   more than [col], or of [Eof]. *)
 let next_toplevel t ~from ~col =
   let rec go i =
     incr steps;
@@ -1340,8 +1338,8 @@ let closer : Token.t -> Token.t option = function
   | _ -> None
 ;;
 
-(* The innermost bracket opened from [start] and not closed before [stop],
-   with its closer, if any. *)
+(* The innermost bracket opened from [start] and not closed before [stop], with
+   its closer, if any. *)
 let unclosed t ~start ~stop =
   let rec go i open_ =
     incr steps;
@@ -1474,9 +1472,9 @@ let rec toplevel t : Toplevel.t =
       t
       "a declaration (`let`, `type`, `exception`, `module` or `include`)"
 
-(* The next toplevel after the broken one at [start]: the next toplevel
-   keyword first on its line and not indented more than the broken one, or, in
-   a [struct], the [end] closing it, by nesting or by being less indented.
+(* The next toplevel after the broken one at [start]: the next toplevel keyword
+   first on its line and not indented more than the broken one, or, in a
+   [struct], the [end] closing it, by nesting or by being less indented.
    Unmatched closing brackets are skipped. *)
 and resync t ~start ~in_struct =
   let col = t.tokens.(start).loc.start.col in
@@ -1513,10 +1511,9 @@ and expansion t ~(keyword : Token.t) ~open_loc =
         t.comments
         ~init:splice_end
         ~f:(fun start (comment : Comment.t) ->
-          if
-            comment.next_token = t.pos
-            && comment.loc.start.line = splice_end.line
-            && comment.loc.start.offset >= splice_end.offset
+          if comment.next_token = t.pos
+             && comment.loc.start.line = splice_end.line
+             && comment.loc.start.offset >= splice_end.offset
           then comment.loc.stop
           else start)
     in
@@ -1682,8 +1679,7 @@ let program_recovering ~file source =
       }
     in
     let program = toplevels t ~in_struct:false in
-    (* A syntax error at the token after a skipped lexeme is likely due to
-       it. *)
+    (* A syntax error at the token after a skipped lexeme is likely due to it. *)
     let after_skipped =
       List.filter_map skipped ~f:(fun loc ->
         Array.binary_search

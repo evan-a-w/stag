@@ -128,8 +128,8 @@ end%inline
   [%expect {| (a.stag up to date) |}]
 ;;
 
-let%expect_test
-    "a stale expansion, edited or generated differently, is corrected"
+let%expect_test "a stale expansion, edited or generated differently, is \
+                 corrected"
   =
   test
     {|
@@ -270,8 +270,8 @@ end
     |}]
 ;;
 
-let%expect_test
-    "the program declares what the splice generates, not the expansion"
+let%expect_test "the program declares what the splice generates, not the \
+                 expansion"
   =
   test
     {|
@@ -298,8 +298,7 @@ let shown = print_int x
 ;;
 
 let%expect_test "an expansion must parse" =
-  test
-    {|
+  test {|
 include%inline .~(value "x" (Stag.Expr.int 1))
   let x =
 end%inline
@@ -314,8 +313,7 @@ end%inline
 ;;
 
 let%expect_test "unclosed" =
-  test
-    {|
+  test {|
 include%inline .~(value "x" (Stag.Expr.int 1))
   let x = 1
 |};
@@ -345,8 +343,7 @@ end%inline
 ;;
 
 let%expect_test "a splice failing at compile time" =
-  test
-    {|
+  test {|
 include%inline .~(raise (Failure "no"))
 end%inline
 |};
@@ -712,8 +709,8 @@ end%inline
     |}]
 ;;
 
-let%expect_test
-    "refs in expansions: shortest suffix at the splice, else a root path"
+let%expect_test "refs in expansions: shortest suffix at the splice, else a \
+                 root path"
   =
   test
     ~others:

@@ -1,10 +1,9 @@
 open! Import
 
-(** Built-in polymorphic functions of the prelude, mostly of its [Stag]
-    module, for reflection. They are named [Intrinsic.x], found only from
-    within the prelude, which binds them to their public names, eg.
-    [Stag.Type.expr]. Only [Type_decl] queries the typechecker, so is only
-    available at compile time. *)
+(** Built-in polymorphic functions of the prelude, mostly of its [Stag] module,
+    for reflection. They are named [Intrinsic.x], found only from within the
+    prelude, which binds them to their public names, eg. [Stag.Type.expr]. Only
+    [Type_decl] queries the typechecker, so is only available at compile time. *)
 
 type t =
   | Type_expr (** [Stag.Type.t['a] -> Stag.Type_expr.t] *)
@@ -21,8 +20,8 @@ type t =
 (** Its name in the prelude, eg. [Stag.Type.expr]. *)
 val public_name : t -> string
 
-(** [var] and [row] make the type of each type and row variable, so [ty] is
-    an instance. *)
+(** [var] and [row] make the type of each type and row variable, so [ty] is an
+    instance. *)
 val ty : t -> var:(unit -> Type.ty) -> row:(unit -> Type.row) -> Type.ty
 
 (** [Intrinsic.x] by its full path. *)

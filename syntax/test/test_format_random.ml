@@ -4,8 +4,8 @@ open! Import
    random gaps between tokens, checked to format keeping their syntax and
    comments, idempotently. Messy sources are printed at a random width, with
    parentheses added or removed where that keeps their syntax, and comments
-   maybe glued to the tokens around them. A failure is shown with as few of
-   its comments as still fail. *)
+   maybe glued to the tokens around them. A failure is shown with as few of its
+   comments as still fail. *)
 
 let comment (gen : Gen.t) ~messy i =
   let body =
@@ -111,20 +111,20 @@ let reparenthesize (gen : Gen.t) program source ~count =
   Fn.apply_n_times
     ~n:count
     (fun source ->
-       let tokens = tokens source in
-       let i = Gen.int gen (Array.length tokens) in
-       let start = tokens.(i).loc.start.offset in
-       let edits =
-         match tokens.(i).token, matching tokens i with
-         | Eof, _ -> []
-         | Lparen, Some j when Gen.bool gen ->
-           [ start, 1, ""; tokens.(j).loc.start.offset, 1, "" ]
-         | Lparen, Some j ->
-           [ start, 0, "("; tokens.(j).loc.stop.offset, 0, ")" ]
-         | _ -> [ start, 0, "("; tokens.(i).loc.stop.offset, 0, ")" ]
-       in
-       let edited = edit source edits in
-       if same edited then edited else source)
+      let tokens = tokens source in
+      let i = Gen.int gen (Array.length tokens) in
+      let start = tokens.(i).loc.start.offset in
+      let edits =
+        match tokens.(i).token, matching tokens i with
+        | Eof, _ -> []
+        | Lparen, Some j when Gen.bool gen ->
+          [ start, 1, ""; tokens.(j).loc.start.offset, 1, "" ]
+        | Lparen, Some j ->
+          [ start, 0, "("; tokens.(j).loc.stop.offset, 0, ")" ]
+        | _ -> [ start, 0, "("; tokens.(i).loc.stop.offset, 0, ")" ]
+      in
+      let edited = edit source edits in
+      if same edited then edited else source)
     source
 ;;
 

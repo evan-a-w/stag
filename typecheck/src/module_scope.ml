@@ -37,8 +37,8 @@ module Member = struct
 end
 
 (* The k-th entry of a module is at [At [k]], the j-th an include at [At p]
-   generates at [At (p @ [j])]. Lists compare lexicographically, a prefix
-   first, so an include is before what it generates. *)
+   generates at [At (p @ [j])]. Lists compare lexicographically, a prefix first,
+   so an include is before what it generates. *)
 module Position = struct
   type t =
     | At of int list
@@ -56,12 +56,12 @@ end
 
 type module_ =
   { members : splice option Member.Table.t
-    (* By the include generating them, [None] for the others. *)
+      (* By the include generating them, [None] for the others. *)
   ; modules : module_ String.Table.t
   ; entries : entry Queue.t
   ; includes : splice Queue.t
-    (* Its own includes and types' definitions [type t = .~e], and those
-       they generate. *)
+      (* Its own includes and types' definitions [type t = .~e], and those they
+         generate. *)
   ; definitions : splice String.Table.t (* By type name. *)
   ; path : string list
   ; loc : Loc.t
@@ -208,8 +208,7 @@ let members (toplevel : Toplevel.t) : (Member.t * Name.t) list =
 
 (* [toplevels] but those whose names, or type parameters, are taken by those
    before them or by [taken], the members of the module [path] they are added
-   to, and with types' constructors and fields so taken left out, each
-   reported. *)
+   to, and with types' constructors and fields so taken left out, each reported. *)
 let rec unique_among ~path taken toplevels ~report =
   List.filter_map toplevels ~f:(fun (toplevel : Toplevel.t) ->
     let error ~loc kind =
@@ -495,9 +494,9 @@ let cycle ?module_ (splice : splice) ~name ~loc =
        })
 ;;
 
-(* Runs [splice], which is not running, adding what it generates to its
-   module, or, for an include, to the module it is in, in its place. If it
-   uses an unfinished toplevel, it is left pending. *)
+(* Runs [splice], which is not running, adding what it generates to its module,
+   or, for an include, to the module it is in, in its place. If it uses an
+   unfinished toplevel, it is left pending. *)
 module Forced = struct
   type t =
     | Forced
@@ -631,8 +630,7 @@ let rec lookup (t : t) member =
         | Uses_unfinished -> Ok (Absent { blocked = Some splice })))
 ;;
 
-(* Whether a splice that failed may have generated [member], not found from
-   [t]. *)
+(* Whether a splice that failed may have generated [member], not found from [t]. *)
 let rec after_failed_splice (t : t) member =
   Queue.exists t.module_.includes ~f:(fun splice ->
     is_failed splice
@@ -695,14 +693,13 @@ let with_note (error : Typecheck_error.Kind.t) ~blocked ~after
   | None, (Some (Visible | Absent { blocked = None }) | None) -> error
 ;;
 
-(* The location of the module path [written] at the start of the path at
-   [loc], if written without spaces as for [path]. *)
+(* The location of the module path [written] at the start of the path at [loc],
+   if written without spaces as for [path]. *)
 let prefix_loc (loc : Loc.t) ~(path : Decl_path.t) ~written =
   let len = String.length (Decl_path.to_string (with_names path written)) in
-  if
-    loc.start.line = loc.stop.line
-    && loc.stop.offset - loc.start.offset
-       = String.length (Decl_path.to_string path)
+  if loc.start.line = loc.stop.line
+     && loc.stop.offset - loc.start.offset
+        = String.length (Decl_path.to_string path)
   then
     { loc with
       stop =
@@ -799,17 +796,17 @@ end
 (* [name] of [module_] then [rest], from outside it, past [blocked]. Errors of
    names not found are passed through [hint]. *)
 let rec find_member
-          ?generated
-          module_
-          namespace
-          name
-          rest
-          ~path
-          ~written
-          ~loc
-          ~unbound
-          ~blocked
-          ~hint
+  ?generated
+  module_
+  namespace
+  name
+  rest
+  ~path
+  ~written
+  ~loc
+  ~unbound
+  ~blocked
+  ~hint
   =
   match Generated.find_from generated module_ namespace (name :: rest) with
   | Found name -> Ok name
@@ -829,17 +826,17 @@ let rec find_member
       ~hint
 
 and find_written
-      ?generated
-      module_
-      namespace
-      name
-      rest
-      ~path
-      ~written
-      ~loc
-      ~unbound
-      ~blocked
-      ~hint
+  ?generated
+  module_
+  namespace
+  name
+  rest
+  ~path
+  ~written
+  ~loc
+  ~unbound
+  ~blocked
+  ~hint
   =
   let written = written @ [ name ] in
   let member : Member.t =
@@ -894,8 +891,8 @@ let rec has_path module_ namespace = function
     |> Option.exists ~f:(fun module_ -> has_path module_ namespace rest)
 ;;
 
-(* [error] for [head :: rest], found in [found], unless it shadows the
-   prelude's [head], which has [rest]. *)
+(* [error] for [head :: rest], found in [found], unless it shadows the prelude's
+   [head], which has [rest]. *)
 let with_prelude_hint found ~head ~rest namespace (error : Typecheck_error.t) =
   match found.module_.program.outside with
   | Some prelude when has_path prelude.module_ namespace (head :: rest) ->
@@ -961,8 +958,7 @@ let find_path ?generated t namespace (path : Decl_path.t) ~loc ~unbound =
           Resolved.Found name, blocked))
 ;;
 
-(* The error for [path], whose first name is not found from [t] past
-   [blocked]. *)
+(* The error for [path], whose first name is not found from [t] past [blocked]. *)
 let unbound_head t namespace (path : Decl_path.t) ~loc ~unbound ~blocked =
   let t, names = start t path in
   let member, kind, loc =
@@ -1007,8 +1003,8 @@ let not_in_scope path = Typecheck_error.Kind.Not_in_scope path
 
 (* Prims are outside the root module, so found only where the program has
    nothing of their name: no value, or no module for a path. The prelude also
-   names them as [Prim.<prim>] (eg. [Prim.String.length], as [Core.String]
-   hides [String.length]), which nothing shadows. *)
+   names them as [Prim.<prim>] (eg. [Prim.String.length], as [Core.String] hides
+   [String.length]), which nothing shadows. *)
 let find_value t path ~loc : (Value.t, _) Result.t =
   let in_prelude =
     lazy (Option.is_some (Prelude_path.relative (canonical_name t "_")))
@@ -1114,15 +1110,15 @@ let splices t =
   splices t.module_
 ;;
 
-(* What [path] names where it is used in [toplevels], which [splice]
-   generated, within their modules [modules] where [locals] are bound. *)
+(* What [path] names where it is used in [toplevels], which [splice] generated,
+   within their modules [modules] where [locals] are bound. *)
 let resolve_in_expansion
-      (splice : splice)
-      toplevels
-      namespace
-      ~modules
-      ~locals
-      (path : Decl_path.t)
+  (splice : splice)
+  toplevels
+  namespace
+  ~modules
+  ~locals
+  (path : Decl_path.t)
   =
   let generated =
     let in_module = splice.scope.module_.path in

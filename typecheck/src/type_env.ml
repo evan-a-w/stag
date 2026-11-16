@@ -35,7 +35,7 @@ module Decl = struct
     ; mutable checked : Signature.Type_decl.t option
     ; mutable failed : bool (** Checking it reported an error. *)
     ; mutable reflected : Reflected_decl.t option
-      (** Once checked, unless abstract. *)
+    (** Once checked, unless abstract. *)
     }
 
   let params t = force t.params
@@ -79,15 +79,15 @@ type t =
       -> loc:Loc.t
       -> (Type_expr.t, Typecheck_error.t) Result.t
   ; type_splices : Type_splice.t list Loc.Table.t
-    (* By location, then physically: each splice is evaluated once. *)
+      (* By location, then physically: each splice is evaluated once. *)
   ; types : Decl.t String.Table.t
   ; exceptions : Exception_decl.t String.Table.t
   ; constructors : Constructor.t String.Table.t
   ; fields : Field.t String.Table.t
   ; constructor_types : string String.Table.t
   ; field_types : string String.Table.t
-    (** The type declaring each constructor and field, whose entry in
-        [constructors] or [fields] is added once it is checked. *)
+  (** The type declaring each constructor and field, whose entry in
+      [constructors] or [fields] is added once it is checked. *)
   ; report : Typecheck_error.t -> unit
   }
 
@@ -162,9 +162,9 @@ let rec kind_has_splice : Type_decl.Kind.t -> bool = function
   | Malformed kind -> kind_has_splice kind
 ;;
 
-(* What a splice gives may not contain splices, so that evaluating splices
-   ends. If its evaluation is abandoned (raising [Uses_unfinished]), it is
-   evaluated anew. *)
+(* What a splice gives may not contain splices, so that evaluating splices ends.
+   If its evaluation is abandoned (raising [Uses_unfinished]), it is evaluated
+   anew. *)
 let evaluate_splice t module_ (expr : Expr.t) ~loc =
   let splices = Hashtbl.find_multi t.type_splices expr.loc in
   match List.find splices ~f:(fun splice -> phys_equal splice.expr expr) with
@@ -262,13 +262,13 @@ module Vars = struct
   ;;
 end
 
-(* An expansion of an alias: [knot], linked to the alias's body once
-   elaborated, stands for the expansion. Each alias is expanded once per
-   (physical) arguments during one elaboration, so references to it share the
-   knot, also while it is being expanded, which closes a cycle. As the knot is
-   a [Link], traversals of the expansion's shared occurrences take it once.
-   It is [Generic] until linked, but only reachable from the elaboration,
-   which stops at its first error and is then dropped. *)
+(* An expansion of an alias: [knot], linked to the alias's body once elaborated,
+   stands for the expansion. Each alias is expanded once per (physical)
+   arguments during one elaboration, so references to it share the knot, also
+   while it is being expanded, which closes a cycle. As the knot is a [Link],
+   traversals of the expansion's shared occurrences take it once. It is
+   [Generic] until linked, but only reachable from the elaboration, which stops
+   at its first error and is then dropped. *)
 module Expansion = struct
   type t =
     { args : Type.arg list
@@ -280,10 +280,10 @@ module Expansion = struct
   let same_args t args =
     List.equal
       (fun (arg1 : Type.arg) (arg2 : Type.arg) ->
-         match arg1, arg2 with
-         | ATy ty1, ATy ty2 -> phys_equal ty1 ty2
-         | ARow row1, ARow row2 -> phys_equal row1 row2
-         | ATy _, ARow _ | ARow _, ATy _ -> false)
+        match arg1, arg2 with
+        | ATy ty1, ATy ty2 -> phys_equal ty1 ty2
+        | ARow row1, ARow row2 -> phys_equal row1 row2
+        | ATy _, ARow _ | ARow _, ATy _ -> false)
       t.args
       args
   ;;
@@ -308,8 +308,7 @@ let map_result xs ~f =
 ;;
 
 (* Each elaborates to the type and the syntax with each type it names by its
-   canonical name ([Resolved]), so that it names the same types wherever it
-   is. *)
+   canonical name ([Resolved]), so that it names the same types wherever it is. *)
 let rec elaborate' t module_ vars ~splices ~expansions (expr : Type_expr.t)
   : (Type.ty * Type_expr.t, Typecheck_error.t) Result.t
   =
@@ -370,13 +369,13 @@ and in_record t row ~loc =
 
 (* Entries are [mut] only in contexts, and in row arguments, which may be. *)
 and elaborate_row
-      ?(allow_mut = true)
-      t
-      module_
-      vars
-      ~splices
-      ~expansions
-      (row : Type_expr.row)
+  ?(allow_mut = true)
+  t
+  module_
+  vars
+  ~splices
+  ~expansions
+  (row : Type_expr.row)
   : (Type.row * Type_expr.row, Typecheck_error.t) Result.t
   =
   let rec go (row : Type_expr.row) ~seen =
@@ -418,14 +417,14 @@ and elaborate_row
   go row ~seen:String.Set.empty
 
 and elaborate_con
-      t
-      module_
-      vars
-      ~splices
-      ~expansions
-      ({ txt = path; loc = path_loc } as located_path : Decl_path.t Located.t)
-      args
-      ~loc
+  t
+  module_
+  vars
+  ~splices
+  ~expansions
+  ({ txt = path; loc = path_loc } as located_path : Decl_path.t Located.t)
+  args
+  ~loc
   =
   let error ~loc kind = Error (Typecheck_error.create ~loc kind) in
   let%bind.Result decl = find_type t module_ path ~loc:path_loc in
@@ -495,8 +494,8 @@ and elaborate_con
   in
   ty, syntax
 
-(* Its definition, computed if spliced. While being computed, it is taken to
-   be nominal, which [set_definition] checks. *)
+(* Its definition, computed if spliced. While being computed, it is taken to be
+   nominal, which [set_definition] checks. *)
 and definition (decl : Decl.t) ~loc =
   match decl.decl.kind with
   | Splice _ when Module_scope.defining decl.module_ decl.decl.name.txt ->
@@ -569,11 +568,11 @@ let declare_members t module_ (decl : Type_decl.t) ~name =
 ;;
 
 let declare
-      ?(lazily = false)
-      ?(wrap_error = Fn.id)
-      t
-      module_
-      (decl : Type_decl.t)
+  ?(lazily = false)
+  ?(wrap_error = Fn.id)
+  t
+  module_
+  (decl : Type_decl.t)
   =
   let name = Module_scope.canonical_name module_ decl.name.txt in
   let params =
@@ -622,12 +621,12 @@ let set_definition t name (kind : Type_decl.Kind.t) ~wrap_error ~loc =
 ;;
 
 let declare_exception
-      ?(wrap_error = Fn.id)
-      t
-      module_
-      (name : Name.t)
-      args
-      ~malformed
+  ?(wrap_error = Fn.id)
+  t
+  module_
+  (name : Name.t)
+  args
+  ~malformed
   =
   Hashtbl.add_exn
     t.exceptions
@@ -826,8 +825,8 @@ let is_empty_variant t name =
   | Variant (_ :: _) | Record _ | Alias _ | Abstract -> false
 ;;
 
-(* The entry of the constructor or field of canonical name [name], checking
-   its type. *)
+(* The entry of the constructor or field of canonical name [name], checking its
+   type. *)
 let find_member t ~types ~members name ~loc ~unbound =
   match Hashtbl.find types name with
   | None ->

@@ -23,14 +23,14 @@ let only_kind error =
   | List _ as sexp -> print_s sexp
 ;;
 
-(* Checks then evaluates [source], printing the values of [show],
-   or the error of the phase that failed. *)
+(* Checks then evaluates [source], printing the values of [show], or the error
+   of the phase that failed. *)
 let run
-      ?(compile_time = limits)
-      ?(runtime = limits)
-      ?(print_error = fun error -> print_s [%sexp (error : Error.t)])
-      ?(show = [])
-      source
+  ?(compile_time = limits)
+  ?(runtime = limits)
+  ?(print_error = fun error -> print_s [%sexp (error : Error.t)])
+  ?(show = [])
+  source
   =
   match Driver.check ~limits:compile_time (program source) with
   | Error
@@ -57,8 +57,8 @@ let run
              print_s
                [%sexp
                  (ident.name : string)
-               , (Treewalk.find (Driver.interpreter driver) ~ident |> ok_exn
-                  : Treewalk.Value.t)])))
+                 , (Treewalk.find (Driver.interpreter driver) ~ident |> ok_exn
+                    : Treewalk.Value.t)])))
 ;;
 
 let fuel_only fuel = { Limits.unlimited with fuel = Some fuel }
@@ -70,9 +70,7 @@ let%expect_test "a runaway splice runs out of fuel while checking" =
 ;;
 
 let%expect_test "a looping toplevel runs out of fuel when evaluated" =
-  run
-    ~runtime:(fuel_only 1000)
-    {|
+  run ~runtime:(fuel_only 1000) {|
 let loop x = loop x
 let x = loop ()
 |};
@@ -88,10 +86,8 @@ let%expect_test "terminating programs are unaffected" =
          {|
 let x = .~(spin (%{nat 5}); .<1>.)
 let y = spin (%{nat 5})
-|}]
-    );
-  [%expect
-    {|
+|}]);
+  [%expect {|
     (x 1)
     (y "()")
     |}]

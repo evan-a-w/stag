@@ -208,29 +208,20 @@ let in_poly_variant (v : [`T of M.t | `U]) = match v with `T {a = n; b = _} -> n
 let%expect_test "an unknown type falls back to the fields in scope" =
   (* [v]'s type is not known when [v.x] is checked: [x] is [s]'s, and
      [(v : N.r)] then fails, as inference is not reordered. *)
-  check
-    (types
-     ^ {|
+  check (types ^ {|
 let late v = (v.x, (v : N.r))
-|}
-    );
-  (* Known later, eg. by an application's argument, is too late: [y] is not
-     in scope. *)
-  check
-    (types
-     ^ {|
+|});
+  (* Known later, eg. by an application's argument, is too late: [y] is not in
+     scope. *)
+  check (types ^ {|
 let apply f = f (M.t.b)
 let y v = v.y
 let late = apply y
-|}
-    );
+|});
   (* Known first, it is used. *)
-  run
-    (types
-     ^ {|
+  run (types ^ {|
 let early v = let _ = (v : N.r) in v.x
-|}
-    );
+|});
   [%expect
     {|
     ((Unification_error
@@ -257,24 +248,15 @@ let early v = let _ = (v : N.r) in v.x
 let%expect_test "qualified fields and constructors name their declaration" =
   (* Even where another type is expected, the qualified name wins, and
      unification reports the mismatch, or for a record, the field. *)
-  check
-    (types
-     ^ {|
+  check (types ^ {|
 let wrong (v : N.r) = v.M.a
-|}
-    );
-  check
-    (types
-     ^ {|
+|});
+  check (types ^ {|
 let wrong : N.r = {M.a = 1; b = M.t.b}
-|}
-    );
-  check
-    (types
-     ^ {|
+|});
+  check (types ^ {|
 let wrong : option[int] = M.A
-|}
-    );
+|});
   [%expect
     {|
     ((Unification_error
@@ -291,49 +273,28 @@ let wrong : option[int] = M.A
 ;;
 
 let%expect_test "a field or constructor the known type lacks" =
-  check
-    (types
-     ^ {|
+  check (types ^ {|
 let missing = M.t.z
-|}
-    );
-  check
-    (types
-     ^ {|
+|});
+  check (types ^ {|
 let missing : N.r = {x = 1; z = 2}
-|}
-    );
-  check
-    (types
-     ^ {|
+|});
+  check (types ^ {|
 let missing (v : N.r) = {v with z = 1}
-|}
-    );
-  check
-    (types
-     ^ {|
+|});
+  check (types ^ {|
 let missing (v : N.r) = match v with {z = n} -> n
-|}
-    );
-  check
-    (types
-     ^ {|
+|});
+  check (types ^ {|
 let missing : M.v = C
-|}
-    );
-  check
-    (types
-     ^ {|
+|});
+  check (types ^ {|
 let missing (v : M.v) = match v with Some _ -> 1 | _ -> 0
-|}
-    );
+|});
   (* Not a nominal record type: the field is looked up in scope. *)
-  check
-    (types
-     ^ {|
+  check (types ^ {|
 let not_nominal = (1, 2).x
-|}
-    );
+|});
   [%expect
     {|
     ((No_such_field (type_name M.t) (field z)) @ t.stag:12:18-19)
@@ -350,13 +311,11 @@ let not_nominal = (1, 2).x
 ;;
 
 let%expect_test "the errors as diagnostics" =
-  File_check.check
-    {|
+  File_check.check {|
 type r = {x : int}
 let missing (v : r) = v.y
 |};
-  File_check.check
-    {|
+  File_check.check {|
 type v = A
 let missing : v = B
 |};
@@ -374,8 +333,8 @@ let missing : v = B
 ;;
 
 let%expect_test "generated code's unqualified fields resolve by type" =
-  (* [getters] makes [get_f (v : t) = v.f] for each field [f] of a record
-     type, naming fields by name rather than by ref: [s] shadows [r]'s [x]. *)
+  (* [getters] makes [get_f (v : t) = v.f] for each field [f] of a record type,
+     naming fields by name rather than by ref: [s] shadows [r]'s [x]. *)
   File_check.check
     ~run:true
     {|
@@ -574,31 +533,19 @@ end
 ;;
 
 let%expect_test "fields of different types" =
-  check
-    (types
-     ^ {|
+  check (types ^ {|
 let mixed = {M.a = 1; N.x = 2}
-|}
-    );
-  check
-    (types
-     ^ {|
+|});
+  check (types ^ {|
 let mixed : M.t = {a = 1; N.x = 2}
-|}
-    );
+|});
   (* At the qualified field, though [y] comes first and [M.t] lacks it. *)
-  check
-    (types
-     ^ {|
+  check (types ^ {|
 let mixed : M.t = {y = true; N.x = 2}
-|}
-    );
-  check
-    (types
-     ^ {|
+|});
+  check (types ^ {|
 let mixed (v : M.t) = {v with N.x = 2}
-|}
-    );
+|});
   [%expect
     {|
     ((Fields_of_different_types (field N.x) (expected_type M.t)
@@ -616,8 +563,8 @@ let mixed (v : M.t) = {v with N.x = 2}
     |}]
 ;;
 
-let%expect_test
-    "with no type known, the first type in scope with all the fields"
+let%expect_test "with no type known, the first type in scope with all the \
+                 fields"
   =
   (* [w]'s [x] is the latest in scope, but only [u] has [y], in either order. *)
   run
@@ -672,8 +619,8 @@ end
     |}]
 ;;
 
-let%expect_test
-    "an update may change the type parameters only in updated fields"
+let%expect_test "an update may change the type parameters only in updated \
+                 fields"
   =
   run
     {|
@@ -757,12 +704,9 @@ let b (a : r) = {a with v = 1; v = 2}
 ;;
 
 let%expect_test "a missing field of the expected type" =
-  check
-    (types
-     ^ {|
+  check (types ^ {|
 let missing : N.r = {x = 1}
-|}
-    );
+|});
   [%expect {| ((Missing_field N.y) @ t.stag:12:20-27) |}]
 ;;
 
@@ -832,8 +776,8 @@ let ran = .~(upd spliced)
 ;;
 
 let%expect_test "a non-function toplevel in a quote is of unknown type" =
-  (* [N.v] is a free variable of the quote, unrelated to [N.v]'s type, so [x]
-     is the one in scope. *)
+  (* [N.v] is a free variable of the quote, unrelated to [N.v]'s type, so [x] is
+     the one in scope. *)
   let program use =
     {|
 module N = struct

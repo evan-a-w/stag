@@ -64,21 +64,21 @@ module To_value = struct
   let reflected_decl decl ~decl_type =
     option
       (fun ({ params; kind } : Reflected_decl.t) ->
-         let ref_ kind name = Value.Ref { kind; name } in
-         let pair f g (a, b) = Value.Tuple [ f a; g b ] in
-         let kind =
-           match kind with
-           | Variant constructors ->
-             con
-               "Stag.Type.Kind.Variant"
-               [ list (pair (ref_ Constructor) (list type_expr)) constructors ]
-           | Record fields ->
-             con
-               "Stag.Type.Kind.Record"
-               [ list (pair (ref_ Field) type_expr) fields ]
-           | Alias ty -> con "Stag.Type.Kind.Alias" [ type_expr ty ]
-         in
-         Value.Record (decl_type, [| list type_param params; kind |]))
+        let ref_ kind name = Value.Ref { kind; name } in
+        let pair f g (a, b) = Value.Tuple [ f a; g b ] in
+        let kind =
+          match kind with
+          | Variant constructors ->
+            con
+              "Stag.Type.Kind.Variant"
+              [ list (pair (ref_ Constructor) (list type_expr)) constructors ]
+          | Record fields ->
+            con
+              "Stag.Type.Kind.Record"
+              [ list (pair (ref_ Field) type_expr) fields ]
+          | Alias ty -> con "Stag.Type.Kind.Alias" [ type_expr ty ]
+        in
+        Value.Record (decl_type, [| list type_param params; kind |]))
       decl
   ;;
 end
@@ -266,9 +266,8 @@ module Of_value = struct
     in
     let names = String.split text ~on:'.' in
     let #(modules, last) = List.split_n names (List.length names - 1) in
-    if
-      List.for_all modules ~f:(Ident_kind.accepts Upper)
-      && List.for_all last ~f:(Ident_kind.accepts kind)
+    if List.for_all modules ~f:(Ident_kind.accepts Upper)
+       && List.for_all last ~f:(Ident_kind.accepts kind)
     then (
       let path = Path.of_list_exn names in
       if root then Root path else Path path)

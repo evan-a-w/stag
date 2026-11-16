@@ -6,7 +6,7 @@ module Document = struct
     type t =
       { index : Index.t option
       ; generations : int String.Map.t
-        (** Of the files checked, as they were. *)
+      (** Of the files checked, as they were. *)
       }
   end
 
@@ -91,8 +91,8 @@ let document_of_path t path =
   Option.bind (Hashtbl.find t.paths path) ~f:(Hashtbl.find t.documents)
 ;;
 
-(* Symlinks resolved, as [Stdlib_checkout]'s are, so that a file has one
-   path. A file that does not exist is in its directory's canonical path. *)
+(* Symlinks resolved, as [Stdlib_checkout]'s are, so that a file has one path. A
+   file that does not exist is in its directory's canonical path. *)
 let canonical path =
   let realpath path = Option.try_with (fun () -> Filename_unix.realpath path) in
   match realpath path with
@@ -104,9 +104,9 @@ let canonical path =
       ~f:(fun dir -> dir ^/ Filename.basename path)
 ;;
 
-(* Documents without a file, eg. [untitled:Untitled-1], are named by a path
-   of their own, eg. [/untitled_1.stag]. Only those of [file:] and
-   [untitled:] are checked: others, eg. [git:], are views of files. *)
+(* Documents without a file, eg. [untitled:Untitled-1], are named by a path of
+   their own, eg. [/untitled_1.stag]. Only those of [file:] and [untitled:] are
+   checked: others, eg. [git:], are views of files. *)
 let path_of_uri t uri =
   let string = Lsp.Uri.to_string uri in
   if String.is_prefix string ~prefix:"file:"
@@ -159,9 +159,8 @@ let generation t path =
 
 let current_index t (document : Document.t) =
   let%bind.Option checked = document.checked in
-  if
-    Map.for_alli checked.generations ~f:(fun ~key ~data ->
-      generation t key = data)
+  if Map.for_alli checked.generations ~f:(fun ~key ~data ->
+       generation t key = data)
   then checked.index
   else None
 ;;
@@ -410,22 +409,21 @@ let capabilities ~encoding =
     ~positionEncoding:(Text.Encoding.to_lsp encoding)
     ~textDocumentSync:
       (`TextDocumentSyncOptions
-          (Types.TextDocumentSyncOptions.create
-             ~openClose:true
-             ~change:Incremental
-             ~save:
-               (`SaveOptions (Types.SaveOptions.create ~includeText:false ()))
-             ()))
+        (Types.TextDocumentSyncOptions.create
+           ~openClose:true
+           ~change:Incremental
+           ~save:(`SaveOptions (Types.SaveOptions.create ~includeText:false ()))
+           ()))
     ~hoverProvider:(`Bool true)
     ~definitionProvider:(`Bool true)
     ~documentFormattingProvider:(`Bool true)
     ~documentSymbolProvider:(`Bool true)
     ~semanticTokensProvider:
       (`SemanticTokensOptions
-          (Types.SemanticTokensOptions.create
-             ~legend:Semantic_tokens.legend
-             ~full:(`Bool true)
-             ()))
+        (Types.SemanticTokensOptions.create
+           ~legend:Semantic_tokens.legend
+           ~full:(`Bool true)
+           ()))
     ()
 ;;
 
@@ -567,8 +565,8 @@ let close_document t (text_document : Types.TextDocumentIdentifier.t) =
     publish t ~path:document.path [];
     Hashtbl.remove t.paths document.path;
     Hash_set.remove t.pending key;
-    if
-      not (String.equal (read_file document.path) (Text.contents document.text))
+    if not
+         (String.equal (read_file document.path) (Text.contents document.text))
     then touch t document.path;
     let covered =
       Hashtbl.find_and_remove t.covered key
@@ -588,8 +586,8 @@ let close_document t (text_document : Types.TextDocumentIdentifier.t) =
         publish t ~path [])))
 ;;
 
-(* Files changed on disk, eg. by [git checkout], or project files: any
-   check may be out of date. *)
+(* Files changed on disk, eg. by [git checkout], or project files: any check may
+   be out of date. *)
 let files_changed t (changes : Types.FileEvent.t list) =
   List.iter changes ~f:(fun change ->
     let path = canonical (Lsp.Uri.to_path change.uri) in

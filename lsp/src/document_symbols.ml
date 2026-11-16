@@ -3,12 +3,12 @@ open! Import
 let of_toplevels text toplevels =
   let range = Text.range_of_loc text in
   let symbol
-        ?(children = [])
-        ?detail
-        ~kind
-        ~(loc : Loc.t)
-        ~(name_loc : Loc.t)
-        name
+    ?(children = [])
+    ?detail
+    ~kind
+    ~(loc : Loc.t)
+    ~(name_loc : Loc.t)
+    name
     =
     Lsp_types.DocumentSymbol.create
       ~name

@@ -1,7 +1,6 @@
 open! Import
 
-(** A routine's times against those of a baseline, as criterion compares
-    them. *)
+(** A routine's times against those of a baseline, as criterion compares them. *)
 
 module Verdict : sig
   type t =
@@ -22,8 +21,8 @@ end
 
 type t =
   { change : Stats.Estimate.t
-    (** Relative change of the mean, [0.032] for +3.2%: the bootstrap of
-        [mean current / mean baseline - 1], resampling both independently. *)
+  (** Relative change of the mean, [0.032] for +3.2%: the bootstrap of
+      [mean current / mean baseline - 1], resampling both independently. *)
   ; verdict : Verdict.t
   }
 [@@deriving sexp]

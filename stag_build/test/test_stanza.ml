@@ -18,8 +18,7 @@ let%expect_test "stanzas" =
       (libraries ((bar @ dir/stag:1:31-34) (baz @ dir/stag:1:35-38)))
       (loc dir/stag:1:0-40)))
     |}];
-  parse
-    {|; a comment
+  parse {|; a comment
 (executable
  (name main) #;(ignored)
  (libraries foo))|};
@@ -45,8 +44,7 @@ let%expect_test "stanzas" =
 let%expect_test "no stanza" =
   parse "";
   parse "; just a comment\n";
-  [%expect
-    {|
+  [%expect {|
     ()
     ()
     |}]

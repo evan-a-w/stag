@@ -14,8 +14,8 @@ module Options : sig
 
   (** [-quick], [-samples N], [-warm-up SPAN], [-time SPAN],
       [-noise-threshold PERCENT], [-no-alloc], [-format FORMAT] (or [-json],
-      [-sexp]), [-baseline NAME] and [-save-baseline NAME]. With
-      [fake_clock], a fake clock moving by it at each read. *)
+      [-sexp]), [-baseline NAME] and [-save-baseline NAME]. With [fake_clock], a
+      fake clock moving by it at each read. *)
   val param : fake_clock:Time_ns.Span.t option -> t Command.Param.t
 end
 
@@ -27,10 +27,10 @@ val take_fake_clock : string list -> string list * Time_ns.Span.t option
     the report to stdout: each bench as it is measured, or all at the end in a
     machine format. Baselines are files of [baseline_dir], saved with the
     results of this run merged into those already saved under the name (or
-    replacing them with a warning, if they are malformed). A missing baseline
-    to compare with is warned of. [report] shows errors, eg. of a routine,
-    which do not stop the other benches, or of the options, which do. False if
-    any failed. *)
+    replacing them with a warning, if they are malformed). A missing baseline to
+    compare with is warned of. [report] shows errors, eg. of a routine, which do
+    not stop the other benches, or of the options, which do. False if any
+    failed. *)
 val run
   :  ?filters:string list
   -> Options.t
