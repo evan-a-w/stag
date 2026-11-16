@@ -813,7 +813,9 @@ module Printer = struct
       if not (List.is_empty var.bounds)
       then Queue.enqueue t.bounded (Bounds (fun () -> bounds name));
       List.iter var.kept ~f:(fun kept ->
-        if Hash_set.strict_add t.kept (kept_id kept) |> Result.is_ok
+        if
+          Hash_set.strict_add t.kept (kept_id kept)
+          |> Hash_set.Ok_or_duplicate.is_ok
         then Queue.enqueue t.bounded (Kept kept)));
     name
   ;;

@@ -129,8 +129,8 @@ module State = struct
 
   let assume set id1 id2 =
     match Hash_set.strict_add set (Id_pair.create id1 id2) with
-    | Ok () -> false
-    | Error _ -> true
+    | Ok -> false
+    | Duplicate -> true
   ;;
 end
 

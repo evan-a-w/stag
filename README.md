@@ -167,6 +167,12 @@ the prelude's sources rather than the embedded copy:
   definitions of its names in the sources of the checkout it was built in,
   if they are the same as the embedded ones.
 
+Development environment: `nix develop` (or direnv) gives the OxCaml compiler,
+its Jane Street libraries, dune, ocamlformat, merlin and ocaml-lsp-server, built
+with opam-nix from the oxcaml and upstream opam repositories (`flake.nix`). The
+opam solution is checked in as `nix/opam-packages.txt`; after `nix flake update`
+or changing the requested packages, regenerate it with `nix run .#resolve`.
+
 Tests: `dune build @runtest`, then `dune promote` to accept changes.
 
 - Runtime behaviour: stag expect tests in `tests/*.stag` (any new `.stag` file

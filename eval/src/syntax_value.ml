@@ -265,7 +265,7 @@ module Of_value = struct
       | None -> false, text
     in
     let names = String.split text ~on:'.' in
-    let modules, last = List.split_n names (List.length names - 1) in
+    let #(modules, last) = List.split_n names (List.length names - 1) in
     if
       List.for_all modules ~f:(Ident_kind.accepts Upper)
       && List.for_all last ~f:(Ident_kind.accepts kind)

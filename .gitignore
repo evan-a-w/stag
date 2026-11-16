@@ -55,3 +55,4 @@ bench/*.json.gz
 
 # direnv / nix-direnv
 .direnv/
+/result

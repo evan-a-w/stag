@@ -9,7 +9,7 @@ module Printed_token = struct
 end
 
 let tokens_of_text () =
-  Memo.of_comparable
+  Memo.of_comparator
     (module String)
     (fun text ->
        match Lexer.tokenize ~file:"" text with
@@ -60,13 +60,16 @@ let cut_points
       ~count
   =
   let first_at offset =
-    Array.binary_search
-      source
-      ~compare:(fun (t : Lexer.Located.t) offset ->
-        Int.compare t.loc.start.offset offset)
-      `First_greater_than_or_equal_to
-      offset
-    |> Option.value ~default:(Array.length source)
+    match
+      Array.binary_search
+        source
+        ~compare:(fun (t : Lexer.Located.t) offset ->
+          Int.compare t.loc.start.offset offset)
+        `First_greater_than_or_equal_to
+        offset
+    with
+    | None -> Array.length source
+    | Some i -> i
   in
   let rec cuts (ts : Syntax.Toplevel.t list) ~start acc =
     List.fold ts ~init:(start, acc) ~f:(fun (p, acc) (t : Syntax.Toplevel.t) ->
@@ -397,6 +400,7 @@ let blank_between
         Int.compare c.loc.start.offset offset)
       `First_greater_than_or_equal_to
       prev.stop.offset
+    |> Option.globalize Int.globalize
     |> Option.value_map ~default:[] ~f:(fun first ->
       let rec from i =
         if

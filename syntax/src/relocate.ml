@@ -1,8 +1,8 @@
 open! Import
 open Syntax
 
-let ( let* ) = Option.( >>= )
-let ( let+ ) = Option.( >>| )
+let ( let* ) x f = Option.bind x ~f
+let ( let+ ) x f = Option.map x ~f
 
 let list f gs ws =
   match List.zip gs ws with

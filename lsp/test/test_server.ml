@@ -204,16 +204,16 @@ let%expect_test "formatting" =
        format "a.stag";
        [%expect
          {|
-        [
-          {
-            "newText": "let x = \"é\" (* 😊 *)\n",
-            "range": {
-              "end": { "character": 0, "line": 2 },
-              "start": { "character": 0, "line": 0 }
-            }
-          }
-        ]
-        |}];
+         [
+           {
+             "newText": "let x = \"é\" (* 😊 *)\n",
+             "range": {
+               "start": { "line": 0, "character": 0 },
+               "end": { "line": 2, "character": 0 }
+             }
+           }
+         ]
+         |}];
        format "b.stag";
        [%expect {| [] |}])
 ;;
@@ -779,8 +779,8 @@ let%expect_test "documents without a file are checked standalone" =
           "value": "```stag\nUntitled_2.y : int\n```"
         },
         "range": {
-          "end": { "character": 5, "line": 0 },
-          "start": { "character": 4, "line": 0 }
+          "start": { "line": 0, "character": 4 },
+          "end": { "line": 0, "character": 5 }
         }
       }
       |}])
@@ -897,12 +897,12 @@ let%expect_test "documents not of files nor untitled are not checked" =
           "kind": 13,
           "name": "y",
           "range": {
-            "end": { "character": 21, "line": 0 },
-            "start": { "character": 0, "line": 0 }
+            "start": { "line": 0, "character": 0 },
+            "end": { "line": 0, "character": 21 }
           },
           "selectionRange": {
-            "end": { "character": 5, "line": 0 },
-            "start": { "character": 4, "line": 0 }
+            "start": { "line": 0, "character": 4 },
+            "end": { "line": 0, "character": 5 }
           }
         }
       ]
@@ -921,15 +921,15 @@ let%expect_test "documents not of files nor untitled are not checked" =
       {
         "contents": { "kind": "markdown", "value": "```stag\nSame.y : int\n```" },
         "range": {
-          "end": { "character": 5, "line": 0 },
-          "start": { "character": 4, "line": 0 }
+          "start": { "line": 0, "character": 4 },
+          "end": { "line": 0, "character": 5 }
         }
       }
       {
         "contents": { "kind": "markdown", "value": "```stag\nSame_2.y : int\n```" },
         "range": {
-          "end": { "character": 5, "line": 0 },
-          "start": { "character": 4, "line": 0 }
+          "start": { "line": 0, "character": 4 },
+          "end": { "line": 0, "character": 5 }
         }
       }
       |}])

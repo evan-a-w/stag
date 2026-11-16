@@ -326,7 +326,7 @@ let to_string_hum
 let max_shown = 50
 
 let list_to_string_hum ?contents ?warning ts =
-  let shown, hidden = List.split_n ts max_shown in
+  let #(shown, hidden) = List.split_n ts max_shown in
   String.concat (List.map shown ~f:(to_string_hum ?contents ?warning))
   ^
   match List.length hidden with

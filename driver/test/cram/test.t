@@ -218,7 +218,7 @@ Errors still fail, after printing the corrections of other tests.
   $ stag test -print-corrected -promote ok.stag
   Error parsing command line:
   
-    Cannot pass more than one of these: 
+    Cannot pass more than one of these:
       -promote
       -print-corrected
   

@@ -191,7 +191,7 @@ let map_fields fields ~f =
    [expr], counting quotes up and splices down. Children are visited in order. *)
 let map_children ~depth (expr : Typed.Expr.t) ~f =
   let same = f ~depth in
-  let%map desc : Typed.Expr.t Typed.Expr.Desc.t =
+  let%map (desc : Typed.Expr.t Typed.Expr.Desc.t) =
     match expr.desc with
     | (Lit _ | Var _ | Poly_variant (_, None) | Expect _ | Type _) as desc ->
       Ok desc
@@ -218,7 +218,7 @@ let map_children ~depth (expr : Typed.Expr.t) ~f =
       Typed.Expr.Desc.Annotated (expr, ty)
     | Splice { code; subs } ->
       let%bind code = f ~depth:(depth - 1) code in
-      let%map subs : Typed.Expr.t Typed.Expr.Subs.t =
+      let%map (subs : Typed.Expr.t Typed.Expr.Subs.t) =
         match subs with
         | Explicit subs ->
           let%map subs = map_fields subs ~f:same in
@@ -915,7 +915,7 @@ and build_step
     { expr with desc = Var (Persistent (Local renamed)) }
   | Splice { code; subs } when depth = 1 ->
     let%bind code, values = eval t ~env ~level code >>= code_of_value in
-    let%bind subs : Typed.Expr.t Typed.Expr.Subs.t =
+    let%bind (subs : Typed.Expr.t Typed.Expr.Subs.t) =
       match subs with
       | Explicit subs ->
         let%map subs =

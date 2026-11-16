@@ -888,8 +888,8 @@ let print_parts ty =
   let vars = Int.Hash_set.create () in
   let first set id =
     match Hash_set.strict_add set id with
-    | Ok () -> true
-    | Error _ -> false
+    | Ok -> true
+    | Duplicate -> false
   in
   let rec go_ty (ty : Type.ty) =
     match ty with

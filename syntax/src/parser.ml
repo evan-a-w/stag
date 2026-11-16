@@ -1290,7 +1290,9 @@ let with_lex_errors t (toplevel : Toplevel.t) ~start =
         ~compare:Int.compare
         `First_greater_than_or_equal_to
         start
-      |> Option.exists ~f:(fun i -> t.lex_errors.(i) < stop)
+      |> function
+      | None -> false
+      | Some i -> t.lex_errors.(i) < stop
     then { toplevel with txt = desc (expr_at ~loc:toplevel.loc Error) }
     else toplevel
 ;;
@@ -1412,7 +1414,7 @@ let rec toplevel t : Toplevel.t =
        let struct_loc = loc t in
        expect t Struct;
        let toplevels = toplevels t ~in_struct:true in
-       close_recovering t End ~opener:Struct ~open_loc:struct_loc;
+       close_recovering t Token.End ~opener:Token.Struct ~open_loc:struct_loc;
        since t start (Toplevel.Module (name, toplevels))
      | _ -> expected t "a declaration splice `.~e` after `module%inline M =`")
   | (Include | Include_inline) as keyword ->
@@ -1690,6 +1692,7 @@ let program_recovering ~file source =
             Int.compare token.loc.start.offset offset)
           `First_greater_than_or_equal_to
           loc.stop.offset
+        |> Option.globalize Int.globalize
         |> Option.map ~f:(fun i -> tokens.(i).loc.start.offset))
       |> Int.Set.of_list
     in

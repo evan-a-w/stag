@@ -68,7 +68,7 @@ let at_most (lower : Presence_var.t) (upper : Presence_var.t) =
   let visited = Int.Hash_set.create () in
   let rec go (var : Presence_var.t) =
     var.id = upper.id
-    || (Hash_set.strict_add visited var.id |> Result.is_ok
+    || (Hash_set.strict_add visited var.id |> Hash_set.Ok_or_duplicate.is_ok
         && List.exists var.bounds ~f:(function
           | At_most bound ->
             (match Type.canonical_presence bound with
@@ -90,7 +90,8 @@ let simplify ~is_generalized ~tys ~presences ~rows ~kept =
   let rec walk_ty (ty : Type.ty) =
     match ty with
     | TVar ({ state = Link target; _ } as var) ->
-      if Hash_set.strict_add links var.id |> Result.is_ok then walk_ty target
+      if Hash_set.strict_add links var.id |> Hash_set.Ok_or_duplicate.is_ok
+      then walk_ty target
     | TVar var -> occurs var Occurrence.Other
     | TCon (_, args) ->
       List.iter args ~f:(function
@@ -104,12 +105,14 @@ let simplify ~is_generalized ~tys ~presences ~rows ~kept =
       walk_ty inner;
       walk_row context
     | TRecord { id; row } | TVariant { id; row } ->
-      if Hash_set.strict_add nodes id |> Result.is_ok then walk_row row
+      if Hash_set.strict_add nodes id |> Hash_set.Ok_or_duplicate.is_ok
+      then walk_row row
   and walk_row (row : Type.row) =
     match row with
     | REmpty -> ()
     | RVar ({ state = Link target; _ } as var) ->
-      if Hash_set.strict_add links var.id |> Result.is_ok then walk_row target
+      if Hash_set.strict_add links var.id |> Hash_set.Ok_or_duplicate.is_ok
+      then walk_row target
     | RVar _ -> ()
     | RExtend (_, presence, _, ty, rest) ->
       entry presence ty;

@@ -289,7 +289,9 @@ module Program_env = struct
   let reaches_mutable t ident =
     let visited = Typed.Ident.Hash_set.create () in
     let rec reaches ident ~via =
-      if Result.is_error (Hash_set.strict_add visited ident)
+      if
+        Hash_set.Ok_or_duplicate.is_duplicate
+          (Hash_set.strict_add visited ident)
       then None
       else (
         let ty = Map.find t.ident_info ident in
@@ -357,7 +359,19 @@ exception Uses_unfinished
 
 (* Carries why reflection failed, eg. a cycle, through the evaluation, to be
    the error of that evaluation. *)
-exception Reflection_failed of Typecheck_error.t [@@deriving sexp_of]
+exception Reflection_failed of Typecheck_error.t
+
+let () =
+  Sexplib0.Sexp_conv.Exn_converter.add
+    [%extension_constructor Reflection_failed]
+    (Basement.Stdlib_shim.Obj.magic_portable (function
+       | Reflection_failed error ->
+         Sexp.List
+           [ Atom "typecheck.ml.Reflection_failed"
+           ; Typecheck_error.sexp_of_t error
+           ]
+       | _ -> assert false))
+;;
 
 (* Raised by the interpreter: a bug, eg. ill-typed code that was run. *)
 exception Internal of exn
@@ -3343,12 +3357,13 @@ let sorted_errors errors ~root =
       match error.kind with
       | Maybe_generated_by_running_include { include_ = splice; error = _ }
       | Declaration_splice_cycle { splice; name = _; module_ = _ } ->
-        Hash_set.strict_add blocking splice |> Result.is_error
+        Hash_set.strict_add blocking splice
+        |> Hash_set.Ok_or_duplicate.is_duplicate
       | _ -> false
     in
     (not blocked_again)
     && Hash_set.strict_add seen (error.loc, Typecheck_error.message error)
-       |> Result.is_ok)
+       |> Hash_set.Ok_or_duplicate.is_ok)
 ;;
 
 let prelude_and_root t program_env =

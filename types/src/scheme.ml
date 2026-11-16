@@ -46,7 +46,9 @@ let constrain_row_exn fresh ~row ~(bound : Type.bound) =
 ;;
 
 let enqueue_kept ~pending ~seen_kept kept =
-  if Hash_set.strict_add seen_kept (Type.kept_id kept) |> Result.is_ok
+  if
+    Hash_set.strict_add seen_kept (Type.kept_id kept)
+    |> Hash_set.Ok_or_duplicate.is_ok
   then Queue.enqueue pending (Pending.Kept kept)
 ;;
 
@@ -375,7 +377,8 @@ let may_be_used ~rank =
           (match Hashtbl.find known var.id with
            | Some used -> used
            | None ->
-             Hash_set.strict_add visited var.id |> Result.is_ok
+             Hash_set.strict_add visited var.id
+             |> Hash_set.Ok_or_duplicate.is_ok
              && (List.exists var.in_bounds_of ~f:go || next ())
              &&
              (Hashtbl.set known ~key:var.id ~data:true;
@@ -634,7 +637,8 @@ let iter_used_vars
     match ty with
     | TVar { state = Link target; id; _ } ->
       link id;
-      if Hash_set.strict_add links id |> Result.is_ok then iter_ty target
+      if Hash_set.strict_add links id |> Hash_set.Ok_or_duplicate.is_ok
+      then iter_ty target
     | TVar var -> f var.id
     | TCon (_, args) ->
       List.iter args ~f:(function
@@ -648,12 +652,14 @@ let iter_used_vars
       iter_ty inner;
       iter_row context
     | TRecord { id; row } | TVariant { id; row } ->
-      if Hash_set.strict_add nodes id |> Result.is_ok then iter_row row
+      if Hash_set.strict_add nodes id |> Hash_set.Ok_or_duplicate.is_ok
+      then iter_row row
   and iter_row (row : Type.row) =
     match row with
     | RVar { state = Link target; id; _ } ->
       link id;
-      if Hash_set.strict_add links id |> Result.is_ok then iter_row target
+      if Hash_set.strict_add links id |> Hash_set.Ok_or_duplicate.is_ok
+      then iter_row target
     | RVar var -> f var.id
     | REmpty -> ()
     | RExtend (_, presence, assigned, ty, rest) ->
@@ -1176,7 +1182,8 @@ let generalize fresh ~rank tys =
     |> List.concat_map ~f:(fun (var : Type.bounded) ->
       let unbound (var : _ Type.Var.t) =
         match var.state with
-        | Unbound _ -> Hash_set.strict_add bounded var.id |> Result.is_ok
+        | Unbound _ ->
+          Hash_set.strict_add bounded var.id |> Hash_set.Ok_or_duplicate.is_ok
         | Generic | Link _ -> false
       in
       match var with

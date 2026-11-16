@@ -245,7 +245,8 @@ let rec unique_among ~path taken toplevels ~report =
     let duplicates =
       List.filter (members toplevel) ~f:(fun (member, _) ->
         Hash_set.mem taken member
-        || Hash_set.strict_add added member |> Result.is_error)
+        || Hash_set.strict_add added member
+           |> Hash_set.Ok_or_duplicate.is_duplicate)
     in
     let report_duplicate ((kind, name), (at : Name.t)) =
       error ~loc:at.loc (Member_kind.duplicate kind (join (path @ [ name ])))

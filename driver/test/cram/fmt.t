@@ -61,7 +61,7 @@ Several files need a flag.
   $ stag fmt --check --inplace messy.stag 2>&1 | head -4
   Error parsing command line:
   
-    Cannot pass more than one of these: 
+    Cannot pass more than one of these:
       -inplace
 
 Formatting in place rewrites only the files that change.

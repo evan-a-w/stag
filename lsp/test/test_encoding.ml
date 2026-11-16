@@ -40,8 +40,8 @@ let%expect_test "UTF-16 positions, by default" =
         "value": "```stag\nInt.add : int -> int -> int\n```"
       },
       "range": {
-        "end": { "character": 23, "line": 0 },
-        "start": { "character": 16, "line": 0 }
+        "start": { "line": 0, "character": 16 },
+        "end": { "line": 0, "character": 23 }
       }
     }
     |}];
@@ -70,8 +70,8 @@ let%expect_test "UTF-16 positions, by default" =
         "value": "```stag\nInt.add : int -> int -> int\n```"
       },
       "range": {
-        "end": { "character": 23, "line": 0 },
-        "start": { "character": 16, "line": 0 }
+        "start": { "line": 0, "character": 16 },
+        "end": { "line": 0, "character": 23 }
       }
     }
     |}]
@@ -106,8 +106,8 @@ let%expect_test "UTF-8 positions, if the client offers them" =
         "value": "```stag\nInt.add : int -> int -> int\n```"
       },
       "range": {
-        "end": { "character": 26, "line": 0 },
-        "start": { "character": 19, "line": 0 }
+        "start": { "line": 0, "character": 19 },
+        "end": { "line": 0, "character": 26 }
       }
     }
     |}]
