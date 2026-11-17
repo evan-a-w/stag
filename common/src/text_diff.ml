@@ -25,9 +25,10 @@ let lines string =
   | lines -> lines
 ;;
 
-(* By longest common subsequence, only tabulating the lines between the common prefix and
-   suffix. Past them, the shorter side's remaining lines are a subsequence of
-   the other's, which are matched greedily as the full table would. *)
+(* By longest common subsequence, only tabulating the lines between the common
+   prefix and suffix. Past them, the shorter side's remaining lines are a
+   subsequence of the other's, which are matched greedily as the full table
+   would. *)
 let diff (old : string array) (new_ : string array) =
   let n = Array.length old in
   let m = Array.length new_ in
@@ -60,10 +61,9 @@ let diff (old : string array) (new_ : string array) =
   let rec go i j acc =
     if i < n && j < m && String.equal old.(i) new_.(j)
     then go (i + 1) (j + 1) (Line.Same old.(i) :: acc)
-    else if
-      if i < n' && j < m'
-      then lcs.(i - p + 1).(j - p) >= lcs.(i - p).(j - p + 1)
-      else n - i > m - j
+    else if if i < n' && j < m'
+            then lcs.(i - p + 1).(j - p) >= lcs.(i - p).(j - p + 1)
+            else n - i > m - j
     then go (i + 1) j (Line.Removed old.(i) :: acc)
     else if j < m
     then go i (j + 1) (Line.Added new_.(j) :: acc)
@@ -97,8 +97,7 @@ let unified ~old_name ~new_name ~old ~new_ =
     let changes =
       List.filter (List.range 0 count) ~f:(fun i -> Line.is_change lines.(i))
     in
-    (* Hunks as inclusive ranges of lines, merging those whose context
-       overlaps. *)
+    (* Hunks as inclusive ranges of lines, merging those whose context overlaps. *)
     let hunks =
       List.fold changes ~init:[] ~f:(fun hunks i ->
         let start = Int.max 0 (i - context) in

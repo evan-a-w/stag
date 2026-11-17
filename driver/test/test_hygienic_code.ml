@@ -39,8 +39,8 @@ let show_values source =
     printf "%s: %s\n" name (Treewalk.Value.to_string_hum value))
 ;;
 
-(* As syntax, printed, checked to print and parse back the same, and as a
-   sexp, where refs are [<name>]. *)
+(* As syntax, printed, checked to print and parse back the same, and as a sexp,
+   where refs are [<name>]. *)
 let show_erased source =
   iter_erased source ~f:(fun name value ->
     let expr = Syntax_value.Expr.of_value value ~loc:Loc.none |> ok_exn in
@@ -56,8 +56,8 @@ let%expect_test "an erased expression's value" =
     {| e_lib: Stag.Expr.Construct (Stag.Path.Ref <constructor Core.Sexp.Atom>, Cons (Stag.Expr.App (Stag.Expr.Var (Stag.Path.Ref <value Core.Int.to_string>, None), Stag.Expr.Var (Stag.Path.Name "x", None)), Nil)) |}]
 ;;
 
-let%expect_test
-    "what code refers to is erased as refs, its free variables as names"
+let%expect_test "what code refers to is erased as refs, its free variables as \
+                 names"
   =
   show_erased
     {|
@@ -169,8 +169,7 @@ let e_shadowing = Stag.Code.erase .< fun x -> fun x -> x >.
 ;;
 
 let%expect_test "erasing code that embeds a local function is an error" =
-  show_erased
-    {|
+  show_erased {|
 let e_local = let k y = y in Stag.Code.erase .< k 1 >.
 |};
   [%expect
@@ -399,8 +398,8 @@ include .~(value "g" .< 1 >.)
     |}]
 ;;
 
-let%expect_test
-    "a ref to a function that uses what the running include generates"
+let%expect_test "a ref to a function that uses what the running include \
+                 generates"
   =
   check_files
     [ ( "a.stag"

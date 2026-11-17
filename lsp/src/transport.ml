@@ -120,20 +120,20 @@ let respond_error t ~id ~code message =
     t
     (frame_json
        (`Assoc
-           [ "jsonrpc", `String "2.0"
-           ; "id", id
-           ; ( "error"
-             , Jsonrpc.Response.Error.yojson_of_t
-                 (Jsonrpc.Response.Error.make ~code ~message ()) )
-           ]))
+         [ "jsonrpc", `String "2.0"
+         ; "id", id
+         ; ( "error"
+           , Jsonrpc.Response.Error.yojson_of_t
+               (Jsonrpc.Response.Error.make ~code ~message ()) )
+         ]))
 ;;
 
 let without_null_params : Yojson.Safe.t -> Yojson.Safe.t = function
   | `Assoc fields ->
     `Assoc
       (List.filter fields ~f:(function
-         | "params", `Null -> false
-         | _ -> true))
+        | "params", `Null -> false
+        | _ -> true))
   | json -> json
 ;;
 

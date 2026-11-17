@@ -44,11 +44,11 @@ end = struct
   let t_of_sexp sexp = of_string (string_of_sexp sexp)
 end
 
-(** What names a declared type, constructor, field or toplevel value: a path
-    as written, resolved where it is, or from the root scope ([.M.x], which
-    nothing local shadows), or a canonical name, which reflection and
-    [Stag.Code.erase] give (see [Stag.Type_ref] in the prelude) and the parser
-    never makes, naming the same declaration wherever it is. *)
+(** What names a declared type, constructor, field or toplevel value: a path as
+    written, resolved where it is, or from the root scope ([.M.x], which nothing
+    local shadows), or a canonical name, which reflection and [Stag.Code.erase]
+    give (see [Stag.Type_ref] in the prelude) and the parser never makes, naming
+    the same declaration wherever it is. *)
 module Decl_path = struct
   type t =
     | Path of Path.t
@@ -65,11 +65,11 @@ module Decl_path = struct
 
   let sexp_of_t t = Sexp.Atom (to_string t)
 
-  (** The source naming the declaration of canonical name [name] from
-      anywhere, given the program's root modules: its root path, unless the
-      first name of a prelude path is a root module (or it is an intrinsic,
-      named only within the prelude), where nothing names it, so as
-      [<prelude.P>], which does not parse, [P] its public path. *)
+  (** The source naming the declaration of canonical name [name] from anywhere,
+      given the program's root modules: its root path, unless the first name of
+      a prelude path is a root module (or it is an intrinsic, named only within
+      the prelude), where nothing names it, so as [<prelude.P>], which does not
+      parse, [P] its public path. *)
   let resolved_source ~root_modules name =
     let path = Prelude_path.root_path name in
     let unnamed =
@@ -89,10 +89,10 @@ module Name = struct
   type t = string Located.t [@@deriving sexp_of, compare, equal]
 end
 
-(* The syntax's types are mutually recursive, as splices in type positions
-   hold expressions and struct quotes hold declarations; each is re-exported
-   by its module below. They are in [Defs], so that their constructors (eg.
-   [Error]) don't shadow others where [Syntax] is opened. *)
+(* The syntax's types are mutually recursive, as splices in type positions hold
+   expressions and struct quotes hold declarations; each is re-exported by its
+   module below. They are in [Defs], so that their constructors (eg. [Error])
+   don't shadow others where [Syntax] is opened. *)
 module Defs = struct
   [@@@warning "-30"]
 
@@ -110,14 +110,13 @@ module Defs = struct
     | Record of row
     | Variant of row (** Each entry is a tag and its argument type. *)
     | Mut of type_expr
-    (** [mut t]: the type of an entry of a code type's context the code
-        assigns. *)
+    (** [mut t]: the type of an entry of a code type's context the code assigns. *)
     | Immut of type_expr
     (** [immut t]: the type of an entry of a code type's context the code
         doesn't assign. Without either, it may or may not. *)
     | Splice of expr
     (** [.~e]: the type [e : Stag.Type_expr.t] evaluates to at compile time, or
-      an antiquote in a struct quote. *)
+        an antiquote in a struct quote. *)
 
   and row = row_desc Located.t
 
@@ -141,11 +140,11 @@ module Defs = struct
     | Abstract
     | Splice of expr Located.t
     (** [type t = .~e], located at [.~e]: the definition
-      [e : Stag.Type_decl.Kind.t] evaluates to at compile time, or an
-      antiquote in a struct quote. *)
+        [e : Stag.Type_decl.Kind.t] evaluates to at compile time, or an
+        antiquote in a struct quote. *)
     | Malformed of type_decl_kind
     (** What parsed of a declaration with a syntax error, whose members' types
-      may be missing. *)
+        may be missing. *)
 
   and type_decl =
     { name : Name.t
@@ -177,7 +176,7 @@ module Defs = struct
         }
     | Exception of pattern
     (** [exception p], at the top of a match arm: matches an exception the
-      scrutinee raises. *)
+        scrutinee raises. *)
 
   and expr = expr_desc Located.t
 
@@ -192,9 +191,8 @@ module Defs = struct
     | Fun of binding list * expr (** [fun x (y : t) -> e], of some params. *)
     | Splice of
         { expr : expr
-        ; subs :
-            (Name.t * expr option) list
-              option (* [None] is all in scope, so is diff to [] *)
+        ; subs : (Name.t * expr option) list option
+        (* [None] is all in scope, so is diff to [] *)
         }
     | Quote of expr
     | Tuple of expr list
@@ -215,8 +213,8 @@ module Defs = struct
     (** [[%expect {|...|}]], located at the string, or zero width after
       [[%expect] if there is none. *)
     | Struct_quote of toplevel list
-    (** [.< struct ... end >.]: the declarations as a
-      [list[Stag.Toplevel.t]], with antiquotes. *)
+    (** [.< struct ... end >.]: the declarations as a [list[Stag.Toplevel.t]],
+        with antiquotes. *)
     | Error (** In place of what did not parse. *)
 
   and bench_param =
@@ -233,17 +231,17 @@ module Defs = struct
     | Exception of Name.t * type_expr list (** [exception E of t1 * t2]. *)
     | Malformed_exception of Name.t * type_expr list
     (** What parsed of an exception declaration with a syntax error, whose
-      arguments may be missing. *)
+        arguments may be missing. *)
     | Module of Name.t * toplevel list
     | Module_splice of Name.t * expr * toplevel list Located.t option
     (** [module M = .~e], or with its expansion
-      [module%inline M = .~e ... end%inline]. *)
+        [module%inline M = .~e ... end%inline]. *)
     | Include of expr * toplevel list Located.t option
     (** [include .~e], or with its expansion
-      [include%inline .~e ... end%inline]. An expansion is the declarations
-      written between the splice and [end%inline], located from the end of
-      the splice to the start of [end%inline]. It is only checked against
-      what the splice generates, which is what is declared. *)
+        [include%inline .~e ... end%inline]. An expansion is the declarations
+        written between the splice and [end%inline], located from the end of the
+        splice to the start of [end%inline]. It is only checked against what the
+        splice generates, which is what is declared. *)
     | Expect_test of
         { name : string Located.t
         ; body : expr
@@ -338,8 +336,7 @@ module Binding = struct
 end
 
 module Pattern = struct
-  (** What a polymorphic record pattern says about the fields it does not
-      list. *)
+  (** What a polymorphic record pattern says about the fields it does not list. *)
   module Rest = struct
     type t = pattern_rest =
       | Closed

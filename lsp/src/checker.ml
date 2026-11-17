@@ -16,8 +16,7 @@ let read ~contents path =
      | Sys_error _ -> "")
 ;;
 
-(* [absolute] locates in absolute paths, and those without a location in
-   [path]. *)
+(* [absolute] locates in absolute paths, and those without a location in [path]. *)
 let diagnostics_by_file ~path ~absolute ~files diagnostics =
   let init =
     List.map files ~f:(fun file -> file, [])
@@ -26,22 +25,22 @@ let diagnostics_by_file ~path ~absolute ~files diagnostics =
   List.fold diagnostics ~init ~f:(fun map (diagnostic : Diagnostic.t) ->
     let diagnostic = Diagnostic.relocate diagnostic ~f:absolute in
     let file =
-      if Loc.is_none diagnostic.loc then path else diagnostic.loc.file
+      if Loc.is_none diagnostic.loc then path else Loc.file_name diagnostic.loc
     in
     Map.add_multi map ~key:file ~data:diagnostic)
   |> Map.map ~f:List.rev
 ;;
 
-(* [checked] is the program's modules, if they parsed, and the program
-   checked, which with errors is what checked. *)
+(* [checked] is the program's modules, if they parsed, and the program checked,
+   which with errors is what checked. *)
 let of_checked
-      ?prelude
-      ?(of_prelude = false)
-      ~path
-      ~absolute
-      ~files
-      ~errors
-      checked
+  ?prelude
+  ?(of_prelude = false)
+  ~path
+  ~absolute
+  ~files
+  ~errors
+  checked
   =
   let diagnostics = diagnostics_by_file ~path ~absolute ~files in
   match checked with
@@ -92,14 +91,16 @@ let rec relocated ~relocate (toplevels : Syntax.Toplevel.t list) =
     | Bench _ ->
       Option.some_if
         (not
-           (String.equal (relocate toplevel.loc : Loc.t).file toplevel.loc.file))
+           (Loc.File.equal
+              (relocate toplevel.loc : Loc.t).file
+              toplevel.loc.file))
         toplevel)
 ;;
 
 module Prelude_source = struct
-  (* The prelude a program is checked with: the embedded one, whose
-     definitions are found in [stdlib]'s sources that are the same, or the
-     sources of the checkout the program is in. *)
+  (* The prelude a program is checked with: the embedded one, whose definitions
+     are found in [stdlib]'s sources that are the same, or the sources of the
+     checkout the program is in. *)
   type t =
     | Embedded of { stdlib : Stdlib_checkout.t option }
     | Checkout of Stdlib_checkout.t
@@ -118,13 +119,13 @@ let source_paths checkout =
 ;;
 
 let check_groups
-      ~limits
-      ~(prelude : Prelude_source.t)
-      ~contents
-      ~path
-      ~absolute
-      ~files
-      groups
+  ~limits
+  ~(prelude : Prelude_source.t)
+  ~contents
+  ~path
+  ~absolute
+  ~files
+  groups
   =
   let groups, errors = groups in
   let checked ?prelude groups =
@@ -153,8 +154,8 @@ let check_groups
     let result =
       match Stdlib_checkout.prelude ~contents checkout with
       | Error diagnostic ->
-        (* The prelude's error is reported in its source, and the program
-           left unchecked, which is said in it. *)
+        (* The prelude's error is reported in its source, and the program left
+           unchecked, which is said in it. *)
         of_checked
           ~path
           ~absolute
@@ -162,7 +163,7 @@ let check_groups
           ~errors:
             [ diagnostic
             ; Diagnostic.create
-                ~loc:(Loc.start_of_file path)
+                ~loc:(Loc.start_of_file (Loc.File.of_string path))
                 "This file is not checked: its checkout's prelude has errors"
             ]
           None
@@ -229,9 +230,9 @@ let standalone ~limits ~prelude ~contents path =
 ;;
 
 let absolute_loc ~root (loc : Loc.t) =
-  if Loc.is_none loc || Filename.is_absolute loc.file
+  if Loc.is_none loc || Filename.is_absolute (Loc.file_name loc)
   then loc
-  else { loc with file = root ^/ loc.file }
+  else { loc with file = Loc.File.of_string (root ^/ Loc.file_name loc) }
 ;;
 
 let relative ~root path =

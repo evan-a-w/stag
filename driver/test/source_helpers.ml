@@ -26,9 +26,8 @@ let id x = x
 ;;
 
 (* Every program parsed from source is also checked to round trip through
-   [Printer], which is silent unless it does not. Only at one width, and not
-   for long sources (eg. the deep nesting of [test_limits]), to keep tests
-   fast. *)
+   [Printer], which is silent unless it does not. Only at one width, and not for
+   long sources (eg. the deep nesting of [test_limits]), to keep tests fast. *)
 let round_trip ~source program =
   if String.length source <= 10_000
   then Round_trip.program ~widths:[ 80 ] program
@@ -119,9 +118,8 @@ let print_signature t =
 
 let print_bodies ?only t =
   List.iter (members t) ~f:(fun { ident; body; _ } ->
-    if
-      Option.for_all only ~f:(fun only ->
-        List.mem only ident.name ~equal:String.equal)
+    if Option.for_all only ~f:(fun only ->
+         List.mem only ident.name ~equal:String.equal)
     then print_s [%sexp (ident : Typed.Ident.t), (body : Typed.Expr.t)])
 ;;
 
@@ -163,9 +161,8 @@ let prelude_locals =
 let print_typed ?(idents = false) t =
   let program = (checked t).program in
   List.iter program.sccs ~f:(fun (scc : Typed.Scc.t) ->
-    if
-      not
-        (List.for_all scc.members ~f:(fun member -> is_prelude t member.ident))
+    if not
+         (List.for_all scc.members ~f:(fun member -> is_prelude t member.ident))
     then print_s [%sexp (scc : Typed.Scc.t)]);
   if idents
   then (

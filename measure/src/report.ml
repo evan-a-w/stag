@@ -26,8 +26,8 @@ module Entry = struct
   [@@deriving sexp_of]
 end
 
-(* [value] with 4 significant digits, scaled by a power of 1000 to the
-   largest of [units] that leaves at least 1 before the point. *)
+(* [value] with 4 significant digits, scaled by a power of 1000 to the largest
+   of [units] that leaves at least 1 before the point. *)
 let scaled value ~units =
   if not (Float.is_finite value)
   then Float.to_string value, List.hd_exn units

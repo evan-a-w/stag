@@ -9,8 +9,8 @@ module Kind : sig
   [@@deriving sexp_of]
 end
 
-(** An error raised by the program being evaluated, eg. an exception it does
-    not handle or an exceeded limit, at the expression that raised it. *)
+(** An error raised by the program being evaluated, eg. an exception it does not
+    handle or an exceeded limit, at the expression that raised it. *)
 type t =
   { loc : Loc.t
   ; kind : Kind.t

@@ -226,7 +226,7 @@ module Make (B : Builder) = struct
               ; ( "param"
                 , option
                     (fun ({ name = param; args } : Bench_param.t) ->
-                       pair name (list expr) (param, args))
+                      pair name (list expr) (param, args))
                     param )
               ; "body", expr body
               ]
@@ -256,7 +256,8 @@ module Make (B : Builder) = struct
     match antiquote with
     | None -> program t
     | Some antiquote ->
-      let module L = Lifter (struct
+      let module L =
+        Lifter (struct
           let antiquote = antiquote
         end)
       in

@@ -44,8 +44,7 @@ let z = 3
 
 let%expect_test "only comments" =
   test "(* a *)\n\n(* b *)   \n";
-  [%expect
-    {|
+  [%expect {|
     (* a *)
 
     (* b *)
@@ -157,12 +156,10 @@ let z = 4
 ;;
 
 let%expect_test "a trailing comment breaks the line after it" =
-  test
-    {|let x = f a (* a *)
+  test {|let x = f a (* a *)
   b
 |};
-  [%expect
-    {|
+  [%expect {|
     let x =
       f
         a (* a *)
@@ -381,8 +378,7 @@ type t = A (** the a *) | B
 ;;
 
 let%expect_test "multi-line comments keep their text" =
-  test
-    {|let f x =
+  test {|let f x =
       (* indented
          over lines *)
   x
@@ -451,8 +447,8 @@ let z =
     |}]
 ;;
 
-let%expect_test
-    "comments followed on their last line by more comments then code are inline"
+let%expect_test "comments followed on their last line by more comments then \
+                 code are inline"
   =
   test
     {|let x = (a, (* one
@@ -476,8 +472,8 @@ let y = (a, (* one
     |}]
 ;;
 
-let%expect_test
-    "multi-line comments move with their first line, as far as they can"
+let%expect_test "multi-line comments move with their first line, as far as \
+                 they can"
   =
   test
     {|let f x =
@@ -519,8 +515,8 @@ let%expect_test "a space after a line is not measured" =
     |}]
 ;;
 
-let%expect_test
-    "an inline comment whose next token is dropped stays before what follows"
+let%expect_test "an inline comment whose next token is dropped stays before \
+                 what follows"
   =
   test
     {|let rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr = ((* in redundant paren *) (xxxxxxxxxxxxxxxxxxxxxx))
@@ -604,8 +600,7 @@ let%expect_test "comments' CRLFs become LFs, as the code's do" =
 
 let%expect_test "comments with lines indented by tabs are not moved" =
   test "let f x =\n        (* a\n\tb\n  \tc *)\n        x\n";
-  [%expect
-    {|
+  [%expect {|
     let f x =
       (* a
     b

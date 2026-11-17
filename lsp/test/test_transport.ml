@@ -26,8 +26,7 @@ let with_input ?read_size input ~f =
   result, written
 ;;
 
-(* The bodies of framed messages, one per line, with initialize's result
-   elided. *)
+(* The bodies of framed messages, one per line, with initialize's result elided. *)
 let print_frames output =
   let rec loop output =
     if not (String.is_empty output)
@@ -190,14 +189,14 @@ let did_open uri text =
           ~method_:"textDocument/didOpen"
           ~params:
             (`Assoc
-                [ ( "textDocument"
-                  , `Assoc
-                      [ "uri", `String uri
-                      ; "languageId", `String "stag"
-                      ; "version", `Int 1
-                      ; "text", `String text
-                      ] )
-                ])
+              [ ( "textDocument"
+                , `Assoc
+                    [ "uri", `String uri
+                    ; "languageId", `String "stag"
+                    ; "version", `Int 1
+                    ; "text", `String text
+                    ] )
+              ])
           ()))
 ;;
 
@@ -209,9 +208,9 @@ let hover id uri =
           ~method_:"textDocument/hover"
           ~params:
             (`Assoc
-                [ "textDocument", `Assoc [ "uri", `String uri ]
-                ; "position", `Assoc [ "line", `Int 0; "character", `Int 4 ]
-                ])
+              [ "textDocument", `Assoc [ "uri", `String uri ]
+              ; "position", `Assoc [ "line", `Int 0; "character", `Int 4 ]
+              ])
           ()))
 ;;
 
@@ -255,8 +254,8 @@ let%expect_test "serving until exit" =
     {"result":"<initialize result>","id":1,"jsonrpc":"2.0"}
     {"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Line 1, bytes 0-1:\nUnexpected end of input"}}
     {"jsonrpc":"2.0","id":2,"error":{"code":-32600,"message":"(\"Jsonrpc: json conversion failed: missing field error\")"}}
-    {"params":{"diagnostics":[{"message":"This expression has type string but an expression was expected of type int","range":{"end":{"character":21,"line":0},"start":{"character":18,"line":0}},"relatedInformation":[],"severity":1,"source":"stag"}],"uri":"untitled:a","version":1},"method":"textDocument/publishDiagnostics","jsonrpc":"2.0"}
-    {"id":3,"jsonrpc":"2.0","result":{"contents":{"kind":"markdown","value":"```stag\nA.x : int\n```"},"range":{"end":{"character":5,"line":0},"start":{"character":4,"line":0}}}}
+    {"params":{"diagnostics":[{"message":"This expression has type string but an expression was expected of type int","range":{"start":{"line":0,"character":18},"end":{"line":0,"character":21}},"relatedInformation":[],"severity":1,"source":"stag"}],"uri":"untitled:a","version":1},"method":"textDocument/publishDiagnostics","jsonrpc":"2.0"}
+    {"id":3,"jsonrpc":"2.0","result":{"contents":{"kind":"markdown","value":"```stag\nA.x : int\n```"},"range":{"start":{"line":0,"character":4},"end":{"line":0,"character":5}}}}
     {"id":4,"jsonrpc":"2.0","result":null}
     |}]
 ;;
@@ -371,8 +370,8 @@ let%expect_test "checks wait until the client is idle for the debounce" =
     {|
     (code 0)
     {"result":"<initialize result>","id":1,"jsonrpc":"2.0"}
-    {"id":2,"jsonrpc":"2.0","result":[{"children":[],"kind":13,"name":"x","range":{"end":{"character":21,"line":0},"start":{"character":0,"line":0}},"selectionRange":{"end":{"character":5,"line":0},"start":{"character":4,"line":0}}}]}
-    {"params":{"diagnostics":[{"message":"This expression has type string but an expression was expected of type int","range":{"end":{"character":21,"line":0},"start":{"character":18,"line":0}},"relatedInformation":[],"severity":1,"source":"stag"}],"uri":"untitled:a","version":1},"method":"textDocument/publishDiagnostics","jsonrpc":"2.0"}
+    {"id":2,"jsonrpc":"2.0","result":[{"children":[],"kind":13,"name":"x","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":21}},"selectionRange":{"start":{"line":0,"character":4},"end":{"line":0,"character":5}}}]}
+    {"params":{"diagnostics":[{"message":"This expression has type string but an expression was expected of type int","range":{"start":{"line":0,"character":18},"end":{"line":0,"character":21}},"relatedInformation":[],"severity":1,"source":"stag"}],"uri":"untitled:a","version":1},"method":"textDocument/publishDiagnostics","jsonrpc":"2.0"}
     {"id":3,"jsonrpc":"2.0","result":null}
     |}]
 ;;

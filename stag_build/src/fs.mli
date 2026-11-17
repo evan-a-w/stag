@@ -19,9 +19,9 @@ val relative : dir:string -> string -> string
 (** [f ()], or its [Sys_error] or [Unix_error] as [path: reason]. *)
 val try_ : path:string -> (unit -> 'a) -> ('a, Diagnostic.t) Result.t
 
-(** The names in the directory [root/dir], sorted, with their kinds, or none
-    if it can't be read. Those whose kind can't be read are omitted, and an
-    error for those that [must_read]. *)
+(** The names in the directory [root/dir], sorted, with their kinds, or none if
+    it can't be read. Those whose kind can't be read are omitted, and an error
+    for those that [must_read]. *)
 val read_dir
   :  ?must_read:(string -> bool)
   -> error:(Diagnostic.t -> unit)

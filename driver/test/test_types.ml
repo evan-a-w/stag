@@ -20,17 +20,14 @@ let nested = Some (Cons (true, Nil))
 type list['a] = Nil | Cons of 'a * list['a]
 let bad = Cons (1, Cons (true, Nil))
 |};
-  check
-    {|
+  check {|
 let unbound = Nil
 |};
-  check
-    {|
+  check {|
 type list['a] = Nil | Cons of 'a * list['a]
 let arity = Cons 1
 |};
-  check
-    {|
+  check {|
 type list['a] = Nil | Cons of 'a * list['a]
 let arity = Nil 1
 |};
@@ -79,8 +76,7 @@ module M = struct
 end
 let id_int (x : int) = x
 |};
-  check
-    {|
+  check {|
 type t
 let id_t (x : t) = x
 let bad = id_t 1
@@ -90,8 +86,7 @@ let bad = id_t 1
     [ Decl.abstract "t"
     ; top_let ("absurd", [ typed "x" (Ty.con "t") ], None, match_ (var "x") [])
     ];
-  check
-    {|
+  check {|
 type t
 let bad = T
 |};
@@ -179,8 +174,7 @@ type list['a] = Nil | Cons of 'a * list['a]
 ;;
 
 let%expect_test "record errors" =
-  check
-    {|
+  check {|
 type point = {x : int; y : int}
 let missing = {x = 0}
 |};
@@ -195,13 +189,11 @@ type point = {x : int; y : int}
 type point3 = {z : int}
 let mixed = {x = 0; y = 0; z = 0}
 |};
-  check
-    {|
+  check {|
 type point = {x : int; y : int}
 let unbound = {x = 0; w = 0}
 |};
-  check
-    {|
+  check {|
 type point = {x : int; y : int}
 let wrong_type = {x = 0; y = true}
 |};
@@ -210,13 +202,11 @@ let wrong_type = {x = 0; y = true}
     [ Decl.record "point" [ "x", Ty.int; "y", Ty.int ]
     ; top "empty" [] (record [])
     ];
-  check
-    {|
+  check {|
 type point = {x : int; y : int}
 let unbound_field p = p.w
 |};
-  check
-    {|
+  check {|
 type point = {x : int; y : int}
 let not_a_record = (1).x
 |};
@@ -311,8 +301,7 @@ let arm_types o = match o with Some _ -> 1 | None -> true
 type option['a] = None | Some of 'a
 let pattern_types o = match o with Some _ -> 1 | 1 -> 2
 |};
-  check
-    {|
+  check {|
 let duplicate = match (1, 2) with (x, x) -> x
 |};
   check
@@ -320,8 +309,7 @@ let duplicate = match (1, 2) with (x, x) -> x
 type option['a] = None | Some of 'a
 let nested_duplicate = match (1, None) with (x, Some x) -> x
 |};
-  check
-    {|
+  check {|
 let same_name_other_arms = match 1 with x -> x | x -> x
 |};
   check
@@ -329,8 +317,7 @@ let same_name_other_arms = match 1 with x -> x | x -> x
 type option['a] = None | Some of 'a
 let arity = match 1 with Some -> 1
 |};
-  check
-    {|
+  check {|
 let unbound = match 1 with Some -> 1
 |};
   check
@@ -347,8 +334,7 @@ let mixed_fields p = match p with {x = _; contents = _} -> 1
   (* On the DSL: in source, [{}] is the empty polymorphic record pattern. *)
   check_program
     [ top "empty_record" [ "p" ] (match_ (var "p") [ Pat.record [], int 1 ]) ];
-  check
-    {|
+  check {|
 let tuple_length = match (1, 2) with (_, _, _) -> 1
 |};
   [%expect
@@ -382,51 +368,40 @@ let tuple_length = match (1, 2) with (_, _, _) -> 1
 ;;
 
 let%expect_test "declaration errors" =
-  check
-    {|
+  check {|
 type t = A
 type t = {x : int}
 |};
-  check
-    {|
+  check {|
 type t['a, {..'a}] = |
 |};
-  check
-    {|
+  check {|
 type t = A | A of int
 |};
-  check
-    {|
+  check {|
 type t = A
 type u = A
 |};
-  check
-    {|
+  check {|
 type t = {x : int; x : bool}
 |};
-  check
-    {|
+  check {|
 type point = {x : int; y : int}
 type u = {x : int}
 |};
-  check
-    {|
+  check {|
 type t = A of 'a
 |};
-  check
-    {|
+  check {|
 type t['a] = A of <int>{..'a}
 |};
-  check
-    {|
+  check {|
 type t[{..'r}] = A of 'r
 |};
-  check
-    {|
+  check {|
 type t = A of nope
 |};
-  check
-    {|
+  check {|
 type t = nope
 |};
   [%expect
@@ -446,20 +421,16 @@ type t = nope
 ;;
 
 let%expect_test "duplicate context entries" =
-  check
-    {|
+  check {|
 let f c : <int>{x : int; x : bool} = c
 |};
-  check
-    {|
+  check {|
 let f c = (c : <int>{x : int; x : bool})
 |};
-  check
-    {|
+  check {|
 type t = A of <int>{x : int; x : bool}
 |};
-  check
-    {|
+  check {|
 type t = <int>{x : int; x : bool}
 |};
   check
@@ -467,8 +438,7 @@ type t = <int>{x : int; x : bool}
 type code[{..'r}] = <int>{..'r}
 let f c : code[{`x : int; `x : int; ..'r}] = c
 |};
-  check
-    {|
+  check {|
 let nested c : <<int>{x : int}>{x : bool} = c
 |};
   [%expect
@@ -483,35 +453,28 @@ let nested c : <<int>{x : int}>{x : bool} = c
 ;;
 
 let%expect_test "arity and kind of type arguments" =
-  check
-    {|
+  check {|
 type list['a] = Nil | Cons of 'a * list['a]
 type t = A of list
 |};
-  check
-    {|
+  check {|
 type t = A of int[int]
 |};
-  check
-    {|
+  check {|
 let f x : bool[int] = x
 |};
-  check
-    {|
+  check {|
 type list['a] = Nil | Cons of 'a * list['a]
 type t = A of list[{}]
 |};
-  check
-    {|
+  check {|
 type stmt[{..'r}] = Stmt of <unit>{..'r}
 type t = A of stmt[int]
 |};
-  check
-    {|
+  check {|
 let f x : list[int] = x
 |};
-  check
-    {|
+  check {|
 let f x : M.t = x
 |};
   [%expect
@@ -543,8 +506,7 @@ let a = let p = (1, 2) in A p
 let g c : code[{`x : int; ..'r}] = c
 let h : unused[int] = true
 |};
-  check
-    {|
+  check {|
 type pair['a] = 'a * 'a
 let bad : pair[int] = (1, true)
 |};
@@ -567,22 +529,18 @@ let bad : pair[int] = (1, true)
 ;;
 
 let%expect_test "cyclic aliases" =
-  check
-    {|
+  check {|
 type t = t
 |};
-  check
-    {|
+  check {|
 type t = u
 type u = int -> t
 |};
-  check
-    {|
+  check {|
 type list['a] = Nil | Cons of 'a * list['a]
 type t = list[t]
 |};
-  check
-    {|
+  check {|
 type t = <int>{x : t}
 |};
   check
@@ -625,8 +583,7 @@ let ty_and_context_named_alike c = (c : <'r>{..'r})
 ;;
 
 let%expect_test "annotation variables are not generalized by inner lets" =
-  check
-    {|
+  check {|
 let f = let g y = (y : 'a) in g 1; g true
 |};
   [%expect
@@ -674,8 +631,7 @@ let bound_outside = match 1 with x -> .<x>.
 let wrong_type = captures .<cond x 1 2>.
 let captures c = .<match 1 with x -> .~c>.
 |};
-  check
-    {|
+  check {|
 let level = .<match 1 with x -> .~x>.
 |};
   [%expect
@@ -842,21 +798,17 @@ type list['a] = Nil | Cons of 'a * list['a]
 let xs = Cons (1, ys)
 let ys = Cons (2, xs)
 |};
-  check
-    {|
+  check {|
 let x = x
 |};
-  check
-    {|
+  check {|
 let x = y
 let y = x
 |};
-  check
-    {|
+  check {|
 module M = struct let x = M.x end
 |};
-  check
-    {|
+  check {|
 let x = x
 let use = x 1; x true
 |};
@@ -873,8 +825,7 @@ let x = fun u -> y u
 let y = fun u -> x u
 module M = struct let x = fun u -> M.x u end
 |};
-  check
-    {|
+  check {|
 let x = fun u -> x u
 let use = x 1; x true
 |};
@@ -919,8 +870,7 @@ let%expect_test "recursive local non-functions are not generalized" =
   print_local "x";
   print_local "x; Nil";
   print_local "match x with _ -> Nil";
-  (* The splices' providers are of the quote's level, so are never the
-     binder. *)
+  (* The splices' providers are of the quote's level, so are never the binder. *)
   print_local ".<.~(.<Nil>.)>.";
   print_local ".<.~(.<x>.)>.";
   print_local "Nil";

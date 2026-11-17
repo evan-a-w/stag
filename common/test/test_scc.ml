@@ -20,8 +20,7 @@ let%expect_test "cycles" =
   print [ [ 1 ]; [ 2 ]; [ 0 ] ];
   print [ [ 3 ]; [ 2 ]; [ 1; 0 ]; [ 0 ] ];
   print [ [ 1 ]; [ 0; 2 ]; [ 3 ]; [ 2; 4 ]; [] ];
-  [%expect
-    {|
+  [%expect {|
     ((0 1 2))
     ((0 3) (1 2))
     ((4) (2 3) (0 1))
@@ -45,15 +44,14 @@ let%expect_test "dependencies come first, otherwise smallest vertex first" =
 let%expect_test "disconnected" =
   print [ [ 1 ]; [ 0 ]; [ 3 ]; [ 2 ]; [] ];
   print [ [ 4 ]; [ 3 ]; [ 0 ]; [ 1 ]; [ 2 ] ];
-  [%expect
-    {|
+  [%expect {|
     ((0 1) (2 3) (4))
     ((0 2 4) (1 3))
     |}]
 ;;
 
-(* The specification, quadratically: components by reachability, then
-   repeatedly the ready one of smallest vertex. *)
+(* The specification, quadratically: components by reachability, then repeatedly
+   the ready one of smallest vertex. *)
 let reference successors =
   let n = Array.length successors in
   let reaches =
@@ -118,8 +116,7 @@ let%expect_test "large graphs" =
   let cycle = Array.init n ~f:(fun v -> [ (v + 1) % n ]) in
   let components = Scc.topological_components ~successors:cycle in
   print_s [%sexp (List.map components ~f:List.length : int list)];
-  [%expect
-    {|
+  [%expect {|
     (200000 ((0)))
     (200000)
     |}]

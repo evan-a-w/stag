@@ -23,34 +23,29 @@ let fn x = x
 ;;
 
 let%expect_test "recursive values" =
-  (* Computing a value may not use its own component, even through a call
-     that wouldn't need the value: calls aren't followed. *)
-  eval
-    {|
+  (* Computing a value may not use its own component, even through a call that
+     wouldn't need the value: calls aren't followed. *)
+  eval {|
 let y = f `A
 let f x = match x with `A -> 1 | `B -> y
 |};
   [%expect {| ((Toplevel_initialization_cycle (y f y)) @ t.stag:2:8-9) |}];
   (* A value used by its own definition is an error. *)
-  eval
-    {|
+  eval {|
 let x = add x 1
 |};
   [%expect {| ((Toplevel_initialization_cycle (x x)) @ t.stag:2:12-13) |}];
-  eval
-    {|
+  eval {|
 let z = g `B
 let g x = match x with `A -> 1 | `B -> z
 |};
   [%expect {| ((Toplevel_initialization_cycle (z g z)) @ t.stag:2:8-9) |}];
   (* A closure may refer to the value it is part of. *)
-  eval
-    {|
+  eval {|
 let h = let k u = h; u in k
 let called = h 7
 |};
-  [%expect
-    {|
+  [%expect {|
     (h <fun>)
     (called 7)
     |}]
@@ -118,8 +113,7 @@ let%expect_test "printed negative ints parse back" =
       match Parser.expr ~file:"t.stag" printed with
       | Ok _ -> print_endline printed
       | Error error -> print_endline (Parser.Error.to_string error));
-  [%expect
-    {|
+  [%expect {|
     -1
     -4611686018427387904
     `A (-2)
@@ -147,8 +141,8 @@ let failure = only_none v
     |}]
 ;;
 
-(* Each [name : ty = e] evaluates to a value whose printed form, checked
-   against [ty] after [types], evaluates to a value printed the same. *)
+(* Each [name : ty = e] evaluates to a value whose printed form, checked against
+   [ty] after [types], evaluates to a value printed the same. *)
 let%expect_test "printed nominal records parse back" =
   let types =
     {|
@@ -342,8 +336,8 @@ let in_quote = .<.~(.~(.<.<1>.>.))>.
     |}]
 ;;
 
-let%expect_test
-    "a failing toplevel splice fails checking, before anything is evaluated"
+let%expect_test "a failing toplevel splice fails checking, before anything is \
+                 evaluated"
   =
   eval
     {|

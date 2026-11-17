@@ -108,6 +108,9 @@ fib/15
   the standard deviation of normal data), min, max, p90/p99, and outliers classified by Tukey's
   fences (mild beyond 1.5 IQR, severe beyond 3). With `-no-alloc`, the GC's
   counters (minor and major words, collections per iteration) are not read.
+  They count only the GC's heap: values the compiler (OxCaml) allocates on
+  the stack are not words allocated, so compare them only between builds of
+  the same compiler.
 - `-save-baseline NAME` saves the per-iteration times of the run in
   `_stag/bench/NAME.sexp` (of the project root, or `-baseline-dir` for
   `stag bench`), merged with those already saved; `-baseline NAME` compares
@@ -166,6 +169,12 @@ the prelude's sources rather than the embedded copy:
 - Elsewhere, programs use the embedded prelude; `stag lsp` goes to
   definitions of its names in the sources of the checkout it was built in,
   if they are the same as the embedded ones.
+
+Development environment: `nix develop` (or direnv) gives the OxCaml compiler,
+its Jane Street libraries, dune, ocamlformat, merlin and ocaml-lsp-server, built
+with opam-nix from the oxcaml and upstream opam repositories (`flake.nix`). The
+opam solution is checked in as `nix/opam-packages.txt`; after `nix flake update`
+or changing the requested packages, regenerate it with `nix run .#resolve`.
 
 Tests: `dune build @runtest`, then `dune promote` to accept changes.
 

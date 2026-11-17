@@ -129,10 +129,10 @@ module Scope = struct
           target)
   ;;
 
-  (* The program's scopes are within the prelude, never inside its modules,
-     so a prelude type is named by its full path within it, unless the
-     program shadows the path's first name, then from the root, unless a
-     root module (of the outermost scope) does. *)
+  (* The program's scopes are within the prelude, never inside its modules, so a
+     prelude type is named by its full path within it, unless the program
+     shadows the path's first name, then from the root, unless a root module (of
+     the outermost scope) does. *)
   let prelude_name enclosing relative =
     Prelude_path.to_string_hum
       (Prelude_path.canonical relative)

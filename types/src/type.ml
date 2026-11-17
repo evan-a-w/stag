@@ -112,15 +112,6 @@ module Var = struct
     | Generic -> [%sexp "Generic", (t.id : id)]
     | Link a -> [%sexp "Link", (a : a)]
   ;;
-
-  let rec canonical x ~var =
-    match var x with
-    | Some ({ state = Link x'; _ } as t) ->
-      let x'' = canonical x' ~var in
-      t.state <- Link x'';
-      x''
-    | Some { state = Unbound _ | Generic; _ } | None -> x
-  ;;
 end
 
 let int = TCon ("int", [])
@@ -133,28 +124,45 @@ let exn = TCon (exn_name, [])
 let error_name = "<error>"
 let error = TCon (error_name, [])
 
-let canonical_ty =
-  Var.canonical ~var:(function
-    | TVar var -> Some var
-    | TCon _ | TArrow _ | TTuple _ | TCode _ | TRecord _ | TVariant _ -> None)
+(* Path compression, for a [Link] not already to the canonical value. Its new
+   [Link] is the only allocation of the [canonical_*] functions, and rare once
+   paths are compressed, so it is not checked. *)
+let[@cold] [@zero_alloc assume] relink (var : (_, _) Var.t) target =
+  var.state <- Link target
+;;
+
+let[@zero_alloc] rec canonical_ty ty =
+  match ty with
+  | TVar ({ state = Link target; _ } as var) ->
+    let canonical = canonical_ty target in
+    if not (phys_equal canonical target) then relink var canonical;
+    canonical
+  | TVar _ | TCon _ | TArrow _ | TTuple _ | TCode _ | TRecord _ | TVariant _ ->
+    ty
+;;
+
+let[@zero_alloc] rec canonical_row row =
+  match row with
+  | RVar ({ state = Link target; _ } as var) ->
+    let canonical = canonical_row target in
+    if not (phys_equal canonical target) then relink var canonical;
+    canonical
+  | RVar _ | REmpty | RExtend _ -> row
+;;
+
+let[@zero_alloc] rec canonical_presence presence =
+  match presence with
+  | PVar ({ state = Link target; _ } as var) ->
+    let canonical = canonical_presence target in
+    if not (phys_equal canonical target) then relink var canonical;
+    canonical
+  | PVar _ | Present | Absent -> presence
 ;;
 
 let is_error ty =
   match canonical_ty ty with
   | TCon (name, []) -> String.equal name error_name
   | _ -> false
-;;
-
-let canonical_row =
-  Var.canonical ~var:(function
-    | RVar var -> Some var
-    | REmpty | RExtend _ -> None)
-;;
-
-let canonical_presence =
-  Var.canonical ~var:(function
-    | PVar var -> Some var
-    | Present | Absent -> None)
 ;;
 
 let rec tail_var row =
@@ -235,81 +243,132 @@ module Iter = struct
     }
 end
 
-let iterator (f : _ Iter.t) =
-  (* Whether each [Link] was only visited guarded: an unguarded visit covers a
-     guarded one. *)
+module Iter_start = struct
+  type t =
+    | Ty of ty @@ global
+    | Row of row @@ global
+end
+
+module Visited = struct
   (* The first [Link]s, records and variants reached are followed without
      remembering them: most types are small, and visiting a variable again is
      harmless. Only past those is a table of their ids, which are distinct,
-     needed for cycles. *)
-  let unremembered = ref 64 in
-  let visited = lazy (Int.Table.create ()) in
-  let link (var : _ Var.t) ~guarded ~visit =
-    if !unremembered > 0
+     needed for cycles. Whether each [Link] was only visited guarded: an
+     unguarded visit covers a guarded one. *)
+  type t =
+    { mutable unremembered : int
+    ; mutable table : bool Int.Table.t or_null
+    }
+
+  let table t =
+    match t.table with
+    | This table -> table
+    | Null ->
+      let table = Int.Table.create () in
+      t.table <- This table;
+      table
+  ;;
+
+  let enter_link t ~id ~guarded =
+    if t.unremembered > 0
     then (
-      decr unremembered;
-      visit ())
+      t.unremembered <- t.unremembered - 1;
+      true)
     else (
-      let table = force visited in
-      match Hashtbl.find table var.id with
-      | Some was_guarded when guarded || not was_guarded -> Ok ()
+      let table = table t in
+      match Hashtbl.find table id with
+      | Some was_guarded when guarded || not was_guarded -> false
       | Some _ | None ->
-        Hashtbl.set table ~key:var.id ~data:guarded;
-        visit ())
-  in
-  let node id ~visit =
-    if !unremembered > 0
+        Hashtbl.set table ~key:id ~data:guarded;
+        true)
+  ;;
+
+  let enter_node t id =
+    if t.unremembered > 0
     then (
-      decr unremembered;
-      visit ())
+      t.unremembered <- t.unremembered - 1;
+      true)
     else (
-      let table = force visited in
+      let table = table t in
       if Hashtbl.mem table id
-      then Ok ()
+      then false
       else (
         Hashtbl.set table ~key:id ~data:true;
-        visit ()))
-  in
+        true))
+  ;;
+end
+
+let iterate (local_ (f : _ Iter.t)) (local_ (start : Iter_start.t)) =
+  let visited = stack_ { Visited.unremembered = 64; table = Null } in
   let rec iter_ty ~guarded ty =
     match ty with
     | TVar ({ state = Link target; _ } as var) ->
-      link var ~guarded ~visit:(fun () -> iter_ty ~guarded target)
-    | TVar var -> f.ty ~guarded var
-    | TCon (_, args) ->
-      List.fold_result args ~init:() ~f:(fun () -> function
-        | ATy ty -> iter_ty ~guarded ty
-        | ARow row -> iter_row ~guarded row)
+      if Visited.enter_link visited ~id:var.id ~guarded
+      then iter_ty ~guarded target
+      else Ok ()
+    | TVar var -> (f.ty ~guarded) var
+    | TCon (_, args) -> iter_args ~guarded args
     | TArrow (ty1, ty2) ->
-      let%bind.Result () = iter_ty ~guarded ty1 in
-      iter_ty ~guarded ty2
-    | TTuple tys ->
-      List.fold_result tys ~init:() ~f:(fun () -> iter_ty ~guarded)
+      (match iter_ty ~guarded ty1 with
+       | Ok () -> iter_ty ~guarded ty2
+       | Error _ as error -> error)
+    | TTuple tys -> iter_tys ~guarded tys
     | TCode { inner; context } ->
-      let%bind.Result () = iter_ty ~guarded inner in
-      iter_row ~guarded context
+      (match iter_ty ~guarded inner with
+       | Ok () -> iter_row ~guarded context
+       | Error _ as error -> error)
     | TRecord { id; row } | TVariant { id; row } ->
-      node id ~visit:(fun () -> iter_row ~guarded:true row)
+      if Visited.enter_node visited id
+      then iter_row ~guarded:true row
+      else Ok ()
+  and iter_args ~guarded args =
+    match args with
+    | [] -> Ok ()
+    | ATy ty :: args ->
+      (match iter_ty ~guarded ty with
+       | Ok () -> iter_args ~guarded args
+       | Error _ as error -> error)
+    | ARow row :: args ->
+      (match iter_row ~guarded row with
+       | Ok () -> iter_args ~guarded args
+       | Error _ as error -> error)
+  and iter_tys ~guarded tys =
+    match tys with
+    | [] -> Ok ()
+    | ty :: tys ->
+      (match iter_ty ~guarded ty with
+       | Ok () -> iter_tys ~guarded tys
+       | Error _ as error -> error)
   and iter_row ~guarded row =
     match row with
     | REmpty -> Ok ()
     | RExtend (_, presence, assigned, ty, rest) ->
-      let%bind.Result () = iter_presence ~guarded presence in
-      let%bind.Result () = iter_presence ~guarded assigned in
-      let%bind.Result () = iter_ty ~guarded ty in
-      iter_row ~guarded rest
+      (match iter_presence ~guarded presence with
+       | Error _ as error -> error
+       | Ok () ->
+         (match iter_presence ~guarded assigned with
+          | Error _ as error -> error
+          | Ok () ->
+            (match iter_ty ~guarded ty with
+             | Ok () -> iter_row ~guarded rest
+             | Error _ as error -> error)))
     | RVar ({ state = Link target; _ } as var) ->
-      link var ~guarded ~visit:(fun () -> iter_row ~guarded target)
-    | RVar var -> f.row ~guarded var
+      if Visited.enter_link visited ~id:var.id ~guarded
+      then iter_row ~guarded target
+      else Ok ()
+    | RVar var -> (f.row ~guarded) var
   and iter_presence ~guarded presence =
     match canonical_presence presence with
     | Present | Absent -> Ok ()
-    | PVar var -> f.presence ~guarded var
+    | PVar var -> (f.presence ~guarded) var
   in
-  iter_ty ~guarded:false, iter_row ~guarded:false
+  match start with
+  | Ty ty -> iter_ty ~guarded:false ty [@nontail]
+  | Row row -> iter_row ~guarded:false row [@nontail]
 ;;
 
-let iter_ty f ty = fst (iterator f) ty
-let iter_row f row = snd (iterator f) row
+let iter_ty f ty = iterate f (stack_ Iter_start.Ty ty) [@nontail]
+let iter_row f row = iterate f (stack_ Iter_start.Row row) [@nontail]
 
 module Mapper = struct
   type t =
@@ -541,11 +600,10 @@ let mapper (f : Mapper.t) =
       let assigned' = map_presence assigned in
       let ty' = map_ty ty in
       let rest' = map_row rest in
-      if
-        phys_equal presence presence'
-        && phys_equal assigned assigned'
-        && phys_equal ty ty'
-        && phys_equal rest rest'
+      if phys_equal presence presence'
+         && phys_equal assigned assigned'
+         && phys_equal ty ty'
+         && phys_equal rest rest'
       then row
       else RExtend (name, presence', assigned', ty', rest')
     | RVar ({ state = Link target; _ } as var) ->
@@ -588,15 +646,15 @@ module Sexper = struct
 
   type t =
     { printing : Printing.t Int.Table.t
-      (* The records and variants being printed, by id, labelled once a
-         cycle reaches them again. *)
+        (* The records and variants being printed, by id, labelled once a cycle
+           reaches them again. *)
     ; nodes : Sexp.t Int.Table.t
     ; tys : Sexp.t Int.Table.t
     ; rows : Sexp.t Int.Table.t
     ; mutable depth : int
     ; mutable low : int
-      (* The lowest depth of a record or variant being printed that the
-         current part refers to. *)
+        (* The lowest depth of a record or variant being printed that the
+           current part refers to. *)
     ; mutable next_label : int
     }
 
@@ -611,8 +669,8 @@ module Sexper = struct
     }
   ;;
 
-  (* Memoizes the sexp of a part unless it refers to a record or variant
-     being printed around it, as it would then print differently elsewhere. *)
+  (* Memoizes the sexp of a part unless it refers to a record or variant being
+     printed around it, as it would then print differently elsewhere. *)
   let closed t table key ~sexp =
     match Hashtbl.find table key with
     | Some sexp -> sexp
@@ -737,26 +795,26 @@ module Printer = struct
     ; names : int Int.Table.t
     ; mutable next_index : int
     ; cycle_names : string Int.Table.t
-      (* The names of the records and variants reached again within
-         themselves, by id, kept across types for consistency. *)
+        (* The names of the records and variants reached again within
+           themselves, by id, kept across types for consistency. *)
     ; printing : bool ref Int.Table.t
-      (* The records and variants being printed, and whether they were
-         reached again within themselves. *)
+        (* The records and variants being printed, and whether they were reached
+           again within themselves. *)
     ; introduced : string Int.Table.t
-      (* The records and variants whose name the type being printed has
-         introduced, which later occurrences use. *)
+        (* The records and variants whose name the type being printed has
+           introduced, which later occurrences use. *)
     ; mutable recursive : (ty * string) option
-      (* The body [recursive] prints, and the name of its occurrences. *)
+        (* The body [recursive] prints, and the name of its occurrences. *)
     ; bounded : Bounded.t Queue.t
-      (* The bounds of the variables reached, in order of appearance, to
-         print after the types. *)
+        (* The bounds of the variables reached, in order of appearance, to print
+           after the types. *)
     ; kept : Int.Hash_set.t
     ; elided : Int.Hash_set.t
-      (* The assignment variables written as an unmarked entry, as each is
-         the only occurrence of an unconstrained one, so reads back as it. *)
+        (* The assignment variables written as an unmarked entry, as each is the
+           only occurrence of an unconstrained one, so reads back as it. *)
     ; mutable counting : int Int.Table.t option
-      (* Set while rendering only to count how often each presence variable
-         is named. *)
+    (* Set while rendering only to count how often each presence variable is
+       named. *)
     }
 
   let create ?(type_name = fun name -> Prelude_path.to_string_hum name) () =
@@ -813,7 +871,8 @@ module Printer = struct
       if not (List.is_empty var.bounds)
       then Queue.enqueue t.bounded (Bounds (fun () -> bounds name));
       List.iter var.kept ~f:(fun kept ->
-        if Hash_set.strict_add t.kept (kept_id kept) |> Result.is_ok
+        if Hash_set.strict_add t.kept (kept_id kept)
+           |> Hash_set.Ok_or_duplicate.is_ok
         then Queue.enqueue t.bounded (Kept kept)));
     name
   ;;
@@ -852,13 +911,13 @@ module Printer = struct
   ;;
 
   let sorted_row_entries
-        t
-        row
-        ~context
-        ~label
-        ~entry
-        ~row_var_name
-        ~presence_var_name
+    t
+    row
+    ~context
+    ~label
+    ~entry
+    ~row_var_name
+    ~presence_var_name
     =
     let entries, tail = row_entries row in
     let entries =
@@ -968,10 +1027,10 @@ module Printer = struct
           name
           (row_to_string t bound.row ~label:Fn.id ~context:true)))
 
-  (* A bound is printed with its lower variable, unless only the upper one
-     keeps it, as a generic variable does for a variable it is not generalized
-     with. A lower variable not printed otherwise is named here, so prints its
-     bounds later. *)
+  (* A bound is printed with its lower variable, unless only the upper one keeps
+     it, as a generic variable does for a variable it is not generalized with. A
+     lower variable not printed otherwise is named here, so prints its bounds
+     later. *)
   and presence_var_name t (var : (presence, presence_bound) Var.t) =
     Option.iter t.counting ~f:(fun counts -> Hashtbl.incr counts var.id);
     let others side =
@@ -1081,9 +1140,8 @@ module Printer = struct
   ;;
 
   (* Renders with [render] once, on a copy, to find the assignment variables
-     named once, so in no bound either, to elide, then for real. The copy
-     prints the bounds it reaches, not those queued before, which print with
-     [t]. *)
+     named once, so in no bound either, to elide, then for real. The copy prints
+     the bounds it reaches, not those queued before, which print with [t]. *)
   let eliding t ~render =
     let counts = Int.Table.create () in
     let copy =

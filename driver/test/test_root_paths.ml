@@ -79,8 +79,7 @@ let%expect_test "a root path is not resolved locally" =
                   ^^
     Error: Unbound value .x
     |}];
-  check
-    {|module M = struct let x = 1 end
+  check {|module M = struct let x = 1 end
 let y = M.x
 let z = .M.x|};
   [%expect
@@ -134,10 +133,8 @@ let z = .M.x|};
 
 let%expect_test "root paths across files" =
   check_files
-    [ ( "a.stag"
-      , {|let x = 1
+    [ "a.stag", {|let x = 1
 module B = struct let x = "inner" end|}
-      )
     ; ( "b.stag"
       , {|let x = "b"
 let y = .Int.add .A.x 1
@@ -163,10 +160,8 @@ let z = .Core.String.concat "" (Cons (.B.x, Cons (A.B.x, Nil)))|}
 let%expect_test "a root module shadowing the prelude's" =
   check_files
     [ "core.stag", {|let x = 1|}
-    ; ( "a.stag"
-      , {|let y = .Core.x
+    ; "a.stag", {|let y = .Core.x
 let z = .Core.Int.to_string 1|}
-      )
     ];
   [%expect
     {|

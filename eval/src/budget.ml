@@ -17,32 +17,55 @@ let create (limits : Limits.t) =
 
 let steps_per_clock_check = 4096
 
-let exceeded t =
-  match t.limits, t.deadline with
-  | { fuel = Some fuel; _ }, _ when t.steps >= fuel ->
-    Some (sprintf "Out of fuel: evaluation took more than %d steps" fuel)
-  | { max_depth = Some max_depth; _ }, _ when t.depth >= max_depth ->
-    Some
-      (sprintf
-         "Stack depth exceeded: evaluation nested more than %d steps deep"
-         max_depth)
-  | { time_limit = Some time_limit; _ }, Some deadline
-    when t.steps % steps_per_clock_check = 0
-         && Time_ns.( > ) (Time_ns.now ()) deadline ->
-    Some
-      (sprintf
-         "Time limit exceeded: evaluation took more than %s"
-         (Time_ns.Span.to_string_hum time_limit))
-  | _ -> None
+(* The clock doesn't allocate. *)
+let[@zero_alloc assume] past_deadline t =
+  match t.deadline with
+  | Some deadline -> Time_ns.( > ) (Time_ns.now ()) deadline
+  | None -> false
 ;;
 
-let tail_step t ~loc =
-  match exceeded t with
-  | Some message ->
-    Error (Runtime_error.to_error (Runtime_error.create ~loc message))
-  | None ->
+let[@inline] out_of_fuel t =
+  match t.limits.fuel with
+  | Some fuel -> Int_prim.(t.steps >= fuel)
+  | None -> false
+;;
+
+let[@inline] too_deep t =
+  match t.limits.max_depth with
+  | Some max_depth -> Int_prim.(t.depth >= max_depth)
+  | None -> false
+;;
+
+let[@inline] out_of_time t =
+  Int_prim.(t.steps land (steps_per_clock_check - 1) = 0) && past_deadline t
+;;
+
+let[@cold] [@zero_alloc assume error] exceeded t ~loc =
+  let message =
+    if out_of_fuel t
+    then
+      sprintf
+        "Out of fuel: evaluation took more than %d steps"
+        (Option.value_exn t.limits.fuel)
+    else if too_deep t
+    then
+      sprintf
+        "Stack depth exceeded: evaluation nested more than %d steps deep"
+        (Option.value_exn t.limits.max_depth)
+    else
+      sprintf
+        "Time limit exceeded: evaluation took more than %s"
+        (Time_ns.Span.to_string_hum (Option.value_exn t.limits.time_limit))
+  in
+  Error (Runtime_error.to_error (Runtime_error.create ~loc message))
+;;
+
+let[@zero_alloc] tail_step t ~loc =
+  if out_of_fuel t || too_deep t || out_of_time t
+  then exceeded t ~loc
+  else (
     t.steps <- t.steps + 1;
-    Ok ()
+    Ok ())
 ;;
 
 let step t ~loc ~f =

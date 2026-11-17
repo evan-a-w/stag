@@ -1,7 +1,7 @@
 open! Import
 
-(** The per-iteration times of the samples of benches, by name, saved to
-    compare later runs with. *)
+(** The per-iteration times of the samples of benches, by name, saved to compare
+    later runs with. *)
 type t = float array String.Map.t [@@deriving sexp]
 
 val empty : t

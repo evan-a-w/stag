@@ -44,13 +44,13 @@ let decl_path ~(add : add) ~kind ~loc : Syntax.Decl_path.t -> unit = function
 let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
   let occurrences = Queue.create () in
   let add
-        ?(declaration = false)
-        ?(root = false)
-        ~module_path
-        ~quoted
-        ~kind
-        ~loc
-        path
+    ?(declaration = false)
+    ?(root = false)
+    ~module_path
+    ~quoted
+    ~kind
+    ~loc
+    path
     =
     if not (Loc.is_none loc)
     then

@@ -62,25 +62,20 @@ let reveal r = ({`x = 1 | r} \ `x).`x
 ;;
 
 let%expect_test "update, restriction and access require the field" =
-  check
-    {|
+  check {|
 let update_missing = {{`y = 1} with `x = 1}
 |};
-  check
-    {|
+  check {|
 let restrict_missing = {`y = 1} \ `x
 |};
-  check
-    {|
+  check {|
 let access_missing = {}.`x
 |};
-  check
-    {|
+  check {|
 let get_y r = r.`y
 let closed = get_y {`x = 1}
 |};
-  check
-    {|
+  check {|
 let restrict_all r = ({`x = 1 | {}} \ `x).`x
 |};
   [%expect
@@ -127,28 +122,22 @@ let update_fn r v = {r with `x = v}
 ;;
 
 let%expect_test "duplicate labels" =
-  check
-    {|
+  check {|
 let literal = {`x = 1; `y = 2; `x = 2}
 |};
-  check
-    {|
+  check {|
 let extension r = {`x = 1; `x = 2 | r}
 |};
-  check
-    {|
+  check {|
 let update r = {r with `x = 1; `x = 2}
 |};
-  check
-    {|
+  check {|
 let pattern r = match r with {`x = a; `x = b} -> a
 |};
-  check
-    {|
+  check {|
 let annotation (r : {`x : int; `x : bool}) = r
 |};
-  check
-    {|
+  check {|
 type t = {`x : int; `x : int; ..'r}
 |};
   [%expect
@@ -174,12 +163,10 @@ let nested r = match r with {`p = {`x = a; ..}; ..} -> a
 let empty r = match r with {} -> 1
 let with_literals r = match r with {`x = 1; ..} -> true | _ -> false
 |};
-  check
-    {|
+  check {|
 let closed_mismatch = match {`x = 1; `y = 2} with {`x = a} -> a
 |};
-  check
-    {|
+  check {|
 let duplicate_rest r = match r with {`x = a; ..a} -> a
 |};
   [%expect
@@ -339,20 +326,16 @@ let missing = same_row .<x>. {}
 ;;
 
 let%expect_test "unification errors" =
-  check
-    {|
+  check {|
 let record_vs_variant = (`A).`x
 |};
-  check
-    {|
+  check {|
 let record_vs_int = 1.`x
 |};
-  check
-    {|
+  check {|
 let record_vs_code = .<1>. \ `x
 |};
-  check
-    {|
+  check {|
 let field_type = add {`x = true}.`x 1
 |};
   check
@@ -437,20 +420,16 @@ let absent c (r : {..'d}) =
 ;;
 
 let%expect_test "structural types may be recursive" =
-  check
-    {|
+  check {|
 let occurs r = cond true r.`x r
 |};
-  check
-    {|
+  check {|
 let cyclic r = cond true {`x = 1 | r} {`y = 1 | r}
 |};
-  check
-    {|
+  check {|
 type t = {`next : t}
 |};
-  check
-    {|
+  check {|
 type a = {`b : b}
 type b = [`A of a]
 |};

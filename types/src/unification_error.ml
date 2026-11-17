@@ -14,8 +14,7 @@ module Row_mismatch_reason = struct
     | Missing_label of string
     | Presence_mismatch of string
     | Assigned of string
-    (** One code context assigns the name, which the other has as not
-        assigned. *)
+    (** One code context assigns the name, which the other has as not assigned. *)
     | Cyclic_row
   [@@deriving sexp_of]
 end

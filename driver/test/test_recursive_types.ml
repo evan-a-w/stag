@@ -125,8 +125,7 @@ let eval_neg self k e = match e with `Neg a -> add 0 (self a) | other -> k other
          ~file:"after_eval.stag"
          {|
 let example = eval (`Add (`Num 1, `Neg (`Num 2)))
-|}
-    );
+|});
   check_program
     (parse_exn
        {|
@@ -137,8 +136,7 @@ let eval_num self k e = match e with `Num n -> n | other -> k other
          ~file:"after_eval.stag"
          {|
 let bad = eval (`Add (`Num 1, `Num 2))
-|}
-    );
+|});
   [%expect
     {|
     val eval_num : 'a -> ([..'b] -> 'c) -> [`Num of 'c; ..'b] -> 'c
@@ -535,51 +533,40 @@ type u = [`U of M.l[u]]
 ;;
 
 let%expect_test "non-regular and unguarded recursive aliases" =
-  check
-    {|
+  check {|
 type t['a] = [`A of t['a * 'a]]
 |};
-  check
-    {|
+  check {|
 type t['a] = [`A of t[int]]
 |};
-  check
-    {|
+  check {|
 type t['a, 'b] = [`A of t['b, 'a]]
 |};
-  check
-    {|
+  check {|
 type a['x] = {`b : b['x]}
 type b['y] = [`A of a[int]]
 |};
-  check
-    {|
+  check {|
 type t[{..'r}] = {`x : t[{`y : int; ..'r}]}
 |};
-  check
-    {|
+  check {|
 type t = t * int
 |};
-  check
-    {|
+  check {|
 type list['a] = Nil | Cons of 'a * list['a]
 type t = list[t]
 |};
-  check
-    {|
+  check {|
 type id['a] = 'a
 type t = id[t]
 |};
-  check
-    {|
+  check {|
 type t = <t>{}
 |};
-  check
-    {|
+  check {|
 type t = <int>{x : t}
 |};
-  check
-    {|
+  check {|
 type t = [`A of int] -> t
 |};
   [%expect
@@ -600,9 +587,7 @@ type t = [`A of int] -> t
 
 let%expect_test "sexps of recursive aliases" =
   Option.iter
-    (typecheck
-       ~prelude:false
-       {|
+    (typecheck ~prelude:false {|
 type l['a] = [`Nil | `Cons of 'a * l['a]]
 |})
     ~f:(fun t -> print_s [%sexp ((checked t).signature : Signature.t)]);
@@ -723,23 +708,19 @@ let%expect_test "mutually recursive alias cliques expand each alias once" =
 ;;
 
 let%expect_test "guardedness is judged on the expansion" =
-  check
-    {|
+  check {|
 type f['a] = [`A of 'a]
 type g = f[g]
 |};
-  check
-    {|
+  check {|
 type g = f[g]
 type f['a] = [`A of 'a]
 |};
-  check
-    {|
+  check {|
 type f['a] = {`x : 'a}
 type g = f[g]
 |};
-  check
-    {|
+  check {|
 type g = f[g]
 type f['a] = {`x : 'a}
 |};
@@ -750,8 +731,7 @@ type g = f[g]
 let v (x : g) = x
 let a (x : g) : g = `A (`A x)
 |};
-  check
-    {|
+  check {|
 type a = b * int
 type b = [`A of a]
 |};
@@ -772,12 +752,10 @@ type b = [`A of a]
     type a = [`A of a] * int
     type b = [`A of b * int]
     |}];
-  check
-    {|
+  check {|
 type t = t
 |};
-  check
-    {|
+  check {|
 type f['a] = 'a * int
 type g = f[g]
 |};
@@ -787,18 +765,15 @@ type list['a] = Nil | Cons of 'a * list['a]
 type f['a] = list['a]
 type g = f[g]
 |};
-  check
-    {|
+  check {|
 type f['a] = <'a>{}
 type g = f[g]
 |};
-  check
-    {|
+  check {|
 type a = b
 type b = a
 |};
-  check
-    {|
+  check {|
 type id['a] = 'a
 type t = [`A of t] * id[t]
 |};
@@ -821,9 +796,9 @@ let%expect_test "instantiation and unification of large types" =
     Fn.apply_n_times
       ~n
       (fun ty ->
-         let var = Fresh.var fresh ~rank:2 in
-         var.state <- Link (Type.TTuple [ ty; Type.int ]);
-         Type.TVar var)
+        let var = Fresh.var fresh ~rank:2 in
+        var.state <- Link (Type.TTuple [ ty; Type.int ]);
+        Type.TVar var)
       (generic ())
   in
   let records =
@@ -872,8 +847,8 @@ let%expect_test "instantiation and unification of large types" =
     |}]
 ;;
 
-(* [t0['a] = 'a] and [t(k+1)['a] = step tk['a]], so [tn] has [2^n] paths
-   when [step] uses its argument twice, but [n] expansions. *)
+(* [t0['a] = 'a] and [t(k+1)['a] = step tk['a]], so [tn] has [2^n] paths when
+   [step] uses its argument twice, but [n] expansions. *)
 let alias_dag n ~step =
   "type t0['a] = 'a\n"
   ^ String.concat
@@ -888,8 +863,8 @@ let print_parts ty =
   let vars = Int.Hash_set.create () in
   let first set id =
     match Hash_set.strict_add set id with
-    | Ok () -> true
-    | Error _ -> false
+    | Ok -> true
+    | Duplicate -> false
   in
   let rec go_ty (ty : Type.ty) =
     match ty with
@@ -983,14 +958,12 @@ let pair (x : l['a] * l['a]) = x
 ;;
 
 let%expect_test "elaboration stops at a failed expansion" =
-  check
-    {|
+  check {|
 type v = A of c | B of c
 type u = c * c
 type c = c * int
 |};
-  check
-    {|
+  check {|
 type u = c * c
 type c = c * int
 |};
@@ -1084,8 +1057,8 @@ let%expect_test "unified link pairs are memoised as pairs" =
   let l2 = linked int in
   let l3 = linked Type.bool in
   unify fresh (TTuple [ l1; l1 ]) (TTuple [ l2; l3 ]);
-  (* The pair of the cycles' [Link]s is reached again within the cycles, and
-     [a] then meets [c], whose [y] differs. *)
+  (* The pair of the cycles' [Link]s is reached again within the cycles, and [a]
+     then meets [c], whose [y] differs. *)
   let cycle y = fix fresh (fun a -> record fresh [ "x", a; "y", y ]) in
   let a = cycle int in
   let b = cycle int in

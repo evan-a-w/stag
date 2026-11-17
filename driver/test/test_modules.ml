@@ -159,8 +159,7 @@ let explicit = M.N.x
 ;;
 
 let%expect_test "the rest of a path is looked up only in the module" =
-  check
-    {|
+  check {|
 let x = 1
 module M = struct end
 let y = M.x
@@ -173,8 +172,7 @@ end
 module M = struct end
 let y = M.N.x
 |};
-  check
-    {|
+  check {|
 module M = struct
   module N = struct end
 end
@@ -182,21 +180,18 @@ let y = M.N.K.x
 |};
   (* On the DSL: source reads [M.x.y] as the field [y] of [M.x]. *)
   check_program
-    (parse_exn
-       {|
+    (parse_exn {|
 module M = struct
   let x = 1
 end
 |}
      @ [ Helpers.top "y" [] (Helpers.var "M.x.y") ]);
-  check
-    {|
+  check {|
 type t = A
 module M = struct end
 let y = M.A
 |};
-  check
-    {|
+  check {|
 type t = A
 module M = struct end
 let y : M.t = A
@@ -386,8 +381,7 @@ end
 let root = A
 let qualified = M.A
 |};
-  check
-    {|
+  check {|
 type t = A
 module M = struct
   type t = A
@@ -502,16 +496,13 @@ let x : u = 1
 ;;
 
 let%expect_test "builtin types are declared in the root module" =
-  check
-    {|
+  check {|
 type int = I
 |};
-  check
-    {|
+  check {|
 type unit = bool
 |};
-  check
-    {|
+  check {|
 module M = struct
   type bool = B
 end
@@ -531,8 +522,7 @@ end
 let root : unit = ()
 let qualified : M.unit = M.U
 |};
-  check
-    {|
+  check {|
 module M = struct
   type unit = U
   let lit : unit = ()
@@ -582,8 +572,7 @@ type r = {f : unit}
 module N = struct end
 let fields = ({M.f = 1}.M.f, {K.f = true}.K.f)
 |};
-  check
-    {|
+  check {|
 module M = struct end
 module M = struct end
 |};
@@ -594,35 +583,30 @@ module M = struct
   module N = struct end
 end
 |};
-  check
-    {|
+  check {|
 module M = struct
   let x = 1
   let x = 2
 end
 |};
-  check
-    {|
+  check {|
 module M = struct
   type t = |
   type t = int
 end
 |};
-  check
-    {|
+  check {|
 module M = struct
   type t = A
   type u = A
 end
 |};
-  check
-    {|
+  check {|
 module M = struct
   type t = {x : int; x : int}
 end
 |};
-  check
-    {|
+  check {|
 module M = struct
   type t['a, 'a] = |
 end
@@ -657,60 +641,47 @@ end
 ;;
 
 let%expect_test "unbound modules and members" =
-  check
-    {|
+  check {|
 let v = M.x
 |};
-  check
-    {|
+  check {|
 let v : M.t = 1
 |};
-  check
-    {|
+  check {|
 let c = M.A
 |};
-  check
-    {|
+  check {|
 let f p = p.M.x
 |};
-  check
-    {|
+  check {|
 let r = {M.x = 1}
 |};
-  check
-    {|
+  check {|
 let p v = match v with M.A -> 1
 |};
-  check
-    {|
+  check {|
 let p v = match v with {M.x = _} -> 1
 |};
-  check
-    {|
+  check {|
 type t = A of M.t
 |};
-  check
-    {|
+  check {|
 module M = struct end
 let v = M.x
 |};
-  check
-    {|
+  check {|
 module M = struct end
 let v : M.t = 1
 |};
-  check
-    {|
+  check {|
 module M = struct end
 let c = M.A
 |};
-  check
-    {|
+  check {|
 module M = struct end
 let f p = p.M.x
 |};
-  check
-    {|
+  check {|
 module M = struct
   let x = y
 end
@@ -843,8 +814,7 @@ let local_does_not_provide n = cond n () (); .~.<M.n>.
              (splice ~subs:[ "M.n", Some (string "s") ] (quote (var "M.n")))
          ; top "shorthand" [] (splice ~subs:[ "M.n", None ] (quote (var "M.n")))
          ]);
-  check
-    {|
+  check {|
 module M = struct
   let n = 5
   let as_written = .~.<n>..{n}
@@ -875,8 +845,7 @@ module M = struct
 end
 let x = .~M.code
 |};
-  check
-    {|
+  check {|
 module M = struct
   let n = 1
 end

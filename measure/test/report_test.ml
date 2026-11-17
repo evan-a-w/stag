@@ -62,8 +62,7 @@ let%expect_test "time" =
 let%expect_test "Format.to_string" =
   List.iter Report.Format.all ~f:(fun format ->
     print_endline (Report.Format.to_string format));
-  [%expect
-    {|
+  [%expect {|
     human
     sexp
     json

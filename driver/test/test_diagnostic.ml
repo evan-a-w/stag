@@ -6,10 +6,10 @@ let show ?contents loc message =
 ;;
 
 let loc (line, col) (line', col') =
-  { Loc.file = "a.stag"
-  ; start = { line; col; offset = 0 }
-  ; stop = { line = line'; col = col'; offset = 0 }
-  }
+  Loc.create
+    ~file:"a.stag"
+    ~start:#{ line; col; offset = 0 }
+    ~stop:#{ line = line'; col = col'; offset = 0 }
 ;;
 
 let%expect_test "rendering" =

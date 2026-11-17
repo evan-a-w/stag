@@ -87,42 +87,42 @@ let%expect_test "diagnostics follow changes" =
   Client.with_server
     ~files:[ "a.stag", "let x = Int.add 1 \"é\"\n" ]
     (fun client ->
-       Client.did_open client "a.stag";
-       [%expect
-         {|
+      Client.did_open client "a.stag";
+      [%expect
+        {|
       diagnostics a.stag (version 1):
         0:18-0:21 error: This expression has type string but an expression was expected of type int
       |}];
-       Client.did_change client "a.stag" ~version:2 "let x = Int.add 1 2\n";
-       [%expect {| diagnostics a.stag (version 2): none |}];
-       Client.did_change
-         client
-         "a.stag"
-         ~version:3
-         "let x = (* 😊 *) Int.add 1 2 in\n";
-       [%expect
-         {|
+      Client.did_change client "a.stag" ~version:2 "let x = Int.add 1 2\n";
+      [%expect {| diagnostics a.stag (version 2): none |}];
+      Client.did_change
+        client
+        "a.stag"
+        ~version:3
+        "let x = (* 😊 *) Int.add 1 2 in\n";
+      [%expect
+        {|
       diagnostics a.stag (version 3):
         0:29-0:31 error: Unexpected `in`: a toplevel `let` is a declaration, without `in`
       |}];
-       Client.notify
-         client
-         "textDocument/didClose"
-         (Client.text_document client "a.stag");
-       [%expect {| diagnostics a.stag: none |}])
+      Client.notify
+        client
+        "textDocument/didClose"
+        (Client.text_document client "a.stag");
+      [%expect {| diagnostics a.stag: none |}])
 ;;
 
 let%expect_test "changes are checked once, at their last version" =
   Client.with_server
     ~files:[ "a.stag", "let x = 1\n" ]
     (fun client ->
-       Client.did_open client "a.stag";
-       Client.did_change ~check:false client "a.stag" ~version:2 "let x = y\n";
-       Client.did_change ~check:false client "a.stag" ~version:3 "let x = z\n";
-       [%expect {| |}];
-       Client.check_pending client;
-       [%expect
-         {|
+      Client.did_open client "a.stag";
+      Client.did_change ~check:false client "a.stag" ~version:2 "let x = y\n";
+      Client.did_change ~check:false client "a.stag" ~version:3 "let x = z\n";
+      [%expect {| |}];
+      Client.check_pending client;
+      [%expect
+        {|
       diagnostics a.stag (version 3):
         0:8-0:9 error: Unbound value z
       |}])
@@ -133,9 +133,9 @@ let%expect_test "a looping splice is stopped by the limits" =
     ~limits:{ Server.default_limits with fuel = Some 100_000 }
     ~files:[ "a.stag", "let loop x = loop x\nlet y = .~(loop 0)\n" ]
     (fun client ->
-       Client.did_open client "a.stag";
-       [%expect
-         {|
+      Client.did_open client "a.stag";
+      [%expect
+        {|
          diagnostics a.stag (version 1):
            1:8-1:18 error: This toplevel splice failed at compile time: Out of fuel: evaluation took more than 100000 steps
              related a.stag 0:13-0:17: The error was raised here
@@ -151,21 +151,21 @@ let%expect_test "a syntax splice: diagnostics and hover" =
            let bad : string = .~(Stag.Expr.int 1)\n" )
       ]
     (fun client ->
-       Client.did_open client "a.stag";
-       [%expect
-         {|
+      Client.did_open client "a.stag";
+      [%expect
+        {|
          diagnostics a.stag (version 1):
            2:19-2:38 error: In the expression this splice gave: This expression has type int but an expression was expected of type string
              Note: The splice gave the expression:
                1
          |}];
-       List.iter
-         [ 0, 4; 0, 10; 0, 20; 1, 13; 1, 48 ]
-         ~f:(fun (line, character) ->
-           printf "%d:%d " line character;
-           hover client ~line ~character);
-       [%expect
-         {|
+      List.iter
+        [ 0, 4; 0, 10; 0, 20; 1, 13; 1, 48 ]
+        ~f:(fun (line, character) ->
+          printf "%d:%d " line character;
+          hover client ~line ~character);
+      [%expect
+        {|
          0:4 0:4-0:7 ```stag A.one : int ```
          0:10 0:10-0:29 ```stag int ```
          0:20 0:13-0:26 ```stag prelude.Stag.Expr.int : int -> Stag.Expr.t ```
@@ -179,54 +179,53 @@ let%expect_test "formatting" =
     ~files:
       [ "a.stag", "let   x =\n  \"é\"   (* 😊 *)\n"; "b.stag", "let x = (\n" ]
     (fun client ->
-       Client.did_open client "a.stag";
-       Client.did_open client "b.stag";
-       [%expect
-         {|
+      Client.did_open client "a.stag";
+      Client.did_open client "b.stag";
+      [%expect
+        {|
         diagnostics b.stag (version 1):
           1:0-1:0 error: Expected an expression, found end of file
         |}];
-       let format file =
-         Option.iter
-           (Client.request
-              client
-              "textDocument/formatting"
-              (Client.text_document
-                 client
-                 file
-                 ~extra:
-                   [ ( "options"
-                     , `Assoc [ "tabSize", `Int 2; "insertSpaces", `Bool true ]
-                     )
-                   ]))
-           ~f:(Client.print_json client)
-       in
-       format "a.stag";
-       [%expect
-         {|
-        [
-          {
-            "newText": "let x = \"é\" (* 😊 *)\n",
-            "range": {
-              "end": { "character": 0, "line": 2 },
-              "start": { "character": 0, "line": 0 }
-            }
-          }
-        ]
-        |}];
-       format "b.stag";
-       [%expect {| [] |}])
+      let format file =
+        Option.iter
+          (Client.request
+             client
+             "textDocument/formatting"
+             (Client.text_document
+                client
+                file
+                ~extra:
+                  [ ( "options"
+                    , `Assoc [ "tabSize", `Int 2; "insertSpaces", `Bool true ] )
+                  ]))
+          ~f:(Client.print_json client)
+      in
+      format "a.stag";
+      [%expect
+        {|
+         [
+           {
+             "newText": "let x = \"é\" (* 😊 *)\n",
+             "range": {
+               "start": { "line": 0, "character": 0 },
+               "end": { "line": 2, "character": 0 }
+             }
+           }
+         ]
+         |}];
+      format "b.stag";
+      [%expect {| [] |}])
 ;;
 
 let%expect_test "semantic tokens" =
   Client.with_server
     ~files:[ "a.stag", source ]
     (fun client ->
-       Client.did_open client "a.stag";
-       [%expect {| |}];
-       Client.print_semantic_tokens client "a.stag";
-       [%expect
-         {xxx|
+      Client.did_open client "a.stag";
+      [%expect {| |}];
+      Client.print_semantic_tokens client "a.stag";
+      [%expect
+        {xxx|
       0:0+17 Comment "(* a \195\188 comment *)"
       1:0+4 Keyword "type"
       1:5+5 Type (declaration) "point"
@@ -334,18 +333,18 @@ let%expect_test "semantic tokens of a file that doesn't typecheck or parse" =
     ~files:
       [ "a.stag", "let f x = x\nlet y : t = f 1\n"; "b.stag", "let f x = (x\n" ]
     (fun client ->
-       Client.did_open client "a.stag";
-       Client.did_open client "b.stag";
-       [%expect
-         {|
+      Client.did_open client "a.stag";
+      Client.did_open client "b.stag";
+      [%expect
+        {|
         diagnostics a.stag (version 1):
           1:8-1:9 error: Unbound type t
         diagnostics b.stag (version 1):
           1:0-1:0 error: Expected `)` to close this `(` (opened at 1:10), found end of file
         |}];
-       Client.print_semantic_tokens client "a.stag";
-       [%expect
-         {|
+      Client.print_semantic_tokens client "a.stag";
+      [%expect
+        {|
          0:0+3 Keyword "let"
          0:4+1 Function (declaration) "f"
          0:6+1 Parameter (declaration) "x"
@@ -358,9 +357,9 @@ let%expect_test "semantic tokens of a file that doesn't typecheck or parse" =
          1:12+1 Function "f"
          1:14+1 Number "1"
          |}];
-       Client.print_semantic_tokens client "b.stag";
-       [%expect
-         {|
+      Client.print_semantic_tokens client "b.stag";
+      [%expect
+        {|
         0:0+3 Keyword "let"
         0:4+1 Variable "f"
         0:6+1 Variable "x"
@@ -373,34 +372,34 @@ let%expect_test "hover and definition" =
   Client.with_server
     ~files:[ "a.stag", source ]
     (fun client ->
-       Client.did_open client "a.stag";
-       [%expect {| |}];
-       List.iter
-         [ 1, 6
-         ; 1, 14
-         ; 1, 18
-         ; 2, 13
-         ; 2, 39
-         ; 3, 10
-         ; 6, 7
-         ; 6, 12
-         ; 7, 11
-         ; 8, 6
-         ; 8, 21
-         ; 9, 13
-         ; 9, 31
-         ; 14, 22
-         ; 14, 31
-         ; 14, 40
-         ; 15, 7
-         ; 13, 8
-         ; 13, 20
-         ]
-         ~f:(fun (line, character) ->
-           printf "%d:%d " line character;
-           hover client ~line ~character);
-       [%expect
-         {|
+      Client.did_open client "a.stag";
+      [%expect {| |}];
+      List.iter
+        [ 1, 6
+        ; 1, 14
+        ; 1, 18
+        ; 2, 13
+        ; 2, 39
+        ; 3, 10
+        ; 6, 7
+        ; 6, 12
+        ; 7, 11
+        ; 8, 6
+        ; 8, 21
+        ; 9, 13
+        ; 9, 31
+        ; 14, 22
+        ; 14, 31
+        ; 14, 40
+        ; 15, 7
+        ; 13, 8
+        ; 13, 20
+        ]
+        ~f:(fun (line, character) ->
+          printf "%d:%d " line character;
+          hover client ~line ~character);
+      [%expect
+        {|
       1:6 1:5-1:10 ```stag type A.point ```
       1:14 no hover
       1:18 1:18-1:21 ```stag type int ```
@@ -421,25 +420,25 @@ let%expect_test "hover and definition" =
       13:8 13:4-13:8 ```stag A.code : <int>{..'a} ```
       13:20 13:14-13:21 ```stag Int.add : int -> int -> int ```
       |}];
-       List.iter
-         [ 8, 21
-         ; 9, 32
-         ; 9, 30
-         ; 9, 13
-         ; 14, 14
-         ; 14, 35
-         ; 8, 6
-         ; 14, 22
-         ; 14, 31
-         ; 14, 40
-         ; 2, 39
-         ; 20, 13
-         ]
-         ~f:(fun (line, character) ->
-           printf "%d:%d " line character;
-           definition client "a.stag" ~line ~character);
-       [%expect
-         {|
+      List.iter
+        [ 8, 21
+        ; 9, 32
+        ; 9, 30
+        ; 9, 13
+        ; 14, 14
+        ; 14, 35
+        ; 8, 6
+        ; 14, 22
+        ; 14, 31
+        ; 14, 40
+        ; 2, 39
+        ; 20, 13
+        ]
+        ~f:(fun (line, character) ->
+          printf "%d:%d " line character;
+          definition client "a.stag" ~line ~character);
+      [%expect
+        {|
       8:21 no definition
       9:32 -> a.stag 1:23-1:24
       9:30 -> a.stag 9:13-9:14
@@ -466,22 +465,22 @@ let%expect_test "hover and definition in a file with errors" =
            let h = double 4\n" )
       ]
     (fun client ->
-       Client.did_open client "a.stag";
-       [%expect
-         {|
+      Client.did_open client "a.stag";
+      [%expect
+        {|
          diagnostics a.stag (version 1):
            1:19-1:34 error: This expression has type int but an expression was expected of type string
            1:27-1:31 error: Unbound value nope
            2:29-2:33 error: This expression has type bool but an expression was expected of type int
            3:8-3:10 error: Expected an expression, found `in`
          |}];
-       List.iter
-         [ 1, 4; 1, 20; 2, 6; 2, 20; 2, 26; 4, 9 ]
-         ~f:(fun (line, character) ->
-           printf "%d:%d " line character;
-           hover client ~line ~character);
-       [%expect
-         {|
+      List.iter
+        [ 1, 4; 1, 20; 2, 6; 2, 20; 2, 26; 4, 9 ]
+        ~f:(fun (line, character) ->
+          printf "%d:%d " line character;
+          hover client ~line ~character);
+      [%expect
+        {|
          1:4 1:4-1:7 ```stag A.bad : string ```
          1:20 1:19-1:25 ```stag A.double : int -> int ```
          2:6 2:6-2:7 ```stag y : int ```
@@ -489,13 +488,13 @@ let%expect_test "hover and definition in a file with errors" =
          2:26 2:26-2:27 ```stag y : int ```
          4:9 4:8-4:14 ```stag A.double : int -> int ```
          |}];
-       List.iter
-         [ 1, 20; 2, 20; 2, 27; 4, 9 ]
-         ~f:(fun (line, character) ->
-           printf "%d:%d " line character;
-           definition client "a.stag" ~line ~character);
-       [%expect
-         {|
+      List.iter
+        [ 1, 20; 2, 20; 2, 27; 4, 9 ]
+        ~f:(fun (line, character) ->
+          printf "%d:%d " line character;
+          definition client "a.stag" ~line ~character);
+      [%expect
+        {|
          1:20 -> a.stag 0:4-0:10
          2:20 -> a.stag 0:4-0:10
          2:27 -> a.stag 2:6-2:7
@@ -513,14 +512,14 @@ let%expect_test "mutable variables: hover and definition" =
            let local u = let mut n = 3 in n <- Int.add n 1; n\n" )
       ]
     (fun client ->
-       Client.did_open client "a.stag";
-       [%expect {| |}];
-       let positions = [ 0, 8; 2, 13; 2, 31; 2, 41; 3, 22; 3, 31; 3, 44 ] in
-       List.iter positions ~f:(fun (line, character) ->
-         printf "%d:%d " line character;
-         hover client ~line ~character);
-       [%expect
-         {|
+      Client.did_open client "a.stag";
+      [%expect {| |}];
+      let positions = [ 0, 8; 2, 13; 2, 31; 2, 41; 3, 22; 3, 31; 3, 44 ] in
+      List.iter positions ~f:(fun (line, character) ->
+        printf "%d:%d " line character;
+        hover client ~line ~character);
+      [%expect
+        {|
          0:8 0:8-0:13 ```stag A.count : int ```
          2:13 2:13-2:18 ```stag A.count : int ```
          2:31 2:30-2:35 ```stag A.count : int ```
@@ -529,11 +528,11 @@ let%expect_test "mutable variables: hover and definition" =
          3:31 3:31-3:32 ```stag n : int ```
          3:44 3:44-3:45 ```stag n : int ```
          |}];
-       List.iter positions ~f:(fun (line, character) ->
-         printf "%d:%d " line character;
-         definition client "a.stag" ~line ~character);
-       [%expect
-         {|
+      List.iter positions ~f:(fun (line, character) ->
+        printf "%d:%d " line character;
+        definition client "a.stag" ~line ~character);
+      [%expect
+        {|
          0:8 -> a.stag 0:8-0:13
          2:13 -> a.stag 0:8-0:13
          2:31 -> a.stag 0:8-0:13
@@ -553,12 +552,12 @@ let%expect_test "hover on code that assigns a free variable" =
            let read = .<x>.\n" )
       ]
     (fun client ->
-       Client.did_open client "a.stag";
-       hover client ~line:0 ~character:4;
-       hover client ~line:1 ~character:4;
-       hover client ~line:2 ~character:4;
-       [%expect
-         {|
+      Client.did_open client "a.stag";
+      hover client ~line:0 ~character:4;
+      hover client ~line:1 ~character:4;
+      hover client ~line:2 ~character:4;
+      [%expect
+        {|
          0:4-0:8 ```stag A.incr : <unit>{x : mut int; ..'a} ```
          1:4-1:5 ```stag A.g : <'a>{x?'b : immut int; ..'c} -> <'a>{..'d} ```
          2:4-2:8 ```stag A.read : <'a>{x : 'a; ..'b} ```
@@ -575,20 +574,20 @@ let%expect_test "hover on the variables of a pattern that failed to check" =
            let h = g 3\n" )
       ]
     (fun client ->
-       Client.did_open client "a.stag";
-       [%expect
-         {|
+      Client.did_open client "a.stag";
+      [%expect
+        {|
          diagnostics a.stag (version 1):
            0:16-0:20 error: Unbound type nope
            3:10-3:11 error: This expression has type int but an expression was expected of type option[int]
          |}];
-       List.iter
-         [ 1, 29; 1, 34; 2, 30; 2, 43 ]
-         ~f:(fun (line, character) ->
-           printf "%d:%d " line character;
-           hover client ~line ~character);
-       [%expect
-         {|
+      List.iter
+        [ 1, 29; 1, 34; 2, 30; 2, 43 ]
+        ~f:(fun (line, character) ->
+          printf "%d:%d " line character;
+          hover client ~line ~character);
+      [%expect
+        {|
          1:29 1:29-1:30 ```stag z : 'a ```
          1:34 1:34-1:35 ```stag z : 'a ```
          2:30 2:30-2:31 ```stag w : int ```
@@ -600,45 +599,45 @@ let%expect_test "document symbols" =
   Client.with_server
     ~files:[ "a.stag", source ]
     (fun client ->
-       Client.did_open client "a.stag";
-       let rec print indent (symbol : Lsp_types.DocumentSymbol.t) =
-         printf
-           "%s%s %s%s %d:%d-%d:%d\n"
-           indent
-           (match symbol.kind with
-            | Module -> "module"
-            | Function -> "function"
-            | Variable -> "variable"
-            | Struct -> "struct"
-            | Enum -> "enum"
-            | Class -> "class"
-            | EnumMember -> "enum-member"
-            | Field -> "field"
-            | Constructor -> "constructor"
-            | Event -> "event"
-            | _ -> "other")
-           symbol.name
-           (Option.value_map symbol.detail ~default:"" ~f:(sprintf " (%s)"))
-           symbol.range.start.line
-           symbol.range.start.character
-           symbol.range.end_.line
-           symbol.range.end_.character;
-         List.iter
-           (Option.value symbol.children ~default:[])
-           ~f:(print (indent ^ "  "))
-       in
-       (match
-          Client.request
-            client
-            "textDocument/documentSymbol"
-            (Client.text_document client "a.stag")
-        with
-        | Some (`List symbols) ->
-          List.iter symbols ~f:(fun json ->
-            print "" (Lsp_types.DocumentSymbol.t_of_yojson json))
-        | _ -> print_endline "unexpected");
-       [%expect
-         {|
+      Client.did_open client "a.stag";
+      let rec print indent (symbol : Lsp_types.DocumentSymbol.t) =
+        printf
+          "%s%s %s%s %d:%d-%d:%d\n"
+          indent
+          (match symbol.kind with
+           | Module -> "module"
+           | Function -> "function"
+           | Variable -> "variable"
+           | Struct -> "struct"
+           | Enum -> "enum"
+           | Class -> "class"
+           | EnumMember -> "enum-member"
+           | Field -> "field"
+           | Constructor -> "constructor"
+           | Event -> "event"
+           | _ -> "other")
+          symbol.name
+          (Option.value_map symbol.detail ~default:"" ~f:(sprintf " (%s)"))
+          symbol.range.start.line
+          symbol.range.start.character
+          symbol.range.end_.line
+          symbol.range.end_.character;
+        List.iter
+          (Option.value symbol.children ~default:[])
+          ~f:(print (indent ^ "  "))
+      in
+      (match
+         Client.request
+           client
+           "textDocument/documentSymbol"
+           (Client.text_document client "a.stag")
+       with
+       | Some (`List symbols) ->
+         List.iter symbols ~f:(fun json ->
+           print "" (Lsp_types.DocumentSymbol.t_of_yojson json))
+       | _ -> print_endline "unexpected");
+      [%expect
+        {|
       struct point 1:0-1:31
         field x 1:14-1:15
         field y 1:23-1:24
@@ -690,33 +689,33 @@ let%expect_test "a project: other files' errors, cross-file definitions" =
       ; "bin/main.stag", "let main = print_int (Math.Power.quad 3)\n"
       ]
     (fun client ->
-       Client.did_open client "bin/main.stag";
-       [%expect {| |}];
-       definition client "bin/main.stag" ~line:0 ~character:34;
-       hover ~file:"bin/main.stag" client ~line:0 ~character:34;
-       [%expect
-         {|
+      Client.did_open client "bin/main.stag";
+      [%expect {| |}];
+      definition client "bin/main.stag" ~line:0 ~character:34;
+      hover ~file:"bin/main.stag" client ~line:0 ~character:34;
+      [%expect
+        {|
         -> math/power.stag 0:4-0:8
         0:22-0:37 ```stag Math.Power.quad : int -> int ```
         |}];
-       Client.did_open client "math/arith.stag";
-       [%expect {| |}];
-       Client.did_change
-         client
-         "math/arith.stag"
-         ~version:2
-         "let double x = Int.mul \"2\" x\n";
-       [%expect
-         {|
+      Client.did_open client "math/arith.stag";
+      [%expect {| |}];
+      Client.did_change
+        client
+        "math/arith.stag"
+        ~version:2
+        "let double x = Int.mul \"2\" x\n";
+      [%expect
+        {|
         diagnostics math/arith.stag (version 2):
           0:23-0:26 error: This expression has type string but an expression was expected of type int
         |}];
-       Client.did_change
-         client
-         "math/arith.stag"
-         ~version:3
-         "let double x = Int.mul 2 x\n";
-       [%expect {| diagnostics math/arith.stag (version 3): none |}])
+      Client.did_change
+        client
+        "math/arith.stag"
+        ~version:3
+        "let double x = Int.mul 2 x\n";
+      [%expect {| diagnostics math/arith.stag (version 3): none |}])
 ;;
 
 let%expect_test "errors in unopened files of the project are published for them"
@@ -729,14 +728,14 @@ let%expect_test "errors in unopened files of the project are published for them"
       ; "lib/b.stag", "let y : int = \"s\"\n"
       ]
     (fun client ->
-       Client.did_open client "lib/a.stag";
-       [%expect
-         {|
+      Client.did_open client "lib/a.stag";
+      [%expect
+        {|
         diagnostics lib/b.stag:
           0:14-0:17 error: This expression has type string but an expression was expected of type int
         |}];
-       Client.did_change client "lib/a.stag" ~version:2 "let x = 1\n";
-       [%expect {| |}])
+      Client.did_change client "lib/a.stag" ~version:2 "let x = 1\n";
+      [%expect {| |}])
 ;;
 
 let%expect_test "documents without a file are checked standalone" =
@@ -746,14 +745,14 @@ let%expect_test "documents without a file are checked standalone" =
         client
         "textDocument/didOpen"
         (`Assoc
-            [ ( "textDocument"
-              , `Assoc
-                  [ "uri", `String uri
-                  ; "languageId", `String "stag"
-                  ; "version", `Int 1
-                  ; "text", `String text
-                  ] )
-            ])
+          [ ( "textDocument"
+            , `Assoc
+                [ "uri", `String uri
+                ; "languageId", `String "stag"
+                ; "version", `Int 1
+                ; "text", `String text
+                ] )
+          ])
     in
     open_untitled "untitled:Untitled-1" "let y = Int.add 1 \"s\"\n";
     open_untitled "untitled:Untitled-2" "let y = Int.add 1 2\n";
@@ -767,9 +766,9 @@ let%expect_test "documents without a file are checked standalone" =
          client
          "textDocument/hover"
          (`Assoc
-             [ "textDocument", `Assoc [ "uri", `String "untitled:Untitled-2" ]
-             ; "position", Client.position ~line:0 ~character:5
-             ]))
+           [ "textDocument", `Assoc [ "uri", `String "untitled:Untitled-2" ]
+           ; "position", Client.position ~line:0 ~character:5
+           ]))
       ~f:(Client.print_json client);
     [%expect
       {|
@@ -779,8 +778,8 @@ let%expect_test "documents without a file are checked standalone" =
           "value": "```stag\nUntitled_2.y : int\n```"
         },
         "range": {
-          "end": { "character": 5, "line": 0 },
-          "start": { "character": 4, "line": 0 }
+          "start": { "line": 0, "character": 4 },
+          "end": { "line": 0, "character": 5 }
         }
       }
       |}])
@@ -858,14 +857,14 @@ let%expect_test "documents not of files nor untitled are not checked" =
         client
         "textDocument/didOpen"
         (`Assoc
-            [ ( "textDocument"
-              , `Assoc
-                  [ "uri", `String uri
-                  ; "languageId", `String "stag"
-                  ; "version", `Int 1
-                  ; "text", `String text
-                  ] )
-            ])
+          [ ( "textDocument"
+            , `Assoc
+                [ "uri", `String uri
+                ; "languageId", `String "stag"
+                ; "version", `Int 1
+                ; "text", `String text
+                ] )
+          ])
     in
     let hover uri =
       Option.iter
@@ -873,9 +872,9 @@ let%expect_test "documents not of files nor untitled are not checked" =
            client
            "textDocument/hover"
            (`Assoc
-               [ "textDocument", `Assoc [ "uri", `String uri ]
-               ; "position", Client.position ~line:0 ~character:5
-               ]))
+             [ "textDocument", `Assoc [ "uri", `String uri ]
+             ; "position", Client.position ~line:0 ~character:5
+             ]))
         ~f:(Client.print_json client)
     in
     open_ "git:/x/a.stag?ref" "let y = Int.add 1 \"s\"\n";
@@ -887,7 +886,7 @@ let%expect_test "documents not of files nor untitled are not checked" =
          client
          "textDocument/documentSymbol"
          (`Assoc
-             [ "textDocument", `Assoc [ "uri", `String "git:/x/a.stag?ref" ] ]))
+           [ "textDocument", `Assoc [ "uri", `String "git:/x/a.stag?ref" ] ]))
       ~f:(Client.print_json client);
     [%expect
       {|
@@ -897,12 +896,12 @@ let%expect_test "documents not of files nor untitled are not checked" =
           "kind": 13,
           "name": "y",
           "range": {
-            "end": { "character": 21, "line": 0 },
-            "start": { "character": 0, "line": 0 }
+            "start": { "line": 0, "character": 0 },
+            "end": { "line": 0, "character": 21 }
           },
           "selectionRange": {
-            "end": { "character": 5, "line": 0 },
-            "start": { "character": 4, "line": 0 }
+            "start": { "line": 0, "character": 4 },
+            "end": { "line": 0, "character": 5 }
           }
         }
       ]
@@ -921,15 +920,15 @@ let%expect_test "documents not of files nor untitled are not checked" =
       {
         "contents": { "kind": "markdown", "value": "```stag\nSame.y : int\n```" },
         "range": {
-          "end": { "character": 5, "line": 0 },
-          "start": { "character": 4, "line": 0 }
+          "start": { "line": 0, "character": 4 },
+          "end": { "line": 0, "character": 5 }
         }
       }
       {
         "contents": { "kind": "markdown", "value": "```stag\nSame_2.y : int\n```" },
         "range": {
-          "end": { "character": 5, "line": 0 },
-          "start": { "character": 4, "line": 0 }
+          "start": { "line": 0, "character": 4 },
+          "end": { "line": 0, "character": 5 }
         }
       }
       |}])
@@ -939,12 +938,12 @@ let%expect_test "files changed on disk, project errors, closing" =
   Client.with_server
     ~capabilities:
       (`Assoc
-          [ ( "workspace"
-            , `Assoc
-                [ ( "didChangeWatchedFiles"
-                  , `Assoc [ "dynamicRegistration", `Bool true ] )
-                ] )
-          ])
+        [ ( "workspace"
+          , `Assoc
+              [ ( "didChangeWatchedFiles"
+                , `Assoc [ "dynamicRegistration", `Bool true ] )
+              ] )
+        ])
     ~files:
       [ "stag-project", ""
       ; "lib/stag", "(library (name lib))"
@@ -952,8 +951,8 @@ let%expect_test "files changed on disk, project errors, closing" =
       ; "lib/b.stag", "let y : int = \"s\"\n"
       ]
     (fun client ->
-       [%expect
-         {|
+      [%expect
+        {|
          request client/registerCapability
          {
            "registrations": [
@@ -971,53 +970,53 @@ let%expect_test "files changed on disk, project errors, closing" =
            ]
          }
          |}];
-       Client.did_open client "lib/a.stag";
-       [%expect
-         {|
+      Client.did_open client "lib/a.stag";
+      [%expect
+        {|
          diagnostics lib/b.stag:
            0:14-0:17 error: This expression has type string but an expression was expected of type int
          |}];
-       let write file data =
-         Out_channel.write_all (Client.path client file) ~data;
-         Client.notify
-           client
-           "workspace/didChangeWatchedFiles"
-           (`Assoc
-               [ ( "changes"
-                 , `List
-                     [ `Assoc
-                         [ "uri", `String (Client.uri client file)
-                         ; "type", `Int 2
-                         ]
-                     ] )
-               ])
-       in
-       write "lib/b.stag" "let y = 1\n";
-       [%expect {| diagnostics lib/b.stag: none |}];
-       write "lib/b.stag" "let y : int = \"s\"\n";
-       [%expect
-         {|
+      let write file data =
+        Out_channel.write_all (Client.path client file) ~data;
+        Client.notify
+          client
+          "workspace/didChangeWatchedFiles"
+          (`Assoc
+            [ ( "changes"
+              , `List
+                  [ `Assoc
+                      [ "uri", `String (Client.uri client file)
+                      ; "type", `Int 2
+                      ]
+                  ] )
+            ])
+      in
+      write "lib/b.stag" "let y = 1\n";
+      [%expect {| diagnostics lib/b.stag: none |}];
+      write "lib/b.stag" "let y : int = \"s\"\n";
+      [%expect
+        {|
          diagnostics lib/b.stag:
            0:14-0:17 error: This expression has type string but an expression was expected of type int
          |}];
-       write "lib/stag" "(library (nme lib))";
-       [%expect
-         {|
+      write "lib/stag" "(library (nme lib))";
+      [%expect
+        {|
          diagnostics lib/stag:
            0:10-0:13 error: Unknown field nme: expected name or libraries
            0:0-0:19 error: The library stanza has no name: add (name ...)
          diagnostics lib/b.stag: none
          |}];
-       write "lib/stag" "(library (name lib))";
-       [%expect
-         {|
+      write "lib/stag" "(library (name lib))";
+      [%expect
+        {|
          diagnostics lib/b.stag:
            0:14-0:17 error: This expression has type string but an expression was expected of type int
          diagnostics lib/stag: none
          |}];
-       Client.notify
-         client
-         "textDocument/didClose"
-         (Client.text_document client "lib/a.stag");
-       [%expect {| diagnostics lib/b.stag: none |}])
+      Client.notify
+        client
+        "textDocument/didClose"
+        (Client.text_document client "lib/a.stag");
+      [%expect {| diagnostics lib/b.stag: none |}])
 ;;

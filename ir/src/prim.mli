@@ -1,9 +1,9 @@
 open! Import
 
 (** Built-in functions, implemented in OCaml. They are in scope in every
-    program, outside its root module, so any definition of the same name
-    shadows them: [print_int] at the root, and modules such as [Int], whose
-    members are named by paths ([Int.add]). *)
+    program, outside its root module, so any definition of the same name shadows
+    them: [print_int] at the root, and modules such as [Int], whose members are
+    named by paths ([Int.add]). *)
 
 (** The values prims take and return. *)
 module Value : sig

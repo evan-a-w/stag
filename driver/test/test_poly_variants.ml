@@ -29,8 +29,7 @@ let same_type = cond true `A `B
 ;;
 
 let%expect_test "matches without a catch-all are closed" =
-  check
-    {|
+  check {|
 let f v = match v with `A n -> n | `B -> 0
 let applied = f `B
 |};
@@ -43,14 +42,12 @@ let with_var v = match v with `A -> 1 | x -> 0
 let var_first v = match v with x -> x | `A -> `B
 let repeated v = match v with `A 1 -> 1 | `A _ -> 2
 |};
-  check
-    {|
+  check {|
 let f v = match v with `A n -> n | `B -> 0
 let unhandled = f `C
 |};
   check_program [ top "absurd_applied" [] (match_ (tag "A") []) ];
-  check
-    {|
+  check {|
 let argument_mismatch v = match v with `A 1 -> 1 | `A -> 2
 |};
   [%expect
@@ -210,13 +207,11 @@ let c : with_c[{`D : unit}] = `D
 let w = W `B
 let open_param (v : with_c[{..'r}]) = v
 |};
-  check
-    {|
+  check {|
 type ab = [`A of int | `B]
 let bad : ab = `C
 |};
-  check
-    {|
+  check {|
 type dup = [`A of int | `A of bool]
 |};
   [%expect
@@ -289,24 +284,19 @@ let absent c (v : [..'d]) =
 ;;
 
 let%expect_test "unification errors" =
-  check
-    {|
+  check {|
 let variant_vs_record = match {} with `A -> 1
 |};
-  check
-    {|
+  check {|
 let variant_vs_tuple = add `A 1
 |};
-  check
-    {|
+  check {|
 let argument = cond true (`A 1) (`A true)
 |};
-  check
-    {|
+  check {|
 let closed = match `C with `A -> 1 | `B -> 2
 |};
-  check
-    {|
+  check {|
 let maybe_c v =
   cond true v `C;
   match v with `A -> 1
@@ -344,8 +334,7 @@ let%expect_test "empty tuples print as ()" =
   (* On the DSL: in source, [()] is the unit literal, not the empty tuple. *)
   check_program
     [ top "empty" [] (tuple []); top "arg" [] (tag "A" ~arg:(tuple [])) ];
-  check
-    {|
+  check {|
 let unit_arg = `A ()
 type t = [`A of ()]
 type c = C of ()
@@ -384,19 +373,16 @@ let residual =
   ( f (`B 1) (let fn o = match o with `B n -> n in fn),
     f (`C true) (let fn o = match o with `C b -> cond b 1 2 in fn) )
 |};
-  [%expect
-    {|
+  [%expect {|
     val closed : int * bool
     val residual : int * int
     |}]
 ;;
 
 let%expect_test "closing scrutinees with shadowed tags" =
-  let shadowed =
-    {|
+  let shadowed = {|
 type t[{..'r}] = [`A of int; ..'r]
-|}
-  in
+|} in
   check
     (shadowed
      ^ {|
@@ -406,14 +392,11 @@ let residual (v : t[{`A : bool}]) =
   | other -> (match other with `A b -> cond b 1 2)
 |}
     );
-  (* Closing gives each tag one entry, so the shadowed [`A of bool] is
-     extra. *)
+  (* Closing gives each tag one entry, so the shadowed [`A of bool] is extra. *)
   check
-    (shadowed
-     ^ {|
+    (shadowed ^ {|
 let closed (v : t[{`A : bool}]) = match v with `A n -> 1
-|}
-    );
+|});
   check
     (shadowed
      ^ {|
@@ -463,16 +446,13 @@ let missing = same {`A = 1} `B
 ;;
 
 let%expect_test "structural types may be recursive" =
-  check
-    {|
+  check {|
 let occurs v = cond true v (`A v)
 |};
-  check
-    {|
+  check {|
 let cyclic (a : [`A; ..'r]) (b : [`B; ..'r]) = cond true a b
 |};
-  check
-    {|
+  check {|
 type t = [`Nil | `Cons of int * t]
 |};
   check

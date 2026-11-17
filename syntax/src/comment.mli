@@ -1,7 +1,7 @@
 open! Import
 
-(** A comment of a source file, which the lexer keeps beside the tokens, so
-    that a formatter can put it back. *)
+(** A comment of a source file, which the lexer keeps beside the tokens, so that
+    a formatter can put it back. *)
 
 module Placement : sig
   type t =
@@ -9,8 +9,8 @@ module Placement : sig
         { blank_before : bool
         ; blank_after : bool
         }
-    (** No token on its last line after it, nor on its first line before it
-        but one that does not end code (eg. [=] or [(]), so it is about what
+    (** No token on its last line after it, nor on its first line before it but
+        one that does not end code (eg. [=] or [(]), so it is about what
         follows. The blank lines are those between it and the previous or next
         token or comment. *)
     | Trailing

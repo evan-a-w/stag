@@ -35,8 +35,7 @@ let%expect_test "find_root" =
       show (root ^/ "a/b");
       show (root ^/ "a");
       show root);
-  [%expect
-    {|
+  [%expect {|
     true
     true
     true
@@ -192,8 +191,7 @@ let%expect_test "modules do not shadow libraries" =
     File "main/b.stag":
     Error: The module B is also the library b
     |}];
-  (* A library's own name, or that of a library outside its closure, is
-     fine. *)
+  (* A library's own name, or that of a library outside its closure, is fine. *)
   load
     [ "a/stag", "(library (name a))"
     ; "a/a.stag", ""

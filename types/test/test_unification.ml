@@ -111,8 +111,7 @@ let%expect_test "constructor with context args" =
     ~ty1:(con "t" ~args:[ ARow (row [ "x", a ]) ])
     ~ty2:(con "t" ~args:[ ARow (row [ "x", int ]) ]);
   print_ty a;
-  [%expect
-    {|
+  [%expect {|
     (Ok ())
     (TVar (Link (TCon int ())))
     |}]
@@ -138,8 +137,7 @@ let%expect_test "tuples" =
   let a = tvar fresh ~rank:1 in
   unify_ty fresh ~ty1:(TTuple [ a; int ]) ~ty2:(TTuple [ bool; int ]);
   print_ty a;
-  [%expect
-    {|
+  [%expect {|
     (Ok ())
     (TVar (Link (TCon bool ())))
     |}]
@@ -153,6 +151,62 @@ let%expect_test "tuple length mismatch" =
     (Error
      (Type_mismatch (TTuple ((TCon int ()) (TCon int ())))
       (TTuple ((TCon int ()))) (Args_length_mismatch 2 1)))
+    |}]
+;;
+
+let%expect_test "tuples unify every element, reporting the first error" =
+  let fresh = Fresh.create () in
+  let a = tvar fresh ~rank:1 in
+  let b = tvar fresh ~rank:1 in
+  unify_ty
+    fresh
+    ~ty1:(TTuple [ int; a; string; b ])
+    ~ty2:(TTuple [ bool; int; int; bool ]);
+  print_ty a;
+  print_ty b;
+  [%expect
+    {|
+    (Error
+     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    (TVar (Link (TCon int ())))
+    (TVar (Link (TCon bool ())))
+    |}]
+;;
+
+let%expect_test "constructor arguments stop at the first error" =
+  let fresh = Fresh.create () in
+  let a = tvar fresh ~rank:1 in
+  unify_ty
+    fresh
+    ~ty1:(con "pair" ~args:[ ATy int; ATy a ])
+    ~ty2:(con "pair" ~args:[ ATy bool; ATy int ]);
+  print_ty a;
+  [%expect
+    {|
+    (Error
+     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    (TVar (Unbound 0 1))
+    |}]
+;;
+
+let%expect_test "length mismatches unify no element" =
+  let fresh = Fresh.create () in
+  let a = tvar fresh ~rank:1 in
+  unify_ty fresh ~ty1:(TTuple [ a; int ]) ~ty2:(TTuple [ int ]);
+  unify_ty
+    fresh
+    ~ty1:(con "pair" ~args:[ ATy a; ATy int ])
+    ~ty2:(con "pair" ~args:[ ATy int ]);
+  print_ty a;
+  [%expect
+    {|
+    (Error
+     (Type_mismatch (TTuple ((TVar (Unbound 0 1)) (TCon int ())))
+      (TTuple ((TCon int ()))) (Args_length_mismatch 2 1)))
+    (Error
+     (Type_mismatch (TCon pair ((ATy (TVar (Unbound 0 1))) (ATy (TCon int ()))))
+      (TCon pair ((ATy (TCon int ())))) (Args_length_mismatch 2 1)))
+    (TVar (Unbound 0 1))
     |}]
 ;;
 
@@ -191,8 +245,7 @@ let%expect_test "variable with itself" =
   let a = tvar fresh ~rank:1 in
   unify_ty fresh ~ty1:a ~ty2:a;
   print_ty a;
-  [%expect
-    {|
+  [%expect {|
     (Ok ())
     (TVar (Unbound 0 1))
     |}]
@@ -281,8 +334,7 @@ let%expect_test "binding variable to variable lowers rank" =
   let b = tvar fresh ~rank:3 in
   unify_ty fresh ~ty1:a ~ty2:b;
   print_ty b;
-  [%expect
-    {|
+  [%expect {|
     (Ok ())
     (TVar (Unbound 1 1))
     |}]
@@ -609,8 +661,8 @@ let%expect_test "context bounds and presence" =
     |}]
 ;;
 
-(* Contexts with an entry [x] of each presence, as code types, so their
-   presence bounds are printed. *)
+(* Contexts with an entry [x] of each presence, as code types, so their presence
+   bounds are printed. *)
 let print_presences presences =
   print_endline
     (Type.to_string_hum
@@ -740,8 +792,8 @@ let%expect_test "equalities wait for their presence" =
     |}]
 ;;
 
-let%expect_test
-    "types clash only if no instance of their variables unifies them"
+let%expect_test "types clash only if no instance of their variables unifies \
+                 them"
   =
   let fresh = Fresh.create () in
   let a = tvar fresh ~rank:1 in
@@ -959,8 +1011,8 @@ let%expect_test "a row bound equates entry types if present" =
     |}]
 ;;
 
-let%expect_test
-    "equalities are generalized and instantiated with their presence"
+let%expect_test "equalities are generalized and instantiated with their \
+                 presence"
   =
   let fresh = Fresh.create () in
   let p = pvar fresh ~rank:2 in
@@ -1021,9 +1073,9 @@ let%expect_test "entry types that only matter where their presence is present" =
   let c = tvar fresh ~rank:2 in
   let outer = pvar fresh ~rank:1 in
   let g = tvar fresh ~rank:2 in
-  (* [a] is only the type of entries of [p], so is [int]; [b] is also that
-     of an entry of [q], which may be present while [p] is absent, unless
-     [q <= p]; [c] is used elsewhere. *)
+  (* [a] is only the type of entries of [p], so is [int]; [b] is also that of an
+     entry of [q], which may be present while [p] is absent, unless [q <= p];
+     [c] is used elsewhere. *)
   if_present fresh ~presence:p ~ty1:a ~ty2:int;
   if_present fresh ~presence:p ~ty1:b ~ty2:int;
   if_present fresh ~presence:p ~ty1:c ~ty2:int;
@@ -1073,8 +1125,8 @@ let rec permutations = function
       |> List.map ~f:(fun rest -> x :: rest))
 ;;
 
-(* Runs [steps] on [x?'p] and [x?'q] in every order, printing their results
-   and the presences, which are the same whatever the order. *)
+(* Runs [steps] on [x?'p] and [x?'q] in every order, printing their results and
+   the presences, which are the same whatever the order. *)
 let in_every_order steps =
   let fresh = Fresh.create () in
   List.iter (permutations steps) ~f:(fun steps ->
@@ -1108,9 +1160,9 @@ let in_every_order steps =
       [%sexp
         (List.zip_exn
            (List.map steps ~f:(function
-              | `Bound -> "p <= q"
-              | `P to_ -> "p = " ^ Sexp.to_string [%sexp (to_ : presence)]
-              | `Q to_ -> "q = " ^ Sexp.to_string [%sexp (to_ : presence)]))
+             | `Bound -> "p <= q"
+             | `P to_ -> "p = " ^ Sexp.to_string [%sexp (to_ : presence)]
+             | `Q to_ -> "q = " ^ Sexp.to_string [%sexp (to_ : presence)]))
            results
          : (string * (unit, unit) Result.t) list)];
     print_presences [ p; q ])
@@ -1258,8 +1310,8 @@ let%expect_test "presence bounds are generalized and instantiated together" =
   let p = pvar fresh ~rank:2 in
   let q = pvar fresh ~rank:1 in
   at_most fresh ~presence:p ~bound:q;
-  (* Bounds relate variables of any ranks: [p] is generalized, keeping its
-     bound to [q], which no longer refers to [p]. *)
+  (* Bounds relate variables of any ranks: [p] is generalized, keeping its bound
+     to [q], which no longer refers to [p]. *)
   let pair p q =
     TTuple
       [ code (ext "x" int REmpty ~presence:p)
@@ -1332,8 +1384,8 @@ let bounded_through_generalized fresh =
   l1, l2, u, instance
 ;;
 
-let%expect_test
-    "generalization keeps the bounds that hold through generalized variables"
+let%expect_test "generalization keeps the bounds that hold through generalized \
+                 variables"
   =
   let fresh = Fresh.create () in
   let l1, l2, u, instance = bounded_through_generalized fresh in
@@ -1656,8 +1708,8 @@ let%expect_test "a scheme keeps the bounds of outer rows to its variables" =
     |}]
 ;;
 
-let%expect_test
-    "generalization adds the outside bounds implied through a scheme"
+let%expect_test "generalization adds the outside bounds implied through a \
+                 scheme"
   =
   let fresh = Fresh.create () in
   let o1 = rvar fresh ~rank:1 in
@@ -1746,8 +1798,8 @@ let%expect_test "same_bound compares structure up to links, conservatively" =
     print_s
       [%sexp
         (name : string)
-      , (Type.same_bound bound1 bound2 : bool)
-      , (Type.same_bound bound2 bound1 : bool)]);
+        , (Type.same_bound bound1 bound2 : bool)
+        , (Type.same_bound bound2 bound1 : bool)]);
   (* [same_entry_ty] only decides entries of different types. *)
   let calls = ref [] in
   let same_entry_ty presence ty1 ty2 =
@@ -1766,8 +1818,8 @@ let%expect_test "same_bound compares structure up to links, conservatively" =
   print_s
     [%sexp
       (other_type : bool)
-    , (other_presence : bool)
-    , (List.rev !calls : Sexp.t list)];
+      , (other_presence : bool)
+      , (List.rev !calls : Sexp.t list)];
   [%expect
     {|
     (same true true)
@@ -1785,9 +1837,8 @@ let%expect_test "same_bound compares structure up to links, conservatively" =
     |}]
 ;;
 
-let%expect_test
-    "iteration past the first steps visits cycles once and reports unguarded \
-     uses"
+let%expect_test "iteration past the first steps visits cycles once and reports \
+                 unguarded uses"
   =
   let fresh = Fresh.create () in
   let x = Fresh.var fresh ~rank:1 in

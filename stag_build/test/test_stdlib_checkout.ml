@@ -76,7 +76,7 @@ let%expect_test "finding checkouts and their sources" =
          print_s
            [%sexp
              (relative prelude : string * string)
-           , (List.map core ~f:relative : (string * string) list)]);
+             , (List.map core ~f:relative : (string * string) list)]);
       [%expect
         {|
         ((stag/prelude/prelude.stag "let x = 1\n")
@@ -143,9 +143,10 @@ let%expect_test "core files that are not modules" =
                (Diagnostic.relocate diagnostic ~f:(fun loc ->
                   { loc with
                     file =
-                      String.chop_prefix_exn
-                        loc.file
-                        ~prefix:(Stdlib_checkout.root checkout ^ "/")
+                      Stag_common.Loc.File.of_string
+                        (String.chop_prefix_exn
+                           (Stag_common.Loc.file_name loc)
+                           ~prefix:(Stdlib_checkout.root checkout ^ "/"))
                   })))
       in
       print (Stdlib_checkout.prelude checkout);

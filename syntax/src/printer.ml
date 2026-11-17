@@ -4,8 +4,8 @@ open Doc
 
 let path p = text (Path.to_string p)
 
-(* What printing depends on beyond the syntax. Declarations in struct quotes
-   are printed as those of a module. *)
+(* What printing depends on beyond the syntax. Declarations in struct quotes are
+   printed as those of a module. *)
 module Env = struct
   type t =
     { root_modules : String.Set.t
@@ -73,8 +73,8 @@ let lit : Lit.t -> Doc.t = function
   | Unit -> text "()"
 ;;
 
-(* [{a; b}], or broken with each item on its own line, followed by a [;]
-   unless [~trailing:false], then the [tail]. *)
+(* [{a; b}], or broken with each item on its own line, followed by a [;] unless
+   [~trailing:false], then the [tail]. *)
 let braces ?(opener = "{") ?(closer = "}") ?(trailing = true) ?tail items =
   match items, tail with
   | [], None -> text (opener ^ closer)
@@ -136,8 +136,8 @@ module Level = struct
   [@@deriving compare]
 end
 
-(** What follows an expression, which a [let], [match] or [fun] ending it
-    would take as its own. *)
+(** What follows an expression, which a [let], [match] or [fun] ending it would
+    take as its own. *)
 module After = struct
   type t =
     | Nothing
@@ -150,10 +150,10 @@ module Ctx = struct
   type t =
     { level : Level.t
     ; seq : bool
-      (** Whether the bodies of [let]s, [match]es and [fun]s are [Seq]s. *)
+    (** Whether the bodies of [let]s, [match]es and [fun]s are [Seq]s. *)
     ; after : After.t
     ; flat : bool
-      (** Whether [let]s and sequences may stay on one line, as in parentheses,
+    (** Whether [let]s and sequences may stay on one line, as in parentheses,
         rather than always breaking. *)
     }
 
@@ -738,8 +738,8 @@ and tuple_items roots es =
 and entry roots ?(after = After.Nothing) e =
   expr roots { (Ctx.item ~seq:false after) with level = Assign } e
 
-(* A [let], [match] or [fun] item is parenthesized, though the [;] would end
-   it, so items read as separate. *)
+(* A [let], [match] or [fun] item is parenthesized, though the [;] would end it,
+   so items read as separate. *)
 and list_items roots items = List.map items ~f:(entry roots ~after:Semi)
 
 and field roots ?after lhs value =
@@ -882,7 +882,8 @@ and toplevels (roots : Env.t) ~indent ts =
         (fun
           acc
           ( ((prev_kind, prev_one_line, prev_loc), _)
-          , ((kind, one_line, loc), doc) ) ->
+          , ((kind, one_line, loc), doc) )
+        ->
         let compact =
           prev_one_line
           && one_line

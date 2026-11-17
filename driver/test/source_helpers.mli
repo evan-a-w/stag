@@ -1,29 +1,28 @@
 open! Import
 
-(** Helpers for tests written as stag source, going through the real parser
-    and [Driver].
+(** Helpers for tests written as stag source, going through the real parser and
+    [Driver].
 
     {[
       let%expect_test "tags" =
-        check
-          {|
-let a = `A 1
-let f v = match v with `A n -> n | `B -> 0
-|};
+        check {|
+      let a = `A 1
+      let f v = match v with `A n -> n | `B -> 0
+      |};
         [%expect {| ... |}]
       ;;
     ]}
 
-    Source is in the file [t.stag], so locations print as
-    [t.stag:LINE:COL-COL], with lines counted from the start of the string (so
-    from 2 if it starts with a newline, as above) and columns from 0. Write
-    source at column 0, so columns are those of the source as written.
+    Source is in the file [t.stag], so locations print as [t.stag:LINE:COL-COL],
+    with lines counted from the start of the string (so from 2 if it starts with
+    a newline, as above) and columns from 0. Write source at column 0, so
+    columns are those of the source as written.
 
     A source string is checked by [Driver.check] as a program of toplevels (not
     wrapped in a module) after [prelude], unless [~prelude:false]. The prelude
-    is left out of everything printed, as are the toplevels of the stag
-    prelude ([Prelude]), which every program sees. The files of [check_files] are checked
-    by [Driver.check_files], without the prelude.
+    is left out of everything printed, as are the toplevels of the stag prelude
+    ([Prelude]), which every program sees. The files of [check_files] are
+    checked by [Driver.check_files], without the prelude.
 
     Everything runs within [limits], unless given others.
 
@@ -54,8 +53,7 @@ val limits : Limits.t
 (** A [Typecheck.t] whose interpreter runs within [limits]. *)
 val typechecker : unit -> Typecheck.t
 
-(** The toplevels of [source], in [file] unless given, raising on a parse
-    error. *)
+(** The toplevels of [source], in [file] unless given, raising on a parse error. *)
 val parse_exn : ?file:string -> string -> Syntax.Program.t
 
 (** [parse_exn source] after the prelude, unless [~prelude:false], for tests
@@ -89,16 +87,16 @@ val members : t -> Typed.Toplevel.t list
 val print_signature : t -> unit
 
 (** [(ident body)] for each of [members] (only those named in [only], by
-    canonical name like ["M.x"], if given). Toplevel splices show their code
-    and expansion. *)
+    canonical name like ["M.x"], if given). Toplevel splices show their code and
+    expansion. *)
 val print_bodies : ?only:string list -> t -> unit
 
 (** Evaluates the program ([Driver.eval]), then prints [(name value)] for each
     of [members], then the runtime error, if any. *)
 val eval_and_print_values : ?limits:Limits.t -> t -> unit
 
-(** Each component of the typed program, but those of only the prelude, and
-    with [~idents] the type and level of each binder, but the prelude's. *)
+(** Each component of the typed program, but those of only the prelude, and with
+    [~idents] the type and level of each binder, but the prelude's. *)
 val print_typed : ?idents:bool -> t -> unit
 
 (** {2 Shorthands}

@@ -127,8 +127,8 @@ let%expect_test "a group fits only if the text after it, up to a line, fits too"
     |}]
 ;;
 
-let%expect_test
-    "nest indents from the enclosing indentation, align from the column"
+let%expect_test "nest indents from the enclosing indentation, align from the \
+                 column"
   =
   let body = text "a" ^^ line ^^ text "b" in
   show (text "xyz(" ^^ nest 2 (align body) ^^ text ")");
@@ -211,8 +211,7 @@ let%expect_test "fits_flat" =
   print_s
     [%sexp (fits_flat ~width:80 (text "a" ^^ hardline ^^ text "b") : bool)];
   print_s [%sexp (fits_flat ~width:80 (text "a\nb") : bool)];
-  [%expect
-    {|
+  [%expect {|
     7 true
     6 false
     false
@@ -221,8 +220,8 @@ let%expect_test "fits_flat" =
 ;;
 
 let%expect_test "a space that prints nothing is not measured" =
-  (* Each line is 10 wide, fitting only if the spaces after a line, a space
-     or a newline count for nothing. *)
+  (* Each line is 10 wide, fitting only if the spaces after a line, a space or a
+     newline count for nothing. *)
   let doc =
     separate
       hardline

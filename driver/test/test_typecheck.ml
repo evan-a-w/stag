@@ -22,8 +22,7 @@ let%expect_test "typechecking twice with the same state" =
         print_s [%sexp (error : Typecheck_error.t)])
   in
   run prelude;
-  run
-    {|
+  run {|
 let id x = x
 let n = id 1
 |};
@@ -62,12 +61,10 @@ let partial = add 1
 ;;
 
 let%expect_test "application errors" =
-  check
-    {|
+  check {|
 let bad = add true
 |};
-  check
-    {|
+  check {|
 let bad = 1 2
 |};
   [%expect
@@ -84,8 +81,7 @@ let bad = 1 2
 ;;
 
 let%expect_test "functions are generalized" =
-  check
-    {|
+  check {|
 let k x y = x
 let flip f x y = f y x
 let both = k 1 true; k true 1
@@ -99,12 +95,10 @@ let both = k 1 true; k true 1
 ;;
 
 let%expect_test "value restriction" =
-  check
-    {|
+  check {|
 let weak = id id
 |};
-  check
-    {|
+  check {|
 let weak = id id
 let use = weak 1; weak true
 |};
@@ -160,16 +154,13 @@ let%expect_test "later toplevels don't generalize weak variables" =
 ;;
 
 let%expect_test "annotations" =
-  check
-    {|
+  check {|
 let f x : int = x
 |};
-  check
-    {|
+  check {|
 let f = (id : bool -> bool)
 |};
-  check
-    {|
+  check {|
 let f x : bool = add x 1
 |};
   [%expect
@@ -184,17 +175,14 @@ let f x : bool = add x 1
 ;;
 
 let%expect_test "scope errors" =
-  check
-    {|
+  check {|
 let f = nope
 |};
-  check
-    {|
+  check {|
 let f x = x
 let f = 1
 |};
-  check
-    {|
+  check {|
 let f x = g
 let g y = x
 |};
@@ -207,8 +195,7 @@ let g y = x
 ;;
 
 let%expect_test "toplevels are order independent and generalized per SCC" =
-  check
-    {|
+  check {|
 let main = f 1; f true
 let f x = g x
 let g x = x
@@ -222,14 +209,12 @@ let g x = x
 ;;
 
 let%expect_test "mutual recursion is monomorphic within an SCC" =
-  check
-    {|
+  check {|
 let a x = b 1
 let b y = a true; y
 let c = a true; b 2
 |};
-  check
-    {|
+  check {|
 let a x = b 1
 let b y = a true; a 1
 |};
@@ -246,8 +231,7 @@ let b y = a true; a 1
 ;;
 
 let%expect_test "initialization cycles" =
-  (* Recursion through functions, and values only building closures, are
-     fine. *)
+  (* Recursion through functions, and values only building closures, are fine. *)
   run
     {|
 let even n = match n with 0 -> true | _ -> odd (Int.sub n 1)
@@ -262,19 +246,16 @@ let stored_local = let k = fun u -> stored_local in `Pair (k, 1)
 let stored_alias = let k = fun u -> stored_alias in let j = k in `Pair (j, 2)
 |};
   (* A local closure needing the value, then called, through an alias. *)
-  check
-    {|
+  check {|
 let x = let k = fun u -> x in let j = k in j ()
 |};
   (* Conservative: safe, but rejected, as calls are assumed to need all the
      callee refers to, and functions to call closures passed to them. *)
-  check
-    {|
+  check {|
 let f u = (1, fun w -> v)
 let v = match f () with (n, _) -> n
 |};
-  check
-    {|
+  check {|
 let make u = `Default (fun w -> default)
 let default = make ()
 |};
@@ -286,30 +267,25 @@ let handlers = register (fun x -> dispatch x)
 |};
   (* A value needing itself, directly or through other toplevels. *)
   check "let x = Int.add x 1";
-  check
-    {|
+  check {|
 let x = y
 let y = Int.add x 1
 |};
-  check
-    {|
+  check {|
 let x = f 1
 let f n = g n
 let g n = Int.add x n
 |};
   (* Calls are assumed to need all the callee refers to, and passing a closure
      to a function, to call it. *)
-  check
-    {|
+  check {|
 let x = f `A
 let f t = match t with `A -> 1 | `B -> x
 |};
-  check
-    {|
+  check {|
 let x = Int.add (id (fun u -> x) ()) 1
 |};
-  check
-    {|
+  check {|
 let x = let h u = x in h 1
 |};
   check
@@ -357,13 +333,11 @@ let y = match x with (f, _) -> f ()
 ;;
 
 let%expect_test "SCC containing a non-value is not generalized" =
-  check
-    {|
+  check {|
 let x = (id 1, fun u -> f u)
 let f y = x; y
 |};
-  [%expect
-    {|
+  [%expect {|
     val x : int * ('_a -> '_a)
     val f : '_a -> '_a
     |}]
@@ -391,8 +365,8 @@ let e = b 1; b true
 let%expect_test "a recursive group is generalized at once, in any order" =
   (* The members share variables, which generalizing one at a time would
      simplify while the others still use them: generalizing [g] first gave its
-     [y] type [<int>{x?'d : int; ..'e}]. The orders give the same schemes, up to which
-     side of an equality is an entry type. *)
+     [y] type [<int>{x?'d : int; ..'e}]. The orders give the same schemes, up to
+     which side of an equality is an entry type. *)
   let both_orders f g =
     check (f ^ "\n" ^ g);
     print_endline "---";
@@ -424,8 +398,8 @@ let%expect_test "a recursive group is generalized at once, in any order" =
 
 let%expect_test "a kept bound is added by instances of every group member" =
   (* The scheme of the group keeps an equality on [w]'s weak presence of [x]
-     with ['a] of [g] and ['a] of [f]. [f]'s instance must add it again, or
-     the first [r] would be accepted with ill-typed generated code. In the
+     with ['a] of [g] and ['a] of [f]. [f]'s instance must add it again, or the
+     first [r] would be accepted with ill-typed generated code. In the
      signatures, [w] has it from the generalization, [r]'s instance of [g] and
      [q]'s of [f]. *)
   let prelude =
@@ -480,12 +454,10 @@ let rec_ = let loop x = loop x in loop
 let shadow x = let x = 1 in x
 let arg_scope x = (let f x = true in f); x
 |};
-  check
-    {|
+  check {|
 let mono = let i = id id in i 1; i true
 |};
-  check
-    {|
+  check {|
 let mono_rec = let f x = f 1; f true in f
 |};
   [%expect
@@ -531,8 +503,7 @@ let nested = .< .<add x 1>. >.
 ;;
 
 let%expect_test "free variables of a quote are not generalized by inner lets" =
-  check
-    {|
+  check {|
 let f u = .<let g v = x in add (g 1) 1; g true>.
 |};
   [%expect {| val f : 'a -> <int>{x : int; ..'b} |}]
@@ -558,24 +529,19 @@ let closed = .<.~(.<1>.).{}>.
 ;;
 
 let%expect_test "splice substitution errors" =
-  check
-    {|
+  check {|
 let wrong_type = .<.~(.<add x 1>.).{x = true}>.
 |};
-  check
-    {|
+  check {|
 let missing = .<.~(.<add x 1>.).{}>.
 |};
-  check
-    {|
+  check {|
 let extra = .<.~(.<add x 1>.).{x = 1; y = 1}>.
 |};
-  check
-    {|
+  check {|
 let dup = .<.~(.<add x 1>.).{x = 1; x = 1}>.
 |};
-  check
-    {|
+  check {|
 let not_code = .<.~(1).{}>.
 |};
   [%expect
@@ -625,8 +591,7 @@ let conflict = two_unknown .<add y 1>. .<cond y 1 1>.
 let toplevel_unknown =
   .~(let opaque u = opaque u in match 1 with 2 -> opaque 1)
 |};
-  check
-    {|
+  check {|
 let wrong_type = .<let x = true in .~(.<add x 1>.)>.
 |};
   [%expect
@@ -667,8 +632,7 @@ let wrong_type = .<let x = true in .~(.<add x 1>.)>.
 ;;
 
 let%expect_test "levels" =
-  check
-    {|
+  check {|
 let inner_in_splice = .<let y = 1 in .~y>.
 |};
   check
@@ -682,16 +646,13 @@ let toplevel_splice = .~(.<1>.)
 let toplevel_splice_arg x = .~(.<x>.)
 let not_captured = .<let x = 1 in .~(.<x>.).{x}>.
 |};
-  check
-    {|
+  check {|
 let toplevel_splice_open = .~(.<x>.)
 |};
-  check
-    {|
+  check {|
 let captured = .<let x = true in .~(.<x>.).{}>.
 |};
-  check
-    {|
+  check {|
 let toplevel_splice_level x = .~x
 |};
   [%expect
@@ -742,8 +703,8 @@ let%expect_test "staged power" =
     |}]
 ;;
 
-let%expect_test
-    "splices capture binders of the quote even once the code is known"
+let%expect_test "splices capture binders of the quote even once the code is \
+                 known"
   =
   let captures_x = "let captures_x c = .<let x = true in .~c>.\n" in
   check
@@ -793,8 +754,7 @@ let not_used = twice .<1>.
 (* Instantiation keeps the order of bounds. *)
 let instance c = twice c
 |};
-  check
-    {|
+  check {|
 let direct_use c = .<let y = .~(.<let x = true in .~c>.) in x>.
 |};
   [%expect
@@ -918,8 +878,7 @@ let pong n c = .<add .~(ping (add n -1) c) y>.
 ;;
 
 let%expect_test "toplevel splices drop names spliced code only may use" =
-  check
-    {|
+  check {|
 let unused = .~(let g c = .<let x = true in .~c>.; c in g .<1>.)
 |};
   check
@@ -932,8 +891,8 @@ let used = .~(let g c = .<let x = true in .~c>.; c in g .<cond x 1 2>.)
 let x = true
 let used_toplevel = .~(let g c = .<let x = true in .~c>.; c in g .<x>.)
 |};
-  (* A name that may be used is not provided by a toplevel, so needn't have
-     its type. *)
+  (* A name that may be used is not provided by a toplevel, so needn't have its
+     type. *)
   check
     {|
 let unused_of_another_type =
@@ -989,8 +948,8 @@ let f c = |}
     ^ body
     ^ "\n"
   in
-  (* [g] bounds [c]'s [x] by its quote's, and [.<add .~c2 x>.] makes the
-     quote's [x] used, while [closeit] makes [c]'s absent: all orders agree. *)
+  (* [g] bounds [c]'s [x] by its quote's, and [.<add .~c2 x>.] makes the quote's
+     [x] used, while [closeit] makes [c]'s absent: all orders agree. *)
   List.iter
     [ "close first", "closeit c; let c2 = g c in .<add .~c2 x>."
     ; "close last", "let c2 = g c in let r = .<add .~c2 x>. in closeit c; r"
@@ -1026,8 +985,8 @@ let local_bounded_by_outer ~in_ =
   "let h d = .<let x = 1 in .~d>.; cond true .<.~d>. e in " ^ in_
 ;;
 
-let%expect_test
-    "generalization does not depend on when outer presences are known"
+let%expect_test "generalization does not depend on when outer presences are \
+                 known"
   =
   let uses = "h .<add x 1>.; h k; closeit k" in
   check
@@ -1256,8 +1215,8 @@ let%expect_test "row bounds are solved in any order" =
 ;;
 
 let%expect_test "instances of a scheme bounded by an outer row" =
-  (* Each use of [h] bounds [e]'s row by its argument's, so what [e] uses
-     every argument must allow, whether [e] uses it before or after. *)
+  (* Each use of [h] bounds [e]'s row by its argument's, so what [e] uses every
+     argument must allow, whether [e] uses it before or after. *)
   let uses = "(h .<1>.; h k)" in
   let program body = closeit ^ needy ^ tw ^ sprintf "let f e k = %s\n" body in
   List.iter
@@ -1349,8 +1308,8 @@ let%expect_test "weak toplevels in a recursive group or a module" =
 ;;
 
 let%expect_test "an entry code may use only gets a type if it is present" =
-  (* [tw c] and the quote give [c]'s [x] different types, which only
-     conflict if [c] has [x]: closing [c] makes it absent, whenever it is. *)
+  (* [tw c] and the quote give [c]'s [x] different types, which only conflict if
+     [c] has [x]: closing [c] makes it absent, whenever it is. *)
   let binds_bool = ".<let x = true in .~c>." in
   let orders =
     [ "closed_first", "closeit c; tw c; " ^ binds_bool

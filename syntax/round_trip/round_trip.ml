@@ -22,12 +22,12 @@ let rec without_resolved : Sexp.t -> Sexp.t = function
 ;;
 
 let check
-      ?(widths = [ 80; 40; 10 ])
-      ~(print : ?width:int -> 'a -> string)
-      ~(parse : file:string -> string -> ('a, Parser.Error.t) Result.t)
-      ~equal
-      ~sexp_of
-      t
+  ?(widths = [ 80; 40; 10 ])
+  ~(print : ?width:int -> 'a -> string)
+  ~(parse : file:string -> string -> ('a, Parser.Error.t) Result.t)
+  ~equal
+  ~sexp_of
+  t
   =
   let sexp_of t = strip_locs (sexp_of t) in
   let equal t parsed =
@@ -169,12 +169,11 @@ let source_errors ?(widths = [ 80; 40; 10 ]) source =
                      (strip_locs (Syntax.Program.sexp_of_t program) : Sexp.t)
                    ~parsed:
                      (strip_locs (Syntax.Program.sexp_of_t parsed) : Sexp.t)];
-           if
-             not
-               (List.equal
-                  String.equal
-                  (texts comments)
-                  (texts parsed_comments))
+           if not
+                (List.equal
+                   String.equal
+                   (texts comments)
+                   (texts parsed_comments))
            then
              print_s
                [%message

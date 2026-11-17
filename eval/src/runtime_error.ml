@@ -27,10 +27,10 @@ exception Runtime_error of t
 let () =
   Sexplib0.Sexp_conv.Exn_converter.add
     [%extension_constructor Runtime_error]
-    (function
-    | Runtime_error t ->
-      Sexp.List [ Atom (message t); Atom "@"; Loc.sexp_of_t t.loc ]
-    | _ -> assert false)
+    (Basement.Stdlib_shim.Obj.magic_portable (function
+      | Runtime_error t ->
+        Sexp.List [ Atom (message t); Atom "@"; Loc.sexp_of_t t.loc ]
+      | _ -> assert false))
 ;;
 
 let to_error t = Error.of_exn (Runtime_error t)

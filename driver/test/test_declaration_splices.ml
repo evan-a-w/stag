@@ -2,8 +2,7 @@ open! Import
 
 let check = File_check.check
 
-(* [enum] generates a variant of the constructors [names] and its
-   [to_string]. *)
+(* [enum] generates a variant of the constructors [names] and its [to_string]. *)
 let generators =
   {|
 let constructor name = (name, Nil)
@@ -96,9 +95,8 @@ let shown = print_int (Int.add Outer.x Outer.after)
     |}]
 ;;
 
-let%expect_test
-    "spliced toplevels are evaluated at run time at the splice's position, and \
-     their expect tests run"
+let%expect_test "spliced toplevels are evaluated at run time at the splice's \
+                 position, and their expect tests run"
   =
   check
     ~run:true
@@ -205,8 +203,8 @@ let shown = print_int x
 ;;
 
 let%expect_test "names are forced via paths and unqualified lookups" =
-  (* [M.x] forces [M]'s splice, which comes later; [b] forces the include
-     before it. *)
+  (* [M.x] forces [M]'s splice, which comes later; [b] forces the include before
+     it. *)
   check
     (generators
      ^ {|
@@ -255,9 +253,8 @@ module E = .~(enum (Cons ("A", Nil)))
     |}]
 ;;
 
-let%expect_test
-    "includes in one module sharing a generator, and a generator using what \
-     another include defines"
+let%expect_test "includes in one module sharing a generator, and a generator \
+                 using what another include defines"
   =
   check
     ~run:true
@@ -506,13 +503,11 @@ end
 let%expect_test "a failed splice" =
   (* Reported as its own error wherever it is first reached. *)
   check
-    (generators
-     ^ {|
+    (generators ^ {|
 let a = M.x
 module M = .~(Int.div 1 0; Nil)
 let b = M.y
-|}
-    );
+|});
   [%expect
     {|
     File "a.stag", line 19, characters 0-31:
@@ -530,8 +525,7 @@ let b = M.y
      ^ {|
 let y = Int.add 1 2
 module Int = .~(let u = Nope.x in Nil)
-|}
-    );
+|});
   [%expect
     {|
     File "a.stag", line 19, characters 24-28:
@@ -543,11 +537,9 @@ module Int = .~(let u = Nope.x in Nil)
 
 let%expect_test "an unbound name in a generator" =
   check
-    (generators
-     ^ {|
+    (generators ^ {|
 include .~(let u = typo in value "x" (Stag.Expr.int 1))
-|}
-    );
+|});
   [%expect
     {|
     File "a.stag", line 18, characters 19-23:
@@ -559,8 +551,7 @@ include .~(let u = typo in value "x" (Stag.Expr.int 1))
     (generators
      ^ {|
 module M = .~(let u = typo in value "x" (Stag.Expr.int 1))
-|}
-    );
+|});
   [%expect
     {|
     File "a.stag", line 18, characters 22-26:
@@ -657,9 +648,8 @@ module Q = .~(let _ = P.a in value "b" (Stag.Expr.int 2))
     |}]
 ;;
 
-let%expect_test
-    "shadowing: a written name in an inner module shadows an included one in \
-     an outer"
+let%expect_test "shadowing: a written name in an inner module shadows an \
+                 included one in an outer"
   =
   check
     ~run:true
@@ -703,13 +693,10 @@ let shown = print_endline Inner.seen; print_endline Inner2.seen; print_endline x
 ;;
 
 let%expect_test "duplicates between spliced and written declarations" =
-  check
-    (generators
-     ^ {|
+  check (generators ^ {|
 let x = 1
 include .~(value "x" (Stag.Expr.int 2))
-|}
-    );
+|});
   [%expect
     {|
     File "a.stag", line 19, characters 0-39:
@@ -717,13 +704,10 @@ include .~(value "x" (Stag.Expr.int 2))
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: The value A.x is defined more than once in this module
     |}];
-  check
-    (generators
-     ^ {|
+  check (generators ^ {|
 include .~(value "x" (Stag.Expr.int 2))
 let x = 1
-|}
-    );
+|});
   [%expect
     {|
     File "a.stag", line 18, characters 0-39:
@@ -736,8 +720,7 @@ let x = 1
      ^ {|
 module M = struct end
 module M = .~(value "x" (Stag.Expr.int 2))
-|}
-    );
+|});
   [%expect
     {|
     File "a.stag", line 19, characters 7-8:
@@ -763,12 +746,9 @@ include .~(value "x" (Stag.Expr.int 3))
 
 let%expect_test "cycles" =
   (* An include's expression does not see what it generates. *)
-  check
-    (generators
-     ^ {|
+  check (generators ^ {|
 include .~(value "x" (Stag.Expr.int x))
-|}
-    );
+|});
   [%expect
     {|
     File "a.stag", line 18, characters 36-37:
@@ -777,12 +757,9 @@ include .~(value "x" (Stag.Expr.int x))
     Error: Unbound value x
     |}];
   (* A type the splice defines. *)
-  check
-    (generators
-     ^ {|
+  check (generators ^ {|
 module E = .~(let f (e : E.t) = e in enum Nil)
-|}
-    );
+|});
   [%expect
     {|
     File "a.stag", line 18, characters 25-28:
@@ -818,12 +795,10 @@ module B = .~(value "b" (Stag.Expr.int A.a))
   (* An unqualified lookup searching the module of a pending include, from
      within its own generator. *)
   check
-    (generators
-     ^ {|
+    (generators ^ {|
 let one = 1
 include .~(value "x" (Stag.Expr.int one))
-|}
-    );
+|});
   [%expect
     {|
     module A : sig
@@ -856,8 +831,8 @@ let wrong = A.to_string B.C
     |}]
 ;;
 
-let%expect_test
-    "a program shadowing list and option, and with its own module Stag"
+let%expect_test "a program shadowing list and option, and with its own module \
+                 Stag"
   =
   check
     ~run:true
@@ -883,8 +858,8 @@ let o = Some 1
     end
     --- output ---
     |}];
-  (* Its [Cons] and [Nil] are the prelude's where a prelude list is expected,
-     as constructors are looked up in the expected type. *)
+  (* Its [Cons] and [Nil] are the prelude's where a prelude list is expected, as
+     constructors are looked up in the expected type. *)
   check
     {|
 type list['a] = Nil | Cons of 'a * list['a]
@@ -900,12 +875,9 @@ include .~(Cons (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1), Nil))
 ;;
 
 let%expect_test "malformed generated values" =
-  check
-    (generators
-     ^ {|
+  check (generators ^ {|
 include .~(value "X" (Stag.Expr.int 1))
-|}
-    );
+|});
   [%expect
     {|
     File "a.stag", line 18, characters 0-39:
@@ -944,12 +916,9 @@ module M = .~(value "x" (Stag.Expr.apply (Stag.Expr.var "Int.add") (Cons (Stag.E
     Note: The generated declaration is:
       let x = Int.add 1 "a"
     |}];
-  check
-    (generators
-     ^ {|
+  check (generators ^ {|
 include .~(value "x" (Stag.Expr.var "nope"))
-|}
-    );
+|});
   [%expect
     {|
     File "a.stag", line 18, characters 0-44:
@@ -1008,12 +977,9 @@ include .~(value "x" (Stag.Expr.Match (Stag.Expr.var "Int.max_value", arms 20)))
       ... (12 more lines)
     |}];
   (* Failing at compile time. *)
-  check
-    (generators
-     ^ {|
+  check (generators ^ {|
 include .~(Int.div 1 0; Nil)
-|}
-    );
+|});
   [%expect
     {|
     File "a.stag", line 18, characters 0-28:
@@ -1026,8 +992,7 @@ include .~(Int.div 1 0; Nil)
     Note: The error was raised here
     |}];
   (* Not a declaration list. *)
-  check
-    {|
+  check {|
 include .~1
 |};
   [%expect
@@ -1128,8 +1093,8 @@ let type_ name kind =
          (List.map error ~f:Diagnostic.of_driver_error))
 ;;
 
-(* [G], generated by an include, has an include of its own: [before] doesn't
-   see the [x] it generates, [after] does. *)
+(* [G], generated by an include, has an include of its own: [before] doesn't see
+   the [x] it generates, [after] does. *)
 let generated_g =
   {|include .~(Gen.module_ "G"
   (Cons (Stag.Toplevel.let_ "before" Nil (Stag.Expr.var "x"),
@@ -1141,11 +1106,8 @@ let generated_g =
 let%expect_test "before and after an include in a generated module" =
   check_with_gen
     ({|let x = "outer"
-|}
-     ^ generated_g
-     ^ {|let r = (G.before, G.after, G.x)
-|}
-    );
+|} ^ generated_g ^ {|let r = (G.before, G.after, G.x)
+|});
   [%expect
     {|
     module A : sig
@@ -1159,11 +1121,9 @@ let%expect_test "before and after an include in a generated module" =
     end
     |}];
   (* Used before the include generating it. *)
-  check_with_gen
-    ({|let probe = G.after
+  check_with_gen ({|let probe = G.after
 let x = "outer"
-|}
-     ^ generated_g);
+|} ^ generated_g);
   [%expect
     {|
     File "a.stag", line 1, characters 12-13:
@@ -1185,8 +1145,7 @@ let x = "outer"
 |}
      ^ generated_g
      ^ {|let b = G.x
-|}
-    );
+|});
   [%expect
     {|
     File "a.stag", line 2, characters 12-13:
@@ -1200,8 +1159,7 @@ let x = "outer"
     7 |    Cons (Stag.Toplevel.let_ "after" Nil (Stag.Expr.var "x"), Nil)))))
     Note: This include generates it, but it is visible only after the include
     |}];
-  check_with_gen
-    {|let probe = y
+  check_with_gen {|let probe = y
 include .~(Gen.value "y" (Stag.Expr.int 1))
 |};
   [%expect

@@ -1,7 +1,7 @@
 open! Import
 
-(* [v.(k + d)], of the [d]th of [vs], is the furthest x reached on diagonal
-   [k] (= x - y) with [d] edits. *)
+(* [v.(k + d)], of the [d]th of [vs], is the furthest x reached on diagonal [k]
+   (= x - y) with [d] edits. *)
 let myers a b ~equal =
   let n = Array.length a in
   let m = Array.length b in
@@ -62,8 +62,8 @@ let myers a b ~equal =
   matched
 ;;
 
-(* The pairs of indices of the elements that occur once in each of [a] and
-   [b], in order of [a]. *)
+(* The pairs of indices of the elements that occur once in each of [a] and [b],
+   in order of [a]. *)
 let unique_pairs a b ~compare =
   let uniques arr =
     let sorted =

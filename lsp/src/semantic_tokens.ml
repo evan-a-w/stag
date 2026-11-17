@@ -140,20 +140,20 @@ let compute text ~file ~occurrences ~is_function =
     Option.iter (of_lexical token) ~f:(fun token_type ->
       Hashtbl.set
         by_start
-        ~key:loc.start.offset
+        ~key:loc.start.#offset
         ~data:
-          { Classified.start = loc.start.offset
-          ; stop = loc.stop.offset
+          { Classified.start = loc.start.#offset
+          ; stop = loc.stop.#offset
           ; token_type
           ; declaration = false
           }));
   List.iter comments ~f:(fun (comment : Comment.t) ->
     Hashtbl.set
       by_start
-      ~key:comment.loc.start.offset
+      ~key:comment.loc.start.#offset
       ~data:
-        { start = comment.loc.start.offset
-        ; stop = comment.loc.stop.offset
+        { start = comment.loc.start.#offset
+        ; stop = comment.loc.stop.#offset
         ; token_type = Comment
         ; declaration = false
         });
@@ -168,9 +168,9 @@ let compute text ~file ~occurrences ~is_function =
       Array.binary_search
         tokens
         ~compare:(fun (token : Lexer.Located.t) offset ->
-          Int.compare token.loc.start.offset offset)
+          Int.compare token.loc.start.#offset offset)
         `First_greater_than_or_equal_to
-        loc.start.offset
+        loc.start.#offset
     with
     | None -> [||]
     | Some first ->
@@ -180,15 +180,14 @@ let compute text ~file ~occurrences ~is_function =
         else first
       in
       let rec stop i =
-        if
-          i + 2 < Array.length tokens
-          && Stag_syntax.Token.equal tokens.(i + 1).token Dot
-          && is_name (i + 2)
-          && tokens.(i + 2).loc.stop.offset <= loc.stop.offset
+        if i + 2 < Array.length tokens
+           && Stag_syntax.Token.equal tokens.(i + 1).token Dot
+           && is_name (i + 2)
+           && tokens.(i + 2).loc.stop.#offset <= loc.stop.#offset
         then stop (i + 2)
         else i
       in
-      if is_name first && tokens.(first).loc.stop.offset <= loc.stop.offset
+      if is_name first && tokens.(first).loc.stop.#offset <= loc.stop.#offset
       then
         Array.filteri
           (Array.sub tokens ~pos:first ~len:(stop first - first + 1))
@@ -200,27 +199,27 @@ let compute text ~file ~occurrences ~is_function =
     ~f:(fun ({ loc; kind; declaration; _ } : Syntax_names.Occurrence.t) ->
       let names = name_tokens loc in
       Array.iteri names ~f:(fun i { token = _; loc = name_loc } ->
-        let start = name_loc.start.offset in
+        let start = name_loc.start.#offset in
         let token_type : Token_type.t =
           if i < Array.length names - 1
           then Namespace
           else (
             match of_kind kind with
-            | (Variable | Parameter) when is_function loc.start.offset ->
+            | (Variable | Parameter) when is_function loc.start.#offset ->
               Function
             | token_type -> token_type)
         in
         Hashtbl.set
           by_start
           ~key:start
-          ~data:{ start; stop = name_loc.stop.offset; token_type; declaration }));
+          ~data:{ start; stop = name_loc.stop.#offset; token_type; declaration }));
   (* Unclassified module paths, eg. of [include .~M.x]: *)
   Array.iteri tokens ~f:(fun i { token; loc } ->
     match token with
     | Uident _ when i + 1 < Array.length tokens ->
       (match tokens.(i + 1).token with
        | Dot ->
-         Hashtbl.change by_start loc.start.offset ~f:(function
+         Hashtbl.change by_start loc.start.#offset ~f:(function
            | Some ({ token_type = Enum_member; _ } as classified) ->
              Some { classified with token_type = Namespace }
            | other -> other)

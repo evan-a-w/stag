@@ -117,15 +117,15 @@ let range_of_offsets t ~start ~stop =
 ;;
 
 let range_of_loc t (loc : Loc.t) =
-  range_of_offsets t ~start:loc.start.offset ~stop:loc.stop.offset
+  range_of_offsets t ~start:loc.start.#offset ~stop:loc.stop.#offset
 ;;
 
 let full_range t = range_of_offsets t ~start:0 ~stop:(String.length t.contents)
 
 let apply_change
-      t
-      ({ range; rangeLength = _; text } :
-        Lsp_types.TextDocumentContentChangeEvent.t)
+  t
+  ({ range; rangeLength = _; text } :
+    Lsp_types.TextDocumentContentChangeEvent.t)
   =
   match range with
   | None -> create ~encoding:t.encoding text

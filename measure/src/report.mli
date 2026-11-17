@@ -29,8 +29,8 @@ module Entry : sig
   [@@deriving sexp_of]
 end
 
-(** A span in nanoseconds with 4 significant digits and a unit: [ns], [us],
-    [ms] or [s]. Under a picosecond, eg. rounding errors, it is 0. *)
+(** A span in nanoseconds with 4 significant digits and a unit: [ns], [us], [ms]
+    or [s]. Under a picosecond, eg. rounding errors, it is 0. *)
 val time : float -> string
 
 (** A criterion-like block:
@@ -45,6 +45,5 @@ fib/20
     allocation, the samples and outliers, and the change, if compared. *)
 val human : Config.t -> Entry.t -> string
 
-(** All entries in one document, for [Sexp] or [Json] (raises for
-    [Human]). *)
+(** All entries in one document, for [Sexp] or [Json] (raises for [Human]). *)
 val machine : Format.t -> Entry.t list -> string

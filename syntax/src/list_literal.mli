@@ -2,8 +2,8 @@ open! Import
 open Syntax
 
 (** List literals [[a; b; c]], which are sugar for chains of the prelude's
-    [Cons] ending in its [Nil], both named [Decl_path.Resolved] so that
-    nothing local changes what a literal means. *)
+    [Cons] ending in its [Nil], both named [Decl_path.Resolved] so that nothing
+    local changes what a literal means. *)
 
 val cons : Decl_path.t
 val nil : Decl_path.t
@@ -21,8 +21,8 @@ val expr_items : Expr.t -> Expr.t list option
 
 val pattern_items : Pattern.t -> Pattern.t list option
 
-(** A list literal with [f] applied to each of its items, keeping its
-    [Cons]es and [Nil] as they are, if this is one. *)
+(** A list literal with [f] applied to each of its items, keeping its [Cons]es
+    and [Nil] as they are, if this is one. *)
 val map_expr_items : Expr.t -> f:(Expr.t -> Expr.t) -> Expr.t option
 
 val map_pattern_items

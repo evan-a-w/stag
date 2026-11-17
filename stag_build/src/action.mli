@@ -15,8 +15,8 @@ val build : Project.t -> bool
 (** Checks and evaluates the executable [name]. *)
 val exec : Project.t -> string -> bool
 
-(** Runs the expect tests in the files of each library and test named, or all
-    of them. A file whose tests fail has its corrected version written to
+(** Runs the expect tests in the files of each library and test named, or all of
+    them. A file whose tests fail has its corrected version written to
     [corrections_dir], mirroring its path, with the digest of the version it
     corrects, and the diff printed. A file whose tests pass, or whose target
     doesn't check or evaluate, has its stale correction removed. *)
@@ -41,7 +41,7 @@ val bench
     changed since it was made. *)
 val promote : Project.t -> bool
 
-(** Formats every source of the project, printing the diff of each file that
-    is not formatted, and rewriting it in [Inplace] mode. Fails on a parse
-    error, or in [Check] mode if a file is not formatted. *)
+(** Formats every source of the project, printing the diff of each file that is
+    not formatted, and rewriting it in [Inplace] mode. Fails on a parse error,
+    or in [Check] mode if a file is not formatted. *)
 val fmt : Project.t -> mode:Format.Mode.t -> bool

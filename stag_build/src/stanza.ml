@@ -36,11 +36,11 @@ type t =
 let module_name t = String.capitalize t.name.txt
 
 let loc_of_pos ({ line; col; offset } : Parsexp.Positions.pos) : Loc.Pos.t =
-  { line; col; offset }
+  #{ line; col; offset }
 ;;
 
 let loc ~path ({ start_pos; end_pos } : Parsexp.Positions.range) : Loc.t =
-  { file = path; start = loc_of_pos start_pos; stop = loc_of_pos end_pos }
+  Loc.create ~file:path ~start:(loc_of_pos start_pos) ~stop:(loc_of_pos end_pos)
 ;;
 
 let cst_loc ~path : Cst.t -> Loc.t = function
@@ -210,7 +210,7 @@ let parse ~path contents =
     | Error parse_error ->
       let pos = loc_of_pos (Parsexp.Parse_error.position parse_error) in
       error
-        { file = path; start = pos; stop = pos }
+        (Loc.create ~file:path ~start:pos ~stop:pos)
         (String.capitalize (Parsexp.Parse_error.message parse_error));
       None
     | Ok elements ->

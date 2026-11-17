@@ -66,7 +66,8 @@ let%expect_test "a million elements" =
       ~output:print_string
       [ { Source_file.path = "t.stag"; contents = source } ]
   with
-  | Error error -> List.iter error ~f:(fun error -> print_s [%sexp (error : Driver.Error.t)])
+  | Error error ->
+    List.iter error ~f:(fun error -> print_s [%sexp (error : Driver.Error.t)])
   | Ok driver ->
     (match Driver.eval ~limits driver with
      | Ok () -> ()

@@ -22,7 +22,7 @@ let create ?(notes = []) ?(whole_file = false) ~loc message =
 
 let sort ts = Loc.sort_by ts ~f:(fun t -> t.loc)
 
-let relocate t ~f =
+let relocate t ~(local_ f) =
   { t with
     loc = f t.loc
   ; notes =
@@ -195,8 +195,8 @@ let indented output =
 ;;
 
 let of_test_result
-      ({ name; error; output_before_error; different_outputs; _ } :
-        Expect_test_runner.Test_result.t)
+  ({ name; error; output_before_error; different_outputs; _ } :
+    Expect_test_runner.Test_result.t)
   =
   let in_test = sprintf "Expect test %S" name.txt in
   let error =
@@ -226,23 +226,23 @@ let of_test_result
 
 let header (loc : Loc.t) ~whole_file =
   if whole_file
-  then sprintf "File %S:" loc.file
-  else if loc.start.line = loc.stop.line
+  then sprintf "File %S:" (Loc.file_name loc)
+  else if loc.start.#line = loc.stop.#line
   then
     sprintf
       "File %S, line %d, characters %d-%d:"
-      loc.file
-      loc.start.line
-      loc.start.col
-      loc.stop.col
+      (Loc.file_name loc)
+      loc.start.#line
+      loc.start.#col
+      loc.stop.#col
   else
     sprintf
       "File %S, lines %d-%d, characters %d-%d:"
-      loc.file
-      loc.start.line
-      loc.stop.line
-      loc.start.col
-      loc.stop.col
+      (Loc.file_name loc)
+      loc.start.#line
+      loc.stop.#line
+      loc.start.#col
+      loc.stop.#col
 ;;
 
 let max_quoted_lines = 6
@@ -264,28 +264,28 @@ let width string = String.count string ~f:(Fn.non is_continuation_byte)
 
 let quote (loc : Loc.t) contents =
   let lines = String.split contents ~on:'\n' |> Array.of_list in
-  if loc.stop.line > Array.length lines
+  if loc.stop.#line > Array.length lines
   then []
   else (
-    let number_width = String.length (Int.to_string loc.stop.line) in
+    let number_width = String.length (Int.to_string loc.stop.#line) in
     let numbered n =
       sprintf "%*d | %s" number_width n (String.rstrip lines.(n - 1))
     in
-    if loc.start.line = loc.stop.line
+    if loc.start.#line = loc.stop.#line
     then (
-      let line = lines.(loc.start.line - 1) in
-      let start = Int.min loc.start.col (String.length line) in
-      let stop = Int.max start (Int.min loc.stop.col (String.length line)) in
+      let line = lines.(loc.start.#line - 1) in
+      let start = Int.min loc.start.#col (String.length line) in
+      let stop = Int.max start (Int.min loc.stop.#col (String.length line)) in
       let carets =
         Int.max 1 (width (String.sub line ~pos:start ~len:(stop - start)))
       in
-      [ numbered loc.start.line
+      [ numbered loc.start.#line
       ; String.make (number_width + 3) ' '
         ^ padding (String.prefix line start)
         ^ String.make carets '^'
       ])
     else (
-      let all = List.range loc.start.line loc.stop.line ~stop:`inclusive in
+      let all = List.range loc.start.#line loc.stop.#line ~stop:`inclusive in
       if List.length all <= max_quoted_lines
       then List.map all ~f:numbered
       else
@@ -302,13 +302,17 @@ let located ~contents ~whole_file (loc : Loc.t) =
     ::
     (if whole_file
      then []
-     else Option.value_map (contents loc.file) ~default:[] ~f:(quote loc))
+     else
+       Option.value_map
+         (contents (Loc.file_name loc))
+         ~default:[]
+         ~f:(quote loc))
 ;;
 
 let to_string_hum
-      ?(contents = fun _ -> None)
-      ?(warning = false)
-      { loc; whole_file; message; notes }
+  ?(contents = fun _ -> None)
+  ?(warning = false)
+  { loc; whole_file; message; notes }
   =
   let contents file =
     match contents file with
@@ -326,7 +330,7 @@ let to_string_hum
 let max_shown = 50
 
 let list_to_string_hum ?contents ?warning ts =
-  let shown, hidden = List.split_n ts max_shown in
+  let #(shown, hidden) = List.split_n ts max_shown in
   String.concat (List.map shown ~f:(to_string_hum ?contents ?warning))
   ^
   match List.length hidden with

@@ -44,13 +44,13 @@ let may_select_arguments ~filters name =
 ;;
 
 let run
-      ?alloc
-      ?baseline
-      ?(on_outcome = ignore)
-      ?(filters = [])
-      config
-      clock
-      benches
+  ?alloc
+  ?baseline
+  ?(on_outcome = ignore)
+  ?(filters = [])
+  config
+  clock
+  benches
   =
   let measure name routine =
     Gc.compact ();

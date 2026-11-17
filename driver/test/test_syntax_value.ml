@@ -631,8 +631,8 @@ let%expect_test "constructors are made as the typechecker resolves them" =
       | Module { name = "Core"; _ } | Type { name = "result"; _ } -> false
       | _ -> true)
   in
-  (* A function matching every constructor of each variant of the prelude
-     that syntax values may use. *)
+  (* A function matching every constructor of each variant of the prelude that
+     syntax values may use. *)
   let rec probes path (items : Signature.t) =
     List.concat_map items ~f:(function
       | Module { name; items } -> probes (path @ [ name ]) items
@@ -717,7 +717,7 @@ let%expect_test "values" =
 ;;
 
 let%expect_test "nodes are located where given" =
-  let loc = Loc.start_of_file "splice.stag" in
+  let loc = Loc.start_of_file (Loc.File.of_string "splice.stag") in
   (match
      Syntax_value.Expr.of_value
        (Syntax_value.Expr.to_value
@@ -763,8 +763,8 @@ let%expect_test "an update of fields by ref round trips" =
     |}]
 ;;
 
-(* [file], checked and evaluated, and the value of each toplevel
-   by canonical name. *)
+(* [file], checked and evaluated, and the value of each toplevel by canonical
+   name. *)
 let eval_values ?(file = "gen.stag") source =
   match
     Driver.check_files
@@ -1446,8 +1446,7 @@ let decls =
     (Con list ((Ty (Con int ()))))
     |}];
   each Syntax_value.Pattern.of_value Syntax.Pattern.sexp_of_t "Gen.patterns";
-  [%expect
-    {|
+  [%expect {|
     (Lit Unit)
     Any
     (Tuple ((Var a) (Var b)))

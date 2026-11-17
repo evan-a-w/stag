@@ -4,8 +4,7 @@ open Syntax
 let file = "t.stag"
 let strip_locs = Round_trip.strip_locs
 
-(* Successfully parsed syntax is also checked to round trip through
-   [Printer]. *)
+(* Successfully parsed syntax is also checked to round trip through [Printer]. *)
 let show sexp_of_t round_trip = function
   | Ok t ->
     print_s (strip_locs (sexp_of_t t));
@@ -1174,8 +1173,8 @@ let%expect_test "an expansion starts after the comments on its splice's line" =
           [%sexp
             (String.sub
                source
-               ~pos:expansion.loc.start.offset
-               ~len:(expansion.loc.stop.offset - expansion.loc.start.offset)
+               ~pos:expansion.loc.start.#offset
+               ~len:(expansion.loc.stop.#offset - expansion.loc.start.#offset)
              : string)]
       | _ -> print_endline "unexpected");
   [%expect

@@ -24,13 +24,13 @@ end
 module Summary : sig
   type t =
     { unformatted : Unformatted.t list
-      (** In the order of the files. In [Inplace] mode, those rewritten. *)
+    (** In the order of the files. In [Inplace] mode, those rewritten. *)
     ; errors : Diagnostic.t list
-      (** Parse errors, and failures to rewrite a file. *)
+    (** Parse errors, and failures to rewrite a file. *)
     }
 end
 
-(** Formats each file, rewriting it at [root/path] (or [path] without [root])
-    in [Inplace] mode if it changes. A file that doesn't parse is left as it
-    is, the others still formatted. *)
+(** Formats each file, rewriting it at [root/path] (or [path] without [root]) in
+    [Inplace] mode if it changes. A file that doesn't parse is left as it is,
+    the others still formatted. *)
 val run : ?root:string -> mode:Mode.t -> Source_file.t list -> Summary.t

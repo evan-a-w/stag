@@ -19,9 +19,9 @@ let first_module relative =
 ;;
 
 let to_string_hum
-      ?(shadowed = fun _ -> false)
-      ?(root_modules = String.Set.empty)
-      name
+  ?(shadowed = fun _ -> false)
+  ?(root_modules = String.Set.empty)
+  name
   =
   match relative name with
   | Some relative when not (shadowed relative) -> relative

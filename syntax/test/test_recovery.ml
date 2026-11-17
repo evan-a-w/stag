@@ -11,8 +11,7 @@ let parse source =
 ;;
 
 let%expect_test "a missing [in]" =
-  parse
-    {|let f x =
+  parse {|let f x =
   let y = add x 1
   mul y 2
 
@@ -56,8 +55,7 @@ let e = 4
 ;;
 
 let%expect_test "unbalanced parentheses" =
-  parse
-    {|let a = (f (g 3)
+  parse {|let a = (f (g 3)
 let b = 1 2))
 let c = 3
 |};
@@ -73,8 +71,7 @@ let c = 3
 ;;
 
 let%expect_test "a stray [end]" =
-  parse
-    {|let a = 1
+  parse {|let a = 1
 end
 let b = 2
 end end
@@ -90,8 +87,7 @@ end end
 ;;
 
 let%expect_test "an unterminated string at the end of the file" =
-  parse
-    {|let a = (1 ]
+  parse {|let a = (1 ]
 let b = "abc
 |};
   [%expect
@@ -105,8 +101,7 @@ let b = "abc
 ;;
 
 let%expect_test "an unterminated comment at the end of the file" =
-  parse
-    {|let a = 1
+  parse {|let a = 1
 let b = (2 (* 3
 let c = 4
 |};
@@ -146,8 +141,7 @@ let f = 5
 ;;
 
 let%expect_test "a syntax error just after a lexer error is not reported" =
-  parse
-    {|let a = $
+  parse {|let a = $
 let b = (1 ]
 let c = 3 $ in
 let d = {|abc
@@ -199,8 +193,7 @@ let e = 5
 ;;
 
 let%expect_test "an [end] at the indentation of the [struct] closes it" =
-  parse
-    {|module M = struct
+  parse {|module M = struct
   let a = (f (g 2
 end
 let b = 2
@@ -218,8 +211,7 @@ let b = 2
 ;;
 
 let%expect_test "a missing [end] of a [struct]" =
-  parse
-    {|module M = struct
+  parse {|module M = struct
   let a = 1
   let b = f (
 |};
@@ -235,8 +227,7 @@ let%expect_test "a missing [end] of a [struct]" =
 ;;
 
 let%expect_test "a missing [end] of a [struct], with no other error" =
-  parse
-    {|module M = struct
+  parse {|module M = struct
   let a = 1
 |};
   [%expect
@@ -346,17 +337,16 @@ let ok = 1
     |}]
 ;;
 
-let%expect_test
-    "the errors and program of a file without errors are as without recovery"
+let%expect_test "the errors and program of a file without errors are as \
+                 without recovery"
   =
   List.iter (Test_printer.stag_files ()) ~f:(fun path ->
     let source = In_channel.read_all path in
     let recovered, errors = Parser.program_recovering ~file:path source in
     let strict = Parser.program ~file:path source |> Result.ok in
-    if
-      not
-        (List.is_empty errors
-         && Option.equal Syntax.Program.equal (Some recovered) strict)
+    if not
+         (List.is_empty errors
+          && Option.equal Syntax.Program.equal (Some recovered) strict)
     then print_endline path);
   [%expect {| |}]
 ;;

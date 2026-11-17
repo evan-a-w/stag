@@ -6,8 +6,8 @@ open! Import
     cyclic.
 
     Sexps render types with [Type.Printer], one printer per toplevel (or per
-    outermost value converted), so variables are named consistently within
-    it. A node is rendered as its constructor followed by [: type]. *)
+    outermost value converted), so variables are named consistently within it. A
+    node is rendered as its constructor followed by [: type]. *)
 
 module Ident : sig
   (** A binder, local or toplevel. Stamps are unique among the idents made by
@@ -37,17 +37,16 @@ end
 module Var_ref : sig
   type t =
     | Bound of Binder.t
-    (** Bound in the same quote, or outside any quote and usable at this
-        level (so a persistent toplevel used at level 0 is [Bound]). *)
+    (** Bound in the same quote, or outside any quote and usable at this level
+        (so a persistent toplevel used at level 0 is [Bound]). *)
     | Persistent of Binder.t
     (** A persistent binder from outside the enclosing quote: its value is
         embedded in the code. *)
     | Free of string
-    (** A free variable of the enclosing quote: its context entry of this
-        name. *)
+    (** A free variable of the enclosing quote: its context entry of this name. *)
     | Free_toplevel of string
-    (** A toplevel, by canonical name, as a free variable of the enclosing
-        quote (see modes.md): its context entry of that name. *)
+    (** A toplevel, by canonical name, as a free variable of the enclosing quote
+        (see modes.md): its context entry of that name. *)
     | Prim of Prim.t (** Usable at any level, like a persistent toplevel. *)
     | Intrinsic of Intrinsic.t (** As [Prim]. *)
   [@@deriving sexp_of]
@@ -63,16 +62,15 @@ module Constructor_ref : sig
     }
   [@@deriving sexp_of]
 
-  (** The exception [name], a canonical name. Exceptions are of type [exn]
-      and share an index, so are told apart by name. *)
+  (** The exception [name], a canonical name. Exceptions are of type [exn] and
+      share an index, so are told apart by name. *)
   val exception_ : string -> t
 
   val is_exception : t -> bool
 end
 
-(** A nominal record type: its canonical name, and its fields' canonical
-    names by index. One per declaration, shared by its fields' refs and its
-    values. *)
+(** A nominal record type: its canonical name, and its fields' canonical names
+    by index. One per declaration, shared by its fields' refs and its values. *)
 module Record_type : sig
   type t =
     { name : string
@@ -152,9 +150,9 @@ module Expr : sig
       (** Each entry, by name, is the code it is bound to, at the splice's
           level. A substitution without an expression is a [Var]. *)
       | Implicit of Binder.t String.Map.t
-      (** The binders at the splice that may provide the code's entries of
-          their name. The other entries of the code become entries of the
-          enclosing quote's context. *)
+      (** The binders at the splice that may provide the code's entries of their
+          name. The other entries of the code become entries of the enclosing
+          quote's context. *)
     [@@deriving sexp_of]
   end
 
@@ -167,9 +165,9 @@ module Expr : sig
           { ident : Ident.t
           ; args : Ident.t list
           ; annots : (Ident.t * Syntax.Type_expr.t) list
-            (** The annotated [args], their annotations as written but for
-                type names, which are canonical ([Resolved]). Likewise
-                [result_annot] and [Fun]'s and [Annotated]'s. *)
+          (** The annotated [args], their annotations as written but for type
+              names, which are canonical ([Resolved]). Likewise [result_annot]
+              and [Fun]'s and [Annotated]'s. *)
           ; result_annot : Syntax.Type_expr.t option
           ; generalized : bool
           ; body : 'e (** [ident] is bound in [body]. *)
@@ -196,7 +194,7 @@ module Expr : sig
       | Toplevel_splice of
           { code : 'e (** At the level below, evaluated while checking. *)
           ; expansion : 'e
-            (** The code [code] evaluated to, instantiated and inferred here,
+          (** The code [code] evaluated to, instantiated and inferred here,
               within lets binding its explicit substitutions. *)
           } (** A splice outside any quote. *)
       | Quote of 'e
@@ -211,7 +209,7 @@ module Expr : sig
           { scrutinee : 'e
           ; cases : (Pattern.t * 'e) list
           ; exception_cases : (Pattern.t * 'e) list
-            (** The cases [exception p], as [p]: they match what the scrutinee
+          (** The cases [exception p], as [p]: they match what the scrutinee
               raises. *)
           }
       | Poly_record of (string * 'e) list
@@ -221,8 +219,7 @@ module Expr : sig
       | Poly_update of 'e * (string * 'e) list
       | Poly_variant of string * 'e option
       | Expect of string Located.t
-      (** Checks the output so far against the string, see
-          [Expect_test_runner]. *)
+      (** Checks the output so far against the string, see [Expect_test_runner]. *)
       | Type of Syntax.Type_expr.t
       (** [type t], its types named by canonical names ([Resolved]). *)
       | Error of 'e list
@@ -246,7 +243,7 @@ module Expr : sig
 
   (** Whether [t] refers to a binder satisfying [f], by a [Bound] or
       [Persistent] variable, an [Assign] or an [Implicit] substitution. *)
-  val refers_to : t -> f:(Binder.t -> bool) -> bool
+  val refers_to : t -> f:(Binder.t -> bool) @ local -> bool
 
   (** The local idents [t] refers to (as [refers_to]) that it doesn't bind. *)
   val free_locals : t -> Ident.Set.t
@@ -255,8 +252,8 @@ module Expr : sig
       restriction). A toplevel splice is judged by its expansion. *)
   val is_value : t -> bool
 
-  (** Whether a [Let] of [ident] may be generalized: a function, or a value
-      that doesn't refer to [ident]. *)
+  (** Whether a [Let] of [ident] may be generalized: a function, or a value that
+      doesn't refer to [ident]. *)
   val binding_is_value : ident:Ident.t -> args:Ident.t list -> body:t -> bool
 end
 
@@ -271,11 +268,11 @@ module Toplevel : sig
   [@@deriving sexp_of]
 end
 
-(** A strongly connected component of toplevels, in the order they were
-    reached. Components may be larger than needed, as references to functions
-    from within quotes count. [recursive] if the members need a recursive
-    binding: a member refers to a member by a [Bound] or [Persistent]
-    variable, or by an [Implicit] substitution. *)
+(** A strongly connected component of toplevels, in the order they were reached.
+    Components may be larger than needed, as references to functions from within
+    quotes count. [recursive] if the members need a recursive binding: a member
+    refers to a member by a [Bound] or [Persistent] variable, or by an
+    [Implicit] substitution. *)
 module Scc : sig
   type t =
     { members : Toplevel.t list
@@ -307,7 +304,7 @@ module Bench : sig
   type t =
     { name : string Located.t
     ; param : (Ident.t * Expr.t list) option
-      (** The parameter bound in [body], and its arguments, at level 0. *)
+    (** The parameter bound in [body], and its arguments, at level 0. *)
     ; body : Expr.t (** At level 0, of any type. *)
     ; loc : Loc.t
     ; generated : bool (** By a declaration splice, so located at the splice. *)
@@ -321,7 +318,7 @@ module Program : sig
     ; expect_tests : Expect_test.t list (** In program order. *)
     ; benches : Bench.t list (** In program order. *)
     ; declaration_splices : Expr.t list
-      (** The expression of each declaration splice that ran, at level -1. *)
+    (** The expression of each declaration splice that ran, at level -1. *)
     ; ident_info : Ident_info.t Ident.Map.t
     }
   [@@deriving sexp_of]

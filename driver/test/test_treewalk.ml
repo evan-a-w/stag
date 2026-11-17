@@ -89,8 +89,7 @@ let f r s x =
   let g u = ({`a = x | r}, {s with `b = u}, r \ `c, s.`d, {`e = x}, `T x) in
   0
 |};
-  [%expect
-    {|
+  [%expect {|
     (f/4 ())
     (g/18 (r/14 s/15 x/16))
     |}]
@@ -121,13 +120,11 @@ let explicit c d = let e x = .<.~c.{y = .~d}>. in 0
 ;;
 
 let%expect_test "toplevel splices" =
-  print
-    {|
+  print {|
 let n = 3
 let f x = let g y = .~(.<add x y>.) in 0
 |};
-  [%expect
-    {|
+  [%expect {|
     (f/5 (add/0))
     (g/17 (add/0 x/15))
     |}]
@@ -148,7 +145,10 @@ let%expect_test "env slots" =
   show env f;
   show env x;
   let closure =
-    Treewalk.Env.of_captures env ~captures:(Typed.Ident.Hash_set.of_list [ f ])
+    Treewalk.Env.of_captures
+      env
+      ~fallback:(Treewalk.Env.create ())
+      ~captures:(Typed.Ident.Hash_set.of_list [ f ])
     |> Or_error.ok_exn
   in
   Treewalk.Env.set env ~ident:f ~value:2;
@@ -158,6 +158,7 @@ let%expect_test "env slots" =
     [%sexp
       (Treewalk.Env.of_captures
          env
+         ~fallback:(Treewalk.Env.create ())
          ~captures:(Typed.Ident.Hash_set.of_list [ unbound ])
        |> Or_error.map ~f:(fun _ -> ())
        : unit Or_error.t)];
@@ -174,6 +175,83 @@ let%expect_test "env slots" =
     |}]
 ;;
 
+let%expect_test "extended envs" =
+  let stamps = Stamp_counter.create () in
+  let ident name = Typed.Ident.fresh stamps name in
+  let captured = ident "captured" in
+  let param = ident "param" in
+  let local = ident "local" in
+  let toplevel = ident "toplevel" in
+  let fallback = Treewalk.Env.create () in
+  Treewalk.Env.set fallback ~ident:toplevel ~value:0;
+  let closure = Treewalk.Env.create () in
+  Treewalk.Env.set closure ~ident:captured ~value:1;
+  let first = Treewalk.Env.extend closure in
+  let second = Treewalk.Env.extend closure in
+  Treewalk.Env.set first ~ident:param ~value:2;
+  Treewalk.Env.set second ~ident:param ~value:3;
+  Treewalk.Env.declare first ~ident:local;
+  Treewalk.Env.set first ~ident:captured ~value:4;
+  let show name env =
+    print_s
+      [%sexp
+        (name : string)
+        , (List.map [ captured; param; local; toplevel ] ~f:(fun ident ->
+             ( ident
+             , Treewalk.Env.mem env ident
+             , Treewalk.Env.lookup env ~fallback ~ident
+               |> Result.map_error ~f:(fun _ -> ()) ))
+           : (Typed.Ident.t * bool * (int, unit) Result.t) list)]
+  in
+  show "closure" closure;
+  show "first" first;
+  show "second" second;
+  [%expect
+    {|
+    (closure
+     ((captured/0 true (Ok 4)) (param/1 false (Error ()))
+      (local/2 false (Error ())) (toplevel/3 false (Ok 0))))
+    (first
+     ((captured/0 true (Ok 4)) (param/1 true (Ok 2)) (local/2 true (Error ()))
+      (toplevel/3 false (Ok 0))))
+    (second
+     ((captured/0 true (Ok 4)) (param/1 true (Ok 3)) (local/2 false (Error ()))
+      (toplevel/3 false (Ok 0))))
+    |}]
+;;
+
+let%expect_test "binding in an extended env raises" =
+  let stamps = Stamp_counter.create () in
+  let ident name = Typed.Ident.fresh stamps name in
+  let bound = ident "bound" in
+  let later = ident "later" in
+  let env = Treewalk.Env.create () in
+  Treewalk.Env.set env ~ident:bound ~value:0;
+  let extended = Treewalk.Env.extend env in
+  let attempt name f =
+    print_s [%sexp (name : string), (Or_error.try_with f : unit Or_error.t)]
+  in
+  attempt "set bound" (fun () -> Treewalk.Env.set env ~ident:bound ~value:1);
+  attempt "set later" (fun () -> Treewalk.Env.set env ~ident:later ~value:2);
+  attempt "declare later" (fun () -> Treewalk.Env.declare env ~ident:later);
+  attempt "set later in extension" (fun () ->
+    Treewalk.Env.set extended ~ident:later ~value:3);
+  print_s
+    [%sexp
+      (Treewalk.Env.lookup extended ~ident:bound : int Or_error.t)
+      , (Treewalk.Env.lookup env ~ident:later : int Or_error.t)];
+  [%expect
+    {|
+    ("set bound" (Ok ()))
+    ("set later"
+     (Error ("Env: binding in an env already extended" (ident later/1))))
+    ("declare later"
+     (Error ("Env: binding in an env already extended" (ident later/1))))
+    ("set later in extension" (Ok ()))
+    ((Ok 1) (Error ("Unbound ident" (ident later/1))))
+    |}]
+;;
+
 let%expect_test "a shared stamp counter" =
   let stamps = Stamp_counter.create () in
   let interpreter = Treewalk.create ~stamps () in
@@ -187,8 +265,7 @@ let%expect_test "a shared stamp counter" =
   print_s [%sexp (idents (parse_exn "let f x = x") : Typed.Ident.t list)];
   print_s [%sexp (idents (parse_exn "let g y = y") : Typed.Ident.t list)];
   print_s [%sexp (Typed.Ident.fresh stamps "minted" : Typed.Ident.t)];
-  [%expect
-    {|
+  [%expect {|
     (f/0 x/1)
     (g/2 y/3)
     minted/4

@@ -2,8 +2,7 @@ open! Import
 open File_check
 
 let%expect_test "several type errors in one file" =
-  check
-    {|let a : int = "a"
+  check {|let a : int = "a"
 let b = Int.add 1 true
 let c = nope
 let d = 1
@@ -27,16 +26,12 @@ let d = 1
 
 let%expect_test "type errors across files, sorted by location" =
   check_files
-    [ ( "b.stag"
-      , {|let y : string = 1
+    [ "b.stag", {|let y : string = 1
 let z = Int.add A.x 1
 |}
-      )
-    ; ( "a.stag"
-      , {|let x : int = true
+    ; "a.stag", {|let x : int = true
 let w = Int.add B.y 1
 |}
-      )
     ];
   [%expect
     {|
@@ -75,8 +70,7 @@ let k = Int.add (broken : int) (broken : string)
 ;;
 
 let%expect_test "a failed annotation is ignored" =
-  check
-    {|let f (x : nope) : int = Int.add x 1
+  check {|let f (x : nope) : int = Int.add x 1
 let y : string = f 1
 |};
   [%expect
@@ -156,8 +150,7 @@ let c : int = "c"
 ;;
 
 let%expect_test "a splice raising at compile time" =
-  check
-    {|exception E
+  check {|exception E
 include .~(raise E)
 let a = generated
 let b : int = "b"
@@ -189,10 +182,8 @@ let d = 1 $ 2
 let e = Int.add b d
 |}
       )
-    ; ( "b.stag"
-      , {|let x : string = A.c
+    ; "b.stag", {|let x : string = A.c
 |}
-      )
     ];
   [%expect
     {|
@@ -220,9 +211,7 @@ let e = Int.add b d
 ;;
 
 let%expect_test "a program with errors is not run" =
-  check
-    ~run:true
-    {|let ran = print_endline "ran"
+  check ~run:true {|let ran = print_endline "ran"
 let x : int = "x"
 |};
   [%expect
@@ -264,8 +253,7 @@ let%expect_test "past 50 errors, only how many more" =
 ;;
 
 let%expect_test "compile-time code never runs what failed to check" =
-  check
-    {|let bad _ = Int.add 1 "x"
+  check {|let bad _ = Int.add 1 "x"
 let x = .~ (let _ = bad () in .< 1 >.)
 |};
   check
@@ -286,8 +274,7 @@ let x = .~ (print_int (bad (Some 3)); .< 1 >.)
 let bad _ = indirect ()
 let x = .~ (let _ = bad () in .< 1 >.)
 |};
-  check
-    {|let f x = x.nonexistent_field
+  check {|let f x = x.nonexistent_field
 let x = .~ (let _ = f 3 in .< 1 >.)
 |};
   [%expect
@@ -336,8 +323,7 @@ let x = .~ (print_endline (classify 3); .< 1 >.)
 ;;
 
 let%expect_test "a mistake in the first of several patterns is reported once" =
-  check
-    {|let n = match 3 with | Some x -> x | None -> 0
+  check {|let n = match 3 with | Some x -> x | None -> 0
 |};
   [%expect
     {|

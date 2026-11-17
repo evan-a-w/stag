@@ -13,8 +13,7 @@ let check_files ?run files =
 let check ?run contents = check_files ?run [ "a.stag", contents ]
 
 let%expect_test "functions have no conversion" =
-  check
-    {|
+  check {|
 type t = {f : int -> int}
 include .~(Core.Sexp.derive (type t))
 |};
@@ -28,8 +27,7 @@ include .~(Core.Sexp.derive (type t))
 ;;
 
 let%expect_test "unsupported types" =
-  check
-    {|
+  check {|
 type t = {c : <int>{}}
 include .~(Core.Sexp.derive (type t))
 |};
@@ -39,13 +37,11 @@ type r[{..'r}] = {`a : int; ..'r}
 type t = {r : r[{`b : int}]}
 include .~(Core.Sexp.derive (type t))
 |};
-  check
-    {|
+  check {|
 type t = {r : {`a : int}}
 include .~(Core.Sexp.derive (type t))
 |};
-  check
-    {|
+  check {|
 type t = |
 include .~(Core.Sexp.derive (type t))
 |};
@@ -71,8 +67,7 @@ include .~(Core.Sexp.derive (type t))
 ;;
 
 let%expect_test "abstract types" =
-  check
-    {|
+  check {|
 type t
 include .~(Core.Sexp.derive (type t))
 |};
@@ -101,8 +96,7 @@ include .~(Core.Sexp.derive (type t[{`B : unit}]))
 ;;
 
 let%expect_test "not a declared type" =
-  check
-    {|
+  check {|
 include .~(Core.Sexp.derive (type 'a))
 |};
   [%expect
@@ -115,8 +109,7 @@ include .~(Core.Sexp.derive (type 'a))
 ;;
 
 let%expect_test "a type named sexp" =
-  check
-    {|
+  check {|
 type sexp = S
 include .~(Core.Sexp.derive (type sexp))
 |};
@@ -130,8 +123,7 @@ include .~(Core.Sexp.derive (type sexp))
 ;;
 
 let%expect_test "the prelude's types" =
-  check
-    {|
+  check {|
 include .~(Core.Sexp.derive (type option[int]))
 |};
   [%expect
@@ -144,8 +136,7 @@ include .~(Core.Sexp.derive (type option[int]))
 ;;
 
 let%expect_test "a type without its referenced type's converters" =
-  check
-    {|
+  check {|
 type u = A
 type t = B of u
 include .~(Core.Sexp.derive (type t))
@@ -215,8 +206,8 @@ let main = print_endline (Core.Sexp.to_string (sexp_of_t {u = .B.M.U}))
     |}]
 ;;
 
-(* Types other than the derived one are named by their root paths, so [M.t]
-   may be derived outside [M]. *)
+(* Types other than the derived one are named by their root paths, so [M.t] may
+   be derived outside [M]. *)
 let%expect_test "deriving a type of another module" =
   check
     ~run:true

@@ -30,7 +30,7 @@ let%expect_test "module names" =
       print_s
         [%sexp
           (path : string)
-        , (Source_file.module_name path : (string, string) Result.t)]);
+          , (Source_file.module_name path : (string, string) Result.t)]);
   [%expect
     {|
     (foo.stag (Ok Foo))
@@ -55,16 +55,12 @@ let%expect_test "module names" =
 
 let%expect_test "files refer to each other in any order" =
   run
-    [ file
-        "a.stag"
-        {|
+    [ file "a.stag" {|
 let x = B.y
 type t = B.u
 let f (n : t) = n
 |}
-    ; file
-        "dir/b.stag"
-        {|
+    ; file "dir/b.stag" {|
 type u = int
 let y = 1
 let g = A.f
@@ -94,22 +90,16 @@ let%expect_test "evaluation order" =
 let p1 = print_endline "a1"
 let p2 = print_endline (B.s)
 |}
-    ; file
-        "b.stag"
-        {|
+    ; file "b.stag" {|
 let p = print_endline "b"
 let s = "a2 (from b)"
 |}
     ; file "c.stag" {| let p = print_endline "c" |}
-    ; file
-        "d.stag"
-        {|
+    ; file "d.stag" {|
 let p = print_endline "d"
 let f x = E.f x
 |}
-    ; file
-        "e.stag"
-        {|
+    ; file "e.stag" {|
 let p = print_endline "e"
 let f x = D.f x
 |}
@@ -317,7 +307,7 @@ let q = print_endline "Lib.B.q"
 let%expect_test "a file named prelude.stag" =
   (* The prelude's locations are not in a file of the program. *)
   let toplevel = List.hd_exn (force Prelude.toplevels) in
-  print_endline toplevel.loc.file;
+  print_endline (Loc.file_name toplevel.loc);
   run [ file "prelude.stag" "let x = 1"; file "a.stag" "let y = Prelude.x" ];
   [%expect
     {|
@@ -332,8 +322,8 @@ let%expect_test "a file named prelude.stag" =
     |}]
 ;;
 
-let%expect_test
-    "errors are ordered by file, then position, whatever the files' order"
+let%expect_test "errors are ordered by file, then position, whatever the \
+                 files' order"
   =
   let a = file "a.stag" "let x = (\nlet y : int = \"y\"\nlet z = )" in
   let b = file "b.stag" "let u : int = \"u\"\nlet v = ]\nlet w : int = \"w\"" in

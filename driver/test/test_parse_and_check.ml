@@ -10,9 +10,9 @@ type stmt[{..'a}] = Stmt of <unit>{..'a} * list[stmt[{..'a}]]
 |}
 ;;
 
-(* [let f (x : ty) = x] has type [ty -> ty], printed as [ty] is. A context
-   entry is marked: an unmarked one's assignment variable is shared by both
-   sides, so printed. *)
+(* [let f (x : ty) = x] has type [ty -> ty], printed as [ty] is. A context entry
+   is marked: an unmarked one's assignment variable is shared by both sides, so
+   printed. *)
 let%expect_test "printed types parse back" =
   List.map
     [ "{`x : 'a; ..'b} -> 'a"

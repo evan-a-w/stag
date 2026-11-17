@@ -3,4 +3,4 @@
  (preprocess
   (pps ppx_jane))
  (inline_tests)
- (libraries core stag_common))
+ (libraries core stag_common stdlib_upstream_compatible))

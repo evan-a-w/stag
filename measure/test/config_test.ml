@@ -14,8 +14,7 @@ let%expect_test "validate" =
     ; resamples = 0
     ; noise_threshold = 0.
     };
-  [%expect
-    {|
+  [%expect {|
     (Ok ())
     (Ok ())
     (Ok ())

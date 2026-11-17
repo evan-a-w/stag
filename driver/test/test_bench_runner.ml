@@ -28,8 +28,8 @@ let benches ?files source =
      | Ok benches -> Some benches)
 ;;
 
-(* The names of the benches, and the result of an iteration of each, by
-   running it once. *)
+(* The names of the benches, and the result of an iteration of each, by running
+   it once. *)
 let print_benches ?files source =
   let print name (routine : Measure.Routine.t) =
     let outcome =
@@ -52,8 +52,8 @@ let print_benches ?files source =
           | Error error -> print_s [%message name (error : Error.t)])))
 ;;
 
-let%expect_test
-    "benches are collected in order, parameterised ones per argument"
+let%expect_test "benches are collected in order, parameterised ones per \
+                 argument"
   =
   print_benches
     {|
@@ -90,8 +90,7 @@ let%expect_test "bench bodies are typechecked, at level 0, and may use any type"
   print_benches {|let%bench "x" = .<1>.|};
   print_benches {|let%bench "x" = .~(.<1>.)|};
   print_benches {|let%bench "x" = unbound|};
-  print_benches
-    {|let%bench "x" n in [1] = n
+  print_benches {|let%bench "x" n in [1] = n
 let y = n|};
   [%expect
     {|
@@ -118,22 +117,18 @@ let y = n|};
 ;;
 
 let%expect_test "names" =
-  print_benches
-    {|
+  print_benches {|
 let%bench "a" = 1
 let%bench "a" = 2
 |};
-  print_benches
-    {|
+  print_benches {|
 let%bench "a" n in [1; 1] = n
 |};
-  print_benches
-    {|
+  print_benches {|
 let%bench "a/1" = 1
 let%bench "a" n in [1] = n
 |};
-  print_benches
-    {|
+  print_benches {|
 let%bench "" = 1
 |};
   [%expect
@@ -221,8 +216,7 @@ let%expect_test "an argument that fails" =
 ;;
 
 let%expect_test "check and run ignore benches" =
-  Source_helpers.run
-    {|
+  Source_helpers.run {|
 let%bench "x" = print_endline "never"
 let a = 1
 |};

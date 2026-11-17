@@ -1,7 +1,7 @@
 open! Import
 
-(* While a value is converted, its types are left as placeholders, rendered
-   in reading order once it is done, so variables are named as they are read. *)
+(* While a value is converted, its types are left as placeholders, rendered in
+   reading order once it is done, so variables are named as they are read. *)
 module Hum = struct
   let pending : Type.ty Queue.t option ref = ref None
 
@@ -63,22 +63,19 @@ module Hum = struct
 end
 
 module Ident = struct
-  module T = struct
-    type t =
-      { name : string
-      ; stamp : int
-      }
-    [@@deriving compare]
+  type t =
+    { name : string
+    ; stamp : int
+    }
+  [@@deriving compare]
 
-    (* Stamps are rarely shared, and hashing names is costly. *)
-    let hash_fold_t state t = Int.hash_fold_t state t.stamp
-    let hash t = Int.hash t.stamp
-    let sexp_of_t t = Sexp.Atom [%string "%{t.name}/%{t.stamp#Int}"]
-  end
+  (* Stamps are rarely shared, and hashing names is costly. *)
+  let hash_fold_t state t = Int.hash_fold_t state t.stamp
+  let hash t = Int.hash t.stamp
+  let sexp_of_t t = Sexp.Atom [%string "%{t.name}/%{t.stamp#Int}"]
 
-  include T
-  include Comparable.Make_plain (T)
-  include Hashable.Make_plain (T)
+  include functor Comparable.Make_plain
+  include functor Hashable.Make_plain
 
   let fresh stamps name = { name; stamp = Stamp_counter.next stamps }
 end
@@ -330,13 +327,13 @@ module Expr = struct
     | _ -> List.exists (sub_exprs t) ~f:has_error
   ;;
 
-  let rec refers_to t ~f =
+  let rec refers_to t ~(local_ f) =
     match t.desc with
     | Var (Bound binder | Persistent binder) -> f binder
     | Assign ((Bound binder | Persistent binder), _) when f binder -> true
     | Splice { subs = Implicit providers; _ } when Map.exists providers ~f ->
       true
-    | _ -> List.exists (sub_exprs t) ~f:(refers_to ~f)
+    | _ -> List.exists (sub_exprs t) ~f:(refers_to ~f) [@nontail]
   ;;
 
   let free_locals t =
@@ -434,8 +431,8 @@ module Expr = struct
     || (is_value body
         && not
              (refers_to body ~f:(function
-                | Local ident' -> Ident.equal ident ident'
-                | Toplevel _ -> false)))
+               | Local ident' -> Ident.equal ident ident'
+               | Toplevel _ -> false)))
   ;;
 end
 

@@ -18,11 +18,10 @@ type t =
   }
 [@@deriving sexp_of]
 
-(** Whether [written] is how [generated] is printed, by a toplevel at
-    [column], with each [Decl_path.Root] and [Decl_path.Resolved] path printed
-    as the path [path] gives (given where it is used, as for
-    [Decl_paths.map]), else a root path as is, and a resolved name [name] as
-    [<name>]. *)
+(** Whether [written] is how [generated] is printed, by a toplevel at [column],
+    with each [Decl_path.Root] and [Decl_path.Resolved] path printed as the path
+    [path] gives (given where it is used, as for [Decl_paths.map]), else a root
+    path as is, and a resolved name [name] as [<name>]. *)
 val status
   :  written:Syntax.Toplevel.t list
   -> Syntax.Toplevel.t list

@@ -7,8 +7,8 @@ open! Import
     Generated code has lost its annotations, so may be inferred more generally
     than when first inferred. Inference, including of presences and context
     bounds, is principal, so doesn't depend on the order constraints arise in,
-    and decisions that depend on types are kept (see [Expr.Subs.Providers]):
-    it is never inferred less generally (see proofs.md). *)
+    and decisions that depend on types are kept (see [Expr.Subs.Providers]): it
+    is never inferred less generally (see proofs.md). *)
 
 (** A binder: generated code already has its idents. *)
 module Binder : sig
@@ -90,8 +90,8 @@ module Expr : sig
           variable. *)
       | Implicit (** Each entry is provided by the binder in scope, if any. *)
       | Providers of Typed.Binder.t String.Map.t
-      (** Generated code's: the binders that provided entries when the code
-          was first inferred, which provide exactly those entries again. *)
+      (** Generated code's: the binders that provided entries when the code was
+          first inferred, which provide exactly those entries again. *)
   end
 
   module View : sig
@@ -131,7 +131,7 @@ module Expr : sig
           { scrutinee : t
           ; cases : (Pattern.t * t) list
           ; exception_cases : (Pattern.t * t) list
-            (** The cases [exception p], as [p]. *)
+          (** The cases [exception p], as [p]. *)
           }
       | Poly_record of (Syntax.Name.t * t) list
       | Poly_field of t * string

@@ -15,11 +15,11 @@ let z : t = M.y
         )
       ]
     (fun client ->
-       Client.did_open client "a.stag";
-       [%expect {| |}];
-       Client.print_semantic_tokens client "a.stag";
-       [%expect
-         {|
+      Client.did_open client "a.stag";
+      [%expect {| |}];
+      Client.print_semantic_tokens client "a.stag";
+      [%expect
+        {|
          0:0+4 Keyword "type"
          0:5+1 Type (declaration) "t"
          0:7+1 Operator "="
@@ -54,13 +54,13 @@ let z : t = M.y
          6:12+1 Namespace "M"
          6:14+1 Variable "y"
          |}];
-       List.iter
-         [ 3, 11; 3, 12; 4, 13; 4, 14 ]
-         ~f:(fun (line, character) ->
-           Client.print_hover client "a.stag" ~line ~character;
-           Client.print_definition client "a.stag" ~line ~character);
-       [%expect
-         {|
+      List.iter
+        [ 3, 11; 3, 12; 4, 13; 4, 14 ]
+        ~f:(fun (line, character) ->
+          Client.print_hover client "a.stag" ~line ~character;
+          Client.print_definition client "a.stag" ~line ~character);
+      [%expect
+        {|
          3:11 3:10-3:14 ```stag type A.t ```
          3:11 -> a.stag 0:5-0:6
          3:12 3:10-3:14 ```stag type A.t ```

@@ -1,7 +1,7 @@
 open! Import
 
-(** [textDocument/semanticTokens]: tokens classified by the lexer, then by
-    where the parser puts names, then by their types if typechecked. *)
+(** [textDocument/semanticTokens]: tokens classified by the lexer, then by where
+    the parser puts names, then by their types if typechecked. *)
 
 module Token_type : sig
   type t =
@@ -35,9 +35,9 @@ end
 
 val legend : Lsp_types.SemanticTokensLegend.t
 
-(** The tokens of [text] (of [file], as named in locations), each on one
-    line, in order. If it doesn't lex, those before the error. [occurrences] are those of the
-    syntax, if it parses. [is_function offset] is whether the name or
+(** The tokens of [text] (of [file], as named in locations), each on one line,
+    in order. If it doesn't lex, those before the error. [occurrences] are those
+    of the syntax, if it parses. [is_function offset] is whether the name or
     path starting at [offset] is of a function. *)
 val compute
   :  Text.t

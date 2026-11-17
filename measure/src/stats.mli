@@ -1,8 +1,8 @@
 open! Import
 
 (** Statistics of a sample of measurements, eg. the per-iteration times of a
-    routine's samples. Functions of a [float array] do not modify it, and
-    raise if it is empty. *)
+    routine's samples. Functions of a [float array] do not modify it, and raise
+    if it is empty. *)
 
 module Estimate : sig
   (** A statistic and its confidence interval. *)
@@ -14,9 +14,8 @@ module Estimate : sig
   [@@deriving sexp]
 end
 
-(** Tukey's fences: values beyond [1.5] interquartile ranges from the
-    quartiles are mild outliers, beyond [3] severe ones, as criterion
-    classifies them. *)
+(** Tukey's fences: values beyond [1.5] interquartile ranges from the quartiles
+    are mild outliers, beyond [3] severe ones, as criterion classifies them. *)
 module Outliers : sig
   type t =
     { low_severe : int
@@ -55,19 +54,18 @@ val percentile : float array -> float -> float
 
 val median : float array -> float
 
-(** The median absolute deviation from the median, scaled by 1.4826 to
-    estimate the standard deviation of normal data, as criterion does. *)
+(** The median absolute deviation from the median, scaled by 1.4826 to estimate
+    the standard deviation of normal data, as criterion does. *)
 val mad : float array -> float
 
-(** [f data], with the [confidence] interval of the percentile bootstrap:
-    [f] of [resamples] resamples of [data] with replacement, drawn from
-    [random]. *)
+(** [f data], with the [confidence] interval of the percentile bootstrap: [f] of
+    [resamples] resamples of [data] with replacement, drawn from [random]. *)
 val bootstrap
   :  random:Random.State.t
   -> resamples:int
   -> confidence:float
   -> float array
-  -> f:(float array -> float)
+  -> f:(float array -> float) @ local
   -> Estimate.t
 
 (** As [bootstrap], of [f a b], resampling [a] and [b] independently. [f] is
@@ -78,7 +76,7 @@ val bootstrap2
   -> confidence:float
   -> float array
   -> float array
-  -> f:(float array -> float array -> float)
+  -> f:(float array -> float array -> float) @ local
   -> Estimate.t
 
 (** Bootstrapping with [Config.resamples], [confidence] and [seed]. *)

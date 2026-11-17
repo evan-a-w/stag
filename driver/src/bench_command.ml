@@ -125,11 +125,11 @@ let load_baseline ~baseline_dir name =
 ;;
 
 let run
-      ?filters
-      { Options.config; format; alloc; baseline; save_baseline; clock }
-      ~baseline_dir
-      ~report
-      benches
+  ?filters
+  { Options.config; format; alloc; baseline; save_baseline; clock }
+  ~baseline_dir
+  ~report
+  benches
   =
   let baseline =
     let%bind.Or_error () = Config.validate config in

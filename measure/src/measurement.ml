@@ -9,10 +9,10 @@ module Plan = struct
   [@@deriving sexp]
 
   let create
-        ?(setup = Time_ns.Span.zero)
-        (config : Config.t)
-        ~resolution
-        ~per_iteration
+    ?(setup = Time_ns.Span.zero)
+    (config : Config.t)
+    ~resolution
+    ~per_iteration
     =
     let measurement_time = Time_ns.Span.to_ns config.measurement_time in
     let per_iteration = Float.max 1. (Time_ns.Span.to_ns per_iteration) in
@@ -26,9 +26,8 @@ module Plan = struct
               (1000. *. Time_ns.Span.to_ns resolution /. per_iteration)))
     in
     let samples =
-      if
-        iterations = 1
-        && Float.( > ) (cost *. Float.of_int config.samples) measurement_time
+      if iterations = 1
+         && Float.( > ) (cost *. Float.of_int config.samples) measurement_time
       then
         Int.min
           config.samples
@@ -119,7 +118,7 @@ module Timed = struct
     }
   ;;
 
-  let measure ?alloc clock f =
+  let measure ?alloc clock (local_ f) =
     let alloc_before = Option.map alloc ~f:(fun read -> read ()) in
     let before = Clock.now clock in
     let result = f () in
@@ -186,12 +185,11 @@ module Warm_up = struct
       let iterations = iterations + batch in
       let time = Time_ns.Span.( + ) time last.time in
       let setup = Time_ns.Span.( + ) setup last_setup in
-      if
-        Time_ns.Span.( >= ) time config.warm_up
-        || Time_ns.Span.( >= ) (Time_ns.Span.( + ) time setup) setup_limit
-        || iterations + (2 * batch) > max_warm_up_iterations
-        || (Time_ns.Span.equal time Time_ns.Span.zero
-            && iterations >= max_unmoved_iterations)
+      if Time_ns.Span.( >= ) time config.warm_up
+         || Time_ns.Span.( >= ) (Time_ns.Span.( + ) time setup) setup_limit
+         || iterations + (2 * batch) > max_warm_up_iterations
+         || (Time_ns.Span.equal time Time_ns.Span.zero
+             && iterations >= max_unmoved_iterations)
       then Ok { iterations; time; last; last_setup }
       else loop ~batch:(2 * batch) ~iterations ~time ~setup
     in

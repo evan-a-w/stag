@@ -43,7 +43,7 @@ let warn_unrun_tests project (target : Project.Target.t) driver =
     List.iter
       (Driver.checked driver).program.expect_tests
       ~f:(fun (test : Typed.Expect_test.t) ->
-        if Set.mem files test.name.loc.file
+        if Set.mem files (Loc.file_name test.name.loc)
         then
           warn
             project
@@ -58,7 +58,7 @@ let warn_unrun_tests project (target : Project.Target.t) driver =
 let stale_expansions (target : Project.Target.t) driver =
   let files = files target in
   List.filter (Inline_expansion.stale driver) ~f:(fun expansion ->
-    Set.mem files expansion.loc.file)
+    Set.mem files (Loc.file_name expansion.loc))
 ;;
 
 (* The program of a target, checked once, reporting its errors once, and its

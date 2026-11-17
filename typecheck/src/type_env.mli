@@ -1,10 +1,10 @@
 open! Import
 
 (** User type declarations, the constructors and fields they define, and the
-    elaboration of surface types. Names are canonical. A declaration is
-    checked on first use of its constructors, fields or checked declaration:
-    elaborating a type only needs its parameters, so checking one declaration
-    never needs another one checked. *)
+    elaboration of surface types. Names are canonical. A declaration is checked
+    on first use of its constructors, fields or checked declaration: elaborating
+    a type only needs its parameters, so checking one declaration never needs
+    another one checked. *)
 type t
 
 (** The builtin types, as declarations of the root module. *)
@@ -12,10 +12,10 @@ val builtins : Syntax.Type_decl.t list
 
 val create : Fresh.t -> report:(Typecheck_error.t -> unit) -> t
 
-(** Declares [decl], a member of [module_], whose parameters are distinct.
-    Types may refer to each other in any order, once declared. With [lazily],
-    its parameters' ids are taken when first needed rather than now. Errors
-    checking it are passed through [wrap_error]. *)
+(** Declares [decl], a member of [module_], whose parameters are distinct. Types
+    may refer to each other in any order, once declared. With [lazily], its
+    parameters' ids are taken when first needed rather than now. Errors checking
+    it are passed through [wrap_error]. *)
 val declare
   :  ?lazily:bool
   -> ?wrap_error:(Typecheck_error.t -> Typecheck_error.t)
@@ -37,8 +37,8 @@ val declare_exception
   -> malformed:bool
   -> unit
 
-(** The checked declaration of the type of canonical name [name]. Its error,
-    the first time, is given to [create]'s [report], and [Already_reported]
+(** The checked declaration of the type of canonical name [name]. Its error, the
+    first time, is given to [create]'s [report], and [Already_reported]
     returned. *)
 val check : t -> string -> (Signature.Type_decl.t, Typecheck_error.t) Result.t
 
@@ -55,8 +55,8 @@ module Constructor : sig
   [@@deriving sexp_of]
 end
 
-(** Like [Constructor], with the record type's parameters [Generic] in
-    [record] and [ty]. *)
+(** Like [Constructor], with the record type's parameters [Generic] in [record]
+    and [ty]. *)
 module Field : sig
   type t =
     { record_type : Typed.Record_type.t
@@ -116,12 +116,12 @@ val variant_constructors
 (** Like [check], for a type already checked. *)
 val find_decl_exn : t -> string -> Signature.Type_decl.t
 
-(** Whether the type of canonical name [name] is a variant with no
-    constructors, checking its declaration. *)
+(** Whether the type of canonical name [name] is a variant with no constructors,
+    checking its declaration. *)
 val is_empty_variant : t -> string -> (bool, Typecheck_error.t) Result.t
 
-(** The type and row variables of the annotations of one toplevel
-    definition: each name stands for the same variable throughout. *)
+(** The type and row variables of the annotations of one toplevel definition:
+    each name stands for the same variable throughout. *)
 module Annotation_vars : sig
   type t
 
@@ -132,7 +132,8 @@ end
 (** The type, and the syntax with each type it names by its canonical name
     ([Resolved]), so that it names the same types wherever it is. With
     [splices], each type splice [.~e] is the type [e] evaluates to (once per
-    splice), which may not itself contain a splice; without, it is an error, as in quotes and compile-time code. *)
+    splice), which may not itself contain a splice; without, it is an error, as
+    in quotes and compile-time code. *)
 val elaborate
   :  t
   -> Module_scope.t
@@ -142,8 +143,8 @@ val elaborate
   -> (Type.ty * Syntax.Type_expr.t, Typecheck_error.t) Result.t
 
 (** How a type splice [.~e] at [loc] is evaluated, in the scope it is written
-    in, to the type it gives (located at [loc]). Types and exceptions are
-    always declarations, so evaluate theirs. *)
+    in, to the type it gives (located at [loc]). Types and exceptions are always
+    declarations, so evaluate theirs. *)
 val set_evaluate_splice
   :  t
   -> (Module_scope.t
@@ -153,10 +154,10 @@ val set_evaluate_splice
   -> unit
 
 (** Gives the type [name], declared as [type t = .~e], the definition [e]
-    evaluated to at [loc]. Errs (reported to [create]'s [report], the type
-    then failed) if it contains a type splice, or is an alias while the type
-    was used while computing it. Errors checking it are then passed through
-    [wrap_error], then as before. *)
+    evaluated to at [loc]. Errs (reported to [create]'s [report], the type then
+    failed) if it contains a type splice, or is an alias while the type was used
+    while computing it. Errors checking it are then passed through [wrap_error],
+    then as before. *)
 val set_definition
   :  t
   -> string
@@ -165,9 +166,9 @@ val set_definition
   -> loc:Loc.t
   -> unit
 
-(** The declaration of the type of canonical name [name], checking it, its
-    types [Resolved] where it is declared. [None] if it is abstract, as are
-    the builtin types. *)
+(** The declaration of the type of canonical name [name], checking it, its types
+    [Resolved] where it is declared. [None] if it is abstract, as are the
+    builtin types. *)
 val reflect
   :  t
   -> string

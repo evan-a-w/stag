@@ -110,7 +110,7 @@ let check_file_names (target : Target.t) ~error =
       error
         (Diagnostic.create
            ~whole_file:true
-           ~loc:(Loc.start_of_file path)
+           ~loc:(Loc.start_of_file (Loc.File.of_string path))
            message))
 ;;
 
@@ -129,7 +129,7 @@ let index targets ~error =
                 "The name %s is already used by the %s in %s"
                 name.txt
                 (Stanza.Kind.to_string other.stanza.kind)
-                other.stanza.name.loc.file);
+                (Loc.file_name other.stanza.name.loc));
         by_name
       | None -> Map.set by_name ~key:name.txt ~data:target)
 ;;
@@ -223,7 +223,7 @@ let check_module_clashes targets ~by_name ~error =
           error
           @@ Diagnostic.create
                ~whole_file:true
-               ~loc:(Loc.start_of_file path)
+               ~loc:(Loc.start_of_file (Loc.File.of_string path))
                (sprintf
                   "The module %s is also the library %s"
                   module_name

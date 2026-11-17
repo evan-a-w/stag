@@ -21,9 +21,8 @@ let%expect_test "selected" =
     |}]
 ;;
 
-let%expect_test
-    "run: in order, filtered, errors do not stop the others, and comparison \
-     with the baseline"
+let%expect_test "run: in order, filtered, errors do not stop the others, and \
+                 comparison with the baseline"
   =
   let fake = Clock.Fake.create () in
   let config =
@@ -117,9 +116,8 @@ let%expect_test
     |}]
 ;;
 
-let%expect_test
-    "run: the arguments of parameterised benches are made only if a filter \
-     could select them, and one failing fails only itself"
+let%expect_test "run: the arguments of parameterised benches are made only if \
+                 a filter could select them, and one failing fails only itself"
   =
   let config =
     { Config.quick with

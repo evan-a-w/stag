@@ -15,7 +15,7 @@ module Target : sig
     { stanza : Stanza.t
     ; dir : string (** Relative to the root, [.] for the root. *)
     ; files : Source_file.t list
-      (** The [.stag] files of [dir], by name, at paths relative to the root. *)
+    (** The [.stag] files of [dir], by name, at paths relative to the root. *)
     }
   [@@deriving sexp_of]
 

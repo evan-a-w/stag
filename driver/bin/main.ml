@@ -20,13 +20,13 @@ let read_files paths =
       exit 2)
 ;;
 
-(* Files under the current directory, eg. the prelude's sources in a
-   checkout, which are absolute, are named relative to it. *)
+(* Files under the current directory, eg. the prelude's sources in a checkout,
+   which are absolute, are named relative to it. *)
 let relative_loc =
   let cwd = lazy (Sys_unix.getcwd () ^ "/") in
   fun (loc : Loc.t) ->
-    match String.chop_prefix loc.file ~prefix:(force cwd) with
-    | Some file -> { loc with file }
+    match String.chop_prefix (Loc.file_name loc) ~prefix:(force cwd) with
+    | Some file -> { loc with file = Loc.File.of_string file }
     | None -> loc
 ;;
 
@@ -63,8 +63,8 @@ let report_stale ?warning files expansions =
     report ?warning files (Inline_expansion.diagnostic expansion))
 ;;
 
-(* The prelude a program sees: of the sources of the checkout its files are
-   all in, if any (see [Stdlib_checkout.prelude]), else the embedded one. *)
+(* The prelude a program sees: of the sources of the checkout its files are all
+   in, if any (see [Stdlib_checkout.prelude]), else the embedded one. *)
 let program_prelude paths =
   let checkouts =
     List.map paths ~f:(fun path ->
@@ -113,8 +113,8 @@ let limits_param ?(default = Limits.unlimited) () =
         name
         (optional
            (Command.Arg_type.create (function
-              | "none" -> None
-              | string -> Some (of_string string))))
+             | "none" -> None
+             | string -> Some (of_string string))))
         ~doc:
           (sprintf
              "%s|none %s (default: %s)"
@@ -156,16 +156,15 @@ let limits_readme ~phases =
   sprintf "Limits apply to each phase of evaluation on its own: %s." phases
 ;;
 
-(* The sources of the prelude among [paths] are checked as the prelude of
-   their checkout, then the others as a program that sees it. *)
+(* The sources of the prelude among [paths] are checked as the prelude of their
+   checkout, then the others as a program that sees it. *)
 let check_with_prelude_sources ~limits ~sources ~program =
   let checkout = snd (List.hd_exn sources) in
   List.iter sources ~f:(fun (path, other) ->
-    if
-      not
-        (String.equal
-           (Stdlib_checkout.root other)
-           (Stdlib_checkout.root checkout))
+    if not
+         (String.equal
+            (Stdlib_checkout.root other)
+            (Stdlib_checkout.root checkout))
     then (
       eprintf
         "Error: %s and %s are sources of the preludes of different checkouts, \
@@ -365,10 +364,9 @@ let test_command =
          | `Write_corrected -> true
          | `Promote | `Print_corrected -> false
        in
-       if
-         (not evaluated)
-         || errors > 0
-         || (failed_on_mismatch && (failed > 0 || stale > 0))
+       if (not evaluated)
+          || errors > 0
+          || (failed_on_mismatch && (failed > 0 || stale > 0))
        then exit 1)
 ;;
 
@@ -413,14 +411,13 @@ let bench_command ~fake_clock =
              report files diagnostic;
              exit 1)
        in
-       if
-         not
-           (Bench_command.run
-              ~filters
-              options
-              ~baseline_dir
-              ~report:(report files)
-              benches)
+       if not
+            (Bench_command.run
+               ~filters
+               options
+               ~baseline_dir
+               ~report:(report files)
+               benches)
        then exit 1)
 ;;
 

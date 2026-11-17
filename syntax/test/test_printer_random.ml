@@ -1,7 +1,6 @@
 open! Import
 
-(* Random syntax ([Gen]), printed at several widths
-   and checked to round trip. *)
+(* Random syntax ([Gen]), printed at several widths and checked to round trip. *)
 
 module Line_counts = struct
   type t =
@@ -36,11 +35,11 @@ end
 
 (* Round trips [t] at each width, counting the printed lines. *)
 let check
-      counts
-      ~widths
-      ~(round_trip : ?widths:int list -> 'a -> unit)
-      ~(print : ?width:int -> 'a -> string)
-      t
+  counts
+  ~widths
+  ~(round_trip : ?widths:int list -> 'a -> unit)
+  ~(print : ?width:int -> 'a -> string)
+  t
   =
   round_trip ~widths t;
   List.fold widths ~init:counts ~f:(fun counts width ->

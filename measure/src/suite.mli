@@ -1,7 +1,6 @@
 open! Import
 
-(** Running a set of named routines, as [stag bench] and [stag-build bench]
-    do. *)
+(** Running a set of named routines, as [stag bench] and [stag-build bench] do. *)
 
 module Bench : sig
   type t =
@@ -12,8 +11,8 @@ module Bench : sig
     | Parameterised of
         { name : string
         ; args : (unit -> (string * Routine.t) Or_error.t) list
-          (** Each makes the routine of an argument, and its label: the bench
-            is named [NAME/LABEL]. *)
+        (** Each makes the routine of an argument, and its label: the bench is
+            named [NAME/LABEL]. *)
         }
 
   val add_prefix : t -> string -> t
@@ -23,7 +22,7 @@ module Outcome : sig
   type t =
     { name : string
     ; entry : Report.Entry.t Or_error.t
-      (** An error of the routine, which stops its measurement. *)
+    (** An error of the routine, which stops its measurement. *)
     }
   [@@deriving sexp_of]
 end
@@ -32,9 +31,9 @@ end
     those containing any of them. *)
 val selected : filters:string list -> string -> bool
 
-(** Measures the benches [selected] in order, each after a [Gc.compact], so
-    that earlier ones do not leave it garbage, calling [on_outcome] after each,
-    and compares them with their times in [baseline], if any.
+(** Measures the benches [selected] in order, each after a [Gc.compact], so that
+    earlier ones do not leave it garbage, calling [on_outcome] after each, and
+    compares them with their times in [baseline], if any.
 
     The arguments of a [Parameterised] bench are made only if a filter could
     select it: one it contains, or one with a [/] after a suffix of its name

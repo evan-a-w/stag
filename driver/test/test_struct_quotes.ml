@@ -120,8 +120,7 @@ let shown =
 ;;
 
 let%expect_test "an antiquote of the wrong type" =
-  check
-    {|
+  check {|
 let bad = .< struct let x = .~1 end >.
 |};
   [%expect
@@ -134,8 +133,7 @@ let bad = .< struct let x = .~1 end >.
 ;;
 
 let%expect_test "an item antiquote of the wrong type" =
-  check
-    {|
+  check {|
 let bad = .< struct include .~(Stag.Expr.int 1) end >.
 |};
   [%expect
@@ -148,8 +146,7 @@ let bad = .< struct include .~(Stag.Expr.int 1) end >.
 ;;
 
 let%expect_test "an antiquote with substitutions" =
-  check
-    {|
+  check {|
 let bad = .< struct let x = .~(Stag.Expr.int 1).{y} end >.
 |};
   [%expect
@@ -162,8 +159,7 @@ let bad = .< struct let x = .~(Stag.Expr.int 1).{y} end >.
 ;;
 
 let%expect_test "an error in quoted declarations is reported where spliced" =
-  check
-    {|
+  check {|
 let decls = .< struct let x : int = "no" end >.
 include .~decls
 |};
@@ -178,8 +174,8 @@ include .~decls
     |}]
 ;;
 
-let%expect_test
-    "free names resolve where spliced; root paths and erased code don't"
+let%expect_test "free names resolve where spliced; root paths and erased code \
+                 don't"
   =
   check
     ~run:true
@@ -263,8 +259,7 @@ let shown = print_endline (Int.to_string (f p))
 ;;
 
 let%expect_test "errors in type splices" =
-  check
-    {|
+  check {|
 let x : .~1 = 1
 |};
   [%expect
@@ -527,8 +522,7 @@ let f (n : .~int_ty) =
                     ^^^^^^
     Error: This expression has type string but an expression was expected of type int
     |}];
-  check
-    {|
+  check {|
 let bad = Stag.Type_expr.con "nope" Nil
 exception E of .~bad
 |};
@@ -555,8 +549,7 @@ let a = A
     Note: The generated declaration is:
       type t = A of nope
     |}];
-  check
-    {|
+  check {|
 let n = 1
 type t = .~n
 |};
@@ -771,8 +764,7 @@ end
 ;;
 
 let%expect_test "a type splice giving a splice is an error, not a loop" =
-  check
-    {|
+  check {|
 let s = Stag.Type_expr.Splice (Stag.Expr.var "s")
 let x : .~s = 1
 |};

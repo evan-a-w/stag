@@ -14,8 +14,8 @@ end
 type t =
   { loc : Loc.t (** [Loc.none] if it has none. *)
   ; whole_file : bool
-    (** About [loc.file] as a whole, eg. its name, so shown without a line or
-        source. *)
+  (** About [loc.file] as a whole, eg. its name, so shown without a line or
+      source. *)
   ; message : string
   ; notes : Note.t list
   }
@@ -27,7 +27,7 @@ val create : ?notes:Note.t list -> ?whole_file:bool -> loc:Loc.t -> string -> t
 val sort : t list -> t list
 
 (** With each location [f loc], eg. to name files differently. *)
-val relocate : t -> f:(Loc.t -> Loc.t) -> t
+val relocate : t -> f:(Loc.t -> Loc.t) @ local -> t
 
 val of_parse_error : Parser.Error.t -> t
 val of_source_file_error : Source_file.Error.t -> t
@@ -51,16 +51,16 @@ Error: message
 
     Then each note likewise, with [Note:] for [Error:]. The quoted source is
     that of [contents] of the file, if given and the span is in it. Spans of
-    several lines quote them (elided in the middle when there are many)
-    without underlining. With [warning], [Warning:] for [Error:]. *)
+    several lines quote them (elided in the middle when there are many) without
+    underlining. With [warning], [Warning:] for [Error:]. *)
 val to_string_hum
   :  ?contents:(string -> string option)
   -> ?warning:bool
   -> t
   -> string
 
-(** Each as [to_string_hum], the first [max_shown] only, then a line of how
-    many more there are. *)
+(** Each as [to_string_hum], the first [max_shown] only, then a line of how many
+    more there are. *)
 val list_to_string_hum
   :  ?contents:(string -> string option)
   -> ?warning:bool

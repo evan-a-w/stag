@@ -9,32 +9,30 @@ module Printed_token = struct
 end
 
 let tokens_of_text () =
-  Memo.of_comparable
-    (module String)
-    (fun text ->
-       match Lexer.tokenize ~file:"" text with
-       | Error error ->
-         raise_s
-           [%message "printed text does not lex" text (error : Lexer.Error.t)]
-       | Ok tokens ->
-         Array.to_list tokens
-         |> List.filter_map ~f:(fun ({ token; loc } : Lexer.Located.t) ->
-           match token with
-           | Eof -> None
-           | token ->
-             Some
-               { Printed_token.token
-               ; start = loc.start.offset
-               ; stop = loc.stop.offset
-               }))
+  Memo.of_comparator (module String) (fun text ->
+    match Lexer.tokenize ~file:"" text with
+    | Error error ->
+      raise_s
+        [%message "printed text does not lex" text (error : Lexer.Error.t)]
+    | Ok tokens ->
+      Array.to_list tokens
+      |> List.filter_map ~f:(fun ({ token; loc } : Lexer.Located.t) ->
+        match token with
+        | Eof -> None
+        | token ->
+          Some
+            { Printed_token.token
+            ; start = loc.start.#offset
+            ; stop = loc.stop.#offset
+            }))
 ;;
 
 let leaf_text : Doc.Leaf.t -> string = function
   | Text s | If_break s -> s
 ;;
 
-(* The tokens of [doc], in order, and whether each is the [|] of a match arm
-   or variant constructor, which starts a line when broken. *)
+(* The tokens of [doc], in order, and whether each is the [|] of a match arm or
+   variant constructor, which starts a line when broken. *)
 let printed_tokens doc ~tokens_of_text =
   let tokens, (_ : Doc.t) =
     Doc.fold_map_leaves doc ~init:[] ~f:(fun tokens leaf ->
@@ -48,34 +46,37 @@ let printed_tokens doc ~tokens_of_text =
   Array.of_list_rev tokens |> Array.unzip
 ;;
 
-(* Pairs of a source and a printed token index at the start of the same
-   toplevel (or module member, or module's [end]), in order, from [(0, 0)] to
-   the ends. The tokens between two are aligned apart from the others, which
-   keeps aligning a long file quick. [count] is the number of tokens a
-   toplevel prints. *)
+(* Pairs of a source and a printed token index at the start of the same toplevel
+   (or module member, or module's [end]), in order, from [(0, 0)] to the ends.
+   The tokens between two are aligned apart from the others, which keeps
+   aligning a long file quick. [count] is the number of tokens a toplevel
+   prints. *)
 let cut_points
-      (program : Syntax.Program.t)
-      ~(source : Lexer.Located.t array)
-      ~printed
-      ~count
+  (program : Syntax.Program.t)
+  ~(source : Lexer.Located.t array)
+  ~printed
+  ~count
   =
   let first_at offset =
-    Array.binary_search
-      source
-      ~compare:(fun (t : Lexer.Located.t) offset ->
-        Int.compare t.loc.start.offset offset)
-      `First_greater_than_or_equal_to
-      offset
-    |> Option.value ~default:(Array.length source)
+    match
+      Array.binary_search
+        source
+        ~compare:(fun (t : Lexer.Located.t) offset ->
+          Int.compare t.loc.start.#offset offset)
+        `First_greater_than_or_equal_to
+        offset
+    with
+    | None -> Array.length source
+    | Some i -> i
   in
   let rec cuts (ts : Syntax.Toplevel.t list) ~start acc =
     List.fold ts ~init:(start, acc) ~f:(fun (p, acc) (t : Syntax.Toplevel.t) ->
-      let acc = (first_at t.loc.start.offset, p) :: acc in
+      let acc = (first_at t.loc.start.#offset, p) :: acc in
       match t.txt with
       | Module (_, (_ :: _ as members)) ->
         (* After [module M = struct]. *)
         let p, acc = cuts members ~start:(p + 4) acc in
-        p + 1, (first_at t.loc.stop.offset - 1, p) :: acc
+        p + 1, (first_at t.loc.stop.#offset - 1, p) :: acc
       | _ -> p + count t, acc)
   in
   let stop, cuts = cuts program ~start:0 [ 0, 0 ] in
@@ -109,7 +110,7 @@ let align source printed ~cuts =
 let comment_doc (comment : Comment.t) =
   Doc.block
     (String.substr_replace_all comment.text ~pattern:"\r\n" ~with_:"\n")
-    ~col:comment.loc.start.col
+    ~col:comment.loc.start.#col
 ;;
 
 let is_inline (comment : Comment.t) =
@@ -121,9 +122,9 @@ let is_inline (comment : Comment.t) =
 (* Those on their own line before an [end] or [}] are indented as what it
    closes. Those on their own line that were on one line stay on one. *)
 let render_before
-      ~(prev : Token.t option)
-      ~(next : Token.t option)
-      (comments : Comment.t list)
+  ~(prev : Token.t option)
+  ~(next : Token.t option)
+  (comments : Comment.t list)
   =
   let open Doc in
   let own_line (run : Comment.t list) =
@@ -147,7 +148,7 @@ let render_before
     | _ -> leading (fresh_line ^^ doc ^^ after)
   in
   List.group comments ~break:(fun (a : Comment.t) (b : Comment.t) ->
-    is_inline a || is_inline b || b.loc.start.line <> a.loc.stop.line)
+    is_inline a || is_inline b || b.loc.start.#line <> a.loc.stop.#line)
   |> List.map ~f:(function
     | [ comment ] when is_inline comment ->
       let space =
@@ -206,17 +207,16 @@ let with_comments doc ~tokens_of_text ~source_tokens ~comments ~cuts =
     last_matched.(i + 1) <- Option.first_some m last_matched.(i));
   let next_matched g = g < Array.length matched && Option.is_some matched.(g) in
   (* The first printed token from [i] that is not a separator, which would be
-     left alone on its line or pushed to the next, nor, with [closers], a
-     closer the printer added. *)
+     left alone on its line or pushed to the next, nor, with [closers], a closer
+     the printer added. *)
   let rec skip_separators ?(closers = false) i =
-    if
-      i < n
-      &&
-      match printed.(i) with
-      | Semi | Comma | In -> true
-      | Rparen | Rbracket | Rbrace | End | Quote_close ->
-        closers && not printed_matched.(i)
-      | _ -> false
+    if i < n
+       &&
+       match printed.(i) with
+       | Semi | Comma | In -> true
+       | Rparen | Rbracket | Rbrace | End | Quote_close ->
+         closers && not printed_matched.(i)
+       | _ -> false
     then skip_separators ~closers (i + 1)
     else i
   in
@@ -251,16 +251,15 @@ let with_comments doc ~tokens_of_text ~source_tokens ~comments ~cuts =
       (* What followed it is gone, as a redundant parenthesis. Before what
          follows on its line instead, unless that is a closer. *)
       let q = skip_separators (q + 1) - 1 in
-      if
-        q + 1 < n
-        && (not starts_line.(q + 1))
-        && not (Token.follows printed.(q + 1))
+      if q + 1 < n
+         && (not starts_line.(q + 1))
+         && not (Token.follows printed.(q + 1))
       then Before (q + 1)
       else inline_after q
     | Inline, Some q when Token.follows source.(comment.next_token) ->
       (* Not about what follows. A line broken after a token that does not end
-         code would make it about what follows. Past separators, where it is
-         as one written after them. *)
+         code would make it about what follows. Past separators, where it is as
+         one written after them. *)
       let i = skip_separators (q + 1) in
       if i > q + 1 && i < n && not (Token.follows printed.(i))
       then Before i
@@ -288,9 +287,8 @@ let with_comments doc ~tokens_of_text ~source_tokens ~comments ~cuts =
        | After q -> after.(q) <- comment :: after.(q));
       Some slot)
   in
-  (* An inline comment followed by one that ends a line ends it too. One
-     after one that ends a line, before a closer or separator, is on its own
-     line. *)
+  (* An inline comment followed by one that ends a line ends it too. One after
+     one that ends a line, before a closer or separator, is on its own line. *)
   let before =
     Array.mapi before ~f:(fun i comments ->
       let comments =
@@ -382,10 +380,10 @@ let with_comments doc ~tokens_of_text ~source_tokens ~comments ~cuts =
 (* Whether there is a blank line between the toplevels at [prev] and [next],
    before any comment between them. *)
 let blank_between
-      source
-      (comments : Comment.t array)
-      (prev : Loc.t)
-      (next : Loc.t)
+  source
+  (comments : Comment.t array)
+  (prev : Loc.t)
+  (next : Loc.t)
   =
   (not (Loc.is_none prev))
   && (not (Loc.is_none next))
@@ -394,14 +392,14 @@ let blank_between
     Array.binary_search
       comments
       ~compare:(fun (c : Comment.t) offset ->
-        Int.compare c.loc.start.offset offset)
+        Int.compare c.loc.start.#offset offset)
       `First_greater_than_or_equal_to
-      prev.stop.offset
+      prev.stop.#offset
+    |> Option.globalize Int.globalize
     |> Option.value_map ~default:[] ~f:(fun first ->
       let rec from i =
-        if
-          i < Array.length comments
-          && comments.(i).loc.start.offset < next.start.offset
+        if i < Array.length comments
+           && comments.(i).loc.start.#offset < next.start.#offset
         then comments.(i) :: from (i + 1)
         else []
       in
@@ -409,22 +407,21 @@ let blank_between
   in
   (* After the comments trailing [prev], on its line. *)
   let start =
-    List.fold between ~init:prev.stop.offset ~f:(fun start comment ->
-      let offset = comment.loc.start.offset in
-      if
-        offset >= start
-        && not
-             (String.mem
-                (String.sub source ~pos:start ~len:(offset - start))
-                '\n')
-      then comment.loc.stop.offset
+    List.fold between ~init:prev.stop.#offset ~f:(fun start comment ->
+      let offset = comment.loc.start.#offset in
+      if offset >= start
+         && not
+              (String.mem
+                 (String.sub source ~pos:start ~len:(offset - start))
+                 '\n')
+      then comment.loc.stop.#offset
       else start)
   in
   let stop =
     List.find_map between ~f:(fun comment ->
-      let offset = comment.loc.start.offset in
+      let offset = comment.loc.start.#offset in
       Option.some_if (offset >= start) offset)
-    |> Option.value ~default:next.start.offset
+    |> Option.value ~default:next.start.#offset
   in
   match
     String.split (String.sub source ~pos:start ~len:(stop - start)) ~on:'\n'

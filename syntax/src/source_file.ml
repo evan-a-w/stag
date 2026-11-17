@@ -16,10 +16,9 @@ let module_name path =
     let is_ident_char c =
       Char.is_alphanum c || Char.equal c '_' || Char.equal c '\''
     in
-    if
-      String.is_empty name
-      || (not (Char.is_alpha name.[0]))
-      || not (String.for_all name ~f:is_ident_char)
+    if String.is_empty name
+       || (not (Char.is_alpha name.[0]))
+       || not (String.for_all name ~f:is_ident_char)
     then
       Error
         (sprintf
@@ -41,12 +40,13 @@ module Error = struct
 
   let loc = function
     | Parse error -> Parser.Error.loc error
-    | Invalid_file_name { path; message = _ } -> Loc.start_of_file path
+    | Invalid_file_name { path; message = _ } ->
+      Loc.start_of_file (Loc.File.of_string path)
   ;;
 end
 
 let module_ path name toplevels =
-  let loc = Loc.start_of_file path in
+  let loc = Loc.start_of_file (Loc.File.of_string path) in
   Located.create
     ~loc
     (Syntax.Toplevel.Module (Located.create ~loc name, toplevels))

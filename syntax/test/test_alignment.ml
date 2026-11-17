@@ -31,8 +31,7 @@ let%expect_test "elements occurring once in each are matched first" =
   (* Myers would match the [a]s, as more of them. *)
   show "aaxbb" "bbxaa";
   show "x(a)y(b)z" "xaybz";
-  [%expect
-    {|
+  [%expect {|
     a- a- xx b- b-
     xx (- aa )- yy (- bb )- zz
     |}]
