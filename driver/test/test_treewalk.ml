@@ -273,3 +273,36 @@ let%expect_test "a shared stamp counter" =
     minted/4
     |}]
 ;;
+
+let%expect_test "with_output restores the previous output" =
+  let eval_printing_to ~f =
+    let t = Option.value_exn (typecheck {|let x = print_string "hello"|}) in
+    let interpreter = Driver.interpreter (driver t) in
+    let buffers = String.Table.create () in
+    let to_ name =
+      Buffer.add_string
+        (Hashtbl.find_or_add buffers name ~default:(fun () -> Buffer.create 16))
+    in
+    Treewalk.set_output interpreter (to_ "outer");
+    f interpreter ~to_ ~eval:(fun () -> ok_exn (Driver.eval (driver t)));
+    print_s
+      [%sexp (Hashtbl.map buffers ~f:Buffer.contents : string String.Table.t)]
+  in
+  eval_printing_to ~f:(fun interpreter ~to_ ~eval ->
+    Treewalk.with_output interpreter (to_ "inner") ~f:(fun () ->
+      Treewalk.with_output interpreter (to_ "innermost") ~f:Fn.id;
+      eval ()));
+  [%expect {| ((inner hello) (innermost "") (outer "")) |}];
+  eval_printing_to ~f:(fun interpreter ~to_ ~eval ->
+    (match
+       Treewalk.with_output interpreter (to_ "raising") ~f:(fun () ->
+         raise_s [%message "boom"])
+     with
+     | () -> ()
+     | exception exn -> print_s [%sexp (exn : exn)]);
+    eval ());
+  [%expect {|
+    boom
+    ((outer hello) (raising ""))
+    |}]
+;;
