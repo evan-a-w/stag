@@ -19,18 +19,17 @@ type t =
   }
 [@@deriving fields ~getters]
 
-let create_interpreter ~limits ~output =
-  let interpreter = Treewalk.create ~stamps:(Stamp_counter.create ()) () in
+let create_typecheck ~limits ~output ?prelude () =
+  let stamps = Stamp_counter.create () in
+  let interpreter = Treewalk.create ~stamps () in
   Option.iter output ~f:(Treewalk.set_output interpreter);
   Treewalk.set_limits interpreter limits;
-  interpreter
+  Typecheck.create ~stamps ~interpreter ?prelude (), interpreter
 ;;
 
 let check ?(limits = Limits.unlimited) ?output ?prelude program =
-  let interpreter = create_interpreter ~limits ~output in
-  let%map.Result checked =
-    Typecheck.typecheck (Typecheck.create ~interpreter ?prelude ()) ~program
-  in
+  let typecheck, interpreter = create_typecheck ~limits ~output ?prelude () in
+  let%map.Result checked = Typecheck.typecheck typecheck ~program in
   { checked; interpreter; eval_order = [] }
 ;;
 
@@ -132,10 +131,10 @@ let rec eval_order ~prefix ~references ~(items : Signature.t) members =
 ;;
 
 let check_modules ?(limits = Limits.unlimited) ?output ?prelude groups =
-  let interpreter = create_interpreter ~limits ~output in
+  let typecheck, interpreter = create_typecheck ~limits ~output ?prelude () in
   let%map.Result checked =
     Typecheck.typecheck
-      (Typecheck.create ~interpreter ?prelude ())
+      typecheck
       ~program:(List.map groups ~f:Module_group.to_toplevel)
   in
   let idents =
@@ -190,9 +189,7 @@ let check_files ?limits ?output ?prelude files =
 ;;
 
 let check_prelude ?(limits = Limits.unlimited) ?output prelude =
-  let interpreter = create_interpreter ~limits ~output in
-  let%map.Result checked =
-    Typecheck.check_prelude (Typecheck.create ~interpreter ~prelude ())
-  in
+  let typecheck, interpreter = create_typecheck ~limits ~output ~prelude () in
+  let%map.Result checked = Typecheck.check_prelude typecheck in
   { checked; interpreter; eval_order = [] }
 ;;
