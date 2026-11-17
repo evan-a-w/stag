@@ -12,9 +12,10 @@ let limits =
 ;;
 
 let typechecker () =
-  let interpreter = Treewalk.create ~stamps:(Stamp_counter.create ()) () in
+  let stamps = Stamp_counter.create () in
+  let interpreter = Treewalk.create ~stamps () in
   Treewalk.set_limits interpreter limits;
-  Typecheck.create ~interpreter ()
+  Typecheck.create ~stamps ~interpreter ()
 ;;
 
 let prelude =
