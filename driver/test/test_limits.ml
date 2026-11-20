@@ -224,3 +224,37 @@ let%expect_test "growing code exponentially runs out of fuel at runtime" =
     eval failed: Time limit exceeded: evaluation took more than 50ms
     |}]
 ;;
+
+let%expect_test "an exception escaping evaluation leaves the depth as it was" =
+  let contents =
+    {x|
+let id x = x
+let%expect_test "t" = id (id (id (id (id ([%expect {||}])))))
+|x}
+  in
+  match Driver.check_files [ { Source_file.path = "t.stag"; contents } ] with
+  | Error errors -> print_s [%sexp (errors : Driver.Error.t list)]
+  | Ok driver ->
+    Driver.eval driver |> ok_exn;
+    let interpreter = Driver.interpreter driver in
+    Interpreter.set_limits
+      interpreter
+      { Limits.unlimited with max_depth = Some 20 };
+    let test = List.hd_exn (Driver.checked driver).program.expect_tests in
+    let outcomes =
+      List.init 100 ~f:(fun _ ->
+        match
+          Interpreter.run_expect_test interpreter test ~on_expect:(fun _ ->
+            raise_s [%message "on_expect raised"])
+        with
+        | exception exn -> Exn.to_string exn
+        | Ok () -> "Ok"
+        | Error error -> Error.to_string_hum error)
+    in
+    print_s
+      [%sexp
+        (List.sort_and_group outcomes ~compare:String.compare
+         |> List.map ~f:(fun group -> List.hd_exn group, List.length group)
+         : (string * int) list)];
+    [%expect {| (("\"on_expect raised\"" 100)) |}]
+;;

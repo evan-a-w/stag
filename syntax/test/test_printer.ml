@@ -735,6 +735,7 @@ let%expect_test "the project's sources round trip and are formatted" =
     (../../core/sexp_printer.stag (formatted true) (long_lines 0))
     (../../core/string.stag (formatted true) (long_lines 0))
     (../../bench/programs/fib.stag (formatted true) (long_lines 0))
+    (../../bench/programs/loops.stag (formatted true) (long_lines 0))
     (../../bench/programs/matching.stag (formatted true) (long_lines 0))
     (../../bench/programs/power.stag (formatted true) (long_lines 0))
     (../../bench/programs/sort.stag (formatted true) (long_lines 0))

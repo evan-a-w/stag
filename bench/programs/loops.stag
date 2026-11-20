@@ -1,0 +1,27 @@
+(* Tail calls through [let], [match] and exception handlers: they must run in
+   constant stack and memory however long the loop. *)
+
+let count n acc =
+  match Int.equal n 0 with
+  | true -> acc
+  | false ->
+    let pair = (n, acc) in
+    match pair with n, acc -> count (Int.sub n 1) (Int.add acc 1)
+
+let catching n acc =
+  match Int.equal n 0 with
+  | true -> acc
+  | false ->
+    match raise (Failure "next") with
+    | () -> acc
+    | exception Failure _ -> catching (Int.sub n 1) (Int.add acc 1)
+
+let%bench "tail loop 1M" = count 1000000 0
+
+let%bench "handler tail loop 1M" = catching 1000000 0
+
+let%expect_test "loops" =
+  print_int (count 1000000 0);
+  print_string " ";
+  print_int (catching 1000000 0);
+  [%expect {| 1000000 1000000 |}]

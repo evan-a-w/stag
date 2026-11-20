@@ -46,3 +46,7 @@ Don't commit unless it's mentioned by the user or it's obvious that you are alre
 When running tests or any code really, you should always use a time limit (even if it's very large relative to the time the tests take), to guard against infinite loops.
 
 When making PRs, don't add any detail - just use the smiley emoji.
+
+After having made a change, please report the sections that need the most scrutiny in code review, and sections that need less. Eg. if changes are all mechanical and simple, you should mention that. If the most of the changes are in a particular API, and other changes are mechanical, mention that API. Also mention any particular tricky implementation details that reviewers should understand. This list I just gave is by no means exhaustive, but the goal should be to focus the reviewer's time, and not waste their time in trivial details.
+
+At ideation time/immediately after being asked a request, you should clarify any design decisions or implementation points to the user. If things are unclear midway, also clarify.

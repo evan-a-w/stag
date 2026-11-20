@@ -68,12 +68,26 @@ let[@zero_alloc] tail_step t ~loc =
     Ok ())
 ;;
 
-let step t ~loc ~f =
+let[@zero_alloc] enter t ~loc =
   match tail_step t ~loc with
   | Error _ as error -> error
   | Ok () ->
     t.depth <- t.depth + 1;
+    Ok ()
+;;
+
+let exit t = t.depth <- t.depth - 1
+
+let protect_depth t ~f =
+  let depth = t.depth in
+  Exn.protect ~f ~finally:(fun () -> t.depth <- depth)
+;;
+
+let step t ~loc ~f =
+  match enter t ~loc with
+  | Error _ as error -> error
+  | Ok () ->
     let result = f () in
-    t.depth <- t.depth - 1;
+    exit t;
     result
 ;;

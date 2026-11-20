@@ -45,9 +45,9 @@ module Next = struct
         }
     | Failed of Error.t @@ global
 
-  let of_or_error : Value.t Or_error.t -> t @ local = function
-    | Ok value -> exclave_ Value value
-    | Error error -> exclave_ Failed error
+  let of_local_result : Value.t Eval_result.t @ local -> t @ local = function
+    | Ok { global = value } -> exclave_ Value value
+    | Error { global = error } -> exclave_ Failed error
   ;;
 end
 
@@ -466,12 +466,12 @@ let splice_code
       })
 ;;
 
-let runtime_error ~loc message =
-  Error (Runtime_error.to_error (Runtime_error.create ~loc message))
+let runtime_error ~loc message = exclave_
+  Eval_result.error (Runtime_error.to_error (Runtime_error.create ~loc message))
 ;;
 
-let raise_exn ~loc exn =
-  Error (Runtime_error.to_error (Runtime_error.raise_exn ~loc exn))
+let raise_exn ~loc exn = exclave_
+  Eval_result.error (Runtime_error.to_error (Runtime_error.raise_exn ~loc exn))
 ;;
 
 let prelude_exception name : Typed.Constructor_ref.t =
@@ -486,32 +486,38 @@ let prim_exception : Prim.Exception.t -> Value.t = function
     Construct (prelude_exception "Failure", [ String message ])
 ;;
 
-let pattern_mismatch pattern value =
-  Or_error.error_s
+let pattern_mismatch pattern value = exclave_
+  Eval_result.error_s
     [%message
       "Pattern does not fit value" (pattern : Typed.Pattern.t) (value : Value.t)]
 ;;
 
+let reached_error () = exclave_
+  Eval_result.error (Error.of_exn Erase.Reached_error)
+;;
+
 (* Binds the variables of [pattern] in [env] if it matches [value]. *)
-let rec match_pattern env (pattern : Typed.Pattern.t) (value : Value.t) =
+let rec match_pattern env (pattern : Typed.Pattern.t) (value : Value.t)
+  : bool Eval_result.t @ local
+  = exclave_
   match pattern.desc, value with
-  | Any, _ -> Ok true
-  | Error _, _ -> Error (Error.of_exn Erase.Reached_error)
+  | Any, _ -> Eval_result.return true
+  | Error _, _ -> reached_error ()
   | Var ident, _ ->
     Env.set env ~ident ~value;
-    Ok true
-  | Lit (Int a), Int b -> Ok (Int.equal a b)
-  | Lit (Bool a), Bool b -> Ok (Bool.equal a b)
-  | Lit (String a), String b -> Ok (String.equal a b)
-  | Lit (Char a), Char b -> Ok (Char.equal a b)
-  | Lit Unit, Unit -> Ok true
+    Eval_result.return true
+  | Lit (Int a), Int b -> Eval_result.return (Int.equal a b)
+  | Lit (Bool a), Bool b -> Eval_result.return (Bool.equal a b)
+  | Lit (String a), String b -> Eval_result.return (String.equal a b)
+  | Lit (Char a), Char b -> Eval_result.return (Char.equal a b)
+  | Lit Unit, Unit -> Eval_result.return true
   | Tuple patterns, Tuple values -> match_all env pattern patterns values
   | Construct (constructor, patterns), Construct (constructor', values) ->
     if constructor.index = constructor'.index
        && ((not (Typed.Constructor_ref.is_exception constructor))
            || String.equal constructor.name constructor'.name)
     then match_all env pattern patterns values
-    else Ok false
+    else Eval_result.return false
   | Record fields, Record (_, values) ->
     if List.exists fields ~f:(fun ((field : Typed.Field_ref.t), _) ->
          field.index >= Array.length values)
@@ -524,10 +530,10 @@ let rec match_pattern env (pattern : Typed.Pattern.t) (value : Value.t) =
         (List.map fields ~f:(fun (field, _) -> values.(field.index)))
   | Poly_variant (tag, arg), Poly_variant (tag', value) ->
     if not (String.equal tag tag')
-    then Ok false
+    then Eval_result.return false
     else (
       match arg with
-      | None -> Ok true
+      | None -> Eval_result.return true
       | Some arg -> match_pattern env arg value)
   | Poly_record { fields; rest }, Poly_record values ->
     (match
@@ -537,7 +543,7 @@ let rec match_pattern env (pattern : Typed.Pattern.t) (value : Value.t) =
      with
      | None -> pattern_mismatch pattern value
      | Some pairs ->
-       let%map matched =
+       let%mapl_fun.Local_result { global = matched } =
          match_all env pattern (List.map pairs ~f:fst) (List.map pairs ~f:snd)
        in
        (match rest with
@@ -548,23 +554,26 @@ let rec match_pattern env (pattern : Typed.Pattern.t) (value : Value.t) =
           in
           Env.set env ~ident ~value:(Poly_record rest)
         | Bind _ | Closed | Open -> ());
-       matched)
+       { global = matched })
   | ( (Lit _ | Tuple _ | Construct _ | Record _ | Poly_variant _ | Poly_record _)
     , _ ) -> pattern_mismatch pattern value
 
-and match_all env pattern patterns values =
-  match List.zip patterns values with
-  | Unequal_lengths -> pattern_mismatch pattern (Tuple values)
-  | Ok pairs ->
-    List.fold_until
-      pairs
-      ~init:()
-      ~f:(fun () (p, v) ->
-        match match_pattern env p v with
-        | Ok true -> Continue ()
-        | Ok false -> Stop (Ok false)
-        | Error _ as error -> Stop error)
-      ~finish:(fun () -> Ok true)
+and match_all env pattern patterns values : bool Eval_result.t @ local =
+  (* [go] returns on the heap, so each pattern's result is freed by its tail
+     call. *)
+  let rec go ps vs : bool Or_error.t =
+    match ps, vs with
+    | p :: ps, v :: vs ->
+      (match match_pattern env p v with
+       | Ok { global = true } -> go ps vs
+       | Ok { global = false } -> Ok false
+       | Error { global = error } -> Error error)
+    | [], [] -> Ok true
+    | [], _ :: _ | _ :: _, [] -> assert false
+  in
+  if List.length patterns <> List.length values
+  then exclave_ pattern_mismatch pattern (Tuple values)
+  else exclave_ Eval_result.of_or_error (go patterns values)
 ;;
 
 (* [applied], latest first, as prim values in order, or [Null] if one isn't. *)
@@ -579,25 +588,28 @@ let prim_args applied =
     ~finish:(fun args -> This args)
 ;;
 
-let poly_record (value : Value.t) =
+let poly_record (value : Value.t) : Value.t String.Map.t Eval_result.t @ local
+  = exclave_
   match value with
-  | Poly_record fields -> Ok fields
-  | _ -> Or_error.error_s [%message "Expected a record" (value : Value.t)]
+  | Poly_record fields -> Eval_result.return fields
+  | _ -> Eval_result.error_s [%message "Expected a record" (value : Value.t)]
 ;;
 
-let poly_field fields label =
+let poly_field fields label : Value.t Eval_result.t @ local = exclave_
   match Map.find fields label with
-  | Some value -> Ok value
+  | Some value -> Eval_result.return value
   | None ->
-    Or_error.error_s
+    Eval_result.error_s
       [%message "Missing field" label (fields : Value.t String.Map.t)]
 ;;
 
-let code_of_value (value : Value.t) =
+let code_of_value (value : Value.t)
+  : (Typed.Expr.t * Value.t Typed.Ident.Map.t) Eval_result.t @ local
+  = exclave_
   match value with
-  | Code { expr; persistent } -> Ok (expr, persistent)
+  | Code { expr; persistent } -> Eval_result.return (expr, persistent)
   | _ ->
-    Or_error.error_s [%message "Spliced a non-code value" (value : Value.t)]
+    Eval_result.error_s [%message "Spliced a non-code value" (value : Value.t)]
 ;;
 
 (* Closures capturing a toplevel not yet evaluated share its slot, so it is
@@ -608,21 +620,21 @@ let declare_toplevel t ident =
 
 (* Toplevels are evaluated on first use, so compile time evaluation only runs
    what it needs. *)
-let rec force t ident =
+let rec force t ident : unit Eval_result.t @ local = exclave_
   match Hashtbl.find t.pending ident with
-  | None -> Ok ()
+  | None -> Eval_result.return ()
   | Some (Component scc) ->
-    let%bind () = bind_functions t scc in
+    let%bindl.Local_result { global = () } = bind_functions t scc in
     force t ident
-  | Some (Failed { error; uncatchable = _ }) -> Error error
+  | Some (Failed { error; uncatchable = _ }) -> Eval_result.error error
   | Some (Value body) ->
     Hashtbl.remove t.pending ident;
     declare_toplevel t ident;
     (match eval t ~env:(Env.create ()) ~level:0 body with
-     | Ok value ->
+     | Ok { global = value } ->
        Env.set t.env ~ident ~value;
-       Ok ()
-     | Error error ->
+       Eval_result.return ()
+     | Error { global = error } ->
        let uncatchable =
          match Runtime_error.of_error error with
          | Some { kind = Raised exn; loc } ->
@@ -636,37 +648,37 @@ let rec force t ident =
          | Some { kind = Message _; loc = _ } | None -> error
        in
        Hashtbl.set t.pending ~key:ident ~data:(Failed { error; uncatchable });
-       Error error)
+       Eval_result.error error)
 
 (* A filled slot's ident is never pending, so needs no [force]. *)
-and lookup t env ident ~loc =
+and lookup t env ident ~loc : Value.t Eval_result.t @ local = exclave_
   match Env.find_slot env ~fallback:t.env ident with
-  | This { value = This value } -> Ok value
+  | This { value = This value } -> Eval_result.return value
   | This { value = Null } | Null -> lookup_forcing t env ident ~loc
 
-and lookup_forcing t env ident ~loc =
-  let%bind () =
-    match force t ident with
-    | Ok () -> Ok ()
-    | Error error ->
-      (match Hashtbl.find t.pending ident with
-       | Some (Failed { uncatchable; error = _ }) -> Error uncatchable
-       | Some (Component _ | Value _) | None -> Error error)
-  in
-  match Env.find_slot env ~fallback:t.env ident with
-  | This { value = This value } -> Ok value
-  | This { value = Null } ->
-    runtime_error
-      ~loc
-      (sprintf
-         "%s is used before its value is defined (a value may not depend on \
-          itself)"
-         ident.name)
-  | Null -> Env.lookup env ~fallback:t.env ~ident
+and lookup_forcing t env ident ~loc : Value.t Eval_result.t @ local = exclave_
+  match force t ident with
+  | Error error ->
+    (match Hashtbl.find t.pending ident with
+     | Some (Failed { uncatchable; error = _ }) -> Eval_result.error uncatchable
+     | Some (Component _ | Value _) | None -> Error error)
+  | Ok { global = () } ->
+    (match Env.find_slot env ~fallback:t.env ident with
+     | This { value = This value } -> Eval_result.return value
+     | This { value = Null } ->
+       runtime_error
+         ~loc
+         (sprintf
+            "%s is used before its value is defined (a value may not depend on \
+             itself)"
+            ident.name)
+     | Null -> Eval_result.of_or_error (Env.lookup env ~fallback:t.env ~ident))
 
 (* Making closures reads nothing, so a component's functions are all bound at
    once, and its values evaluated each when first used. *)
-and bind_functions t ({ members; recursive } : Typed.Scc.t) =
+and bind_functions t ({ members; recursive } : Typed.Scc.t)
+  : unit Eval_result.t @ local
+  = exclave_
   let functions, values =
     List.partition_tf members ~f:(fun { args; _ } -> not (List.is_empty args))
   in
@@ -675,133 +687,151 @@ and bind_functions t ({ members; recursive } : Typed.Scc.t) =
   List.iter functions ~f:(fun { ident; _ } ->
     Hashtbl.remove t.pending ident;
     if recursive then declare_toplevel t ident);
-  iter_result functions ~f:(fun { ident; args; body; _ } ->
-    let%map value = closure t ~env:t.env ~level:0 ~ident ~args ~body in
-    Env.set t.env ~ident ~value)
+  Eval_result.List.iter functions ~f:(fun { ident; args; body; _ } -> exclave_
+    let%mapl_fun.Local_result { global = value } =
+      closure t ~env:t.env ~level:0 ~ident ~args ~body
+    in
+    { global = Env.set t.env ~ident ~value })
 
 (* [env] has the bindings of the current activation, at [level]. *)
-and eval t ~env ~level expr =
-  Budget.step t.budget ~loc:expr.loc ~f:(fun () -> run t ~env ~level expr)
-  [@nontail]
+and eval t ~env ~level expr : Value.t Eval_result.t @ local = exclave_
+  match Budget.enter t.budget ~loc:expr.loc with
+  | Error error -> Eval_result.error error
+  | Ok () ->
+    let result = run t ~env ~level expr in
+    Budget.exit t.budget;
+    result
 
 (* Steps until a value, each tail step counted but no deeper. The [Next.t] of a
    step is on [run]'s stack, freed by the tail call, its fields being global. *)
-and run t ~env ~level expr =
+and run t ~env ~level expr : Value.t Eval_result.t @ local =
   match step t ~env ~level expr with
-  | Value value -> Ok value
-  | Failed error -> Error error
+  | Value value -> exclave_ Eval_result.return value
+  | Failed error -> exclave_ Eval_result.error error
   | Eval { env; level; expr } ->
     (match Budget.tail_step t.budget ~loc:expr.loc with
-     | Error error -> Error error
-     | Ok () -> run t ~env ~level expr)
+     | Error error -> exclave_ Eval_result.error error
+     | Ok () -> exclave_ run t ~env ~level expr)
 
 and step t ~env ~level (expr : Typed.Expr.t) : Next.t =
-  let eval' expr = eval t ~env ~level expr in
   match expr.desc with
   | App (f, arg) ->
-    (match eval' f with
-     | Error error -> Failed error
-     | Ok f ->
-       (match eval' arg with
-        | Error error -> Failed error
-        | Ok arg -> exclave_ apply t f arg ~loc:expr.loc))
+    (match eval t ~env ~level f with
+     | Error { global = error } -> exclave_ Failed error
+     | Ok { global = f } ->
+       (match eval t ~env ~level arg with
+        | Error { global = error } -> exclave_ Failed error
+        | Ok { global = arg } -> exclave_ apply t f arg ~loc:expr.loc))
   | Annotated (expr, _) -> exclave_ Eval { env; level; expr }
   | Let { ident; args; body; in_; _ } ->
     (match bind_let t ~env ~level ~ident ~args ~body with
-     | Error error -> Failed error
-     | Ok () -> exclave_ Eval { env; level; expr = in_ })
+     | Error { global = error } -> exclave_ Failed error
+     | Ok { global = () } -> exclave_ Eval { env; level; expr = in_ })
   | Let_mut { ident; body; in_; annot = _ } ->
-    (match eval' body with
-     | Error error -> Failed error
-     | Ok value ->
+    (match eval t ~env ~level body with
+     | Error { global = error } -> exclave_ Failed error
+     | Ok { global = value } ->
        Env.declare env ~ident;
        Env.set env ~ident ~value;
        exclave_ Eval { env; level; expr = in_ })
   | Toplevel_splice { code = _; expansion } ->
     exclave_ Eval { env; level; expr = expansion }
   | Match { scrutinee; cases; exception_cases } ->
-    (match eval' scrutinee with
-     | Ok value -> exclave_ eval_match t ~env ~level value cases ~loc:expr.loc
-     | Error error ->
+    (match eval t ~env ~level scrutinee with
+     | Ok { global = value } ->
+       exclave_ eval_match t ~env ~level value cases ~loc:expr.loc
+     | Error { global = error } ->
        (match exception_cases, Runtime_error.raised error with
         | _ :: _, Some exn ->
           exclave_ handle t ~env ~level exn exception_cases ~unhandled:error
-        | _ -> Failed error))
-  | _ -> exclave_ Next.of_or_error (step_value t ~env ~level expr)
+        | _ -> exclave_ Failed error))
+  | _ -> exclave_ Next.of_local_result (step_value t ~env ~level expr)
 
-and step_value t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
-  let eval' expr = eval t ~env ~level expr in
+and step_value t ~env ~level (expr : Typed.Expr.t)
+  : Value.t Eval_result.t @ local
+  = exclave_
   match expr.desc with
-  | Lit lit -> Ok (Value.of_lit lit)
+  | Lit lit -> Eval_result.return (Value.of_lit lit)
   | Expect expected ->
     (match t.on_expect with
      | Some on_expect ->
        on_expect expected;
-       Ok Value.Unit
+       Eval_result.return Value.Unit
      | None ->
-       Or_error.error_s [%message "[%expect] outside a running expect test"])
+       Eval_result.error_s [%message "[%expect] outside a running expect test"])
   | Var (Bound (Local ident | Toplevel ident))
   | Var (Persistent (Local ident | Toplevel ident)) ->
     lookup t env ident ~loc:expr.loc
   | Var (Free name | Free_toplevel name) ->
-    Or_error.error_s [%message "Free variable of code evaluated" name]
-  | Var (Prim prim) -> Ok (Value.Prim { prim; applied = [] })
-  | Var (Intrinsic intrinsic) -> Ok (Value.Intrinsic intrinsic)
-  | Type ty -> Ok (Value.Type ty)
+    Eval_result.error_s [%message "Free variable of code evaluated" name]
+  | Var (Prim prim) -> Eval_result.return (Value.Prim { prim; applied = [] })
+  | Var (Intrinsic intrinsic) -> Eval_result.return (Value.Intrinsic intrinsic)
+  | Type ty -> Eval_result.return (Value.Type ty)
   | Assign (var_ref, value) ->
-    let%bind value = eval' value in
+    let%bindl.Local_result { global = value } = eval t ~env ~level value in
     (match var_ref with
      | Bound (Local ident | Toplevel ident)
      | Persistent (Local ident | Toplevel ident) ->
-       let%bind () = force t ident in
+       let%bindl.Local_result { global = () } = force t ident in
        (match Env.find_slot env ~fallback:t.env ident with
         | This slot ->
           slot.value <- This value;
-          Ok Value.Unit
+          Eval_result.return Value.Unit
         | Null ->
-          Or_error.error_s
+          Eval_result.error_s
             [%message "Assigned an unbound ident" (ident : Typed.Ident.t)])
      | Free _ | Free_toplevel _ | Prim _ | Intrinsic _ ->
-       Or_error.error_s
+       Eval_result.error_s
          [%message "Assigned a non-variable" (var_ref : Typed.Var_ref.t)])
   | App _ | Let _ | Let_mut _ | Annotated _ | Toplevel_splice _ | Match _ ->
     run t ~env ~level expr
   | Fun { args; annots = _; body } ->
     (* Its first parameter identifies it, as a let's name does. *)
     closure t ~env ~level ~ident:(List.hd_exn args) ~args ~body
-  | Splice _ -> Or_error.error_s [%message "Splice outside a quote evaluated"]
-  | Error _ -> Error (Error.of_exn Erase.Reached_error)
+  | Splice _ ->
+    Eval_result.error_s [%message "Splice outside a quote evaluated"]
+  | Error _ -> reached_error ()
   | Quote body ->
     let embedded = Embedded.create () in
-    let%map expr = build t ~env ~level ~embedded ~depth:1 body in
-    Value.Code { expr; persistent = embedded.values }
+    (match build t ~env ~level ~embedded ~depth:1 body with
+     | Ok expr ->
+       Eval_result.return (Value.Code { expr; persistent = embedded.values })
+     | Error error -> Eval_result.error error)
   | Tuple exprs ->
-    let%map values = map_result exprs ~f:eval' in
-    Value.Tuple values
+    let%mapl_fun.Local_result { global = values } =
+      eval_all t ~env ~level exprs
+    in
+    { global = Value.Tuple values }
   | Construct (constructor, exprs) ->
-    let%map values = map_result exprs ~f:eval' in
-    Value.Construct (constructor, values)
+    let%mapl_fun.Local_result { global = values } =
+      eval_all t ~env ~level exprs
+    in
+    { global = Value.Construct (constructor, values) }
   | Record fields ->
-    let%map values = map_fields fields ~f:eval' in
+    let%mapl_fun.Local_result { global = values } =
+      eval_fields t ~env ~level fields
+    in
     let record_type = (fst (List.hd_exn values) : Typed.Field_ref.t).record in
     let record =
       Array.create ~len:(Array.length record_type.fields) Value.Unit
     in
     List.iter values ~f:(fun ((field : Typed.Field_ref.t), value) ->
       record.(field.index) <- value);
-    Value.Record (record_type, record)
+    { global = Value.Record (record_type, record) }
   | Field (expr, field) ->
-    let%bind value = eval' expr in
+    let%bindl.Local_result { global = value } = eval t ~env ~level expr in
     (match value with
      | Record (_, values) when field.index < Array.length values ->
-       Ok values.(field.index)
+       Eval_result.return values.(field.index)
      | _ ->
-       Or_error.error_s
+       Eval_result.error_s
          [%message
            "Field of a non-record" (field : Typed.Field_ref.t) (value : Value.t)])
   | Record_update (expr, fields) ->
-    let%bind value = eval' expr in
-    let%bind values = map_fields fields ~f:eval' in
+    let%bindl.Local_result { global = value } = eval t ~env ~level expr in
+    let%bindl.Local_result { global = values } =
+      eval_fields t ~env ~level fields
+    in
     (match value with
      | Record (record_type, record)
        when List.for_all values ~f:(fun ((field : Typed.Field_ref.t), _) ->
@@ -809,54 +839,89 @@ and step_value t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
        let record = Array.copy record in
        List.iter values ~f:(fun ((field : Typed.Field_ref.t), value) ->
          record.(field.index) <- value);
-       Ok (Value.Record (record_type, record))
+       Eval_result.return (Value.Record (record_type, record))
      | _ ->
-       Or_error.error_s [%message "Update of a non-record" (value : Value.t)])
+       Eval_result.error_s [%message "Update of a non-record" (value : Value.t)])
   | Poly_record fields ->
-    let%bind fields = map_fields fields ~f:eval' in
-    let%map fields = String.Map.of_alist_or_error fields in
-    Value.Poly_record fields
+    let%bindl.Local_result { global = fields } =
+      eval_fields t ~env ~level fields
+    in
+    (match String.Map.of_alist_or_error fields with
+     | Ok fields -> Eval_result.return (Value.Poly_record fields)
+     | Error error -> Eval_result.error error)
   | Poly_field (expr, label) ->
-    let%bind fields = eval' expr >>= poly_record in
+    let%bindl.Local_result { global = value } = eval t ~env ~level expr in
+    let%bindl.Local_result { global = fields } = poly_record value in
     poly_field fields label
   | Poly_extend (fields, expr) ->
-    let%bind added = map_fields fields ~f:eval' in
-    let%map fields = eval' expr >>= poly_record in
-    Value.Poly_record
-      (List.fold added ~init:fields ~f:(fun fields (key, data) ->
-         Map.set fields ~key ~data))
+    let%bindl.Local_result { global = added } =
+      eval_fields t ~env ~level fields
+    in
+    let%bindl.Local_result { global = value } = eval t ~env ~level expr in
+    let%mapl_fun.Local_result { global = fields } = poly_record value in
+    { global =
+        Value.Poly_record
+          (List.fold added ~init:fields ~f:(fun fields (key, data) ->
+             Map.set fields ~key ~data))
+    }
   | Poly_restrict (expr, label) ->
-    let%map fields = eval' expr >>= poly_record in
-    Value.Poly_record (Map.remove fields label)
+    let%bindl.Local_result { global = value } = eval t ~env ~level expr in
+    let%mapl_fun.Local_result { global = fields } = poly_record value in
+    { global = Value.Poly_record (Map.remove fields label) }
   | Poly_update (expr, updates) ->
-    let%bind fields = eval' expr >>= poly_record in
-    let%map updates = map_fields updates ~f:eval' in
-    Value.Poly_record
-      (List.fold updates ~init:fields ~f:(fun fields (key, data) ->
-         Map.set fields ~key ~data))
-  | Poly_variant (tag, None) -> Ok (Value.Poly_variant (tag, Unit))
+    let%bindl.Local_result { global = value } = eval t ~env ~level expr in
+    let%bindl.Local_result { global = fields } = poly_record value in
+    let%mapl_fun.Local_result { global = updates } =
+      eval_fields t ~env ~level updates
+    in
+    { global =
+        Value.Poly_record
+          (List.fold updates ~init:fields ~f:(fun fields (key, data) ->
+             Map.set fields ~key ~data))
+    }
+  | Poly_variant (tag, None) ->
+    Eval_result.return (Value.Poly_variant (tag, Unit))
   | Poly_variant (tag, Some expr) ->
-    let%map value = eval' expr in
-    Value.Poly_variant (tag, value)
+    let%mapl_fun.Local_result { global = value } = eval t ~env ~level expr in
+    { global = Value.Poly_variant (tag, value) }
 
-and bind_let t ~env ~level ~ident ~args ~body =
+and eval_all t ~env ~level exprs : Value.t list Eval_result.t @ local = exclave_
+  Eval_result.List.map exprs ~f:(fun expr -> exclave_ eval t ~env ~level expr)
+
+and eval_fields
+  : 'key.
+  _
+  -> env:_
+  -> level:_
+  -> ('key * Typed.Expr.t) list
+  -> ('key * Value.t) list Eval_result.t @ local
+  =
+  fun t ~env ~level fields -> exclave_
+  Eval_result.List.map fields ~f:(fun (key, expr) -> exclave_
+    let%mapl_fun.Local_result { global = value } = eval t ~env ~level expr in
+    { global = key, value })
+
+and bind_let t ~env ~level ~ident ~args ~body : unit Eval_result.t @ local
+  = exclave_
   Env.declare env ~ident;
-  let%map value =
+  let%mapl_fun.Local_result { global = value } =
     match args with
     | [] -> eval t ~env ~level body
     | _ :: _ -> closure t ~env ~level ~ident ~args ~body
   in
-  Env.set env ~ident ~value
+  { global = Env.set env ~ident ~value }
 
-and closure t ~env ~level ~ident ~args ~body =
+and closure t ~env ~level ~ident ~args ~body : Value.t Eval_result.t @ local
+  = exclave_
   let captures =
     Hashtbl.find_or_add t.closure_captures ident ~default:(fun () ->
       captures t ~ident ~args ~body)
   in
   Hash_set.iter captures ~f:(fun ident ->
     if Hashtbl.mem t.pending ident then declare_toplevel t ident);
-  let%map env = Env.of_captures env ~fallback:t.env ~captures in
-  Value.Function { args; body; env; level }
+  match Env.of_captures env ~fallback:t.env ~captures with
+  | Ok env -> Eval_result.return (Value.Function { args; body; env; level })
+  | Error error -> Eval_result.error error
 
 and apply t (f : Value.t) arg ~loc : Next.t =
   match f with
@@ -866,40 +931,41 @@ and apply t (f : Value.t) arg ~loc : Next.t =
     (match args with
      | [] -> exclave_ Eval { env; level; expr = body }
      | _ :: _ -> exclave_ Value (Function { args; body; env; level }))
-  | _ -> exclave_ Next.of_or_error (apply_non_function t f arg ~loc)
+  | _ -> exclave_ Next.of_local_result (apply_non_function t f arg ~loc)
 
-and apply_non_function t (f : Value.t) arg ~loc : Value.t Or_error.t =
-  let value (value : Value.t) = Ok value in
+and apply_non_function t (f : Value.t) arg ~loc : Value.t Eval_result.t @ local
+  = exclave_
   match f with
   | Prim { prim; applied } ->
     let applied = arg :: applied in
     if List.length applied < Prim.arity prim
-    then value (Value.Prim { prim; applied })
+    then Eval_result.return (Value.Prim { prim; applied })
     else (
       match prim_args applied with
       | Null ->
-        Or_error.error_s
+        Eval_result.error_s
           [%message
             "Prim applied to a non-base value"
               (prim : Prim.t)
               (applied : Value.t list)]
       | This args ->
         (match Prim.apply prim ~output:t.output args with
-         | Ok result -> value (Value.of_prim result)
+         | Ok result -> Eval_result.return (Value.of_prim result)
          | Error exn -> raise_exn ~loc (prim_exception exn)))
   | Intrinsic intrinsic ->
     (match intrinsic, arg with
-     | Type_expr, Type ty -> value (Syntax_value.Type_expr.to_value ty)
+     | Type_expr, Type ty ->
+       Eval_result.return (Syntax_value.Type_expr.to_value ty)
      | ( (Type_ref_name | Constructor_ref_name | Field_ref_name | Value_ref_name)
-       , Ref ref_ ) -> value (String (Decl_ref.short_name ref_))
+       , Ref ref_ ) ->
+       Eval_result.return (Value.String (Decl_ref.short_name ref_))
      | Type_ref_path, Ref ref_ ->
-       value (Syntax_value.type_ref_path (Decl_ref.root_path ref_))
+       Eval_result.return (Syntax_value.type_ref_path (Decl_ref.root_path ref_))
      | Raise, exn -> raise_exn ~loc exn
      | Erase, Code { expr; persistent = _ } ->
        (match Erase.expr expr with
-        | exception Erase.Reached_error ->
-          Error (Error.of_exn Erase.Reached_error)
-        | Ok expr -> value (Syntax_value.Expr.to_value expr)
+        | exception Erase.Reached_error -> reached_error ()
+        | Ok expr -> Eval_result.return (Syntax_value.Expr.to_value expr)
         | Error error ->
           runtime_error
             ~loc
@@ -909,7 +975,7 @@ and apply_non_function t (f : Value.t) arg ~loc : Value.t Or_error.t =
                (Error.to_string_hum error)))
      | Type_decl, Ref { kind = Type; name } ->
        (match t.reflect with
-        | Some reflect -> reflect name
+        | Some reflect -> Eval_result.of_or_error (reflect name)
         | None ->
           runtime_error
             ~loc
@@ -922,36 +988,39 @@ and apply_non_function t (f : Value.t) arg ~loc : Value.t Or_error.t =
            "Intrinsic applied to an ill-typed argument"
              (intrinsic : Intrinsic.t)
              (arg : Value.t)])
-  | _ -> Or_error.error_s [%message "Applied a non-function" (f : Value.t)]
+  | _ -> Eval_result.error_s [%message "Applied a non-function" (f : Value.t)]
 
 and eval_match t ~env ~level value cases ~loc : Next.t =
   match cases with
   | [] ->
     exclave_
-    Next.of_or_error
+    Next.of_local_result
       (runtime_error
          ~loc
          ("Match failure: no case matches the value "
           ^ Value.to_string_for_message value))
   | (pattern, body) :: cases ->
     (match match_pattern env pattern value with
-     | Error error -> Failed error
-     | Ok true -> exclave_ Eval { env; level; expr = body }
-     | Ok false -> exclave_ eval_match t ~env ~level value cases ~loc)
+     | Error { global = error } -> exclave_ Failed error
+     | Ok { global = true } -> exclave_ Eval { env; level; expr = body }
+     | Ok { global = false } ->
+       exclave_ eval_match t ~env ~level value cases ~loc)
 
 and handle t ~env ~level exn cases ~unhandled : Next.t =
   match cases with
-  | [] -> Failed unhandled
+  | [] -> exclave_ Failed unhandled
   | (pattern, body) :: cases ->
     (match match_pattern env pattern exn with
-     | Error error -> Failed error
-     | Ok true -> exclave_ Eval { env; level; expr = body }
-     | Ok false -> exclave_ handle t ~env ~level exn cases ~unhandled)
+     | Error { global = error } -> exclave_ Failed error
+     | Ok { global = true } -> exclave_ Eval { env; level; expr = body }
+     | Ok { global = false } ->
+       exclave_ handle t ~env ~level exn cases ~unhandled)
 
 (* The code [expr] is in a quote built at [level], [depth] quotes in. Splices at
    [depth] 1 are evaluated now, and the values of persistent binders of [level]
-   or below are embedded under fresh idents. *)
-and build t ~env ~level ~embedded ~depth expr =
+   or below are embedded under fresh idents. Building allocates the code anyway,
+   so it uses [Or_error.t]s, as [map_children] does. *)
+and build t ~env ~level ~embedded ~depth expr : Typed.Expr.t Or_error.t =
   Budget.step t.budget ~loc:expr.loc ~f:(fun () ->
     build_step t ~env ~level ~embedded ~depth expr)
   [@nontail]
@@ -972,17 +1041,19 @@ and build_step
       match Hashtbl.find embedded.renames ident with
       | Some renamed -> Ok renamed
       | None ->
-        let%map value = lookup t env ident ~loc:expr.loc in
-        let renamed =
-          fresh_like t ident ~info:(Hashtbl.find_exn t.ident_info ident)
-        in
-        Hashtbl.set embedded.renames ~key:ident ~data:renamed;
-        Embedded.add embedded ~ident:renamed ~value;
-        renamed
+        (match lookup t env ident ~loc:expr.loc with
+         | Error { global = error } -> Error error
+         | Ok { global = value } ->
+           let renamed =
+             fresh_like t ident ~info:(Hashtbl.find_exn t.ident_info ident)
+           in
+           Hashtbl.set embedded.renames ~key:ident ~data:renamed;
+           Embedded.add embedded ~ident:renamed ~value;
+           Ok renamed)
     in
     { expr with desc = Var (Persistent (Local renamed)) }
   | Splice { code; subs } when depth = 1 ->
-    let%bind code, values = eval t ~env ~level code >>= code_of_value in
+    let%bind code, values = eval_code t ~env ~level code in
     let%bind (subs : Typed.Expr.t Typed.Expr.Subs.t) =
       match subs with
       | Explicit subs ->
@@ -998,6 +1069,11 @@ and build_step
   | _ ->
     map_children ~depth expr ~f:(fun ~depth ->
       build t ~env ~level ~embedded ~depth)
+
+and eval_code t ~env ~level code =
+  Eval_result.to_or_error
+    (let%bindl.Local_result { global = value } = eval t ~env ~level code in
+     code_of_value value) [@nontail]
 ;;
 
 let at_compile_time t ~reflect ~f =
@@ -1009,39 +1085,49 @@ let at_compile_time t ~reflect ~f =
            reflect name
          in
          Syntax_value.reflected_decl decl ~decl_type);
-  Exn.protect ~f ~finally:(fun () -> t.reflect <- outer)
+  Exn.protect
+    ~f:(fun () -> Budget.protect_depth t.budget ~f)
+    ~finally:(fun () -> t.reflect <- outer)
 ;;
 
 let splice t ~code ~level ~entry ~reflect =
   at_compile_time t ~reflect ~f:(fun () ->
-    let%bind code, embedded =
-      eval t ~env:(Env.create ()) ~level code >>= code_of_value
-    in
+    let%bind code, embedded = eval_code t ~env:(Env.create ()) ~level code in
     Map.iteri embedded ~f:(fun ~key ~data ->
       Env.set t.env ~ident:key ~value:data);
     instantiate t code ~entry)
 ;;
 
+let eval_global t ~env ~level expr =
+  Eval_result.to_or_error (eval t ~env ~level expr) [@nontail]
+;;
+
 let run t expr ~level ~reflect =
   at_compile_time t ~reflect ~f:(fun () ->
-    eval t ~env:(Env.create ()) ~level expr)
+    eval_global t ~env:(Env.create ()) ~level expr)
 ;;
 
 let run_expect_test t ({ body; _ } : Typed.Expect_test.t) ~on_expect =
   t.on_expect <- Some on_expect;
   Exn.protect
     ~f:(fun () ->
-      eval t ~env:(Env.create ()) ~level:0 body |> Or_error.ignore_m)
+      Budget.protect_depth t.budget ~f:(fun () ->
+        eval_global t ~env:(Env.create ()) ~level:0 body |> Or_error.ignore_m))
     ~finally:(fun () -> t.on_expect <- None)
 ;;
 
 let eval_expr ?(bindings = []) t expr =
   let env = Env.create () in
   List.iter bindings ~f:(fun (ident, value) -> Env.set env ~ident ~value);
-  eval t ~env ~level:0 expr
+  Budget.protect_depth t.budget ~f:(fun () -> eval_global t ~env ~level:0 expr)
 ;;
 
 let find t ~ident = Env.lookup t.env ~ident
+
+let eval_toplevel t ~ident =
+  Budget.protect_depth t.budget ~f:(fun () ->
+    Eval_result.to_or_error (force t ident) [@nontail])
+;;
 
 let eval t =
   let rec loop () =
@@ -1049,11 +1135,9 @@ let eval t =
     | None -> Ok ()
     | Some scc ->
       let%bind () =
-        iter_result scc.members ~f:(fun { ident; _ } -> force t ident)
+        iter_result scc.members ~f:(fun { ident; _ } -> eval_toplevel t ~ident)
       in
       loop ()
   in
   loop ()
 ;;
-
-let eval_toplevel t ~ident = force t ident

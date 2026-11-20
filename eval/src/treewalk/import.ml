@@ -22,3 +22,5 @@ module Interpreter_intf = Stag_eval.Interpreter_intf
 module Syntax_value_intf = Stag_eval.Syntax_value_intf
 module Interpreter = Stag_eval.Interpreter
 module Generated_syntax = Stag_eval.Generated_syntax
+module Global = Modes.Global
+module Local_result = Stag_common.Local_result
