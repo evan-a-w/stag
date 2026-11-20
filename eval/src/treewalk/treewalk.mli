@@ -1,6 +1,15 @@
 open! Import
 module Env = Env
-module Value = Value
+module Syntax_value = Syntax_value
+
+module Value : sig
+  include module type of struct
+    include Value
+  end
+
+  val to_syntax : 'a Generated_syntax.t -> t -> loc:Loc.t -> 'a Or_error.t
+end
+
 include Interpreter_intf.S with module Value := Value
 
 (** The binders from outside the closure [ident] that it reads when called,
@@ -12,6 +21,3 @@ val captures
   -> args:Typed.Ident.t list
   -> body:Typed.Expr.t
   -> Typed.Ident.Hash_set.t
-
-(** The value of a toplevel, once evaluated. *)
-val find : t -> ident:Typed.Ident.t -> Value.t Or_error.t

@@ -422,8 +422,8 @@ let%expect_test "locals of tests are not toplevels" =
         | Let { ident; _ } ->
           print_s
             [%sexp
-              (Treewalk.find (Driver.interpreter driver) ~ident
-               |> Result.map ~f:Treewalk.Value.to_string_hum
+              (Interpreter.find (Driver.interpreter driver) ~ident
+               |> Result.map ~f:Interpreter.Value.to_string_hum
                : string Or_error.t)]
         | _ -> print_endline "not a let"));
   [%expect {|

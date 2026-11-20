@@ -104,7 +104,7 @@ let build project =
 ;;
 
 let eval project driver =
-  Treewalk.set_output (Driver.interpreter driver) print_string;
+  Interpreter.set_output (Driver.interpreter driver) print_string;
   match Driver.eval driver with
   | Ok () -> true
   | Error error ->
@@ -308,7 +308,7 @@ let bench project options ~filters ~phases =
         Phase_bench.benches ~prefix (fun () -> Program.parse project target))
     else (
       let%bind.Option driver = check target in
-      Treewalk.set_output (Driver.interpreter driver) ignore;
+      Interpreter.set_output (Driver.interpreter driver) ignore;
       match
         let%bind.Result () =
           Driver.eval driver |> Result.map_error ~f:Diagnostic.of_runtime_error

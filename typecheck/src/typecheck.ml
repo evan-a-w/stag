@@ -138,7 +138,7 @@ end
 type t =
   { fresh : Fresh.t
   ; stamps : Stamp_counter.t
-  ; interpreter : Treewalk.t
+  ; interpreter : Interpreter.t
   ; prelude : Syntax.Toplevel.t list Lazy.t
   }
 
@@ -191,7 +191,7 @@ module Program_env = struct
     (** By canonical name. The prelude's are made when first used, so that those
         unused take no idents. *)
     ; stamps : Stamp_counter.t
-    ; interpreter : Treewalk.t
+    ; interpreter : Interpreter.t
     ; mutable ident_info : Typed.Ident_info.t Typed.Ident.Map.t
     ; sccs : Typed.Scc.t Queue.t
     ; declaration_splices : Typed.Expr.t Queue.t
@@ -253,7 +253,7 @@ module Program_env = struct
   let add_info t ident ~ty ~level =
     let info = { Typed.Ident_info.ty; level } in
     t.ident_info <- Map.add_exn t.ident_info ~key:ident ~data:info;
-    Treewalk.add_ident_info t.interpreter ~ident ~info
+    Interpreter.add_ident_info t.interpreter ~ident ~info
   ;;
 
   (* Generated code's binders keep their idents, but get their info anew. *)
@@ -270,7 +270,7 @@ module Program_env = struct
 
   (* Values a toplevel splice's code embedded in its code. *)
   let embedded t ident =
-    Treewalk.global_info t.interpreter ~ident
+    Interpreter.global_info t.interpreter ~ident
     |> Option.map ~f:(fun info ->
       t.ident_info <- Map.set t.ident_info ~key:ident ~data:info;
       Hashtbl.set t.reach ~key:ident ~data:(Function Typed.Ident.Set.empty);
@@ -379,7 +379,7 @@ let at_compile_time (program : Program_env.t) f ~loc ~error =
         program.type_env
         (Prelude_path.canonical "Stag.Type.Decl.t")
     in
-    Syntax_value.reflected_decl decl ~decl_type
+    { Reflected_decl.Reflection.decl; decl_type }
   in
   let reflect name =
     reflect name
@@ -392,7 +392,7 @@ let at_compile_time (program : Program_env.t) f ~loc ~error =
   |> Result.map_error ~f:(fun runtime_error ->
     match Error.to_exn runtime_error with
     | Reflection_failed reflection_error -> reflection_error
-    | Treewalk.Reached_error -> Typecheck_error.already_reported
+    | Erase.Reached_error -> Typecheck_error.already_reported
     | Internal exn ->
       Typecheck_error.create
         ~loc
@@ -1544,7 +1544,7 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
     }
   in
   Queue.enqueue program.sccs scc;
-  Treewalk.add_scc program.interpreter scc
+  Interpreter.add_scc program.interpreter scc
 ;;
 
 let intrinsic_type t scope intrinsic =
@@ -2428,12 +2428,16 @@ and splice_syntax ?expected t (scope : Scope.t) ~code ~loc =
       ~loc
       program
       (fun ~reflect ->
-        Treewalk.run program.interpreter code ~level:(scope.level - 1) ~reflect)
+        Interpreter.run
+          program.interpreter
+          code
+          ~level:(scope.level - 1)
+          ~reflect)
       ~error:(fun error ->
         Typecheck_error.create ~loc (Splice_evaluation_failed { code; error }))
   in
   let%map.Result generated =
-    Syntax_value.Expr.of_value value ~loc
+    Interpreter.Value.to_syntax value Generated_syntax.Expr ~loc
     |> Result.map_error ~f:(fun error ->
       Typecheck_error.create ~loc (Malformed_syntax_splice error))
   in
@@ -2455,8 +2459,8 @@ and expand t (scope : Scope.t) ~code ~subs ~ty ~loc =
           Map.find providers name
           |> Option.map ~f:(fun binder -> Typed.Var_ref.Bound binder) )
     | Explicit subs ->
-      (* As [Treewalk.splice_code] does: a variable is substituted as itself, so
-         that the code may assign it. *)
+      (* As [Interpreter_intf.S.splice] does: a variable is substituted as
+         itself, so that the code may assign it. *)
       let subs =
         List.map subs ~f:(fun (name, (sub : Typed.Expr.t)) ->
           match sub.desc with
@@ -2489,7 +2493,7 @@ and expand t (scope : Scope.t) ~code ~subs ~ty ~loc =
       ~loc
       program
       (fun ~reflect ->
-        Treewalk.splice
+        Interpreter.splice
           program.interpreter
           ~code
           ~level:(scope.level - 1)
@@ -2942,7 +2946,7 @@ let run_at_compile_time t (program : Program_env.t) scope ~expr ~ty ~loc ~error 
         ~loc
         program
         (fun ~reflect ->
-          Treewalk.run program.interpreter expr ~level:(-1) ~reflect)
+          Interpreter.run program.interpreter expr ~level:(-1) ~reflect)
         ~error
     in
     Queue.enqueue program.declaration_splices expr;
@@ -2970,7 +2974,7 @@ let evaluate_type_splice t program module_ expr ~loc =
       ~error:(fun error ->
         Typecheck_error.create ~loc (Type_splice_failed error))
   in
-  Syntax_value.Type_expr.of_value value ~loc
+  Interpreter.Value.to_syntax value Generated_syntax.Type_expr ~loc
   |> Result.map_error ~f:(fun error ->
     Typecheck_error.create ~loc (Malformed_type_splice error))
 ;;
@@ -3012,7 +3016,7 @@ let define_type t (program : Program_env.t) splice =
           Typecheck_error.create ~loc (Type_splice_failed error))
     in
     let%map.Result kind =
-      Syntax_value.Type_decl.Kind.of_value value ~loc
+      Interpreter.Value.to_syntax value Generated_syntax.Type_decl_kind ~loc
       |> Result.map_error ~f:(fun error ->
         Typecheck_error.create ~loc (Malformed_type_splice error))
     in
@@ -3048,7 +3052,7 @@ let generate t (program : Program_env.t) splice
             Typecheck_error.create ~loc (Declaration_splice_failed error))
       in
       let%map.Result generated =
-        Syntax_value.Program.of_value value ~loc
+        Interpreter.Value.to_syntax value Generated_syntax.Program ~loc
         |> Result.map_error ~f:(fun error ->
           Typecheck_error.create ~loc (Malformed_declarations error))
       in

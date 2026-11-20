@@ -1,9 +1,35 @@
 open! Import
 
+module Raised = struct
+  module Kind = struct
+    type 'value t =
+      { id : 'value Type_equal.Id.t
+      ; to_string_for_message : 'value -> string
+      }
+
+    let create ~name ~sexp_of ~to_string_for_message =
+      { id = Type_equal.Id.create ~name sexp_of; to_string_for_message }
+    ;;
+  end
+
+  type t = T : 'value Kind.t * 'value -> t
+
+  let create kind value = T (kind, value)
+  let sexp_of_t (T (kind, value)) = Type_equal.Id.to_sexp kind.id value
+  let to_string_for_message (T (kind, value)) = kind.to_string_for_message value
+
+  let value (type value) (T (kind', value)) (kind : value Kind.t) : value option
+    =
+    match Type_equal.Id.same_witness kind'.id kind.id with
+    | Some T -> Some value
+    | None -> None
+  ;;
+end
+
 module Kind = struct
   type t =
     | Message of string
-    | Raised of Value.t
+    | Raised of Raised.t
   [@@deriving sexp_of]
 end
 
@@ -19,7 +45,7 @@ let raise_exn ~loc exn = { loc; kind = Raised exn }
 let message t =
   match t.kind with
   | Message message -> message
-  | Raised exn -> "Uncaught exception " ^ Value.to_string_for_message exn
+  | Raised exn -> "Uncaught exception " ^ Raised.to_string_for_message exn
 ;;
 
 exception Runtime_error of t

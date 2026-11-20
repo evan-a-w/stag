@@ -6,15 +6,15 @@ type t
 
 (** Toplevel splices are run by [interpreter] while checking, which also gets
     every checked toplevel, to evaluate those used at compile time on demand,
-    and the rest when it is [Treewalk.eval]ed. Idents are made by [stamps],
+    and the rest when it is [Interpreter.eval]ed. Idents are made by [stamps],
     which [interpreter] must have been created with, so are unique among those
     of every program it checks and those it mints. Its budget (see
-    [Treewalk.set_limits]) is shared by every program checked with [t], and
-    toplevels it evaluates keep their values when [Treewalk.eval]ed. Programs
+    [Interpreter.set_limits]) is shared by every program checked with [t], and
+    toplevels it evaluates keep their values when [Interpreter.eval]ed. Programs
     see [prelude], by default [Prelude.toplevels]. *)
 val create
   :  stamps:Stamp_counter.t
-  -> interpreter:Treewalk.t
+  -> interpreter:Interpreter.t
   -> ?prelude:Syntax.Toplevel.t list
   -> unit
   -> t

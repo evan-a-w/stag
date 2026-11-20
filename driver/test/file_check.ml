@@ -21,7 +21,9 @@ let check_files ?(run = false) ?(filter_diagnostic = Fn.id) files =
     if run
     then (
       let output = Buffer.create 64 in
-      Treewalk.set_output (Driver.interpreter driver) (Buffer.add_string output);
+      Interpreter.set_output
+        (Driver.interpreter driver)
+        (Buffer.add_string output);
       (match Driver.eval driver with
        | Ok () -> ()
        | Error error -> print_diagnostic (Diagnostic.of_runtime_error error));

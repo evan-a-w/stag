@@ -12,7 +12,10 @@ let prelude_signature =
   lazy
     (let stamps = Stamp_counter.create () in
      Typecheck.prelude_signature
-       (Typecheck.create ~stamps ~interpreter:(Treewalk.create ~stamps ()) ()))
+       (Typecheck.create
+          ~stamps
+          ~interpreter:(Interpreter.create Treewalk.interpreter ~stamps)
+          ()))
 ;;
 
 let%expect_test "the prelude's signature" =
@@ -786,7 +789,8 @@ let eval_values ?(file = "gen.stag") source =
           List.find_map scc.members ~f:(fun (member : Typed.Toplevel.t) ->
             Option.some_if (String.equal member.ident.name name) member.ident))
       in
-      Treewalk.find (Driver.interpreter driver) ~ident |> ok_exn
+      Treewalk.find (Treewalk.of_interpreter (Driver.interpreter driver)) ~ident
+      |> ok_exn
 ;;
 
 let generator =

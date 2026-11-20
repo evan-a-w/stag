@@ -5,7 +5,7 @@ open Source_helpers
    local functions within them. *)
 let print source =
   Option.iter (typecheck source) ~f:(fun t ->
-    let interpreter = Driver.interpreter (driver t) in
+    let interpreter = Treewalk.of_interpreter (Driver.interpreter (driver t)) in
     let print_captures ~ident ~args ~body =
       let captures =
         Treewalk.captures interpreter ~ident ~args ~body
@@ -257,7 +257,12 @@ let%expect_test "a shared stamp counter" =
   let interpreter = Treewalk.create ~stamps () in
   let idents program =
     match
-      Typecheck.typecheck (Typecheck.create ~stamps ~interpreter ()) ~program
+      Typecheck.typecheck
+        (Typecheck.create
+           ~stamps
+           ~interpreter:(Treewalk.to_interpreter interpreter)
+           ())
+        ~program
     with
     | Error error ->
       raise_s
@@ -277,7 +282,7 @@ let%expect_test "a shared stamp counter" =
 let%expect_test "with_output restores the previous output" =
   let eval_printing_to ~f =
     let t = Option.value_exn (typecheck {|let x = print_string "hello"|}) in
-    let interpreter = Driver.interpreter (driver t) in
+    let interpreter = Treewalk.of_interpreter (Driver.interpreter (driver t)) in
     let buffers = String.Table.create () in
     let to_ name =
       Buffer.add_string

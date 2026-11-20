@@ -1,7 +1,21 @@
 open! Import
 open Or_error.Let_syntax
 module Env = Env
-module Value = Value
+module Syntax_value = Syntax_value
+
+module Value = struct
+  include Value
+
+  let to_syntax : type a. a Generated_syntax.t -> t -> loc:Loc.t -> a Or_error.t
+    =
+    fun syntax value ~loc ->
+    match syntax with
+    | Expr -> Syntax_value.Expr.of_value value ~loc
+    | Type_expr -> Syntax_value.Type_expr.of_value value ~loc
+    | Type_decl_kind -> Syntax_value.Type_decl.Kind.of_value value ~loc
+    | Program -> Syntax_value.Program.of_value value ~loc
+  ;;
+end
 
 (* The values embedded by a quote being built. [renames] are its own embeddings,
    of binders it refers to. *)
@@ -49,8 +63,6 @@ module Pending = struct
             can't handle its failure. *)
         }
 end
-
-exception Reached_error = Erase.Reached_error
 
 type t =
   { sccs : Typed.Scc.t Queue.t
@@ -144,6 +156,8 @@ let captures t ~ident ~args ~body =
   go ~depth:0 body;
   captures
 ;;
+
+let type_id = Type_equal.Id.create ~name:"Treewalk" sexp_of_opaque
 
 let create ~stamps () =
   { sccs = Queue.create ()
@@ -482,7 +496,7 @@ let pattern_mismatch pattern value =
 let rec match_pattern env (pattern : Typed.Pattern.t) (value : Value.t) =
   match pattern.desc, value with
   | Any, _ -> Ok true
-  | Error _, _ -> Error (Error.of_exn Reached_error)
+  | Error _, _ -> Error (Error.of_exn Erase.Reached_error)
   | Var ident, _ ->
     Env.set env ~ident ~value;
     Ok true
@@ -611,14 +625,14 @@ let rec force t ident =
      | Error error ->
        let uncatchable =
          match Runtime_error.of_error error with
-         | Some ({ kind = Raised exn; loc } : Runtime_error.t) ->
+         | Some { kind = Raised exn; loc } ->
            Runtime_error.to_error
              (Runtime_error.create
                 ~loc
                 (sprintf
                    "Initialization of %s raised %s"
                    ident.name
-                   (Value.to_string_for_message exn)))
+                   (Runtime_error.Raised.to_string_for_message exn)))
          | Some { kind = Message _; loc = _ } | None -> error
        in
        Hashtbl.set t.pending ~key:ident ~data:(Failed { error; uncatchable });
@@ -756,7 +770,7 @@ and step_value t ~env ~level (expr : Typed.Expr.t) : Value.t Or_error.t =
     (* Its first parameter identifies it, as a let's name does. *)
     closure t ~env ~level ~ident:(List.hd_exn args) ~args ~body
   | Splice _ -> Or_error.error_s [%message "Splice outside a quote evaluated"]
-  | Error _ -> Error (Error.of_exn Reached_error)
+  | Error _ -> Error (Error.of_exn Erase.Reached_error)
   | Quote body ->
     let embedded = Embedded.create () in
     let%map expr = build t ~env ~level ~embedded ~depth:1 body in
@@ -883,7 +897,8 @@ and apply_non_function t (f : Value.t) arg ~loc : Value.t Or_error.t =
      | Raise, exn -> raise_exn ~loc exn
      | Erase, Code { expr; persistent = _ } ->
        (match Erase.expr expr with
-        | exception Reached_error -> Error (Error.of_exn Reached_error)
+        | exception Erase.Reached_error ->
+          Error (Error.of_exn Erase.Reached_error)
         | Ok expr -> value (Syntax_value.Expr.to_value expr)
         | Error error ->
           runtime_error
@@ -987,7 +1002,13 @@ and build_step
 
 let at_compile_time t ~reflect ~f =
   let outer = t.reflect in
-  t.reflect <- Some reflect;
+  t.reflect
+  <- Some
+       (fun name ->
+         let%map ({ decl; decl_type } : Reflected_decl.Reflection.t) =
+           reflect name
+         in
+         Syntax_value.reflected_decl decl ~decl_type);
   Exn.protect ~f ~finally:(fun () -> t.reflect <- outer)
 ;;
 

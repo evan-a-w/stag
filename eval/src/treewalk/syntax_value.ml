@@ -1,5 +1,6 @@
 open! Import
-include Syntax_value_intf
+
+module type S = Syntax_value_intf.S with type value := Value.t
 
 (* By canonical name, from the prelude's declarations, so they agree with the
    refs the typechecker makes. *)

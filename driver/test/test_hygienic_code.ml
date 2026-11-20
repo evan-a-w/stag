@@ -30,20 +30,23 @@ let iter_erased source ~f =
            then
              f
                name
-               (Treewalk.find (Driver.interpreter driver) ~ident:member.ident
+               (Interpreter.find (Driver.interpreter driver) ~ident:member.ident
                 |> ok_exn))))
 ;;
 
 let show_values source =
   iter_erased source ~f:(fun name value ->
-    printf "%s: %s\n" name (Treewalk.Value.to_string_hum value))
+    printf "%s: %s\n" name (Interpreter.Value.to_string_hum value))
 ;;
 
 (* As syntax, printed, checked to print and parse back the same, and as a sexp,
    where refs are [<name>]. *)
 let show_erased source =
   iter_erased source ~f:(fun name value ->
-    let expr = Syntax_value.Expr.of_value value ~loc:Loc.none |> ok_exn in
+    let expr =
+      Interpreter.Value.to_syntax value Generated_syntax.Expr ~loc:Loc.none
+      |> ok_exn
+    in
     printf "%s:\n%s\n" name (Printer.expr expr);
     print_s (Round_trip.strip_locs [%sexp (expr : Syntax.Expr.t)]);
     Round_trip.expr expr)

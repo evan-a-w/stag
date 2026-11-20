@@ -158,7 +158,7 @@ type s = {x : bool}
     let%bind.Option () = Driver.eval (driver t) |> Result.ok in
     List.find_map (members t) ~f:(fun { ident; _ } ->
       if String.equal ident.name "v"
-      then Treewalk.find (Driver.interpreter (driver t)) ~ident |> Result.ok
+      then Interpreter.find (Driver.interpreter (driver t)) ~ident |> Result.ok
       else None)
   in
   List.iter
@@ -169,7 +169,7 @@ type s = {x : bool}
     ]
     ~f:(fun (ty, e) ->
       let printed source =
-        Option.map (value_of source) ~f:Treewalk.Value.to_string_hum
+        Option.map (value_of source) ~f:Interpreter.Value.to_string_hum
       in
       let first = printed (sprintf "let v : %s = %s" ty e) in
       let second =

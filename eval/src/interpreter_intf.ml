@@ -1,16 +1,27 @@
 open! Import
 
-(** An evaluator of typed programs, as the typechecker and driver use it. *)
+(** An evaluator of typed programs, as the typechecker and driver use it. Its
+    errors are [Runtime_error]s, except on code that did not check
+    ([Typed.Expr.Desc.Error]), where it errs with [Erase.Reached_error]. *)
+module type Value = sig
+  type t [@@deriving sexp_of]
+
+  (** As stag syntax, eg. [C (1, `A)], for messages. If longer than
+      [max_length], it is cut there and followed by [...]. *)
+  val to_string_hum : ?max_length:int -> t -> string
+
+  (** The syntax [t] represents as a value of the [Prelude]'s type of it
+      ([Stag.Expr.t] etc.), as [Syntax_value_intf.S.of_value]. *)
+  val to_syntax : 'a Generated_syntax.t -> t -> loc:Loc.t -> 'a Or_error.t
+end
+
 module type S = sig
-  module Value : sig
-    type t [@@deriving sexp_of]
-  end
+  module Value : Value
 
   type t
 
-  (** The error of evaluating code that did not check ([Typed.Expr.Desc.Error]). *)
-  exception Reached_error
-  [@@deriving sexp_of]
+  (** Names [t], to recover it from an [Interpreter.t]. *)
+  val type_id : t Type_equal.Id.t
 
   (** [stamps] should be the counter that made the idents of the programs
       evaluated, so idents minted while evaluating are distinct from theirs. *)
@@ -58,7 +69,7 @@ module type S = sig
     -> code:Typed.Expr.t
     -> level:int
     -> entry:(string -> Typed.Var_ref.t option)
-    -> reflect:(string -> Value.t Or_error.t)
+    -> reflect:(string -> Reflected_decl.Reflection.t Or_error.t)
     -> Typed.Expr.t Or_error.t
 
   (** Evaluates [expr] at compile time, as [splice], at [level] in an empty env,
@@ -67,7 +78,7 @@ module type S = sig
     :  t
     -> Typed.Expr.t
     -> level:int
-    -> reflect:(string -> Value.t Or_error.t)
+    -> reflect:(string -> Reflected_decl.Reflection.t Or_error.t)
     -> Value.t Or_error.t
 
   (** The info of [ident] if it is bound globally, eg. a value embedded by a
@@ -96,4 +107,7 @@ module type S = sig
   (** Evaluates the toplevel [ident], of a component queued, unless it already
       is. *)
   val eval_toplevel : t -> ident:Typed.Ident.t -> unit Or_error.t
+
+  (** The value of a toplevel, once evaluated. *)
+  val find : t -> ident:Typed.Ident.t -> Value.t Or_error.t
 end

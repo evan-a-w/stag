@@ -2,25 +2,24 @@ open! Import
 
 let max_label_length = 40
 
-let label value =
-  let label = Value.to_string_hum value in
-  if String.length label <= max_label_length
-  then label
-  else String.prefix label (max_label_length - 3) ^ "..."
+let label string =
+  if String.length string <= max_label_length
+  then string
+  else String.prefix string (max_label_length - 3) ^ "..."
 ;;
 
 let benches ?files driver =
   let interpreter = Driver.interpreter driver in
-  Treewalk.set_output interpreter ignore;
-  Treewalk.set_limits interpreter Limits.unlimited;
+  Interpreter.set_output interpreter ignore;
+  Interpreter.set_limits interpreter Limits.unlimited;
+  let (T ((module I), interpreter)) = interpreter in
   let in_files (bench : Typed.Bench.t) =
     Option.for_all files ~f:(fun files ->
       Set.mem files (Loc.file_name bench.name.loc))
   in
   let routine bindings body : Measure.Routine.t =
     Plain
-      (fun () ->
-        Treewalk.eval_expr interpreter ~bindings body |> Or_error.ignore_m)
+      (fun () -> I.eval_expr interpreter ~bindings body |> Or_error.ignore_m)
   in
   let seen = String.Table.create () in
   let claim name ~(loc : Loc.t) =
@@ -61,8 +60,8 @@ let benches ?files driver =
         { name
         ; args =
             List.map args ~f:(fun arg () ->
-              let%bind.Or_error value = Treewalk.eval_expr interpreter arg in
-              let label = label value in
+              let%bind.Or_error value = I.eval_expr interpreter arg in
+              let label = label (I.Value.to_string_hum value) in
               let loc = bench.name.loc in
               let%map.Or_error () =
                 claim (name ^ "/" ^ label) ~loc

@@ -13,8 +13,8 @@ let limits =
 
 let typechecker () =
   let stamps = Stamp_counter.create () in
-  let interpreter = Treewalk.create ~stamps () in
-  Treewalk.set_limits interpreter limits;
+  let interpreter = Interpreter.create Treewalk.interpreter ~stamps in
+  Interpreter.set_limits interpreter limits;
   Typecheck.create ~stamps ~interpreter ()
 ;;
 
@@ -126,9 +126,9 @@ let print_bodies ?only t =
 
 let print_values t =
   List.iter (members t) ~f:(fun { ident; _ } ->
-    match Treewalk.find (Driver.interpreter t.driver) ~ident with
+    match Interpreter.find (Driver.interpreter t.driver) ~ident with
     | Ok value ->
-      print_s [%sexp (ident.name : string), (value : Treewalk.Value.t)]
+      print_s [%sexp (ident.name : string), (value : Interpreter.Value.t)]
     | Error _ -> ())
 ;;
 

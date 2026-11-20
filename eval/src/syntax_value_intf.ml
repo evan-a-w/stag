@@ -1,9 +1,10 @@
 open! Import
 
 module type S = sig
+  type value
   type t
 
-  val to_value : t -> Value.t
+  val to_value : t -> value
 
   (** Every node is located at [loc], as syntax generated where it is spliced.
 
@@ -23,7 +24,7 @@ module type S = sig
       accepted, left to the typechecker: a negative int literal, a match of no
       arms (of an empty type), a constructor applied to one tuple, a polymorphic
       record extended or updated with no fields. *)
-  val of_value : Value.t -> loc:Loc.t -> t Or_error.t
+  val of_value : value -> loc:Loc.t -> t Or_error.t
 end
 
 module type Syntax_value = sig
@@ -32,7 +33,9 @@ module type Syntax_value = sig
       or [include%inline], only checked against what its splice generates, has
       no representation: [to_value] drops it. *)
 
-  module type S = S
+  type value
+
+  module type S = S with type value := value
 
   module Type_expr : S with type t := Syntax.Type_expr.t
 
@@ -49,11 +52,11 @@ module type Syntax_value = sig
   (** A [Stag.Type_ref.Path.t]. *)
   val type_ref_path
     :  [ `Prelude of string list | `Program of string list ]
-    -> Value.t
+    -> value
 
   (** An [option[Stag.Type.Decl.t]], given that record type. *)
   val reflected_decl
     :  Reflected_decl.t option
     -> decl_type:Typed.Record_type.t
-    -> Value.t
+    -> value
 end

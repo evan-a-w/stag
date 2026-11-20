@@ -17,9 +17,11 @@ type t
     evaluation at compile time shares [limits], unlimited by default. Prims
     print to [output], stdout by default, at compile time and when evaluated.
     The program sees [prelude], by default the embedded one
-    ([Prelude.toplevels]). *)
+    ([Prelude.toplevels]). It is run by [interpreter], by default
+    [Stag_treewalk]. *)
 val check
-  :  ?limits:Limits.t
+  :  ?interpreter:(module Interpreter_intf.S)
+  -> ?limits:Limits.t
   -> ?output:(string -> unit)
   -> ?prelude:Syntax.Toplevel.t list
   -> Syntax.Program.t
@@ -30,7 +32,8 @@ val check
     order. Files with syntax errors are checked as far as they parse; the errors
     are of all files, by location. *)
 val check_files
-  :  ?limits:Limits.t
+  :  ?interpreter:(module Interpreter_intf.S)
+  -> ?limits:Limits.t
   -> ?output:(string -> unit)
   -> ?prelude:Syntax.Toplevel.t list
   -> Source_file.t list
@@ -48,7 +51,8 @@ end
 
 (** As [check_files], for modules already parsed. *)
 val check_modules
-  :  ?limits:Limits.t
+  :  ?interpreter:(module Interpreter_intf.S)
+  -> ?limits:Limits.t
   -> ?output:(string -> unit)
   -> ?prelude:Syntax.Toplevel.t list
   -> Module_group.t list
@@ -57,13 +61,14 @@ val check_modules
 (** Checks [prelude] (eg. [Prelude.parse] of sources being edited) as
     [Typecheck.check_prelude] does. Its toplevels are not evaluated. *)
 val check_prelude
-  :  ?limits:Limits.t
+  :  ?interpreter:(module Interpreter_intf.S)
+  -> ?limits:Limits.t
   -> ?output:(string -> unit)
   -> Syntax.Toplevel.t list
   -> (t, Typecheck.Failed.t) Result.t
 
 val checked : t -> Typecheck.Checked.t
-val interpreter : t -> Treewalk.t
+val interpreter : t -> Interpreter.t
 
 (** Evaluates the toplevels not yet evaluated at compile time, within [limits]
     of its own, unlimited by default. Those evaluated at compile time keep their

@@ -20,8 +20,8 @@ let run ?(runtime = limits) ~show source =
          print_s
            [%sexp
              (name : string)
-             , (Treewalk.find (Driver.interpreter driver) ~ident |> ok_exn
-                : Treewalk.Value.t)]))
+             , (Interpreter.find (Driver.interpreter driver) ~ident |> ok_exn
+                : Interpreter.Value.t)]))
 ;;
 
 let%expect_test "closures share mutable slots with their scope" =
@@ -184,7 +184,7 @@ let%expect_test "a toplevel already evaluated can't be queued again" =
       print_s
         [%sexp
           (Or_error.try_with (fun () ->
-             Treewalk.add_scc
+             Interpreter.add_scc
                interpreter
                { members = [ member ]; recursive = false })
            : unit Or_error.t)]));

@@ -57,8 +57,9 @@ let run
              print_s
                [%sexp
                  (ident.name : string)
-                 , (Treewalk.find (Driver.interpreter driver) ~ident |> ok_exn
-                    : Treewalk.Value.t)])))
+                 , (Interpreter.find (Driver.interpreter driver) ~ident
+                    |> ok_exn
+                    : Interpreter.Value.t)])))
 ;;
 
 let fuel_only fuel = { Limits.unlimited with fuel = Some fuel }

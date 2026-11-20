@@ -757,9 +757,9 @@ let run_values source =
     List.iter (members t) ~f:(fun { ident; _ } ->
       if String.is_suffix ident.name ~suffix:"_value"
       then (
-        match Treewalk.find (Driver.interpreter (driver t)) ~ident with
+        match Interpreter.find (Driver.interpreter (driver t)) ~ident with
         | Ok value ->
-          print_s [%sexp (ident.name : string), (value : Treewalk.Value.t)]
+          print_s [%sexp (ident.name : string), (value : Interpreter.Value.t)]
         | Error _ -> ())))
 ;;
 

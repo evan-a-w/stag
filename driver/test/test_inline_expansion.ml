@@ -49,7 +49,9 @@ let test ?(others = []) ?(crlf = false) source =
     List.iter expansions ~f:(fun expansion ->
       report (Inline_expansion.diagnostic expansion));
     let output = Buffer.create 64 in
-    Treewalk.set_output (Driver.interpreter driver) (Buffer.add_string output);
+    Interpreter.set_output
+      (Driver.interpreter driver)
+      (Buffer.add_string output);
     let tests =
       match Driver.eval driver with
       | Ok () -> Expect_test_runner.run driver
