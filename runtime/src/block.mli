@@ -22,7 +22,7 @@ val element : t -> Layout.Element.t option
 val header : t -> length:int -> Header.Color.t -> Header.t
 
 (** Raises where there is a hidden length word, or on a header of another kind
-    than [header] makes. *)
+    than [header] makes: so on any [Handle], whose words are the heap's. *)
 val length : t -> Header.t -> int
 
 val has_hidden_length : t -> bool
