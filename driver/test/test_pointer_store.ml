@@ -410,3 +410,25 @@ let now = orig.*.next.*.value
     (now 2)
     |}]
 ;;
+
+let%expect_test "a field store applies its path to the contents at write time" =
+  run
+    {|
+type point = {x : int; y : int}
+let q = Ptr.make {x = 0; y = 0}
+let set = q.*.x <- (q.* <- {x = 1; y = 9}; 3)
+let after = q.*
+|};
+  [%expect
+    {|
+    type point = { x : int; y : int }
+    val q : ptr[point]
+    val set : unit
+    val after : point
+    -- evaluated at compile time
+    -- evaluated
+    (q (Ptr (point (x 3) (y 9))))
+    (set "()")
+    (after (point (x 3) (y 9)))
+    |}]
+;;

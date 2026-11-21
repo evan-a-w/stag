@@ -2,34 +2,41 @@ open! Import
 open Syntax
 include Lift_intf
 
-let indirect_arity = function
-  | "Stag.Pattern.Deref"
-  | "Stag.Pattern.Exception"
-  | "Stag.Type_expr.Code"
-  | "Stag.Type_expr.Mut"
-  | "Stag.Type_expr.Immut"
-  | "Stag.Type_expr.Splice"
-  | "Stag.Expr.Splice"
-  | "Stag.Expr.Deref"
-  | "Stag.Expr.Quote" -> Some 1
-  | "Stag.Pattern.Poly_variant"
-  | "Stag.Type_expr.Arrow"
-  | "Stag.Expr.App"
-  | "Stag.Expr.Assign"
-  | "Stag.Expr.Store"
-  | "Stag.Expr.Fun"
-  | "Stag.Expr.Field"
-  | "Stag.Expr.Record_update"
-  | "Stag.Expr.Match"
-  | "Stag.Expr.Poly_field"
-  | "Stag.Expr.Poly_extend"
-  | "Stag.Expr.Poly_restrict"
-  | "Stag.Expr.Poly_update"
-  | "Stag.Expr.Poly_variant" -> Some 2
-  | "Stag.Type_expr.Row.Extend" -> Some 3
-  | "Stag.Expr.Let_mut" -> Some 4
-  | "Stag.Expr.Let" -> Some 5
-  | _ -> None
+let indirect_constructors =
+  List.map
+    ~f:(fun (name, arity) -> "Stag." ^ name, arity)
+    [ "Type_expr.Arrow", 2
+    ; "Type_expr.Code", 1
+    ; "Type_expr.Mut", 1
+    ; "Type_expr.Immut", 1
+    ; "Type_expr.Splice", 1
+    ; "Type_expr.Row.Extend", 3
+    ; "Pattern.Deref", 1
+    ; "Pattern.Poly_variant", 2
+    ; "Pattern.Exception", 1
+    ; "Expr.App", 2
+    ; "Expr.Let", 5
+    ; "Expr.Let_mut", 4
+    ; "Expr.Assign", 2
+    ; "Expr.Store", 2
+    ; "Expr.Fun", 2
+    ; "Expr.Splice", 1
+    ; "Expr.Quote", 1
+    ; "Expr.Deref", 1
+    ; "Expr.Field", 2
+    ; "Expr.Record_update", 2
+    ; "Expr.Match", 2
+    ; "Expr.Poly_field", 2
+    ; "Expr.Poly_extend", 2
+    ; "Expr.Poly_restrict", 2
+    ; "Expr.Poly_update", 2
+    ; "Expr.Poly_variant", 2
+    ]
+;;
+
+let indirect_arity =
+  let table = String.Table.of_alist_exn indirect_constructors in
+  fun name -> Hashtbl.find table name
 ;;
 
 module Make (B : Builder) = struct

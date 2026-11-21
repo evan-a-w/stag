@@ -75,8 +75,14 @@ Ptr.make e          (* allocate: heap, data stack under local_, static if const 
 *e   e.*            (* read *)
 e.*.x               (* field of the pointee *)
 *e <- v   e.* <- v  (* write *)
-e.*.x <- v          (* write a mutable field of the pointee *)
+e.*.x <- v          (* write a field of the pointee *)
 ```
+
+- A store `e.*.f.g <- v` evaluates the pointer expression `e` first, then
+  `v`, and only then reads the cell's contents, replaces the field path `f.g`
+  in them, and writes the result back. So stores made while evaluating `v`
+  are kept in the fields it doesn't replace: with `q = Ptr.make {x = 0; y = 0}`,
+  `q.*.x <- (q.* <- {x = 1; y = 9}; 3)` leaves `{x = 3; y = 9}`.
 
 - Postfix `e.*` is at the field access level, so it chains (`p.*.next.*`).
 - Prefix `*e` is at the constructor level (`C e`), so it extends over an

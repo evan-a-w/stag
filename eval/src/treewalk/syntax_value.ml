@@ -58,12 +58,13 @@ module To_value = struct
 
       let rec append (xs : Value.t) ys =
         match xs with
-        | Construct (_, [ Ptr cell ]) ->
-          (match !cell with
-           | Tuple [ x; rest ] ->
-             con "Cons" [ ptr (tuple [ x; append rest ys ]) ]
-           | _ -> ys)
-        | _ -> ys
+        | Construct ({ name; _ }, [ Ptr { contents = Tuple [ x; rest ] } ])
+          when String.equal name (Prelude_path.canonical "Cons") ->
+          con "Cons" [ ptr (tuple [ x; append rest ys ]) ]
+        | Construct ({ name; _ }, [])
+          when String.equal name (Prelude_path.canonical "Nil") -> ys
+        | _ ->
+          raise_s [%message "Syntax_value.append: not a list" (xs : Value.t)]
       ;;
     end)
 
