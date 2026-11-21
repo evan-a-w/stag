@@ -51,7 +51,13 @@ module Chunk = struct
     { bigstring : Bigstring.t
     ; base : Addr.t
     ; mutable bytes : int
+    ; id : int
     }
+
+  (* Every chunk not yet destroyed, so none is freed by its finaliser while
+     addresses into it are in use. *)
+  let live : t Int.Table.t = Int.Table.create ()
+  let next_id = ref 0
 
   let create ~bytes ~align =
     if bytes < 0
@@ -64,7 +70,11 @@ module Chunk = struct
       Addr.align_up (Native_pointer.unsafe_of_bigstring bigstring ~pos:0) align
     in
     Native_pointer.unsafe_memset base '\000' ~pos:0 ~len:bytes;
-    { bigstring; base; bytes }
+    let id = !next_id in
+    incr next_id;
+    let t = { bigstring; base; bytes; id } in
+    Hashtbl.add_exn live ~key:id ~data:t;
+    t
   ;;
 
   let[@inline] [@zero_alloc] base t = t.base
@@ -75,9 +85,16 @@ module Chunk = struct
   ;;
 
   let destroy t =
+    if not (Hashtbl.mem live t.id)
+    then raise_s [%message "Memory.Chunk.destroy: already destroyed"];
+    Hashtbl.remove live t.id;
     Bigstring.unsafe_destroy t.bigstring;
     t.bytes <- 0
   ;;
+
+  module For_testing = struct
+    let live () = Hashtbl.length live
+  end
 end
 
 let () =

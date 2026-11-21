@@ -310,11 +310,32 @@ let%expect_test "destroy" =
   [%expect
     {|
     ((bytes 0) (contains_base false))
-    ("second destroy"
-     (exn
-      (Failure "bigstring_destroy: bigstring is external or already deallocated")))
+    ("second destroy" (exn "Memory.Chunk.destroy: already destroyed"))
     collected
     |}]
+;;
+
+let%expect_test "a chunk nothing refers to stays alive until destroyed" =
+  let live_before = Chunk.For_testing.live () in
+  let base =
+    (* The chunk itself is dropped: only an address into it is kept. *)
+    let chunk = Chunk.create ~bytes:4096 ~align:8 in
+    Chunk.base chunk
+  in
+  store_64 (Addr.add base 8) #0x1234_5678_9abc_def0L;
+  for _ = 1 to 3 do
+    Gc.full_major ()
+  done;
+  (* A fresh allocation would likely reuse freed memory, overwriting it. *)
+  let others = List.init 64 ~f:(fun _ -> Chunk.create ~bytes:4096 ~align:8) in
+  print_s
+    [%message
+      ""
+        ~still_there:
+          (sprintf "%Lx" (Int64_u.to_int64 (load_64 (Addr.add base 8))))
+        ~live:(Chunk.For_testing.live () - live_before : int)];
+  List.iter others ~f:Chunk.destroy;
+  [%expect {| ((still_there 123456789abcdef0) (live 65)) |}]
 ;;
 
 let%expect_test "alignment, by offset from an aligned base" =

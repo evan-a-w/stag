@@ -33,8 +33,9 @@ module Addr : sig
   val compare : t -> t -> int [@@zero_alloc]
 end
 
-(** A block of malloc'd memory, owned until [destroy]. The [t] must stay
-    reachable until then: its memory is freed if it is collected. *)
+(** A block of malloc'd memory, owned until [destroy]. It is kept alive until
+    then even if nothing refers to it, so addresses into it stay valid: a chunk
+    never destroyed leaks. *)
 module Chunk : sig
   type t
 
@@ -52,6 +53,11 @@ module Chunk : sig
 
   (** Accessing its memory afterwards is undefined. Raises if already destroyed. *)
   val destroy : t -> unit
+
+  module For_testing : sig
+    (** The chunks not yet destroyed. *)
+    val live : unit -> int
+  end
 end
 
 (** Little-endian. Addresses need not be aligned. *)
