@@ -3,10 +3,12 @@ open! Import
 (** What the GC starts from: a shadow stack of frames, each with pointer slots,
     and global slots elsewhere.
 
-    A frame is [next; root count; roots...], words from its base: [next] is the
-    base of the frame pushed before it, or null. That is LLVM's [shadow-stack]
-    GC strategy's chain, but for its frame map pointer being the count itself,
-    so compiled code can push its frames onto the same chain.
+    A frame is [next; map; roots...], words from its base: [next] is the base of
+    the frame pushed before it, or null, and [map] points to its frame map,
+    [{ int32_t num_roots; int32_t num_meta; void *meta[num_meta] }]. That is
+    LLVM's [shadow-stack] GC strategy's format, so compiled code can push its
+    frames onto the same chain. Every root is a word that is a pointer or null.
+    The frames pushed here share one map per slot count, with no metadata.
 
     Frames are bump allocated in segments, chunks of C memory chained as the
     stack grows, so a frame never moves while it is pushed: the addresses of its
@@ -25,7 +27,9 @@ val create : unit -> t
 val destroy : t -> unit
 
 (** Pushes a frame of [slots] null slots, giving the address of its first slot.
-    Allocates (on the OCaml heap) only when it needs a new segment. *)
+    Allocates (on the OCaml heap) only when it needs a new segment, or a frame
+    map for a slot count it has not had (or, for 1024 slots or more, each time).
+    Raises unless [0 <= slots < 2^32]. *)
 val push_frame : t -> slots:int -> Memory.Addr.t
 [@@zero_alloc]
 
@@ -49,6 +53,13 @@ val remove_global : t -> Memory.Addr.t -> unit
 val latest_frame : t -> Memory.Addr.t
 [@@zero_alloc]
 
+module Frame_map : sig
+  (** Of a frame map's address. *)
+
+  val num_roots : Memory.Addr.t -> int [@@zero_alloc]
+  val num_meta : Memory.Addr.t -> int [@@zero_alloc]
+end
+
 module Frame : sig
   (** Of a frame's base. *)
 
@@ -56,6 +67,9 @@ module Frame : sig
   val next : Memory.Addr.t -> Memory.Addr.t
   [@@zero_alloc]
 
+  val map : Memory.Addr.t -> Memory.Addr.t [@@zero_alloc]
+
+  (** Its map's [num_roots]. *)
   val slots : Memory.Addr.t -> int [@@zero_alloc]
 
   (** The address of slot [i]. *)

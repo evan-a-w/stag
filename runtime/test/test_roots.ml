@@ -72,16 +72,38 @@ let%expect_test "the frame format" =
         ~first_is_last:(Addr.is_null (Roots.Frame.next previous) : bool)
         ~slots:
           ((Roots.Frame.slots latest, Roots.Frame.slots previous) : int * int)
-        ~words_of_a:
-          (List.init 4 ~f:(fun i ->
-             Int64_u.to_int (Memory.load_64 (Addr.add previous (i * 8))))
-           |> List.tl_exn
+        ~map_word_is_map:
+          (Addr.equal
+             (Memory.load_addr (Addr.add previous 8))
+             (Roots.Frame.map previous)
+           : bool)
+        ~map_of_a:
+          (( Roots.Frame_map.num_roots (Roots.Frame.map previous)
+           , Roots.Frame_map.num_meta (Roots.Frame.map previous) )
+           : int * int)
+        ~roots_of_a:
+          (List.init 2 ~f:(fun i ->
+             Int64_u.to_int (Memory.load_64 (Addr.add previous (16 + (i * 8)))))
            : int list)];
-  (* [next; count; roots...]: the count and roots of [a]. *)
+  (* [next; map; roots...], the map [{ num_roots; num_meta }] as two [int32]s. *)
+  let c = push roots ~slots:2 ~first:5 in
+  ignore c;
+  let a_map = Roots.Frame.map previous in
+  let c_map = Roots.Frame.map (Roots.latest_frame roots) in
+  print_s
+    [%message
+      "frames of a slot count share a map"
+        ~shared:(Addr.equal a_map c_map : bool)
+        ~map_bytes:
+          (List.init 8 ~f:(fun i ->
+             Int8_u.to_int (Memory.load_8 (Addr.add a_map i)) land 0xff)
+           : int list)];
   [%expect
     {|
     ((latest_is_b true) (previous_is_a true) (first_is_last true) (slots (1 2))
-     (words_of_a (2 1 2)))
+     (map_word_is_map true) (map_of_a (2 0)) (roots_of_a (1 2)))
+    ("frames of a slot count share a map" (shared true)
+     (map_bytes (2 0 0 0 0 0 0 0)))
     |}]
 ;;
 
@@ -252,5 +274,33 @@ let%expect_test "destroy" =
     ((depth 0) (slots ()))
     (Error "Roots.push_frame: destroyed")
     (Error "Roots.destroy: destroyed")
+    |}]
+;;
+
+let%expect_test "frame maps of many slot counts" =
+  let roots = Roots.create () in
+  let maps = Array.create ~len:6 (Addr.null ()) in
+  List.iteri [ 0; 1; 1023; 1024; 5000; 1024 ] ~f:(fun i slots ->
+    let _ = Roots.push_frame roots ~slots in
+    maps.(i) <- Roots.Frame.map (Roots.latest_frame roots));
+  print_s
+    [%message
+      ""
+        ~num_roots:
+          (List.init 6 ~f:(fun i -> Roots.Frame_map.num_roots maps.(i))
+           : int list)
+        ~big_maps_shared:(Addr.equal maps.(3) maps.(5) : bool)
+        ~distinct:(not (Addr.equal maps.(3) maps.(4)) : bool)];
+  print_s
+    [%sexp
+      (Or_error.try_with (fun () ->
+         ignore (Roots.push_frame roots ~slots:(1 lsl 32)))
+       : unit Or_error.t)];
+  Roots.destroy roots;
+  [%expect
+    {|
+    ((num_roots (0 1 1023 1024 5000 1024)) (big_maps_shared true)
+     (distinct true))
+    (Error (Roots.push_frame (slots 4294967296)))
     |}]
 ;;

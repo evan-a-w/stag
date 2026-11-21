@@ -3,16 +3,31 @@ module Addr = Memory.Addr
 module Chunk = Memory.Chunk
 
 let[@cold] fail sexp = raise (Error.to_exn (Error.create_s sexp))
-let[@inline] [@zero_alloc] load_int addr = Int64_u.to_int (Memory.load_64 addr)
 
-let[@inline] [@zero_alloc] store_int addr n =
-  Memory.store_64 addr (Int64_u.of_int n)
-;;
+module Frame_map = struct
+  (* LLVM's [{ int32_t NumRoots; int32_t NumMeta; void *Meta[] }], with no
+     metadata. *)
+  let bytes = 8
+
+  let[@inline] [@zero_alloc] num_roots map =
+    Int32_u.to_int (Memory.load_32 map) land 0xffff_ffff
+  ;;
+
+  let[@inline] [@zero_alloc] num_meta map =
+    Int32_u.to_int (Memory.load_32 (Addr.add map 4)) land 0xffff_ffff
+  ;;
+
+  let store map ~num_roots =
+    Memory.store_32 map (Int32_u.of_int num_roots);
+    Memory.store_32 (Addr.add map 4) #0l
+  ;;
+end
 
 module Frame = struct
   let header_bytes = 16
   let[@inline] [@zero_alloc] next base = Memory.load_addr base
-  let[@inline] [@zero_alloc] slots base = load_int (Addr.add base 8)
+  let[@inline] [@zero_alloc] map base = Memory.load_addr (Addr.add base 8)
+  let[@inline] [@zero_alloc] slots base = Frame_map.num_roots (map base)
   let[@inline] [@zero_alloc] slot base i = Addr.add base (header_bytes + (i * 8))
   let[@inline] [@zero_alloc] bytes ~slots = header_bytes + (slots * 8)
 end
@@ -35,6 +50,12 @@ type t =
   ; segment_bytes : int
   ; mutable globals : Addr.t array
   ; mutable global_count : int
+  ; mutable maps : Addr.t array
+  (** The frame map of each slot count, or null: frames of a count share one. *)
+  ; big_maps : int Int.Table.t (** Maps' addresses as words. *)
+  ; mutable map_chunks : Chunk.t list
+  ; mutable map_top : Addr.t
+  ; mutable map_limit : Addr.t
   ; mutable destroyed : bool
   }
 
@@ -64,6 +85,11 @@ let create_with ~segment_bytes =
     ; segment_bytes
     ; globals = Array.create ~len:4 (Addr.null ())
     ; global_count = 0
+    ; maps = Array.create ~len:16 (Addr.null ())
+    ; big_maps = Int.Table.create ()
+    ; map_chunks = []
+    ; map_top = Addr.null ()
+    ; map_limit = Addr.null ()
     ; destroyed = false
     }
   in
@@ -109,14 +135,66 @@ let[@cold] [@zero_alloc assume] grow t ~bytes =
     enter_segment t next)
 ;;
 
+let map_chunk_bytes = 4096
+
+(* Slot counts from this one have their maps in [big_maps]. *)
+let max_direct_map = 1024
+
+(* Allocates, but once per slot count, so [push_frame] is assumed zero-alloc. *)
+let[@cold] [@zero_alloc assume] make_map t ~slots =
+  match Hashtbl.find t.big_maps slots with
+  | Some map -> Addr.of_word (Nativeint_u.of_int map)
+  | None ->
+    if Int.(Addr.diff t.map_limit t.map_top < Frame_map.bytes)
+       || Addr.is_null t.map_top
+    then (
+      let chunk = Chunk.create ~bytes:map_chunk_bytes ~align:8 in
+      t.map_chunks <- chunk :: t.map_chunks;
+      t.map_top <- Chunk.base chunk;
+      t.map_limit <- Addr.add (Chunk.base chunk) map_chunk_bytes);
+    let map = t.map_top in
+    Frame_map.store map ~num_roots:slots;
+    t.map_top <- Addr.add map Frame_map.bytes;
+    if slots >= max_direct_map
+    then
+      Hashtbl.set
+        t.big_maps
+        ~key:slots
+        ~data:(Nativeint_u.to_int (Addr.to_word map))
+    else (
+      if slots >= Array.length t.maps
+      then (
+        let maps =
+          Array.create
+            ~len:
+              (Int.min
+                 max_direct_map
+                 (Int.max (slots + 1) (2 * Array.length t.maps)))
+            (Addr.null ())
+        in
+        for i = 0 to Array.length t.maps - 1 do
+          maps.(i) <- t.maps.(i)
+        done;
+        t.maps <- maps);
+      t.maps.(slots) <- map);
+    map
+;;
+
+let[@inline] [@zero_alloc] map_for t ~slots =
+  if Int.(slots < Array.length t.maps) && not (Addr.is_null t.maps.(slots))
+  then t.maps.(slots)
+  else make_map t ~slots
+;;
+
 let[@zero_alloc] push_frame t ~slots =
   if t.destroyed then fail [%message "Roots.push_frame: destroyed"];
-  if Int.(slots < 0) then fail [%message "Roots.push_frame" (slots : int)];
+  if Int.(slots < 0 || slots > 0xffff_ffff)
+  then fail [%message "Roots.push_frame" (slots : int)];
   let bytes = Frame.bytes ~slots in
   if Int.(Addr.diff t.limit t.top < bytes) then grow t ~bytes;
   let frame = t.top in
   Memory.store_addr frame t.head;
-  store_int (Addr.add frame 8) slots;
+  Memory.store_addr (Addr.add frame 8) (map_for t ~slots);
   Memory.fill_zero (Frame.slot frame 0) ~bytes:(slots * 8);
   t.head <- frame;
   t.top <- Addr.add frame bytes;
@@ -150,6 +228,9 @@ let destroy t =
   for i = 0 to t.segment_count - 1 do
     Chunk.destroy t.segments.(i)
   done;
+  List.iter t.map_chunks ~f:Chunk.destroy;
+  t.map_chunks <- [];
+  t.maps <- [||];
   t.head <- Addr.null ();
   t.depth <- 0;
   t.global_count <- 0;
