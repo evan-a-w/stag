@@ -2251,12 +2251,21 @@ and expr_type
                 | Ok expansion ->
                   node (Toplevel_splice { code; expansion }) inner))))
   | Deref pointer ->
-    let pointee =
-      Option.value_or_thunk expected ~default:(fun () -> Scope.fresh_ty t scope)
+    let ptr pointee = Type.TCon ("ptr", [ ATy pointee ]) in
+    let pointee, pointer =
+      match expected with
+      | Some expected when Expectation.is_required hint ->
+        expected, expr_type t scope ~expr:pointer ~expected:(ptr expected)
+      | Some _ | None ->
+        ( Scope.fresh_ty t scope
+        , expr_type
+            t
+            scope
+            ~expr:pointer
+            ?expected:(Option.map expected ~f:ptr)
+            ~hint:Hint )
     in
-    let expected = Type.TCon ("ptr", [ ATy pointee ]) in
-    let pointer = expr_type t scope ~expr:pointer ~expected ~hint in
-    if Scope.unifies t scope ~ty1:pointer.ty ~ty2:expected ~loc
+    if Scope.unifies t scope ~ty1:pointer.ty ~ty2:(ptr pointee) ~loc
     then node (Deref pointer) pointee
     else node (Error [ pointer ]) Type.error
   | Store (target, value) ->

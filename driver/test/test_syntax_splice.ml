@@ -568,3 +568,50 @@ let main = match ok with C n -> print_endline (Core.Int.to_string n)
     3
     |}]
 ;;
+
+let%expect_test "dereferencing a pointer to syntax" =
+  check
+    ~run:true
+    {|
+let p = Ptr.make (Stag.Expr.int 4)
+let h : int = .~(p.*)
+let main = print_endline (Core.Int.to_string h)
+|};
+  [%expect
+    {|
+    File "a.stag", line 3, characters 16-21:
+    3 | let h : int = .~(p.*)
+                        ^^^^^
+    Error: This expression has type <int>{..'_a} but an expression was expected of type Stag.Expr.t
+    |}]
+;;
+
+let%expect_test "dereferencing a pointer to code" =
+  check
+    ~run:true
+    {|
+module M = struct type t = A | B end
+module N = struct type u = A | B end
+let q = Ptr.make .< 5 >.
+let h : int = .~(q.*)
+let a : M.t = .~((Ptr.make .< A >.).*)
+let main = match a with A -> print_endline (Core.Int.to_string h) | B -> ()
+|};
+  [%expect
+    {|
+    module A : sig
+      module M : sig
+        type t = A | B
+      end
+      module N : sig
+        type u = A | B
+      end
+      val q : ptr[<int>{}]
+      val h : int
+      val a : M.t
+      val main : unit
+    end
+    --- output ---
+    5
+    |}]
+;;
