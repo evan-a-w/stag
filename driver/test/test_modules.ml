@@ -464,7 +464,7 @@ let pair : B.trees = (A.Leaf, tree)
     |}]
 ;;
 
-let%expect_test "aliases across modules may cycle through a function type" =
+let%expect_test "cyclic aliases across modules" =
   check
     {|
 module A = struct
