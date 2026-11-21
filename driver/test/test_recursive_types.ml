@@ -487,7 +487,8 @@ let%expect_test "functions don't guard cycles, nor pointers alone in aliases" =
   check "type f = int -> ptr[f]";
   check "type f = [`F of int -> ptr[f]]";
   check "type s = {`head : int; `tail : unit -> ptr[s]}";
-  [%expect {|
+  [%expect
+    {|
     ((Unification_error (Occurs_check_failed (ATy (TVar (Unbound 20 1))))) @
      t.stag:1:15-16)
     val self : ((ptr['a -> 'b] as 'a) -> 'b) -> 'b
