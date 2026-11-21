@@ -45,14 +45,14 @@ let create_gc ?(config = Stag_gc.Config.default) ?(classes = [ 1 ]) () =
   let heap =
     Heap.create { page_bytes = 256; arena_bytes = 4096; size_classes = classes }
   in
-  let roots = Roots.create () in
+  let roots = Shadow_stack.create () in
   let data_stack = Data_stack.create () in
   let static = Static_data.create () in
   let gc =
     Stag_gc.create
       config
       ~heap
-      ~roots:(Roots.root_sources roots)
+      ~roots:[ Shadow_stack.root_source roots ]
       ~data_stack
       ~static
   in
@@ -61,7 +61,7 @@ let create_gc ?(config = Stag_gc.Config.default) ?(classes = [ 1 ]) () =
 
 let destroy gc roots data_stack static heap =
   Stag_gc.destroy gc;
-  Roots.destroy roots;
+  Shadow_stack.destroy roots;
   Data_stack.destroy data_stack;
   Static_data.destroy static;
   Heap.destroy heap
@@ -86,7 +86,7 @@ let scanned gc =
 
 let%expect_test "handle reachability and slot reuse" =
   let gc, heap, roots, data_stack, static = create_gc () in
-  let root = Roots.push_frame roots ~slots:1 in
+  let root = Shadow_stack.push_frame roots ~slots:1 in
   let parent = scanned gc in
   Memory.store_addr root parent;
   let kept = Stag_gc.alloc_handle gc name_kind "kept" in
@@ -119,12 +119,12 @@ let%expect_test "handle reachability and slot reuse" =
         ~reused:(Addr.equal dead fresh : bool)
         ~new_id:(word fresh > old_id : bool)
         ~fresh:(Stag_gc.get_handle gc name_kind fresh : string option)];
-  Roots.pop_frame roots;
+  Shadow_stack.pop_frame roots;
   collect ();
   let _ = Stag_gc.alloc_handle gc name_kind "released at heap destrucion" in
   Stag_gc.destroy gc;
   print_s [%sexp (Heap.For_testing.handles heap : int)];
-  Roots.destroy roots;
+  Shadow_stack.destroy roots;
   Data_stack.destroy data_stack;
   Static_data.destroy static;
   Heap.destroy heap;
@@ -144,7 +144,7 @@ let%expect_test "handle allocation may collect" =
   let gc, heap, roots, data_stack, static =
     create_gc ~config:{ space_overhead = 0; min_words = 2 } ()
   in
-  let root = Roots.push_frame roots ~slots:1 in
+  let root = Shadow_stack.push_frame roots ~slots:1 in
   let first = Stag_gc.alloc_handle gc name_kind "first" in
   Memory.store_addr root first;
   let second = Stag_gc.alloc_handle gc name_kind "second" in
@@ -154,14 +154,14 @@ let%expect_test "handle allocation may collect" =
         ~collections:(Stag_gc.collections gc : int)
         ~first:(Stag_gc.get_handle gc name_kind first : string option)
         ~second:(Stag_gc.get_handle gc name_kind second : string option)];
-  Roots.pop_frame roots;
+  Shadow_stack.pop_frame roots;
   destroy gc roots data_stack static heap;
   [%expect {| ((collections 1) (first (first)) (second (second))) |}]
 ;;
 
 let%expect_test "refs keep their blocks alive, and die with the handle" =
   let gc, heap, roots, data_stack, static = create_gc () in
-  let root = Roots.push_frame roots ~slots:1 in
+  let root = Shadow_stack.push_frame roots ~slots:1 in
   let capture =
     Stag_gc.alloc gc (Header.scanned ~size_words:2 ~scalar_words:1 Unmarked)
   in
@@ -189,7 +189,7 @@ let%expect_test "refs keep their blocks alive, and die with the handle" =
   in
   Memory.store_addr root handle;
   collect ();
-  Roots.pop_frame roots;
+  Shadow_stack.pop_frame roots;
   collect ();
   destroy gc roots data_stack static heap;
   [%expect
@@ -211,7 +211,7 @@ let%expect_test "alloc_handle roots refs only its payload holds across the \
   let capture = scanned gc in
   store_word capture 7;
   let handle = Stag_gc.alloc_handle gc captures_kind [| capture |] in
-  let root = Roots.push_frame roots ~slots:1 in
+  let root = Shadow_stack.push_frame roots ~slots:1 in
   Memory.store_addr root handle;
   print_s
     [%message
@@ -222,7 +222,7 @@ let%expect_test "alloc_handle roots refs only its payload holds across the \
   let stats = Stag_gc.collect gc in
   report gc;
   print_s [%sexp (stats.marked_blocks : int), (live heap capture : bool)];
-  Roots.pop_frame roots;
+  Shadow_stack.pop_frame roots;
   destroy gc roots data_stack static heap;
   [%expect
     {|
@@ -234,7 +234,7 @@ let%expect_test "alloc_handle roots refs only its payload holds across the \
 
 let%expect_test "many refs, in a large block" =
   let gc, heap, roots, data_stack, static = create_gc () in
-  let root = Roots.push_frame roots ~slots:1 in
+  let root = Shadow_stack.push_frame roots ~slots:1 in
   let refs = Array.create ~len:300 (Addr.null ()) in
   for i = 0 to Array.length refs - 1 do
     refs.(i) <- scanned gc
@@ -249,14 +249,14 @@ let%expect_test "many refs, in a large block" =
         ~size_words:(Header.size_words (Header.load handle) : int)
         ~marked:(stats.marked_blocks : int)
         ~marked_words:(stats.marked_words : int)];
-  Roots.pop_frame roots;
+  Shadow_stack.pop_frame roots;
   destroy gc roots data_stack static heap;
   [%expect {| ((size_words 301) (marked 301) (marked_words 601)) |}]
 ;;
 
 let%expect_test "a handle named only by another's payload lives as long as it" =
   let gc, heap, roots, data_stack, static = create_gc () in
-  let root = Roots.push_frame roots ~slots:1 in
+  let root = Shadow_stack.push_frame roots ~slots:1 in
   let callee =
     Stag_gc.alloc_handle gc Code.kind { name = "callee"; calls = [] }
   in
@@ -282,7 +282,7 @@ let%expect_test "a handle named only by another's payload lives as long as it" =
   show ();
   Memory.store_addr root (Addr.null ());
   show ();
-  Roots.pop_frame roots;
+  Shadow_stack.pop_frame roots;
   destroy gc roots data_stack static heap;
   [%expect
     {|
@@ -299,7 +299,7 @@ let%expect_test "a handle named only by another's payload lives as long as it" =
    bare address then finds the other's payload, but a [Handle_ref.t] nothing. *)
 let%expect_test "a stale handle reference" =
   let gc, heap, roots, data_stack, static = create_gc () in
-  let root = Roots.push_frame roots ~slots:1 in
+  let root = Shadow_stack.push_frame roots ~slots:1 in
   let callee =
     Stag_gc.alloc_handle gc Code.kind { name = "callee"; calls = [] }
   in
@@ -327,7 +327,7 @@ let%expect_test "a stale handle reference" =
         ~other:
           (Stag_gc.get_handle_checked gc Code.kind (Stag_gc.handle_ref gc other)
            : Code.t option)];
-  Roots.pop_frame roots;
+  Shadow_stack.pop_frame roots;
   destroy gc roots data_stack static heap;
   [%expect
     {|
@@ -339,7 +339,7 @@ let%expect_test "a stale handle reference" =
 
 let%expect_test "get_handle_checked of a handle with a corrupt ID" =
   let gc, heap, roots, data_stack, static = create_gc () in
-  let root = Roots.push_frame roots ~slots:1 in
+  let root = Shadow_stack.push_frame roots ~slots:1 in
   let handle = Stag_gc.alloc_handle gc name_kind "handle" in
   Memory.store_addr root handle;
   let handle_ref = Stag_gc.handle_ref gc handle in
@@ -353,7 +353,7 @@ let%expect_test "get_handle_checked of a handle with a corrupt ID" =
   get ();
   store_word handle (Handle_ref.id handle_ref);
   get ();
-  Roots.pop_frame roots;
+  Shadow_stack.pop_frame roots;
   destroy gc roots data_stack static heap;
   [%expect {|
     (handle)
@@ -387,7 +387,7 @@ let%expect_test "handle_ref of anything but a handle raises" =
 let%expect_test "alloc_handle rejects a ref into the heap but no block" =
   let gc, heap, roots, data_stack, static = create_gc ~classes:[ 2 ] () in
   let block = scanned gc in
-  let root = Roots.push_frame roots ~slots:1 in
+  let root = Shadow_stack.push_frame roots ~slots:1 in
   Memory.store_addr root block;
   let swept = scanned gc in
   ignore (Stag_gc.collect gc : Stag_gc.Stats.t);
@@ -400,7 +400,7 @@ let%expect_test "alloc_handle rejects a ref into the heap but no block" =
   alloc_raises [| block; Addr.add block (-8) |];
   print_s [%message "" ~handles:(Heap.For_testing.handles heap : int)];
   report gc;
-  Roots.pop_frame roots;
+  Shadow_stack.pop_frame roots;
   destroy gc roots data_stack static heap;
   [%expect
     {|
@@ -417,7 +417,7 @@ let%expect_test "alloc_handle rejects a ref into the heap but no block" =
 
 let%expect_test "check_invariants reports refs a handle lacks" =
   let gc, heap, roots, data_stack, static = create_gc () in
-  let root = Roots.push_frame roots ~slots:4 in
+  let root = Shadow_stack.push_frame roots ~slots:4 in
   let slot i = Addr.add root (i * 8) in
   let first = scanned gc in
   let second = scanned gc in
@@ -440,7 +440,7 @@ let%expect_test "check_invariants reports refs a handle lacks" =
   (* A ref word to no block. *)
   Memory.store_addr (Addr.add handle 8) (Addr.add first (-8));
   report gc;
-  Roots.pop_frame roots;
+  Shadow_stack.pop_frame roots;
   destroy gc roots data_stack static heap;
   [%expect
     {|
@@ -470,7 +470,7 @@ let%expect_test "check_invariants reports refs a handle lacks" =
 
 let%expect_test "metadata consistency" =
   let gc, heap, roots, data_stack, static = create_gc () in
-  let root = Roots.push_frame roots ~slots:2 in
+  let root = Shadow_stack.push_frame roots ~slots:2 in
   let first = Stag_gc.alloc_handle gc name_kind "first" in
   let second = Stag_gc.alloc_handle gc name_kind "second" in
   Memory.store_addr root first;
@@ -487,7 +487,7 @@ let%expect_test "metadata consistency" =
   store_word orphan 99;
   print_s [%sexp (Header.load orphan : Header.t)];
   report gc;
-  Roots.pop_frame roots;
+  Shadow_stack.pop_frame roots;
   destroy gc roots data_stack static heap;
   [%expect
     {|
@@ -526,7 +526,7 @@ let%expect_test "a corrupt ID does not remove another block's metadata, but \
                  leaks its own"
   =
   let gc, heap, roots, data_stack, static = create_gc () in
-  let root = Roots.push_frame roots ~slots:1 in
+  let root = Shadow_stack.push_frame roots ~slots:1 in
   let doomed = Stag_gc.alloc_handle gc name_kind "doomed" in
   let kept = Stag_gc.alloc_handle gc name_kind "kept" in
   Memory.store_addr root kept;
@@ -541,7 +541,7 @@ let%expect_test "a corrupt ID does not remove another block's metadata, but \
         ~handles:(Heap.For_testing.handles heap : int)
         ~kept:(Stag_gc.get_handle gc name_kind kept : string option)];
   report gc;
-  Roots.pop_frame roots;
+  Shadow_stack.pop_frame roots;
   destroy gc roots data_stack static heap;
   [%expect
     {|
@@ -590,7 +590,7 @@ let%expect_test "alloc_handle rejects a ref into the data stack" =
 
 let%expect_test "alloc_handle failing leaves no handle" =
   let gc, heap, roots, data_stack, static = create_gc ~classes:[ 1; 2 ] () in
-  let root = Roots.push_frame roots ~slots:2 in
+  let root = Shadow_stack.push_frame roots ~slots:2 in
   let capture = scanned gc in
   Memory.store_addr root capture;
   let handle = Stag_gc.alloc_handle gc name_kind "first" in
@@ -621,7 +621,7 @@ let%expect_test "alloc_handle failing leaves no handle" =
   let stats = Stag_gc.collect gc in
   print_s [%message "" ~freed:(stats.freed_blocks : int)];
   show ();
-  Roots.pop_frame roots;
+  Shadow_stack.pop_frame roots;
   destroy gc roots data_stack static heap;
   [%expect
     {|
@@ -643,7 +643,7 @@ let%expect_test "alloc_handle failing leaves no handle" =
 let%expect_test "alloc_handle calls refs once" =
   (* An impure [refs], breaking [Handle_kind]'s rules: [[||]], then [x]. *)
   let gc, heap, roots, data_stack, static = create_gc () in
-  let root = Roots.push_frame roots ~slots:2 in
+  let root = Shadow_stack.push_frame roots ~slots:2 in
   let x = scanned gc in
   Memory.store_addr root x;
   let calls = ref 0 in
@@ -660,7 +660,7 @@ let%expect_test "alloc_handle calls refs once" =
         ~calls:(!calls : int)
         ~ref_words:(Header.size_words (Header.load handle) - 1 : int)];
   report gc;
-  Roots.pop_frame roots;
+  Shadow_stack.pop_frame roots;
   destroy gc roots data_stack static heap;
   [%expect
     {|

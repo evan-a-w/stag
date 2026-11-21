@@ -185,13 +185,13 @@ let%expect_test "the GC: data-stack blocks root heap blocks until their region \
                  exits"
   =
   let heap = Heap.create heap_config in
-  let roots = Roots.create () in
+  let roots = Shadow_stack.create () in
   let stack = Data_stack.create () in
   let gc =
     Stag_gc.create
       manual
       ~heap
-      ~roots:(Roots.root_sources roots)
+      ~roots:[ Shadow_stack.root_source roots ]
       ~data_stack:stack
       ~static:(Static_data.create ())
   in
@@ -231,30 +231,30 @@ let%expect_test "the GC: data-stack blocks root heap blocks until their region \
     |}];
   Stag_gc.destroy gc;
   Data_stack.destroy stack;
-  Roots.destroy roots;
+  Shadow_stack.destroy roots;
   Heap.destroy heap
 ;;
 
 let%expect_test "check_invariants: nothing but the data stack points into it" =
   let heap = Heap.create heap_config in
-  let roots = Roots.create () in
+  let roots = Shadow_stack.create () in
   let stack = Data_stack.create () in
   let static = Static_data.create () in
   let gc =
     Stag_gc.create
       manual
       ~heap
-      ~roots:(Roots.root_sources roots)
+      ~roots:[ Shadow_stack.root_source roots ]
       ~data_stack:stack
       ~static
   in
-  let frame = Roots.push_frame roots ~slots:1 in
+  let frame = Shadow_stack.push_frame roots ~slots:1 in
   let local = Data_stack.alloc stack (scanned ~size:1 ~scalars:0) in
   let block = Stag_gc.alloc gc (scanned ~size:1 ~scalars:0) in
   let static_block = Static_data.alloc static (scanned ~size:1 ~scalars:0) in
   Memory.store_addr frame block;
   (* A root may point into the data stack. *)
-  let frame2 = Roots.push_frame roots ~slots:1 in
+  let frame2 = Shadow_stack.push_frame roots ~slots:1 in
   Memory.store_addr frame2 local;
   let check () =
     print_s [%sexp (Stag_gc.check_invariants gc : unit Or_error.t)]
@@ -280,7 +280,7 @@ let%expect_test "check_invariants: nothing but the data stack points into it" =
   Stag_gc.destroy gc;
   Static_data.destroy static;
   Data_stack.destroy stack;
-  Roots.destroy roots;
+  Shadow_stack.destroy roots;
   Heap.destroy heap
 ;;
 
@@ -372,21 +372,22 @@ let%expect_test "check_invariants: dangling pointers into the data stack, and \
                  a broken walk"
   =
   let heap = Heap.create heap_config in
-  let roots = Roots.create () in
+  let roots = Shadow_stack.create () in
+  let globals = Globals.create () in
   let stack = Data_stack.create ~segment_bytes:128 () in
   let static = Static_data.create () in
   let gc =
     Stag_gc.create
       manual
       ~heap
-      ~roots:(Roots.root_sources roots)
+      ~roots:[ Shadow_stack.root_source roots; Globals.root_source globals ]
       ~data_stack:stack
       ~static
   in
   let global =
-    Static_data.add_global static roots (Layout.of_shape Ptr |> ok_exn)
+    Static_data.add_global static globals (Layout.of_shape Ptr |> ok_exn)
   in
-  let frame = Roots.push_frame roots ~slots:1 in
+  let frame = Shadow_stack.push_frame roots ~slots:1 in
   let check () =
     print_s [%sexp (Stag_gc.check_invariants gc : unit Or_error.t)]
   in
@@ -440,23 +441,23 @@ let%expect_test "check_invariants: dangling pointers into the data stack, and \
       (errors
        (("a data-stack block not unmarked" (from ("data stack" (block 0))))))))
     |}];
-  Static_data.remove_global roots global;
+  Static_data.remove_global globals global;
   Stag_gc.destroy gc;
   Static_data.destroy static;
   Data_stack.destroy stack;
-  Roots.destroy roots;
+  Shadow_stack.destroy roots;
   Heap.destroy heap
 ;;
 
 let%expect_test "the GC ignores stale blocks in a reused segment" =
   let heap = Heap.create heap_config in
-  let roots = Roots.create () in
+  let roots = Shadow_stack.create () in
   let stack = Data_stack.create ~segment_bytes:64 () in
   let gc =
     Stag_gc.create
       manual
       ~heap
-      ~roots:(Roots.root_sources roots)
+      ~roots:[ Shadow_stack.root_source roots ]
       ~data_stack:stack
       ~static:(Static_data.create ())
   in
@@ -494,6 +495,6 @@ let%expect_test "the GC ignores stale blocks in a reused segment" =
     |}];
   Stag_gc.destroy gc;
   Data_stack.destroy stack;
-  Roots.destroy roots;
+  Shadow_stack.destroy roots;
   Heap.destroy heap
 ;;

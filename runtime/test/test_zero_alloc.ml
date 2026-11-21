@@ -112,17 +112,13 @@ let%expect_test "no allocation in lookups" =
 
 let[@zero_alloc] walk_roots roots =
   let mutable count = 0 in
-  let mutable frame = Roots.latest_frame roots in
+  let mutable frame = Shadow_stack.latest_frame roots in
   while not (Addr.is_null frame) do
-    for i = 0 to Roots.Frame.slots frame - 1 do
-      if not (Addr.is_null (load_addr (Roots.Frame.slot frame i)))
+    for i = 0 to Shadow_stack.Frame.slots frame - 1 do
+      if not (Addr.is_null (load_addr (Shadow_stack.Frame.slot frame i)))
       then count <- count + 1
     done;
-    frame <- Roots.Frame.next frame
-  done;
-  for i = 0 to Roots.globals roots - 1 do
-    if not (Addr.is_null (load_addr (Roots.global roots i)))
-    then count <- count + 1
+    frame <- Shadow_stack.Frame.next frame
   done;
   count
 ;;
@@ -130,18 +126,18 @@ let[@zero_alloc] walk_roots roots =
 let[@zero_alloc] push_and_pop roots ~frames =
   for i = 1 to frames do
     let slots = i land 3 in
-    let slot = Roots.push_frame roots ~slots in
+    let slot = Shadow_stack.push_frame roots ~slots in
     if Int.(slots > 0) then store_addr slot slot
   done;
   let count = walk_roots roots in
   for _ = 1 to frames do
-    Roots.pop_frame roots
+    Shadow_stack.pop_frame roots
   done;
   count
 ;;
 
 let%expect_test "no allocation in pushing, popping and walking frames" =
-  let roots = Roots.create () in
+  let roots = Shadow_stack.create () in
   (* Once the segments are there, nothing allocates. *)
   let (_ : int) = push_and_pop roots ~frames:10_000 in
   let before = Gc.minor_words () in
@@ -194,12 +190,12 @@ let%expect_test "no allocation in data-stack regions" =
 
 let[@zero_alloc] push_wide roots ~frames =
   for _ = 1 to frames do
-    let slot = Roots.push_frame roots ~slots:100 in
+    let slot = Shadow_stack.push_frame roots ~slots:100 in
     store_addr (Addr.add slot (99 * 8)) slot
   done;
   let count = walk_roots roots in
   for _ = 1 to frames do
-    Roots.pop_frame roots
+    Shadow_stack.pop_frame roots
   done;
   count
 ;;
@@ -207,12 +203,12 @@ let[@zero_alloc] push_wide roots ~frames =
 let%expect_test "no allocation in pushing frames of 100 slots, past the first \
                  maps"
   =
-  let roots = Roots.create () in
+  let roots = Shadow_stack.create () in
   let (_ : int) = push_wide roots ~frames:100 in
   let before = Gc.minor_words () in
   let count = push_wide roots ~frames:100 in
   let allocated = Gc.minor_words () - before in
   print_s [%message "" (count : int) (allocated : int)];
-  Roots.destroy roots;
+  Shadow_stack.destroy roots;
   [%expect {| ((count 100) (allocated 0)) |}]
 ;;

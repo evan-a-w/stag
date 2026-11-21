@@ -53,12 +53,12 @@ module Global : sig
   val block : t -> Memory.Addr.t
 end
 
-(** Zeroed, its pointer slots added to [roots]. *)
-val add_global : t -> Roots.t -> Layout.t -> Global.t
+(** Zeroed, its pointer slots added to [globals]. *)
+val add_global : t -> Globals.t -> Layout.t -> Global.t
 
-(** Removes its slots from [roots]. Its storage is not reused. Raises, changing
-    nothing, if already removed or if its slots are not [roots]' globals. *)
-val remove_global : Roots.t -> Global.t -> unit
+(** Removes its slots from [globals]. Its storage is not reused. Raises,
+    changing nothing, if already removed or if its slots are not in [globals]. *)
+val remove_global : Globals.t -> Global.t -> unit
 
 (** Every block, by offset from the start of its segment, with its header:
     deterministic. *)

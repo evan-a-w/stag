@@ -229,14 +229,15 @@ end
 
 let%expect_test "random mutation against a model" =
   let heap = Heap.create heap_config in
-  let roots = Roots.create () in
+  let roots = Shadow_stack.create () in
+  let globals = Globals.create () in
   let data_stack = Data_stack.create ~segment_bytes:512 () in
   let static = Static_data.create () in
   let gc =
     Stag_gc.create
       { Stag_gc.Config.space_overhead = 50; min_words = 500 }
       ~heap
-      ~roots:(Roots.root_sources roots)
+      ~roots:[ Globals.root_source globals; Shadow_stack.root_source roots ]
       ~data_stack
       ~static
   in
@@ -244,7 +245,7 @@ let%expect_test "random mutation against a model" =
   let global =
     Static_data.add_global
       static
-      roots
+      globals
       (Layout.of_shape
          (Struct
             { repr = Default
@@ -269,7 +270,7 @@ let%expect_test "random mutation against a model" =
   let random = Random.State.make [| 7 |] in
   let int bound = Random.State.int random bound in
   let push_frame slots =
-    let first = Roots.push_frame roots ~slots in
+    let first = Shadow_stack.push_frame roots ~slots in
     model.frames
     <- { Frame.slots = to_int first
        ; values = Array.create ~len:slots Value.Null
@@ -638,7 +639,7 @@ let%expect_test "random mutation against a model" =
       if List.length model.frames > 1
       then (
         incr pops;
-        Roots.pop_frame roots;
+        Shadow_stack.pop_frame roots;
         model.frames <- List.tl_exn model.frames)
     | _ ->
       ignore (Stag_gc.collect gc : Stag_gc.Stats.t);
@@ -660,13 +661,13 @@ let%expect_test "random mutation against a model" =
         ~regions_at_end:(List.length model.regions : int)
         ~data_stack_segments:
           (Data_stack.For_testing.segments_made data_stack : int)
-        ~depth_at_end:(Roots.depth roots : int)
+        ~depth_at_end:(Shadow_stack.depth roots : int)
         ~mark_stack_capacity:(Stag_gc.For_testing.mark_stack_capacity gc : int)];
-  Static_data.remove_global roots global;
+  Static_data.remove_global globals global;
   Stag_gc.destroy gc;
   Static_data.destroy static;
   Data_stack.destroy data_stack;
-  Roots.destroy roots;
+  Shadow_stack.destroy roots;
   Heap.destroy heap;
   Memory.Chunk.destroy foreign;
   [%expect

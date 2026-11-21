@@ -58,9 +58,6 @@ type t =
   (** Segments [0, segment_count) have been used, by depth. *)
   ; mutable segment_count : int
   ; segment_bytes : int
-  ; mutable globals : Addr.t array
-  ; mutable global_count : int
-  ; global_index : int Int.Table.t (** By address, as a word. *)
   ; mutable maps : Addr.t array
   (** The frame map of each slot count, or null: frames of a count share one. *)
   ; big_maps : int Int.Table.t (** Maps' addresses as words. *)
@@ -98,9 +95,6 @@ let create_with ~segment_bytes =
     ; segments = [| first |]
     ; segment_count = 1
     ; segment_bytes
-    ; globals = Array.create ~len:4 (Addr.null ())
-    ; global_count = 0
-    ; global_index = Int.Table.create ()
     ; maps = Array.create ~len:16 (Addr.null ())
     ; big_maps = Int.Table.create ()
     ; map_chunks = []
@@ -205,9 +199,9 @@ let[@inline] [@zero_alloc] map_for t ~slots =
 ;;
 
 let[@zero_alloc] push_frame t ~slots =
-  if t.destroyed then fail [%message "Roots.push_frame: destroyed"];
+  if t.destroyed then fail [%message "Shadow_stack.push_frame: destroyed"];
   if Int.(slots < 0 || slots > max_slots)
-  then fail [%message "Roots.push_frame" (slots : int)];
+  then fail [%message "Shadow_stack.push_frame" (slots : int)];
   let bytes = Frame.bytes ~slots in
   if Int.(Addr.diff t.limit t.top < bytes) then grow t ~bytes;
   if Int.(t.depth = Array.length t.own) then grow_own t;
@@ -223,10 +217,10 @@ let[@zero_alloc] push_frame t ~slots =
 ;;
 
 let[@zero_alloc] pop_frame t =
-  if Int.(t.depth = 0) then fail [%message "Roots.pop_frame: no frame"];
+  if Int.(t.depth = 0) then fail [%message "Shadow_stack.pop_frame: no frame"];
   let frame = t.own.(t.depth - 1) in
   if not (Addr.equal (Memory.load_addr t.head) frame)
-  then fail [%message "Roots.pop_frame: a foreign frame is the latest"];
+  then fail [%message "Shadow_stack.pop_frame: a foreign frame is the latest"];
   Memory.store_addr t.head (Frame.next frame);
   t.depth <- t.depth - 1;
   t.own.(t.depth) <- Addr.null ();
@@ -243,7 +237,7 @@ let[@zero_alloc] pop_frame t =
 let depth t = t.depth
 
 let destroy t =
-  if t.destroyed then fail [%message "Roots.destroy: destroyed"];
+  if t.destroyed then fail [%message "Shadow_stack.destroy: destroyed"];
   for i = 0 to t.segment_count - 1 do
     Chunk.destroy t.segments.(i)
   done;
@@ -252,61 +246,11 @@ let destroy t =
   t.maps <- [||];
   Chunk.destroy t.head_chunk;
   t.depth <- 0;
-  t.global_count <- 0;
-  Hashtbl.clear t.global_index;
   t.destroyed <- true
 ;;
 
 let[@zero_alloc] latest_frame t =
   if t.destroyed then Addr.null () else Memory.load_addr t.head
-;;
-
-let[@zero_alloc] globals t = t.global_count
-
-let[@zero_alloc] global t i =
-  if Int.(i < 0 || i >= t.global_count)
-  then fail [%message "Roots.global" (i : int)];
-  t.globals.(i)
-;;
-
-let key addr = Nativeint_u.to_int (Addr.to_word addr)
-let is_global t addr = Hashtbl.mem t.global_index (key addr)
-
-let add_global t addr =
-  if t.destroyed then fail [%message "Roots.add_global: destroyed"];
-  if is_global t addr then fail [%message "Roots.add_global: already added"];
-  if t.global_count = Array.length t.globals
-  then t.globals <- grow_addrs t.globals ~len:(2 * t.global_count);
-  t.globals.(t.global_count) <- addr;
-  Hashtbl.set t.global_index ~key:(key addr) ~data:t.global_count;
-  t.global_count <- t.global_count + 1
-;;
-
-let remove_global t addr =
-  match Hashtbl.find t.global_index (key addr) with
-  | None -> fail [%message "Roots.remove_global: not added"]
-  | Some i ->
-    Hashtbl.remove t.global_index (key addr);
-    t.global_count <- t.global_count - 1;
-    if i < t.global_count
-    then (
-      let last = t.globals.(t.global_count) in
-      t.globals.(i) <- last;
-      Hashtbl.set t.global_index ~key:(key last) ~data:i);
-    t.globals.(t.global_count) <- Addr.null ()
-;;
-
-let iter_slots t ~(f : _ @ local) =
-  let mutable frame = latest_frame t in
-  while not (Addr.is_null frame) do
-    for i = 0 to Frame.slots frame - 1 do
-      f (Frame.slot frame i)
-    done;
-    frame <- Frame.next frame
-  done;
-  for i = 0 to t.global_count - 1 do
-    f t.globals.(i)
-  done
 ;;
 
 module For_testing = struct
@@ -315,7 +259,7 @@ module For_testing = struct
   let segment t = t.segment
 end
 
-module Frames_source = struct
+module Source = struct
   type nonrec t = t
 
   let name = "shadow stack"
@@ -332,21 +276,4 @@ module Frames_source = struct
   ;;
 end
 
-module Globals_source = struct
-  type nonrec t = t
-
-  let name = "globals"
-  let holds_locals = false
-
-  let[@zero_alloc] iter t ~(f : _ @ local) =
-    for i = 0 to t.global_count - 1 do
-      (f [@zero_alloc assume]) t.globals.(i)
-    done
-  ;;
-end
-
-let root_sources t =
-  [ Root_source.create (module Frames_source) t
-  ; Root_source.create (module Globals_source) t
-  ]
-;;
+let root_source t = Root_source.create (module Source) t

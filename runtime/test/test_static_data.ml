@@ -129,21 +129,21 @@ let%expect_test "errors" =
 
 let%expect_test "globals: scalars, then pointer slots that are roots" =
   let static = Static_data.create () in
-  let roots = Roots.create () in
+  let globals = Globals.create () in
   (* An i8, an i64 and two pointers: 16 bytes of scalars, then two slots. *)
   let global =
     Static_data.add_global
       static
-      roots
+      globals
       (layout (struct_ [ scalar I8; ptr; scalar I64; ptr ]))
   in
-  let nothing = Static_data.add_global static roots (layout (struct_ [])) in
+  let nothing = Static_data.add_global static globals (layout (struct_ [])) in
   let only_scalars =
-    Static_data.add_global static roots (layout (scalar I32))
+    Static_data.add_global static globals (layout (scalar I32))
   in
   let roots_slots () =
     let slots = ref [] in
-    Roots.iter_slots roots ~f:(fun slot ->
+    Root_source.iter (Globals.root_source globals) ~f:(fun slot ->
       slots := Addr.diff slot (Static_data.Global.block global) :: !slots);
     List.rev !slots |> List.sort ~compare:Int.compare
   in
@@ -164,11 +164,11 @@ let%expect_test "globals: scalars, then pointer slots that are roots" =
            : bool)
         ~only_scalars_header:
           (Header.load (Static_data.Global.block only_scalars) : Header.t)];
-  Static_data.remove_global roots global;
+  Static_data.remove_global globals global;
   print_s [%message "removed" ~root_slots:(roots_slots () : int list)];
   print_s
     [%sexp
-      (Or_error.try_with (fun () -> Static_data.remove_global roots global)
+      (Or_error.try_with (fun () -> Static_data.remove_global globals global)
        : unit Or_error.t)];
   [%expect
     {|
@@ -185,15 +185,15 @@ let%expect_test "globals: scalars, then pointer slots that are roots" =
        : unit Or_error.t)];
   [%expect
     {| (Error ("Static_data.destroy: globals not removed" (globals 2))) |}];
-  Static_data.remove_global roots nothing;
-  (* Removing from the wrong roots raises, changing nothing. *)
-  let other_roots = Roots.create () in
+  Static_data.remove_global globals nothing;
+  (* Removing from the wrong globals raises, changing nothing. *)
+  let other_globals = Globals.create () in
   let two =
-    Static_data.add_global static roots (layout (struct_ [ ptr; ptr ]))
+    Static_data.add_global static globals (layout (struct_ [ ptr; ptr ]))
   in
   print_s
     [%sexp
-      (Or_error.try_with (fun () -> Static_data.remove_global other_roots two)
+      (Or_error.try_with (fun () -> Static_data.remove_global other_globals two)
        : unit Or_error.t)];
   print_s [%message "" ~root_slots_still:(List.length (roots_slots ()) : int)];
   [%expect
@@ -201,27 +201,25 @@ let%expect_test "globals: scalars, then pointer slots that are roots" =
     (Error "Static_data.remove_global: a slot is not a root")
     (root_slots_still 2)
     |}];
-  Static_data.remove_global roots only_scalars;
-  Static_data.remove_global roots two;
-  Roots.destroy other_roots;
-  Roots.destroy roots;
+  Static_data.remove_global globals only_scalars;
+  Static_data.remove_global globals two;
   Static_data.destroy static
 ;;
 
 let%expect_test "a global keeps what its slots point to alive, until removed" =
   let static = Static_data.create () in
   let heap = Heap.create heap_config in
-  let roots = Roots.create () in
+  let globals = Globals.create () in
   let gc =
     Stag_gc.create
       manual
       ~heap
-      ~roots:(Roots.root_sources roots)
+      ~roots:[ Globals.root_source globals ]
       ~data_stack:(Data_stack.create ())
       ~static
   in
   let global =
-    Static_data.add_global static roots (layout (struct_ [ ptr; scalar I64 ]))
+    Static_data.add_global static globals (layout (struct_ [ ptr; scalar I64 ]))
   in
   let cell = Stag_gc.alloc gc (scanned ~size:2 ~scalars:1 Unmarked) in
   let other = Stag_gc.alloc gc (scanned ~size:1 ~scalars:1 Unmarked) in
@@ -236,12 +234,11 @@ let%expect_test "a global keeps what its slots point to alive, until removed" =
   collect ();
   [%expect
     {| ((marked_blocks 2) (marked_words 3) (freed_blocks 0) (freed_words 0)) |}];
-  Static_data.remove_global roots global;
+  Static_data.remove_global globals global;
   collect ();
   [%expect
     {| ((marked_blocks 0) (marked_words 0) (freed_blocks 2) (freed_words 3)) |}];
   Stag_gc.destroy gc;
-  Roots.destroy roots;
   Heap.destroy heap;
   Static_data.destroy static
 ;;
@@ -249,16 +246,16 @@ let%expect_test "a global keeps what its slots point to alive, until removed" =
 let%expect_test "check_invariants: static data must not point into the heap" =
   let static = Static_data.create () in
   let heap = Heap.create heap_config in
-  let roots = Roots.create () in
+  let roots = Shadow_stack.create () in
   let gc =
     Stag_gc.create
       manual
       ~heap
-      ~roots:(Roots.root_sources roots)
+      ~roots:[ Shadow_stack.root_source roots ]
       ~data_stack:(Data_stack.create ())
       ~static
   in
-  let frame = Roots.push_frame roots ~slots:1 in
+  let frame = Shadow_stack.push_frame roots ~slots:1 in
   let cell = Stag_gc.alloc gc (scanned ~size:1 ~scalars:1 Unmarked) in
   Memory.store_addr frame cell;
   let a = Static_data.alloc static (scanned ~size:3 ~scalars:0 Unmarked) in
@@ -282,7 +279,7 @@ let%expect_test "check_invariants: static data must not point into the heap" =
        (("static data points into the heap" (from (static (block 0) (word 1))))))))
     |}];
   Stag_gc.destroy gc;
-  Roots.destroy roots;
+  Shadow_stack.destroy roots;
   Heap.destroy heap;
   Static_data.destroy static
 ;;
