@@ -189,6 +189,9 @@ module Defs = struct
     | Let_mut of Name.t * type_expr option * expr * expr
     (** [let mut x = e in body]: not recursive. *)
     | Assign of Decl_path.t Located.t * expr (** [x <- e] *)
+    | Store of expr * expr
+    (** [e <- v], where [e] is a place: a dereference [p.*], or a field of one,
+        [p.*.f] or [p.*.`f]. *)
     | Fun of binding list * expr (** [fun x (y : t) -> e], of some params. *)
     | Splice of
         { expr : expr
@@ -382,6 +385,7 @@ module Expr = struct
     | Let of Name.t * Binding.t list * Type_expr.t option * t * t
     | Let_mut of Name.t * Type_expr.t option * t * t
     | Assign of Decl_path.t Located.t * t
+    | Store of t * t
     | Fun of Binding.t list * t
     | Splice of
         { expr : t

@@ -522,6 +522,7 @@ module Of_value = struct
              , arg 3 (expr ~loc) )
          | "Assign", 2 ->
            Assign (arg 0 (decl_path Lower ~loc), arg 1 (expr ~loc))
+         | "Store", 2 -> Store (arg 0 (expr ~loc), arg 1 (expr ~loc))
          | "Fun", 2 -> Fun (arg 0 (params (binding ~loc)), arg 1 (expr ~loc))
          | "Splice", 1 ->
            arg 0 (fun splice : Expr.desc ->

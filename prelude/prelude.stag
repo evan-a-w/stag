@@ -198,6 +198,7 @@ module Stag = struct
       | Let of ptr[string * list[Binding.t] * option[Type_expr.t] * t * t]
       | Let_mut of ptr[string * option[Type_expr.t] * t * t]
       | Assign of ptr[Path.t[Value_ref.t] * t]
+      | Store of ptr[t * t]
       | Fun of ptr[list[Binding.t] * t]
       | Splice of ptr[{`expr : t; `subs : option[list[string * option[t]]]}]
       | Quote of ptr[t]

@@ -175,6 +175,7 @@ module Expr = struct
           ; in_ : t
           }
       | Assign of Var.t * t
+      | Store of t * t
       | Fun of
           { args : (Binder.t * Syntax.Type_expr.t option) list
           ; body : t
@@ -226,6 +227,7 @@ module Expr = struct
     | Let_mut (name, annot, equal, in_) ->
       Let_mut { binder = Name name; annot; body = sub equal; in_ = sub in_ }
     | Assign (path, value) -> Assign (Path (path.txt, None), sub value)
+    | Store (target, value) -> Store (sub target, sub value)
     | Fun (args, body) ->
       Fun
         { args = List.map args ~f:(fun (name, annot) -> Binder.Name name, annot)
@@ -301,6 +303,7 @@ module Expr = struct
     | Let_mut { ident; annot; body; in_ } ->
       Let_mut { binder = Ident ident; annot; body = sub body; in_ = sub in_ }
     | Assign (var_ref, value) -> Assign (Ref var_ref, sub value)
+    | Store (target, value) -> Store (sub target, sub value)
     | Fun { args; annots; body } ->
       Fun { args = annotated_args args annots; body = sub body }
     | Splice { code; subs = Explicit subs } ->

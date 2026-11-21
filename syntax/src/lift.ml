@@ -16,6 +16,7 @@ let indirect_arity = function
   | "Stag.Type_expr.Arrow"
   | "Stag.Expr.App"
   | "Stag.Expr.Assign"
+  | "Stag.Expr.Store"
   | "Stag.Expr.Fun"
   | "Stag.Expr.Field"
   | "Stag.Expr.Record_update"
@@ -194,6 +195,7 @@ module Make (B : Builder) = struct
           [ name var; option type_expr annot; expr equal; expr body ]
       | Assign (p, value) ->
         con "Assign" [ decl_path_txt Value p.txt; expr value ]
+      | Store (target, value) -> con "Store" [ expr target; expr value ]
       | Fun (params, body) -> con "Fun" [ list binding params; expr body ]
       | Splice { expr = spliced; subs } ->
         (match A.antiquote Expr spliced with

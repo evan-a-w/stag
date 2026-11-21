@@ -197,6 +197,10 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
     let* p = decl_path p p' in
     let+ e = expr e e' in
     Expr.Assign (p, e)
+  | Store (target, value), Store (target', value') ->
+    let* target = expr target target' in
+    let+ value = expr value value' in
+    Expr.Store (target, value)
   | Fun (bs, e), Fun (bs', e') ->
     let* bs = list binding bs bs' in
     let+ e = expr e e' in
@@ -271,6 +275,7 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
       | Let _
       | Let_mut _
       | Assign _
+      | Store _
       | Fun _
       | Splice _
       | Quote _

@@ -114,6 +114,7 @@ module Expr : sig
           ; in_ : t
           }
       | Assign of Var.t * t
+      | Store of t * t
       | Fun of
           { args : (Binder.t * Syntax.Type_expr.t option) list
           ; body : t

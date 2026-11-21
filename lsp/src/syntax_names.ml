@@ -233,6 +233,9 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
     | Assign (path, value) ->
       decl_path ~add ~kind:Kind.Value ~loc:path.loc path.txt;
       recurse value
+    | Store (target, value) ->
+      recurse target;
+      recurse value
     | Fun (bindings, body) ->
       walk_bindings ~add ~type_expr bindings;
       recurse body

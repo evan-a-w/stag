@@ -2177,6 +2177,23 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
     if Scope.unifies t scope ~ty1:pointer.ty ~ty2:expected ~loc
     then node (Deref pointer) pointee
     else node (Error [ pointer ]) Type.error
+  | Store (target, value) ->
+    let rec under_deref (expr : Source.Expr.t) =
+      match Source.Expr.view expr with
+      | Deref _ -> true
+      | Field (inner, _) | Poly_field (inner, _) -> under_deref inner
+      | _ -> false
+    in
+    if not (under_deref target)
+    then (
+      let target = expr_type t scope ~expr:target in
+      fail
+        ~children:[ target ]
+        (Typecheck_error.create ~loc Store_not_through_pointer))
+    else (
+      let target = expr_type t scope ~expr:target in
+      let value = check_expr t scope ~expr:value ~ty:target.ty in
+      node (Store (target, value)) Type.unit)
   | Tuple exprs ->
     let exprs =
       List.map2_exn

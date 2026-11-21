@@ -827,17 +827,29 @@ and assignment t ~seq : Expr.t =
   let target = tuple t ~seq in
   match peek t with
   | Larrow ->
-    let path =
-      match target.txt with
-      | Var (path, None) -> located ~loc:target.loc path
-      | Field _ ->
-        fail target.loc "record fields are not mutable: only variables are"
-      | _ -> fail target.loc "only a variable can be assigned to"
-    in
+    let store = store_target target in
     advance t;
     let value = assignment t ~seq in
-    expr_at ~loc:(Loc.merge target.loc value.loc) (Assign (path, value))
+    expr_at ~loc:(Loc.merge target.loc value.loc) (store value)
   | _ -> target
+
+and store_target (target : Expr.t) : Expr.t -> Expr.desc =
+  let rec under_deref (e : Expr.t) =
+    match e.txt with
+    | Deref _ -> true
+    | Field (inner, _) | Poly_field (inner, _) -> under_deref inner
+    | _ -> false
+  in
+  match target.txt with
+  | Var (path, None) -> fun value -> Assign (located ~loc:target.loc path, value)
+  | (Deref _ | Field _ | Poly_field _) when under_deref target ->
+    fun value -> Store (target, value)
+  | Field _ | Poly_field _ ->
+    fail
+      target.loc
+      "only a field of a dereference is mutable, as in [p.*.x <- v]: records \
+       are values, and are mutated through pointers"
+  | _ -> fail target.loc "only a variable or a dereference can be assigned to"
 
 and fun_ t ~seq : Expr.t =
   let start = loc t in

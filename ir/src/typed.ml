@@ -265,6 +265,7 @@ module Expr = struct
       | Record of (Field_ref.t * 'e) list
       | Field of 'e * Field_ref.t
       | Record_update of 'e * (Field_ref.t * 'e) list
+      | Store of 'e * 'e
       | Match of
           { scrutinee : 'e
           ; cases : (Pattern.t * 'e) list
@@ -304,6 +305,7 @@ module Expr = struct
     | Toplevel_splice { code = a; expansion = b } -> [ a; b ]
     | Splice { code; subs = Explicit subs } -> code :: snds subs
     | Splice { code; subs = Implicit _ } -> [ code ]
+    | Store (target, value) -> [ target; value ]
     | Quote e
     | Annotated (e, _)
     | Assign (_, e)
@@ -376,7 +378,8 @@ module Expr = struct
     | Let { ident; args; body; in_; _ } ->
       binding_is_value ~ident ~args ~body && is_value in_
     | Toplevel_splice { expansion; code = _ } -> is_value expansion
-    | App _ | Splice _ | Expect _ | Let_mut _ | Assign _ | Deref _ -> false
+    | App _ | Splice _ | Expect _ | Let_mut _ | Assign _ | Store _ | Deref _ ->
+      false
     | Tuple _
     | Construct _
     | Record _
@@ -413,6 +416,7 @@ module Expr = struct
     | Let _
     | Let_mut _
     | Assign _
+    | Store _
     | Fun _
     | Tuple _
     | Construct _

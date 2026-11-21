@@ -84,6 +84,8 @@ module Kind = struct
     | Duplicate_parameter of string
     | Duplicate_row_entry of string
     | Assign_to_immutable of string
+    | Store_not_through_pointer
+    (** A [Store] whose target is not a dereference, or a field of one. *)
     | Captures_mutable of
         { name : string
         ; var_level : Env.Level.t
@@ -461,6 +463,10 @@ let rec kind_message (kind : Kind.t) ~show_type =
       "The variable %s is not mutable: only one bound by [let mut] can be \
        assigned to"
       name
+  | Store_not_through_pointer ->
+    "Only a pointer can be stored to: [p.* <- v], or a field of it, as in \
+     [p.*.x <- v]. Records are values, so a field is stored through a pointer \
+     to the record"
   | Toplevel_initialization_cycle cycle ->
     sprintf
       "The value of %s may be needed to compute itself: %s"

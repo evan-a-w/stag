@@ -207,6 +207,8 @@ module Expr : sig
       | Record_update of 'e * (Field_ref.t * 'e) list
       (** [{e with f = v; ...}], of [e]'s type but for the parameters only the
           updated fields' types contain. *)
+      | Store of 'e * 'e
+      (** [e <- v], [e] a place: a [Deref], or a field of one. *)
       | Match of
           { scrutinee : 'e
           ; cases : (Pattern.t * 'e) list

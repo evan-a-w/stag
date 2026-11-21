@@ -191,7 +191,7 @@ let level (e : Expr.t) : Level.t =
   match e.txt with
   | Let _ when Option.is_some (seq e) -> Seq
   | Let _ | Let_mut _ | Match _ | Fun _ -> Item
-  | Assign _ -> Assign
+  | Assign _ | Store _ -> Assign
   | Lit (Int n) when n < 0 -> Item
   | _ when is_construct e -> Construct
   | App _ -> App
@@ -219,7 +219,7 @@ let bare_at at e = Level.compare (level e) at >= 0
 let rec extends_right e =
   match (unwrap e).txt with
   | Let _ | Let_mut _ | Match _ | Fun _ -> true
-  | Assign (_, value) -> extends_right value
+  | Assign (_, value) | Store (_, value) -> extends_right value
   | _ -> false
 ;;
 
@@ -233,7 +233,7 @@ let rec ends_with_match ~seq:in_seq e =
   | (Let (_, _, _, _, body) | Let_mut (_, _, _, body) | Fun (_, body)), _ ->
     bare_at (Ctx.body { Ctx.top with seq = in_seq }) body
     && ends_with_match ~seq:in_seq body
-  | Assign (_, value), _ ->
+  | (Assign (_, value) | Store (_, value)), _ ->
     bare_at Assign value && ends_with_match ~seq:in_seq value
   | _ -> false
 ;;
@@ -520,6 +520,11 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
   | Assign (p, value), _ ->
     group
       (decl_path roots p
+       ^^ text " <-"
+       ^^ nest 2 (line ^^ expr roots { ctx with level = Assign } value))
+  | Store (target, value), _ ->
+    group
+      (postfix roots target
        ^^ text " <-"
        ^^ nest 2 (line ^^ expr roots { ctx with level = Assign } value))
   | Fun (params, body), _ ->

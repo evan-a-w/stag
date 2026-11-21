@@ -187,12 +187,14 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   borrowed: the callee may not retain it.
 - `global_` on record fields and constructor arguments: always `global`, even
   inside a local block.
-- Mutable fields, and stores through a `ptr` (`*p <- v`), are implicitly
-  `global_` (as OxCaml's mutable fields), so an older region's block never
-  points into a newer region. `Unsafe.assume_global e` (name tentative)
-  bypasses this, the programmer guaranteeing that `e` outlives what it is
-  stored into. The GC stays safe either way: it never follows pointers into
-  the data stack, so only the program's own reads can dangle.
+- Records have no mutable fields: mutation is through a `ptr` (`p.* <- v`,
+  `p.*.x <- v`), whose pointee is storage rather than a value. Such a store
+  is implicitly `global_`, so an older region's block never points into a
+  newer region. `Unsafe.assume_global e` (name tentative) bypasses this, the
+  programmer guaranteeing that `e` outlives what it is stored into. The GC
+  stays safe either way: it never follows pointers into the data stack, so
+  only the program's own reads can dangle. Which pointers may be written
+  through (immutability as a permission) is left to modes and modalities.
 - Tail calls end the current region before the call, so a local value of the
   current region cannot be passed to a tail call (OxCaml's rule); such a call
   is not a tail call (or is an error under an explicit `[@tail]`).

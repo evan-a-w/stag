@@ -211,6 +211,20 @@ List literals and patterns keep their syntax. The equivalent constructors
 are `Nil` and `Cons` of a pointer to an element-and-tail pair. Constructing
 a nonempty list therefore allocates even when its elements are values.
 
+### Stores
+
+`p.* <- v` (or `*p <- v`) stores `v` in the pointee of `p : ptr[t]`, with
+`v : t`, and is a `unit`. It is the one way to mutate: records have no mutable
+fields, and `r.x <- v` on a record value is an error. A field of a pointee is
+stated by the destination: `p.*.x <- v` stores `v` in the `x` of the record `p`
+points to, as does a longer path (`p.*.a.b <- v`), which copies the records
+along the path. Records are values, so a store to one is not seen by holders
+of a previous copy; it is seen through every pointer to the same pointee.
+
+The destination is evaluated once, before the value. `<-` binds as in
+[`let mut`](#mutable-variables): `p.*.x <- v; e` and `f (p.*.x <- v)`
+parse as expected, and the value extends as far right as possible.
+
 ### Type-directed fields and constructors
 
 As OCaml's disambiguation, an unqualified field (`x`, not `M.x`) or
@@ -311,7 +325,8 @@ variable, optionally annotated (`let mut x : t = e`), with no parameters. It is
 the one `let` that is not recursive: in `let mut x = x + 1 in ...` the `x` on
 the right is the outer one. Its type is never generalized (`let mut l = []`
 has a weak type, fixed by its uses). Only a variable bound by `let mut` can be
-assigned; `<-` takes a path (`x`, `M.x`), not a field (records are immutable).
+assigned; `<-` takes a path (`x`, `M.x`). Fields are assigned through a
+pointer (see [Stores](#stores)): records have no mutable fields.
 
 A closure captures a mutable local by reference: it shares the variable with
 the code that binds it. Mutable locals are values of their level only: a

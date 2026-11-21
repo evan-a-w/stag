@@ -126,6 +126,9 @@ module Syntax_at = struct
     | Assign (path, value) ->
       set t.assigned e.loc path;
       recurse value
+    | Store (target, value) ->
+      recurse target;
+      recurse value
     | Fun (bindings, body) ->
       set t.funs e.loc bindings;
       recurse body
@@ -375,6 +378,7 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
        pattern t ~syntax ~program p)
    | Annotated _ -> ()
    | Lit _
+   | Store _
    | App _
    | Splice _
    | Toplevel_splice _

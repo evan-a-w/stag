@@ -47,6 +47,7 @@ val module_ : string -> Toplevel.t list -> Toplevel.t
 
 module Pat : sig
   val var : string -> Pattern.t
+  val deref : Pattern.t -> Pattern.t
   val construct : ?args:Pattern.t list -> string -> Pattern.t
   val record : (string * Pattern.t) list -> Pattern.t
   val tag : ?arg:Pattern.t -> string -> Pattern.t

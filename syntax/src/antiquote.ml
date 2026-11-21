@@ -85,6 +85,7 @@ let map ?type_expr:replace_type_expr toplevels ~f =
         let body = sub body in
         Let_mut (n, a, body, sub in_)
       | Assign (p, value) -> Assign (p, sub value)
+      | Store (target, value) -> Store (sub target, sub value)
       | Fun (bs, body) ->
         let bs = List.map bs ~f:(binding depth) in
         Fun (bs, sub body)

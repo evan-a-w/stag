@@ -180,6 +180,10 @@ let expr (expr : Typed.Expr.t) =
       let%bind path = var_path names var_ref in
       let%bind value = go names value in
       node (Assign (located loc path, value))
+    | Store (target, value) ->
+      let%bind target = go names target in
+      let%bind value = go names value in
+      node (Store (target, value))
     | Let_mut { ident; annot; body; in_ } ->
       let%bind body = go names body in
       let names = Names.bind names [ ident ] ~scope:(Uses.of_expr in_) in

@@ -32,6 +32,63 @@ module Embedded = struct
   let add t ~ident ~value = t.values <- Map.set t.values ~key:ident ~data:value
 end
 
+(* A place that a [Store] writes to: a pointer's cell, and the fields of the
+   value in it to reach the part stored. Fields are copied on the way, so a
+   record is never mutated in place: [p.*.x <- v] leaves other holders of the
+   record's value unchanged. *)
+module Store_place = struct
+  type step =
+    | Field of int
+    | Poly_field of string
+
+  type t =
+    { cell : Value.t ref
+    ; path : step list
+    }
+
+  let rec update (value : Value.t) (path : step list) ~value_to_store
+    : Value.t Or_error.t
+    =
+    match path with
+    | [] -> Ok value_to_store
+    | Field index :: path ->
+      (match value with
+       | Record (record_type, values) when index < Array.length values ->
+         let values = Array.copy values in
+         (match update values.(index) path ~value_to_store with
+          | Error _ as error -> error
+          | Ok inner ->
+            values.(index) <- inner;
+            Ok (Value.Record (record_type, values)))
+       | _ ->
+         Or_error.error_s
+           [%message "Field of a non-record" (index : int) (value : Value.t)])
+    | Poly_field label :: path ->
+      (match value with
+       | Poly_record fields ->
+         (match Map.find fields label with
+          | None ->
+            Or_error.error_s
+              [%message "No such polymorphic record field" (label : string)]
+          | Some field ->
+            (match update field path ~value_to_store with
+             | Error _ as error -> error
+             | Ok field ->
+               Ok (Poly_record (Map.set fields ~key:label ~data:field))))
+       | _ ->
+         Or_error.error_s
+           [%message "Field of a non-polymorphic-record" (label : string)])
+  ;;
+
+  let store ({ cell; path } : t) ~value =
+    match update !cell path ~value_to_store:value with
+    | Error _ as error -> error
+    | Ok content ->
+      cell := content;
+      Ok ()
+  ;;
+end
+
 (* What a step evaluates to: a value, or an expression in tail position, to
    evaluate in place of the step so that tail calls take no stack. *)
 module Next = struct
@@ -103,6 +160,9 @@ let captures t ~ident ~args ~body =
     | Var var_ref -> var ~depth var_ref
     | Assign (var_ref, value) ->
       var ~depth var_ref;
+      go ~depth value
+    | Store (target, value) ->
+      go ~depth target;
       go ~depth value
     | Let { ident; args; body; in_; _ } ->
       def ident;
@@ -247,6 +307,10 @@ let map_children ~depth (expr : Typed.Expr.t) ~(f @ local) =
     | Assign (var_ref, value) ->
       let%mapl_fun value = same value in
       Typed.Expr.Desc.Assign (var_ref, value)
+    | Store (target, value) ->
+      let%bindl_fun target = same target in
+      let%mapl_fun value = same value in
+      Typed.Expr.Desc.Store (target, value)
     | Fun fun_ ->
       let%mapl_fun body = same fun_.body in
       Typed.Expr.Desc.Fun { fun_ with body }
@@ -705,6 +769,32 @@ and bind_functions t ({ members; recursive } : Typed.Scc.t)
     in
     { global = Env.set t.env ~ident ~value })
 
+and store_place t ~env ~level (expr : Typed.Expr.t)
+  : Store_place.t Eval_result.t @ local
+  = exclave_
+  match expr.desc with
+  | Deref pointer ->
+    let%bindl.Local_result { global = pointer } = eval t ~env ~level pointer in
+    (match pointer with
+     | Ptr cell -> Eval_result.return { Store_place.cell; path = [] }
+     | _ ->
+       Eval_result.error_s
+         [%message "Dereferenced a non-pointer" (pointer : Value.t)])
+  | Field (inner, field) ->
+    let%bindl.Local_result { global = place } =
+      store_place t ~env ~level inner
+    in
+    Eval_result.return
+      { place with path = Store_place.Field field.index :: place.path }
+  | Poly_field (inner, label) ->
+    let%bindl.Local_result { global = place } =
+      store_place t ~env ~level inner
+    in
+    Eval_result.return { place with path = Poly_field label :: place.path }
+  | _ ->
+    Eval_result.error_s
+      [%message "Not a place to store to" (expr : Typed.Expr.t)]
+
 (* [env] has the bindings of the current activation, at [level]. *)
 and eval t ~env ~level expr : Value.t Eval_result.t @ local = exclave_
   match Budget.enter t.budget ~loc:expr.loc with
@@ -846,6 +936,15 @@ and step_value t ~env ~level (expr : Typed.Expr.t)
        Eval_result.error_s
          [%message
            "Field of a non-record" (field : Typed.Field_ref.t) (value : Value.t)])
+  | Store (target, value) ->
+    let%bindl.Local_result { global = place } =
+      store_place t ~env ~level target
+    in
+    let%bindl.Local_result { global = value } = eval t ~env ~level value in
+    let%bindl.Local_result (_ : unit Global.t) =
+      Store_place.store place ~value |> Eval_result.of_or_error
+    in
+    Eval_result.return Value.Unit
   | Record_update (expr, fields) ->
     let%bindl.Local_result { global = value } = eval t ~env ~level expr in
     let%bindl.Local_result { global = values } =

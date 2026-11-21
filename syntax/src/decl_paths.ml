@@ -108,6 +108,7 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
           , expr value
           , expr' (bind locals [ n.txt ]) body )
       | Assign (p, value) -> Assign (f Value ~locals p, expr value)
+      | Store (target, value) -> Store (expr target, expr value)
       | Fun (bs, body) ->
         Fun (List.map bs ~f:binding, expr' (bind locals (binding_names bs)) body)
       | Splice { expr = e; subs } ->
