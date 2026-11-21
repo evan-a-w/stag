@@ -13,3 +13,4 @@ module Block = Stag_runtime.Block
 module Nativeint_u = Stdlib_upstream_compatible.Nativeint_u
 module Page_table = Stag_runtime.Page_table
 module Heap = Stag_runtime.Heap
+module Roots = Stag_runtime.Roots

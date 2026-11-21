@@ -109,3 +109,44 @@ let%expect_test "no allocation in lookups" =
      (allocated 0))
     |}]
 ;;
+
+let[@zero_alloc] walk_roots roots =
+  let mutable count = 0 in
+  let mutable frame = Roots.latest_frame roots in
+  while not (Addr.is_null frame) do
+    for i = 0 to Roots.Frame.slots frame - 1 do
+      if not (Addr.is_null (load_addr (Roots.Frame.slot frame i)))
+      then count <- count + 1
+    done;
+    frame <- Roots.Frame.next frame
+  done;
+  for i = 0 to Roots.globals roots - 1 do
+    if not (Addr.is_null (load_addr (Roots.global roots i)))
+    then count <- count + 1
+  done;
+  count
+;;
+
+let[@zero_alloc] push_and_pop roots ~frames =
+  for i = 1 to frames do
+    let slots = i land 3 in
+    let slot = Roots.push_frame roots ~slots in
+    if Int.(slots > 0) then store_addr slot slot
+  done;
+  let count = walk_roots roots in
+  for _ = 1 to frames do
+    Roots.pop_frame roots
+  done;
+  count
+;;
+
+let%expect_test "no allocation in pushing, popping and walking frames" =
+  let roots = Roots.create () in
+  (* Once the segments are there, nothing allocates. *)
+  let (_ : int) = push_and_pop roots ~frames:10_000 in
+  let before = Gc.minor_words () in
+  let count = push_and_pop roots ~frames:10_000 in
+  let allocated = Gc.minor_words () - before in
+  print_s [%message "" (count : int) (allocated : int)];
+  [%expect {| ((count 7500) (allocated 0)) |}]
+;;
