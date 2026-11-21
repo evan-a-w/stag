@@ -23,6 +23,7 @@ module Stats = struct
 end
 
 let initial_mark_stack_blocks = 1024
+let[@cold] fail sexp = raise (Error.to_exn (Error.create_s sexp))
 
 type t =
   { config : Config.t
@@ -37,6 +38,7 @@ type t =
   ; mutable stack_limit : Addr.t
   ; mutable marked_blocks : int
   ; mutable marked_words : int
+  ; mutable destroyed : bool
   }
 
 let set_stack t chunk =
@@ -59,6 +61,7 @@ let create config heap roots =
   ; stack_limit = Addr.add (Chunk.base stack) (Chunk.bytes stack)
   ; marked_blocks = 0
   ; marked_words = 0
+  ; destroyed = false
   }
 ;;
 
@@ -102,6 +105,8 @@ let[@inline] [@zero_alloc] visit t word =
 ;;
 
 let[@zero_alloc] mark t =
+  (* Left mid-stack if a previous mark raised. *)
+  t.stack_top <- t.stack_base;
   t.marked_blocks <- 0;
   t.marked_words <- 0;
   let mutable frame = Roots.latest_frame t.roots in
@@ -124,10 +129,13 @@ let[@zero_alloc] mark t =
   done
 ;;
 
+let check_live t = if t.destroyed then fail [%message "Gc: destroyed"]
+
 let collect t =
+  check_live t;
   mark t;
   let sweep = Heap.sweep t.heap in
-  t.live_words <- sweep.kept_words;
+  t.live_words <- sweep.kept_footprint_words;
   t.allocated_words <- 0;
   t.collections <- t.collections + 1;
   { Stats.marked_blocks = t.marked_blocks
@@ -138,7 +146,8 @@ let collect t =
 ;;
 
 let alloc t header =
-  let words = Header.size_words header in
+  check_live t;
+  let words = Heap.footprint_words t.heap header in
   let threshold =
     Int.max t.config.min_words (t.live_words * t.config.space_overhead / 100)
   in
@@ -149,6 +158,12 @@ let alloc t header =
 ;;
 
 let collections t = t.collections
+
+let destroy t =
+  check_live t;
+  Chunk.destroy t.stack;
+  t.destroyed <- true
+;;
 
 let check_invariants t =
   let errors = ref [] in

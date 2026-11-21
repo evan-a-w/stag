@@ -11,7 +11,7 @@ module Config : sig
   type t =
     { page_bytes : int
     (** A power of two, from 64 bytes to 1 MiB; regions are aligned to it. *)
-    ; arena_bytes : int (** A power of two, at least [page_bytes]. *)
+    ; arena_bytes : int (** A power of two, from [page_bytes] to 1 GiB. *)
     ; size_classes : int list (** Block words, increasing, from 1. *)
     }
   [@@deriving sexp_of]
@@ -28,6 +28,9 @@ module Sweep_stats : sig
     ; freed_words : int
     ; kept_blocks : int
     ; kept_words : int
+    ; kept_footprint_words : int
+    (** Of the kept blocks' slots, headers and rounding up to a class (or to
+        pages, for large blocks) included. *)
     }
   [@@deriving sexp_of]
 end
@@ -40,8 +43,13 @@ val create : Config.t -> t
 
 (** A block of the size [header] gives, its header written and its words zeroed.
     Zero-size blocks are a shared immortal atom per kind, outside the heap.
-    Raises on a [Free] header. *)
+    Raises on a [Free] or [Marked] header. *)
 val alloc : t -> Header.t -> Memory.Addr.t
+
+(** The words a block of [header] takes in the heap, its header and rounding up
+    to a class (or to pages, for a large block) included: 0 for zero-size
+    blocks. *)
+val footprint_words : t -> Header.t -> int
 
 (** The block containing [addr], at its first field, if [addr] is within the
     words of an allocated block of [t]: [Memory.Addr.null] for anything else,
@@ -55,8 +63,9 @@ val owns : t -> Memory.Addr.t -> bool
 [@@zero_alloc]
 
 (** Frees every [Unmarked] block, and makes every [Marked] one [Unmarked]. The
-    pages of freed large blocks go back to their arena. Pages of slots are kept,
-    even when all their slots are free. *)
+    pages of freed large blocks, and pages of slots left with no block, go back
+    to their arena, for any class or large block to take. Arenas left with no
+    page in use go back to the system, but for the first. *)
 val sweep : t -> Sweep_stats.t
 
 (** The allocated blocks (before a sweep, garbage included), by region in
@@ -79,6 +88,9 @@ module For_testing : sig
   val regions : t -> int
   val pages : t -> int
   val arenas : t -> int
+
+  (** Of each arena, in creation order. *)
+  val free_pages : t -> int list
 
   (** The index of the arena [addr] is in, in creation order, and of its page
       there. *)

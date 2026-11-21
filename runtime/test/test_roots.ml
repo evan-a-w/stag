@@ -205,3 +205,52 @@ let%expect_test "globals" =
     (Error "Roots.remove_global: not added")
     |}]
 ;;
+
+let%expect_test "a used segment too small for a frame is replaced" =
+  let roots = Roots.For_testing.create ~segment_bytes:64 in
+  let segments () =
+    Roots.For_testing.segments roots, Roots.For_testing.segment roots
+  in
+  (* Two frames fill the first segment, a third makes the second. *)
+  let _ = push roots ~slots:2 ~first:0 in
+  let _ = push roots ~slots:2 ~first:10 in
+  let _ = push roots ~slots:1 ~first:20 in
+  print_s [%message "" ~segments:(segments () : int * int)];
+  Roots.pop_frame roots;
+  (* The second segment (64 bytes) is too small for this frame: replaced. *)
+  let big = push roots ~slots:20 ~first:100 in
+  print_s [%message "" ~segments:(segments () : int * int)];
+  print_roots roots;
+  print_s
+    [%message
+      ""
+        ~big_last_slot:(int_of (Memory.load_addr (Addr.add big (19 * 8))) : int)];
+  [%expect
+    {|
+    (segments (2 1))
+    (segments (2 1))
+    ((depth 3)
+     (slots
+      (100 101 102 103 104 105 106 107 108 109 110 111 112 113 114 115 116 117
+       118 119 10 11 0 1)))
+    (big_last_slot 119)
+    |}]
+;;
+
+let%expect_test "destroy" =
+  let roots = Roots.For_testing.create ~segment_bytes:64 in
+  for i = 0 to 4 do
+    ignore (push roots ~slots:2 ~first:(i * 10) : Addr.t)
+  done;
+  Roots.destroy roots;
+  print_roots roots;
+  let try_ f = print_s [%sexp (Or_error.try_with f : unit Or_error.t)] in
+  try_ (fun () -> ignore (Roots.push_frame roots ~slots:1 : Addr.t));
+  try_ (fun () -> Roots.destroy roots);
+  [%expect
+    {|
+    ((depth 0) (slots ()))
+    (Error "Roots.push_frame: destroyed")
+    (Error "Roots.destroy: destroyed")
+    |}]
+;;

@@ -177,7 +177,7 @@ let%expect_test "blocks are zeroed, their headers written" =
 let%expect_test "zero-size blocks are shared immortal atoms" =
   let heap = Heap.create small in
   let a = Heap.alloc heap (scanned 0) in
-  let b = Heap.alloc heap (scanned ~color:Marked 0) in
+  let b = Heap.alloc heap (scanned ~color:Immortal 0) in
   let s = Heap.alloc heap (Header.bytes ~length:0 Unmarked) in
   let s' = Heap.alloc heap (Header.bytes ~length:0 Unmarked) in
   print_s
@@ -199,7 +199,8 @@ let%expect_test "zero-size blocks are shared immortal atoms" =
      (scanned (Scanned (size_words 0) (scalar_words 0) (color Immortal)))
      (bytes (Bytes (length 0) (color Immortal))) (where outside)
      (block_start null) (regions 0))
-    ((freed_blocks 0) (freed_words 0) (kept_blocks 0) (kept_words 0))
+    ((freed_blocks 0) (freed_words 0) (kept_blocks 0) (kept_words 0)
+     (kept_footprint_words 0))
     (Scanned (size_words 0) (scalar_words 0) (color Immortal))
     |}]
 ;;
@@ -344,7 +345,8 @@ let%expect_test "sweep" =
         ~pages:(Heap.For_testing.pages heap : int)];
   [%expect
     {|
-    ((freed_blocks 4) (freed_words 68) (kept_blocks 4) (kept_words 55))
+    ((freed_blocks 4) (freed_words 68) (kept_blocks 4) (kept_words 55)
+     (kept_footprint_words 73))
     ((Page
       ((index 0) (words 1)
        (slots
@@ -363,18 +365,6 @@ let%expect_test "sweep" =
          (224 (Free (size_words 1) (color Unmarked)))
          (240 (Free (size_words 1) (color Unmarked)))))))
      (Page
-      ((index 1) (words 2)
-       (slots
-        ((32 (Free (size_words 2) (color Unmarked)))
-         (56 (Free (size_words 2) (color Unmarked)))
-         (80 (Free (size_words 2) (color Unmarked)))
-         (104 (Free (size_words 2) (color Unmarked)))
-         (128 (Free (size_words 2) (color Unmarked)))
-         (152 (Free (size_words 2) (color Unmarked)))
-         (176 (Free (size_words 2) (color Unmarked)))
-         (200 (Free (size_words 2) (color Unmarked)))
-         (224 (Free (size_words 2) (color Unmarked)))))))
-     (Page
       ((index 2) (words 4)
        (slots
         ((32 (Scanned (size_words 3) (scalar_words 0) (color Unmarked)))
@@ -385,9 +375,10 @@ let%expect_test "sweep" =
      (Large
       ((index 3) (pages 2)
        (slots ((32 (Scanned (size_words 50) (scalar_words 0) (color Unmarked))))))))
-    ((regions 4) (pages 5) (large_freed null))
-    ((freed_blocks 4) (freed_words 55) (kept_blocks 0) (kept_words 0))
-    ((regions 3) (pages 3))
+    ((regions 3) (pages 4) (large_freed null))
+    ((freed_blocks 4) (freed_words 55) (kept_blocks 0) (kept_words 0)
+     (kept_footprint_words 0))
+    ((regions 0) (pages 0))
     |}]
 ;;
 
@@ -417,7 +408,8 @@ let%expect_test "immortal blocks are kept as they are" =
         ~large:(Header.load large : Header.t)];
   [%expect
     {|
-    ((freed_blocks 0) (freed_words 0) (kept_blocks 2) (kept_words 41))
+    ((freed_blocks 0) (freed_words 0) (kept_blocks 2) (kept_words 41)
+     (kept_footprint_words 66))
     ((block (Scanned (size_words 1) (scalar_words 0) (color Immortal)))
      (large (Scanned (size_words 40) (scalar_words 0) (color Immortal))))
     |}]
@@ -491,7 +483,8 @@ let%expect_test "a large block spanning many pages" =
   [%expect
     {|
     ((pages 17) (first (0 32)) (page_boundaries true) (last (0 32)) (past null))
-    ((freed_blocks 1) (freed_words 131072) (kept_blocks 0) (kept_words 0))
+    ((freed_blocks 1) (freed_words 131072) (kept_blocks 0) (kept_words 0)
+     (kept_footprint_words 0))
     ((pages 0) (after null))
     |}]
 ;;
@@ -537,10 +530,12 @@ let%expect_test "a marked large block survives sweep" =
   print_s [%sexp (Heap.sweep heap : Heap.Sweep_stats.t)];
   [%expect
     {|
-    ((freed_blocks 0) (freed_words 0) (kept_blocks 1) (kept_words 60))
+    ((freed_blocks 0) (freed_words 0) (kept_blocks 1) (kept_words 60)
+     (kept_footprint_words 64))
     ((header (Scanned (size_words 60) (scalar_words 0) (color Unmarked)))
      (start (0 32)) (interior (0 32)))
-    ((freed_blocks 1) (freed_words 60) (kept_blocks 0) (kept_words 0))
+    ((freed_blocks 1) (freed_words 60) (kept_blocks 0) (kept_words 0)
+     (kept_footprint_words 0))
     |}]
 ;;
 
@@ -574,7 +569,10 @@ let%expect_test "sweeping bytes blocks counts their words" =
   set_color kept Marked;
   print_s [%sexp (Heap.sweep heap : Heap.Sweep_stats.t)];
   [%expect
-    {| ((freed_blocks 2) (freed_words 14) (kept_blocks 1) (kept_words 2)) |}]
+    {|
+    ((freed_blocks 2) (freed_words 14) (kept_blocks 1) (kept_words 2)
+     (kept_footprint_words 3))
+    |}]
 ;;
 
 let%expect_test "destroy" =
@@ -599,5 +597,125 @@ let%expect_test "destroy" =
     ((regions 0) (pages 0) (block null)
      (again (Error ("Heap: destroyed" (name destroy))))
      (alloc (Error ("Heap: destroyed" (name alloc)))))
+    |}]
+;;
+
+let%expect_test "arenas: first fit, page runs, own chunks, release" =
+  let heap = Heap.create small in
+  let show () =
+    print_s
+      [%message
+        ""
+          ~arenas:(Heap.For_testing.arenas heap : int)
+          ~free_pages:(Heap.For_testing.free_pages heap : int list)]
+  in
+  let page addr =
+    [%sexp (Heap.For_testing.arena_page heap addr : (int * int) option)]
+  in
+  let one = Heap.alloc heap (scanned 1) in
+  let two_pages = Heap.alloc heap (scanned 40) in
+  let one_page = Heap.alloc heap (scanned 20) in
+  print_s
+    [%message
+      ""
+        ~one:(page one : Sexp.t)
+        ~two_pages:(page two_pages : Sexp.t)
+        ~one_page:(page one_page : Sexp.t)];
+  show ();
+  [%expect
+    {|
+    ((one ((0 0))) (two_pages ((0 1))) (one_page ((0 3))))
+    ((arenas 1) (free_pages (0)))
+    |}];
+  (* A run of every page of an arena: a new one. *)
+  let whole = Heap.alloc heap (scanned 120) in
+  (* Bigger than an arena: a chunk of its own. *)
+  let huge = Heap.alloc heap (scanned 200) in
+  print_s
+    [%message
+      ""
+        ~whole:(page whole : Sexp.t)
+        ~huge:(page huge : Sexp.t)
+        ~huge_resolves:
+          (Addr.equal (Heap.block_start heap (Addr.add huge 1592)) huge : bool)];
+  show ();
+  [%expect
+    {|
+    ((whole ((1 0))) (huge ()) (huge_resolves true))
+    ((arenas 2) (free_pages (0 0)))
+    |}];
+  set_color one Marked;
+  set_color one_page Marked;
+  ignore (Heap.sweep heap : Heap.Sweep_stats.t);
+  (* The emptied second arena is given back; the first keeps its free run. *)
+  show ();
+  [%expect {| ((arenas 1) (free_pages (2))) |}];
+  (* Freed pages are taken again, first fit, by another class and a run. *)
+  let two = Heap.alloc heap (scanned 2) in
+  let again = Heap.alloc heap (scanned 20) in
+  print_s [%message "" ~two:(page two : Sexp.t) ~again:(page again : Sexp.t)];
+  show ();
+  [%expect
+    {|
+    ((two ((0 1))) (again ((0 2))))
+    ((arenas 1) (free_pages (0)))
+    |}];
+  (* Pages of slots left with no block go back too: here, every page. *)
+  ignore (Heap.sweep heap : Heap.Sweep_stats.t);
+  show ();
+  let four = Heap.alloc heap (scanned 4) in
+  print_s
+    [%message
+      ""
+        ~four:(page four : Sexp.t)
+        ~at_one_s_old_address:(Addr.equal four one : bool)];
+  [%expect
+    {|
+    ((arenas 1) (free_pages (4)))
+    ((four ((0 0))) (at_one_s_old_address true))
+    |}]
+;;
+
+let%expect_test "alloc rejects marked headers" =
+  let heap = Heap.create small in
+  print_s
+    [%sexp
+      (Or_error.try_with (fun () ->
+         ignore (Heap.alloc heap (scanned ~color:Marked 1) : Addr.t))
+       : unit Or_error.t)];
+  [%expect
+    {|
+    (Error
+     ("Heap.alloc: a Marked header"
+      (header (Scanned (size_words 1) (scalar_words 0) (color Marked)))))
+    |}]
+;;
+
+let%expect_test "footprint_words" =
+  let heap = Heap.create small in
+  List.iter [ 0; 1; 2; 3; 4; 5; 28; 29; 124; 200 ] ~f:(fun words ->
+    print_s
+      [%message
+        ""
+          (words : int)
+          ~footprint:(Heap.footprint_words heap (scanned words) : int)]);
+  print_s
+    [%message
+      ""
+        ~bytes_13:
+          (Heap.footprint_words heap (Header.bytes ~length:13 Unmarked) : int)];
+  [%expect
+    {|
+    ((words 0) (footprint 0))
+    ((words 1) (footprint 2))
+    ((words 2) (footprint 3))
+    ((words 3) (footprint 5))
+    ((words 4) (footprint 5))
+    ((words 5) (footprint 32))
+    ((words 28) (footprint 32))
+    ((words 29) (footprint 64))
+    ((words 124) (footprint 128))
+    ((words 200) (footprint 224))
+    (bytes_13 3)
     |}]
 ;;

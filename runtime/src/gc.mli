@@ -9,13 +9,18 @@ open! Import
     of the heap (it may point into the block): anything else, such as static
     data, zero-size atoms and foreign memory, is left alone. [Immortal] blocks
     are never traced, so must only point to other immortal blocks or outside the
-    heap. *)
+    heap.
+
+    Collections are not reentrant: nothing a collection runs (finalisers or
+    signal handlers, run by the OCaml allocations of growing the mark stack)
+    may use the collector, its heap or its roots. *)
 
 module Config : sig
   type t =
     { space_overhead : int
     (** Collect once the words allocated since the last collection exceed this
-        percentage of the words live after it... *)
+        percentage of the words live after it (as [Heap.footprint_words]:
+        headers and rounding up to a class included)... *)
     ; min_words : int (** ...and [min_words]. *)
     }
   [@@deriving sexp_of]
@@ -38,6 +43,11 @@ end
 type t
 
 val create : Config.t -> Heap.t -> Roots.t -> t
+
+(** Frees the mark stack. [t] must be kept reachable until then, or its memory
+    is freed with it. Using [t] afterwards raises. The heap and roots are left
+    as they are. *)
+val destroy : t -> unit
 
 (** As [Heap.alloc], collecting first if the policy says to. Every pointer the
     caller holds into the heap must be in a root slot (or a block reachable from

@@ -22,6 +22,7 @@ module Config = struct
   ;;
 
   let max_page_bytes = 1 lsl 20
+  let max_arena_bytes = 1 lsl 30
 end
 
 module Sweep_stats = struct
@@ -30,6 +31,7 @@ module Sweep_stats = struct
     ; freed_words : int
     ; kept_blocks : int
     ; kept_words : int
+    ; kept_footprint_words : int
     }
   [@@deriving sexp_of]
 end
@@ -74,35 +76,51 @@ module Arena = struct
   type t =
     { chunk : Chunk.t
     ; free : bool array (** By page. *)
+    ; mutable free_pages : int
+    ; mutable hint : int (** No page before it is free. *)
     }
 
   let create ~arena_bytes ~page_bytes =
+    let pages = arena_bytes / page_bytes in
     { chunk = Chunk.create ~bytes:arena_bytes ~align:page_bytes
-    ; free = Array.create ~len:(arena_bytes / page_bytes) true
+    ; free = Array.create ~len:pages true
+    ; free_pages = pages
+    ; hint = 0
     }
   ;;
 
-  (* The first of the first run of [pages] free pages, which are taken. *)
+  let is_empty t = t.free_pages = Array.length t.free
+
+  (* The first of the first run of [pages] free pages, which are taken, or -1. *)
   let take t ~pages =
-    let len = Array.length t.free in
-    let rec from first =
-      if first + pages > len
-      then None
-      else (
-        match
-          List.find
-            (List.range first (first + pages))
-            ~f:(fun page -> not t.free.(page))
-        with
-        | Some taken -> from (taken + 1)
-        | None ->
-          Array.fill t.free ~pos:first ~len:pages false;
-          Some first)
-    in
-    from 0
+    if pages > t.free_pages
+    then -1
+    else (
+      let len = Array.length t.free in
+      let found = ref (-1) in
+      let run = ref 0 in
+      let page = ref t.hint in
+      while !found < 0 && !page < len do
+        if t.free.(!page)
+        then (
+          incr run;
+          if !run = pages then found := !page - pages + 1)
+        else run := 0;
+        incr page
+      done;
+      if !found >= 0
+      then (
+        Array.fill t.free ~pos:!found ~len:pages false;
+        t.free_pages <- t.free_pages - pages;
+        if !found = t.hint then t.hint <- !found + pages);
+      !found)
   ;;
 
-  let release t ~first ~pages = Array.fill t.free ~pos:first ~len:pages true
+  let release t ~first ~pages =
+    Array.fill t.free ~pos:first ~len:pages true;
+    t.free_pages <- t.free_pages + pages;
+    t.hint <- Int.min t.hint first
+  ;;
 end
 
 module Region = struct
@@ -128,6 +146,7 @@ module Region = struct
     ; kind : Kind.t
     ; slot_bytes : int
     ; slots : int
+    ; mutable removed : bool (** Its pages given back. *)
     }
 
   let base t ~page_bytes =
@@ -150,7 +169,7 @@ type t =
   ; class_of_words : int array (** The smallest class of at least that many. *)
   ; free : Addr.t array (** The first free block of each class, or null. *)
   ; page_table : Page_table.t
-  ; mutable arenas : Arena.t list (** Latest first. *)
+  ; mutable arenas : Arena.t list (** Oldest first: allocation is first fit. *)
   ; mutable regions : Region.t list (** Latest first. *)
   ; mutable regions_created : int
   ; atoms : Chunk.t
@@ -172,6 +191,7 @@ let create (config : Config.t) =
      || page_bytes > Config.max_page_bytes
      || (not (is_power_of_two arena_bytes))
      || arena_bytes < page_bytes
+     || arena_bytes > Config.max_arena_bytes
      || Array.is_empty classes
      || classes.(0) < 1
      || (not
@@ -216,21 +236,23 @@ let arena_pages t = t.config.arena_bytes / page_bytes t
 
 (* [pages] contiguous pages, from the first arena with a run of them. *)
 let take_pages t ~pages : Region.Backing.t =
-  let found =
-    List.find_map (List.rev t.arenas) ~f:(fun arena ->
-      Option.map (Arena.take arena ~pages) ~f:(fun first ->
-        Region.Backing.Arena { arena; first }))
+  let rec first_fit : Arena.t list -> Region.Backing.t = function
+    | arena :: arenas ->
+      let first = Arena.take arena ~pages in
+      if first >= 0 then Arena { arena; first } else first_fit arenas
+    | [] ->
+      let arena =
+        Arena.create
+          ~arena_bytes:t.config.arena_bytes
+          ~page_bytes:(page_bytes t)
+      in
+      t.arenas <- t.arenas @ [ arena ];
+      let first = Arena.take arena ~pages in
+      if first < 0
+      then fail [%message "Heap: a fresh arena has no room" (pages : int)];
+      Arena { arena; first }
   in
-  match found with
-  | Some backing -> backing
-  | None ->
-    let arena =
-      Arena.create ~arena_bytes:t.config.arena_bytes ~page_bytes:(page_bytes t)
-    in
-    t.arenas <- arena :: t.arenas;
-    (match Arena.take arena ~pages with
-     | Some first -> Arena { arena; first }
-     | None -> fail [%message "Heap: a fresh arena has no room" (pages : int)])
+  first_fit t.arenas
 ;;
 
 let iter_pages t (region : Region.t) ~f =
@@ -254,6 +276,7 @@ let add_region t ~pages ~kind ~slot_bytes ~slots ~magic =
     ; kind
     ; slot_bytes
     ; slots
+    ; removed = false
     }
   in
   let base = Region.base region ~page_bytes:(page_bytes t) in
@@ -266,6 +289,7 @@ let add_region t ~pages ~kind ~slot_bytes ~slots ~magic =
 ;;
 
 let remove_region t (region : Region.t) =
+  region.removed <- true;
   iter_pages t region ~f:(fun page -> Page_table.remove t.page_table ~page);
   match region.backing with
   | Arena { arena; first } -> Arena.release arena ~first ~pages:region.pages
@@ -292,12 +316,16 @@ let add_page t class_index =
   done
 ;;
 
+let large_pages t ~words =
+  Int.round_up
+    (Descriptor.bytes + ((words + 1) * 8))
+    ~to_multiple_of:(page_bytes t)
+  / page_bytes t
+;;
+
 let alloc_large t header ~words =
   let slot_bytes = (words + 1) * 8 in
-  let pages =
-    Int.round_up (Descriptor.bytes + slot_bytes) ~to_multiple_of:(page_bytes t)
-    / page_bytes t
-  in
+  let pages = large_pages t ~words in
   let region = add_region t ~pages ~kind:Large ~slot_bytes ~slots:1 ~magic:0 in
   let block = Region.block region 0 ~page_bytes:(page_bytes t) in
   Header.store block header;
@@ -310,6 +338,9 @@ let alloc t header =
   (match Header.kind header with
    | Free -> fail [%message "Heap.alloc: a Free header" (header : Header.t)]
    | Scanned | Bytes -> ());
+  (match Header.color header with
+   | Marked -> fail [%message "Heap.alloc: a Marked header" (header : Header.t)]
+   | Unmarked | Immortal -> ());
   let words = Header.size_words header in
   if words = 0
   then (
@@ -326,6 +357,15 @@ let alloc t header =
     Header.store block header;
     Memory.fill_zero block ~bytes:(t.classes.(class_index) * 8);
     block)
+;;
+
+let footprint_words t header =
+  let words = Header.size_words header in
+  if words = 0
+  then 0
+  else if words >= Array.length t.class_of_words
+  then large_pages t ~words * (page_bytes t / 8)
+  else t.classes.(t.class_of_words.(words)) + 1
 ;;
 
 let[@zero_alloc] owns t addr =
@@ -367,67 +407,94 @@ let sweep t =
   let freed_words = ref 0 in
   let kept_blocks = ref 0 in
   let kept_words = ref 0 in
-  let count blocks words header =
-    incr blocks;
-    words := !words + Header.size_words header
+  let kept_footprint_words = ref 0 in
+  let free header =
+    incr freed_blocks;
+    freed_words := !freed_words + Header.size_words header
+  in
+  let keep header ~footprint_words =
+    incr kept_blocks;
+    kept_words := !kept_words + Header.size_words header;
+    kept_footprint_words := !kept_footprint_words + footprint_words
   in
   for i = 0 to Array.length t.free - 1 do
     t.free.(i) <- Addr.null ()
   done;
-  (* Latest region first and last slot first, so the free lists end up in
+  (* Frees the region's garbage, giving its pages back if nothing is left in it,
+     and says whether it is kept. A page's free slots are pushed last slot
+     first, and the regions are swept latest first, so the free lists end up in
      creation and address order. *)
-  (* Whether [region] is kept: freed large blocks aren't. *)
   let sweep_region (region : Region.t) =
     match region.kind with
     | Page { class_index } ->
-      for i = region.slots - 1 downto 0 do
+      let words = t.classes.(class_index) in
+      let kept = ref 0 in
+      for i = 0 to region.slots - 1 do
         let block = Region.block region i ~page_bytes in
         let header = Header.load block in
         match Header.kind header, Header.color header with
-        | Free, _ -> push_free t ~class_index block
+        | Free, _ -> ()
         | (Scanned | Bytes), Unmarked ->
-          count freed_blocks freed_words header;
-          Header.store block (Header.free ~size_words:t.classes.(class_index));
-          push_free t ~class_index block
+          free header;
+          Header.store block (Header.free ~size_words:words)
         | (Scanned | Bytes), Marked ->
-          count kept_blocks kept_words header;
+          incr kept;
+          keep header ~footprint_words:(words + 1);
           Header.store block (Header.with_color header Unmarked)
-        | (Scanned | Bytes), Immortal -> count kept_blocks kept_words header
+        | (Scanned | Bytes), Immortal ->
+          incr kept;
+          keep header ~footprint_words:(words + 1)
       done;
-      true
+      if !kept = 0
+      then (
+        remove_region t region;
+        false)
+      else (
+        for i = region.slots - 1 downto 0 do
+          let block = Region.block region i ~page_bytes in
+          match Header.kind (Header.load block) with
+          | Free -> push_free t ~class_index block
+          | Scanned | Bytes -> ()
+        done;
+        true)
     | Large ->
       let block = Region.block region 0 ~page_bytes in
       let header = Header.load block in
+      let footprint_words = region.pages * (page_bytes / 8) in
       (match Header.color header with
        | Unmarked ->
-         count freed_blocks freed_words header;
+         free header;
          remove_region t region;
          false
        | Marked ->
-         count kept_blocks kept_words header;
+         keep header ~footprint_words;
          Header.store block (Header.with_color header Unmarked);
          true
        | Immortal ->
-         count kept_blocks kept_words header;
+         keep header ~footprint_words;
          true)
   in
-  (* The list of regions is only rebuilt if a large block was freed: the regions
-     of those are no longer in the page table. *)
+  (* Not [List.filter], so a sweep giving back no region allocates nothing. *)
   let all_kept =
     List.fold t.regions ~init:true ~f:(fun all_kept region ->
       sweep_region region && all_kept)
   in
   if not all_kept
-  then
+  then (
     t.regions
-    <- List.filter t.regions ~f:(fun region ->
-         not
-           (Addr.is_null
-              (Page_table.find t.page_table (Region.base region ~page_bytes))));
+    <- List.filter t.regions ~f:(fun (region : Region.t) -> not region.removed);
+    (* Wholly free arenas but the first go back to the system. *)
+    match t.arenas with
+    | [] -> ()
+    | first :: rest ->
+      let empty, used = List.partition_tf rest ~f:Arena.is_empty in
+      List.iter empty ~f:(fun (arena : Arena.t) -> Chunk.destroy arena.chunk);
+      t.arenas <- first :: used);
   { Sweep_stats.freed_blocks = !freed_blocks
   ; freed_words = !freed_words
   ; kept_blocks = !kept_blocks
   ; kept_words = !kept_words
+  ; kept_footprint_words = !kept_footprint_words
   }
 ;;
 
@@ -505,8 +572,12 @@ module For_testing = struct
   let pages t = Page_table.length t.page_table
   let arenas t = List.length t.arenas
 
+  let free_pages t =
+    List.map t.arenas ~f:(fun (arena : Arena.t) -> arena.free_pages)
+  ;;
+
   let arena_page t addr =
-    List.find_mapi (List.rev t.arenas) ~f:(fun i (arena : Arena.t) ->
+    List.find_mapi t.arenas ~f:(fun i (arena : Arena.t) ->
       if Chunk.contains arena.chunk addr
       then Some (i, Addr.diff addr (Chunk.base arena.chunk) / page_bytes t)
       else None)

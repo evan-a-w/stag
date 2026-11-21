@@ -12,17 +12,21 @@ let heap_config =
 (* Collections only when asked for. *)
 let manual = { Stag_gc.Config.space_overhead = 100; min_words = Int.max_value }
 
-type env =
-  { heap : Heap.t
-  ; roots : Roots.t
-  ; gc : Stag_gc.t
-  }
+module Env = struct
+  type t =
+    { heap : Heap.t
+    ; roots : Roots.t
+    ; gc : Stag_gc.t
+    }
 
-let env ?(config = manual) () =
-  let heap = Heap.create heap_config in
-  let roots = Roots.create () in
-  { heap; roots; gc = Stag_gc.create config heap roots }
-;;
+  let create ?(config = manual) () =
+    let heap = Heap.create heap_config in
+    let roots = Roots.create () in
+    { heap; roots; gc = Stag_gc.create config heap roots }
+  ;;
+end
+
+open Env
 
 let check env = Stag_gc.check_invariants env.gc |> ok_exn
 
@@ -85,7 +89,7 @@ let rec list_values cell =
 ;;
 
 let%expect_test "lists: the rooted one is kept" =
-  let env = env () in
+  let env = Env.create () in
   let root = Roots.push_frame env.roots ~slots:1 in
   Memory.store_addr root (list env ~n:4 ~first:10);
   let (_ : Addr.t) = list env ~n:3 ~first:100 in
@@ -109,7 +113,7 @@ let%expect_test "lists: the rooted one is kept" =
 ;;
 
 let%expect_test "trees and cycles" =
-  let env = env () in
+  let env = Env.create () in
   let roots = Roots.push_frame env.roots ~slots:2 in
   (* A tree of depth 3, each node [left; right]. *)
   let rec tree depth =
@@ -153,7 +157,7 @@ let%expect_test "trees and cycles" =
 ;;
 
 let%expect_test "interior pointers keep their block" =
-  let env = env () in
+  let env = Env.create () in
   let roots = Roots.push_frame env.roots ~slots:3 in
   let small_block = alloc env ~ptrs:4 in
   let large = alloc env ~ptrs:40 in
@@ -174,7 +178,7 @@ let%expect_test "interior pointers keep their block" =
 ;;
 
 let%expect_test "words that aren't pointers to blocks are left alone" =
-  let env = env () in
+  let env = Env.create () in
   let foreign = Memory.Chunk.create ~bytes:64 ~align:8 in
   let atom = alloc env ~ptrs:0 in
   let block = alloc env ~ptrs:5 in
@@ -211,7 +215,7 @@ let%expect_test "words that aren't pointers to blocks are left alone" =
 ;;
 
 let%expect_test "scalars are not traced" =
-  let env = env () in
+  let env = Env.create () in
   let block = alloc env ~scalars:2 ~ptrs:1 in
   let other = alloc env ~ptrs:0 ~scalars:1 in
   let roots = Roots.push_frame env.roots ~slots:1 in
@@ -229,7 +233,7 @@ let%expect_test "scalars are not traced" =
 ;;
 
 let%expect_test "bytes blocks are marked, not scanned" =
-  let env = env () in
+  let env = Env.create () in
   let string = Stag_gc.alloc env.gc (Header.bytes ~length:20 Unmarked) in
   let other = alloc env ~ptrs:0 ~scalars:1 in
   (* Bytes that happen to be a pointer. *)
@@ -246,7 +250,7 @@ let%expect_test "bytes blocks are marked, not scanned" =
 ;;
 
 let%expect_test "globals are roots" =
-  let env = env () in
+  let env = Env.create () in
   let static = Memory.Chunk.create ~bytes:16 ~align:8 in
   let global = Memory.Chunk.base static in
   Roots.add_global env.roots global;
@@ -265,7 +269,7 @@ let%expect_test "globals are roots" =
 ;;
 
 let%expect_test "immortal blocks are not traced" =
-  let env = env () in
+  let env = Env.create () in
   let immortal =
     Stag_gc.alloc env.gc (Header.scanned ~size_words:2 ~scalar_words:0 Immortal)
   in
@@ -295,7 +299,7 @@ let%expect_test "immortal blocks are not traced" =
 ;;
 
 let%expect_test "a wide block grows the mark stack" =
-  let env = env () in
+  let env = Env.create () in
   let roots = Roots.push_frame env.roots ~slots:1 in
   let wide = alloc env ~ptrs:3000 in
   Memory.store_addr roots wide;
@@ -318,7 +322,7 @@ let%expect_test "a wide block grows the mark stack" =
 ;;
 
 let%expect_test "a deep chain" =
-  let env = env () in
+  let env = Env.create () in
   let head = list env ~n:100_000 ~first:0 in
   let roots = Roots.push_frame env.roots ~slots:1 in
   Memory.store_addr roots head;
@@ -341,7 +345,7 @@ let%expect_test "a deep chain" =
 
 let%expect_test "the policy" =
   let config = { Stag_gc.Config.space_overhead = 100; min_words = 100 } in
-  let env = env ~config () in
+  let env = Env.create ~config () in
   let roots = Roots.push_frame env.roots ~slots:1 in
   let allocate_garbage n =
     for _ = 1 to n do
@@ -362,14 +366,14 @@ let%expect_test "the policy" =
         ~live:(List.length (list_values (Memory.load_addr roots)) : int)];
   check env;
   [%expect {|
-    (collections 9)
-    ((collections 5) (live 500))
+    (collections 19)
+    ((collections 7) (live 500))
     |}]
 ;;
 
 let%expect_test "collecting allocates the same however much is live" =
   let allocated_by_collect ~n =
-    let env = env () in
+    let env = Env.create () in
     let roots = Roots.push_frame env.roots ~slots:1 in
     Memory.store_addr roots (list env ~n ~first:0);
     let (_ : Addr.t) = list env ~n ~first:0 in
@@ -384,5 +388,27 @@ let%expect_test "collecting allocates the same however much is live" =
       ""
         ~small:(allocated_by_collect ~n:10 : int)
         ~large:(allocated_by_collect ~n:100_000 : int)];
-  [%expect {| ((small 10) (large 10)) |}]
+  [%expect {| ((small 11) (large 11)) |}]
+;;
+
+let%expect_test "destroy" =
+  let heap = Heap.create Heap.Config.default in
+  let roots = Roots.create () in
+  let gc = Stag_gc.create Stag_gc.Config.default heap roots in
+  Stag_gc.destroy gc;
+  let try_ f = print_s [%sexp (Or_error.try_with f : unit Or_error.t)] in
+  try_ (fun () -> ignore (Stag_gc.collect gc : Stag_gc.Stats.t));
+  try_ (fun () ->
+    ignore
+      (Stag_gc.alloc gc (Header.scanned ~size_words:1 ~scalar_words:0 Unmarked)
+       : Memory.Addr.t));
+  try_ (fun () -> Stag_gc.destroy gc);
+  Roots.destroy roots;
+  Heap.destroy heap;
+  [%expect
+    {|
+    (Error "Gc: destroyed")
+    (Error "Gc: destroyed")
+    (Error "Gc: destroyed")
+    |}]
 ;;

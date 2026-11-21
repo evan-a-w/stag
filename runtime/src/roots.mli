@@ -10,11 +10,19 @@ open! Import
 
     Frames are bump allocated in segments, chunks of C memory chained as the
     stack grows, so a frame never moves while it is pushed: the addresses of its
-    slots stay valid until it is popped. *)
+    slots stay valid until it is popped.
+
+    Growing the stack allocates on the OCaml heap, which may run finalisers or
+    signal handlers: they must not use [t]. *)
 
 type t
 
 val create : unit -> t
+
+(** Frees the segments: every frame's slots are then dangling. [t] must be kept
+    reachable until then, or its memory is freed with it. Pushing afterwards
+    raises; there are no frames or globals left. *)
+val destroy : t -> unit
 
 (** Pushes a frame of [slots] null slots, giving the address of its first slot.
     Allocates (on the OCaml heap) only when it needs a new segment. *)

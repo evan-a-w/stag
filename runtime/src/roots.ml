@@ -35,6 +35,7 @@ type t =
   ; segment_bytes : int
   ; mutable globals : Addr.t array
   ; mutable global_count : int
+  ; mutable destroyed : bool
   }
 
 let enter_segment t i =
@@ -63,6 +64,7 @@ let create_with ~segment_bytes =
     ; segment_bytes
     ; globals = Array.create ~len:4 (Addr.null ())
     ; global_count = 0
+    ; destroyed = false
     }
   in
   enter_segment t 0;
@@ -108,6 +110,7 @@ let[@cold] [@zero_alloc assume] grow t ~bytes =
 ;;
 
 let[@zero_alloc] push_frame t ~slots =
+  if t.destroyed then fail [%message "Roots.push_frame: destroyed"];
   if Int.(slots < 0) then fail [%message "Roots.push_frame" (slots : int)];
   let bytes = Frame.bytes ~slots in
   if Int.(Addr.diff t.limit t.top < bytes) then grow t ~bytes;
@@ -141,6 +144,18 @@ let[@zero_alloc] pop_frame t =
 ;;
 
 let depth t = t.depth
+
+let destroy t =
+  if t.destroyed then fail [%message "Roots.destroy: destroyed"];
+  for i = 0 to t.segment_count - 1 do
+    Chunk.destroy t.segments.(i)
+  done;
+  t.head <- Addr.null ();
+  t.depth <- 0;
+  t.global_count <- 0;
+  t.destroyed <- true
+;;
+
 let[@zero_alloc] latest_frame t = t.head
 let[@zero_alloc] globals t = t.global_count
 
