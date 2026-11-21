@@ -39,7 +39,9 @@ val create : ?ptr_name:string -> Resolver.t -> t
       once per instantiation however it was reached: [type u['a] = A of 'a] with
       [type r['a] = u['a]] has a finite layout at [r[r[int]]].
     - A declaration whose expansion does not terminate, as under polymorphic
-      recursion, is [Error.Too_deep]. *)
+      recursion, is [Error.Too_deep]. One whose shape grows exponentially with
+      the depth of its expansions, as under nested polymorphic recursion
+      ([type t['a] = L of 'a | N of t[('a * 'a)]]), is [Error.Too_large]. *)
 val shape : t -> Type.ty -> (Shape.t, Error.t) Result.t
 
 (** [shape], laid out by [Layout.of_shape]. *)

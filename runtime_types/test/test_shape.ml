@@ -507,3 +507,128 @@ let%expect_test "shared instantiations are expanded once" =
   printf !"is_ok %b\n" (Result.is_ok (Runtime_types.shape t (tycon "t0" [])));
   [%expect {| is_ok true |}]
 ;;
+
+let%expect_test "nested polymorphic recursion" =
+  (* type t['a] = L of 'a | N of t[('a * 'a)]: [t[int]] never repeats an
+     instantiation, and the shape doubles at each one. *)
+  let parameter = var () in
+  let nested =
+    decl
+      ~name:"t"
+      ~params:[ Type.ATy (Type.TVar parameter) ]
+      (variant
+         [ ctor "L" [ Type.TVar parameter ]
+         ; ctor
+             "N"
+             [ tycon
+                 "t"
+                 [ Type.TTuple [ Type.TVar parameter; Type.TVar parameter ] ]
+             ]
+         ])
+  in
+  let t = Runtime_types.create (resolver [ nested ]) in
+  shape t (tycon "t" [ int ]);
+  layout t (tycon "t" [ int ]);
+  (* Behind a pointer, it is finite. *)
+  let parameter = var () in
+  let boxed =
+    decl
+      ~name:"t"
+      ~params:[ Type.ATy (Type.TVar parameter) ]
+      (variant
+         [ ctor "L" [ Type.TVar parameter ]
+         ; ctor
+             "N"
+             [ tycon
+                 "ptr"
+                 [ tycon
+                     "t"
+                     [ Type.TTuple [ Type.TVar parameter; Type.TVar parameter ]
+                     ]
+                 ]
+             ]
+         ])
+  in
+  shape (Runtime_types.create (resolver [ boxed ])) (tycon "t" [ int ]);
+  [%expect
+    {|
+    (Error (Too_large 100000))
+    (Too_large 100000)
+    (Ok
+     (Union (repr Default)
+      (cases
+       ((Struct (repr Default) (fields ((Scalar (scalar I64) (valid ())))))
+        (Struct (repr Default) (fields (Ptr)))))))
+    |}]
+;;
+
+let%expect_test "regular recursion behind pointers" =
+  (* type list['a] = Nil | Cons of 'a * ptr[list['a]] type tree['a] = Leaf |
+     Node of ptr[tree['a]] * 'a * ptr[tree['a]] type even = E of ptr[odd] | Zero
+     and odd = O of ptr[even] *)
+  let element = var () in
+  let list =
+    decl
+      ~name:"list"
+      ~params:[ Type.ATy (Type.TVar element) ]
+      (variant
+         [ ctor "Nil" []
+         ; ctor
+             "Cons"
+             [ Type.TVar element
+             ; tycon "ptr" [ tycon "list" [ Type.TVar element ] ]
+             ]
+         ])
+  in
+  let label = var () in
+  let subtree = tycon "ptr" [ tycon "tree" [ Type.TVar label ] ] in
+  let tree =
+    decl
+      ~name:"tree"
+      ~params:[ Type.ATy (Type.TVar label) ]
+      (variant
+         [ ctor "Leaf" []; ctor "Node" [ subtree; Type.TVar label; subtree ] ])
+  in
+  let even =
+    decl
+      ~name:"even"
+      (variant [ ctor "Zero" []; ctor "E" [ tycon "ptr" [ tycon "odd" [] ] ] ])
+  in
+  let odd =
+    decl ~name:"odd" (variant [ ctor "O" [ tycon "ptr" [ tycon "even" [] ] ] ])
+  in
+  let t = Runtime_types.create (resolver [ list; tree; even; odd ]) in
+  shape t (tycon "list" [ int ]);
+  shape t (tycon "tree" [ tycon "list" [ bool ] ]);
+  shape t (tycon "even" []);
+  layout t (tycon "list" [ int ]);
+  [%expect
+    {|
+    (Ok
+     (Union (repr Default)
+      (cases
+       ((Struct (repr Default) (fields ()))
+        (Struct (repr Default) (fields ((Scalar (scalar I64) (valid ())) Ptr)))))))
+    (Ok
+     (Union (repr Default)
+      (cases
+       ((Struct (repr Default) (fields ()))
+        (Struct (repr Default)
+         (fields
+          (Ptr
+           (Union (repr Default)
+            (cases
+             ((Struct (repr Default) (fields ()))
+              (Struct (repr Default)
+               (fields ((Scalar (scalar I8) (valid ((0 1)))) Ptr))))))
+           Ptr)))))))
+    (Ok
+     (Union (repr Default)
+      (cases
+       ((Struct (repr Default) (fields ()))
+        (Struct (repr Default) (fields (Ptr)))))))
+    (8 1
+     ((Niche (leaf (Ptr (ptr_index 0))) (untagged 1) (first 0) (last 0)
+       (start 0))))
+    |}]
+;;

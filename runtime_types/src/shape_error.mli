@@ -27,5 +27,8 @@ type t =
       [variant 12]. *)
   | Error_type (** [<error>], of what did not check. *)
   | Too_deep of int (** More expansions than this enclose the type. *)
+  | Too_large of int
+  (** Mapping the type took more steps than this, as under nested polymorphic
+      recursion, where each expansion doubles the shape. *)
   | Layout of Sexp.t (** Raised by [Layout.of_shape]. *)
 [@@deriving sexp_of]

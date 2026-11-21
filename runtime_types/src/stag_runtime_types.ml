@@ -119,12 +119,17 @@ module Context = struct
     ; path : Path.t
     ; cache : Cache.t
     ; ids : int ref (* For the ids of the copies substitution makes. *)
+    ; work : int ref
     }
 end
 
 (* Deeper than any value's type, and bounds the expansions of polymorphic
    recursion, whose types have no finite layout. *)
 let max_expansions = 1000
+
+(* Bounds the time of a type that expands without repeating, but whose shape
+   grows exponentially with the depth. *)
+let max_work = 100_000
 
 type t =
   { resolver : Resolver.t
@@ -370,7 +375,13 @@ and bind_parameters (declaration : Signature.Type_decl.t) ~name ~args =
               | ATy _ -> Error (Error.Row_expected id))
            | _ -> Ok bindings))
 
-and shape t context (ty : Type.ty) : (Shape.t, Error.t) Result.t =
+and shape t context ty =
+  incr context.Context.work;
+  if !(context.work) > max_work
+  then Error (Error.Too_large max_work)
+  else expand t context ty
+
+and expand t context (ty : Type.ty) : (Shape.t, Error.t) Result.t =
   match Type.canonical_ty ty with
   | TVar { id; _ } ->
     (match Map.find context.Context.bindings id with
@@ -422,6 +433,7 @@ let context () =
   ; path = []
   ; cache = Cache.create ()
   ; ids = ref 0
+  ; work = ref 0
   }
 ;;
 
