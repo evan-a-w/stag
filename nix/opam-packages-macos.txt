@@ -46,13 +46,12 @@ dot-merlin-reader.5.6.1-504+ox
 dune.3.25.0
 dune-build-info.3.25.0
 dune-configurator.3.25.0
-dune-private-libs.3.25.0
 dune-rpc.3.25.0
-dune-site.3.25.0
 dyn.3.25.0
 either.1.0.0
 expect_test_helpers_base.v0.18~preview.133.03+642
 expect_test_helpers_core.v0.18~preview.133.03+642
+extlib.1.8.0+ox
 faraday.0.8.2+ox1
 fieldslib.v0.18~preview.133.03+642
 file_path.v0.18~preview.133.03+642
@@ -84,7 +83,6 @@ merlin-lib.5.6.1-504+ox
 mew.0.1.0
 mew_vi.0.5.0
 nonempty_list_type.v0.18~preview.133.03+642
-notty-community.0.2.4+ox3
 num.1.6
 ocaml.5.4.0
 ocaml-compiler-libs.v0.17.0+ox1
@@ -95,6 +93,7 @@ ocaml-options-vanilla.1
 ocaml-syntax-shims.1.0.0
 ocaml-variants.5.4.0+ox
 ocaml-version.4.1.5
+ocaml_intrinsics.v0.18~preview.133.03+642
 ocaml_intrinsics_kernel.v0.18~preview.133.03+642
 ocamlbuild.0.16.1+ox
 ocamlc-loc.3.25.0
@@ -133,7 +132,7 @@ oxcaml-eio.guard
 oxcaml-eio_linux.guard
 oxcaml-eio_main.guard
 oxcaml-eio_posix.guard
-oxcaml-extlib.guard
+oxcaml-extlib-patches.enabled
 oxcaml-faraday-patches.enabled
 oxcaml-fs-io.guard
 oxcaml-gen_js_api.guard
@@ -151,7 +150,7 @@ oxcaml-lwt_runtime_events.guard
 oxcaml-mdx.guard
 oxcaml-merlin-lib-patches.enabled
 oxcaml-merlin-patches.enabled
-oxcaml-notty-community-patches.enabled
+oxcaml-notty-community.guard
 oxcaml-ocaml-compiler-libs-patches.enabled
 oxcaml-ocaml-index-patches.enabled
 oxcaml-ocaml-lsp-server-patches.enabled
@@ -188,7 +187,6 @@ parsexp.v0.18~preview.133.03+642
 pipe_with_writer_error.v0.18~preview.133.03+642
 portable.v0.18~preview.133.03+642
 portable_intrusive_stack.v0.18~preview.133.03+642
-portable_lockfree_htbl.v0.18~preview.133.03+642
 pp.2.0.0
 ppx_array_base.v0.18~preview.133.03+642
 ppx_assert.v0.18~preview.133.03+642
