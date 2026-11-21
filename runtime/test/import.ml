@@ -18,4 +18,4 @@ module Stag_gc = Stag_runtime.Gc
 module Static_data = Stag_runtime.Static_data
 module Data_stack = Stag_runtime.Data_stack
 module Handle_kind = Stag_runtime.Handle_kind
-module Handle_ref = Stag_runtime.Handle_ref
+module Handle_ref = Stag_runtime.Heap.Handle_ref

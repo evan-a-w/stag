@@ -17,8 +17,8 @@ open! Import
 
     [Gc.check_invariants] recomputes [refs] of every live payload and reports
     those its handle doesn't hold. To name another handle, a payload should hold
-    a [Handle_ref.t], read with [Heap.get_handle_checked], as well as returning
-    its address from [refs].
+    a [Heap.Handle_ref.t], read with [Heap.get_handle_checked], as well as
+    returning its address from [refs].
 
     A payload, and any [Memory.Addr.t] taken from it, is valid only while its
     handle is reachable from the Stag roots: once the handle is swept, the

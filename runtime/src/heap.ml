@@ -25,6 +25,17 @@ module Config = struct
   let max_arena_bytes = 1 lsl 30
 end
 
+module Handle_ref = struct
+  type t =
+    { addr : Addr.t
+    ; id : int
+    }
+
+  let addr t = t.addr
+  let id t = t.id
+  let sexp_of_t t = [%sexp { id = (t.id : int) }]
+end
+
 module Sweep_stats = struct
   type t =
     { freed_blocks : int
@@ -497,7 +508,7 @@ let handle_ref t block =
   check_live t ~name:"handle_ref";
   if not (is_handle t block)
   then fail [%message "Heap.handle_ref: not a handle"];
-  Handle_ref.create ~addr:block ~id:(handle_id block)
+  { Handle_ref.addr = block; id = handle_id block }
 ;;
 
 (* The entry is looked up by the reference's ID before its block is read: were

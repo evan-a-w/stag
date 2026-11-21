@@ -75,10 +75,10 @@ val alloc_handle : t -> 'a Handle_kind.t -> 'a -> Memory.Addr.t
 val get_handle : t -> 'a Handle_kind.t -> Memory.Addr.t -> 'a option
 
 (** As [Heap.handle_ref]. *)
-val handle_ref : t -> Memory.Addr.t -> Handle_ref.t
+val handle_ref : t -> Memory.Addr.t -> Heap.Handle_ref.t
 
 (** As [Heap.get_handle_checked], with [get_handle]'s validity. *)
-val get_handle_checked : t -> 'a Handle_kind.t -> Handle_ref.t -> 'a option
+val get_handle_checked : t -> 'a Handle_kind.t -> Heap.Handle_ref.t -> 'a option
 
 (** Marks, then sweeps. Marking allocates nothing (on the OCaml heap) but to
     grow the mark stack. Sweeping also releases OCaml metadata for dead handles,

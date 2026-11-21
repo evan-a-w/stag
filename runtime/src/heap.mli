@@ -79,6 +79,20 @@ val alloc_handle_with_refs
     reachable from the Stag roots (see [Handle_kind]). *)
 val get_handle : t -> 'a Handle_kind.t -> Memory.Addr.t -> 'a option
 
+(** A handle by its address and its ID, made only by [handle_ref]. A swept
+    handle's address may be reused by any later block, but its ID never is:
+    [get_handle_checked] finds nothing for a handle that has been swept, where
+    [get_handle] of a stale address may find another handle's payload. *)
+module Handle_ref : sig
+  type t
+
+  val addr : t -> Memory.Addr.t
+  val id : t -> int
+
+  (** Its ID: addresses are not deterministic. *)
+  val sexp_of_t : t -> Sexp.t
+end
+
 (** Raises unless [addr] is a live handle's base. *)
 val handle_ref : t -> Memory.Addr.t -> Handle_ref.t
 
