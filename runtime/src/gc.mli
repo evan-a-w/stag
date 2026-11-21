@@ -42,11 +42,12 @@ end
 
 type t
 
-val create : Config.t -> Heap.t -> Roots.t -> t
+(** Its roots are [roots]' slots, and the pointer words of [data_stack]'s live
+    blocks. *)
+val create : Config.t -> Heap.t -> Roots.t -> Data_stack.t -> t
 
-(** Frees the mark stack. [t] must be kept reachable until then, or its memory
-    is freed with it. Using [t] afterwards raises. The heap and roots are left
-    as they are. *)
+(** Frees the mark stack. Using [t] afterwards raises. The heap, roots and data
+    stack are left as they are. *)
 val destroy : t -> unit
 
 (** As [Heap.alloc], collecting first if the policy says to. Every pointer the
@@ -63,9 +64,11 @@ val collect : t -> Stats.t
 val collections : t -> int
 
 (** Between collections: every block [Unmarked] or [Immortal], and every root
-    slot and pointer word of an allocated block below 4096, outside the heap, or
-    in an allocated block (an [Immortal] one, for words of [Immortal] blocks);
-    and no pointer word of a block of [static] into the heap. *)
+    slot and pointer word of an allocated or data-stack block below 4096,
+    outside the heap, or in an allocated block (an [Immortal] one, for words of
+    [Immortal] blocks); every data-stack block [Unmarked]; and no pointer word
+    of a heap block or a block of [static] into the data stack, nor of a block
+    of [static] into the heap. *)
 val check_invariants : ?static:Static_data.t list -> t -> unit Or_error.t
 
 module For_testing : sig

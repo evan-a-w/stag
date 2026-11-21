@@ -150,3 +150,44 @@ let%expect_test "no allocation in pushing, popping and walking frames" =
   print_s [%message "" (count : int) (allocated : int)];
   [%expect {| ((count 7500) (allocated 0)) |}]
 ;;
+
+let[@zero_alloc] regions stack ~blocks =
+  let outer = Data_stack.enter stack in
+  for i = 1 to blocks do
+    let inner = Data_stack.enter stack in
+    let block =
+      Data_stack.alloc
+        stack
+        (Header.scanned ~size_words:(1 + (i land 7)) ~scalar_words:1 Unmarked)
+    in
+    store_addr block block;
+    if Int.(i land 1 = 0) then Data_stack.exit stack inner
+  done;
+  let mutable count = 0 in
+  for segment = 0 to Data_stack.segments stack - 1 do
+    let end_ = Data_stack.segment_end stack segment in
+    let mutable block = Data_stack.first_block stack segment in
+    while Int.(Addr.compare (Addr.add block (-8)) end_ < 0) do
+      count <- count + 1;
+      block <- Data_stack.next_block block
+    done
+  done;
+  Data_stack.exit stack outer;
+  count
+;;
+
+let%expect_test "no allocation in data-stack regions" =
+  let stack = Data_stack.create ~segment_bytes:1024 () in
+  let (_ : int) = regions stack ~blocks:10_000 in
+  let before = Gc.minor_words () in
+  let count = regions stack ~blocks:10_000 in
+  let allocated = Gc.minor_words () - before in
+  print_s
+    [%message
+      ""
+        (count : int)
+        (allocated : int)
+        ~segments_made:(Data_stack.For_testing.segments_made stack : int)];
+  Data_stack.destroy stack;
+  [%expect {| ((count 5000) (allocated 0) (segments_made 250)) |}]
+;;

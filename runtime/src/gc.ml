@@ -29,6 +29,7 @@ type t =
   { config : Config.t
   ; heap : Heap.t
   ; roots : Roots.t
+  ; data_stack : Data_stack.t
   ; mutable live_words : int (** After the last collection. *)
   ; mutable allocated_words : int (** Since the last collection. *)
   ; mutable collections : int
@@ -47,11 +48,12 @@ let set_stack t chunk =
   t.stack_limit <- Addr.add (Chunk.base chunk) (Chunk.bytes chunk)
 ;;
 
-let create config heap roots =
+let create config heap roots data_stack =
   let stack = Chunk.create ~bytes:(initial_mark_stack_blocks * 8) ~align:8 in
   { config
   ; heap
   ; roots
+  ; data_stack
   ; live_words = 0
   ; allocated_words = 0
   ; collections = 0
@@ -119,6 +121,20 @@ let[@zero_alloc] mark t =
   for i = 0 to Roots.globals t.roots - 1 do
     visit t (Memory.load_addr (Roots.global t.roots i))
   done;
+  for segment = 0 to Data_stack.segments t.data_stack - 1 do
+    let end_ = Data_stack.segment_end t.data_stack segment in
+    let mutable block = Data_stack.first_block t.data_stack segment in
+    while Int.(Addr.compare (Addr.add block (-8)) end_ < 0) do
+      let header = Header.load block in
+      (match Header.kind header with
+       | Scanned ->
+         for i = Header.scalar_words header to Header.size_words header - 1 do
+           visit t (Memory.load_addr (Addr.add block (i * 8)))
+         done
+       | Bytes | Free -> ());
+      block <- Data_stack.next_block block
+    done
+  done;
   while not (Addr.equal t.stack_top t.stack_base) do
     t.stack_top <- Addr.add t.stack_top (-8);
     let block = Memory.load_addr t.stack_top in
@@ -184,6 +200,10 @@ let check_invariants ?(static = []) t =
             [%message
               "an immortal block points to a mortal one" (from : Sexp.t)]))
   in
+  let check_not_data_stack ~from word =
+    if (not (is_small word)) && Data_stack.contains t.data_stack word
+    then error [%message "a pointer into the data stack" (from : Sexp.t)]
+  in
   let index = ref 0 in
   Roots.iter_slots t.roots ~f:(fun slot ->
     check_word
@@ -205,10 +225,12 @@ let check_invariants ?(static = []) t =
     (match Header.kind header with
      | Scanned ->
        for i = Header.scalar_words header to Header.size_words header - 1 do
-         check_word
-           ~from:[%message "block" ~block:(!block_index : int) ~word:(i : int)]
-           ~immortal
-           (Memory.load_addr (Addr.add block (i * 8)))
+         let word = Memory.load_addr (Addr.add block (i * 8)) in
+         let from =
+           [%message "block" ~block:(!block_index : int) ~word:(i : int)]
+         in
+         check_word ~from ~immortal word;
+         check_not_data_stack ~from word
        done
      | Bytes | Free -> ());
     incr block_index);
@@ -227,10 +249,38 @@ let check_invariants ?(static = []) t =
                  "static data points into the heap"
                    ~static:(static_index : int)
                    ~block:(!block_index : int)
+                   ~word:(i : int)];
+           check_not_data_stack
+             ~from:
+               [%message
+                 "static"
+                   ~static:(static_index : int)
+                   ~block:(!block_index : int)
                    ~word:(i : int)]
+             word
          done
        | Bytes | Free -> ());
       incr block_index));
+  let block_index = ref 0 in
+  Data_stack.iter t.data_stack ~f:(fun block ->
+    let header = Header.load block in
+    (match Header.color header with
+     | Unmarked -> ()
+     | Marked | Immortal ->
+       error
+         [%message
+           "a data-stack block not unmarked" ~block:(!block_index : int)]);
+    (match Header.kind header with
+     | Scanned ->
+       for i = Header.scalar_words header to Header.size_words header - 1 do
+         check_word
+           ~from:
+             [%message "data stack" ~block:(!block_index : int) ~word:(i : int)]
+           ~immortal:false
+           (Memory.load_addr (Addr.add block (i * 8)))
+       done
+     | Bytes | Free -> ());
+    incr block_index);
   match List.rev !errors with
   | [] -> Ok ()
   | errors ->

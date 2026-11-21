@@ -18,8 +18,8 @@ let atoms =
   chunk
 ;;
 
-let empty () = Addr.add (Chunk.base atoms) 8
-let empty_bytes () = Addr.add (Chunk.base atoms) 16
+let[@zero_alloc] empty () = Addr.add (Chunk.base atoms) 8
+let[@zero_alloc] empty_bytes () = Addr.add (Chunk.base atoms) 16
 
 module Segment = struct
   type t =

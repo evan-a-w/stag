@@ -22,7 +22,10 @@ module Env = struct
   let create ?(config = manual) () =
     let heap = Heap.create heap_config in
     let roots = Roots.create () in
-    { heap; roots; gc = Stag_gc.create config heap roots }
+    { heap
+    ; roots
+    ; gc = Stag_gc.create config heap roots (Data_stack.create ())
+    }
   ;;
 end
 
@@ -394,7 +397,9 @@ let%expect_test "collecting allocates the same however much is live" =
 let%expect_test "destroy" =
   let heap = Heap.create Heap.Config.default in
   let roots = Roots.create () in
-  let gc = Stag_gc.create Stag_gc.Config.default heap roots in
+  let gc =
+    Stag_gc.create Stag_gc.Config.default heap roots (Data_stack.create ())
+  in
   Stag_gc.destroy gc;
   let try_ f = print_s [%sexp (Or_error.try_with f : unit Or_error.t)] in
   try_ (fun () -> ignore (Stag_gc.collect gc : Stag_gc.Stats.t));

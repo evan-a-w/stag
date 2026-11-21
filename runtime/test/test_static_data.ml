@@ -186,7 +186,7 @@ let%expect_test "a global keeps what its slots point to alive, until removed" =
   let static = Static_data.create () in
   let heap = Heap.create heap_config in
   let roots = Roots.create () in
-  let gc = Stag_gc.create manual heap roots in
+  let gc = Stag_gc.create manual heap roots (Data_stack.create ()) in
   let global =
     Static_data.add_global static roots (layout (struct_ [ ptr; scalar I64 ]))
   in
@@ -217,7 +217,7 @@ let%expect_test "check_invariants: static data must not point into the heap" =
   let static = Static_data.create () in
   let heap = Heap.create heap_config in
   let roots = Roots.create () in
-  let gc = Stag_gc.create manual heap roots in
+  let gc = Stag_gc.create manual heap roots (Data_stack.create ()) in
   let frame = Roots.push_frame roots ~slots:1 in
   let cell = Stag_gc.alloc gc (scanned ~size:1 ~scalars:1 Unmarked) in
   Memory.store_addr frame cell;

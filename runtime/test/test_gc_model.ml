@@ -35,6 +35,18 @@ module Value = struct
             no block while the block is alive, so not followed. *)
         }
     | Scalar of int (** In a scalar word: maybe a block's address. *)
+    | Local of int
+    (** A data-stack block's address, in a data-stack word: never followed, and
+        maybe freed. *)
+end
+
+(* A data-stack block: its pointer words are roots. *)
+module Local_block = struct
+  type t =
+    { addr : int
+    ; scalars : int
+    ; words : Value.t array
+    }
 end
 
 module Block = struct
@@ -61,29 +73,42 @@ module Model = struct
     ; global_slot : int
     ; mutable global : Value.t
     ; mutable next_id : int
+    ; mutable regions : Local_block.t list list
+    (** Of the data stack, latest first, each its blocks latest first. *)
     }
 
   let encode t (value : Value.t) =
     match value with
     | Null -> 0
-    | Small n | Foreign n | Atom n | Scalar n -> n
+    | Small n | Foreign n | Atom n | Scalar n | Local n -> n
     | Ref { id; word } -> (Hashtbl.find_exn t.blocks id).addr + (word * 8)
     | Edge { id; offset } -> (Hashtbl.find_exn t.blocks id).addr + offset
   ;;
 
+  let local_blocks t = List.concat t.regions
+
   (* Every root slot's address, and how to set its value in the model: the
-     global, then the frames' slots, latest first. *)
+     global, then the frames' slots, latest first, then the pointer words of the
+     data-stack blocks. *)
   let root_slots t =
-    (t.global_slot, fun value -> t.global <- value)
-    :: List.concat_map t.frames ~f:(fun (frame : Frame.t) ->
-      List.init (Array.length frame.values) ~f:(fun i ->
-        frame.slots + (i * 8), fun value -> frame.values.(i) <- value))
+    ((t.global_slot, fun value -> t.global <- value)
+     :: List.concat_map t.frames ~f:(fun (frame : Frame.t) ->
+       List.init (Array.length frame.values) ~f:(fun i ->
+         frame.slots + (i * 8), fun value -> frame.values.(i) <- value)))
+    @ List.concat_map (local_blocks t) ~f:(fun (block : Local_block.t) ->
+      List.init
+        (Array.length block.words - block.scalars)
+        ~f:(fun j ->
+          let i = block.scalars + j in
+          block.addr + (i * 8), fun value -> block.words.(i) <- value))
   ;;
 
   let root_values t =
-    t.global
-    :: List.concat_map t.frames ~f:(fun (frame : Frame.t) ->
-      Array.to_list frame.values)
+    (t.global
+     :: List.concat_map t.frames ~f:(fun (frame : Frame.t) ->
+       Array.to_list frame.values))
+    @ List.concat_map (local_blocks t) ~f:(fun (block : Local_block.t) ->
+      Array.to_list block.words |> Fn.flip List.drop block.scalars)
   ;;
 
   (* Drops the blocks neither immortal nor reachable from the roots. *)
@@ -98,7 +123,7 @@ module Model = struct
           let block = Hashtbl.find_exn t.blocks id in
           Array.iteri block.words ~f:(fun i value ->
             if i >= block.scalars then visit value))
-      | Null | Small _ | Foreign _ | Atom _ | Edge _ | Scalar _ -> ()
+      | Null | Small _ | Foreign _ | Atom _ | Edge _ | Scalar _ | Local _ -> ()
     in
     List.iter (root_values t) ~f:visit;
     Hashtbl.filteri_inplace t.blocks ~f:(fun ~key:id ~data:(block : Block.t) ->
@@ -110,7 +135,7 @@ module Model = struct
     let rewrite (value : Value.t) =
       match value with
       | Edge _ -> Some (f value)
-      | Null | Small _ | Foreign _ | Atom _ | Ref _ | Scalar _ -> None
+      | Null | Small _ | Foreign _ | Atom _ | Ref _ | Scalar _ | Local _ -> None
     in
     Hashtbl.iter t.blocks ~f:(fun (block : Block.t) ->
       Array.iteri block.words ~f:(fun i value ->
@@ -127,7 +152,8 @@ module Model = struct
     let dangling (value : Value.t) =
       match value with
       | Edge { id; offset = _ } -> not (Hashtbl.mem t.blocks id)
-      | Null | Small _ | Foreign _ | Atom _ | Ref _ | Scalar _ -> false
+      | Null | Small _ | Foreign _ | Atom _ | Ref _ | Scalar _ | Local _ ->
+        false
     in
     Hashtbl.iter t.blocks ~f:(fun (block : Block.t) ->
       Array.iteri block.words ~f:(fun i value ->
@@ -146,11 +172,13 @@ end
 let%expect_test "random mutation against a model" =
   let heap = Heap.create heap_config in
   let roots = Roots.create () in
+  let data_stack = Data_stack.create ~segment_bytes:512 () in
   let gc =
     Stag_gc.create
       { Stag_gc.Config.space_overhead = 50; min_words = 500 }
       heap
       roots
+      data_stack
   in
   let static = Memory.Chunk.create ~bytes:8 ~align:8 in
   Roots.add_global roots (Memory.Chunk.base static);
@@ -161,8 +189,10 @@ let%expect_test "random mutation against a model" =
     ; global_slot = to_int (Memory.Chunk.base static)
     ; global = Null
     ; next_id = 0
+    ; regions = []
     }
   in
+  let marks = ref [] in
   let random = Random.State.make [| 7 |] in
   let int bound = Random.State.int random bound in
   let push_frame slots =
@@ -229,6 +259,20 @@ let%expect_test "random mutation against a model" =
     in
     (* A block allocated after the collection, not yet in the model. *)
     let expected = Option.fold fresh ~init:expected ~f:Set.add in
+    let locals = ref [] in
+    Data_stack.iter data_stack ~f:(fun block ->
+      locals := to_int block :: !locals);
+    let expected_locals =
+      List.map (Model.local_blocks model) ~f:(fun (block : Local_block.t) ->
+        block.addr)
+    in
+    if not ([%equal: int list] !locals expected_locals)
+    then raise_s [%message "data-stack blocks differ"];
+    List.iter (Model.local_blocks model) ~f:(fun block ->
+      Array.iteri block.words ~f:(fun i value ->
+        if Int64_u.to_int (Memory.load_64 (of_int (block.addr + (i * 8))))
+           <> Model.encode model value
+        then raise_s [%message "a data-stack word changed" (i : int)]));
     if not (Set.equal !allocated expected)
     then
       raise_s
@@ -382,12 +426,81 @@ let%expect_test "random mutation against a model" =
     ignore (Stag_gc.collect gc : Stag_gc.Stats.t);
     sync_collections ()
   in
+  (* Data-stack regions, whose blocks root heap blocks, and point to each other. *)
+  let local_blocks = ref 0 in
+  let enter () =
+    marks := Data_stack.enter data_stack :: !marks;
+    model.regions <- [] :: model.regions
+  in
+  let exit () =
+    match !marks with
+    | [] -> ()
+    | mark :: rest ->
+      Data_stack.exit data_stack mark;
+      marks := rest;
+      model.regions <- List.tl_exn model.regions
+  in
+  let local_alloc () =
+    if List.is_empty model.regions then enter ();
+    incr local_blocks;
+    (* Some too large for a segment of 512 bytes. *)
+    let words = if int 30 = 0 then 70 + int 40 else 1 + int 8 in
+    let bytes = int 6 = 0 in
+    let header =
+      if bytes
+      then Header.bytes ~length:((words * 8) - int 8) Unmarked
+      else
+        Header.scanned
+          ~size_words:words
+          ~scalar_words:(int (words + 1))
+          Unmarked
+    in
+    let addr = Data_stack.alloc data_stack header in
+    let block =
+      { Local_block.addr = to_int addr
+      ; scalars = Header.scalar_words header
+      ; words = Array.create ~len:words Value.Null
+      }
+    in
+    for i = 0 to block.scalars - 1 do
+      let value = random_scalar () in
+      block.words.(i) <- value;
+      Memory.store_64
+        (Addr.add addr (i * 8))
+        (Int64_u.of_int (Model.encode model value))
+    done;
+    model.regions
+    <- (block :: List.hd_exn model.regions) :: List.tl_exn model.regions
+  in
+  let local_store () =
+    match Model.local_blocks model with
+    | [] -> ()
+    | blocks ->
+      let block = List.nth_exn blocks (int (List.length blocks)) in
+      let size = Array.length block.words in
+      if size > block.scalars
+      then (
+        let i = block.scalars + int (size - block.scalars) in
+        let value : Value.t =
+          if int 3 = 0
+          then Local (List.nth_exn blocks (int (List.length blocks))).addr
+          else random_pointer ~immortal:false
+        in
+        block.words.(i) <- value;
+        Memory.store_addr
+          (of_int (block.addr + (i * 8)))
+          (of_int (Model.encode model value)))
+  in
   let pops = ref 0 in
   for step = 1 to 20_000 do
     if step % 7_000 = 0 then wide ();
     match int 100 with
-    | n when n < 40 -> ignore (alloc () : int option)
-    | n when n < 75 -> store ()
+    | n when n < 36 -> ignore (alloc () : int option)
+    | n when n < 66 -> store ()
+    | n when n < 69 -> local_alloc ()
+    | n when n < 72 -> local_store ()
+    | 72 -> enter ()
+    | 73 | 74 -> exit ()
     | n when n < 90 ->
       set_root (random_root ()) (random_pointer ~immortal:false)
     | n when n < 94 -> push_frame (int 5)
@@ -412,6 +525,11 @@ let%expect_test "random mutation against a model" =
         ~allocated:(model.next_id : int)
         ~large_blocks:(!large_blocks : int)
         ~pops:(!pops : int)
+        ~local_blocks:(!local_blocks : int)
+        ~local_blocks_at_end:(List.length (Model.local_blocks model) : int)
+        ~regions_at_end:(List.length model.regions : int)
+        ~data_stack_segments:
+          (Data_stack.For_testing.segments_made data_stack : int)
         ~depth_at_end:(Roots.depth roots : int)
         ~mark_stack_capacity:(Stag_gc.For_testing.mark_stack_capacity gc : int)];
   (* Kept reachable until here, or their memory would be freed. *)
@@ -419,8 +537,9 @@ let%expect_test "random mutation against a model" =
   Memory.Chunk.destroy foreign;
   [%expect
     {|
-    ((collections 504) (checks 504) (blocks_at_end 353) (immortal_at_end 320)
-     (allocated 10222) (large_blocks 45) (pops 782) (depth_at_end 5)
-     (mark_stack_capacity 2048))
+    ((collections 495) (checks 495) (blocks_at_end 322) (immortal_at_end 293)
+     (allocated 9461) (large_blocks 41) (pops 753) (local_blocks 625)
+     (local_blocks_at_end 1) (regions_at_end 1) (data_stack_segments 5)
+     (depth_at_end 22) (mark_stack_capacity 2048))
     |}]
 ;;

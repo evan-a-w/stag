@@ -23,8 +23,9 @@ val alloc : t -> Header.t -> Memory.Addr.t
 (** The zero-size blocks, shared by everything (heaps included): a [Scanned] one
     and a [Bytes] one, of length 0. Both [Immortal], never freed. *)
 val empty : unit -> Memory.Addr.t
+[@@zero_alloc]
 
-val empty_bytes : unit -> Memory.Addr.t
+val empty_bytes : unit -> Memory.Addr.t [@@zero_alloc]
 
 (** Whether [addr] is in one of [t]'s blocks, headers included. *)
 val contains : t -> Memory.Addr.t -> bool
