@@ -328,3 +328,61 @@ let stored = cell.*
     (stored 5)
     |}]
 ;;
+
+let%expect_test "a field store keeps what the value stored to another field" =
+  run
+    {|
+type point = {x : int; y : int}
+let p = Ptr.make {x = 1; y = 2}
+let set = p.*.x <- (p.*.y <- 1; 2)
+let after = p.*
+|};
+  [%expect
+    {|
+    type point = { x : int; y : int }
+    val p : ptr[point]
+    val set : unit
+    val after : point
+    -- evaluated at compile time
+    -- evaluated
+    (p <ptr>)
+    (set "()")
+    (after (point (x 2) (y 1)))
+    |}]
+;;
+
+let%expect_test "a nested pointer's store goes to the cell it designated" =
+  run
+    {|
+type cell = {value : int}
+type node = {next : ptr[cell]; label : int}
+let leaf = Ptr.make {value = 0}
+let repl = Ptr.make {value = 2}
+let orig = Ptr.make {next = leaf; label = 1}
+let set = orig.*.next.*.value <- (orig.*.next <- repl; 99)
+let leaf_value = leaf.*.value
+let repl_value = repl.*.value
+let now = orig.*.next.*.value
+|};
+  [%expect
+    {|
+    type cell = { value : int }
+    type node = { next : ptr[cell]; label : int }
+    val leaf : ptr[cell]
+    val repl : ptr[cell]
+    val orig : ptr[node]
+    val set : unit
+    val leaf_value : int
+    val repl_value : int
+    val now : int
+    -- evaluated at compile time
+    -- evaluated
+    (leaf <ptr>)
+    (repl <ptr>)
+    (orig <ptr>)
+    (set "()")
+    (leaf_value 99)
+    (repl_value 2)
+    (now 2)
+    |}]
+;;
