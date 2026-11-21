@@ -1852,8 +1852,15 @@ and with_monomorphic_bindings (scope : Scope.t) bindings ~f =
     ~f
 
 (* What fails to check is reported, and becomes [Error] of its parts that did,
-   of type [Type.error]. *)
-and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
+   of type [Type.error]. With [hint], [expected] is only what [expr] is likely
+   to be, rather than what it must be, so it isn't unified with what may turn
+   out to be something else. *)
+and expr_type
+  ?expected
+  ?(hint = false)
+  t
+  (scope : Scope.t)
+  ~(expr : Source.Expr.t)
   : Typed.Expr.t
   =
   let loc = Source.Expr.loc expr in
@@ -1884,7 +1891,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
   | Struct_quote toplevels ->
     (match Struct_quote.expand toplevels ~loc with
      | Ok expanded ->
-       expr_type ?expected t scope ~expr:(Source.Expr.Syntax expanded)
+       expr_type ?expected ~hint t scope ~expr:(Source.Expr.Syntax expanded)
      | Error (loc, message) ->
        fail (Typecheck_error.create ~loc (Malformed_struct_quote message)))
   | Type ty ->
@@ -1931,12 +1938,20 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
     let b = Scope.fresh_ty t scope in
     let f = check_expr t scope ~expr:f ~ty:(TArrow (a, b)) in
     (* The expected result is known before the argument, which may need it:
-       [Ptr.make (C x)] resolves [C] in the expected pointee type. A toplevel
-       splice's expected code type is only a hint, as its code may be syntax, so
-       a clash is left to whoever expects the result to report. *)
+       [Ptr.make (C x)] resolves [C] in the expected pointee type. A clash is
+       left to whoever expects the result to report. A hint is only taken once
+       the result is known to be of its form, as a variable may become another
+       type: a toplevel splice's code may be syntax. *)
     let result_matches =
       match expected with
-      | Some expected when not (Unify.clash expected b) ->
+      | Some expected
+        when (not (Unify.clash expected b))
+             && not
+                  (hint
+                   &&
+                   match Type.canonical_ty b with
+                   | TVar _ -> true
+                   | _ -> false) ->
         Scope.unifies t scope ~ty1:expected ~ty2:b ~loc
       | Some _ | None -> true
     in
@@ -1976,7 +1991,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
       Env.with_bindings
         scope.locals
         [ name, Scope.entry scope ~ident ~scheme:ty ~persistent ]
-        ~f:(fun () -> expr_type t scope ~expr:in_ ?expected)
+        ~f:(fun () -> expr_type t scope ~expr:in_ ?expected ~hint)
     in
     node
       (Let { ident; args; annots; result_annot; body; in_; generalized })
@@ -2002,7 +2017,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
         [ ( Source.Binder.name binder
           , Scope.entry scope ~ident ~scheme:ty ~persistent:false )
         ]
-        ~f:(fun () -> expr_type t scope ~expr:in_ ?expected)
+        ~f:(fun () -> expr_type t scope ~expr:in_ ?expected ~hint)
     in
     node (Let_mut { ident; annot; body; in_ }) in_.ty
   | Assign (var, value) ->
@@ -2080,6 +2095,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
         { scope with level = scope.level + 1; quote = Some quote }
         ~expr
         ?expected
+        ~hint
     in
     node (Quote inner) (TCode { inner = inner.ty; context = quote.context })
   | Splice { code; subs } ->
@@ -2138,12 +2154,15 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
            ~expr:code
            ~ty:(TCode { inner; context })
            ?expected:code_expected
+           ~hint
        in
        (match substitutions () with
         | Error error -> fail error ~children:[ code ]
         | Ok subs -> node (Splice { code; subs }) inner)
      | None ->
-       let code = expr_type t outside ~expr:code ?expected:code_expected in
+       let code =
+         expr_type t outside ~expr:code ?expected:code_expected ~hint:true
+       in
        if is_syntax code.ty
        then (
          match subs with
@@ -2155,7 +2174,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
            if failed code
            then node (Error [ code ]) Type.error
            else (
-             match splice_syntax t scope ~code ~loc ?expected with
+             match splice_syntax t scope ~code ~loc ?expected ~hint with
              | Error error -> fail error ~children:[ code ]
              | Ok expansion ->
                node (Toplevel_splice { code; expansion }) expansion.ty))
@@ -2197,7 +2216,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
       Option.value_or_thunk expected ~default:(fun () -> Scope.fresh_ty t scope)
     in
     let expected = Type.TCon ("ptr", [ ATy pointee ]) in
-    let pointer = expr_type t scope ~expr:pointer ~expected in
+    let pointer = expr_type t scope ~expr:pointer ~expected ~hint in
     if Scope.unifies t scope ~ty1:pointer.ty ~ty2:expected ~loc
     then node (Deref pointer) pointee
     else node (Error [ pointer ]) Type.error
@@ -2223,7 +2242,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
       List.map2_exn
         exprs
         (tuple_components expected (List.length exprs))
-        ~f:(fun expr expected -> expr_type t scope ~expr ?expected)
+        ~f:(fun expr expected -> expr_type t scope ~expr ?expected ~hint)
     in
     node (Tuple exprs) (Type.TTuple (tys exprs))
   | Construct (constructor, args) ->
@@ -2375,7 +2394,8 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
               scope
               ~expr:body
               ~ty:result
-              ?expected:(either_known result expected))
+              ?expected:(either_known result expected)
+              ~hint)
       in
       (pattern, body), unified
     in
@@ -2430,7 +2450,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
     let match_ = node (Match { scrutinee; cases; exception_cases }) result in
     if !patterns_failed then node (Error [ match_ ]) result else match_
   | Poly_record fields ->
-    let fields = labelled_types t scope fields ~expected in
+    let fields = labelled_types t scope fields ~expected ~hint in
     node
       (Poly_record fields)
       (Fresh.record t (Poly_row.present (labelled_tys fields) ~tail:REmpty))
@@ -2439,7 +2459,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
     let expr, (_ : Type.row) = check_open_record t scope expr [ label, ty ] in
     node (Poly_field (expr, label)) ty
   | Poly_extend (fields, expr) ->
-    let fields = labelled_types t scope fields ~expected in
+    let fields = labelled_types t scope fields ~expected ~hint in
     let rest = Scope.fresh_row t scope in
     let expr = check_expr t scope ~expr ~ty:(Fresh.record t rest) in
     node
@@ -2451,7 +2471,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
     in
     node (Poly_restrict (expr, label)) (Fresh.record t rest)
   | Poly_update (expr, fields) ->
-    let fields = labelled_types t scope fields ~expected in
+    let fields = labelled_types t scope fields ~expected ~hint in
     let expr, rest =
       check_open_record
         t
@@ -2469,7 +2489,8 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
           t
           scope
           ~expr
-          ?expected:(row_entry expected `Variant ~label:tag))
+          ?expected:(row_entry expected `Variant ~label:tag)
+          ~hint)
     in
     let arg_ty =
       Option.value_map arg ~default:Type.unit ~f:(fun (expr : Typed.Expr.t) ->
@@ -2480,7 +2501,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
 (* Runs the toplevel splice [code] of a [Stag.Expr.t], then infers the
    expression it gives here, checking it against [expected] so that a mismatch
    is reported as the expression's. *)
-and splice_syntax ?expected t (scope : Scope.t) ~code ~loc =
+and splice_syntax ?expected ~hint t (scope : Scope.t) ~code ~loc =
   let program = scope.program in
   let%bind.Result value =
     at_compile_time
@@ -2503,8 +2524,8 @@ and splice_syntax ?expected t (scope : Scope.t) ~code ~loc =
   let scope = { scope with syntax_splice = Some { splice = loc; generated } } in
   let expr = Source.Expr.Syntax generated in
   match expected with
-  | None -> expr_type t scope ~expr
-  | Some ty -> check_expr t scope ~expr ~ty
+  | Some ty when not hint -> check_expr t scope ~expr ~ty
+  | Some _ | None -> expr_type t scope ~expr ?expected ~hint
 
 (* Runs the toplevel splice [code], then infers the code it generates here, with
    its explicit substitutions bound by lets around it. *)
@@ -2583,7 +2604,7 @@ and expand t (scope : Scope.t) ~code ~subs ~ty ~loc =
     ; loc
     })
 
-and labelled_types t scope fields ~expected =
+and labelled_types t scope fields ~expected ~hint =
   Poly_row.report_duplicate_labels scope fields;
   List.map fields ~f:(fun ((label : Syntax.Name.t), expr) ->
     ( label.txt
@@ -2591,13 +2612,14 @@ and labelled_types t scope fields ~expected =
         t
         scope
         ~expr
-        ?expected:(row_entry expected `Record ~label:label.txt) ))
+        ?expected:(row_entry expected `Record ~label:label.txt)
+        ~hint ))
 
 (* Checks [expr] has type [ty], [expected] (by default [ty]) being what it is
    known to be. *)
-and check_expr ?expected t scope ~expr ~ty =
+and check_expr ?expected ?hint t scope ~expr ~ty =
   let expr =
-    expr_type t scope ~expr ~expected:(Option.value expected ~default:ty)
+    expr_type t scope ~expr ~expected:(Option.value expected ~default:ty) ?hint
   in
   if Scope.unifies t scope ~ty1:ty ~ty2:expr.ty ~loc:expr.loc
   then expr

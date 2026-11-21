@@ -448,3 +448,67 @@ let main =
     6
     |}]
 ;;
+
+let%expect_test "through calls of functions generic in their result" =
+  check
+    ~run:true
+    {|
+let id x = x
+let f (x : string) = .~(id (Stag.Expr.var "x"))
+let gen name = Stag.Expr.var name
+let twice g x = g x
+let g (x : string) = .~(twice gen "x")
+let wrap e = e
+let first p = match p with (a, _) -> a
+let h (x : string) = .~(wrap (first (Stag.Expr.var "x", 0)))
+let code = .~(id .< 1 >.)
+let main = print_endline (Core.String.append (Core.String.append (f "a") (g "b")) (Core.String.append (h "c") (Core.Int.to_string code)))
+|};
+  [%expect
+    {|
+    module A : sig
+      val id : 'a -> 'a
+      val f : string -> string
+      val gen : string -> Stag.Expr.t
+      val twice : ('a -> 'b) -> 'a -> 'b
+      val g : string -> string
+      val wrap : 'a -> 'a
+      val first : 'a * 'b -> 'a
+      val h : string -> string
+      val code : int
+      val main : unit
+    end
+    --- output ---
+    abc1
+    |}]
+;;
+
+let%expect_test "the expected type resolves constructors in spliced code" =
+  check
+    ~run:true
+    {|
+module M = struct type t = A | B end
+module N = struct type u = A | B end
+let p : ptr[M.t] = .~(.< Ptr.make A >.)
+let mk x = .< Ptr.make .~x >.
+let q : ptr[M.t] = .~(mk .< B >.)
+let main = match (p.*, q.*) with (A, B) -> print_endline "A B" | _ -> ()
+|};
+  [%expect
+    {|
+    module A : sig
+      module M : sig
+        type t = A | B
+      end
+      module N : sig
+        type u = A | B
+      end
+      val p : ptr[M.t]
+      val mk : <'a>{..'b} -> <ptr['a]>{..'c} where ..'b <= {..'c}
+      val q : ptr[M.t]
+      val main : unit
+    end
+    --- output ---
+    A B
+    |}]
+;;
