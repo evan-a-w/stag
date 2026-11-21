@@ -182,11 +182,17 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   so a function can return a local value (allocate in the caller's region).
 - `&x` of a variable puts `x` on the data stack, and is a `local` `ptr`.
 - `local` values cannot escape their region: not returned (except via
-  `exclave_`), not stored into `global` blocks (including GC objects, even
-  unsafely), not captured by `global` closures. A `local` argument
-  (`(x @ local)`) is borrowed: the callee may not retain it.
+  `exclave_`), not stored into `global` blocks (including GC objects), not
+  captured by `global` closures. A `local` argument (`(x @ local)`) is
+  borrowed: the callee may not retain it.
 - `global_` on record fields and constructor arguments: always `global`, even
   inside a local block.
+- Mutable fields, and stores through a `ptr` (`*p <- v`), are implicitly
+  `global_` (as OxCaml's mutable fields), so an older region's block never
+  points into a newer region. `Unsafe.assume_global e` (name tentative)
+  bypasses this, the programmer guaranteeing that `e` outlives what it is
+  stored into. The GC stays safe either way: it never follows pointers into
+  the data stack, so only the program's own reads can dangle.
 - Tail calls end the current region before the call, so a local value of the
   current region cannot be passed to a tail call (OxCaml's rule); such a call
   is not a tail call (or is an error under an explicit `[@tail]`).
