@@ -512,3 +512,33 @@ let main = match (p.*, q.*) with (A, B) -> print_endline "A B" | _ -> ()
     A B
     |}]
 ;;
+
+let%expect_test "a quote's body is expected with the splice's own type" =
+  check
+    ~run:true
+    {|
+module M = struct type t = C of int end
+type t = M.t
+type u = C of string
+let id x = x
+let ok : t = id (C 1)
+let ok2 : t = .~(.< id (C 2) >.)
+let main = match ok2 with C n -> print_endline (Core.Int.to_string n)
+|};
+  [%expect
+    {|
+    module A : sig
+      module M : sig
+        type t = C of int
+      end
+      type t = M.t
+      type u = C of string
+      val id : 'a -> 'a
+      val ok : M.t
+      val ok2 : M.t
+      val main : unit
+    end
+    --- output ---
+    2
+    |}]
+;;

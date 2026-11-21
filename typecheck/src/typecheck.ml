@@ -1886,12 +1886,12 @@ and with_monomorphic_bindings (scope : Scope.t) bindings ~f =
     ~f
 
 (* What fails to check is reported, and becomes [Error] of its parts that did,
-   of type [Type.error]. With [hint], [expected] is only what [expr] is likely
-   to be, rather than what it must be, so it isn't unified with what may turn
-   out to be something else. *)
+   of type [Type.error]. Unless [hint] is [Required], [expected] is only what
+   [expr] is likely to be, so it isn't unified with what may turn out to be
+   something else. *)
 and expr_type
   ?expected
-  ?(hint = false)
+  ?(hint = Expectation.Required)
   t
   (scope : Scope.t)
   ~(expr : Source.Expr.t)
@@ -1981,7 +1981,7 @@ and expr_type
       | Some expected
         when (not (Unify.clash expected b))
              && not
-                  (hint
+                  ((not (Expectation.is_required hint))
                    &&
                    match Type.canonical_ty b with
                    | TVar _ -> true
@@ -2129,7 +2129,7 @@ and expr_type
         { scope with level = scope.level + 1; quote = Some quote }
         ~expr
         ?expected
-        ~hint
+        ~hint:(Expectation.quoted hint)
     in
     node (Quote inner) (TCode { inner = inner.ty; context = quote.context })
   | Splice { code; subs } ->
@@ -2195,7 +2195,12 @@ and expr_type
         | Ok subs -> node (Splice { code; subs }) inner)
      | None ->
        let code =
-         expr_type t outside ~expr:code ?expected:code_expected ~hint:true
+         expr_type
+           t
+           outside
+           ~expr:code
+           ?expected:code_expected
+           ~hint:(Code_hint hint)
        in
        if is_syntax code.ty
        then (
@@ -2558,7 +2563,7 @@ and splice_syntax ?expected ~hint t (scope : Scope.t) ~code ~loc =
   let scope = { scope with syntax_splice = Some { splice = loc; generated } } in
   let expr = Source.Expr.Syntax generated in
   match expected with
-  | Some ty when not hint -> check_expr t scope ~expr ~ty
+  | Some ty when Expectation.is_required hint -> check_expr t scope ~expr ~ty
   | Some _ | None -> expr_type t scope ~expr ?expected ~hint
 
 (* Runs the toplevel splice [code], then infers the code it generates here, with
