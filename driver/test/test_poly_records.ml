@@ -438,6 +438,22 @@ type b = [`A of a]
 type t = T of {`next : t}
 let deref t = match t with T r -> r.`next
 |};
+  (* Through a pointer, as they must be. *)
+  check {|
+let occurs r = cond true r.`x.* r
+|};
+  check {|
+type t = {`next : ptr[t]}
+|};
+  check {|
+type a = {`b : b}
+type b = [`A of ptr[a]]
+|};
+  check
+    {|
+type t = T of {`next : ptr[t]}
+let deref t = match t with T r -> r.`next.*
+|};
   [%expect
     {|
     ((Unification_error (Occurs_check_failed (ATy (TVar (Unbound 29 1))))) @
@@ -457,5 +473,11 @@ let deref t = match t with T r -> r.`next
     ((Cyclic_type_alias t) @ t.stag:2:5-6)
     ((Cyclic_type_alias a) @ t.stag:2:5-6)
     ((Infinite_type_layout t) @ t.stag:2:5-6)
+    val occurs : ({`x : ptr['a]; ..'b} as 'a) -> 'a
+    type t = {`next : ptr[t]}
+    type a = {`b : [`A of ptr[a]]}
+    type b = [`A of ptr[{`b : b}]]
+    type t = T of {`next : ptr[t]}
+    val deref : t -> t
     |}]
 ;;

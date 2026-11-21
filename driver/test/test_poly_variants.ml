@@ -460,6 +460,18 @@ type t = [`Nil | `Cons of int * t]
 type t = T of [`Nil | `Cons of int * t]
 let two = T (`Cons (1, T `Nil))
 |};
+  (* Through a pointer, as they must be. *)
+  check {|
+let occurs v = cond true v (`A (Ptr.make v))
+|};
+  check {|
+type t = [`Nil | `Cons of int * ptr[t]]
+|};
+  check
+    {|
+type t = T of [`Nil | `Cons of int * ptr[t]]
+let two = T (`Cons (1, Ptr.make (T `Nil)))
+|};
   [%expect
     {|
     ((Unification_error (Occurs_check_failed (ATy (TVar (Unbound 18 1))))) @
@@ -478,6 +490,10 @@ let two = T (`Cons (1, T `Nil))
      @ t.stag:2:59-60)
     ((Cyclic_type_alias t) @ t.stag:2:5-6)
     ((Infinite_type_layout t) @ t.stag:2:5-6)
+    val occurs : ([`A of ptr['a]; ..'b] as 'a) -> 'a
+    type t = [`Cons of int * ptr[t] | `Nil]
+    type t = T of [`Cons of int * ptr[t] | `Nil]
+    val two : t
     |}]
 ;;
 
