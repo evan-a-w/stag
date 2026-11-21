@@ -542,3 +542,29 @@ let main = match ok2 with C n -> print_endline (Core.Int.to_string n)
     2
     |}]
 ;;
+
+let%expect_test "a later match arm is expected with an earlier arm's type" =
+  check
+    ~run:true
+    {|
+module M = struct type t = C of int end
+type u = C of string
+let id x = x
+let ok : M.t = .~(match true with true -> .< M.C 3 >. | false -> id .< C 4 >.)
+let main = match ok with C n -> print_endline (Core.Int.to_string n)
+|};
+  [%expect
+    {|
+    module A : sig
+      module M : sig
+        type t = C of int
+      end
+      type u = C of string
+      val id : 'a -> 'a
+      val ok : M.t
+      val main : unit
+    end
+    --- output ---
+    3
+    |}]
+;;

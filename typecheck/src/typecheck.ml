@@ -2434,7 +2434,12 @@ and expr_type
               ~expr:body
               ~ty:result
               ?expected:(either_known result expected)
-              ~hint)
+              ~hint:
+                (match Type.canonical_ty result with
+                 | TVar _ -> hint
+                 | _ ->
+                   (* An earlier case's type, which this one must have. *)
+                   Required))
       in
       (pattern, body), unified
     in
