@@ -341,5 +341,169 @@ let%expect_test "polymorphic recursion" =
          [ ctor "T" [ tycon "t" [ tycon "list" [ Type.TVar parameter ] ] ] ])
   in
   shape (Runtime_types.create (resolver [ list; poly ])) (tycon "t" [ int ]);
-  [%expect {| (Error (Recursive (t t t))) |}]
+  [%expect {| (Error (Too_deep 1000)) |}]
+;;
+
+let%expect_test "instantiations through an alias" =
+  (* type u['a] = A of 'a type r['a] = u['a] [r[r[int]]] is finite: A (A 1). The
+     inner [u] is instantiated with [r[int]] and the outer with [int], so the
+     same declaration recurs with different arguments. *)
+  let u_parameter = var () in
+  let u =
+    decl
+      ~name:"u"
+      ~params:[ Type.ATy (Type.TVar u_parameter) ]
+      (variant [ ctor "A" [ Type.TVar u_parameter ] ])
+  in
+  let r_parameter = var () in
+  let r =
+    decl
+      ~name:"r"
+      ~params:[ Type.ATy (Type.TVar r_parameter) ]
+      (alias (tycon "u" [ Type.TVar r_parameter ]))
+  in
+  let t = Runtime_types.create (resolver [ u; r ]) in
+  shape t (tycon "r" [ tycon "r" [ int ] ]);
+  shape t (tycon "r" [ tycon "r" [ tycon "r" [ int ] ] ]);
+  [%expect
+    {|
+    (Ok
+     (Union (repr Default)
+      (cases
+       ((Struct (repr Default)
+         (fields
+          ((Union (repr Default)
+            (cases
+             ((Struct (repr Default) (fields ((Scalar (scalar I64) (valid ())))))))))))))))
+    (Ok
+     (Union (repr Default)
+      (cases
+       ((Struct (repr Default)
+         (fields
+          ((Union (repr Default)
+            (cases
+             ((Struct (repr Default)
+               (fields
+                ((Union (repr Default)
+                  (cases
+                   ((Struct (repr Default)
+                     (fields ((Scalar (scalar I64) (valid ())))))))))))))))))))))
+    |}]
+;;
+
+let%expect_test "instantiations through a structural body" =
+  (* type u['a] = {x : 'a}
+     type r['a] = u[{y : 'a}]
+     [r[r[int]]] is {x = {y = {x = {y = 1}}}}. *)
+  let u_parameter = var () in
+  let u =
+    decl
+      ~name:"u"
+      ~params:[ Type.ATy (Type.TVar u_parameter) ]
+      (record [ field "x" (Type.TVar u_parameter) ])
+  in
+  let r_parameter = var () in
+  let structural =
+    Fresh.record fresh (present "y" (Type.TVar r_parameter) Type.REmpty)
+  in
+  let r =
+    decl
+      ~name:"r"
+      ~params:[ Type.ATy (Type.TVar r_parameter) ]
+      (alias (tycon "u" [ structural ]))
+  in
+  let t = Runtime_types.create (resolver [ u; r ]) in
+  shape t (tycon "r" [ tycon "r" [ int ] ]);
+  [%expect
+    {|
+    (Ok
+     (Struct (repr Default)
+      (fields
+       ((Struct (repr Default)
+         (fields
+          ((Struct (repr Default)
+            (fields
+             ((Struct (repr Default) (fields ((Scalar (scalar I64) (valid ())))))))))))))))
+    |}]
+;;
+
+let%expect_test "a parameter that reaches itself" =
+  (* type t['a] = U of 'a | T of t['a] [t[int]] never finishes expanding: the
+     recursive case binds the parameter to itself. *)
+  let parameter = var () in
+  let t =
+    decl
+      ~name:"t"
+      ~params:[ Type.ATy (Type.TVar parameter) ]
+      (variant
+         [ ctor "U" [ Type.TVar parameter ]
+         ; ctor "T" [ tycon "t" [ Type.TVar parameter ] ]
+         ])
+  in
+  shape (Runtime_types.create (resolver [ t ])) (tycon "t" [ int ]);
+  [%expect {| (Error (Recursive (t t))) |}]
+;;
+
+let%expect_test "parameters that reach each other" =
+  (* type a['x] = A of b['x] type b['y] = B of a['y] *)
+  let a_parameter = var () in
+  let b_parameter = var () in
+  let a =
+    decl
+      ~name:"a"
+      ~params:[ Type.ATy (Type.TVar a_parameter) ]
+      (variant [ ctor "A" [ tycon "b" [ Type.TVar a_parameter ] ] ])
+  in
+  let b =
+    decl
+      ~name:"b"
+      ~params:[ Type.ATy (Type.TVar b_parameter) ]
+      (variant [ ctor "B" [ tycon "a" [ Type.TVar b_parameter ] ] ])
+  in
+  shape (Runtime_types.create (resolver [ a; b ])) (tycon "a" [ int ]);
+  [%expect {| (Error (Recursive (a b a))) |}]
+;;
+
+let%expect_test "row parameters and arity" =
+  let t = Runtime_types.create (resolver []) in
+  shape t (tycon "int" [ bool ]);
+  shape t (tycon "ptr" []);
+  shape t (tycon "ptr" [ int; int ]);
+  shape t (tycon "ptr" [ int ]);
+  let row_parameter = var () in
+  let s =
+    decl
+      ~name:"s"
+      ~params:[ Type.ARow (Type.RVar row_parameter) ]
+      (alias Type.unit)
+  in
+  shape (Runtime_types.create (resolver [ s ])) (tycon "s" [ int ]);
+  [%expect
+    {|
+    (Error (Wrong_arity (name int) (expected 0) (got 1)))
+    (Error (Wrong_arity (name ptr) (expected 1) (got 0)))
+    (Error (Wrong_arity (name ptr) (expected 1) (got 2)))
+    (Ok Ptr)
+    (Error (Row_expected 17))
+    |}]
+;;
+
+let%expect_test "shared instantiations are expanded once" =
+  (* type t0 = [{x : t1; y : t1}] ... type t39 = int. Expanding every occurrence
+     separately is 2^39 expansions, so without the cache this test never
+     finishes. *)
+  let n = 40 in
+  let names = List.init n ~f:(fun i -> sprintf "t%d" i) in
+  let declarations =
+    List.mapi names ~f:(fun i name ->
+      let ty =
+        match List.nth names (i + 1) with
+        | None -> int
+        | Some next -> tycon next []
+      in
+      decl ~name (record [ field "x" ty; field "y" ty ]))
+  in
+  let t = Runtime_types.create (resolver declarations) in
+  printf !"is_ok %b\n" (Result.is_ok (Runtime_types.shape t (tycon "t0" [])));
+  [%expect {| is_ok true |}]
 ;;

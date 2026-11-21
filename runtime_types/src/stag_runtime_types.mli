@@ -16,7 +16,10 @@ module Error : module type of Shape_error
 (** Where declarations come from. *)
 module Resolver : module type of Resolver
 
-(** The canonical name [ptr] is recognised by, unless [create] says otherwise. *)
+(** The canonical name [ptr] is recognised by, unless [create] says otherwise.
+
+    [ptr] is checked before the builtins, so [~ptr_name:"int"] makes [int]
+    [ptr]. *)
 val ptr_name : string
 
 type t
@@ -32,7 +35,11 @@ val create : ?ptr_name:string -> Resolver.t -> t
     - A structural record or variant ([TRecord], [TVariant]) has its present
       entries sorted by label, which is the order the maps holding them iterate.
     - [TArrow] and [TCode] are [Ptr]: a closure or a meta value.
-    - An alias is expanded. *)
+    - An alias is expanded, and a declaration applied to arguments is expanded
+      once per instantiation however it was reached: [type u['a] = A of 'a] with
+      [type r['a] = u['a]] has a finite layout at [r[r[int]]].
+    - A declaration whose expansion does not terminate, as under polymorphic
+      recursion, is [Error.Too_deep]. *)
 val shape : t -> Type.ty -> (Shape.t, Error.t) Result.t
 
 (** [shape], laid out by [Layout.of_shape]. *)

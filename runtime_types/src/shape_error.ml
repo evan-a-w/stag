@@ -17,10 +17,10 @@ type t =
       ; expected : int
       ; got : int
       }
-  | Type_expected of Type.id
+  | Recursive_ty of Type.id
+  (** A type variable whose instantiation reaches itself, so is not concrete. *)
   | Row_expected of Type.id
-  | Presence_expected of Type.id
-  (** A variable used as something its instantiation is not. *)
+  (** A row variable used as a type, or the reverse. *)
   | Recursive of string list
   (** The by-value cycle: the expansions enclosing it, outermost first.
       Declarations by canonical name, structural types as [record 12] or

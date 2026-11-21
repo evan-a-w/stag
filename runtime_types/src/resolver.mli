@@ -2,7 +2,10 @@ open! Import
 
 (** The declarations that [Type.TCon] names, by canonical name. A program's
     types are only in it if its signature is added, and the prelude's if the
-    prelude's is. *)
+    prelude's is.
+
+    Every signature added must come from types made by one [Fresh.t]: a
+    declaration's parameters and structural types are identified by their ids. *)
 type t
 
 val empty : t
