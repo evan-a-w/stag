@@ -288,3 +288,25 @@ let q = .< (a, b) >.
 |};
   [%expect {| ((Toplevel_initialization_cycle (b a b)) @ t.stag:3:8-9) |}]
 ;;
+
+let%expect_test "a cycle in an argument prints without parentheses" =
+  run
+    {|
+exception E of list[int]
+let cyc = Cons (Ptr.make (1, Nil))
+let main =
+  match cyc with
+  | Cons q -> q.* <- (1, Cons q); raise (E cyc)
+  | Nil -> ()
+|};
+  [%expect
+    {|
+    exception E of list[int]
+    val cyc : list[int]
+    val main : unit
+    -- evaluated at compile time
+    -- evaluated
+    (cyc (Cons 1 (Cons <cycle>)))
+    ("Uncaught exception E (Cons (Ptr.make (1, Cons <cycle>)))" @ t.stag:6:34-47)
+    |}]
+;;

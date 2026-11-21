@@ -59,7 +59,7 @@ let%expect_test "cyclic pointers terminate, including through records" =
   [%expect
     {|
     (Ptr <cycle>)
-    Ptr.make (<cycle>)
+    Ptr.make <cycle>
     (Ptr ((next (Ptr (Tuple <cycle> 1)))))
     Ptr.make {`next = Ptr.make (<cycle>, 1)}
     |}]

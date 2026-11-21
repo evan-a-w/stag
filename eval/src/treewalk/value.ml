@@ -232,6 +232,7 @@ let to_string_hum ?max_length value =
   and argument (value : t) =
     match value with
     | Construct (_, []) | Poly_variant (_, Unit) -> value_ value
+    | Ptr cell when List.exists !pointers ~f:(phys_equal cell) -> value_ value
     | Ptr _ | Construct _ | Poly_variant _ ->
       add "(";
       value_ value;
