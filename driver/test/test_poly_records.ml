@@ -470,8 +470,8 @@ let deref t = match t with T r -> r.`next.*
           (RExtend x (PVar (Unbound 35 1)) (TCon int ()) (RVar (Unbound 36 1))))))
        Cyclic_row))
      @ t.stag:2:38-50)
-    ((Cyclic_type_alias t) @ t.stag:2:5-6)
-    ((Cyclic_type_alias a) @ t.stag:2:5-6)
+    ((Infinite_type_layout t) @ t.stag:2:5-6)
+    ((Infinite_type_layout a) @ t.stag:2:5-6)
     ((Infinite_type_layout t) @ t.stag:2:5-6)
     val occurs : ({`x : ptr['a]; ..'b} as 'a) -> 'a
     type t = {`next : ptr[t]}

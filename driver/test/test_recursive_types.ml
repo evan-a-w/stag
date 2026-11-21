@@ -493,7 +493,7 @@ let%expect_test "functions don't guard cycles, nor pointers alone in aliases" =
      t.stag:1:15-16)
     val self : ((ptr['a -> 'b] as 'a) -> 'b) -> 'b
     ((Cyclic_type_alias al) @ t.stag:1:5-7)
-    ((Cyclic_type_alias f) @ t.stag:1:5-6)
+    ((Infinite_type_layout f) @ t.stag:1:5-6)
     type f = int -> ptr[f]
     type f = [`F of int -> ptr[f]]
     type s = {`head : int; `tail : unit -> ptr[s]}
@@ -649,13 +649,13 @@ type t = [`A of int] -> t
     ((Non_regular_recursive_alias t) @ t.stag:2:24-33)
     ((Non_regular_recursive_alias a) @ t.stag:3:20-26)
     ((Non_regular_recursive_alias t) @ t.stag:2:23-42)
-    ((Cyclic_type_alias t) @ t.stag:2:5-6)
+    ((Infinite_type_layout t) @ t.stag:2:5-6)
     type list['a] = Nil | Cons of ptr['a * list['a]]
     type t = list[t]
     ((Cyclic_type_alias t) @ t.stag:3:5-6)
-    ((Cyclic_type_alias t) @ t.stag:2:5-6)
-    ((Cyclic_type_alias t) @ t.stag:2:5-6)
-    ((Cyclic_type_alias t) @ t.stag:2:5-6)
+    ((Infinite_type_layout t) @ t.stag:2:5-6)
+    ((Infinite_type_layout t) @ t.stag:2:5-6)
+    ((Infinite_type_layout t) @ t.stag:2:5-6)
     |}]
 ;;
 
@@ -838,8 +838,8 @@ type b = [`A of a]
     val a : ([`A of ptr['a]] as 'a) -> ([`A of ptr['b]] as 'b)
     type a = [`A of ptr[a]] * int
     type b = [`A of ptr[b * int]]
-    ((Cyclic_type_alias g) @ t.stag:3:5-6)
-    ((Cyclic_type_alias a) @ t.stag:2:5-6)
+    ((Infinite_type_layout g) @ t.stag:3:5-6)
+    ((Infinite_type_layout a) @ t.stag:2:5-6)
     |}];
   check {|
 type t = t
@@ -869,13 +869,13 @@ type t = [`A of t] * id[t]
   [%expect
     {|
     ((Cyclic_type_alias t) @ t.stag:2:5-6)
-    ((Cyclic_type_alias g) @ t.stag:3:5-6)
+    ((Infinite_type_layout g) @ t.stag:3:5-6)
     type list['a] = Nil | Cons of ptr['a * list['a]]
     type f['a] = list['a]
     type g = list[g]
-    ((Cyclic_type_alias g) @ t.stag:3:5-6)
+    ((Infinite_type_layout g) @ t.stag:3:5-6)
     ((Cyclic_type_alias a) @ t.stag:2:5-6)
-    ((Cyclic_type_alias t) @ t.stag:3:5-6)
+    ((Infinite_type_layout t) @ t.stag:3:5-6)
     |}]
 ;;
 
@@ -1060,8 +1060,8 @@ type c = c * int
 |};
   [%expect
     {|
-    ((Cyclic_type_alias c) @ t.stag:4:5-6)
-    ((Cyclic_type_alias c) @ t.stag:3:5-6)
+    ((Infinite_type_layout c) @ t.stag:4:5-6)
+    ((Infinite_type_layout c) @ t.stag:3:5-6)
     |}]
 ;;
 

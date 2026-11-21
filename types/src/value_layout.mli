@@ -15,9 +15,12 @@ val iter
 (** Whether [roots] reach the variable [var] by a path through no pointer: a
     [ptr], or a parameter of a nominal type that [con] says is not stored by
     value. If [needs_structure], a path must also pass through a type
-    constructor other than [ptr] to be guarded. Functions don't guard paths. *)
+    constructor other than [ptr] to be guarded. Functions don't guard paths. If
+    [through_structure], only paths through a type constructor other than [ptr]
+    count. *)
 val reaches_unguarded
-  :  con:(string -> Int.Set.t option)
+  :  ?through_structure:bool
+  -> con:(string -> Int.Set.t option)
   -> needs_structure:bool
   -> var:Type.id
   -> Type.arg list

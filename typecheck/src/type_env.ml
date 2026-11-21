@@ -529,17 +529,23 @@ and expand t (decl : Decl.t) ~args ~expansions body =
   in
   (* Nominal types are taken to guard here, as their layouts may not be known
      yet: the layout of the declaration is checked after elaboration. *)
-  if expansion.reached_back
-     && Value_layout.reaches_unguarded
-          ~con:(fun (_ : string) -> Some Int.Set.empty)
-          ~needs_structure:true
-          ~var:knot.id
-          [ ATy body ]
+  let reaches_unguarded ?through_structure () =
+    Value_layout.reaches_unguarded
+      ?through_structure
+      ~con:(fun (_ : string) -> Some Int.Set.empty)
+      ~needs_structure:true
+      ~var:knot.id
+      [ ATy body ]
+  in
+  if expansion.reached_back && reaches_unguarded ()
   then
     Error
       (Typecheck_error.create
          ~loc:decl.decl.name.loc
-         (Cyclic_type_alias decl.name))
+         (* Through a type constructor, a [ptr] would break the cycle. *)
+         (if reaches_unguarded ~through_structure:true ()
+          then Infinite_type_layout decl.name
+          else Cyclic_type_alias decl.name))
   else (
     knot.state <- Link body;
     expansion.expanded <- true;

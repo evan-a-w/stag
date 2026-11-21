@@ -485,7 +485,7 @@ let x : u = 1
 |};
   [%expect
     {|
-    ((Cyclic_type_alias A.t) @ t.stag:3:7-8)
+    ((Infinite_type_layout A.t) @ t.stag:3:7-8)
     module A : sig
       type t = int
       type u = int

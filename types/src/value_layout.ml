@@ -64,11 +64,18 @@ module Guard = struct
   ;;
 end
 
-let reaches_unguarded ~con ~needs_structure ~var roots =
+let reaches_unguarded
+  ?(through_structure = false)
+  ~con
+  ~needs_structure
+  ~var
+  roots
+  =
   let visited = Hash_set.Poly.create () in
   let guarded (guard : Guard.t) =
     guard.pointer && (guard.structure || not needs_structure)
   in
+  let reached (guard : Guard.t) = guard.structure || not through_structure in
   let visit id (guard : Guard.t) ~f =
     let key = id, Guard.to_int guard in
     if Hash_set.mem visited key
@@ -81,7 +88,7 @@ let reaches_unguarded ~con ~needs_structure ~var roots =
     (not (guarded guard))
     &&
     match ty' with
-    | TVar { id; _ } when id = var -> true
+    | TVar { id; _ } when id = var -> reached guard
     | TVar { id; state = Link target; _ } ->
       visit id guard ~f:(fun () -> ty guard target)
     | TVar _ -> false
@@ -109,7 +116,7 @@ let reaches_unguarded ~con ~needs_structure ~var roots =
     &&
     match row' with
     | REmpty -> false
-    | RVar { id; _ } when id = var -> true
+    | RVar { id; _ } when id = var -> reached guard
     | RVar { id; state = Link target; _ } ->
       visit id guard ~f:(fun () -> row guard target)
     | RVar _ -> false

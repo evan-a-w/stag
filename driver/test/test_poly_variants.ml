@@ -488,7 +488,7 @@ let two = T (`Cons (1, Ptr.make (T `Nil)))
           (RExtend A (PVar (Unbound 31 1)) (TCon unit ()) (RVar (Unbound 32 1))))))
        Cyclic_row))
      @ t.stag:2:59-60)
-    ((Cyclic_type_alias t) @ t.stag:2:5-6)
+    ((Infinite_type_layout t) @ t.stag:2:5-6)
     ((Infinite_type_layout t) @ t.stag:2:5-6)
     val occurs : ([`A of ptr['a]; ..'b] as 'a) -> 'a
     type t = [`Cons of int * ptr[t] | `Nil]

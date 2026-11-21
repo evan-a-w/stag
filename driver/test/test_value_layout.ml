@@ -14,8 +14,8 @@ type b = B of a
     {|
     ((Infinite_type_layout t) @ t.stag:1:5-6)
     ((Infinite_type_layout r) @ t.stag:1:5-6)
-    ((Cyclic_type_alias t) @ t.stag:1:5-6)
-    ((Cyclic_type_alias r) @ t.stag:1:5-6)
+    ((Infinite_type_layout t) @ t.stag:1:5-6)
+    ((Infinite_type_layout r) @ t.stag:1:5-6)
     ((Infinite_type_layout a) @ t.stag:2:5-6)
     |}]
 ;;
