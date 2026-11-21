@@ -1,0 +1,10 @@
+; Measures memory through /proc, so Linux only.
+
+(library
+ (name test_linux)
+ (enabled_if
+  (= %{system} linux))
+ (preprocess
+  (pps ppx_jane))
+ (inline_tests)
+ (libraries core stag_common stag_syntax stag_driver))
