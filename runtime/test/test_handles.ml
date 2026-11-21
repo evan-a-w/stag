@@ -515,13 +515,16 @@ let%expect_test "metadata consistency" =
     |}]
 ;;
 
-let%expect_test "a corrupt ID does not remove another block's metadata" =
+let%expect_test "a corrupt ID does not remove another block's metadata, but \
+                 leaks its own"
+  =
   let gc, heap, roots, data_stack, static = create_gc () in
   let root = Roots.push_frame roots ~slots:1 in
   let doomed = Stag_gc.alloc_handle gc name_kind "doomed" in
   let kept = Stag_gc.alloc_handle gc name_kind "kept" in
   Memory.store_addr root kept;
-  (* [doomed] claims [kept]'s ID, and is swept. *)
+  (* [doomed] claims [kept]'s ID, and is swept. Its own entry, under the ID it
+     had, is never removed. *)
   store_word doomed (word kept);
   let stats = Stag_gc.collect gc in
   print_s
@@ -530,9 +533,20 @@ let%expect_test "a corrupt ID does not remove another block's metadata" =
         ~freed:(stats.freed_blocks : int)
         ~handles:(Heap.For_testing.handles heap : int)
         ~kept:(Stag_gc.get_handle gc name_kind kept : string option)];
+  report gc;
   Roots.pop_frame roots;
   destroy gc roots data_stack static heap;
-  [%expect {| ((freed 1) (handles 2) (kept (kept))) |}]
+  [%expect
+    {|
+    ((freed 1) (handles 2) (kept (kept)))
+    (Gc.check_invariants
+     (errors
+      (("handle metadata"
+        (error_
+         ("handle blocks and metadata entries of different counts" (blocks 1)
+          (entries 2))))
+       ("handle metadata" (error_ ("metadata for no live block" (id 0)))))))
+    |}]
 ;;
 
 let%expect_test "alloc_handle rejects a ref into the data stack" =
