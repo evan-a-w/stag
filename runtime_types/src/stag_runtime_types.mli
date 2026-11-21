@@ -22,6 +22,7 @@ module Resolver : module type of Resolver
     [ptr]. *)
 val ptr_name : string
 
+(** Keeps the shapes of the declarations it has expanded, for its later calls. *)
 type t
 
 val create : ?ptr_name:string -> Resolver.t -> t

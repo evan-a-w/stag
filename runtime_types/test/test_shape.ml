@@ -687,3 +687,37 @@ let%expect_test "substitution copies have their own ids" =
        ((Struct (repr Default) (fields ((Scalar (scalar I8) (valid ((0 1)))))))))))
     |}]
 ;;
+
+let%expect_test "the cache is kept across calls" =
+  (* type wrap['a] = W of 'a type t = T of wrap[t] [wrap[t]] is not cached by
+     [wrap[int]], nor [t] by refusing it. *)
+  let parameter = var () in
+  let wrap =
+    decl
+      ~name:"wrap"
+      ~params:[ Type.ATy (Type.TVar parameter) ]
+      (variant [ ctor "W" [ Type.TVar parameter ] ])
+  in
+  let self =
+    decl ~name:"t" (variant [ ctor "T" [ tycon "wrap" [ tycon "t" [] ] ] ])
+  in
+  let t = Runtime_types.create (resolver [ wrap; self ]) in
+  let first = Runtime_types.shape t (tycon "wrap" [ int ]) in
+  let second = Runtime_types.shape t (tycon "wrap" [ int ]) in
+  let same_shape = Result.equal phys_equal phys_equal first second in
+  print_s [%sexp (first : (Shape.t, Error.t) Result.t), ~~(same_shape : bool)];
+  shape t (tycon "t" []);
+  shape t (tycon "wrap" [ tycon "t" [] ]);
+  shape t (tycon "t" []);
+  [%expect
+    {|
+    ((Ok
+      (Union (repr Default)
+       (cases
+        ((Struct (repr Default) (fields ((Scalar (scalar I64) (valid ())))))))))
+     (same_shape true))
+    (Error (Recursive (t wrap t)))
+    (Error (Recursive (wrap t wrap)))
+    (Error (Recursive (t wrap t)))
+    |}]
+;;

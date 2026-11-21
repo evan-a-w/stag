@@ -90,10 +90,11 @@ module Path = struct
   let names path = List.rev (List.map path ~f:name)
 end
 
-(* Shapes of declarations already mapped, by canonical name and instantiation.
-   Only a shape that was computed is stored, never one that was refused, and
-   [declared] looks for a cycle first: a shape computed outside a cycle would
-   not be the one inside it. *)
+(* Shapes of declarations already mapped, by canonical name and instantiation,
+   for every [shape] of a [t]: an expansion depends only on those. Only a shape
+   that was computed is stored, never one that was refused, and [declared] looks
+   for a cycle first: a shape computed outside a cycle would not be the one
+   inside it. *)
 module Cache = struct
   type t = (Type.arg list * Shape.t) list String.Table.t
 
@@ -117,10 +118,10 @@ module Context = struct
     ; resolving : Int.Set.t
         (* The variables whose bindings are being substituted. *)
     ; path : Path.t
-    ; cache : Cache.t
     ; ids : int ref
         (* For the ids of the copies substitution makes: negative, so distinct
-           from [Fresh]'s, which a key compares records by. *)
+           from [Fresh]'s, which a key compares records by, and shared by a
+           [t]'s calls, as its cache keeps copies. *)
     ; work : int ref
     }
 end
@@ -136,9 +137,13 @@ let max_work = 100_000
 type t =
   { resolver : Resolver.t
   ; ptr_name : string
+  ; cache : Cache.t
+  ; ids : int ref
   }
 
-let create ?(ptr_name = default_ptr_name) resolver = { resolver; ptr_name }
+let create ?(ptr_name = default_ptr_name) resolver =
+  { resolver; ptr_name; cache = Cache.create (); ids = ref 0 }
+;;
 
 (* Substitution through the bindings. [Type.map_ty] keeps what does not change
    and closes the copies of cycles, and only bound variables reach the
@@ -300,7 +305,7 @@ and declared t context ~name ~args =
     (match cycle_check context (Path.Step.Declaration { name; args }) with
      | Error error -> Error error
      | Ok () ->
-       (match Cache.find context.Context.cache ~name ~args with
+       (match Cache.find t.cache ~name ~args with
         | Some shape -> Ok shape
         | None ->
           let path = Path.Step.Declaration { name; args } :: context.path in
@@ -335,7 +340,7 @@ and declared t context ~name ~args =
               in
               Struct { repr = Repr.Default; fields }
           in
-          Cache.add context.cache ~name ~args shape;
+          Cache.add t.cache ~name ~args shape;
           Ok shape))
 
 (* A parameter is bound to its argument as it stands, which [declared] has
@@ -429,18 +434,17 @@ and expand t context (ty : Type.ty) : (Shape.t, Error.t) Result.t =
          row)
 ;;
 
-let context () =
+let context t =
   { Context.bindings = Int.Map.empty
   ; resolving = Int.Set.empty
   ; path = []
-  ; cache = Cache.create ()
-  ; ids = ref 0
+  ; ids = t.ids
   ; work = ref 0
   }
 ;;
 
 let shape t ty =
-  match shape t (context ()) ty with
+  match shape t (context t) ty with
   | result -> result
   | exception Cycle id -> Error (Error.Recursive_ty id)
   | exception Not_a_row id -> Error (Error.Row_expected id)
