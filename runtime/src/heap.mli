@@ -62,15 +62,18 @@ val alloc : t -> Header.t -> Memory.Addr.t
     for it. *)
 val alloc_handle : t -> 'a Handle_kind.t -> 'a -> Memory.Addr.t
 
-(** [alloc_handle], with [refs] already computed as
-    [Handle_kind.refs kind value], for [Gc.alloc_handle], which roots them
-    first. *)
-val alloc_handle_with_refs
-  :  t
-  -> 'a Handle_kind.t
-  -> 'a
-  -> Memory.Addr.t array
-  -> Memory.Addr.t
+(** For [Gc] only. *)
+module For_gc : sig
+  (** [alloc_handle], with [refs] already computed as
+      [Handle_kind.refs kind value] and rooted by the caller. Not for other
+      callers: refs not derived from the payload leave its pointers untraced. *)
+  val alloc_handle_with_refs
+    :  t
+    -> 'a Handle_kind.t
+    -> 'a
+    -> Memory.Addr.t array
+    -> Memory.Addr.t
+end
 
 (** Returns a handle's OCaml value, or [None] if [addr] is not a live handle's
     base in this heap of [kind]. A swept address may be reused, by a handle of

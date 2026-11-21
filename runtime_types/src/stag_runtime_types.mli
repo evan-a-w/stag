@@ -44,7 +44,8 @@ val create : ?ptr_name:string -> Resolver.t -> t
       the depth of its expansions, as under nested polymorphic recursion
       ([type t['a] = L of 'a | N of t[('a * 'a)]]), or whose shape is too large
       as a tree however much of it is shared, is [Error.Too_large], whatever
-      earlier calls expanded. *)
+      earlier calls expanded. [Error.Too_deep] may still depend on them: a
+      cached declaration is not expanded again. *)
 val shape : t -> Type.ty -> (Shape.t, Error.t) Result.t
 
 (** [shape], laid out by [Layout.of_shape]. *)

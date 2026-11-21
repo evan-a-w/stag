@@ -476,6 +476,10 @@ let alloc_handle t kind value =
   alloc_handle_with_refs t kind value (Handle_kind.refs kind value)
 ;;
 
+module For_gc = struct
+  let alloc_handle_with_refs = alloc_handle_with_refs
+end
+
 let is_handle t block =
   let start = block_start t block in
   (not (Addr.is_null start))

@@ -242,7 +242,7 @@ let alloc_handle t kind value =
           Memory.store_addr (Addr.add scratch (index * 8)) refs.(index)
         done);
       if should_collect t words then ignore (collect t : Stats.t);
-      let block = Heap.alloc_handle_with_refs t.heap kind value refs in
+      let block = Heap.For_gc.alloc_handle_with_refs t.heap kind value refs in
       t.allocated_words <- t.allocated_words + words;
       result.(0) <- block)
     ~finally:(fun () -> Data_stack.exit t.data_stack mark);
