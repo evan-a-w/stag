@@ -414,9 +414,8 @@ let[@zero_alloc] block_start t addr =
             else Addr.null ()))))
 ;;
 
-let alloc_handle t kind value =
+let alloc_handle_with_refs t kind value refs =
   check_live t ~name:"alloc_handle";
-  let refs = Handle_kind.refs kind value in
   for index = 0 to Array.length refs - 1 do
     let ref_ = refs.(index) in
     if owns t ref_ && Addr.is_null (block_start t ref_)
@@ -460,6 +459,10 @@ let alloc_handle t kind value =
      raise exn);
   Header.store block header;
   block
+;;
+
+let alloc_handle t kind value =
+  alloc_handle_with_refs t kind value (Handle_kind.refs kind value)
 ;;
 
 let is_handle t block =

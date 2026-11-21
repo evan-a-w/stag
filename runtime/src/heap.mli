@@ -60,6 +60,16 @@ val alloc : t -> Header.t -> Memory.Addr.t
     which [Gc.alloc_handle] roots for it. *)
 val alloc_handle : t -> 'a Handle_kind.t -> 'a -> Memory.Addr.t
 
+(** [alloc_handle], with [refs] already computed as
+    [Handle_kind.refs kind value], for [Gc.alloc_handle], which roots them
+    first. *)
+val alloc_handle_with_refs
+  :  t
+  -> 'a Handle_kind.t
+  -> 'a
+  -> Memory.Addr.t array
+  -> Memory.Addr.t
+
 (** Returns a handle's OCaml value, or [None] if [addr] is not a live handle's
     base in this heap of [kind]. A swept address may be reused, by a handle of
     any ID: callers must not use a stale address (see [get_handle_checked]). *)

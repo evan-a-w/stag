@@ -8,7 +8,8 @@ open! Import
     alive as long as the handle is. For that to stay true:
     - [refs] must return every Stag pointer the payload holds, directly or
       through other OCaml values (in any order, duplicates allowed), and be a
-      pure function of it;
+      pure function of it, which neither allocates on the Stag heap nor collects
+      ([Gc.alloc_handle] raises if it collects);
     - the payload's Stag pointers must never change after creation. A mutable
       cell the payload captures must be a Stag heap block, among [refs], whose
       fields are mutated, never an OCaml [ref] (or mutable field) holding a

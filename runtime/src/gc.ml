@@ -188,7 +188,13 @@ let alloc t header =
    root them across the collection that may follow. *)
 let alloc_handle t kind value =
   check_live t;
+  let collections = t.collections in
   let refs = Handle_kind.refs kind value in
+  if t.collections <> collections
+  then
+    fail
+      [%message
+        "Gc.alloc_handle: refs collected" ~kind:(Handle_kind.name kind : string)];
   let refs_count = Array.length refs in
   for index = 0 to refs_count - 1 do
     let ref_ = refs.(index) in
@@ -216,7 +222,7 @@ let alloc_handle t kind value =
           Memory.store_addr (Addr.add scratch (index * 8)) refs.(index)
         done);
       if should_collect t words then ignore (collect t : Stats.t);
-      let block = Heap.alloc_handle t.heap kind value in
+      let block = Heap.alloc_handle_with_refs t.heap kind value refs in
       t.allocated_words <- t.allocated_words + words;
       result.(0) <- block)
     ~finally:(fun () -> Data_stack.exit t.data_stack mark);

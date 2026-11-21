@@ -632,3 +632,63 @@ let%expect_test "alloc_handle failing leaves no handle" =
     ((handles 1) (first (first)))
     |}]
 ;;
+
+let%expect_test "alloc_handle calls refs once" =
+  (* An impure [refs], breaking [Handle_kind]'s rules: [[||]], then [x]. *)
+  let gc, heap, roots, data_stack, static = create_gc () in
+  let root = Roots.push_frame roots ~slots:2 in
+  let x = scanned gc in
+  Memory.store_addr root x;
+  let calls = ref 0 in
+  let kind =
+    Handle_kind.create ~name:"impure" Unit.sexp_of_t ~refs:(fun () ->
+      incr calls;
+      if !calls = 1 then [||] else [| x |])
+  in
+  let handle = Stag_gc.alloc_handle gc kind () in
+  Memory.store_addr (Addr.add root 8) handle;
+  print_s
+    [%message
+      ""
+        ~calls:(!calls : int)
+        ~ref_words:(Header.size_words (Header.load handle) - 1 : int)];
+  report gc;
+  Roots.pop_frame roots;
+  destroy gc roots data_stack static heap;
+  [%expect
+    {|
+    ((calls 1) (ref_words 0))
+    (Gc.check_invariants
+     (errors
+      (("handle metadata"
+        (error_
+         ("a handle without refs of its payload" (id 0) (kind impure)
+          (missing (0))))))))
+    |}]
+;;
+
+let%expect_test "alloc_handle rejects refs that collect" =
+  let gc, heap, roots, data_stack, static = create_gc () in
+  let x = scanned gc in
+  let kind =
+    Handle_kind.create ~name:"collecting" Unit.sexp_of_t ~refs:(fun () ->
+      if Stag_gc.collections gc = 0
+      then ignore (Stag_gc.collect gc : Stag_gc.Stats.t);
+      [| x |])
+  in
+  Expect_test_helpers_core.require_does_raise (fun () ->
+    ignore (Addr.is_null (Stag_gc.alloc_handle gc kind ()) : bool));
+  print_s
+    [%message
+      ""
+        ~handles:(Heap.For_testing.handles heap : int)
+        ~x_live:(live heap x : bool)];
+  report gc;
+  destroy gc roots data_stack static heap;
+  [%expect
+    {|
+    ("Gc.alloc_handle: refs collected" (kind collecting))
+    ((handles 0) (x_live false))
+    ok
+    |}]
+;;
