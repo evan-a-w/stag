@@ -618,10 +618,10 @@ let wrong_type = .<let x = true in .~(.<add x 1>.)>.
          (Match (scrutinee (Lit (Int 1) : int))
           (cases
            (((Lit (Int 2) : int)
-             (App (Var (Bound (Local opaque/15)) : "int -> <'_c>{}")
-              (Lit (Int 1) : int) : <'_c>{}))))
-          : <'_c>{}))
-        : <'_c>{}))
+             (App (Var (Bound (Local opaque/15)) : "int -> <<error>>{}")
+              (Lit (Int 1) : int) : <<error>>{}))))
+          : <<error>>{}))
+        : <<error>>{}))
       (error ("Match failure: no case matches the value 1" @ t.stag:3:32-58)))
      @ t.stag:3:2-59)
     ((Unification_error
@@ -691,11 +691,11 @@ let%expect_test "staged power" =
     val power : int -> <int>{..'a} -> <int>{..'b} where ..'a <= {..'b}
     val open : <int>{y : mut?'_a int; ..'_b} where '_c <= '_a
     ((Unification_error
-      (Row_mismatch REmpty
+      (Row_mismatch
        (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 79 1)))
-       (Missing_label y)))
-     @ t.stag:2:31-44)
+        (RVar (Unbound 75 1)))
+       (RVar (Link REmpty)) (Missing_label y)))
+     @ t.stag:2:39-44)
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
@@ -868,10 +868,7 @@ let pong n c = .<add .~(ping (add n -1) c) y>.
     ((Unification_error
       (Row_mismatch REmpty
        (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar
-         (Link
-          (RExtend z (PVar (Link Present)) (TVar (Link (TCon int ())))
-           (RVar (Unbound 100 1))))))
+        (RVar (Unbound 84 1)))
        (Missing_label y)))
      @ t.stag:4:33-45)
     |}]
@@ -1086,11 +1083,11 @@ let partial e = let h c = .< let _ = .~e in .~c >. in let _ = h .< 1 >. in h
     val partial : <'a>{_?'b : immut 'a; ..'c} -> <'d>{_?'e : immut 'a; ..'f} -> <'d>{..'g} where ..'c <= {..'g}, ..'f <= {..'g}
     val ok : <int>{..'_a}
     ((Unification_error
-      (Row_mismatch REmpty
-       (RExtend y (PVar (Link Present)) (TVar (Unbound 113 1))
-        (RVar (Unbound 114 1)))
-       (Missing_label y)))
-     @ t.stag:4:18-29)
+      (Row_mismatch
+       (RExtend y (PVar (Link Present)) (TVar (Unbound 107 1))
+        (RVar (Unbound 110 1)))
+       (RVar (Link REmpty)) (Missing_label y)))
+     @ t.stag:4:21-28)
     ((Unification_error
       (Row_mismatch REmpty
        (RExtend y (PVar (Link Present)) (TVar (Unbound 121 1))
@@ -1135,11 +1132,13 @@ let use = conflict_later %s
   [%expect
     {|
     ((Unification_error
-      (Row_mismatch REmpty
+      (Row_mismatch
+       (RExtend x (PVar (Link Absent)) (TVar (Link (TCon bool ())))
+        (RVar (Link (RVar (Unbound 51 1)))))
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon bool ())))
-        (RVar (Unbound 58 1)))
-       (Missing_label x)))
-     @ t.stag:3:23-45)
+        (RVar (Unbound 74 1)))
+       (Presence_mismatch x)))
+     @ t.stag:3:30-44)
     ((Unification_error
       (Row_mismatch
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon bool ())))

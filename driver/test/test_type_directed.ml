@@ -399,9 +399,32 @@ let ran = (pattern (B 5), nested (Cons (Ptr.make ( (B 6, Nil)))), in_match false
     );
   [%expect
     {|
-    ((Unbound_constructor A) @ t.stag:13:44-45)
-    ((Unbound_constructor B) @ t.stag:13:65-66)
-    ((Unbound_constructor B) @ t.stag:18:52-53)
+    module N : sig
+      type r = { x : int; y : bool }
+    end
+    module M : sig
+      type t = { a : int; b : N.r }
+      type v = A | B of int
+      val t : t
+    end
+    type s = { x : string; z : int }
+    val annotated : M.v
+    val in_list : list[M.v]
+    val returned : int -> M.v
+    val in_match : bool -> M.v
+    val pattern : M.v -> int
+    val nested : list[M.v] -> int
+    val ran : int * int * M.v
+    -- evaluated at compile time
+    -- evaluated
+    (M.t (M.t (a 1) (b (N.r (x 2) (y true)))))
+    (annotated (M.B 1))
+    (in_list (Cons (M.A) (Cons (M.B 2) (Nil))))
+    (returned <fun>)
+    (in_match <fun>)
+    (pattern <fun>)
+    (nested <fun>)
+    (ran (Tuple 5 6 (M.B 3)))
     |}]
 ;;
 

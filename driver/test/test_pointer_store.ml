@@ -266,7 +266,7 @@ let erased = Stag.Code.erase .< (Ptr.make 1).* <- 2 >.
 |};
   [%expect
     {|
-    val quoted : <unit>{prelude.Ptr.make : int -> ptr[int]; ..'a}
+    val quoted : <unit>{..'a}
     val ran : unit
     val erased : Stag.Expr.t
     -- evaluated at compile time
@@ -274,7 +274,8 @@ let erased = Stag.Code.erase .< (Ptr.make 1).* <- 2 >.
      (Code
       (Store
        (Deref
-        (App (Var (Free_toplevel prelude.Ptr.make) : "int -> ptr[int]")
+        (App
+         (Var (Persistent (Toplevel prelude.Ptr.make/16)) : "int -> ptr[int]")
          (Lit (Int 1) : int) : ptr[int])
         : int)
        (Lit (Int 2) : int) : unit)))
@@ -283,7 +284,8 @@ let erased = Stag.Code.erase .< (Ptr.make 1).* <- 2 >.
      (Code
       (Store
        (Deref
-        (App (Var (Free_toplevel prelude.Ptr.make) : "int -> ptr[int]")
+        (App
+         (Var (Persistent (Toplevel prelude.Ptr.make/16)) : "int -> ptr[int]")
          (Lit (Int 1) : int) : ptr[int])
         : int)
        (Lit (Int 2) : int) : unit)))

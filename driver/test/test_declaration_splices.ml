@@ -867,10 +867,10 @@ include .~(Cons (Ptr.make (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1), Nil)))
 |};
   [%expect
     {|
-    File "a.stag", line 3, characters 16-78:
-    3 | include .~(Cons (Ptr.make (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1), Nil)))
-                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: This expression has type A.list['_a] but an expression was expected of type .list[Stag.Toplevel.t]
+    module A : sig
+      type list['a] = Nil | Cons of ptr['a * list['a]]
+      val x : int
+    end
     |}]
 ;;
 

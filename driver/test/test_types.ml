@@ -41,9 +41,9 @@ let arity = Nil 1
     val none : option['a]
     val nested : option[list[bool]]
     ((Unification_error
-      (Type_mismatch (TCon int ()) (TCon bool ())
-       (Base_types_not_equal int bool)))
-     @ t.stag:3:15-58)
+      (Type_mismatch (TCon bool ()) (TCon int ())
+       (Base_types_not_equal bool int)))
+     @ t.stag:3:25-57)
     val unbound : list['a]
     ((Constructor_arity_mismatch (constructor Cons) (expected 1) (got 0)) @
      t.stag:3:12-16)
@@ -668,8 +668,8 @@ let in_splice = .<.~(.<Nil>.)>.
     {|
     type list['a] = Nil | Cons of ptr['a * list['a]]
     type point = { x : int; y : int }
-    val closed : <list['a]>{prelude.Ptr.make : int * list['b] -> ptr['a * list['a]]; ..'c}
-    val open : <list['a]>{prelude.Ptr.make : 'b * list['c] -> ptr['a * list['a]]; y : 'b; ..'d}
+    val closed : <list[int]>{..'a}
+    val open : <list['a]>{y : 'a; ..'b}
     val record : <int>{y : int; ..'a}
     val pattern : <int>{l : list[int]; ..'a}
     val in_splice : <list['a]>{..'b}
@@ -739,7 +739,7 @@ let mono = let n = id Nil in (Cons (Ptr.make (1, n)), Cons (Ptr.make (true, n)))
     ((Unification_error
       (Type_mismatch (TCon bool ()) (TCon int ())
        (Base_types_not_equal bool int)))
-     @ t.stag:3:59-79)
+     @ t.stag:3:69-78)
     |}]
 ;;
 

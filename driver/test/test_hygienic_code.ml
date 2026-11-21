@@ -241,14 +241,67 @@ let%expect_test "derived" =
     ];
   [%expect
     {xxx|
-    File "a.stag", line 16, characters 25-47:
-    16 |   map (fun x -> x) (Cons (Ptr.make ( (1, Nil))));
-                                  ^^^^^^^^^^^^^^^^^^^^^^
-    Error: This expression has type A.list['_a] but an expression was expected of type .list[int]
-    File "a.stag", line 17, characters 25-49:
-    17 |   map (fun x -> x) (Cons (Ptr.make ( ("a", Nil))));
-                                  ^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: This expression has type A.list['_a] but an expression was expected of type .list[string]
+    module Gen : sig
+      val value : string -> list[string] -> <'a>{..'b} -> Stag.Toplevel.t
+      val sexp_of_pair : <'a * int -> Core.Sexp.t>{prelude.Core.Int.to_string : 'a -> string; ..'b}
+      val to_string_x : <'a>{prelude.Core.Int.to_string : 'b -> 'a; x : 'b; ..'c}
+      val derive : list[Stag.Toplevel.t]
+    end
+    module H : sig
+      val helper : int -> int
+    end
+    module A : sig
+      module Core : sig
+        val x : int
+      end
+      module Sexp : sig end
+      module List : sig end
+      module Int : sig
+        val to_string : 'a -> string
+      end
+      module H : sig end
+      type list['a] = Nil | Cons of 'a
+      val to_string : 'a -> string
+      val sexp_of_int : 'a -> 'a
+      val sexp_of_pair : int * int -> .Core.Sexp.t
+      val show : .Core.Sexp.t -> string
+      val local : int -> string
+      val helped : int
+      val map : ('a -> 'b) -> .list['a] -> .list['b]
+      val code : <'a>{prelude.Core.Int.to_string : int -> 'a; ..'b}
+    end
+    --- output ---
+    ((name (derived @ a.stag:11:16-25))
+     (mismatches
+      (((loc a.stag:18:10-10) (expected ("")) (actual  "(1 2)\
+                                                      \n3\
+                                                      \n(2 0)\
+                                                      \n3"))))
+     (error ()))
+    --- corrected ---
+
+    module Core = struct let x = 1 end
+    module Sexp = struct end
+    module List = struct end
+    module Int = struct let to_string x = "shadowed" end
+    module H = struct end
+    type list['a] = Nil | Cons of 'a
+    let to_string x = "shadowed"
+    let sexp_of_int x = x
+    include .~(Gen.derive)
+    let%expect_test "derived" =
+      print_endline (show (sexp_of_pair (1, 2)));
+      print_endline (local 3);
+      print_endline (show (sexp_of_pair (helped, 0)));
+      print_endline (.~code);
+      map (fun x -> x) (Cons (Ptr.make ( (1, Nil))));
+      map (fun x -> x) (Cons (Ptr.make ( ("a", Nil))));
+      [%expect {|
+        (1 2)
+        3
+        (2 0)
+        3
+        |}]
     |xxx}]
 ;;
 
@@ -594,7 +647,7 @@ include .~(Gen.value "w" Gen.w)
       val value : string -> <'a>{..'b} -> list[Stag.Toplevel.t]
       type r = { f : int }
       val v : <int -> int>{..'a}
-      val w : <option[r] -> int -> list[int]>{prelude.Ptr.make : int * list['a] -> ptr[int * list[int]]; ..'b}
+      val w : <option[r] -> int -> list[int]>{..'a}
     end
     module A : sig
       type int = bool
@@ -691,9 +744,31 @@ let e_literal = Stag.Code.erase .< match [x; [1]] with [y; []] -> [] | _ -> [y] 
 |};
   [%expect
     {|
-    File "gen.stag", line 3, characters 43-49:
-    3 | let e_literal = Stag.Code.erase .< match [x; [1]] with [y; []] -> [] | _ -> [y] >.
-                                                   ^^^^^^
-    Error: This expression has type .list['_a] but an expression was expected of type int
+    e_literal:
+    match [x; [1]] with
+    | [y; []] -> []
+    | _ -> [y]
+    (Match
+     (Construct <Cons>
+      ((App (Var <Ptr.make> ())
+        (Tuple
+         ((Var x ())
+          (Construct <Cons>
+           ((App (Var <Ptr.make> ())
+             (Tuple
+              ((Construct <Cons>
+                ((App (Var <Ptr.make> ())
+                  (Tuple ((Lit (Int 1)) (Construct <Nil> ()))))))
+               (Construct <Nil> ())))))))))))
+     (((Construct <Cons>
+        ((Deref
+          (Tuple
+           ((Var y)
+            (Construct <Cons>
+             ((Deref (Tuple ((Construct <Nil> ()) (Construct <Nil> ())))))))))))
+       (Construct <Nil> ()))
+      (Any
+       (Construct <Cons>
+        ((App (Var <Ptr.make> ()) (Tuple ((Var y ()) (Construct <Nil> ())))))))))
     |}]
 ;;

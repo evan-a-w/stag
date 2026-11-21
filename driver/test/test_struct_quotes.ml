@@ -625,7 +625,7 @@ let shown = print_endline (Int.to_string N.x)
     {|
     module A : sig
       val v : Stag.Expr.t
-      val quoted : <list['a]>{A.v : Stag.Expr.t; prelude.Ptr.make : Stag.Toplevel.t * list['b] -> ptr['a * list['a]]; ..'c}
+      val quoted : <list[Stag.Toplevel.t]>{A.v : Stag.Expr.t; ..'a}
       val erased : Stag.Expr.t
       module M : sig
         val z : list[Stag.Toplevel.t]

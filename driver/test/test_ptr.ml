@@ -23,15 +23,15 @@ let quoted_value = .~quoted
     val tree : tree
     val first : tree -> int
     val found : int
-    val quoted : <'a>{prelude.Ptr.make : int -> ptr['a]; ..'b}
+    val quoted : <int>{..'a}
     val quoted_value : int
     -- evaluated at compile time
     (quoted
      (Code
       (Deref
-       (App (Var (Free_toplevel prelude.Ptr.make) : "int -> ptr['a]")
-        (Lit (Int 3) : int) : ptr['a])
-       : 'a)))
+       (App (Var (Persistent (Toplevel prelude.Ptr.make/21)) : "int -> ptr[int]")
+        (Lit (Int 3) : int) : ptr[int])
+       : int)))
     -- evaluated
     (pair <ptr>)
     (prefix (Tuple 42 true))
@@ -42,9 +42,9 @@ let quoted_value = .~quoted
     (quoted
      (Code
       (Deref
-       (App (Var (Free_toplevel prelude.Ptr.make) : "int -> ptr['a]")
-        (Lit (Int 3) : int) : ptr['a])
-       : 'a)))
+       (App (Var (Persistent (Toplevel prelude.Ptr.make/21)) : "int -> ptr[int]")
+        (Lit (Int 3) : int) : ptr[int])
+       : int)))
     (quoted_value 3)
     |}]
 ;;
@@ -65,6 +65,26 @@ let b = cell.* true
     |}]
 ;;
 
+let%expect_test "allocation is independently instantiated inside quotes" =
+  run
+    {|
+let pair = .~(.< ((Ptr.make 1).*, (Ptr.make "a").*) >.)
+let lists = .~(.< [[1]] >.)
+include .~([Stag.Toplevel.let_ "erased" [] (Stag.Code.erase .< [[1]] >.)])
+|};
+  [%expect
+    {|
+    val pair : int * string
+    val lists : list[list[int]]
+    val erased : list[list[int]]
+    -- evaluated at compile time
+    -- evaluated
+    (pair (Tuple 1 (String a)))
+    (lists (Cons (Cons 1 (Nil)) (Nil)))
+    (erased (Cons (Cons 1 (Nil)) (Nil)))
+    |}]
+;;
+
 let%expect_test "an annotated allocator alias still checks its annotation" =
   run {|
 let bad : int -> int = Ptr.make
@@ -75,6 +95,32 @@ let bad : int -> int = Ptr.make
       (Type_mismatch (TCon int ()) (TCon ptr ((ATy (TVar (Link (TCon int ()))))))
        (Base_types_not_equal int ptr)))
      @ t.stag:2:23-31)
+    |}]
+;;
+
+let%expect_test "pointer allocation propagates the expected pointee type" =
+  run
+    {|
+module M = struct
+  type t = A | B of int
+end
+let cell : ptr[M.t] = Ptr.make (B 7)
+let cells : list[M.t] = [A; B 8]
+let values = (cell.*, cells)
+|};
+  [%expect
+    {|
+    module M : sig
+      type t = A | B of int
+    end
+    val cell : ptr[M.t]
+    val cells : list[M.t]
+    val values : M.t * list[M.t]
+    -- evaluated at compile time
+    -- evaluated
+    (cell <ptr>)
+    (cells (Cons (M.A) (Cons (M.B 8) (Nil))))
+    (values (Tuple (M.B 7) (Cons (M.A) (Cons (M.B 8) (Nil)))))
     |}]
 ;;
 
@@ -102,5 +148,69 @@ let canonical_list = .~(.< [3] >.)
     (value 11)
     (generated 12)
     (canonical_list (Cons 3 (Nil)))
+    |}]
+;;
+
+let%expect_test "constructors resolve through a wrapper of the allocator" =
+  run
+    {|
+module M = struct
+  type t = A | B of int
+end
+let wrap x = Ptr.make x
+let cell : ptr[M.t] = wrap (B 7)
+let quoted : <ptr[M.t]>{} = .< wrap A >.
+let values = (cell.*, (.~quoted).*)
+|};
+  [%expect
+    {|
+    module M : sig
+      type t = A | B of int
+    end
+    val wrap : 'a -> ptr['a]
+    val cell : ptr[M.t]
+    val quoted : <ptr[M.t]>{}
+    val values : M.t * M.t
+    -- evaluated at compile time
+    (quoted
+     (Code
+      (App (Var (Persistent (Toplevel wrap/4)) : "M.t -> ptr[M.t]")
+       (Construct ((type_name M.t) (name M.A) (index 0)) () : M.t) : ptr[M.t])))
+    -- evaluated
+    (wrap <fun>)
+    (cell <ptr>)
+    (quoted
+     (Code
+      (App (Var (Persistent (Toplevel wrap/4)) : "M.t -> ptr[M.t]")
+       (Construct ((type_name M.t) (name M.A) (index 0)) () : M.t) : ptr[M.t])))
+    (values (Tuple (M.B 7) (M.A)))
+    |}]
+;;
+
+let%expect_test "an argument's errors are reported with its result's" =
+  run
+    {|
+let clash : string = Ptr.make (add 1 true)
+let pointee : ptr[string] = Ptr.make (add 1 true)
+|};
+  [%expect
+    {|
+    ((Unification_error
+      (Type_mismatch (TCon string ())
+       (TCon ptr ((ATy (TVar (Link (TCon int ()))))))
+       (Base_types_not_equal string ptr)))
+     @ t.stag:2:21-42)
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:2:37-41)
+    ((Unification_error
+      (Type_mismatch (TCon string ()) (TCon int ())
+       (Base_types_not_equal string int)))
+     @ t.stag:3:37-49)
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon bool ())
+       (Base_types_not_equal int bool)))
+     @ t.stag:3:44-48)
     |}]
 ;;

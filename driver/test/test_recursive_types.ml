@@ -175,7 +175,7 @@ let compile e =
   | `Add *(a, b) -> .<add .~(compile a) .~(compile b)>.
 let len l = match l with `Nil -> 0 | `Cons (_, *t) -> add 1 (len t)
 let free = .<len l>.
-let provided = .<.~free.{l = `Cons (Ptr.make (1, `Nil))}>.
+let provided = .<.~free.{l = `Cons (1, Ptr.make `Nil)}>.
 let spliced_in l = .<.~free.{l = l}>.
 let quoted_ones = .<let ones = `Cons (1, Ptr.make ones) in ones>.
 |};
@@ -184,9 +184,9 @@ let quoted_ones = .<let ones = `Cons (1, Ptr.make ones) in ones>.
     val compile : ([`Add of ptr['a * 'a] | `Code of <int>{..'b}] as 'a) -> <int>{..'b}
     val len : ([`Cons of 'a * ptr['b] | `Nil] as 'b) -> int
     val free : <int>{l : ([`Cons of 'a * ptr['b] | `Nil] as 'b); ..'c}
-    val provided : <int>{prelude.Ptr.make : int * [`Nil; ..'a] -> 'b * (ptr[[`Cons of 'b * 'c | `Nil]] as 'c); ..'d}
+    val provided : <int>{..'a}
     val spliced_in : 'a -> <int>{l : ([`Cons of 'b * ptr['c] | `Nil] as 'c); ..'d}
-    val quoted_ones : <[`Cons of int * 'a; ..'b]>{prelude.Ptr.make : [`Cons of int * 'a; ..'b] -> 'a; ..'c}
+    val quoted_ones : <([`Cons of int * ptr['a]; ..'b] as 'a)>{..'c}
     |}]
 ;;
 

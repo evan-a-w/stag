@@ -132,7 +132,13 @@ let v : N.r = {x = 1; y = Some (Ptr.make {x = -2; y = None})}
 let only_none (v : N.r) = match v with {x = _; y = None} -> 0
 let failure = only_none v
 |};
-  [%expect {| ((No_such_field (type_name s) (field y)) @ t.stag:6:50-51) |}]
+  [%expect
+    {|
+    (v (N.r (x 1) (y (Some <ptr>))))
+    (only_none <fun>)
+    ("Match failure: no case matches the value {x = 1; y = Some <ptr>}" @
+     t.stag:7:26-61)
+    |}]
 ;;
 
 (* Each [name : ty = e] evaluates to a value whose printed form, checked against
@@ -173,8 +179,8 @@ type s = {x : bool}
       print_s [%sexp (first : string option), (second : string option)]);
   [%expect
     {|
-    ((No_such_field (type_name s) (field y)) @ t.stag:7:50-51)
-    (() ())
+    t.stag:7:31-32: expected `}` to close this `{` (opened at 7:14), found `<`
+    (("{x = 1; y = Some <ptr>}") ())
     (("N.B ({`a = {x = 3; y = None}}, {x = 4; y = None})")
      ("N.B ({`a = {x = 3; y = None}}, {x = 4; y = None})"))
     ((Unification_error

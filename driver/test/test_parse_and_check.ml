@@ -167,7 +167,7 @@ let%expect_test "the staged power example" =
     ("Program.equal (List.take program 3) [nat; list; power]" false)
     type nat = Z | S of ptr[nat]
     type list['a] = Nil | Cons of ptr['a * list['a]]
-    val power : nat -> <'a>{..'b} -> <list['c]>{prelude.Ptr.make : mut?'d 'a * list['c] -> ptr['c * list['c]]; ..'e} where ..'b <= {prelude.Ptr.make : mut?'d 'a * list['c] -> ptr['c * list['c]]; ..'e}, ..'e <= {prelude.Ptr.make : mut?'d 'a * list['c] -> ptr['c * list['c]]; ..'e}
+    val power : nat -> <'a>{..'b} -> <list['a]>{..'c} where ..'b <= {..'c}
     val three : nat
     val cube : 'a -> list['a]
     val used : list[int]

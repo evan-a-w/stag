@@ -105,9 +105,21 @@ module Toplevel = struct
 
   let is_function t = not (List.is_empty t.args)
 
+  (* Such as [Ptr.make]: a builtin, so its value needn't be lifted. *)
+  let is_intrinsic_alias t =
+    Option.is_none t.annot
+    &&
+    match t.expr.txt with
+    | Var (((Path _ | Root _) as path), None) ->
+      (match Module_scope.find_value t.module_ path ~loc:t.expr.loc with
+       | Ok (Intrinsic _) -> true
+       | Ok (Toplevel _ | Prim _ | Unbound) | Error _ -> false)
+    | _ -> false
+  ;;
+
   (* Usable in quotes once checked: a mutable toplevel is referred to by name,
      like a function, rather than lifted. *)
-  let is_persistent t = is_function t || t.mut
+  let is_persistent t = is_function t || t.mut || is_intrinsic_alias t
 end
 
 (* Whether a local may reach a mutable local's cell, so that a closure capturing
@@ -1918,8 +1930,20 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
     let a = Scope.fresh_ty t scope in
     let b = Scope.fresh_ty t scope in
     let f = check_expr t scope ~expr:f ~ty:(TArrow (a, b)) in
+    (* The expected result is known before the argument, which may need it:
+       [Ptr.make (C x)] resolves [C] in the expected pointee type. A toplevel
+       splice's expected code type is only a hint, as its code may be syntax, so
+       a clash is left to whoever expects the result to report. *)
+    let result_matches =
+      match expected with
+      | Some expected when not (Unify.clash expected b) ->
+        Scope.unifies t scope ~ty1:expected ~ty2:b ~loc
+      | Some _ | None -> true
+    in
     let x = check_expr t scope ~expr:x ~ty:a in
-    node (App (f, x)) b
+    if result_matches
+    then node (App (f, x)) b
+    else node (Error [ f; x ]) Type.error
   | Let { binder; args; annot; body; in_ } ->
     let inner = { scope with rank = scope.rank + 1 } in
     let { Function_type.args = arg_types; annots; result_annot; res_ty; ty } =
