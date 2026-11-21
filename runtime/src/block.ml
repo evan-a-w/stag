@@ -4,22 +4,23 @@ type t =
   { prefix : Layout.t
   ; element : Layout.Element.t option
   ; has_hidden_length : bool
-  ; prefix_offset : int
   ; elements_offset : int
   }
 [@@deriving sexp_of]
-
-let round_up n ~align = (n + align - 1) / align * align
 
 let fixed prefix =
   { prefix
   ; element = None
   ; has_hidden_length = false
-  ; prefix_offset = 0
   ; elements_offset = Layout.scalar_bytes prefix
   }
 ;;
 
+let hidden_length_bytes = 8
+
+(* Elements with pointers are counted by the pointer words, pointer-free ones by
+   the exact length of [Bytes], or after a prefix with pointers by the scalar
+   words: exactly if each element takes at least a word. *)
 let variable ~prefix ~elt =
   let element : Layout.Element.t =
     { scalar_stride = Layout.scalar_bytes elt
@@ -29,17 +30,13 @@ let variable ~prefix ~elt =
   in
   let has_hidden_length =
     element.ptr_stride = 0
-    && (Layout.ptr_words prefix > 0 || element.scalar_stride = 0)
+    && (element.scalar_stride = 0
+        || (Layout.ptr_words prefix > 0 && element.scalar_stride < 8))
   in
-  let prefix_offset =
-    if has_hidden_length
-    then round_up 8 ~align:(Layout.scalar_align prefix)
-    else 0
-  in
+  let prefix_offset = if has_hidden_length then hidden_length_bytes else 0 in
   { prefix
   ; element = Some element
   ; has_hidden_length
-  ; prefix_offset
   ; elements_offset =
       round_up
         (prefix_offset + Layout.scalar_bytes prefix)
@@ -50,7 +47,7 @@ let variable ~prefix ~elt =
 let prefix t = t.prefix
 let element t = t.element
 let has_hidden_length t = t.has_hidden_length
-let prefix_offset t = t.prefix_offset
+let prefix_offset t = if t.has_hidden_length then hidden_length_bytes else 0
 let elements_offset t = t.elements_offset
 
 let pointer_free t =
@@ -101,8 +98,12 @@ let length t header =
     (match kind with
      | Bytes -> (Header.length header - t.elements_offset) / scalar_stride
      | Scanned | Free ->
-       (Header.size_words header
-        - Header.scalar_words header
-        - Layout.ptr_words t.prefix)
-       / ptr_stride)
+       if ptr_stride > 0
+       then
+         (Header.size_words header
+          - Header.scalar_words header
+          - Layout.ptr_words t.prefix)
+         / ptr_stride
+       else
+         ((8 * Header.scalar_words header) - t.elements_offset) / scalar_stride)
 ;;

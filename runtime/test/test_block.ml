@@ -130,11 +130,11 @@ let%expect_test "hidden length: pointer-free elements after pointers" =
      (length raises))
     ((length 5) (Scanned (size_words 3) (scalar_words 2) (color Unmarked))
      (length raises))
-    i64s after a ptr and an i32: prefix at 8, elements at 16, hidden length
-    ((length 0) (Scanned (size_words 3) (scalar_words 2) (color Unmarked))
-     (length raises))
-    ((length 2) (Scanned (size_words 5) (scalar_words 4) (color Unmarked))
-     (length raises))
+    i64s after a ptr and an i32: prefix at 0, elements at 8
+    ((length 0) (Scanned (size_words 2) (scalar_words 1) (color Unmarked))
+     (length 0))
+    ((length 2) (Scanned (size_words 4) (scalar_words 3) (color Unmarked))
+     (length 2))
     |}]
 ;;
 

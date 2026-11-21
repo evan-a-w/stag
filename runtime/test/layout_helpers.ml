@@ -11,10 +11,12 @@ let code = scalar Code
 let ptr = Shape.Ptr
 let struct_ fields = Shape.Struct { repr = Default; fields }
 let c_struct fields = Shape.Struct { repr = C; fields }
+let union cases = Shape.Union { repr = Default; cases }
+let c_union cases = Shape.Union { repr = C; cases }
 let unit = struct_ []
-let enum n = Shape.Union (List.init n ~f:(fun _ -> unit))
+let enum n = union (List.init n ~f:(fun _ -> unit))
 let bool = enum 2
-let option t = Shape.Union [ unit; t ]
+let option t = union [ unit; t ]
 let array elt ~length = Shape.Array { elt; length }
 let layout shape = Or_error.ok_exn (Layout.of_shape shape)
 
@@ -24,7 +26,7 @@ let path_to_string path =
   else
     String.concat
       (List.map path ~f:(function
-        | Layout.Path.Field i -> sprintf ".%d" i
+        | Layout.Path.Step.Field i -> sprintf ".%d" i
         | Case i -> sprintf "|%d" i
         | Index i -> sprintf "[%d]" i))
 ;;
@@ -62,11 +64,11 @@ let rec lines root (shape : Shape.t) path =
   | Array { elt; length } ->
     List.concat
       (List.init length ~f:(fun i -> lines root elt (path @ [ Index i ])))
-  | Union cases ->
+  | Union { cases; _ } ->
     let discriminant =
       match Option.value_exn (Layout.discriminant layout) with
       | Uninhabited -> "uninhabited"
-      | Single -> "single"
+      | Single { case } -> sprintf "single |%d" case
       | Tag leaf ->
         sprintf
           "tag %s"

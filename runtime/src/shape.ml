@@ -36,7 +36,10 @@ type t =
       { repr : Repr.t
       ; fields : t list
       }
-  | Union of t list
+  | Union of
+      { repr : Repr.t
+      ; cases : t list
+      }
   | Array of
       { elt : t
       ; length : int

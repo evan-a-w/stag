@@ -4,9 +4,11 @@ open! Import
     elements, their scalar parts after the prefix's scalars and their pointer
     runs after its pointers. A block is [Bytes] if pointer-free, else [Scanned],
     and [n] is recovered from its header: from the length of [Bytes], from the
-    pointer words of elements with pointers. Where it can't be (pointer-free
-    elements after a prefix with pointers, or zero-size elements), a hidden
-    length word starts the scalar part. *)
+    pointer words of elements with pointers, or from the scalar words of
+    pointer-free elements of at least 8 bytes after a prefix with pointers.
+    Where it can't be (smaller pointer-free elements after a prefix with
+    pointers, or zero-size elements), a hidden length word, an [I64] at scalar
+    offset 0, starts the scalar part. *)
 
 type t [@@deriving sexp_of]
 
@@ -25,9 +27,11 @@ val length : t -> Header.t -> int
 
 val has_hidden_length : t -> bool
 
-(** Where the prefix's scalars start: after the hidden length word, if any. *)
+(** Where the prefix's scalars start: 8 after the hidden length word, if any,
+    else 0. *)
 val prefix_offset : t -> int
 
-(** Where the elements' scalars start. Their pointers start after the prefix's,
-    at [Layout.ptr_words (prefix t)]. *)
+(** Where the elements' scalars start, aligned for them. Their pointers start
+    after the prefix's, at [Layout.ptr_words (prefix t)]. Of a fixed block, the
+    end of the prefix's scalars. *)
 val elements_offset : t -> int
