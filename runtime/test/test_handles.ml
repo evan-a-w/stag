@@ -566,3 +566,55 @@ let%expect_test "alloc_handle rejects a ref into the data stack" =
     ok
     |}]
 ;;
+
+let%expect_test "alloc_handle failing leaves no handle" =
+  let gc, heap, roots, data_stack, static = create_gc ~classes:[ 1; 2 ] () in
+  let root = Roots.push_frame roots ~slots:2 in
+  let capture = scanned gc in
+  Memory.store_addr root capture;
+  let handle = Stag_gc.alloc_handle gc name_kind "first" in
+  Memory.store_addr (Addr.add root 8) handle;
+  let alloc_raises () =
+    Expect_test_helpers_core.require_does_raise (fun () ->
+      ignore
+        (Addr.is_null (Stag_gc.alloc_handle gc captures_kind [| capture |])
+         : bool))
+  in
+  let show () =
+    report gc;
+    print_s
+      [%message
+        ""
+          ~handles:(Heap.For_testing.handles heap : int)
+          ~first:(Stag_gc.get_handle gc name_kind handle : string option)]
+  in
+  (* Registering it raises, as [first] has its ID. *)
+  Heap.For_testing.set_next_handle_id heap 0;
+  alloc_raises ();
+  show ();
+  Heap.iter heap ~f:(fun block ->
+    print_s [%sexp (Header.load block : Header.t)]);
+  Heap.For_testing.set_next_handle_id heap Int.max_value;
+  alloc_raises ();
+  show ();
+  let stats = Stag_gc.collect gc in
+  print_s [%message "" ~freed:(stats.freed_blocks : int)];
+  show ();
+  Roots.pop_frame roots;
+  destroy gc roots data_stack static heap;
+  [%expect
+    {|
+    ("Hashtbl.add_exn got key already present" 0)
+    ok
+    ((handles 1) (first (first)))
+    (Scanned (size_words 1) (scalar_words 0) (color Unmarked))
+    (Handle (size_words 1) (color Unmarked))
+    (Scanned (size_words 2) (scalar_words 1) (color Unmarked))
+    "Heap.alloc_handle: ID exhausted"
+    ok
+    ((handles 1) (first (first)))
+    (freed 1)
+    ok
+    ((handles 1) (first (first)))
+    |}]
+;;

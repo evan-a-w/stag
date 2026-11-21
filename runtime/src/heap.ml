@@ -442,7 +442,22 @@ let alloc_handle t kind value =
   (* Registration allocates: were a collection reentered here (forbidden), it
      would keep the block, marked, but not trace its refs (marking skips marked
      blocks): [Gc.alloc_handle] roots them across this call. *)
-  Hashtbl.set t.handles ~key:id ~data:{ Entry.block; payload = T (kind, value) };
+  (match
+     Hashtbl.add_exn
+       t.handles
+       ~key:id
+       ~data:{ Entry.block; payload = T (kind, value) }
+   with
+   | () -> ()
+   | exception exn ->
+     (* Garbage for the next sweep, not a handle without metadata. *)
+     Header.store
+       block
+       (Header.scanned
+          ~size_words:(Header.size_words header)
+          ~scalar_words:1
+          Unmarked);
+     raise exn);
   Header.store block header;
   block
 ;;
@@ -744,6 +759,7 @@ let sexp_of_t t =
 
 module For_testing = struct
   let handles t = Hashtbl.length t.handles
+  let set_next_handle_id t id = t.next_handle <- id
 
   let locate t addr =
     let page_bytes = page_bytes t in

@@ -116,6 +116,9 @@ val check_handles : t -> Sexp.t list
 module For_testing : sig
   val handles : t -> int
 
+  (** IDs then count up from [id]: an ID in use makes [alloc_handle] raise. *)
+  val set_next_handle_id : t -> int -> unit
+
   (** The index of the region [addr] is in, and its offset from the region's
       base. *)
   val locate : t -> Memory.Addr.t -> (int * int) option
