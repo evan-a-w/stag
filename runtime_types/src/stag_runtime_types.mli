@@ -1,0 +1,39 @@
+open! Import
+
+(** Shapes of concrete types, for laying out their values in runtime memory.
+
+    A shape describes a value, not the blocks it points to: strings, [exn],
+    functions and meta values (code, types and refs) are all [Shape.Ptr], as is
+    [ptr] whatever it points to.
+
+    Laying out a value's type needs the type to be concrete: a type variable no
+    declaration binds, an open row, or a declaration the resolver does not have
+    is an [Error], never a guess. So is a type that reaches itself without a
+    [ptr], which has no finite layout. *)
+
+module Error : module type of Shape_error
+
+(** Where declarations come from. *)
+module Resolver : module type of Resolver
+
+(** The canonical name [ptr] is recognised by, unless [create] says otherwise. *)
+val ptr_name : string
+
+type t
+
+val create : ?ptr_name:string -> Resolver.t -> t
+
+(** [shape].
+    - [int] is [I64], [char] and [bool] [I8] ([bool] 0 or 1 only), [unit] empty,
+      [string] and [exn] [Ptr].
+    - A tuple is a [Struct] of its components, in order.
+    - A nominal record or variant is a [Struct] or [Union] of its fields or
+      constructors, in declaration order.
+    - A structural record or variant ([TRecord], [TVariant]) has its present
+      entries sorted by label, which is the order the maps holding them iterate.
+    - [TArrow] and [TCode] are [Ptr]: a closure or a meta value.
+    - An alias is expanded. *)
+val shape : t -> Type.ty -> (Shape.t, Error.t) Result.t
+
+(** [shape], laid out by [Layout.of_shape]. *)
+val layout : t -> Type.ty -> (Layout.t, Error.t) Result.t
