@@ -109,4 +109,9 @@ module For_testing : sig
 
   (** The next growth of the mark stack raises. *)
   val fail_next_grow : t -> unit
+
+  (** Marks without sweeping: what it reaches is left [Marked] until the next
+      collection's sweep. *)
+  val mark : t -> unit
+  [@@zero_alloc]
 end

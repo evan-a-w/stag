@@ -22,8 +22,7 @@ let holds_locals (T (m, _)) =
   M.holds_locals
 ;;
 
-(* The checker can't see through the indirect call, but every [S.iter] is
-   checked zero-alloc when it is made a source. *)
+(* The checker can't see through the indirect call. *)
 let[@zero_alloc] iter (T (m, x)) ~f =
   let module M = (val m) in
   (M.iter [@zero_alloc assume]) x ~f

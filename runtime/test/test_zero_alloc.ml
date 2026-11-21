@@ -212,3 +212,218 @@ let%expect_test "no allocation in pushing frames of 100 slots, past the first \
   Shadow_stack.destroy roots;
   [%expect {| ((count 100) (allocated 0)) |}]
 ;;
+
+(* Allocation on the OCaml heap, minor or major. *)
+let ocaml_words () =
+  Gc.minor_words () + Gc.major_words () - Gc.promoted_words ()
+;;
+
+(* [Root_source.iter]'s call through the source is only assumed zero-alloc, so
+   these measure that the common paths through it really don't allocate. *)
+
+let[@zero_alloc] count_roots source =
+  let count = stack_ (ref 0) in
+  Root_source.iter source ~f:(fun [@zero_alloc] root ->
+    if not (Addr.is_null (load_addr root)) then count := !count + 1);
+  !count
+;;
+
+let[@zero_alloc] count_all sources =
+  let mutable count = 0 in
+  for i = 0 to Array.length sources - 1 do
+    count <- count + count_roots sources.(i)
+  done;
+  count
+;;
+
+let%expect_test "no allocation in iterating root sources" =
+  let stack = Shadow_stack.create () in
+  let globals = Globals.create () in
+  let table = Root_table.create () in
+  let chunk = Chunk.create ~bytes:(200 * 8) ~align:8 in
+  let word i = Addr.add (Chunk.base chunk) (i * 8) in
+  for i = 0 to 199 do
+    store_addr (word i) (if i % 3 = 0 then Addr.null () else word i);
+    if i < 100
+    then Globals.add globals (word i)
+    else Root_table.add table (word i)
+  done;
+  for i = 1 to 1000 do
+    let slot = Shadow_stack.push_frame stack ~slots:(i % 4) in
+    if i % 4 > 0 then store_addr slot slot
+  done;
+  let sources =
+    [| Shadow_stack.root_source stack
+     ; Globals.root_source globals
+     ; Root_table.root_source table
+    |]
+  in
+  let counts = Array.map sources ~f:(fun source -> count_roots source) in
+  let before = ocaml_words () in
+  let total = count_all sources in
+  let allocated = ocaml_words () - before in
+  print_s [%message "" (counts : int array) (total : int) (allocated : int)];
+  Chunk.destroy chunk;
+  Shadow_stack.destroy stack;
+  [%expect {|
+    ((counts (750 66 67)) (total 883) (allocated 0))
+    |}]
+;;
+
+module Populated = struct
+  type t =
+    { gc : Stag_gc.t
+    ; heap : Heap.t
+    ; stack : Shadow_stack.t
+    ; data_stack : Data_stack.t
+    ; chunk : Chunk.t
+    }
+
+  let manual =
+    { Stag_gc.Config.space_overhead = 100; min_words = Int.max_value }
+  ;;
+
+  (* Lists rooted by a shadow stack, globals, a user-defined table and the data
+     stack, with as much garbage. *)
+  let create () =
+    let heap = Heap.create Heap.Config.default in
+    let stack = Shadow_stack.create () in
+    let globals = Globals.create () in
+    let table = Root_table.create () in
+    let data_stack = Data_stack.create () in
+    let gc =
+      Stag_gc.create
+        manual
+        ~heap
+        ~roots:
+          [ Shadow_stack.root_source stack
+          ; Globals.root_source globals
+          ; Root_table.root_source table
+          ]
+        ~data_stack
+        ~static:(Static_data.create ())
+    in
+    let chunk = Chunk.create ~bytes:(20 * 8) ~align:8 in
+    let cell next =
+      let cell =
+        Stag_gc.alloc gc (Header.scanned ~size_words:2 ~scalar_words:1 Unmarked)
+      in
+      store_addr (Addr.add cell 8) next;
+      cell
+    in
+    (* Each list is built in a root word, so it is rooted while it grows. *)
+    let list root ~n =
+      store_addr root (Addr.null ());
+      for _ = 1 to n do
+        store_addr root (cell (load_addr root))
+      done
+    in
+    for i = 0 to 9 do
+      let slot = Shadow_stack.push_frame stack ~slots:1 in
+      list slot ~n:100;
+      list (Addr.add (Chunk.base chunk) (i * 8)) ~n:100;
+      Globals.add globals (Addr.add (Chunk.base chunk) (i * 8));
+      list (Addr.add (Chunk.base chunk) ((10 + i) * 8)) ~n:100;
+      Root_table.add table (Addr.add (Chunk.base chunk) ((10 + i) * 8));
+      let local =
+        Data_stack.alloc
+          data_stack
+          (Header.scanned ~size_words:1 ~scalar_words:0 Unmarked)
+      in
+      list local ~n:100;
+      let garbage = Shadow_stack.push_frame stack ~slots:1 in
+      list garbage ~n:400;
+      Shadow_stack.pop_frame stack
+    done;
+    { gc; heap; stack; data_stack; chunk }
+  ;;
+
+  let destroy t =
+    Stag_gc.destroy t.gc;
+    Data_stack.destroy t.data_stack;
+    Shadow_stack.destroy t.stack;
+    Heap.destroy t.heap;
+    Chunk.destroy t.chunk
+  ;;
+end
+
+let%expect_test "no allocation in marking from several sources" =
+  let t = Populated.create () in
+  let first = Stag_gc.collect t.gc in
+  let before = ocaml_words () in
+  Stag_gc.For_testing.mark t.gc;
+  let allocated_by_mark = ocaml_words () - before in
+  (* The sweep after it keeps what it marked. *)
+  let sweep = Heap.sweep t.heap in
+  let before = ocaml_words () in
+  let second = Stag_gc.collect t.gc in
+  let allocated_by_collect = ocaml_words () - before in
+  print_s
+    [%message
+      ""
+        (first : Stag_gc.Stats.t)
+        (allocated_by_mark : int)
+        ~freed_by_sweep:(sweep.freed_blocks : int)
+        (second : Stag_gc.Stats.t)
+        (allocated_by_collect : int)
+        ~invariants:(Stag_gc.check_invariants t.gc : unit Or_error.t)];
+  Populated.destroy t;
+  [%expect
+    {|
+    ((first
+      ((marked_blocks 4000) (marked_words 8000) (freed_blocks 4000)
+       (freed_words 8000)))
+     (allocated_by_mark 0) (freed_by_sweep 0)
+     (second
+      ((marked_blocks 4000) (marked_words 8000) (freed_blocks 0) (freed_words 0)))
+     (allocated_by_collect 11) (invariants (Ok ())))
+    |}]
+;;
+
+let alloc_cells gc ~n =
+  for _ = 1 to n do
+    ignore
+      (Stag_gc.alloc gc (Header.scanned ~size_words:2 ~scalar_words:1 Unmarked)
+       : Addr.t)
+  done
+;;
+
+let%expect_test "no allocation in Gc.alloc's fast path" =
+  let t = Populated.create () in
+  ignore (Stag_gc.collect t.gc : Stag_gc.Stats.t);
+  (* A list of 20000 cells with every other one cut out, so the collection
+     leaves 10000 free slots in pages still in use. *)
+  let root = Shadow_stack.push_frame t.stack ~slots:1 in
+  store_addr root (Addr.null ());
+  for _ = 1 to 20_000 do
+    let cell =
+      Stag_gc.alloc t.gc (Header.scanned ~size_words:2 ~scalar_words:1 Unmarked)
+    in
+    store_addr (Addr.add cell 8) (load_addr root);
+    store_addr root cell
+  done;
+  let mutable cell = load_addr root in
+  while not (Addr.is_null cell) do
+    let skipped = load_addr (Addr.add cell 8) in
+    let next =
+      if Addr.is_null skipped then skipped else load_addr (Addr.add skipped 8)
+    in
+    store_addr (Addr.add cell 8) next;
+    cell <- next
+  done;
+  let freed = (Stag_gc.collect t.gc).freed_blocks in
+  let before = ocaml_words () in
+  alloc_cells t.gc ~n:10_000;
+  let allocated = ocaml_words () - before in
+  print_s
+    [%message
+      ""
+        (freed : int)
+        (allocated : int)
+        ~collections:(Stag_gc.collections t.gc : int)
+        ~invariants:(Stag_gc.check_invariants t.gc : unit Or_error.t)];
+  Shadow_stack.pop_frame t.stack;
+  Populated.destroy t;
+  [%expect
+    {| ((freed 10000) (allocated 0) (collections 2) (invariants (Ok ()))) |}]
+;;

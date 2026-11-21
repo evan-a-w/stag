@@ -15,9 +15,10 @@ module type S = sig
   val holds_locals : bool
 
   (** Calls [f] on the address of every root word. Must not allocate on the stag
-      heap, collect or change the set while iterating. It is checked zero-alloc
-      but for its calls to [f], which it makes as
-      [(f [@zero_alloc assume]) root]: [f] is up to the caller. *)
+      heap, collect or change the set while iterating. It must not allocate on
+      the OCaml heap but in its calls to [f], which it makes as
+      [(f [@zero_alloc assume]) root]: [f] is up to the caller. Packing a module
+      as [S] does not check this: annotate [iter] [@zero_alloc]. *)
   val iter : t -> f:(Memory.Addr.t -> unit) @ local -> unit
   [@@zero_alloc]
 end

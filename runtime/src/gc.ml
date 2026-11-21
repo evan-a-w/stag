@@ -410,4 +410,5 @@ let check_invariants t =
 module For_testing = struct
   let mark_stack_capacity t = Chunk.bytes t.stack / 8
   let fail_next_grow t = t.fail_next_grow <- true
+  let[@zero_alloc] mark t = mark t
 end
