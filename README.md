@@ -173,8 +173,11 @@ the prelude's sources rather than the embedded copy:
 Development environment: `nix develop` (or direnv) gives the OxCaml compiler,
 its Jane Street libraries, dune, ocamlformat, merlin and ocaml-lsp-server, built
 with opam-nix from the oxcaml and upstream opam repositories (`flake.nix`). The
-opam solution is checked in as `nix/opam-packages.txt`; after `nix flake update`
-or changing the requested packages, regenerate it with `nix run .#resolve`.
+opam solution is checked in per OS as `nix/opam-packages-{linux,macos}.txt`;
+after `nix flake update` or changing the requested packages, regenerate them
+with `nix run .#resolve` on each OS. Because the macOS sandbox lacks Apple's
+libtool, the compiler is built with `ar` instead of it
+(`nix/patches/merge-dot-a-files-ar.patch`).
 
 Tests: `dune build @runtest`, then `dune promote` to accept changes.
 

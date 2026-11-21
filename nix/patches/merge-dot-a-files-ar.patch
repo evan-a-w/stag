@@ -1,0 +1,23 @@
+Do not use Apple's libtool to merge static libraries: the sandbox does not
+allow it and it is only a stub for the Xcode one. Use ar, as the script
+already does elsewhere; Apple's ar has no D (deterministic) flag.
+
+--- a/tools/merge_dot_a_files.sh
++++ b/tools/merge_dot_a_files.sh
+@@ -22,10 +22,6 @@
+ 
+ target=$(absolute_path $target)
+ 
+-if [ "$(uname)" = "Darwin" ]; then
+-  exec libtool -static -o $target $archives
+-fi
+-
+ files=$(mktemp)
+ tempdir=$(mktemp -d)
+ 
+@@ -42,4 +38,4 @@
+ cd $tempdir
+ rm -f $target
+ 
+-ar rcD $target $(cat $files)
++ar rc $target $(cat $files)
