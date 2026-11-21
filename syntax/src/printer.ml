@@ -197,7 +197,7 @@ let level (e : Expr.t) : Level.t =
   | App _ -> App
   | Splice _ -> Splice
   | Type _ -> Construct
-  | Field _ | Poly_field _ | Poly_restrict _ -> Postfix
+  | Deref _ | Field _ | Poly_field _ | Poly_restrict _ -> Postfix
   | Lit _
   | Var _
   | Tuple _
@@ -414,6 +414,7 @@ and pattern_desc roots ~prec (p : Pattern.t) =
   | Var name -> text name
   | Lit (Int n as l) when n < 0 -> paren_if (prec > 1) (lit l)
   | Lit l -> lit l
+  | Deref p -> text "*" ^^ pattern roots ~prec:2 p
   | Tuple [] -> text "()"
   | Tuple [ p ] -> pattern roots ~prec p
   | Tuple ps ->
@@ -626,6 +627,7 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
     ^^ nest 2 (hardline ^^ toplevels roots ~indent:2 ts)
     ^^ hardline
     ^^ text "end >."
+  | Deref pointer, _ -> postfix roots pointer ^^ text ".*"
   | Field (record, p), _ ->
     let field =
       match p.txt with

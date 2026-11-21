@@ -2,12 +2,47 @@ open! Import
 open Syntax
 include Lift_intf
 
+let indirect_arity = function
+  | "Stag.Pattern.Deref"
+  | "Stag.Pattern.Exception"
+  | "Stag.Type_expr.Code"
+  | "Stag.Type_expr.Mut"
+  | "Stag.Type_expr.Immut"
+  | "Stag.Type_expr.Splice"
+  | "Stag.Expr.Splice"
+  | "Stag.Expr.Deref"
+  | "Stag.Expr.Quote" -> Some 1
+  | "Stag.Pattern.Poly_variant"
+  | "Stag.Type_expr.Arrow"
+  | "Stag.Expr.App"
+  | "Stag.Expr.Assign"
+  | "Stag.Expr.Fun"
+  | "Stag.Expr.Field"
+  | "Stag.Expr.Record_update"
+  | "Stag.Expr.Match"
+  | "Stag.Expr.Poly_field"
+  | "Stag.Expr.Poly_extend"
+  | "Stag.Expr.Poly_restrict"
+  | "Stag.Expr.Poly_update"
+  | "Stag.Expr.Poly_variant" -> Some 2
+  | "Stag.Type_expr.Row.Extend" -> Some 3
+  | "Stag.Expr.Let_mut" -> Some 4
+  | "Stag.Expr.Let" -> Some 5
+  | _ -> None
+;;
+
 module Make (B : Builder) = struct
-  let con = B.con
+  let con name args =
+    match indirect_arity name, args with
+    | None, _ -> B.con name args
+    | Some 1, [ arg ] -> B.con name [ B.ptr arg ]
+    | Some _, _ -> B.con name [ B.ptr (B.tuple args) ]
+  ;;
+
+  let cons x xs = con "Cons" [ B.ptr (B.tuple [ x; xs ]) ]
 
   let list f xs =
-    List.fold_right xs ~init:(con "Nil" []) ~f:(fun x tail ->
-      con "Cons" [ f x; tail ])
+    List.fold_right xs ~init:(con "Nil" []) ~f:(fun x tail -> cons (f x) tail)
   ;;
 
   let option f = function
@@ -51,6 +86,7 @@ module Make (B : Builder) = struct
     | Var var -> con "Var" [ B.string var ]
     | Lit l -> con "Lit" [ lit l ]
     | Tuple ps -> con "Tuple" [ list pattern ps ]
+    | Deref p -> con "Deref" [ pattern p ]
     | Construct (p, args) ->
       con "Construct" [ decl_path Constructor p; list pattern args ]
     | Record fields ->
@@ -173,6 +209,7 @@ module Make (B : Builder) = struct
       | Quote e -> con "Quote" [ expr e ]
       | Struct_quote toplevels -> con "Struct_quote" [ program toplevels ]
       | Tuple es -> con "Tuple" [ list expr es ]
+      | Deref e -> con "Deref" [ expr e ]
       | Construct (p, args) ->
         con "Construct" [ decl_path Constructor p; list expr args ]
       | Record record_fields ->
@@ -244,7 +281,7 @@ module Make (B : Builder) = struct
         (match antiquoted, rest with
          | Some items, [] -> items
          | Some items, _ :: _ -> B.append items (program rest)
-         | None, _ -> con "Cons" [ toplevel item; program rest ])
+         | None, _ -> cons (toplevel item) (program rest))
     ;;
   end
 

@@ -55,6 +55,7 @@ module Kind = struct
         ; param : Syntax.Type_decl.Param.t
         }
     | Cyclic_type_alias of string
+    | Infinite_type_layout of string
     | Non_regular_recursive_alias of string
     | Duplicate_module of string
     | Duplicate_type of string
@@ -369,6 +370,10 @@ let rec kind_message (kind : Kind.t) ~show_type =
     sprintf
       "The recursive type abbreviation %s is used with different arguments in \
        its definition"
+      name
+  | Infinite_type_layout name ->
+    sprintf
+      "The type %s contains itself by value; break the cycle with ptr"
       name
   | Duplicate_module name ->
     sprintf "The module %s is defined more than once" name

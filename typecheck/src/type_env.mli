@@ -2,9 +2,10 @@ open! Import
 
 (** User type declarations, the constructors and fields they define, and the
     elaboration of surface types. Names are canonical. A declaration is checked
-    on first use of its constructors, fields or checked declaration: elaborating
-    a type only needs its parameters, so checking one declaration never needs
-    another one checked. *)
+    on first use of its constructors, fields or checked declaration. Elaboration
+    of nominal references does not check their declarations; layout checking
+    inspects by-value dependencies without publishing their checked
+    declarations. *)
 type t
 
 (** The builtin types, as declarations of the root module. *)

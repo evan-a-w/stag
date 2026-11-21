@@ -47,6 +47,7 @@ module Pattern = struct
       | Var of Binder.t
       | Lit of Syntax.Lit.t
       | Tuple of t list
+      | Deref of t
       | Construct of Constructor.t * t list
       | Record of (Field.t * t) list
       | Poly_variant of string * t option
@@ -65,6 +66,7 @@ module Pattern = struct
     | Var name -> Var (Name { txt = name; loc })
     | Lit lit -> Lit lit
     | Tuple patterns -> Tuple (List.map patterns ~f:sub)
+    | Deref pattern -> Deref (sub pattern)
     | Construct (path, patterns) ->
       Construct (Path path, List.map patterns ~f:sub)
     | Record fields' ->
@@ -93,6 +95,7 @@ module Pattern = struct
     | Var ident -> Var (Ident ident)
     | Lit lit -> Lit lit
     | Tuple patterns -> Tuple (List.map patterns ~f:sub)
+    | Deref pattern -> Deref (sub pattern)
     | Construct (constructor, patterns) ->
       Construct (Ref constructor, List.map patterns ~f:sub)
     | Record fields ->
@@ -182,6 +185,7 @@ module Expr = struct
           }
       | Quote of t
       | Tuple of t list
+      | Deref of t
       | Construct of Constructor.t * t list
       | Record of (Field.t * t) list
       | Field of t * Field.t
@@ -240,6 +244,7 @@ module Expr = struct
         }
     | Quote expr -> Quote (sub expr)
     | Tuple exprs -> Tuple (subs exprs)
+    | Deref expr -> Deref (sub expr)
     | Construct (path, exprs) -> Construct (Path path, subs exprs)
     | Record fields' ->
       Record
@@ -313,6 +318,7 @@ module Expr = struct
     | Error _ -> raise_s [%message "Generated code has an error"]
     | Quote expr -> Quote (sub expr)
     | Tuple exprs -> Tuple (subs exprs)
+    | Deref expr -> Deref (sub expr)
     | Construct (constructor, exprs) -> Construct (Ref constructor, subs exprs)
     | Record fields' ->
       Record

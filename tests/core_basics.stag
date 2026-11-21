@@ -160,8 +160,8 @@ let%expect_test "Char" =
         | false -> None
     in
     print_sexp
-      (Core.Sexp.List (Cons
-         (Core.Sexp.sexp_of_char c, Core.List.filter_map class_ classes)))
+      (Core.Sexp.List (Cons (Ptr.make (
+         (Core.Sexp.sexp_of_char c, Core.List.filter_map class_ classes)))))
   in
   Core.List.iter
     classify

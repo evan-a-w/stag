@@ -182,6 +182,7 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
     | Var name ->
       add ~declaration:true ~kind:Kind.Pattern_var ~loc:pattern.loc [ name ]
     | Tuple patterns -> List.iter patterns ~f:recurse
+    | Deref pattern -> recurse pattern
     | Construct (path, args) ->
       decl_path ~add ~kind:Kind.Constructor ~loc:path.loc path.txt;
       List.iter args ~f:recurse
@@ -250,6 +251,7 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
             recurse expr))
     | Quote expr -> recurse expr
     | Tuple exprs -> List.iter exprs ~f:recurse
+    | Deref expr -> recurse expr
     | Construct (path, args) ->
       decl_path ~add ~kind:Kind.Constructor ~loc:path.loc path.txt;
       List.iter args ~f:recurse

@@ -1,18 +1,21 @@
 (* Pattern matching on variants and polymorphic variants: evaluating and
    simplifying arithmetic expressions. *)
 
-type expr = Num of int | Var of string | Add of expr * expr | Mul of expr * expr
+type expr = Num of int | Var of string | Add of ptr[expr * expr] | Mul of ptr[expr * expr]
+
+let add a b = Add (Ptr.make (a, b))
+let mul a b = Mul (Ptr.make (a, b))
 
 let simplify e =
   match e with
-  | Add (Num 0, e) -> simplify e
-  | Add (e, Num 0) -> simplify e
-  | Mul (Num 1, e) -> simplify e
-  | Mul (e, Num 1) -> simplify e
-  | Mul (Num 0, _) -> Num 0
-  | Mul (_, Num 0) -> Num 0
-  | Add (a, b) -> Add (simplify a, simplify b)
-  | Mul (a, b) -> Mul (simplify a, simplify b)
+  | Add *(Num 0, e) -> simplify e
+  | Add *(e, Num 0) -> simplify e
+  | Mul *(Num 1, e) -> simplify e
+  | Mul *(e, Num 1) -> simplify e
+  | Mul *(Num 0, _) -> Num 0
+  | Mul *(_, Num 0) -> Num 0
+  | Add *(a, b) -> add (simplify a) (simplify b)
+  | Mul *(a, b) -> mul (simplify a) (simplify b)
   | Num _ -> e
   | Var _ -> e
 
@@ -20,17 +23,17 @@ let eval env e =
   match e with
   | Num n -> n
   | Var x -> env x
-  | Add (a, b) -> Int.add (eval env a) (eval env b)
-  | Mul (a, b) -> Int.mul (eval env a) (eval env b)
+  | Add *(a, b) -> Int.add (eval env a) (eval env b)
+  | Mul *(a, b) -> Int.mul (eval env a) (eval env b)
 
 (* A balanced tree of [2^depth] leaves, with neutral elements to simplify. *)
 let build depth =
   match Int.equal depth 0 with
-  | true -> Add (Var "x", Num 0)
+  | true -> add (Var "x") (Num 0)
   | false ->
     match Int.rem depth 2 with
-    | 0 -> Add (build (Int.sub depth 1), Mul (Num 1, build (Int.sub depth 1)))
-    | _ -> Mul (build (Int.sub depth 1), Add (Num 0, Num 1))
+    | 0 -> add (build (Int.sub depth 1)) (mul (Num 1) (build (Int.sub depth 1)))
+    | _ -> mul (build (Int.sub depth 1)) (add (Num 0) (Num 1))
 
 let tree = build 10
 

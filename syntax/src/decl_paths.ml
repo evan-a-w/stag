@@ -14,6 +14,7 @@ let rec pattern_binders (p : Pattern.t) =
   | Any | Lit _ -> []
   | Var name -> [ name ]
   | Tuple ps | Construct (_, ps) -> List.concat_map ps ~f:pattern_binders
+  | Deref p -> pattern_binders p
   | Record fs -> List.concat_map fs ~f:(fun (_, p) -> pattern_binders p)
   | Poly_variant (_, p) -> Option.value_map p ~default:[] ~f:pattern_binders
   | Poly_record { fields; rest } ->
@@ -65,6 +66,7 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
       match p.txt with
       | Any | Var _ | Lit _ -> p.txt
       | Tuple ps -> Tuple (List.map ps ~f:pattern)
+      | Deref p -> Deref (pattern p)
       | Construct (c, ps) -> Construct (constructor c, List.map ps ~f:pattern)
       | Record fs ->
         Record (List.map fs ~f:(fun (p, value) -> field p, pattern value))
@@ -118,6 +120,7 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
           }
       | Quote e -> Quote (expr e)
       | Tuple es -> Tuple (List.map es ~f:expr)
+      | Deref e -> Deref (expr e)
       | Construct (c, es) -> Construct (constructor c, List.map es ~f:expr)
       | Record fs -> Record (fields fs)
       | Field (e, p) -> Field (expr e, field p)

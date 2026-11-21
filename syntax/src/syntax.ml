@@ -166,6 +166,7 @@ module Defs = struct
     | Var of string
     | Lit of Lit.t
     | Tuple of pattern list
+    | Deref of pattern
     | Construct of Decl_path.t Located.t * pattern list
     | Record of (Decl_path.t Located.t * pattern) list
     | Poly_variant of Name.t * pattern option
@@ -196,6 +197,7 @@ module Defs = struct
         }
     | Quote of expr
     | Tuple of expr list
+    | Deref of expr
     | Construct of Decl_path.t Located.t * expr list
     | Record of (Decl_path.t Located.t * expr) list
     | Field of expr * Decl_path.t Located.t
@@ -355,6 +357,7 @@ module Pattern = struct
     | Var of string
     | Lit of Lit.t
     | Tuple of t list
+    | Deref of t
     | Construct of Decl_path.t Located.t * t list
     | Record of (Decl_path.t Located.t * t) list
     | Poly_variant of Name.t * t option
@@ -386,6 +389,7 @@ module Expr = struct
         }
     | Quote of t
     | Tuple of t list
+    | Deref of t
     | Construct of Decl_path.t Located.t * t list
     | Record of (Decl_path.t Located.t * t) list
     | Field of t * Decl_path.t Located.t

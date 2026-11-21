@@ -108,6 +108,7 @@ let of_lexical : Stag_syntax.Token.t -> Token_type.t option = function
   | Semi
   | Colon
   | Dot
+  | Dot_star
   | Underscore
   | Eof -> None
 ;;

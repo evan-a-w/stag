@@ -7,6 +7,7 @@ type t =
   | Char of char
   | Unit
   | Tuple of t list
+  | Ptr of t ref
   | Construct of Typed.Constructor_ref.t * t list
   | Record of Typed.Record_type.t * t array
   | Poly_record of t String.Map.t
@@ -43,7 +44,10 @@ let of_prim : Prim.Value.t -> t = function
 let string_list value =
   let rec loop acc : t -> _ = function
     | Construct (_, []) -> This (Prim.Value.String_list (List.rev acc))
-    | Construct (_, [ String s; rest ]) -> loop (s :: acc) rest
+    | Construct (_, [ Ptr cell ]) ->
+      (match !cell with
+       | Tuple [ String s; rest ] -> loop (s :: acc) rest
+       | _ -> Null)
     | _ -> Null
   in
   loop [] value
@@ -57,6 +61,7 @@ let to_prim : t -> Prim.Value.t or_null = function
   | Unit -> This Unit
   | Construct _ as value -> string_list value
   | Tuple _
+  | Ptr _
   | Record _
   | Poly_record _
   | Poly_variant _
@@ -88,6 +93,12 @@ let rec sexp_of_t : t -> Sexp.t = function
   | Char c -> List [ Atom "Char"; sexp_of_char c ]
   | Unit -> Atom "()"
   | Tuple values -> List (Atom "Tuple" :: List.map values ~f:sexp_of_t)
+  | Ptr _ -> Atom "<ptr>"
+  | Construct ({ name; _ }, [ Ptr cell ])
+    when String.equal name (Prelude_path.canonical "Cons") ->
+    (match !cell with
+     | Tuple values -> List (Atom "Cons" :: List.map values ~f:sexp_of_t)
+     | _ -> List [ Atom "Cons"; Atom "<ptr>" ])
   | Construct ({ name; _ }, values) ->
     List (Atom (Prelude_path.to_string_hum name) :: List.map values ~f:sexp_of_t)
   | Record (record_type, values) ->
@@ -130,6 +141,11 @@ let to_string_hum ?max_length value =
     | Char c -> add (sprintf "%C" c)
     | Unit -> add "()"
     | Tuple values -> tuple values
+    | Ptr _ -> add "<ptr>"
+    | Construct ({ name; _ }, [ Ptr cell ])
+      when String.equal name (Prelude_path.canonical "Cons") ->
+      add "Cons ";
+      value_ !cell
     | Construct ({ name; _ }, []) -> add (Prelude_path.to_string_hum name)
     | Construct ({ name; _ }, [ (Tuple _ as value) ]) ->
       add (Prelude_path.to_string_hum name);

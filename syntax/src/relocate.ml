@@ -123,6 +123,9 @@ and pattern_desc (g : Pattern.desc) (w : Pattern.desc) : Pattern.desc option =
   | Tuple ps, Tuple ps' ->
     let+ ps = list pattern ps ps' in
     Pattern.Tuple ps
+  | Deref p, Deref p' ->
+    let+ p = pattern p p' in
+    Pattern.Deref p
   | Construct (p, ps), Construct (p', ps') ->
     let* p = decl_path p p' in
     let+ ps = list pattern ps ps' in
@@ -153,6 +156,7 @@ and pattern_desc (g : Pattern.desc) (w : Pattern.desc) : Pattern.desc option =
       | Var _
       | Lit _
       | Tuple _
+      | Deref _
       | Construct _
       | Record _
       | Poly_variant _
@@ -207,6 +211,9 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
   | Tuple es, Tuple es' ->
     let+ es = list expr es es' in
     Expr.Tuple es
+  | Deref e, Deref e' ->
+    let+ e = expr e e' in
+    Expr.Deref e
   | Construct (p, es), Construct (p', es') ->
     let* p = decl_path p p' in
     let+ es = list expr es es' in
@@ -268,6 +275,7 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
       | Splice _
       | Quote _
       | Tuple _
+      | Deref _
       | Construct _
       | Record _
       | Field _

@@ -191,6 +191,26 @@ parentheses).
 type is that of such a let (so `let id = fun x -> x` is generalized, being a
 value), and it has no name to recurse by.
 
+### Pointers
+
+`Ptr.make e` allocates a GC-managed `ptr[t]` holding the result of
+evaluating `e : t`. Both `p.*` and `*p` read that value. In a pattern,
+`*p` matches the pointee with pattern `p`. Dereferencing binds more
+tightly than function application; for example, `f *p` calls `f` with the
+pointee, not with the pointer.
+
+Recursive data types must cross a pointer or another indirection (such
+as a function) before returning to the same type. For example:
+
+```
+type tree = Leaf of int | Branch of ptr[tree * tree]
+let left t = match t with Branch *(l, _) -> l | Leaf _ -> t
+```
+
+List literals and patterns keep their syntax. The equivalent constructors
+are `Nil` and `Cons` of a pointer to an element-and-tail pair. Constructing
+a nonempty list therefore allocates even when its elements are values.
+
 ### Type-directed fields and constructors
 
 As OCaml's disambiguation, an unqualified field (`x`, not `M.x`) or

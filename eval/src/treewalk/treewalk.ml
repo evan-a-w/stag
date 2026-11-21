@@ -131,6 +131,7 @@ let captures t ~ident ~args ~body =
         List.iter (Typed.Pattern.idents pattern) ~f:def;
         go ~depth body)
     | Quote expr -> go ~depth:(depth + 1) expr
+    | Deref expr
     | Field (expr, _)
     | Poly_field (expr, _)
     | Poly_restrict (expr, _)
@@ -272,6 +273,9 @@ let map_children ~depth (expr : Typed.Expr.t) ~(f @ local) =
     | Tuple exprs ->
       let%mapl_fun exprs = map_result exprs ~f:same in
       Typed.Expr.Desc.Tuple exprs
+    | Deref expr ->
+      let%mapl_fun expr = same expr in
+      Typed.Expr.Desc.Deref expr
     | Construct (constructor, exprs) ->
       let%mapl_fun exprs = map_result exprs ~f:same in
       Typed.Expr.Desc.Construct (constructor, exprs)
@@ -348,6 +352,7 @@ let instantiate t (code : Typed.Expr.t) ~entry =
       | (Any | Lit _) as desc -> desc
       | Var ident -> Var (fresh ident)
       | Tuple patterns -> Tuple (List.map patterns ~f:pattern)
+      | Deref inner -> Deref (pattern inner)
       | Error patterns -> Error (List.map patterns ~f:pattern)
       | Construct (constructor, patterns) ->
         Construct (constructor, List.map patterns ~f:pattern)
@@ -512,6 +517,7 @@ let rec match_pattern env (pattern : Typed.Pattern.t) (value : Value.t)
   | Lit (Char a), Char b -> Eval_result.return (Char.equal a b)
   | Lit Unit, Unit -> Eval_result.return true
   | Tuple patterns, Tuple values -> match_all env pattern patterns values
+  | Deref inner, Ptr cell -> match_pattern env inner !cell
   | Construct (constructor, patterns), Construct (constructor', values) ->
     if constructor.index = constructor'.index
        && ((not (Typed.Constructor_ref.is_exception constructor))
@@ -555,7 +561,13 @@ let rec match_pattern env (pattern : Typed.Pattern.t) (value : Value.t)
           Env.set env ~ident ~value:(Poly_record rest)
         | Bind _ | Closed | Open -> ());
        { global = matched })
-  | ( (Lit _ | Tuple _ | Construct _ | Record _ | Poly_variant _ | Poly_record _)
+  | ( ( Lit _
+      | Tuple _
+      | Deref _
+      | Construct _
+      | Record _
+      | Poly_variant _
+      | Poly_record _ )
     , _ ) -> pattern_mismatch pattern value
 
 and match_all env pattern patterns values : bool Eval_result.t @ local =
@@ -818,6 +830,13 @@ and step_value t ~env ~level (expr : Typed.Expr.t)
     List.iter values ~f:(fun ((field : Typed.Field_ref.t), value) ->
       record.(field.index) <- value);
     { global = Value.Record (record_type, record) }
+  | Deref pointer ->
+    let%bindl.Local_result { global = pointer } = eval t ~env ~level pointer in
+    (match pointer with
+     | Ptr cell -> Eval_result.return !cell
+     | _ ->
+       Eval_result.error_s
+         [%message "Dereferenced a non-pointer" (pointer : Value.t)])
   | Field (expr, field) ->
     let%bindl.Local_result { global = value } = eval t ~env ~level expr in
     (match value with
@@ -962,6 +981,7 @@ and apply_non_function t (f : Value.t) arg ~loc : Value.t Eval_result.t @ local
      | Type_ref_path, Ref ref_ ->
        Eval_result.return (Syntax_value.type_ref_path (Decl_ref.root_path ref_))
      | Raise, exn -> raise_exn ~loc exn
+     | Ptr_make, value -> Eval_result.return (Value.Ptr (ref value))
      | Erase, Code { expr; persistent = _ } ->
        (match Erase.expr expr with
         | exception Erase.Reached_error -> reached_error ()

@@ -1014,6 +1014,15 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
     let ident, var = bind binder ty in
     node (Var ident) ty, [ var ]
   | Lit lit -> node (Lit lit) (Syntax.Lit.ty lit), []
+  | Deref inner ->
+    let expected =
+      Option.bind expected ~f:(fun ty ->
+        match Type.canonical_ty ty with
+        | TCon ("ptr", [ ATy pointee ]) -> Some pointee
+        | _ -> None)
+    in
+    let inner, bindings = pattern_type t scope ~pattern:inner ?expected in
+    node (Deref inner) (Type.TCon ("ptr", [ ATy inner.ty ])), bindings
   | Tuple patterns ->
     let types = List.map patterns ~f:(fun _ -> Scope.fresh_ty t scope) in
     let patterns, bindings =
@@ -2159,6 +2168,15 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
                 | Error error -> fail error ~children:[ code ]
                 | Ok expansion ->
                   node (Toplevel_splice { code; expansion }) inner))))
+  | Deref pointer ->
+    let pointee =
+      Option.value_or_thunk expected ~default:(fun () -> Scope.fresh_ty t scope)
+    in
+    let expected = Type.TCon ("ptr", [ ATy pointee ]) in
+    let pointer = expr_type t scope ~expr:pointer ~expected in
+    if Scope.unifies t scope ~ty1:pointer.ty ~ty2:expected ~loc
+    then node (Deref pointer) pointee
+    else node (Error [ pointer ]) Type.error
   | Tuple exprs ->
     let exprs =
       List.map2_exn

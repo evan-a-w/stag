@@ -7,6 +7,7 @@ type t =
   | Char of char
   | Unit
   | Tuple of t list
+  | Ptr of t ref
   | Construct of Typed.Constructor_ref.t * t list
   | Record of Typed.Record_type.t * t array (** By field index. *)
   | Poly_record of t String.Map.t

@@ -63,6 +63,7 @@ module Kind : sig
         ; param : Syntax.Type_decl.Param.t
         }
     | Cyclic_type_alias of string
+    | Infinite_type_layout of string
     | Non_regular_recursive_alias of string
     | Duplicate_module of string
     | Duplicate_type of string

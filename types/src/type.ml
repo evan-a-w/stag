@@ -180,21 +180,70 @@ let presence_bound_var = function
   | If_present _ -> None
 ;;
 
-let rec same_ty ty1 ty2 =
-  match canonical_ty ty1, canonical_ty ty2 with
+module Link_pairs = struct
+  type 'a t = 'a list Int.Table.t option ref
+
+  let create () = ref None
+
+  let seen t id other =
+    let table =
+      match !t with
+      | Some table -> table
+      | None ->
+        let table = Int.Table.create () in
+        t := Some table;
+        table
+    in
+    if List.exists (Hashtbl.find_multi table id) ~f:(phys_equal other)
+    then true
+    else (
+      Hashtbl.add_multi table ~key:id ~data:other;
+      false)
+  ;;
+
+  let ty t ty1 ty2 =
+    match ty1, ty2 with
+    | TVar { id; state = Link _; _ }, other
+    | other, TVar { id; state = Link _; _ } -> seen t id other
+    | _ -> false
+  ;;
+
+  let row t row1 row2 =
+    match row1, row2 with
+    | RVar { id; state = Link _; _ }, other
+    | other, RVar { id; state = Link _; _ } -> seen t id other
+    | _ -> false
+  ;;
+end
+
+let rec same_ty' ((tys, _) as pairs) ty1 ty2 =
+  phys_equal ty1 ty2
+  ||
+  let left = canonical_ty ty1 in
+  let right = canonical_ty ty2 in
+  phys_equal left right
+  || (match left, right with
+      | TRecord _, TRecord _ | TVariant _, TVariant _ -> false
+      | _ -> Link_pairs.ty tys ty1 ty2)
+  ||
+  match left, right with
   | TVar var1, TVar var2 -> var1.id = var2.id
   | TCon (name1, args1), TCon (name2, args2) ->
-    String.equal name1 name2 && List.equal same_arg args1 args2
-  | TArrow (a1, b1), TArrow (a2, b2) -> same_ty a1 a2 && same_ty b1 b2
-  | TTuple tys1, TTuple tys2 -> List.equal same_ty tys1 tys2
+    String.equal name1 name2 && List.equal (same_arg pairs) args1 args2
+  | TArrow (a1, b1), TArrow (a2, b2) ->
+    same_ty' pairs a1 a2 && same_ty' pairs b1 b2
+  | TTuple tys1, TTuple tys2 -> List.equal (same_ty' pairs) tys1 tys2
   | TCode c1, TCode c2 ->
-    same_ty c1.inner c2.inner && same_row c1.context c2.context
+    same_ty' pairs c1.inner c2.inner && same_row' pairs c1.context c2.context
   | TRecord { id = id1; _ }, TRecord { id = id2; _ }
   | TVariant { id = id1; _ }, TVariant { id = id2; _ } -> id1 = id2
   | ( (TVar _ | TCon _ | TArrow _ | TTuple _ | TCode _ | TRecord _ | TVariant _)
     , _ ) -> false
 
-and same_row row1 row2 =
+and same_row' ((_, rows) as pairs) row1 row2 =
+  phys_equal row1 row2
+  || Link_pairs.row rows row1 row2
+  ||
   match canonical_row row1, canonical_row row2 with
   | REmpty, REmpty -> true
   | RVar var1, RVar var2 -> var1.id = var2.id
@@ -202,8 +251,8 @@ and same_row row1 row2 =
     String.equal name1 name2
     && same_presence p1 p2
     && same_presence a1 a2
-    && same_ty ty1 ty2
-    && same_row rest1 rest2
+    && same_ty' pairs ty1 ty2
+    && same_row' pairs rest1 rest2
   | (REmpty | RVar _ | RExtend _), _ -> false
 
 and same_presence p1 p2 =
@@ -212,12 +261,16 @@ and same_presence p1 p2 =
   | PVar var1, PVar var2 -> var1.id = var2.id
   | (Present | Absent | PVar _), _ -> false
 
-and same_arg arg1 arg2 =
+and same_arg pairs arg1 arg2 =
   match arg1, arg2 with
-  | ATy ty1, ATy ty2 -> same_ty ty1 ty2
-  | ARow row1, ARow row2 -> same_row row1 row2
+  | ATy ty1, ATy ty2 -> same_ty' pairs ty1 ty2
+  | ARow row1, ARow row2 -> same_row' pairs row1 row2
   | (ATy _ | ARow _), _ -> false
 ;;
+
+let comparison () = Link_pairs.create (), Link_pairs.create ()
+let same_ty ty1 ty2 = same_ty' (comparison ()) ty1 ty2
+let same_row row1 row2 = same_row' (comparison ()) row1 row2
 
 let same_bound ?(same_entry_ty = fun (_ : presence) -> same_ty) bound1 bound2 =
   let rec same_rows row1 row2 =
@@ -646,8 +699,7 @@ module Sexper = struct
 
   type t =
     { printing : Printing.t Int.Table.t
-        (* The records and variants being printed, by id, labelled once a cycle
-           reaches them again. *)
+        (* Nodes and links being printed, labelled once reached again. *)
     ; nodes : Sexp.t Int.Table.t
     ; tys : Sexp.t Int.Table.t
     ; rows : Sexp.t Int.Table.t
@@ -684,12 +736,40 @@ module Sexper = struct
       sexp
   ;;
 
-  let var t table (var : _ Var.t) ~sexp_of_link : Sexp.t =
+  let cycle t table id ~sexp =
+    match Hashtbl.find t.printing id with
+    | Some printing ->
+      t.low <- min t.low printing.depth;
+      let label =
+        match printing.label with
+        | Some label -> label
+        | None ->
+          let next = t.next_label in
+          t.next_label <- next + 1;
+          printing.label <- Some next;
+          next
+      in
+      [%sexp "Cycle_ref", (label : int)]
+    | None ->
+      closed t table id ~sexp:(fun () ->
+        t.depth <- t.depth + 1;
+        let printing = { Printing.depth = t.depth; label = None } in
+        Hashtbl.set t.printing ~key:id ~data:printing;
+        let sexp = sexp () in
+        Hashtbl.remove t.printing id;
+        t.depth <- t.depth - 1;
+        match printing.label with
+        | None -> sexp
+        | Some label -> [%sexp "Cycle", (label : int), (sexp : Sexp.t)])
+  ;;
+
+  let var t table (var : _ Var.t) ~structural ~sexp_of_link : Sexp.t =
     match var.state with
     | Unbound rank -> [%sexp "Unbound", (var.id : id), (rank : rank)]
     | Generic -> [%sexp "Generic", (var.id : id)]
     | Link target ->
-      closed t table var.id ~sexp:(fun () ->
+      let memo = if structural target then closed else cycle in
+      memo t table var.id ~sexp:(fun () ->
         [%sexp "Link", (sexp_of_link target : Sexp.t)])
   ;;
 
@@ -707,33 +787,16 @@ module Sexper = struct
         ]
     | TRecord { id; row = r } -> node t id ~name:"TRecord" r
     | TVariant { id; row = r } -> node t id ~name:"TVariant" r
-    | TVar v -> List [ Atom "TVar"; var t t.tys v ~sexp_of_link:(ty t) ]
+    | TVar v ->
+      let structural target =
+        match canonical_ty target with
+        | TRecord _ | TVariant _ -> true
+        | _ -> false
+      in
+      List [ Atom "TVar"; var t t.tys v ~structural ~sexp_of_link:(ty t) ]
 
   and node t id ~name r =
-    match Hashtbl.find t.printing id with
-    | Some printing ->
-      t.low <- min t.low printing.depth;
-      let label =
-        match printing.label with
-        | Some label -> label
-        | None ->
-          let next = t.next_label in
-          t.next_label <- next + 1;
-          printing.label <- Some next;
-          next
-      in
-      [%sexp "Cycle_ref", (label : int)]
-    | None ->
-      closed t t.nodes id ~sexp:(fun () ->
-        t.depth <- t.depth + 1;
-        let printing = { Printing.depth = t.depth; label = None } in
-        Hashtbl.set t.printing ~key:id ~data:printing;
-        let sexp : Sexp.t = List [ Atom name; row t r ] in
-        Hashtbl.remove t.printing id;
-        t.depth <- t.depth - 1;
-        match printing.label with
-        | None -> sexp
-        | Some label -> [%sexp "Cycle", (label : int), (sexp : Sexp.t)])
+    cycle t t.nodes id ~sexp:(fun () -> List [ Atom name; row t r ])
 
   and row t row' : Sexp.t =
     match row' with
@@ -749,7 +812,11 @@ module Sexper = struct
         ([ Sexp.Atom "RExtend"; Atom name; presence p ]
          @ assigned
          @ [ ty t ty'; row t rest ])
-    | RVar v -> List [ Atom "RVar"; var t t.rows v ~sexp_of_link:(row t) ]
+    | RVar v ->
+      List
+        [ Atom "RVar"
+        ; var t t.rows v ~structural:(fun _ -> false) ~sexp_of_link:(row t)
+        ]
 
   and presence p : Sexp.t =
     match p with
@@ -946,27 +1013,44 @@ module Printer = struct
     entries, Option.map tail ~f:(row_var_name t)
   ;;
 
+  let render_cycle t id ~name ~render =
+    match Hashtbl.find t.introduced id, Hashtbl.find t.printing id with
+    | Some name, _ -> name
+    | None, Some reached ->
+      reached := true;
+      name ()
+    | None, None ->
+      let reached = ref false in
+      Hashtbl.set t.printing ~key:id ~data:reached;
+      let body = render () in
+      Hashtbl.remove t.printing id;
+      if !reached
+      then (
+        let name = name () in
+        Hashtbl.set t.introduced ~key:id ~data:name;
+        sprintf "(%s as %s)" body name)
+      else body
+  ;;
+
   let rec ty_to_string t ~prec ty =
-    match canonical_ty ty, t.recursive with
+    let canonical = canonical_ty ty in
+    match canonical, t.recursive with
     | ty, Some (body, name) when phys_equal ty body -> name
-    | ((TRecord { id; _ } | TVariant { id; _ }) as ty), _ ->
-      (match Hashtbl.find t.introduced id, Hashtbl.find t.printing id with
-       | Some name, _ -> name
-       | None, Some reached ->
-         reached := true;
-         cycle_name t id ty
-       | None, None ->
-         let reached = ref false in
-         Hashtbl.set t.printing ~key:id ~data:reached;
-         let body = structure t ~prec ty in
-         Hashtbl.remove t.printing id;
-         if !reached
-         then (
-           let name = cycle_name t id ty in
-           Hashtbl.set t.introduced ~key:id ~data:name;
-           sprintf "(%s as %s)" body name)
-         else body)
-    | ty, _ -> structure t ~prec ty
+    | (TRecord { id; _ } | TVariant { id; _ }), _ ->
+      render_cycle
+        t
+        id
+        ~name:(fun () -> cycle_name t id canonical)
+        ~render:(fun () -> structure t ~prec canonical)
+    | _ ->
+      (match ty with
+       | TVar { id; state = Link _; _ } ->
+         render_cycle
+           t
+           id
+           ~name:(fun () -> cycle_name t id canonical)
+           ~render:(fun () -> structure t ~prec canonical)
+       | _ -> structure t ~prec canonical)
 
   and structure t ~prec ty =
     let parens_if cond s = if cond then "(" ^ s ^ ")" else s in
@@ -1011,7 +1095,7 @@ module Printer = struct
         ~entry:(fun tag ty ~assigned:_ ->
           match canonical_ty ty with
           | TCon ("unit", []) -> tag
-          | ty -> sprintf "%s of %s" tag (ty_to_string t ~prec:0 ty))
+          | _ -> sprintf "%s of %s" tag (ty_to_string t ~prec:0 ty))
     in
     let entries = String.concat entries ~sep:" | " in
     match entries, tail with
@@ -1088,6 +1172,18 @@ module Printer = struct
     row_to_string t row ~label:(fun name -> "`" ^ name) ~context:false
 
   and row_to_string t row ~label ~context =
+    match row with
+    | RVar { id; state = Link _; _ } ->
+      render_cycle
+        t
+        id
+        ~name:(fun () ->
+          Hashtbl.find_or_add t.cycle_names id ~default:(fun () ->
+            ".." ^ name (next_index t) ~weak:false))
+        ~render:(fun () -> row_structure t row ~label ~context)
+    | _ -> row_structure t row ~label ~context
+
+  and row_structure t row ~label ~context =
     let entries, tail =
       sorted_row_entries
         t

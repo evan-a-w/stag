@@ -155,15 +155,16 @@ let string_of_sexp t =
   | List _ -> Internal.of_sexp_error "string_of_sexp: atom needed" t
 
 let sexp_of_list sexp_of_elt l = List (List.map sexp_of_elt l)
+let sexp_of_ptr sexp_of_elt p = sexp_of_elt p.*
 
 (* Stops at the first element that fails. *)
 let list_of_sexp elt_of_sexp t =
   let loop ts acc =
     match ts with
     | [] -> Ok (List.rev acc)
-    | Cons (x, rest) ->
+    | Cons * (x, rest) ->
       match elt_of_sexp x with
-      | Ok y -> loop rest (Cons (y, acc))
+      | Ok y -> loop rest (Cons (Ptr.make ( (y, acc))))
       | Error e -> Error e
   in
   match t with
@@ -245,6 +246,8 @@ let int_of_sexp_exn t = of_sexp_exn int_of_sexp t
 let char_of_sexp_exn t = of_sexp_exn char_of_sexp t
 let string_of_sexp_exn t = of_sexp_exn string_of_sexp t
 let list_of_sexp_exn elt_of_sexp t = of_sexp_exn (list_of_sexp elt_of_sexp) t
+let ptr_of_sexp elt_of_sexp t = Result.map Ptr.make (elt_of_sexp t)
+let ptr_of_sexp_exn elt_of_sexp t = of_sexp_exn (ptr_of_sexp elt_of_sexp) t
 
 let option_of_sexp_exn value_of_sexp t =
   of_sexp_exn (option_of_sexp value_of_sexp) t
@@ -297,8 +300,8 @@ module Deriving = struct
   let capitalize sexp =
     match sexp with
     | Atom tag -> Atom (String.capitalize tag)
-    | List (Cons (Atom tag, args)) ->
-      List (Cons (Atom (String.capitalize tag), args))
+    | List (Cons * (Atom tag, args)) ->
+      List (Cons (Ptr.make ( (Atom (String.capitalize tag), args))))
     | List _ -> sexp
 
   (* Raises the error of [sexp], which is not a variant of the constructors
@@ -335,9 +338,9 @@ module Deriving = struct
     let in_order names items values =
       match (names, items) with
       | [], [] -> Some values
-      | Cons (name, names), Cons (List [Atom given; value], items) ->
+      | Cons * (name, names), Cons * (List [Atom given; value], items) ->
         (match String.equal name given with
-         | true -> in_order names items (Cons (value, values))
+         | true -> in_order names items (Cons (Ptr.make ( (value, values))))
          | false -> None)
       | _ -> None
     in
@@ -380,11 +383,11 @@ module Internal = struct
     let repeats names seen repeated =
       match names with
       | [] -> List.rev repeated
-      | Cons (name, rest) ->
+      | Cons * (name, rest) ->
         match (is_in seen name, is_in repeated name) with
-        | true, false -> repeats rest seen (Cons (name, repeated))
+        | true, false -> repeats rest seen (Cons (Ptr.make ( (name, repeated))))
         | true, true -> repeats rest seen repeated
-        | false, _ -> repeats rest (Cons (name, seen)) repeated
+        | false, _ -> repeats rest (Cons (Ptr.make ( (name, seen)))) repeated
     in
     let pairs = List.map pair items in
     let given = List.map (fun p -> match p with name, _ -> name) pairs in
@@ -392,9 +395,9 @@ module Internal = struct
     let extras = List.filter (fun name -> Bool.not (is_in names name)) given in
     let missing = List.filter (fun name -> Bool.not (is_in given name)) names in
     match (duplicates, extras, missing) with
-    | Cons (_, _), _, _ -> listed "duplicate fields: " duplicates
-    | _, Cons (_, _), _ -> listed "extra fields: " extras
-    | _, _, Cons (_, _) ->
+    | Cons * (_, _), _, _ -> listed "duplicate fields: " duplicates
+    | _, Cons * (_, _), _ -> listed "extra fields: " extras
+    | _, _, Cons * (_, _) ->
       listed "the following record elements were undefined: " missing
     | _ -> List.map (fun name -> List.assoc_exn String.equal name pairs) names
 
@@ -438,7 +441,7 @@ module Internal = struct
         (match is_in with_args tag with
          | true -> fail messages.requires_args
          | false -> fail messages.unexpected)
-      | List (Cons (Atom tag, _)) ->
+      | List (Cons * (Atom tag, _)) ->
         (match (is_in constants tag, is_in with_args tag) with
          | true, _ -> fail messages.takes_no_args
          | _, true ->
@@ -452,7 +455,7 @@ module Internal = struct
                   "\" has incorrect number of arguments";
                 ])
          | _ -> fail messages.unexpected)
-      | List (Cons (List _, _)) -> invalid "a nested list"
+      | List (Cons * (List _, _)) -> invalid "a nested list"
       | List [] -> invalid "the empty list"
   end
 end

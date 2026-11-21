@@ -17,7 +17,7 @@ let print_bool b =
 let print_nat n =
   match n with
   | `Z -> print_string "Z"
-  | `S m ->
+  | `S *m ->
     print_string "S ";
     print_nat m
 
@@ -64,29 +64,30 @@ module Recursion = struct
   let double n =
     match n with
     | `Z -> `Z
-    | `S m -> `S (`S (double m))
+    | `S *m -> `S (Ptr.make (`S (Ptr.make (double m))))
 
-  let doubled = double (`S (`S `Z))
+  let succ n = `S (Ptr.make n)
+  let doubled = double (succ (succ `Z))
 
   let even n =
     match n with
     | `Z -> true
-    | `S m -> odd m
+    | `S *m -> odd m
 
   let odd n =
     match n with
     | `Z -> false
-    | `S m -> even m
+    | `S *m -> even m
 
-  let parities = (even (`S (`S (`S `Z))), odd (`S (`S (`S `Z))))
+  let parities = (even (succ (succ (succ `Z))), odd (succ (succ (succ `Z))))
 
   let local =
     let count n =
       match n with
       | `Z -> `Done
-      | `S m -> count m
+      | `S *m -> count m
     in
-    count (`S (`S (`S (`S `Z))))
+    count (succ (succ (succ (succ `Z))))
 
   let%expect_test "recursion" =
     print_nat doubled;
@@ -109,9 +110,10 @@ module Toplevel_splices = struct
     .~(let gen n =
          match n with
          | `Z -> .< `Z >.
-         | `S m -> .< `S .~(gen m) >.
+         | `S *m -> .< `S (Ptr.make .~(gen m)) >.
        in
-       gen (`S (`S (`S `Z))))
+       let succ n = `S (Ptr.make n) in
+       gen (succ (succ (succ `Z))))
 
   (* The level 0 binders at the splice provide the code's context. *)
   let captured x = .~(.< (x, x) >.)

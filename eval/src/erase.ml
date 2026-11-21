@@ -115,6 +115,7 @@ let expr (expr : Typed.Expr.t) =
        | Var ident -> Var (name names ident)
        | Lit lit -> Lit lit
        | Tuple ps -> Tuple (List.map ps ~f:go)
+       | Deref p -> Deref (go p)
        | Construct (c, ps) -> Construct (decl_path c.name, List.map ps ~f:go)
        | Record fields ->
          Record
@@ -257,6 +258,9 @@ let expr (expr : Typed.Expr.t) =
     | Tuple es ->
       let%bind es = all es in
       node (Tuple es)
+    | Deref e ->
+      let%bind e = go names e in
+      node (Deref e)
     | Construct (c, es) ->
       let%bind es = all es in
       node (Construct (located loc (resolved c.name), es))

@@ -408,7 +408,7 @@ let%expect_test "parameterised types" =
     |}]
 
 (* Recursive types: the conversions are recursive, as lets are. *)
-type tree['a] = Leaf | Node of tree['a] * 'a * tree['a]
+type tree['a] = Leaf | Node of ptr[tree['a]] * 'a * ptr[tree['a]]
 
 include%inline .~(Core.Sexp.derive (type tree['a]))
   let sexp_of_tree _of_a v =
@@ -417,9 +417,9 @@ include%inline .~(Core.Sexp.derive (type tree['a]))
     | Node (v0, v1, v2) ->
       Core.Sexp.List [
         Core.Sexp.Atom "Node";
-        sexp_of_tree _of_a v0;
+        Core.Sexp.sexp_of_ptr (sexp_of_tree _of_a) v0;
         _of_a v1;
-        sexp_of_tree _of_a v2;
+        Core.Sexp.sexp_of_ptr (sexp_of_tree _of_a) v2;
       ]
 
   let tree_of_sexp_exn _of_a sexp =
@@ -427,9 +427,9 @@ include%inline .~(Core.Sexp.derive (type tree['a]))
     | Core.Sexp.Atom "Leaf" -> Leaf
     | Core.Sexp.List [Core.Sexp.Atom "Node"; v0; v1; v2] ->
       Node
-        (tree_of_sexp_exn _of_a v0,
+        (Core.Sexp.ptr_of_sexp_exn (tree_of_sexp _of_a) v0,
          Core.Sexp.of_sexp_exn _of_a v1,
-         tree_of_sexp_exn _of_a v2)
+         Core.Sexp.ptr_of_sexp_exn (tree_of_sexp _of_a) v2)
     | _ ->
       Core.Sexp.Deriving.variant_error "tree_of_sexp" ["Leaf"] ["Node"] sexp
 
@@ -438,11 +438,12 @@ include%inline .~(Core.Sexp.derive (type tree['a]))
 end%inline
 
 let%expect_test "recursive types" =
-  let leaf x = Node (Leaf, x, Leaf) in
+  let leaf x = Node (Ptr.make Leaf, x, Ptr.make Leaf) in
   round_trip
     (sexp_of_tree Core.Sexp.sexp_of_string)
     (tree_of_sexp Core.Sexp.string_of_sexp)
-    (Node (leaf "a", "b", Node (Leaf, "c", leaf "d")));
+    (Node (Ptr.make (leaf "a"), "b",
+           Ptr.make (Node (Ptr.make Leaf, "c", Ptr.make (leaf "d")))));
   parse
     (sexp_of_tree Core.Sexp.sexp_of_int)
     (tree_of_sexp Core.Sexp.int_of_sexp)
@@ -1078,7 +1079,7 @@ let%expect_test "aliases of parameterised types" =
     |}]
 
 (* Recursive polymorphic variants. *)
-type pv = [`Leaf | `Node of pv * pv]
+type pv = [`Leaf | `Node of ptr[pv] * ptr[pv]]
 
 include%inline .~(Core.Sexp.derive (type pv))
   let sexp_of_pv v =
@@ -1087,7 +1088,10 @@ include%inline .~(Core.Sexp.derive (type pv))
     | `Node (v0_0, v0_1) ->
       Core.Sexp.List [
         Core.Sexp.Atom "Node";
-        Core.Sexp.List [sexp_of_pv v0_0; sexp_of_pv v0_1];
+        Core.Sexp.List [
+          Core.Sexp.sexp_of_ptr sexp_of_pv v0_0;
+          Core.Sexp.sexp_of_ptr sexp_of_pv v0_1;
+        ];
       ]
 
   let pv_of_sexp_exn sexp =
@@ -1097,7 +1101,8 @@ include%inline .~(Core.Sexp.derive (type pv))
       `Node
         (match v0 with
          | Core.Sexp.List [v0_0; v0_1] ->
-           (pv_of_sexp_exn v0_0, pv_of_sexp_exn v0_1)
+           (Core.Sexp.ptr_of_sexp_exn pv_of_sexp v0_0,
+            Core.Sexp.ptr_of_sexp_exn pv_of_sexp v0_1)
          | _ -> Core.Sexp.Deriving.tuple_error "pv_of_sexp" 2 v0)
     | _ ->
       Core.Sexp.Deriving.poly_variant_error "pv_of_sexp" ["Leaf"] ["Node"] sexp
@@ -1106,7 +1111,8 @@ include%inline .~(Core.Sexp.derive (type pv))
 end%inline
 
 let%expect_test "recursive polymorphic variants" =
-  round_trip sexp_of_pv pv_of_sexp (`Node ((`Leaf, `Node ((`Leaf, `Leaf)))));
+  let node l r = `Node ((Ptr.make l, Ptr.make r)) in
+  round_trip sexp_of_pv pv_of_sexp (node `Leaf (node `Leaf `Leaf));
   parse sexp_of_pv pv_of_sexp "(Node Leaf)";
   parse sexp_of_pv pv_of_sexp "(Node (Leaf) Leaf)";
   [%expect {|

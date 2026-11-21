@@ -70,6 +70,7 @@ let map ?type_expr:replace_type_expr toplevels ~f =
     let txt : Expr.desc =
       match e.txt with
       | Lit _ | Expect _ | Error -> e.txt
+      | Deref e -> Deref (sub e)
       | Var (p, a) -> Var (p, annot a)
       | App (a, b) ->
         let a = sub a in

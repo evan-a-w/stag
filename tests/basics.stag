@@ -70,17 +70,17 @@ let%expect_test "tuples" =
     1
     |}]
 
-type list['a] = Nil | Cons of 'a * list['a]
+type list['a] = Nil | Cons of ptr['a * list['a]]
 
 let map f l =
   match l with
   | Nil -> Nil
-  | Cons (x, rest) -> Cons (f x, map f rest)
+  | Cons * (x, rest) -> Cons (Ptr.make ( (f x, map f rest)))
 
 let iter f l =
   match l with
   | Nil -> ()
-  | Cons (x, rest) ->
+  | Cons * (x, rest) ->
     f x;
     iter f rest
 
@@ -89,7 +89,7 @@ let%expect_test "nominal variants" =
     print_int x;
     print_char ' '
   in
-  iter print_item (map (Int.mul 10) (Cons (1, Cons (2, Cons (3, Nil)))));
+  iter print_item (map (Int.mul 10) (Cons (Ptr.make ( (1, Cons (Ptr.make ( (2, Cons (Ptr.make ( (3, Nil)))))))))));
   [%expect {| 10 20 30 |}]
 
 type shape = Circle of int | Rect of int * int | Empty
@@ -105,7 +105,7 @@ let%expect_test "constructors with several arguments" =
     print_int (area s);
     print_char ' '
   in
-  iter print_area (Cons (Circle 2, Cons (Rect (3, 4), Cons (Empty, Nil))));
+  iter print_area (Cons (Ptr.make ( (Circle 2, Cons (Ptr.make ( (Rect (3, 4), Cons (Ptr.make ( (Empty, Nil))))))))));
   [%expect {| 12 12 0 |}]
 
 type point = {x : int; y : int}
