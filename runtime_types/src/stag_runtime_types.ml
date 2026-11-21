@@ -118,7 +118,9 @@ module Context = struct
         (* The variables whose bindings are being substituted. *)
     ; path : Path.t
     ; cache : Cache.t
-    ; ids : int ref (* For the ids of the copies substitution makes. *)
+    ; ids : int ref
+        (* For the ids of the copies substitution makes: negative, so distinct
+           from [Fresh]'s, which a key compares records by. *)
     ; work : int ref
     }
 end
@@ -177,7 +179,7 @@ and mapper ~bindings ~ids ~resolving : Type.Mapper.t =
   ; presence = (fun var -> PVar var)
   ; id =
       (fun () ->
-        incr ids;
+        decr ids;
         !ids)
   }
 ;;

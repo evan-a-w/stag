@@ -632,3 +632,58 @@ let%expect_test "regular recursion behind pointers" =
        (start 0))))
     |}]
 ;;
+
+let%expect_test "substitution copies have their own ids" =
+  (* type u['a] = [{x : 'a}] type r['a] = u[{y : 'a}] Expanding [r[int]] copies
+     [{y : 'a}] as [{y : int}]. A record of the program with the same id is
+     another type: [u] of it is not cached as the copy's. *)
+  let u_parameter = var () in
+  let u =
+    decl
+      ~name:"u"
+      ~params:[ Type.ATy (Type.TVar u_parameter) ]
+      (record [ field "x" (Type.TVar u_parameter) ])
+  in
+  let r_parameter = var () in
+  let structural =
+    Fresh.record fresh (present "y" (Type.TVar r_parameter) Type.REmpty)
+  in
+  let r =
+    decl
+      ~name:"r"
+      ~params:[ Type.ATy (Type.TVar r_parameter) ]
+      (alias (tycon "u" [ structural ]))
+  in
+  let t = Runtime_types.create (resolver [ u; r ]) in
+  List.iter [ 0; 1; 2; 3 ] ~f:(fun id ->
+    let program_record =
+      Type.TRecord { id; row = present "y" bool Type.REmpty }
+    in
+    match
+      Runtime_types.shape
+        t
+        (Type.TTuple [ tycon "r" [ int ]; tycon "u" [ program_record ] ])
+    with
+    | Ok (Struct { fields = [ _; program_shape ]; _ }) ->
+      print_s [%sexp (id : int), (program_shape : Shape.t)]
+    | result -> print_s [%sexp (result : (Shape.t, Error.t) Result.t)]);
+  [%expect
+    {|
+    (0
+     (Struct (repr Default)
+      (fields
+       ((Struct (repr Default) (fields ((Scalar (scalar I8) (valid ((0 1)))))))))))
+    (1
+     (Struct (repr Default)
+      (fields
+       ((Struct (repr Default) (fields ((Scalar (scalar I8) (valid ((0 1)))))))))))
+    (2
+     (Struct (repr Default)
+      (fields
+       ((Struct (repr Default) (fields ((Scalar (scalar I8) (valid ((0 1)))))))))))
+    (3
+     (Struct (repr Default)
+      (fields
+       ((Struct (repr Default) (fields ((Scalar (scalar I8) (valid ((0 1)))))))))))
+    |}]
+;;
