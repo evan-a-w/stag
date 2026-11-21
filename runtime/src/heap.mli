@@ -49,6 +49,11 @@ val alloc : t -> Header.t -> Memory.Addr.t
 val block_start : t -> Memory.Addr.t -> Memory.Addr.t
 [@@zero_alloc]
 
+(** Whether [addr] is in one of [t]'s regions: its pages, descriptors and slots,
+    allocated or not. *)
+val owns : t -> Memory.Addr.t -> bool
+[@@zero_alloc]
+
 (** Frees every [Unmarked] block, and makes every [Marked] one [Unmarked]. The
     pages of freed large blocks go back to their arena. Pages of slots are kept,
     even when all their slots are free. *)

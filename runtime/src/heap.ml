@@ -328,6 +328,10 @@ let alloc t header =
     block)
 ;;
 
+let[@zero_alloc] owns t addr =
+  not (Addr.is_null (Page_table.find t.page_table addr))
+;;
+
 let[@zero_alloc] block_start t addr =
   let owner = Page_table.find t.page_table addr in
   if Addr.is_null owner
@@ -372,42 +376,54 @@ let sweep t =
   done;
   (* Latest region first and last slot first, so the free lists end up in
      creation and address order. *)
-  let kept_regions =
-    List.filter t.regions ~f:(fun (region : Region.t) ->
-      match region.kind with
-      | Page { class_index } ->
-        for i = region.slots - 1 downto 0 do
-          let block = Region.block region i ~page_bytes in
-          let header = Header.load block in
-          match Header.kind header, Header.color header with
-          | Free, _ -> push_free t ~class_index block
-          | (Scanned | Bytes), Unmarked ->
-            count freed_blocks freed_words header;
-            Header.store block (Header.free ~size_words:t.classes.(class_index));
-            push_free t ~class_index block
-          | (Scanned | Bytes), Marked ->
-            count kept_blocks kept_words header;
-            Header.store block (Header.with_color header Unmarked)
-          | (Scanned | Bytes), Immortal -> count kept_blocks kept_words header
-        done;
-        true
-      | Large ->
-        let block = Region.block region 0 ~page_bytes in
+  (* Whether [region] is kept: freed large blocks aren't. *)
+  let sweep_region (region : Region.t) =
+    match region.kind with
+    | Page { class_index } ->
+      for i = region.slots - 1 downto 0 do
+        let block = Region.block region i ~page_bytes in
         let header = Header.load block in
-        (match Header.color header with
-         | Unmarked ->
-           count freed_blocks freed_words header;
-           remove_region t region;
-           false
-         | Marked ->
-           count kept_blocks kept_words header;
-           Header.store block (Header.with_color header Unmarked);
-           true
-         | Immortal ->
-           count kept_blocks kept_words header;
-           true))
+        match Header.kind header, Header.color header with
+        | Free, _ -> push_free t ~class_index block
+        | (Scanned | Bytes), Unmarked ->
+          count freed_blocks freed_words header;
+          Header.store block (Header.free ~size_words:t.classes.(class_index));
+          push_free t ~class_index block
+        | (Scanned | Bytes), Marked ->
+          count kept_blocks kept_words header;
+          Header.store block (Header.with_color header Unmarked)
+        | (Scanned | Bytes), Immortal -> count kept_blocks kept_words header
+      done;
+      true
+    | Large ->
+      let block = Region.block region 0 ~page_bytes in
+      let header = Header.load block in
+      (match Header.color header with
+       | Unmarked ->
+         count freed_blocks freed_words header;
+         remove_region t region;
+         false
+       | Marked ->
+         count kept_blocks kept_words header;
+         Header.store block (Header.with_color header Unmarked);
+         true
+       | Immortal ->
+         count kept_blocks kept_words header;
+         true)
   in
-  t.regions <- kept_regions;
+  (* The list of regions is only rebuilt if a large block was freed: the regions
+     of those are no longer in the page table. *)
+  let all_kept =
+    List.fold t.regions ~init:true ~f:(fun all_kept region ->
+      sweep_region region && all_kept)
+  in
+  if not all_kept
+  then
+    t.regions
+    <- List.filter t.regions ~f:(fun region ->
+         not
+           (Addr.is_null
+              (Page_table.find t.page_table (Region.base region ~page_bytes))));
   { Sweep_stats.freed_blocks = !freed_blocks
   ; freed_words = !freed_words
   ; kept_blocks = !kept_blocks
