@@ -24,7 +24,13 @@ module Env = struct
     let roots = Roots.create () in
     { heap
     ; roots
-    ; gc = Stag_gc.create config heap roots (Data_stack.create ())
+    ; gc =
+        Stag_gc.create
+          config
+          ~heap
+          ~roots
+          ~data_stack:(Data_stack.create ())
+          ~static:(Static_data.create ())
     }
   ;;
 end
@@ -398,7 +404,12 @@ let%expect_test "destroy" =
   let heap = Heap.create Heap.Config.default in
   let roots = Roots.create () in
   let gc =
-    Stag_gc.create Stag_gc.Config.default heap roots (Data_stack.create ())
+    Stag_gc.create
+      Stag_gc.Config.default
+      ~heap
+      ~roots
+      ~data_stack:(Data_stack.create ())
+      ~static:(Static_data.create ())
   in
   Stag_gc.destroy gc;
   let try_ f = print_s [%sexp (Or_error.try_with f : unit Or_error.t)] in

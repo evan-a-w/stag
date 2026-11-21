@@ -60,12 +60,12 @@ let%expect_test "blocks larger than a segment get one of their own" =
   print_s [%sexp (static : Static_data.t)];
   [%expect
     {|
-    (((bytes 65536) (used 16)
-      (blocks ((8 (Scanned (size_words 1) (scalar_words 1) (color Immortal))))))
+    (((bytes 65536) (used 32)
+      (blocks
+       ((8 (Scanned (size_words 1) (scalar_words 1) (color Immortal)))
+        (24 (Scanned (size_words 1) (scalar_words 1) (color Immortal))))))
      ((bytes 100008) (used 100008)
-      (blocks ((8 (Bytes (length 100000) (color Immortal))))))
-     ((bytes 65536) (used 16)
-      (blocks ((8 (Scanned (size_words 1) (scalar_words 1) (color Immortal)))))))
+      (blocks ((8 (Bytes (length 100000) (color Immortal)))))))
     |}];
   Static_data.destroy static
 ;;
@@ -178,6 +178,32 @@ let%expect_test "globals: scalars, then pointer slots that are roots" =
     (removed (root_slots ()))
     (Error "Static_data.remove_global: removed")
     |}];
+  (* Destroying it with globals left raises. *)
+  print_s
+    [%sexp
+      (Or_error.try_with (fun () -> Static_data.destroy static)
+       : unit Or_error.t)];
+  [%expect
+    {| (Error ("Static_data.destroy: globals not removed" (globals 2))) |}];
+  Static_data.remove_global roots nothing;
+  (* Removing from the wrong roots raises, changing nothing. *)
+  let other_roots = Roots.create () in
+  let two =
+    Static_data.add_global static roots (layout (struct_ [ ptr; ptr ]))
+  in
+  print_s
+    [%sexp
+      (Or_error.try_with (fun () -> Static_data.remove_global other_roots two)
+       : unit Or_error.t)];
+  print_s [%message "" ~root_slots_still:(List.length (roots_slots ()) : int)];
+  [%expect
+    {|
+    (Error "Static_data.remove_global: a slot is not a root")
+    (root_slots_still 2)
+    |}];
+  Static_data.remove_global roots only_scalars;
+  Static_data.remove_global roots two;
+  Roots.destroy other_roots;
   Roots.destroy roots;
   Static_data.destroy static
 ;;
@@ -186,7 +212,14 @@ let%expect_test "a global keeps what its slots point to alive, until removed" =
   let static = Static_data.create () in
   let heap = Heap.create heap_config in
   let roots = Roots.create () in
-  let gc = Stag_gc.create manual heap roots (Data_stack.create ()) in
+  let gc =
+    Stag_gc.create
+      manual
+      ~heap
+      ~roots
+      ~data_stack:(Data_stack.create ())
+      ~static
+  in
   let global =
     Static_data.add_global static roots (layout (struct_ [ ptr; scalar I64 ]))
   in
@@ -198,7 +231,7 @@ let%expect_test "a global keeps what its slots point to alive, until removed" =
   let collect () =
     let stats = Stag_gc.collect gc in
     print_s [%sexp (stats : Stag_gc.Stats.t)];
-    Stag_gc.check_invariants ~static:[ static ] gc |> ok_exn
+    Stag_gc.check_invariants gc |> ok_exn
   in
   collect ();
   [%expect
@@ -217,7 +250,14 @@ let%expect_test "check_invariants: static data must not point into the heap" =
   let static = Static_data.create () in
   let heap = Heap.create heap_config in
   let roots = Roots.create () in
-  let gc = Stag_gc.create manual heap roots (Data_stack.create ()) in
+  let gc =
+    Stag_gc.create
+      manual
+      ~heap
+      ~roots
+      ~data_stack:(Data_stack.create ())
+      ~static
+  in
   let frame = Roots.push_frame roots ~slots:1 in
   let cell = Stag_gc.alloc gc (scanned ~size:1 ~scalars:1 Unmarked) in
   Memory.store_addr frame cell;
@@ -227,21 +267,19 @@ let%expect_test "check_invariants: static data must not point into the heap" =
   Memory.store_addr a b;
   Memory.store_addr (word a 1) (small 3);
   Memory.store_addr (word a 2) (Static_data.empty ());
-  print_s
-    [%sexp (Stag_gc.check_invariants ~static:[ static ] gc : unit Or_error.t)];
+  print_s [%sexp (Stag_gc.check_invariants gc : unit Or_error.t)];
   [%expect {| (Ok ()) |}];
   Memory.store_addr (word a 1) cell;
   (* Even as a scalar of a [Bytes] block it is not a pointer. *)
   let bytes = Static_data.alloc static (Header.bytes ~length:8 Unmarked) in
   Memory.store_addr bytes cell;
-  print_s
-    [%sexp (Stag_gc.check_invariants ~static:[ static ] gc : unit Or_error.t)];
+  print_s [%sexp (Stag_gc.check_invariants gc : unit Or_error.t)];
   [%expect
     {|
     (Error
      (Gc.check_invariants
       (errors
-       (("static data points into the heap" (static 0) (block 0) (word 1))))))
+       (("static data points into the heap" (from (static (block 0) (word 1))))))))
     |}];
   Stag_gc.destroy gc;
   Roots.destroy roots;

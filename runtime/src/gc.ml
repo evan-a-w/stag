@@ -30,6 +30,7 @@ type t =
   ; heap : Heap.t
   ; roots : Roots.t
   ; data_stack : Data_stack.t
+  ; static : Static_data.t
   ; mutable live_words : int (** After the last collection. *)
   ; mutable allocated_words : int (** Since the last collection. *)
   ; mutable collections : int
@@ -48,12 +49,13 @@ let set_stack t chunk =
   t.stack_limit <- Addr.add (Chunk.base chunk) (Chunk.bytes chunk)
 ;;
 
-let create config heap roots data_stack =
+let create config ~heap ~roots ~data_stack ~static =
   let stack = Chunk.create ~bytes:(initial_mark_stack_blocks * 8) ~align:8 in
   { config
   ; heap
   ; roots
   ; data_stack
+  ; static
   ; live_words = 0
   ; allocated_words = 0
   ; collections = 0
@@ -181,7 +183,7 @@ let destroy t =
   t.destroyed <- true
 ;;
 
-let check_invariants ?(static = []) t =
+let check_invariants t =
   let errors = ref [] in
   let error message = errors := message :: !errors in
   let check_word ~from ~immortal word =
@@ -200,17 +202,38 @@ let check_invariants ?(static = []) t =
             [%message
               "an immortal block points to a mortal one" (from : Sexp.t)]))
   in
+  let in_data_stack word =
+    (not (is_small word)) && Data_stack.contains t.data_stack word
+  in
   let check_not_data_stack ~from word =
-    if (not (is_small word)) && Data_stack.contains t.data_stack word
+    if in_data_stack word
     then error [%message "a pointer into the data stack" (from : Sexp.t)]
   in
-  let index = ref 0 in
-  Roots.iter_slots t.roots ~f:(fun slot ->
-    check_word
-      ~from:[%message "root" ~index:(!index : int)]
-      ~immortal:false
-      (Memory.load_addr slot);
-    incr index);
+  (* Of frames and data-stack blocks, which may point to live data-stack blocks. *)
+  let check_local ~from word =
+    check_word ~from ~immortal:false word;
+    if in_data_stack word && not (Data_stack.live_contains t.data_stack word)
+    then
+      error
+        [%message "a pointer into the data stack past its top" (from : Sexp.t)]
+  in
+  let frame_index = ref 0 in
+  let mutable frame = Roots.latest_frame t.roots in
+  while not (Addr.is_null frame) do
+    for i = 0 to Roots.Frame.slots frame - 1 do
+      check_local
+        ~from:[%message "frame" ~frame:(!frame_index : int) ~slot:(i : int)]
+        (Memory.load_addr (Roots.Frame.slot frame i))
+    done;
+    incr frame_index;
+    frame <- Roots.Frame.next frame
+  done;
+  for i = 0 to Roots.globals t.roots - 1 do
+    let word = Memory.load_addr (Roots.global t.roots i) in
+    let from = [%message "global" ~index:(i : int)] in
+    check_word ~from ~immortal:false word;
+    check_not_data_stack ~from word
+  done;
   let block_index = ref 0 in
   Heap.iter t.heap ~f:(fun block ->
     let header = Header.load block in
@@ -234,53 +257,64 @@ let check_invariants ?(static = []) t =
        done
      | Bytes | Free -> ());
     incr block_index);
-  List.iteri static ~f:(fun static_index static ->
-    let block_index = ref 0 in
-    Static_data.iter static ~f:(fun block ->
-      let header = Header.load block in
-      (match Header.kind header with
-       | Scanned ->
-         for i = Header.scalar_words header to Header.size_words header - 1 do
-           let word = Memory.load_addr (Addr.add block (i * 8)) in
-           if (not (is_small word)) && Heap.owns t.heap word
-           then
-             error
-               [%message
-                 "static data points into the heap"
-                   ~static:(static_index : int)
-                   ~block:(!block_index : int)
-                   ~word:(i : int)];
-           check_not_data_stack
-             ~from:
-               [%message
-                 "static"
-                   ~static:(static_index : int)
-                   ~block:(!block_index : int)
-                   ~word:(i : int)]
-             word
-         done
-       | Bytes | Free -> ());
-      incr block_index));
   let block_index = ref 0 in
-  Data_stack.iter t.data_stack ~f:(fun block ->
+  Static_data.iter t.static ~f:(fun block ->
     let header = Header.load block in
-    (match Header.color header with
-     | Unmarked -> ()
-     | Marked | Immortal ->
-       error
-         [%message
-           "a data-stack block not unmarked" ~block:(!block_index : int)]);
     (match Header.kind header with
      | Scanned ->
        for i = Header.scalar_words header to Header.size_words header - 1 do
-         check_word
-           ~from:
-             [%message "data stack" ~block:(!block_index : int) ~word:(i : int)]
-           ~immortal:false
-           (Memory.load_addr (Addr.add block (i * 8)))
+         let word = Memory.load_addr (Addr.add block (i * 8)) in
+         let from =
+           [%message "static" ~block:(!block_index : int) ~word:(i : int)]
+         in
+         if (not (is_small word)) && Heap.owns t.heap word
+         then
+           error [%message "static data points into the heap" (from : Sexp.t)];
+         check_not_data_stack ~from word
        done
      | Bytes | Free -> ());
     incr block_index);
+  let block_index = ref 0 in
+  for segment = 0 to Data_stack.segments t.data_stack - 1 do
+    let end_ = Data_stack.segment_end t.data_stack segment in
+    let mutable block = Data_stack.first_block t.data_stack segment in
+    let mutable walking = true in
+    while walking && Int.(Addr.compare (Addr.add block (-8)) end_ < 0) do
+      let from = [%message "data stack" ~block:(!block_index : int)] in
+      match
+        Header.kind (Header.load block), Header.color (Header.load block)
+      with
+      | exception exn ->
+        error [%message "a data-stack header" (from : Sexp.t) (exn : exn)];
+        walking <- false
+      | Free, _ ->
+        error [%message "a free data-stack block" (from : Sexp.t)];
+        walking <- false
+      | ((Scanned | Bytes) as kind), color ->
+        (match color with
+         | Unmarked -> ()
+         | Marked | Immortal ->
+           error [%message "a data-stack block not unmarked" (from : Sexp.t)]);
+        let header = Header.load block in
+        (match kind with
+         | Scanned ->
+           for i = Header.scalar_words header to Header.size_words header - 1 do
+             check_local
+               ~from:
+                 [%message
+                   "data stack" ~block:(!block_index : int) ~word:(i : int)]
+               (Memory.load_addr (Addr.add block (i * 8)))
+           done
+         | Bytes | Free -> ());
+        incr block_index;
+        block <- Data_stack.next_block block
+    done;
+    if walking && not (Addr.equal (Addr.add block (-8)) end_)
+    then
+      error
+        [%message
+          "the data stack's blocks overrun the end of a segment" (segment : int)]
+  done;
   match List.rev !errors with
   | [] -> Ok ()
   | errors ->

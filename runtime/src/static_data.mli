@@ -11,8 +11,8 @@ type t
 
 val create : unit -> t
 
-(** Frees every block: every address it gave is then dangling. The globals'
-    slots must have been removed from their roots. Using [t] afterwards raises. *)
+(** Frees every block: every address it gave is then dangling. Raises if a
+    global has not been removed. Using [t] afterwards raises. *)
 val destroy : t -> unit
 
 (** A block of the size [header] gives, zeroed, its header [Immortal] whatever
@@ -30,8 +30,9 @@ val empty_bytes : unit -> Memory.Addr.t [@@zero_alloc]
 (** Whether [addr] is in one of [t]'s blocks, headers included. *)
 val contains : t -> Memory.Addr.t -> bool
 
-(** Every block of [t], in allocation order, globals' storage included. [f] must
-    not allocate in [t]. *)
+(** Every block of [t], globals' storage included: segment by segment, in the
+    order they were made (a block larger than a segment has one of its own),
+    each in allocation order. [f] must not allocate in [t]. *)
 val iter : t -> f:(Memory.Addr.t -> unit) @ local -> unit
 
 (** The storage of a mutable global of any layout: its scalar part, then its
@@ -55,8 +56,8 @@ end
 (** Zeroed, its pointer slots added to [roots]. *)
 val add_global : t -> Roots.t -> Layout.t -> Global.t
 
-(** Removes its slots from [roots]. Its storage is not reused, and raises if
-    already removed. *)
+(** Removes its slots from [roots]. Its storage is not reused. Raises, changing
+    nothing, if already removed or if its slots are not [roots]' globals. *)
 val remove_global : Roots.t -> Global.t -> unit
 
 (** Every block, by offset from the start of its segment, with its header:

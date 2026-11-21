@@ -31,11 +31,15 @@ module Segment = struct
 end
 
 type t =
-  { mutable segments : Segment.t list (** Latest first. *)
+  { mutable segments : Segment.t list (** Latest made first. *)
+  ; mutable current : Segment.t option (** Where small blocks go. *)
+  ; mutable live_globals : int
   ; mutable destroyed : bool
   }
 
-let create () = { segments = []; destroyed = false }
+let create () =
+  { segments = []; current = None; live_globals = 0; destroyed = false }
+;;
 
 let check_live t ~name =
   if t.destroyed then fail [%message "Static_data: destroyed" (name : string)]
@@ -43,26 +47,38 @@ let check_live t ~name =
 
 let destroy t =
   check_live t ~name:"destroy";
+  if t.live_globals > 0
+  then
+    fail
+      [%message
+        "Static_data.destroy: globals not removed"
+          ~globals:(t.live_globals : int)];
   List.iter t.segments ~f:(fun (segment : Segment.t) ->
     Chunk.destroy segment.chunk);
   t.segments <- [];
+  t.current <- None;
   t.destroyed <- true
 ;;
 
-(* [bytes] bytes, from a segment with room, or a new one: of its own if larger
-   than a segment. *)
+(* [bytes] bytes, from the current segment if it has room, or a new one: of its
+   own if larger than a segment, leaving the current one as it is. *)
 let take t ~bytes =
+  let new_segment () =
+    let segment =
+      { Segment.chunk =
+          Chunk.create ~bytes:(Int.max segment_bytes bytes) ~align:8
+      ; used = 0
+      }
+    in
+    t.segments <- segment :: t.segments;
+    segment
+  in
   let segment =
-    match t.segments with
-    | segment :: _ when Segment.free segment >= bytes -> segment
-    | _ ->
-      let segment =
-        { Segment.chunk =
-            Chunk.create ~bytes:(Int.max segment_bytes bytes) ~align:8
-        ; used = 0
-        }
-      in
-      t.segments <- segment :: t.segments;
+    match t.current with
+    | Some segment when Segment.free segment >= bytes -> segment
+    | Some _ | None ->
+      let segment = new_segment () in
+      if bytes <= segment_bytes then t.current <- Some segment;
       segment
   in
   let addr = Addr.add (Chunk.base segment.chunk) segment.used in
@@ -113,8 +129,9 @@ let iter t ~(f : _ @ local) =
 ;;
 
 module Global = struct
-  type t =
-    { layout : Layout.t
+  type nonrec t =
+    { owner : t
+    ; layout : Layout.t
     ; block : Addr.t
     ; mutable removed : bool
     }
@@ -141,15 +158,20 @@ let add_global t roots layout =
     + (Layout.ptr_words layout * 8)
   in
   let block = alloc t (Header.bytes ~length:bytes Immortal) in
-  let global = { Global.layout; block; removed = false } in
+  let global = { Global.owner = t; layout; block; removed = false } in
   Global.iter_slots global ~f:(fun slot -> Roots.add_global roots slot);
+  t.live_globals <- t.live_globals + 1;
   global
 ;;
 
 let remove_global roots (global : Global.t) =
   if global.removed then fail [%message "Static_data.remove_global: removed"];
+  Global.iter_slots global ~f:(fun slot ->
+    if not (Roots.is_global roots slot)
+    then fail [%message "Static_data.remove_global: a slot is not a root"]);
   Global.iter_slots global ~f:(fun slot -> Roots.remove_global roots slot);
-  global.removed <- true
+  global.removed <- true;
+  global.owner.live_globals <- global.owner.live_globals - 1
 ;;
 
 let sexp_of_t t =

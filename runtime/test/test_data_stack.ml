@@ -18,7 +18,7 @@ let%expect_test "regions nest" =
   print_s [%sexp (stack : Data_stack.t)];
   [%expect
     {|
-    ((outer ((segment 0) (offset 0))) (inner ((segment 0) (offset 24))))
+    ((outer ((depth 1) (generation 1))) (inner ((depth 2) (generation 1))))
     ((0 8 (Scanned (size_words 2) (scalar_words 1) (color Unmarked)))
      (0 32 (Bytes (length 3) (color Unmarked)))
      (0 48 (Scanned (size_words 1) (scalar_words 0) (color Unmarked))))
@@ -143,7 +143,8 @@ let%expect_test "marks in earlier segments" =
     {|
     (Ok ())
     (blocks ((0 8 (Scanned (size_words 3) (scalar_words 3) (color Unmarked)))))
-    (Error ("Data_stack.exit: not a live mark" (mark ((segment 1) (offset 32)))))
+    (Error
+     ("Data_stack.exit: not a live mark" (mark ((depth 2) (generation 1)))))
     |}];
   Data_stack.destroy stack;
   print_s
@@ -163,7 +164,8 @@ let%expect_test "marks in earlier segments" =
   [%expect
     {|
     (Error "Data_stack: destroyed")
-    (Error ("Data_stack.exit: not a live mark" (mark ((segment 0) (offset 32)))))
+    (Error
+     ("Data_stack.exit: not a live mark" (mark ((depth 1) (generation 1)))))
     (Error
      ("Data_stack.alloc: a Free header"
       (header (Free (size_words 1) (color Unmarked)))))
@@ -185,7 +187,14 @@ let%expect_test "the GC: data-stack blocks root heap blocks until their region \
   let heap = Heap.create heap_config in
   let roots = Roots.create () in
   let stack = Data_stack.create () in
-  let gc = Stag_gc.create manual heap roots stack in
+  let gc =
+    Stag_gc.create
+      manual
+      ~heap
+      ~roots
+      ~data_stack:stack
+      ~static:(Static_data.create ())
+  in
   let collect () =
     print_s [%sexp (Stag_gc.collect gc : Stag_gc.Stats.t)];
     print_s [%sexp (Stag_gc.check_invariants gc : unit Or_error.t)]
@@ -231,7 +240,7 @@ let%expect_test "check_invariants: nothing but the data stack points into it" =
   let roots = Roots.create () in
   let stack = Data_stack.create () in
   let static = Static_data.create () in
-  let gc = Stag_gc.create manual heap roots stack in
+  let gc = Stag_gc.create manual ~heap ~roots ~data_stack:stack ~static in
   let frame = Roots.push_frame roots ~slots:1 in
   let local = Data_stack.alloc stack (scanned ~size:1 ~scalars:0) in
   let block = Stag_gc.alloc gc (scanned ~size:1 ~scalars:0) in
@@ -241,8 +250,7 @@ let%expect_test "check_invariants: nothing but the data stack points into it" =
   let frame2 = Roots.push_frame roots ~slots:1 in
   Memory.store_addr frame2 local;
   let check () =
-    print_s
-      [%sexp (Stag_gc.check_invariants ~static:[ static ] gc : unit Or_error.t)]
+    print_s [%sexp (Stag_gc.check_invariants gc : unit Or_error.t)]
   in
   check ();
   Memory.store_addr block local;
@@ -258,13 +266,218 @@ let%expect_test "check_invariants: nothing but the data stack points into it" =
      (Gc.check_invariants
       (errors
        (("a pointer into the data stack" (from (block (block 0) (word 0))))
-        ("a pointer into the data stack"
-         (from (static (static 0) (block 0) (word 0))))
+        ("a pointer into the data stack" (from (static (block 0) (word 0))))
         ("a pointer into the heap but no block"
          (from ("data stack" (block 1) (word 0))))))))
     |}];
   Stag_gc.destroy gc;
   Static_data.destroy static;
+  Data_stack.destroy stack;
+  Roots.destroy roots;
+  Heap.destroy heap
+;;
+
+let%expect_test "stale and out-of-order marks raise" =
+  let stack = Data_stack.create ~segment_bytes:64 () in
+  let try_exit name mark =
+    print_s
+      [%message
+        name
+          ~_:
+            (Or_error.try_with (fun () -> Data_stack.exit stack mark)
+             : unit Or_error.t)]
+  in
+  (* The review's case: [m1] is stale once [m0] exits, though a later block
+     covers where it was. *)
+  let m0 = Data_stack.enter stack in
+  let _ = Data_stack.alloc stack (scanned ~size:2 ~scalars:2) in
+  let m1 = Data_stack.enter stack in
+  try_exit "m0" m0;
+  let _ = Data_stack.alloc stack (scanned ~size:4 ~scalars:4) in
+  try_exit "stale m1" m1;
+  (* In an earlier segment: entered in segment 0, exited after growing. *)
+  let a = Data_stack.enter stack in
+  let _ = Data_stack.alloc stack (scanned ~size:3 ~scalars:3) in
+  let b = Data_stack.enter stack in
+  let _ = Data_stack.alloc stack (scanned ~size:3 ~scalars:3) in
+  let _ = Data_stack.alloc stack (scanned ~size:3 ~scalars:3) in
+  try_exit "a" a;
+  let _ = Data_stack.enter stack in
+  try_exit "stale b, at the same depth as a new region" b;
+  (* Exiting an outer region exits those in it. *)
+  let outer = Data_stack.enter stack in
+  let inner = Data_stack.enter stack in
+  try_exit "outer" outer;
+  try_exit "inner, exited with it" inner;
+  print_s [%message "" ~blocks:(stack : Data_stack.t)];
+  Data_stack.destroy stack;
+  print_s
+    [%sexp
+      (Or_error.try_with (fun () ->
+         ignore (Data_stack.enter stack : Data_stack.Mark.t))
+       : unit Or_error.t)];
+  [%expect
+    {|
+    (m0 (Ok ()))
+    ("stale m1"
+     (Error
+      ("Data_stack.exit: not a live mark" (mark ((depth 2) (generation 1))))))
+    (a (Ok ()))
+    ("stale b, at the same depth as a new region"
+     (Error
+      ("Data_stack.exit: not a live mark" (mark ((depth 2) (generation 2))))))
+    (outer (Ok ()))
+    ("inner, exited with it"
+     (Error
+      ("Data_stack.exit: not a live mark" (mark ((depth 3) (generation 1))))))
+    (blocks ((0 8 (Scanned (size_words 4) (scalar_words 4) (color Unmarked)))))
+    (Error "Data_stack.enter: destroyed")
+    |}]
+;;
+
+let%expect_test "live_contains" =
+  let stack = Data_stack.create ~segment_bytes:64 () in
+  let mark = Data_stack.enter stack in
+  let a = Data_stack.alloc stack (scanned ~size:2 ~scalars:2) in
+  let b = Data_stack.alloc stack (scanned ~size:5 ~scalars:5) in
+  let show () =
+    print_s
+      [%message
+        ""
+          ~a:(Data_stack.live_contains stack a : bool)
+          ~a_header:(Data_stack.live_contains stack (Addr.add a (-8)) : bool)
+          ~b:(Data_stack.live_contains stack b : bool)
+          ~past_b:(Data_stack.live_contains stack (word b 5) : bool)
+          ~contains_b:(Data_stack.contains stack b : bool)]
+  in
+  show ();
+  Data_stack.exit stack mark;
+  show ();
+  Data_stack.destroy stack;
+  [%expect
+    {|
+    ((a true) (a_header true) (b true) (past_b false) (contains_b true))
+    ((a false) (a_header false) (b false) (past_b false) (contains_b true))
+    |}]
+;;
+
+let%expect_test "check_invariants: dangling pointers into the data stack, and \
+                 a broken walk"
+  =
+  let heap = Heap.create heap_config in
+  let roots = Roots.create () in
+  let stack = Data_stack.create ~segment_bytes:128 () in
+  let static = Static_data.create () in
+  let gc = Stag_gc.create manual ~heap ~roots ~data_stack:stack ~static in
+  let global =
+    Static_data.add_global static roots (Layout.of_shape Ptr |> ok_exn)
+  in
+  let frame = Roots.push_frame roots ~slots:1 in
+  let check () =
+    print_s [%sexp (Stag_gc.check_invariants gc : unit Or_error.t)]
+  in
+  let mark = Data_stack.enter stack in
+  let old = Data_stack.alloc stack (scanned ~size:1 ~scalars:0) in
+  let inner = Data_stack.enter stack in
+  let young = Data_stack.alloc stack (scanned ~size:1 ~scalars:0) in
+  Memory.store_addr frame young;
+  Memory.store_addr old young;
+  check ();
+  (* After [young]'s region exits, both dangle, and a global may never point
+     into the data stack. *)
+  Data_stack.exit stack inner;
+  Memory.store_addr (Static_data.Global.ptrs global) old;
+  check ();
+  Memory.store_addr frame (Addr.null ());
+  Memory.store_addr old (Addr.null ());
+  Memory.store_addr (Static_data.Global.ptrs global) (Addr.null ());
+  check ();
+  (* A header the walk can't step over: overwritten by a program bug. *)
+  Header.store old (Header.scanned ~size_words:100 ~scalar_words:100 Unmarked);
+  check ();
+  Header.store old (Header.free ~size_words:1);
+  check ();
+  Header.store old (Header.scanned ~size_words:1 ~scalar_words:0 Marked);
+  check ();
+  Header.store old (scanned ~size:1 ~scalars:0);
+  Data_stack.exit stack mark;
+  [%expect
+    {|
+    (Ok ())
+    (Error
+     (Gc.check_invariants
+      (errors
+       (("a pointer into the data stack past its top"
+         (from (frame (frame 0) (slot 0))))
+        ("a pointer into the data stack" (from (global (index 0))))
+        ("a pointer into the data stack past its top"
+         (from ("data stack" (block 0) (word 0))))))))
+    (Ok ())
+    (Error
+     (Gc.check_invariants
+      (errors
+       (("the data stack's blocks overrun the end of a segment" (segment 0))))))
+    (Error
+     (Gc.check_invariants
+      (errors (("a free data-stack block" (from ("data stack" (block 0))))))))
+    (Error
+     (Gc.check_invariants
+      (errors
+       (("a data-stack block not unmarked" (from ("data stack" (block 0))))))))
+    |}];
+  Static_data.remove_global roots global;
+  Stag_gc.destroy gc;
+  Static_data.destroy static;
+  Data_stack.destroy stack;
+  Roots.destroy roots;
+  Heap.destroy heap
+;;
+
+let%expect_test "the GC ignores stale blocks in a reused segment" =
+  let heap = Heap.create heap_config in
+  let roots = Roots.create () in
+  let stack = Data_stack.create ~segment_bytes:64 () in
+  let gc =
+    Stag_gc.create
+      manual
+      ~heap
+      ~roots
+      ~data_stack:stack
+      ~static:(Static_data.create ())
+  in
+  let mark = Data_stack.enter stack in
+  (* Fill two segments with blocks pointing to heap blocks. *)
+  for _ = 1 to 6 do
+    let local = Data_stack.alloc stack (scanned ~size:2 ~scalars:0) in
+    Memory.store_addr local (Stag_gc.alloc gc (scanned ~size:1 ~scalars:1));
+    Memory.store_addr
+      (word local 1)
+      (Stag_gc.alloc gc (scanned ~size:1 ~scalars:1))
+  done;
+  let segments = Data_stack.segments stack in
+  Data_stack.exit stack mark;
+  (* Regrow over the same segments, with smaller blocks: the old ones' words are
+     still there, past each block, and must not be read. *)
+  let mark = Data_stack.enter stack in
+  for _ = 1 to 5 do
+    ignore (Data_stack.alloc stack (scanned ~size:1 ~scalars:1) : Addr.t)
+  done;
+  print_s
+    [%message
+      ""
+        ~segments_before:(segments : int)
+        ~segments:(Data_stack.segments stack : int)
+        ~stats:(Stag_gc.collect gc : Stag_gc.Stats.t)
+        ~invariants:(Stag_gc.check_invariants gc : unit Or_error.t)];
+  Data_stack.exit stack mark;
+  [%expect
+    {|
+    ((segments_before 3) (segments 2)
+     (stats
+      ((marked_blocks 0) (marked_words 0) (freed_blocks 12) (freed_words 12)))
+     (invariants (Ok ())))
+    |}];
+  Stag_gc.destroy gc;
   Data_stack.destroy stack;
   Roots.destroy roots;
   Heap.destroy heap

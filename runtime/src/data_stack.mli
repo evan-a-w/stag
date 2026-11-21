@@ -29,11 +29,16 @@ module Mark : sig
   val sexp_of_t : t -> Sexp.t
 end
 
-val enter : t -> Mark.t [@@zero_alloc]
+(** Enters a region, nested in the current one. Raises if destroyed. Allocates
+    (on the OCaml heap) only when regions nest deeper than they have. *)
+val enter : t -> Mark.t
+[@@zero_alloc]
 
-(** Frees every block allocated since [mark]. Raises if [mark] is later than the
-    latest block, so a region exited twice or out of order raises unless others
-    were entered since. *)
+(** Exits the region of [mark], and those nested in it (as when an exception
+    leaves them), freeing every block allocated since it was entered. Raises if
+    it is not a live region: exited (directly, or by exiting a region it was
+    nested in), or of another stack (unless it happens to match). Marks wrap
+    after 2^38 regions entered at the same depth. *)
 val exit : t -> Mark.t -> unit
 [@@zero_alloc]
 
@@ -46,6 +51,11 @@ val alloc : t -> Header.t -> Memory.Addr.t
 
 (** Whether [addr] is in one of its segments, live or freed. *)
 val contains : t -> Memory.Addr.t -> bool
+[@@zero_alloc]
+
+(** Whether [addr] is in a live block (or its header): before the end of the
+    blocks of a segment in use. *)
+val live_contains : t -> Memory.Addr.t -> bool
 [@@zero_alloc]
 
 (** {2 Walking the live blocks, without closures}

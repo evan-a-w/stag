@@ -43,8 +43,15 @@ end
 type t
 
 (** Its roots are [roots]' slots, and the pointer words of [data_stack]'s live
-    blocks. *)
-val create : Config.t -> Heap.t -> Roots.t -> Data_stack.t -> t
+    blocks. [static] is the program's static data, which [check_invariants]
+    checks (marking needs nothing of it: it is never traced). *)
+val create
+  :  Config.t
+  -> heap:Heap.t
+  -> roots:Roots.t
+  -> data_stack:Data_stack.t
+  -> static:Static_data.t
+  -> t
 
 (** Frees the mark stack. Using [t] afterwards raises. The heap, roots and data
     stack are left as they are. *)
@@ -63,13 +70,17 @@ val collect : t -> Stats.t
 (** How many collections there have been. *)
 val collections : t -> int
 
-(** Between collections: every block [Unmarked] or [Immortal], and every root
-    slot and pointer word of an allocated or data-stack block below 4096,
-    outside the heap, or in an allocated block (an [Immortal] one, for words of
-    [Immortal] blocks); every data-stack block [Unmarked]; and no pointer word
-    of a heap block or a block of [static] into the data stack, nor of a block
-    of [static] into the heap. *)
-val check_invariants : ?static:Static_data.t list -> t -> unit Or_error.t
+(** Between collections:
+    - every heap block [Unmarked] or [Immortal];
+    - every root slot, and pointer word of an allocated, static or data-stack
+      block, below 4096, outside the heap, or in an allocated block (an
+      [Immortal] one, for words of [Immortal] blocks);
+    - no pointer word of a heap block, static block or global into the data
+      stack, nor of a static block into the heap;
+    - no frame slot or data-stack word into the data stack past its live blocks;
+    - every data-stack block [Scanned] or [Bytes] and [Unmarked], and each
+      segment's blocks ending exactly at its end. *)
+val check_invariants : t -> unit Or_error.t
 
 module For_testing : sig
   (** In blocks. *)

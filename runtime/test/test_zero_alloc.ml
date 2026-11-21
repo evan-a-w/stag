@@ -191,3 +191,28 @@ let%expect_test "no allocation in data-stack regions" =
   Data_stack.destroy stack;
   [%expect {| ((count 5000) (allocated 0) (segments_made 250)) |}]
 ;;
+
+let[@zero_alloc] push_wide roots ~frames =
+  for _ = 1 to frames do
+    let slot = Roots.push_frame roots ~slots:100 in
+    store_addr (Addr.add slot (99 * 8)) slot
+  done;
+  let count = walk_roots roots in
+  for _ = 1 to frames do
+    Roots.pop_frame roots
+  done;
+  count
+;;
+
+let%expect_test "no allocation in pushing frames of 100 slots, past the first \
+                 maps"
+  =
+  let roots = Roots.create () in
+  let (_ : int) = push_wide roots ~frames:100 in
+  let before = Gc.minor_words () in
+  let count = push_wide roots ~frames:100 in
+  let allocated = Gc.minor_words () - before in
+  print_s [%message "" (count : int) (allocated : int)];
+  Roots.destroy roots;
+  [%expect {| ((count 100) (allocated 0)) |}]
+;;

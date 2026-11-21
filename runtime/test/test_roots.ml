@@ -304,3 +304,64 @@ let%expect_test "frame maps of many slot counts" =
     (Error (Roots.push_frame (slots 4294967296)))
     |}]
 ;;
+
+let%expect_test "the chain head, and foreign frames" =
+  let roots = Roots.create () in
+  let head = Roots.chain_head roots in
+  let show () =
+    print_s
+      [%message
+        ""
+          ~head_is_latest:
+            (Addr.equal (Memory.load_addr head) (Roots.latest_frame roots)
+             : bool)
+          ~depth:(Roots.depth roots : int)
+          ~slots:(slot_values roots : int list)]
+  in
+  let _ = push roots ~slots:2 ~first:10 in
+  show ();
+  (* A frame pushed by compiled code, as LLVM does: elsewhere (here, a chunk),
+     with its own map. *)
+  let foreign = Memory.Chunk.create ~bytes:64 ~align:8 in
+  let frame = Memory.Chunk.base foreign in
+  let map = Addr.add frame 40 in
+  Memory.store_32 map #2l;
+  Memory.store_32 (Addr.add map 4) #0l;
+  Memory.store_addr frame (Memory.load_addr head);
+  Memory.store_addr (Addr.add frame 8) map;
+  Memory.store_addr (Addr.add frame 16) (word 20);
+  Memory.store_addr (Addr.add frame 24) (word 21);
+  Memory.store_addr head frame;
+  show ();
+  (* Ours, on top of it. *)
+  let _ = push roots ~slots:1 ~first:30 in
+  show ();
+  Roots.pop_frame roots;
+  show ();
+  (* Compiled code pops its own. *)
+  Memory.store_addr head (Memory.load_addr frame);
+  show ();
+  let _ = push roots ~slots:1 ~first:40 in
+  show ();
+  Roots.pop_frame roots;
+  Roots.pop_frame roots;
+  show ();
+  [%expect
+    {|
+    ((head_is_latest true) (depth 1) (slots (10 11)))
+    ((head_is_latest true) (depth 1) (slots (20 21 10 11)))
+    ((head_is_latest true) (depth 2) (slots (30 20 21 10 11)))
+    ((head_is_latest true) (depth 1) (slots (20 21 10 11)))
+    ((head_is_latest true) (depth 1) (slots (10 11)))
+    ((head_is_latest true) (depth 2) (slots (40 10 11)))
+    ((head_is_latest true) (depth 0) (slots ()))
+    |}];
+  print_s
+    [%sexp
+      (Or_error.try_with (fun () ->
+         ignore (Roots.push_frame roots ~slots:(1 lsl 31) : Addr.t))
+       : unit Or_error.t)];
+  [%expect {| (Error (Roots.push_frame (slots 2147483648))) |}];
+  Memory.Chunk.destroy foreign;
+  Roots.destroy roots
+;;

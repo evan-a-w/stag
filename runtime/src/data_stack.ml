@@ -5,25 +5,40 @@ module Chunk = Memory.Chunk
 let[@cold] fail sexp = raise (Error.to_exn (Error.create_s sexp))
 let default_segment_bytes = 64 * 1024
 
-(* A mark is [segment lsl offset_bits lor offset], [offset] the bytes used in
-   [segment]: segments' addresses alone are ambiguous, as one may start where
+(* A position is [segment lsl offset_bits lor offset], [offset] the bytes used
+   in [segment]: segments' addresses alone are ambiguous, as one may start where
    another ends. *)
 let offset_bits = 40
 
-module Mark = struct
-  type t = int
-
-  let[@inline] [@zero_alloc] equal a b = Int.(a = b)
-
+module Position = struct
   let[@inline] [@zero_alloc] create ~segment ~offset =
     (segment lsl offset_bits) lor offset
   ;;
 
   let[@inline] [@zero_alloc] segment t = t lsr offset_bits
   let[@inline] [@zero_alloc] offset t = t land ((1 lsl offset_bits) - 1)
+end
+
+(* A mark is [generation lsl depth_bits lor depth]: the region's depth, from 1,
+   and how many regions have been entered at that depth, so a mark of a region
+   already exited never matches a live one. *)
+let depth_bits = 24
+let generation_mask = (1 lsl (Int.num_bits - 1 - depth_bits)) - 1
+
+module Mark = struct
+  type t = int
+
+  let[@inline] [@zero_alloc] equal a b = Int.(a = b)
+
+  let[@inline] [@zero_alloc] create ~depth ~generation =
+    (generation lsl depth_bits) lor depth
+  ;;
+
+  let[@inline] [@zero_alloc] depth t = t land ((1 lsl depth_bits) - 1)
+  let[@inline] [@zero_alloc] generation t = t lsr depth_bits
 
   let sexp_of_t t =
-    [%sexp { segment = (segment t : int); offset = (offset t : int) }]
+    [%sexp { depth = (depth t : int); generation = (generation t : int) }]
   ;;
 end
 
@@ -38,6 +53,10 @@ type t =
   ; mutable chunks : Chunk.t array (** Segments [0, made), made in order. *)
   ; mutable made : int
   ; segment_bytes : int
+  ; mutable depth : int (** Regions entered and not exited. *)
+  ; mutable positions : int array
+  (** Where each live region starts, by depth. *)
+  ; mutable generations : int array (** Of each depth, its latest region's. *)
   ; mutable destroyed : bool
   }
 
@@ -61,6 +80,9 @@ let create ?(segment_bytes = default_segment_bytes) () =
     ; chunks = [| first |]
     ; made = 1
     ; segment_bytes
+    ; depth = 0
+    ; positions = Array.create ~len:16 0
+    ; generations = Array.create ~len:16 0
     ; destroyed = false
     }
   in
@@ -74,28 +96,51 @@ let destroy t =
     Chunk.destroy t.chunks.(i)
   done;
   t.made <- 0;
+  t.depth <- 0;
   t.destroyed <- true;
   (* So [alloc] can't fit anything, and goes to [grow], which raises. *)
   t.top <- Addr.null ();
   t.limit <- Addr.null ()
 ;;
 
-let[@inline] [@zero_alloc] enter t =
-  Mark.create ~segment:t.segment ~offset:(Addr.diff t.top t.bases.(t.segment))
+(* Allocates, but only when regions nest deeper than they have. *)
+let[@cold] [@zero_alloc assume] grow_regions t =
+  let grown a =
+    let b = Array.create ~len:(2 * Array.length a) 0 in
+    Array.blit ~src:a ~src_pos:0 ~dst:b ~dst_pos:0 ~len:(Array.length a);
+    b
+  in
+  t.positions <- grown t.positions;
+  t.generations <- grown t.generations
+;;
+
+let[@zero_alloc] enter t =
+  if t.destroyed then fail [%message "Data_stack.enter: destroyed"];
+  if Int.(t.depth + 1 >= 1 lsl depth_bits)
+  then fail [%message "Data_stack.enter: too deep"];
+  if Int.(t.depth = Array.length t.positions) then grow_regions t;
+  let generation = (t.generations.(t.depth) + 1) land generation_mask in
+  t.generations.(t.depth) <- generation;
+  t.positions.(t.depth)
+  <- Position.create
+       ~segment:t.segment
+       ~offset:(Addr.diff t.top t.bases.(t.segment));
+  t.depth <- t.depth + 1;
+  Mark.create ~depth:t.depth ~generation
 ;;
 
 let[@zero_alloc] exit t mark =
-  let segment = Mark.segment mark in
-  let offset = Mark.offset mark in
+  let depth = Mark.depth mark in
   if t.destroyed
-     || Int.(segment > t.segment)
-     || (Int.(segment = t.segment)
-         && Int.(offset > Addr.diff t.top t.bases.(segment)))
-     || (Int.(segment < t.segment)
-         && Int.(offset > Addr.diff t.ends.(segment) t.bases.(segment)))
+     || Int.(depth < 1)
+     || Int.(depth > t.depth)
+     || Int.(t.generations.(depth - 1) <> Mark.generation mark)
   then fail [%message "Data_stack.exit: not a live mark" (mark : Mark.t)];
+  let position = t.positions.(depth - 1) in
+  let segment = Position.segment position in
   enter_segment t segment;
-  t.top <- Addr.add t.bases.(segment) offset
+  t.top <- Addr.add t.bases.(segment) (Position.offset position);
+  t.depth <- depth - 1
 ;;
 
 let grow_array a ~len ~fill =
@@ -171,6 +216,21 @@ let[@zero_alloc] contains t addr =
     then found <- true;
     i <- i + 1
   done;
+  found
+;;
+
+let[@zero_alloc] live_contains t addr =
+  let mutable found = false in
+  if not t.destroyed
+  then (
+    let mutable i = 0 in
+    while (not found) && Int.(i <= t.segment) do
+      let end_ = if Int.(i = t.segment) then t.top else t.ends.(i) in
+      if Int.(Addr.compare addr t.bases.(i) >= 0)
+         && Int.(Addr.compare addr end_ < 0)
+      then found <- true;
+      i <- i + 1
+    done);
   found
 ;;
 
