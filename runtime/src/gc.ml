@@ -190,6 +190,16 @@ let alloc_handle t kind value =
   check_live t;
   let refs = Handle_kind.refs kind value in
   let refs_count = Array.length refs in
+  for index = 0 to refs_count - 1 do
+    let ref_ = refs.(index) in
+    if (not (is_small ref_)) && Data_stack.contains t.data_stack ref_
+    then
+      fail
+        [%message
+          "Gc.alloc_handle: a ref into the data stack"
+            ~kind:(Handle_kind.name kind : string)
+            (index : int)]
+  done;
   let words = Heap.footprint_words t.heap (Header.handle ~refs:refs_count) in
   let mark = Data_stack.enter t.data_stack in
   let result = Array.create ~len:1 (Addr.null ()) in

@@ -534,3 +534,35 @@ let%expect_test "a corrupt ID does not remove another block's metadata" =
   destroy gc roots data_stack static heap;
   [%expect {| ((freed 1) (handles 2) (kept (kept))) |}]
 ;;
+
+let%expect_test "alloc_handle rejects a ref into the data stack" =
+  let gc, heap, roots, data_stack, static = create_gc () in
+  let alloc_raises payload =
+    Expect_test_helpers_core.require_does_raise (fun () ->
+      ignore
+        (Addr.is_null (Stag_gc.alloc_handle gc captures_kind payload) : bool))
+  in
+  let mark = Data_stack.enter data_stack in
+  let local =
+    Data_stack.alloc
+      data_stack
+      (Header.scanned ~size_words:1 ~scalar_words:0 Unmarked)
+  in
+  alloc_raises [| local |];
+  Data_stack.exit data_stack mark;
+  alloc_raises [| Static_data.empty (); local |];
+  print_s [%message "" ~handles:(Heap.For_testing.handles heap : int)];
+  report gc;
+  destroy gc roots data_stack static heap;
+  [%expect
+    {|
+    ("Gc.alloc_handle: a ref into the data stack"
+     (kind  captures)
+     (index 0))
+    ("Gc.alloc_handle: a ref into the data stack"
+     (kind  captures)
+     (index 1))
+    (handles 0)
+    ok
+    |}]
+;;

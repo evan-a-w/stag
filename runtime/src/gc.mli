@@ -65,8 +65,9 @@ val alloc : t -> Header.t -> Memory.Addr.t
 
 (** Allocates a [Heap.alloc_handle] block, with the same collection and rooting
     rules as [alloc]. Its creation may collect, so its refs need not be rooted:
-    they are, across that collection. The returned address is not itself a root:
-    keep it in a root or a traced field across calls that can collect. *)
+    they are, across that collection. Raises for a ref into the data stack. The
+    returned address is not itself a root: keep it in a root or a traced field
+    across calls that can collect. *)
 val alloc_handle : t -> 'a Handle_kind.t -> 'a -> Memory.Addr.t
 
 (** As [Heap.get_handle]. *)
