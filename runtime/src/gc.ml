@@ -184,10 +184,11 @@ let alloc t header =
   block
 ;;
 
-(* The refs may be held only by [refs], an OCaml array the collector doesn't
-   see: root them across the collection that may follow. *)
-let alloc_handle t ~refs key value =
+(* The refs may be held only by the payload, which the collector doesn't see:
+   root them across the collection that may follow. *)
+let alloc_handle t kind value =
   check_live t;
+  let refs = Handle_kind.refs kind value in
   let refs_count = Array.length refs in
   let words = Heap.footprint_words t.heap (Header.handle ~refs:refs_count) in
   let mark = Data_stack.enter t.data_stack in
@@ -205,16 +206,26 @@ let alloc_handle t ~refs key value =
           Memory.store_addr (Addr.add scratch (index * 8)) refs.(index)
         done);
       if should_collect t words then ignore (collect t : Stats.t);
-      let block = Heap.alloc_handle t.heap ~refs key value in
+      let block = Heap.alloc_handle t.heap kind value in
       t.allocated_words <- t.allocated_words + words;
       result.(0) <- block)
     ~finally:(fun () -> Data_stack.exit t.data_stack mark);
   result.(0)
 ;;
 
-let get_handle t block key =
+let get_handle t kind block =
   check_live t;
-  Heap.get_handle t.heap block key
+  Heap.get_handle t.heap kind block
+;;
+
+let handle_ref t block =
+  check_live t;
+  Heap.handle_ref t.heap block
+;;
+
+let get_handle_checked t kind handle_ref =
+  check_live t;
+  Heap.get_handle_checked t.heap kind handle_ref
 ;;
 
 let collections t = t.collections

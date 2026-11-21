@@ -64,19 +64,19 @@ val destroy : t -> unit
 val alloc : t -> Header.t -> Memory.Addr.t
 
 (** Allocates a [Heap.alloc_handle] block, with the same collection and rooting
-    rules as [alloc], and with [refs] as its traced pointer words (see
-    [Heap.alloc_handle]). Its creation may collect, so the [refs] need not be
-    rooted: they are, across that collection. The returned address is not itself
-    a root: keep it in a root or a traced field across calls that can collect. *)
-val alloc_handle
-  :  t
-  -> refs:Memory.Addr.t array
-  -> 'a Type_equal.Id.t
-  -> 'a
-  -> Memory.Addr.t
+    rules as [alloc]. Its creation may collect, so its refs need not be rooted:
+    they are, across that collection. The returned address is not itself a root:
+    keep it in a root or a traced field across calls that can collect. *)
+val alloc_handle : t -> 'a Handle_kind.t -> 'a -> Memory.Addr.t
 
 (** As [Heap.get_handle]. *)
-val get_handle : t -> Memory.Addr.t -> 'a Type_equal.Id.t -> 'a option
+val get_handle : t -> 'a Handle_kind.t -> Memory.Addr.t -> 'a option
+
+(** As [Heap.handle_ref]. *)
+val handle_ref : t -> Memory.Addr.t -> Handle_ref.t
+
+(** As [Heap.get_handle_checked]. *)
+val get_handle_checked : t -> 'a Handle_kind.t -> Handle_ref.t -> 'a option
 
 (** Marks, then sweeps. Marking allocates nothing (on the OCaml heap) but to
     grow the mark stack. Sweeping also releases OCaml metadata for dead handles,
@@ -91,7 +91,8 @@ val collections : t -> int
     - every root slot, and pointer word of an allocated, static or data-stack
       block, below 4096, outside the heap, or in an allocated block (an
       [Immortal] one, for words of [Immortal] blocks);
-    - the heap's handle blocks and its metadata table agreeing;
+    - the heap's handle blocks and its metadata table agreeing, and each handle
+      holding every ref its payload has ([Heap.check_handles]);
     - no pointer word of a heap block, static block or global into the data
       stack, nor of a static block into the heap;
     - no frame slot or data-stack word into the data stack past its live blocks;

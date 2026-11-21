@@ -162,9 +162,9 @@ module Region = struct
   ;;
 end
 
-module Handle = struct
+module Entry = struct
   module Payload = struct
-    type t = T : 'a Type_equal.Id.t * 'a -> t
+    type t = T : 'a Handle_kind.t * 'a -> t
   end
 
   type t =
@@ -172,8 +172,10 @@ module Handle = struct
     ; payload : Payload.t
     }
 
-  let id block = Int64_u.to_int (Memory.load_64 block)
+  let kind_name { payload = T (kind, _); _ } = Handle_kind.name kind
 end
+
+let[@inline] [@zero_alloc] handle_id block = load_int block
 
 type t =
   { config : Config.t
@@ -185,7 +187,7 @@ type t =
   ; mutable arenas : Arena.t list (** Oldest first: allocation is first fit. *)
   ; mutable regions : Region.t list (** Latest first. *)
   ; mutable regions_created : int
-  ; handles : Handle.t Int.Table.t
+  ; handles : Entry.t Int.Table.t
   ; mutable next_handle : int
   ; mutable destroyed : bool
   }
@@ -371,26 +373,6 @@ let alloc t header =
   alloc_block t header
 ;;
 
-let alloc_handle t ~refs key value =
-  let id = t.next_handle in
-  if id = Int.max_value then fail [%message "Heap.alloc_handle: ID exhausted"];
-  let header = Header.handle ~refs:(Array.length refs) in
-  let block = alloc_block t header in
-  (* Neither store below allocates, so no OCaml finaliser can collect between
-     the block existing and it having its metadata. *)
-  Header.store block (Header.with_color header Marked);
-  t.next_handle <- id + 1;
-  Memory.store_64 block (Int64_u.of_int id);
-  for index = 0 to Array.length refs - 1 do
-    Memory.store_addr (Addr.add block ((index + 1) * 8)) refs.(index)
-  done;
-  (* Registration allocates: were a collection reentered here (forbidden), the
-     marked block would be kept. *)
-  Hashtbl.set t.handles ~key:id ~data:{ Handle.block; payload = T (key, value) };
-  Header.store block header;
-  block
-;;
-
 let footprint_words t header =
   let words = Header.size_words header in
   if words = 0
@@ -432,31 +414,94 @@ let[@zero_alloc] block_start t addr =
             else Addr.null ()))))
 ;;
 
-let get_handle (type a) t block (key : a Type_equal.Id.t) : a option =
-  check_live t ~name:"get_handle";
+let alloc_handle t kind value =
+  check_live t ~name:"alloc_handle";
+  let refs = Handle_kind.refs kind value in
+  for index = 0 to Array.length refs - 1 do
+    let ref_ = refs.(index) in
+    if owns t ref_ && Addr.is_null (block_start t ref_)
+    then
+      fail
+        [%message
+          "Heap.alloc_handle: a ref to no block"
+            ~kind:(Handle_kind.name kind : string)
+            (index : int)]
+  done;
+  let id = t.next_handle in
+  if id = Int.max_value then fail [%message "Heap.alloc_handle: ID exhausted"];
+  let header = Header.handle ~refs:(Array.length refs) in
+  let block = alloc_block t header in
+  (* Neither store below allocates, so no OCaml finaliser can collect between
+     the block existing and it having its metadata. *)
+  Header.store block (Header.with_color header Marked);
+  t.next_handle <- id + 1;
+  store_int block id;
+  for index = 0 to Array.length refs - 1 do
+    Memory.store_addr (Addr.add block ((index + 1) * 8)) refs.(index)
+  done;
+  (* Registration allocates: were a collection reentered here (forbidden), the
+     marked block would be kept. *)
+  Hashtbl.set t.handles ~key:id ~data:{ Entry.block; payload = T (kind, value) };
+  Header.store block header;
+  block
+;;
+
+let is_handle t block =
   let start = block_start t block in
-  if Addr.is_null start || not (Addr.equal start block)
-  then None
-  else (
-    match Header.kind (Header.load block) with
-    | Scanned | Bytes | Free -> None
-    | Handle ->
-      (match Hashtbl.find t.handles (Handle.id block) with
-       | Some { block = owner; payload = T (stored_key, value) }
-         when Addr.equal owner block ->
-         (match Type_equal.Id.same_witness stored_key key with
-          | Some T -> Some value
-          | None -> None)
-       | Some _ | None -> None))
+  (not (Addr.is_null start))
+  && Addr.equal start block
+  &&
+  match Header.kind (Header.load block) with
+  | Handle -> true
+  | Scanned | Bytes | Free -> false
+;;
+
+(* The payload of the entry [id], if it is [block]'s. *)
+let find_payload (type a) t ~id block (kind : a Handle_kind.t) : a option =
+  match Hashtbl.find t.handles id with
+  | Some { block = owner; payload = T (stored_kind, value) }
+    when Addr.equal owner block ->
+    (match Handle_kind.same_witness stored_kind kind with
+     | Some T -> Some value
+     | None -> None)
+  | Some _ | None -> None
+;;
+
+let get_handle t kind block =
+  check_live t ~name:"get_handle";
+  if is_handle t block
+  then find_payload t ~id:(handle_id block) block kind
+  else None
+;;
+
+let handle_ref t block =
+  check_live t ~name:"handle_ref";
+  if not (is_handle t block)
+  then fail [%message "Heap.handle_ref: not a handle"];
+  Handle_ref.create ~addr:block ~id:(handle_id block)
+;;
+
+(* The entry is looked up by the reference's ID before its block is read: were
+   the handle swept, the entry would be gone, and the block may be another's. *)
+let get_handle_checked t kind handle_ref =
+  check_live t ~name:"get_handle_checked";
+  let id = Handle_ref.id handle_ref in
+  let block = Handle_ref.addr handle_ref in
+  match find_payload t ~id block kind with
+  | None -> None
+  | Some _ as payload ->
+    if is_handle t block && Int.equal (handle_id block) id
+    then payload
+    else None
 ;;
 
 (* Removes the entry of the block [block], if it has one: a corrupt ID can't
    remove another block's metadata. Allocates on the OCaml heap, so a collection
    is not reentrant with it. *)
 let remove_handle t block =
-  let id = Handle.id block in
+  let id = handle_id block in
   match Hashtbl.find t.handles id with
-  | Some { Handle.block = owner; _ } when Addr.equal owner block ->
+  | Some { Entry.block = owner; _ } when Addr.equal owner block ->
     Hashtbl.remove t.handles id
   | Some _ | None -> ()
 ;;
@@ -590,6 +635,22 @@ let destroy t =
   t.destroyed <- true
 ;;
 
+(* The indices of the payload's refs not among [block]'s ref words. *)
+let missing_refs block (Entry.Payload.T (kind, value)) =
+  let refs = Handle_kind.refs kind value in
+  let words = Int.Hash_set.create () in
+  for i = 1 to Header.size_words (Header.load block) - 1 do
+    Hash_set.add
+      words
+      (Nativeint_u.to_int
+         (Addr.to_word (Memory.load_addr (Addr.add block (i * 8)))))
+  done;
+  List.filter
+    (List.range 0 (Array.length refs))
+    ~f:(fun index ->
+      not (Hash_set.mem words (Nativeint_u.to_int (Addr.to_word refs.(index)))))
+;;
+
 let check_handles t =
   let errors = ref [] in
   let error sexp = errors := sexp :: !errors in
@@ -598,9 +659,9 @@ let check_handles t =
     match Header.kind (Header.load block) with
     | Handle ->
       incr handle_blocks;
-      let id = Handle.id block in
+      let id = handle_id block in
       (match Hashtbl.find t.handles id with
-       | Some { Handle.block = owner; _ } when Addr.equal owner block -> ()
+       | Some { Entry.block = owner; _ } when Addr.equal owner block -> ()
        | Some _ ->
          error
            [%message "a handle block whose metadata is another's" (id : int)]
@@ -613,7 +674,7 @@ let check_handles t =
         "handle blocks and metadata entries of different counts"
           ~blocks:(!handle_blocks : int)
           ~entries:(Hashtbl.length t.handles : int)];
-  Hashtbl.iteri t.handles ~f:(fun ~key:id ~data:(entry : Handle.t) ->
+  Hashtbl.iteri t.handles ~f:(fun ~key:id ~data:(entry : Entry.t) ->
     let block = entry.block in
     let start = block_start t block in
     if Addr.is_null start || not (Addr.equal start block)
@@ -621,7 +682,7 @@ let check_handles t =
     else (
       match Header.kind (Header.load block) with
       | Handle ->
-        let stored_id = Handle.id block in
+        let stored_id = handle_id block in
         if not (Int.equal stored_id id)
         then
           error
@@ -629,6 +690,24 @@ let check_handles t =
               "metadata stored under another block's ID"
                 ~id:(id : int)
                 ~stored_id:(stored_id : int)]
+        else (
+          let kind = Entry.kind_name entry in
+          match missing_refs block entry.payload with
+          | [] -> ()
+          | missing ->
+            error
+              [%message
+                "a handle without refs of its payload"
+                  (id : int)
+                  (kind : string)
+                  (missing : int list)]
+          | exception exn ->
+            error
+              [%message
+                "a handle whose refs raise"
+                  (id : int)
+                  (kind : string)
+                  (exn : exn)])
       | Scanned | Bytes | Free ->
         error [%message "metadata for a block that is not a handle" (id : int)]));
   List.rev !errors

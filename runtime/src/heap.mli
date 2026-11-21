@@ -46,28 +46,30 @@ val create : Config.t -> t
     Raises on a [Free], [Handle] or [Marked] header. *)
 val alloc : t -> Header.t -> Memory.Addr.t
 
-(** A block pointing indirectly to an OCaml value of the type identified by
-    [key], with [refs] as its traced pointer words: they keep alive the Stag
-    values the OCaml value refers to, and must be a superset of them (extra refs
-    are harmless; missing ones dangle). [refs] are fixed for its life, which
-    suits closures, whose captures are. Its scalar ID word must not be modified.
-    The heap holds the value until the block is swept or the heap is destroyed.
-    The OCaml value itself is never scanned by the Stag GC.
+(** A block for an OCaml [value] of [kind]: its scalar ID word, which must not
+    be modified, then [Handle_kind.refs kind value] as its traced pointer words,
+    fixed for its life, so the GC keeps the Stag values [value] refers to alive
+    as long as the block (see [Handle_kind] for what that asks of [value]). The
+    heap holds [value] until the block is swept or the heap is destroyed; the
+    Stag GC never scans it.
 
-    [refs] may hold blocks or static data, not data-stack blocks. While it runs,
-    the new block is marked, so a collection reentered by an OCaml allocation
-    (which is forbidden) cannot leave it without its metadata. *)
-val alloc_handle
-  :  t
-  -> refs:Memory.Addr.t array
-  -> 'a Type_equal.Id.t
-  -> 'a
-  -> Memory.Addr.t
+    The refs may be blocks or static data, not data-stack blocks; raises for a
+    ref into the heap but no block. While it runs, the new block is marked, so a
+    collection reentered by an OCaml allocation (which is forbidden) cannot
+    leave it without its metadata. *)
+val alloc_handle : t -> 'a Handle_kind.t -> 'a -> Memory.Addr.t
 
 (** Returns a handle's OCaml value, or [None] if [addr] is not a live handle's
-    base in this heap with the given type ID. A swept address may be reused;
-    callers must not use a stale address. *)
-val get_handle : t -> Memory.Addr.t -> 'a Type_equal.Id.t -> 'a option
+    base in this heap of [kind]. A swept address may be reused, by a handle of
+    any ID: callers must not use a stale address (see [get_handle_checked]). *)
+val get_handle : t -> 'a Handle_kind.t -> Memory.Addr.t -> 'a option
+
+(** Raises unless [addr] is a live handle's base. *)
+val handle_ref : t -> Memory.Addr.t -> Handle_ref.t
+
+(** As [get_handle], but [None] once the handle has been swept, even if its
+    address has been reused. *)
+val get_handle_checked : t -> 'a Handle_kind.t -> Handle_ref.t -> 'a option
 
 (** The words a block of [header] takes in the heap, its header and rounding up
     to a class (or to pages, for a large block) included: 0 for zero-size
@@ -104,9 +106,10 @@ val destroy : t -> unit
 val sexp_of_t : t -> Sexp.t
 
 (** Whether the metadata table and the handle blocks agree: an entry for every
-    handle block, with its ID and address, and a handle block for every entry.
-    Empty other than after corruption: sweep keeps them in step, and
-    [check_invariants] uses this. *)
+    handle block, with its ID and address, and a handle block for every entry,
+    holding every ref its payload has now ([Handle_kind.refs]). Empty other than
+    after corruption, or a payload breaking [Handle_kind]'s rules: sweep keeps
+    them in step. [Gc.check_invariants] uses this. *)
 val check_handles : t -> Sexp.t list
 
 module For_testing : sig
