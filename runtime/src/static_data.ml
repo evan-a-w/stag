@@ -154,24 +154,24 @@ module Global = struct
   ;;
 end
 
-let add_global t roots layout =
+let add_global t globals layout =
   let bytes =
     round_up (Layout.scalar_bytes layout) ~align:8
     + (Layout.ptr_words layout * 8)
   in
   let block = alloc t (Header.bytes ~length:bytes Immortal) in
   let global = { Global.owner = t; layout; block; removed = false } in
-  Global.iter_slots global ~f:(fun slot -> Roots.add_global roots slot);
+  Global.iter_slots global ~f:(fun slot -> Globals.add globals slot);
   t.live_globals <- t.live_globals + 1;
   global
 ;;
 
-let remove_global roots (global : Global.t) =
+let remove_global globals (global : Global.t) =
   if global.removed then fail [%message "Static_data.remove_global: removed"];
   Global.iter_slots global ~f:(fun slot ->
-    if not (Roots.is_global roots slot)
+    if not (Globals.mem globals slot)
     then fail [%message "Static_data.remove_global: a slot is not a root"]);
-  Global.iter_slots global ~f:(fun slot -> Roots.remove_global roots slot);
+  Global.iter_slots global ~f:(fun slot -> Globals.remove globals slot);
   global.removed <- true;
   global.owner.live_globals <- global.owner.live_globals - 1
 ;;
