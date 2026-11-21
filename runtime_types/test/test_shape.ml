@@ -721,3 +721,52 @@ let%expect_test "the cache is kept across calls" =
     (Error (Recursive (t wrap t)))
     |}]
 ;;
+
+let%expect_test "a parameter bound to different rows" =
+  (* type u['a] = U of 'a type box['r] = B of u['r] [box[{x : int}]] and
+     [box[{x : bool}]] expand [u] at records of different rows. *)
+  let declarations () =
+    let u_parameter = var () in
+    let u =
+      decl
+        ~name:"u"
+        ~params:[ Type.ATy (Type.TVar u_parameter) ]
+        (variant [ ctor "U" [ Type.TVar u_parameter ] ])
+    in
+    let box_parameter = var () in
+    let box =
+      decl
+        ~name:"box"
+        ~params:[ Type.ATy (Type.TVar box_parameter) ]
+        (variant [ ctor "B" [ tycon "u" [ Type.TVar box_parameter ] ] ])
+    in
+    [ u; box ]
+  in
+  let box_of field_ty =
+    Type.TCon ("box", [ Type.ARow (present "x" field_ty Type.REmpty) ])
+  in
+  let field_scalar t ty =
+    let rec go (shape : Shape.t) =
+      match shape with
+      | Scalar { scalar; _ } -> [ scalar ]
+      | Ptr -> []
+      | Struct { fields = shapes; _ } | Union { cases = shapes; _ } ->
+        List.concat_map shapes ~f:go
+      | Array { elt; _ } -> go elt
+    in
+    print_s
+      [%sexp
+        (Result.map (Runtime_types.shape t ty) ~f:go
+         : (Shape.Scalar.t list, Error.t) Result.t)]
+  in
+  let t = Runtime_types.create (resolver (declarations ())) in
+  field_scalar t (box_of int);
+  field_scalar t (box_of bool);
+  let t = Runtime_types.create (resolver (declarations ())) in
+  field_scalar t (Type.TTuple [ box_of bool; box_of int ]);
+  [%expect {|
+    (Ok (I64))
+    (Ok (I8))
+    (Ok (I8 I64))
+    |}]
+;;

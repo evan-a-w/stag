@@ -16,11 +16,16 @@ let rec map_result list ~f =
 let default_ptr_name = "ptr"
 let ptr_name = default_ptr_name
 
-(* How a declaration's parameter is instantiated. *)
+(* How a declaration's parameter is instantiated. A row has the id of the record
+   a type parameter bound to it stands for, made once per binding: records are
+   compared by id. *)
 module Binding = struct
   type t =
     | Ty of Type.ty
-    | Row of Type.row
+    | Row of
+        { id : Type.id
+        ; row : Type.row
+        }
   [@@deriving sexp_of]
 end
 
@@ -145,6 +150,11 @@ let create ?(ptr_name = default_ptr_name) resolver =
   { resolver; ptr_name; cache = Cache.create (); ids = ref 0 }
 ;;
 
+let fresh_id ids =
+  decr ids;
+  !ids
+;;
+
 (* Substitution through the bindings. [Type.map_ty] keeps what does not change
    and closes the copies of cycles, and only bound variables reach the
    callbacks, so this terminates on any type it is given. Bindings cannot cycle
@@ -171,21 +181,18 @@ and mapper ~bindings ~ids ~resolving : Type.Mapper.t =
       (fun var ->
         match Map.find bindings var.id with
         | Some (Binding.Ty ty) -> bound var.id subst_ty ty
-        | Some (Binding.Row row) ->
+        | Some (Binding.Row { id; row }) ->
           (* A parameter instantiated with a row is the record of that row. *)
-          Type.TRecord { id = var.id; row = bound var.id subst_row row }
+          Type.TRecord { id; row = bound var.id subst_row row }
         | None -> TVar var)
   ; row =
       (fun var ->
         match Map.find bindings var.id with
-        | Some (Binding.Row row) -> bound var.id subst_row row
+        | Some (Binding.Row { row; _ }) -> bound var.id subst_row row
         | Some (Binding.Ty _) -> raise (Not_a_row var.id)
         | None -> RVar var)
   ; presence = (fun var -> PVar var)
-  ; id =
-      (fun () ->
-        decr ids;
-        !ids)
+  ; id = (fun () -> fresh_id ids)
   }
 ;;
 
@@ -219,7 +226,7 @@ and entries t context row =
     | REmpty -> Ok (List.rev acc)
     | RVar { id; _ } ->
       (match Map.find context.Context.bindings id with
-       | Some (Binding.Row row) ->
+       | Some (Binding.Row { row; _ }) ->
          if Set.mem seen_vars id
          then Error (Error.Recursive_row id)
          else go seen_labels (Set.add seen_vars id) acc row
@@ -309,7 +316,9 @@ and declared t context ~name ~args =
         | Some shape -> Ok shape
         | None ->
           let path = Path.Step.Declaration { name; args } :: context.path in
-          let%bind.Result bindings = bind_parameters declaration ~name ~args in
+          let%bind.Result bindings =
+            bind_parameters context declaration ~name ~args
+          in
           let context =
             { context with
               path
@@ -346,7 +355,7 @@ and declared t context ~name ~args =
 (* A parameter is bound to its argument as it stands, which [declared] has
    substituted: a type parameter takes a type, or a row (the record of that
    row), and a row parameter takes a row. *)
-and bind_parameters (declaration : Signature.Type_decl.t) ~name ~args =
+and bind_parameters context (declaration : Signature.Type_decl.t) ~name ~args =
   if List.length declaration.params <> List.length args
   then
     Error
@@ -369,7 +378,7 @@ and bind_parameters (declaration : Signature.Type_decl.t) ~name ~args =
              let binding =
                match argument with
                | ATy ty -> Binding.Ty ty
-               | ARow row -> Binding.Row row
+               | ARow row -> Binding.Row { id = fresh_id context.ids; row }
              in
              Ok (Map.set bindings ~key:id ~data:binding)
            | _ -> Ok bindings (* Not a variable: the body already has it. *))
@@ -378,7 +387,12 @@ and bind_parameters (declaration : Signature.Type_decl.t) ~name ~args =
            | RVar { id; _ } ->
              (match argument with
               | ARow row' ->
-                Ok (Map.set bindings ~key:id ~data:(Binding.Row row'))
+                Ok
+                  (Map.set
+                     bindings
+                     ~key:id
+                     ~data:
+                       (Binding.Row { id = fresh_id context.ids; row = row' }))
               | ATy _ -> Error (Error.Row_expected id))
            | _ -> Ok bindings))
 
@@ -396,7 +410,7 @@ and expand t context (ty : Type.ty) : (Shape.t, Error.t) Result.t =
        if Set.mem context.resolving id
        then Error (Error.Recursive_ty id)
        else shape t { context with resolving = Set.add context.resolving id } ty
-     | Some (Binding.Row row) ->
+     | Some (Binding.Row { row; _ }) ->
        if Set.mem context.resolving id
        then Error (Error.Recursive_ty id)
        else
