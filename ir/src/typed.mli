@@ -109,6 +109,7 @@ module Pattern : sig
       | Var of Ident.t
       | Lit of Syntax.Lit.t
       | Tuple of 'p list
+      | Deref of 'p
       | Construct of Constructor_ref.t * 'p list
       | Record of (Field_ref.t * 'p) list
       | Poly_variant of string * 'p option
@@ -199,12 +200,15 @@ module Expr : sig
           } (** A splice outside any quote. *)
       | Quote of 'e
       | Tuple of 'e list
+      | Deref of 'e
       | Construct of Constructor_ref.t * 'e list
       | Record of (Field_ref.t * 'e) list
       | Field of 'e * Field_ref.t
       | Record_update of 'e * (Field_ref.t * 'e) list
       (** [{e with f = v; ...}], of [e]'s type but for the parameters only the
           updated fields' types contain. *)
+      | Store of 'e * 'e
+      (** [e <- v], [e] a place: a [Deref], or a field of one. *)
       | Match of
           { scrutinee : 'e
           ; cases : (Pattern.t * 'e) list

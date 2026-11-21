@@ -51,21 +51,21 @@ let f x = match x with [] -> 0 | [_; Cons] -> 1 | _ -> 2
           Client.print_definition client "a.stag" ~line ~character);
       [%expect
         {|
-         1:8 1:8-1:19 ```stag list[A.t] ```
-         1:8 no definition
-         1:9 1:9-1:13 ```stag A.Cons : A.t ```
-         1:9 -> a.stag 0:9-0:13
-         1:13 1:9-1:13 ```stag A.Cons : A.t ```
-         1:13 -> a.stag 0:9-0:13
-         1:18 1:18-1:19 ```stag list[A.t] ```
-         1:18 no definition
-         2:23 2:23-2:25 ```stag list[A.t] ```
-         2:23 no definition
-         2:24 2:23-2:25 ```stag list[A.t] ```
-         2:24 no definition
-         2:33 2:33-2:42 ```stag list[A.t] ```
-         2:33 no definition
-         2:35 2:34-2:35 ```stag A.t ```
-         2:35 no definition
-         |}])
+        1:8 1:8-1:19 ```stag A.t * list[A.t] ```
+        1:8 no definition
+        1:9 1:9-1:13 ```stag A.Cons : A.t ```
+        1:9 -> a.stag 0:9-0:13
+        1:13 1:9-1:13 ```stag A.Cons : A.t ```
+        1:13 -> a.stag 0:9-0:13
+        1:18 1:18-1:19 ```stag list[A.t] ```
+        1:18 no definition
+        2:23 2:23-2:25 ```stag list[A.t] ```
+        2:23 no definition
+        2:24 2:23-2:25 ```stag list[A.t] ```
+        2:24 no definition
+        2:33 2:33-2:42 ```stag A.t * list[A.t] ```
+        2:33 no definition
+        2:35 2:34-2:35 ```stag A.t ```
+        2:35 no definition
+        |}])
 ;;

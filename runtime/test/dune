@@ -1,0 +1,11 @@
+(library
+ (name test_runtime)
+ (preprocess
+  (pps ppx_jane))
+ (inline_tests)
+ (libraries
+  core
+  expect_test_helpers_core
+  stag_runtime
+  stdlib_stable
+  stdlib_upstream_compatible))

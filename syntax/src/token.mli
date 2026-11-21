@@ -46,6 +46,7 @@ type t =
   | Larrow
   | Star
   | Dot
+  | Dot_star
   | Root (** [.] starting a path from the root scope, as [.M.x] *)
   | Dot_lbrace (** [.{], substitutions of a splice *)
   | Dotdot

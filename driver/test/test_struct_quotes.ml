@@ -48,7 +48,7 @@ let make names extra =
     module Inner = .~extra
   end >.
 
-include .~(make (Cons ("A", Cons ("B", Nil))) .< struct let y = 2 end >.)
+include .~(make (Cons (Ptr.make ( ("A", Cons (Ptr.make ( ("B", Nil))))))) .< struct let y = 2 end >.)
 
 let shown = print_endline (Int.to_string (Int.add (f y) Inner.y))
 |};
@@ -79,7 +79,7 @@ let%expect_test "printing a struct quote's value" =
 let names = .< struct let x = .~(Stag.Expr.int 1) end >.
 let shown =
   match names with
-  | Cons (Stag.Toplevel.Let (name, _, _, _), Nil) -> print_endline name
+  | Cons * (Stag.Toplevel.Let (name, _, _, _), Nil) -> print_endline name
   | _ -> print_endline "?"
 |};
   [%expect
@@ -104,7 +104,7 @@ end >.
 
 let shown =
   match quoted with
-  | Cons (Stag.Toplevel.Let (_, _, _, Stag.Expr.Quote _), Cons (Stag.Toplevel.Let (_, _, _, Stag.Expr.Struct_quote _), Nil)) ->
+  | Cons * (Stag.Toplevel.Let (_, _, _, Stag.Expr.Quote *( _)), Cons * (Stag.Toplevel.Let (_, _, _, Stag.Expr.Struct_quote _), Nil)) ->
     print_endline "quoted"
   | _ -> print_endline "?"
 |};
@@ -226,7 +226,7 @@ let int = Stag.Type_expr.Con (Stag.Path.Name "int", Nil)
 let fields names =
   Stag.Type_decl.Kind.Record (Stag.map (fun name -> (name, int)) names)
 
-type point = .~(fields (Cons ("x", Cons ("y", Nil))))
+type point = .~(fields (Cons (Ptr.make ( ("x", Cons (Ptr.make ( ("y", Nil))))))))
 
 let x : .~int = 1
 let two = 2
@@ -327,8 +327,8 @@ let%expect_test "a generated declaration with a type splice and a ref" =
     {|
 let helper = 1
 let t = Stag.Type_expr.con "int" Nil
-let ann = Stag.Type_expr.Splice (Stag.Expr.var "t")
-include .~(Cons (Stag.Toplevel.Let ("x", Nil, Some ann, Stag.Code.erase .< helper >.), Nil))
+let ann = Stag.Type_expr.Splice (Ptr.make ( (Stag.Expr.var "t")))
+include .~(Cons (Ptr.make ( (Stag.Toplevel.Let ("x", Nil, Some ann, Stag.Code.erase .< helper >.), Nil))))
 let shown = print_endline (Int.to_string x)
 |};
   [%expect
@@ -404,13 +404,13 @@ let%expect_test "spliced and plain types are mutually recursive" =
 let tree = Stag.Type_expr.con "tree" Nil
 let kind =
   Stag.Type_decl.Kind.Variant
-    (Cons (("Leaf", Nil), Cons (("Node", Cons (Stag.Type_expr.con "forest" Nil, Nil)), Nil)))
+    (Cons (Ptr.make ( (("Leaf", Nil), Cons (Ptr.make ( (("Node", Cons (Ptr.make ( (Stag.Type_expr.con "forest" Nil, Nil)))), Nil)))))))
 type forest = F of list[.~tree]
 type tree = .~kind
 let size_forest f = match f with F trees -> size_list trees
-let size_list ts = match ts with Nil -> 0 | Cons (t, ts) -> Int.add (size t) (size_list ts)
+let size_list ts = match ts with Nil -> 0 | Cons * (t, ts) -> Int.add (size t) (size_list ts)
 let size t = match t with Leaf -> 1 | Node f -> Int.add 1 (size_forest f)
-let shown = print_endline (Int.to_string (size (Node (F (Cons (Leaf, Cons (Leaf, Nil)))))))
+let shown = print_endline (Int.to_string (size (Node (F (Cons (Ptr.make ( (Leaf, Cons (Ptr.make ( (Leaf, Nil)))))))))))
 exception E of .~tree
 let caught = match raise (E Leaf) with _ -> () | exception E Leaf -> print_endline "E Leaf"
 |};
@@ -536,7 +536,7 @@ exception E of .~bad
     |}];
   check
     {|
-let kind = Stag.Type_decl.Kind.Variant (Cons (("A", Cons (Stag.Type_expr.con "nope" Nil, Nil)), Nil))
+let kind = Stag.Type_decl.Kind.Variant (Cons (Ptr.make ( (("A", Cons (Ptr.make ( (Stag.Type_expr.con "nope" Nil, Nil)))), Nil))))
 type t = .~kind
 let a = A
 |};
@@ -616,7 +616,7 @@ let%expect_test "struct quotes in an expression quote and in erased code" =
 let v = Stag.Expr.int 5
 let quoted = .< .< struct let x = .~v end >. >.
 let erased = Stag.Code.erase .< let y = 1 in .< struct let x = .~(Stag.Expr.var "y") end >. >.
-module M = .~(Cons (Stag.Toplevel.let_ "z" Nil erased, Nil))
+module M = .~(Cons (Ptr.make ( (Stag.Toplevel.let_ "z" Nil erased, Nil))))
 let y = 7
 module N = .~M.z
 let shown = print_endline (Int.to_string N.x)
@@ -677,7 +677,7 @@ type t = .~kind
     ~run:true
     {|
 let int_ty = Stag.Type_expr.con "int" Nil
-let nested = Stag.Type_expr.Splice (Stag.Expr.var "int_ty")
+let nested = Stag.Type_expr.Splice (Ptr.make ( (Stag.Expr.var "int_ty")))
 let x : .~nested = 1
 let shown = print_endline (Int.to_string x)
 |};
@@ -710,7 +710,7 @@ let%expect_test "a function before a definition splice that uses it" =
   check
     {|
 let g x = Some x
-let mk (u : unit) = match g 1 with Some _ -> Stag.Type_decl.Kind.Variant (Cons (("A", Nil), Nil)) | None -> Stag.Type_decl.Kind.Abstract
+let mk (u : unit) = match g 1 with Some _ -> Stag.Type_decl.Kind.Variant (Cons (Ptr.make ( (("A", Nil), Nil)))) | None -> Stag.Type_decl.Kind.Abstract
 type t = .~(let _ = g in mk ())
 let x = A
 |};
@@ -718,7 +718,7 @@ let x = A
   check
     {|
 let f x = match x with A -> 1 | B -> 2
-type t = .~(let _ = f in Stag.Type_decl.Kind.Variant (Cons (("A", Nil), Cons (("B", Nil), Nil))))
+type t = .~(let _ = f in Stag.Type_decl.Kind.Variant (Cons (Ptr.make ( (("A", Nil), Cons (Ptr.make ( (("B", Nil), Nil))))))))
 |};
   [%expect
     {|
@@ -732,9 +732,9 @@ type t = .~(let _ = f in Stag.Type_decl.Kind.Variant (Cons (("A", Nil), Cons (("
     2 | let f x = match x with A -> 1 | B -> 2
                                ^
     Error: Unbound constructor A
-    File "a.stag", line 3, characters 9-97:
-    3 | type t = .~(let _ = f in Stag.Type_decl.Kind.Variant (Cons (("A", Nil), Cons (("B", Nil), Nil))))
-                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "a.stag", line 3, characters 9-125:
+    3 | type t = .~(let _ = f in Stag.Type_decl.Kind.Variant (Cons (Ptr.make ( (("A", Nil), Cons (Ptr.make ( (("B", Nil), Nil))))))))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Note: This type splice, after this point, may define it, but is still being computed because its expression uses this code
     |}]
 ;;
@@ -743,7 +743,7 @@ let%expect_test "a definition splice's constructors are visible after it" =
   check
     {|
 let early = A
-let mk (u : unit) = Stag.Type_decl.Kind.Variant (Cons (("A", Nil), Nil))
+let mk (u : unit) = Stag.Type_decl.Kind.Variant (Cons (Ptr.make ( (("A", Nil), Nil))))
 type t = .~(mk ())
 let late = A
 module M = struct
@@ -764,13 +764,14 @@ end
 ;;
 
 let%expect_test "a type splice giving a splice is an error, not a loop" =
-  check {|
-let s = Stag.Type_expr.Splice (Stag.Expr.var "s")
+  check
+    {|
+let s = Stag.Type_expr.Splice (Ptr.make ( (Stag.Expr.var "s")))
 let x : .~s = 1
 |};
   check
     {|
-let k = Stag.Type_decl.Kind.Variant (Cons (("A", Cons (Stag.Type_expr.Splice (Stag.Expr.var "s"), Nil)), Nil))
+let k = Stag.Type_decl.Kind.Variant (Cons (Ptr.make ( (("A", Cons (Ptr.make ( (Stag.Type_expr.Splice (Ptr.make ( (Stag.Expr.var "s"))), Nil)))), Nil))))
 type t = .~k
 |};
   [%expect
@@ -795,7 +796,7 @@ type n = .~(Stag.Type_decl.Kind.Alias (int_ty ()))
 exception E of n
 let a = E 1
 let b = E 2
-let kind (u : unit) = let _ = print_endline "defined" in Stag.Type_decl.Kind.Record (Cons (("v", Stag.Type_expr.con "n" Nil), Nil))
+let kind (u : unit) = let _ = print_endline "defined" in Stag.Type_decl.Kind.Record (Cons (Ptr.make ( (("v", Stag.Type_expr.con "n" Nil), Nil))))
 type r = .~(kind ())
 let c = {v = 1}
 let d = {v = 2}
@@ -825,7 +826,7 @@ let%expect_test "polymorphic type splice annotations" =
   check
     ~run:true
     {|
-let arrow = Stag.Type_expr.Arrow (Stag.Type_expr.Var "a", Stag.Type_expr.Var "a")
+let arrow = Stag.Type_expr.Arrow (Ptr.make ( (Stag.Type_expr.Var "a", Stag.Type_expr.Var "a")))
 let id : .~arrow = fun x -> x
 let both = (id 1, id "s")
 let pair (x : 'a) (y : .~(Stag.Type_expr.Var "a")) = (x, y)
@@ -848,12 +849,12 @@ let shown = match both with (_, s) -> print_endline s
 let%expect_test "a definition splice reflecting on its own declaration" =
   check
     {|
-type t = .~(let _ = Stag.Type.expr (type t) in Stag.Type_decl.Kind.Variant (Cons (("A", Nil), Nil)))
+type t = .~(let _ = Stag.Type.expr (type t) in Stag.Type_decl.Kind.Variant (Cons (Ptr.make ( (("A", Nil), Nil)))))
 let x = A
 |};
   check
     {|
-type t = .~(match Stag.Type.expr (type t) with Stag.Type_expr.Con (Stag.Path.Ref r, _) -> let _ = Stag.Type.decl r in Stag.Type_decl.Kind.Variant (Cons (("A", Nil), Nil)) | _ -> Stag.Type_decl.Kind.Abstract)
+type t = .~(match Stag.Type.expr (type t) with Stag.Type_expr.Con (Stag.Path.Ref r, _) -> let _ = Stag.Type.decl r in Stag.Type_decl.Kind.Variant (Cons (Ptr.make ( (("A", Nil), Nil)))) | _ -> Stag.Type_decl.Kind.Abstract)
 |};
   [%expect
     {|
@@ -862,9 +863,9 @@ type t = .~(match Stag.Type.expr (type t) with Stag.Type_expr.Con (Stag.Path.Ref
       val x : t
     end
     File "a.stag", line 2, characters 5-6:
-    2 | type t = .~(match Stag.Type.expr (type t) with Stag.Type_expr.Con (Stag.Path.Ref r, _) -> let _ = Stag.Type.decl r in Stag.Type_decl.Kind.Variant (Cons (("A", Nil), Nil)) | _ -> Stag.Type_decl.Kind.Abstract)
+    2 | type t = .~(match Stag.Type.expr (type t) with Stag.Type_expr.Con (Stag.Path.Ref r, _) -> let _ = Stag.Type.decl r in Stag.Type_decl.Kind.Variant (Cons (Ptr.make ( (("A", Nil), Nil)))) | _ -> Stag.Type_decl.Kind.Abstract)
              ^
-    Error: The type A.t is needed here while its definition is being computed by the type splice at a.stag:2:9-207, whose expression uses this code
+    Error: The type A.t is needed here while its definition is being computed by the type splice at a.stag:2:9-221, whose expression uses this code
     |}]
 ;;
 
@@ -878,7 +879,7 @@ let a : .~(also_nope) = 1
 let b : int = "b"
 let mk (u : unit) = match use with _ -> Stag.Type_expr.con "int" Nil
 let c : .~(mk ()) = 3
-type u = .~(Stag.Type_decl.Kind.Variant (Cons (("U", Nil), Nil)))
+type u = .~(Stag.Type_decl.Kind.Variant (Cons (Ptr.make ( (("U", Nil), Nil)))))
 let fine = U
 let shown = print_endline "ran"
 |};

@@ -200,6 +200,17 @@ and expr t : Expr.t =
              Let_mut
                (name t, Option.some_if (bool t) (type_expr t), expr t, expr t))
          ; (fun t -> Assign (loc (decl_path t ~last:lident), expr t))
+         ; (fun t -> Store (loc (Expr.Deref (expr t)), expr t))
+         ; (fun t ->
+             Store
+               ( loc
+                   (Expr.Field
+                      (loc (Expr.Deref (expr t)), loc (decl_path t ~last:lident)))
+               , expr t ))
+         ; (fun t ->
+             Store
+               ( loc (Expr.Poly_field (loc (Expr.Deref (expr t)), label t))
+               , expr t ))
          ; (fun t -> Fun (list t ~min:1 ~max:2 binding, expr t))
          ; (fun t ->
              Splice

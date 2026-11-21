@@ -47,8 +47,8 @@ let e : exn = E
 let f = F 1
 let g = G (1, "x")
 let h = H (1, "x")
-let l = L (Cons (None, Nil))
-let es = Cons (E, Cons (M.E false, Cons (M.e, Nil)))
+let l = L (Cons (Ptr.make ( (None, Nil))))
+let es = Cons (Ptr.make ( (E, Cons (Ptr.make ( (M.E false, Cons (Ptr.make ( (M.e, Nil)))))))))
 |};
   [%expect
     {|
@@ -307,14 +307,14 @@ let main = raise (M.E (1, "x"))
     {|
 module M = struct exception F of list[int] * option[exn] end
 exception G
-let main = raise (M.F (Cons (1, Nil), Some G))
+let main = raise (M.F (Cons (Ptr.make ( (1, Nil))), Some G))
 |};
   [%expect
     {|
-    File "a.stag", line 4, characters 11-46:
-    4 | let main = raise (M.F (Cons (1, Nil), Some G))
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: Uncaught exception A.M.F (Cons (1, Nil), Some A.G)
+    File "a.stag", line 4, characters 11-60:
+    4 | let main = raise (M.F (Cons (Ptr.make ( (1, Nil))), Some G))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: Uncaught exception A.M.F (Cons (Ptr.make (1, Nil)), Some A.G)
     |}]
 ;;
 
@@ -613,8 +613,8 @@ let%expect_test "generated exception declarations" =
     ~signature:true
     {|
 module M = .~(
-  Cons (Stag.Toplevel.Exception ("E", Cons (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Nil)),
-  Cons (Stag.Toplevel.Exception ("F", Nil), Nil)))
+  Cons (Ptr.make ( (Stag.Toplevel.Exception ("E", Cons (Ptr.make ( (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Nil)))),
+  Cons (Ptr.make ( (Stag.Toplevel.Exception ("F", Nil), Nil)))))))
 let main =
   match raise (M.E 3) with
   | () -> ()
@@ -639,9 +639,9 @@ let main =
    only the start of it. *)
 let big_tree =
   {|
-type tree = Leaf | Node of tree * tree
+type tree = Leaf | Node of ptr[tree * tree]
 exception E of tree
-let big n = match n with 0 -> Leaf | _ -> let t = big (Int.sub n 1) in Node (t, t)
+let big n = match n with 0 -> Leaf | _ -> let t = big (Int.sub n 1) in Node (Ptr.make (t, t))
 let t = big 60
 |}
 ;;
@@ -661,7 +661,7 @@ let main = print_int (catch 1000 0)
     File "a.stag", line 6, characters 11-22:
     6 | let main = raise (E t)
                    ^^^^^^^^^^^
-    Error: Uncaught exception A.E (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf)), A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf))), A.Node (A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf)), A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf)))), A.Node (A.Node (A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf)), A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf))), A.Node (A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf)), A.Node (A.Node (A.Leaf, A.Leaf), A.Node (A.Leaf, A.Leaf))))), A.Node (A.Node (A.No...
+    Error: Uncaught exception A.E (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Nod...
     |}]
 ;;
 
@@ -852,39 +852,52 @@ let%expect_test "exception patterns in generated matches" =
     run
       (sprintf
          {|
-include .~(Cons (Stag.Toplevel.let_ "f" (Cons ("x", Nil)) (Stag.Expr.Match (Stag.Expr.App (Stag.Expr.var "Int.of_string_exn", Stag.Expr.var "x"), %s)), Nil))
+include .~([Stag.Toplevel.let_ "f" ["x"]
+  (Stag.Expr.match_
+    (Stag.Expr.App (Ptr.make (Stag.Expr.var "Int.of_string_exn", Stag.Expr.var "x")))
+    (%s))])
 let main = print_int (f "1"); print_int (f "x")
 |}
          cases)
   in
   generated
-    {|Cons ((Stag.Pattern.Var "n", Stag.Expr.var "n"),
-        Cons ((Stag.Pattern.Exception (Stag.Pattern.construct "Failure" (Cons (Stag.Pattern.Any, Nil))), Stag.Expr.int 0), Nil))|};
+    {|[(Stag.Pattern.Var "n", Stag.Expr.var "n");
+       (Stag.Pattern.Exception (Ptr.make (Stag.Pattern.construct "Failure" [Stag.Pattern.Any])),
+        Stag.Expr.int 0)]|};
   [%expect {| 10 |}];
   generated
-    {|Cons ((Stag.Pattern.construct "Some" (Cons (Stag.Pattern.Exception Stag.Pattern.Any, Nil)), Stag.Expr.int 1), Nil)|};
+    {|[(Stag.Pattern.construct "Some" [Stag.Pattern.Exception (Ptr.make Stag.Pattern.Any)],
+        Stag.Expr.int 1)]|};
   [%expect
     {|
-    File "a.stag", line 2, characters 0-269:
-    2 | include .~(Cons (Stag.Toplevel.let_ "f" (Cons ("x", Nil)) (Stag.Expr.Match (Stag.Expr.App (Stag.Expr.var "Int.of_string_exn", Stag.Expr.var "x"), Cons ((Stag.Pattern.construct "Some" (Cons (Stag.Pattern.Exception Stag.Pattern.Any, Nil)), Stag.Expr.int 1), Nil))), Nil))
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "a.stag", lines 2-6, characters 0-29:
+    2 | include .~([Stag.Toplevel.let_ "f" ["x"]
+    3 |   (Stag.Expr.match_
+    4 |     (Stag.Expr.App (Ptr.make (Stag.Expr.var "Int.of_string_exn", Stag.Expr.var "x")))
+    5 |     ([(Stag.Pattern.construct "Some" [Stag.Pattern.Exception (Ptr.make Stag.Pattern.Any)],
+    6 |         Stag.Expr.int 1)]))])
     Error: In the declaration `let f` generated by this splice: An exception pattern is only allowed at the top of a match case, as in [match e with | exception E -> ...]
     Note: The generated declaration is:
       let f x = match Int.of_string_exn x with Some (exception _) -> 1
-    File "a.stag", line 2, characters 0-269:
-    2 | include .~(Cons (Stag.Toplevel.let_ "f" (Cons ("x", Nil)) (Stag.Expr.Match (Stag.Expr.App (Stag.Expr.var "Int.of_string_exn", Stag.Expr.var "x"), Cons ((Stag.Pattern.construct "Some" (Cons (Stag.Pattern.Exception Stag.Pattern.Any, Nil)), Stag.Expr.int 1), Nil))), Nil))
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "a.stag", lines 2-6, characters 0-29:
+    2 | include .~([Stag.Toplevel.let_ "f" ["x"]
+    3 |   (Stag.Expr.match_
+    4 |     (Stag.Expr.App (Ptr.make (Stag.Expr.var "Int.of_string_exn", Stag.Expr.var "x")))
+    5 |     ([(Stag.Pattern.construct "Some" [Stag.Pattern.Exception (Ptr.make Stag.Pattern.Any)],
+    6 |         Stag.Expr.int 1)]))])
     Error: In the declaration `let f` generated by this splice: This expression has type option[<error>] but an expression was expected of type int
     Note: The generated declaration is:
       let f x = match Int.of_string_exn x with Some (exception _) -> 1
     |}];
   generated
-    {|Cons ((Stag.Pattern.Exception Stag.Pattern.Any, Stag.Expr.int 1), Nil)|};
+    {|[(Stag.Pattern.Exception (Ptr.make Stag.Pattern.Any), Stag.Expr.int 1)]|};
   [%expect
     {|
-    File "a.stag", line 2, characters 0-225:
-    2 | include .~(Cons (Stag.Toplevel.let_ "f" (Cons ("x", Nil)) (Stag.Expr.Match (Stag.Expr.App (Stag.Expr.var "Int.of_string_exn", Stag.Expr.var "x"), Cons ((Stag.Pattern.Exception Stag.Pattern.Any, Stag.Expr.int 1), Nil))), Nil))
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "a.stag", lines 2-5, characters 0-80:
+    2 | include .~([Stag.Toplevel.let_ "f" ["x"]
+    3 |   (Stag.Expr.match_
+    4 |     (Stag.Expr.App (Ptr.make (Stag.Expr.var "Int.of_string_exn", Stag.Expr.var "x")))
+    5 |     ([(Stag.Pattern.Exception (Ptr.make Stag.Pattern.Any), Stag.Expr.int 1)]))])
     Error: In the declaration `let f` generated by this splice: A match must have a case for the value, not only exception cases
     Note: The generated declaration is:
       let f x = match Int.of_string_exn x with exception _ -> 1

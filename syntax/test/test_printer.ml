@@ -65,6 +65,27 @@ type w = with_x[({`x : int}), {`y : int}, {}]
     |}]
 ;;
 
+let%expect_test "pointers" =
+  print
+    {|type rec_list['a] = Nil | Cons of ptr['a * rec_list['a]]
+let alloc x = Ptr.make x
+let deref p = p.*
+let uncons l = match l with Nil -> Nil | Cons *(x, xs) -> xs
+|};
+  [%expect
+    {|
+    type rec_list['a] = Nil | Cons of ptr['a * rec_list['a]]
+
+    let alloc x = Ptr.make x
+    let deref p = p.*
+
+    let uncons l =
+      match l with
+      | Nil -> Nil
+      | Cons *(x, xs) -> xs
+    |}]
+;;
+
 let%expect_test "minimal parentheses" =
   List.iter
     ~f:print_expr
@@ -722,18 +743,18 @@ let%expect_test "the project's sources round trip and are formatted" =
     (../../examples/calc/math/arith.stag (formatted true) (long_lines 0))
     (../../examples/calc/math/power.stag (formatted true) (long_lines 0))
     (../../examples/calc/test/calc_test.stag (formatted true) (long_lines 0))
-    (../../prelude/prelude.stag (formatted true) (long_lines 0))
+    (../../prelude/prelude.stag (formatted false) (long_lines 0))
     (../../core/bool.stag (formatted true) (long_lines 0))
     (../../core/char.stag (formatted true) (long_lines 0))
     (../../core/int.stag (formatted true) (long_lines 0))
-    (../../core/list.stag (formatted true) (long_lines 0))
+    (../../core/list.stag (formatted false) (long_lines 0))
     (../../core/option.stag (formatted true) (long_lines 0))
-    (../../core/result.stag (formatted true) (long_lines 0))
-    (../../core/sexp.stag (formatted true) (long_lines 0))
-    (../../core/sexp_derive.stag (formatted true) (long_lines 0))
-    (../../core/sexp_parser.stag (formatted true) (long_lines 0))
-    (../../core/sexp_printer.stag (formatted true) (long_lines 0))
-    (../../core/string.stag (formatted true) (long_lines 0))
+    (../../core/result.stag (formatted false) (long_lines 0))
+    (../../core/sexp.stag (formatted false) (long_lines 0))
+    (../../core/sexp_derive.stag (formatted false) (long_lines 0))
+    (../../core/sexp_parser.stag (formatted false) (long_lines 0))
+    (../../core/sexp_printer.stag (formatted false) (long_lines 0))
+    (../../core/string.stag (formatted false) (long_lines 0))
     (../../bench/programs/fib.stag (formatted true) (long_lines 0))
     (../../bench/programs/loops.stag (formatted true) (long_lines 0))
     (../../bench/programs/matching.stag (formatted true) (long_lines 0))
@@ -971,9 +992,9 @@ let%expect_test "list literals" =
 let b = [x]
 let c = [[1]; []; [2; 3;]]
 let d = [1, "one"; 2, "two"]
-let e = Cons (x, Cons (y, Nil))
-let f = Cons (x, [y])
-let g l = match l with [] -> [] | [x] -> [x] | [[x]; (y, z)] -> f [x] [] | Cons (x, [_; _]) -> C [x]
+let e = Cons (Ptr.make ( (x, Cons (Ptr.make ( (y, Nil))))))
+let f = Cons (Ptr.make ( (x, [y])))
+let g l = match l with [] -> [] | [x] -> [x] | [[x]; (y, z)] -> f [x] [] | Cons * (x, [_; _]) -> C [x]
 let h = [let x = 1 in x; fun x -> x; match x with A -> 1 | B -> 2; 3].x
 let long_name = [first_element; second_element; third_element; fourth_element]
 let long = {field = [first_element; second_element; third_element; fourth_element]}
@@ -985,15 +1006,15 @@ let nested = [[first_element; second_element]; [third_element; fourth_element; f
     let b = [x]
     let c = [[1]; []; [2; 3]]
     let d = [(1, "one"); (2, "two")]
-    let e = Cons (x, Cons (y, Nil))
-    let f = Cons (x, [y])
+    let e = Cons (Ptr.make (x, Cons (Ptr.make (y, Nil))))
+    let f = Cons (Ptr.make (x, [y]))
 
     let g l =
       match l with
       | [] -> []
       | [x] -> [x]
       | [[x]; (y, z)] -> f [x] []
-      | Cons (x, [_; _]) -> C [x]
+      | Cons *(x, [_; _]) -> C [x]
 
     let h =
       [
@@ -1063,7 +1084,7 @@ let%expect_test "resolved Cons and Nil not ending a list literal" =
     {|
     .Cons (x, rest)
     .Cons (x, .Cons (y, rest))
-    [x; []]
+    .Cons (x, .Cons ([], []))
     .Cons x
     .Cons (x, [], [])
     .Nil x

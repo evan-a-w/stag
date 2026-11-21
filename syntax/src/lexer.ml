@@ -135,6 +135,7 @@ let after_atom (t : State.t) ~glued =
   &&
   match t.src.[t.offset - 1] with
   | ')' | ']' | '}' | '"' | '.' -> true
+  | '*' -> t.offset >= 2 && Char.equal t.src.[t.offset - 2] '.'
   | c -> is_ident_char c
 ;;
 
@@ -460,6 +461,7 @@ and token_or_skip (t : State.t) : Located.t =
        | '.', Some '<' -> simple 2 Quote_open
        | '.', Some '~' -> simple 2 Splice
        | '.', Some '.' -> simple 2 Dotdot
+       | '.', Some '*' -> simple 2 Dot_star
        | '.', Some '{' -> simple 2 Dot_lbrace
        | '.', Some c when is_ident_start c && not (after_atom t ~glued) ->
          simple 1 Root

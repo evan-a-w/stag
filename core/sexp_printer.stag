@@ -8,14 +8,14 @@ let to_string t =
     match t with
     | Sexp.Atom s ->
       (match (must_escape s, space) with
-       | true, _ -> (Cons (quote s, parts), false)
-       | false, true -> (Cons (s, Cons (" ", parts)), true)
-       | false, false -> (Cons (s, parts), true))
-    | Sexp.List [] -> (Cons ("()", parts), false)
+       | true, _ -> (Cons (Ptr.make ( (quote s, parts))), false)
+       | false, true -> (Cons (Ptr.make ( (s, Cons (Ptr.make ( (" ", parts)))))), true)
+       | false, false -> (Cons (Ptr.make ( (s, parts))), true))
+    | Sexp.List [] -> (Cons (Ptr.make ( ("()", parts))), false)
     | Sexp.List ts ->
       let step acc t = match acc with parts, space -> add parts space t in
-      match List.fold_left step (Cons ("(", parts), false) ts with
-      | parts, _ -> (Cons (")", parts), false)
+      match List.fold_left step (Cons (Ptr.make ( ("(", parts))), false) ts with
+      | parts, _ -> (Cons (Ptr.make ( (")", parts))), false)
   in
   match add [] false t with parts, _ -> String.concat "" (List.rev parts)
 
@@ -26,7 +26,7 @@ let to_string_hum t =
   match Pretty.tokens t [] 0 with
   | tokens, n, _ ->
     let outermost = Pretty.Token.Begin (Pretty.Box.Hov, 0, 0, -2) in
-    let st = Pretty.run Pretty.State.init (Cons (outermost, tokens)) n in
+    let st = Pretty.run Pretty.State.init (Cons (Ptr.make ( (outermost, tokens)))) n in
     String.concat "" (List.rev st.out)
 
 (* Whether [s] must be quoted to be read back as an atom: it is empty, or has
@@ -127,7 +127,7 @@ module Pretty = struct
       out = [];
     }
 
-    let output (st : t) s = {st with out = Cons (s, st.out)}
+    let output (st : t) s = {st with out = Cons (Ptr.make ( (s, st.out)))}
 
     let new_line st width offset =
       let indent = Int.min max_indent (Int.add (Int.sub margin width) offset) in
@@ -151,7 +151,7 @@ module Pretty = struct
     let text s acc =
       match acc with
       | after, n, width ->
-        (Cons (Token.Text s, after),
+        (Cons (Ptr.make ( (Token.Text s, after))),
          Int.succ n,
          Int.add width (String.length s))
     in
@@ -160,36 +160,36 @@ module Pretty = struct
     let elements rev_ts acc setter =
       match (rev_ts, acc) with
       | [], _ -> acc
-      | Cons (t, rest), (after, n, width) ->
+      | Cons * (t, rest), (after, n, width) ->
         match tokens t after n with
         | after, m, t_width ->
           let total = Int.add width t_width in
           match rest with
           | [] -> (after, m, total)
-          | Cons (_, _) ->
+          | Cons * (_, _) ->
             let break = Token.Break (Int.add t_width 2, setter) in
-            elements rest (Cons (break, after), Int.succ m, Int.succ total) m
+            elements rest (Cons (Ptr.make ( (break, after))), Int.succ m, Int.succ total) m
     in
     let lines rev_lines acc =
       match rev_lines with
       | [] -> acc
       | [l] -> text (String.escaped l) acc
-      | Cons (l, rest) ->
+      | Cons * (l, rest) ->
         match text "\\n" (text (String.escaped l) acc) with
         | after, n, width ->
           lines
             rest
-            (text "\\" (Cons (Token.Newline, after), Int.succ n, width))
+            (text "\\" (Cons (Ptr.make ( (Token.Newline, after))), Int.succ n, width))
     in
     let box offset acc =
       match acc with
       | after, m, width ->
-        (Cons (Token.Begin (Box.B, offset, width, n), after), Int.succ m, width)
+        (Cons (Ptr.make ( (Token.Begin (Box.B, offset, width, n), after))), Int.succ m, width)
     in
     match t with
     | Sexp.List [] -> text "()" (after, n, 0)
     | Sexp.List ts ->
-      let close = text ")" (Cons (Token.End, after), Int.succ n, 0) in
+      let close = text ")" (Cons (Ptr.make ( (Token.End, after))), Int.succ n, 0) in
       box 1 (text "(" (elements (List.rev ts) close n))
     | Sexp.Atom s ->
       let rev_lines = List.rev (String.split_on_char '\n' s) in
@@ -203,7 +203,7 @@ module Pretty = struct
       | false, _ -> text s (after, n, 0)
       | true, true -> text (quote s) (after, n, 0)
       | true, false ->
-        let close = text "\"" (Cons (Token.End, after), Int.succ n, 0) in
+        let close = text "\"" (Cons (Ptr.make ( (Token.End, after))), Int.succ n, 0) in
         box 0 (text " \"" (lines rev_lines close))
 
   (* [Format]'s [format_pp_token]. *)
@@ -217,8 +217,8 @@ module Pretty = struct
         match (Int.gt (Int.sub margin st.space_left) max_indent, st.boxes) with
         | false, _ -> st
         | true, [] -> State.output st "\n"
-        | true, Cons ((Box.Fits, _), _) -> st
-        | true, Cons ((_, width), _) ->
+        | true, Cons * ((Box.Fits, _), _) -> st
+        | true, Cons * ((_, width), _) ->
           match Int.gt width st.space_left with
           | true -> State.new_line st width 0
           | false -> st
@@ -229,19 +229,19 @@ module Pretty = struct
         | false -> Box.Fits
       in
       let opened = (kind, Int.sub indented.space_left offset) in
-      {indented with boxes = Cons (opened, indented.boxes)}
+      {indented with boxes = Cons (Ptr.make ( (opened, indented.boxes)))}
     | Token.End ->
       (match st.boxes with
        | [] -> st
-       | Cons (_, rest) -> {st with boxes = rest})
+       | Cons * (_, rest) -> {st with boxes = rest})
     | Token.Newline ->
       (match st.boxes with
        | [] -> State.output st "\n"
-       | Cons ((_, width), _) -> State.new_line st width 0)
+       | Cons * ((_, width), _) -> State.new_line st width 0)
     | Token.Break (_, _) ->
       match st.boxes with
       | [] -> st
-      | Cons ((box, width), _) ->
+      | Cons * ((box, width), _) ->
         let fits = Int.le size st.space_left in
         let deeper = Int.gt st.indent (Int.sub margin width) in
         match (box, st.new_line, fits, deeper) with
@@ -257,12 +257,12 @@ module Pretty = struct
   let advance (st : State.t) now =
     let queue =
       match (st.front, st.back) with
-      | [], Cons (_, _) -> {st with front = List.rev st.back; back = []}
+      | [], Cons * (_, _) -> {st with front = List.rev st.back; back = []}
       | _ -> st
     in
     match queue.front with
     | [] -> st
-    | Cons (token, rest) ->
+    | Cons * (token, rest) ->
       let known_size =
         match token with
         | Token.Begin (_, _, size, known) ->
@@ -293,9 +293,9 @@ module Pretty = struct
   let run (st : State.t) tokens now =
     match tokens with
     | [] -> advance {st with right = infinity} (-1)
-    | Cons (token, rest) ->
+    | Cons * (token, rest) ->
       let right = Int.add st.right (Token.length token) in
-      let queued = {st with back = Cons (token, st.back); right = right} in
+      let queued = {st with back = Cons (Ptr.make ( (token, st.back))); right = right} in
       match token with
       | Token.Text _ -> run (advance queued now) rest (Int.pred now)
       | Token.Newline -> run (advance queued now) rest (Int.pred now)

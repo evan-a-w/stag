@@ -36,8 +36,7 @@ is rejected by the backend (the interpreter supports everything).
 ## Recursive types
 
 Nothing is boxed implicitly: a type whose by-value layout would be infinite
-is an error, and recursion is written through `ptr[t]` (closures and function
-pointers also break cycles):
+is an error, and recursion is written through `ptr[t]`:
 
 ```ocaml
 type list['a] = Nil | Cons of 'a * ptr[list['a]]
@@ -51,7 +50,12 @@ and fields, and type arguments of types that contain that parameter by value
 `type t = T of wrap[ptr[t]]` is not). Cyclic structural types
 (`` [`Nil | `Cons of int * 'a] as 'a ``) are likewise errors unless every
 cycle goes through a `ptr`; this is checked where unification closes the
-cycle.
+cycle (the occurs check). A function type is not a `ptr`, so it does not
+break a structural cycle: `let self x = x x` is rejected, as is the alias
+`type f = int -> f` (a nominal declaration may still recurse through a
+function type, as a closure is not stored by value). An alias is cyclic
+unless its expansion reaches itself through a `ptr` and some other type
+constructor: `type al = ptr[al]` is rejected, `type f = int -> ptr[f]` is not.
 
 Where the pointee lives is the pointer's mode, as for any `ptr`: a `const`
 list is static data, an allocated one in the heap, a `local_` one on the data
@@ -71,8 +75,14 @@ Ptr.make e          (* allocate: heap, data stack under local_, static if const 
 *e   e.*            (* read *)
 e.*.x               (* field of the pointee *)
 *e <- v   e.* <- v  (* write *)
-e.*.x <- v          (* write a mutable field of the pointee *)
+e.*.x <- v          (* write a field of the pointee *)
 ```
+
+- A store `e.*.f.g <- v` evaluates the pointer expression `e` first, then
+  `v`, and only then reads the cell's contents, replaces the field path `f.g`
+  in them, and writes the result back. So stores made while evaluating `v`
+  are kept in the fields it doesn't replace: with `q = Ptr.make {x = 0; y = 0}`,
+  `q.*.x <- (q.* <- {x = 1; y = 9}; 3)` leaves `{x = 3; y = 9}`.
 
 - Postfix `e.*` is at the field access level, so it chains (`p.*.next.*`).
 - Prefix `*e` is at the constructor level (`C e`), so it extends over an
@@ -182,11 +192,19 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   so a function can return a local value (allocate in the caller's region).
 - `&x` of a variable puts `x` on the data stack, and is a `local` `ptr`.
 - `local` values cannot escape their region: not returned (except via
-  `exclave_`), not stored into `global` blocks (including GC objects, even
-  unsafely), not captured by `global` closures. A `local` argument
-  (`(x @ local)`) is borrowed: the callee may not retain it.
+  `exclave_`), not stored into `global` blocks (including GC objects), not
+  captured by `global` closures. A `local` argument (`(x @ local)`) is
+  borrowed: the callee may not retain it.
 - `global_` on record fields and constructor arguments: always `global`, even
   inside a local block.
+- Records have no mutable fields: mutation is through a `ptr` (`p.* <- v`,
+  `p.*.x <- v`), whose pointee is storage rather than a value. Such a store
+  is implicitly `global_`, so an older region's block never points into a
+  newer region. `Unsafe.assume_global e` (name tentative) bypasses this, the
+  programmer guaranteeing that `e` outlives what it is stored into. The GC
+  stays safe either way: it never follows pointers into the data stack, so
+  only the program's own reads can dangle. Which pointers may be written
+  through (immutability as a permission) is left to modes and modalities.
 - Tail calls end the current region before the call, so a local value of the
   current region cannot be passed to a tail call (OxCaml's rule); such a call
   is not a tail call (or is an error under an explicit `[@tail]`).

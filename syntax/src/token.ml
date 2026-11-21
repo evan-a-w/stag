@@ -46,6 +46,7 @@ type t =
   | Larrow
   | Star
   | Dot
+  | Dot_star
   | Root
   | Dot_lbrace (** [.{], substitutions of a splice *)
   | Dotdot
@@ -126,6 +127,7 @@ let to_string = function
   | Larrow -> "<-"
   | Star -> "*"
   | Dot -> "."
+  | Dot_star -> ".*"
   | Root -> "."
   | Dot_lbrace -> ".{"
   | Dotdot -> ".."
@@ -196,6 +198,7 @@ let ends_code : t -> bool = function
   | Comma
   | Semi
   | Dotdot
+  | Dot_star
   | Underscore
   | Quote_close
   | Greater

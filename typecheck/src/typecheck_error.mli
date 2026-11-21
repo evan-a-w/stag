@@ -63,6 +63,7 @@ module Kind : sig
         ; param : Syntax.Type_decl.Param.t
         }
     | Cyclic_type_alias of string
+    | Infinite_type_layout of string
     | Non_regular_recursive_alias of string
     | Duplicate_module of string
     | Duplicate_type of string
@@ -91,6 +92,8 @@ module Kind : sig
     | Duplicate_parameter of string
     | Duplicate_row_entry of string
     | Assign_to_immutable of string
+    | Store_not_through_pointer
+    (** A [Store] whose target is not a dereference, or a field of one. *)
     | Captures_mutable of
         { name : string
         ; var_level : Env.Level.t

@@ -343,9 +343,9 @@ let fst p = match p with (a, _) -> a
 let getter ty r =
   let name = Stag.Field_ref.name r in
   Stag.Toplevel.let_ (String.append "get_" name) Nil
-    (Stag.Expr.Let ("f", Cons (("v", Some (Stag.Type.expr ty)), Nil), None,
-       Stag.Expr.Field (Stag.Expr.var "v", Stag.Path.Name name),
-       Stag.Expr.var "f"))
+    (Stag.Expr.Let (Ptr.make ( ("f", Cons (Ptr.make ( (("v", Some (Stag.Type.expr ty)), Nil))), None,
+       Stag.Expr.Field (Ptr.make ( (Stag.Expr.var "v", Stag.Path.Name name))),
+       Stag.Expr.var "f"))))
 
 let getters ty =
   let head = match Stag.Type.expr ty with Stag.Type_expr.Con (Stag.Path.Ref r, _) -> r in
@@ -389,12 +389,12 @@ let%expect_test "unqualified constructors resolve by the expected type" =
     (types
      ^ {|
 let annotated : M.v = B 1
-let in_list : list[M.v] = Cons (A, Cons (B 2, Nil))
+let in_list : list[M.v] = Cons (Ptr.make ( (A, Cons (Ptr.make ( (B 2, Nil))))))
 let returned n : M.v = B n
 let in_match b : M.v = match b with true -> A | false -> B 3
 let pattern (v : M.v) = match v with A -> 0 | B n -> n
-let nested (l : list[M.v]) = match l with Cons (B n, _) -> n | _ -> 0
-let ran = (pattern (B 5), nested (Cons (B 6, Nil)), in_match false)
+let nested (l : list[M.v]) = match l with Cons * (B n, _) -> n | _ -> 0
+let ran = (pattern (B 5), nested (Cons (Ptr.make ( (B 6, Nil)))), in_match false)
 |}
     );
   [%expect

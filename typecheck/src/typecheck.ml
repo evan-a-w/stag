@@ -100,14 +100,23 @@ module Toplevel = struct
     ; mut : bool
     ; generated : Generated.t option
     ; mutable state : State.t
+    ; mutable intrinsic_alias : bool option
+    (** Whether it is an alias of an intrinsic, once known. *)
     }
   [@@deriving sexp_of]
 
   let is_function t = not (List.is_empty t.args)
 
-  (* Usable in quotes once checked: a mutable toplevel is referred to by name,
-     like a function, rather than lifted. *)
-  let is_persistent t = is_function t || t.mut
+  (* The value it is an alias of, if any. *)
+  let aliased t =
+    match t.expr.txt with
+    | Var (((Path _ | Root _) as path), None)
+      when Option.is_none t.annot && (not t.mut) && not (is_function t) ->
+      (match Module_scope.find_value t.module_ path ~loc:t.expr.loc with
+       | Ok value -> Some value
+       | Error _ -> None)
+    | _ -> None
+  ;;
 end
 
 (* Whether a local may reach a mutable local's cell, so that a closure capturing
@@ -249,6 +258,40 @@ module Program_env = struct
   ;;
 
   let toplevel t name = force (Hashtbl.find_exn t.toplevels name)
+
+  (* Such as [Ptr.make], or an alias of one: a builtin, so its value needn't be
+     lifted. *)
+  let is_intrinsic_alias t toplevel =
+    let rec go (toplevel : Toplevel.t) ~visited =
+      match toplevel.intrinsic_alias with
+      | Some known -> known
+      | None ->
+        let name = toplevel.ident.name in
+        let known =
+          (not (Set.mem visited name))
+          &&
+          match Toplevel.aliased toplevel with
+          | Some (Intrinsic _) -> true
+          | Some (Toplevel target) ->
+            Option.value_map
+              (find_toplevel t target)
+              ~default:false
+              ~f:(go ~visited:(Set.add visited name))
+          | Some (Prim _ | Unbound) | None -> false
+        in
+        toplevel.intrinsic_alias <- Some known;
+        known
+    in
+    go toplevel ~visited:String.Set.empty
+  ;;
+
+  (* Usable in quotes once checked: a mutable toplevel is referred to by name,
+     like a function, rather than lifted. *)
+  let is_persistent t (toplevel : Toplevel.t) =
+    Toplevel.is_function toplevel
+    || toplevel.mut
+    || is_intrinsic_alias t toplevel
+  ;;
 
   let add_info t ident ~ty ~level =
     let info = { Typed.Ident_info.ty; level } in
@@ -1014,6 +1057,15 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
     let ident, var = bind binder ty in
     node (Var ident) ty, [ var ]
   | Lit lit -> node (Lit lit) (Syntax.Lit.ty lit), []
+  | Deref inner ->
+    let expected =
+      Option.bind expected ~f:(fun ty ->
+        match Type.canonical_ty ty with
+        | TCon ("ptr", [ ATy pointee ]) -> Some pointee
+        | _ -> None)
+    in
+    let inner, bindings = pattern_type t scope ~pattern:inner ?expected in
+    node (Deref inner) (Type.TCon ("ptr", [ ATy inner.ty ])), bindings
   | Tuple patterns ->
     let types = List.map patterns ~f:(fun _ -> Scope.fresh_ty t scope) in
     let patterns, bindings =
@@ -1470,7 +1522,9 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
             | In_progress { body = None; _ } | Unchecked | Done _ -> None))
   in
   let runtime_only = runtime_only program members in
-  let persistent = List.for_all members ~f:Toplevel.is_persistent in
+  let persistent =
+    List.for_all members ~f:(Program_env.is_persistent program)
+  in
   let recursive =
     List.exists members ~f:(fun member ->
       match member.state with
@@ -1712,7 +1766,8 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
        scope.scc.lowlink <- Int.min scope.scc.lowlink in_progress.index;
        Ok entry)
   | Unchecked
-    when Option.is_some scope.quote && not (Toplevel.is_persistent toplevel) ->
+    when Option.is_some scope.quote
+         && not (Program_env.is_persistent scope.program toplevel) ->
     (* A free variable of the quote, like an [In_progress] toplevel. A function
        is checked, as it is persistent once its component is. *)
     Ok
@@ -1831,8 +1886,15 @@ and with_monomorphic_bindings (scope : Scope.t) bindings ~f =
     ~f
 
 (* What fails to check is reported, and becomes [Error] of its parts that did,
-   of type [Type.error]. *)
-and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
+   of type [Type.error]. Unless [hint] is [Required], [expected] is only what
+   [expr] is likely to be, so it isn't unified with what may turn out to be
+   something else. *)
+and expr_type
+  ?expected
+  ?(hint = Expectation.Required)
+  t
+  (scope : Scope.t)
+  ~(expr : Source.Expr.t)
   : Typed.Expr.t
   =
   let loc = Source.Expr.loc expr in
@@ -1863,7 +1925,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
   | Struct_quote toplevels ->
     (match Struct_quote.expand toplevels ~loc with
      | Ok expanded ->
-       expr_type ?expected t scope ~expr:(Source.Expr.Syntax expanded)
+       expr_type ?expected ~hint t scope ~expr:(Source.Expr.Syntax expanded)
      | Error (loc, message) ->
        fail (Typecheck_error.create ~loc (Malformed_struct_quote message)))
   | Type ty ->
@@ -1909,8 +1971,28 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
     let a = Scope.fresh_ty t scope in
     let b = Scope.fresh_ty t scope in
     let f = check_expr t scope ~expr:f ~ty:(TArrow (a, b)) in
+    (* The expected result is known before the argument, which may need it:
+       [Ptr.make (C x)] resolves [C] in the expected pointee type. A clash is
+       left to whoever expects the result to report. A hint is only taken once
+       the result is known to be of its form, as a variable may become another
+       type: a toplevel splice's code may be syntax. *)
+    let result_matches =
+      match expected with
+      | Some expected
+        when (not (Unify.clash expected b))
+             && not
+                  ((not (Expectation.is_required hint))
+                   &&
+                   match Type.canonical_ty b with
+                   | TVar _ -> true
+                   | _ -> false) ->
+        Scope.unifies t scope ~ty1:expected ~ty2:b ~loc
+      | Some _ | None -> true
+    in
     let x = check_expr t scope ~expr:x ~ty:a in
-    node (App (f, x)) b
+    if result_matches
+    then node (App (f, x)) b
+    else node (Error [ f; x ]) Type.error
   | Let { binder; args; annot; body; in_ } ->
     let inner = { scope with rank = scope.rank + 1 } in
     let { Function_type.args = arg_types; annots; result_annot; res_ty; ty } =
@@ -1943,7 +2025,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
       Env.with_bindings
         scope.locals
         [ name, Scope.entry scope ~ident ~scheme:ty ~persistent ]
-        ~f:(fun () -> expr_type t scope ~expr:in_ ?expected)
+        ~f:(fun () -> expr_type t scope ~expr:in_ ?expected ~hint)
     in
     node
       (Let { ident; args; annots; result_annot; body; in_; generalized })
@@ -1969,7 +2051,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
         [ ( Source.Binder.name binder
           , Scope.entry scope ~ident ~scheme:ty ~persistent:false )
         ]
-        ~f:(fun () -> expr_type t scope ~expr:in_ ?expected)
+        ~f:(fun () -> expr_type t scope ~expr:in_ ?expected ~hint)
     in
     node (Let_mut { ident; annot; body; in_ }) in_.ty
   | Assign (var, value) ->
@@ -2047,6 +2129,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
         { scope with level = scope.level + 1; quote = Some quote }
         ~expr
         ?expected
+        ~hint:(Expectation.quoted hint)
     in
     node (Quote inner) (TCode { inner = inner.ty; context = quote.context })
   | Splice { code; subs } ->
@@ -2105,12 +2188,20 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
            ~expr:code
            ~ty:(TCode { inner; context })
            ?expected:code_expected
+           ~hint
        in
        (match substitutions () with
         | Error error -> fail error ~children:[ code ]
         | Ok subs -> node (Splice { code; subs }) inner)
      | None ->
-       let code = expr_type t outside ~expr:code ?expected:code_expected in
+       let code =
+         expr_type
+           t
+           outside
+           ~expr:code
+           ?expected:code_expected
+           ~hint:(Code_hint hint)
+       in
        if is_syntax code.ty
        then (
          match subs with
@@ -2122,7 +2213,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
            if failed code
            then node (Error [ code ]) Type.error
            else (
-             match splice_syntax t scope ~code ~loc ?expected with
+             match splice_syntax t scope ~code ~loc ?expected ~hint with
              | Error error -> fail error ~children:[ code ]
              | Ok expansion ->
                node (Toplevel_splice { code; expansion }) expansion.ty))
@@ -2159,12 +2250,47 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
                 | Error error -> fail error ~children:[ code ]
                 | Ok expansion ->
                   node (Toplevel_splice { code; expansion }) inner))))
+  | Deref pointer ->
+    let ptr pointee = Type.TCon ("ptr", [ ATy pointee ]) in
+    let pointee, pointer =
+      match expected with
+      | Some expected when Expectation.is_required hint ->
+        expected, expr_type t scope ~expr:pointer ~expected:(ptr expected)
+      | Some _ | None ->
+        ( Scope.fresh_ty t scope
+        , expr_type
+            t
+            scope
+            ~expr:pointer
+            ?expected:(Option.map expected ~f:ptr)
+            ~hint:Hint )
+    in
+    if Scope.unifies t scope ~ty1:pointer.ty ~ty2:(ptr pointee) ~loc
+    then node (Deref pointer) pointee
+    else node (Error [ pointer ]) Type.error
+  | Store (target, value) ->
+    let rec under_deref (expr : Source.Expr.t) =
+      match Source.Expr.view expr with
+      | Deref _ -> true
+      | Field (inner, _) | Poly_field (inner, _) -> under_deref inner
+      | _ -> false
+    in
+    if not (under_deref target)
+    then (
+      let target = expr_type t scope ~expr:target in
+      fail
+        ~children:[ target ]
+        (Typecheck_error.create ~loc Store_not_through_pointer))
+    else (
+      let target = expr_type t scope ~expr:target in
+      let value = check_expr t scope ~expr:value ~ty:target.ty in
+      node (Store (target, value)) Type.unit)
   | Tuple exprs ->
     let exprs =
       List.map2_exn
         exprs
         (tuple_components expected (List.length exprs))
-        ~f:(fun expr expected -> expr_type t scope ~expr ?expected)
+        ~f:(fun expr expected -> expr_type t scope ~expr ?expected ~hint)
     in
     node (Tuple exprs) (Type.TTuple (tys exprs))
   | Construct (constructor, args) ->
@@ -2316,7 +2442,13 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
               scope
               ~expr:body
               ~ty:result
-              ?expected:(either_known result expected))
+              ?expected:(either_known result expected)
+              ~hint:
+                (match Type.canonical_ty result with
+                 | TVar _ -> hint
+                 | _ ->
+                   (* An earlier case's type, which this one must have. *)
+                   Required))
       in
       (pattern, body), unified
     in
@@ -2371,7 +2503,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
     let match_ = node (Match { scrutinee; cases; exception_cases }) result in
     if !patterns_failed then node (Error [ match_ ]) result else match_
   | Poly_record fields ->
-    let fields = labelled_types t scope fields ~expected in
+    let fields = labelled_types t scope fields ~expected ~hint in
     node
       (Poly_record fields)
       (Fresh.record t (Poly_row.present (labelled_tys fields) ~tail:REmpty))
@@ -2380,7 +2512,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
     let expr, (_ : Type.row) = check_open_record t scope expr [ label, ty ] in
     node (Poly_field (expr, label)) ty
   | Poly_extend (fields, expr) ->
-    let fields = labelled_types t scope fields ~expected in
+    let fields = labelled_types t scope fields ~expected ~hint in
     let rest = Scope.fresh_row t scope in
     let expr = check_expr t scope ~expr ~ty:(Fresh.record t rest) in
     node
@@ -2392,7 +2524,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
     in
     node (Poly_restrict (expr, label)) (Fresh.record t rest)
   | Poly_update (expr, fields) ->
-    let fields = labelled_types t scope fields ~expected in
+    let fields = labelled_types t scope fields ~expected ~hint in
     let expr, rest =
       check_open_record
         t
@@ -2410,7 +2542,8 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
           t
           scope
           ~expr
-          ?expected:(row_entry expected `Variant ~label:tag))
+          ?expected:(row_entry expected `Variant ~label:tag)
+          ~hint)
     in
     let arg_ty =
       Option.value_map arg ~default:Type.unit ~f:(fun (expr : Typed.Expr.t) ->
@@ -2421,7 +2554,7 @@ and expr_type ?expected t (scope : Scope.t) ~(expr : Source.Expr.t)
 (* Runs the toplevel splice [code] of a [Stag.Expr.t], then infers the
    expression it gives here, checking it against [expected] so that a mismatch
    is reported as the expression's. *)
-and splice_syntax ?expected t (scope : Scope.t) ~code ~loc =
+and splice_syntax ?expected ~hint t (scope : Scope.t) ~code ~loc =
   let program = scope.program in
   let%bind.Result value =
     at_compile_time
@@ -2444,8 +2577,8 @@ and splice_syntax ?expected t (scope : Scope.t) ~code ~loc =
   let scope = { scope with syntax_splice = Some { splice = loc; generated } } in
   let expr = Source.Expr.Syntax generated in
   match expected with
-  | None -> expr_type t scope ~expr
-  | Some ty -> check_expr t scope ~expr ~ty
+  | Some ty when Expectation.is_required hint -> check_expr t scope ~expr ~ty
+  | Some _ | None -> expr_type t scope ~expr ?expected ~hint
 
 (* Runs the toplevel splice [code], then infers the code it generates here, with
    its explicit substitutions bound by lets around it. *)
@@ -2524,7 +2657,7 @@ and expand t (scope : Scope.t) ~code ~subs ~ty ~loc =
     ; loc
     })
 
-and labelled_types t scope fields ~expected =
+and labelled_types t scope fields ~expected ~hint =
   Poly_row.report_duplicate_labels scope fields;
   List.map fields ~f:(fun ((label : Syntax.Name.t), expr) ->
     ( label.txt
@@ -2532,13 +2665,14 @@ and labelled_types t scope fields ~expected =
         t
         scope
         ~expr
-        ?expected:(row_entry expected `Record ~label:label.txt) ))
+        ?expected:(row_entry expected `Record ~label:label.txt)
+        ~hint ))
 
 (* Checks [expr] has type [ty], [expected] (by default [ty]) being what it is
    known to be. *)
-and check_expr ?expected t scope ~expr ~ty =
+and check_expr ?expected ?hint t scope ~expr ~ty =
   let expr =
-    expr_type t scope ~expr ~expected:(Option.value expected ~default:ty)
+    expr_type t scope ~expr ~expected:(Option.value expected ~default:ty) ?hint
   in
   if Scope.unifies t scope ~ty1:ty ~ty2:expr.ty ~loc:expr.loc
   then expr
@@ -3096,6 +3230,7 @@ let declare
          ; mut
          ; generated
          ; state = Unchecked
+         ; intrinsic_alias = None
          })
     in
     if not in_prelude then ignore (force toplevel : Toplevel.t);

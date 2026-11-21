@@ -3,7 +3,7 @@ stag-build corrects inline expansions like expect tests, in libraries and tests.
   $ touch stag-project && mkdir gen t
   $ echo '(library (name gen))' > gen/stag
   $ cat > gen/gen.stag <<'EOF'
-  > let value name n = Cons (Stag.Toplevel.let_ name Nil (Stag.Expr.int n), Nil)
+  > let value name n = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil (Stag.Expr.int n), Nil)))
   > 
   > include%inline .~(value "base" 10)
   > end%inline
@@ -23,7 +23,7 @@ stag-build corrects inline expansions like expect tests, in libraries and tests.
   --- gen/gen.stag
   +++ _stag/gen/gen.stag.corrected
   @@ -1,4 +1,5 @@
-   let value name n = Cons (Stag.Toplevel.let_ name Nil (Stag.Expr.int n), Nil)
+   let value name n = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil (Stag.Expr.int n), Nil)))
    
    include%inline .~(value "base" 10)
   +  let base = 10
@@ -53,7 +53,7 @@ stag-build corrects inline expansions like expect tests, in libraries and tests.
   Promoting _stag/gen/gen.stag.corrected to gen/gen.stag.
   Promoting _stag/t/t.stag.corrected to t/t.stag.
   $ cat gen/gen.stag t/t.stag
-  let value name n = Cons (Stag.Toplevel.let_ name Nil (Stag.Expr.int n), Nil)
+  let value name n = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil (Stag.Expr.int n), Nil)))
   
   include%inline .~(value "base" 10)
     let base = 10
@@ -77,7 +77,7 @@ A changed generator makes the expansions using it stale.
   --- gen/gen.stag
   +++ _stag/gen/gen.stag.corrected
   @@ -1,5 +1,5 @@
-   let value name n = Cons (Stag.Toplevel.let_ name Nil (Stag.Expr.int (Int.mul 2 n)), Nil)
+   let value name n = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil (Stag.Expr.int (Int.mul 2 n)), Nil)))
    
    include%inline .~(value "base" 10)
   -  let base = 10

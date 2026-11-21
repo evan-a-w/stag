@@ -506,12 +506,18 @@ x
 let%expect_test "a space after a line is not measured" =
   test
     {|let x =
-  iter print_item (map (Int.mul 10) (Cons (1, Cons (2, Cons (3 (* c *), Nil)))))
+  iter print_item (map (Int.mul 10) (Cons (Ptr.make ( (1, Cons (Ptr.make ( (2, Cons (Ptr.make ( (3 (* c *), Nil)))))))))))
 |};
   [%expect
     {|
     let x =
-      iter print_item (map (Int.mul 10) (Cons (1, Cons (2, Cons (3, (* c *) Nil)))))
+      iter
+        print_item
+        (map
+           (Int.mul 10)
+           (Cons
+              (Ptr.make
+                 (1, Cons (Ptr.make (2, Cons (Ptr.make (3, (* c *) Nil))))))))
     |}]
 ;;
 

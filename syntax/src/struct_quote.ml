@@ -96,6 +96,10 @@ let expand_exn toplevels ~loc =
       let char c = node (Expr.Lit (Char c))
       let tuple es = node (Expr.Tuple es)
 
+      let ptr e =
+        node (Expr.App (node (Expr.Var (resolved "Ptr.make", None)), e))
+      ;;
+
       let record fields =
         node
           (Expr.Poly_record

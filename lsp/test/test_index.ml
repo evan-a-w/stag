@@ -10,7 +10,7 @@ let%expect_test "an include's expression is indexed, not what it generates" =
   Client.with_server
     ~files:
       [ ( "a.stag"
-        , {|let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+        , {|let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
 let x = 1
 include .~(value "y" (Stag.Expr.var "x"))
 let z = y
@@ -44,7 +44,7 @@ let%expect_test "a spliced module" =
   Client.with_server
     ~files:
       [ ( "a.stag"
-        , {|let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+        , {|let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
 let y = "written"
 module M = .~(value "y" (Stag.Expr.int 1))
 let z = M.y
@@ -77,7 +77,7 @@ let%expect_test "a written declaration shadowed by an included one" =
   Client.with_server
     ~files:
       [ ( "a.stag"
-        , {|let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+        , {|let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
 let y = "written"
 module N = struct
   include .~(value "y" (Stag.Expr.int 1))
@@ -143,7 +143,7 @@ let%expect_test "inline expansions" =
   Client.with_server
     ~files:
       [ ( "a.stag"
-        , {|let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+        , {|let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
 include%inline .~(value "x" (Stag.Expr.int 1))
   let x = 1
 end%inline
@@ -220,73 +220,75 @@ let w = s
       Client.print_semantic_tokens client "a.stag";
       [%expect
         {|
-         0:0+3 Keyword "let"
-         0:4+5 Function (declaration) "value"
-         0:10+4 Parameter (declaration) "name"
-         0:15+1 Parameter (declaration) "e"
-         0:17+1 Operator "="
-         0:19+4 Enum_member "Cons"
-         0:25+4 Namespace "Stag"
-         0:30+8 Namespace "Toplevel"
-         0:39+4 Function "let_"
-         0:44+4 Variable "name"
-         0:49+3 Enum_member "Nil"
-         0:53+1 Variable "e"
-         0:56+3 Enum_member "Nil"
-         1:0+14 Keyword "include%inline"
-         1:15+2 Macro ".~"
-         1:18+5 Function "value"
-         1:24+3 String "\"x\""
-         1:29+4 Namespace "Stag"
-         1:34+4 Namespace "Expr"
-         1:39+3 Function "int"
-         1:43+1 Number "1"
-         2:2+3 Keyword "let"
-         2:6+1 Variable (declaration) "x"
-         2:8+1 Operator "="
-         2:10+1 Number "1"
-         3:0+10 Keyword "end%inline"
-         4:0+13 Keyword "module%inline"
-         4:14+1 Namespace (declaration) "M"
-         4:16+1 Operator "="
-         4:18+2 Macro ".~"
-         4:21+5 Function "value"
-         4:27+3 String "\"y\""
-         4:32+4 Namespace "Stag"
-         4:37+4 Namespace "Expr"
-         4:42+3 Function "var"
-         4:46+3 String "\"x\""
-         5:2+3 Keyword "let"
-         5:6+1 Variable (declaration) "y"
-         5:8+1 Operator "="
-         5:10+1 Variable "x"
-         6:0+10 Keyword "end%inline"
-         7:0+14 Keyword "include%inline"
-         7:15+2 Macro ".~"
-         7:18+5 Function "value"
-         7:24+3 String "\"s\""
-         7:29+4 Namespace "Stag"
-         7:34+4 Namespace "Expr"
-         7:39+3 Function "int"
-         7:43+1 Number "2"
-         8:2+3 Keyword "let"
-         8:6+1 Variable (declaration) "s"
-         8:8+1 Operator "="
-         8:10+1 Number "3"
-         9:0+10 Keyword "end%inline"
-         10:0+3 Keyword "let"
-         10:4+1 Variable (declaration) "z"
-         10:6+1 Operator "="
-         10:8+3 Namespace "Int"
-         10:12+3 Function "add"
-         10:16+1 Variable "x"
-         10:18+1 Namespace "M"
-         10:20+1 Variable "y"
-         11:0+3 Keyword "let"
-         11:4+1 Variable (declaration) "w"
-         11:6+1 Operator "="
-         11:8+1 Variable "s"
-         |}])
+        0:0+3 Keyword "let"
+        0:4+5 Function (declaration) "value"
+        0:10+4 Parameter (declaration) "name"
+        0:15+1 Parameter (declaration) "e"
+        0:17+1 Operator "="
+        0:19+4 Enum_member "Cons"
+        0:25+3 Namespace "Ptr"
+        0:29+4 Function "make"
+        0:37+4 Namespace "Stag"
+        0:42+8 Namespace "Toplevel"
+        0:51+4 Function "let_"
+        0:56+4 Variable "name"
+        0:61+3 Enum_member "Nil"
+        0:65+1 Variable "e"
+        0:68+3 Enum_member "Nil"
+        1:0+14 Keyword "include%inline"
+        1:15+2 Macro ".~"
+        1:18+5 Function "value"
+        1:24+3 String "\"x\""
+        1:29+4 Namespace "Stag"
+        1:34+4 Namespace "Expr"
+        1:39+3 Function "int"
+        1:43+1 Number "1"
+        2:2+3 Keyword "let"
+        2:6+1 Variable (declaration) "x"
+        2:8+1 Operator "="
+        2:10+1 Number "1"
+        3:0+10 Keyword "end%inline"
+        4:0+13 Keyword "module%inline"
+        4:14+1 Namespace (declaration) "M"
+        4:16+1 Operator "="
+        4:18+2 Macro ".~"
+        4:21+5 Function "value"
+        4:27+3 String "\"y\""
+        4:32+4 Namespace "Stag"
+        4:37+4 Namespace "Expr"
+        4:42+3 Function "var"
+        4:46+3 String "\"x\""
+        5:2+3 Keyword "let"
+        5:6+1 Variable (declaration) "y"
+        5:8+1 Operator "="
+        5:10+1 Variable "x"
+        6:0+10 Keyword "end%inline"
+        7:0+14 Keyword "include%inline"
+        7:15+2 Macro ".~"
+        7:18+5 Function "value"
+        7:24+3 String "\"s\""
+        7:29+4 Namespace "Stag"
+        7:34+4 Namespace "Expr"
+        7:39+3 Function "int"
+        7:43+1 Number "2"
+        8:2+3 Keyword "let"
+        8:6+1 Variable (declaration) "s"
+        8:8+1 Operator "="
+        8:10+1 Number "3"
+        9:0+10 Keyword "end%inline"
+        10:0+3 Keyword "let"
+        10:4+1 Variable (declaration) "z"
+        10:6+1 Operator "="
+        10:8+3 Namespace "Int"
+        10:12+3 Function "add"
+        10:16+1 Variable "x"
+        10:18+1 Namespace "M"
+        10:20+1 Variable "y"
+        11:0+3 Keyword "let"
+        11:4+1 Variable (declaration) "w"
+        11:6+1 Operator "="
+        11:8+1 Variable "s"
+        |}])
 ;;
 
 let%expect_test "a declaration with type splices" =
@@ -294,7 +296,7 @@ let%expect_test "a declaration with type splices" =
     ~files:
       [ ( "a.stag"
         , {|let int_ty = Stag.Type_expr.con "int" Nil
-let kind = Stag.Type_decl.Kind.Variant (Cons (("A", Nil), Nil))
+let kind = Stag.Type_decl.Kind.Variant (Cons (Ptr.make ( (("A", Nil), Nil))))
 let f (n : .~int_ty) = Int.add n 1
 type t = .~kind
 let a = A

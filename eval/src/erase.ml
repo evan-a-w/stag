@@ -115,6 +115,7 @@ let expr (expr : Typed.Expr.t) =
        | Var ident -> Var (name names ident)
        | Lit lit -> Lit lit
        | Tuple ps -> Tuple (List.map ps ~f:go)
+       | Deref p -> Deref (go p)
        | Construct (c, ps) -> Construct (decl_path c.name, List.map ps ~f:go)
        | Record fields ->
          Record
@@ -148,6 +149,7 @@ let expr (expr : Typed.Expr.t) =
     | Free name -> Ok (Path (Syntax.Path.of_string name))
     | Free_toplevel name -> Ok (resolved name)
     | Prim prim -> Ok (resolved (Prim.canonical_name prim))
+    | Intrinsic Ptr_make -> Ok (resolved (Prelude_path.canonical "Ptr.make"))
     | Intrinsic intrinsic ->
       Or_error.error_s
         [%message
@@ -179,6 +181,10 @@ let expr (expr : Typed.Expr.t) =
       let%bind path = var_path names var_ref in
       let%bind value = go names value in
       node (Assign (located loc path, value))
+    | Store (target, value) ->
+      let%bind target = go names target in
+      let%bind value = go names value in
+      node (Store (target, value))
     | Let_mut { ident; annot; body; in_ } ->
       let%bind body = go names body in
       let names = Names.bind names [ ident ] ~scope:(Uses.of_expr in_) in
@@ -257,6 +263,9 @@ let expr (expr : Typed.Expr.t) =
     | Tuple es ->
       let%bind es = all es in
       node (Tuple es)
+    | Deref e ->
+      let%bind e = go names e in
+      node (Deref e)
     | Construct (c, es) ->
       let%bind es = all es in
       node (Construct (located loc (resolved c.name), es))

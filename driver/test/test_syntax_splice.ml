@@ -206,7 +206,7 @@ let%expect_test "t" =
   .~(Stag.Expr.Expect "")
 let%expect_test "nested" =
   print_endline "hi";
-  .~(Stag.Expr.Let ("u", [], None, Stag.Expr.Lit Stag.Lit.Unit, Stag.Expr.Expect ""))
+  .~(Stag.Expr.Let (Ptr.make ( ("u", [], None, Stag.Expr.Lit Stag.Lit.Unit, Stag.Expr.Expect ""))))
 |};
   [%expect
     {|
@@ -216,9 +216,9 @@ let%expect_test "nested" =
     Error: In the expression this splice gave: A splice of syntax can't give an [%expect]: its expected output is generated, so it could not be corrected
     Note: The splice gave the expression:
       [%expect]
-    File "a.stag", line 7, characters 2-85:
-    7 |   .~(Stag.Expr.Let ("u", [], None, Stag.Expr.Lit Stag.Lit.Unit, Stag.Expr.Expect ""))
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "a.stag", line 7, characters 2-99:
+    7 |   .~(Stag.Expr.Let (Ptr.make ( ("u", [], None, Stag.Expr.Lit Stag.Lit.Unit, Stag.Expr.Expect ""))))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: In the expression this splice gave: A splice of syntax can't give an [%expect]: its expected output is generated, so it could not be corrected
     Note: The splice gave the expression:
       let u = () in
@@ -406,23 +406,23 @@ let%expect_test "mutable variables in generated syntax and declarations" =
     ~run:true
     {|
 let counted =
-  .~(Stag.Expr.Let_mut
+  .~(Stag.Expr.Let_mut (Ptr.make (
        ( "n"
        , None
        , Stag.Expr.int 1
-       , Stag.Expr.Let
+       , Stag.Expr.Let (Ptr.make (
            ( "_"
            , Nil
            , None
-           , Stag.Expr.Assign
+           , Stag.Expr.Assign (Ptr.make (
                ( Stag.Path.Name "n"
-               , Stag.Expr.apply (Stag.Expr.var "Core.Int.add") (Cons (Stag.Expr.var "n", Cons (Stag.Expr.int 2, Nil))) )
-           , Stag.Expr.var "n" ) ))
+               , Stag.Expr.apply (Stag.Expr.var "Core.Int.add") (Cons (Ptr.make ( (Stag.Expr.var "n", Cons (Ptr.make ( (Stag.Expr.int 2, Nil))))))) )))
+           , Stag.Expr.var "n" ))) ))))
 include .~(.< struct
   let mut total = 0
   let add_to_total n = total <- Core.Int.add total n
 end >.)
-module Generated = .~(Cons (Stag.Toplevel.Let_mut ("count", None, Stag.Expr.int 5), Nil))
+module Generated = .~(Cons (Ptr.make ( (Stag.Toplevel.Let_mut ("count", None, Stag.Expr.int 5), Nil))))
 let main =
   add_to_total 3;
   add_to_total 4;
@@ -446,5 +446,175 @@ let main =
     3
     7
     6
+    |}]
+;;
+
+let%expect_test "through calls of functions generic in their result" =
+  check
+    ~run:true
+    {|
+let id x = x
+let f (x : string) = .~(id (Stag.Expr.var "x"))
+let gen name = Stag.Expr.var name
+let twice g x = g x
+let g (x : string) = .~(twice gen "x")
+let wrap e = e
+let first p = match p with (a, _) -> a
+let h (x : string) = .~(wrap (first (Stag.Expr.var "x", 0)))
+let code = .~(id .< 1 >.)
+let main = print_endline (Core.String.append (Core.String.append (f "a") (g "b")) (Core.String.append (h "c") (Core.Int.to_string code)))
+|};
+  [%expect
+    {|
+    module A : sig
+      val id : 'a -> 'a
+      val f : string -> string
+      val gen : string -> Stag.Expr.t
+      val twice : ('a -> 'b) -> 'a -> 'b
+      val g : string -> string
+      val wrap : 'a -> 'a
+      val first : 'a * 'b -> 'a
+      val h : string -> string
+      val code : int
+      val main : unit
+    end
+    --- output ---
+    abc1
+    |}]
+;;
+
+let%expect_test "the expected type resolves constructors in spliced code" =
+  check
+    ~run:true
+    {|
+module M = struct type t = A | B end
+module N = struct type u = A | B end
+let p : ptr[M.t] = .~(.< Ptr.make A >.)
+let mk x = .< Ptr.make .~x >.
+let q : ptr[M.t] = .~(mk .< B >.)
+let main = match (p.*, q.*) with (A, B) -> print_endline "A B" | _ -> ()
+|};
+  [%expect
+    {|
+    module A : sig
+      module M : sig
+        type t = A | B
+      end
+      module N : sig
+        type u = A | B
+      end
+      val p : ptr[M.t]
+      val mk : <'a>{..'b} -> <ptr['a]>{..'c} where ..'b <= {..'c}
+      val q : ptr[M.t]
+      val main : unit
+    end
+    --- output ---
+    A B
+    |}]
+;;
+
+let%expect_test "a quote's body is expected with the splice's own type" =
+  check
+    ~run:true
+    {|
+module M = struct type t = C of int end
+type t = M.t
+type u = C of string
+let id x = x
+let ok : t = id (C 1)
+let ok2 : t = .~(.< id (C 2) >.)
+let main = match ok2 with C n -> print_endline (Core.Int.to_string n)
+|};
+  [%expect
+    {|
+    module A : sig
+      module M : sig
+        type t = C of int
+      end
+      type t = M.t
+      type u = C of string
+      val id : 'a -> 'a
+      val ok : M.t
+      val ok2 : M.t
+      val main : unit
+    end
+    --- output ---
+    2
+    |}]
+;;
+
+let%expect_test "a later match arm is expected with an earlier arm's type" =
+  check
+    ~run:true
+    {|
+module M = struct type t = C of int end
+type u = C of string
+let id x = x
+let ok : M.t = .~(match true with true -> .< M.C 3 >. | false -> id .< C 4 >.)
+let main = match ok with C n -> print_endline (Core.Int.to_string n)
+|};
+  [%expect
+    {|
+    module A : sig
+      module M : sig
+        type t = C of int
+      end
+      type u = C of string
+      val id : 'a -> 'a
+      val ok : M.t
+      val main : unit
+    end
+    --- output ---
+    3
+    |}]
+;;
+
+let%expect_test "dereferencing a pointer to syntax" =
+  check
+    ~run:true
+    {|
+let p = Ptr.make (Stag.Expr.int 4)
+let h : int = .~(p.*)
+let main = print_endline (Core.Int.to_string h)
+|};
+  [%expect
+    {|
+    module A : sig
+      val p : ptr[Stag.Expr.t]
+      val h : int
+      val main : unit
+    end
+    --- output ---
+    4
+    |}]
+;;
+
+let%expect_test "dereferencing a pointer to code" =
+  check
+    ~run:true
+    {|
+module M = struct type t = A | B end
+module N = struct type u = A | B end
+let q = Ptr.make .< 5 >.
+let h : int = .~(q.*)
+let a : M.t = .~((Ptr.make .< A >.).*)
+let main = match a with A -> print_endline (Core.Int.to_string h) | B -> ()
+|};
+  [%expect
+    {|
+    module A : sig
+      module M : sig
+        type t = A | B
+      end
+      module N : sig
+        type u = A | B
+      end
+      val q : ptr[<int>{}]
+      val h : int
+      val a : M.t
+      val main : unit
+    end
+    --- output ---
+    5
     |}]
 ;;

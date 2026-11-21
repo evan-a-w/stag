@@ -1,8 +1,13 @@
 open! Import
 
-type t = { mutable next_id : int }
+type t =
+  { mutable next_id : int
+  ; mutable value_parameters : Value_layout.parameters
+  }
 
-let create () = { next_id = 0 }
+let create () = { next_id = 0; value_parameters = (fun _ -> None) }
+let set_value_parameters t f = t.value_parameters <- f
+let value_parameters t = t.value_parameters
 
 let id t =
   let id = t.next_id in

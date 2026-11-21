@@ -574,7 +574,7 @@ let%expect_test "declarations" =
     let f x y = e
     let g : int = 1
     type nat = Z | S of nat
-    type list['a] = Nil | Cons of 'a * list['a]
+    type list['a] = Nil | Cons of ptr['a * list['a]]
     type pair = P of ('a * 'b)
     type with_x[{..'r}] = {`x : int; ..'r}
     type point = {x : int; y : int}
@@ -598,7 +598,10 @@ let%expect_test "declarations" =
      (Type ((name nat) (params ()) (kind (Variant ((Z ()) (S ((Con nat ()))))))))
      (Type
       ((name list) (params ((Ty a)))
-       (kind (Variant ((Nil ()) (Cons ((Var a) (Con list ((Ty (Var a)))))))))))
+       (kind
+        (Variant
+         ((Nil ())
+          (Cons ((Con ptr ((Ty (Tuple ((Var a) (Con list ((Ty (Var a))))))))))))))))
      (Type
       ((name pair) (params ())
        (kind (Variant ((P ((Tuple ((Var a) (Var b))))))))))
@@ -739,20 +742,23 @@ let%expect_test "locations" =
   show_locs
     Program.sexp_of_t
     Parser.program
-    "type list['a] = Nil | Cons of 'a * list['a]\n\
+    "type list['a] = Nil | Cons of ptr['a * list['a]]\n\
      type t[{..'r}] = {x : int}\n\
      module M = struct let x = 1 end";
   [%expect
     {|
-    Type "type list['a] = Nil | Cons of 'a * list['a]"
+    Type "type list['a] = Nil | Cons of ptr['a * list['a]]"
       list "list"
       Ty "'a"
       Nil "Nil"
       Cons "Cons"
-      Var "'a"
-      Con "list['a]"
-        list "list"
-        Var "'a"
+      Con "ptr['a * list['a]]"
+        ptr "ptr"
+        Tuple "'a * list['a]"
+          Var "'a"
+          Con "list['a]"
+            list "list"
+            Var "'a"
     Type "type t[{..'r}] = {x : int}"
       t "t"
       Row "{..'r}"
@@ -1212,19 +1218,27 @@ let%expect_test "list literal locations" =
     {|
     Construct "[a; b;]"
       <Cons> "["
-      Var "a"
-      Construct "; b;]"
-        <Cons> ";"
-        Var "b"
-        Construct "]"
-          <Nil> "]"
+      App "[a; b;]"
+        Var "[a; b;]"
+        Tuple "[a; b;]"
+          Var "a"
+          Construct "; b;]"
+            <Cons> ";"
+            App "; b;]"
+              Var "; b;]"
+              Tuple "; b;]"
+                Var "b"
+                Construct "]"
+                  <Nil> "]"
     Construct "[ ]"
       <Nil> "[ ]"
     Construct "[a]"
       <Cons> "["
-      Var "a"
-      Construct "]"
-        <Nil> "]"
+      Deref "[a]"
+        Tuple "[a]"
+          Var "a"
+          Construct "]"
+            <Nil> "]"
     |}]
 ;;
 
@@ -1257,14 +1271,19 @@ let%expect_test "mutable variables" =
      ((Any (Let _ () () (Assign x (Lit (Int 1))) (Lit (Int 2))))))
     (Fun ((u ())) (Let _ () () (Assign x (Lit (Int 1))) (Lit (Int 2))))
     (Construct <Cons>
-     ((Assign x (Lit (Int 2)))
-      (Construct <Cons>
-       ((Assign y (Tuple ((Lit (Int 3)) (Lit (Int 4))))) (Construct <Nil> ())))))
+     ((App (Var <Ptr.make> ())
+       (Tuple
+        ((Assign x (Lit (Int 2)))
+         (Construct <Cons>
+          ((App (Var <Ptr.make> ())
+            (Tuple
+             ((Assign y (Tuple ((Lit (Int 3)) (Lit (Int 4)))))
+              (Construct <Nil> ())))))))))))
     (Poly_record ((a (Assign x (Lit (Int 2)))) (b (Lit (Int 1)))))
     (Record_update (Var r ()) ((M.f (Assign x (Lit (Int 2))))))
     t.stag:1:8-9: a mutable variable has no parameters
     t.stag:1:8-9: expected a name to bind, found `(`
-    t.stag:1:0-3: only a variable can be assigned to
+    t.stag:1:0-3: only a variable or a dereference can be assigned to
     ((Let_mut x () (Lit (Int 1)))
      (Let_mut y ((Con list ((Ty (Con int ()))))) (Construct <Nil> ()))
      (Let f ((u ())) ()

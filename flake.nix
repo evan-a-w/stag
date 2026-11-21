@@ -65,6 +65,7 @@
           "core"
           "core_unix"
           "ppx_jane"
+          "ocaml_intrinsics"
           "parsexp"
           "sexplib0"
           "time_now"

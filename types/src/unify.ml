@@ -73,43 +73,54 @@ let record_in_bounds_of
   | Error _ -> .
 ;;
 
-(* Lowers ranks to at most [rank], for a variable bound to the type iterated,
-   which passes on [in_bounds_of]. [occurs] is the id of the variable being
-   bound, if any, with the variable to report if it is reached other than
-   through a record or variant, which would make an unguarded cycle. Bounds may
-   relate variables of any ranks (see [Scheme.generalize]), so are not followed. *)
-let adjuster ~rank ~(occurs : (Type.id * Type.arg) option) ~in_bounds_of
-  : Unification_error.t Type.Iter.t
-  =
-  let adjust ~guarded (var : _ Type.Var.t) =
-    match occurs with
-    | Some (id, arg) when id = var.id && not guarded ->
-      Error (Unification_error.Occurs_check_failed arg)
-    | Some _ | None ->
-      add_in_bounds_of var in_bounds_of;
-      (match var.state with
-       | Unbound rank' when rank' > rank -> var.state <- Unbound rank
-       | Unbound _ | Generic | Link _ -> ());
-      Ok ()
+(* Bounds may relate variables of any ranks, so are not followed. *)
+let adjuster ~rank ~seen ~in_bounds_of : Unification_error.t Type.Iter.t =
+  let adjust ~guarded:_ (var : _ Type.Var.t) =
+    seen var.id;
+    add_in_bounds_of var in_bounds_of;
+    (match var.state with
+     | Unbound rank' when rank' > rank -> var.state <- Unbound rank
+     | Unbound _ | Generic | Link _ -> ());
+    Ok ()
   in
   { ty = adjust; row = adjust; presence = adjust }
 ;;
 
-(* The pairs of records or variants, and of [Link]s, being or already unified,
-   assumed equal when reached again: as each cycle passes through a record or
-   variant, and unification creates none, unifying cyclic types terminates, and
-   shared parts are unified once. *)
+let adjust_binding fresh iter ~id ~rank ~in_bounds_of ~occurs target =
+  let recursive = ref false in
+  let%bind.Result () =
+    iter
+      (adjuster ~rank ~in_bounds_of ~seen:(fun other ->
+         if id = other then recursive := true))
+  in
+  if not !recursive
+  then Ok ()
+  else if Value_layout.reaches_unguarded
+            ~con:(Fresh.value_parameters fresh)
+            ~needs_structure:false
+            ~var:id
+            [ target ]
+  then Error (Unification_error.Occurs_check_failed occurs)
+  else Ok ()
+;;
+
+(* Repeated pairs are assumed equal. Cuts through links also cover cycles
+   without a structural record or variant, including different unrollings. *)
 module State = struct
   type t =
     { fresh : Fresh.t
     ; nodes : Id_pair.Hash_set.t
     ; links : Id_pair.Hash_set.t
+    ; unaligned : Type.ty Type.Link_pairs.t
+    ; rows : Type.row Type.Link_pairs.t
     }
 
   let create fresh =
     { fresh
     ; nodes = Id_pair.Hash_set.create ()
     ; links = Id_pair.Hash_set.create ()
+    ; unaligned = Type.Link_pairs.create ()
+    ; rows = Type.Link_pairs.create ()
     }
   ;;
 
@@ -268,6 +279,9 @@ let rec unify_ty' state ~ty1 ~ty2 : (unit, Unification_error.t) Result.t =
   | ( Type.TVar { id = id1; state = Link _; _ }
     , Type.TVar { id = id2; state = Link _; _ } )
     when State.assume state.State.links id1 id2 -> Ok ()
+  | Type.TVar { state = Link _; _ }, Type.TVar { state = Link _; _ } ->
+    unify_structure state ~ty1 ~ty2
+  | _ when Type.Link_pairs.ty state.State.unaligned ty1 ty2 -> Ok ()
   | _ -> unify_structure state ~ty1 ~ty2
 
 and unify_structure state ~ty1 ~ty2 =
@@ -314,24 +328,28 @@ and unify_structure state ~ty1 ~ty2 =
   | TVar var1, TVar var2 when phys_equal var1 var2 -> Ok ()
   | TVar var, ty | ty, TVar var ->
     let%map.Result () =
-      Type.iter_ty
-        (adjuster
-           ~rank:(Type.Var.rank_exn var)
-           ~occurs:(Some (var.id, ATy (TVar var)))
-           ~in_bounds_of:var.in_bounds_of)
-        ty
+      adjust_binding
+        state.State.fresh
+        (fun f -> Type.iter_ty f ty)
+        ~id:var.id
+        ~rank:(Type.Var.rank_exn var)
+        ~in_bounds_of:var.in_bounds_of
+        ~occurs:(ATy (TVar var))
+        (ATy ty)
     in
     var.state <- Link ty
   | _ -> Error (Type_mismatch (ty1, ty2, Structural_mismatch))
 
 and bind_rvar state (var : _ Type.Var.t) row =
   let%bind.Result () =
-    Type.iter_row
-      (adjuster
-         ~rank:(Type.Var.rank_exn var)
-         ~occurs:(Some (var.id, ARow (RVar var)))
-         ~in_bounds_of:var.in_bounds_of)
-      row
+    adjust_binding
+      state.State.fresh
+      (fun f -> Type.iter_row f row)
+      ~id:var.id
+      ~rank:(Type.Var.rank_exn var)
+      ~in_bounds_of:var.in_bounds_of
+      ~occurs:(ARow (RVar var))
+      (ARow row)
   in
   var.state <- Link row;
   let%bind.Result () =
@@ -359,6 +377,11 @@ and in_record' state row ~whole =
     Ok ()
 
 and unify_row' state ~row1 ~row2 : (unit, Unification_error.t) Result.t =
+  if Type.Link_pairs.row state.State.rows row1 row2
+  then Ok ()
+  else unify_row_structure state ~row1 ~row2
+
+and unify_row_structure state ~row1 ~row2 =
   let row1 = Type.canonical_row row1 in
   let row2 = Type.canonical_row row2 in
   match row1, row2 with
@@ -586,7 +609,7 @@ and unify_if_present' state ~presence ~ty1 ~ty2 =
 ;;
 
 let lower_ty ~rank ty =
-  match Type.iter_ty (adjuster ~rank ~occurs:None ~in_bounds_of:[]) ty with
+  match Type.iter_ty (adjuster ~rank ~seen:ignore ~in_bounds_of:[]) ty with
   | Ok () -> ()
   | Error error ->
     raise_s [%message "lower_ty: occurs check" (error : Unification_error.t)]

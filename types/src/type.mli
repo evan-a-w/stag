@@ -239,6 +239,16 @@ module Iter : sig
     }
 end
 
+(** Memoisation for comparisons of regular types whose recursion knots need not
+    line up in the two unrollings being compared. *)
+module Link_pairs : sig
+  type 'a t
+
+  val create : unit -> 'a t
+  val ty : ty t -> ty -> ty -> bool
+  val row : row t -> row -> row -> bool
+end
+
 val iter_ty : 'e Iter.t @ local -> ty -> (unit, 'e) Result.t
 val iter_row : 'e Iter.t @ local -> row -> (unit, 'e) Result.t
 

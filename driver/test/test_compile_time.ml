@@ -7,29 +7,30 @@ let lines toplevels = String.concat ("" :: toplevels) ~sep:"\n" ^ "\n"
 let%expect_test "a generator used by a toplevel splice" =
   run
     {|
-type nat = Z | S of nat
-type list['a] = Nil | Cons of 'a * list['a]
-let power n c = match n with Z -> .<Nil>. | S m -> .<Cons (.~c, .~(power m c))>.
-let three = S (S (S Z))
+type nat = Z | S of ptr[nat]
+type list['a] = Nil | Cons of ptr['a * list['a]]
+let power n c = match n with Z -> .<Nil>. | S * m -> .<Cons (Ptr.make ((.~c, .~(power m c))))>.
+let three = S (Ptr.make (S (Ptr.make (S (Ptr.make Z)))))
 let cube x = .~(power three .<x>.)
 let used = cube 7
 |};
   [%expect
     {|
-    type nat = Z | S of nat
-    type list['a] = Nil | Cons of 'a * list['a]
+    type nat = Z | S of ptr[nat]
+    type list['a] = Nil | Cons of ptr['a * list['a]]
     val power : nat -> <'a>{..'b} -> <list['a]>{..'c} where ..'b <= {..'c}
     val three : nat
     val cube : 'a -> list['a]
     val used : list[int]
     -- evaluated at compile time
     (power <fun>)
-    (three (S (S (S (Z)))))
+    (three (S (Ptr (S (Ptr (S (Ptr (Z))))))))
     -- evaluated
     (power <fun>)
-    (three (S (S (S (Z)))))
+    (three (S (Ptr (S (Ptr (S (Ptr (Z))))))))
     (cube <fun>)
-    (used (Cons 7 (Cons 7 (Cons 7 (Nil)))))
+    (used
+     (Cons (Ptr (Tuple 7 (Cons (Ptr (Tuple 7 (Cons (Ptr (Tuple 7 (Nil)))))))))))
     |}]
 ;;
 
@@ -80,14 +81,14 @@ let generated = wrap .<1>.
 let%expect_test "mutually dependent compile time helpers" =
   run
     {|
-type nat = Z | S of nat
-let even n = match n with Z -> .<true>. | S m -> odd m
-let odd n = match n with Z -> .<false>. | S m -> even m
-let five_is_odd = .~(odd (S (S (S (S (S Z))))))
+type nat = Z | S of ptr[nat]
+let even n = match n with Z -> .<true>. | S * m -> odd m
+let odd n = match n with Z -> .<false>. | S * m -> even m
+let five_is_odd = .~(odd (S (Ptr.make (S (Ptr.make (S (Ptr.make (S (Ptr.make (S (Ptr.make Z)))))))))))
 |};
   [%expect
     {|
-    type nat = Z | S of nat
+    type nat = Z | S of ptr[nat]
     val even : nat -> <bool>{..'a}
     val odd : nat -> <bool>{..'a}
     val five_is_odd : bool
@@ -411,22 +412,22 @@ let%expect_test "spliced code using the toplevel being checked" =
   run
     ~bodies:[ "f" ]
     {|
-type nat = Z | S of nat
-let f n = match n with Z -> 0 | S m -> .~code
+type nat = Z | S of ptr[nat]
+let f n = match n with Z -> 0 | S * m -> .~code
 let code = .<f m>.
-let used = f (S (S Z))
+let used = f (S (Ptr.make (S (Ptr.make Z))))
 |};
   (* [f] must be checked to know if [code] embeds it, which needs [code]. *)
   run
     {|
-type nat = Z | S of nat
+type nat = Z | S of ptr[nat]
 let code = .<f m>.
-let f n = match n with Z -> 0 | S m -> .~code
-let used = f (S (S Z))
+let f n = match n with Z -> 0 | S * m -> .~code
+let used = f (S (Ptr.make (S (Ptr.make Z))))
 |};
   [%expect
     {|
-    type nat = Z | S of nat
+    type nat = Z | S of ptr[nat]
     val f : nat -> int
     val code : <'a>{f : 'b -> 'a; m : 'b; ..'c}
     val used : int
@@ -435,8 +436,8 @@ let used = f (S (S Z))
       (cases
        (((Construct ((type_name nat) (name Z) (index 0)) () : nat)
          (Lit (Int 0) : int))
-        ((Construct ((type_name nat) (name S) (index 1)) ((Var m/17 : nat)) :
-          nat)
+        ((Construct ((type_name nat) (name S) (index 1))
+          ((Deref (Var m/17 : nat) : ptr[nat])) : nat)
          (Toplevel_splice
           (code
            (Var (Bound (Toplevel code/5)) :
@@ -454,7 +455,7 @@ let used = f (S (S Z))
      (Code (App (Var (Free_toplevel f) : "'a -> 'b") (Var (Free m) : 'a) : 'b)))
     (f <fun>)
     (used 0)
-    ((Compile_time_use_of_toplevel_being_checked code) @ t.stag:4:41-45)
+    ((Compile_time_use_of_toplevel_being_checked code) @ t.stag:4:43-47)
     |}]
 ;;
 
@@ -920,7 +921,7 @@ let s = .~(w .<1>.)
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
         (RVar (Link REmpty)))
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 65 1)))
+        (RVar (Unbound 66 1)))
        (Presence_mismatch x)))
      @ t.stag:6:13-18)
     val x : int
