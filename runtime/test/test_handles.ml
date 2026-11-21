@@ -692,3 +692,22 @@ let%expect_test "alloc_handle rejects refs that collect" =
     ok
     |}]
 ;;
+
+let%expect_test "alloc rejects handle headers" =
+  let gc, heap, roots, data_stack, static = create_gc () in
+  let handle = Header.handle ~refs:0 in
+  Expect_test_helpers_core.require_does_raise (fun () ->
+    ignore (Addr.is_null (Heap.alloc heap handle) : bool));
+  Expect_test_helpers_core.require_does_raise (fun () ->
+    ignore (Addr.is_null (Stag_gc.alloc gc handle) : bool));
+  print_s [%message "" ~handles:(Heap.For_testing.handles heap : int)];
+  report gc;
+  destroy gc roots data_stack static heap;
+  [%expect
+    {|
+    "Heap.alloc: use alloc_handle"
+    "Gc.alloc: use alloc_handle"
+    (handles 0)
+    ok
+    |}]
+;;
