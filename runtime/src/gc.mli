@@ -105,4 +105,7 @@ val check_invariants : t -> unit Or_error.t
 module For_testing : sig
   (** In blocks. *)
   val mark_stack_capacity : t -> int
+
+  (** The next growth of the mark stack raises. *)
+  val fail_next_grow : t -> unit
 end

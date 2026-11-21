@@ -41,6 +41,7 @@ type t =
   ; mutable marked_blocks : int
   ; mutable marked_words : int
   ; mutable destroyed : bool
+  ; mutable fail_next_grow : bool
   }
 
 let set_stack t chunk =
@@ -66,12 +67,17 @@ let create config ~heap ~roots ~data_stack ~static =
   ; marked_blocks = 0
   ; marked_words = 0
   ; destroyed = false
+  ; fail_next_grow = false
   }
 ;;
 
 (* Doubles the mark stack. It allocates, but only when the stack is deeper than
    it has been, so marking is assumed zero-alloc. *)
 let[@cold] [@zero_alloc assume] grow_stack t =
+  if t.fail_next_grow
+  then (
+    t.fail_next_grow <- false;
+    fail [%message "Gc: injected mark stack failure"]);
   let used = Addr.diff t.stack_top t.stack_base in
   let chunk = Chunk.create ~bytes:(2 * Chunk.bytes t.stack) ~align:8 in
   Memory.copy ~src:t.stack_base ~dst:(Chunk.base chunk) ~bytes:used;
@@ -148,9 +154,23 @@ let[@zero_alloc] mark t =
 
 let check_live t = if t.destroyed then fail [%message "Gc: destroyed"]
 
+(* A mark that raised leaves blocks [Marked] that the next would skip, with
+   their children. *)
+let[@cold] clear_marks t =
+  Heap.iter t.heap ~f:(fun block ->
+    let header = Header.load block in
+    match Header.color header with
+    | Marked -> Header.store block (Header.with_color header Unmarked)
+    | Unmarked | Immortal -> ())
+;;
+
 let collect t =
   check_live t;
-  mark t;
+  (match mark t with
+   | () -> ()
+   | exception exn ->
+     clear_marks t;
+     raise exn);
   let sweep = Heap.sweep t.heap in
   t.live_words <- sweep.kept_footprint_words;
   t.allocated_words <- 0;
@@ -397,4 +417,5 @@ let check_invariants t =
 
 module For_testing = struct
   let mark_stack_capacity t = Chunk.bytes t.stack / 8
+  let fail_next_grow t = t.fail_next_grow <- true
 end

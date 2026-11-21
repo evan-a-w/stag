@@ -428,3 +428,28 @@ let%expect_test "destroy" =
     (Error "Gc: destroyed")
     |}]
 ;;
+
+let%expect_test "a mark that raises leaves no block marked" =
+  (* The mark stack fails to grow with 1024 children of [wide] marked but not
+     scanned: the next collection must still trace their leaves. *)
+  let env = Env.create () in
+  let roots = Roots.push_frame env.roots ~slots:1 in
+  let wide = alloc env ~ptrs:2000 in
+  Memory.store_addr roots wide;
+  for i = 0 to 1999 do
+    let child = alloc env ~ptrs:1 in
+    set child 0 (alloc env ~ptrs:0 ~scalars:1);
+    set wide i child
+  done;
+  Stag_gc.For_testing.fail_next_grow env.gc;
+  Expect_test_helpers_core.require_does_raise (fun () ->
+    ignore (Stag_gc.collect env.gc : Stag_gc.Stats.t));
+  print_s [%sexp (Stag_gc.check_invariants env.gc : unit Or_error.t)];
+  collect env;
+  [%expect
+    {|
+    "Gc: injected mark stack failure"
+    (Ok ())
+    ((marked_blocks 4001) (marked_words 6000) (freed_blocks 0) (freed_words 0))
+    |}]
+;;
