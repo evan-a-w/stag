@@ -99,21 +99,32 @@ end
    for every [shape] of a [t]: an expansion depends only on those. Only a shape
    that was computed is stored, never one that was refused, and [declared] looks
    for a cycle first: a shape computed outside a cycle would not be the one
-   inside it. *)
+   inside it. A shape keeps the work it took, which a hit charges again: the
+   result of a [shape], and whether it is [Too_large], do not depend on what
+   earlier calls cached, and the work bounds the size of the shape as a tree,
+   which shares the cached subtrees. *)
 module Cache = struct
-  type t = (Type.arg list * Shape.t) list String.Table.t
+  module Entry = struct
+    type t =
+      { args : Type.arg list
+      ; shape : Shape.t
+      ; work : int
+      }
+  end
+
+  type t = Entry.t list String.Table.t
 
   let create () = String.Table.create ()
 
   let find t ~name ~args =
-    Option.bind (Hashtbl.find t name) ~f:(fun shapes ->
-      List.find_map shapes ~f:(fun (args', shape) ->
-        if Path.same_arguments args args' then Some shape else None))
+    Option.bind (Hashtbl.find t name) ~f:(fun entries ->
+      List.find entries ~f:(fun (entry : Entry.t) ->
+        Path.same_arguments args entry.args))
   ;;
 
-  let add t ~name ~args shape =
-    Hashtbl.update t name ~f:(fun shapes ->
-      (args, shape) :: Option.value shapes ~default:[])
+  let add t (entry : Entry.t) ~name =
+    Hashtbl.update t name ~f:(fun entries ->
+      entry :: Option.value entries ~default:[])
   ;;
 end
 
@@ -313,8 +324,11 @@ and declared t context ~name ~args =
      | Error error -> Error error
      | Ok () ->
        (match Cache.find t.cache ~name ~args with
-        | Some shape -> Ok shape
+        | Some { shape; work; _ } ->
+          let%map.Result () = charge context work in
+          shape
         | None ->
+          let work_before = !(context.work) in
           let path = Path.Step.Declaration { name; args } :: context.path in
           let%bind.Result bindings =
             bind_parameters context declaration ~name ~args
@@ -343,7 +357,10 @@ and declared t context ~name ~args =
               in
               Struct { repr = Repr.Default; fields }
           in
-          Cache.add t.cache ~name ~args shape;
+          Cache.add
+            t.cache
+            ~name
+            { args; shape; work = !(context.work) - work_before };
           Ok shape))
 
 (* A parameter is bound to its argument as it stands, which [declared] has
@@ -390,11 +407,13 @@ and bind_parameters context (declaration : Signature.Type_decl.t) ~name ~args =
               | ATy _ -> Error (Error.Row_expected id))
            | _ -> Ok bindings))
 
+and charge context work =
+  context.Context.work := !(context.work) + work;
+  if !(context.work) > max_work then Error (Error.Too_large max_work) else Ok ()
+
 and shape t context ty =
-  incr context.Context.work;
-  if !(context.work) > max_work
-  then Error (Error.Too_large max_work)
-  else expand t context ty
+  let%bind.Result () = charge context 1 in
+  expand t context ty
 
 and expand t context (ty : Type.ty) : (Shape.t, Error.t) Result.t =
   match Type.canonical_ty ty with

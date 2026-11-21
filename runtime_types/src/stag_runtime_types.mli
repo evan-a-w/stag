@@ -42,7 +42,9 @@ val create : ?ptr_name:string -> Resolver.t -> t
     - A declaration whose expansion does not terminate, as under polymorphic
       recursion, is [Error.Too_deep]. One whose shape grows exponentially with
       the depth of its expansions, as under nested polymorphic recursion
-      ([type t['a] = L of 'a | N of t[('a * 'a)]]), is [Error.Too_large]. *)
+      ([type t['a] = L of 'a | N of t[('a * 'a)]]), or whose shape is too large
+      as a tree however much of it is shared, is [Error.Too_large], whatever
+      earlier calls expanded. *)
 val shape : t -> Type.ty -> (Shape.t, Error.t) Result.t
 
 (** [shape], laid out by [Layout.of_shape]. *)

@@ -489,10 +489,9 @@ let%expect_test "row parameters and arity" =
 ;;
 
 let%expect_test "shared instantiations are expanded once" =
-  (* type t0 = [{x : t1; y : t1}] ... type t39 = int. Expanding every occurrence
-     separately is 2^39 expansions, so without the cache this test never
-     finishes. *)
-  let n = 40 in
+  (* type t0 = [{x : t1; y : t1}] ... type t9 = int. [t1] is expanded once, and
+     its shape shared by both fields. *)
+  let n = 10 in
   let names = List.init n ~f:(fun i -> sprintf "t%d" i) in
   let declarations =
     List.mapi names ~f:(fun i name ->
@@ -504,8 +503,11 @@ let%expect_test "shared instantiations are expanded once" =
       decl ~name (record [ field "x" ty; field "y" ty ]))
   in
   let t = Runtime_types.create (resolver declarations) in
-  printf !"is_ok %b\n" (Result.is_ok (Runtime_types.shape t (tycon "t0" [])));
-  [%expect {| is_ok true |}]
+  (match Runtime_types.shape t (tycon "t0" []) with
+   | Ok (Struct { fields = [ x; y ]; _ }) ->
+     printf "fields shared: %b\n" (phys_equal x y)
+   | result -> print_s [%sexp (result : (Shape.t, Error.t) Result.t)]);
+  [%expect {| fields shared: true |}]
 ;;
 
 let%expect_test "nested polymorphic recursion" =
@@ -790,5 +792,55 @@ let%expect_test "a declaration does not see its user's bindings" =
     (Error (Unresolved_ty 30))
     (Error (Unresolved_ty 30))
     (Error (Unresolved_ty 30))
+    |}]
+;;
+
+let%expect_test "the work bound does not depend on the cache" =
+  (* type d0 = int type d(i+1) = d(i) * d(i): [d(i)] has 2^i leaves, each
+     reached through the cache. *)
+  let n = 60 in
+  let d i = tycon (sprintf "d%d" i) [] in
+  let declarations =
+    List.init n ~f:(fun i ->
+      decl
+        ~name:(sprintf "d%d" i)
+        (alias (if i = 0 then int else Type.TTuple [ d (i - 1); d (i - 1) ])))
+  in
+  (* Nodes of the shape as a tree, up to a million. *)
+  let summary t ty =
+    let count = ref 0 in
+    let rec visit (shape : Shape.t) =
+      incr count;
+      if !count <= 1_000_000
+      then (
+        match shape with
+        | Scalar _ | Ptr -> ()
+        | Struct { fields = shapes; _ } | Union { cases = shapes; _ } ->
+          List.iter shapes ~f:visit
+        | Array { elt; _ } -> visit elt)
+    in
+    print_s
+      [%sexp
+        (Result.map (Runtime_types.shape t ty) ~f:(fun shape ->
+           visit shape;
+           if !count > 1_000_000
+           then "more than a million"
+           else Int.to_string !count)
+         : (string, Error.t) Result.t)]
+  in
+  let pair = Type.TTuple [ d 14; d 14 ] in
+  summary (Runtime_types.create (resolver declarations)) (d (n - 1));
+  summary (Runtime_types.create (resolver declarations)) pair;
+  let t = Runtime_types.create (resolver declarations) in
+  summary t (d 14);
+  summary t pair;
+  summary t (d (n - 1));
+  [%expect
+    {|
+    (Error (Too_large 100000))
+    (Error (Too_large 100000))
+    (Ok 32767)
+    (Error (Too_large 100000))
+    (Error (Too_large 100000))
     |}]
 ;;
