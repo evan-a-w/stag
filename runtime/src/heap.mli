@@ -43,8 +43,19 @@ val create : Config.t -> t
 
 (** A block of the size [header] gives, its header written and its words zeroed.
     Zero-size blocks are [Static_data.empty] and [Static_data.empty_bytes].
-    Raises on a [Free] or [Marked] header. *)
+    Raises on a [Free], [Handle] or [Marked] header. *)
 val alloc : t -> Header.t -> Memory.Addr.t
+
+(** A block pointing indirectly to an OCaml value of the type identified by
+    [key]. Its scalar ID word must not be modified. The heap holds the value
+    until the block is swept or the heap is destroyed. Any Stag pointers held by
+    the OCaml value are not traced. *)
+val alloc_handle : t -> 'a Type_equal.Id.t -> 'a -> Memory.Addr.t
+
+(** Returns a handle's OCaml value, or [None] if [addr] is not a live handle's
+    base in this heap with the given type ID. A swept address may be reused;
+    callers must not use a stale address. *)
+val get_handle : t -> Memory.Addr.t -> 'a Type_equal.Id.t -> 'a option
 
 (** The words a block of [header] takes in the heap, its header and rounding up
     to a class (or to pages, for a large block) included: 0 for zero-size
@@ -81,6 +92,8 @@ val destroy : t -> unit
 val sexp_of_t : t -> Sexp.t
 
 module For_testing : sig
+  val handles : t -> int
+
   (** The index of the region [addr] is in, and its offset from the region's
       base. *)
   val locate : t -> Memory.Addr.t -> (int * int) option

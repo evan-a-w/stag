@@ -470,7 +470,7 @@ let%expect_test "random blocks: lengths round trip, parts fit" =
       let scalar_room =
         match Header.kind header with
         | Bytes -> Header.length header
-        | Scanned | Free -> 8 * Header.scalar_words header
+        | Scanned | Free | Handle -> 8 * Header.scalar_words header
       in
       if scalar_end > scalar_room || scalar_room - scalar_end >= 8
       then fail "scalar part";

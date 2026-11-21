@@ -5,13 +5,15 @@ open! Import
     colour (bits 0-1); the upper 56 bits depend on the kind:
     - [Scanned]: [size_words] (bits 32-63) and [scalar_words] (bits 8-31).
     - [Bytes]: [length] in bytes (bits 8-63).
-    - [Free]: [size_words] (bits 32-63). *)
+    - [Free]: [size_words] (bits 32-63).
+    - [Handle]: zero; the block has one scalar word for its table ID. *)
 
 module Kind : sig
   type t =
     | Scanned (** Scalar words, then pointer words. *)
     | Bytes (** No pointers, with an exact length in bytes (strings). *)
     | Free (** A free slot in a page. *)
+    | Handle (** An entry in the heap's OCaml metadata table. *)
   [@@deriving sexp_of, equal, enumerate]
 end
 
@@ -42,6 +44,8 @@ val bytes : length:int -> Color.t -> t
 val free : size_words:int -> t
 [@@zero_alloc]
 
+val handle : unit -> t [@@zero_alloc]
+
 (** The following raise on a header with an unknown kind or colour. *)
 
 val kind : t -> Kind.t [@@zero_alloc]
@@ -52,7 +56,7 @@ val with_color : t -> Color.t -> t [@@zero_alloc]
 val size_words : t -> int
 [@@zero_alloc]
 
-(** The words the GC skips. All of a [Bytes] or [Free] block. *)
+(** The words the GC skips. All of a [Bytes], [Free] or [Handle] block. *)
 val scalar_words : t -> int
 [@@zero_alloc]
 

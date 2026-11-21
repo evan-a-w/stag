@@ -160,8 +160,8 @@ let%expect_test "unknown kind and colour" =
   let try_ name f =
     print_s [%message name ~_:(Or_error.try_with f : Sexp.t Or_error.t)]
   in
-  (* Kind 3. *)
-  let t = Header.of_int64 #0x0CL in
+  (* Kind 4. *)
+  let t = Header.of_int64 #0x10L in
   try_ "kind" (fun () -> [%sexp (Header.kind t : Header.Kind.t)]);
   try_ "color" (fun () -> [%sexp (Header.color t : Header.Color.t)]);
   (* Colour 3, of a [Scanned] header. *)
@@ -171,7 +171,7 @@ let%expect_test "unknown kind and colour" =
   try_ "with_color" (fun () -> [%sexp (Header.with_color t Marked : Header.t)]);
   [%expect
     {|
-    (kind (Error ("Header: unknown kind" (kind 3))))
+    (kind (Error ("Header: unknown kind" (kind 4))))
     (color (Ok Unmarked))
     (kind (Ok Scanned))
     (color (Error ("Header: unknown colour" (color 3))))

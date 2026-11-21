@@ -162,6 +162,19 @@ module Region = struct
   ;;
 end
 
+module Handle = struct
+  module Payload = struct
+    type t = T : 'a Type_equal.Id.t * 'a -> t
+  end
+
+  type t =
+    { block : Addr.t
+    ; payload : Payload.t
+    }
+
+  let id block = Int64_u.to_int (Memory.load_64 block)
+end
+
 type t =
   { config : Config.t
   ; shift : int
@@ -172,6 +185,8 @@ type t =
   ; mutable arenas : Arena.t list (** Oldest first: allocation is first fit. *)
   ; mutable regions : Region.t list (** Latest first. *)
   ; mutable regions_created : int
+  ; handles : Handle.t Int.Table.t
+  ; mutable next_handle : int
   ; mutable destroyed : bool
   }
 
@@ -209,6 +224,8 @@ let create (config : Config.t) =
     ; arenas = []
     ; regions = []
     ; regions_created = 0
+    ; handles = Int.Table.create ()
+    ; next_handle = 0
     ; destroyed = false
     }
   in
@@ -321,11 +338,11 @@ let alloc_large t header ~words =
   block
 ;;
 
-let alloc t header =
+let alloc_block t header =
   check_live t ~name:"alloc";
   (match Header.kind header with
    | Free -> fail [%message "Heap.alloc: a Free header" (header : Header.t)]
-   | Scanned | Bytes -> ());
+   | Scanned | Bytes | Handle -> ());
   (match Header.color header with
    | Marked -> fail [%message "Heap.alloc: a Marked header" (header : Header.t)]
    | Unmarked | Immortal -> ());
@@ -334,7 +351,7 @@ let alloc t header =
   then (
     match Header.kind header with
     | Bytes -> Static_data.empty_bytes ()
-    | Scanned | Free -> Static_data.empty ())
+    | Scanned | Free | Handle -> Static_data.empty ())
   else if words >= Array.length t.class_of_words
   then alloc_large t header ~words
   else (
@@ -345,6 +362,23 @@ let alloc t header =
     Header.store block header;
     Memory.fill_zero block ~bytes:(t.classes.(class_index) * 8);
     block)
+;;
+
+let alloc t header =
+  (match Header.kind header with
+   | Handle -> fail [%message "Heap.alloc: use alloc_handle"]
+   | Free | Scanned | Bytes -> ());
+  alloc_block t header
+;;
+
+let alloc_handle t key value =
+  let id = t.next_handle in
+  if id = Int.max_value then fail [%message "Heap.alloc_handle: ID exhausted"];
+  let block = alloc_block t (Header.handle ()) in
+  t.next_handle <- id + 1;
+  Hashtbl.set t.handles ~key:id ~data:{ Handle.block; payload = T (key, value) };
+  Memory.store_64 block (Int64_u.of_int id);
+  block
 ;;
 
 let footprint_words t header =
@@ -382,10 +416,28 @@ let[@zero_alloc] block_start t addr =
           let header = Header.load block in
           match Header.kind header with
           | Free -> Addr.null ()
-          | Scanned | Bytes ->
+          | Scanned | Bytes | Handle ->
             if Int.(within < Header.size_words header * 8)
             then block
             else Addr.null ()))))
+;;
+
+let get_handle (type a) t block (key : a Type_equal.Id.t) : a option =
+  check_live t ~name:"get_handle";
+  let start = block_start t block in
+  if Addr.is_null start || not (Addr.equal start block)
+  then None
+  else (
+    match Header.kind (Header.load block) with
+    | Scanned | Bytes | Free -> None
+    | Handle ->
+      (match Hashtbl.find t.handles (Handle.id block) with
+       | Some { block = owner; payload = T (stored_key, value) }
+         when Addr.equal owner block ->
+         (match Type_equal.Id.same_witness stored_key key with
+          | Some T -> Some value
+          | None -> None)
+       | Some _ | None -> None))
 ;;
 
 let sweep t =
@@ -396,7 +448,10 @@ let sweep t =
   let kept_blocks = ref 0 in
   let kept_words = ref 0 in
   let kept_footprint_words = ref 0 in
-  let free header =
+  let free block header =
+    (match Header.kind header with
+     | Handle -> Hashtbl.remove t.handles (Handle.id block)
+     | Scanned | Bytes | Free -> ());
     incr freed_blocks;
     freed_words := !freed_words + Header.size_words header
   in
@@ -422,14 +477,14 @@ let sweep t =
         let header = Header.load block in
         match Header.kind header, Header.color header with
         | Free, _ -> ()
-        | (Scanned | Bytes), Unmarked ->
-          free header;
+        | (Scanned | Bytes | Handle), Unmarked ->
+          free block header;
           Header.store block (Header.free ~size_words:words)
-        | (Scanned | Bytes), Marked ->
+        | (Scanned | Bytes | Handle), Marked ->
           incr kept;
           keep header ~footprint_words:(words + 1);
           Header.store block (Header.with_color header Unmarked)
-        | (Scanned | Bytes), Immortal ->
+        | (Scanned | Bytes | Handle), Immortal ->
           incr kept;
           keep header ~footprint_words:(words + 1)
       done;
@@ -442,7 +497,7 @@ let sweep t =
           let block = Region.block region i ~page_bytes in
           match Header.kind (Header.load block) with
           | Free -> push_free t ~class_index block
-          | Scanned | Bytes -> ()
+          | Scanned | Bytes | Handle -> ()
         done;
         true)
     | Large ->
@@ -451,7 +506,7 @@ let sweep t =
       let footprint_words = region.pages * (page_bytes / 8) in
       (match Header.color header with
        | Unmarked ->
-         free header;
+         free block header;
          remove_region t region;
          false
        | Marked ->
@@ -496,13 +551,14 @@ let iter t ~(f : _ @ local) =
       let block = Region.block region i ~page_bytes in
       match Header.kind (Header.load block) with
       | Free -> ()
-      | Scanned | Bytes -> f block
+      | Scanned | Bytes | Handle -> f block
     done
   done
 ;;
 
 let destroy t =
   check_live t ~name:"destroy";
+  Hashtbl.clear t.handles;
   List.iter t.regions ~f:(remove_region t);
   List.iter t.arenas ~f:(fun (arena : Arena.t) -> Chunk.destroy arena.chunk);
   t.regions <- [];
@@ -542,6 +598,8 @@ let sexp_of_t t =
 ;;
 
 module For_testing = struct
+  let handles t = Hashtbl.length t.handles
+
   let locate t addr =
     let page_bytes = page_bytes t in
     List.find_map t.regions ~f:(fun (region : Region.t) ->

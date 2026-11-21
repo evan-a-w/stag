@@ -62,9 +62,17 @@ val destroy : t -> unit
     one) across the call. *)
 val alloc : t -> Header.t -> Memory.Addr.t
 
+(** Allocates a [Heap.alloc_handle] block, with the same collection and rooting
+    rules as [alloc]. The returned address is not itself a root. Keep it in a
+    root or a traced field across calls that can collect. The OCaml value may
+    not be used as the sole owner of any Stag heap pointers it contains. *)
+val alloc_handle : t -> 'a Type_equal.Id.t -> 'a -> Memory.Addr.t
+
+(** As [Heap.get_handle]. *)
+val get_handle : t -> Memory.Addr.t -> 'a Type_equal.Id.t -> 'a option
+
 (** Marks, then sweeps. Marking allocates nothing (on the OCaml heap) but to
-    grow the mark stack, and sweeping a constant amount but to rebuild the list
-    of regions when large blocks are freed. *)
+    grow the mark stack. Sweeping also releases OCaml metadata for dead handles. *)
 val collect : t -> Stats.t
 
 (** How many collections there have been. *)

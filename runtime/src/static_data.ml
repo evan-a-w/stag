@@ -91,13 +91,15 @@ let alloc t header =
   (match Header.kind header with
    | Free ->
      fail [%message "Static_data.alloc: a Free header" (header : Header.t)]
+   | Handle ->
+     fail [%message "Static_data.alloc: a Handle header" (header : Header.t)]
    | Scanned | Bytes -> ());
   let words = Header.size_words header in
   if words = 0
   then (
     match Header.kind header with
     | Bytes -> empty_bytes ()
-    | Scanned | Free -> empty ())
+    | Scanned | Free | Handle -> empty ())
   else (
     let block = Addr.add (take t ~bytes:((words + 1) * 8)) 8 in
     Header.store block (Header.with_color header Immortal);

@@ -97,7 +97,7 @@ let length t header =
   | Some { scalar_stride; ptr_stride; _ } ->
     (match kind with
      | Bytes -> (Header.length header - t.elements_offset) / scalar_stride
-     | Scanned | Free ->
+     | Scanned | Free | Handle ->
        if ptr_stride > 0
        then
          (Header.size_words header

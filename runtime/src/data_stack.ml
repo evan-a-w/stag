@@ -190,13 +190,15 @@ let[@zero_alloc] alloc t header =
   (match Header.kind header with
    | Free ->
      fail [%message "Data_stack.alloc: a Free header" (header : Header.t)]
+   | Handle ->
+     fail [%message "Data_stack.alloc: a Handle header" (header : Header.t)]
    | Scanned | Bytes -> ());
   let words = Header.size_words header in
   if Int.(words = 0)
   then (
     match Header.kind header with
     | Bytes -> Static_data.empty_bytes ()
-    | Scanned | Free -> Static_data.empty ())
+    | Scanned | Free | Handle -> Static_data.empty ())
   else (
     let bytes = (words + 1) * 8 in
     if t.destroyed || Int.(Addr.diff t.limit t.top < bytes) then grow t ~bytes;

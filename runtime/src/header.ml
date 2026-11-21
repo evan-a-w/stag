@@ -5,12 +5,14 @@ module Kind = struct
     | Scanned
     | Bytes
     | Free
+    | Handle
   [@@deriving sexp_of, equal, enumerate]
 
   let[@inline] [@zero_alloc] to_int = function
     | Scanned -> 0
     | Bytes -> 1
     | Free -> 2
+    | Handle -> 3
   ;;
 end
 
@@ -88,11 +90,16 @@ let[@inline] [@zero_alloc] free ~size_words =
   make_sized ~kind:Free Unmarked ~size_words ~low:0
 ;;
 
+let[@inline] [@zero_alloc] handle () =
+  Int64_u.of_int (low_byte ~kind:Handle Unmarked)
+;;
+
 let[@inline] [@zero_alloc] kind t : Kind.t =
   match field t ~pos:2 ~bits:6 with
   | 0 -> Scanned
   | 1 -> Bytes
   | 2 -> Free
+  | 3 -> Handle
   | kind -> fail [%message "Header: unknown kind" (kind : int)]
 ;;
 
@@ -116,18 +123,19 @@ let[@inline] [@zero_alloc] size_words t =
   match kind t with
   | Scanned | Free -> field t ~pos:32 ~bits:32
   | Bytes -> (raw_length t + 7) / 8
+  | Handle -> 1
 ;;
 
 let[@inline] [@zero_alloc] scalar_words t =
   match kind t with
   | Scanned -> field t ~pos:8 ~bits:24
-  | Bytes | Free -> size_words t
+  | Bytes | Free | Handle -> size_words t
 ;;
 
 let[@inline] [@zero_alloc] length t =
   match kind t with
   | Bytes -> raw_length t
-  | (Scanned | Free) as kind ->
+  | (Scanned | Free | Handle) as kind ->
     fail [%message "Header.length: not Bytes" (kind : Kind.t)]
 ;;
 
@@ -142,6 +150,7 @@ let sexp_of_t t =
         (color : Color.t)]
   | Bytes -> [%message "Bytes" ~length:(raw_length t : int) (color : Color.t)]
   | Free -> [%message "Free" ~size_words:(size_words t : int) (color : Color.t)]
+  | Handle -> [%message "Handle" (color : Color.t)]
 ;;
 
 let[@inline] [@zero_alloc] load addr =

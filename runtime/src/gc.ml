@@ -105,7 +105,7 @@ let[@inline] [@zero_alloc] visit t word =
              if Int.(Addr.diff t.stack_limit t.stack_top < 8) then grow_stack t;
              Memory.store_addr t.stack_top block;
              t.stack_top <- Addr.add t.stack_top 8)
-         | Bytes | Free -> ())))
+         | Bytes | Free | Handle -> ())))
 ;;
 
 let[@zero_alloc] mark t =
@@ -133,7 +133,7 @@ let[@zero_alloc] mark t =
          for i = Header.scalar_words header to Header.size_words header - 1 do
            visit t (Memory.load_addr (Addr.add block (i * 8)))
          done
-       | Bytes | Free -> ());
+       | Bytes | Free | Handle -> ());
       block <- Data_stack.next_block block
     done
   done;
@@ -163,16 +163,36 @@ let collect t =
   }
 ;;
 
-let alloc t header =
+let before_alloc t header =
   check_live t;
   let words = Heap.footprint_words t.heap header in
   let threshold =
     Int.max t.config.min_words (t.live_words * t.config.space_overhead / 100)
   in
   if t.allocated_words + words > threshold then ignore (collect t : Stats.t);
+  words
+;;
+
+let alloc t header =
+  (match Header.kind header with
+   | Handle -> fail [%message "Gc.alloc: use alloc_handle"]
+   | Scanned | Bytes | Free -> ());
+  let words = before_alloc t header in
   let block = Heap.alloc t.heap header in
   t.allocated_words <- t.allocated_words + words;
   block
+;;
+
+let alloc_handle t key value =
+  let words = before_alloc t (Header.handle ()) in
+  let block = Heap.alloc_handle t.heap key value in
+  t.allocated_words <- t.allocated_words + words;
+  block
+;;
+
+let get_handle t block key =
+  check_live t;
+  Heap.get_handle t.heap block key
 ;;
 
 let collections t = t.collections
@@ -255,7 +275,7 @@ let check_invariants t =
          check_word ~from ~immortal word;
          check_not_data_stack ~from word
        done
-     | Bytes | Free -> ());
+     | Bytes | Free | Handle -> ());
     incr block_index);
   let block_index = ref 0 in
   Static_data.iter t.static ~f:(fun block ->
@@ -272,7 +292,7 @@ let check_invariants t =
            error [%message "static data points into the heap" (from : Sexp.t)];
          check_not_data_stack ~from word
        done
-     | Bytes | Free -> ());
+     | Bytes | Free | Handle -> ());
     incr block_index);
   let block_index = ref 0 in
   for segment = 0 to Data_stack.segments t.data_stack - 1 do
@@ -290,6 +310,9 @@ let check_invariants t =
       | Free, _ ->
         error [%message "a free data-stack block" (from : Sexp.t)];
         walking <- false
+      | Handle, _ ->
+        error [%message "a data-stack handle block" (from : Sexp.t)];
+        walking <- false
       | ((Scanned | Bytes) as kind), color ->
         (match color with
          | Unmarked -> ()
@@ -305,7 +328,7 @@ let check_invariants t =
                    "data stack" ~block:(!block_index : int) ~word:(i : int)]
                (Memory.load_addr (Addr.add block (i * 8)))
            done
-         | Bytes | Free -> ());
+         | Bytes | Free | Handle -> ());
         incr block_index;
         block <- Data_stack.next_block block
     done;
