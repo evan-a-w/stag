@@ -53,11 +53,13 @@ val alloc : t -> Header.t -> Memory.Addr.t
     heap holds [value] until the block is swept or the heap is destroyed; the
     Stag GC never scans it.
 
-    The refs may be blocks or static data, not data-stack blocks; raises for a
-    ref into the heap but no block. While it runs, the new block is marked, so a
-    collection reentered by an OCaml allocation (which is forbidden) cannot free
-    it before it has its metadata; such a collection would not trace its refs,
-    which [Gc.alloc_handle] roots for it. *)
+    The refs may be blocks or static data, not data-stack blocks. The heap knows
+    nothing of the data stack, so does not check that: [Gc.alloc_handle], the
+    entry point to use, does. Raises for a ref into the heap but no block. While
+    it runs, the new block is marked, so a collection reentered by an OCaml
+    allocation (which is forbidden) cannot free it before it has its metadata;
+    such a collection would not trace its refs, which [Gc.alloc_handle] roots
+    for it. *)
 val alloc_handle : t -> 'a Handle_kind.t -> 'a -> Memory.Addr.t
 
 (** [alloc_handle], with [refs] already computed as
