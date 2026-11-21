@@ -1,0 +1,5 @@
+(library
+ (name stag_runtime)
+ (preprocess
+  (pps ppx_jane))
+ (libraries core ocaml_intrinsics stdlib_stable stdlib_upstream_compatible))
