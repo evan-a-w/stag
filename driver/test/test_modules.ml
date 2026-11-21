@@ -440,12 +440,12 @@ let s = M.N.S (M.T, U)
 let%expect_test "types are order independent and recursive across modules" =
   check
     {|
-let tree = A.Node (B.Cons (A.Leaf, B.Nil))
+let tree = A.Node (Ptr.make (B.Cons (Ptr.make (A.Leaf, B.Nil))))
 module A = struct
-  type tree = Leaf | Node of B.forest
+  type tree = Leaf | Node of ptr[B.forest]
 end
 module B = struct
-  type forest = Nil | Cons of A.tree * forest
+  type forest = Nil | Cons of ptr[A.tree * forest]
   type trees = A.tree * A.tree
 end
 let pair : B.trees = (A.Leaf, tree)
@@ -454,17 +454,17 @@ let pair : B.trees = (A.Leaf, tree)
     {|
     val tree : A.tree
     module A : sig
-      type tree = Leaf | Node of B.forest
+      type tree = Leaf | Node of ptr[B.forest]
     end
     module B : sig
-      type forest = Nil | Cons of A.tree * forest
+      type forest = Nil | Cons of ptr[A.tree * forest]
       type trees = A.tree * A.tree
     end
     val pair : A.tree * A.tree
     |}]
 ;;
 
-let%expect_test "cyclic aliases across modules" =
+let%expect_test "aliases across modules may cycle through a function type" =
   check
     {|
 module A = struct
@@ -485,7 +485,12 @@ let x : u = 1
 |};
   [%expect
     {|
-    ((Cyclic_type_alias A.t) @ t.stag:3:7-8)
+    module A : sig
+      type t = int -> t
+    end
+    module B : sig
+      type u = int -> u
+    end
     module A : sig
       type t = int
       type u = int

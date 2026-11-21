@@ -1,7 +1,11 @@
 (* Pattern matching on variants and polymorphic variants: evaluating and
    simplifying arithmetic expressions. *)
 
-type expr = Num of int | Var of string | Add of ptr[expr * expr] | Mul of ptr[expr * expr]
+type expr =
+  | Num of int
+  | Var of string
+  | Add of ptr[expr * expr]
+  | Mul of ptr[expr * expr]
 
 let add a b = Add (Ptr.make (a, b))
 let mul a b = Mul (Ptr.make (a, b))

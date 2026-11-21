@@ -16,6 +16,7 @@ module T = struct
 
   let variant fresh ?tail entries = Fresh.variant fresh (row ?tail entries)
   let record fresh ?tail entries = Fresh.record fresh (row ?tail entries)
+  let ptr ty = TCon ("ptr", [ ATy ty ])
 
   (* [(f 'a as 'a)] *)
   let fix fresh f =
@@ -38,38 +39,38 @@ end
 let%expect_test "recursive functions over recursive variants" =
   check
     {|
-let len l = match l with `Nil -> 0 | `Cons (_, t) -> add 1 (len t)
-let map f l = match l with `Nil -> `Nil | `Cons (x, t) -> `Cons (f x, map f t)
-let two = len (`Cons (1, `Cons (2, `Nil)))
-let lengths = (len (`Cons (1, `Nil)), len (`Cons (true, `Nil)))
-let mapped = map id (`Cons (1, `Nil))
+let len l = match l with `Nil -> 0 | `Cons (_, *t) -> add 1 (len t)
+let map f l = match l with `Nil -> `Nil | `Cons (x, *t) -> `Cons (f x, Ptr.make (map f t))
+let two = len (`Cons (1, Ptr.make (`Cons (2, Ptr.make (`Nil)))))
+let lengths = (len (`Cons (1, Ptr.make (`Nil))), len (`Cons (true, Ptr.make (`Nil))))
+let mapped = map id (`Cons (1, Ptr.make (`Nil)))
 |};
   [%expect
     {|
-    val len : ([`Cons of 'a * 'b | `Nil] as 'b) -> int
-    val map : ('a -> 'b) -> ([`Cons of 'a * 'c | `Nil] as 'c) -> ([`Cons of 'b * 'd | `Nil; ..'e] as 'd)
+    val len : ([`Cons of 'a * ptr['b] | `Nil] as 'b) -> int
+    val map : ('a -> 'b) -> ([`Cons of 'a * ptr['c] | `Nil] as 'c) -> ([`Cons of 'b * ptr['d] | `Nil; ..'e] as 'd)
     val two : int
     val lengths : int * int
-    val mapped : ([`Cons of int * '_a | `Nil; ..'_b] as '_a)
+    val mapped : ([`Cons of int * ptr['_a] | `Nil; ..'_b] as '_a)
     |}]
 ;;
 
 let%expect_test "recursive functions over recursive records" =
   check
     {|
-let sum r = add r.`v (sum r.`next)
+let sum r = add r.`v (sum r.`next.*)
 let next r = r.`next
-let both r = cond true r r.`next.`next
-let self r = cond true r r.`self
+let both r = cond true r r.`next.*.`next.*
+let self r = cond true r r.`self.*
 let pair r = (self r, r)
 |};
   [%expect
     {|
-    val sum : ({`next : 'a; `v : int; ..'b} as 'a) -> int
+    val sum : ({`next : ptr['a]; `v : int; ..'b} as 'a) -> int
     val next : {`next : 'a; ..'b} -> 'a
-    val both : ({`next : {`next : 'a; ..'b}; ..'c} as 'a) -> 'a
-    val self : ({`self : 'a; ..'b} as 'a) -> 'a
-    val pair : ({`self : 'a; ..'b} as 'a) -> 'a * 'a
+    val both : ({`next : ptr[{`next : ptr['a]; ..'b}]; ..'c} as 'a) -> 'a
+    val self : ({`self : ptr['a]; ..'b} as 'a) -> 'a
+    val pair : ({`self : ptr['a]; ..'b} as 'a) -> 'a * 'a
     |}]
 ;;
 
@@ -89,13 +90,13 @@ let loop = {`next = fun _ -> loop; `v = id}
 let%expect_test "open rows and residuals" =
   check
     {|
-let strip e = match e with `Wrap x -> strip x | other -> other
-let count e = match e with `S x -> add 1 (count x) | _ -> 0
+let strip e = match e with `Wrap x -> strip x.* | other -> other
+let count e = match e with `S x -> add 1 (count x.*) | _ -> 0
 |};
   [%expect
     {|
-    val strip : ([`Wrap of 'a; ..'b] as 'a) -> [..'b]
-    val count : ([`S of 'a; ..'b] as 'a) -> int
+    val strip : ([`Wrap of ptr['a]; ..'b] as 'a) -> [..'b]
+    val count : ([`S of ptr['a]; ..'b] as 'a) -> int
     |}]
 ;;
 
@@ -108,8 +109,8 @@ let%expect_test "extensible interpreter" =
     (parse_exn
        {|
 let eval_num self k e = match e with `Num n -> n | other -> k other
-let eval_add self k e = match e with `Add (a, b) -> add (self a) (self b) | other -> k other
-let eval_neg self k e = match e with `Neg a -> add 0 (self a) | other -> k other
+let eval_add self k e = match e with `Add *(a, b) -> add (self a) (self b) | other -> k other
+let eval_neg self k e = match e with `Neg *a -> add 0 (self a) | other -> k other
 |}
      @ [ eval
            (app
@@ -124,8 +125,9 @@ let eval_neg self k e = match e with `Neg a -> add 0 (self a) | other -> k other
      @ parse_exn
          ~file:"after_eval.stag"
          {|
-let example = eval (`Add (`Num 1, `Neg (`Num 2)))
-|});
+let example = eval (`Add (Ptr.make (`Num 1, `Neg (Ptr.make (`Num 2)))))
+|}
+    );
   check_program
     (parse_exn
        {|
@@ -135,24 +137,32 @@ let eval_num self k e = match e with `Num n -> n | other -> k other
      @ parse_exn
          ~file:"after_eval.stag"
          {|
-let bad = eval (`Add (`Num 1, `Num 2))
+let bad = eval (`Add (Ptr.make (`Num 1, `Num 2)))
 |});
   [%expect
     {|
     val eval_num : 'a -> ([..'b] -> 'c) -> [`Num of 'c; ..'b] -> 'c
-    val eval_add : ('a -> int) -> ([..'b] -> int) -> [`Add of 'a * 'a; ..'b] -> int
-    val eval_neg : ('a -> int) -> ([..'b] -> int) -> [`Neg of 'a; ..'b] -> int
-    val eval : ([`Add of 'a * 'a | `Neg of 'a | `Num of int] as 'a) -> int
+    val eval_add : ('a -> int) -> ([..'b] -> int) -> [`Add of ptr['a * 'a]; ..'b] -> int
+    val eval_neg : ('a -> int) -> ([..'b] -> int) -> [`Neg of ptr['a]; ..'b] -> int
+    val eval : ([`Add of ptr['a * 'a] | `Neg of ptr['a] | `Num of int] as 'a) -> int
     val example : int
     ((Unification_error
       (Row_mismatch REmpty
        (RExtend Add Present
-        (TTuple
-         ((TVariant (RExtend Num Present (TCon int ()) (RVar (Unbound 66 1))))
-          (TVariant (RExtend Num Present (TCon int ()) (RVar (Unbound 68 1))))))
-        (RVar (Unbound 73 1)))
+        (TVar
+         (Link
+          (TCon ptr
+           ((ATy
+             (TVar
+              (Link
+               (TTuple
+                ((TVariant
+                  (RExtend Num Present (TCon int ()) (RVar (Unbound 74 1))))
+                 (TVariant
+                  (RExtend Num Present (TCon int ()) (RVar (Unbound 76 1)))))))))))))
+        (RVar (Unbound 81 1)))
        (Missing_label Add)))
-     @ after_eval.stag:2:15-38)
+     @ after_eval.stag:2:15-49)
     |}]
 ;;
 
@@ -162,21 +172,21 @@ let%expect_test "cyclic types in quotes and contexts" =
 let compile e =
   match e with
   | `Code c -> c
-  | `Add (a, b) -> .<add .~(compile a) .~(compile b)>.
-let len l = match l with `Nil -> 0 | `Cons (_, t) -> add 1 (len t)
+  | `Add *(a, b) -> .<add .~(compile a) .~(compile b)>.
+let len l = match l with `Nil -> 0 | `Cons (_, *t) -> add 1 (len t)
 let free = .<len l>.
-let provided = .<.~free.{l = `Cons (1, `Nil)}>.
+let provided = .<.~free.{l = `Cons (Ptr.make (1, `Nil))}>.
 let spliced_in l = .<.~free.{l = l}>.
-let quoted_ones = .<let ones = `Cons (1, ones) in ones>.
+let quoted_ones = .<let ones = `Cons (1, Ptr.make ones) in ones>.
 |};
   [%expect
     {|
-    val compile : ([`Add of 'a * 'a | `Code of <int>{..'b}] as 'a) -> <int>{..'b}
-    val len : ([`Cons of 'a * 'b | `Nil] as 'b) -> int
-    val free : <int>{l : ([`Cons of 'a * 'b | `Nil] as 'b); ..'c}
-    val provided : <int>{..'a}
-    val spliced_in : 'a -> <int>{l : ([`Cons of 'b * 'c | `Nil] as 'c); ..'d}
-    val quoted_ones : <([`Cons of int * 'a; ..'b] as 'a)>{..'c}
+    val compile : ([`Add of ptr['a * 'a] | `Code of <int>{..'b}] as 'a) -> <int>{..'b}
+    val len : ([`Cons of 'a * ptr['b] | `Nil] as 'b) -> int
+    val free : <int>{l : ([`Cons of 'a * ptr['b] | `Nil] as 'b); ..'c}
+    val provided : <int>{prelude.Ptr.make : int * [`Nil; ..'a] -> 'b * (ptr[[`Cons of 'b * 'c | `Nil]] as 'c); ..'d}
+    val spliced_in : 'a -> <int>{l : ([`Cons of 'b * ptr['c] | `Nil] as 'c); ..'d}
+    val quoted_ones : <[`Cons of int * 'a; ..'b]>{prelude.Ptr.make : [`Cons of int * 'a; ..'b] -> 'a; ..'c}
     |}]
 ;;
 
@@ -187,12 +197,10 @@ let%expect_test "occurs check fails for unguarded cycles" =
     let a = tvar fresh in
     unify fresh a (f a)
   in
-  check (fun a -> TArrow (a, int));
   check (fun a -> TTuple [ a; int ]);
   check (fun a -> TCon ("list", [ ATy a ]));
   check (fun a -> TCode { inner = int; context = row [ "x", a ] });
   check (fun a -> TCode { inner = a; context = REmpty });
-  check (fun a -> TArrow (record fresh [ "x", a ], a));
   let check_row f =
     let r = rvar fresh in
     print_s
@@ -207,20 +215,18 @@ let%expect_test "occurs check fails for unguarded cycles" =
   let a = tvar fresh in
   let b = tvar fresh in
   unify fresh a (TTuple [ b; int ]);
-  unify fresh b (TArrow (int, a));
+  unify fresh b (TTuple [ a; int ]);
   [%expect
     {|
     (Error (Occurs_check_failed (ATy (TVar (Unbound 0 1)))))
     (Error (Occurs_check_failed (ATy (TVar (Unbound 1 1)))))
     (Error (Occurs_check_failed (ATy (TVar (Unbound 2 1)))))
     (Error (Occurs_check_failed (ATy (TVar (Unbound 3 1)))))
-    (Error (Occurs_check_failed (ATy (TVar (Unbound 4 1)))))
-    (Error (Occurs_check_failed (ATy (TVar (Unbound 5 1)))))
-    (Error (Occurs_check_failed (ARow (RVar (Unbound 7 1)))))
-    (Error (Occurs_check_failed (ARow (RVar (Unbound 8 1)))))
-    (Error (Occurs_check_failed (ARow (RVar (Unbound 9 1)))))
+    (Error (Occurs_check_failed (ARow (RVar (Unbound 4 1)))))
+    (Error (Occurs_check_failed (ARow (RVar (Unbound 5 1)))))
+    (Error (Occurs_check_failed (ARow (RVar (Unbound 6 1)))))
     (Ok ())
-    (Error (Occurs_check_failed (ATy (TVar (Unbound 11 1)))))
+    (Error (Occurs_check_failed (ATy (TVar (Unbound 8 1)))))
     |}]
 ;;
 
@@ -232,12 +238,14 @@ let%expect_test "guarded cycles" =
     unify fresh a (f a);
     print a
   in
-  check (fun a -> variant fresh [ "A", a ]);
-  check (fun a -> record fresh [ "x", TCon ("list", [ ATy a ]) ]);
+  check (fun a -> variant fresh [ "A", ptr a ]);
+  check (fun a -> record fresh [ "x", TCon ("list", [ ATy (ptr a) ]) ]);
   check (fun a -> variant fresh [ "A", TArrow (a, int) ]);
   check (fun a ->
-    TCode { inner = int; context = row [ "x", record fresh [ "y", a ] ] });
+    TCode { inner = int; context = row [ "x", record fresh [ "y", ptr a ] ] });
   check (fun a -> TArrow (variant fresh [ "A", a ], int));
+  check (fun a -> TArrow (a, int));
+  check (fun a -> TArrow (record fresh [ "x", a ], a));
   (* Through another variable. *)
   let b = tvar fresh in
   let a = tvar fresh in
@@ -245,32 +253,45 @@ let%expect_test "guarded cycles" =
   unify fresh a (TArrow (b, int));
   print a;
   print b;
-  (* A row variable within its own row, under a record. *)
+  (* Through a variable already bound to a guarded cycle's part. *)
+  let c = tvar fresh in
+  let d = tvar fresh in
+  unify fresh c (TTuple [ d; int ]);
+  unify fresh d (TArrow (int, c));
+  print (TTuple [ c; d ]);
+  (* A row variable within its own row, under a pointer. *)
   let r = rvar fresh in
   let record_r = Fresh.record fresh r in
   print_s
     [%sexp
-      (Unify.unify_row fresh ~row1:r ~row2:(row [ "x", record_r ])
+      (Unify.unify_row fresh ~row1:r ~row2:(row [ "x", ptr record_r ])
        : (unit, Unification_error.t) Result.t)];
   print record_r;
   [%expect
     {|
     (Ok ())
-    ([`A of 'a] as 'a)
+    ([`A of ptr['a]] as 'a)
     (Ok ())
-    ({`x : list['a]} as 'a)
+    ({`x : list[ptr['a]]} as 'a)
     (Ok ())
     ([`A of 'a -> int] as 'a)
     (Ok ())
-    <int>{x : immut ({`y : <int>{x : immut 'a}} as 'a)}
+    (<int>{x : immut {`y : ptr['a]}} as 'a)
     (Ok ())
-    ([`A of 'a -> int] as 'a) -> int
+    ([`A of 'a] -> int as 'a)
+    (Ok ())
+    ('a -> int as 'a)
+    (Ok ())
+    ({`x : 'a} -> 'a as 'a)
     (Ok ())
     (Ok ())
-    ([`A of 'a -> int] as 'a) -> int
+    ([`A of 'a] -> int as 'a)
     ([`A of 'a -> int] as 'a)
     (Ok ())
-    ({`x : 'a} as 'a)
+    (Ok ())
+    (((int -> 'a) * int) as 'a) * (int -> 'a)
+    (Ok ())
+    ({`x : ptr['a]} as 'a)
     |}]
 ;;
 
@@ -279,13 +300,14 @@ let%expect_test "sexps of cyclic types" =
   let open T in
   let list =
     fix fresh (fun l ->
-      variant fresh [ "Nil", Type.unit; "Cons", TTuple [ int; l ] ])
+      variant fresh [ "Nil", Type.unit; "Cons", TTuple [ int; ptr l ] ])
   in
   print_s [%sexp (list : Type.ty)];
   let r = rvar fresh in
   let record_r = Fresh.record fresh r in
   ignore
-    (Unify.unify_row fresh ~row1:r ~row2:(row [ "x", record_r ]) : _ Result.t);
+    (Unify.unify_row fresh ~row1:r ~row2:(row [ "x", ptr record_r ])
+     : _ Result.t);
   print_s [%sexp (record_r : Type.ty)];
   print_s [%sexp (Type.ATy list : Type.arg)];
   [%expect
@@ -296,8 +318,11 @@ let%expect_test "sexps of cyclic types" =
        (TVariant
         (RExtend Nil Present (TCon unit ())
          (RExtend Cons Present
-          (TTuple ((TCon int ()) (TVar (Link (Cycle_ref 0))))) REmpty))))))
-    (Cycle 0 (TRecord (RVar (Link (RExtend x Present (Cycle_ref 0) REmpty)))))
+          (TTuple ((TCon int ()) (TCon ptr ((ATy (TVar (Link (Cycle_ref 0))))))))
+          REmpty))))))
+    (Cycle 0
+     (TRecord
+      (RVar (Link (RExtend x Present (TCon ptr ((ATy (Cycle_ref 0)))) REmpty)))))
     (ATy
      (TVar
       (Link
@@ -305,59 +330,67 @@ let%expect_test "sexps of cyclic types" =
         (TVariant
          (RExtend Nil Present (TCon unit ())
           (RExtend Cons Present
-           (TTuple ((TCon int ()) (TVar (Link (Cycle_ref 0))))) REmpty)))))))
+           (TTuple
+            ((TCon int ()) (TCon ptr ((ATy (TVar (Link (Cycle_ref 0))))))))
+           REmpty)))))))
     |}]
 ;;
 
 let%expect_test "unifying cyclic types of different unrollings" =
   let fresh = Fresh.create () in
   let open T in
-  let a = fix fresh (fun a -> variant fresh [ "A", a ]) in
+  let a = fix fresh (fun a -> variant fresh [ "A", ptr a ]) in
   let b = tvar fresh in
-  let unrolled = variant fresh [ "A", variant fresh [ "A", b ] ] in
+  let unrolled = variant fresh [ "A", ptr (variant fresh [ "A", ptr b ]) ] in
   unify fresh a unrolled;
   print b;
   print unrolled;
   let two =
-    fix fresh (fun a -> variant fresh [ "A", variant fresh [ "A", a ] ])
+    fix fresh (fun a ->
+      variant fresh [ "A", ptr (variant fresh [ "A", ptr a ]) ])
   in
   let three =
     fix fresh (fun a ->
-      variant fresh [ "A", variant fresh [ "A", variant fresh [ "A", a ] ] ])
+      variant
+        fresh
+        [ "A", ptr (variant fresh [ "A", ptr (variant fresh [ "A", ptr a ]) ]) ])
   in
   unify fresh two three;
   print (TTuple [ two; three ]);
   let open_ =
-    fix fresh (fun a -> variant fresh [ "A", a ] ~tail:(rvar fresh))
+    fix fresh (fun a -> variant fresh [ "A", ptr a ] ~tail:(rvar fresh))
   in
   unify fresh open_ a;
   print open_;
   [%expect
     {|
     (Ok ())
-    ([`A of 'a] as 'a)
-    [`A of [`A of ([`A of 'a] as 'a)]]
+    ([`A of ptr['a]] as 'a)
+    [`A of ptr[[`A of ptr[([`A of ptr['a]] as 'a)]]]]
     (Ok ())
-    ([`A of [`A of 'a]] as 'a) * ([`A of [`A of [`A of 'b]]] as 'b)
+    ([`A of ptr[[`A of ptr['a]]]] as 'a) * ([`A of ptr[[`A of ptr[[`A of ptr['b]]]]]] as 'b)
     (Ok ())
-    ([`A of 'a] as 'a)
+    ([`A of ptr['a]] as 'a)
     |}]
 ;;
 
 let%expect_test "mismatching cyclic types" =
   let fresh = Fresh.create () in
   let open T in
-  let a = fix fresh (fun a -> variant fresh [ "A", a ]) in
+  let a = fix fresh (fun a -> variant fresh [ "A", ptr a ]) in
   let ab =
-    fix fresh (fun a -> variant fresh [ "A", variant fresh [ "B", a ] ])
+    fix fresh (fun a ->
+      variant fresh [ "A", ptr (variant fresh [ "B", ptr a ]) ])
   in
   unify fresh a ab;
-  let r = fix fresh (fun r -> record fresh [ "x", r; "y", int ]) in
+  let r = fix fresh (fun r -> record fresh [ "x", ptr r; "y", int ]) in
   let s =
     fix fresh (fun s ->
       record
         fresh
-        [ "x", record fresh [ "x", s; "y", TCon ("bool", []) ]; "y", int ])
+        [ "x", ptr (record fresh [ "x", ptr s; "y", TCon ("bool", []) ])
+        ; "y", int
+        ])
   in
   unify fresh r s;
   print r;
@@ -367,25 +400,35 @@ let%expect_test "mismatching cyclic types" =
     (Error
      (Row_mismatch
       (RExtend A Present
-       (TVar
-        (Link
-         (Cycle 0
-          (TVariant (RExtend A Present (TVar (Link (Cycle_ref 0))) REmpty)))))
+       (TCon ptr
+        ((ATy
+          (TVar
+           (Link
+            (Cycle 0
+             (TVariant
+              (RExtend A Present (TCon ptr ((ATy (TVar (Link (Cycle_ref 0))))))
+               REmpty))))))))
        REmpty)
       (RExtend B Present
-       (TVar
-        (Link
-         (Cycle 0
-          (TVariant
-           (RExtend A Present
-            (TVariant (RExtend B Present (TVar (Link (Cycle_ref 0))) REmpty))
-            REmpty)))))
+       (TCon ptr
+        ((ATy
+          (TVar
+           (Link
+            (Cycle 0
+             (TVariant
+              (RExtend A Present
+               (TCon ptr
+                ((ATy
+                  (TVariant
+                   (RExtend B Present
+                    (TCon ptr ((ATy (TVar (Link (Cycle_ref 0)))))) REmpty)))))
+               REmpty))))))))
        REmpty)
       (Missing_label A)))
     (Error
      (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
-    ({`x : 'a; `y : int} as 'a)
-    ({`x : {`x : 'a; `y : bool}; `y : int} as 'a)
+    ({`x : ptr['a]; `y : int} as 'a)
+    ({`x : ptr[{`x : ptr['a]; `y : bool}]; `y : int} as 'a)
     |}]
 ;;
 
@@ -397,7 +440,7 @@ let%expect_test "generalization and instantiation of cyclic types" =
   unify
     fresh
     list
-    (variant fresh [ "Nil", Type.unit; "Cons", TTuple [ elt; list ] ]);
+    (variant fresh [ "Nil", Type.unit; "Cons", TTuple [ elt; ptr list ] ]);
   let ty = Type.TTuple [ list; list ] in
   print ty;
   Scheme.generalize fresh ~rank:1 [ ty ];
@@ -407,7 +450,10 @@ let%expect_test "generalization and instantiation of cyclic types" =
   let bools = inst () in
   print ints;
   let cons elt =
-    variant fresh [ "Cons", TTuple [ elt; tvar fresh ] ] ~tail:(rvar fresh)
+    variant
+      fresh
+      [ "Cons", TTuple [ elt; ptr (tvar fresh) ] ]
+      ~tail:(rvar fresh)
   in
   (match ints, bools with
    | TTuple [ i; _ ], TTuple [ b; _ ] ->
@@ -418,56 +464,56 @@ let%expect_test "generalization and instantiation of cyclic types" =
   [%expect
     {|
     (Ok ())
-    ([`Cons of '_a * '_b | `Nil] as '_b) * '_b
-    ([`Cons of 'a * 'b | `Nil] as 'b) * 'b
-    ([`Cons of '_a * '_b | `Nil] as '_b) * '_b
+    ([`Cons of '_a * ptr['_b] | `Nil] as '_b) * '_b
+    ([`Cons of 'a * ptr['b] | `Nil] as 'b) * 'b
+    ([`Cons of '_a * ptr['_b] | `Nil] as '_b) * '_b
     (Ok ())
     (Ok ())
-    (([`Cons of int * 'a | `Nil] as 'a) * 'a) * (([`Cons of bool * 'b | `Nil] as 'b) * 'b) * (([`Cons of 'c * 'd | `Nil] as 'd) * 'd)
+    (([`Cons of int * ptr['a] | `Nil] as 'a) * 'a) * (([`Cons of bool * ptr['b] | `Nil] as 'b) * 'b) * (([`Cons of 'c * ptr['d] | `Nil] as 'd) * 'd)
     |}]
 ;;
 
 let%expect_test "recursive aliases" =
   check
     {|
-type l['a] = [`Nil | `Cons of 'a * l['a]]
-let len l = match l with `Nil -> 0 | `Cons (_, t) -> add 1 (len t)
+type l['a] = [`Nil | `Cons of 'a * ptr[l['a]]]
+let len l = match l with `Nil -> 0 | `Cons (_, *t) -> add 1 (len t)
 let len_ints (l : l[int]) = len l
 let len_any (l : l['a]) = len l
 let nil : l[bool] = `Nil
-let one : l[int] = `Cons (1, `Nil)
+let one : l[int] = `Cons (1, Ptr.make (`Nil))
 type ints = l[int]
 type n = N of l[int]
 let wrapped = N one
 |};
   check
     {|
-type l['a] = [`Nil | `Cons of 'a * l['a]]
-let bad : l[int] = `Cons (true, `Nil)
+type l['a] = [`Nil | `Cons of 'a * ptr[l['a]]]
+let bad : l[int] = `Cons (true, Ptr.make (`Nil))
 |};
   check
     {|
-type l['a] = [`Nil | `Cons of 'a * l['a]]
+type l['a] = [`Nil | `Cons of 'a * ptr[l['a]]]
 let open : l[int] = `Other
 |};
   [%expect
     {|
-    type l['a] = [`Cons of 'a * l['a] | `Nil]
-    val len : ([`Cons of 'a * 'b | `Nil] as 'b) -> int
-    val len_ints : ([`Cons of int * 'a | `Nil] as 'a) -> int
-    val len_any : ([`Cons of 'a * 'b | `Nil] as 'b) -> int
-    val nil : ([`Cons of bool * 'a | `Nil] as 'a)
-    val one : ([`Cons of int * 'a | `Nil] as 'a)
-    type ints = [`Cons of int * ints | `Nil]
-    type n = N of ([`Cons of int * 'a | `Nil] as 'a)
+    type l['a] = [`Cons of 'a * ptr[l['a]] | `Nil]
+    val len : ([`Cons of 'a * ptr['b] | `Nil] as 'b) -> int
+    val len_ints : ([`Cons of int * ptr['a] | `Nil] as 'a) -> int
+    val len_any : ([`Cons of 'a * ptr['b] | `Nil] as 'b) -> int
+    val nil : ([`Cons of bool * ptr['a] | `Nil] as 'a)
+    val one : ([`Cons of int * ptr['a] | `Nil] as 'a)
+    type ints = [`Cons of int * ptr[ints] | `Nil]
+    type n = N of ([`Cons of int * ptr['a] | `Nil] as 'a)
     val wrapped : n
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
-     @ t.stag:3:19-37)
+     @ t.stag:3:19-48)
     ((Unification_error
       (Row_mismatch REmpty
-       (RExtend Other Present (TCon unit ()) (RVar (Unbound 27 1)))
+       (RExtend Other Present (TCon unit ()) (RVar (Unbound 28 1)))
        (Missing_label Other)))
      @ t.stag:3:20-26)
     |}]
@@ -477,24 +523,24 @@ let%expect_test "recursive aliases through records, tuples and type arguments" =
   check
     {|
 type stream['a] = {`head : 'a; `tail : unit -> stream['a]}
-type list['a] = Nil | Cons of 'a * list['a]
+type list['a] = Nil | Cons of ptr['a * list['a]]
 type tree = [`Leaf of int | `Node of list[tree]]
-type pair = [`A of pair] * int
+type pair = [`A of ptr[pair]] * int
 type id['a] = 'a
-type through_id = id[[`A of through_id]]
-type rows[{..'r}] = {`x : rows[{..'r}]; ..'r}
+type through_id = id[[`A of ptr[through_id]]]
+type rows[{..'r}] = {`x : ptr[rows[{..'r}]]; ..'r}
 let heads (s : stream[int]) = (s.`head, (s.`tail ()).`head)
 let leaf (t : tree) = match t with `Leaf n -> n | _ -> 0
 |};
   [%expect
     {|
     type stream['a] = {`head : 'a; `tail : unit -> stream['a]}
-    type list['a] = Nil | Cons of 'a * list['a]
+    type list['a] = Nil | Cons of ptr['a * list['a]]
     type tree = [`Leaf of int | `Node of list[tree]]
-    type pair = [`A of pair] * int
+    type pair = [`A of ptr[pair]] * int
     type id['a] = 'a
-    type through_id = [`A of through_id]
-    type rows[{..'a}] = {`x : rows[{..'a}]; ..'a}
+    type through_id = [`A of ptr[through_id]]
+    type rows[{..'a}] = {`x : ptr[rows[{..'a}]]; ..'a}
     val heads : ({`head : int; `tail : unit -> 'a} as 'a) -> int * int
     val leaf : ([`Leaf of int | `Node of list['a]] as 'a) -> int
     |}]
@@ -504,31 +550,31 @@ let%expect_test "mutually recursive aliases" =
   check
     {|
 type a['x] = {`b : b['x]; `v : 'x}
-type b['y] = [`End | `More of a['y]]
+type b['y] = [`End | `More of ptr[a['y]]]
 type c = a[int]
 let a x : a['t] = {`b = `End; `v = x}
-let more = {`b = `More (a 1); `v = 2}
+let more = {`b = `More (Ptr.make (a 1)); `v = 2}
 let c : c = more
 |};
   check
     {|
 module M = struct
-type l['a] = [`Nil | `Cons of 'a * l['a]]
+type l['a] = [`Nil | `Cons of 'a * ptr[l['a]]]
 end
-type u = [`U of M.l[u]]
+type u = [`U of ptr[M.l[u]]]
 |};
   [%expect
     {|
-    type a['a] = {`b : [`End | `More of a['a]]; `v : 'a}
-    type b['a] = [`End | `More of {`b : b['a]; `v : 'a}]
-    type c = {`b : [`End | `More of c]; `v : int}
-    val a : 'a -> ({`b : [`End | `More of 'b]; `v : 'a} as 'b)
-    val more : {`b : [`End | `More of ({`b : [`End | `More of 'a]; `v : int} as 'a)]; `v : int}
-    val c : ({`b : [`End | `More of 'a]; `v : int} as 'a)
+    type a['a] = {`b : [`End | `More of ptr[a['a]]]; `v : 'a}
+    type b['a] = [`End | `More of ptr[{`b : b['a]; `v : 'a}]]
+    type c = {`b : [`End | `More of ptr[c]]; `v : int}
+    val a : 'a -> ({`b : [`End | `More of ptr['b]]; `v : 'a} as 'b)
+    val more : {`b : [`End | `More of ptr[({`b : [`End | `More of ptr['a]]; `v : int} as 'a)]]; `v : int}
+    val c : ({`b : [`End | `More of ptr['a]]; `v : int} as 'a)
     module M : sig
-      type l['a] = [`Cons of 'a * l['a] | `Nil]
+      type l['a] = [`Cons of 'a * ptr[l['a]] | `Nil]
     end
-    type u = [`U of ([`Cons of u * 'a | `Nil] as 'a)]
+    type u = [`U of ptr[([`Cons of u * ptr['a] | `Nil] as 'a)]]
     |}]
 ;;
 
@@ -553,7 +599,7 @@ type t[{..'r}] = {`x : t[{`y : int; ..'r}]}
 type t = t * int
 |};
   check {|
-type list['a] = Nil | Cons of 'a * list['a]
+type list['a] = Nil | Cons of ptr['a * list['a]]
 type t = list[t]
 |};
   check {|
@@ -576,25 +622,28 @@ type t = [`A of int] -> t
     ((Non_regular_recursive_alias t) @ t.stag:2:24-33)
     ((Non_regular_recursive_alias a) @ t.stag:3:20-26)
     ((Non_regular_recursive_alias t) @ t.stag:2:23-42)
-    ((Cyclic_type_alias t) @ t.stag:2:5-6)
+    ((Infinite_type_layout t) @ t.stag:2:5-6)
+    type list['a] = Nil | Cons of ptr['a * list['a]]
+    type t = list[t]
     ((Cyclic_type_alias t) @ t.stag:3:5-6)
-    ((Cyclic_type_alias t) @ t.stag:3:5-6)
-    ((Cyclic_type_alias t) @ t.stag:2:5-6)
-    ((Cyclic_type_alias t) @ t.stag:2:5-6)
-    ((Cyclic_type_alias t) @ t.stag:2:5-6)
+    ((Infinite_type_layout t) @ t.stag:2:5-6)
+    ((Infinite_type_layout t) @ t.stag:2:5-6)
+    type t = [`A of int] -> t
     |}]
 ;;
 
 let%expect_test "sexps of recursive aliases" =
   Option.iter
-    (typecheck ~prelude:false {|
-type l['a] = [`Nil | `Cons of 'a * l['a]]
+    (typecheck
+       ~prelude:false
+       {|
+type l['a] = [`Nil | `Cons of 'a * ptr[l['a]]]
 |})
     ~f:(fun t -> print_s [%sexp ((checked t).signature : Signature.t)]);
   [%expect
     {|
     ((Type
-      ((name l) (params ((ATy (TVar (Generic 0)))))
+      ((name l) (params ((ATy (TVar (Generic 1)))))
        (kind
         (Alias
          (TVar
@@ -603,7 +652,10 @@ type l['a] = [`Nil | `Cons of 'a * l['a]]
             (TVariant
              (RExtend Nil Present (TCon unit ())
               (RExtend Cons Present
-               (TTuple ((TVar (Generic 0)) (TVar (Link (Cycle_ref 0))))) REmpty)))))))))))
+               (TTuple
+                ((TVar (Generic 1))
+                 (TCon ptr ((ATy (TVar (Link (Cycle_ref 0))))))))
+               REmpty)))))))))))
     |}]
 ;;
 
@@ -612,7 +664,7 @@ let%expect_test "bounds with cyclic types" =
   let open T in
   let list () =
     fix fresh (fun l ->
-      variant fresh [ "Nil", Type.unit; "Cons", TTuple [ int; l ] ])
+      variant fresh [ "Nil", Type.unit; "Cons", TTuple [ int; ptr l ] ])
   in
   let r = rvar fresh in
   print_s
@@ -629,7 +681,7 @@ let%expect_test "bounds with cyclic types" =
   unify
     fresh
     x
-    (variant fresh [ "Cons", TTuple [ int; list () ] ] ~tail:(rvar fresh));
+    (variant fresh [ "Cons", TTuple [ int; ptr (list ()) ] ] ~tail:(rvar fresh));
   print (Fresh.record fresh r);
   let s = rvar fresh in
   ignore
@@ -653,10 +705,10 @@ let%expect_test "bounds with cyclic types" =
   [%expect
     {|
     (Ok ())
-    {..'_a} where ..'_a <= {x : immut ([`Cons of int * 'b | `Nil] as 'b); ..'_c}
+    {..'_a} where ..'_a <= {x : immut ([`Cons of int * ptr['b] | `Nil] as 'b); ..'_c}
     (Ok ())
     (Ok ())
-    {`x : ([`Cons of int * 'a | `Nil] as 'a)}
+    {`x : ([`Cons of int * ptr['a] | `Nil] as 'a)}
     (Error
      (Type_mismatch (TCon bool ()) (TCon int ()) (Base_types_not_equal bool int)))
     |}]
@@ -665,7 +717,7 @@ let%expect_test "bounds with cyclic types" =
 (* [type ai = [`T0 of a0 | ... | `T(n-1) of a(n-1)]] for each [i < n]. *)
 let clique n =
   let variant =
-    List.init n ~f:(fun j -> sprintf "`T%d of a%d" j j)
+    List.init n ~f:(fun j -> sprintf "`T%d of ptr[a%d]" j j)
     |> String.concat ~sep:" | "
   in
   List.init n ~f:(fun i -> sprintf "type a%d = [%s]\n" i variant)
@@ -676,9 +728,9 @@ let%expect_test "mutually recursive alias cliques expand each alias once" =
   check (clique 3);
   [%expect
     {|
-    type a0 = [`T0 of a0 | `T1 of ([`T0 of a0 | `T1 of 'a | `T2 of ([`T0 of a0 | `T1 of 'a | `T2 of 'b] as 'b)] as 'a) | `T2 of 'b]
-    type a1 = [`T0 of ([`T0 of 'a | `T1 of a1 | `T2 of ([`T0 of 'a | `T1 of a1 | `T2 of 'b] as 'b)] as 'a) | `T1 of a1 | `T2 of 'b]
-    type a2 = [`T0 of ([`T0 of 'a | `T1 of ([`T0 of 'a | `T1 of 'b | `T2 of a2] as 'b) | `T2 of a2] as 'a) | `T1 of 'b | `T2 of a2]
+    type a0 = [`T0 of ptr[a0] | `T1 of ptr[([`T0 of ptr[a0] | `T1 of ptr['a] | `T2 of ptr[([`T0 of ptr[a0] | `T1 of ptr['a] | `T2 of ptr['b]] as 'b)]] as 'a)] | `T2 of ptr['b]]
+    type a1 = [`T0 of ptr[([`T0 of ptr['a] | `T1 of ptr[a1] | `T2 of ptr[([`T0 of ptr['a] | `T1 of ptr[a1] | `T2 of ptr['b]] as 'b)]] as 'a)] | `T1 of ptr[a1] | `T2 of ptr['b]]
+    type a2 = [`T0 of ptr[([`T0 of ptr['a] | `T1 of ptr[([`T0 of ptr['a] | `T1 of ptr['b] | `T2 of ptr[a2]] as 'b)] | `T2 of ptr[a2]] as 'a)] | `T1 of ptr['b] | `T2 of ptr[a2]]
     |}];
   (* Each declaration shows each of the 10 aliases' variants once. *)
   Option.iter
@@ -694,16 +746,16 @@ let%expect_test "mutually recursive alias cliques expand each alias once" =
           variants));
   [%expect
     {|
-    a0: 10 variants
-    a1: 10 variants
-    a2: 10 variants
-    a3: 10 variants
-    a4: 10 variants
-    a5: 10 variants
-    a6: 10 variants
-    a7: 10 variants
-    a8: 10 variants
-    a9: 10 variants
+    a0: 110 variants
+    a1: 110 variants
+    a2: 110 variants
+    a3: 110 variants
+    a4: 110 variants
+    a5: 110 variants
+    a6: 110 variants
+    a7: 110 variants
+    a8: 110 variants
+    a9: 110 variants
     |}]
 ;;
 
@@ -737,20 +789,12 @@ type b = [`A of a]
 |};
   [%expect
     {|
-    type f['a] = [`A of 'a]
-    type g = [`A of g]
-    type g = [`A of g]
-    type f['a] = [`A of 'a]
-    type f['a] = {`x : 'a}
-    type g = {`x : g}
-    type g = {`x : g}
-    type f['a] = {`x : 'a}
-    type f['a] = [`A of 'a]
-    type g = [`A of g]
-    val v : ([`A of 'a] as 'a) -> 'a
-    val a : ([`A of 'a] as 'a) -> ([`A of 'b] as 'b)
-    type a = [`A of a] * int
-    type b = [`A of b * int]
+    ((Infinite_type_layout g) @ t.stag:3:5-6)
+    ((Infinite_type_layout g) @ t.stag:2:5-6)
+    ((Infinite_type_layout g) @ t.stag:3:5-6)
+    ((Infinite_type_layout g) @ t.stag:2:5-6)
+    ((Infinite_type_layout g) @ t.stag:3:5-6)
+    ((Infinite_type_layout a) @ t.stag:2:5-6)
     |}];
   check {|
 type t = t
@@ -761,7 +805,7 @@ type g = f[g]
 |};
   check
     {|
-type list['a] = Nil | Cons of 'a * list['a]
+type list['a] = Nil | Cons of ptr['a * list['a]]
 type f['a] = list['a]
 type g = f[g]
 |};
@@ -780,11 +824,13 @@ type t = [`A of t] * id[t]
   [%expect
     {|
     ((Cyclic_type_alias t) @ t.stag:2:5-6)
-    ((Cyclic_type_alias g) @ t.stag:3:5-6)
-    ((Cyclic_type_alias g) @ t.stag:4:5-6)
-    ((Cyclic_type_alias g) @ t.stag:3:5-6)
+    ((Infinite_type_layout g) @ t.stag:3:5-6)
+    type list['a] = Nil | Cons of ptr['a * list['a]]
+    type f['a] = list['a]
+    type g = list[g]
+    ((Infinite_type_layout g) @ t.stag:3:5-6)
     ((Cyclic_type_alias a) @ t.stag:2:5-6)
-    ((Cyclic_type_alias t) @ t.stag:3:5-6)
+    ((Infinite_type_layout t) @ t.stag:3:5-6)
     |}]
 ;;
 
@@ -943,17 +989,17 @@ let h (z : t%d[int]) = g z
 let%expect_test "cycle names are introduced in each type printed" =
   check
     {|
-type l['a] = [`Cons of 'a * l['a] | `Nil]
+type l['a] = [`Cons of 'a * ptr[l['a]] | `Nil]
 type s['a] = {c : l['a]; d : l['a]}
 type v['a] = V of l['a] * l['a]
 let pair (x : l['a] * l['a]) = x
 |};
   [%expect
     {|
-    type l['a] = [`Cons of 'a * l['a] | `Nil]
-    type s['a] = { c : ([`Cons of 'a * 'b | `Nil] as 'b); d : ([`Cons of 'a * 'b | `Nil] as 'b) }
-    type v['a] = V of ([`Cons of 'a * 'b | `Nil] as 'b) * 'b
-    val pair : ([`Cons of 'a * 'b | `Nil] as 'b) * 'b -> 'b * 'b
+    type l['a] = [`Cons of 'a * ptr[l['a]] | `Nil]
+    type s['a] = { c : ([`Cons of 'a * ptr['b] | `Nil] as 'b); d : ([`Cons of 'a * ptr['b] | `Nil] as 'b) }
+    type v['a] = V of ([`Cons of 'a * ptr['b] | `Nil] as 'b) * 'b
+    val pair : ([`Cons of 'a * ptr['b] | `Nil] as 'b) * 'b -> 'b * 'b
     |}]
 ;;
 
@@ -969,8 +1015,11 @@ type c = c * int
 |};
   [%expect
     {|
-    ((Cyclic_type_alias c) @ t.stag:4:5-6)
-    ((Cyclic_type_alias c) @ t.stag:3:5-6)
+    ((Infinite_type_layout v) @ t.stag:2:5-6)
+    ((Infinite_type_layout u) @ t.stag:3:5-6)
+    ((Infinite_type_layout c) @ t.stag:4:5-6)
+    ((Infinite_type_layout u) @ t.stag:2:5-6)
+    ((Infinite_type_layout c) @ t.stag:3:5-6)
     |}]
 ;;
 
@@ -1031,9 +1080,9 @@ let%expect_test "occurs check through a link visited guarded, then unguarded" =
   [%expect
     {|
     (Ok ())
-    (Error (Occurs_check_failed (ATy (TVar (Unbound 0 1)))))
     (Ok ())
-    (Error (Occurs_check_failed (ATy (TVar (Unbound 3 1)))))
+    (Ok ())
+    (Ok ())
     (Ok ())
     (Ok ())
     (Ok ())
@@ -1041,7 +1090,7 @@ let%expect_test "occurs check through a link visited guarded, then unguarded" =
     (Ok ())
     (Error (Occurs_check_failed (ATy (TVar (Unbound 13 1)))))
     (Ok ())
-    (Ok ())
+    (Error (Occurs_check_failed (ATy (TVar (Unbound 16 1)))))
     |}]
 ;;
 
@@ -1059,7 +1108,7 @@ let%expect_test "unified link pairs are memoised as pairs" =
   unify fresh (TTuple [ l1; l1 ]) (TTuple [ l2; l3 ]);
   (* The pair of the cycles' [Link]s is reached again within the cycles, and [a]
      then meets [c], whose [y] differs. *)
-  let cycle y = fix fresh (fun a -> record fresh [ "x", a; "y", y ]) in
+  let cycle y = fix fresh (fun a -> record fresh [ "x", ptr a; "y", y ]) in
   let a = cycle int in
   let b = cycle int in
   let c = cycle Type.bool in
@@ -1098,11 +1147,13 @@ let%expect_test "instantiation shares cycles without generic variables" =
     a
   in
   let weak = tvar fresh in
-  let inner = fix_at ~rank:1 (fun a -> variant fresh [ "A", a; "W", weak ]) in
+  let inner =
+    fix_at ~rank:1 (fun a -> variant fresh [ "A", ptr a; "W", weak ])
+  in
   let generic = Type.TVar (Fresh.var fresh ~rank:2) in
   let outer =
     fix_at ~rank:2 (fun a ->
-      record fresh [ "next", a; "g", generic; "inner", inner ])
+      record fresh [ "next", ptr a; "g", generic; "inner", inner ])
   in
   Scheme.generalize fresh ~rank:1 [ outer ];
   print outer;
@@ -1118,7 +1169,12 @@ let%expect_test "instantiation shares cycles without generic variables" =
   same "inner (original)" (field instance1 "inner") inner;
   same "outer" instance1 instance2;
   same "outer next" (field instance1 "next") (field instance2 "next");
-  same "instance1 next" (field instance1 "next") instance1;
+  let pointee ty =
+    match Type.canonical_ty ty with
+    | TCon ("ptr", [ ATy ty ]) -> ty
+    | _ -> assert false
+  in
+  same "instance1 next" (pointee (field instance1 "next")) instance1;
   unify fresh (field instance1 "g") int;
   unify fresh (field instance2 "g") Type.bool;
   unify fresh weak Type.string;
@@ -1127,7 +1183,7 @@ let%expect_test "instantiation shares cycles without generic variables" =
     {|
     (Ok ())
     (Ok ())
-    ({`g : 'a; `inner : ([`A of '_b | `W of '_c] as '_b); `next : '_d} as '_d)
+    ({`g : 'a; `inner : ([`A of ptr['_b] | `W of '_c] as '_b); `next : ptr['_d]} as '_d)
     inner shared: true
     inner (original) shared: true
     outer shared: false
@@ -1136,7 +1192,7 @@ let%expect_test "instantiation shares cycles without generic variables" =
     (Ok ())
     (Ok ())
     (Ok ())
-    ({`g : int; `inner : ([`A of 'a | `W of string] as 'a); `next : 'b} as 'b) * ({`g : bool; `inner : 'a; `next : 'c} as 'c) * ({`g : 'd; `inner : 'a; `next : 'e} as 'e)
+    ({`g : int; `inner : ([`A of ptr['a] | `W of string] as 'a); `next : ptr['b]} as 'b) * ({`g : bool; `inner : 'a; `next : ptr['c]} as 'c) * ({`g : 'd; `inner : 'a; `next : ptr['e]} as 'e)
     |}]
 ;;
 
@@ -1144,7 +1200,7 @@ let%expect_test "instantiation copies generic presences and bounds" =
   let fresh = Fresh.create () in
   let open T in
   let generic () = Fresh.var fresh ~rank:2 in
-  (* [({self : 'a; x?'p : int} as 'a)] *)
+  (* [({self : ptr['a]; x?'p : int} as 'a)] *)
   let knot = Type.TVar (generic ()) in
   unify
     fresh
@@ -1156,7 +1212,7 @@ let%expect_test "instantiation copies generic presences and bounds" =
           , PVar (generic ())
           , Absent
           , int
-          , RExtend ("self", Present, Absent, knot, REmpty) )));
+          , RExtend ("self", Present, Absent, ptr knot, REmpty) )));
   (* [{..'r} where ..'r <= {x : 'g}] *)
   let r = generic () in
   print_s
@@ -1183,10 +1239,10 @@ let%expect_test "instantiation copies generic presences and bounds" =
     {|
     (Ok ())
     (Ok ())
-    ({`self : 'a; `x?'b : int} as 'a) * {..'c} where ..'c <= {x : immut 'd}
-    (({`self : '_a; `x?'_b : int} as '_a) * {..'_c}) * (({`self : '_d; `x?'_e : int} as '_d) * {..'_f}) where ..'_c <= {x : immut '_g}, ..'_f <= {x : immut '_h}
+    ({`self : ptr['a]; `x?'b : int} as 'a) * {..'c} where ..'c <= {x : immut 'd}
+    (({`self : ptr['_a]; `x?'_b : int} as '_a) * {..'_c}) * (({`self : ptr['_d]; `x?'_e : int} as '_d) * {..'_f}) where ..'_c <= {x : immut '_g}, ..'_f <= {x : immut '_h}
     (Ok ())
     (Ok ())
-    (({`self : 'a} as 'a) * {..'_b}) * (({`self : 'c; `x : int} as 'c) * {..'_d}) * (({`self : 'e; `x?'f : int} as 'e) * {..'g}) where ..'_b <= {x : immut '_h}, ..'_d <= {x : immut '_i}, ..'g <= {x : immut 'j}
+    (({`self : ptr['a]} as 'a) * {..'_b}) * (({`self : ptr['c]; `x : int} as 'c) * {..'_d}) * (({`self : ptr['e]; `x?'f : int} as 'e) * {..'g}) where ..'_b <= {x : immut '_h}, ..'_d <= {x : immut '_i}, ..'g <= {x : immut 'j}
     |}]
 ;;

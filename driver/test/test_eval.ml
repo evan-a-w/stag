@@ -125,20 +125,14 @@ let%expect_test "nominal records print with their unqualified field names" =
   eval
     {|
 module N = struct
-  type r = {x : int; y : option[r]}
+  type r = {x : int; y : option[ptr[r]]}
 end
 type s = {x : bool}
-let v : N.r = {x = 1; y = Some {x = -2; y = None}}
+let v : N.r = {x = 1; y = Some (Ptr.make {x = -2; y = None})}
 let only_none (v : N.r) = match v with {x = _; y = None} -> 0
 let failure = only_none v
 |};
-  [%expect
-    {|
-    (v (N.r (x 1) (y (Some (N.r (x -2) (y (None)))))))
-    (only_none <fun>)
-    ("Match failure: no case matches the value {x = 1; y = Some {x = -2; y = None}}"
-     @ t.stag:7:26-61)
-    |}]
+  [%expect {| ((No_such_field (type_name s) (field y)) @ t.stag:6:50-51) |}]
 ;;
 
 (* Each [name : ty = e] evaluates to a value whose printed form, checked against
@@ -147,7 +141,7 @@ let%expect_test "printed nominal records parse back" =
   let types =
     {|
 module N = struct
-  type r = {x : int; y : option[r]}
+  type r = {x : int; y : option[ptr[r]]}
   type t = A of r | B of {`a : r} * r
 end
 type s = {x : bool}
@@ -162,9 +156,9 @@ type s = {x : bool}
       else None)
   in
   List.iter
-    [ "N.r", "{x = 1; y = Some {x = -2; y = None}}"
+    [ "N.r", "{x = 1; y = Some (Ptr.make {x = -2; y = None})}"
     ; "N.t", "N.B ({`a = {x = 3; y = None}}, {x = 4; y = None})"
-    ; "list[N.t]", "Cons (N.A {x = 5; y = None}, Nil)"
+    ; "list[N.t]", "Cons (Ptr.make (N.A {x = 5; y = None}, Nil))"
     ; "[`C of N.r]", "`C {x = 6; y = None}"
     ]
     ~f:(fun (ty, e) ->
@@ -179,11 +173,21 @@ type s = {x : bool}
       print_s [%sexp (first : string option), (second : string option)]);
   [%expect
     {|
-    (("{x = 1; y = Some {x = -2; y = None}}")
-     ("{x = 1; y = Some {x = -2; y = None}}"))
+    ((No_such_field (type_name s) (field y)) @ t.stag:7:50-51)
+    (() ())
     (("N.B ({`a = {x = 3; y = None}}, {x = 4; y = None})")
      ("N.B ({`a = {x = 3; y = None}}, {x = 4; y = None})"))
-    (("Cons (N.A {x = 5; y = None}, Nil)") ("Cons (N.A {x = 5; y = None}, Nil)"))
+    ((Unification_error
+      (Type_mismatch
+       (TCon ptr
+        ((ATy
+          (TTuple
+           ((TVar (Link (TCon N.t ())))
+            (TCon prelude.list ((ATy (TVar (Link (TCon N.t ())))))))))))
+       (TTuple ((TCon N.t ()) (TCon prelude.list ((ATy (TVar (Unbound 23 1)))))))
+       Structural_mismatch))
+     @ t.stag:7:26-52)
+    (("Cons (N.A {x = 5; y = None}, Nil)") ())
     (("`C {x = 6; y = None}") ("`C {x = 6; y = None}"))
     |}]
 ;;
@@ -249,7 +253,7 @@ let%expect_test "spliced code binding patterns and recursive closures" =
   eval
     {|
 let copies =
-  .~(let c = .<let count m = match m with `Z -> x | `S k -> count k in count (`S (`S `Z))>. in
+  .~(let c = .<let count m = match m with `Z -> x | `S * k -> count k in count (`S (Ptr.make (`S (Ptr.make `Z))))>. in
      .<((match {`x = 1; `y = 0} with {`x = x; ..rest} -> (.~c, rest)),
         (match {`x = 2; `y = 0} with {`x = x; ..rest} -> (.~c, rest)))>.)
 let open_rest = match {`a = 1; `b = 2} with {`a = a; ..} -> a
@@ -418,8 +422,8 @@ let none = match some with None -> 0 | Some (n, _) -> n
     ((Unification_error
       (Type_mismatch (TTuple ((TCon int ()) (TCon int ())))
        (TTuple
-        ((TVar (Link (TVar (Unbound 23 1)))) (TVar (Link (TVar (Unbound 24 1))))
-         (TVar (Link (TVar (Unbound 25 1))))))
+        ((TVar (Link (TVar (Unbound 24 1)))) (TVar (Link (TVar (Unbound 25 1))))
+         (TVar (Link (TVar (Unbound 26 1))))))
        (Args_length_mismatch 2 3)))
      @ t.stag:2:26-33)
     ((Constructor_arity_mismatch (constructor D) (expected 2) (got 1)) @

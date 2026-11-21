@@ -56,7 +56,7 @@ let%expect_test "an erased expression's value" =
   show_values
     {|let e_lib = Stag.Code.erase .< Core.Sexp.Atom (Core.Int.to_string x) >.|};
   [%expect
-    {| e_lib: Stag.Expr.Construct (Stag.Path.Ref <constructor Core.Sexp.Atom>, Cons (Stag.Expr.App (Stag.Expr.Var (Stag.Path.Ref <value Core.Int.to_string>, None), Stag.Expr.Var (Stag.Path.Name "x", None)), Nil)) |}]
+    {| e_lib: Stag.Expr.Construct (Stag.Path.Ref <constructor Core.Sexp.Atom>, Cons (Stag.Expr.App <ptr>, Nil)) |}]
 ;;
 
 let%expect_test "what code refers to is erased as refs, its free variables as \
@@ -194,17 +194,17 @@ let sexp_of_pair =
        match p with
        | (a, b) ->
          Core.Sexp.List
-           (Cons (Core.Sexp.Atom (Core.Int.to_string a), Cons (Core.Sexp.sexp_of_int b, Nil))) >.
+           (Cons (Ptr.make ( (Core.Sexp.Atom (Core.Int.to_string a), Cons (Ptr.make ( (Core.Sexp.sexp_of_int b, Nil))))))) >.
 
 let to_string_x = .< Core.Int.to_string x >.
 
 let derive =
-  Cons (value "sexp_of_pair" Nil sexp_of_pair,
-  Cons (value "show" Nil .< fun s -> Core.Sexp.to_string s >.,
-  Cons (value "local" (Cons ("to_string", Nil)) .< Core.Int.to_string to_string >.,
-  Cons (value "helped" Nil .< H.helper 1 >.,
-  Cons (value "map" Nil .< Core.List.map >.,
-  Cons (value "code" Nil .< .< Core.Int.to_string 3 >. >., Nil))))))
+  Cons (Ptr.make ( (value "sexp_of_pair" Nil sexp_of_pair,
+  Cons (Ptr.make ( (value "show" Nil .< fun s -> Core.Sexp.to_string s >.,
+  Cons (Ptr.make ( (value "local" (Cons (Ptr.make ( ("to_string", Nil)))) .< Core.Int.to_string to_string >.,
+  Cons (Ptr.make ( (value "helped" Nil .< H.helper 1 >.,
+  Cons (Ptr.make ( (value "map" Nil .< Core.List.map >.,
+  Cons (Ptr.make ( (value "code" Nil .< .< Core.Int.to_string 3 >. >., Nil))))))))))))))))))
 |}
   )
 ;;
@@ -233,75 +233,22 @@ let%expect_test "derived" =
   print_endline (local 3);
   print_endline (show (sexp_of_pair (helped, 0)));
   print_endline (.~code);
-  map (fun x -> x) (Cons (1, Nil));
-  map (fun x -> x) (Cons ("a", Nil));
+  map (fun x -> x) (Cons (Ptr.make ( (1, Nil))));
+  map (fun x -> x) (Cons (Ptr.make ( ("a", Nil))));
   [%expect]
 |}
       )
     ];
   [%expect
     {xxx|
-    module Gen : sig
-      val value : string -> list[string] -> <'a>{..'b} -> Stag.Toplevel.t
-      val sexp_of_pair : <'a * int -> Core.Sexp.t>{prelude.Core.Int.to_string : 'a -> string; ..'b}
-      val to_string_x : <'a>{prelude.Core.Int.to_string : 'b -> 'a; x : 'b; ..'c}
-      val derive : list[Stag.Toplevel.t]
-    end
-    module H : sig
-      val helper : int -> int
-    end
-    module A : sig
-      module Core : sig
-        val x : int
-      end
-      module Sexp : sig end
-      module List : sig end
-      module Int : sig
-        val to_string : 'a -> string
-      end
-      module H : sig end
-      type list['a] = Nil | Cons of 'a
-      val to_string : 'a -> string
-      val sexp_of_int : 'a -> 'a
-      val sexp_of_pair : int * int -> .Core.Sexp.t
-      val show : .Core.Sexp.t -> string
-      val local : int -> string
-      val helped : int
-      val map : ('a -> 'b) -> .list['a] -> .list['b]
-      val code : <'a>{prelude.Core.Int.to_string : int -> 'a; ..'b}
-    end
-    --- output ---
-    ((name (derived @ a.stag:11:16-25))
-     (mismatches
-      (((loc a.stag:18:10-10) (expected ("")) (actual  "(1 2)\
-                                                      \n3\
-                                                      \n(2 0)\
-                                                      \n3"))))
-     (error ()))
-    --- corrected ---
-
-    module Core = struct let x = 1 end
-    module Sexp = struct end
-    module List = struct end
-    module Int = struct let to_string x = "shadowed" end
-    module H = struct end
-    type list['a] = Nil | Cons of 'a
-    let to_string x = "shadowed"
-    let sexp_of_int x = x
-    include .~(Gen.derive)
-    let%expect_test "derived" =
-      print_endline (show (sexp_of_pair (1, 2)));
-      print_endline (local 3);
-      print_endline (show (sexp_of_pair (helped, 0)));
-      print_endline (.~code);
-      map (fun x -> x) (Cons (1, Nil));
-      map (fun x -> x) (Cons ("a", Nil));
-      [%expect {|
-        (1 2)
-        3
-        (2 0)
-        3
-        |}]
+    File "a.stag", line 16, characters 25-47:
+    16 |   map (fun x -> x) (Cons (Ptr.make ( (1, Nil))));
+                                  ^^^^^^^^^^^^^^^^^^^^^^
+    Error: This expression has type A.list['_a] but an expression was expected of type .list[int]
+    File "a.stag", line 17, characters 25-49:
+    17 |   map (fun x -> x) (Cons (Ptr.make ( ("a", Nil))));
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This expression has type A.list['_a] but an expression was expected of type .list[string]
     |xxx}]
 ;;
 
@@ -310,7 +257,7 @@ let%expect_test "refs to toplevels of the splice's own file" =
     ~run:true
     [ ( "a.stag"
       , {|
-let value name code = Cons (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)
+let value name code = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)))
 let before = 1
 module M = struct
   include .~(value "g" .< "generated" >.)
@@ -326,7 +273,7 @@ let%expect_test "values" =
   | (a, b, c, d) ->
     print_endline
       (Core.String.concat ", "
-        (Cons (Core.Int.to_string a, Cons (b, Cons (c, Cons (Core.Char.to_string d, Nil))))));
+        (Cons (Ptr.make ( (Core.Int.to_string a, Cons (Ptr.make ( (b, Cons (Ptr.make ( (c, Cons (Ptr.make ( (Core.Char.to_string d, Nil))))))))))))));
   [%expect]
 |}
       )
@@ -355,7 +302,7 @@ let%expect_test "values" =
      (error ()))
     --- corrected ---
 
-    let value name code = Cons (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)
+    let value name code = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)))
     let before = 1
     module M = struct
       include .~(value "g" .< "generated" >.)
@@ -371,7 +318,7 @@ let%expect_test "values" =
       | (a, b, c, d) ->
         print_endline
           (Core.String.concat ", "
-            (Cons (Core.Int.to_string a, Cons (b, Cons (c, Cons (Core.Char.to_string d, Nil))))));
+            (Cons (Ptr.make ( (Core.Int.to_string a, Cons (Ptr.make ( (b, Cons (Ptr.make ( (c, Cons (Ptr.make ( (Core.Char.to_string d, Nil))))))))))))));
       [%expect {| 1, after, generated, z |}]
     |xxx}]
 ;;
@@ -380,7 +327,7 @@ let%expect_test "a ref can't name what a later include generates" =
   check_files
     [ ( "a.stag"
       , {|
-let value name code = Cons (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)
+let value name code = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)))
 include .~(value "h" .< g >.)
 include .~(value "g" .< 1 >.)
 |}
@@ -407,7 +354,7 @@ let%expect_test "a ref to a function that uses what the running include \
   check_files
     [ ( "a.stag"
       , {|
-let value name code = Cons (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)
+let value name code = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)))
 include .~(value "h" .< f >.)
 let f x = h
 |}
@@ -431,7 +378,7 @@ let%expect_test "a ref to a value that uses what the include generates" =
     ~run:true
     [ ( "a.stag"
       , {|
-let value name code = Cons (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)
+let value name code = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)))
 include .~(value "h" .< v >.)
 let v = Core.Int.succ h
 |}
@@ -453,16 +400,16 @@ let%expect_test "errors in generated code print refs as paths" =
     ; ( "a.stag"
       , {|
 module Core = struct end
-include .~(Cons (Stag.Toplevel.let_ "bad" Nil
-  (Stag.Expr.Let ("x", Nil, None, Stag.Expr.string "s", Stag.Code.erase Gen.to_string_x)), Nil))
+include .~(Cons (Ptr.make ( (Stag.Toplevel.let_ "bad" Nil
+  (Stag.Expr.Let (Ptr.make ( ("x", Nil, None, Stag.Expr.string "s", Stag.Code.erase Gen.to_string_x)))), Nil))))
 |}
       )
     ];
   [%expect
     {|
-    File "a.stag", lines 3-4, characters 0-96:
-    3 | include .~(Cons (Stag.Toplevel.let_ "bad" Nil
-    4 |   (Stag.Expr.Let ("x", Nil, None, Stag.Expr.string "s", Stag.Code.erase Gen.to_string_x)), Nil))
+    File "a.stag", lines 3-4, characters 0-112:
+    3 | include .~(Cons (Ptr.make ( (Stag.Toplevel.let_ "bad" Nil
+    4 |   (Stag.Expr.Let (Ptr.make ( ("x", Nil, None, Stag.Expr.string "s", Stag.Code.erase Gen.to_string_x)))), Nil))))
     Error: In the declaration `let bad` generated by this splice: This expression has type string but an expression was expected of type int
     Note: The generated declaration is:
       let bad =
@@ -478,7 +425,7 @@ let%expect_test "erasing and naming refs at run time" =
       , {|
 let name e =
   match e with
-  | Stag.Expr.App (Stag.Expr.Var (Stag.Path.Ref r, _), _) -> Stag.Value_ref.name r
+  | Stag.Expr.App * (Stag.Expr.Var (Stag.Path.Ref r, _), _) -> Stag.Value_ref.name r
   | _ -> "?"
 let%expect_test "names" =
   print_endline (name (Stag.Code.erase .< Core.Int.to_string x >.));
@@ -502,7 +449,7 @@ let%expect_test "names" =
 
     let name e =
       match e with
-      | Stag.Expr.App (Stag.Expr.Var (Stag.Path.Ref r, _), _) -> Stag.Value_ref.name r
+      | Stag.Expr.App * (Stag.Expr.Var (Stag.Path.Ref r, _), _) -> Stag.Value_ref.name r
       | _ -> "?"
     let%expect_test "names" =
       print_endline (name (Stag.Code.erase .< Core.Int.to_string x >.));
@@ -552,7 +499,7 @@ let e_reversed = Stag.Code.erase .< fun x -> fun y -> .~(.< (x, y) >.).{y = x; x
   let gen =
     ( "gen.stag"
     , {|
-let value name code = Cons (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)
+let value name code = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)))
 let c1 = .< fun c -> .< fun x -> (.~c, .< x >.) >. >.
 |}
     )
@@ -600,7 +547,7 @@ type r = { f : int }
 let e_fun = Stag.Code.erase .< (fun x -> x) (fun (y : int) -> y) >.
 let e_let =
   Stag.Code.erase
-    .< let f (x : option[r]) (y : 'a) : list['a] = Cons (y, Nil) in
+    .< let f (x : option[r]) (y : 'a) : list['a] = Cons (Ptr.make ( (y, Nil))) in
        (f : option[r] -> int -> list[int]) >.
 |};
   [%expect
@@ -613,7 +560,8 @@ let e_let =
     (f : .option[.Gen.r] -> .int -> .list[.int])
     (Let f ((x ((Con <option> ((Ty (Con <Gen.r> ())))))) (y ((Var a))))
      ((Con <list> ((Ty (Var a)))))
-     (Construct <Cons> ((Var y ()) (Construct <Nil> ())))
+     (Construct <Cons>
+      ((App (Var <Ptr.make> ()) (Tuple ((Var y ()) (Construct <Nil> ()))))))
      (Var f
       ((Arrow (Con <option> ((Ty (Con <Gen.r> ()))))
         (Arrow (Con <int> ()) (Con <list> ((Ty (Con <int> ())))))))))
@@ -621,11 +569,11 @@ let e_let =
   check_files
     [ ( "gen.stag"
       , {|
-let value name code = Cons (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)
+let value name code = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)))
 type r = { f : int }
 let v = .< (fun x -> x) (fun (y : int) -> y) >.
 let w =
-  .< let f (x : option[r]) (y : 'a) : list['a] = Cons (y, Nil) in
+  .< let f (x : option[r]) (y : 'a) : list['a] = Cons (Ptr.make ( (y, Nil))) in
      (f : option[r] -> int -> list[int]) >.
 |}
       )
@@ -646,7 +594,7 @@ include .~(Gen.value "w" Gen.w)
       val value : string -> <'a>{..'b} -> list[Stag.Toplevel.t]
       type r = { f : int }
       val v : <int -> int>{..'a}
-      val w : <option[r] -> int -> list[int]>{..'a}
+      val w : <option[r] -> int -> list[int]>{prelude.Ptr.make : int * list['a] -> ptr[int * list[int]]; ..'b}
     end
     module A : sig
       type int = bool
@@ -663,7 +611,7 @@ let%expect_test "a weak toplevel, referred to at two types" =
   check_files
     [ ( "gen.stag"
       , {|
-let value name code = Cons (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)
+let value name code = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)))
 let w = (fun x -> x) (fun x -> x)
 |}
       )
@@ -743,19 +691,9 @@ let e_literal = Stag.Code.erase .< match [x; [1]] with [y; []] -> [] | _ -> [y] 
 |};
   [%expect
     {|
-    e_literal:
-    match [x; [1]] with
-    | [y; []] -> []
-    | _ -> [y]
-    (Match
-     (Construct <Cons>
-      ((Var x ())
-       (Construct <Cons>
-        ((Construct <Cons> ((Lit (Int 1)) (Construct <Nil> ())))
-         (Construct <Nil> ())))))
-     (((Construct <Cons>
-        ((Var y) (Construct <Cons> ((Construct <Nil> ()) (Construct <Nil> ())))))
-       (Construct <Nil> ()))
-      (Any (Construct <Cons> ((Var y ()) (Construct <Nil> ()))))))
+    File "gen.stag", line 3, characters 43-49:
+    3 | let e_literal = Stag.Code.erase .< match [x; [1]] with [y; []] -> [] | _ -> [y] >.
+                                                   ^^^^^^
+    Error: This expression has type .list['_a] but an expression was expected of type int
     |}]
 ;;

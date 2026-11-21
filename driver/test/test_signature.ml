@@ -6,7 +6,7 @@ let%expect_test "items mirror the program" =
     ~prelude:false
     {|
 let first = M.N.Leaf
-type list['a] = Nil | Cons of 'a * list['a]
+type list['a] = Nil | Cons of ptr['a * list['a]]
 type stmt[{..'r}, 'a] = Stmt of <'a>{..'r}
 type point = {x : int; y : list[int]}
 type pair['b, 'a] = 'a * 'b
@@ -15,7 +15,7 @@ type args = Arrow of (int -> int) | Tuple of (int * bool) | Two of int * (int ->
 module M = struct
   module Empty = struct end
   module N = struct
-    type tree = Leaf | Node of tree
+    type tree = Leaf | Node of ptr[tree]
   end
   let id x = x
   let code c = .<.~c>.
@@ -27,7 +27,7 @@ let code c = .<.~c>.
   [%expect
     {|
     val first : M.N.tree
-    type list['a] = Nil | Cons of 'a * list['a]
+    type list['a] = Nil | Cons of ptr['a * list['a]]
     type stmt[{..'a}, 'b] = Stmt of <'b>{..'a}
     type point = { x : int; y : list[int] }
     type pair['a, 'b] = 'b * 'a
@@ -36,7 +36,7 @@ let code c = .<.~c>.
     module M : sig
       module Empty : sig end
       module N : sig
-        type tree = Leaf | Node of tree
+        type tree = Leaf | Node of ptr[tree]
       end
       val id : 'a -> 'a
       val code : <'a>{..'b} -> <'a>{..'c} where ..'b <= {..'c}
@@ -78,7 +78,7 @@ type r = R
 module M = struct
   type m = Mk of r * N.n
   module N = struct
-    type n = Nn of n * m * r * P.p
+    type n = Nn of ptr[n * m] * r * P.p
   end
   module P = struct
     type p = Pp
@@ -96,7 +96,7 @@ type c = M.N.n * M.m * r
     module M : sig
       type m = Mk of r * N.n
       module N : sig
-        type n = Nn of n * m * r * P.p
+        type n = Nn of ptr[n * m] * r * P.p
       end
       module P : sig
         type p = Pp
@@ -291,15 +291,15 @@ end
   [%expect
     {|
     ((Type
-      ((name box) (params ((ATy (TVar (Generic 0)))))
-       (kind (Record (((name contents) (ty (TVar (Generic 0)))))))))
+      ((name box) (params ((ATy (TVar (Generic 1)))))
+       (kind (Record (((name contents) (ty (TVar (Generic 1)))))))))
      (Module (name M)
       (items
        ((Value
          ((name f)
           (scheme
-           (TArrow (TVar (Generic 2))
-            (TVar (Link (TCon box ((ATy (TVar (Link (TVar (Generic 2)))))))))))
+           (TArrow (TVar (Generic 3))
+            (TVar (Link (TCon box ((ATy (TVar (Link (TVar (Generic 3)))))))))))
           (persistent true)))
         (Value
          ((name n) (scheme (TVar (Link (TCon int ())))) (persistent false)))))))

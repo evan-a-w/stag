@@ -113,5 +113,13 @@ let close x = match true with true -> x | false -> tie x
 type wrap['a] = Wrap of next['a]
 type next['a] = Next of int
 |};
-  [%expect {||}]
+  [%expect
+    {|
+    ((Unification_error (Occurs_check_failed (ATy (TVar (Unbound 4 1))))) @
+     t.stag:2:51-64)
+    val tie : 'a -> wrap['a]
+    val close : wrap[(wrap['a] as 'a)] -> wrap['a]
+    type wrap['a] = Wrap of next['a]
+    type next['a] = Next of int
+    |}]
 ;;

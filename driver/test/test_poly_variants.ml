@@ -61,12 +61,12 @@ let argument_mismatch v = match v with `A 1 -> 1 | `A -> 2
     val repeated : [`A of int] -> int
     ((Unification_error
       (Row_mismatch REmpty
-       (RExtend C Present (TCon unit ()) (RVar (Unbound 39 1)))
+       (RExtend C Present (TCon unit ()) (RVar (Unbound 40 1)))
        (Missing_label C)))
      @ t.stag:3:18-20)
     (Unification_error
      (Row_mismatch REmpty
-      (RExtend A Present (TCon unit ()) (RVar (Unbound 18 1))) (Missing_label A)))
+      (RExtend A Present (TCon unit ()) (RVar (Unbound 19 1))) (Missing_label A)))
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon unit ())
        (Base_types_not_equal int unit)))
@@ -131,7 +131,7 @@ let%expect_test "residuals of a catch-all" =
     val open_ended : [`A of 'a | `B of 'a; ..'b] -> ([..'b] -> 'a) -> 'a
     (Unification_error
      (Row_mismatch REmpty
-      (RExtend C Present (TCon unit ()) (RVar (Unbound 105 1)))
+      (RExtend C Present (TCon unit ()) (RVar (Unbound 106 1)))
       (Missing_label C)))
     |}]
 ;;
@@ -225,7 +225,7 @@ type dup = [`A of int | `A of bool]
     val open_param : [`C of bool; ..'a] -> [`C of bool; ..'a]
     ((Unification_error
       (Row_mismatch REmpty
-       (RExtend C Present (TCon unit ()) (RVar (Unbound 26 1)))
+       (RExtend C Present (TCon unit ()) (RVar (Unbound 27 1)))
        (Missing_label C)))
      @ t.stag:3:15-17)
     ((Duplicate_row_entry A) @ t.stag:2:24-26)
@@ -305,12 +305,12 @@ let maybe_c v =
     {|
     ((Unification_error
       (Type_mismatch (TRecord REmpty)
-       (TVariant (RExtend A Present (TCon unit ()) (RVar (Unbound 20 1))))
+       (TVariant (RExtend A Present (TCon unit ()) (RVar (Unbound 21 1))))
        Structural_mismatch))
      @ t.stag:2:38-40)
     ((Unification_error
       (Type_mismatch (TCon int ())
-       (TVariant (RExtend A Present (TCon unit ()) (RVar (Unbound 22 1))))
+       (TVariant (RExtend A Present (TCon unit ()) (RVar (Unbound 23 1))))
        Structural_mismatch))
      @ t.stag:2:27-29)
     ((Unification_error
@@ -319,12 +319,12 @@ let maybe_c v =
      @ t.stag:2:32-41)
     ((Unification_error
       (Row_mismatch REmpty
-       (RExtend C Present (TCon unit ()) (RVar (Unbound 30 1)))
+       (RExtend C Present (TCon unit ()) (RVar (Unbound 31 1)))
        (Missing_label C)))
      @ t.stag:2:13-44)
     ((Unification_error
       (Row_mismatch REmpty
-       (RExtend C Present (TCon unit ()) (RVar (Unbound 35 1)))
+       (RExtend C Present (TCon unit ()) (RVar (Unbound 36 1)))
        (Missing_label C)))
      @ t.stag:4:2-22)
     |}]
@@ -439,7 +439,7 @@ let missing = same {`A = 1} `B
     val matched : {`A : 'a} -> [`A of 'a] -> 'a
     ((Unification_error
       (Row_mismatch REmpty
-       (RExtend B Present (TCon unit ()) (RVar (Unbound 35 1)))
+       (RExtend B Present (TCon unit ()) (RVar (Unbound 36 1)))
        (Missing_label B)))
      @ t.stag:3:28-30)
     |}]
@@ -462,22 +462,22 @@ let two = T (`Cons (1, T `Nil))
 |};
   [%expect
     {|
-    val occurs : ([`A of 'a; ..'b] as 'a) -> 'a
+    ((Unification_error (Occurs_check_failed (ATy (TVar (Unbound 18 1))))) @
+     t.stag:2:27-33)
     ((Unification_error
       (Row_mismatch
        (RExtend A Present (TCon unit ())
         (RVar
          (Link
-          (RExtend A (PVar (Unbound 30 1)) (TCon unit ()) (RVar (Unbound 31 1))))))
+          (RExtend A (PVar (Unbound 31 1)) (TCon unit ()) (RVar (Unbound 32 1))))))
        (RExtend B Present (TCon unit ())
         (RVar
          (Link
-          (RExtend A (PVar (Unbound 30 1)) (TCon unit ()) (RVar (Unbound 31 1))))))
+          (RExtend A (PVar (Unbound 31 1)) (TCon unit ()) (RVar (Unbound 32 1))))))
        Cyclic_row))
      @ t.stag:2:59-60)
-    type t = [`Cons of int * t | `Nil]
-    type t = T of [`Cons of int * t | `Nil]
-    val two : t
+    ((Infinite_type_layout t) @ t.stag:2:5-6)
+    ((Infinite_type_layout t) @ t.stag:2:5-6)
     |}]
 ;;
 

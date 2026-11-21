@@ -69,7 +69,7 @@ let%expect_test "messages" =
   List.iter
     ~f:check
     [ "let x = Int.add 1 true"
-    ; "let f x = x x"
+    ; "let x = Some x"
     ; "let r = {`a = 1}.`b"
     ; "let x = y"
     ; "let x = 1 let x = 2"
@@ -95,9 +95,9 @@ let%expect_test "messages" =
     1 | let x = Int.add 1 true
                           ^^^^
     Error: This expression has type bool but an expression was expected of type int
-    File "a.stag", line 1, characters 12-13:
-    1 | let f x = x x
-                    ^
+    File "a.stag", line 1, characters 8-14:
+    1 | let x = Some x
+                ^^^^^^
     Error: The type variable '_a occurs inside its own definition
     File "a.stag", line 1, characters 8-16:
     1 | let r = {`a = 1}.`b

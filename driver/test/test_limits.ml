@@ -1,21 +1,21 @@
 open! Import
 open Source_helpers
 
-let nat_type = "type nat = Z | S of nat\n"
+let nat_type = "type nat = Z | S of ptr[nat]\n"
 
 (* Takes 2^n steps, at depth n. *)
 let spin =
-  nat_type ^ "let spin n = match n with Z -> () | S m -> spin m; spin m\n"
+  nat_type ^ "let spin n = match n with Z -> () | S * m -> spin m; spin m\n"
 ;;
 
 (* Code of size 2^n, built in about 2n steps. *)
 let blow =
   nat_type
-  ^ "let blow n = match n with Z -> .<()>. | S m -> let c = blow m in .<.~c; \
+  ^ "let blow n = match n with Z -> .<()>. | S * m -> let c = blow m in .<.~c; \
      .~c>.\n"
 ;;
 
-let rec nat n = if n = 0 then "Z" else [%string "S (%{nat (n - 1)})"]
+let rec nat n = if n = 0 then "Z" else [%string "S (Ptr.make (%{nat (n - 1)}))"]
 
 let only_kind error =
   match Error.sexp_of_t error with
@@ -67,7 +67,7 @@ let fuel_only fuel = { Limits.unlimited with fuel = Some fuel }
 let%expect_test "a runaway splice runs out of fuel while checking" =
   run (spin ^ [%string "let x = .~(spin (%{nat 40}); .<1>.)\n"]);
   [%expect
-    {| splice failed: ("Out of fuel: evaluation took more than 1000000 steps" @ t.stag:2:43-57) |}]
+    {| splice failed: ("Out of fuel: evaluation took more than 1000000 steps" @ t.stag:2:58-59) |}]
 ;;
 
 let%expect_test "a looping toplevel runs out of fuel when evaluated" =
@@ -102,7 +102,7 @@ let%expect_test "deep recursion exceeds the stack depth" =
       (nat_type
        ^ [%string
            {|
-let double n = match n with Z -> Z | S m -> S (S (double m))
+let double n = match n with Z -> Z | S * m -> S (Ptr.make (S (Ptr.make (double m))))
 let deep = %{String.concat (List.init 14 ~f:(fun _ -> "double ("))}%{nat 1}%{String.make 14 ')'}; 0
 |}]
       )
@@ -112,7 +112,7 @@ let deep = %{String.concat (List.init 14 ~f:(fun _ -> "double ("))}%{nat 1}%{Str
   [%expect
     {|
     eval failed: ("Stack depth exceeded: evaluation nested more than 10000 steps deep" @
-     t.stag:3:50-56)
+     t.stag:3:49-57)
     (deep 0)
     |}]
 ;;
@@ -144,7 +144,7 @@ let%expect_test "compile time and runtime have separate budgets" =
         ~compile_time:(least_fuel at_compile_time : int)
         ~runtime:(least_fuel at_runtime : int)
         ~both:(least_fuel (at_compile_time ^ at_runtime) : int)];
-  [%expect {| ((compile_time 12296) (runtime 12292) (both 12296)) |}]
+  [%expect {| ((compile_time 12317) (runtime 12313) (both 12317)) |}]
 ;;
 
 let%expect_test "the time limit" =
@@ -184,7 +184,7 @@ let%expect_test "values forced at compile time are not evaluated again" =
     {|
     (y 2)
     (x 1)
-    eval failed: ("Out of fuel: evaluation took more than 100 steps" @ t.stag:2:31-33)
+    eval failed: ("Out of fuel: evaluation took more than 100 steps" @ t.stag:2:58-59)
     |}]
 ;;
 
@@ -220,7 +220,7 @@ let%expect_test "growing code exponentially runs out of fuel at runtime" =
      (Code
       (Let (ident _/18) (args ()) (generalized false) (body (Lit Unit : unit))
        (in_ (Lit Unit : unit)) : unit)))
-    eval failed: ("Out of fuel: evaluation took more than 2000 steps" @ t.stag:2:67-75)
+    eval failed: ("Out of fuel: evaluation took more than 2000 steps" @ t.stag:2:69-77)
     eval failed: Time limit exceeded: evaluation took more than 50ms
     |}]
 ;;

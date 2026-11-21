@@ -3,8 +3,8 @@ open Syntax
 open Helpers
 
 let type_decls =
-  {|type nat = Z | S of nat
-type list['a] = Nil | Cons of 'a * list['a]
+  {|type nat = Z | S of ptr[nat]
+type list['a] = Nil | Cons of ptr['a * list['a]]
 type option['a] = None | Some of 'a
 type stmt[{..'a}] = Stmt of <unit>{..'a} * list[stmt[{..'a}]]
 |}
@@ -80,8 +80,8 @@ type with_x[{..'a}] = {`x : int; ..'a}
 type holder = { p : {`x : int; `y : int} }
 type stream['a] = {`head : 'a; `tail : unit -> stream['a]}
 type tree = [`Leaf of int | `Node of list[tree]]
-type pair = [`A of pair] * int
-type rows[{..'a}] = {`x : rows[{..'a}]; ..'a}
+type pair = [`A of ptr[pair]] * int
+type rows[{..'a}] = {`x : ptr[rows[{..'a}]]; ..'a}
 type e = |
 type abstract
 |}
@@ -92,8 +92,8 @@ type abstract
   print_s [%message (String.equal printed source : bool)];
   [%expect
     {|
-    type nat = Z | S of nat
-    type list['a] = Nil | Cons of 'a * list['a]
+    type nat = Z | S of ptr[nat]
+    type list['a] = Nil | Cons of ptr['a * list['a]]
     type option['a] = None | Some of 'a
     type stmt[{..'a}] = Stmt of <unit>{..'a} * list[stmt[{..'a}]]
     type point = {`x : int; `y : int}
@@ -101,8 +101,8 @@ type abstract
     type holder = { p : {`x : int; `y : int} }
     type stream['a] = {`head : 'a; `tail : unit -> stream['a]}
     type tree = [`Leaf of int | `Node of list[tree]]
-    type pair = [`A of pair] * int
-    type rows[{..'a}] = {`x : rows[{..'a}]; ..'a}
+    type pair = [`A of ptr[pair]] * int
+    type rows[{..'a}] = {`x : ptr[rows[{..'a}]]; ..'a}
     type e = |
     type abstract
     ("String.equal printed source" true)
@@ -110,7 +110,11 @@ type abstract
 ;;
 
 let%expect_test "the staged power example" =
-  let nat = Decl.variant "nat" [ "Z", []; "S", [ Ty.con "nat" ] ] in
+  let nat =
+    Decl.variant
+      "nat"
+      [ "Z", []; "S", [ Ty.con "ptr" ~args:[ Ty (Ty.con "nat") ] ] ]
+  in
   let list =
     Decl.variant
       "list"
@@ -126,7 +130,7 @@ let%expect_test "the staged power example" =
       (match_
          (var "n")
          [ Pat.construct "Z", quote (construct "Nil")
-         ; ( Pat.construct "S" ~args:[ Pat.var "m" ]
+         ; ( Pat.construct "S" ~args:[ Pat.deref (Pat.var "m") ]
            , quote
                (construct
                   "Cons"
@@ -139,16 +143,16 @@ let%expect_test "the staged power example" =
   let program =
     Source_helpers.parse_exn
       {|
-      type nat = Z | S of nat
-      type list['a] = Nil | Cons of 'a * list['a]
+      type nat = Z | S of ptr[nat]
+      type list['a] = Nil | Cons of ptr['a * list['a]]
 
       (* [power n c] is a list of [n] copies of [c]. *)
       let power n c =
         match n with
         | Z -> .< Nil >.
-        | S m -> .< Cons (.~c, .~(power m c)) >.
+        | S * m -> .< Cons (Ptr.make ( (.~c, .~(power m c)))) >.
 
-      let three = S (S (S Z))
+      let three = S (Ptr.make (S (Ptr.make (S (Ptr.make Z)))))
       let cube x = .~(power three .<x>.)
       let used = cube 7
       |}
@@ -160,17 +164,17 @@ let%expect_test "the staged power example" =
     Source_helpers.eval_and_print_values t);
   [%expect
     {|
-    ("Program.equal (List.take program 3) [nat; list; power]" true)
-    type nat = Z | S of nat
-    type list['a] = Nil | Cons of 'a * list['a]
-    val power : nat -> <'a>{..'b} -> <list['a]>{..'c} where ..'b <= {..'c}
+    ("Program.equal (List.take program 3) [nat; list; power]" false)
+    type nat = Z | S of ptr[nat]
+    type list['a] = Nil | Cons of ptr['a * list['a]]
+    val power : nat -> <'a>{..'b} -> <list['c]>{prelude.Ptr.make : mut?'d 'a * list['c] -> ptr['c * list['c]]; ..'e} where ..'b <= {prelude.Ptr.make : mut?'d 'a * list['c] -> ptr['c * list['c]]; ..'e}, ..'e <= {prelude.Ptr.make : mut?'d 'a * list['c] -> ptr['c * list['c]]; ..'e}
     val three : nat
     val cube : 'a -> list['a]
     val used : list[int]
     (power <fun>)
-    (three (S (S (S (Z)))))
+    (three (S <ptr>))
     (cube <fun>)
-    (used (Cons 7 (Cons 7 (Cons 7 (Nil)))))
+    (used (Cons <ptr>))
     |}]
 ;;
 

@@ -50,10 +50,10 @@ let%expect_test "an empty match on a later empty type" =
 let%expect_test "a toplevel splice using later types" =
   run
     {|
-let x = .~(print_endline "splice"; gen (M.S M.Z))
+let x = .~(print_endline "splice"; gen (M.S (Ptr.make M.Z)))
 let gen n = match n with M.Z -> .<{N.v = 0}>. | M.S _ -> .<{N.v = 1}>.
 module M = struct
-  type nat = Z | S of nat
+  type nat = Z | S of ptr[nat]
 end
 module N = struct
   type r = {v : int}
@@ -65,7 +65,7 @@ end
     val x : N.r
     val gen : M.nat -> <N.r>{..'a}
     module M : sig
-      type nat = Z | S of nat
+      type nat = Z | S of ptr[nat]
     end
     module N : sig
       type r = { v : int }

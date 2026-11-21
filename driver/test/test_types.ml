@@ -2,38 +2,38 @@ open! Import
 open Helpers
 open Source_helpers
 
-let list_decl = "type list['a] = Nil | Cons of 'a * list['a]\n"
+let list_decl = "type list['a] = Nil | Cons of ptr['a * list['a]]\n"
 
 let%expect_test "variants" =
   check
     {|
-type list['a] = Nil | Cons of 'a * list['a]
+type list['a] = Nil | Cons of ptr['a * list['a]]
 type option['a] = None | Some of 'a
 let nil = Nil
-let one = Cons (1, Nil)
+let one = Cons (Ptr.make (1, Nil))
 let some x = Some x
 let none = None
-let nested = Some (Cons (true, Nil))
+let nested = Some (Cons (Ptr.make (true, Nil)))
 |};
   check
     {|
-type list['a] = Nil | Cons of 'a * list['a]
-let bad = Cons (1, Cons (true, Nil))
+type list['a] = Nil | Cons of ptr['a * list['a]]
+let bad = Cons (Ptr.make (1, Cons (Ptr.make (true, Nil))))
 |};
   check {|
 let unbound = Nil
 |};
   check {|
-type list['a] = Nil | Cons of 'a * list['a]
-let arity = Cons 1
+type list['a] = Nil | Cons of ptr['a * list['a]]
+let arity = Cons
 |};
   check {|
-type list['a] = Nil | Cons of 'a * list['a]
+type list['a] = Nil | Cons of ptr['a * list['a]]
 let arity = Nil 1
 |};
   [%expect
     {|
-    type list['a] = Nil | Cons of 'a * list['a]
+    type list['a] = Nil | Cons of ptr['a * list['a]]
     type option['a] = None | Some of 'a
     val nil : list['a]
     val one : list[int]
@@ -43,10 +43,10 @@ let arity = Nil 1
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
-     @ t.stag:3:25-29)
+     @ t.stag:3:15-58)
     val unbound : list['a]
-    ((Constructor_arity_mismatch (constructor Cons) (expected 2) (got 1)) @
-     t.stag:3:12-18)
+    ((Constructor_arity_mismatch (constructor Cons) (expected 1) (got 0)) @
+     t.stag:3:12-16)
     ((Constructor_arity_mismatch (constructor Nil) (expected 0) (got 1)) @
      t.stag:3:12-17)
     |}]
@@ -124,16 +124,16 @@ let bad = M.id_int 1
 let%expect_test "declarations are order independent and may be recursive" =
   check
     {|
-let tree = Node (Cons (Leaf, Nil))
+let tree = Node (Cons (Ptr.make (Leaf, Nil)))
 type tree = Leaf | Node of forest
 type forest = list[tree]
-type list['a] = Nil | Cons of 'a * list['a]
+type list['a] = Nil | Cons of ptr['a * list['a]]
 |};
   check
     {|
 type even = Zero | Succ_even of odd
-type odd = Succ_odd of even
-let two = Succ_even (Succ_odd Zero)
+type odd = Succ_odd of ptr[even]
+let two = Succ_even (Succ_odd (Ptr.make Zero))
 let bad = Succ_even Zero
 |};
   [%expect
@@ -141,7 +141,7 @@ let bad = Succ_even Zero
     val tree : tree
     type tree = Leaf | Node of list[tree]
     type forest = list[tree]
-    type list['a] = Nil | Cons of 'a * list['a]
+    type list['a] = Nil | Cons of ptr['a * list['a]]
     ((No_such_constructor (type_name odd) (constructor Zero)) @ t.stag:5:20-24)
     |}]
 ;;
@@ -157,7 +157,7 @@ let boxed v = {contents = v}
 let unbox b = b.contents
 let boxed_nil = {contents = Nil}
 let unboxed = boxed_nil.contents
-type list['a] = Nil | Cons of 'a * list['a]
+type list['a] = Nil | Cons of ptr['a * list['a]]
 |};
   [%expect
     {|
@@ -169,7 +169,7 @@ type list['a] = Nil | Cons of 'a * list['a]
     val unbox : box['a] -> 'a
     val boxed_nil : box[list['a]]
     val unboxed : list['a]
-    type list['a] = Nil | Cons of 'a * list['a]
+    type list['a] = Nil | Cons of ptr['a * list['a]]
     |}]
 ;;
 
@@ -257,13 +257,13 @@ let fn = (id, add 1)
 let%expect_test "match" =
   check
     {|
-type list['a] = Nil | Cons of 'a * list['a]
+type list['a] = Nil | Cons of ptr['a * list['a]]
 type option['a] = None | Some of 'a
 type point = {x : int; y : int}
 let sum2 xs =
   match xs with
-  | Cons (x, Cons (y, _)) -> add x y
-  | Cons (x, Nil) -> x
+  | Cons * (x, Cons * (y, _)) -> add x y
+  | Cons * (x, Nil) -> x
   | Nil -> 0
 let is_zero n = match n with 0 -> true | _ -> false
 let fst p = match p with (a, _) -> a
@@ -276,7 +276,7 @@ let nested_record o = match o with Some {x = a; y = 2} -> a
   check_program [ top "no_cases" [ "x" ] (match_ (var "x") []) ];
   [%expect
     {|
-    type list['a] = Nil | Cons of 'a * list['a]
+    type list['a] = Nil | Cons of ptr['a * list['a]]
     type option['a] = None | Some of 'a
     type point = { x : int; y : int }
     val sum2 : list[int] -> int
@@ -344,7 +344,7 @@ let tuple_length = match (1, 2) with (_, _, _) -> 1
        (Base_types_not_equal int bool)))
      @ t.stag:3:53-57)
     ((Unification_error
-      (Type_mismatch (TCon option ((ATy (TVar (Link (TVar (Unbound 22 1)))))))
+      (Type_mismatch (TCon option ((ATy (TVar (Link (TVar (Unbound 23 1)))))))
        (TCon int ()) (Base_types_not_equal option int)))
      @ t.stag:3:49-50)
     ((Duplicate_pattern_variable x) @ t.stag:2:38-39)
@@ -360,8 +360,8 @@ let tuple_length = match (1, 2) with (_, _, _) -> 1
     ((Unification_error
       (Type_mismatch (TTuple ((TCon int ()) (TCon int ())))
        (TTuple
-        ((TVar (Link (TVar (Unbound 22 1)))) (TVar (Link (TVar (Unbound 23 1))))
-         (TVar (Link (TVar (Unbound 24 1))))))
+        ((TVar (Link (TVar (Unbound 23 1)))) (TVar (Link (TVar (Unbound 24 1))))
+         (TVar (Link (TVar (Unbound 25 1))))))
        (Args_length_mismatch 2 3)))
      @ t.stag:2:37-46)
     |}]
@@ -453,8 +453,9 @@ let nested c : <<int>{x : int}>{x : bool} = c
 ;;
 
 let%expect_test "arity and kind of type arguments" =
-  check {|
-type list['a] = Nil | Cons of 'a * list['a]
+  check
+    {|
+type list['a] = Nil | Cons of ptr['a * list['a]]
 type t = A of list
 |};
   check {|
@@ -463,8 +464,9 @@ type t = A of int[int]
   check {|
 let f x : bool[int] = x
 |};
-  check {|
-type list['a] = Nil | Cons of 'a * list['a]
+  check
+    {|
+type list['a] = Nil | Cons of ptr['a * list['a]]
 type t = A of list[{}]
 |};
   check {|
@@ -484,7 +486,7 @@ let f x : M.t = x
     ((Type_arity_mismatch (type_name int) (expected 0) (got 1)) @ t.stag:2:14-22)
     ((Type_arity_mismatch (type_name bool) (expected 0) (got 1)) @
      t.stag:2:10-19)
-    type list['a] = Nil | Cons of 'a * list['a]
+    type list['a] = Nil | Cons of ptr['a * list['a]]
     type t = A of list[{}]
     ((Type_arg_kind_mismatch (type_name stmt) (param (Row r))) @ t.stag:3:19-22)
     val f : list[int] -> list[int]
@@ -537,7 +539,7 @@ type t = u
 type u = int -> t
 |};
   check {|
-type list['a] = Nil | Cons of 'a * list['a]
+type list['a] = Nil | Cons of ptr['a * list['a]]
 type t = list[t]
 |};
   check {|
@@ -545,7 +547,7 @@ type t = <int>{x : t}
 |};
   check
     {|
-type list['a] = Nil | Cons of 'a * list['a]
+type list['a] = Nil | Cons of ptr['a * list['a]]
 type t = list[u]
 type u = U of t
 let ok = U Nil
@@ -553,10 +555,12 @@ let ok = U Nil
   [%expect
     {|
     ((Cyclic_type_alias t) @ t.stag:2:5-6)
-    ((Cyclic_type_alias t) @ t.stag:2:5-6)
-    ((Cyclic_type_alias t) @ t.stag:3:5-6)
-    ((Cyclic_type_alias t) @ t.stag:2:5-6)
-    type list['a] = Nil | Cons of 'a * list['a]
+    type t = int -> t
+    type u = int -> u
+    type list['a] = Nil | Cons of ptr['a * list['a]]
+    type t = list[t]
+    ((Infinite_type_layout t) @ t.stag:2:5-6)
+    type list['a] = Nil | Cons of ptr['a * list['a]]
     type t = list[u]
     type u = U of list[u]
     val ok : u
@@ -598,21 +602,21 @@ let f = let g y = (y : 'a) in g 1; g true
 let%expect_test "context parameters" =
   check
     {|
-type list['a] = Nil | Cons of 'a * list['a]
+type list['a] = Nil | Cons of ptr['a * list['a]]
 type stmt[{..'r}] = Stmt of <unit>{..'r} * list[stmt[{..'r}]]
 let single c = Stmt (c, Nil)
 let uses_x = Stmt (.<x; ()>., Nil)
-let nested = Stmt (.<add x 1; ()>., Cons (uses_x, Nil))
+let nested = Stmt (.<add x 1; ()>., Cons (Ptr.make (uses_x, Nil)))
 let annotated s : stmt[{`y : bool; ..'r}] = s
 let body s = match s with Stmt (c, _) -> c
 |};
   [%expect
     {|
-    type list['a] = Nil | Cons of 'a * list['a]
+    type list['a] = Nil | Cons of ptr['a * list['a]]
     type stmt[{..'a}] = Stmt of <unit>{..'a} * list[stmt[{..'a}]]
     val single : <unit>{..'a} -> stmt[{..'a}]
     val uses_x : stmt[{`x : 'a; ..'b}]
-    val nested : stmt[{`x : int; ..'a}]
+    val nested : stmt[{`x : int; ..'_a}]
     val annotated : stmt[{`y : bool; ..'a}] -> stmt[{`y : bool; ..'a}]
     val body : stmt[{..'a}] -> <unit>{..'a}
     |}]
@@ -652,20 +656,20 @@ let level = .<match 1 with x -> .~x>.
 let%expect_test "constructors and fields are not free variables of quotes" =
   check
     {|
-type list['a] = Nil | Cons of 'a * list['a]
+type list['a] = Nil | Cons of ptr['a * list['a]]
 type point = {x : int; y : int}
-let closed = .<Cons (1, Nil)>.
-let open = .<Cons (y, Nil)>.
+let closed = .<Cons (Ptr.make (1, Nil))>.
+let open = .<Cons (Ptr.make (y, Nil))>.
 let record = .<{x = 1; y = y}.x>.
-let pattern = .<match l with Cons (h, _) -> h | Nil -> 0>.
+let pattern = .<match l with Cons * (h, _) -> h | Nil -> 0>.
 let in_splice = .<.~(.<Nil>.)>.
 |};
   [%expect
     {|
-    type list['a] = Nil | Cons of 'a * list['a]
+    type list['a] = Nil | Cons of ptr['a * list['a]]
     type point = { x : int; y : int }
-    val closed : <list[int]>{..'a}
-    val open : <list['a]>{y : 'a; ..'b}
+    val closed : <list['a]>{prelude.Ptr.make : int * list['b] -> ptr['a * list['a]]; ..'c}
+    val open : <list['a]>{prelude.Ptr.make : 'b * list['c] -> ptr['a * list['a]]; y : 'b; ..'d}
     val record : <int>{y : int; ..'a}
     val pattern : <int>{l : list[int]; ..'a}
     val in_splice : <list['a]>{..'b}
@@ -675,19 +679,19 @@ let in_splice = .<.~(.<Nil>.)>.
 let%expect_test "generalization of syntactic values" =
   check
     {|
-type list['a] = Nil | Cons of 'a * list['a]
+type list['a] = Nil | Cons of ptr['a * list['a]]
 type box['a] = {contents : 'a}
 let nil = Nil
-let uses = (Cons (1, nil), Cons (true, nil))
+let uses = (Cons (Ptr.make (1, nil)), Cons (Ptr.make (true, nil)))
 let pair = (Nil, id)
 let boxed = {contents = Nil}
 let contents = boxed.contents
 let matched = match nil with Nil -> Nil | _ -> nil
-let local = let a = Nil in Cons (a, a)
+let local = let a = Nil in Cons (Ptr.make (a, a))
 let local_fn = let f x = x in f
 let quoted = .<Nil>.
 let weak_app = id id
-let weak_cons = Cons (id id, Nil)
+let weak_cons = Cons (Ptr.make (id id, Nil))
 let weak_let = let a = id Nil in a
 let weak_match = match id Nil with _ -> Nil
 let weak_arm = match Nil with _ -> id Nil
@@ -696,7 +700,7 @@ let spliced_value = .~(.<Nil>.)
 |};
   [%expect
     {|
-    type list['a] = Nil | Cons of 'a * list['a]
+    type list['a] = Nil | Cons of ptr['a * list['a]]
     type box['a] = { contents : 'a }
     val nil : list['a]
     val uses : list[int] * list[bool]
@@ -704,7 +708,7 @@ let spliced_value = .~(.<Nil>.)
     val boxed : box[list['a]]
     val contents : list['a]
     val matched : list['a]
-    val local : list[list['a]]
+    val local : list[list['_a]]
     val local_fn : 'a -> 'a
     val quoted : <list['a]>{..'b}
     val weak_app : '_a -> '_a
@@ -720,29 +724,29 @@ let spliced_value = .~(.<Nil>.)
 let%expect_test "local generalization of syntactic values" =
   check
     {|
-type list['a] = Nil | Cons of 'a * list['a]
-let poly = let n = Nil in (Cons (1, n), Cons (true, n))
+type list['a] = Nil | Cons of ptr['a * list['a]]
+let poly = let n = Nil in (Cons (Ptr.make (1, n)), Cons (Ptr.make (true, n)))
 |};
   check
     {|
-type list['a] = Nil | Cons of 'a * list['a]
-let mono = let n = id Nil in (Cons (1, n), Cons (true, n))
+type list['a] = Nil | Cons of ptr['a * list['a]]
+let mono = let n = id Nil in (Cons (Ptr.make (1, n)), Cons (Ptr.make (true, n)))
 |};
   [%expect
     {|
-    type list['a] = Nil | Cons of 'a * list['a]
+    type list['a] = Nil | Cons of ptr['a * list['a]]
     val poly : list[int] * list[bool]
     ((Unification_error
       (Type_mismatch (TCon bool ()) (TCon int ())
        (Base_types_not_equal bool int)))
-     @ t.stag:3:55-56)
+     @ t.stag:3:59-79)
     |}]
 ;;
 
 let%expect_test "generalized values are not persistent" =
   check
     {|
-type list['a] = Nil | Cons of 'a * list['a]
+type list['a] = Nil | Cons of ptr['a * list['a]]
 let nil = Nil
 let f x = x
 let uses_nil = .<nil>.
@@ -750,7 +754,7 @@ let uses_f = .<f>.
 |};
   [%expect
     {|
-    type list['a] = Nil | Cons of 'a * list['a]
+    type list['a] = Nil | Cons of ptr['a * list['a]]
     val nil : list['a]
     val f : 'a -> 'a
     val uses_nil : <'a>{nil : 'a; ..'b}
@@ -761,24 +765,24 @@ let uses_f = .<f>.
 let%expect_test "SCCs are generalized iff all members are values" =
   check
     {|
-type list['a] = Nil | Cons of 'a * list['a]
+type list['a] = Nil | Cons of ptr['a * list['a]]
 let nil = Nil
 let f x = g x
 let g x = nil; f x
 |};
   check
     {|
-type list['a] = Nil | Cons of 'a * list['a]
+type list['a] = Nil | Cons of ptr['a * list['a]]
 let a x = b
 let b = a; id Nil
 |};
   [%expect
     {|
-    type list['a] = Nil | Cons of 'a * list['a]
+    type list['a] = Nil | Cons of ptr['a * list['a]]
     val nil : list['a]
     val f : 'a -> 'b
     val g : 'a -> 'b
-    type list['a] = Nil | Cons of 'a * list['a]
+    type list['a] = Nil | Cons of ptr['a * list['a]]
     val a : '_a -> list['_b]
     val b : list['_a]
     |}]
@@ -787,16 +791,16 @@ let b = a; id Nil
 let%expect_test "recursive SCCs with a non-function are not generalized" =
   check
     {|
-type list['a] = Nil | Cons of 'a * list['a]
+type list['a] = Nil | Cons of ptr['a * list['a]]
 let a x = b
 let b = a; Nil
 let quoted = .<a 1>.
 |};
   check
     {|
-type list['a] = Nil | Cons of 'a * list['a]
-let xs = Cons (1, ys)
-let ys = Cons (2, xs)
+type list['a] = Nil | Cons of ptr['a * list['a]]
+let xs = Cons (Ptr.make (1, ys))
+let ys = Cons (Ptr.make (2, xs))
 |};
   check {|
 let x = x
@@ -815,9 +819,9 @@ let use = x 1; x true
   (* Without initialization cycles. *)
   check
     {|
-type list['a] = Nil | Cons of 'a * list['a]
-let xs = fun u -> Cons (1, ys u)
-let ys = fun u -> Cons (2, xs u)
+type list['a] = Nil | Cons of ptr['a * list['a]]
+let xs = fun u -> Cons (Ptr.make (1, ys u))
+let ys = fun u -> Cons (Ptr.make (2, xs u))
 |};
   check
     {|
@@ -831,11 +835,11 @@ let use = x 1; x true
 |};
   [%expect
     {|
-    type list['a] = Nil | Cons of 'a * list['a]
+    type list['a] = Nil | Cons of ptr['a * list['a]]
     val a : '_a -> list['_b]
     val b : list['_a]
     val quoted : <'a>{a : int -> 'a; ..'b}
-    ((Toplevel_initialization_cycle (ys xs ys)) @ t.stag:4:18-20)
+    ((Toplevel_initialization_cycle (ys xs ys)) @ t.stag:4:28-30)
     ((Toplevel_initialization_cycle (x x)) @ t.stag:2:8-9)
     ((Toplevel_initialization_cycle (y x y)) @ t.stag:3:8-9)
     ((Toplevel_initialization_cycle (M.x M.x)) @ t.stag:2:26-29)
@@ -844,7 +848,7 @@ let use = x 1; x true
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
      @ t.stag:3:17-21)
-    type list['a] = Nil | Cons of 'a * list['a]
+    type list['a] = Nil | Cons of ptr['a * list['a]]
     val xs : '_a -> list[int]
     val ys : '_a -> list[int]
     val x : '_a -> '_b
@@ -898,7 +902,7 @@ let%expect_test "recursive local non-functions are not generalized" =
 let%expect_test "quotes are values unless their level 0 splices are not" =
   check
     {|
-type list['a] = Nil | Cons of 'a * list['a]
+type list['a] = Nil | Cons of ptr['a * list['a]]
 let no_splice = .<Nil>.
 let value_splice = .<.~(.<Nil>.)>.
 let app_splice = .<.~(id .<Nil>.)>.
@@ -908,7 +912,7 @@ let substitution = .<.~(.<x>.).{x = id Nil}>.
 |};
   [%expect
     {|
-    type list['a] = Nil | Cons of 'a * list['a]
+    type list['a] = Nil | Cons of ptr['a * list['a]]
     val no_splice : <list['a]>{..'b}
     val value_splice : <list['a]>{..'b}
     val app_splice : <list['_a]>{..'_b}

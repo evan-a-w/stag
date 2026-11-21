@@ -218,7 +218,7 @@ let%expect_test "zip, unzip, assoc" =
   print_string_option (Core.List.assoc Core.Int.equal 2 pairs);
   print_string_option (Core.List.assoc Core.Int.equal 3 pairs);
   print_string_option
-    (Core.List.assoc Core.Int.equal 1 (Cons (Ptr.make ( ((1, "first"), pairs)))));
+    (Core.List.assoc Core.Int.equal 1 (Cons (Ptr.make ((1, "first"), pairs))));
   [%expect {|
     (((1 a) (2 b)))
     ()

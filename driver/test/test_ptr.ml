@@ -64,3 +64,43 @@ let b = cell.* true
      @ t.stag:4:15-19)
     |}]
 ;;
+
+let%expect_test "an annotated allocator alias still checks its annotation" =
+  run {|
+let bad : int -> int = Ptr.make
+|};
+  [%expect
+    {|
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon ptr ((ATy (TVar (Link (TCon int ()))))))
+       (Base_types_not_equal int ptr)))
+     @ t.stag:2:23-31)
+    |}]
+;;
+
+let%expect_test "a shadowed allocator remains an ordinary function" =
+  run
+    {|
+module Ptr = struct
+  let make x = Int.add x 10
+end
+let value = Ptr.make 1
+let generated = .~(.< Ptr.make 2 >.)
+let canonical_list = .~(.< [3] >.)
+|};
+  [%expect
+    {|
+    module Ptr : sig
+      val make : int -> int
+    end
+    val value : int
+    val generated : int
+    val canonical_list : list[int]
+    -- evaluated at compile time
+    -- evaluated
+    (Ptr.make <fun>)
+    (value 11)
+    (generated 12)
+    (canonical_list (Cons 3 (Nil)))
+    |}]
+;;

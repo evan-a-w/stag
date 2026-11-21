@@ -56,7 +56,7 @@ let separate =
   | ((incr1, get1), (incr2, get2)) -> let _ = incr1 () in (get1 (), get2 ())
 let sum xs =
   let mut total = 0 in
-  let go xs = match xs with [] -> () | Cons (x, rest) -> total <- Int.add total x; go rest in
+  let go xs = match xs with [] -> () | Cons * (x, rest) -> total <- Int.add total x; go rest in
   go xs;
   total
 let summed = sum [1; 2; 3; 4]
@@ -107,7 +107,7 @@ let bad = let mut id = fun x -> x in (id 1, id true)
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
-     @ t.stag:2:44-48)
+     @ t.stag:2:43-49)
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
@@ -289,32 +289,15 @@ let at_runtime = let mut n = 0 in let f u = n in f ()
       (variable h) (ty (TArrow (TCon unit ()) (TCon int ()))))
      @ t.stag:2:48-49)
     ((May_capture_mutable (name g) (var_level 0) (used_at 1) (via ())
-      (variable x) (ty (TVar (Generic 17))))
+      (variable x) (ty (TVar (Generic 18))))
      @ t.stag:2:29-30)
     ((May_capture_mutable (name g) (var_level 0) (used_at 1) (via ())
       (variable x)
       (ty (TCon prelude.option ((ATy (TArrow (TCon unit ()) (TCon int ())))))))
      @ t.stag:2:53-54)
-    val ok : int -> list[string] -> <int * list[string]>{..'a}
-    val ok_code : <int>{} -> <<int>{}>{..'a}
-    val not_mentioned : <int>{..'_a}
-    val only_data : <int>{..'_a}
-    val at_runtime : int
-    -- evaluated at compile time
-    -- evaluated
-    (ok <fun>)
-    (ok_code <fun>)
-    (not_mentioned
-     (Code
-      (App (Var (Persistent (Local g/35)) : "unit -> int") (Lit Unit : unit) :
-       int)
-      ((g/35 <fun>))))
-    (only_data
-     (Code
-      (App (Var (Persistent (Local g/36)) : "unit -> int") (Lit Unit : unit) :
-       int)
-      ((g/36 <fun>))))
-    (at_runtime 0)
+    ((May_capture_mutable (name g) (var_level 0) (used_at 1) (via ())
+      (variable y) (ty (TCon prelude.list ((ATy (TCon string ()))))))
+     @ t.stag:2:60-61)
     |}]
 ;;
 
@@ -325,7 +308,7 @@ let mut counter = 0
 let incr u = counter <- Int.add counter 1
 let after = incr (); incr (); counter
 let mut log : list[string] = []
-let push s = log <- Cons (s, log)
+let push s = log <- Cons (Ptr.make ( (s, log)))
 let logged = push "a"; push "b"; log
 let mut weak = []
 let fixed = weak <- [true]; weak
@@ -669,7 +652,7 @@ let ran = .~(ok 1)
   [%expect
     {|
     ((May_capture_mutable (name g) (var_level 0) (used_at 1) (via ())
-      (variable x) (ty (TVar (Generic 17))))
+      (variable x) (ty (TVar (Generic 18))))
      @ t.stag:2:29-30)
     ((May_capture_mutable (name g) (var_level 0) (used_at 1) (via (k))
       (variable h) (ty (TArrow (TCon unit ()) (TCon int ()))))
@@ -714,35 +697,35 @@ let%expect_test "errors in generated code" =
   check
     {|
 let bad =
-  .~(Stag.Expr.Let_mut
+  .~(Stag.Expr.Let_mut (Ptr.make (
        ( "n"
        , None
        , Stag.Expr.int 0
-       , Stag.Expr.Let
+       , Stag.Expr.Let (Ptr.make (
            ( "f"
            , [ ("u", None) ]
            , None
            , Stag.Expr.var "n"
-           , Stag.Expr.Quote (Stag.Expr.App (Stag.Expr.var "f", Stag.Expr.Lit Stag.Lit.Unit)) ) ))
+           , Stag.Expr.Quote (Ptr.make ( (Stag.Expr.App (Ptr.make ( (Stag.Expr.var "f", Stag.Expr.Lit Stag.Lit.Unit)))))) ))) ))))
 |};
   [%expect
     {|
     ((In_syntax_splice
       (generated
-       ((Let_mut (n @ t.stag:3:2-12:98) () ((Lit (Int 0)) @ t.stag:3:2-12:98)
-         ((Let (f @ t.stag:3:2-12:98) (((u @ t.stag:3:2-12:98) ())) ()
-           ((Var n ()) @ t.stag:3:2-12:98)
+       ((Let_mut (n @ t.stag:3:2-12:130) () ((Lit (Int 0)) @ t.stag:3:2-12:130)
+         ((Let (f @ t.stag:3:2-12:130) (((u @ t.stag:3:2-12:130) ())) ()
+           ((Var n ()) @ t.stag:3:2-12:130)
            ((Quote
-             ((App ((Var f ()) @ t.stag:3:2-12:98)
-               ((Lit Unit) @ t.stag:3:2-12:98))
-              @ t.stag:3:2-12:98))
-            @ t.stag:3:2-12:98))
-          @ t.stag:3:2-12:98))
-        @ t.stag:3:2-12:98))
+             ((App ((Var f ()) @ t.stag:3:2-12:130)
+               ((Lit Unit) @ t.stag:3:2-12:130))
+              @ t.stag:3:2-12:130))
+            @ t.stag:3:2-12:130))
+          @ t.stag:3:2-12:130))
+        @ t.stag:3:2-12:130))
       (error
        (Captures_mutable (name f) (var_level 0) (used_at 1) (via ())
         (mutable_ n))))
-     @ t.stag:3:2-12:98)
+     @ t.stag:3:2-12:130)
     |}]
 ;;
 
@@ -783,12 +766,12 @@ let reads_mut = .<let mut x = 4 in .~read.{x = x}>.
 let reads_mut_value = .~reads_mut
 let annotated : <unit>{x : mut int} = incr
 let spliced
-  : .~(Stag.Type_expr.Code
+  : .~(Stag.Type_expr.Code (Ptr.make (
          { `inner = Stag.Type_expr.con "unit" []
          ; `context =
-             Stag.Type_expr.Row.Extend
-               ("x", Stag.Type_expr.Mut (Stag.Type_expr.con "int" []), Stag.Type_expr.Row.Empty)
-         })
+             Stag.Type_expr.Row.Extend (Ptr.make (
+               ("x", Stag.Type_expr.Mut (Ptr.make ( (Stag.Type_expr.con "int" []))), Stag.Type_expr.Row.Empty)))
+         })))
   = incr
 |};
   [%expect
@@ -865,7 +848,7 @@ let wrong_place : {`a : immut int} -> int = fun r -> 1
     ((Unification_error
       (Row_mismatch (RExtend x Present (TCon int ()) REmpty)
        (RExtend x (PVar (Link Present)) Assigned (TVar (Link (TCon int ())))
-        (RVar (Unbound 31 1)))
+        (RVar (Unbound 32 1)))
        (Assigned x)))
      @ t.stag:3:36-40)
     (Misplaced_mut @ t.stag:3:24-31)
@@ -921,15 +904,15 @@ let rejected = unknown assigns
     ((Unification_error
       (Row_mismatch
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 42 1)))
+        (RVar (Unbound 43 1)))
        (RExtend x (PVar (Link Present)) Assigned (TVar (Link (TCon int ())))
-        (RVar (Unbound 47 1)))
+        (RVar (Unbound 48 1)))
        (Assigned x)))
      @ t.stag:4:17-24)
     ((Unification_error
       (Row_mismatch (RExtend x Present (TCon int ()) REmpty)
        (RExtend x (PVar (Link Present)) Assigned (TVar (Link (TCon int ())))
-        (RVar (Unbound 40 1)))
+        (RVar (Unbound 41 1)))
        (Assigned x)))
      @ t.stag:4:23-30)
     |}]
@@ -968,18 +951,18 @@ let f (c : <unit>{..'r}) = let _ = (c : <unit>{y : mut int}) in fun (r : {..'r})
     ((Unification_error
       (Assigned_in_record y
        (RExtend y (PVar (Link Present)) Assigned (TVar (Link (TCon int ())))
-        (RVar (Unbound 32 1)))))
+        (RVar (Unbound 33 1)))))
      @ t.stag:3:10-20)
     ((Unification_error
       (Row_mismatch (RExtend y Present (TCon int ()) REmpty)
        (RExtend y (PVar (Link Present)) Assigned (TVar (Link (TCon int ())))
-        (RVar (Unbound 35 1)))
+        (RVar (Unbound 36 1)))
        (Assigned y)))
      @ t.stag:3:19-29)
     ((Unification_error
       (Assigned_in_record y
        (RExtend y (PVar (Link Present)) Assigned (TVar (Link (TCon int ())))
-        (RVar (Unbound 32 1)))))
+        (RVar (Unbound 33 1)))))
      @ t.stag:3:10-20)
     ((Unification_error
       (Assigned_in_record a
