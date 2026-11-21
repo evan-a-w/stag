@@ -30,6 +30,8 @@ cmarkit.0.3.0+ox
 cmdliner.2.1.1
 conf-autoconf.1
 conf-c++.1.0
+conf-libffi.2.0.0
+conf-pkg-config.5
 conf-which.1
 core.v0.18~preview.133.03+642
 core_extended.v0.18~preview.133.03+642
@@ -39,6 +41,7 @@ cppo.1.8.0
 csexp.1.5.2
 cstruct.6.3.0
 ctypes.0.24.0+ox
+ctypes-foreign.0.24.0+ox
 dot-merlin-reader.5.6.1-504+ox
 dune.3.25.0
 dune-build-info.3.25.0
@@ -48,6 +51,7 @@ dyn.3.25.0
 either.1.0.0
 expect_test_helpers_base.v0.18~preview.133.03+642
 expect_test_helpers_core.v0.18~preview.133.03+642
+faraday.0.8.2+ox1
 fieldslib.v0.18~preview.133.03+642
 file_path.v0.18~preview.133.03+642
 fix.20250919
@@ -88,6 +92,7 @@ ocaml-options-vanilla.1
 ocaml-syntax-shims.1.0.0
 ocaml-variants.5.4.0+ox
 ocaml-version.4.1.5
+ocaml_intrinsics.v0.18~preview.133.03+642
 ocaml_intrinsics_kernel.v0.18~preview.133.03+642
 ocamlbuild.0.16.1+ox
 ocamlc-loc.3.25.0
@@ -108,7 +113,7 @@ oxcaml-bigstringaf-patches.enabled
 oxcaml-chrome-trace.guard
 oxcaml-cmarkit-patches.enabled
 oxcaml-compiler.5.4.0-ox9
-oxcaml-ctypes-foreign.guard
+oxcaml-ctypes-foreign-patches.enabled
 oxcaml-ctypes-patches.enabled
 oxcaml-digestif.guard
 oxcaml-dot-merlin-reader-patches.enabled
@@ -127,7 +132,7 @@ oxcaml-eio_linux.guard
 oxcaml-eio_main.guard
 oxcaml-eio_posix.guard
 oxcaml-extlib.guard
-oxcaml-faraday.guard
+oxcaml-faraday-patches.enabled
 oxcaml-fs-io.guard
 oxcaml-gen_js_api.guard
 oxcaml-js_of_ocaml.guard
