@@ -319,16 +319,10 @@ and declared t context ~name ~args =
           let%bind.Result bindings =
             bind_parameters context declaration ~name ~args
           in
+          (* Only the declaration's own parameters: [args] are substituted, and
+             the cache keys an expansion by them alone. *)
           let context =
-            { context with
-              path
-            ; bindings =
-                Map.fold
-                  bindings
-                  ~init:context.bindings
-                  ~f:(fun ~key ~data acc -> Map.set acc ~key ~data)
-            ; resolving = Int.Set.empty
-            }
+            { context with path; bindings; resolving = Int.Set.empty }
           in
           let%bind.Result shape =
             match declaration.kind with

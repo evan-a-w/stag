@@ -770,3 +770,25 @@ let%expect_test "a parameter bound to different rows" =
     (Ok (I8 I64))
     |}]
 ;;
+
+let%expect_test "a declaration does not see its user's bindings" =
+  (* Ill-formed: type u = 'a type w['a] = u *)
+  let parameter = var () in
+  let u = decl ~name:"u" (alias (Type.TVar parameter)) in
+  let w =
+    decl
+      ~name:"w"
+      ~params:[ Type.ATy (Type.TVar parameter) ]
+      (alias (tycon "u" []))
+  in
+  let t = Runtime_types.create (resolver [ u; w ]) in
+  shape t (tycon "w" [ int ]);
+  shape t (tycon "w" [ bool ]);
+  shape t (tycon "u" []);
+  [%expect
+    {|
+    (Error (Unresolved_ty 30))
+    (Error (Unresolved_ty 30))
+    (Error (Unresolved_ty 30))
+    |}]
+;;
