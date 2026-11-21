@@ -6,7 +6,8 @@ open! Import
     - [Scanned]: [size_words] (bits 32-63) and [scalar_words] (bits 8-31).
     - [Bytes]: [length] in bytes (bits 8-63).
     - [Free]: [size_words] (bits 32-63).
-    - [Handle]: zero; the block has one scalar word for its table ID. *)
+    - [Handle]: [size_words] (bits 32-63). The block has one scalar word for its
+      metadata ID, then [refs] traced pointer words. *)
 
 module Kind : sig
   type t =
@@ -44,7 +45,10 @@ val bytes : length:int -> Color.t -> t
 val free : size_words:int -> t
 [@@zero_alloc]
 
-val handle : unit -> t [@@zero_alloc]
+(** [Unmarked]. One word for its metadata ID, then [refs] pointer words. Raises
+    unless [0 <= refs <= max_size_words - 1]. *)
+val handle : refs:int -> t
+[@@zero_alloc]
 
 (** The following raise on a header with an unknown kind or colour. *)
 
@@ -56,7 +60,8 @@ val with_color : t -> Color.t -> t [@@zero_alloc]
 val size_words : t -> int
 [@@zero_alloc]
 
-(** The words the GC skips. All of a [Bytes], [Free] or [Handle] block. *)
+(** The words the GC skips. All of a [Bytes] or [Free] block; for a [Handle],
+    its metadata ID. *)
 val scalar_words : t -> int
 [@@zero_alloc]
 

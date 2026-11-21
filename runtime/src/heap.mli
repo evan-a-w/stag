@@ -47,10 +47,22 @@ val create : Config.t -> t
 val alloc : t -> Header.t -> Memory.Addr.t
 
 (** A block pointing indirectly to an OCaml value of the type identified by
-    [key]. Its scalar ID word must not be modified. The heap holds the value
-    until the block is swept or the heap is destroyed. Any Stag pointers held by
-    the OCaml value are not traced. *)
-val alloc_handle : t -> 'a Type_equal.Id.t -> 'a -> Memory.Addr.t
+    [key], with [refs] as its traced pointer words: they keep alive the Stag
+    values the OCaml value refers to, and must be a superset of them (extra refs
+    are harmless; missing ones dangle). [refs] are fixed for its life, which
+    suits closures, whose captures are. Its scalar ID word must not be modified.
+    The heap holds the value until the block is swept or the heap is destroyed.
+    The OCaml value itself is never scanned by the Stag GC.
+
+    [refs] may hold blocks or static data, not data-stack blocks. While it runs,
+    the new block is marked, so a collection reentered by an OCaml allocation
+    (which is forbidden) cannot leave it without its metadata. *)
+val alloc_handle
+  :  t
+  -> refs:Memory.Addr.t array
+  -> 'a Type_equal.Id.t
+  -> 'a
+  -> Memory.Addr.t
 
 (** Returns a handle's OCaml value, or [None] if [addr] is not a live handle's
     base in this heap with the given type ID. A swept address may be reused;
@@ -90,6 +102,12 @@ val destroy : t -> unit
 (** Every region in creation order, by index, with the offset from its base and
     the header of each slot: deterministic. *)
 val sexp_of_t : t -> Sexp.t
+
+(** Whether the metadata table and the handle blocks agree: an entry for every
+    handle block, with its ID and address, and a handle block for every entry.
+    Empty other than after corruption: sweep keeps them in step, and
+    [check_invariants] uses this. *)
+val check_handles : t -> Sexp.t list
 
 module For_testing : sig
   val handles : t -> int

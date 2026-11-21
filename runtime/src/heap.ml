@@ -371,13 +371,23 @@ let alloc t header =
   alloc_block t header
 ;;
 
-let alloc_handle t key value =
+let alloc_handle t ~refs key value =
   let id = t.next_handle in
   if id = Int.max_value then fail [%message "Heap.alloc_handle: ID exhausted"];
-  let block = alloc_block t (Header.handle ()) in
+  let header = Header.handle ~refs:(Array.length refs) in
+  let block = alloc_block t header in
+  (* Neither store below allocates, so no OCaml finaliser can collect between
+     the block existing and it having its metadata. *)
+  Header.store block (Header.with_color header Marked);
   t.next_handle <- id + 1;
-  Hashtbl.set t.handles ~key:id ~data:{ Handle.block; payload = T (key, value) };
   Memory.store_64 block (Int64_u.of_int id);
+  for index = 0 to Array.length refs - 1 do
+    Memory.store_addr (Addr.add block ((index + 1) * 8)) refs.(index)
+  done;
+  (* Registration allocates: were a collection reentered here (forbidden), the
+     marked block would be kept. *)
+  Hashtbl.set t.handles ~key:id ~data:{ Handle.block; payload = T (key, value) };
+  Header.store block header;
   block
 ;;
 
@@ -440,6 +450,17 @@ let get_handle (type a) t block (key : a Type_equal.Id.t) : a option =
        | Some _ | None -> None))
 ;;
 
+(* Removes the entry of the block [block], if it has one: a corrupt ID can't
+   remove another block's metadata. Allocates on the OCaml heap, so a collection
+   is not reentrant with it. *)
+let remove_handle t block =
+  let id = Handle.id block in
+  match Hashtbl.find t.handles id with
+  | Some { Handle.block = owner; _ } when Addr.equal owner block ->
+    Hashtbl.remove t.handles id
+  | Some _ | None -> ()
+;;
+
 let sweep t =
   check_live t ~name:"sweep";
   let page_bytes = page_bytes t in
@@ -450,7 +471,7 @@ let sweep t =
   let kept_footprint_words = ref 0 in
   let free block header =
     (match Header.kind header with
-     | Handle -> Hashtbl.remove t.handles (Handle.id block)
+     | Handle -> remove_handle t block
      | Scanned | Bytes | Free -> ());
     incr freed_blocks;
     freed_words := !freed_words + Header.size_words header
@@ -567,6 +588,50 @@ let destroy t =
     t.free.(i) <- Addr.null ()
   done;
   t.destroyed <- true
+;;
+
+let check_handles t =
+  let errors = ref [] in
+  let error sexp = errors := sexp :: !errors in
+  let handle_blocks = ref 0 in
+  iter t ~f:(fun block ->
+    match Header.kind (Header.load block) with
+    | Handle ->
+      incr handle_blocks;
+      let id = Handle.id block in
+      (match Hashtbl.find t.handles id with
+       | Some { Handle.block = owner; _ } when Addr.equal owner block -> ()
+       | Some _ ->
+         error
+           [%message "a handle block whose metadata is another's" (id : int)]
+       | None -> error [%message "a handle block with no metadata" (id : int)])
+    | Scanned | Bytes | Free -> ());
+  if not (Int.equal !handle_blocks (Hashtbl.length t.handles))
+  then
+    error
+      [%message
+        "handle blocks and metadata entries of different counts"
+          ~blocks:(!handle_blocks : int)
+          ~entries:(Hashtbl.length t.handles : int)];
+  Hashtbl.iteri t.handles ~f:(fun ~key:id ~data:(entry : Handle.t) ->
+    let block = entry.block in
+    let start = block_start t block in
+    if Addr.is_null start || not (Addr.equal start block)
+    then error [%message "metadata for no live block" (id : int)]
+    else (
+      match Header.kind (Header.load block) with
+      | Handle ->
+        let stored_id = Handle.id block in
+        if not (Int.equal stored_id id)
+        then
+          error
+            [%message
+              "metadata stored under another block's ID"
+                ~id:(id : int)
+                ~stored_id:(stored_id : int)]
+      | Scanned | Bytes | Free ->
+        error [%message "metadata for a block that is not a handle" (id : int)]));
+  List.rev !errors
 ;;
 
 let sexp_of_t t =

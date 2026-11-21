@@ -98,14 +98,13 @@ let[@inline] [@zero_alloc] visit t word =
         Header.store block (Header.with_color header Marked);
         t.marked_blocks <- t.marked_blocks + 1;
         t.marked_words <- t.marked_words + Header.size_words header;
-        (match Header.kind header with
-         | Scanned ->
-           if Int.(Header.scalar_words header < Header.size_words header)
-           then (
-             if Int.(Addr.diff t.stack_limit t.stack_top < 8) then grow_stack t;
-             Memory.store_addr t.stack_top block;
-             t.stack_top <- Addr.add t.stack_top 8)
-         | Bytes | Free | Handle -> ())))
+        (* Scanned blocks' pointer words, and the traced words of a handle (all
+           but its metadata ID). *)
+        if Int.(Header.scalar_words header < Header.size_words header)
+        then (
+          if Int.(Addr.diff t.stack_limit t.stack_top < 8) then grow_stack t;
+          Memory.store_addr t.stack_top block;
+          t.stack_top <- Addr.add t.stack_top 8)))
 ;;
 
 let[@zero_alloc] mark t =
@@ -163,13 +162,15 @@ let collect t =
   }
 ;;
 
+let should_collect t words =
+  t.allocated_words + words
+  > Int.max t.config.min_words (t.live_words * t.config.space_overhead / 100)
+;;
+
 let before_alloc t header =
   check_live t;
   let words = Heap.footprint_words t.heap header in
-  let threshold =
-    Int.max t.config.min_words (t.live_words * t.config.space_overhead / 100)
-  in
-  if t.allocated_words + words > threshold then ignore (collect t : Stats.t);
+  if should_collect t words then ignore (collect t : Stats.t);
   words
 ;;
 
@@ -183,11 +184,32 @@ let alloc t header =
   block
 ;;
 
-let alloc_handle t key value =
-  let words = before_alloc t (Header.handle ()) in
-  let block = Heap.alloc_handle t.heap key value in
-  t.allocated_words <- t.allocated_words + words;
-  block
+(* The refs may be held only by [refs], an OCaml array the collector doesn't
+   see: root them across the collection that may follow. *)
+let alloc_handle t ~refs key value =
+  check_live t;
+  let refs_count = Array.length refs in
+  let words = Heap.footprint_words t.heap (Header.handle ~refs:refs_count) in
+  let mark = Data_stack.enter t.data_stack in
+  let result = Array.create ~len:1 (Addr.null ()) in
+  Exn.protect
+    ~f:(fun () ->
+      if refs_count > 0
+      then (
+        let scratch =
+          Data_stack.alloc
+            t.data_stack
+            (Header.scanned ~size_words:refs_count ~scalar_words:0 Unmarked)
+        in
+        for index = 0 to refs_count - 1 do
+          Memory.store_addr (Addr.add scratch (index * 8)) refs.(index)
+        done);
+      if should_collect t words then ignore (collect t : Stats.t);
+      let block = Heap.alloc_handle t.heap ~refs key value in
+      t.allocated_words <- t.allocated_words + words;
+      result.(0) <- block)
+    ~finally:(fun () -> Data_stack.exit t.data_stack mark);
+  result.(0)
 ;;
 
 let get_handle t block key =
@@ -266,7 +288,7 @@ let check_invariants t =
       | Immortal -> true
     in
     (match Header.kind header with
-     | Scanned ->
+     | Scanned | Handle ->
        for i = Header.scalar_words header to Header.size_words header - 1 do
          let word = Memory.load_addr (Addr.add block (i * 8)) in
          let from =
@@ -275,8 +297,10 @@ let check_invariants t =
          check_word ~from ~immortal word;
          check_not_data_stack ~from word
        done
-     | Bytes | Free | Handle -> ());
+     | Bytes | Free -> ());
     incr block_index);
+  List.iter (Heap.check_handles t.heap) ~f:(fun error_ ->
+    error [%message "handle metadata" (error_ : Sexp.t)]);
   let block_index = ref 0 in
   Static_data.iter t.static ~f:(fun block ->
     let header = Header.load block in

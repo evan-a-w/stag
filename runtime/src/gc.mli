@@ -12,8 +12,9 @@ open! Import
     heap.
 
     Collections are not reentrant: nothing a collection runs (finalisers or
-    signal handlers, run by the OCaml allocations of growing the mark stack)
-    may use the collector, its heap or its roots. *)
+    signal handlers, run by the OCaml allocations of growing the mark stack, of
+    the heap's metadata table, or of [alloc_handle]) may use the collector, its
+    heap or its roots. *)
 
 module Config : sig
   type t =
@@ -63,16 +64,23 @@ val destroy : t -> unit
 val alloc : t -> Header.t -> Memory.Addr.t
 
 (** Allocates a [Heap.alloc_handle] block, with the same collection and rooting
-    rules as [alloc]. The returned address is not itself a root. Keep it in a
-    root or a traced field across calls that can collect. The OCaml value may
-    not be used as the sole owner of any Stag heap pointers it contains. *)
-val alloc_handle : t -> 'a Type_equal.Id.t -> 'a -> Memory.Addr.t
+    rules as [alloc], and with [refs] as its traced pointer words (see
+    [Heap.alloc_handle]). Its creation may collect, so the [refs] need not be
+    rooted: they are, across that collection. The returned address is not itself
+    a root: keep it in a root or a traced field across calls that can collect. *)
+val alloc_handle
+  :  t
+  -> refs:Memory.Addr.t array
+  -> 'a Type_equal.Id.t
+  -> 'a
+  -> Memory.Addr.t
 
 (** As [Heap.get_handle]. *)
 val get_handle : t -> Memory.Addr.t -> 'a Type_equal.Id.t -> 'a option
 
 (** Marks, then sweeps. Marking allocates nothing (on the OCaml heap) but to
-    grow the mark stack. Sweeping also releases OCaml metadata for dead handles. *)
+    grow the mark stack. Sweeping also releases OCaml metadata for dead handles,
+    which allocates. *)
 val collect : t -> Stats.t
 
 (** How many collections there have been. *)
@@ -83,6 +91,7 @@ val collections : t -> int
     - every root slot, and pointer word of an allocated, static or data-stack
       block, below 4096, outside the heap, or in an allocated block (an
       [Immortal] one, for words of [Immortal] blocks);
+    - the heap's handle blocks and its metadata table agreeing;
     - no pointer word of a heap block, static block or global into the data
       stack, nor of a static block into the heap;
     - no frame slot or data-stack word into the data stack past its live blocks;

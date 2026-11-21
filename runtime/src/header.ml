@@ -90,8 +90,10 @@ let[@inline] [@zero_alloc] free ~size_words =
   make_sized ~kind:Free Unmarked ~size_words ~low:0
 ;;
 
-let[@inline] [@zero_alloc] handle () =
-  Int64_u.of_int (low_byte ~kind:Handle Unmarked)
+let[@inline] [@zero_alloc] handle ~refs =
+  if not Int.(0 <= refs && refs < max_size_words)
+  then fail [%message "Header.handle" (refs : int)];
+  make_sized ~kind:Handle Unmarked ~size_words:(refs + 1) ~low:1
 ;;
 
 let[@inline] [@zero_alloc] kind t : Kind.t =
@@ -121,15 +123,15 @@ let[@inline] [@zero_alloc] raw_length t = field t ~pos:8 ~bits:56
 
 let[@inline] [@zero_alloc] size_words t =
   match kind t with
-  | Scanned | Free -> field t ~pos:32 ~bits:32
+  | Scanned | Free | Handle -> field t ~pos:32 ~bits:32
   | Bytes -> (raw_length t + 7) / 8
-  | Handle -> 1
 ;;
 
 let[@inline] [@zero_alloc] scalar_words t =
   match kind t with
   | Scanned -> field t ~pos:8 ~bits:24
-  | Bytes | Free | Handle -> size_words t
+  | Handle -> 1
+  | Bytes | Free -> size_words t
 ;;
 
 let[@inline] [@zero_alloc] length t =
@@ -150,7 +152,8 @@ let sexp_of_t t =
         (color : Color.t)]
   | Bytes -> [%message "Bytes" ~length:(raw_length t : int) (color : Color.t)]
   | Free -> [%message "Free" ~size_words:(size_words t : int) (color : Color.t)]
-  | Handle -> [%message "Handle" (color : Color.t)]
+  | Handle ->
+    [%message "Handle" ~size_words:(size_words t : int) (color : Color.t)]
 ;;
 
 let[@inline] [@zero_alloc] load addr =
