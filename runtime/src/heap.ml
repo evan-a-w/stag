@@ -439,8 +439,9 @@ let alloc_handle t kind value =
   for index = 0 to Array.length refs - 1 do
     Memory.store_addr (Addr.add block ((index + 1) * 8)) refs.(index)
   done;
-  (* Registration allocates: were a collection reentered here (forbidden), the
-     marked block would be kept. *)
+  (* Registration allocates: were a collection reentered here (forbidden), it
+     would keep the block, marked, but not trace its refs (marking skips marked
+     blocks): [Gc.alloc_handle] roots them across this call. *)
   Hashtbl.set t.handles ~key:id ~data:{ Entry.block; payload = T (kind, value) };
   Header.store block header;
   block

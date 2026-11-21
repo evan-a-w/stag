@@ -55,8 +55,9 @@ val alloc : t -> Header.t -> Memory.Addr.t
 
     The refs may be blocks or static data, not data-stack blocks; raises for a
     ref into the heap but no block. While it runs, the new block is marked, so a
-    collection reentered by an OCaml allocation (which is forbidden) cannot
-    leave it without its metadata. *)
+    collection reentered by an OCaml allocation (which is forbidden) cannot free
+    it before it has its metadata; such a collection would not trace its refs,
+    which [Gc.alloc_handle] roots for it. *)
 val alloc_handle : t -> 'a Handle_kind.t -> 'a -> Memory.Addr.t
 
 (** Returns a handle's OCaml value, or [None] if [addr] is not a live handle's
