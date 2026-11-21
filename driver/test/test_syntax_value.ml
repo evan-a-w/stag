@@ -23,13 +23,16 @@ let%expect_test "the prelude's signature" =
     (Signature.to_string_hum ~of_prelude:true (Lazy.force prelude_signature));
   [%expect
     {|
-    type list['a] = Nil | Cons of 'a * list['a]
+    type list['a] = Nil | Cons of ptr['a * list['a]]
     type option['a] = None | Some of 'a
     type result['a, 'b] = Ok of 'a | Error of 'b
     exception Division_by_zero
     exception Invalid_argument of string
     exception Failure of string
     val raise : exn -> 'a
+    module Ptr : sig
+      val make : 'a -> ptr['a]
+    end
     module Stag : sig
       val map : ('a -> 'b) -> list['a] -> list['b]
       val append : list['a] -> list['a] -> list['a]
@@ -60,14 +63,15 @@ let%expect_test "the prelude's signature" =
         val constructor : <'a>{..'b} -> Path.t[Constructor_ref.t]
         val cons : Path.t[Constructor_ref.t]
         val nil : Path.t[Constructor_ref.t]
+        val ptr_make : Path.t[Value_ref.t]
       end
       module Lit : sig
         type t = Int of int | Bool of bool | String of string | Char of char | Unit
       end
       module Type_expr : sig
-        type t = Var of string | Con of Path.t[Type_ref.t] * list[Arg.t] | Arrow of t * t | Tuple of list[t] | Code of {`context : Row.t; `inner : t} | Record of Row.t | Variant of Row.t | Mut of t | Immut of t | Splice of Expr.t
+        type t = Var of string | Con of Path.t[Type_ref.t] * list[Arg.t] | Arrow of ptr[t * t] | Tuple of list[t] | Code of ptr[{`context : Row.t; `inner : t}] | Record of Row.t | Variant of Row.t | Mut of ptr[t] | Immut of ptr[t] | Splice of ptr[Expr.t]
         module Row : sig
-          type t = Empty | Extend of string * Type_expr.t * t | Var of string
+          type t = Empty | Extend of ptr[string * Type_expr.t * t] | Var of string
         end
         module Arg : sig
           type t = Ty of Type_expr.t | Row of Row.t
@@ -91,13 +95,13 @@ let%expect_test "the prelude's signature" =
         module Rest : sig
           type t = Closed | Open | Bind of string
         end
-        type t = Any | Var of string | Lit of Lit.t | Tuple of list[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Poly_variant of string * option[t] | Poly_record of {`fields : list[string * t]; `rest : Rest.t} | Exception of t
+        type t = Any | Var of string | Lit of Lit.t | Tuple of list[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Deref of ptr[t] | Poly_variant of ptr[string * option[t]] | Poly_record of {`fields : list[string * t]; `rest : Rest.t} | Exception of ptr[t]
         val construct : string -> list[t] -> t
         val list : list[t] -> t
         val tuple : list[t] -> t
       end
       module Expr : sig
-        type t = Lit of Lit.t | Var of Path.t[Value_ref.t] * option[Type_expr.t] | App of t * t | Let of string * list[string * option[Type_expr.t]] * option[Type_expr.t] * t * t | Let_mut of string * option[Type_expr.t] * t * t | Assign of Path.t[Value_ref.t] * t | Fun of list[string * option[Type_expr.t]] * t | Splice of {`expr : t; `subs : option[list[string * option[t]]]} | Quote of t | Tuple of list[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Field of t * Path.t[Field_ref.t] | Record_update of t * list[Path.t[Field_ref.t] * t] | Type of Type_expr.t | Match of t * list[Pattern.t * t] | Poly_record of list[string * t] | Poly_field of t * string | Poly_extend of list[string * t] * t | Poly_restrict of t * string | Poly_update of t * list[string * t] | Poly_variant of string * option[t] | Expect of string | Struct_quote of list[Toplevel.t]
+        type t = Lit of Lit.t | Var of Path.t[Value_ref.t] * option[Type_expr.t] | App of ptr[t * t] | Let of ptr[string * list[string * option[Type_expr.t]] * option[Type_expr.t] * t * t] | Let_mut of ptr[string * option[Type_expr.t] * t * t] | Assign of ptr[Path.t[Value_ref.t] * t] | Store of ptr[t * t] | Fun of ptr[list[string * option[Type_expr.t]] * t] | Splice of ptr[{`expr : t; `subs : option[list[string * option[t]]]}] | Quote of ptr[t] | Tuple of list[t] | Deref of ptr[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Field of ptr[t * Path.t[Field_ref.t]] | Record_update of ptr[t * list[Path.t[Field_ref.t] * t]] | Type of Type_expr.t | Match of ptr[t * list[Pattern.t * t]] | Poly_record of list[string * t] | Poly_field of ptr[t * string] | Poly_extend of ptr[list[string * t] * t] | Poly_restrict of ptr[t * string] | Poly_update of ptr[t * list[string * t]] | Poly_variant of ptr[string * option[t]] | Expect of string | Struct_quote of list[Toplevel.t]
         val var : string -> t
         val construct : string -> list[t] -> t
         val int : int -> t
@@ -312,6 +316,7 @@ let%expect_test "the prelude's signature" =
         val sexp_of_string : string -> t
         val string_of_sexp : t -> result[string, Of_sexp_error.t]
         val sexp_of_list : ('a -> t) -> list['a] -> t
+        val sexp_of_ptr : ('a -> 'b) -> ptr['a] -> 'b
         val list_of_sexp : (t -> result['a, Of_sexp_error.t]) -> t -> result[list['a], Of_sexp_error.t]
         val sexp_of_option : ('a -> t) -> option['a] -> t
         val option_of_sexp : (t -> result['a, Of_sexp_error.t]) -> t -> result[option['a], Of_sexp_error.t]
@@ -329,6 +334,8 @@ let%expect_test "the prelude's signature" =
         val char_of_sexp_exn : t -> char
         val string_of_sexp_exn : t -> string
         val list_of_sexp_exn : (t -> result['a, Of_sexp_error.t]) -> t -> list['a]
+        val ptr_of_sexp : ('a -> result['b, 'c]) -> 'a -> result[ptr['b], 'c]
+        val ptr_of_sexp_exn : ('a -> result['b, Of_sexp_error.t]) -> 'a -> ptr['b]
         val option_of_sexp_exn : (t -> result['a, Of_sexp_error.t]) -> t -> option['a]
         val result_of_sexp_exn : (t -> result['a, Of_sexp_error.t]) -> (t -> result['b, Of_sexp_error.t]) -> t -> result['a, 'b]
         val t_of_sexp_exn : t -> t
@@ -540,13 +547,14 @@ let rec constructors_of (value : Treewalk.Value.t) =
   | Construct (ref, args) -> Map.set (union args) ~key:ref.name ~data:ref
   | Tuple values -> union values
   | Poly_record fields -> union (Map.data fields)
+  | Ptr cell -> constructors_of !cell
   | _ -> String.Map.empty
 ;;
 
 let round_trip_sources =
   [ {|
 type nat = Z | S of nat
-type list['a] = Nil | Cons of 'a * list['a]
+type list['a] = Nil | Cons of ptr['a * list['a]]
 type with_x[{..'r}] = {`x : int; ..'r}
 type point = {x : int; y : M.t}
 type void = |
@@ -701,9 +709,10 @@ let%expect_test "constructors are made as the typechecker resolves them" =
            : bool)];
   [%expect
     {|
-    ((constructors 83)
+    ((constructors 86)
      (reflected
-      (prelude.Stag.Type.Kind.Alias prelude.Stag.Type.Kind.Record
+      (prelude.Stag.Expr.Deref prelude.Stag.Expr.Store prelude.Stag.Pattern.Deref
+       prelude.Stag.Type.Kind.Alias prelude.Stag.Type.Kind.Record
        prelude.Stag.Type.Kind.Variant prelude.Stag.Type_ref.Path.Prelude
        prelude.Stag.Type_ref.Path.Program))
      (others_same_as_to_value true))
@@ -720,7 +729,7 @@ let%expect_test "values" =
   show {|type t['a] = A | B of 'a * t['a]|};
   [%expect
     {|
-    Cons (Stag.Toplevel.Let ("f", Cons (("x", Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), Nil), None, Stag.Expr.Poly_variant ("A", Some (Stag.Expr.Var (Stag.Path.Name "x", None)))), Nil)
+    Cons (Stag.Toplevel.Let ("f", Cons (("x", Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), Nil), None, Stag.Expr.Poly_variant <ptr>), Nil)
     Cons (Stag.Toplevel.Type {`kind = Stag.Type_decl.Kind.Variant (Cons (("A", Nil), Cons (("B", Cons (Stag.Type_expr.Var "a", Cons (Stag.Type_expr.Con (Stag.Path.Name "t", Cons (Stag.Type_expr.Arg.Ty (Stag.Type_expr.Var "a"), Nil)), Nil))), Nil))); `name = "t"; `params = Cons (Stag.Type_decl.Param.Ty "a", Nil)}, Nil)
     |}]
 ;;
@@ -766,7 +775,7 @@ let%expect_test "an update of fields by ref round trips" =
    | Error error -> print_error error);
   [%expect
     {|
-    Stag.Expr.Record_update (Stag.Expr.Var (Stag.Path.Name "v", None), Cons ((Stag.Path.Ref <field A.N.x>, Stag.Expr.Lit (Stag.Lit.Int 1)), Cons ((Stag.Path.Name "y", Stag.Expr.Lit Stag.Lit.Unit), Nil)))
+    Stag.Expr.Record_update <ptr>
     (Record_update (Var v ()) ((<A.N.x> (Lit (Int 1))) (y (Lit Unit))))
     (equal true)
     |}]
@@ -800,41 +809,42 @@ let constructor name = (name, Nil)
 
 (* type t = <names>  let to_string x = match x with <name> -> "<name>" ... *)
 let enum names =
-  Cons
+  Cons (Ptr.make (
     ( Stag.Toplevel.Type
         {`name = "t"; `params = Nil; `kind = Stag.Type_decl.Kind.Variant (Stag.map constructor names)}
-    , Cons
+    , Cons (Ptr.make (
         ( Stag.Toplevel.let_
             "to_string"
-            (Cons ("x", Nil))
-            (Stag.Expr.Match (Stag.Expr.var "x", Stag.map arm names))
-        , Nil ) )
+            (Cons (Ptr.make ( ("x", Nil))))
+            (Stag.Expr.Match (Ptr.make ( (Stag.Expr.var "x", Stag.map arm names))))
+        , Nil ))) )))
 
-let names = Cons ("Red", Cons ("Green", Cons ("Blue", Nil)))
+let names = Cons (Ptr.make ( ("Red", Cons (Ptr.make ( ("Green", Cons (Ptr.make ( ("Blue", Nil)))))))))
 let decls = enum names
-let bad = enum (Cons ("Red", Cons ("light blue", Nil)))
-let keyword = Cons (Stag.Toplevel.let_ "match" Nil (Stag.Expr.var "x"), Nil)
-let bad_path = Cons (Stag.Toplevel.let_ "x" Nil (Stag.Expr.var "M..y"), Nil)
+let bad = enum (Cons (Ptr.make ( ("Red", Cons (Ptr.make ( ("light blue", Nil)))))))
+let keyword = Cons (Ptr.make ( (Stag.Toplevel.let_ "match" Nil (Stag.Expr.var "x"), Nil)))
+let bad_path = Cons (Ptr.make ( (Stag.Toplevel.let_ "x" Nil (Stag.Expr.var "M..y"), Nil)))
 
 (* Shapes the parser does not make itself, eg. a constructor of one tuple. *)
-let pair = Stag.Expr.Tuple (Cons (Stag.Expr.int 1, Cons (Stag.Expr.construct "D" (Cons (Stag.Expr.int 2, Nil)), Nil)))
-let one_tuple = Stag.Expr.construct "C" (Cons (pair, Nil))
+let make e = Stag.Expr.apply (Stag.Expr.var "Ptr.make") (Cons (Ptr.make ( (e, Nil))))
+let pair = Stag.Expr.Tuple (Cons (Ptr.make ( (Stag.Expr.int 1, Cons (Ptr.make ( (make (Stag.Expr.construct "D" (Cons (Ptr.make ( (Stag.Expr.int 2, Nil))))), Nil)))))))
+let one_tuple = Stag.Expr.construct "C" (Cons (Ptr.make ( (pair, Nil))))
 let var x = Stag.Pattern.Var x
-let pair_pattern = Stag.Pattern.Tuple (Cons (var "a", Cons (var "b", Nil)))
+let pair_pattern = Stag.Pattern.Tuple (Cons (Ptr.make ( (var "a", Cons (Ptr.make ( (var "b", Nil)))))))
 let first =
-  Stag.Expr.Match
+  Stag.Expr.Match (Ptr.make (
     ( Stag.Expr.var "one_tuple"
-    , Cons ((Stag.Pattern.construct "C" (Cons (pair_pattern, Nil)), Stag.Expr.var "a"), Nil) )
+    , Cons (Ptr.make ( ((Stag.Pattern.construct "C" (Cons (Ptr.make ( (pair_pattern, Nil)))), Stag.Expr.var "a"), Nil))) )))
 let int = Stag.Type_expr.con "int" Nil
 let shapes =
-  Cons
+  Cons (Ptr.make (
     ( Stag.Toplevel.Type
-        {`name = "t"; `params = Nil; `kind = Stag.Type_decl.Kind.Variant (Cons (("C", Cons (Stag.Type_expr.Tuple (Cons (int, Cons (Stag.Type_expr.con "t" Nil, Nil))), Nil)), Cons (("D", Cons (int, Nil)), Nil)))}
-    , Cons
+        {`name = "t"; `params = Nil; `kind = Stag.Type_decl.Kind.Variant (Cons (Ptr.make ( (("C", Cons (Ptr.make ( (Stag.Type_expr.Tuple (Cons (Ptr.make ( (int, Cons (Ptr.make ( (Stag.Type_expr.con "ptr" (Cons (Ptr.make ( (Stag.Type_expr.con "t" Nil, Nil)))), Nil))))))), Nil)))), Cons (Ptr.make ( (("D", Cons (Ptr.make ( (int, Nil)))), Nil)))))))}
+    , Cons (Ptr.make (
         ( Stag.Toplevel.let_ "one_tuple" Nil one_tuple
-        , Cons
+        , Cons (Ptr.make (
             ( Stag.Toplevel.let_ "first" Nil first
-            , Nil ) ) )
+            , Nil ))) ))) )))
 |}
 ;;
 
@@ -909,26 +919,30 @@ let%expect_test "generated syntax the parser does not make" =
     ((Type
       ((name t) (params ())
        (kind
-        (Variant ((C ((Tuple ((Con int ()) (Con t ()))))) (D ((Con int ()))))))))
+        (Variant
+         ((C ((Tuple ((Con int ()) (Con ptr ((Ty (Con t ()))))))))
+          (D ((Con int ()))))))))
      (Let one_tuple () ()
-      (Construct C ((Tuple ((Lit (Int 1)) (Construct D ((Lit (Int 2)))))))))
+      (Construct C
+       ((Tuple
+         ((Lit (Int 1)) (App (Var Ptr.make ()) (Construct D ((Lit (Int 2))))))))))
      (Let first () ()
       (Match (Var one_tuple ())
        (((Construct C ((Tuple ((Var a) (Var b))))) (Var a ()))))))
-    type t = C of (int * t) | D of int
+    type t = C of (int * ptr[t]) | D of int
 
-    let one_tuple = C ((1, D 2))
+    let one_tuple = C ((1, Ptr.make (D 2)))
     let first = match one_tuple with C ((a, b)) -> a
     |}];
   Source_helpers.run_program ~prelude:false program;
   [%expect
     {|
-    type t = C of (int * t) | D of int
+    type t = C of (int * ptr[t]) | D of int
     val one_tuple : t
     val first : int
     -- evaluated at compile time
     -- evaluated
-    (one_tuple (C (Tuple 1 (D 2))))
+    (one_tuple (C (Tuple 1 <ptr>)))
     (first 1)
     |}]
 ;;
@@ -972,7 +986,7 @@ let%expect_test "malformed values" =
       ~file:"other.stag"
       {|
 module Mine = struct type option['a] = None | Some of 'a end
-let decls = Cons (Stag.Toplevel.Let ("x", Nil, None, Stag.Expr.Lit (Stag.Lit.Int 1)), Nil)
+let decls = Cons (Ptr.make ( (Stag.Toplevel.Let ("x", Nil, None, Stag.Expr.Lit (Stag.Lit.Int 1)), Nil)))
 let other = Mine.Some 1
 |}
   in
@@ -984,8 +998,7 @@ let other = Mine.Some 1
     | value -> value
   in
   print_program (replace_none (values "Other.decls"));
-  [%expect
-    {| Malformed syntax: expected option, got Other.Mine.Some 1, within element 0 > Stag.Toplevel.Let argument 2 |}];
+  [%expect {| ((Let x () () (Lit (Int 1)))) |}];
   print_program (Int 1);
   [%expect {| Malformed syntax: expected list, got 1 |}]
 ;;
@@ -1011,14 +1024,24 @@ let%expect_test "malformed values made otherwise" =
     | Construct (ref, args) -> Construct (ref, List.map args ~f:(edit ~name ~f))
     | Tuple values -> Tuple (List.map values ~f:(edit ~name ~f))
     | Poly_record fields -> Poly_record (Map.map fields ~f:(edit ~name ~f))
+    | Ptr cell -> Ptr (ref (edit !cell ~name ~f))
     | value -> value
+  in
+  (* The value a pointer-bearing constructor holds. *)
+  let payload (args : Treewalk.Value.t list) ~default =
+    match args with
+    | [ Ptr cell ] -> !cell
+    | _ -> default
   in
   (* Wrong arity. *)
   print_expr
     (edit (expr "f (g x)") ~name:"prelude.Stag.Expr.App" ~f:(fun ref args ->
-       Construct (ref, List.take args 1)));
+       match payload args ~default:(Tuple []) with
+       | Tuple [ fn; _ ] ->
+         Construct (ref, [ Ptr (Stdlib.ref (Treewalk.Value.Tuple [ fn ])) ])
+       | _ -> assert false));
   [%expect
-    {| Malformed syntax: expected Stag.Expr.App applied to its declared arguments, got Stag.Expr.App (Stag.Expr.Var (Stag.Path.Name "f", None)) |}];
+    {| Malformed syntax: expected an indirect constructor's tuple, got (Stag.Expr.Var (Stag.Path.Name "f", None)) |}];
   (* A wrong payload. *)
   print_expr
     (edit (expr "(1, 2)") ~name:"prelude.Stag.Lit.Int" ~f:(fun ref _ ->
@@ -1031,9 +1054,14 @@ let%expect_test "malformed values made otherwise" =
        (expr ".< .~e >.")
        ~name:"prelude.Stag.Expr.Splice"
        ~f:(fun ref args ->
-         match args with
-         | [ Poly_record fields ] ->
-           Construct (ref, [ Poly_record (Map.remove fields "subs") ])
+         match payload args ~default:Unit with
+         | Poly_record fields ->
+           Construct
+             ( ref
+             , [ Ptr
+                   (Stdlib.ref
+                      (Treewalk.Value.Poly_record (Map.remove fields "subs")))
+               ] )
          | _ -> assert false));
   [%expect
     {| Malformed syntax: expected a record with a field `subs, got {`expr = Stag.Expr.Var (Stag.Path.Name "e", None)}, within Stag.Expr.Quote > Stag.Expr.Splice |}];
@@ -1043,12 +1071,15 @@ let%expect_test "malformed values made otherwise" =
        (expr "let f x (y : int) = x in f")
        ~name:"prelude.Cons"
        ~f:(fun ref args ->
-         match args with
-         | [ Tuple [ name; annot ]; tail ] ->
-           Construct (ref, [ Tuple [ name; annot; annot ]; tail ])
+         match payload args ~default:Unit with
+         | Tuple [ name; rest ] ->
+           Construct
+             ( ref
+             , [ Ptr (Stdlib.ref (Treewalk.Value.Tuple [ name; rest; rest ])) ]
+             )
          | _ -> assert false));
   [%expect
-    {| Malformed syntax: expected a pair, got ("x", None, None), within Stag.Expr.Let argument 1 > element 0 |}];
+    {| Malformed syntax: expected a list cell's pair, got (("x", None), Cons (("y", Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), Nil), Cons (("y", Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), Nil)), within Stag.Expr.Let argument 1 |}];
   (* A list ending in something else. *)
   print_expr (edit (expr "(a, b, c)") ~name:"prelude.Nil" ~f:(fun _ _ -> Unit));
   [%expect
@@ -1290,18 +1321,18 @@ let%expect_test "shapes left to the typechecker" =
 let unit = Stag.Type_expr.con "unit" Nil
 let int = Stag.Type_expr.con "int" Nil
 let decls =
-  Cons (Stag.Toplevel.Type {`name = "void"; `params = Nil; `kind = Stag.Type_decl.Kind.Variant Nil},
-  Cons (Stag.Toplevel.Type {`name = "pair"; `params = Nil;
-     `kind = Stag.Type_decl.Kind.Variant (Cons (("P", Cons (Stag.Type_expr.Tuple (Cons (int, Cons (int, Nil))), Nil)), Nil))},
-  Cons (Stag.Toplevel.Let ("absurd", Cons (("v", Some (Stag.Type_expr.con "void" Nil)), Nil), Some int,
-     Stag.Expr.Match (Stag.Expr.var "v", Nil)),
-  Cons (Stag.Toplevel.let_ "p" Nil
-     (Stag.Expr.construct "P" (Cons (Stag.Expr.Tuple (Cons (Stag.Expr.int 1, Cons (Stag.Expr.int 2, Nil))), Nil))),
-  Cons (Stag.Toplevel.let_ "first" (Cons ("p", Nil))
-     (Stag.Expr.Match (Stag.Expr.var "p", Cons ((Stag.Pattern.construct "P" (Cons (Stag.Pattern.Var "q", Nil)), Stag.Expr.var "q"), Nil))),
-  Cons (Stag.Toplevel.let_ "extended" Nil (Stag.Expr.Poly_extend (Nil, Stag.Expr.Poly_record (Cons (("x", Stag.Expr.int 1), Nil)))),
-  Cons (Stag.Toplevel.let_ "updated" Nil (Stag.Expr.Poly_update (Stag.Expr.var "extended", Nil)),
-  Nil)))))))
+  Cons (Ptr.make ( (Stag.Toplevel.Type {`name = "void"; `params = Nil; `kind = Stag.Type_decl.Kind.Variant Nil},
+  Cons (Ptr.make ( (Stag.Toplevel.Type {`name = "pair"; `params = Nil;
+     `kind = Stag.Type_decl.Kind.Variant (Cons (Ptr.make ( (("P", Cons (Ptr.make ( (Stag.Type_expr.Tuple (Cons (Ptr.make ( (int, Cons (Ptr.make ( (int, Nil))))))), Nil)))), Nil))))},
+  Cons (Ptr.make ( (Stag.Toplevel.Let ("absurd", Cons (Ptr.make ( (("v", Some (Stag.Type_expr.con "void" Nil)), Nil))), Some int,
+     Stag.Expr.Match (Ptr.make ( (Stag.Expr.var "v", Nil)))),
+  Cons (Ptr.make ( (Stag.Toplevel.let_ "p" Nil
+     (Stag.Expr.construct "P" (Cons (Ptr.make ( (Stag.Expr.Tuple (Cons (Ptr.make ( (Stag.Expr.int 1, Cons (Ptr.make ( (Stag.Expr.int 2, Nil))))))), Nil))))),
+  Cons (Ptr.make ( (Stag.Toplevel.let_ "first" (Cons (Ptr.make ( ("p", Nil))))
+     (Stag.Expr.Match (Ptr.make ( (Stag.Expr.var "p", Cons (Ptr.make ( ((Stag.Pattern.construct "P" (Cons (Ptr.make ( (Stag.Pattern.Var "q", Nil)))), Stag.Expr.var "q"), Nil))))))),
+  Cons (Ptr.make ( (Stag.Toplevel.let_ "extended" Nil (Stag.Expr.Poly_extend (Ptr.make ( (Nil, Stag.Expr.Poly_record (Cons (Ptr.make ( (("x", Stag.Expr.int 1), Nil)))))))),
+  Cons (Ptr.make ( (Stag.Toplevel.let_ "updated" Nil (Stag.Expr.Poly_update (Ptr.make ( (Stag.Expr.var "extended", Nil)))),
+  Nil)))))))))))))))))))))
 |}
   in
   let program =
@@ -1376,7 +1407,7 @@ let%expect_test "negative int literals" =
   let values =
     eval_values
       {|
-let decls = Cons (Stag.Toplevel.let_ "minus_one" Nil (Stag.Expr.int (Int.neg 1)), Nil)
+let decls = Cons (Ptr.make ( (Stag.Toplevel.let_ "minus_one" Nil (Stag.Expr.int (Int.neg 1)), Nil)))
 |}
   in
   let program =
@@ -1405,39 +1436,41 @@ let%expect_test "prelude helpers" =
       {|
 let int = Stag.Type_expr.con "int" Nil
 let types =
-  Cons (Stag.Type_expr.tuple Nil,
-  Cons (Stag.Type_expr.tuple (Cons (int, Nil)),
-  Cons (Stag.Type_expr.tuple (Cons (int, Cons (int, Nil))),
-  Cons (Stag.Type_expr.con "list" (Cons (int, Nil)), Nil))))
+  Cons (Ptr.make ( (Stag.Type_expr.tuple Nil,
+  Cons (Ptr.make ( (Stag.Type_expr.tuple (Cons (Ptr.make ( (int, Nil)))),
+  Cons (Ptr.make ( (Stag.Type_expr.tuple (Cons (Ptr.make ( (int, Cons (Ptr.make ( (int, Nil))))))),
+  Cons (Ptr.make ( (Stag.Type_expr.con "list" (Cons (Ptr.make ( (int, Nil)))), Nil))))))))))))
 let patterns =
-  Cons (Stag.Pattern.tuple Nil,
-  Cons (Stag.Pattern.tuple (Cons (Stag.Pattern.Any, Nil)),
-  Cons (Stag.Pattern.tuple (Cons (Stag.Pattern.Var "a", Cons (Stag.Pattern.Var "b", Nil))), Nil)))
+  Cons (Ptr.make ( (Stag.Pattern.tuple Nil,
+  Cons (Ptr.make ( (Stag.Pattern.tuple (Cons (Ptr.make ( (Stag.Pattern.Any, Nil)))),
+  Cons (Ptr.make ( (Stag.Pattern.tuple (Cons (Ptr.make ( (Stag.Pattern.Var "a", Cons (Ptr.make ( (Stag.Pattern.Var "b", Nil))))))), Nil)))))))))
 let one = Stag.Expr.int 1
 let exprs =
-  Cons (Stag.Expr.tuple Nil,
-  Cons (Stag.Expr.tuple (Cons (one, Nil)),
-  Cons (Stag.Expr.tuple (Cons (one, Cons (Stag.Expr.string "s", Nil))),
-  Cons (Stag.Expr.apply (Stag.Expr.var "f") Nil,
-  Cons (Stag.Expr.apply (Stag.Expr.var "f") (Cons (one, Cons (Stag.Expr.var "x", Nil))), Nil)))))
+  Cons (Ptr.make ( (Stag.Expr.tuple Nil,
+  Cons (Ptr.make ( (Stag.Expr.tuple (Cons (Ptr.make ( (one, Nil)))),
+  Cons (Ptr.make ( (Stag.Expr.tuple (Cons (Ptr.make ( (one, Cons (Ptr.make ( (Stag.Expr.string "s", Nil))))))),
+  Cons (Ptr.make ( (Stag.Expr.apply (Stag.Expr.var "f") Nil,
+  Cons (Ptr.make ( (Stag.Expr.apply (Stag.Expr.var "f") (Cons (Ptr.make ( (one, Cons (Ptr.make ( (Stag.Expr.var "x", Nil))))))), Nil)))))))))))))))
 let decls =
-  Cons (Stag.Toplevel.let_ "add" (Cons ("x", Cons ("y", Nil)))
-    (Stag.Expr.apply (Stag.Expr.var "Int.add") (Cons (Stag.Expr.var "x", Cons (Stag.Expr.var "y", Nil)))),
-  Cons (Stag.Toplevel.let_ "seven" Nil
-    (Stag.Expr.let_ "double" (Cons ("n", Nil))
-       (Stag.Expr.apply (Stag.Expr.var "add") (Cons (Stag.Expr.var "n", Cons (Stag.Expr.var "n", Nil))))
-       (Stag.Expr.Match (Stag.Expr.tuple (Cons (Stag.Expr.int 3, Cons (one, Nil))),
-          Cons ((Stag.Pattern.tuple (Cons (Stag.Pattern.Var "a", Cons (Stag.Pattern.Var "b", Nil))),
-                      Stag.Expr.apply (Stag.Expr.var "add") (Cons (Stag.Expr.App (Stag.Expr.var "double", Stag.Expr.var "a"), Cons (Stag.Expr.var "b", Nil)))),
-                     Nil)))),
-  Nil))
+  Cons (Ptr.make ( (Stag.Toplevel.let_ "add" (Cons (Ptr.make ( ("x", Cons (Ptr.make ( ("y", Nil)))))))
+    (Stag.Expr.apply (Stag.Expr.var "Int.add") (Cons (Ptr.make ( (Stag.Expr.var "x", Cons (Ptr.make ( (Stag.Expr.var "y", Nil)))))))),
+  Cons (Ptr.make ( (Stag.Toplevel.let_ "seven" Nil
+    (Stag.Expr.let_ "double" (Cons (Ptr.make ( ("n", Nil))))
+       (Stag.Expr.apply (Stag.Expr.var "add") (Cons (Ptr.make ( (Stag.Expr.var "n", Cons (Ptr.make ( (Stag.Expr.var "n", Nil))))))))
+       (Stag.Expr.Match (Ptr.make ( (Stag.Expr.tuple (Cons (Ptr.make ( (Stag.Expr.int 3, Cons (Ptr.make ( (one, Nil))))))),
+          Cons (Ptr.make ( ((Stag.Pattern.tuple (Cons (Ptr.make ( (Stag.Pattern.Var "a", Cons (Ptr.make ( (Stag.Pattern.Var "b", Nil))))))),
+                      Stag.Expr.apply (Stag.Expr.var "add") (Cons (Ptr.make ( (Stag.Expr.App (Ptr.make ( (Stag.Expr.var "double", Stag.Expr.var "a"))), Cons (Ptr.make ( (Stag.Expr.var "b", Nil)))))))),
+                     Nil)))))))),
+  Nil))))))
 |}
   in
   let each of_value sexp_of name =
     let rec elements (value : Treewalk.Value.t) =
       match value with
-      | Construct ({ name = "prelude.Cons"; _ }, [ x; rest ]) ->
-        x :: elements rest
+      | Construct ({ name = "prelude.Cons"; _ }, [ Ptr cell ]) ->
+        (match !cell with
+         | Tuple [ x; rest ] -> x :: elements rest
+         | _ -> [])
       | _ -> []
     in
     List.iter
