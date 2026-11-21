@@ -579,10 +579,13 @@ let main = print_endline (Core.Int.to_string h)
 |};
   [%expect
     {|
-    File "a.stag", line 3, characters 16-21:
-    3 | let h : int = .~(p.*)
-                        ^^^^^
-    Error: This expression has type <int>{..'_a} but an expression was expected of type Stag.Expr.t
+    module A : sig
+      val p : ptr[Stag.Expr.t]
+      val h : int
+      val main : unit
+    end
+    --- output ---
+    4
     |}]
 ;;
 
