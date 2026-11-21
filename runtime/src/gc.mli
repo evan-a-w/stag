@@ -64,8 +64,9 @@ val collections : t -> int
 
 (** Between collections: every block [Unmarked] or [Immortal], and every root
     slot and pointer word of an allocated block below 4096, outside the heap, or
-    in an allocated block (an [Immortal] one, for words of [Immortal] blocks). *)
-val check_invariants : t -> unit Or_error.t
+    in an allocated block (an [Immortal] one, for words of [Immortal] blocks);
+    and no pointer word of a block of [static] into the heap. *)
+val check_invariants : ?static:Static_data.t list -> t -> unit Or_error.t
 
 module For_testing : sig
   (** In blocks. *)

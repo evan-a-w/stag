@@ -15,3 +15,4 @@ module Page_table = Stag_runtime.Page_table
 module Heap = Stag_runtime.Heap
 module Roots = Stag_runtime.Roots
 module Stag_gc = Stag_runtime.Gc
+module Static_data = Stag_runtime.Static_data

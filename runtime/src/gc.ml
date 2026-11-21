@@ -165,7 +165,7 @@ let destroy t =
   t.destroyed <- true
 ;;
 
-let check_invariants t =
+let check_invariants ?(static = []) t =
   let errors = ref [] in
   let error message = errors := message :: !errors in
   let check_word ~from ~immortal word =
@@ -212,6 +212,25 @@ let check_invariants t =
        done
      | Bytes | Free -> ());
     incr block_index);
+  List.iteri static ~f:(fun static_index static ->
+    let block_index = ref 0 in
+    Static_data.iter static ~f:(fun block ->
+      let header = Header.load block in
+      (match Header.kind header with
+       | Scanned ->
+         for i = Header.scalar_words header to Header.size_words header - 1 do
+           let word = Memory.load_addr (Addr.add block (i * 8)) in
+           if (not (is_small word)) && Heap.owns t.heap word
+           then
+             error
+               [%message
+                 "static data points into the heap"
+                   ~static:(static_index : int)
+                   ~block:(!block_index : int)
+                   ~word:(i : int)]
+         done
+       | Bytes | Free -> ());
+      incr block_index));
   match List.rev !errors with
   | [] -> Ok ()
   | errors ->

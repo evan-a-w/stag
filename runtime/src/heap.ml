@@ -172,14 +172,8 @@ type t =
   ; mutable arenas : Arena.t list (** Oldest first: allocation is first fit. *)
   ; mutable regions : Region.t list (** Latest first. *)
   ; mutable regions_created : int
-  ; atoms : Chunk.t
   ; mutable destroyed : bool
   }
-
-(* The zero-size atoms' headers are words 0 and 1, so their blocks are at 8
-   and 16. *)
-let scanned_atom t = Addr.add (Chunk.base t.atoms) 8
-let bytes_atom t = Addr.add (Chunk.base t.atoms) 16
 
 let create (config : Config.t) =
   let { Config.page_bytes; arena_bytes; size_classes } = config in
@@ -205,7 +199,6 @@ let create (config : Config.t) =
     if classes.(!class_index) < words then incr class_index;
     class_of_words.(words) <- !class_index
   done;
-  let atoms = Chunk.create ~bytes:16 ~align:8 in
   let t =
     { config
     ; shift = 2 * Int.ctz page_bytes
@@ -216,14 +209,9 @@ let create (config : Config.t) =
     ; arenas = []
     ; regions = []
     ; regions_created = 0
-    ; atoms
     ; destroyed = false
     }
   in
-  Header.store
-    (scanned_atom t)
-    (Header.scanned ~size_words:0 ~scalar_words:0 Immortal);
-  Header.store (bytes_atom t) (Header.bytes ~length:0 Immortal);
   t
 ;;
 
@@ -345,8 +333,8 @@ let alloc t header =
   if words = 0
   then (
     match Header.kind header with
-    | Bytes -> bytes_atom t
-    | Scanned | Free -> scanned_atom t)
+    | Bytes -> Static_data.empty_bytes ()
+    | Scanned | Free -> Static_data.empty ())
   else if words >= Array.length t.class_of_words
   then alloc_large t header ~words
   else (
@@ -517,7 +505,6 @@ let destroy t =
   check_live t ~name:"destroy";
   List.iter t.regions ~f:(remove_region t);
   List.iter t.arenas ~f:(fun (arena : Arena.t) -> Chunk.destroy arena.chunk);
-  Chunk.destroy t.atoms;
   t.regions <- [];
   t.arenas <- [];
   for i = 0 to Array.length t.free - 1 do

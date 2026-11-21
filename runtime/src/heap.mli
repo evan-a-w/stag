@@ -42,7 +42,7 @@ type t
 val create : Config.t -> t
 
 (** A block of the size [header] gives, its header written and its words zeroed.
-    Zero-size blocks are a shared immortal atom per kind, outside the heap.
+    Zero-size blocks are [Static_data.empty] and [Static_data.empty_bytes].
     Raises on a [Free] or [Marked] header. *)
 val alloc : t -> Header.t -> Memory.Addr.t
 
@@ -53,7 +53,7 @@ val footprint_words : t -> Header.t -> int
 
 (** The block containing [addr], at its first field, if [addr] is within the
     words of an allocated block of [t]: [Memory.Addr.null] for anything else,
-    including headers, free slots, descriptors and zero-size atoms. *)
+    including headers, free slots, descriptors and static data. *)
 val block_start : t -> Memory.Addr.t -> Memory.Addr.t
 [@@zero_alloc]
 
