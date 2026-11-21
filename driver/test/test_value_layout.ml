@@ -14,8 +14,8 @@ type b = B of a
     {|
     ((Infinite_type_layout t) @ t.stag:1:5-6)
     ((Infinite_type_layout r) @ t.stag:1:5-6)
-    ((Infinite_type_layout t) @ t.stag:1:5-6)
-    ((Infinite_type_layout r) @ t.stag:1:5-6)
+    ((Cyclic_type_alias t) @ t.stag:1:5-6)
+    ((Cyclic_type_alias r) @ t.stag:1:5-6)
     ((Infinite_type_layout a) @ t.stag:2:5-6)
     |}]
 ;;
@@ -62,8 +62,6 @@ let%expect_test "resolved ptr is a barrier, not a namespaced type called ptr" =
 type t = T of wrap[ptr[t]]
 type wrap['a] = Wrap of 'a
 type node = {`next : ptr[node]}
-type link = ptr[link]
-let id (x : link) : link = x
 |}
   in
   (* Supply the declaration in isolation if the pointer builtin has not been
@@ -91,8 +89,6 @@ type t = T of M.ptr[t]
     type t = T of wrap[ptr[t]]
     type wrap['a] = Wrap of 'a
     type node = {`next : ptr[node]}
-    type link = ptr[link]
-    val id : (ptr['a] as 'a) -> (ptr['b] as 'b)
     ((Infinite_type_layout t) @ t.stag:3:5-6)
     |}]
 ;;

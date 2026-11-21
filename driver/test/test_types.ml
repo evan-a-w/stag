@@ -555,11 +555,10 @@ let ok = U Nil
   [%expect
     {|
     ((Cyclic_type_alias t) @ t.stag:2:5-6)
-    type t = int -> t
-    type u = int -> u
+    ((Cyclic_type_alias t) @ t.stag:2:5-6)
     type list['a] = Nil | Cons of ptr['a * list['a]]
     type t = list[t]
-    ((Infinite_type_layout t) @ t.stag:2:5-6)
+    ((Cyclic_type_alias t) @ t.stag:2:5-6)
     type list['a] = Nil | Cons of ptr['a * list['a]]
     type t = list[u]
     type u = U of list[u]

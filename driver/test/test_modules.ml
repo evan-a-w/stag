@@ -485,12 +485,7 @@ let x : u = 1
 |};
   [%expect
     {|
-    module A : sig
-      type t = int -> t
-    end
-    module B : sig
-      type u = int -> u
-    end
+    ((Cyclic_type_alias A.t) @ t.stag:3:7-8)
     module A : sig
       type t = int
       type u = int

@@ -52,3 +52,75 @@ let iter ~con ~var ~cycle roots =
   in
   List.fold_result roots ~init:() ~f:(fun () entry -> arg entry)
 ;;
+
+module Guard = struct
+  type t =
+    { pointer : bool
+    ; structure : bool
+    }
+
+  let to_int { pointer; structure } =
+    Bool.to_int pointer + (2 * Bool.to_int structure)
+  ;;
+end
+
+let reaches_unguarded ~con ~needs_structure ~var roots =
+  let visited = Hash_set.Poly.create () in
+  let guarded (guard : Guard.t) =
+    guard.pointer && (guard.structure || not needs_structure)
+  in
+  let visit id (guard : Guard.t) ~f =
+    let key = id, Guard.to_int guard in
+    if Hash_set.mem visited key
+    then false
+    else (
+      Hash_set.add visited key;
+      f ())
+  in
+  let rec ty (guard : Guard.t) (ty' : Type.ty) =
+    (not (guarded guard))
+    &&
+    match ty' with
+    | TVar { id; _ } when id = var -> true
+    | TVar { id; state = Link target; _ } ->
+      visit id guard ~f:(fun () -> ty guard target)
+    | TVar _ -> false
+    | TCon ("ptr", args) -> args_ { guard with pointer = true } args
+    | TCon (name, args) ->
+      let stored = con name in
+      let guard = { guard with structure = true } in
+      List.existsi args ~f:(fun index entry ->
+        match stored with
+        | Some stored when not (Set.mem stored index) ->
+          arg { guard with pointer = true } entry
+        | Some _ | None -> arg guard entry)
+    | TArrow (from, to_) ->
+      let guard = { guard with structure = true } in
+      ty guard from || ty guard to_
+    | TRecord { id; row = fields } | TVariant { id; row = fields } ->
+      let guard = { guard with structure = true } in
+      visit id guard ~f:(fun () -> row guard fields)
+    | TTuple tys -> List.exists tys ~f:(ty { guard with structure = true })
+    | TCode { inner; context } ->
+      let guard = { guard with structure = true } in
+      ty guard inner || row guard context
+  and row guard (row' : Type.row) =
+    (not (guarded guard))
+    &&
+    match row' with
+    | REmpty -> false
+    | RVar { id; _ } when id = var -> true
+    | RVar { id; state = Link target; _ } ->
+      visit id guard ~f:(fun () -> row guard target)
+    | RVar _ -> false
+    | RExtend (_, presence, _, entry, rest) ->
+      (match Type.canonical_presence presence with
+       | Absent -> false
+       | Present | PVar _ -> ty guard entry)
+      || row guard rest
+  and arg guard : Type.arg -> bool = function
+    | ATy entry -> ty guard entry
+    | ARow fields -> row guard fields
+  and args_ guard args = List.exists args ~f:(arg guard) in
+  args_ { pointer = false; structure = false } roots
+;;

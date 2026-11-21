@@ -236,14 +236,14 @@ let%expect_test "initialization cycles" =
     {|
 let even n = match n with 0 -> true | _ -> odd (Int.sub n 1)
 let odd n = match n with 0 -> false | _ -> even (Int.sub n 1)
-let fns = `Fns (even, fun u -> fns)
-let stream = `Cons (1, fun u -> stream)
+let fns = `Fns (even, fun u -> Ptr.make fns)
+let stream = `Cons (1, fun u -> Ptr.make stream)
 let first = match stream with `Cons (n, _) -> n
 let local = let h (u : int) = Int.add 1 (local u) in h
 let unused = let f u = unused in 1
 let called = even 4
-let stored_local = let k = fun u -> stored_local in `Pair (k, 1)
-let stored_alias = let k = fun u -> stored_alias in let j = k in `Pair (j, 2)
+let stored_local = let k = fun u -> Ptr.make stored_local in `Pair (k, 1)
+let stored_alias = let k = fun u -> Ptr.make stored_alias in let j = k in `Pair (j, 2)
 |};
   (* A local closure needing the value, then called, through an alias. *)
   check {|
@@ -255,8 +255,9 @@ let x = let k = fun u -> x in let j = k in j ()
 let f u = (1, fun w -> v)
 let v = match f () with (n, _) -> n
 |};
-  check {|
-let make u = `Default (fun w -> default)
+  check
+    {|
+let make u = `Default (fun w -> Ptr.make default)
 let default = make ()
 |};
   check
@@ -297,14 +298,14 @@ let y = match x with (f, _) -> f ()
     {|
     val even : int -> bool
     val odd : int -> bool
-    val fns : ([`Fns of (int -> bool) * ('_a -> '_b); ..'_c] as '_b)
-    val stream : ([`Cons of int * ('_a -> '_b)] as '_b)
+    val fns : ([`Fns of (int -> bool) * ('_a -> ptr['_b]); ..'_c] as '_b)
+    val stream : ([`Cons of int * ('_a -> ptr['_b])] as '_b)
     val first : int
     val local : int -> int
     val unused : int
     val called : bool
-    val stored_local : ([`Pair of ('_a -> '_b) * int; ..'_c] as '_b)
-    val stored_alias : ([`Pair of ('_a -> '_b) * int; ..'_c] as '_b)
+    val stored_local : ([`Pair of ('_a -> ptr['_b]) * int; ..'_c] as '_b)
+    val stored_alias : ([`Pair of ('_a -> ptr['_b]) * int; ..'_c] as '_b)
     -- evaluated at compile time
     -- evaluated
     (even <fun>)

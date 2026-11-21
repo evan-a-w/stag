@@ -77,13 +77,13 @@ let pair r = (self r, r)
 let%expect_test "recursive values are weak" =
   check
     {|
-let ones = `Cons (1, fun _ -> ones)
-let loop = {`next = fun _ -> loop; `v = id}
+let ones = `Cons (1, fun _ -> Ptr.make ones)
+let loop = {`next = fun _ -> Ptr.make loop; `v = id}
 |};
   [%expect
     {|
-    val ones : ([`Cons of int * ('_a -> '_b); ..'_c] as '_b)
-    val loop : ({`next : '_a -> '_b; `v : '_c -> '_c} as '_b)
+    val ones : ([`Cons of int * ('_a -> ptr['_b]); ..'_c] as '_b)
+    val loop : ({`next : '_a -> ptr['_b]; `v : '_c -> '_c} as '_b)
     |}]
 ;;
 
@@ -197,10 +197,15 @@ let%expect_test "occurs check fails for unguarded cycles" =
     let a = tvar fresh in
     unify fresh a (f a)
   in
+  check (fun a -> TArrow (a, int));
   check (fun a -> TTuple [ a; int ]);
   check (fun a -> TCon ("list", [ ATy a ]));
   check (fun a -> TCode { inner = int; context = row [ "x", a ] });
   check (fun a -> TCode { inner = a; context = REmpty });
+  check (fun a -> TArrow (record fresh [ "x", a ], a));
+  (* Records, variants and functions don't guard without a pointer. *)
+  check (fun a -> variant fresh [ "A", TArrow (a, int) ]);
+  check (fun a -> TArrow (variant fresh [ "A", a ], int));
   let check_row f =
     let r = rvar fresh in
     print_s
@@ -222,11 +227,15 @@ let%expect_test "occurs check fails for unguarded cycles" =
     (Error (Occurs_check_failed (ATy (TVar (Unbound 1 1)))))
     (Error (Occurs_check_failed (ATy (TVar (Unbound 2 1)))))
     (Error (Occurs_check_failed (ATy (TVar (Unbound 3 1)))))
-    (Error (Occurs_check_failed (ARow (RVar (Unbound 4 1)))))
-    (Error (Occurs_check_failed (ARow (RVar (Unbound 5 1)))))
-    (Error (Occurs_check_failed (ARow (RVar (Unbound 6 1)))))
+    (Error (Occurs_check_failed (ATy (TVar (Unbound 4 1)))))
+    (Error (Occurs_check_failed (ATy (TVar (Unbound 5 1)))))
+    (Error (Occurs_check_failed (ATy (TVar (Unbound 7 1)))))
+    (Error (Occurs_check_failed (ATy (TVar (Unbound 9 1)))))
+    (Error (Occurs_check_failed (ARow (RVar (Unbound 11 1)))))
+    (Error (Occurs_check_failed (ARow (RVar (Unbound 12 1)))))
+    (Error (Occurs_check_failed (ARow (RVar (Unbound 13 1)))))
     (Ok ())
-    (Error (Occurs_check_failed (ATy (TVar (Unbound 8 1)))))
+    (Error (Occurs_check_failed (ATy (TVar (Unbound 15 1)))))
     |}]
 ;;
 
@@ -240,24 +249,23 @@ let%expect_test "guarded cycles" =
   in
   check (fun a -> variant fresh [ "A", ptr a ]);
   check (fun a -> record fresh [ "x", TCon ("list", [ ATy (ptr a) ]) ]);
-  check (fun a -> variant fresh [ "A", TArrow (a, int) ]);
+  check (fun a -> variant fresh [ "A", TArrow (ptr a, int) ]);
   check (fun a ->
     TCode { inner = int; context = row [ "x", record fresh [ "y", ptr a ] ] });
-  check (fun a -> TArrow (variant fresh [ "A", a ], int));
-  check (fun a -> TArrow (a, int));
-  check (fun a -> TArrow (record fresh [ "x", a ], a));
+  check (fun a -> TArrow (variant fresh [ "A", ptr a ], int));
+  check (fun a -> TArrow (ptr a, int));
   (* Through another variable. *)
   let b = tvar fresh in
   let a = tvar fresh in
   unify fresh b (variant fresh [ "A", a ]);
-  unify fresh a (TArrow (b, int));
+  unify fresh a (TArrow (ptr b, int));
   print a;
   print b;
   (* Through a variable already bound to a guarded cycle's part. *)
   let c = tvar fresh in
   let d = tvar fresh in
   unify fresh c (TTuple [ d; int ]);
-  unify fresh d (TArrow (int, c));
+  unify fresh d (TArrow (int, ptr c));
   print (TTuple [ c; d ]);
   (* A row variable within its own row, under a pointer. *)
   let r = rvar fresh in
@@ -274,22 +282,20 @@ let%expect_test "guarded cycles" =
     (Ok ())
     ({`x : list[ptr['a]]} as 'a)
     (Ok ())
-    ([`A of 'a -> int] as 'a)
+    ([`A of ptr['a] -> int] as 'a)
     (Ok ())
     (<int>{x : immut {`y : ptr['a]}} as 'a)
     (Ok ())
-    ([`A of 'a] -> int as 'a)
+    ([`A of ptr['a]] -> int as 'a)
     (Ok ())
-    ('a -> int as 'a)
-    (Ok ())
-    ({`x : 'a} -> 'a as 'a)
+    (ptr['a] -> int as 'a)
     (Ok ())
     (Ok ())
-    ([`A of 'a] -> int as 'a)
-    ([`A of 'a -> int] as 'a)
+    (ptr[[`A of 'a]] -> int as 'a)
+    ([`A of ptr['a] -> int] as 'a)
     (Ok ())
     (Ok ())
-    (((int -> 'a) * int) as 'a) * (int -> 'a)
+    (((int -> ptr['a]) * int) as 'a) * (int -> ptr['a])
     (Ok ())
     ({`x : ptr['a]} as 'a)
     |}]
@@ -473,6 +479,26 @@ let%expect_test "generalization and instantiation of cyclic types" =
     |}]
 ;;
 
+let%expect_test "functions don't guard cycles, nor pointers alone in aliases" =
+  check "let self x = x x";
+  check "let self x = x (Ptr.make x)";
+  check "type al = ptr[al]";
+  check "type f = int -> f";
+  check "type f = int -> ptr[f]";
+  check "type f = [`F of int -> ptr[f]]";
+  check "type s = {`head : int; `tail : unit -> ptr[s]}";
+  [%expect {|
+    ((Unification_error (Occurs_check_failed (ATy (TVar (Unbound 20 1))))) @
+     t.stag:1:15-16)
+    val self : ((ptr['a -> 'b] as 'a) -> 'b) -> 'b
+    ((Cyclic_type_alias al) @ t.stag:1:5-7)
+    ((Cyclic_type_alias f) @ t.stag:1:5-6)
+    type f = int -> ptr[f]
+    type f = [`F of int -> ptr[f]]
+    type s = {`head : int; `tail : unit -> ptr[s]}
+    |}]
+;;
+
 let%expect_test "recursive aliases" =
   check
     {|
@@ -522,26 +548,26 @@ let open : l[int] = `Other
 let%expect_test "recursive aliases through records, tuples and type arguments" =
   check
     {|
-type stream['a] = {`head : 'a; `tail : unit -> stream['a]}
+type stream['a] = {`head : 'a; `tail : unit -> ptr[stream['a]]}
 type list['a] = Nil | Cons of ptr['a * list['a]]
 type tree = [`Leaf of int | `Node of list[tree]]
 type pair = [`A of ptr[pair]] * int
 type id['a] = 'a
 type through_id = id[[`A of ptr[through_id]]]
 type rows[{..'r}] = {`x : ptr[rows[{..'r}]]; ..'r}
-let heads (s : stream[int]) = (s.`head, (s.`tail ()).`head)
+let heads (s : stream[int]) = (s.`head, (s.`tail ()).*.`head)
 let leaf (t : tree) = match t with `Leaf n -> n | _ -> 0
 |};
   [%expect
     {|
-    type stream['a] = {`head : 'a; `tail : unit -> stream['a]}
+    type stream['a] = {`head : 'a; `tail : unit -> ptr[stream['a]]}
     type list['a] = Nil | Cons of ptr['a * list['a]]
     type tree = [`Leaf of int | `Node of list[tree]]
     type pair = [`A of ptr[pair]] * int
     type id['a] = 'a
     type through_id = [`A of ptr[through_id]]
     type rows[{..'a}] = {`x : ptr[rows[{..'a}]]; ..'a}
-    val heads : ({`head : int; `tail : unit -> 'a} as 'a) -> int * int
+    val heads : ({`head : int; `tail : unit -> ptr['a]} as 'a) -> int * int
     val leaf : ([`Leaf of int | `Node of list['a]] as 'a) -> int
     |}]
 ;;
@@ -622,13 +648,13 @@ type t = [`A of int] -> t
     ((Non_regular_recursive_alias t) @ t.stag:2:24-33)
     ((Non_regular_recursive_alias a) @ t.stag:3:20-26)
     ((Non_regular_recursive_alias t) @ t.stag:2:23-42)
-    ((Infinite_type_layout t) @ t.stag:2:5-6)
+    ((Cyclic_type_alias t) @ t.stag:2:5-6)
     type list['a] = Nil | Cons of ptr['a * list['a]]
     type t = list[t]
     ((Cyclic_type_alias t) @ t.stag:3:5-6)
-    ((Infinite_type_layout t) @ t.stag:2:5-6)
-    ((Infinite_type_layout t) @ t.stag:2:5-6)
-    type t = [`A of int] -> t
+    ((Cyclic_type_alias t) @ t.stag:2:5-6)
+    ((Cyclic_type_alias t) @ t.stag:2:5-6)
+    ((Cyclic_type_alias t) @ t.stag:2:5-6)
     |}]
 ;;
 
@@ -761,27 +787,35 @@ let%expect_test "mutually recursive alias cliques expand each alias once" =
 
 let%expect_test "guardedness is judged on the expansion" =
   check {|
-type f['a] = [`A of 'a]
+type f['a] = [`A of ptr['a]]
 type g = f[g]
 |};
   check {|
 type g = f[g]
-type f['a] = [`A of 'a]
+type f['a] = [`A of ptr['a]]
 |};
   check {|
-type f['a] = {`x : 'a}
+type f['a] = {`x : ptr['a]}
 type g = f[g]
 |};
   check {|
 type g = f[g]
-type f['a] = {`x : 'a}
+type f['a] = {`x : ptr['a]}
 |};
   check
     {|
-type f['a] = [`A of 'a]
+type f['a] = [`A of ptr['a]]
 type g = f[g]
 let v (x : g) = x
-let a (x : g) : g = `A (`A x)
+let a (x : g) : g = `A (Ptr.make (`A (Ptr.make x)))
+|};
+  check {|
+type a = b * int
+type b = [`A of ptr[a]]
+|};
+  check {|
+type f['a] = [`A of 'a]
+type g = f[g]
 |};
   check {|
 type a = b * int
@@ -789,12 +823,22 @@ type b = [`A of a]
 |};
   [%expect
     {|
-    ((Infinite_type_layout g) @ t.stag:3:5-6)
-    ((Infinite_type_layout g) @ t.stag:2:5-6)
-    ((Infinite_type_layout g) @ t.stag:3:5-6)
-    ((Infinite_type_layout g) @ t.stag:2:5-6)
-    ((Infinite_type_layout g) @ t.stag:3:5-6)
-    ((Infinite_type_layout a) @ t.stag:2:5-6)
+    type f['a] = [`A of ptr['a]]
+    type g = [`A of ptr[g]]
+    type g = [`A of ptr[g]]
+    type f['a] = [`A of ptr['a]]
+    type f['a] = {`x : ptr['a]}
+    type g = {`x : ptr[g]}
+    type g = {`x : ptr[g]}
+    type f['a] = {`x : ptr['a]}
+    type f['a] = [`A of ptr['a]]
+    type g = [`A of ptr[g]]
+    val v : ([`A of ptr['a]] as 'a) -> 'a
+    val a : ([`A of ptr['a]] as 'a) -> ([`A of ptr['b]] as 'b)
+    type a = [`A of ptr[a]] * int
+    type b = [`A of ptr[b * int]]
+    ((Cyclic_type_alias g) @ t.stag:3:5-6)
+    ((Cyclic_type_alias a) @ t.stag:2:5-6)
     |}];
   check {|
 type t = t
@@ -824,13 +868,13 @@ type t = [`A of t] * id[t]
   [%expect
     {|
     ((Cyclic_type_alias t) @ t.stag:2:5-6)
-    ((Infinite_type_layout g) @ t.stag:3:5-6)
+    ((Cyclic_type_alias g) @ t.stag:3:5-6)
     type list['a] = Nil | Cons of ptr['a * list['a]]
     type f['a] = list['a]
     type g = list[g]
-    ((Infinite_type_layout g) @ t.stag:3:5-6)
+    ((Cyclic_type_alias g) @ t.stag:3:5-6)
     ((Cyclic_type_alias a) @ t.stag:2:5-6)
-    ((Infinite_type_layout t) @ t.stag:3:5-6)
+    ((Cyclic_type_alias t) @ t.stag:3:5-6)
     |}]
 ;;
 
@@ -1015,11 +1059,8 @@ type c = c * int
 |};
   [%expect
     {|
-    ((Infinite_type_layout v) @ t.stag:2:5-6)
-    ((Infinite_type_layout u) @ t.stag:3:5-6)
-    ((Infinite_type_layout c) @ t.stag:4:5-6)
-    ((Infinite_type_layout u) @ t.stag:2:5-6)
-    ((Infinite_type_layout c) @ t.stag:3:5-6)
+    ((Cyclic_type_alias c) @ t.stag:4:5-6)
+    ((Cyclic_type_alias c) @ t.stag:3:5-6)
     |}]
 ;;
 
@@ -1033,7 +1074,7 @@ let%expect_test "instantiation copies each part of a cycle once" =
     list
     (variant
        fresh
-       [ "Nil", Type.unit; "Cons", Type.TTuple [ elt; TArrow (int, list) ] ]);
+       [ "Nil", Type.unit; "Cons", Type.TTuple [ elt; TArrow (int, ptr list) ] ]);
   (* Entered through a [Link], as through the variant. *)
   let ty = Type.TTuple [ list; Type.canonical_ty list ] in
   Scheme.generalize fresh ~rank:1 [ ty ];
@@ -1046,7 +1087,7 @@ let%expect_test "instantiation copies each part of a cycle once" =
     (Ok ())
     ((records_and_variants 1) (links 1) (vars 1))
     ((records_and_variants 1) (links 1) (vars 1))
-    ([`Cons of '_a * (int -> '_b) | `Nil] as '_b) * '_b
+    ([`Cons of '_a * (int -> ptr['_b]) | `Nil] as '_b) * '_b
     |}]
 ;;
 
@@ -1060,9 +1101,9 @@ let%expect_test "occurs check through a link visited guarded, then unguarded" =
     unify fresh l (TArrow (v, int));
     unify fresh v (f l)
   in
-  check (fun l -> TTuple [ record fresh [ "x", l ]; l ]);
-  check (fun l -> TTuple [ l; record fresh [ "x", l ] ]);
-  check (fun l -> TTuple [ record fresh [ "x", l ]; variant fresh [ "A", l ] ]);
+  check (fun l -> TTuple [ ptr l; l ]);
+  check (fun l -> TTuple [ l; ptr l ]);
+  check (fun l -> TTuple [ ptr l; variant fresh [ "A", ptr l ] ]);
   (* [r = {y : v}], then [v = f <int>{..r}]. *)
   let check_row f =
     let v = tvar fresh in
@@ -1073,24 +1114,23 @@ let%expect_test "occurs check through a link visited guarded, then unguarded" =
          : (unit, Unification_error.t) Result.t)];
     unify fresh v (f (Type.TCode { inner = int; context = r }))
   in
-  check_row (fun code -> TTuple [ record fresh [ "x", code ]; code ]);
-  check_row (fun code -> TTuple [ code; record fresh [ "x", code ] ]);
-  check_row (fun code ->
-    TTuple [ record fresh [ "x", code ]; record fresh [ "z", code ] ]);
+  check_row (fun code -> TTuple [ ptr code; code ]);
+  check_row (fun code -> TTuple [ code; ptr code ]);
+  check_row (fun code -> TTuple [ ptr code; record fresh [ "z", ptr code ] ]);
   [%expect
     {|
     (Ok ())
+    (Error (Occurs_check_failed (ATy (TVar (Unbound 0 1)))))
+    (Ok ())
+    (Error (Occurs_check_failed (ATy (TVar (Unbound 2 1)))))
     (Ok ())
     (Ok ())
     (Ok ())
+    (Error (Occurs_check_failed (ATy (TVar (Unbound 7 1)))))
+    (Ok ())
+    (Error (Occurs_check_failed (ATy (TVar (Unbound 9 1)))))
     (Ok ())
     (Ok ())
-    (Ok ())
-    (Error (Occurs_check_failed (ATy (TVar (Unbound 10 1)))))
-    (Ok ())
-    (Error (Occurs_check_failed (ATy (TVar (Unbound 13 1)))))
-    (Ok ())
-    (Error (Occurs_check_failed (ATy (TVar (Unbound 16 1)))))
     |}]
 ;;
 

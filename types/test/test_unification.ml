@@ -298,7 +298,7 @@ let%expect_test "occurs check" =
     {|
     (Error (Occurs_check_failed (ATy (TVar (Unbound 0 1)))))
     (Error (Occurs_check_failed (ATy (TVar (Unbound 0 1)))))
-    (Ok ())
+    (Error (Occurs_check_failed (ATy (TVar (Unbound 0 1)))))
     |}]
 ;;
 

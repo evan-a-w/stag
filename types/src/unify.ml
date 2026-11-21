@@ -95,13 +95,13 @@ let adjust_binding fresh iter ~id ~rank ~in_bounds_of ~occurs target =
   in
   if not !recursive
   then Ok ()
-  else (
-    let error () = Error (Unification_error.Occurs_check_failed occurs) in
-    Value_layout.iter
-      ~con:(fun name -> Ok (Fresh.value_parameters fresh name))
-      ~var:(fun other -> if id = other then error () else Ok ())
-      ~cycle:(fun () -> Ok ())
-      [ target ])
+  else if Value_layout.reaches_unguarded
+            ~con:(Fresh.value_parameters fresh)
+            ~needs_structure:false
+            ~var:id
+            [ target ]
+  then Error (Unification_error.Occurs_check_failed occurs)
+  else Ok ()
 ;;
 
 (* Repeated pairs are assumed equal. Cuts through links also cover cycles

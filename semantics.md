@@ -36,8 +36,7 @@ is rejected by the backend (the interpreter supports everything).
 ## Recursive types
 
 Nothing is boxed implicitly: a type whose by-value layout would be infinite
-is an error, and recursion is written through `ptr[t]` (closures and function
-pointers also break cycles):
+is an error, and recursion is written through `ptr[t]`:
 
 ```ocaml
 type list['a] = Nil | Cons of 'a * ptr[list['a]]
@@ -51,7 +50,12 @@ and fields, and type arguments of types that contain that parameter by value
 `type t = T of wrap[ptr[t]]` is not). Cyclic structural types
 (`` [`Nil | `Cons of int * 'a] as 'a ``) are likewise errors unless every
 cycle goes through a `ptr`; this is checked where unification closes the
-cycle.
+cycle (the occurs check). A function type is not a `ptr`, so it does not
+break a structural cycle: `let self x = x x` is rejected, as is the alias
+`type f = int -> f` (a nominal declaration may still recurse through a
+function type, as a closure is not stored by value). An alias is cyclic
+unless its expansion reaches itself through a `ptr` and some other type
+constructor: `type al = ptr[al]` is rejected, `type f = int -> ptr[f]` is not.
 
 Where the pointee lives is the pointer's mode, as for any `ptr`: a `const`
 list is static data, an allocated one in the heap, a `local_` one on the data

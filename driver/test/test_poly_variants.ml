@@ -476,7 +476,7 @@ let two = T (`Cons (1, T `Nil))
           (RExtend A (PVar (Unbound 31 1)) (TCon unit ()) (RVar (Unbound 32 1))))))
        Cyclic_row))
      @ t.stag:2:59-60)
-    ((Infinite_type_layout t) @ t.stag:2:5-6)
+    ((Cyclic_type_alias t) @ t.stag:2:5-6)
     ((Infinite_type_layout t) @ t.stag:2:5-6)
     |}]
 ;;

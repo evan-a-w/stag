@@ -78,7 +78,7 @@ let%expect_test "printed declarations parse back" =
     ^ {|type point = {`x : int; `y : int}
 type with_x[{..'a}] = {`x : int; ..'a}
 type holder = { p : {`x : int; `y : int} }
-type stream['a] = {`head : 'a; `tail : unit -> stream['a]}
+type stream['a] = {`head : 'a; `tail : unit -> ptr[stream['a]]}
 type tree = [`Leaf of int | `Node of list[tree]]
 type pair = [`A of ptr[pair]] * int
 type rows[{..'a}] = {`x : ptr[rows[{..'a}]]; ..'a}
@@ -99,7 +99,7 @@ type abstract
     type point = {`x : int; `y : int}
     type with_x[{..'a}] = {`x : int; ..'a}
     type holder = { p : {`x : int; `y : int} }
-    type stream['a] = {`head : 'a; `tail : unit -> stream['a]}
+    type stream['a] = {`head : 'a; `tail : unit -> ptr[stream['a]]}
     type tree = [`Leaf of int | `Node of list[tree]]
     type pair = [`A of ptr[pair]] * int
     type rows[{..'a}] = {`x : ptr[rows[{..'a}]]; ..'a}

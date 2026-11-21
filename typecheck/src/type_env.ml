@@ -527,13 +527,14 @@ and expand t (decl : Decl.t) ~args ~expansions body =
       ~expansions
       body
   in
-  (* A loop consisting entirely of links cannot even be canonicalised. Other
-     cycles are checked after elaboration, when nominal layouts are available. *)
+  (* Nominal types are taken to guard here, as their layouts may not be known
+     yet: the layout of the declaration is checked after elaboration. *)
   if expansion.reached_back
-     &&
-     match Type.canonical_ty body with
-     | TVar var -> phys_equal var knot
-     | _ -> false
+     && Value_layout.reaches_unguarded
+          ~con:(fun (_ : string) -> Some Int.Set.empty)
+          ~needs_structure:true
+          ~var:knot.id
+          [ ATy body ]
   then
     Error
       (Typecheck_error.create
