@@ -1,5 +1,6 @@
 open! Import
 open Syntax
+module Value_layout = Stag_types.Value_layout
 
 module Constructor = struct
   type t =
@@ -32,6 +33,9 @@ module Decl = struct
     ; params : Type.arg list Lazy.t
     ; mutable wrap_error : Typecheck_error.t -> Typecheck_error.t
     ; mutable used_while_defined : bool
+    ; mutable prepared :
+        (Signature.Type_decl.Kind.t * Reflected_decl.Kind.t option) option
+    ; mutable value_parameters : Int.Set.t option
     ; mutable checked : Signature.Type_decl.t option
     ; mutable failed : bool (** Checking it reported an error. *)
     ; mutable reflected : Reflected_decl.t option
@@ -91,7 +95,7 @@ type t =
   ; report : Typecheck_error.t -> unit
   }
 
-let create fresh ~report =
+let create_tables fresh ~report =
   { fresh
   ; evaluate_splice =
       (fun _ _ ~loc:_ ->
@@ -112,6 +116,11 @@ let builtins =
     [ "int"; "bool"; "string"; "char"; "unit"; Type.exn_name; Type.error_name ]
     ~f:(fun name ->
       { Type_decl.name = Located.create name; params = []; kind = Abstract })
+  @ [ { Type_decl.name = Located.create "ptr"
+      ; params = [ Located.create (Type_decl.Param.Ty "a") ]
+      ; kind = Abstract
+      }
+    ]
 ;;
 
 let find_resolved t module_ namespace path ~loc ~unbound ~find =
@@ -286,16 +295,6 @@ module Expansion = struct
         | ATy _, ARow _ | ARow _, ATy _ -> false)
       t.args
       args
-  ;;
-
-  (* Whether the cycle the knot closes passes through a record or variant. *)
-  let guarded body ~knot =
-    let unguarded ~guarded var =
-      if (not guarded) && phys_equal var knot then Error () else Ok ()
-    in
-    let ok ~guarded:_ _ = Ok () in
-    Type.iter_ty { ty = unguarded; row = ok; presence = ok } body
-    |> Result.is_ok
   ;;
 end
 
@@ -528,12 +527,25 @@ and expand t (decl : Decl.t) ~args ~expansions body =
       ~expansions
       body
   in
-  if expansion.reached_back && not (Expansion.guarded body ~knot)
+  (* Nominal types are taken to guard here, as their layouts may not be known
+     yet: the layout of the declaration is checked after elaboration. *)
+  let reaches_unguarded ?through_structure () =
+    Value_layout.reaches_unguarded
+      ?through_structure
+      ~con:(fun (_ : string) -> Some Int.Set.empty)
+      ~needs_structure:true
+      ~var:knot.id
+      [ ATy body ]
+  in
+  if expansion.reached_back && reaches_unguarded ()
   then
     Error
       (Typecheck_error.create
          ~loc:decl.decl.name.loc
-         (Cyclic_type_alias decl.name))
+         (* Through a type constructor, a [ptr] would break the cycle. *)
+         (if reaches_unguarded ~through_structure:true ()
+          then Infinite_type_layout decl.name
+          else Cyclic_type_alias decl.name))
   else (
     knot.state <- Link body;
     expansion.expanded <- true;
@@ -593,6 +605,8 @@ let declare
       ; params
       ; wrap_error
       ; used_while_defined = false
+      ; prepared = None
+      ; value_parameters = None
       ; checked = None
       ; failed =
           (match decl.kind with
@@ -665,7 +679,7 @@ let check_exception t name =
     checked
 ;;
 
-let define t (decl : Decl.t) =
+let prepare_kind t (decl : Decl.t) =
   let expansions = String.Table.create () in
   let elaborate =
     elaborate'
@@ -676,41 +690,130 @@ let define t (decl : Decl.t) =
       ~expansions
   in
   let canonical_name = Module_scope.canonical_name decl.module_ in
-  let%map.Result kind, reflected =
-    match decl.decl.kind with
-    | Alias body ->
-      let%map.Result body, syntax =
-        expand t decl ~args:(Decl.params decl) ~expansions body
-      in
-      ( Signature.Type_decl.Kind.Alias body
-      , Some (Reflected_decl.Kind.Alias syntax) )
-    | Abstract -> Ok (Signature.Type_decl.Kind.Abstract, None)
-    | Splice _ ->
-      raise_s [%message "Type_env.define: definition not computed" decl.name]
-    | Malformed _ ->
-      raise_s [%message "Type_env.define: malformed" (decl.name : string)]
-    | Variant constructors ->
-      let%map.Result constructors =
-        map_result constructors ~f:(fun ((name : Name.t), args) ->
-          let%map.Result args = map_result args ~f:elaborate in
-          let args, syntax = List.unzip args in
-          ( { Signature.Constructor.name = name.txt; args }
-          , (canonical_name name.txt, syntax) ))
-      in
-      let constructors, reflected = List.unzip constructors in
-      ( Signature.Type_decl.Kind.Variant constructors
-      , Some (Reflected_decl.Kind.Variant reflected) )
-    | Record fields ->
-      let%map.Result fields =
-        map_result fields ~f:(fun ((name : Name.t), ty) ->
-          let%map.Result ty, syntax = elaborate ty in
-          ( { Signature.Field.name = name.txt; ty }
-          , (canonical_name name.txt, syntax) ))
-      in
-      let fields, reflected = List.unzip fields in
-      ( Signature.Type_decl.Kind.Record fields
-      , Some (Reflected_decl.Kind.Record reflected) )
+  match decl.decl.kind with
+  | Alias body ->
+    let%map.Result body, syntax =
+      expand t decl ~args:(Decl.params decl) ~expansions body
+    in
+    Signature.Type_decl.Kind.Alias body, Some (Reflected_decl.Kind.Alias syntax)
+  | Abstract -> Ok (Signature.Type_decl.Kind.Abstract, None)
+  | Splice _ ->
+    raise_s [%message "Type_env.define: definition not computed" decl.name]
+  | Malformed _ ->
+    raise_s [%message "Type_env.define: malformed" (decl.name : string)]
+  | Variant constructors ->
+    let%map.Result constructors =
+      map_result constructors ~f:(fun ((name : Name.t), args) ->
+        let%map.Result args = map_result args ~f:elaborate in
+        let args, syntax = List.unzip args in
+        ( { Signature.Constructor.name = name.txt; args }
+        , (canonical_name name.txt, syntax) ))
+    in
+    let constructors, reflected = List.unzip constructors in
+    ( Signature.Type_decl.Kind.Variant constructors
+    , Some (Reflected_decl.Kind.Variant reflected) )
+  | Record fields ->
+    let%map.Result fields =
+      map_result fields ~f:(fun ((name : Name.t), ty) ->
+        let%map.Result ty, syntax = elaborate ty in
+        ( { Signature.Field.name = name.txt; ty }
+        , (canonical_name name.txt, syntax) ))
+    in
+    let fields, reflected = List.unzip fields in
+    ( Signature.Type_decl.Kind.Record fields
+    , Some (Reflected_decl.Kind.Record reflected) )
+;;
+
+let prepare t (decl : Decl.t) =
+  match decl.prepared with
+  | Some prepared -> Ok prepared
+  | None ->
+    let%map.Result prepared = prepare_kind t decl in
+    decl.prepared <- Some prepared;
+    prepared
+;;
+
+let value_parameters t (root : Decl.t) =
+  let visiting = String.Hash_set.create () in
+  (* A generated definition that is being evaluated is still opaque. Do not
+     cache any summaries that could depend (even indirectly) on its layout. *)
+  let complete = ref true in
+  let rec visit (decl : Decl.t) =
+    let infinite () =
+      Error
+        (Typecheck_error.create
+           ~loc:decl.decl.name.loc
+           (Infinite_type_layout decl.name))
+    in
+    match decl.value_parameters with
+    | Some params -> Ok (Some params)
+    | None when Hash_set.mem visiting decl.name -> infinite ()
+    | None ->
+      let%bind.Result kind = definition decl ~loc:decl.decl.name.loc in
+      (match kind with
+       | Splice _ ->
+         complete := false;
+         Ok None
+       | Abstract | Malformed _ -> Ok None
+       | Record _ | Variant _ | Alias _ ->
+         Hash_set.add visiting decl.name;
+         let%bind.Result kind, _ = prepare t decl in
+         let roots : Type.arg list =
+           match kind with
+           | Alias ty -> [ ATy ty ]
+           | Record fields ->
+             List.map fields ~f:(fun (field : Signature.Field.t) ->
+               Type.ATy field.ty)
+           | Variant constructors ->
+             List.concat_map
+               constructors
+               ~f:(fun (ctor : Signature.Constructor.t) ->
+                 List.map ctor.args ~f:(fun ty -> Type.ATy ty))
+           | Abstract -> assert false
+         in
+         let params =
+           List.mapi (Decl.params decl) ~f:(fun index -> function
+             | ATy (TVar v) -> v.id, index
+             | ARow (RVar v) -> v.id, index
+             | _ -> assert false)
+           |> Int.Map.of_alist_exn
+         in
+         let stored = ref Int.Set.empty in
+         let%map.Result () =
+           Value_layout.iter
+             ~con:(fun name ->
+               match Hashtbl.find t.types name with
+               | None -> Ok None
+               | Some target when target.failed -> Ok None
+               | Some target -> visit target)
+             ~var:(fun id ->
+               Option.iter (Map.find params id) ~f:(fun index ->
+                 stored := Set.add !stored index);
+               Ok ())
+             ~cycle:infinite
+             roots
+         in
+         Hash_set.remove visiting decl.name;
+         if !complete then decl.value_parameters <- Some !stored;
+         Some !stored)
   in
+  visit root
+;;
+
+let create fresh ~report =
+  let t = create_tables fresh ~report in
+  Fresh.set_value_parameters fresh (fun name ->
+    Option.bind (Hashtbl.find t.types name) ~f:(fun decl ->
+      match value_parameters t decl with
+      | Ok params -> params
+      | Error _ -> None));
+  t
+;;
+
+let define t (decl : Decl.t) =
+  let%bind.Result kind, reflected = prepare t decl in
+  let%map.Result (_ : Int.Set.t option) = value_parameters t decl in
+  let canonical_name = Module_scope.canonical_name decl.module_ in
   decl.reflected
   <- Option.map reflected ~f:(fun kind ->
        { Reflected_decl.params = decl.decl.params; kind });

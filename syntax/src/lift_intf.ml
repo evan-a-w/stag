@@ -12,6 +12,7 @@ module type Builder = sig
   val string : string -> t
   val char : char -> t
   val tuple : t list -> t
+  val ptr : t -> t
 
   (** A polymorphic record. *)
   val record : (string * t) list -> t

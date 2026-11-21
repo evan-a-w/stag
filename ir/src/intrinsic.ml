@@ -10,6 +10,7 @@ type t =
   | Value_ref_name
   | Erase
   | Raise
+  | Ptr_make
 [@@deriving sexp_of, equal, enumerate]
 
 let name = function
@@ -22,6 +23,7 @@ let name = function
   | Value_ref_name -> "value_ref_name"
   | Erase -> "erase"
   | Raise -> "raise"
+  | Ptr_make -> "ptr_make"
 ;;
 
 let public_name = function
@@ -34,6 +36,7 @@ let public_name = function
   | Value_ref_name -> "Stag.Value_ref.name"
   | Erase -> "Stag.Code.erase"
   | Raise -> "raise"
+  | Ptr_make -> "Ptr.make"
 ;;
 
 let prelude ?(args = []) name = Type.TCon (Prelude_path.canonical name, args)
@@ -57,6 +60,9 @@ let ty t ~var ~row =
   | Erase ->
     TArrow (TCode { inner = var (); context = row () }, prelude "Stag.Expr.t")
   | Raise -> TArrow (Type.exn, var ())
+  | Ptr_make ->
+    let pointee = var () in
+    TArrow (pointee, TCon ("ptr", [ ATy pointee ]))
 ;;
 
 let find path =

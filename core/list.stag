@@ -5,7 +5,7 @@
 let is_empty l =
   match l with
   | [] -> true
-  | Cons (_, _) -> false
+  | Cons * (_, _) -> false
 
 let singleton x = [x]
 
@@ -13,35 +13,35 @@ let length l =
   let loop acc l =
     match l with
     | [] -> acc
-    | Cons (_, rest) -> loop (Int.succ acc) rest
+    | Cons * (_, rest) -> loop (Int.succ acc) rest
   in
   loop 0 l
 
 let hd l =
   match l with
   | [] -> None
-  | Cons (x, _) -> Some x
+  | Cons * (x, _) -> Some x
 
 let hd_exn l =
   match l with
   | [] -> raise (Failure "List.hd_exn: empty list")
-  | Cons (x, _) -> x
+  | Cons * (x, _) -> x
 
 let tl l =
   match l with
   | [] -> None
-  | Cons (_, rest) -> Some rest
+  | Cons * (_, rest) -> Some rest
 
 let tl_exn l =
   match l with
   | [] -> raise (Failure "List.tl_exn: empty list")
-  | Cons (_, rest) -> rest
+  | Cons * (_, rest) -> rest
 
 let last l =
   match l with
   | [] -> None
   | [x] -> Some x
-  | Cons (_, rest) -> last rest
+  | Cons * (_, rest) -> last rest
 
 let last_exn l =
   match last l with
@@ -51,7 +51,7 @@ let last_exn l =
 let nth l n =
   match l with
   | [] -> None
-  | Cons (x, rest) ->
+  | Cons * (x, rest) ->
     match Int.equal n 0 with
     | true -> Some x
     | false ->
@@ -69,7 +69,7 @@ let nth_exn l n =
 let rev_append l tail =
   match l with
   | [] -> tail
-  | Cons (x, rest) -> rev_append rest (Cons (x, tail))
+  | Cons * (x, rest) -> rev_append rest (Cons (Ptr.make ( (x, tail))))
 
 let rev l = rev_append l []
 
@@ -77,7 +77,7 @@ let rev l = rev_append l []
 let init n f =
   let loop i acc =
     match Int.lt i n with
-    | true -> loop (Int.succ i) (Cons (f i, acc))
+    | true -> loop (Int.succ i) (Cons (Ptr.make ( (f i, acc))))
     | false -> rev acc
   in
   loop 0 []
@@ -88,12 +88,12 @@ let append l1 l2 = rev_append (rev l1) l2
 let fold_left f acc l =
   match l with
   | [] -> acc
-  | Cons (x, rest) -> fold_left f (f acc x) rest
+  | Cons * (x, rest) -> fold_left f (f acc x) rest
 
 (* [fold_right f [a; b] init] is [f a (f b init)]. *)
 let fold_right f l acc = fold_left (fun acc x -> f x acc) acc (rev l)
 
-let rev_map f l = fold_left (fun acc x -> Cons (f x, acc)) [] l
+let rev_map f l = fold_left (fun acc x -> Cons (Ptr.make ( (f x, acc)))) [] l
 
 let map f l = rev (rev_map f l)
 
@@ -101,14 +101,14 @@ let mapi f l =
   let loop i l acc =
     match l with
     | [] -> rev acc
-    | Cons (x, rest) -> loop (Int.succ i) rest (Cons (f i x, acc))
+    | Cons * (x, rest) -> loop (Int.succ i) rest (Cons (Ptr.make ( (f i x, acc))))
   in
   loop 0 l []
 
 let iter (f : 'a -> unit) l =
   match l with
   | [] -> ()
-  | Cons (x, rest) ->
+  | Cons * (x, rest) ->
     f x;
     iter f rest
 
@@ -116,7 +116,7 @@ let iteri (f : int -> 'a -> unit) l =
   let loop i l =
     match l with
     | [] -> ()
-    | Cons (x, rest) ->
+    | Cons * (x, rest) ->
       f i x;
       loop (Int.succ i) rest
   in
@@ -125,7 +125,7 @@ let iteri (f : int -> 'a -> unit) l =
 let filter_map f l =
   let step acc x =
     match f x with
-    | Some y -> Cons (y, acc)
+    | Some y -> Cons (Ptr.make ( (y, acc)))
     | None -> acc
   in
   rev (fold_left step [] l)
@@ -133,7 +133,7 @@ let filter_map f l =
 let filter f l =
   let step acc x =
     match f x with
-    | true -> Cons (x, acc)
+    | true -> Cons (Ptr.make ( (x, acc)))
     | false -> acc
   in
   rev (fold_left step [] l)
@@ -142,8 +142,8 @@ let filter f l =
 let partition f l =
   let step acc x =
     match (acc, f x) with
-    | (yes, no), true -> (Cons (x, yes), no)
-    | (yes, no), false -> (yes, Cons (x, no))
+    | (yes, no), true -> (Cons (Ptr.make ( (x, yes))), no)
+    | (yes, no), false -> (yes, Cons (Ptr.make ( (x, no))))
   in
   match fold_left step ([], []) l with yes, no -> (rev yes, rev no)
 
@@ -162,7 +162,7 @@ let count f l =
 let find f l =
   match l with
   | [] -> None
-  | Cons (x, rest) ->
+  | Cons * (x, rest) ->
     match f x with
     | true -> Some x
     | false -> find f rest
@@ -175,7 +175,7 @@ let find_exn f l =
 let find_map f l =
   match l with
   | [] -> None
-  | Cons (x, rest) ->
+  | Cons * (x, rest) ->
     match f x with
     | Some y -> Some y
     | None -> find_map f rest
@@ -183,7 +183,7 @@ let find_map f l =
 let exists f l =
   match l with
   | [] -> false
-  | Cons (x, rest) ->
+  | Cons * (x, rest) ->
     match f x with
     | true -> true
     | false -> exists f rest
@@ -191,7 +191,7 @@ let exists f l =
 let for_all f l =
   match l with
   | [] -> true
-  | Cons (x, rest) ->
+  | Cons * (x, rest) ->
     match f x with
     | true -> for_all f rest
     | false -> false
@@ -201,7 +201,7 @@ let mem equal x l = exists (fun y -> equal x y) l
 let equal equal_elt l1 l2 =
   match (l1, l2) with
   | [], [] -> true
-  | Cons (x, rest1), Cons (y, rest2) ->
+  | Cons * (x, rest1), Cons * (y, rest2) ->
     (match equal_elt x y with
      | true -> equal equal_elt rest1 rest2
      | false -> false)
@@ -213,7 +213,7 @@ let compare compare_elt l1 l2 =
   | [], [] -> 0
   | [], _ -> -1
   | _, [] -> 1
-  | Cons (x, rest1), Cons (y, rest2) ->
+  | Cons * (x, rest1), Cons * (y, rest2) ->
     match Int.equal (compare_elt x y) 0 with
     | true -> compare compare_elt rest1 rest2
     | false -> compare_elt x y
@@ -222,7 +222,7 @@ let compare compare_elt l1 l2 =
 let take n l =
   let loop l n acc =
     match (l, Int.gt n 0) with
-    | Cons (x, rest), true -> loop rest (Int.pred n) (Cons (x, acc))
+    | Cons * (x, rest), true -> loop rest (Int.pred n) (Cons (Ptr.make ( (x, acc))))
     | _ -> rev acc
   in
   loop l n []
@@ -230,7 +230,7 @@ let take n l =
 (* Without the first [n] elements. *)
 let drop n l =
   match (l, Int.gt n 0) with
-  | Cons (_, rest), true -> drop (Int.pred n) rest
+  | Cons * (_, rest), true -> drop (Int.pred n) rest
   | _ -> l
 
 (* [None] if the lists' lengths differ. *)
@@ -238,7 +238,7 @@ let zip l1 l2 =
   let loop l1 l2 acc =
     match (l1, l2) with
     | [], [] -> Some (rev acc)
-    | Cons (x, rest1), Cons (y, rest2) -> loop rest1 rest2 (Cons ((x, y), acc))
+    | Cons * (x, rest1), Cons * (y, rest2) -> loop rest1 rest2 (Cons (Ptr.make ( ((x, y), acc))))
     | _ -> None
   in
   loop l1 l2 []
@@ -250,7 +250,7 @@ let zip_exn l1 l2 =
 
 let unzip l =
   let step acc p =
-    match (acc, p) with (xs, ys), (x, y) -> (Cons (x, xs), Cons (y, ys))
+    match (acc, p) with (xs, ys), (x, y) -> (Cons (Ptr.make ( (x, xs))), Cons (Ptr.make ( (y, ys))))
   in
   match fold_left step ([], []) l with xs, ys -> (rev xs, rev ys)
 
@@ -260,7 +260,7 @@ let map2 f l1 l2 =
   let loop l1 l2 acc =
     match (l1, l2) with
     | [], [] -> Some (rev acc)
-    | Cons (x, rest1), Cons (y, rest2) -> loop rest1 rest2 (Cons (f x y, acc))
+    | Cons * (x, rest1), Cons * (y, rest2) -> loop rest1 rest2 (Cons (Ptr.make ( (f x y, acc))))
     | _ -> None
   in
   loop l1 l2 []
@@ -275,7 +275,7 @@ let map2_exn f l1 l2 =
 let iter2 (f : 'a -> 'b -> unit) l1 l2 =
   match (l1, l2) with
   | [], [] -> Some ()
-  | Cons (x, rest1), Cons (y, rest2) ->
+  | Cons * (x, rest1), Cons * (y, rest2) ->
     f x y;
     iter2 f rest1 rest2
   | _ -> None
@@ -283,7 +283,7 @@ let iter2 (f : 'a -> 'b -> unit) l1 l2 =
 let fold_left2 f acc l1 l2 =
   match (l1, l2) with
   | [], [] -> Some acc
-  | Cons (x, rest1), Cons (y, rest2) -> fold_left2 f (f acc x y) rest1 rest2
+  | Cons * (x, rest1), Cons * (y, rest2) -> fold_left2 f (f acc x y) rest1 rest2
   | _ -> None
 
 (* [max_elt compare l] is the first greatest element, [None] if [l] is empty. *)
@@ -295,7 +295,7 @@ let max_elt compare l =
   in
   match l with
   | [] -> None
-  | Cons (x, rest) -> Some (fold_left step x rest)
+  | Cons * (x, rest) -> Some (fold_left step x rest)
 
 (* [min_elt compare l] is the first least element, [None] if [l] is empty. *)
 let min_elt compare l =
@@ -306,13 +306,13 @@ let min_elt compare l =
   in
   match l with
   | [] -> None
-  | Cons (x, rest) -> Some (fold_left step x rest)
+  | Cons * (x, rest) -> Some (fold_left step x rest)
 
 (* The value of the first pair whose key is [equal] to [key]. *)
 let assoc equal key l =
   match l with
   | [] -> None
-  | Cons ((k, v), rest) ->
+  | Cons * ((k, v), rest) ->
     match equal key k with
     | true -> Some v
     | false -> assoc equal key rest
@@ -330,10 +330,10 @@ let sort compare l =
     match (l1, l2) with
     | [], l -> rev_append acc l
     | l, [] -> rev_append acc l
-    | Cons (x, rest1), Cons (y, rest2) ->
+    | Cons * (x, rest1), Cons * (y, rest2) ->
       match Int.gt (compare x y) 0 with
-      | true -> merge l1 rest2 (Cons (y, acc))
-      | false -> merge rest1 l2 (Cons (x, acc))
+      | true -> merge l1 rest2 (Cons (Ptr.make ( (y, acc))))
+      | false -> merge rest1 l2 (Cons (Ptr.make ( (x, acc))))
   in
   (* [run] is the current run before [x] (reversed unless [descending]). *)
   let runs descending run x l acc =
@@ -343,22 +343,22 @@ let sort compare l =
       | false -> rev run
     in
     match l with
-    | [] -> rev (Cons (close (Cons (x, run)), acc))
-    | Cons (y, rest) ->
+    | [] -> rev (Cons (Ptr.make ( (close (Cons (Ptr.make ( (x, run)))), acc))))
+    | Cons * (y, rest) ->
       let down = Int.gt (compare x y) 0 in
       match run with
       | [] -> runs down [x] y rest acc
-      | Cons (_, _) ->
+      | Cons * (_, _) ->
         match Bool.equal descending down with
-        | true -> runs descending (Cons (x, run)) y rest acc
-        | false -> runs false [] y rest (Cons (close (Cons (x, run)), acc))
+        | true -> runs descending (Cons (Ptr.make ( (x, run)))) y rest acc
+        | false -> runs false [] y rest (Cons (Ptr.make ( (close (Cons (Ptr.make ( (x, run)))), acc))))
   in
   (* Merges neighbouring runs, keeping their order. *)
   let merge_pairs runs acc =
     match runs with
-    | Cons (r1, Cons (r2, rest)) ->
-      merge_pairs rest (Cons (merge r1 r2 [], acc))
-    | [r] -> rev (Cons (r, acc))
+    | Cons * (r1, Cons * (r2, rest)) ->
+      merge_pairs rest (Cons (Ptr.make ( (merge r1 r2 [], acc))))
+    | [r] -> rev (Cons (Ptr.make ( (r, acc))))
     | [] -> rev acc
   in
   let merge_all runs =
@@ -369,16 +369,16 @@ let sort compare l =
   in
   match l with
   | [] -> []
-  | Cons (x, rest) -> merge_all (runs false [] x rest [])
+  | Cons * (x, rest) -> merge_all (runs false [] x rest [])
 
 (* Sorted by [compare], keeping the first of the elements it says are equal. *)
 let dedup compare l =
   let step acc x =
     match acc with
-    | Cons (y, _) ->
+    | Cons * (y, _) ->
       (match Int.equal (compare y x) 0 with
        | true -> acc
-       | false -> Cons (x, acc))
-    | [] -> Cons (x, acc)
+       | false -> Cons (Ptr.make ( (x, acc))))
+    | [] -> Cons (Ptr.make ( (x, acc)))
   in
   rev (fold_left step [] (sort compare l))

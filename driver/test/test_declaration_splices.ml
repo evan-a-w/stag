@@ -9,17 +9,17 @@ let constructor name = (name, Nil)
 let arm name = (Stag.Pattern.construct name Nil, Stag.Expr.string name)
 
 let enum names =
-  Cons
+  Cons (Ptr.make (
     ( Stag.Toplevel.Type
         { `name = "t"
         ; `params = Nil
         ; `kind = Stag.Type_decl.Kind.Variant (Stag.map constructor names) }
-    , Cons
-        ( Stag.Toplevel.let_ "to_string" (Cons ("x", Nil))
-            (Stag.Expr.Match (Stag.Expr.var "x", Stag.map arm names))
-        , Nil ) )
+    , Cons (Ptr.make (
+        ( Stag.Toplevel.let_ "to_string" (Cons (Ptr.make ( ("x", Nil))))
+            (Stag.Expr.Match (Ptr.make ( (Stag.Expr.var "x", Stag.map arm names))))
+        , Nil ))) )))
 
-let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
 |}
 ;;
 
@@ -28,7 +28,7 @@ let%expect_test "a generated variant and a function over it" =
     ~run:true
     (generators
      ^ {|
-module Color = .~(enum (Cons ("Red", Cons ("Green", Nil))))
+module Color = .~(enum (Cons (Ptr.make ( ("Red", Cons (Ptr.make ( ("Green", Nil))))))))
 
 let shown = print_endline (Color.to_string Color.Green)
 |}
@@ -60,8 +60,8 @@ module Outer = struct
   let before = 0
   include .~(value "x" (Stag.Expr.int 1))
   module Inner = struct
-    include .~(value "y" (Stag.Expr.apply (Stag.Expr.var "Int.add") (Cons (Stag.Expr.var "x", Cons (Stag.Expr.int 1, Nil)))))
-    module E = .~(enum (Cons ("A", Nil)))
+    include .~(value "y" (Stag.Expr.apply (Stag.Expr.var "Int.add") (Cons (Ptr.make ( (Stag.Expr.var "x", Cons (Ptr.make ( (Stag.Expr.int 1, Nil)))))))))
+    module E = .~(enum (Cons (Ptr.make ( ("A", Nil)))))
   end
   let after = Inner.y
 end
@@ -102,16 +102,16 @@ let%expect_test "spliced toplevels are evaluated at run time at the splice's \
     ~run:true
     {|
 let a = print_endline "a"
-include .~(Cons (Stag.Toplevel.let_ "b" Nil (Stag.Expr.App (Stag.Expr.var "print_endline", Stag.Expr.string "b")), Nil))
+include .~(Cons (Ptr.make ( (Stag.Toplevel.let_ "b" Nil (Stag.Expr.App (Ptr.make ( (Stag.Expr.var "print_endline", Stag.Expr.string "b")))), Nil))))
 let c = print_endline "c"
-include .~(Cons
+include .~(Cons (Ptr.make (
   (Stag.Toplevel.Expect_test
      { `name = "generated"
      ; `body =
-         Stag.Expr.Let ("u", Nil, None,
-           Stag.Expr.App (Stag.Expr.var "print_endline", Stag.Expr.string "hi"),
-           Stag.Expr.Expect "wrong") },
-   Nil))
+         Stag.Expr.Let (Ptr.make ( ("u", Nil, None,
+           Stag.Expr.App (Ptr.make ( (Stag.Expr.var "print_endline", Stag.Expr.string "hi"))),
+           Stag.Expr.Expect "wrong"))) },
+   Nil))))
 let%expect_test "written" = print_endline "w"; [%expect "wrong"]
 |};
   [%expect
@@ -125,8 +125,8 @@ let%expect_test "written" = print_endline "w"; [%expect "wrong"]
     a
     b
     c
-    ((name (generated @ a.stag:5:0-12:8))
-     (mismatches (((loc a.stag:5:0-12:8) (expected (wrong)) (actual hi))))
+    ((name (generated @ a.stag:5:0-12:10))
+     (mismatches (((loc a.stag:5:0-12:10) (expected (wrong)) (actual hi))))
      (error ()) (generated))
     ((name (written @ a.stag:13:16-25))
      (mismatches (((loc a.stag:13:56-63) (expected (wrong)) (actual w))))
@@ -134,16 +134,16 @@ let%expect_test "written" = print_endline "w"; [%expect "wrong"]
     --- corrected ---
 
     let a = print_endline "a"
-    include .~(Cons (Stag.Toplevel.let_ "b" Nil (Stag.Expr.App (Stag.Expr.var "print_endline", Stag.Expr.string "b")), Nil))
+    include .~(Cons (Ptr.make ( (Stag.Toplevel.let_ "b" Nil (Stag.Expr.App (Ptr.make ( (Stag.Expr.var "print_endline", Stag.Expr.string "b")))), Nil))))
     let c = print_endline "c"
-    include .~(Cons
+    include .~(Cons (Ptr.make (
       (Stag.Toplevel.Expect_test
          { `name = "generated"
          ; `body =
-             Stag.Expr.Let ("u", Nil, None,
-               Stag.Expr.App (Stag.Expr.var "print_endline", Stag.Expr.string "hi"),
-               Stag.Expr.Expect "wrong") },
-       Nil))
+             Stag.Expr.Let (Ptr.make ( ("u", Nil, None,
+               Stag.Expr.App (Ptr.make ( (Stag.Expr.var "print_endline", Stag.Expr.string "hi"))),
+               Stag.Expr.Expect "wrong"))) },
+       Nil))))
     let%expect_test "written" = print_endline "w"; [%expect {| w |}]
     |xxx}]
 ;;
@@ -153,17 +153,17 @@ let%expect_test "generated functions, and constructors of one tuple argument" =
     ~run:true
     (generators
      ^ {|
-let pair = Cons (Stag.Expr.int 1, Cons (Stag.Expr.int 2, Nil))
+let pair = Cons (Ptr.make ( (Stag.Expr.int 1, Cons (Ptr.make ( (Stag.Expr.int 2, Nil))))))
 include .~(value "some" (Stag.Expr.construct "Some" pair))
 include .~(value "swap"
-  (Stag.Expr.Fun
-    ( Cons (("o", None), Nil)
-    , Stag.Expr.Match
+  (Stag.Expr.Fun (Ptr.make (
+    ( Cons (Ptr.make ( (("o", None), Nil)))
+    , Stag.Expr.Match (Ptr.make (
         ( Stag.Expr.var "o"
-        , Cons
-            ( ( Stag.Pattern.construct "Some" (Cons (Stag.Pattern.Var "a", Cons (Stag.Pattern.Var "b", Nil)))
-              , Stag.Expr.construct "Some" (Cons (Stag.Expr.var "b", Cons (Stag.Expr.var "a", Nil))) )
-            , Nil ) ) )))
+        , Cons (Ptr.make (
+            ( ( Stag.Pattern.construct "Some" (Cons (Ptr.make ( (Stag.Pattern.Var "a", Cons (Ptr.make ( (Stag.Pattern.Var "b", Nil)))))))
+              , Stag.Expr.construct "Some" (Cons (Ptr.make ( (Stag.Expr.var "b", Cons (Ptr.make ( (Stag.Expr.var "a", Nil))))))) )
+            , Nil ))) ))) )))))
 let shown = match swap some with Some (a, b) -> print_int a; print_int b
 |}
     );
@@ -188,7 +188,7 @@ let%expect_test "negative int literals" =
   check
     ~run:true
     {|
-include .~(Cons (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int (Int.neg 1)), Nil))
+include .~(Cons (Ptr.make ( (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int (Int.neg 1)), Nil))))
 let shown = print_int x
 |};
   [%expect
@@ -234,7 +234,7 @@ let b = y
     (generators
      ^ {|
 let f (c : E.t) = E.to_string c
-module E = .~(enum (Cons ("A", Nil)))
+module E = .~(enum (Cons (Ptr.make ( ("A", Nil)))))
 |}
     );
   [%expect
@@ -291,7 +291,7 @@ let%expect_test "a generator before its include, in the same module" =
   check
     ~run:true
     {|
-let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
 include .~(value "x" (Stag.Expr.int 1))
 let shown = print_int x
 |};
@@ -312,7 +312,7 @@ let%expect_test "a generator in a submodule" =
     ~run:true
     {|
 module Gen = struct
-  let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+  let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
 end
 include .~(Gen.value "x" (Stag.Expr.int 1))
 let shown = print_int x
@@ -334,13 +334,13 @@ let shown = print_int x
     {|
 include .~(Gen.value "x" (Stag.Expr.int 1))
 module Gen = struct
-  let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+  let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
 end
 |};
   [%expect
     {|
     File "a.stag", line 4, characters 21-25:
-    4 |   let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+    4 |   let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
                              ^^^^
     Error: Cons can't be resolved here: the include at a.stag:2:0-43 comes before this point and may define it, but it is still being generated (its expression uses this code). Move this code before the include or into another module
     File "a.stag", line 2, characters 0-43:
@@ -354,12 +354,12 @@ let%expect_test "a generator after its include" =
   check
     {|
 include .~(value "x" (Stag.Expr.int 1))
-let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
 |};
   [%expect
     {|
     File "a.stag", line 3, characters 19-23:
-    3 | let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
+    3 | let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
                            ^^^^
     Error: Cons can't be resolved here: the include at a.stag:2:0-39 comes before this point and may define it, but it is still being generated (its expression uses this code). Move this code before the include or into another module
     File "a.stag", line 2, characters 0-39:
@@ -377,7 +377,7 @@ let%expect_test "what an include generates is visible only after it" =
     (generators
      ^ {|
 let two a e b f =
-  Cons (Stag.Toplevel.let_ a Nil e, Cons (Stag.Toplevel.let_ b Nil f, Nil))
+  Cons (Ptr.make ( (Stag.Toplevel.let_ a Nil e, Cons (Ptr.make ( (Stag.Toplevel.let_ b Nil f, Nil))))))
 let x = "outer"
 module N = struct
   let before = x
@@ -455,7 +455,7 @@ let%expect_test "outward resolution does not depend on check order" =
     ^ (if first then "let first = N.y\n" else "")
     ^ {|
 let two a e b f =
-  Cons (Stag.Toplevel.let_ a Nil e, Cons (Stag.Toplevel.let_ b Nil f, Nil))
+  Cons (Ptr.make ( (Stag.Toplevel.let_ a Nil e, Cons (Ptr.make ( (Stag.Toplevel.let_ b Nil f, Nil))))))
 let x = "outer"
 module N = struct
   let before = x
@@ -569,12 +569,12 @@ let%expect_test "generated declaration splices" =
     (generators
      ^ {|
 let call f args = Stag.Expr.apply (Stag.Expr.var f) args
-let int n = call "Stag.Expr.int" (Cons (Stag.Expr.int n, Nil))
+let int n = call "Stag.Expr.int" (Cons (Ptr.make ( (Stag.Expr.int n, Nil))))
 include .~(
-  Cons (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1),
-  Cons (Stag.Toplevel.Include (call "value" (Cons (Stag.Expr.string "y", Cons (int 2, Nil)))),
-  Cons (Stag.Toplevel.Module_splice ("Inner", call "value" (Cons (Stag.Expr.string "z", Cons (int 3, Nil)))),
-  Nil))))
+  Cons (Ptr.make ( (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1),
+  Cons (Ptr.make ( (Stag.Toplevel.Include (call "value" (Cons (Ptr.make ( (Stag.Expr.string "y", Cons (Ptr.make ( (int 2, Nil)))))))),
+  Cons (Ptr.make ( (Stag.Toplevel.Module_splice ("Inner", call "value" (Cons (Ptr.make ( (Stag.Expr.string "z", Cons (Ptr.make ( (int 3, Nil)))))))),
+  Nil))))))))))
 let shown = print_int x; print_int y; print_int Inner.z
 |}
     );
@@ -816,8 +816,8 @@ let%expect_test "splicing a generator twice gives distinct types" =
   check
     (generators
      ^ {|
-module A = .~(enum (Cons ("C", Nil)))
-module B = .~(enum (Cons ("C", Nil)))
+module A = .~(enum (Cons (Ptr.make ( ("C", Nil)))))
+module B = .~(enum (Cons (Ptr.make ( ("C", Nil)))))
 let ok = (A.to_string A.C, B.to_string B.C)
 let wrong = A.to_string B.C
 |}
@@ -837,7 +837,7 @@ let%expect_test "a program shadowing list and option, and with its own module \
   check
     ~run:true
     {|
-type list['a] = Nil | Cons of 'a * list['a] | Extra
+type list['a] = Nil | Cons of ptr['a * list['a]] | Extra
 module Stag = struct
   let mine = 1
 end
@@ -848,7 +848,7 @@ let o = Some 1
   [%expect
     {|
     module A : sig
-      type list['a] = Nil | Cons of 'a * list['a] | Extra
+      type list['a] = Nil | Cons of ptr['a * list['a]] | Extra
       module Stag : sig
         val mine : int
       end
@@ -862,13 +862,13 @@ let o = Some 1
      constructors are looked up in the expected type. *)
   check
     {|
-type list['a] = Nil | Cons of 'a * list['a]
-include .~(Cons (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1), Nil))
+type list['a] = Nil | Cons of ptr['a * list['a]]
+include .~(Cons (Ptr.make (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1), Nil)))
 |};
   [%expect
     {|
     module A : sig
-      type list['a] = Nil | Cons of 'a * list['a]
+      type list['a] = Nil | Cons of ptr['a * list['a]]
       val x : int
     end
     |}]
@@ -888,14 +888,14 @@ include .~(value "X" (Stag.Expr.int 1))
   check
     (generators
      ^ {|
-include .~(Cons (Stag.Toplevel.Type { `name = "t"; `params = Nil; `kind = Stag.Type_decl.Kind.Record Nil }, Nil))
+include .~(Cons (Ptr.make ( (Stag.Toplevel.Type { `name = "t"; `params = Nil; `kind = Stag.Type_decl.Kind.Record Nil }, Nil))))
 |}
     );
   [%expect
     {|
-    File "a.stag", line 18, characters 0-113:
-    18 | include .~(Cons (Stag.Toplevel.Type { `name = "t"; `params = Nil; `kind = Stag.Type_decl.Kind.Record Nil }, Nil))
-         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "a.stag", line 18, characters 0-127:
+    18 | include .~(Cons (Ptr.make ( (Stag.Toplevel.Type { `name = "t"; `params = Nil; `kind = Stag.Type_decl.Kind.Record Nil }, Nil))))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: This declaration splice generated malformed declarations: Malformed syntax: expected at least one field, got Nil, within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Record
     |}]
 ;;
@@ -904,14 +904,14 @@ let%expect_test "errors in generated code" =
   check
     (generators
      ^ {|
-module M = .~(value "x" (Stag.Expr.apply (Stag.Expr.var "Int.add") (Cons (Stag.Expr.int 1, Cons (Stag.Expr.string "a", Nil)))))
+module M = .~(value "x" (Stag.Expr.apply (Stag.Expr.var "Int.add") (Cons (Ptr.make ( (Stag.Expr.int 1, Cons (Ptr.make ( (Stag.Expr.string "a", Nil)))))))))
 |}
     );
   [%expect
     {|
-    File "a.stag", line 18, characters 0-127:
-    18 | module M = .~(value "x" (Stag.Expr.apply (Stag.Expr.var "Int.add") (Cons (Stag.Expr.int 1, Cons (Stag.Expr.string "a", Nil)))))
-         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "a.stag", line 18, characters 0-155:
+    18 | module M = .~(value "x" (Stag.Expr.apply (Stag.Expr.var "Int.add") (Cons (Ptr.make ( (Stag.Expr.int 1, Cons (Ptr.make ( (Stag.Expr.string "a", Nil)))))))))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: In the declaration `let x` generated by this splice: This expression has type string but an expression was expected of type int
     Note: The generated declaration is:
       let x = Int.add 1 "a"
@@ -934,16 +934,16 @@ include .~(value "x" (Stag.Expr.var "nope"))
      ^ {|
 let arms n =
   match Int.equal n 0 with
-  | true -> Cons ((Stag.Pattern.Any, Stag.Expr.var "nope"), Nil)
-  | false -> Cons ((Stag.Pattern.Lit (Stag.Lit.Int n), Stag.Expr.int n), arms (Int.sub n 1))
-include .~(value "x" (Stag.Expr.Match (Stag.Expr.var "Int.max_value", arms 20)))
+  | true -> Cons (Ptr.make ( ((Stag.Pattern.Any, Stag.Expr.var "nope"), Nil)))
+  | false -> Cons (Ptr.make ( ((Stag.Pattern.Lit (Stag.Lit.Int n), Stag.Expr.int n), arms (Int.sub n 1))))
+include .~(value "x" (Stag.Expr.Match (Ptr.make ( (Stag.Expr.var "Int.max_value", arms 20)))))
 |}
     );
   [%expect
     {|
-    File "a.stag", line 22, characters 0-80:
-    22 | include .~(value "x" (Stag.Expr.Match (Stag.Expr.var "Int.max_value", arms 20)))
-         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "a.stag", line 22, characters 0-94:
+    22 | include .~(value "x" (Stag.Expr.Match (Ptr.make ( (Stag.Expr.var "Int.max_value", arms 20)))))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: In the declaration `let x` generated by this splice: Unbound value Int.max_value
     Note: The generated declaration is:
       let x =
@@ -958,9 +958,9 @@ include .~(value "x" (Stag.Expr.Match (Stag.Expr.var "Int.max_value", arms 20)))
         | 13 -> 13
         | 12 -> 12
       ... (12 more lines)
-    File "a.stag", line 22, characters 0-80:
-    22 | include .~(value "x" (Stag.Expr.Match (Stag.Expr.var "Int.max_value", arms 20)))
-         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "a.stag", line 22, characters 0-94:
+    22 | include .~(value "x" (Stag.Expr.Match (Ptr.make ( (Stag.Expr.var "Int.max_value", arms 20)))))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: In the declaration `let x` generated by this splice: Unbound value nope
     Note: The generated declaration is:
       let x =
@@ -1025,8 +1025,8 @@ let%expect_test "a file shadowing the prelude's Stag" =
     [ { Source_file.path = "stag.stag"; contents = "let mine = 1\n" }
     ; { Source_file.path = "a.stag"
       ; contents =
-          "include .~(Cons (Stag.Toplevel.let_ \"x\" Nil (Stag.Expr.int 1), \
-           Nil))\n"
+          "include .~(Cons (Ptr.make (Stag.Toplevel.let_ \"x\" Nil \
+           (Stag.Expr.int 1), Nil)))\n"
       }
     ]
   in
@@ -1041,17 +1041,17 @@ let%expect_test "a file shadowing the prelude's Stag" =
          (List.map error ~f:Diagnostic.of_driver_error));
     [%expect
       {|
-      File "a.stag", line 1, characters 17-30:
-      1 | include .~(Cons (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1), Nil))
-                           ^^^^^^^^^^^^^
+      File "a.stag", line 1, characters 27-40:
+      1 | include .~(Cons (Ptr.make (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1), Nil)))
+                                     ^^^^^^^^^^^^^
       Error: Unbound module Stag.Toplevel (the prelude's module Stag is shadowed by the program's Stag)
       File "stag.stag", line 1, characters 0-0:
       1 | let mine = 1
           ^
       Note: The program's module Stag is here
-      File "a.stag", line 1, characters 45-54:
-      1 | include .~(Cons (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1), Nil))
-                                                       ^^^^^^^^^
+      File "a.stag", line 1, characters 55-64:
+      1 | include .~(Cons (Ptr.make (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1), Nil)))
+                                                                 ^^^^^^^^^
       Error: Unbound module Stag.Expr (the prelude's module Stag is shadowed by the program's Stag)
       File "stag.stag", line 1, characters 0-0:
       1 | let mine = 1
@@ -1065,14 +1065,14 @@ let check_with_gen contents =
   let files =
     [ { Source_file.path = "gen.stag"
       ; contents =
-          {|let value name e = Cons (Stag.Toplevel.let_ name Nil e, Nil)
-let module_ name decls = Cons (Stag.Toplevel.Module (name, decls), Nil)
+          {|let value name e = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil e, Nil)))
+let module_ name decls = Cons (Ptr.make ( (Stag.Toplevel.Module (name, decls), Nil)))
 let call f args = Stag.Expr.apply (Stag.Expr.var f) args
 let include_value name e =
   Stag.Toplevel.Include
-    (call "Gen.value" (Cons (Stag.Expr.string name, Cons (e, Nil))))
+    (call "Gen.value" (Cons (Ptr.make ( (Stag.Expr.string name, Cons (Ptr.make ( (e, Nil))))))))
 let type_ name kind =
-  Cons (Stag.Toplevel.Type { `name = name; `params = Nil; `kind = kind }, Nil)
+  Cons (Ptr.make ( (Stag.Toplevel.Type { `name = name; `params = Nil; `kind = kind }, Nil)))
 |}
       }
     ; { Source_file.path = "a.stag"; contents }
@@ -1097,9 +1097,9 @@ let type_ name kind =
    the [x] it generates, [after] does. *)
 let generated_g =
   {|include .~(Gen.module_ "G"
-  (Cons (Stag.Toplevel.let_ "before" Nil (Stag.Expr.var "x"),
-   Cons (Gen.include_value "x" (Gen.call "Stag.Expr.int" (Cons (Stag.Expr.int 5, Nil))),
-   Cons (Stag.Toplevel.let_ "after" Nil (Stag.Expr.var "x"), Nil)))))
+  (Cons (Ptr.make ( (Stag.Toplevel.let_ "before" Nil (Stag.Expr.var "x"),
+   Cons (Ptr.make ( (Gen.include_value "x" (Gen.call "Stag.Expr.int" (Cons (Ptr.make ( (Stag.Expr.int 5, Nil))))),
+   Cons (Ptr.make ( (Stag.Toplevel.let_ "after" Nil (Stag.Expr.var "x"), Nil)))))))))))
 |}
 ;;
 
@@ -1130,11 +1130,11 @@ let x = "outer"
     1 | let probe = G.after
                     ^
     Error: Unbound module G
-    File "a.stag", lines 3-6, characters 0-69:
+    File "a.stag", lines 3-6, characters 0-87:
     3 | include .~(Gen.module_ "G"
-    4 |   (Cons (Stag.Toplevel.let_ "before" Nil (Stag.Expr.var "x"),
-    5 |    Cons (Gen.include_value "x" (Gen.call "Stag.Expr.int" (Cons (Stag.Expr.int 5, Nil))),
-    6 |    Cons (Stag.Toplevel.let_ "after" Nil (Stag.Expr.var "x"), Nil)))))
+    4 |   (Cons (Ptr.make ( (Stag.Toplevel.let_ "before" Nil (Stag.Expr.var "x"),
+    5 |    Cons (Ptr.make ( (Gen.include_value "x" (Gen.call "Stag.Expr.int" (Cons (Ptr.make ( (Stag.Expr.int 5, Nil))))),
+    6 |    Cons (Ptr.make ( (Stag.Toplevel.let_ "after" Nil (Stag.Expr.var "x"), Nil)))))))))))
     Note: This include generates it, but it is visible only after the include
     |}];
   (* The same, once the include has run. *)
@@ -1152,11 +1152,11 @@ let x = "outer"
     2 | let probe = G.after
                     ^
     Error: Unbound module G
-    File "a.stag", lines 4-7, characters 0-69:
+    File "a.stag", lines 4-7, characters 0-87:
     4 | include .~(Gen.module_ "G"
-    5 |   (Cons (Stag.Toplevel.let_ "before" Nil (Stag.Expr.var "x"),
-    6 |    Cons (Gen.include_value "x" (Gen.call "Stag.Expr.int" (Cons (Stag.Expr.int 5, Nil))),
-    7 |    Cons (Stag.Toplevel.let_ "after" Nil (Stag.Expr.var "x"), Nil)))))
+    5 |   (Cons (Ptr.make ( (Stag.Toplevel.let_ "before" Nil (Stag.Expr.var "x"),
+    6 |    Cons (Ptr.make ( (Gen.include_value "x" (Gen.call "Stag.Expr.int" (Cons (Ptr.make ( (Stag.Expr.int 5, Nil))))),
+    7 |    Cons (Ptr.make ( (Stag.Toplevel.let_ "after" Nil (Stag.Expr.var "x"), Nil)))))))))))
     Note: This include generates it, but it is visible only after the include
     |}];
   check_with_gen {|let probe = y
@@ -1305,7 +1305,7 @@ end
     |}];
   check_with_gen
     {|module N = struct
-  include .~(Gen.module_ "Sub" (Cons (Gen.include_value "k" (Gen.call "Stag.Expr.var" (Cons (Stag.Expr.string "outer_v", Nil))), Nil)))
+  include .~(Gen.module_ "Sub" (Cons (Ptr.make ( (Gen.include_value "k" (Gen.call "Stag.Expr.var" (Cons (Ptr.make ( (Stag.Expr.string "outer_v", Nil))))), Nil)))))
   let v = Sub.k
 end
 let outer_v = 1
@@ -1525,7 +1525,7 @@ end
 
 let%expect_test "prelude names in messages, with generated shadowing types" =
   let m =
-    {|module M = .~(Cons (Stag.Toplevel.Type {`name = "option"; `params = Nil; `kind = Stag.Type_decl.Kind.Abstract}, Gen.value "x" (Stag.Expr.int 1)))
+    {|module M = .~(Cons (Ptr.make ( (Stag.Toplevel.Type {`name = "option"; `params = Nil; `kind = Stag.Type_decl.Kind.Abstract}, Gen.value "x" (Stag.Expr.int 1)))))
 |}
   in
   check_with_gen ("let bad : option[int] = 1\n" ^ m);
@@ -1546,13 +1546,13 @@ let%expect_test "prelude names in messages, with generated shadowing types" =
     |}];
   (* In the module generated. *)
   check_with_gen
-    {|module M = .~(Cons (Stag.Toplevel.Type {`name = "option"; `params = Nil; `kind = Stag.Type_decl.Kind.Abstract}, Gen.value "x" (Gen.call "Int.add" (Cons (Stag.Expr.construct "None" Nil, Nil)))))
+    {|module M = .~(Cons (Ptr.make ( (Stag.Toplevel.Type {`name = "option"; `params = Nil; `kind = Stag.Type_decl.Kind.Abstract}, Gen.value "x" (Gen.call "Int.add" (Cons (Ptr.make ( (Stag.Expr.construct "None" Nil, Nil)))))))))
 |};
   [%expect
     {|
-    File "a.stag", line 1, characters 0-193:
-    1 | module M = .~(Cons (Stag.Toplevel.Type {`name = "option"; `params = Nil; `kind = Stag.Type_decl.Kind.Abstract}, Gen.value "x" (Gen.call "Int.add" (Cons (Stag.Expr.construct "None" Nil, Nil)))))
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "a.stag", line 1, characters 0-221:
+    1 | module M = .~(Cons (Ptr.make ( (Stag.Toplevel.Type {`name = "option"; `params = Nil; `kind = Stag.Type_decl.Kind.Abstract}, Gen.value "x" (Gen.call "Int.add" (Cons (Ptr.make ( (Stag.Expr.construct "None" Nil, Nil)))))))))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: In the declaration `let x` generated by this splice: This expression has type .option['_a] but an expression was expected of type int
     Note: The generated declaration is:
       let x = Int.add None
@@ -1586,32 +1586,32 @@ let%expect_test "a nested module shadowing a prelude type or module" =
   check_with_gen
     {|module N = struct
   type list = L
-  let bad : int = Cons (1, Nil)
+  let bad : int = Cons (Ptr.make ( (1, Nil)))
 end
-let also_bad : int = Cons (1, Nil)
+let also_bad : int = Cons (Ptr.make ( (1, Nil)))
 |};
   [%expect
     {|
-    File "a.stag", line 3, characters 18-31:
-    3 |   let bad : int = Cons (1, Nil)
-                          ^^^^^^^^^^^^^
+    File "a.stag", line 3, characters 18-45:
+    3 |   let bad : int = Cons (Ptr.make ( (1, Nil)))
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: This expression has type .list[int] but an expression was expected of type int
-    File "a.stag", line 5, characters 21-34:
-    5 | let also_bad : int = Cons (1, Nil)
-                             ^^^^^^^^^^^^^
+    File "a.stag", line 5, characters 21-48:
+    5 | let also_bad : int = Cons (Ptr.make ( (1, Nil)))
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: This expression has type list[int] but an expression was expected of type int
     |}];
   check_with_gen
-    {|let bad : int = Cons (1, Nil)
+    {|let bad : int = Cons (Ptr.make ( (1, Nil)))
 module N = struct
   type list = L
 end
 |};
   [%expect
     {|
-    File "a.stag", line 1, characters 16-29:
-    1 | let bad : int = Cons (1, Nil)
-                        ^^^^^^^^^^^^^
+    File "a.stag", line 1, characters 16-43:
+    1 | let bad : int = Cons (Ptr.make ( (1, Nil)))
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: This expression has type list[int] but an expression was expected of type int
     |}];
   check_with_gen
@@ -1649,8 +1649,8 @@ let%expect_test "generated record updates, by name and by ref" =
 let head ty = match Stag.Type.expr ty with Stag.Type_expr.Con (Stag.Path.Ref r, _) -> r
 let first_field ty =
   match Stag.Type.decl (head ty) with
-  | Some d -> (match d.kind with Stag.Type.Kind.Record (Cons ((f, _), _)) -> f)
-let update field e = Stag.Expr.Record_update (Stag.Expr.var "N.v", Cons ((field, e), Nil))
+  | Some d -> (match d.kind with Stag.Type.Kind.Record (Cons * ((f, _), _)) -> f)
+let update field e = Stag.Expr.Record_update (Ptr.make ( (Stag.Expr.var "N.v", Cons (Ptr.make ( ((field, e), Nil))))))
 module N = struct
   type r = {x : int; y : bool}
   let v = {x = 1; y = true}

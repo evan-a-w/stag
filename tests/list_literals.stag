@@ -10,7 +10,7 @@ let%expect_test "literals" =
   print_ints [1];
   print_ints [1; 2; 3];
   print_ints (Core.List.concat [[1]; []; [2; 3]]);
-  print_ints (Cons (0, [1; 2]));
+  print_ints (Cons (Ptr.make (0, [1; 2])));
   [%expect {|
     ()
     (1)
@@ -25,7 +25,7 @@ let describe l =
   | [x] -> "one"
   | [[x]; [y; z]] -> "one then two"
   | [_; _] -> "two"
-  | Cons (_, [_; _]) -> "three"
+  | Cons *(_, [_; _]) -> "three"
   | _ -> "more"
 
 let%expect_test "patterns" =
@@ -55,7 +55,7 @@ let%expect_test "tuples are items" =
 module Shadowing = struct
   type list['a] = Nil | Cons of 'a
 
-  let local = Cons 1
+  let local = Cons (Ptr.make 1)
 
   let%expect_test "a local Cons, Nil and list do not change literals" =
     print_ints [1; 2];
@@ -64,7 +64,7 @@ module Shadowing = struct
      | [x] -> print_int x
      | _ -> print_endline "not a singleton");
     (match local with
-     | Cons x -> print_int x
+     | Cons *x -> print_int x
      | Nil -> print_endline "local Nil");
     [%expect {|
       (1 2)

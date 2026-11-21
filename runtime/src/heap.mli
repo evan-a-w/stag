@@ -43,8 +43,66 @@ val create : Config.t -> t
 
 (** A block of the size [header] gives, its header written and its words zeroed.
     Zero-size blocks are [Static_data.empty] and [Static_data.empty_bytes].
-    Raises on a [Free] or [Marked] header. *)
+    Raises on a [Free], [Handle] or [Marked] header. *)
 val alloc : t -> Header.t -> Memory.Addr.t
+
+(** A block for an OCaml [value] of [kind]: its scalar ID word, which must not
+    be modified, then [Handle_kind.refs kind value] as its traced pointer words,
+    fixed for its life, so the GC keeps the Stag values [value] refers to alive
+    as long as the block (see [Handle_kind] for what that asks of [value]). The
+    heap holds [value] until the block is swept or the heap is destroyed; the
+    Stag GC never scans it.
+
+    The refs may be blocks or static data, not data-stack blocks. The heap knows
+    nothing of the data stack, so does not check that: [Gc.alloc_handle], the
+    entry point to use, does. Raises for a ref into the heap but no block. While
+    it runs, the new block is marked, so a collection reentered by an OCaml
+    allocation (which is forbidden) cannot free it before it has its metadata;
+    such a collection would not trace its refs, which [Gc.alloc_handle] roots
+    for it. *)
+val alloc_handle : t -> 'a Handle_kind.t -> 'a -> Memory.Addr.t
+
+(** For [Gc] only. *)
+module For_gc : sig
+  (** [alloc_handle], with [refs] already computed as
+      [Handle_kind.refs kind value] and rooted by the caller. Not for other
+      callers: refs not derived from the payload leave its pointers untraced. *)
+  val alloc_handle_with_refs
+    :  t
+    -> 'a Handle_kind.t
+    -> 'a
+    -> Memory.Addr.t array
+    -> Memory.Addr.t
+end
+
+(** Returns a handle's OCaml value, or [None] if [addr] is not a live handle's
+    base in this heap of [kind]. A swept address may be reused, by a handle of
+    any ID: callers must not use a stale address (see [get_handle_checked]). The
+    payload, and any address taken from it, is valid only while the handle is
+    reachable from the Stag roots (see [Handle_kind]). *)
+val get_handle : t -> 'a Handle_kind.t -> Memory.Addr.t -> 'a option
+
+(** A handle by its address and its ID, made only by [handle_ref]. A swept
+    handle's address may be reused by any later block, but its ID never is:
+    [get_handle_checked] finds nothing for a handle that has been swept, where
+    [get_handle] of a stale address may find another handle's payload. *)
+module Handle_ref : sig
+  type t
+
+  val addr : t -> Memory.Addr.t
+  val id : t -> int
+
+  (** Its ID: addresses are not deterministic. *)
+  val sexp_of_t : t -> Sexp.t
+end
+
+(** Raises unless [addr] is a live handle's base. *)
+val handle_ref : t -> Memory.Addr.t -> Handle_ref.t
+
+(** As [get_handle], but [None] once the handle has been swept, even if its
+    address has been reused. The payload is valid only while the handle is
+    reachable, as [get_handle]'s. *)
+val get_handle_checked : t -> 'a Handle_kind.t -> Handle_ref.t -> 'a option
 
 (** The words a block of [header] takes in the heap, its header and rounding up
     to a class (or to pages, for a large block) included: 0 for zero-size
@@ -80,7 +138,19 @@ val destroy : t -> unit
     the header of each slot: deterministic. *)
 val sexp_of_t : t -> Sexp.t
 
+(** Whether the metadata table and the handle blocks agree: an entry for every
+    handle block, with its ID and address, and a handle block for every entry,
+    holding every ref its payload has now ([Handle_kind.refs]). Empty other than
+    after corruption, or a payload breaking [Handle_kind]'s rules: sweep keeps
+    them in step. [Gc.check_invariants] uses this. *)
+val check_handles : t -> Sexp.t list
+
 module For_testing : sig
+  val handles : t -> int
+
+  (** IDs then count up from [id]: an ID in use makes [alloc_handle] raise. *)
+  val set_next_handle_id : t -> int -> unit
+
   (** The index of the region [addr] is in, and its offset from the region's
       base. *)
   val locate : t -> Memory.Addr.t -> (int * int) option

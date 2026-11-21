@@ -15,6 +15,7 @@ type t =
   | Value_ref_name (** [Stag.Value_ref.t -> string] *)
   | Erase (** [<'a>{..'r} -> Stag.Expr.t] *)
   | Raise (** [exn -> 'a] *)
+  | Ptr_make (** ['a -> ptr['a]] *)
 [@@deriving sexp_of, equal]
 
 (** Its name in the prelude, eg. [Stag.Type.expr]. *)

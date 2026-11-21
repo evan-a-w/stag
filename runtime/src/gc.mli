@@ -12,8 +12,9 @@ open! Import
     heap.
 
     Collections are not reentrant: nothing a collection runs (finalisers or
-    signal handlers, run by the OCaml allocations of growing the mark stack)
-    may use the collector, its heap or its roots. *)
+    signal handlers, run by the OCaml allocations of growing the mark stack, of
+    the heap's metadata table, or of [alloc_handle]) may use the collector, its
+    heap or its roots. *)
 
 module Config : sig
   type t =
@@ -62,9 +63,26 @@ val destroy : t -> unit
     one) across the call. *)
 val alloc : t -> Header.t -> Memory.Addr.t
 
+(** Allocates a [Heap.alloc_handle] block, with the same collection and rooting
+    rules as [alloc]. Its creation may collect, so its refs need not be rooted:
+    they are, across that collection. Raises for a ref into the data stack. The
+    returned address is not itself a root: keep it in a root or a traced field
+    across calls that can collect. *)
+val alloc_handle : t -> 'a Handle_kind.t -> 'a -> Memory.Addr.t
+
+(** As [Heap.get_handle]: the payload, and any address taken from it, is valid
+    only while the handle is reachable from the roots. *)
+val get_handle : t -> 'a Handle_kind.t -> Memory.Addr.t -> 'a option
+
+(** As [Heap.handle_ref]. *)
+val handle_ref : t -> Memory.Addr.t -> Heap.Handle_ref.t
+
+(** As [Heap.get_handle_checked], with [get_handle]'s validity. *)
+val get_handle_checked : t -> 'a Handle_kind.t -> Heap.Handle_ref.t -> 'a option
+
 (** Marks, then sweeps. Marking allocates nothing (on the OCaml heap) but to
-    grow the mark stack, and sweeping a constant amount but to rebuild the list
-    of regions when large blocks are freed. *)
+    grow the mark stack. Sweeping also releases OCaml metadata for dead handles,
+    which allocates. *)
 val collect : t -> Stats.t
 
 (** How many collections there have been. *)
@@ -75,6 +93,8 @@ val collections : t -> int
     - every root slot, and pointer word of an allocated, static or data-stack
       block, below 4096, outside the heap, or in an allocated block (an
       [Immortal] one, for words of [Immortal] blocks);
+    - the heap's handle blocks and its metadata table agreeing, and each handle
+      holding every ref its payload has ([Heap.check_handles]);
     - no pointer word of a heap block, static block or global into the data
       stack, nor of a static block into the heap;
     - no frame slot or data-stack word into the data stack past its live blocks;
@@ -85,4 +105,7 @@ val check_invariants : t -> unit Or_error.t
 module For_testing : sig
   (** In blocks. *)
   val mark_stack_capacity : t -> int
+
+  (** The next growth of the mark stack raises. *)
+  val fail_next_grow : t -> unit
 end

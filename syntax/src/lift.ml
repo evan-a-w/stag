@@ -2,12 +2,55 @@ open! Import
 open Syntax
 include Lift_intf
 
+let indirect_constructors =
+  List.map
+    ~f:(fun (name, arity) -> "Stag." ^ name, arity)
+    [ "Type_expr.Arrow", 2
+    ; "Type_expr.Code", 1
+    ; "Type_expr.Mut", 1
+    ; "Type_expr.Immut", 1
+    ; "Type_expr.Splice", 1
+    ; "Type_expr.Row.Extend", 3
+    ; "Pattern.Deref", 1
+    ; "Pattern.Poly_variant", 2
+    ; "Pattern.Exception", 1
+    ; "Expr.App", 2
+    ; "Expr.Let", 5
+    ; "Expr.Let_mut", 4
+    ; "Expr.Assign", 2
+    ; "Expr.Store", 2
+    ; "Expr.Fun", 2
+    ; "Expr.Splice", 1
+    ; "Expr.Quote", 1
+    ; "Expr.Deref", 1
+    ; "Expr.Field", 2
+    ; "Expr.Record_update", 2
+    ; "Expr.Match", 2
+    ; "Expr.Poly_field", 2
+    ; "Expr.Poly_extend", 2
+    ; "Expr.Poly_restrict", 2
+    ; "Expr.Poly_update", 2
+    ; "Expr.Poly_variant", 2
+    ]
+;;
+
+let indirect_arity =
+  let table = String.Table.of_alist_exn indirect_constructors in
+  fun name -> Hashtbl.find table name
+;;
+
 module Make (B : Builder) = struct
-  let con = B.con
+  let con name args =
+    match indirect_arity name, args with
+    | None, _ -> B.con name args
+    | Some 1, [ arg ] -> B.con name [ B.ptr arg ]
+    | Some _, _ -> B.con name [ B.ptr (B.tuple args) ]
+  ;;
+
+  let cons x xs = con "Cons" [ B.ptr (B.tuple [ x; xs ]) ]
 
   let list f xs =
-    List.fold_right xs ~init:(con "Nil" []) ~f:(fun x tail ->
-      con "Cons" [ f x; tail ])
+    List.fold_right xs ~init:(con "Nil" []) ~f:(fun x tail -> cons (f x) tail)
   ;;
 
   let option f = function
@@ -51,6 +94,7 @@ module Make (B : Builder) = struct
     | Var var -> con "Var" [ B.string var ]
     | Lit l -> con "Lit" [ lit l ]
     | Tuple ps -> con "Tuple" [ list pattern ps ]
+    | Deref p -> con "Deref" [ pattern p ]
     | Construct (p, args) ->
       con "Construct" [ decl_path Constructor p; list pattern args ]
     | Record fields ->
@@ -158,6 +202,7 @@ module Make (B : Builder) = struct
           [ name var; option type_expr annot; expr equal; expr body ]
       | Assign (p, value) ->
         con "Assign" [ decl_path_txt Value p.txt; expr value ]
+      | Store (target, value) -> con "Store" [ expr target; expr value ]
       | Fun (params, body) -> con "Fun" [ list binding params; expr body ]
       | Splice { expr = spliced; subs } ->
         (match A.antiquote Expr spliced with
@@ -173,6 +218,7 @@ module Make (B : Builder) = struct
       | Quote e -> con "Quote" [ expr e ]
       | Struct_quote toplevels -> con "Struct_quote" [ program toplevels ]
       | Tuple es -> con "Tuple" [ list expr es ]
+      | Deref e -> con "Deref" [ expr e ]
       | Construct (p, args) ->
         con "Construct" [ decl_path Constructor p; list expr args ]
       | Record record_fields ->
@@ -244,7 +290,7 @@ module Make (B : Builder) = struct
         (match antiquoted, rest with
          | Some items, [] -> items
          | Some items, _ :: _ -> B.append items (program rest)
-         | None, _ -> con "Cons" [ toplevel item; program rest ])
+         | None, _ -> cons (toplevel item) (program rest))
     ;;
   end
 

@@ -63,8 +63,8 @@ let%expect_test "the prelude's sources check cleanly, as the prelude" =
       {|
       12:12 12:12-12:27 ```stag raise : exn -> 'a ```
       12:22 12:12-12:27 ```stag raise : exn -> 'a ```
-      15:34 15:30-15:38 ```stag Core.Int.succ : int -> int ```
-      15:34 -> stag/core/int.stag 14:4-14:8
+      15:36 15:32-15:40 ```stag Core.Int.succ : int -> int ```
+      15:36 -> stag/core/int.stag 14:4-14:8
       11:4 11:4-11:10 ```stag Core.List.length : list['a] -> int ```
       |}])
 ;;
@@ -84,7 +84,7 @@ let%expect_test "errors in the prelude's sources are located in them" =
     [%expect
       {|
       diagnostics stag/core/list.stag (version 2):
-        15:30-15:39 error: Unbound value Int.succc
+        15:32-15:41 error: Unbound value Int.succc
       |}];
     Client.did_change client list ~version:3 (contents list);
     [%expect {| diagnostics stag/core/list.stag (version 3): none |}];
@@ -101,9 +101,9 @@ let%expect_test "errors in the prelude's sources are located in them" =
     [%expect
       {|
       diagnostics stag/core/list.stag (version 3):
-        15:30-15:38 error: Unbound value Int.succ
+        15:32-15:40 error: Unbound value Int.succ
         79:20-79:28 error: Unbound value Int.succ
-        103:30-103:38 error: Unbound value Int.succ
+        103:32-103:40 error: Unbound value Int.succ
         120:12-120:20 error: Unbound value Int.succ
         156:14-156:22 error: Unbound value Int.succ
       diagnostics stag/core/sexp.stag:
@@ -143,12 +143,12 @@ let%expect_test "errors in the prelude's sources are located in them" =
         58:22-58:30 error: Unbound value Int.succ
         62:28-62:36 error: Unbound value Int.succ
         154:9-154:17 error: Unbound value Int.succ
-        170:48-170:56 error: Unbound value Int.succ
-        170:60-170:68 error: Unbound value Int.succ
-        181:53-181:61 error: Unbound value Int.succ
-        186:62-186:70 error: Unbound value Int.succ
-        191:53-191:61 error: Unbound value Int.succ
-        205:56-205:64 error: Unbound value Int.succ
+        170:62-170:70 error: Unbound value Int.succ
+        170:74-170:82 error: Unbound value Int.succ
+        181:67-181:75 error: Unbound value Int.succ
+        186:76-186:84 error: Unbound value Int.succ
+        191:67-191:75 error: Unbound value Int.succ
+        205:70-205:78 error: Unbound value Int.succ
       diagnostics stag/core/string.stag:
         57:23-57:31 error: Unbound value Int.succ
         72:24-72:32 error: Unbound value Int.succ

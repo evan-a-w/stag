@@ -162,6 +162,10 @@ let%expect_test "length of a header of another kind" =
     Block.length strings (Block.header ptrs ~length:1 Unmarked));
   Expect_test_helpers_core.require_does_raise (fun () ->
     Block.length ptrs (Header.free ~size_words:2));
+  Expect_test_helpers_core.require_does_raise (fun () ->
+    Block.length ptrs (Header.handle ~refs:1));
+  Expect_test_helpers_core.require_does_raise (fun () ->
+    Block.length (fixed (struct_ [ i64; ptr ])) (Header.handle ~refs:1));
   [%expect
     {|
     ("Block.length: wrong kind"
@@ -169,6 +173,12 @@ let%expect_test "length of a header of another kind" =
       (expected Bytes))
     ("Block.length: wrong kind"
       (kind     Free)
+      (expected Scanned))
+    ("Block.length: wrong kind"
+      (kind     Handle)
+      (expected Scanned))
+    ("Block.length: wrong kind"
+      (kind     Handle)
       (expected Scanned))
     |}]
 ;;

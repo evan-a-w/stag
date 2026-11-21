@@ -36,7 +36,7 @@ let expr name dir t =
   let e = conv ctx dir ty in
   match has_variant ty with
   | false -> e
-  | true -> Stag.Expr.Let (name, [], Some (conv_type dir ty), e, var name)
+  | true -> Stag.Expr.Let (Ptr.make ( (name, [], Some (conv_type dir ty), e, var name)))
 
 module Dir = struct
   type t = To_sexp | Of_sexp | Of_sexp_exn
@@ -153,6 +153,11 @@ module Builtin = struct
       .< Sexp.list_of_sexp >.
       .< Sexp.list_of_sexp_exn >.;
     create
+      ["ptr"]
+      .< Sexp.sexp_of_ptr >.
+      .< Sexp.ptr_of_sexp >.
+      .< Sexp.ptr_of_sexp_exn >.;
+    create
       ["option"]
       .< Sexp.sexp_of_option >.
       .< Sexp.option_of_sexp >.
@@ -213,7 +218,7 @@ let named (ctx : Context.t) dir r =
     in
     match is_self with
     | true -> var name
-    | false -> var (String.concat "." (Cons ("", List.append modules [name])))
+    | false -> var (String.concat "." (Cons (Ptr.make ( ("", List.append modules [name])))))
 
 (* A converter of [ty], as a function. Its arguments are [To_sexp] or [Of_sexp]
    ones. *)
@@ -241,9 +246,9 @@ let conv (ctx : Context.t) dir ty =
     raise (failure ctx.generator (String.append "unresolved type " path))
   | Stag.Type_expr.Tuple _ -> conv_in_place ctx dir ty
   | Stag.Type_expr.Variant _ -> conv_in_place ctx dir ty
-  | Stag.Type_expr.Arrow (_, _) ->
+  | Stag.Type_expr.Arrow * (_, _) ->
     raise (failure ctx.generator "functions have no sexp conversion")
-  | Stag.Type_expr.Code _ ->
+  | Stag.Type_expr.Code *( _) ->
     raise (failure ctx.generator "code has no sexp conversion")
   | Stag.Type_expr.Record _ ->
     raise (failure ctx.generator "polymorphic records are not supported")
@@ -332,7 +337,7 @@ let poly_cases (ctx : Context.t) row =
   | Stag.Type_expr.Row.Empty -> []
   | Stag.Type_expr.Row.Var _ ->
     raise (failure ctx.generator "open polymorphic variants are not supported")
-  | Stag.Type_expr.Row.Extend (tag, ty, rest) ->
+  | Stag.Type_expr.Row.Extend * (tag, ty, rest) ->
     let args =
       match is_prelude_type ["unit"] ty with
       | true -> []
@@ -341,10 +346,10 @@ let poly_cases (ctx : Context.t) row =
     let case = {
       Case.tag = tag;
       args = args;
-      construct = fun es -> Stag.Expr.Poly_variant (tag, List.hd es);
-      pattern = fun ps -> Stag.Pattern.Poly_variant (tag, List.hd ps);
+      construct = fun es -> Stag.Expr.Poly_variant (Ptr.make ( (tag, List.hd es)));
+      pattern = fun ps -> Stag.Pattern.Poly_variant (Ptr.make ( (tag, List.hd ps)));
     } in
-    Cons (case, poly_cases ctx rest)
+    Cons (Ptr.make ( (case, poly_cases ctx rest)))
 
 let variant_to_sexp ctx cases e prefix =
   let arm (case : Case.t) =
@@ -354,7 +359,7 @@ let variant_to_sexp ctx cases e prefix =
     let sexp =
       match binds with
       | [] -> atom case.tag
-      | _ -> sexp_list (Cons (atom case.tag, List.map snd binds))
+      | _ -> sexp_list (Cons (Ptr.make ( (atom case.tag, List.map snd binds))))
     in
     (case.pattern (List.map fst binds), sexp)
   in
@@ -368,7 +373,7 @@ let variant_of_sexp (ctx : Context.t) poly cases v prefix =
     | [] -> (atom_pattern case.tag, case.construct [])
     | args ->
       let vs = vars prefix (List.length args) in
-      (list_pattern (Cons (atom_pattern case.tag, List.map pvar vs)),
+      (list_pattern (Cons (Ptr.make ( (atom_pattern case.tag, List.map pvar vs)))),
        case.construct (of_sexps ctx args vs))
   in
   let tags with_args =
@@ -399,7 +404,7 @@ let record_to_sexp ctx fields =
   let field i f =
     match f with
     | r, ty ->
-      let value = Stag.Expr.Field (var "v", Stag.Path.Ref r) in
+      let value = Stag.Expr.Field (Ptr.make ( (var "v", Stag.Path.Ref r))) in
       let prefix = String.concat "" ["v"; Int.to_string i; "_"] in
       apply
         (erase .< Sexp.Deriving.field >.)
@@ -443,13 +448,13 @@ let record_of_sexp (ctx : Context.t) fields v =
 let conv_type dir ty =
   let sexp = Stag.Type.expr (type Sexp.t) in
   match dir with
-  | Dir.To_sexp -> Stag.Type_expr.Arrow (ty, sexp)
-  | Dir.Of_sexp_exn -> Stag.Type_expr.Arrow (sexp, ty)
+  | Dir.To_sexp -> Stag.Type_expr.Arrow (Ptr.make ( (ty, sexp)))
+  | Dir.Of_sexp_exn -> Stag.Type_expr.Arrow (Ptr.make ( (sexp, ty)))
   | Dir.Of_sexp ->
     match Stag.Type.expr (type result[unit, Sexp.Of_sexp_error.t]) with
     | Stag.Type_expr.Con (result, [_; error]) ->
-      Stag.Type_expr.Arrow
-        (sexp, Stag.Type_expr.Con (result, [Stag.Type_expr.Arg.Ty ty; error]))
+      Stag.Type_expr.Arrow (Ptr.make (
+        (sexp, Stag.Type_expr.Con (result, [Stag.Type_expr.Arg.Ty ty; error]))))
 
 (* Whether [ty] has a polymorphic variant, whose row its conversion leaves
    open. *)

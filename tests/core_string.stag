@@ -76,7 +76,7 @@ let%expect_test "construction" =
     |}]
 
 let%expect_test "traversal" =
-  let push acc c = Cons (c, acc) in
+  let push acc c = Cons (Ptr.make (c, acc)) in
   print_sexp
     (Core.Sexp.sexp_of_list
        Core.Sexp.sexp_of_char

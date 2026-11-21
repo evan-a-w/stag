@@ -5,7 +5,7 @@
    whitespace and comments. *)
 let one s =
   match between s 0 (Context.create true) with
-  | Ok (Cons (t, _)) -> Ok t
+  | Ok (Cons * (t, _)) -> Ok t
   | Ok [] -> fail s 0 "no s-expression found in input"
   | Error e -> Error e
 
@@ -58,7 +58,7 @@ module Context = struct
     in
     match ctx.ignoring with
     | [] -> finish [] false
-    | Cons (d, rest) ->
+    | Cons * (d, rest) ->
       match (Int.gt d depth, Int.equal d depth) with
       | true, _ -> fail s i "unterminated sexp comment"
       | _, true -> finish rest true
@@ -67,7 +67,7 @@ module Context = struct
   let add s i ctx t =
     let frames =
       match (ignoring ctx, ctx.frames) with
-      | false, Cons (frame, rest) -> Cons (Cons (t, frame), rest)
+      | false, Cons * (frame, rest) -> Cons (Ptr.make ( (Cons (Ptr.make ( (t, frame))), rest)))
       | _ -> ctx.frames
     in
     added s i ctx frames ctx.depth
@@ -75,7 +75,7 @@ module Context = struct
   let open_ s i ctx =
     let frames =
       match ignoring ctx with
-      | false -> Cons ([], ctx.frames)
+      | false -> Cons (Ptr.make ( ([], ctx.frames)))
       | true -> ctx.frames
     in
     let opened ctx =
@@ -93,16 +93,16 @@ module Context = struct
   let close s i ctx =
     match (Int.equal ctx.depth 0, ignoring ctx, ctx.frames) with
     | true, _, _ -> fail s i "unexpected character: ')'"
-    | false, false, Cons (frame, Cons (parent, rest)) ->
+    | false, false, Cons * (frame, Cons * (parent, rest)) ->
       let t = Sexp.List (List.rev frame) in
-      added s i ctx (Cons (Cons (t, parent), rest)) (Int.pred ctx.depth)
+      added s i ctx (Cons (Ptr.make ( (Cons (Ptr.make ( (t, parent))), rest)))) (Int.pred ctx.depth)
     | false, _, _ -> added s i ctx ctx.frames (Int.pred ctx.depth)
 
   let start_comment ctx = {
     single = ctx.single;
     frames = ctx.frames;
     depth = ctx.depth;
-    ignoring = Cons (ctx.depth, ctx.ignoring);
+    ignoring = Cons (Ptr.make ( (ctx.depth, ctx.ignoring)));
     full = ctx.full;
   }
 
@@ -115,7 +115,7 @@ module Context = struct
     | true, _, _, _, _ -> fail s i "unclosed parentheses at end of input"
     | _, true, _, _, _ -> fail s i "unterminated sexp comment"
     | _, _, true, 0, _ -> fail s i "no s-expression found in input"
-    | _, _, _, _, Cons (top, _) -> Ok (List.rev top)
+    | _, _, _, _, Cons * (top, _) -> Ok (List.rev top)
     | _, _, _, _, [] -> Ok []
 end
 
@@ -267,7 +267,7 @@ let after_hash s i ctx =
 (* A quoted atom, its parts so far in reverse in [parts], then the
    characters from [start]. *)
 let quoted s start i parts ctx =
-  let with_chunk _ = Cons (String.sub s start (Int.sub i start), parts) in
+  let with_chunk _ = Cons (Ptr.make ( (String.sub s start (Int.sub i start), parts))) in
   match at_end s i with
   | true -> fail s i "unterminated quoted string"
   | false ->
@@ -281,7 +281,7 @@ let quoted s start i parts ctx =
 (* After a backslash in a quoted atom. *)
 let escape s i parts ctx =
   let eof = "unterminated quoted string" in
-  let char part i = quoted s i i (Cons (part, parts)) ctx in
+  let char part i = quoted s i i (Cons (Ptr.make ( (part, parts)))) ctx in
   let code p =
     match p with code, j -> char (Char.to_string (Prim.Char.of_code code)) j
   in
@@ -313,7 +313,7 @@ let escaped_cr s i parts ctx =
   | false ->
     match String.get s i with
     | '\n' -> continuation s (Int.succ i) parts ctx
-    | _ -> quoted s i i (Cons ("\r", parts)) ctx
+    | _ -> quoted s i i (Cons (Ptr.make ( ("\r", parts)))) ctx
 
 (* After a backslash and a newline, which skip the spaces and tabs
    following. *)

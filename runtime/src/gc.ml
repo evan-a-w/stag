@@ -41,6 +41,7 @@ type t =
   ; mutable marked_blocks : int
   ; mutable marked_words : int
   ; mutable destroyed : bool
+  ; mutable fail_next_grow : bool
   }
 
 let set_stack t chunk =
@@ -66,12 +67,17 @@ let create config ~heap ~roots ~data_stack ~static =
   ; marked_blocks = 0
   ; marked_words = 0
   ; destroyed = false
+  ; fail_next_grow = false
   }
 ;;
 
 (* Doubles the mark stack. It allocates, but only when the stack is deeper than
    it has been, so marking is assumed zero-alloc. *)
 let[@cold] [@zero_alloc assume] grow_stack t =
+  if t.fail_next_grow
+  then (
+    t.fail_next_grow <- false;
+    fail [%message "Gc: injected mark stack failure"]);
   let used = Addr.diff t.stack_top t.stack_base in
   let chunk = Chunk.create ~bytes:(2 * Chunk.bytes t.stack) ~align:8 in
   Memory.copy ~src:t.stack_base ~dst:(Chunk.base chunk) ~bytes:used;
@@ -98,14 +104,13 @@ let[@inline] [@zero_alloc] visit t word =
         Header.store block (Header.with_color header Marked);
         t.marked_blocks <- t.marked_blocks + 1;
         t.marked_words <- t.marked_words + Header.size_words header;
-        (match Header.kind header with
-         | Scanned ->
-           if Int.(Header.scalar_words header < Header.size_words header)
-           then (
-             if Int.(Addr.diff t.stack_limit t.stack_top < 8) then grow_stack t;
-             Memory.store_addr t.stack_top block;
-             t.stack_top <- Addr.add t.stack_top 8)
-         | Bytes | Free -> ())))
+        (* Scanned blocks' pointer words, and the traced words of a handle (all
+           but its metadata ID). *)
+        if Int.(Header.scalar_words header < Header.size_words header)
+        then (
+          if Int.(Addr.diff t.stack_limit t.stack_top < 8) then grow_stack t;
+          Memory.store_addr t.stack_top block;
+          t.stack_top <- Addr.add t.stack_top 8)))
 ;;
 
 let[@zero_alloc] mark t =
@@ -133,7 +138,7 @@ let[@zero_alloc] mark t =
          for i = Header.scalar_words header to Header.size_words header - 1 do
            visit t (Memory.load_addr (Addr.add block (i * 8)))
          done
-       | Bytes | Free -> ());
+       | Bytes | Free | Handle -> ());
       block <- Data_stack.next_block block
     done
   done;
@@ -149,9 +154,23 @@ let[@zero_alloc] mark t =
 
 let check_live t = if t.destroyed then fail [%message "Gc: destroyed"]
 
+(* A mark that raised leaves blocks [Marked] that the next would skip, with
+   their children. *)
+let[@cold] clear_marks t =
+  Heap.iter t.heap ~f:(fun block ->
+    let header = Header.load block in
+    match Header.color header with
+    | Marked -> Header.store block (Header.with_color header Unmarked)
+    | Unmarked | Immortal -> ())
+;;
+
 let collect t =
   check_live t;
-  mark t;
+  (match mark t with
+   | () -> ()
+   | exception exn ->
+     clear_marks t;
+     raise exn);
   let sweep = Heap.sweep t.heap in
   t.live_words <- sweep.kept_footprint_words;
   t.allocated_words <- 0;
@@ -163,16 +182,86 @@ let collect t =
   }
 ;;
 
-let alloc t header =
+let should_collect t words =
+  t.allocated_words + words
+  > Int.max t.config.min_words (t.live_words * t.config.space_overhead / 100)
+;;
+
+let before_alloc t header =
   check_live t;
   let words = Heap.footprint_words t.heap header in
-  let threshold =
-    Int.max t.config.min_words (t.live_words * t.config.space_overhead / 100)
-  in
-  if t.allocated_words + words > threshold then ignore (collect t : Stats.t);
+  if should_collect t words then ignore (collect t : Stats.t);
+  words
+;;
+
+let alloc t header =
+  (match Header.kind header with
+   | Handle -> fail [%message "Gc.alloc: use alloc_handle"]
+   | Scanned | Bytes | Free -> ());
+  let words = before_alloc t header in
   let block = Heap.alloc t.heap header in
   t.allocated_words <- t.allocated_words + words;
   block
+;;
+
+(* The refs may be held only by the payload, which the collector doesn't see:
+   root them across the collection that may follow. *)
+let alloc_handle t kind value =
+  check_live t;
+  let collections = t.collections in
+  let refs = Handle_kind.refs kind value in
+  if t.collections <> collections
+  then
+    fail
+      [%message
+        "Gc.alloc_handle: refs collected" ~kind:(Handle_kind.name kind : string)];
+  let refs_count = Array.length refs in
+  for index = 0 to refs_count - 1 do
+    let ref_ = refs.(index) in
+    if (not (is_small ref_)) && Data_stack.contains t.data_stack ref_
+    then
+      fail
+        [%message
+          "Gc.alloc_handle: a ref into the data stack"
+            ~kind:(Handle_kind.name kind : string)
+            (index : int)]
+  done;
+  let words = Heap.footprint_words t.heap (Header.handle ~refs:refs_count) in
+  let mark = Data_stack.enter t.data_stack in
+  let result = Array.create ~len:1 (Addr.null ()) in
+  Exn.protect
+    ~f:(fun () ->
+      if refs_count > 0
+      then (
+        let scratch =
+          Data_stack.alloc
+            t.data_stack
+            (Header.scanned ~size_words:refs_count ~scalar_words:0 Unmarked)
+        in
+        for index = 0 to refs_count - 1 do
+          Memory.store_addr (Addr.add scratch (index * 8)) refs.(index)
+        done);
+      if should_collect t words then ignore (collect t : Stats.t);
+      let block = Heap.For_gc.alloc_handle_with_refs t.heap kind value refs in
+      t.allocated_words <- t.allocated_words + words;
+      result.(0) <- block)
+    ~finally:(fun () -> Data_stack.exit t.data_stack mark);
+  result.(0)
+;;
+
+let get_handle t kind block =
+  check_live t;
+  Heap.get_handle t.heap kind block
+;;
+
+let handle_ref t block =
+  check_live t;
+  Heap.handle_ref t.heap block
+;;
+
+let get_handle_checked t kind handle_ref =
+  check_live t;
+  Heap.get_handle_checked t.heap kind handle_ref
 ;;
 
 let collections t = t.collections
@@ -246,7 +335,7 @@ let check_invariants t =
       | Immortal -> true
     in
     (match Header.kind header with
-     | Scanned ->
+     | Scanned | Handle ->
        for i = Header.scalar_words header to Header.size_words header - 1 do
          let word = Memory.load_addr (Addr.add block (i * 8)) in
          let from =
@@ -257,6 +346,8 @@ let check_invariants t =
        done
      | Bytes | Free -> ());
     incr block_index);
+  List.iter (Heap.check_handles t.heap) ~f:(fun error_ ->
+    error [%message "handle metadata" (error_ : Sexp.t)]);
   let block_index = ref 0 in
   Static_data.iter t.static ~f:(fun block ->
     let header = Header.load block in
@@ -272,7 +363,7 @@ let check_invariants t =
            error [%message "static data points into the heap" (from : Sexp.t)];
          check_not_data_stack ~from word
        done
-     | Bytes | Free -> ());
+     | Bytes | Free | Handle -> ());
     incr block_index);
   let block_index = ref 0 in
   for segment = 0 to Data_stack.segments t.data_stack - 1 do
@@ -290,6 +381,9 @@ let check_invariants t =
       | Free, _ ->
         error [%message "a free data-stack block" (from : Sexp.t)];
         walking <- false
+      | Handle, _ ->
+        error [%message "a data-stack handle block" (from : Sexp.t)];
+        walking <- false
       | ((Scanned | Bytes) as kind), color ->
         (match color with
          | Unmarked -> ()
@@ -305,7 +399,7 @@ let check_invariants t =
                    "data stack" ~block:(!block_index : int) ~word:(i : int)]
                (Memory.load_addr (Addr.add block (i * 8)))
            done
-         | Bytes | Free -> ());
+         | Bytes | Free | Handle -> ());
         incr block_index;
         block <- Data_stack.next_block block
     done;
@@ -323,4 +417,5 @@ let check_invariants t =
 
 module For_testing = struct
   let mark_stack_capacity t = Chunk.bytes t.stack / 8
+  let fail_next_grow t = t.fail_next_grow <- true
 end

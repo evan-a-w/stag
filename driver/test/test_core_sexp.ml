@@ -16,7 +16,7 @@ let rec expr : Sexp.t -> string = function
   | Atom s -> sprintf "a \"%s\"" (literal s)
   | List ts ->
     List.fold_right ts ~init:"Nil" ~f:(fun t acc ->
-      sprintf "Cons ((%s), %s)" (expr t) acc)
+      sprintf "Cons (Ptr.make ((%s), %s))" (expr t) acc)
     |> sprintf "l (%s)"
 ;;
 
@@ -55,10 +55,10 @@ let parse_result r =
   | Error e ->
     print_string
       (Core.String.concat " "
-         (Cons ("Error", Cons (e.Core.Sexp.Parse_error.message,
-          Cons (Core.Int.to_string e.Core.Sexp.Parse_error.offset,
-          Cons (Core.Int.to_string e.Core.Sexp.Parse_error.line,
-          Cons (Core.Int.to_string e.Core.Sexp.Parse_error.col, Nil))))))));
+         (Cons (Ptr.make ( ("Error", Cons (Ptr.make ( (e.Core.Sexp.Parse_error.message,
+          Cons (Ptr.make ( (Core.Int.to_string e.Core.Sexp.Parse_error.offset,
+          Cons (Ptr.make ( (Core.Int.to_string e.Core.Sexp.Parse_error.line,
+          Cons (Ptr.make ( (Core.Int.to_string e.Core.Sexp.Parse_error.col, Nil))))))))))))))))));
   end_chunk ()
 
 let print s =
@@ -67,7 +67,7 @@ let print s =
   print_string (Core.Sexp.to_string_hum s);
   end_chunk ()
 
-let singleton t = Cons (t, Nil)
+let singleton t = Cons (Ptr.make ( (t, Nil)))
 
 let parse s =
   parse_result (Core.Result.map singleton (Core.Sexp.of_string s));

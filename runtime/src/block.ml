@@ -95,15 +95,13 @@ let length t header =
   | Some _ when t.has_hidden_length ->
     raise_s [%message "Block.length: in the hidden length word"]
   | Some { scalar_stride; ptr_stride; _ } ->
-    (match kind with
-     | Bytes -> (Header.length header - t.elements_offset) / scalar_stride
-     | Scanned | Free ->
-       if ptr_stride > 0
-       then
-         (Header.size_words header
-          - Header.scalar_words header
-          - Layout.ptr_words t.prefix)
-         / ptr_stride
-       else
-         ((8 * Header.scalar_words header) - t.elements_offset) / scalar_stride)
+    if pointer_free t
+    then (Header.length header - t.elements_offset) / scalar_stride
+    else if ptr_stride > 0
+    then
+      (Header.size_words header
+       - Header.scalar_words header
+       - Layout.ptr_words t.prefix)
+      / ptr_stride
+    else ((8 * Header.scalar_words header) - t.elements_offset) / scalar_stride
 ;;

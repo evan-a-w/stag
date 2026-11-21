@@ -69,7 +69,7 @@ let%expect_test "messages" =
   List.iter
     ~f:check
     [ "let x = Int.add 1 true"
-    ; "let f x = x x"
+    ; "let x = Some x"
     ; "let r = {`a = 1}.`b"
     ; "let x = y"
     ; "let x = 1 let x = 2"
@@ -78,6 +78,7 @@ let%expect_test "messages" =
     ; "type t = A of int let x = A"
     ; "type t = {a : int; b : int} let x = {a = 1}"
     ; "type t = t"
+    ; "type s = [`Nil | `Cons of int * s]"
     ; "let f p = match p with (x, x) -> 1"
     ; "let g = let y = 1 in .~(let z = y in .<1>.)"
     ; "let c = .<.~(.<1>.).{x = 1; x = 2}>."
@@ -95,9 +96,9 @@ let%expect_test "messages" =
     1 | let x = Int.add 1 true
                           ^^^^
     Error: This expression has type bool but an expression was expected of type int
-    File "a.stag", line 1, characters 12-13:
-    1 | let f x = x x
-                    ^
+    File "a.stag", line 1, characters 8-14:
+    1 | let x = Some x
+                ^^^^^^
     Error: The type variable '_a occurs inside its own definition
     File "a.stag", line 1, characters 8-16:
     1 | let r = {`a = 1}.`b
@@ -132,6 +133,10 @@ let%expect_test "messages" =
     1 | type t = t
              ^
     Error: The type abbreviation A.t is cyclic
+    File "a.stag", line 1, characters 5-6:
+    1 | type s = [`Nil | `Cons of int * s]
+             ^
+    Error: The type A.s contains itself by value; break the cycle with ptr
     File "a.stag", line 1, characters 27-28:
     1 | let f p = match p with (x, x) -> 1
                                    ^

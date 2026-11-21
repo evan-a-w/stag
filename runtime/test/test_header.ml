@@ -67,6 +67,9 @@ let%expect_test "extremes" =
     ; (fun () -> Header.bytes ~length:Header.max_length Immortal)
     ; (fun () -> Header.free ~size_words:0)
     ; (fun () -> Header.free ~size_words:Header.max_size_words)
+    ; (fun () -> Header.handle ~refs:0)
+    ; (fun () -> Header.handle ~refs:1)
+    ; (fun () -> Header.handle ~refs:(Header.max_size_words - 1))
     ]
     ~f:(fun make -> round_trip (make ()));
   [%expect
@@ -97,6 +100,12 @@ let%expect_test "extremes" =
      (size_words 0) (scalar_words 0))
     (0xffffffff00000008 (Free (size_words 4294967295) (color Unmarked))
      (kind Free) (size_words 4294967295) (scalar_words 4294967295))
+    (0x000000010000010c (Handle (size_words 1) (color Unmarked)) (kind Handle)
+     (size_words 1) (scalar_words 1))
+    (0x000000020000010c (Handle (size_words 2) (color Unmarked)) (kind Handle)
+     (size_words 2) (scalar_words 1))
+    (0xffffffff0000010c (Handle (size_words 4294967295) (color Unmarked))
+     (kind Handle) (size_words 4294967295) (scalar_words 1))
     |}]
 ;;
 
@@ -119,6 +128,8 @@ let%expect_test "out of range" =
     ; (fun () -> Header.bytes ~length:(Header.max_length + 1) Unmarked)
     ; (fun () -> Header.free ~size_words:(-1))
     ; (fun () -> Header.free ~size_words:(Header.max_size_words + 1))
+    ; (fun () -> Header.handle ~refs:(-1))
+    ; (fun () -> Header.handle ~refs:Header.max_size_words)
     ]
     ~f:(fun make ->
       match make () with
@@ -135,6 +146,8 @@ let%expect_test "out of range" =
     (Header.bytes (length 72057594037927936))
     (Header.free (size_words -1))
     (Header.free (size_words 4294967296))
+    (Header.handle (refs -1))
+    (Header.handle (refs 4294967295))
     |}]
 ;;
 
@@ -160,8 +173,8 @@ let%expect_test "unknown kind and colour" =
   let try_ name f =
     print_s [%message name ~_:(Or_error.try_with f : Sexp.t Or_error.t)]
   in
-  (* Kind 3. *)
-  let t = Header.of_int64 #0x0CL in
+  (* Kind 4. *)
+  let t = Header.of_int64 #0x10L in
   try_ "kind" (fun () -> [%sexp (Header.kind t : Header.Kind.t)]);
   try_ "color" (fun () -> [%sexp (Header.color t : Header.Color.t)]);
   (* Colour 3, of a [Scanned] header. *)
@@ -171,7 +184,7 @@ let%expect_test "unknown kind and colour" =
   try_ "with_color" (fun () -> [%sexp (Header.with_color t Marked : Header.t)]);
   [%expect
     {|
-    (kind (Error ("Header: unknown kind" (kind 3))))
+    (kind (Error ("Header: unknown kind" (kind 4))))
     (color (Ok Unmarked))
     (kind (Ok Scanned))
     (color (Error ("Header: unknown colour" (color 3))))

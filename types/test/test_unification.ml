@@ -291,9 +291,9 @@ let%expect_test "link chains" =
 let%expect_test "occurs check" =
   let fresh = Fresh.create () in
   let a = tvar fresh ~rank:1 in
-  unify_ty fresh ~ty1:a ~ty2:(TArrow (a, int));
   unify_ty fresh ~ty1:a ~ty2:(TTuple [ a; int ]);
   unify_ty fresh ~ty1:a ~ty2:(con "list" ~args:[ ATy a ]);
+  unify_ty fresh ~ty1:a ~ty2:(TArrow (a, int));
   [%expect
     {|
     (Error (Occurs_check_failed (ATy (TVar (Unbound 0 1)))))

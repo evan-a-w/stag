@@ -90,6 +90,7 @@ module Syntax_at = struct
   let rec pattern t (p : Syntax.Pattern.t) =
     match p.txt with
     | Any | Var _ | Lit _ -> ()
+    | Deref p -> pattern t p
     | Tuple ps -> List.iter ps ~f:(pattern t)
     | Construct (path, ps) ->
       set_constructor t p.loc path;
@@ -125,6 +126,9 @@ module Syntax_at = struct
     | Assign (path, value) ->
       set t.assigned e.loc path;
       recurse value
+    | Store (target, value) ->
+      recurse target;
+      recurse value
     | Fun (bindings, body) ->
       set t.funs e.loc bindings;
       recurse body
@@ -133,7 +137,7 @@ module Syntax_at = struct
       Option.iter
         subs
         ~f:(List.iter ~f:(fun (_, e) -> Option.iter e ~f:recurse))
-    | Quote e -> recurse e
+    | Deref e | Quote e -> recurse e
     | Struct_quote toplevels ->
       Antiquote.iter toplevels ~f:(fun antiquote -> recurse antiquote.expr)
     | Tuple es -> List.iter es ~f:recurse
@@ -252,6 +256,9 @@ let rec pattern t ~syntax ~program (p : Typed.Pattern.t) =
       ~ident:(Some ident)
   | Any | Lit _ -> typed ()
   | Error ps -> List.iter ps ~f:recurse
+  | Deref p ->
+    typed ();
+    recurse p
   | Tuple ps ->
     typed ();
     List.iter ps ~f:recurse
@@ -371,10 +378,12 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
        pattern t ~syntax ~program p)
    | Annotated _ -> ()
    | Lit _
+   | Store _
    | App _
    | Splice _
    | Toplevel_splice _
    | Quote _
+   | Deref _
    | Tuple _
    | Poly_record _
    | Poly_field _

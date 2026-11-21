@@ -59,6 +59,7 @@ let module_ name' toplevels = toplevel (Module (name name', toplevels))
 module Pat = struct
   let pattern desc : Pattern.t = none desc
   let var name = pattern (Var name)
+  let deref p = pattern (Deref p)
 
   let construct ?(args = []) name =
     pattern (Construct (located_path name, args))

@@ -47,6 +47,7 @@ module Pattern = struct
       | Var of Binder.t
       | Lit of Syntax.Lit.t
       | Tuple of t list
+      | Deref of t
       | Construct of Constructor.t * t list
       | Record of (Field.t * t) list
       | Poly_variant of string * t option
@@ -65,6 +66,7 @@ module Pattern = struct
     | Var name -> Var (Name { txt = name; loc })
     | Lit lit -> Lit lit
     | Tuple patterns -> Tuple (List.map patterns ~f:sub)
+    | Deref pattern -> Deref (sub pattern)
     | Construct (path, patterns) ->
       Construct (Path path, List.map patterns ~f:sub)
     | Record fields' ->
@@ -93,6 +95,7 @@ module Pattern = struct
     | Var ident -> Var (Ident ident)
     | Lit lit -> Lit lit
     | Tuple patterns -> Tuple (List.map patterns ~f:sub)
+    | Deref pattern -> Deref (sub pattern)
     | Construct (constructor, patterns) ->
       Construct (Ref constructor, List.map patterns ~f:sub)
     | Record fields ->
@@ -172,6 +175,7 @@ module Expr = struct
           ; in_ : t
           }
       | Assign of Var.t * t
+      | Store of t * t
       | Fun of
           { args : (Binder.t * Syntax.Type_expr.t option) list
           ; body : t
@@ -182,6 +186,7 @@ module Expr = struct
           }
       | Quote of t
       | Tuple of t list
+      | Deref of t
       | Construct of Constructor.t * t list
       | Record of (Field.t * t) list
       | Field of t * Field.t
@@ -222,6 +227,7 @@ module Expr = struct
     | Let_mut (name, annot, equal, in_) ->
       Let_mut { binder = Name name; annot; body = sub equal; in_ = sub in_ }
     | Assign (path, value) -> Assign (Path (path.txt, None), sub value)
+    | Store (target, value) -> Store (sub target, sub value)
     | Fun (args, body) ->
       Fun
         { args = List.map args ~f:(fun (name, annot) -> Binder.Name name, annot)
@@ -240,6 +246,7 @@ module Expr = struct
         }
     | Quote expr -> Quote (sub expr)
     | Tuple exprs -> Tuple (subs exprs)
+    | Deref expr -> Deref (sub expr)
     | Construct (path, exprs) -> Construct (Path path, subs exprs)
     | Record fields' ->
       Record
@@ -296,6 +303,7 @@ module Expr = struct
     | Let_mut { ident; annot; body; in_ } ->
       Let_mut { binder = Ident ident; annot; body = sub body; in_ = sub in_ }
     | Assign (var_ref, value) -> Assign (Ref var_ref, sub value)
+    | Store (target, value) -> Store (sub target, sub value)
     | Fun { args; annots; body } ->
       Fun { args = annotated_args args annots; body = sub body }
     | Splice { code; subs = Explicit subs } ->
@@ -313,6 +321,7 @@ module Expr = struct
     | Error _ -> raise_s [%message "Generated code has an error"]
     | Quote expr -> Quote (sub expr)
     | Tuple exprs -> Tuple (subs exprs)
+    | Deref expr -> Deref (sub expr)
     | Construct (constructor, exprs) -> Construct (Ref constructor, subs exprs)
     | Record fields' ->
       Record

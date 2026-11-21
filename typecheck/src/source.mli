@@ -53,6 +53,7 @@ module Pattern : sig
       | Var of Binder.t
       | Lit of Syntax.Lit.t
       | Tuple of t list
+      | Deref of t
       | Construct of Constructor.t * t list
       | Record of (Field.t * t) list
       | Poly_variant of string * t option
@@ -113,6 +114,7 @@ module Expr : sig
           ; in_ : t
           }
       | Assign of Var.t * t
+      | Store of t * t
       | Fun of
           { args : (Binder.t * Syntax.Type_expr.t option) list
           ; body : t
@@ -123,6 +125,7 @@ module Expr : sig
           }
       | Quote of t
       | Tuple of t list
+      | Deref of t
       | Construct of Constructor.t * t list
       | Record of (Field.t * t) list
       | Field of t * Field.t

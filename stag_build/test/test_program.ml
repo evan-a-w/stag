@@ -210,8 +210,8 @@ let%expect_test "a library named core shadows Core for derivers too" =
     [ "derive/stag", "(library (name derive))"
     ; ( "derive/sexp.stag"
       , {|let of_int name =
-  Cons (Stag.Toplevel.let_ name (Cons ("x", Nil))
-    (Stag.Code.erase .< Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.List.init x Core.Int.succ)) >.), Nil)|}
+  Cons (Ptr.make ( (Stag.Toplevel.let_ name (Cons (Ptr.make ( ("x", Nil))))
+    (Stag.Code.erase .< Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.List.init x Core.Int.succ)) >.), Nil)))|}
       )
     ; "core/stag", "(library (name core))"
     ; "core/list.stag", "let init n f = Nil"
@@ -225,7 +225,7 @@ let main = print_endline (show 3)|}
   [%expect
     {|
     File "derive/sexp.stag", line 3, characters 24-33:
-    3 |     (Stag.Code.erase .< Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.List.init x Core.Int.succ)) >.), Nil)
+    3 |     (Stag.Code.erase .< Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.List.init x Core.Int.succ)) >.), Nil)))
                                 ^^^^^^^^^
     Error: Unbound module Core.Sexp (the prelude's module Core is shadowed by the program's Core)
     File "core/stag", line 1, characters 15-19:
@@ -233,7 +233,7 @@ let main = print_endline (show 3)|}
                        ^^^^
     Note: The program's module Core is here
     File "derive/sexp.stag", line 3, characters 45-54:
-    3 |     (Stag.Code.erase .< Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.List.init x Core.Int.succ)) >.), Nil)
+    3 |     (Stag.Code.erase .< Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.List.init x Core.Int.succ)) >.), Nil)))
                                                      ^^^^^^^^^
     Error: Unbound module Core.Sexp (the prelude's module Core is shadowed by the program's Core)
     File "core/stag", line 1, characters 15-19:
@@ -241,7 +241,7 @@ let main = print_endline (show 3)|}
                        ^^^^
     Note: The program's module Core is here
     File "derive/sexp.stag", line 3, characters 68-77:
-    3 |     (Stag.Code.erase .< Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.List.init x Core.Int.succ)) >.), Nil)
+    3 |     (Stag.Code.erase .< Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.List.init x Core.Int.succ)) >.), Nil)))
                                                                             ^^^^^^^^^
     Error: Unbound module Core.Sexp (the prelude's module Core is shadowed by the program's Core)
     File "core/stag", line 1, characters 15-19:
@@ -249,7 +249,7 @@ let main = print_endline (show 3)|}
                        ^^^^
     Note: The program's module Core is here
     File "derive/sexp.stag", line 3, characters 108-116:
-    3 |     (Stag.Code.erase .< Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.List.init x Core.Int.succ)) >.), Nil)
+    3 |     (Stag.Code.erase .< Core.Sexp.to_string (Core.Sexp.sexp_of_list Core.Sexp.sexp_of_int (Core.List.init x Core.Int.succ)) >.), Nil)))
                                                                                                                     ^^^^^^^^
     Error: Unbound module Core.Int (the prelude's module Core is shadowed by the program's Core)
     File "core/stag", line 1, characters 15-19:
@@ -268,8 +268,8 @@ let%expect_test "a deriver's relative refs survive root modules of their names" 
     ; "gen/helper.stag", {|let describe n = Core.Int.to_string n|}
     ; ( "gen/derive.stag"
       , {|let show name =
-  Cons (Stag.Toplevel.let_ name (Cons ("x", Nil))
-    (Stag.Code.erase .< Helper.describe x >.), Nil)|}
+  Cons (Ptr.make ( (Stag.Toplevel.let_ name (Cons (Ptr.make ( ("x", Nil))))
+    (Stag.Code.erase .< Helper.describe x >.), Nil)))|}
       )
     ; "b/stag", "(executable (name b) (libraries gen))"
     ; "b/helper.stag", {|let describe n = "the program's helper"|}
@@ -284,8 +284,8 @@ let main = print_endline (show 3)|}
     ; "gen/helper.stag", {|let describe n = n|}
     ; ( "gen/derive.stag"
       , {|let bad name =
-  Cons (Stag.Toplevel.let_ name Nil
-    (Stag.Expr.App (Stag.Expr.int 0, Stag.Code.erase .< Helper.describe >.)), Nil)|}
+  Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil
+    (Stag.Expr.App (Ptr.make (Stag.Expr.int 0, Stag.Code.erase .< Helper.describe >.))), Nil)))|}
       )
     ; "b/stag", "(executable (name b) (libraries gen))"
     ; "b/helper.stag", {|let describe n = n|}

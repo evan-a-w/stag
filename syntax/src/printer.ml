@@ -191,13 +191,13 @@ let level (e : Expr.t) : Level.t =
   match e.txt with
   | Let _ when Option.is_some (seq e) -> Seq
   | Let _ | Let_mut _ | Match _ | Fun _ -> Item
-  | Assign _ -> Assign
+  | Assign _ | Store _ -> Assign
   | Lit (Int n) when n < 0 -> Item
   | _ when is_construct e -> Construct
   | App _ -> App
   | Splice _ -> Splice
   | Type _ -> Construct
-  | Field _ | Poly_field _ | Poly_restrict _ -> Postfix
+  | Deref _ | Field _ | Poly_field _ | Poly_restrict _ -> Postfix
   | Lit _
   | Var _
   | Tuple _
@@ -219,7 +219,7 @@ let bare_at at e = Level.compare (level e) at >= 0
 let rec extends_right e =
   match (unwrap e).txt with
   | Let _ | Let_mut _ | Match _ | Fun _ -> true
-  | Assign (_, value) -> extends_right value
+  | Assign (_, value) | Store (_, value) -> extends_right value
   | _ -> false
 ;;
 
@@ -233,7 +233,7 @@ let rec ends_with_match ~seq:in_seq e =
   | (Let (_, _, _, _, body) | Let_mut (_, _, _, body) | Fun (_, body)), _ ->
     bare_at (Ctx.body { Ctx.top with seq = in_seq }) body
     && ends_with_match ~seq:in_seq body
-  | Assign (_, value), _ ->
+  | (Assign (_, value) | Store (_, value)), _ ->
     bare_at Assign value && ends_with_match ~seq:in_seq value
   | _ -> false
 ;;
@@ -414,6 +414,7 @@ and pattern_desc roots ~prec (p : Pattern.t) =
   | Var name -> text name
   | Lit (Int n as l) when n < 0 -> paren_if (prec > 1) (lit l)
   | Lit l -> lit l
+  | Deref p -> text "*" ^^ pattern roots ~prec:2 p
   | Tuple [] -> text "()"
   | Tuple [ p ] -> pattern roots ~prec p
   | Tuple ps ->
@@ -521,6 +522,11 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
       (decl_path roots p
        ^^ text " <-"
        ^^ nest 2 (line ^^ expr roots { ctx with level = Assign } value))
+  | Store (target, value), _ ->
+    group
+      (postfix roots target
+       ^^ text " <-"
+       ^^ nest 2 (line ^^ expr roots { ctx with level = Assign } value))
   | Fun (params, body), _ ->
     group
       (group
@@ -626,6 +632,7 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
     ^^ nest 2 (hardline ^^ toplevels roots ~indent:2 ts)
     ^^ hardline
     ^^ text "end >."
+  | Deref pointer, _ -> postfix roots pointer ^^ text ".*"
   | Field (record, p), _ ->
     let field =
       match p.txt with

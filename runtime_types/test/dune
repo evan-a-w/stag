@@ -1,0 +1,6 @@
+(library
+ (name test_runtime_types)
+ (preprocess
+  (pps ppx_jane))
+ (inline_tests)
+ (libraries core stag_common stag_types stag_runtime stag_runtime_types))

@@ -25,6 +25,17 @@ module Config = struct
   let max_arena_bytes = 1 lsl 30
 end
 
+module Handle_ref = struct
+  type t =
+    { addr : Addr.t
+    ; id : int
+    }
+
+  let addr t = t.addr
+  let id t = t.id
+  let sexp_of_t t = [%sexp { id = (t.id : int) }]
+end
+
 module Sweep_stats = struct
   type t =
     { freed_blocks : int
@@ -162,6 +173,21 @@ module Region = struct
   ;;
 end
 
+module Entry = struct
+  module Payload = struct
+    type t = T : 'a Handle_kind.t * 'a -> t
+  end
+
+  type t =
+    { block : Addr.t
+    ; payload : Payload.t
+    }
+
+  let kind_name { payload = T (kind, _); _ } = Handle_kind.name kind
+end
+
+let[@inline] [@zero_alloc] handle_id block = load_int block
+
 type t =
   { config : Config.t
   ; shift : int
@@ -172,6 +198,8 @@ type t =
   ; mutable arenas : Arena.t list (** Oldest first: allocation is first fit. *)
   ; mutable regions : Region.t list (** Latest first. *)
   ; mutable regions_created : int
+  ; handles : Entry.t Int.Table.t
+  ; mutable next_handle : int
   ; mutable destroyed : bool
   }
 
@@ -209,6 +237,8 @@ let create (config : Config.t) =
     ; arenas = []
     ; regions = []
     ; regions_created = 0
+    ; handles = Int.Table.create ()
+    ; next_handle = 0
     ; destroyed = false
     }
   in
@@ -321,11 +351,11 @@ let alloc_large t header ~words =
   block
 ;;
 
-let alloc t header =
+let alloc_block t header =
   check_live t ~name:"alloc";
   (match Header.kind header with
    | Free -> fail [%message "Heap.alloc: a Free header" (header : Header.t)]
-   | Scanned | Bytes -> ());
+   | Scanned | Bytes | Handle -> ());
   (match Header.color header with
    | Marked -> fail [%message "Heap.alloc: a Marked header" (header : Header.t)]
    | Unmarked | Immortal -> ());
@@ -334,7 +364,7 @@ let alloc t header =
   then (
     match Header.kind header with
     | Bytes -> Static_data.empty_bytes ()
-    | Scanned | Free -> Static_data.empty ())
+    | Scanned | Free | Handle -> Static_data.empty ())
   else if words >= Array.length t.class_of_words
   then alloc_large t header ~words
   else (
@@ -345,6 +375,13 @@ let alloc t header =
     Header.store block header;
     Memory.fill_zero block ~bytes:(t.classes.(class_index) * 8);
     block)
+;;
+
+let alloc t header =
+  (match Header.kind header with
+   | Handle -> fail [%message "Heap.alloc: use alloc_handle"]
+   | Free | Scanned | Bytes -> ());
+  alloc_block t header
 ;;
 
 let footprint_words t header =
@@ -382,10 +419,125 @@ let[@zero_alloc] block_start t addr =
           let header = Header.load block in
           match Header.kind header with
           | Free -> Addr.null ()
-          | Scanned | Bytes ->
+          | Scanned | Bytes | Handle ->
             if Int.(within < Header.size_words header * 8)
             then block
             else Addr.null ()))))
+;;
+
+let alloc_handle_with_refs t kind value refs =
+  check_live t ~name:"alloc_handle";
+  for index = 0 to Array.length refs - 1 do
+    let ref_ = refs.(index) in
+    if owns t ref_ && Addr.is_null (block_start t ref_)
+    then
+      fail
+        [%message
+          "Heap.alloc_handle: a ref to no block"
+            ~kind:(Handle_kind.name kind : string)
+            (index : int)]
+  done;
+  let id = t.next_handle in
+  if id = Int.max_value then fail [%message "Heap.alloc_handle: ID exhausted"];
+  let header = Header.handle ~refs:(Array.length refs) in
+  let block = alloc_block t header in
+  (* Neither store below allocates, so no OCaml finaliser can collect between
+     the block existing and it having its metadata. *)
+  Header.store block (Header.with_color header Marked);
+  t.next_handle <- id + 1;
+  store_int block id;
+  for index = 0 to Array.length refs - 1 do
+    Memory.store_addr (Addr.add block ((index + 1) * 8)) refs.(index)
+  done;
+  (* Registration allocates: were a collection reentered here (forbidden), it
+     would keep the block, marked, but not trace its refs (marking skips marked
+     blocks): [Gc.alloc_handle] roots them across this call. *)
+  (match
+     Hashtbl.add_exn
+       t.handles
+       ~key:id
+       ~data:{ Entry.block; payload = T (kind, value) }
+   with
+   | () -> ()
+   | exception exn ->
+     (* Garbage for the next sweep, not a handle without metadata. *)
+     Header.store
+       block
+       (Header.scanned
+          ~size_words:(Header.size_words header)
+          ~scalar_words:1
+          Unmarked);
+     raise exn);
+  Header.store block header;
+  block
+;;
+
+let alloc_handle t kind value =
+  alloc_handle_with_refs t kind value (Handle_kind.refs kind value)
+;;
+
+module For_gc = struct
+  let alloc_handle_with_refs = alloc_handle_with_refs
+end
+
+let is_handle t block =
+  let start = block_start t block in
+  (not (Addr.is_null start))
+  && Addr.equal start block
+  &&
+  match Header.kind (Header.load block) with
+  | Handle -> true
+  | Scanned | Bytes | Free -> false
+;;
+
+(* The payload of the entry [id], if it is [block]'s. *)
+let find_payload (type a) t ~id block (kind : a Handle_kind.t) : a option =
+  match Hashtbl.find t.handles id with
+  | Some { block = owner; payload = T (stored_kind, value) }
+    when Addr.equal owner block ->
+    (match Handle_kind.same_witness stored_kind kind with
+     | Some T -> Some value
+     | None -> None)
+  | Some _ | None -> None
+;;
+
+let get_handle t kind block =
+  check_live t ~name:"get_handle";
+  if is_handle t block
+  then find_payload t ~id:(handle_id block) block kind
+  else None
+;;
+
+let handle_ref t block =
+  check_live t ~name:"handle_ref";
+  if not (is_handle t block)
+  then fail [%message "Heap.handle_ref: not a handle"];
+  { Handle_ref.addr = block; id = handle_id block }
+;;
+
+(* The entry is looked up by the reference's ID before its block is read: were
+   the handle swept, the entry would be gone, and the block may be another's. *)
+let get_handle_checked t kind handle_ref =
+  check_live t ~name:"get_handle_checked";
+  let id = Handle_ref.id handle_ref in
+  let block = Handle_ref.addr handle_ref in
+  match find_payload t ~id block kind with
+  | None -> None
+  | Some _ as payload ->
+    if is_handle t block && Int.equal (handle_id block) id
+    then payload
+    else None
+;;
+
+(* Removes the entry of the block [block], if it has one: a corrupt ID can't
+   remove another block's metadata. Allocates on the OCaml heap, so a collection
+   is not reentrant with it. *)
+let remove_handle t block =
+  let id = handle_id block in
+  match Hashtbl.find t.handles id with
+  | Some { Entry.block = owner; _ } when Addr.equal owner block ->
+    Hashtbl.remove t.handles id
+  | Some _ | None -> ()
 ;;
 
 let sweep t =
@@ -396,7 +548,10 @@ let sweep t =
   let kept_blocks = ref 0 in
   let kept_words = ref 0 in
   let kept_footprint_words = ref 0 in
-  let free header =
+  let free block header =
+    (match Header.kind header with
+     | Handle -> remove_handle t block
+     | Scanned | Bytes | Free -> ());
     incr freed_blocks;
     freed_words := !freed_words + Header.size_words header
   in
@@ -422,14 +577,14 @@ let sweep t =
         let header = Header.load block in
         match Header.kind header, Header.color header with
         | Free, _ -> ()
-        | (Scanned | Bytes), Unmarked ->
-          free header;
+        | (Scanned | Bytes | Handle), Unmarked ->
+          free block header;
           Header.store block (Header.free ~size_words:words)
-        | (Scanned | Bytes), Marked ->
+        | (Scanned | Bytes | Handle), Marked ->
           incr kept;
           keep header ~footprint_words:(words + 1);
           Header.store block (Header.with_color header Unmarked)
-        | (Scanned | Bytes), Immortal ->
+        | (Scanned | Bytes | Handle), Immortal ->
           incr kept;
           keep header ~footprint_words:(words + 1)
       done;
@@ -442,7 +597,7 @@ let sweep t =
           let block = Region.block region i ~page_bytes in
           match Header.kind (Header.load block) with
           | Free -> push_free t ~class_index block
-          | Scanned | Bytes -> ()
+          | Scanned | Bytes | Handle -> ()
         done;
         true)
     | Large ->
@@ -451,7 +606,7 @@ let sweep t =
       let footprint_words = region.pages * (page_bytes / 8) in
       (match Header.color header with
        | Unmarked ->
-         free header;
+         free block header;
          remove_region t region;
          false
        | Marked ->
@@ -496,13 +651,14 @@ let iter t ~(f : _ @ local) =
       let block = Region.block region i ~page_bytes in
       match Header.kind (Header.load block) with
       | Free -> ()
-      | Scanned | Bytes -> f block
+      | Scanned | Bytes | Handle -> f block
     done
   done
 ;;
 
 let destroy t =
   check_live t ~name:"destroy";
+  Hashtbl.clear t.handles;
   List.iter t.regions ~f:(remove_region t);
   List.iter t.arenas ~f:(fun (arena : Arena.t) -> Chunk.destroy arena.chunk);
   t.regions <- [];
@@ -511,6 +667,84 @@ let destroy t =
     t.free.(i) <- Addr.null ()
   done;
   t.destroyed <- true
+;;
+
+(* The indices of the payload's refs not among [block]'s ref words. *)
+let missing_refs block (Entry.Payload.T (kind, value)) =
+  let refs = Handle_kind.refs kind value in
+  let words = Int.Hash_set.create () in
+  for i = 1 to Header.size_words (Header.load block) - 1 do
+    Hash_set.add
+      words
+      (Nativeint_u.to_int
+         (Addr.to_word (Memory.load_addr (Addr.add block (i * 8)))))
+  done;
+  List.filter
+    (List.range 0 (Array.length refs))
+    ~f:(fun index ->
+      not (Hash_set.mem words (Nativeint_u.to_int (Addr.to_word refs.(index)))))
+;;
+
+let check_handles t =
+  let errors = ref [] in
+  let error sexp = errors := sexp :: !errors in
+  let handle_blocks = ref 0 in
+  iter t ~f:(fun block ->
+    match Header.kind (Header.load block) with
+    | Handle ->
+      incr handle_blocks;
+      let id = handle_id block in
+      (match Hashtbl.find t.handles id with
+       | Some { Entry.block = owner; _ } when Addr.equal owner block -> ()
+       | Some _ ->
+         error
+           [%message "a handle block whose metadata is another's" (id : int)]
+       | None -> error [%message "a handle block with no metadata" (id : int)])
+    | Scanned | Bytes | Free -> ());
+  if not (Int.equal !handle_blocks (Hashtbl.length t.handles))
+  then
+    error
+      [%message
+        "handle blocks and metadata entries of different counts"
+          ~blocks:(!handle_blocks : int)
+          ~entries:(Hashtbl.length t.handles : int)];
+  Hashtbl.iteri t.handles ~f:(fun ~key:id ~data:(entry : Entry.t) ->
+    let block = entry.block in
+    let start = block_start t block in
+    if Addr.is_null start || not (Addr.equal start block)
+    then error [%message "metadata for no live block" (id : int)]
+    else (
+      match Header.kind (Header.load block) with
+      | Handle ->
+        let stored_id = handle_id block in
+        if not (Int.equal stored_id id)
+        then
+          error
+            [%message
+              "metadata stored under another block's ID"
+                ~id:(id : int)
+                ~stored_id:(stored_id : int)]
+        else (
+          let kind = Entry.kind_name entry in
+          match missing_refs block entry.payload with
+          | [] -> ()
+          | missing ->
+            error
+              [%message
+                "a handle without refs of its payload"
+                  (id : int)
+                  (kind : string)
+                  (missing : int list)]
+          | exception exn ->
+            error
+              [%message
+                "a handle whose refs raise"
+                  (id : int)
+                  (kind : string)
+                  (exn : exn)])
+      | Scanned | Bytes | Free ->
+        error [%message "metadata for a block that is not a handle" (id : int)]));
+  List.rev !errors
 ;;
 
 let sexp_of_t t =
@@ -542,6 +776,9 @@ let sexp_of_t t =
 ;;
 
 module For_testing = struct
+  let handles t = Hashtbl.length t.handles
+  let set_next_handle_id t id = t.next_handle <- id
+
   let locate t addr =
     let page_bytes = page_bytes t in
     List.find_map t.regions ~f:(fun (region : Region.t) ->

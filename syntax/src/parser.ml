@@ -515,6 +515,7 @@ and variant t : Type_expr.t =
 
 let starts_pattern_atom : Token.t -> bool = function
   | Underscore
+  | Star
   | Lident _
   | Uident _
   | Root
@@ -570,6 +571,10 @@ let rec pattern t : Pattern.t =
 and pattern_construct t : Pattern.t =
   let start = loc t in
   match peek t with
+  | Star ->
+    advance t;
+    let inner = pattern_construct t in
+    since t start (Pattern.Deref inner)
   | Uident _ | Root ->
     let path = uppercase_path t ~what:"a constructor" in
     let args =
@@ -677,6 +682,7 @@ let expr_since t start (desc : Expr.desc) : Expr.t = since t start desc
 
 let starts_atom : Token.t -> bool = function
   | Int _
+  | Star
   | Char _
   | String _
   | Lident _
@@ -821,17 +827,29 @@ and assignment t ~seq : Expr.t =
   let target = tuple t ~seq in
   match peek t with
   | Larrow ->
-    let path =
-      match target.txt with
-      | Var (path, None) -> located ~loc:target.loc path
-      | Field _ ->
-        fail target.loc "record fields are not mutable: only variables are"
-      | _ -> fail target.loc "only a variable can be assigned to"
-    in
+    let store = store_target target in
     advance t;
     let value = assignment t ~seq in
-    expr_at ~loc:(Loc.merge target.loc value.loc) (Assign (path, value))
+    expr_at ~loc:(Loc.merge target.loc value.loc) (store value)
   | _ -> target
+
+and store_target (target : Expr.t) : Expr.t -> Expr.desc =
+  let rec under_deref (e : Expr.t) =
+    match e.txt with
+    | Deref _ -> true
+    | Field (inner, _) | Poly_field (inner, _) -> under_deref inner
+    | _ -> false
+  in
+  match target.txt with
+  | Var (path, None) -> fun value -> Assign (located ~loc:target.loc path, value)
+  | (Deref _ | Field _ | Poly_field _) when under_deref target ->
+    fun value -> Store (target, value)
+  | Field _ | Poly_field _ ->
+    fail
+      target.loc
+      "only a field of a dereference is mutable, as in [p.*.x <- v]: records \
+       are values, and are mutated through pointers"
+  | _ -> fail target.loc "only a variable or a dereference can be assigned to"
 
 and fun_ t ~seq : Expr.t =
   let start = loc t in
@@ -941,6 +959,11 @@ and app t : Expr.t =
 
 and splice t : Expr.t =
   match peek t with
+  | Star ->
+    let start = loc t in
+    advance t;
+    let inner = splice t in
+    expr_since t start (Deref inner)
   | Splice ->
     let start = loc t in
     advance t;
@@ -980,6 +1003,9 @@ and splice t : Expr.t =
 and postfix t : Expr.t =
   let rec loop (e : Expr.t) =
     match peek t with
+    | Dot_star ->
+      advance t;
+      loop (expr_since t e.loc (Deref e))
     | Dot ->
       advance t;
       (match peek t with

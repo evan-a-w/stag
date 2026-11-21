@@ -14,3 +14,4 @@ module Source_file = Stag_syntax.Source_file
 module Relocate = Stag_syntax.Relocate
 module Struct_quote = Stag_syntax.Struct_quote
 module List_literal = Stag_syntax.List_literal
+module Lift = Stag_syntax.Lift
