@@ -100,26 +100,23 @@ module Toplevel = struct
     ; mut : bool
     ; generated : Generated.t option
     ; mutable state : State.t
+    ; mutable intrinsic_alias : bool option
+    (** Whether it is an alias of an intrinsic, once known. *)
     }
   [@@deriving sexp_of]
 
   let is_function t = not (List.is_empty t.args)
 
-  (* Such as [Ptr.make]: a builtin, so its value needn't be lifted. *)
-  let is_intrinsic_alias t =
-    Option.is_none t.annot
-    &&
+  (* The value it is an alias of, if any. *)
+  let aliased t =
     match t.expr.txt with
-    | Var (((Path _ | Root _) as path), None) ->
+    | Var (((Path _ | Root _) as path), None)
+      when Option.is_none t.annot && (not t.mut) && not (is_function t) ->
       (match Module_scope.find_value t.module_ path ~loc:t.expr.loc with
-       | Ok (Intrinsic _) -> true
-       | Ok (Toplevel _ | Prim _ | Unbound) | Error _ -> false)
-    | _ -> false
+       | Ok value -> Some value
+       | Error _ -> None)
+    | _ -> None
   ;;
-
-  (* Usable in quotes once checked: a mutable toplevel is referred to by name,
-     like a function, rather than lifted. *)
-  let is_persistent t = is_function t || t.mut || is_intrinsic_alias t
 end
 
 (* Whether a local may reach a mutable local's cell, so that a closure capturing
@@ -261,6 +258,40 @@ module Program_env = struct
   ;;
 
   let toplevel t name = force (Hashtbl.find_exn t.toplevels name)
+
+  (* Such as [Ptr.make], or an alias of one: a builtin, so its value needn't be
+     lifted. *)
+  let is_intrinsic_alias t toplevel =
+    let rec go (toplevel : Toplevel.t) ~visited =
+      match toplevel.intrinsic_alias with
+      | Some known -> known
+      | None ->
+        let name = toplevel.ident.name in
+        let known =
+          (not (Set.mem visited name))
+          &&
+          match Toplevel.aliased toplevel with
+          | Some (Intrinsic _) -> true
+          | Some (Toplevel target) ->
+            Option.value_map
+              (find_toplevel t target)
+              ~default:false
+              ~f:(go ~visited:(Set.add visited name))
+          | Some (Prim _ | Unbound) | None -> false
+        in
+        toplevel.intrinsic_alias <- Some known;
+        known
+    in
+    go toplevel ~visited:String.Set.empty
+  ;;
+
+  (* Usable in quotes once checked: a mutable toplevel is referred to by name,
+     like a function, rather than lifted. *)
+  let is_persistent t (toplevel : Toplevel.t) =
+    Toplevel.is_function toplevel
+    || toplevel.mut
+    || is_intrinsic_alias t toplevel
+  ;;
 
   let add_info t ident ~ty ~level =
     let info = { Typed.Ident_info.ty; level } in
@@ -1491,7 +1522,9 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
             | In_progress { body = None; _ } | Unchecked | Done _ -> None))
   in
   let runtime_only = runtime_only program members in
-  let persistent = List.for_all members ~f:Toplevel.is_persistent in
+  let persistent =
+    List.for_all members ~f:(Program_env.is_persistent program)
+  in
   let recursive =
     List.exists members ~f:(fun member ->
       match member.state with
@@ -1733,7 +1766,8 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
        scope.scc.lowlink <- Int.min scope.scc.lowlink in_progress.index;
        Ok entry)
   | Unchecked
-    when Option.is_some scope.quote && not (Toplevel.is_persistent toplevel) ->
+    when Option.is_some scope.quote
+         && not (Program_env.is_persistent scope.program toplevel) ->
     (* A free variable of the quote, like an [In_progress] toplevel. A function
        is checked, as it is persistent once its component is. *)
     Ok
@@ -3177,6 +3211,7 @@ let declare
          ; mut
          ; generated
          ; state = Unchecked
+         ; intrinsic_alias = None
          })
     in
     if not in_prelude then ignore (force toplevel : Toplevel.t);

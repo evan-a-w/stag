@@ -214,3 +214,77 @@ let pointee : ptr[string] = Ptr.make (add 1 true)
      @ t.stag:3:44-48)
     |}]
 ;;
+
+let%expect_test "aliases of the allocator are polymorphic in quotes" =
+  run
+    {|
+let mk = Ptr.make
+let mk2 = mk
+module M = struct let mk = Ptr.make end
+let quoted = .~(.< ((mk 1).*, (mk "a").*, (mk2 true).*, (M.mk 2).*) >.)
+include .~([Stag.Toplevel.let_ "erased" [] (Stag.Code.erase .< ((mk2 3).*, (M.mk "c").*) >.)])
+let r = raise
+exception E
+let raised = .~(.< fun (b : bool) -> match b with true -> r E | false -> 1 >.)
+|};
+  [%expect
+    {|
+    val mk : 'a -> ptr['a]
+    val mk2 : 'a -> ptr['a]
+    module M : sig
+      val mk : 'a -> ptr['a]
+    end
+    val quoted : int * string * bool * int
+    val erased : int * string
+    val r : exn -> 'a
+    exception E
+    val raised : bool -> int
+    -- evaluated at compile time
+    -- evaluated
+    (mk <fun>)
+    (mk2 <fun>)
+    (M.mk <fun>)
+    (quoted (Tuple 1 (String a) true 2))
+    (erased (Tuple 3 (String c)))
+    (r <fun>)
+    (raised <fun>)
+    |}]
+;;
+
+let%expect_test "aliases through an annotation or a shadowing module are not \
+                 the allocator"
+  =
+  run
+    {|
+let annotated : int -> ptr[int] = Ptr.make
+let mk = annotated
+let ok = .< (mk 1, mk 2) >.
+let bad = .< (mk 1, mk "a") >.
+|};
+  run
+    {|
+module Ptr = struct let make x = x end
+let mk = Ptr.make
+let bad = .< (mk 1, mk "a") >.
+|};
+  [%expect
+    {|
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon string ())
+       (Base_types_not_equal int string)))
+     @ t.stag:5:23-26)
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon string ())
+       (Base_types_not_equal int string)))
+     @ t.stag:4:23-26)
+    |}]
+;;
+
+let%expect_test "cyclic aliases are not the allocator" =
+  run {|
+let a = b
+let b = a
+let q = .< (a, b) >.
+|};
+  [%expect {| ((Toplevel_initialization_cycle (b a b)) @ t.stag:3:8-9) |}]
+;;
