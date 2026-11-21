@@ -75,7 +75,11 @@ let[@zero_alloc] page_owned table addr =
 
 let%expect_test "no allocation in lookups" =
   let heap =
-    Heap.create { Heap.Config.page_bytes = 4096; size_classes = [ 4 ] }
+    Heap.create
+      { Heap.Config.page_bytes = 4096
+      ; arena_bytes = 65536
+      ; size_classes = [ 4 ]
+      }
   in
   let block =
     Heap.alloc heap (Header.scanned ~size_words:4 ~scalar_words:0 Unmarked)
@@ -84,7 +88,7 @@ let%expect_test "no allocation in lookups" =
     Heap.alloc heap (Header.scanned ~size_words:1000 ~scalar_words:0 Unmarked)
   in
   let table = Page_table.create ~page_bytes:4096 in
-  Page_table.add table ~page:(Addr.null ()) ~owner:block;
+  Page_table.add table ~page:(Addr.null ()) ~owner:(Addr.of_word #8192n);
   let before = Gc.minor_words () in
   let small_found = resolve_words heap block ~words:4 in
   let large_found = resolve_words heap large ~words:1000 in

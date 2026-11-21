@@ -1,19 +1,23 @@
 open! Import
 
 (** The GC heap: pages of equal-size slots, one size class per page, and large
-    blocks in chunks of their own. Every slot is a header and its block. Each
-    region (a page or a large block's chunk) starts with a descriptor of its
-    slots, and is found from any address in it by a [Page_table]. *)
+    blocks in runs of pages of their own. Every slot is a header and its block.
+    Pages come from arenas, chunks of [arena_bytes] aligned once; a block too
+    large for an arena gets a chunk of its own. Each region (a page, or a large
+    block's pages) starts with a descriptor of its slots, and is found from any
+    address in it by a [Page_table]. *)
 
 module Config : sig
   type t =
-    { page_bytes : int (** A power of two; regions are aligned to it. *)
+    { page_bytes : int
+    (** A power of two, from 64 bytes to 1 MiB; regions are aligned to it. *)
+    ; arena_bytes : int (** A power of two, at least [page_bytes]. *)
     ; size_classes : int list (** Block words, increasing, from 1. *)
     }
   [@@deriving sexp_of]
 
-  (** 64 KiB pages; classes 1-8, 10, 12, 14, 16, 20, 24, 28, 32, 40, 48, 56, 64,
-      80, 96, 112, 128, 160, 192, 224, 256 words. Larger blocks are large. *)
+  (** 64 KiB pages and 4 MiB arenas; classes 1-8, 10, 12, 14, 16, then four per
+      doubling up to 1024 words. Larger blocks are large. *)
   val default : t
 end
 
@@ -30,7 +34,8 @@ end
 
 type t
 
-(** Raises unless every slot of the largest class fits in a page. *)
+(** Raises on an invalid config, or one whose largest class's slot doesn't fit
+    in a page. *)
 val create : Config.t -> t
 
 (** A block of the size [header] gives, its header written and its words zeroed.
@@ -39,16 +44,23 @@ val create : Config.t -> t
 val alloc : t -> Header.t -> Memory.Addr.t
 
 (** The block containing [addr], at its first field, if [addr] is within the
-    words of a block in [t]: [Memory.Addr.null] for anything else, including
-    headers, free slots, descriptors and zero-size atoms. *)
+    words of an allocated block of [t]: [Memory.Addr.null] for anything else,
+    including headers, free slots, descriptors and zero-size atoms. *)
 val block_start : t -> Memory.Addr.t -> Memory.Addr.t
 [@@zero_alloc]
 
-(** Frees every [Unmarked] block, and makes every [Marked] one [Unmarked]. *)
+(** Frees every [Unmarked] block, and makes every [Marked] one [Unmarked]. The
+    pages of freed large blocks go back to their arena. Pages of slots are kept,
+    even when all their slots are free. *)
 val sweep : t -> Sweep_stats.t
 
-(** The live blocks, by region in creation order, then by address. *)
+(** The allocated blocks (before a sweep, garbage included), by region in
+    creation order, then by address. [f] must not allocate or sweep. *)
 val iter : t -> f:(Memory.Addr.t -> unit) @ local -> unit
+
+(** Frees all of [t]'s memory: every address it gave is then dangling. Using [t]
+    afterwards raises, but for [block_start], which gives null. *)
+val destroy : t -> unit
 
 (** Every region in creation order, by index, with the offset from its base and
     the header of each slot: deterministic. *)
@@ -61,4 +73,9 @@ module For_testing : sig
 
   val regions : t -> int
   val pages : t -> int
+  val arenas : t -> int
+
+  (** The index of the arena [addr] is in, in creation order, and of its page
+      there. *)
+  val arena_page : t -> Memory.Addr.t -> (int * int) option
 end

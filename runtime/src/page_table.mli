@@ -10,7 +10,7 @@ val create : page_bytes:int -> t
 
 val page_bytes : t -> int
 
-(** Raises if [page] is not aligned or already has an owner. *)
+(** Raises if [page] or [owner] is not aligned, or [page] already has an owner. *)
 val add : t -> page:Memory.Addr.t -> owner:Memory.Addr.t -> unit
 
 (** Raises if [page] has no owner. *)

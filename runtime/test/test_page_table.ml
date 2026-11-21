@@ -3,15 +3,16 @@ module Addr = Memory.Addr
 
 let page_bytes = 4096
 
-(* Pages are never accessed, so any aligned word will do. *)
+(* Pages are never accessed, so any aligned word will do. Owners are pages too,
+   apart from the ones they own. *)
 let page n = Addr.of_word (Nativeint_u.of_int (n * page_bytes))
-let owner n = Addr.of_word (Nativeint_u.of_int ((n * page_bytes) + 1))
+let owner n = page (n + 1_000_000)
 
 let owner_of t addr =
   let found = Page_table.find t addr in
   if Addr.is_null found
   then None
-  else Some ((Nativeint_u.to_int (Addr.to_word found) - 1) / page_bytes)
+  else Some ((Nativeint_u.to_int (Addr.to_word found) / page_bytes) - 1_000_000)
 ;;
 
 let print_table t pages =
@@ -55,10 +56,10 @@ let%expect_test "add, find, remove" =
   [%expect
     {|
     ((length 3) (capacity 16)
-     (pages ((1 3 (3) (1)) (2 7 (7) (2)) (3 11 (11) (3)) (4 15 () ()))))
+     (pages ((1 9 (9) (1)) (2 3 (3) (2)) (3 13 (13) (3)) (4 7 () ()))))
     ((0 (2)) (1 (2)) (8 (2)) (4095 (2)) (4096 (3)))
     ((length 2) (capacity 16)
-     (pages ((1 3 (3) (1)) (2 7 () ()) (3 11 (11) (3)))))
+     (pages ((1 9 (9) (1)) (2 3 () ()) (3 13 (13) (3)))))
     |}]
 ;;
 
@@ -68,6 +69,7 @@ let%expect_test "errors" =
   let show f = print_s [%sexp (Or_error.try_with f : unit Or_error.t)] in
   show (fun () -> Page_table.add t ~page:(page 1) ~owner:(owner 2));
   show (fun () -> Page_table.add t ~page:(Addr.add (page 3) 8) ~owner:(owner 3));
+  show (fun () -> Page_table.add t ~page:(page 4) ~owner:(Addr.add (owner 4) 8));
   show (fun () -> Page_table.remove t ~page:(page 2));
   show (fun () -> Page_table.remove t ~page:(Addr.add (page 1) 1));
   List.iter [ 0; 4; 12; 4097 ] ~f:(fun page_bytes ->
@@ -75,9 +77,10 @@ let%expect_test "errors" =
   [%expect
     {|
     (Error "Page_table.add: page already has an owner")
-    (Error ("Page_table: unaligned page" add))
+    (Error ("Page_table: unaligned" page))
+    (Error ("Page_table: unaligned" owner))
     (Error "Page_table.remove: page has no owner")
-    (Error ("Page_table: unaligned page" remove))
+    (Error ("Page_table: unaligned" page))
     (Error (Page_table.create (page_bytes 0)))
     (Error (Page_table.create (page_bytes 4)))
     (Error (Page_table.create (page_bytes 12)))
@@ -101,11 +104,11 @@ let%expect_test "collisions and deletion chains" =
   [%expect
     {|
     ((length 3) (capacity 16)
-     (pages ((4 15 (15) (4)) (21 15 (0) (21)) (38 15 (1) (38)))))
+     (pages ((8 15 (15) (8)) (21 15 (0) (21)) (42 15 (1) (42)))))
     ((length 2) (capacity 16)
-     (pages ((4 15 () ()) (21 15 (15) (21)) (38 15 (0) (38)))))
+     (pages ((8 15 () ()) (21 15 (15) (21)) (42 15 (0) (42)))))
     ((length 1) (capacity 16)
-     (pages ((4 15 () ()) (21 15 () ()) (38 15 (15) (38)))))
+     (pages ((8 15 () ()) (21 15 () ()) (42 15 (15) (42)))))
     |}]
 ;;
 
@@ -125,10 +128,10 @@ let%expect_test "an entry whose home is past the hole stays" =
   [%expect
     {|
     ((length 3) (capacity 16)
-     (pages ((1 3 (3) (1)) (18 3 (4) (18)) (14 4 (5) (14)))))
+     (pages ((2 3 (3) (2)) (23 3 (4) (23)) (15 4 (5) (15)))))
     ((length 2) (capacity 16)
-     (pages ((1 3 () ()) (18 3 (3) (18)) (14 4 (4) (14)))))
-    ((length 1) (capacity 16) (pages ((1 3 () ()) (18 3 () ()) (14 4 (4) (14)))))
+     (pages ((2 3 () ()) (23 3 (3) (23)) (15 4 (4) (15)))))
+    ((length 1) (capacity 16) (pages ((2 3 () ()) (23 3 () ()) (15 4 (4) (15)))))
     |}]
 ;;
 
@@ -178,6 +181,45 @@ let%expect_test "addresses far from any page" =
     (2^63 (owner ()))
     ("2^63 + 4096" (owner ()))
     (-1 (owner ()))
+    |}]
+;;
+
+let%expect_test "pages and owners at high addresses" =
+  let t = Page_table.create ~page_bytes in
+  (* The [i]th page below 2^64, and its owner, 100 pages further down. *)
+  let high i = Addr.of_word (Nativeint_u.of_int (-(i * page_bytes))) in
+  let pages = List.range 1 101 in
+  List.iter pages ~f:(fun i ->
+    Page_table.add t ~page:(high i) ~owner:(high (i + 100)));
+  let owned_correctly i =
+    Addr.equal (Page_table.find t (Addr.add (high i) 4095)) (high (i + 100))
+  in
+  print_s
+    [%message
+      ""
+        ~length:(Page_table.length t : int)
+        ~all_found:(List.for_all pages ~f:owned_correctly : bool)
+        ~top_word:
+          (Addr.equal
+             (Page_table.find t (Addr.of_word (Nativeint_u.of_int (-1))))
+             (high 101)
+           : bool)];
+  List.iter pages ~f:(fun i ->
+    if i % 2 = 0 then Page_table.remove t ~page:(high i));
+  print_s
+    [%message
+      ""
+        ~length:(Page_table.length t : int)
+        ~odd_found:
+          (List.for_all pages ~f:(fun i ->
+             if i % 2 = 0
+             then Addr.is_null (Page_table.find t (high i))
+             else owned_correctly i)
+           : bool)];
+  [%expect
+    {|
+    ((length 100) (all_found true) (top_word true))
+    ((length 50) (odd_found true))
     |}]
 ;;
 

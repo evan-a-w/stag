@@ -1,8 +1,14 @@
 open! Import
 module Addr = Memory.Addr
 
-(* 256-byte pages: a 24-byte descriptor, then slots of 16, 24 and 40 bytes. *)
-let small = { Heap.Config.page_bytes = 256; size_classes = [ 1; 2; 4 ] }
+(* 256-byte pages, 4 to an arena: a 24-byte descriptor, then slots of 16, 24 and
+   40 bytes. *)
+let small =
+  { Heap.Config.page_bytes = 256
+  ; arena_bytes = 1024
+  ; size_classes = [ 1; 2; 4 ]
+  }
+;;
 
 let scanned ?(color = Header.Color.Unmarked) ?(scalar = 0) words =
   Header.scanned ~size_words:words ~scalar_words:scalar color
@@ -60,22 +66,22 @@ let%expect_test "invalid configs" =
     {|
     (Error
      ("Heap.create: invalid config"
-      (config ((page_bytes 255) (size_classes (1 2 4))))))
+      (config ((page_bytes 255) (arena_bytes 1024) (size_classes (1 2 4))))))
     (Error
      ("Heap.create: invalid config"
-      (config ((page_bytes 32) (size_classes (1 2 4))))))
+      (config ((page_bytes 32) (arena_bytes 1024) (size_classes (1 2 4))))))
     (Error
      ("Heap.create: invalid config"
-      (config ((page_bytes 256) (size_classes ())))))
+      (config ((page_bytes 256) (arena_bytes 1024) (size_classes ())))))
     (Error
      ("Heap.create: invalid config"
-      (config ((page_bytes 256) (size_classes (0 1))))))
+      (config ((page_bytes 256) (arena_bytes 1024) (size_classes (0 1))))))
     (Error
      ("Heap.create: invalid config"
-      (config ((page_bytes 256) (size_classes (2 2))))))
+      (config ((page_bytes 256) (arena_bytes 1024) (size_classes (2 2))))))
     (Error
      ("Heap.create: invalid config"
-      (config ((page_bytes 256) (size_classes (1 29))))))
+      (config ((page_bytes 256) (arena_bytes 1024) (size_classes (1 29))))))
     (Ok ())
     |}]
 ;;
@@ -300,11 +306,10 @@ let%expect_test "large blocks" =
   [%expect
     {|
     ((Large
-      ((index 0) (bytes 256)
+      ((index 0) (pages 1)
        (slots ((32 (Scanned (size_words 10) (scalar_words 3) (color Unmarked)))))))
      (Large
-      ((index 1) (bytes 1024)
-       (slots ((32 (Bytes (length 800) (color Unmarked))))))))
+      ((index 1) (pages 4) (slots ((32 (Bytes (length 800) (color Unmarked))))))))
     (pages 5)
     [0, 32): null
     [32, 112): (0 32)
@@ -378,7 +383,7 @@ let%expect_test "sweep" =
          (152 (Free (size_words 4) (color Unmarked)))
          (192 (Free (size_words 4) (color Unmarked)))))))
      (Large
-      ((index 3) (bytes 512)
+      ((index 3) (pages 2)
        (slots ((32 (Scanned (size_words 50) (scalar_words 0) (color Unmarked))))))))
     ((regions 4) (pages 5) (large_freed null))
     ((freed_blocks 4) (freed_words 55) (kept_blocks 0) (kept_words 0))
@@ -433,8 +438,8 @@ let%expect_test "iter" =
 let%expect_test "the default config" =
   let heap = Heap.create Heap.Config.default in
   print_s [%sexp (Heap.Config.default : Heap.Config.t)];
-  let largest_small = Heap.alloc heap (scanned 256) in
-  let smallest_large = Heap.alloc heap (scanned 257) in
+  let largest_small = Heap.alloc heap (scanned 1024) in
+  let smallest_large = Heap.alloc heap (scanned 1025) in
   let odd = Heap.alloc heap (scanned 9) in
   print_s
     [%message
@@ -447,15 +452,152 @@ let%expect_test "the default config" =
         ~interior:
           (where
              heap
-             (Heap.block_start heap (Addr.add smallest_large (256 * 8)))
+             (Heap.block_start heap (Addr.add smallest_large (1024 * 8)))
            : Sexp.t)];
   [%expect
     {|
-    ((page_bytes 65536)
+    ((page_bytes 65536) (arena_bytes 4194304)
      (size_classes
       (1 2 3 4 5 6 7 8 10 12 14 16 20 24 28 32 40 48 56 64 80 96 112 128 160 192
-       224 256)))
+       224 256 320 384 448 512 640 768 896 1024)))
     ((largest_small (0 32)) (smallest_large (1 32)) (odd (2 32)) (regions 3)
      (pages 3) (interior (1 32)))
+    |}]
+;;
+
+let%expect_test "a large block spanning many pages" =
+  let heap = Heap.create Heap.Config.default in
+  (* 1 MiB of fields: 17 pages with the descriptor and header. *)
+  let words = 1 lsl 17 in
+  let block = Heap.alloc heap (scanned words) in
+  let resolves offset =
+    where heap (Heap.block_start heap (Addr.add block offset))
+  in
+  print_s
+    [%message
+      ""
+        ~pages:(Heap.For_testing.pages heap : int)
+        ~first:(resolves 0 : Sexp.t)
+        ~page_boundaries:
+          (List.for_all (List.range 1 17) ~f:(fun page ->
+             Sexp.equal (resolves ((page * 65536) - 32)) (resolves 0))
+           : bool)
+        ~last:(resolves ((words * 8) - 1) : Sexp.t)
+        ~past:(resolves (words * 8) : Sexp.t)];
+  print_s [%sexp (Heap.sweep heap : Heap.Sweep_stats.t)];
+  print_s
+    [%message
+      "" ~pages:(Heap.For_testing.pages heap : int) ~after:(resolves 0 : Sexp.t)];
+  [%expect
+    {|
+    ((pages 17) (first (0 32)) (page_boundaries true) (last (0 32)) (past null))
+    ((freed_blocks 1) (freed_words 131072) (kept_blocks 0) (kept_words 0))
+    ((pages 0) (after null))
+    |}]
+;;
+
+let%expect_test "large blocks freed and allocated again" =
+  let heap = Heap.create small in
+  let rounds =
+    sequentially 4 ~f:(fun round ->
+      let block = Heap.alloc heap (scanned (20 + (round * 30))) in
+      let pages = Heap.For_testing.pages heap in
+      let found = where heap (Heap.block_start heap block) in
+      ignore (Heap.sweep heap : Heap.Sweep_stats.t);
+      [%message
+        ""
+          (round : int)
+          (pages : int)
+          (found : Sexp.t)
+          ~freed:(where heap (Heap.block_start heap block) : Sexp.t)
+          ~pages_after:(Heap.For_testing.pages heap : int)])
+  in
+  List.iter rounds ~f:print_s;
+  [%expect
+    {|
+    ((round 0) (pages 1) (found (0 32)) (freed null) (pages_after 0))
+    ((round 1) (pages 2) (found (1 32)) (freed null) (pages_after 0))
+    ((round 2) (pages 3) (found (2 32)) (freed null) (pages_after 0))
+    ((round 3) (pages 4) (found (3 32)) (freed null) (pages_after 0))
+    |}]
+;;
+
+let%expect_test "a marked large block survives sweep" =
+  let heap = Heap.create small in
+  let block = Heap.alloc heap (scanned 60) in
+  set_color block Marked;
+  print_s [%sexp (Heap.sweep heap : Heap.Sweep_stats.t)];
+  print_s
+    [%message
+      ""
+        ~header:(Header.load block : Header.t)
+        ~start:(where heap (Heap.block_start heap block) : Sexp.t)
+        ~interior:
+          (where heap (Heap.block_start heap (Addr.add block 300)) : Sexp.t)];
+  print_s [%sexp (Heap.sweep heap : Heap.Sweep_stats.t)];
+  [%expect
+    {|
+    ((freed_blocks 0) (freed_words 0) (kept_blocks 1) (kept_words 60))
+    ((header (Scanned (size_words 60) (scalar_words 0) (color Unmarked)))
+     (start (0 32)) (interior (0 32)))
+    ((freed_blocks 1) (freed_words 60) (kept_blocks 0) (kept_words 0))
+    |}]
+;;
+
+let%expect_test "a class whose last slot ends at the page end" =
+  (* A 24-byte descriptor, then one slot of 29 * 8 = 232 bytes: 256 exactly. *)
+  let heap =
+    Heap.create
+      { Heap.Config.page_bytes = 256
+      ; arena_bytes = 1024
+      ; size_classes = [ 28 ]
+      }
+  in
+  let block = Heap.alloc heap (scanned 28) in
+  let resolves offset =
+    where heap (Heap.block_start heap (Addr.add block offset))
+  in
+  print_s
+    [%message
+      ""
+        ~block:(where heap block : Sexp.t)
+        ~last_byte:(resolves ((28 * 8) - 1) : Sexp.t)
+        ~next_page:(resolves (28 * 8) : Sexp.t)];
+  [%expect {| ((block (0 32)) (last_byte (0 32)) (next_page null)) |}]
+;;
+
+let%expect_test "sweeping bytes blocks counts their words" =
+  let heap = Heap.create small in
+  let kept = Heap.alloc heap (Header.bytes ~length:9 Unmarked) in
+  let _freed = Heap.alloc heap (Header.bytes ~length:1 Unmarked) in
+  let _freed_large = Heap.alloc heap (Header.bytes ~length:100 Unmarked) in
+  set_color kept Marked;
+  print_s [%sexp (Heap.sweep heap : Heap.Sweep_stats.t)];
+  [%expect
+    {| ((freed_blocks 2) (freed_words 14) (kept_blocks 1) (kept_words 2)) |}]
+;;
+
+let%expect_test "destroy" =
+  let heap = Heap.create small in
+  let block = Heap.alloc heap (scanned 2) in
+  let _large = Heap.alloc heap (scanned 60) in
+  Heap.destroy heap;
+  print_s
+    [%message
+      ""
+        ~regions:(Heap.For_testing.regions heap : int)
+        ~pages:(Heap.For_testing.pages heap : int)
+        ~block:(where heap (Heap.block_start heap block) : Sexp.t)
+        ~again:
+          (Or_error.try_with (fun () -> Heap.destroy heap) : unit Or_error.t)
+        ~alloc:
+          (Or_error.try_with (fun () ->
+             ignore (Heap.alloc heap (scanned 1) : Addr.t))
+           : unit Or_error.t)];
+  [%expect
+    {|
+    ((regions 0) (pages 0) (block null)
+     (again (Error ("Heap: destroyed" (name destroy))))
+     (alloc (Error ("Heap: destroyed" (name alloc)))))
     |}]
 ;;

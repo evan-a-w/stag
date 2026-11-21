@@ -5,18 +5,23 @@ module Chunk = Memory.Chunk
 module Config = struct
   type t =
     { page_bytes : int
+    ; arena_bytes : int
     ; size_classes : int list
     }
   [@@deriving sexp_of]
 
   let default =
     { page_bytes = 64 * 1024
+    ; arena_bytes = 4 * 1024 * 1024
     ; size_classes =
         List.range 1 9
         @ [ 10; 12; 14; 16; 20; 24; 28; 32; 40; 48; 56; 64 ]
         @ [ 80; 96; 112; 128; 160; 192; 224; 256 ]
+        @ [ 320; 384; 448; 512; 640; 768; 896; 1024 ]
     }
   ;;
+
+  let max_page_bytes = 1 lsl 20
 end
 
 module Sweep_stats = struct
@@ -29,12 +34,76 @@ module Sweep_stats = struct
   [@@deriving sexp_of]
 end
 
-(* A region's descriptor, at its base: the bytes of each slot (its header and
-   block), the offset of the first slot's header, and the number of slots. *)
-let slot_bytes_offset = 0
-let first_slot_offset = 8
-let slots_offset = 16
-let first_slot = 24
+let[@cold] fail sexp = raise (Error.to_exn (Error.create_s sexp))
+let[@inline] [@zero_alloc] load_int addr = Int64_u.to_int (Memory.load_64 addr)
+
+let[@inline] [@zero_alloc] store_int addr n =
+  Memory.store_64 addr (Int64_u.of_int n)
+;;
+
+(* At the base of each region: the bytes of each slot (its header and block),
+   the reciprocal of that, and the number of slots. The first slot's header
+   follows.
+
+   A slot's index is [offset / slot_bytes] for the [offset] of an address from
+   the first slot, computed as [(offset * magic) lsr shift] with
+   [shift = 2 * log2 page_bytes] and [magic = ceil (2^shift / slot_bytes)].
+   Writing [magic * slot_bytes = 2^shift + e] with [0 <= e < slot_bytes],
+   [offset * magic / 2^shift = offset / slot_bytes + offset * e / (slot_bytes * 2^shift)],
+   whose floor is [offset / slot_bytes]'s as long as [offset * e < 2^shift],
+   which holds as [offset] and [e] are below [page_bytes]. The product is below
+   [page_bytes * 2^shift <= 2^60] for pages of at most 1 MiB. A large block's
+   region has one slot and a [magic] of 0, so any offset is in slot 0. *)
+module Descriptor = struct
+  let bytes = 24
+
+  let store base ~slot_bytes ~magic ~slots =
+    store_int base slot_bytes;
+    store_int (Addr.add base 8) magic;
+    store_int (Addr.add base 16) slots
+  ;;
+
+  let[@inline] [@zero_alloc] slot_bytes base = load_int base
+  let[@inline] [@zero_alloc] magic base = load_int (Addr.add base 8)
+  let[@inline] [@zero_alloc] slots base = load_int (Addr.add base 16)
+end
+
+(* A chunk of [arena_bytes], aligned to [page_bytes], its pages handed out to
+   regions. *)
+module Arena = struct
+  type t =
+    { chunk : Chunk.t
+    ; free : bool array (** By page. *)
+    }
+
+  let create ~arena_bytes ~page_bytes =
+    { chunk = Chunk.create ~bytes:arena_bytes ~align:page_bytes
+    ; free = Array.create ~len:(arena_bytes / page_bytes) true
+    }
+  ;;
+
+  (* The first of the first run of [pages] free pages, which are taken. *)
+  let take t ~pages =
+    let len = Array.length t.free in
+    let rec from first =
+      if first + pages > len
+      then None
+      else (
+        match
+          List.find
+            (List.range first (first + pages))
+            ~f:(fun page -> not t.free.(page))
+        with
+        | Some taken -> from (taken + 1)
+        | None ->
+          Array.fill t.free ~pos:first ~len:pages false;
+          Some first)
+    in
+    from 0
+  ;;
+
+  let release t ~first ~pages = Array.fill t.free ~pos:first ~len:pages true
+end
 
 module Region = struct
   module Kind = struct
@@ -43,38 +112,50 @@ module Region = struct
       | Large
   end
 
+  module Backing = struct
+    type t =
+      | Arena of
+          { arena : Arena.t
+          ; first : int
+          }
+      | Chunk of Chunk.t
+  end
+
   type t =
     { index : int
-    ; chunk : Chunk.t
+    ; backing : Backing.t
+    ; pages : int
     ; kind : Kind.t
     ; slot_bytes : int
     ; slots : int
     }
 
-  (* The [i]th slot's block. *)
-  let block t i =
-    Addr.add (Chunk.base t.chunk) (first_slot + (i * t.slot_bytes) + 8)
+  let base t ~page_bytes =
+    match t.backing with
+    | Arena { arena; first } ->
+      Addr.add (Chunk.base arena.chunk) (first * page_bytes)
+    | Chunk chunk -> Chunk.base chunk
   ;;
 
-  let pages t ~page_bytes ~f =
-    for i = 0 to (Chunk.bytes t.chunk / page_bytes) - 1 do
-      f (Addr.add (Chunk.base t.chunk) (i * page_bytes))
-    done
+  (* The [i]th slot's block. *)
+  let block t i ~page_bytes =
+    Addr.add (base t ~page_bytes) (Descriptor.bytes + (i * t.slot_bytes) + 8)
   ;;
 end
 
 type t =
   { config : Config.t
+  ; shift : int
   ; classes : int array (** Words. *)
   ; class_of_words : int array (** The smallest class of at least that many. *)
   ; free : Addr.t array (** The first free block of each class, or null. *)
   ; page_table : Page_table.t
+  ; mutable arenas : Arena.t list (** Latest first. *)
   ; mutable regions : Region.t list (** Latest first. *)
   ; mutable regions_created : int
   ; atoms : Chunk.t
+  ; mutable destroyed : bool
   }
-
-let[@cold] fail sexp = raise (Error.to_exn (Error.create_s sexp))
 
 (* The zero-size atoms' headers are words 0 and 1, so their blocks are at 8
    and 16. *)
@@ -82,34 +163,41 @@ let scanned_atom t = Addr.add (Chunk.base t.atoms) 8
 let bytes_atom t = Addr.add (Chunk.base t.atoms) 16
 
 let create (config : Config.t) =
-  let { Config.page_bytes; size_classes } = config in
+  let { Config.page_bytes; arena_bytes; size_classes } = config in
+  let is_power_of_two n = n > 0 && n land (n - 1) = 0 in
   let classes = Array.of_list size_classes in
   let largest = if Array.is_empty classes then 0 else Array.last_exn classes in
-  if page_bytes < 64
-     || page_bytes land (page_bytes - 1) <> 0
+  if (not (is_power_of_two page_bytes))
+     || page_bytes < 64
+     || page_bytes > Config.max_page_bytes
+     || (not (is_power_of_two arena_bytes))
+     || arena_bytes < page_bytes
      || Array.is_empty classes
      || classes.(0) < 1
      || (not
            (Array.for_alli classes ~f:(fun i words ->
               i = 0 || classes.(i - 1) < words)))
-     || first_slot + ((largest + 1) * 8) > page_bytes
-  then raise_s [%message "Heap.create: invalid config" (config : Config.t)];
+     || Descriptor.bytes + ((largest + 1) * 8) > page_bytes
+  then fail [%message "Heap.create: invalid config" (config : Config.t)];
   let class_of_words = Array.create ~len:(largest + 1) 0 in
   let class_index = ref 0 in
   for words = 1 to largest do
     if classes.(!class_index) < words then incr class_index;
     class_of_words.(words) <- !class_index
   done;
-  let atoms = Chunk.create ~bytes:24 ~align:8 in
+  let atoms = Chunk.create ~bytes:16 ~align:8 in
   let t =
     { config
+    ; shift = 2 * Int.ctz page_bytes
     ; classes
     ; class_of_words
     ; free = Array.create ~len:(Array.length classes) (Addr.null ())
     ; page_table = Page_table.create ~page_bytes
+    ; arenas = []
     ; regions = []
     ; regions_created = 0
     ; atoms
+    ; destroyed = false
     }
   in
   Header.store
@@ -119,24 +207,69 @@ let create (config : Config.t) =
   t
 ;;
 
-let add_region t ~bytes ~kind ~slot_bytes ~slots =
-  let page_bytes = t.config.page_bytes in
-  let chunk = Chunk.create ~bytes ~align:page_bytes in
-  let base = Chunk.base chunk in
-  let store offset n =
-    Memory.store_64 (Addr.add base offset) (Int64_u.of_int n)
+let check_live t ~name =
+  if t.destroyed then fail [%message "Heap: destroyed" (name : string)]
+;;
+
+let page_bytes t = t.config.page_bytes
+let arena_pages t = t.config.arena_bytes / page_bytes t
+
+(* [pages] contiguous pages, from the first arena with a run of them. *)
+let take_pages t ~pages : Region.Backing.t =
+  let found =
+    List.find_map (List.rev t.arenas) ~f:(fun arena ->
+      Option.map (Arena.take arena ~pages) ~f:(fun first ->
+        Region.Backing.Arena { arena; first }))
   in
-  store slot_bytes_offset slot_bytes;
-  store first_slot_offset first_slot;
-  store slots_offset slots;
+  match found with
+  | Some backing -> backing
+  | None ->
+    let arena =
+      Arena.create ~arena_bytes:t.config.arena_bytes ~page_bytes:(page_bytes t)
+    in
+    t.arenas <- arena :: t.arenas;
+    (match Arena.take arena ~pages with
+     | Some first -> Arena { arena; first }
+     | None -> fail [%message "Heap: a fresh arena has no room" (pages : int)])
+;;
+
+let iter_pages t (region : Region.t) ~f =
+  let base = Region.base region ~page_bytes:(page_bytes t) in
+  for i = 0 to region.pages - 1 do
+    f (Addr.add base (i * page_bytes t))
+  done
+;;
+
+let add_region t ~pages ~kind ~slot_bytes ~slots ~magic =
+  let backing : Region.Backing.t =
+    if pages <= arena_pages t
+    then take_pages t ~pages
+    else
+      Chunk (Chunk.create ~bytes:(pages * page_bytes t) ~align:(page_bytes t))
+  in
   let region =
-    { Region.index = t.regions_created; chunk; kind; slot_bytes; slots }
+    { Region.index = t.regions_created
+    ; backing
+    ; pages
+    ; kind
+    ; slot_bytes
+    ; slots
+    }
   in
+  let base = Region.base region ~page_bytes:(page_bytes t) in
+  Descriptor.store base ~slot_bytes ~magic ~slots;
   t.regions_created <- t.regions_created + 1;
   t.regions <- region :: t.regions;
-  Region.pages region ~page_bytes ~f:(fun page ->
+  iter_pages t region ~f:(fun page ->
     Page_table.add t.page_table ~page ~owner:base);
   region
+;;
+
+let remove_region t (region : Region.t) =
+  iter_pages t region ~f:(fun page -> Page_table.remove t.page_table ~page);
+  match region.backing with
+  | Arena { arena; first } -> Arena.release arena ~first ~pages:region.pages
+  | Chunk chunk -> Chunk.destroy chunk
 ;;
 
 let push_free t ~class_index block =
@@ -147,36 +280,33 @@ let push_free t ~class_index block =
 let add_page t class_index =
   let words = t.classes.(class_index) in
   let slot_bytes = (words + 1) * 8 in
-  let page_bytes = t.config.page_bytes in
-  let slots = (page_bytes - first_slot) / slot_bytes in
+  let slots = (page_bytes t - Descriptor.bytes) / slot_bytes in
+  let magic = ((1 lsl t.shift) + slot_bytes - 1) / slot_bytes in
   let region =
-    add_region
-      t
-      ~bytes:page_bytes
-      ~kind:(Page { class_index })
-      ~slot_bytes
-      ~slots
+    add_region t ~pages:1 ~kind:(Page { class_index }) ~slot_bytes ~slots ~magic
   in
   for i = slots - 1 downto 0 do
-    let block = Region.block region i in
+    let block = Region.block region i ~page_bytes:(page_bytes t) in
     Header.store block (Header.free ~size_words:words);
     push_free t ~class_index block
   done
 ;;
 
 let alloc_large t header ~words =
-  let page_bytes = t.config.page_bytes in
   let slot_bytes = (words + 1) * 8 in
-  let bytes =
-    Int.round_up (first_slot + slot_bytes) ~to_multiple_of:page_bytes
+  let pages =
+    Int.round_up (Descriptor.bytes + slot_bytes) ~to_multiple_of:(page_bytes t)
+    / page_bytes t
   in
-  let region = add_region t ~bytes ~kind:Large ~slot_bytes ~slots:1 in
-  let block = Region.block region 0 in
+  let region = add_region t ~pages ~kind:Large ~slot_bytes ~slots:1 ~magic:0 in
+  let block = Region.block region 0 ~page_bytes:(page_bytes t) in
   Header.store block header;
+  Memory.fill_zero block ~bytes:(words * 8);
   block
 ;;
 
 let alloc t header =
+  check_live t ~name:"alloc";
   (match Header.kind header with
    | Free -> fail [%message "Heap.alloc: a Free header" (header : Header.t)]
    | Scanned | Bytes -> ());
@@ -198,28 +328,25 @@ let alloc t header =
     block)
 ;;
 
-let[@inline] [@zero_alloc] load_int addr = Int64_u.to_int (Memory.load_64 addr)
-
 let[@zero_alloc] block_start t addr =
   let owner = Page_table.find t.page_table addr in
   if Addr.is_null owner
   then Addr.null ()
   else (
-    let slot_bytes = load_int (Addr.add owner slot_bytes_offset) in
-    let first = load_int (Addr.add owner first_slot_offset) in
-    let offset = Addr.diff addr owner - first in
+    let offset = Addr.diff addr owner - Descriptor.bytes in
     if Int.(offset < 0)
     then Addr.null ()
     else (
-      let slot = offset / slot_bytes in
-      if Int.(slot >= load_int (Addr.add owner slots_offset))
+      let slot = (offset * Descriptor.magic owner) lsr t.shift in
+      if Int.(slot >= Descriptor.slots owner)
       then Addr.null ()
       else (
-        let block = Addr.add owner (first + (slot * slot_bytes) + 8) in
-        let within = offset - (slot * slot_bytes) - 8 in
+        let slot_offset = slot * Descriptor.slot_bytes owner in
+        let within = offset - slot_offset - 8 in
         if Int.(within < 0)
         then Addr.null ()
         else (
+          let block = Addr.add owner (Descriptor.bytes + slot_offset + 8) in
           let header = Header.load block in
           match Header.kind header with
           | Free -> Addr.null ()
@@ -230,6 +357,8 @@ let[@zero_alloc] block_start t addr =
 ;;
 
 let sweep t =
+  check_live t ~name:"sweep";
+  let page_bytes = page_bytes t in
   let freed_blocks = ref 0 in
   let freed_words = ref 0 in
   let kept_blocks = ref 0 in
@@ -248,7 +377,7 @@ let sweep t =
       match region.kind with
       | Page { class_index } ->
         for i = region.slots - 1 downto 0 do
-          let block = Region.block region i in
+          let block = Region.block region i ~page_bytes in
           let header = Header.load block in
           match Header.kind header, Header.color header with
           | Free, _ -> push_free t ~class_index block
@@ -263,14 +392,12 @@ let sweep t =
         done;
         true
       | Large ->
-        let block = Region.block region 0 in
+        let block = Region.block region 0 ~page_bytes in
         let header = Header.load block in
         (match Header.color header with
          | Unmarked ->
            count freed_blocks freed_words header;
-           Region.pages region ~page_bytes:t.config.page_bytes ~f:(fun page ->
-             Page_table.remove t.page_table ~page);
-           Chunk.destroy region.chunk;
+           remove_region t region;
            false
          | Marked ->
            count kept_blocks kept_words header;
@@ -289,11 +416,13 @@ let sweep t =
 ;;
 
 let iter t ~(f : _ @ local) =
+  check_live t ~name:"iter";
+  let page_bytes = page_bytes t in
   let regions = Array.of_list_rev t.regions in
   for r = 0 to Array.length regions - 1 do
     let region = regions.(r) in
     for i = 0 to region.Region.slots - 1 do
-      let block = Region.block region i in
+      let block = Region.block region i ~page_bytes in
       match Header.kind (Header.load block) with
       | Free -> ()
       | Scanned | Bytes -> f block
@@ -301,14 +430,27 @@ let iter t ~(f : _ @ local) =
   done
 ;;
 
+let destroy t =
+  check_live t ~name:"destroy";
+  List.iter t.regions ~f:(remove_region t);
+  List.iter t.arenas ~f:(fun (arena : Arena.t) -> Chunk.destroy arena.chunk);
+  Chunk.destroy t.atoms;
+  t.regions <- [];
+  t.arenas <- [];
+  for i = 0 to Array.length t.free - 1 do
+    t.free.(i) <- Addr.null ()
+  done;
+  t.destroyed <- true
+;;
+
 let sexp_of_t t =
+  let page_bytes = page_bytes t in
   let region_sexp (region : Region.t) =
+    let base = Region.base region ~page_bytes in
     let slots =
       List.init region.slots ~f:(fun i ->
-        let block = Region.block region i in
-        [%sexp
-          (Addr.diff block (Chunk.base region.chunk) : int)
-          , (Header.load block : Header.t)])
+        let block = Region.block region i ~page_bytes in
+        [%sexp (Addr.diff block base : int), (Header.load block : Header.t)])
     in
     match region.kind with
     | Page { class_index } ->
@@ -322,7 +464,7 @@ let sexp_of_t t =
       [%sexp
         Large
           { index = (region.index : int)
-          ; bytes = (Chunk.bytes region.chunk : int)
+          ; pages = (region.pages : int)
           ; slots : Sexp.t list
           }]
   in
@@ -331,12 +473,26 @@ let sexp_of_t t =
 
 module For_testing = struct
   let locate t addr =
+    let page_bytes = page_bytes t in
     List.find_map t.regions ~f:(fun (region : Region.t) ->
-      if Chunk.contains region.chunk addr
-      then Some (region.index, Addr.diff addr (Chunk.base region.chunk))
+      let base = Region.base region ~page_bytes in
+      let offset =
+        Nativeint_u.to_int
+          (Nativeint_u.sub (Addr.to_word addr) (Addr.to_word base))
+      in
+      if offset >= 0 && offset < region.pages * page_bytes
+      then Some (region.index, offset)
       else None)
   ;;
 
   let regions t = List.length t.regions
   let pages t = Page_table.length t.page_table
+  let arenas t = List.length t.arenas
+
+  let arena_page t addr =
+    List.find_mapi (List.rev t.arenas) ~f:(fun i (arena : Arena.t) ->
+      if Chunk.contains arena.chunk addr
+      then Some (i, Addr.diff addr (Chunk.base arena.chunk) / page_bytes t)
+      else None)
+  ;;
 end
