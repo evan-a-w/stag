@@ -70,13 +70,14 @@ val alloc : t -> Header.t -> Memory.Addr.t
     across calls that can collect. *)
 val alloc_handle : t -> 'a Handle_kind.t -> 'a -> Memory.Addr.t
 
-(** As [Heap.get_handle]. *)
+(** As [Heap.get_handle]: the payload, and any address taken from it, is valid
+    only while the handle is reachable from the roots. *)
 val get_handle : t -> 'a Handle_kind.t -> Memory.Addr.t -> 'a option
 
 (** As [Heap.handle_ref]. *)
 val handle_ref : t -> Memory.Addr.t -> Handle_ref.t
 
-(** As [Heap.get_handle_checked]. *)
+(** As [Heap.get_handle_checked], with [get_handle]'s validity. *)
 val get_handle_checked : t -> 'a Handle_kind.t -> Handle_ref.t -> 'a option
 
 (** Marks, then sweeps. Marking allocates nothing (on the OCaml heap) but to

@@ -72,14 +72,17 @@ val alloc_handle_with_refs
 
 (** Returns a handle's OCaml value, or [None] if [addr] is not a live handle's
     base in this heap of [kind]. A swept address may be reused, by a handle of
-    any ID: callers must not use a stale address (see [get_handle_checked]). *)
+    any ID: callers must not use a stale address (see [get_handle_checked]). The
+    payload, and any address taken from it, is valid only while the handle is
+    reachable from the Stag roots (see [Handle_kind]). *)
 val get_handle : t -> 'a Handle_kind.t -> Memory.Addr.t -> 'a option
 
 (** Raises unless [addr] is a live handle's base. *)
 val handle_ref : t -> Memory.Addr.t -> Handle_ref.t
 
 (** As [get_handle], but [None] once the handle has been swept, even if its
-    address has been reused. *)
+    address has been reused. The payload is valid only while the handle is
+    reachable, as [get_handle]'s. *)
 val get_handle_checked : t -> 'a Handle_kind.t -> Handle_ref.t -> 'a option
 
 (** The words a block of [header] takes in the heap, its header and rounding up
