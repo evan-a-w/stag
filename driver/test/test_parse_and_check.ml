@@ -172,9 +172,10 @@ let%expect_test "the staged power example" =
     val cube : 'a -> list['a]
     val used : list[int]
     (power <fun>)
-    (three (S <ptr>))
+    (three (S (Ptr (S (Ptr (S (Ptr (Z))))))))
     (cube <fun>)
-    (used (Cons <ptr>))
+    (used
+     (Cons (Ptr (Tuple 7 (Cons (Ptr (Tuple 7 (Cons (Ptr (Tuple 7 (Nil)))))))))))
     |}]
 ;;
 

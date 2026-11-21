@@ -24,7 +24,7 @@ let store_is_unit = (p.* <- 4)
     val store_is_unit : unit
     -- evaluated at compile time
     -- evaluated
-    (p <ptr>)
+    (p (Ptr 4))
     (set "()")
     (postfix 2)
     (set_prefix "()")
@@ -54,8 +54,8 @@ let cells =
     val cells : int * int
     -- evaluated at compile time
     -- evaluated
-    (p <ptr>)
-    (q <ptr>)
+    (p (Ptr 5))
+    (q (Ptr 5))
     (set "()")
     (through_p 5)
     (cells (Tuple 9 1))
@@ -92,13 +92,13 @@ let nested = s.*
     val nested : segment
     -- evaluated at compile time
     -- evaluated
-    (p <ptr>)
+    (p (Ptr (point (x 10) (y 2))))
     (before (point (x 1) (y 2)))
     (set "()")
     (after (point (x 10) (y 2)))
     (unchanged 1)
     (changed 10)
-    (s <ptr>)
+    (s (Ptr (segment (from (point (x 5) (y 0))) (to_ (point (x 1) (y 1))))))
     (nested_set "()")
     (nested (segment (from (point (x 5) (y 0))) (to_ (point (x 1) (y 1)))))
     |}]
@@ -120,7 +120,7 @@ let after = r.*
     val after : {`x : int; `y : bool}
     -- evaluated at compile time
     -- evaluated
-    (r <ptr>)
+    (r (Ptr ((x 2) (y true))))
     (before ((x 1) (y true)))
     (set "()")
     (after ((x 2) (y true)))
@@ -155,8 +155,8 @@ let evaluations = count
     val evaluations : int
     -- evaluated at compile time
     -- evaluated
-    (p <ptr>)
-    (q <ptr>)
+    (p (Ptr 1))
+    (q (Ptr 0))
     (rhs_done true)
     (pick <fun>)
     (set "()")
@@ -188,10 +188,10 @@ let both = s.*
     val both : {`a : int; `b : int}
     -- evaluated at compile time
     -- evaluated
-    (p <ptr>)
+    (p (Ptr 3))
     (sets "()")
     (last 3)
-    (s <ptr>)
+    (s (Ptr ((a 3) (b 4))))
     (field_sets "()")
     (both ((a 3) (b 4)))
     |}]
@@ -290,7 +290,17 @@ let erased = Stag.Code.erase .< (Ptr.make 1).* <- 2 >.
         : int)
        (Lit (Int 2) : int) : unit)))
     (ran "()")
-    (erased (Stag.Expr.Store <ptr>))
+    (erased
+     (Stag.Expr.Store
+      (Ptr
+       (Tuple
+        (Stag.Expr.Deref
+         (Ptr
+          (Stag.Expr.App
+           (Ptr
+            (Tuple (Stag.Expr.Var (Stag.Path.Ref (Ref (value Ptr.make))) (None))
+             (Stag.Expr.Lit (Stag.Lit.Int 1)))))))
+        (Stag.Expr.Lit (Stag.Lit.Int 2))))))
     |}];
   show_erased
     {|type point = {x : int; y : int}
@@ -322,10 +332,22 @@ let stored = cell.*
     val run_store : unit
     val stored : int
     -- evaluated at compile time
-    (store (Stag.Expr.Store <ptr>))
+    (store
+     (Stag.Expr.Store
+      (Ptr
+       (Tuple
+        (Stag.Expr.Deref
+         (Ptr (Stag.Expr.Var (Stag.Path.Name (String cell)) (None))))
+        (Stag.Expr.Lit (Stag.Lit.Int 5))))))
     -- evaluated
-    (cell <ptr>)
-    (store (Stag.Expr.Store <ptr>))
+    (cell (Ptr 5))
+    (store
+     (Stag.Expr.Store
+      (Ptr
+       (Tuple
+        (Stag.Expr.Deref
+         (Ptr (Stag.Expr.Var (Stag.Path.Name (String cell)) (None))))
+        (Stag.Expr.Lit (Stag.Lit.Int 5))))))
     (run_store "()")
     (stored 5)
     |}]
@@ -347,7 +369,7 @@ let after = p.*
     val after : point
     -- evaluated at compile time
     -- evaluated
-    (p <ptr>)
+    (p (Ptr (point (x 2) (y 1))))
     (set "()")
     (after (point (x 2) (y 1)))
     |}]
@@ -379,9 +401,9 @@ let now = orig.*.next.*.value
     val now : int
     -- evaluated at compile time
     -- evaluated
-    (leaf <ptr>)
-    (repl <ptr>)
-    (orig <ptr>)
+    (leaf (Ptr (cell (value 99))))
+    (repl (Ptr (cell (value 2))))
+    (orig (Ptr (node (next (Ptr (cell (value 2)))) (label 1))))
     (set "()")
     (leaf_value 99)
     (repl_value 2)

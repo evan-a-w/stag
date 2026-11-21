@@ -314,7 +314,7 @@ let main = raise (M.F (Cons (Ptr.make ( (1, Nil))), Some G))
     File "a.stag", line 4, characters 11-60:
     4 | let main = raise (M.F (Cons (Ptr.make ( (1, Nil))), Some G))
                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: Uncaught exception A.M.F (Cons (1, Nil), Some A.G)
+    Error: Uncaught exception A.M.F (Cons (Ptr.make (1, Nil)), Some A.G)
     |}]
 ;;
 
@@ -634,33 +634,34 @@ let main =
     |}]
 ;;
 
-(* [big 200] is long enough that showing the whole of it would take many lines:
-   a raise must not show its exception unless it is uncaught, and then only the
-   start of it. *)
-let big_value =
+(* [big 60] shares its subtrees, so it is built in 60 steps but shows as 2^60
+   leaves: a raise must not show its exception unless it is uncaught, and then
+   only the start of it. *)
+let big_tree =
   {|
-exception E of list[int]
-let big n = match n with 0 -> Nil | _ -> let rest = big (Int.sub n 1) in Cons (Ptr.make (n, rest))
-let t = big 200
+type tree = Leaf | Node of ptr[tree * tree]
+exception E of tree
+let big n = match n with 0 -> Leaf | _ -> let t = big (Int.sub n 1) in Node (Ptr.make (t, t))
+let t = big 60
 |}
 ;;
 
 let%expect_test "raising a big value is cheap" =
   run
-    (big_value
+    (big_tree
      ^ {|
 let catch n acc = match n with 0 -> acc | _ -> catch (Int.sub n 1) (match raise (E t) with () -> acc | exception E _ -> Int.add acc 1)
 let main = print_int (catch 1000 0)
 |}
     );
   [%expect {| 1000 |}];
-  run (big_value ^ "let main = raise (E t)\n");
+  run (big_tree ^ "let main = raise (E t)\n");
   [%expect
     {|
-    File "a.stag", line 5, characters 11-22:
-    5 | let main = raise (E t)
+    File "a.stag", line 6, characters 11-22:
+    6 | let main = raise (E t)
                    ^^^^^^^^^^^
-    Error: Uncaught exception A.E (Cons (200, Cons (199, Cons (198, Cons (197, Cons (196, Cons (195, Cons (194, Cons (193, Cons (192, Cons (191, Cons (190, Cons (189, Cons (188, Cons (187, Cons (186, Cons (185, Cons (184, Cons (183, Cons (182, Cons (181, Cons (180, Cons (179, Cons (178, Cons (177, Cons (176, Cons (175, Cons (174, Cons (173, Cons (172, Cons (171, Cons (170, Cons (169, Cons (168, Cons (167, Cons (166, Cons (165, Cons (164, Cons (163, Cons (162, Cons (161, Cons (160, Cons (159, Cons (158, Cons (157, Cons (156, Cons (155, Cons (154, Cons (153, Cons (152, Cons (151, Cons (150, Cons (149, Cons (148, Cons (147, Cons (146, Cons (145, Cons (144, Cons (143, Cons (142, Cons (141, Cons (140, Cons (139, Cons (138, Cons (137, Cons (136, Cons (135, Cons (134, Cons (133, Cons (132, Cons (131, Cons (130, Cons (129, Cons (128, Cons (127, Cons (126, Cons (125, Cons (124, Cons (123, Cons (122, Cons (121, Cons (120, Cons (119, Cons (118, Cons (117, Cons (116, Cons (115, Cons (114, Cons (113, Cons (112, Cons (111, Cons ...
+    Error: Uncaught exception A.E (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Node (Ptr.make (A.Nod...
     |}]
 ;;
 

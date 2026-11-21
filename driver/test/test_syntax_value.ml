@@ -729,8 +729,8 @@ let%expect_test "values" =
   show {|type t['a] = A | B of 'a * t['a]|};
   [%expect
     {|
-    Cons (Stag.Toplevel.Let ("f", Cons (("x", Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), Nil), None, Stag.Expr.Poly_variant <ptr>), Nil)
-    Cons (Stag.Toplevel.Type {`kind = Stag.Type_decl.Kind.Variant (Cons (("A", Nil), Cons (("B", Cons (Stag.Type_expr.Var "a", Cons (Stag.Type_expr.Con (Stag.Path.Name "t", Cons (Stag.Type_expr.Arg.Ty (Stag.Type_expr.Var "a"), Nil)), Nil))), Nil))); `name = "t"; `params = Cons (Stag.Type_decl.Param.Ty "a", Nil)}, Nil)
+    Cons (Ptr.make (Stag.Toplevel.Let ("f", Cons (Ptr.make (("x", Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), Nil)), None, Stag.Expr.Poly_variant (Ptr.make ("A", Some (Stag.Expr.Var (Stag.Path.Name "x", None))))), Nil))
+    Cons (Ptr.make (Stag.Toplevel.Type {`kind = Stag.Type_decl.Kind.Variant (Cons (Ptr.make (("A", Nil), Cons (Ptr.make (("B", Cons (Ptr.make (Stag.Type_expr.Var "a", Cons (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "t", Cons (Ptr.make (Stag.Type_expr.Arg.Ty (Stag.Type_expr.Var "a"), Nil))), Nil))))), Nil))))); `name = "t"; `params = Cons (Ptr.make (Stag.Type_decl.Param.Ty "a", Nil))}, Nil))
     |}]
 ;;
 
@@ -775,7 +775,7 @@ let%expect_test "an update of fields by ref round trips" =
    | Error error -> print_error error);
   [%expect
     {|
-    Stag.Expr.Record_update <ptr>
+    Stag.Expr.Record_update (Ptr.make (Stag.Expr.Var (Stag.Path.Name "v", None), Cons (Ptr.make ((Stag.Path.Ref <field A.N.x>, Stag.Expr.Lit (Stag.Lit.Int 1)), Cons (Ptr.make ((Stag.Path.Name "y", Stag.Expr.Lit Stag.Lit.Unit), Nil))))))
     (Record_update (Var v ()) ((<A.N.x> (Lit (Int 1))) (y (Lit Unit))))
     (equal true)
     |}]
@@ -942,7 +942,7 @@ let%expect_test "generated syntax the parser does not make" =
     val first : int
     -- evaluated at compile time
     -- evaluated
-    (one_tuple (C (Tuple 1 <ptr>)))
+    (one_tuple (C (Tuple 1 (Ptr (D 2)))))
     (first 1)
     |}]
 ;;
@@ -1079,7 +1079,7 @@ let%expect_test "malformed values made otherwise" =
              )
          | _ -> assert false));
   [%expect
-    {| Malformed syntax: expected a list cell's pair, got (("x", None), Cons (("y", Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), Nil), Cons (("y", Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), Nil)), within Stag.Expr.Let argument 1 |}];
+    {| Malformed syntax: expected a list cell's pair, got (("x", None), Cons (Ptr.make (("y", Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), Nil)), Cons (Ptr.make (("y", Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), Nil))), within Stag.Expr.Let argument 1 |}];
   (* A list ending in something else. *)
   print_expr (edit (expr "(a, b, c)") ~name:"prelude.Nil" ~f:(fun _ _ -> Unit));
   [%expect
@@ -1281,7 +1281,7 @@ let%expect_test "shapes" =
   [%expect
     {|
     Malformed syntax: expected at least two components, got Nil, within Stag.Expr.Tuple
-    Malformed syntax: expected at least two components, got Cons (Stag.Expr.Lit Stag.Lit.Unit, Nil), within Stag.Expr.Tuple
+    Malformed syntax: expected at least two components, got Cons (Ptr.make (Stag.Expr.Lit Stag.Lit.Unit, Nil)), within Stag.Expr.Tuple
     (Tuple ((Lit Unit) (Lit Unit)))
     |}];
   List.iter
@@ -1290,7 +1290,7 @@ let%expect_test "shapes" =
   [%expect
     {|
     Malformed syntax: expected at least two components, got Nil, within Stag.Pattern.Tuple
-    Malformed syntax: expected at least two components, got Cons (Stag.Pattern.Any, Nil), within Stag.Pattern.Tuple
+    Malformed syntax: expected at least two components, got Cons (Ptr.make (Stag.Pattern.Any, Nil)), within Stag.Pattern.Tuple
     (Tuple (Any Any))
     |}];
   List.iter
@@ -1299,7 +1299,7 @@ let%expect_test "shapes" =
   [%expect
     {|
     (Tuple ())
-    Malformed syntax: expected no components or at least two, got Cons (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Nil), within Stag.Type_expr.Tuple
+    Malformed syntax: expected no components or at least two, got Cons (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Nil)), within Stag.Type_expr.Tuple
     (Tuple ((Con int ()) (Con int ())))
     |}];
   expr (at (Syntax.Expr.Record []));

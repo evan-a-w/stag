@@ -38,14 +38,18 @@ val of_prim : Prim.Value.t -> t
 val to_prim : t -> Prim.Value.t or_null
 val of_lit : Syntax.Lit.t -> t
 
-(** Functions are [<fun>], as their envs may contain themselves. Here and in
-    [to_string_hum], constructors of the prelude are named as within it
-    ([Prelude_path.to_string_hum]). *)
+(** Pointers expose their payload as [(Ptr v)], with [<cycle>] on a back-edge,
+    and prelude lists are [(Cons x xs)]. Deep or excessively large values are
+    bounded with [<truncated>]. Functions are [<fun>], as their envs may contain
+    themselves. Here and in [to_string_hum], constructors of the prelude are
+    named as within it ([Prelude_path.to_string_hum]). *)
 val sexp_of_t : t -> Sexp.t
 
-(** As stag syntax, eg. [C (1, `A)], for messages. Functions are [<fun>], code
-    [<code>]. If longer than [max_length], it is cut there and followed by
-    [...]. *)
+(** As stag syntax, eg. [C (1, `A)] and [Ptr.make (1, Nil)], for messages.
+    Cycles and excessive depth/size use [<cycle>] and [<truncated>]. Functions
+    are [<fun>], code [<code>]. If longer than [max_length], it is cut there and
+    followed by [...]. Sharing is printed as repeated values; reparsing a
+    printed pointer value does not preserve its identity. *)
 val to_string_hum : ?max_length:int -> t -> string
 
 (** [to_string_hum], cut at 1000 characters, followed by [...]. *)

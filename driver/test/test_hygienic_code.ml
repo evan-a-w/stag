@@ -56,7 +56,7 @@ let%expect_test "an erased expression's value" =
   show_values
     {|let e_lib = Stag.Code.erase .< Core.Sexp.Atom (Core.Int.to_string x) >.|};
   [%expect
-    {| e_lib: Stag.Expr.Construct (Stag.Path.Ref <constructor Core.Sexp.Atom>, Cons (Stag.Expr.App <ptr>, Nil)) |}]
+    {| e_lib: Stag.Expr.Construct (Stag.Path.Ref <constructor Core.Sexp.Atom>, Cons (Ptr.make (Stag.Expr.App (Ptr.make (Stag.Expr.Var (Stag.Path.Ref <value Core.Int.to_string>, None), Stag.Expr.Var (Stag.Path.Name "x", None))), Nil))) |}]
 ;;
 
 let%expect_test "what code refers to is erased as refs, its free variables as \

@@ -33,10 +33,10 @@ let quoted_value = .~quoted
         (Lit (Int 3) : int) : ptr[int])
        : int)))
     -- evaluated
-    (pair <ptr>)
+    (pair (Ptr (Tuple 42 true)))
     (prefix (Tuple 42 true))
     (postfix (Tuple 42 true))
-    (tree (Branch <ptr>))
+    (tree (Branch (Ptr (Tuple (Leaf 7) (Leaf 8)))))
     (first <fun>)
     (found 7)
     (quoted
@@ -118,7 +118,7 @@ let values = (cell.*, cells)
     val values : M.t * list[M.t]
     -- evaluated at compile time
     -- evaluated
-    (cell <ptr>)
+    (cell (Ptr (M.B 7)))
     (cells (Cons (M.A) (Cons (M.B 8) (Nil))))
     (values (Tuple (M.B 7) (Cons (M.A) (Cons (M.B 8) (Nil)))))
     |}]
@@ -178,7 +178,7 @@ let values = (cell.*, (.~quoted).*)
        (Construct ((type_name M.t) (name M.A) (index 0)) () : M.t) : ptr[M.t])))
     -- evaluated
     (wrap <fun>)
-    (cell <ptr>)
+    (cell (Ptr (M.B 7)))
     (quoted
      (Code
       (App (Var (Persistent (Toplevel wrap/4)) : "M.t -> ptr[M.t]")

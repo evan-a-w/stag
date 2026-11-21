@@ -86,66 +86,107 @@ let field_name (record_type : Typed.Record_type.t) index =
   Prelude_path.short_name record_type.fields.(index)
 ;;
 
-let rec sexp_of_t : t -> Sexp.t = function
-  | Int n -> Atom (Int.to_string n)
-  | Bool b -> sexp_of_bool b
-  | String s -> List [ Atom "String"; Atom s ]
-  | Char c -> List [ Atom "Char"; sexp_of_char c ]
-  | Unit -> Atom "()"
-  | Tuple values -> List (Atom "Tuple" :: List.map values ~f:sexp_of_t)
-  | Ptr _ -> Atom "<ptr>"
-  | Construct ({ name; _ }, [ Ptr cell ])
-    when String.equal name (Prelude_path.canonical "Cons") ->
-    (match !cell with
-     | Tuple values -> List (Atom "Cons" :: List.map values ~f:sexp_of_t)
-     | _ -> List [ Atom "Cons"; Atom "<ptr>" ])
-  | Construct ({ name; _ }, values) ->
-    List (Atom (Prelude_path.to_string_hum name) :: List.map values ~f:sexp_of_t)
-  | Record (record_type, values) ->
-    List
-      (Atom (Prelude_path.to_string_hum record_type.name)
-       :: Array.to_list
-            (Array.mapi values ~f:(fun index value ->
-               Sexp.List
-                 [ Atom (field_name record_type index); sexp_of_t value ])))
-  | Poly_record fields -> [%sexp (fields : t String.Map.t)]
-  | Poly_variant (tag, Unit) -> Atom ("`" ^ tag)
-  | Poly_variant (tag, arg) -> List [ Atom ("`" ^ tag); sexp_of_t arg ]
-  | Function _ | Prim _ | Intrinsic _ -> Atom "<fun>"
-  | Type ty -> List [ Atom "Type"; Syntax.Type_expr.sexp_of_t ty ]
-  | Ref ref_ -> List [ Atom "Ref"; Decl_ref.sexp_of_t ref_ ]
-  | Code { expr; persistent } ->
-    List
-      (Atom "Code"
-       :: Typed.Expr.sexp_of_t expr
-       ::
-       (if Map.is_empty persistent
-        then []
-        else [ [%sexp (persistent : t Typed.Ident.Map.t)] ]))
+let print_budget = 100_000
+let max_print_depth = 1024
+
+let sexp_of_t value =
+  let remaining = ref print_budget in
+  let rec sexp depth pointers value : Sexp.t =
+    if !remaining = 0 || depth >= max_print_depth
+    then Atom "<truncated>"
+    else (
+      decr remaining;
+      let sexp_of_t = sexp (depth + 1) pointers in
+      match value with
+      | Int n -> Atom (Int.to_string n)
+      | Bool b -> sexp_of_bool b
+      | String s -> List [ Atom "String"; Atom s ]
+      | Char c -> List [ Atom "Char"; sexp_of_char c ]
+      | Unit -> Atom "()"
+      | Tuple values -> List (Atom "Tuple" :: List.map values ~f:sexp_of_t)
+      | Ptr cell ->
+        if List.exists pointers ~f:(phys_equal cell)
+        then Atom "<cycle>"
+        else List [ Atom "Ptr"; sexp (depth + 1) (cell :: pointers) !cell ]
+      | Construct ({ name; _ }, [ Ptr ({ contents = Tuple [ _; _ ] } as cell) ])
+        when String.equal name (Prelude_path.canonical "Cons")
+             && not (List.exists pointers ~f:(phys_equal cell)) ->
+        (match sexp (depth + 1) (cell :: pointers) !cell with
+         | List (Atom "Tuple" :: values) -> List (Atom "Cons" :: values)
+         | payload -> List [ Atom "Cons"; List [ Atom "Ptr"; payload ] ])
+      | Construct ({ name; _ }, values) ->
+        List
+          (Atom (Prelude_path.to_string_hum name)
+           :: List.map values ~f:sexp_of_t)
+      | Record (record_type, values) ->
+        List
+          (Atom (Prelude_path.to_string_hum record_type.name)
+           :: Array.to_list
+                (Array.mapi values ~f:(fun index value ->
+                   Sexp.List
+                     [ Atom (field_name record_type index); sexp_of_t value ]))
+          )
+      | Poly_record fields ->
+        [%sexp (Map.map fields ~f:sexp_of_t : Sexp.t String.Map.t)]
+      | Poly_variant (tag, Unit) -> Atom ("`" ^ tag)
+      | Poly_variant (tag, arg) -> List [ Atom ("`" ^ tag); sexp_of_t arg ]
+      | Function _ | Prim _ | Intrinsic _ -> Atom "<fun>"
+      | Type ty -> List [ Atom "Type"; Syntax.Type_expr.sexp_of_t ty ]
+      | Ref ref_ -> List [ Atom "Ref"; Decl_ref.sexp_of_t ref_ ]
+      | Code { expr; persistent } ->
+        List
+          (Atom "Code"
+           :: Typed.Expr.sexp_of_t expr
+           ::
+           (if Map.is_empty persistent
+            then []
+            else
+              [ [%sexp
+                  (Map.map persistent ~f:sexp_of_t : Sexp.t Typed.Ident.Map.t)]
+              ])))
+  in
+  sexp 0 [] value
 ;;
 
 exception Too_long
+exception Print_limit
 
 let to_string_hum ?max_length value =
   let buffer = Buffer.create 64 in
+  let depth = ref 0 in
+  let remaining = ref print_budget in
+  let pointers = ref [] in
   let add string =
     Buffer.add_string buffer string;
     match max_length with
     | Some max_length when Buffer.length buffer > max_length -> raise Too_long
     | Some _ | None -> ()
   in
-  let rec value_ : t -> unit = function
+  let rec value_ value =
+    if !remaining = 0 then raise Print_limit;
+    if !depth >= max_print_depth
+    then add "<truncated>"
+    else (
+      incr depth;
+      decr remaining;
+      print_value value;
+      decr depth)
+  and print_value : t -> unit = function
     | Int n -> add (Int.to_string n)
     | Bool b -> add (Bool.to_string b)
     | String s -> add (sprintf "%S" s)
     | Char c -> add (sprintf "%C" c)
     | Unit -> add "()"
     | Tuple values -> tuple values
-    | Ptr _ -> add "<ptr>"
-    | Construct ({ name; _ }, [ Ptr cell ])
-      when String.equal name (Prelude_path.canonical "Cons") ->
-      add "Cons ";
-      value_ !cell
+    | Ptr cell ->
+      if List.exists !pointers ~f:(phys_equal cell)
+      then add "<cycle>"
+      else (
+        let previous = !pointers in
+        pointers := cell :: previous;
+        add "Ptr.make ";
+        argument !cell;
+        pointers := previous)
     | Construct ({ name; _ }, []) -> add (Prelude_path.to_string_hum name)
     | Construct ({ name; _ }, [ (Tuple _ as value) ]) ->
       add (Prelude_path.to_string_hum name);
@@ -191,7 +232,7 @@ let to_string_hum ?max_length value =
   and argument (value : t) =
     match value with
     | Construct (_, []) | Poly_variant (_, Unit) -> value_ value
-    | Construct _ | Poly_variant _ ->
+    | Ptr _ | Construct _ | Poly_variant _ ->
       add "(";
       value_ value;
       add ")"
@@ -203,6 +244,12 @@ let to_string_hum ?max_length value =
   in
   match value_ value with
   | () -> Buffer.contents buffer
+  | exception Print_limit ->
+    (match add "<truncated>" with
+     | () -> Buffer.contents buffer
+     | exception Too_long ->
+       Buffer.To_string.sub buffer ~pos:0 ~len:(Option.value_exn max_length)
+       ^ "...")
   | exception Too_long ->
     Buffer.To_string.sub buffer ~pos:0 ~len:(Option.value_exn max_length)
     ^ "..."

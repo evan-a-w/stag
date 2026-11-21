@@ -24,12 +24,13 @@ let used = cube 7
     val used : list[int]
     -- evaluated at compile time
     (power <fun>)
-    (three (S <ptr>))
+    (three (S (Ptr (S (Ptr (S (Ptr (Z))))))))
     -- evaluated
     (power <fun>)
-    (three (S <ptr>))
+    (three (S (Ptr (S (Ptr (S (Ptr (Z))))))))
     (cube <fun>)
-    (used (Cons <ptr>))
+    (used
+     (Cons (Ptr (Tuple 7 (Cons (Ptr (Tuple 7 (Cons (Ptr (Tuple 7 (Nil)))))))))))
     |}]
 ;;
 

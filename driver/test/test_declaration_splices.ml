@@ -858,8 +858,8 @@ let o = Some 1
     end
     --- output ---
     |}];
-  (* The prelude's [Cons] and [Nil] build a prelude list of toplevels, though
-     the program shadows [list]. *)
+  (* Its [Cons] and [Nil] are the prelude's where a prelude list is expected, as
+     constructors are looked up in the expected type. *)
   check
     {|
 type list['a] = Nil | Cons of ptr['a * list['a]]
@@ -1025,8 +1025,8 @@ let%expect_test "a file shadowing the prelude's Stag" =
     [ { Source_file.path = "stag.stag"; contents = "let mine = 1\n" }
     ; { Source_file.path = "a.stag"
       ; contents =
-          "include .~(Cons (Stag.Toplevel.let_ \"x\" Nil (Stag.Expr.int 1), \
-           Nil))\n"
+          "include .~(Cons (Ptr.make (Stag.Toplevel.let_ \"x\" Nil \
+           (Stag.Expr.int 1), Nil)))\n"
       }
     ]
   in
@@ -1041,21 +1041,17 @@ let%expect_test "a file shadowing the prelude's Stag" =
          (List.map error ~f:Diagnostic.of_driver_error));
     [%expect
       {|
-      File "a.stag", line 1, characters 17-30:
-      1 | include .~(Cons (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1), Nil))
-                           ^^^^^^^^^^^^^
+      File "a.stag", line 1, characters 27-40:
+      1 | include .~(Cons (Ptr.make (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1), Nil)))
+                                     ^^^^^^^^^^^^^
       Error: Unbound module Stag.Toplevel (the prelude's module Stag is shadowed by the program's Stag)
       File "stag.stag", line 1, characters 0-0:
       1 | let mine = 1
           ^
       Note: The program's module Stag is here
-      File "a.stag", line 1, characters 17-66:
-      1 | include .~(Cons (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1), Nil))
-                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-      Error: This expression has type <error> * list['_a] but an expression was expected of type ptr[prelude.Stag.Toplevel.t * list[prelude.Stag.Toplevel.t]]
-      File "a.stag", line 1, characters 45-54:
-      1 | include .~(Cons (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1), Nil))
-                                                       ^^^^^^^^^
+      File "a.stag", line 1, characters 55-64:
+      1 | include .~(Cons (Ptr.make (Stag.Toplevel.let_ "x" Nil (Stag.Expr.int 1), Nil)))
+                                                                 ^^^^^^^^^
       Error: Unbound module Stag.Expr (the prelude's module Stag is shadowed by the program's Stag)
       File "stag.stag", line 1, characters 0-0:
       1 | let mine = 1

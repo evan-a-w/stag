@@ -134,10 +134,10 @@ let failure = only_none v
 |};
   [%expect
     {|
-    (v (N.r (x 1) (y (Some <ptr>))))
+    (v (N.r (x 1) (y (Some (Ptr (N.r (x -2) (y (None))))))))
     (only_none <fun>)
-    ("Match failure: no case matches the value {x = 1; y = Some <ptr>}" @
-     t.stag:7:26-61)
+    ("Match failure: no case matches the value {x = 1; y = Some (Ptr.make {x = -2; y = None})}"
+     @ t.stag:7:26-61)
     |}]
 ;;
 
@@ -179,21 +179,12 @@ type s = {x : bool}
       print_s [%sexp (first : string option), (second : string option)]);
   [%expect
     {|
-    t.stag:7:31-32: expected `}` to close this `{` (opened at 7:14), found `<`
-    (("{x = 1; y = Some <ptr>}") ())
+    (("{x = 1; y = Some (Ptr.make {x = -2; y = None})}")
+     ("{x = 1; y = Some (Ptr.make {x = -2; y = None})}"))
     (("N.B ({`a = {x = 3; y = None}}, {x = 4; y = None})")
      ("N.B ({`a = {x = 3; y = None}}, {x = 4; y = None})"))
-    ((Unification_error
-      (Type_mismatch
-       (TCon ptr
-        ((ATy
-          (TTuple
-           ((TVar (Link (TCon N.t ())))
-            (TCon prelude.list ((ATy (TVar (Link (TCon N.t ())))))))))))
-       (TTuple ((TCon N.t ()) (TCon prelude.list ((ATy (TVar (Unbound 23 1)))))))
-       Structural_mismatch))
-     @ t.stag:7:26-52)
-    (("Cons (N.A {x = 5; y = None}, Nil)") ())
+    (("Cons (Ptr.make (N.A {x = 5; y = None}, Nil))")
+     ("Cons (Ptr.make (N.A {x = 5; y = None}, Nil))"))
     (("`C {x = 6; y = None}") ("`C {x = 6; y = None}"))
     |}]
 ;;

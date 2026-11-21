@@ -149,6 +149,7 @@ let expr (expr : Typed.Expr.t) =
     | Free name -> Ok (Path (Syntax.Path.of_string name))
     | Free_toplevel name -> Ok (resolved name)
     | Prim prim -> Ok (resolved (Prim.canonical_name prim))
+    | Intrinsic Ptr_make -> Ok (resolved (Prelude_path.canonical "Ptr.make"))
     | Intrinsic intrinsic ->
       Or_error.error_s
         [%message
