@@ -28,7 +28,7 @@ module Env = struct
         Stag_gc.create
           config
           ~heap
-          ~roots
+          ~roots:(Roots.root_sources roots)
           ~data_stack:(Data_stack.create ())
           ~static:(Static_data.create ())
     }
@@ -407,7 +407,7 @@ let%expect_test "destroy" =
     Stag_gc.create
       Stag_gc.Config.default
       ~heap
-      ~roots
+      ~roots:(Roots.root_sources roots)
       ~data_stack:(Data_stack.create ())
       ~static:(Static_data.create ())
   in

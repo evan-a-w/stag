@@ -216,7 +216,7 @@ let%expect_test "a global keeps what its slots point to alive, until removed" =
     Stag_gc.create
       manual
       ~heap
-      ~roots
+      ~roots:(Roots.root_sources roots)
       ~data_stack:(Data_stack.create ())
       ~static
   in
@@ -254,7 +254,7 @@ let%expect_test "check_invariants: static data must not point into the heap" =
     Stag_gc.create
       manual
       ~heap
-      ~roots
+      ~roots:(Roots.root_sources roots)
       ~data_stack:(Data_stack.create ())
       ~static
   in

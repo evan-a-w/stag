@@ -28,7 +28,7 @@ let[@cold] fail sexp = raise (Error.to_exn (Error.create_s sexp))
 type t =
   { config : Config.t
   ; heap : Heap.t
-  ; roots : Roots.t
+  ; roots : Root_source.t array
   ; data_stack : Data_stack.t
   ; static : Static_data.t
   ; mutable live_words : int (** After the last collection. *)
@@ -54,7 +54,7 @@ let create config ~heap ~roots ~data_stack ~static =
   let stack = Chunk.create ~bytes:(initial_mark_stack_blocks * 8) ~align:8 in
   { config
   ; heap
-  ; roots
+  ; roots = Array.of_list roots
   ; data_stack
   ; static
   ; live_words = 0
@@ -118,15 +118,9 @@ let[@zero_alloc] mark t =
   t.stack_top <- t.stack_base;
   t.marked_blocks <- 0;
   t.marked_words <- 0;
-  let mutable frame = Roots.latest_frame t.roots in
-  while not (Addr.is_null frame) do
-    for i = 0 to Roots.Frame.slots frame - 1 do
-      visit t (Memory.load_addr (Roots.Frame.slot frame i))
-    done;
-    frame <- Roots.Frame.next frame
-  done;
-  for i = 0 to Roots.globals t.roots - 1 do
-    visit t (Memory.load_addr (Roots.global t.roots i))
+  for i = 0 to Array.length t.roots - 1 do
+    Root_source.iter t.roots.(i) ~f:(fun [@zero_alloc] root ->
+      visit t (Memory.load_addr root))
   done;
   for segment = 0 to Data_stack.segments t.data_stack - 1 do
     let end_ = Data_stack.segment_end t.data_stack segment in
@@ -306,23 +300,21 @@ let check_invariants t =
       error
         [%message "a pointer into the data stack past its top" (from : Sexp.t)]
   in
-  let frame_index = ref 0 in
-  let mutable frame = Roots.latest_frame t.roots in
-  while not (Addr.is_null frame) do
-    for i = 0 to Roots.Frame.slots frame - 1 do
-      check_local
-        ~from:[%message "frame" ~frame:(!frame_index : int) ~slot:(i : int)]
-        (Memory.load_addr (Roots.Frame.slot frame i))
-    done;
-    incr frame_index;
-    frame <- Roots.Frame.next frame
-  done;
-  for i = 0 to Roots.globals t.roots - 1 do
-    let word = Memory.load_addr (Roots.global t.roots i) in
-    let from = [%message "global" ~index:(i : int)] in
-    check_word ~from ~immortal:false word;
-    check_not_data_stack ~from word
-  done;
+  Array.iter t.roots ~f:(fun source ->
+    let name = Root_source.name source in
+    let holds_locals = Root_source.holds_locals source in
+    let index = ref 0 in
+    Root_source.iter source ~f:(fun root ->
+      let word = Memory.load_addr root in
+      let from =
+        [%message "root" ~source:(name : string) ~index:(!index : int)]
+      in
+      if holds_locals
+      then check_local ~from word
+      else (
+        check_word ~from ~immortal:false word;
+        check_not_data_stack ~from word);
+      incr index));
   let block_index = ref 0 in
   Heap.iter t.heap ~f:(fun block ->
     let header = Header.load block in

@@ -1,9 +1,9 @@
 open! Import
 
-(** A precise, non-moving mark-sweep collector over a [Heap], from the slots of
-    [Roots].
+(** A precise, non-moving mark-sweep collector over a [Heap], from the root
+    words of its [Root_source]s and the data stack's live blocks.
 
-    Marking reads every root slot and every pointer word of a marked block (its
+    Marking reads every root word and every pointer word of a marked block (its
     words [[scalar_words, size_words)]). A word is followed only if it is at
     least 4096 (below are null and niche values) and within an allocated block
     of the heap (it may point into the block): anything else, such as static
@@ -43,13 +43,13 @@ end
 
 type t
 
-(** Its roots are [roots]' slots, and the pointer words of [data_stack]'s live
-    blocks. [static] is the program's static data, which [check_invariants]
-    checks (marking needs nothing of it: it is never traced). *)
+(** Its roots are [roots]' root words, in any order, and the pointer words of
+    [data_stack]'s live blocks. [static] is the program's static data, which
+    [check_invariants] checks (marking needs nothing of it: it is never traced). *)
 val create
   :  Config.t
   -> heap:Heap.t
-  -> roots:Roots.t
+  -> roots:Root_source.t list
   -> data_stack:Data_stack.t
   -> static:Static_data.t
   -> t
@@ -59,7 +59,7 @@ val create
 val destroy : t -> unit
 
 (** As [Heap.alloc], collecting first if the policy says to. Every pointer the
-    caller holds into the heap must be in a root slot (or a block reachable from
+    caller holds into the heap must be in a root word (or a block reachable from
     one) across the call. *)
 val alloc : t -> Header.t -> Memory.Addr.t
 
@@ -90,14 +90,15 @@ val collections : t -> int
 
 (** Between collections:
     - every heap block [Unmarked] or [Immortal];
-    - every root slot, and pointer word of an allocated, static or data-stack
+    - every root word, and pointer word of an allocated, static or data-stack
       block, below 4096, outside the heap, or in an allocated block (an
       [Immortal] one, for words of [Immortal] blocks);
     - the heap's handle blocks and its metadata table agreeing, and each handle
       holding every ref its payload has ([Heap.check_handles]);
-    - no pointer word of a heap block, static block or global into the data
-      stack, nor of a static block into the heap;
-    - no frame slot or data-stack word into the data stack past its live blocks;
+    - no pointer word of a heap block or static block, or root word of a source
+      not [Root_source.holds_locals], into the data stack, nor of a static block
+      into the heap;
+    - no root word or data-stack word into the data stack past its live blocks;
     - every data-stack block [Scanned] or [Bytes] and [Unmarked], and each
       segment's blocks ending exactly at its end. *)
 val check_invariants : t -> unit Or_error.t

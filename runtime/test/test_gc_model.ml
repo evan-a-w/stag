@@ -236,7 +236,7 @@ let%expect_test "random mutation against a model" =
     Stag_gc.create
       { Stag_gc.Config.space_overhead = 50; min_words = 500 }
       ~heap
-      ~roots
+      ~roots:(Roots.root_sources roots)
       ~data_stack
       ~static
   in

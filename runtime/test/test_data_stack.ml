@@ -191,7 +191,7 @@ let%expect_test "the GC: data-stack blocks root heap blocks until their region \
     Stag_gc.create
       manual
       ~heap
-      ~roots
+      ~roots:(Roots.root_sources roots)
       ~data_stack:stack
       ~static:(Static_data.create ())
   in
@@ -240,7 +240,14 @@ let%expect_test "check_invariants: nothing but the data stack points into it" =
   let roots = Roots.create () in
   let stack = Data_stack.create () in
   let static = Static_data.create () in
-  let gc = Stag_gc.create manual ~heap ~roots ~data_stack:stack ~static in
+  let gc =
+    Stag_gc.create
+      manual
+      ~heap
+      ~roots:(Roots.root_sources roots)
+      ~data_stack:stack
+      ~static
+  in
   let frame = Roots.push_frame roots ~slots:1 in
   let local = Data_stack.alloc stack (scanned ~size:1 ~scalars:0) in
   let block = Stag_gc.alloc gc (scanned ~size:1 ~scalars:0) in
@@ -368,7 +375,14 @@ let%expect_test "check_invariants: dangling pointers into the data stack, and \
   let roots = Roots.create () in
   let stack = Data_stack.create ~segment_bytes:128 () in
   let static = Static_data.create () in
-  let gc = Stag_gc.create manual ~heap ~roots ~data_stack:stack ~static in
+  let gc =
+    Stag_gc.create
+      manual
+      ~heap
+      ~roots:(Roots.root_sources roots)
+      ~data_stack:stack
+      ~static
+  in
   let global =
     Static_data.add_global static roots (Layout.of_shape Ptr |> ok_exn)
   in
@@ -408,8 +422,9 @@ let%expect_test "check_invariants: dangling pointers into the data stack, and \
      (Gc.check_invariants
       (errors
        (("a pointer into the data stack past its top"
-         (from (frame (frame 0) (slot 0))))
-        ("a pointer into the data stack" (from (global (index 0))))
+         (from (root (source "shadow stack") (index 0))))
+        ("a pointer into the data stack"
+         (from (root (source globals) (index 0))))
         ("a pointer into the data stack past its top"
          (from ("data stack" (block 0) (word 0))))))))
     (Ok ())
@@ -441,7 +456,7 @@ let%expect_test "the GC ignores stale blocks in a reused segment" =
     Stag_gc.create
       manual
       ~heap
-      ~roots
+      ~roots:(Roots.root_sources roots)
       ~data_stack:stack
       ~static:(Static_data.create ())
   in

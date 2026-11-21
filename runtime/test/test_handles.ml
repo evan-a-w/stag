@@ -48,7 +48,14 @@ let create_gc ?(config = Stag_gc.Config.default) ?(classes = [ 1 ]) () =
   let roots = Roots.create () in
   let data_stack = Data_stack.create () in
   let static = Static_data.create () in
-  let gc = Stag_gc.create config ~heap ~roots ~data_stack ~static in
+  let gc =
+    Stag_gc.create
+      config
+      ~heap
+      ~roots:(Roots.root_sources roots)
+      ~data_stack
+      ~static
+  in
   gc, heap, roots, data_stack, static
 ;;
 

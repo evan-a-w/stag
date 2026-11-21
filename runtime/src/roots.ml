@@ -314,3 +314,39 @@ module For_testing = struct
   let segments t = t.segment_count
   let segment t = t.segment
 end
+
+module Frames_source = struct
+  type nonrec t = t
+
+  let name = "shadow stack"
+  let holds_locals = true
+
+  let[@zero_alloc] iter t ~(f : _ @ local) =
+    let mutable frame = latest_frame t in
+    while not (Addr.is_null frame) do
+      for i = 0 to Frame.slots frame - 1 do
+        (f [@zero_alloc assume]) (Frame.slot frame i)
+      done;
+      frame <- Frame.next frame
+    done
+  ;;
+end
+
+module Globals_source = struct
+  type nonrec t = t
+
+  let name = "globals"
+  let holds_locals = false
+
+  let[@zero_alloc] iter t ~(f : _ @ local) =
+    for i = 0 to t.global_count - 1 do
+      (f [@zero_alloc assume]) t.globals.(i)
+    done
+  ;;
+end
+
+let root_sources t =
+  [ Root_source.create (module Frames_source) t
+  ; Root_source.create (module Globals_source) t
+  ]
+;;

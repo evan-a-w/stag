@@ -113,3 +113,6 @@ module For_testing : sig
 
   val segment : t -> int
 end
+
+(** Its frames' slots (which may hold locals) and its globals, as two sources. *)
+val root_sources : t -> Root_source.t list
