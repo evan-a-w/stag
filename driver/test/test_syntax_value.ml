@@ -761,7 +761,7 @@ let%expect_test "an update of fields by ref round trips" =
   let update =
     expr
       (Record_update
-         ( expr (Var (Path (Syntax.Path.name "v"), None))
+         ( expr (Var (Path (Syntax.Path.name "v"), Syntax.Annot.none))
          , [ at (Syntax.Decl_path.Resolved "A.N.x"), expr (Lit (Int 1))
            ; at (Syntax.Decl_path.Path (Syntax.Path.name "y")), expr (Lit Unit)
            ] ))
@@ -1114,10 +1114,10 @@ let%expect_test "names" =
     [ ( "pattern"
       , of_expr (fun name ->
           expr (Match (unit, [ at (Syntax.Pattern.Var name), unit ]))) )
-    ; "let", of_expr (fun name -> expr (Let (at name, [], None, unit, unit)))
+    ; "let", of_expr (fun name -> expr (Let (at name, [], Syntax.Annot.none, unit, unit)))
     ; ( "param"
       , of_expr (fun name ->
-          expr (Let (at "f", [ at name, None ], None, unit, unit))) )
+          expr (Let (at "f", [ at name, Syntax.Annot.none ], Syntax.Annot.none, unit, unit))) )
     ; ( "module"
       , of_toplevel (fun name -> at (Syntax.Toplevel.Module (at name, []))) )
     ; ( "type"
@@ -1142,7 +1142,7 @@ let%expect_test "names" =
           expr (Splice { expr = unit; subs = Some [ at name, None ] })) )
     ; ( "var path"
       , of_expr (fun name ->
-          expr (Var (Path (Syntax.Path.of_list_exn [ name ]), None))) )
+          expr (Var (Path (Syntax.Path.of_list_exn [ name ]), Syntax.Annot.none))) )
     ; ( "con path"
       , of_expr (fun name ->
           expr
@@ -1387,13 +1387,13 @@ let decls =
            (Syntax.Toplevel.Let
               ( Located.create ~loc:Loc.none "bad"
               , []
-              , None
+              , Syntax.Annot.none
               , Located.create
                   ~loc:Loc.none
                   (Syntax.Expr.Match
                      ( Located.create
                          ~loc:Loc.none
-                         (Syntax.Expr.Var (Path (Syntax.Path.name "p"), None))
+                         (Syntax.Expr.Var (Path (Syntax.Path.name "p"), Syntax.Annot.none))
                      , [] )) ))
        ]);
   [%expect

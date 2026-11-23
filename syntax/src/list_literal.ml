@@ -21,17 +21,17 @@ module Node = struct
           | _ -> None)
     ; pair =
         (fun loc x xs ->
-          let make = Located.create ~loc (Expr.Var (ptr_make, None)) in
+          let make = Located.create ~loc (Expr.Var (ptr_make, Annot.none)) in
           Located.create
             ~loc
             (Expr.App (make, Located.create ~loc (Expr.Tuple [ x; xs ]))))
     ; unpair =
         (function
           | { txt =
-                App ({ txt = Var (name, None); _ }, { txt = Tuple [ x; xs ]; _ })
+                App ({ txt = Var (name, annot); _ }, { txt = Tuple [ x; xs ]; _ })
             ; _
             }
-            when Decl_path.equal name ptr_make -> Some (x, xs)
+            when Decl_path.equal name ptr_make && Annot.is_none annot -> Some (x, xs)
           | _ -> None)
     }
   ;;

@@ -96,6 +96,25 @@ module Stag = struct
     type t = Int of int | Bool of bool | String of string | Char of char | Unit
   end
 
+  (* A mode as written after [@]: [@ 'm], standing for every axis, or
+     [@ local portable], at most one of each axis. *)
+  module Mode_expr = struct
+    module Atom = struct
+      type t =
+        | Const
+        | Portable
+        | Nonportable
+        | Static
+        | Gc
+        | Unknown
+        | Global
+        | Regional
+        | Local
+    end
+
+    type t = Var of string | Atoms of list[Atom.t]
+  end
+
   module Type_expr = struct
     type t =
       | Var of string
@@ -110,6 +129,11 @@ module Stag = struct
       | Mut of ptr[t]
       | Immut of ptr[t]
       | Splice of ptr[Expr.t]
+      (* [t @ m], only as a function type's argument or result. *)
+      | Moded of ptr[t * Mode_expr.t]
+      (* [global_ t], only as a record field's type or a constructor's
+         argument. *)
+      | Global of ptr[t]
 
     (* Labels are those of polymorphic records and variants, except in the
        context of a code type, whose entries are variables. *)
@@ -151,8 +175,15 @@ module Stag = struct
     type t = {`name : string; `params : list[Param.t]; `kind : Kind.t}
   end
 
+  (* [: t @ m] of a binder or a variable, each part optional. *)
+  module Annot = struct
+    type t = {`ty : option[Type_expr.t]; `mode : option[Mode_expr.t]}
+
+    let none = {`ty = None; `mode = None}
+  end
+
   module Binding = struct
-    type t = string * option[Type_expr.t]
+    type t = string * Annot.t
   end
 
   module Pattern = struct
@@ -193,10 +224,10 @@ module Stag = struct
   module Expr = struct
     type t =
       | Lit of Lit.t
-      | Var of Path.t[Value_ref.t] * option[Type_expr.t]
+      | Var of Path.t[Value_ref.t] * Annot.t
       | App of ptr[t * t]
-      | Let of ptr[string * list[Binding.t] * option[Type_expr.t] * t * t]
-      | Let_mut of ptr[string * option[Type_expr.t] * t * t]
+      | Let of ptr[string * list[Binding.t] * Annot.t * t * t]
+      | Let_mut of ptr[string * Annot.t * t * t]
       | Assign of ptr[Path.t[Value_ref.t] * t]
       | Store of ptr[t * t]
       | Fun of ptr[list[Binding.t] * t]
@@ -218,15 +249,19 @@ module Stag = struct
       | Poly_variant of ptr[string * option[t]]
       | Expect of string
       | Struct_quote of list[Toplevel.t]
+      | Local of ptr[t]
+      | Exclave of ptr[t]
+      (* [f x [@nontail]], of an application. *)
+      | Nontail of ptr[t]
 
-    let var name = Var (Path.Name name, None)
+    let var name = Var (Path.Name name, Annot.none)
     let construct name args = Construct (Path.Name name, args)
     let int n = Lit (Lit.Int n)
     let string s = Lit (Lit.String s)
 
     (* [fun_ ["x"; "y"] body] is [fun x y -> body]. *)
     let fun_ params body =
-      let param name = (name, None) in
+      let param name = (name, Annot.none) in
       Fun (Ptr.make (map param params, body))
 
     let match_ e arms = Match (Ptr.make (e, arms))
@@ -236,7 +271,7 @@ module Stag = struct
       match es with
       | [] -> Construct (Internal.nil, [])
       | Cons *(e, rest) ->
-        Construct (Internal.cons, [App (Ptr.make (Var (Internal.ptr_make, None), Tuple [e; list rest]))])
+        Construct (Internal.cons, [App (Ptr.make (Var (Internal.ptr_make, Annot.none), Tuple [e; list rest]))])
 
     (* [apply f [x; y]] is [f x y]. *)
     let apply f args =
@@ -253,14 +288,14 @@ module Stag = struct
 
     (* [let_ name params equal body] is [let name params = equal in body]. *)
     let let_ name params equal body =
-      let param name = (name, None) in
-      Let (Ptr.make (name, map param params, None, equal, body))
+      let param name = (name, Annot.none) in
+      Let (Ptr.make (name, map param params, Annot.none, equal, body))
   end
 
   module Toplevel = struct
     type t =
-      | Let of string * list[Binding.t] * option[Type_expr.t] * Expr.t
-      | Let_mut of string * option[Type_expr.t] * Expr.t
+      | Let of string * list[Binding.t] * Annot.t * Expr.t
+      | Let_mut of string * Annot.t * Expr.t
       | Type of Type_decl.t
       | Exception of string * list[Type_expr.t]
       | Module of string * list[t]
@@ -273,8 +308,8 @@ module Stag = struct
 
     (* [let_ name params body] is [let name params = body]. *)
     let let_ name params body =
-      let param name = (name, None) in
-      Let (name, map param params, None, body)
+      let param name = (name, Annot.none) in
+      Let (name, map param params, Annot.none, body)
   end
 
   module Program = struct

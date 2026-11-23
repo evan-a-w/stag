@@ -10,6 +10,8 @@ let indirect_constructors =
     ; "Type_expr.Mut", 1
     ; "Type_expr.Immut", 1
     ; "Type_expr.Splice", 1
+    ; "Type_expr.Moded", 2
+    ; "Type_expr.Global", 1
     ; "Type_expr.Row.Extend", 3
     ; "Pattern.Deref", 1
     ; "Pattern.Poly_variant", 2
@@ -31,6 +33,9 @@ let indirect_constructors =
     ; "Expr.Poly_restrict", 2
     ; "Expr.Poly_update", 2
     ; "Expr.Poly_variant", 2
+    ; "Expr.Local", 1
+    ; "Expr.Exclave", 1
+    ; "Expr.Nontail", 1
     ]
 ;;
 
@@ -80,6 +85,22 @@ module Make (B : Builder) = struct
   ;;
 
   let no_antiquote _ _ = None
+
+  let mode_expr ({ txt; loc = _ } : Mode_expr.t) =
+    match txt with
+    | Var var -> con "Stag.Mode_expr.Var" [ B.string var ]
+    | Atoms atoms ->
+      con
+        "Stag.Mode_expr.Atoms"
+        [ list
+            (fun atom ->
+              con
+                ("Stag.Mode_expr.Atom."
+                 ^ Sexp.to_string (Mode_expr.Atom.sexp_of_t atom))
+                [])
+            atoms
+        ]
+  ;;
 
   let type_param ({ txt; loc = _ } : Type_decl.Param.t Located.t) =
     match txt with
@@ -138,6 +159,8 @@ module Make (B : Builder) = struct
       | Variant r -> con "Variant" [ row r ]
       | Mut t -> con "Mut" [ type_expr t ]
       | Immut t -> con "Immut" [ type_expr t ]
+      | Moded (t, m) -> con "Moded" [ type_expr t; mode_expr m ]
+      | Global t -> con "Global" [ type_expr t ]
       | Splice e ->
         (match A.antiquote Type_expr e with
          | Some lifted -> lifted
@@ -177,29 +200,30 @@ module Make (B : Builder) = struct
          | Some lifted -> lifted
          | None -> con "Stag.Type_decl.Kind.Splice" [ expr e ])
 
-    and binding b = pair name (option type_expr) b
+    and binding b = pair name annot b
+
+    and annot ({ ty; mode } : Annot.t) =
+      B.record [ "ty", option type_expr ty; "mode", option mode_expr mode ]
 
     and expr ({ txt; loc = _ } : Expr.t) =
       let con name = con ("Stag.Expr." ^ name) in
       let fields = list (pair name expr) in
       match txt with
       | Lit l -> con "Lit" [ lit l ]
-      | Var (p, annot) ->
-        con "Var" [ decl_path_txt Value p; option type_expr annot ]
+      | Var (p, a) ->
+        con "Var" [ decl_path_txt Value p; annot a ]
       | App (f, x) -> con "App" [ expr f; expr x ]
-      | Let (var, bindings, annot, equal, body) ->
+      | Let (var, bindings, a, equal, body) ->
         con
           "Let"
           [ name var
           ; list binding bindings
-          ; option type_expr annot
+          ; annot a
           ; expr equal
           ; expr body
           ]
-      | Let_mut (var, annot, equal, body) ->
-        con
-          "Let_mut"
-          [ name var; option type_expr annot; expr equal; expr body ]
+      | Let_mut (var, a, equal, body) ->
+        con "Let_mut" [ name var; annot a; expr equal; expr body ]
       | Assign (p, value) ->
         con "Assign" [ decl_path_txt Value p.txt; expr value ]
       | Store (target, value) -> con "Store" [ expr target; expr value ]
@@ -239,17 +263,17 @@ module Make (B : Builder) = struct
       | Poly_variant (tag, arg) ->
         con "Poly_variant" [ name tag; option expr arg ]
       | Expect expected -> con "Expect" [ B.string expected.txt ]
+      | Local e -> con "Local" [ expr e ]
+      | Exclave e -> con "Exclave" [ expr e ]
+      | Nontail e -> con "Nontail" [ expr e ]
       | Error -> raise_s [%message "Lift: an expression that did not parse"]
 
     and toplevel ({ txt; loc = _ } : Toplevel.t) =
       let con name = con ("Stag.Toplevel." ^ name) in
       match txt with
-      | Let (var, bindings, annot, body) ->
-        con
-          "Let"
-          [ name var; list binding bindings; option type_expr annot; expr body ]
-      | Let_mut (var, annot, body) ->
-        con "Let_mut" [ name var; option type_expr annot; expr body ]
+      | Let (var, bindings, a, body) ->
+        con "Let" [ name var; list binding bindings; annot a; expr body ]
+      | Let_mut (var, a, body) -> con "Let_mut" [ name var; annot a; expr body ]
       | Type decl -> con "Type" [ type_decl decl ]
       | Exception (exn_name, args) | Malformed_exception (exn_name, args) ->
         con "Exception" [ name exn_name; list type_expr args ]

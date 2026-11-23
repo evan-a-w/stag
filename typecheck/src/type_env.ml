@@ -152,7 +152,7 @@ let rec has_splice (expr : Type_expr.t) =
   | Tuple tys -> List.exists tys ~f:has_splice
   | Code { inner; context } -> has_splice inner || row_has_splice context
   | Record row | Variant row -> row_has_splice row
-  | Mut ty | Immut ty -> has_splice ty
+  | Mut ty | Immut ty | Moded (ty, _) | Global ty -> has_splice ty
 
 and row_has_splice (row : Type_expr.row) =
   match row.txt with
@@ -356,6 +356,12 @@ let rec elaborate' t module_ vars ~splices ~expansions (expr : Type_expr.t)
       ty, syntax.txt
     | Splice _ -> Error (Typecheck_error.create ~loc Misplaced_type_splice)
     | Mut _ | Immut _ -> Error (Typecheck_error.create ~loc Misplaced_mut)
+    | Moded (ty, mode) ->
+      let%map.Result ty, syntax = elaborate ty in
+      ty, Type_expr.Moded (syntax, mode)
+    | Global ty ->
+      let%map.Result ty, syntax = elaborate ty in
+      ty, Type_expr.Global syntax
   in
   ty, { expr with txt }
 

@@ -143,11 +143,11 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
       ~loc:binder.loc
       [ binder.txt ];
     walk_bindings ~add ~type_expr bindings;
-    Option.iter annot ~f:type_expr
+    Option.iter annot.Syntax.Annot.ty ~f:type_expr
   and walk_bindings ~(add : add) ~type_expr bindings =
     List.iter bindings ~f:(fun ((name : Syntax.Name.t), annot) ->
       add ~declaration:true ~kind:Kind.Parameter ~loc:name.loc [ name.txt ];
-      Option.iter annot ~f:type_expr)
+      Option.iter annot.Syntax.Annot.ty ~f:type_expr)
   and walk_type_expr ~(add : add) ~expr (ty : Syntax.Type_expr.t) =
     let recurse = walk_type_expr ~add ~expr in
     match ty.txt with
@@ -166,7 +166,7 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
       walk_row ~add ~expr ~kind:Kind.Poly_field context
     | Record row -> walk_row ~add ~expr ~kind:Kind.Poly_field row
     | Variant row -> walk_row ~add ~expr ~kind:Kind.Poly_tag row
-    | Mut ty | Immut ty -> recurse ty
+    | Mut ty | Immut ty | Moded (ty, _) | Global ty -> recurse ty
     | Splice e -> expr e
   and walk_row ~(add : add) ~expr ~kind (row : Syntax.Type_expr.row) =
     match row.txt with
@@ -218,7 +218,7 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
     | Lit _ | Expect _ | Error -> ()
     | Var (path, annot) ->
       decl_path ~add ~kind:Kind.Value ~loc:expr.loc path;
-      Option.iter annot ~f:type_expr
+      Option.iter annot.ty ~f:type_expr
     | App (f, arg) ->
       recurse f;
       recurse arg
@@ -285,6 +285,7 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
       add ~kind:Kind.Poly_tag ~loc:tag.loc [ tag.txt ];
       Option.iter arg ~f:recurse
     | Struct_quote quoted -> toplevels quoted
+    | Local expr | Exclave expr | Nontail expr -> recurse expr
   in
   walk_toplevels ~module_path toplevels;
   Queue.to_list occurrences

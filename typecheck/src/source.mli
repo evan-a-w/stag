@@ -153,6 +153,9 @@ module Expr : sig
 
   val loc : t -> Loc.t
 
+  (** A written binder, without its mode, which is not checked yet. *)
+  val binding : Syntax.Binding.t -> Binder.t * Syntax.Type_expr.t option
+
   (** The tuple of [ts], of at least two written ones: generated nodes are
       typed, so have their constructor's arity. *)
   val tuple : t list -> t

@@ -84,6 +84,8 @@ module Decl_path = struct
   ;;
 end
 
+module Mode_expr = Mode_expr
+
 (** A name as written, eg. a binder or a label. *)
 module Name = struct
   type t = string Located.t [@@deriving sexp_of, compare, equal]
@@ -117,6 +119,11 @@ module Defs = struct
     | Splice of expr
     (** [.~e]: the type [e : Stag.Type_expr.t] evaluates to at compile time, or
         an antiquote in a struct quote. *)
+    | Moded of type_expr * Mode_expr.t
+    (** [t @ m]: only as a function type's argument or result. *)
+    | Global of type_expr
+    (** [global_ t]: only as a record field's type or a constructor's
+        argument. *)
 
   and row = row_desc Located.t
 
@@ -152,7 +159,13 @@ module Defs = struct
     ; kind : type_decl_kind
     }
 
-  and binding = Name.t * type_expr option
+  (** [: t @ m] of a binder or a variable, each part optional. *)
+  and annot =
+    { ty : type_expr option [@sexp.option]
+    ; mode : Mode_expr.t option [@sexp.option]
+    }
+
+  and binding = Name.t * annot
 
   and pattern_rest =
     | Closed (** There are none. *)
@@ -183,10 +196,10 @@ module Defs = struct
 
   and expr_desc =
     | Lit of Lit.t
-    | Var of Decl_path.t * type_expr option
+    | Var of Decl_path.t * annot
     | App of expr * expr
-    | Let of Name.t * binding list * type_expr option * expr * expr
-    | Let_mut of Name.t * type_expr option * expr * expr
+    | Let of Name.t * binding list * annot * expr * expr
+    | Let_mut of Name.t * annot * expr * expr
     (** [let mut x = e in body]: not recursive. *)
     | Assign of Decl_path.t Located.t * expr (** [x <- e] *)
     | Store of expr * expr
@@ -220,6 +233,9 @@ module Defs = struct
     | Struct_quote of toplevel list
     (** [.< struct ... end >.]: the declarations as a [list[Stag.Toplevel.t]],
         with antiquotes. *)
+    | Local of expr (** [local_ e] *)
+    | Exclave of expr (** [exclave_ e] *)
+    | Nontail of expr (** [f x [@nontail]], of an application. *)
     | Error (** In place of what did not parse. *)
 
   and bench_param =
@@ -230,8 +246,8 @@ module Defs = struct
   and toplevel = toplevel_desc Located.t
 
   and toplevel_desc =
-    | Let of Name.t * binding list * type_expr option * expr
-    | Let_mut of Name.t * type_expr option * expr
+    | Let of Name.t * binding list * annot * expr
+    | Let_mut of Name.t * annot * expr
     | Type of type_decl
     | Exception of Name.t * type_expr list (** [exception E of t1 * t2]. *)
     | Malformed_exception of Name.t * type_expr list
@@ -284,6 +300,8 @@ module Type_expr = struct
     | Mut of t
     | Immut of t
     | Splice of expr
+    | Moded of t * Mode_expr.t
+    | Global of t
 
   type nonrec row_desc = row_desc =
     | Empty
@@ -330,6 +348,26 @@ module Type_decl = struct
   let sexp_of_t = sexp_of_type_decl
   let compare = compare_type_decl
   let equal = equal_type_decl
+end
+
+module Annot = struct
+  type t = annot =
+    { ty : Type_expr.t option
+    ; mode : Mode_expr.t option
+    }
+
+  let none = { ty = None; mode = None }
+
+  let is_none = function
+    | { ty = None; mode = None } -> true
+    | _ -> false
+  ;;
+
+  let map { ty; mode } ~f = { ty = Option.map ty ~f; mode }
+
+  let sexp_of_t = sexp_of_annot
+  let compare = compare_annot
+  let equal = equal_annot
 end
 
 module Binding = struct
@@ -380,10 +418,10 @@ module Expr = struct
 
   type desc = expr_desc =
     | Lit of Lit.t
-    | Var of Decl_path.t * Type_expr.t option
+    | Var of Decl_path.t * Annot.t
     | App of t * t
-    | Let of Name.t * Binding.t list * Type_expr.t option * t * t
-    | Let_mut of Name.t * Type_expr.t option * t * t
+    | Let of Name.t * Binding.t list * Annot.t * t * t
+    | Let_mut of Name.t * Annot.t * t * t
     | Assign of Decl_path.t Located.t * t
     | Store of t * t
     | Fun of Binding.t list * t
@@ -408,6 +446,9 @@ module Expr = struct
     | Poly_variant of Name.t * t option
     | Expect of string Located.t
     | Struct_quote of toplevel list
+    | Local of t
+    | Exclave of t
+    | Nontail of t
     | Error
 
   let sexp_of_t = sexp_of_expr
@@ -431,8 +472,8 @@ module Toplevel = struct
   type t = toplevel
 
   type desc = toplevel_desc =
-    | Let of Name.t * Binding.t list * Type_expr.t option * Expr.t
-    | Let_mut of Name.t * Type_expr.t option * Expr.t
+    | Let of Name.t * Binding.t list * Annot.t * Expr.t
+    | Let_mut of Name.t * Annot.t * Expr.t
     | Type of Type_decl.t
     | Exception of Name.t * Type_expr.t list
     | Malformed_exception of Name.t * Type_expr.t list

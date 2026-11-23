@@ -92,6 +92,35 @@ let rec row ?(label = label) t ~entry : Type_expr.row =
      | 1 -> Var (loc "r")
      | _ -> Extend (label t, entry t, row ~label t ~entry))
 
+and mode_expr t : Mode_expr.t =
+  loc
+    (if int t 4 = 0
+     then Mode_expr.Var (pick t [ "m"; "n" ])
+     else
+       Atoms
+         (List.filter_map
+            [ [ Mode_expr.Atom.Global; Regional; Local ]
+            ; [ Const; Portable; Nonportable ]
+            ; [ Static; Gc; Unknown ]
+            ]
+            ~f:(fun atoms -> Option.some_if (bool t) (pick t atoms))
+          |> function
+          | [] -> [ Mode_expr.Atom.Local ]
+          | atoms -> atoms))
+
+and moded t : Type_expr.t =
+  let ty = type_expr t in
+  if int t 3 = 0 then loc (Type_expr.Moded (ty, mode_expr t)) else ty
+
+and maybe_global t : Type_expr.t =
+  let ty = type_expr t in
+  if int t 4 = 0 then loc (Type_expr.Global ty) else ty
+
+and annot t : Annot.t =
+  { ty = Option.some_if (bool t) (type_expr t)
+  ; mode = Option.some_if (int t 3 = 0) (mode_expr t)
+  }
+
 and type_expr t : Type_expr.t =
   let unit =
     loc (Type_expr.Con (loc (Decl_path.Root (Path.name "unit")), []))
@@ -112,7 +141,7 @@ and type_expr t : Type_expr.t =
                    if bool t
                    then Ty (type_expr t)
                    else Row (row t ~entry:type_expr)) ))
-         ; (fun t -> Arrow (type_expr t, type_expr t))
+         ; (fun t -> Arrow (moded t, moded t))
          ; (fun t -> Tuple (list t ~min:2 ~max:3 type_expr))
          ; (fun t ->
              Code
@@ -169,7 +198,7 @@ and pattern t : Pattern.t =
          ; (fun t -> Exception (pattern t))
          ])
 
-and binding t : Binding.t = name t, Option.some_if (bool t) (type_expr t)
+and binding t : Binding.t = name t, annot t
 
 and expr t : Expr.t =
   loc
@@ -177,8 +206,13 @@ and expr t : Expr.t =
        t
        ~leaves:
          [ (fun t -> Expr.Lit (lit t))
-         ; (fun t -> Var (decl_path t ~last:lident, None))
-         ; (fun t -> Var (decl_path t ~last:lident, Some (type_expr t)))
+         ; (fun t -> Var (decl_path t ~last:lident, Annot.none))
+         ; (fun t ->
+             Var
+               ( decl_path t ~last:lident
+               , if bool t
+                 then { ty = Some (type_expr t); mode = None }
+                 else { ty = None; mode = Some (mode_expr t) } ))
          ; (fun t -> Construct (loc (decl_path t ~last:uident), []))
          ; (fun t -> Poly_variant (label t, None))
          ; (fun t -> Expect (loc (string t)))
@@ -192,13 +226,11 @@ and expr t : Expr.t =
              Let
                ( name t
                , list t ~min:0 ~max:2 binding
-               , Option.some_if (bool t) (type_expr t)
+               , annot t
                , expr t
                , expr t ))
-         ; (fun t -> Let (loc "_", [], None, expr t, expr t))
-         ; (fun t ->
-             Let_mut
-               (name t, Option.some_if (bool t) (type_expr t), expr t, expr t))
+         ; (fun t -> Let (loc "_", [], Annot.none, expr t, expr t))
+         ; (fun t -> Let_mut (name t, annot t, expr t, expr t))
          ; (fun t -> Assign (loc (decl_path t ~last:lident), expr t))
          ; (fun t -> Store (loc (Expr.Deref (expr t)), expr t))
          ; (fun t ->
@@ -258,6 +290,9 @@ and expr t : Expr.t =
                (expr t, list t ~min:1 ~max:3 (fun t -> label t, expr t)))
          ; (fun t -> Poly_variant (label t, Some (expr t)))
          ; (fun t -> Struct_quote (list t ~min:0 ~max:3 toplevel))
+         ; (fun t -> Local (expr t))
+         ; (fun t -> Exclave (expr t))
+         ; (fun t -> Nontail (loc (Expr.App (expr t, expr t))))
          ])
 
 and type_decl t : Type_decl.t =
@@ -272,8 +307,8 @@ and type_decl t : Type_decl.t =
        | 2 ->
          Variant
            (list t ~min:0 ~max:3 (fun t ->
-              loc (uident t), list t ~min:0 ~max:3 type_expr))
-       | 3 -> Record (list t ~min:1 ~max:3 (fun t -> name t, type_expr t))
+              loc (uident t), list t ~min:0 ~max:3 maybe_global))
+       | 3 -> Record (list t ~min:1 ~max:3 (fun t -> name t, maybe_global t))
        | _ -> Splice (Located.create (expr t)))
   }
 
@@ -284,7 +319,7 @@ and toplevel t : Toplevel.t =
        Toplevel.Let
          ( name t
          , list t ~min:0 ~max:2 binding
-         , Option.some_if (bool t) (type_expr t)
+         , annot t
          , expr t )
      | 1 | 2 -> Type (type_decl t)
      | 3 -> Expect_test { name = loc (string t); body = expr t }
@@ -307,8 +342,8 @@ and toplevel t : Toplevel.t =
               else None)
          ; body = expr t
          }
-     | 10 -> Let_mut (name t, Option.some_if (bool t) (type_expr t), expr t)
-     | _ -> Let (name t, [], None, expr t))
+     | 10 -> Let_mut (name t, annot t, expr t)
+     | _ -> Let (name t, [], Annot.none, expr t))
 
 and expansion t =
   if t.size > 0 && bool t

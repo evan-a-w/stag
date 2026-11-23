@@ -41,6 +41,8 @@ let map ?type_expr:replace_type_expr toplevels ~f =
       | Variant r -> Variant (row depth r)
       | Mut t -> Mut (type_expr t)
       | Immut t -> Immut (type_expr t)
+      | Moded (t, m) -> Moded (type_expr t, m)
+      | Global t -> Global (type_expr t)
       | Splice e ->
         (match replace_type_expr with
          | Some replace when depth = 0 ->
@@ -62,11 +64,11 @@ let map ?type_expr:replace_type_expr toplevels ~f =
   and arg depth : Type_expr.arg -> Type_expr.arg = function
     | Ty t -> Ty (type_expr depth t)
     | Row r -> Row (row depth r)
-  and binding depth ((n, t) : Binding.t) = n, Option.map t ~f:(type_expr depth)
+  and binding depth ((n, a) : Binding.t) = n, Annot.map a ~f:(type_expr depth)
   and expr depth (e : Expr.t) : Expr.t =
     let sub = expr depth in
     let fields = List.map ~f:(fun (n, e) -> n, sub e) in
-    let annot = Option.map ~f:(type_expr depth) in
+    let annot = Annot.map ~f:(type_expr depth) in
     let txt : Expr.desc =
       match e.txt with
       | Lit _ | Expect _ | Error -> e.txt
@@ -129,6 +131,9 @@ let map ?type_expr:replace_type_expr toplevels ~f =
         let e = sub e in
         Poly_update (e, fields fs)
       | Poly_variant (n, e) -> Poly_variant (n, Option.map e ~f:sub)
+      | Local e -> Local (sub e)
+      | Exclave e -> Exclave (sub e)
+      | Nontail e -> Nontail (sub e)
     in
     { e with txt }
   and toplevel depth (t : Toplevel.t) : Toplevel.t =
@@ -138,10 +143,10 @@ let map ?type_expr:replace_type_expr toplevels ~f =
       match t.txt with
       | Let (n, bs, a, body) ->
         let bs = List.map bs ~f:(binding depth) in
-        let a = Option.map a ~f:type_expr in
+        let a = Annot.map a ~f:type_expr in
         Let (n, bs, a, sub body)
       | Let_mut (n, a, body) ->
-        let a = Option.map a ~f:type_expr in
+        let a = Annot.map a ~f:type_expr in
         Let_mut (n, a, sub body)
       | Type { name; params; kind } ->
         let rec decl_kind : Type_decl.Kind.t -> Type_decl.Kind.t = function
@@ -203,12 +208,12 @@ let placeholder_prefix = "%antiquote."
 let placeholder i =
   Located.create
     ~loc:Loc.none
-    (Expr.Var (Resolved (placeholder_prefix ^ Int.to_string i), None))
+    (Expr.Var (Resolved (placeholder_prefix ^ Int.to_string i), Annot.none))
 ;;
 
 let index (e : Expr.t) =
   match e.txt with
-  | Var (Resolved name, None) ->
+  | Var (Resolved name, annot) when Annot.is_none annot ->
     String.chop_prefix name ~prefix:placeholder_prefix
     |> Option.map ~f:Int.of_string
   | _ -> None

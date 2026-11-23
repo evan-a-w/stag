@@ -44,7 +44,7 @@ module Bound = struct
   ;;
 
   let var t ~loc : Expr.t =
-    Located.create ~loc (Expr.Var (Path (Path.name t.name), None))
+    Located.create ~loc (Expr.Var (Path (Path.name t.name), Annot.none))
   ;;
 
   let bind t ~(in_ : Expr.t) : Expr.t =
@@ -54,7 +54,7 @@ module Bound = struct
       (Expr.Let
          ( Located.create ~loc t.name
          , []
-         , Some (type_ t.antiquote.kind ~loc)
+         , { ty = Some (type_ t.antiquote.kind ~loc); mode = None }
          , t.antiquote.expr
          , in_ ))
   ;;
@@ -97,7 +97,7 @@ let expand_exn toplevels ~loc =
       let tuple es = node (Expr.Tuple es)
 
       let ptr e =
-        node (Expr.App (node (Expr.Var (resolved "Ptr.make", None)), e))
+        node (Expr.App (node (Expr.Var (resolved "Ptr.make", Annot.none)), e))
       ;;
 
       let record fields =
@@ -116,7 +116,7 @@ let expand_exn toplevels ~loc =
       ;;
 
       let append a b =
-        let append = node (Expr.Var (resolved "Stag.append", None)) in
+        let append = node (Expr.Var (resolved "Stag.append", Annot.none)) in
         node (Expr.App (node (Expr.App (append, a)), b))
       ;;
     end)

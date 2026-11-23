@@ -110,8 +110,11 @@ module Toplevel = struct
   (* The value it is an alias of, if any. *)
   let aliased t =
     match t.expr.txt with
-    | Var (((Path _ | Root _) as path), None)
-      when Option.is_none t.annot && (not t.mut) && not (is_function t) ->
+    | Var (((Path _ | Root _) as path), annot)
+      when Syntax.Annot.is_none annot
+           && Option.is_none t.annot
+           && (not t.mut)
+           && not (is_function t) ->
       (match Module_scope.find_value t.module_ path ~loc:t.expr.loc with
        | Ok value -> Some value
        | Error _ -> None)
@@ -1808,8 +1811,7 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
       t
       scope
       ~args:
-        (List.map toplevel.args ~f:(fun (name, annot) ->
-           Source.Binder.Name name, annot))
+        (List.map toplevel.args ~f:Source.Expr.binding)
       ~annot:toplevel.annot
   in
   match toplevel.state with
@@ -3225,7 +3227,7 @@ let declare
          { Toplevel.ident
          ; module_
          ; args
-         ; annot
+         ; annot = annot.Syntax.Annot.ty
          ; expr
          ; mut
          ; generated

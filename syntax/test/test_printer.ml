@@ -766,7 +766,7 @@ let%expect_test "the project's sources round trip and are formatted" =
 
 let%expect_test "syntax the parser does not produce" =
   let e txt : Syntax.Expr.t = Located.create txt in
-  let x = e (Var (Path (Syntax.Path.name "x"), None)) in
+  let x = e (Var (Path (Syntax.Path.name "x"), Syntax.Annot.none)) in
   let c = Located.create (Syntax.Decl_path.Path (Syntax.Path.name "C")) in
   let show expr =
     let printed = Printer.expr expr in
@@ -828,13 +828,13 @@ let%expect_test "resolved paths are printed as root paths" =
   let int = ty "prelude.int" [] in
   let option = ty "prelude.option" [ Ty int ] in
   let t = ty "Gen.M.t" [] in
-  let x = at (Syntax.Expr.Var (Path (Syntax.Path.name "x"), None)) in
+  let x = at (Syntax.Expr.Var (Path (Syntax.Path.name "x"), Syntax.Annot.none)) in
   let program : Syntax.Program.t =
     [ at
         (Syntax.Toplevel.Let
            ( at "f"
-           , [ at "r", Some option ]
-           , Some t
+           , [ at "r", { ty = Some option; mode = None } ]
+           , { ty = Some t; mode = None }
            , at
                (Syntax.Expr.Match
                   ( at (Syntax.Expr.Field (x, resolved "Gen.M.field"))
@@ -865,7 +865,7 @@ let%expect_test "resolved paths are printed as root paths" =
 
 let%expect_test "resolved paths with no root path" =
   let var name =
-    Located.create (Syntax.Expr.Var (Syntax.Decl_path.Resolved name, None))
+    Located.create (Syntax.Expr.Var (Syntax.Decl_path.Resolved name, Syntax.Annot.none))
   in
   List.iter
     [ "prelude.Core.Int.to_string"
@@ -1059,7 +1059,7 @@ let%expect_test "resolved Cons and Nil not ending a list literal" =
   let at txt = Located.create txt in
   let cons args = at (Syntax.Expr.Construct (at List_literal.cons, args)) in
   let nil = at (Syntax.Expr.Construct (at List_literal.nil, [])) in
-  let var name = at (Syntax.Expr.Var (Path (Syntax.Path.name name), None)) in
+  let var name = at (Syntax.Expr.Var (Path (Syntax.Path.name name), Syntax.Annot.none)) in
   let pcons args = at (Syntax.Pattern.Construct (at List_literal.cons, args)) in
   let pvar name = at (Syntax.Pattern.Var name) in
   let show e =
