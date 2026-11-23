@@ -245,7 +245,8 @@ let%expect_test "splices leave the locks of their quote" =
     { (Env.Entry.toplevel
          ~ident:{ Typed.Ident.name = "y"; stamp = 0 }
          ~scheme:Type.error
-         ~mode:(mode ()))
+         ~mode:(mode ())
+         ~held:None)
       with
       locks = outer
     }

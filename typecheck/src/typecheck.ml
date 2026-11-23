@@ -79,6 +79,7 @@ module Toplevel = struct
           ; init_mode : Mode.Var.t
           (** Of its initializer: its [mode], but for a mutable one, whose
               variable is referred to by symbol. *)
+          ; held : Mode.Var.t option (** Of the values a mutable one holds. *)
           ; mutable body : Typed.Expr.t option
           ; mutable recursive : bool
           }
@@ -196,8 +197,6 @@ module Program_env = struct
         first. *)
     ; mutable_idents : Typed.Ident.Hash_set.t
     (** Of the [let mut]s, local and toplevel. *)
-    ; held_modes : Mode.Var.t Typed.Ident.Table.t
-    (** The mode of the values a [let mut] holds, once its checking began. *)
     ; modes : Mode.Id_source.t
     ; const_toplevels : bool
     ; mode_limits_reported : String.Hash_set.t
@@ -336,18 +335,10 @@ module Scope = struct
     ; in_expect_test : bool
     ; generated : Generated.t option
     ; syntax_splice : Syntax_splice.t option
-    ; sink : Mode.Var.t
-    (** The mode of the value being computed: what is evaluated for it is at
-        most [sink]. *)
     ; locks : Env.Lock.t list (** Innermost first. *)
     ; params : Type.ty list
     (** The types of the parameters of the functions being checked, whose modes
         are decided by each use of their function. *)
-    ; tail : bool
-    (** Whether the value being computed is the result of the function being
-        checked, in tail position. *)
-    ; region : Mode.Var.t option
-    (** Within a function body, its result mode, which [exclave_] returns at. *)
     }
 
   and quote =
@@ -361,26 +352,17 @@ module Scope = struct
 
   let quote_id t = Option.map t.quote ~f:(fun quote -> quote.id)
 
-  let entry ?(defining = false) t ~ident ~scheme ~mode =
+  let entry ?(defining = false) ?held t ~ident ~scheme ~mode =
     { Env.Entry.scheme
     ; level = t.level
     ; quote_id = quote_id t
     ; mode
+    ; held
     ; locks = t.locks
     ; binder = Local ident
     ; defining
     }
   ;;
-
-  let fresh_mode t = Mode.Var.create t.program.modes ~rank:t.rank
-
-  let stage_at_least t stage ~reason =
-    let mode = fresh_mode t in
-    Mode.Error.ok_exn (Mode.Var.at_least mode Stage stage reason);
-    mode
-  ;;
-
-  let with_sink t = { t with sink = fresh_mode t }
 
   (* What [mode] is at least however the functions being checked are used: with
      the modes of their parameters, those within their types, and those of the
@@ -410,7 +392,6 @@ module Scope = struct
   let enter_closure ids t mode =
     { t with
       locks = { Env.Lock.id = Fresh.id ids; kind = Closure mode } :: t.locks
-    ; sink = fresh_mode t
     }
   ;;
 
@@ -420,17 +401,6 @@ module Scope = struct
     if Type_env.pointer_free t.program.type_env ty
     then Mode.Crossing.immediate
     else Mode.Crossing.none
-  ;;
-
-  (* A value of [mode] and type [ty] is at most [locality], unless its type
-     crosses locality. *)
-  let locality_at_most t mode ~ty locality ~loc ~why =
-    Mode.Var.at_most
-      ~crossing:(crossing t ty)
-      mode
-      Locality
-      locality
-      (Mode.Reason.create ~loc why)
   ;;
 
   let fresh_ty ids t = Type.TVar (Fresh.var ids ~rank:t.rank)
@@ -479,114 +449,16 @@ module Scope = struct
       false
   ;;
 
-  let add_mode t ~loc result = ignore (mode_holds t ~loc result : bool)
-
-  (* The value being computed is at least [stage], eg. as it runs code. *)
-  let evaluates t stage ~loc ~why =
-    add_mode
-      t
-      ~loc
-      (Mode.Var.at_least t.sink Stage stage (Mode.Reason.create ~loc why))
+  let modes t : Mode_rules.Ctx.t =
+    { modes = t.program.modes
+    ; rank = t.rank
+    ; holds = mode_holds t
+    ; crossing = crossing t
+    }
   ;;
 
-  (* [mode] is bounded by the annotation on the axes it names; with [exact],
-     fixed to it. [@ 'm] is the mode ['m] stands for throughout the annotations
-     of the toplevel. *)
-  let annotated ?(exact = false) t mode (annot : Syntax.Mode_expr.t option) =
-    Option.iter annot ~f:(fun { txt; loc } ->
-      match txt with
-      | Var var ->
-        add_mode
-          t
-          ~loc
-          ((if exact
-            then Mode.Var.equate
-            else Mode.Var.submode ?crossing:None ?locality:None)
-             mode
-             (Type_env.Annotation_vars.mode t.annotation_vars var)
-             (Mode.Reason.create ~loc (sprintf "it is annotated '%s" var)))
-      | Atoms atoms ->
-        List.iter atoms ~f:(fun atom ->
-          let reason =
-            Mode.Reason.create
-              ~loc
-              (sprintf
-                 "it is annotated %s"
-                 (Syntax.Mode_expr.Atom.to_string atom))
-          in
-          let fix axis point =
-            add_mode
-              t
-              ~loc
-              (Mode.Var.at_most mode axis point reason
-               |> Result.bind ~f:(fun () ->
-                 if exact
-                 then Mode.Var.at_least mode axis point reason
-                 else Ok ()))
-          in
-          match atom with
-          | Const -> fix Stage Const
-          | Portable -> fix Stage Portable
-          | Nonportable -> fix Stage Nonportable
-          | Global -> fix Locality Global
-          | Regional -> fix Locality Regional
-          | Local -> fix Locality Local
-          | Static | Gc | Unknown -> ()))
-  ;;
-
-  (* The mode of a variable bound by [let x @ annot = e], [e] being of [mode]:
-     the annotation's, on the axes it names, else [e]'s. *)
-  let bound t mode (annot : Syntax.Mode_expr.t option) =
-    match annot with
-    | None -> mode
-    | Some { loc; _ } ->
-      let bound = fresh_mode t in
-      let reason = Mode.Reason.create ~loc "it is bound by an annotated let" in
-      add_mode t ~loc (Mode.Var.submode mode bound reason);
-      annotated ~exact:true t bound annot;
-      let named =
-        match annot with
-        | Some { txt = Atoms atoms; _ } ->
-          List.filter_map atoms ~f:(fun (atom : Syntax.Mode_expr.Atom.t) ->
-            match atom with
-            | Const | Portable | Nonportable -> Some (Mode.Axis.Any.T Stage)
-            | Global | Regional | Local -> Some (T Locality)
-            | Static | Gc | Unknown -> None)
-        | Some { txt = Var _; _ } | None ->
-          [ T Stage; T Locality; T Provenance ]
-      in
-      List.iter
-        [ Mode.Axis.Any.T Stage; T Provenance; T Locality ]
-        ~f:(fun (T axis as any) ->
-          if not (List.mem named any ~equal:Mode.Axis.Any.equal)
-          then add_mode t ~loc (Mode.Var.submode_on bound mode axis reason));
-      bound
-  ;;
-
-  (* A value of [mode] is evaluated for the value being computed: with
-     [~locality:Locality_map.ignore], only evaluated, not part of it. *)
-  let joins ?crossing ?locality t mode ~loc ~why =
-    add_mode
-      t
-      ~loc
-      (Mode.Var.submode
-         ?crossing
-         ?locality
-         mode
-         t.sink
-         (Mode.Reason.create ~loc why))
-  ;;
-
-  (* Evaluated for the value being computed, which it isn't part of. *)
-  let evaluates_for t mode ~loc ~why =
-    joins t mode ~locality:Mode.Locality_map.ignore ~loc ~why
-  ;;
-
-  (* Where to check a variable used with [annot]: with a mode, in a sink of its
-     own, that the mode bounds. *)
-  let annotated_use t (annot : Syntax.Annot.t) =
-    if Option.is_some annot.mode then with_sink t else t
-  ;;
+  let fresh_mode t = Mode_rules.Ctx.fresh (modes t)
+  let mode_var t = Type_env.Annotation_vars.mode t.annotation_vars
 
   (* Whether they unify: if not, what checked is to become [Error]. *)
   let unifies ids t ~ty1 ~ty2 ~loc =
@@ -732,9 +604,7 @@ let function_type
          Scope.fresh_ty t scope, None)
   in
   let moded annot =
-    let mode = Scope.fresh_mode scope in
-    Scope.annotated ~exact:true scope mode annot;
-    mode
+    Mode_rules.annotated (Scope.modes scope) annot ~var:(Scope.mode_var scope)
   in
   let args =
     List.map args ~f:(fun (binder, (annot : Syntax.Annot.t)) ->
@@ -1093,10 +963,13 @@ module Pattern_var = struct
     { ident : Typed.Ident.t
     ; ty : Type.ty
     ; loc : Loc.t
-    ; global : bool (** Bound within a [global_] field or argument. *)
+    ; modality : Modality.t (** Of the part of the scrutinee it is bound to. *)
     }
 
-  let make_global = List.map ~f:(fun t -> { t with global = true })
+  let under modality =
+    List.map ~f:(fun t ->
+      { t with modality = Modality.compose modality t.modality })
+  ;;
 end
 
 (* The components of [expected], if it is known to be a tuple of [n]. *)
@@ -1142,31 +1015,33 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
     , { Pattern_var.ident
       ; ty
       ; loc = Source.Binder.loc binder ~enclosing:loc
-      ; global = false
+      ; modality = Id
       } )
   in
-  (* Each pattern of type [ty], known to be of [expected] (by default [ty]).
-     Those [globals] are of [global_] fields or arguments. *)
-  let sub_patterns ?expected ?globals patterns =
+  (* Each pattern of type [ty], known to be of [expected] (by default [ty]), of
+     a part of the block through [modalities]. *)
+  let sub_patterns ?expected ?modalities patterns =
     let expected =
       Option.value
         expected
         ~default:(List.map patterns ~f:(fun (_, ty) -> Some ty))
     in
-    let globals =
-      Option.value globals ~default:(List.map patterns ~f:(fun _ -> false))
+    let modalities =
+      Option.value
+        modalities
+        ~default:(List.map patterns ~f:(fun _ -> Modality.Id))
     in
     let typed =
       List.map3_exn
         patterns
         expected
-        globals
-        ~f:(fun (pattern, ty) expected global ->
+        modalities
+        ~f:(fun (pattern, ty) expected modality ->
           let pattern, bindings = pattern_type t scope ~pattern ?expected in
           ( (if Scope.unifies t scope ~ty1:ty ~ty2:pattern.ty ~loc:pattern.loc
              then pattern
              else Typed.Pattern.error [ pattern ] ~loc:pattern.loc)
-          , if global then Pattern_var.make_global bindings else bindings ))
+          , Pattern_var.under modality bindings ))
     in
     List.map typed ~f:fst, List.concat_map typed ~f:snd
   in
@@ -1217,30 +1092,30 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
      with
      | Error error -> fail error args
      | Ok (constructor, args, result) ->
-       let globals =
+       let modalities =
          let declared =
-           Type_env.global_constructor_args
+           Type_env.constructor_modalities
              scope.program.type_env
              constructor.name
            |> Option.value ~default:[]
          in
          List.mapi args ~f:(fun i _ ->
-           Option.value (List.nth declared i) ~default:false)
+           Option.value (List.nth declared i) ~default:Modality.Id)
        in
-       let args, bindings = sub_patterns args ~globals in
+       let args, bindings = sub_patterns args ~modalities in
        node (Construct (constructor, args)) result, bindings)
   | Record fields ->
     (match record_fields t scope fields ~all_required:false ~expected ~loc with
      | Error error -> fail error (List.map fields ~f:snd)
      | Ok (record, fields, (_ : bool)) ->
-       let globals =
+       let modalities =
          List.map fields ~f:(fun ((field : Typed.Field_ref.t), _) ->
-           Type_env.is_global_field
+           Type_env.field_modality
              scope.program.type_env
              (Typed.Field_ref.name field))
        in
        let patterns, bindings =
-         sub_patterns (List.map fields ~f:snd) ~globals
+         sub_patterns (List.map fields ~f:snd) ~modalities
        in
        ( node (Record (List.zip_exn (List.map fields ~f:fst) patterns)) record
        , bindings ))
@@ -1338,7 +1213,7 @@ module Variant_match = struct
           ; ty = rest
           ; loc =
               Source.Binder.loc binder ~enclosing:(Source.Pattern.loc pattern)
-          ; global = false
+          ; modality = Id
           }
         ] )
     | _ -> pattern_type t scope ~pattern ~expected:scrutinee
@@ -1400,185 +1275,26 @@ module Variant_match = struct
   ;;
 end
 
-(* How a value bound outside [locks] relates on locality to its use inside them:
-   a function body is a region of its own, and [exclave_] leaves it. Assigning
-   goes the other way, from the use to the binding. *)
-let locality_map ?(assign = false) (locks : Env.Lock.t list) =
-  List.fold
-    locks
-    ~init:Mode.Locality_map.id
-    ~f:(fun inner (lock : Env.Lock.t) ->
-      let map : Mode.Locality_map.t =
-        match lock.kind, assign with
-        | Closure _, false | Exclave, true -> Mode.Locality_map.borrow
-        | Exclave, false | Closure _, true -> Mode.Locality_map.release
-        | (Quote _ | Splice), _ -> Mode.Locality_map.id
-      in
-      if assign
-      then Mode.Locality_map.compose inner map
-      else Mode.Locality_map.compose map inner)
+let use_entry (scope : Scope.t) ~at (entry : Env.Entry.t) ~name ~loc =
+  Mode_rules.use
+    (Scope.modes scope)
+    at
+    entry
+    ~locks:scope.locks
+    ~toplevel:
+      (match entry.binder with
+       | Toplevel _ -> true
+       | Local _ -> false)
+    ~name
+    ~loc
+    ~mutable_captured_in_exclave:(fun () ->
+      Scope.report
+        scope
+        (Typecheck_error.create ~loc (Mutable_captured_in_exclave name)))
 ;;
 
-(* Constrains [entry]'s mode by the locks its use crosses, and the value being
-   computed by the variable's. Toplevels are referred to by symbol, so closures
-   and code don't capture them: they only cross a quote lock if [portable], so
-   as not to be free variables of the quote, unless mutable. A mutable's value
-   is the one it holds, but closures capture its cell. *)
-let use_entry (scope : Scope.t) (entry : Env.Entry.t) ~name ~loc =
-  let reason what = Mode.Reason.create ~loc (sprintf what name) in
-  let toplevel, mutable_, ident =
-    match entry.binder with
-    | Toplevel ident -> true, Program_env.is_mutable scope.program ident, ident
-    | Local ident -> false, Program_env.is_mutable scope.program ident, ident
-  in
-  let crossing = Scope.crossing scope entry.scheme in
-  let held =
-    if mutable_ then Hashtbl.find scope.program.held_modes ident else None
-  in
-  let crossed = Env.Entry.crossed entry ~locks:scope.locks in
-  let is_closure (lock : Env.Lock.t) =
-    match lock.kind with
-    | Closure _ -> true
-    | Quote _ | Splice | Exclave -> false
-  in
-  List.iteri crossed ~f:(fun index lock ->
-    match lock.kind with
-    | Splice -> ()
-    | (Closure _ | Exclave) when toplevel -> ()
-    | Exclave ->
-      (* As seen where [exclave_] ends the region: what is local to it then is
-         gone. *)
-      let inside = List.take crossed index in
-      let outside = List.drop crossed (index + 1) in
-      let ended = Scope.fresh_mode scope in
-      Scope.add_mode
-        scope
-        ~loc
-        (Mode.Var.submode
-           ~crossing
-           ~locality:(locality_map outside)
-           (Option.value held ~default:entry.mode)
-           ended
-           (reason "%s is used in an [exclave_]")
-         |> Result.bind ~f:(fun () ->
-           Mode.Var.at_most
-             ended
-             Locality
-             Regional
-             (Mode.Reason.create ~loc "the [exclave_] has ended its region")));
-      (* The cell of a mutable captured by a closure only lives as long as its
-         region, when the closure is local. *)
-      if mutable_
-         && List.exists inside ~f:is_closure
-         && not (List.exists outside ~f:is_closure)
-      then
-        Scope.report
-          scope
-          (Typecheck_error.create ~loc (Mutable_captured_in_exclave name))
-    | Closure closure ->
-      Scope.add_mode
-        scope
-        ~loc
-        (if mutable_
-         then
-           Mode.Var.submode
-             entry.mode
-             closure
-             (reason "%s is captured by a closure")
-         else
-           Mode.Var.submode
-             ~crossing
-             entry.mode
-             closure
-             (reason "%s is captured by a closure"));
-      Option.iter held ~f:(fun held ->
-        Scope.add_mode
-          scope
-          ~loc
-          (Mode.Var.submode
-             ~crossing
-             held
-             closure
-             (reason "%s holds it, and is captured by a closure")));
-      (* A closure capturing itself is as portable as anything else it captures. *)
-      if entry.defining && Mode.Var.id closure <> Mode.Var.id entry.mode
-      then
-        Scope.add_mode
-          scope
-          ~loc
-          (Mode.Var.at_least
-             closure
-             Stage
-             Nonportable
-             (reason "%s is captured by a closure in its own definition"))
-    | Quote _ when toplevel && mutable_ -> ()
-    | Quote code ->
-      Scope.add_mode
-        scope
-        ~loc
-        (Mode.Var.at_most
-           ?crossing:(if mutable_ then None else Some crossing)
-           entry.mode
-           Stage
-           Portable
-           (reason "%s is used in a quote"));
-      if not toplevel
-      then
-        Scope.add_mode
-          scope
-          ~loc
-          (Mode.Var.submode
-             ?crossing:(if mutable_ then None else Some crossing)
-             entry.mode
-             code
-             (reason "%s is embedded in a quote")));
-  let locality =
-    if toplevel then Mode.Locality_map.id else locality_map crossed
-  in
-  let why = sprintf "%s is used" name in
-  match held with
-  | Some held ->
-    Scope.evaluates scope Nonportable ~loc ~why:(sprintf "%s is mutable" name);
-    Scope.joins scope held ~crossing ~locality ~loc ~why
-  | None when mutable_ ->
-    Scope.evaluates scope Nonportable ~loc ~why:(sprintf "%s is mutable" name)
-  | None when entry.defining ->
-    Scope.evaluates
-      scope
-      Nonportable
-      ~loc
-      ~why:(sprintf "%s is used in its own definition" name);
-    Scope.joins
-      scope
-      entry.mode
-      ~crossing:{ crossing with stage = true; provenance = true }
-      ~locality
-      ~loc
-      ~why
-  | None -> Scope.joins scope entry.mode ~crossing ~locality ~loc ~why
-;;
-
-(* A free variable of the enclosing quote, provided where the code is spliced:
-   its mode is unknown. *)
-let use_free (scope : Scope.t) ~why ~loc =
-  Env.Lock.cancel_splices scope.locks
-  |> List.take_while ~f:(fun (lock : Env.Lock.t) ->
-    match lock.kind with
-    | Closure _ | Exclave -> true
-    | Quote _ | Splice -> false)
-  |> List.iter ~f:(fun (lock : Env.Lock.t) ->
-    match lock.kind with
-    | Closure closure ->
-      Scope.add_mode
-        scope
-        ~loc
-        (Mode.Var.at_least
-           closure
-           Stage
-           Nonportable
-           (Mode.Reason.create ~loc why))
-    | Quote _ | Splice | Exclave -> ());
-  Scope.evaluates scope Nonportable ~loc ~why
+let use_free (scope : Scope.t) ~at ~why ~loc =
+  Mode_rules.use_free (Scope.modes scope) at ~locks:scope.locks ~loc ~why
 ;;
 
 (* A closure computes nothing, so is generalized whatever it captures; other
@@ -1586,25 +1302,19 @@ let use_free (scope : Scope.t) ~why ~loc =
 let generalizes (scope : Scope.t) mode ~is_function ~loc =
   is_function
   || (Mode.Stage.le (Scope.known_stage scope mode) Const
-      && Scope.mode_holds
-           scope
-           ~loc
-           (Mode.Var.at_most
-              mode
-              Stage
-              Const
-              (Mode.Reason.create ~loc "it is generalized")))
+      && Mode_rules.generalizes (Scope.modes scope) mode ~loc)
 ;;
 
 (* [name] is the context entry the variable is provided as, if it becomes a free
    variable of the quote: a local's name or a toplevel's canonical name. *)
-let resolution_type t (scope : Scope.t) ~name ~toplevel ~loc : Resolution.t -> _
+let resolution_type t (scope : Scope.t) ~at ~name ~toplevel ~loc
+  : Resolution.t -> _
   = function
   | Local entry ->
-    use_entry scope entry ~name ~loc;
+    use_entry scope ~at entry ~name ~loc;
     Ok (Scope.instantiate t scope entry.scheme, Typed.Var_ref.Bound entry.binder)
   | Outside_quote { usable = Some entry; _ } ->
-    use_entry scope entry ~name ~loc;
+    use_entry scope ~at entry ~name ~loc;
     Ok (Scope.instantiate t scope entry.scheme, Persistent entry.binder)
   | Outside_quote { quote; usable = None; unusable } ->
     Option.iter unusable ~f:(fun entry ->
@@ -1612,7 +1322,11 @@ let resolution_type t (scope : Scope.t) ~name ~toplevel ~loc : Resolution.t -> _
         scope.program.unusable_in_quotes
         ~key:name
         ~data:{ loc; var_level = entry.level; used_at = scope.level });
-    use_free scope ~why:(sprintf "%s is a free variable of the quote" name) ~loc;
+    use_free
+      scope
+      ~at
+      ~why:(sprintf "%s is a free variable of the quote" name)
+      ~loc;
     let%map.Result ty =
       Unify.present_entry t ~row:quote.context ~name ~rank:quote.outside.rank
       |> lift ~loc
@@ -1854,37 +1568,36 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
             | In_progress { body = None; _ } | Unchecked | Done _ -> None))
   in
   let runtime_only = runtime_only program members in
-  let mode_holds (member : Toplevel.t) result =
-    match result with
-    | Ok () -> true
-    | Error error ->
-      Program_env.report
-        program
-        (Module_scope.within
-           member.module_
-           (Typecheck_error.create ~loc:member.expr.loc (Mode_error error)));
-      false
-  in
   let init_mode (member : Toplevel.t) =
     match member.state with
     | In_progress { init_mode; _ } -> init_mode
     | Unchecked | Done _ ->
       raise_s [%message "finish_scc: member not checked" (member : Toplevel.t)]
   in
+  let const (member : Toplevel.t) ~why =
+    Mode_rules.const
+      { modes = program.modes
+      ; rank = 0
+      ; holds =
+          (fun ~loc -> function
+            | Ok () -> true
+            | Error error ->
+              Program_env.report
+                program
+                (Module_scope.within
+                   member.module_
+                   (Typecheck_error.create ~loc (Mode_error error)));
+              false)
+      ; crossing = (fun _ -> Mode.Crossing.none)
+      }
+      (init_mode member)
+      ~loc:member.expr.loc
+      ~why:(why member.ident.name)
+  in
   if program.const_toplevels
   then
     List.iter members ~f:(fun member ->
-      ignore
-        (mode_holds
-           member
-           (Mode.Var.at_most
-              (init_mode member)
-              Stage
-              Const
-              (Mode.Reason.create
-                 ~loc:member.expr.loc
-                 (sprintf "%s is a toplevel" member.ident.name)))
-         : bool));
+      ignore (const member ~why:(sprintf "%s is a toplevel") : bool));
   let all_functions = List.for_all members ~f:Toplevel.is_function in
   let recursive =
     List.exists members ~f:(fun member ->
@@ -1901,15 +1614,7 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
           && Mode.Stage.le (Mode.Var.lower (init_mode member)).stage Const))
     && List.for_all members ~f:(fun member ->
       Toplevel.is_function member
-      || mode_holds
-           member
-           (Mode.Var.at_most
-              (init_mode member)
-              Stage
-              Const
-              (Mode.Reason.create
-                 ~loc:member.expr.loc
-                 (sprintf "%s is generalized" member.ident.name))))
+      || const member ~why:(sprintf "%s is generalized"))
   in
   if generalize
   then
@@ -1925,7 +1630,7 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
   let members =
     List.map members ~f:(fun member ->
       match member.state with
-      | In_progress { index; ty; args; mode; body = Some body; _ } ->
+      | In_progress { index; ty; args; mode; held; body = Some body; _ } ->
         Program_env.add_info program member.ident ~ty ~level:0;
         let typed =
           { Typed.Toplevel.ident = member.ident
@@ -1937,7 +1642,8 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
         in
         member.state
         <- Done
-             { entry = Env.Entry.toplevel ~ident:member.ident ~scheme:ty ~mode
+             { entry =
+                 Env.Entry.toplevel ~ident:member.ident ~scheme:ty ~mode ~held
              ; typed
              ; failed
              ; runtime_only
@@ -1971,25 +1677,7 @@ let intrinsic_type t (scope : Scope.t) (intrinsic : Intrinsic.t) =
   | Assume_global ->
     (* Only its locality is assumed. *)
     let ty = Scope.fresh_ty t scope in
-    let arg = Scope.fresh_mode scope in
-    let res = Scope.fresh_mode scope in
-    let reason = Mode.Reason.create "Unsafe.assume_global keeps it" in
-    Result.all_unit
-      [ Mode.Var.submode_on arg res Stage reason
-      ; Mode.Var.submode_on arg res Provenance reason
-      ; Mode.Var.at_least
-          arg
-          Locality
-          Local
-          (Mode.Reason.create "Unsafe.assume_global takes it")
-      ; Mode.Var.at_most
-          res
-          Locality
-          Global
-          (Mode.Reason.create "Unsafe.assume_global assumes it")
-      ]
-    |> Result.iter_error ~f:(fun error ->
-      raise_s [%message "Unsafe.assume_global" (error : Mode.Error.t)]);
+    let arg, res = Mode_rules.assume_global (Scope.modes scope) in
     Type.TArrow (ty, ty, { arg = Var arg; res = Var res })
   | _ ->
     Intrinsic.ty
@@ -2004,11 +1692,12 @@ let is_syntax ty =
   | _ -> false
 ;;
 
-let rec var_type t (scope : Scope.t) ~(path : Syntax.Decl_path.t) ~loc =
+let rec var_type t (scope : Scope.t) ~at ~(path : Syntax.Decl_path.t) ~loc =
   let resolve ~name entry =
     resolution_type
       t
       scope
+      ~at
       ~name
       ~toplevel:false
       ~loc
@@ -2028,7 +1717,7 @@ let rec var_type t (scope : Scope.t) ~(path : Syntax.Decl_path.t) ~loc =
   | None ->
     (match%bind.Result Module_scope.find_value scope.module_ path ~loc with
      | Toplevel name ->
-       toplevel_type t scope (Program_env.toplevel scope.program name) ~loc
+       toplevel_type t scope ~at (Program_env.toplevel scope.program name) ~loc
      | Prim prim -> Ok (Prim.ty prim, Typed.Var_ref.Prim prim)
      | Intrinsic intrinsic ->
        Ok (intrinsic_type t scope intrinsic, Typed.Var_ref.Intrinsic intrinsic)
@@ -2037,12 +1726,13 @@ let rec var_type t (scope : Scope.t) ~(path : Syntax.Decl_path.t) ~loc =
         | Some _ -> resolve ~name:(Syntax.Decl_path.to_string path) None
         | None -> Error (Module_scope.unbound_value scope.module_ path ~loc)))
 
-and toplevel_type t scope (toplevel : Toplevel.t) ~loc =
+and toplevel_type t scope ~at (toplevel : Toplevel.t) ~loc =
   let%bind.Result entry = toplevel_entry t scope toplevel ~loc in
   let name = toplevel.ident.name in
   resolution_type
     t
     scope
+    ~at
     ~name
     ~toplevel:true
     ~loc
@@ -2050,21 +1740,22 @@ and toplevel_type t scope (toplevel : Toplevel.t) ~loc =
 
 (* A [Stag.Value_ref.t]'s canonical name, resolved where the code it was erased
    from was checked, so not looked up in [scope]. *)
-and resolved_value_type t (scope : Scope.t) name ~loc =
+and resolved_value_type t (scope : Scope.t) ~at name ~loc =
   match
     Prim.of_canonical_name name, Program_env.find_toplevel scope.program name
   with
   | Some prim, _ -> Ok (Prim.ty prim, Typed.Var_ref.Prim prim)
-  | None, Some toplevel -> toplevel_type t scope toplevel ~loc
+  | None, Some toplevel -> toplevel_type t scope ~at toplevel ~loc
   | None, None -> error ~loc (Not_in_scope (Path (Syntax.Path.of_string name)))
 
 (* Generated code's variables are already resolved, so are found by binder
    rather than by name, which may be shadowed. *)
-and var_ref_type t (scope : Scope.t) (var_ref : Typed.Var_ref.t) ~loc =
+and var_ref_type t (scope : Scope.t) ~at (var_ref : Typed.Var_ref.t) ~loc =
   let resolve ~name ~toplevel entry =
     resolution_type
       t
       scope
+      ~at
       ~name
       ~toplevel
       ~loc
@@ -2082,6 +1773,7 @@ and var_ref_type t (scope : Scope.t) (var_ref : Typed.Var_ref.t) ~loc =
        resolution_type
          t
          scope
+         ~at
          ~name
          ~toplevel:
            (match var_ref with
@@ -2105,8 +1797,9 @@ and var_ref_type t (scope : Scope.t) (var_ref : Typed.Var_ref.t) ~loc =
      | None ->
        (match Program_env.embedded scope.program ident with
         | Some info ->
-          Scope.evaluates
-            scope
+          Mode_rules.runs
+            (Scope.modes scope)
+            at
             Portable
             ~loc
             ~why:(sprintf "%s was computed at compile time" ident.name);
@@ -2140,6 +1833,7 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
         ~ident:toplevel.ident
         ~scheme:in_progress.ty
         ~mode:in_progress.mode
+        ~held:in_progress.held
     in
     (match scope.quote with
      | Some _ when not toplevel.mut ->
@@ -2149,13 +1843,11 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
          (at_scope_level
             { entry with
               mode =
-                Scope.stage_at_least
-                  scope
+                Mode_rules.stage_at_least
+                  (Scope.modes scope)
                   Nonportable
-                  ~reason:
-                    (Mode.Reason.create
-                       ~loc
-                       (sprintf "%s is being checked" toplevel.ident.name))
+                  ~loc
+                  ~why:(sprintf "%s is being checked" toplevel.ident.name)
             })
      | None when scope.level < 0 ->
        (match Stack.top scope.program.splice_starts with
@@ -2197,13 +1889,12 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
     ; in_expect_test = false
     ; generated = toplevel.generated
     ; syntax_splice = None
-    ; sink = Mode.Var.create program.modes ~rank
     ; locks = []
     ; params = []
-    ; tail = false
-    ; region = None
     }
   in
+  let modes = Scope.modes scope in
+  let expected = Mode_rules.Expected.fresh modes in
   let fn =
     function_type
       t
@@ -2222,37 +1913,37 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
     Stack.push program.unfinished ty;
     let init_mode =
       if Toplevel.is_function toplevel
-      then Scope.fresh_mode scope
-      else scope.sink
+      then Mode_rules.Ctx.fresh modes
+      else Mode_rules.Expected.mode expected
     in
+    let loc = toplevel.expr.loc in
+    let name = toplevel.ident.name in
     let mode =
       if toplevel.mut
       then
-        Scope.stage_at_least
-          scope
+        Mode_rules.stage_at_least
+          modes
           Nonportable
-          ~reason:
-            (Mode.Reason.create
-               ~loc:toplevel.expr.loc
-               (sprintf "%s is mutable" toplevel.ident.name))
+          ~loc
+          ~why:(sprintf "%s is mutable" name)
       else if Toplevel.is_function toplevel
       then init_mode
-      else Scope.bound scope init_mode toplevel.mode
+      else
+        Mode_rules.bound
+          modes
+          init_mode
+          toplevel.mode
+          ~var:(Scope.mode_var scope)
     in
-    if toplevel.mut
-    then (
-      let held = Scope.fresh_mode scope in
-      Scope.add_mode
-        scope
-        ~loc:toplevel.expr.loc
-        (Mode.Var.submode
-           init_mode
-           held
-           (Mode.Reason.create
-              ~loc:toplevel.expr.loc
-              (sprintf "it initializes %s" toplevel.ident.name)));
-      Hashtbl.set program.held_modes ~key:toplevel.ident ~data:held;
-      Scope.annotated ~exact:true scope held toplevel.mode);
+    let held = Option.some_if toplevel.mut (Mode_rules.Ctx.fresh modes) in
+    Option.iter held ~f:(fun held ->
+      Mode_rules.initializes modes ~value:init_mode ~held ~name ~loc;
+      Mode_rules.annotate
+        ~exact:true
+        modes
+        held
+        toplevel.mode
+        ~var:(Scope.mode_var scope));
     toplevel.state
     <- In_progress
          { index
@@ -2260,6 +1951,7 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
          ; args = List.map args ~f:fst
          ; mode
          ; init_mode
+         ; held
          ; body = None
          ; recursive = false
          };
@@ -2275,29 +1967,20 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
             ~body:(Source.Expr.Syntax toplevel.expr)
             ~loc:toplevel.expr.loc
         else
-          check_expr t scope ~expr:(Source.Expr.Syntax toplevel.expr) ~ty:res_ty
+          check_expr
+            t
+            scope
+            ~at:expected
+            ~expr:(Source.Expr.Syntax toplevel.expr)
+            ~ty:res_ty
       with
       | body -> body
       | exception Uses_unfinished ->
         abandon program scc ~unfinished;
         raise Uses_unfinished
     in
-    (* A toplevel outlives every region. *)
-    List.iter
-      (init_mode
-       :: mode
-       :: Option.to_list (Hashtbl.find program.held_modes toplevel.ident))
-      ~f:(fun mode ->
-        Scope.add_mode
-          scope
-          ~loc:toplevel.expr.loc
-          (Scope.locality_at_most
-             scope
-             mode
-             ~ty
-             Global
-             ~loc:toplevel.expr.loc
-             ~why:(sprintf "%s is a toplevel" toplevel.ident.name)));
+    List.iter (init_mode :: mode :: Option.to_list held) ~f:(fun mode ->
+      Mode_rules.toplevel modes mode ~ty ~name ~loc);
     if program.reported > reported then scc.failed <- true;
     (match toplevel.state with
      | In_progress in_progress -> in_progress.body <- Some body
@@ -2336,67 +2019,31 @@ and abandon (program : Program_env.t) (scc : Scc_frame.t) ~unfinished =
    closure of a partial application holds what the function captures and the
    arguments given so far. *)
 and check_body t (scope : Scope.t) ~closure ~(fn : Function_type.t) ~body ~loc =
-  let reason = Mode.Reason.create ~loc "a partial application holds it" in
-  List.iteri fn.partial_modes ~f:(fun index partial ->
-    Scope.add_mode scope ~loc (Mode.Var.submode closure partial reason);
-    List.iteri fn.arg_modes ~f:(fun index' arg ->
-      if index' <= index
-      then Scope.add_mode scope ~loc (Mode.Var.submode arg partial reason)));
+  Mode_rules.Function.partial_applications
+    (Scope.modes scope)
+    ~closure
+    ~arg_modes:fn.arg_modes
+    ~partial_modes:fn.partial_modes
+    ~loc;
   let scope =
     { (Scope.enter_closure t scope closure) with
       params = List.map fn.args ~f:snd @ scope.params
-    ; tail = true
-    ; region = Some fn.res_mode
     }
   in
-  (* The body is a region of its own: what is local to the caller's is regional
-     in it, and what is local to it can't be returned. *)
-  let params =
-    List.map2_exn
-      fn.args
-      fn.arg_modes
-      ~f:(fun ((ident : Typed.Ident.t), ty) arg_mode ->
-        let mode = Scope.fresh_mode scope in
-        Scope.add_mode
-          scope
-          ~loc
-          (Mode.Var.submode
-             ~locality:Mode.Locality_map.borrow
-             arg_mode
-             mode
-             (Mode.Reason.create
-                ~loc
-                (sprintf "%s is passed to the function" ident.name)));
-        ident.name, Scope.entry scope ~ident ~scheme:ty ~mode)
-  in
-  let body =
+  let modes = Scope.modes scope in
+  Mode_rules.Function.body modes ~res_mode:fn.res_mode ~ty:fn.res_ty (fun at ->
+    let params =
+      List.map2_exn
+        fn.args
+        fn.arg_modes
+        ~f:(fun ((ident : Typed.Ident.t), ty) arg_mode ->
+          let mode =
+            Mode_rules.Function.param modes ~arg_mode ~name:ident.name ~loc
+          in
+          ident.name, Scope.entry scope ~ident ~scheme:ty ~mode)
+    in
     Env.with_bindings scope.locals params ~f:(fun () ->
-      check_expr t scope ~expr:body ~ty:fn.res_ty)
-  in
-  let crossing = Scope.crossing scope fn.res_ty in
-  let reason = Mode.Reason.create ~loc:body.loc "the function returns it" in
-  Scope.add_mode
-    scope
-    ~loc:body.loc
-    (Mode.Var.at_most
-       ~crossing
-       scope.sink
-       Locality
-       Regional
-       (Mode.Reason.create
-          ~loc:body.loc
-          "the function returns it, ending its region (return it with \
-           [exclave_] instead)"));
-  Scope.add_mode
-    scope
-    ~loc:body.loc
-    (Mode.Var.submode
-       ~crossing
-       ~locality:Mode.Locality_map.release
-       scope.sink
-       fn.res_mode
-       reason);
-  body
+      check_expr t scope ~at ~expr:body ~ty:fn.res_ty))
 
 and with_monomorphic_bindings (scope : Scope.t) bindings ~mode ~f =
   Env.with_bindings
@@ -2414,19 +2061,24 @@ and expr_type
   ?(hint = Expectation.Required)
   t
   (scope : Scope.t)
+  ~(at : Mode_rules.Expected.t)
   ~(expr : Source.Expr.t)
   : Typed.Expr.t
   =
-  let tail = scope.tail in
-  let scope = { scope with tail = false } in
-  let tail_scope = { scope with tail } in
+  let modes = Scope.modes scope in
+  let within = Mode_rules.Expected.within at in
   let loc = Source.Expr.loc expr in
   let node desc ty = { Typed.Expr.desc; ty; loc } in
   let fail ?(children = []) error =
     Scope.report scope error;
     node (Error children) Type.error
   in
-  let infer exprs = List.map exprs ~f:(fun expr -> expr_type t scope ~expr) in
+  let infer exprs =
+    List.map exprs ~f:(fun expr -> expr_type t scope ~at:within ~expr)
+  in
+  let part ?(modality = Modality.Id) ?ty check =
+    Mode_rules.part ?ty modes at modality check
+  in
   let tys = List.map ~f:(fun (expr : Typed.Expr.t) -> expr.ty) in
   let labelled_tys =
     List.map ~f:(fun (label, (expr : Typed.Expr.t)) -> label, expr.ty)
@@ -2448,7 +2100,13 @@ and expr_type
   | Struct_quote toplevels ->
     (match Struct_quote.expand toplevels ~loc with
      | Ok expanded ->
-       expr_type ?expected ~hint t scope ~expr:(Source.Expr.Syntax expanded)
+       expr_type
+         ?expected
+         ~hint
+         t
+         scope
+         ~at:(Mode_rules.Expected.part at)
+         ~expr:(Source.Expr.Syntax expanded)
      | Error (loc, message) ->
        fail (Typecheck_error.create ~loc (Malformed_struct_quote message)))
   | Type ty ->
@@ -2466,141 +2124,88 @@ and expr_type
          (Type resolved)
          (TCon (Prelude_path.canonical "Stag.Type.t", [ ATy elaborated ])))
   | Var (Path (path, annot)) ->
-    let var_scope = Scope.annotated_use scope annot in
     (match
-       match path with
-       | Path _ | Root _ -> var_type t var_scope ~path ~loc
-       | Resolved name -> resolved_value_type t var_scope name ~loc
+       Mode_rules.annotated_use
+         modes
+         within
+         ~annot:annot.mode
+         ~var:(Scope.mode_var scope)
+         ~loc
+         (fun at ->
+            let%map.Result ty, var_ref =
+              match path with
+              | Path _ | Root _ -> var_type t scope ~at ~path ~loc
+              | Resolved name -> resolved_value_type t scope ~at name ~loc
+            in
+            node (Var var_ref) ty)
      with
      | Error error -> fail error
-     | Ok (ty, var_ref) ->
-       annotate t scope ~var_scope (node (Var var_ref) ty) annot ~loc)
+     | Ok var -> annotate t scope var annot ~loc)
   | Marked (Nontail, inner) ->
-    let inner = expr_type ?expected ~hint t scope ~expr:inner in
+    let inner = expr_type ?expected ~hint t scope ~at:within ~expr:inner in
     node (Marked (Nontail, inner)) inner.ty
   | Marked (Stack, inner) ->
-    let inner_scope = Scope.with_sink scope in
-    let inner = expr_type ?expected ~hint t inner_scope ~expr:inner in
-    let rec is_allocation (expr : Typed.Expr.t) =
-      (* Records, tuples and variants are values, which allocate only through
-         their parts. *)
-      match expr.desc with
-      | Fun _ | Quote _ | Error _ -> true
-      | Tuple parts | Construct (_, parts) -> List.exists parts ~f:is_allocation
-      | Record fields | Record_update (_, fields) ->
-        List.exists fields ~f:(fun (_, part) -> is_allocation part)
-      | Poly_record fields | Poly_update (_, fields) | Poly_extend (fields, _)
-        -> List.exists fields ~f:(fun (_, part) -> is_allocation part)
-      | Poly_variant (_, part) -> Option.exists part ~f:is_allocation
-      | App ({ desc = Var (Intrinsic Ptr_make); _ }, _) -> true
-      | App
-          ( { desc = Var (Bound (Toplevel ident) | Persistent (Toplevel ident))
-            ; _
-            }
-          , _ ) -> String.equal ident.name (Prelude_path.canonical "Ptr.make")
-      | Annotated (expr, _) -> is_allocation expr
-      | _ -> false
-    in
-    if is_allocation inner
-    then (
-      Scope.add_mode
-        scope
-        ~loc
-        (Mode.Var.at_least
-           inner_scope.sink
-           Locality
-           Local
-           (Mode.Reason.create ~loc "it is allocated by [stack_]"));
-      Scope.joins
-        scope
-        inner_scope.sink
-        ~crossing:(Scope.crossing scope inner.ty)
-        ~loc
-        ~why:"it is part of the value";
-      node (Marked (Stack, inner)) inner.ty)
-    else
-      fail
-        ~children:[ inner ]
-        (Typecheck_error.create ~loc Stack_not_on_allocation)
+    (match
+       Mode_rules.Alloc.stack modes within ~loc (fun at ->
+         expr_type ?expected ~hint t scope ~at ~expr:inner)
+     with
+     | Ok inner -> node (Marked (Stack, inner)) inner.ty
+     | Error inner ->
+       fail
+         ~children:[ inner ]
+         (Typecheck_error.create ~loc Stack_not_on_allocation))
   | Marked (Exclave, inner) ->
-    (match scope.region with
-     | Some res_mode when tail ->
-       let inner_scope =
-         { (Scope.with_sink scope) with
-           locks = { Env.Lock.id = Fresh.id t; kind = Exclave } :: scope.locks
-         ; region = None
-         }
-       in
-       let inner = expr_type ?expected ~hint t inner_scope ~expr:inner in
-       Scope.add_mode
-         scope
-         ~loc
-         (Mode.Var.submode
-            ~crossing:(Scope.crossing scope inner.ty)
-            inner_scope.sink
-            res_mode
-            (Mode.Reason.create ~loc "the function returns it"));
-       Scope.evaluates_for
-         scope
-         inner_scope.sink
-         ~loc
-         ~why:"it is returned in the caller's region";
-       node (Marked (Exclave, inner)) inner.ty
-     | Some _ | None ->
-       let inner = expr_type t scope ~expr:inner in
+    (match
+       Mode_rules.exclave modes at ~loc (fun at ->
+         expr_type
+           ?expected
+           ~hint
+           t
+           { scope with
+             locks = { Env.Lock.id = Fresh.id t; kind = Exclave } :: scope.locks
+           }
+           ~at
+           ~expr:inner)
+     with
+     | Some inner -> node (Marked (Exclave, inner)) inner.ty
+     | None ->
+       let inner = expr_type t scope ~at:within ~expr:inner in
        fail
          ~children:[ inner ]
          (Typecheck_error.create ~loc Exclave_not_in_tail_position))
   | Annotated (var, annot) ->
-    let var_scope = Scope.annotated_use scope annot in
-    annotate t scope ~var_scope (expr_type t var_scope ~expr:var) annot ~loc
+    let var =
+      Mode_rules.annotated_use
+        modes
+        at
+        ~annot:annot.mode
+        ~var:(Scope.mode_var scope)
+        ~loc
+        (fun at -> Ok (expr_type t scope ~at ~expr:var))
+      |> Result.ok_exn
+    in
+    annotate t scope var annot ~loc
   | Var (Ref var_ref) ->
-    (match var_ref_type t scope var_ref ~loc with
+    (match var_ref_type t scope ~at:within var_ref ~loc with
      | Error error -> fail error
      | Ok (ty, var_ref) -> node (Var var_ref) ty)
   | App (f, x) ->
-    Scope.evaluates scope Portable ~loc ~why:"it applies a function";
+    Mode_rules.runs modes at Portable ~loc ~why:"it applies a function";
     let a = Scope.fresh_ty t scope in
     let b = Scope.fresh_ty t scope in
     let arg_mode = Scope.fresh_mode scope in
     let res_mode = Scope.fresh_mode scope in
-    (* A tail call ends the current region first, so what it is passed may not
-       be local to it: a curried call's arguments are all passed at once. *)
-    let tail_reason =
-      "it is passed in a tail call, after the current region has ended (mark \
-       the call [@nontail])"
-    in
-    let f_is_app =
+    let curried =
       match Source.Expr.view f with
       | App _ -> true
       | _ -> false
     in
-    let f_scope = { (Scope.with_sink scope) with tail = tail && f_is_app } in
-    let f =
-      check_expr
-        t
-        f_scope
-        ~expr:f
-        ~ty:(TArrow (a, b, { arg = Var arg_mode; res = Var res_mode }))
-    in
-    if tail && (not f_is_app) && Option.is_some scope.region
-    then
-      Scope.add_mode
-        scope
-        ~loc
-        (Scope.locality_at_most
-           scope
-           f_scope.sink
-           ~ty:f.ty
-           Regional
-           ~loc:f.loc
-           ~why:tail_reason);
     (* The expected result is known before the argument, which may need it:
        [Ptr.make (C x)] resolves [C] in the expected pointee type. A clash is
        left to whoever expects the result to report. A hint is only taken once
        the result is known to be of its form, as a variable may become another
        type: a toplevel splice's code may be syntax. *)
-    let result_matches =
+    let result_matches_expected () =
       match expected with
       | Some expected
         when (not (Unify.clash expected b))
@@ -2613,78 +2218,94 @@ and expr_type
         Scope.unifies t scope ~ty1:expected ~ty2:b ~loc
       | Some _ | None -> true
     in
-    let x_scope = Scope.with_sink scope in
-    let x = check_expr t x_scope ~expr:x ~ty:a in
-    Scope.add_mode
-      scope
-      ~loc
-      (Mode.Var.submode
-         ~crossing:(Scope.crossing scope a)
-         x_scope.sink
-         arg_mode
-         (Mode.Reason.create ~loc "it is passed to a function"));
-    if tail && Option.is_some scope.region
-    then
-      Scope.add_mode
-        scope
+    let result_matches = ref true in
+    let f, x =
+      Mode_rules.apply
+        modes
+        at
         ~loc
-        (Scope.locality_at_most
-           scope
-           x_scope.sink
-           ~ty:a
-           Regional
-           ~loc:x.loc
-           ~why:tail_reason);
-    Scope.joins
-      scope
-      res_mode
-      ~crossing:(Scope.crossing scope b)
-      ~loc
-      ~why:"the function returns it";
-    if result_matches
+        ~curried
+        ~arg_mode
+        ~res_mode
+        ~arg_ty:a
+        ~res_ty:b
+        ~callee:(fun at ->
+          check_expr
+            t
+            scope
+            ~at
+            ~expr:f
+            ~ty:(TArrow (a, b, { arg = Var arg_mode; res = Var res_mode })))
+        ~arg:(fun at ->
+          result_matches := result_matches_expected ();
+          check_expr t scope ~at ~expr:x ~ty:a)
+    in
+    (match f.desc with
+     | Var (Intrinsic Ptr_make) -> Mode_rules.Alloc.pointer at
+     | Var (Bound (Toplevel ident) | Persistent (Toplevel ident))
+       when String.equal ident.name (Prelude_path.canonical "Ptr.make") ->
+       Mode_rules.Alloc.pointer at
+     | _ -> ());
+    if !result_matches
     then node (App (f, x)) b
     else node (Error [ f; x ]) Type.error
   | Let { binder; args; annot; mode = mode_annot; body; in_ } ->
-    let inner = Scope.with_sink { scope with rank = scope.rank + 1 } in
+    let inner = { scope with rank = scope.rank + 1 } in
     let is_function = not (List.is_empty args) in
-    let fn =
-      function_type
-        t
-        inner
-        ~args
-        ~annot
-        ~res_mode:(if is_function then mode_annot else None)
-    in
-    let { Function_type.args = arg_types; annots; result_annot; res_ty; ty; _ } =
-      fn
-    in
-    let ident = Program_env.bind scope.program binder ty ~level:scope.level in
     let name = Source.Binder.name binder in
-    let mode = inner.sink in
-    (* A closure may refer to itself, but a value referring to itself is not
-       known yet, as a [let rec]'s isn't. *)
-    let own_mode =
-      if is_function
-      then mode
-      else
-        Scope.stage_at_least
-          scope
-          Nonportable
-          ~reason:(Mode.Reason.create ~loc (sprintf "%s is being defined" name))
+    let fn, ident, mode, body =
+      Mode_rules.evaluate
+        modes
+        at
+        ~inner:(Scope.modes inner)
+        ~loc
+        ~why:(sprintf "%s is bound" name)
+        (fun inner_at ->
+           let fn =
+             function_type
+               t
+               inner
+               ~args
+               ~annot
+               ~res_mode:(if is_function then mode_annot else None)
+           in
+           let ident =
+             Program_env.bind scope.program binder fn.ty ~level:scope.level
+           in
+           let mode = Mode_rules.Expected.mode inner_at in
+           (* A closure may refer to itself, but a value referring to itself is
+              not known yet, as a [let rec]'s isn't. *)
+           let own_mode =
+             if is_function
+             then mode
+             else
+               Mode_rules.stage_at_least
+                 modes
+                 Nonportable
+                 ~loc
+                 ~why:(sprintf "%s is being defined" name)
+           in
+           let body =
+             Env.with_bindings
+               scope.locals
+               [ ( name
+                 , Scope.entry
+                     scope
+                     ~defining:true
+                     ~ident
+                     ~scheme:fn.ty
+                     ~mode:own_mode )
+               ]
+               ~f:(fun () ->
+                 match fn.args with
+                 | [] ->
+                   check_expr t inner ~at:inner_at ~expr:body ~ty:fn.res_ty
+                 | _ :: _ -> check_body t inner ~closure:mode ~fn ~body ~loc)
+           in
+           fn, ident, mode, body)
     in
-    let body =
-      Env.with_bindings
-        scope.locals
-        [ ( name
-          , Scope.entry scope ~defining:true ~ident ~scheme:ty ~mode:own_mode )
-        ]
-        ~f:(fun () ->
-          match arg_types with
-          | [] -> check_expr t inner ~expr:body ~ty:res_ty
-          | _ :: _ -> check_body t inner ~closure:mode ~fn ~body ~loc)
-    in
+    let { Function_type.args = arg_types; annots; result_annot; ty; _ } = fn in
     let args = List.map arg_types ~f:fst in
-    Scope.evaluates_for scope mode ~loc ~why:(sprintf "%s is bound" name);
     let generalized = generalizes scope mode ~is_function ~loc in
     if generalized
     then Scheme.generalize t ~rank:scope.rank [ ty ]
@@ -2698,10 +2319,23 @@ and expr_type
               ~ident
               ~scheme:ty
               ~mode:
-                (if is_function then mode else Scope.bound scope mode mode_annot)
-          )
+                (if is_function
+                 then mode
+                 else
+                   Mode_rules.bound
+                     modes
+                     mode
+                     mode_annot
+                     ~var:(Scope.mode_var scope)) )
         ]
-        ~f:(fun () -> expr_type t tail_scope ~expr:in_ ?expected ~hint)
+        ~f:(fun () ->
+          expr_type
+            t
+            scope
+            ~at:(Mode_rules.Expected.whole at)
+            ~expr:in_
+            ?expected
+            ~hint)
     in
     node
       (Let
@@ -2726,49 +2360,59 @@ and expr_type
            Scope.report scope error;
            Scope.fresh_ty t scope, None)
     in
-    let body_scope = Scope.with_sink scope in
-    let body = check_expr t body_scope ~expr:body ~ty in
-    let ident = Program_env.bind scope.program binder ty ~level:scope.level in
-    Hash_set.add scope.program.mutable_idents ident;
     let name = Source.Binder.name binder in
-    Scope.evaluates_for
-      scope
-      body_scope.sink
-      ~loc
-      ~why:(sprintf "%s is bound" name);
+    let body, ident, value =
+      Mode_rules.evaluate
+        modes
+        at
+        ~loc
+        ~why:(sprintf "%s is bound" name)
+        (fun body_at ->
+           let body = check_expr t scope ~at:body_at ~expr:body ~ty in
+           let ident =
+             Program_env.bind scope.program binder ty ~level:scope.level
+           in
+           body, ident, Mode_rules.Expected.mode body_at)
+    in
+    Hash_set.add scope.program.mutable_idents ident;
     let held = Scope.fresh_mode scope in
-    Scope.add_mode
-      scope
-      ~loc
-      (Mode.Var.submode
-         ~crossing:(Scope.crossing scope ty)
-         body_scope.sink
-         held
-         (Mode.Reason.create ~loc (sprintf "it initializes %s" name)));
-    Hashtbl.set scope.program.held_modes ~key:ident ~data:held;
-    Scope.annotated ~exact:true scope held held_annot;
+    Mode_rules.initializes ~ty modes ~value ~held ~name ~loc;
+    Mode_rules.annotate
+      ~exact:true
+      modes
+      held
+      held_annot
+      ~var:(Scope.mode_var scope);
     let mode =
-      Scope.stage_at_least
-        scope
+      Mode_rules.stage_at_least
+        modes
         Nonportable
-        ~reason:(Mode.Reason.create ~loc (sprintf "%s is mutable" name))
+        ~loc
+        ~why:(sprintf "%s is mutable" name)
     in
     let in_ =
       Env.with_bindings
         scope.locals
-        [ name, Scope.entry scope ~ident ~scheme:ty ~mode ]
-        ~f:(fun () -> expr_type t tail_scope ~expr:in_ ?expected ~hint)
+        [ name, Scope.entry scope ~ident ~scheme:ty ~mode ~held ]
+        ~f:(fun () ->
+          expr_type
+            t
+            scope
+            ~at:(Mode_rules.Expected.whole at)
+            ~expr:in_
+            ?expected
+            ~hint)
     in
     node (Let_mut { ident; annot; mode = held_annot; body; in_ }) in_.ty
   | Assign (var, value) ->
-    Scope.evaluates scope Nonportable ~loc ~why:"it assigns a variable";
+    Mode_rules.runs modes at Nonportable ~loc ~why:"it assigns a variable";
     let target =
       match var with
       | Path (path, _) ->
         (match path with
-         | Path _ | Root _ -> var_type t scope ~path ~loc
-         | Resolved name -> resolved_value_type t scope name ~loc)
-      | Ref var_ref -> var_ref_type t scope var_ref ~loc
+         | Path _ | Root _ -> var_type t scope ~at:within ~path ~loc
+         | Resolved name -> resolved_value_type t scope ~at:within name ~loc)
+      | Ref var_ref -> var_ref_type t scope ~at:within var_ref ~loc
     in
     let name =
       match var with
@@ -2807,59 +2451,36 @@ and expr_type
          Result.map (assignable var_ref) ~f:(fun var_ref -> ty, var_ref))
      with
      | Error error ->
-       let value = expr_type t scope ~expr:value in
+       let value = expr_type t scope ~at:within ~expr:value in
        fail ~children:[ value ] error
      | Ok (ty, var_ref) ->
-       let value_scope = Scope.with_sink scope in
-       let value = check_expr t value_scope ~expr:value ~ty in
-       Scope.evaluates_for scope value_scope.sink ~loc ~why:"it is assigned";
-       (match var_ref with
-        | Bound (Local ident | Toplevel ident)
-        | Persistent (Local ident | Toplevel ident) ->
-          Option.iter
-            (Hashtbl.find scope.program.held_modes ident)
-            ~f:(fun held ->
-              let crossed =
-                match
-                  Env.find_binder scope.locals (Local ident) ~name:ident.name
-                with
-                | Some entry -> Env.Entry.crossed entry ~locks:scope.locks
-                | None -> []
-              in
-              let locality = locality_map ~assign:true crossed in
-              (* A closure may be called from a region shorter than the
-                 variable's, so may only store what outlives every region. *)
-              if List.exists crossed ~f:(fun (lock : Env.Lock.t) ->
-                   match lock.kind with
-                   | Closure _ -> true
-                   | Quote _ | Splice | Exclave -> false)
-              then
-                Scope.add_mode
-                  scope
-                  ~loc
-                  (Scope.locality_at_most
-                     scope
-                     value_scope.sink
-                     ~ty
-                     Global
-                     ~loc
-                     ~why:
-                       (sprintf
-                          "it is assigned to %s from a closure, which may be \
-                           called from a shorter region"
-                          ident.name));
-              Scope.add_mode
-                scope
-                ~loc
-                (Mode.Var.submode
-                   ~crossing:(Scope.crossing scope ty)
-                   ~locality
-                   value_scope.sink
-                   held
-                   (Mode.Reason.create
-                      ~loc
-                      (sprintf "it is assigned to %s" ident.name))))
-        | Free _ | Free_toplevel _ | Prim _ | Intrinsic _ -> ());
+       let assigned, (held, crossed) =
+         match var_ref with
+         | Bound (Local ident) | Persistent (Local ident) ->
+           ( ident.name
+           , Env.find_binder scope.locals (Local ident) ~name:ident.name
+             |> Option.value_map ~default:(None, []) ~f:(fun entry ->
+               entry.held, Env.Entry.crossed entry ~locks:scope.locks) )
+         | Bound (Toplevel ident) | Persistent (Toplevel ident) ->
+           ( ident.name
+           , ( (match (Program_env.toplevel scope.program ident.name).state with
+                | In_progress { held; _ } -> held
+                | Done { entry; _ } -> entry.held
+                | Unchecked -> None)
+             , [] ) )
+         | Free _ | Free_toplevel _ | Prim _ | Intrinsic _ -> name, (None, [])
+       in
+       let value =
+         Mode_rules.assign
+           modes
+           at
+           ~held
+           ~crossed
+           ~ty
+           ~name:assigned
+           ~loc
+           (fun at -> check_expr t scope ~at ~expr:value ~ty)
+       in
        node (Assign (var_ref, value)) Type.unit)
   | Fun { args; body } ->
     let fn = function_type t scope ~args ~annot:None ~res_mode:None in
@@ -2872,19 +2493,19 @@ and expr_type
        when Expectation.is_required hint && not (Unify.clash expected ty) ->
        ignore (Unify.unify_ty t ~ty1:expected ~ty2:ty : (unit, _) Result.t)
      | Some _ | None -> ());
-    let closure = Scope.fresh_mode scope in
-    let body = check_body t scope ~closure ~fn ~body ~loc in
-    Scope.joins scope closure ~loc ~why:"the closure is made";
+    let body =
+      Mode_rules.Alloc.closure modes at ~loc (fun closure ->
+        check_body t scope ~closure ~fn ~body ~loc)
+    in
     node (Fun { args = List.map args ~f:fst; annots; body }) ty
   | Quote expr ->
     let quote =
       { Scope.id = Fresh.id t
       ; context = Scope.fresh_row t scope
       ; outside = scope
-      ; mode = Scope.fresh_mode scope
+      ; mode = Mode_rules.Alloc.code modes at ~loc
       }
     in
-    Scope.joins scope quote.mode ~loc ~why:"the code is built";
     let expected =
       match Option.map expected ~f:Type.canonical_ty with
       | Some (TCode { inner; context = _ }) -> Some inner
@@ -2897,8 +2518,8 @@ and expr_type
           level = scope.level + 1
         ; quote = Some quote
         ; locks = { id = Fresh.id t; kind = Quote quote.mode } :: scope.locks
-        ; sink = Scope.fresh_mode scope
         }
+        ~at:(Mode_rules.Expected.fresh modes)
         ~expr
         ?expected
         ~hint:(Expectation.quoted hint)
@@ -2910,21 +2531,22 @@ and expr_type
      | None, Generated _ ->
        raise_s [%message "Generated code has a splice outside any quote"]
      | None, Syntax _ | Some _, _ -> ());
-    let outside : Scope.t =
+    let (outside : Scope.t), outside_at =
       match scope.quote with
       | Some quote ->
-        Scope.evaluates
-          scope
+        Mode_rules.runs
+          modes
+          at
           Nonportable
           ~loc
           ~why:"the mode of spliced code is not known";
-        { quote.outside with
-          rank = scope.rank
-        ; sink = quote.mode
-        ; locks = { id = Fresh.id t; kind = Splice } :: scope.locks
-        }
+        ( { quote.outside with
+            rank = scope.rank
+          ; locks = { id = Fresh.id t; kind = Splice } :: scope.locks
+          }
+        , Mode_rules.Expected.of_mode quote.mode )
       | None ->
-        { scope with level = scope.level - 1; sink = Scope.fresh_mode scope }
+        { scope with level = scope.level - 1 }, Mode_rules.Expected.fresh modes
     in
     let reported = scope.program.reported in
     let inner = Scope.fresh_ty t scope in
@@ -2937,8 +2559,13 @@ and expr_type
       match subs with
       | Implicit ->
         let%map.Result captures =
-          substitute_from_scope t scope ~context ~loc ~may_capture:(fun _ _ ->
-            true)
+          substitute_from_scope
+            t
+            scope
+            ~at:within
+            ~context
+            ~loc
+            ~may_capture:(fun _ _ -> true)
         in
         Typed.Expr.Subs.Implicit captures
       | Providers providers ->
@@ -2946,6 +2573,7 @@ and expr_type
           substitute_from_scope
             t
             scope
+            ~at:within
             ~context
             ~loc
             ~may_capture:(fun name binder ->
@@ -2956,7 +2584,7 @@ and expr_type
         Typed.Expr.Subs.Implicit captures
       | Explicit subs ->
         let%map.Result subs =
-          substitute_explicitly t scope ~context ~subs ~loc
+          substitute_explicitly t scope ~at:within ~context ~subs ~loc
         in
         Typed.Expr.Subs.Explicit subs
     in
@@ -2969,6 +2597,7 @@ and expr_type
          check_expr
            t
            outside
+           ~at:outside_at
            ~expr:code
            ~ty:(TCode { inner; context })
            ?expected:code_expected
@@ -2982,6 +2611,7 @@ and expr_type
          expr_type
            t
            outside
+           ~at:outside_at
            ~expr:code
            ?expected:code_expected
            ~hint:(Code_hint hint)
@@ -2997,7 +2627,9 @@ and expr_type
            if failed code
            then node (Error [ code ]) Type.error
            else (
-             match splice_syntax t scope ~code ~loc ?expected ~hint with
+             match
+               splice_syntax t scope ~at:within ~code ~loc ?expected ~hint
+             with
              | Error error -> fail error ~children:[ code ]
              | Ok expansion ->
                node (Toplevel_splice { code; expansion }) expansion.ty))
@@ -3041,31 +2673,41 @@ and expr_type
                   | Implicit | Providers _ -> String.Map.empty
                 in
                 match
-                  expand t scope ~code ~subs ~listed ~name_locs ~ty:inner ~loc
+                  expand
+                    t
+                    scope
+                    ~at:within
+                    ~code
+                    ~subs
+                    ~listed
+                    ~name_locs
+                    ~ty:inner
+                    ~loc
                 with
                 | Error error -> fail error ~children:[ code ]
                 | Ok expansion ->
                   node (Toplevel_splice { code; expansion }) inner))))
   | Deref pointer ->
-    Scope.evaluates scope Nonportable ~loc ~why:"it reads through a pointer";
+    Mode_rules.runs modes at Nonportable ~loc ~why:"it reads through a pointer";
     let ptr pointee = Type.TCon ("ptr", [ ATy pointee ]) in
     (* What a pointer points to is global, as it is stored global. *)
-    let pointer_scope = Scope.with_sink scope in
     let pointee, pointer =
-      match expected with
-      | Some expected when Expectation.is_required hint ->
-        ( expected
-        , expr_type t pointer_scope ~expr:pointer ~expected:(ptr expected) )
-      | Some _ | None ->
-        ( Scope.fresh_ty t scope
-        , expr_type
-            t
-            pointer_scope
-            ~expr:pointer
-            ?expected:(Option.map expected ~f:ptr)
-            ~hint:Hint )
+      Mode_rules.project modes at ~loc ~why:"it is dereferenced" (fun at ->
+        ( (match expected with
+           | Some expected when Expectation.is_required hint ->
+             ( expected
+             , expr_type t scope ~at ~expr:pointer ~expected:(ptr expected) )
+           | Some _ | None ->
+             ( Scope.fresh_ty t scope
+             , expr_type
+                 t
+                 scope
+                 ~at
+                 ~expr:pointer
+                 ?expected:(Option.map expected ~f:ptr)
+                 ~hint:Hint ))
+        , Modality.Global ))
     in
-    Scope.evaluates_for scope pointer_scope.sink ~loc ~why:"it is dereferenced";
     if Scope.unifies t scope ~ty1:pointer.ty ~ty2:(ptr pointee) ~loc
     then node (Deref pointer) pointee
     else node (Error [ pointer ]) Type.error
@@ -3078,34 +2720,27 @@ and expr_type
     in
     if not (under_deref target)
     then (
-      let target = expr_type t scope ~expr:target in
+      let target = expr_type t scope ~at:within ~expr:target in
       fail
         ~children:[ target ]
         (Typecheck_error.create ~loc Store_not_through_pointer))
     else (
-      let target_scope = Scope.with_sink scope in
-      let target = expr_type t target_scope ~expr:target in
-      Scope.evaluates_for scope target_scope.sink ~loc ~why:"it is stored to";
-      let value_scope = Scope.with_sink scope in
-      let value = check_expr t value_scope ~expr:value ~ty:target.ty in
-      Scope.evaluates_for scope value_scope.sink ~loc ~why:"it is stored";
-      Scope.add_mode
-        scope
-        ~loc
-        (Scope.locality_at_most
-           scope
-           value_scope.sink
-           ~ty:target.ty
-           Global
-           ~loc:value.loc
-           ~why:"it is stored through a pointer, which may outlive any region");
+      let target, value =
+        Mode_rules.store
+          modes
+          at
+          ~loc
+          ~target:(fun at -> expr_type t scope ~at ~expr:target)
+          ~value:(fun at ~ty -> check_expr t scope ~at ~expr:value ~ty)
+      in
       node (Store (target, value)) Type.unit)
   | Tuple exprs ->
     let exprs =
       List.map2_exn
         exprs
         (tuple_components expected (List.length exprs))
-        ~f:(fun expr expected -> expr_type t scope ~expr ?expected ~hint)
+        ~f:(fun expr expected ->
+          part (fun at -> expr_type t scope ~at ~expr ?expected ~hint))
     in
     node (Tuple exprs) (Type.TTuple (tys exprs))
   | Construct (constructor, args) ->
@@ -3121,19 +2756,16 @@ and expr_type
      with
      | Error error -> fail error ~children:(infer args)
      | Ok (constructor, args, result) ->
-       let globals =
-         Type_env.global_constructor_args
-           scope.program.type_env
-           constructor.name
+       let modalities =
+         Type_env.constructor_modalities scope.program.type_env constructor.name
          |> Option.value ~default:[]
        in
        let args =
-         List.mapi args ~f:(fun i arg ->
-           check_part
-             t
-             scope
-             arg
-             ~global:(Option.value (List.nth globals i) ~default:false))
+         List.mapi args ~f:(fun i (expr, ty) ->
+           part
+             ~modality:(Option.value (List.nth modalities i) ~default:Id)
+             ~ty
+             (fun at -> check_expr t scope ~at ~expr ~ty))
        in
        node (Construct (constructor, args)) result)
   | Record fields ->
@@ -3141,28 +2773,30 @@ and expr_type
      | Error error -> fail error ~children:(infer (List.map fields ~f:snd))
      | Ok (record, fields, complete) ->
        let exprs =
-         List.map fields ~f:(fun ((field : Typed.Field_ref.t), arg) ->
-           check_part
-             t
-             scope
-             arg
-             ~global:
-               (Type_env.is_global_field
+         List.map fields ~f:(fun ((field : Typed.Field_ref.t), (expr, ty)) ->
+           part
+             ~modality:
+               (Type_env.field_modality
                   scope.program.type_env
-                  (Typed.Field_ref.name field)))
+                  (Typed.Field_ref.name field))
+             ~ty
+             (fun at -> check_expr t scope ~at ~expr ~ty))
        in
        if complete
        then node (Record (List.zip_exn (List.map fields ~f:fst) exprs)) record
        else node (Error exprs) record)
   | Field (expr, field) when Option.is_some (Known.unqualified_field field) ->
-    let record_scope = Scope.with_sink scope in
-    let expr = expr_type t record_scope ~expr in
-    (match field_type t scope field ~record:(Some expr.ty) ~loc with
-     | Error error ->
-       Scope.joins scope record_scope.sink ~loc ~why:"its field is read";
-       fail error ~children:[ expr ]
+    let expr, field =
+      Mode_rules.project modes at ~loc ~why:"its field is read" (fun at ->
+        let expr = expr_type t scope ~at ~expr in
+        match field_type t scope field ~record:(Some expr.ty) ~loc with
+        | Error error -> (expr, Error error), Modality.Id
+        | Ok ((field, _, _) as typed) ->
+          (expr, Ok typed), field_modality scope field)
+    in
+    (match field with
+     | Error error -> fail error ~children:[ expr ]
      | Ok (field, record, field_ty) ->
-       read_field scope field ~record_mode:record_scope.sink ~loc;
        let field = node (Field (expr, field)) field_ty in
        if Scope.unifies t scope ~ty1:record ~ty2:expr.ty ~loc:expr.loc
        then field
@@ -3171,9 +2805,10 @@ and expr_type
     (match field_type t scope field ~record:None ~loc with
      | Error error -> fail error ~children:(infer [ expr ])
      | Ok (field, record, field_ty) ->
-       let record_scope = Scope.with_sink scope in
-       let expr = check_expr t record_scope ~expr ~ty:record in
-       read_field scope field ~record_mode:record_scope.sink ~loc;
+       let expr =
+         Mode_rules.project modes at ~loc ~why:"its field is read" (fun at ->
+           check_expr t scope ~at ~expr ~ty:record, field_modality scope field)
+       in
        node (Field (expr, field)) field_ty)
   | Record_update (expr, fields) ->
     (* As in OCaml, the result's type parameters are those of [expr]'s type but
@@ -3186,6 +2821,7 @@ and expr_type
          expr_type
            t
            scope
+           ~at:within
            ~expr
            ?expected:
              (Option.map known_expected ~f:(fun known ->
@@ -3233,14 +2869,11 @@ and expr_type
           in
           let exprs =
             List.map fields ~f:(fun (field, _, expr) ->
-              check_part
-                t
-                scope
-                (expr, inst_out field.ty)
-                ~global:
-                  (Type_env.is_global_field
-                     scope.program.type_env
-                     (Typed.Field_ref.name (field_ref field))))
+              let ty = inst_out field.ty in
+              part
+                ~modality:(field_modality scope (field_ref field))
+                ~ty
+                (fun at -> check_expr t scope ~at ~expr ~ty))
           in
           let update =
             node
@@ -3253,9 +2886,10 @@ and expr_type
           in
           if unified then update else node (Error [ update ]) Type.error))
   | Match { scrutinee = expr; cases; exception_cases } ->
-    let scrutinee_scope = Scope.with_sink scope in
-    let scrutinee = expr_type t scrutinee_scope ~expr in
-    Scope.evaluates_for scope scrutinee_scope.sink ~loc ~why:"it is matched on";
+    let scrutinee, scrutinee_mode =
+      Mode_rules.evaluate modes at ~loc ~why:"it is matched on" (fun at ->
+        expr_type t scope ~at ~expr, Mode_rules.Expected.mode at)
+    in
     let result = Scope.fresh_ty t scope in
     (* Closing the scrutinee to patterns in error would only add errors. *)
     let patterns_failed = ref false in
@@ -3289,33 +2923,19 @@ and expr_type
           scope.locals
           (List.map bindings ~f:(fun (var : Pattern_var.t) ->
              let mode =
-               if not var.global
-               then mode
-               else (
-                 let global = Scope.fresh_mode scope in
-                 let reason =
-                   Mode.Reason.create
-                     ~loc:var.loc
-                     "it is held by a [global_] field"
-                 in
-                 Scope.add_mode
-                   scope
-                   ~loc:var.loc
-                   (Mode.Var.submode
-                      ~locality:Mode.Locality_map.ignore
-                      mode
-                      global
-                      reason
-                    |> Result.bind ~f:(fun () ->
-                      Mode.Var.at_most global Locality Global reason));
-                 global)
+               Mode_rules.project_binding
+                 modes
+                 ~block:mode
+                 var.modality
+                 ~loc:var.loc
              in
              ( var.ident.name
              , Scope.entry scope ~ident:var.ident ~scheme:var.ty ~mode )))
           ~f:(fun () ->
             check_expr
               t
-              tail_scope
+              scope
+              ~at:(Mode_rules.Expected.whole at)
               ~expr:body
               ~ty:result
               ?expected:(either_known result expected)
@@ -3345,7 +2965,7 @@ and expr_type
               Variant_match.pattern_type t scope handled ~pattern ~scrutinee:ty)
           in
           let ((pattern, _) as typed_case), unified =
-            case ~ty ~mode:scrutinee_scope.sink typed_pattern body
+            case ~ty ~mode:scrutinee_mode typed_pattern body
           in
           (* So that later cases don't report the same mismatch. *)
           let ty = if unified then ty else Scope.fresh_ty t scope in
@@ -3358,10 +2978,11 @@ and expr_type
           (case
              ~ty:Type.exn
              ~mode:
-               (Scope.stage_at_least
-                  scope
+               (Mode_rules.stage_at_least
+                  modes
                   Nonportable
-                  ~reason:(Mode.Reason.create ~loc "it is a raised exception"))
+                  ~loc
+                  ~why:"it is a raised exception")
              (pattern_type t scope ~pattern ~expected:Type.exn)
              body))
     in
@@ -3384,32 +3005,40 @@ and expr_type
     let match_ = node (Match { scrutinee; cases; exception_cases }) result in
     if !patterns_failed then node (Error [ match_ ]) result else match_
   | Poly_record fields ->
-    let fields = labelled_types t scope fields ~expected ~hint in
+    let fields = labelled_types t scope ~at fields ~expected ~hint in
     node
       (Poly_record fields)
       (Fresh.record t (Poly_row.present (labelled_tys fields) ~tail:REmpty))
   | Poly_field (expr, label) ->
     let ty = Scope.fresh_ty t scope in
-    let expr, (_ : Type.row) = check_open_record t scope expr [ label, ty ] in
+    let expr, (_ : Type.row) =
+      check_open_record t scope ~at:within expr [ label, ty ]
+    in
     node (Poly_field (expr, label)) ty
   | Poly_extend (fields, expr) ->
-    let fields = labelled_types t scope fields ~expected ~hint in
+    let fields = labelled_types t scope ~at fields ~expected ~hint in
     let rest = Scope.fresh_row t scope in
-    let expr = check_expr t scope ~expr ~ty:(Fresh.record t rest) in
+    let expr = check_expr t scope ~at:within ~expr ~ty:(Fresh.record t rest) in
     node
       (Poly_extend (fields, expr))
       (Fresh.record t (Poly_row.present (labelled_tys fields) ~tail:rest))
   | Poly_restrict (expr, label) ->
     let expr, rest =
-      check_open_record t scope expr [ label, Scope.fresh_ty t scope ]
+      check_open_record
+        t
+        scope
+        ~at:within
+        expr
+        [ label, Scope.fresh_ty t scope ]
     in
     node (Poly_restrict (expr, label)) (Fresh.record t rest)
   | Poly_update (expr, fields) ->
-    let fields = labelled_types t scope fields ~expected ~hint in
+    let fields = labelled_types t scope ~at fields ~expected ~hint in
     let expr, rest =
       check_open_record
         t
         scope
+        ~at:within
         expr
         (List.map fields ~f:(fun (label, _) -> label, Scope.fresh_ty t scope))
     in
@@ -3419,12 +3048,14 @@ and expr_type
   | Poly_variant (tag, arg) ->
     let arg =
       Option.map arg ~f:(fun expr ->
-        expr_type
-          t
-          scope
-          ~expr
-          ?expected:(row_entry expected `Variant ~label:tag)
-          ~hint)
+        part (fun at ->
+          expr_type
+            t
+            scope
+            ~at
+            ~expr
+            ?expected:(row_entry expected `Variant ~label:tag)
+            ~hint))
     in
     let arg_ty =
       Option.value_map arg ~default:Type.unit ~f:(fun (expr : Typed.Expr.t) ->
@@ -3432,25 +3063,15 @@ and expr_type
     in
     node (Poly_variant (tag, arg)) (Poly_row.variant t scope ~tag ~arg:arg_ty)
 
-(* [var] was checked in [var_scope], from [Scope.annotated_use]. *)
+(* [var] was checked at its mode, by [Mode_rules.annotated_use]. *)
 and annotate
   t
   (scope : Scope.t)
-  ~(var_scope : Scope.t)
   (var : Typed.Expr.t)
   (annot : Syntax.Annot.t)
   ~loc
   : Typed.Expr.t
   =
-  if Option.is_some annot.mode
-  then (
-    Scope.joins
-      scope
-      var_scope.sink
-      ~crossing:(Scope.crossing scope var.ty)
-      ~loc
-      ~why:"it is used";
-    Scope.annotated scope var_scope.sink annot.mode);
   match annot.ty with
   | None when Option.is_none annot.mode -> var
   | None -> { var with desc = Annotated (var, annot); loc }
@@ -3473,7 +3094,7 @@ and annotate
 (* Runs the toplevel splice [code] of a [Stag.Expr.t], then infers the
    expression it gives here, checking it against [expected] so that a mismatch
    is reported as the expression's. *)
-and splice_syntax ?expected ~hint t (scope : Scope.t) ~code ~loc =
+and splice_syntax ?expected ~hint t (scope : Scope.t) ~at ~code ~loc =
   let program = scope.program in
   let%bind.Result value =
     at_compile_time
@@ -3496,8 +3117,9 @@ and splice_syntax ?expected ~hint t (scope : Scope.t) ~code ~loc =
   let scope = { scope with syntax_splice = Some { splice = loc; generated } } in
   let expr = Source.Expr.Syntax generated in
   match expected with
-  | Some ty when Expectation.is_required hint -> check_expr t scope ~expr ~ty
-  | Some _ | None -> expr_type t scope ~expr ?expected ~hint
+  | Some ty when Expectation.is_required hint ->
+    check_expr t scope ~at ~expr ~ty
+  | Some _ | None -> expr_type t scope ~at ~expr ?expected ~hint
 
 (* The names [row] has an entry for that may be present. *)
 and listed_entries (row : Type.row) =
@@ -3512,7 +3134,7 @@ and listed_entries (row : Type.row) =
    its explicit substitutions bound by lets around it. An explicit substitution
    of a name not [listed] in the code's context must be of a free variable of
    the code generated. *)
-and expand t (scope : Scope.t) ~code ~subs ~listed ~name_locs ~ty ~loc =
+and expand t (scope : Scope.t) ~at ~code ~subs ~listed ~name_locs ~ty ~loc =
   let program = scope.program in
   let bindings, entry =
     match (subs : Typed.Expr.t Typed.Expr.Subs.t) with
@@ -3588,11 +3210,11 @@ and expand t (scope : Scope.t) ~code ~subs ~listed ~name_locs ~ty ~loc =
       scope
       (List.map bindings ~f:(fun (ident, (sub : Typed.Expr.t)) -> ident, sub.ty))
       ~mode:
-        (Scope.stage_at_least
-           scope
+        (Mode_rules.stage_at_least
+           (Scope.modes scope)
            Nonportable
-           ~reason:
-             (Mode.Reason.create ~loc "it is substituted into spliced code"))
+           ~loc
+           ~why:"it is substituted into spliced code")
       ~f:(fun () ->
         (* Each expansion's annotations name their own type variables. *)
         let scope =
@@ -3600,7 +3222,7 @@ and expand t (scope : Scope.t) ~code ~subs ~listed ~name_locs ~ty ~loc =
             annotation_vars = Type_env.Annotation_vars.create t ~rank:scope.rank
           }
         in
-        check_expr t scope ~expr:(Source.Expr.Generated generated) ~ty)
+        check_expr t scope ~at ~expr:(Source.Expr.Generated generated) ~ty)
   in
   List.fold_right bindings ~init:expansion ~f:(fun (ident, body) in_ ->
     { Typed.Expr.desc =
@@ -3618,69 +3240,47 @@ and expand t (scope : Scope.t) ~code ~subs ~listed ~name_locs ~ty ~loc =
     ; loc
     })
 
-and labelled_types t scope fields ~expected ~hint =
+and labelled_types t scope ~at fields ~expected ~hint =
   Poly_row.report_duplicate_labels scope fields;
   List.map fields ~f:(fun ((label : Syntax.Name.t), expr) ->
     ( label.txt
-    , expr_type
-        t
-        scope
-        ~expr
-        ?expected:(row_entry expected `Record ~label:label.txt)
-        ~hint ))
+    , Mode_rules.part (Scope.modes scope) at Id (fun at ->
+        expr_type
+          t
+          scope
+          ~at
+          ~expr
+          ?expected:(row_entry expected `Record ~label:label.txt)
+          ~hint) ))
 
 (* Checks [expr] has type [ty], [expected] (by default [ty]) being what it is
    known to be. *)
-and check_expr ?expected ?hint t scope ~expr ~ty =
+and check_expr ?expected ?hint t scope ~at ~expr ~ty =
   let expr =
-    expr_type t scope ~expr ~expected:(Option.value expected ~default:ty) ?hint
+    expr_type
+      t
+      scope
+      ~at
+      ~expr
+      ~expected:(Option.value expected ~default:ty)
+      ?hint
   in
   if Scope.unifies t scope ~ty1:ty ~ty2:expr.ty ~loc:expr.loc
   then expr
   else { desc = Error [ expr ]; ty = Type.error; loc = expr.loc }
 
-and check_exprs t scope exprs =
-  List.map exprs ~f:(fun (expr, ty) -> check_expr t scope ~expr ~ty)
-
-(* A part of a block being built: a [global_] one must be global, and isn't part
-   of the block's locality. *)
-and check_part t (scope : Scope.t) (expr, ty) ~global =
-  if not global
-  then check_expr t scope ~expr ~ty
-  else (
-    let part_scope = Scope.with_sink scope in
-    let part = check_expr t part_scope ~expr ~ty in
-    Scope.add_mode
-      scope
-      ~loc:part.loc
-      (Scope.locality_at_most
-         scope
-         part_scope.sink
-         ~ty
-         Global
-         ~loc:part.loc
-         ~why:"it is held by a [global_] field");
-    Scope.evaluates_for scope part_scope.sink ~loc:part.loc ~why:"it is held";
-    part)
-
-(* A [global_] field read from a record is global, whatever the record's
-   locality. *)
-and read_field (scope : Scope.t) field ~record_mode ~loc =
-  if Type_env.is_global_field
-       scope.program.type_env
-       (Typed.Field_ref.name field)
-  then Scope.evaluates_for scope record_mode ~loc ~why:"its field is read"
-  else Scope.joins scope record_mode ~loc ~why:"its field is read"
+and field_modality (scope : Scope.t) field =
+  Type_env.field_modality scope.program.type_env (Typed.Field_ref.name field)
 
 (* Checks [expr] has a record type with [entries] first, returning the rest of
    its row. *)
-and check_open_record t scope expr entries =
+and check_open_record t scope ~at expr entries =
   let row, rest = Poly_row.open_ t scope entries in
-  check_expr t scope ~expr ~ty:(Fresh.record t row), rest
+  check_expr t scope ~at ~expr ~ty:(Fresh.record t row), rest
 
 (* Returns the binder each entry that may be captured is captured by: entries
    bound in the quote may be captured by their binders if [may_capture]. *)
-and substitute_from_scope t (scope : Scope.t) ~context ~loc ~may_capture =
+and substitute_from_scope t (scope : Scope.t) ~at ~context ~loc ~may_capture =
   let rec go context ~seen ~captures =
     match Type.canonical_row context with
     | REmpty -> Ok captures
@@ -3693,6 +3293,7 @@ and substitute_from_scope t (scope : Scope.t) ~context ~loc ~may_capture =
           substitute_entry
             t
             scope
+            ~at
             ~name
             ~presence
             ~assigned
@@ -3714,7 +3315,7 @@ and substitute_from_scope t (scope : Scope.t) ~context ~loc ~may_capture =
          captures
        | Some quote ->
          let%map.Result captured =
-           substitute_tail t scope quote ~tail ~seen ~loc ~may_capture
+           substitute_tail t scope ~at quote ~tail ~seen ~loc ~may_capture
          in
          captured @ captures)
   in
@@ -3724,6 +3325,7 @@ and substitute_from_scope t (scope : Scope.t) ~context ~loc ~may_capture =
 and substitute_entry
   t
   (scope : Scope.t)
+  ~at
   ~name
   ~presence
   ~assigned
@@ -3771,7 +3373,7 @@ and substitute_entry
     None
   | Local entry when may_capture name entry.binder ->
     (* Whether the code uses it may not be known yet: assume it does. *)
-    use_entry scope entry ~name ~loc;
+    use_entry scope ~at entry ~name ~loc;
     let%bind.Result () =
       provides_assigned
         t
@@ -3804,6 +3406,7 @@ and substitute_entry
      | Present | PVar _ ->
        use_free
          scope
+         ~at
          ~why:(sprintf "%s is a free variable of the quote" name)
          ~loc);
     let%map.Result () =
@@ -3820,7 +3423,16 @@ and substitute_entry
    would be captured here explicit entries, absent unless [may_capture]. The
    rest must be free variables of the quote. Returns the binders of the ones
    that may be captured. *)
-and substitute_tail t scope (quote : Scope.quote) ~tail ~seen ~loc ~may_capture =
+and substitute_tail
+  t
+  scope
+  ~at
+  (quote : Scope.quote)
+  ~tail
+  ~seen
+  ~loc
+  ~may_capture
+  =
   let captured =
     Env.visible scope.locals
     |> List.filter_map ~f:(fun (name, entry) ->
@@ -3830,7 +3442,7 @@ and substitute_tail t scope (quote : Scope.quote) ~tail ~seen ~loc ~may_capture 
         match Resolution.of_entry scope ~name (Some entry) with
         | Local entry when may_capture name entry.binder ->
           (* Whether the code uses it is not known: assume it does. *)
-          use_entry scope entry ~name ~loc;
+          use_entry scope ~at entry ~name ~loc;
           Some
             ( name
             , Scope.fresh_presence t scope
@@ -3844,6 +3456,7 @@ and substitute_tail t scope (quote : Scope.quote) ~tail ~seen ~loc ~may_capture 
   let rest = Scope.fresh_row t scope in
   use_free
     scope
+    ~at
     ~why:"the spliced code may use free variables of the quote"
     ~loc;
   let%bind.Result () =
@@ -3871,7 +3484,7 @@ and substitute_tail t scope (quote : Scope.quote) ~tail ~seen ~loc ~may_capture 
   List.filter_map captured ~f:(fun (name, _, _, _, binder) ->
     Option.map binder ~f:(fun binder -> name, binder))
 
-and substitute_explicitly t scope ~context ~subs ~loc =
+and substitute_explicitly t scope ~at ~context ~subs ~loc =
   let%bind.Result () =
     check_no_duplicates (List.map subs ~f:fst) ~error:(fun name ->
       Duplicate_substitution name)
@@ -3906,11 +3519,12 @@ and substitute_explicitly t scope ~context ~subs ~loc =
               var_type
                 t
                 scope
+                ~at
                 ~path:(Path (Syntax.Path.of_string name))
                 ~loc:name_loc
             in
             { Typed.Expr.desc = Var var_ref; ty; loc = name_loc }
-          | Some expr -> Ok (expr_type t scope ~expr)
+          | Some expr -> Ok (expr_type t scope ~at ~expr)
         in
         (name, expr) :: acc)
   in
@@ -3925,7 +3539,7 @@ and substitute_explicitly t scope ~context ~subs ~loc =
   in
   let%bind.Result provided =
     List.fold_result (toplevels context) ~init:provided ~f:(fun acc name ->
-      let%map.Result ty, var_ref = resolved_value_type t scope name ~loc in
+      let%map.Result ty, var_ref = resolved_value_type t scope ~at name ~loc in
       (name, { Typed.Expr.desc = Var var_ref; ty; loc }) :: acc)
   in
   (* Only a variable that is mutable can be assigned, as itself. *)
@@ -3998,11 +3612,8 @@ let toplevel_scope ?generated t program module_ ~level ~in_expect_test =
   ; in_expect_test
   ; generated
   ; syntax_splice = None
-  ; sink = Mode.Var.create program.Program_env.modes ~rank
   ; locks = []
   ; params = []
-  ; tail = false
-  ; region = None
   }
 ;;
 
@@ -4010,7 +3621,10 @@ let check_expect_test t program module_ ~name ~body ~loc ~generated =
   let scope =
     toplevel_scope ?generated t program module_ ~level:0 ~in_expect_test:true
   in
-  let body = check_expr t scope ~expr:(Source.Expr.Syntax body) ~ty:Type.unit in
+  let at = Mode_rules.Expected.fresh (Scope.modes scope) in
+  let body =
+    check_expr t scope ~at ~expr:(Source.Expr.Syntax body) ~ty:Type.unit
+  in
   { Typed.Expect_test.name; body; loc; generated = Option.is_some generated }
 ;;
 
@@ -4018,12 +3632,14 @@ let check_bench t program module_ ~name ~param ~body ~loc ~generated =
   let scope =
     toplevel_scope ?generated t program module_ ~level:0 ~in_expect_test:false
   in
+  let at = Mode_rules.Expected.fresh (Scope.modes scope) in
   match (param : Syntax.Bench_param.t option) with
   | None ->
     let body =
       check_expr
         t
         scope
+        ~at
         ~expr:(Source.Expr.Syntax body)
         ~ty:(Scope.fresh_ty t scope)
     in
@@ -4046,7 +3662,7 @@ let check_bench t program module_ ~name ~param ~body ~loc ~generated =
     let ident, param_ty = List.hd_exn params in
     let args =
       List.map args ~f:(fun arg ->
-        check_expr t scope ~expr:(Source.Expr.Syntax arg) ~ty:param_ty)
+        check_expr t scope ~at ~expr:(Source.Expr.Syntax arg) ~ty:param_ty)
     in
     let body =
       check_body
@@ -4112,7 +3728,14 @@ let stag_type name = Type.TCon (Prelude_path.canonical name, [])
    not check. *)
 let run_at_compile_time t (program : Program_env.t) scope ~expr ~ty ~loc ~error =
   let reported = program.reported in
-  let expr = check_expr t scope ~expr:(Source.Expr.Syntax expr) ~ty in
+  let expr =
+    check_expr
+      t
+      scope
+      ~at:(Mode_rules.Expected.fresh (Scope.modes scope))
+      ~expr:(Source.Expr.Syntax expr)
+      ~ty
+  in
   if program.reported > reported
   then Error Typecheck_error.already_reported
   else (
@@ -4489,7 +4112,6 @@ let program_env t ~stamps ~modes ~const_toplevels interpreter =
     ; syntax_errors = false
     ; splice_starts = Stack.create ()
     ; mutable_idents = Typed.Ident.Hash_set.create ()
-    ; held_modes = Typed.Ident.Table.create ()
     ; modes
     ; const_toplevels
     ; mode_limits_reported = String.Hash_set.create ()

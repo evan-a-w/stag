@@ -41,17 +41,19 @@ module Entry = struct
     ; level : Level.t
     ; quote_id : int option
     ; mode : Mode.Var.t
+    ; held : Mode.Var.t option
     ; locks : (Lock.t list[@sexp.opaque])
     ; binder : Typed.Binder.t
     ; defining : bool
     }
   [@@deriving sexp_of]
 
-  let toplevel ~ident ~scheme ~mode =
+  let toplevel ~ident ~scheme ~mode ~held =
     { scheme
     ; level = 0
     ; quote_id = None
     ; mode
+    ; held
     ; locks = []
     ; binder = Toplevel ident
     ; defining = false

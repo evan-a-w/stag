@@ -1,0 +1,672 @@
+open! Import
+
+module Ctx = struct
+  type t =
+    { modes : Mode.Id_source.t
+    ; rank : int
+    ; holds : loc:Loc.t -> (unit, Mode.Error.t) Result.t -> bool
+    ; crossing : Type.ty -> Mode.Crossing.t
+    }
+
+  let fresh t = Mode.Var.create t.modes ~rank:t.rank
+  let add t ~loc result = ignore (t.holds ~loc result : bool)
+end
+
+let reason ~loc why = Mode.Reason.create ~loc why
+
+module Expected = struct
+  type t =
+    { mode : Mode.Var.t
+    ; region : Mode.Var.t option
+    ; stack : bool ref option
+    }
+
+  let of_mode mode = { mode; region = None; stack = None }
+  let fresh ctx = of_mode (Ctx.fresh ctx)
+  let mode t = t.mode
+  let is_tail t = Option.is_some t.region
+  let whole t = { t with stack = None }
+  let within t = { t with region = None; stack = None }
+  let part t = { t with region = None }
+end
+
+let joins ?crossing ?locality ctx (expected : Expected.t) mode ~loc ~why =
+  Ctx.add
+    ctx
+    ~loc
+    (Mode.Var.submode ?crossing ?locality mode expected.mode (reason ~loc why))
+;;
+
+let evaluated ctx expected mode ~loc ~why =
+  joins ctx expected mode ~locality:Mode.Locality_map.ignore ~loc ~why
+;;
+
+let evaluate ?inner ctx expected ~loc ~why f =
+  let sub = Expected.fresh (Option.value inner ~default:ctx) in
+  let result = f sub in
+  evaluated ctx expected sub.Expected.mode ~loc ~why;
+  result
+;;
+
+let runs ctx (expected : Expected.t) stage ~loc ~why =
+  Ctx.add
+    ctx
+    ~loc
+    (Mode.Var.at_least expected.mode Stage stage (reason ~loc why))
+;;
+
+let stage_at_least ctx stage ~loc ~why =
+  let mode = Ctx.fresh ctx in
+  Mode.Error.ok_exn (Mode.Var.at_least mode Stage stage (reason ~loc why));
+  mode
+;;
+
+let locality_at_most ctx mode ~ty locality ~loc ~why =
+  Mode.Var.at_most
+    ~crossing:(ctx.Ctx.crossing ty)
+    mode
+    Locality
+    locality
+    (reason ~loc why)
+;;
+
+let annotate ?(exact = false) ctx mode (annot : Syntax.Mode_expr.t option) ~var =
+  Option.iter annot ~f:(fun { txt; loc } ->
+    match txt with
+    | Var name ->
+      Ctx.add
+        ctx
+        ~loc
+        ((if exact
+          then Mode.Var.equate
+          else Mode.Var.submode ?crossing:None ?locality:None)
+           mode
+           (var name)
+           (reason ~loc (sprintf "it is annotated '%s" name)))
+    | Atoms atoms ->
+      List.iter atoms ~f:(fun atom ->
+        let reason =
+          reason
+            ~loc
+            (sprintf
+               "it is annotated %s"
+               (Syntax.Mode_expr.Atom.to_string atom))
+        in
+        let fix axis point =
+          Ctx.add
+            ctx
+            ~loc
+            (Mode.Var.at_most mode axis point reason
+             |> Result.bind ~f:(fun () ->
+               if exact then Mode.Var.at_least mode axis point reason else Ok ())
+            )
+        in
+        match atom with
+        | Const -> fix Stage Const
+        | Portable -> fix Stage Portable
+        | Nonportable -> fix Stage Nonportable
+        | Global -> fix Locality Global
+        | Regional -> fix Locality Regional
+        | Local -> fix Locality Local
+        | Static | Gc | Unknown -> ()))
+;;
+
+let annotated ctx annot ~var =
+  let mode = Ctx.fresh ctx in
+  annotate ~exact:true ctx mode annot ~var;
+  mode
+;;
+
+let bound ctx mode (annot : Syntax.Mode_expr.t option) ~var =
+  match annot with
+  | None -> mode
+  | Some { loc; _ } ->
+    let bound = Ctx.fresh ctx in
+    let reason = reason ~loc "it is bound by an annotated let" in
+    Ctx.add ctx ~loc (Mode.Var.submode mode bound reason);
+    annotate ~exact:true ctx bound annot ~var;
+    let named =
+      match annot with
+      | Some { txt = Atoms atoms; _ } ->
+        List.filter_map atoms ~f:(fun (atom : Syntax.Mode_expr.Atom.t) ->
+          match atom with
+          | Const | Portable | Nonportable -> Some (Mode.Axis.Any.T Stage)
+          | Global | Regional | Local -> Some (T Locality)
+          | Static | Gc | Unknown -> None)
+      | Some { txt = Var _; _ } | None -> [ T Stage; T Locality; T Provenance ]
+    in
+    List.iter
+      [ Mode.Axis.Any.T Stage; T Provenance; T Locality ]
+      ~f:(fun (T axis as any) ->
+        if not (List.mem named any ~equal:Mode.Axis.Any.equal)
+        then Ctx.add ctx ~loc (Mode.Var.submode_on bound mode axis reason));
+    bound
+;;
+
+let annotated_use ctx expected ~annot ~var ~loc f =
+  match annot with
+  | None -> f (Expected.part expected)
+  | Some _ ->
+    let used = { (Expected.fresh ctx) with stack = expected.Expected.stack } in
+    let result = f used in
+    Result.iter result ~f:(fun (used_expr : Typed.Expr.t) ->
+      joins
+        ctx
+        expected
+        used.mode
+        ~crossing:(ctx.crossing used_expr.ty)
+        ~loc
+        ~why:"it is used";
+      annotate ctx used.mode annot ~var);
+    result
+;;
+
+let part ?ty ctx expected (modality : Modality.t) f =
+  match modality with
+  | Id -> f (Expected.part expected)
+  | Global ->
+    let sub = { (Expected.fresh ctx) with stack = expected.Expected.stack } in
+    let (part : Typed.Expr.t) = f sub in
+    Ctx.add
+      ctx
+      ~loc:part.loc
+      (locality_at_most
+         ctx
+         sub.mode
+         ~ty:(Option.value ty ~default:part.ty)
+         Global
+         ~loc:part.loc
+         ~why:"it is held by a [global_] field");
+    evaluated ctx expected sub.mode ~loc:part.loc ~why:"it is held";
+    part
+;;
+
+let project ctx expected ~loc ~why f =
+  let block = Expected.fresh ctx in
+  let result, (modality : Modality.t) = f block in
+  (match modality with
+   | Id -> joins ctx expected block.mode ~loc ~why
+   | Global -> evaluated ctx expected block.mode ~loc ~why);
+  result
+;;
+
+let project_binding ctx ~block (modality : Modality.t) ~loc =
+  match modality with
+  | Id -> block
+  | Global ->
+    let global = Ctx.fresh ctx in
+    let reason = reason ~loc "it is held by a [global_] field" in
+    Ctx.add
+      ctx
+      ~loc
+      (Mode.Var.submode ~locality:Mode.Locality_map.ignore block global reason
+       |> Result.bind ~f:(fun () ->
+         Mode.Var.at_most global Locality Global reason));
+    global
+;;
+
+module Alloc = struct
+  let site (expected : Expected.t) =
+    Option.iter expected.stack ~f:(fun allocates -> allocates := true)
+  ;;
+
+  let closure ctx expected ~loc f =
+    site expected;
+    let closure = Ctx.fresh ctx in
+    let result = f closure in
+    joins ctx expected closure ~loc ~why:"the closure is made";
+    result
+  ;;
+
+  let code ctx expected ~loc =
+    site expected;
+    let code = Ctx.fresh ctx in
+    joins ctx expected code ~loc ~why:"the code is built";
+    code
+  ;;
+
+  let pointer = site
+
+  let stack ctx expected ~loc f =
+    let allocates = ref false in
+    let inner = { (Expected.fresh ctx) with stack = Some allocates } in
+    let (result : Typed.Expr.t) = f inner in
+    if !allocates || Typed.Expr.has_error result
+    then (
+      Ctx.add
+        ctx
+        ~loc
+        (Mode.Var.at_least
+           inner.mode
+           Locality
+           Local
+           (reason ~loc "it is allocated by [stack_]"));
+      joins
+        ctx
+        expected
+        inner.mode
+        ~crossing:(ctx.crossing result.ty)
+        ~loc
+        ~why:"it is part of the value";
+      Ok result)
+    else Error result
+  ;;
+end
+
+module Function = struct
+  let partial_applications ctx ~closure ~arg_modes ~partial_modes ~loc =
+    let reason = reason ~loc "a partial application holds it" in
+    List.iteri partial_modes ~f:(fun index partial ->
+      Ctx.add ctx ~loc (Mode.Var.submode closure partial reason);
+      List.iteri arg_modes ~f:(fun index' arg ->
+        if index' <= index
+        then Ctx.add ctx ~loc (Mode.Var.submode arg partial reason)))
+  ;;
+
+  let param ctx ~arg_mode ~name ~loc =
+    let mode = Ctx.fresh ctx in
+    Ctx.add
+      ctx
+      ~loc
+      (Mode.Var.submode
+         ~locality:Mode.Locality_map.borrow
+         arg_mode
+         mode
+         (reason ~loc (sprintf "%s is passed to the function" name)));
+    mode
+  ;;
+
+  let body ctx ~res_mode ~ty f =
+    let expected = { (Expected.fresh ctx) with region = Some res_mode } in
+    let (body : Typed.Expr.t) = f expected in
+    let crossing = ctx.Ctx.crossing ty in
+    let loc = body.loc in
+    Ctx.add
+      ctx
+      ~loc
+      (Mode.Var.at_most
+         ~crossing
+         expected.mode
+         Locality
+         Regional
+         (reason
+            ~loc
+            "the function returns it, ending its region (return it with \
+             [exclave_] instead)"));
+    Ctx.add
+      ctx
+      ~loc
+      (Mode.Var.submode
+         ~crossing
+         ~locality:Mode.Locality_map.release
+         expected.mode
+         res_mode
+         (reason ~loc "the function returns it"));
+    body
+  ;;
+end
+
+let exclave ctx (expected : Expected.t) ~loc f =
+  match expected.region with
+  | None -> None
+  | Some res_mode ->
+    let inner = Expected.fresh ctx in
+    let (result : Typed.Expr.t) = f inner in
+    Ctx.add
+      ctx
+      ~loc
+      (Mode.Var.submode
+         ~crossing:(ctx.crossing result.ty)
+         inner.mode
+         res_mode
+         (reason ~loc "the function returns it"));
+    evaluated
+      ctx
+      expected
+      inner.mode
+      ~loc
+      ~why:"it is returned in the caller's region";
+    Some result
+;;
+
+let apply
+  ctx
+  (expected : Expected.t)
+  ~loc
+  ~curried
+  ~arg_mode
+  ~res_mode
+  ~arg_ty
+  ~res_ty
+  ~callee
+  ~arg
+  =
+  let tail_reason =
+    "it is passed in a tail call, after the current region has ended (mark the \
+     call [@nontail])"
+  in
+  let f_expected =
+    { (Expected.fresh ctx) with
+      region = (if curried then expected.region else None)
+    }
+  in
+  let (f : Typed.Expr.t) = callee f_expected in
+  if Expected.is_tail expected && not curried
+  then
+    Ctx.add
+      ctx
+      ~loc
+      (locality_at_most
+         ctx
+         f_expected.mode
+         ~ty:f.ty
+         Regional
+         ~loc:f.loc
+         ~why:tail_reason);
+  let x_expected = Expected.fresh ctx in
+  let (x : Typed.Expr.t) = arg x_expected in
+  Ctx.add
+    ctx
+    ~loc
+    (Mode.Var.submode
+       ~crossing:(ctx.crossing arg_ty)
+       x_expected.mode
+       arg_mode
+       (reason ~loc "it is passed to a function"));
+  if Expected.is_tail expected
+  then
+    Ctx.add
+      ctx
+      ~loc
+      (locality_at_most
+         ctx
+         x_expected.mode
+         ~ty:arg_ty
+         Regional
+         ~loc:x.loc
+         ~why:tail_reason);
+  joins
+    ctx
+    expected
+    res_mode
+    ~crossing:(ctx.crossing res_ty)
+    ~loc
+    ~why:"the function returns it";
+  f, x
+;;
+
+let initializes ?ty ctx ~value ~held ~name ~loc =
+  Ctx.add
+    ctx
+    ~loc
+    (Mode.Var.submode
+       ?crossing:(Option.map ty ~f:ctx.Ctx.crossing)
+       value
+       held
+       (reason ~loc (sprintf "it initializes %s" name)))
+;;
+
+(* How a value bound outside [locks] relates on locality to its use inside them:
+   a function body is a region of its own, and [exclave_] leaves it. Assigning
+   goes the other way, from the use to the binding. *)
+let locality_map ?(assign = false) (locks : Env.Lock.t list) =
+  List.fold
+    locks
+    ~init:Mode.Locality_map.id
+    ~f:(fun inner (lock : Env.Lock.t) ->
+      let map : Mode.Locality_map.t =
+        match lock.kind, assign with
+        | Closure _, false | Exclave, true -> Mode.Locality_map.borrow
+        | Exclave, false | Closure _, true -> Mode.Locality_map.release
+        | (Quote _ | Splice), _ -> Mode.Locality_map.id
+      in
+      if assign
+      then Mode.Locality_map.compose inner map
+      else Mode.Locality_map.compose map inner)
+;;
+
+let is_closure (lock : Env.Lock.t) =
+  match lock.kind with
+  | Closure _ -> true
+  | Quote _ | Splice | Exclave -> false
+;;
+
+let assign ctx expected ~held ~crossed ~ty ~name ~loc f =
+  let value = Expected.fresh ctx in
+  let result = f value in
+  evaluated ctx expected value.mode ~loc ~why:"it is assigned";
+  Option.iter held ~f:(fun held ->
+    (* A closure may be called from a region shorter than the variable's, so may
+       only store what outlives every region. *)
+    if List.exists crossed ~f:is_closure
+    then
+      Ctx.add
+        ctx
+        ~loc
+        (locality_at_most
+           ctx
+           value.mode
+           ~ty
+           Global
+           ~loc
+           ~why:
+             (sprintf
+                "it is assigned to %s from a closure, which may be called from \
+                 a shorter region"
+                name));
+    Ctx.add
+      ctx
+      ~loc
+      (Mode.Var.submode
+         ~crossing:(ctx.crossing ty)
+         ~locality:(locality_map ~assign:true crossed)
+         value.mode
+         held
+         (reason ~loc (sprintf "it is assigned to %s" name))));
+  result
+;;
+
+let store ctx expected ~loc ~target ~value =
+  let (target : Typed.Expr.t) =
+    evaluate ctx expected ~loc ~why:"it is stored to" target
+  in
+  let sub = Expected.fresh ctx in
+  let (value : Typed.Expr.t) = value sub ~ty:target.ty in
+  evaluated ctx expected sub.mode ~loc ~why:"it is stored";
+  Ctx.add
+    ctx
+    ~loc
+    (locality_at_most
+       ctx
+       sub.mode
+       ~ty:target.ty
+       Global
+       ~loc:value.loc
+       ~why:"it is stored through a pointer, which may outlive any region");
+  target, value
+;;
+
+let use
+  ctx
+  expected
+  (entry : Env.Entry.t)
+  ~locks
+  ~toplevel
+  ~name
+  ~loc
+  ~mutable_captured_in_exclave
+  =
+  let reason what = reason ~loc (sprintf what name) in
+  let held = entry.held in
+  let mutable_ = Option.is_some held in
+  let crossing = ctx.Ctx.crossing entry.scheme in
+  let crossed = Env.Entry.crossed entry ~locks in
+  List.iteri crossed ~f:(fun index lock ->
+    match lock.kind with
+    | Splice -> ()
+    | (Closure _ | Exclave) when toplevel -> ()
+    | Exclave ->
+      (* As seen where [exclave_] ends the region: what is local to it then is
+         gone. *)
+      let inside = List.take crossed index in
+      let outside = List.drop crossed (index + 1) in
+      let ended = Ctx.fresh ctx in
+      Ctx.add
+        ctx
+        ~loc
+        (Mode.Var.submode
+           ~crossing
+           ~locality:(locality_map outside)
+           (Option.value held ~default:entry.mode)
+           ended
+           (reason "%s is used in an [exclave_]")
+         |> Result.bind ~f:(fun () ->
+           Mode.Var.at_most
+             ended
+             Locality
+             Regional
+             (Mode.Reason.create ~loc "the [exclave_] has ended its region")));
+      (* The cell of a mutable captured by a closure only lives as long as its
+         region, when the closure is local. *)
+      if mutable_
+         && List.exists inside ~f:is_closure
+         && not (List.exists outside ~f:is_closure)
+      then mutable_captured_in_exclave ()
+    | Closure closure ->
+      Ctx.add
+        ctx
+        ~loc
+        (Mode.Var.submode
+           ?crossing:(if mutable_ then None else Some crossing)
+           entry.mode
+           closure
+           (reason "%s is captured by a closure"));
+      Option.iter held ~f:(fun held ->
+        Ctx.add
+          ctx
+          ~loc
+          (Mode.Var.submode
+             ~crossing
+             held
+             closure
+             (reason "%s holds it, and is captured by a closure")));
+      (* A closure capturing itself is as portable as anything else it captures. *)
+      if entry.defining && Mode.Var.id closure <> Mode.Var.id entry.mode
+      then
+        Ctx.add
+          ctx
+          ~loc
+          (Mode.Var.at_least
+             closure
+             Stage
+             Nonportable
+             (reason "%s is captured by a closure in its own definition"))
+    | Quote _ when toplevel && mutable_ -> ()
+    | Quote code ->
+      Ctx.add
+        ctx
+        ~loc
+        (Mode.Var.at_most
+           ?crossing:(if mutable_ then None else Some crossing)
+           entry.mode
+           Stage
+           Portable
+           (reason "%s is used in a quote"));
+      if not toplevel
+      then
+        Ctx.add
+          ctx
+          ~loc
+          (Mode.Var.submode
+             ?crossing:(if mutable_ then None else Some crossing)
+             entry.mode
+             code
+             (reason "%s is embedded in a quote")));
+  let locality =
+    if toplevel then Mode.Locality_map.id else locality_map crossed
+  in
+  let why = sprintf "%s is used" name in
+  match held with
+  | Some held ->
+    runs ctx expected Nonportable ~loc ~why:(sprintf "%s is mutable" name);
+    joins ctx expected held ~crossing ~locality ~loc ~why
+  | None when entry.defining ->
+    runs
+      ctx
+      expected
+      Nonportable
+      ~loc
+      ~why:(sprintf "%s is used in its own definition" name);
+    joins
+      ctx
+      expected
+      entry.mode
+      ~crossing:{ crossing with stage = true; provenance = true }
+      ~locality
+      ~loc
+      ~why
+  | None -> joins ctx expected entry.mode ~crossing ~locality ~loc ~why
+;;
+
+let use_free ctx expected ~locks ~loc ~why =
+  Env.Lock.cancel_splices locks
+  |> List.take_while ~f:(fun (lock : Env.Lock.t) ->
+    match lock.kind with
+    | Closure _ | Exclave -> true
+    | Quote _ | Splice -> false)
+  |> List.iter ~f:(fun (lock : Env.Lock.t) ->
+    match lock.kind with
+    | Closure closure ->
+      Ctx.add
+        ctx
+        ~loc
+        (Mode.Var.at_least closure Stage Nonportable (reason ~loc why))
+    | Quote _ | Splice | Exclave -> ());
+  runs ctx expected Nonportable ~loc ~why
+;;
+
+let generalizes ctx mode ~loc =
+  ctx.Ctx.holds
+    ~loc
+    (Mode.Var.at_most mode Stage Const (reason ~loc "it is generalized"))
+;;
+
+let const ctx mode ~loc ~why =
+  ctx.Ctx.holds ~loc (Mode.Var.at_most mode Stage Const (reason ~loc why))
+;;
+
+let toplevel ctx mode ~ty ~name ~loc =
+  Ctx.add
+    ctx
+    ~loc
+    (locality_at_most
+       ctx
+       mode
+       ~ty
+       Global
+       ~loc
+       ~why:(sprintf "%s is a toplevel" name))
+;;
+
+let assume_global ctx =
+  let arg = Ctx.fresh ctx in
+  let res = Ctx.fresh ctx in
+  let reason = Mode.Reason.create "Unsafe.assume_global keeps it" in
+  Result.all_unit
+    [ Mode.Var.submode_on arg res Stage reason
+    ; Mode.Var.submode_on arg res Provenance reason
+    ; Mode.Var.at_least
+        arg
+        Locality
+        Local
+        (Mode.Reason.create "Unsafe.assume_global takes it")
+    ; Mode.Var.at_most
+        res
+        Locality
+        Global
+        (Mode.Reason.create "Unsafe.assume_global assumes it")
+    ]
+  |> Result.iter_error ~f:(fun error ->
+    raise_s [%message "Unsafe.assume_global" (error : Mode.Error.t)]);
+  arg, res
+;;
