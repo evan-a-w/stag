@@ -244,10 +244,11 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   leave it free, its last arrow (a function value it returns) bounds it by
   `regional`. A function whose body is directly a `fun` (`let f a = fun b ->
   e`, `fun a -> fun b -> e`) is one function of both's parameters, as in
-  OxCaml: the compiler never materialises the inner closure, so it is a
-  partial application too. A tail call of an unknown function bounds its intermediate
-  results by their arrows' `curry`, so it may be passed curried functions,
-  but not ones returning a `local` function value.
+  OxCaml: a compiler must merge them into one arity rather than make the
+  inner closure, which is then a partial application too. A tail call of an
+  unknown function bounds its intermediate results by their arrows' `curry`,
+  so it may be passed curried functions, but not ones returning a `local`
+  function value.
 - In a quote, `exclave_` and tail position are decided where the code is
   spliced, as the region they end is the one of the function it ends up in.
   An explicit substitution (`.~c.{x = e}`) is only evaluated there: `e`'s
