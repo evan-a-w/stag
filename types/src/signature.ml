@@ -4,7 +4,8 @@ module Value = struct
   type t =
     { name : string
     ; scheme : Type.ty
-    ; persistent : bool
+    ; stage : Stag_mode.Stage.t
+    (** Its least, so whether it may be used in quotes. *)
     }
   [@@deriving sexp_of]
 end
@@ -178,7 +179,7 @@ let rec lines ~of_prelude enclosing : Item.t -> _ =
     [ line ^ Type.Printer.where printer ]
   in
   function
-  | Value { name; scheme; persistent = _ } ->
+  | Value { name; scheme; stage = _ } ->
     line (fun printer ->
       sprintf "val %s : %s" name (Type.Printer.ty printer scheme))
   | Type decl ->

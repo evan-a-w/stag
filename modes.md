@@ -7,41 +7,17 @@ monomorphisation are in [semantics.md](semantics.md#modes).
 
 ## Motivation
 
-Today a single syntactic test, "is this binding a function?"
+Before modes, a single syntactic test, "is this binding a function?"
 (`not (List.is_empty args)`), decides two unrelated things:
 
 1. **Generalization** (value restriction): `let f x = ...` is generalized,
    `let y = id id` is not.
-2. **Crossing levels**: `Env.Entry.persistent` lets generalized functions be
-   used at any later level. Anything else becomes a free variable of the
-   enclosing quote.
+2. **Crossing levels**: generalized functions were persistent, usable at any
+   later level. Anything else became a free variable of the enclosing quote.
 
 Modes make both of these precise and separate, and also let toplevels be
 required to be constant (no arbitrary code run to initialize them) without
 dedicated syntax.
-
-## How level crossing works today
-
-For `let n = 3` at toplevel:
-
-- `finish_scc` marks the SCC persistent only if every member has arguments, so
-  `n` gets `{ level = 0; quote_id = None; persistent = false }` and is not
-  generalized.
-- In `<n + 1>` (level 1), `var_type` finds the toplevel entry, but
-  `Env.Entry.is_allowed_at` fails (non-persistent entries are only usable at
-  their own level, in their own quote). Since `entry.level <= scope.level`,
-  `n` becomes a **free variable of the quote** with a fresh type unrelated to
-  `int`: `not_persistent : <'_a>{n : '_a; ..'_b}`. The splice site provides
-  `n` later.
-- Toplevel functions such as `add` are persistent, so `<add 1 2>` refers to
-  the toplevel directly. Local generalized functions are persistent too, even
-  when they capture level-0 arguments:
-
-  ```ocaml
-  let f n =
-    let g x = x + n in  (* g captures a level-0 runtime value *)
-    < g 1 >             (* but is allowed to cross into level 1 *)
-  ```
 
 ## The mode axis
 
@@ -79,7 +55,12 @@ Applied when the type is known where the constraint arises.
 | literal                    | const                                       |
 | variable                   | the binding's mode                          |
 | function (`let f x = ...`) | at least the join of the modes it captures |
-| application `f x`          | the arrow's return mode                     |
+| application `f x`          | nonportable (the arrow's return mode, from D) |
+| `e.*`, assignment          | nonportable                                 |
+| match                      | join of the scrutinee and the arms; its pattern variables have the scrutinee's mode (exception cases: nonportable) |
+| splice in a quote          | nonportable (the code's mode is not known)  |
+| toplevel splice            | the mode of its expansion: `.~(.<1>.)` is const |
+| value computed at compile time, embedded in generated code | portable |
 | `let x = e1 in e2`         | join of `e1` and `e2`                       |
 | quote `<e>`                | join of the values it captures from outer levels (its free variables are resolved at the splice, so don't count) |
 
@@ -90,30 +71,72 @@ arguments are.
 
 ## Locks
 
-`Scope` keeps a stack of locks; each entry records the lock depth it was bound
-at. Looking up a variable walks the locks it crosses (Fitch-style, as OxCaml's
-`Env` does):
+`Scope` keeps a stack of locks, and each entry the locks enclosing its
+binding. A use crosses the locks between the two (Fitch-style, as OxCaml's
+`Env` does). A splice in a quote pushes a splice lock, which cancels its quote
+and the locks between them: code built in the splice is used where the splice
+is, so a variable bound inside the quote crosses the closures around the
+splice, while one bound outside the quote crosses none of them.
 
 - **Closure lock** (entering a function body): the captured variable's mode
   must be at most the closure's mode.
-- **Quote lock**: the variable must be `portable`. Otherwise it becomes a free
-  variable of the quote, as today.
+- **Quote lock**: the variable must be `portable`, and the code is at least
+  as nonportable as it. Otherwise it becomes a free variable of the quote.
+  Whether it is `portable` is decided by its lower bound where it is used,
+  then required: a later rise is an error. A variable used in its own
+  definition (a local function in its body, a toplevel being checked) is not
+  decided on, so is always a free variable of a quote there. A local function
+  in its own body is nonportable to compute with, as is a local closure
+  capturing it (other than itself); so is a toplevel non-function being
+  checked. A toplevel function captures nothing, so its mode is known while
+  it is checked. Toplevels are referred to by symbol, so are not captured by
+  closures, and mutable toplevels cross quote locks freely.
 - **Toplevel splice lock** (splice outside any quote, i.e. code run at compile
   time): the variable must be `const`, since only `const` values exist at
-  compile time.
+  compile time. Not implemented yet: compile-time code may use any checked
+  toplevel but a mutable one (the "runtime-only toplevel" check).
 
-This replaces `level` / `quote_id` / `persistent` checks in
-`Env.Entry.is_allowed_at`.
+A splice of code whose context is not known yet may use any variable visible
+there, so is taken to use them all, crossing their locks. It may also use any
+free variable of the enclosing quote, so the closures around it are
+nonportable, as is a closure around a splice providing such a variable.
+
+This is a known loss of precision: every code value has an open context
+(`.<1>.` included), so a closure in a quote containing a splice is never
+`const`. In `.< fun a -> let p = fun u -> .~(.<1>.) in (p 1, p true) >.`, `p`
+is not generalized. It goes once code types carry their mode (`<t @ m>`, see
+Toplevel splices). Annotating the spliced code with a closed context
+(`.~(c : <int>{})`) avoids it.
 
 ## Toplevels
 
 A compiler flag, e.g. `Typecheck.create ~const_toplevels:bool`:
 
-- **On (compiler)**: every toplevel must be `const`.
-- **Off (interpreter)**: any toplevel is allowed. Generalization is still
-  decided by mode. Toplevels are order independent, so initialization needs an
+- **On (compiler)**: every toplevel's initializer must be `const`.
+- **Off (interpreter, the default)**: any toplevel is allowed.
+  Generalization is still decided by mode: functions always, other values when
+  `const` (then required), and a recursive group only if all its members are
+  functions. Toplevels are order independent, so initialization needs an
   order: cycles through non-functions (e.g. `let x = f 1` and `let f y = x`)
   are reported at check time (see syntax.md, Evaluation).
+
+## Toplevels in quotes
+
+A toplevel used in a quote is checked first, to know its mode: `const` ones
+are used directly, others are free variables of the quote. One whose checking
+is underway (a recursive reference) is a free variable, and computing with it
+elsewhere is nonportable: `let z = r` in a toplevel `r` depends on is not
+generalized, whichever order they are checked in. So the order of
+checking matters: with
+
+```ocaml
+let q = .<later>.
+let later = .~(let z = q in .<1>.)
+```
+
+checking `q` checks `later`, whose splice needs `q`, which isn't checked yet:
+an error. With the two swapped, `later` is checked first, so `q` is checked
+during its splice, and `later` is a free variable of `q`'s quote.
 
 ## Toplevel splices
 
@@ -124,13 +147,17 @@ For `let cube = ~(power 3 <2>)` to be `const` in compiler mode, the *generated*
 code must be `const` too. That needs code types to record the mode of the
 expression they contain, `<t @ m>{ctx}`: `<1>` is `<int @ const>`,
 `<add 1 2>` is not, and splicing yields the code's mode. Deferred: until then a
-toplevel splice is not `const`.
+toplevel splice has the mode of its expansion, checked after it is generated.
 
 ## Behaviour changes
 
 - Toplevel constants like `n` resolve directly inside quotes (they are
   `const`), instead of becoming free variables filled in at the splice.
-- Local closures capturing arguments no longer cross levels.
+- Local closures capturing arguments, mutable locals or computed values no
+  longer cross levels: they are free variables of the quote. (Ints too, until
+  mode crossing by kind.)
+- Constant data is generalized, local or not; values computed by applying
+  or splicing are not.
 
 ## Mutable variables
 
@@ -142,10 +169,10 @@ by the code that uses it) and that of the value it holds.
   lock nor a toplevel splice lock, and capturing it makes a closure
   `nonportable`. That join propagates through closures and data, and with
   arguments `nonportable` by default (and mode crossing by kind for plain
-  data), it replaces the hand-written check that decides persistence today
-  (a closure that may reach a mutable local, through what it captures or
-  parameters whose type may hold a function, is not persistent; see
-  syntax.md). Not `const`, it is never generalized either.
+  data), it replaces the hand-written check that decided persistence (a closure
+  that may reach a mutable local, through what it captures or parameters
+  whose type may hold a function, was not persistent). Not `const`, it is
+  never generalized either.
 - **The value held** has a mode variable `m` fixed at the binding, as
   OxCaml's `let mutable`: `x <- e` requires `mode e ≤ m`, and reading `x` is
   at `m`. Locality: a value local to an inner region (each function body,
@@ -186,9 +213,9 @@ Each step is a branch stacked on the previous one.
   reasons and errors, atomic updates, generalisation and instantiation,
   defaulting. Standalone, expect tests.
 - **C. Stage axis in the typechecker**: `Env.Entry` gets a `mode` in place of
-  `persistent`, `expr_type` returns a type and a mode; closure, quote and
-  toplevel splice locks; generalisation decided by `const`; the
-  `const_toplevels` flag. Removes `may_hold_closure` and `is_allowed_at`.
+  `persistent`, `expr_type` returns a type and a mode; closure and quote
+  locks (the toplevel splice lock is left for later); generalisation decided
+  by `const`; the `const_toplevels` flag. Removes `may_hold_closure` and `is_allowed_at`.
 - **D. Arrow modes and polymorphism**: arrows carry argument, return and
   closure modes; schemes keep mode variables and their constraints; mode
   annotations; printing that hides unconstrained and default modes.

@@ -2,11 +2,35 @@ open! Import
 
 module Level = struct
   type t = int [@@deriving sexp, compare, equal]
+end
 
-  let is_allowed_at t ~used_at ~which =
-    match which with
-    | `Any_greater -> used_at >= t
-    | `Exactly_the_same -> used_at = t
+module Lock = struct
+  module Kind = struct
+    type t =
+      | Closure of Mode.Var.t
+      | Quote of Mode.Var.t
+      | Splice
+  end
+
+  type t =
+    { id : int
+    ; kind : Kind.t
+    }
+
+  (* Each splice leaves the innermost quote outside it, so drops it with the
+     locks between them. A splice whose quote is outside [locks] is dropped
+     alone. *)
+  let cancel_splices locks =
+    let rec leave_quote stack =
+      match stack with
+      | [] -> None
+      | { kind = Quote _; _ } :: rest -> Some rest
+      | { kind = Closure _ | Splice; _ } :: rest -> leave_quote rest
+    in
+    List.fold_right locks ~init:[] ~f:(fun lock stack ->
+      match lock.kind with
+      | Splice -> Option.value (leave_quote stack) ~default:stack
+      | Closure _ | Quote _ -> lock :: stack)
   ;;
 end
 
@@ -15,21 +39,30 @@ module Entry = struct
     { scheme : Type.ty
     ; level : Level.t
     ; quote_id : int option
-    ; persistent : bool
+    ; mode : Mode.Var.t
+    ; locks : (Lock.t list[@sexp.opaque])
     ; binder : Typed.Binder.t
+    ; defining : bool
     }
   [@@deriving sexp_of]
 
-  let toplevel ~ident ~scheme ~persistent =
-    { scheme; level = 0; quote_id = None; persistent; binder = Toplevel ident }
+  let toplevel ~ident ~scheme ~mode =
+    { scheme
+    ; level = 0
+    ; quote_id = None
+    ; mode
+    ; locks = []
+    ; binder = Toplevel ident
+    ; defining = false
+    }
   ;;
 
-  let is_allowed_at t ~used_at ~quote_id =
-    if t.persistent
-    then Level.is_allowed_at t.level ~used_at ~which:`Any_greater
-    else
-      Level.is_allowed_at t.level ~used_at ~which:`Exactly_the_same
-      && [%equal: int option] t.quote_id quote_id
+  (* Locks are only pushed, so those enclosing the binding are a suffix of those
+     enclosing a use it is visible at. *)
+  let crossed t ~locks =
+    List.take_while locks ~f:(fun (lock : Lock.t) ->
+      not (List.exists t.locks ~f:(fun (bound : Lock.t) -> bound.id = lock.id)))
+    |> Lock.cancel_splices
   ;;
 end
 

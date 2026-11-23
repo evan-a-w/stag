@@ -80,7 +80,7 @@ module Expr : sig
 
   module Var : sig
     type t =
-      | Path of Syntax.Decl_path.t * Syntax.Type_expr.t option
+      | Path of Syntax.Decl_path.t * Syntax.Annot.t
       | Ref of Typed.Var_ref.t
   end
 
@@ -99,11 +99,14 @@ module Expr : sig
     type nonrec t =
       | Lit of Syntax.Lit.t
       | Var of Var.t
+      | Annotated of t * Syntax.Type_expr.t
+      (** A generated [(x : t)], whose annotation re-inference keeps. *)
       | App of t * t
       | Let of
           { binder : Binder.t
           ; args : (Binder.t * Syntax.Type_expr.t option) list
           ; annot : Syntax.Type_expr.t option
+          ; mode : Syntax.Mode_expr.t option
           ; body : t
           ; in_ : t
           }

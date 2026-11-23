@@ -74,7 +74,7 @@ let bad = 1 2
        (Base_types_not_equal int bool)))
      @ t.stag:2:14-18)
     ((Unification_error
-      (Type_mismatch (TArrow (TVar (Unbound 19 1)) (TVar (Unbound 20 1)))
+      (Type_mismatch (TArrow (TVar (Unbound 23 1)) (TVar (Unbound 24 1)))
        (TCon int ()) Structural_mismatch))
      @ t.stag:2:10-11)
     |}]
@@ -378,11 +378,11 @@ let%expect_test "a recursive group is generalized at once, in any order" =
     "let g c d = let _ = .< .~c >. in let _ = .< let x = 1 in .~c >. in f c d";
   [%expect
     {|
-    val f : <'a>{x?'b : immut 'c; ..'d} -> <'c>{x?'e : immut 'c; ..'f} -> 'g where 'b => 'c = int, ..'d <= {..'h}, ..'f <= {..'h}
-    val g : <'a>{x?'b : immut int; ..'c} -> <'d>{x?'e : immut 'd; ..'f} -> 'g where 'b => 'd = int, ..'c <= {..'h}, ..'f <= {..'h}
+    val f : <'a>{x?'b : immut 'c; ..'d} -> <'c>{x?'e : immut 'c; ..'f} -> 'g where 'b <= 'h, 'b => 'c = int, 'b => int = 'i, ..'d <= {..'j}, ..'d <= {x?'h : 'i; ..'k}, ..'f <= {..'j}
+    val g : <'a>{x?'b : immut int; ..'c} -> <'d>{x?'e : immut 'd; ..'f} -> 'g where 'b <= 'h, 'b => 'd = int, 'b => int = 'i, ..'c <= {..'j}, ..'c <= {x?'h : 'i; ..'k}, ..'f <= {..'j}
     ---
-    val g : <'a>{x?'b : immut int; ..'c} -> <'d>{x?'e : immut 'd; ..'f} -> 'g where 'b => int = 'd, ..'c <= {..'h}, ..'f <= {..'h}
-    val f : <'a>{x?'b : immut 'c; ..'d} -> <'c>{x?'e : immut 'c; ..'f} -> 'g where 'b => int = 'c, ..'d <= {..'h}, ..'f <= {..'h}
+    val g : <'a>{x?'b : immut int; ..'c} -> <'d>{x?'e : immut 'd; ..'f} -> 'g where 'b <= 'h, 'b => int = 'd, 'b => int = 'i, ..'c <= {x?'h : 'i; ..'j}, ..'c <= {..'k}, ..'f <= {..'k}
+    val f : <'a>{x?'b : immut 'c; ..'d} -> <'c>{x?'e : immut 'c; ..'f} -> 'g where 'b <= 'h, 'b => int = 'c, 'b => int = 'i, ..'d <= {x?'h : 'i; ..'j}, ..'d <= {..'k}, ..'f <= {..'k}
     |}];
   both_orders
     "let f c = let _ = g c in .< let x = 1 in .~c >."
@@ -497,7 +497,7 @@ let nested = .< .<add x 1>. >.
     val local : <int>{..'a}
     val persistent : <int>{..'a}
     val n : int
-    val not_persistent : <'a>{n : 'a; ..'b}
+    val not_persistent : <int>{..'a}
     val outer_arg : 'a -> <'b>{x : 'b; ..'c}
     val nested : <<int>{x : int; ..'a}>{..'b}
     |}]
@@ -554,14 +554,14 @@ let not_code = .<.~(1).{}>.
     ((Unification_error
       (Row_mismatch
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 32 1)))
+        (RVar (Unbound 39 1)))
        REmpty (Missing_label x)))
      @ t.stag:2:16-34)
     val extra : <int>{..'a}
     ((Duplicate_substitution x) @ t.stag:2:36-37)
     ((Unification_error
       (Type_mismatch
-       (TCode (inner (TVar (Unbound 21 1))) (context (RVar (Unbound 22 1))))
+       (TCode (inner (TVar (Unbound 27 1))) (context (RVar (Unbound 28 1))))
        (TCon int ()) Structural_mismatch))
      @ t.stag:2:19-22)
     |}]
@@ -628,7 +628,7 @@ let wrong_type = .<let x = true in .~(.<add x 1>.)>.
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
-     @ t.stag:2:35-50)
+     @ t.stag:2:44-45)
     |}]
 ;;
 
@@ -666,12 +666,7 @@ let toplevel_splice_level x = .~x
     val toplevel_splice_arg : 'a -> 'a
     val not_captured : <int>{..'a}
     ((Not_in_scope x) @ t.stag:2:27-36)
-    ((Unification_error
-      (Row_mismatch
-       (RExtend x (PVar (Link Present)) (TVar (Unbound 28 1))
-        (RVar (Unbound 29 1)))
-       REmpty (Missing_label x)))
-     @ t.stag:2:33-45)
+    val captured : <bool>{..'a}
     ((Variable_used_at_wrong_level (name x) (var_level 0) (used_at -1)) @
      t.stag:2:32-33)
     |}]
@@ -694,7 +689,7 @@ let%expect_test "staged power" =
     ((Unification_error
       (Row_mismatch
        (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 75 1)))
+        (RVar (Unbound 85 1)))
        (RVar (Link REmpty)) (Missing_label y)))
      @ t.stag:2:39-44)
     ((Unification_error
@@ -798,9 +793,9 @@ let known_z c =
     val uses_z : <<int>{..'_a}>{..'_b}
     ((Unification_error
       (Row_mismatch
-       (RExtend z Absent (TVar (Unbound 45 1)) (RVar (Unbound 46 1)))
-       (RExtend z (PVar (Link Present)) (TVar (Unbound 55 1))
-        (RVar (Unbound 56 1)))
+       (RExtend z Absent (TVar (Unbound 54 1)) (RVar (Unbound 55 1)))
+       (RExtend z (PVar (Link Present)) (TVar (Unbound 65 1))
+        (RVar (Unbound 66 1)))
        (Presence_mismatch z)))
      @ t.stag:2:36-48)
     ((Variable_used_at_wrong_level (name z) (var_level 2) (used_at 1)) @
@@ -869,7 +864,7 @@ let pong n c = .<add .~(ping (add n -1) c) y>.
     ((Unification_error
       (Row_mismatch REmpty
        (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 84 1)))
+        (RVar (Unbound 94 1)))
        (Missing_label y)))
      @ t.stag:4:33-45)
     |}]
@@ -1023,9 +1018,9 @@ let%expect_test "instances of a scheme bounded by an outer presence" =
     ((Unification_error
       (Row_mismatch
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
-        (RVar (Link (RVar (Unbound 60 1)))))
+        (RVar (Link (RVar (Unbound 70 1)))))
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 70 1)))
+        (RVar (Unbound 81 1)))
        (Presence_mismatch x)))
      @ t.stag:2:78-89)
     val closeit : <int>{} -> unit
@@ -1085,14 +1080,14 @@ let partial e = let h c = .< let _ = .~e in .~c >. in let _ = h .< 1 >. in h
     val ok : <int>{..'_a}
     ((Unification_error
       (Row_mismatch
-       (RExtend y (PVar (Link Present)) (TVar (Unbound 107 1))
-        (RVar (Unbound 110 1)))
+       (RExtend y (PVar (Link Present)) (TVar (Unbound 125 1))
+        (RVar (Unbound 128 1)))
        (RVar (Link REmpty)) (Missing_label y)))
      @ t.stag:4:21-28)
     ((Unification_error
       (Row_mismatch REmpty
-       (RExtend y (PVar (Link Present)) (TVar (Unbound 121 1))
-        (RVar (Unbound 122 1)))
+       (RExtend y (PVar (Link Present)) (TVar (Unbound 139 1))
+        (RVar (Unbound 140 1)))
        (Missing_label y)))
      @ t.stag:4:18-43)
     |}]
@@ -1135,17 +1130,17 @@ let use = conflict_later %s
     ((Unification_error
       (Row_mismatch
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon bool ())))
-        (RVar (Link (RVar (Unbound 51 1)))))
+        (RVar (Link (RVar (Unbound 60 1)))))
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon bool ())))
-        (RVar (Unbound 74 1)))
+        (RVar (Unbound 84 1)))
        (Presence_mismatch x)))
      @ t.stag:3:30-44)
     ((Unification_error
       (Row_mismatch
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon bool ())))
-        (RVar (Link (RVar (Unbound 76 1)))))
+        (RVar (Link (RVar (Unbound 88 1)))))
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon bool ())))
-        (RVar (Unbound 96 1)))
+        (RVar (Unbound 109 1)))
        (Presence_mismatch x)))
      @ t.stag:4:25-39)
     |}]
@@ -1158,8 +1153,8 @@ let%expect_test "references to toplevels in quotes don't join their components" 
   check (b ^ a);
   [%expect
     {|
-    val a : <'a>{b : 'a; ..'b}
-    val b : <'a>{b : 'a; ..'b} * int
+    val a : <'_a>{b : '_a; ..'_b}
+    val b : <'_a>{b : '_a; ..'_b} * int
     val b : <'a>{b : 'a; ..'b} * int
     val a : <'a>{b : 'a; ..'b}
     |}]
@@ -1258,16 +1253,16 @@ let%expect_test "instances of a scheme bounded by an outer row" =
     ((Unification_error
       (Row_mismatch REmpty
        (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 127 1)))
+        (RVar (Unbound 140 1)))
        (Missing_label y)))
      @ t.stag:4:77-78)
     used after, k closed
     ((Unification_error
-      (Row_mismatch (RExtend y Present (TCon int ()) (RVar (Unbound 115 1)))
+      (Row_mismatch (RExtend y Present (TCon int ()) (RVar (Unbound 128 1)))
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
         (RVar
          (Link
-          (RExtend y (PVar (Link Absent)) (TCon int ()) (RVar (Unbound 117 1))))))
+          (RExtend y (PVar (Link Absent)) (TCon int ()) (RVar (Unbound 130 1))))))
        (Presence_mismatch y)))
      @ t.stag:4:77-78)
     |}]

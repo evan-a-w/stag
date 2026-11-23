@@ -8,7 +8,8 @@ module Value : sig
   type t =
     { name : string
     ; scheme : Type.ty
-    ; persistent : bool
+    ; stage : Stag_mode.Stage.t
+    (** Its least, so whether it may be used in quotes. *)
     }
   [@@deriving sexp_of]
 end

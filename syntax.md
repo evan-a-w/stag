@@ -334,12 +334,8 @@ pointer (see [Stores](#stores)): records have no mutable fields.
 A closure captures a mutable local by reference: it shares the variable with
 the code that binds it. Mutable locals are values of their level only: a
 quote can't use one bound outside it, nor can compile-time code use a runtime
-one. A local function is persistent (usable in quotes, see Staging) only if
-it can't reach a mutable local through what it captures: not a mutable local,
-nor a non-persistent local function, nor a non-function local whose
-definition mentions one of those, nor a variable (a parameter or a pattern
-variable) whose type may hold a function, ie. has an arrow, a type variable or
-an abstract type in it (`int`, `list[string]` and code types can't).
+one. A closure capturing one is `nonportable` (see [modes.md](modes.md)), so
+is not used directly in a quote: it becomes a free variable of the quote.
 
 Toplevel `let mut x = e` declares a mutable global, assignable from anywhere
 it is in scope (`M.x <- 1`). Its value can't need itself (see Evaluation),
@@ -376,11 +372,22 @@ evaluated once, in the order written, before the code runs, so
 `.~c.{a = y; b = y <- 5}` gives `a` the value `y` has after `b`'s assignment.
 This is the same at a toplevel splice and in a quote.
 
+A substitution must be of a free variable of the code: substituting a name
+the code's context is known not to have (it is closed without it, or the
+entry is absent) is an error, as is one the code run at a toplevel splice
+turns out not to use when its type doesn't list it. A toplevel constant used
+in a quote is not a free variable (see modes.md), so `.~(.<n>.).{n = 1}` is
+an error for `let n = 3`. Nor is a free variable of a quote inside the
+generated code: in `.~(.< .<x>. >.).{x = 1}`, the inner `x` is provided where
+that inner code is spliced, not by the substitution, so it is an error too.
+
 ### Modes
 
 The syntax of modes (see [modes.md](modes.md) and
-[semantics.md](semantics.md#modes)). Modes are not checked yet: annotations
-are ignored, and `local_`, `exclave_` and `[@nontail]` evaluate as their body.
+[semantics.md](semantics.md#modes)). Only the stage axis is checked so far:
+stage annotations on `let` bindings (`let x @ const = ...`) are upper bounds;
+other annotations are ignored, and `local_`, `exclave_` and `[@nontail]`
+evaluate as their body.
 
 A mode, after `@`, is a mode variable (`'m`, standing for every axis), or one
 or more of `const portable nonportable` (stage), `static gc unknown`
@@ -436,7 +443,7 @@ include .~e
 ## Primitives
 
 Built-in functions, implemented by the interpreter, available in every program
-at any level (in quotes and at compile time too, like persistent toplevels):
+at any level (in quotes and at compile time too, like `const` toplevels):
 
 ```ocaml
 print_string : string -> unit      print_endline : string -> unit

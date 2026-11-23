@@ -273,10 +273,23 @@ let bad = .< (mk 1, mk "a") >.
       (Type_mismatch (TCon int ()) (TCon string ())
        (Base_types_not_equal int string)))
      @ t.stag:5:23-26)
-    ((Unification_error
-      (Type_mismatch (TCon int ()) (TCon string ())
-       (Base_types_not_equal int string)))
-     @ t.stag:4:23-26)
+    module Ptr : sig
+      val make : 'a -> 'a
+    end
+    val mk : 'a -> 'a
+    val bad : <int * string>{..'a}
+    -- evaluated at compile time
+    -- evaluated
+    (Ptr.make <fun>)
+    (mk <fun>)
+    (bad
+     (Code
+      (Tuple
+       ((App (Var (Persistent (Toplevel mk/5)) : "int -> int")
+         (Lit (Int 1) : int) : int)
+        (App (Var (Persistent (Toplevel mk/5)) : "string -> string")
+         (Lit (String a) : string) : string))
+       : "int * string")))
     |}]
 ;;
 

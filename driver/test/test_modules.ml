@@ -782,16 +782,16 @@ let captured = .<let n = () in .~(q_root ())>.
     val n : bool
     module M : sig
       val n : int
-      val q : 'a -> <'b>{M.n : 'b; ..'c}
-      val both : <'a * 'a>{M.n : 'a; ..'b}
+      val q : 'a -> <int>{..'b}
+      val both : <int * int>{..'a}
       val local : <unit>{..'a}
-      val root_code : <'_a>{n : mut?'_b '_a; ..'_c} where '_d <= '_b
+      val root_code : <bool>{..'_a}
     end
-    val q : 'a -> <'b>{M.n : 'b; ..'c}
-    val q_root : 'a -> <'b>{n : 'b; ..'c}
-    val spliced : <'_a>{M.n : mut?'_b '_a; ..'_c} where '_d <= '_b
-    val not_captured : <'_a>{M.n : mut?'_b '_a; ..'_c} where '_d <= '_b
-    val captured : <unit>{..'_a}
+    val q : 'a -> <int>{..'b}
+    val q_root : 'a -> <bool>{..'b}
+    val spliced : <int>{..'_a}
+    val not_captured : <int>{..'_a}
+    val captured : <bool>{..'_a}
     |}]
 ;;
 
@@ -802,7 +802,7 @@ let%expect_test "splicing code with canonically named free variables" =
     (parse_exn
        {|
 module M = struct
-  let n = 5
+  let n = add 2 3
 end
 let implicit = .~.<M.n>.
 let local_does_not_provide n = cond n () (); .~.<M.n>.
@@ -814,9 +814,10 @@ let local_does_not_provide n = cond n () (); .~.<M.n>.
              (splice ~subs:[ "M.n", Some (string "s") ] (quote (var "M.n")))
          ; top "shorthand" [] (splice ~subs:[ "M.n", None ] (quote (var "M.n")))
          ]);
-  check {|
+  check
+    {|
 module M = struct
-  let n = 5
+  let n = add 2 3
   let as_written = .~.<n>..{n}
 end
 |};
@@ -829,10 +830,7 @@ end
     val local_does_not_provide : bool -> int
     val explicit : string
     val shorthand : int
-    module M : sig
-      val n : int
-      val as_written : int
-    end
+    ((Unused_substitution n) @ t.stag:4:28-29)
     |}]
 ;;
 
@@ -855,7 +853,7 @@ let x = .~M.n
     {|
     module M : sig
       val n : int
-      val code : <int>{M.n : int; ..'a}
+      val code : <int>{..'a}
     end
     val x : int
     ((Toplevel_splice_of_neither (TCon int ())) @ t.stag:5:10-13)

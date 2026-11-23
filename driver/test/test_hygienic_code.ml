@@ -243,8 +243,8 @@ let%expect_test "derived" =
     {xxx|
     module Gen : sig
       val value : string -> list[string] -> <'a>{..'b} -> Stag.Toplevel.t
-      val sexp_of_pair : <'a * int -> Core.Sexp.t>{prelude.Core.Int.to_string : 'a -> string; ..'b}
-      val to_string_x : <'a>{prelude.Core.Int.to_string : 'b -> 'a; x : 'b; ..'c}
+      val sexp_of_pair : <int * int -> Core.Sexp.t>{..'a}
+      val to_string_x : <string>{x : int; ..'a}
       val derive : list[Stag.Toplevel.t]
     end
     module H : sig
@@ -268,7 +268,7 @@ let%expect_test "derived" =
       val local : int -> string
       val helped : int
       val map : ('a -> 'b) -> .list['a] -> .list['b]
-      val code : <'a>{prelude.Core.Int.to_string : int -> 'a; ..'b}
+      val code : <string>{..'a}
     end
     --- output ---
     ((name (derived @ a.stag:11:16-25))
@@ -439,10 +439,14 @@ let v = Core.Int.succ h
     ];
   [%expect
     {|
-    File "a.stag", line 4, characters 22-23:
+    File "a.stag", line 4, characters 8-21:
     4 | let v = Core.Int.succ h
-                              ^
-    Error: The value of A.v may be needed to compute itself: A.v -> A.h -> A.v
+                ^^^^^^^^^^^^^
+    Error: Core.Int.succ can't be resolved here: the include at a.stag:3:0-29 comes before this point and may define it, but it is still being generated (its expression uses this code). Move this code before the include or into another module
+    File "a.stag", line 3, characters 0-29:
+    3 | include .~(value "h" .< v >.)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: The declaration splice is here
     |}]
 ;;
 

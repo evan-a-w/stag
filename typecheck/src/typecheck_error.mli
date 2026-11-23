@@ -28,6 +28,9 @@ module Kind : sig
     | Not_in_scope of Syntax.Decl_path.t
     | Duplicate_toplevel of string
     | Duplicate_substitution of string
+    | Unused_substitution of string
+    (** An explicit substitution of a name that the spliced code doesn't have as
+        a free variable. *)
     | Variable_used_at_wrong_level of
         { name : string
         ; var_level : Env.Level.t
@@ -94,33 +97,15 @@ module Kind : sig
     | Assign_to_immutable of string
     | Store_not_through_pointer
     (** A [Store] whose target is not a dereference, or a field of one. *)
-    | Captures_mutable of
-        { name : string
-        ; var_level : Env.Level.t
-        ; used_at : Env.Level.t
-        ; via : string list
-        ; mutable_ : string
-        }
-    (** A local function used at another level that reaches [mutable_], a
-        [let mut] local, through what it captures ([via], the locals in
-        between), as its cell can't be shared with code. *)
-    | May_capture_mutable of
-        { name : string
-        ; var_level : Env.Level.t
-        ; used_at : Env.Level.t
-        ; via : string list
-        ; variable : string
-        ; ty : Type.ty
-        }
-    (** As [Captures_mutable], but it reaches no [let mut] local, only
-        [variable], a parameter or pattern variable whose type may hold a
-        closure, so one capturing a [let mut] local. *)
     | Compile_time_use_of_mutable of
         { toplevel : string
         ; mutable_ : string
         }
     (** Of [toplevel], which may use the mutable toplevel [mutable_] when run:
         mutable toplevels have only a runtime instance. *)
+    | Mode_error of Mode.Error.t
+    (** A value whose mode exceeds what its use allows, eg. a [nonportable] one
+        captured by a closure used in a quote. *)
     | Mutable_used_outside_its_code of
         { name : string
         ; var_level : Env.Level.t
@@ -165,6 +150,8 @@ module Kind : sig
         evaluates it. *)
     | Misplaced_mut
     (** [mut t] other than as the type of an entry of a code type's context. *)
+    | Mode_variable_on_binding of string
+    (** [let x @ 'm]: mode variables are not supported on bindings yet. *)
     | Spliced_code_assigns_immutable of string
     (** Code spliced where the variable it assigns is not mutable. *)
     | Type_splice_failed of Error.t

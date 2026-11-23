@@ -145,7 +145,7 @@ module Expr = struct
 
   module Var = struct
     type t =
-      | Path of Syntax.Decl_path.t * Syntax.Type_expr.t option
+      | Path of Syntax.Decl_path.t * Syntax.Annot.t
       | Ref of Typed.Var_ref.t
   end
 
@@ -160,11 +160,13 @@ module Expr = struct
     type nonrec t =
       | Lit of Syntax.Lit.t
       | Var of Var.t
+      | Annotated of t * Syntax.Type_expr.t
       | App of t * t
       | Let of
           { binder : Binder.t
           ; args : (Binder.t * Syntax.Type_expr.t option) list
           ; annot : Syntax.Type_expr.t option
+          ; mode : Syntax.Mode_expr.t option
           ; body : t
           ; in_ : t
           }
@@ -216,13 +218,14 @@ module Expr = struct
     let fields = List.map ~f:(fun (key, expr) -> key, sub expr) in
     match expr.txt with
     | Lit lit -> Lit lit
-    | Var (path, annot) -> Var (Path (path, annot.ty))
+    | Var (path, annot) -> Var (Path (path, annot))
     | App (f, x) -> App (sub f, sub x)
     | Let (name, args, annot, equal, in_) ->
       Let
         { binder = Name name
         ; args = List.map args ~f:binding
         ; annot = annot.ty
+        ; mode = annot.mode
         ; body = sub equal
         ; in_ = sub in_
         }
@@ -233,7 +236,8 @@ module Expr = struct
         ; body = sub equal
         ; in_ = sub in_
         }
-    | Assign (path, value) -> Assign (Path (path.txt, None), sub value)
+    | Assign (path, value) ->
+      Assign (Path (path.txt, Syntax.Annot.none), sub value)
     | Store (target, value) -> Store (sub target, sub value)
     | Fun (args, body) ->
       Fun { args = List.map args ~f:binding; body = sub body }
@@ -296,12 +300,13 @@ module Expr = struct
     | Lit lit -> Lit lit
     | Var var_ref -> Var (Ref var_ref)
     | App (f, x) -> App (sub f, sub x)
-    | Annotated (expr, _) -> generated_view expr
+    | Annotated (expr, annot) -> Annotated (sub expr, annot)
     | Let { ident; args; annots; result_annot; generalized = _; body; in_ } ->
       Let
         { binder = Ident ident
         ; args = annotated_args args annots
         ; annot = result_annot
+        ; mode = None
         ; body = sub body
         ; in_ = sub in_
         }

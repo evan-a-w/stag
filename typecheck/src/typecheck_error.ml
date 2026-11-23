@@ -22,6 +22,7 @@ module Kind = struct
     | Not_in_scope of Syntax.Decl_path.t
     | Duplicate_toplevel of string
     | Duplicate_substitution of string
+    | Unused_substitution of string
     | Variable_used_at_wrong_level of
         { name : string
         ; var_level : Env.Level.t
@@ -86,25 +87,11 @@ module Kind = struct
     | Assign_to_immutable of string
     | Store_not_through_pointer
     (** A [Store] whose target is not a dereference, or a field of one. *)
-    | Captures_mutable of
-        { name : string
-        ; var_level : Env.Level.t
-        ; used_at : Env.Level.t
-        ; via : string list
-        ; mutable_ : string
-        }
-    | May_capture_mutable of
-        { name : string
-        ; var_level : Env.Level.t
-        ; used_at : Env.Level.t
-        ; via : string list
-        ; variable : string
-        ; ty : Type.ty
-        }
     | Compile_time_use_of_mutable of
         { toplevel : string
         ; mutable_ : string
         }
+    | Mode_error of Mode.Error.t
     | Mutable_used_outside_its_code of
         { name : string
         ; var_level : Env.Level.t
@@ -130,6 +117,7 @@ module Kind = struct
     | Malformed_struct_quote of string
     | Misplaced_type_splice
     | Misplaced_mut
+    | Mode_variable_on_binding of string
     | Spliced_code_assigns_immutable of string
     | Type_splice_failed of Error.t
     | Malformed_type_splice of Error.t
@@ -235,9 +223,27 @@ let level_name level =
   | level -> sprintf "inside %d quote(s) (level %d)" level level
 ;;
 
-let through = function
-  | [] -> ""
-  | via -> sprintf " (through %s)" (String.concat via ~sep:", ")
+let mode_message
+  (Mode.Error.Mismatch
+    { var = _; axis; lower; upper; lower_because; upper_because })
+  =
+  let point (type a) (axis : a Mode.Axis.t) (point : a) =
+    let module C = (val Mode.Axis.chain axis) in
+    Sexp.to_string (C.sexp_of_t point) |> String.lowercase
+  in
+  let reasons because =
+    List.map because ~f:(fun ({ loc; what } : Mode.Reason.t) ->
+      if Loc.is_none loc
+      then what
+      else sprintf "%s (at %s)" what (Loc.to_string loc))
+    |> String.concat ~sep:", then "
+  in
+  sprintf
+    "This is %s, because %s, but must be at most %s, because %s"
+    (point axis lower)
+    (reasons lower_because)
+    (point axis upper)
+    (reasons upper_because)
 ;;
 
 let unification_message (error : Unification_error.t) ~show_type =
@@ -316,12 +322,17 @@ let rec kind_message (kind : Kind.t) ~show_type =
   | Not_in_scope path -> sprintf "Unbound value %s" (decl_path path)
   | Duplicate_toplevel name ->
     sprintf "The value %s is defined more than once in this module" name
+  | Unused_substitution name ->
+    sprintf
+      "%s is substituted, but the spliced code has no free variable %s"
+      name
+      name
   | Duplicate_substitution name ->
     sprintf "The variable %s is substituted more than once" name
   | Variable_used_at_wrong_level { name; var_level; used_at } ->
     sprintf
-      "The variable %s is bound at %s but used at %s; only toplevel functions \
-       may be used at other levels"
+      "The variable %s is bound at %s but used at %s; only toplevels may be \
+       used at an earlier level"
       name
       (level_name var_level)
       (level_name used_at)
@@ -329,7 +340,7 @@ let rec kind_message (kind : Kind.t) ~show_type =
     sprintf
       "Unbound value %s, which the spliced code uses: %s is a variable of its \
        quote's context, as the %s bound at %s can't be used in the quote \
-       (level %d); only toplevel functions may be used at other levels"
+       (level %d), as it is not portable"
       name
       name
       name
@@ -436,28 +447,7 @@ let rec kind_message (kind : Kind.t) ~show_type =
          toplevel %s when run: mutable toplevels exist only at runtime"
         toplevel
         mutable_
-  | Captures_mutable { name; var_level; used_at; via; mutable_ } ->
-    sprintf
-      "The function %s is bound at %s but used at %s, which it can't be as it \
-       reaches the mutable variable %s%s: its cell can't be shared with code"
-      name
-      (level_name var_level)
-      (level_name used_at)
-      mutable_
-      (through via)
-  | May_capture_mutable { name; var_level; used_at; via; variable; ty } ->
-    let printer = Type.Printer.create ~type_name:show_type () in
-    sprintf
-      "The function %s is bound at %s but used at %s, which it can't be as it \
-       captures %s%s, of type %s, which may hold a closure capturing a mutable \
-       variable: annotate %s with a type holding no function, if it is one"
-      name
-      (level_name var_level)
-      (level_name used_at)
-      variable
-      (through via)
-      (Type.Printer.ty printer ty)
-      variable
+  | Mode_error error -> mode_message error
   | Assign_to_immutable name ->
     sprintf
       "The variable %s is not mutable: only one bound by [let mut] can be \
@@ -515,6 +505,8 @@ let rec kind_message (kind : Kind.t) ~show_type =
        be provided by a variable bound by [let mut] or a mutable toplevel"
       name
       name
+  | Mode_variable_on_binding var ->
+    sprintf "Mode variables like '%s are not supported on bindings yet" var
   | Misplaced_mut ->
     "Only an entry of a code type's context can be [mut] or [immut], for a \
      variable the code assigns or doesn't"

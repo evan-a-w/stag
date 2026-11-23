@@ -300,8 +300,7 @@ end
           (scheme
            (TArrow (TVar (Generic 3))
             (TVar (Link (TCon box ((ATy (TVar (Link (TVar (Generic 3)))))))))))
-          (persistent true)))
-        (Value
-         ((name n) (scheme (TVar (Link (TCon int ())))) (persistent false)))))))
+          (stage Const)))
+        (Value ((name n) (scheme (TVar (Link (TCon int ())))) (stage Const)))))))
     |}]
 ;;

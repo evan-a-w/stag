@@ -140,13 +140,13 @@ module Persistent = struct
   (* [h] is a level -1 closure, used by the level 0 code. *)
   let embedded = .~(let h y = (y, y) in .< h 1 >.)
 
-  (* Each call of [mk] embeds its own [h]. *)
+  (* Each closure embeds what it captures, which is [const], so portable. *)
   let per_build =
-    .~(let mk (n : int) =
-         let h u = n in
-         .< h () >.
-       in
-       .< (.~(mk 1), .~(mk 2)) >.)
+    .~(let one = 1 in
+       let two = 2 in
+       let h1 u = one in
+       let h2 u = two in
+       .< (h1 (), h2 ()) >.)
 
   let%expect_test "persistent values in code" =
     print_pair embedded;

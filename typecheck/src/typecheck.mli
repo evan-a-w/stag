@@ -11,10 +11,12 @@ type t
     of every program it checks and those it mints. Its budget (see
     [Interpreter.set_limits]) is shared by every program checked with [t], and
     toplevels it evaluates keep their values when [Interpreter.eval]ed. Programs
-    see [prelude], by default [Prelude.toplevels]. *)
+    see [prelude], by default [Prelude.toplevels]. With [const_toplevels]
+    (default false, as for the interpreter), every toplevel must be [const]. *)
 val create
   :  stamps:Stamp_counter.t
   -> interpreter:Interpreter.t
+  -> ?const_toplevels:bool
   -> ?prelude:Syntax.Toplevel.t list
   -> unit
   -> t

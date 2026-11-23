@@ -217,7 +217,10 @@ let at_compile_time =
     |}]
 ;;
 
-let%expect_test "closures reaching a mutable local are not persistent" =
+let%expect_test "closures reaching a mutable local are free variables of quotes"
+  =
+  (* They are [nonportable], so not usable in quotes: the code leaves them to
+     its context. *)
   (* Directly. *)
   check {|
 let bad = let mut n = 0 in let f u = n in .<f ()>.
@@ -273,31 +276,31 @@ let at_runtime = let mut n = 0 in let f u = n in f ()
 |};
   [%expect
     {|
-    ((Captures_mutable (name f) (var_level 0) (used_at 1) (via ()) (mutable_ n))
-     @ t.stag:2:44-45)
-    ((Captures_mutable (name g) (var_level 0) (used_at 1) (via (f)) (mutable_ n))
-     @ t.stag:2:62-63)
-    ((Captures_mutable (name g) (var_level 0) (used_at 1) (via (h)) (mutable_ n))
-     @ t.stag:6:4-5)
-    ((Captures_mutable (name g) (var_level 0) (used_at 1) (via (pair))
-      (mutable_ n))
-     @ t.stag:6:4-5)
-    ((Captures_mutable (name g) (var_level 0) (used_at 1) (via (opt))
-      (mutable_ n))
-     @ t.stag:6:4-5)
-    ((May_capture_mutable (name g) (var_level 0) (used_at 1) (via ())
-      (variable h) (ty (TArrow (TCon unit ()) (TCon int ()))))
-     @ t.stag:2:48-49)
-    ((May_capture_mutable (name g) (var_level 0) (used_at 1) (via ())
-      (variable x) (ty (TVar (Generic 18))))
-     @ t.stag:2:29-30)
-    ((May_capture_mutable (name g) (var_level 0) (used_at 1) (via ())
-      (variable x)
-      (ty (TCon prelude.option ((ATy (TArrow (TCon unit ()) (TCon int ())))))))
-     @ t.stag:2:53-54)
-    ((May_capture_mutable (name g) (var_level 0) (used_at 1) (via ())
-      (variable y) (ty (TCon prelude.list ((ATy (TCon string ()))))))
-     @ t.stag:2:60-61)
+    val bad : <'_a>{f : unit -> '_a; ..'_b}
+    val bad : <'_a>{g : unit -> '_a; ..'_b}
+    val bad : <'_a>{g : unit -> '_a; ..'_b}
+    val bad : <'_a>{g : unit -> '_a; ..'_b}
+    val bad : <'_a>{g : unit -> '_a; ..'_b}
+    val bad : (unit -> int) -> <'a>{g : unit -> 'a; ..'b}
+    val bad : 'a -> <'b>{g : unit -> 'b; ..'c}
+    val bad : option[unit -> int] -> <'a>{g : unit -> 'a; ..'b}
+    val ok : int -> list[string] -> <'a>{g : unit -> 'a; ..'b}
+    val ok_code : <int>{} -> <'a>{g : unit -> 'a; ..'b}
+    val not_mentioned : <int>{..'a}
+    val only_data : <'_a>{g : unit -> '_a; ..'_b}
+    val at_runtime : int
+    -- evaluated at compile time
+    -- evaluated
+    (ok <fun>)
+    (ok_code <fun>)
+    (not_mentioned
+     (Code
+      (App (Var (Persistent (Local g/35)) : "unit -> int") (Lit Unit : unit) :
+       int)
+      ((g/35 <fun>))))
+    (only_data
+     (Code (App (Var (Free g) : "unit -> '_a") (Lit Unit : unit) : '_a)))
+    (at_runtime 0)
     |}]
 ;;
 
@@ -633,7 +636,9 @@ let ran_assigned = .~assigned
     |}]
 ;;
 
-let%expect_test "may capture a mutable" =
+let%expect_test "closures capturing arguments are free variables of quotes" =
+  (* Arguments are [nonportable], whatever their type, until mode crossing by
+     kind: even [ok]'s [g], capturing an [int], is not usable in its quote. *)
   check {|
 let bad x = let g u = x in .<g ()>.
 |};
@@ -651,21 +656,12 @@ let ran = .~(ok 1)
 |};
   [%expect
     {|
-    ((May_capture_mutable (name g) (var_level 0) (used_at 1) (via ())
-      (variable x) (ty (TVar (Generic 18))))
-     @ t.stag:2:29-30)
-    ((May_capture_mutable (name g) (var_level 0) (used_at 1) (via (k))
-      (variable h) (ty (TArrow (TCon unit ()) (TCon int ()))))
-     @ t.stag:2:61-62)
-    ((Captures_mutable (name g) (var_level 0) (used_at 1) (via (f)) (mutable_ n))
-     @ t.stag:2:62-63)
-    val ok : int -> <int>{..'a}
-    val ran : int
-    -- evaluated at compile time
-    (ok <fun>)
-    -- evaluated
-    (ok <fun>)
-    (ran 1)
+    val bad : 'a -> <'b>{g : unit -> 'b; ..'c}
+    val bad : (unit -> int) -> <'a>{g : unit -> 'a; ..'b}
+    val bad : <'_a>{g : unit -> '_a; ..'_b}
+    ((Free_in_spliced_code (name g)
+      (unusable ((loc t.stag:2:36-37) (var_level 0) (used_at 1))))
+     @ t.stag:3:10-18)
     |}]
 ;;
 
@@ -693,7 +689,7 @@ let ran = .~d; x
     |}]
 ;;
 
-let%expect_test "errors in generated code" =
+let%expect_test "generated code with a closure reaching a mutable local" =
   check
     {|
 let bad =
@@ -708,25 +704,7 @@ let bad =
            , Stag.Expr.var "n"
            , Stag.Expr.Quote (Ptr.make ( (Stag.Expr.App (Ptr.make ( (Stag.Expr.var "f", Stag.Expr.Lit Stag.Lit.Unit)))))) ))) ))))
 |};
-  [%expect
-    {|
-    ((In_syntax_splice
-      (generated
-       ((Let_mut (n @ t.stag:3:2-12:130) () ((Lit (Int 0)) @ t.stag:3:2-12:130)
-         ((Let (f @ t.stag:3:2-12:130) (((u @ t.stag:3:2-12:130) ())) ()
-           ((Var n ()) @ t.stag:3:2-12:130)
-           ((Quote
-             ((App ((Var f ()) @ t.stag:3:2-12:130)
-               ((Lit Unit) @ t.stag:3:2-12:130))
-              @ t.stag:3:2-12:130))
-            @ t.stag:3:2-12:130))
-          @ t.stag:3:2-12:130))
-        @ t.stag:3:2-12:130))
-      (error
-       (Captures_mutable (name f) (var_level 0) (used_at 1) (via ())
-        (mutable_ n))))
-     @ t.stag:3:2-12:130)
-    |}]
+  [%expect {| val bad : <'_a>{f : unit -> '_a; ..'_b} |}]
 ;;
 
 (* The signature, then the values of the toplevels named [*_value] at runtime. *)
@@ -848,7 +826,7 @@ let wrong_place : {`a : immut int} -> int = fun r -> 1
     ((Unification_error
       (Row_mismatch (RExtend x Present (TCon int ()) REmpty)
        (RExtend x (PVar (Link Present)) Assigned (TVar (Link (TCon int ())))
-        (RVar (Unbound 32 1)))
+        (RVar (Unbound 37 1)))
        (Assigned x)))
      @ t.stag:3:36-40)
     (Misplaced_mut @ t.stag:3:24-31)
@@ -904,15 +882,15 @@ let rejected = unknown assigns
     ((Unification_error
       (Row_mismatch
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 43 1)))
+        (RVar (Unbound 51 1)))
        (RExtend x (PVar (Link Present)) Assigned (TVar (Link (TCon int ())))
-        (RVar (Unbound 48 1)))
+        (RVar (Unbound 56 1)))
        (Assigned x)))
      @ t.stag:4:17-24)
     ((Unification_error
       (Row_mismatch (RExtend x Present (TCon int ()) REmpty)
        (RExtend x (PVar (Link Present)) Assigned (TVar (Link (TCon int ())))
-        (RVar (Unbound 41 1)))
+        (RVar (Unbound 49 1)))
        (Assigned x)))
      @ t.stag:4:23-30)
     |}]
@@ -951,18 +929,18 @@ let f (c : <unit>{..'r}) = let _ = (c : <unit>{y : mut int}) in fun (r : {..'r})
     ((Unification_error
       (Assigned_in_record y
        (RExtend y (PVar (Link Present)) Assigned (TVar (Link (TCon int ())))
-        (RVar (Unbound 33 1)))))
+        (RVar (Unbound 39 1)))))
      @ t.stag:3:10-20)
     ((Unification_error
       (Row_mismatch (RExtend y Present (TCon int ()) REmpty)
        (RExtend y (PVar (Link Present)) Assigned (TVar (Link (TCon int ())))
-        (RVar (Unbound 36 1)))
+        (RVar (Unbound 42 1)))
        (Assigned y)))
      @ t.stag:3:19-29)
     ((Unification_error
       (Assigned_in_record y
        (RExtend y (PVar (Link Present)) Assigned (TVar (Link (TCon int ())))
-        (RVar (Unbound 33 1)))))
+        (RVar (Unbound 39 1)))))
      @ t.stag:3:10-20)
     ((Unification_error
       (Assigned_in_record a
@@ -1067,9 +1045,9 @@ let fine = .<let mut x = 0 in let g u = .~incr in g (); x>.
 |};
   [%expect
     {|
-    ((Captures_mutable (name g) (var_level 1) (used_at 2) (via ()) (mutable_ x))
-     @ t.stag:3:56-57)
-    ((Captures_mutable (name g) (var_level 1) (used_at 2) (via ()) (mutable_ y))
-     @ t.stag:4:64-65)
+    val incr : <unit>{x : mut int; ..'a}
+    val implicit : <<'a>{g : unit -> 'a; ..'b}>{..'c}
+    val explicit : <<'a>{g : unit -> 'a; ..'b}>{..'c}
+    val fine : <int>{..'a}
     |}]
 ;;
