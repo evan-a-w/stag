@@ -236,6 +236,20 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   in tail position must be at most `regional`: passing a `local` value is an
   error, fixed by marking the call non-tail (see syntax.md), which keeps the
   region alive until it returns. A call inside `exclave_` is always fine.
+  A saturated call `f x y` is the call of `f x`'s result after the region has
+  ended, so that result must be at most `regional` too, unless it is the
+  closure of a partial application, which a saturated call of a known
+  function never makes. Each arrow records which (its `curry` mode, not
+  printed): the arrows of a multi-parameter function's partial applications
+  leave it free, its last arrow (a function value it returns) bounds it by
+  `regional`. A tail call of an unknown function bounds its intermediate
+  results by their arrows' `curry`, so it may be passed curried functions,
+  but not ones returning a `local` function value.
+- In a quote, `exclave_` and tail position are decided where the code is
+  spliced, as the region they end is the one of the function it ends up in.
+  An explicit substitution (`.~c.{x = e}`) is only evaluated there: `e`'s
+  mode is checked again where the code it is substituted into is finally
+  spliced.
 - The interpreter has no regions: `stack_` allocates on its heap and
   `exclave_ e` is `e`. The rules are checked all the same.
 
