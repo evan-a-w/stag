@@ -1,7 +1,7 @@
 open! Import
 open Source_helpers
 
-let modes source =
+let signature source =
   let stamps = Stamp_counter.create () in
   let interpreter = Interpreter.create Treewalk.interpreter ~stamps in
   Interpreter.set_limits interpreter limits;
@@ -9,13 +9,55 @@ let modes source =
   let prelude = program ~prelude:true "" in
   match Typecheck.typecheck typecheck ~program:(program source) with
   | Ok checked ->
-    print_string
+    Ok
       (Signature.to_string_hum
          ~modes:true
          (List.drop checked.signature (List.length prelude)))
   | Error { errors; partial = _ } ->
-    List.iter errors ~f:(fun error ->
-      print_endline (Typecheck_error.message error))
+    Error (List.map errors ~f:Typecheck_error.message)
+;;
+
+let modes source =
+  match signature source with
+  | Ok signature -> print_string signature
+  | Error errors -> List.iter errors ~f:print_endline
+;;
+
+(* Annotates a copy of each value with its printed type, which reads back as the
+   same type. *)
+let round_trip source =
+  let printed = signature source |> Result.ok |> Option.value_exn in
+  let copies =
+    String.split_lines printed
+    |> List.filter_map ~f:(fun line ->
+      String.chop_prefix line ~prefix:"val "
+      |> Option.map ~f:(fun rest ->
+        let name, ty = String.lsplit2_exn rest ~on:':' in
+        let name = String.strip name in
+        sprintf "let %s_copy :%s = %s" name ty name))
+  in
+  let source = String.concat ~sep:"\n" (source :: copies) in
+  print_endline (String.concat ~sep:"\n" copies);
+  match signature source with
+  | Error errors -> List.iter errors ~f:print_endline
+  | Ok signature' ->
+    let lines = String.split_lines signature' in
+    let find name =
+      List.find_map lines ~f:(fun line ->
+        String.chop_prefix line ~prefix:("val " ^ name ^ " :"))
+    in
+    List.iter copies ~f:(fun copy ->
+      let name = String.chop_prefix_exn copy ~prefix:"let " in
+      let name = String.prefix name (String.index_exn name ' ') in
+      let original = String.chop_suffix_exn name ~suffix:"_copy" in
+      if not ([%equal: string option] (find name) (find original))
+      then
+        print_s
+          [%message
+            "differs"
+              (name : string)
+              (find original : string option)
+              (find name : string option)])
 ;;
 
 let%expect_test "arrow modes are polymorphic" =
@@ -32,8 +74,8 @@ let code2 = .<m>.
   [%expect
     {|
     val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1
-    val apply : ('a @ 'm2 -> 'b @ 'm3) @ 'm0 -> ('a @ 'm5 -> 'b @ 'm4) @ 'm1 with 'm0 <= 'm1 and 'm3 <= 'm4 and 'm5 <= 'm2
-    val const_ : 'a @ 'm0 -> ('b @ 'm3 -> 'a @ 'm1) @ 'm2 with 'm0 <= 'm1 and 'm0 <= 'm2
+    val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and 'm2 <= 'm5 and 'm4 <= 'm1 and portable <= 'm5
+    val const_ : 'a @ 'm0 -> ('b -> 'a @ 'm2) @ 'm1 with 'm0 <= 'm1 and 'm0 <= 'm2
     val n : int
     val code : <int>{..'a}
     val m : int
@@ -71,9 +113,9 @@ type t = { k : int @ portable -> int }
 |};
   [%expect
     {|
-    val f : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with 'm0 <= 'm1
+    val f : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with 'm0 <= 'm1 and 'm0 <= portable
     val g : 'a @ 'm0 -> 'a @ 'm0
-    val h : int @ 'm0 -> int @ 'm1 with 'm0 <= 'm1 and 'm1 <= 'm0
+    val h : int @ 'm0 -> int @ 'm0
     type t = { k : int @ portable -> int }
     |}]
 ;;
@@ -85,7 +127,7 @@ let g x = let h u = x in .<h>.
 |};
   [%expect
     {|
-    val f : 'a @ 'm0 -> <'b>{x : 'b; ..'c} @ 'm1
+    val f : 'a -> <'b>{x : 'b; ..'c}
     val g : 'a @ 'm0 -> <'b>{h : 'b; ..'c} @ 'm1 with 'm0 <= 'm1
     |}]
 ;;
@@ -97,4 +139,75 @@ let bad = f (Int.add 1 2)
 |};
   [%expect
     {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:3:12-25), then it is passed to a function (at t.stag:3:10-25), but must be at most portable, because it is annotated portable (at t.stag:2:11-19), then the function types are unified |}]
+;;
+
+let%expect_test "printed constraints are simplified" =
+  modes
+    {|
+let h (x @ 'm) : int @ 'm = x
+let chain f g x = f (g x)
+let fixed (x @ portable) : int @ portable = x
+let both (x @ portable) = x
+|};
+  [%expect
+    {|
+    val h : int @ 'm0 -> int @ 'm0
+    val chain : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> (('c @ 'm5 -> 'a @ 'm6) @ 'm4 -> ('c @ 'm8 -> 'b @ 'm9) @ 'm7) @ 'm3 with 'm0 <= 'm3 and 'm0 <= 'm7 and portable <= 'm1 and 'm2 <= 'm9 and 'm4 <= 'm7 and 'm6 <= 'm1 and 'm8 <= 'm5 and portable <= 'm9
+    val fixed : int @ 'm0 -> int @ 'm1 with 'm0 <= 'm1 and 'm1 <= portable
+    val both : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and 'm0 <= portable
+    |}]
+;;
+
+let%expect_test "printed types read back as themselves" =
+  round_trip
+    {|
+let ident x = x
+let apply f x = f x
+let const_ x y = x
+let chain f g x = f (g x)
+let f (x @ portable) = .<x>.
+let g x = let h u = x in .<h>.
+let h (x @ 'm) : int @ 'm = x
+let fixed (x @ portable) : int @ portable = x
+|};
+  [%expect
+    {|
+    let ident_copy : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 = ident
+    let apply_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and 'm2 <= 'm5 and 'm4 <= 'm1 and portable <= 'm5 = apply
+    let const__copy : 'a @ 'm0 -> ('b -> 'a @ 'm2) @ 'm1 with 'm0 <= 'm1 and 'm0 <= 'm2 = const_
+    let chain_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> (('c @ 'm5 -> 'a @ 'm6) @ 'm4 -> ('c @ 'm8 -> 'b @ 'm9) @ 'm7) @ 'm3 with 'm0 <= 'm3 and 'm0 <= 'm7 and portable <= 'm1 and 'm2 <= 'm9 and 'm4 <= 'm7 and 'm6 <= 'm1 and 'm8 <= 'm5 and portable <= 'm9 = chain
+    let f_copy : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with 'm0 <= 'm1 and 'm0 <= portable = f
+    let g_copy : 'a @ 'm0 -> <'b>{h : 'b; ..'c} @ 'm1 with 'm0 <= 'm1 = g
+    let h_copy : int @ 'm0 -> int @ 'm0 = h
+    let fixed_copy : int @ 'm0 -> int @ 'm1 with 'm0 <= 'm1 and 'm1 <= portable = fixed
+    |}]
+;;
+
+let%expect_test "annotated constraints constrain" =
+  modes
+    {|
+let loose : 'a @ 'm -> 'a @ 'n = fun x -> x
+let tight : 'a @ 'm -> 'a @ 'n with 'n <= 'm = fun x -> x
+let capped : 'a @ 'm -> 'a @ 'n with 'n <= portable = fun x -> x
+let ok = capped 1
+|};
+  [%expect
+    {|
+    val loose : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1
+    val tight : 'a @ 'm0 -> 'a @ 'm0
+    val capped : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and 'm1 <= portable
+    val ok : int
+    |}];
+  modes
+    {|
+let capped : 'a @ 'm -> 'a @ 'n with 'n <= portable = fun x -> x
+let bad = capped (Int.add 1 2)
+|};
+  [%expect
+    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:3:17-30), then it is passed to a function (at t.stag:3:10-30), but must be at most portable, because it is annotated 'n <= portable (at t.stag:2:37-51), then the function types are unified, then x is used (at t.stag:2:63-64), then the function types are unified, then the function types are unified |}];
+  modes
+    {|
+let pinned : int @ 'm -> int @ 'n with 'n <= 'm and 'm <= const = fun x -> x
+|};
+  [%expect {| val pinned : int @ const -> int @ const |}]
 ;;

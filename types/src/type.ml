@@ -924,9 +924,7 @@ module Printer = struct
     ; mutable counting : int Int.Table.t option
         (* Set while rendering only to count how often each presence variable is
            named. *)
-    ; modes : (string Int.Table.t * String.Hash_set.t * string Queue.t) option
-    (* With [create ~modes:true]: the names of mode variables, by id, and the
-       constraints between them, to print after the types. *)
+    ; modes : Mode_printing.t option (* With [create ~modes:true]. *)
     }
 
   let create
@@ -945,10 +943,7 @@ module Printer = struct
     ; kept = Int.Hash_set.create ()
     ; elided = Int.Hash_set.create ()
     ; counting = None
-    ; modes =
-        Option.some_if
-          modes
-          (Int.Table.create (), String.Hash_set.create (), Queue.create ())
+    ; modes = Option.some_if modes (Mode_printing.create ())
     }
   ;;
 
@@ -1098,18 +1093,13 @@ module Printer = struct
     @ atom Locality const.locality default.locality
   ;;
 
-  let mode_var_name t var_id =
-    match t.modes with
-    | None -> None
-    | Some (names, _, _) ->
-      Some
-        (Hashtbl.find_or_add names var_id ~default:(fun () ->
-           sprintf "'m%d" (Hashtbl.length names)))
-  ;;
-
   let is_default_side t : Arrow_modes.Side.t -> bool = function
     | Fixed const -> List.is_empty (const_atoms const)
-    | Var _ -> Option.is_none t.modes
+    | Var var ->
+      (match t.modes, t.counting with
+       | None, _ -> true
+       | Some _, Some _ -> false
+       | Some modes, None -> Option.is_none (Mode_printing.side modes var))
   ;;
 
   let mode_side t (side : Arrow_modes.Side.t) =
@@ -1119,23 +1109,13 @@ module Printer = struct
        | [] -> ""
        | atoms -> " @ " ^ String.concat ~sep:" " atoms)
     | Var var ->
-      (match t.modes, mode_var_name t (Mode.Var.id var) with
-       | Some (_, seen, constraints), Some name ->
-         List.iter
-           (Mode.Var.generic_relations var Stage)
-           ~f:(fun (rel, other) ->
-             let other = Option.value_exn (mode_var_name t other) in
-             let constr =
-               match rel with
-               | `Le -> sprintf "%s <= %s" name other
-               | `Ge -> sprintf "%s <= %s" other name
-             in
-             if Hash_set.mem seen constr |> not
-             then (
-               Hash_set.add seen constr;
-               Queue.enqueue constraints constr));
-         " @ " ^ name
-       | _ -> "")
+      (match t.modes, t.counting with
+       | None, _ -> ""
+       | Some modes, Some _ ->
+         Mode_printing.count modes var;
+         " @ _"
+       | Some modes, None ->
+         Option.value (Mode_printing.side modes var) ~default:"")
   ;;
 
   let rec ty_to_string t ~prec ty =
@@ -1363,6 +1343,7 @@ module Printer = struct
     in
     ignore (render copy : string);
     ignore (bounds copy : string list);
+    Option.iter t.modes ~f:Mode_printing.settle;
     Hashtbl.iteri counts ~f:(fun ~key:id ~data:count ->
       if count = 1 && not (Hashtbl.mem t.names id) then Hash_set.add t.elided id);
     render t
@@ -1394,7 +1375,7 @@ module Printer = struct
     let modes =
       match t.modes with
       | None -> []
-      | Some (_, _, constraints) -> Queue.to_list constraints
+      | Some modes -> Mode_printing.constraints modes
     in
     (match bounds t with
      | [] -> ""

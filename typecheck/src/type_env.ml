@@ -501,7 +501,10 @@ let rec elaborate' t module_ vars ~splices ~expansions (expr : Type_expr.t)
       let%bind.Result ty, syntax = elaborate ty in
       let%map.Result () =
         List.fold_result constraints ~init:() ~f:(fun () constraint_ ->
-          Vars.mode_constraint vars constraint_ ~loc)
+          Vars.mode_constraint
+            vars
+            constraint_
+            ~loc:(Loc.merge constraint_.lower.loc constraint_.upper.loc))
       in
       ty, Type_expr.Constrained (syntax, constraints)
     | Global ty ->
