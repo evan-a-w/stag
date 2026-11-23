@@ -184,8 +184,8 @@ Each step is a branch stacked on the previous one.
   defaulting. Standalone, expect tests.
 - **C. Stage axis in the typechecker**: `Env.Entry` gets a `mode` in place of
   `persistent`, `expr_type` returns a type and a mode; closure and quote
-  locks (the toplevel splice lock is left for later); generalisation decided by `const`; the
-  `const_toplevels` flag. Removes `may_hold_closure` and `is_allowed_at`.
+  locks (the toplevel splice lock is left for later); generalisation decided
+  by `const`; the `const_toplevels` flag. Removes `may_hold_closure` and `is_allowed_at`.
 - **D. Arrow modes and polymorphism**: arrows carry argument, return and
   closure modes; schemes keep mode variables and their constraints; mode
   annotations; printing that hides unconstrained and default modes.
