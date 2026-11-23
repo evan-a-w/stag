@@ -179,7 +179,8 @@ let argument c = .< fun a -> let h b = .~c in .< h 1 >. >.
 let uses_argument = argument .<a>.
 let mutable_ c = .< let mut m = 1 in let h b = .~c in .< h 1 >. >.
 let uses_mutable = mutable_ .<m>.
-let nothing_captured c = .< let h b = .~c in .< h 1 >. >.
+let free_of_the_quote c = .< let h b = .~c in .< h 1 >. >.
+let closed (c : <int>{}) = .< let h b = .~c in .< h 1 >. >.
 |};
   [%expect
     {|
@@ -187,7 +188,8 @@ let nothing_captured c = .< let h b = .~c in .< h 1 >. >.
     val uses_argument : <'_a -> <'_b>{h : int -> '_b; ..'_c}>{..'_d}
     val mutable_ : <'a>{b?'b : immut 'c; h?'d : immut 'c -> 'a; m?'e : int; ..'f} -> <<'g>{h : int -> 'g; ..'h}>{..'i} where ..'f <= {..'i}
     val uses_mutable : <<'_a>{h : int -> '_a; ..'_b}>{..'_c}
-    val nothing_captured : <'a>{b?'b : immut int; h?'c : immut int -> 'a; ..'d} -> <<'a>{..'e}>{..'f} where ..'d <= {..'f}
+    val free_of_the_quote : <'a>{b?'b : immut 'c; h?'d : immut 'c -> 'a; ..'e} -> <<'f>{h : int -> 'f; ..'g}>{..'h} where ..'e <= {..'h}
+    val closed : <int>{} -> <<int>{..'a}>{..'b}
     |}]
 ;;
 
@@ -376,4 +378,125 @@ let q = .<later>.
     val later : int
     val q : <'a>{later : 'a; ..'b}
     |}]
+;;
+
+let%expect_test "closures using free variables of the quote through a splice \
+                 are not embedded"
+  =
+  modes
+    {|
+let q = .< let h a = .~(.<x>.) in .<h>. >.
+let q_direct = .< let h a = x in .<h>. >.
+let q_param c = .< let h a = .~c in .<h>. >.
+|};
+  [%expect
+    {|
+    val q : <<'a>{h : 'a; ..'b}>{x : 'c; ..'d}
+    val q_direct : <<'a>{h : 'a; ..'b}>{x : 'c; ..'d}
+    val q_param : <'a>{a?'b : immut 'c; h?'d : immut 'c -> 'a; ..'e} -> <<'f>{h : 'f; ..'g}>{..'h} where ..'e <= {..'h}
+    |}];
+  run
+    {|
+let q = .< let h a = .~(.<x>.) in .<h>. >.
+let g = .< fun (y : int) -> .~q.{x = y} >.
+let k : int -> <int -> int>{..'r} = .~g
+|};
+  [%expect
+    {|
+    val q : <<'a>{h : 'a; ..'b}>{x : 'c; ..'d}
+    val g : <int -> <'a>{h : 'a; ..'b}>{..'c}
+    val k : int -> <int -> int>{h : int -> int; ..'a}
+    -- evaluated at compile time
+    (q
+     (Code
+      (Let (ident h/17) (args (a/16)) (generalized true)
+       (body (Var (Free x) : 'a))
+       (in_ (Quote (Var (Free h) : 'b) : "<'b>{h : 'b; ..'c}")) :
+       "<'b>{h : 'b; ..'c}")))
+    (g
+     (Code
+      (Fun (args (y/18))
+       (annots ((y/18 ((Con (<int> @ t.stag:3:20-23) ()) @ t.stag:3:20-23))))
+       (body
+        (Let (ident h/19) (args (a/20)) (generalized true)
+         (body (Var (Bound (Local y/18)) : 'a))
+         (in_ (Quote (Var (Free h) : 'b) : "<'b>{h : 'b; ..'c}")) :
+         "<'b>{h : 'b; ..'c}"))
+       : "int -> <'d>{h : 'd; ..'e}")))
+    -- evaluated
+    (q
+     (Code
+      (Let (ident h/17) (args (a/16)) (generalized true)
+       (body (Var (Free x) : 'a))
+       (in_ (Quote (Var (Free h) : 'b) : "<'b>{h : 'b; ..'c}")) :
+       "<'b>{h : 'b; ..'c}")))
+    (g
+     (Code
+      (Fun (args (y/18))
+       (annots ((y/18 ((Con (<int> @ t.stag:3:20-23) ()) @ t.stag:3:20-23))))
+       (body
+        (Let (ident h/19) (args (a/20)) (generalized true)
+         (body (Var (Bound (Local y/18)) : 'a))
+         (in_ (Quote (Var (Free h) : 'b) : "<'b>{h : 'b; ..'c}")) :
+         "<'b>{h : 'b; ..'c}"))
+       : "int -> <'d>{h : 'd; ..'e}")))
+    (k <fun>)
+    |}]
+;;
+
+let%expect_test "a closure capturing a function being defined is not embedded" =
+  modes
+    {|
+let outer n =
+  let f x = let g u = f in let c = .<g>. in Int.add x n in f 1
+let outer2 n =
+  let f x = let p = (fun u -> f) in let c = .<p>. in Int.add x n in f 1
+|};
+  [%expect {|
+    val outer : int -> int
+    val outer2 : int -> int
+    |}]
+;;
+
+let%expect_test "a toplevel being checked is nonportable, in either order" =
+  modes {|
+let r = (.<q>., Int.add 1 2)
+let q = let z = r in 3
+|};
+  [%expect {|
+    val r : <'_a>{q : '_a; ..'_b} * int
+    val q : int
+    |}];
+  modes {|
+let q = let z = r in 3
+let r = (.<q>., Int.add 1 2)
+|};
+  [%expect {|
+    val q : int
+    val r : <'_a>{q : '_a; ..'_b} * int
+    |}]
+;;
+
+let%expect_test "substituting a free variable of a quote inside the generated \
+                 code is an error: the inner code is provided it where it is \
+                 spliced"
+  =
+  modes {|
+let a = .~(.< .<x>. >.).{x = 1}
+let b = .~(.< .<x>. >.)
+|};
+  [%expect {| x is substituted, but the spliced code has no free variable x |}]
+;;
+
+let%expect_test "splices in closures make them nonportable (known limitation)" =
+  modes {|
+let q = .< fun a -> let p = fun u -> .~(.<1>.) in (p 1, p true) >.
+|};
+  [%expect
+    {| This expression has type bool but an expression was expected of type int |}];
+  modes {|
+let q = .< fun a -> let h @ const = fun u -> .~(.<1>.) in h >.
+|};
+  [%expect
+    {| This is nonportable, because it is a parameter, then a is captured by a closure (at t.stag:2:45-54), then the closure is made (at t.stag:2:36-54), but must be at most const, because it is annotated const (at t.stag:2:28-33) |}]
 ;;

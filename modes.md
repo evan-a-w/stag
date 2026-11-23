@@ -86,15 +86,25 @@ splice, while one bound outside the quote crosses none of them.
   then required: a later rise is an error. A variable used in its own
   definition (a function in its body, a toplevel being checked) is not
   decided on, so is always a free variable there, and computing with it is
-  nonportable. Toplevels are referred to by symbol, so cross closure locks,
-  and mutable toplevels quote locks, freely.
+  nonportable, as is a closure capturing it (other than itself). Toplevels
+  are referred to by symbol, so cross closure locks, and mutable toplevels
+  quote locks, freely.
 - **Toplevel splice lock** (splice outside any quote, i.e. code run at compile
   time): the variable must be `const`, since only `const` values exist at
   compile time. Not implemented yet: compile-time code may use any checked
   toplevel but a mutable one (the "runtime-only toplevel" check).
 
 A splice of code whose context is not known yet may use any variable visible
-there, so is taken to use them all, crossing their locks.
+there, so is taken to use them all, crossing their locks. It may also use any
+free variable of the enclosing quote, so the closures around it are
+nonportable, as is a closure around a splice providing such a variable.
+
+This is a known loss of precision: every code value has an open context
+(`.<1>.` included), so a closure in a quote containing a splice is never
+`const`. In `.< fun a -> let p = fun u -> .~(.<1>.) in (p 1, p true) >.`, `p`
+is not generalized. It goes once code types carry their mode (`<t @ m>`, see
+Toplevel splices). Annotating the spliced code with a closed context
+(`.~(c : <int>{})`) avoids it.
 
 ## Toplevels
 
@@ -112,7 +122,9 @@ A compiler flag, e.g. `Typecheck.create ~const_toplevels:bool`:
 
 A toplevel used in a quote is checked first, to know its mode: `const` ones
 are used directly, others are free variables of the quote. One whose checking
-is underway (a recursive reference) is a free variable. So the order of
+is underway (a recursive reference) is a free variable, and computing with it
+elsewhere is nonportable: `let z = r` in a toplevel `r` depends on is not
+generalized, whichever order they are checked in. So the order of
 checking matters: with
 
 ```ocaml

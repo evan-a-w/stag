@@ -1237,7 +1237,18 @@ let use_entry (scope : Scope.t) (entry : Env.Entry.t) ~name ~loc =
         (Mode.Var.submode
            entry.mode
            closure
-           (reason "%s is captured by a closure"))
+           (reason "%s is captured by a closure"));
+      (* A closure capturing itself is as portable as anything else it captures. *)
+      if entry.defining && Mode.Var.id closure <> Mode.Var.id entry.mode
+      then
+        Scope.add_mode
+          scope
+          ~loc
+          (Mode.Var.at_least
+             closure
+             Stage
+             Nonportable
+             (reason "%s is captured by a closure in its own definition"))
     | Quote _ when toplevel && mutable_ -> ()
     | Quote code ->
       Scope.add_mode
@@ -1272,16 +1283,14 @@ let use_entry (scope : Scope.t) (entry : Env.Entry.t) ~name ~loc =
 
 (* A free variable of the enclosing quote, provided where the code is spliced:
    its mode is unknown. *)
-let use_free (scope : Scope.t) ~name ~loc =
-  let why = sprintf "%s is a free variable of the quote" name in
+let use_free (scope : Scope.t) ~why ~loc =
   Env.Lock.cancel_splices scope.locks
   |> List.take_while ~f:(fun (lock : Env.Lock.t) ->
     match lock.kind with
-    | Closure _ | Splice -> true
-    | Quote _ -> false)
+    | Closure _ -> true
+    | Quote _ | Splice -> false)
   |> List.iter ~f:(fun (lock : Env.Lock.t) ->
     match lock.kind with
-    | Splice -> ()
     | Closure closure ->
       Scope.add_mode
         scope
@@ -1291,7 +1300,7 @@ let use_free (scope : Scope.t) ~name ~loc =
            Stage
            Nonportable
            (Mode.Reason.create ~loc why))
-    | Quote _ -> ());
+    | Quote _ | Splice -> ());
   Scope.evaluates scope Nonportable ~loc ~why
 ;;
 
@@ -1326,7 +1335,7 @@ let resolution_type t (scope : Scope.t) ~name ~toplevel ~loc : Resolution.t -> _
         scope.program.unusable_in_quotes
         ~key:name
         ~data:{ loc; var_level = entry.level; used_at = scope.level });
-    use_free scope ~name ~loc;
+    use_free scope ~why:(sprintf "%s is a free variable of the quote" name) ~loc;
     let%map.Result ty =
       Unify.present_entry t ~row:quote.context ~name ~rank:quote.outside.rank
       |> lift ~loc
@@ -1859,7 +1868,7 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
           reference. *)
        in_progress.recursive <- true;
        scope.scc.lowlink <- Int.min scope.scc.lowlink in_progress.index;
-       Ok entry)
+       Ok { entry with defining = true })
   | Unchecked ->
     let scc = check_toplevel t scope.program toplevel in
     scope.scc.lowlink <- Int.min scope.scc.lowlink scc.lowlink;
@@ -2071,16 +2080,9 @@ and expr_type
        let var = node (Var var_ref) ty in
        (match annot.Syntax.Annot.ty with
         | None -> var
-        | Some annot ->
-          (match Scope.elaborate_resolved scope annot with
-           | Ok (annot_ty, resolved) ->
-             let annotated = node (Annotated (var, resolved)) ty in
-             if Scope.unifies t scope ~ty1:ty ~ty2:annot_ty ~loc
-             then annotated
-             else node (Error [ annotated ]) Type.error
-           | Error error ->
-             Scope.report scope error;
-             var)))
+        | Some annot -> annotate t scope var annot ~loc))
+  | Annotated (var, annot) ->
+    annotate t scope (expr_type t scope ~expr:var) annot ~loc
   | Var (Ref var_ref) ->
     (match var_ref_type t scope var_ref ~loc with
      | Error error -> fail error
@@ -2716,6 +2718,17 @@ and expr_type
     in
     node (Poly_variant (tag, arg)) (Poly_row.variant t scope ~tag ~arg:arg_ty)
 
+and annotate t scope (var : Typed.Expr.t) annot ~loc : Typed.Expr.t =
+  match Scope.elaborate_resolved scope annot with
+  | Ok (annot_ty, resolved) ->
+    let annotated = { var with desc = Annotated (var, resolved); loc } in
+    if Scope.unifies t scope ~ty1:var.ty ~ty2:annot_ty ~loc
+    then annotated
+    else { desc = Error [ annotated ]; ty = Type.error; loc }
+  | Error error ->
+    Scope.report scope error;
+    var
+
 (* Runs the toplevel splice [code] of a [Stag.Expr.t], then infers the
    expression it gives here, checking it against [expected] so that a mismatch
    is reported as the expression's. *)
@@ -2745,8 +2758,6 @@ and splice_syntax ?expected ~hint t (scope : Scope.t) ~code ~loc =
   | Some ty when Expectation.is_required hint -> check_expr t scope ~expr ~ty
   | Some _ | None -> expr_type t scope ~expr ?expected ~hint
 
-(* Runs the toplevel splice [code], then infers the code it generates here, with
-   its explicit substitutions bound by lets around it. *)
 (* The names [row] has an entry for that may be present. *)
 and listed_entries (row : Type.row) =
   match Type.canonical_row row with
@@ -2756,8 +2767,10 @@ and listed_entries (row : Type.row) =
      | Present | PVar _ -> Set.add (listed_entries rest) name
      | Absent -> listed_entries rest)
 
-(* An explicit substitution of a name not [listed] in the code's context must be
-   of a free variable of the code generated. *)
+(* Runs the toplevel splice [code], then infers the code it generates here, with
+   its explicit substitutions bound by lets around it. An explicit substitution
+   of a name not [listed] in the code's context must be of a free variable of
+   the code generated. *)
 and expand t (scope : Scope.t) ~code ~subs ~listed ~ty ~loc =
   let program = scope.program in
   let bindings, entry =
@@ -3006,6 +3019,7 @@ and substitute_entry
     in
     None
   | Outside_quote { quote; _ } ->
+    use_free scope ~why:(sprintf "%s is a free variable of the quote" name) ~loc;
     let%map.Result () =
       Unify.constrain_row
         t
@@ -3042,6 +3056,10 @@ and substitute_tail t scope (quote : Scope.quote) ~tail ~seen ~loc ~may_capture 
         | Outside_quote _ -> None))
   in
   let rest = Scope.fresh_row t scope in
+  use_free
+    scope
+    ~why:"the spliced code may use free variables of the quote"
+    ~loc;
   let%bind.Result () =
     Unify.unify_row
       t
@@ -3085,7 +3103,8 @@ and substitute_explicitly t scope ~context ~subs ~loc =
       else lacks rest name
   in
   let%bind.Result () =
-    List.find_map subs ~f:(fun ({ txt = name; loc }, _) ->
+    List.find_map subs ~f:(fun ({ txt = name; loc }, expr) ->
+      let loc = Option.value_map expr ~default:loc ~f:Source.Expr.loc in
       Option.some_if (lacks context name) (loc, name))
     |> Option.value_map ~default:(Ok ()) ~f:(fun (loc, name) ->
       error ~loc (Unused_substitution name))

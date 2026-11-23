@@ -1145,14 +1145,14 @@ let%expect_test "re-inference of a local bounded by an outer closed row" =
     (gen <fun>)
     (user <fun>)
     -- annotated
-    ((Unused_substitution x) @ t.stag:6:12-13)
+    ((Unused_substitution x) @ t.stag:6:16-17)
     -- not annotated
     val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
     val closeit : <int>{} -> unit
     val direct : <int>{} -> <int>{} -> unit
     -- evaluated at compile time
     -- generated
-    ((Unused_substitution x) @ t.stag:5:12-13)
+    ((Unused_substitution x) @ t.stag:5:16-17)
     |}]
 ;;
 
@@ -1173,7 +1173,7 @@ let%expect_test "the order of splices deciding a weak variable matters" =
   [%expect
     {|
     ((Unused_substitution x) @ t.stag:5:28-29)
-    ((Unused_substitution x) @ t.stag:6:24-25)
+    ((Unused_substitution x) @ t.stag:6:28-29)
     ((Unification_error
       (Row_mismatch (RExtend x Present (TCon int ()) REmpty) REmpty
        (Missing_label x)))

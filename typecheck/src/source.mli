@@ -99,6 +99,8 @@ module Expr : sig
     type nonrec t =
       | Lit of Syntax.Lit.t
       | Var of Var.t
+      | Annotated of t * Syntax.Type_expr.t
+      (** A generated [(x : t)], whose annotation re-inference keeps. *)
       | App of t * t
       | Let of
           { binder : Binder.t

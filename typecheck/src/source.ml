@@ -160,6 +160,7 @@ module Expr = struct
     type nonrec t =
       | Lit of Syntax.Lit.t
       | Var of Var.t
+      | Annotated of t * Syntax.Type_expr.t
       | App of t * t
       | Let of
           { binder : Binder.t
@@ -299,7 +300,7 @@ module Expr = struct
     | Lit lit -> Lit lit
     | Var var_ref -> Var (Ref var_ref)
     | App (f, x) -> App (sub f, sub x)
-    | Annotated (expr, _) -> generated_view expr
+    | Annotated (expr, annot) -> Annotated (sub expr, annot)
     | Let { ident; args; annots; result_annot; generalized = _; body; in_ } ->
       Let
         { binder = Ident ident
