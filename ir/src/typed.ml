@@ -215,6 +215,14 @@ module Pattern = struct
   ;;
 end
 
+module Marker = struct
+  type t =
+    | Local
+    | Exclave
+    | Nontail
+  [@@deriving sexp_of, equal]
+end
+
 module Expr = struct
   module Subs = struct
     type 'e t =
@@ -252,6 +260,7 @@ module Expr = struct
           ; body : 'e
           }
       | Annotated of 'e * Syntax.Annot.t
+      | Marked of Marker.t * 'e
       | Splice of
           { code : 'e
           ; subs : 'e Subs.t
@@ -310,6 +319,7 @@ module Expr = struct
     | Store (target, value) -> [ target; value ]
     | Quote e
     | Annotated (e, _)
+    | Marked (_, e)
     | Assign (_, e)
     | Fun { body = e; _ }
     | Deref e

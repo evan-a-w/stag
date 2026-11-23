@@ -2,4 +2,11 @@
  (name stag_typecheck)
  (preprocess
   (pps ppx_jane))
- (libraries core stag_common stag_types stag_syntax stag_ir stag_eval stag_mode))
+ (libraries
+  core
+  stag_common
+  stag_types
+  stag_syntax
+  stag_ir
+  stag_eval
+  stag_mode))

@@ -87,6 +87,8 @@ module Kind = struct
     | Assign_to_immutable of string
     | Store_not_through_pointer
     (** A [Store] whose target is not a dereference, or a field of one. *)
+    | Exclave_not_in_tail_position
+    (** [exclave_ e] other than as the result of a function body. *)
     | Compile_time_use_of_mutable of
         { toplevel : string
         ; mutable_ : string
@@ -455,6 +457,9 @@ let rec kind_message (kind : Kind.t) ~show_type =
       "The variable %s is not mutable: only one bound by [let mut] can be \
        assigned to"
       name
+  | Exclave_not_in_tail_position ->
+    "[exclave_] ends the function's region, so must be the function's result, \
+     in tail position"
   | Store_not_through_pointer ->
     "Only a pointer can be stored to: [p.* <- v], or a field of it, as in \
      [p.*.x <- v]. Records are values, so a field is stored through a pointer \

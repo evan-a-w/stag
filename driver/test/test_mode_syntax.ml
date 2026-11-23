@@ -1,8 +1,8 @@
 open! Import
 open Source_helpers
 
-(* Modes are not checked yet: annotations are ignored, and [local_], [exclave_]
-   and [[@nontail]] evaluate their body. *)
+(* [local_], [exclave_] and [[@nontail]] evaluate their body: the interpreter
+   allocates everything on the heap. *)
 let%expect_test "mode syntax typechecks and evaluates as its body" =
   run
     {|
@@ -13,11 +13,11 @@ let pair (x @ local) = exclave_ (x, local_ (x, x))
 let apply (h : int @ local -> int @ local) = h 1 [@nontail]
 let annotated = (f : int @ local -> int -> int)
 let mut counter : int @ static = 0
-let record = local_ { x = 1; y = 2 }
+let record = let r = local_ { x = 1; y = 2 } in r.x
 let constructed = A (1, 2)
 let applied = apply (fun x -> Int.add x 1)
 let summed = f 1 2
-let paired = pair 3
+let paired = match pair 3 with (a, _) -> a
 let counted = counter <- 1; counter
 let var = (summed @ local)
 |};
@@ -30,11 +30,11 @@ let var = (summed @ local)
     val apply : (int -> int) -> int
     val annotated : int -> int -> int
     val counter : int
-    val record : r
+    val record : int
     val constructed : t
     val applied : int
     val summed : int
-    val paired : int * (int * int)
+    val paired : int
     val counted : int
     val var : int
     -- evaluated at compile time
@@ -44,42 +44,48 @@ let var = (summed @ local)
     (apply <fun>)
     (annotated <fun>)
     (counter 1)
-    (record (r (x 1) (y 2)))
+    (record 1)
     (constructed (A 1 2))
     (applied 2)
     (summed 3)
-    (paired (Tuple 3 (Tuple 3 3)))
+    (paired 3)
     (counted 1)
     (var 3)
     |}]
 ;;
 
-(* The typed tree keeps mode annotations on bindings, but not yet [local_],
-   [exclave_] or [[@nontail]], which erased code loses. *)
+(* The typed tree keeps mode annotations, [local_], [exclave_] and [[@nontail]],
+   which erased code keeps. *)
 let%expect_test "mode syntax in quotes" =
   run
     {|
 let code = .< fun (x @ local) -> exclave_ local_ (x, Int.add x 1 [@nontail]) >.
 let erased = Stag.Code.erase code
-let spliced = .~code 1
+let spliced = match .~code 1 with (a, b) -> Int.add a b
 |};
   [%expect
     {|
     val code : <int -> int * int>{..'a}
     val erased : Stag.Expr.t
-    val spliced : int * int
+    val spliced : int
     -- evaluated at compile time
     (code
      (Code
       (Fun (args (x/16))
        (annots ((x/16 ((mode ((Atoms (Local)) @ t.stag:2:23-28))))))
        (body
-        (Tuple
-         ((Var (Bound (Local x/16)) : int)
-          (App
-           (App (Var (Prim Int.add) : "int -> int -> int")
-            (Var (Bound (Local x/16)) : int) : "int -> int")
-           (Lit (Int 1) : int) : int))
+        (Marked Exclave
+         (Marked Local
+          (Tuple
+           ((Var (Bound (Local x/16)) : int)
+            (Marked Nontail
+             (App
+              (App (Var (Prim Int.add) : "int -> int -> int")
+               (Var (Bound (Local x/16)) : int) : "int -> int")
+              (Lit (Int 1) : int) : int)
+             : int))
+           : "int * int")
+          : "int * int")
          : "int * int"))
        : "int -> int * int")))
     -- evaluated
@@ -88,12 +94,18 @@ let spliced = .~code 1
       (Fun (args (x/16))
        (annots ((x/16 ((mode ((Atoms (Local)) @ t.stag:2:23-28))))))
        (body
-        (Tuple
-         ((Var (Bound (Local x/16)) : int)
-          (App
-           (App (Var (Prim Int.add) : "int -> int -> int")
-            (Var (Bound (Local x/16)) : int) : "int -> int")
-           (Lit (Int 1) : int) : int))
+        (Marked Exclave
+         (Marked Local
+          (Tuple
+           ((Var (Bound (Local x/16)) : int)
+            (Marked Nontail
+             (App
+              (App (Var (Prim Int.add) : "int -> int -> int")
+               (Var (Bound (Local x/16)) : int) : "int -> int")
+              (Lit (Int 1) : int) : int)
+             : int))
+           : "int * int")
+          : "int * int")
          : "int * int"))
        : "int -> int * int")))
     (erased
@@ -107,22 +119,29 @@ let spliced = .~code 1
              (Stag.Mode_expr.Atoms (Cons (Stag.Mode_expr.Atom.Local) (Nil)))))
            (ty (None))))
          (Nil))
-        (Stag.Expr.Tuple
-         (Cons
-          (Stag.Expr.Var (Stag.Path.Name (String x)) ((mode (None)) (ty (None))))
-          (Cons
-           (Stag.Expr.App
-            (Ptr
-             (Tuple
-              (Stag.Expr.App
-               (Ptr
-                (Tuple
-                 (Stag.Expr.Var (Stag.Path.Ref (Ref (value Prim.Int.add)))
-                  ((mode (None)) (ty (None))))
-                 (Stag.Expr.Var (Stag.Path.Name (String x))
-                  ((mode (None)) (ty (None)))))))
-              (Stag.Expr.Lit (Stag.Lit.Int 1)))))
-           (Nil))))))))
-    (spliced (Tuple 1 2))
+        (Stag.Expr.Exclave
+         (Ptr
+          (Stag.Expr.Local
+           (Ptr
+            (Stag.Expr.Tuple
+             (Cons
+              (Stag.Expr.Var (Stag.Path.Name (String x))
+               ((mode (None)) (ty (None))))
+              (Cons
+               (Stag.Expr.Nontail
+                (Ptr
+                 (Stag.Expr.App
+                  (Ptr
+                   (Tuple
+                    (Stag.Expr.App
+                     (Ptr
+                      (Tuple
+                       (Stag.Expr.Var (Stag.Path.Ref (Ref (value Prim.Int.add)))
+                        ((mode (None)) (ty (None))))
+                       (Stag.Expr.Var (Stag.Path.Name (String x))
+                        ((mode (None)) (ty (None)))))))
+                    (Stag.Expr.Lit (Stag.Lit.Int 1)))))))
+               (Nil))))))))))))
+    (spliced 3)
     |}]
 ;;

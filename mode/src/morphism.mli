@@ -16,6 +16,14 @@ val const_is_static : t
     crossing [portable] used at [nonportable]. *)
 val cross_portable : t
 
+(** On locality, the right adjoint of [x |-> meet x regional]: a value seen from
+    a region nested in its own. *)
+val borrow : t
+
+(** On locality, the right adjoint of [regional |-> local]: a value of a region
+    seen from the enclosing one. *)
+val release : t
+
 val src : t -> Axis.Any.t
 val dst : t -> Axis.Any.t
 val is_identity : t -> bool

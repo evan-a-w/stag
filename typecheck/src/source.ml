@@ -161,6 +161,7 @@ module Expr = struct
       | Lit of Syntax.Lit.t
       | Var of Var.t
       | Annotated of t * Syntax.Annot.t
+      | Marked of Typed.Marker.t * t
       | App of t * t
       | Let of
           { binder : Binder.t
@@ -283,7 +284,9 @@ module Expr = struct
     | Expect expected -> Expect expected
     | Type ty -> Type ty
     | Struct_quote toplevels -> Struct_quote toplevels
-    | Local expr | Exclave expr | Nontail expr -> syntax_view expr
+    | Local expr -> Marked (Local, sub expr)
+    | Exclave expr -> Marked (Exclave, sub expr)
+    | Nontail expr -> Marked (Nontail, sub expr)
     | Error -> Error
   ;;
 
@@ -305,6 +308,7 @@ module Expr = struct
     | Var var_ref -> Var (Ref var_ref)
     | App (f, x) -> App (sub f, sub x)
     | Annotated (expr, annot) -> Annotated (sub expr, annot)
+    | Marked (marker, expr) -> Marked (marker, sub expr)
     | Let
         { ident; args; annots; result_annot; mode; generalized = _; body; in_ }
       ->

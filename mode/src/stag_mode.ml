@@ -4,6 +4,7 @@ module Provenance = Axis.Provenance
 module Locality = Axis.Locality
 module Const = Const
 module Crossing = Crossing
+module Locality_map = Locality_map
 module Error = Mode_error
 module Id_source = Id_source
 module Reason = Reason

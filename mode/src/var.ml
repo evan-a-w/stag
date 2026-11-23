@@ -71,28 +71,38 @@ let crosses (type a) (crossing : Crossing.t) (axis : a Axis.t) =
   | Locality -> crossing.locality
 ;;
 
-let submode_axis (type a) ~crossing t1 t2 (axis : a Axis.t) reason =
-  if not (crosses crossing axis)
-  then
+let submode_axis (type a) ~crossing ~locality t1 t2 (axis : a Axis.t) reason =
+  match axis, crosses crossing axis with
+  | Locality, false ->
+    (match Locality_map.morphism locality with
+     | None -> Ok ()
+     | Some morphism -> Graph.add_edge t1.locality morphism t2.locality reason)
+  | _, false ->
     Graph.add_edge
       (node t1 axis)
       (Morphism.identity (T axis))
       (node t2 axis)
       reason
-  else (
-    match axis with
-    | Stage -> Graph.add_edge t1.stage Morphism.cross_portable t2.stage reason
-    | Provenance | Locality -> Ok ())
+  | Stage, true ->
+    Graph.add_edge t1.stage Morphism.cross_portable t2.stage reason
+  | (Provenance | Locality), true -> Ok ()
 ;;
 
-let submode ?(crossing = Crossing.none) a b reason =
+let submode ?(crossing = Crossing.none) ?(locality = Locality_map.id) a b reason
+  =
   Graph.atomically (fun () ->
-    all_axes (fun (T axis) -> submode_axis ~crossing a b axis reason))
+    all_axes (fun (T axis) -> submode_axis ~crossing ~locality a b axis reason))
 ;;
 
 let submode_on a b axis reason =
   Graph.atomically (fun () ->
-    submode_axis ~crossing:Crossing.none a b axis reason)
+    submode_axis
+      ~crossing:Crossing.none
+      ~locality:Locality_map.id
+      a
+      b
+      axis
+      reason)
 ;;
 
 let equate a b reason =

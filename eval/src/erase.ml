@@ -151,6 +151,8 @@ let expr (expr : Typed.Expr.t) =
     | Free_toplevel name -> Ok (resolved name)
     | Prim prim -> Ok (resolved (Prim.canonical_name prim))
     | Intrinsic Ptr_make -> Ok (resolved (Prelude_path.canonical "Ptr.make"))
+    | Intrinsic Assume_global ->
+      Ok (resolved (Prelude_path.canonical "Unsafe.assume_global"))
     | Intrinsic intrinsic ->
       Or_error.error_s
         [%message
@@ -194,6 +196,13 @@ let expr (expr : Typed.Expr.t) =
       node
         (Let_mut
            (label (name names ident), { (ty_annot annot) with mode }, body, in_))
+    | Marked (marker, e) ->
+      let%bind e = go names e in
+      node
+        (match marker with
+         | Local -> Local e
+         | Exclave -> Exclave e
+         | Nontail -> Nontail e)
     | Annotated (e, annot) ->
       let%bind e = go names e in
       (match e.txt with

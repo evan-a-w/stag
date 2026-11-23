@@ -204,7 +204,7 @@ let capped : 'a @ 'm -> 'a @ 'n with 'n <= portable = fun x -> x
 let bad = capped (Int.add 1 2)
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:3:17-30), then it is passed to a function (at t.stag:3:10-30), but must be at most portable, because it is annotated 'n <= portable (at t.stag:2:37-51), then the function types are unified, then x is used (at t.stag:2:63-64), then the function types are unified, then the function types are unified |}];
+    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:3:17-30), then it is passed to a function (at t.stag:3:10-30), but must be at most portable, because it is annotated 'n <= portable (at t.stag:2:37-51), then the function types are unified, then the function returns it (at t.stag:2:63-64), then x is used (at t.stag:2:63-64), then x is passed to the function (at t.stag:2:54-64), then the function types are unified, then the function types are unified |}];
   modes
     {|
 let pinned : int @ 'm -> int @ 'n with 'n <= 'm and 'm <= const = fun x -> x
@@ -316,7 +316,7 @@ let pair x y = x
 let p @ portable = pair (make 1)
 |};
   [%expect
-    {| This is nonportable, because cell is mutable (at t.stag:2:13-60), then cell is captured by a closure (at t.stag:2:51-55), then f is bound (at t.stag:2:33-60), then the function types are unified, then the function returns it (at t.stag:4:24-32), then it is passed to a function (at t.stag:4:19-32), but must be at most portable, because it is annotated portable (at t.stag:4:8-16), then the function returns it (at t.stag:4:19-32), then the function types are unified, then a partial application holds it (at t.stag:3:15-16), then the function types are unified |}]
+    {| This is nonportable, because cell is mutable (at t.stag:2:13-60), then cell is captured by a closure (at t.stag:2:51-55), then f is bound (at t.stag:2:33-60), then the function returns it (at t.stag:2:13-60), then the function types are unified, then the function returns it (at t.stag:4:24-32), then it is passed to a function (at t.stag:4:19-32), then the function types are unified, then a partial application holds it (at t.stag:3:15-16), then the function types are unified, then the function returns it (at t.stag:4:19-32), but must be at most portable, because it is annotated portable (at t.stag:4:8-16) |}]
 ;;
 
 let%expect_test "annotations on uses bound the variable's mode" =
@@ -342,7 +342,7 @@ let bad = cap (Int.add 1 2)
 let cap x = (x @ portable)
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:2:14-27), then it is passed to a function (at t.stag:2:10-27), but must be at most portable, because it is annotated portable (at t.stag:3:17-25), then x is used (at t.stag:3:12-26), then the function types are unified |}]
+    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:2:14-27), then it is passed to a function (at t.stag:2:10-27), but must be at most portable, because it is annotated portable (at t.stag:3:17-25), then x is used (at t.stag:3:12-26), then x is passed to the function (at t.stag:3:12-26), then the function types are unified |}]
 ;;
 
 let%expect_test "a let mut's mode bounds the values it holds" =

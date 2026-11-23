@@ -424,7 +424,8 @@ module Of_value = struct
                 (match arg 1 (list constraint_) with
                  | [] ->
                    unexpected ~expected:"at least one mode constraint" value
-                 | constraints -> Constrained (arg 0 (type_expr ~loc), constraints))
+                 | constraints ->
+                   Constrained (arg 0 (type_expr ~loc), constraints))
               | Plain | Arrow_side | Member ->
                 unexpected
                   ~expected:

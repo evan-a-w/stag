@@ -19,6 +19,9 @@ module Lock : sig
       (** A splice in a quote: it leaves the quote, so what is outside the quote
           is used across neither the splice nor the locks between it and the
           quote. *)
+      | Exclave
+      (** [exclave_ e]: [e] is in the caller's region, after the function's has
+          ended, so what is local to the function's is gone. *)
   end
 
   type t =

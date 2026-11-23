@@ -33,6 +33,9 @@ let%expect_test "the prelude's signature" =
     module Ptr : sig
       val make : 'a -> ptr['a]
     end
+    module Unsafe : sig
+      val assume_global : 'a @ local -> 'a
+    end
     module Stag : sig
       val map : ('a -> 'b) -> list['a] -> list['b]
       val append : list['a] -> list['a] -> list['a]

@@ -374,7 +374,7 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
      typed ();
      List.iter (cases @ exception_cases) ~f:(fun (p, _) ->
        pattern t ~syntax ~program p)
-   | Annotated _ -> ()
+   | Annotated _ | Marked _ -> ()
    | Lit _
    | Store _
    | App _

@@ -16,6 +16,11 @@ module Ptr = struct
   let make = Intrinsic.ptr_make
 end
 
+module Unsafe = struct
+  (* The caller vouches that the value outlives every region. *)
+  let assume_global = Intrinsic.assume_global
+end
+
 module Stag = struct
   (* The syntax of stag as data, mirroring [Syntax], for declarations generated
      at compile time. Names are as written, without backticks or quotes: [x],

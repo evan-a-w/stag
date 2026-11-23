@@ -44,9 +44,11 @@ end
 val node : t -> _ Axis.t -> Node.t
 
 (** [submode a b]: a value of mode [a] may be used at mode [b]. With [crossing],
-    [a] is first lowered on the axes it crosses. *)
+    [a] is first lowered on the axes it crosses. On locality, [a <= locality(b)]
+    (by default, [a <= b]). *)
 val submode
   :  ?crossing:Crossing.t
+  -> ?locality:Locality_map.t
   -> t
   -> t
   -> Reason.t

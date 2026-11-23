@@ -176,7 +176,7 @@ let captures t ~ident ~args ~body =
     | Fun { args; annots = _; body } ->
       List.iter args ~f:def;
       go ~depth body
-    | Annotated (expr, _) -> go ~depth expr
+    | Annotated (expr, _) | Marked (_, expr) -> go ~depth expr
     | Splice { code; subs } ->
       go ~depth:(depth - 1) code;
       (match subs with
@@ -314,6 +314,9 @@ let map_children ~depth (expr : Typed.Expr.t) ~(f @ local) =
     | Fun fun_ ->
       let%mapl_fun body = same fun_.body in
       Typed.Expr.Desc.Fun { fun_ with body }
+    | Marked (marker, expr) ->
+      let%mapl_fun expr = same expr in
+      Typed.Expr.Desc.Marked (marker, expr)
     | Annotated (expr, ty) ->
       let%mapl_fun expr = same expr in
       Typed.Expr.Desc.Annotated (expr, ty)
@@ -825,7 +828,7 @@ and step t ~env ~level (expr : Typed.Expr.t) : Next.t =
        (match eval t ~env ~level arg with
         | Error { global = error } -> exclave_ Failed error
         | Ok { global = arg } -> exclave_ apply t f arg ~loc:expr.loc))
-  | Annotated (expr, _) -> exclave_ Eval { env; level; expr }
+  | Annotated (expr, _) | Marked (_, expr) -> exclave_ Eval { env; level; expr }
   | Let { ident; args; body; in_; _ } ->
     (match bind_let t ~env ~level ~ident ~args ~body with
      | Error { global = error } -> exclave_ Failed error
@@ -886,8 +889,13 @@ and step_value t ~env ~level (expr : Typed.Expr.t)
      | Free _ | Free_toplevel _ | Prim _ | Intrinsic _ ->
        Eval_result.error_s
          [%message "Assigned a non-variable" (var_ref : Typed.Var_ref.t)])
-  | App _ | Let _ | Let_mut _ | Annotated _ | Toplevel_splice _ | Match _ ->
-    run t ~env ~level expr
+  | App _
+  | Let _
+  | Let_mut _
+  | Annotated _
+  | Marked _
+  | Toplevel_splice _
+  | Match _ -> run t ~env ~level expr
   | Fun { args; annots = _; body } ->
     (* Its first parameter identifies it, as a let's name does. *)
     closure t ~env ~level ~ident:(List.hd_exn args) ~args ~body
@@ -1082,6 +1090,7 @@ and apply_non_function t (f : Value.t) arg ~loc : Value.t Eval_result.t @ local
        Eval_result.return (Syntax_value.type_ref_path (Decl_ref.root_path ref_))
      | Raise, exn -> raise_exn ~loc exn
      | Ptr_make, value -> Eval_result.return (Value.Ptr (ref value))
+     | Assume_global, value -> Eval_result.return value
      | Erase, Code { expr; persistent = _ } ->
        (match Erase.expr expr with
         | exception Erase.Reached_error -> reached_error ()
