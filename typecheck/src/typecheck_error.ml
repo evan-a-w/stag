@@ -545,18 +545,23 @@ let rec kind_message (kind : Kind.t) ~show_type =
       | Not_a_function -> "it must be a function"
       | Argument ty ->
         sprintf
-          "C functions can't take a %s: arguments must be int, bool, char or \
-           string%s"
+          "C functions can't take arguments of type %s, only int, bool and \
+           char%s"
           (Type.Printer.ty printer ty)
           (Type.Printer.where printer)
       | Result ty ->
         sprintf
-          "C functions can't return a %s: results must be int, bool, char or \
-           unit%s"
+          "C functions can't return values of type %s, only int, bool, char \
+           and unit%s"
           (Type.Printer.ty printer ty)
           (Type.Printer.where printer)
       | Unit_argument ->
         "unit can only be the only argument, of a C function of no arguments"
+      | Pointer ty ->
+        sprintf
+          "%s would be passed to C as a pointer, which is not supported yet%s"
+          (Type.Printer.ty printer ty)
+          (Type.Printer.where printer)
     in
     sprintf "The external %s has no C signature: %s" symbol problem
   | Misplaced_mut ->

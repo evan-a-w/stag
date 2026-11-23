@@ -10,7 +10,8 @@ module Arg : sig
     | Bool (** [bool]. *)
     | Char (** [char]. *)
     | String
-    (** [const char *]: a NUL-terminated copy, valid only during the call. *)
+    (** [const char *]: a NUL-terminated copy, valid only during the call. Not
+        yet allowed by [of_type], see [Problem.Pointer]. *)
   [@@deriving sexp_of, equal]
 end
 
@@ -38,6 +39,8 @@ module Problem : sig
     | Argument of Type.ty (** Of a type C functions can't take. *)
     | Result of Type.ty (** Of a type C functions can't return. *)
     | Unit_argument (** [unit] as an argument, but not the only one. *)
+    | Pointer of Type.ty
+    (** A [string] or [ptr]: passing pointers to C is not supported yet. *)
   [@@deriving sexp_of]
 end
 

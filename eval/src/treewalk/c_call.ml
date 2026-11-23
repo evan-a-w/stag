@@ -82,7 +82,7 @@ let call ~symbol (signature : C_signature.t) args =
       let (Fn (typ, call)) = fn signature.args signature.result in
       match Foreign.foreign symbol typ with
       | f -> Ok (call f)
-      | exception Dl.DL_error message -> Error message)
+      | exception Dl.DL_error _ -> Error "there is no such C symbol")
   in
   Result.map resolved ~f:(fun call -> call args)
 ;;

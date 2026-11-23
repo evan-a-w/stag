@@ -3,7 +3,8 @@ open! Import
 (** Calls C functions of the current process through libffi. *)
 
 (** Calls [symbol], found by [dlsym] in the process, with [args], of the stag
-    types of [signature]'s arguments. Errs if there is no such symbol. *)
+    types of [signature]'s arguments. Errs, saying why, if there is no such
+    symbol. *)
 val call
   :  symbol:string
   -> C_signature.t

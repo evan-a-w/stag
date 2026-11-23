@@ -32,12 +32,14 @@ module Problem = struct
     | Argument of Type.ty
     | Result of Type.ty
     | Unit_argument
+    | Pointer of Type.ty
   [@@deriving sexp_of]
 end
 
 let con_name ty =
   match Type.canonical_ty ty with
   | TCon (name, []) -> Some name
+  | TCon ("ptr", _) -> Some "ptr"
   | _ -> None
 ;;
 
@@ -57,6 +59,7 @@ let of_type ty : (t, Problem.t) Core.Result.t =
       | Some "bool" -> Ok Result.Bool
       | Some "char" -> Ok Result.Char
       | Some "unit" -> Ok Result.Unit
+      | Some ("string" | "ptr") -> Error (Problem.Pointer result)
       | _ -> Error (Problem.Result result)
     in
     (match args with
@@ -69,7 +72,7 @@ let of_type ty : (t, Problem.t) Core.Result.t =
            | Some "int" -> Ok Int
            | Some "bool" -> Ok Bool
            | Some "char" -> Ok Char
-           | Some "string" -> Ok String
+           | Some ("string" | "ptr") -> Error (Pointer arg)
            | Some "unit" -> Error Unit_argument
            | _ -> Error (Argument arg))
          |> Core.Result.all

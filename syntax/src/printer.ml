@@ -884,7 +884,7 @@ and toplevel roots ~indent (t : Toplevel.t) =
     text "exception " ^^ constructor_decl roots (name, args)
   | External { name; ty; symbol } ->
     definition
-      (text ("external " ^ name.txt ^ " : ") ^^ type_expr_doc roots ty)
+      (let_lhs roots "external" name [] { ty = Some ty; mode = None })
       (text (string_literal symbol.txt))
   | Module (name, []) -> text ("module " ^ name.txt ^ " = struct end")
   | Module (name, members) ->
