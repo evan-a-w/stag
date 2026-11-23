@@ -350,8 +350,11 @@ Each step is a branch stacked on the previous one.
   pointers take `gc` values (through `gc` pointers, until FFI pointers are
   designed), mutable variables infer their held provenance;
   provenance annotations and bounds in `with`; the Go-style GC design.
-- **G. `External`**: C functions with a C compatible ABI (rejecting
-  signatures it can't express), producing `external` values.
+- **G. `external`**: C functions at ordinary curried types, their modes
+  trusted as written (unwritten ones a declaration's defaults, so they may
+  produce `external` values only where their types say so), called through
+  libffi by the interpreter. Only immediates (`int`, `bool`, `char`, `unit`)
+  for now: other signatures, pointers included, are rejected.
 
 ## Later
 
@@ -360,7 +363,8 @@ Each step is a branch stacked on the previous one.
   cell's provenance in its type (as a modality), as a pointer's mode may
   have been raised by subsumption.
 - Printing provenance relations between mode variables.
-- Function pointer arrows (`=>`).
+- Pointers in `external` signatures, and callbacks (`@ static` closures
+  passed to C).
 - A dynamic mode checker in the interpreter, as a test oracle.
 - Presence ordering constraints (`Absent <= Present`) are kept as bounds
   between presence variables, so are solved independently of the order they

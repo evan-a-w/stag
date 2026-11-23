@@ -37,10 +37,12 @@ node, for good errors.
   `(* c *).x` start root paths, and `r.x`, `M.x`, `(e).x`, `"s".x` do not.
   The longest tokens `.<` `.~` `..` `.{` are unaffected (`..x` is `..` then
   `x`).
-- Keywords: `let rec in match with fun exception type of module struct end`,
-  `true false`, and `stack_ exclave_ global_` (see [Modes](#modes)), so
-  these are not identifiers anywhere, even qualified (`M.stack_`). Mode names
-  (`local`, `const`, ...) are not keywords.
+- Keywords: `let rec in match with fun exception external type of module
+  struct end`, `true false`, and `stack_ exclave_ global_` (see
+  [Modes](#modes)), so these are not identifiers anywhere, even qualified
+  (`M.stack_`). Mode names (`local`, `const`, ...) are not keywords, but
+  `external`: it is the `external` mode after `@`, unless it starts a
+  declaration (`external name :`).
   `rec` is reserved, as lets are always recursive.
 - `@` introduces a mode (see [Modes](#modes)); `@@` is reserved (for
   modalities). `[@nontail]` is the one attribute.
@@ -460,6 +462,31 @@ type t                                 (* abstract *)
 module M = struct ... end
 module M = .~e                         (* declaration splices, see below *)
 include .~e
+external labs : int -> int = "labs"   (* a C function, see below *)
+```
+
+### External functions
+
+`external name : t = "symbol"` declares the C function `symbol`, found in the
+process (by `dlsym`, in the interpreter, which calls it through libffi), as
+the toplevel function `name : t`. `t` is an ordinary curried arrow, with no
+type variables: `a -> b -> r` is C's `r symbol(a, b)`, and `unit -> r` is
+`r symbol(void)`. Each argument and the result is `int` (C's `int64_t`),
+`bool` or `char`, and the result may be `unit` (`void`). Pointers (`string`,
+`ptr[...]`) are not supported yet, and other types are rejected. The C
+function must have exactly that signature: nothing checks it. An external is
+a toplevel function like any other: it can be partially applied and passed
+around, and C is called once it has all its arguments.
+
+Modes written in `t` are trusted, as C code is not checked, and unwritten
+ones are a declaration's defaults (see [modes.md](modes.md#arrow-modes)):
+`external f : int @ portable -> int @ portable = "f"` returns portable
+values, while a plain `int -> int` returns nonportable ones.
+
+```ocaml
+external srand48 : int -> unit = "srand48"
+external lrand48 : unit -> int = "lrand48"
+let seeded = srand48 7; lrand48 ()
 ```
 
 ## Primitives

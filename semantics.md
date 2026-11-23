@@ -10,7 +10,7 @@ axis here, and its implementation plan).
 One language at every level: meta level (compile-time splices, generators) and
 residual program alike. It has GC'd values, closures and modes, but a program
 that uses none of them is essentially C: by-value structs, fixed width
-integers, function pointers, static data. Features are implemented
+integers, static functions, static data. Features are implemented
 incrementally; initially the compiled subset is the C-like one, and the rest
 is rejected by the backend (the interpreter supports everything).
 
@@ -114,37 +114,28 @@ let sum p =
 
 ## Functions
 
-Two arrow types:
+There is one arrow type, `a -> b`. Every function value is a closure, boxed,
+at least the provenance of what it captures. A `static` closure is `const`
+and a constant global; others are allocated (heap or data stack); one
+capturing an `external` value is `external`. The closure's mode is the mode
+of the arrow value itself.
 
-- **Closure** `a -> b` (the existing arrow): boxed, at least the provenance
-  of what it captures. A `static` closure is `const` and a constant global;
-  others are allocated (heap or data stack); one capturing an `external`
-  value is `external`.
-- **Function pointer** `a => b`: a code pointer, capturing nothing (it may
-  refer to `const`/`static` toplevels directly). No allocation, C ABI
-  compatible. Same precedence and associativity as `->` (`int * int => int`
-  is `(int * int) => int`).
+Calling a function known statically (a toplevel, an `external`) with all its
+arguments is a direct call, with no closure involved: a compilation detail,
+not part of the type. Partially applying it, or passing it as a value, makes
+a closure, as for any function.
 
-Function pointers are unary and uncurried: several arguments are a tuple,
-flattened by the calling convention into separate parameters (`unit` into
-none), so `int * int => int` is C's `int64_t (*)(int64_t, int64_t)`. Defining
-and calling look the same as for closures:
-
-```ocaml
-let add (x, y) = Int.add x y      (* add : int * int => int, or a closure *)
-let apply (f : int * int => int) = f (1, 2)
-```
-
-Whether an arrow is a closure or a function pointer is inferred: arrows carry
-a kind variable (`closure | fn_ptr`), generalised like a mode variable and
-monomorphised. A function capturing nothing may be either, so `add` above can
-be passed where a closure is expected and where a function pointer is (two
-instances are compiled); one capturing anything not `static` is a closure.
-An unconstrained kind variable defaults to `fn_ptr` when allowed. `->` and
-`=>` in annotations force the kind.
-
-Function pointers come after modes. Until then every arrow is a closure, and
-the closure's mode is the mode of the arrow value itself.
+C functions are declared with `external` (see
+[syntax.md](syntax.md#external-functions)), at ordinary curried types: an
+`external f : a -> b -> r` is C's `r f(a, b)`, and `unit -> r` is `r f(void)`.
+Its modes are trusted as written, unwritten ones a declaration's defaults
+(`nonportable gc global`); the external itself is a code pointer, whose mode
+is unconstrained. Only immediates cross the boundary for now (`int` as
+`int64_t`, `bool`, `char`, and `unit` as `void`): pointers are not supported
+yet, and signatures that can't be expressed are rejected. A stag function
+passed to C as a callback must be `@ static`: a
+`static` closure carries a C ABI entry point, as it needs no environment.
+Callbacks are not implemented yet.
 
 Tail calls are guaranteed in tail position (LLVM `tailcc` + `musttail`).
 
@@ -202,9 +193,9 @@ Provenance follows reachability, not evaluation:
   their provenance. A `global_` field still counts: it is reachable.
 - What is only evaluated (a `let`'s bound expression, a sequence's first
   part, a scrutinee) doesn't count towards the result's provenance.
-- Literals and toplevel constants are `static`; prims and declared functions
-  take and return `gc` values unless their types say otherwise
-  (`string @ external -> ...`), and an `external` result is trusted as
+- Literals and toplevel constants are `static`; prims, declared functions and
+  `external`s take and return `gc` values unless their types say otherwise
+  (`string @ external -> ...`), and an `external`'s result is trusted as
   declared.
 - A heap block holding an `external` value is itself `external`. Stores must
   not raise a cell's provenance, as the cell's other aliases rely on it: a
@@ -225,9 +216,9 @@ Provenance follows reachability, not evaluation:
   must be `@ static` (C may retain it), once the FFI has callbacks.
 
 `external` is produced by annotations (`let x @ external = e`, a declared
-function type's `@ external` result), and later by an `External` FFI:
-declarations of C functions, with a C compatible ABI that rejects signatures
-it can't express.
+function type's `@ external` result), including those of `external`
+declarations of C functions: an external's modes are trusted as written, not
+forced to `external`.
 
 In compiled code, a value crossing from compile time into a quote must be
 `const` (lifted, as static data) or a runtime toplevel, referred to by its
@@ -450,9 +441,10 @@ Steps:
 
 1. Modes: see the implementation plan in [modes.md](modes.md). Later, move
    presence variables onto the solver (with triggers).
-2. Language: fixed width integers, pointer types, mutation, function pointer
-   type, closure mode restriction, recursion only through pointers (rewriting
-   the existing recursive variants).
+2. Language: fixed width integers, pointer types, mutation, C callbacks
+   (`@ static` closures), pointers in `external`s, closure mode restriction,
+   recursion only through pointers (rewriting the existing recursive
+   variants).
 3. Treewalk: the new constructs; optional dynamic provenance checks.
 4. Monomorphiser.
 5. Closure conversion and lowering to Core IR; Core IR interpreter;
