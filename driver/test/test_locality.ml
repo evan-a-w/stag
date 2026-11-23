@@ -340,3 +340,26 @@ let g u = let c = Unsafe.assume_global (fun x -> x) in .<c>.
     val g : 'a -> <'b -> 'b>{..'c}
     |}]
 ;;
+
+let%expect_test "exceptions' arguments are global" =
+  locality
+    {|
+exception E of ptr[int]
+let f u = let p = stack_ (Ptr.make 1) in raise (E p)
+|};
+  [%expect
+    {|
+    This is local, because it is allocated by [stack_] (at t.stag:3:18-37), then it is part of the value (at t.stag:3:18-37), then p is used (at t.stag:3:50-51), then it is passed to a function (at t.stag:3:41-52), but must be at most global, because a function type fixes it, then the function types are unified
+    This is local, because it is allocated by [stack_] (at t.stag:3:18-37), then it is part of the value (at t.stag:3:18-37), then p is used (at t.stag:3:50-51), but must be at most regional, because it is passed in a tail call, after the current region has ended (mark the call [@nontail]) (at t.stag:3:47-52)
+    |}];
+  locality
+    {|
+exception E of ptr[int]
+let g h = match h () with x -> x | exception E p -> Ptr.make p
+|};
+  [%expect
+    {|
+    exception E of ptr[int]
+    val g : (unit -> ptr[ptr[int]]) -> ptr[ptr[int]]
+    |}]
+;;

@@ -195,14 +195,17 @@ machine (function) stack, and managed by the runtime as a bump allocator:
 
 - Each function body is a region: on entry it saves the data stack pointer,
   on exit restores it, freeing everything allocated locally in the call.
-- Allocation is inferred, as in OxCaml: each allocation (tuple, record,
-  constructor, closure) has a mode variable, at least its parts' (a block
-  holding a value local to the region is itself local) and at most what its
-  uses allow. Nothing needs a keyword to be local: compiled code allocates in
-  the current region whatever may be `local`, the interpreter on its heap.
-  `stack_ e` forces `e`'s outermost allocation to be `local`, so it is an
-  error if it escapes. Plain data (`int`, `bool`, `char`, `unit`) crosses
-  locality: a copy of it is as good anywhere.
+- Allocation is inferred, as in OxCaml: each allocation (closure, quote,
+  `Ptr.make`) has a mode variable, at least its parts' (a block holding a
+  value local to the region is itself local) and at most what its uses allow.
+  Records, tuples and constructors are values, as local as their parts.
+  Nothing needs a keyword to be local: compiled code allocates in the current
+  region whatever may be `local`, the interpreter on its heap. `stack_ e`
+  forces `e`'s allocations to be `local`, so it is an error if they escape,
+  and an error if `e` allocates nothing (a record, tuple or constructor must
+  hold an allocation). Pointer-free data (`int`, `bool`, `char`, `unit`, and
+  records, tuples and variants of them) crosses locality: a copy of it is as
+  good anywhere.
 - A function's result is at most `regional` (it outlives the function's
   region); a toplevel, what is stored through a pointer and what a `global_`
   field holds must be `global`. A closure is at least the localities of what

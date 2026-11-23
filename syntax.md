@@ -407,7 +407,7 @@ let mut counter : int @ static = 0
 (e : t @ m)   (x @ local)               (* an annotated variable *)
 int @ local -> int @ local              (* a function type's argument/result *)
 'a @ 'm -> 'b @ 'n
-stack_ e                                (* allocate e in the current region *)
+stack_ e                                (* allocate e's allocations in the current region *)
 exclave_ e                              (* end the region, then evaluate e *)
 f x [@nontail]                          (* not a tail call *)
 type r = {x : global_ int; y : int}     (* always global, even in a local r *)

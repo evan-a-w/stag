@@ -62,3 +62,44 @@ let%expect_test "composition and order" =
   [%expect
     {| ((id_le_cross true) (cross_le_id false) (is_identity (true false false))) |}]
 ;;
+
+let%expect_test "locality morphisms" =
+  print Morphism.borrow;
+  print Morphism.release;
+  print (Morphism.compose Morphism.borrow Morphism.release);
+  print (Morphism.compose Morphism.release Morphism.borrow);
+  print (Morphism.compose Morphism.borrow Morphism.borrow);
+  [%expect
+    {|
+    (borrow (right ((Global 0) (Regional 2) (Local 2)))
+     (left ((Global 0) (Regional 1) (Local 1))) (inflationary true))
+    (release (right ((Global 0) (Regional 0) (Local 2)))
+     (left ((Global 0) (Regional 2) (Local 2))) (inflationary false))
+    (release (right ((Global 0) (Regional 0) (Local 2)))
+     (left ((Global 0) (Regional 2) (Local 2))) (inflationary false))
+    (borrow (right ((Global 0) (Regional 2) (Local 2)))
+     (left ((Global 0) (Regional 1) (Local 1))) (inflationary true))
+    (borrow (right ((Global 0) (Regional 2) (Local 2)))
+     (left ((Global 0) (Regional 1) (Local 1))) (inflationary true))
+    |}]
+;;
+
+let%expect_test "locality maps" =
+  let module L = Stag_mode.Locality_map in
+  List.iter
+    [ "borrow . release", L.compose L.borrow L.release
+    ; "release . borrow", L.compose L.release L.borrow
+    ; "id . borrow", L.compose L.id L.borrow
+    ; "ignore . borrow", L.compose L.ignore L.borrow
+    ; "borrow . ignore", L.compose L.borrow L.ignore
+    ]
+    ~f:(fun (name, map) -> print_s [%message name ~_:(map : L.t)]);
+  [%expect
+    {|
+    ("borrow . release" release)
+    ("release . borrow" borrow)
+    ("id . borrow" borrow)
+    ("ignore . borrow" ignore)
+    ("borrow . ignore" ignore)
+    |}]
+;;

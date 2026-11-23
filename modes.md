@@ -44,9 +44,16 @@ This is about what values *capture*, not about effects. Effect purity (calling
 a function performs no side effects) would be a separate property of arrows,
 needing a small effect system; deferred until the language has effects.
 
-Mode crossing by kind, as in OxCaml: plain data like `int` can always be
-lifted into code, so crosses `portable` regardless of mode, but never `const`.
-Applied when the type is known where the constraint arises.
+Mode crossing by layout: a value of a pointer-free by-value type (`int`,
+`bool`, `char`, `unit`, and records, tuples and variants of pointer-free
+types) holds nothing a mode could restrict. It crosses locality and
+provenance entirely, and stage up to `portable` (it can always be lifted into
+code, but `const` stays a promise about how it was computed). Applied when the
+type is known where the constraint arises; a function's parameter type is
+unified with what the context expects before its body is checked, so whether
+a use crosses does not depend on the order things are checked in. Records,
+tuples and variants are values, not allocations: what is local in a local
+`(p, 1)` is `p`.
 
 ## Expression modes
 
@@ -121,8 +128,7 @@ val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3
 - bounds every mode meets (`const <= 'm`, `'m <= nonportable`) are left out;
 - a weak (not generalized) variable is named `'_m0`, as weak type variables,
   and shown with its current constraints;
-- relations through a crossing morphism are not printed (nothing crosses
-  until crossing by kind, chunk E).
+- relations through a crossing morphism are not printed.
 
 The `with` clause is also syntax for annotations (see syntax.md), so printed
 types read back as themselves. As only the stage axis is printed, a constraint
@@ -234,8 +240,8 @@ toplevel splice has the mode of its expansion, checked after it is generated.
 - Toplevel constants like `n` resolve directly inside quotes (they are
   `const`), instead of becoming free variables filled in at the splice.
 - Local closures capturing arguments, mutable locals or computed values no
-  longer cross levels: they are free variables of the quote. (Ints too, until
-  mode crossing by kind.)
+  longer cross levels: they are free variables of the quote, unless their type
+  is pointer-free.
 - Constant data is generalized, local or not; values computed by applying
   or splicing are not.
 
@@ -323,4 +329,4 @@ Each step is a branch stacked on the previous one.
   wait for the entry to be `Present`. They move into the mode solver, as a
   two point axis whose equalities are triggers (see
   [semantics.md](semantics.md#solver)).
-- Effect purity, `const fn`, mode crossing by kind.
+- Effect purity, `const fn`.
