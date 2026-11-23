@@ -166,7 +166,8 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
       walk_row ~add ~expr ~kind:Kind.Poly_field context
     | Record row -> walk_row ~add ~expr ~kind:Kind.Poly_field row
     | Variant row -> walk_row ~add ~expr ~kind:Kind.Poly_tag row
-    | Mut ty | Immut ty | Moded (ty, _) | Global ty -> recurse ty
+    | Mut ty | Immut ty | Moded (ty, _) | Constrained (ty, _) | Global ty ->
+      recurse ty
     | Splice e -> expr e
   and walk_row ~(add : add) ~expr ~kind (row : Syntax.Type_expr.row) =
     match row.txt with

@@ -344,9 +344,25 @@ let rec type_expr roots ~prec (t : Type_expr.t) =
   | Splice e -> spliced roots e
   | Moded (t, mode) ->
     paren_if (prec > 1) (type_expr roots ~prec:1 t ^^ mode_doc mode)
+  | Constrained (t, constraints) ->
+    paren_if
+      (prec > 0)
+      (type_expr roots ~prec:0 t ^^ constraints_doc constraints)
   | Global t -> text "global_ " ^^ type_expr roots ~prec t
 
 and mode_doc mode = text (" @ " ^ Mode_expr.to_string mode)
+
+and constraints_doc constraints =
+  group
+    (nest
+       2
+       (line
+        ^^ text "with "
+        ^^ group
+             (separate
+                (line ^^ text "and ")
+                (List.map constraints ~f:(fun c ->
+                   text (Mode_expr.Constraint.to_string c))))))
 
 (* A [{...}] argument is a row, so a type argument starting with a record type
    is parenthesized. *)
@@ -360,8 +376,10 @@ and type_arg roots : Type_expr.arg -> Doc.t = function
 and starts_with_record (t : Type_expr.t) =
   match t.txt with
   | Record _ -> true
-  | Arrow (first, _) | Tuple (first :: _) | Moded (first, _) ->
-    starts_with_record first
+  | Arrow (first, _)
+  | Tuple (first :: _)
+  | Moded (first, _)
+  | Constrained (first, _) -> starts_with_record first
   | Var _ | Con _
   | Tuple []
   | Code _ | Variant _ | Mut _ | Immut _ | Splice _ | Global _ -> false
@@ -371,8 +389,10 @@ and starts_with_record (t : Type_expr.t) =
 and starts_with_splice (t : Type_expr.t) =
   match t.txt with
   | Splice _ -> true
-  | Arrow (first, _) | Tuple (first :: _) | Moded (first, _) ->
-    starts_with_splice first
+  | Arrow (first, _)
+  | Tuple (first :: _)
+  | Moded (first, _)
+  | Constrained (first, _) -> starts_with_splice first
   | Var _ | Con _
   | Tuple []
   | Code _ | Record _ | Variant _ | Mut _ | Immut _ | Global _ -> false
@@ -485,8 +505,13 @@ and annot_doc roots ({ ty; mode } : Annot.t) =
   match ty with
   | None -> mode_doc
   | Some t ->
+    let t, constraints =
+      match t.txt with
+      | Constrained (t, constraints) -> t, constraints_doc constraints
+      | _ -> t, empty
+    in
     let prec = if Option.is_some mode then 1 else 0 in
-    text " : " ^^ type_expr roots ~prec t ^^ mode_doc
+    text " : " ^^ type_expr roots ~prec t ^^ mode_doc ^^ constraints
 
 and region roots (ctx : Ctx.t) keyword body =
   group

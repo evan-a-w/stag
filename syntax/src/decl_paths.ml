@@ -47,6 +47,7 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
       | Mut t -> Mut (type_expr t)
       | Immut t -> Immut (type_expr t)
       | Moded (t, m) -> Moded (type_expr t, m)
+      | Constrained (t, cs) -> Constrained (type_expr t, cs)
       | Global t -> Global (type_expr t)
       | Splice e -> Splice (expr String.Set.empty e)
     in

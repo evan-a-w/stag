@@ -121,6 +121,8 @@ module Defs = struct
         an antiquote in a struct quote. *)
     | Moded of type_expr * Mode_expr.t
     (** [t @ m]: only as a function type's argument or result. *)
+    | Constrained of type_expr * Mode_expr.Constraint.t list
+    (** [t with c and ...], non-empty: only as an annotation's type. *)
     | Global of type_expr
     (** [global_ t]: only as a record field's type or a constructor's argument. *)
 
@@ -300,6 +302,7 @@ module Type_expr = struct
     | Immut of t
     | Splice of expr
     | Moded of t * Mode_expr.t
+    | Constrained of t * Mode_expr.Constraint.t list
     | Global of t
 
   type nonrec row_desc = row_desc =

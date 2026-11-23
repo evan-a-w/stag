@@ -152,7 +152,8 @@ let rec has_splice (expr : Type_expr.t) =
   | Tuple tys -> List.exists tys ~f:has_splice
   | Code { inner; context } -> has_splice inner || row_has_splice context
   | Record row | Variant row -> row_has_splice row
-  | Mut ty | Immut ty | Moded (ty, _) | Global ty -> has_splice ty
+  | Mut ty | Immut ty | Moded (ty, _) | Constrained (ty, _) | Global ty ->
+    has_splice ty
 
 and row_has_splice (row : Type_expr.row) =
   match row.txt with
@@ -347,6 +348,54 @@ module Vars = struct
     | Params _, Atoms atoms ->
       Ok (Arrow_modes.Side.Fixed (Mode_atoms.declared atoms))
   ;;
+
+  (* [lower <= upper] between variables, on every axis, or bounding a variable
+     on the axes of the atoms, of those checked so far (stage). *)
+  let mode_constraint t ({ lower; upper } : Syntax.Mode_expr.Constraint.t) ~loc
+    : (unit, Typecheck_error.t) Result.t
+    =
+    match t with
+    | Params _ ->
+      let var =
+        match lower.txt, upper.txt with
+        | Var name, _ | _, Var name -> name
+        | Atoms _, Atoms _ -> ""
+      in
+      error ~loc (Mode_variable_in_declaration var)
+    | Annotation vars ->
+      let reason =
+        Mode.Reason.create
+          ~loc
+          (sprintf
+             "it is annotated %s"
+             (Syntax.Mode_expr.Constraint.to_string { lower; upper }))
+      in
+      let bound (atoms : Syntax.Mode_expr.Atom.t list) ~f =
+        List.fold_result atoms ~init:() ~f:(fun () atom ->
+          match atom with
+          | Const -> f Mode.Stage.Const
+          | Portable -> f Portable
+          | Nonportable -> f Nonportable
+          | Static | Gc | Unknown | Global | Regional | Local -> Ok ())
+      in
+      let result =
+        match lower.txt, upper.txt with
+        | Var lower, Var upper ->
+          Mode.Var.submode
+            (Annotation_vars.mode vars lower)
+            (Annotation_vars.mode vars upper)
+            reason
+        | Var lower, Atoms atoms ->
+          let var = Annotation_vars.mode vars lower in
+          bound atoms ~f:(fun point -> Mode.Var.at_most var Stage point reason)
+        | Atoms atoms, Var upper ->
+          let var = Annotation_vars.mode vars upper in
+          bound atoms ~f:(fun point -> Mode.Var.at_least var Stage point reason)
+        | Atoms _, Atoms _ -> Ok ()
+      in
+      Result.map_error result ~f:(fun error ->
+        Typecheck_error.create ~loc (Mode_error error))
+  ;;
 end
 
 (* An expansion of an alias : [knot], linked to the alias's body once
@@ -448,6 +497,13 @@ let rec elaborate' t module_ vars ~splices ~expansions (expr : Type_expr.t)
     | Moded (ty, mode) ->
       let%map.Result ty, syntax = elaborate ty in
       ty, Type_expr.Moded (syntax, mode)
+    | Constrained (ty, constraints) ->
+      let%bind.Result ty, syntax = elaborate ty in
+      let%map.Result () =
+        List.fold_result constraints ~init:() ~f:(fun () constraint_ ->
+          Vars.mode_constraint vars constraint_ ~loc)
+      in
+      ty, Type_expr.Constrained (syntax, constraints)
     | Global ty ->
       let%map.Result ty, syntax = elaborate ty in
       ty, Type_expr.Global syntax

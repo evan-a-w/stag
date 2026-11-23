@@ -29,7 +29,8 @@ let code = .<n>.
 let m = Int.add 1 2
 let code2 = .<m>.
 |};
-  [%expect {|
+  [%expect
+    {|
     val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1
     val apply : ('a @ 'm2 -> 'b @ 'm3) @ 'm0 -> ('a @ 'm5 -> 'b @ 'm4) @ 'm1 with 'm0 <= 'm1 and 'm3 <= 'm4 and 'm5 <= 'm2
     val const_ : 'a @ 'm0 -> ('b @ 'm3 -> 'a @ 'm1) @ 'm2 with 'm0 <= 'm1 and 'm0 <= 'm2
@@ -49,7 +50,8 @@ let b = ident (Int.add 1 2)
 let qa = .<a>.
 let qb = .<b>.
 |};
-  [%expect {|
+  [%expect
+    {|
     val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1
     val a : int
     val b : int
@@ -67,7 +69,8 @@ let h (x @ 'm) : int @ 'm = x
 type t = { k : int @ portable -> int }
 
 |};
-  [%expect {|
+  [%expect
+    {|
     val f : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with 'm0 <= 'm1
     val g : 'a @ 'm0 -> 'a @ 'm0
     val h : int @ 'm0 -> int @ 'm1 with 'm0 <= 'm1 and 'm1 <= 'm0
@@ -80,7 +83,8 @@ let%expect_test "parameters used in quotes are free variables" =
 let f x = .<x>.
 let g x = let h u = x in .<h>.
 |};
-  [%expect {|
+  [%expect
+    {|
     val f : 'a @ 'm0 -> <'b>{x : 'b; ..'c} @ 'm1
     val g : 'a @ 'm0 -> <'b>{h : 'b; ..'c} @ 'm1 with 'm0 <= 'm1
     |}]
@@ -91,5 +95,6 @@ let%expect_test "an argument annotated portable must be" =
 let f (x @ portable) = .<x>.
 let bad = f (Int.add 1 2)
 |};
-  [%expect {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:3:12-25), then it is passed to a function (at t.stag:3:10-25), but must be at most portable, because it is annotated portable (at t.stag:2:11-19), then the function types are unified |}]
+  [%expect
+    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:3:12-25), then it is passed to a function (at t.stag:3:10-25), but must be at most portable, because it is annotated portable (at t.stag:2:11-19), then the function types are unified |}]
 ;;

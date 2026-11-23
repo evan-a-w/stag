@@ -198,3 +198,108 @@ let f (x @ local) = exclave_ let y = local_ (x, x) in some_function y [@nontail]
         some_function y [@nontail]
     |}]
 ;;
+
+let%expect_test "mode constraints" =
+  prog
+    "let compose : ('b @ 'n -> 'c) -> ('a -> 'b @ 'm) -> 'a -> 'c with 'm <= \
+     'n = f";
+  prog "let f : 'a @ 'm -> 'a @ 'n with 'm <= 'n and 'n <= portable = f";
+  prog "let f : 'a @ 'm -> 'a with portable <= 'm and 'm <= local portable = f";
+  expr "(x : int @ 'm with 'm <= portable)";
+  expr "fun (x : int @ 'm with 'm <= 'n) -> x";
+  prog "let f (x : int @ 'm with const <= 'm) : int @ 'n with 'm <= 'n = x";
+  (* [with] closes an annotation, so needs no parentheses in [match]. *)
+  expr "match (x : int @ 'm with 'm <= portable) with y -> y";
+  [%expect
+    {|
+    ((Let compose ()
+      ((ty
+        (Constrained
+         (Arrow (Arrow (Moded (Var b) (Var n)) (Var c))
+          (Arrow (Arrow (Var a) (Moded (Var b) (Var m))) (Arrow (Var a) (Var c))))
+         (((lower (Var m)) (upper (Var n)))))))
+      (Var f ())))
+    ((Let f ()
+      ((ty
+        (Constrained (Arrow (Moded (Var a) (Var m)) (Moded (Var a) (Var n)))
+         (((lower (Var m)) (upper (Var n)))
+          ((lower (Var n)) (upper (Atoms (Portable))))))))
+      (Var f ())))
+    ((Let f ()
+      ((ty
+        (Constrained (Arrow (Moded (Var a) (Var m)) (Var a))
+         (((lower (Atoms (Portable))) (upper (Var m)))
+          ((lower (Var m)) (upper (Atoms (Local Portable))))))))
+      (Var f ())))
+    (Var x
+     ((ty
+       (Constrained (Con int ()) (((lower (Var m)) (upper (Atoms (Portable)))))))
+      (mode (Var m))))
+    (Fun
+     ((x
+       ((ty (Constrained (Con int ()) (((lower (Var m)) (upper (Var n))))))
+        (mode (Var m)))))
+     (Var x ()))
+    ((Let f
+      ((x
+        ((ty
+          (Constrained (Con int ()) (((lower (Atoms (Const))) (upper (Var m))))))
+         (mode (Var m)))))
+      ((ty (Constrained (Con int ()) (((lower (Var m)) (upper (Var n))))))
+       (mode (Var n)))
+      (Var x ())))
+    (Match
+     (Var x
+      ((ty
+        (Constrained (Con int ()) (((lower (Var m)) (upper (Atoms (Portable)))))))
+       (mode (Var m))))
+     (((Var y) (Var y ()))))
+    |}]
+;;
+
+let%expect_test "mode constraint errors" =
+  prog "let f : int with portable <= const = f";
+  prog "let f : int with 'm = f";
+  prog "let f : int with 'm < 'n = f";
+  prog "let f : int with 'm <= 'n and = f";
+  prog "let f (x @ 'm with 'm <= portable) = x";
+  ty "int with 'm <= 'n";
+  ty "list[int with 'm <= 'n]";
+  [%expect
+    {|
+    t.stag:1:17-34: a mode constraint relates a mode variable, as in `'m <= 'n` or `'m <= portable`
+    t.stag:1:20-21: expected `<=`, found `=`
+    t.stag:1:20-21: expected `<=`, found `<`
+    t.stag:1:30-31: expected a mode like `local`, or a mode variable like `'m`, found `=`
+    t.stag:1:14-18: mode constraints follow an annotation's type, as in `(x : t @ 'm with 'm <= portable)`
+    t.stag:1:4-8: expected end of file, found `with`
+    t.stag:1:9-13: expected `]` to close this `[` (opened at 1:4), found `with`
+    |}]
+;;
+
+let%expect_test "printing mode constraints" =
+  print
+    {|
+let compose : ('b @ 'n -> 'c) -> ('a -> 'b @ 'm) -> 'a -> 'c with 'm <= 'n and portable <= 'm = fun f g x -> f (g x)
+let f (x : int @ 'm with 'm <= portable) = x
+|};
+  print
+    ~width:40
+    {|
+let compose : ('b @ 'n -> 'c) -> ('a -> 'b @ 'm) -> 'a -> 'c with 'm <= 'n and portable <= 'm = fun f g x -> f (g x)
+|};
+  [%expect
+    {|
+    let compose : ('b @ 'n -> 'c) -> ('a -> 'b @ 'm) -> 'a -> 'c
+          with 'm <= 'n and portable <= 'm =
+      fun f g x -> f (g x)
+
+    let f (x : int @ 'm with 'm <= portable) = x
+    let compose : ('b @ 'n -> 'c) ->
+        ('a -> 'b @ 'm) ->
+        'a ->
+        'c
+          with 'm <= 'n and portable <= 'm =
+      fun f g x -> f (g x)
+    |}]
+;;

@@ -75,7 +75,7 @@ let%expect_test "the prelude's signature" =
         type t = Var of string | Atoms of list[Atom.t]
       end
       module Type_expr : sig
-        type t = Var of string | Con of Path.t[Type_ref.t] * list[Arg.t] | Arrow of ptr[t * t] | Tuple of list[t] | Code of ptr[{`context : Row.t; `inner : t}] | Record of Row.t | Variant of Row.t | Mut of ptr[t] | Immut of ptr[t] | Splice of ptr[Expr.t] | Moded of ptr[t * Mode_expr.t] | Global of ptr[t]
+        type t = Var of string | Con of Path.t[Type_ref.t] * list[Arg.t] | Arrow of ptr[t * t] | Tuple of list[t] | Code of ptr[{`context : Row.t; `inner : t}] | Record of Row.t | Variant of Row.t | Mut of ptr[t] | Immut of ptr[t] | Splice of ptr[Expr.t] | Moded of ptr[t * Mode_expr.t] | Constrained of ptr[t * list[Mode_expr.t * Mode_expr.t]] | Global of ptr[t]
         module Row : sig
           type t = Empty | Extend of ptr[string * Type_expr.t * t] | Var of string
         end
@@ -630,6 +630,8 @@ let g (h : int @ local -> int @ 'm -> (int -> int @ local) @ global) = h 1 [@non
 let annotated = ((f : (int -> int) @ local), (f @ local portable gc))
 let x @ const = local_ (Some (f x [@nontail]), `A (g y [@nontail]))
 let mut counter : int @ static = 0
+let compose : ('b @ 'n -> 'c) -> ('a -> 'b @ 'm) -> 'a -> 'c with 'm <= 'n and portable <= 'm = compose
+let h (x : int @ 'm with 'm <= portable) = (x : int with const <= 'm)
 |}
   ]
 ;;
@@ -730,7 +732,7 @@ let%expect_test "constructors are made as the typechecker resolves them" =
            : bool)];
   [%expect
     {|
-    ((constructors 102)
+    ((constructors 103)
      (reflected
       (prelude.Stag.Expr.Deref prelude.Stag.Expr.Store
        prelude.Stag.Mode_expr.Atom.Nonportable
@@ -1434,6 +1436,28 @@ let%expect_test "modes and [global_] only where the parser puts them" =
     Malformed syntax: expected a type without [global_]: [global_] is only on a record field or a constructor's argument, got Stag.Type_expr.Global (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Alias
     Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Alias
     Malformed syntax: expected a type without [global_]: [global_] is only on a record field or a constructor's argument, got Stag.Type_expr.Global (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), within element 0 > Stag.Toplevel.Exception argument 1 > element 0
+    |}];
+  let m = at (Syntax.Mode_expr.Var "m") in
+  let constrained ?(lower = m) ?(upper = local) ty =
+    at (Syntax.Type_expr.Constrained (ty, [ { lower; upper } ]))
+  in
+  program (var { ty = Some (constrained int); mode = Some m });
+  program (var { ty = Some (constrained ~lower:local int); mode = None });
+  program (var { ty = Some (arrow int (constrained int)); mode = None });
+  program
+    (var
+       { ty = Some (at (Syntax.Type_expr.Constrained (int, []))); mode = None });
+  type_expr (constrained int);
+  program (type_decl (Alias (constrained int)));
+  [%expect
+    {|
+    let v = (x : int @ 'm with 'm <= local)
+
+    Malformed syntax: expected a constraint relating a mode variable, got (Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil)))), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty > Stag.Type_expr.Constrained argument 1 > element 0
+    Malformed syntax: expected a type without mode constraints: they are only on an annotation's type, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Cons (Ptr.make ((Stag.Mode_expr.Var "m", Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil)))), Nil)))), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty > Stag.Type_expr.Arrow argument 1
+    Malformed syntax: expected at least one mode constraint, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Nil)), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty
+    Malformed syntax: expected a type without mode constraints: they are only on an annotation's type, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Cons (Ptr.make ((Stag.Mode_expr.Var "m", Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil)))), Nil))))
+    Malformed syntax: expected a type without mode constraints: they are only on an annotation's type, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Cons (Ptr.make ((Stag.Mode_expr.Var "m", Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil)))), Nil)))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Alias
     |}]
 ;;
 
@@ -1672,6 +1696,7 @@ let decls = .< struct
   let annotated = (f : int @ local -> int -> int * int)
   let var = (g @ local)
   let mut counter : int @ static = 0
+  let h (x : int @ 'm with 'm <= portable) : int @ 'n with 'm <= 'n and 'n <= nonportable = x
 end >.
 |}
       "Gen.decls"
@@ -1703,7 +1728,19 @@ end >.
          (Arrow (Moded (Con int ()) (Atoms (Local)))
           (Arrow (Con int ()) (Tuple ((Con int ()) (Con int ())))))))))
      (Let var () () (Var g ((mode (Atoms (Local))))))
-     (Let_mut counter ((ty (Con int ())) (mode (Atoms (Static)))) (Lit (Int 0))))
+     (Let_mut counter ((ty (Con int ())) (mode (Atoms (Static)))) (Lit (Int 0)))
+     (Let h
+      ((x
+        ((ty
+          (Constrained (Con int ())
+           (((lower (Var m)) (upper (Atoms (Portable)))))))
+         (mode (Var m)))))
+      ((ty
+        (Constrained (Con int ())
+         (((lower (Var m)) (upper (Var n)))
+          ((lower (Var n)) (upper (Atoms (Nonportable)))))))
+       (mode (Var n)))
+      (Var x ())))
     type r = {x : global_ int; y : int}
     type t = A of global_ int * int
 
@@ -1714,5 +1751,10 @@ end >.
     let annotated = (f : int @ local -> int -> int * int)
     let var = (g @ local)
     let mut counter : int @ static = 0
+
+    let h
+        (x : int @ 'm with 'm <= portable) : int @ 'n
+          with 'm <= 'n and 'n <= nonportable =
+      x
     |}]
 ;;
