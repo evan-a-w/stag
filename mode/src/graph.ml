@@ -1,0 +1,362 @@
+open! Import
+
+module Why = struct
+  type t =
+    | Initial
+    | Bound of Reason.t
+    | Step of
+        { reasons : Reason.t list
+        ; prev : t
+        }
+
+  let to_list t =
+    let rec go acc = function
+      | Initial -> acc
+      | Bound reason -> reason :: acc
+      | Step { reasons; prev } -> go (reasons @ acc) prev
+    in
+    go [] t
+  ;;
+end
+
+type t =
+  { id : int
+  ; var_id : int
+  ; axis : Axis.Any.t
+  ; mutable lower : int
+  ; mutable lower_why : Why.t
+  ; mutable upper : int
+  ; mutable upper_why : Why.t
+  ; mutable succ : edge list
+  ; mutable pred : edge list
+  ; mutable state : state
+  }
+
+and edge =
+  { lo : t
+  ; morphism : Morphism.t
+  ; hi : t
+  ; reasons : Reason.t list
+  }
+
+and state =
+  | Rank of int
+  | Generic of
+      { above : implied list (** [this <= m(other)] *)
+      ; below : implied list (** [other <= m(this)] *)
+      }
+
+and implied =
+  { other : t
+  ; implied_morphism : Morphism.t
+  ; path : Reason.t list
+  }
+
+let name t = sprintf !"m%d.%{Sexp}" t.var_id (Axis.Any.sexp_of_t t.axis)
+
+let sexp_of_bounds t =
+  let point = Axis.Any.sexp_of_point t.axis in
+  if t.lower = t.upper
+  then point t.lower
+  else Sexp.Atom (sprintf !"%{Sexp}..%{Sexp}" (point t.lower) (point t.upper))
+;;
+
+let sexp_of_applied morphism t =
+  if Morphism.is_identity morphism
+  then Sexp.Atom (name t)
+  else List [ Morphism.sexp_of_t morphism; Atom (name t) ]
+;;
+
+let sexp_of_t t =
+  match t.state with
+  | Rank _ -> Sexp.List [ Atom (name t); sexp_of_bounds t ]
+  | Generic { above; below } ->
+    let constraints =
+      List.map above ~f:(fun { other; implied_morphism; _ } ->
+        Sexp.List
+          [ Atom (name t); Atom "<="; sexp_of_applied implied_morphism other ])
+      @ List.map below ~f:(fun { other; implied_morphism; _ } ->
+        Sexp.List
+          [ Atom (name other); Atom "<="; sexp_of_applied implied_morphism t ])
+    in
+    List
+      [ Atom (name t); sexp_of_bounds t; List (Atom "generic" :: constraints) ]
+;;
+
+let create ~var_id axis ~rank =
+  { id = (var_id * List.length Axis.Any.all) + Axis.Any.index axis
+  ; var_id
+  ; axis
+  ; lower = 0
+  ; lower_why = Initial
+  ; upper = Axis.Any.size axis - 1
+  ; upper_why = Initial
+  ; succ = []
+  ; pred = []
+  ; state = Rank rank
+  }
+;;
+
+let var_id t = t.var_id
+let lower t = t.lower
+let upper t = t.upper
+
+let is_generic t =
+  match t.state with
+  | Generic _ -> true
+  | Rank _ -> false
+;;
+
+let lower_rank t ~rank =
+  match t.state with
+  | Rank r when r > rank -> t.state <- Rank rank
+  | Rank _ | Generic _ -> ()
+;;
+
+let undo_log : (unit -> unit) list ref = ref []
+let depth = ref 0
+
+let log undo =
+  assert (!depth > 0);
+  undo_log := undo :: !undo_log
+;;
+
+let atomically f =
+  let saved = !undo_log in
+  incr depth;
+  let result = Exn.protect ~f ~finally:(fun () -> decr depth) in
+  (match result with
+   | Ok () -> ()
+   | Error (_ : Mode_error.t) ->
+     let rec undo () =
+       if not (phys_equal !undo_log saved)
+       then (
+         match !undo_log with
+         | [] -> assert false
+         | f :: rest ->
+           f ();
+           undo_log := rest;
+           undo ())
+     in
+     undo ());
+  if !depth = 0 then undo_log := [];
+  result
+;;
+
+let check t =
+  if t.lower <= t.upper
+  then Ok ()
+  else
+    Error
+      (Mode_error.create
+         ~var:t.var_id
+         ~axis:t.axis
+         ~lower:t.lower
+         ~upper:t.upper
+         ~lower_because:(Why.to_list t.lower_why)
+         ~upper_because:(Why.to_list t.upper_why))
+;;
+
+let rec raise_lower t point why =
+  if point <= t.lower
+  then Ok ()
+  else (
+    let lower = t.lower
+    and lower_why = t.lower_why in
+    log (fun () ->
+      t.lower <- lower;
+      t.lower_why <- lower_why);
+    t.lower <- point;
+    t.lower_why <- why;
+    let%bind.Result () = check t in
+    List.fold_result t.succ ~init:() ~f:(fun () edge ->
+      raise_lower
+        edge.hi
+        (Morphism.left edge.morphism t.lower)
+        (Step { reasons = edge.reasons; prev = t.lower_why })))
+;;
+
+let rec lower_upper t point why =
+  if point >= t.upper
+  then Ok ()
+  else (
+    let upper = t.upper
+    and upper_why = t.upper_why in
+    log (fun () ->
+      t.upper <- upper;
+      t.upper_why <- upper_why);
+    t.upper <- point;
+    t.upper_why <- why;
+    let%bind.Result () = check t in
+    List.fold_result t.pred ~init:() ~f:(fun () edge ->
+      lower_upper
+        edge.lo
+        (Morphism.right edge.morphism t.upper)
+        (Step { reasons = List.rev edge.reasons; prev = t.upper_why })))
+;;
+
+let add_edge' lo morphism hi reasons =
+  assert (Axis.Any.equal (Morphism.dst morphism) lo.axis);
+  assert (Axis.Any.equal (Morphism.src morphism) hi.axis);
+  let edge = { lo; morphism; hi; reasons } in
+  let succ = lo.succ
+  and pred = hi.pred in
+  log (fun () ->
+    lo.succ <- succ;
+    hi.pred <- pred);
+  lo.succ <- edge :: lo.succ;
+  hi.pred <- edge :: hi.pred;
+  let%bind.Result () =
+    raise_lower
+      hi
+      (Morphism.left morphism lo.lower)
+      (Step { reasons; prev = lo.lower_why })
+  in
+  lower_upper
+    lo
+    (Morphism.right morphism hi.upper)
+    (Step { reasons = List.rev reasons; prev = hi.upper_why })
+;;
+
+let add_edge lo morphism hi reason = add_edge' lo morphism hi [ reason ]
+let at_least t point reason = raise_lower t point (Bound reason)
+let at_most t point reason = lower_upper t point (Bound reason)
+let defaulted = Reason.create "defaulted"
+
+let default_to_lower t =
+  atomically (fun () -> lower_upper t t.lower (Bound defaulted))
+  |> Mode_error.ok_exn
+;;
+
+let default_to_upper t =
+  atomically (fun () -> raise_lower t t.upper (Bound defaulted))
+  |> Mode_error.ok_exn
+;;
+
+(* The constraints between [start] and the nodes [stop] accepts, through paths
+   in nodes [through] accepts: [start <= m(other)] when [forward],
+   [other <= m(start)] otherwise. *)
+let implied start ~forward ~stop ~through =
+  let visited = Int.Table.create () in
+  let found = ref [] in
+  let seen node morphism =
+    let morphisms = Hashtbl.find_multi visited node.id in
+    List.mem morphisms morphism ~equal:(fun a b -> Morphism.compare a b = 0)
+  in
+  let rec visit node morphism path =
+    let edges = if forward then node.succ else node.pred in
+    List.iter edges ~f:(fun edge ->
+      let other, morphism, path =
+        if forward
+        then
+          edge.hi, Morphism.compose morphism edge.morphism, path @ edge.reasons
+        else
+          edge.lo, Morphism.compose edge.morphism morphism, edge.reasons @ path
+      in
+      if stop other
+      then (
+        if not
+             (List.exists !found ~f:(fun implied ->
+                phys_equal implied.other other
+                && Morphism.compare implied.implied_morphism morphism = 0))
+        then found := { other; implied_morphism = morphism; path } :: !found)
+      else if through other && not (seen other morphism)
+      then (
+        Hashtbl.add_multi visited ~key:other.id ~data:morphism;
+        visit other morphism path))
+  in
+  visit start (Morphism.identity start.axis) [];
+  List.rev !found
+  |> List.filter ~f:(fun implied ->
+    not
+      (phys_equal implied.other start
+       && Morphism.is_inflationary implied.implied_morphism))
+;;
+
+let generalize nodes ~rank =
+  let is_outer node =
+    match node.state with
+    | Rank r -> r <= rank
+    | Generic _ -> false
+  in
+  let kept =
+    List.filter nodes ~f:(fun node ->
+      match node.state with
+      | Rank r -> r > rank
+      | Generic _ -> false)
+    |> List.dedup_and_sort ~compare:(fun a b -> Int.compare a.id b.id)
+  in
+  let kept_ids =
+    Int.Hash_set.of_list (List.map kept ~f:(fun node -> node.id))
+  in
+  let is_kept node = Hash_set.mem kept_ids node.id in
+  let internal node = not (is_kept node || is_outer node) in
+  let states =
+    List.map kept ~f:(fun node ->
+      let above =
+        implied
+          node
+          ~forward:true
+          ~stop:(fun other -> is_kept other || is_outer other)
+          ~through:internal
+      in
+      let below =
+        implied node ~forward:false ~stop:is_outer ~through:internal
+      in
+      node, Generic { above; below })
+  in
+  List.iter states ~f:(fun (node, state) -> node.state <- state)
+;;
+
+module Instance = struct
+  type node = t
+
+  let create_node = create
+
+  type t =
+    { ids : Id_source.t
+    ; rank : int
+    ; var_ids : int Int.Table.t
+    ; nodes : node Int.Table.t
+    }
+
+  let create ids ~rank =
+    { ids; rank; var_ids = Int.Table.create (); nodes = Int.Table.create () }
+  ;;
+
+  let var_id t var_id =
+    Hashtbl.find_or_add t.var_ids var_id ~default:(fun () ->
+      Id_source.next t.ids)
+  ;;
+
+  let rec instantiate t (node : node) =
+    match node.state with
+    | Rank _ -> node
+    | Generic { above; below } ->
+      (match Hashtbl.find t.nodes node.id with
+       | Some copy -> copy
+       | None ->
+         let copy =
+           { (create_node ~var_id:(var_id t node.var_id) node.axis ~rank:t.rank) with
+             lower = node.lower
+           ; lower_why = node.lower_why
+           ; upper = node.upper
+           ; upper_why = node.upper_why
+           }
+         in
+         Hashtbl.set t.nodes ~key:node.id ~data:copy;
+         atomically (fun () ->
+           let%bind.Result () =
+             List.fold_result above ~init:() ~f:(fun () implied ->
+               add_edge'
+                 copy
+                 implied.implied_morphism
+                 (instantiate t implied.other)
+                 implied.path)
+           in
+           List.fold_result below ~init:() ~f:(fun () implied ->
+             add_edge' implied.other implied.implied_morphism copy implied.path))
+         |> Mode_error.ok_exn;
+         copy)
+  ;;
+end

@@ -1,6 +1,9 @@
 # Modes
 
-Design notes for adding modes, in the style of OxCaml. Not implemented yet.
+Design notes for adding modes, in the style of OxCaml. Being implemented (see
+[Implementation plan](#implementation-plan)). This file covers the stage axis;
+the provenance and locality axes, the solver, mode polymorphism and
+monomorphisation are in [semantics.md](semantics.md#modes).
 
 ## Motivation
 
@@ -65,9 +68,9 @@ This is about what values *capture*, not about effects. Effect purity (calling
 a function performs no side effects) would be a separate property of arrows,
 needing a small effect system; deferred until the language has effects.
 
-Later refinement: mode crossing by kind, as in OxCaml. Plain data like `int`
-can always be lifted into code, so could cross `portable` regardless of mode,
-but never `const`.
+Mode crossing by kind, as in OxCaml: plain data like `int` can always be
+lifted into code, so crosses `portable` regardless of mode, but never `const`.
+Applied when the type is known where the constraint arises.
 
 ## Expression modes
 
@@ -76,11 +79,12 @@ but never `const`.
 | literal                    | const                                       |
 | variable                   | the binding's mode                          |
 | function (`let f x = ...`) | at least the join of the modes it captures |
-| application `f x`          | nonportable (for now)                       |
+| application `f x`          | the arrow's return mode                     |
 | `let x = e1 in e2`         | join of `e1` and `e2`                       |
 | quote `<e>`                | join of the values it captures from outer levels (its free variables are resolved at the splice, so don't count) |
 
-Application is never `const` as arrow return modes are never `const`. A
+Application is never `const` as arrow return modes are never `const` (for
+now; arrows carry argument and return modes, `'a @ 'm -> 'b @ 'n`). A
 Rust-style `const fn` could later be an arrow whose result is `const` when its
 arguments are.
 
@@ -172,20 +176,35 @@ writable/read-only distinction on pointers; and with mutation, effect purity
 
 ## Implementation plan
 
-1. `Mode` module: the lattice, and mode variables with lower and upper bounds
-   (`submode`, errors). Standalone, with expect tests.
-2. `Env.Entry` gets a `mode` in place of `persistent`; `expr_type` returns a
-   type and a mode.
-3. Closure, quote and toplevel splice locks.
-4. Generalization decided by `const`; the `const_toplevels` flag.
-5. Function arguments default to `nonportable`; mode annotations on arrows
-   later. No mode polymorphism initially: leftover mode variables are
-   defaulted at generalization.
+Each step is a branch stacked on the previous one.
+
+- **A. Syntax**: mode annotations (`(x @ local)`, `'a @ 'm -> 'b @ 'n`),
+  `local_`, `exclave_`, `global_` fields, the non-tail call marker. Parsed
+  and printed, ignored by the typechecker.
+- **B. Solver**: the `Mode` library (`mode/`): the three axes, mode
+  variables with bounds, edges with morphisms (`const ⇒ static`, crossing),
+  reasons and errors, atomic updates, generalisation and instantiation,
+  defaulting. Standalone, expect tests.
+- **C. Stage axis in the typechecker**: `Env.Entry` gets a `mode` in place of
+  `persistent`, `expr_type` returns a type and a mode; closure, quote and
+  toplevel splice locks; generalisation decided by `const`; the
+  `const_toplevels` flag. Removes `may_hold_closure` and `is_allowed_at`.
+- **D. Arrow modes and polymorphism**: arrows carry argument, return and
+  closure modes; schemes keep mode variables and their constraints; mode
+  annotations; printing that hides unconstrained and default modes.
+- **E. Locality**: regions, `local_`, `exclave_`, the tail call rule,
+  `global_` fields, `Unsafe.assume_global`, mutable variables captured by
+  closures holding `global` values, mode crossing by kind.
+- **F. Provenance**: allocation is `gc`, literals and `const` values
+  `static`, stores, mutable globals.
+- **G. `External`**: C functions with a C compatible ABI (rejecting
+  signatures it can't express), producing `unknown` values.
 
 ## Later
 
 - `<t @ m>{ctx}` code modes.
-- Mode annotations and mode polymorphism.
+- Function pointer arrows (`=>`).
+- A dynamic mode checker in the interpreter, as a test oracle.
 - Presence ordering constraints (`Absent <= Present`) are kept as bounds
   between presence variables, so are solved independently of the order they
   arise in, as are the type equalities of entries the code may use, which
