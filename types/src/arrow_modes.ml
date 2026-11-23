@@ -9,17 +9,30 @@ end
 type t =
   { arg : Side.t
   ; res : Side.t
+  ; curry : Side.t
   }
 
 let default_const : Mode.Const.t =
   { stage = Nonportable; provenance = Unknown; locality = Global }
 ;;
 
-let default = { arg = Fixed default_const; res = Fixed default_const }
+let default_curry_const : Mode.Const.t =
+  { default_const with locality = Regional }
+;;
+
+let default_curry : Side.t = Fixed default_curry_const
+
+let default =
+  { arg = Fixed default_const
+  ; res = Fixed default_const
+  ; curry = default_curry
+  }
+;;
 
 let fresh ids ~rank =
   { arg = Var (Mode.Var.create ids ~rank)
   ; res = Var (Mode.Var.create ids ~rank)
+  ; curry = Var (Mode.Var.create ids ~rank)
   }
 ;;
 
@@ -51,7 +64,8 @@ let equate_side ids (side1 : Side.t) (side2 : Side.t) =
 
 let equate ids t1 t2 =
   let%bind.Result () = equate_side ids t1.arg t2.arg in
-  equate_side ids t1.res t2.res
+  let%bind.Result () = equate_side ids t1.res t2.res in
+  equate_side ids t1.curry t2.curry
 ;;
 
 let side_vars : Side.t -> _ = function
@@ -59,7 +73,7 @@ let side_vars : Side.t -> _ = function
   | Fixed _ -> []
 ;;
 
-let vars t = side_vars t.arg @ side_vars t.res
+let vars t = side_vars t.arg @ side_vars t.res @ side_vars t.curry
 
 let map_side (side : Side.t) ~f : Side.t =
   match side with
@@ -72,7 +86,10 @@ let map_side (side : Side.t) ~f : Side.t =
 let map t ~f =
   let arg = map_side t.arg ~f in
   let res = map_side t.res ~f in
-  if phys_equal arg t.arg && phys_equal res t.res then t else { arg; res }
+  let curry = map_side t.curry ~f in
+  if phys_equal arg t.arg && phys_equal res t.res && phys_equal curry t.curry
+  then t
+  else { arg; res; curry }
 ;;
 
 let same_side (a : Side.t) (b : Side.t) =
@@ -82,4 +99,6 @@ let same_side (a : Side.t) (b : Side.t) =
   | Fixed _, Var _ | Var _, Fixed _ -> false
 ;;
 
-let same t t' = same_side t.arg t'.arg && same_side t.res t'.res
+let same t t' =
+  same_side t.arg t'.arg && same_side t.res t'.res && same_side t.curry t'.curry
+;;

@@ -13,10 +13,20 @@ end
 type t =
   { arg : Side.t
   ; res : Side.t
+  ; curry : Side.t
+  (** On the locality axis only: how local the result may be where a tail call
+      gives it further arguments. The closure of a partial application of a
+      function of several parameters is never made then, so its arrows may leave
+      it unbounded; any other function value returned must outlive the region
+      the tail call ends, so is at most [regional]. *)
   }
 
 (** The modes of an arrow written without them in a declaration. *)
 val default_const : Mode.Const.t
+
+(** The [curry] of an arrow written in a declaration: any function value may be
+    held by what it types. *)
+val default_curry : Side.t
 
 val default : t
 val fresh : Mode.Id_source.t -> rank:int -> t

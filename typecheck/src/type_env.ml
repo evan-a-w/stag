@@ -337,6 +337,11 @@ module Vars = struct
     | Params _ -> Fixed Arrow_modes.default_const
   ;;
 
+  let unannotated_curry : t -> Arrow_modes.Side.t = function
+    | Annotation vars -> Var (Annotation_vars.fresh_mode vars)
+    | Params _ -> Arrow_modes.default_curry
+  ;;
+
   let mode_side t ({ txt; loc } : Syntax.Mode_expr.t)
     : (Arrow_modes.Side.t, Typecheck_error.t) Result.t
     =
@@ -463,7 +468,10 @@ let rec elaborate' t module_ vars ~splices ~expansions (expr : Type_expr.t)
       in
       let%bind.Result ty1, side1, syntax1 = side ty1 in
       let%map.Result ty2, side2, syntax2 = side ty2 in
-      ( Type.TArrow (ty1, ty2, { arg = side1; res = side2 })
+      ( Type.TArrow
+          ( ty1
+          , ty2
+          , { arg = side1; res = side2; curry = Vars.unannotated_curry vars } )
       , Type_expr.Arrow (syntax1, syntax2) )
     | Tuple tys ->
       let%map.Result tys = map_result tys ~f:elaborate in

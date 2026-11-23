@@ -629,13 +629,22 @@ let function_type
     |> List.map ~f:(fun _ -> Scope.arrow_mode scope)
   in
   let ty =
+    let results =
+      if List.is_empty args
+      then []
+      else
+        List.map partial_modes ~f:(fun partial ->
+          partial, Scope.arrow_mode scope)
+        @ [ res_mode, Mode_rules.Function.result_curry (Scope.modes scope) ]
+    in
     List.fold_right
-      (List.zip_exn
-         args
-         (if List.is_empty args then [] else partial_modes @ [ res_mode ]))
+      (List.zip_exn args results)
       ~init:res_ty
-      ~f:(fun ((_, arg_ty, _, arg_mode), res_mode) ty ->
-        Type.TArrow (arg_ty, ty, { arg = Var arg_mode; res = Var res_mode }))
+      ~f:(fun ((_, arg_ty, _, arg_mode), (res_mode, curry)) ty ->
+        Type.TArrow
+          ( arg_ty
+          , ty
+          , { arg = Var arg_mode; res = Var res_mode; curry = Var curry } ))
   in
   let arg_modes = List.map args ~f:(fun (_, _, _, mode) -> mode) in
   let args, annots =
@@ -1687,7 +1696,10 @@ let intrinsic_type t (scope : Scope.t) (intrinsic : Intrinsic.t) =
     (* Only its locality is assumed. *)
     let ty = Scope.fresh_ty t scope in
     let arg, res = Mode_rules.assume_global (Scope.modes scope) in
-    Type.TArrow (ty, ty, { arg = Var arg; res = Var res })
+    Type.TArrow
+      ( ty
+      , ty
+      , { arg = Var arg; res = Var res; curry = Arrow_modes.default_curry } )
   | _ ->
     Intrinsic.ty
       intrinsic
@@ -2181,6 +2193,7 @@ and expr_type
     let b = Scope.fresh_ty t scope in
     let arg_mode = Scope.arrow_mode scope in
     let res_mode = Scope.arrow_mode scope in
+    let curry = Scope.arrow_mode scope in
     let curried =
       match Source.Expr.view f with
       | App _ -> true
@@ -2213,6 +2226,7 @@ and expr_type
         ~curried
         ~arg_mode
         ~res_mode
+        ~curry
         ~arg_ty:a
         ~res_ty:b
         ~callee:(fun at ->
@@ -2221,7 +2235,12 @@ and expr_type
             scope
             ~at
             ~expr:f
-            ~ty:(TArrow (a, b, { arg = Var arg_mode; res = Var res_mode })))
+            ~ty:
+              (TArrow
+                 ( a
+                 , b
+                 , { arg = Var arg_mode; res = Var res_mode; curry = Var curry }
+                 )))
         ~arg:(fun at ->
           result_matches := result_matches_expected ();
           check_expr t scope ~at ~expr:x ~ty:a)

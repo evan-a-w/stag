@@ -173,6 +173,10 @@ module Alloc : sig
 end
 
 module Function : sig
+  (** The [curry] of the arrow of a function's last parameter: its result is a
+      value it returns, not the closure of a partial application. *)
+  val result_curry : Ctx.t -> Mode.Var.t
+
   (** The closures of partial applications hold what the function captures and
       the arguments given so far. *)
   val partial_applications
@@ -211,7 +215,8 @@ val exclave
   -> Typed.Expr.t option
 
 (** [f x], [f] being of an arrow of those types and modes. With [curried], [f]
-    is itself an application, which a tail call makes at once. *)
+    is itself an application, which a tail call makes at once: then the result
+    it gives further arguments is at most the [curry] of its arrow. *)
 val apply
   :  Ctx.t
   -> Expected.t
@@ -219,6 +224,7 @@ val apply
   -> curried:bool
   -> arg_mode:Mode.Var.t
   -> res_mode:Mode.Var.t
+  -> curry:Mode.Var.t
   -> arg_ty:Type.ty
   -> res_ty:Type.ty
   -> callee:(Expected.t -> Typed.Expr.t)

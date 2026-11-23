@@ -27,9 +27,12 @@ module Expected = struct
     { mode : Mode.Var.t
     ; region : Tail.t
     ; stack : bool ref option
+    ; applied : bool
+    (** A function a tail call gives further arguments: the result of an
+        application. *)
     }
 
-  let of_mode mode = { mode; region = Nontail; stack = None }
+  let of_mode mode = { mode; region = Nontail; stack = None; applied = false }
   let fresh ctx = of_mode (Ctx.fresh ctx)
   let quoted ctx = { (fresh ctx) with region = Quoted }
 
@@ -39,9 +42,9 @@ module Expected = struct
     | Nontail | Quoted -> false
   ;;
 
-  let whole t = { t with stack = None }
-  let nontail t = { t with region = Nontail }
-  let part t = { t with region = Nontail }
+  let whole t = { t with stack = None; applied = false }
+  let nontail t = { t with region = Nontail; applied = false }
+  let part t = { t with region = Nontail; applied = false }
 
   (* The same value, at a mode of its own, which is then related to [t]'s. *)
   let same_value ctx t = { (fresh ctx) with region = t.region; stack = t.stack }
@@ -355,6 +358,19 @@ module Function = struct
     mode
   ;;
 
+  let result_curry ctx =
+    let curry = Ctx.fresh ctx in
+    Mode.Error.ok_exn
+      (Mode.Var.at_most
+         curry
+         Locality
+         Regional
+         (Mode.Reason.create
+            "it is a function value returned, not the closure of a partial \
+             application"));
+    curry
+  ;;
+
   let body ctx ~res_mode ~ty f =
     let expected = { (Expected.fresh ctx) with region = Returns res_mode } in
     let (body : Typed.Expr.t) = f expected in
@@ -418,6 +434,7 @@ let apply
   ~curried
   ~arg_mode
   ~res_mode
+  ~curry
   ~arg_ty
   ~res_ty
   ~callee
@@ -428,9 +445,9 @@ let apply
      call [@nontail])"
   in
   let f_expected =
-    { (Expected.fresh ctx) with
-      region = (if curried then expected.region else Nontail)
-    }
+    if curried
+    then { (Expected.fresh ctx) with region = expected.region; applied = true }
+    else Expected.fresh ctx
   in
   let (f : Typed.Expr.t) = callee f_expected in
   if Expected.is_tail expected && not curried
@@ -467,6 +484,19 @@ let apply
          Regional
          ~loc:x.loc
          ~why:tail_reason);
+  if expected.applied && Expected.is_tail expected
+  then
+    Ctx.add
+      ctx
+      ~loc
+      (Mode.Var.submode_on
+         res_mode
+         curry
+         Locality
+         (reason
+            ~loc
+            "a tail call gives it further arguments, after the current region \
+             has ended (mark the call [@nontail])"));
   joins
     ctx
     expected

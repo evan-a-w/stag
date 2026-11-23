@@ -356,14 +356,14 @@ end
 let iterate (local_ (f : _ Iter.t)) (local_ (start : Iter_start.t)) =
   let visited = stack_ { Visited.unremembered = 64; table = Null } in
   let iter_modes (modes : Arrow_modes.t) =
-    match modes.arg, modes.res with
-    | Fixed _, Fixed _ -> Ok ()
-    | Var arg, Fixed _ -> f.mode arg
-    | Fixed _, Var res -> f.mode res
-    | Var arg, Var res ->
-      (match f.mode arg with
-       | Ok () -> f.mode res
-       | Error _ as error -> error)
+    let rec go = function
+      | [] -> Ok ()
+      | var :: vars ->
+        (match f.mode var with
+         | Ok () -> go vars
+         | Error _ as error -> error)
+    in
+    go (Arrow_modes.vars modes) [@nontail]
   in
   let rec iter_ty ~guarded ty =
     match ty with
@@ -720,7 +720,7 @@ let has_unbound_var ty =
 ;;
 
 (* Only the modes of an arrow that aren't the default of a declaration's. *)
-let sexp_of_modes ({ arg; res } : Arrow_modes.t) =
+let sexp_of_modes ({ arg; res; curry = _ } : Arrow_modes.t) =
   let side name : Arrow_modes.Side.t -> _ = function
     | Fixed const when Mode.Const.equal const Arrow_modes.default_const -> []
     | Fixed const -> [ [%sexp (name : string), (const : Mode.Const.t)] ]
