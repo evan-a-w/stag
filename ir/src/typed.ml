@@ -241,6 +241,7 @@ module Expr = struct
       | Let_mut of
           { ident : Ident.t
           ; annot : Syntax.Type_expr.t option [@sexp.option]
+          ; mode : Syntax.Mode_expr.t option [@sexp.option]
           ; body : 'e
           ; in_ : 'e
           }
@@ -250,7 +251,7 @@ module Expr = struct
           ; annots : (Ident.t * Syntax.Annot.t) list [@sexp.list]
           ; body : 'e
           }
-      | Annotated of 'e * Syntax.Type_expr.t
+      | Annotated of 'e * Syntax.Annot.t
       | Splice of
           { code : 'e
           ; subs : 'e Subs.t

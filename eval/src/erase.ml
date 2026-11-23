@@ -187,16 +187,18 @@ let expr (expr : Typed.Expr.t) =
       let%bind target = go names target in
       let%bind value = go names value in
       node (Store (target, value))
-    | Let_mut { ident; annot; body; in_ } ->
+    | Let_mut { ident; annot; mode; body; in_ } ->
       let%bind body = go names body in
       let names = Names.bind names [ ident ] ~scope:(Uses.of_expr in_) in
       let%bind in_ = go names in_ in
-      node (Let_mut (label (name names ident), ty_annot annot, body, in_))
+      node
+        (Let_mut
+           (label (name names ident), { (ty_annot annot) with mode }, body, in_))
     | Annotated (e, annot) ->
       let%bind e = go names e in
       (match e.txt with
        | Var (path, existing) when Syntax.Annot.is_none existing ->
-         node (Var (path, ty_annot (Some annot)))
+         node (Var (path, annot))
        | _ ->
          Or_error.error_s
            [%message "annotated non-variable" (e : Syntax.Expr.t)])

@@ -196,6 +196,8 @@ module Program_env = struct
         first. *)
     ; mutable_idents : Typed.Ident.Hash_set.t
     (** Of the [let mut]s, local and toplevel. *)
+    ; held_modes : Mode.Var.t Typed.Ident.Table.t
+    (** The mode of the values a [let mut] holds, once its checking began. *)
     ; modes : Mode.Id_source.t
     ; const_toplevels : bool
     ; mode_limits_reported : String.Hash_set.t
@@ -375,8 +377,6 @@ module Scope = struct
 
   let with_sink t = { t with sink = fresh_mode t }
 
-  (* What [mode] is at least, whatever the parameters' modes turn out to be: a
-     decision taken on it holds for any use of the function. *)
   (* What [mode] is at least however the functions being checked are used: with
      the modes of their parameters, those within their types, and those of the
      types of the components not finished yet raised. *)
@@ -505,6 +505,12 @@ module Scope = struct
   (* A value of [mode] is evaluated for the value being computed. *)
   let joins t mode ~loc ~why =
     add_mode t ~loc (Mode.Var.submode mode t.sink (Mode.Reason.create ~loc why))
+  ;;
+
+  (* Where to check a variable used with [annot]: with a mode, in a sink of its
+     own, that the mode bounds. *)
+  let annotated_use t (annot : Syntax.Annot.t) =
+    if Option.is_some annot.mode then with_sink t else t
   ;;
 
   (* Whether they unify: if not, what checked is to become [Error]. *)
@@ -2005,7 +2011,21 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
                (sprintf "%s is mutable" toplevel.ident.name))
       else init_mode
     in
-    if not (Toplevel.is_function toplevel)
+    if toplevel.mut
+    then (
+      let held = Scope.fresh_mode scope in
+      Scope.add_mode
+        scope
+        ~loc:toplevel.expr.loc
+        (Mode.Var.submode
+           init_mode
+           held
+           (Mode.Reason.create
+              ~loc:toplevel.expr.loc
+              (sprintf "it initializes %s" toplevel.ident.name)));
+      Hashtbl.set program.held_modes ~key:toplevel.ident ~data:held;
+      Scope.annotated scope held toplevel.mode)
+    else if not (Toplevel.is_function toplevel)
     then Scope.annotated scope init_mode toplevel.mode;
     toplevel.state
     <- In_progress
@@ -2160,19 +2180,18 @@ and expr_type
          (Type resolved)
          (TCon (Prelude_path.canonical "Stag.Type.t", [ ATy elaborated ])))
   | Var (Path (path, annot)) ->
+    let var_scope = Scope.annotated_use scope annot in
     (match
        match path with
-       | Path _ | Root _ -> var_type t scope ~path ~loc
-       | Resolved name -> resolved_value_type t scope name ~loc
+       | Path _ | Root _ -> var_type t var_scope ~path ~loc
+       | Resolved name -> resolved_value_type t var_scope name ~loc
      with
      | Error error -> fail error
      | Ok (ty, var_ref) ->
-       let var = node (Var var_ref) ty in
-       (match annot.Syntax.Annot.ty with
-        | None -> var
-        | Some annot -> annotate t scope var annot ~loc))
+       annotate t scope ~var_scope (node (Var var_ref) ty) annot ~loc)
   | Annotated (var, annot) ->
-    annotate t scope (expr_type t scope ~expr:var) annot ~loc
+    let var_scope = Scope.annotated_use scope annot in
+    annotate t scope ~var_scope (expr_type t var_scope ~expr:var) annot ~loc
   | Var (Ref var_ref) ->
     (match var_ref_type t scope var_ref ~loc with
      | Error error -> fail error
@@ -2285,7 +2304,7 @@ and expr_type
          ; generalized
          })
       in_.ty
-  | Let_mut { binder; annot; body; in_ } ->
+  | Let_mut { binder; annot; mode = held_annot; body; in_ } ->
     let ty, annot =
       match annot with
       | None -> Scope.fresh_ty t scope, None
@@ -2296,10 +2315,22 @@ and expr_type
            Scope.report scope error;
            Scope.fresh_ty t scope, None)
     in
-    let body = check_expr t scope ~expr:body ~ty in
+    let body_scope = Scope.with_sink scope in
+    let body = check_expr t body_scope ~expr:body ~ty in
     let ident = Program_env.bind scope.program binder ty ~level:scope.level in
     Hash_set.add scope.program.mutable_idents ident;
     let name = Source.Binder.name binder in
+    Scope.joins scope body_scope.sink ~loc ~why:(sprintf "%s is bound" name);
+    let held = Scope.fresh_mode scope in
+    Scope.add_mode
+      scope
+      ~loc
+      (Mode.Var.submode
+         body_scope.sink
+         held
+         (Mode.Reason.create ~loc (sprintf "it initializes %s" name)));
+    Hashtbl.set scope.program.held_modes ~key:ident ~data:held;
+    Scope.annotated scope held held_annot;
     let mode =
       Scope.stage_at_least
         scope
@@ -2312,7 +2343,7 @@ and expr_type
         [ name, Scope.entry scope ~ident ~scheme:ty ~mode ]
         ~f:(fun () -> expr_type t scope ~expr:in_ ?expected ~hint)
     in
-    node (Let_mut { ident; annot; body; in_ }) in_.ty
+    node (Let_mut { ident; annot; mode = held_annot; body; in_ }) in_.ty
   | Assign (var, value) ->
     Scope.evaluates scope Nonportable ~loc ~why:"it assigns a variable";
     let target =
@@ -2363,7 +2394,25 @@ and expr_type
        let value = expr_type t scope ~expr:value in
        fail ~children:[ value ] error
      | Ok (ty, var_ref) ->
-       let value = check_expr t scope ~expr:value ~ty in
+       let value_scope = Scope.with_sink scope in
+       let value = check_expr t value_scope ~expr:value ~ty in
+       Scope.joins scope value_scope.sink ~loc ~why:"it is assigned";
+       (match var_ref with
+        | Bound (Local ident | Toplevel ident)
+        | Persistent (Local ident | Toplevel ident) ->
+          Option.iter
+            (Hashtbl.find scope.program.held_modes ident)
+            ~f:(fun held ->
+              Scope.add_mode
+                scope
+                ~loc
+                (Mode.Var.submode
+                   value_scope.sink
+                   held
+                   (Mode.Reason.create
+                      ~loc
+                      (sprintf "it is assigned to %s" ident.name))))
+        | Free _ | Free_toplevel _ | Prim _ | Intrinsic _ -> ());
        node (Assign (var_ref, value)) Type.unit)
   | Fun { args; body } ->
     let fn = function_type t scope ~args ~annot:None ~res_mode:None in
@@ -2852,16 +2901,38 @@ and expr_type
     in
     node (Poly_variant (tag, arg)) (Poly_row.variant t scope ~tag ~arg:arg_ty)
 
-and annotate t scope (var : Typed.Expr.t) annot ~loc : Typed.Expr.t =
-  match Scope.elaborate_resolved scope annot with
-  | Ok (annot_ty, resolved) ->
-    let annotated = { var with desc = Annotated (var, resolved); loc } in
-    if Scope.unifies t scope ~ty1:var.ty ~ty2:annot_ty ~loc
-    then annotated
-    else { desc = Error [ annotated ]; ty = Type.error; loc }
-  | Error error ->
-    Scope.report scope error;
-    var
+(* [var] was checked in [var_scope], from [Scope.annotated_use]. *)
+and annotate
+  t
+  (scope : Scope.t)
+  ~(var_scope : Scope.t)
+  (var : Typed.Expr.t)
+  (annot : Syntax.Annot.t)
+  ~loc
+  : Typed.Expr.t
+  =
+  if Option.is_some annot.mode
+  then (
+    Scope.joins scope var_scope.sink ~loc ~why:"it is used";
+    Scope.annotated scope var_scope.sink annot.mode);
+  match annot.ty with
+  | None when Option.is_none annot.mode -> var
+  | None -> { var with desc = Annotated (var, annot); loc }
+  | Some ty ->
+    (match Scope.elaborate_resolved scope ty with
+     | Ok (annot_ty, resolved) ->
+       let annotated =
+         { var with
+           desc = Annotated (var, { annot with ty = Some resolved })
+         ; loc
+         }
+       in
+       if Scope.unifies t scope ~ty1:var.ty ~ty2:annot_ty ~loc
+       then annotated
+       else { desc = Error [ annotated ]; ty = Type.error; loc }
+     | Error error ->
+       Scope.report scope error;
+       var)
 
 (* Runs the toplevel splice [code] of a [Stag.Expr.t], then infers the
    expression it gives here, checking it against [expected] so that a mismatch
@@ -3847,6 +3918,7 @@ let program_env t ~stamps ~modes ~const_toplevels interpreter =
     ; syntax_errors = false
     ; splice_starts = Stack.create ()
     ; mutable_idents = Typed.Ident.Hash_set.create ()
+    ; held_modes = Typed.Ident.Table.create ()
     ; modes
     ; const_toplevels
     ; mode_limits_reported = String.Hash_set.create ()

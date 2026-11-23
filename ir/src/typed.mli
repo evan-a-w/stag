@@ -179,6 +179,7 @@ module Expr : sig
       | Let_mut of
           { ident : Ident.t
           ; annot : Syntax.Type_expr.t option
+          ; mode : Syntax.Mode_expr.t option (** Of the values it holds. *)
           ; body : 'e (** [ident] is not bound in [body]. *)
           ; in_ : 'e
           }
@@ -189,7 +190,8 @@ module Expr : sig
           ; annots : (Ident.t * Syntax.Annot.t) list
           ; body : 'e
           }
-      | Annotated of 'e * Syntax.Type_expr.t (** [(x : t)], of a [Var]. *)
+      | Annotated of 'e * Syntax.Annot.t
+      (** [(x : t @ m)], of a [Var], its type resolved as [Let]'s. *)
       | Splice of
           { code : 'e (** At the level outside the splice. *)
           ; subs : 'e Subs.t

@@ -968,7 +968,7 @@ let first p = match p with (a, _) -> (a : int)
           (cases
            (((Tuple ((Var a/15 : int) (Any : 'a)) : "int * 'a")
              (Annotated (Var (Bound (Local a/15)) : int)
-              ((Con (<int> @ t.stag:2:42-45) ()) @ t.stag:2:42-45) : int))))
+              ((ty ((Con (<int> @ t.stag:2:42-45) ()) @ t.stag:2:42-45))) : int))))
           : int)))))
      (recursive false))
     ((a/15 (int 0)) (first/4 ("int * 'a -> int" 0)) (p/14 ("int * 'a" 0)))

@@ -349,52 +349,50 @@ module Vars = struct
       Ok (Arrow_modes.Side.Fixed (Mode_atoms.declared atoms))
   ;;
 
-  (* [lower <= upper] between variables, on every axis, or bounding a variable
-     on the axes of the atoms, of those checked so far (stage). *)
+  (* [lower <= upper] between variables, or bounding a variable by the atoms: on
+     the axes checked so far (stage), as printed. *)
   let mode_constraint t ({ lower; upper } : Syntax.Mode_expr.Constraint.t) ~loc
     : (unit, Typecheck_error.t) Result.t
     =
-    match t with
-    | Params _ ->
-      let var =
-        match lower.txt, upper.txt with
-        | Var name, _ | _, Var name -> name
-        | Atoms _, Atoms _ -> ""
-      in
-      error ~loc (Mode_variable_in_declaration var)
-    | Annotation vars ->
-      let reason =
-        Mode.Reason.create
-          ~loc
-          (sprintf
-             "it is annotated %s"
-             (Syntax.Mode_expr.Constraint.to_string { lower; upper }))
-      in
-      let bound (atoms : Syntax.Mode_expr.Atom.t list) ~f =
-        List.fold_result atoms ~init:() ~f:(fun () atom ->
-          match atom with
-          | Const -> f Mode.Stage.Const
-          | Portable -> f Portable
-          | Nonportable -> f Nonportable
-          | Static | Gc | Unknown | Global | Regional | Local -> Ok ())
-      in
-      let result =
-        match lower.txt, upper.txt with
-        | Var lower, Var upper ->
-          Mode.Var.submode
-            (Annotation_vars.mode vars lower)
-            (Annotation_vars.mode vars upper)
-            reason
-        | Var lower, Atoms atoms ->
-          let var = Annotation_vars.mode vars lower in
-          bound atoms ~f:(fun point -> Mode.Var.at_most var Stage point reason)
-        | Atoms atoms, Var upper ->
-          let var = Annotation_vars.mode vars upper in
-          bound atoms ~f:(fun point -> Mode.Var.at_least var Stage point reason)
-        | Atoms _, Atoms _ -> Ok ()
-      in
+    let reason =
+      Mode.Reason.create
+        ~loc
+        (sprintf
+           "it is annotated %s"
+           (Syntax.Mode_expr.Constraint.to_string { lower; upper }))
+    in
+    let bound (atoms : Syntax.Mode_expr.Atom.t list) ~f =
+      List.fold_result atoms ~init:() ~f:(fun () atom ->
+        match atom with
+        | Const -> f Mode.Stage.Const
+        | Portable -> f Portable
+        | Nonportable -> f Nonportable
+        | Static | Gc | Unknown | Global | Regional | Local -> Ok ())
+    in
+    let checked result =
       Result.map_error result ~f:(fun error ->
         Typecheck_error.create ~loc (Mode_error error))
+    in
+    match t, lower.txt, upper.txt with
+    | _, Atoms _, Atoms _ ->
+      error ~loc (Invalid_mode "a constraint must be on a mode variable")
+    | Params _, Var name, _ | Params _, _, Var name ->
+      error ~loc (Mode_variable_in_declaration name)
+    | Annotation vars, Var lower, Var upper ->
+      checked
+        (Mode.Var.submode_on
+           (Annotation_vars.mode vars lower)
+           (Annotation_vars.mode vars upper)
+           Stage
+           reason)
+    | Annotation vars, Var lower, Atoms atoms ->
+      let var = Annotation_vars.mode vars lower in
+      checked
+        (bound atoms ~f:(fun point -> Mode.Var.at_most var Stage point reason))
+    | Annotation vars, Atoms atoms, Var upper ->
+      let var = Annotation_vars.mode vars upper in
+      checked
+        (bound atoms ~f:(fun point -> Mode.Var.at_least var Stage point reason))
   ;;
 end
 

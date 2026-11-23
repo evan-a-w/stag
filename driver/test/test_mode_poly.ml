@@ -265,7 +265,7 @@ let c = a (Int.add 1 2)
   [%expect
     {|
     val b : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and portable <= 'm1
-    val a : 'a -> <'b>{r : 'b; ..'c} @ 'm0 with portable <= 'm0
+    val a : 'a @ 'm0 -> <'b>{r : 'b; ..'c} @ 'm1 with 'm0 <= 'm1 and portable <= 'm1
     val c : <'_a>{r : '_a; ..'_b}
     |}];
   modes
@@ -276,21 +276,23 @@ let c = a (Int.add 1 2)
 |};
   [%expect
     {|
-    val a : 'a -> <'b>{r : 'b; ..'c} @ 'm0 with portable <= 'm0
+    val a : 'a @ 'm0 -> <'b>{r : 'b; ..'c} @ 'm1 with 'm0 <= 'm1 and portable <= 'm1
     val b : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and portable <= 'm1
     val c : <'_a>{r : '_a; ..'_b}
     |}]
 ;;
 
-let%expect_test "mutually recursive toplevels print only their own modes" =
-  modes {|
+let%expect_test "mutually recursive toplevels print constraints through each \
+                 other"
+  =
+  round_trip {|
 let a x = let r = b x in r
 let b y = let w = a y in y
 |};
   [%expect
     {|
-    val a : 'a -> 'a @ 'm0 with portable <= 'm0
-    val b : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and portable <= 'm1
+    let a_copy : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and portable <= 'm1 = a
+    let b_copy : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and portable <= 'm1 = b
     |}]
 ;;
 
@@ -299,8 +301,9 @@ let%expect_test "weak mode variables" =
 let k = (fun f -> f) (fun w -> w)
 let n = k 1
 |};
-  [%expect {|
-    val k : int @ '_m0 -> int @ '_m1
+  [%expect
+    {|
+    val k : int @ '_m0 -> int @ '_m1 with '_m0 <= '_m1
     val n : int
     |}]
 ;;
@@ -314,4 +317,71 @@ let p @ portable = pair (make 1)
 |};
   [%expect
     {| This is nonportable, because cell is mutable (at t.stag:2:13-60), then cell is captured by a closure (at t.stag:2:51-55), then f is bound (at t.stag:2:33-60), then the function types are unified, then the function returns it (at t.stag:4:24-32), then it is passed to a function (at t.stag:4:19-32), but must be at most portable, because it is annotated portable (at t.stag:4:8-16), then the function returns it (at t.stag:4:19-32), then the function types are unified, then a partial application holds it (at t.stag:3:15-16), then the function types are unified |}]
+;;
+
+let%expect_test "annotations on uses bound the variable's mode" =
+  modes
+    {|
+let cap x = (x @ portable)
+let cap_with (x : int) = (x : int @ 'm with 'm <= portable)
+let same (x @ 'm) = let y = (x @ 'm) in y
+|};
+  [%expect
+    {|
+    val cap : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and 'm0 <= portable
+    val cap_with : int @ 'm0 -> int @ 'm1 with 'm0 <= 'm1 and 'm0 <= portable
+    val same : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1
+    |}];
+  modes {|
+let bad = let mut c = 1 in (c @ portable)
+|};
+  [%expect
+    {| This is nonportable, because c is mutable (at t.stag:2:27-41), but must be at most portable, because it is annotated portable (at t.stag:2:32-40) |}];
+  modes {|
+let bad = cap (Int.add 1 2)
+let cap x = (x @ portable)
+|};
+  [%expect
+    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:2:14-27), then it is passed to a function (at t.stag:2:10-27), but must be at most portable, because it is annotated portable (at t.stag:3:17-25), then x is used (at t.stag:3:12-26), then the function types are unified |}]
+;;
+
+let%expect_test "a let mut's mode bounds the values it holds" =
+  modes {|
+let ok u = let mut x @ portable = 1 in x <- 2; x
+|};
+  [%expect {| val ok : 'a -> int @ nonportable |}];
+  modes {|
+let bad u = let mut x @ const = 1 in x <- Int.add 1 2; x
+|};
+  [%expect
+    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:2:42-53), then it is assigned to x (at t.stag:2:37-53), but must be at most const, because it is annotated const (at t.stag:2:24-29) |}];
+  modes
+    {|
+let mut counter @ const = 0
+let bump u = counter <- Int.add counter 1
+|};
+  [%expect
+    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:3:24-41), then it is assigned to counter (at t.stag:3:13-41), but must be at most const, because it is annotated const (at t.stag:2:18-23) |}];
+  modes {|
+let mut counter @ portable = Int.add 1 2
+|};
+  [%expect
+    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:2:29-40), but must be at most portable, because it is annotated portable (at t.stag:2:18-26), then it initializes counter (at t.stag:2:29-40) |}]
+;;
+
+let%expect_test "use and let mut annotations survive re-inference" =
+  modes
+    {|
+let q = .< fun x -> (x @ portable) >.
+let r = .~q
+let q2 = .< fun x -> let mut c @ portable = 1 in c <- x; c >.
+let r2 = .~q2
+|};
+  [%expect
+    {|
+    val q : <'a @ 'm0 -> 'a @ 'm1>{..'b} with 'm0 <= 'm1 and 'm0 <= portable
+    val r : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and 'm0 <= portable
+    val q2 : <int @ 'm0 -> int @ nonportable>{..'a} with 'm0 <= portable
+    val r2 : int @ 'm0 -> int @ nonportable with 'm0 <= portable
+    |}]
 ;;

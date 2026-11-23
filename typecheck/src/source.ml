@@ -160,7 +160,7 @@ module Expr = struct
     type nonrec t =
       | Lit of Syntax.Lit.t
       | Var of Var.t
-      | Annotated of t * Syntax.Type_expr.t
+      | Annotated of t * Syntax.Annot.t
       | App of t * t
       | Let of
           { binder : Binder.t
@@ -173,6 +173,7 @@ module Expr = struct
       | Let_mut of
           { binder : Binder.t
           ; annot : Syntax.Type_expr.t option
+          ; mode : Syntax.Mode_expr.t option
           ; body : t
           ; in_ : t
           }
@@ -233,6 +234,7 @@ module Expr = struct
       Let_mut
         { binder = Name name
         ; annot = annot.ty
+        ; mode = annot.mode
         ; body = sub equal
         ; in_ = sub in_
         }
@@ -314,8 +316,9 @@ module Expr = struct
         ; body = sub body
         ; in_ = sub in_
         }
-    | Let_mut { ident; annot; body; in_ } ->
-      Let_mut { binder = Ident ident; annot; body = sub body; in_ = sub in_ }
+    | Let_mut { ident; annot; mode; body; in_ } ->
+      Let_mut
+        { binder = Ident ident; annot; mode; body = sub body; in_ = sub in_ }
     | Assign (var_ref, value) -> Assign (Ref var_ref, sub value)
     | Store (target, value) -> Store (sub target, sub value)
     | Fun { args; annots; body } ->

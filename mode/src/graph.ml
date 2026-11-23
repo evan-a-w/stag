@@ -399,18 +399,23 @@ let rank t =
   | Generic _ -> None
 ;;
 
-let generic_relations t =
+let var_id t = t.var_id
+
+let relations t =
+  let related direction other morphism =
+    Option.some_if
+      (Morphism.is_identity morphism && Axis.Any.equal other.axis t.axis)
+      (direction, other)
+  in
   match t.state with
-  | Rank _ -> []
+  | Rank _ ->
+    List.filter_map t.succ ~f:(fun edge -> related `Le edge.hi edge.morphism)
+    @ List.filter_map t.pred ~f:(fun edge -> related `Ge edge.lo edge.morphism)
   | Generic { above; below } ->
-    let related direction =
-      List.filter_map ~f:(fun { other; implied_morphism; _ } ->
-        Option.some_if
-          (Morphism.is_identity implied_morphism
-           && Axis.Any.equal other.axis t.axis)
-          (direction, other.var_id))
-    in
-    related `Le above @ related `Ge below
+    List.filter_map above ~f:(fun { other; implied_morphism; _ } ->
+      related `Le other implied_morphism)
+    @ List.filter_map below ~f:(fun { other; implied_morphism; _ } ->
+      related `Ge other implied_morphism)
 ;;
 
 let lower_assuming t ~raised =

@@ -44,20 +44,31 @@ let count t var =
 ;;
 
 let settle t =
+  (* The relations between the counted variables, through any others: those of
+     the other members of a recursive group, or a weak variable's neighbours. *)
   let edges = Int.Table.create () in
-  let nodes = Int.Hash_set.create () in
-  let add_edge lo hi =
-    Hash_set.add nodes lo;
-    Hash_set.add nodes hi;
-    Hashtbl.add_multi edges ~key:lo ~data:hi
+  let visited = Int.Hash_set.create () in
+  let queue = Queue.create () in
+  let visit node =
+    let id = Mode.Var.Node.var_id node in
+    if not (Hash_set.mem visited id)
+    then (
+      Hash_set.add visited id;
+      Queue.enqueue queue node)
   in
-  Hashtbl.iteri t.vars ~f:(fun ~key:id ~data:var ->
-    Hash_set.add nodes id;
-    List.iter (Mode.Var.generic_relations var Stage) ~f:(function
-      | `Le, other -> add_edge id other
-      | `Ge, other -> add_edge other id));
+  Hashtbl.iter t.vars ~f:(fun var -> visit (Mode.Var.node var Stage));
+  while not (Queue.is_empty queue) do
+    let node = Queue.dequeue_exn queue in
+    let id = Mode.Var.Node.var_id node in
+    List.iter (Mode.Var.Node.relations node) ~f:(fun (direction, other) ->
+      visit other;
+      let other = Mode.Var.Node.var_id other in
+      match direction with
+      | `Le -> Hashtbl.add_multi edges ~key:id ~data:other
+      | `Ge -> Hashtbl.add_multi edges ~key:other ~data:id)
+  done;
   let reach = Int.Table.create () in
-  Hash_set.iter nodes ~f:(fun start ->
+  Hashtbl.iter_keys t.vars ~f:(fun start ->
     let seen = Int.Hash_set.create () in
     let rec go id =
       if not (Hash_set.mem seen id)
@@ -68,16 +79,10 @@ let settle t =
     go start;
     Hashtbl.set reach ~key:start ~data:seen);
   let reaches a b = Hash_set.mem (Hashtbl.find_exn reach a) b in
-  (* Counted variables first, in the order they are named, then the others. *)
-  let position id =
-    match Hashtbl.find t.order id with
-    | Some position -> position, id
-    | None -> Int.max_value, id
-  in
   let by_position =
-    Hash_set.to_list nodes
+    Hashtbl.keys t.vars
     |> List.sort ~compare:(fun a b ->
-      [%compare: int * int] (position a) (position b))
+      Int.compare (Hashtbl.find_exn t.order a) (Hashtbl.find_exn t.order b))
   in
   Hashtbl.clear t.rep;
   List.iter by_position ~f:(fun id ->
@@ -87,13 +92,8 @@ let settle t =
     with
     | Some rep -> Hashtbl.set t.rep ~key:id ~data:rep
     | None -> Hashtbl.set t.rep ~key:id ~data:id);
-  (* Other variables, of the other members of a recursive group, only relate the
-     counted ones: their classes are left out. *)
   let reps =
-    List.filter by_position ~f:(fun id ->
-      Hashtbl.find_exn t.rep id = id
-      && List.exists by_position ~f:(fun member ->
-        Hashtbl.find_exn t.rep member = id && Hashtbl.mem t.vars member))
+    List.filter by_position ~f:(fun id -> Hashtbl.find_exn t.rep id = id)
   in
   let members rep =
     List.filter by_position ~f:(fun id -> Hashtbl.find_exn t.rep id = rep)
@@ -150,7 +150,9 @@ let settle t =
     |> List.filter ~f:(fun ((lo : Operand.t), (hi : Operand.t)) ->
       match lo, hi with
       | Const _, Const _ -> false
-      | _ -> true)
+      | Const lo, Var _ -> not (Stage.equal lo Stage.min)
+      | Var _, Const hi -> not (Stage.equal hi Stage.max)
+      | Var _, Var _ -> true)
   in
   t.constraints <- constraints;
   Hash_set.clear t.elided;

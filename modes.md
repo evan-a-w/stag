@@ -115,14 +115,31 @@ val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3
 - constraints and bounds implied by the others are left out;
 - a generic variable named once and in no constraint is left out, which
   reads back as a fresh variable;
-- only the item's own variables are named: constraints through variables of
-  other members of a recursive group are projected onto its own;
-- a weak (not generalized) variable is named `'_m0`, as weak type variables;
+- only the item's own variables are named: constraints through other
+  variables (of other members of a recursive group, or a weak variable's
+  current neighbours) are projected onto its own;
+- bounds every mode meets (`const <= 'm`, `'m <= nonportable`) are left out;
+- a weak (not generalized) variable is named `'_m0`, as weak type variables,
+  and shown with its current constraints;
 - relations through a crossing morphism are not printed (nothing crosses
   until crossing by kind, chunk E).
 
 The `with` clause is also syntax for annotations (see syntax.md), so printed
-types read back as themselves.
+types read back as themselves. As only the stage axis is printed, a constraint
+between variables constrains only the stage axis, until the others are
+checked.
+
+### Annotations on uses
+
+`(x @ m)` (or `(x : t @ m)`) bounds the mode of `x` at this use, so of the
+variable: `let cap x = (x @ portable)` restricts `cap`'s argument to portable
+values, and with `@ 'm` the use is `'m`, shared with the definition's other
+annotations (`(x : t @ 'm with 'm <= portable)`).
+
+Known limitation: annotation variable names are scoped per toplevel and per
+toplevel splice's expansion, not per piece of generated code. Code values
+spliced together into one expansion share them, so two pieces each naming
+`'m` (or `'a`) constrain one variable.
 
 ## Locks
 
@@ -230,7 +247,9 @@ by the code that uses it) and that of the value it holds.
   never generalized either.
 - **The value held** has a mode variable `m` fixed at the binding, as
   OxCaml's `let mutable`: `x <- e` requires `mode e ≤ m`, and reading `x` is
-  at `m`. Locality: a value local to an inner region (each function body,
+  at `m`. Its initializer is checked likewise, and `let mut x @ m`
+  (or a mutable toplevel's `@ m`) bounds `m`. Reading is `nonportable` for
+  now, as the variable is. Locality: a value local to an inner region (each function body,
   closures included, is one) must not be stored in a variable of an outer
   one, so a variable captured by a closure holds `global` values, unless the
   closure is `local`. An uncaptured variable may hold values local to its own
