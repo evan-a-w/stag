@@ -482,6 +482,19 @@ that signature: nothing checks it. For instance C's `isdigit` returns an
 a toplevel function like any other: it can be partially applied and passed
 around, and C is called once it has all its arguments.
 
+C is called at compile time only if the library declaring the external allows
+it: the prelude's always may, and a stag-build library, executable or test
+opts in with the stanza field `(compile_time_c_calls)` (see
+[README.md](README.md#stag-build)). Calling another external while running
+compile-time code (a toplevel splice, or a toplevel it uses) is an error,
+when the call happens, naming the external and its library. The check is on
+the library declaring the external, so a permitted library's functions that
+call its externals may be called at compile time from anywhere. Calls at
+runtime are always allowed. Files checked outside a project (`stag check`,
+`stag run`, an editor buffer outside any project) may not call externals at
+compile time. This keeps opening or checking a file from running arbitrary C
+code.
+
 Modes written in `t` are trusted, as C code is not checked, and unwritten
 ones are a declaration's defaults (see [modes.md](modes.md#arrow-modes)):
 `external f : int @ portable -> int @ portable = "f"` returns portable
