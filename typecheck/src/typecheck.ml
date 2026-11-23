@@ -105,26 +105,10 @@ module Toplevel = struct
     ; mut : bool
     ; generated : Generated.t option
     ; mutable state : State.t
-    ; mutable intrinsic_alias : bool option
-    (** Whether it is an alias of an intrinsic, once known. *)
     }
   [@@deriving sexp_of]
 
   let is_function t = not (List.is_empty t.args)
-
-  (* The value it is an alias of, if any. *)
-  let aliased t =
-    match t.expr.txt with
-    | Var (((Path _ | Root _) as path), annot)
-      when Syntax.Annot.is_none annot
-           && Option.is_none t.annot
-           && (not t.mut)
-           && not (is_function t) ->
-      (match Module_scope.find_value t.module_ path ~loc:t.expr.loc with
-       | Ok value -> Some value
-       | Error _ -> None)
-    | _ -> None
-  ;;
 end
 
 type t =
@@ -247,32 +231,6 @@ module Program_env = struct
 
   let toplevel t name = force (Hashtbl.find_exn t.toplevels name)
 
-  (* Such as [Ptr.make], or an alias of one: a builtin, so its value needn't be
-     lifted. *)
-  let is_intrinsic_alias t toplevel =
-    let rec go (toplevel : Toplevel.t) ~visited =
-      match toplevel.intrinsic_alias with
-      | Some known -> known
-      | None ->
-        let name = toplevel.ident.name in
-        let known =
-          (not (Set.mem visited name))
-          &&
-          match Toplevel.aliased toplevel with
-          | Some (Intrinsic _) -> true
-          | Some (Toplevel target) ->
-            Option.value_map
-              (find_toplevel t target)
-              ~default:false
-              ~f:(go ~visited:(Set.add visited name))
-          | Some (Prim _ | Unbound) | None -> false
-        in
-        toplevel.intrinsic_alias <- Some known;
-        known
-    in
-    go toplevel ~visited:String.Set.empty
-  ;;
-
   let add_info t ident ~ty ~level =
     let info = { Typed.Ident_info.ty; level } in
     t.ident_info <- Map.add_exn t.ident_info ~key:ident ~data:info;
@@ -389,13 +347,14 @@ module Scope = struct
 
   let quote_id t = Option.map t.quote ~f:(fun quote -> quote.id)
 
-  let entry t ~ident ~scheme ~mode =
+  let entry ?(defining = false) t ~ident ~scheme ~mode =
     { Env.Entry.scheme
     ; level = t.level
     ; quote_id = quote_id t
     ; mode
     ; locks = t.locks
     ; binder = Local ident
+    ; defining
     }
   ;;
 
@@ -476,7 +435,8 @@ module Scope = struct
   let annotated t mode (annot : Syntax.Mode_expr.t option) =
     Option.iter annot ~f:(fun { txt; loc } ->
       match txt with
-      | Var _ -> ()
+      | Var var ->
+        report t (Typecheck_error.create ~loc (Mode_variable_on_binding var))
       | Atoms atoms ->
         List.iter atoms ~f:(fun atom ->
           let stage : Mode.Stage.t option =
@@ -555,7 +515,8 @@ module Resolution = struct
       (entry.level = scope.level
        && [%equal: int option] entry.quote_id (Scope.quote_id scope))
       || (entry.level <= scope.level
-          && (Mode.Stage.le (Mode.Var.lower entry.mode).stage Portable
+          && ((Mode.Stage.le (Mode.Var.lower entry.mode).stage Portable
+               && not entry.defining)
               || is_mutable_toplevel entry))
     in
     let is_mutable_local (entry : Env.Entry.t) =
@@ -1267,6 +1228,7 @@ let use_entry (scope : Scope.t) (entry : Env.Entry.t) ~name ~loc =
   in
   List.iter (Env.Entry.crossed entry ~locks:scope.locks) ~f:(fun lock ->
     match lock.kind with
+    | Splice -> ()
     | Closure _ when toplevel -> ()
     | Closure closure ->
       Scope.add_mode
@@ -1298,6 +1260,13 @@ let use_entry (scope : Scope.t) (entry : Env.Entry.t) ~name ~loc =
   if mutable_
   then
     Scope.evaluates scope Nonportable ~loc ~why:(sprintf "%s is mutable" name)
+  else if entry.defining
+  then
+    Scope.evaluates
+      scope
+      Nonportable
+      ~loc
+      ~why:(sprintf "%s is used in its own definition" name)
   else Scope.joins scope entry.mode ~loc ~why:(sprintf "%s is used" name)
 ;;
 
@@ -1305,12 +1274,14 @@ let use_entry (scope : Scope.t) (entry : Env.Entry.t) ~name ~loc =
    its mode is unknown. *)
 let use_free (scope : Scope.t) ~name ~loc =
   let why = sprintf "%s is a free variable of the quote" name in
-  List.take_while scope.locks ~f:(fun (lock : Env.Lock.t) ->
+  Env.Lock.cancel_splices scope.locks
+  |> List.take_while ~f:(fun (lock : Env.Lock.t) ->
     match lock.kind with
-    | Closure _ -> true
+    | Closure _ | Splice -> true
     | Quote _ -> false)
   |> List.iter ~f:(fun (lock : Env.Lock.t) ->
     match lock.kind with
+    | Splice -> ()
     | Closure closure ->
       Scope.add_mode
         scope
@@ -1328,7 +1299,7 @@ let use_free (scope : Scope.t) ~name ~loc =
    values only when [const], which is then required of them. *)
 let generalizes (scope : Scope.t) mode ~is_function ~loc =
   is_function
-  || (Mode.Stage.equal (Mode.Var.lower mode).stage Const
+  || (Mode.Stage.le (Mode.Var.lower mode).stage Const
       && Scope.mode_holds
            scope
            ~loc
@@ -2165,7 +2136,9 @@ and expr_type
     let body =
       Env.with_bindings
         scope.locals
-        [ name, Scope.entry scope ~ident ~scheme:ty ~mode:own_mode ]
+        [ ( name
+          , Scope.entry scope ~defining:true ~ident ~scheme:ty ~mode:own_mode )
+        ]
         ~f:(fun () ->
           match arg_types with
           | [] -> check_expr t inner ~expr:body ~ty:res_ty
@@ -2316,7 +2289,11 @@ and expr_type
           Nonportable
           ~loc
           ~why:"the mode of spliced code is not known";
-        { quote.outside with rank = scope.rank; sink = quote.mode }
+        { quote.outside with
+          rank = scope.rank
+        ; sink = quote.mode
+        ; locks = { id = Fresh.id t; kind = Splice } :: scope.locks
+        }
       | None ->
         { scope with level = scope.level - 1; sink = Scope.fresh_mode scope }
     in
@@ -3024,6 +3001,8 @@ and substitute_tail t scope (quote : Scope.quote) ~tail ~seen ~loc ~may_capture 
       else (
         match Resolution.of_entry scope ~name (Some entry) with
         | Local entry when may_capture name entry.binder ->
+          (* Whether the code uses it is not known: assume it does. *)
+          use_entry scope entry ~name ~loc;
           Some
             ( name
             , Scope.fresh_presence t scope
@@ -3434,7 +3413,6 @@ let declare
          ; mut
          ; generated
          ; state = Unchecked
-         ; intrinsic_alias = None
          })
     in
     if not in_prelude then ignore (force toplevel : Toplevel.t);

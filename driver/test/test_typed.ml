@@ -919,8 +919,33 @@ let in_quote = let f x = .<f x>. in .<f>.
 |};
   [%expect
     {|
-    ((Unification_error (Occurs_check_failed (ATy (TVar (Unbound 37 2))))) @
-     t.stag:3:25-32)
+    ((members
+      (((ident direct/4) (args (y/15)) (scheme "'a -> 'b")
+        (body
+         (Let (ident f/17) (args (x/16)) (generalized true)
+          (body
+           (App (Var (Bound (Local f/17)) : "'c -> 'd")
+            (Var (Bound (Local x/16)) : 'c) : 'd))
+          (in_
+           (App (Var (Bound (Local f/17)) : "'a -> 'b")
+            (Var (Bound (Local y/15)) : 'a) : 'b))
+          : 'b)))))
+     (recursive false))
+    ((members
+      (((ident in_quote/5) (args ())
+        (scheme "<'a -> <'b>{f : 'c -> 'b; x : 'c; ..'d}>{..'e}")
+        (body
+         (Let (ident f/19) (args (x/18)) (generalized true)
+          (body
+           (Quote (App (Var (Free f) : "'f -> 'g") (Var (Free x) : 'f) : 'g) :
+            "<'g>{f : 'f -> 'g; x : 'f; ..'h}"))
+          (in_
+           (Quote
+            (Var (Persistent (Local f/19)) :
+             "'a -> <'b>{f : 'c -> 'b; x : 'c; ..'d}")
+            : "<'a -> <'b>{f : 'c -> 'b; x : 'c; ..'d}>{..'e}"))
+          : "<'a -> <'b>{f : 'c -> 'b; x : 'c; ..'d}>{..'e}")))))
+     (recursive false))
     |}]
 ;;
 

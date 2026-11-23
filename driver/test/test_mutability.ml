@@ -882,15 +882,15 @@ let rejected = unknown assigns
     ((Unification_error
       (Row_mismatch
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 50 1)))
+        (RVar (Unbound 51 1)))
        (RExtend x (PVar (Link Present)) Assigned (TVar (Link (TCon int ())))
-        (RVar (Unbound 55 1)))
+        (RVar (Unbound 56 1)))
        (Assigned x)))
      @ t.stag:4:17-24)
     ((Unification_error
       (Row_mismatch (RExtend x Present (TCon int ()) REmpty)
        (RExtend x (PVar (Link Present)) Assigned (TVar (Link (TCon int ())))
-        (RVar (Unbound 48 1)))
+        (RVar (Unbound 49 1)))
        (Assigned x)))
      @ t.stag:4:23-30)
     |}]

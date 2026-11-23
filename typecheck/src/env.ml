@@ -9,12 +9,29 @@ module Lock = struct
     type t =
       | Closure of Mode.Var.t
       | Quote of Mode.Var.t
+      | Splice
   end
 
   type t =
     { id : int
     ; kind : Kind.t
     }
+
+  (* Each splice leaves the innermost quote outside it, so drops it with the
+     locks between them. A splice whose quote is outside [locks] is dropped
+     alone. *)
+  let cancel_splices locks =
+    let rec leave_quote stack =
+      match stack with
+      | [] -> None
+      | { kind = Quote _; _ } :: rest -> Some rest
+      | { kind = Closure _ | Splice; _ } :: rest -> leave_quote rest
+    in
+    List.fold_right locks ~init:[] ~f:(fun lock stack ->
+      match lock.kind with
+      | Splice -> Option.value (leave_quote stack) ~default:stack
+      | Closure _ | Quote _ -> lock :: stack)
+  ;;
 end
 
 module Entry = struct
@@ -25,6 +42,7 @@ module Entry = struct
     ; mode : Mode.Var.t
     ; locks : (Lock.t list[@sexp.opaque])
     ; binder : Typed.Binder.t
+    ; defining : bool
     }
   [@@deriving sexp_of]
 
@@ -35,15 +53,16 @@ module Entry = struct
     ; mode
     ; locks = []
     ; binder = Toplevel ident
+    ; defining = false
     }
   ;;
 
   (* Locks are only pushed, so those enclosing the binding are a suffix of those
-     enclosing a use it is visible at, unless the use is in a splice, whose
-     locks are those outside its quote. *)
+     enclosing a use it is visible at. *)
   let crossed t ~locks =
     List.take_while locks ~f:(fun (lock : Lock.t) ->
       not (List.exists t.locks ~f:(fun (bound : Lock.t) -> bound.id = lock.id)))
+    |> Lock.cancel_splices
   ;;
 end
 

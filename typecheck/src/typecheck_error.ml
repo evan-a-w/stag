@@ -116,6 +116,7 @@ module Kind = struct
     | Malformed_struct_quote of string
     | Misplaced_type_splice
     | Misplaced_mut
+    | Mode_variable_on_binding of string
     | Spliced_code_assigns_immutable of string
     | Type_splice_failed of Error.t
     | Malformed_type_splice of Error.t
@@ -498,6 +499,8 @@ let rec kind_message (kind : Kind.t) ~show_type =
        be provided by a variable bound by [let mut] or a mutable toplevel"
       name
       name
+  | Mode_variable_on_binding var ->
+    sprintf "Mode variables like '%s are not supported on bindings yet" var
   | Misplaced_mut ->
     "Only an entry of a code type's context can be [mut] or [immut], for a \
      variable the code assigns or doesn't"
