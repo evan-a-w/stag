@@ -8,26 +8,43 @@ module Ctx = struct
     ; crossing : Type.ty -> Mode.Crossing.t
     }
 
+  let create ~modes ~rank ~holds ~crossing = { modes; rank; holds; crossing }
   let fresh t = Mode.Var.create t.modes ~rank:t.rank
   let add t ~loc result = ignore (t.holds ~loc result : bool)
 end
 
 let reason ~loc why = Mode.Reason.create ~loc why
 
+module Tail = struct
+  type t =
+    | Nontail
+    | Returns of Mode.Var.t (** The function's result mode. *)
+    | Quoted (** Where the code is spliced decides. *)
+end
+
 module Expected = struct
   type t =
     { mode : Mode.Var.t
-    ; region : Mode.Var.t option
+    ; region : Tail.t
     ; stack : bool ref option
     }
 
-  let of_mode mode = { mode; region = None; stack = None }
+  let of_mode mode = { mode; region = Nontail; stack = None }
   let fresh ctx = of_mode (Ctx.fresh ctx)
-  let mode t = t.mode
-  let is_tail t = Option.is_some t.region
+  let quoted ctx = { (fresh ctx) with region = Quoted }
+
+  let is_tail t =
+    match t.region with
+    | Returns _ -> true
+    | Nontail | Quoted -> false
+  ;;
+
   let whole t = { t with stack = None }
-  let within t = { t with region = None; stack = None }
-  let part t = { t with region = None }
+  let nontail t = { t with region = Nontail }
+  let part t = { t with region = Nontail }
+
+  (* The same value, at a mode of its own, which is then related to [t]'s. *)
+  let same_value ctx t = { (fresh ctx) with region = t.region; stack = t.stack }
 end
 
 let joins ?crossing ?locality ctx (expected : Expected.t) mode ~loc ~why =
@@ -44,8 +61,8 @@ let evaluated ctx expected mode ~loc ~why =
 let evaluate ?inner ctx expected ~loc ~why f =
   let sub = Expected.fresh (Option.value inner ~default:ctx) in
   let result = f sub in
-  evaluated ctx expected sub.Expected.mode ~loc ~why;
-  result
+  evaluated ctx expected sub.mode ~loc ~why;
+  result, sub.mode
 ;;
 
 let runs ctx (expected : Expected.t) stage ~loc ~why =
@@ -69,6 +86,8 @@ let locality_at_most ctx mode ~ty locality ~loc ~why =
     locality
     (reason ~loc why)
 ;;
+
+let arrow_mode = Ctx.fresh
 
 let annotate ?(exact = false) ctx mode (annot : Syntax.Mode_expr.t option) ~var =
   Option.iter annot ~f:(fun { txt; loc } ->
@@ -117,37 +136,11 @@ let annotated ctx annot ~var =
   mode
 ;;
 
-let bound ctx mode (annot : Syntax.Mode_expr.t option) ~var =
-  match annot with
-  | None -> mode
-  | Some { loc; _ } ->
-    let bound = Ctx.fresh ctx in
-    let reason = reason ~loc "it is bound by an annotated let" in
-    Ctx.add ctx ~loc (Mode.Var.submode mode bound reason);
-    annotate ~exact:true ctx bound annot ~var;
-    let named =
-      match annot with
-      | Some { txt = Atoms atoms; _ } ->
-        List.filter_map atoms ~f:(fun (atom : Syntax.Mode_expr.Atom.t) ->
-          match atom with
-          | Const | Portable | Nonportable -> Some (Mode.Axis.Any.T Stage)
-          | Global | Regional | Local -> Some (T Locality)
-          | Static | Gc | Unknown -> None)
-      | Some { txt = Var _; _ } | None -> [ T Stage; T Locality; T Provenance ]
-    in
-    List.iter
-      [ Mode.Axis.Any.T Stage; T Provenance; T Locality ]
-      ~f:(fun (T axis as any) ->
-        if not (List.mem named any ~equal:Mode.Axis.Any.equal)
-        then Ctx.add ctx ~loc (Mode.Var.submode_on bound mode axis reason));
-    bound
-;;
-
 let annotated_use ctx expected ~annot ~var ~loc f =
   match annot with
-  | None -> f (Expected.part expected)
+  | None -> f expected
   | Some _ ->
-    let used = { (Expected.fresh ctx) with stack = expected.Expected.stack } in
+    let used = Expected.same_value ctx expected in
     let result = f used in
     Result.iter result ~f:(fun (used_expr : Typed.Expr.t) ->
       joins
@@ -165,7 +158,8 @@ let part ?ty ctx expected (modality : Modality.t) f =
   match modality with
   | Id -> f (Expected.part expected)
   | Global ->
-    let sub = { (Expected.fresh ctx) with stack = expected.Expected.stack } in
+    (* What a [global_] field holds is not allocated with the block. *)
+    let sub = Expected.fresh ctx in
     let (part : Typed.Expr.t) = f sub in
     Ctx.add
       ctx
@@ -190,19 +184,102 @@ let project ctx expected ~loc ~why f =
   result
 ;;
 
-let project_binding ctx ~block (modality : Modality.t) ~loc =
-  match modality with
-  | Id -> block
-  | Global ->
-    let global = Ctx.fresh ctx in
-    let reason = reason ~loc "it is held by a [global_] field" in
+let initializes ?ty ctx ~value ~held ~name ~loc =
+  Ctx.add
+    ctx
+    ~loc
+    (Mode.Var.submode
+       ?crossing:(Option.map ty ~f:ctx.Ctx.crossing)
+       value
+       held
+       (reason ~loc (sprintf "it initializes %s" name)))
+;;
+
+module Binding = struct
+  type t = Mode.Var.t [@@deriving sexp_of]
+
+  let value ctx mode (annot : Syntax.Mode_expr.t option) ~var =
+    match annot with
+    | None -> mode
+    | Some { txt; loc } ->
+      let bound = Ctx.fresh ctx in
+      let reason = reason ~loc "it is bound by an annotated let" in
+      Ctx.add ctx ~loc (Mode.Var.submode mode bound reason);
+      annotate ~exact:true ctx bound annot ~var;
+      let named =
+        match txt with
+        | Atoms atoms ->
+          List.filter_map atoms ~f:(fun (atom : Syntax.Mode_expr.Atom.t) ->
+            match atom with
+            | Const | Portable | Nonportable -> Some (Mode.Axis.Any.T Stage)
+            | Global | Regional | Local -> Some (T Locality)
+            | Static | Gc | Unknown -> None)
+        | Var _ -> [ T Stage; T Locality; T Provenance ]
+      in
+      List.iter
+        [ Mode.Axis.Any.T Stage; T Provenance; T Locality ]
+        ~f:(fun (T axis as any) ->
+          if not (List.mem named any ~equal:Mode.Axis.Any.equal)
+          then Ctx.add ctx ~loc (Mode.Var.submode_on bound mode axis reason));
+      bound
+  ;;
+
+  let closure closure = closure
+
+  let defining ctx (expected : Expected.t) ~name ~loc =
+    let own =
+      stage_at_least
+        ctx
+        Nonportable
+        ~loc
+        ~why:(sprintf "%s is being defined" name)
+    in
     Ctx.add
       ctx
       ~loc
-      (Mode.Var.submode ~locality:Mode.Locality_map.ignore block global reason
-       |> Result.bind ~f:(fun () ->
-         Mode.Var.at_most global Locality Global reason));
-    global
+      (Mode.Var.submode
+         expected.mode
+         own
+         (reason ~loc (sprintf "it defines %s" name)));
+    own
+  ;;
+
+  let mutable_ ?ty ctx ~value annot ~var ~name ~loc =
+    let held = Ctx.fresh ctx in
+    initializes ?ty ctx ~value ~held ~name ~loc;
+    annotate ~exact:true ctx held annot ~var;
+    let cell =
+      stage_at_least ctx Nonportable ~loc ~why:(sprintf "%s is mutable" name)
+    in
+    cell, held
+  ;;
+
+  let project ctx ~block (modality : Modality.t) ~loc =
+    match modality with
+    | Id -> block
+    | Global ->
+      let global = Ctx.fresh ctx in
+      let reason = reason ~loc "it is held by a [global_] field" in
+      Ctx.add
+        ctx
+        ~loc
+        (Mode.Var.submode ~locality:Mode.Locality_map.ignore block global reason
+         |> Result.bind ~f:(fun () ->
+           Mode.Var.at_most global Locality Global reason));
+      global
+  ;;
+
+  let being_checked ctx ~name ~loc =
+    stage_at_least
+      ctx
+      Nonportable
+      ~loc
+      ~why:(sprintf "%s is being checked" name)
+  ;;
+end
+
+let raised ctx ~loc =
+  stage_at_least ctx Nonportable ~loc ~why:"it is a raised exception"
 ;;
 
 module Alloc = struct
@@ -229,7 +306,9 @@ module Alloc = struct
 
   let stack ctx expected ~loc f =
     let allocates = ref false in
-    let inner = { (Expected.fresh ctx) with stack = Some allocates } in
+    let inner =
+      { (Expected.same_value ctx expected) with stack = Some allocates }
+    in
     let (result : Typed.Expr.t) = f inner in
     if !allocates || Typed.Expr.has_error result
     then (
@@ -277,7 +356,7 @@ module Function = struct
   ;;
 
   let body ctx ~res_mode ~ty f =
-    let expected = { (Expected.fresh ctx) with region = Some res_mode } in
+    let expected = { (Expected.fresh ctx) with region = Returns res_mode } in
     let (body : Typed.Expr.t) = f expected in
     let crossing = ctx.Ctx.crossing ty in
     let loc = body.loc in
@@ -308,18 +387,21 @@ end
 
 let exclave ctx (expected : Expected.t) ~loc f =
   match expected.region with
-  | None -> None
-  | Some res_mode ->
+  | Nontail -> None
+  | (Returns _ | Quoted) as region ->
     let inner = Expected.fresh ctx in
     let (result : Typed.Expr.t) = f inner in
-    Ctx.add
-      ctx
-      ~loc
-      (Mode.Var.submode
-         ~crossing:(ctx.crossing result.ty)
-         inner.mode
-         res_mode
-         (reason ~loc "the function returns it"));
+    (match region with
+     | Returns res_mode ->
+       Ctx.add
+         ctx
+         ~loc
+         (Mode.Var.submode
+            ~crossing:(ctx.crossing result.ty)
+            inner.mode
+            res_mode
+            (reason ~loc "the function returns it"))
+     | Nontail | Quoted -> ());
     evaluated
       ctx
       expected
@@ -347,7 +429,7 @@ let apply
   in
   let f_expected =
     { (Expected.fresh ctx) with
-      region = (if curried then expected.region else None)
+      region = (if curried then expected.region else Nontail)
     }
   in
   let (f : Typed.Expr.t) = callee f_expected in
@@ -393,17 +475,6 @@ let apply
     ~loc
     ~why:"the function returns it";
   f, x
-;;
-
-let initializes ?ty ctx ~value ~held ~name ~loc =
-  Ctx.add
-    ctx
-    ~loc
-    (Mode.Var.submode
-       ?crossing:(Option.map ty ~f:ctx.Ctx.crossing)
-       value
-       held
-       (reason ~loc (sprintf "it initializes %s" name)))
 ;;
 
 (* How a value bound outside [locks] relates on locality to its use inside them:
@@ -467,7 +538,7 @@ let assign ctx expected ~held ~crossed ~ty ~name ~loc f =
 ;;
 
 let store ctx expected ~loc ~target ~value =
-  let (target : Typed.Expr.t) =
+  let (target : Typed.Expr.t), (_ : Mode.Var.t) =
     evaluate ctx expected ~loc ~why:"it is stored to" target
   in
   let sub = Expected.fresh ctx in
@@ -625,28 +696,62 @@ let use_free ctx expected ~locks ~loc ~why =
   runs ctx expected Nonportable ~loc ~why
 ;;
 
-let generalizes ctx mode ~loc =
-  ctx.Ctx.holds
-    ~loc
-    (Mode.Var.at_most mode Stage Const (reason ~loc "it is generalized"))
-;;
+module Splice = struct
+  let code ~code f = f (Expected.of_mode code)
+
+  let captured (expected : Expected.t) =
+    { expected with region = Nontail; stack = None }
+  ;;
+
+  let substitution ctx expected ~loc f =
+    let (sub : Typed.Expr.t), mode =
+      evaluate ctx expected ~loc ~why:"it is substituted into spliced code" f
+    in
+    sub, mode
+  ;;
+end
 
 let const ctx mode ~loc ~why =
   ctx.Ctx.holds ~loc (Mode.Var.at_most mode Stage Const (reason ~loc why))
 ;;
 
-let toplevel ctx mode ~ty ~name ~loc =
-  Ctx.add
-    ctx
-    ~loc
-    (locality_at_most
-       ctx
-       mode
-       ~ty
-       Global
-       ~loc
-       ~why:(sprintf "%s is a toplevel" name))
-;;
+module Toplevel = struct
+  type t =
+    { expected : Expected.t
+    ; value : Mode.Var.t
+    ; binding : Binding.t
+    ; held : Binding.t option
+    }
+
+  let create ctx ~is_function ~mut annot ~var ~name ~loc =
+    let expected = Expected.fresh ctx in
+    let value = if is_function then Ctx.fresh ctx else expected.mode in
+    let binding, held =
+      if mut
+      then (
+        let cell, held = Binding.mutable_ ctx ~value annot ~var ~name ~loc in
+        cell, Some held)
+      else if is_function
+      then Binding.closure value, None
+      else Binding.value ctx value annot ~var, None
+    in
+    { expected; value; binding; held }
+  ;;
+
+  let outlives ctx t ~ty ~name ~loc =
+    List.iter (t.value :: t.binding :: Option.to_list t.held) ~f:(fun mode ->
+      Ctx.add
+        ctx
+        ~loc
+        (locality_at_most
+           ctx
+           mode
+           ~ty
+           Global
+           ~loc
+           ~why:(sprintf "%s is a toplevel" name)))
+  ;;
+end
 
 let assume_global ctx =
   let arg = Ctx.fresh ctx in

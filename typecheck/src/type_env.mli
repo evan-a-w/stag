@@ -183,10 +183,6 @@ val reflect
 (** Of the field of canonical name [name]. *)
 val field_modality : t -> string -> Modality.t
 
-(** Per argument of the constructor of canonical name [name]. [None] for
-    exceptions. *)
-val constructor_modalities : t -> string -> Modality.t list option
-
 (** Whether values of [ty] hold no pointers by value: immediates, and tuples,
     records and variants of such types. [false] while unknown, e.g. for a
     variable or an open row. *)

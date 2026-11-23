@@ -1173,15 +1173,7 @@ let reflect t name =
 ;;
 
 let field_modality t name =
-  Option.value_map
-    (Hashtbl.find t.fields name)
-    ~default:Modality.Id
-    ~f:(fun field -> Modality.of_global field.is_global)
-;;
-
-let constructor_modalities t name =
-  Option.map (Hashtbl.find t.constructors name) ~f:(fun constructor ->
-    List.map constructor.global_args ~f:Modality.of_global)
+  Modality.of_global (Hashtbl.find_exn t.fields name).is_global
 ;;
 
 let pointer_free t ty =

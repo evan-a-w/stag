@@ -5,35 +5,42 @@ open! Import
     only evaluated for). *)
 
 module Ctx : sig
-  type t =
-    { modes : Mode.Id_source.t
-    ; rank : int
-    ; holds : loc:Loc.t -> (unit, Mode.Error.t) Result.t -> bool
-    (** Whether the constraint held: if not, it is reported. *)
-    ; crossing : Type.ty -> Mode.Crossing.t
-    }
+  type t
 
-  val fresh : t -> Mode.Var.t
+  (** [holds] reports a constraint that doesn't hold, returning whether it did. *)
+  val create
+    :  modes:Mode.Id_source.t
+    -> rank:int
+    -> holds:(loc:Loc.t -> (unit, Mode.Error.t) Result.t -> bool)
+    -> crossing:(Type.ty -> Mode.Crossing.t)
+    -> t
 end
 
 (** The mode an expression's value is checked against: what is evaluated for the
-    value is at most it. *)
+    value is at most it. It knows whether the expression is in tail position,
+    and whether [stack_] applies to it. A subexpression that is the whole value
+    is checked at the same [Expected.t]. *)
 module Expected : sig
   type t
 
-  val of_mode : Mode.Var.t -> t
+  (** Of a value unrelated to any other: a toplevel's, a test's, or what is only
+      checked for its errors. *)
   val fresh : Ctx.t -> t
-  val mode : t -> Mode.Var.t
 
-  (** The whole value, in tail position if it is. *)
+  (** The value of the body of a [let] or [match]: in tail position if it is,
+      but not what [stack_] applies to. *)
   val whole : t -> t
 
-  (** A part of the value, at the same mode. *)
-  val part : t -> t
+  (** Of code in a quote: whether it is in tail position is decided where it is
+      spliced. *)
+  val quoted : Ctx.t -> t
 
-  (** At the same mode, not in tail position. *)
-  val within : t -> t
+  (** [e [@nontail]]. *)
+  val nontail : t -> t
 end
+
+(** A mode on an arrow: of an argument, a result or a partial application. *)
+val arrow_mode : Ctx.t -> Mode.Var.t
 
 (** Its value is at least [stage], e.g. as computing it runs code. *)
 val runs
@@ -45,7 +52,7 @@ val runs
   -> unit
 
 (** A subexpression only evaluated for the value, not part of it, at a mode of
-    [inner] (by default the [Ctx.t]). *)
+    [inner] (by default the [Ctx.t]): returns its mode. *)
 val evaluate
   :  ?inner:Ctx.t
   -> Ctx.t
@@ -53,15 +60,7 @@ val evaluate
   -> loc:Loc.t
   -> why:string
   -> (Expected.t -> 'a)
-  -> 'a
-
-(** A fresh mode at least [stage]. *)
-val stage_at_least
-  :  Ctx.t
-  -> Mode.Stage.t
-  -> loc:Loc.t
-  -> why:string
-  -> Mode.Var.t
+  -> 'a * Mode.Var.t
 
 (** Bounds [mode] by the annotation on the axes it names; with [exact], fixes it
     to it. [var] is the mode an annotation variable stands for. *)
@@ -76,15 +75,6 @@ val annotate
 (** A fresh mode fixed to the annotation on the axes it names. *)
 val annotated
   :  Ctx.t
-  -> Syntax.Mode_expr.t option
-  -> var:(string -> Mode.Var.t)
-  -> Mode.Var.t
-
-(** The mode of a variable bound by [let x @ annot = e], [e] being of [mode]:
-    the annotation's, on the axes it names, else [e]'s. *)
-val bound
-  :  Ctx.t
-  -> Mode.Var.t
   -> Syntax.Mode_expr.t option
   -> var:(string -> Mode.Var.t)
   -> Mode.Var.t
@@ -120,13 +110,47 @@ val project
   -> (Expected.t -> 'a * Modality.t)
   -> 'a
 
-(** The mode of a variable a pattern binds to a part of a block of mode [block]. *)
-val project_binding
-  :  Ctx.t
-  -> block:Mode.Var.t
-  -> Modality.t
-  -> loc:Loc.t
-  -> Mode.Var.t
+(** The mode of a variable: only these make one. *)
+module Binding : sig
+  type t = private Mode.Var.t [@@deriving sexp_of]
+
+  (** Bound by [let x @ annot = e], [e] being of [mode]: the annotation's, on
+      the axes it names, else [e]'s. *)
+  val value
+    :  Ctx.t
+    -> Mode.Var.t
+    -> Syntax.Mode_expr.t option
+    -> var:(string -> Mode.Var.t)
+    -> t
+
+  (** A function, of its closure's mode. *)
+  val closure : Mode.Var.t -> t
+
+  (** A non-function in its own definition, being checked at [Expected.t]: at
+      least its value, which isn't known yet. *)
+  val defining : Ctx.t -> Expected.t -> name:string -> loc:Loc.t -> t
+
+  (** A [let mut] initialized by a value of mode [value] ([ty] crossing as its
+      type does): its cell, and the values it holds. *)
+  val mutable_
+    :  ?ty:Type.ty
+    -> Ctx.t
+    -> value:Mode.Var.t
+    -> Syntax.Mode_expr.t option
+    -> var:(string -> Mode.Var.t)
+    -> name:string
+    -> loc:Loc.t
+    -> t * t
+
+  (** Bound by a pattern to a part of a block of mode [block]. *)
+  val project : Ctx.t -> block:Mode.Var.t -> Modality.t -> loc:Loc.t -> t
+
+  (** A toplevel being checked, used where its mode isn't known yet. *)
+  val being_checked : Ctx.t -> name:string -> loc:Loc.t -> t
+end
+
+(** Of a raised exception, matched on. *)
+val raised : Ctx.t -> loc:Loc.t -> Mode.Var.t
 
 (** Allocation sites: [stack_] applies to those the value is made of. *)
 module Alloc : sig
@@ -159,14 +183,14 @@ module Function : sig
     -> loc:Loc.t
     -> unit
 
-  (** The mode of a parameter in the body, passed at [arg_mode]: the body is a
-      region of its own. *)
+  (** A parameter in the body, passed at [arg_mode]: the body is a region of its
+      own. *)
   val param
     :  Ctx.t
     -> arg_mode:Mode.Var.t
     -> name:string
     -> loc:Loc.t
-    -> Mode.Var.t
+    -> Binding.t
 
   (** The body, of type [ty], returned at [res_mode]. *)
   val body
@@ -177,7 +201,8 @@ module Function : sig
     -> Typed.Expr.t
 end
 
-(** [exclave_ e]: [None] if not in tail position. *)
+(** [exclave_ e]: [None] if not in tail position. In a quote, it is checked
+    where the code is spliced. *)
 val exclave
   :  Ctx.t
   -> Expected.t
@@ -200,18 +225,8 @@ val apply
   -> arg:(Expected.t -> Typed.Expr.t)
   -> Typed.Expr.t * Typed.Expr.t
 
-(** A [let mut] initialized by a value of mode [value], with [ty] crossing as
-    its type does. *)
-val initializes
-  :  ?ty:Type.ty
-  -> Ctx.t
-  -> value:Mode.Var.t
-  -> held:Mode.Var.t
-  -> name:string
-  -> loc:Loc.t
-  -> unit
-
-(** Assigns a [let mut] holding [held], across the locks [crossed]. *)
+(** Assigns a [let mut] holding [held] (unless a free variable of the quote),
+    across the locks [crossed]. *)
 val assign
   :  Ctx.t
   -> Expected.t
@@ -258,19 +273,49 @@ val use_free
   -> why:string
   -> unit
 
-(** Whether [mode] may be generalized, which then requires it [const]. *)
-val generalizes : Ctx.t -> Mode.Var.t -> loc:Loc.t -> bool
+module Splice : sig
+  (** The code a splice in a quote splices, part of the code being built, of
+      mode [code]. *)
+  val code : code:Mode.Var.t -> (Expected.t -> 'a) -> 'a
 
+  (** What spliced code may use from the splice's scope: it may be part of the
+      value. *)
+  val captured : Expected.t -> Expected.t
+
+  (** An explicit substitution, bound around the spliced code: its mode. *)
+  val substitution
+    :  Ctx.t
+    -> Expected.t
+    -> loc:Loc.t
+    -> (Expected.t -> Typed.Expr.t)
+    -> Typed.Expr.t * Binding.t
+end
+
+(** Whether [mode] is at most [const], reporting it if not. *)
 val const : Ctx.t -> Mode.Var.t -> loc:Loc.t -> why:string -> bool
 
-(** A toplevel outlives every region. *)
-val toplevel
-  :  Ctx.t
-  -> Mode.Var.t
-  -> ty:Type.ty
-  -> name:string
-  -> loc:Loc.t
-  -> unit
+module Toplevel : sig
+  type t = private
+    { expected : Expected.t (** Of its value, unless a function. *)
+    ; value : Mode.Var.t (** Of its value or closure. *)
+    ; binding : Binding.t
+    ; held : Binding.t option (** Of the values a mutable one holds. *)
+    }
+
+  (** [annot] is of its value, or of a function's result. *)
+  val create
+    :  Ctx.t
+    -> is_function:bool
+    -> mut:bool
+    -> Syntax.Mode_expr.t option
+    -> var:(string -> Mode.Var.t)
+    -> name:string
+    -> loc:Loc.t
+    -> t
+
+  (** A toplevel outlives every region. *)
+  val outlives : Ctx.t -> t -> ty:Type.ty -> name:string -> loc:Loc.t -> unit
+end
 
 (** The argument and result modes of [Unsafe.assume_global]. *)
 val assume_global : Ctx.t -> Mode.Var.t * Mode.Var.t

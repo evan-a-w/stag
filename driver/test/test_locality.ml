@@ -363,3 +363,85 @@ let g h = match h () with x -> x | exception E p -> Ptr.make p
     val g : (unit -> ptr[ptr[int]]) -> ptr[ptr[int]]
     |}]
 ;;
+
+let%expect_test "a value in its own definition is at least its value" =
+  locality
+    {|
+let f (q : ptr[unit -> unit]) =
+  let x = (let p = stack_ (Ptr.make 1) in fun u -> let y = p in q.* <- x) in
+  x () [@nontail]
+|};
+  [%expect
+    {| This is local, because it is allocated by [stack_] (at t.stag:3:19-38), then it is part of the value (at t.stag:3:19-38), then p is captured by a closure (at t.stag:3:59-60), then the closure is made (at t.stag:3:42-72), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:3:71-72), then x is used (at t.stag:3:71-72), then it defines x (at t.stag:3:2-4:17) |}];
+  locality
+    {|
+let f (q : ptr[unit -> unit]) =
+  let x = stack_ (fun u -> q.* <- x) in
+  x () [@nontail]
+|};
+  [%expect
+    {| This is local, because it is allocated by [stack_] (at t.stag:3:10-36), then it is part of the value (at t.stag:3:10-36), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:3:34-35), then x is used (at t.stag:3:34-35), then it defines x (at t.stag:3:2-4:17) |}]
+;;
+
+let%expect_test "explicit substitutions are bound at their own modes" =
+  locality
+    {|
+let f (q : ptr[ptr[int]]) = .~(.<q.* <- x>.).{q; x = stack_ (Ptr.make 1)}
+|};
+  [%expect
+    {| This is local, because it is allocated by [stack_] (at t.stag:2:53-72), then it is part of the value (at t.stag:2:53-72), then x is used (at t.stag:2:40-41), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:2:40-41) |}];
+  locality
+    {|
+let f (q : ptr[ptr[int]]) = .~(.<q.* <- x>.).{q; x = Ptr.make 1}
+let g (q : ptr[int]) = .~(.<match x.* with (a, _) -> a>.).{x = stack_ (Ptr.make (1, 2))}
+|};
+  [%expect
+    {|
+    val f : ptr[ptr[int]] -> unit
+    val g : ptr[int] -> int
+    |}]
+;;
+
+let%expect_test "a toplevel splice's expansion is in tail position if it is" =
+  locality
+    {|
+let use (p @ local) = match p.* with (a, _) -> a
+let f u = let p = stack_ (Ptr.make (1, 2)) in .~(.<use p>.)
+|};
+  [%expect
+    {| This is local, because it is allocated by [stack_] (at t.stag:3:18-42), then it is part of the value (at t.stag:3:18-42), then p is used (at t.stag:3:55-56), but must be at most regional, because it is passed in a tail call, after the current region has ended (mark the call [@nontail]) (at t.stag:3:55-56) |}];
+  locality
+    {|
+let f u = .~(.<exclave_ stack_ (Ptr.make (1, 2))>.)
+let g u = let p = stack_ (Ptr.make (1, 2)) in .~(.<p>.)
+|};
+  [%expect
+    {| This is local, because it is allocated by [stack_] (at t.stag:3:18-42), then it is part of the value (at t.stag:3:18-42), then p is used (at t.stag:3:46-55), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:3:10-55) |}];
+  locality {|
+let c = .<exclave_ stack_ (Ptr.make 1)>.
+|};
+  [%expect {| val c : <ptr[int]>{..'a} |}];
+  locality {|
+let f u = let p = .~(.<exclave_ stack_ (Ptr.make 1)>.) in 1
+|};
+  [%expect
+    {| [exclave_] ends the function's region, so must be the function's result, in tail position |}]
+;;
+
+let%expect_test "a pointer's pointee is global in patterns" =
+  locality
+    {|
+let f (p : ptr[ptr[int]] @ local) = match p with *q -> Ptr.make q
+|};
+  [%expect {| val f : ptr[ptr[int]] @ local -> ptr[ptr[int]] |}]
+;;
+
+let%expect_test "stack_ doesn't apply to what a global_ field holds" =
+  locality
+    {|
+type r = { g : global_ ptr[int] }
+let f u = stack_ { g = Ptr.make 1 }
+|};
+  [%expect
+    {| [stack_] allocates its value on the stack, so must be on an allocation: a closure, a quote, [Ptr.make e], or a record, tuple or constructor holding one (records, tuples and constructors are values) |}]
+;;
