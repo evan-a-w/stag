@@ -2720,11 +2720,10 @@ and expr_type
               let locality = locality_map ~assign:true crossed in
               (* A closure may be called from a region shorter than the
                  variable's, so may only store what outlives every region. *)
-              if
-                List.exists crossed ~f:(fun (lock : Env.Lock.t) ->
-                  match lock.kind with
-                  | Closure _ -> true
-                  | Quote _ | Splice | Exclave -> false)
+              if List.exists crossed ~f:(fun (lock : Env.Lock.t) ->
+                   match lock.kind with
+                   | Closure _ -> true
+                   | Quote _ | Splice | Exclave -> false)
               then
                 Scope.add_mode
                   scope

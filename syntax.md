@@ -384,10 +384,16 @@ that inner code is spliced, not by the substitution, so it is an error too.
 ### Modes
 
 The syntax of modes (see [modes.md](modes.md) and
-[semantics.md](semantics.md#modes)). Only the stage axis is checked so far:
-stage annotations (`let x @ const = ...`, `(x @ portable)`, `int @ 'm ->
-int @ 'm`) bound modes; locality and provenance annotations are ignored, and `stack_`, `exclave_` and `[@nontail]`
-evaluate as their body.
+[semantics.md](semantics.md#modes)). The stage and locality axes are checked;
+provenance annotations are ignored. The interpreter allocates everything on
+its heap, so `stack_`, `exclave_` and `[@nontail]` evaluate as their body.
+
+A binding's annotation is the variable's mode: `let x @ m = e` needs `e`'s
+mode to be at most `m`, and `x` is then `m` on the axes `m` names (and `e`'s
+mode on the others), as are parameters `(x @ m)` and `let mut x @ m`. An
+expression's annotation `(x @ m)` only checks: it bounds `x`'s mode, which it
+keeps. So `let n @ portable = 1` is a `portable` `n`, while
+`let n = (one @ portable)` is as `const` as `one`.
 
 A mode, after `@`, is a mode variable (`'m`, standing for every axis), or one
 or more of `const portable nonportable` (stage), `static gc unknown`

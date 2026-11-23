@@ -131,8 +131,16 @@ checked.
 
 ### Annotations on uses
 
-`(x @ m)` (or `(x : t @ m)`) bounds the mode of `x` at this use, so of the
-variable: `let cap x = (x @ portable)` restricts `cap`'s argument to portable
+`(x @ m)` (or `(x : t @ m)`) is the check-only form: it bounds the mode of `x`
+at this use, so of the variable, and `x` keeps its own mode. A binding's
+annotation, `let x @ m = e`, is instead the variable's mode (as in OxCaml): `e`
+must be at most `m`, and uses of `x` see `m` on the axes it names (`e`'s mode
+on the others), though generalisation is still decided by `e`'s own mode.
+Parameters `(x @ m)` and `let mut x @ m` are likewise exact. So
+`let n @ portable = 1` gives a `portable` `n`, while `let n = (one @ portable)`
+leaves `n` as `const` as `one`.
+
+For example, `let cap x = (x @ portable)` restricts `cap`'s argument to portable
 values, and with `@ 'm` the use is `'m`, shared with the definition's other
 annotations (`(x : t @ 'm with 'm <= portable)`).
 
@@ -251,9 +259,11 @@ by the code that uses it) and that of the value it holds.
   (or a mutable toplevel's `@ m`) bounds `m`. Reading is `nonportable` for
   now, as the variable is. Locality: a value local to an inner region (each function body,
   closures included, is one) must not be stored in a variable of an outer
-  one, so a variable captured by a closure holds `global` values, unless the
-  closure is `local`. An uncaptured variable may hold values local to its own
-  region.
+  one. Assigning a variable from inside a closure (which may be called from a
+  shorter region) needs a `global` value; reading it there sees what is
+  `local` to the variable's region as `regional`, so a closure that reads a
+  variable holding local values is itself local. An uncaptured variable may
+  hold values local to its own region.
 - **Representation** (see semantics.md): uncaptured, a stack slot; captured
   only by `local` closures, on the data stack; captured by a `gc` closure, a
   heap box, whose stores have a write barrier unless the value is `static`.
@@ -293,9 +303,10 @@ Each step is a branch stacked on the previous one.
 - **D. Arrow modes and polymorphism**: arrows carry argument and return
   modes (a closure's mode is the mode of the arrow value); schemes keep mode variables and their constraints; mode
   annotations; printing that hides unconstrained and default modes.
-- **E. Locality**: regions, `stack_`, `exclave_`, the tail call rule,
-  `global_` fields, `Unsafe.assume_global`, mutable variables captured by
-  closures holding `global` values, mode crossing by kind.
+- **E. Locality**: regions, inferred allocation locality, `stack_`,
+  `exclave_`, the tail call rule, `global_` fields, `Unsafe.assume_global`,
+  mutable variables assigned from closures holding `global` values, mode
+  crossing by kind on locality, exact binding annotations.
 - **F. Provenance**: allocation is `gc`, literals and `const` values
   `static`, stores, mutable globals.
 - **G. `External`**: C functions with a C compatible ABI (rejecting

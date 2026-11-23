@@ -195,9 +195,19 @@ machine (function) stack, and managed by the runtime as a bump allocator:
 
 - Each function body is a region: on entry it saves the data stack pointer,
   on exit restores it, freeing everything allocated locally in the call.
-- `stack_ e` allocates `e`'s blocks in the current region (closures included,
-  as a third closure mode beside `static` and `gc`). Allocation is otherwise
-  `global` (GC heap), unless inferred local because the value does not escape.
+- Allocation is inferred, as in OxCaml: each allocation (tuple, record,
+  constructor, closure) has a mode variable, at least its parts' (a block
+  holding a value local to the region is itself local) and at most what its
+  uses allow. Nothing needs a keyword to be local: compiled code allocates in
+  the current region whatever may be `local`, the interpreter on its heap.
+  `stack_ e` forces `e`'s outermost allocation to be `local`, so it is an
+  error if it escapes. Plain data (`int`, `bool`, `char`, `unit`) crosses
+  locality: a copy of it is as good anywhere.
+- A function's result is at most `regional` (it outlives the function's
+  region); a toplevel, what is stored through a pointer and what a `global_`
+  field holds must be `global`. A closure is at least the localities of what
+  it captures, as seen from its body (what is `local` to the enclosing body is
+  `regional` inside it).
 - `exclave_ e` ends the current region early and evaluates `e` in the caller's,
   so a function can return a local value (allocate in the caller's region).
 - `&x` of a variable puts `x` on the data stack, and is a `local` `ptr`.
