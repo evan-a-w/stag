@@ -1,0 +1,6 @@
+(library
+ (name test_mode)
+ (preprocess
+  (pps ppx_jane))
+ (inline_tests)
+ (libraries core expect_test_helpers_core stag_mode))

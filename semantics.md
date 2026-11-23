@@ -1,8 +1,9 @@
 # Semantics
 
-Design notes for the runtime semantics of stag and its compilation to LLVM. Not
-implemented yet. Extends [modes.md](modes.md), whose `const < portable <
-nonportable` axis is the stage axis here (see [Modes](#modes)).
+Design notes for the runtime semantics of stag and its compilation to LLVM.
+Mostly not implemented yet; modes are being added first (see
+[modes.md](modes.md), whose `const < portable < nonportable` axis is the stage
+axis here, and its implementation plan).
 
 ## Overview
 
@@ -142,6 +143,9 @@ instances are compiled); one capturing anything not `static` is a closure.
 An unconstrained kind variable defaults to `fn_ptr` when allowed. `->` and
 `=>` in annotations force the kind.
 
+Function pointers come after modes. Until then every arrow is a closure, and
+the closure's mode is the mode of the arrow value itself.
+
 Tail calls are guaranteed in tail position (LLVM `tailcc` + `musttail`).
 
 ## Modes
@@ -163,7 +167,8 @@ Modes are a product of independent axes, each a small lattice:
     tolerates pointers outside its heap, in roots and in GC objects alike
     (Boehm does; a precise GC checks headers or the heap range on such
     fields). Stores of `unknown` keep their write barrier.
-- **Locality**: `global ≤ local`, as OxCaml. See [Locality](#locality).
+- **Locality**: `global ≤ regional ≤ local`, as OxCaml's regionality. See
+  [Locality](#locality).
 
 The axes are independent except for one link: `const` implies `static` (a
 value known at compile time is emitted as static data). In the solver this is
@@ -172,7 +177,12 @@ a monotone morphism bounding provenance by stage, `prov ≤ f(stage)` with
 They cannot be one axis, because of mode crossing by kind: pointer-free data
 (ints) crosses provenance and locality entirely, and crosses `portable` (it
 can be lifted into code), but never `const`, as a runtime int is not known at
-compile time.
+compile time. Crossing is applied when the type is known where the constraint
+arises.
+
+`unknown` is produced by annotations (`(p @ unknown)`), and later by an
+`External` FFI: declarations of C functions, with a C compatible ABI that
+rejects signatures it can't express.
 
 In compiled code, a value crossing from compile time into a quote must be
 `const` (lifted, as static data) or a runtime toplevel (`static`, referred to
@@ -195,6 +205,10 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   `exclave_`), not stored into `global` blocks (including GC objects), not
   captured by `global` closures. A `local` argument (`(x @ local)`) is
   borrowed: the callee may not retain it.
+- `regional` is local to an *outer* region: inside a function body, its
+  `local` parameters (and what is read from them) are `regional`, as they
+  live in the caller's region. `local_` allocations of the current body are
+  `local`. Returning needs `global` (`regional` or `local` under `exclave_`).
 - `global_` on record fields and constructor arguments: always `global`, even
   inside a local block.
 - Records have no mutable fields: mutation is through a `ptr` (`p.* <- v`,
@@ -205,9 +219,12 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   stays safe either way: it never follows pointers into the data stack, so
   only the program's own reads can dangle. Which pointers may be written
   through (immutability as a permission) is left to modes and modalities.
-- Tail calls end the current region before the call, so a local value of the
-  current region cannot be passed to a tail call (OxCaml's rule); such a call
-  is not a tail call (or is an error under an explicit `[@tail]`).
+- Tail calls end the current region before the call, so arguments of a call
+  in tail position must be at most `regional`: passing a `local` value is an
+  error, fixed by marking the call non-tail (see syntax.md), which keeps the
+  region alive until it returns. A call inside `exclave_` is always fine.
+- The interpreter has no regions: `local_` allocates on its heap and
+  `exclave_ e` is `e`. The rules are checked all the same.
 
 Data stack blocks have GC headers, so their provenance is `gc` (traceable)
 and only their locality differs. The data stack is a GC root region (with
@@ -243,24 +260,45 @@ as for modes.
 
 Mode crossing by kind is applied when the type is known at the constraint;
 constraints on values of a type variable later found to be `int` are not
-retracted (as OxCaml; annotations recover precision).
+retracted (as OxCaml; annotations recover precision). A crossing is a
+morphism on the edge, e.g. `a ≤ r(b)` with `r` the right adjoint of
+`x ↦ x ⊓ portable` on stage; on provenance and locality the edge is dropped.
+
+Each operation is atomic: a constraint that fails leaves the graph as it was.
 
 ### Mode polymorphism
 
-At generalisation, the scheme keeps the mode variables occurring in the type,
-with the constraints between them, and with outer variables, implied by the
-graph (its transitive closure restricted to those variables). Other variables
-are fixed to their lower bound, which is always consistent. Instantiation
-copies the variables and constraints fresh. At instantiation for
-monomorphisation, an unconstrained variable defaults to its lower bound.
+From the start: at generalisation, the scheme keeps the mode variables
+occurring in the type (those not of an outer rank), with the constraints
+between them and with outer variables implied by the graph (paths through the
+other, internal, variables, composing their morphisms), and their current
+bounds. Instantiation copies the variables, bounds and constraints fresh.
+Internal variables stay in the graph: the bounds they imply are already on
+the kept ones. At instantiation for monomorphisation, an unconstrained
+variable defaults to its lower bound.
+
+Syntax: `'a @ 'm -> 'b @ 'n`, where a mode variable ranges over all axes,
+or concrete modes, `int @ local -> int`. Printing hides modes that are
+unconstrained or at their default; the full constraints are shown on
+request.
 
 ## Monomorphisation
 
-Full monomorphisation over types and modes for compiled code. Polymorphic
-recursion is rejected in compiled code (instantiation that does not reach a
-fixpoint). A mode variable the body does not depend on may instead be erased
-to its upper bound (always sound, since the body was checked for every mode
-within its bounds), bounding code size.
+Full monomorphisation over types, and over the code-relevant modes, for
+compiled code. Polymorphic recursion is rejected in compiled code
+(instantiation that does not reach a fixpoint). A mode variable is
+code-relevant when the generated code depends on it: locality at an
+allocation site (data stack or heap), provenance at a store (write barrier,
+address space), transitively through callees. Others (the stage axis always,
+locality of a parameter that is only read) are erased to their upper bound,
+which is always sound since the body was checked for every mode within its
+bounds. A function is compiled once per distinct assignment of its relevant
+variables, so instances differing only in irrelevant modes share code.
+
+A scheme only copies the mode variables it keeps, not the internal ones of
+the body (such as an allocation site's locality). So the monomorphiser keeps
+each definition's body mode constraints and re-solves them per instance,
+rather than relying on scheme instantiation.
 
 ## Pipeline
 
@@ -281,8 +319,9 @@ initially.
 ## Interpreters
 
 - **Treewalk** (on `Typed`): uses the OCaml GC, ignores modes at runtime.
-  Optionally tags pointers with their actual provenance and checks the static
-  modes dynamically, as a test oracle for mode soundness.
+  Later, optionally: tag pointers with their actual provenance and locality
+  and check the static modes dynamically, as a test oracle for mode
+  soundness.
 - **Core IR interpreter**: the reference semantics of the compiled subset.
   Expect tests run under Treewalk, the Core IR interpreter and compiled LLVM,
   and must agree.
@@ -296,18 +335,15 @@ initially.
 
 ## Plan
 
-1. `Mode`: the axes, the product, mode variables with bounds and constraints,
-   morphisms, triggers, solver and errors. Standalone, expect tests. Then move
-   presence variables onto it.
-2. Typechecker: modes on entries and expressions, locks (closure, quote,
-   toplevel splice), modes on arrows, mode polymorphism in schemes.
-3. Language: fixed width integers, pointer types, mutation, function pointer
+1. Modes: see the implementation plan in [modes.md](modes.md). Later, move
+   presence variables onto the solver (with triggers).
+2. Language: fixed width integers, pointer types, mutation, function pointer
    type, closure mode restriction, recursion only through pointers (rewriting
    the existing recursive variants).
-4. Treewalk: the new constructs; optional dynamic provenance checks.
-5. Monomorphiser.
-6. Closure conversion and lowering to Core IR; Core IR interpreter;
+3. Treewalk: the new constructs; optional dynamic provenance checks.
+4. Monomorphiser.
+5. Closure conversion and lowering to Core IR; Core IR interpreter;
    differential tests against Treewalk.
-7. LLVM emitter (textual), Boehm, clang via nix; expect tests on the emitted
+6. LLVM emitter (textual), Boehm, clang via nix; expect tests on the emitted
    IR and on the output of the compiled programs.
-8. Later: precise GC, runtime quotes, C FFI with by-value structs.
+7. Later: precise GC, runtime quotes, by-value structs in the FFI.
