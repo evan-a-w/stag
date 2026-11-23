@@ -29,6 +29,7 @@ type t =
   { kind : Kind.t
   ; name : string Located.t
   ; libraries : string Located.t list
+  ; compile_time_c_calls : bool
   ; loc : Loc.t
   }
 [@@deriving sexp_of]
@@ -104,6 +105,7 @@ module Fields = struct
   type t =
     { mutable name : string Located.t option option
     ; mutable libraries : string Located.t list option
+    ; mutable compile_time_c_calls : bool
     }
 end
 
@@ -127,7 +129,9 @@ let field ~path ~error ~kind (fields : Fields.t) (cst : Cst.t) =
   in
   match head_and_args with
   | None ->
-    error (cst_loc ~path cst) "Expected a field: (name ...) or (libraries ...)"
+    error
+      (cst_loc ~path cst)
+      "Expected a field: (name ...), (libraries ...) or (compile_time_c_calls)"
   | Some (({ txt = "name"; _ } as field_name), args) ->
     let name =
       match args with
@@ -147,10 +151,21 @@ let field ~path ~error ~kind (fields : Fields.t) (cst : Cst.t) =
     check_duplicate_libraries ~error libraries;
     once field_name ~given:(Option.is_some fields.libraries) ~set:(fun () ->
       fields.libraries <- Some libraries)
+  | Some (({ txt = "compile_time_c_calls"; _ } as field_name), args) ->
+    if not (List.is_empty args)
+    then
+      error
+        (cst_loc ~path cst)
+        "The field compile_time_c_calls takes no arguments: \n\
+        \         (compile_time_c_calls)";
+    once field_name ~given:fields.compile_time_c_calls ~set:(fun () ->
+      fields.compile_time_c_calls <- true)
   | Some (field_name, _) ->
     error
       field_name.loc
-      (sprintf "Unknown field %s: expected name or libraries" field_name.txt)
+      (sprintf
+         "Unknown field %s: expected name, libraries or compile_time_c_calls"
+         field_name.txt)
 ;;
 
 let stanza ~path ~error (cst : Cst.t) =
@@ -180,7 +195,9 @@ let stanza ~path ~error (cst : Cst.t) =
             kind_name.txt);
        None
      | Some kind ->
-       let fields = { Fields.name = None; libraries = None } in
+       let fields =
+         { Fields.name = None; libraries = None; compile_time_c_calls = false }
+       in
        List.iter field_csts ~f:(field ~path ~error ~kind fields);
        (match fields.name with
         | None ->
@@ -196,6 +213,7 @@ let stanza ~path ~error (cst : Cst.t) =
             { kind
             ; name
             ; libraries = Option.value fields.libraries ~default:[]
+            ; compile_time_c_calls = fields.compile_time_c_calls
             ; loc = stanza_loc
             }))
 ;;

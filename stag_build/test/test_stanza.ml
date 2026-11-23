@@ -16,7 +16,7 @@ let%expect_test "stanzas" =
     {|
     (((kind Library) (name (foo @ dir/stag:1:15-18))
       (libraries ((bar @ dir/stag:1:31-34) (baz @ dir/stag:1:35-38)))
-      (loc dir/stag:1:0-40)))
+      (compile_time_c_calls false) (loc dir/stag:1:0-40)))
     |}];
   parse {|; a comment
 (executable
@@ -25,19 +25,20 @@ let%expect_test "stanzas" =
   [%expect
     {|
     (((kind Executable) (name (main @ dir/stag:3:7-11))
-      (libraries ((foo @ dir/stag:4:12-15))) (loc dir/stag:2:0-4:17)))
+      (libraries ((foo @ dir/stag:4:12-15))) (compile_time_c_calls false)
+      (loc dir/stag:2:0-4:17)))
     |}];
   parse "(test (name foo_test2))";
   [%expect
     {|
     (((kind Test) (name (foo_test2 @ dir/stag:1:12-21)) (libraries ())
-      (loc dir/stag:1:0-23)))
+      (compile_time_c_calls false) (loc dir/stag:1:0-23)))
     |}];
   parse "(library (libraries) (name foo))";
   [%expect
     {|
     (((kind Library) (name (foo @ dir/stag:1:27-30)) (libraries ())
-      (loc dir/stag:1:0-32)))
+      (compile_time_c_calls false) (loc dir/stag:1:0-32)))
     |}]
 ;;
 
@@ -123,19 +124,19 @@ let%expect_test "invalid fields" =
     File "dir/stag", line 1, characters 24-29:
     1 | (executable (name foo) (modes byte) name () ((x)))
                                 ^^^^^
-    Error: Unknown field modes: expected name or libraries
+    Error: Unknown field modes: expected name, libraries or compile_time_c_calls
     File "dir/stag", line 1, characters 36-40:
     1 | (executable (name foo) (modes byte) name () ((x)))
                                             ^^^^
-    Error: Expected a field: (name ...) or (libraries ...)
+    Error: Expected a field: (name ...), (libraries ...) or (compile_time_c_calls)
     File "dir/stag", line 1, characters 41-43:
     1 | (executable (name foo) (modes byte) name () ((x)))
                                                  ^^
-    Error: Expected a field: (name ...) or (libraries ...)
+    Error: Expected a field: (name ...), (libraries ...) or (compile_time_c_calls)
     File "dir/stag", line 1, characters 44-49:
     1 | (executable (name foo) (modes byte) name () ((x)))
                                                     ^^^^^
-    Error: Expected a field: (name ...) or (libraries ...)
+    Error: Expected a field: (name ...), (libraries ...) or (compile_time_c_calls)
     |}];
   parse "(library (name foo) (name bar) (libraries) (libraries x))";
   [%expect
@@ -194,5 +195,31 @@ let%expect_test "invalid names" =
     1 | (library (name foo-bar) (libraries 1x (y) ok ok))
                                                      ^^
     Error: The library ok is listed more than once
+    |}]
+;;
+
+let%expect_test "compile_time_c_calls" =
+  parse "(library (name foo) (compile_time_c_calls))";
+  [%expect
+    {|
+    (((kind Library) (name (foo @ dir/stag:1:15-18)) (libraries ())
+      (compile_time_c_calls true) (loc dir/stag:1:0-43)))
+    |}];
+  parse "(library (name foo) (compile_time_c_calls yes))";
+  [%expect
+    {|
+    File "dir/stag", line 1, characters 20-46:
+    1 | (library (name foo) (compile_time_c_calls yes))
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: The field compile_time_c_calls takes no arguments:
+             (compile_time_c_calls)
+    |}];
+  parse "(library (name foo) (compile_time_c_calls) (compile_time_c_calls))";
+  [%expect
+    {|
+    File "dir/stag", line 1, characters 44-64:
+    1 | (library (name foo) (compile_time_c_calls) (compile_time_c_calls))
+                                                    ^^^^^^^^^^^^^^^^^^^^
+    Error: The field compile_time_c_calls is given more than once
     |}]
 ;;

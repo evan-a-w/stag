@@ -103,7 +103,7 @@ let%expect_test "errors in stanzas" =
     File "b/stag", line 1, characters 19-22:
     1 | (library (name b) (foo))
                            ^^^
-    Error: Unknown field foo: expected name or libraries
+    Error: Unknown field foo: expected name, libraries or compile_time_c_calls
     File "c/stag", line 1, characters 29-30:
     1 | (library (name c) (libraries a))
                                      ^

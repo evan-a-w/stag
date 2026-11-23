@@ -120,6 +120,7 @@ let source_paths checkout =
 ;;
 
 let check_groups
+  ?compile_time_c_calls
   ~limits
   ~(prelude : Prelude_source.t)
   ~contents
@@ -132,7 +133,13 @@ let check_groups
   let checked ?prelude groups =
     Option.map groups ~f:(fun groups ->
       let checked, type_errors =
-        of_driver (Driver.check_modules ~limits ~output:ignore ?prelude groups)
+        of_driver
+          (Driver.check_modules
+             ?compile_time_c_calls
+             ~limits
+             ~output:ignore
+             ?prelude
+             groups)
       in
       groups, checked, type_errors)
   in
@@ -271,6 +278,7 @@ let in_project ~limits ~prelude ~contents ~root path =
           List.map target.files ~f:(fun source -> root ^/ source.path))
     in
     check_groups
+      ~compile_time_c_calls:(Program.compile_time_c_calls project target)
       ~limits
       ~prelude
       ~contents

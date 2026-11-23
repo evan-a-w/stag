@@ -1002,11 +1002,11 @@ let%expect_test "files changed on disk, project errors, closing" =
       write "lib/stag" "(library (nme lib))";
       [%expect
         {|
-         diagnostics lib/stag:
-           0:10-0:13 error: Unknown field nme: expected name or libraries
-           0:0-0:19 error: The library stanza has no name: add (name ...)
-         diagnostics lib/b.stag: none
-         |}];
+        diagnostics lib/stag:
+          0:10-0:13 error: Unknown field nme: expected name, libraries or compile_time_c_calls
+          0:0-0:19 error: The library stanza has no name: add (name ...)
+        diagnostics lib/b.stag: none
+        |}];
       write "lib/stag" "(library (name lib))";
       [%expect
         {|
