@@ -242,6 +242,7 @@ module Expr : sig
       | External of
           { symbol : string
           ; signature : C_signature.t
+          ; at_compile_time : Compile_time_c_calls.Policy.t
           }
       (** The body of [external f : t = "symbol"]: the C function [symbol],
           called once given [C_signature.arity signature] arguments. *)

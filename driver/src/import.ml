@@ -12,6 +12,7 @@ module Formatter = Stag_syntax.Formatter
 module Source_file = Stag_syntax.Source_file
 module Syntax = Stag_syntax.Syntax
 module Typed = Stag_ir.Typed
+module Compile_time_c_calls = Stag_ir.Compile_time_c_calls
 module Interpreter = Stag_eval.Interpreter
 module Interpreter_intf = Stag_eval.Interpreter_intf
 module Runtime_error = Stag_eval.Runtime_error

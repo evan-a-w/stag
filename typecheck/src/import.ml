@@ -26,3 +26,4 @@ module Relocate = Stag_syntax.Relocate
 module Struct_quote = Stag_syntax.Struct_quote
 module Mode = Stag_mode
 module C_signature = Stag_ir.C_signature
+module Compile_time_c_calls = Stag_ir.Compile_time_c_calls

@@ -18,9 +18,12 @@ type t
     print to [output], stdout by default, at compile time and when evaluated.
     The program sees [prelude], by default the embedded one
     ([Prelude.toplevels]). It is run by [interpreter], by default
-    [Stag_treewalk]. *)
+    [Stag_treewalk]. Externals may be called at compile time as
+    [compile_time_c_calls] says, by default only the prelude's (see
+    [Typecheck.create]). *)
 val check
   :  ?interpreter:(module Interpreter_intf.S)
+  -> ?compile_time_c_calls:Compile_time_c_calls.t
   -> ?limits:Limits.t
   -> ?output:(string -> unit)
   -> ?prelude:Syntax.Toplevel.t list
@@ -33,6 +36,7 @@ val check
     are of all files, by location. *)
 val check_files
   :  ?interpreter:(module Interpreter_intf.S)
+  -> ?compile_time_c_calls:Compile_time_c_calls.t
   -> ?limits:Limits.t
   -> ?output:(string -> unit)
   -> ?prelude:Syntax.Toplevel.t list
@@ -52,6 +56,7 @@ end
 (** As [check_files], for modules already parsed. *)
 val check_modules
   :  ?interpreter:(module Interpreter_intf.S)
+  -> ?compile_time_c_calls:Compile_time_c_calls.t
   -> ?limits:Limits.t
   -> ?output:(string -> unit)
   -> ?prelude:Syntax.Toplevel.t list

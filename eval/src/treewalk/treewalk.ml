@@ -871,8 +871,9 @@ and step_value t ~env ~level (expr : Typed.Expr.t)
   | Var (Free name | Free_toplevel name) ->
     Eval_result.error_s [%message "Free variable of code evaluated" name]
   | Var (Prim prim) -> Eval_result.return (Value.Prim { prim; applied = [] })
-  | External { symbol; signature } ->
-    Eval_result.return (Value.External { symbol; signature; applied = [] })
+  | External { symbol; signature; at_compile_time } ->
+    Eval_result.return
+      (Value.External { symbol; signature; at_compile_time; applied = [] })
   | Var (Intrinsic intrinsic) -> Eval_result.return (Value.Intrinsic intrinsic)
   | Type ty -> Eval_result.return (Value.Type ty)
   | Assign (var_ref, value) ->
@@ -1081,17 +1082,25 @@ and apply_non_function t (f : Value.t) arg ~loc : Value.t Eval_result.t @ local
         (match Prim.apply prim ~output:t.output args with
          | Ok result -> Eval_result.return (Value.of_prim result)
          | Error exn -> raise_exn ~loc (prim_exception exn)))
-  | External { symbol; signature; applied } ->
+  | External { symbol; signature; at_compile_time; applied } ->
     let applied = arg :: applied in
     if List.length applied < C_signature.arity signature
-    then Eval_result.return (Value.External { symbol; signature; applied })
+    then
+      Eval_result.return
+        (Value.External { symbol; signature; at_compile_time; applied })
     else (
-      match C_call.call ~symbol signature (List.rev applied) with
-      | Ok result -> Eval_result.return result
-      | Error message ->
+      match at_compile_time with
+      | Denied { external_; library } when Option.is_some t.reflect ->
         runtime_error
           ~loc
-          (sprintf "The external %s could not be called: %s" symbol message))
+          (Compile_time_c_calls.Policy.denial ~external_ ~library)
+      | Allowed | Denied _ ->
+        (match C_call.call ~symbol signature (List.rev applied) with
+         | Ok result -> Eval_result.return result
+         | Error message ->
+           runtime_error
+             ~loc
+             (sprintf "The external %s could not be called: %s" symbol message)))
   | Intrinsic intrinsic ->
     (match intrinsic, arg with
      | Type_expr, Type ty ->

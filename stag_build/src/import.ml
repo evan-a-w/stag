@@ -10,6 +10,7 @@ module Source_file = Stag_syntax.Source_file
 module Text_diff = Stag_common.Text_diff
 module Interpreter = Stag_eval.Interpreter
 module Typed = Stag_ir.Typed
+module Compile_time_c_calls = Stag_ir.Compile_time_c_calls
 module Bench_command = Stag_driver.Bench_command
 module Bench_runner = Stag_driver.Bench_runner
 module Phase_bench = Stag_driver.Phase_bench

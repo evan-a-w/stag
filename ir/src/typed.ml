@@ -292,6 +292,7 @@ module Expr = struct
       | External of
           { symbol : string
           ; signature : C_signature.t
+          ; at_compile_time : Compile_time_c_calls.Policy.t
           }
       | Type of Syntax.Type_expr.t
       (** [type t], its types named by canonical names ([Resolved]). *)

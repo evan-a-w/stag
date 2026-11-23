@@ -74,6 +74,7 @@ module Toplevel = struct
     type t =
       { ty : Syntax.Type_expr.t
       ; symbol : string Located.t
+      ; at_compile_time : Compile_time_c_calls.Policy.t
       }
     [@@deriving sexp_of]
   end
@@ -129,16 +130,25 @@ type t =
   ; stamps : Stamp_counter.t
   ; interpreter : Interpreter.t
   ; const_toplevels : bool
+  ; compile_time_c_calls : Compile_time_c_calls.t
   ; prelude : Syntax.Toplevel.t list Lazy.t
   }
 
-let create ~stamps ~interpreter ?(const_toplevels = false) ?prelude () =
+let create
+  ~stamps
+  ~interpreter
+  ?(const_toplevels = false)
+  ?(compile_time_c_calls = Compile_time_c_calls.none)
+  ?prelude
+  ()
+  =
   let fresh = Fresh.create () in
   { fresh
   ; modes = Fresh.modes fresh
   ; stamps
   ; interpreter
   ; const_toplevels
+  ; compile_time_c_calls
   ; prelude =
       (match prelude with
        | Some prelude -> Lazy.from_val prelude
@@ -210,6 +220,7 @@ module Program_env = struct
     (** Of the [let mut]s, local and toplevel. *)
     ; modes : Mode.Id_source.t
     ; const_toplevels : bool
+    ; compile_time_c_calls : Compile_time_c_calls.t
     ; mode_limits_reported : String.Hash_set.t
     (** The reasons of the upper bounds of mode errors reported, so that each
         limit is reported once, at what first exceeded it. *)
@@ -2096,7 +2107,7 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
 and check_external
   t
   (scope : Scope.t)
-  ({ ty = declared; symbol } : Toplevel.External.t)
+  ({ ty = declared; symbol; at_compile_time } : Toplevel.External.t)
   ~ty
   : Typed.Expr.t
   =
@@ -2124,7 +2135,10 @@ and check_external
             (Invalid_external { symbol = symbol.txt; problem }))
      | Ok signature ->
        ignore (Scope.unifies t scope ~ty1:ty ~ty2:declared_ty ~loc : bool);
-       { desc = External { symbol = symbol.txt; signature }; ty; loc })
+       { desc = External { symbol = symbol.txt; signature; at_compile_time }
+       ; ty
+       ; loc
+       })
 
 (* Abandons the toplevels of [scc] with the splice whose code reached them, to
    be checked anew. *)
@@ -4100,8 +4114,16 @@ let declare
     add_toplevel ~mut:false name args annot expr
   | Let_mut (name, annot, expr), _ -> add_toplevel ~mut:true name [] annot expr
   | External { name; ty; symbol }, _ ->
+    let at_compile_time : Compile_time_c_calls.Policy.t =
+      if in_prelude
+      then Allowed
+      else
+        Compile_time_c_calls.policy
+          program.compile_time_c_calls
+          ~external_:(Module_scope.canonical_name module_ name.txt)
+    in
     add_toplevel
-      ~external_:{ Toplevel.External.ty; symbol }
+      ~external_:{ Toplevel.External.ty; symbol; at_compile_time }
       ~mut:false
       name
       []
@@ -4273,7 +4295,14 @@ let rec signature (program_env : Program_env.t) module_ ~complete =
              }))
 ;;
 
-let program_env t ~stamps ~modes ~const_toplevels interpreter =
+let program_env
+  t
+  ~stamps
+  ~modes
+  ~const_toplevels
+  ~compile_time_c_calls
+  interpreter
+  =
   let report = ref (fun (_ : Typecheck_error.t) -> ()) in
   let program_env =
     { Program_env.type_env =
@@ -4293,6 +4322,7 @@ let program_env t ~stamps ~modes ~const_toplevels interpreter =
     ; mutable_idents = Typed.Ident.Hash_set.create ()
     ; modes
     ; const_toplevels
+    ; compile_time_c_calls
     ; mode_limits_reported = String.Hash_set.create ()
     ; parameter_modes = Int.Hash_set.create ()
     }
@@ -4350,6 +4380,7 @@ let prelude_signature ({ fresh; stamps; interpreter; _ } as t) =
       ~stamps
       ~modes:t.modes
       ~const_toplevels:t.const_toplevels
+      ~compile_time_c_calls:t.compile_time_c_calls
       interpreter
   in
   let prelude, (_ : Module_scope.t) = prelude_and_root t program_env in
@@ -4418,6 +4449,7 @@ let typecheck ({ fresh; stamps; interpreter; _ } as t) ~program =
       ~stamps
       ~modes:t.modes
       ~const_toplevels:t.const_toplevels
+      ~compile_time_c_calls:t.compile_time_c_calls
       interpreter
   in
   let (_ : Module_scope.t), root = prelude_and_root t program_env in
@@ -4426,10 +4458,23 @@ let typecheck ({ fresh; stamps; interpreter; _ } as t) ~program =
 ;;
 
 let check_prelude
-  { fresh; stamps; interpreter; prelude; modes; const_toplevels }
+  { fresh
+  ; stamps
+  ; interpreter
+  ; prelude
+  ; modes
+  ; const_toplevels
+  ; compile_time_c_calls
+  }
   =
   let program_env =
-    program_env fresh ~stamps ~modes ~const_toplevels interpreter
+    program_env
+      fresh
+      ~stamps
+      ~modes
+      ~const_toplevels
+      ~compile_time_c_calls
+      interpreter
   in
   let prelude = add_prelude program_env (force prelude) in
   check_module fresh program_env prelude

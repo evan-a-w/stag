@@ -29,6 +29,7 @@ type t =
   | External of
       { symbol : string
       ; signature : C_signature.t
+      ; at_compile_time : Compile_time_c_calls.Policy.t
       ; applied : t list
       }
   | Intrinsic of Intrinsic.t

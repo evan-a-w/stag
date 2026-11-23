@@ -21,6 +21,7 @@ type t =
 
 let create_typecheck
   ?(interpreter = Stag_treewalk.interpreter)
+  ?compile_time_c_calls
   ~limits
   ~output
   ?prelude
@@ -30,12 +31,26 @@ let create_typecheck
   let interpreter = Interpreter.create interpreter ~stamps in
   Option.iter output ~f:(Interpreter.set_output interpreter);
   Interpreter.set_limits interpreter limits;
-  Typecheck.create ~stamps ~interpreter ?prelude (), interpreter
+  ( Typecheck.create ~stamps ~interpreter ?compile_time_c_calls ?prelude ()
+  , interpreter )
 ;;
 
-let check ?interpreter ?(limits = Limits.unlimited) ?output ?prelude program =
+let check
+  ?interpreter
+  ?compile_time_c_calls
+  ?(limits = Limits.unlimited)
+  ?output
+  ?prelude
+  program
+  =
   let typecheck, interpreter =
-    create_typecheck ?interpreter ~limits ~output ?prelude ()
+    create_typecheck
+      ?interpreter
+      ?compile_time_c_calls
+      ~limits
+      ~output
+      ?prelude
+      ()
   in
   let%map.Result checked = Typecheck.typecheck typecheck ~program in
   { checked; interpreter; eval_order = [] }
@@ -141,13 +156,20 @@ let rec eval_order ~prefix ~references ~(items : Signature.t) members =
 
 let check_modules
   ?interpreter
+  ?compile_time_c_calls
   ?(limits = Limits.unlimited)
   ?output
   ?prelude
   groups
   =
   let typecheck, interpreter =
-    create_typecheck ?interpreter ~limits ~output ?prelude ()
+    create_typecheck
+      ?interpreter
+      ?compile_time_c_calls
+      ~limits
+      ~output
+      ?prelude
+      ()
   in
   let%map.Result checked =
     Typecheck.typecheck
@@ -179,7 +201,14 @@ let eval ?(limits = Limits.unlimited) t =
   Interpreter.eval t.interpreter
 ;;
 
-let check_files ?interpreter ?limits ?output ?prelude files =
+let check_files
+  ?interpreter
+  ?compile_time_c_calls
+  ?limits
+  ?output
+  ?prelude
+  files
+  =
   let parsed = List.map files ~f:Source_file.parse_recovering in
   let source_errors =
     List.concat_map parsed ~f:snd
@@ -191,6 +220,7 @@ let check_files ?interpreter ?limits ?output ?prelude files =
     (match
        check_modules
          ?interpreter
+         ?compile_time_c_calls
          ?limits
          ?output
          ?prelude
