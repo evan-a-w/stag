@@ -248,17 +248,6 @@ module Expr : sig
   (** Whether [t] refers to a binder satisfying [f], by a [Bound] or
       [Persistent] variable, an [Assign] or an [Implicit] substitution. *)
   val refers_to : t -> f:(Binder.t -> bool) @ local -> bool
-
-  (** The local idents [t] refers to (as [refers_to]) that it doesn't bind. *)
-  val free_locals : t -> Ident.Set.t
-
-  (** Syntactic values, which may be generalized (the relaxed value
-      restriction). A toplevel splice is judged by its expansion. *)
-  val is_value : t -> bool
-
-  (** Whether a [Let] of [ident] may be generalized: a function, or a value that
-      doesn't refer to [ident]. *)
-  val binding_is_value : ident:Ident.t -> args:Ident.t list -> body:t -> bool
 end
 
 module Toplevel : sig
