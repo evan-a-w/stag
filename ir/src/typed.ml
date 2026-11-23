@@ -231,8 +231,9 @@ module Expr = struct
       | Let of
           { ident : Ident.t
           ; args : Ident.t list
-          ; annots : (Ident.t * Syntax.Type_expr.t) list [@sexp.list]
+          ; annots : (Ident.t * Syntax.Annot.t) list [@sexp.list]
           ; result_annot : Syntax.Type_expr.t option [@sexp.option]
+          ; mode : Syntax.Mode_expr.t option [@sexp.option]
           ; generalized : bool
           ; body : 'e
           ; in_ : 'e
@@ -240,16 +241,17 @@ module Expr = struct
       | Let_mut of
           { ident : Ident.t
           ; annot : Syntax.Type_expr.t option [@sexp.option]
+          ; mode : Syntax.Mode_expr.t option [@sexp.option]
           ; body : 'e
           ; in_ : 'e
           }
       | Assign of Var_ref.t * 'e
       | Fun of
           { args : Ident.t list
-          ; annots : (Ident.t * Syntax.Type_expr.t) list [@sexp.list]
+          ; annots : (Ident.t * Syntax.Annot.t) list [@sexp.list]
           ; body : 'e
           }
-      | Annotated of 'e * Syntax.Type_expr.t
+      | Annotated of 'e * Syntax.Annot.t
       | Splice of
           { code : 'e
           ; subs : 'e Subs.t

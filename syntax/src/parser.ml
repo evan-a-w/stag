@@ -287,6 +287,7 @@ let mode_expr t : Mode_expr.t =
   | Lident _ ->
     let rec loop acc =
       match peek t with
+      | Lident "and" when not (List.is_empty acc) -> List.rev acc
       | Lident name ->
         (match Mode_expr.Atom.of_string name with
          | None ->
@@ -322,6 +323,31 @@ let mode_expr t : Mode_expr.t =
     let atoms = loop [] in
     since t start (Mode_expr.Atoms atoms)
   | _ -> expected t "a mode like `local`, or a mode variable like `'m`"
+;;
+
+(** [with 'm <= 'n and ...], after the [with]. *)
+let mode_constraints t =
+  let rec loop acc =
+    let lower = mode_expr t in
+    if not (is t Less && Token.equal (peek_at t 1) Equal) then expected t "`<=`";
+    advance t;
+    advance t;
+    let upper = mode_expr t in
+    (match lower.txt, upper.txt with
+     | Atoms _, Atoms _ ->
+       fail
+         (Loc.merge lower.loc upper.loc)
+         "a mode constraint relates a mode variable, as in `'m <= 'n` or `'m \
+          <= portable`"
+     | _ -> ());
+    let acc = { Mode_expr.Constraint.lower; upper } :: acc in
+    match peek t with
+    | Lident "and" ->
+      advance t;
+      loop acc
+    | _ -> List.rev acc
+  in
+  loop []
 ;;
 
 let misplaced_mode =
@@ -822,12 +848,33 @@ let annot t : Annot.t =
   | Colon ->
     advance t;
     let ty = moded_type_expr t in
-    (match ty.txt with
-     | Moded (ty, mode) -> { ty = Some ty; mode = Some mode }
-     | _ -> { ty = Some ty; mode = None })
+    let ty, mode =
+      match ty.txt with
+      | Moded (ty, mode) -> ty, Some mode
+      | _ -> ty, None
+    in
+    let ty =
+      if is t With
+      then (
+        advance t;
+        let constraints = mode_constraints t in
+        let last = List.last_exn constraints in
+        located
+          ~loc:(Loc.merge ty.loc last.upper.loc)
+          (Type_expr.Constrained (ty, constraints)))
+      else ty
+    in
+    { ty = Some ty; mode }
   | At ->
     advance t;
-    { ty = None; mode = Some (mode_expr t) }
+    let mode = mode_expr t in
+    if is t With
+    then
+      fail
+        (loc t)
+        "mode constraints follow an annotation's type, as in `(x : t @ 'm with \
+         'm <= portable)`";
+    { ty = None; mode = Some mode }
   | _ -> Annot.none
 ;;
 

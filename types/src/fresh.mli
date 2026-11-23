@@ -11,6 +11,9 @@ val id : t -> Type.id
 val set_value_parameters : t -> Value_layout.parameters -> unit
 val value_parameters : t -> Value_layout.parameters
 
+(** The source of mode variables' ids. *)
+val modes : t -> Mode.Id_source.t
+
 (** An [Unbound] variable with a fresh id. *)
 val var : t -> rank:Type.rank -> (_, _) Type.Var.t
 

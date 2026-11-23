@@ -73,7 +73,7 @@ let%expect_test "builtins" =
 let%expect_test "compound" =
   let t = Runtime_types.create Resolver.empty in
   shape t (Type.TTuple [ int; bool ]);
-  shape t (Type.TArrow (int, bool));
+  shape t (Type.arrow int bool);
   shape t (Type.TCode { inner = int; context = Type.REmpty });
   layout t (Type.TTuple [ int; bool ]);
   [%expect

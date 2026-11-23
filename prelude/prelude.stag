@@ -131,6 +131,9 @@ module Stag = struct
       | Splice of ptr[Expr.t]
       (* [t @ m], only as a function type's argument or result. *)
       | Moded of ptr[t * Mode_expr.t]
+      (* [t with c and ...], only as an annotation's type: each constraint
+         [(lower, upper)] is [lower <= upper], at least one a variable. *)
+      | Constrained of ptr[t * list[Mode_expr.t * Mode_expr.t]]
       (* [global_ t], only as a record field's type or a constructor's
          argument. *)
       | Global of ptr[t]

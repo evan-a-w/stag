@@ -160,11 +160,11 @@ module Expr = struct
     type nonrec t =
       | Lit of Syntax.Lit.t
       | Var of Var.t
-      | Annotated of t * Syntax.Type_expr.t
+      | Annotated of t * Syntax.Annot.t
       | App of t * t
       | Let of
           { binder : Binder.t
-          ; args : (Binder.t * Syntax.Type_expr.t option) list
+          ; args : (Binder.t * Syntax.Annot.t) list
           ; annot : Syntax.Type_expr.t option
           ; mode : Syntax.Mode_expr.t option
           ; body : t
@@ -173,13 +173,14 @@ module Expr = struct
       | Let_mut of
           { binder : Binder.t
           ; annot : Syntax.Type_expr.t option
+          ; mode : Syntax.Mode_expr.t option
           ; body : t
           ; in_ : t
           }
       | Assign of Var.t * t
       | Store of t * t
       | Fun of
-          { args : (Binder.t * Syntax.Type_expr.t option) list
+          { args : (Binder.t * Syntax.Annot.t) list
           ; body : t
           }
       | Splice of
@@ -210,7 +211,7 @@ module Expr = struct
       | Error
   end
 
-  let binding (name, (annot : Syntax.Annot.t)) = Binder.Name name, annot.ty
+  let binding (name, (annot : Syntax.Annot.t)) = Binder.Name name, annot
 
   let rec syntax_view (expr : Syntax.Expr.t) : View.t =
     let sub expr = Syntax expr in
@@ -233,6 +234,7 @@ module Expr = struct
       Let_mut
         { binder = Name name
         ; annot = annot.ty
+        ; mode = annot.mode
         ; body = sub equal
         ; in_ = sub in_
         }
@@ -287,7 +289,9 @@ module Expr = struct
 
   let annotated_args args annots =
     List.map args ~f:(fun ident ->
-      Binder.Ident ident, List.Assoc.find annots ident ~equal:Typed.Ident.equal)
+      ( Binder.Ident ident
+      , List.Assoc.find annots ident ~equal:Typed.Ident.equal
+        |> Option.value ~default:Syntax.Annot.none ))
   ;;
 
   let rec generated_view ({ desc; ty = _; loc } : Typed.Expr.t) : View.t =
@@ -301,17 +305,20 @@ module Expr = struct
     | Var var_ref -> Var (Ref var_ref)
     | App (f, x) -> App (sub f, sub x)
     | Annotated (expr, annot) -> Annotated (sub expr, annot)
-    | Let { ident; args; annots; result_annot; generalized = _; body; in_ } ->
+    | Let
+        { ident; args; annots; result_annot; mode; generalized = _; body; in_ }
+      ->
       Let
         { binder = Ident ident
         ; args = annotated_args args annots
         ; annot = result_annot
-        ; mode = None
+        ; mode
         ; body = sub body
         ; in_ = sub in_
         }
-    | Let_mut { ident; annot; body; in_ } ->
-      Let_mut { binder = Ident ident; annot; body = sub body; in_ = sub in_ }
+    | Let_mut { ident; annot; mode; body; in_ } ->
+      Let_mut
+        { binder = Ident ident; annot; mode; body = sub body; in_ = sub in_ }
     | Assign (var_ref, value) -> Assign (Ref var_ref, sub value)
     | Store (target, value) -> Store (sub target, sub value)
     | Fun { args; annots; body } ->

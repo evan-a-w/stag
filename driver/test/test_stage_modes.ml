@@ -59,7 +59,7 @@ let code = .<n>.
     {|
     val f : 'a -> 'a
     val n : int
-    val code : <'a>{n : 'a; ..'b}
+    val code : <int>{..'a}
     |}]
 ;;
 
@@ -134,10 +134,7 @@ let bad @ const = Int.add 1 2
 let bad_local = let x @ portable = (fun u -> u) 1 in x
 |};
   [%expect
-    {|
-    This is nonportable, because it applies a function (at t.stag:4:18-29), but must be at most const, because it is annotated const (at t.stag:4:10-15)
-    This is nonportable, because it applies a function (at t.stag:5:35-49), but must be at most portable, because it is annotated portable (at t.stag:5:24-32)
-    |}]
+    {| This is portable, because it applies a function (at t.stag:4:18-29), but must be at most const, because it is annotated const (at t.stag:4:10-15) |}]
 ;;
 
 let%expect_test "const_toplevels" =
@@ -159,8 +156,8 @@ let mut computed_counter = f 0
     val applied : int
     val counter : int
     val computed_counter : int
-    This is nonportable, because it applies a function (at t.stag:4:14-17), but must be at most const, because applied is a toplevel (at t.stag:4:14-17)
-    This is nonportable, because it applies a function (at t.stag:6:27-30), but must be at most const, because computed_counter is a toplevel (at t.stag:6:27-30)
+    This is portable, because it applies a function (at t.stag:4:14-17), but must be at most const, because applied is a toplevel (at t.stag:4:14-17)
+    This is portable, because it applies a function (at t.stag:6:27-30), but must be at most const, because computed_counter is a toplevel (at t.stag:6:27-30)
     |}]
 ;;
 
@@ -291,7 +288,7 @@ let applied = .~(.<Int.add 1 2>.)
     val embeds : '_a -> '_a
     val quoted : <'_a -> '_a>{..'b}
     This is portable, because k was computed at compile time (at t.stag:2:33-34), but must be at most const, because embeds is a toplevel (at t.stag:2:13-37)
-    This is nonportable, because it applies a function (at t.stag:4:19-30), but must be at most const, because applied is a toplevel (at t.stag:4:14-33)
+    This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:4:19-30), but must be at most const, because applied is a toplevel (at t.stag:4:14-33)
     |}]
 ;;
 
@@ -328,11 +325,7 @@ let k @ portable = let n = Int.add 1 2 in fun x -> Int.add x n
 let v @ 'm = 1
 |};
   [%expect
-    {|
-    This is nonportable, because it is a parameter, then n is captured by a closure (at t.stag:3:45-46), then the closure is made (at t.stag:3:26-46), but must be at most const, because it is annotated const (at t.stag:3:18-23)
-    This is nonportable, because it applies a function (at t.stag:4:27-38), then n is bound (at t.stag:4:19-62), but must be at most portable, because it is annotated portable (at t.stag:4:8-16)
-    Mode variables like 'm are not supported on bindings yet
-    |}]
+    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:4:27-38), then n is bound (at t.stag:4:19-62), but must be at most portable, because it is annotated portable (at t.stag:4:8-16) |}]
 ;;
 
 let%expect_test "a limit is reported once, at what first exceeds it" =
@@ -341,7 +334,7 @@ let%expect_test "a limit is reported once, at what first exceeds it" =
 let bad @ const = (Int.add 1 2, Int.add 3 4, Int.add (Int.add 5 6) 7)
 |};
   [%expect
-    {| This is nonportable, because it applies a function (at t.stag:2:19-30), but must be at most const, because it is annotated const (at t.stag:2:10-15) |}]
+    {| This is portable, because it applies a function (at t.stag:2:19-30), but must be at most const, because it is annotated const (at t.stag:2:10-15) |}]
 ;;
 
 let%expect_test "substituting a name the code doesn't need is an error" =
@@ -416,7 +409,8 @@ let k : int -> <int -> int>{..'r} = .~g
     (g
      (Code
       (Fun (args (y/18))
-       (annots ((y/18 ((Con (<int> @ t.stag:3:20-23) ()) @ t.stag:3:20-23))))
+       (annots
+        ((y/18 ((ty ((Con (<int> @ t.stag:3:20-23) ()) @ t.stag:3:20-23))))))
        (body
         (Let (ident h/19) (args (a/20)) (generalized true)
          (body (Var (Bound (Local y/18)) : 'a))
@@ -433,7 +427,8 @@ let k : int -> <int -> int>{..'r} = .~g
     (g
      (Code
       (Fun (args (y/18))
-       (annots ((y/18 ((Con (<int> @ t.stag:3:20-23) ()) @ t.stag:3:20-23))))
+       (annots
+        ((y/18 ((ty ((Con (<int> @ t.stag:3:20-23) ()) @ t.stag:3:20-23))))))
        (body
         (Let (ident h/19) (args (a/20)) (generalized true)
          (body (Var (Bound (Local y/18)) : 'a))
@@ -498,7 +493,7 @@ let q = .< fun a -> let p = fun u -> .~(.<1>.) in (p 1, p true) >.
 let q = .< fun a -> let h @ const = fun u -> .~(.<1>.) in h >.
 |};
   [%expect
-    {| This is nonportable, because it is a parameter, then a is captured by a closure (at t.stag:2:45-54), then the closure is made (at t.stag:2:36-54), but must be at most const, because it is annotated const (at t.stag:2:28-33) |}]
+    {| This is nonportable, because h is being defined (at t.stag:2:20-59), then h is captured by a closure (at t.stag:2:45-54), then the closure is made (at t.stag:2:36-54), but must be at most const, because it is annotated const (at t.stag:2:28-33) |}]
 ;;
 
 let%expect_test "data holding a toplevel function being checked is const" =

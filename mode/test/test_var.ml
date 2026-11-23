@@ -374,3 +374,44 @@ let%expect_test "equate failing on its second half changes nothing" =
      (m1.locality Local))
     |}]
 ;;
+
+let%expect_test "lower bounds assuming some variables at their upper bounds" =
+  let ids = Id_source.create () in
+  let param = Var.create ids ~rank:1
+  and other = Var.create ids ~rank:1
+  and mid = Var.create ids ~rank:1
+  and result = Var.create ids ~rank:1
+  and generic = Var.create ids ~rank:1 in
+  List.iter
+    [ param, mid; mid, result; other, result; generic, result; result, mid ]
+    ~f:(fun (a, b) -> ok_exn (Var.submode a b (reason "flows")));
+  ok_exn (Var.at_most param Stage Portable (reason "param is portable"));
+  ok_exn (Var.at_most param Provenance Gc (reason "param is gc"));
+  ok_exn (Var.at_most other Locality Regional (reason "other is regional"));
+  Var.generalize [ generic ] ~rank:0;
+  let assuming raised =
+    let raised = List.map raised ~f:Var.id in
+    let raised id = List.mem raised id ~equal:Int.equal in
+    print_s
+      [%message
+        ""
+          ~stage:(Var.lower_assuming result Stage ~raised : Stage.t)
+          ~provenance:
+            (Var.lower_assuming result Provenance ~raised : Provenance.t)
+          ~locality:(Var.lower_assuming result Locality ~raised : Locality.t)]
+  in
+  assuming [];
+  assuming [ param ];
+  assuming [ other ];
+  assuming [ generic ];
+  show [ result ];
+  [%expect
+    {|
+    ((stage Const) (provenance Static) (locality Global))
+    ((stage Portable) (provenance Gc) (locality Local))
+    ((stage Nonportable) (provenance Unknown) (locality Regional))
+    ((stage Const) (provenance Static) (locality Global))
+    ((m3.stage Const..Nonportable) (m3.provenance Static..Unknown)
+     (m3.locality Global..Local))
+    |}]
+;;

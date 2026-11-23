@@ -48,3 +48,17 @@ module Instance : sig
   (** The id of the variable that the copies of a variable's nodes belong to. *)
   val var_id : t -> int -> int
 end
+
+(** [None] once generic. *)
+val rank : t -> int option
+
+val var_id : t -> int
+
+(** The nodes [t] is related to on its axis, without a morphism: [`Le n] for
+    [t <= n], [`Ge n] for [n <= t]. A generic node's are the constraints its
+    scheme keeps, others' their edges. *)
+val relations : t -> ([ `Le | `Ge ] * t) list
+
+(** The lower bound [t] would have if the variables [raised] (by variable id),
+    but generic ones, were raised to their upper bounds. *)
+val lower_assuming : t -> raised:(int -> bool) -> int

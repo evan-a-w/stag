@@ -18,6 +18,31 @@ val upper : t -> Const.t
 val is_generic : t -> bool
 val lower_rank : t -> rank:int -> unit
 
+(** The lower bound [t] would have on [axis] if the variables [raised] (by [id])
+    were raised to their upper bounds, but generic ones: what [t] is at least
+    however they turn out. *)
+val lower_assuming : t -> 'a Axis.t -> raised:(int -> bool) -> 'a
+
+(** [None] once generic. *)
+val rank : t -> int option
+
+(** A variable's node on one axis, to walk the constraints between variables. *)
+module Node : sig
+  type t
+
+  (** The id of the variable it belongs to. *)
+  val var_id : t -> int
+
+  (** [`Le n] for [this <= n], [`Ge n] for [n <= this], on the same axis and
+      without crossing: of a generic variable, the constraints its scheme keeps;
+      of another, those it has now. A relation through a crossing morphism is
+      left out: no annotation can write it, and nothing crosses modes until
+      crossing by kind. *)
+  val relations : t -> ([ `Le | `Ge ] * t) list
+end
+
+val node : t -> _ Axis.t -> Node.t
+
 (** [submode a b]: a value of mode [a] may be used at mode [b]. With [crossing],
     [a] is first lowered on the axes it crosses. *)
 val submode
@@ -26,6 +51,9 @@ val submode
   -> t
   -> Reason.t
   -> (unit, Mode_error.t) Result.t
+
+(** [submode a b] on [axis] only. *)
+val submode_on : t -> t -> _ Axis.t -> Reason.t -> (unit, Mode_error.t) Result.t
 
 val equate : t -> t -> Reason.t -> (unit, Mode_error.t) Result.t
 val at_least : t -> 'a Axis.t -> 'a -> Reason.t -> (unit, Mode_error.t) Result.t

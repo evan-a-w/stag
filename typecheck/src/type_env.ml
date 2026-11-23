@@ -152,7 +152,8 @@ let rec has_splice (expr : Type_expr.t) =
   | Tuple tys -> List.exists tys ~f:has_splice
   | Code { inner; context } -> has_splice inner || row_has_splice context
   | Record row | Variant row -> row_has_splice row
-  | Mut ty | Immut ty | Moded (ty, _) | Global ty -> has_splice ty
+  | Mut ty | Immut ty | Moded (ty, _) | Constrained (ty, _) | Global ty ->
+    has_splice ty
 
 and row_has_splice (row : Type_expr.row) =
   match row.txt with
@@ -219,10 +220,16 @@ module Annotation_vars = struct
     ; rank : Type.rank
     ; tys : Type.ty String.Table.t
     ; rows : Type.row String.Table.t
+    ; modes : Mode.Var.t String.Table.t
     }
 
   let create fresh ~rank =
-    { fresh; rank; tys = String.Table.create (); rows = String.Table.create () }
+    { fresh
+    ; rank
+    ; tys = String.Table.create ()
+    ; rows = String.Table.create ()
+    ; modes = String.Table.create ()
+    }
   ;;
 
   let ty t name =
@@ -233,6 +240,57 @@ module Annotation_vars = struct
   let row t name =
     Hashtbl.find_or_add t.rows name ~default:(fun () ->
       Type.RVar (Fresh.var t.fresh ~rank:t.rank))
+  ;;
+
+  let fresh_mode t = Mode.Var.create (Fresh.modes t.fresh) ~rank:t.rank
+
+  let mode t name =
+    Hashtbl.find_or_add t.modes name ~default:(fun () -> fresh_mode t)
+  ;;
+end
+
+module Mode_atoms = struct
+  (* The constant of a declaration's arrow: the axes not written are the
+     default's, but a [const] one is [static]. Only the stage axis is checked so
+     far: the others are left to their default. *)
+  let declared (atoms : Syntax.Mode_expr.Atom.t list) =
+    let default = Arrow_modes.default_const in
+    let const : Mode.Const.t =
+      List.fold atoms ~init:default ~f:(fun const atom ->
+        match atom with
+        | Const -> { const with stage = Const; provenance = Static }
+        | Portable -> { const with stage = Portable }
+        | Nonportable -> { const with stage = Nonportable }
+        | Static | Gc | Unknown | Global | Regional | Local -> const)
+    in
+    const
+  ;;
+
+  (* Fixes the axes written, of those checked so far (stage). *)
+  let constrain var (atoms : Syntax.Mode_expr.Atom.t list) ~loc =
+    let reason =
+      Mode.Reason.create
+        ~loc
+        (sprintf
+           "it is annotated %s"
+           (List.map atoms ~f:Syntax.Mode_expr.Atom.to_string
+            |> String.concat ~sep:" "))
+    in
+    let fix axis point =
+      let%bind.Result () = Mode.Var.at_least var axis point reason in
+      Mode.Var.at_most var axis point reason
+    in
+    List.fold_result
+      atoms
+      ~init:()
+      ~f:(fun () (atom : Syntax.Mode_expr.Atom.t) ->
+        match atom with
+        | Const -> fix Mode.Axis.Stage Mode.Stage.Const
+        | Portable -> fix Stage Portable
+        | Nonportable -> fix Stage Nonportable
+        | Static | Gc | Unknown | Global | Regional | Local -> Ok ())
+    |> Result.map_error ~f:(fun (_ : Mode.Error.t) ->
+      Typecheck_error.create ~loc (Invalid_mode "its modes are inconsistent"))
   ;;
 end
 
@@ -268,6 +326,73 @@ module Vars = struct
        | Some (ARow row) -> Ok row
        | Some (ATy _) -> error ~loc (Type_variable_kind_mismatch name)
        | None -> error ~loc (Unbound_type_variable name))
+  ;;
+
+  (* An arrow side written without a mode: in an annotation, any, so as not to
+     restrict the modes of what it annotates; in a declaration, the default. *)
+  let unannotated_side : t -> Arrow_modes.Side.t = function
+    | Annotation vars -> Var (Annotation_vars.fresh_mode vars)
+    | Params _ -> Fixed Arrow_modes.default_const
+  ;;
+
+  let mode_side t ({ txt; loc } : Syntax.Mode_expr.t)
+    : (Arrow_modes.Side.t, Typecheck_error.t) Result.t
+    =
+    match t, txt with
+    | Annotation vars, Var name -> Ok (Var (Annotation_vars.mode vars name))
+    | Params _, Var name -> error ~loc (Mode_variable_in_declaration name)
+    | Annotation vars, Atoms atoms ->
+      let var = Annotation_vars.fresh_mode vars in
+      let%map.Result () = Mode_atoms.constrain var atoms ~loc in
+      Arrow_modes.Side.Var var
+    | Params _, Atoms atoms ->
+      Ok (Arrow_modes.Side.Fixed (Mode_atoms.declared atoms))
+  ;;
+
+  (* [lower <= upper] between variables, or bounding a variable by the atoms: on
+     the axes checked so far (stage), as printed. *)
+  let mode_constraint t ({ lower; upper } : Syntax.Mode_expr.Constraint.t) ~loc
+    : (unit, Typecheck_error.t) Result.t
+    =
+    let reason =
+      Mode.Reason.create
+        ~loc
+        (sprintf
+           "it is annotated %s"
+           (Syntax.Mode_expr.Constraint.to_string { lower; upper }))
+    in
+    let bound (atoms : Syntax.Mode_expr.Atom.t list) ~f =
+      List.fold_result atoms ~init:() ~f:(fun () atom ->
+        match atom with
+        | Const -> f Mode.Stage.Const
+        | Portable -> f Portable
+        | Nonportable -> f Nonportable
+        | Static | Gc | Unknown | Global | Regional | Local -> Ok ())
+    in
+    let checked result =
+      Result.map_error result ~f:(fun error ->
+        Typecheck_error.create ~loc (Mode_error error))
+    in
+    match t, lower.txt, upper.txt with
+    | _, Atoms _, Atoms _ ->
+      error ~loc (Invalid_mode "a constraint must be on a mode variable")
+    | Params _, Var name, _ | Params _, _, Var name ->
+      error ~loc (Mode_variable_in_declaration name)
+    | Annotation vars, Var lower, Var upper ->
+      checked
+        (Mode.Var.submode_on
+           (Annotation_vars.mode vars lower)
+           (Annotation_vars.mode vars upper)
+           Stage
+           reason)
+    | Annotation vars, Var lower, Atoms atoms ->
+      let var = Annotation_vars.mode vars lower in
+      checked
+        (bound atoms ~f:(fun point -> Mode.Var.at_most var Stage point reason))
+    | Annotation vars, Atoms atoms, Var upper ->
+      let var = Annotation_vars.mode vars upper in
+      checked
+        (bound atoms ~f:(fun point -> Mode.Var.at_least var Stage point reason))
   ;;
 end
 
@@ -324,9 +449,20 @@ let rec elaborate' t module_ vars ~splices ~expansions (expr : Type_expr.t)
     | Con (path, args) ->
       elaborate_con t module_ vars ~splices ~expansions path args ~loc
     | Arrow (ty1, ty2) ->
-      let%bind.Result ty1, syntax1 = elaborate ty1 in
-      let%map.Result ty2, syntax2 = elaborate ty2 in
-      Type.TArrow (ty1, ty2), Type_expr.Arrow (syntax1, syntax2)
+      let side (ty : Type_expr.t) =
+        match ty.txt with
+        | Moded (inner, mode) ->
+          let%bind.Result elaborated, syntax = elaborate inner in
+          let%map.Result side = Vars.mode_side vars mode in
+          elaborated, side, { ty with txt = Type_expr.Moded (syntax, mode) }
+        | _ ->
+          let%map.Result elaborated, syntax = elaborate ty in
+          elaborated, Vars.unannotated_side vars, syntax
+      in
+      let%bind.Result ty1, side1, syntax1 = side ty1 in
+      let%map.Result ty2, side2, syntax2 = side ty2 in
+      ( Type.TArrow (ty1, ty2, { arg = side1; res = side2 })
+      , Type_expr.Arrow (syntax1, syntax2) )
     | Tuple tys ->
       let%map.Result tys = map_result tys ~f:elaborate in
       let tys, syntax = List.unzip tys in
@@ -359,6 +495,16 @@ let rec elaborate' t module_ vars ~splices ~expansions (expr : Type_expr.t)
     | Moded (ty, mode) ->
       let%map.Result ty, syntax = elaborate ty in
       ty, Type_expr.Moded (syntax, mode)
+    | Constrained (ty, constraints) ->
+      let%bind.Result ty, syntax = elaborate ty in
+      let%map.Result () =
+        List.fold_result constraints ~init:() ~f:(fun () constraint_ ->
+          Vars.mode_constraint
+            vars
+            constraint_
+            ~loc:(Loc.merge constraint_.lower.loc constraint_.upper.loc))
+      in
+      ty, Type_expr.Constrained (syntax, constraints)
     | Global ty ->
       let%map.Result ty, syntax = elaborate ty in
       ty, Type_expr.Global syntax

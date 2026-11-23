@@ -11,6 +11,7 @@ let indirect_constructors =
     ; "Type_expr.Immut", 1
     ; "Type_expr.Splice", 1
     ; "Type_expr.Moded", 2
+    ; "Type_expr.Constrained", 2
     ; "Type_expr.Global", 1
     ; "Type_expr.Row.Extend", 3
     ; "Pattern.Deref", 1
@@ -102,6 +103,10 @@ module Make (B : Builder) = struct
         ]
   ;;
 
+  let mode_constraint ({ lower; upper } : Mode_expr.Constraint.t) =
+    B.tuple [ mode_expr lower; mode_expr upper ]
+  ;;
+
   let type_param ({ txt; loc = _ } : Type_decl.Param.t Located.t) =
     match txt with
     | Ty var -> con "Stag.Type_decl.Param.Ty" [ B.string var ]
@@ -160,6 +165,8 @@ module Make (B : Builder) = struct
       | Mut t -> con "Mut" [ type_expr t ]
       | Immut t -> con "Immut" [ type_expr t ]
       | Moded (t, m) -> con "Moded" [ type_expr t; mode_expr m ]
+      | Constrained (t, cs) ->
+        con "Constrained" [ type_expr t; list mode_constraint cs ]
       | Global t -> con "Global" [ type_expr t ]
       | Splice e ->
         (match A.antiquote Type_expr e with

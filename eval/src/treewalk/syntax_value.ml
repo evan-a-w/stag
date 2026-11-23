@@ -359,13 +359,14 @@ module Of_value = struct
       | _ -> raise Bad_arguments)
   ;;
 
-  (* Where a type is, so which of [t @ m] and [global_ t] it may be, as the
-     parser allows. *)
+  (* Where a type is, so which of [t @ m], [global_ t] and [t with ...] it may
+     be, as the parser allows. *)
   module Type_position = struct
     type t =
       | Plain
       | Arrow_side
       | Member
+      | Annotation
   end
 
   let rec type_expr ?(at = Type_position.Plain) value ~loc : Type_expr.t =
@@ -400,16 +401,40 @@ module Of_value = struct
              (match at with
               | Arrow_side ->
                 Moded (arg 0 (type_expr ~loc), arg 1 (mode_expr ~loc))
-              | Plain | Member ->
+              | Plain | Member | Annotation ->
                 unexpected
                   ~expected:
                     "a type without a mode: a mode is only on a function \
                      type's argument or result"
                   value)
+           | "Constrained", 2 ->
+             (match at with
+              | Annotation ->
+                let constraint_ value : Mode_expr.Constraint.t =
+                  let lower, upper =
+                    pair (mode_expr ~loc) (mode_expr ~loc) value
+                  in
+                  match lower.txt, upper.txt with
+                  | Atoms _, Atoms _ ->
+                    unexpected
+                      ~expected:"a constraint relating a mode variable"
+                      value
+                  | _ -> { lower; upper }
+                in
+                (match arg 1 (list constraint_) with
+                 | [] ->
+                   unexpected ~expected:"at least one mode constraint" value
+                 | constraints -> Constrained (arg 0 (type_expr ~loc), constraints))
+              | Plain | Arrow_side | Member ->
+                unexpected
+                  ~expected:
+                    "a type without mode constraints: they are only on an \
+                     annotation's type"
+                  value)
            | "Global", 1 ->
              (match at with
               | Member -> Global (arg 0 (type_expr ~loc))
-              | Plain | Arrow_side ->
+              | Plain | Arrow_side | Annotation ->
                 unexpected
                   ~expected:
                     "a type without [global_]: [global_] is only on a record \
@@ -524,7 +549,7 @@ module Of_value = struct
   and binding ~loc = pair (name Binder ~loc) (annot ~loc)
 
   and annot value ~loc : Annot.t =
-    { ty = field "ty" (option (type_expr ~loc)) value
+    { ty = field "ty" (option (type_expr ~at:Annotation ~loc)) value
     ; mode = field "mode" (option (mode_expr ~loc)) value
     }
 

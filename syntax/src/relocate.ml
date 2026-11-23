@@ -79,6 +79,10 @@ and type_desc (g : Type_expr.desc) (w : Type_expr.desc) : Type_expr.desc option 
     let* t = type_expr t t' in
     let+ m = mode_expr m m' in
     Type_expr.Moded (t, m)
+  | Constrained (t, cs), Constrained (t', cs') ->
+    let* t = type_expr t t' in
+    let+ cs = list mode_constraint cs cs' in
+    Type_expr.Constrained (t, cs)
   | Global t, Global t' ->
     let+ t = type_expr t t' in
     Type_expr.Global t
@@ -93,10 +97,19 @@ and type_desc (g : Type_expr.desc) (w : Type_expr.desc) : Type_expr.desc option 
       | Immut _
       | Splice _
       | Moded _
+      | Constrained _
       | Global _ )
     , _ ) -> None
 
 and mode_expr m m' = located (same Mode_expr.equal_desc) m m'
+
+and mode_constraint
+  ({ lower; upper } : Mode_expr.Constraint.t)
+  ({ lower = lower'; upper = upper' } : Mode_expr.Constraint.t)
+  =
+  let* lower = mode_expr lower lower' in
+  let+ upper = mode_expr upper upper' in
+  { Mode_expr.Constraint.lower; upper }
 
 and annot ({ ty; mode } : Annot.t) ({ ty = ty'; mode = mode' } : Annot.t) =
   let* ty = option type_expr ty ty' in

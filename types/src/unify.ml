@@ -68,7 +68,14 @@ let record_in_bounds_of
     add_in_bounds_of var [ bounded ];
     Ok ()
   in
-  match iter { Type.Iter.ty = record; row = record; presence = record } with
+  match
+    iter
+      { Type.Iter.ty = record
+      ; row = record
+      ; presence = record
+      ; mode = (fun _ -> Ok ())
+      }
+  with
   | Ok () -> ()
   | Error _ -> .
 ;;
@@ -83,7 +90,14 @@ let adjuster ~rank ~seen ~in_bounds_of : Unification_error.t Type.Iter.t =
      | Unbound _ | Generic | Link _ -> ());
     Ok ()
   in
-  { ty = adjust; row = adjust; presence = adjust }
+  { ty = adjust
+  ; row = adjust
+  ; presence = adjust
+  ; mode =
+      (fun var ->
+        Mode.Var.lower_rank var ~rank;
+        Ok ())
+  }
 ;;
 
 let adjust_binding fresh iter ~id ~rank ~in_bounds_of ~occurs target =
@@ -145,7 +159,18 @@ let fits ty ~(var : (Type.row, Type.bound) Type.Var.t) =
     | Unbound rank' when rank' <= rank && var'.id <> var.id -> Ok ()
     | Unbound _ | Generic | Link _ -> Error ()
   in
-  Type.iter_ty { ty = check; row = check; presence = check } ty |> Result.is_ok
+  Type.iter_ty
+    { ty = check
+    ; row = check
+    ; presence = check
+    ; mode =
+        (fun var ->
+          match Mode.Var.rank var with
+          | Some rank' when rank' <= rank -> Ok ()
+          | Some _ | None -> Error ())
+    }
+    ty
+  |> Result.is_ok
 ;;
 
 let fits_presence presence ~(var : (Type.row, Type.bound) Type.Var.t) =
@@ -251,7 +276,7 @@ let clash ty1 ty2 =
         | ATy ty1, ATy ty2 -> clash ~depth:(depth - 1) ty1 ty2
         | ARow _, ARow _ -> false
         | ATy _, ARow _ | ARow _, ATy _ -> true)
-    | TArrow (arg1, res1), TArrow (arg2, res2) ->
+    | TArrow (arg1, res1, _), TArrow (arg2, res2, _) ->
       clash ~depth:(depth - 1) arg1 arg2 || clash ~depth:(depth - 1) res1 res2
     | TTuple tys1, TTuple tys2 -> all tys1 tys2
     | TCode { inner = inner1; _ }, TCode { inner = inner2; _ } ->
@@ -271,7 +296,9 @@ let poison ty =
     Ok ()
   in
   let ignore ~guarded:_ _ = Ok () in
-  Type.iter_ty { ty = bind; row = ignore; presence = ignore } ty
+  Type.iter_ty
+    { ty = bind; row = ignore; presence = ignore; mode = (fun _ -> Ok ()) }
+    ty
 ;;
 
 let rec unify_ty' state ~ty1 ~ty2 : (unit, Unification_error.t) Result.t =
@@ -310,9 +337,12 @@ and unify_structure state ~ty1 ~ty2 =
         | ARow row1, ARow row2 -> unify_row' state ~row1 ~row2
         | ATy _, ARow _ | ARow _, ATy _ ->
           Error (Type_mismatch (ty1, ty2, Mismatch_arg_kind (arg1, arg2)))))
-  | TArrow (arg1, res1), TArrow (arg2, res2) ->
+  | TArrow (arg1, res1, modes1), TArrow (arg2, res2, modes2) ->
     let%bind.Result () = unify_ty' state ~ty1:arg1 ~ty2:arg2 in
-    unify_ty' state ~ty1:res1 ~ty2:res2
+    let%bind.Result () = unify_ty' state ~ty1:res1 ~ty2:res2 in
+    Arrow_modes.equate (Fresh.modes state.fresh) modes1 modes2
+    |> Result.map_error ~f:(fun error ->
+      Unification_error.Type_mismatch (ty1, ty2, Modes error))
   | TTuple tys1, TTuple tys2 ->
     let%bind.Result () = same_length tys1 tys2 in
     iter2_all tys1 tys2 ~f:(fun ty1 ty2 -> unify_ty' state ~ty1 ~ty2)

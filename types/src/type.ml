@@ -19,7 +19,7 @@ type ('a, 'bound) var =
 
 and ty =
   | TCon of string * arg list
-  | TArrow of ty * ty
+  | TArrow of ty * ty * Arrow_modes.t
   | TTuple of ty list
   | TCode of
       { inner : ty
@@ -123,6 +123,7 @@ let exn_name = "exn"
 let exn = TCon (exn_name, [])
 let error_name = "<error>"
 let error = TCon (error_name, [])
+let arrow arg res = TArrow (arg, res, Arrow_modes.default)
 
 (* Path compression, for a [Link] not already to the canonical value. Its new
    [Link] is the only allocation of the [canonical_*] functions, and rare once
@@ -230,8 +231,8 @@ let rec same_ty' ((tys, _) as pairs) ty1 ty2 =
   | TVar var1, TVar var2 -> var1.id = var2.id
   | TCon (name1, args1), TCon (name2, args2) ->
     String.equal name1 name2 && List.equal (same_arg pairs) args1 args2
-  | TArrow (a1, b1), TArrow (a2, b2) ->
-    same_ty' pairs a1 a2 && same_ty' pairs b1 b2
+  | TArrow (a1, b1, m1), TArrow (a2, b2, m2) ->
+    Arrow_modes.same m1 m2 && same_ty' pairs a1 a2 && same_ty' pairs b1 b2
   | TTuple tys1, TTuple tys2 -> List.equal (same_ty' pairs) tys1 tys2
   | TCode c1, TCode c2 ->
     same_ty' pairs c1.inner c2.inner && same_row' pairs c1.context c2.context
@@ -293,6 +294,7 @@ module Iter = struct
     ; row : guarded:bool -> (row, bound) Var.t -> (unit, 'e) Result.t
     ; presence :
         guarded:bool -> (presence, presence_bound) Var.t -> (unit, 'e) Result.t
+    ; mode : Mode.Var.t -> (unit, 'e) Result.t
     }
 end
 
@@ -353,6 +355,16 @@ end
 
 let iterate (local_ (f : _ Iter.t)) (local_ (start : Iter_start.t)) =
   let visited = stack_ { Visited.unremembered = 64; table = Null } in
+  let iter_modes (modes : Arrow_modes.t) =
+    match modes.arg, modes.res with
+    | Fixed _, Fixed _ -> Ok ()
+    | Var arg, Fixed _ -> f.mode arg
+    | Fixed _, Var res -> f.mode res
+    | Var arg, Var res ->
+      (match f.mode arg with
+       | Ok () -> f.mode res
+       | Error _ as error -> error)
+  in
   let rec iter_ty ~guarded ty =
     match ty with
     | TVar ({ state = Link target; _ } as var) ->
@@ -361,10 +373,13 @@ let iterate (local_ (f : _ Iter.t)) (local_ (start : Iter_start.t)) =
       else Ok ()
     | TVar var -> (f.ty ~guarded) var
     | TCon (_, args) -> iter_args ~guarded args
-    | TArrow (ty1, ty2) ->
-      (match iter_ty ~guarded ty1 with
-       | Ok () -> iter_ty ~guarded ty2
-       | Error _ as error -> error)
+    | TArrow (ty1, ty2, modes) ->
+      (match iter_modes modes with
+       | Error _ as error -> error
+       | Ok () ->
+         (match iter_ty ~guarded ty1 with
+          | Ok () -> iter_ty ~guarded ty2
+          | Error _ as error -> error))
     | TTuple tys -> iter_tys ~guarded tys
     | TCode { inner; context } ->
       (match iter_ty ~guarded inner with
@@ -430,6 +445,7 @@ module Mapper = struct
     ; presence : (presence, presence_bound) Var.t -> presence
     ; keeps : 'a 'bound. ('a, 'bound) Var.t -> bool
     ; id : unit -> id
+    ; mode : Mode.Var.t -> Mode.Var.t
     }
 end
 
@@ -453,6 +469,7 @@ module Changes = struct
 
   type t =
     { keeps : 'a 'bound. ('a, 'bound) Var.t -> bool
+    ; mode : Mode.Var.t -> Mode.Var.t
     ; tys : State.t Int.Table.t
     ; rows : State.t Int.Table.t
     ; nodes : State.t Int.Table.t
@@ -462,6 +479,7 @@ module Changes = struct
 
   let create (f : Mapper.t) =
     { keeps = f.keeps
+    ; mode = f.mode
     ; tys = Int.Table.create ()
     ; rows = Int.Table.create ()
     ; nodes = Int.Table.create ()
@@ -520,7 +538,12 @@ module Changes = struct
       List.fold args ~init:none ~f:(fun acc -> function
         | ATy ty' -> both acc (ty t ty')
         | ARow row' -> both acc (row t row'))
-    | TArrow (ty1, ty2) -> both (ty t ty1) (ty t ty2)
+    | TArrow (ty1, ty2, modes) ->
+      let changes =
+        List.exists (Arrow_modes.vars modes) ~f:(fun var ->
+          not (phys_equal (t.mode var) var))
+      in
+      both (changes, Int.max_value) (both (ty t ty1) (ty t ty2))
     | TTuple tys ->
       List.fold tys ~init:none ~f:(fun acc ty' -> both acc (ty t ty'))
     | TCode { inner; context } -> both (ty t inner) (row t context)
@@ -613,12 +636,13 @@ let mapper (f : Mapper.t) =
       if List.for_all2_exn args args' ~f:phys_equal
       then ty
       else TCon (name, args')
-    | TArrow (ty1, ty2) ->
+    | TArrow (ty1, ty2, modes) ->
       let ty1' = map_ty ty1 in
       let ty2' = map_ty ty2 in
-      if phys_equal ty1 ty1' && phys_equal ty2 ty2'
+      let modes' = Arrow_modes.map modes ~f:f.mode in
+      if phys_equal ty1 ty1' && phys_equal ty2 ty2' && phys_equal modes modes'
       then ty
-      else TArrow (ty1', ty2')
+      else TArrow (ty1', ty2', modes')
     | TTuple tys ->
       let tys' = List.map tys ~f:map_ty in
       if List.for_all2_exn tys tys' ~f:phys_equal then ty else TTuple tys'
@@ -686,7 +710,23 @@ let has_unbound_var ty =
     | Generic | Link _ -> Ok ()
   in
   Result.is_error
-    (iter_ty { ty = unbound; row = unbound; presence = unbound } ty)
+    (iter_ty
+       { ty = unbound
+       ; row = unbound
+       ; presence = unbound
+       ; mode = (fun _ -> Ok ())
+       }
+       ty)
+;;
+
+(* Only the modes of an arrow that aren't the default of a declaration's. *)
+let sexp_of_modes ({ arg; res } : Arrow_modes.t) =
+  let side name : Arrow_modes.Side.t -> _ = function
+    | Fixed const when Mode.Const.equal const Arrow_modes.default_const -> []
+    | Fixed const -> [ [%sexp (name : string), (const : Mode.Const.t)] ]
+    | Var _ -> []
+  in
+  side "arg" arg @ side "res" res
 ;;
 
 module Sexper = struct
@@ -777,7 +817,9 @@ module Sexper = struct
     match ty' with
     | TCon (name, args) ->
       List [ Atom "TCon"; Atom name; List (List.map args ~f:(arg t)) ]
-    | TArrow (ty1, ty2) -> List [ Atom "TArrow"; ty t ty1; ty t ty2 ]
+    | TArrow (ty1, ty2, modes) ->
+      Sexp.List
+        ([ Sexp.Atom "TArrow"; ty t ty1; ty t ty2 ] @ sexp_of_modes modes)
     | TTuple tys -> List [ Atom "TTuple"; List (List.map tys ~f:(ty t)) ]
     | TCode { inner; context } ->
       List
@@ -880,11 +922,16 @@ module Printer = struct
         (* The assignment variables written as an unmarked entry, as each is the
            only occurrence of an unconstrained one, so reads back as it. *)
     ; mutable counting : int Int.Table.t option
-    (* Set while rendering only to count how often each presence variable is
-       named. *)
+        (* Set while rendering only to count how often each presence variable is
+           named. *)
+    ; modes : Mode_printing.t option (* With [create ~modes:true]. *)
     }
 
-  let create ?(type_name = fun name -> Prelude_path.to_string_hum name) () =
+  let create
+    ?(type_name = fun name -> Prelude_path.to_string_hum name)
+    ?(modes = false)
+    ()
+    =
     { type_name
     ; names = Int.Table.create ()
     ; next_index = 0
@@ -896,6 +943,7 @@ module Printer = struct
     ; kept = Int.Hash_set.create ()
     ; elided = Int.Hash_set.create ()
     ; counting = None
+    ; modes = Option.some_if modes (Mode_printing.create ())
     }
   ;;
 
@@ -1032,6 +1080,44 @@ module Printer = struct
       else body
   ;;
 
+  let const_atoms (const : Mode.Const.t) =
+    let default = Arrow_modes.default_const in
+    let atom (type a) (axis : a Mode.Axis.t) (point : a) (default : a) =
+      let module C = (val Mode.Axis.chain axis) in
+      if C.equal point default
+      then []
+      else [ Sexp.to_string (C.sexp_of_t point) |> String.lowercase ]
+    in
+    atom Stage const.stage default.stage
+    @ atom Provenance const.provenance default.provenance
+    @ atom Locality const.locality default.locality
+  ;;
+
+  let is_default_side t : Arrow_modes.Side.t -> bool = function
+    | Fixed const -> List.is_empty (const_atoms const)
+    | Var var ->
+      (match t.modes, t.counting with
+       | None, _ -> true
+       | Some _, Some _ -> false
+       | Some modes, None -> Option.is_none (Mode_printing.side modes var))
+  ;;
+
+  let mode_side t (side : Arrow_modes.Side.t) =
+    match side with
+    | Fixed const ->
+      (match const_atoms const with
+       | [] -> ""
+       | atoms -> " @ " ^ String.concat ~sep:" " atoms)
+    | Var var ->
+      (match t.modes, t.counting with
+       | None, _ -> ""
+       | Some modes, Some _ ->
+         Mode_printing.count modes var;
+         " @ _"
+       | Some modes, None ->
+         Option.value (Mode_printing.side modes var) ~default:"")
+  ;;
+
   let rec ty_to_string t ~prec ty =
     let canonical = canonical_ty ty in
     match canonical, t.recursive with
@@ -1064,9 +1150,12 @@ module Printer = struct
            | ATy ty -> ty_to_string t ~prec:0 ty
            | ARow row -> record_to_string t row)
          |> String.concat ~sep:", ")
-    | TArrow (ty1, ty2) ->
-      let ty1 = ty_to_string t ~prec:1 ty1 in
-      let ty2 = ty_to_string t ~prec:0 ty2 in
+    | TArrow (ty1, ty2, modes) ->
+      let ty1 = ty_to_string t ~prec:1 ty1 ^ mode_side t modes.arg in
+      let ty2 =
+        ty_to_string t ~prec:(if is_default_side t modes.res then 0 else 1) ty2
+        ^ mode_side t modes.res
+      in
       parens_if (prec > 0) (sprintf "%s -> %s" ty1 ty2)
     | TTuple [] -> "()"
     | TTuple tys ->
@@ -1254,6 +1343,7 @@ module Printer = struct
     in
     ignore (render copy : string);
     ignore (bounds copy : string list);
+    Option.iter t.modes ~f:Mode_printing.settle;
     Hashtbl.iteri counts ~f:(fun ~key:id ~data:count ->
       if count = 1 && not (Hashtbl.mem t.names id) then Hash_set.add t.elided id);
     render t
@@ -1282,9 +1372,18 @@ module Printer = struct
   ;;
 
   let where t =
-    match bounds t with
+    let modes =
+      match t.modes with
+      | None -> []
+      | Some modes -> Mode_printing.constraints modes
+    in
+    (match bounds t with
+     | [] -> ""
+     | bounds -> " where " ^ String.concat ~sep:", " bounds)
+    ^
+    match modes with
     | [] -> ""
-    | bounds -> " where " ^ String.concat ~sep:", " bounds
+    | modes -> " with " ^ String.concat ~sep:" and " modes
   ;;
 end
 
@@ -1324,7 +1423,7 @@ module Snapshot = struct
 
   let rec ty t = function
     | TCon (name, args) -> TCon (name, List.map args ~f:(arg t))
-    | TArrow (a, b) -> TArrow (ty t a, ty t b)
+    | TArrow (a, b, modes) -> TArrow (ty t a, ty t b, modes)
     | TTuple tys -> TTuple (List.map tys ~f:(ty t))
     | TCode { inner; context } ->
       TCode { inner = ty t inner; context = row t context }

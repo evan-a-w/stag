@@ -117,7 +117,8 @@ module Kind = struct
     | Malformed_struct_quote of string
     | Misplaced_type_splice
     | Misplaced_mut
-    | Mode_variable_on_binding of string
+    | Mode_variable_in_declaration of string
+    | Invalid_mode of string
     | Spliced_code_assigns_immutable of string
     | Type_splice_failed of Error.t
     | Malformed_type_splice of Error.t
@@ -267,6 +268,7 @@ let unification_message (error : Unification_error.t) ~show_type =
         | Mismatch_arg_kind (a, b) ->
           let a = arg a in
           sprintf "\nThe arguments %s and %s are of different kinds." a (arg b)
+        | Modes error -> "\nTheir modes differ: " ^ mode_message error
       in
       sprintf
         "This expression has type %s but an expression was expected of type \
@@ -505,8 +507,12 @@ let rec kind_message (kind : Kind.t) ~show_type =
        be provided by a variable bound by [let mut] or a mutable toplevel"
       name
       name
-  | Mode_variable_on_binding var ->
-    sprintf "Mode variables like '%s are not supported on bindings yet" var
+  | Mode_variable_in_declaration var ->
+    sprintf
+      "The mode variable '%s is not allowed in a declaration: its arrows have \
+       fixed modes"
+      var
+  | Invalid_mode why -> sprintf "This mode is invalid: %s" why
   | Misplaced_mut ->
     "Only an entry of a code type's context can be [mut] or [immut], for a \
      variable the code assigns or doesn't"

@@ -55,3 +55,15 @@ let to_string (t : t) =
   | Var name -> "'" ^ name
   | Atoms atoms -> String.concat ~sep:" " (List.map atoms ~f:Atom.to_string)
 ;;
+
+module Constraint = struct
+  type mode = t [@@deriving sexp_of, compare, equal]
+
+  type t =
+    { lower : mode
+    ; upper : mode
+    }
+  [@@deriving sexp_of, compare, equal]
+
+  let to_string { lower; upper } = to_string lower ^ " <= " ^ to_string upper
+end

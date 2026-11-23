@@ -117,9 +117,26 @@ and maybe_global t : Type_expr.t =
   if int t 4 = 0 then loc (Type_expr.Global ty) else ty
 
 and annot t : Annot.t =
-  { ty = Option.some_if (bool t) (type_expr t)
+  { ty = Option.some_if (bool t) (annot_type t)
   ; mode = Option.some_if (int t 3 = 0) (mode_expr t)
   }
+
+(* An annotation's type, maybe with mode constraints. *)
+and annot_type t : Type_expr.t =
+  let ty = type_expr t in
+  if int t 3 = 0
+  then (
+    let var () = loc (Mode_expr.Var (pick t [ "m"; "n" ])) in
+    let constraint_ () : Mode_expr.Constraint.t =
+      match int t 3 with
+      | 0 -> { lower = var (); upper = mode_expr t }
+      | 1 -> { lower = mode_expr t; upper = var () }
+      | _ -> { lower = var (); upper = var () }
+    in
+    loc
+      (Type_expr.Constrained
+         (ty, List.init (1 + int t 2) ~f:(fun _ -> constraint_ ()))))
+  else ty
 
 and type_expr t : Type_expr.t =
   let unit =
@@ -211,7 +228,7 @@ and expr t : Expr.t =
              Var
                ( decl_path t ~last:lident
                , if bool t
-                 then { ty = Some (type_expr t); mode = None }
+                 then { ty = Some (annot_type t); mode = None }
                  else { ty = None; mode = Some (mode_expr t) } ))
          ; (fun t -> Construct (loc (decl_path t ~last:uident), []))
          ; (fun t -> Poly_variant (label t, None))

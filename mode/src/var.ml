@@ -90,6 +90,11 @@ let submode ?(crossing = Crossing.none) a b reason =
     all_axes (fun (T axis) -> submode_axis ~crossing a b axis reason))
 ;;
 
+let submode_on a b axis reason =
+  Graph.atomically (fun () ->
+    submode_axis ~crossing:Crossing.none a b axis reason)
+;;
+
 let equate a b reason =
   Graph.atomically (fun () ->
     let%bind.Result () = submode a b reason in
@@ -181,3 +186,17 @@ module Instance = struct
         copy)
   ;;
 end
+
+let rank t = Graph.rank t.stage
+
+module Node = struct
+  type t = Graph.t
+
+  let var_id = Graph.var_id
+  let relations = Graph.relations
+end
+
+let lower_assuming (type a) t (axis : a Axis.t) ~raised : a =
+  let module C = (val Axis.chain axis) in
+  C.of_index_exn (Graph.lower_assuming (node t axis) ~raised)
+;;

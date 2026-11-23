@@ -171,7 +171,8 @@ let expr (expr : Typed.Expr.t) =
     let field_path f = located loc (resolved (Typed.Field_ref.name f)) in
     let binding names annots ident : Syntax.Binding.t =
       ( label (name names ident)
-      , ty_annot (List.Assoc.find annots ident ~equal:Typed.Ident.equal) )
+      , List.Assoc.find annots ident ~equal:Typed.Ident.equal
+        |> Option.value ~default:Syntax.Annot.none )
     in
     match e.desc with
     | Lit lit -> node (Lit lit)
@@ -186,16 +187,18 @@ let expr (expr : Typed.Expr.t) =
       let%bind target = go names target in
       let%bind value = go names value in
       node (Store (target, value))
-    | Let_mut { ident; annot; body; in_ } ->
+    | Let_mut { ident; annot; mode; body; in_ } ->
       let%bind body = go names body in
       let names = Names.bind names [ ident ] ~scope:(Uses.of_expr in_) in
       let%bind in_ = go names in_ in
-      node (Let_mut (label (name names ident), ty_annot annot, body, in_))
+      node
+        (Let_mut
+           (label (name names ident), { (ty_annot annot) with mode }, body, in_))
     | Annotated (e, annot) ->
       let%bind e = go names e in
       (match e.txt with
        | Var (path, existing) when Syntax.Annot.is_none existing ->
-         node (Var (path, ty_annot (Some annot)))
+         node (Var (path, annot))
        | _ ->
          Or_error.error_s
            [%message "annotated non-variable" (e : Syntax.Expr.t)])
@@ -203,7 +206,9 @@ let expr (expr : Typed.Expr.t) =
       let%bind f = go names f in
       let%bind x = go names x in
       node (App (f, x))
-    | Let { ident; args; annots; result_annot; body; in_; generalized = _ } ->
+    | Let
+        { ident; args; annots; result_annot; mode; body; in_; generalized = _ }
+      ->
       let outer =
         Names.bind
           names
@@ -217,7 +222,7 @@ let expr (expr : Typed.Expr.t) =
         (Let
            ( label (name outer ident)
            , List.map args ~f:(binding inner annots)
-           , ty_annot result_annot
+           , { (ty_annot result_annot) with mode }
            , body
            , in_ ))
     | Fun { args; annots; body } ->

@@ -56,6 +56,7 @@ let instantiator fresh ~rank ~(pending : Pending.t Queue.t) ~seen_kept
   =
   let tys = Int.Table.create () in
   let rows = Int.Table.create () in
+  let modes = Mode.Var.Instance.create (Fresh.modes fresh) ~rank in
   let presences = Int.Table.create () in
   let inst table (var : _ Type.Var.t) ~wrap ~bounds =
     match var.state with
@@ -96,6 +97,7 @@ let instantiator fresh ~rank ~(pending : Pending.t Queue.t) ~seen_kept
         match var.state with
         | Generic -> false
         | Unbound _ | Link _ -> true)
+  ; mode = Mode.Var.Instance.instantiate modes
   ; id = (fun () -> Fresh.id fresh)
   }
 ;;
@@ -284,11 +286,23 @@ let keep_with_generalized fresh ~rank ~args ~kept bounds =
         { Type.Iter.ty = has_generalized
         ; row = has_generalized
         ; presence = has_generalized
+        ; mode = (fun _ -> Ok ())
         }
     with
     | Ok () -> Second bound
     | Error () ->
-      (match iter bound { ty = lowerer; row = lowerer; presence = lowerer } with
+      (match
+         iter
+           bound
+           { ty = lowerer
+           ; row = lowerer
+           ; presence = lowerer
+           ; mode =
+               (fun var ->
+                 Mode.Var.lower_rank var ~rank;
+                 Ok ())
+           }
+       with
        | Ok () -> ()
        | Error _ -> .);
       First (kept bound ~id:(Fresh.id fresh)))
@@ -320,7 +334,15 @@ let attach_kept ~is_generalized kept =
        | Unbound _ | Link _ -> ());
       Ok ()
     in
-    match iter_kept kept { ty = attach; row = attach; presence = attach } with
+    match
+      iter_kept
+        kept
+        { ty = attach
+        ; row = attach
+        ; presence = attach
+        ; mode = (fun _ -> Ok ())
+        }
+    with
     | Ok () -> ()
     | Error _ -> .)
 ;;
@@ -421,6 +443,7 @@ let trivial_witnesses ~kept ~(with_equalities : Presence_var.t list) =
             List.fold_result var.bounds ~init:() ~f:(fun () bound ->
               Type.iter_row counter bound.row)))
     ; presence = (fun ~guarded:_ var -> count var ~bounds:presence_bounds)
+    ; mode = (fun _ -> Ok ())
     }
   and presence_bounds (var : Presence_var.t) =
     List.fold_result var.bounds ~init:() ~f:(fun () -> function
@@ -477,7 +500,7 @@ let outside_witnessed ~kept =
            | Generic -> Error ()
            | Unbound _ | Link _ -> Ok ()
          in
-         { ty = check; row = check; presence = check })
+         { ty = check; row = check; presence = check; mode = (fun _ -> Ok ()) })
         ty
     with
     | Ok () -> true
@@ -643,7 +666,7 @@ let iter_used_vars
       List.iter args ~f:(function
         | ATy ty -> iter_ty ty
         | ARow row -> iter_row row)
-    | TArrow (ty1, ty2) ->
+    | TArrow (ty1, ty2, _) ->
       iter_ty ty1;
       iter_ty ty2
     | TTuple tys -> List.iter tys ~f:iter_ty
@@ -1125,6 +1148,7 @@ let generalize fresh ~rank tys =
   let presences = Queue.create () in
   let rows = Queue.create () in
   let in_bounds_of = Queue.create () in
+  let modes = Int.Table.create () in
   let generalized = Int.Hash_set.create () in
   let generalize (var : _ Type.Var.t) =
     newly_generalized ~rank var
@@ -1164,6 +1188,13 @@ let generalize fresh ~rank tys =
                 let%bind.Result () = Type.iter_ty generalizer ty1 in
                 Type.iter_ty generalizer ty2))
           else Ok ())
+    ; mode =
+        (fun var ->
+          (match Mode.Var.rank var with
+           | Some rank' when rank' > rank ->
+             Hashtbl.set modes ~key:(Mode.Var.id var) ~data:var
+           | Some _ | None -> ());
+          Ok ())
     }
   in
   (match
@@ -1172,6 +1203,10 @@ let generalize fresh ~rank tys =
    | Ok () -> ()
    | Error _ -> .);
   let is_generalized = Hash_set.mem generalized in
+  Mode.Var.generalize
+    (Hashtbl.data modes
+     |> List.sort ~compare:(Comparable.lift Int.compare ~f:Mode.Var.id))
+    ~rank;
   let may_be_used = may_be_used ~rank in
   let bounded = Int.Hash_set.create () in
   let kept =

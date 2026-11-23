@@ -42,27 +42,30 @@ let public_name = function
 let prelude ?(args = []) name = Type.TCon (Prelude_path.canonical name, args)
 
 let ty t ~var ~row =
-  let name ref_ = Type.TArrow (prelude ref_, Type.string) in
+  let name ref_ = Type.arrow (prelude ref_) Type.string in
   match t with
   | Type_expr ->
-    Type.TArrow
-      (prelude "Stag.Type.t" ~args:[ ATy (var ()) ], prelude "Stag.Type_expr.t")
+    Type.arrow
+      (prelude "Stag.Type.t" ~args:[ ATy (var ()) ])
+      (prelude "Stag.Type_expr.t")
   | Type_ref_name -> name "Stag.Type_ref.t"
   | Type_ref_path ->
-    TArrow (prelude "Stag.Type_ref.t", prelude "Stag.Type_ref.Path.t")
+    Type.arrow (prelude "Stag.Type_ref.t") (prelude "Stag.Type_ref.Path.t")
   | Constructor_ref_name -> name "Stag.Constructor_ref.t"
   | Field_ref_name -> name "Stag.Field_ref.t"
   | Type_decl ->
-    TArrow
-      ( prelude "Stag.Type_ref.t"
-      , prelude "option" ~args:[ ATy (prelude "Stag.Type.Decl.t") ] )
+    Type.arrow
+      (prelude "Stag.Type_ref.t")
+      (prelude "option" ~args:[ ATy (prelude "Stag.Type.Decl.t") ])
   | Value_ref_name -> name "Stag.Value_ref.t"
   | Erase ->
-    TArrow (TCode { inner = var (); context = row () }, prelude "Stag.Expr.t")
-  | Raise -> TArrow (Type.exn, var ())
+    Type.arrow
+      (TCode { inner = var (); context = row () })
+      (prelude "Stag.Expr.t")
+  | Raise -> Type.arrow Type.exn (var ())
   | Ptr_make ->
     let pointee = var () in
-    TArrow (pointee, TCon ("ptr", [ ATy pointee ]))
+    Type.arrow pointee (TCon ("ptr", [ ATy pointee ]))
 ;;
 
 let find path =

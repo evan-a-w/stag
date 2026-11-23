@@ -38,3 +38,16 @@ type desc =
 type t = desc Located.t [@@deriving sexp_of, compare, equal]
 
 val to_string : t -> string
+
+(** [lower <= upper] of a [with] clause, at least one of them a variable. *)
+module Constraint : sig
+  type mode := t
+
+  type t =
+    { lower : mode
+    ; upper : mode
+    }
+  [@@deriving sexp_of, compare, equal]
+
+  val to_string : t -> string
+end

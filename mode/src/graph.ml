@@ -392,3 +392,61 @@ module Instance = struct
          copy)
   ;;
 end
+
+let rank t =
+  match t.state with
+  | Rank rank -> Some rank
+  | Generic _ -> None
+;;
+
+let var_id t = t.var_id
+
+let relations t =
+  let related direction other morphism =
+    Option.some_if
+      (Morphism.is_identity morphism && Axis.Any.equal other.axis t.axis)
+      (direction, other)
+  in
+  match t.state with
+  | Rank _ ->
+    List.filter_map t.succ ~f:(fun edge -> related `Le edge.hi edge.morphism)
+    @ List.filter_map t.pred ~f:(fun edge -> related `Ge edge.lo edge.morphism)
+  | Generic { above; below } ->
+    List.filter_map above ~f:(fun { other; implied_morphism; _ } ->
+      related `Le other implied_morphism)
+    @ List.filter_map below ~f:(fun { other; implied_morphism; _ } ->
+      related `Ge other implied_morphism)
+;;
+
+let lower_assuming t ~raised =
+  let estimates = Int.Table.create () in
+  let nodes = Queue.create () in
+  let rec collect node =
+    if not (Hashtbl.mem estimates node.id)
+    then (
+      Hashtbl.set
+        estimates
+        ~key:node.id
+        ~data:
+          (if raised node.var_id && not (is_generic node)
+           then node.upper
+           else node.lower);
+      Queue.enqueue nodes node;
+      List.iter node.pred ~f:(fun edge -> collect edge.lo))
+  in
+  collect t;
+  while not (Queue.is_empty nodes) do
+    let node = Queue.dequeue_exn nodes in
+    let estimate = Hashtbl.find_exn estimates node.id in
+    List.iter node.succ ~f:(fun edge ->
+      match Hashtbl.find estimates edge.hi.id with
+      | None -> ()
+      | Some current ->
+        let from = Morphism.left edge.morphism estimate in
+        if from > current
+        then (
+          Hashtbl.set estimates ~key:edge.hi.id ~data:from;
+          Queue.enqueue nodes edge.hi))
+  done;
+  Hashtbl.find_exn estimates t.id
+;;

@@ -121,7 +121,7 @@ let%expect_test "arrows" =
   let fresh = Fresh.create () in
   let a = tvar fresh ~rank:1 in
   let b = tvar fresh ~rank:1 in
-  unify_ty fresh ~ty1:(TArrow (a, int)) ~ty2:(TArrow (bool, b));
+  unify_ty fresh ~ty1:(Type.arrow a int) ~ty2:(Type.arrow bool b);
   print_ty a;
   print_ty b;
   [%expect
@@ -212,8 +212,8 @@ let%expect_test "length mismatches unify no element" =
 
 let%expect_test "structural mismatch" =
   let fresh = Fresh.create () in
-  unify_ty fresh ~ty1:(TArrow (int, int)) ~ty2:(TTuple [ int; int ]);
-  unify_ty fresh ~ty1:int ~ty2:(TArrow (int, int));
+  unify_ty fresh ~ty1:(Type.arrow int int) ~ty2:(TTuple [ int; int ]);
+  unify_ty fresh ~ty1:int ~ty2:(Type.arrow int int);
   [%expect
     {|
     (Error
@@ -293,7 +293,7 @@ let%expect_test "occurs check" =
   let a = tvar fresh ~rank:1 in
   unify_ty fresh ~ty1:a ~ty2:(TTuple [ a; int ]);
   unify_ty fresh ~ty1:a ~ty2:(con "list" ~args:[ ATy a ]);
-  unify_ty fresh ~ty1:a ~ty2:(TArrow (a, int));
+  unify_ty fresh ~ty1:a ~ty2:(Type.arrow a int);
   [%expect
     {|
     (Error (Occurs_check_failed (ATy (TVar (Unbound 0 1)))))
@@ -316,7 +316,7 @@ let%expect_test "binding lowers ranks of variables in the bound type" =
   let c = tvar fresh ~rank:2 in
   let r = rvar fresh ~rank:3 in
   let d = tvar fresh ~rank:0 in
-  let ty = TTuple [ TArrow (b, c); code ~inner:d r ] in
+  let ty = TTuple [ Type.arrow b c; code ~inner:d r ] in
   unify_ty fresh ~ty1:a ~ty2:ty;
   print_ty ty;
   [%expect
@@ -343,7 +343,7 @@ let%expect_test "binding variable to variable lowers rank" =
 let%expect_test "bindings are not undone on failure" =
   let fresh = Fresh.create () in
   let a = tvar fresh ~rank:1 in
-  unify_ty fresh ~ty1:(TArrow (a, int)) ~ty2:(TArrow (bool, string));
+  unify_ty fresh ~ty1:(Type.arrow a int) ~ty2:(Type.arrow bool string);
   print_ty a;
   [%expect
     {|
@@ -803,8 +803,8 @@ let%expect_test "types clash only if no instance of their variables unifies \
     var.state <- Link (f (TVar var));
     TVar var
   in
-  let rec nest n ty = if n = 0 then ty else TArrow (int, nest (n - 1) ty) in
-  let ints = cyclic (fun self -> TArrow (int, self)) in
+  let rec nest n ty = if n = 0 then ty else Type.arrow int (nest (n - 1) ty) in
+  let ints = cyclic (fun self -> Type.arrow int self) in
   let rs = rvar fresh ~rank:1 in
   List.iter
     [ "int, bool", int, bool
@@ -813,7 +813,7 @@ let%expect_test "types clash only if no instance of their variables unifies \
     ; "int * 'a, bool * 'b", TTuple [ int; a ], TTuple [ bool; b ]
     ; "int * 'a, int * 'b", TTuple [ int; a ], TTuple [ int; b ]
     ; "int * int, int", TTuple [ int; int ], TTuple [ int ]
-    ; "int -> int, int * int", TArrow (int, int), TTuple [ int; int ]
+    ; "int -> int, int * int", Type.arrow int int, TTuple [ int; int ]
     ; ( "int list, bool list"
       , con "list" ~args:[ ATy int ]
       , con "list" ~args:[ ATy bool ] )
@@ -834,7 +834,7 @@ let%expect_test "types clash only if no instance of their variables unifies \
     ; ( "rows as arguments"
       , con "r" ~args:[ ARow (row [ "x", int ]) ]
       , con "r" ~args:[ ARow (row [ "x", bool ] ~tail:rs) ] )
-    ; "int -> int -> ..., same", ints, cyclic (fun self -> TArrow (int, self))
+    ; "int -> int -> ..., same", ints, cyclic (fun self -> Type.arrow int self)
     ; "int -> int -> ..., int -> int -> bool", ints, nest 2 bool
     ; "int -> int -> ..., 20 arrows to bool", ints, nest 20 bool
     ]
@@ -1020,7 +1020,7 @@ let%expect_test "equalities are generalized and instantiated with their \
   let outer = pvar fresh ~rank:1 in
   let o = tvar fresh ~rank:1 in
   let g = tvar fresh ~rank:2 in
-  if_present fresh ~presence:p ~ty1:a ~ty2:(TArrow (o, int));
+  if_present fresh ~presence:p ~ty1:a ~ty2:(Type.arrow o int);
   (* [outer] is not generalized, but its equality is, with [g]. *)
   if_present fresh ~presence:outer ~ty1:g ~ty2:bool;
   (* [a] and [g] are also used where their presences don't matter. *)
@@ -1085,7 +1085,7 @@ let%expect_test "entry types that only matter where their presence is present" =
       [ code (ext "x" a REmpty ~presence:p)
       ; code (ext "x" b (ext "y" b REmpty ~presence:q) ~presence:p)
       ; code (ext "x" c REmpty ~presence:p)
-      ; TArrow (c, c)
+      ; Type.arrow c c
       ; code (ext "x" g REmpty ~presence:outer)
       ]
   in
@@ -1438,7 +1438,7 @@ let%expect_test "bounds are kept by generalization and instantiation" =
   ignore
     (Unify.constrain_row fresh ~row:r ~bound ~shadowed:String.Set.empty
      : _ Result.t);
-  let ty = TArrow (code r, code bound) in
+  let ty = Type.arrow (code r) (code bound) in
   let print ty = print_endline (Type.to_string_hum ty) in
   print ty;
   Scheme.generalize fresh ~rank:1 [ ty ];
@@ -1856,7 +1856,7 @@ let%expect_test "iteration past the first steps visits cycles once and reports \
   in
   (match
      (Type.iter_ty
-        { ty = add; row = add; presence = add }
+        { ty = add; row = add; presence = add; mode = (fun _ -> Ok ()) }
         (TTuple [ cyclic; chain ])
       : (unit, Nothing.t) Result.t)
    with

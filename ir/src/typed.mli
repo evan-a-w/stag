@@ -165,11 +165,13 @@ module Expr : sig
       | Let of
           { ident : Ident.t
           ; args : Ident.t list
-          ; annots : (Ident.t * Syntax.Type_expr.t) list
+          ; annots : (Ident.t * Syntax.Annot.t) list
           (** The annotated [args], their annotations as written but for type
               names, which are canonical ([Resolved]). Likewise [result_annot]
               and [Fun]'s and [Annotated]'s. *)
           ; result_annot : Syntax.Type_expr.t option
+          ; mode : Syntax.Mode_expr.t option
+          (** As written: of the result of a function, else of the value. *)
           ; generalized : bool
           ; body : 'e (** [ident] is bound in [body]. *)
           ; in_ : 'e
@@ -177,6 +179,7 @@ module Expr : sig
       | Let_mut of
           { ident : Ident.t
           ; annot : Syntax.Type_expr.t option
+          ; mode : Syntax.Mode_expr.t option (** Of the values it holds. *)
           ; body : 'e (** [ident] is not bound in [body]. *)
           ; in_ : 'e
           }
@@ -184,10 +187,11 @@ module Expr : sig
       (** Of a [let mut] bound in the same quote, or a mutable toplevel. *)
       | Fun of
           { args : Ident.t list (** Non-empty. *)
-          ; annots : (Ident.t * Syntax.Type_expr.t) list
+          ; annots : (Ident.t * Syntax.Annot.t) list
           ; body : 'e
           }
-      | Annotated of 'e * Syntax.Type_expr.t (** [(x : t)], of a [Var]. *)
+      | Annotated of 'e * Syntax.Annot.t
+      (** [(x : t @ m)], of a [Var], its type resolved as [Let]'s. *)
       | Splice of
           { code : 'e (** At the level outside the splice. *)
           ; subs : 'e Subs.t

@@ -51,7 +51,7 @@ let sexp_of_t t = Sexp.Atom t.name
 
 let ty t =
   List.fold_right t.args ~init:(Base_type.ty t.result) ~f:(fun arg res ->
-    Type.TArrow (Base_type.ty arg, res))
+    Type.arrow (Base_type.ty arg) res)
 ;;
 
 let arity t = List.length t.args
