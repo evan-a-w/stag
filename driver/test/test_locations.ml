@@ -38,7 +38,7 @@ let x = 3
        (Base_types_not_equal int bool)))
      @ t.stag:1:12-16)
     ((Unification_error
-      (Type_mismatch (TArrow (TVar (Unbound 19 1)) (TVar (Unbound 20 1)))
+      (Type_mismatch (TArrow (TVar (Unbound 23 1)) (TVar (Unbound 24 1)))
        (TCon int ()) Structural_mismatch))
      @ t.stag:1:8-9)
     ((Unification_error
@@ -165,15 +165,15 @@ let%expect_test "patterns" =
     ((Unification_error
       (Type_mismatch (TCon int ())
        (TTuple
-        ((TVar (Link (TVar (Unbound 22 1)))) (TVar (Link (TVar (Unbound 23 1))))))
+        ((TVar (Link (TVar (Unbound 26 1)))) (TVar (Link (TVar (Unbound 27 1))))))
        Structural_mismatch))
      @ t.stag:2:21-27)
     ((Duplicate_pattern_variable a) @ t.stag:2:25-26)
     ((Unification_error
       (Type_mismatch (TCon int ())
        (TRecord
-        (RExtend x Present (TVar (Unbound 20 1))
-         (RExtend x Present (TVar (Unbound 21 1)) REmpty)))
+        (RExtend x Present (TVar (Unbound 24 1))
+         (RExtend x Present (TVar (Unbound 25 1)) REmpty)))
        Structural_mismatch))
      @ t.stag:2:21-37)
     ((Duplicate_row_entry x) @ t.stag:2:30-32)
@@ -183,7 +183,7 @@ let%expect_test "patterns" =
      @ t.stag:2:35-39)
     ((Unification_error
       (Type_mismatch (TCon int ())
-       (TVariant (RExtend A Present (TCon unit ()) (RVar (Unbound 20 1))))
+       (TVariant (RExtend A Present (TCon unit ()) (RVar (Unbound 24 1))))
        Structural_mismatch))
      @ t.stag:2:21-23)
     |}]
@@ -214,43 +214,43 @@ let%expect_test "polymorphic records and variants" =
     ((Duplicate_row_entry x) @ t.stag:1:25-27)
     ((Unification_error
       (Type_mismatch
-       (TRecord (RExtend x Present (TVar (Unbound 19 1)) (RVar (Unbound 20 1))))
+       (TRecord (RExtend x Present (TVar (Unbound 23 1)) (RVar (Unbound 24 1))))
        (TCon int ()) Structural_mismatch))
      @ t.stag:1:8-11)
     ((Unification_error
       (Row_mismatch
-       (RExtend x Present (TVar (Unbound 19 1)) (RVar (Unbound 20 1)))
+       (RExtend x Present (TVar (Unbound 23 1)) (RVar (Unbound 24 1)))
        (RExtend y Present (TCon int ()) REmpty) (Missing_label x)))
      @ t.stag:1:8-16)
     ((Unification_error
       (Type_mismatch
-       (TRecord (RExtend x Present (TVar (Unbound 19 1)) (RVar (Unbound 20 1))))
+       (TRecord (RExtend x Present (TVar (Unbound 23 1)) (RVar (Unbound 24 1))))
        (TCon int ()) Structural_mismatch))
      @ t.stag:1:8-11)
     ((Duplicate_row_entry x) @ t.stag:1:17-19)
     ((Unification_error
-      (Type_mismatch (TRecord (RVar (Unbound 19 1))) (TCon int ())
+      (Type_mismatch (TRecord (RVar (Unbound 23 1))) (TCon int ())
        Structural_mismatch))
      @ t.stag:1:26-27)
     ((Unification_error
-      (Type_mismatch (TRecord (RVar (Unbound 19 1))) (TCon int ())
+      (Type_mismatch (TRecord (RVar (Unbound 23 1))) (TCon int ())
        Structural_mismatch))
      @ t.stag:1:18-19)
     ((Unification_error
       (Type_mismatch
-       (TRecord (RExtend x Present (TVar (Unbound 19 1)) (RVar (Unbound 20 1))))
+       (TRecord (RExtend x Present (TVar (Unbound 23 1)) (RVar (Unbound 24 1))))
        (TCon int ()) Structural_mismatch))
      @ t.stag:1:9-12)
     ((Unification_error
       (Type_mismatch
        (TRecord
-        (RExtend x Present (TVar (Unbound 19 1))
-         (RExtend x Present (TVar (Unbound 20 1)) (RVar (Unbound 21 1)))))
+        (RExtend x Present (TVar (Unbound 23 1))
+         (RExtend x Present (TVar (Unbound 24 1)) (RVar (Unbound 25 1)))))
        (TCon int ()) Structural_mismatch))
      @ t.stag:1:9-12)
     ((Duplicate_row_entry x) @ t.stag:1:26-28)
     ((Unification_error
-      (Type_mismatch (TArrow (TVar (Unbound 19 1)) (TVar (Unbound 20 1)))
+      (Type_mismatch (TArrow (TVar (Unbound 23 1)) (TVar (Unbound 24 1)))
        (TCon int ()) Structural_mismatch))
      @ t.stag:1:8-9)
     |}]

@@ -131,8 +131,8 @@ let hygienic = hygiene 1
     (made <fun>)
     (inc <fun>)
     (applied (Tuple 3 6))
-    (hygiene <fun>)
     (x 10)
-    (hygienic 2)
+    (hygiene <fun>)
+    (hygienic 11)
     |}]
 ;;

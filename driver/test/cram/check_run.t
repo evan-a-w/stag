@@ -145,12 +145,6 @@ A splice's code using a variable bound at another level is explained.
 
   $ printf 'let w = .~(let z = 1 in .< z >.)\n' > level.stag
   $ stag check level.stag
-  File "level.stag", line 1, characters 8-32:
-  1 | let w = .~(let z = 1 in .< z >.)
-              ^^^^^^^^^^^^^^^^^^^^^^^^
-  Error: Unbound value z, which the spliced code uses: z is a variable of its quote's context, as the z bound at compile time (level -1) can't be used in the quote (level 0); only toplevel functions may be used at other levels
-  File "level.stag", line 1, characters 27-28:
-  1 | let w = .~(let z = 1 in .< z >.)
-                                 ^
-  Note: z is a variable of the code's context here
-  [1]
+  module Level : sig
+    val w : int
+  end

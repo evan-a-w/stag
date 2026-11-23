@@ -157,10 +157,10 @@ let bad = eval (`Add (Ptr.make (`Num 1, `Num 2)))
               (Link
                (TTuple
                 ((TVariant
-                  (RExtend Num Present (TCon int ()) (RVar (Unbound 74 1))))
+                  (RExtend Num Present (TCon int ()) (RVar (Unbound 81 1))))
                  (TVariant
-                  (RExtend Num Present (TCon int ()) (RVar (Unbound 76 1)))))))))))))
-        (RVar (Unbound 81 1)))
+                  (RExtend Num Present (TCon int ()) (RVar (Unbound 83 1)))))))))))))
+        (RVar (Unbound 88 1)))
        (Missing_label Add)))
      @ after_eval.stag:2:15-49)
     |}]
@@ -489,7 +489,7 @@ let%expect_test "functions don't guard cycles, nor pointers alone in aliases" =
   check "type s = {`head : int; `tail : unit -> ptr[s]}";
   [%expect
     {|
-    ((Unification_error (Occurs_check_failed (ATy (TVar (Unbound 20 1))))) @
+    ((Unification_error (Occurs_check_failed (ATy (TVar (Unbound 25 1))))) @
      t.stag:1:15-16)
     val self : ((ptr['a -> 'b] as 'a) -> 'b) -> 'b
     ((Cyclic_type_alias al) @ t.stag:1:5-7)
@@ -540,7 +540,7 @@ let open : l[int] = `Other
      @ t.stag:3:19-48)
     ((Unification_error
       (Row_mismatch REmpty
-       (RExtend Other Present (TCon unit ()) (RVar (Unbound 28 1)))
+       (RExtend Other Present (TCon unit ()) (RVar (Unbound 32 1)))
        (Missing_label Other)))
      @ t.stag:3:20-26)
     |}]

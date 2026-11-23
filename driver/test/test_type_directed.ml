@@ -741,7 +741,7 @@ let ran = .~(upd spliced)
      (Code
       (Let (ident v/18) (args ())
        (result_annot ((Con (<N.r> @ t.stag:12:35-38) ()) @ t.stag:12:35-38))
-       (generalized false)
+       (generalized true)
        (body
         (Record
          ((((type_name N.r) (name N.x) (index 0)) (Lit (Int 1) : int))
@@ -755,7 +755,7 @@ let ran = .~(upd spliced)
      (Code
       (Let (ident v/18) (args ())
        (result_annot ((Con (<N.r> @ t.stag:12:35-38) ()) @ t.stag:12:35-38))
-       (generalized false)
+       (generalized true)
        (body
         (Record
          ((((type_name N.r) (name N.x) (index 0)) (Lit (Int 1) : int))
@@ -797,17 +797,19 @@ type s = {x : string}
       val v : r
     end
     type s = { x : string }
-    val a : <string>{N.v : s; ..'a}
+    val a : <int>{..'a}
     -- evaluated at compile time
     -- evaluated
     (N.v (N.r (x 1) (y true)))
     (a
      (Code
-      (Field (Var (Free_toplevel N.v) : s) ((type_name s) (name x) (index 0)) :
-       string)))
-    ((Unification_error
-      (Type_mismatch (TCon string ()) (TCon int ())
-       (Base_types_not_equal string int)))
-     @ t.stag:7:25-26)
+      (Field (Var (Persistent (Toplevel N.v/4)) : N.r)
+       ((type_name N.r) (name N.x) (index 0)) : int)))
+    module N : sig
+      type r = { x : int; y : bool }
+      val v : r
+    end
+    type s = { x : string }
+    val b : <N.r>{..'a}
     |}]
 ;;

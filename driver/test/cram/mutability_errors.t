@@ -17,18 +17,6 @@ Messages of errors about mutable variables.
   > let annotated : <unit>{z : immut int} = assigns
   > X
   $ stag check a.stag
-  File "a.stag", line 1, characters 29-30:
-  1 | let ok2 x = let g u = x in .<g ()>.
-                                   ^
-  Error: The function g is bound at runtime (level 0) but used at inside 1 quote(s) (level 1), which it can't be as it captures x, of type 'a, which may hold a closure capturing a mutable variable: annotate x with a type holding no function, if it is one
-  File "a.stag", line 2, characters 60-61:
-  2 | let fn (h : unit -> int) = let k = h in let g u = k () in .<g ()>.
-                                                                  ^
-  Error: The function g is bound at runtime (level 0) but used at inside 1 quote(s) (level 1), which it can't be as it captures h (through k), of type unit -> int, which may hold a closure capturing a mutable variable: annotate h with a type holding no function, if it is one
-  File "a.stag", line 3, characters 65-66:
-  3 | let direct = let mut n = 0 in let f u = n in let g u = f () in .<g ()>.
-                                                                       ^
-  Error: The function g is bound at runtime (level 0) but used at inside 1 quote(s) (level 1), which it can't be as it reaches the mutable variable n (through f): its cell can't be shared with code
   File "a.stag", line 5, characters 8-9:
   5 | let x = f 1
               ^

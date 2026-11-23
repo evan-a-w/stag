@@ -82,27 +82,27 @@ let restrict_all r = ({`x = 1 | {}} \ `x).`x
     {|
     ((Unification_error
       (Row_mismatch
-       (RExtend x Present (TVar (Unbound 19 1)) (RVar (Unbound 20 1)))
+       (RExtend x Present (TVar (Unbound 23 1)) (RVar (Unbound 24 1)))
        (RExtend y Present (TCon int ()) REmpty) (Missing_label x)))
      @ t.stag:2:22-30)
     ((Unification_error
       (Row_mismatch
-       (RExtend x Present (TVar (Unbound 19 1)) (RVar (Unbound 20 1)))
+       (RExtend x Present (TVar (Unbound 23 1)) (RVar (Unbound 24 1)))
        (RExtend y Present (TCon int ()) REmpty) (Missing_label x)))
      @ t.stag:2:23-31)
     ((Unification_error
       (Row_mismatch
-       (RExtend x Present (TVar (Unbound 19 1)) (RVar (Unbound 20 1))) REmpty
+       (RExtend x Present (TVar (Unbound 23 1)) (RVar (Unbound 24 1))) REmpty
        (Missing_label x)))
      @ t.stag:2:21-23)
     ((Unification_error
       (Row_mismatch
-       (RExtend y Present (TVar (Unbound 28 1)) (RVar (Unbound 29 1)))
+       (RExtend y Present (TVar (Unbound 33 1)) (RVar (Unbound 34 1)))
        (RExtend x Present (TCon int ()) REmpty) (Missing_label y)))
      @ t.stag:3:19-27)
     ((Unification_error
       (Row_mismatch
-       (RExtend x Present (TVar (Unbound 20 1)) (RVar (Unbound 21 1))) REmpty
+       (RExtend x Present (TVar (Unbound 25 1)) (RVar (Unbound 26 1))) REmpty
        (Missing_label x)))
      @ t.stag:2:21-41)
     |}]
@@ -293,7 +293,7 @@ let pattern_rest = .<match r with {`x = x; ..rest} -> (x, rest)>.
     {|
     val label : <int>{..'a}
     val var_and_label : <{`y : 'a}>{y : 'a; ..'b}
-    val outside : <'a>{r : {`x : 'a; ..'b}; ..'c}
+    val outside : <int>{..'a}
     val extend_inside : <{..'a}>{..'b} -> <{..'a}>{..'c} where ..'b <= {..'c}
     val pattern_rest : <'a * {..'b}>{r : {`x : 'a; ..'b}; ..'c}
     |}]
@@ -319,7 +319,7 @@ let missing = same_row .<x>. {}
     ((Unification_error
       (Row_mismatch
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 35 1)))
+        (RVar (Unbound 41 1)))
        REmpty (Missing_label x)))
      @ t.stag:3:29-31)
     |}]
@@ -347,19 +347,19 @@ let different_rows r =
     {|
     ((Unification_error
       (Type_mismatch
-       (TRecord (RExtend x Present (TVar (Unbound 19 1)) (RVar (Unbound 20 1))))
-       (TVariant (RExtend A Present (TCon unit ()) (RVar (Unbound 22 1))))
+       (TRecord (RExtend x Present (TVar (Unbound 23 1)) (RVar (Unbound 24 1))))
+       (TVariant (RExtend A Present (TCon unit ()) (RVar (Unbound 26 1))))
        Structural_mismatch))
      @ t.stag:2:24-28)
     ((Unification_error
       (Type_mismatch
-       (TRecord (RExtend x Present (TVar (Unbound 19 1)) (RVar (Unbound 20 1))))
+       (TRecord (RExtend x Present (TVar (Unbound 23 1)) (RVar (Unbound 24 1))))
        (TCon int ()) Structural_mismatch))
      @ t.stag:2:20-21)
     ((Unification_error
       (Type_mismatch
-       (TRecord (RExtend x Present (TVar (Unbound 19 1)) (RVar (Unbound 20 1))))
-       (TCode (inner (TCon int ())) (context (RVar (Unbound 22 1))))
+       (TRecord (RExtend x Present (TVar (Unbound 23 1)) (RVar (Unbound 24 1))))
+       (TCode (inner (TCon int ())) (context (RVar (Unbound 26 1))))
        Structural_mismatch))
      @ t.stag:2:21-26)
     ((Unification_error
@@ -367,8 +367,8 @@ let different_rows r =
        (Base_types_not_equal int bool)))
      @ t.stag:2:21-35)
     ((Unification_error
-      (Row_mismatch (RExtend x Present (TVar (Unbound 21 1)) REmpty)
-       (RExtend y Present (TVar (Unbound 24 1)) REmpty) (Missing_label x)))
+      (Row_mismatch (RExtend x Present (TVar (Unbound 26 1)) REmpty)
+       (RExtend y Present (TVar (Unbound 29 1)) REmpty) (Missing_label x)))
      @ t.stag:3:47-55)
     |}]
 ;;
@@ -456,18 +456,18 @@ let deref t = match t with T r -> r.`next.*
 |};
   [%expect
     {|
-    ((Unification_error (Occurs_check_failed (ATy (TVar (Unbound 29 1))))) @
+    ((Unification_error (Occurs_check_failed (ATy (TVar (Unbound 34 1))))) @
      t.stag:2:30-31)
     ((Unification_error
       (Row_mismatch
        (RExtend x Present (TCon int ())
         (RVar
          (Link
-          (RExtend x (PVar (Unbound 35 1)) (TCon int ()) (RVar (Unbound 36 1))))))
+          (RExtend x (PVar (Unbound 40 1)) (TCon int ()) (RVar (Unbound 41 1))))))
        (RExtend y Present (TCon int ())
         (RVar
          (Link
-          (RExtend x (PVar (Unbound 35 1)) (TCon int ()) (RVar (Unbound 36 1))))))
+          (RExtend x (PVar (Unbound 40 1)) (TCon int ()) (RVar (Unbound 41 1))))))
        Cyclic_row))
      @ t.stag:2:38-50)
     ((Infinite_type_layout t) @ t.stag:2:5-6)

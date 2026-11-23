@@ -70,7 +70,7 @@ let generated = wrap .<1>.
     (wrapped (Tuple 1 1))
     (generated
      (Code
-      (Let (ident y/17) (args ()) (generalized false) (body (Lit (Int 1) : int))
+      (Let (ident y/17) (args ()) (generalized true) (body (Lit (Int 1) : int))
        (in_
         (Tuple ((Var (Bound (Local y/17)) : 'a) (Var (Bound (Local y/17)) : 'a))
          : "'a * 'a"))
@@ -247,16 +247,14 @@ let applied = implicit false
   [%expect
     {|
     val n : int
-    val code : <'a * 'b>{n : 'a; x : 'b; ..'c}
+    val code : <int * 'a>{x : 'a; ..'b}
     val implicit : 'a -> int * 'a
-    val explicit : bool * int
+    val explicit : int * int
     val explicit_toplevel : int * int
     val applied : int * bool
     (implicit/6
      (Toplevel_splice
-      (code
-       (Var (Bound (Toplevel code/5)) :
-        "<int * 'a>{n : immut int; x : immut 'a}"))
+      (code (Var (Bound (Toplevel code/5)) : "<int * 'a>{x : immut 'a}"))
       (expansion
        (Tuple
         ((Var (Bound (Toplevel n/4)) : int) (Var (Bound (Local x/19)) : 'a)) :
@@ -266,7 +264,7 @@ let applied = implicit false
      (Toplevel_splice
       (code
        (Var (Bound (Toplevel code/5)) :
-        "<bool * int>{n : immut bool; x : immut int}"))
+        "<int * int>{n?'_a : immut bool; x : immut int}"))
       (expansion
        (Let (ident n/20) (args ()) (generalized false)
         (body (Lit (Bool true) : bool))
@@ -275,16 +273,16 @@ let applied = implicit false
           (body (Lit (Int 1) : int))
           (in_
            (Tuple
-            ((Var (Bound (Local n/20)) : bool) (Var (Bound (Local x/21)) : int))
-            : "bool * int"))
-          : "bool * int"))
-        : "bool * int"))
-      : "bool * int"))
+            ((Var (Bound (Toplevel n/4)) : int) (Var (Bound (Local x/21)) : int))
+            : "int * int"))
+          : "int * int"))
+        : "int * int"))
+      : "int * int"))
     (explicit_toplevel/8
      (Toplevel_splice
       (code
        (Var (Bound (Toplevel code/5)) :
-        "<int * int>{n : immut int; x : immut int}"))
+        "<int * int>{n?'_a : immut int; x : immut int}"))
       (expansion
        (Tuple
         ((Var (Bound (Toplevel n/4)) : int) (Var (Bound (Toplevel n/4)) : int)) :
@@ -293,14 +291,16 @@ let applied = implicit false
     -- evaluated at compile time
     (code
      (Code
-      (Tuple ((Var (Free_toplevel n) : 'a) (Var (Free x) : 'b)) : "'a * 'b")))
+      (Tuple ((Var (Persistent (Toplevel n/4)) : int) (Var (Free x) : 'a)) :
+       "int * 'a")))
     -- evaluated
     (n 3)
     (code
      (Code
-      (Tuple ((Var (Free_toplevel n) : 'a) (Var (Free x) : 'b)) : "'a * 'b")))
+      (Tuple ((Var (Persistent (Toplevel n/4)) : int) (Var (Free x) : 'a)) :
+       "int * 'a")))
     (implicit <fun>)
-    (explicit (Tuple true 1))
+    (explicit (Tuple 3 1))
     (explicit_toplevel (Tuple 3 3))
     (applied (Tuple 3 false))
     |}]
@@ -543,7 +543,7 @@ let gen2 u = .<5>.
   [%expect
     {|
     val user : int
-    val gen : 'a -> <'b>{helper : 'b; ..'c}
+    val gen : 'a -> <int>{..'b}
     val helper : int
     val gen2 : 'a -> <int>{..'b}
     -- evaluated at compile time
@@ -724,12 +724,11 @@ let deep = .~(.~(n; .< .<n>. >.))
          (Let (ident _/15) (args ()) (generalized true)
           (body (Var (Bound (Toplevel n/4)) : int))
           (in_
-           (Quote (Quote (Var (Free_toplevel n) : int) : "<int>{n : immut int}")
-            : "<<int>{n : immut int}>{}"))
-          : "<<int>{n : immut int}>{}"))
-        (expansion
-         (Quote (Var (Free_toplevel n) : int) : "<int>{n : immut int}"))
-        : "<int>{n : immut int}"))
+           (Quote (Quote (Var (Persistent (Toplevel n/4)) : int) : <int>{}) :
+            <<int>{}>{}))
+          : <<int>{}>{}))
+        (expansion (Quote (Var (Persistent (Toplevel n/4)) : int) : <int>{})) :
+        <int>{}))
       (expansion (Var (Bound (Toplevel n/4)) : int)) : int))
     -- evaluated at compile time
     (n 2)
@@ -916,17 +915,23 @@ let s = .~(w .<1>.)
 |};
   [%expect
     {|
-    ((Unification_error
-      (Row_mismatch
-       (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
-        (RVar (Link REmpty)))
-       (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 66 1)))
-       (Presence_mismatch x)))
-     @ t.stag:6:13-18)
     val x : int
     val k : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'b : immut int; ..'c}
-    val w : <int>{x : immut int} -> <int>{x : immut int}
+    val w : <int>{} -> <int>{}
+    val s : int
+    val t : int
+    -- evaluated at compile time
+    (k <fun>)
+    (w <fun>)
+    -- evaluated
+    (x 5)
+    (k <fun>)
+    (w <fun>)
+    (s 1)
+    (t 5)
+    val x : int
+    val k : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'b : immut int; ..'c}
+    val w : <int>{} -> <int>{}
     val t : int
     val s : int
     -- evaluated at compile time

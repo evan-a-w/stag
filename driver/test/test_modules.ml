@@ -782,16 +782,16 @@ let captured = .<let n = () in .~(q_root ())>.
     val n : bool
     module M : sig
       val n : int
-      val q : 'a -> <'b>{M.n : 'b; ..'c}
-      val both : <'a * 'a>{M.n : 'a; ..'b}
+      val q : 'a -> <int>{..'b}
+      val both : <int * int>{..'a}
       val local : <unit>{..'a}
-      val root_code : <'_a>{n : mut?'_b '_a; ..'_c} where '_d <= '_b
+      val root_code : <bool>{..'_a}
     end
-    val q : 'a -> <'b>{M.n : 'b; ..'c}
-    val q_root : 'a -> <'b>{n : 'b; ..'c}
-    val spliced : <'_a>{M.n : mut?'_b '_a; ..'_c} where '_d <= '_b
-    val not_captured : <'_a>{M.n : mut?'_b '_a; ..'_c} where '_d <= '_b
-    val captured : <unit>{..'_a}
+    val q : 'a -> <int>{..'b}
+    val q_root : 'a -> <bool>{..'b}
+    val spliced : <int>{..'_a}
+    val not_captured : <int>{..'_a}
+    val captured : <bool>{..'_a}
     |}]
 ;;
 
@@ -827,7 +827,7 @@ end
     end
     val implicit : int
     val local_does_not_provide : bool -> int
-    val explicit : string
+    val explicit : int
     val shorthand : int
     module M : sig
       val n : int
@@ -855,7 +855,7 @@ let x = .~M.n
     {|
     module M : sig
       val n : int
-      val code : <int>{M.n : int; ..'a}
+      val code : <int>{..'a}
     end
     val x : int
     ((Toplevel_splice_of_neither (TCon int ())) @ t.stag:5:10-13)

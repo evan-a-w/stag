@@ -144,7 +144,7 @@ let%expect_test "messages" =
     File "a.stag", line 1, characters 32-33:
     1 | let g = let y = 1 in .~(let z = y in .<1>.)
                                         ^
-    Error: The variable y is bound at runtime (level 0) but used at compile time (level -1); only toplevel functions may be used at other levels
+    Error: The variable y is bound at runtime (level 0) but used at compile time (level -1); only toplevels may be used at an earlier level
     File "a.stag", line 1, characters 28-29:
     1 | let c = .<.~(.<1>.).{x = 1; x = 2}>.
                                     ^
@@ -173,18 +173,11 @@ let%expect_test "messages" =
     1 | module M = struct end module M = struct end
                                      ^
     Error: The module A.M is defined more than once
-    File "a.stag", line 1, characters 8-32:
-    1 | let w = .~(let z = 1 in .< z >.)
-                ^^^^^^^^^^^^^^^^^^^^^^^^
-    Error: Unbound value z, which the spliced code uses: z is a variable of its quote's context, as the z bound at compile time (level -1) can't be used in the quote (level 0); only toplevel functions may be used at other levels
-    File "a.stag", line 1, characters 27-28:
-    1 | let w = .~(let z = 1 in .< z >.)
-                                   ^
-    Note: z is a variable of the code's context here
+    ok
     File "a.stag", line 2, characters 8-15:
     2 | let u = .~(f 3)
                 ^^^^^^^
-    Error: Unbound value z, which the spliced code uses: z is a variable of its quote's context, as the z bound at runtime (level 0) can't be used in the quote (level 1); only toplevel functions may be used at other levels
+    Error: Unbound value z, which the spliced code uses: z is a variable of its quote's context, as the z bound at runtime (level 0) can't be used in the quote (level 1), as it is not portable
     File "a.stag", line 1, characters 13-14:
     1 | let f z = .< z >.
                      ^

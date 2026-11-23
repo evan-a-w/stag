@@ -125,11 +125,11 @@ let f (x : Stag.Expr.t) = .~x
     File "a.stag", line 2, characters 12-13:
     2 | let f e = .~e
                     ^
-    Error: The variable e is bound at runtime (level 0) but used at compile time (level -1); only toplevel functions may be used at other levels
+    Error: The variable e is bound at runtime (level 0) but used at compile time (level -1); only toplevels may be used at an earlier level
     File "a.stag", line 3, characters 28-29:
     3 | let f (x : Stag.Expr.t) = .~x
                                     ^
-    Error: The variable x is bound at runtime (level 0) but used at compile time (level -1); only toplevel functions may be used at other levels
+    Error: The variable x is bound at runtime (level 0) but used at compile time (level -1); only toplevels may be used at an earlier level
     |}]
 ;;
 

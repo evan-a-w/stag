@@ -1243,34 +1243,29 @@ module Variant_match = struct
   ;;
 end
 
-(* Toplevels are referred to by symbol, so code needn't capture them, only be
-   as [const] as they are. *)
-let by_symbol : Mode.Crossing.t =
-  { stage = true; provenance = true; locality = true }
-;;
-
 (* Constrains [entry]'s mode by the locks its use crosses, and the value being
-   computed by the variable's. *)
+   computed by the variable's. Toplevels are referred to by symbol, so closures
+   and code don't capture them: they only cross a quote lock if [portable], so
+   as not to be free variables of the quote, unless mutable. *)
 let use_entry (scope : Scope.t) (entry : Env.Entry.t) ~name ~loc =
   let reason what = Mode.Reason.create ~loc (sprintf what name) in
-  let crossing, mutable_ =
+  let toplevel, mutable_ =
     match entry.binder with
-    | Toplevel ident ->
-      Some by_symbol, Program_env.is_mutable scope.program ident
-    | Local ident -> None, Program_env.is_mutable scope.program ident
+    | Toplevel ident -> true, Program_env.is_mutable scope.program ident
+    | Local ident -> false, Program_env.is_mutable scope.program ident
   in
   List.iter (Env.Entry.crossed entry ~locks:scope.locks) ~f:(fun lock ->
     match lock.kind with
+    | Closure _ when toplevel -> ()
     | Closure closure ->
       Scope.add_mode
         scope
         ~loc
         (Mode.Var.submode
-           ?crossing
            entry.mode
            closure
            (reason "%s is captured by a closure"))
-    | Quote _ when Option.is_some crossing && mutable_ -> ()
+    | Quote _ when toplevel && mutable_ -> ()
     | Quote code ->
       Scope.add_mode
         scope
@@ -1280,14 +1275,15 @@ let use_entry (scope : Scope.t) (entry : Env.Entry.t) ~name ~loc =
            Stage
            Portable
            (reason "%s is used in a quote"));
-      Scope.add_mode
-        scope
-        ~loc
-        (Mode.Var.submode
-           ?crossing
-           entry.mode
-           code
-           (reason "%s is embedded in a quote")));
+      if not toplevel
+      then
+        Scope.add_mode
+          scope
+          ~loc
+          (Mode.Var.submode
+             entry.mode
+             code
+             (reason "%s is embedded in a quote")));
   if mutable_
   then Scope.evaluates scope Nonportable ~loc ~why:(sprintf "%s is mutable" name)
   else Scope.joins scope entry.mode ~loc ~why:(sprintf "%s is used" name)
@@ -1816,6 +1812,11 @@ and var_ref_type t (scope : Scope.t) (var_ref : Typed.Var_ref.t) ~loc =
      | None ->
        (match Program_env.embedded scope.program ident with
         | Some info ->
+         Scope.evaluates
+           scope
+           Portable
+           ~loc
+           ~why:(sprintf "%s was computed at compile time" ident.name);
           Ok (Scope.instantiate t scope info.ty, Typed.Var_ref.Persistent binder)
         | None -> not_in_scope ident.name))
 
@@ -2127,10 +2128,22 @@ and expr_type
     let name = Source.Binder.name binder in
     let mode = inner.sink in
     Scope.annotated scope mode mode_annot;
+    let is_function = not (List.is_empty arg_types) in
+    (* A closure may refer to itself, but a value referring to itself is not
+       known yet, as a [let rec]'s isn't. *)
+    let own_mode =
+      if is_function
+      then mode
+      else
+        Scope.stage_at_least
+          scope
+          Nonportable
+          ~reason:(Mode.Reason.create ~loc (sprintf "%s is being defined" name))
+    in
     let body =
       Env.with_bindings
         scope.locals
-        [ name, Scope.entry scope ~ident ~scheme:ty ~mode ]
+        [ name, Scope.entry scope ~ident ~scheme:ty ~mode:own_mode ]
         ~f:(fun () ->
           match arg_types with
           | [] -> check_expr t inner ~expr:body ~ty:res_ty
@@ -2139,16 +2152,7 @@ and expr_type
     in
     let args = List.map arg_types ~f:fst in
     Scope.joins scope mode ~loc ~why:(sprintf "%s is bound" name);
-    let generalized =
-      (* Like OCaml's [let rec], a recursive non-function is not generalized. *)
-      let is_function = not (List.is_empty args) in
-      (is_function
-       || not
-            (Typed.Expr.refers_to body ~f:(function
-               | Local ident' -> Typed.Ident.equal ident ident'
-               | Toplevel _ -> false)))
-      && generalizes scope mode ~is_function ~loc
-    in
+    let generalized = generalizes scope mode ~is_function ~loc in
     if generalized
     then Scheme.generalize t ~rank:scope.rank [ ty ]
     else Unify.lower_ty ~rank:scope.rank ty;
@@ -2284,14 +2288,14 @@ and expr_type
      | None, Syntax _ | Some _, _ -> ());
     let outside : Scope.t =
       match scope.quote with
-      | Some quote -> { quote.outside with rank = scope.rank; sink = quote.mode }
-      | None ->
+      | Some quote ->
         Scope.evaluates
           scope
           Nonportable
           ~loc
-          ~why:"the code is generated at compile time";
-        { scope with level = scope.level - 1; sink = Scope.fresh_mode scope }
+          ~why:"the mode of spliced code is not known";
+        { quote.outside with rank = scope.rank; sink = quote.mode }
+      | None -> { scope with level = scope.level - 1; sink = Scope.fresh_mode scope }
     in
     let reported = scope.program.reported in
     let inner = Scope.fresh_ty t scope in
@@ -2944,6 +2948,8 @@ and substitute_entry
     in
     None
   | Local entry when may_capture name entry.binder ->
+    (* Whether the code uses it may not be known yet: assume it does. *)
+    use_entry scope entry ~name ~loc;
     let%bind.Result () =
       provides_assigned
         t

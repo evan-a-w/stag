@@ -344,7 +344,7 @@ let tuple_length = match (1, 2) with (_, _, _) -> 1
        (Base_types_not_equal int bool)))
      @ t.stag:3:53-57)
     ((Unification_error
-      (Type_mismatch (TCon option ((ATy (TVar (Link (TVar (Unbound 23 1)))))))
+      (Type_mismatch (TCon option ((ATy (TVar (Link (TVar (Unbound 28 1)))))))
        (TCon int ()) (Base_types_not_equal option int)))
      @ t.stag:3:49-50)
     ((Duplicate_pattern_variable x) @ t.stag:2:38-39)
@@ -360,8 +360,8 @@ let tuple_length = match (1, 2) with (_, _, _) -> 1
     ((Unification_error
       (Type_mismatch (TTuple ((TCon int ()) (TCon int ())))
        (TTuple
-        ((TVar (Link (TVar (Unbound 23 1)))) (TVar (Link (TVar (Unbound 24 1))))
-         (TVar (Link (TVar (Unbound 25 1))))))
+        ((TVar (Link (TVar (Unbound 27 1)))) (TVar (Link (TVar (Unbound 28 1))))
+         (TVar (Link (TVar (Unbound 29 1))))))
        (Args_length_mismatch 2 3)))
      @ t.stag:2:37-46)
     |}]
@@ -642,7 +642,7 @@ let level = .<match 1 with x -> .~x>.
     val captures : <'a>{x?'b : immut int; ..'c} -> <'a>{..'d} where ..'c <= {..'d}
     val applied : <int>{..'_a}
     val local : <int>{..'a}
-    val bound_outside : <'a>{x : 'a; ..'b}
+    val bound_outside : <int>{..'a}
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
@@ -756,7 +756,7 @@ let uses_f = .<f>.
     type list['a] = Nil | Cons of ptr['a * list['a]]
     val nil : list['a]
     val f : 'a -> 'a
-    val uses_nil : <'a>{nil : 'a; ..'b}
+    val uses_nil : <list['a]>{..'b}
     val uses_f : <'a -> 'a>{..'b}
     |}]
 ;;
@@ -835,9 +835,9 @@ let use = x 1; x true
   [%expect
     {|
     type list['a] = Nil | Cons of ptr['a * list['a]]
-    val a : '_a -> list['_b]
+    val a : int -> list['_a]
     val b : list['_a]
-    val quoted : <'a>{a : int -> 'a; ..'b}
+    val quoted : <list['_a]>{..'b}
     ((Toplevel_initialization_cycle (ys xs ys)) @ t.stag:4:28-30)
     ((Toplevel_initialization_cycle (x x)) @ t.stag:2:8-9)
     ((Toplevel_initialization_cycle (y x y)) @ t.stag:3:8-9)

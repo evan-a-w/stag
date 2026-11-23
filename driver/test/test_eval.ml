@@ -280,11 +280,7 @@ let embedded = embedding 7
         (subs (Implicit ())) : 'b)
        : <'b>{..'c} (where "..'_a <= {..'_d}"))))
     (embedding <fun>)
-    (embedded
-     (Code
-      (App (Var (Persistent (Local h/21)) : "unit -> int") (Lit Unit : unit) :
-       int)
-      ((h/21 <fun>))))
+    (embedded (Code (App (Var (Free h) : "unit -> 'a") (Lit Unit : unit) : 'a)))
     |}]
 ;;
 
@@ -316,11 +312,11 @@ let in_quote = .<.~(.~(.<.<1>.>.))>.
      (Toplevel_splice
       (code
        (Quote
-        (Let (ident z/19) (args ()) (generalized true) (body (Var (Free x) : 'a))
-         (in_ (Var (Bound (Local z/19)) : 'a)) : 'a)
+        (Let (ident z/19) (args ()) (generalized false)
+         (body (Var (Free x) : 'a)) (in_ (Var (Bound (Local z/19)) : 'a)) : 'a)
         : "<'a>{x : immut 'a}"))
       (expansion
-       (Let (ident z/20) (args ()) (generalized true)
+       (Let (ident z/20) (args ()) (generalized false)
         (body (Var (Bound (Local y/18)) : 'a))
         (in_ (Var (Bound (Local z/20)) : 'a)) : 'a))
       : 'a))
@@ -419,8 +415,8 @@ let none = match some with None -> 0 | Some (n, _) -> n
     ((Unification_error
       (Type_mismatch (TTuple ((TCon int ()) (TCon int ())))
        (TTuple
-        ((TVar (Link (TVar (Unbound 24 1)))) (TVar (Link (TVar (Unbound 25 1))))
-         (TVar (Link (TVar (Unbound 26 1))))))
+        ((TVar (Link (TVar (Unbound 29 1)))) (TVar (Link (TVar (Unbound 30 1))))
+         (TVar (Link (TVar (Unbound 31 1))))))
        (Args_length_mismatch 2 3)))
      @ t.stag:2:26-33)
     ((Constructor_arity_mismatch (constructor D) (expected 2) (got 1)) @
