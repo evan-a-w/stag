@@ -104,6 +104,13 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
     | Exception (exn, args) | Malformed_exception (exn, args) ->
       name ~declaration:true Constructor exn;
       List.iter args ~f:type_expr
+    | External { name = ext; ty; symbol = _ } ->
+      add
+        ~declaration:true
+        ~kind:(Kind.Let { is_function = true })
+        ~loc:ext.loc
+        [ ext.txt ];
+      type_expr ty
     | Module (module_name, toplevels) ->
       name ~declaration:true Module module_name;
       walk_toplevels

@@ -251,6 +251,11 @@ module Defs = struct
     | Let_mut of Name.t * annot * expr
     | Type of type_decl
     | Exception of Name.t * type_expr list (** [exception E of t1 * t2]. *)
+    | External of
+        { name : Name.t
+        ; ty : type_expr
+        ; symbol : string Located.t
+        } (** [external name : ty = "symbol"]. *)
     | Malformed_exception of Name.t * type_expr list
     (** What parsed of an exception declaration with a syntax error, whose
         arguments may be missing. *)
@@ -483,6 +488,11 @@ module Toplevel = struct
     | Let_mut of Name.t * Annot.t * Expr.t
     | Type of Type_decl.t
     | Exception of Name.t * Type_expr.t list
+    | External of
+        { name : Name.t
+        ; ty : Type_expr.t
+        ; symbol : string Located.t
+        }
     | Malformed_exception of Name.t * Type_expr.t list
     | Module of Name.t * t list
     | Module_splice of Name.t * Expr.t * t list Located.t option

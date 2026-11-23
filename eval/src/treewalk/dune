@@ -2,4 +2,12 @@
  (name stag_treewalk)
  (preprocess
   (pps ppx_jane))
- (libraries core stag_common stag_types stag_syntax stag_ir stag_eval))
+ (libraries
+  core
+  ctypes
+  ctypes-foreign
+  stag_common
+  stag_types
+  stag_syntax
+  stag_ir
+  stag_eval))

@@ -183,7 +183,8 @@ let members (toplevel : Toplevel.t) : (Member.t * Name.t) list =
     (Member_kind.Member namespace, name.txt), name
   in
   match toplevel.txt with
-  | Let (name, _, _, _) | Let_mut (name, _, _) -> [ member Value name ]
+  | Let (name, _, _, _) | Let_mut (name, _, _) | External { name; _ } ->
+    [ member Value name ]
   | Type { name; params = _; kind } ->
     member Type name
     ::
@@ -229,6 +230,7 @@ let rec unique_among ~path taken toplevels ~report =
       | Let _
       | Let_mut _
       | Exception _
+      | External _
       | Malformed_exception _
       | Module _
       | Module_splice _
@@ -273,6 +275,7 @@ let rec unique_among ~path taken toplevels ~report =
       , ( Let _
         | Let_mut _
         | Exception _
+        | External _
         | Malformed_exception _
         | Module _
         | Module_splice _
@@ -300,6 +303,7 @@ let rec unique_among ~path taken toplevels ~report =
          | Let_mut _
          | Type _
          | Exception _
+         | External _
          | Malformed_exception _
          | Module_splice _
          | Expect_test _
@@ -358,6 +362,7 @@ let rec register module_ toplevels ~parent ~generated_by =
     | Let_mut _
     | Type _
     | Exception _
+    | External _
     | Malformed_exception _
     | Expect_test _
     | Bench _
@@ -395,6 +400,7 @@ let rec register module_ toplevels ~parent ~generated_by =
        | Let_mut _
        | Type _
        | Exception _
+       | External _
        | Malformed_exception _
        | Expect_test _
        | Bench _
@@ -1066,6 +1072,7 @@ let iter_declarations t ~f =
          | Let_mut _
          | Type _
          | Exception _
+         | External _
          | Malformed_exception _
          | Expect_test _
          | Bench _

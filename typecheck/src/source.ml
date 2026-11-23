@@ -370,6 +370,10 @@ module Expr = struct
     | Poly_variant (tag, arg) -> Poly_variant (tag, Option.map arg ~f:sub)
     | Expect expected -> Expect expected
     | Type ty -> Type ty
+    | External { symbol; signature = _ } ->
+      raise_s
+        [%message
+          "Source.generated_view: an external is not code" (symbol : string)]
   ;;
 
   let view = function

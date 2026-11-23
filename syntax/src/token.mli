@@ -24,6 +24,7 @@ type t =
   | With
   | Fun
   | Exception
+  | External
   | Type
   | Of
   | Module

@@ -24,6 +24,7 @@ let constructor_refs =
              ~data:{ Typed.Constructor_ref.type_name; name; index })
        | Type _
        | Exception _
+       | External _
        | Malformed_exception _
        | Let _
        | Let_mut _
@@ -693,6 +694,14 @@ module Of_value = struct
            | "Type", 1 -> Type (arg 0 (type_decl ~loc))
            | "Exception", 2 ->
              Exception (arg 0 (name Upper ~loc), arg 1 (list (type_expr ~loc)))
+           | "External", 1 ->
+             arg 0 (fun external_ : Toplevel.desc ->
+               External
+                 { name = field "name" (name Lower ~loc) external_
+                 ; ty = field "ty" (type_expr ~loc) external_
+                 ; symbol =
+                     Located.create ~loc (field "symbol" string external_)
+                 })
            | "Module", 2 ->
              Module (arg 0 (name Upper ~loc), arg 1 (list (toplevel ~loc)))
            | "Module_splice", 2 ->

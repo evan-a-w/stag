@@ -288,7 +288,7 @@ module Kind = struct
   let of_toplevel (t : Toplevel.t) =
     match t.txt with
     | Let _ | Let_mut _ -> Let
-    | Type _ | Exception _ | Malformed_exception _ -> Type
+    | Type _ | Exception _ | External _ | Malformed_exception _ -> Type
     | Module_splice _ -> Module_splice
     | Include _ -> Include
     | Module _ | Expect_test _ | Bench _ -> Other
@@ -882,6 +882,10 @@ and toplevel roots ~indent (t : Toplevel.t) =
   | Type decl -> type_decl roots decl
   | Exception (name, args) | Malformed_exception (name, args) ->
     text "exception " ^^ constructor_decl roots (name, args)
+  | External { name; ty; symbol } ->
+    definition
+      (text ("external " ^ name.txt ^ " : ") ^^ type_expr_doc roots ty)
+      (text (string_literal symbol.txt))
   | Module (name, []) -> text ("module " ^ name.txt ^ " = struct end")
   | Module (name, members) ->
     text ("module " ^ name.txt ^ " = struct")

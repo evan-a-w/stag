@@ -156,7 +156,7 @@ let captures t ~ident ~args ~body =
   in
   let rec go ~depth ({ desc; _ } : Typed.Expr.t) =
     match desc with
-    | Lit _ | Expect _ | Type _ -> ()
+    | Lit _ | Expect _ | External _ | Type _ -> ()
     | Var var_ref -> var ~depth var_ref
     | Assign (var_ref, value) ->
       var ~depth var_ref;
@@ -290,8 +290,8 @@ let map_children ~depth (expr : Typed.Expr.t) ~(f @ local) =
   let same expr = f ~depth expr in
   let%mapl_fun (desc : Typed.Expr.t Typed.Expr.Desc.t) =
     match expr.desc with
-    | (Lit _ | Var _ | Poly_variant (_, None) | Expect _ | Type _) as desc ->
-      Ok desc
+    | (Lit _ | Var _ | Poly_variant (_, None) | Expect _ | External _ | Type _)
+      as desc -> Ok desc
     | App (a, b) ->
       let%bindl_fun a = same a in
       let%mapl_fun b = same b in
@@ -871,6 +871,8 @@ and step_value t ~env ~level (expr : Typed.Expr.t)
   | Var (Free name | Free_toplevel name) ->
     Eval_result.error_s [%message "Free variable of code evaluated" name]
   | Var (Prim prim) -> Eval_result.return (Value.Prim { prim; applied = [] })
+  | External { symbol; signature } ->
+    Eval_result.return (Value.External { symbol; signature; applied = [] })
   | Var (Intrinsic intrinsic) -> Eval_result.return (Value.Intrinsic intrinsic)
   | Type ty -> Eval_result.return (Value.Type ty)
   | Assign (var_ref, value) ->
@@ -1079,6 +1081,17 @@ and apply_non_function t (f : Value.t) arg ~loc : Value.t Eval_result.t @ local
         (match Prim.apply prim ~output:t.output args with
          | Ok result -> Eval_result.return (Value.of_prim result)
          | Error exn -> raise_exn ~loc (prim_exception exn)))
+  | External { symbol; signature; applied } ->
+    let applied = arg :: applied in
+    if List.length applied < C_signature.arity signature
+    then Eval_result.return (Value.External { symbol; signature; applied })
+    else (
+      match C_call.call ~symbol signature (List.rev applied) with
+      | Ok result -> Eval_result.return result
+      | Error message ->
+        runtime_error
+          ~loc
+          (sprintf "The external %s could not be called: %s" symbol message))
   | Intrinsic intrinsic ->
     (match intrinsic, arg with
      | Type_expr, Type ty ->

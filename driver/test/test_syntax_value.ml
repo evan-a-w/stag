@@ -128,7 +128,7 @@ let%expect_test "the prelude's signature" =
         val let_ : string -> list[string] -> t -> t -> t
       end
       module Toplevel : sig
-        type t = Let of string * list[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * Expr.t | Let_mut of string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * Expr.t | Type of {`kind : Type_decl.Kind.t; `name : string; `params : list[Type_decl.Param.t]} | Exception of string * list[Type_expr.t] | Module of string * list[t] | Module_splice of string * Expr.t | Include of Expr.t | Expect_test of {`body : Expr.t; `name : string} | Bench of {`body : Expr.t; `name : string; `param : option[string * list[Expr.t]]}
+        type t = Let of string * list[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * Expr.t | Let_mut of string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * Expr.t | Type of {`kind : Type_decl.Kind.t; `name : string; `params : list[Type_decl.Param.t]} | Exception of string * list[Type_expr.t] | External of {`name : string; `symbol : string; `ty : Type_expr.t} | Module of string * list[t] | Module_splice of string * Expr.t | Include of Expr.t | Expect_test of {`body : Expr.t; `name : string} | Bench of {`body : Expr.t; `name : string; `param : option[string * list[Expr.t]]}
         val let_ : string -> list[string] -> Expr.t -> t
       end
       module Program : sig
@@ -735,15 +735,15 @@ let%expect_test "constructors are made as the typechecker resolves them" =
            : bool)];
   [%expect
     {|
-    ((constructors 103)
+    ((constructors 104)
      (reflected
       (prelude.Stag.Expr.Deref prelude.Stag.Expr.Store
        prelude.Stag.Mode_expr.Atom.External
        prelude.Stag.Mode_expr.Atom.Nonportable
        prelude.Stag.Mode_expr.Atom.Regional prelude.Stag.Pattern.Deref
-       prelude.Stag.Type.Kind.Alias prelude.Stag.Type.Kind.Record
-       prelude.Stag.Type.Kind.Variant prelude.Stag.Type_ref.Path.Prelude
-       prelude.Stag.Type_ref.Path.Program))
+       prelude.Stag.Toplevel.External prelude.Stag.Type.Kind.Alias
+       prelude.Stag.Type.Kind.Record prelude.Stag.Type.Kind.Variant
+       prelude.Stag.Type_ref.Path.Prelude prelude.Stag.Type_ref.Path.Program))
      (others_same_as_to_value true))
     |}]
 ;;

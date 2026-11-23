@@ -289,6 +289,10 @@ module Expr = struct
       | Poly_update of 'e * (string * 'e) list
       | Poly_variant of string * 'e option
       | Expect of string Located.t
+      | External of
+          { symbol : string
+          ; signature : C_signature.t
+          }
       | Type of Syntax.Type_expr.t
       (** [type t], its types named by canonical names ([Resolved]). *)
       | Error of 'e list
@@ -309,7 +313,8 @@ module Expr = struct
   let sub_exprs t =
     let snds = List.map ~f:snd in
     match t.desc with
-    | Lit _ | Var _ | Poly_variant (_, None) | Expect _ | Type _ -> []
+    | Lit _ | Var _ | Poly_variant (_, None) | Expect _ | External _ | Type _ ->
+      []
     | App (a, b)
     | Let { body = a; in_ = b; _ }
     | Let_mut { body = a; in_ = b; _ }

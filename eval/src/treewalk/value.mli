@@ -27,6 +27,11 @@ type t =
       { prim : Prim.t
       ; applied : t list (** Fewer than its arity, latest first. *)
       }
+  | External of
+      { symbol : string
+      ; signature : C_signature.t
+      ; applied : t list (** As [Prim]'s. *)
+      }
   | Intrinsic of Intrinsic.t
   | Type of Syntax.Type_expr.t
   (** A [Stag.Type.t], its types named by canonical names. *)

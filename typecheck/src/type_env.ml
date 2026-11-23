@@ -785,6 +785,17 @@ let elaborate t module_ vars expr ~splices =
     expr
 ;;
 
+let elaborate_declared t module_ expr =
+  elaborate'
+    t
+    module_
+    (Params String.Map.empty)
+    ~splices:true
+    ~expansions:(String.Table.create ())
+    expr
+  |> Result.map ~f:fst
+;;
+
 let declare_members t module_ (decl : Type_decl.t) ~name =
   let declares names table =
     List.iter names ~f:(fun ((member : Name.t), _) ->

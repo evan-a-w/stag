@@ -277,6 +277,14 @@ let starts_type : Token.t -> bool = function
   | _ -> false
 ;;
 
+(* [external name :], declaring an external rather than the [external] mode. *)
+let starts_external t =
+  match peek t, peek_at t 1, peek_at t 2 with
+  | External, Lident name, Colon ->
+    Option.is_none (Mode_expr.Atom.of_string name)
+  | _ -> false
+;;
+
 (** [@ 'm] or [@ local portable], after the [@]. *)
 let mode_expr t : Mode_expr.t =
   let start = loc t in
@@ -284,11 +292,14 @@ let mode_expr t : Mode_expr.t =
   | Tyvar _ | Weak_tyvar _ ->
     let var = tyvar t in
     located ~loc:var.loc (Mode_expr.Var var.txt)
-  | Lident _ ->
+  | Lident _ | External ->
     let rec loop acc =
       match peek t with
       | Lident "and" when not (List.is_empty acc) -> List.rev acc
-      | Lident name ->
+      | External when (not (List.is_empty acc)) && starts_external t ->
+        List.rev acc
+      | (Lident _ | External) as token ->
+        let name = Token.to_string token in
         (match Mode_expr.Atom.of_string name with
          | None ->
            fail
@@ -1551,6 +1562,7 @@ let starts_toplevel_at t i ~col =
   | Let
   | Type
   | Exception
+  | External
   | Module
   | Module_inline
   | Include
@@ -1643,6 +1655,21 @@ let rec toplevel t : Toplevel.t =
     parsed [];
     let args = constructor_args t ~exception_:true ~parsed in
     since t start (Toplevel.Exception (name, args))
+  | External ->
+    advance t;
+    let name = lident t ~what:"the external's name" in
+    expect t Colon;
+    let ty = type_expr t in
+    expect t Equal;
+    let symbol =
+      match peek t with
+      | String s ->
+        let loc = loc t in
+        advance t;
+        located ~loc s
+      | _ -> expected t "the external's C symbol, a string"
+    in
+    since t start (Toplevel.External { name; ty; symbol })
   | (Module | Module_inline) as keyword ->
     advance t;
     let name = uident t ~what:"a module name" in

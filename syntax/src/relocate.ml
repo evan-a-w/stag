@@ -387,6 +387,12 @@ and toplevel_desc (g : Toplevel.desc) (w : Toplevel.desc) =
     let* n = name n n' in
     let+ ts = list type_expr ts ts' in
     Toplevel.Exception (n, ts)
+  | ( External { name = n; ty; symbol }
+    , External { name = n'; ty = ty'; symbol = s' } ) ->
+    let* n = name n n' in
+    let* ty = type_expr ty ty' in
+    let+ symbol = located (same String.equal) symbol s' in
+    Toplevel.External { name = n; ty; symbol }
   | Module (n, ts), Module (n', ts') ->
     let* n = name n n' in
     let+ ts = toplevels ts ts' in
@@ -423,6 +429,7 @@ and toplevel_desc (g : Toplevel.desc) (w : Toplevel.desc) =
       | Let_mut _
       | Type _
       | Exception _
+      | External _
       | Malformed_exception _
       | Module _
       | Module_splice _

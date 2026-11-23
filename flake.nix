@@ -76,6 +76,8 @@
           "ocaml-lsp-server"
           "merlin"
           "utop"
+          "ctypes"
+          "ctypes-foreign"
         ];
 
         pins = {

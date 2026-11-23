@@ -18,6 +18,7 @@ module Generated = struct
       | Type decl -> "type " ^ decl.name.txt
       | Exception (name, _) | Malformed_exception (name, _) ->
         "exception " ^ name.txt
+      | External { name; _ } -> "external " ^ name.txt
       | Module (name, _) | Module_splice (name, _, _) -> "module " ^ name.txt
       | Include _ -> "include"
       | Expect_test { name; _ } -> sprintf "let%%expect_test %S" name.txt
@@ -68,6 +69,15 @@ module Syntax_splice = struct
 end
 
 module Toplevel = struct
+  (** [external name : ty = "symbol"], whose [expr] is a placeholder. *)
+  module External = struct
+    type t =
+      { ty : Syntax.Type_expr.t
+      ; symbol : string Located.t
+      }
+    [@@deriving sexp_of]
+  end
+
   module State = struct
     type t =
       | Unchecked
@@ -104,6 +114,7 @@ module Toplevel = struct
     ; mode : Syntax.Mode_expr.t option
     ; expr : Syntax.Expr.t
     ; mut : bool
+    ; external_ : External.t option
     ; generated : Generated.t option
     ; mutable state : State.t
     }
@@ -2048,9 +2059,11 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
          };
     let body =
       match
-        if Toplevel.is_function toplevel
-        then check_body t scope ~closure:rules.value ~fn ~loc:toplevel.expr.loc
-        else
+        match toplevel.external_ with
+        | Some external_ -> check_external t scope external_ ~ty:res_ty
+        | None when Toplevel.is_function toplevel ->
+          check_body t scope ~closure:rules.value ~fn ~loc:toplevel.expr.loc
+        | None ->
           check_expr
             t
             scope
@@ -2078,6 +2091,35 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
         Unify.lower_ty ~rank:0 (Stack.pop_exn program.unfinished)
       done);
     scc
+
+(* Its modes are as declared: C code is trusted to keep to them. *)
+and check_external
+  t
+  (scope : Scope.t)
+  ({ ty = declared; symbol } : Toplevel.External.t)
+  ~ty
+  : Typed.Expr.t
+  =
+  let loc = Loc.merge declared.loc symbol.loc in
+  let error error =
+    Scope.report scope error;
+    ignore (Scope.unifies t scope ~ty1:ty ~ty2:Type.error ~loc : bool);
+    { Typed.Expr.desc = Error []; ty; loc }
+  in
+  match
+    Type_env.elaborate_declared scope.program.type_env scope.module_ declared
+  with
+  | Error e -> error e
+  | Ok declared_ty ->
+    (match C_signature.of_type declared_ty with
+     | Error problem ->
+       error
+         (Typecheck_error.create
+            ~loc:declared.loc
+            (Invalid_external { symbol = symbol.txt; problem }))
+     | Ok signature ->
+       ignore (Scope.unifies t scope ~ty1:ty ~ty2:declared_ty ~loc : bool);
+       { desc = External { symbol = symbol.txt; signature }; ty; loc })
 
 (* Abandons the toplevels of [scc] with the splice whose code reached them, to
    be checked anew. *)
@@ -3994,7 +4036,7 @@ let declare
        | None -> error
        | Some generated -> Generated.wrap_error generated error)
   in
-  let add_toplevel ~mut (name : Syntax.Name.t) args annot expr =
+  let add_toplevel ?external_ ~mut (name : Syntax.Name.t) args annot expr =
     let name = Module_scope.canonical_name module_ name.txt in
     let toplevel =
       lazy
@@ -4007,6 +4049,7 @@ let declare
          ; mode = annot.mode
          ; expr
          ; mut
+         ; external_
          ; generated
          ; state = Unchecked
          })
@@ -4051,6 +4094,14 @@ let declare
   | Let (name, args, annot, expr), _ ->
     add_toplevel ~mut:false name args annot expr
   | Let_mut (name, annot, expr), _ -> add_toplevel ~mut:true name [] annot expr
+  | External { name; ty; symbol }, _ ->
+    add_toplevel
+      ~external_:{ Toplevel.External.ty; symbol }
+      ~mut:false
+      name
+      []
+      Syntax.Annot.none
+      (Located.create ~loc:toplevel.loc (Syntax.Expr.Lit Unit))
   | (Module _ | Module_splice _ | Include _ | Expect_test _ | Bench _), _ -> ()
 ;;
 
@@ -4094,7 +4145,7 @@ let check_declarations t (program : Program_env.t) module_ =
           program.type_env
           (Module_scope.canonical_name module_ name.txt)
         |> report_if_error
-      | Let (name, _, _, _) | Let_mut (name, _, _) ->
+      | Let (name, _, _, _) | Let_mut (name, _, _) | External { name; _ } ->
         let toplevel =
           Program_env.toplevel
             program
@@ -4168,7 +4219,8 @@ let rec signature (program_env : Program_env.t) module_ ~complete =
       match toplevel.txt with
       | Expect_test _ | Bench _ | Include _ -> None
       | Let ({ txt = name; loc = _ }, _, _, _)
-      | Let_mut ({ txt = name; loc = _ }, _, _) ->
+      | Let_mut ({ txt = name; loc = _ }, _, _)
+      | External { name = { txt = name; loc = _ }; _ } ->
         let toplevel = Program_env.toplevel program_env (canonical_name name) in
         (match toplevel.state with
          | Done { entry = { scheme; mode; held; _ }; _ } ->

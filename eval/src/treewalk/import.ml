@@ -24,3 +24,4 @@ module Interpreter = Stag_eval.Interpreter
 module Generated_syntax = Stag_eval.Generated_syntax
 module Global = Modes.Global
 module Local_result = Stag_common.Local_result
+module C_signature = Stag_ir.C_signature
