@@ -2947,20 +2947,48 @@ and expr_type
      with
      | Error error -> fail error ~children:(infer args)
      | Ok (constructor, args, result) ->
-       node (Construct (constructor, check_exprs t scope args)) result)
+       let globals =
+         Type_env.global_constructor_args
+           scope.program.type_env
+           constructor.name
+         |> Option.value ~default:[]
+       in
+       let args =
+         List.mapi args ~f:(fun i arg ->
+           check_part
+             t
+             scope
+             arg
+             ~global:(Option.value (List.nth globals i) ~default:false))
+       in
+       node (Construct (constructor, args)) result)
   | Record fields ->
     (match record_fields t scope fields ~all_required:true ~expected ~loc with
      | Error error -> fail error ~children:(infer (List.map fields ~f:snd))
      | Ok (record, fields, complete) ->
-       let exprs = check_exprs t scope (List.map fields ~f:snd) in
+       let exprs =
+         List.map fields ~f:(fun ((field : Typed.Field_ref.t), arg) ->
+           check_part
+             t
+             scope
+             arg
+             ~global:
+               (Type_env.is_global_field
+                  scope.program.type_env
+                  (Typed.Field_ref.name field)))
+       in
        if complete
        then node (Record (List.zip_exn (List.map fields ~f:fst) exprs)) record
        else node (Error exprs) record)
   | Field (expr, field) when Option.is_some (Known.unqualified_field field) ->
-    let expr = expr_type t scope ~expr in
+    let record_scope = Scope.with_sink scope in
+    let expr = expr_type t record_scope ~expr in
     (match field_type t scope field ~record:(Some expr.ty) ~loc with
-     | Error error -> fail error ~children:[ expr ]
+     | Error error ->
+       Scope.joins scope record_scope.sink ~loc ~why:"its field is read";
+       fail error ~children:[ expr ]
      | Ok (field, record, field_ty) ->
+       read_field scope field ~record_mode:record_scope.sink ~loc;
        let field = node (Field (expr, field)) field_ty in
        if Scope.unifies t scope ~ty1:record ~ty2:expr.ty ~loc:expr.loc
        then field
@@ -2969,7 +2997,10 @@ and expr_type
     (match field_type t scope field ~record:None ~loc with
      | Error error -> fail error ~children:(infer [ expr ])
      | Ok (field, record, field_ty) ->
-       node (Field (check_expr t scope ~expr ~ty:record, field)) field_ty)
+       let record_scope = Scope.with_sink scope in
+       let expr = check_expr t record_scope ~expr ~ty:record in
+       read_field scope field ~record_mode:record_scope.sink ~loc;
+       node (Field (expr, field)) field_ty)
   | Record_update (expr, fields) ->
     (* As in OCaml, the result's type parameters are those of [expr]'s type but
        for the ones only in the updated fields' types. *)
@@ -3409,6 +3440,35 @@ and check_expr ?expected ?hint t scope ~expr ~ty =
 
 and check_exprs t scope exprs =
   List.map exprs ~f:(fun (expr, ty) -> check_expr t scope ~expr ~ty)
+
+(* A part of a block being built: a [global_] one must be global, and isn't part
+   of the block's locality. *)
+and check_part t (scope : Scope.t) (expr, ty) ~global =
+  if not global
+  then check_expr t scope ~expr ~ty
+  else (
+    let part_scope = Scope.with_sink scope in
+    let part = check_expr t part_scope ~expr ~ty in
+    Scope.add_mode
+      scope
+      ~loc:part.loc
+      (Scope.locality_at_most
+         part_scope.sink
+         ~ty
+         Global
+         ~loc:part.loc
+         ~why:"it is held by a [global_] field");
+    Scope.evaluates_for scope part_scope.sink ~loc:part.loc ~why:"it is held";
+    part)
+
+(* A [global_] field read from a record is global, whatever the record's
+   locality. *)
+and read_field (scope : Scope.t) field ~record_mode ~loc =
+  if Type_env.is_global_field
+       scope.program.type_env
+       (Typed.Field_ref.name field)
+  then Scope.evaluates_for scope record_mode ~loc ~why:"its field is read"
+  else Scope.joins scope record_mode ~loc ~why:"its field is read"
 
 (* Checks [expr] has a record type with [entries] first, returning the rest of
    its row. *)

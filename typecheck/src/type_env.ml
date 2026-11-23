@@ -1171,3 +1171,13 @@ let reflect t name =
   let%map.Result (_ : Signature.Type_decl.t) = check t name in
   (Hashtbl.find_exn t.types name).reflected
 ;;
+
+let is_global_field t name =
+  Option.value_map (Hashtbl.find t.fields name) ~default:false ~f:(fun field ->
+    field.is_global)
+;;
+
+let global_constructor_args t name =
+  Option.map (Hashtbl.find t.constructors name) ~f:(fun constructor ->
+    constructor.global_args)
+;;

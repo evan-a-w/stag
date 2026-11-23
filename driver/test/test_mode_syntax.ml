@@ -23,8 +23,8 @@ let var = (summed @ local)
 |};
   [%expect
     {|
-    type r = { x : int; y : int }
-    type t = A of int * int
+    type r = { x : global_ int; y : int }
+    type t = A of global_ int * int
     val f : int -> int -> int
     val pair : 'a -> 'a * ('a * 'a)
     val apply : (int -> int) -> int

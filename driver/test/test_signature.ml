@@ -292,7 +292,8 @@ end
     {|
     ((Type
       ((name box) (params ((ATy (TVar (Generic 1)))))
-       (kind (Record (((name contents) (ty (TVar (Generic 1)))))))))
+       (kind
+        (Record (((name contents) (ty (TVar (Generic 1))) (is_global false)))))))
      (Module (name M)
       (items
        ((Value

@@ -78,7 +78,11 @@ module Type_decl = struct
         |> Some
       | Record fields ->
         List.map fields ~f:(fun { name; ty = field; is_global } ->
-          sprintf "%s : %s%s" name (if is_global then "global_ " else "") (ty field))
+          sprintf
+            "%s : %s%s"
+            name
+            (if is_global then "global_ " else "")
+            (ty field))
         |> String.concat ~sep:"; "
         |> sprintf "{ %s }"
         |> Some

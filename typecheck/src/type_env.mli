@@ -179,3 +179,10 @@ val reflect
   :  t
   -> string
   -> (Reflected_decl.t option, Typecheck_error.t) Result.t
+
+(** Whether the field of canonical name [name] is declared [global_]. *)
+val is_global_field : t -> string -> bool
+
+(** Per argument of the constructor of canonical name [name], whether it is
+    declared [global_]. [None] for exceptions. *)
+val global_constructor_args : t -> string -> bool list option
