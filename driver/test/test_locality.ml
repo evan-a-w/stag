@@ -19,13 +19,13 @@ let locality source =
 
 let%expect_test "a local value can't be returned" =
   locality {|
-let f u = let p = local_ (1, 2) in p
+let f u = let p = stack_ (1, 2) in p
 |};
   [%expect
-    {| This is local, because it is allocated by [local_] (at t.stag:2:18-31), then it is part of the value (at t.stag:2:18-31), then p is used (at t.stag:2:35-36), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:2:10-36) |}];
+    {| This is local, because it is allocated by [stack_] (at t.stag:2:18-31), then it is part of the value (at t.stag:2:18-31), then p is used (at t.stag:2:35-36), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:2:10-36) |}];
   locality
     {|
-let f u = exclave_ local_ (1, 2)
+let f u = exclave_ stack_ (1, 2)
 let g u = match f () with (a, _) -> a
 |};
   [%expect {|
@@ -41,13 +41,13 @@ let f u = let x = exclave_ (1, 2) in x
 
 let%expect_test "toplevels are global" =
   locality {|
-let x = local_ (1, 2)
+let x = stack_ (1, 2)
 |};
   [%expect
-    {| This is local, because it is allocated by [local_] (at t.stag:2:8-21), then it is part of the value (at t.stag:2:8-21), but must be at most global, because x is a toplevel (at t.stag:2:8-21) |}];
+    {| This is local, because it is allocated by [stack_] (at t.stag:2:8-21), then it is part of the value (at t.stag:2:8-21), but must be at most global, because x is a toplevel (at t.stag:2:8-21) |}];
   locality
     {|
-let x = let p = local_ (1, 2) in match p with (a, b) -> Int.add a b
+let x = let p = stack_ (1, 2) in match p with (a, b) -> Int.add a b
 |};
   [%expect {| val x : int |}]
 ;;
@@ -55,36 +55,36 @@ let x = let p = local_ (1, 2) in match p with (a, b) -> Int.add a b
 let%expect_test "plain data crosses locality" =
   locality
     {|
-let f u = let p = local_ ((1, 2), 3) in match p with (a, _) -> a
+let f u = let p = stack_ ((1, 2), 3) in match p with (a, _) -> a
 |};
   [%expect
-    {| This is local, because it is allocated by [local_] (at t.stag:2:18-36), then it is part of the value (at t.stag:2:18-36), then p is used (at t.stag:2:46-47), then a is used (at t.stag:2:63-64), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:2:10-64) |}];
+    {| This is local, because it is allocated by [stack_] (at t.stag:2:18-36), then it is part of the value (at t.stag:2:18-36), then p is used (at t.stag:2:46-47), then a is used (at t.stag:2:63-64), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:2:10-64) |}];
   locality
     {|
-let f u = let p = local_ ((1, 2), 3) in match p with (_, b) -> b
+let f u = let p = stack_ ((1, 2), 3) in match p with (_, b) -> b
 |};
   [%expect {| val f : 'a -> int |}]
 ;;
 
 let%expect_test "a closure capturing a local value is local" =
   locality {|
-let f u = let p = local_ (1, 2) in let g v = p in g
+let f u = let p = stack_ (1, 2) in let g v = p in g
 |};
   [%expect
-    {| This is local, because it is allocated by [local_] (at t.stag:2:18-31), then it is part of the value (at t.stag:2:18-31), then p is captured by a closure (at t.stag:2:45-46), then g is used (at t.stag:2:50-51), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:2:10-51) |}];
+    {| This is local, because it is allocated by [stack_] (at t.stag:2:18-31), then it is part of the value (at t.stag:2:18-31), then p is captured by a closure (at t.stag:2:45-46), then g is used (at t.stag:2:50-51), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:2:10-51) |}];
   locality
     {|
 let f u =
-  let p = local_ ((1, 2), 3) in
+  let p = stack_ ((1, 2), 3) in
   let g v = match p with (_, b) -> b in
   g ()
 |};
   [%expect
-    {| This is local, because it is allocated by [local_] (at t.stag:3:10-28), then it is part of the value (at t.stag:3:10-28), then p is captured by a closure (at t.stag:4:18-19), then g is used (at t.stag:5:2-3), but must be at most regional, because it is passed in a tail call, after the current region has ended (mark the call [@nontail]) (at t.stag:5:2-3) |}];
+    {| This is local, because it is allocated by [stack_] (at t.stag:3:10-28), then it is part of the value (at t.stag:3:10-28), then p is captured by a closure (at t.stag:4:18-19), then g is used (at t.stag:5:2-3), but must be at most regional, because it is passed in a tail call, after the current region has ended (mark the call [@nontail]) (at t.stag:5:2-3) |}];
   locality
     {|
 let f u =
-  let p = local_ ((1, 2), 3) in
+  let p = stack_ ((1, 2), 3) in
   let g v = match p with (_, b) -> b in
   g () [@nontail]
 |};
@@ -95,16 +95,16 @@ let%expect_test "a tail call can't be passed what is local to the region" =
   locality
     {|
 let use (p @ local) = match p with (a, _) -> a
-let caller u = use (local_ (1, 2))
+let caller u = use (stack_ (1, 2))
 |};
   [%expect
-    {| This is local, because it is allocated by [local_] (at t.stag:3:19-34), then it is part of the value (at t.stag:3:19-34), but must be at most regional, because it is passed in a tail call, after the current region has ended (mark the call [@nontail]) (at t.stag:3:19-34) |}];
+    {| This is local, because it is allocated by [stack_] (at t.stag:3:19-34), then it is part of the value (at t.stag:3:19-34), but must be at most regional, because it is passed in a tail call, after the current region has ended (mark the call [@nontail]) (at t.stag:3:19-34) |}];
   locality
     {|
 let use (p @ local) = match p with (a, _) -> a
-let caller u = use (local_ (1, 2)) [@nontail]
+let caller u = use (stack_ (1, 2)) [@nontail]
 let pass (p : (int * int) @ local) = use p
-let in_exclave u = exclave_ use (local_ (1, 2))
+let in_exclave u = exclave_ use (stack_ (1, 2))
 |};
   [%expect
     {|
@@ -119,10 +119,10 @@ let%expect_test "parameters" =
   locality
     {|
 let keep (x @ global) = Ptr.make x
-let f u = keep (local_ (1, 2)) [@nontail]
+let f u = keep (stack_ (1, 2)) [@nontail]
 |};
   [%expect
-    {| This is local, because it is allocated by [local_] (at t.stag:3:15-30), then it is part of the value (at t.stag:3:15-30), then it is passed to a function (at t.stag:3:10-30), but must be at most global, because it is annotated global (at t.stag:2:14-20), then the function types are unified |}];
+    {| This is local, because it is allocated by [stack_] (at t.stag:3:15-30), then it is part of the value (at t.stag:3:15-30), then it is passed to a function (at t.stag:3:10-30), but must be at most global, because it is annotated global (at t.stag:2:14-20), then the function types are unified |}];
   locality {|
 let escape (x @ local) = Ptr.make x
 |};
@@ -131,26 +131,26 @@ let escape (x @ local) = Ptr.make x
   locality
     {|
 let same x = x
-let f u = let p = same (local_ (1, 2)) in Ptr.make p
+let f u = let p = same (stack_ (1, 2)) in Ptr.make p
 let g u = let p = same (1, 2) in Ptr.make p
 |};
   [%expect
     {|
-    This is local, because it is allocated by [local_] (at t.stag:3:23-38), then it is part of the value (at t.stag:3:23-38), then it is passed to a function (at t.stag:3:18-38), then the function types are unified, then x is passed to the function (at t.stag:2:13-14), then x is used (at t.stag:2:13-14), then the function returns it (at t.stag:2:13-14), then the function types are unified, then the function returns it (at t.stag:3:18-38), then p is used (at t.stag:3:51-52), then it is passed to a function (at t.stag:3:42-52), but must be at most global, because a function type fixes it, then the function types are unified
-    This is local, because it is allocated by [local_] (at t.stag:3:23-38), then it is part of the value (at t.stag:3:23-38), then it is passed to a function (at t.stag:3:18-38), then the function types are unified, then x is passed to the function (at t.stag:2:13-14), then x is used (at t.stag:2:13-14), then the function returns it (at t.stag:2:13-14), then the function types are unified, then the function returns it (at t.stag:3:18-38), then p is used (at t.stag:3:51-52), but must be at most regional, because it is passed in a tail call, after the current region has ended (mark the call [@nontail]) (at t.stag:3:51-52)
+    This is local, because it is allocated by [stack_] (at t.stag:3:23-38), then it is part of the value (at t.stag:3:23-38), then it is passed to a function (at t.stag:3:18-38), then the function types are unified, then x is passed to the function (at t.stag:2:13-14), then x is used (at t.stag:2:13-14), then the function returns it (at t.stag:2:13-14), then the function types are unified, then the function returns it (at t.stag:3:18-38), then p is used (at t.stag:3:51-52), then it is passed to a function (at t.stag:3:42-52), but must be at most global, because a function type fixes it, then the function types are unified
+    This is local, because it is allocated by [stack_] (at t.stag:3:23-38), then it is part of the value (at t.stag:3:23-38), then it is passed to a function (at t.stag:3:18-38), then the function types are unified, then x is passed to the function (at t.stag:2:13-14), then x is used (at t.stag:2:13-14), then the function returns it (at t.stag:2:13-14), then the function types are unified, then the function returns it (at t.stag:3:18-38), then p is used (at t.stag:3:51-52), but must be at most regional, because it is passed in a tail call, after the current region has ended (mark the call [@nontail]) (at t.stag:3:51-52)
     |}]
 ;;
 
 let%expect_test "stores through pointers are global" =
   locality {|
-let f (p : ptr[int * int]) = p.* <- local_ (1, 2)
+let f (p : ptr[int * int]) = p.* <- stack_ (1, 2)
 |};
   [%expect
-    {| This is local, because it is allocated by [local_] (at t.stag:2:36-49), then it is part of the value (at t.stag:2:36-49), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:2:36-49) |}];
+    {| This is local, because it is allocated by [stack_] (at t.stag:2:36-49), then it is part of the value (at t.stag:2:36-49), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:2:36-49) |}];
   locality
     {|
 let f (p : ptr[(int * int) * int]) =
-  let q = local_ ((1, 2), 3) in
+  let q = stack_ ((1, 2), 3) in
   match p.* with (a, _) -> a
 |};
   [%expect {| val f : ptr[(int * int) * int] -> int * int |}]
@@ -168,12 +168,12 @@ let get_l (r @ local) = Ptr.make r.l
   locality
     {|
 type r = { g : global_ int * int; l : int * int }
-let mk u = local_ { g = local_ (1, 2); l = (3, 4) }
+let mk u = stack_ { g = stack_ (1, 2); l = (3, 4) }
 |};
   [%expect
     {|
-    This is local, because it is allocated by [local_] (at t.stag:3:11-51), then it is part of the value (at t.stag:3:11-51), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:3:11-51)
-    This is local, because it is allocated by [local_] (at t.stag:3:24-37), then it is part of the value (at t.stag:3:24-37), but must be at most global, because it is held by a [global_] field (at t.stag:3:24-37)
+    This is local, because it is allocated by [stack_] (at t.stag:3:11-51), then it is part of the value (at t.stag:3:11-51), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:3:11-51)
+    This is local, because it is allocated by [stack_] (at t.stag:3:24-37), then it is part of the value (at t.stag:3:24-37), but must be at most global, because it is held by a [global_] field (at t.stag:3:24-37)
     |}]
 ;;
 
@@ -182,7 +182,7 @@ let%expect_test "let mut" =
     {|
 let f u =
   let mut x = (1, 2) in
-  x <- (local_ (3, 4));
+  x <- (stack_ (3, 4));
   match x with (a, _) -> a
 |};
   [%expect {| val f : 'a -> int |}];
@@ -191,17 +191,17 @@ let f u =
 let f u =
   let mut x = (1, 2) in
   let g v = match x with (a, _) -> a in
-  x <- (local_ (3, 4));
+  x <- (stack_ (3, 4));
   g
 |};
   [%expect
-    {| This is local, because it is allocated by [local_] (at t.stag:5:7-22), then it is part of the value (at t.stag:5:7-22), then it is assigned to x (at t.stag:5:2-22), then x holds it, and is captured by a closure (at t.stag:4:18-19), then g is used (at t.stag:6:2-3), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:3:2-6:3) |}];
+    {| This is local, because it is allocated by [stack_] (at t.stag:5:7-22), then it is part of the value (at t.stag:5:7-22), then it is assigned to x (at t.stag:5:2-22), then x holds it, and is captured by a closure (at t.stag:4:18-19), then g is used (at t.stag:6:2-3), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:3:2-6:3) |}];
   locality
     {|
 let f u =
   let mut x = (1, 2) in
   let g v = match x with (a, _) -> a in
-  x <- (local_ (3, 4));
+  x <- (stack_ (3, 4));
   g () [@nontail]
 |};
   [%expect {| val f : 'a -> int |}];
@@ -209,7 +209,7 @@ let f u =
     {|
 let f u =
   let mut x = (1, 2) in
-  let set v = x <- (local_ (3, 4)) in
+  let set v = x <- (stack_ (3, 4)) in
   set ();
   0
 |};
@@ -224,7 +224,7 @@ let iter f l =
   | [] -> ()
   | Cons *(x, rest) -> f x [@nontail]; iter f rest
 let sum l =
-  let p = local_ (1, 2) in
+  let p = stack_ (1, 2) in
   let mut total = 0 in
   iter (fun x -> match p with (a, _) -> total <- Int.add total (Int.add a x)) l [@nontail];
   total
@@ -239,7 +239,7 @@ let sum l =
 let%expect_test "Unsafe.assume_global" =
   locality
     {|
-let f u = let p = local_ (1, 2) in let q = Unsafe.assume_global p in q
+let f u = let p = stack_ (1, 2) in let q = Unsafe.assume_global p in q
 |};
   [%expect {| val f : 'a -> int * int |}]
 ;;

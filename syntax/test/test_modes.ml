@@ -99,12 +99,12 @@ let%expect_test "moded arrow types" =
     |}]
 ;;
 
-let%expect_test "local_, exclave_ and [@nontail]" =
-  expr "local_ (1, 2)";
+let%expect_test "stack_, exclave_ and [@nontail]" =
+  expr "stack_ (1, 2)";
   expr "exclave_ f x";
-  expr "let x = local_ { a = 1 } in exclave_ (x, x)";
-  expr "local_ let x = 1 in x";
-  expr "f (local_ x) y";
+  expr "let x = stack_ { a = 1 } in exclave_ (x, x)";
+  expr "stack_ let x = 1 in x";
+  expr "f (stack_ x) y";
   expr "f x [@nontail]";
   expr "(f x y [@nontail], g x [@nontail])";
   expr "x [@nontail]";
@@ -118,12 +118,12 @@ let%expect_test "local_, exclave_ and [@nontail]" =
   expr "g (Some (f x)) [@nontail]";
   [%expect
     {|
-    (Local (Tuple ((Lit (Int 1)) (Lit (Int 2)))))
+    (Stack (Tuple ((Lit (Int 1)) (Lit (Int 2)))))
     (Exclave (App (Var f ()) (Var x ())))
-    (Let x () () (Local (Record ((a (Lit (Int 1))))))
+    (Let x () () (Stack (Record ((a (Lit (Int 1))))))
      (Exclave (Tuple ((Var x ()) (Var x ())))))
-    (Local (Let x () () (Lit (Int 1)) (Var x ())))
-    (App (App (Var f ()) (Local (Var x ()))) (Var y ()))
+    (Stack (Let x () () (Lit (Int 1)) (Var x ())))
+    (App (App (Var f ()) (Stack (Var x ()))) (Var y ()))
     (Nontail (App (Var f ()) (Var x ())))
     (Tuple
      ((Nontail (App (App (Var f ()) (Var x ())) (Var y ())))
@@ -171,14 +171,14 @@ let%expect_test "global_ fields and constructor arguments" =
 let%expect_test "printing" =
   print
     {|
-let f (x @ local) (y : int @ 'm) : int @ global = exclave_ (x, local_ (y, y))
+let f (x @ local) (y : int @ 'm) : int @ global = exclave_ (x, stack_ (y, y))
 let g (h : int @ local -> int @ local) = h 1 [@nontail]
 type r = { x : global_ int; y : int }
 let mut counter : int @ static = 0
 |};
   [%expect
     {|
-    let f (x @ local) (y : int @ 'm) : int @ global = exclave_ (x, local_ (y, y))
+    let f (x @ local) (y : int @ 'm) : int @ global = exclave_ (x, stack_ (y, y))
     let g (h : int @ local -> int @ local) = h 1 [@nontail]
 
     type r = {x : global_ int; y : int}
@@ -188,13 +188,13 @@ let mut counter : int @ static = 0
   print
     ~width:30
     {|
-let f (x @ local) = exclave_ let y = local_ (x, x) in some_function y [@nontail]
+let f (x @ local) = exclave_ let y = stack_ (x, x) in some_function y [@nontail]
 |};
   [%expect
     {|
     let f (x @ local) =
       exclave_
-        let y = local_ (x, x) in
+        let y = stack_ (x, x) in
         some_function y [@nontail]
     |}]
 ;;

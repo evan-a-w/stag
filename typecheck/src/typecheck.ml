@@ -491,16 +491,19 @@ module Scope = struct
       (Mode.Var.at_least t.sink Stage stage (Mode.Reason.create ~loc why))
   ;;
 
-  (* An annotation [@ local] bounds the mode on its axes; [@ 'm] is the mode
-     ['m] stands for throughout the annotations of the toplevel. *)
-  let annotated t mode (annot : Syntax.Mode_expr.t option) =
+  (* [mode] is bounded by the annotation on the axes it names; with [exact],
+     fixed to it. [@ 'm] is the mode ['m] stands for throughout the annotations
+     of the toplevel. *)
+  let annotated ?(exact = false) t mode (annot : Syntax.Mode_expr.t option) =
     Option.iter annot ~f:(fun { txt; loc } ->
       match txt with
       | Var var ->
         add_mode
           t
           ~loc
-          (Mode.Var.equate
+          ((if exact
+            then Mode.Var.equate
+            else Mode.Var.submode ?crossing:None ?locality:None)
              mode
              (Type_env.Annotation_vars.mode t.annotation_vars var)
              (Mode.Reason.create ~loc (sprintf "it is annotated '%s" var)))
@@ -513,27 +516,53 @@ module Scope = struct
                  "it is annotated %s"
                  (Syntax.Mode_expr.Atom.to_string atom))
           in
-          let stage stage =
-            add_mode t ~loc (Mode.Var.at_most mode Stage stage reason)
-          in
-          (* A locality is the value's own, so is fixed: [local] promises not to
-             let it escape. *)
-          let locality locality =
+          let fix axis point =
             add_mode
               t
               ~loc
-              (Mode.Var.at_least mode Locality locality reason
+              (Mode.Var.at_most mode axis point reason
                |> Result.bind ~f:(fun () ->
-                 Mode.Var.at_most mode Locality locality reason))
+                 if exact
+                 then Mode.Var.at_least mode axis point reason
+                 else Ok ()))
           in
           match atom with
-          | Const -> stage Const
-          | Portable -> stage Portable
-          | Nonportable -> stage Nonportable
-          | Global -> locality Global
-          | Regional -> locality Regional
-          | Local -> locality Local
+          | Const -> fix Stage Const
+          | Portable -> fix Stage Portable
+          | Nonportable -> fix Stage Nonportable
+          | Global -> fix Locality Global
+          | Regional -> fix Locality Regional
+          | Local -> fix Locality Local
           | Static | Gc | Unknown -> ()))
+  ;;
+
+  (* The mode of a variable bound by [let x @ annot = e], [e] being of [mode]:
+     the annotation's, on the axes it names, else [e]'s. *)
+  let bound t mode (annot : Syntax.Mode_expr.t option) =
+    match annot with
+    | None -> mode
+    | Some { loc; _ } ->
+      let bound = fresh_mode t in
+      let reason = Mode.Reason.create ~loc "it is bound by an annotated let" in
+      add_mode t ~loc (Mode.Var.submode mode bound reason);
+      annotated ~exact:true t bound annot;
+      let named =
+        match annot with
+        | Some { txt = Atoms atoms; _ } ->
+          List.filter_map atoms ~f:(fun (atom : Syntax.Mode_expr.Atom.t) ->
+            match atom with
+            | Const | Portable | Nonportable -> Some (Mode.Axis.Any.T Stage)
+            | Global | Regional | Local -> Some (T Locality)
+            | Static | Gc | Unknown -> None)
+        | Some { txt = Var _; _ } | None ->
+          [ T Stage; T Locality; T Provenance ]
+      in
+      List.iter
+        [ Mode.Axis.Any.T Stage; T Provenance; T Locality ]
+        ~f:(fun (T axis as any) ->
+          if not (List.mem named any ~equal:Mode.Axis.Any.equal)
+          then add_mode t ~loc (Mode.Var.submode_on bound mode axis reason));
+      bound
   ;;
 
   (* A value of [mode] is evaluated for the value being computed: with
@@ -706,7 +735,7 @@ let function_type
   in
   let moded annot =
     let mode = Scope.fresh_mode scope in
-    Scope.annotated scope mode annot;
+    Scope.annotated ~exact:true scope mode annot;
     mode
   in
   let args =
@@ -2126,7 +2155,9 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
             (Mode.Reason.create
                ~loc:toplevel.expr.loc
                (sprintf "%s is mutable" toplevel.ident.name))
-      else init_mode
+      else if Toplevel.is_function toplevel
+      then init_mode
+      else Scope.bound scope init_mode toplevel.mode
     in
     if toplevel.mut
     then (
@@ -2141,9 +2172,7 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
               ~loc:toplevel.expr.loc
               (sprintf "it initializes %s" toplevel.ident.name)));
       Hashtbl.set program.held_modes ~key:toplevel.ident ~data:held;
-      Scope.annotated scope held toplevel.mode)
-    else if not (Toplevel.is_function toplevel)
-    then Scope.annotated scope init_mode toplevel.mode;
+      Scope.annotated ~exact:true scope held toplevel.mode);
     toplevel.state
     <- In_progress
          { index
@@ -2176,6 +2205,7 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
     (* A toplevel outlives every region. *)
     List.iter
       (init_mode
+       :: mode
        :: Option.to_list (Hashtbl.find program.held_modes toplevel.ident))
       ~f:(fun mode ->
         Scope.add_mode
@@ -2367,7 +2397,7 @@ and expr_type
   | Marked (Nontail, inner) ->
     let inner = expr_type ?expected ~hint t scope ~expr:inner in
     node (Marked (Nontail, inner)) inner.ty
-  | Marked (Local, inner) ->
+  | Marked (Stack, inner) ->
     let inner_scope = Scope.with_sink scope in
     Scope.add_mode
       scope
@@ -2376,7 +2406,7 @@ and expr_type
          inner_scope.sink
          Locality
          Local
-         (Mode.Reason.create ~loc "it is allocated by [local_]"));
+         (Mode.Reason.create ~loc "it is allocated by [stack_]"));
     let inner = expr_type ?expected ~hint t inner_scope ~expr:inner in
     Scope.joins
       scope
@@ -2384,7 +2414,7 @@ and expr_type
       ~crossing:(Scope.crossing inner.ty)
       ~loc
       ~why:"it is part of the value";
-    node (Marked (Local, inner)) inner.ty
+    node (Marked (Stack, inner)) inner.ty
   | Marked (Exclave, inner) ->
     (match scope.region with
      | Some res_mode when tail ->
@@ -2522,7 +2552,6 @@ and expr_type
     let ident = Program_env.bind scope.program binder ty ~level:scope.level in
     let name = Source.Binder.name binder in
     let mode = inner.sink in
-    if not is_function then Scope.annotated scope mode mode_annot;
     (* A closure may refer to itself, but a value referring to itself is not
        known yet, as a [let rec]'s isn't. *)
     let own_mode =
@@ -2554,7 +2583,15 @@ and expr_type
     let in_ =
       Env.with_bindings
         scope.locals
-        [ name, Scope.entry scope ~ident ~scheme:ty ~mode ]
+        [ ( name
+          , Scope.entry
+              scope
+              ~ident
+              ~scheme:ty
+              ~mode:
+                (if is_function then mode else Scope.bound scope mode mode_annot)
+          )
+        ]
         ~f:(fun () -> expr_type t tail_scope ~expr:in_ ?expected ~hint)
     in
     node
@@ -2600,7 +2637,7 @@ and expr_type
          held
          (Mode.Reason.create ~loc (sprintf "it initializes %s" name)));
     Hashtbl.set scope.program.held_modes ~key:ident ~data:held;
-    Scope.annotated scope held held_annot;
+    Scope.annotated ~exact:true scope held held_annot;
     let mode =
       Scope.stage_at_least
         scope

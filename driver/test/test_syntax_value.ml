@@ -115,7 +115,7 @@ let%expect_test "the prelude's signature" =
         val tuple : list[t] -> t
       end
       module Expr : sig
-        type t = Lit of Lit.t | Var of Path.t[Value_ref.t] * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} | App of ptr[t * t] | Let of ptr[string * list[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * t * t] | Let_mut of ptr[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * t * t] | Assign of ptr[Path.t[Value_ref.t] * t] | Store of ptr[t * t] | Fun of ptr[list[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] * t] | Splice of ptr[{`expr : t; `subs : option[list[string * option[t]]]}] | Quote of ptr[t] | Tuple of list[t] | Deref of ptr[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Field of ptr[t * Path.t[Field_ref.t]] | Record_update of ptr[t * list[Path.t[Field_ref.t] * t]] | Type of Type_expr.t | Match of ptr[t * list[Pattern.t * t]] | Poly_record of list[string * t] | Poly_field of ptr[t * string] | Poly_extend of ptr[list[string * t] * t] | Poly_restrict of ptr[t * string] | Poly_update of ptr[t * list[string * t]] | Poly_variant of ptr[string * option[t]] | Expect of string | Struct_quote of list[Toplevel.t] | Local of ptr[t] | Exclave of ptr[t] | Nontail of ptr[t]
+        type t = Lit of Lit.t | Var of Path.t[Value_ref.t] * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} | App of ptr[t * t] | Let of ptr[string * list[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * t * t] | Let_mut of ptr[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * t * t] | Assign of ptr[Path.t[Value_ref.t] * t] | Store of ptr[t * t] | Fun of ptr[list[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] * t] | Splice of ptr[{`expr : t; `subs : option[list[string * option[t]]]}] | Quote of ptr[t] | Tuple of list[t] | Deref of ptr[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Field of ptr[t * Path.t[Field_ref.t]] | Record_update of ptr[t * list[Path.t[Field_ref.t] * t]] | Type of Type_expr.t | Match of ptr[t * list[Pattern.t * t]] | Poly_record of list[string * t] | Poly_field of ptr[t * string] | Poly_extend of ptr[list[string * t] * t] | Poly_restrict of ptr[t * string] | Poly_update of ptr[t * list[string * t]] | Poly_variant of ptr[string * option[t]] | Expect of string | Struct_quote of list[Toplevel.t] | Stack of ptr[t] | Exclave of ptr[t] | Nontail of ptr[t]
         val var : string -> t
         val construct : string -> list[t] -> t
         val int : int -> t
@@ -628,10 +628,10 @@ let quoted = .< struct type t = .~kind let x : .~ty = .~e include .~items end >.
   ; {|
 type r = {x : global_ int; y : global_ int @ local -> int @ 'm; z : int}
 type v = A of global_ int * int | B of global_ (int -> int)
-let f (x @ local) (y : int @ 'm) : int @ global portable = exclave_ local_ (x, y)
+let f (x @ local) (y : int @ 'm) : int @ global portable = exclave_ stack_ (x, y)
 let g (h : int @ local -> int @ 'm -> (int -> int @ local) @ global) = h 1 [@nontail]
 let annotated = ((f : (int -> int) @ local), (f @ local portable gc))
-let x @ const = local_ (Some (f x [@nontail]), `A (g y [@nontail]))
+let x @ const = stack_ (Some (f x [@nontail]), `A (g y [@nontail]))
 let mut counter : int @ static = 0
 let compose : ('b @ 'n -> 'c) -> ('a -> 'b @ 'm) -> 'a -> 'c with 'm <= 'n and portable <= 'm = compose
 let h (x : int @ 'm with 'm <= portable) = (x : int with const <= 'm)
@@ -1694,7 +1694,7 @@ let%expect_test "mode syntax round trips through values" =
 let decls = .< struct
   type r = { x : global_ int; y : int }
   type t = A of global_ int * int
-  let f (x @ local) (y : int @ 'm) : int @ global portable = exclave_ local_ (x, y)
+  let f (x @ local) (y : int @ 'm) : int @ global portable = exclave_ stack_ (x, y)
   let g (h : int @ local -> int @ 'm) = h 1 [@nontail]
   let annotated = (f : int @ local -> int -> int * int)
   let var = (g @ local)
@@ -1718,7 +1718,7 @@ end >.
        (kind (Variant ((A ((Global (Con int ())) (Con int ()))))))))
      (Let f ((x ((mode (Atoms (Local))))) (y ((ty (Con int ())) (mode (Var m)))))
       ((ty (Con int ())) (mode (Atoms (Global Portable))))
-      (Exclave (Local (Tuple ((Var x ()) (Var y ()))))))
+      (Exclave (Stack (Tuple ((Var x ()) (Var y ()))))))
      (Let g
       ((h
         ((ty
@@ -1748,7 +1748,7 @@ end >.
     type t = A of global_ int * int
 
     let f (x @ local) (y : int @ 'm) : int @ global portable =
-      exclave_ local_ (x, y)
+      exclave_ stack_ (x, y)
 
     let g (h : int @ local -> int @ 'm) = h 1 [@nontail]
     let annotated = (f : int @ local -> int -> int * int)

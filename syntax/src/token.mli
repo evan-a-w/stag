@@ -14,7 +14,7 @@ type t =
   | Let
   | Rec
   | Mut
-  | Local_ (** [local_] *)
+  | Stack_ (** [stack_] *)
   | Exclave_ (** [exclave_] *)
   | Global_ (** [global_] *)
   | Let_expect_test (** [let%expect_test] *)

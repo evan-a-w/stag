@@ -144,11 +144,11 @@ module Pattern : sig
 end
 
 (** [ty] is the type of the node, instantiated where it is a variable. *)
-(** The locality markers of expressions: [local_ e], [exclave_ e] and
+(** The locality markers of expressions: [stack_ e], [exclave_ e] and
     [e [@nontail]]. *)
 module Marker : sig
   type t =
-    | Local
+    | Stack
     | Exclave
     | Nontail
   [@@deriving sexp_of, equal]

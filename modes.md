@@ -280,7 +280,7 @@ writable/read-only distinction on pointers; and with mutation, effect purity
 Each step is a branch stacked on the previous one.
 
 - **A. Syntax**: mode annotations (`(x @ local)`, `'a @ 'm -> 'b @ 'n`),
-  `local_`, `exclave_`, `global_` fields, the non-tail call marker. Parsed
+  `stack_`, `exclave_`, `global_` fields, the non-tail call marker. Parsed
   and printed, ignored by the typechecker.
 - **B. Solver**: the `Mode` library (`mode/`): the three axes, mode
   variables with bounds, edges with morphisms (`const ⇒ static`, crossing),
@@ -293,7 +293,7 @@ Each step is a branch stacked on the previous one.
 - **D. Arrow modes and polymorphism**: arrows carry argument and return
   modes (a closure's mode is the mode of the arrow value); schemes keep mode variables and their constraints; mode
   annotations; printing that hides unconstrained and default modes.
-- **E. Locality**: regions, `local_`, `exclave_`, the tail call rule,
+- **E. Locality**: regions, `stack_`, `exclave_`, the tail call rule,
   `global_` fields, `Unsafe.assume_global`, mutable variables captured by
   closures holding `global` values, mode crossing by kind.
 - **F. Provenance**: allocation is `gc`, literals and `const` values

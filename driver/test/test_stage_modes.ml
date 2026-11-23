@@ -134,7 +134,7 @@ let bad @ const = Int.add 1 2
 let bad_local = let x @ portable = (fun u -> u) 1 in x
 |};
   [%expect
-    {| This is portable, because it applies a function (at t.stag:4:18-29), but must be at most const, because it is annotated const (at t.stag:4:10-15) |}]
+    {| This is portable, because it applies a function (at t.stag:4:18-29), but must be at most const, because it is annotated const (at t.stag:4:10-15), then it is bound by an annotated let (at t.stag:4:10-15) |}]
 ;;
 
 let%expect_test "const_toplevels" =
@@ -325,7 +325,7 @@ let k @ portable = let n = Int.add 1 2 in fun x -> Int.add x n
 let v @ 'm = 1
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:4:27-38), then n is bound (at t.stag:4:19-62), but must be at most portable, because it is annotated portable (at t.stag:4:8-16) |}]
+    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:4:27-38), then n is bound (at t.stag:4:19-62), but must be at most portable, because it is annotated portable (at t.stag:4:8-16), then it is bound by an annotated let (at t.stag:4:8-16) |}]
 ;;
 
 let%expect_test "a limit is reported once, at what first exceeds it" =
@@ -334,7 +334,7 @@ let%expect_test "a limit is reported once, at what first exceeds it" =
 let bad @ const = (Int.add 1 2, Int.add 3 4, Int.add (Int.add 5 6) 7)
 |};
   [%expect
-    {| This is portable, because it applies a function (at t.stag:2:19-30), but must be at most const, because it is annotated const (at t.stag:2:10-15) |}]
+    {| This is portable, because it applies a function (at t.stag:2:19-30), but must be at most const, because it is annotated const (at t.stag:2:10-15), then it is bound by an annotated let (at t.stag:2:10-15) |}]
 ;;
 
 let%expect_test "substituting a name the code doesn't need is an error" =
@@ -493,7 +493,7 @@ let q = .< fun a -> let p = fun u -> .~(.<1>.) in (p 1, p true) >.
 let q = .< fun a -> let h @ const = fun u -> .~(.<1>.) in h >.
 |};
   [%expect
-    {| This is nonportable, because h is being defined (at t.stag:2:20-59), then h is captured by a closure (at t.stag:2:45-54), then the closure is made (at t.stag:2:36-54), but must be at most const, because it is annotated const (at t.stag:2:28-33) |}]
+    {| This is nonportable, because h is being defined (at t.stag:2:20-59), then h is captured by a closure (at t.stag:2:45-54), then the closure is made (at t.stag:2:36-54), then it is bound by an annotated let (at t.stag:2:28-33), but must be at most const, because it is annotated const (at t.stag:2:28-33) |}]
 ;;
 
 let%expect_test "data holding a toplevel function being checked is const" =
@@ -538,4 +538,30 @@ let use2 = (.~q 1, .~q true)
     val q : <'a -> 'a>{..'b}
     val use2 : int * bool
     |}]
+;;
+
+let%expect_test "a binding annotation is the variable's mode; an expression's \
+                 only bounds it"
+  =
+  modes {|
+let exact = let n @ portable = 1 in let m @ const = n in m
+|};
+  [%expect
+    {| This is portable, because it is annotated portable (at t.stag:2:20-28), then n is used (at t.stag:2:52-53), then it is bound by an annotated let (at t.stag:2:44-49), but must be at most const, because it is annotated const (at t.stag:2:44-49) |}];
+  modes
+    {|
+let checked = let one = 1 in let n = (one @ portable) in let m @ const = n in m
+|};
+  [%expect {| val checked : int |}];
+  modes {|
+let n @ portable = 1
+let m @ const = n
+|};
+  [%expect
+    {| This is portable, because it is annotated portable (at t.stag:2:8-16), then n is used (at t.stag:3:16-17), but must be at most const, because it is annotated const (at t.stag:3:8-13), then it is bound by an annotated let (at t.stag:3:8-13) |}];
+  modes {|
+let f u = let p @ local = (1, 2) in p
+|};
+  [%expect
+    {| This is local, because it is annotated local (at t.stag:2:18-23), then p is used (at t.stag:2:36-37), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:2:10-37) |}]
 ;;

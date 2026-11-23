@@ -284,7 +284,7 @@ module Expr = struct
     | Expect expected -> Expect expected
     | Type ty -> Type ty
     | Struct_quote toplevels -> Struct_quote toplevels
-    | Local expr -> Marked (Local, sub expr)
+    | Stack expr -> Marked (Stack, sub expr)
     | Exclave expr -> Marked (Exclave, sub expr)
     | Nontail expr -> Marked (Nontail, sub expr)
     | Error -> Error

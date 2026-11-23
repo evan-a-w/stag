@@ -38,8 +38,8 @@ node, for good errors.
   The longest tokens `.<` `.~` `..` `.{` are unaffected (`..x` is `..` then
   `x`).
 - Keywords: `let rec in match with fun exception type of module struct end`,
-  `true false`, and `local_ exclave_ global_` (see [Modes](#modes)), so
-  these are not identifiers anywhere, even qualified (`M.local_`). Mode names
+  `true false`, and `stack_ exclave_ global_` (see [Modes](#modes)), so
+  these are not identifiers anywhere, even qualified (`M.stack_`). Mode names
   (`local`, `const`, ...) are not keywords.
   `rec` is reserved, as lets are always recursive.
 - `@` introduces a mode (see [Modes](#modes)); `@@` is reserved (for
@@ -386,7 +386,7 @@ that inner code is spliced, not by the substitution, so it is an error too.
 The syntax of modes (see [modes.md](modes.md) and
 [semantics.md](semantics.md#modes)). Only the stage axis is checked so far:
 stage annotations (`let x @ const = ...`, `(x @ portable)`, `int @ 'm ->
-int @ 'm`) bound modes; locality and provenance annotations are ignored, and `local_`, `exclave_` and `[@nontail]`
+int @ 'm`) bound modes; locality and provenance annotations are ignored, and `stack_`, `exclave_` and `[@nontail]`
 evaluate as their body.
 
 A mode, after `@`, is a mode variable (`'m`, standing for every axis), or one
@@ -401,7 +401,7 @@ let mut counter : int @ static = 0
 (e : t @ m)   (x @ local)               (* an annotated variable *)
 int @ local -> int @ local              (* a function type's argument/result *)
 'a @ 'm -> 'b @ 'n
-local_ e                                (* allocate e in the current region *)
+stack_ e                                (* allocate e in the current region *)
 exclave_ e                              (* end the region, then evaluate e *)
 f x [@nontail]                          (* not a tail call *)
 type r = {x : global_ int; y : int}     (* always global, even in a local r *)
@@ -411,7 +411,7 @@ type t = A of global_ int * int
 `@` binds looser than `*` and tighter than `->`: `int * int @ local -> int`
 is `(int * int) @ local -> int`. A mode is written only on a binder, an
 annotation, or a function type's argument or result: `list[int @ local]` and
-`(int @ local) -> int` are errors. `local_` and `exclave_` extend as far right
+`(int @ local) -> int` are errors. `stack_` and `exclave_` extend as far right
 as `fun` does. `[@nontail]` follows an application, but not as a
 constructor's argument, where it would read as applying to the construction:
 `C (f x [@nontail])`, not `C (f x) [@nontail]`. `global_` is written only

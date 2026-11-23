@@ -234,7 +234,7 @@ module Defs = struct
     | Struct_quote of toplevel list
     (** [.< struct ... end >.]: the declarations as a [list[Stag.Toplevel.t]],
         with antiquotes. *)
-    | Local of expr (** [local_ e] *)
+    | Stack of expr (** [stack_ e] *)
     | Exclave of expr (** [exclave_ e] *)
     | Nontail of expr (** [f x [@nontail]], of an application. *)
     | Error (** In place of what did not parse. *)
@@ -453,7 +453,7 @@ module Expr = struct
     | Poly_variant of Name.t * t option
     | Expect of string Located.t
     | Struct_quote of toplevel list
-    | Local of t
+    | Stack of t
     | Exclave of t
     | Nontail of t
     | Error

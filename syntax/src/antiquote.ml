@@ -132,7 +132,7 @@ let map ?type_expr:replace_type_expr toplevels ~f =
         let e = sub e in
         Poly_update (e, fields fs)
       | Poly_variant (n, e) -> Poly_variant (n, Option.map e ~f:sub)
-      | Local e -> Local (sub e)
+      | Stack e -> Stack (sub e)
       | Exclave e -> Exclave (sub e)
       | Nontail e -> Nontail (sub e)
     in

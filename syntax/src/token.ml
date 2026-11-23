@@ -14,7 +14,7 @@ type t =
   | Let
   | Rec
   | Mut
-  | Local_ (** [local_] *)
+  | Stack_ (** [stack_] *)
   | Exclave_ (** [exclave_] *)
   | Global_ (** [global_] *)
   | Let_expect_test (** [let%expect_test] *)
@@ -71,7 +71,7 @@ let keyword = function
   | "let" -> Some Let
   | "rec" -> Some Rec
   | "mut" -> Some Mut
-  | "local_" -> Some Local_
+  | "stack_" -> Some Stack_
   | "exclave_" -> Some Exclave_
   | "global_" -> Some Global_
   | "in" -> Some In
@@ -101,7 +101,7 @@ let to_string = function
   | Let -> "let"
   | Rec -> "rec"
   | Mut -> "mut"
-  | Local_ -> "local_"
+  | Stack_ -> "stack_"
   | Exclave_ -> "exclave_"
   | Global_ -> "global_"
   | Let_expect_test -> "let%expect_test"
@@ -182,7 +182,7 @@ let ends_code : t -> bool = function
   | Include
   | Module_inline
   | Include_inline
-  | Local_
+  | Stack_
   | Exclave_
   | Global_
   | At

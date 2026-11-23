@@ -200,7 +200,7 @@ let expr (expr : Typed.Expr.t) =
       let%bind e = go names e in
       node
         (match marker with
-         | Local -> Local e
+         | Stack -> Stack e
          | Exclave -> Exclave e
          | Nontail -> Nontail e)
     | Annotated (e, annot) ->

@@ -286,7 +286,7 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
       add ~kind:Kind.Poly_tag ~loc:tag.loc [ tag.txt ];
       Option.iter arg ~f:recurse
     | Struct_quote quoted -> toplevels quoted
-    | Local expr | Exclave expr | Nontail expr -> recurse expr
+    | Stack expr | Exclave expr | Nontail expr -> recurse expr
   in
   walk_toplevels ~module_path toplevels;
   Queue.to_list occurrences

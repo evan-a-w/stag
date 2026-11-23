@@ -1,7 +1,7 @@
 open! Import
 open Source_helpers
 
-(* [local_], [exclave_] and [[@nontail]] evaluate their body: the interpreter
+(* [stack_], [exclave_] and [[@nontail]] evaluate their body: the interpreter
    allocates everything on the heap. *)
 let%expect_test "mode syntax typechecks and evaluates as its body" =
   run
@@ -9,11 +9,11 @@ let%expect_test "mode syntax typechecks and evaluates as its body" =
 type r = { x : global_ int; y : int }
 type t = A of global_ int * int
 let f (x @ local) (y : int @ 'm) : int @ global = Int.add x y
-let pair (x @ local) = exclave_ (x, local_ (x, x))
+let pair (x @ local) = exclave_ (x, stack_ (x, x))
 let apply (h : int @ local -> int @ local) = h 1 [@nontail]
 let annotated = (f : int @ local -> int -> int)
 let mut counter : int @ static = 0
-let record = let r = local_ { x = 1; y = 2 } in r.x
+let record = let r = stack_ { x = 1; y = 2 } in r.x
 let constructed = A (1, 2)
 let applied = apply (fun x -> Int.add x 1)
 let summed = f 1 2
@@ -54,12 +54,12 @@ let var = (summed @ local)
     |}]
 ;;
 
-(* The typed tree keeps mode annotations, [local_], [exclave_] and [[@nontail]],
+(* The typed tree keeps mode annotations, [stack_], [exclave_] and [[@nontail]],
    which erased code keeps. *)
 let%expect_test "mode syntax in quotes" =
   run
     {|
-let code = .< fun (x @ local) -> exclave_ local_ (x, Int.add x 1 [@nontail]) >.
+let code = .< fun (x @ local) -> exclave_ stack_ (x, Int.add x 1 [@nontail]) >.
 let erased = Stag.Code.erase code
 let spliced = match .~code 1 with (a, b) -> Int.add a b
 |};
@@ -75,7 +75,7 @@ let spliced = match .~code 1 with (a, b) -> Int.add a b
        (annots ((x/16 ((mode ((Atoms (Local)) @ t.stag:2:23-28))))))
        (body
         (Marked Exclave
-         (Marked Local
+         (Marked Stack
           (Tuple
            ((Var (Bound (Local x/16)) : int)
             (Marked Nontail
@@ -95,7 +95,7 @@ let spliced = match .~code 1 with (a, b) -> Int.add a b
        (annots ((x/16 ((mode ((Atoms (Local)) @ t.stag:2:23-28))))))
        (body
         (Marked Exclave
-         (Marked Local
+         (Marked Stack
           (Tuple
            ((Var (Bound (Local x/16)) : int)
             (Marked Nontail
@@ -121,7 +121,7 @@ let spliced = match .~code 1 with (a, b) -> Int.add a b
          (Nil))
         (Stag.Expr.Exclave
          (Ptr
-          (Stag.Expr.Local
+          (Stag.Expr.Stack
            (Ptr
             (Stag.Expr.Tuple
              (Cons

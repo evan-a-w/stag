@@ -59,7 +59,7 @@ unless its expansion reaches itself through a `ptr` and some other type
 constructor: `type al = ptr[al]` is rejected, `type f = int -> ptr[f]` is not.
 
 Where the pointee lives is the pointer's mode, as for any `ptr`: a `const`
-list is static data, an allocated one in the heap, a `local_` one on the data
+list is static data, an allocated one in the heap, a `stack_` one on the data
 stack.
 
 The existing tests and examples using recursive variants (`list`, `nat`) are
@@ -71,7 +71,7 @@ All explicit. A `ptr[t]` is never null (`option[ptr[t]]` is represented as a
 nullable pointer, unobservably).
 
 ```ocaml
-Ptr.make e          (* allocate: heap, data stack under local_, static if const *)
+Ptr.make e          (* allocate: heap, data stack under stack_, static if const *)
 &x                  (* address of a variable: local *)
 *e   e.*            (* read *)
 e.*.x               (* field of the pointee *)
@@ -195,7 +195,7 @@ machine (function) stack, and managed by the runtime as a bump allocator:
 
 - Each function body is a region: on entry it saves the data stack pointer,
   on exit restores it, freeing everything allocated locally in the call.
-- `local_ e` allocates `e`'s blocks in the current region (closures included,
+- `stack_ e` allocates `e`'s blocks in the current region (closures included,
   as a third closure mode beside `static` and `gc`). Allocation is otherwise
   `global` (GC heap), unless inferred local because the value does not escape.
 - `exclave_ e` ends the current region early and evaluates `e` in the caller's,
@@ -207,7 +207,7 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   borrowed: the callee may not retain it.
 - `regional` is local to an *outer* region: inside a function body, its
   `local` parameters (and what is read from them) are `regional`, as they
-  live in the caller's region. `local_` allocations of the current body are
+  live in the caller's region. `stack_` allocations of the current body are
   `local`. Returning needs `global` (`regional` or `local` under `exclave_`).
 - `global_` on record fields and constructor arguments: always `global`, even
   inside a local block.
@@ -223,7 +223,7 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   in tail position must be at most `regional`: passing a `local` value is an
   error, fixed by marking the call non-tail (see syntax.md), which keeps the
   region alive until it returns. A call inside `exclave_` is always fine.
-- The interpreter has no regions: `local_` allocates on its heap and
+- The interpreter has no regions: `stack_` allocates on its heap and
   `exclave_ e` is `e`. The rules are checked all the same.
 
 Data stack blocks have GC headers, so their provenance is `gc` (traceable)
