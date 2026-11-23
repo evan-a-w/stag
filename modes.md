@@ -84,11 +84,13 @@ splice, while one bound outside the quote crosses none of them.
   as nonportable as it. Otherwise it becomes a free variable of the quote.
   Whether it is `portable` is decided by its lower bound where it is used,
   then required: a later rise is an error. A variable used in its own
-  definition (a function in its body, a toplevel being checked) is not
-  decided on, so is always a free variable there, and computing with it is
-  nonportable, as is a closure capturing it (other than itself). Toplevels
-  are referred to by symbol, so cross closure locks, and mutable toplevels
-  quote locks, freely.
+  definition (a local function in its body, a toplevel being checked) is not
+  decided on, so is always a free variable of a quote there. A local function
+  in its own body is nonportable to compute with, as is a local closure
+  capturing it (other than itself); so is a toplevel non-function being
+  checked. A toplevel function captures nothing, so its mode is known while
+  it is checked. Toplevels are referred to by symbol, so are not captured by
+  closures, and mutable toplevels cross quote locks freely.
 - **Toplevel splice lock** (splice outside any quote, i.e. code run at compile
   time): the variable must be `const`, since only `const` values exist at
   compile time. Not implemented yet: compile-time code may use any checked

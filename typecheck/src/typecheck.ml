@@ -1865,10 +1865,11 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
             (Compile_time_use_of_toplevel_being_checked toplevel.ident.name))
      | Some _ | None ->
        (* [toplevel] is in the component being checked, so this is a recursive
-          reference. *)
+          reference. A function captures nothing (toplevels are referred to by
+          symbol), so its mode is already known. *)
        in_progress.recursive <- true;
        scope.scc.lowlink <- Int.min scope.scc.lowlink in_progress.index;
-       Ok { entry with defining = true })
+       Ok { entry with defining = not (Toplevel.is_function toplevel) })
   | Unchecked ->
     let scc = check_toplevel t scope.program toplevel in
     scope.scc.lowlink <- Int.min scope.scc.lowlink scc.lowlink;
@@ -2279,6 +2280,7 @@ and expr_type
     in
     node (Quote inner) (TCode { inner = inner.ty; context = quote.context })
   | Splice { code; subs } ->
+    let source_subs = subs in
     (match scope.quote, expr with
      | None, Generated _ ->
        raise_s [%message "Generated code has a splice outside any quote"]
@@ -2404,7 +2406,18 @@ and expr_type
                        | Implicit _ -> [])))
                   Type.error
               else (
-                match expand t scope ~code ~subs ~listed ~ty:inner ~loc with
+                let name_locs =
+                  match source_subs with
+                  | Explicit source_subs ->
+                    String.Map.of_alist_reduce
+                      (List.map source_subs ~f:(fun ({ Located.txt; loc }, _) ->
+                         txt, loc))
+                      ~f:(fun first _ -> first)
+                  | Implicit | Providers _ -> String.Map.empty
+                in
+                match
+                  expand t scope ~code ~subs ~listed ~name_locs ~ty:inner ~loc
+                with
                 | Error error -> fail error ~children:[ code ]
                 | Ok expansion ->
                   node (Toplevel_splice { code; expansion }) inner))))
@@ -2771,7 +2784,7 @@ and listed_entries (row : Type.row) =
    its explicit substitutions bound by lets around it. An explicit substitution
    of a name not [listed] in the code's context must be of a free variable of
    the code generated. *)
-and expand t (scope : Scope.t) ~code ~subs ~listed ~ty ~loc =
+and expand t (scope : Scope.t) ~code ~subs ~listed ~name_locs ~ty ~loc =
   let program = scope.program in
   let bindings, entry =
     match (subs : Typed.Expr.t Typed.Expr.Subs.t) with
@@ -2838,7 +2851,9 @@ and expand t (scope : Scope.t) ~code ~subs ~listed ~ty ~loc =
       |> Option.value_map
            ~default:(Ok ())
            ~f:(fun (name, (sub : Typed.Expr.t)) ->
-             error ~loc:sub.loc (Unused_substitution name))
+             error
+               ~loc:(Map.find name_locs name |> Option.value ~default:sub.loc)
+               (Unused_substitution name))
   in
   let expansion =
     with_monomorphic_bindings
@@ -2851,6 +2866,12 @@ and expand t (scope : Scope.t) ~code ~subs ~listed ~ty ~loc =
            ~reason:
              (Mode.Reason.create ~loc "it is substituted into spliced code"))
       ~f:(fun () ->
+        (* Each expansion's annotations name their own type variables. *)
+        let scope =
+          { scope with
+            annotation_vars = Type_env.Annotation_vars.create t ~rank:scope.rank
+          }
+        in
         check_expr t scope ~expr:(Source.Expr.Generated generated) ~ty)
   in
   List.fold_right bindings ~init:expansion ~f:(fun (ident, body) in_ ->
@@ -3019,7 +3040,13 @@ and substitute_entry
     in
     None
   | Outside_quote { quote; _ } ->
-    use_free scope ~why:(sprintf "%s is a free variable of the quote" name) ~loc;
+    (match Type.canonical_presence presence with
+     | Absent -> ()
+     | Present | PVar _ ->
+       use_free
+         scope
+         ~why:(sprintf "%s is a free variable of the quote" name)
+         ~loc);
     let%map.Result () =
       Unify.constrain_row
         t
@@ -3103,8 +3130,7 @@ and substitute_explicitly t scope ~context ~subs ~loc =
       else lacks rest name
   in
   let%bind.Result () =
-    List.find_map subs ~f:(fun ({ txt = name; loc }, expr) ->
-      let loc = Option.value_map expr ~default:loc ~f:Source.Expr.loc in
+    List.find_map subs ~f:(fun ({ txt = name; loc }, _) ->
       Option.some_if (lacks context name) (loc, name))
     |> Option.value_map ~default:(Ok ()) ~f:(fun (loc, name) ->
       error ~loc (Unused_substitution name))

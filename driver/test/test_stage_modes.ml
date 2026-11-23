@@ -500,3 +500,47 @@ let q = .< fun a -> let h @ const = fun u -> .~(.<1>.) in h >.
   [%expect
     {| This is nonportable, because it is a parameter, then a is captured by a closure (at t.stag:2:45-54), then the closure is made (at t.stag:2:36-54), but must be at most const, because it is annotated const (at t.stag:2:28-33) |}]
 ;;
+
+let%expect_test "data holding a toplevel function being checked is const" =
+  let types = {|
+type list['a] = Nil | Cons of ptr['a * list['a]]
+|} in
+  modes
+    ~const_toplevels:true
+    (types ^ {|
+let table = (f, Nil)
+let f x = match table with (g, _) -> x
+|});
+  modes
+    ~const_toplevels:true
+    (types ^ {|
+let f x = match table with (g, _) -> x
+let table = (f, Nil)
+|});
+  [%expect
+    {|
+    type list['a] = Nil | Cons of ptr['a * list['a]]
+    val table : ('_a -> '_a) * list['_b]
+    val f : '_a -> '_a
+    type list['a] = Nil | Cons of ptr['a * list['a]]
+    val f : '_a -> '_a
+    val table : ('_a -> '_a) * list['_b]
+    |}]
+;;
+
+let%expect_test "each expansion has its own annotation variables" =
+  modes
+    {|
+let p = .< fun u -> (u : 'a) >.
+let use = (.~p 1, .~p true)
+let q = .< fun (u : 'a) -> u >.
+let use2 = (.~q 1, .~q true)
+|};
+  [%expect
+    {|
+    val p : <'a -> 'a>{..'b}
+    val use : int * bool
+    val q : <'a -> 'a>{..'b}
+    val use2 : int * bool
+    |}]
+;;
