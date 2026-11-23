@@ -228,14 +228,15 @@ module Expr = struct
         }
     | Let_mut (name, annot, equal, in_) ->
       Let_mut
-        { binder = Name name; annot = annot.ty; body = sub equal; in_ = sub in_ }
+        { binder = Name name
+        ; annot = annot.ty
+        ; body = sub equal
+        ; in_ = sub in_
+        }
     | Assign (path, value) -> Assign (Path (path.txt, None), sub value)
     | Store (target, value) -> Store (sub target, sub value)
     | Fun (args, body) ->
-      Fun
-        { args = List.map args ~f:binding
-        ; body = sub body
-        }
+      Fun { args = List.map args ~f:binding; body = sub body }
     | Splice { expr; subs } ->
       Splice
         { code = sub expr

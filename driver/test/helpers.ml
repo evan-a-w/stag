@@ -26,7 +26,8 @@ let args = List.map ~f:(fun name -> name, Annot.none)
 let typed name ty = name, { Annot.ty = Some ty; mode = None }
 
 let expr_let (name', binds, annot, equal, in_) =
-  expr (Let (name name', bindings binds, { ty = annot; mode = None }, equal, in_))
+  expr
+    (Let (name name', bindings binds, { ty = annot; mode = None }, equal, in_))
 ;;
 
 let let_ name params equal in_ = expr_let (name, args params, None, equal, in_)

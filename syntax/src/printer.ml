@@ -362,15 +362,9 @@ and starts_with_record (t : Type_expr.t) =
   | Record _ -> true
   | Arrow (first, _) | Tuple (first :: _) | Moded (first, _) ->
     starts_with_record first
-  | Var _
-  | Con _
+  | Var _ | Con _
   | Tuple []
-  | Code _
-  | Variant _
-  | Mut _
-  | Immut _
-  | Splice _
-  | Global _ -> false
+  | Code _ | Variant _ | Mut _ | Immut _ | Splice _ | Global _ -> false
 
 (* Whether [t], printed at precedence 0, starts with a splice, which would read
    as a definition's splice after [type t =]. *)
@@ -379,15 +373,9 @@ and starts_with_splice (t : Type_expr.t) =
   | Splice _ -> true
   | Arrow (first, _) | Tuple (first :: _) | Moded (first, _) ->
     starts_with_splice first
-  | Var _
-  | Con _
+  | Var _ | Con _
   | Tuple []
-  | Code _
-  | Record _
-  | Variant _
-  | Mut _
-  | Immut _
-  | Global _ -> false
+  | Code _ | Record _ | Variant _ | Mut _ | Immut _ | Global _ -> false
 
 and row_entries roots (r : Type_expr.row) =
   match r.txt with

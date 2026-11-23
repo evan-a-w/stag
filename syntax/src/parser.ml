@@ -325,8 +325,8 @@ let mode_expr t : Mode_expr.t =
 ;;
 
 let misplaced_mode =
-  "a mode is only written on a function type's argument or result, as in \
-   `t @ local -> u`, or on an annotation, as in `(x : t @ local)`"
+  "a mode is only written on a function type's argument or result, as in `t @ \
+   local -> u`, or on an annotation, as in `(x : t @ local)`"
 ;;
 
 (* A type that is not [t @ m]. *)
@@ -1039,9 +1039,7 @@ and construct t : Expr.t =
   | _ -> app t
 
 and app t : Expr.t =
-  let attribute_ahead () =
-    is t Lbracket && Token.equal (peek_at t 1) At
-  in
+  let attribute_ahead () = is t Lbracket && Token.equal (peek_at t 1) At in
   let rec loop (f : Expr.t) =
     if starts_atom (peek t) && not (attribute_ahead ())
     then (
@@ -1182,8 +1180,8 @@ and atom t : Expr.t =
          | _ ->
            fail
              e.loc
-             "annotations are only supported on variables, as in `(x : t)` \
-              or `(x @ m)`")
+             "annotations are only supported on variables, as in `(x : t)` or \
+              `(x @ m)`")
       | _ ->
         close_parens t ~open_loc:start e ~tuple_items:(function
           | Expr.Tuple items -> Some items

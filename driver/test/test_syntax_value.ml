@@ -1133,10 +1133,18 @@ let%expect_test "names" =
     [ ( "pattern"
       , of_expr (fun name ->
           expr (Match (unit, [ at (Syntax.Pattern.Var name), unit ]))) )
-    ; "let", of_expr (fun name -> expr (Let (at name, [], Syntax.Annot.none, unit, unit)))
+    ; ( "let"
+      , of_expr (fun name ->
+          expr (Let (at name, [], Syntax.Annot.none, unit, unit))) )
     ; ( "param"
       , of_expr (fun name ->
-          expr (Let (at "f", [ at name, Syntax.Annot.none ], Syntax.Annot.none, unit, unit))) )
+          expr
+            (Let
+               ( at "f"
+               , [ at name, Syntax.Annot.none ]
+               , Syntax.Annot.none
+               , unit
+               , unit ))) )
     ; ( "module"
       , of_toplevel (fun name -> at (Syntax.Toplevel.Module (at name, []))) )
     ; ( "type"
@@ -1161,7 +1169,9 @@ let%expect_test "names" =
           expr (Splice { expr = unit; subs = Some [ at name, None ] })) )
     ; ( "var path"
       , of_expr (fun name ->
-          expr (Var (Path (Syntax.Path.of_list_exn [ name ]), Syntax.Annot.none))) )
+          expr
+            (Var (Path (Syntax.Path.of_list_exn [ name ]), Syntax.Annot.none)))
+      )
     ; ( "con path"
       , of_expr (fun name ->
           expr
@@ -1413,7 +1423,8 @@ let decls =
                   (Syntax.Expr.Match
                      ( Located.create
                          ~loc:Loc.none
-                         (Syntax.Expr.Var (Path (Syntax.Path.name "p"), Syntax.Annot.none))
+                         (Syntax.Expr.Var
+                            (Path (Syntax.Path.name "p"), Syntax.Annot.none))
                      , [] )) ))
        ]);
   [%expect
@@ -1574,7 +1585,8 @@ end >.
   (match Syntax_value.Program.of_value decls ~loc:Loc.none with
    | Ok program -> print_string (Printer.program program)
    | Error error -> print_error error);
-  [%expect {|
+  [%expect
+    {|
     ((Type
       ((name r) (params ())
        (kind (Record ((x (Global (Con int ()))) (y (Con int ())))))))

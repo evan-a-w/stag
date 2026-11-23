@@ -62,7 +62,8 @@ let code = .< fun (x @ local) -> exclave_ local_ (x, Int.add x 1 [@nontail]) >.
 let erased = Stag.Code.erase code
 let spliced = .~code 1
 |};
-  [%expect {|
+  [%expect
+    {|
     val code : <int -> int * int>{..'a}
     val erased : Stag.Expr.t
     val spliced : int * int

@@ -28,10 +28,12 @@ module Node = struct
     ; unpair =
         (function
           | { txt =
-                App ({ txt = Var (name, annot); _ }, { txt = Tuple [ x; xs ]; _ })
+                App
+                  ({ txt = Var (name, annot); _ }, { txt = Tuple [ x; xs ]; _ })
             ; _
             }
-            when Decl_path.equal name ptr_make && Annot.is_none annot -> Some (x, xs)
+            when Decl_path.equal name ptr_make && Annot.is_none annot ->
+            Some (x, xs)
           | _ -> None)
     }
   ;;

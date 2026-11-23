@@ -414,7 +414,10 @@ module Of_value = struct
                   || List.contains_dup
                        (List.map atoms ~f:Mode_expr.Atom.axis)
                        ~compare:Mode_expr.Axis.compare
-               then unexpected ~expected:"atoms of distinct axes, at least one" value
+               then
+                 unexpected
+                   ~expected:"atoms of distinct axes, at least one"
+                   value
                else Atoms atoms)
            | _ -> raise Bad_arguments))
 
@@ -625,9 +628,7 @@ module Of_value = struct
                , arg 3 (expr ~loc) )
            | "Let_mut", 3 ->
              Let_mut
-               ( arg 0 (name Binder ~loc)
-               , arg 1 (annot ~loc)
-               , arg 2 (expr ~loc) )
+               (arg 0 (name Binder ~loc), arg 1 (annot ~loc), arg 2 (expr ~loc))
            | "Type", 1 -> Type (arg 0 (type_decl ~loc))
            | "Exception", 2 ->
              Exception (arg 0 (name Upper ~loc), arg 1 (list (type_expr ~loc)))

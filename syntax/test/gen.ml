@@ -223,12 +223,7 @@ and expr t : Expr.t =
          [ (fun t -> App (expr t, expr t))
          ; (fun t -> App (expr t, expr t))
          ; (fun t ->
-             Let
-               ( name t
-               , list t ~min:0 ~max:2 binding
-               , annot t
-               , expr t
-               , expr t ))
+             Let (name t, list t ~min:0 ~max:2 binding, annot t, expr t, expr t))
          ; (fun t -> Let (loc "_", [], Annot.none, expr t, expr t))
          ; (fun t -> Let_mut (name t, annot t, expr t, expr t))
          ; (fun t -> Assign (loc (decl_path t ~last:lident), expr t))
@@ -315,12 +310,7 @@ and type_decl t : Type_decl.t =
 and toplevel t : Toplevel.t =
   loc
     (match int t 11 with
-     | 0 ->
-       Toplevel.Let
-         ( name t
-         , list t ~min:0 ~max:2 binding
-         , annot t
-         , expr t )
+     | 0 -> Toplevel.Let (name t, list t ~min:0 ~max:2 binding, annot t, expr t)
      | 1 | 2 -> Type (type_decl t)
      | 3 -> Expect_test { name = loc (string t); body = expr t }
      | 4 when t.size > 0 ->

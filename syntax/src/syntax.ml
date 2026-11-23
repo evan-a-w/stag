@@ -122,8 +122,7 @@ module Defs = struct
     | Moded of type_expr * Mode_expr.t
     (** [t @ m]: only as a function type's argument or result. *)
     | Global of type_expr
-    (** [global_ t]: only as a record field's type or a constructor's
-        argument. *)
+    (** [global_ t]: only as a record field's type or a constructor's argument. *)
 
   and row = row_desc Located.t
 
@@ -364,7 +363,6 @@ module Annot = struct
   ;;
 
   let map { ty; mode } ~f = { ty = Option.map ty ~f; mode }
-
   let sexp_of_t = sexp_of_annot
   let compare = compare_annot
   let equal = equal_annot

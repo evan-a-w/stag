@@ -1810,8 +1810,7 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
     function_type
       t
       scope
-      ~args:
-        (List.map toplevel.args ~f:Source.Expr.binding)
+      ~args:(List.map toplevel.args ~f:Source.Expr.binding)
       ~annot:toplevel.annot
   in
   match toplevel.state with

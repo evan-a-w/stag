@@ -828,7 +828,9 @@ let%expect_test "resolved paths are printed as root paths" =
   let int = ty "prelude.int" [] in
   let option = ty "prelude.option" [ Ty int ] in
   let t = ty "Gen.M.t" [] in
-  let x = at (Syntax.Expr.Var (Path (Syntax.Path.name "x"), Syntax.Annot.none)) in
+  let x =
+    at (Syntax.Expr.Var (Path (Syntax.Path.name "x"), Syntax.Annot.none))
+  in
   let program : Syntax.Program.t =
     [ at
         (Syntax.Toplevel.Let
@@ -865,7 +867,8 @@ let%expect_test "resolved paths are printed as root paths" =
 
 let%expect_test "resolved paths with no root path" =
   let var name =
-    Located.create (Syntax.Expr.Var (Syntax.Decl_path.Resolved name, Syntax.Annot.none))
+    Located.create
+      (Syntax.Expr.Var (Syntax.Decl_path.Resolved name, Syntax.Annot.none))
   in
   List.iter
     [ "prelude.Core.Int.to_string"
@@ -1059,7 +1062,9 @@ let%expect_test "resolved Cons and Nil not ending a list literal" =
   let at txt = Located.create txt in
   let cons args = at (Syntax.Expr.Construct (at List_literal.cons, args)) in
   let nil = at (Syntax.Expr.Construct (at List_literal.nil, [])) in
-  let var name = at (Syntax.Expr.Var (Path (Syntax.Path.name name), Syntax.Annot.none)) in
+  let var name =
+    at (Syntax.Expr.Var (Path (Syntax.Path.name name), Syntax.Annot.none))
+  in
   let pcons args = at (Syntax.Pattern.Construct (at List_literal.cons, args)) in
   let pvar name = at (Syntax.Pattern.Var name) in
   let show e =

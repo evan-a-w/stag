@@ -97,7 +97,6 @@ module Names = struct
 end
 
 let ty_annot ty : Syntax.Annot.t = { ty; mode = None }
-
 let resolved name : Syntax.Decl_path.t = Resolved name
 
 let expr (expr : Typed.Expr.t) =
@@ -252,8 +251,11 @@ let expr (expr : Typed.Expr.t) =
                  (Map.to_alist providers
                   |> List.filter_map ~f:(fun (key, binder) ->
                     let%map.Option path = sub ~key binder in
-                    label key, Some (located loc (Syntax.Expr.Var (path, Syntax.Annot.none))))
-                 ))
+                    ( label key
+                    , Some
+                        (located
+                           loc
+                           (Syntax.Expr.Var (path, Syntax.Annot.none))) ))))
         | Explicit subs ->
           let%map subs = fields subs ~key:label in
           Some (List.map subs ~f:(fun (name, e) -> name, Some e))

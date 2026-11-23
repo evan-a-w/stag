@@ -210,18 +210,12 @@ module Make (B : Builder) = struct
       let fields = list (pair name expr) in
       match txt with
       | Lit l -> con "Lit" [ lit l ]
-      | Var (p, a) ->
-        con "Var" [ decl_path_txt Value p; annot a ]
+      | Var (p, a) -> con "Var" [ decl_path_txt Value p; annot a ]
       | App (f, x) -> con "App" [ expr f; expr x ]
       | Let (var, bindings, a, equal, body) ->
         con
           "Let"
-          [ name var
-          ; list binding bindings
-          ; annot a
-          ; expr equal
-          ; expr body
-          ]
+          [ name var; list binding bindings; annot a; expr equal; expr body ]
       | Let_mut (var, a, equal, body) ->
         con "Let_mut" [ name var; annot a; expr equal; expr body ]
       | Assign (p, value) ->

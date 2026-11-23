@@ -168,7 +168,8 @@ let mut counter : int @ static = 0
     {|
 let f (x @ local) = exclave_ let y = local_ (x, x) in some_function y [@nontail]
 |};
-  [%expect {|
+  [%expect
+    {|
     let f (x @ local) =
       exclave_
         let y = local_ (x, x) in
