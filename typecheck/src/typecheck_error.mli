@@ -152,7 +152,8 @@ module Kind : sig
     (** [mut t] other than as the type of an entry of a code type's context. *)
     | Mode_variable_in_declaration of string
     | Invalid_mode of string
-    (** [let x @ 'm]: mode variables are not supported on bindings yet. *)
+    (** A mode whose atoms contradict each other, as [const unknown] will once
+        provenance is checked. *)
     | Spliced_code_assigns_immutable of string
     (** Code spliced where the variable it assigns is not mutable. *)
     | Type_splice_failed of Error.t

@@ -226,7 +226,7 @@ let prov = .< let mut cell = 5 in let f (u : int) = cell in .~both >.
     val f : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1
     val user : <<'a>{r : 'a; ..'b}>{..'c}
     val pair : <'a>{..'b} @ 'm0 -> (<'c>{..'d} @ 'm2 -> <'a * 'c>{..'e} @ 'm3) @ 'm1 where ..'b <= {..'e}, ..'d <= {..'e} with 'm0 <= 'm1 and 'm0 <= 'm3 and 'm2 <= 'm3
-    val both : <<'_a>{r : '_a; ..'_b} * int>{cell?'_c : int; f?'_d : immut int -> int @ nonportable; ..'_e} where ..'_e <= {..'_f}
+    val both : <<'_a>{r : '_a; ..'_b} * int>{cell?'_c : int; f?'_d : immut int @ '_m0 -> int @ nonportable; ..'_e} where ..'_e <= {..'_f}
     val prov : <<'_a>{r : '_a; ..'_b} * int>{..'_c}
     |}]
 ;;
@@ -264,8 +264,8 @@ let c = a (Int.add 1 2)
 |};
   [%expect
     {|
-    val b : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and 'm0 <= 'm2 and portable <= 'm1 and 'm1 <= 'm3
-    val a : 'a @ 'm0 -> <'b>{r : 'b; ..'c} @ 'm1 with 'm0 <= 'm2 and portable <= 'm1 and 'm1 <= 'm3
+    val b : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and portable <= 'm1
+    val a : 'a -> <'b>{r : 'b; ..'c} @ 'm0 with portable <= 'm0
     val c : <'_a>{r : '_a; ..'_b}
     |}];
   modes
@@ -276,8 +276,42 @@ let c = a (Int.add 1 2)
 |};
   [%expect
     {|
-    val a : 'a @ 'm0 -> <'b>{r : 'b; ..'c} @ 'm1 with 'm0 <= 'm2 and portable <= 'm1 and 'm1 <= 'm3
-    val b : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and 'm0 <= 'm2 and portable <= 'm1 and 'm1 <= 'm3
+    val a : 'a -> <'b>{r : 'b; ..'c} @ 'm0 with portable <= 'm0
+    val b : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and portable <= 'm1
     val c : <'_a>{r : '_a; ..'_b}
     |}]
+;;
+
+let%expect_test "mutually recursive toplevels print only their own modes" =
+  modes {|
+let a x = let r = b x in r
+let b y = let w = a y in y
+|};
+  [%expect
+    {|
+    val a : 'a -> 'a @ 'm0 with portable <= 'm0
+    val b : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and portable <= 'm1
+    |}]
+;;
+
+let%expect_test "weak mode variables" =
+  modes {|
+let k = (fun f -> f) (fun w -> w)
+let n = k 1
+|};
+  [%expect {|
+    val k : int @ '_m0 -> int @ '_m1
+    val n : int
+    |}]
+;;
+
+let%expect_test "partial applications' constraints have locations" =
+  modes
+    {|
+let make n = let mut cell = n in let f (u : int) = cell in f
+let pair x y = x
+let p @ portable = pair (make 1)
+|};
+  [%expect
+    {| This is nonportable, because cell is mutable (at t.stag:2:13-60), then cell is captured by a closure (at t.stag:2:51-55), then f is bound (at t.stag:2:33-60), then the function types are unified, then the function returns it (at t.stag:4:24-32), then it is passed to a function (at t.stag:4:19-32), but must be at most portable, because it is annotated portable (at t.stag:4:8-16), then the function returns it (at t.stag:4:19-32), then the function types are unified, then a partial application holds it (at t.stag:3:15-16), then the function types are unified |}]
 ;;

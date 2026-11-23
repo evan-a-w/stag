@@ -398,9 +398,8 @@ module Scope = struct
         match Type.iter_ty iter ty with
         | Ok () -> ()
         | Error _ -> .);
-    (Mode.Var.lower_assuming mode ~raised:(fun id ->
-       Hash_set.mem t.program.parameter_modes id || Hash_set.mem raised id))
-      .stage
+    Mode.Var.lower_assuming mode Stage ~raised:(fun id ->
+      Hash_set.mem t.program.parameter_modes id || Hash_set.mem raised id)
   ;;
 
   let enter_closure ids t mode =
@@ -2028,6 +2027,7 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
             ~closure:init_mode
             ~fn
             ~body:(Source.Expr.Syntax toplevel.expr)
+            ~loc:toplevel.expr.loc
         else
           check_expr t scope ~expr:(Source.Expr.Syntax toplevel.expr) ~ty:res_ty
       with
@@ -2073,14 +2073,13 @@ and abandon (program : Program_env.t) (scc : Scc_frame.t) ~unfinished =
    modes of its arrows' arguments, and its value of the last one's result. The
    closure of a partial application holds what the function captures and the
    arguments given so far. *)
-and check_body t (scope : Scope.t) ~closure ~(fn : Function_type.t) ~body =
-  let reason = Mode.Reason.create "a partial application holds it" in
+and check_body t (scope : Scope.t) ~closure ~(fn : Function_type.t) ~body ~loc =
+  let reason = Mode.Reason.create ~loc "a partial application holds it" in
   List.iteri fn.partial_modes ~f:(fun index partial ->
-    Scope.add_mode scope ~loc:Loc.none (Mode.Var.submode closure partial reason);
+    Scope.add_mode scope ~loc (Mode.Var.submode closure partial reason);
     List.iteri fn.arg_modes ~f:(fun index' arg ->
       if index' <= index
-      then
-        Scope.add_mode scope ~loc:Loc.none (Mode.Var.submode arg partial reason)));
+      then Scope.add_mode scope ~loc (Mode.Var.submode arg partial reason)));
   let scope =
     { (Scope.enter_closure t scope closure) with
       sink = fn.res_mode
@@ -2260,7 +2259,7 @@ and expr_type
         ~f:(fun () ->
           match arg_types with
           | [] -> check_expr t inner ~expr:body ~ty:res_ty
-          | _ :: _ -> check_body t inner ~closure:mode ~fn ~body)
+          | _ :: _ -> check_body t inner ~closure:mode ~fn ~body ~loc)
     in
     let args = List.map arg_types ~f:fst in
     Scope.joins scope mode ~loc ~why:(sprintf "%s is bound" name);
@@ -2370,7 +2369,7 @@ and expr_type
     let fn = function_type t scope ~args ~annot:None ~res_mode:None in
     let { Function_type.args; annots; ty; _ } = fn in
     let closure = Scope.fresh_mode scope in
-    let body = check_body t scope ~closure ~fn ~body in
+    let body = check_body t scope ~closure ~fn ~body ~loc in
     Scope.joins scope closure ~loc ~why:"the closure is made";
     node (Fun { args = List.map args ~f:fst; annots; body }) ty
   | Quote expr ->
@@ -3417,6 +3416,7 @@ let check_bench t program module_ ~name ~param ~body ~loc ~generated =
         ~closure:(Scope.fresh_mode scope)
         ~fn
         ~body:(Source.Expr.Syntax body)
+        ~loc
     in
     { Typed.Bench.name
     ; param = Some (ident, args)

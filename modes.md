@@ -113,8 +113,13 @@ val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3
 - variables equal by their constraints (a cycle) print as one;
 - a variable fixed to a constant prints as it (`int @ const -> int @ const`);
 - constraints and bounds implied by the others are left out;
-- a variable named once and in no constraint is left out, which reads back
-  as a fresh variable.
+- a generic variable named once and in no constraint is left out, which
+  reads back as a fresh variable;
+- only the item's own variables are named: constraints through variables of
+  other members of a recursive group are projected onto its own;
+- a weak (not generalized) variable is named `'_m0`, as weak type variables;
+- relations through a crossing morphism are not printed (nothing crosses
+  until crossing by kind, chunk E).
 
 The `with` clause is also syntax for annotations (see syntax.md), so printed
 types read back as themselves.

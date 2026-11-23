@@ -415,6 +415,7 @@ let generic_relations t =
 
 let lower_assuming t ~raised =
   let estimates = Int.Table.create () in
+  let nodes = Queue.create () in
   let rec collect node =
     if not (Hashtbl.mem estimates node.id)
     then (
@@ -425,30 +426,22 @@ let lower_assuming t ~raised =
           (if raised node.var_id && not (is_generic node)
            then node.upper
            else node.lower);
+      Queue.enqueue nodes node;
       List.iter node.pred ~f:(fun edge -> collect edge.lo))
   in
   collect t;
-  let nodes = Int.Table.create () in
-  let rec index node =
-    if not (Hashtbl.mem nodes node.id)
-    then (
-      Hashtbl.set nodes ~key:node.id ~data:node;
-      List.iter node.pred ~f:(fun edge -> index edge.lo))
-  in
-  index t;
-  let changed = ref true in
-  while !changed do
-    changed := false;
-    Hashtbl.iter nodes ~f:(fun node ->
-      List.iter node.pred ~f:(fun edge ->
-        let current = Hashtbl.find_exn estimates node.id in
-        let from =
-          Morphism.left edge.morphism (Hashtbl.find_exn estimates edge.lo.id)
-        in
+  while not (Queue.is_empty nodes) do
+    let node = Queue.dequeue_exn nodes in
+    let estimate = Hashtbl.find_exn estimates node.id in
+    List.iter node.succ ~f:(fun edge ->
+      match Hashtbl.find estimates edge.hi.id with
+      | None -> ()
+      | Some current ->
+        let from = Morphism.left edge.morphism estimate in
         if from > current
         then (
-          Hashtbl.set estimates ~key:node.id ~data:from;
-          changed := true)))
+          Hashtbl.set estimates ~key:edge.hi.id ~data:from;
+          Queue.enqueue nodes edge.hi))
   done;
   Hashtbl.find_exn estimates t.id
 ;;

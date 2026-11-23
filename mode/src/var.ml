@@ -188,6 +188,7 @@ let generic_relations (type a) t (axis : a Axis.t) =
   Graph.generic_relations (node t axis)
 ;;
 
-let lower_assuming t ~raised =
-  get t (Graph.lower_assuming ~raised:(fun id -> raised id))
+let lower_assuming (type a) t (axis : a Axis.t) ~raised : a =
+  let module C = (val Axis.chain axis) in
+  C.of_index_exn (Graph.lower_assuming (node t axis) ~raised)
 ;;

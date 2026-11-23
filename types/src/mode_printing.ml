@@ -87,8 +87,13 @@ let settle t =
     with
     | Some rep -> Hashtbl.set t.rep ~key:id ~data:rep
     | None -> Hashtbl.set t.rep ~key:id ~data:id);
+  (* Other variables, of the other members of a recursive group, only relate the
+     counted ones: their classes are left out. *)
   let reps =
-    List.filter by_position ~f:(fun id -> Hashtbl.find_exn t.rep id = id)
+    List.filter by_position ~f:(fun id ->
+      Hashtbl.find_exn t.rep id = id
+      && List.exists by_position ~f:(fun member ->
+        Hashtbl.find_exn t.rep member = id && Hashtbl.mem t.vars member))
   in
   let members rep =
     List.filter by_position ~f:(fun id -> Hashtbl.find_exn t.rep id = rep)
@@ -158,14 +163,19 @@ let settle t =
     match members rep, Hashtbl.find_exn t.operand rep with
     | [ id ], Var _ ->
       if [%equal: int option] (Hashtbl.find t.counts id) (Some 1)
-         && not (Hash_set.mem mentioned rep)
+         && (not (Hash_set.mem mentioned rep))
+         && Hashtbl.find t.vars id |> Option.for_all ~f:Mode.Var.is_generic
       then Hash_set.add t.elided rep
     | _ -> ())
 ;;
 
 let name t rep =
   Hashtbl.find_or_add t.names rep ~default:(fun () ->
-    sprintf "'m%d" (Hashtbl.length t.names))
+    let weak =
+      Hashtbl.find t.vars rep
+      |> Option.exists ~f:(fun var -> not (Mode.Var.is_generic var))
+    in
+    sprintf "'%sm%d" (if weak then "_" else "") (Hashtbl.length t.names))
 ;;
 
 let side t var =
