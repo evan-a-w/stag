@@ -249,6 +249,7 @@ let implied start ~forward ~stop ~through =
 ;;
 
 let generalize nodes ~rank =
+  Undo.assert_not_atomic "generalize";
   let is_outer node =
     match node.state with
     | Rank r -> r <= rank
@@ -285,8 +286,9 @@ let generalize nodes ~rank =
   let find table node =
     Hashtbl.find table node.id |> Option.value ~default:[]
   in
-  (* The constraints [n <= m(other)] from [n], in the scheme and between outer
-     nodes, except [excluding]. *)
+  (* The constraints [n <= m(other)] from [n] in the scheme, except [excluding].
+     Edges between outer nodes are not used: a later generalization may make one
+     end generic and the other not, so an instance would lose them. *)
   let steps n ~excluding =
     let keep c = not (phys_equal c excluding) in
     if is_kept n
@@ -295,9 +297,7 @@ let generalize nodes ~rank =
         Option.some_if (keep c) (c.other, c.implied_morphism))
     else if is_outer n
     then
-      List.filter_map n.succ ~f:(fun edge ->
-        Option.some_if (is_outer edge.hi) (edge.hi, edge.morphism))
-      @ List.concat_map kept ~f:(fun y ->
+      List.concat_map kept ~f:(fun y ->
         List.filter_map (find below y) ~f:(fun c ->
           Option.some_if (keep c && phys_equal c.other n) (y, c.implied_morphism)))
     else []
@@ -371,8 +371,9 @@ module Instance = struct
            ; upper_why = node.upper_why
            }
          in
-         Hashtbl.set t.nodes ~key:node.id ~data:copy;
          atomically (fun () ->
+           Hashtbl.set t.nodes ~key:node.id ~data:copy;
+           log (fun () -> Hashtbl.remove t.nodes node.id);
            let%bind.Result () =
              List.fold_result above ~init:() ~f:(fun () implied ->
                add_edge'

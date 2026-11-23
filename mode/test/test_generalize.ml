@@ -347,7 +347,8 @@ let%expect_test "constraints from outer variables compose morphisms" =
   [%expect
     {|
     ((m2.stage Const..Nonportable
-      (generic (m0.stage <= (cross_portable m2.stage))))
+      (generic (m0.stage <= (cross_portable m2.stage))
+       (m0.provenance <= (const_is_static m2.stage))))
      (m2.provenance Static..Unknown
       (generic (m2.provenance <= (const_is_static m2.stage))))
      (m2.locality Global..Local (generic)))
@@ -424,5 +425,74 @@ let%expect_test "defaulting an outer variable after generalization" =
     ((m1.stage Nonportable) (m1.provenance Unknown) (m1.locality Local))
     ((m3.stage Const..Nonportable) (m3.provenance Static..Unknown)
      (m3.locality Regional..Local))
+    |}]
+;;
+
+let%expect_test "constraints implied only through outer variables are kept, as \
+                 a later generalization may separate them"
+  =
+  let ids = Id_source.create () in
+  let p = Var.create ids ~rank:1
+  and q = Var.create ids ~rank:1
+  and inner = Var.create ids ~rank:2 in
+  ok (Var.submode inner p (reason "inner flows to p"));
+  ok (Var.submode p q (reason "p flows to q"));
+  ok (Var.submode inner q (reason "inner flows to q"));
+  Var.generalize [ inner ] ~rank:1;
+  Var.generalize [ q ] ~rank:0;
+  let instance = Var.Instance.create ids ~rank:0 in
+  let q1 = Var.Instance.instantiate instance q
+  and inner1 = Var.Instance.instantiate instance inner in
+  ok (Var.at_least inner1 Locality Local (reason "inner1 is local"));
+  show [ inner1; q1 ];
+  [%expect
+    {|
+    ((m4.stage Const..Nonportable) (m4.provenance Static..Unknown)
+     (m4.locality Local))
+    ((m3.stage Const..Nonportable) (m3.provenance Static..Unknown)
+     (m3.locality Local))
+    |}]
+;;
+
+let%expect_test "generalize is not allowed under atomically" =
+  let ids = Id_source.create () in
+  let x = Var.create ids ~rank:1 in
+  Expect_test_helpers_core.require_does_raise (fun () ->
+    Private.Undo.atomically (fun () ->
+      Var.generalize [ x ] ~rank:0;
+      Ok ()));
+  show [ x ];
+  [%expect
+    {|
+    ("cannot be undone, so not allowed under atomically" generalize)
+    ((m0.stage Const..Nonportable) (m0.provenance Static..Unknown)
+     (m0.locality Global..Local))
+    |}]
+;;
+
+let%expect_test "instances made under a failed atomically are forgotten" =
+  let ids = Id_source.create () in
+  let x = Var.create ids ~rank:1 in
+  Var.generalize [ x ] ~rank:0;
+  let instance = Var.Instance.create ids ~rank:0 in
+  let result =
+    Private.Undo.atomically (fun () ->
+      let x1 = Var.Instance.instantiate instance x in
+      let%bind.Result () =
+        Var.at_least x1 Locality Local (reason "x1 is local")
+      in
+      Var.at_most x1 Locality Global (reason "x1 is global"))
+  in
+  print_result result;
+  let x1 = Var.Instance.instantiate instance x in
+  ok (Var.at_most x1 Locality Global (reason "x1 is global"));
+  show [ x1 ];
+  [%expect
+    {|
+    (Error
+     ("Mode mismatch" (var m1) (axis locality) (lower Local) (upper Global)
+      (lower_because ("x1 is local")) (upper_because ("x1 is global"))))
+    ((m1.stage Const..Nonportable) (m1.provenance Static..Unknown)
+     (m1.locality Global))
     |}]
 ;;

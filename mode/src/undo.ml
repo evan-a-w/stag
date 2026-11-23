@@ -31,11 +31,15 @@ let atomically f =
     finish ();
     result
   | Error _ as result ->
-    rollback ~saved;
-    finish ();
+    Exn.protect ~f:(fun () -> rollback ~saved) ~finally:finish;
     result
   | exception exn ->
-    rollback ~saved;
-    finish ();
+    Exn.protect ~f:(fun () -> rollback ~saved) ~finally:finish;
     raise exn
+;;
+
+let assert_not_atomic what =
+  if !depth > 0
+  then
+    raise_s [%message "cannot be undone, so not allowed under atomically" what]
 ;;

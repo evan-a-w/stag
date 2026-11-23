@@ -163,13 +163,21 @@ module Instance = struct
   let instantiate t (var : var) =
     if not (is_generic var)
     then var
-    else
-      Hashtbl.find_or_add t.vars var.id ~default:(fun () ->
+    else (
+      match Hashtbl.find t.vars var.id with
+      | Some copy -> copy
+      | None ->
         let id = Graph.Instance.var_id t.graph var.id in
         let instantiate = Graph.Instance.instantiate t.graph in
         let stage = instantiate var.stage in
         let provenance = instantiate var.provenance in
         let locality = instantiate var.locality in
-        { id; stage; provenance; locality })
+        let copy = { id; stage; provenance; locality } in
+        Graph.atomically (fun () ->
+          Hashtbl.set t.vars ~key:var.id ~data:copy;
+          Undo.record (fun () -> Hashtbl.remove t.vars var.id);
+          Ok ())
+        |> Mode_error.ok_exn;
+        copy)
   ;;
 end

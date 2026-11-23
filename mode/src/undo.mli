@@ -9,3 +9,6 @@ val record : (unit -> unit) -> unit
 (** Runs [f], undoing the changes it recorded if it returns [Error] or raises.
     May be nested. *)
 val atomically : (unit -> ('a, 'e) Result.t) -> ('a, 'e) Result.t
+
+(** Raises if under [atomically], for changes that can't be undone. *)
+val assert_not_atomic : string -> unit

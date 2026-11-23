@@ -58,7 +58,13 @@ val default_to_upper : t -> unit
 (** Makes generic the variables in the list of rank greater than [rank]. They
     keep their bounds and the constraints the graph implies among them and with
     variables of rank at most [rank], through the variables not in the list,
-    which stay as they are. *)
+    which stay as they are. Not allowed under [atomically], as it can't be
+    undone.
+
+    Generic variables stay in the graph: their bounds follow later changes to
+    the variables they are constrained by, so a change to such a variable may
+    fail with a mismatch at a generic variable (one of its instances would be
+    inconsistent anyway). *)
 val generalize : t list -> rank:int -> unit
 
 module Instance : sig
@@ -68,6 +74,7 @@ module Instance : sig
   val create : Id_source.t -> rank:int -> t
 
   (** A fresh copy of a generic variable, with its bounds and constraints, the
-      same for each variable in [t]. Other variables are returned as they are. *)
+      same for each variable in [t]. Other variables are returned as they are.
+      Under [atomically], copies made are forgotten if it is undone. *)
   val instantiate : t -> var -> var
 end
