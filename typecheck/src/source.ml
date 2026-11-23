@@ -288,10 +288,8 @@ module Expr = struct
   let annotated_args args annots =
     List.map args ~f:(fun ident ->
       ( Binder.Ident ident
-      , { Syntax.Annot.ty =
-            List.Assoc.find annots ident ~equal:Typed.Ident.equal
-        ; mode = None
-        } ))
+      , List.Assoc.find annots ident ~equal:Typed.Ident.equal
+        |> Option.value ~default:Syntax.Annot.none ))
   ;;
 
   let rec generated_view ({ desc; ty = _; loc } : Typed.Expr.t) : View.t =
@@ -305,12 +303,14 @@ module Expr = struct
     | Var var_ref -> Var (Ref var_ref)
     | App (f, x) -> App (sub f, sub x)
     | Annotated (expr, annot) -> Annotated (sub expr, annot)
-    | Let { ident; args; annots; result_annot; generalized = _; body; in_ } ->
+    | Let
+        { ident; args; annots; result_annot; mode; generalized = _; body; in_ }
+      ->
       Let
         { binder = Ident ident
         ; args = annotated_args args annots
         ; annot = result_annot
-        ; mode = None
+        ; mode
         ; body = sub body
         ; in_ = sub in_
         }

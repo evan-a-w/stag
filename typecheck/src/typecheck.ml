@@ -591,7 +591,7 @@ let report_duplicates scope (names : Syntax.Name.t list) ~error:kind =
 module Function_type = struct
   type t =
     { args : (Typed.Ident.t * Type.ty) list
-    ; annots : (Typed.Ident.t * Syntax.Type_expr.t) list
+    ; annots : (Typed.Ident.t * Syntax.Annot.t) list
     ; result_annot : Syntax.Type_expr.t option
     ; res_ty : Type.ty
     ; ty : Type.ty
@@ -639,7 +639,7 @@ let function_type
       let ty, resolved = annot_type annot.ty in
       let mode = moded annot.mode in
       Hash_set.add scope.program.parameter_modes (Mode.Var.id mode);
-      binder, ty, resolved, mode)
+      binder, ty, { annot with ty = resolved }, mode)
   in
   let res_ty, result_annot = annot_type annot in
   let res_mode = moded res_mode in
@@ -661,7 +661,8 @@ let function_type
   let args, annots =
     List.map args ~f:(fun (binder, ty, resolved, _) ->
       let ident = Program_env.bind scope.program binder ty ~level:scope.level in
-      (ident, ty), Option.map resolved ~f:(fun resolved -> ident, resolved))
+      ( (ident, ty)
+      , Option.some_if (not (Syntax.Annot.is_none resolved)) (ident, resolved) ))
     |> List.unzip
   in
   { Function_type.args
@@ -2248,7 +2249,16 @@ and expr_type
         ~f:(fun () -> expr_type t scope ~expr:in_ ?expected ~hint)
     in
     node
-      (Let { ident; args; annots; result_annot; body; in_; generalized })
+      (Let
+         { ident
+         ; args
+         ; annots
+         ; result_annot
+         ; mode = mode_annot
+         ; body
+         ; in_
+         ; generalized
+         })
       in_.ty
   | Let_mut { binder; annot; body; in_ } ->
     let ty, annot =
@@ -2967,6 +2977,7 @@ and expand t (scope : Scope.t) ~code ~subs ~listed ~name_locs ~ty ~loc =
           ; args = []
           ; annots = []
           ; result_annot = None
+          ; mode = None
           ; generalized = false
           ; body
           ; in_

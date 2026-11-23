@@ -409,7 +409,8 @@ let k : int -> <int -> int>{..'r} = .~g
     (g
      (Code
       (Fun (args (y/18))
-       (annots ((y/18 ((Con (<int> @ t.stag:3:20-23) ()) @ t.stag:3:20-23))))
+       (annots
+        ((y/18 ((ty ((Con (<int> @ t.stag:3:20-23) ()) @ t.stag:3:20-23))))))
        (body
         (Let (ident h/19) (args (a/20)) (generalized true)
          (body (Var (Bound (Local y/18)) : 'a))
@@ -426,7 +427,8 @@ let k : int -> <int -> int>{..'r} = .~g
     (g
      (Code
       (Fun (args (y/18))
-       (annots ((y/18 ((Con (<int> @ t.stag:3:20-23) ()) @ t.stag:3:20-23))))
+       (annots
+        ((y/18 ((ty ((Con (<int> @ t.stag:3:20-23) ()) @ t.stag:3:20-23))))))
        (body
         (Let (ident h/19) (args (a/20)) (generalized true)
          (body (Var (Bound (Local y/18)) : 'a))

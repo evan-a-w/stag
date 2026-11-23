@@ -54,7 +54,8 @@ let var = (summed @ local)
     |}]
 ;;
 
-(* The typed tree has no modes yet, so erased code loses them. *)
+(* The typed tree keeps mode annotations on bindings, but not yet [local_],
+   [exclave_] or [[@nontail]], which erased code loses. *)
 let%expect_test "mode syntax in quotes" =
   run
     {|
@@ -71,6 +72,7 @@ let spliced = .~code 1
     (code
      (Code
       (Fun (args (x/16))
+       (annots ((x/16 ((mode ((Atoms (Local)) @ t.stag:2:23-28))))))
        (body
         (Tuple
          ((Var (Bound (Local x/16)) : int)
@@ -84,6 +86,7 @@ let spliced = .~code 1
     (code
      (Code
       (Fun (args (x/16))
+       (annots ((x/16 ((mode ((Atoms (Local)) @ t.stag:2:23-28))))))
        (body
         (Tuple
          ((Var (Bound (Local x/16)) : int)
@@ -96,7 +99,14 @@ let spliced = .~code 1
     (erased
      (Stag.Expr.Fun
       (Ptr
-       (Tuple (Cons (Tuple (String x) ((mode (None)) (ty (None)))) (Nil))
+       (Tuple
+        (Cons
+         (Tuple (String x)
+          ((mode
+            (Some
+             (Stag.Mode_expr.Atoms (Cons (Stag.Mode_expr.Atom.Local) (Nil)))))
+           (ty (None))))
+         (Nil))
         (Stag.Expr.Tuple
          (Cons
           (Stag.Expr.Var (Stag.Path.Name (String x)) ((mode (None)) (ty (None))))

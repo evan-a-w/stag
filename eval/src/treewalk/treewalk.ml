@@ -526,6 +526,7 @@ let splice_code
             ; args = []
             ; annots = []
             ; result_annot = None
+            ; mode = None
             ; generalized = false
             ; body = sub
             ; in_

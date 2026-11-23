@@ -31,3 +31,6 @@ val map : t -> f:(Mode.Var.t -> Mode.Var.t) -> t
 
 (** [Var v] as is, a [Fixed] mode as a new variable fixed to it. *)
 val side_var : Mode.Id_source.t -> rank:int -> Side.t -> Mode.Var.t
+
+(** Whether the modes are the same: equal fixed modes, or the same variables. *)
+val same : t -> t -> bool

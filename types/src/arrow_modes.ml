@@ -74,3 +74,12 @@ let map t ~f =
   let res = map_side t.res ~f in
   if phys_equal arg t.arg && phys_equal res t.res then t else { arg; res }
 ;;
+
+let same_side (a : Side.t) (b : Side.t) =
+  match a, b with
+  | Fixed a, Fixed b -> Mode.Const.equal a b
+  | Var a, Var b -> Mode.Var.id a = Mode.Var.id b
+  | Fixed _, Var _ | Var _, Fixed _ -> false
+;;
+
+let same t t' = same_side t.arg t'.arg && same_side t.res t'.res

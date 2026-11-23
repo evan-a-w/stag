@@ -171,7 +171,8 @@ let expr (expr : Typed.Expr.t) =
     let field_path f = located loc (resolved (Typed.Field_ref.name f)) in
     let binding names annots ident : Syntax.Binding.t =
       ( label (name names ident)
-      , ty_annot (List.Assoc.find annots ident ~equal:Typed.Ident.equal) )
+      , List.Assoc.find annots ident ~equal:Typed.Ident.equal
+        |> Option.value ~default:Syntax.Annot.none )
     in
     match e.desc with
     | Lit lit -> node (Lit lit)
@@ -203,7 +204,9 @@ let expr (expr : Typed.Expr.t) =
       let%bind f = go names f in
       let%bind x = go names x in
       node (App (f, x))
-    | Let { ident; args; annots; result_annot; body; in_; generalized = _ } ->
+    | Let
+        { ident; args; annots; result_annot; mode; body; in_; generalized = _ }
+      ->
       let outer =
         Names.bind
           names
@@ -217,7 +220,7 @@ let expr (expr : Typed.Expr.t) =
         (Let
            ( label (name outer ident)
            , List.map args ~f:(binding inner annots)
-           , ty_annot result_annot
+           , { (ty_annot result_annot) with mode }
            , body
            , in_ ))
     | Fun { args; annots; body } ->

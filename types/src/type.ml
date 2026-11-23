@@ -231,8 +231,8 @@ let rec same_ty' ((tys, _) as pairs) ty1 ty2 =
   | TVar var1, TVar var2 -> var1.id = var2.id
   | TCon (name1, args1), TCon (name2, args2) ->
     String.equal name1 name2 && List.equal (same_arg pairs) args1 args2
-  | TArrow (a1, b1, _), TArrow (a2, b2, _) ->
-    same_ty' pairs a1 a2 && same_ty' pairs b1 b2
+  | TArrow (a1, b1, m1), TArrow (a2, b2, m2) ->
+    Arrow_modes.same m1 m2 && same_ty' pairs a1 a2 && same_ty' pairs b1 b2
   | TTuple tys1, TTuple tys2 -> List.equal (same_ty' pairs) tys1 tys2
   | TCode c1, TCode c2 ->
     same_ty' pairs c1.inner c2.inner && same_row' pairs c1.context c2.context

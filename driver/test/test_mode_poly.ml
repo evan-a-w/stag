@@ -211,3 +211,69 @@ let pinned : int @ 'm -> int @ 'n with 'n <= 'm and 'm <= const = fun x -> x
 |};
   [%expect {| val pinned : int @ const -> int @ const |}]
 ;;
+
+let%expect_test "equalities between arrows of different modes are kept" =
+  modes
+    {|
+let f x = x
+let user = .< let r = f (Int.add 1 0) in let s = Int.add r 0 in .<r>. >.
+let pair c d = .< (.~c, .~d) >.
+let both = pair user .< Int.add (f 1) 1 >.
+let prov = .< let mut cell = 5 in let f (u : int) = cell in .~both >.
+|};
+  [%expect
+    {|
+    val f : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1
+    val user : <<'a>{r : 'a; ..'b}>{..'c}
+    val pair : <'a>{..'b} @ 'm0 -> (<'c>{..'d} @ 'm2 -> <'a * 'c>{..'e} @ 'm3) @ 'm1 where ..'b <= {..'e}, ..'d <= {..'e} with 'm0 <= 'm1 and 'm0 <= 'm3 and 'm2 <= 'm3
+    val both : <<'_a>{r : '_a; ..'_b} * int>{cell?'_c : int; f?'_d : immut int -> int @ nonportable; ..'_e} where ..'_e <= {..'_f}
+    val prov : <<'_a>{r : '_a; ..'_b} * int>{..'_c}
+    |}]
+;;
+
+let%expect_test "a parameter's mode annotation survives re-inference" =
+  modes
+    {|
+let q = .< fun (x @ portable) -> .<x>. >.
+let r = .~q
+let s = .~(r 1)
+|};
+  [%expect
+    {|
+    val q : <'a @ 'm0 -> <'a>{..'b} @ 'm1>{..'c} with 'm0 <= 'm1 and 'm0 <= portable
+    val r : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with 'm0 <= 'm1 and 'm0 <= portable
+    val s : int
+    |}]
+;;
+
+let%expect_test "results of function parameters are not assumed portable" =
+  modes {|
+let t f = let r = f 1 in .<r>.
+let u = t (Int.add 1)
+|};
+  [%expect
+    {|
+    This expression has type int -> int but an expression was expected of type int -> int
+    Their modes differ: This is nonportable, because a function type fixes it, then the function types are unified, but must be at most portable, because r is used in a quote (at t.stag:2:27-28), then the function returns it (at t.stag:2:18-21)
+    |}];
+  modes
+    {|
+let b y = let w = a y in y
+let a x = let r = b x in .<r>.
+let c = a (Int.add 1 2)
+|};
+  [%expect
+    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:4:10-23), then it is passed to a function (at t.stag:4:8-23), but must be at most portable, because r is used in a quote (at t.stag:3:27-28), then the function returns it (at t.stag:3:18-21), then the function types are unified, then y is used (at t.stag:2:25-26), then the function types are unified, then it is passed to a function (at t.stag:3:18-21), then x is used (at t.stag:3:20-21), then the function types are unified |}];
+  modes
+    {|
+let a x = let r = b x in .<r>.
+let b y = let w = a y in y
+let c = a (Int.add 1 2)
+|};
+  [%expect
+    {|
+    val a : 'a @ 'm0 -> <'b>{r : 'b; ..'c} @ 'm1 with 'm0 <= 'm2 and portable <= 'm1 and 'm1 <= 'm3
+    val b : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and 'm0 <= 'm2 and portable <= 'm1 and 'm1 <= 'm3
+    val c : <'_a>{r : '_a; ..'_b}
+    |}]
+;;
