@@ -472,16 +472,22 @@ process (by `dlsym`, in the interpreter, which calls it through libffi), as
 the toplevel function `name : t`. `t` is an ordinary curried arrow, with no
 type variables: `a -> b -> r` is C's `r symbol(a, b)`, and `unit -> r` is
 `r symbol(void)`. Each argument and the result is `int` (C's `int64_t`),
-`bool` or `char`, and the result may be `unit` (`void`). Pointers (`string`,
-`ptr[...]`) are not supported yet, and other types are rejected. The C
-function must have exactly that signature: nothing checks it. An external is
+`bool` or `char`, and the result may be `unit` (`void`). An `int` is 63 bits, so
+a C result outside that range is a runtime error. Pointers (`string`,
+`ptr[...]`) are not supported yet, and other types are rejected. The symbol
+must be non-empty, with no NUL character. The C function must have exactly
+that signature: nothing checks it. For instance C's `isdigit` returns an
+`int`, so `external isdigit : char -> bool = "isdigit"` misreads its result
+(only the low byte is read as a `bool`): declare it `char -> int`. An external is
 a toplevel function like any other: it can be partially applied and passed
 around, and C is called once it has all its arguments.
 
 Modes written in `t` are trusted, as C code is not checked, and unwritten
 ones are a declaration's defaults (see [modes.md](modes.md#arrow-modes)):
 `external f : int @ portable -> int @ portable = "f"` returns portable
-values, while a plain `int -> int` returns nonportable ones.
+values, while a plain `int -> int` returns nonportable ones. The external
+itself, a code pointer, has no mode of its own to declare: as a toplevel
+function it is `static` and `const`, so may be used anywhere.
 
 ```ocaml
 external srand48 : int -> unit = "srand48"

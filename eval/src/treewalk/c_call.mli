@@ -4,7 +4,7 @@ open! Import
 
 (** Calls [symbol], found by [dlsym] in the process, with [args], of the stag
     types of [signature]'s arguments. Errs, saying why, if there is no such
-    symbol. *)
+    symbol, or if it returns an [int64_t] out of the range of [int]. *)
 val call
   :  symbol:string
   -> C_signature.t

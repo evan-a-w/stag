@@ -164,6 +164,8 @@ module Kind : sig
         { symbol : string
         ; problem : C_signature.Problem.t
         } (** An [external] whose type has no C signature. *)
+    | Invalid_external_symbol of string
+    (** An [external]'s symbol is empty or contains a NUL character. *)
     | Spliced_code_assigns_immutable of string
     (** Code spliced where the variable it assigns is not mutable. *)
     | Type_splice_failed of Error.t

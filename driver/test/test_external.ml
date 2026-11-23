@@ -245,3 +245,57 @@ let code = .<labs 1>.
     val code : <int>{..'a}
     |}]
 ;;
+
+(* [labs] of the least int is one more than the greatest. *)
+let%expect_test "a C result out of the range of int errs" =
+  run
+    {|
+external labs : int -> int = "labs"
+let least = Int.sub (Int.sub 0 4611686018427387903) 1
+let in_range = labs (Int.add least 1)
+let out_of_range = labs least
+|};
+  [%expect
+    {|
+    val labs : int -> int
+    val least : int
+    val in_range : int
+    val out_of_range : int
+    -- evaluated at compile time
+    -- evaluated
+    (labs <fun>)
+    (least -4611686018427387904)
+    (in_range 4611686018427387903)
+    ("The external labs could not be called: it returned 4611686018427387904, which is out of the range of int (63 bits)"
+     @ t.stag:5:19-29)
+    |}]
+;;
+
+let%expect_test "symbols must be non-empty, with no NUL character" =
+  modes
+    {|
+external empty : int -> int = ""
+external nul : int -> int = "labs\000junk"
+external fine : int -> int = "labs"
+|};
+  [%expect
+    {|
+    The C symbol "" is invalid: it must be non-empty, with no NUL character
+    The C symbol "labs\000junk" is invalid: it must be non-empty, with no NUL character
+    |}]
+;;
+
+let%expect_test "an external's own mode is unconstrained" =
+  modes
+    ~const_toplevels:true
+    {|
+external labs : int -> int = "labs"
+let k @ const = labs
+let p @ portable = labs
+|};
+  [%expect {|
+    val labs : int -> int
+    val k : int -> int
+    val p : int -> int
+    |}]
+;;

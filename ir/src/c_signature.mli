@@ -9,9 +9,6 @@ module Arg : sig
     | Int (** [int64_t]. *)
     | Bool (** [bool]. *)
     | Char (** [char]. *)
-    | String
-    (** [const char *]: a NUL-terminated copy, valid only during the call. Not
-        yet allowed by [of_type], see [Problem.Pointer]. *)
   [@@deriving sexp_of, equal]
 end
 

@@ -2110,6 +2110,11 @@ and check_external
     Type_env.elaborate_declared scope.program.type_env scope.module_ declared
   with
   | Error e -> error e
+  | Ok _ when String.is_empty symbol.txt || String.mem symbol.txt '\000' ->
+    error
+      (Typecheck_error.create
+         ~loc:symbol.loc
+         (Invalid_external_symbol symbol.txt))
   | Ok declared_ty ->
     (match C_signature.of_type declared_ty with
      | Error problem ->

@@ -352,9 +352,11 @@ Each step is a branch stacked on the previous one.
   provenance annotations and bounds in `with`; the Go-style GC design.
 - **G. `external`**: C functions at ordinary curried types, their modes
   trusted as written (unwritten ones a declaration's defaults, so they may
-  produce `external` values only where their types say so), called through
-  libffi by the interpreter. Only immediates (`int`, `bool`, `char`, `unit`)
-  for now: other signatures, pointers included, are rejected.
+  produce `external` values only where their types say so; the external's own
+  mode is unconstrained: a code pointer, `static` and `const` like any
+  toplevel function), called through libffi by the interpreter. Only
+  immediates (`int`, `bool`, `char`, `unit`) for now: other signatures,
+  pointers included, are rejected.
 
 ## Later
 

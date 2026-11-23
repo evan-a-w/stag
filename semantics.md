@@ -129,11 +129,12 @@ C functions are declared with `external` (see
 [syntax.md](syntax.md#external-functions)), at ordinary curried types: an
 `external f : a -> b -> r` is C's `r f(a, b)`, and `unit -> r` is `r f(void)`.
 Its modes are trusted as written, unwritten ones a declaration's defaults
-(`nonportable gc global`); the external itself is a code pointer, whose mode
-is unconstrained. Only immediates cross the boundary for now (`int` as
-`int64_t`, `bool`, `char`, and `unit` as `void`): pointers are not supported
-yet, and signatures that can't be expressed are rejected. A stag function
-passed to C as a callback must be `@ static`: a
+(`nonportable gc global`). The external itself is a code pointer, so its own
+mode is unconstrained: like any toplevel function, it is `static` and `const`.
+Only immediates cross the boundary for now (`int` as `int64_t`, `bool`,
+`char`, and `unit` as `void`): pointers are not supported yet, and signatures
+that can't be expressed are rejected. A stag function passed to C as a
+callback must be `@ static`: a
 `static` closure carries a C ABI entry point, as it needs no environment.
 Callbacks are not implemented yet.
 

@@ -5,7 +5,6 @@ module Arg = struct
     | Int
     | Bool
     | Char
-    | String
   [@@deriving sexp_of, equal]
 end
 

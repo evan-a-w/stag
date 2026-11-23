@@ -11,8 +11,16 @@ let bad_value value =
   raise_s [%message "C_call: an argument of the wrong type" (value : Value.t)]
 ;;
 
+exception Out_of_range of Int64.t
+
 let result_ : C_signature.Result.t -> result_ = function
-  | Int -> Result_ (Ctypes.int64_t, fun n -> Value.Int (Int64.to_int_trunc n))
+  | Int ->
+    Result_
+      ( Ctypes.int64_t
+      , fun n ->
+          match Int64.to_int n with
+          | Some n -> Value.Int n
+          | None -> raise (Out_of_range n) )
   | Bool -> Result_ (Ctypes.bool, fun b -> Value.Bool b)
   | Char -> Result_ (Ctypes.char, fun c -> Value.Char c)
   | Unit -> Result_ (Ctypes.void, fun () -> Value.Unit)
@@ -36,12 +44,6 @@ let arg : C_signature.Arg.t -> arg = function
       ( Ctypes.char
       , function
         | Char c -> c
-        | value -> bad_value value )
-  | String ->
-    Arg
-      ( Ctypes.string
-      , function
-        | String s -> s
         | value -> bad_value value )
 ;;
 
@@ -84,5 +86,12 @@ let call ~symbol (signature : C_signature.t) args =
       | f -> Ok (call f)
       | exception Dl.DL_error _ -> Error "there is no such C symbol")
   in
-  Result.map resolved ~f:(fun call -> call args)
+  Result.bind resolved ~f:(fun call ->
+    match call args with
+    | value -> Ok value
+    | exception Out_of_range n ->
+      Error
+        (sprintf
+           !"it returned %{Int64}, which is out of the range of int (63 bits)"
+           n))
 ;;

@@ -128,6 +128,7 @@ module Kind = struct
         { symbol : string
         ; problem : C_signature.Problem.t
         }
+    | Invalid_external_symbol of string
     | Spliced_code_assigns_immutable of string
     | Type_splice_failed of Error.t
     | Malformed_type_splice of Error.t
@@ -564,6 +565,10 @@ let rec kind_message (kind : Kind.t) ~show_type =
           (Type.Printer.where printer)
     in
     sprintf "The external %s has no C signature: %s" symbol problem
+  | Invalid_external_symbol symbol ->
+    sprintf
+      "The C symbol %S is invalid: it must be non-empty, with no NUL character"
+      symbol
   | Misplaced_mut ->
     "Only an entry of a code type's context can be [mut] or [immut], for a \
      variable the code assigns or doesn't"
