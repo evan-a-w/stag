@@ -101,7 +101,7 @@ let reaches_unguarded
         | Some stored when not (Set.mem stored index) ->
           arg { guard with pointer = true } entry
         | Some _ | None -> arg guard entry)
-    | TArrow (from, to_) ->
+    | TArrow (from, to_, _) ->
       let guard = { guard with structure = true } in
       ty guard from || ty guard to_
     | TRecord { id; row = fields } | TVariant { id; row = fields } ->

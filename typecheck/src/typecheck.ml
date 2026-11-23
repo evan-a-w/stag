@@ -121,8 +121,9 @@ type t =
   }
 
 let create ~stamps ~interpreter ?(const_toplevels = false) ?prelude () =
-  { fresh = Fresh.create ()
-  ; modes = Mode.Id_source.create ()
+  let fresh = Fresh.create () in
+  { fresh
+  ; modes = Fresh.modes fresh
   ; stamps
   ; interpreter
   ; const_toplevels
@@ -200,6 +201,9 @@ module Program_env = struct
     ; mode_limits_reported : String.Hash_set.t
     (** The reasons of the upper bounds of mode errors reported, so that each
         limit is reported once, at what first exceeded it. *)
+    ; parameter_modes : Int.Hash_set.t
+    (** The ids of the modes of parameters: what they are is decided by each use
+        of their function, so is not known while it is checked. *)
     }
 
   let report ?frame t error =
@@ -368,6 +372,15 @@ module Scope = struct
 
   let with_sink t = { t with sink = fresh_mode t }
 
+  (* What [mode] is at least, whatever the parameters' modes turn out to be: a
+     decision taken on it holds for any use of the function. *)
+  let known_stage t mode =
+    (Mode.Var.lower_assuming
+       mode
+       ~raised:(Hash_set.mem t.program.parameter_modes))
+      .stage
+  ;;
+
   let enter_closure ids t mode =
     { t with
       locks = { Env.Lock.id = Fresh.id ids; kind = Closure mode } :: t.locks
@@ -431,12 +444,19 @@ module Scope = struct
       (Mode.Var.at_least t.sink Stage stage (Mode.Reason.create ~loc why))
   ;;
 
-  (* Only the stage axis is checked so far. *)
+  (* An annotation [@ local] bounds the mode on its axes; [@ 'm] is the mode
+     ['m] stands for throughout the annotations of the toplevel. *)
   let annotated t mode (annot : Syntax.Mode_expr.t option) =
     Option.iter annot ~f:(fun { txt; loc } ->
       match txt with
       | Var var ->
-        report t (Typecheck_error.create ~loc (Mode_variable_on_binding var))
+        add_mode
+          t
+          ~loc
+          (Mode.Var.equate
+             mode
+             (Type_env.Annotation_vars.mode t.annotation_vars var)
+             (Mode.Reason.create ~loc (sprintf "it is annotated '%s" var)))
       | Atoms atoms ->
         List.iter atoms ~f:(fun atom ->
           let stage : Mode.Stage.t option =
@@ -515,7 +535,7 @@ module Resolution = struct
       (entry.level = scope.level
        && [%equal: int option] entry.quote_id (Scope.quote_id scope))
       || (entry.level <= scope.level
-          && ((Mode.Stage.le (Mode.Var.lower entry.mode).stage Portable
+          && ((Mode.Stage.le (Scope.known_stage scope entry.mode) Portable
                && not entry.defining)
               || is_mutable_toplevel entry))
     in
@@ -575,15 +595,23 @@ module Function_type = struct
     ; result_annot : Syntax.Type_expr.t option
     ; res_ty : Type.ty
     ; ty : Type.ty
+    ; arg_modes : Mode.Var.t list
+    ; res_mode : Mode.Var.t (** The mode of the body's value. *)
+    ; partial_modes : Mode.Var.t list
+    (** Those of the closures of partial applications, of all but the last
+        argument. *)
     }
 end
 
-(* An annotation that fails to elaborate is reported, and ignored. *)
+(* An annotation that fails to elaborate is reported, and ignored. Mode
+   annotations on the arguments, and with [res_mode] on the result, bound their
+   modes. *)
 let function_type
   t
   (scope : Scope.t)
-  ~(args : (Source.Binder.t * Syntax.Type_expr.t option) list)
+  ~(args : (Source.Binder.t * Syntax.Annot.t) list)
   ~annot
+  ~res_mode
   =
   report_duplicates
     scope
@@ -601,18 +629,37 @@ let function_type
          Scope.report scope error;
          Scope.fresh_ty t scope, None)
   in
+  let moded annot =
+    let mode = Scope.fresh_mode scope in
+    Scope.annotated scope mode annot;
+    mode
+  in
   let args =
-    List.map args ~f:(fun (binder, annot) ->
-      let ty, resolved = annot_type annot in
-      binder, ty, resolved)
+    List.map args ~f:(fun (binder, (annot : Syntax.Annot.t)) ->
+      let ty, resolved = annot_type annot.ty in
+      let mode = moded annot.mode in
+      Hash_set.add scope.program.parameter_modes (Mode.Var.id mode);
+      binder, ty, resolved, mode)
   in
   let res_ty, result_annot = annot_type annot in
-  let ty =
-    List.fold_right args ~init:res_ty ~f:(fun (_, arg_ty, _) ty ->
-      Type.TArrow (arg_ty, ty))
+  let res_mode = moded res_mode in
+  let partial_modes =
+    List.drop_last args
+    |> Option.value ~default:[]
+    |> List.map ~f:(fun _ -> Scope.fresh_mode scope)
   in
+  let ty =
+    List.fold_right
+      (List.zip_exn
+         args
+         (if List.is_empty args then [] else partial_modes @ [ res_mode ]))
+      ~init:res_ty
+      ~f:(fun ((_, arg_ty, _, arg_mode), res_mode) ty ->
+        Type.TArrow (arg_ty, ty, { arg = Var arg_mode; res = Var res_mode }))
+  in
+  let arg_modes = List.map args ~f:(fun (_, _, _, mode) -> mode) in
   let args, annots =
-    List.map args ~f:(fun (binder, ty, resolved) ->
+    List.map args ~f:(fun (binder, ty, resolved, _) ->
       let ident = Program_env.bind scope.program binder ty ~level:scope.level in
       (ident, ty), Option.map resolved ~f:(fun resolved -> ident, resolved))
     |> List.unzip
@@ -622,6 +669,9 @@ let function_type
   ; result_annot
   ; res_ty
   ; ty
+  ; arg_modes
+  ; res_mode
+  ; partial_modes
   }
 ;;
 
@@ -1308,7 +1358,7 @@ let use_free (scope : Scope.t) ~why ~loc =
    values only when [const], which is then required of them. *)
 let generalizes (scope : Scope.t) mode ~is_function ~loc =
   is_function
-  || (Mode.Stage.le (Mode.Var.lower mode).stage Const
+  || (Mode.Stage.le (Scope.known_stage scope mode) Const
       && Scope.mode_holds
            scope
            ~loc
@@ -1899,13 +1949,15 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
     ; locks = []
     }
   in
-  let { Function_type.args; res_ty; ty; annots = _; result_annot = _ } =
+  let fn =
     function_type
       t
       scope
       ~args:(List.map toplevel.args ~f:Source.Expr.binding)
       ~annot:toplevel.annot
+      ~res_mode:(if Toplevel.is_function toplevel then toplevel.mode else None)
   in
+  let { Function_type.args; res_ty; ty; _ } = fn in
   match toplevel.state with
   | In_progress _ | Done _ ->
     (* Checked while elaborating its annotations, through a type splice that
@@ -1930,7 +1982,8 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
                (sprintf "%s is mutable" toplevel.ident.name))
       else init_mode
     in
-    Scope.annotated scope init_mode toplevel.mode;
+    if not (Toplevel.is_function toplevel)
+    then Scope.annotated scope init_mode toplevel.mode;
     toplevel.state
     <- In_progress
          { index
@@ -1949,8 +2002,7 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
             t
             scope
             ~closure:init_mode
-            ~args
-            ~res_ty
+            ~fn
             ~body:(Source.Expr.Syntax toplevel.expr)
         else
           check_expr t scope ~expr:(Source.Expr.Syntax toplevel.expr) ~ty:res_ty
@@ -1993,18 +2045,29 @@ and abandon (program : Program_env.t) (scc : Scc_frame.t) ~unfinished =
     ignore (Stack.pop_exn program.unfinished : Type.ty)
   done
 
-(* A function's body, in a closure of mode [closure]. *)
-and check_body t (scope : Scope.t) ~closure ~args ~res_ty ~body =
-  let scope = Scope.enter_closure t scope closure in
-  with_monomorphic_bindings
-    scope
-    args
-    ~mode:
-      (Scope.stage_at_least
-         scope
-         Nonportable
-         ~reason:(Mode.Reason.create "it is a parameter"))
-    ~f:(fun () -> check_expr t scope ~expr:body ~ty:res_ty)
+(* A function's body, in a closure of mode [closure]. Its parameters are of the
+   modes of its arrows' arguments, and its value of the last one's result. The
+   closure of a partial application holds what the function captures and the
+   arguments given so far. *)
+and check_body t (scope : Scope.t) ~closure ~(fn : Function_type.t) ~body =
+  let reason = Mode.Reason.create "a partial application holds it" in
+  List.iteri fn.partial_modes ~f:(fun index partial ->
+    Scope.add_mode scope ~loc:Loc.none (Mode.Var.submode closure partial reason);
+    List.iteri fn.arg_modes ~f:(fun index' arg ->
+      if index' <= index
+      then
+        Scope.add_mode scope ~loc:Loc.none (Mode.Var.submode arg partial reason)));
+  let scope =
+    { (Scope.enter_closure t scope closure) with sink = fn.res_mode }
+  in
+  Env.with_bindings
+    scope.locals
+    (List.map2_exn
+       fn.args
+       fn.arg_modes
+       ~f:(fun ((ident : Typed.Ident.t), ty) mode ->
+         ident.name, Scope.entry scope ~ident ~scheme:ty ~mode))
+    ~f:(fun () -> check_expr t scope ~expr:body ~ty:fn.res_ty)
 
 and with_monomorphic_bindings (scope : Scope.t) bindings ~mode ~f =
   Env.with_bindings
@@ -2089,10 +2152,19 @@ and expr_type
      | Error error -> fail error
      | Ok (ty, var_ref) -> node (Var var_ref) ty)
   | App (f, x) ->
-    Scope.evaluates scope Nonportable ~loc ~why:"it applies a function";
+    Scope.evaluates scope Portable ~loc ~why:"it applies a function";
     let a = Scope.fresh_ty t scope in
     let b = Scope.fresh_ty t scope in
-    let f = check_expr t scope ~expr:f ~ty:(TArrow (a, b)) in
+    let arg_mode = Scope.fresh_mode scope in
+    let res_mode = Scope.fresh_mode scope in
+    let f =
+      check_expr
+        t
+        (Scope.with_sink scope)
+        ~expr:f
+        ~ty:(TArrow (a, b, { arg = Var arg_mode; res = Var res_mode }))
+    in
+    Scope.joins scope res_mode ~loc ~why:"the function returns it";
     (* The expected result is known before the argument, which may need it:
        [Ptr.make (C x)] resolves [C] in the expected pointee type. A clash is
        left to whoever expects the result to report. A hint is only taken once
@@ -2111,20 +2183,36 @@ and expr_type
         Scope.unifies t scope ~ty1:expected ~ty2:b ~loc
       | Some _ | None -> true
     in
-    let x = check_expr t scope ~expr:x ~ty:a in
+    let x_scope = Scope.with_sink scope in
+    let x = check_expr t x_scope ~expr:x ~ty:a in
+    Scope.add_mode
+      scope
+      ~loc
+      (Mode.Var.submode
+         x_scope.sink
+         arg_mode
+         (Mode.Reason.create ~loc "it is passed to a function"));
     if result_matches
     then node (App (f, x)) b
     else node (Error [ f; x ]) Type.error
   | Let { binder; args; annot; mode = mode_annot; body; in_ } ->
     let inner = Scope.with_sink { scope with rank = scope.rank + 1 } in
-    let { Function_type.args = arg_types; annots; result_annot; res_ty; ty } =
-      function_type t inner ~args ~annot
+    let is_function = not (List.is_empty args) in
+    let fn =
+      function_type
+        t
+        inner
+        ~args
+        ~annot
+        ~res_mode:(if is_function then mode_annot else None)
+    in
+    let { Function_type.args = arg_types; annots; result_annot; res_ty; ty; _ } =
+      fn
     in
     let ident = Program_env.bind scope.program binder ty ~level:scope.level in
     let name = Source.Binder.name binder in
     let mode = inner.sink in
-    Scope.annotated scope mode mode_annot;
-    let is_function = not (List.is_empty arg_types) in
+    if not is_function then Scope.annotated scope mode mode_annot;
     (* A closure may refer to itself, but a value referring to itself is not
        known yet, as a [let rec]'s isn't. *)
     let own_mode =
@@ -2145,8 +2233,7 @@ and expr_type
         ~f:(fun () ->
           match arg_types with
           | [] -> check_expr t inner ~expr:body ~ty:res_ty
-          | _ :: _ ->
-            check_body t inner ~closure:mode ~args:arg_types ~res_ty ~body)
+          | _ :: _ -> check_body t inner ~closure:mode ~fn ~body)
     in
     let args = List.map arg_types ~f:fst in
     Scope.joins scope mode ~loc ~why:(sprintf "%s is bound" name);
@@ -2244,11 +2331,10 @@ and expr_type
        let value = check_expr t scope ~expr:value ~ty in
        node (Assign (var_ref, value)) Type.unit)
   | Fun { args; body } ->
-    let { Function_type.args; annots; result_annot = _; res_ty; ty } =
-      function_type t scope ~args ~annot:None
-    in
+    let fn = function_type t scope ~args ~annot:None ~res_mode:None in
+    let { Function_type.args; annots; ty; _ } = fn in
     let closure = Scope.fresh_mode scope in
-    let body = check_body t scope ~closure ~args ~res_ty ~body in
+    let body = check_body t scope ~closure ~fn ~body in
     Scope.joins scope closure ~loc ~why:"the closure is made";
     node (Fun { args = List.map args ~f:fst; annots; body }) ty
   | Quote expr ->
@@ -3272,9 +3358,15 @@ let check_bench t program module_ ~name ~param ~body ~loc ~generated =
     ; generated = Option.is_some generated
     }
   | Some { name = param; args } ->
-    let { Function_type.args = params; res_ty; _ } =
-      function_type t scope ~args:[ Source.Binder.Name param, None ] ~annot:None
+    let fn =
+      function_type
+        t
+        scope
+        ~args:[ Source.Binder.Name param, Syntax.Annot.none ]
+        ~annot:None
+        ~res_mode:None
     in
+    let { Function_type.args = params; res_ty; _ } = fn in
     let ident, param_ty = List.hd_exn params in
     let args =
       List.map args ~f:(fun arg ->
@@ -3285,8 +3377,7 @@ let check_bench t program module_ ~name ~param ~body ~loc ~generated =
         t
         scope
         ~closure:(Scope.fresh_mode scope)
-        ~args:params
-        ~res_ty
+        ~fn
         ~body:(Source.Expr.Syntax body)
     in
     { Typed.Bench.name
@@ -3721,6 +3812,7 @@ let program_env t ~stamps ~modes ~const_toplevels interpreter =
     ; modes
     ; const_toplevels
     ; mode_limits_reported = String.Hash_set.create ()
+    ; parameter_modes = Int.Hash_set.create ()
     }
   in
   (report := fun error -> Program_env.report program_env error);

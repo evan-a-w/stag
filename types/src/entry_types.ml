@@ -97,7 +97,7 @@ let simplify ~is_generalized ~tys ~presences ~rows ~kept =
       List.iter args ~f:(function
         | ATy ty -> walk_ty ty
         | ARow row -> walk_row row)
-    | TArrow (ty1, ty2) ->
+    | TArrow (ty1, ty2, _) ->
       walk_ty ty1;
       walk_ty ty2
     | TTuple tys -> List.iter tys ~f:walk_ty
@@ -160,7 +160,13 @@ let simplify ~is_generalized ~tys ~presences ~rows ~kept =
         Ok ()
       in
       (match
-         Type.iter_ty { ty = collect; row = collect; presence = collect } other
+         Type.iter_ty
+           { ty = collect
+           ; row = collect
+           ; presence = collect
+           ; mode = (fun _ -> Ok ())
+           }
+           other
        with
        | Ok () -> ()
        | Error _ -> .);

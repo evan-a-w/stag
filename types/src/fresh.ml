@@ -3,9 +3,17 @@ open! Import
 type t =
   { mutable next_id : int
   ; mutable value_parameters : Value_layout.parameters
+  ; modes : Mode.Id_source.t
   }
 
-let create () = { next_id = 0; value_parameters = (fun _ -> None) }
+let create () =
+  { next_id = 0
+  ; value_parameters = (fun _ -> None)
+  ; modes = Mode.Id_source.create ()
+  }
+;;
+
+let modes t = t.modes
 let set_value_parameters t f = t.value_parameters <- f
 let value_parameters t = t.value_parameters
 

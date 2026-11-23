@@ -6,6 +6,7 @@ module Type_mismatch_reason : sig
     | Args_length_mismatch of int * int
     | Mismatch_arg_kind of Type.arg * Type.arg
     | Structural_mismatch
+    | Modes of Mode.Error.t
   [@@deriving sexp_of]
 end
 

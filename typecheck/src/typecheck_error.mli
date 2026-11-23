@@ -150,7 +150,8 @@ module Kind : sig
         evaluates it. *)
     | Misplaced_mut
     (** [mut t] other than as the type of an entry of a code type's context. *)
-    | Mode_variable_on_binding of string
+    | Mode_variable_in_declaration of string
+    | Invalid_mode of string
     (** [let x @ 'm]: mode variables are not supported on bindings yet. *)
     | Spliced_code_assigns_immutable of string
     (** Code spliced where the variable it assigns is not mutable. *)

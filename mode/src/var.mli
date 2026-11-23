@@ -18,6 +18,18 @@ val upper : t -> Const.t
 val is_generic : t -> bool
 val lower_rank : t -> rank:int -> unit
 
+(** The lower bound [t] would have if the variables [raised] (by [id]) were
+    raised to their upper bounds, but generic ones: what [t] is at least however
+    they turn out. *)
+val lower_assuming : t -> raised:(int -> bool) -> Const.t
+
+(** [None] once generic. *)
+val rank : t -> int option
+
+(** The variables (by id) a generic variable is related to on [axis], without
+    crossing: [`Le v] for [t <= v], [`Ge v] for [v <= t]. *)
+val generic_relations : t -> _ Axis.t -> ([ `Le | `Ge ] * int) list
+
 (** [submode a b]: a value of mode [a] may be used at mode [b]. With [crossing],
     [a] is first lowered on the axes it crosses. *)
 val submode

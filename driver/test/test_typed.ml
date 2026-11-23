@@ -855,7 +855,7 @@ let deep = .~(let x = .<1>. in .~(let n = 5 in .<n; x>.))
 let%expect_test "explicit substitutions" =
   print
     {|
-let n = add 1 2
+let n = Int.add 1 2
 let persistent_shorthand = let f y = y in .<.~(.<id (f 1)>.).{f; id}>.
 let at_toplevel = .~(.<add n y>.).{n; y = 1}
 |};
@@ -865,8 +865,8 @@ let at_toplevel = .~(.<add n y>.).{n; y = 1}
       (((ident n/4) (args ()) (scheme int)
         (body
          (App
-          (App (Var (Bound (Toplevel add/0)) : "int -> int -> int")
-           (Lit (Int 1) : int) : "int -> int")
+          (App (Var (Prim Int.add) : "int -> int -> int") (Lit (Int 1) : int) :
+           "int -> int")
           (Lit (Int 2) : int) : int)))))
      (recursive false))
     ((members

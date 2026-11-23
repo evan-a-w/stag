@@ -237,7 +237,7 @@ let%expect_test "substitutions at toplevel splices" =
   run
     ~bodies:[ "implicit"; "explicit"; "explicit_toplevel" ]
     {|
-let n = add 1 2
+let n = Int.add 1 2
 let code = .<(n, x)>.
 let implicit x = .~code
 let explicit = .~code.{n = true; x = 1}
@@ -295,14 +295,14 @@ let applied = implicit false
      (Code
       (Tuple ((Var (Free_toplevel n) : 'a) (Var (Free x) : 'b)) : "'a * 'b")))
     -- evaluated
-    (n 1)
+    (n 3)
     (code
      (Code
       (Tuple ((Var (Free_toplevel n) : 'a) (Var (Free x) : 'b)) : "'a * 'b")))
     (implicit <fun>)
     (explicit (Tuple true 1))
-    (explicit_toplevel (Tuple 1 1))
-    (applied (Tuple 1 false))
+    (explicit_toplevel (Tuple 3 3))
+    (applied (Tuple 3 false))
     |}]
 ;;
 
@@ -1214,7 +1214,7 @@ let other = .~(gen ()) true
   [%expect
     {|
     val weak : int -> int
-    val gen : 'a -> <'b>{weak : 'b; ..'c}
+    val gen : 'a -> <int -> int>{..'b}
     val one : int
     val two : int
     -- evaluated at compile time

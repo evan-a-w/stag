@@ -203,6 +203,7 @@ and mapper ~bindings ~ids ~resolving : Type.Mapper.t =
         | Some (Binding.Ty _) -> raise (Not_a_row var.id)
         | None -> RVar var)
   ; presence = (fun var -> PVar var)
+  ; mode = Fn.id
   ; id = (fun () -> fresh_id ids)
   }
 ;;

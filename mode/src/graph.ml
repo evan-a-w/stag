@@ -392,3 +392,63 @@ module Instance = struct
          copy)
   ;;
 end
+
+let rank t =
+  match t.state with
+  | Rank rank -> Some rank
+  | Generic _ -> None
+;;
+
+let generic_relations t =
+  match t.state with
+  | Rank _ -> []
+  | Generic { above; below } ->
+    let related direction =
+      List.filter_map ~f:(fun { other; implied_morphism; _ } ->
+        Option.some_if
+          (Morphism.is_identity implied_morphism
+           && Axis.Any.equal other.axis t.axis)
+          (direction, other.var_id))
+    in
+    related `Le above @ related `Ge below
+;;
+
+let lower_assuming t ~raised =
+  let estimates = Int.Table.create () in
+  let rec collect node =
+    if not (Hashtbl.mem estimates node.id)
+    then (
+      Hashtbl.set
+        estimates
+        ~key:node.id
+        ~data:
+          (if raised node.var_id && not (is_generic node)
+           then node.upper
+           else node.lower);
+      List.iter node.pred ~f:(fun edge -> collect edge.lo))
+  in
+  collect t;
+  let nodes = Int.Table.create () in
+  let rec index node =
+    if not (Hashtbl.mem nodes node.id)
+    then (
+      Hashtbl.set nodes ~key:node.id ~data:node;
+      List.iter node.pred ~f:(fun edge -> index edge.lo))
+  in
+  index t;
+  let changed = ref true in
+  while !changed do
+    changed := false;
+    Hashtbl.iter nodes ~f:(fun node ->
+      List.iter node.pred ~f:(fun edge ->
+        let current = Hashtbl.find_exn estimates node.id in
+        let from =
+          Morphism.left edge.morphism (Hashtbl.find_exn estimates edge.lo.id)
+        in
+        if from > current
+        then (
+          Hashtbl.set estimates ~key:node.id ~data:from;
+          changed := true)))
+  done;
+  Hashtbl.find_exn estimates t.id
+;;

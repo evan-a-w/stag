@@ -128,6 +128,9 @@ module Annotation_vars : sig
 
   (** Variables are created at [rank] on first use. *)
   val create : Fresh.t -> rank:Type.rank -> t
+
+  (** The mode a mode variable stands for. *)
+  val mode : t -> string -> Mode.Var.t
 end
 
 (** The type, and the syntax with each type it names by its canonical name

@@ -197,15 +197,15 @@ let%expect_test "occurs check fails for unguarded cycles" =
     let a = tvar fresh in
     unify fresh a (f a)
   in
-  check (fun a -> TArrow (a, int));
+  check (fun a -> Type.arrow a int);
   check (fun a -> TTuple [ a; int ]);
   check (fun a -> TCon ("list", [ ATy a ]));
   check (fun a -> TCode { inner = int; context = row [ "x", a ] });
   check (fun a -> TCode { inner = a; context = REmpty });
-  check (fun a -> TArrow (record fresh [ "x", a ], a));
+  check (fun a -> Type.arrow (record fresh [ "x", a ]) a);
   (* Records, variants and functions don't guard without a pointer. *)
-  check (fun a -> variant fresh [ "A", TArrow (a, int) ]);
-  check (fun a -> TArrow (variant fresh [ "A", a ], int));
+  check (fun a -> variant fresh [ "A", Type.arrow a int ]);
+  check (fun a -> Type.arrow (variant fresh [ "A", a ]) int);
   let check_row f =
     let r = rvar fresh in
     print_s
@@ -249,23 +249,23 @@ let%expect_test "guarded cycles" =
   in
   check (fun a -> variant fresh [ "A", ptr a ]);
   check (fun a -> record fresh [ "x", TCon ("list", [ ATy (ptr a) ]) ]);
-  check (fun a -> variant fresh [ "A", TArrow (ptr a, int) ]);
+  check (fun a -> variant fresh [ "A", Type.arrow (ptr a) int ]);
   check (fun a ->
     TCode { inner = int; context = row [ "x", record fresh [ "y", ptr a ] ] });
-  check (fun a -> TArrow (variant fresh [ "A", ptr a ], int));
-  check (fun a -> TArrow (ptr a, int));
+  check (fun a -> Type.arrow (variant fresh [ "A", ptr a ]) int);
+  check (fun a -> Type.arrow (ptr a) int);
   (* Through another variable. *)
   let b = tvar fresh in
   let a = tvar fresh in
   unify fresh b (variant fresh [ "A", a ]);
-  unify fresh a (TArrow (ptr b, int));
+  unify fresh a (Type.arrow (ptr b) int);
   print a;
   print b;
   (* Through a variable already bound to a guarded cycle's part. *)
   let c = tvar fresh in
   let d = tvar fresh in
   unify fresh c (TTuple [ d; int ]);
-  unify fresh d (TArrow (int, ptr c));
+  unify fresh d (Type.arrow int (ptr c));
   print (TTuple [ c; d ]);
   (* A row variable within its own row, under a pointer. *)
   let r = rvar fresh in
@@ -911,7 +911,9 @@ let%expect_test "instantiation and unification of large types" =
       Ok ()
     in
     (match
-       (Type.iter_ty { ty = add; row = add; presence = add } ty
+       (Type.iter_ty
+          { ty = add; row = add; presence = add; mode = (fun _ -> Ok ()) }
+          ty
         : (unit, Nothing.t) Result.t)
      with
      | Ok () -> ()
@@ -966,7 +968,7 @@ let print_parts ty =
       List.iter args ~f:(function
         | ATy ty -> go_ty ty
         | ARow row -> go_row row)
-    | TArrow (ty1, ty2) ->
+    | TArrow (ty1, ty2, _) ->
       go_ty ty1;
       go_ty ty2
     | TTuple tys -> List.iter tys ~f:go_ty
@@ -1011,7 +1013,7 @@ let h (z : t%d[int]) = g z
       List.iter (checked t).signature ~f:(function
         | Value { name; scheme; _ } ->
           (match Type.canonical_ty scheme with
-           | TArrow (arg, result) ->
+           | TArrow (arg, result, _) ->
              ignore (Type.sexp_of_ty arg : Sexp.t);
              printf "%s : _ -> %s " name (Type.to_string_hum result);
              print_parts arg
@@ -1075,7 +1077,9 @@ let%expect_test "instantiation copies each part of a cycle once" =
     list
     (variant
        fresh
-       [ "Nil", Type.unit; "Cons", Type.TTuple [ elt; TArrow (int, ptr list) ] ]);
+       [ "Nil", Type.unit
+       ; "Cons", Type.TTuple [ elt; Type.arrow int (ptr list) ]
+       ]);
   (* Entered through a [Link], as through the variant. *)
   let ty = Type.TTuple [ list; Type.canonical_ty list ] in
   Scheme.generalize fresh ~rank:1 [ ty ];
@@ -1099,7 +1103,7 @@ let%expect_test "occurs check through a link visited guarded, then unguarded" =
   let check f =
     let v = tvar fresh in
     let l = tvar fresh in
-    unify fresh l (TArrow (v, int));
+    unify fresh l (Type.arrow v int);
     unify fresh v (f l)
   in
   check (fun l -> TTuple [ ptr l; l ]);

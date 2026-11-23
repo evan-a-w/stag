@@ -25,7 +25,7 @@ type ('a, 'bound) var =
 
 and ty =
   | TCon of string * arg list
-  | TArrow of ty * ty
+  | TArrow of ty * ty * Arrow_modes.t
   | TTuple of ty list
   | TCode of
       { inner : ty
@@ -160,6 +160,9 @@ val exn_name : string
     variables to [error], so that what uses it is not in error too. *)
 val error : ty
 
+(** With the modes of an arrow in a declaration. *)
+val arrow : ty -> ty -> ty
+
 val error_name : string
 val is_error : ty -> bool
 
@@ -220,6 +223,7 @@ module Mapper : sig
     ; presence : (presence, presence_bound) Var.t -> presence
     ; keeps : 'a 'bound. ('a, 'bound) Var.t -> bool
     ; id : unit -> id
+    ; mode : Mode.Var.t -> Mode.Var.t
     }
 end
 
@@ -236,6 +240,7 @@ module Iter : sig
     ; row : guarded:bool -> (row, bound) Var.t -> (unit, 'e) Result.t
     ; presence :
         guarded:bool -> (presence, presence_bound) Var.t -> (unit, 'e) Result.t
+    ; mode : Mode.Var.t -> (unit, 'e) Result.t
     }
 end
 
@@ -263,7 +268,10 @@ module Printer : sig
   (** [type_name] renders the canonical name of a type constructor: by default
       as is, except the prelude's, which are as within the prelude
       ([Prelude_path.to_string_hum]). *)
-  val create : ?type_name:(string -> string) -> unit -> t
+  (** With [modes], the mode variables of arrows are named, and the constraints
+      between them listed by [where]; otherwise only the modes of arrows fixed
+      to other than a declaration's default are. *)
+  val create : ?type_name:(string -> string) -> ?modes:bool -> unit -> t
 
   val ty : t -> ty -> string
 

@@ -104,7 +104,7 @@ module Expr : sig
       | App of t * t
       | Let of
           { binder : Binder.t
-          ; args : (Binder.t * Syntax.Type_expr.t option) list
+          ; args : (Binder.t * Syntax.Annot.t) list
           ; annot : Syntax.Type_expr.t option
           ; mode : Syntax.Mode_expr.t option
           ; body : t
@@ -119,7 +119,7 @@ module Expr : sig
       | Assign of Var.t * t
       | Store of t * t
       | Fun of
-          { args : (Binder.t * Syntax.Type_expr.t option) list
+          { args : (Binder.t * Syntax.Annot.t) list
           ; body : t
           }
       | Splice of
@@ -157,7 +157,7 @@ module Expr : sig
   val loc : t -> Loc.t
 
   (** A written binder, without its mode, which is not checked yet. *)
-  val binding : Syntax.Binding.t -> Binder.t * Syntax.Type_expr.t option
+  val binding : Syntax.Binding.t -> Binder.t * Syntax.Annot.t
 
   (** The tuple of [ts], of at least two written ones: generated nodes are
       typed, so have their constructor's arity. *)

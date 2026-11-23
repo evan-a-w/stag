@@ -164,7 +164,7 @@ module Expr = struct
       | App of t * t
       | Let of
           { binder : Binder.t
-          ; args : (Binder.t * Syntax.Type_expr.t option) list
+          ; args : (Binder.t * Syntax.Annot.t) list
           ; annot : Syntax.Type_expr.t option
           ; mode : Syntax.Mode_expr.t option
           ; body : t
@@ -179,7 +179,7 @@ module Expr = struct
       | Assign of Var.t * t
       | Store of t * t
       | Fun of
-          { args : (Binder.t * Syntax.Type_expr.t option) list
+          { args : (Binder.t * Syntax.Annot.t) list
           ; body : t
           }
       | Splice of
@@ -210,7 +210,7 @@ module Expr = struct
       | Error
   end
 
-  let binding (name, (annot : Syntax.Annot.t)) = Binder.Name name, annot.ty
+  let binding (name, (annot : Syntax.Annot.t)) = Binder.Name name, annot
 
   let rec syntax_view (expr : Syntax.Expr.t) : View.t =
     let sub expr = Syntax expr in
@@ -287,7 +287,11 @@ module Expr = struct
 
   let annotated_args args annots =
     List.map args ~f:(fun ident ->
-      Binder.Ident ident, List.Assoc.find annots ident ~equal:Typed.Ident.equal)
+      ( Binder.Ident ident
+      , { Syntax.Annot.ty =
+            List.Assoc.find annots ident ~equal:Typed.Ident.equal
+        ; mode = None
+        } ))
   ;;
 
   let rec generated_view ({ desc; ty = _; loc } : Typed.Expr.t) : View.t =
