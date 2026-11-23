@@ -2710,16 +2710,35 @@ and expr_type
           Option.iter
             (Hashtbl.find scope.program.held_modes ident)
             ~f:(fun held ->
-              let locality =
+              let crossed =
                 match
                   Env.find_binder scope.locals (Local ident) ~name:ident.name
                 with
-                | Some entry ->
-                  locality_map
-                    ~assign:true
-                    (Env.Entry.crossed entry ~locks:scope.locks)
-                | None -> Mode.Locality_map.id
+                | Some entry -> Env.Entry.crossed entry ~locks:scope.locks
+                | None -> []
               in
+              let locality = locality_map ~assign:true crossed in
+              (* A closure may be called from a region shorter than the
+                 variable's, so may only store what outlives every region. *)
+              if
+                List.exists crossed ~f:(fun (lock : Env.Lock.t) ->
+                  match lock.kind with
+                  | Closure _ -> true
+                  | Quote _ | Splice | Exclave -> false)
+              then
+                Scope.add_mode
+                  scope
+                  ~loc
+                  (Scope.locality_at_most
+                     value_scope.sink
+                     ~ty
+                     Global
+                     ~loc
+                     ~why:
+                       (sprintf
+                          "it is assigned to %s from a closure, which may be \
+                           called from a shorter region"
+                          ident.name));
               Scope.add_mode
                 scope
                 ~loc

@@ -213,7 +213,7 @@ let f u =
   set ();
   0
 |};
-  [%expect {| val f : 'a -> int |}]
+  [%expect {| This is local, because it is allocated by [stack_] (at t.stag:4:19-34), then it is part of the value (at t.stag:4:19-34), but must be at most global, because it is assigned to x from a closure, which may be called from a shorter region (at t.stag:4:14-34) |}]
 ;;
 
 let%expect_test "higher-order functions take local closures" =
