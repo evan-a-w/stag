@@ -108,7 +108,7 @@ include .~(Cons (Ptr.make (
   (Stag.Toplevel.Expect_test
      { `name = "generated"
      ; `body =
-         Stag.Expr.Let (Ptr.make ( ("u", Nil, None,
+         Stag.Expr.Let (Ptr.make ( ("u", Nil, Stag.Annot.none,
            Stag.Expr.App (Ptr.make ( (Stag.Expr.var "print_endline", Stag.Expr.string "hi"))),
            Stag.Expr.Expect "wrong"))) },
    Nil))))
@@ -140,7 +140,7 @@ let%expect_test "written" = print_endline "w"; [%expect "wrong"]
       (Stag.Toplevel.Expect_test
          { `name = "generated"
          ; `body =
-             Stag.Expr.Let (Ptr.make ( ("u", Nil, None,
+             Stag.Expr.Let (Ptr.make ( ("u", Nil, Stag.Annot.none,
                Stag.Expr.App (Ptr.make ( (Stag.Expr.var "print_endline", Stag.Expr.string "hi"))),
                Stag.Expr.Expect "wrong"))) },
        Nil))))
@@ -157,7 +157,7 @@ let pair = Cons (Ptr.make ( (Stag.Expr.int 1, Cons (Ptr.make ( (Stag.Expr.int 2,
 include .~(value "some" (Stag.Expr.construct "Some" pair))
 include .~(value "swap"
   (Stag.Expr.Fun (Ptr.make (
-    ( Cons (Ptr.make ( (("o", None), Nil)))
+    ( Cons (Ptr.make ( (("o", Stag.Annot.none), Nil)))
     , Stag.Expr.Match (Ptr.make (
         ( Stag.Expr.var "o"
         , Cons (Ptr.make (
@@ -1016,7 +1016,7 @@ let v = Stag.Expr.Var (Stag.Path.Name "x", o)
     File "a.stag", line 4, characters 43-44:
     4 | let v = Stag.Expr.Var (Stag.Path.Name "x", o)
                                                    ^
-    Error: This expression has type A.option[int] but an expression was expected of type .option[Stag.Type_expr.t]
+    Error: This expression has type A.option[int] but an expression was expected of type {`mode : .option[Stag.Mode_expr.t]; `ty : .option[Stag.Type_expr.t]}
     |}]
 ;;
 

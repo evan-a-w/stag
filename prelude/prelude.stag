@@ -179,7 +179,9 @@ module Stag = struct
   module Annot = struct
     type t = {`ty : option[Type_expr.t]; `mode : option[Mode_expr.t]}
 
-    let none = {`ty = None; `mode = None}
+    let none : t = {`ty = None; `mode = None}
+
+    let ty t : t = {`ty = Some t; `mode = None}
   end
 
   module Binding = struct

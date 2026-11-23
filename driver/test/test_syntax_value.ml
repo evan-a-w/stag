@@ -68,8 +68,14 @@ let%expect_test "the prelude's signature" =
       module Lit : sig
         type t = Int of int | Bool of bool | String of string | Char of char | Unit
       end
+      module Mode_expr : sig
+        module Atom : sig
+          type t = Const | Portable | Nonportable | Static | Gc | Unknown | Global | Regional | Local
+        end
+        type t = Var of string | Atoms of list[Atom.t]
+      end
       module Type_expr : sig
-        type t = Var of string | Con of Path.t[Type_ref.t] * list[Arg.t] | Arrow of ptr[t * t] | Tuple of list[t] | Code of ptr[{`context : Row.t; `inner : t}] | Record of Row.t | Variant of Row.t | Mut of ptr[t] | Immut of ptr[t] | Splice of ptr[Expr.t]
+        type t = Var of string | Con of Path.t[Type_ref.t] * list[Arg.t] | Arrow of ptr[t * t] | Tuple of list[t] | Code of ptr[{`context : Row.t; `inner : t}] | Record of Row.t | Variant of Row.t | Mut of ptr[t] | Immut of ptr[t] | Splice of ptr[Expr.t] | Moded of ptr[t * Mode_expr.t] | Global of ptr[t]
         module Row : sig
           type t = Empty | Extend of ptr[string * Type_expr.t * t] | Var of string
         end
@@ -88,8 +94,13 @@ let%expect_test "the prelude's signature" =
         end
         type t = {`kind : Kind.t; `name : string; `params : list[Param.t]}
       end
+      module Annot : sig
+        type t = {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}
+        val none : {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}
+        val ty : Type_expr.t -> {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}
+      end
       module Binding : sig
-        type t = string * option[Type_expr.t]
+        type t = string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}
       end
       module Pattern : sig
         module Rest : sig
@@ -101,7 +112,7 @@ let%expect_test "the prelude's signature" =
         val tuple : list[t] -> t
       end
       module Expr : sig
-        type t = Lit of Lit.t | Var of Path.t[Value_ref.t] * option[Type_expr.t] | App of ptr[t * t] | Let of ptr[string * list[string * option[Type_expr.t]] * option[Type_expr.t] * t * t] | Let_mut of ptr[string * option[Type_expr.t] * t * t] | Assign of ptr[Path.t[Value_ref.t] * t] | Store of ptr[t * t] | Fun of ptr[list[string * option[Type_expr.t]] * t] | Splice of ptr[{`expr : t; `subs : option[list[string * option[t]]]}] | Quote of ptr[t] | Tuple of list[t] | Deref of ptr[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Field of ptr[t * Path.t[Field_ref.t]] | Record_update of ptr[t * list[Path.t[Field_ref.t] * t]] | Type of Type_expr.t | Match of ptr[t * list[Pattern.t * t]] | Poly_record of list[string * t] | Poly_field of ptr[t * string] | Poly_extend of ptr[list[string * t] * t] | Poly_restrict of ptr[t * string] | Poly_update of ptr[t * list[string * t]] | Poly_variant of ptr[string * option[t]] | Expect of string | Struct_quote of list[Toplevel.t]
+        type t = Lit of Lit.t | Var of Path.t[Value_ref.t] * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} | App of ptr[t * t] | Let of ptr[string * list[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * t * t] | Let_mut of ptr[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * t * t] | Assign of ptr[Path.t[Value_ref.t] * t] | Store of ptr[t * t] | Fun of ptr[list[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] * t] | Splice of ptr[{`expr : t; `subs : option[list[string * option[t]]]}] | Quote of ptr[t] | Tuple of list[t] | Deref of ptr[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Field of ptr[t * Path.t[Field_ref.t]] | Record_update of ptr[t * list[Path.t[Field_ref.t] * t]] | Type of Type_expr.t | Match of ptr[t * list[Pattern.t * t]] | Poly_record of list[string * t] | Poly_field of ptr[t * string] | Poly_extend of ptr[list[string * t] * t] | Poly_restrict of ptr[t * string] | Poly_update of ptr[t * list[string * t]] | Poly_variant of ptr[string * option[t]] | Expect of string | Struct_quote of list[Toplevel.t] | Local of ptr[t] | Exclave of ptr[t] | Nontail of ptr[t]
         val var : string -> t
         val construct : string -> list[t] -> t
         val int : int -> t
@@ -114,7 +125,7 @@ let%expect_test "the prelude's signature" =
         val let_ : string -> list[string] -> t -> t -> t
       end
       module Toplevel : sig
-        type t = Let of string * list[string * option[Type_expr.t]] * option[Type_expr.t] * Expr.t | Let_mut of string * option[Type_expr.t] * Expr.t | Type of {`kind : Type_decl.Kind.t; `name : string; `params : list[Type_decl.Param.t]} | Exception of string * list[Type_expr.t] | Module of string * list[t] | Module_splice of string * Expr.t | Include of Expr.t | Expect_test of {`body : Expr.t; `name : string} | Bench of {`body : Expr.t; `name : string; `param : option[string * list[Expr.t]]}
+        type t = Let of string * list[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * Expr.t | Let_mut of string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * Expr.t | Type of {`kind : Type_decl.Kind.t; `name : string; `params : list[Type_decl.Param.t]} | Exception of string * list[Type_expr.t] | Module of string * list[t] | Module_splice of string * Expr.t | Include of Expr.t | Expect_test of {`body : Expr.t; `name : string} | Bench of {`body : Expr.t; `name : string; `param : option[string * list[Expr.t]]}
         val let_ : string -> list[string] -> Expr.t -> t
       end
       module Program : sig
@@ -709,12 +720,20 @@ let%expect_test "constructors are made as the typechecker resolves them" =
            : bool)];
   [%expect
     {|
-    ((constructors 86)
+    ((constructors 102)
      (reflected
-      (prelude.Stag.Expr.Deref prelude.Stag.Expr.Store prelude.Stag.Pattern.Deref
-       prelude.Stag.Type.Kind.Alias prelude.Stag.Type.Kind.Record
-       prelude.Stag.Type.Kind.Variant prelude.Stag.Type_ref.Path.Prelude
-       prelude.Stag.Type_ref.Path.Program))
+      (prelude.Stag.Expr.Deref prelude.Stag.Expr.Exclave prelude.Stag.Expr.Local
+       prelude.Stag.Expr.Nontail prelude.Stag.Expr.Store
+       prelude.Stag.Mode_expr.Atom.Const prelude.Stag.Mode_expr.Atom.Gc
+       prelude.Stag.Mode_expr.Atom.Global prelude.Stag.Mode_expr.Atom.Local
+       prelude.Stag.Mode_expr.Atom.Nonportable
+       prelude.Stag.Mode_expr.Atom.Portable prelude.Stag.Mode_expr.Atom.Regional
+       prelude.Stag.Mode_expr.Atom.Static prelude.Stag.Mode_expr.Atom.Unknown
+       prelude.Stag.Mode_expr.Atoms prelude.Stag.Mode_expr.Var
+       prelude.Stag.Pattern.Deref prelude.Stag.Type.Kind.Alias
+       prelude.Stag.Type.Kind.Record prelude.Stag.Type.Kind.Variant
+       prelude.Stag.Type_expr.Global prelude.Stag.Type_expr.Moded
+       prelude.Stag.Type_ref.Path.Prelude prelude.Stag.Type_ref.Path.Program))
      (others_same_as_to_value true))
     |}]
 ;;
@@ -729,7 +748,7 @@ let%expect_test "values" =
   show {|type t['a] = A | B of 'a * t['a]|};
   [%expect
     {|
-    Cons (Ptr.make (Stag.Toplevel.Let ("f", Cons (Ptr.make (("x", Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), Nil)), None, Stag.Expr.Poly_variant (Ptr.make ("A", Some (Stag.Expr.Var (Stag.Path.Name "x", None))))), Nil))
+    Cons (Ptr.make (Stag.Toplevel.Let ("f", Cons (Ptr.make (("x", {`mode = None; `ty = Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))}), Nil)), {`mode = None; `ty = None}, Stag.Expr.Poly_variant (Ptr.make ("A", Some (Stag.Expr.Var (Stag.Path.Name "x", {`mode = None; `ty = None}))))), Nil))
     Cons (Ptr.make (Stag.Toplevel.Type {`kind = Stag.Type_decl.Kind.Variant (Cons (Ptr.make (("A", Nil), Cons (Ptr.make (("B", Cons (Ptr.make (Stag.Type_expr.Var "a", Cons (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "t", Cons (Ptr.make (Stag.Type_expr.Arg.Ty (Stag.Type_expr.Var "a"), Nil))), Nil))))), Nil))))); `name = "t"; `params = Cons (Ptr.make (Stag.Type_decl.Param.Ty "a", Nil))}, Nil))
     |}]
 ;;
@@ -749,7 +768,7 @@ let%expect_test "nodes are located where given" =
   [%expect
     {|
     ((App ((Var f ()) @ splice.stag:1:0-0)
-      ((Var x (((Con (int @ splice.stag:1:0-0) ()) @ splice.stag:1:0-0))) @
+      ((Var x ((ty ((Con (int @ splice.stag:1:0-0) ()) @ splice.stag:1:0-0)))) @
        splice.stag:1:0-0))
      @ splice.stag:1:0-0)
     |}]
@@ -775,7 +794,7 @@ let%expect_test "an update of fields by ref round trips" =
    | Error error -> print_error error);
   [%expect
     {|
-    Stag.Expr.Record_update (Ptr.make (Stag.Expr.Var (Stag.Path.Name "v", None), Cons (Ptr.make ((Stag.Path.Ref <field A.N.x>, Stag.Expr.Lit (Stag.Lit.Int 1)), Cons (Ptr.make ((Stag.Path.Name "y", Stag.Expr.Lit Stag.Lit.Unit), Nil))))))
+    Stag.Expr.Record_update (Ptr.make (Stag.Expr.Var (Stag.Path.Name "v", {`mode = None; `ty = None}), Cons (Ptr.make ((Stag.Path.Ref <field A.N.x>, Stag.Expr.Lit (Stag.Lit.Int 1)), Cons (Ptr.make ((Stag.Path.Name "y", Stag.Expr.Lit Stag.Lit.Unit), Nil))))))
     (Record_update (Var v ()) ((<A.N.x> (Lit (Int 1))) (y (Lit Unit))))
     (equal true)
     |}]
@@ -986,7 +1005,7 @@ let%expect_test "malformed values" =
       ~file:"other.stag"
       {|
 module Mine = struct type option['a] = None | Some of 'a end
-let decls = Cons (Ptr.make ( (Stag.Toplevel.Let ("x", Nil, None, Stag.Expr.Lit (Stag.Lit.Int 1)), Nil)))
+let decls = Cons (Ptr.make ( (Stag.Toplevel.Let ("x", Nil, Stag.Annot.none, Stag.Expr.Lit (Stag.Lit.Int 1)), Nil)))
 let other = Mine.Some 1
 |}
   in
@@ -1041,7 +1060,7 @@ let%expect_test "malformed values made otherwise" =
          Construct (ref, [ Ptr (Stdlib.ref (Treewalk.Value.Tuple [ fn ])) ])
        | _ -> assert false));
   [%expect
-    {| Malformed syntax: expected an indirect constructor's tuple, got (Stag.Expr.Var (Stag.Path.Name "f", None)) |}];
+    {| Malformed syntax: expected an indirect constructor's tuple, got (Stag.Expr.Var (Stag.Path.Name "f", {`mode = None; `ty = None})) |}];
   (* A wrong payload. *)
   print_expr
     (edit (expr "(1, 2)") ~name:"prelude.Stag.Lit.Int" ~f:(fun ref _ ->
@@ -1064,7 +1083,7 @@ let%expect_test "malformed values made otherwise" =
                ] )
          | _ -> assert false));
   [%expect
-    {| Malformed syntax: expected a record with a field `subs, got {`expr = Stag.Expr.Var (Stag.Path.Name "e", None)}, within Stag.Expr.Quote > Stag.Expr.Splice |}];
+    {| Malformed syntax: expected a record with a field `subs, got {`expr = Stag.Expr.Var (Stag.Path.Name "e", {`mode = None; `ty = None})}, within Stag.Expr.Quote > Stag.Expr.Splice |}];
   (* Not a pair. *)
   print_expr
     (edit
@@ -1079,7 +1098,7 @@ let%expect_test "malformed values made otherwise" =
              )
          | _ -> assert false));
   [%expect
-    {| Malformed syntax: expected a list cell's pair, got (("x", None), Cons (Ptr.make (("y", Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), Nil)), Cons (Ptr.make (("y", Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), Nil))), within Stag.Expr.Let argument 1 |}];
+    {| Malformed syntax: expected a list cell's pair, got (("x", {`mode = None; `ty = None}), Cons (Ptr.make (("y", {`mode = None; `ty = Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))}), Nil)), Cons (Ptr.make (("y", {`mode = None; `ty = Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))}), Nil))), within Stag.Expr.Let argument 1 |}];
   (* A list ending in something else. *)
   print_expr (edit (expr "(a, b, c)") ~name:"prelude.Nil" ~f:(fun _ _ -> Unit));
   [%expect
@@ -1324,7 +1343,7 @@ let decls =
   Cons (Ptr.make ( (Stag.Toplevel.Type {`name = "void"; `params = Nil; `kind = Stag.Type_decl.Kind.Variant Nil},
   Cons (Ptr.make ( (Stag.Toplevel.Type {`name = "pair"; `params = Nil;
      `kind = Stag.Type_decl.Kind.Variant (Cons (Ptr.make ( (("P", Cons (Ptr.make ( (Stag.Type_expr.Tuple (Cons (Ptr.make ( (int, Cons (Ptr.make ( (int, Nil))))))), Nil)))), Nil))))},
-  Cons (Ptr.make ( (Stag.Toplevel.Let ("absurd", Cons (Ptr.make ( (("v", Some (Stag.Type_expr.con "void" Nil)), Nil))), Some int,
+  Cons (Ptr.make ( (Stag.Toplevel.Let ("absurd", Cons (Ptr.make ( (("v", Stag.Annot.ty (Stag.Type_expr.con "void" Nil)), Nil))), Stag.Annot.ty int,
      Stag.Expr.Match (Ptr.make ( (Stag.Expr.var "v", Nil)))),
   Cons (Ptr.make ( (Stag.Toplevel.let_ "p" Nil
      (Stag.Expr.construct "P" (Cons (Ptr.make ( (Stag.Expr.Tuple (Cons (Ptr.make ( (Stag.Expr.int 1, Cons (Ptr.make ( (Stag.Expr.int 2, Nil))))))), Nil))))),
@@ -1345,7 +1364,8 @@ let decls =
      (Type
       ((name pair) (params ())
        (kind (Variant ((P ((Tuple ((Con int ()) (Con int ()))))))))))
-     (Let absurd ((v ((Con void ())))) ((Con int ())) (Match (Var v ()) ()))
+     (Let absurd ((v ((ty (Con void ()))))) ((ty (Con int ())))
+      (Match (Var v ()) ()))
      (Let p () () (Construct P ((Tuple ((Lit (Int 1)) (Lit (Int 2)))))))
      (Let first ((p ())) ()
       (Match (Var p ()) (((Construct P ((Var q))) (Var q ())))))

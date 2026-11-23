@@ -298,7 +298,9 @@ let erased = Stag.Code.erase .< (Ptr.make 1).* <- 2 >.
          (Ptr
           (Stag.Expr.App
            (Ptr
-            (Tuple (Stag.Expr.Var (Stag.Path.Ref (Ref (value Ptr.make))) (None))
+            (Tuple
+             (Stag.Expr.Var (Stag.Path.Ref (Ref (value Ptr.make)))
+              ((mode (None)) (ty (None))))
              (Stag.Expr.Lit (Stag.Lit.Int 1)))))))
         (Stag.Expr.Lit (Stag.Lit.Int 2))))))
     |}];
@@ -337,7 +339,9 @@ let stored = cell.*
       (Ptr
        (Tuple
         (Stag.Expr.Deref
-         (Ptr (Stag.Expr.Var (Stag.Path.Name (String cell)) (None))))
+         (Ptr
+          (Stag.Expr.Var (Stag.Path.Name (String cell))
+           ((mode (None)) (ty (None))))))
         (Stag.Expr.Lit (Stag.Lit.Int 5))))))
     -- evaluated
     (cell (Ptr 5))
@@ -346,7 +350,9 @@ let stored = cell.*
       (Ptr
        (Tuple
         (Stag.Expr.Deref
-         (Ptr (Stag.Expr.Var (Stag.Path.Name (String cell)) (None))))
+         (Ptr
+          (Stag.Expr.Var (Stag.Path.Name (String cell))
+           ((mode (None)) (ty (None))))))
         (Stag.Expr.Lit (Stag.Lit.Int 5))))))
     (run_store "()")
     (stored 5)

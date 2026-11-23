@@ -343,7 +343,7 @@ let fst p = match p with (a, _) -> a
 let getter ty r =
   let name = Stag.Field_ref.name r in
   Stag.Toplevel.let_ (String.append "get_" name) Nil
-    (Stag.Expr.Let (Ptr.make ( ("f", Cons (Ptr.make ( (("v", Some (Stag.Type.expr ty)), Nil))), None,
+    (Stag.Expr.Let (Ptr.make ( ("f", Cons (Ptr.make ( (("v", Stag.Annot.ty (Stag.Type.expr ty)), Nil))), Stag.Annot.none,
        Stag.Expr.Field (Ptr.make ( (Stag.Expr.var "v", Stag.Path.Name name))),
        Stag.Expr.var "f"))))
 
