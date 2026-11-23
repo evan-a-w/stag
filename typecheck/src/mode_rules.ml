@@ -274,6 +274,25 @@ module Binding = struct
       Binding.of_mode global
   ;;
 
+  let embedded ctx ~name ~loc =
+    let mode =
+      stage_at_least
+        ctx
+        Portable
+        ~loc
+        ~why:(sprintf "%s was computed at compile time" name)
+    in
+    Ctx.add
+      ctx
+      ~loc
+      (Mode.Var.at_most
+         mode
+         Locality
+         Global
+         (reason ~loc (sprintf "%s was computed at compile time" name)));
+    of_mode mode
+  ;;
+
   let being_checked ctx ~name ~loc =
     Binding.of_mode
       (stage_at_least

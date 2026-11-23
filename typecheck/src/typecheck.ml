@@ -1820,12 +1820,24 @@ and var_ref_type t (scope : Scope.t) ~at (var_ref : Typed.Var_ref.t) ~loc =
      | None ->
        (match Program_env.embedded scope.program ident with
         | Some info ->
-          Mode_rules.runs
-            (Scope.modes scope)
-            at
-            Portable
-            ~loc
-            ~why:(sprintf "%s was computed at compile time" ident.name);
+          use_entry
+            scope
+            ~at
+            { scheme = info.ty
+            ; level = 0
+            ; quote_id = None
+            ; mode =
+                Mode_rules.Binding.embedded
+                  (Scope.modes scope)
+                  ~name:ident.name
+                  ~loc
+            ; held = None
+            ; locks = []
+            ; binder
+            ; defining = false
+            }
+            ~name:ident.name
+            ~loc;
           Ok (Scope.instantiate t scope info.ty, Typed.Var_ref.Persistent binder)
         | None -> not_in_scope ident.name))
 

@@ -135,6 +135,9 @@ module Binding : sig
   (** Bound by a pattern to a part of a block of mode [block]. *)
   val project : Ctx.t -> block:Mode.Var.t -> Modality.t -> loc:Loc.t -> t
 
+  (** A value computed at compile time, embedded in the code. *)
+  val embedded : Ctx.t -> name:string -> loc:Loc.t -> t
+
   (** A toplevel being checked, used where its mode isn't known yet. *)
   val being_checked : Ctx.t -> name:string -> loc:Loc.t -> t
 end
