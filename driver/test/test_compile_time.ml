@@ -237,7 +237,7 @@ let%expect_test "substitutions at toplevel splices" =
   run
     ~bodies:[ "implicit"; "explicit"; "explicit_toplevel" ]
     {|
-let n = Int.add 1 2
+let n = Int.to_string 3
 let code = .<(n, x)>.
 let implicit x = .~code
 let explicit = .~code.{n = true; x = 1}
@@ -246,22 +246,22 @@ let applied = implicit false
 |};
   [%expect
     {|
-    val n : int
+    val n : string
     val code : <'a * 'b>{n : 'a; x : 'b; ..'c}
-    val implicit : 'a -> int * 'a
+    val implicit : 'a -> string * 'a
     val explicit : bool * int
-    val explicit_toplevel : int * int
-    val applied : int * bool
+    val explicit_toplevel : string * string
+    val applied : string * bool
     (implicit/6
      (Toplevel_splice
       (code
        (Var (Bound (Toplevel code/5)) :
-        "<int * 'a>{n : immut int; x : immut 'a}"))
+        "<string * 'a>{n : immut string; x : immut 'a}"))
       (expansion
        (Tuple
-        ((Var (Bound (Toplevel n/4)) : int) (Var (Bound (Local x/19)) : 'a)) :
-        "int * 'a"))
-      : "int * 'a"))
+        ((Var (Bound (Toplevel n/4)) : string) (Var (Bound (Local x/19)) : 'a)) :
+        "string * 'a"))
+      : "string * 'a"))
     (explicit/7
      (Toplevel_splice
       (code
@@ -284,25 +284,26 @@ let applied = implicit false
      (Toplevel_splice
       (code
        (Var (Bound (Toplevel code/5)) :
-        "<int * int>{n : immut int; x : immut int}"))
+        "<string * string>{n : immut string; x : immut string}"))
       (expansion
        (Tuple
-        ((Var (Bound (Toplevel n/4)) : int) (Var (Bound (Toplevel n/4)) : int)) :
-        "int * int"))
-      : "int * int"))
+        ((Var (Bound (Toplevel n/4)) : string)
+         (Var (Bound (Toplevel n/4)) : string))
+        : "string * string"))
+      : "string * string"))
     -- evaluated at compile time
     (code
      (Code
       (Tuple ((Var (Free_toplevel n) : 'a) (Var (Free x) : 'b)) : "'a * 'b")))
     -- evaluated
-    (n 3)
+    (n (String 3))
     (code
      (Code
       (Tuple ((Var (Free_toplevel n) : 'a) (Var (Free x) : 'b)) : "'a * 'b")))
     (implicit <fun>)
     (explicit (Tuple true 1))
-    (explicit_toplevel (Tuple 3 3))
-    (applied (Tuple 3 false))
+    (explicit_toplevel (Tuple (String 3) (String 3)))
+    (applied (Tuple (String 3) false))
     |}]
 ;;
 

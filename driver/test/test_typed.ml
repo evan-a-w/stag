@@ -855,19 +855,17 @@ let deep = .~(let x = .<1>. in .~(let n = 5 in .<n; x>.))
 let%expect_test "explicit substitutions" =
   print
     {|
-let n = Int.add 1 2
+let n = Int.to_string 3
 let persistent_shorthand = let f y = y in .<.~(.<id (f 1)>.).{f; id}>.
-let at_toplevel = .~(.<add n y>.).{n; y = 1}
+let at_toplevel = .~(.<String.append n y>.).{n; y = "1"}
 |};
   [%expect
     {|
     ((members
-      (((ident n/4) (args ()) (scheme int)
+      (((ident n/4) (args ()) (scheme string)
         (body
-         (App
-          (App (Var (Prim Int.add) : "int -> int -> int") (Lit (Int 1) : int) :
-           "int -> int")
-          (Lit (Int 2) : int) : int)))))
+         (App (Var (Prim Int.to_string) : "int -> string") (Lit (Int 3) : int) :
+          string)))))
      (recursive false))
     ((members
       (((ident persistent_shorthand/5) (args ()) (scheme <int>{..'a})
@@ -893,26 +891,26 @@ let at_toplevel = .~(.<add n y>.).{n; y = 1}
           : <int>{..'a})))))
      (recursive false))
     ((members
-      (((ident at_toplevel/6) (args ()) (scheme int)
+      (((ident at_toplevel/6) (args ()) (scheme string)
         (body
          (Toplevel_splice
           (code
            (Quote
             (App
-             (App (Var (Persistent (Toplevel add/0)) : "int -> int -> int")
-              (Var (Free_toplevel n) : int) : "int -> int")
-             (Var (Free y) : int) : int)
-            : "<int>{n : immut int; y : immut int}"))
+             (App (Var (Prim String.append) : "string -> string -> string")
+              (Var (Free_toplevel n) : string) : "string -> string")
+             (Var (Free y) : string) : string)
+            : "<string>{n : immut string; y : immut string}"))
           (expansion
            (Let (ident y/18) (args ()) (generalized false)
-            (body (Lit (Int 1) : int))
+            (body (Lit (String 1) : string))
             (in_
              (App
-              (App (Var (Bound (Toplevel add/0)) : "int -> int -> int")
-               (Var (Bound (Toplevel n/4)) : int) : "int -> int")
-              (Var (Bound (Local y/18)) : int) : int))
-            : int))
-          : int)))))
+              (App (Var (Prim String.append) : "string -> string -> string")
+               (Var (Bound (Toplevel n/4)) : string) : "string -> string")
+              (Var (Bound (Local y/18)) : string) : string))
+            : string))
+          : string)))))
      (recursive false))
     |}]
 ;;

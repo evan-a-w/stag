@@ -287,7 +287,7 @@ let at_runtime = let mut n = 0 in let f u = n in f ()
     val ok : int -> list[string] -> <'a>{g : unit -> 'a; ..'b}
     val ok_code : <int>{} -> <'a>{g : unit -> 'a; ..'b}
     val not_mentioned : <int>{..'a}
-    val only_data : <'_a>{g : unit -> '_a; ..'_b}
+    val only_data : <int>{..'_a}
     val at_runtime : int
     -- evaluated at compile time
     -- evaluated
@@ -299,7 +299,10 @@ let at_runtime = let mut n = 0 in let f u = n in f ()
        int)
       ((g/35 <fun>))))
     (only_data
-     (Code (App (Var (Free g) : "unit -> '_a") (Lit Unit : unit) : '_a)))
+     (Code
+      (App (Var (Persistent (Local g/36)) : "unit -> int") (Lit Unit : unit) :
+       int)
+      ((g/36 <fun>))))
     (at_runtime 0)
     |}]
 ;;
@@ -659,9 +662,13 @@ let ran = .~(ok 1)
     val bad : 'a -> <'b>{g : unit -> 'b; ..'c}
     val bad : (unit -> int) -> <'a>{g : unit -> 'a; ..'b}
     val bad : <'_a>{g : unit -> '_a; ..'_b}
-    ((Free_in_spliced_code (name g)
-      (unusable ((loc t.stag:2:36-37) (var_level 0) (used_at 1))))
-     @ t.stag:3:10-18)
+    val ok : int -> <int>{..'a}
+    val ran : int
+    -- evaluated at compile time
+    (ok <fun>)
+    -- evaluated
+    (ok <fun>)
+    (ran 1)
     |}]
 ;;
 

@@ -9,11 +9,11 @@ let%expect_test "mode syntax typechecks and evaluates as its body" =
 type r = { x : global_ int; y : int }
 type t = A of global_ int * int
 let f (x @ local) (y : int @ 'm) : int @ global = Int.add x y
-let pair (x @ local) = exclave_ (x, stack_ (x, x))
+let pair (x @ local) = exclave_ (x, stack_ (fun u -> x))
 let apply (h : int @ local -> int @ local) = h 1 [@nontail]
 let annotated = (f : int @ local -> int -> int)
 let mut counter : int @ static = 0
-let record = let r = stack_ { x = 1; y = 2 } in r.x
+let record = let r = stack_ (Ptr.make { x = 1; y = 2 }) in match r.* with { x = x; y = _ } -> x
 let constructed = A (1, 2)
 let applied = apply (fun x -> Int.add x 1)
 let summed = f 1 2
@@ -25,10 +25,10 @@ let var = (summed @ local)
     {|
     type r = { x : global_ int; y : int }
     type t = A of global_ int * int
-    val f : int -> int -> int
-    val pair : 'a -> 'a * ('a * 'a)
+    val f : int @ local -> (int -> int) @ local
+    val pair : 'a @ local -> 'a * ('b -> 'a @ local) @ local
     val apply : (int -> int) -> int
-    val annotated : int -> int -> int
+    val annotated : int @ local -> (int -> int) @ local
     val counter : int
     val record : int
     val constructed : t
@@ -59,13 +59,13 @@ let var = (summed @ local)
 let%expect_test "mode syntax in quotes" =
   run
     {|
-let code = .< fun (x @ local) -> exclave_ stack_ (x, Int.add x 1 [@nontail]) >.
+let code = .< fun (x @ local) -> exclave_ stack_ (x, Ptr.make (Int.add x 1 [@nontail])) >.
 let erased = Stag.Code.erase code
-let spliced = match .~code 1 with (a, b) -> Int.add a b
+let spliced = match .~code 1 with (a, b) -> Int.add a (b.*)
 |};
   [%expect
     {|
-    val code : <int -> int * int>{..'a}
+    val code : <int @ local -> int * ptr[int] @ local>{..'a}
     val erased : Stag.Expr.t
     val spliced : int
     -- evaluated at compile time
@@ -78,16 +78,20 @@ let spliced = match .~code 1 with (a, b) -> Int.add a b
          (Marked Stack
           (Tuple
            ((Var (Bound (Local x/16)) : int)
-            (Marked Nontail
-             (App
-              (App (Var (Prim Int.add) : "int -> int -> int")
-               (Var (Bound (Local x/16)) : int) : "int -> int")
-              (Lit (Int 1) : int) : int)
-             : int))
-           : "int * int")
-          : "int * int")
-         : "int * int"))
-       : "int -> int * int")))
+            (App
+             (Var (Persistent (Toplevel prelude.Ptr.make/17)) :
+              "int -> ptr[int]")
+             (Marked Nontail
+              (App
+               (App (Var (Prim Int.add) : "int -> int -> int")
+                (Var (Bound (Local x/16)) : int) : "int -> int")
+               (Lit (Int 1) : int) : int)
+              : int)
+             : ptr[int]))
+           : "int * ptr[int]")
+          : "int * ptr[int]")
+         : "int * ptr[int]"))
+       : "int @ local -> int * ptr[int] @ local")))
     -- evaluated
     (code
      (Code
@@ -98,16 +102,20 @@ let spliced = match .~code 1 with (a, b) -> Int.add a b
          (Marked Stack
           (Tuple
            ((Var (Bound (Local x/16)) : int)
-            (Marked Nontail
-             (App
-              (App (Var (Prim Int.add) : "int -> int -> int")
-               (Var (Bound (Local x/16)) : int) : "int -> int")
-              (Lit (Int 1) : int) : int)
-             : int))
-           : "int * int")
-          : "int * int")
-         : "int * int"))
-       : "int -> int * int")))
+            (App
+             (Var (Persistent (Toplevel prelude.Ptr.make/17)) :
+              "int -> ptr[int]")
+             (Marked Nontail
+              (App
+               (App (Var (Prim Int.add) : "int -> int -> int")
+                (Var (Bound (Local x/16)) : int) : "int -> int")
+               (Lit (Int 1) : int) : int)
+              : int)
+             : ptr[int]))
+           : "int * ptr[int]")
+          : "int * ptr[int]")
+         : "int * ptr[int]"))
+       : "int @ local -> int * ptr[int] @ local")))
     (erased
      (Stag.Expr.Fun
       (Ptr
@@ -128,19 +136,25 @@ let spliced = match .~code 1 with (a, b) -> Int.add a b
               (Stag.Expr.Var (Stag.Path.Name (String x))
                ((mode (None)) (ty (None))))
               (Cons
-               (Stag.Expr.Nontail
+               (Stag.Expr.App
                 (Ptr
-                 (Stag.Expr.App
-                  (Ptr
-                   (Tuple
+                 (Tuple
+                  (Stag.Expr.Var (Stag.Path.Ref (Ref (value Ptr.make)))
+                   ((mode (None)) (ty (None))))
+                  (Stag.Expr.Nontail
+                   (Ptr
                     (Stag.Expr.App
                      (Ptr
                       (Tuple
-                       (Stag.Expr.Var (Stag.Path.Ref (Ref (value Prim.Int.add)))
-                        ((mode (None)) (ty (None))))
-                       (Stag.Expr.Var (Stag.Path.Name (String x))
-                        ((mode (None)) (ty (None)))))))
-                    (Stag.Expr.Lit (Stag.Lit.Int 1)))))))
+                       (Stag.Expr.App
+                        (Ptr
+                         (Tuple
+                          (Stag.Expr.Var
+                           (Stag.Path.Ref (Ref (value Prim.Int.add)))
+                           ((mode (None)) (ty (None))))
+                          (Stag.Expr.Var (Stag.Path.Name (String x))
+                           ((mode (None)) (ty (None)))))))
+                       (Stag.Expr.Lit (Stag.Lit.Int 1))))))))))
                (Nil))))))))))))
     (spliced 3)
     |}]

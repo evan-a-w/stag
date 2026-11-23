@@ -1977,6 +1977,11 @@ let intrinsic_type t (scope : Scope.t) (intrinsic : Intrinsic.t) =
     Result.all_unit
       [ Mode.Var.submode_on arg res Stage reason
       ; Mode.Var.submode_on arg res Provenance reason
+      ; Mode.Var.at_least
+          arg
+          Locality
+          Local
+          (Mode.Reason.create "Unsafe.assume_global takes it")
       ; Mode.Var.at_most
           res
           Locality
@@ -2484,8 +2489,8 @@ and expr_type
       | Tuple parts | Construct (_, parts) -> List.exists parts ~f:is_allocation
       | Record fields | Record_update (_, fields) ->
         List.exists fields ~f:(fun (_, part) -> is_allocation part)
-      | Poly_record fields | Poly_update (_, fields) | Poly_extend (fields, _) ->
-        List.exists fields ~f:(fun (_, part) -> is_allocation part)
+      | Poly_record fields | Poly_update (_, fields) | Poly_extend (fields, _)
+        -> List.exists fields ~f:(fun (_, part) -> is_allocation part)
       | Poly_variant (_, part) -> Option.exists part ~f:is_allocation
       | App ({ desc = Var (Intrinsic Ptr_make); _ }, _) -> true
       | App

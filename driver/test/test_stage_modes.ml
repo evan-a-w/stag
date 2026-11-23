@@ -68,7 +68,8 @@ let%expect_test "quote lock: locals are embedded only when portable" =
     {|
 let constant = let k = 1 in .<k>.
 let closure = let k = 1 in let g u = k in .<g ()>.
-let computed = let k = Int.add 1 2 in .<k>.
+let computed = let k = Int.to_string 3 in .<k>.
+let computed_int = let k = Int.add 1 2 in .<k>.
 let argument x = .<x>.
 let mutable_ = let mut m = 1 in let g u = m in .<g ()>.
 |};
@@ -77,6 +78,7 @@ let mutable_ = let mut m = 1 in let g u = m in .<g ()>.
     val constant : <int>{..'a}
     val closure : <int>{..'a}
     val computed : <'_a>{k : '_a; ..'_b}
+    val computed_int : <int>{..'_a}
     val argument : 'a -> <'b>{x : 'b; ..'c}
     val mutable_ : <'_a>{g : unit -> '_a; ..'_b}
     |}]
@@ -86,7 +88,7 @@ let%expect_test "closure lock: a closure is as portable as what it captures" =
   check
     {|
 let through_closures =
-  let k = Int.add 1 2 in
+  let k = Int.to_string 3 in
   let f u = k in
   let g u = f () in
   .<g ()>.
@@ -281,14 +283,14 @@ let quoted = .<embeds>.
     {|
 let embeds = .~(let k x = x in .<k>.)
 let literal = .~(.<1>.)
-let applied = .~(.<Int.add 1 2>.)
+let applied = .~(.<Int.to_string 3>.)
 |};
   [%expect
     {|
     val embeds : '_a -> '_a
     val quoted : <'_a -> '_a>{..'b}
     This is portable, because k was computed at compile time (at t.stag:2:33-34), but must be at most const, because embeds is a toplevel (at t.stag:2:13-37)
-    This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:4:19-30), but must be at most const, because applied is a toplevel (at t.stag:4:14-33)
+    This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:4:19-34), but must be at most const, because applied is a toplevel (at t.stag:4:14-37)
     |}]
 ;;
 
@@ -321,11 +323,11 @@ let%expect_test "mode annotations on functions and mode variables" =
     {|
 let f @ const = fun x -> x
 let g n = let h @ const = fun x -> Int.add x n in h
-let k @ portable = let n = Int.add 1 2 in fun x -> Int.add x n
+let k @ portable = let n = Int.to_string 3 in fun x -> String.append x n
 let v @ 'm = 1
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:4:27-38), then n is bound (at t.stag:4:19-62), but must be at most portable, because it is annotated portable (at t.stag:4:8-16), then it is bound by an annotated let (at t.stag:4:8-16) |}]
+    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:4:27-42), then n is bound (at t.stag:4:19-72), but must be at most portable, because it is annotated portable (at t.stag:4:8-16), then it is bound by an annotated let (at t.stag:4:8-16) |}]
 ;;
 
 let%expect_test "a limit is reported once, at what first exceeds it" =
@@ -341,7 +343,7 @@ let%expect_test "substituting a name the code doesn't need is an error" =
   modes
     {|
 let n = 3
-let computed = Int.add 1 2
+let computed = Int.to_string 3
 let resolved_directly = .~(.<n>.).{n = true}
 let free = .~(.<computed>.).{computed = true}
 let closed (c : <int>{}) = .<.~c.{x = 1}>.
@@ -560,8 +562,8 @@ let m @ const = n
   [%expect
     {| This is portable, because it is annotated portable (at t.stag:2:8-16), then n is used (at t.stag:3:16-17), but must be at most const, because it is annotated const (at t.stag:3:8-13), then it is bound by an annotated let (at t.stag:3:8-13) |}];
   modes {|
-let f u = let p @ local = (1, 2) in p
+let f u = let p @ local = Ptr.make (1, 2) in p
 |};
   [%expect
-    {| This is local, because it is annotated local (at t.stag:2:18-23), then p is used (at t.stag:2:36-37), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:2:10-37) |}]
+    {| This is local, because it is annotated local (at t.stag:2:18-23), then p is used (at t.stag:2:45-46), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:2:10-46) |}]
 ;;
