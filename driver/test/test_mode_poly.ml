@@ -253,8 +253,8 @@ let u = t (Int.add 1)
 |};
   [%expect
     {|
-    This expression has type int -> int but an expression was expected of type int -> int
-    Their modes differ: This is nonportable, because a function type fixes it, then the function types are unified, but must be at most portable, because r is used in a quote (at t.stag:2:27-28), then the function returns it (at t.stag:2:18-21)
+    val t : (int -> 'a @ 'm0) -> <'b>{r : 'b; ..'c} @ 'm1 with 'm0 <= 'm1 and portable <= 'm1
+    val u : <'_a>{r : '_a; ..'_b}
     |}];
   modes
     {|
@@ -263,7 +263,11 @@ let a x = let r = b x in .<r>.
 let c = a (Int.add 1 2)
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:4:10-23), then it is passed to a function (at t.stag:4:8-23), but must be at most portable, because r is used in a quote (at t.stag:3:27-28), then the function returns it (at t.stag:3:18-21), then the function types are unified, then y is used (at t.stag:2:25-26), then the function types are unified, then it is passed to a function (at t.stag:3:18-21), then x is used (at t.stag:3:20-21), then the function types are unified |}];
+    {|
+    val b : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and 'm0 <= 'm2 and portable <= 'm1 and 'm1 <= 'm3
+    val a : 'a @ 'm0 -> <'b>{r : 'b; ..'c} @ 'm1 with 'm0 <= 'm2 and portable <= 'm1 and 'm1 <= 'm3
+    val c : <'_a>{r : '_a; ..'_b}
+    |}];
   modes
     {|
 let a x = let r = b x in .<r>.

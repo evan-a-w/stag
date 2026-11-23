@@ -338,6 +338,9 @@ module Scope = struct
     (** The mode of the value being computed: what is evaluated for it is at
         most [sink]. *)
     ; locks : Env.Lock.t list (** Innermost first. *)
+    ; params : Type.ty list
+    (** The types of the parameters of the functions being checked, whose modes
+        are decided by each use of their function. *)
     }
 
   and quote =
@@ -374,10 +377,29 @@ module Scope = struct
 
   (* What [mode] is at least, whatever the parameters' modes turn out to be: a
      decision taken on it holds for any use of the function. *)
+  (* What [mode] is at least however the functions being checked are used: with
+     the modes of their parameters, those within their types, and those of the
+     types of the components not finished yet raised. *)
   let known_stage t mode =
-    (Mode.Var.lower_assuming
-       mode
-       ~raised:(Hash_set.mem t.program.parameter_modes))
+    let raised = Int.Hash_set.create () in
+    let iter : Nothing.t Type.Iter.t =
+      { ty = (fun ~guarded:_ _ -> Ok ())
+      ; row = (fun ~guarded:_ _ -> Ok ())
+      ; presence = (fun ~guarded:_ _ -> Ok ())
+      ; mode =
+          (fun var ->
+            Hash_set.add raised (Mode.Var.id var);
+            Ok ())
+      }
+    in
+    List.iter
+      (t.params @ Stack.to_list t.program.unfinished)
+      ~f:(fun ty ->
+        match Type.iter_ty iter ty with
+        | Ok () -> ()
+        | Error _ -> .);
+    (Mode.Var.lower_assuming mode ~raised:(fun id ->
+       Hash_set.mem t.program.parameter_modes id || Hash_set.mem raised id))
       .stage
   ;;
 
@@ -1948,6 +1970,7 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
     ; syntax_splice = None
     ; sink = Mode.Var.create program.modes ~rank
     ; locks = []
+    ; params = []
     }
   in
   let fn =
@@ -2059,7 +2082,10 @@ and check_body t (scope : Scope.t) ~closure ~(fn : Function_type.t) ~body =
       then
         Scope.add_mode scope ~loc:Loc.none (Mode.Var.submode arg partial reason)));
   let scope =
-    { (Scope.enter_closure t scope closure) with sink = fn.res_mode }
+    { (Scope.enter_closure t scope closure) with
+      sink = fn.res_mode
+    ; params = List.map fn.args ~f:snd @ scope.params
+    }
   in
   Env.with_bindings
     scope.locals
@@ -3338,6 +3364,7 @@ let toplevel_scope ?generated t program module_ ~level ~in_expect_test =
   ; syntax_splice = None
   ; sink = Mode.Var.create program.Program_env.modes ~rank
   ; locks = []
+  ; params = []
   }
 ;;
 
