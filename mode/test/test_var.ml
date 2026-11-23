@@ -1,6 +1,12 @@
 open! Import
 
 let reason = Reason.create
+
+let ok_exn = function
+  | Ok x -> x
+  | Error error -> raise_s [%sexp (error : Error.t)]
+;;
+
 let print_result result = print_s [%sexp (result : (unit, Error.t) Result.t)]
 let show vars = List.iter vars ~f:(fun var -> print_s [%sexp (var : Var.t)])
 
@@ -12,8 +18,11 @@ let%expect_test "a fresh variable is unconstrained, a constant one fixed" =
       ids
       ~rank:0
       { stage = Const; provenance = Static; locality = Global }
+    |> ok_exn
   in
-  let local = Var.of_const ids ~rank:0 { Const.max with locality = Local } in
+  let local =
+    Var.of_const ids ~rank:0 { Const.max with locality = Local } |> ok_exn
+  in
   show [ fresh; const; local ];
   print_s
     [%message
@@ -182,6 +191,7 @@ let%expect_test "crossing" =
       ids
       ~rank:0
       { stage = Nonportable; provenance = Unknown; locality = Local }
+    |> ok_exn
   in
   let target () =
     let t = Var.create ids ~rank:0 in
@@ -294,5 +304,73 @@ let%expect_test "defaulting" =
     (Ok ())
     ((m2.stage Portable) (m2.provenance Unknown) (m2.locality Local))
     ((m3.stage Portable) (m3.provenance Unknown) (m3.locality Local))
+    |}]
+;;
+
+let%expect_test "a constant that is const but not static is rejected" =
+  let ids = Id_source.create () in
+  print_s
+    [%sexp
+      (Var.of_const
+         ids
+         ~rank:0
+         { stage = Const; provenance = Unknown; locality = Global }
+       : (Var.t, Error.t) Result.t)];
+  [%expect
+    {|
+    (Error
+     ("Mode mismatch" (var m0) (axis stage) (lower Portable) (upper Const)
+      (lower_because (constant "const implies static"))
+      (upper_because (constant))))
+    |}]
+;;
+
+let%expect_test "upper bounds carried over several edges explain their path" =
+  let ids = Id_source.create () in
+  let a = Var.create ids ~rank:0
+  and b = Var.create ids ~rank:0
+  and c = Var.create ids ~rank:0
+  and d = Var.create ids ~rank:0 in
+  print_result (Var.submode a b (reason "a flows to b"));
+  print_result (Var.submode b c (reason "b flows to c"));
+  print_result (Var.submode c d (reason "c flows to d"));
+  print_result (Var.at_most d Locality Global (reason "d is returned"));
+  print_result (Var.at_least a Locality Local (reason "a is local"));
+  [%expect
+    {|
+    (Ok ())
+    (Ok ())
+    (Ok ())
+    (Ok ())
+    (Error
+     ("Mode mismatch" (var m0) (axis locality) (lower Local) (upper Global)
+      (lower_because ("a is local"))
+      (upper_because
+       ("d is returned" "c flows to d" "b flows to c" "a flows to b"))))
+    |}]
+;;
+
+let%expect_test "equate failing on its second half changes nothing" =
+  let ids = Id_source.create () in
+  let a = Var.create ids ~rank:0
+  and b = Var.create ids ~rank:0 in
+  print_result (Var.at_most a Locality Global (reason "a is returned"));
+  print_result (Var.at_least b Locality Local (reason "b is local"));
+  (* [a <= b] holds, [b <= a] does not. *)
+  print_result (Var.equate a b (reason "unified"));
+  (* Without the [a <= b] edge, [b] is unaffected. *)
+  print_result (Var.at_least a Stage Nonportable (reason "a is computed"));
+  show [ a; b ];
+  [%expect
+    {|
+    (Ok ())
+    (Ok ())
+    (Error
+     ("Mode mismatch" (var m0) (axis locality) (lower Local) (upper Global)
+      (lower_because ("b is local" unified)) (upper_because ("a is returned"))))
+    (Ok ())
+    ((m0.stage Nonportable) (m0.provenance Static..Unknown) (m0.locality Global))
+    ((m1.stage Const..Nonportable) (m1.provenance Static..Unknown)
+     (m1.locality Local))
     |}]
 ;;

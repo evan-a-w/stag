@@ -136,10 +136,11 @@ let at_most_const ?(crossing = Crossing.none) t const reason =
 let of_const ids ~rank const =
   let t = create ids ~rank in
   let reason = Reason.create "constant" in
-  Graph.atomically (fun () ->
-    let%bind.Result () = at_least_const t const reason in
-    at_most_const t const reason)
-  |> Mode_error.ok_exn;
+  let%map.Result () =
+    Graph.atomically (fun () ->
+      let%bind.Result () = at_least_const t const reason in
+      at_most_const t const reason)
+  in
   t
 ;;
 

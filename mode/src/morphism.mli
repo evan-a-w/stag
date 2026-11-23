@@ -2,8 +2,8 @@ open! Import
 
 (** A monotone map [right] from the points of [src] to those of [dst], with a
     left adjoint [left]: [left p <= q] iff [p <= right q]. An edge [lo <= m(hi)]
-    relates [lo] on [dst] to [hi] on [src]. Compared by what it maps, not its
-    name. *)
+    relates [lo] on [dst] to [hi] on [src]. Printed by name when it maps as a
+    named morphism does. *)
 type t [@@deriving compare, sexp_of]
 
 val identity : Axis.Any.t -> t
@@ -23,6 +23,9 @@ val is_identity : t -> bool
 (** Whether [x <= right x] for every [x], so that [x <= m(x)] always holds. Only
     for morphisms from an axis to itself. *)
 val is_inflationary : t -> bool
+
+(** [le a b]: [x <= a(y)] implies [x <= b(y)]. *)
+val le : t -> t -> bool
 
 val right : t -> int -> int
 val left : t -> int -> int

@@ -9,7 +9,9 @@ type t [@@deriving sexp_of]
     rank makes generic the variables of greater ranks). *)
 val create : Id_source.t -> rank:int -> t
 
-val of_const : Id_source.t -> rank:int -> Const.t -> t
+(** Fixed to the constant. Fails if it is [const] but not [static]. *)
+val of_const : Id_source.t -> rank:int -> Const.t -> (t, Mode_error.t) Result.t
+
 val id : t -> int
 val lower : t -> Const.t
 val upper : t -> Const.t
@@ -53,9 +55,10 @@ val default_to_lower : t -> unit
     depend on. Never fails. *)
 val default_to_upper : t -> unit
 
-(** Makes generic the variables of rank greater than [rank]. They keep their
-    bounds and the constraints the graph implies among them and with variables
-    of rank at most [rank] (through other variables, which stay as they are). *)
+(** Makes generic the variables in the list of rank greater than [rank]. They
+    keep their bounds and the constraints the graph implies among them and with
+    variables of rank at most [rank], through the variables not in the list,
+    which stay as they are. *)
 val generalize : t list -> rank:int -> unit
 
 module Instance : sig

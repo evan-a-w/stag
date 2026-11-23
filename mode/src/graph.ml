@@ -97,7 +97,6 @@ let create ~var_id axis ~rank =
   }
 ;;
 
-let var_id t = t.var_id
 let lower t = t.lower
 let upper t = t.upper
 
@@ -113,48 +112,24 @@ let lower_rank t ~rank =
   | Rank _ | Generic _ -> ()
 ;;
 
-let undo_log : (unit -> unit) list ref = ref []
-let depth = ref 0
-
-let log undo =
-  assert (!depth > 0);
-  undo_log := undo :: !undo_log
-;;
-
-let atomically f =
-  let saved = !undo_log in
-  incr depth;
-  let result = Exn.protect ~f ~finally:(fun () -> decr depth) in
-  (match result with
-   | Ok () -> ()
-   | Error (_ : Mode_error.t) ->
-     let rec undo () =
-       if not (phys_equal !undo_log saved)
-       then (
-         match !undo_log with
-         | [] -> assert false
-         | f :: rest ->
-           f ();
-           undo_log := rest;
-           undo ())
-     in
-     undo ());
-  if !depth = 0 then undo_log := [];
-  result
-;;
+let log = Undo.record
+let atomically = Undo.atomically
 
 let check t =
   if t.lower <= t.upper
   then Ok ()
-  else
+  else (
+    let (T axis) = t.axis in
+    let module C = (val Axis.chain axis) in
     Error
-      (Mode_error.create
-         ~var:t.var_id
-         ~axis:t.axis
-         ~lower:t.lower
-         ~upper:t.upper
-         ~lower_because:(Why.to_list t.lower_why)
-         ~upper_because:(Why.to_list t.upper_why))
+      (Mode_error.Mismatch
+         { var = t.var_id
+         ; axis
+         ; lower = C.of_index_exn t.lower
+         ; upper = C.of_index_exn t.upper
+         ; lower_because = Why.to_list t.lower_why
+         ; upper_because = Why.to_list t.upper_why
+         }))
 ;;
 
 let rec raise_lower t point why =
@@ -291,21 +266,73 @@ let generalize nodes ~rank =
   in
   let is_kept node = Hash_set.mem kept_ids node.id in
   let internal node = not (is_kept node || is_outer node) in
-  let states =
-    List.map kept ~f:(fun node ->
-      let above =
-        implied
-          node
-          ~forward:true
-          ~stop:(fun other -> is_kept other || is_outer other)
-          ~through:internal
-      in
-      let below =
-        implied node ~forward:false ~stop:is_outer ~through:internal
-      in
-      node, Generic { above; below })
+  let above = Int.Table.create ()
+  and below = Int.Table.create () in
+  List.iter kept ~f:(fun node ->
+    Hashtbl.set
+      above
+      ~key:node.id
+      ~data:
+        (implied
+           node
+           ~forward:true
+           ~stop:(fun other -> is_kept other || is_outer other)
+           ~through:internal);
+    Hashtbl.set
+      below
+      ~key:node.id
+      ~data:(implied node ~forward:false ~stop:is_outer ~through:internal));
+  let find table node =
+    Hashtbl.find table node.id |> Option.value ~default:[]
   in
-  List.iter states ~f:(fun (node, state) -> node.state <- state)
+  (* The constraints [n <= m(other)] from [n], in the scheme and between outer
+     nodes, except [excluding]. *)
+  let steps n ~excluding =
+    let keep c = not (phys_equal c excluding) in
+    if is_kept n
+    then
+      List.filter_map (find above n) ~f:(fun c ->
+        Option.some_if (keep c) (c.other, c.implied_morphism))
+    else if is_outer n
+    then
+      List.filter_map n.succ ~f:(fun edge ->
+        Option.some_if (is_outer edge.hi) (edge.hi, edge.morphism))
+      @ List.concat_map kept ~f:(fun y ->
+        List.filter_map (find below y) ~f:(fun c ->
+          Option.some_if (keep c && phys_equal c.other n) (y, c.implied_morphism)))
+    else []
+  in
+  (* Whether [src <= m(dst)] follows from the constraints other than
+     [excluding]. *)
+  let derivable ~excluding ~src ~dst m =
+    let visited = Int.Table.create () in
+    let rec go n acc =
+      (phys_equal n dst && Morphism.le acc m)
+      || ((not
+             (List.mem (Hashtbl.find_multi visited n.id) acc ~equal:(fun a b ->
+                Morphism.compare a b = 0)))
+          &&
+          (Hashtbl.add_multi visited ~key:n.id ~data:acc;
+           List.exists (steps n ~excluding) ~f:(fun (n', e) ->
+             go n' (Morphism.compose acc e))))
+    in
+    go src (Morphism.identity src.axis)
+  in
+  (* Drops, one at a time, the constraints the others imply. Each dropped one is
+     implied by those remaining when it is dropped, so by the final ones. *)
+  let reduce table node ~src ~dst =
+    List.iter (find table node) ~f:(fun c ->
+      if derivable ~excluding:c ~src:(src c) ~dst:(dst c) c.implied_morphism
+      then
+        Hashtbl.update table node.id ~f:(fun current ->
+          List.filter (Option.value current ~default:[]) ~f:(fun c' ->
+            not (phys_equal c c'))))
+  in
+  List.iter kept ~f:(fun x ->
+    reduce above x ~src:(fun _ -> x) ~dst:(fun c -> c.other);
+    reduce below x ~src:(fun c -> c.other) ~dst:(fun _ -> x));
+  List.iter kept ~f:(fun node ->
+    node.state <- Generic { above = find above node; below = find below node })
 ;;
 
 module Instance = struct
@@ -355,7 +382,11 @@ module Instance = struct
                  implied.path)
            in
            List.fold_result below ~init:() ~f:(fun () implied ->
-             add_edge' implied.other implied.implied_morphism copy implied.path))
+             add_edge'
+               (instantiate t implied.other)
+               implied.implied_morphism
+               copy
+               implied.path))
          |> Mode_error.ok_exn;
          copy)
   ;;

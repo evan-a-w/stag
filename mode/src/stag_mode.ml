@@ -8,3 +8,8 @@ module Error = Mode_error
 module Id_source = Id_source
 module Reason = Reason
 module Var = Var
+
+module Private = struct
+  module Morphism = Morphism
+  module Undo = Undo
+end

@@ -6,7 +6,6 @@ open! Import
 type t [@@deriving sexp_of]
 
 val create : var_id:int -> Axis.Any.t -> rank:int -> t
-val var_id : t -> int
 val lower : t -> int
 val upper : t -> int
 val is_generic : t -> bool
@@ -29,9 +28,10 @@ val default_to_lower : t -> unit
 
 val default_to_upper : t -> unit
 
-(** Makes generic the nodes of rank greater than [rank]. Each keeps the
-    constraints the graph implies between it and other such nodes or nodes of
-    rank at most [rank], through paths in other nodes. *)
+(** Makes generic the nodes in the list of rank greater than [rank]. Each keeps
+    the constraints the graph implies between it and the other such nodes or
+    nodes of rank at most [rank], through paths in the remaining nodes, which
+    stay as they are. Constraints implied by the others kept are dropped. *)
 val generalize : t list -> rank:int -> unit
 
 module Instance : sig

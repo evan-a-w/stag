@@ -15,14 +15,5 @@ type t =
       -> t
 [@@deriving sexp_of]
 
-val create
-  :  var:int
-  -> axis:Axis.Any.t
-  -> lower:int
-  -> upper:int
-  -> lower_because:Reason.t list
-  -> upper_because:Reason.t list
-  -> t
-
 (** Raises on [Error]: for constraints that cannot fail. *)
 val ok_exn : (unit, t) Result.t -> unit

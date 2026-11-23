@@ -295,6 +295,11 @@ which is always sound since the body was checked for every mode within its
 bounds. A function is compiled once per distinct assignment of its relevant
 variables, so instances differing only in irrelevant modes share code.
 
+A scheme only copies the mode variables it keeps, not the internal ones of
+the body (such as an allocation site's locality). So the monomorphiser keeps
+each definition's body mode constraints and re-solves them per instance,
+rather than relying on scheme instantiation.
+
 ## Pipeline
 
 ```
