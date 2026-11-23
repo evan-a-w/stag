@@ -641,7 +641,8 @@ let function_type
         @ [ ( res_mode
             , match Source.Expr.view body with
               | Fun _ -> Scope.arrow_mode scope
-              | _ -> Mode_rules.Function.result_curry (Scope.modes scope) ~loc )
+              | _ -> Mode_rules.Function.result_curry (Scope.modes scope) ~loc
+            )
           ]
     in
     List.fold_right

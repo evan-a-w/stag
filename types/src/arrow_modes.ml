@@ -52,7 +52,14 @@ let side_var ids ~rank : Side.t -> Mode.Var.t = function
 
 let reason = Mode.Reason.create "the function types are unified"
 
-let equate_side ids (side1 : Side.t) (side2 : Side.t) =
+let curry_reason =
+  Mode.Reason.create
+    "the function types are unified, including whether a call giving their \
+     results arguments needs them to outlive its region, which types don't \
+     print"
+;;
+
+let equate_side ids (side1 : Side.t) (side2 : Side.t) ~reason =
   match side1, side2 with
   | Fixed const1, Fixed const2 when Mode.Const.equal const1 const2 -> Ok ()
   | _ ->
@@ -63,9 +70,9 @@ let equate_side ids (side1 : Side.t) (side2 : Side.t) =
 ;;
 
 let equate ids t1 t2 =
-  let%bind.Result () = equate_side ids t1.arg t2.arg in
-  let%bind.Result () = equate_side ids t1.res t2.res in
-  equate_side ids t1.curry t2.curry
+  let%bind.Result () = equate_side ids t1.arg t2.arg ~reason in
+  let%bind.Result () = equate_side ids t1.res t2.res ~reason in
+  equate_side ids t1.curry t2.curry ~reason:curry_reason
 ;;
 
 let iter_side (side : Side.t) ~(local_ f) =
@@ -89,7 +96,7 @@ let exists t ~(local_ f) =
     | Var var -> f var
     | Fixed _ -> false
   in
-  side t.arg || side t.res || side t.curry [@nontail]
+  side t.arg || side t.res || (side t.curry [@nontail])
 ;;
 
 let map_side (side : Side.t) ~f : Side.t =

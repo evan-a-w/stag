@@ -252,23 +252,25 @@ module Annotation_vars = struct
 end
 
 module Mode_atoms = struct
-  (* The constant of a declaration's arrow: the axes not written are the
-     default's, but a [const] one is [static]. Only the stage axis is checked so
-     far: the others are left to their default. *)
-  let declared (atoms : Syntax.Mode_expr.Atom.t list) =
-    let default = Arrow_modes.default_const in
+  (* The constant of a declaration's arrow: the axes not written are
+     [default]'s, but a [const] one is [static]. Provenance isn't checked so
+     far. *)
+  let declared ~(default : Mode.Const.t) (atoms : Syntax.Mode_expr.Atom.t list) =
     let const : Mode.Const.t =
       List.fold atoms ~init:default ~f:(fun const atom ->
         match atom with
         | Const -> { const with stage = Const; provenance = Static }
         | Portable -> { const with stage = Portable }
         | Nonportable -> { const with stage = Nonportable }
-        | Static | Gc | Unknown | Global | Regional | Local -> const)
+        | Global -> { const with locality = Global }
+        | Regional -> { const with locality = Regional }
+        | Local -> { const with locality = Local }
+        | Static | Gc | Unknown -> const)
     in
     const
   ;;
 
-  (* Fixes the axes written, of those checked so far (stage). *)
+  (* Fixes the axes written, of those checked so far (not provenance). *)
   let constrain var (atoms : Syntax.Mode_expr.Atom.t list) ~loc =
     let reason =
       Mode.Reason.create
@@ -290,7 +292,10 @@ module Mode_atoms = struct
         | Const -> fix Mode.Axis.Stage Mode.Stage.Const
         | Portable -> fix Stage Portable
         | Nonportable -> fix Stage Nonportable
-        | Static | Gc | Unknown | Global | Regional | Local -> Ok ())
+        | Global -> fix Locality Global
+        | Regional -> fix Locality Regional
+        | Local -> fix Locality Local
+        | Static | Gc | Unknown -> Ok ())
     |> Result.map_error ~f:(fun (_ : Mode.Error.t) ->
       Typecheck_error.create ~loc (Invalid_mode "its modes are inconsistent"))
   ;;
@@ -332,9 +337,10 @@ module Vars = struct
 
   (* An arrow side written without a mode: in an annotation, any, so as not to
      restrict the modes of what it annotates; in a declaration, the default. *)
-  let unannotated_side : t -> Arrow_modes.Side.t = function
+  let unannotated_side t ~default : Arrow_modes.Side.t =
+    match t with
     | Annotation vars -> Var (Annotation_vars.fresh_mode vars)
-    | Params _ -> Fixed Arrow_modes.default_const
+    | Params _ -> Fixed default
   ;;
 
   let unannotated_curry : t -> Arrow_modes.Side.t = function
@@ -342,7 +348,7 @@ module Vars = struct
     | Params _ -> Arrow_modes.default_curry
   ;;
 
-  let mode_side t ({ txt; loc } : Syntax.Mode_expr.t)
+  let mode_side t ({ txt; loc } : Syntax.Mode_expr.t) ~default
     : (Arrow_modes.Side.t, Typecheck_error.t) Result.t
     =
     match t, txt with
@@ -353,7 +359,7 @@ module Vars = struct
       let%map.Result () = Mode_atoms.constrain var atoms ~loc in
       Arrow_modes.Side.Var var
     | Params _, Atoms atoms ->
-      Ok (Arrow_modes.Side.Fixed (Mode_atoms.declared atoms))
+      Ok (Arrow_modes.Side.Fixed (Mode_atoms.declared atoms ~default))
   ;;
 
   (* [lower <= upper] between variables, or bounding a variable by the atoms: on
@@ -440,7 +446,14 @@ let map_result xs ~f =
 
 (* Each elaborates to the type and the syntax with each type it names by its
    canonical name ([Resolved]), so that it names the same types wherever it is. *)
-let rec elaborate' t module_ vars ~splices ~expansions (expr : Type_expr.t)
+let rec elaborate'
+  ?(curried = Mode.Locality.Global)
+  t
+  module_
+  vars
+  ~splices
+  ~expansions
+  (expr : Type_expr.t)
   : (Type.ty * Type_expr.t, Typecheck_error.t) Result.t
   =
   let elaborate = elaborate' t module_ vars ~splices ~expansions in
@@ -456,18 +469,30 @@ let rec elaborate' t module_ vars ~splices ~expansions (expr : Type_expr.t)
     | Con (path, args) ->
       elaborate_con t module_ vars ~splices ~expansions path args ~loc
     | Arrow (ty1, ty2) ->
-      let side (ty : Type_expr.t) =
+      let side (ty : Type_expr.t) ~default ~elaborate =
         match ty.txt with
         | Moded (inner, mode) ->
           let%bind.Result elaborated, syntax = elaborate inner in
-          let%map.Result side = Vars.mode_side vars mode in
+          let%map.Result side = Vars.mode_side vars mode ~default in
           elaborated, side, { ty with txt = Type_expr.Moded (syntax, mode) }
         | _ ->
           let%map.Result elaborated, syntax = elaborate ty in
-          elaborated, Vars.unannotated_side vars, syntax
+          elaborated, Vars.unannotated_side vars ~default, syntax
       in
-      let%bind.Result ty1, side1, syntax1 = side ty1 in
-      let%map.Result ty2, side2, syntax2 = side ty2 in
+      let default = Arrow_modes.default_const in
+      let%bind.Result ty1, side1, syntax1 = side ty1 ~default ~elaborate in
+      (* A curried declaration's partial applications hold its arguments so far,
+         so are as local as they are, as in OxCaml. *)
+      let%map.Result ty2, side2, syntax2 =
+        match ty2.txt, side1 with
+        | Arrow _, Fixed { locality; _ } ->
+          let curried = Mode.Locality.join curried locality in
+          side
+            ty2
+            ~default:{ default with locality = curried }
+            ~elaborate:(elaborate' ~curried t module_ vars ~splices ~expansions)
+        | _ -> side ty2 ~default ~elaborate
+      in
       ( Type.TArrow
           ( ty1
           , ty2
