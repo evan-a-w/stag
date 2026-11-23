@@ -1396,9 +1396,13 @@ module Printer = struct
       | None -> []
       | Some (_, _, constraints) -> Queue.to_list constraints
     in
-    match bounds t @ modes with
+    (match bounds t with
+     | [] -> ""
+     | bounds -> " where " ^ String.concat ~sep:", " bounds)
+    ^
+    match modes with
     | [] -> ""
-    | bounds -> " where " ^ String.concat ~sep:", " bounds
+    | modes -> " with " ^ String.concat ~sep:" and " modes
   ;;
 end
 

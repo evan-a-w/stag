@@ -167,12 +167,13 @@ module Scope = struct
   ;;
 end
 
-let rec lines ~of_prelude enclosing : Item.t -> _ =
+let rec lines ~of_prelude ~modes enclosing : Item.t -> _ =
   let scope = List.hd_exn enclosing in
   let line f =
     let printer =
       Type.Printer.create
         ~type_name:(Scope.relative_name ~of_prelude enclosing)
+        ~modes
         ()
     in
     let line = f printer in
@@ -196,15 +197,15 @@ let rec lines ~of_prelude enclosing : Item.t -> _ =
     let enclosing = Scope.create (scope.path @ [ name ]) items :: enclosing in
     (sprintf "module %s : sig" name
      :: List.concat_map items ~f:(fun item ->
-       List.map (lines ~of_prelude enclosing item) ~f:(fun line -> "  " ^ line))
-    )
+       List.map (lines ~of_prelude ~modes enclosing item) ~f:(fun line ->
+         "  " ^ line)))
     @ [ "end" ]
 ;;
 
 type t = Item.t list [@@deriving sexp_of]
 
-let to_string_hum ?(of_prelude = false) t =
-  List.concat_map t ~f:(lines ~of_prelude [ Scope.create [] t ])
+let to_string_hum ?(of_prelude = false) ?(modes = false) t =
+  List.concat_map t ~f:(lines ~of_prelude ~modes [ Scope.create [] t ])
   |> List.map ~f:(fun line -> line ^ "\n")
   |> String.concat
 ;;

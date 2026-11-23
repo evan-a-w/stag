@@ -267,10 +267,10 @@ module Printer : sig
 
   (** [type_name] renders the canonical name of a type constructor: by default
       as is, except the prelude's, which are as within the prelude
-      ([Prelude_path.to_string_hum]). *)
-  (** With [modes], the mode variables of arrows are named, and the constraints
-      between them listed by [where]; otherwise only the modes of arrows fixed
-      to other than a declaration's default are. *)
+      ([Prelude_path.to_string_hum]). With [modes], the mode variables of arrows
+      are named, and the constraints between them listed by [where] (as
+      [with 'm0 <= 'm1]); otherwise only the modes of arrows fixed to other than
+      a declaration's default are. *)
   val create : ?type_name:(string -> string) -> ?modes:bool -> unit -> t
 
   val ty : t -> ty -> string

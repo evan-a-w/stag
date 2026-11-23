@@ -76,5 +76,6 @@ type t = Item.t list [@@deriving sexp_of]
     [.], which stands for the root: [.t], [.M.t].
 
     With [~of_prelude], [t] is the prelude's, so its names are named as the
-    program's are, relative to its root. *)
-val to_string_hum : ?of_prelude:bool -> t -> string
+    program's are, relative to its root. With [~modes], as
+    [Type.Printer.create ~modes]. *)
+val to_string_hum : ?of_prelude:bool -> ?modes:bool -> t -> string
