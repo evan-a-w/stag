@@ -17,42 +17,33 @@ struct
 end
 
 module Stage = struct
-  module T = struct
-    type t =
-      | Const
-      | Portable
-      | Nonportable
-    [@@deriving sexp, compare, equal, enumerate]
-  end
+  type t =
+    | Const
+    | Portable
+    | Nonportable
+  [@@deriving sexp, compare, equal, enumerate]
 
-  include T
-  include Make_chain (T)
+  include functor Make_chain
 end
 
 module Provenance = struct
-  module T = struct
-    type t =
-      | Static
-      | Gc
-      | Unknown
-    [@@deriving sexp, compare, equal, enumerate]
-  end
+  type t =
+    | Static
+    | Gc
+    | Unknown
+  [@@deriving sexp, compare, equal, enumerate]
 
-  include T
-  include Make_chain (T)
+  include functor Make_chain
 end
 
 module Locality = struct
-  module T = struct
-    type t =
-      | Global
-      | Regional
-      | Local
-    [@@deriving sexp, compare, equal, enumerate]
-  end
+  type t =
+    | Global
+    | Regional
+    | Local
+  [@@deriving sexp, compare, equal, enumerate]
 
-  include T
-  include Make_chain (T)
+  include functor Make_chain
 end
 
 type 'a t =

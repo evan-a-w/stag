@@ -1,17 +1,14 @@
 open! Import
 
 module Span = struct
-  module T = struct
-    type t =
-      { file : Loc.File.t
-      ; start : int
-      ; stop : int
-      }
-    [@@deriving compare, equal, hash, sexp_of]
-  end
+  type t =
+    { file : Loc.File.t
+    ; start : int
+    ; stop : int
+    }
+  [@@deriving compare, equal, hash, sexp_of]
 
-  include T
-  include Hashable.Make_plain (T)
+  include functor Hashable.Make_plain
 
   let of_loc (loc : Loc.t) =
     { file = loc.file; start = loc.start.#offset; stop = loc.stop.#offset }
