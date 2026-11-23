@@ -62,16 +62,6 @@ val evaluate
   -> (Expected.t -> 'a)
   -> 'a * Mode.Var.t
 
-(** Bounds [mode] by the annotation on the axes it names; with [exact], fixes it
-    to it. [var] is the mode an annotation variable stands for. *)
-val annotate
-  :  ?exact:bool
-  -> Ctx.t
-  -> Mode.Var.t
-  -> Syntax.Mode_expr.t option
-  -> var:(string -> Mode.Var.t)
-  -> unit
-
 (** A fresh mode fixed to the annotation on the axes it names. *)
 val annotated
   :  Ctx.t
@@ -112,7 +102,7 @@ val project
 
 (** The mode of a variable: only these make one. *)
 module Binding : sig
-  type t = private Mode.Var.t [@@deriving sexp_of]
+  type t = Binding.t [@@deriving sexp_of]
 
   (** Bound by [let x @ annot = e], [e] being of [mode]: the annotation's, on
       the axes it names, else [e]'s. *)
@@ -236,7 +226,7 @@ val apply
 val assign
   :  Ctx.t
   -> Expected.t
-  -> held:Mode.Var.t option
+  -> held:Binding.t option
   -> crossed:Env.Lock.t list
   -> ty:Type.ty
   -> name:string

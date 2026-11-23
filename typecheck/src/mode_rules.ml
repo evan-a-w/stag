@@ -199,11 +199,13 @@ let initializes ?ty ctx ~value ~held ~name ~loc =
 ;;
 
 module Binding = struct
-  type t = Mode.Var.t [@@deriving sexp_of]
+  type t = Binding.t [@@deriving sexp_of]
+
+  let of_mode = Binding.of_mode
 
   let value ctx mode (annot : Syntax.Mode_expr.t option) ~var =
     match annot with
-    | None -> mode
+    | None -> Binding.of_mode mode
     | Some { txt; loc } ->
       let bound = Ctx.fresh ctx in
       let reason = reason ~loc "it is bound by an annotated let" in
@@ -224,10 +226,10 @@ module Binding = struct
         ~f:(fun (T axis as any) ->
           if not (List.mem named any ~equal:Mode.Axis.Any.equal)
           then Ctx.add ctx ~loc (Mode.Var.submode_on bound mode axis reason));
-      bound
+      Binding.of_mode bound
   ;;
 
-  let closure closure = closure
+  let closure = Binding.of_mode
 
   let defining ctx (expected : Expected.t) ~name ~loc =
     let own =
@@ -244,7 +246,7 @@ module Binding = struct
          expected.mode
          own
          (reason ~loc (sprintf "it defines %s" name)));
-    own
+    Binding.of_mode own
   ;;
 
   let mutable_ ?ty ctx ~value annot ~var ~name ~loc =
@@ -254,12 +256,12 @@ module Binding = struct
     let cell =
       stage_at_least ctx Nonportable ~loc ~why:(sprintf "%s is mutable" name)
     in
-    cell, held
+    Binding.of_mode cell, Binding.of_mode held
   ;;
 
   let project ctx ~block (modality : Modality.t) ~loc =
     match modality with
-    | Id -> block
+    | Id -> Binding.of_mode block
     | Global ->
       let global = Ctx.fresh ctx in
       let reason = reason ~loc "it is held by a [global_] field" in
@@ -269,15 +271,16 @@ module Binding = struct
         (Mode.Var.submode ~locality:Mode.Locality_map.ignore block global reason
          |> Result.bind ~f:(fun () ->
            Mode.Var.at_most global Locality Global reason));
-      global
+      Binding.of_mode global
   ;;
 
   let being_checked ctx ~name ~loc =
-    stage_at_least
-      ctx
-      Nonportable
-      ~loc
-      ~why:(sprintf "%s is being checked" name)
+    Binding.of_mode
+      (stage_at_least
+         ctx
+         Nonportable
+         ~loc
+         ~why:(sprintf "%s is being checked" name))
   ;;
 end
 
@@ -355,7 +358,7 @@ module Function = struct
          arg_mode
          mode
          (reason ~loc (sprintf "%s is passed to the function" name)));
-    mode
+    Binding.of_mode mode
   ;;
 
   let result_curry ctx =
@@ -537,6 +540,7 @@ let assign ctx expected ~held ~crossed ~ty ~name ~loc f =
   let result = f value in
   evaluated ctx expected value.mode ~loc ~why:"it is assigned";
   Option.iter held ~f:(fun held ->
+    let held = (held : Binding.t :> Mode.Var.t) in
     (* A closure may be called from a region shorter than the variable's, so may
        only store what outlives every region. *)
     if List.exists crossed ~f:is_closure
@@ -598,7 +602,8 @@ let use
   ~mutable_captured_in_exclave
   =
   let reason what = reason ~loc (sprintf what name) in
-  let held = entry.held in
+  let held = (entry.held :> Mode.Var.t option) in
+  let mode = (entry.mode :> Mode.Var.t) in
   let mutable_ = Option.is_some held in
   let crossing = ctx.Ctx.crossing entry.scheme in
   let crossed = Env.Entry.crossed entry ~locks in
@@ -618,7 +623,7 @@ let use
         (Mode.Var.submode
            ~crossing
            ~locality:(locality_map outside)
-           (Option.value held ~default:entry.mode)
+           (Option.value held ~default:mode)
            ended
            (reason "%s is used in an [exclave_]")
          |> Result.bind ~f:(fun () ->
@@ -639,7 +644,7 @@ let use
         ~loc
         (Mode.Var.submode
            ?crossing:(if mutable_ then None else Some crossing)
-           entry.mode
+           mode
            closure
            (reason "%s is captured by a closure"));
       Option.iter held ~f:(fun held ->
@@ -652,7 +657,7 @@ let use
              closure
              (reason "%s holds it, and is captured by a closure")));
       (* A closure capturing itself is as portable as anything else it captures. *)
-      if entry.defining && Mode.Var.id closure <> Mode.Var.id entry.mode
+      if entry.defining && Mode.Var.id closure <> Mode.Var.id mode
       then
         Ctx.add
           ctx
@@ -669,7 +674,7 @@ let use
         ~loc
         (Mode.Var.at_most
            ?crossing:(if mutable_ then None else Some crossing)
-           entry.mode
+           mode
            Stage
            Portable
            (reason "%s is used in a quote"));
@@ -680,7 +685,7 @@ let use
           ~loc
           (Mode.Var.submode
              ?crossing:(if mutable_ then None else Some crossing)
-             entry.mode
+             mode
              code
              (reason "%s is embedded in a quote")));
   let locality =
@@ -701,12 +706,12 @@ let use
     joins
       ctx
       expected
-      entry.mode
+      mode
       ~crossing:{ crossing with stage = true; provenance = true }
       ~locality
       ~loc
       ~why
-  | None -> joins ctx expected entry.mode ~crossing ~locality ~loc ~why
+  | None -> joins ctx expected mode ~crossing ~locality ~loc ~why
 ;;
 
 let use_free ctx expected ~locks ~loc ~why =
@@ -737,7 +742,7 @@ module Splice = struct
     let (sub : Typed.Expr.t), mode =
       evaluate ctx expected ~loc ~why:"it is substituted into spliced code" f
     in
-    sub, mode
+    sub, Binding.of_mode mode
   ;;
 end
 
@@ -769,17 +774,21 @@ module Toplevel = struct
   ;;
 
   let outlives ctx t ~ty ~name ~loc =
-    List.iter (t.value :: t.binding :: Option.to_list t.held) ~f:(fun mode ->
-      Ctx.add
-        ctx
-        ~loc
-        (locality_at_most
-           ctx
-           mode
-           ~ty
-           Global
-           ~loc
-           ~why:(sprintf "%s is a toplevel" name)))
+    List.iter
+      (t.value
+       :: (t.binding :> Mode.Var.t)
+       :: (Option.to_list t.held :> Mode.Var.t list))
+      ~f:(fun mode ->
+        Ctx.add
+          ctx
+          ~loc
+          (locality_at_most
+             ctx
+             mode
+             ~ty
+             Global
+             ~loc
+             ~why:(sprintf "%s is a toplevel" name)))
   ;;
 end
 

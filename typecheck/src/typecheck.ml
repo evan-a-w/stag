@@ -75,12 +75,11 @@ module Toplevel = struct
           { index : int
           ; ty : Type.ty
           ; args : Typed.Ident.t list
-          ; mode : Mode_rules.Binding.t
+          ; mode : Binding.t
           ; init_mode : Mode.Var.t
           (** Of its initializer: its [mode], but for a mutable one, whose
               variable is referred to by symbol. *)
-          ; held : Mode_rules.Binding.t option
-          (** Of the values a mutable one holds. *)
+          ; held : Binding.t option (** Of the values a mutable one holds. *)
           ; mutable body : Typed.Expr.t option
           ; mutable recursive : bool
           }
@@ -355,17 +354,17 @@ module Scope = struct
 
   let entry
     ?(defining = false)
-    ?(held : Mode_rules.Binding.t option)
+    ?(held : Binding.t option)
     t
     ~ident
     ~scheme
-    ~(mode : Mode_rules.Binding.t)
+    ~(mode : Binding.t)
     =
     { Env.Entry.scheme
     ; level = t.level
     ; quote_id = quote_id t
-    ; mode :> Mode.Var.t
-    ; held :> Mode.Var.t option
+    ; mode
+    ; held
     ; locks = t.locks
     ; binder = Local ident
     ; defining
@@ -517,7 +516,9 @@ module Resolution = struct
       (entry.level = scope.level
        && [%equal: int option] entry.quote_id (Scope.quote_id scope))
       || (entry.level <= scope.level
-          && ((Mode.Stage.le (Scope.known_stage scope entry.mode) Portable
+          && ((Mode.Stage.le
+                 (Scope.known_stage scope (entry.mode :> Mode.Var.t))
+                 Portable
                && not entry.defining)
               || is_mutable_toplevel entry))
     in
@@ -1658,10 +1659,11 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
         <- Done
              { entry =
                  Env.Entry.toplevel
+                   ~defining:false
                    ~ident:member.ident
                    ~scheme:ty
-                   ~mode:(mode :> Mode.Var.t)
-                   ~held:(held :> Mode.Var.t option)
+                   ~mode
+                   ~held
              ; typed
              ; failed
              ; runtime_only
@@ -1849,12 +1851,13 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
     if failed then scope.scc.failed <- true;
     Ok (at_scope_level entry)
   | In_progress in_progress ->
-    let entry =
+    let entry ?(defining = false) mode =
       Env.Entry.toplevel
+        ~defining
         ~ident:toplevel.ident
         ~scheme:in_progress.ty
-        ~mode:(in_progress.mode :> Mode.Var.t)
-        ~held:(in_progress.held :> Mode.Var.t option)
+        ~mode
+        ~held:in_progress.held
     in
     (match scope.quote with
      | Some _ when not toplevel.mut ->
@@ -1862,14 +1865,11 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
           quote's value doesn't depend on [toplevel]. *)
        Ok
          (at_scope_level
-            { entry with
-              mode =
-                (Mode_rules.Binding.being_checked
-                   (Scope.modes scope)
-                   ~name:toplevel.ident.name
-                   ~loc
-                  :> Mode.Var.t)
-            })
+            (entry
+               (Mode_rules.Binding.being_checked
+                  (Scope.modes scope)
+                  ~name:toplevel.ident.name
+                  ~loc)))
      | None when scope.level < 0 ->
        (match Stack.top scope.program.splice_starts with
         | Some start when in_progress.index < start || scope.scc.lowlink < start
@@ -1884,7 +1884,10 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
           symbol), so its mode is already known. *)
        in_progress.recursive <- true;
        scope.scc.lowlink <- Int.min scope.scc.lowlink in_progress.index;
-       Ok { entry with defining = not (Toplevel.is_function toplevel) })
+       Ok
+         (entry
+            ~defining:(not (Toplevel.is_function toplevel))
+            in_progress.mode))
   | Unchecked ->
     let scc = check_toplevel t scope.program toplevel in
     scope.scc.lowlink <- Int.min scope.scc.lowlink scc.lowlink;
@@ -2467,7 +2470,7 @@ and expr_type
          | Bound (Toplevel ident) | Persistent (Toplevel ident) ->
            ( ident.name
            , ( (match (Program_env.toplevel scope.program ident.name).state with
-                | In_progress { held; _ } -> (held :> Mode.Var.t option)
+                | In_progress { held; _ } -> held
                 | Done { entry; _ } -> entry.held
                 | Unchecked ->
                   raise_s
@@ -2615,7 +2618,7 @@ and expr_type
        in
        (match substitutions () with
         | Error error -> fail error ~children:[ code ]
-        | Ok (subs, (_ : Mode_rules.Binding.t String.Map.t)) ->
+        | Ok (subs, (_ : Binding.t String.Map.t)) ->
           node (Splice { code; subs }) inner)
      | None ->
        let code =
@@ -4065,7 +4068,12 @@ let rec signature (program_env : Program_env.t) module_ ~complete =
         let toplevel = Program_env.toplevel program_env (canonical_name name) in
         (match toplevel.state with
          | Done { entry = { scheme; mode; _ }; _ } ->
-           Some (Value { name; scheme; stage = (Mode.Var.lower mode).stage })
+           Some
+             (Value
+                { name
+                ; scheme
+                ; stage = (Mode.Var.lower (mode :> Mode.Var.t)).stage
+                })
          | Unchecked | In_progress _ ->
            missing "toplevel" [%sexp (toplevel : Toplevel.t)])
       | Type decl ->
