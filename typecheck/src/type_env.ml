@@ -1185,6 +1185,10 @@ let global_constructor_args t name =
 let pointer_free t ty =
   let visiting = String.Hash_set.create () in
   let visiting_ids = Int.Hash_set.create () in
+  (* Shared aliases and nodes are visited once: a DAG of them is linear. *)
+  let nominals = Hashtbl.Poly.create () in
+  let nodes = Int.Table.create () in
+  let links = Int.Table.create () in
   let visit id ~f =
     (not (Hash_set.mem visiting_ids id))
     &&
@@ -1193,12 +1197,23 @@ let pointer_free t ty =
      Hash_set.remove visiting_ids id;
      result)
   in
+  let node ?(table = nodes) params id ~f =
+    if not (Map.is_empty params)
+    then visit id ~f
+    else (
+      match Hashtbl.find table id with
+      | Some result -> result
+      | None ->
+        let result = visit id ~f in
+        Hashtbl.set table ~key:id ~data:result;
+        result)
+  in
   let rec ty_ params (ty : Type.ty) =
     match ty with
     | TVar { id; state = Generic; _ } when Map.mem params id ->
       Map.find_exn params id
     | TVar { id; state = Link target; _ } ->
-      visit id ~f:(fun () -> ty_ params target)
+      node ~table:links params id ~f:(fun () -> ty_ params target)
     | _ ->
       (match Type.canonical_ty ty with
        | TVar _ | TArrow _ | TCode _ -> false
@@ -1206,13 +1221,13 @@ let pointer_free t ty =
        | TCon (name, args) -> nominal name (List.map args ~f:(arg params))
        | TTuple tys -> List.for_all tys ~f:(ty_ params)
        | TRecord { id; row } | TVariant { id; row } ->
-         visit id ~f:(fun () -> row_ params row))
+         node params id ~f:(fun () -> row_ params row))
   and row_ params (row : Type.row) =
     match row with
     | RVar { id; state = Generic; _ } when Map.mem params id ->
       Map.find_exn params id
     | RVar { id; state = Link target; _ } ->
-      visit id ~f:(fun () -> row_ params target)
+      node ~table:links params id ~f:(fun () -> row_ params target)
     | _ ->
       (match Type.canonical_row row with
        | REmpty -> true
@@ -1226,10 +1241,26 @@ let pointer_free t ty =
     | ATy entry -> ty_ params entry
     | ARow entry -> row_ params entry
   and nominal name args =
+    match Hashtbl.find nominals (name, args) with
+    | Some result -> result
+    | None ->
+      let result = nominal' name args in
+      if not (Hash_set.mem visiting name)
+      then Hashtbl.set nominals ~key:(name, args) ~data:result;
+      result
+  and nominal' name args =
     (not (Hash_set.mem visiting name))
     &&
-    match check t name with
-    | Error _ -> false
+    match
+      (* A type computed by a splice isn't forced: that may need what is being
+         checked. *)
+      match Hashtbl.find t.types name with
+      | None -> Error ()
+      | Some { checked = Some checked; _ } -> Ok checked
+      | Some { decl = { kind = Splice _; _ }; _ } -> Error ()
+      | Some _ -> Result.map_error (check t name) ~f:ignore
+    with
+    | Error () -> false
     | Ok decl ->
       Hash_set.add visiting name;
       let params =

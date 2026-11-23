@@ -2475,34 +2475,18 @@ and expr_type
     node (Marked (Nontail, inner)) inner.ty
   | Marked (Stack, inner) ->
     let inner_scope = Scope.with_sink scope in
-    Scope.add_mode
-      scope
-      ~loc
-      (Mode.Var.at_least
-         inner_scope.sink
-         Locality
-         Local
-         (Mode.Reason.create ~loc "it is allocated by [stack_]"));
     let inner = expr_type ?expected ~hint t inner_scope ~expr:inner in
-    Scope.joins
-      scope
-      inner_scope.sink
-      ~crossing:(Scope.crossing scope inner.ty)
-      ~loc
-      ~why:"it is part of the value";
     let rec is_allocation (expr : Typed.Expr.t) =
+      (* Records, tuples and variants are values, which allocate only through
+         their parts. *)
       match expr.desc with
-      | Tuple _
-      | Construct _
-      | Record _
-      | Record_update _
-      | Poly_record _
-      | Poly_extend _
-      | Poly_update _
-      | Poly_variant _
-      | Fun _
-      | Quote _
-      | Error _ -> true
+      | Fun _ | Quote _ | Error _ -> true
+      | Tuple parts | Construct (_, parts) -> List.exists parts ~f:is_allocation
+      | Record fields | Record_update (_, fields) ->
+        List.exists fields ~f:(fun (_, part) -> is_allocation part)
+      | Poly_record fields | Poly_update (_, fields) | Poly_extend (fields, _) ->
+        List.exists fields ~f:(fun (_, part) -> is_allocation part)
+      | Poly_variant (_, part) -> Option.exists part ~f:is_allocation
       | App ({ desc = Var (Intrinsic Ptr_make); _ }, _) -> true
       | App
           ( { desc = Var (Bound (Toplevel ident) | Persistent (Toplevel ident))
@@ -2513,7 +2497,22 @@ and expr_type
       | _ -> false
     in
     if is_allocation inner
-    then node (Marked (Stack, inner)) inner.ty
+    then (
+      Scope.add_mode
+        scope
+        ~loc
+        (Mode.Var.at_least
+           inner_scope.sink
+           Locality
+           Local
+           (Mode.Reason.create ~loc "it is allocated by [stack_]"));
+      Scope.joins
+        scope
+        inner_scope.sink
+        ~crossing:(Scope.crossing scope inner.ty)
+        ~loc
+        ~why:"it is part of the value";
+      node (Marked (Stack, inner)) inner.ty)
     else
       fail
         ~children:[ inner ]

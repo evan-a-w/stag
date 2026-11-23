@@ -466,7 +466,8 @@ let rec kind_message (kind : Kind.t) ~show_type =
      in tail position"
   | Stack_not_on_allocation ->
     "[stack_] allocates its value on the stack, so must be on an allocation: a \
-     tuple, record, constructor, closure, quote or [Ptr.make e]"
+     closure, a quote, [Ptr.make e], or a record, tuple or constructor holding \
+     one (records, tuples and constructors are values)"
   | Mutable_captured_in_exclave name ->
     sprintf
       "The mutable variable %s is captured by a closure in an [exclave_], but \
