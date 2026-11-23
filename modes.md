@@ -55,7 +55,7 @@ Applied when the type is known where the constraint arises.
 | literal                    | const                                       |
 | variable                   | the binding's mode                          |
 | function (`let f x = ...`) | at least the join of the modes it captures |
-| application `f x`          | nonportable (the arrow's return mode, from D) |
+| application `f x`          | the arrow's result mode, at least portable |
 | `e.*`, assignment          | nonportable                                 |
 | match                      | join of the scrutinee and the arms; its pattern variables have the scrutinee's mode (exception cases: nonportable) |
 | splice in a quote          | nonportable (the code's mode is not known)  |
@@ -64,10 +64,60 @@ Applied when the type is known where the constraint arises.
 | `let x = e1 in e2`         | join of `e1` and `e2`                       |
 | quote `<e>`                | join of the values it captures from outer levels (its free variables are resolved at the splice, so don't count) |
 
-Application is never `const` as arrow return modes are never `const` (for
-now; arrows carry argument and return modes, `'a @ 'm -> 'b @ 'n`). A
-Rust-style `const fn` could later be an arrow whose result is `const` when its
-arguments are.
+See [Arrow modes](#arrow-modes).
+
+## Arrow modes
+
+Arrows carry the modes of their argument and result, `'a @ 'm -> 'b @ 'n`; a
+closure's own mode is the mode of the arrow value, like any value's. Only the
+stage axis is constrained so far.
+
+- **Functions.** Each parameter has the arrow's argument mode, and the body's
+  value is at most its result mode. The closure of a partial application holds
+  the closure and the arguments given so far.
+- **Application.** The argument is at most the arrow's argument mode, and the
+  result has the arrow's result mode, joined with `portable`: calling runs
+  code, so an application is never `const` (a Rust-style `const fn` could
+  later be an arrow whose result is `const` when its arguments are).
+- **Unification** equates the modes of two arrows: there is no subtyping
+  (variance) of arrow modes for now, a known limitation.
+- **Polymorphism.** Mode variables are generalised with the type variables of
+  a scheme, with the constraints between them, and copied per instance, so
+  `let apply f x = f x` works for portable and nonportable `f` alike.
+- **Annotations.** In an annotation, a side written without a mode is a fresh
+  variable, so annotating restricts no mode; `'m` names one variable across a
+  definition's annotations. In a declaration (and for builtins), it is the
+  default, `nonportable unknown global`, and a mode variable is an error.
+- **Decisions made while checking a function.** Whether a variable is
+  embedded in a quote, and whether a `let` is `const` enough to generalise,
+  can't wait for the function's uses. They take the lower bound the mode would
+  have with every mode chosen by those uses raised to its upper bound: the
+  modes of the parameters of the functions being checked, the modes within
+  their types (eg. the result of a function parameter), and those of the types
+  of toplevels not finished yet. So `let f x = .<x>.` makes `x` a free
+  variable of the quote, whatever `f` is called with, and `(x @ portable)`
+  opts into embedding it, restricting callers to portable arguments.
+
+### Printing
+
+By default, types show only fixed modes other than the default, so most
+signatures print as without modes. With modes shown
+(`Signature.to_string_hum ~modes:true`), mode variables are named `'m0`,
+`'m1`, ... and their constraints follow the type, simplified:
+
+```
+val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3
+  with 'm0 <= 'm3 and 'm2 <= 'm5 and 'm4 <= 'm1 and portable <= 'm5
+```
+
+- variables equal by their constraints (a cycle) print as one;
+- a variable fixed to a constant prints as it (`int @ const -> int @ const`);
+- constraints and bounds implied by the others are left out;
+- a variable named once and in no constraint is left out, which reads back
+  as a fresh variable.
+
+The `with` clause is also syntax for annotations (see syntax.md), so printed
+types read back as themselves.
 
 ## Locks
 
@@ -216,8 +266,8 @@ Each step is a branch stacked on the previous one.
   `persistent`, `expr_type` returns a type and a mode; closure and quote
   locks (the toplevel splice lock is left for later); generalisation decided
   by `const`; the `const_toplevels` flag. Removes `may_hold_closure` and `is_allowed_at`.
-- **D. Arrow modes and polymorphism**: arrows carry argument, return and
-  closure modes; schemes keep mode variables and their constraints; mode
+- **D. Arrow modes and polymorphism**: arrows carry argument and return
+  modes (a closure's mode is the mode of the arrow value); schemes keep mode variables and their constraints; mode
   annotations; printing that hides unconstrained and default modes.
 - **E. Locality**: regions, `local_`, `exclave_`, the tail call rule,
   `global_` fields, `Unsafe.assume_global`, mutable variables captured by

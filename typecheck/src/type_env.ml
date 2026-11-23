@@ -290,7 +290,7 @@ module Mode_atoms = struct
         | Nonportable -> fix Stage Nonportable
         | Static | Gc | Unknown | Global | Regional | Local -> Ok ())
     |> Result.map_error ~f:(fun (_ : Mode.Error.t) ->
-      Typecheck_error.create ~loc (Invalid_mode "a const value is static"))
+      Typecheck_error.create ~loc (Invalid_mode "its modes are inconsistent"))
   ;;
 end
 
@@ -398,11 +398,11 @@ module Vars = struct
   ;;
 end
 
-(* An expansion of an alias : [knot], linked to the alias's body once
-   elaborated, stands for the expansion. Each alias is expanded once per
-   (physical) arguments during one elaboration, so references to it share the
-   knot, also while it is being expanded, which closes a cycle. As the knot is a
-   [Link], traversals of the expansion's shared occurrences take it once. It is
+(* An expansion of an alias: [knot], linked to the alias's body once elaborated,
+   stands for the expansion. Each alias is expanded once per (physical)
+   arguments during one elaboration, so references to it share the knot, also
+   while it is being expanded, which closes a cycle. As the knot is a [Link],
+   traversals of the expansion's shared occurrences take it once. It is
    [Generic] until linked, but only reachable from the elaboration, which stops
    at its first error and is then dropped. *)
 module Expansion = struct

@@ -385,8 +385,8 @@ that inner code is spliced, not by the substitution, so it is an error too.
 
 The syntax of modes (see [modes.md](modes.md) and
 [semantics.md](semantics.md#modes)). Only the stage axis is checked so far:
-stage annotations on `let` bindings (`let x @ const = ...`) are upper bounds;
-other annotations are ignored, and `local_`, `exclave_` and `[@nontail]`
+stage annotations (`let x @ const = ...`, `(x @ portable)`, `int @ 'm ->
+int @ 'm`) bound modes; locality and provenance annotations are ignored, and `local_`, `exclave_` and `[@nontail]`
 evaluate as their body.
 
 A mode, after `@`, is a mode variable (`'m`, standing for every axis), or one
@@ -417,6 +417,21 @@ constructor's argument, where it would read as applying to the construction:
 `C (f x [@nontail])`, not `C (f x) [@nontail]`. `global_` is written only
 on a record field or a constructor argument; an exception's arguments are
 always global, so take no `global_`.
+
+An annotation's type may end with constraints between mode variables, or
+between a variable and a mode, joined by `and`; each relates at least one
+variable:
+
+```ocaml
+let compose : ('b @ 'n -> 'c) -> ('a -> 'b @ 'm) -> 'a -> 'c
+    with 'm <= 'n and portable <= 'm = ...
+let h (x : int @ 'm with 'm <= portable) = x
+```
+
+`with` is only in an annotation's type, never in a function type's argument or
+in a declaration. `and` is not a keyword (there is no `let ... and`), so
+following constraints it always continues them. Printed types use the same syntax, so read back as
+themselves.
 
 In reflected syntax, a binder's or variable's annotation is a
 ``Stag.Annot.t = {`ty : option[Type_expr.t]; `mode : option[Mode_expr.t]}``
