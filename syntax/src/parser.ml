@@ -86,7 +86,7 @@ let found t = t.tokens.(t.pos).token
 
 let expected t what =
   match found t with
-  | At | At_at -> fail (loc t) "`@` is reserved (for modes)"
+  | At_at -> fail (loc t) "`@@` is reserved (for modalities)"
   | token ->
     fail (loc t) (sprintf "expected %s, found %s" what (describe token))
 ;;
@@ -277,16 +277,91 @@ let starts_type : Token.t -> bool = function
   | _ -> false
 ;;
 
+(** [@ 'm] or [@ local portable], after the [@]. *)
+let mode_expr t : Mode_expr.t =
+  let start = loc t in
+  match peek t with
+  | Tyvar _ | Weak_tyvar _ ->
+    let var = tyvar t in
+    located ~loc:var.loc (Mode_expr.Var var.txt)
+  | Lident _ ->
+    let rec loop acc =
+      match peek t with
+      | Lident name ->
+        (match Mode_expr.Atom.of_string name with
+         | None ->
+           fail
+             (loc t)
+             (sprintf
+                "unknown mode `%s`, expected one of %s"
+                name
+                (String.concat
+                   ~sep:", "
+                   (List.map Mode_expr.Atom.all ~f:(fun atom ->
+                      "`" ^ Mode_expr.Atom.to_string atom ^ "`"))))
+         | Some atom ->
+           (match
+              List.find acc ~f:(fun other ->
+                Mode_expr.Axis.equal
+                  (Mode_expr.Atom.axis other)
+                  (Mode_expr.Atom.axis atom))
+            with
+            | Some other ->
+              fail
+                (loc t)
+                (sprintf
+                   "`%s` and `%s` are both %s modes"
+                   (Mode_expr.Atom.to_string other)
+                   name
+                   (Mode_expr.Axis.to_string (Mode_expr.Atom.axis atom)))
+            | None ->
+              advance t;
+              loop (atom :: acc)))
+      | _ -> List.rev acc
+    in
+    let atoms = loop [] in
+    since t start (Mode_expr.Atoms atoms)
+  | _ -> expected t "a mode like `local`, or a mode variable like `'m`"
+;;
+
+let misplaced_mode =
+  "a mode is only written on a function type's argument or result, as in `t @ \
+   local -> u`, or on an annotation, as in `(x : t @ local)`"
+;;
+
+(* A type that is not [t @ m]. *)
 let rec type_expr t : Type_expr.t =
-  let domain = type_tuple t in
+  let ty = moded_type_expr t in
+  match ty.txt with
+  | Moded (_, mode) -> fail mode.loc misplaced_mode
+  | _ -> ty
+
+(* A type, or [t @ m] that is an annotation's type and mode. *)
+and moded_type_expr t : Type_expr.t =
+  let domain = arrow_operand t in
   if is t Arrow
   then (
     advance t;
-    let codomain = type_expr t in
+    let codomain = moded_type_expr t in
     located
       ~loc:(Loc.merge domain.loc codomain.loc)
       (Type_expr.Arrow (domain, codomain)))
   else domain
+
+and arrow_operand t : Type_expr.t =
+  let ty = type_tuple t in
+  if is t At
+  then (
+    advance t;
+    let mode = mode_expr t in
+    if is t At
+    then
+      fail
+        (loc t)
+        "a type has one mode: write its modes together, as in `t @ local \
+         portable`";
+    located ~loc:(Loc.merge ty.loc mode.loc) (Type_expr.Moded (ty, mode)))
+  else ty
 
 and type_tuple t : Type_expr.t =
   let first = type_app t in
@@ -712,11 +787,51 @@ let nominal_record_ahead t =
 ;;
 
 let pattern_parameter =
-  "patterns are not allowed as parameters, only `x`, `_` or `(x : t)`; use \
-   `match`"
+  "patterns are not allowed as parameters, only `x`, `_`, `(x : t)` or `(x @ \
+   m)`; use `match`"
 ;;
 
-(** [x], [_] or [(x : t)]. *)
+let attribute_ahead t = is t Lbracket && Token.equal (peek_at t 1) At
+
+(** Parses [[@nontail]], returning its location. *)
+let nontail_attribute t =
+  let open_loc = loc t in
+  advance t;
+  advance t;
+  let name = lident t ~what:"an attribute, `nontail`" in
+  if not (String.equal name.txt "nontail")
+  then
+    fail
+      name.loc
+      (sprintf "unknown attribute `[@%s]`, only `[@nontail]` exists" name.txt);
+  close t Rbracket ~opener:Lbracket ~open_loc;
+  Loc.merge open_loc (prev_loc t)
+;;
+
+let nontail_without_application_message =
+  "`[@nontail]` is only written after an application, as in `f x [@nontail]`"
+;;
+
+let nontail_without_application t =
+  fail (nontail_attribute t) nontail_without_application_message
+;;
+
+(** [: t], [: t @ m] or [@ m], if any. *)
+let annot t : Annot.t =
+  match peek t with
+  | Colon ->
+    advance t;
+    let ty = moded_type_expr t in
+    (match ty.txt with
+     | Moded (ty, mode) -> { ty = Some ty; mode = Some mode }
+     | _ -> { ty = Some ty; mode = None })
+  | At ->
+    advance t;
+    { ty = None; mode = Some (mode_expr t) }
+  | _ -> Annot.none
+;;
+
+(** [x], [_], [(x : t)], [(x @ m)] or [(x : t @ m)]. *)
 let param t : Binding.t =
   let binder t =
     match peek t with
@@ -730,15 +845,14 @@ let param t : Binding.t =
   | Lparen ->
     let open_loc = loc t in
     (match peek_at t 1, peek_at t 2 with
-     | (Lident _ | Underscore), Colon -> ()
+     | (Lident _ | Underscore), (Colon | At) -> ()
      | _ -> fail open_loc pattern_parameter);
     advance t;
     let name = binder t in
-    expect t Colon;
-    let ty = type_expr t in
+    let annot = annot t in
     close t Rparen ~opener:Lparen ~open_loc;
-    name, Some ty
-  | _ -> binder t, None
+    name, annot
+  | _ -> binder t, Annot.none
 ;;
 
 let params t =
@@ -757,6 +871,7 @@ let rec expr ?(seq = true) t : Expr.t =
   | Let -> let_ t ~seq
   | Match -> match_ t ~seq
   | Fun -> fun_ t ~seq
+  | Local_ | Exclave_ -> region t ~seq
   | _ ->
     let first = assignment t ~seq in
     if seq && is t Semi
@@ -766,7 +881,7 @@ let rec expr ?(seq = true) t : Expr.t =
       let second = expr t in
       expr_at
         ~loc:(Loc.merge first.loc second.loc)
-        (Let (located ~loc:semi "_", [], None, first, second)))
+        (Let (located ~loc:semi "_", [], Annot.none, first, second)))
     else first
 
 and binding_name t =
@@ -778,18 +893,11 @@ and binding_name t =
     located ~loc "_"
   | _ -> lident t ~what:"a name to bind"
 
-and binding_annot t =
-  if is t Colon
-  then (
-    advance t;
-    Some (type_expr t))
-  else None
-
-(** [name params : t = e], after [let]. *)
+(** [name params : t @ m = e], after [let]. *)
 and binding t =
   let name = binding_name t in
   let params = params t in
-  let annot = binding_annot t in
+  let annot = annot t in
   expect t Equal;
   name, params, annot, expr t
 
@@ -799,7 +907,7 @@ and mut_binding t =
   let name = binding_name t in
   if not (List.is_empty (params t))
   then fail name.loc "a mutable variable has no parameters";
-  let annot = binding_annot t in
+  let annot = annot t in
   expect t Equal;
   name, annot, expr t
 
@@ -841,7 +949,8 @@ and store_target (target : Expr.t) : Expr.t -> Expr.desc =
     | _ -> false
   in
   match target.txt with
-  | Var (path, None) -> fun value -> Assign (located ~loc:target.loc path, value)
+  | Var (path, annot) when Annot.is_none annot ->
+    fun value -> Assign (located ~loc:target.loc path, value)
   | (Deref _ | Field _ | Poly_field _) when under_deref target ->
     fun value -> Store (target, value)
   | Field _ | Poly_field _ ->
@@ -912,12 +1021,25 @@ and tuple_item t ~seq : Expr.t =
   | Let -> let_ t ~seq
   | Match -> match_ t ~seq
   | Fun -> fun_ t ~seq
+  | Local_ | Exclave_ -> region t ~seq
   | _ -> construct t
+
+(** [local_ e] or [exclave_ e]. *)
+and region t ~seq : Expr.t =
+  let start = loc t in
+  let keyword = peek t in
+  advance t;
+  let body = expr t ~seq in
+  expr_at
+    ~loc:(Loc.merge start body.loc)
+    (match keyword with
+     | Exclave_ -> Exclave body
+     | _ -> Local body)
 
 (** A value in [{...}]. *)
 and entry_value t = assignment t ~seq:false
 
-and construct t : Expr.t =
+and construct ?(in_argument = false) t : Expr.t =
   let start = loc t in
   let saved = t.pos in
   match peek t with
@@ -925,9 +1047,11 @@ and construct t : Expr.t =
     (match path t ~what:"" with
      | path, true ->
        let args =
-         if starts_atom (peek t)
+         if attribute_ahead t
+         then nontail_without_application t
+         else if starts_atom (peek t)
          then (
-           let arg = construct t in
+           let arg = construct ~in_argument:true t in
            construct_args t arg ~tuple_items:(function
              | Expr.Tuple items -> Some items
              | _ -> None))
@@ -936,26 +1060,46 @@ and construct t : Expr.t =
        expr_since t start (Construct (path, args))
      | _, false ->
        t.pos <- saved;
-       app t)
+       app ~in_argument t)
   | Label tag ->
     let tag = located ~loc:start tag in
     advance t;
-    let arg = if starts_atom (peek t) then Some (construct t) else None in
+    let arg =
+      if attribute_ahead t
+      then nontail_without_application t
+      else if starts_atom (peek t)
+      then Some (construct ~in_argument:true t)
+      else None
+    in
     expr_since t start (Poly_variant (tag, arg))
   | Type ->
     advance t;
     expr_since t start (Type (type_app t))
-  | _ -> app t
+  | _ -> app ~in_argument t
 
-and app t : Expr.t =
+(* [in_argument]: [t] is a constructor's argument, which [[@nontail]] can't
+   follow, as it would read as applying to the construction. *)
+and app ?(in_argument = false) t : Expr.t =
   let rec loop (f : Expr.t) =
-    if starts_atom (peek t)
+    if starts_atom (peek t) && not (attribute_ahead t)
     then (
       let arg = splice t in
       loop (expr_at ~loc:(Loc.merge f.loc arg.loc) (Expr.App (f, arg))))
     else f
   in
-  loop (splice t)
+  let e = loop (splice t) in
+  if attribute_ahead t
+  then (
+    let attribute_loc = nontail_attribute t in
+    match e.txt with
+    | App _ when in_argument ->
+      fail
+        attribute_loc
+        "`[@nontail]` can't follow a constructor's argument: parenthesize the \
+         application, as in `C (f x [@nontail])`"
+    | App _ -> expr_since t e.loc (Nontail e)
+    | _ -> fail attribute_loc nontail_without_application_message)
+  else e
 
 and splice t : Expr.t =
   match peek t with
@@ -1046,7 +1190,7 @@ and atom t : Expr.t =
   | Lident _ | Uident _ | Root ->
     (match path t ~what:"" with
      | path, true -> expr_since t start (Construct (path, []))
-     | path, false -> expr_since t start (Var (path.txt, None)))
+     | path, false -> expr_since t start (Var (path.txt, Annot.none)))
   | Label tag ->
     advance t;
     expr_since t start (Poly_variant (located ~loc:start tag, None))
@@ -1059,17 +1203,17 @@ and atom t : Expr.t =
     else (
       let e = expr t in
       match peek t with
-      | Colon ->
+      | Colon | At ->
         (match e.txt with
-         | Var (path, None) ->
-           advance t;
-           let ty = type_expr t in
+         | Var (path, existing) when Annot.is_none existing ->
+           let annot = annot t in
            close t Rparen ~opener:Lparen ~open_loc:start;
-           expr_since t start (Var (path, Some ty))
+           expr_since t start (Var (path, annot))
          | _ ->
            fail
              e.loc
-             "type annotations are only supported on variables, as in `(x : t)`")
+             "annotations are only supported on variables, as in `(x : t)` or \
+              `(x @ m)`")
       | _ ->
         close_parens t ~open_loc:start e ~tuple_items:(function
           | Expr.Tuple items -> Some items
@@ -1191,15 +1335,40 @@ let type_param t : Type_decl.Param.t Located.t =
   | _ -> expected t "a type parameter like `'a` or `{..'r}`"
 ;;
 
-(* [parsed] is told the arguments parsed so far, as they are parsed. *)
-let constructor_args ?(parsed = ignore) t =
+(** [global_ t], with [t] parsed by [ty], or [t]. *)
+let maybe_global t ~ty : Type_expr.t =
+  match peek t with
+  | Global_ ->
+    let start = loc t in
+    advance t;
+    let inner = ty t in
+    since t start (Type_expr.Global inner)
+  | _ -> ty t
+;;
+
+(* [parsed] is told the arguments parsed so far, as they are parsed. An
+   exception's arguments are always global, so are not written [global_]. *)
+let constructor_args ?(parsed = ignore) ~exception_ t =
   if is t Of
   then (
     advance t;
     let rec args acc =
-      let acc = type_app t :: acc in
+      if exception_ && is t Global_
+      then
+        fail
+          (loc t)
+          "an exception's arguments are always global: remove `global_`";
+      let acc = maybe_global t ~ty:type_app :: acc in
       parsed (List.rev acc);
       match peek t with
+      | At ->
+        fail
+          (loc t)
+          (if exception_
+           then "an exception's arguments have no mode, they are always global"
+           else
+             "a constructor's argument has no mode: to make it always global, \
+              write `global_ t`")
       | Star ->
         advance t;
         args acc
@@ -1243,7 +1412,10 @@ let type_kind t ~(parsed : Type_decl.Kind.t -> unit) : Type_decl.Kind.t =
            parsed (Variant (List.rev ((name, args) :: acc)))
          in
          parsed_args [];
-         let acc = (name, constructor_args t ~parsed:parsed_args) :: acc in
+         let acc =
+           (name, constructor_args t ~exception_:false ~parsed:parsed_args)
+           :: acc
+         in
          parsed (Variant (List.rev acc));
          if is t Bar
          then (
@@ -1262,7 +1434,7 @@ let type_kind t ~(parsed : Type_decl.Kind.t -> unit) : Type_decl.Kind.t =
          let missing = located ~loc:name.loc (Type_expr.Tuple []) in
          parsed (Record (List.rev ((name, missing) :: !fields)));
          expect t Colon;
-         let field = name, type_expr t in
+         let field = name, maybe_global t ~ty:type_expr in
          fields := field :: !fields;
          parsed (Record (List.rev !fields));
          field))
@@ -1397,10 +1569,10 @@ let rec toplevel t : Toplevel.t =
   | Let ->
     advance t;
     let name = binding_name t in
-    salvage t (fun error -> Let (name, [], None, error));
+    salvage t (fun error -> Let (name, [], Annot.none, error));
     let params = params t in
-    salvage t (fun error -> Let (name, params, None, error));
-    let annot = binding_annot t in
+    salvage t (fun error -> Let (name, params, Annot.none, error));
+    let annot = annot t in
     salvage t (fun error -> Let (name, params, annot, error));
     expect t Equal;
     let equal = expr t in
@@ -1422,7 +1594,7 @@ let rec toplevel t : Toplevel.t =
     let name = uident t ~what:"a constructor name" in
     let parsed args = salvage t (fun _ -> Malformed_exception (name, args)) in
     parsed [];
-    let args = constructor_args t ~parsed in
+    let args = constructor_args t ~exception_:true ~parsed in
     since t start (Toplevel.Exception (name, args))
   | (Module | Module_inline) as keyword ->
     advance t;

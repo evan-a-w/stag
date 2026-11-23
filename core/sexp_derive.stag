@@ -36,7 +36,7 @@ let expr name dir t =
   let e = conv ctx dir ty in
   match has_variant ty with
   | false -> e
-  | true -> Stag.Expr.Let (Ptr.make ( (name, [], Some (conv_type dir ty), e, var name)))
+  | true -> Stag.Expr.Let (Ptr.make ( (name, [], Stag.Annot.ty (conv_type dir ty), e, var name)))
 
 module Dir = struct
   type t = To_sexp | Of_sexp | Of_sexp_exn

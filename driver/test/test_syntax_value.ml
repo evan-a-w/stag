@@ -68,8 +68,14 @@ let%expect_test "the prelude's signature" =
       module Lit : sig
         type t = Int of int | Bool of bool | String of string | Char of char | Unit
       end
+      module Mode_expr : sig
+        module Atom : sig
+          type t = Const | Portable | Nonportable | Static | Gc | Unknown | Global | Regional | Local
+        end
+        type t = Var of string | Atoms of list[Atom.t]
+      end
       module Type_expr : sig
-        type t = Var of string | Con of Path.t[Type_ref.t] * list[Arg.t] | Arrow of ptr[t * t] | Tuple of list[t] | Code of ptr[{`context : Row.t; `inner : t}] | Record of Row.t | Variant of Row.t | Mut of ptr[t] | Immut of ptr[t] | Splice of ptr[Expr.t]
+        type t = Var of string | Con of Path.t[Type_ref.t] * list[Arg.t] | Arrow of ptr[t * t] | Tuple of list[t] | Code of ptr[{`context : Row.t; `inner : t}] | Record of Row.t | Variant of Row.t | Mut of ptr[t] | Immut of ptr[t] | Splice of ptr[Expr.t] | Moded of ptr[t * Mode_expr.t] | Global of ptr[t]
         module Row : sig
           type t = Empty | Extend of ptr[string * Type_expr.t * t] | Var of string
         end
@@ -88,8 +94,13 @@ let%expect_test "the prelude's signature" =
         end
         type t = {`kind : Kind.t; `name : string; `params : list[Param.t]}
       end
+      module Annot : sig
+        type t = {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}
+        val none : {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}
+        val ty : Type_expr.t -> {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}
+      end
       module Binding : sig
-        type t = string * option[Type_expr.t]
+        type t = string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}
       end
       module Pattern : sig
         module Rest : sig
@@ -101,7 +112,7 @@ let%expect_test "the prelude's signature" =
         val tuple : list[t] -> t
       end
       module Expr : sig
-        type t = Lit of Lit.t | Var of Path.t[Value_ref.t] * option[Type_expr.t] | App of ptr[t * t] | Let of ptr[string * list[string * option[Type_expr.t]] * option[Type_expr.t] * t * t] | Let_mut of ptr[string * option[Type_expr.t] * t * t] | Assign of ptr[Path.t[Value_ref.t] * t] | Store of ptr[t * t] | Fun of ptr[list[string * option[Type_expr.t]] * t] | Splice of ptr[{`expr : t; `subs : option[list[string * option[t]]]}] | Quote of ptr[t] | Tuple of list[t] | Deref of ptr[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Field of ptr[t * Path.t[Field_ref.t]] | Record_update of ptr[t * list[Path.t[Field_ref.t] * t]] | Type of Type_expr.t | Match of ptr[t * list[Pattern.t * t]] | Poly_record of list[string * t] | Poly_field of ptr[t * string] | Poly_extend of ptr[list[string * t] * t] | Poly_restrict of ptr[t * string] | Poly_update of ptr[t * list[string * t]] | Poly_variant of ptr[string * option[t]] | Expect of string | Struct_quote of list[Toplevel.t]
+        type t = Lit of Lit.t | Var of Path.t[Value_ref.t] * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} | App of ptr[t * t] | Let of ptr[string * list[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * t * t] | Let_mut of ptr[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * t * t] | Assign of ptr[Path.t[Value_ref.t] * t] | Store of ptr[t * t] | Fun of ptr[list[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] * t] | Splice of ptr[{`expr : t; `subs : option[list[string * option[t]]]}] | Quote of ptr[t] | Tuple of list[t] | Deref of ptr[t] | Construct of Path.t[Constructor_ref.t] * list[t] | Record of list[Path.t[Field_ref.t] * t] | Field of ptr[t * Path.t[Field_ref.t]] | Record_update of ptr[t * list[Path.t[Field_ref.t] * t]] | Type of Type_expr.t | Match of ptr[t * list[Pattern.t * t]] | Poly_record of list[string * t] | Poly_field of ptr[t * string] | Poly_extend of ptr[list[string * t] * t] | Poly_restrict of ptr[t * string] | Poly_update of ptr[t * list[string * t]] | Poly_variant of ptr[string * option[t]] | Expect of string | Struct_quote of list[Toplevel.t] | Local of ptr[t] | Exclave of ptr[t] | Nontail of ptr[t]
         val var : string -> t
         val construct : string -> list[t] -> t
         val int : int -> t
@@ -114,7 +125,7 @@ let%expect_test "the prelude's signature" =
         val let_ : string -> list[string] -> t -> t -> t
       end
       module Toplevel : sig
-        type t = Let of string * list[string * option[Type_expr.t]] * option[Type_expr.t] * Expr.t | Let_mut of string * option[Type_expr.t] * Expr.t | Type of {`kind : Type_decl.Kind.t; `name : string; `params : list[Type_decl.Param.t]} | Exception of string * list[Type_expr.t] | Module of string * list[t] | Module_splice of string * Expr.t | Include of Expr.t | Expect_test of {`body : Expr.t; `name : string} | Bench of {`body : Expr.t; `name : string; `param : option[string * list[Expr.t]]}
+        type t = Let of string * list[string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]}] * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * Expr.t | Let_mut of string * {`mode : option[Mode_expr.t]; `ty : option[Type_expr.t]} * Expr.t | Type of {`kind : Type_decl.Kind.t; `name : string; `params : list[Type_decl.Param.t]} | Exception of string * list[Type_expr.t] | Module of string * list[t] | Module_splice of string * Expr.t | Include of Expr.t | Expect_test of {`body : Expr.t; `name : string} | Bench of {`body : Expr.t; `name : string; `param : option[string * list[Expr.t]]}
         val let_ : string -> list[string] -> Expr.t -> t
       end
       module Program : sig
@@ -611,6 +622,15 @@ exception G of (int * string)
 type spliced = .~kind
 let quoted = .< struct type t = .~kind let x : .~ty = .~e include .~items end >.
 |}
+  ; {|
+type r = {x : global_ int; y : global_ int @ local -> int @ 'm; z : int}
+type v = A of global_ int * int | B of global_ (int -> int)
+let f (x @ local) (y : int @ 'm) : int @ global portable = exclave_ local_ (x, y)
+let g (h : int @ local -> int @ 'm -> (int -> int @ local) @ global) = h 1 [@nontail]
+let annotated = ((f : (int -> int) @ local), (f @ local portable gc))
+let x @ const = local_ (Some (f x [@nontail]), `A (g y [@nontail]))
+let mut counter : int @ static = 0
+|}
   ]
 ;;
 
@@ -635,6 +655,7 @@ let%expect_test "round trips, modulo locations" =
         [%message "" ~equal:(Syntax.Program.equal program program' : bool)]);
   [%expect
     {|
+    (equal true)
     (equal true)
     (equal true)
     (equal true)
@@ -709,12 +730,14 @@ let%expect_test "constructors are made as the typechecker resolves them" =
            : bool)];
   [%expect
     {|
-    ((constructors 86)
+    ((constructors 102)
      (reflected
-      (prelude.Stag.Expr.Deref prelude.Stag.Expr.Store prelude.Stag.Pattern.Deref
-       prelude.Stag.Type.Kind.Alias prelude.Stag.Type.Kind.Record
-       prelude.Stag.Type.Kind.Variant prelude.Stag.Type_ref.Path.Prelude
-       prelude.Stag.Type_ref.Path.Program))
+      (prelude.Stag.Expr.Deref prelude.Stag.Expr.Store
+       prelude.Stag.Mode_expr.Atom.Nonportable
+       prelude.Stag.Mode_expr.Atom.Regional prelude.Stag.Mode_expr.Atom.Unknown
+       prelude.Stag.Pattern.Deref prelude.Stag.Type.Kind.Alias
+       prelude.Stag.Type.Kind.Record prelude.Stag.Type.Kind.Variant
+       prelude.Stag.Type_ref.Path.Prelude prelude.Stag.Type_ref.Path.Program))
      (others_same_as_to_value true))
     |}]
 ;;
@@ -729,7 +752,7 @@ let%expect_test "values" =
   show {|type t['a] = A | B of 'a * t['a]|};
   [%expect
     {|
-    Cons (Ptr.make (Stag.Toplevel.Let ("f", Cons (Ptr.make (("x", Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), Nil)), None, Stag.Expr.Poly_variant (Ptr.make ("A", Some (Stag.Expr.Var (Stag.Path.Name "x", None))))), Nil))
+    Cons (Ptr.make (Stag.Toplevel.Let ("f", Cons (Ptr.make (("x", {`mode = None; `ty = Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))}), Nil)), {`mode = None; `ty = None}, Stag.Expr.Poly_variant (Ptr.make ("A", Some (Stag.Expr.Var (Stag.Path.Name "x", {`mode = None; `ty = None}))))), Nil))
     Cons (Ptr.make (Stag.Toplevel.Type {`kind = Stag.Type_decl.Kind.Variant (Cons (Ptr.make (("A", Nil), Cons (Ptr.make (("B", Cons (Ptr.make (Stag.Type_expr.Var "a", Cons (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "t", Cons (Ptr.make (Stag.Type_expr.Arg.Ty (Stag.Type_expr.Var "a"), Nil))), Nil))))), Nil))))); `name = "t"; `params = Cons (Ptr.make (Stag.Type_decl.Param.Ty "a", Nil))}, Nil))
     |}]
 ;;
@@ -749,7 +772,7 @@ let%expect_test "nodes are located where given" =
   [%expect
     {|
     ((App ((Var f ()) @ splice.stag:1:0-0)
-      ((Var x (((Con (int @ splice.stag:1:0-0) ()) @ splice.stag:1:0-0))) @
+      ((Var x ((ty ((Con (int @ splice.stag:1:0-0) ()) @ splice.stag:1:0-0)))) @
        splice.stag:1:0-0))
      @ splice.stag:1:0-0)
     |}]
@@ -761,7 +784,7 @@ let%expect_test "an update of fields by ref round trips" =
   let update =
     expr
       (Record_update
-         ( expr (Var (Path (Syntax.Path.name "v"), None))
+         ( expr (Var (Path (Syntax.Path.name "v"), Syntax.Annot.none))
          , [ at (Syntax.Decl_path.Resolved "A.N.x"), expr (Lit (Int 1))
            ; at (Syntax.Decl_path.Path (Syntax.Path.name "y")), expr (Lit Unit)
            ] ))
@@ -775,7 +798,7 @@ let%expect_test "an update of fields by ref round trips" =
    | Error error -> print_error error);
   [%expect
     {|
-    Stag.Expr.Record_update (Ptr.make (Stag.Expr.Var (Stag.Path.Name "v", None), Cons (Ptr.make ((Stag.Path.Ref <field A.N.x>, Stag.Expr.Lit (Stag.Lit.Int 1)), Cons (Ptr.make ((Stag.Path.Name "y", Stag.Expr.Lit Stag.Lit.Unit), Nil))))))
+    Stag.Expr.Record_update (Ptr.make (Stag.Expr.Var (Stag.Path.Name "v", {`mode = None; `ty = None}), Cons (Ptr.make ((Stag.Path.Ref <field A.N.x>, Stag.Expr.Lit (Stag.Lit.Int 1)), Cons (Ptr.make ((Stag.Path.Name "y", Stag.Expr.Lit Stag.Lit.Unit), Nil))))))
     (Record_update (Var v ()) ((<A.N.x> (Lit (Int 1))) (y (Lit Unit))))
     (equal true)
     |}]
@@ -986,7 +1009,7 @@ let%expect_test "malformed values" =
       ~file:"other.stag"
       {|
 module Mine = struct type option['a] = None | Some of 'a end
-let decls = Cons (Ptr.make ( (Stag.Toplevel.Let ("x", Nil, None, Stag.Expr.Lit (Stag.Lit.Int 1)), Nil)))
+let decls = Cons (Ptr.make ( (Stag.Toplevel.Let ("x", Nil, Stag.Annot.none, Stag.Expr.Lit (Stag.Lit.Int 1)), Nil)))
 let other = Mine.Some 1
 |}
   in
@@ -1041,7 +1064,7 @@ let%expect_test "malformed values made otherwise" =
          Construct (ref, [ Ptr (Stdlib.ref (Treewalk.Value.Tuple [ fn ])) ])
        | _ -> assert false));
   [%expect
-    {| Malformed syntax: expected an indirect constructor's tuple, got (Stag.Expr.Var (Stag.Path.Name "f", None)) |}];
+    {| Malformed syntax: expected an indirect constructor's tuple, got (Stag.Expr.Var (Stag.Path.Name "f", {`mode = None; `ty = None})) |}];
   (* A wrong payload. *)
   print_expr
     (edit (expr "(1, 2)") ~name:"prelude.Stag.Lit.Int" ~f:(fun ref _ ->
@@ -1064,7 +1087,7 @@ let%expect_test "malformed values made otherwise" =
                ] )
          | _ -> assert false));
   [%expect
-    {| Malformed syntax: expected a record with a field `subs, got {`expr = Stag.Expr.Var (Stag.Path.Name "e", None)}, within Stag.Expr.Quote > Stag.Expr.Splice |}];
+    {| Malformed syntax: expected a record with a field `subs, got {`expr = Stag.Expr.Var (Stag.Path.Name "e", {`mode = None; `ty = None})}, within Stag.Expr.Quote > Stag.Expr.Splice |}];
   (* Not a pair. *)
   print_expr
     (edit
@@ -1079,7 +1102,7 @@ let%expect_test "malformed values made otherwise" =
              )
          | _ -> assert false));
   [%expect
-    {| Malformed syntax: expected a list cell's pair, got (("x", None), Cons (Ptr.make (("y", Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), Nil)), Cons (Ptr.make (("y", Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), Nil))), within Stag.Expr.Let argument 1 |}];
+    {| Malformed syntax: expected a list cell's pair, got (("x", {`mode = None; `ty = None}), Cons (Ptr.make (("y", {`mode = None; `ty = Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))}), Nil)), Cons (Ptr.make (("y", {`mode = None; `ty = Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))}), Nil))), within Stag.Expr.Let argument 1 |}];
   (* A list ending in something else. *)
   print_expr (edit (expr "(a, b, c)") ~name:"prelude.Nil" ~f:(fun _ _ -> Unit));
   [%expect
@@ -1114,10 +1137,18 @@ let%expect_test "names" =
     [ ( "pattern"
       , of_expr (fun name ->
           expr (Match (unit, [ at (Syntax.Pattern.Var name), unit ]))) )
-    ; "let", of_expr (fun name -> expr (Let (at name, [], None, unit, unit)))
+    ; ( "let"
+      , of_expr (fun name ->
+          expr (Let (at name, [], Syntax.Annot.none, unit, unit))) )
     ; ( "param"
       , of_expr (fun name ->
-          expr (Let (at "f", [ at name, None ], None, unit, unit))) )
+          expr
+            (Let
+               ( at "f"
+               , [ at name, Syntax.Annot.none ]
+               , Syntax.Annot.none
+               , unit
+               , unit ))) )
     ; ( "module"
       , of_toplevel (fun name -> at (Syntax.Toplevel.Module (at name, []))) )
     ; ( "type"
@@ -1142,7 +1173,9 @@ let%expect_test "names" =
           expr (Splice { expr = unit; subs = Some [ at name, None ] })) )
     ; ( "var path"
       , of_expr (fun name ->
-          expr (Var (Path (Syntax.Path.of_list_exn [ name ]), None))) )
+          expr
+            (Var (Path (Syntax.Path.of_list_exn [ name ]), Syntax.Annot.none)))
+      )
     ; ( "con path"
       , of_expr (fun name ->
           expr
@@ -1313,6 +1346,97 @@ let%expect_test "shapes" =
     |}]
 ;;
 
+let%expect_test "modes and [global_] only where the parser puts them" =
+  let at txt = Located.create ~loc:Loc.none txt in
+  let int : Syntax.Type_expr.t =
+    at
+      (Syntax.Type_expr.Con
+         (at (Syntax.Decl_path.Path (Syntax.Path.name "int")), []))
+  in
+  let local = at (Syntax.Mode_expr.Atoms [ Local ]) in
+  let moded ty = at (Syntax.Type_expr.Moded (ty, local)) in
+  let global ty = at (Syntax.Type_expr.Global ty) in
+  let arrow a b = at (Syntax.Type_expr.Arrow (a, b)) in
+  let show ~to_value ~of_value print x =
+    match of_value (to_value x) ~loc:Loc.none with
+    | Ok x -> print_endline (print x)
+    | Error error -> print_error error
+  in
+  let type_expr =
+    show
+      ~to_value:Syntax_value.Type_expr.to_value
+      ~of_value:Syntax_value.Type_expr.of_value
+      (fun ty -> Printer.type_expr ty)
+  in
+  let program =
+    show
+      ~to_value:Syntax_value.Program.to_value
+      ~of_value:Syntax_value.Program.of_value
+      (fun program -> Printer.program program)
+  in
+  let var annot : Syntax.Program.t =
+    [ at
+        (Syntax.Toplevel.Let
+           ( at "v"
+           , []
+           , Syntax.Annot.none
+           , at
+               (Syntax.Expr.Var
+                  (Syntax.Decl_path.Path (Syntax.Path.name "x"), annot)) ))
+    ]
+  in
+  let type_decl (kind : Syntax.Type_decl.Kind.t) : Syntax.Program.t =
+    [ at (Syntax.Toplevel.Type { name = at "t"; params = []; kind }) ]
+  in
+  type_expr (arrow (moded int) (moded int));
+  type_expr (arrow (arrow (moded int) int) (moded (arrow int int)));
+  type_expr (at (Syntax.Type_expr.Tuple [ moded int; int ]));
+  type_expr (arrow (global int) int);
+  type_expr (moded int);
+  type_expr (arrow (moded (moded int)) int);
+  type_expr (global int);
+  [%expect
+    {|
+    int @ local -> int @ local
+    (int @ local -> int) -> (int -> int) @ local
+    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), within Stag.Type_expr.Tuple > element 0
+    Malformed syntax: expected a type without [global_]: [global_] is only on a record field or a constructor's argument, got Stag.Type_expr.Global (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), within Stag.Type_expr.Arrow argument 0
+    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil)))))
+    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), within Stag.Type_expr.Arrow argument 0 > Stag.Type_expr.Moded argument 0
+    Malformed syntax: expected a type without [global_]: [global_] is only on a record field or a constructor's argument, got Stag.Type_expr.Global (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil)))
+    |}];
+  program (var { ty = Some (moded int); mode = None });
+  program (var { ty = Some (moded int); mode = Some local });
+  program (var { ty = Some (arrow int (moded int)); mode = Some local });
+  [%expect
+    {|
+    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty
+    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty
+    let v = (x : (int -> int @ local) @ local)
+    |}];
+  program (type_decl (Record [ at "x", global (arrow (moded int) int) ]));
+  program (type_decl (Record [ at "x", global (global int) ]));
+  program (type_decl (Record [ at "x", moded int ]));
+  program (type_decl (Variant [ at "A", [ global int; int ] ]));
+  program (type_decl (Variant [ at "A", [ moded int ] ]));
+  program (type_decl (Alias (global int)));
+  program (type_decl (Alias (moded int)));
+  program [ at (Syntax.Toplevel.Exception (at "E", [ global int ])) ];
+  [%expect
+    {|
+    type t = {x : global_ int @ local -> int}
+
+    Malformed syntax: expected a type without [global_]: [global_] is only on a record field or a constructor's argument, got Stag.Type_expr.Global (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Record > element 0 > component 1 > Stag.Type_expr.Global
+    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Record > element 0 > component 1
+    type t = A of global_ int * int
+
+    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Variant > element 0 > component 1 > element 0
+    Malformed syntax: expected a type without [global_]: [global_] is only on a record field or a constructor's argument, got Stag.Type_expr.Global (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Alias
+    Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Alias
+    Malformed syntax: expected a type without [global_]: [global_] is only on a record field or a constructor's argument, got Stag.Type_expr.Global (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), within element 0 > Stag.Toplevel.Exception argument 1 > element 0
+    |}]
+;;
+
 (* Shapes accepted as meaningful, though the parser can't produce most. *)
 let%expect_test "shapes left to the typechecker" =
   let values =
@@ -1324,7 +1448,7 @@ let decls =
   Cons (Ptr.make ( (Stag.Toplevel.Type {`name = "void"; `params = Nil; `kind = Stag.Type_decl.Kind.Variant Nil},
   Cons (Ptr.make ( (Stag.Toplevel.Type {`name = "pair"; `params = Nil;
      `kind = Stag.Type_decl.Kind.Variant (Cons (Ptr.make ( (("P", Cons (Ptr.make ( (Stag.Type_expr.Tuple (Cons (Ptr.make ( (int, Cons (Ptr.make ( (int, Nil))))))), Nil)))), Nil))))},
-  Cons (Ptr.make ( (Stag.Toplevel.Let ("absurd", Cons (Ptr.make ( (("v", Some (Stag.Type_expr.con "void" Nil)), Nil))), Some int,
+  Cons (Ptr.make ( (Stag.Toplevel.Let ("absurd", Cons (Ptr.make ( (("v", Stag.Annot.ty (Stag.Type_expr.con "void" Nil)), Nil))), Stag.Annot.ty int,
      Stag.Expr.Match (Ptr.make ( (Stag.Expr.var "v", Nil)))),
   Cons (Ptr.make ( (Stag.Toplevel.let_ "p" Nil
      (Stag.Expr.construct "P" (Cons (Ptr.make ( (Stag.Expr.Tuple (Cons (Ptr.make ( (Stag.Expr.int 1, Cons (Ptr.make ( (Stag.Expr.int 2, Nil))))))), Nil))))),
@@ -1345,7 +1469,8 @@ let decls =
      (Type
       ((name pair) (params ())
        (kind (Variant ((P ((Tuple ((Con int ()) (Con int ()))))))))))
-     (Let absurd ((v ((Con void ())))) ((Con int ())) (Match (Var v ()) ()))
+     (Let absurd ((v ((ty (Con void ()))))) ((ty (Con int ())))
+      (Match (Var v ()) ()))
      (Let p () () (Construct P ((Tuple ((Lit (Int 1)) (Lit (Int 2)))))))
      (Let first ((p ())) ()
       (Match (Var p ()) (((Construct P ((Var q))) (Var q ())))))
@@ -1387,13 +1512,14 @@ let decls =
            (Syntax.Toplevel.Let
               ( Located.create ~loc:Loc.none "bad"
               , []
-              , None
+              , Syntax.Annot.none
               , Located.create
                   ~loc:Loc.none
                   (Syntax.Expr.Match
                      ( Located.create
                          ~loc:Loc.none
-                         (Syntax.Expr.Var (Path (Syntax.Path.name "p"), None))
+                         (Syntax.Expr.Var
+                            (Path (Syntax.Path.name "p"), Syntax.Annot.none))
                      , [] )) ))
        ]);
   [%expect
@@ -1531,5 +1657,62 @@ let decls =
     (add <fun>)
     (seven 7)
     (printed "()")
+    |}]
+;;
+
+let%expect_test "mode syntax round trips through values" =
+  let decls =
+    eval_values
+      {|
+let decls = .< struct
+  type r = { x : global_ int; y : int }
+  type t = A of global_ int * int
+  let f (x @ local) (y : int @ 'm) : int @ global portable = exclave_ local_ (x, y)
+  let g (h : int @ local -> int @ 'm) = h 1 [@nontail]
+  let annotated = (f : int @ local -> int -> int * int)
+  let var = (g @ local)
+  let mut counter : int @ static = 0
+end >.
+|}
+      "Gen.decls"
+  in
+  print_program decls;
+  (match Syntax_value.Program.of_value decls ~loc:Loc.none with
+   | Ok program -> print_string (Printer.program program)
+   | Error error -> print_error error);
+  [%expect
+    {|
+    ((Type
+      ((name r) (params ())
+       (kind (Record ((x (Global (Con int ()))) (y (Con int ())))))))
+     (Type
+      ((name t) (params ())
+       (kind (Variant ((A ((Global (Con int ())) (Con int ()))))))))
+     (Let f ((x ((mode (Atoms (Local))))) (y ((ty (Con int ())) (mode (Var m)))))
+      ((ty (Con int ())) (mode (Atoms (Global Portable))))
+      (Exclave (Local (Tuple ((Var x ()) (Var y ()))))))
+     (Let g
+      ((h
+        ((ty
+          (Arrow (Moded (Con int ()) (Atoms (Local)))
+           (Moded (Con int ()) (Var m)))))))
+      () (Nontail (App (Var h ()) (Lit (Int 1)))))
+     (Let annotated () ()
+      (Var f
+       ((ty
+         (Arrow (Moded (Con int ()) (Atoms (Local)))
+          (Arrow (Con int ()) (Tuple ((Con int ()) (Con int ())))))))))
+     (Let var () () (Var g ((mode (Atoms (Local))))))
+     (Let_mut counter ((ty (Con int ())) (mode (Atoms (Static)))) (Lit (Int 0))))
+    type r = {x : global_ int; y : int}
+    type t = A of global_ int * int
+
+    let f (x @ local) (y : int @ 'm) : int @ global portable =
+      exclave_ local_ (x, y)
+
+    let g (h : int @ local -> int @ 'm) = h 1 [@nontail]
+    let annotated = (f : int @ local -> int -> int * int)
+    let var = (g @ local)
+    let mut counter : int @ static = 0
     |}]
 ;;

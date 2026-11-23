@@ -14,6 +14,9 @@ type t =
   | Let
   | Rec
   | Mut
+  | Local_ (** [local_] *)
+  | Exclave_ (** [exclave_] *)
+  | Global_ (** [global_] *)
   | Let_expect_test (** [let%expect_test] *)
   | Let_bench (** [let%bench] *)
   | In

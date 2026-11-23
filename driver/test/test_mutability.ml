@@ -699,12 +699,12 @@ let%expect_test "errors in generated code" =
 let bad =
   .~(Stag.Expr.Let_mut (Ptr.make (
        ( "n"
-       , None
+       , Stag.Annot.none
        , Stag.Expr.int 0
        , Stag.Expr.Let (Ptr.make (
            ( "f"
-           , [ ("u", None) ]
-           , None
+           , [ ("u", Stag.Annot.none) ]
+           , Stag.Annot.none
            , Stag.Expr.var "n"
            , Stag.Expr.Quote (Ptr.make ( (Stag.Expr.App (Ptr.make ( (Stag.Expr.var "f", Stag.Expr.Lit Stag.Lit.Unit)))))) ))) ))))
 |};

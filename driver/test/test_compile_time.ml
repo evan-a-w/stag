@@ -809,7 +809,7 @@ let%expect_test "re-inference of empty matches on empty nominal types" =
            (quote
               (expr_let
                  ( "f"
-                 , [ "x", Some (Ty.con "void") ]
+                 , [ typed "x" (Ty.con "void") ]
                  , None
                  , match_ (var "x") []
                  , var "f" ))))

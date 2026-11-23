@@ -19,14 +19,15 @@ let expr desc : Expr.t = none desc
 let int n = expr (Lit (Int n))
 let string s = expr (Lit (String s))
 let unit = expr (Lit Unit)
-let var name = expr (Var (Path (Path.of_string name), None))
+let var name = expr (Var (Path (Path.of_string name), Annot.none))
 let app f args = List.fold args ~init:f ~f:(fun f x -> expr (App (f, x)))
 let bindings = List.map ~f:(fun (arg, annot) -> name arg, annot)
-let args = List.map ~f:(fun name -> name, None)
-let typed name ty = name, Some ty
+let args = List.map ~f:(fun name -> name, Annot.none)
+let typed name ty = name, { Annot.ty = Some ty; mode = None }
 
 let expr_let (name', binds, annot, equal, in_) =
-  expr (Let (name name', bindings binds, annot, equal, in_))
+  expr
+    (Let (name name', bindings binds, { ty = annot; mode = None }, equal, in_))
 ;;
 
 let let_ name params equal in_ = expr_let (name, args params, None, equal, in_)
@@ -50,7 +51,7 @@ let tag ?arg tag = expr (Poly_variant (name tag, arg))
 let toplevel desc : Toplevel.t = none desc
 
 let top_let (name', binds, annot, e) =
-  toplevel (Let (name name', bindings binds, annot, e))
+  toplevel (Let (name name', bindings binds, { ty = annot; mode = None }, e))
 ;;
 
 let top ?annot name params e = top_let (name, args params, annot, e)

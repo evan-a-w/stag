@@ -20,11 +20,7 @@ val let_ : string -> string list -> Expr.t -> Expr.t -> Expr.t
 
 (** [let name (arg : annot) ... : annot = equal in in_] *)
 val expr_let
-  :  string
-     * (string * Type_expr.t option) list
-     * Type_expr.t option
-     * Expr.t
-     * Expr.t
+  :  string * (string * Annot.t) list * Type_expr.t option * Expr.t * Expr.t
   -> Expr.t
 
 val seq : Expr.t -> Expr.t -> Expr.t
@@ -35,11 +31,11 @@ val construct : ?args:Expr.t list -> string -> Expr.t
 val record : (string * Expr.t) list -> Expr.t
 val match_ : Expr.t -> (Pattern.t * Expr.t) list -> Expr.t
 val tag : ?arg:Expr.t -> string -> Expr.t
-val typed : string -> Type_expr.t -> string * Type_expr.t option
+val typed : string -> Type_expr.t -> string * Annot.t
 
 (** As [expr_let], for a toplevel. *)
 val top_let
-  :  string * (string * Type_expr.t option) list * Type_expr.t option * Expr.t
+  :  string * (string * Annot.t) list * Type_expr.t option * Expr.t
   -> Toplevel.t
 
 val top : ?annot:Type_expr.t -> string -> string list -> Expr.t -> Toplevel.t

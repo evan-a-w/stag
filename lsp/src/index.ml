@@ -165,6 +165,7 @@ module Syntax_at = struct
       recurse e;
       snds fields
     | Poly_variant (_, e) -> Option.iter e ~f:recurse
+    | Local e | Exclave e | Nontail e -> recurse e
   ;;
 end
 

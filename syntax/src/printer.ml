@@ -173,7 +173,8 @@ let rec unwrap (e : Expr.t) =
 
 let seq (e : Expr.t) =
   match e.txt with
-  | Let ({ txt = "_"; _ }, [], None, first, second) -> Some (first, second)
+  | Let ({ txt = "_"; _ }, [], annot, first, second) when Annot.is_none annot ->
+    Some (first, second)
   | _ -> None
 ;;
 
@@ -190,8 +191,9 @@ let level (e : Expr.t) : Level.t =
   let e = unwrap e in
   match e.txt with
   | Let _ when Option.is_some (seq e) -> Seq
-  | Let _ | Let_mut _ | Match _ | Fun _ -> Item
+  | Let _ | Let_mut _ | Match _ | Fun _ | Local _ | Exclave _ -> Item
   | Assign _ | Store _ -> Assign
+  | Nontail _ -> Construct
   | Lit (Int n) when n < 0 -> Item
   | _ when is_construct e -> Construct
   | App _ -> App
@@ -218,7 +220,7 @@ let bare_at at e = Level.compare (level e) at >= 0
 
 let rec extends_right e =
   match (unwrap e).txt with
-  | Let _ | Let_mut _ | Match _ | Fun _ -> true
+  | Let _ | Let_mut _ | Match _ | Fun _ | Local _ | Exclave _ -> true
   | Assign (_, value) | Store (_, value) -> extends_right value
   | _ -> false
 ;;
@@ -230,7 +232,12 @@ let rec ends_with_match ~seq:in_seq e =
   match e.txt, seq e with
   | Match _, _ -> true
   | Let _, Some (_, second) -> ends_with_match ~seq:true second
-  | (Let (_, _, _, _, body) | Let_mut (_, _, _, body) | Fun (_, body)), _ ->
+  | ( ( Let (_, _, _, _, body)
+      | Let_mut (_, _, _, body)
+      | Fun (_, body)
+      | Local body
+      | Exclave body )
+    , _ ) ->
     bare_at (Ctx.body { Ctx.top with seq = in_seq }) body
     && ends_with_match ~seq:in_seq body
   | (Assign (_, value) | Store (_, value)), _ ->
@@ -335,6 +342,11 @@ let rec type_expr roots ~prec (t : Type_expr.t) =
   | Mut t -> paren_if (prec > 0) (text "mut " ^^ type_expr roots ~prec:0 t)
   | Immut t -> paren_if (prec > 0) (text "immut " ^^ type_expr roots ~prec:0 t)
   | Splice e -> spliced roots e
+  | Moded (t, mode) ->
+    paren_if (prec > 1) (type_expr roots ~prec:1 t ^^ mode_doc mode)
+  | Global t -> text "global_ " ^^ type_expr roots ~prec t
+
+and mode_doc mode = text (" @ " ^ Mode_expr.to_string mode)
 
 (* A [{...}] argument is a row, so a type argument starting with a record type
    is parenthesized. *)
@@ -348,18 +360,22 @@ and type_arg roots : Type_expr.arg -> Doc.t = function
 and starts_with_record (t : Type_expr.t) =
   match t.txt with
   | Record _ -> true
-  | Arrow (first, _) | Tuple (first :: _) -> starts_with_record first
-  | Var _ | Con _ | Tuple [] | Code _ | Variant _ | Mut _ | Immut _ | Splice _
-    -> false
+  | Arrow (first, _) | Tuple (first :: _) | Moded (first, _) ->
+    starts_with_record first
+  | Var _ | Con _
+  | Tuple []
+  | Code _ | Variant _ | Mut _ | Immut _ | Splice _ | Global _ -> false
 
 (* Whether [t], printed at precedence 0, starts with a splice, which would read
    as a definition's splice after [type t =]. *)
 and starts_with_splice (t : Type_expr.t) =
   match t.txt with
   | Splice _ -> true
-  | Arrow (first, _) | Tuple (first :: _) -> starts_with_splice first
-  | Var _ | Con _ | Tuple [] | Code _ | Record _ | Variant _ | Mut _ | Immut _
-    -> false
+  | Arrow (first, _) | Tuple (first :: _) | Moded (first, _) ->
+    starts_with_splice first
+  | Var _ | Con _
+  | Tuple []
+  | Code _ | Record _ | Variant _ | Mut _ | Immut _ | Global _ -> false
 
 and row_entries roots (r : Type_expr.row) =
   match r.txt with
@@ -463,17 +479,27 @@ and pattern_desc roots ~prec (p : Pattern.t) =
 
 and pattern_doc roots p = pattern roots ~prec:0 p
 
+(* [ : t @ m], [ : t] or [ @ m]. *)
+and annot_doc roots ({ ty; mode } : Annot.t) =
+  let mode_doc = Option.value_map mode ~default:empty ~f:mode_doc in
+  match ty with
+  | None -> mode_doc
+  | Some t ->
+    let prec = if Option.is_some mode then 1 else 0 in
+    text " : " ^^ type_expr roots ~prec t ^^ mode_doc
+
+and region roots (ctx : Ctx.t) keyword body =
+  group
+    (text keyword
+     ^^ nest 2 (line ^^ expr roots { ctx with level = Ctx.body ctx } body))
+
 and binding roots ((name : Name.t), annot) =
-  match annot with
-  | None -> text name.txt
-  | Some t -> parens (text (name.txt ^ " : ") ^^ type_expr_doc roots t)
+  if Annot.is_none annot
+  then text name.txt
+  else parens (text name.txt ^^ annot_doc roots annot)
 
 and let_lhs roots keyword (name : Name.t) params annot =
-  let annot =
-    match annot with
-    | None -> empty
-    | Some t -> text " : " ^^ type_expr_doc roots t
-  in
+  let annot = annot_doc roots annot in
   group
     (text (keyword ^ " " ^ name.txt)
      ^^ nest
@@ -575,11 +601,16 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
   | Tuple (_ :: _ :: _ as es), _ -> parens (tuple_items roots es)
   | Tuple _, _ -> text "()"
   | Lit l, _ -> lit l
-  | Var (p, None), _ -> text (decl_path_txt ~root_modules:roots.root_modules p)
-  | Var (p, Some t), _ ->
+  | Var (p, annot), _ when Annot.is_none annot ->
+    text (decl_path_txt ~root_modules:roots.root_modules p)
+  | Var (p, annot), _ ->
     parens
-      (text (decl_path_txt ~root_modules:roots.root_modules p ^ " : ")
-       ^^ type_expr_doc roots t)
+      (text (decl_path_txt ~root_modules:roots.root_modules p)
+       ^^ annot_doc roots annot)
+  | Local body, _ -> region roots ctx "local_" body
+  | Exclave body, _ -> region roots ctx "exclave_" body
+  | Nontail app, _ ->
+    group (expr roots (Ctx.at App) app ^^ nest 2 (line ^^ text "[@nontail]"))
   | App _, _ ->
     let rec spine (e : Expr.t) args =
       match e.txt with

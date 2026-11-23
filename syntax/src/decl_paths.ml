@@ -46,6 +46,8 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
       | Variant r -> Variant (row r)
       | Mut t -> Mut (type_expr t)
       | Immut t -> Immut (type_expr t)
+      | Moded (t, m) -> Moded (type_expr t, m)
+      | Global t -> Global (type_expr t)
       | Splice e -> Splice (expr String.Set.empty e)
     in
     { t with txt }
@@ -56,7 +58,7 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
   and arg : Type_expr.arg -> Type_expr.arg = function
     | Ty t -> Ty (type_expr t)
     | Row r -> Row (row r)
-  and binding (n, t) = n, Option.map t ~f:type_expr
+  and binding (n, a) = n, Annot.map a ~f:type_expr
   and pattern (p : Pattern.t) : Pattern.t =
     match List_literal.map_pattern_items p ~f:pattern with
     | Some p -> p
@@ -92,19 +94,19 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
       | Var (p, t) ->
         Var
           ( (f Value ~locals { txt = p; loc = e.loc }).txt
-          , Option.map t ~f:type_expr )
+          , Annot.map t ~f:type_expr )
       | App (a, b) -> App (expr a, expr b)
       | Let (n, bs, t, value, body) ->
         Let
           ( n
           , List.map bs ~f:binding
-          , Option.map t ~f:type_expr
+          , Annot.map t ~f:type_expr
           , expr' (bind locals (n.txt :: binding_names bs)) value
           , expr' (bind locals [ n.txt ]) body )
       | Let_mut (n, t, value, body) ->
         Let_mut
           ( n
-          , Option.map t ~f:type_expr
+          , Annot.map t ~f:type_expr
           , expr value
           , expr' (bind locals [ n.txt ]) body )
       | Assign (p, value) -> Assign (f Value ~locals p, expr value)
@@ -139,6 +141,9 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
       | Poly_update (e, fs) -> Poly_update (expr e, poly_fields fs)
       | Poly_variant (n, e) -> Poly_variant (n, Option.map e ~f:expr)
       | Struct_quote ts -> Struct_quote (List.map ts ~f:toplevel)
+      | Local e -> Local (expr e)
+      | Exclave e -> Exclave (expr e)
+      | Nontail e -> Nontail (expr e)
     in
     { e with txt }
   and toplevel (t : Toplevel.t) : Toplevel.t =
@@ -148,10 +153,10 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
         Let
           ( n
           , List.map bs ~f:binding
-          , Option.map ty ~f:type_expr
+          , Annot.map ty ~f:type_expr
           , expr (String.Set.of_list (binding_names bs)) e )
       | Let_mut (n, ty, e) ->
-        Let_mut (n, Option.map ty ~f:type_expr, expr String.Set.empty e)
+        Let_mut (n, Annot.map ty ~f:type_expr, expr String.Set.empty e)
       | Type { name; params; kind } ->
         let rec decl_kind : Type_decl.Kind.t -> Type_decl.Kind.t = function
           | Variant cs ->

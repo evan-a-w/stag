@@ -206,7 +206,7 @@ let%expect_test "t" =
   .~(Stag.Expr.Expect "")
 let%expect_test "nested" =
   print_endline "hi";
-  .~(Stag.Expr.Let (Ptr.make ( ("u", [], None, Stag.Expr.Lit Stag.Lit.Unit, Stag.Expr.Expect ""))))
+  .~(Stag.Expr.Let (Ptr.make ( ("u", [], Stag.Annot.none, Stag.Expr.Lit Stag.Lit.Unit, Stag.Expr.Expect ""))))
 |};
   [%expect
     {|
@@ -216,9 +216,9 @@ let%expect_test "nested" =
     Error: In the expression this splice gave: A splice of syntax can't give an [%expect]: its expected output is generated, so it could not be corrected
     Note: The splice gave the expression:
       [%expect]
-    File "a.stag", line 7, characters 2-99:
-    7 |   .~(Stag.Expr.Let (Ptr.make ( ("u", [], None, Stag.Expr.Lit Stag.Lit.Unit, Stag.Expr.Expect ""))))
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "a.stag", line 7, characters 2-110:
+    7 |   .~(Stag.Expr.Let (Ptr.make ( ("u", [], Stag.Annot.none, Stag.Expr.Lit Stag.Lit.Unit, Stag.Expr.Expect ""))))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     Error: In the expression this splice gave: A splice of syntax can't give an [%expect]: its expected output is generated, so it could not be corrected
     Note: The splice gave the expression:
       let u = () in
@@ -408,12 +408,12 @@ let%expect_test "mutable variables in generated syntax and declarations" =
 let counted =
   .~(Stag.Expr.Let_mut (Ptr.make (
        ( "n"
-       , None
+       , Stag.Annot.none
        , Stag.Expr.int 1
        , Stag.Expr.Let (Ptr.make (
            ( "_"
            , Nil
-           , None
+           , Stag.Annot.none
            , Stag.Expr.Assign (Ptr.make (
                ( Stag.Path.Name "n"
                , Stag.Expr.apply (Stag.Expr.var "Core.Int.add") (Cons (Ptr.make ( (Stag.Expr.var "n", Cons (Ptr.make ( (Stag.Expr.int 2, Nil))))))) )))
@@ -422,7 +422,7 @@ include .~(.< struct
   let mut total = 0
   let add_to_total n = total <- Core.Int.add total n
 end >.)
-module Generated = .~(Cons (Ptr.make ( (Stag.Toplevel.Let_mut ("count", None, Stag.Expr.int 5), Nil))))
+module Generated = .~(Cons (Ptr.make ( (Stag.Toplevel.Let_mut ("count", Stag.Annot.none, Stag.Expr.int 5), Nil))))
 let main =
   add_to_total 3;
   add_to_total 4;

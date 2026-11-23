@@ -96,6 +96,7 @@ module Names = struct
   ;;
 end
 
+let ty_annot ty : Syntax.Annot.t = { ty; mode = None }
 let resolved name : Syntax.Decl_path.t = Resolved name
 
 let expr (expr : Typed.Expr.t) =
@@ -170,13 +171,13 @@ let expr (expr : Typed.Expr.t) =
     let field_path f = located loc (resolved (Typed.Field_ref.name f)) in
     let binding names annots ident : Syntax.Binding.t =
       ( label (name names ident)
-      , List.Assoc.find annots ident ~equal:Typed.Ident.equal )
+      , ty_annot (List.Assoc.find annots ident ~equal:Typed.Ident.equal) )
     in
     match e.desc with
     | Lit lit -> node (Lit lit)
     | Var var_ref ->
       let%bind path = var_path names var_ref in
-      node (Var (path, None))
+      node (Var (path, Syntax.Annot.none))
     | Assign (var_ref, value) ->
       let%bind path = var_path names var_ref in
       let%bind value = go names value in
@@ -189,11 +190,12 @@ let expr (expr : Typed.Expr.t) =
       let%bind body = go names body in
       let names = Names.bind names [ ident ] ~scope:(Uses.of_expr in_) in
       let%bind in_ = go names in_ in
-      node (Let_mut (label (name names ident), annot, body, in_))
+      node (Let_mut (label (name names ident), ty_annot annot, body, in_))
     | Annotated (e, annot) ->
       let%bind e = go names e in
       (match e.txt with
-       | Var (path, None) -> node (Var (path, Some annot))
+       | Var (path, existing) when Syntax.Annot.is_none existing ->
+         node (Var (path, ty_annot (Some annot)))
        | _ ->
          Or_error.error_s
            [%message "annotated non-variable" (e : Syntax.Expr.t)])
@@ -215,7 +217,7 @@ let expr (expr : Typed.Expr.t) =
         (Let
            ( label (name outer ident)
            , List.map args ~f:(binding inner annots)
-           , result_annot
+           , ty_annot result_annot
            , body
            , in_ ))
     | Fun { args; annots; body } ->
@@ -249,8 +251,11 @@ let expr (expr : Typed.Expr.t) =
                  (Map.to_alist providers
                   |> List.filter_map ~f:(fun (key, binder) ->
                     let%map.Option path = sub ~key binder in
-                    label key, Some (located loc (Syntax.Expr.Var (path, None))))
-                 ))
+                    ( label key
+                    , Some
+                        (located
+                           loc
+                           (Syntax.Expr.Var (path, Syntax.Annot.none))) ))))
         | Explicit subs ->
           let%map subs = fields subs ~key:label in
           Some (List.map subs ~f:(fun (name, e) -> name, Some e))

@@ -98,8 +98,8 @@ let%expect_test "literals and variables" =
     (Var x ())
     (Var M.N.x ())
     (Var x ())
-    (Var x ((Con int ())))
-    (Var M.x ((Arrow (Var a) (Var a))))
+    (Var x ((ty (Con int ()))))
+    (Var M.x ((ty (Arrow (Var a) (Var a)))))
     |}]
 ;;
 
@@ -252,8 +252,8 @@ let%expect_test "tuples, sequences, let and match" =
     (Let _ () () (Var a ()) (Let _ () () (Var b ()) (Var c ())))
     (Let _ () () (Tuple ((Var a ()) (Var b ()))) (Var c ()))
     (Let x () () (Lit (Int 1)) (Var x ()))
-    (Let f ((x ()) (y ((Con int ()))) (_ ()) (_ ((Con bool ())))) ((Con t ()))
-     (Var e ()) (Var f ()))
+    (Let f ((x ()) (y ((ty (Con int ())))) (_ ()) (_ ((ty (Con bool ())))))
+     ((ty (Con t ()))) (Var e ()) (Var f ()))
     (Let _ () () (Var a ()) (Var b ()))
     (Let x () () (Lit (Int 1)) (Let _ () () (Var a ()) (Var b ())))
     (Let _ () () (Var a ())
@@ -301,7 +301,7 @@ let%expect_test "anonymous functions" =
   [%expect
     {|
     (Fun ((x ())) (Var x ()))
-    (Fun ((x ()) (y ((Con int ()))) (_ ()) (_ ((Con bool ()))))
+    (Fun ((x ()) (y ((ty (Con int ())))) (_ ()) (_ ((ty (Con bool ())))))
      (App (App (Var f ()) (Var x ())) (Var y ())))
     (Fun ((x ())) (Let _ () () (Var a ()) (Var b ())))
     (Fun ((x ())) (Fun ((y ())) (Tuple ((Var x ()) (Var y ())))))
@@ -312,12 +312,12 @@ let%expect_test "anonymous functions" =
     (Record ((x (Fun ((y ())) (Var y ()))) (z (Lit (Int 1)))))
     t.stag:1:4-6: expected a parameter, found `->`
     t.stag:1:5-5: expected `->`, found end of file
-    t.stag:1:4-5: patterns are not allowed as parameters, only `x`, `_` or `(x : t)`; use `match`
-    t.stag:1:4-5: patterns are not allowed as parameters, only `x`, `_` or `(x : t)`; use `match`
-    t.stag:1:4-5: patterns are not allowed as parameters, only `x`, `_` or `(x : t)`; use `match`
-    t.stag:1:4-5: patterns are not allowed as parameters, only `x`, `_` or `(x : t)`; use `match`
-    t.stag:1:6-7: patterns are not allowed as parameters, only `x`, `_` or `(x : t)`; use `match`
-    t.stag:1:4-5: patterns are not allowed as parameters, only `x`, `_` or `(x : t)`; use `match`
+    t.stag:1:4-5: patterns are not allowed as parameters, only `x`, `_`, `(x : t)` or `(x @ m)`; use `match`
+    t.stag:1:4-5: patterns are not allowed as parameters, only `x`, `_`, `(x : t)` or `(x @ m)`; use `match`
+    t.stag:1:4-5: patterns are not allowed as parameters, only `x`, `_`, `(x : t)` or `(x @ m)`; use `match`
+    t.stag:1:4-5: patterns are not allowed as parameters, only `x`, `_`, `(x : t)` or `(x @ m)`; use `match`
+    t.stag:1:6-7: patterns are not allowed as parameters, only `x`, `_`, `(x : t)` or `(x @ m)`; use `match`
+    t.stag:1:4-5: patterns are not allowed as parameters, only `x`, `_`, `(x : t)` or `(x @ m)`; use `match`
     t.stag:1:4-6: expected a parameter, found `in`
     t.stag:1:2-5: expected end of file, found `fun`
     |}]
@@ -594,7 +594,7 @@ let%expect_test "declarations" =
   [%expect
     {|
     ((Let f ((x ()) (y ())) () (Var e ()))
-     (Let g () ((Con int ())) (Lit (Int 1)))
+     (Let g () ((ty (Con int ()))) (Lit (Int 1)))
      (Type ((name nat) (params ()) (kind (Variant ((Z ()) (S ((Con nat ()))))))))
      (Type
       ((name list) (params ((Ty a)))
@@ -833,8 +833,8 @@ let%expect_test "errors" =
     t.stag:1:21-21: expected a pattern, found end of file
     t.stag:1:10-12: expected `with` for the `match` at 1:0, found `->`
     t.stag:1:16-16: expected `->`, found end of file
-    t.stag:1:1-4: type annotations are only supported on variables, as in `(x : t)`
-    t.stag:1:1-2: type annotations are only supported on variables, as in `(x : t)`
+    t.stag:1:1-4: annotations are only supported on variables, as in `(x : t)` or `(x @ m)`
+    t.stag:1:1-2: annotations are only supported on variables, as in `(x : t)` or `(x @ m)`
     t.stag:1:2-3: unmatched `)`
     t.stag:1:6-8: expected end of file, found `in`
     t.stag:1:8-10: expected a field name, found the label `y
@@ -1014,10 +1014,10 @@ let%expect_test "slack and misplaced syntax" =
     t.stag:1:1-3: substitutions `.{...}` are only written after a splice `.~e`
     (Splice (expr (Var f ()))
      (subs (((x ((Lit (Int 1)))) (y ((Tuple ((Lit (Int 2)) (Lit (Int 3))))))))))
-    t.stag:1:2-3: `@` is reserved (for modes)
-    t.stag:1:2-4: `@` is reserved (for modes)
-    t.stag:1:4-5: `@` is reserved (for modes)
-    t.stag:1:6-7: `@` is reserved (for modes)
+    t.stag:1:2-3: expected end of file, found `@`
+    t.stag:1:2-4: `@@` is reserved (for modalities)
+    t.stag:1:6-7: unknown mode `m`, expected one of `const`, `portable`, `nonportable`, `static`, `gc`, `unknown`, `global`, `regional`, `local`
+    ((Let x () ((mode (Atoms (Const)))) (Lit (Int 1))))
     t.stag:1:7-8: expected a type parameter, found `]`
     t.stag:1:5-6: expected a row variable like `..'r` after `;`, found `]`
     t.stag:1:6-7: expected a polymorphic variant tag like `A, found `]`
@@ -1263,7 +1263,7 @@ let%expect_test "mutable variables" =
     (Let_mut x () (Lit (Int 1))
      (Let _ () () (Assign x (App (App (Var add ()) (Var x ())) (Lit (Int 1))))
       (Var x ())))
-    (Let_mut x ((Con int ())) (Lit (Int 1)) (Var x ()))
+    (Let_mut x ((ty (Con int ()))) (Lit (Int 1)) (Var x ()))
     (Assign M.x (Tuple ((Lit (Int 1)) (Lit (Int 2)))))
     (Assign x (Assign y (Lit (Int 1))))
     (App (Var f ()) (Assign x (Lit (Int 1))))
@@ -1285,7 +1285,7 @@ let%expect_test "mutable variables" =
     t.stag:1:8-9: expected a name to bind, found `(`
     t.stag:1:0-3: only a variable or a dereference can be assigned to
     ((Let_mut x () (Lit (Int 1)))
-     (Let_mut y ((Con list ((Ty (Con int ()))))) (Construct <Nil> ()))
+     (Let_mut y ((ty (Con list ((Ty (Con int ())))))) (Construct <Nil> ()))
      (Let f ((u ())) ()
       (Assign x (App (App (Var add ()) (Var x ())) (Lit (Int 1))))))
     t.stag:1:8-9: a mutable variable has no parameters

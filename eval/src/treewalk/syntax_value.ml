@@ -359,7 +359,16 @@ module Of_value = struct
       | _ -> raise Bad_arguments)
   ;;
 
-  let rec type_expr value ~loc : Type_expr.t =
+  (* Where a type is, so which of [t @ m] and [global_ t] it may be, as the
+     parser allows. *)
+  module Type_position = struct
+    type t =
+      | Plain
+      | Arrow_side
+      | Member
+  end
+
+  let rec type_expr ?(at = Type_position.Plain) value ~loc : Type_expr.t =
     Located.create
       ~loc
       (variant
@@ -371,7 +380,10 @@ module Of_value = struct
            | "Var", 1 -> Var (arg 0 (ident Tyvar))
            | "Con", 2 ->
              Con (arg 0 (decl_path Lower ~loc), arg 1 (list (type_arg ~loc)))
-           | "Arrow", 2 -> Arrow (arg 0 (type_expr ~loc), arg 1 (type_expr ~loc))
+           | "Arrow", 2 ->
+             Arrow
+               ( arg 0 (type_expr ~at:Arrow_side ~loc)
+               , arg 1 (type_expr ~at:Arrow_side ~loc) )
            | "Tuple", 1 -> Tuple (arg 0 (components ~min:0 (type_expr ~loc)))
            | "Code", 1 ->
              arg 0 (fun code : Type_expr.desc ->
@@ -384,6 +396,58 @@ module Of_value = struct
            | "Mut", 1 -> Mut (arg 0 (type_expr ~loc))
            | "Immut", 1 -> Immut (arg 0 (type_expr ~loc))
            | "Splice", 1 -> Splice (arg 0 (expr ~loc))
+           | "Moded", 2 ->
+             (match at with
+              | Arrow_side ->
+                Moded (arg 0 (type_expr ~loc), arg 1 (mode_expr ~loc))
+              | Plain | Member ->
+                unexpected
+                  ~expected:
+                    "a type without a mode: a mode is only on a function \
+                     type's argument or result"
+                  value)
+           | "Global", 1 ->
+             (match at with
+              | Member -> Global (arg 0 (type_expr ~loc))
+              | Plain | Arrow_side ->
+                unexpected
+                  ~expected:
+                    "a type without [global_]: [global_] is only on a record \
+                     field or a constructor's argument"
+                  value)
+           | _ -> raise Bad_arguments))
+
+  and mode_expr value ~loc : Mode_expr.t =
+    let atom value =
+      variant
+        "Stag.Mode_expr.Atom.t"
+        value
+        ~f:(fun constructor args : Mode_expr.Atom.t ->
+          match Args.count args with
+          | 0 -> Mode_expr.Atom.t_of_sexp (Atom constructor)
+          | _ -> raise Bad_arguments)
+    in
+    Located.create
+      ~loc
+      (variant
+         "Stag.Mode_expr.t"
+         value
+         ~f:(fun constructor args : Mode_expr.desc ->
+           let arg i read = Args.read args i read in
+           match constructor, Args.count args with
+           | "Var", 1 -> Var (arg 0 (ident Tyvar))
+           | "Atoms", 1 ->
+             arg 0 (fun value : Mode_expr.desc ->
+               let atoms = list atom value in
+               if List.is_empty atoms
+                  || List.contains_dup
+                       (List.map atoms ~f:Mode_expr.Atom.axis)
+                       ~compare:Mode_expr.Axis.compare
+               then
+                 unexpected
+                   ~expected:"atoms of distinct axes, at least one"
+                   value
+               else Atoms atoms)
            | _ -> raise Bad_arguments))
 
   and row ~(labels : Ident_kind.t) value ~loc : Type_expr.row =
@@ -443,15 +507,26 @@ module Of_value = struct
         match constructor, Args.count args with
         | "Variant", 1 ->
           Variant
-            (arg 0 (list (pair (name Upper ~loc) (list (type_expr ~loc)))))
+            (arg
+               0
+               (list
+                  (pair (name Upper ~loc) (list (type_expr ~at:Member ~loc)))))
         | "Record", 1 ->
-          Record (arg 0 (fields (pair (name Lower ~loc) (type_expr ~loc))))
+          Record
+            (arg
+               0
+               (fields (pair (name Lower ~loc) (type_expr ~at:Member ~loc))))
         | "Alias", 1 -> Alias (arg 0 (type_expr ~loc))
         | "Abstract", 0 -> Abstract
         | "Splice", 1 -> Splice (Located.create ~loc (arg 0 (expr ~loc)))
         | _ -> raise Bad_arguments)
 
-  and binding ~loc = pair (name Binder ~loc) (option (type_expr ~loc))
+  and binding ~loc = pair (name Binder ~loc) (annot ~loc)
+
+  and annot value ~loc : Annot.t =
+    { ty = field "ty" (option (type_expr ~loc)) value
+    ; mode = field "mode" (option (mode_expr ~loc)) value
+    }
 
   and pattern value ~loc : Pattern.t =
     Located.create
@@ -506,19 +581,19 @@ module Of_value = struct
          | "Var", 2 ->
            Var
              ( arg 0 (fun value -> (decl_path Lower value ~loc).txt)
-             , arg 1 (option (type_expr ~loc)) )
+             , arg 1 (annot ~loc) )
          | "App", 2 -> App (arg 0 (expr ~loc), arg 1 (expr ~loc))
          | "Let", 5 ->
            Let
              ( arg 0 (name Binder ~loc)
              , arg 1 (list (binding ~loc))
-             , arg 2 (option (type_expr ~loc))
+             , arg 2 (annot ~loc)
              , arg 3 (expr ~loc)
              , arg 4 (expr ~loc) )
          | "Let_mut", 4 ->
            Let_mut
              ( arg 0 (name Binder ~loc)
-             , arg 1 (option (type_expr ~loc))
+             , arg 1 (annot ~loc)
              , arg 2 (expr ~loc)
              , arg 3 (expr ~loc) )
          | "Assign", 2 ->
@@ -563,6 +638,12 @@ module Of_value = struct
            Poly_variant (arg 0 (name Label ~loc), arg 1 (option (expr ~loc)))
          | "Expect", 1 -> Expect (Located.create ~loc (arg 0 string))
          | "Struct_quote", 1 -> Struct_quote (arg 0 (list (toplevel ~loc)))
+         | "Local", 1 -> Local (arg 0 (expr ~loc))
+         | "Exclave", 1 -> Exclave (arg 0 (expr ~loc))
+         | "Nontail", 1 ->
+           (match arg 0 (expr ~loc) with
+            | { txt = App _; _ } as app -> Nontail app
+            | _ -> unexpected ~expected:"an application under Nontail" value)
          | _ -> raise Bad_arguments))
 
   and toplevel value ~loc : Toplevel.t =
@@ -578,13 +659,11 @@ module Of_value = struct
              Let
                ( arg 0 (name Binder ~loc)
                , arg 1 (list (binding ~loc))
-               , arg 2 (option (type_expr ~loc))
+               , arg 2 (annot ~loc)
                , arg 3 (expr ~loc) )
            | "Let_mut", 3 ->
              Let_mut
-               ( arg 0 (name Binder ~loc)
-               , arg 1 (option (type_expr ~loc))
-               , arg 2 (expr ~loc) )
+               (arg 0 (name Binder ~loc), arg 1 (annot ~loc), arg 2 (expr ~loc))
            | "Type", 1 -> Type (arg 0 (type_decl ~loc))
            | "Exception", 2 ->
              Exception (arg 0 (name Upper ~loc), arg 1 (list (type_expr ~loc)))
@@ -636,7 +715,7 @@ let reflected_decl = To_value.reflected_decl
 
 module Type_expr = struct
   let to_value t = To_value.type_expr t
-  let of_value = Of_value.(run type_expr)
+  let of_value = Of_value.(run (fun value ~loc -> type_expr value ~loc))
 end
 
 module Type_decl = struct

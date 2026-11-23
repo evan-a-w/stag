@@ -76,7 +76,8 @@ let%expect_test "expansion" =
          (.Stag.Toplevel.Type {`name = "t"; `params = []; `kind = antiquote_0},
           .Cons
             (.Ptr.make
-               (.Stag.Toplevel.Let ("x", [], .Some antiquote_1, antiquote_2),
+               (.Stag.Toplevel.Let
+                  ("x", [], {`ty = .Some antiquote_1; `mode = .None}, antiquote_2),
                 antiquote_3))))
     |}];
   expand {|.< struct let q = .< .~x >. module M = .~items end >.|};
@@ -87,13 +88,15 @@ let%expect_test "expansion" =
       .Stag.Toplevel.Let
         ("q",
          [],
-         .None,
+         {`ty = .None; `mode = .None},
          .Stag.Expr.Quote
            (.Ptr.make
               (.Stag.Expr.Splice
                  (.Ptr.make
                     {
-                      `expr = .Stag.Expr.Var (.Stag.Path.Name "x", .None);
+                      `expr =
+                        .Stag.Expr.Var
+                          (.Stag.Path.Name "x", {`ty = .None; `mode = .None});
                       `subs = .None;
                     }))));
       .Stag.Toplevel.Module ("M", antiquote_0);

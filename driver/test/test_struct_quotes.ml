@@ -328,7 +328,7 @@ let%expect_test "a generated declaration with a type splice and a ref" =
 let helper = 1
 let t = Stag.Type_expr.con "int" Nil
 let ann = Stag.Type_expr.Splice (Ptr.make ( (Stag.Expr.var "t")))
-include .~(Cons (Ptr.make ( (Stag.Toplevel.Let ("x", Nil, Some ann, Stag.Code.erase .< helper >.), Nil))))
+include .~(Cons (Ptr.make ( (Stag.Toplevel.Let ("x", Nil, Stag.Annot.ty ann, Stag.Code.erase .< helper >.), Nil))))
 let shown = print_endline (Int.to_string x)
 |};
   [%expect

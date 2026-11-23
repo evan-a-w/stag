@@ -38,9 +38,12 @@ node, for good errors.
   The longest tokens `.<` `.~` `..` `.{` are unaffected (`..x` is `..` then
   `x`).
 - Keywords: `let rec in match with fun exception type of module struct end`,
-  `true false`.
+  `true false`, and `local_ exclave_ global_` (see [Modes](#modes)), so
+  these are not identifiers anywhere, even qualified (`M.local_`). Mode names
+  (`local`, `const`, ...) are not keywords.
   `rec` is reserved, as lets are always recursive.
-- `@` and `@@` are reserved (for modes, see below).
+- `@` introduces a mode (see [Modes](#modes)); `@@` is reserved (for
+  modalities). `[@nontail]` is the one attribute.
 - Staging tokens: `.<` `>.` `.~`, and `.{` (a splice's substitutions).
 - Expect test tokens: `let%expect_test`, `[%expect`. Benchmarks: `let%bench`.
   Inline expansions: `include%inline`, `module%inline`, `end%inline`.
@@ -372,6 +375,47 @@ if it is mutable, and reads its current value. Any other substitution is
 evaluated once, in the order written, before the code runs, so
 `.~c.{a = y; b = y <- 5}` gives `a` the value `y` has after `b`'s assignment.
 This is the same at a toplevel splice and in a quote.
+
+### Modes
+
+The syntax of modes (see [modes.md](modes.md) and
+[semantics.md](semantics.md#modes)). Modes are not checked yet: annotations
+are ignored, and `local_`, `exclave_` and `[@nontail]` evaluate as their body.
+
+A mode, after `@`, is a mode variable (`'m`, standing for every axis), or one
+or more of `const portable nonportable` (stage), `static gc unknown`
+(provenance) and `global regional local` (locality), at most one per axis:
+`@ local portable`.
+
+```ocaml
+let x @ const = 1                       (* a binder's mode *)
+let f (x @ local) (y : int @ 'm) : int @ global = ...
+let mut counter : int @ static = 0
+(e : t @ m)   (x @ local)               (* an annotated variable *)
+int @ local -> int @ local              (* a function type's argument/result *)
+'a @ 'm -> 'b @ 'n
+local_ e                                (* allocate e in the current region *)
+exclave_ e                              (* end the region, then evaluate e *)
+f x [@nontail]                          (* not a tail call *)
+type r = {x : global_ int; y : int}     (* always global, even in a local r *)
+type t = A of global_ int * int
+```
+
+`@` binds looser than `*` and tighter than `->`: `int * int @ local -> int`
+is `(int * int) @ local -> int`. A mode is written only on a binder, an
+annotation, or a function type's argument or result: `list[int @ local]` and
+`(int @ local) -> int` are errors. `local_` and `exclave_` extend as far right
+as `fun` does. `[@nontail]` follows an application, but not as a
+constructor's argument, where it would read as applying to the construction:
+`C (f x [@nontail])`, not `C (f x) [@nontail]`. `global_` is written only
+on a record field or a constructor argument; an exception's arguments are
+always global, so take no `global_`.
+
+In reflected syntax, a binder's or variable's annotation is a
+``Stag.Annot.t = {`ty : option[Type_expr.t]; `mode : option[Mode_expr.t]}``
+(`Stag.Annot.none`, `Stag.Annot.ty t`). Reflected syntax is checked to have
+modes and `global_` only where the parser allows them, so the annotation's
+`` `ty `` has no mode of its own.
 
 ## Declarations
 
@@ -968,15 +1012,9 @@ the others still run.
 Typed declaration quotes (code types of signatures, `<sig ... end>{ctx}`) and
 `let module` may come later, beside struct quotes.
 
-### Modes
-
-OxCaml style:
+### Modalities and code modes
 
 ```ocaml
-let n @ const = 3
-let f (x @ portable) = ...
-(e : t @ m)
-t @ m -> t' @ m'          (* @ binds looser than *, tighter than -> *)
 val n : int @@ const      (* modalities on signature items and fields *)
 <t @ m>{ctx}              (* code modes *)
 ```

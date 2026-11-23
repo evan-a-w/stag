@@ -369,7 +369,7 @@ let%expect_test "end to end: source to rendered errors" =
     ; "type t = C of int * int list"
     ; "let f (x : int list) = x"
     ; "type t = list[int][int]"
-    ; "let x @ const = 1"
+    ; "let x @ bogus = 1"
     ; "type t[] = int"
     ; "type t = [`A | ]"
     ; "type t = with_x[{x : int}]"
@@ -435,10 +435,10 @@ let%expect_test "end to end: source to rendered errors" =
     1 | type t = list[int][int]
                           ^
     Error: Type arguments are written once
-    File "a.stag", line 1, characters 6-7:
-    1 | let x @ const = 1
-              ^
-    Error: `@` is reserved (for modes)
+    File "a.stag", line 1, characters 8-13:
+    1 | let x @ bogus = 1
+                ^^^^^
+    Error: Unknown mode `bogus`, expected one of `const`, `portable`, `nonportable`, `static`, `gc`, `unknown`, `global`, `regional`, `local`
     File "a.stag", line 1, characters 7-8:
     1 | type t[] = int
                ^

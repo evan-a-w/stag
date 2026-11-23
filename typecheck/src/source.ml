@@ -208,31 +208,35 @@ module Expr = struct
       | Error
   end
 
-  let syntax_view (expr : Syntax.Expr.t) : View.t =
+  let binding (name, (annot : Syntax.Annot.t)) = Binder.Name name, annot.ty
+
+  let rec syntax_view (expr : Syntax.Expr.t) : View.t =
     let sub expr = Syntax expr in
     let subs = List.map ~f:sub in
     let fields = List.map ~f:(fun (key, expr) -> key, sub expr) in
     match expr.txt with
     | Lit lit -> Lit lit
-    | Var (path, annot) -> Var (Path (path, annot))
+    | Var (path, annot) -> Var (Path (path, annot.ty))
     | App (f, x) -> App (sub f, sub x)
     | Let (name, args, annot, equal, in_) ->
       Let
         { binder = Name name
-        ; args = List.map args ~f:(fun (name, annot) -> Binder.Name name, annot)
-        ; annot
+        ; args = List.map args ~f:binding
+        ; annot = annot.ty
         ; body = sub equal
         ; in_ = sub in_
         }
     | Let_mut (name, annot, equal, in_) ->
-      Let_mut { binder = Name name; annot; body = sub equal; in_ = sub in_ }
+      Let_mut
+        { binder = Name name
+        ; annot = annot.ty
+        ; body = sub equal
+        ; in_ = sub in_
+        }
     | Assign (path, value) -> Assign (Path (path.txt, None), sub value)
     | Store (target, value) -> Store (sub target, sub value)
     | Fun (args, body) ->
-      Fun
-        { args = List.map args ~f:(fun (name, annot) -> Binder.Name name, annot)
-        ; body = sub body
-        }
+      Fun { args = List.map args ~f:binding; body = sub body }
     | Splice { expr; subs } ->
       Splice
         { code = sub expr
@@ -273,6 +277,7 @@ module Expr = struct
     | Expect expected -> Expect expected
     | Type ty -> Type ty
     | Struct_quote toplevels -> Struct_quote toplevels
+    | Local expr | Exclave expr | Nontail expr -> syntax_view expr
     | Error -> Error
   ;;
 

@@ -75,6 +75,13 @@ and type_desc (g : Type_expr.desc) (w : Type_expr.desc) : Type_expr.desc option 
   | Splice e, Splice e' ->
     let+ e = expr e e' in
     Type_expr.Splice e
+  | Moded (t, m), Moded (t', m') ->
+    let* t = type_expr t t' in
+    let+ m = mode_expr m m' in
+    Type_expr.Moded (t, m)
+  | Global t, Global t' ->
+    let+ t = type_expr t t' in
+    Type_expr.Global t
   | ( ( Var _
       | Con _
       | Arrow _
@@ -84,8 +91,17 @@ and type_desc (g : Type_expr.desc) (w : Type_expr.desc) : Type_expr.desc option 
       | Variant _
       | Mut _
       | Immut _
-      | Splice _ )
+      | Splice _
+      | Moded _
+      | Global _ )
     , _ ) -> None
+
+and mode_expr m m' = located (same Mode_expr.equal_desc) m m'
+
+and annot ({ ty; mode } : Annot.t) ({ ty = ty'; mode = mode' } : Annot.t) =
+  let* ty = option type_expr ty ty' in
+  let+ mode = option mode_expr mode mode' in
+  { Annot.ty; mode }
 
 and row g w = located row_desc g w
 
@@ -112,7 +128,7 @@ and arg (g : Type_expr.arg) (w : Type_expr.arg) =
     Type_expr.Row r
   | (Ty _ | Row _), _ -> None
 
-and binding b b' = pair name (option type_expr) b b'
+and binding b b' = pair name annot b b'
 and pattern g w = located pattern_desc g w
 
 and pattern_desc (g : Pattern.desc) (w : Pattern.desc) : Pattern.desc option =
@@ -174,7 +190,7 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
   | Error, Error -> Some Error
   | Var (p, t), Var (p', t') ->
     let* p = decl_path_desc p p' in
-    let+ t = option type_expr t t' in
+    let+ t = annot t t' in
     Expr.Var (p, t)
   | App (f, x), App (f', x') ->
     let* f = expr f f' in
@@ -183,13 +199,13 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
   | Let (n, bs, t, e, in_), Let (n', bs', t', e', in_') ->
     let* n = name n n' in
     let* bs = list binding bs bs' in
-    let* t = option type_expr t t' in
+    let* t = annot t t' in
     let* e = expr e e' in
     let+ in_ = expr in_ in_' in
     Expr.Let (n, bs, t, e, in_)
   | Let_mut (n, t, e, in_), Let_mut (n', t', e', in_') ->
     let* n = name n n' in
-    let* t = option type_expr t t' in
+    let* t = annot t t' in
     let* e = expr e e' in
     let+ in_ = expr in_ in_' in
     Expr.Let_mut (n, t, e, in_)
@@ -269,6 +285,15 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
   | Struct_quote ts, Struct_quote ts' ->
     let+ ts = toplevels ts ts' in
     Expr.Struct_quote ts
+  | Local e, Local e' ->
+    let+ e = expr e e' in
+    Expr.Local e
+  | Exclave e, Exclave e' ->
+    let+ e = expr e e' in
+    Expr.Exclave e
+  | Nontail e, Nontail e' ->
+    let+ e = expr e e' in
+    Expr.Nontail e
   | ( ( Lit _
       | Var _
       | App _
@@ -295,6 +320,9 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
       | Poly_variant _
       | Expect _
       | Struct_quote _
+      | Local _
+      | Exclave _
+      | Nontail _
       | Error )
     , _ ) -> None
 
@@ -331,12 +359,12 @@ and toplevel_desc (g : Toplevel.desc) (w : Toplevel.desc) =
   | Let (n, bs, t, e), Let (n', bs', t', e') ->
     let* n = name n n' in
     let* bs = list binding bs bs' in
-    let* t = option type_expr t t' in
+    let* t = annot t t' in
     let+ e = expr e e' in
     Toplevel.Let (n, bs, t, e)
   | Let_mut (n, t, e), Let_mut (n', t', e') ->
     let* n = name n n' in
-    let* t = option type_expr t t' in
+    let* t = annot t t' in
     let+ e = expr e e' in
     Toplevel.Let_mut (n, t, e)
   | Type d, Type d' ->
