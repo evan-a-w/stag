@@ -213,6 +213,9 @@ module Program_env = struct
     (** Of the [let mut]s, local and toplevel. *)
     ; modes : Mode.Id_source.t
     ; const_toplevels : bool
+    ; mode_limits_reported : String.Hash_set.t
+    (** The reasons of the upper bounds of mode errors reported, so that each
+        limit is reported once, at what first exceeded it. *)
     }
 
   let report ?frame t error =
@@ -269,7 +272,6 @@ module Program_env = struct
     in
     go toplevel ~visited:String.Set.empty
   ;;
-
 
   let add_info t ident ~ty ~level =
     let info = { Typed.Ident_info.ty; level } in
@@ -381,8 +383,8 @@ module Scope = struct
     ; context : Type.row
     ; outside : t
     ; mode : Mode.Var.t
-    (** The code's: of what it embeds from outside, and of the splices run
-        when it is built. *)
+    (** The code's: of what it embeds from outside, and of the splices run when
+        it is built. *)
     }
 
   let quote_id t = Option.map t.quote ~f:(fun quote -> quote.id)
@@ -451,8 +453,12 @@ module Scope = struct
   (* Whether the mode constraint held: if not, it is reported. *)
   let mode_holds t ~loc = function
     | Ok () -> true
-    | Error error ->
-      report t (Typecheck_error.create ~loc (Mode_error error));
+    | Error (Mode.Error.Mismatch { upper_because; _ } as error) ->
+      let key = Sexp.to_string [%sexp (upper_because : Mode.Reason.t list)] in
+      if not (Hash_set.mem t.program.mode_limits_reported key)
+      then (
+        Hash_set.add t.program.mode_limits_reported key;
+        report t (Typecheck_error.create ~loc (Mode_error error)));
       false
   ;;
 
@@ -460,7 +466,10 @@ module Scope = struct
 
   (* The value being computed is at least [stage], eg. as it runs code. *)
   let evaluates t stage ~loc ~why =
-    add_mode t ~loc (Mode.Var.at_least t.sink Stage stage (Mode.Reason.create ~loc why))
+    add_mode
+      t
+      ~loc
+      (Mode.Var.at_least t.sink Stage stage (Mode.Reason.create ~loc why))
   ;;
 
   (* Only the stage axis is checked so far. *)
@@ -487,7 +496,9 @@ module Scope = struct
                  stage
                  (Mode.Reason.create
                     ~loc
-                    (sprintf "it is annotated %s" (Syntax.Mode_expr.Atom.to_string atom)))))))
+                    (sprintf
+                       "it is annotated %s"
+                       (Syntax.Mode_expr.Atom.to_string atom)))))))
   ;;
 
   (* A value of [mode] is evaluated for the value being computed. *)
@@ -1285,7 +1296,8 @@ let use_entry (scope : Scope.t) (entry : Env.Entry.t) ~name ~loc =
              code
              (reason "%s is embedded in a quote")));
   if mutable_
-  then Scope.evaluates scope Nonportable ~loc ~why:(sprintf "%s is mutable" name)
+  then
+    Scope.evaluates scope Nonportable ~loc ~why:(sprintf "%s is mutable" name)
   else Scope.joins scope entry.mode ~loc ~why:(sprintf "%s is used" name)
 ;;
 
@@ -1668,8 +1680,7 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
         in
         member.state
         <- Done
-             { entry =
-                 Env.Entry.toplevel ~ident:member.ident ~scheme:ty ~mode
+             { entry = Env.Entry.toplevel ~ident:member.ident ~scheme:ty ~mode
              ; typed
              ; failed
              ; runtime_only
@@ -1812,11 +1823,11 @@ and var_ref_type t (scope : Scope.t) (var_ref : Typed.Var_ref.t) ~loc =
      | None ->
        (match Program_env.embedded scope.program ident with
         | Some info ->
-         Scope.evaluates
-           scope
-           Portable
-           ~loc
-           ~why:(sprintf "%s was computed at compile time" ident.name);
+          Scope.evaluates
+            scope
+            Portable
+            ~loc
+            ~why:(sprintf "%s was computed at compile time" ident.name);
           Ok (Scope.instantiate t scope info.ty, Typed.Var_ref.Persistent binder)
         | None -> not_in_scope ident.name))
 
@@ -1852,7 +1863,9 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
      | Some _ when not toplevel.mut ->
        (* Its mode isn't known yet, so it is a free variable of the quote: the
           quote's value doesn't depend on [toplevel]. *)
-       Ok (at_scope_level { entry with
+       Ok
+         (at_scope_level
+            { entry with
               mode =
                 Scope.stage_at_least
                   scope
@@ -1919,7 +1932,11 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
     Scc_frame.create index ~pending:[]
   | Unchecked ->
     Stack.push program.unfinished ty;
-    let init_mode = if Toplevel.is_function toplevel then Scope.fresh_mode scope else scope.sink in
+    let init_mode =
+      if Toplevel.is_function toplevel
+      then Scope.fresh_mode scope
+      else scope.sink
+    in
     let mode =
       if toplevel.mut
       then
@@ -1954,7 +1971,8 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
             ~args
             ~res_ty
             ~body:(Source.Expr.Syntax toplevel.expr)
-        else check_expr t scope ~expr:(Source.Expr.Syntax toplevel.expr) ~ty:res_ty
+        else
+          check_expr t scope ~expr:(Source.Expr.Syntax toplevel.expr) ~ty:res_ty
       with
       | body -> body
       | exception Uses_unfinished ->
@@ -2000,7 +2018,11 @@ and check_body t (scope : Scope.t) ~closure ~args ~res_ty ~body =
   with_monomorphic_bindings
     scope
     args
-    ~mode:(Scope.stage_at_least scope Nonportable ~reason:(Mode.Reason.create "it is a parameter"))
+    ~mode:
+      (Scope.stage_at_least
+         scope
+         Nonportable
+         ~reason:(Mode.Reason.create "it is a parameter"))
     ~f:(fun () -> check_expr t scope ~expr:body ~ty:res_ty)
 
 and with_monomorphic_bindings (scope : Scope.t) bindings ~mode ~f =
@@ -2295,7 +2317,8 @@ and expr_type
           ~loc
           ~why:"the mode of spliced code is not known";
         { quote.outside with rank = scope.rank; sink = quote.mode }
-      | None -> { scope with level = scope.level - 1; sink = Scope.fresh_mode scope }
+      | None ->
+        { scope with level = scope.level - 1; sink = Scope.fresh_mode scope }
     in
     let reported = scope.program.reported in
     let inner = Scope.fresh_ty t scope in
@@ -2807,7 +2830,8 @@ and expand t (scope : Scope.t) ~code ~subs ~ty ~loc =
         (Scope.stage_at_least
            scope
            Nonportable
-           ~reason:(Mode.Reason.create ~loc "it is substituted into spliced code"))
+           ~reason:
+             (Mode.Reason.create ~loc "it is substituted into spliced code"))
       ~f:(fun () ->
         check_expr t scope ~expr:(Source.Expr.Generated generated) ~ty)
   in
@@ -3627,6 +3651,7 @@ let program_env t ~stamps ~modes ~const_toplevels interpreter =
     ; mutable_idents = Typed.Ident.Hash_set.create ()
     ; modes
     ; const_toplevels
+    ; mode_limits_reported = String.Hash_set.create ()
     }
   in
   (report := fun error -> Program_env.report program_env error);
@@ -3676,7 +3701,14 @@ let prelude_and_root t program_env =
 ;;
 
 let prelude_signature ({ fresh; stamps; interpreter; _ } as t) =
-  let program_env = program_env fresh ~stamps ~modes:t.modes ~const_toplevels:t.const_toplevels interpreter in
+  let program_env =
+    program_env
+      fresh
+      ~stamps
+      ~modes:t.modes
+      ~const_toplevels:t.const_toplevels
+      interpreter
+  in
   let prelude, (_ : Module_scope.t) = prelude_and_root t program_env in
   let (_ : _ list) = check_declarations fresh program_env prelude in
   match Program_env.errors program_env with
@@ -3737,14 +3769,25 @@ let check_module t (program_env : Program_env.t) module_
 ;;
 
 let typecheck ({ fresh; stamps; interpreter; _ } as t) ~program =
-  let program_env = program_env fresh ~stamps ~modes:t.modes ~const_toplevels:t.const_toplevels interpreter in
+  let program_env =
+    program_env
+      fresh
+      ~stamps
+      ~modes:t.modes
+      ~const_toplevels:t.const_toplevels
+      interpreter
+  in
   let (_ : Module_scope.t), root = prelude_and_root t program_env in
   Module_scope.add root program;
   check_module fresh program_env root
 ;;
 
-let check_prelude { fresh; stamps; interpreter; prelude; modes; const_toplevels } =
-  let program_env = program_env fresh ~stamps ~modes ~const_toplevels interpreter in
+let check_prelude
+  { fresh; stamps; interpreter; prelude; modes; const_toplevels }
+  =
+  let program_env =
+    program_env fresh ~stamps ~modes ~const_toplevels interpreter
+  in
   let prelude = add_prelude program_env (force prelude) in
   check_module fresh program_env prelude
 ;;

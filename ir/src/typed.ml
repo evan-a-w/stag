@@ -341,7 +341,6 @@ module Expr = struct
       true
     | _ -> List.exists (sub_exprs t) ~f:(refers_to ~f) [@nontail]
   ;;
-
 end
 
 module Toplevel = struct

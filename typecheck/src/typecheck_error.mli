@@ -101,8 +101,8 @@ module Kind : sig
     (** Of [toplevel], which may use the mutable toplevel [mutable_] when run:
         mutable toplevels have only a runtime instance. *)
     | Mode_error of Mode.Error.t
-    (** A value whose mode exceeds what its use allows, eg. a [nonportable]
-        one captured by a closure used in a quote. *)
+    (** A value whose mode exceeds what its use allows, eg. a [nonportable] one
+        captured by a closure used in a quote. *)
     | Mutable_used_outside_its_code of
         { name : string
         ; var_level : Env.Level.t

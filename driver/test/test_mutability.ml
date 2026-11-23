@@ -217,7 +217,8 @@ let at_compile_time =
     |}]
 ;;
 
-let%expect_test "closures reaching a mutable local are free variables of quotes" =
+let%expect_test "closures reaching a mutable local are free variables of quotes"
+  =
   (* They are [nonportable], so not usable in quotes: the code leaves them to
      its context. *)
   (* Directly. *)
@@ -618,7 +619,7 @@ let ran_assigned = .~assigned
      (Code
       (Let_mut (ident x/15) (body (Lit (Int 0) : int))
        (in_
-        (Let (ident _/16) (args ()) (generalized true)
+        (Let (ident _/16) (args ()) (generalized false)
          (body (Assign (Bound (Local x/15)) (Lit (Int 2) : int) : unit))
          (in_ (Var (Bound (Local x/15)) : int)) : int))
        : int)))
@@ -627,7 +628,7 @@ let ran_assigned = .~assigned
      (Code
       (Let_mut (ident x/15) (body (Lit (Int 0) : int))
        (in_
-        (Let (ident _/16) (args ()) (generalized true)
+        (Let (ident _/16) (args ()) (generalized false)
          (body (Assign (Bound (Local x/15)) (Lit (Int 2) : int) : unit))
          (in_ (Var (Bound (Local x/15)) : int)) : int))
        : int)))
@@ -703,8 +704,7 @@ let bad =
            , Stag.Expr.var "n"
            , Stag.Expr.Quote (Ptr.make ( (Stag.Expr.App (Ptr.make ( (Stag.Expr.var "f", Stag.Expr.Lit Stag.Lit.Unit)))))) ))) ))))
 |};
-  [%expect
-    {| val bad : <'_a>{f : unit -> '_a; ..'_b} |}]
+  [%expect {| val bad : <'_a>{f : unit -> '_a; ..'_b} |}]
 ;;
 
 (* The signature, then the values of the toplevels named [*_value] at runtime. *)
@@ -1046,7 +1046,7 @@ let fine = .<let mut x = 0 in let g u = .~incr in g (); x>.
   [%expect
     {|
     val incr : <unit>{x : mut int; ..'a}
-    val implicit : <<unit>{..'a}>{..'b}
+    val implicit : <<'a>{g : unit -> 'a; ..'b}>{..'c}
     val explicit : <<'a>{g : unit -> 'a; ..'b}>{..'c}
     val fine : <int>{..'a}
     |}]

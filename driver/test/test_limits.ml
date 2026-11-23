@@ -218,7 +218,7 @@ let%expect_test "growing code exponentially runs out of fuel at runtime" =
     {|
     (x
      (Code
-      (Let (ident _/18) (args ()) (generalized true) (body (Lit Unit : unit))
+      (Let (ident _/18) (args ()) (generalized false) (body (Lit Unit : unit))
        (in_ (Lit Unit : unit)) : unit)))
     eval failed: ("Out of fuel: evaluation took more than 2000 steps" @ t.stag:2:69-77)
     eval failed: Time limit exceeded: evaluation took more than 50ms

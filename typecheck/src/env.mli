@@ -29,7 +29,8 @@ module Entry : sig
     ; level : Level.t
     ; quote_id : int option (** The innermost quote the entry is bound in. *)
     ; mode : Mode.Var.t
-    ; locks : Lock.t list (** The locks enclosing its binding, innermost first. *)
+    ; locks : Lock.t list
+    (** The locks enclosing its binding, innermost first. *)
     ; binder : Typed.Binder.t
     }
   [@@deriving sexp_of]

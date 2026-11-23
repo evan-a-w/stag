@@ -235,7 +235,8 @@ module Expr = struct
         ; body = sub equal
         ; in_ = sub in_
         }
-    | Assign (path, value) -> Assign (Path (path.txt, Syntax.Annot.none), sub value)
+    | Assign (path, value) ->
+      Assign (Path (path.txt, Syntax.Annot.none), sub value)
     | Store (target, value) -> Store (sub target, sub value)
     | Fun (args, body) ->
       Fun { args = List.map args ~f:binding; body = sub body }

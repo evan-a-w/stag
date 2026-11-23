@@ -741,7 +741,7 @@ let ran = .~(upd spliced)
      (Code
       (Let (ident v/18) (args ())
        (result_annot ((Con (<N.r> @ t.stag:12:35-38) ()) @ t.stag:12:35-38))
-       (generalized true)
+       (generalized false)
        (body
         (Record
          ((((type_name N.r) (name N.x) (index 0)) (Lit (Int 1) : int))
@@ -755,7 +755,7 @@ let ran = .~(upd spliced)
      (Code
       (Let (ident v/18) (args ())
        (result_annot ((Con (<N.r> @ t.stag:12:35-38) ()) @ t.stag:12:35-38))
-       (generalized true)
+       (generalized false)
        (body
         (Record
          ((((type_name N.r) (name N.x) (index 0)) (Lit (Int 1) : int))

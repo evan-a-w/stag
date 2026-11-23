@@ -70,7 +70,7 @@ let generated = wrap .<1>.
     (wrapped (Tuple 1 1))
     (generated
      (Code
-      (Let (ident y/17) (args ()) (generalized true) (body (Lit (Int 1) : int))
+      (Let (ident y/17) (args ()) (generalized false) (body (Lit (Int 1) : int))
        (in_
         (Tuple ((Var (Bound (Local y/17)) : 'a) (Var (Bound (Local y/17)) : 'a))
          : "'a * 'a"))

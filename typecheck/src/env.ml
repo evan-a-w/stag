@@ -38,9 +38,9 @@ module Entry = struct
     }
   ;;
 
-  (* Locks are only pushed, so those enclosing the binding are a suffix of
-     those enclosing a use it is visible at, unless the use is in a splice,
-     whose locks are those outside its quote. *)
+  (* Locks are only pushed, so those enclosing the binding are a suffix of those
+     enclosing a use it is visible at, unless the use is in a splice, whose
+     locks are those outside its quote. *)
   let crossed t ~locks =
     List.take_while locks ~f:(fun (lock : Lock.t) ->
       not (List.exists t.locks ~f:(fun (bound : Lock.t) -> bound.id = lock.id)))

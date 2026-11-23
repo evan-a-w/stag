@@ -221,14 +221,19 @@ let level_name level =
   | level -> sprintf "inside %d quote(s) (level %d)" level level
 ;;
 
-let mode_message (Mode.Error.Mismatch { var = _; axis; lower; upper; lower_because; upper_because }) =
+let mode_message
+  (Mode.Error.Mismatch
+    { var = _; axis; lower; upper; lower_because; upper_because })
+  =
   let point (type a) (axis : a Mode.Axis.t) (point : a) =
     let module C = (val Mode.Axis.chain axis) in
     Sexp.to_string (C.sexp_of_t point) |> String.lowercase
   in
   let reasons because =
     List.map because ~f:(fun ({ loc; what } : Mode.Reason.t) ->
-      if Loc.is_none loc then what else sprintf "%s (at %s)" what (Loc.to_string loc))
+      if Loc.is_none loc
+      then what
+      else sprintf "%s (at %s)" what (Loc.to_string loc))
     |> String.concat ~sep:", then "
   in
   sprintf
@@ -319,8 +324,8 @@ let rec kind_message (kind : Kind.t) ~show_type =
     sprintf "The variable %s is substituted more than once" name
   | Variable_used_at_wrong_level { name; var_level; used_at } ->
     sprintf
-      "The variable %s is bound at %s but used at %s; only toplevels may be used \
-       at an earlier level"
+      "The variable %s is bound at %s but used at %s; only toplevels may be \
+       used at an earlier level"
       name
       (level_name var_level)
       (level_name used_at)
