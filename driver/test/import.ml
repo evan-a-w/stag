@@ -30,3 +30,5 @@ module Round_trip = Stag_syntax_round_trip.Round_trip
 module Inline_expansion = Stag_driver.Inline_expansion
 module Corrected_file = Stag_driver.Corrected_file
 module Source_edit = Stag_driver.Source_edit
+module Env = Stag_typecheck.Env
+module Mode = Stag_mode

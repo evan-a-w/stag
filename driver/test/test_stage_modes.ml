@@ -171,3 +171,173 @@ let f y = x
 |};
   [%expect {| The value of x may be needed to compute itself: x -> f -> x |}]
 ;;
+
+let%expect_test "a splice of unknown code captures what it may use" =
+  check
+    {|
+let argument c = .< fun a -> let h b = .~c in .< h 1 >. >.
+let uses_argument = argument .<a>.
+let mutable_ c = .< let mut m = 1 in let h b = .~c in .< h 1 >. >.
+let uses_mutable = mutable_ .<m>.
+let nothing_captured c = .< let h b = .~c in .< h 1 >. >.
+|};
+  [%expect
+    {|
+    val argument : <'a>{a?'b : immut 'c; b?'d : immut 'e; h?'f : immut 'e -> 'a; ..'g} -> <'c -> <'h>{h : int -> 'h; ..'i}>{..'j} where ..'g <= {..'j}
+    val uses_argument : <'_a -> <'_b>{h : int -> '_b; ..'_c}>{..'_d}
+    val mutable_ : <'a>{b?'b : immut 'c; h?'d : immut 'c -> 'a; m?'e : int; ..'f} -> <<'g>{h : int -> 'g; ..'h}>{..'i} where ..'f <= {..'i}
+    val uses_mutable : <<'_a>{h : int -> '_a; ..'_b}>{..'_c}
+    val nothing_captured : <'a>{b?'b : immut int; h?'c : immut int -> 'a; ..'d} -> <<'a>{..'e}>{..'f} where ..'d <= {..'f}
+    |}]
+;;
+
+let%expect_test "a function used in its own definition isn't decided on early" =
+  check
+    {|
+let quote_first n = let g x = let c = .<g>. in Int.add x n in g 1
+let quote_last n = let g x = let y = Int.add x n in let c = .<g>. in y in g 1
+let bound_first n = let g x = let y = g in Int.add x n in g 1
+let bound_last n = let g x = let z = Int.add x n in let y = g in z in g 1
+let constant = let g x = let c = .<g>. in let y = g in x in .<g>.
+|};
+  [%expect
+    {|
+    val quote_first : int -> int
+    val quote_last : int -> int
+    val bound_first : int -> int
+    val bound_last : int -> int
+    val constant : <'a -> 'a>{..'b}
+    |}]
+;;
+
+let%expect_test "splices leave the locks of their quote" =
+  let id = ref 0 in
+  let lock name (kind : Env.Lock.Kind.t) =
+    incr id;
+    name, { Env.Lock.id = !id; kind }
+  in
+  let mode () = Mode.Var.create (Mode.Id_source.create ()) ~rank:0 in
+  let closure name = lock name (Closure (mode ())) in
+  let quote name = lock name (Quote (mode ())) in
+  let splice name = lock name Splice in
+  let names = ref [] in
+  let show locks =
+    print_s
+      [%sexp
+        (List.map locks ~f:(fun (lock : Env.Lock.t) ->
+           List.Assoc.find_exn !names lock.id ~equal:Int.equal)
+         : string list)]
+  in
+  let make locks =
+    names
+    := List.map locks ~f:(fun (name, (lock : Env.Lock.t)) -> lock.id, name)
+       @ !names;
+    List.map locks ~f:snd
+  in
+  (* .< let y = .. in fun b -> .~(.< y >.) >. *)
+  let outer = make [ quote "outer" ] in
+  let b = make [ closure "b" ] in
+  let inner = make [ quote "inner"; splice "splice" ] in
+  let at_use = inner @ b @ outer in
+  show (Env.Lock.cancel_splices at_use);
+  let y : Env.Entry.t =
+    { (Env.Entry.toplevel
+         ~ident:{ Typed.Ident.name = "y"; stamp = 0 }
+         ~scheme:Type.error
+         ~mode:(mode ()))
+      with
+      locks = outer
+    }
+  in
+  show (Env.Entry.crossed y ~locks:at_use);
+  let x = { y with locks = [] } in
+  show (Env.Entry.crossed x ~locks:at_use);
+  (* .< fun a -> .< fun b -> .~(fun c -> use) >. >. *)
+  let nested =
+    make
+      [ closure "c"
+      ; splice "splice'"
+      ; closure "b'"
+      ; quote "q2"
+      ; closure "a"
+      ; quote "q1"
+      ]
+  in
+  show (Env.Lock.cancel_splices nested);
+  [%expect {|
+    (inner)
+    (inner b)
+    (inner)
+    (c a q1)
+    |}]
+;;
+
+let%expect_test "values computed at compile time are portable, not const" =
+  modes {|
+let embeds = .~(let k x = x in .<k>.)
+let quoted = .<embeds>.
+|};
+  modes
+    ~const_toplevels:true
+    {|
+let embeds = .~(let k x = x in .<k>.)
+let literal = .~(.<1>.)
+let applied = .~(.<Int.add 1 2>.)
+|};
+  [%expect
+    {|
+    val embeds : '_a -> '_a
+    val quoted : <'_a -> '_a>{..'b}
+    This is portable, because k was computed at compile time (at t.stag:2:33-34), but must be at most const, because embeds is a toplevel (at t.stag:2:13-37)
+    This is nonportable, because it applies a function (at t.stag:4:19-30), but must be at most const, because applied is a toplevel (at t.stag:4:14-33)
+    |}]
+;;
+
+let%expect_test "reading through a pointer and matching exceptions compute" =
+  check
+    {|
+type list['a] = Nil | Cons of ptr['a * list['a]]
+exception E of list[int]
+let cell = Ptr.make Nil
+let read = let x = cell.* in x
+let read_in_quote = let x = cell.* in .<x>.
+let caught = match Nil with x -> x | exception E l -> l
+let caught_in_quote f =
+  match f () with x -> .<Nil>. | exception E l -> let y = l in .<y>.
+|};
+  [%expect
+    {|
+    type list['a] = Nil | Cons of ptr['a * list['a]]
+    exception E of list[int]
+    val cell : ptr[list['_a]]
+    val read : list['_a]
+    val read_in_quote : <'_a>{x : '_a; ..'_b}
+    val caught : list[int]
+    val caught_in_quote : (unit -> 'a) -> <list['b]>{y : list['b]; ..'c}
+    |}]
+;;
+
+let%expect_test "mode annotations on functions and mode variables" =
+  modes
+    {|
+let f @ const = fun x -> x
+let g n = let h @ const = fun x -> Int.add x n in h
+let k @ portable = let n = Int.add 1 2 in fun x -> Int.add x n
+let v @ 'm = 1
+|};
+  [%expect
+    {|
+    This is nonportable, because it is a parameter, then n is captured by a closure (at t.stag:3:45-46), then the closure is made (at t.stag:3:26-46), but must be at most const, because it is annotated const (at t.stag:3:18-23)
+    This is nonportable, because it applies a function (at t.stag:4:27-38), then n is bound (at t.stag:4:19-62), but must be at most portable, because it is annotated portable (at t.stag:4:8-16)
+    Mode variables like 'm are not supported on bindings yet
+    |}]
+;;
+
+let%expect_test "a limit is reported once, at what first exceeds it" =
+  modes
+    {|
+let bad @ const = (Int.add 1 2, Int.add 3 4, Int.add (Int.add 5 6) 7)
+|};
+  [%expect
+    {| This is nonportable, because it applies a function (at t.stag:2:19-30), but must be at most const, because it is annotated const (at t.stag:2:10-15) |}]
+;;

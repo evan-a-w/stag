@@ -15,5 +15,6 @@
   stag_eval
   stag_treewalk
   stag_typecheck
+  stag_mode
   stag_driver
   stag_syntax_round_trip))
