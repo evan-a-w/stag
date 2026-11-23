@@ -502,7 +502,10 @@ let%expect_test "end to end: source to rendered errors" =
     1 | let f r = match r with {`x = a; ..a} -> a
                                           ^
     Error: The variable a is bound several times in this matching
-    ok
+    File "a.stag", line 1, characters 31-32:
+    1 | let c = .<1>. let d = .~c.{y = 1}
+                                       ^
+    Error: y is substituted, but the spliced code has no free variable y
     File "a.stag", line 1, characters 22-23:
     1 | let%expect_test "t" = 1
                               ^

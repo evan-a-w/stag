@@ -376,6 +376,13 @@ evaluated once, in the order written, before the code runs, so
 `.~c.{a = y; b = y <- 5}` gives `a` the value `y` has after `b`'s assignment.
 This is the same at a toplevel splice and in a quote.
 
+A substitution must be of a free variable of the code: substituting a name
+the code's context is known not to have (it is closed without it, or the
+entry is absent) is an error, as is one the code run at a toplevel splice
+turns out not to use when its type doesn't list it. A toplevel constant used
+in a quote is not a free variable (see modes.md), so `.~(.<n>.).{n = 1}` is
+an error for `let n = 3`.
+
 ### Modes
 
 The syntax of modes (see [modes.md](modes.md) and

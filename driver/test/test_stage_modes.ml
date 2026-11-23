@@ -341,3 +341,37 @@ let bad @ const = (Int.add 1 2, Int.add 3 4, Int.add (Int.add 5 6) 7)
   [%expect
     {| This is nonportable, because it applies a function (at t.stag:2:19-30), but must be at most const, because it is annotated const (at t.stag:2:10-15) |}]
 ;;
+
+let%expect_test "substituting a name the code doesn't need is an error" =
+  modes
+    {|
+let n = 3
+let computed = Int.add 1 2
+let resolved_directly = .~(.<n>.).{n = true}
+let free = .~(.<computed>.).{computed = true}
+let closed (c : <int>{}) = .<.~c.{x = 1}>.
+let absent (c : <int>{x : int}) = .<let y = 1 in .~c.{x = 1; y}>.
+let unknown c = .<.~c.{x = 1}>.
+|};
+  [%expect {|
+    n is substituted, but the spliced code has no free variable n
+    x is substituted, but the spliced code has no free variable x
+    y is substituted, but the spliced code has no free variable y
+    |}]
+;;
+
+let%expect_test "a quote checks the toplevels it uses first" =
+  modes {|
+let q = .<later>.
+let later = .~(let z = q in .<1>.)
+|};
+  modes {|
+let later = .~(let z = q in .<1>.)
+let q = .<later>.
+|};
+  [%expect {|
+    The toplevel q is used at compile time before it is fully checked (it is in the same recursive group as this splice)
+    val later : int
+    val q : <'a>{later : 'a; ..'b}
+    |}]
+;;

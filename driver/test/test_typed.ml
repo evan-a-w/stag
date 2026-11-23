@@ -855,13 +855,19 @@ let deep = .~(let x = .<1>. in .~(let n = 5 in .<n; x>.))
 let%expect_test "explicit substitutions" =
   print
     {|
-let n = 3
+let n = add 1 2
 let persistent_shorthand = let f y = y in .<.~(.<id (f 1)>.).{f; id}>.
 let at_toplevel = .~(.<add n y>.).{n; y = 1}
 |};
   [%expect
     {|
-    ((members (((ident n/4) (args ()) (scheme int) (body (Lit (Int 3) : int)))))
+    ((members
+      (((ident n/4) (args ()) (scheme int)
+        (body
+         (App
+          (App (Var (Bound (Toplevel add/0)) : "int -> int -> int")
+           (Lit (Int 1) : int) : "int -> int")
+          (Lit (Int 2) : int) : int)))))
      (recursive false))
     ((members
       (((ident persistent_shorthand/5) (args ()) (scheme <int>{..'a})
@@ -894,9 +900,9 @@ let at_toplevel = .~(.<add n y>.).{n; y = 1}
            (Quote
             (App
              (App (Var (Persistent (Toplevel add/0)) : "int -> int -> int")
-              (Var (Persistent (Toplevel n/4)) : int) : "int -> int")
+              (Var (Free_toplevel n) : int) : "int -> int")
              (Var (Free y) : int) : int)
-            : "<int>{n?'_a : immut int; y : immut int}"))
+            : "<int>{n : immut int; y : immut int}"))
           (expansion
            (Let (ident y/18) (args ()) (generalized false)
             (body (Lit (Int 1) : int))

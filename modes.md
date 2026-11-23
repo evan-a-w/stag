@@ -108,6 +108,22 @@ A compiler flag, e.g. `Typecheck.create ~const_toplevels:bool`:
   order: cycles through non-functions (e.g. `let x = f 1` and `let f y = x`)
   are reported at check time (see syntax.md, Evaluation).
 
+## Toplevels in quotes
+
+A toplevel used in a quote is checked first, to know its mode: `const` ones
+are used directly, others are free variables of the quote. One whose checking
+is underway (a recursive reference) is a free variable. So the order of
+checking matters: with
+
+```ocaml
+let q = .<later>.
+let later = .~(let z = q in .<1>.)
+```
+
+checking `q` checks `later`, whose splice needs `q`, which isn't checked yet:
+an error. With the two swapped, `later` is checked first, so `q` is checked
+during its splice, and `later` is a free variable of `q`'s quote.
+
 ## Toplevel splices
 
 A splice outside any quote runs at compile time, so may only use `const`

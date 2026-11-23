@@ -22,6 +22,7 @@ module Kind = struct
     | Not_in_scope of Syntax.Decl_path.t
     | Duplicate_toplevel of string
     | Duplicate_substitution of string
+    | Unused_substitution of string
     | Variable_used_at_wrong_level of
         { name : string
         ; var_level : Env.Level.t
@@ -321,6 +322,11 @@ let rec kind_message (kind : Kind.t) ~show_type =
   | Not_in_scope path -> sprintf "Unbound value %s" (decl_path path)
   | Duplicate_toplevel name ->
     sprintf "The value %s is defined more than once in this module" name
+  | Unused_substitution name ->
+    sprintf
+      "%s is substituted, but the spliced code has no free variable %s"
+      name
+      name
   | Duplicate_substitution name ->
     sprintf "The variable %s is substituted more than once" name
   | Variable_used_at_wrong_level { name; var_level; used_at } ->

@@ -2386,6 +2386,7 @@ and expr_type
                       (Type.canonical_ty code.ty))))
              ~children:[ code ]
          | Ok () ->
+           let listed = listed_entries context in
            (match substitutions () with
             | Error error -> fail error ~children:[ code ]
             | Ok subs ->
@@ -2401,7 +2402,7 @@ and expr_type
                        | Implicit _ -> [])))
                   Type.error
               else (
-                match expand t scope ~code ~subs ~ty:inner ~loc with
+                match expand t scope ~code ~subs ~listed ~ty:inner ~loc with
                 | Error error -> fail error ~children:[ code ]
                 | Ok expansion ->
                   node (Toplevel_splice { code; expansion }) inner))))
@@ -2746,7 +2747,18 @@ and splice_syntax ?expected ~hint t (scope : Scope.t) ~code ~loc =
 
 (* Runs the toplevel splice [code], then infers the code it generates here, with
    its explicit substitutions bound by lets around it. *)
-and expand t (scope : Scope.t) ~code ~subs ~ty ~loc =
+(* The names [row] has an entry for that may be present. *)
+and listed_entries (row : Type.row) =
+  match Type.canonical_row row with
+  | REmpty | RVar _ -> String.Set.empty
+  | RExtend (name, presence, _, _, rest) ->
+    (match Type.canonical_presence presence with
+     | Present | PVar _ -> Set.add (listed_entries rest) name
+     | Absent -> listed_entries rest)
+
+(* An explicit substitution of a name not [listed] in the code's context must be
+   of a free variable of the code generated. *)
+and expand t (scope : Scope.t) ~code ~subs ~listed ~ty ~loc =
   let program = scope.program in
   let bindings, entry =
     match (subs : Typed.Expr.t Typed.Expr.Subs.t) with
@@ -2785,7 +2797,12 @@ and expand t (scope : Scope.t) ~code ~subs ~ty ~loc =
       ( List.filter_map subs ~f:(fun (_, sub) -> Either.Second.to_option sub)
       , Map.find entries )
   in
-  let%map.Result generated =
+  let used = String.Hash_set.create () in
+  let entry name =
+    Hash_set.add used name;
+    entry name
+  in
+  let%bind.Result generated =
     at_compile_time
       ~loc
       program
@@ -2798,6 +2815,17 @@ and expand t (scope : Scope.t) ~code ~subs ~ty ~loc =
           ~reflect)
       ~error:(fun error ->
         Typecheck_error.create ~loc (Splice_evaluation_failed { code; error }))
+  in
+  let%map.Result () =
+    match subs with
+    | Implicit _ -> Ok ()
+    | Explicit subs ->
+      List.find subs ~f:(fun (name, _) ->
+        not (Set.mem listed name || Hash_set.mem used name))
+      |> Option.value_map
+           ~default:(Ok ())
+           ~f:(fun (name, (sub : Typed.Expr.t)) ->
+             error ~loc:sub.loc (Unused_substitution name))
   in
   let expansion =
     with_monomorphic_bindings
@@ -3043,6 +3071,24 @@ and substitute_explicitly t scope ~context ~subs ~loc =
   let%bind.Result () =
     check_no_duplicates (List.map subs ~f:fst) ~error:(fun name ->
       Duplicate_substitution name)
+  in
+  let rec lacks (row : Type.row) name =
+    match Type.canonical_row row with
+    | REmpty -> true
+    | RVar _ -> false
+    | RExtend (entry, presence, _, _, rest) ->
+      if String.equal entry name
+      then (
+        match Type.canonical_presence presence with
+        | Absent -> true
+        | Present | PVar _ -> false)
+      else lacks rest name
+  in
+  let%bind.Result () =
+    List.find_map subs ~f:(fun ({ txt = name; loc }, _) ->
+      Option.some_if (lacks context name) (loc, name))
+    |> Option.value_map ~default:(Ok ()) ~f:(fun (loc, name) ->
+      error ~loc (Unused_substitution name))
   in
   let%bind.Result provided =
     List.fold_result

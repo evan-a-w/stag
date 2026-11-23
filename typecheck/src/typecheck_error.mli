@@ -28,6 +28,9 @@ module Kind : sig
     | Not_in_scope of Syntax.Decl_path.t
     | Duplicate_toplevel of string
     | Duplicate_substitution of string
+    | Unused_substitution of string
+    (** An explicit substitution of a name that the spliced code doesn't have as
+        a free variable. *)
     | Variable_used_at_wrong_level of
         { name : string
         ; var_level : Env.Level.t

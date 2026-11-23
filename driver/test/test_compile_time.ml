@@ -237,7 +237,7 @@ let%expect_test "substitutions at toplevel splices" =
   run
     ~bodies:[ "implicit"; "explicit"; "explicit_toplevel" ]
     {|
-let n = 3
+let n = add 1 2
 let code = .<(n, x)>.
 let implicit x = .~code
 let explicit = .~code.{n = true; x = 1}
@@ -247,14 +247,16 @@ let applied = implicit false
   [%expect
     {|
     val n : int
-    val code : <int * 'a>{x : 'a; ..'b}
+    val code : <'a * 'b>{n : 'a; x : 'b; ..'c}
     val implicit : 'a -> int * 'a
-    val explicit : int * int
+    val explicit : bool * int
     val explicit_toplevel : int * int
     val applied : int * bool
     (implicit/6
      (Toplevel_splice
-      (code (Var (Bound (Toplevel code/5)) : "<int * 'a>{x : immut 'a}"))
+      (code
+       (Var (Bound (Toplevel code/5)) :
+        "<int * 'a>{n : immut int; x : immut 'a}"))
       (expansion
        (Tuple
         ((Var (Bound (Toplevel n/4)) : int) (Var (Bound (Local x/19)) : 'a)) :
@@ -264,7 +266,7 @@ let applied = implicit false
      (Toplevel_splice
       (code
        (Var (Bound (Toplevel code/5)) :
-        "<int * int>{n?'_a : immut bool; x : immut int}"))
+        "<bool * int>{n : immut bool; x : immut int}"))
       (expansion
        (Let (ident n/20) (args ()) (generalized false)
         (body (Lit (Bool true) : bool))
@@ -273,16 +275,16 @@ let applied = implicit false
           (body (Lit (Int 1) : int))
           (in_
            (Tuple
-            ((Var (Bound (Toplevel n/4)) : int) (Var (Bound (Local x/21)) : int))
-            : "int * int"))
-          : "int * int"))
-        : "int * int"))
-      : "int * int"))
+            ((Var (Bound (Local n/20)) : bool) (Var (Bound (Local x/21)) : int))
+            : "bool * int"))
+          : "bool * int"))
+        : "bool * int"))
+      : "bool * int"))
     (explicit_toplevel/8
      (Toplevel_splice
       (code
        (Var (Bound (Toplevel code/5)) :
-        "<int * int>{n?'_a : immut int; x : immut int}"))
+        "<int * int>{n : immut int; x : immut int}"))
       (expansion
        (Tuple
         ((Var (Bound (Toplevel n/4)) : int) (Var (Bound (Toplevel n/4)) : int)) :
@@ -291,18 +293,16 @@ let applied = implicit false
     -- evaluated at compile time
     (code
      (Code
-      (Tuple ((Var (Persistent (Toplevel n/4)) : int) (Var (Free x) : 'a)) :
-       "int * 'a")))
+      (Tuple ((Var (Free_toplevel n) : 'a) (Var (Free x) : 'b)) : "'a * 'b")))
     -- evaluated
-    (n 3)
+    (n 1)
     (code
      (Code
-      (Tuple ((Var (Persistent (Toplevel n/4)) : int) (Var (Free x) : 'a)) :
-       "int * 'a")))
+      (Tuple ((Var (Free_toplevel n) : 'a) (Var (Free x) : 'b)) : "'a * 'b")))
     (implicit <fun>)
-    (explicit (Tuple 3 1))
-    (explicit_toplevel (Tuple 3 3))
-    (applied (Tuple 3 false))
+    (explicit (Tuple true 1))
+    (explicit_toplevel (Tuple 1 1))
+    (applied (Tuple 1 false))
     |}]
 ;;
 
@@ -1088,7 +1088,9 @@ let%expect_test "re-inference of a local bounded by an outer row" =
 let%expect_test "re-inference of a local bounded by an outer closed row" =
   (* Splicing [e1] with only [x] substituted closes its row, so [h]'s presence
      of [x] is only bounded below by [e1]'s, which must not keep [h] from being
-     generalized: without [k]'s annotation, [h] is used with and without [x]. *)
+     generalized: without [k]'s annotation, [h] is used with and without [x].
+     Substituting [x] into [e1] known to be closed, or into code generated
+     without [x], is an error. *)
   let f e1 ~use_k =
     sprintf
       {|let f %s k =
@@ -1143,34 +1145,22 @@ let%expect_test "re-inference of a local bounded by an outer closed row" =
     (gen <fun>)
     (user <fun>)
     -- annotated
-    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
-    val closeit : <int>{} -> unit
-    val direct : <int>{} -> <int>{} -> unit
-    -- evaluated at compile time
+    ((Unused_substitution x) @ t.stag:6:12-13)
     -- not annotated
     val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
     val closeit : <int>{} -> unit
     val direct : <int>{} -> <int>{} -> unit
     -- evaluated at compile time
     -- generated
-    val tw : <'a>{x?'b : immut int; ..'c} -> <'a>{x?'d : mut?'e 'f; ..'g} where 'b <= 'd, 'b => int = 'f, ..'c <= {x?'d : mut?'e 'f; ..'g}
-    val closeit : <int>{} -> unit
-    val gen : 'a -> <<int>{} -> <int>{} -> unit>{..'b}
-    val user : <int>{} -> <int>{} -> unit
-    -- evaluated at compile time
-    (gen <fun>)
-    -- evaluated
-    (tw <fun>)
-    (closeit <fun>)
-    (gen <fun>)
-    (user <fun>)
+    ((Unused_substitution x) @ t.stag:5:12-13)
     |}]
 ;;
 
 let%expect_test "the order of splices deciding a weak variable matters" =
   (* [w0]'s row is weak. Spliced under local [x] and [y] first, it is closed
      with neither, as nothing it may use is known; spliced with [x] substituted
-     first, it may use [x], which [needx] then makes [Present]. *)
+     first, it may use [x], which [needx] then makes [Present]. Its code doesn't
+     use [x], so a substitution of [x] is an error either way. *)
   let f0 = {|let f0 c d = d|} in
   let w0 = {|let w0 = f0 .<y>. .<2>.|} in
   let substituted = {|let substituted = .~w0.{x = 3}|} in
@@ -1182,26 +1172,13 @@ let%expect_test "the order of splices deciding a weak variable matters" =
   run ~eval:false (lines [ needx; f0; w0; under_lets ]);
   [%expect
     {|
-    val needx : <int>{x : int} -> unit
-    val f0 : 'a -> 'b -> 'b
-    val w0 : <int>{x : immut int}
-    val substituted : int
-    val under_lets : int
-    val use : unit
-    -- evaluated at compile time
-    (f0 <fun>)
-    (w0 (Code (Lit (Int 2) : int)))
+    ((Unused_substitution x) @ t.stag:5:28-29)
+    ((Unused_substitution x) @ t.stag:6:24-25)
     ((Unification_error
       (Row_mismatch (RExtend x Present (TCon int ()) REmpty) REmpty
        (Missing_label x)))
      @ t.stag:7:16-18)
-    val needx : <int>{x : int} -> unit
-    val f0 : 'a -> 'b -> 'b
-    val w0 : <int>{x?'_a : immut int}
-    val substituted : int
-    -- evaluated at compile time
-    (f0 <fun>)
-    (w0 (Code (Lit (Int 2) : int)))
+    ((Unused_substitution x) @ t.stag:5:28-29)
     val needx : <int>{x : int} -> unit
     val f0 : 'a -> 'b -> 'b
     val w0 : <int>{}

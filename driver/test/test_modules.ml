@@ -802,7 +802,7 @@ let%expect_test "splicing code with canonically named free variables" =
     (parse_exn
        {|
 module M = struct
-  let n = 5
+  let n = add 2 3
 end
 let implicit = .~.<M.n>.
 let local_does_not_provide n = cond n () (); .~.<M.n>.
@@ -814,9 +814,10 @@ let local_does_not_provide n = cond n () (); .~.<M.n>.
              (splice ~subs:[ "M.n", Some (string "s") ] (quote (var "M.n")))
          ; top "shorthand" [] (splice ~subs:[ "M.n", None ] (quote (var "M.n")))
          ]);
-  check {|
+  check
+    {|
 module M = struct
-  let n = 5
+  let n = add 2 3
   let as_written = .~.<n>..{n}
 end
 |};
@@ -827,12 +828,9 @@ end
     end
     val implicit : int
     val local_does_not_provide : bool -> int
-    val explicit : int
+    val explicit : string
     val shorthand : int
-    module M : sig
-      val n : int
-      val as_written : int
-    end
+    ((Unused_substitution n) @ t.stag:4:28-29)
     |}]
 ;;
 
