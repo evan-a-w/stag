@@ -44,6 +44,7 @@ let of_libraries libraries = Libraries libraries
 let policy t ~external_ : Policy.t =
   match t with
   | All -> Allowed
+  | Libraries _ when Option.is_some (Prelude_path.relative external_) -> Allowed
   | Libraries libraries ->
     let root =
       match String.lsplit2 external_ ~on:'.' with

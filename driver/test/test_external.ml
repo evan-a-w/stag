@@ -363,3 +363,39 @@ let at_compile_time = .~(match labs 1 with 1 -> .<true>. | _ -> .<false>.)
      @ t.stag:3:22-74)
     |}]
 ;;
+
+let%expect_test "the prelude's and core's externals may always be called at \
+                 compile time"
+  =
+  let policies =
+    [ "none", Compile_time_c_calls.none
+    ; ( "denying Foo"
+      , Compile_time_c_calls.of_libraries
+          (String.Map.singleton
+             "Foo"
+             { Compile_time_c_calls.Library.name = "foo"; allowed = false }) )
+    ]
+  in
+  List.iter policies ~f:(fun (name, t) ->
+    List.iter
+      [ Prelude_path.canonical "labs"
+      ; Prelude_path.canonical "Core.Int.labs"
+      ; "Foo.labs"
+      ; "Bar.labs"
+      ]
+      ~f:(fun external_ ->
+        let policy = Compile_time_c_calls.policy t ~external_ in
+        print_s
+          [%message name external_ (policy : Compile_time_c_calls.Policy.t)]));
+  [%expect {|
+    (none prelude.labs (policy Allowed))
+    (none prelude.Core.Int.labs (policy Allowed))
+    (none Foo.labs (policy (Denied (external_ Foo.labs) (library ()))))
+    (none Bar.labs (policy (Denied (external_ Bar.labs) (library ()))))
+    ("denying Foo" prelude.labs (policy Allowed))
+    ("denying Foo" prelude.Core.Int.labs (policy Allowed))
+    ("denying Foo" Foo.labs
+     (policy (Denied (external_ Foo.labs) (library (foo)))))
+    ("denying Foo" Bar.labs (policy (Denied (external_ Bar.labs) (library ()))))
+    |}]
+;;

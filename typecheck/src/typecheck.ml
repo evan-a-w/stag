@@ -4114,13 +4114,10 @@ let declare
     add_toplevel ~mut:false name args annot expr
   | Let_mut (name, annot, expr), _ -> add_toplevel ~mut:true name [] annot expr
   | External { name; ty; symbol }, _ ->
-    let at_compile_time : Compile_time_c_calls.Policy.t =
-      if in_prelude
-      then Allowed
-      else
-        Compile_time_c_calls.policy
-          program.compile_time_c_calls
-          ~external_:(Module_scope.canonical_name module_ name.txt)
+    let at_compile_time =
+      Compile_time_c_calls.policy
+        program.compile_time_c_calls
+        ~external_:(Module_scope.canonical_name module_ name.txt)
     in
     add_toplevel
       ~external_:{ Toplevel.External.ty; symbol; at_compile_time }

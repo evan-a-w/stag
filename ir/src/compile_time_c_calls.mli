@@ -27,14 +27,14 @@ end
 
 type t
 
-(** Only the prelude's externals. *)
+(** Only the prelude's externals (core's included). *)
 val none : t
 
 val all : t
 
-(** The externals of each root module (eg. [Foo] for [Foo.f] or [Foo.M.f]) of
-    [libraries] as its library says, and no others. *)
+(** The prelude's externals, and those of each root module (eg. [Foo] for
+    [Foo.f] or [Foo.M.f]) of [libraries] as its library says. *)
 val of_libraries : Library.t String.Map.t -> t
 
-(** Of the external of canonical name [external_] (not of the prelude). *)
+(** Of the external of canonical name [external_]. *)
 val policy : t -> external_:string -> Policy.t
