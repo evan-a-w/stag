@@ -14,6 +14,7 @@ module Constructor = struct
   type t =
     { name : string
     ; args : Type.ty list
+    ; global_args : bool list (** Per argument: whether written [global_]. *)
     }
   [@@deriving sexp_of]
 end
@@ -22,13 +23,26 @@ module Field = struct
   type t =
     { name : string
     ; ty : Type.ty
+    ; is_global : bool
     }
   [@@deriving sexp_of]
 end
 
 (* A tuple parenthesizes its components as constructor arguments need. *)
-let constructor_args printer name args =
-  sprintf "%s of %s" name (Type.Printer.ty printer (TTuple args))
+let constructor_args printer name args ~global_args =
+  if List.exists global_args ~f:Fn.id
+  then
+    List.map2_exn args global_args ~f:(fun arg is_global ->
+      let printed = Type.Printer.ty printer arg in
+      let printed =
+        match Type.canonical_ty arg with
+        | TTuple _ | TArrow _ -> "(" ^ printed ^ ")"
+        | _ -> printed
+      in
+      if is_global then "global_ " ^ printed else printed)
+    |> String.concat ~sep:" * "
+    |> sprintf "%s of %s" name
+  else sprintf "%s of %s" name (Type.Printer.ty printer (TTuple args))
 ;;
 
 module Type_decl = struct
@@ -56,15 +70,15 @@ module Type_decl = struct
       | Abstract -> None
       | Variant [] -> Some "|"
       | Variant constructors ->
-        List.map constructors ~f:(fun { name; args } ->
+        List.map constructors ~f:(fun { name; args; global_args } ->
           match args with
           | [] -> name
-          | args -> constructor_args printer name args)
+          | args -> constructor_args printer name args ~global_args)
         |> String.concat ~sep:" | "
         |> Some
       | Record fields ->
-        List.map fields ~f:(fun { name; ty = field } ->
-          sprintf "%s : %s" name (ty field))
+        List.map fields ~f:(fun { name; ty = field; is_global } ->
+          sprintf "%s : %s%s" name (if is_global then "global_ " else "") (ty field))
         |> String.concat ~sep:"; "
         |> sprintf "{ %s }"
         |> Some
@@ -190,8 +204,9 @@ let rec lines ~of_prelude ~modes enclosing : Item.t -> _ =
         decl
         ~canonical_name:(Scope.canonical_name scope decl.name))
   | Exception { name; args = [] } -> [ "exception " ^ name ]
-  | Exception { name; args } ->
-    line (fun printer -> "exception " ^ constructor_args printer name args)
+  | Exception { name; args; global_args } ->
+    line (fun printer ->
+      "exception " ^ constructor_args printer name args ~global_args)
   | Module { name; items = [] } -> [ sprintf "module %s : sig end" name ]
   | Module { name; items } ->
     let enclosing = Scope.create (scope.path @ [ name ]) items :: enclosing in

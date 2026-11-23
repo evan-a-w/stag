@@ -52,6 +52,7 @@ module Constructor : sig
     ; index : int
     ; args : Type.ty list
     ; result : Type.ty
+    ; global_args : bool list
     }
   [@@deriving sexp_of]
 end
@@ -64,6 +65,7 @@ module Field : sig
     ; record : Type.ty
     ; index : int
     ; ty : Type.ty
+    ; is_global : bool
     }
   [@@deriving sexp_of]
 

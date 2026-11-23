@@ -313,6 +313,12 @@ module Type_expr = struct
   let sexp_of_t = sexp_of_type_expr
   let compare = compare_type_expr
   let equal = equal_type_expr
+
+  let is_global (t : t) =
+    match t.txt with
+    | Global _ -> true
+    | _ -> false
+  ;;
 end
 
 module Type_decl = struct

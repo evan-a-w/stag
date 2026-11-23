@@ -12,8 +12,9 @@ let decl ?(params = []) ~name kind = { Signature.Type_decl.name; params; kind }
 let variant constructors = Signature.Type_decl.Kind.Variant constructors
 let record fields = Signature.Type_decl.Kind.Record fields
 let alias ty = Signature.Type_decl.Kind.Alias ty
-let ctor name args = { Signature.Constructor.name; args }
-let field name ty = { Signature.Field.name; ty }
+let ctor name args =
+  { Signature.Constructor.name; args; global_args = List.map args ~f:(fun _ -> false) }
+let field name ty = { Signature.Field.name; ty; is_global = false }
 
 let present label ty rest =
   Type.RExtend (label, Type.Present, Type.Absent, ty, rest)

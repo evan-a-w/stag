@@ -4189,7 +4189,10 @@ let rec signature (program_env : Program_env.t) module_ ~complete =
         (match
            Type_env.check_exception program_env.type_env (canonical_name name)
          with
-         | Ok { args; _ } -> Some (Exception { name; args })
+         | Ok { args; _ } ->
+           Some
+             (Exception
+                { name; args; global_args = List.map args ~f:(fun _ -> false) })
          | Error error when Typecheck_error.is_already_reported error -> None
          | Error error ->
            missing "exception" [%sexp (error : Typecheck_error.t)])

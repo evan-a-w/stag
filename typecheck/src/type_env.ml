@@ -9,6 +9,7 @@ module Constructor = struct
     ; index : int
     ; args : Type.ty list
     ; result : Type.ty
+    ; global_args : bool list
     }
   [@@deriving sexp_of]
 end
@@ -19,6 +20,7 @@ module Field = struct
     ; record : Type.ty
     ; index : int
     ; ty : Type.ty
+    ; is_global : bool
     }
   [@@deriving sexp_of]
 
@@ -825,7 +827,13 @@ let check_exception t name =
       Typed.Constructor_ref.exception_ name
     in
     let checked =
-      { Constructor.name; type_name; index; args; result = Type.exn }
+      { Constructor.name
+      ; type_name
+      ; index
+      ; args
+      ; result = Type.exn
+      ; global_args = List.map args ~f:(fun _ -> false)
+      }
     in
     decl.checked <- Some checked;
     checked
@@ -858,7 +866,10 @@ let prepare_kind t (decl : Decl.t) =
       map_result constructors ~f:(fun ((name : Name.t), args) ->
         let%map.Result args = map_result args ~f:elaborate in
         let args, syntax = List.unzip args in
-        ( { Signature.Constructor.name = name.txt; args }
+        ( { Signature.Constructor.name = name.txt
+          ; args
+          ; global_args = List.map syntax ~f:Syntax.Type_expr.is_global
+          }
         , (canonical_name name.txt, syntax) ))
     in
     let constructors, reflected = List.unzip constructors in
@@ -868,7 +879,10 @@ let prepare_kind t (decl : Decl.t) =
     let%map.Result fields =
       map_result fields ~f:(fun ((name : Name.t), ty) ->
         let%map.Result ty, syntax = elaborate ty in
-        ( { Signature.Field.name = name.txt; ty }
+        ( { Signature.Field.name = name.txt
+          ; ty
+          ; is_global = Syntax.Type_expr.is_global syntax
+          }
         , (canonical_name name.txt, syntax) ))
     in
     let fields, reflected = List.unzip fields in
@@ -980,12 +994,19 @@ let define t (decl : Decl.t) =
    | Alias _ | Abstract -> ()
    | Variant constructors ->
      let result = Type.TCon (decl.name, Decl.params decl) in
-     List.iteri constructors ~f:(fun index { name; args } ->
+     List.iteri constructors ~f:(fun index { name; args; global_args } ->
        let name = canonical_name name in
        Hashtbl.add_exn
          t.constructors
          ~key:name
-         ~data:{ Constructor.name; type_name = decl.name; index; args; result })
+         ~data:
+           { Constructor.name
+           ; type_name = decl.name
+           ; index
+           ; args
+           ; result
+           ; global_args
+           })
    | Record fields ->
      let record_type =
        { Typed.Record_type.name = decl.name
@@ -994,7 +1015,7 @@ let define t (decl : Decl.t) =
              canonical_name field.name)
        }
      in
-     List.iteri fields ~f:(fun index { name = _; ty } ->
+     List.iteri fields ~f:(fun index { name = _; ty; is_global } ->
        Hashtbl.add_exn
          t.fields
          ~key:record_type.fields.(index)
@@ -1003,6 +1024,7 @@ let define t (decl : Decl.t) =
            ; index
            ; record = TCon (decl.name, Decl.params decl)
            ; ty
+           ; is_global
            }));
   checked
 ;;
