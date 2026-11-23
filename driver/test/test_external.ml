@@ -72,8 +72,9 @@ let failed = (at 0, bad_fd 5 1)
     |}]
 ;;
 
-let%expect_test "externals run at compile time" =
+let%expect_test "externals run at compile time, if allowed" =
   run
+    ~compile_time_c_calls:Compile_time_c_calls.all
     {|
 external labs : int -> int = "labs"
 let code = .<labs (Int.sub 0 3)>.
@@ -293,9 +294,72 @@ external labs : int -> int = "labs"
 let k @ const = labs
 let p @ portable = labs
 |};
-  [%expect {|
+  [%expect
+    {|
     val labs : int -> int
     val k : int -> int
     val p : int -> int
+    |}]
+;;
+
+(* Outside a project, no library allows C calls at compile time. Calls at
+   runtime are allowed, including those of code generated at compile time. *)
+let%expect_test "C calls at compile time are denied by default" =
+  run
+    {|
+external labs : int -> int = "labs"
+let at_runtime = labs (Int.sub 0 1)
+let code = .<labs (Int.sub 0 3)>.
+let ran = .~code
+|};
+  [%expect
+    {|
+    val labs : int -> int
+    val at_runtime : int
+    val code : <int>{..'a}
+    val ran : int
+    -- evaluated at compile time
+    (code
+     (Code
+      (App (Var (Persistent (Toplevel labs/4)) : "int -> int")
+       (App
+        (App (Var (Prim Int.sub) : "int -> int -> int") (Lit (Int 0) : int) :
+         "int -> int")
+        (Lit (Int 3) : int) : int)
+       : int)))
+    -- evaluated
+    (labs <fun>)
+    (at_runtime 1)
+    (code
+     (Code
+      (App (Var (Persistent (Toplevel labs/4)) : "int -> int")
+       (App
+        (App (Var (Prim Int.sub) : "int -> int -> int") (Lit (Int 0) : int) :
+         "int -> int")
+        (Lit (Int 3) : int) : int)
+       : int)))
+    (ran 3)
+    |}];
+  run
+    {|
+external labs : int -> int = "labs"
+let at_compile_time = .~(match labs 1 with 1 -> .<true>. | _ -> .<false>.)
+|};
+  [%expect
+    {|
+    ((Splice_evaluation_failed
+      (code
+       (Match
+        (scrutinee
+         (App (Var (Bound (Toplevel labs/4)) : "int -> int") (Lit (Int 1) : int)
+          : int))
+        (cases
+         (((Lit (Int 1) : int) (Quote (Lit (Bool true) : bool) : <bool>{}))
+          ((Any : int) (Quote (Lit (Bool false) : bool) : <bool>{}))))
+        : <bool>{}))
+      (error
+       ("The external labs can't be called at compile time: C calls at compile time are only allowed in libraries that allow them"
+        @ t.stag:3:31-37)))
+     @ t.stag:3:22-74)
     |}]
 ;;

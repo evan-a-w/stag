@@ -52,9 +52,14 @@ let program ?(prelude = true) source = prelude_if prelude @ parse_exn source
 let driver t = t.driver
 let checked t = Driver.checked t.driver
 
-let typecheck_program ?(limits = limits) ?(prelude = true) program =
+let typecheck_program
+  ?(limits = limits)
+  ?compile_time_c_calls
+  ?(prelude = true)
+  program
+  =
   let prelude = prelude_if prelude in
-  match Driver.check ~limits (prelude @ program) with
+  match Driver.check ~limits ?compile_time_c_calls (prelude @ program) with
   | Error error ->
     List.iter (error : Typecheck.Failed.t).errors ~f:(fun error ->
       print_s [%sexp (error : Typecheck_error.t)]);
@@ -62,12 +67,13 @@ let typecheck_program ?(limits = limits) ?(prelude = true) program =
   | Ok driver -> Some { driver; prelude }
 ;;
 
-let typecheck ?limits ?prelude source =
+let typecheck ?limits ?compile_time_c_calls ?prelude source =
   match parse source with
   | Error error ->
     print_endline (Parser.Error.to_string error);
     None
-  | Ok program -> typecheck_program ?limits ?prelude program
+  | Ok program ->
+    typecheck_program ?limits ?compile_time_c_calls ?prelude program
 ;;
 
 let check_files ?(limits = limits) files =
@@ -202,9 +208,9 @@ let check_program ?limits ?prelude program =
   Option.iter (typecheck_program ?limits ?prelude program) ~f:print_signature
 ;;
 
-let run ?limits ?prelude ?bodies ?eval source =
+let run ?limits ?compile_time_c_calls ?prelude ?bodies ?eval source =
   Option.iter
-    (typecheck ?limits ?prelude source)
+    (typecheck ?limits ?compile_time_c_calls ?prelude source)
     ~f:(print_run ?limits ?bodies ?eval)
 ;;
 
