@@ -38,7 +38,9 @@ node, for good errors.
   The longest tokens `.<` `.~` `..` `.{` are unaffected (`..x` is `..` then
   `x`).
 - Keywords: `let rec in match with fun exception type of module struct end`,
-  `true false`, and `local_ exclave_ global_` (see [Modes](#modes)).
+  `true false`, and `local_ exclave_ global_` (see [Modes](#modes)), so
+  these are not identifiers anywhere, even qualified (`M.local_`). Mode names
+  (`local`, `const`, ...) are not keywords.
   `rec` is reserved, as lets are always recursive.
 - `@` introduces a mode (see [Modes](#modes)); `@@` is reserved (for
   modalities). `[@nontail]` is the one attribute.
@@ -403,13 +405,17 @@ type t = A of global_ int * int
 is `(int * int) @ local -> int`. A mode is written only on a binder, an
 annotation, or a function type's argument or result: `list[int @ local]` and
 `(int @ local) -> int` are errors. `local_` and `exclave_` extend as far right
-as `fun` does. `[@nontail]` follows an application. `global_` is written only
+as `fun` does. `[@nontail]` follows an application, but not as a
+constructor's argument, where it would read as applying to the construction:
+`C (f x [@nontail])`, not `C (f x) [@nontail]`. `global_` is written only
 on a record field or a constructor argument; an exception's arguments are
 always global, so take no `global_`.
 
 In reflected syntax, a binder's or variable's annotation is a
 ``Stag.Annot.t = {`ty : option[Type_expr.t]; `mode : option[Mode_expr.t]}``
-(`Stag.Annot.none`, `Stag.Annot.ty t`).
+(`Stag.Annot.none`, `Stag.Annot.ty t`). Reflected syntax is checked to have
+modes and `global_` only where the parser allows them, so the annotation's
+`` `ty `` has no mode of its own.
 
 ## Declarations
 

@@ -78,6 +78,7 @@ let%expect_test "moded arrow types" =
   ty "list[int @ local]";
   ty "int @ local";
   ty "(int @ local) -> int";
+  ty "int @ local @ global -> int";
   [%expect
     {|
     (Arrow (Moded (Con int ()) (Atoms (Local)))
@@ -94,6 +95,7 @@ let%expect_test "moded arrow types" =
     t.stag:1:11-16: a mode is only written on a function type's argument or result, as in `t @ local -> u`, or on an annotation, as in `(x : t @ local)`
     t.stag:1:6-11: a mode is only written on a function type's argument or result, as in `t @ local -> u`, or on an annotation, as in `(x : t @ local)`
     t.stag:1:7-12: a mode is only written on a function type's argument or result, as in `t @ local -> u`, or on an annotation, as in `(x : t @ local)`
+    t.stag:1:12-13: a type has one mode: write its modes together, as in `t @ local portable`
     |}]
 ;;
 
@@ -107,6 +109,13 @@ let%expect_test "local_, exclave_ and [@nontail]" =
   expr "(f x y [@nontail], g x [@nontail])";
   expr "x [@nontail]";
   expr "f x [@other]";
+  expr "Some (f x) [@nontail]";
+  expr "A f x [@nontail]";
+  expr "`A (f x) [@nontail]";
+  expr "Some (f x [@nontail])";
+  expr "A [@nontail]";
+  expr "`A [@nontail]";
+  expr "g (Some (f x)) [@nontail]";
   [%expect
     {|
     (Local (Tuple ((Lit (Int 1)) (Lit (Int 2)))))
@@ -121,6 +130,13 @@ let%expect_test "local_, exclave_ and [@nontail]" =
       (Nontail (App (Var g ()) (Var x ())))))
     t.stag:1:2-12: `[@nontail]` is only written after an application, as in `f x [@nontail]`
     t.stag:1:6-11: unknown attribute `[@other]`, only `[@nontail]` exists
+    t.stag:1:11-21: `[@nontail]` can't follow a constructor's argument: parenthesize the application, as in `C (f x [@nontail])`
+    t.stag:1:6-16: `[@nontail]` can't follow a constructor's argument: parenthesize the application, as in `C (f x [@nontail])`
+    t.stag:1:9-19: `[@nontail]` can't follow a constructor's argument: parenthesize the application, as in `C (f x [@nontail])`
+    (Construct Some ((Nontail (App (Var f ()) (Var x ())))))
+    t.stag:1:2-12: `[@nontail]` is only written after an application, as in `f x [@nontail]`
+    t.stag:1:3-13: `[@nontail]` is only written after an application, as in `f x [@nontail]`
+    (Nontail (App (Var g ()) (Construct Some ((App (Var f ()) (Var x ()))))))
     |}]
 ;;
 
@@ -128,6 +144,9 @@ let%expect_test "global_ fields and constructor arguments" =
   prog "type r = { x : global_ int; y : list[int] }";
   prog "type t = A of global_ int * int | B of global_ (int -> int)";
   prog "exception E of global_ int";
+  prog "exception E of int @ local";
+  prog "type t = A of int @ local";
+  prog "type t = A of global_ int @ local";
   ty "global_ int";
   [%expect
     {|
@@ -142,6 +161,9 @@ let%expect_test "global_ fields and constructor arguments" =
          ((A ((Global (Con int ())) (Con int ())))
           (B ((Global (Arrow (Con int ()) (Con int ())))))))))))
     t.stag:1:15-22: an exception's arguments are always global: remove `global_`
+    t.stag:1:19-20: an exception's arguments have no mode, they are always global
+    t.stag:1:18-19: a constructor's argument has no mode: to make it always global, write `global_ t`
+    t.stag:1:26-27: a constructor's argument has no mode: to make it always global, write `global_ t`
     t.stag:1:0-7: expected a type, found `global_`
     |}]
 ;;

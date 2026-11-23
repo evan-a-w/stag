@@ -354,6 +354,12 @@ and arrow_operand t : Type_expr.t =
   then (
     advance t;
     let mode = mode_expr t in
+    if is t At
+    then
+      fail
+        (loc t)
+        "a type has one mode: write its modes together, as in `t @ local \
+         portable`";
     located ~loc:(Loc.merge ty.loc mode.loc) (Type_expr.Moded (ty, mode)))
   else ty
 
@@ -785,6 +791,31 @@ let pattern_parameter =
    m)`; use `match`"
 ;;
 
+let attribute_ahead t = is t Lbracket && Token.equal (peek_at t 1) At
+
+(** Parses [[@nontail]], returning its location. *)
+let nontail_attribute t =
+  let open_loc = loc t in
+  advance t;
+  advance t;
+  let name = lident t ~what:"an attribute, `nontail`" in
+  if not (String.equal name.txt "nontail")
+  then
+    fail
+      name.loc
+      (sprintf "unknown attribute `[@%s]`, only `[@nontail]` exists" name.txt);
+  close t Rbracket ~opener:Lbracket ~open_loc;
+  Loc.merge open_loc (prev_loc t)
+;;
+
+let nontail_without_application_message =
+  "`[@nontail]` is only written after an application, as in `f x [@nontail]`"
+;;
+
+let nontail_without_application t =
+  fail (nontail_attribute t) nontail_without_application_message
+;;
+
 (** [: t], [: t @ m] or [@ m], if any. *)
 let annot t : Annot.t =
   match peek t with
@@ -1008,7 +1039,7 @@ and region t ~seq : Expr.t =
 (** A value in [{...}]. *)
 and entry_value t = assignment t ~seq:false
 
-and construct t : Expr.t =
+and construct ?(in_argument = false) t : Expr.t =
   let start = loc t in
   let saved = t.pos in
   match peek t with
@@ -1016,9 +1047,11 @@ and construct t : Expr.t =
     (match path t ~what:"" with
      | path, true ->
        let args =
-         if starts_atom (peek t)
+         if attribute_ahead t
+         then nontail_without_application t
+         else if starts_atom (peek t)
          then (
-           let arg = construct t in
+           let arg = construct ~in_argument:true t in
            construct_args t arg ~tuple_items:(function
              | Expr.Tuple items -> Some items
              | _ -> None))
@@ -1027,46 +1060,45 @@ and construct t : Expr.t =
        expr_since t start (Construct (path, args))
      | _, false ->
        t.pos <- saved;
-       app t)
+       app ~in_argument t)
   | Label tag ->
     let tag = located ~loc:start tag in
     advance t;
-    let arg = if starts_atom (peek t) then Some (construct t) else None in
+    let arg =
+      if attribute_ahead t
+      then nontail_without_application t
+      else if starts_atom (peek t)
+      then Some (construct ~in_argument:true t)
+      else None
+    in
     expr_since t start (Poly_variant (tag, arg))
   | Type ->
     advance t;
     expr_since t start (Type (type_app t))
-  | _ -> app t
+  | _ -> app ~in_argument t
 
-and app t : Expr.t =
-  let attribute_ahead () = is t Lbracket && Token.equal (peek_at t 1) At in
+(* [in_argument]: [t] is a constructor's argument, which [[@nontail]] can't
+   follow, as it would read as applying to the construction. *)
+and app ?(in_argument = false) t : Expr.t =
   let rec loop (f : Expr.t) =
-    if starts_atom (peek t) && not (attribute_ahead ())
+    if starts_atom (peek t) && not (attribute_ahead t)
     then (
       let arg = splice t in
       loop (expr_at ~loc:(Loc.merge f.loc arg.loc) (Expr.App (f, arg))))
     else f
   in
   let e = loop (splice t) in
-  if attribute_ahead ()
+  if attribute_ahead t
   then (
-    let open_loc = loc t in
-    advance t;
-    advance t;
-    let name = lident t ~what:"an attribute, `nontail`" in
-    if not (String.equal name.txt "nontail")
-    then
-      fail
-        name.loc
-        (sprintf "unknown attribute `[@%s]`, only `[@nontail]` exists" name.txt);
-    close t Rbracket ~opener:Lbracket ~open_loc;
+    let attribute_loc = nontail_attribute t in
     match e.txt with
-    | App _ -> expr_since t e.loc (Nontail e)
-    | _ ->
+    | App _ when in_argument ->
       fail
-        (Loc.merge open_loc (prev_loc t))
-        "`[@nontail]` is only written after an application, as in `f x \
-         [@nontail]`")
+        attribute_loc
+        "`[@nontail]` can't follow a constructor's argument: parenthesize the \
+         application, as in `C (f x [@nontail])`"
+    | App _ -> expr_since t e.loc (Nontail e)
+    | _ -> fail attribute_loc nontail_without_application_message)
   else e
 
 and splice t : Expr.t =
@@ -1329,6 +1361,14 @@ let constructor_args ?(parsed = ignore) ~exception_ t =
       let acc = maybe_global t ~ty:type_app :: acc in
       parsed (List.rev acc);
       match peek t with
+      | At ->
+        fail
+          (loc t)
+          (if exception_
+           then "an exception's arguments have no mode, they are always global"
+           else
+             "a constructor's argument has no mode: to make it always global, \
+              write `global_ t`")
       | Star ->
         advance t;
         args acc

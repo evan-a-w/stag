@@ -359,7 +359,16 @@ module Of_value = struct
       | _ -> raise Bad_arguments)
   ;;
 
-  let rec type_expr value ~loc : Type_expr.t =
+  (* Where a type is, so which of [t @ m] and [global_ t] it may be, as the
+     parser allows. *)
+  module Type_position = struct
+    type t =
+      | Plain
+      | Arrow_side
+      | Member
+  end
+
+  let rec type_expr ?(at = Type_position.Plain) value ~loc : Type_expr.t =
     Located.create
       ~loc
       (variant
@@ -371,7 +380,10 @@ module Of_value = struct
            | "Var", 1 -> Var (arg 0 (ident Tyvar))
            | "Con", 2 ->
              Con (arg 0 (decl_path Lower ~loc), arg 1 (list (type_arg ~loc)))
-           | "Arrow", 2 -> Arrow (arg 0 (type_expr ~loc), arg 1 (type_expr ~loc))
+           | "Arrow", 2 ->
+             Arrow
+               ( arg 0 (type_expr ~at:Arrow_side ~loc)
+               , arg 1 (type_expr ~at:Arrow_side ~loc) )
            | "Tuple", 1 -> Tuple (arg 0 (components ~min:0 (type_expr ~loc)))
            | "Code", 1 ->
              arg 0 (fun code : Type_expr.desc ->
@@ -384,8 +396,25 @@ module Of_value = struct
            | "Mut", 1 -> Mut (arg 0 (type_expr ~loc))
            | "Immut", 1 -> Immut (arg 0 (type_expr ~loc))
            | "Splice", 1 -> Splice (arg 0 (expr ~loc))
-           | "Moded", 2 -> Moded (arg 0 (type_expr ~loc), arg 1 (mode_expr ~loc))
-           | "Global", 1 -> Global (arg 0 (type_expr ~loc))
+           | "Moded", 2 ->
+             (match at with
+              | Arrow_side ->
+                Moded (arg 0 (type_expr ~loc), arg 1 (mode_expr ~loc))
+              | Plain | Member ->
+                unexpected
+                  ~expected:
+                    "a type without a mode: a mode is only on a function \
+                     type's argument or result"
+                  value)
+           | "Global", 1 ->
+             (match at with
+              | Member -> Global (arg 0 (type_expr ~loc))
+              | Plain | Arrow_side ->
+                unexpected
+                  ~expected:
+                    "a type without [global_]: [global_] is only on a record \
+                     field or a constructor's argument"
+                  value)
            | _ -> raise Bad_arguments))
 
   and mode_expr value ~loc : Mode_expr.t =
@@ -478,9 +507,15 @@ module Of_value = struct
         match constructor, Args.count args with
         | "Variant", 1 ->
           Variant
-            (arg 0 (list (pair (name Upper ~loc) (list (type_expr ~loc)))))
+            (arg
+               0
+               (list
+                  (pair (name Upper ~loc) (list (type_expr ~at:Member ~loc)))))
         | "Record", 1 ->
-          Record (arg 0 (fields (pair (name Lower ~loc) (type_expr ~loc))))
+          Record
+            (arg
+               0
+               (fields (pair (name Lower ~loc) (type_expr ~at:Member ~loc))))
         | "Alias", 1 -> Alias (arg 0 (type_expr ~loc))
         | "Abstract", 0 -> Abstract
         | "Splice", 1 -> Splice (Located.create ~loc (arg 0 (expr ~loc)))
@@ -680,7 +715,7 @@ let reflected_decl = To_value.reflected_decl
 
 module Type_expr = struct
   let to_value t = To_value.type_expr t
-  let of_value = Of_value.(run type_expr)
+  let of_value = Of_value.(run (fun value ~loc -> type_expr value ~loc))
 end
 
 module Type_decl = struct
