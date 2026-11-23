@@ -453,7 +453,7 @@ let mk u = exclave_ stack_ (fun (x : int) -> x)
 let f u = mk () 1
 |};
   [%expect
-    {| This is local, because it is allocated by [stack_] (at t.stag:2:20-47), then it is part of the value (at t.stag:2:20-47), then the function returns it (at t.stag:2:11-47), then the function types are unified, then a tail call gives it further arguments, after the current region has ended (mark the call [@nontail]) (at t.stag:3:10-15), but must be at most regional, because it is a function value returned, not the closure of a partial application, then the function types are unified |}];
+    {| This is local, because it is allocated by [stack_] (at t.stag:2:20-47), then it is part of the value (at t.stag:2:20-47), then the function returns it (at t.stag:2:11-47), then the function types are unified, then a tail call gives it further arguments, after the current region has ended (mark the call [@nontail]) (at t.stag:3:10-15), but must be at most regional, because the function returns a function value, not the closure of a partial application (at t.stag:2:11-47), then the function types are unified |}];
   locality
     {|
 let mk u = exclave_ stack_ (fun (x : int) -> x)
@@ -467,7 +467,7 @@ let mk (p : ptr[int]) = exclave_ stack_ (fun (x : int) -> Int.add x p.*)
 let f u = mk (Ptr.make 1) 1
 |};
   [%expect
-    {| This is local, because it is allocated by [stack_] (at t.stag:2:33-72), then it is part of the value (at t.stag:2:33-72), then the function returns it (at t.stag:2:24-72), then the function types are unified, then a tail call gives it further arguments, after the current region has ended (mark the call [@nontail]) (at t.stag:3:10-25), but must be at most regional, because it is a function value returned, not the closure of a partial application, then the function types are unified |}];
+    {| This is local, because it is allocated by [stack_] (at t.stag:2:33-72), then it is part of the value (at t.stag:2:33-72), then the function returns it (at t.stag:2:24-72), then the function types are unified, then a tail call gives it further arguments, after the current region has ended (mark the call [@nontail]) (at t.stag:3:10-25), but must be at most regional, because the function returns a function value, not the closure of a partial application (at t.stag:2:24-72), then the function types are unified |}];
   (* Not in tail position, or the closure of a partial application, which a tail
      call never makes. *)
   locality
@@ -492,6 +492,24 @@ let use3 (f : int -> int -> int) = k f
     val use2 : 'a -> int
     val use3 : (int -> int -> int) -> int
     |}];
+  (* A function whose body is a [fun] is one function of both's parameters. *)
+  locality
+    {|
+let plus (p @ local) = fun (x : int) -> Int.add p.* x
+let plus2 = fun (p @ local) -> fun (x : int) -> Int.add p.* x
+let g (p @ local) = plus p 2
+let g2 (p @ local) = plus2 p 2
+let k f = f 1 2
+let use u = k (fun (x : int) -> fun (y : int) -> Int.add x y)
+|};
+  [%expect {|
+    val plus : ptr[int] @ local -> (int -> int) @ local
+    val plus2 : ptr[int] @ local -> (int -> int) @ local
+    val g : ptr[int] @ local -> int
+    val g2 : ptr[int] @ local -> int
+    val k : (int -> int -> 'a) -> 'a
+    val use : 'a -> int
+    |}];
   (* A function returning a function value, called with both arguments by a tail
      call, must return one that outlives the region. *)
   locality
@@ -500,5 +518,5 @@ let k f = f 1 2
 let use u = k (fun (x : int) -> exclave_ stack_ (fun (y : int) -> Int.add x y))
 |};
   [%expect
-    {| This is local, because it is allocated by [stack_] (at t.stag:3:41-78), then it is part of the value (at t.stag:3:41-78), then the function returns it (at t.stag:3:32-78), but must be at most regional, because it is a function value returned, not the closure of a partial application, then the function types are unified, then a tail call gives it further arguments, after the current region has ended (mark the call [@nontail]) (at t.stag:2:10-13), then the function types are unified |}]
+    {| This is local, because it is allocated by [stack_] (at t.stag:3:41-78), then it is part of the value (at t.stag:3:41-78), then the function returns it (at t.stag:3:32-78), but must be at most regional, because the function returns a function value, not the closure of a partial application (at t.stag:3:14-79), then the function types are unified, then a tail call gives it further arguments, after the current region has ended (mark the call [@nontail]) (at t.stag:2:10-13), then the function types are unified |}]
 ;;

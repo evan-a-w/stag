@@ -595,6 +595,8 @@ let function_type
   ~(args : (Source.Binder.t * Syntax.Annot.t) list)
   ~annot
   ~res_mode
+  ~(body : Source.Expr.t)
+  ~loc
   =
   report_duplicates
     scope
@@ -636,7 +638,11 @@ let function_type
       else
         List.map partial_modes ~f:(fun partial ->
           partial, Scope.arrow_mode scope)
-        @ [ res_mode, Mode_rules.Function.result_curry (Scope.modes scope) ]
+        @ [ ( res_mode
+            , match Source.Expr.view body with
+              | Fun _ -> Scope.arrow_mode scope
+              | _ -> Mode_rules.Function.result_curry (Scope.modes scope) ~loc )
+          ]
     in
     List.fold_right
       (List.zip_exn args results)
@@ -1937,6 +1943,8 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
       ~args:(List.map toplevel.args ~f:Source.Expr.binding)
       ~annot:toplevel.annot
       ~res_mode:(if Toplevel.is_function toplevel then toplevel.mode else None)
+      ~body:(Source.Expr.Syntax toplevel.expr)
+      ~loc:toplevel.expr.loc
   in
   let { Function_type.args; res_ty; ty; _ } = fn in
   match toplevel.state with
@@ -2288,6 +2296,8 @@ and expr_type
                ~args
                ~annot
                ~res_mode:(if is_function then mode_annot else None)
+               ~body
+               ~loc
            in
            let ident =
              Program_env.bind scope.program binder fn.ty ~level:scope.level
@@ -2506,7 +2516,9 @@ and expr_type
        in
        node (Assign (var_ref, value)) Type.unit)
   | Fun { args; body } ->
-    let fn = function_type t scope ~args ~annot:None ~res_mode:None in
+    let fn =
+      function_type t scope ~args ~annot:None ~res_mode:None ~body ~loc
+    in
     let { Function_type.args; annots; ty; _ } = fn in
     (* The parameters' types are known before the body is checked where they are
        expected, so that what crosses modes by its type does: [f (fun x -> ...)]
@@ -3684,6 +3696,8 @@ let check_bench t program module_ ~name ~param ~body ~loc ~generated =
         ~args:[ Source.Binder.Name param, Syntax.Annot.none ]
         ~annot:None
         ~res_mode:None
+        ~body:(Source.Expr.Syntax body)
+        ~loc
     in
     let { Function_type.args = params; res_ty; _ } = fn in
     let ident, param_ty = List.hd_exn params in

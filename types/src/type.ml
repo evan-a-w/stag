@@ -356,14 +356,7 @@ end
 let iterate (local_ (f : _ Iter.t)) (local_ (start : Iter_start.t)) =
   let visited = stack_ { Visited.unremembered = 64; table = Null } in
   let iter_modes (modes : Arrow_modes.t) =
-    let rec go = function
-      | [] -> Ok ()
-      | var :: vars ->
-        (match f.mode var with
-         | Ok () -> go vars
-         | Error _ as error -> error)
-    in
-    go (Arrow_modes.vars modes) [@nontail]
+    Arrow_modes.iter_result modes ~f:(fun var -> f.mode var) [@nontail]
   in
   let rec iter_ty ~guarded ty =
     match ty with
@@ -540,7 +533,7 @@ module Changes = struct
         | ARow row' -> both acc (row t row'))
     | TArrow (ty1, ty2, modes) ->
       let changes =
-        List.exists (Arrow_modes.vars modes) ~f:(fun var ->
+        Arrow_modes.exists modes ~f:(fun var ->
           not (phys_equal (t.mode var) var))
       in
       both (changes, Int.max_value) (both (ty t ty1) (ty t ty2))

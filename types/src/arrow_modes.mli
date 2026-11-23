@@ -34,7 +34,13 @@ val fresh : Mode.Id_source.t -> rank:int -> t
 (** Unifies the modes of two arrows. *)
 val equate : Mode.Id_source.t -> t -> t -> (unit, Mode.Error.t) Result.t
 
-val vars : t -> Mode.Var.t list
+(** Applies [f] to each variable, stopping at the first error. *)
+val iter_result
+  :  t
+  -> f:(Mode.Var.t -> (unit, 'e) Result.t) @ local
+  -> (unit, 'e) Result.t
+
+val exists : t -> f:(Mode.Var.t -> bool) @ local -> bool
 
 (** Keeps [t] (physically) if [f] keeps each variable. *)
 val map : t -> f:(Mode.Var.t -> Mode.Var.t) -> t

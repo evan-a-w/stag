@@ -297,6 +297,8 @@ let e = .~(let k = Int.add 1 2 in let v = fun y -> Int.add y k in .<fun x -> v x
   modes
     {|
 let d = .~(let k = Int.add 1 2 in let v = fun y -> Int.add y k in .<let w = fun x -> v x in w>.)
+|};
+  modes {|
 let e = .~(let v = Ptr.make 1 in .<fun x -> v>.)
 |};
   [%expect
@@ -308,6 +310,7 @@ let e = .~(let v = Ptr.make 1 in .<fun x -> v>.)
     This is portable, because v was computed at compile time (at t.stag:2:71-72), then v is embedded in a quote (at t.stag:2:71-72), then the code is built (at t.stag:2:69-74), but must be at most const, because c is a toplevel (at t.stag:2:8-78)
     This is portable, because v was computed at compile time (at t.stag:3:85-86), then v is captured by a closure (at t.stag:3:85-86), then the closure is made (at t.stag:3:76-88), then w is bound (at t.stag:3:68-93), but must be at most const, because d is a toplevel (at t.stag:3:8-96)
     This is portable, because v was computed at compile time (at t.stag:4:77-78), then v is captured by a closure (at t.stag:4:77-78), then the closure is made (at t.stag:4:68-80), but must be at most const, because e is a toplevel (at t.stag:4:8-83)
+    val d : int -> int
     Unbound value v, which the spliced code uses: v is a variable of its quote's context, as the v bound at compile time (level -1) can't be used in the quote (level 0), as it is not portable
     |}]
 ;;

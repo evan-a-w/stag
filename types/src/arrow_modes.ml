@@ -68,12 +68,29 @@ let equate ids t1 t2 =
   equate_side ids t1.curry t2.curry
 ;;
 
-let side_vars : Side.t -> _ = function
-  | Var var -> [ var ]
-  | Fixed _ -> []
+let iter_side (side : Side.t) ~(local_ f) =
+  match side with
+  | Var var -> f var [@nontail]
+  | Fixed _ -> Ok ()
 ;;
 
-let vars t = side_vars t.arg @ side_vars t.res @ side_vars t.curry
+let iter_result t ~(local_ f) =
+  match iter_side t.arg ~f with
+  | Error _ as error -> error
+  | Ok () ->
+    (match iter_side t.res ~f with
+     | Error _ as error -> error
+     | Ok () -> iter_side t.curry ~f [@nontail])
+;;
+
+let exists t ~(local_ f) =
+  let side (side : Side.t) =
+    match side with
+    | Var var -> f var
+    | Fixed _ -> false
+  in
+  side t.arg || side t.res || side t.curry [@nontail]
+;;
 
 let map_side (side : Side.t) ~f : Side.t =
   match side with

@@ -167,8 +167,10 @@ end
 
 module Function : sig
   (** The [curry] of the arrow of a function's last parameter: its result is a
-      value it returns, not the closure of a partial application. *)
-  val result_curry : Ctx.t -> Mode.Var.t
+      value it returns, not the closure of a partial application. A function
+      whose body is a [fun] is one function of the parameters of both, so its
+      last arrow is not one. *)
+  val result_curry : Ctx.t -> loc:Loc.t -> Mode.Var.t
 
   (** The closures of partial applications hold what the function captures and
       the arguments given so far. *)

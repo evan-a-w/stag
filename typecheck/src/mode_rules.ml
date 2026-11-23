@@ -380,16 +380,17 @@ module Function = struct
     Binding.of_mode mode
   ;;
 
-  let result_curry ctx =
+  let result_curry ctx ~loc =
     let curry = Ctx.fresh ctx in
     Mode.Error.ok_exn
       (Mode.Var.at_most
          curry
          Locality
          Regional
-         (Mode.Reason.create
-            "it is a function value returned, not the closure of a partial \
-             application"));
+         (reason
+            ~loc
+            "the function returns a function value, not the closure of a \
+             partial application"));
     curry
   ;;
 

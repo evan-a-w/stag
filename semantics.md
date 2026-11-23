@@ -242,7 +242,10 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   function never makes. Each arrow records which (its `curry` mode, not
   printed): the arrows of a multi-parameter function's partial applications
   leave it free, its last arrow (a function value it returns) bounds it by
-  `regional`. A tail call of an unknown function bounds its intermediate
+  `regional`. A function whose body is directly a `fun` (`let f a = fun b ->
+  e`, `fun a -> fun b -> e`) is one function of both's parameters, as in
+  OxCaml: the compiler never materialises the inner closure, so it is a
+  partial application too. A tail call of an unknown function bounds its intermediate
   results by their arrows' `curry`, so it may be passed curried functions,
   but not ones returning a `local` function value.
 - In a quote, `exclave_` and tail position are decided where the code is
