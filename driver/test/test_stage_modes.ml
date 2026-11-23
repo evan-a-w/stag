@@ -353,7 +353,8 @@ let closed (c : <int>{}) = .<.~c.{x = 1}>.
 let absent (c : <int>{x : int}) = .<let y = 1 in .~c.{x = 1; y}>.
 let unknown c = .<.~c.{x = 1}>.
 |};
-  [%expect {|
+  [%expect
+    {|
     n is substituted, but the spliced code has no free variable n
     x is substituted, but the spliced code has no free variable x
     y is substituted, but the spliced code has no free variable y
@@ -369,7 +370,8 @@ let later = .~(let z = q in .<1>.)
 let later = .~(let z = q in .<1>.)
 let q = .<later>.
 |};
-  [%expect {|
+  [%expect
+    {|
     The toplevel q is used at compile time before it is fully checked (it is in the same recursive group as this splice)
     val later : int
     val q : <'a>{later : 'a; ..'b}
