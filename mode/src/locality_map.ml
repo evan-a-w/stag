@@ -18,12 +18,4 @@ let compose m1 m2 =
   | Some m1, Some m2 -> Some (Morphism.compose m1 m2)
 ;;
 
-let apply t point =
-  match t with
-  | None -> Axis.Locality.max
-  | Some morphism ->
-    Axis.Locality.of_index_exn
-      (Morphism.right morphism (Axis.Locality.index point))
-;;
-
 let morphism = Fn.id

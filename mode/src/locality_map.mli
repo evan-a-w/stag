@@ -24,5 +24,4 @@ val ignore : t
     [a <= (compose m1 m2)(c)]. *)
 val compose : t -> t -> t
 
-val apply : t -> Axis.Locality.t -> Axis.Locality.t
 val morphism : t -> Morphism.t option

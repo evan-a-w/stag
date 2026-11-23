@@ -244,3 +244,39 @@ let f u = let p = stack_ (1, 2) in let q = Unsafe.assume_global p in q
 |};
   [%expect {| val f : 'a -> int * int |}]
 ;;
+
+let%expect_test "scratch" =
+  locality
+    {|
+type r = { g : global_ int * int; l : int * int }
+let mk u = { g = (1, 2); l = (3, 4) }
+let f u = let r = mk () in let r2 = { r with g = stack_ (5, 6) } in Ptr.make r2.g
+|};
+  locality {|
+let f u = let mut x = (1, 2) in exclave_ stack_ (fun v -> x)
+|};
+  locality {|
+let f2 u = let mut x = 0 in exclave_ stack_ (fun v -> x <- 1)
+|};
+  locality
+    {|
+let outer u =
+  let p = stack_ (1, 2) in
+  let f v = exclave_ p in
+  match f () with (a, _) -> a
+|};
+  locality {|
+let f u = let p = stack_ (1, 2) in exclave_ (fun v -> p)
+|};
+  locality
+    {|
+let f g = let p = stack_ (1, 2) in g p [@nontail]
+let h u = f (fun x -> match x with (a, _) -> a)
+|};
+  locality
+    {|
+type r = { g : global_ int * int; l : int * int }
+let f u = let r = stack_ { g = (1, 2); l = (3, 4) } in match r with { g = g; l = _ } -> Ptr.make g
+|};
+  [%expect {| |}]
+;;

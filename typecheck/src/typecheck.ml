@@ -414,21 +414,19 @@ module Scope = struct
     }
   ;;
 
-  (* Values of types that are plain data may be used at any locality: a copy of
-     one is as good. (Not yet on stage, where computed plain data would become
-     [portable].) *)
-  let crossing ty =
-    match Type.canonical_ty ty with
-    | TCon (("int" | "bool" | "char" | "unit"), []) ->
-      { Mode.Crossing.immediate with stage = false }
-    | _ -> Mode.Crossing.none
+  (* Plain data may be used at any locality and provenance, and at a stage up to
+     [portable]: a copy of it is as good. *)
+  let crossing t ty =
+    if Type_env.pointer_free t.program.type_env ty
+    then Mode.Crossing.immediate
+    else Mode.Crossing.none
   ;;
 
   (* A value of [mode] and type [ty] is at most [locality], unless its type
      crosses locality. *)
-  let locality_at_most mode ~ty locality ~loc ~why =
+  let locality_at_most t mode ~ty locality ~loc ~why =
     Mode.Var.at_most
-      ~crossing:(crossing ty)
+      ~crossing:(crossing t ty)
       mode
       Locality
       locality
@@ -1095,9 +1093,10 @@ module Pattern_var = struct
     { ident : Typed.Ident.t
     ; ty : Type.ty
     ; loc : Loc.t
+    ; global : bool (** Bound within a [global_] field or argument. *)
     }
 
-  let bindings = List.map ~f:(fun t -> t.ident, t.ty)
+  let make_global = List.map ~f:(fun t -> { t with global = true })
 end
 
 (* The components of [expected], if it is known to be a tuple of [n]. *)
@@ -1140,22 +1139,34 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
   let bind binder ty =
     let ident = Program_env.bind scope.program binder ty ~level:scope.level in
     ( ident
-    , { Pattern_var.ident; ty; loc = Source.Binder.loc binder ~enclosing:loc } )
+    , { Pattern_var.ident
+      ; ty
+      ; loc = Source.Binder.loc binder ~enclosing:loc
+      ; global = false
+      } )
   in
-  (* Each pattern of type [ty], known to be of [expected] (by default [ty]). *)
-  let sub_patterns ?expected patterns =
+  (* Each pattern of type [ty], known to be of [expected] (by default [ty]).
+     Those [globals] are of [global_] fields or arguments. *)
+  let sub_patterns ?expected ?globals patterns =
     let expected =
       Option.value
         expected
         ~default:(List.map patterns ~f:(fun (_, ty) -> Some ty))
     in
+    let globals =
+      Option.value globals ~default:(List.map patterns ~f:(fun _ -> false))
+    in
     let typed =
-      List.map2_exn patterns expected ~f:(fun (pattern, ty) expected ->
-        let pattern, bindings = pattern_type t scope ~pattern ?expected in
-        ( (if Scope.unifies t scope ~ty1:ty ~ty2:pattern.ty ~loc:pattern.loc
-           then pattern
-           else Typed.Pattern.error [ pattern ] ~loc:pattern.loc)
-        , bindings ))
+      List.map3_exn
+        patterns
+        expected
+        globals
+        ~f:(fun (pattern, ty) expected global ->
+          let pattern, bindings = pattern_type t scope ~pattern ?expected in
+          ( (if Scope.unifies t scope ~ty1:ty ~ty2:pattern.ty ~loc:pattern.loc
+             then pattern
+             else Typed.Pattern.error [ pattern ] ~loc:pattern.loc)
+          , if global then Pattern_var.make_global bindings else bindings ))
     in
     List.map typed ~f:fst, List.concat_map typed ~f:snd
   in
@@ -1206,13 +1217,31 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
      with
      | Error error -> fail error args
      | Ok (constructor, args, result) ->
-       let args, bindings = sub_patterns args in
+       let globals =
+         let declared =
+           Type_env.global_constructor_args
+             scope.program.type_env
+             constructor.name
+           |> Option.value ~default:[]
+         in
+         List.mapi args ~f:(fun i _ ->
+           Option.value (List.nth declared i) ~default:false)
+       in
+       let args, bindings = sub_patterns args ~globals in
        node (Construct (constructor, args)) result, bindings)
   | Record fields ->
     (match record_fields t scope fields ~all_required:false ~expected ~loc with
      | Error error -> fail error (List.map fields ~f:snd)
      | Ok (record, fields, (_ : bool)) ->
-       let patterns, bindings = sub_patterns (List.map fields ~f:snd) in
+       let globals =
+         List.map fields ~f:(fun ((field : Typed.Field_ref.t), _) ->
+           Type_env.is_global_field
+             scope.program.type_env
+             (Typed.Field_ref.name field))
+       in
+       let patterns, bindings =
+         sub_patterns (List.map fields ~f:snd) ~globals
+       in
        ( node (Record (List.zip_exn (List.map fields ~f:fst) patterns)) record
        , bindings ))
   | Poly_variant (tag, arg) ->
@@ -1309,6 +1338,7 @@ module Variant_match = struct
           ; ty = rest
           ; loc =
               Source.Binder.loc binder ~enclosing:(Source.Pattern.loc pattern)
+          ; global = false
           }
         ] )
     | _ -> pattern_type t scope ~pattern ~expected:scrutinee
@@ -1401,25 +1431,50 @@ let use_entry (scope : Scope.t) (entry : Env.Entry.t) ~name ~loc =
     | Toplevel ident -> true, Program_env.is_mutable scope.program ident, ident
     | Local ident -> false, Program_env.is_mutable scope.program ident, ident
   in
-  let crossing = Scope.crossing entry.scheme in
+  let crossing = Scope.crossing scope entry.scheme in
   let held =
     if mutable_ then Hashtbl.find scope.program.held_modes ident else None
   in
   let crossed = Env.Entry.crossed entry ~locks:scope.locks in
-  List.iter crossed ~f:(fun lock ->
+  let is_closure (lock : Env.Lock.t) =
+    match lock.kind with
+    | Closure _ -> true
+    | Quote _ | Splice | Exclave -> false
+  in
+  List.iteri crossed ~f:(fun index lock ->
     match lock.kind with
     | Splice -> ()
     | (Closure _ | Exclave) when toplevel -> ()
     | Exclave ->
+      (* As seen where [exclave_] ends the region: what is local to it then is
+         gone. *)
+      let inside = List.take crossed index in
+      let outside = List.drop crossed (index + 1) in
+      let ended = Scope.fresh_mode scope in
       Scope.add_mode
         scope
         ~loc
-        (Mode.Var.at_most
+        (Mode.Var.submode
            ~crossing
+           ~locality:(locality_map outside)
            (Option.value held ~default:entry.mode)
-           Locality
-           Regional
-           (reason "%s is used in an [exclave_], after its region has ended"))
+           ended
+           (reason "%s is used in an [exclave_]")
+         |> Result.bind ~f:(fun () ->
+           Mode.Var.at_most
+             ended
+             Locality
+             Regional
+             (Mode.Reason.create ~loc "the [exclave_] has ended its region")));
+      (* The cell of a mutable captured by a closure only lives as long as its
+         region, when the closure is local. *)
+      if mutable_
+         && List.exists inside ~f:is_closure
+         && not (List.exists outside ~f:is_closure)
+      then
+        Scope.report
+          scope
+          (Typecheck_error.create ~loc (Mutable_captured_in_exclave name))
     | Closure closure ->
       Scope.add_mode
         scope
@@ -1911,11 +1966,31 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
   Interpreter.add_scc program.interpreter scc
 ;;
 
-let intrinsic_type t scope intrinsic =
-  Intrinsic.ty
-    intrinsic
-    ~var:(fun () -> Scope.fresh_ty t scope)
-    ~row:(fun () -> Scope.fresh_row t scope)
+let intrinsic_type t (scope : Scope.t) (intrinsic : Intrinsic.t) =
+  match intrinsic with
+  | Assume_global ->
+    (* Only its locality is assumed. *)
+    let ty = Scope.fresh_ty t scope in
+    let arg = Scope.fresh_mode scope in
+    let res = Scope.fresh_mode scope in
+    let reason = Mode.Reason.create "Unsafe.assume_global keeps it" in
+    Result.all_unit
+      [ Mode.Var.submode_on arg res Stage reason
+      ; Mode.Var.submode_on arg res Provenance reason
+      ; Mode.Var.at_most
+          res
+          Locality
+          Global
+          (Mode.Reason.create "Unsafe.assume_global assumes it")
+      ]
+    |> Result.iter_error ~f:(fun error ->
+      raise_s [%message "Unsafe.assume_global" (error : Mode.Error.t)]);
+    Type.TArrow (ty, ty, { arg = Var arg; res = Var res })
+  | _ ->
+    Intrinsic.ty
+      intrinsic
+      ~var:(fun () -> Scope.fresh_ty t scope)
+      ~row:(fun () -> Scope.fresh_row t scope)
 ;;
 
 let is_syntax ty =
@@ -2212,6 +2287,7 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
           scope
           ~loc:toplevel.expr.loc
           (Scope.locality_at_most
+             scope
              mode
              ~ty
              Global
@@ -2292,7 +2368,7 @@ and check_body t (scope : Scope.t) ~closure ~(fn : Function_type.t) ~body ~loc =
     Env.with_bindings scope.locals params ~f:(fun () ->
       check_expr t scope ~expr:body ~ty:fn.res_ty)
   in
-  let crossing = Scope.crossing fn.res_ty in
+  let crossing = Scope.crossing scope fn.res_ty in
   let reason = Mode.Reason.create ~loc:body.loc "the function returns it" in
   Scope.add_mode
     scope
@@ -2411,10 +2487,37 @@ and expr_type
     Scope.joins
       scope
       inner_scope.sink
-      ~crossing:(Scope.crossing inner.ty)
+      ~crossing:(Scope.crossing scope inner.ty)
       ~loc
       ~why:"it is part of the value";
-    node (Marked (Stack, inner)) inner.ty
+    let rec is_allocation (expr : Typed.Expr.t) =
+      match expr.desc with
+      | Tuple _
+      | Construct _
+      | Record _
+      | Record_update _
+      | Poly_record _
+      | Poly_extend _
+      | Poly_update _
+      | Poly_variant _
+      | Fun _
+      | Quote _
+      | Error _ -> true
+      | App ({ desc = Var (Intrinsic Ptr_make); _ }, _) -> true
+      | App
+          ( { desc = Var (Bound (Toplevel ident) | Persistent (Toplevel ident))
+            ; _
+            }
+          , _ ) -> String.equal ident.name (Prelude_path.canonical "Ptr.make")
+      | Annotated (expr, _) -> is_allocation expr
+      | _ -> false
+    in
+    if is_allocation inner
+    then node (Marked (Stack, inner)) inner.ty
+    else
+      fail
+        ~children:[ inner ]
+        (Typecheck_error.create ~loc Stack_not_on_allocation)
   | Marked (Exclave, inner) ->
     (match scope.region with
      | Some res_mode when tail ->
@@ -2429,7 +2532,7 @@ and expr_type
          scope
          ~loc
          (Mode.Var.submode
-            ~crossing:(Scope.crossing inner.ty)
+            ~crossing:(Scope.crossing scope inner.ty)
             inner_scope.sink
             res_mode
             (Mode.Reason.create ~loc "the function returns it"));
@@ -2482,6 +2585,7 @@ and expr_type
         scope
         ~loc
         (Scope.locality_at_most
+           scope
            f_scope.sink
            ~ty:f.ty
            Regional
@@ -2511,7 +2615,7 @@ and expr_type
       scope
       ~loc
       (Mode.Var.submode
-         ~crossing:(Scope.crossing a)
+         ~crossing:(Scope.crossing scope a)
          x_scope.sink
          arg_mode
          (Mode.Reason.create ~loc "it is passed to a function"));
@@ -2521,6 +2625,7 @@ and expr_type
         scope
         ~loc
         (Scope.locality_at_most
+           scope
            x_scope.sink
            ~ty:a
            Regional
@@ -2529,7 +2634,7 @@ and expr_type
     Scope.joins
       scope
       res_mode
-      ~crossing:(Scope.crossing b)
+      ~crossing:(Scope.crossing scope b)
       ~loc
       ~why:"the function returns it";
     if result_matches
@@ -2632,7 +2737,7 @@ and expr_type
       scope
       ~loc
       (Mode.Var.submode
-         ~crossing:(Scope.crossing ty)
+         ~crossing:(Scope.crossing scope ty)
          body_scope.sink
          held
          (Mode.Reason.create ~loc (sprintf "it initializes %s" name)));
@@ -2729,6 +2834,7 @@ and expr_type
                   scope
                   ~loc
                   (Scope.locality_at_most
+                     scope
                      value_scope.sink
                      ~ty
                      Global
@@ -2742,7 +2848,7 @@ and expr_type
                 scope
                 ~loc
                 (Mode.Var.submode
-                   ~crossing:(Scope.crossing ty)
+                   ~crossing:(Scope.crossing scope ty)
                    ~locality
                    value_scope.sink
                    held
@@ -2754,6 +2860,14 @@ and expr_type
   | Fun { args; body } ->
     let fn = function_type t scope ~args ~annot:None ~res_mode:None in
     let { Function_type.args; annots; ty; _ } = fn in
+    (* The parameters' types are known before the body is checked where they are
+       expected, so that what crosses modes by its type does: [f (fun x -> ...)]
+       with [f]'s type known. A mismatch is left to the caller to report. *)
+    (match expected with
+     | Some expected
+       when Expectation.is_required hint && not (Unify.clash expected ty) ->
+       ignore (Unify.unify_ty t ~ty1:expected ~ty2:ty : (unit, _) Result.t)
+     | Some _ | None -> ());
     let closure = Scope.fresh_mode scope in
     let body = check_body t scope ~closure ~fn ~body ~loc in
     Scope.joins scope closure ~loc ~why:"the closure is made";
@@ -2975,6 +3089,7 @@ and expr_type
         scope
         ~loc
         (Scope.locality_at_most
+           scope
            value_scope.sink
            ~ty:target.ty
            Global
@@ -3113,11 +3228,15 @@ and expr_type
               && unified)
           in
           let exprs =
-            check_exprs
-              t
-              scope
-              (List.map fields ~f:(fun ((field : Type_env.Field.t), _, expr) ->
-                 expr, inst_out field.ty))
+            List.map fields ~f:(fun (field, _, expr) ->
+              check_part
+                t
+                scope
+                (expr, inst_out field.ty)
+                ~global:
+                  (Type_env.is_global_field
+                     scope.program.type_env
+                     (Typed.Field_ref.name (field_ref field))))
           in
           let update =
             node
@@ -3162,10 +3281,33 @@ and expr_type
           , unified ))
       in
       let body =
-        with_monomorphic_bindings
-          scope
-          (Pattern_var.bindings bindings)
-          ~mode
+        Env.with_bindings
+          scope.locals
+          (List.map bindings ~f:(fun (var : Pattern_var.t) ->
+             let mode =
+               if not var.global
+               then mode
+               else (
+                 let global = Scope.fresh_mode scope in
+                 let reason =
+                   Mode.Reason.create
+                     ~loc:var.loc
+                     "it is held by a [global_] field"
+                 in
+                 Scope.add_mode
+                   scope
+                   ~loc:var.loc
+                   (Mode.Var.submode
+                      ~locality:Mode.Locality_map.ignore
+                      mode
+                      global
+                      reason
+                    |> Result.bind ~f:(fun () ->
+                      Mode.Var.at_most global Locality Global reason));
+                 global)
+             in
+             ( var.ident.name
+             , Scope.entry scope ~ident:var.ident ~scheme:var.ty ~mode )))
           ~f:(fun () ->
             check_expr
               t
@@ -3301,7 +3443,7 @@ and annotate
     Scope.joins
       scope
       var_scope.sink
-      ~crossing:(Scope.crossing var.ty)
+      ~crossing:(Scope.crossing scope var.ty)
       ~loc
       ~why:"it is used";
     Scope.annotated scope var_scope.sink annot.mode);
@@ -3508,6 +3650,7 @@ and check_part t (scope : Scope.t) (expr, ty) ~global =
       scope
       ~loc:part.loc
       (Scope.locality_at_most
+         scope
          part_scope.sink
          ~ty
          Global

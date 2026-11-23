@@ -1181,3 +1181,79 @@ let global_constructor_args t name =
   Option.map (Hashtbl.find t.constructors name) ~f:(fun constructor ->
     constructor.global_args)
 ;;
+
+let pointer_free t ty =
+  let visiting = String.Hash_set.create () in
+  let visiting_ids = Int.Hash_set.create () in
+  let visit id ~f =
+    (not (Hash_set.mem visiting_ids id))
+    &&
+    (Hash_set.add visiting_ids id;
+     let result = f () in
+     Hash_set.remove visiting_ids id;
+     result)
+  in
+  let rec ty_ params (ty : Type.ty) =
+    match ty with
+    | TVar { id; state = Generic; _ } when Map.mem params id ->
+      Map.find_exn params id
+    | TVar { id; state = Link target; _ } ->
+      visit id ~f:(fun () -> ty_ params target)
+    | _ ->
+      (match Type.canonical_ty ty with
+       | TVar _ | TArrow _ | TCode _ -> false
+       | TCon (("int" | "bool" | "char" | "unit"), []) -> true
+       | TCon (name, args) -> nominal name (List.map args ~f:(arg params))
+       | TTuple tys -> List.for_all tys ~f:(ty_ params)
+       | TRecord { id; row } | TVariant { id; row } ->
+         visit id ~f:(fun () -> row_ params row))
+  and row_ params (row : Type.row) =
+    match row with
+    | RVar { id; state = Generic; _ } when Map.mem params id ->
+      Map.find_exn params id
+    | RVar { id; state = Link target; _ } ->
+      visit id ~f:(fun () -> row_ params target)
+    | _ ->
+      (match Type.canonical_row row with
+       | REmpty -> true
+       | RVar _ -> false
+       | RExtend (_, presence, _, entry, rest) ->
+         (match Type.canonical_presence presence with
+          | Absent -> true
+          | Present | PVar _ -> ty_ params entry)
+         && row_ params rest)
+  and arg params : Type.arg -> bool = function
+    | ATy entry -> ty_ params entry
+    | ARow entry -> row_ params entry
+  and nominal name args =
+    (not (Hash_set.mem visiting name))
+    &&
+    match check t name with
+    | Error _ -> false
+    | Ok decl ->
+      Hash_set.add visiting name;
+      let params =
+        List.zip_exn decl.params args
+        |> List.filter_map ~f:(fun (param, pointer_free) ->
+          match param with
+          | ATy (TVar v) -> Some (v.id, pointer_free)
+          | ARow (RVar v) -> Some (v.id, pointer_free)
+          | _ -> None)
+        |> Int.Map.of_alist_exn
+      in
+      let result =
+        match decl.kind with
+        | Abstract -> false
+        | Alias body -> ty_ params body
+        | Record fields ->
+          List.for_all fields ~f:(fun (field : Signature.Field.t) ->
+            ty_ params field.ty)
+        | Variant constructors ->
+          List.for_all constructors ~f:(fun (ctor : Signature.Constructor.t) ->
+            List.for_all ctor.args ~f:(ty_ params))
+      in
+      Hash_set.remove visiting name;
+      result
+  in
+  ty_ Int.Map.empty ty
+;;
