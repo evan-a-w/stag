@@ -1553,3 +1553,59 @@ let decls =
     (printed "()")
     |}]
 ;;
+
+let%expect_test "mode syntax round trips through values" =
+  let decls =
+    eval_values
+      {|
+let decls = .< struct
+  type r = { x : global_ int; y : int }
+  type t = A of global_ int * int
+  let f (x @ local) (y : int @ 'm) : int @ global portable = exclave_ local_ (x, y)
+  let g (h : int @ local -> int @ 'm) = h 1 [@nontail]
+  let annotated = (f : int @ local -> int -> int * int)
+  let var = (g @ local)
+  let mut counter : int @ static = 0
+end >.
+|}
+      "Gen.decls"
+  in
+  print_program decls;
+  (match Syntax_value.Program.of_value decls ~loc:Loc.none with
+   | Ok program -> print_string (Printer.program program)
+   | Error error -> print_error error);
+  [%expect {|
+    ((Type
+      ((name r) (params ())
+       (kind (Record ((x (Global (Con int ()))) (y (Con int ())))))))
+     (Type
+      ((name t) (params ())
+       (kind (Variant ((A ((Global (Con int ())) (Con int ()))))))))
+     (Let f ((x ((mode (Atoms (Local))))) (y ((ty (Con int ())) (mode (Var m)))))
+      ((ty (Con int ())) (mode (Atoms (Global Portable))))
+      (Exclave (Local (Tuple ((Var x ()) (Var y ()))))))
+     (Let g
+      ((h
+        ((ty
+          (Arrow (Moded (Con int ()) (Atoms (Local)))
+           (Moded (Con int ()) (Var m)))))))
+      () (Nontail (App (Var h ()) (Lit (Int 1)))))
+     (Let annotated () ()
+      (Var f
+       ((ty
+         (Arrow (Moded (Con int ()) (Atoms (Local)))
+          (Arrow (Con int ()) (Tuple ((Con int ()) (Con int ())))))))))
+     (Let var () () (Var g ((mode (Atoms (Local))))))
+     (Let_mut counter ((ty (Con int ())) (mode (Atoms (Static)))) (Lit (Int 0))))
+    type r = {x : global_ int; y : int}
+    type t = A of global_ int * int
+
+    let f (x @ local) (y : int @ 'm) : int @ global portable =
+      exclave_ local_ (x, y)
+
+    let g (h : int @ local -> int @ 'm) = h 1 [@nontail]
+    let annotated = (f : int @ local -> int -> int * int)
+    let var = (g @ local)
+    let mut counter : int @ static = 0
+    |}]
+;;

@@ -20,11 +20,7 @@ val let_ : string -> string list -> Expr.t -> Expr.t -> Expr.t
 
 (** [let name (arg : annot) ... : annot = equal in in_] *)
 val expr_let
-  :  string
-     * (string * Annot.t) list
-     * Type_expr.t option
-     * Expr.t
-     * Expr.t
+  :  string * (string * Annot.t) list * Type_expr.t option * Expr.t * Expr.t
   -> Expr.t
 
 val seq : Expr.t -> Expr.t -> Expr.t
