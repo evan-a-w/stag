@@ -158,8 +158,8 @@ module Kind : sig
     | Mode_variable_in_declaration of string
     (** A mode variable in a declaration's type, whose arrows have fixed modes. *)
     | Invalid_mode of string
-    (** A mode whose atoms contradict each other, as [const unknown] will once
-        provenance is checked, or a [with] constraint on no mode variable. *)
+    (** A mode whose atoms contradict each other, as [const external], or a
+        [with] constraint on no mode variable. *)
     | Spliced_code_assigns_immutable of string
     (** Code spliced where the variable it assigns is not mutable. *)
     | Type_splice_failed of Error.t

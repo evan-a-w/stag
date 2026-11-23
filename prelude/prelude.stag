@@ -111,7 +111,7 @@ module Stag = struct
         | Nonportable
         | Static
         | Gc
-        | Unknown
+        | External
         | Global
         | Regional
         | Local

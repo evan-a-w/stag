@@ -396,7 +396,7 @@ keeps. So `let n @ portable = 1` is a `portable` `n`, while
 `let n = (one @ portable)` is as `const` as `one`.
 
 A mode, after `@`, is a mode variable (`'m`, standing for every axis), or one
-or more of `const portable nonportable` (stage), `static gc unknown`
+or more of `const portable nonportable` (stage), `static gc external`
 (provenance) and `global regional local` (locality), at most one per axis:
 `@ local portable`.
 

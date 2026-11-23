@@ -32,12 +32,12 @@ let%expect_test "a fresh variable is unconstrained, a constant one fixed" =
         ~ids:([ Var.id fresh; Var.id const; Var.id local ] : int list)];
   [%expect
     {|
-    ((m0.stage Const..Nonportable) (m0.provenance Static..Unknown)
+    ((m0.stage Const..Nonportable) (m0.provenance Static..External)
      (m0.locality Global..Local))
     ((m1.stage Const) (m1.provenance Static) (m1.locality Global))
-    ((m2.stage Nonportable) (m2.provenance Unknown) (m2.locality Local))
+    ((m2.stage Nonportable) (m2.provenance External) (m2.locality Local))
     ((lower ((stage Const) (provenance Static) (locality Global)))
-     (upper ((stage Nonportable) (provenance Unknown) (locality Local)))
+     (upper ((stage Nonportable) (provenance External) (locality Local)))
      (ids (0 1 2)))
     |}]
 ;;
@@ -54,24 +54,24 @@ let%expect_test "const implies static" =
   show [ b ];
   let c = Var.create ids ~rank:0 in
   print_result (Var.at_most c Stage Const (reason "used at compile time"));
-  print_result (Var.at_least c Provenance Unknown (reason "from C"));
+  print_result (Var.at_least c Provenance External (reason "from C"));
   show [ c ];
   [%expect
     {|
     (Ok ())
     ((m0.stage Const) (m0.provenance Static) (m0.locality Global..Local))
     (Ok ())
-    ((m1.stage Portable..Nonportable) (m1.provenance Gc..Unknown)
+    ((m1.stage Portable..Nonportable) (m1.provenance Gc..External)
      (m1.locality Global..Local))
     (Error
      ("Mode mismatch" (var m1) (axis stage) (lower Portable) (upper Const)
       (lower_because (allocated "const implies static"))
       (upper_because ("used at compile time"))))
-    ((m1.stage Portable..Nonportable) (m1.provenance Gc..Unknown)
+    ((m1.stage Portable..Nonportable) (m1.provenance Gc..External)
      (m1.locality Global..Local))
     (Ok ())
     (Error
-     ("Mode mismatch" (var m2) (axis provenance) (lower Unknown) (upper Static)
+     ("Mode mismatch" (var m2) (axis provenance) (lower External) (upper Static)
       (lower_because ("from C"))
       (upper_because ("used at compile time" "const implies static"))))
     ((m2.stage Const) (m2.provenance Static) (m2.locality Global..Local))
@@ -96,21 +96,21 @@ let%expect_test "bounds propagate along edges, and errors explain them" =
     (Ok ())
     (Ok ())
     (Ok ())
-    ((m0.stage Const..Portable) (m0.provenance Static..Unknown)
+    ((m0.stage Const..Portable) (m0.provenance Static..External)
      (m0.locality Regional..Local))
-    ((m1.stage Const..Portable) (m1.provenance Static..Unknown)
+    ((m1.stage Const..Portable) (m1.provenance Static..External)
      (m1.locality Regional..Local))
-    ((m2.stage Const..Portable) (m2.provenance Static..Unknown)
+    ((m2.stage Const..Portable) (m2.provenance Static..External)
      (m2.locality Regional..Local))
     (Error
      ("Mode mismatch" (var m2) (axis locality) (lower Regional) (upper Global)
       (lower_because ("a is a parameter" "a flows to b" "b flows to c"))
       (upper_because ("c is returned"))))
-    ((m0.stage Const..Portable) (m0.provenance Static..Unknown)
+    ((m0.stage Const..Portable) (m0.provenance Static..External)
      (m0.locality Regional..Local))
-    ((m1.stage Const..Portable) (m1.provenance Static..Unknown)
+    ((m1.stage Const..Portable) (m1.provenance Static..External)
      (m1.locality Regional..Local))
-    ((m2.stage Const..Portable) (m2.provenance Static..Unknown)
+    ((m2.stage Const..Portable) (m2.provenance Static..External)
      (m2.locality Regional..Local))
     |}]
 ;;
@@ -140,25 +140,25 @@ let%expect_test "a failed constraint changes nothing" =
     (Ok ())
     (Ok ())
     (Ok ())
-    ((m0.stage Portable..Nonportable) (m0.provenance Static..Unknown)
+    ((m0.stage Portable..Nonportable) (m0.provenance Static..External)
      (m0.locality Local))
-    ((m1.stage Const..Nonportable) (m1.provenance Static..Unknown)
+    ((m1.stage Const..Nonportable) (m1.provenance Static..External)
      (m1.locality Global))
     (Error
      ("Mode mismatch" (var m1) (axis locality) (lower Local) (upper Global)
       (lower_because ("a is local" "a flows to b"))
       (upper_because ("b is returned"))))
-    ((m0.stage Portable..Nonportable) (m0.provenance Static..Unknown)
+    ((m0.stage Portable..Nonportable) (m0.provenance Static..External)
      (m0.locality Local))
-    ((m1.stage Const..Nonportable) (m1.provenance Static..Unknown)
+    ((m1.stage Const..Nonportable) (m1.provenance Static..External)
      (m1.locality Global))
     (Error
      ("Mode mismatch" (var m1) (axis locality) (lower Local) (upper Global)
       (lower_because ("all at once")) (upper_because ("b is returned"))))
-    ((m1.stage Const..Nonportable) (m1.provenance Static..Unknown)
+    ((m1.stage Const..Nonportable) (m1.provenance Static..External)
      (m1.locality Global))
     (Ok ())
-    ((m0.stage Portable..Nonportable) (m0.provenance Static..Unknown)
+    ((m0.stage Portable..Nonportable) (m0.provenance Static..External)
      (m0.locality Local))
     ((m1.stage Const) (m1.provenance Static) (m1.locality Global))
     |}]
@@ -190,7 +190,7 @@ let%expect_test "crossing" =
     Var.of_const
       ids
       ~rank:0
-      { stage = Nonportable; provenance = Unknown; locality = Local }
+      { stage = Nonportable; provenance = External; locality = Local }
     |> ok_exn
   in
   let target () =
@@ -273,9 +273,9 @@ let%expect_test "crossing" =
      ("Mode mismatch" (var m11) (axis stage) (lower Portable) (upper Const)
       (lower_because ("a is a parameter" "an int"))
       (upper_because ("b is const"))))
-    ((m10.stage Nonportable) (m10.provenance Static..Unknown)
+    ((m10.stage Nonportable) (m10.provenance Static..External)
      (m10.locality Local))
-    ((m11.stage Portable..Nonportable) (m11.provenance Static..Unknown)
+    ((m11.stage Portable..Nonportable) (m11.provenance Static..External)
      (m11.locality Global..Local))
     |}]
 ;;
@@ -302,8 +302,8 @@ let%expect_test "defaulting" =
     ((m1.stage Const) (m1.provenance Static) (m1.locality Regional))
     (Ok ())
     (Ok ())
-    ((m2.stage Portable) (m2.provenance Unknown) (m2.locality Local))
-    ((m3.stage Portable) (m3.provenance Unknown) (m3.locality Local))
+    ((m2.stage Portable) (m2.provenance External) (m2.locality Local))
+    ((m3.stage Portable) (m3.provenance External) (m3.locality Local))
     |}]
 ;;
 
@@ -314,7 +314,7 @@ let%expect_test "a constant that is const but not static is rejected" =
       (Var.of_const
          ids
          ~rank:0
-         { stage = Const; provenance = Unknown; locality = Global }
+         { stage = Const; provenance = External; locality = Global }
        : (Var.t, Error.t) Result.t)];
   [%expect
     {|
@@ -369,8 +369,9 @@ let%expect_test "equate failing on its second half changes nothing" =
      ("Mode mismatch" (var m0) (axis locality) (lower Local) (upper Global)
       (lower_because ("b is local" unified)) (upper_because ("a is returned"))))
     (Ok ())
-    ((m0.stage Nonportable) (m0.provenance Static..Unknown) (m0.locality Global))
-    ((m1.stage Const..Nonportable) (m1.provenance Static..Unknown)
+    ((m0.stage Nonportable) (m0.provenance Static..External)
+     (m0.locality Global))
+    ((m1.stage Const..Nonportable) (m1.provenance Static..External)
      (m1.locality Local))
     |}]
 ;;
@@ -409,9 +410,9 @@ let%expect_test "lower bounds assuming some variables at their upper bounds" =
     {|
     ((stage Const) (provenance Static) (locality Global))
     ((stage Portable) (provenance Gc) (locality Local))
-    ((stage Nonportable) (provenance Unknown) (locality Regional))
+    ((stage Nonportable) (provenance External) (locality Regional))
     ((stage Const) (provenance Static) (locality Global))
-    ((m3.stage Const..Nonportable) (m3.provenance Static..Unknown)
+    ((m3.stage Const..Nonportable) (m3.provenance Static..External)
      (m3.locality Global..Local))
     |}]
 ;;

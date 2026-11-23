@@ -45,7 +45,7 @@ let%expect_test "mode expressions" =
     ((Let x () ((ty (Con int ())) (mode (Atoms (Const)))) (Lit (Int 1))))
     t.stag:1:14-19: `local` and `local` are both locality modes
     t.stag:1:17-23: `regional` and `global` are both locality modes
-    t.stag:1:8-13: unknown mode `bogus`, expected one of `const`, `portable`, `nonportable`, `static`, `gc`, `unknown`, `global`, `regional`, `local`
+    t.stag:1:8-13: unknown mode `bogus`, expected one of `const`, `portable`, `nonportable`, `static`, `gc`, `external`, `global`, `regional`, `local`
     t.stag:1:8-9: expected a mode like `local`, or a mode variable like `'m`, found `=`
     |}]
 ;;

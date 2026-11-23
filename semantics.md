@@ -119,7 +119,7 @@ Two arrow types:
 - **Closure** `a -> b` (the existing arrow): boxed, with mode `static` or `gc`
   only. A `static` closure captures only `static` values and is a constant
   global; a `gc` closure is heap allocated and captures `global` values
-  (capturing `unknown` ones is unsafe, as storing them).
+  (capturing `external` ones is unsafe, as storing them).
 - **Function pointer** `a => b`: a code pointer, capturing nothing (it may
   refer to `const`/`static` toplevels directly). No allocation, C ABI
   compatible. Same precedence and associativity as `->` (`int * int => int`
@@ -156,31 +156,31 @@ Modes are a product of independent axes, each a small lattice:
   `const ≤ portable ≤ nonportable`. Whether a value is known at compile time
   (`const`), and whether code of the next stage may refer to it (`portable`).
   `const` values are deeply immutable, since lifting copies them.
-- **Provenance** (memory): `static ≤ gc ≤ unknown`. Where pointers point.
+- **Provenance** (memory): `static ≤ gc ≤ external`. Where pointers point.
   - `static`: immortal data with GC headers marked immortal, so tracing it is
     harmless. Deep: everything reachable from a `static` value is `static`.
   - `gc`: in the GC heap, or `static`.
-  - `unknown`: anything (FFI, malloc). The safety escape hatch: it may be
+  - `external`: anything (FFI, malloc). The safety escape hatch: it may be
     stored into GC objects and captured by closures, unmarked, but that is
-    unsafe (the programmer guarantees it outlives them). Since an `unknown`
+    unsafe (the programmer guarantees it outlives them). Since an `external`
     may point into the GC heap, it is traced, wherever it is stored: the GC
     tolerates pointers outside its heap, in roots and in GC objects alike
     (Boehm does; a precise GC checks headers or the heap range on such
-    fields). Stores of `unknown` keep their write barrier.
+    fields). Stores of `external` keep their write barrier.
 - **Locality**: `global ≤ regional ≤ local`, as OxCaml's regionality. See
   [Locality](#locality).
 
 The axes are independent except for one link: `const` implies `static` (a
 value known at compile time is emitted as static data). In the solver this is
 a monotone morphism bounding provenance by stage, `prov ≤ f(stage)` with
-`f(const) = static` and `f(_) = unknown`, as OxCaml's solver relates axes.
+`f(const) = static` and `f(_) = external`, as OxCaml's solver relates axes.
 They cannot be one axis, because of mode crossing by kind: pointer-free data
 (ints) crosses provenance and locality entirely, and crosses `portable` (it
 can be lifted into code), but never `const`, as a runtime int is not known at
 compile time. Crossing is applied when the type is known where the constraint
 arises.
 
-`unknown` is produced by annotations (`(p @ unknown)`), and later by an
+`external` is produced by annotations (`(p @ external)`), and later by an
 `External` FFI: declarations of C functions, with a C compatible ABI that
 rejects signatures it can't express.
 
@@ -278,7 +278,7 @@ The `const ⇒ static` link is a morphism edge between the stage and provenance
 graphs, `prov ≤ f(stage)`. It propagates upper bounds through `f`
 (`upper prov ⊓= f (upper stage)`) and lower bounds through its left adjoint
 `g` (`lower stage ⊔= g (lower prov)`, with `g(static) = const`,
-`g(gc) = g(unknown) = portable`: a heap value is not `const`). Morphisms
+`g(gc) = g(external) = portable`: a heap value is not `const`). Morphisms
 must have adjoints for this to work, as in OxCaml.
 
 The presence variables of rows (`Absent ≤ Present`, today `Type.presence`
@@ -342,7 +342,7 @@ Typed  (after compile-time splices, run by the interpreter)
 ```
 
 Lowering of modes to LLVM: `static` is `ptr` (globals, constant if `const`),
-`gc` and `unknown` are `ptr addrspace(1)` (GC references).
+`gc` and `external` are `ptr addrspace(1)` (GC references).
 
 Runtime quotes (code values at level 0 in a compiled program) are not compiled
 initially.
@@ -361,7 +361,7 @@ initially.
 
 1. Boehm (conservative, non-moving): modes only serve as optimisations.
 2. Precise non-moving GC with LLVM's `shadow-stack` strategy.
-3. Statepoints (`RewriteStatepointsForGC`), possibly moving: `unknown` roots
+3. Statepoints (`RewriteStatepointsForGC`), possibly moving: `external` roots
    and fields then need a heap check before relocation.
 
 ## Plan

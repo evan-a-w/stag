@@ -8,7 +8,7 @@ type t [@@deriving compare, sexp_of]
 
 val identity : Axis.Any.t -> t
 
-(** [x |-> f x] from stage to provenance, with [f const = static] and [unknown]
+(** [x |-> f x] from stage to provenance, with [f const = static] and [external]
     otherwise: [provenance <= f stage] says [const] implies [static]. *)
 val const_is_static : t
 

@@ -1016,7 +1016,7 @@ let%expect_test "slack and misplaced syntax" =
      (subs (((x ((Lit (Int 1)))) (y ((Tuple ((Lit (Int 2)) (Lit (Int 3))))))))))
     t.stag:1:2-3: expected end of file, found `@`
     t.stag:1:2-4: `@@` is reserved (for modalities)
-    t.stag:1:6-7: unknown mode `m`, expected one of `const`, `portable`, `nonportable`, `static`, `gc`, `unknown`, `global`, `regional`, `local`
+    t.stag:1:6-7: unknown mode `m`, expected one of `const`, `portable`, `nonportable`, `static`, `gc`, `external`, `global`, `regional`, `local`
     ((Let x () ((mode (Atoms (Const)))) (Lit (Int 1))))
     t.stag:1:7-8: expected a type parameter, found `]`
     t.stag:1:5-6: expected a row variable like `..'r` after `;`, found `]`

@@ -30,7 +30,7 @@ module Provenance = struct
   type t =
     | Static
     | Gc
-    | Unknown
+    | External
   [@@deriving sexp, compare, equal, enumerate]
 
   include functor Make_chain

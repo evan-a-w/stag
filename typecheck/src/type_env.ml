@@ -265,7 +265,7 @@ module Mode_atoms = struct
         | Global -> { const with locality = Global }
         | Regional -> { const with locality = Regional }
         | Local -> { const with locality = Local }
-        | Static | Gc | Unknown -> const)
+        | Static | Gc | External -> const)
     in
     const
   ;;
@@ -295,7 +295,7 @@ module Mode_atoms = struct
         | Global -> fix Locality Global
         | Regional -> fix Locality Regional
         | Local -> fix Locality Local
-        | Static | Gc | Unknown -> Ok ())
+        | Static | Gc | External -> Ok ())
     |> Result.map_error ~f:(fun (_ : Mode.Error.t) ->
       Typecheck_error.create ~loc (Invalid_mode "its modes are inconsistent"))
   ;;
@@ -380,7 +380,7 @@ module Vars = struct
         | Const -> f Mode.Stage.Const
         | Portable -> f Portable
         | Nonportable -> f Nonportable
-        | Static | Gc | Unknown | Global | Regional | Local -> Ok ())
+        | Static | Gc | External | Global | Regional | Local -> Ok ())
     in
     let checked result =
       Result.map_error result ~f:(fun error ->

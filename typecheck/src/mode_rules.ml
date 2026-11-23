@@ -130,7 +130,7 @@ let annotate ?(exact = false) ctx mode (annot : Syntax.Mode_expr.t option) ~var 
         | Global -> fix Locality Global
         | Regional -> fix Locality Regional
         | Local -> fix Locality Local
-        | Static | Gc | Unknown -> ()))
+        | Static | Gc | External -> ()))
 ;;
 
 let annotated ctx annot ~var =
@@ -218,7 +218,7 @@ module Binding = struct
             match atom with
             | Const | Portable | Nonportable -> Some (Mode.Axis.Any.T Stage)
             | Global | Regional | Local -> Some (T Locality)
-            | Static | Gc | Unknown -> None)
+            | Static | Gc | External -> None)
         | Var _ -> [ T Stage; T Locality; T Provenance ]
       in
       List.iter

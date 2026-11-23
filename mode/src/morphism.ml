@@ -39,7 +39,7 @@ let const_is_static =
   create
     ~src:(T Stage)
     ~dst:(T Provenance)
-    ~right:[| p Static; p Unknown; p Unknown |]
+    ~right:[| p Static; p External; p External |]
     ~left:[| i Const; i Portable; i Portable |]
 ;;
 

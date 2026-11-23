@@ -94,7 +94,7 @@ stage axis is constrained so far.
 - **Annotations.** In an annotation, a side written without a mode is a fresh
   variable, so annotating restricts no mode; `'m` names one variable across a
   definition's annotations. In a declaration (and for builtins), it is the
-  default, `nonportable unknown global`, and a mode variable is an error. As
+  default, `nonportable external global`, and a mode variable is an error. As
   in OxCaml, the result of a curried arrow written without a mode is as local
   as the arguments before it (`ptr[int] @ local -> int -> int` is
   `ptr[int] @ local -> (int -> int) @ local`), as it is the closure of a
@@ -323,7 +323,7 @@ Each step is a branch stacked on the previous one.
 - **F. Provenance**: allocation is `gc`, literals and `const` values
   `static`, stores, mutable globals.
 - **G. `External`**: C functions with a C compatible ABI (rejecting
-  signatures it can't express), producing `unknown` values.
+  signatures it can't express), producing `external` values.
 
 ## Later
 
