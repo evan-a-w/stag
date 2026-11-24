@@ -78,6 +78,39 @@ let%expect_test "const implies static" =
     |}]
 ;;
 
+let%expect_test "what is allocated at run time is gc unless it is const" =
+  let ids = Id_source.create () in
+  let allocated () =
+    let var = Var.create ids ~rank:0 in
+    ok_exn (Var.allocated var (reason "allocated"));
+    var
+  in
+  let a = allocated () in
+  print_result (Var.at_least a Stage Portable (reason "made at run time"));
+  show [ a ];
+  let b = allocated () in
+  print_result (Var.at_most b Provenance Static (reason "annotated static"));
+  show [ b ];
+  let c = allocated () in
+  print_result (Var.at_least c Stage Portable (reason "made at run time"));
+  print_result (Var.at_most c Provenance Static (reason "annotated static"));
+  show [ c ];
+  [%expect {|
+    (Ok ())
+    ((m0.stage Portable..Nonportable) (m0.provenance Gc..External)
+     (m0.locality Global..Local))
+    (Ok ())
+    ((m1.stage Const) (m1.provenance Static) (m1.locality Global..Local))
+    (Ok ())
+    (Error
+     ("Mode mismatch" (var m2) (axis provenance) (lower Gc) (upper Static)
+      (lower_because ("made at run time" allocated))
+      (upper_because ("annotated static"))))
+    ((m2.stage Portable..Nonportable) (m2.provenance Gc..External)
+     (m2.locality Global..Local))
+    |}]
+;;
+
 let%expect_test "bounds propagate along edges, and errors explain them" =
   let ids = Id_source.create () in
   let a = Var.create ids ~rank:0
