@@ -317,7 +317,16 @@ module Binding = struct
 end
 
 let raised ctx ~loc =
-  stage_at_least ctx Nonportable ~loc ~why:"it is a raised exception"
+  let mode =
+    stage_at_least ctx Nonportable ~loc ~why:"it is a raised exception"
+  in
+  Mode.Error.ok_exn
+    (Mode.Var.at_least
+       mode
+       Provenance
+       Gc
+       (reason ~loc "it is a raised exception"));
+  mode
 ;;
 
 module Alloc = struct
@@ -407,7 +416,15 @@ module Function = struct
   ;;
 
   let param ctx ~arg_mode ~name ~loc =
-    let mode = Ctx.fresh ctx in
+    (* A parameter may differ between calls, so is never [const] in the body,
+       whatever its callers pass. *)
+    let mode =
+      stage_at_least
+        ctx
+        Portable
+        ~loc
+        ~why:(sprintf "%s is a parameter, which may differ between calls" name)
+    in
     Ctx.add
       ctx
       ~loc
@@ -835,6 +852,10 @@ module Toplevel = struct
       if mut
       then (
         let cell, held = Binding.mutable_ ctx ~value annot ~var ~name ~loc in
+        (* A toplevel cell outlives every generalization: its readers relate to
+           it rather than copying its bounds. *)
+        List.iter [ cell; held ] ~f:(fun binding ->
+          Mode.Var.lower_rank (binding :> Mode.Var.t) ~rank:0);
         cell, Some held)
       else if is_function
       then Binding.closure value, None

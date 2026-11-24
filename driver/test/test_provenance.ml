@@ -27,7 +27,7 @@ let g (x : string) = x
   [%expect
     {|
     val f : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and portable <= 'm1 and external <= 'm1
-    val g : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1
+    val g : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and portable <= 'm1
     |}]
 ;;
 
@@ -189,7 +189,7 @@ let closed u = let f @ static = fun x -> x in f
   [%expect
     {|
     val literal : 'a -> string
-    val closed : 'a -> 'b @ 'm0 -> 'b @ 'm1 with 'm0 <= 'm1
+    val closed : 'a -> 'b @ 'm0 -> 'b @ 'm1 with 'm0 <= 'm1 and portable <= 'm1
     |}];
   provenance {|
 let made u = let p @ static = Ptr.make 1 in p
@@ -199,7 +199,8 @@ let made u = let p @ static = Ptr.make 1 in p
   provenance {|
 let captures (s : string) = let f @ static = fun v -> s in f
 |};
-  [%expect {| val captures : string @ const -> 'a -> string |}];
+  [%expect
+    {| This is gc, because s is a parameter, which may differ between calls (at t.stag:2:28-60), then s is captured by a closure (at t.stag:2:54-55), then the closure is made at run time, unless it is [const] (at t.stag:2:45-55), then the closure is made (at t.stag:2:45-55), then it is bound by an annotated let (at t.stag:2:36-42), but must be at most static, because it is annotated static (at t.stag:2:36-42) |}];
   provenance {|
 let built u = let s @ static = String.append "a" "b" in s
 |};
@@ -252,17 +253,14 @@ let captures (s : string) = let f @ static = fun v -> s in f
 let literal u = captures "a"
 |};
   [%expect
-    {|
-    val captures : string @ const -> 'a -> string
-    val literal : 'a -> ('b -> string) @ 'm0 with portable <= 'm0
-    |}];
+    {| This is gc, because s is a parameter, which may differ between calls (at t.stag:2:28-60), then s is captured by a closure (at t.stag:2:54-55), then the closure is made at run time, unless it is [const] (at t.stag:2:45-55), then the closure is made (at t.stag:2:45-55), then it is bound by an annotated let (at t.stag:2:36-42), but must be at most static, because it is annotated static (at t.stag:2:36-42) |}];
   provenance
     {|
 let captures (s : string) = let f @ static = fun v -> s in f
 let built u = captures (Int.to_string 1)
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:3:23-40), then it is passed to a function (at t.stag:3:14-40), but must be at most const, because it is annotated static (at t.stag:2:36-42), then it is bound by an annotated let (at t.stag:2:36-42), then the closure is made (at t.stag:2:45-55), then the closure is made at run time, unless it is [const] (at t.stag:2:45-55), then s is captured by a closure (at t.stag:2:54-55), then s is passed to the function (at t.stag:2:28-60), then the function types are unified |}];
+    {| This is gc, because s is a parameter, which may differ between calls (at t.stag:2:28-60), then s is captured by a closure (at t.stag:2:54-55), then the closure is made at run time, unless it is [const] (at t.stag:2:45-55), then the closure is made (at t.stag:2:45-55), then it is bound by an annotated let (at t.stag:2:36-42), but must be at most static, because it is annotated static (at t.stag:2:36-42) |}];
   provenance
     {|
 let ptr u = let p = Ptr.make 1 in let f @ static = fun v -> p in f
@@ -330,7 +328,7 @@ let g @ static = fun (x : int) -> f x
 |};
   [%expect
     {|
-    val f : int -> int
+    val f : int -> int @ 'm0 with portable <= 'm0
     val g : int -> int @ 'm0 with portable <= 'm0
     |}]
 ;;
@@ -362,7 +360,78 @@ let g = k 1
 |};
   [%expect
     {|
-    val k : int @ 'm0 -> (int -> int) @ 'm1 with 'm0 <= 'm1 and portable <= 'm1
-    val g : int @ '_m0 -> int @ '_m1
+    val k : int @ 'm0 -> (int -> int @ 'm2) @ 'm1 with 'm0 <= 'm1 and portable <= 'm2 and portable <= 'm1
+    val g : int @ '_m0 -> int @ '_m1 with portable <= '_m1
     |}]
+;;
+
+let%expect_test "readers of a mutable global see what is assigned later" =
+  provenance
+    {|
+let ext (x : string) = let y @ external = x in y
+let mut g = "a"
+let get u = g
+let p = Ptr.make "x"
+let copy u = p.* <- get ()
+let set u = g <- ext "b"
+|};
+  [%expect
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:7:17-24), then it is assigned to g (at t.stag:7:12-24), but must be at most gc, because it is stored through a pointer, whose cell may be managed by the GC (at t.stag:6:20-26), then the function returns it (at t.stag:6:20-26), then the function types are unified, then the function returns it (at t.stag:4:12-13), then g is used (at t.stag:4:12-13) |}];
+  provenance
+    {|
+let ext (x : string) = let y @ external = x in y
+let mut g = "a"
+let get u = g
+let keep u = let s @ gc = get () in s
+let set u = g <- ext "b"
+|};
+  [%expect
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:6:17-24), then it is assigned to g (at t.stag:6:12-24), but must be at most gc, because it is annotated gc (at t.stag:5:21-23), then it is bound by an annotated let (at t.stag:5:21-23), then the function returns it (at t.stag:5:26-32), then the function types are unified, then the function returns it (at t.stag:4:12-13), then g is used (at t.stag:4:12-13) |}];
+  provenance
+    {|
+let ext (x : string) = let y @ external = x in y
+let mut g = "a"
+let h = fun (u : int) -> g
+let keep u = let s @ gc = h 1 in s
+let set u = g <- ext "b"
+|};
+  [%expect
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:6:17-24), then it is assigned to g (at t.stag:6:12-24), but must be at most gc, because it is annotated gc (at t.stag:5:21-23), then it is bound by an annotated let (at t.stag:5:21-23), then the function returns it (at t.stag:5:26-29), then the function types are unified, then the function returns it (at t.stag:4:25-26), then g is used (at t.stag:4:25-26) |}]
+;;
+
+let%expect_test "a raised payload is allocated at run time" =
+  provenance
+    {|
+exception E of string
+let f u =
+  match raise (E (Int.to_string 1)) with
+  | x -> x
+  | exception E s -> let t @ static = s in t
+|};
+  [%expect
+    {| This is gc, because it is a raised exception (at t.stag:4:2-6:44), then s is used (at t.stag:6:38-39), then it is bound by an annotated let (at t.stag:6:29-35), but must be at most static, because it is annotated static (at t.stag:6:29-35) |}]
+;;
+
+let%expect_test "a parameter is never const in the body" =
+  provenance
+    {|
+let captures (s : string) = let f @ static = fun v -> s in f
+let a u = captures "a"
+|};
+  [%expect
+    {| This is gc, because s is a parameter, which may differ between calls (at t.stag:2:28-60), then s is captured by a closure (at t.stag:2:54-55), then the closure is made at run time, unless it is [const] (at t.stag:2:45-55), then the closure is made (at t.stag:2:45-55), then it is bound by an annotated let (at t.stag:2:36-42), but must be at most static, because it is annotated static (at t.stag:2:36-42) |}];
+  provenance
+    {|
+let r = .~(let q (s @ portable) = let c @ static = .< s >. in c in q 1)
+|};
+  [%expect
+    {| This is gc, because s is a parameter, which may differ between calls (at t.stag:2:10-71), then s is embedded in a quote (at t.stag:2:54-55), then the code is built at run time, unless it is [const] (at t.stag:2:51-58), then the code is built (at t.stag:2:51-58), then it is bound by an annotated let (at t.stag:2:42-48), but must be at most static, because it is annotated static (at t.stag:2:42-48) |}];
+  provenance
+    {|
+let closed (s : string) = let f @ static = fun v -> "k" in f
+let ident x = x
+let not_const = let c @ const = ident 1 in c
+|};
+  [%expect
+    {| This is portable, because it applies a function (at t.stag:4:32-39), then it is bound by an annotated let (at t.stag:4:24-29), but must be at most const, because it is annotated const (at t.stag:4:24-29) |}]
 ;;
