@@ -80,3 +80,27 @@ module M = struct external getpid : unit -> int = "getpid" end
       "a_long_symbol_name"
     |}]
 ;;
+
+(* [external] is also a mode: after a mode it is a declaration only when it
+   starts one. *)
+let%expect_test "the external mode next to an external" =
+  print
+    {|
+external f : int -> int @ external = "f"
+external g : int -> int @ gc = "g"
+type t = int -> int @ external
+external local : unit -> int = "h"
+let x : int @ global external = 1
+|};
+  prog {|external f : int -> int @ gc external = "f"|};
+  [%expect
+    {|
+    external f : int -> int @ external = "f"
+    external g : int -> int @ gc = "g"
+    type t = int -> int @ external
+    external local : unit -> int = "h"
+
+    let x : int @ global external = 1
+    t.stag:1:29-37: `gc` and `external` are both provenance modes
+    |}]
+;;

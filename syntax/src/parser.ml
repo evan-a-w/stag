@@ -277,11 +277,11 @@ let starts_type : Token.t -> bool = function
   | _ -> false
 ;;
 
-(* [external name :], declaring an external rather than the [external] mode. *)
+(* [external name :], declaring an external rather than the [external] mode: no
+   mode is followed by [name :]. *)
 let starts_external t =
   match peek t, peek_at t 1, peek_at t 2 with
-  | External, Lident name, Colon ->
-    Option.is_none (Mode_expr.Atom.of_string name)
+  | External, Lident _, Colon -> true
   | _ -> false
 ;;
 

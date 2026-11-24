@@ -496,11 +496,16 @@ compile time. This keeps opening or checking a file from running arbitrary C
 code.
 
 Modes written in `t` are trusted, as C code is not checked, and unwritten
-ones are a declaration's defaults (see [modes.md](modes.md#arrow-modes)):
+ones are a declaration's defaults, `nonportable gc global` (see
+[modes.md](modes.md#arrow-modes)):
 `external f : int @ portable -> int @ portable = "f"` returns portable
-values, while a plain `int -> int` returns nonportable ones. The external
-itself, a code pointer, has no mode of its own to declare: as a toplevel
-function it is `static` and `const`, so may be used anywhere.
+values, while a plain `int -> int` returns nonportable `gc` ones
+(`@ external` declares a result outside the GC's heap). The values C passes
+are pointer-free, so cross modes (but never to `const`): for now the modes
+matter in the external's type, as where it is passed as a function value of
+an annotated type. The external itself, a code pointer, has no mode of its
+own to declare: as a toplevel function it is `static` and `const`, so may be
+used anywhere.
 
 ```ocaml
 external srand48 : int -> unit = "srand48"

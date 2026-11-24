@@ -225,6 +225,14 @@ let f : int -> int @ portable = plain
     Their modes differ, in ways types don't print: This is nonportable, because a function type fixes it, then the function types are unified, but must be at most portable, because it is annotated portable (at t.stag:3:21-29)
     |}];
   modes {|
+external results : int @ local -> int @ external = "labs"
+|};
+  [%expect {| val results : int @ local -> int @ external |}];
+  modes {|
+external const_result : int -> int @ const = "labs"
+|};
+  [%expect {| This mode is invalid: the result of a function is never const |}];
+  modes {|
 external bad : int @ 'm -> int = "labs"
 |};
   [%expect
@@ -387,7 +395,8 @@ let%expect_test "the prelude's and core's externals may always be called at \
         let policy = Compile_time_c_calls.policy t ~external_ in
         print_s
           [%message name external_ (policy : Compile_time_c_calls.Policy.t)]));
-  [%expect {|
+  [%expect
+    {|
     (none prelude.labs (policy Allowed))
     (none prelude.Core.Int.labs (policy Allowed))
     (none Foo.labs (policy (Denied (external_ Foo.labs) (library ()))))
