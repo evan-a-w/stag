@@ -44,8 +44,8 @@ node, for good errors.
   `external`: it is the `external` mode after `@`, unless it starts a
   declaration (`external name :`).
   `rec` is reserved, as lets are always recursive.
-- `@` introduces a mode (see [Modes](#modes)); `@@` is reserved (for
-  modalities). `[@nontail]` is the one attribute.
+- `@` introduces a mode (see [Modes](#modes)); `@@` introduces a
+  modality, only in `ptr[t @@ external]` for now. `[@nontail]` is the one attribute.
 - Staging tokens: `.<` `>.` `.~`, and `.{` (a splice's substitutions).
 - Expect test tokens: `let%expect_test`, `[%expect`. Benchmarks: `let%bench`.
   Inline expansions: `include%inline`, `module%inline`, `end%inline`.
@@ -203,6 +203,12 @@ evaluating `e : t`. Both `p.*` and `*p` read that value. In a pattern,
 `*p` matches the pointee with pattern `p`. Dereferencing binds more
 tightly than function application; for example, `f *p` calls `f` with the
 pointee, not with the pointer.
+
+`ptr[t @@ external]` is a pointer whose cell may hold `external` values (see
+[Modes](#modes)): `Ptr.make_external e` allocates one, a store through it
+takes any value, and a read through it is `external`. It is a distinct type
+from `ptr[t]`, whose stores take only `gc` values. `@@ external` is only
+written on `ptr`'s type argument, and `external` is its only modality.
 
 Recursive data types must cross a pointer or another indirection (such
 as a function) before returning to the same type. For example:

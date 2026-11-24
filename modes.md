@@ -347,8 +347,7 @@ Each step is a branch stacked on the previous one.
   blocks, pointers and closures, not through what is only evaluated; what is
   allocated at run time is `gc` unless `const`, literals and toplevel
   constants `static`; declared arrows default to `gc`; stores through
-  pointers take `gc` values (through `gc` pointers, until FFI pointers are
-  designed), mutable variables infer their held provenance;
+  pointers take `gc` values (through `gc` pointers, until H), mutable variables infer their held provenance;
   provenance annotations and bounds in `with`; the Go-style GC design.
 - **G. `external`**: C functions at ordinary curried types, their modes
   trusted as written (unwritten ones a declaration's defaults, so they may
@@ -357,13 +356,18 @@ Each step is a branch stacked on the previous one.
   toplevel function), called through libffi by the interpreter. Only
   immediates (`int`, `bool`, `char`, `unit`) for now: other signatures,
   pointers included, are rejected.
+- **H. Pointee modality**: `ptr[t @@ external]`, a distinct pointer type
+  whose cell may be given `external` values (`Ptr.make_external`), reads
+  through it `external`; stores through a `ptr[t]` take `gc` values, through
+  any pointer whatever its mode (every `ptr` is to stag's memory; C's will
+  be `cptr[t]`).
 
 ## Later
 
 - `<t @ m>{ctx}` code modes.
-- Pointers to cells holding `external` values that may be stored to: the
-  cell's provenance in its type (as a modality), as a pointer's mode may
-  have been raised by subsumption.
+- `cptr[t]`: pointers into C's memory, which the GC doesn't scan, holding
+  only C-compatible data (pointer-free values and `cptr`s), for `external`
+  signatures.
 - Printing provenance relations between mode variables.
 - Pointers in `external` signatures, and callbacks (`@ static` closures
   passed to C).
