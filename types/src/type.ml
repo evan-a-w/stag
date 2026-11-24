@@ -166,6 +166,38 @@ let is_error ty =
   | _ -> false
 ;;
 
+module Pointee = struct
+  type t =
+    | Gc
+    | External
+  [@@deriving sexp_of, equal]
+
+  let type_name = function
+    | Gc -> "ptr"
+    | External -> "ptr@@external"
+  ;;
+
+  let of_type_name = function
+    | "ptr" -> Some Gc
+    | "ptr@@external" -> Some External
+    | _ -> None
+  ;;
+
+  let provenance : t -> Mode.Provenance.t = function
+    | Gc -> Gc
+    | External -> External
+  ;;
+
+  let ptr t pointee = TCon (type_name t, [ ATy pointee ])
+
+  let of_ptr ty =
+    match canonical_ty ty with
+    | TCon (name, [ ATy pointee ]) ->
+      Option.map (of_type_name name) ~f:(fun t -> t, pointee)
+    | _ -> None
+  ;;
+end
+
 let rec tail_var row =
   match row with
   | REmpty -> None
@@ -1182,6 +1214,12 @@ module Printer = struct
     let parens_if cond s = if cond then "(" ^ s ^ ")" else s in
     match canonical_ty ty with
     | TCon (name, []) -> t.type_name name
+    | TCon (name, [ ATy pointee ])
+      when String.equal name (Pointee.type_name External) ->
+      sprintf
+        "%s[%s @@ external]"
+        (t.type_name (Pointee.type_name Gc))
+        (ty_to_string t ~prec:1 pointee)
     | TCon (name, args) ->
       sprintf
         "%s[%s]"

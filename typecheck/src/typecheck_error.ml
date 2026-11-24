@@ -122,6 +122,8 @@ module Kind = struct
     | Malformed_struct_quote of string
     | Misplaced_type_splice
     | Misplaced_mut
+    | Misplaced_modality
+    | Invalid_modality
     | Mode_variable_in_declaration of string
     | Invalid_mode of string
     | Invalid_external of
@@ -569,6 +571,12 @@ let rec kind_message (kind : Kind.t) ~show_type =
     sprintf
       "The C symbol %S is invalid: it must be non-empty, with no NUL character"
       symbol
+  | Misplaced_modality ->
+    "A modality is only written on a pointer's type argument, as in \
+     [ptr[string @@ external]]"
+  | Invalid_modality ->
+    "The only modality of a pointer's type argument is [external], as in \
+     [ptr[string @@ external]]"
   | Misplaced_mut ->
     "Only an entry of a code type's context can be [mut] or [immut], for a \
      variable the code assigns or doesn't"

@@ -417,7 +417,7 @@ let strings (q : ptr[string]) (s : string) = q.* <- s
     let captures_copy : string @ 'm0 -> (int -> string @ 'm2) @ 'm1 with 'm0 <= 'm2 and 'm0 <= 'm1 and gc <= 'm1 = captures
     let closed_copy : 'a @ 'm0 -> (int -> int) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1 = closed
     let ints_copy : ptr[int] -> unit = ints
-    let strings_copy : ptr[string] @ 'm0 -> (string @ 'm2 -> unit) @ 'm1 with 'm0 <= 'm1 and 'm0 <= gc and 'm2 <= gc and gc <= 'm1 = strings
+    let strings_copy : ptr[string] @ 'm0 -> (string @ 'm2 -> unit) @ 'm1 with 'm0 <= 'm1 and 'm2 <= gc and gc <= 'm1 = strings
     |}]
 ;;
 

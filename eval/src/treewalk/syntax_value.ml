@@ -360,7 +360,8 @@ module Of_value = struct
       | _ -> raise Bad_arguments)
   ;;
 
-  (* Where a type is, so which of [t @ m], [global_ t] and [t with ...] it may
+  (* Where a type is, so which of [t @ m], [global_ t], [t @@ m] and [t with ...]
+     it may
      be, as the parser allows. *)
   module Type_position = struct
     type t =
@@ -368,6 +369,7 @@ module Of_value = struct
       | Arrow_side
       | Member
       | Annotation
+      | Type_arg
   end
 
   let rec type_expr ?(at = Type_position.Plain) value ~loc : Type_expr.t =
@@ -402,7 +404,7 @@ module Of_value = struct
              (match at with
               | Arrow_side ->
                 Moded (arg 0 (type_expr ~loc), arg 1 (mode_expr ~loc))
-              | Plain | Member | Annotation ->
+              | Plain | Member | Annotation | Type_arg ->
                 unexpected
                   ~expected:
                     "a type without a mode: a mode is only on a function \
@@ -427,16 +429,26 @@ module Of_value = struct
                    unexpected ~expected:"at least one mode constraint" value
                  | constraints ->
                    Constrained (arg 0 (type_expr ~loc), constraints))
-              | Plain | Arrow_side | Member ->
+              | Plain | Arrow_side | Member | Type_arg ->
                 unexpected
                   ~expected:
                     "a type without mode constraints: they are only on an \
                      annotation's type"
                   value)
+           | "Modality", 2 ->
+             (match at with
+              | Type_arg ->
+                Modality (arg 0 (type_expr ~loc), arg 1 (mode_expr ~loc))
+              | Plain | Arrow_side | Member | Annotation ->
+                unexpected
+                  ~expected:
+                    "a type without a modality: a modality is only on a type \
+                     argument, as in [ptr[t @@ external]]"
+                  value)
            | "Global", 1 ->
              (match at with
               | Member -> Global (arg 0 (type_expr ~loc))
-              | Plain | Arrow_side | Annotation ->
+              | Plain | Arrow_side | Annotation | Type_arg ->
                 unexpected
                   ~expected:
                     "a type without [global_]: [global_] is only on a record \
@@ -502,7 +514,7 @@ module Of_value = struct
       ~f:(fun constructor args : Type_expr.arg ->
         let arg i read = Args.read args i read in
         match constructor, Args.count args with
-        | "Ty", 1 -> Ty (arg 0 (type_expr ~loc))
+        | "Ty", 1 -> Ty (arg 0 (type_expr ~at:Type_arg ~loc))
         | "Row", 1 -> Row (arg 0 (row ~labels:Label ~loc))
         | _ -> raise Bad_arguments)
 

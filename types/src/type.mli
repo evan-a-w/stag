@@ -166,6 +166,28 @@ val arrow : ty -> ty -> ty
 val error_name : string
 val is_error : ty -> bool
 
+(** A pointer's type says which values its cell may be given by a store, so
+    that every alias of the cell agrees on it, whatever their modes. *)
+module Pointee : sig
+  type t =
+    | Gc (** [ptr[t]]: values at most [gc]. *)
+    | External (** [ptr[t @@ external]]: any value. *)
+  [@@deriving sexp_of, equal]
+
+  (** Of the pointer type: [ptr[t @@ external]]'s is not a name one can write. *)
+  val type_name : t -> string
+
+  val of_type_name : string -> t option
+
+  (** The most a value stored may be. *)
+  val provenance : t -> Mode.Provenance.t
+
+  val ptr : t -> ty -> ty
+
+  (** Of a pointer type, with what it points to. *)
+  val of_ptr : ty -> (t * ty) option
+end
+
 (** Copies of types as they are now, unaffected by later unification, eg. for an
     error to show them as they were when it arose. Variables keep their ids, and
     only their state is copied, not their bounds. *)

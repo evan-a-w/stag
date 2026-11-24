@@ -13,6 +13,7 @@ let indirect_constructors =
     ; "Type_expr.Moded", 2
     ; "Type_expr.Constrained", 2
     ; "Type_expr.Global", 1
+    ; "Type_expr.Modality", 2
     ; "Type_expr.Row.Extend", 3
     ; "Pattern.Deref", 1
     ; "Pattern.Poly_variant", 2
@@ -165,6 +166,7 @@ module Make (B : Builder) = struct
       | Mut t -> con "Mut" [ type_expr t ]
       | Immut t -> con "Immut" [ type_expr t ]
       | Moded (t, m) -> con "Moded" [ type_expr t; mode_expr m ]
+      | Modality (t, m) -> con "Modality" [ type_expr t; mode_expr m ]
       | Constrained (t, cs) ->
         con "Constrained" [ type_expr t; list mode_constraint cs ]
       | Global t -> con "Global" [ type_expr t ]

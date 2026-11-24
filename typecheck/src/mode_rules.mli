@@ -239,12 +239,13 @@ val assign
   -> (Expected.t -> 'a)
   -> 'a
 
-(** [target := value], [value] being checked at the target's type. *)
+(** [target := value], [value] being checked at the target's type, through a
+    pointer of the modality given. *)
 val store
   :  Ctx.t
   -> Expected.t
   -> loc:Loc.t
-  -> target:(Expected.t -> Typed.Expr.t)
+  -> target:(Expected.t -> Typed.Expr.t * Type.Pointee.t)
   -> value:(Expected.t -> ty:Type.ty -> Typed.Expr.t)
   -> Typed.Expr.t * Typed.Expr.t
 

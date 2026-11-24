@@ -38,7 +38,8 @@ end
 let con_name ty =
   match Type.canonical_ty ty with
   | TCon (name, []) -> Some name
-  | TCon ("ptr", _) -> Some "ptr"
+  | TCon (name, _) when Option.is_some (Type.Pointee.of_type_name name) ->
+    Some "ptr"
   | _ -> None
 ;;
 

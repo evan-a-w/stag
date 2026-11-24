@@ -352,6 +352,10 @@ let rec type_expr roots ~prec (t : Type_expr.t) =
       (prec > 0)
       (type_expr roots ~prec:0 t ^^ constraints_doc constraints)
   | Global t -> text "global_ " ^^ type_expr roots ~prec t
+  | Modality (t, mode) ->
+    paren_if
+      (prec > 0)
+      (type_expr roots ~prec:1 t ^^ text (" @@ " ^ Mode_expr.to_string mode))
 
 and mode_doc mode = text (" @ " ^ Mode_expr.to_string mode)
 
@@ -382,7 +386,8 @@ and starts_with_record (t : Type_expr.t) =
   | Arrow (first, _)
   | Tuple (first :: _)
   | Moded (first, _)
-  | Constrained (first, _) -> starts_with_record first
+  | Constrained (first, _)
+  | Modality (first, _) -> starts_with_record first
   | Var _ | Con _
   | Tuple []
   | Code _ | Variant _ | Mut _ | Immut _ | Splice _ | Global _ -> false
@@ -395,7 +400,8 @@ and starts_with_splice (t : Type_expr.t) =
   | Arrow (first, _)
   | Tuple (first :: _)
   | Moded (first, _)
-  | Constrained (first, _) -> starts_with_splice first
+  | Constrained (first, _)
+  | Modality (first, _) -> starts_with_splice first
   | Var _ | Con _
   | Tuple []
   | Code _ | Record _ | Variant _ | Mut _ | Immut _ | Global _ -> false

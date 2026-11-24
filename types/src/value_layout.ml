@@ -16,7 +16,9 @@ let iter ~con ~var ~cycle roots =
   let rec ty : Type.ty -> _ = function
     | TVar { id; state = Link target; _ } -> visit id ~f:(fun () -> ty target)
     | TVar v -> var v.id
-    | TCon ("ptr", _) | TArrow _ -> Ok ()
+    | TCon (name, _) when Option.is_some (Type.Pointee.of_type_name name) ->
+      Ok ()
+    | TArrow _ -> Ok ()
     | TCon (name, args) ->
       let%bind.Result stored = con name in
       args_by_value stored 0 args
@@ -92,7 +94,8 @@ let reaches_unguarded
     | TVar { id; state = Link target; _ } ->
       visit id guard ~f:(fun () -> ty guard target)
     | TVar _ -> false
-    | TCon ("ptr", args) -> args_ { guard with pointer = true } args
+    | TCon (name, args) when Option.is_some (Type.Pointee.of_type_name name) ->
+      args_ { guard with pointer = true } args
     | TCon (name, args) ->
       let stored = con name in
       let guard = { guard with structure = true } in

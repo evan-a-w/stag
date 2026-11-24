@@ -1124,7 +1124,7 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
     , { Pattern_var.ident
       ; ty
       ; loc = Source.Binder.loc binder ~enclosing:loc
-      ; modality = Id
+      ; modality = Modality.id
       } )
   in
   (* Each pattern of type [ty], known to be of [expected] (by default [ty]), of
@@ -1156,7 +1156,7 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
     let patterns, bindings =
       sub_patterns
         (List.map patterns ~f:(fun pattern -> pattern, Scope.fresh_ty t scope))
-        ~modalities:(List.map patterns ~f:(fun _ -> Modality.Id))
+        ~modalities:(List.map patterns ~f:(fun _ -> Modality.id))
     in
     Typed.Pattern.error patterns ~loc, bindings
   in
@@ -1168,22 +1168,21 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
     node (Var ident) ty, [ var ]
   | Lit lit -> node (Lit lit) (Syntax.Lit.ty lit), []
   | Deref inner ->
-    let expected =
-      Option.bind expected ~f:(fun ty ->
-        match Type.canonical_ty ty with
-        | TCon ("ptr", [ ATy pointee ]) -> Some pointee
-        | _ -> None)
+    let kind, expected =
+      match Option.bind expected ~f:Type.Pointee.of_ptr with
+      | Some (kind, pointee) -> kind, Some pointee
+      | None -> Type.Pointee.Gc, None
     in
     let inner, bindings = pattern_type t scope ~pattern:inner ?expected in
-    ( node (Deref inner) (Type.TCon ("ptr", [ ATy inner.ty ]))
-    , Pattern_var.under Global bindings )
+    ( node (Deref inner) (Type.Pointee.ptr kind inner.ty)
+    , Pattern_var.under (Modality.of_pointee kind) bindings )
   | Tuple patterns ->
     let types = List.map patterns ~f:(fun _ -> Scope.fresh_ty t scope) in
     let patterns, bindings =
       sub_patterns
         (List.zip_exn patterns types)
         ~expected:(tuple_components expected (List.length patterns))
-        ~modalities:(List.map patterns ~f:(fun _ -> Modality.Id))
+        ~modalities:(List.map patterns ~f:(fun _ -> Modality.id))
     in
     node (Tuple patterns) (Type.TTuple types), bindings
   | Construct (constructor, args) ->
@@ -1314,7 +1313,7 @@ module Variant_match = struct
           ; ty = rest
           ; loc =
               Source.Binder.loc binder ~enclosing:(Source.Pattern.loc pattern)
-          ; modality = Id
+          ; modality = Modality.id
           }
         ] )
     | _ -> pattern_type t scope ~pattern ~expected:scrutinee
@@ -1780,12 +1779,17 @@ let intrinsic_type t (scope : Scope.t) (intrinsic : Intrinsic.t) =
       ( ty
       , ty
       , { arg = Var arg; res = Var res; curry = Arrow_modes.default_curry } )
-  | Ptr_make ->
+  | (Ptr_make | Ptr_make_external) as intrinsic ->
     let pointee = Scope.fresh_ty t scope in
     let arg, res = Mode_rules.ptr_make (Scope.modes scope) in
+    let kind : Type.Pointee.t =
+      match intrinsic with
+      | Ptr_make_external -> External
+      | _ -> Gc
+    in
     Type.TArrow
       ( pointee
-      , TCon ("ptr", [ ATy pointee ])
+      , Type.Pointee.ptr kind pointee
       , { arg = Var arg; res = Var res; curry = Arrow_modes.default_curry } )
   | _ ->
     Intrinsic.ty
@@ -2395,9 +2399,11 @@ and expr_type
           check_expr t scope ~at ~expr:x ~ty:a)
     in
     (match f.desc with
-     | Var (Intrinsic Ptr_make) -> Mode_rules.Alloc.pointer at
+     | Var (Intrinsic (Ptr_make | Ptr_make_external)) ->
+       Mode_rules.Alloc.pointer at
      | Var (Bound (Toplevel ident) | Persistent (Toplevel ident))
-       when String.equal ident.name (Prelude_path.canonical "Ptr.make") ->
+       when List.exists [ "Ptr.make"; "Ptr.make_external" ] ~f:(fun name ->
+              String.equal ident.name (Prelude_path.canonical name)) ->
        Mode_rules.Alloc.pointer at
      | _ -> ());
     if !result_matches
@@ -2853,26 +2859,39 @@ and expr_type
                   node (Toplevel_splice { code; expansion }) inner))))
   | Deref pointer ->
     Mode_rules.runs modes at Nonportable ~loc ~why:"it reads through a pointer";
-    let ptr pointee = Type.TCon ("ptr", [ ATy pointee ]) in
-    (* What a pointer points to is global, as it is stored global. *)
-    let pointee, pointer =
+    (* What a pointer points to is global, as it is stored global. Whether it
+       is a [ptr[_ @@ external]] is known from the pointer's type, else it is a
+       [ptr[_]]. *)
+    let pointee, pointer, kind =
       Mode_rules.project modes at ~loc ~why:"it is dereferenced" (fun at ->
-        ( (match expected with
-           | Some expected when Expectation.is_required hint ->
-             ( expected
-             , expr_type t scope ~at ~expr:pointer ~expected:(ptr expected) )
-           | Some _ | None ->
-             ( Scope.fresh_ty t scope
-             , expr_type
-                 t
-                 scope
-                 ~at
-                 ~expr:pointer
-                 ?expected:(Option.map expected ~f:ptr)
-                 ~hint:Hint ))
-        , Modality.Global ))
+        let pointer =
+          expr_type
+            t
+            scope
+            ~at
+            ~expr:pointer
+            ?expected:(Option.map expected ~f:(Type.Pointee.ptr Gc))
+            ~hint:Hint
+        in
+        let kind : Type.Pointee.t =
+          match Type.Pointee.of_ptr pointer.ty with
+          | Some (kind, _) -> kind
+          | None -> Gc
+        in
+        let pointee =
+          match expected with
+          | Some expected when Expectation.is_required hint -> expected
+          | Some _ | None -> Scope.fresh_ty t scope
+        in
+        (pointee, pointer, kind), Modality.of_pointee kind)
     in
-    if Scope.unifies t scope ~ty1:pointer.ty ~ty2:(ptr pointee) ~loc
+    if
+      Scope.unifies
+        t
+        scope
+        ~ty1:pointer.ty
+        ~ty2:(Type.Pointee.ptr kind pointee)
+        ~loc
     then node (Deref pointer) pointee
     else node (Error [ pointer ]) Type.error
   | Store (target, value) ->
@@ -2888,12 +2907,22 @@ and expr_type
         ~children:[ discarded target ]
         (Typecheck_error.create ~loc Store_not_through_pointer)
     else (
+      (* The cell stored into is that of the pointer dereferenced last. *)
+      let rec cell_pointee (expr : Typed.Expr.t) : Type.Pointee.t =
+        match expr.desc with
+        | Deref pointer ->
+          Option.value_map (Type.Pointee.of_ptr pointer.ty) ~default:Type.Pointee.Gc ~f:fst
+        | Field (inner, _) | Poly_field (inner, _) -> cell_pointee inner
+        | _ -> Gc
+      in
       let target, value =
         Mode_rules.store
           modes
           at
           ~loc
-          ~target:(fun at -> expr_type t scope ~at ~expr:target)
+          ~target:(fun at ->
+            let target = expr_type t scope ~at ~expr:target in
+            target, cell_pointee target)
           ~value:(fun at ~ty -> check_expr t scope ~at ~expr:value ~ty)
       in
       node (Store (target, value)) Type.unit)
@@ -2903,7 +2932,7 @@ and expr_type
         exprs
         (tuple_components expected (List.length exprs))
         ~f:(fun expr expected ->
-          part Id (fun at -> expr_type t scope ~at ~expr ?expected ~hint))
+          part Modality.id (fun at -> expr_type t scope ~at ~expr ?expected ~hint))
     in
     node (Tuple exprs) (Type.TTuple (tys exprs))
   | Construct (constructor, args) ->
@@ -2941,7 +2970,7 @@ and expr_type
       Mode_rules.project modes at ~loc ~why:"its field is read" (fun at ->
         let expr = expr_type t scope ~at ~expr in
         match field_type t scope field ~record:(Some expr.ty) ~loc with
-        | Error error -> (expr, Error error), Modality.Id
+        | Error error -> (expr, Error error), Modality.id
         | Ok ((field, _, _) as typed) ->
           (expr, Ok typed), field_modality scope field)
     in
@@ -2970,7 +2999,7 @@ and expr_type
      | Ok known_expected ->
        (* What it does not update is copied. *)
        let expr =
-         part Id (fun at ->
+         part Modality.id (fun at ->
            expr_type
              t
              scope
@@ -3162,14 +3191,14 @@ and expr_type
     let row, (_ : Type.row) = Poly_row.open_ t scope [ label, ty ] in
     let expr =
       Mode_rules.project modes at ~loc ~why:"its field is read" (fun at ->
-        check_expr t scope ~at ~expr ~ty:(Fresh.record t row), Modality.Id)
+        check_expr t scope ~at ~expr ~ty:(Fresh.record t row), Modality.id)
     in
     node (Poly_field (expr, label)) ty
   | Poly_extend (fields, expr) ->
     let fields = labelled_types t scope ~at fields ~expected ~hint in
     let rest = Scope.fresh_row t scope in
     let expr =
-      part Id (fun at -> check_expr t scope ~at ~expr ~ty:(Fresh.record t rest))
+      part Modality.id (fun at -> check_expr t scope ~at ~expr ~ty:(Fresh.record t rest))
     in
     node
       (Poly_extend (fields, expr))
@@ -3177,7 +3206,7 @@ and expr_type
   | Poly_restrict (expr, label) ->
     let row, rest = Poly_row.open_ t scope [ label, Scope.fresh_ty t scope ] in
     let expr =
-      part Id (fun at -> check_expr t scope ~at ~expr ~ty:(Fresh.record t row))
+      part Modality.id (fun at -> check_expr t scope ~at ~expr ~ty:(Fresh.record t row))
     in
     node (Poly_restrict (expr, label)) (Fresh.record t rest)
   | Poly_update (expr, fields) ->
@@ -3189,7 +3218,7 @@ and expr_type
         (List.map fields ~f:(fun (label, _) -> label, Scope.fresh_ty t scope))
     in
     let expr =
-      part Id (fun at -> check_expr t scope ~at ~expr ~ty:(Fresh.record t row))
+      part Modality.id (fun at -> check_expr t scope ~at ~expr ~ty:(Fresh.record t row))
     in
     node
       (Poly_update (expr, fields))
@@ -3197,7 +3226,7 @@ and expr_type
   | Poly_variant (tag, arg) ->
     let arg =
       Option.map arg ~f:(fun expr ->
-        part Id (fun at ->
+        part Modality.id (fun at ->
           expr_type
             t
             scope
@@ -3401,7 +3430,7 @@ and labelled_types t scope ~at fields ~expected ~hint =
   Poly_row.report_duplicate_labels scope fields;
   List.map fields ~f:(fun ((label : Syntax.Name.t), expr) ->
     ( label.txt
-    , Mode_rules.part (Scope.modes scope) at Id (fun at ->
+    , Mode_rules.part (Scope.modes scope) at Modality.id (fun at ->
         expr_type
           t
           scope

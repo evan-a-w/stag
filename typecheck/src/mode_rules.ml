@@ -172,9 +172,9 @@ let annotated_use ctx expected ~annot ~var ~loc f =
 ;;
 
 let part ?ty ctx expected (modality : Modality.t) f =
-  match modality with
-  | Id -> f (Expected.part expected)
-  | Global ->
+  if not modality.global
+  then f (Expected.part expected)
+  else (
     (* What a [global_] field holds is not allocated with the block. *)
     let sub = Expected.fresh ctx in
     let (part : Typed.Expr.t) = f sub in
@@ -189,15 +189,30 @@ let part ?ty ctx expected (modality : Modality.t) f =
          ~loc:part.loc
          ~why:"it is held by a [global_] field");
     held ctx expected sub.mode ~loc:part.loc ~why:"it is held";
-    part
+    part)
+;;
+
+(* What may be stored into the cell of a [ptr[t @@ external]] is [external],
+   whatever the provenance of the pointer read through: as with deep
+   provenance, a pointer is then taken to be at least what its cell holds. *)
+let holds_external ctx block ~loc =
+  Ctx.add
+    ctx
+    ~loc
+    (Mode.Var.at_least
+       block
+       Provenance
+       External
+       (reason ~loc "its cell may be given external values"))
 ;;
 
 let project ctx expected ~loc ~why f =
   let block = Expected.fresh ctx in
   let result, (modality : Modality.t) = f block in
-  (match modality with
-   | Id -> joins ctx expected block.mode ~loc ~why
-   | Global -> held ctx expected block.mode ~loc ~why);
+  if modality.external_ then holds_external ctx block.mode ~loc;
+  if modality.global
+  then held ctx expected block.mode ~loc ~why
+  else joins ctx expected block.mode ~loc ~why;
   result
 ;;
 
@@ -274,18 +289,37 @@ module Binding = struct
   ;;
 
   let project ctx ~block (modality : Modality.t) ~loc =
-    match modality with
-    | Id -> Binding.of_mode block
-    | Global ->
-      let global = Ctx.fresh ctx in
-      let reason = reason ~loc "it is held by a [global_] field" in
+    let mode =
+      if not modality.global
+      then block
+      else (
+        let global = Ctx.fresh ctx in
+        let reason = reason ~loc "it is held by a [global_] field" in
+        Ctx.add
+          ctx
+          ~loc
+          (Mode.Var.submode
+             ~locality:Mode.Locality_map.ignore
+             block
+             global
+             reason
+           |> Result.bind ~f:(fun () ->
+             Mode.Var.at_most global Locality Global reason));
+        global)
+    in
+    if not modality.external_
+    then Binding.of_mode mode
+    else (
+      let held = Ctx.fresh ctx in
       Ctx.add
         ctx
         ~loc
-        (Mode.Var.submode ~locality:Mode.Locality_map.ignore block global reason
-         |> Result.bind ~f:(fun () ->
-           Mode.Var.at_most global Locality Global reason));
-      Binding.of_mode global
+        (Mode.Var.submode
+           mode
+           held
+           (reason ~loc "it is held by a [ptr[_ @@ external]]"));
+      holds_external ctx held ~loc;
+      Binding.of_mode held)
   ;;
 
   let embedded ctx ~name ~loc =
@@ -648,20 +682,9 @@ let assign ctx expected ~held ~crossed ~ty ~name ~loc f =
 ;;
 
 let store ctx expected ~loc ~target ~value =
-  let (target : Typed.Expr.t), target_mode =
+  let ((target : Typed.Expr.t), (pointee : Type.Pointee.t)), (_ : Mode.Var.t) =
     evaluate ctx expected ~loc ~why:"it is stored to" target
   in
-  Ctx.add
-    ctx
-    ~loc
-    (Mode.Var.at_most
-       ~crossing:(ctx.crossing target.ty)
-       target_mode
-       Provenance
-       Gc
-       (reason
-          ~loc:target.loc
-          "it is stored through, which needs a cell the GC scans"));
   let sub = Expected.fresh ctx in
   let (value : Typed.Expr.t) = value sub ~ty:target.ty in
   evaluated ctx expected sub.mode ~loc ~why:"it is stored";
@@ -675,17 +698,21 @@ let store ctx expected ~loc ~target ~value =
        Global
        ~loc:value.loc
        ~why:"it is stored through a pointer, which may outlive any region");
-  Ctx.add
-    ctx
-    ~loc
-    (Mode.Var.at_most
-       ~crossing:(ctx.crossing target.ty)
-       sub.mode
-       Provenance
-       Gc
-       (reason
-          ~loc:value.loc
-          "it is stored through a pointer, whose cell may be managed by the GC"));
+  (match pointee with
+   | External -> ()
+   | Gc ->
+     Ctx.add
+       ctx
+       ~loc
+       (Mode.Var.at_most
+          ~crossing:(ctx.crossing target.ty)
+          sub.mode
+          Provenance
+          Gc
+          (reason
+             ~loc:value.loc
+             "it is stored through a [ptr[t]], which holds only gc values (a \
+              [ptr[t @@ external]] may hold external ones)")));
   target, value
 ;;
 

@@ -86,6 +86,10 @@ and type_desc (g : Type_expr.desc) (w : Type_expr.desc) : Type_expr.desc option 
   | Global t, Global t' ->
     let+ t = type_expr t t' in
     Type_expr.Global t
+  | Modality (t, m), Modality (t', m') ->
+    let* t = type_expr t t' in
+    let+ m = mode_expr m m' in
+    Type_expr.Modality (t, m)
   | ( ( Var _
       | Con _
       | Arrow _
@@ -98,7 +102,8 @@ and type_desc (g : Type_expr.desc) (w : Type_expr.desc) : Type_expr.desc option 
       | Splice _
       | Moded _
       | Constrained _
-      | Global _ )
+      | Global _
+      | Modality _ )
     , _ ) -> None
 
 and mode_expr m m' = located (same Mode_expr.equal_desc) m m'

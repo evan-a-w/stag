@@ -125,6 +125,9 @@ module Defs = struct
     (** [t with c and ...], non-empty: only as an annotation's type. *)
     | Global of type_expr
     (** [global_ t]: only as a record field's type or a constructor's argument. *)
+    | Modality of type_expr * Mode_expr.t
+    (** [t @@ m]: only as a pointer's type argument, as in
+        [ptr[string @@ external]]. *)
 
   and row = row_desc Located.t
 
@@ -309,6 +312,7 @@ module Type_expr = struct
     | Moded of t * Mode_expr.t
     | Constrained of t * Mode_expr.Constraint.t list
     | Global of t
+    | Modality of t * Mode_expr.t
 
   type nonrec row_desc = row_desc =
     | Empty
