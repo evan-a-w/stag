@@ -211,11 +211,12 @@ end
 
 let rec lines ~of_prelude ~modes enclosing : Item.t -> _ =
   let scope = List.hd_exn enclosing in
-  let line f =
+  let line ?(declaration = false) f =
     let printer =
       Type.Printer.create
         ~type_name:(Scope.relative_name ~of_prelude enclosing)
         ~modes
+        ~declaration
         ()
     in
     let line = f printer in
@@ -232,14 +233,14 @@ let rec lines ~of_prelude ~modes enclosing : Item.t -> _ =
       let ty = Type.Printer.ty printer scheme ~atomic:external_ in
       sprintf "val %s : %s%s" name ty (if external_ then " @ external" else ""))
   | Type decl ->
-    line (fun printer ->
+    line ~declaration:true (fun printer ->
       Type_decl.to_string_hum
         printer
         decl
         ~canonical_name:(Scope.canonical_name scope decl.name))
   | Exception { name; args = [] } -> [ "exception " ^ name ]
   | Exception { name; args; modalities } ->
-    line (fun printer ->
+    line ~declaration:true (fun printer ->
       "exception " ^ constructor_args printer name args ~modalities ~params:[])
   | Module { name; items = [] } -> [ sprintf "module %s : sig end" name ]
   | Module { name; items } ->
