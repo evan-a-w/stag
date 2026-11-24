@@ -48,8 +48,8 @@ let field u = match in_record () with (s, _) -> s
     val in_ptr : 'a -> ptr[string @@ 'm1] @ 'm0 with portable external <= 'm1 and nonportable gc <= 'm0
     val in_record : 'a -> string * int @ external
     val in_closure : 'a -> ('b -> string @ external) @ external
-    val read : ptr['a @@ 'm0] -> 'a @ 'm1 with provenance('m0) <= provenance('m1) and nonportable <= 'm1
-    val read_ext : 'a -> string @ nonportable external
+    val read : ptr['a @@ 'm0] -> 'a @ 'm1 with stage('m0) <= stage('m1) and provenance('m0) <= provenance('m1)
+    val read_ext : 'a -> string @ external
     val field : 'a -> string @ external
     |}]
 ;;
@@ -79,7 +79,7 @@ let p = Ptr.make "a"
 let store u = p.* <- ext "b"
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:4:21-28), then it is stored into a pointer's cell, which holds only what fits its [@@] ([ptr[t]]: nonportable gc), and the modalities of the fields stored into (at t.stag:4:21-28), but must be at most gc, because p is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default) |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:4:21-28), then it is stored into a cell, which holds only what fits its modality (at t.stag:4:21-28), but must be at most gc, because p is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default) |}];
   provenance
     {|
 let p = Ptr.make "a"
@@ -285,7 +285,7 @@ let p = Ptr.make (fun (v : int) -> "a")
 let store u = let s = ext "a" in p.* <- (fun v -> s)
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:4:22-29), then s is captured by a closure (at t.stag:4:50-51), then the closure is made (at t.stag:4:40-52), then it is stored into a pointer's cell, which holds only what fits its [@@] ([ptr[t]]: nonportable gc), and the modalities of the fields stored into (at t.stag:4:40-52), but must be at most gc, because p is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default) |}]
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:4:22-29), then s is captured by a closure (at t.stag:4:50-51), then the closure is made (at t.stag:4:40-52), then it is stored into a cell, which holds only what fits its modality (at t.stag:4:40-52), but must be at most gc, because p is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default) |}]
 ;;
 
 let%expect_test "toplevel constants are static" =
@@ -383,7 +383,7 @@ let copy u = p.* <- get ()
 let set u = g <- ext "b"
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:7:17-24), then it is assigned to g (at t.stag:7:12-24), but must be at most gc, because p is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default), then it is stored into a pointer's cell, which holds only what fits its [@@] ([ptr[t]]: nonportable gc), and the modalities of the fields stored into (at t.stag:6:20-26), then the function returns it (at t.stag:6:20-26), then the function types are unified, then the function returns it (at t.stag:4:12-13), then g is used (at t.stag:4:12-13) |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:7:17-24), then it is assigned to g (at t.stag:7:12-24), but must be at most gc, because p is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default), then it is stored into a cell, which holds only what fits its modality (at t.stag:6:20-26), then the function returns it (at t.stag:6:20-26), then the function types are unified, then the function returns it (at t.stag:4:12-13), then g is used (at t.stag:4:12-13) |}];
   provenance
     {|
 let ext (x : string) = let y @ external = x in y

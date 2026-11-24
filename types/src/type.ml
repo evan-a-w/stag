@@ -1205,8 +1205,8 @@ module Printer = struct
       sprintf "'m%d" (Hashtbl.length t.mode_names))
   ;;
 
-  (* A mode argument, unless the default ([ptr[t]]'s [gc]). *)
-  let held_mode ?(cell = false) t (held : Mode_arg.t) =
+  (* A mode argument, unless the default ([ptr[t]]'s [nonportable gc]). *)
+  let held_mode t (held : Mode_arg.t) =
     let atom provenance =
       Some
         (Sexp.to_string (Mode.Provenance.sexp_of_t provenance)
@@ -1228,7 +1228,7 @@ module Printer = struct
          then Some (mode_var_name t var)
          else None
        | Some modes, Some _ ->
-         Mode_printing.count modes var ~side:(if cell then `Cell else `Held);
+         Mode_printing.count modes var ~side:`Mode_arg;
          Some "_"
        | Some modes, None -> Some (Mode_printing.held modes var))
   ;;
@@ -1283,7 +1283,7 @@ module Printer = struct
     | TCon (name, []) -> t.type_name name
     | TCon (name, [ ATy pointee; AMode held ]) when String.equal name ptr_name
       ->
-      (match held_mode ~cell:true t held with
+      (match held_mode t held with
        | None ->
          sprintf "%s[%s]" (t.type_name name) (ty_to_string t ~prec:0 pointee)
        | Some mode ->

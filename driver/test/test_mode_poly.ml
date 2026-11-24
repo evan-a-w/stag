@@ -424,11 +424,11 @@ let swap_any p q = let v = p.* in p.* <- q.*; q.* <- v
     let closed_copy : 'a @ 'm0 -> (int -> int) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1 = closed
     let ints_copy : ptr[int] -> unit = ints
     let strings_copy : ptr[string] @ 'm0 -> (string @ 'm2 -> unit) @ 'm1 with 'm0 <= 'm1 and 'm2 <= gc global and gc <= 'm1 = strings
-    let get_any_copy : ptr['a @@ 'm0] -> 'a @ 'm1 with provenance('m0) <= provenance('m1) and nonportable <= 'm1 = get_any
+    let get_any_copy : ptr['a @@ 'm0] -> 'a @ 'm1 with stage('m0) <= stage('m1) and provenance('m0) <= provenance('m1) = get_any
     let id_cell_copy : ptr['a @@ 'm1] @ 'm0 -> ptr['a @@ 'm1] @ 'm2 with 'm0 <= 'm2 = id_cell
     let static_cell_copy : ptr[string @@ static] = static_cell
     let ext_cell_copy : ptr[string @@ external] = ext_cell
-    let swap_any_copy : ptr['a @@ 'm1] @ 'm0 -> (ptr['a @@ 'm1] -> unit) @ 'm2 with 'm0 <= 'm2 and nonportable <= 'm1 and gc <= 'm2 = swap_any
+    let swap_any_copy : ptr['a @@ 'm1] @ 'm0 -> (ptr['a @@ 'm1] -> unit) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and gc <= 'm2 = swap_any
     |}]
 ;;
 

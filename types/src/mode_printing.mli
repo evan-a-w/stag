@@ -15,10 +15,9 @@ type t
 
 val create : unit -> t
 
-(** Counts an occurrence, on an arrow's argument or result, as a type's mode
-    argument ([`Held]) or as what a pointer's cell holds ([`Cell]), whose
-    locality means nothing, while counting what a rendering names. *)
-val count : t -> Mode.Var.t -> side:[ `Arg | `Res | `Held | `Cell ] -> unit
+(** Counts an occurrence, on an arrow's argument or result, or as a type's mode
+    argument, which has no locality, while counting what a rendering names. *)
+val count : t -> Mode.Var.t -> side:[ `Arg | `Res | `Mode_arg ] -> unit
 
 (** After counting a rendering: groups the variables counted so far. *)
 val settle : t -> unit
@@ -27,8 +26,8 @@ val settle : t -> unit
     the mode, as in [" @ 'm0"]. *)
 val side : t -> Mode.Var.t -> string option
 
-(** The name of a variable a pointer's cell holds, never elided: [ptr[t]] reads
-    back as [gc], not as a fresh variable. Its provenance is not fixed. *)
+(** The name of a variable of a mode argument, never elided: [ptr[t]] reads back
+    as [nonportable gc], not as a fresh variable. *)
 val held : t -> Mode.Var.t -> string
 
 (** The constraints between the variables counted, as [["'m0 <= 'm1"]]. *)

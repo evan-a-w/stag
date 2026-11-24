@@ -232,7 +232,7 @@ let set_owned u = p.*.owned <- ext "c"
 |}
     );
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:6:31-38), but must be at most gc, because it is stored into a pointer's cell, which holds only what fits its [@@] ([ptr[t]]: nonportable gc), and the modalities of the fields stored into (at t.stag:6:31-38) |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:6:31-38), but must be at most gc, because it is stored into a cell, which holds only what fits its modality (at t.stag:6:31-38) |}];
   check
     {|
 type r = { owned : string @@ gc; any : string }
@@ -270,26 +270,30 @@ let read u = let f @ portable = p.* in f
 let store u = p.* <- (fun x -> String.append x x)
 |};
   [%expect
-    {| This is nonportable, because it reads through a pointer (at t.stag:3:32-35), then it is bound by an annotated let (at t.stag:3:21-29), but must be at most portable, because it is annotated portable (at t.stag:3:21-29) |}];
+    {|
+    val p : ptr[(string @ '_m0 -> string @ '_m1) @@ portable] with '_m0 <= gc global and nonportable gc <= '_m1
+    val read : 'a -> (string @ '_m1 -> string @ '_m2) @ 'm0 with '_m1 <= gc global and nonportable gc <= '_m2 and gc <= 'm0
+    val store : 'a -> unit
+    |}];
   check
     {|
 let p : ptr[(string -> string) @@ portable] = Ptr.make (fun x -> x)
 let store u = p.* <- (let n = Int.to_string 3 in fun x -> String.append x n)
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:3:30-45), then n is bound (at t.stag:3:21-76), but must be at most portable, because it is stored into a pointer's cell, which holds only what fits its [@@] ([ptr[t]]: nonportable gc), and the modalities of the fields stored into (at t.stag:3:21-76) |}];
+    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:3:30-45), then n is bound (at t.stag:3:21-76), but must be at most portable, because it is stored into a cell, which holds only what fits its modality (at t.stag:3:21-76) |}];
   check
     {|
 let p : ptr[string -> string] = Ptr.make (fun x -> x)
 let read u = let f @ portable = p.* in f
 |};
   [%expect
-    {| This is nonportable, because it reads through a pointer (at t.stag:3:32-35), then it is bound by an annotated let (at t.stag:3:21-29), but must be at most portable, because it is annotated portable (at t.stag:3:21-29) |}];
+    {| This is nonportable, because it is read from a pointer's cell, which may hold it (at t.stag:3:32-35), then it is dereferenced (at t.stag:3:32-35), then it is bound by an annotated let (at t.stag:3:21-29), but must be at most portable, because it is annotated portable (at t.stag:3:21-29) |}];
   check {|
 let f (p : ptr[int @@ local]) = p
 |};
   [%expect
-    {| The modality of a pointer's type argument is on stage and provenance ([const], [portable], [nonportable], [static], [gc], [external]) or a mode variable, as in [ptr[string @@ external]]: a pointer's cell is always [global] |}];
+    {| A mode argument is on stage and provenance only ([const], [portable], [nonportable], [static], [gc], [external]) or a mode variable, as in [ptr[string @@ external]]: a pointer's cell is always [global], and a type's mode parameters have no locality |}];
   check {|
 let f (p : ptr[int @@ portable external]) = p
 |};
@@ -315,7 +319,7 @@ let static_tagged : tagged[static] = { tag = 1; payload = "a" }
     {|
     type cell['a, 'm0 : mode] = { v : ptr['a @@ 'm0] }
     type tagged['m0 : mode] = { tag : int; payload : string @@ 'm0 }
-    val get : cell['a, 'm0] -> 'a @ 'm1 with provenance('m0) <= provenance('m1) and nonportable <= 'm1
+    val get : cell['a, 'm0] -> 'a @ 'm1 with stage('m0) <= stage('m1) and provenance('m0) <= provenance('m1)
     val set : cell['a, 'm1] @ 'm0 -> ('a @ 'm3 -> unit) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and 'm3 <= global and gc <= 'm2
     val ext_cell : cell[string, external]
     val portable_cell : cell[string, portable]
@@ -351,7 +355,7 @@ let bad u = c.v.* <- ext "b"
 |}
     );
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:6:21-28), then it is stored into a pointer's cell, which holds only what fits its [@@] ([ptr[t]]: nonportable gc), and the modalities of the fields stored into (at t.stag:6:21-28), but must be at most gc, because the types are unified |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:6:21-28), then it is stored into a cell, which holds only what fits its modality (at t.stag:6:21-28), but must be at most gc, because the types are unified |}];
   check
     {|
 type tagged['p : mode] = { tag : int; payload : string @@ 'p }
@@ -407,30 +411,116 @@ type cell['p : mode] = { v : ptr[int @@ 'p] }
 let f (c : cell[local]) = c
 |};
   [%expect
-    {| The mode parameter 'p reaches what a pointer's cell holds, which is on stage and provenance only: a pointer's cell is always [global], so its argument has no locality |}];
-  (* Through another type's parameter, and not where it only meets a field. *)
-  check
-    {|
-type cell['p : mode] = { v : ptr[int @@ 'p] }
-type wrap['q : mode] = { c : cell['q] }
-let f (w : wrap[local]) = w
-|};
-  [%expect
-    {| The mode parameter 'q reaches what a pointer's cell holds, which is on stage and provenance only: a pointer's cell is always [global], so its argument has no locality |}];
+    {| A mode argument is on stage and provenance only ([const], [portable], [nonportable], [static], [gc], [external]) or a mode variable, as in [ptr[string @@ external]]: a pointer's cell is always [global], and a type's mode parameters have no locality |}];
+  (* Mode parameters have no locality, also where one only meets a field. *)
   check
     {|
 type tagged['p : mode] = { payload : string @@ 'p }
-let f (t : tagged[local]) = t
-type cell['p : mode] = { v : ptr[int @@ 'p] }
-let g (c : cell[portable external]) = c
+let f (t : tagged[global]) = t
+|};
+  [%expect
+    {| A mode argument is on stage and provenance only ([const], [portable], [nonportable], [static], [gc], [external]) or a mode variable, as in [ptr[string @@ external]]: a pointer's cell is always [global], and a type's mode parameters have no locality |}];
+  (* A name is a mode variable or a type variable, not both. *)
+  check
+    {|
+type cell['a, 'p : mode] = { v : ptr['a @@ 'p] }
+let f (c : cell['a, 'a]) = c
+|};
+  [%expect
+    {| The variable a is used as more than one of a type, a row and a mode |}];
+  check {|
+let f (p : ptr[string @@ 'a]) (x : 'a) = p
+|};
+  [%expect
+    {| The variable a is used as more than one of a type, a row and a mode |}];
+  check {|
+let f (x : 'a) (y @ 'a) = x
+|};
+  [%expect
+    {| The variable a is used as more than one of a type, a row and a mode |}];
+  (* An unknown mode argument is named in errors, not left out as the default. *)
+  check {|
+let f (p : ptr[string @@ 'm]) : int = p
+|};
+  [%expect
+    {| This expression has type ptr[string @@ 'm0] but an expression was expected of type int |}]
+;;
+
+let%expect_test "a modality's locality is only [global]" =
+  (* [regional] is relative to a region: a block returned to the caller's region
+     with [exclave_] would keep it regional there, though its parts were
+     allocated in the callee's. *)
+  check
+    {|
+type r = { f : ptr[int] @@ regional }
+let mk (x : ptr[int] @ local) = let r = { f = x } in exclave_ r
+let h (u : unit) =
+  let s = stack_ (Ptr.make 1) in
+  let x = (mk s).f in
+  exclave_ x
+|};
+  [%expect
+    {| A modality's locality can only be [global]: [regional] and [local] are relative to a region, and a part read from a block returned to the caller's region (with [exclave_]) would outlive the region it was allocated in |}];
+  check {|
+type t = A of string @@ local
+|};
+  [%expect
+    {| A modality's locality can only be [global]: [regional] and [local] are relative to a region, and a part read from a block returned to the caller's region (with [exclave_]) would outlive the region it was allocated in |}]
+;;
+
+let%expect_test "record update keeps the mode parameters of what it copies" =
+  check
+    (ext
+     ^ {|
+type two['p : mode] = { a : string @@ 'p; b : int }
+let forge (t : two[external]) : two[static] = { t with b = 1 }
+|}
+    );
+  [%expect
+    {|
+    This expression has type two[static] but an expression was expected of type two[external]
+    Their modes differ: This is external, because the types are unified, but must be at most static, because the types are unified
+    |}];
+  (* A mode parameter only of updated fields may change. *)
+  check
+    (ext
+     ^ {|
+type two['p : mode] = { a : string @@ 'p; b : int }
+let launder (t : two[external]) : two[static] = { t with a = "a" }
+let infer (t : two['p]) = { t with b = 1 }
+|}
+    );
+  [%expect
+    {|
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
+    type two['m0 : mode] = { a : string @@ 'm0; b : int }
+    val launder : two[external] @ 'm0 -> two[static] @ 'm1 with 'm0 <= 'm1
+    val infer : two['m1] @ 'm0 -> two['m1] @ 'm2 with 'm0 <= 'm2
+    |}]
+;;
+
+let%expect_test "reading a cell" =
+  (* What a [portable] cell holds is portable, so can be embedded in code. *)
+  check
+    {|
+let p : ptr[string @@ portable] = Ptr.make "a"
+let read u = let s @ portable = p.* in .< s >.
 |};
   [%expect
     {|
-    type tagged['m0 : mode] = { payload : string @@ 'm0 }
-    val f : tagged[local] @ 'm0 -> tagged[local] @ 'm1 with 'm0 <= 'm1
-    type cell['m0 : mode] = { v : ptr[int @@ 'm0] }
-    val g : cell[portable external] @ 'm0 -> cell[portable external] @ 'm1 with 'm0 <= 'm1
-    |}]
+    val p : ptr[string @@ portable]
+    val read : 'a -> <string>{..'b} @ 'm0 with gc <= 'm0
+    |}];
+  (* A cell may change between evaluations, so what is read from it is never
+     [const], even from a [const] cell. *)
+  check
+    {|
+let p : ptr[string @@ const] = Ptr.make "a"
+let read u = let s @ portable = p.* in s
+let bad u = let s @ const = p.* in s
+|};
+  [%expect
+    {| This is portable, because it is read from a pointer's cell, which may hold it (at t.stag:4:28-31), then it is dereferenced (at t.stag:4:28-31), then it is bound by an annotated let (at t.stag:4:20-25), but must be at most const, because it is annotated const (at t.stag:4:20-25) |}]
 ;;
 
 let%expect_test "in quotes, re-checked once erased" =
