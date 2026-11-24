@@ -46,16 +46,16 @@ let int_part (n : int @ local) = Int.add n
 |};
   [%expect
     {|
-    val app : string @ 'm0 -> (string -> string) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
-    val part : string @ 'm0 -> (string -> string) @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and gc <= 'm1
-    val part_local : string @ 'm0 -> (string -> string) @ 'm1 with local <= 'm0 and 'm0 <= 'm1 and gc <= 'm1
-    val int_part : int @ local -> (int -> int) @ 'm0 with gc <= 'm0
+    val app : string @ 'm0 -> (string -> string @ nonportable gc global) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
+    val part : string @ 'm0 -> (string -> string @ nonportable gc global) @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and gc <= 'm1
+    val part_local : string @ 'm0 -> (string -> string @ nonportable gc global) @ 'm1 with local <= 'm0 and 'm0 <= 'm1 and gc <= 'm1
+    val int_part : int @ local -> (int -> int @ nonportable gc global) @ 'm0 with gc <= 'm0
     |}];
   show {|
 let returned (s : string @ local) = String.append s
 |};
   [%expect
-    {| val returned : string @ 'm0 -> (string -> string) @ 'm1 with local <= 'm0 and 'm0 <= 'm1 and gc <= 'm1 |}];
+    {| val returned : string @ 'm0 -> (string -> string @ nonportable gc global) @ 'm1 with local <= 'm0 and 'm0 <= 'm1 and gc <= 'm1 |}];
   show
     {|
 let stored = Ptr.make (String.append "a")
