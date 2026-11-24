@@ -1,15 +1,14 @@
 open! Import
 
-(** The mode variables of the arrows a [Type.Printer] renders, related on the
-    stage axis, and the constraints to print after them, simplified: variables
-    equal by their constraints print as one, a variable fixed to a constant
-    prints as it, constraints and bounds the others imply are left out, and a
-    variable named once and in no constraint is elided (as an annotation's side
-    without a mode is a fresh variable, it reads back as it). A [portable] lower
-    bound of a variable only on arrows' results is left out too, as an arrow's
-    result is never [const]. On provenance, only a variable's bounds print: a
-    lower bound above [static], as [gc <= 'm0], and an upper bound below
-    [external], as ['m0 <= gc]. *)
+(** The mode variables of the arrows a [Type.Printer] renders, and the
+    constraints to print after them, exact: they read back ([Type_env]) as
+    implying just what the variables' constraints do, every axis's bounds and
+    relations, through the functions of [Mode.Written_morphism]. Variables equal
+    on every axis print as one, and a constraint the others imply as read back
+    is left out, as is a result's [portable] lower bound, which every result
+    reads back with. A variable in no relation, named once or fixed on every
+    axis, prints as the atoms of its fixed axes (none: elided), which read back
+    as it. *)
 
 type t
 

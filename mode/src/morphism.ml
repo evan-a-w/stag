@@ -115,10 +115,6 @@ let is_inflationary t =
   t.src_index = t.dst_index && Array.for_alli t.right ~f:(fun x y -> x <= y)
 ;;
 
-let is_deflationary t =
-  t.src_index = t.dst_index && Array.for_alli t.right ~f:(fun x y -> y <= x)
-;;
-
 let le a b =
   a.src_index = b.src_index
   && a.dst_index = b.dst_index

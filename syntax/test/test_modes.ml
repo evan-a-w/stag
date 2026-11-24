@@ -227,41 +227,48 @@ let%expect_test "mode constraints" =
         (Constrained
          (Arrow (Arrow (Moded (Var b) (Var n)) (Var c))
           (Arrow (Arrow (Var a) (Moded (Var b) (Var m))) (Arrow (Var a) (Var c))))
-         (((lower (Var m)) (upper (Var n)))))))
+         (((lower (Mode (Var m))) (upper (Mode (Var n))))))))
       (Var f ())))
     ((Let f ()
       ((ty
         (Constrained (Arrow (Moded (Var a) (Var m)) (Moded (Var a) (Var n)))
-         (((lower (Var m)) (upper (Var n)))
-          ((lower (Var n)) (upper (Atoms (Portable))))))))
+         (((lower (Mode (Var m))) (upper (Mode (Var n))))
+          ((lower (Mode (Var n))) (upper (Mode (Atoms (Portable)))))))))
       (Var f ())))
     ((Let f ()
       ((ty
         (Constrained (Arrow (Moded (Var a) (Var m)) (Var a))
-         (((lower (Atoms (Portable))) (upper (Var m)))
-          ((lower (Var m)) (upper (Atoms (Local Portable))))))))
+         (((lower (Mode (Atoms (Portable)))) (upper (Mode (Var m))))
+          ((lower (Mode (Var m))) (upper (Mode (Atoms (Local Portable)))))))))
       (Var f ())))
     (Var x
      ((ty
-       (Constrained (Con int ()) (((lower (Var m)) (upper (Atoms (Portable)))))))
+       (Constrained (Con int ())
+        (((lower (Mode (Var m))) (upper (Mode (Atoms (Portable))))))))
       (mode (Var m))))
     (Fun
      ((x
-       ((ty (Constrained (Con int ()) (((lower (Var m)) (upper (Var n))))))
+       ((ty
+         (Constrained (Con int ())
+          (((lower (Mode (Var m))) (upper (Mode (Var n)))))))
         (mode (Var m)))))
      (Var x ()))
     ((Let f
       ((x
         ((ty
-          (Constrained (Con int ()) (((lower (Atoms (Const))) (upper (Var m))))))
+          (Constrained (Con int ())
+           (((lower (Mode (Atoms (Const)))) (upper (Mode (Var m)))))))
          (mode (Var m)))))
-      ((ty (Constrained (Con int ()) (((lower (Var m)) (upper (Var n))))))
+      ((ty
+        (Constrained (Con int ())
+         (((lower (Mode (Var m))) (upper (Mode (Var n)))))))
        (mode (Var n)))
       (Var x ())))
     (Match
      (Var x
       ((ty
-        (Constrained (Con int ()) (((lower (Var m)) (upper (Atoms (Portable)))))))
+        (Constrained (Con int ())
+         (((lower (Mode (Var m))) (upper (Mode (Atoms (Portable))))))))
        (mode (Var m))))
      (((Var y) (Var y ()))))
     |}]
@@ -307,21 +314,69 @@ let f : 'a @ 'm -> 'a @ 'n with stage('m) <= stage('n) and 'n <= portable = f
     ((Let f ()
       ((ty
         (Constrained (Arrow (Moded (Var a) (Var m)) (Moded (Var a) (Var n)))
-         (((lower (Var m)) (upper (Var n)) (axis Stage))))))
+         (((lower (Axis Stage (Var m))) (upper (Axis Stage (Var n))))))))
       (Var f ())))
     ((Let f ()
       ((ty
         (Constrained (Arrow (Moded (Var a) (Var m)) (Moded (Var a) (Var n)))
-         (((lower (Var m)) (upper (Var n)) (axis Locality))
-          ((lower (Var n)) (upper (Var m)) (axis Provenance))))))
+         (((lower (Axis Locality (Var m))) (upper (Axis Locality (Var n))))
+          ((lower (Axis Provenance (Var n))) (upper (Axis Provenance (Var m))))))))
       (Var f ())))
-    t.stag:1:23-41: a constraint on one axis names it on both sides, as in `stage('m) <= stage('n)`
-    t.stag:1:23-38: a constraint on one axis names it on both sides, as in `stage('m) <= stage('n)`
-    t.stag:1:17-37: a constraint on one axis names it on both sides, as in `stage('m) <= stage('n)`
-    t.stag:1:23-32: a constraint on one axis names it on both sides, as in `stage('m) <= stage('n)`
+    t.stag:1:17-42: the sides of `<=` are on different axes, stage and locality
+    t.stag:1:17-38: a constraint on one axis names it on both sides, as in `stage('m) <= stage('n)`
+    t.stag:1:17-38: a constraint on one axis names it on both sides, as in `stage('m) <= stage('n)`
+    t.stag:1:17-32: a constraint on one axis names it on both sides, as in `stage('m) <= stage('n)`
     t.stag:1:17-23: unknown mode `height`, expected one of `const`, `portable`, `nonportable`, `static`, `gc`, `external`, `global`, `regional`, `local`
-    t.stag:1:23-28: `stage(...)` takes a mode variable, as in `stage('m)`: a mode like `portable` names its axis
+    t.stag:1:17-42: `stage(...)` takes a mode variable, as in `stage('m)`: a mode like `portable` names its axis
     let f : 'a @ 'm -> 'a @ 'n with stage('m) <= stage('n) and 'n <= portable = f
+    |}]
+;;
+
+let%expect_test "functions in mode constraints" =
+  print
+    {|
+let f : 'a @ 'm -> 'a @ 'n with meet(provenance('m), gc) <= provenance('n) = f
+let f : 'a @ 'm -> 'a @ 'n with release(locality('m)) <= locality('n) = f
+let f : 'a @ 'm -> 'a @ 'n with meet(release(locality('m)), regional) <= locality('n) = f
+let f : 'a @ 'm -> 'a @ 'n with provenance('n) <= static_if_const(stage('m)) = f
+let f : 'a @ 'm -> 'a @ 'n with stage('n) <= const_if_static(provenance('m)) = f
+|};
+  prog "let f : int with meet(stage('m), portable) <= stage('n) = f";
+  [%expect
+    {|
+    let f : 'a @ 'm -> 'a @ 'n with meet(provenance('m), gc) <= provenance('n) = f
+    let f : 'a @ 'm -> 'a @ 'n with release(locality('m)) <= locality('n) = f
+
+    let f : 'a @ 'm -> 'a @ 'n
+          with meet(release(locality('m)), regional) <= locality('n) =
+      f
+
+    let f : 'a @ 'm -> 'a @ 'n with provenance('n) <= static_if_const(stage('m)) = f
+    let f : 'a @ 'm -> 'a @ 'n with stage('n) <= const_if_static(provenance('m)) = f
+    ((Let f ()
+      ((ty
+        (Constrained (Con int ())
+         (((lower (Meet (Axis Stage (Var m)) Portable))
+           (upper (Axis Stage (Var n))))))))
+      (Var f ())))
+    |}];
+  (* Each function is on its side of [<=], of a term on its axis. *)
+  prog "let f : int with provenance('n) <= meet(provenance('m), gc) = f";
+  prog "let f : int with static_if_const(stage('m)) <= provenance('n) = f";
+  prog "let f : int with release(stage('m)) <= stage('n) = f";
+  prog "let f : int with meet(stage('m), gc) <= stage('n) = f";
+  prog "let f : int with static_if_const(stage('m)) <= stage('n) = f";
+  prog "let f : int with meet('m, gc) <= 'n = f";
+  prog "let f : int with meet(stage('m)) <= stage('n) = f";
+  [%expect
+    {|
+    t.stag:1:17-59: `meet(...)` is only on the left of `<=`
+    t.stag:1:17-61: `static_if_const(...)` is only on the right of `<=`
+    t.stag:1:17-48: `release(...)` takes a locality term, as in `release(locality('m))`
+    t.stag:1:17-49: `meet(...)` takes a provenance term, as in `meet(provenance('m), gc)`
+    t.stag:1:17-56: `static_if_const(...)` is only on the right of `<=`
+    t.stag:1:17-35: a constraint on one axis names it on both sides, as in `stage('m) <= stage('n)`
+    t.stag:1:31-32: expected `,`, found `)`
     |}]
 ;;
 

@@ -230,8 +230,22 @@ module Node = struct
   type t = Graph.t
 
   let var_id = Graph.var_id
-  let relations = Graph.relations
+  let axis = Graph.axis
+  let lower = Graph.lower
+  let upper = Graph.upper
+  let raised = Graph.raised
 end
+
+let node_any t (Axis.Any.T axis) = node t axis
+
+let relate a morphism b reason =
+  Graph.atomically (fun () ->
+    Graph.add_edge
+      (node_any a (Morphism.dst morphism))
+      morphism
+      (node_any b (Morphism.src morphism))
+      reason)
+;;
 
 let lower_assuming (type a) t (axis : a Axis.t) ~raised : a =
   let module C = (val Axis.chain axis) in

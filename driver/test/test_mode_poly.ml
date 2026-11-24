@@ -1,63 +1,13 @@
 open! Import
 open Source_helpers
+open Mode_helpers
 
-let signature source =
-  let stamps = Stamp_counter.create () in
-  let interpreter = Interpreter.create Treewalk.interpreter ~stamps in
-  Interpreter.set_limits interpreter limits;
-  let typecheck = Typecheck.create ~stamps ~interpreter () in
-  let prelude = program ~prelude:true "" in
-  match Typecheck.typecheck typecheck ~program:(program source) with
-  | Ok checked ->
-    Ok
-      (Signature.to_string_hum
-         ~modes:true
-         (List.drop checked.signature (List.length prelude)))
-  | Error { errors; partial = _ } ->
-    Error (List.map errors ~f:Typecheck_error.message)
-;;
+let round_trip source = round_trip source ~show:`Copies
 
 let modes source =
   match signature source with
   | Ok signature -> print_string signature
   | Error errors -> List.iter errors ~f:print_endline
-;;
-
-(* Annotates a copy of each value with its printed type, which reads back as the
-   same type. *)
-let round_trip source =
-  let printed = signature source |> Result.ok |> Option.value_exn in
-  let copies =
-    String.split_lines printed
-    |> List.filter_map ~f:(fun line ->
-      String.chop_prefix line ~prefix:"val "
-      |> Option.map ~f:(fun rest ->
-        let name, ty = String.lsplit2_exn rest ~on:':' in
-        let name = String.strip name in
-        sprintf "let %s_copy :%s = %s" name ty name))
-  in
-  let source = String.concat ~sep:"\n" (source :: copies) in
-  print_endline (String.concat ~sep:"\n" copies);
-  match signature source with
-  | Error errors -> List.iter errors ~f:print_endline
-  | Ok signature' ->
-    let lines = String.split_lines signature' in
-    let find name =
-      List.find_map lines ~f:(fun line ->
-        String.chop_prefix line ~prefix:("val " ^ name ^ " :"))
-    in
-    List.iter copies ~f:(fun copy ->
-      let name = String.chop_prefix_exn copy ~prefix:"let " in
-      let name = String.prefix name (String.index_exn name ' ') in
-      let original = String.chop_suffix_exn name ~suffix:"_copy" in
-      if not ([%equal: string option] (find name) (find original))
-      then
-        print_s
-          [%message
-            "differs"
-              (name : string)
-              (find original : string option)
-              (find name : string option)])
 ;;
 
 let%expect_test "arrow modes are polymorphic" =
@@ -73,9 +23,9 @@ let code2 = .<m>.
 |};
   [%expect
     {|
-    val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1
-    val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and 'm2 <= regional and stage('m4) <= stage('m1) and provenance('m4) <= provenance('m1) and gc <= 'm3
-    val const_ : 'a @ 'm0 -> ('b -> 'a @ 'm2) @ 'm1 with 'm0 <= 'm2 and 'm0 <= 'm1 and gc <= 'm1
+    val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm2 <= regional and stage('m4) <= stage('m1) and provenance('m4) <= provenance('m1) and meet(locality('m4), regional) <= locality('m1) and gc <= 'm3
+    val const_ : 'a @ 'm0 -> ('b -> 'a @ 'm2) @ 'm1 with 'm0 <= 'm2 and release(locality('m0)) <= locality('m2) and 'm0 <= 'm1 and gc <= 'm1
     val n : int
     val code : <int>{..'a}
     val m : string
@@ -94,7 +44,7 @@ let qb = .<b>.
 |};
   [%expect
     {|
-    val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1
+    val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     val a : int
     val b : string
     val qa : <int>{..'a}
@@ -113,9 +63,9 @@ type t = { k : int @ portable -> int }
 |};
   [%expect
     {|
-    val f : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and 'm0 <= portable and gc <= 'm1
-    val g : 'a @ 'm0 -> 'a @ 'm0 with portable <= 'm0
-    val h : int @ 'm0 -> int @ 'm0 with portable <= 'm0
+    val f : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= portable and gc <= 'm1
+    val g : 'a @ 'm0 -> 'a @ 'm0
+    val h : int @ 'm0 -> int @ 'm0
     type t = { k : int @ portable -> int }
     |}]
 ;;
@@ -151,11 +101,60 @@ let both (x @ portable) = x
 |};
   [%expect
     {|
-    val h : int @ 'm0 -> int @ 'm0 with portable <= 'm0
-    val chain : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> (('c @ 'm5 -> 'a @ 'm6) @ 'm4 -> ('c @ 'm8 -> 'b @ 'm9) @ 'm7) @ 'm3 with 'm0 <= 'm7 and 'm0 <= 'm3 and 'm2 <= 'm9 and 'm2 <= regional and 'm4 <= 'm7 and portable <= 'm5 and 'm6 <= 'm1 and 'm6 <= regional and stage('m8) <= stage('m5) and provenance('m8) <= provenance('m5) and gc <= 'm7 and gc <= 'm3
+    val h : int @ 'm0 -> int @ 'm0
+    val chain : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> (('c @ 'm5 -> 'a @ 'm6) @ 'm4 -> ('c @ 'm8 -> 'b @ 'm9) @ 'm7) @ 'm3 with 'm0 <= 'm7 and 'm0 <= 'm3 and 'm2 <= 'm9 and release(locality('m2)) <= locality('m9) and 'm2 <= regional and 'm4 <= 'm7 and portable <= 'm5 and 'm6 <= 'm1 and 'm6 <= regional and stage('m8) <= stage('m5) and provenance('m8) <= provenance('m5) and meet(locality('m8), regional) <= locality('m5) and gc <= 'm7 and gc <= 'm3
     val fixed : int @ portable -> int @ portable
-    val both : 'a @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and 'm0 <= portable
+    val both : 'a @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= portable
     |}]
+;;
+
+let%expect_test "printed constraints are exact" =
+  (* A field's modality: what is read is at most the record's mode met with
+     [gc], on provenance. *)
+  round_trip
+    {|
+type r2 = { x : string @@ gc; y : string }
+let fx (r : r2) = r.x
+let fy (r : r2) = r.y
+|};
+  [%expect {| |}];
+  (* [exclave_]: a regional value is local in the caller. *)
+  round_trip
+    {|
+let mk (x : ptr[int] @ local) = exclave_ stack_ (Ptr.make 1)
+let pass (p : ptr[int] @ local) = exclave_ p
+let wrap x = exclave_ stack_ (Ptr.make x)
+|};
+  [%expect {| |}];
+  (* Crossing: an [int] is the same value at every mode. *)
+  round_trip
+    {|
+let cross (x : int) = x
+let pair (x : int) (s : string) = (x, s)
+let embed (x : int) = .< x >.
+|};
+  [%expect {| |}];
+  (* [const] is [static], and a value allocated at run time is [gc]. *)
+  round_trip
+    {|
+let closure x = fun (y : int) -> x
+let keep (s : string) = s
+let pinned : string @ 'm -> string @ 'n with 'm <= const = fun s -> s
+|};
+  [%expect {| |}]
+;;
+
+let%expect_test "each written function reads back as the solver's" =
+  round_trip
+    {|
+let diverge (u : unit) = diverge u
+let meet_ : 'a @ 'm -> 'a @ 'n with meet(provenance('m), gc) <= provenance('n) = fun x -> diverge ()
+let release_ : 'a @ 'm -> 'a @ 'n with release(locality('m)) <= locality('n) = fun x -> diverge ()
+let nested : 'a @ 'm -> 'a @ 'n with meet(release(locality('m)), regional) <= locality('n) = fun x -> diverge ()
+let static_if : 'a @ 'm -> 'a @ 'n with provenance('n) <= static_if_const(stage('m)) = fun x -> diverge ()
+let const_if : 'a @ 'm -> 'a @ 'n with stage('n) <= const_if_static(provenance('m)) = fun x -> diverge ()
+|};
+  [%expect {| |}]
 ;;
 
 let%expect_test "printed types read back as themselves" =
@@ -172,13 +171,13 @@ let fixed (x @ portable) : int @ portable = x
 |};
   [%expect
     {|
-    let ident_copy : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 = ident
-    let apply_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and 'm2 <= regional and stage('m4) <= stage('m1) and provenance('m4) <= provenance('m1) and gc <= 'm3 = apply
-    let const__copy : 'a @ 'm0 -> ('b -> 'a @ 'm2) @ 'm1 with 'm0 <= 'm2 and 'm0 <= 'm1 and gc <= 'm1 = const_
-    let chain_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> (('c @ 'm5 -> 'a @ 'm6) @ 'm4 -> ('c @ 'm8 -> 'b @ 'm9) @ 'm7) @ 'm3 with 'm0 <= 'm7 and 'm0 <= 'm3 and 'm2 <= 'm9 and 'm2 <= regional and 'm4 <= 'm7 and portable <= 'm5 and 'm6 <= 'm1 and 'm6 <= regional and stage('m8) <= stage('m5) and provenance('m8) <= provenance('m5) and gc <= 'm7 and gc <= 'm3 = chain
-    let f_copy : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and 'm0 <= portable and gc <= 'm1 = f
+    let ident_copy : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) = ident
+    let apply_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm2 <= regional and stage('m4) <= stage('m1) and provenance('m4) <= provenance('m1) and meet(locality('m4), regional) <= locality('m1) and gc <= 'm3 = apply
+    let const__copy : 'a @ 'm0 -> ('b -> 'a @ 'm2) @ 'm1 with 'm0 <= 'm2 and release(locality('m0)) <= locality('m2) and 'm0 <= 'm1 and gc <= 'm1 = const_
+    let chain_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> (('c @ 'm5 -> 'a @ 'm6) @ 'm4 -> ('c @ 'm8 -> 'b @ 'm9) @ 'm7) @ 'm3 with 'm0 <= 'm7 and 'm0 <= 'm3 and 'm2 <= 'm9 and release(locality('m2)) <= locality('m9) and 'm2 <= regional and 'm4 <= 'm7 and portable <= 'm5 and 'm6 <= 'm1 and 'm6 <= regional and stage('m8) <= stage('m5) and provenance('m8) <= provenance('m5) and meet(locality('m8), regional) <= locality('m5) and gc <= 'm7 and gc <= 'm3 = chain
+    let f_copy : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= portable and gc <= 'm1 = f
     let g_copy : 'a @ 'm0 -> <'b>{h : 'b; ..'c} @ 'm1 with stage('m0) <= stage('m1) = g
-    let h_copy : int @ 'm0 -> int @ 'm0 with portable <= 'm0 = h
+    let h_copy : int @ 'm0 -> int @ 'm0 = h
     let fixed_copy : int @ portable -> int @ portable = fixed
     |}]
 ;;
@@ -193,9 +192,9 @@ let ok = capped 1
 |};
   [%expect
     {|
-    val loose : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1
-    val tight : 'a @ 'm0 -> 'a @ 'm0 with portable <= 'm0
-    val capped : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and 'm1 <= portable
+    val loose : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val tight : 'a @ 'm0 -> 'a @ 'm0
+    val capped : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm1 <= portable
     val ok : int
     |}];
   modes
@@ -230,9 +229,9 @@ let prov = .< let mut cell = "a" in let f (u : string) = cell in .~both >.
 |};
   [%expect
     {|
-    val f : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1
+    val f : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     val user : <<'a>{r : 'a; ..'b}>{..'c}
-    val pair : <'a>{..'b} @ 'm0 -> (<'c>{..'d} @ 'm2 -> <'a * 'c>{..'e} @ 'm3) @ 'm1 where ..'b <= {..'e}, ..'d <= {..'e} with 'm0 <= 'm3 and 'm0 <= 'm1 and 'm2 <= 'm3 and gc <= 'm3 and gc <= 'm1
+    val pair : <'a>{..'b} @ 'm0 -> (<'c>{..'d} @ 'm2 -> <'a * 'c>{..'e} @ 'm3) @ 'm1 where ..'b <= {..'e}, ..'d <= {..'e} with 'm0 <= 'm3 and release(locality('m0)) <= locality('m3) and 'm0 <= 'm1 and 'm2 <= 'm3 and release(locality('m2)) <= locality('m3) and gc <= 'm3 and gc <= 'm1
     val both : <<'_a>{r : '_a; ..'_b} * string>{cell?'_c : string; f?'_d : immut string @ '_m0 -> string @ '_m1; ..'_e} where ..'_e <= {..'_f} with nonportable <= '_m1
     val prov : <<'_a>{r : '_a; ..'_b} * string>{..'_c}
     |}]
@@ -247,8 +246,8 @@ let s = .~(r 1)
 |};
   [%expect
     {|
-    val q : <'a @ 'm0 -> <'a>{..'b} @ 'm1>{..'c} with portable <= 'm0 and 'm0 <= 'm1 and 'm0 <= portable and gc <= 'm1
-    val r : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and 'm0 <= portable and gc <= 'm1
+    val q : <'a @ 'm0 -> <'a>{..'b} @ 'm1>{..'c} with portable <= 'm0 and 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= portable and gc <= 'm1
+    val r : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= portable and gc <= 'm1
     val s : int
     |}]
 ;;
@@ -271,7 +270,7 @@ let c = a (Int.add 1 2)
 |};
   [%expect
     {|
-    val b : 'a @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm0 <= 'm1
+    val b : 'a @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     val a : 'a @ 'm0 -> <'b>{r : 'b; ..'c} @ 'm1 with portable <= 'm0 and stage('m0) <= stage('m1)
     val c : <'_a>{r : '_a; ..'_b}
     |}];
@@ -284,7 +283,7 @@ let c = a (Int.add 1 2)
   [%expect
     {|
     val a : 'a @ 'm0 -> <'b>{r : 'b; ..'c} @ 'm1 with portable <= 'm0 and stage('m0) <= stage('m1)
-    val b : 'a @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm0 <= 'm1
+    val b : 'a @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     val c : <'_a>{r : '_a; ..'_b}
     |}]
 ;;
@@ -310,7 +309,7 @@ let n = k 1
 |};
   [%expect
     {|
-    val k : int @ '_m0 -> int @ '_m1 with stage('_m0) <= stage('_m1) and provenance('_m0) <= provenance('_m1)
+    val k : int @ '_m0 -> int @ '_m1 with '_m0 <= '_m1 and release(locality('_m0)) <= locality('_m1)
     val n : int
     |}]
 ;;
@@ -335,9 +334,9 @@ let same (x @ 'm) = let y = (x @ 'm) in y
 |};
   [%expect
     {|
-    val cap : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and 'm0 <= portable
-    val cap_with : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and 'm0 <= portable
-    val same : 'a @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm0 <= 'm1
+    val cap : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= portable
+    val cap_with : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= portable
+    val same : 'a @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     |}];
   modes {|
 let bad = let mut c = 1 in (c @ portable)
@@ -386,10 +385,10 @@ let r2 = .~q2
 |};
   [%expect
     {|
-    val q : <'a @ 'm0 -> 'a @ 'm1>{..'b} with 'm0 <= 'm1 and 'm0 <= portable
-    val r : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and 'm0 <= portable
-    val q2 : <string @ 'm0 -> string @ 'm1>{..'a} with 'm0 <= 'm1 and 'm0 <= portable and nonportable <= 'm1
-    val r2 : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and 'm0 <= portable and nonportable <= 'm1
+    val q : <'a @ 'm0 -> 'a @ 'm1>{..'b} with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= portable
+    val r : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= portable
+    val q2 : <string @ 'm0 -> string @ 'm1>{..'a} with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= portable and nonportable <= 'm1
+    val r2 : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= portable and nonportable <= 'm1
     |}]
 ;;
 
@@ -414,18 +413,18 @@ let swap_any p q = let v = p.* in p.* <- q.*; q.* <- v
 |};
   [%expect
     {|
-    let ext_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1 = ext
+    let ext_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1 = ext
     let p_copy : ptr[string] = p
     let store_copy : string @ 'm0 -> unit with 'm0 <= gc global = store
-    let keep_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and 'm0 <= static = keep
-    let in_ptr_copy : 'a -> ptr[string @@ 'm1] @ 'm0 with portable external <= 'm1 and nonportable gc <= 'm0 = in_ptr
+    let keep_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= static = keep
+    let in_ptr_copy : 'a -> ptr[string @@ 'm1] @ 'm0 with external <= 'm1 and nonportable gc <= 'm0 = in_ptr
     let k_copy : int @ 'm0 -> (int -> int) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1 = k
-    let captures_copy : string @ 'm0 -> (int -> string @ 'm2) @ 'm1 with 'm0 <= 'm2 and 'm0 <= 'm1 and gc <= 'm1 = captures
+    let captures_copy : string @ 'm0 -> (int -> string @ 'm2) @ 'm1 with 'm0 <= 'm2 and release(locality('m0)) <= locality('m2) and 'm0 <= 'm1 and gc <= 'm1 = captures
     let closed_copy : 'a @ 'm0 -> (int -> int) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1 = closed
     let ints_copy : ptr[int] -> unit = ints
     let strings_copy : ptr[string] @ 'm0 -> (string @ 'm2 -> unit) @ 'm1 with 'm0 <= 'm1 and 'm2 <= gc global and gc <= 'm1 = strings
-    let get_any_copy : ptr['a @@ 'm0] -> 'a @ 'm1 with stage('m0) <= stage('m1) and provenance('m0) <= provenance('m1) = get_any
-    let id_cell_copy : ptr['a @@ 'm1] @ 'm0 -> ptr['a @@ 'm1] @ 'm2 with 'm0 <= 'm2 = id_cell
+    let get_any_copy : ptr['a @@ 'm0] -> 'a @ 'm1 with 'm0 <= 'm1 = get_any
+    let id_cell_copy : ptr['a @@ 'm1] @ 'm0 -> ptr['a @@ 'm1] @ 'm2 with 'm0 <= 'm2 and release(locality('m0)) <= locality('m2) = id_cell
     let static_cell_copy : ptr[string @@ static] = static_cell
     let ext_cell_copy : ptr[string @@ external] = ext_cell
     let swap_any_copy : ptr['a @@ 'm1] @ 'm0 -> (ptr['a @@ 'm1] -> unit) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and gc <= 'm2 = swap_any
@@ -465,9 +464,9 @@ let through_stage (f : string @ 'm -> string @ 'n with stage('m) <= stage('n)) (
 |};
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
-    val through_all : (string @ 'm1 -> string @ 'm2) @ 'm0 -> (string @ 'm4 -> string @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable external <= 'm1 and 'm1 <= 'm2 and 'm2 <= 'm5 and 'm2 <= regional and 'm4 <= 'm1 and 'm4 <= global and gc <= 'm3
-    val through_stage : (string @ 'm1 -> string @ 'm2) @ 'm0 -> (string @ 'm4 -> string @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable external <= 'm1 and stage('m1) <= stage('m2) and 'm2 <= 'm5 and 'm2 <= regional and 'm4 <= 'm1 and 'm4 <= global and gc <= 'm3
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
+    val through_all : (string @ 'm1 -> string @ 'm2) @ 'm0 -> (string @ 'm4 -> string @ 'm5) @ 'm3 with 'm0 <= 'm3 and external <= 'm1 and 'm1 <= 'm2 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm2 <= regional and 'm4 <= 'm1 and 'm4 <= global and gc <= 'm3
+    val through_stage : (string @ 'm1 -> string @ 'm2) @ 'm0 -> (string @ 'm4 -> string @ 'm5) @ 'm3 with 'm0 <= 'm3 and external <= 'm1 and stage('m1) <= stage('m2) and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm2 <= regional and 'm4 <= 'm1 and 'm4 <= global and gc <= 'm3
     |}]
 ;;
 
@@ -484,12 +483,12 @@ let apply f x = f x
 |};
   [%expect
     {|
-    let pick_copy : string @ 'm0 -> (string @ 'm2 -> string @ 'm3) @ 'm1 with 'm0 <= 'm3 and 'm0 <= 'm1 and stage('m2) <= stage('m3) and gc <= 'm1 = pick
-    let ext_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1 = ext
-    let through_stage_copy : (string @ 'm1 -> string @ 'm2) @ 'm0 -> (string @ 'm4 -> string @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable external <= 'm1 and stage('m1) <= stage('m2) and 'm2 <= 'm5 and 'm2 <= regional and 'm4 <= 'm1 and 'm4 <= global and gc <= 'm3 = through_stage
+    let pick_copy : string @ 'm0 -> (string @ 'm2 -> string @ 'm3) @ 'm1 with 'm0 <= 'm3 and release(locality('m0)) <= locality('m3) and 'm0 <= 'm1 and stage('m2) <= stage('m3) and gc <= 'm1 = pick
+    let ext_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1 = ext
+    let through_stage_copy : (string @ 'm1 -> string @ 'm2) @ 'm0 -> (string @ 'm4 -> string @ 'm5) @ 'm3 with 'm0 <= 'm3 and external <= 'm1 and stage('m1) <= stage('m2) and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm2 <= regional and 'm4 <= 'm1 and 'm4 <= global and gc <= 'm3 = through_stage
     let fixed_stage_copy : 'a -> string @ 'm0 with nonportable gc <= 'm0 = fixed_stage
-    let fixed_and_related_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and nonportable <= 'm1 = fixed_and_related
+    let fixed_and_related_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and nonportable <= 'm1 = fixed_and_related
     let local_closure_copy : 'a @ 'm0 -> (int -> 'a @ 'm2) @ 'm1 with local <= 'm0 and 'm0 <= 'm2 and 'm0 <= 'm1 and gc <= 'm1 = local_closure
-    let apply_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and 'm2 <= regional and stage('m4) <= stage('m1) and provenance('m4) <= provenance('m1) and gc <= 'm3 = apply
+    let apply_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm2 <= regional and stage('m4) <= stage('m1) and provenance('m4) <= provenance('m1) and meet(locality('m4), regional) <= locality('m1) and gc <= 'm3 = apply
     |}]
 ;;

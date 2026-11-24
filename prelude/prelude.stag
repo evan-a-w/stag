@@ -122,6 +122,20 @@ module Stag = struct
     end
 
     type t = Var of string | Atoms of list[Atom.t]
+
+    (* A side of a constraint [lower <= upper]: a mode, on every axis, or a
+       variable on one axis, [Axis], under functions: [meet] and [release] on
+       the left of [<=], [static_if_const] and [const_if_static] on the
+       right. *)
+    module Term = struct
+      type t =
+        | Mode of Mode_expr.t
+        | Axis of Axis.t * Mode_expr.t
+        | Meet of ptr[t * Atom.t]
+        | Release of ptr[t]
+        | Static_if_const of ptr[t]
+        | Const_if_static of ptr[t]
+    end
   end
 
   module Type_expr = struct
@@ -142,7 +156,7 @@ module Stag = struct
       | Moded of ptr[t * Mode_expr.t]
       (* [t with c and ...], only as an annotation's type: each constraint
          [(lower, upper)] is [lower <= upper], at least one a variable. *)
-      | Constrained of ptr[t * list[Mode_expr.t * Mode_expr.t * option[Mode_expr.Axis.t]]]
+      | Constrained of ptr[t * list[Mode_expr.Term.t * Mode_expr.Term.t]]
       (* [t @@ m], only as a record field's type, a constructor's argument or
          a pointer's type argument. *)
       | Modality of ptr[t * Mode_expr.t]

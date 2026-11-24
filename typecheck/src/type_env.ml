@@ -477,11 +477,75 @@ module Vars = struct
       else Ok (Fixed (Mode_atoms.declared ~default:Mode_arg.default atoms))
   ;;
 
+  let rec term_loc : Syntax.Mode_expr.Term.t -> Loc.t = function
+    | Mode mode | Axis (_, mode) -> mode.loc
+    | Meet (t, _) | Release t | Static_if_const t | Const_if_static t ->
+      term_loc t
+  ;;
+
+  let rec term_var : Syntax.Mode_expr.Term.t -> string option = function
+    | Mode { txt = Var name; _ } | Axis (_, { txt = Var name; _ }) -> Some name
+    | Mode { txt = Atoms _; _ } | Axis (_, { txt = Atoms _; _ }) -> None
+    | Meet (t, _) | Release t | Static_if_const t | Const_if_static t ->
+      term_var t
+  ;;
+
+  (* A term of one variable as [m(var)] on the right of [<=], or, on the left,
+     as the morphism whose left adjoint it applies. *)
+  let rec term vars (expr : Syntax.Mode_expr.Term.t) ~loc =
+    let open Result.Let_syntax in
+    let axis : Syntax.Mode_expr.Axis.t -> Mode.Axis.Any.t = function
+      | Stage -> T Stage
+      | Provenance -> T Provenance
+      | Locality -> T Locality
+    in
+    let point (atom : Syntax.Mode_expr.Atom.t) =
+      match atom with
+      | Const -> 0
+      | Portable -> 1
+      | Nonportable -> 2
+      | Static -> 0
+      | Gc -> 1
+      | External -> 2
+      | Global -> 0
+      | Regional -> 1
+      | Local -> 2
+    in
+    (* [m1] applied after [m2]'s left adjoint, on the left; [m1] of [m2], on the
+       right: [Morphism.compose m2 m1] and [compose m1 m2]. *)
+    let under t m ~left =
+      let%map var, inner = term vars t ~loc in
+      ( var
+      , if left
+        then Mode.Morphism.compose inner m
+        else Mode.Morphism.compose m inner )
+    in
+    match expr with
+    | Axis (on, { txt = Var name; loc }) ->
+      let%map var = Annotation_vars.mode vars name ~loc in
+      var, Mode.Morphism.identity (axis on)
+    | Meet (t, atom) ->
+      under
+        t
+        (Mode.Morphism.meet_with
+           (axis (Syntax.Mode_expr.Atom.axis atom))
+           (point atom))
+        ~left:true
+    | Release t -> under t Mode.Morphism.release ~left:true
+    | Static_if_const t -> under t Mode.Morphism.const_is_static ~left:false
+    | Const_if_static t -> under t Mode.Morphism.runtime_is_gc ~left:false
+    | Mode _ | Axis (_, { txt = Atoms _; _ }) ->
+      Error
+        (Typecheck_error.create
+           ~loc
+           (Invalid_mode "a constraint on one axis relates two mode variables"))
+  ;;
+
   (* [lower <= upper]: between variables, on every axis or the one named, or
      bounding a variable by the atoms, on their axes. *)
   let mode_constraint
     t
-    ({ lower; upper; axis } as constraint_ : Syntax.Mode_expr.Constraint.t)
+    ({ lower; upper } as constraint_ : Syntax.Mode_expr.Constraint.t)
     ~loc
     : (unit, Typecheck_error.t) Result.t
     =
@@ -509,38 +573,47 @@ module Vars = struct
       Result.map_error result ~f:(fun error ->
         Typecheck_error.create ~loc (Mode_error error))
     in
-    match t, lower.txt, upper.txt with
-    | _, Atoms _, Atoms _ ->
-      error ~loc (Invalid_mode "a constraint must be on a mode variable")
-    | Params _, Var name, _ | Params _, _, Var name ->
-      error ~loc (Mode_variable_in_declaration name)
-    | Annotation vars, Var lower, Var upper ->
-      let%bind.Result lower = Annotation_vars.mode vars lower ~loc in
-      let%bind.Result upper = Annotation_vars.mode vars upper ~loc in
+    match t, lower, upper with
+    | Params _, _, _ ->
+      (match Option.first_some (term_var lower) (term_var upper) with
+       | Some name -> error ~loc (Mode_variable_in_declaration name)
+       | None ->
+         error ~loc (Invalid_mode "a constraint must be on a mode variable"))
+    | Annotation vars, Mode lower, Mode upper ->
+      (match lower.txt, upper.txt with
+       | Atoms _, Atoms _ ->
+         error ~loc (Invalid_mode "a constraint must be on a mode variable")
+       | Var lower, Var upper ->
+         let%bind.Result lower = Annotation_vars.mode vars lower ~loc in
+         let%bind.Result upper = Annotation_vars.mode vars upper ~loc in
+         checked (Mode.Var.submode lower upper reason)
+       | Var lower, Atoms atoms ->
+         let%bind.Result var = Annotation_vars.mode vars lower ~loc in
+         checked
+           (bound
+              atoms
+              ~f:
+                { f = (fun axis point -> Mode.Var.at_most var axis point reason)
+                })
+       | Atoms atoms, Var upper ->
+         let%bind.Result var = Annotation_vars.mode vars upper ~loc in
+         checked
+           (bound
+              atoms
+              ~f:
+                { f =
+                    (fun axis point -> Mode.Var.at_least var axis point reason)
+                }))
+    | Annotation vars, lower, upper ->
+      let%bind.Result () =
+        Syntax.Mode_expr.Constraint.check constraint_
+        |> Result.map_error ~f:(fun message ->
+          Typecheck_error.create ~loc (Invalid_mode message))
+      in
+      let%bind.Result lower, left = term vars lower ~loc in
+      let%bind.Result upper, right = term vars upper ~loc in
       checked
-        (match axis with
-         | None -> Mode.Var.submode lower upper reason
-         | Some Stage -> Mode.Var.submode_on lower upper Stage reason
-         | Some Provenance -> Mode.Var.submode_on lower upper Provenance reason
-         | Some Locality -> Mode.Var.submode_on lower upper Locality reason)
-    | Annotation _, (Var _ | Atoms _), (Var _ | Atoms _)
-      when Option.is_some axis ->
-      error
-        ~loc
-        (Invalid_mode "a constraint on one axis relates two mode variables")
-    | Annotation vars, Var lower, Atoms atoms ->
-      let%bind.Result var = Annotation_vars.mode vars lower ~loc in
-      checked
-        (bound
-           atoms
-           ~f:{ f = (fun axis point -> Mode.Var.at_most var axis point reason) })
-    | Annotation vars, Atoms atoms, Var upper ->
-      let%bind.Result var = Annotation_vars.mode vars upper ~loc in
-      checked
-        (bound
-           atoms
-           ~f:
-             { f = (fun axis point -> Mode.Var.at_least var axis point reason) })
+        (Mode.Var.relate lower (Mode.Morphism.compose left right) upper reason)
   ;;
 end
 
@@ -694,7 +767,10 @@ let rec elaborate'
           Vars.mode_constraint
             vars
             constraint_
-            ~loc:(Loc.merge constraint_.lower.loc constraint_.upper.loc))
+            ~loc:
+              (Loc.merge
+                 (Vars.term_loc constraint_.lower)
+                 (Vars.term_loc constraint_.upper)))
       in
       ty, Type_expr.Constrained (syntax, constraints)
     | Modality _ -> Error (Typecheck_error.create ~loc Misplaced_modality)

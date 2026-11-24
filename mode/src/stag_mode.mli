@@ -21,6 +21,8 @@ module Axis : sig
     val sexp_of_t : t -> Sexp.t
     val all : t list
     val equal : t -> t -> bool
+    val size : t -> int
+    val index : t -> int
   end
 end
 
@@ -40,8 +42,9 @@ end
 
 module Reason = Reason
 module Var = Var
+module Morphism = Morphism
+module Written_morphism = Written_morphism
 
 module Private : sig
-  module Morphism = Morphism
   module Undo = Undo
 end

@@ -53,11 +53,12 @@ end
 val rank : t -> int option
 
 val var_id : t -> int
+val axis : t -> Axis.Any.t
 
-(** The nodes [t] is related to on its axis, by a morphism implying the relation
-    without it: [`Le n] for [t <= n], [`Ge n] for [n <= t]. A generic node's are
-    the constraints its scheme keeps, others' their edges. *)
-val relations : t -> ([ `Le | `Ge ] * t) list
+(** The nodes that rise, with their least points, if each node given is raised
+    to its point, by the constraints that hold: a generic node's are those its
+    scheme keeps. [None] if one can't be. *)
+val raised : (t * int) list -> (t * int) list option
 
 (** The lower bound [t] would have if the variables [raised] (by variable id),
     but generic ones, were raised to their upper bounds. *)

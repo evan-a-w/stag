@@ -413,25 +413,20 @@ module Of_value = struct
              (match at with
               | Annotation ->
                 let constraint_ value : Mode_expr.Constraint.t =
-                  let lower, upper, axis =
+                  let constraint_ : Mode_expr.Constraint.t =
                     match value with
-                    | Value.Tuple [ lower; upper; axis ] ->
-                      ( within (Component 0) (mode_expr ~loc) lower
-                      , within (Component 1) (mode_expr ~loc) upper
-                      , within (Component 2) (option mode_axis) axis )
-                    | value -> unexpected ~expected:"a triple" value
+                    | Value.Tuple [ lower; upper ] ->
+                      { lower = within (Component 0) (mode_term ~loc) lower
+                      ; upper = within (Component 1) (mode_term ~loc) upper
+                      }
+                    | value -> unexpected ~expected:"a pair" value
                   in
-                  match lower.txt, upper.txt, axis with
-                  | Atoms _, Atoms _, _ ->
+                  match Mode_expr.Constraint.check constraint_ with
+                  | Ok () -> constraint_
+                  | Error message ->
                     unexpected
-                      ~expected:"a constraint relating a mode variable"
+                      ~expected:(sprintf "a well-formed mode constraint (%s)" message)
                       value
-                  | Atoms _, _, Some _ | _, Atoms _, Some _ ->
-                    unexpected
-                      ~expected:
-                        "a constraint on one axis between two mode variables"
-                      value
-                  | _ -> { lower; upper; axis }
                 in
                 (match arg 1 (list constraint_) with
                  | [] ->
@@ -466,6 +461,30 @@ module Of_value = struct
         | "Stage", 0 -> Stage
         | "Provenance", 0 -> Provenance
         | "Locality", 0 -> Locality
+        | _ -> raise Bad_arguments)
+
+  and mode_atom value : Mode_expr.Atom.t =
+    variant
+      "Stag.Mode_expr.Atom.t"
+      value
+      ~f:(fun constructor args : Mode_expr.Atom.t ->
+        match Args.count args with
+        | 0 -> Mode_expr.Atom.t_of_sexp (Atom constructor)
+        | _ -> raise Bad_arguments)
+
+  and mode_term value ~loc : Mode_expr.Term.t =
+    variant
+      "Stag.Mode_expr.Term.t"
+      value
+      ~f:(fun constructor args : Mode_expr.Term.t ->
+        let arg i read = Args.read args i read in
+        match constructor, Args.count args with
+        | "Mode", 1 -> Mode (arg 0 (mode_expr ~loc))
+        | "Axis", 2 -> Axis (arg 0 mode_axis, arg 1 (mode_expr ~loc))
+        | "Meet", 2 -> Meet (arg 0 (mode_term ~loc), arg 1 mode_atom)
+        | "Release", 1 -> Release (arg 0 (mode_term ~loc))
+        | "Static_if_const", 1 -> Static_if_const (arg 0 (mode_term ~loc))
+        | "Const_if_static", 1 -> Const_if_static (arg 0 (mode_term ~loc))
         | _ -> raise Bad_arguments)
 
   and mode_expr value ~loc : Mode_expr.t =

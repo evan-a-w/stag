@@ -123,57 +123,102 @@ closure's own mode is the mode of the arrow value, like any value's.
 By default, types show only fixed modes other than the default, so most
 signatures print as without modes. With modes shown
 (`Signature.to_string_hum ~modes:true`), mode variables are named `'m0`,
-`'m1`, ... and their constraints follow the type, simplified:
+`'m1`, ... and their constraints follow the type:
 
 ```
 val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3
-  with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and 'm2 <= regional
+  with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5
+  and release(locality('m2)) <= locality('m5) and 'm2 <= regional
   and stage('m4) <= stage('m1) and provenance('m4) <= provenance('m1)
-  and gc <= 'm3
+  and meet(locality('m4), regional) <= locality('m1) and gc <= 'm3
 ```
 
-- variables equal by their constraints (a cycle) print as one;
-- a variable fixed or free on each axis prints as its atoms
-  (`string @ external`);
-- constraints and bounds implied by the others are left out;
-- a generic variable named once and in no constraint is left out, which
-  reads back as a fresh variable;
+The `with` clause is also syntax for annotations (see syntax.md), and the
+printed constraints are exact: read back, they imply just what the
+variables' constraints do, no more and no less (up to the floor every
+annotation gives a result: `portable`). So printed types can be trusted on
+their own, by interfaces and separately checked code.
+
+- variables equal on every axis by their constraints print as one;
+- a variable in no relation, named once (or fixed on every axis), prints as
+  the atoms of its fixed axes (`string @ external`), or not at all if none
+  are, which reads back as a fresh variable;
+- constraints and bounds the others imply, as read back, are left out;
 - only the item's own variables are named: constraints through other
   variables (of other members of a recursive group, or a weak variable's
   current neighbours) are projected onto its own;
-- bounds every mode meets (`const <= 'm`, `'m <= nonportable`) are left out,
-  and so is `portable <= 'm` for a variable only on arrows' results, which
-  are never `const` (an annotation's are floored at `portable`);
 - a weak (not generalized) variable is named `'_m0`, as weak type variables,
   and shown with its current constraints;
-- relations through a crossing morphism (or `borrow`) are not printed.
+- a variable on `ptr` cells and mode arguments only has no locality.
 
-Provenance bounds print where they restrict: `gc <= 'm` (made at run time,
-as a closure or partial application), `external <= 'm` (it may reach external
-memory) and `'m <= gc` or `'m <= static` (an argument stored or stored
-through, or bound `@ static`); `const` implies `static`, so `'m <= const`
-needs no `'m <= static`. A constant side shows its provenance when it is not
-the default `gc`.
 A mutable global whose reads are `external` shows it
 (`val g : string @ external`), parenthesizing an arrow or tuple type
 (`val g : (int -> int) @ external`).
 
-The `with` clause is also syntax for annotations (see syntax.md), so printed
-types read back as themselves. A relation `'m0 <= 'm1` is on every axis; one
-holding on only some is printed per axis (`stage('m0) <= stage('m1) and
-provenance('m0) <= provenance('m1)`), and a bound names its axes by its atoms
-(`portable external <= 'm0`, every axis's bound on one side together).
-Variables equal on every axis print as one; a variable on `ptr` cells only
-has no locality to relate. A side fixed on some axes and free on the others
-prints as its atoms (`string @ external`); one bounded on an axis
-(`nonportable gc <= 'm0`) is named.
+### Printed constraints
 
-Relations through a morphism print as the plain relation they imply
-(on locality, `release`'s: `a <= release(b)` implies `a <= b`); those
-through one implying none (`borrow`, crossing, or between axes) are not
-printed. So a printed type may be weaker than the real one there, but never
-stronger, and annotating with it is sound: an annotated value's own
-constraints still apply to its uses.
+The solver's constraints between two variables' axes are each
+`a <= m(b)`, `m` a monotone map from `b`'s axis to `a`'s with a left
+adjoint `m*` (`m*(x) <= y` iff `x <= m(y)`). Composing the solver's maps
+gives only these, up to ones relating nothing (`m*` always the least point),
+each written in one form:
+
+| Written | Map | `m*` (least to greatest point) | Where it arises |
+| --- | --- | --- | --- |
+| `'a <= 'b` | identity, every axis | | subsumption |
+| `stage('a) <= stage('b)` (and `locality`, `provenance`) | identity, one axis | | a relation holding on only some axes |
+| `meet(stage('a), portable) <= stage('b)` | `meet_with portable` | const, portable, portable | crossing: a value whose type crosses to `portable` |
+| `meet(provenance('a), gc) <= provenance('b)` | `meet_with gc` | static, gc, gc | a field `@@ gc` read from a record at `'a` |
+| `meet(locality('a), regional) <= locality('b)` | `borrow` | global, regional, regional | a value seen from a nested region: a parameter, a capture |
+| `release(locality('a)) <= locality('b)` | `release` | global, local, local | a regional value seen from the enclosing region: a result, `exclave_` |
+| `provenance('a) <= static_if_const(stage('b))` | `const_is_static` (stage to provenance: const ↦ static, else external) | static ↦ const, else portable | a `const` value is `static` |
+| `stage('a) <= const_if_static(provenance('b))` | `runtime_is_gc` (provenance to stage: static ↦ const, else nonportable) | const ↦ static, else gc | a value allocated at run time is `gc` |
+
+`meet` and `release` apply `m*` on the left of `<=`; `static_if_const` and
+`const_if_static` apply `m` itself on the right, naming the map rather than
+its adjoint. `meet(t, c)` takes any atom `c` of `t`'s axis (meeting with the
+greatest is the identity, with the least relates nothing); the printer only
+uses the middle one. Functions nest: `meet(release(locality('m)), regional)`
+is `borrow` after `release`, which is `borrow` again, as the printer would
+write it; a constraint's left functions compose with its right ones, so
+`f(a) <= g(b)` is `a <= (f ∘ g)(b)` with `f`'s map.
+
+Each variable's own `provenance <= static_if_const(stage)` (`const` is
+`static`) is never printed, and neither is a result's `portable` lower bound,
+which every annotation's result has.
+
+The printer finds the exact set as follows:
+
+1. For each pair of counted variables' axes `x`, `y`, and each point `p` of
+   `x` within its bounds, it asks the solver how far raising `x` to `p`
+   raises `y` (following the constraints that hold, a generic variable's
+   being those its scheme keeps). This is what the constraints imply between
+   them: `y >= g(x)` for a monotone `g`.
+2. Variables equal on every axis (each at least the other, with the same
+   bounds) are grouped as one.
+3. Every written relation `w` with `w* <= g` (so implied), raising `y` above
+   its lower bound somewhere, and not below another such, is a candidate;
+   with every variable's bounds, they imply exactly what the solver does.
+4. Each candidate the others imply as read back is dropped, latest first;
+   then a pair related plainly on an axis, and on each other one by what
+   holds, prints as `'a <= 'b`, and the rest are reduced again; then each
+   bound the rest imply is dropped. "Implies as read back" is checked by
+   propagating the printed constraints and bounds (plus what every variable
+   reads back with) on a model of the variables' axes and comparing both
+   bounds and every `g` with the solver's.
+
+So, for example, reading a field `x : string @@ gc`:
+
+```
+type r2 = { x : string @@ gc; y : string }
+let fx (r : r2) = r.x
+val fx : r2 @ 'm0 -> string @ 'm1 with stage('m0) <= stage('m1)
+  and meet(provenance('m0), gc) <= provenance('m1)
+  and release(locality('m0)) <= locality('m1)
+```
+
+The result is `'m0` met with `gc` on provenance, and a regional record gives
+a local result (`release`): it was regional in `fx`'s region, which ends.
 
 ### Annotations on uses
 
@@ -393,10 +438,6 @@ Each step is a branch stacked on the previous one.
 
 ## Later
 
-- Printed types may be weaker than the real ones (a field read's `b ⊓ m`,
-  relations through `borrow` or crossing can't be written): interfaces and
-  separately checked code must not trust a printed type until these are
-  printable.
 - `<t @ m>{ctx}` code modes.
 - `cptr[t]`: pointers into C's memory, which the GC doesn't scan, holding
   only C-compatible data (pointer-free values and `cptr`s), for `external`

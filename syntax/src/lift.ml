@@ -14,6 +14,10 @@ let indirect_constructors =
     ; "Type_expr.Constrained", 2
     ; "Type_expr.Modality", 2
     ; "Type_expr.Row.Extend", 3
+    ; "Mode_expr.Term.Meet", 2
+    ; "Mode_expr.Term.Release", 1
+    ; "Mode_expr.Term.Static_if_const", 1
+    ; "Mode_expr.Term.Const_if_static", 1
     ; "Pattern.Deref", 1
     ; "Pattern.Poly_variant", 2
     ; "Pattern.Exception", 1
@@ -103,18 +107,33 @@ module Make (B : Builder) = struct
         ]
   ;;
 
-  let mode_constraint ({ lower; upper; axis } : Mode_expr.Constraint.t) =
-    B.tuple
-      [ mode_expr lower
-      ; mode_expr upper
-      ; option
-          (fun (axis : Mode_expr.Axis.t) ->
-            con
-              ("Stag.Mode_expr.Axis."
-               ^ Sexp.to_string (Mode_expr.Axis.sexp_of_t axis))
-              [])
-          axis
-      ]
+  let mode_axis (axis : Mode_expr.Axis.t) =
+    con
+      ("Stag.Mode_expr.Axis." ^ Sexp.to_string (Mode_expr.Axis.sexp_of_t axis))
+      []
+  ;;
+
+  let rec mode_term (term : Mode_expr.Term.t) =
+    let con name = con ("Stag.Mode_expr.Term." ^ name) in
+    match term with
+    | Mode m -> con "Mode" [ mode_expr m ]
+    | Axis (axis, m) -> con "Axis" [ mode_axis axis; mode_expr m ]
+    | Meet (t, atom) ->
+      con
+        "Meet"
+        [ mode_term t
+        ; con
+            ("Stag.Mode_expr.Atom."
+             ^ Sexp.to_string (Mode_expr.Atom.sexp_of_t atom))
+            []
+        ]
+    | Release t -> con "Release" [ mode_term t ]
+    | Static_if_const t -> con "Static_if_const" [ mode_term t ]
+    | Const_if_static t -> con "Const_if_static" [ mode_term t ]
+  ;;
+
+  let mode_constraint ({ lower; upper } : Mode_expr.Constraint.t) =
+    B.tuple [ mode_term lower; mode_term upper ]
   ;;
 
   let type_param ({ txt; loc = _ } : Type_decl.Param.t Located.t) =

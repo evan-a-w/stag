@@ -340,58 +340,60 @@ let mode_expr t : Mode_expr.t =
   | _ -> expected t "a mode like `local`, or a mode variable like `'m`"
 ;;
 
-(** A side of a constraint: a mode, or [axis('m)], a variable on one axis. *)
-let constraint_side t =
+(** A side of a constraint: a mode, or a term of a variable on one axis:
+    [axis('m)], or a function of a term, [meet(t, atom)], [release(t)],
+    [static_if_const(t)] or [const_if_static(t)]. *)
+let rec constraint_term t : Mode_expr.Term.t =
   match peek t, peek_at t 1 with
-  | Lident name, Lparen when Option.is_some (Mode_expr.Axis.of_string name) ->
-    let axis = Option.value_exn (Mode_expr.Axis.of_string name) in
-    advance t;
-    let open_loc = loc t in
-    advance t;
-    let mode = mode_expr t in
-    (match mode.txt with
-     | Var _ -> ()
-     | Atoms _ ->
-       fail
-         mode.loc
-         (sprintf
-            "`%s(...)` takes a mode variable, as in `%s('m)`: a mode like \
-             `portable` names its axis"
-            name
-            name));
-    close t Rparen ~opener:Lparen ~open_loc;
-    Some axis, mode
-  | _ -> None, mode_expr t
+  | Lident name, Lparen ->
+    let call ~f =
+      advance t;
+      let open_loc = loc t in
+      advance t;
+      let term = f () in
+      close t Rparen ~opener:Lparen ~open_loc;
+      term
+    in
+    (match name, Mode_expr.Axis.of_string name with
+     | _, Some axis ->
+       call ~f:(fun () -> Mode_expr.Term.Axis (axis, mode_expr t))
+     | "meet", None ->
+       call ~f:(fun () ->
+         let term = constraint_term t in
+         if not (is t Comma) then expected t "`,`";
+         advance t;
+         match peek t with
+         | (Lident _ | External) as token ->
+           (match Mode_expr.Atom.of_string (Token.to_string token) with
+            | Some atom ->
+              advance t;
+              Mode_expr.Term.Meet (term, atom)
+            | None -> expected t "a mode like `gc`")
+         | _ -> expected t "a mode like `gc`")
+     | "release", None ->
+       call ~f:(fun () -> Mode_expr.Term.Release (constraint_term t))
+     | "static_if_const", None ->
+       call ~f:(fun () -> Mode_expr.Term.Static_if_const (constraint_term t))
+     | "const_if_static", None ->
+       call ~f:(fun () -> Mode_expr.Term.Const_if_static (constraint_term t))
+     | _ -> Mode (mode_expr t))
+  | _ -> Mode (mode_expr t)
 ;;
 
 (** [with 'm <= 'n and ...], after the [with]. *)
 let mode_constraints t =
   let rec loop acc =
-    let lower_axis, lower = constraint_side t in
+    let start = loc t in
+    let lower = constraint_term t in
     if not (is t Less && Token.equal (peek_at t 1) Equal) then expected t "`<=`";
     advance t;
     advance t;
-    let upper_axis, upper = constraint_side t in
-    let loc = Loc.merge lower.loc upper.loc in
-    (match lower.txt, upper.txt with
-     | Atoms _, Atoms _ ->
-       fail
-         loc
-         "a mode constraint relates a mode variable, as in `'m <= 'n` or `'m \
-          <= portable`"
-     | _ -> ());
-    let axis =
-      match lower_axis, upper_axis with
-      | None, None -> None
-      | Some lower, Some upper when Mode_expr.Axis.equal lower upper ->
-        Some lower
-      | _ ->
-        fail
-          loc
-          "a constraint on one axis names it on both sides, as in `stage('m) \
-           <= stage('n)`"
-    in
-    let acc = { Mode_expr.Constraint.lower; upper; axis } :: acc in
+    let upper = constraint_term t in
+    let constraint_ = { Mode_expr.Constraint.lower; upper } in
+    (match Mode_expr.Constraint.check constraint_ with
+     | Ok () -> ()
+     | Error message -> fail (Loc.merge start (prev_loc t)) message);
+    let acc = constraint_ :: acc in
     match peek t with
     | Lident "and" ->
       advance t;
@@ -927,9 +929,8 @@ let annot t : Annot.t =
       then (
         advance t;
         let constraints = mode_constraints t in
-        let last = List.last_exn constraints in
         located
-          ~loc:(Loc.merge ty.loc last.upper.loc)
+          ~loc:(Loc.merge ty.loc (prev_loc t))
           (Type_expr.Constrained (ty, constraints)))
       else ty
     in
