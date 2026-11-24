@@ -64,7 +64,7 @@ type t = { k : int @ portable -> int }
   [%expect
     {|
     val f : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= portable and gc <= 'm1
-    val g : 'a @ 'm0 -> 'a @ 'm0
+    val g : 'a @ 'm0 -> 'a @ 'm0 with release(locality('m0)) <= locality('m0)
     val h : int @ 'm0 -> int @ 'm0
     type t = { k : int @ portable -> int }
     |}]
@@ -215,7 +215,7 @@ let ok = capped 1
   [%expect
     {|
     val loose : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
-    val tight : 'a @ 'm0 -> 'a @ 'm0
+    val tight : 'a @ 'm0 -> 'a @ 'm0 with release(locality('m0)) <= locality('m0)
     val capped : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm1 <= portable
     val ok : int
     |}];

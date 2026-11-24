@@ -974,15 +974,18 @@ module Printer = struct
     ; modes : Mode_printing.t option (* With [create ~modes:true]. *)
     ; mode_names : string Int.Table.t
     ; name_mode_args : bool
-    (* Without [modes], whether a mode argument not known is named rather than
-       left out as if the default. *)
-    (* Without [modes], of the mode variables a type's mode argument names. *)
+        (* Without [modes], whether a mode argument not known is named rather
+           than left out as if the default. *)
+    ; declaration : bool
+    (* With [modes], whether a fixed side reads back by a declaration's
+       defaults, else, in an annotation, from the atoms written. *)
     }
 
   let create
     ?(type_name = fun name -> Prelude_path.to_string_hum name)
     ?(modes = false)
     ?(name_mode_args = false)
+    ?(declaration = false)
     ()
     =
     { type_name
@@ -999,6 +1002,7 @@ module Printer = struct
     ; modes = Option.some_if modes (Mode_printing.create ())
     ; mode_names = Int.Table.create ()
     ; name_mode_args
+    ; declaration
     }
   ;;
 
@@ -1135,17 +1139,27 @@ module Printer = struct
       else body
   ;;
 
-  let const_atoms (const : Mode.Const.t) =
-    let default = Arrow_modes.default_const in
-    let atom (type a) (axis : a Mode.Axis.t) (point : a) (default : a) =
+  (* The atoms of the axes other than [default]'s, or of every axis. *)
+  let const_atoms (const : Mode.Const.t) ~(default : Mode.Const.t option) =
+    let atom (type a) (axis : a Mode.Axis.t) (point : a) ~(default : a option) =
       let module C = (val Mode.Axis.chain axis) in
-      if C.equal point default
+      if Option.exists default ~f:(C.equal point)
       then []
       else [ Sexp.to_string (C.sexp_of_t point) |> String.lowercase ]
     in
-    atom Stage const.stage default.stage
-    @ atom Provenance const.provenance default.provenance
-    @ atom Locality const.locality default.locality
+    atom
+      Stage
+      const.stage
+      ~default:(Option.map default ~f:(fun (d : Mode.Const.t) -> d.stage))
+    @ atom
+        Provenance
+        const.provenance
+        ~default:
+          (Option.map default ~f:(fun (d : Mode.Const.t) -> d.provenance))
+    @ atom
+        Locality
+        const.locality
+        ~default:(Option.map default ~f:(fun (d : Mode.Const.t) -> d.locality))
   ;;
 
   (* What a variable is known to be at least, where that restricts its uses: a
@@ -1171,8 +1185,14 @@ module Printer = struct
     | atoms -> Some (String.concat ~sep:" " atoms)
   ;;
 
+  (* In an annotation, an axis not written is a fresh variable's. *)
+  let all_atoms t = Option.is_some t.modes && not t.declaration
+
   let is_default_side t : Arrow_modes.Side.t -> bool = function
-    | Fixed const -> List.is_empty (const_atoms const)
+    | Fixed _ when all_atoms t -> false
+    | Fixed const ->
+      List.is_empty
+        (const_atoms const ~default:(Some Arrow_modes.default_const))
     | Var var ->
       (match t.modes, t.counting with
        | None, _ -> Option.is_none (lower_atoms var)
@@ -1182,8 +1202,10 @@ module Printer = struct
 
   let mode_side t (side : Arrow_modes.Side.t) ~position =
     match side with
+    | Fixed const when all_atoms t ->
+      " @ " ^ String.concat ~sep:" " (const_atoms const ~default:None)
     | Fixed const ->
-      (match const_atoms const with
+      (match const_atoms const ~default:(Some Arrow_modes.default_const) with
        | [] -> ""
        | atoms -> " @ " ^ String.concat ~sep:" " atoms)
     | Var var ->
@@ -1214,7 +1236,7 @@ module Printer = struct
     in
     match held, Mode_arg.known held with
     | _, Some const | Fixed const, None ->
-      (match const_atoms const with
+      (match const_atoms const ~default:(Some Mode_arg.default) with
        | [] -> None
        | atoms -> Some (String.concat ~sep:" " atoms))
     | Var var, None ->
@@ -1251,6 +1273,7 @@ module Printer = struct
   let curried_global t ~curried (side : Arrow_modes.Side.t) =
     (not (Mode.Locality.equal curried Global))
     && Mode.Locality.equal (side_locality side) Global
+    && (not (all_atoms t))
     &&
     match side, t.modes with
     | Var _, Some _ -> false

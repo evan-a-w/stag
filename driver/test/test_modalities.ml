@@ -45,7 +45,7 @@ let p u = let f @ portable = (make ()).p in f
     {|
     type r = { p : (string -> string) @@ portable; n : string -> string }
     val make : 'a -> r @ 'm0 with nonportable gc <= 'm0
-    val p : 'a -> (string -> string) @ 'm0 with gc <= 'm0
+    val p : 'a -> (string @ nonportable gc global -> string @ nonportable gc global) @ 'm0 with gc <= 'm0
     |}];
   check
     {|
