@@ -206,7 +206,10 @@ Provenance follows reachability, not evaluation:
   given is in the pointer's type instead: `ptr[t @@ m]`, whose `m` is
   unified exactly, so all aliases agree on it. A store through it
   (`p.* <- v`) takes values of at most `m`, and a read through it is at
-  least `m` (unless the type crosses). `ptr[t]` is `ptr[t @@ gc]`, and `m`
+  least `m` (unless the type crosses), and at least `portable`: a cell may
+  change between evaluations, so what is read from it is never `const`.
+  `ptr[t]` is `ptr[t @@ nonportable gc]` (`ptr` is a type with a mode
+  parameter, `ptr['a, 'p : mode]`, and `ptr[t @@ m]` is `ptr[t, m]`), and `m`
   may be a variable, so code can be polymorphic in it. `Ptr.make` infers
   `m` from its argument and the cell's uses; a toplevel cell that is not
   generalized has its `m` fixed by its definition, `gc` unless that needs
@@ -269,7 +272,10 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   live in the caller's region. `stack_` allocations of the current body are
   `local`. Returning needs `global` (`regional` or `local` under `exclave_`).
 - Modalities, `t @@ m` on a record field or constructor argument, on any
-  axis: building one needs the part at most `m`, and reading it from a block
+  axis, but only `global` on locality: `regional` and `local` are relative
+  to a region, so a block returned to its caller's region with `exclave_`
+  would keep its parts `regional` there though they were allocated in the
+  callee's: building one needs the part at most `m`, and reading it from a block
   at mode `b` gives at most `b ⊓ m` (`@@ global`: always `global`, even
   inside a local block; `@@ portable`: embeddable even when the block isn't;
   `@@ gc`: GC-owned even in an `external` block). A `const` modality is also
@@ -277,8 +283,10 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   at most `m`, and a read gives `m` whatever the pointer's mode, as the
   cell's aliases may store anything that fits. Modalities compose along a
   path (`p.*.f`: the cell's, then the field's). A type's mode parameters
-  (`type cell['a, 'p : mode]`) are full modes, of which each position uses
-  the axes it allows; for now they are invariant.
+  (`type cell['a, 'p : mode]`) are on stage and provenance only (a locality
+  atom in a mode argument is an error); for now they are invariant. A record
+  update `{ r with ... }` may change a mode parameter only if no field it
+  keeps refers to it, by its type or its modality.
 - Records have no mutable fields: mutation is through a `ptr` (`p.* <- v`,
   `p.*.x <- v`), whose pointee is storage rather than a value. Such a store
   is implicitly `@@ global`, so an older region's block never points into a

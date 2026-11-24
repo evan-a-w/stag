@@ -384,12 +384,19 @@ Each step is a branch stacked on the previous one.
   pointer's own provenance), composing along `p.*.f`. `ptr`'s covers stage
   and provenance; its locality is always `global`. Types take mode
   parameters, `type cell['a, 'p : mode]`, applied as `cell[string, external]`
-  (the declaration says which arguments are modes); invariant for now. A
-  locality atom in the argument of a parameter reaching a `ptr` cell
-  (through other types' parameters too) is an error.
+  (the declaration says which arguments are modes); invariant for now. Mode
+  parameters (and so `ptr`'s cells) are on stage and provenance only, and a
+  modality's locality is only `global`. `ptr` is declared
+  `ptr['a, 'p : mode]`, with `ptr[t @@ m]` as sugar. A cell's reads are at
+  least `portable` (never `const`). Record updates keep the mode parameters
+  of the fields they copy.
 
 ## Later
 
+- Printed types may be weaker than the real ones (a field read's `b ⊓ m`,
+  relations through `borrow` or crossing can't be written): interfaces and
+  separately checked code must not trust a printed type until these are
+  printable.
 - `<t @ m>{ctx}` code modes.
 - `cptr[t]`: pointers into C's memory, which the GC doesn't scan, holding
   only C-compatible data (pointer-free values and `cptr`s), for `external`

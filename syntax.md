@@ -208,10 +208,12 @@ pointee, not with the pointer.
 values in the pointer's cell may have, as atoms (`portable external`) or a
 mode variable, as in
 `get : ptr['a @@ 'm0] -> 'a @ 'm1 with provenance('m0) <= provenance('m1)`.
-`ptr[t]` is `ptr[t @@ nonportable gc]`. A cell's locality is always
+`ptr[t]` is `ptr[t @@ nonportable gc]`; `ptr[t @@ m]` is sugar for `ptr[t, m]`,
+`ptr` being declared `ptr['a, 'p : mode]`. A cell's locality is always
 `global`, so a locality atom is an error. A store through it takes values
 of at most `m`, and a read through it is exactly `m` (on those axes),
-whatever the pointer's own mode. `Ptr.make e` infers `m` from `e` and the
+whatever the pointer's own mode, but at least `portable`, as the cell may
+change between evaluations. `Ptr.make e` infers `m` from `e` and the
 cell's uses.
 
 Recursive data types must cross a pointer or another indirection (such
@@ -437,11 +439,14 @@ constructor's argument, where it would read as applying to the construction:
 
 A modality `t @@ m` (atoms, at most one per axis, or a mode variable) is
 written only on a record field, a constructor argument or `ptr`'s type
-argument. It binds looser than `->`: `{f : int -> int @@ portable}` is a
+argument. Its locality can only be `global` (`regional` and `local` are
+relative to a region). It binds looser than `->`: `{f : int -> int @@ portable}` is a
 portable function field. An exception's arguments are always global, so
-take none. A declaration's mode parameters are declared `'p : mode`; a type
-argument of several atoms is a mode, and one of one atom or a variable is
-read as a mode or a type by the declaration's parameter.
+take none. A declaration's mode parameters are declared `'p : mode`, and are
+on stage and provenance only (a locality atom in a mode argument is an
+error); a type argument of several atoms is a mode, and one of one atom or
+a variable is read as a mode or a type by the declaration's parameter. A
+name in an annotation is a mode variable or a type variable, not both.
 
 An annotation's type may end with constraints between mode variables, or
 between a variable and a mode, joined by `and`; each relates at least one
