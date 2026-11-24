@@ -94,12 +94,9 @@ let mutable_ = let mut m = 1 in let g u = m in .<g ()>.
 |};
   [%expect
     {|
-    ((Not_embeddable (name k) (var_level 0) (used_at 1) (defining false)) @
-     t.stag:2:44-45)
-    ((Not_embeddable (name x) (var_level 0) (used_at 1) (defining false)) @
-     t.stag:2:19-20)
-    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
-     t.stag:2:49-50)
+    ((Not_embeddable (name k) (why Nonportable)) @ t.stag:2:44-45)
+    ((Not_embeddable (name x) (why Unknown)) @ t.stag:2:19-20)
+    ((Not_embeddable (name g) (why Nonportable)) @ t.stag:2:49-50)
     |}]
 ;;
 
@@ -222,12 +219,9 @@ let constant = let g x = let c = .<g>. in let y = g in x in .<g>.
 |};
   [%expect
     {|
-    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining true)) @
-     t.stag:2:40-41)
-    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining true)) @
-     t.stag:3:62-63)
-    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining true)) @
-     t.stag:6:35-36)
+    ((Not_embeddable (name g) (why Defining)) @ t.stag:2:40-41)
+    ((Not_embeddable (name g) (why Defining)) @ t.stag:3:62-63)
+    ((Not_embeddable (name g) (why Defining)) @ t.stag:6:35-36)
     |}]
 ;;
 
@@ -331,7 +325,7 @@ let e = .~(let v = Ptr.make 1 in .<fun x -> v>.)
     This is portable, because v was computed at compile time (at t.stag:3:85-86), then v is captured by a closure (at t.stag:3:85-86), then the closure is made (at t.stag:3:76-88), then w is bound (at t.stag:3:68-93), but must be at most const, because d is a toplevel (at t.stag:3:8-96)
     This is portable, because v was computed at compile time (at t.stag:4:77-78), then v is captured by a closure (at t.stag:4:77-78), then the closure is made (at t.stag:4:68-80), but must be at most const, because e is a toplevel (at t.stag:4:8-83)
     val d : int -> int
-    The quote can't embed v, as it may not be portable. Bind it as (v @ portable) to embed it, or write [forget v in ...] to make v a free variable of the quote
+    The quote can't embed v, as it isn't portable. Write [forget v in ...] to make v a free variable of the quote
     |}]
 ;;
 
@@ -496,8 +490,8 @@ let outer2 n =
 |};
   [%expect
     {|
-    The quote can't embed g, as it may not be portable. Bind it as (g @ portable) to embed it, or write [forget g in ...] to make g a free variable of the quote
-    The quote can't embed p, as it may not be portable. Bind it as (p @ portable) to embed it, or write [forget p in ...] to make p a free variable of the quote
+    The quote can't embed g, as it isn't portable. Write [forget g in ...] to make g a free variable of the quote
+    The quote can't embed p, as it isn't portable. Write [forget p in ...] to make p a free variable of the quote
     |}]
 ;;
 

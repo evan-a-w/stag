@@ -278,26 +278,16 @@ let at_runtime = let mut n = 0 in let f u = n in f ()
 |};
   [%expect
     {|
-    ((Not_embeddable (name f) (var_level 0) (used_at 1) (defining false)) @
-     t.stag:2:44-45)
-    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
-     t.stag:2:62-63)
-    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
-     t.stag:6:4-5)
-    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
-     t.stag:6:4-5)
-    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
-     t.stag:6:4-5)
-    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
-     t.stag:2:48-49)
-    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
-     t.stag:2:29-30)
-    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
-     t.stag:2:53-54)
-    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
-     t.stag:2:70-71)
-    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
-     t.stag:2:55-56)
+    ((Not_embeddable (name f) (why Nonportable)) @ t.stag:2:44-45)
+    ((Not_embeddable (name g) (why Nonportable)) @ t.stag:2:62-63)
+    ((Not_embeddable (name g) (why Nonportable)) @ t.stag:6:4-5)
+    ((Not_embeddable (name g) (why Nonportable)) @ t.stag:6:4-5)
+    ((Not_embeddable (name g) (why Nonportable)) @ t.stag:6:4-5)
+    ((Not_embeddable (name g) (why Unknown)) @ t.stag:2:48-49)
+    ((Not_embeddable (name g) (why Unknown)) @ t.stag:2:29-30)
+    ((Not_embeddable (name g) (why Unknown)) @ t.stag:2:53-54)
+    ((Not_embeddable (name g) (why Unknown)) @ t.stag:2:70-71)
+    ((Not_embeddable (name g) (why Unknown)) @ t.stag:2:55-56)
     val not_mentioned : <int>{..'a}
     val only_data : <int>{..'_a}
     val at_runtime : int
@@ -665,12 +655,9 @@ let ran = .~(ok 1)
 |};
   [%expect
     {|
-    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
-     t.stag:2:29-30)
-    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
-     t.stag:2:61-62)
-    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
-     t.stag:2:62-63)
+    ((Not_embeddable (name g) (why Unknown)) @ t.stag:2:29-30)
+    ((Not_embeddable (name g) (why Unknown)) @ t.stag:2:61-62)
+    ((Not_embeddable (name g) (why Nonportable)) @ t.stag:2:62-63)
     val ok : int -> <int>{..'a}
     val ran : int
     -- evaluated at compile time
@@ -734,8 +721,7 @@ let bad =
             @ t.stag:3:2-12:130))
           @ t.stag:3:2-12:130))
         @ t.stag:3:2-12:130))
-      (error
-       (Not_embeddable (name f) (var_level 0) (used_at 1) (defining false))))
+      (error (Not_embeddable (name f) (why Nonportable))))
      @ t.stag:3:2-12:130)
     |}]
 ;;
