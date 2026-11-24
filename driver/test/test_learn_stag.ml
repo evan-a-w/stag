@@ -682,7 +682,7 @@ let%expect_test "learn_stag.md" =
       val get_x : r @ 'm0 -> string @ 'm1 with stage('m0) <= stage('m1) and meet(provenance('m0), gc) <= provenance('m1) and release(locality('m0)) <= locality('m1)
       val embed : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= portable and gc <= 'm1
       val mk : ptr[int] @ local -> ptr[int @@ 'm1] @ 'm0 with nonportable gc local <= 'm0
-      val same : string @ 'm0 -> string @ 'm0
+      val same : string @ 'm0 -> string @ 'm0 with release(locality('m0)) <= locality('m0)
       val static_if : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and provenance('m1) <= static_if_const(stage('m0))
     end
     Doc.id = <fun>
@@ -691,16 +691,16 @@ let%expect_test "learn_stag.md" =
     Doc.mk = <fun>
     Doc.same = <fun>
     Doc.static_if = <fun>
-    === learn_stag.md:587
+    === learn_stag.md:588
     module Doc : sig
       val labs : int -> int
       val a : int
     end
     Doc.labs = <fun>
     Doc.a = 42
-    === learn_stag.md:592
-    File "doc.stag", line 593, characters 18-31:
-    593 | external strlen : string -> int = "strlen"
+    === learn_stag.md:593
+    File "doc.stag", line 594, characters 18-31:
+    594 | external strlen : string -> int = "strlen"
                             ^^^^^^^^^^^^^
     Error: The external strlen has no C signature: string would be passed to C as a pointer, which is not supported yet
     |}]
