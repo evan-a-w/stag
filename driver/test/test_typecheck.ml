@@ -628,7 +628,7 @@ let wrong_type = .<let x = true in .~(.<add x 1>.)>.
     ((Unification_error
       (Type_mismatch (TCon int ()) (TCon bool ())
        (Base_types_not_equal int bool)))
-     @ t.stag:2:44-45)
+     @ t.stag:2:35-50)
     |}]
 ;;
 
@@ -666,7 +666,12 @@ let toplevel_splice_level x = .~x
     val toplevel_splice_arg : 'a -> 'a
     val not_captured : <int>{..'a}
     ((Not_in_scope x) @ t.stag:2:27-36)
-    val captured : <bool>{..'a}
+    ((Unification_error
+      (Row_mismatch
+       (RExtend x (PVar (Link Present)) (TVar (Unbound 35 1))
+        (RVar (Unbound 36 1)))
+       REmpty (Missing_label x)))
+     @ t.stag:2:33-45)
     ((Variable_used_at_wrong_level (name x) (var_level 0) (used_at -1)) @
      t.stag:2:32-33)
     |}]
@@ -1148,15 +1153,15 @@ let use = conflict_later %s
 
 let%expect_test "references to toplevels in quotes don't join their components" =
   let a = "let a = .<b>.\n" in
-  let b = "let b = (a, 1)\n" in
+  let b = "let b = (let _ = a in 1, 1)\n" in
   check (a ^ b);
   check (b ^ a);
   [%expect
     {|
-    val a : <'_a>{..'_b}
-    val b : <'_a>{..'_b} * int
-    val b : <'a>{..'b} * int
-    val a : <'a>{..'b}
+    val a : <int * int>{..'_a}
+    val b : int * int
+    val b : int * int
+    val a : <int * int>{..'a}
     |}]
 ;;
 

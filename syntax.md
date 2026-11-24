@@ -167,10 +167,13 @@ A name in scope inside a quote always means that variable. A local of an
 earlier level is embedded in the code if the quote may use its value (it is
 `portable`, or its type crosses stage, see [modes.md](modes.md)); otherwise
 using it is an error, which suggests `forget` (and `(x @ portable)` where
-that could hold). A toplevel the quote can't embed is referred to by symbol:
+that could hold). A local of the quote's level bound in another quote has no
+value to embed: it is a free variable of the quote, provided by a substitution
+where the code is spliced (an implicit one, if spliced in its scope). A toplevel the quote can't embed is referred to by symbol:
 the code names that toplevel wherever it is spliced, so no local there can
 capture it, no substitution can replace it, and `forget` at the splice doesn't
-hide it. So the quote's free variables are exactly the names not in scope:
+hide it. So the quote's free variables are exactly the names not in scope
+and the locals of other quotes:
 
 ```ocaml
 let argument x = .< x >.             (* error: x may not be portable *)
@@ -311,7 +314,8 @@ parameter whose type is fixed by a later use), the lookup is lexical. So the
 order matters, and nothing warns of it (there is no `-principal`):
 `let f v = let _ = (v : N.r) in v.x` finds `N.r`'s `x`, but
 `let f v = let _ = v.x in (v : N.r)` the `x` in scope. Inside a quote, a
-toplevel still being checked has a fresh type there (see modes.md), so in
+toplevel still being checked by another toplevel has a type of its own there,
+unified with the toplevel's once it is finished (see modes.md), so in
 `.< N.v.x >.` the `x` is then the one in scope whatever `N.v`'s type.
 
 ## Patterns

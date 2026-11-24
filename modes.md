@@ -331,9 +331,15 @@ A toplevel used in a quote is checked first, to know its mode: `const` ones
 are used directly, others are referred to by symbol: the code reads the
 toplevel where it runs, so the use is nonportable, and no local or
 substitution where the code is spliced can replace it. One whose checking is
-underway (a recursive reference) is referred to by symbol too, at a fresh type
-(the expansion is checked against its own where spliced), and doesn't join its
-component; computing with it elsewhere is nonportable: `let z = r` in a toplevel `r` depends on is not
+underway is referred to by symbol too, and doesn't join its component. In its
+own code, the use is a recursive one, of its type (so `let gen n = forget n in
+.< gen n >.`, whose code type would contain itself, is an error). Elsewhere,
+the quote's component may be finished first, so the use is of a type of its
+own, never generalized (weak: `'_a`), unified with an instance of the
+toplevel's as soon as that is finished, and an error is reported at the use.
+So the code's type is the toplevel's, but with weak variables where they
+would have been generalized had the toplevel been finished first. Computing
+with it elsewhere is nonportable: `let z = r` in a toplevel `r` depends on is not
 generalized, whichever order they are checked in. So the order of
 checking matters: with
 
