@@ -14,6 +14,9 @@ let raise = Intrinsic.raise
 
 module Ptr = struct
   let make = Intrinsic.ptr_make
+
+  (* A cell that may be given [external] values. *)
+  let make_external = Intrinsic.ptr_make_external
 end
 
 module Unsafe = struct
@@ -142,6 +145,8 @@ module Stag = struct
       (* [global_ t], only as a record field's type or a constructor's
          argument. *)
       | Global of ptr[t]
+      (* [t @@ m], only as a pointer's type argument. *)
+      | Modality of ptr[t * Mode_expr.t]
 
     (* Labels are those of polymorphic records and variants, except in the
        context of a code type, whose entries are variables. *)

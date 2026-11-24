@@ -16,6 +16,7 @@ type t =
   | Erase (** [<'a>{..'r} -> Stag.Expr.t] *)
   | Raise (** [exn -> 'a] *)
   | Ptr_make (** ['a -> ptr['a]] *)
+  | Ptr_make_external (** ['a -> ptr['a @@ external]] *)
   | Assume_global (** ['a @ local -> 'a] *)
 [@@deriving sexp_of, equal]
 

@@ -154,8 +154,12 @@ let rec has_splice (expr : Type_expr.t) =
   | Tuple tys -> List.exists tys ~f:has_splice
   | Code { inner; context } -> has_splice inner || row_has_splice context
   | Record row | Variant row -> row_has_splice row
-  | Mut ty | Immut ty | Moded (ty, _) | Constrained (ty, _) | Global ty ->
-    has_splice ty
+  | Mut ty
+  | Immut ty
+  | Moded (ty, _)
+  | Constrained (ty, _)
+  | Global ty
+  | Modality (ty, _) -> has_splice ty
 
 and row_has_splice (row : Type_expr.row) =
   match row.txt with
@@ -579,6 +583,7 @@ let rec elaborate'
     | Global ty ->
       let%map.Result ty, syntax = elaborate ty in
       ty, Type_expr.Global syntax
+    | Modality _ -> Error (Typecheck_error.create ~loc Misplaced_modality)
   in
   ty, { expr with txt }
 
@@ -663,6 +668,16 @@ and elaborate_con
   let%bind.Result args =
     map_result (List.zip_exn decl.decl.params args) ~f:(fun (param, arg) ->
       match param.txt, arg with
+      | Ty _, Ty { txt = Modality (ty, mode); loc }
+        when String.equal decl.name (Type.Pointee.type_name Gc) ->
+        (match mode.txt with
+         | Atoms [ External ] ->
+           let%map.Result ty, syntax =
+             elaborate' t module_ vars ~splices ~expansions ty
+           in
+           ( Type.ATy ty
+           , Type_expr.Ty { txt = Modality (syntax, mode); loc } )
+         | Atoms _ | Var _ -> error ~loc:mode.loc Invalid_modality)
       | Ty _, Ty ty ->
         let%map.Result ty, syntax =
           elaborate' t module_ vars ~splices ~expansions ty
@@ -692,7 +707,12 @@ and elaborate_con
   let%map.Result ty =
     match (kind : Type_decl.Kind.t) with
     | Variant _ | Record _ | Abstract | Splice _ | Malformed _ ->
-      Ok (Type.TCon (decl.name, args))
+      let name =
+        match args_syntax with
+        | [ Ty { txt = Modality _; _ } ] -> Type.Pointee.type_name External
+        | _ -> decl.name
+      in
+      Ok (Type.TCon (name, args))
     | Alias body ->
       let instances = Hashtbl.find_multi expansions decl.name in
       (match

@@ -432,6 +432,7 @@ and expand t context (ty : Type.ty) : (Shape.t, Error.t) Result.t =
      | None -> Error (Error.Unresolved_ty id))
   | TCon (name, args) ->
     if String.equal name t.ptr_name
+       || String.equal name (Type.Pointee.type_name External)
     then Result.map (arity ~name ~args 1) ~f:(fun () -> Ptr)
     else (
       match builtin ~name ~args with

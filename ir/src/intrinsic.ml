@@ -11,6 +11,7 @@ type t =
   | Erase
   | Raise
   | Ptr_make
+  | Ptr_make_external
   | Assume_global
 [@@deriving sexp_of, equal, enumerate]
 
@@ -25,6 +26,7 @@ let name = function
   | Erase -> "erase"
   | Raise -> "raise"
   | Ptr_make -> "ptr_make"
+  | Ptr_make_external -> "ptr_make_external"
   | Assume_global -> "assume_global"
 ;;
 
@@ -39,6 +41,7 @@ let public_name = function
   | Erase -> "Stag.Code.erase"
   | Raise -> "raise"
   | Ptr_make -> "Ptr.make"
+  | Ptr_make_external -> "Ptr.make_external"
   | Assume_global -> "Unsafe.assume_global"
 ;;
 
@@ -68,7 +71,10 @@ let ty t ~var ~row =
   | Raise -> Type.arrow Type.exn (var ())
   | Ptr_make ->
     let pointee = var () in
-    Type.arrow pointee (TCon ("ptr", [ ATy pointee ]))
+    Type.arrow pointee (Type.Pointee.ptr Gc pointee)
+  | Ptr_make_external ->
+    let pointee = var () in
+    Type.arrow pointee (Type.Pointee.ptr External pointee)
   | Assume_global ->
     let ty = var () in
     TArrow

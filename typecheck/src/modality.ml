@@ -1,14 +1,21 @@
 open! Import
 
 type t =
-  | Id
-  | Global
+  { global : bool
+  ; external_ : bool
+  }
 [@@deriving sexp_of, equal]
 
-let of_global global = if global then Global else Id
+let id = { global = false; external_ = false }
+let of_global global = { id with global }
+
+let of_pointee : Type.Pointee.t -> t = function
+  | Gc -> { global = true; external_ = false }
+  | External -> { global = true; external_ = true }
+;;
 
 let compose outer inner =
-  match outer with
-  | Id -> inner
-  | Global -> Global
+  { global = outer.global || inner.global
+  ; external_ = outer.external_ || inner.external_
+  }
 ;;

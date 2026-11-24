@@ -303,3 +303,19 @@ let compose : ('b @ 'n -> 'c) -> ('a -> 'b @ 'm) -> 'a -> 'c with 'm <= 'n and p
       fun f g x -> f (g x)
     |}]
 ;;
+
+let%expect_test "modalities on type arguments" =
+  ty "ptr[string @@ external]";
+  ty "ptr[int * string @@ external]";
+  ty "ptr[(int -> int) @@ external]";
+  ty "ptr[int -> int @@ external]";
+  ty "ptr[ptr[int @@ external] @@ external]";
+  ty "ptr['a @@ 'm]";
+  ty "ptr[string @@ gc external]";
+  ty "ptr[string @@]";
+  ty "string @@ external";
+  prog "let f (x : string @@ external) = x";
+  print
+    "type t = { cell : ptr[(int -> int) @@ external]; pair : ptr[int * int @@ external] }";
+  [%expect {| |}]
+;;

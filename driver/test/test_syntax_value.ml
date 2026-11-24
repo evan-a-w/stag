@@ -32,6 +32,7 @@ let%expect_test "the prelude's signature" =
     val raise : exn -> 'a
     module Ptr : sig
       val make : 'a -> ptr['a]
+      val make_external : 'a -> ptr['a @@ external]
     end
     module Unsafe : sig
       val assume_global : 'a @ local -> 'a
@@ -78,7 +79,7 @@ let%expect_test "the prelude's signature" =
         type t = Var of string | Atoms of list[Atom.t]
       end
       module Type_expr : sig
-        type t = Var of string | Con of Path.t[Type_ref.t] * list[Arg.t] | Arrow of ptr[t * t] | Tuple of list[t] | Code of ptr[{`context : Row.t; `inner : t}] | Record of Row.t | Variant of Row.t | Mut of ptr[t] | Immut of ptr[t] | Splice of ptr[Expr.t] | Moded of ptr[t * Mode_expr.t] | Constrained of ptr[t * list[Mode_expr.t * Mode_expr.t]] | Global of ptr[t]
+        type t = Var of string | Con of Path.t[Type_ref.t] * list[Arg.t] | Arrow of ptr[t * t] | Tuple of list[t] | Code of ptr[{`context : Row.t; `inner : t}] | Record of Row.t | Variant of Row.t | Mut of ptr[t] | Immut of ptr[t] | Splice of ptr[Expr.t] | Moded of ptr[t * Mode_expr.t] | Constrained of ptr[t * list[Mode_expr.t * Mode_expr.t]] | Global of ptr[t] | Modality of ptr[t * Mode_expr.t]
         module Row : sig
           type t = Empty | Extend of ptr[string * Type_expr.t * t] | Var of string
         end
@@ -735,7 +736,7 @@ let%expect_test "constructors are made as the typechecker resolves them" =
            : bool)];
   [%expect
     {|
-    ((constructors 104)
+    ((constructors 105)
      (reflected
       (prelude.Stag.Expr.Deref prelude.Stag.Expr.Store
        prelude.Stag.Mode_expr.Atom.External
@@ -743,7 +744,8 @@ let%expect_test "constructors are made as the typechecker resolves them" =
        prelude.Stag.Mode_expr.Atom.Regional prelude.Stag.Pattern.Deref
        prelude.Stag.Toplevel.External prelude.Stag.Type.Kind.Alias
        prelude.Stag.Type.Kind.Record prelude.Stag.Type.Kind.Variant
-       prelude.Stag.Type_ref.Path.Prelude prelude.Stag.Type_ref.Path.Program))
+       prelude.Stag.Type_expr.Modality prelude.Stag.Type_ref.Path.Prelude
+       prelude.Stag.Type_ref.Path.Program))
      (others_same_as_to_value true))
     |}]
 ;;

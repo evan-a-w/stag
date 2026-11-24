@@ -86,7 +86,11 @@ let found t = t.tokens.(t.pos).token
 
 let expected t what =
   match found t with
-  | At_at -> fail (loc t) "`@@` is reserved (for modalities)"
+  | At_at ->
+    fail
+      (loc t)
+      "a modality (`@@`) is only written on a type argument, as in `ptr[t @@ \
+       external]`"
   | token ->
     fail (loc t) (sprintf "expected %s, found %s" what (describe token))
 ;;
@@ -446,7 +450,17 @@ and type_app t : Type_expr.t =
 and type_arg t : Type_expr.arg =
   match peek t with
   | Lbrace -> Row (record_row t)
-  | _ -> Ty (type_expr t)
+  | _ ->
+    let ty = type_expr t in
+    if is t At_at
+    then (
+      advance t;
+      let mode = mode_expr t in
+      Ty
+        (located
+           ~loc:(Loc.merge ty.loc mode.loc)
+           (Type_expr.Modality (ty, mode))))
+    else Ty ty
 
 and record_row t =
   row
