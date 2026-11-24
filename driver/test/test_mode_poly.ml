@@ -215,7 +215,8 @@ let pinned : int @ 'm -> int @ 'n with 'n <= 'm and 'm <= const = fun x -> x
     {|
 let pinned : int @ 'm -> int @ 'n with 'n <= 'm and 'm <= portable = fun x -> x
 |};
-  [%expect {| val pinned : int @ 'm0 -> int @ 'm1 with 'm0 <= portable and 'm1 <= 'm0 |}]
+  [%expect
+    {| val pinned : int @ 'm0 -> int @ 'm1 with 'm0 <= portable and 'm1 <= 'm0 |}]
 ;;
 
 let%expect_test "equalities between arrows of different modes are kept" =
@@ -451,16 +452,19 @@ type t = { f : int @ const -> int @ portable }
   [%expect {| type t = { f : int @ const static -> int @ portable } |}]
 ;;
 
-let%expect_test "a relation between variables is on every axis, or on the one named" =
-  (* Through [through_all], [f]'s result is as external as its argument, so
-     the result is [external]; through [through_stage], it need not be. *)
+let%expect_test "a relation between variables is on every axis, or on the one \
+                 named"
+  =
+  (* Through [through_all], [f]'s result is as external as its argument, so the
+     result is [external]; through [through_stage], it need not be. *)
   modes
     {|
 let ext (x : string) = let y @ external = x in y
 let through_all (f : string @ 'm -> string @ 'n with 'm <= 'n) (x : string) = f (ext x)
 let through_stage (f : string @ 'm -> string @ 'n with stage('m) <= stage('n)) (x : string) = f (ext x)
 |};
-  [%expect {|
+  [%expect
+    {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
     val through_all : (string @ 'm1 -> string @ 'm2) @ 'm0 -> (string @ 'm4 -> string @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable external <= 'm1 and 'm1 <= 'm2 and 'm2 <= 'm5 and 'm2 <= regional and 'm4 <= 'm1 and 'm4 <= global and gc <= 'm3
     val through_stage : (string @ 'm1 -> string @ 'm2) @ 'm0 -> (string @ 'm4 -> string @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable external <= 'm1 and stage('m1) <= stage('m2) and 'm2 <= 'm5 and 'm2 <= regional and 'm4 <= 'm1 and 'm4 <= global and gc <= 'm3
@@ -478,7 +482,8 @@ let fixed_and_related (x : string) = let y @ nonportable = x in y
 let local_closure (x @ local) = exclave_ stack_ (fun (u : int) -> x)
 let apply f x = f x
 |};
-  [%expect {|
+  [%expect
+    {|
     let pick_copy : string @ 'm0 -> (string @ 'm2 -> string @ 'm3) @ 'm1 with 'm0 <= 'm3 and 'm0 <= 'm1 and stage('m2) <= stage('m3) and gc <= 'm1 = pick
     let ext_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1 = ext
     let through_stage_copy : (string @ 'm1 -> string @ 'm2) @ 'm0 -> (string @ 'm4 -> string @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable external <= 'm1 and stage('m1) <= stage('m2) and 'm2 <= 'm5 and 'm2 <= regional and 'm4 <= 'm1 and 'm4 <= global and gc <= 'm3 = through_stage

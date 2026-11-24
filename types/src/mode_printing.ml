@@ -28,6 +28,7 @@ module Axis = struct
   ;;
 
   let node (T axis : t) var = Mode.Var.node var axis
+
   let is_stage : t -> bool = function
     | T Stage -> true
     | T (Provenance | Locality) -> false
@@ -172,7 +173,6 @@ let settle t =
   let equal_on axis a b =
     (irrelevant axis a && irrelevant axis b)
     || (reaches axis a b && reaches axis b a)
-
     ||
     let lower, upper = var_bounds axis a in
     lower = upper && [%equal: int * int] (lower, upper) (var_bounds axis b)
@@ -232,8 +232,7 @@ let settle t =
       List.concat_map leaders ~f:(fun leader ->
         match cycle leader with
         | [ _ ] -> []
-        | cycle ->
-          List.zip_exn cycle (List.tl_exn cycle @ [ List.hd_exn cycle ]))
+        | cycle -> List.zip_exn cycle (List.tl_exn cycle @ [ List.hd_exn cycle ]))
     in
     let above a b = a <> b && reaches a b && not (reaches b a) in
     let between =
@@ -241,8 +240,7 @@ let settle t =
         List.filter_map leaders ~f:(fun b ->
           Option.some_if
             (above a b
-             && not (List.exists leaders ~f:(fun c -> above a c && above c b))
-            )
+             && not (List.exists leaders ~f:(fun c -> above a c && above c b)))
             (a, b)))
     in
     rings @ between
@@ -254,8 +252,8 @@ let settle t =
     List.Assoc.find_exn edges axis ~equal:Mode.Axis.Any.equal
     |> fun edges -> List.mem edges pair ~equal:[%equal: int * int]
   in
-  (* A relation on the axes of its edges, or on every axis where that is
-     implied on the others. *)
+  (* A relation on the axes of its edges, or on every axis where that is implied
+     on the others. *)
   let relations =
     List.concat_map reps ~f:(fun a ->
       List.filter_map reps ~f:(fun b ->
@@ -280,7 +278,9 @@ let settle t =
     if lower = upper
     then (
       (* [const] says [static]. *)
-      let implied = ceiling axis rep < Axis.max axis && lower = ceiling axis rep in
+      let implied =
+        ceiling axis rep < Axis.max axis && lower = ceiling axis rep
+      in
       Some (Option.some_if (not implied) lower))
     else if lower <= floor axis rep && upper >= ceiling axis rep
     then Some None
@@ -340,13 +340,18 @@ let settle t =
       let implied_lower =
         Hash_set.fold
           (outside below)
-          ~init:(Hash_set.fold cycle ~init:0 ~f:(fun acc id -> Int.max acc (floor axis id)))
-          ~f:(fun acc id -> Int.max acc (Int.max (lower axis id) (floor axis id)))
+          ~init:
+            (Hash_set.fold cycle ~init:0 ~f:(fun acc id ->
+               Int.max acc (floor axis id)))
+          ~f:(fun acc id ->
+            Int.max acc (Int.max (lower axis id) (floor axis id)))
       in
       let implied_upper =
         Hash_set.fold
           (outside above)
-          ~init:(Hash_set.fold cycle ~init:(Axis.max axis) ~f:(fun acc id -> Int.min acc (ceiling axis id)))
+          ~init:
+            (Hash_set.fold cycle ~init:(Axis.max axis) ~f:(fun acc id ->
+               Int.min acc (ceiling axis id)))
           ~f:(fun acc id -> Int.min acc (upper axis id))
       in
       let bound done_ ~implied printed =

@@ -586,9 +586,9 @@ let rec kind_message (kind : Kind.t) ~show_type =
      always [global]"
   | Invalid_modality { mode_param = Some param } ->
     sprintf
-      "The mode parameter '%s reaches what a pointer's cell holds, which is \
-       on stage and provenance only: a pointer's cell is always [global], so \
-       its argument has no locality"
+      "The mode parameter '%s reaches what a pointer's cell holds, which is on \
+       stage and provenance only: a pointer's cell is always [global], so its \
+       argument has no locality"
       param
   | Misplaced_mut ->
     "Only an entry of a code type's context can be [mut] or [immut], for a \

@@ -54,9 +54,9 @@ val rank : t -> int option
 
 val var_id : t -> int
 
-(** The nodes [t] is related to on its axis, by a morphism implying the
-    relation without it: [`Le n] for [t <= n], [`Ge n] for [n <= t]. A generic node's are the constraints its
-    scheme keeps, others' their edges. *)
+(** The nodes [t] is related to on its axis, by a morphism implying the relation
+    without it: [`Le n] for [t <= n], [`Ge n] for [n <= t]. A generic node's are
+    the constraints its scheme keeps, others' their edges. *)
 val relations : t -> ([ `Le | `Ge ] * t) list
 
 (** The lower bound [t] would have if the variables [raised] (by variable id),

@@ -386,8 +386,8 @@ let mode_constraints t =
       | _ ->
         fail
           loc
-          "a constraint on one axis names it on both sides, as in \
-           `stage('m) <= stage('n)`"
+          "a constraint on one axis names it on both sides, as in `stage('m) \
+           <= stage('n)`"
     in
     let acc = { Mode_expr.Constraint.lower; upper; axis } :: acc in
     match peek t with
