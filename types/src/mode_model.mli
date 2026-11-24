@@ -24,15 +24,13 @@ end
 
 (** Drops each of [items], in order, while the rest imply it, as read back with
     [implicit] (constraints reading back always adds) and nodes at least
-    [base_lower] (what they read back at least as). A [dead] node is raised by
-    nothing but the edges into it, so what raising it raises doesn't matter.
-    Edges are to be before bounds: dropping an edge keeps what the bounds imply.
-    Then checks that the rest imply exactly what [closure] does, raising if not:
-    every item must hold of [closure], and those it has to imply be among them. *)
+    [base_lower] (what they read back at least as). Edges are to be before
+    bounds: dropping an edge keeps what the bounds imply. Then checks that the
+    rest imply exactly what [closure] does of [nodes], raising if not: every
+    item must hold of [closure], and those it has to imply be among them. *)
 val reduce
   :  Mode_closure.t
   -> nodes:Mode_node.t list
-  -> dead:(Mode_node.t -> bool)
   -> base_lower:(Mode_node.t -> int)
   -> implicit:Edge.t list
   -> 'a list

@@ -16,13 +16,13 @@ module Item = struct
 end
 
 (* The nodes by index, and each item's edges in adjacency lists, with whether
-   the item is kept. *)
+   the item is kept. A raise is propagated over [base] levels sparsely: a node's
+   level is [over.(i)] if [stamp.(i) = generation], else [base.(i)]. *)
 type t =
   { closure : Mode_closure.t
   ; nodes : Mode_node.t array
   ; index : Mode_node.t -> int
   ; find : Mode_node.t -> int option
-  ; dead : bool array
   ; real_lows : int array
   ; base_lower : int array
   ; kept : bool array (* By item; the implicit edges' item is the last. *)
@@ -30,9 +30,13 @@ type t =
   ; backward : (int * Mode.Morphism.t * int) list array
   ; lower : (int * int) list array (* Bounds, as (item, point), by node. *)
   ; upper : (int * int) list array
+  ; over : int array
+  ; stamp : int array
+  ; mutable generation : int
+  ; queue : int Queue.t
   }
 
-let create closure ~nodes ~dead ~base_lower ~implicit items =
+let create closure ~nodes ~base_lower ~implicit items =
   let nodes = Array.of_list nodes in
   let table = Mode_node.Table.create () in
   Array.iteri nodes ~f:(fun i n -> Hashtbl.set table ~key:n ~data:i);
@@ -44,7 +48,6 @@ let create closure ~nodes ~dead ~base_lower ~implicit items =
     ; nodes
     ; index
     ; find = Hashtbl.find table
-    ; dead = Array.map nodes ~f:dead
     ; real_lows = Array.map nodes ~f:(Mode_closure.lower closure)
     ; base_lower = Array.map nodes ~f:base_lower
     ; kept = Array.create ~len:(Array.length items) true
@@ -52,6 +55,10 @@ let create closure ~nodes ~dead ~base_lower ~implicit items =
     ; backward = Array.create ~len:size []
     ; lower = Array.create ~len:size []
     ; upper = Array.create ~len:size []
+    ; over = Array.create ~len:size 0
+    ; stamp = Array.create ~len:size 0
+    ; generation = 0
+    ; queue = Queue.create ()
     }
   in
   Array.iteri items ~f:(fun item -> function
@@ -71,68 +78,80 @@ let bound t bounds ~init ~f =
     if t.kept.(item) then f acc p else acc)
 ;;
 
-(* Raises [levels] along the kept edges from [start] until nothing changes. *)
-let propagate t levels ~start =
-  let queue = Queue.of_list start in
+let size t = Array.length t.nodes
+
+(* The least levels the kept items give, from [init], raised along the kept
+   edges until nothing changes. *)
+let fixpoint t ~init ~edges ~step ~better =
+  let levels = Array.init (size t) ~f:init in
+  let queue = Queue.of_list (List.init (size t) ~f:Fn.id) in
   while not (Queue.is_empty queue) do
-    let lo = Queue.dequeue_exn queue in
-    List.iter t.forward.(lo) ~f:(fun (item, m, hi) ->
+    let from = Queue.dequeue_exn queue in
+    List.iter (edges from) ~f:(fun (item, m, other) ->
       if t.kept.(item)
       then (
-        let point = Mode.Morphism.left m levels.(lo) in
-        if point > levels.(hi)
+        let point = step m levels.(from) in
+        if better point levels.(other)
         then (
-          levels.(hi) <- point;
-          Queue.enqueue queue hi)))
-  done
-;;
-
-let all t = List.init (Array.length t.nodes) ~f:Fn.id
-
-let lows t =
-  let levels =
-    Array.mapi t.nodes ~f:(fun i _ ->
-      bound t t.lower.(i) ~init:t.base_lower.(i) ~f:Int.max)
-  in
-  propagate t levels ~start:(all t);
-  levels
-;;
-
-let ups t =
-  let levels =
-    Array.mapi t.nodes ~f:(fun i n ->
-      bound t t.upper.(i) ~init:(Mode_node.max n.axis) ~f:Int.min)
-  in
-  let queue = Queue.of_list (all t) in
-  while not (Queue.is_empty queue) do
-    let hi = Queue.dequeue_exn queue in
-    List.iter t.backward.(hi) ~f:(fun (item, m, lo) ->
-      if t.kept.(item)
-      then (
-        let point = Mode.Morphism.right m levels.(hi) in
-        if point < levels.(lo)
-        then (
-          levels.(lo) <- point;
-          Queue.enqueue queue lo)))
+          levels.(other) <- point;
+          Queue.enqueue queue other)))
   done;
   levels
 ;;
 
-let raised t lows x p =
-  let levels = Array.copy lows in
-  levels.(x) <- Int.max levels.(x) p;
-  propagate t levels ~start:[ x ];
-  levels
+let lows t =
+  fixpoint
+    t
+    ~init:(fun i -> bound t t.lower.(i) ~init:t.base_lower.(i) ~f:Int.max)
+    ~edges:(fun i -> t.forward.(i))
+    ~step:Mode.Morphism.left
+    ~better:( > )
+;;
+
+let ups t =
+  fixpoint
+    t
+    ~init:(fun i ->
+      bound t t.upper.(i) ~init:(Mode_node.max t.nodes.(i).axis) ~f:Int.min)
+    ~edges:(fun i -> t.backward.(i))
+    ~step:Mode.Morphism.right
+    ~better:( < )
+;;
+
+(* Raises [x] to [p] over [base], until [stop] holds; then [level] reads the
+   levels raised, and [touched] the nodes raised, until the next raise. *)
+let raise_ t base x p ~stop =
+  t.generation <- t.generation + 1;
+  let level i = if t.stamp.(i) = t.generation then t.over.(i) else base.(i) in
+  let set i point =
+    t.over.(i) <- point;
+    t.stamp.(i) <- t.generation
+  in
+  let touched = ref [] in
+  if p > level x
+  then (
+    set x p;
+    touched := [ x ];
+    Queue.clear t.queue;
+    Queue.enqueue t.queue x;
+    while (not (Queue.is_empty t.queue)) && not (stop level) do
+      let lo = Queue.dequeue_exn t.queue in
+      List.iter t.forward.(lo) ~f:(fun (item, m, hi) ->
+        if t.kept.(item)
+        then (
+          let point = Mode.Morphism.left m (level lo) in
+          if point > level hi
+          then (
+            if t.stamp.(hi) <> t.generation then touched := hi :: !touched;
+            set hi point;
+            Queue.enqueue t.queue hi)))
+    done);
+  level, !touched
 ;;
 
 let real_lower t i = t.real_lows.(i)
 let real_upper t i = Mode_closure.upper t.closure t.nodes.(i)
-
-(* What a node may be raised to from outside: nothing, if dead. A dead node's
-   own level is never compared either: only what its edges raise. *)
-let domain t i =
-  if t.dead.(i) then [] else Mode_closure.domain t.closure t.nodes.(i)
-;;
+let domain t i = Mode_closure.domain t.closure t.nodes.(i)
 
 let implied t (item : Item.t) =
   match item with
@@ -148,13 +167,12 @@ let implied t (item : Item.t) =
     List.for_all edges ~f:(fun { lo; morphism; hi } ->
       let lo = t.index lo
       and hi = t.index hi in
-      t.dead.(hi)
-      || List.for_all (domain t lo) ~f:(fun p ->
-        (raised t lows lo p).(hi) >= Mode.Morphism.left morphism p))
-  | Lower _ ->
-    Array.for_alli (lows t) ~f:(fun i p -> t.dead.(i) || p = real_lower t i)
-  | Upper _ ->
-    Array.for_alli (ups t) ~f:(fun i p -> t.dead.(i) || p = real_upper t i)
+      List.for_all (domain t lo) ~f:(fun p ->
+        let need = Mode.Morphism.left morphism p in
+        let level, _ = raise_ t lows lo p ~stop:(fun level -> level hi >= need) in
+        level hi >= need))
+  | Lower _ -> Array.for_alli (lows t) ~f:(fun i p -> p = real_lower t i)
+  | Upper _ -> Array.for_alli (ups t) ~f:(fun i p -> p = real_upper t i)
 ;;
 
 let check_exact t =
@@ -166,8 +184,7 @@ let check_exact t =
   let lows = lows t in
   let ups = ups t in
   Array.iteri t.nodes ~f:(fun i n ->
-    if (not t.dead.(i))
-       && (lows.(i) <> real_lower t i || ups.(i) <> real_upper t i)
+    if lows.(i) <> real_lower t i || ups.(i) <> real_upper t i
     then
       fail
         [%message
@@ -177,29 +194,37 @@ let check_exact t =
             (ups.(i) : int)
             (real_lower t i : int)
             (real_upper t i : int)]);
+  (* The levels being the real ones, a raise needs comparing only where either
+     raises. *)
   Array.iteri t.nodes ~f:(fun i x ->
     List.iter (domain t i) ~f:(fun p ->
-      let levels = raised t lows i p in
-      let real = Array.copy t.real_lows in
+      let real = Int.Table.create () in
       List.iter (Mode_closure.raised_alist t.closure x p) ~f:(fun (y, point) ->
-        Option.iter (t.find y) ~f:(fun j -> real.(j) <- Int.max real.(j) point));
-      Array.iteri t.nodes ~f:(fun j y ->
-        let real = real.(j) in
-        if (not t.dead.(j)) && levels.(j) <> real
+        Option.iter (t.find y) ~f:(fun j ->
+          if point > lows.(j)
+          then
+            Hashtbl.update real j ~f:(fun current ->
+              Int.max point (Option.value current ~default:point))));
+      let level, touched = raise_ t lows i p ~stop:(fun _ -> false) in
+      List.iter (touched @ Hashtbl.keys real) ~f:(fun j ->
+        let real =
+          Hashtbl.find real j |> Option.value ~default:lows.(j)
+        in
+        if level j <> real
         then
           fail
             [%message
               "raise"
                 (x : Mode_node.t)
                 (p : int)
-                (y : Mode_node.t)
-                (levels.(j) : int)
+                ~y:(t.nodes.(j) : Mode_node.t)
+                ~level:(level j : int)
                 (real : int)])))
 ;;
 
-let reduce closure ~nodes ~dead ~base_lower ~implicit items ~item =
+let reduce closure ~nodes ~base_lower ~implicit items ~item =
   let t, kinds =
-    create closure ~nodes ~dead ~base_lower ~implicit (List.map items ~f:item)
+    create closure ~nodes ~base_lower ~implicit (List.map items ~f:item)
   in
   List.iteri items ~f:(fun i _ ->
     t.kept.(i) <- false;

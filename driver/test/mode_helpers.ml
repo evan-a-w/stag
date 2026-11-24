@@ -139,6 +139,7 @@ let projection positions =
       , List.concat_map positions ~f:(fun p ->
           List.concat_map Mode.Axis.Any.all ~f:(fun axis ->
             match p.side with
+            | _ when dead p axis -> []
             | Fixed const -> [ point const axis ]
             | Var var ->
               let n = node var axis in
