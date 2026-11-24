@@ -143,7 +143,6 @@ module Pattern : sig
   val has_error : t -> bool
 end
 
-(** [ty] is the type of the node, instantiated where it is a variable. *)
 (** The locality markers of expressions: [stack_ e], [exclave_ e] and
     [e [@nontail]]. *)
 module Marker : sig
@@ -154,6 +153,7 @@ module Marker : sig
   [@@deriving sexp_of, equal]
 end
 
+(** [ty] is the type of the node, instantiated where it is a variable. *)
 module Expr : sig
   module Subs : sig
     type 'e t =

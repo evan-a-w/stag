@@ -93,18 +93,32 @@ module Term = struct
   let rec axis t ~side =
     let open Result.Let_syntax in
     let inner ?(rest = "") t ~(on : Axis.t) ~name =
-      let%bind axis = axis t ~side in
-      if Axis.equal axis on
-      then Ok ()
-      else
+      let example = sprintf "`%s(%s('m)%s)`" name (Axis.to_string on) rest in
+      match t with
+      | Mode { txt = Var _; _ } ->
         Error
           (sprintf
-             "`%s(...)` takes a %s term, as in `%s(%s('m)%s)`"
+             "the variable in `%s(...)` names its axis, as in %s"
              name
-             (Axis.to_string on)
-             name
-             (Axis.to_string on)
-             rest)
+             example)
+      | _ ->
+        let%bind axis = axis t ~side in
+        if Axis.equal axis on
+        then Ok ()
+        else
+          Error
+            (sprintf
+               "`%s(...)` %s, but its term is on %s: as in %s"
+               name
+               (if String.is_empty rest
+                then sprintf "is on %s" (Axis.to_string on)
+                else
+                  sprintf
+                    "is on the axis of its mode%s, %s"
+                    (String.drop_prefix rest 1)
+                    (Axis.to_string on))
+               (Axis.to_string axis)
+               example)
     in
     let on ~(sides : [ `Left | `Right ]) ~name =
       if Poly.equal side sides
@@ -174,10 +188,23 @@ module Constraint = struct
         "a mode constraint relates a mode variable, as in `'m <= 'n` or `'m <= \
          portable`"
     | Mode _, Mode _ -> Ok ()
-    | Mode _, _ | _, Mode _ ->
-      Error
-        "a constraint on one axis names it on both sides, as in `stage('m) <= \
-         stage('n)`"
+    | Mode mode, term | term, Mode mode ->
+      let side = if phys_equal term lower then `Left else `Right in
+      (match Term.axis term ~side, mode.txt with
+       | Error message, _ -> Error message
+       | Ok axis, Var _ ->
+         Error
+           (sprintf
+              "both sides of a constraint on one axis name it: write `%s('n)` \
+               for `'n`"
+              (Axis.to_string axis))
+       | Ok _, Atoms _ ->
+         Error
+           (sprintf
+              "a bound is on the whole variable, as in `%s`"
+              (match side with
+               | `Left -> "'m <= " ^ Term.mode_string mode
+               | `Right -> Term.mode_string mode ^ " <= 'm")))
     | _ ->
       let open Result.Let_syntax in
       let%bind lower_axis = Term.axis lower ~side:`Left in

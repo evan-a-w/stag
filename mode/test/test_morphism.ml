@@ -131,6 +131,12 @@ let%expect_test "what the solver composes, a with clause writes" =
       grow ())
   in
   grow ();
+  (* Raising nothing above the least point: no constraint at all. *)
+  let is_trivial m =
+    List.for_all
+      (List.init (Axis.Any.size (Morphism.dst m)) ~f:Fn.id)
+      ~f:(fun x -> Morphism.left m x = 0)
+  in
   let written m =
     List.find Written_morphism.all ~f:(fun w ->
       Morphism.compare (Written_morphism.morphism w) m = 0)
@@ -138,7 +144,7 @@ let%expect_test "what the solver composes, a with clause writes" =
   List.iter !closure ~f:(fun m ->
     match written m with
     | Some _ -> ()
-    | None when Written_morphism.is_trivial m -> ()
+    | None when is_trivial m -> ()
     | None -> print_s [%message "not written" (m : Morphism.t)]);
   print_s [%message (List.length !closure : int)];
   [%expect {| ("List.length (!closure)" 19) |}]

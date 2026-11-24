@@ -17,6 +17,3 @@ val morphism : t -> Morphism.t
 
 (** The middle point of the axis, which [Meet] meets with, by index. *)
 val middle : Axis.Any.t -> int
-
-(** Whether the morphism relates nothing: [lo <= m(hi)] always holds. *)
-val is_trivial : Morphism.t -> bool
