@@ -326,8 +326,8 @@ let%expect_test "learn_stag.md" =
       val without_age : {`name : string}
       val get_name : {`name : 'a; ..'b} -> 'a
     end
-    Doc.origin = {x = 0; y = 0}
-    Doc.moved = {x = 0; y = 5}
+    Doc.origin = {Doc.x = 0; y = 0}
+    Doc.moved = {Doc.x = 0; y = 5}
     Doc.y = 5
     Doc.pair = (1, "one")
     Doc.shapes = (Doc.Circle 2, Doc.Rect (3, 4), Doc.Empty)
@@ -387,9 +387,9 @@ let%expect_test "learn_stag.md" =
     Doc.p = Ptr.make 2
     Doc.one = 1
     Doc.stored = 2
-    Doc.q = Ptr.make {x = 10; y = 2}
-    Doc.copy = {x = 1; y = 2}
-    Doc.after = ({x = 10; y = 2}, {x = 1; y = 2})
+    Doc.q = Ptr.make {Doc.x = 10; y = 2}
+    Doc.copy = {Doc.x = 1; y = 2}
+    Doc.after = ({Doc.x = 10; y = 2}, {Doc.x = 1; y = 2})
     Doc.rec_sum = <fun>
     Doc.tree = Doc.Branch (Ptr.make (Doc.Leaf 1, Doc.Branch (Ptr.make (Doc.Leaf 2, Doc.Leaf 3))))
     Doc.total = 6
@@ -461,9 +461,9 @@ let%expect_test "learn_stag.md" =
       val shadowed : int
       val prim : int
     end
-    Doc.Geometry.origin = {x = 0; y = 0}
-    Doc.Geometry.Inner.unit_x = {x = 1; y = 0}
-    Doc.o = {x = 0; y = 0}
+    Doc.Geometry.origin = {Doc.Geometry.x = 0; y = 0}
+    Doc.Geometry.Inner.unit_x = {Doc.Geometry.x = 1; y = 0}
+    Doc.o = {Doc.Geometry.x = 0; y = 0}
     Doc.ux = 1
     Doc.get_x = <fun>
     Doc.x = 10
@@ -677,7 +677,7 @@ let%expect_test "learn_stag.md" =
       val gc_cell : cell[string, gc]
       val read_cell : cell['a, 'm0] -> 'a
     end
-    Doc.gc_cell = {value = "x"}
+    Doc.gc_cell = {Doc.value = "x"}
     Doc.read_cell = <fun>
     === learn_stag.md:567
     module Doc : sig

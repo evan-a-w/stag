@@ -212,7 +212,13 @@ let to_string_hum ?max_length value =
       add "{";
       Array.iteri values ~f:(fun index value ->
         if index > 0 then add "; ";
-        add (sprintf "%s = " (field_name record_type index));
+        (* The first qualified, as a constructor is: the rest are found from it. *)
+        let name =
+          if index = 0
+          then Prelude_path.to_string_hum record_type.fields.(index)
+          else field_name record_type index
+        in
+        add (sprintf "%s = " name);
         value_ value);
       add "}"
     | Poly_record fields ->
