@@ -163,7 +163,8 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
       decl_path ~add ~kind:Kind.Type ~loc:path.loc path.txt;
       List.iter args ~f:(function
         | Ty ty -> recurse ty
-        | Row row -> walk_row ~add ~expr ~kind:Kind.Poly_field row)
+        | Row row -> walk_row ~add ~expr ~kind:Kind.Poly_field row
+        | Mode _ -> ())
     | Arrow (a, b) ->
       recurse a;
       recurse b
@@ -173,12 +174,8 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
       walk_row ~add ~expr ~kind:Kind.Poly_field context
     | Record row -> walk_row ~add ~expr ~kind:Kind.Poly_field row
     | Variant row -> walk_row ~add ~expr ~kind:Kind.Poly_tag row
-    | Mut ty
-    | Immut ty
-    | Moded (ty, _)
-    | Constrained (ty, _)
-    | Global ty
-    | Modality (ty, _) -> recurse ty
+    | Mut ty | Immut ty | Moded (ty, _) | Constrained (ty, _) | Modality (ty, _)
+      -> recurse ty
     | Splice e -> expr e
   and walk_row ~(add : add) ~expr ~kind (row : Syntax.Type_expr.row) =
     match row.txt with

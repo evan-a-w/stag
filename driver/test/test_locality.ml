@@ -186,7 +186,7 @@ let f (p : ptr[ptr[int] * int]) =
 let%expect_test "global_ fields" =
   locality
     {|
-type r = { g : global_ ptr[int]; l : ptr[int] }
+type r = { g : ptr[int] @@ global; l : ptr[int] }
 let get (r @ local) = Ptr.make r.g
 let get_l (r @ local) = Ptr.make r.l
 |};
@@ -194,27 +194,27 @@ let get_l (r @ local) = Ptr.make r.l
     {| This is regional, because it is annotated local (at t.stag:4:15-20), then r is passed to the function (at t.stag:4:24-36), then r is used (at t.stag:4:33-34), then its field is read (at t.stag:4:33-36), then it is passed to a function (at t.stag:4:24-36), but must be at most global, because Ptr.make holds it, then the function types are unified |}];
   locality
     {|
-type r = { g : global_ ptr[int]; l : ptr[int] }
+type r = { g : ptr[int] @@ global; l : ptr[int] }
 let mk u = { g = stack_ (Ptr.make 1); l = Ptr.make 2 }
 |};
   [%expect
-    {| This is local, because it is allocated by [stack_] (at t.stag:3:17-36), then it is part of the value (at t.stag:3:17-36), but must be at most global, because it is held by a [global_] field (at t.stag:3:17-36) |}];
+    {| This is local, because it is allocated by [stack_] (at t.stag:3:17-36), then it is part of the value (at t.stag:3:17-36), but must be at most global, because it is held by a field or argument with a modality (at t.stag:3:17-36) |}];
   (* Reviewer: record update must check [global_] fields too. *)
   locality
     {|
-type r = { g : global_ ptr[int]; l : ptr[int] }
+type r = { g : ptr[int] @@ global; l : ptr[int] }
 let mk u = { g = Ptr.make 1; l = Ptr.make 2 }
 let f u = let r = mk () in let r2 = { r with g = stack_ (Ptr.make 5) } in Ptr.make r2.g
 |};
   [%expect
-    {| This is local, because it is allocated by [stack_] (at t.stag:4:49-68), then it is part of the value (at t.stag:4:49-68), but must be at most global, because it is held by a [global_] field (at t.stag:4:49-68) |}];
+    {| This is local, because it is allocated by [stack_] (at t.stag:4:49-68), then it is part of the value (at t.stag:4:49-68), but must be at most global, because it is held by a field or argument with a modality (at t.stag:4:49-68) |}];
   (* Reviewer: a [global_] field bound by a pattern is global, as [r.g] is. *)
   locality
     {|
-type r = { g : global_ ptr[int]; l : ptr[int] }
+type r = { g : ptr[int] @@ global; l : ptr[int] }
 let f (r @ local) = match r with { g = g; l = _ } -> Ptr.make g
 let f_l (r @ local) = match r with { g = _; l = l } -> Ptr.make l
-type t = A of global_ ptr[int] * ptr[int]
+type t = A of ptr[int] @@ global * ptr[int]
 let h (x @ local) = match x with A (g, _) -> Ptr.make g
 |};
   [%expect
@@ -439,7 +439,7 @@ let f (p : ptr[ptr[int]] @ local) = match p with *q -> Ptr.make q
 let%expect_test "stack_ doesn't apply to what a global_ field holds" =
   locality
     {|
-type r = { g : global_ ptr[int] }
+type r = { g : ptr[int] @@ global }
 let f u = stack_ { g = Ptr.make 1 }
 |};
   [%expect

@@ -112,9 +112,9 @@ and moded t : Type_expr.t =
   let ty = type_expr t in
   if int t 3 = 0 then loc (Type_expr.Moded (ty, mode_expr t)) else ty
 
-and maybe_global t : Type_expr.t =
+and maybe_modality t : Type_expr.t =
   let ty = type_expr t in
-  if int t 4 = 0 then loc (Type_expr.Global ty) else ty
+  if int t 4 = 0 then loc (Type_expr.Modality (ty, mode_expr t)) else ty
 
 and annot t : Annot.t =
   { ty = Option.some_if (bool t) (annot_type t)
@@ -155,9 +155,20 @@ and type_expr t : Type_expr.t =
              Con
                ( loc (decl_path t ~last:lident)
                , list t ~min:1 ~max:3 (fun t : Type_expr.arg ->
-                   if bool t
-                   then Ty (type_expr t)
-                   else Row (row t ~entry:type_expr)) ))
+                   match int t 5 with
+                   | 0 | 1 -> Ty (type_expr t)
+                   | 2 -> Ty (maybe_modality t)
+                   | 3 -> Row (row t ~entry:type_expr)
+                   | _ ->
+                     (* One atom would read back as a type. *)
+                     Mode
+                       (loc
+                          (Mode_expr.Atoms
+                             [ pick
+                                 t
+                                 [ Mode_expr.Atom.Const; Portable; Nonportable ]
+                             ; pick t [ Mode_expr.Atom.Static; Gc; External ]
+                             ]))) ))
          ; (fun t -> Arrow (moded t, moded t))
          ; (fun t -> Tuple (list t ~min:2 ~max:3 type_expr))
          ; (fun t ->
@@ -311,7 +322,11 @@ and type_decl t : Type_decl.t =
   { name = name t
   ; params =
       list t ~min:0 ~max:2 (fun t ->
-        loc (if bool t then Type_decl.Param.Ty "a" else Row "r"))
+        loc
+          (match int t 3 with
+           | 0 -> Type_decl.Param.Ty "a"
+           | 1 -> Row "r"
+           | _ -> Mode "p"))
   ; kind =
       (match int t 5 with
        | 0 -> Abstract
@@ -319,8 +334,8 @@ and type_decl t : Type_decl.t =
        | 2 ->
          Variant
            (list t ~min:0 ~max:3 (fun t ->
-              loc (uident t), list t ~min:0 ~max:3 maybe_global))
-       | 3 -> Record (list t ~min:1 ~max:3 (fun t -> name t, maybe_global t))
+              loc (uident t), list t ~min:0 ~max:3 maybe_modality))
+       | 3 -> Record (list t ~min:1 ~max:3 (fun t -> name t, maybe_modality t))
        | _ -> Splice (Located.create (expr t)))
   }
 

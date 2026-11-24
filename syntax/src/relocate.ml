@@ -83,9 +83,6 @@ and type_desc (g : Type_expr.desc) (w : Type_expr.desc) : Type_expr.desc option 
     let* t = type_expr t t' in
     let+ cs = list mode_constraint cs cs' in
     Type_expr.Constrained (t, cs)
-  | Global t, Global t' ->
-    let+ t = type_expr t t' in
-    Type_expr.Global t
   | Modality (t, m), Modality (t', m') ->
     let* t = type_expr t t' in
     let+ m = mode_expr m m' in
@@ -102,7 +99,6 @@ and type_desc (g : Type_expr.desc) (w : Type_expr.desc) : Type_expr.desc option 
       | Splice _
       | Moded _
       | Constrained _
-      | Global _
       | Modality _ )
     , _ ) -> None
 
@@ -144,7 +140,10 @@ and arg (g : Type_expr.arg) (w : Type_expr.arg) =
   | Row r, Row r' ->
     let+ r = row r r' in
     Type_expr.Row r
-  | (Ty _ | Row _), _ -> None
+  | Mode m, Mode m' ->
+    let+ m = mode_expr m m' in
+    Type_expr.Mode m
+  | (Ty _ | Row _ | Mode _), _ -> None
 
 and binding b b' = pair name annot b b'
 and pattern g w = located pattern_desc g w

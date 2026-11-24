@@ -360,8 +360,8 @@ module Of_value = struct
       | _ -> raise Bad_arguments)
   ;;
 
-  (* Where a type is, so which of [t @ m], [global_ t], [t @@ m] and
-     [t with ...] it may be, as the parser allows. *)
+  (* Where a type is, so which of [t @ m], [t @@ m] and [t with ...] it may be,
+     as the parser allows. *)
   module Type_position = struct
     type t =
       | Plain
@@ -436,22 +436,14 @@ module Of_value = struct
                   value)
            | "Modality", 2 ->
              (match at with
-              | Type_arg ->
+              | Type_arg | Member ->
                 Modality (arg 0 (type_expr ~loc), arg 1 (mode_expr ~loc))
-              | Plain | Arrow_side | Member | Annotation ->
+              | Plain | Arrow_side | Annotation ->
                 unexpected
                   ~expected:
                     "a type without a modality: a modality is only on a type \
-                     argument, as in [ptr[t @@ external]]"
-                  value)
-           | "Global", 1 ->
-             (match at with
-              | Member -> Global (arg 0 (type_expr ~loc))
-              | Plain | Arrow_side | Annotation | Type_arg ->
-                unexpected
-                  ~expected:
-                    "a type without [global_]: [global_] is only on a record \
-                     field or a constructor's argument"
+                     argument, a record field or a constructor's argument, as \
+                     in [ptr[t @@ external]]"
                   value)
            | _ -> raise Bad_arguments))
 
@@ -515,6 +507,7 @@ module Of_value = struct
         match constructor, Args.count args with
         | "Ty", 1 -> Ty (arg 0 (type_expr ~at:Type_arg ~loc))
         | "Row", 1 -> Row (arg 0 (row ~labels:Label ~loc))
+        | "Mode", 1 -> Mode (arg 0 (mode_expr ~loc))
         | _ -> raise Bad_arguments)
 
   and type_decl value ~loc : Type_decl.t =
@@ -529,6 +522,7 @@ module Of_value = struct
              match constructor, Args.count args with
              | "Ty", 1 -> Ty (arg 0 (ident Tyvar))
              | "Row", 1 -> Row (arg 0 (ident Tyvar))
+             | "Mode", 1 -> Mode (arg 0 (ident Tyvar))
              | _ -> raise Bad_arguments))
     in
     { name = field "name" (name Lower ~loc) value

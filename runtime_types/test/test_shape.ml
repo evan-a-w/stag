@@ -16,11 +16,13 @@ let alias ty = Signature.Type_decl.Kind.Alias ty
 let ctor name args =
   { Signature.Constructor.name
   ; args
-  ; global_args = List.map args ~f:(fun _ -> false)
+  ; modalities = List.map args ~f:(fun _ -> Stag_types.Member_modality.Id)
   }
 ;;
 
-let field name ty = { Signature.Field.name; ty; is_global = false }
+let field name ty =
+  { Signature.Field.name; ty; modality = Stag_types.Member_modality.Id }
+;;
 
 let present label ty rest =
   Type.RExtend (label, Type.Present, Type.Absent, ty, rest)

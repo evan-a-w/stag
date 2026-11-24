@@ -908,8 +908,8 @@ let constructor_types
     let result = inst constructor.result in
     let%map.Result () = unify_known t ~expected result ~loc in
     ( constructor_ref constructor
-    , List.map2_exn args constructor.global_args ~f:(fun (arg, ty) is_global ->
-        arg, inst ty, Modality.of_global is_global)
+    , List.map2_exn args constructor.modalities ~f:(fun (arg, ty) modality ->
+        arg, inst ty, Type_env.modality modality ~of_:result)
     , result )
 ;;
 
@@ -1212,7 +1212,8 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
          List.map fields ~f:(fun ((field : Typed.Field_ref.t), _) ->
            Type_env.field_modality
              scope.program.type_env
-             (Typed.Field_ref.name field))
+             (Typed.Field_ref.name field)
+             ~record)
        in
        let patterns, bindings =
          sub_patterns (List.map fields ~f:snd) ~modalities
@@ -1393,8 +1394,11 @@ let use_entry (scope : Scope.t) ~at (entry : Env.Entry.t) ~name ~loc =
         (Typecheck_error.create ~loc (Mutable_captured_in_exclave name)))
 ;;
 
-let field_modality (scope : Scope.t) field =
-  Type_env.field_modality scope.program.type_env (Typed.Field_ref.name field)
+let field_modality (scope : Scope.t) field ~record =
+  Type_env.field_modality
+    scope.program.type_env
+    (Typed.Field_ref.name field)
+    ~record
 ;;
 
 let use_free (scope : Scope.t) ~at ~why ~loc =
@@ -2896,13 +2900,22 @@ and expr_type
         ~children:[ discarded target ]
         (Typecheck_error.create ~loc Store_not_through_pointer)
     else (
-      (* The cell stored into is that of the pointer dereferenced last. *)
-      let rec cell_held (expr : Typed.Expr.t) =
+      (* The cell stored into is that of the pointer dereferenced last, then the
+         fields of its value stored into. *)
+      let rec stored (expr : Typed.Expr.t) =
         match expr.desc with
         | Deref pointer ->
-          Option.value_map (Type.of_ptr pointer.ty) ~default:Mode_arg.gc ~f:snd
-        | Field (inner, _) | Poly_field (inner, _) -> cell_held inner
-        | _ -> Mode_arg.gc
+          Modality.of_cell
+            (Option.value_map
+               (Type.of_ptr pointer.ty)
+               ~default:Mode_arg.gc
+               ~f:snd)
+        | Field (inner, field) ->
+          Modality.compose
+            (stored inner)
+            (field_modality scope field ~record:inner.ty)
+        | Poly_field (inner, _) -> stored inner
+        | _ -> Modality.of_cell Mode_arg.gc
       in
       let target, value =
         Mode_rules.store
@@ -2911,7 +2924,7 @@ and expr_type
           ~loc
           ~target:(fun at ->
             let target = expr_type t scope ~at ~expr:target in
-            target, cell_held target)
+            target, stored target)
           ~value:(fun at ~ty -> check_expr t scope ~at ~expr:value ~ty)
       in
       node (Store (target, value)) Type.unit)
@@ -2949,7 +2962,7 @@ and expr_type
      | Ok (record, fields, complete) ->
        let exprs =
          List.map fields ~f:(fun ((field : Typed.Field_ref.t), (expr, ty)) ->
-           part (field_modality scope field) ~ty (fun at ->
+           part (field_modality scope field ~record) ~ty (fun at ->
              check_expr t scope ~at ~expr ~ty))
        in
        if complete
@@ -2961,8 +2974,8 @@ and expr_type
         let expr = expr_type t scope ~at ~expr in
         match field_type t scope field ~record:(Some expr.ty) ~loc with
         | Error error -> (expr, Error error), Modality.id
-        | Ok ((field, _, _) as typed) ->
-          (expr, Ok typed), field_modality scope field)
+        | Ok ((field, record, _) as typed) ->
+          (expr, Ok typed), field_modality scope field ~record)
     in
     (match field with
      | Error error -> fail error ~children:[ expr ]
@@ -2977,7 +2990,8 @@ and expr_type
      | Ok (field, record, field_ty) ->
        let expr =
          Mode_rules.project modes at ~loc ~why:"its field is read" (fun at ->
-           check_expr t scope ~at ~expr ~ty:record, field_modality scope field)
+           ( check_expr t scope ~at ~expr ~ty:record
+           , field_modality scope field ~record ))
        in
        node (Field (expr, field)) field_ty)
   | Record_update (expr, fields) ->
@@ -3043,7 +3057,7 @@ and expr_type
             List.map fields ~f:(fun (field, _, expr) ->
               let ty = inst_out field.ty in
               part
-                (field_modality scope (field_ref field))
+                (field_modality scope (field_ref field) ~record)
                 ~ty
                 (fun at -> check_expr t scope ~at ~expr ~ty))
           in
@@ -4310,7 +4324,10 @@ let rec signature (program_env : Program_env.t) module_ ~complete =
          | Ok { args; _ } ->
            Some
              (Exception
-                { name; args; global_args = List.map args ~f:(fun _ -> false) })
+                { name
+                ; args
+                ; modalities = List.map args ~f:(fun _ -> Member_modality.Id)
+                })
          | Error error when Typecheck_error.is_already_reported error -> None
          | Error error ->
            missing "exception" [%sexp (error : Typecheck_error.t)])

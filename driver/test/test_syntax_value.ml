@@ -78,19 +78,19 @@ let%expect_test "the prelude's signature" =
         type t = Var of string | Atoms of list[Atom.t]
       end
       module Type_expr : sig
-        type t = Var of string | Con of Path.t[Type_ref.t] * list[Arg.t] | Arrow of ptr[t * t] | Tuple of list[t] | Code of ptr[{`context : Row.t; `inner : t}] | Record of Row.t | Variant of Row.t | Mut of ptr[t] | Immut of ptr[t] | Splice of ptr[Expr.t] | Moded of ptr[t * Mode_expr.t] | Constrained of ptr[t * list[Mode_expr.t * Mode_expr.t]] | Global of ptr[t] | Modality of ptr[t * Mode_expr.t]
+        type t = Var of string | Con of Path.t[Type_ref.t] * list[Arg.t] | Arrow of ptr[t * t] | Tuple of list[t] | Code of ptr[{`context : Row.t; `inner : t}] | Record of Row.t | Variant of Row.t | Mut of ptr[t] | Immut of ptr[t] | Splice of ptr[Expr.t] | Moded of ptr[t * Mode_expr.t] | Constrained of ptr[t * list[Mode_expr.t * Mode_expr.t]] | Modality of ptr[t * Mode_expr.t]
         module Row : sig
           type t = Empty | Extend of ptr[string * Type_expr.t * t] | Var of string
         end
         module Arg : sig
-          type t = Ty of Type_expr.t | Row of Row.t
+          type t = Ty of Type_expr.t | Row of Row.t | Mode of Mode_expr.t
         end
         val con : string -> list[t] -> t
         val tuple : list[t] -> t
       end
       module Type_decl : sig
         module Param : sig
-          type t = Ty of string | Row of string
+          type t = Ty of string | Row of string | Mode of string
         end
         module Kind : sig
           type t = Variant of list[string * list[Type_expr.t]] | Record of list[string * Type_expr.t] | Alias of Type_expr.t | Abstract | Splice of Expr.t
@@ -626,8 +626,8 @@ type spliced = .~kind
 let quoted = .< struct type t = .~kind let x : .~ty = .~e include .~items end >.
 |}
   ; {|
-type r = {x : global_ int; y : global_ int @ local -> int @ 'm; z : int}
-type v = A of global_ int * int | B of global_ (int -> int)
+type r = {x : int @@ global; y : (int @ local -> int @ 'm) @@ global; z : int}
+type v = A of int @@ global * int | B of (int -> int) @@ global
 let f (x @ local) (y : int @ 'm) : int @ global portable = exclave_ stack_ (x, y)
 let g (h : int @ local -> int @ 'm -> (int -> int @ local) @ global) = h 1 [@nontail]
 let annotated = ((f : (int -> int) @ local), (f @ local portable gc))
@@ -735,7 +735,7 @@ let%expect_test "constructors are made as the typechecker resolves them" =
            : bool)];
   [%expect
     {|
-    ((constructors 105)
+    ((constructors 106)
      (reflected
       (prelude.Stag.Expr.Deref prelude.Stag.Expr.Store
        prelude.Stag.Mode_expr.Atom.External
@@ -743,8 +743,8 @@ let%expect_test "constructors are made as the typechecker resolves them" =
        prelude.Stag.Mode_expr.Atom.Regional prelude.Stag.Pattern.Deref
        prelude.Stag.Toplevel.External prelude.Stag.Type.Kind.Alias
        prelude.Stag.Type.Kind.Record prelude.Stag.Type.Kind.Variant
-       prelude.Stag.Type_expr.Modality prelude.Stag.Type_ref.Path.Prelude
-       prelude.Stag.Type_ref.Path.Program))
+       prelude.Stag.Type_decl.Param.Mode prelude.Stag.Type_expr.Arg.Mode
+       prelude.Stag.Type_ref.Path.Prelude prelude.Stag.Type_ref.Path.Program))
      (others_same_as_to_value true))
     |}]
 ;;
@@ -1353,7 +1353,7 @@ let%expect_test "shapes" =
     |}]
 ;;
 
-let%expect_test "modes and [global_] only where the parser puts them" =
+let%expect_test "modes and modalities only where the parser puts them" =
   let at txt = Located.create ~loc:Loc.none txt in
   let int : Syntax.Type_expr.t =
     at
@@ -1362,7 +1362,9 @@ let%expect_test "modes and [global_] only where the parser puts them" =
   in
   let local = at (Syntax.Mode_expr.Atoms [ Local ]) in
   let moded ty = at (Syntax.Type_expr.Moded (ty, local)) in
-  let global ty = at (Syntax.Type_expr.Global ty) in
+  let global ty =
+    at (Syntax.Type_expr.Modality (ty, at (Syntax.Mode_expr.Atoms [ Global ])))
+  in
   let arrow a b = at (Syntax.Type_expr.Arrow (a, b)) in
   let show ~to_value ~of_value print x =
     match of_value (to_value x) ~loc:Loc.none with
@@ -1407,10 +1409,10 @@ let%expect_test "modes and [global_] only where the parser puts them" =
     int @ local -> int @ local
     (int @ local -> int) -> (int -> int) @ local
     Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), within Stag.Type_expr.Tuple > element 0
-    Malformed syntax: expected a type without [global_]: [global_] is only on a record field or a constructor's argument, got Stag.Type_expr.Global (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), within Stag.Type_expr.Arrow argument 0
+    Malformed syntax: expected a type without a modality: a modality is only on a type argument, a record field or a constructor's argument, as in [ptr[t @@ external]], got Stag.Type_expr.Modality (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Global, Nil))))), within Stag.Type_expr.Arrow argument 0
     Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil)))))
     Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), within Stag.Type_expr.Arrow argument 0 > Stag.Type_expr.Moded argument 0
-    Malformed syntax: expected a type without [global_]: [global_] is only on a record field or a constructor's argument, got Stag.Type_expr.Global (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil)))
+    Malformed syntax: expected a type without a modality: a modality is only on a type argument, a record field or a constructor's argument, as in [ptr[t @@ external]], got Stag.Type_expr.Modality (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Global, Nil)))))
     |}];
   program (var { ty = Some (moded int); mode = None });
   program (var { ty = Some (moded int); mode = Some local });
@@ -1431,16 +1433,16 @@ let%expect_test "modes and [global_] only where the parser puts them" =
   program [ at (Syntax.Toplevel.Exception (at "E", [ global int ])) ];
   [%expect
     {|
-    type t = {x : global_ int @ local -> int}
+    type t = {x : (int @ local -> int) @@ global}
 
-    Malformed syntax: expected a type without [global_]: [global_] is only on a record field or a constructor's argument, got Stag.Type_expr.Global (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Record > element 0 > component 1 > Stag.Type_expr.Global
+    Malformed syntax: expected a type without a modality: a modality is only on a type argument, a record field or a constructor's argument, as in [ptr[t @@ external]], got Stag.Type_expr.Modality (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Global, Nil))))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Record > element 0 > component 1 > Stag.Type_expr.Modality argument 0
     Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Record > element 0 > component 1
-    type t = A of global_ int * int
+    type t = A of int @@ global * int
 
     Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Variant > element 0 > component 1 > element 0
-    Malformed syntax: expected a type without [global_]: [global_] is only on a record field or a constructor's argument, got Stag.Type_expr.Global (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Alias
+    Malformed syntax: expected a type without a modality: a modality is only on a type argument, a record field or a constructor's argument, as in [ptr[t @@ external]], got Stag.Type_expr.Modality (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Global, Nil))))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Alias
     Malformed syntax: expected a type without a mode: a mode is only on a function type's argument or result, got Stag.Type_expr.Moded (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Alias
-    Malformed syntax: expected a type without [global_]: [global_] is only on a record field or a constructor's argument, got Stag.Type_expr.Global (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))), within element 0 > Stag.Toplevel.Exception argument 1 > element 0
+    Malformed syntax: expected a type without a modality: a modality is only on a type argument, a record field or a constructor's argument, as in [ptr[t @@ external]], got Stag.Type_expr.Modality (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Global, Nil))))), within element 0 > Stag.Toplevel.Exception argument 1 > element 0
     |}];
   let m = at (Syntax.Mode_expr.Var "m") in
   let constrained ?(lower = m) ?(upper = local) ty =
@@ -1694,8 +1696,8 @@ let%expect_test "mode syntax round trips through values" =
     eval_values
       {|
 let decls = .< struct
-  type r = { x : global_ int; y : int }
-  type t = A of global_ int * int
+  type r = { x : int @@ global; y : int }
+  type t = A of int @@ global * int
   let f (x @ local) (y : int @ 'm) : int @ global portable = exclave_ stack_ (x, y)
   let g (h : int @ local -> int @ 'm) = h 1 [@nontail]
   let annotated = (f : int @ local -> int -> int * int)
@@ -1714,10 +1716,12 @@ end >.
     {|
     ((Type
       ((name r) (params ())
-       (kind (Record ((x (Global (Con int ()))) (y (Con int ())))))))
+       (kind
+        (Record ((x (Modality (Con int ()) (Atoms (Global)))) (y (Con int ())))))))
      (Type
       ((name t) (params ())
-       (kind (Variant ((A ((Global (Con int ())) (Con int ()))))))))
+       (kind
+        (Variant ((A ((Modality (Con int ()) (Atoms (Global))) (Con int ()))))))))
      (Let f ((x ((mode (Atoms (Local))))) (y ((ty (Con int ())) (mode (Var m)))))
       ((ty (Con int ())) (mode (Atoms (Global Portable))))
       (Exclave (Stack (Tuple ((Var x ()) (Var y ()))))))
@@ -1746,8 +1750,8 @@ end >.
           ((lower (Var n)) (upper (Atoms (Nonportable)))))))
        (mode (Var n)))
       (Var x ())))
-    type r = {x : global_ int; y : int}
-    type t = A of global_ int * int
+    type r = {x : int @@ global; y : int}
+    type t = A of int @@ global * int
 
     let f (x @ local) (y : int @ 'm) : int @ global portable =
       exclave_ stack_ (x, y)

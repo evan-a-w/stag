@@ -49,7 +49,6 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
       | Moded (t, m) -> Moded (type_expr t, m)
       | Modality (t, m) -> Modality (type_expr t, m)
       | Constrained (t, cs) -> Constrained (type_expr t, cs)
-      | Global t -> Global (type_expr t)
       | Splice e -> Splice (expr String.Set.empty e)
     in
     { t with txt }
@@ -60,6 +59,7 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
   and arg : Type_expr.arg -> Type_expr.arg = function
     | Ty t -> Ty (type_expr t)
     | Row r -> Row (row r)
+    | Mode _ as arg -> arg
   and binding (n, a) = n, Annot.map a ~f:type_expr
   and pattern (p : Pattern.t) : Pattern.t =
     match List_literal.map_pattern_items p ~f:pattern with

@@ -29,6 +29,10 @@ val borrow : t
     seen from the enclosing one. *)
 val release : t
 
+(** On [axis], the right adjoint of [x |-> meet x point]: [x <= right y] iff
+    [meet x point <= y]. *)
+val meet_with : Axis.Any.t -> int -> t
+
 val src : t -> Axis.Any.t
 val dst : t -> Axis.Any.t
 val is_identity : t -> bool

@@ -1200,19 +1200,18 @@ module Printer = struct
           | Some side, _ -> side))
   ;;
 
-  (* What a pointer's cell may hold, unless [gc]. *)
+  (* A mode argument, unless the default ([ptr[t]]'s [gc]). *)
   let held_mode t (held : Mode_arg.t) =
     let atom provenance =
-      if Mode.Provenance.equal provenance Gc
-      then None
-      else
-        Some
-          (Sexp.to_string (Mode.Provenance.sexp_of_t provenance)
-           |> String.lowercase)
+      Some
+        (Sexp.to_string (Mode.Provenance.sexp_of_t provenance)
+         |> String.lowercase)
     in
     match held, Mode_arg.known held with
-    | _, Some provenance -> atom provenance
-    | Fixed provenance, None -> atom provenance
+    | _, Some const | Fixed const, None ->
+      (match const_atoms const with
+       | [] -> None
+       | atoms -> Some (String.concat ~sep:" " atoms))
     | Var var, None ->
       (match t.modes, t.counting with
        | None, _ ->
@@ -1503,6 +1502,10 @@ module Printer = struct
     eliding t ~render:(fun t ->
       Hashtbl.clear t.introduced;
       ty_to_string t ~prec:(if atomic then 2 else 0) ty)
+  ;;
+
+  let mode_arg t mode =
+    eliding t ~render:(fun t -> Option.value (held_mode t mode) ~default:"gc")
   ;;
 
   let context t row =

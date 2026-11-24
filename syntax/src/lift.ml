@@ -12,7 +12,6 @@ let indirect_constructors =
     ; "Type_expr.Splice", 1
     ; "Type_expr.Moded", 2
     ; "Type_expr.Constrained", 2
-    ; "Type_expr.Global", 1
     ; "Type_expr.Modality", 2
     ; "Type_expr.Row.Extend", 3
     ; "Pattern.Deref", 1
@@ -112,6 +111,7 @@ module Make (B : Builder) = struct
     match txt with
     | Ty var -> con "Stag.Type_decl.Param.Ty" [ B.string var ]
     | Row var -> con "Stag.Type_decl.Param.Row" [ B.string var ]
+    | Mode var -> con "Stag.Type_decl.Param.Mode" [ B.string var ]
   ;;
 
   let rec pattern ({ txt; loc = _ } : Pattern.t) =
@@ -169,7 +169,6 @@ module Make (B : Builder) = struct
       | Modality (t, m) -> con "Modality" [ type_expr t; mode_expr m ]
       | Constrained (t, cs) ->
         con "Constrained" [ type_expr t; list mode_constraint cs ]
-      | Global t -> con "Global" [ type_expr t ]
       | Splice e ->
         (match A.antiquote Type_expr e with
          | Some lifted -> lifted
@@ -186,6 +185,7 @@ module Make (B : Builder) = struct
     and type_arg : Type_expr.arg -> B.t = function
       | Ty ty -> con "Stag.Type_expr.Arg.Ty" [ type_expr ty ]
       | Row r -> con "Stag.Type_expr.Arg.Row" [ row r ]
+      | Mode m -> con "Stag.Type_expr.Arg.Mode" [ mode_expr m ]
 
     and type_decl ({ name = decl_name; params; kind } : Type_decl.t) =
       B.record
