@@ -159,7 +159,8 @@ let bad = eval (`Add (Ptr.make (`Num 1, `Num 2)))
                 ((TVariant
                   (RExtend Num Present (TCon int ()) (RVar (Unbound 81 1))))
                  (TVariant
-                  (RExtend Num Present (TCon int ()) (RVar (Unbound 83 1)))))))))))))
+                  (RExtend Num Present (TCon int ()) (RVar (Unbound 83 1)))))))))
+            (AMode (Var 148))))))
         (RVar (Unbound 88 1)))
        (Missing_label Add)))
      @ after_eval.stag:2:15-49)
@@ -681,7 +682,7 @@ type l['a] = [`Nil | `Cons of 'a * ptr[l['a]]]
               (RExtend Cons Present
                (TTuple
                 ((TVar (Generic 1))
-                 (TCon ptr ((ATy (TVar (Link (Cycle_ref 0))))))))
+                 (TCon ptr ((ATy (TVar (Link (Cycle_ref 0)))) (AMode Gc)))))
                REmpty)))))))))))
     |}]
 ;;
@@ -967,7 +968,8 @@ let print_parts ty =
     | TCon (_, args) ->
       List.iter args ~f:(function
         | ATy ty -> go_ty ty
-        | ARow row -> go_row row)
+        | ARow row -> go_row row
+        | AMode _ -> ())
     | TArrow (ty1, ty2, _) ->
       go_ty ty1;
       go_ty ty2

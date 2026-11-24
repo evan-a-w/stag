@@ -405,6 +405,11 @@ let captures (s : string) = fun (v : int) -> s
 let closed u = fun (v : int) -> 1
 let ints (q : ptr[int]) = q.* <- 1
 let strings (q : ptr[string]) (s : string) = q.* <- s
+let get_any (p : ptr['a @@ 'm]) = p.*
+let id_cell (p : ptr['a @@ 'm]) = p
+let static_cell : ptr[string @@ static] = Ptr.make "a"
+let ext_cell : ptr[string @@ external] = Ptr.make "a"
+let swap_any p q = let v = p.* in p.* <- q.*; q.* <- v
 |};
   [%expect
     {|
@@ -412,12 +417,17 @@ let strings (q : ptr[string]) (s : string) = q.* <- s
     let p_copy : ptr[string] = p
     let store_copy : string @ 'm0 -> unit with 'm0 <= gc = store
     let keep_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and 'm0 <= static = keep
-    let in_ptr_copy : 'a -> ptr[string] @ nonportable external = in_ptr
+    let in_ptr_copy : 'a -> ptr[string @@ external] @ nonportable = in_ptr
     let k_copy : int @ 'm0 -> (int -> int) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1 = k
     let captures_copy : string @ 'm0 -> (int -> string @ 'm2) @ 'm1 with 'm0 <= 'm2 and 'm0 <= 'm1 and gc <= 'm1 = captures
     let closed_copy : 'a @ 'm0 -> (int -> int) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1 = closed
     let ints_copy : ptr[int] -> unit = ints
     let strings_copy : ptr[string] @ 'm0 -> (string @ 'm2 -> unit) @ 'm1 with 'm0 <= 'm1 and 'm2 <= gc and gc <= 'm1 = strings
+    let get_any_copy : ptr['a @@ 'm0] -> 'a @ 'm1 with 'm0 <= 'm1 and nonportable <= 'm1 = get_any
+    let id_cell_copy : ptr['a @@ 'm1] @ 'm0 -> ptr['a @@ 'm1] @ 'm2 with 'm0 <= 'm2 = id_cell
+    let static_cell_copy : ptr[string @@ static] = static_cell
+    let ext_cell_copy : ptr[string @@ external] = ext_cell
+    let swap_any_copy : ptr['a @@ 'm1] @ 'm0 -> (ptr['a @@ 'm1] @ 'm3 -> unit) @ 'm2 with 'm0 <= 'm1 and 'm0 <= 'm2 and 'm3 <= 'm1 and gc <= 'm2 = swap_any
     |}]
 ;;
 

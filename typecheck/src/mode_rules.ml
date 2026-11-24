@@ -103,6 +103,7 @@ let locality_at_most ctx mode ~ty locality ~loc ~why =
 ;;
 
 let arrow_mode = Ctx.fresh
+let fresh_held ctx = Mode_arg.Var (Ctx.fresh ctx)
 
 let annotate ?(exact = false) ctx mode (annot : Syntax.Mode_expr.t option) ~var =
   Option.iter annot ~f:(fun { txt; loc } ->
@@ -192,24 +193,25 @@ let part ?ty ctx expected (modality : Modality.t) f =
     part)
 ;;
 
-(* What may be stored into the cell of a [ptr[t @@ external]] is [external],
-   whatever the provenance of the pointer read through: as with deep provenance,
-   a pointer is then taken to be at least what its cell holds. *)
-let holds_external ctx block ~loc =
-  Ctx.add
-    ctx
-    ~loc
-    (Mode.Var.at_least
-       block
-       Provenance
-       External
-       (reason ~loc "its cell may be given external values"))
+(* What is read from a pointer's cell is of the provenance its type says the
+   cell may hold. *)
+let reads_held ctx mode (modality : Modality.t) ~loc =
+  List.iter modality.held ~f:(fun (held : Mode_arg.t) ->
+    let reason =
+      reason ~loc "it is read from a pointer's cell, which may hold it"
+    in
+    Ctx.add
+      ctx
+      ~loc
+      (match held with
+       | Fixed provenance -> Mode.Var.at_least mode Provenance provenance reason
+       | Var held -> Mode.Var.submode_on held mode Provenance reason))
 ;;
 
 let project ctx expected ~loc ~why f =
   let block = Expected.fresh ctx in
   let result, (modality : Modality.t) = f block in
-  if modality.external_ then holds_external ctx block.mode ~loc;
+  reads_held ctx expected.Expected.mode modality ~loc;
   if modality.global
   then held ctx expected block.mode ~loc ~why
   else joins ctx expected block.mode ~loc ~why;
@@ -307,19 +309,19 @@ module Binding = struct
              Mode.Var.at_most global Locality Global reason));
         global)
     in
-    if not modality.external_
+    if List.is_empty modality.held
     then Binding.of_mode mode
     else (
-      let held = Ctx.fresh ctx in
+      let read = Ctx.fresh ctx in
       Ctx.add
         ctx
         ~loc
         (Mode.Var.submode
            mode
-           held
-           (reason ~loc "it is held by a [ptr[_ @@ external]]"));
-      holds_external ctx held ~loc;
-      Binding.of_mode held)
+           read
+           (reason ~loc "it is read from a pointer's cell"));
+      reads_held ctx read modality ~loc;
+      Binding.of_mode read)
   ;;
 
   let embedded ctx ~name ~loc =
@@ -682,7 +684,7 @@ let assign ctx expected ~held ~crossed ~ty ~name ~loc f =
 ;;
 
 let store ctx expected ~loc ~target ~value =
-  let ((target : Typed.Expr.t), (pointee : Type.Pointee.t)), (_ : Mode.Var.t) =
+  let ((target : Typed.Expr.t), (held : Mode_arg.t)), (_ : Mode.Var.t) =
     evaluate ctx expected ~loc ~why:"it is stored to" target
   in
   let sub = Expected.fresh ctx in
@@ -698,21 +700,21 @@ let store ctx expected ~loc ~target ~value =
        Global
        ~loc:value.loc
        ~why:"it is stored through a pointer, which may outlive any region");
-  (match pointee with
-   | External -> ()
-   | Gc ->
-     Ctx.add
-       ctx
-       ~loc
-       (Mode.Var.at_most
-          ~crossing:(ctx.crossing target.ty)
-          sub.mode
-          Provenance
-          Gc
-          (reason
-             ~loc:value.loc
-             "it is stored through a [ptr[t]], which holds only gc values (a \
-              [ptr[t @@ external]] may hold external ones)")));
+  if not (ctx.crossing target.ty).provenance
+  then (
+    let reason =
+      reason
+        ~loc:value.loc
+        "it is stored into a pointer's cell, which holds only values of the \
+         provenance after its [@@] ([ptr[t]]: gc)"
+    in
+    Ctx.add
+      ctx
+      ~loc
+      (match held with
+       | Fixed provenance ->
+         Mode.Var.at_most sub.mode Provenance provenance reason
+       | Var held -> Mode.Var.submode_on sub.mode held Provenance reason));
   target, value
 ;;
 
@@ -924,17 +926,18 @@ end
 let ptr_make ctx =
   let arg = Ctx.fresh ctx in
   let res = Ctx.fresh ctx in
+  let held = Ctx.fresh ctx in
   let reason = Mode.Reason.create "Ptr.make holds it" in
   let made = Mode.Reason.create "Ptr.make allocates it at run time" in
   Result.all_unit
     [ Mode.Var.at_most arg Locality Global reason
-    ; Mode.Var.submode_on arg res Provenance reason
+    ; Mode.Var.submode_on arg held Provenance reason
     ; Mode.Var.at_least res Stage Nonportable made
     ; Mode.Var.at_least res Provenance Gc made
     ]
   |> Result.iter_error ~f:(fun error ->
     raise_s [%message "Ptr.make" (error : Mode.Error.t)]);
-  arg, res
+  arg, res, Mode_arg.Var held
 ;;
 
 let assume_global ctx =
@@ -958,4 +961,27 @@ let assume_global ctx =
   |> Result.iter_error ~f:(fun error ->
     raise_s [%message "Unsafe.assume_global" (error : Mode.Error.t)]);
   arg, res
+;;
+
+let default_held var ~name =
+  if not (Mode.Var.is_generic var)
+  then (
+    let lower = (Mode.Var.lower var).provenance in
+    let held =
+      if Mode.Provenance.le Gc (Mode.Var.upper var).provenance
+      then Mode.Provenance.join lower Gc
+      else lower
+    in
+    let reason =
+      Mode.Reason.create
+        (sprintf
+           "%s is not generalized, so what its cells hold is fixed by its \
+            definition (gc by default)"
+           name)
+    in
+    Result.all_unit
+      [ Mode.Var.at_least var Provenance held reason
+      ; Mode.Var.at_most var Provenance held reason
+      ]
+    |> Mode.Error.ok_exn)
 ;;

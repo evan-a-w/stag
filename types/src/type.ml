@@ -53,6 +53,7 @@ and presence_bound =
 and arg =
   | ATy of ty
   | ARow of row
+  | AMode of Mode_arg.t
 
 and bound =
   { row : row
@@ -166,37 +167,18 @@ let is_error ty =
   | _ -> false
 ;;
 
-module Pointee = struct
-  type t =
-    | Gc
-    | External
-  [@@deriving sexp_of, equal]
+let ptr_name = "ptr"
 
-  let type_name = function
-    | Gc -> "ptr"
-    | External -> "ptr@@external"
-  ;;
+let ptr ?(held = Mode_arg.gc) pointee =
+  TCon (ptr_name, [ ATy pointee; AMode held ])
+;;
 
-  let of_type_name = function
-    | "ptr" -> Some Gc
-    | "ptr@@external" -> Some External
-    | _ -> None
-  ;;
-
-  let provenance : t -> Mode.Provenance.t = function
-    | Gc -> Gc
-    | External -> External
-  ;;
-
-  let ptr t pointee = TCon (type_name t, [ ATy pointee ])
-
-  let of_ptr ty =
-    match canonical_ty ty with
-    | TCon (name, [ ATy pointee ]) ->
-      Option.map (of_type_name name) ~f:(fun t -> t, pointee)
-    | _ -> None
-  ;;
-end
+let of_ptr ty =
+  match canonical_ty ty with
+  | TCon (name, [ ATy pointee; AMode held ]) when String.equal name ptr_name ->
+    Some (pointee, held)
+  | _ -> None
+;;
 
 let rec tail_var row =
   match row with
@@ -298,7 +280,8 @@ and same_arg pairs arg1 arg2 =
   match arg1, arg2 with
   | ATy ty1, ATy ty2 -> same_ty' pairs ty1 ty2
   | ARow row1, ARow row2 -> same_row' pairs row1 row2
-  | (ATy _ | ARow _), _ -> false
+  | AMode mode1, AMode mode2 -> Mode_arg.same mode1 mode2
+  | (ATy _ | ARow _ | AMode _), _ -> false
 ;;
 
 let comparison () = Link_pairs.create (), Link_pairs.create ()
@@ -385,7 +368,11 @@ module Visited = struct
   ;;
 end
 
-let iterate (local_ (f : _ Iter.t)) (local_ (start : Iter_start.t)) =
+let iterate
+  (local_ (f : _ Iter.t))
+  ~(local_ held : Mode.Var.t -> _)
+  (local_ (start : Iter_start.t))
+  =
   let visited = stack_ { Visited.unremembered = 64; table = Null } in
   let iter_modes (modes : Arrow_modes.t) =
     Arrow_modes.iter_result modes ~f:(fun var -> f.mode var) [@nontail]
@@ -425,6 +412,10 @@ let iterate (local_ (f : _ Iter.t)) (local_ (start : Iter_start.t)) =
       (match iter_row ~guarded row with
        | Ok () -> iter_args ~guarded args
        | Error _ as error -> error)
+    | AMode mode :: args ->
+      (match Mode_arg.iter_result mode ~f:(fun var -> held var) with
+       | Ok () -> iter_args ~guarded args
+       | Error _ as error -> error)
   and iter_tys ~guarded tys =
     match tys with
     | [] -> Ok ()
@@ -460,8 +451,29 @@ let iterate (local_ (f : _ Iter.t)) (local_ (start : Iter_start.t)) =
   | Row row -> iter_row ~guarded:false row [@nontail]
 ;;
 
-let iter_ty f ty = iterate f (stack_ Iter_start.Ty ty) [@nontail]
-let iter_row f row = iterate f (stack_ Iter_start.Row row) [@nontail]
+let iter_ty f ty =
+  iterate f ~held:(fun var -> f.mode var) (stack_ Iter_start.Ty ty) [@nontail]
+;;
+
+let iter_row f row =
+  iterate f ~held:(fun var -> f.mode var) (stack_ Iter_start.Row row) [@nontail]
+;;
+
+let iter_held ty ~f =
+  let ok _ = Ok () in
+  match
+    iterate
+      { ty = (fun ~guarded:_ -> ok)
+      ; row = (fun ~guarded:_ -> ok)
+      ; presence = (fun ~guarded:_ -> ok)
+      ; mode = ok
+      }
+      ~held:(fun var -> Ok (f var))
+      (stack_ Iter_start.Ty ty)
+  with
+  | Ok () -> ()
+  | Error (_ : Nothing.t) -> .
+;;
 
 module Mapper = struct
   type t =
@@ -562,7 +574,13 @@ module Changes = struct
     | TCon (_, args) ->
       List.fold args ~init:none ~f:(fun acc -> function
         | ATy ty' -> both acc (ty t ty')
-        | ARow row' -> both acc (row t row'))
+        | ARow row' -> both acc (row t row')
+        | AMode mode ->
+          both
+            acc
+            ( Mode_arg.exists mode ~f:(fun var ->
+                not (phys_equal (t.mode var) var))
+            , Int.max_value ))
     | TArrow (ty1, ty2, modes) ->
       let changes =
         Arrow_modes.exists modes ~f:(fun var ->
@@ -694,6 +712,9 @@ let mapper (f : Mapper.t) =
     | ARow row ->
       let row' = map_row row in
       if phys_equal row row' then arg else ARow row'
+    | AMode mode ->
+      let mode' = Mode_arg.map mode ~f:f.mode in
+      if phys_equal mode mode' then arg else AMode mode'
   and map_row row =
     match row with
     | REmpty -> row
@@ -899,6 +920,7 @@ module Sexper = struct
     match arg' with
     | ATy ty' -> List [ Atom "ATy"; ty t ty' ]
     | ARow row' -> List [ Atom "ARow"; row t row' ]
+    | AMode mode -> List [ Atom "AMode"; Mode_arg.sexp_of_t mode ]
   ;;
 end
 
@@ -1178,6 +1200,33 @@ module Printer = struct
           | Some side, _ -> side))
   ;;
 
+  (* What a pointer's cell may hold, unless [gc]. *)
+  let held_mode t (held : Mode_arg.t) =
+    let atom provenance =
+      if Mode.Provenance.equal provenance Gc
+      then None
+      else
+        Some
+          (Sexp.to_string (Mode.Provenance.sexp_of_t provenance)
+           |> String.lowercase)
+    in
+    match held, Mode_arg.known held with
+    | _, Some provenance -> atom provenance
+    | Fixed provenance, None -> atom provenance
+    | Var var, None ->
+      (match t.modes, t.counting with
+       | None, _ ->
+         if Mode.Provenance.equal (Mode.Var.lower var).provenance External
+         then atom External
+         else if Mode.Provenance.equal (Mode.Var.upper var).provenance Static
+         then atom Static
+         else None
+       | Some modes, Some _ ->
+         Mode_printing.count modes var ~side:`Held;
+         Some "_"
+       | Some modes, None -> Some (Mode_printing.held modes var))
+  ;;
+
   let side_locality : Arrow_modes.Side.t -> Mode.Locality.t = function
     | Fixed const -> const.locality
     | Var var -> (Mode.Var.lower var).locality
@@ -1214,19 +1263,24 @@ module Printer = struct
     let parens_if cond s = if cond then "(" ^ s ^ ")" else s in
     match canonical_ty ty with
     | TCon (name, []) -> t.type_name name
-    | TCon (name, [ ATy pointee ])
-      when String.equal name (Pointee.type_name External) ->
-      sprintf
-        "%s[%s @@ external]"
-        (t.type_name (Pointee.type_name Gc))
-        (ty_to_string t ~prec:1 pointee)
+    | TCon (name, [ ATy pointee; AMode held ]) ->
+      (match held_mode t held with
+       | None ->
+         sprintf "%s[%s]" (t.type_name name) (ty_to_string t ~prec:0 pointee)
+       | Some mode ->
+         sprintf
+           "%s[%s @@ %s]"
+           (t.type_name name)
+           (ty_to_string t ~prec:1 pointee)
+           mode)
     | TCon (name, args) ->
       sprintf
         "%s[%s]"
         (t.type_name name)
         (List.map args ~f:(function
            | ATy ty -> ty_to_string t ~prec:0 ty
-           | ARow row -> record_to_string t row)
+           | ARow row -> record_to_string t row
+           | AMode held -> Option.value (held_mode t held) ~default:"gc")
          |> String.concat ~sep:", ")
     | TArrow (ty1, ty2, modes) ->
       let ty1 =
@@ -1540,5 +1594,6 @@ module Snapshot = struct
   and arg t = function
     | ATy a -> ATy (ty t a)
     | ARow r -> ARow (row t r)
+    | AMode _ as mode -> mode
   ;;
 end

@@ -274,8 +274,8 @@ let clash ty1 ty2 =
       || List.exists2_exn args1 args2 ~f:(fun arg1 arg2 ->
         match arg1, arg2 with
         | ATy ty1, ATy ty2 -> clash ~depth:(depth - 1) ty1 ty2
-        | ARow _, ARow _ -> false
-        | ATy _, ARow _ | ARow _, ATy _ -> true)
+        | ARow _, ARow _ | AMode _, AMode _ -> false
+        | (ATy _ | ARow _ | AMode _), _ -> true)
     | TArrow (arg1, res1, _), TArrow (arg2, res2, _) ->
       clash ~depth:(depth - 1) arg1 arg2 || clash ~depth:(depth - 1) res1 res2
     | TTuple tys1, TTuple tys2 -> all tys1 tys2
@@ -335,7 +335,11 @@ and unify_structure state ~ty1 ~ty2 =
         match arg1, arg2 with
         | ATy ty1, ATy ty2 -> unify_ty' state ~ty1 ~ty2
         | ARow row1, ARow row2 -> unify_row' state ~row1 ~row2
-        | ATy _, ARow _ | ARow _, ATy _ ->
+        | AMode mode1, AMode mode2 ->
+          Mode_arg.equate (Fresh.modes state.fresh) mode1 mode2
+          |> Result.map_error ~f:(fun error ->
+            Unification_error.Type_mismatch (ty1, ty2, Modes error))
+        | (ATy _ | ARow _ | AMode _), _ ->
           Error (Type_mismatch (ty1, ty2, Mismatch_arg_kind (arg1, arg2)))))
   | TArrow (arg1, res1, modes1), TArrow (arg2, res2, modes2) ->
     let%bind.Result () = unify_ty' state ~ty1:arg1 ~ty2:arg2 in

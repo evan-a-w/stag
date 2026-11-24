@@ -21,6 +21,7 @@ type t =
   ; counts : int Int.Table.t
   ; results : Int.Hash_set.t
   ; args : Int.Hash_set.t
+  ; held : Int.Hash_set.t
   ; rep : int Int.Table.t
   ; operand : Operand.t Int.Table.t
   ; elided : Int.Hash_set.t
@@ -34,6 +35,7 @@ let create () =
   ; counts = Int.Table.create ()
   ; results = Int.Hash_set.create ()
   ; args = Int.Hash_set.create ()
+  ; held = Int.Hash_set.create ()
   ; rep = Int.Table.create ()
   ; operand = Int.Table.create ()
   ; elided = Int.Hash_set.create ()
@@ -42,22 +44,24 @@ let create () =
   }
 ;;
 
-let count t var ~(side : [ `Arg | `Res ]) =
+let count t var ~(side : [ `Arg | `Res | `Held ]) =
   let id = Mode.Var.id var in
   Hashtbl.set t.vars ~key:id ~data:var;
   Hash_set.add
     (match side with
      | `Arg -> t.args
-     | `Res -> t.results)
+     | `Res -> t.results
+     | `Held -> t.held)
     id;
   if not (Hashtbl.mem t.order id)
   then Hashtbl.set t.order ~key:id ~data:(Hashtbl.length t.order);
   Hashtbl.incr t.counts id
 ;;
 
-let settle t =
-  (* The relations between the counted variables, through any others: those of
-     the other members of a recursive group, or a weak variable's neighbours. *)
+(* Whether each counted variable is below each other on the axis, through any
+   others: those of the other members of a recursive group, or a weak variable's
+   neighbours. *)
+let reach t axis =
   let edges = Int.Table.create () in
   let visited = Int.Hash_set.create () in
   let queue = Queue.create () in
@@ -68,7 +72,7 @@ let settle t =
       Hash_set.add visited id;
       Queue.enqueue queue node)
   in
-  Hashtbl.iter t.vars ~f:(fun var -> visit (Mode.Var.node var Stage));
+  Hashtbl.iter t.vars ~f:(fun var -> visit (Mode.Var.node var axis));
   while not (Queue.is_empty queue) do
     let node = Queue.dequeue_exn queue in
     let id = Mode.Var.Node.var_id node in
@@ -90,7 +94,18 @@ let settle t =
     in
     go start;
     Hashtbl.set reach ~key:start ~data:seen);
-  let reaches a b = Hash_set.mem (Hashtbl.find_exn reach a) b in
+  fun a b -> Hash_set.mem (Hashtbl.find_exn reach a) b
+;;
+
+let settle t =
+  (* A relation with a cell's variable is on provenance, the only axis a cell's
+     variable means; others are on stage. *)
+  let on_stage = reach t Stage in
+  let on_provenance = reach t Provenance in
+  let is_cell = Hash_set.mem t.held in
+  let reaches a b =
+    if is_cell a || is_cell b then on_provenance a b else on_stage a b
+  in
   let by_position =
     Hashtbl.keys t.vars
     |> List.sort ~compare:(fun a b ->
@@ -100,7 +115,9 @@ let settle t =
   List.iter by_position ~f:(fun id ->
     match
       List.find by_position ~f:(fun other ->
-        reaches id other && reaches other id)
+        Bool.equal (is_cell id) (is_cell other)
+        && reaches id other
+        && reaches other id)
     with
     | Some rep -> Hashtbl.set t.rep ~key:id ~data:rep
     | None -> Hashtbl.set t.rep ~key:id ~data:id);
@@ -117,9 +134,15 @@ let settle t =
         (Mode.Var.lower var).stage, (Mode.Var.upper var).stage))
     |> Option.value ~default:(Stage.min, Stage.max)
   in
+  let related_to_cell rep =
+    List.exists reps ~f:(fun cell ->
+      is_cell cell && cell <> rep && (reaches cell rep || reaches rep cell))
+  in
   let operand rep : Operand.t =
     let lower, upper = bounds rep in
-    if Stage.equal lower upper then Const lower else Var rep
+    if Stage.equal lower upper && not (is_cell rep || related_to_cell rep)
+    then Const lower
+    else Var rep
   in
   Hashtbl.clear t.operand;
   List.iter reps ~f:(fun rep ->
@@ -136,14 +159,22 @@ let settle t =
   in
   (* Strictly above, between classes. *)
   let above a b = (not (a = b)) && reaches a b in
+  let stage_above a b =
+    (not (a = b)) && (not (is_cell a || is_cell b)) && on_stage a b
+  in
+  (* An edge is implied by a path through [c] read back on its axis. *)
   let edges =
     List.concat_map reps ~f:(fun a ->
       List.filter_map reps ~f:(fun b ->
+        let through c =
+          Bool.equal (is_cell c) (is_cell a || is_cell b)
+          && above a c
+          && above c b
+        in
         Option.some_if
           (above a b
-           && not
-                (List.exists reps ~f:(fun c ->
-                   c <> a && c <> b && above a c && above c b)))
+           && not (List.exists reps ~f:(fun c -> c <> a && c <> b && through c))
+          )
           (a, b)))
   in
   let constraints =
@@ -154,11 +185,14 @@ let settle t =
       | Const _ | Provenance _ ->
         List.filter_map edges ~f:(fun (a, b) ->
           Option.some_if (a = rep) (op, Hashtbl.find_exn t.operand b))
+      | Var _ when is_cell rep ->
+        List.filter_map edges ~f:(fun (a, b) ->
+          Option.some_if (a = rep) (op, Hashtbl.find_exn t.operand b))
       | Var _ ->
         let implied_lower =
           Stage.le lower (read_back_lower rep)
           || List.exists reps ~f:(fun other ->
-            above other rep
+            stage_above other rep
             && Stage.le
                  lower
                  (Stage.join (fst (bounds other)) (read_back_lower other)))
@@ -166,7 +200,7 @@ let settle t =
         let implied_upper =
           Stage.equal upper Stage.max
           || List.exists reps ~f:(fun other ->
-            above rep other && Stage.le (snd (bounds other)) upper)
+            stage_above rep other && Stage.le (snd (bounds other)) upper)
         in
         (if implied_lower then [] else [ Operand.Const lower, op ])
         @ List.filter_map edges ~f:(fun (a, b) ->
@@ -177,7 +211,11 @@ let settle t =
       | Const _, Const _ -> false
       | Const lo, Var rep -> not (Stage.le lo (read_back_lower rep))
       | Var _, Const hi -> not (Stage.equal hi Stage.max)
-      | Var _, Var _ -> true
+      | Var lo, Var hi ->
+        (* Below what is above every stage is implied, on stage. *)
+        is_cell lo
+        || is_cell hi
+        || not (Stage.equal (fst (bounds hi)) Stage.max)
       | Provenance _, _ | _, Provenance _ -> true)
   in
   let provenance rep : (Operand.t * Operand.t) list =
@@ -218,7 +256,8 @@ let settle t =
   List.iter reps ~f:(fun rep ->
     match members rep, Hashtbl.find_exn t.operand rep with
     | [ id ], Var _ ->
-      if [%equal: int option] (Hashtbl.find t.counts id) (Some 1)
+      if (not (Hash_set.mem t.held id))
+         && [%equal: int option] (Hashtbl.find t.counts id) (Some 1)
          && (not (Hash_set.mem mentioned rep))
          && Hashtbl.find t.vars id |> Option.for_all ~f:Mode.Var.is_generic
       then Hash_set.add t.elided rep
@@ -244,6 +283,11 @@ let side t var =
       Hashtbl.find t.operand rep |> Option.value ~default:(Operand.Var rep)
     in
     Some (" @ " ^ Operand.to_string ~name:(name t) operand))
+;;
+
+let held t var =
+  let id = Mode.Var.id var in
+  name t (Hashtbl.find t.rep id |> Option.value ~default:id)
 ;;
 
 let constraints t =

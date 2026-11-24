@@ -268,7 +268,8 @@ let keep_with_generalized fresh ~rank ~args ~kept bounds =
   let iter bound iter =
     List.fold_result (args bound) ~init:() ~f:(fun () -> function
       | Type.ATy ty -> Type.iter_ty iter ty
-      | ARow row -> Type.iter_row iter row)
+      | ARow row -> Type.iter_row iter row
+      | AMode _ -> Ok ())
   in
   let has_generalized ~guarded:_ (var : _ Type.Var.t) =
     match var.state with
@@ -665,7 +666,8 @@ let iter_used_vars
     | TCon (_, args) ->
       List.iter args ~f:(function
         | ATy ty -> iter_ty ty
-        | ARow row -> iter_row row)
+        | ARow row -> iter_row row
+        | AMode _ -> ())
     | TArrow (ty1, ty2, _) ->
       iter_ty ty1;
       iter_ty ty2

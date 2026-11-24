@@ -68,7 +68,8 @@ module Path = struct
       match argument1, argument2 with
       | ATy ty1, ATy ty2 -> Type.same_ty ty1 ty2
       | ARow row1, ARow row2 -> Type.same_row row1 row2
-      | ATy _, ARow _ | ARow _, ATy _ -> false)
+      | AMode mode1, AMode mode2 -> Stag_types.Mode_arg.same mode1 mode2
+      | (ATy _ | ARow _ | AMode _), _ -> false)
   ;;
 
   (* Re-entering the same declaration at the same instantiation, or a structural
@@ -321,7 +322,8 @@ and builtin ~name ~args : (Shape.t, Error.t) Result.t option =
 and subst_args context args =
   map_result args ~f:(function
     | ATy ty -> Ok (ATy (substitute_ty context ty))
-    | ARow row -> Ok (ARow (substitute_row context row)))
+    | ARow row -> Ok (ARow (substitute_row context row))
+    | AMode _ as mode -> Ok mode)
 
 and declared t context ~name ~args =
   match Resolver.find t.resolver name with
@@ -409,28 +411,34 @@ and bind_parameters context (declaration : Signature.Type_decl.t) ~name ~args =
       ~f:(fun bindings parameter argument ->
         let%bind.Result bindings in
         match parameter, argument with
-        | ATy ty, argument ->
+        | _, AMode _ | AMode _, _ ->
+          Ok bindings (* Modes don't change shapes. *)
+        | ATy ty, ATy argument ->
           (match Type.canonical_ty ty with
            | TVar { id; _ } ->
-             let binding =
-               match argument with
-               | ATy ty -> Binding.Ty ty
-               | ARow row -> Binding.Row { id = fresh_id context.ids; row }
-             in
-             Ok (Map.set bindings ~key:id ~data:binding)
+             Ok (Map.set bindings ~key:id ~data:(Binding.Ty argument))
+           | _ -> Ok bindings)
+        | ATy ty, ARow row ->
+          (match Type.canonical_ty ty with
+           | TVar { id; _ } ->
+             Ok
+               (Map.set
+                  bindings
+                  ~key:id
+                  ~data:(Binding.Row { id = fresh_id context.ids; row }))
            | _ -> Ok bindings (* Not a variable: the body already has it. *))
-        | ARow row, argument ->
+        | ARow row, ARow row' ->
           (match Type.canonical_row row with
            | RVar { id; _ } ->
-             (match argument with
-              | ARow row' ->
-                Ok
-                  (Map.set
-                     bindings
-                     ~key:id
-                     ~data:
-                       (Binding.Row { id = fresh_id context.ids; row = row' }))
-              | ATy _ -> Error (Error.Row_expected id))
+             Ok
+               (Map.set
+                  bindings
+                  ~key:id
+                  ~data:(Binding.Row { id = fresh_id context.ids; row = row' }))
+           | _ -> Ok bindings)
+        | ARow row, ATy _ ->
+          (match Type.canonical_row row with
+           | RVar { id; _ } -> Error (Error.Row_expected id)
            | _ -> Ok bindings))
 
 and charge context work =
@@ -457,8 +465,13 @@ and expand t context (ty : Type.ty) : (Shape.t, Error.t) Result.t =
      | None -> Error (Error.Unresolved_ty id))
   | TCon (name, args) ->
     if String.equal name t.ptr_name
-       || String.equal name (Type.Pointee.type_name External)
-    then Result.map (arity ~name ~args 1) ~f:(fun () -> Ptr)
+    then (
+      let args =
+        List.filter args ~f:(function
+          | AMode _ -> false
+          | ATy _ | ARow _ -> true)
+      in
+      Result.map (arity ~name ~args 1) ~f:(fun () -> Ptr))
     else (
       match builtin ~name ~args with
       | Some shape -> shape

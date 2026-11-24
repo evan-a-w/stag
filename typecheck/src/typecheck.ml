@@ -1168,14 +1168,14 @@ let rec pattern_type ?expected t (scope : Scope.t) ~(pattern : Source.Pattern.t)
     node (Var ident) ty, [ var ]
   | Lit lit -> node (Lit lit) (Syntax.Lit.ty lit), []
   | Deref inner ->
-    let kind, expected =
-      match Option.bind expected ~f:Type.Pointee.of_ptr with
-      | Some (kind, pointee) -> kind, Some pointee
-      | None -> Type.Pointee.Gc, None
+    let held, expected =
+      match Option.bind expected ~f:Type.of_ptr with
+      | Some (pointee, held) -> held, Some pointee
+      | None -> Mode_rules.fresh_held (Scope.modes scope), None
     in
     let inner, bindings = pattern_type t scope ~pattern:inner ?expected in
-    ( node (Deref inner) (Type.Pointee.ptr kind inner.ty)
-    , Pattern_var.under (Modality.of_pointee kind) bindings )
+    ( node (Deref inner) (Type.ptr ~held inner.ty)
+    , Pattern_var.under (Modality.of_cell held) bindings )
   | Tuple patterns ->
     let types = List.map patterns ~f:(fun _ -> Scope.fresh_ty t scope) in
     let patterns, bindings =
@@ -1731,6 +1731,11 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
          | Unchecked | Done _ ->
            raise_s
              [%message "finish_scc: member not checked" (member : Toplevel.t)]));
+  List.iter members ~f:(fun member ->
+    match member.state with
+    | In_progress { ty; _ } ->
+      Type.iter_held ty ~f:(Mode_rules.default_held ~name:member.ident.name)
+    | Unchecked | Done _ -> ());
   let members =
     List.map members ~f:(fun member ->
       match member.state with
@@ -1779,17 +1784,12 @@ let intrinsic_type t (scope : Scope.t) (intrinsic : Intrinsic.t) =
       ( ty
       , ty
       , { arg = Var arg; res = Var res; curry = Arrow_modes.default_curry } )
-  | (Ptr_make | Ptr_make_external) as intrinsic ->
+  | Ptr_make ->
     let pointee = Scope.fresh_ty t scope in
-    let arg, res = Mode_rules.ptr_make (Scope.modes scope) in
-    let kind : Type.Pointee.t =
-      match intrinsic with
-      | Ptr_make_external -> External
-      | _ -> Gc
-    in
+    let arg, res, held = Mode_rules.ptr_make (Scope.modes scope) in
     Type.TArrow
       ( pointee
-      , Type.Pointee.ptr kind pointee
+      , Type.ptr ~held pointee
       , { arg = Var arg; res = Var res; curry = Arrow_modes.default_curry } )
   | _ ->
     Intrinsic.ty
@@ -2399,11 +2399,9 @@ and expr_type
           check_expr t scope ~at ~expr:x ~ty:a)
     in
     (match f.desc with
-     | Var (Intrinsic (Ptr_make | Ptr_make_external)) ->
-       Mode_rules.Alloc.pointer at
+     | Var (Intrinsic Ptr_make) -> Mode_rules.Alloc.pointer at
      | Var (Bound (Toplevel ident) | Persistent (Toplevel ident))
-       when List.exists [ "Ptr.make"; "Ptr.make_external" ] ~f:(fun name ->
-              String.equal ident.name (Prelude_path.canonical name)) ->
+       when String.equal ident.name (Prelude_path.canonical "Ptr.make") ->
        Mode_rules.Alloc.pointer at
      | _ -> ());
     if !result_matches
@@ -2859,38 +2857,30 @@ and expr_type
                   node (Toplevel_splice { code; expansion }) inner))))
   | Deref pointer ->
     Mode_rules.runs modes at Nonportable ~loc ~why:"it reads through a pointer";
-    (* What a pointer points to is global, as it is stored global. Whether it is
-       a [ptr[_ @@ external]] is known from the pointer's type, else it is a
-       [ptr[_]]. *)
-    let pointee, pointer, kind =
+    (* What a pointer points to is global, as it is stored global. *)
+    let pointee, pointer, held =
       Mode_rules.project modes at ~loc ~why:"it is dereferenced" (fun at ->
+        let fresh_held = Mode_rules.fresh_held modes in
         let pointer =
           expr_type
             t
             scope
             ~at
             ~expr:pointer
-            ?expected:(Option.map expected ~f:(Type.Pointee.ptr Gc))
+            ?expected:(Option.map expected ~f:(Type.ptr ~held:fresh_held))
             ~hint:Hint
         in
-        let kind : Type.Pointee.t =
-          match Type.Pointee.of_ptr pointer.ty with
-          | Some (kind, _) -> kind
-          | None -> Gc
+        let held =
+          Option.value_map (Type.of_ptr pointer.ty) ~default:fresh_held ~f:snd
         in
         let pointee =
           match expected with
           | Some expected when Expectation.is_required hint -> expected
           | Some _ | None -> Scope.fresh_ty t scope
         in
-        (pointee, pointer, kind), Modality.of_pointee kind)
+        (pointee, pointer, held), Modality.of_cell held)
     in
-    if Scope.unifies
-         t
-         scope
-         ~ty1:pointer.ty
-         ~ty2:(Type.Pointee.ptr kind pointee)
-         ~loc
+    if Scope.unifies t scope ~ty1:pointer.ty ~ty2:(Type.ptr ~held pointee) ~loc
     then node (Deref pointer) pointee
     else node (Error [ pointer ]) Type.error
   | Store (target, value) ->
@@ -2907,15 +2897,12 @@ and expr_type
         (Typecheck_error.create ~loc Store_not_through_pointer)
     else (
       (* The cell stored into is that of the pointer dereferenced last. *)
-      let rec cell_pointee (expr : Typed.Expr.t) : Type.Pointee.t =
+      let rec cell_held (expr : Typed.Expr.t) =
         match expr.desc with
         | Deref pointer ->
-          Option.value_map
-            (Type.Pointee.of_ptr pointer.ty)
-            ~default:Type.Pointee.Gc
-            ~f:fst
-        | Field (inner, _) | Poly_field (inner, _) -> cell_pointee inner
-        | _ -> Gc
+          Option.value_map (Type.of_ptr pointer.ty) ~default:Mode_arg.gc ~f:snd
+        | Field (inner, _) | Poly_field (inner, _) -> cell_held inner
+        | _ -> Mode_arg.gc
       in
       let target, value =
         Mode_rules.store
@@ -2924,7 +2911,7 @@ and expr_type
           ~loc
           ~target:(fun at ->
             let target = expr_type t scope ~at ~expr:target in
-            target, cell_pointee target)
+            target, cell_held target)
           ~value:(fun at ~ty -> check_expr t scope ~at ~expr:value ~ty)
       in
       node (Store (target, value)) Type.unit)

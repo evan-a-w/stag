@@ -267,6 +267,7 @@ let unification_message (error : Unification_error.t) ~show_type =
   let arg : Type.arg -> string = function
     | ATy t -> ty t
     | ARow r -> "row " ^ row r
+    | AMode _ -> "a mode"
   in
   let message =
     match error with
@@ -575,8 +576,8 @@ let rec kind_message (kind : Kind.t) ~show_type =
     "A modality is only written on a pointer's type argument, as in \
      [ptr[string @@ external]]"
   | Invalid_modality ->
-    "The only modality of a pointer's type argument is [external], as in \
-     [ptr[string @@ external]]"
+    "The modality of a pointer's type argument is a provenance ([static], [gc] \
+     or [external]) or a mode variable, as in [ptr[string @@ external]]"
   | Misplaced_mut ->
     "Only an entry of a code type's context can be [mut] or [immut], for a \
      variable the code assigns or doesn't"

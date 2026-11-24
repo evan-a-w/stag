@@ -2,20 +2,14 @@ open! Import
 
 type t =
   { global : bool
-  ; external_ : bool
+  ; held : Mode_arg.t list
   }
-[@@deriving sexp_of, equal]
+[@@deriving sexp_of]
 
-let id = { global = false; external_ = false }
+let id = { global = false; held = [] }
 let of_global global = { id with global }
-
-let of_pointee : Type.Pointee.t -> t = function
-  | Gc -> { global = true; external_ = false }
-  | External -> { global = true; external_ = true }
-;;
+let of_cell held = { global = true; held = [ held ] }
 
 let compose outer inner =
-  { global = outer.global || inner.global
-  ; external_ = outer.external_ || inner.external_
-  }
+  { global = outer.global || inner.global; held = outer.held @ inner.held }
 ;;

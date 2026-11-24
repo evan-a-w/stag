@@ -73,6 +73,7 @@ and presence_bound =
 and arg =
   | ATy of ty
   | ARow of row
+  | AMode of Mode_arg.t
 
 (** An upper bound of a row variable: every entry the variable gets must also be
     an entry of [row], unless shadowed where the bound arose. The variables of
@@ -165,28 +166,14 @@ val arrow : ty -> ty -> ty
 
 val error_name : string
 val is_error : ty -> bool
+val ptr_name : string
 
-(** A pointer's type says which values its cell may be given by a store, so that
-    every alias of the cell agrees on it, whatever their modes. *)
-module Pointee : sig
-  type t =
-    | Gc (** [ptr[t]]: values at most [gc]. *)
-    | External (** [ptr[t @@ external]]: any value. *)
-  [@@deriving sexp_of, equal]
+(** [ptr[pointee @@ held]], by default [ptr[pointee]], whose cell holds only
+    values of provenance at most [held] ([gc] by default). *)
+val ptr : ?held:Mode_arg.t -> ty -> ty
 
-  (** Of the pointer type: [ptr[t @@ external]]'s is not a name one can write. *)
-  val type_name : t -> string
-
-  val of_type_name : string -> t option
-
-  (** The most a value stored may be. *)
-  val provenance : t -> Mode.Provenance.t
-
-  val ptr : t -> ty -> ty
-
-  (** Of a pointer type, with what it points to. *)
-  val of_ptr : ty -> (t * ty) option
-end
+(** Of a pointer type, with what it points to. *)
+val of_ptr : ty -> (ty * Mode_arg.t) option
 
 (** Copies of types as they are now, unaffected by later unification, eg. for an
     error to show them as they were when it arose. Variables keep their ids, and
@@ -278,6 +265,9 @@ end
 
 val iter_ty : 'e Iter.t @ local -> ty -> (unit, 'e) Result.t
 val iter_row : 'e Iter.t @ local -> row -> (unit, 'e) Result.t
+
+(** The variables of what the cells of the pointers in the type may hold. *)
+val iter_held : ty -> f:(Mode.Var.t -> unit) @ local -> unit
 
 (** Renders types for humans. Variables are named in order of appearance,
     consistently across the types one printer renders; weak (unbound) ones are

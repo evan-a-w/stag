@@ -14,9 +14,6 @@ let raise = Intrinsic.raise
 
 module Ptr = struct
   let make = Intrinsic.ptr_make
-
-  (* A cell that may be given [external] values. *)
-  let make_external = Intrinsic.ptr_make_external
 end
 
 module Unsafe = struct
