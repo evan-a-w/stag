@@ -14,9 +14,11 @@ type t =
 
 let compare a b = Int.compare a.code b.code
 
-let code ~src_index ~dst_index right =
-  Array.fold right ~init:((src_index * 3) + dst_index) ~f:(fun acc p ->
-    (acc * 8) + p)
+let make_code ~src_index ~dst_index right =
+  Array.fold
+    right
+    ~init:((src_index * 3) + dst_index)
+    ~f:(fun acc p -> (acc * 8) + p)
 ;;
 
 let create ~src ~dst ~right ~left =
@@ -35,7 +37,7 @@ let create ~src ~dst ~right ~left =
   ; right
   ; left
   ; code =
-      code
+      make_code
         ~src_index:(Axis.Any.index src)
         ~dst_index:(Axis.Any.index dst)
         right
@@ -137,7 +139,6 @@ let le a b =
 
 let right t x = t.right.(x)
 let left t x = t.left.(x)
-
 let composed = Int.Table.create ()
 
 let compose m1 m2 =
@@ -153,7 +154,7 @@ let compose m1 m2 =
       ; dst_index = m1.dst_index
       ; right
       ; left = Array.map m1.left ~f:(fun x -> m2.left.(x))
-      ; code = code ~src_index:m2.src_index ~dst_index:m1.dst_index right
+      ; code = make_code ~src_index:m2.src_index ~dst_index:m1.dst_index right
       })
 ;;
 
@@ -166,3 +167,5 @@ let meet_with axis point =
     ~right:(Array.init size ~f:(fun y -> if point <= y then top else y))
     ~left:(Array.init size ~f:(fun x -> Int.min x point))
 ;;
+
+let code t = t.code

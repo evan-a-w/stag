@@ -50,3 +50,6 @@ val left : t -> int -> int
 (** [compose m1 m2] is [m1 . m2]: [x <= m1(y)] and [y <= m2(z)] give
     [x <= (compose m1 m2)(z)]. *)
 val compose : t -> t -> t
+
+(** Identifies the morphism: equal codes, equal morphisms. *)
+val code : t -> int
