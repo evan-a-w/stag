@@ -262,7 +262,9 @@ let mode_message
 ;;
 
 let unification_message (error : Unification_error.t) ~show_type =
-  let printer = Type.Printer.create ~type_name:show_type ~name_mode_args:true () in
+  let printer =
+    Type.Printer.create ~type_name:show_type ~name_mode_args:true ()
+  in
   let ty = Type.Printer.ty printer in
   let row row = ty (TRecord { id = -1; row }) in
   let arg : Type.arg -> string = function
@@ -518,7 +520,9 @@ let rec kind_message (kind : Kind.t) ~show_type =
     "A splice of syntax can't give an [%expect]: its expected output is \
      generated, so it could not be corrected"
   | Toplevel_splice_of_neither ty ->
-    let printer = Type.Printer.create ~type_name:show_type ~name_mode_args:true () in
+    let printer =
+      Type.Printer.create ~type_name:show_type ~name_mode_args:true ()
+    in
     let ty = Type.Printer.ty printer ty in
     sprintf
       "This expression has type %s, but a toplevel splice is of code (of type \
@@ -548,7 +552,9 @@ let rec kind_message (kind : Kind.t) ~show_type =
       var
   | Invalid_mode why -> sprintf "This mode is invalid: %s" why
   | Invalid_external { symbol; problem } ->
-    let printer = Type.Printer.create ~type_name:show_type ~name_mode_args:true () in
+    let printer =
+      Type.Printer.create ~type_name:show_type ~name_mode_args:true ()
+    in
     let problem =
       match problem with
       | Not_a_function -> "it must be a function"

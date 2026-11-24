@@ -54,8 +54,7 @@ type t =
   ; results : Int.Hash_set.t
   ; args : Int.Hash_set.t
   ; named : Int.Hash_set.t
-  ; cells : Int.Hash_set.t
-  ; held : Int.Hash_set.t
+  ; mode_args : Int.Hash_set.t
   ; rep : int Int.Table.t
   ; atoms : (Axis.t * int) list Int.Table.t
   ; names : string Int.Table.t
@@ -69,8 +68,7 @@ let create () =
   ; results = Int.Hash_set.create ()
   ; args = Int.Hash_set.create ()
   ; named = Int.Hash_set.create ()
-  ; cells = Int.Hash_set.create ()
-  ; held = Int.Hash_set.create ()
+  ; mode_args = Int.Hash_set.create ()
   ; rep = Int.Table.create ()
   ; atoms = Int.Table.create ()
   ; names = Int.Table.create ()
@@ -78,18 +76,15 @@ let create () =
   }
 ;;
 
-let count t var ~(side : [ `Arg | `Res | `Held | `Cell ]) =
+let count t var ~(side : [ `Arg | `Res | `Mode_arg ]) =
   let id = Mode.Var.id var in
   Hashtbl.set t.vars ~key:id ~data:var;
   (match side with
    | `Arg -> Hash_set.add t.args id
    | `Res -> Hash_set.add t.results id
-   | `Held ->
+   | `Mode_arg ->
      Hash_set.add t.named id;
-     Hash_set.add t.held id
-   | `Cell ->
-     Hash_set.add t.named id;
-     Hash_set.add t.cells id);
+     Hash_set.add t.mode_args id);
   if not (Hashtbl.mem t.order id)
   then Hashtbl.set t.order ~key:id ~data:(Hashtbl.length t.order);
   Hashtbl.incr t.counts id
@@ -155,18 +150,15 @@ let settle t =
     let var = Hashtbl.find_exn t.vars id in
     Axis.index axis (Mode.Var.lower var), Axis.index axis (Mode.Var.upper var)
   in
-  (* A cell's locality means nothing: a variable only on cells is left out of
-     the locality relations and bounds. *)
-  let cell_only id =
-    Hash_set.mem t.cells id
-    && not
-         (Hash_set.mem t.args id
-          || Hash_set.mem t.results id
-          || Hash_set.mem t.held id)
+  (* A mode argument has no locality: a variable only of mode arguments is left
+     out of the locality relations and bounds. *)
+  let mode_arg_only id =
+    Hash_set.mem t.mode_args id
+    && not (Hash_set.mem t.args id || Hash_set.mem t.results id)
   in
   let irrelevant (axis : Axis.t) id =
     match axis with
-    | T Locality -> cell_only id
+    | T Locality -> mode_arg_only id
     | T (Stage | Provenance) -> false
   in
   (* Equal on the axis: by their constraints, or fixed to the same point. *)

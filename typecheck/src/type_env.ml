@@ -238,7 +238,8 @@ module Annotation_vars = struct
     }
   ;;
 
-  (* A name stands for one kind of variable throughout. *)
+  (* A mode variable's name is not also a type or row variable's (a type and a
+     row variable may share one, as in [<'r>{..'r}]). *)
   let only_kind name ~loc ~(in_ : _ Hashtbl.t) ~others ~default =
     match Hashtbl.find in_ name with
     | Some var -> Ok var
@@ -255,7 +256,7 @@ module Annotation_vars = struct
       name
       ~loc
       ~in_:t.tys
-      ~others:[ Hashtbl.mem t.rows; Hashtbl.mem t.modes ]
+      ~others:[ Hashtbl.mem t.modes ]
       ~default:(fun () -> Type.TVar (Fresh.var t.fresh ~rank:t.rank))
   ;;
 
@@ -264,7 +265,7 @@ module Annotation_vars = struct
       name
       ~loc
       ~in_:t.rows
-      ~others:[ Hashtbl.mem t.tys; Hashtbl.mem t.modes ]
+      ~others:[ Hashtbl.mem t.modes ]
       ~default:(fun () -> Type.RVar (Fresh.var t.fresh ~rank:t.rank))
   ;;
 
@@ -362,27 +363,26 @@ let arg_loc : Type_expr.arg -> Loc.t = function
 (* [ptr[t @@ m]] is [ptr[t, m]], and [ptr[t]] is [ptr[t, nonportable gc]]. *)
 module Ptr_sugar = struct
   type t =
-    | Modality
+    | Modality of Loc.t
     | Default
     | Args
 
   let desugar (args : Type_expr.arg list) ~loc =
     match args with
-    | [ Ty { txt = Modality (ty, mode); _ } ] -> [ Type_expr.Ty ty; Mode mode ], Modality
+    | [ Ty { txt = Modality (ty, mode); loc } ] ->
+      [ Type_expr.Ty ty; Mode mode ], Modality loc
     | [ ((Ty _ | Row _) as arg) ] ->
-      ( [ arg
-        ; Mode (Located.create ~loc (Mode_expr.Atoms [ Nonportable; Gc ]))
-        ]
+      ( [ arg; Mode (Located.create ~loc (Mode_expr.Atoms [ Nonportable; Gc ])) ]
       , Default )
     | args -> args, Args
   ;;
 
   let resugar t (args : Type_expr.arg list) =
     match t, args with
-    | Modality, [ Ty ty; Mode mode ] ->
-      [ Type_expr.Ty (Located.create ~loc:ty.loc (Type_expr.Modality (ty, mode))) ]
+    | Modality loc, [ Ty ty; Mode mode ] ->
+      [ Type_expr.Ty (Located.create ~loc (Type_expr.Modality (ty, mode))) ]
     | Default, [ arg; Mode _ ] -> [ arg ]
-    | (Modality | Default | Args), args -> args
+    | (Modality _ | Default | Args), args -> args
   ;;
 end
 
@@ -443,7 +443,8 @@ module Vars = struct
     =
     match t, txt with
     | Annotation vars, Var name ->
-      Result.map (Annotation_vars.mode vars name ~loc) ~f:(fun var -> Arrow_modes.Side.Var var)
+      Result.map (Annotation_vars.mode vars name ~loc) ~f:(fun var ->
+        Arrow_modes.Side.Var var)
     | Params _, Var name -> error ~loc (Mode_variable_in_declaration name)
     | Annotation vars, Atoms atoms ->
       let var = Annotation_vars.fresh_mode vars in
@@ -460,7 +461,8 @@ module Vars = struct
     =
     match t, txt with
     | Annotation vars, Var name ->
-      Result.map (Annotation_vars.mode vars name ~loc) ~f:(fun var -> Mode_arg.Var var)
+      Result.map (Annotation_vars.mode vars name ~loc) ~f:(fun var ->
+        Mode_arg.Var var)
     | Params params, Var name ->
       (match Map.find params name with
        | Some (AMode mode) -> Ok mode
@@ -1069,7 +1071,12 @@ let prepare_kind t (decl : Decl.t) =
           when List.exists atoms ~f:(fun (atom : Mode_expr.Atom.t) ->
                  match atom with
                  | Regional | Local -> true
-                 | Global | Const | Portable | Nonportable | Static | Gc
+                 | Global
+                 | Const
+                 | Portable
+                 | Nonportable
+                 | Static
+                 | Gc
                  | External -> false) ->
           Error
             (Typecheck_error.create ~loc:mode.loc Relative_locality_modality)

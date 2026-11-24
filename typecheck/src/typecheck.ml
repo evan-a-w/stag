@@ -487,6 +487,7 @@ module Scope = struct
   ;;
 
   let arrow_mode t = Mode_rules.arrow_mode (modes t)
+
   let mode_var t name ~loc =
     match Type_env.Annotation_vars.mode t.annotation_vars name ~loc with
     | Ok var -> var

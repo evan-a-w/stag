@@ -733,8 +733,7 @@ let store ctx expected ~loc ~target ~value =
     sub.mode
     (Modality.from_last_cell modality)
     ~loc:value.loc
-    ~why:
-      "it is stored into a cell, which holds only what fits its modality";
+    ~why:"it is stored into a cell, which holds only what fits its modality";
   target, value
 ;;
 

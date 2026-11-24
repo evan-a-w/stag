@@ -133,7 +133,11 @@ module Annotation_vars : sig
 
   (** The mode a mode variable stands for, an error if the name is also a type
       or row variable. *)
-  val mode : t -> string -> loc:Loc.t -> (Mode.Var.t, Typecheck_error.t) Result.t
+  val mode
+    :  t
+    -> string
+    -> loc:Loc.t
+    -> (Mode.Var.t, Typecheck_error.t) Result.t
 end
 
 (** The type, and the syntax with each type it names by its canonical name
