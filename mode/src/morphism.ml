@@ -43,6 +43,16 @@ let const_is_static =
     ~left:[| i Const; i Portable; i Portable |]
 ;;
 
+let runtime_is_gc =
+  let i = Axis.Stage.index
+  and p = Axis.Provenance.index in
+  create
+    ~src:(T Provenance)
+    ~dst:(T Stage)
+    ~right:[| i Const; i Nonportable; i Nonportable |]
+    ~left:[| p Static; p Gc; p Gc |]
+;;
+
 let cross_portable =
   let i = Axis.Stage.index in
   create
@@ -80,6 +90,7 @@ let is_identity t =
 
 let named =
   [ "const_is_static", const_is_static
+  ; "runtime_is_gc", runtime_is_gc
   ; "cross_portable", cross_portable
   ; "borrow", borrow
   ; "release", release

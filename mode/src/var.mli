@@ -54,6 +54,10 @@ val submode
   -> Reason.t
   -> (unit, Mode_error.t) Result.t
 
+(** [t] is allocated at run time unless it is [const]: its provenance is at
+    least [gc] unless its stage is [const]. *)
+val allocated : t -> Reason.t -> (unit, Mode_error.t) Result.t
+
 (** [submode a b] on [axis] only. *)
 val submode_on : t -> t -> _ Axis.t -> Reason.t -> (unit, Mode_error.t) Result.t
 

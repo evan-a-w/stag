@@ -253,8 +253,7 @@ end
 
 module Mode_atoms = struct
   (* The constant of a declaration's arrow: the axes not written are
-     [default]'s, but a [const] one is [static]. Provenance isn't checked so
-     far. *)
+     [default]'s, but a [const] one is [static]. *)
   let declared ~(default : Mode.Const.t) (atoms : Syntax.Mode_expr.Atom.t list) =
     let const : Mode.Const.t =
       List.fold atoms ~init:default ~f:(fun const atom ->
@@ -265,12 +264,14 @@ module Mode_atoms = struct
         | Global -> { const with locality = Global }
         | Regional -> { const with locality = Regional }
         | Local -> { const with locality = Local }
-        | Static | Gc | External -> const)
+        | Static -> { const with provenance = Static }
+        | Gc -> { const with provenance = Gc }
+        | External -> { const with provenance = External })
     in
     const
   ;;
 
-  (* Fixes the axes written, of those checked so far (not provenance). *)
+  (* Fixes the axes written. *)
   let constrain var (atoms : Syntax.Mode_expr.Atom.t list) ~loc =
     let reason =
       Mode.Reason.create
@@ -295,7 +296,9 @@ module Mode_atoms = struct
         | Global -> fix Locality Global
         | Regional -> fix Locality Regional
         | Local -> fix Locality Local
-        | Static | Gc | External -> Ok ())
+        | Static -> fix Provenance Static
+        | Gc -> fix Provenance Gc
+        | External -> fix Provenance External)
     |> Result.map_error ~f:(fun (_ : Mode.Error.t) ->
       Typecheck_error.create ~loc (Invalid_mode "its modes are inconsistent"))
   ;;

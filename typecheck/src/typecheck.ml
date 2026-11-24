@@ -1759,6 +1759,13 @@ let intrinsic_type t (scope : Scope.t) (intrinsic : Intrinsic.t) =
       ( ty
       , ty
       , { arg = Var arg; res = Var res; curry = Arrow_modes.default_curry } )
+  | Ptr_make ->
+    let pointee = Scope.fresh_ty t scope in
+    let arg, res = Mode_rules.ptr_make (Scope.modes scope) in
+    Type.TArrow
+      ( pointee
+      , TCon ("ptr", [ ATy pointee ])
+      , { arg = Var arg; res = Var res; curry = Arrow_modes.default_curry } )
   | _ ->
     Intrinsic.ty
       intrinsic
