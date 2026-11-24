@@ -68,19 +68,37 @@ let%expect_test "quote lock: locals are embedded only when portable" =
     {|
 let constant = let k = 1 in .<k>.
 let closure = let k = 1 in let g u = k in .<g ()>.
-let computed = let k = Int.to_string 3 in .<k>.
 let computed_int = let k = Int.add 1 2 in .<k>.
-let argument x = .<x>.
-let mutable_ = let mut m = 1 in let g u = m in .<g ()>.
+let computed = let k = Int.to_string 3 in forget k in .<k>.
+let argument x = forget x in .<x>.
+let mutable_ = let mut m = 1 in let g u = m in forget g in .<g ()>.
 |};
   [%expect
     {|
     val constant : <int>{..'a}
     val closure : <int>{..'a}
-    val computed : <'_a>{k : '_a; ..'_b}
     val computed_int : <int>{..'_a}
+    val computed : <'_a>{k : '_a; ..'_b}
     val argument : 'a -> <'b>{x : 'b; ..'c}
     val mutable_ : <'_a>{g : unit -> '_a; ..'_b}
+    |}];
+  (* Without [forget], a local that can't be embedded is an error. *)
+  check {|
+let computed = let k = Int.to_string 3 in .<k>.
+|};
+  check {|
+let argument x = .<x>.
+|};
+  check {|
+let mutable_ = let mut m = 1 in let g u = m in .<g ()>.
+|};
+  [%expect {|
+    ((Not_embeddable (name k) (var_level 0) (used_at 1) (defining false)) @
+     t.stag:2:44-45)
+    ((Not_embeddable (name x) (var_level 0) (used_at 1) (defining false)) @
+     t.stag:2:19-20)
+    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
+     t.stag:2:49-50)
     |}]
 ;;
 
@@ -91,7 +109,7 @@ let through_closures =
   let k = Int.to_string 3 in
   let f u = k in
   let g u = f () in
-  .<g ()>.
+  forget g in .<g ()>.
 let through_data =
   let pair = (1, fun u -> 2) in
   let g u = match pair with (_, h) -> h () in
@@ -203,11 +221,12 @@ let constant = let g x = let c = .<g>. in let y = g in x in .<g>.
 |};
   [%expect
     {|
-    val quote_first : int -> int
-    val quote_last : int -> int
-    val bound_first : int -> int
-    val bound_last : int -> int
-    val constant : <'a -> 'a>{..'b}
+    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining true)) @
+     t.stag:2:40-41)
+    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining true)) @
+     t.stag:3:62-63)
+    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining true)) @
+     t.stag:6:35-36)
     |}]
 ;;
 
@@ -311,7 +330,7 @@ let e = .~(let v = Ptr.make 1 in .<fun x -> v>.)
     This is portable, because v was computed at compile time (at t.stag:3:85-86), then v is captured by a closure (at t.stag:3:85-86), then the closure is made (at t.stag:3:76-88), then w is bound (at t.stag:3:68-93), but must be at most const, because d is a toplevel (at t.stag:3:8-96)
     This is portable, because v was computed at compile time (at t.stag:4:77-78), then v is captured by a closure (at t.stag:4:77-78), then the closure is made (at t.stag:4:68-80), but must be at most const, because e is a toplevel (at t.stag:4:8-83)
     val d : int -> int
-    Unbound value v, which the spliced code uses: v is a variable of its quote's context, as the v bound at compile time (level -1) can't be used in the quote (level 0), as it is not portable
+    The quote can't embed v, as it may not be portable. Bind it as (v @ portable) to embed it, or write [forget v in ...] to make v a free variable of the quote
     |}]
 ;;
 
@@ -322,10 +341,10 @@ type list['a] = Nil | Cons of ptr['a * list['a]]
 exception E of list[int]
 let cell = Ptr.make Nil
 let read = let x = cell.* in x
-let read_in_quote = let x = cell.* in .<x>.
+let read_in_quote = let x = cell.* in forget x in .<x>.
 let caught = match Nil with x -> x | exception E l -> l
 let caught_in_quote f =
-  match f () with x -> .<Nil>. | exception E l -> let y = l in .<y>.
+  match f () with x -> .<Nil>. | exception E l -> let y = l in forget y in .<y>.
 |};
   [%expect
     {|
@@ -404,9 +423,9 @@ let%expect_test "closures using free variables of the quote through a splice \
   =
   modes
     {|
-let q = .< let h a = .~(.<x>.) in .<h>. >.
-let q_direct = .< let h a = x in .<h>. >.
-let q_param c = .< let h a = .~c in .<h>. >.
+let q = .< let h a = .~(.<x>.) in forget h in .<h>. >.
+let q_direct = .< let h a = x in forget h in .<h>. >.
+let q_param c = .< let h a = .~c in forget h in .<h>. >.
 |};
   [%expect
     {|
@@ -474,8 +493,8 @@ let outer2 n =
   let f x = let p = (fun u -> f) in let c = .<p>. in Int.add x n in f 1
 |};
   [%expect {|
-    val outer : int -> int
-    val outer2 : int -> int
+    The quote can't embed g, as it may not be portable. Bind it as (g @ portable) to embed it, or write [forget g in ...] to make g a free variable of the quote
+    The quote can't embed p, as it may not be portable. Bind it as (p @ portable) to embed it, or write [forget p in ...] to make p a free variable of the quote
     |}]
 ;;
 
@@ -601,7 +620,7 @@ let r = .~(let q (s : int) = .< s >. in q 1)
 let r = .~(let q (s : string) = .< s >. in q "a")
 |};
   [%expect
-    {| Unbound value s, which the spliced code uses: s is a variable of its quote's context, as the s bound at compile time (level -1) can't be used in the quote (level 0), as it is not portable |}];
+    {| The quote can't embed s, as it may not be portable. Bind it as (s @ portable) to embed it, or write [forget s in ...] to make s a free variable of the quote |}];
   modes {|
 let r = .~(let mut x = 1 in x <- 2; .< x >.)
 |};

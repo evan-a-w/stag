@@ -521,8 +521,8 @@ let%expect_test "names" =
 let%expect_test "a renamed binder still provides the implicit splices it did" =
   show_erased
     {|
-let e_provider = Stag.Code.erase .< fun c -> .< fun x -> (.~c, .< x >.) >. >.
-let e_nested = Stag.Code.erase .< fun c -> .< fun x -> .< (.~(.~c), .< x >.) >. >. >.
+let e_provider = Stag.Code.erase .< fun c -> .< fun x -> (.~c, forget x in .< x >.) >. >.
+let e_nested = Stag.Code.erase .< fun c -> .< fun x -> .< (.~(.~c), forget x in .< x >.) >. >. >.
 let e_kept = Stag.Code.erase .< fun c -> .< fun x -> .~c >. >.
 let e_reversed = Stag.Code.erase .< fun x -> fun y -> .~(.< (x, y) >.).{y = x; x = y} >.
 |};
@@ -557,7 +557,7 @@ let e_reversed = Stag.Code.erase .< fun x -> fun y -> .~(.< (x, y) >.).{y = x; x
     ( "gen.stag"
     , {|
 let value name code = Cons (Ptr.make ( (Stag.Toplevel.let_ name Nil (Stag.Code.erase code), Nil)))
-let c1 = .< fun c -> .< fun x -> (.~c, .< x >.) >. >.
+let c1 = .< fun c -> .< fun x -> (.~c, forget x in .< x >.) >. >.
 |}
     )
   in

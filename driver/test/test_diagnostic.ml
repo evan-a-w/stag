@@ -174,14 +174,10 @@ let%expect_test "messages" =
                                      ^
     Error: The module A.M is defined more than once
     ok
-    File "a.stag", line 2, characters 8-15:
-    2 | let u = .~(f 3)
-                ^^^^^^^
-    Error: Unbound value z, which the spliced code uses: z is a variable of its quote's context, as the z bound at runtime (level 0) can't be used in the quote (level 1), as it is not portable
     File "a.stag", line 1, characters 13-14:
     1 | let f z = .< z >.
                      ^
-    Note: z is a variable of the code's context here
+    Error: The quote can't embed z, as it may not be portable. Bind it as (z @ portable) to embed it, or write [forget z in ...] to make z a free variable of the quote
     |}]
 ;;
 

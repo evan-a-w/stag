@@ -215,7 +215,7 @@ let at_compile_time =
     |}]
 ;;
 
-let%expect_test "closures reaching a mutable local are free variables of quotes"
+let%expect_test "closures reaching a mutable local can't be embedded in quotes"
   =
   (* They are [nonportable], so not usable in quotes: the code leaves them to
      its context. *)
@@ -278,23 +278,31 @@ let at_runtime = let mut n = 0 in let f u = n in f ()
 |};
   [%expect
     {|
-    val bad : <'_a>{f : unit -> '_a; ..'_b}
-    val bad : <'_a>{g : unit -> '_a; ..'_b}
-    val bad : <'_a>{g : unit -> '_a; ..'_b}
-    val bad : <'_a>{g : unit -> '_a; ..'_b}
-    val bad : <'_a>{g : unit -> '_a; ..'_b}
-    val bad : (unit -> int) -> <'a>{g : unit -> 'a; ..'b}
-    val bad : 'a -> <'b>{g : unit -> 'b; ..'c}
-    val bad : option[unit -> int] -> <'a>{g : unit -> 'a; ..'b}
-    val ok : int -> list[string] -> <'a>{g : unit -> 'a; ..'b}
-    val ok_code : <int>{} -> <'a>{g : unit -> 'a; ..'b}
+    ((Not_embeddable (name f) (var_level 0) (used_at 1) (defining false)) @
+     t.stag:2:44-45)
+    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
+     t.stag:2:62-63)
+    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
+     t.stag:6:4-5)
+    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
+     t.stag:6:4-5)
+    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
+     t.stag:6:4-5)
+    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
+     t.stag:2:48-49)
+    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
+     t.stag:2:29-30)
+    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
+     t.stag:2:53-54)
+    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
+     t.stag:2:70-71)
+    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
+     t.stag:2:55-56)
     val not_mentioned : <int>{..'a}
     val only_data : <int>{..'_a}
     val at_runtime : int
     -- evaluated at compile time
     -- evaluated
-    (ok <fun>)
-    (ok_code <fun>)
     (not_mentioned
      (Code
       (App (Var (Persistent (Local g/34)) : "unit -> int") (Lit Unit : unit) :
@@ -637,7 +645,7 @@ let ran_assigned = .~assigned
     |}]
 ;;
 
-let%expect_test "closures capturing arguments are free variables of quotes" =
+let%expect_test "closures capturing arguments can't be embedded in quotes" =
   (* Arguments are [nonportable], whatever their type, until mode crossing by
      kind: even [ok]'s [g], capturing an [int], is not usable in its quote. *)
   check {|
@@ -657,9 +665,12 @@ let ran = .~(ok 1)
 |};
   [%expect
     {|
-    val bad : 'a -> <'b>{g : unit -> 'b; ..'c}
-    val bad : (unit -> int) -> <'a>{g : unit -> 'a; ..'b}
-    val bad : <'_a>{g : unit -> '_a; ..'_b}
+    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
+     t.stag:2:29-30)
+    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
+     t.stag:2:61-62)
+    ((Not_embeddable (name g) (var_level 0) (used_at 1) (defining false)) @
+     t.stag:2:62-63)
     val ok : int -> <int>{..'a}
     val ran : int
     -- evaluated at compile time
@@ -709,7 +720,23 @@ let bad =
            , Stag.Expr.var "n"
            , Stag.Expr.Quote (Ptr.make ( (Stag.Expr.App (Ptr.make ( (Stag.Expr.var "f", Stag.Expr.Lit Stag.Lit.Unit)))))) ))) ))))
 |};
-  [%expect {| val bad : <'_a>{f : unit -> '_a; ..'_b} |}]
+  [%expect {|
+    ((In_syntax_splice
+      (generated
+       ((Let_mut (n @ t.stag:3:2-12:130) () ((Lit (Int 0)) @ t.stag:3:2-12:130)
+         ((Let (f @ t.stag:3:2-12:130) (((u @ t.stag:3:2-12:130) ())) ()
+           ((Var n ()) @ t.stag:3:2-12:130)
+           ((Quote
+             ((App ((Var f ()) @ t.stag:3:2-12:130)
+               ((Lit Unit) @ t.stag:3:2-12:130))
+              @ t.stag:3:2-12:130))
+            @ t.stag:3:2-12:130))
+          @ t.stag:3:2-12:130))
+        @ t.stag:3:2-12:130))
+      (error
+       (Not_embeddable (name f) (var_level 0) (used_at 1) (defining false))))
+     @ t.stag:3:2-12:130)
+    |}]
 ;;
 
 (* The signature, then the values of the toplevels named [*_value] at runtime. *)
@@ -825,7 +852,7 @@ let wrong_place : {`a : immut int} -> int = fun r -> 1
     {|
     ((Spliced_code_assigns_immutable x) @ t.stag:3:27-33)
     ((Spliced_code_assigns_immutable x) @ t.stag:3:12-26)
-    ((Spliced_code_assigns_immutable x) @ t.stag:3:12-36)
+    ((Spliced_code_assigns_immutable x) @ t.stag:3:20-44)
     ((Spliced_code_assigns_immutable x) @ t.stag:3:25-39)
     ((Spliced_code_assigns_immutable x) @ t.stag:4:12-26)
     ((Unification_error
@@ -1044,8 +1071,8 @@ let%expect_test "closures assigning through spliced code are not persistent" =
   check
     {|
 let incr = .<x <- Int.add x 1>.
-let implicit = .<let mut x = 0 in let g u = .~incr in .<g ()>.>.
-let explicit = .<let mut y = 0 in let g u = .~incr.{x = y} in .<g ()>.>.
+let implicit = .<let mut x = 0 in let g u = .~incr in forget g in .<g ()>.>.
+let explicit = .<let mut y = 0 in let g u = .~incr.{x = y} in forget g in .<g ()>.>.
 let fine = .<let mut x = 0 in let g u = .~incr in g (); x>.
 |};
   [%expect

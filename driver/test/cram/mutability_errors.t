@@ -17,6 +17,18 @@ Messages of errors about mutable variables.
   > let annotated : <unit>{z : immut int} = assigns
   > X
   $ stag check a.stag
+  File "a.stag", line 1, characters 29-30:
+  1 | let ok2 x = let g u = x in .<g ()>.
+                                   ^
+  Error: The quote can't embed g, as it may not be portable. Bind it as (g @ portable) to embed it, or write [forget g in ...] to make g a free variable of the quote
+  File "a.stag", line 2, characters 60-61:
+  2 | let fn (h : unit -> int) = let k = h in let g u = k () in .<g ()>.
+                                                                  ^
+  Error: The quote can't embed g, as it may not be portable. Bind it as (g @ portable) to embed it, or write [forget g in ...] to make g a free variable of the quote
+  File "a.stag", line 3, characters 65-66:
+  3 | let direct = let mut n = 0 in let f u = n in let g u = f () in .<g ()>.
+                                                                       ^
+  Error: The quote can't embed g, as it may not be portable. Bind it as (g @ portable) to embed it, or write [forget g in ...] to make g a free variable of the quote
   File "a.stag", line 5, characters 8-9:
   5 | let x = f 1
               ^

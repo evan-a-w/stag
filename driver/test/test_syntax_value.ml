@@ -742,9 +742,9 @@ let%expect_test "constructors are made as the typechecker resolves them" =
            : bool)];
   [%expect
     {|
-    ((constructors 116)
+    ((constructors 117)
      (reflected
-      (prelude.Stag.Expr.Deref prelude.Stag.Expr.Store
+      (prelude.Stag.Expr.Deref prelude.Stag.Expr.Forget prelude.Stag.Expr.Store
        prelude.Stag.Mode_expr.Atom.External
        prelude.Stag.Mode_expr.Atom.Nonportable
        prelude.Stag.Mode_expr.Atom.Regional prelude.Stag.Mode_expr.Axis.Locality
