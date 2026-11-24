@@ -81,8 +81,8 @@ there are no mutable fields (mutation goes through pointers, below).
 
 ```stag
 type point = {x : int; y : int}     (* type point = { x : int; y : int } *)
-let origin = {x = 0; y = 0}         (* val origin : point = {x = 0; y = 0} *)
-let moved = {origin with y = 5}     (* val moved : point = {x = 0; y = 5} *)
+let origin = {x = 0; y = 0}         (* val origin : point = {Doc.x = 0; y = 0} *)
+let moved = {origin with y = 5}     (* val moved : point = {Doc.x = 0; y = 5} *)
 let y = moved.y                     (* val y : int = 5 *)
 
 let pair = (1, "one")               (* val pair : int * string = (1, "one") *)
@@ -172,7 +172,7 @@ let copy = q.*                      (* records are values: a copy *)
 let after =
   q.*.x <- 10;                      (* store into a field of the pointee *)
   (q.*, copy)
-(* val after : point * point = ({x = 10; y = 2}, {x = 1; y = 2}) *)
+(* val after : point * point = ({Doc.x = 10; y = 2}, {Doc.x = 1; y = 2}) *)
 
 (* `*p` in a pattern matches the pointee. *)
 type tree = Leaf of int | Branch of ptr[tree * tree]
