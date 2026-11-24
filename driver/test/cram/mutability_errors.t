@@ -28,7 +28,7 @@ Messages of errors about mutable variables.
   File "a.stag", line 3, characters 65-66:
   3 | let direct = let mut n = 0 in let f u = n in let g u = f () in .<g ()>.
                                                                        ^
-  Error: The quote can't embed g, as it may not be portable. Bind it as (g @ portable) to embed it, or write [forget g in ...] to make g a free variable of the quote
+  Error: The quote can't embed g, as it isn't portable. Write [forget g in ...] to make g a free variable of the quote
   File "a.stag", line 5, characters 8-9:
   5 | let x = f 1
               ^

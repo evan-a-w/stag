@@ -23,7 +23,7 @@ let computed = let k = Int.to_string 3 in .< k >.
   [%expect
     {|
     The quote can't embed x, as it may not be portable. Bind it as (x @ portable) to embed it, or write [forget x in ...] to make x a free variable of the quote
-    The quote can't embed k, as it may not be portable. Bind it as (k @ portable) to embed it, or write [forget k in ...] to make k a free variable of the quote
+    The quote can't embed k, as it isn't portable. Write [forget k in ...] to make k a free variable of the quote
     |}]
 ;;
 

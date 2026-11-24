@@ -74,6 +74,7 @@ end
 type t [@@deriving sexp_of]
 
 val create : unit -> t
+
 (** The innermost binding of [name] seen at [level]. *)
 val lookup : t -> string -> level:int -> Lookup.t
 

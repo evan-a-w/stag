@@ -9,6 +9,14 @@ module Unusable_in_quote = struct
   [@@deriving sexp_of]
 end
 
+module Not_embeddable_why = struct
+  type t =
+    | Defining
+    | Unknown
+    | Nonportable
+  [@@deriving sexp_of]
+end
+
 module Splice_kind = struct
   type t =
     | Include
@@ -34,9 +42,7 @@ module Kind = struct
         }
     | Not_embeddable of
         { name : string
-        ; var_level : Env.Level.t
-        ; used_at : Env.Level.t
-        ; defining : bool
+        ; why : Not_embeddable_why.t
         }
     | Forgotten of string
     | Duplicate_forget of string
@@ -376,19 +382,26 @@ let rec kind_message (kind : Kind.t) ~show_type =
       name
       (level_name var_level)
       used_at
-  | Not_embeddable { name; var_level = _; used_at = _; defining = true } ->
+  | Not_embeddable { name; why = Defining } ->
     sprintf
       "The quote can't embed %s, as it is still being defined. Write [forget \
        %s in ...] to make %s a free variable of the quote"
       name
       name
       name
-  | Not_embeddable { name; var_level = _; used_at = _; defining = false } ->
+  | Not_embeddable { name; why = Unknown } ->
     sprintf
       "The quote can't embed %s, as it may not be portable. Bind it as (%s @ \
        portable) to embed it, or write [forget %s in ...] to make %s a free \
        variable of the quote"
       name
+      name
+      name
+      name
+  | Not_embeddable { name; why = Nonportable } ->
+    sprintf
+      "The quote can't embed %s, as it isn't portable. Write [forget %s in \
+       ...] to make %s a free variable of the quote"
       name
       name
       name

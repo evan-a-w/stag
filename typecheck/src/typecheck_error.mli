@@ -11,6 +11,17 @@ module Unusable_in_quote : sig
   [@@deriving sexp_of]
 end
 
+(** Why a quote can't embed a local of an earlier level. *)
+module Not_embeddable_why : sig
+  type t =
+    | Defining (** It is used in its own definition. *)
+    | Unknown
+    (** Its stage isn't known to be [portable], though it could be: eg. an
+        unannotated parameter. *)
+    | Nonportable (** Its value is known not to be [portable]. *)
+  [@@deriving sexp_of]
+end
+
 (** What generates declarations: an include (or a spliced module), or the splice
     defining a type [type t = .~e]. *)
 module Splice_kind : sig
@@ -42,9 +53,7 @@ module Kind : sig
         }
     | Not_embeddable of
         { name : string
-        ; var_level : Env.Level.t
-        ; used_at : Env.Level.t
-        ; defining : bool
+        ; why : Not_embeddable_why.t
         }
     | Forgotten of string
     | Duplicate_forget of string

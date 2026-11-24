@@ -583,7 +583,11 @@ module Resolution = struct
     | Some quote, Some entry
       when [%equal: int option] entry.quote_id (Some quote.id) -> Local entry
     | Some quote, Some ({ binder = Local _; _ } as entry)
-      when spliced && entry.level < scope.level ->
+      when spliced
+           && entry.level < scope.level
+           && (is_mutable_local entry || not (usable entry)) ->
+      (* Spliced code's free variable, which this local can't provide: it
+         stays a free variable of the quote. *)
       Outside_quote { quote; usable = None; unusable = Some entry }
     | _, Some entry when is_mutable_local entry && entry.level <> scope.level ->
       Unusable
@@ -592,13 +596,19 @@ module Resolution = struct
     | Some _, Some ({ binder = Local _; _ } as entry)
       when entry.level < scope.level && not (usable entry) ->
       (* A local of an earlier level: the quote can only embed its value. *)
-      Unusable
-        (Not_embeddable
-           { name
-           ; var_level = entry.level
-           ; used_at = scope.level
-           ; defining = entry.defining
-           })
+      let why : Typecheck_error.Not_embeddable_why.t =
+        if entry.defining
+        then Defining
+        else if Mode.Stage.le
+                  (Mode.Var.lower_assuming
+                     (entry.mode :> Mode.Var.t)
+                     Stage
+                     ~raised:(fun _ -> false))
+                  Portable
+        then Unknown
+        else Nonportable
+      in
+      Unusable (Not_embeddable { name; why })
     | Some _, Some ({ binder = Toplevel _; _ } as entry)
       when (not spliced) && entry.level <= scope.level && not (usable entry) ->
       By_symbol entry
