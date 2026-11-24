@@ -72,13 +72,16 @@ let%expect_test "the prelude's signature" =
         type t = Int of int | Bool of bool | String of string | Char of char | Unit
       end
       module Mode_expr : sig
+        module Axis : sig
+          type t = Stage | Provenance | Locality
+        end
         module Atom : sig
           type t = Const | Portable | Nonportable | Static | Gc | External | Global | Regional | Local
         end
         type t = Var of string | Atoms of list[Atom.t]
       end
       module Type_expr : sig
-        type t = Var of string | Con of Path.t[Type_ref.t] * list[Arg.t] | Arrow of ptr[t * t] | Tuple of list[t] | Code of ptr[{`context : Row.t; `inner : t}] | Record of Row.t | Variant of Row.t | Mut of ptr[t] | Immut of ptr[t] | Splice of ptr[Expr.t] | Moded of ptr[t * Mode_expr.t] | Constrained of ptr[t * list[Mode_expr.t * Mode_expr.t]] | Modality of ptr[t * Mode_expr.t]
+        type t = Var of string | Con of Path.t[Type_ref.t] * list[Arg.t] | Arrow of ptr[t * t] | Tuple of list[t] | Code of ptr[{`context : Row.t; `inner : t}] | Record of Row.t | Variant of Row.t | Mut of ptr[t] | Immut of ptr[t] | Splice of ptr[Expr.t] | Moded of ptr[t * Mode_expr.t] | Constrained of ptr[t * list[Mode_expr.t * Mode_expr.t * option[Mode_expr.Axis.t]]] | Modality of ptr[t * Mode_expr.t]
         module Row : sig
           type t = Empty | Extend of ptr[string * Type_expr.t * t] | Var of string
         end
@@ -735,16 +738,18 @@ let%expect_test "constructors are made as the typechecker resolves them" =
            : bool)];
   [%expect
     {|
-    ((constructors 106)
+    ((constructors 109)
      (reflected
       (prelude.Stag.Expr.Deref prelude.Stag.Expr.Store
        prelude.Stag.Mode_expr.Atom.External
        prelude.Stag.Mode_expr.Atom.Nonportable
-       prelude.Stag.Mode_expr.Atom.Regional prelude.Stag.Pattern.Deref
-       prelude.Stag.Toplevel.External prelude.Stag.Type.Kind.Alias
-       prelude.Stag.Type.Kind.Record prelude.Stag.Type.Kind.Variant
-       prelude.Stag.Type_decl.Param.Mode prelude.Stag.Type_expr.Arg.Mode
-       prelude.Stag.Type_ref.Path.Prelude prelude.Stag.Type_ref.Path.Program))
+       prelude.Stag.Mode_expr.Atom.Regional prelude.Stag.Mode_expr.Axis.Locality
+       prelude.Stag.Mode_expr.Axis.Provenance prelude.Stag.Mode_expr.Axis.Stage
+       prelude.Stag.Pattern.Deref prelude.Stag.Toplevel.External
+       prelude.Stag.Type.Kind.Alias prelude.Stag.Type.Kind.Record
+       prelude.Stag.Type.Kind.Variant prelude.Stag.Type_decl.Param.Mode
+       prelude.Stag.Type_expr.Arg.Mode prelude.Stag.Type_ref.Path.Prelude
+       prelude.Stag.Type_ref.Path.Program))
      (others_same_as_to_value true))
     |}]
 ;;
@@ -1446,7 +1451,7 @@ let%expect_test "modes and modalities only where the parser puts them" =
     |}];
   let m = at (Syntax.Mode_expr.Var "m") in
   let constrained ?(lower = m) ?(upper = local) ty =
-    at (Syntax.Type_expr.Constrained (ty, [ { lower; upper } ]))
+    at (Syntax.Type_expr.Constrained (ty, [ { lower; upper; axis = None } ]))
   in
   program (var { ty = Some (constrained int); mode = Some m });
   program (var { ty = Some (constrained ~lower:local int); mode = None });
@@ -1460,11 +1465,11 @@ let%expect_test "modes and modalities only where the parser puts them" =
     {|
     let v = (x : int @ 'm with 'm <= local)
 
-    Malformed syntax: expected a constraint relating a mode variable, got (Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil)))), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty > Stag.Type_expr.Constrained argument 1 > element 0
-    Malformed syntax: expected a type without mode constraints: they are only on an annotation's type, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Cons (Ptr.make ((Stag.Mode_expr.Var "m", Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil)))), Nil)))), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty > Stag.Type_expr.Arrow argument 1
+    Malformed syntax: expected a constraint relating a mode variable, got (Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))), Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))), None), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty > Stag.Type_expr.Constrained argument 1 > element 0
+    Malformed syntax: expected a type without mode constraints: they are only on an annotation's type, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Cons (Ptr.make ((Stag.Mode_expr.Var "m", Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))), None), Nil)))), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty > Stag.Type_expr.Arrow argument 1
     Malformed syntax: expected at least one mode constraint, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Nil)), within element 0 > Stag.Toplevel.Let argument 3 > Stag.Expr.Var argument 1 > field `ty
-    Malformed syntax: expected a type without mode constraints: they are only on an annotation's type, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Cons (Ptr.make ((Stag.Mode_expr.Var "m", Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil)))), Nil))))
-    Malformed syntax: expected a type without mode constraints: they are only on an annotation's type, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Cons (Ptr.make ((Stag.Mode_expr.Var "m", Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil)))), Nil)))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Alias
+    Malformed syntax: expected a type without mode constraints: they are only on an annotation's type, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Cons (Ptr.make ((Stag.Mode_expr.Var "m", Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))), None), Nil))))
+    Malformed syntax: expected a type without mode constraints: they are only on an annotation's type, got Stag.Type_expr.Constrained (Ptr.make (Stag.Type_expr.Con (Stag.Path.Name "int", Nil), Cons (Ptr.make ((Stag.Mode_expr.Var "m", Stag.Mode_expr.Atoms (Cons (Ptr.make (Stag.Mode_expr.Atom.Local, Nil))), None), Nil)))), within element 0 > Stag.Toplevel.Type > field `kind > Stag.Type_decl.Kind.Alias
     |}]
 ;;
 

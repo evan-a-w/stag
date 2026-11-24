@@ -54,8 +54,8 @@ val rank : t -> int option
 
 val var_id : t -> int
 
-(** The nodes [t] is related to on its axis, without a morphism: [`Le n] for
-    [t <= n], [`Ge n] for [n <= t]. A generic node's are the constraints its
+(** The nodes [t] is related to on its axis, by a morphism implying the
+    relation without it: [`Le n] for [t <= n], [`Ge n] for [n <= t]. A generic node's are the constraints its
     scheme keeps, others' their edges. *)
 val relations : t -> ([ `Le | `Ge ] * t) list
 

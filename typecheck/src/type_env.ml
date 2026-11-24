@@ -38,6 +38,7 @@ module Decl = struct
     ; mutable prepared :
         (Signature.Type_decl.Kind.t * Reflected_decl.Kind.t option) option
     ; mutable value_parameters : Int.Set.t option
+    ; mutable storage_params : String.Set.t option
     ; mutable checked : Signature.Type_decl.t option
     ; mutable failed : bool (** Checking it reported an error. *)
     ; mutable reflected : Reflected_decl.t option
@@ -224,8 +225,6 @@ module Annotation_vars = struct
     ; tys : Type.ty String.Table.t
     ; rows : Type.row String.Table.t
     ; modes : Mode.Var.t String.Table.t
-    ; cells : String.Hash_set.t
-    (** The mode variables of what pointers' cells hold. *)
     }
 
   let create fresh ~rank =
@@ -234,7 +233,6 @@ module Annotation_vars = struct
     ; tys = String.Table.create ()
     ; rows = String.Table.create ()
     ; modes = String.Table.create ()
-    ; cells = String.Hash_set.create ()
     }
   ;;
 
@@ -383,12 +381,11 @@ module Vars = struct
 
   (* A mode argument: of a type's mode parameter, or what the cell of a
      [ptr[t @@ mode]] may hold, which is on stage and provenance only. *)
-  let mode_arg ?(ptr = false) t ({ txt; loc } : Syntax.Mode_expr.t)
+  let mode_arg ?(cell = `No) t ({ txt; loc } : Syntax.Mode_expr.t)
     : (Mode_arg.t, Typecheck_error.t) Result.t
     =
     match t, txt with
     | Annotation vars, Var name ->
-      Hash_set.add vars.cells name;
       Ok (Var (Annotation_vars.mode vars name))
     | Params params, Var name ->
       (match Map.find params name with
@@ -396,19 +393,31 @@ module Vars = struct
        | Some (ATy _ | ARow _) -> error ~loc (Type_variable_kind_mismatch name)
        | None -> error ~loc (Mode_variable_in_declaration name))
     | _, Atoms atoms ->
-      if ptr
+      if (match cell with
+          | `No -> false
+          | `Ptr | `Param _ -> true)
          && List.exists atoms ~f:(fun (atom : Syntax.Mode_expr.Atom.t) ->
            match atom with
            | Global | Regional | Local -> true
            | Const | Portable | Nonportable | Static | Gc | External -> false)
-      then error ~loc Invalid_modality
+      then
+        error
+          ~loc
+          (Invalid_modality
+             { mode_param =
+                 (match cell with
+                  | `Param name -> Some name
+                  | `No | `Ptr -> None)
+             })
       else Ok (Fixed (Mode_atoms.declared ~default:Mode_arg.default atoms))
   ;;
 
-  (* [lower <= upper] between variables, on provenance if either is a cell's,
-     else on stage, or bounding a variable by the atoms, on stage and
-     provenance: as printed. *)
-  let mode_constraint t ({ lower; upper } : Syntax.Mode_expr.Constraint.t) ~loc
+  (* [lower <= upper]: between variables, on every axis or the one named, or
+     bounding a variable by the atoms, on their axes. *)
+  let mode_constraint
+    t
+    ({ lower; upper; axis } as constraint_ : Syntax.Mode_expr.Constraint.t)
+    ~loc
     : (unit, Typecheck_error.t) Result.t
     =
     let reason =
@@ -416,7 +425,7 @@ module Vars = struct
         ~loc
         (sprintf
            "it is annotated %s"
-           (Syntax.Mode_expr.Constraint.to_string { lower; upper }))
+           (Syntax.Mode_expr.Constraint.to_string constraint_))
     in
     let bound (atoms : Syntax.Mode_expr.Atom.t list) ~(f : Bound.t) =
       List.fold_result atoms ~init:() ~f:(fun () atom ->
@@ -427,7 +436,9 @@ module Vars = struct
         | Static -> f.f Provenance Static
         | Gc -> f.f Provenance Gc
         | External -> f.f Provenance External
-        | Global | Regional | Local -> Ok ())
+        | Global -> f.f Locality Global
+        | Regional -> f.f Locality Regional
+        | Local -> f.f Locality Local)
     in
     let checked result =
       Result.map_error result ~f:(fun error ->
@@ -439,17 +450,19 @@ module Vars = struct
     | Params _, Var name, _ | Params _, _, Var name ->
       error ~loc (Mode_variable_in_declaration name)
     | Annotation vars, Var lower, Var upper ->
-      let submode axis =
-        Mode.Var.submode_on
-          (Annotation_vars.mode vars lower)
-          (Annotation_vars.mode vars upper)
-          axis
-          reason
-      in
+      let lower = Annotation_vars.mode vars lower in
+      let upper = Annotation_vars.mode vars upper in
       checked
-        (if Hash_set.mem vars.cells lower || Hash_set.mem vars.cells upper
-         then submode Provenance
-         else submode Stage)
+        (match axis with
+         | None -> Mode.Var.submode lower upper reason
+         | Some Stage -> Mode.Var.submode_on lower upper Stage reason
+         | Some Provenance -> Mode.Var.submode_on lower upper Provenance reason
+         | Some Locality -> Mode.Var.submode_on lower upper Locality reason)
+    | Annotation _, (Var _ | Atoms _), (Var _ | Atoms _)
+      when Option.is_some axis ->
+      error
+        ~loc
+        (Invalid_mode "a constraint on one axis relates two mode variables")
     | Annotation vars, Var lower, Atoms atoms ->
       let var = Annotation_vars.mode vars lower in
       checked
@@ -702,12 +715,14 @@ and elaborate_con
     else error ~loc (Type_arity_mismatch { type_name = path; expected; got })
   in
   let is_ptr = String.equal decl.name Type.ptr_name in
+  let storage = storage_params t decl in
+  let storage_cell param = if Set.mem storage param then `Param param else `No in
   let held = ref Mode_arg.gc in
   let%bind.Result args =
     map_result (List.zip_exn decl.decl.params args) ~f:(fun (param, arg) ->
       match param.txt, arg with
       | Ty _, Ty { txt = Modality (ty, mode); loc } when is_ptr ->
-        let%bind.Result mode_arg = Vars.mode_arg ~ptr:true vars mode in
+        let%bind.Result mode_arg = Vars.mode_arg ~cell:`Ptr vars mode in
         held := mode_arg;
         let%map.Result ty, syntax =
           elaborate' t module_ vars ~splices ~expansions ty
@@ -729,21 +744,25 @@ and elaborate_con
           elaborate_row t module_ vars ~splices ~expansions row
         in
         Type.ATy (Fresh.record t.fresh row), Type_expr.Row syntax
-      | Mode _, Mode mode ->
-        let%map.Result mode_arg = Vars.mode_arg vars mode in
+      | Mode param, Mode mode ->
+        let%map.Result mode_arg =
+          Vars.mode_arg ~cell:(storage_cell param) vars mode
+        in
         Type.AMode mode_arg, Type_expr.Mode mode
       | Mode _, Ty { txt = Var name; loc } ->
         let mode = Located.create ~loc (Syntax.Mode_expr.Var name) in
         let%map.Result mode_arg = Vars.mode_arg vars mode in
         Type.AMode mode_arg, Type_expr.Mode mode
-      | Mode _, Ty { txt = Con ({ txt = Path path; _ }, []); loc }
+      | Mode param, Ty { txt = Con ({ txt = Path path; _ }, []); loc }
         when Option.is_some (atom_of_path path) ->
         let mode =
           Located.create
             ~loc
             (Syntax.Mode_expr.Atoms [ Option.value_exn (atom_of_path path) ])
         in
-        let%map.Result mode_arg = Vars.mode_arg vars mode in
+        let%map.Result mode_arg = 
+          Vars.mode_arg ~cell:(storage_cell param) vars mode
+        in
         Type.AMode mode_arg, Type_expr.Mode mode
       | Ty _, Mode { txt = Atoms [ atom ]; loc } ->
         let%map.Result ty, syntax =
@@ -822,6 +841,95 @@ and definition (decl : Decl.t) ~loc =
     then Error Typecheck_error.already_reported
     else Ok decl.decl.kind
   | Variant _ | Record _ | Alias _ | Abstract | Malformed _ -> Ok decl.decl.kind
+
+(* The names of [decl]'s mode parameters that reach what a [ptr]'s cell holds,
+   which is on stage and provenance only. *)
+and storage_params t (decl : Decl.t) =
+  match decl.storage_params with
+  | Some params -> params
+  | None ->
+    (* While computing it, as for a recursive reference: none. *)
+    decl.storage_params <- Some String.Set.empty;
+    let reached = String.Hash_set.create () in
+    let mode_var (mode : Mode_expr.t) =
+      match mode.txt with
+      | Var name -> Some name
+      | Atoms _ -> None
+    in
+    let rec walk (ty : Type_expr.t) =
+      match ty.txt with
+      | Var _ | Splice _ -> ()
+      | Con (path, args) ->
+        let callee =
+          find_type t decl.module_ path.txt ~loc:path.loc |> Result.ok
+        in
+        let is_ptr =
+          Option.exists callee ~f:(fun callee ->
+            String.equal callee.name Type.ptr_name)
+        in
+        let callee_storage =
+          match callee with
+          | Some callee when not is_ptr -> storage_params t callee
+          | Some _ | None -> String.Set.empty
+        in
+        let callee_params =
+          Option.value_map callee ~default:[] ~f:(fun callee ->
+            List.map callee.decl.params ~f:(fun param -> Some param.txt))
+        in
+        let callee_params =
+          if List.length callee_params = List.length args
+          then callee_params
+          else List.map args ~f:(fun _ -> None)
+        in
+        List.iter2_exn args callee_params ~f:(fun arg param ->
+          let into_storage name =
+            match param with
+            | Some (Type_decl.Param.Mode param) ->
+              if Set.mem callee_storage param
+              then Hash_set.add reached name
+            | Some (Ty _ | Row _) | None -> ()
+          in
+          match arg with
+          | Ty { txt = Modality (ty, mode); _ } when is_ptr ->
+            Option.iter (mode_var mode) ~f:(Hash_set.add reached);
+            walk ty
+          | Ty { txt = Var name; _ } ->
+            into_storage name
+          | Ty ty -> walk ty
+          | Row row -> walk_row row
+          | Mode mode -> Option.iter (mode_var mode) ~f:into_storage)
+      | Arrow (a, b) ->
+        walk a;
+        walk b
+      | Tuple tys -> List.iter tys ~f:walk
+      | Code { inner; context } ->
+        walk inner;
+        walk_row context
+      | Record row | Variant row -> walk_row row
+      | Mut ty | Immut ty | Moded (ty, _) | Constrained (ty, _) | Modality (ty, _)
+        -> walk ty
+    and walk_row (row : Type_expr.row) =
+      match row.txt with
+      | Empty | Var _ -> ()
+      | Extend (_, ty, row) ->
+        walk ty;
+        walk_row row
+    in
+    (match definition decl ~loc:decl.decl.name.loc with
+     | Ok (Variant constructors) ->
+       List.iter constructors ~f:(fun (_, args) -> List.iter args ~f:walk)
+     | Ok (Record fields) -> List.iter fields ~f:(fun (_, ty) -> walk ty)
+     | Ok (Alias body) -> walk body
+     | Ok (Abstract | Splice _ | Malformed _) | Error _ -> ());
+    let params =
+      List.filter_map decl.decl.params ~f:(fun param ->
+        match param.txt with
+        | Mode name when Hash_set.mem reached name -> Some name
+        | Mode _ | Ty _ | Row _ -> None)
+      |> String.Set.of_list
+    in
+    decl.storage_params <- Some params;
+    params
 
 and expand t (decl : Decl.t) ~args ~expansions body =
   let knot = Type.Var.create (Fresh.id t.fresh) Generic in
@@ -931,6 +1039,7 @@ let declare
       ; params
       ; wrap_error
       ; used_while_defined = false
+      ; storage_params = None
       ; prepared = None
       ; value_parameters = None
       ; checked = None

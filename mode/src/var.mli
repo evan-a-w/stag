@@ -33,11 +33,12 @@ module Node : sig
   (** The id of the variable it belongs to. *)
   val var_id : t -> int
 
-  (** [`Le n] for [this <= n], [`Ge n] for [n <= this], on the same axis and
-      without crossing: of a generic variable, the constraints its scheme keeps;
-      of another, those it has now. A relation through a crossing morphism is
-      left out: no annotation can write it, and nothing crosses modes until
-      crossing by kind. *)
+  (** [`Le n] for [this <= n], [`Ge n] for [n <= this], on the same axis: of a
+      generic variable, the constraints its scheme keeps; of another, those it
+      has now. A relation through a morphism counts as the plain one it implies
+      (on locality, [a <= borrow(release(b))] implies [a <= b]); one through a
+      morphism implying none (crossing, or between axes) is left out, as no
+      annotation can write it. *)
   val relations : t -> ([ `Le | `Ge ] * t) list
 end
 

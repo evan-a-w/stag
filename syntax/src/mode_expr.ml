@@ -12,6 +12,13 @@ module Axis = struct
     | Provenance -> "provenance"
     | Locality -> "locality"
   ;;
+
+  let of_string = function
+    | "stage" -> Some Stage
+    | "provenance" -> Some Provenance
+    | "locality" -> Some Locality
+    | _ -> None
+  ;;
 end
 
 module Atom = struct
@@ -62,8 +69,16 @@ module Constraint = struct
   type t =
     { lower : mode
     ; upper : mode
+    ; axis : Axis.t option [@sexp.option]
     }
   [@@deriving sexp_of, compare, equal]
 
-  let to_string { lower; upper } = to_string lower ^ " <= " ^ to_string upper
+  let to_string { lower; upper; axis } =
+    let side mode =
+      match axis with
+      | None -> to_string mode
+      | Some axis -> sprintf "%s(%s)" (Axis.to_string axis) (to_string mode)
+    in
+    side lower ^ " <= " ^ side upper
+  ;;
 end

@@ -158,8 +158,9 @@ module Kind : sig
     | Misplaced_modality
     (** [t @@ m] other than as a field's or constructor argument's type or
         [ptr]'s argument. *)
-    | Invalid_modality
-    (** [ptr[t @@ m]] with [m] other than [external], the only modality yet. *)
+    | Invalid_modality of { mode_param : string option }
+    (** A locality in what a pointer's cell holds: [ptr[t @@ local]], or the
+        argument of a mode parameter ([mode_param]) that reaches one. *)
     | Mode_variable_in_declaration of string
     (** A mode variable in a declaration's type, whose arrows have fixed modes. *)
     | Invalid_mode of string

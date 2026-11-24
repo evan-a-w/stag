@@ -74,7 +74,7 @@ let code2 = .<m>.
   [%expect
     {|
     val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1
-    val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and 'm4 <= 'm1 and gc <= 'm3
+    val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and 'm2 <= regional and stage('m4) <= stage('m1) and provenance('m4) <= provenance('m1) and gc <= 'm3
     val const_ : 'a @ 'm0 -> ('b -> 'a @ 'm2) @ 'm1 with 'm0 <= 'm2 and 'm0 <= 'm1 and gc <= 'm1
     val n : int
     val code : <int>{..'a}
@@ -113,7 +113,7 @@ type t = { k : int @ portable -> int }
 |};
   [%expect
     {|
-    val f : 'a @ portable -> <'a>{..'b} @ 'm0 with gc <= 'm0
+    val f : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and 'm0 <= portable and gc <= 'm1
     val g : 'a @ 'm0 -> 'a @ 'm0 with portable <= 'm0
     val h : int @ 'm0 -> int @ 'm0 with portable <= 'm0
     type t = { k : int @ portable -> int }
@@ -128,7 +128,7 @@ let g x = let h u = x in .<h>.
   [%expect
     {|
     val f : 'a -> <'b>{x : 'b; ..'c}
-    val g : 'a @ 'm0 -> <'b>{h : 'b; ..'c} @ 'm1 with 'm0 <= 'm1
+    val g : 'a @ 'm0 -> <'b>{h : 'b; ..'c} @ 'm1 with stage('m0) <= stage('m1)
     |}]
 ;;
 
@@ -152,9 +152,9 @@ let both (x @ portable) = x
   [%expect
     {|
     val h : int @ 'm0 -> int @ 'm0 with portable <= 'm0
-    val chain : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> (('c @ 'm5 -> 'a @ 'm6) @ 'm4 -> ('c @ 'm8 -> 'b @ 'm9) @ 'm7) @ 'm3 with 'm0 <= 'm7 and 'm0 <= 'm3 and 'm2 <= 'm9 and 'm4 <= 'm7 and portable <= 'm5 and 'm6 <= 'm1 and 'm8 <= 'm5 and gc <= 'm7 and gc <= 'm3
+    val chain : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> (('c @ 'm5 -> 'a @ 'm6) @ 'm4 -> ('c @ 'm8 -> 'b @ 'm9) @ 'm7) @ 'm3 with 'm0 <= 'm7 and 'm0 <= 'm3 and 'm2 <= 'm9 and 'm2 <= regional and 'm4 <= 'm7 and portable <= 'm5 and 'm6 <= 'm1 and 'm6 <= regional and stage('m8) <= stage('m5) and provenance('m8) <= provenance('m5) and gc <= 'm7 and gc <= 'm3
     val fixed : int @ portable -> int @ portable
-    val both : 'a @ portable -> 'a
+    val both : 'a @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and 'm0 <= portable
     |}]
 ;;
 
@@ -173,11 +173,11 @@ let fixed (x @ portable) : int @ portable = x
   [%expect
     {|
     let ident_copy : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 = ident
-    let apply_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and 'm4 <= 'm1 and gc <= 'm3 = apply
+    let apply_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and 'm2 <= regional and stage('m4) <= stage('m1) and provenance('m4) <= provenance('m1) and gc <= 'm3 = apply
     let const__copy : 'a @ 'm0 -> ('b -> 'a @ 'm2) @ 'm1 with 'm0 <= 'm2 and 'm0 <= 'm1 and gc <= 'm1 = const_
-    let chain_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> (('c @ 'm5 -> 'a @ 'm6) @ 'm4 -> ('c @ 'm8 -> 'b @ 'm9) @ 'm7) @ 'm3 with 'm0 <= 'm7 and 'm0 <= 'm3 and 'm2 <= 'm9 and 'm4 <= 'm7 and portable <= 'm5 and 'm6 <= 'm1 and 'm8 <= 'm5 and gc <= 'm7 and gc <= 'm3 = chain
-    let f_copy : 'a @ portable -> <'a>{..'b} @ 'm0 with gc <= 'm0 = f
-    let g_copy : 'a @ 'm0 -> <'b>{h : 'b; ..'c} @ 'm1 with 'm0 <= 'm1 = g
+    let chain_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> (('c @ 'm5 -> 'a @ 'm6) @ 'm4 -> ('c @ 'm8 -> 'b @ 'm9) @ 'm7) @ 'm3 with 'm0 <= 'm7 and 'm0 <= 'm3 and 'm2 <= 'm9 and 'm2 <= regional and 'm4 <= 'm7 and portable <= 'm5 and 'm6 <= 'm1 and 'm6 <= regional and stage('m8) <= stage('m5) and provenance('m8) <= provenance('m5) and gc <= 'm7 and gc <= 'm3 = chain
+    let f_copy : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and 'm0 <= portable and gc <= 'm1 = f
+    let g_copy : 'a @ 'm0 -> <'b>{h : 'b; ..'c} @ 'm1 with stage('m0) <= stage('m1) = g
     let h_copy : int @ 'm0 -> int @ 'm0 with portable <= 'm0 = h
     let fixed_copy : int @ portable -> int @ portable = fixed
     |}]
@@ -195,7 +195,7 @@ let ok = capped 1
     {|
     val loose : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1
     val tight : 'a @ 'm0 -> 'a @ 'm0 with portable <= 'm0
-    val capped : 'a @ 'm0 -> 'a @ portable with 'm0 <= portable
+    val capped : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and 'm1 <= portable
     val ok : int
     |}];
   modes
@@ -215,7 +215,7 @@ let pinned : int @ 'm -> int @ 'n with 'n <= 'm and 'm <= const = fun x -> x
     {|
 let pinned : int @ 'm -> int @ 'n with 'n <= 'm and 'm <= portable = fun x -> x
 |};
-  [%expect {| val pinned : int @ portable -> int @ portable |}]
+  [%expect {| val pinned : int @ 'm0 -> int @ 'm1 with 'm0 <= portable and 'm1 <= 'm0 |}]
 ;;
 
 let%expect_test "equalities between arrows of different modes are kept" =
@@ -232,7 +232,7 @@ let prov = .< let mut cell = "a" in let f (u : string) = cell in .~both >.
     val f : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1
     val user : <<'a>{r : 'a; ..'b}>{..'c}
     val pair : <'a>{..'b} @ 'm0 -> (<'c>{..'d} @ 'm2 -> <'a * 'c>{..'e} @ 'm3) @ 'm1 where ..'b <= {..'e}, ..'d <= {..'e} with 'm0 <= 'm3 and 'm0 <= 'm1 and 'm2 <= 'm3 and gc <= 'm3 and gc <= 'm1
-    val both : <<'_a>{r : '_a; ..'_b} * string>{cell?'_c : string; f?'_d : immut string @ '_m0 -> string @ nonportable; ..'_e} where ..'_e <= {..'_f}
+    val both : <<'_a>{r : '_a; ..'_b} * string>{cell?'_c : string; f?'_d : immut string @ '_m0 -> string @ '_m1; ..'_e} where ..'_e <= {..'_f} with nonportable <= '_m1
     val prov : <<'_a>{r : '_a; ..'_b} * string>{..'_c}
     |}]
 ;;
@@ -246,8 +246,8 @@ let s = .~(r 1)
 |};
   [%expect
     {|
-    val q : <'a @ portable -> <'a>{..'b} @ 'm0>{..'c} with gc <= 'm0
-    val r : 'a @ portable -> <'a>{..'b} @ 'm0 with gc <= 'm0
+    val q : <'a @ 'm0 -> <'a>{..'b} @ 'm1>{..'c} with portable <= 'm0 and 'm0 <= 'm1 and 'm0 <= portable and gc <= 'm1
+    val r : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and 'm0 <= portable and gc <= 'm1
     val s : int
     |}]
 ;;
@@ -259,7 +259,7 @@ let u = t (Int.add 1)
 |};
   [%expect
     {|
-    val t : (int -> 'a @ 'm0) -> <'b>{r : 'b; ..'c} @ 'm1 with 'm0 <= 'm1
+    val t : (int -> 'a @ 'm0) -> <'b>{r : 'b; ..'c} @ 'm1 with stage('m0) <= stage('m1)
     val u : <'_a>{r : '_a; ..'_b}
     |}];
   modes
@@ -271,7 +271,7 @@ let c = a (Int.add 1 2)
   [%expect
     {|
     val b : 'a @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm0 <= 'm1
-    val a : 'a @ 'm0 -> <'b>{r : 'b; ..'c} @ 'm1 with portable <= 'm0 and 'm0 <= 'm1
+    val a : 'a @ 'm0 -> <'b>{r : 'b; ..'c} @ 'm1 with portable <= 'm0 and stage('m0) <= stage('m1)
     val c : <'_a>{r : '_a; ..'_b}
     |}];
   modes
@@ -282,7 +282,7 @@ let c = a (Int.add 1 2)
 |};
   [%expect
     {|
-    val a : 'a @ 'm0 -> <'b>{r : 'b; ..'c} @ 'm1 with portable <= 'm0 and 'm0 <= 'm1
+    val a : 'a @ 'm0 -> <'b>{r : 'b; ..'c} @ 'm1 with portable <= 'm0 and stage('m0) <= stage('m1)
     val b : 'a @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm0 <= 'm1
     val c : <'_a>{r : '_a; ..'_b}
     |}]
@@ -297,8 +297,8 @@ let b y = let w = a y in y
 |};
   [%expect
     {|
-    let a_copy : 'a @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 = a
-    let b_copy : 'a @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 = b
+    let a_copy : 'a @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and 'm0 <= global = a
+    let b_copy : 'a @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and 'm0 <= global and 'm1 <= regional = b
     |}]
 ;;
 
@@ -309,7 +309,7 @@ let n = k 1
 |};
   [%expect
     {|
-    val k : int @ '_m0 -> int @ '_m1 with '_m0 <= '_m1
+    val k : int @ '_m0 -> int @ '_m1 with stage('_m0) <= stage('_m1) and provenance('_m0) <= provenance('_m1)
     val n : int
     |}]
 ;;
@@ -387,8 +387,8 @@ let r2 = .~q2
     {|
     val q : <'a @ 'm0 -> 'a @ 'm1>{..'b} with 'm0 <= 'm1 and 'm0 <= portable
     val r : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and 'm0 <= portable
-    val q2 : <string @ 'm0 -> string @ nonportable>{..'a} with 'm0 <= portable
-    val r2 : string @ 'm0 -> string @ nonportable with 'm0 <= portable
+    val q2 : <string @ 'm0 -> string @ 'm1>{..'a} with 'm0 <= 'm1 and 'm0 <= portable and nonportable <= 'm1
+    val r2 : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and 'm0 <= portable and nonportable <= 'm1
     |}]
 ;;
 
@@ -415,19 +415,19 @@ let swap_any p q = let v = p.* in p.* <- q.*; q.* <- v
     {|
     let ext_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1 = ext
     let p_copy : ptr[string] = p
-    let store_copy : string @ 'm0 -> unit with 'm0 <= gc = store
+    let store_copy : string @ 'm0 -> unit with 'm0 <= gc global = store
     let keep_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and 'm0 <= static = keep
-    let in_ptr_copy : 'a -> ptr[string @@ 'm0] @ nonportable with external <= 'm0 = in_ptr
+    let in_ptr_copy : 'a -> ptr[string @@ 'm1] @ 'm0 with portable external <= 'm1 and nonportable gc <= 'm0 = in_ptr
     let k_copy : int @ 'm0 -> (int -> int) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1 = k
     let captures_copy : string @ 'm0 -> (int -> string @ 'm2) @ 'm1 with 'm0 <= 'm2 and 'm0 <= 'm1 and gc <= 'm1 = captures
     let closed_copy : 'a @ 'm0 -> (int -> int) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1 = closed
     let ints_copy : ptr[int] -> unit = ints
-    let strings_copy : ptr[string] @ 'm0 -> (string @ 'm2 -> unit) @ 'm1 with 'm0 <= 'm1 and 'm2 <= gc and gc <= 'm1 = strings
-    let get_any_copy : ptr['a @@ 'm0] -> 'a @ 'm1 with 'm0 <= 'm1 and nonportable <= 'm1 = get_any
+    let strings_copy : ptr[string] @ 'm0 -> (string @ 'm2 -> unit) @ 'm1 with 'm0 <= 'm1 and 'm2 <= gc global and gc <= 'm1 = strings
+    let get_any_copy : ptr['a @@ 'm0] -> 'a @ 'm1 with provenance('m0) <= provenance('m1) and nonportable <= 'm1 = get_any
     let id_cell_copy : ptr['a @@ 'm1] @ 'm0 -> ptr['a @@ 'm1] @ 'm2 with 'm0 <= 'm2 = id_cell
     let static_cell_copy : ptr[string @@ static] = static_cell
     let ext_cell_copy : ptr[string @@ external] = ext_cell
-    let swap_any_copy : ptr['a @@ 'm1] @ 'm0 -> (ptr['a @@ 'm1] -> unit) @ 'm2 with 'm0 <= 'm2 and gc <= 'm2 = swap_any
+    let swap_any_copy : ptr['a @@ 'm1] @ 'm0 -> (ptr['a @@ 'm1] -> unit) @ 'm2 with 'm0 <= 'm2 and nonportable <= 'm1 and gc <= 'm2 = swap_any
     |}]
 ;;
 

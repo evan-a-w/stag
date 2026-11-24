@@ -123,7 +123,7 @@ module Kind = struct
     | Misplaced_type_splice
     | Misplaced_mut
     | Misplaced_modality
-    | Invalid_modality
+    | Invalid_modality of { mode_param : string option }
     | Mode_variable_in_declaration of string
     | Invalid_mode of string
     | Invalid_external of
@@ -579,11 +579,17 @@ let rec kind_message (kind : Kind.t) ~show_type =
   | Misplaced_modality ->
     "A modality is only written on a record field's type, a constructor's \
      argument or a pointer's type argument, as in [ptr[string @@ external]]"
-  | Invalid_modality ->
+  | Invalid_modality { mode_param = None } ->
     "The modality of a pointer's type argument is on stage and provenance \
      ([const], [portable], [nonportable], [static], [gc], [external]) or a \
      mode variable, as in [ptr[string @@ external]]: a pointer's cell is \
      always [global]"
+  | Invalid_modality { mode_param = Some param } ->
+    sprintf
+      "The mode parameter '%s reaches what a pointer's cell holds, which is \
+       on stage and provenance only: a pointer's cell is always [global], so \
+       its argument has no locality"
+      param
   | Misplaced_mut ->
     "Only an entry of a code type's context can be [mut] or [immut], for a \
      variable the code assigns or doesn't"

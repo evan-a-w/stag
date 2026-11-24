@@ -105,12 +105,13 @@ and type_desc (g : Type_expr.desc) (w : Type_expr.desc) : Type_expr.desc option 
 and mode_expr m m' = located (same Mode_expr.equal_desc) m m'
 
 and mode_constraint
-  ({ lower; upper } : Mode_expr.Constraint.t)
-  ({ lower = lower'; upper = upper' } : Mode_expr.Constraint.t)
+  ({ lower; upper; axis } : Mode_expr.Constraint.t)
+  ({ lower = lower'; upper = upper'; axis = axis' } : Mode_expr.Constraint.t)
   =
   let* lower = mode_expr lower lower' in
-  let+ upper = mode_expr upper upper' in
-  { Mode_expr.Constraint.lower; upper }
+  let* upper = mode_expr upper upper' in
+  let+ axis = same [%equal: Mode_expr.Axis.t option] axis axis' in
+  { Mode_expr.Constraint.lower; upper; axis }
 
 and annot ({ ty; mode } : Annot.t) ({ ty = ty'; mode = mode' } : Annot.t) =
   let* ty = option type_expr ty ty' in

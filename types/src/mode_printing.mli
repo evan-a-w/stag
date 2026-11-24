@@ -15,9 +15,10 @@ type t
 
 val create : unit -> t
 
-(** Counts an occurrence, on an arrow's argument or result or as what a
-    pointer's cell holds, while counting what a rendering names. *)
-val count : t -> Mode.Var.t -> side:[ `Arg | `Res | `Held ] -> unit
+(** Counts an occurrence, on an arrow's argument or result, as a type's mode
+    argument ([`Held]) or as what a pointer's cell holds ([`Cell]), whose
+    locality means nothing, while counting what a rendering names. *)
+val count : t -> Mode.Var.t -> side:[ `Arg | `Res | `Held | `Cell ] -> unit
 
 (** After counting a rendering: groups the variables counted so far. *)
 val settle : t -> unit

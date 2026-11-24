@@ -340,22 +340,58 @@ let mode_expr t : Mode_expr.t =
   | _ -> expected t "a mode like `local`, or a mode variable like `'m`"
 ;;
 
+(** A side of a constraint: a mode, or [axis('m)], a variable on one axis. *)
+let constraint_side t =
+  match peek t, peek_at t 1 with
+  | Lident name, Lparen when Option.is_some (Mode_expr.Axis.of_string name) ->
+    let axis = Option.value_exn (Mode_expr.Axis.of_string name) in
+    advance t;
+    let open_loc = loc t in
+    advance t;
+    let mode = mode_expr t in
+    (match mode.txt with
+     | Var _ -> ()
+     | Atoms _ ->
+       fail
+         mode.loc
+         (sprintf
+            "`%s(...)` takes a mode variable, as in `%s('m)`: a mode like \
+             `portable` names its axis"
+            name
+            name));
+    close t Rparen ~opener:Lparen ~open_loc;
+    Some axis, mode
+  | _ -> None, mode_expr t
+;;
+
 (** [with 'm <= 'n and ...], after the [with]. *)
 let mode_constraints t =
   let rec loop acc =
-    let lower = mode_expr t in
+    let lower_axis, lower = constraint_side t in
     if not (is t Less && Token.equal (peek_at t 1) Equal) then expected t "`<=`";
     advance t;
     advance t;
-    let upper = mode_expr t in
+    let upper_axis, upper = constraint_side t in
+    let loc = Loc.merge lower.loc upper.loc in
     (match lower.txt, upper.txt with
      | Atoms _, Atoms _ ->
        fail
-         (Loc.merge lower.loc upper.loc)
+         loc
          "a mode constraint relates a mode variable, as in `'m <= 'n` or `'m \
           <= portable`"
      | _ -> ());
-    let acc = { Mode_expr.Constraint.lower; upper } :: acc in
+    let axis =
+      match lower_axis, upper_axis with
+      | None, None -> None
+      | Some lower, Some upper when Mode_expr.Axis.equal lower upper ->
+        Some lower
+      | _ ->
+        fail
+          loc
+          "a constraint on one axis names it on both sides, as in \
+           `stage('m) <= stage('n)`"
+    in
+    let acc = { Mode_expr.Constraint.lower; upper; axis } :: acc in
     match peek t with
     | Lident "and" ->
       advance t;

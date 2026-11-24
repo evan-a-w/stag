@@ -100,10 +100,10 @@ let weak_ext = Ptr.make (ext "a")
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
-    val from_init : 'a -> ptr[string @@ 'm0] @ nonportable with external <= 'm0
-    val from_store : 'a -> ptr[string @@ 'm0] @ nonportable with external <= 'm0
-    val from_read : 'a -> ptr[string @@ 'm0] @ nonportable with 'm0 <= gc
-    val unconstrained : 'a -> ptr[string @@ 'm0] @ nonportable
+    val from_init : 'a -> ptr[string @@ 'm1] @ 'm0 with portable external <= 'm1 and nonportable gc <= 'm0
+    val from_store : 'a -> ptr[string @@ 'm1] @ 'm0 with portable external <= 'm1 and nonportable gc <= 'm0
+    val from_read : 'a -> ptr[string @@ 'm1] @ 'm0 with 'm1 <= gc and nonportable gc <= 'm0
+    val unconstrained : 'a -> ptr[string @@ 'm1] @ 'm0 with nonportable gc <= 'm0
     val weak : ptr[string]
     val weak_ext : ptr[string @@ external]
     |}];
@@ -147,7 +147,7 @@ let rename_any (p : ptr[r @@ 'm]) s = p.*.name <- s
     val renumber : 'a -> unit
     val plain : ptr[r]
     val renumber_plain : 'a -> unit
-    val rename_any : ptr[r @@ 'm1] @ 'm0 -> (string @ 'm3 -> unit) @ 'm2 with 'm0 <= 'm2 and 'm3 <= 'm1 and gc <= 'm2
+    val rename_any : ptr[r @@ 'm1] @ 'm0 -> (string @ 'm3 -> unit) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and 'm3 <= global and gc <= 'm2
     |}];
   provenance
     (ext
@@ -218,9 +218,9 @@ let use u =
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
-    val get : ptr['a @@ 'm0] -> 'a @ 'm1 with 'm0 <= 'm1 and nonportable <= 'm1
-    val set : ptr['a @@ 'm1] @ 'm0 -> ('a @ 'm3 -> unit) @ 'm2 with 'm0 <= 'm2 and 'm3 <= 'm1 and gc <= 'm2
-    val swap : ptr['a @@ 'm1] @ 'm0 -> (ptr['a @@ 'm1] -> unit) @ 'm2 with 'm0 <= 'm2 and gc <= 'm2
+    val get : ptr['a @@ 'm0] -> 'a @ 'm1 with provenance('m0) <= provenance('m1) and nonportable <= 'm1
+    val set : ptr['a @@ 'm1] @ 'm0 -> ('a @ 'm3 -> unit) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and 'm3 <= global and gc <= 'm2
+    val swap : ptr['a @@ 'm1] @ 'm0 -> (ptr['a @@ 'm1] -> unit) @ 'm2 with 'm0 <= 'm2 and nonportable <= 'm1 and gc <= 'm2
     val ints : ptr[int]
     val strings : ptr[string @@ external]
     val plain : ptr[string]
@@ -278,7 +278,7 @@ let id_cell (p : ptr['a @@ 'm]) = p
     type alias['a] = ptr['a @@ external]
     type poly['a, 'b] = ptr['a]
     val via_alias : ptr[int @@ external]
-    val get : ptr['a @@ 'm0] -> 'a @ 'm1 with 'm0 <= 'm1 and nonportable <= 'm1
+    val get : ptr['a @@ 'm0] -> 'a @ 'm1 with provenance('m0) <= provenance('m1) and nonportable <= 'm1
     val id_cell : ptr['a @@ 'm1] @ 'm0 -> ptr['a @@ 'm1] @ 'm2 with 'm0 <= 'm2
     |}]
 ;;

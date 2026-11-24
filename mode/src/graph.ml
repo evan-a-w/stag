@@ -404,7 +404,7 @@ let var_id t = t.var_id
 let relations t =
   let related direction other morphism =
     Option.some_if
-      (Morphism.is_identity morphism && Axis.Any.equal other.axis t.axis)
+      (Morphism.is_deflationary morphism && Axis.Any.equal other.axis t.axis)
       (direction, other)
   in
   match t.state with

@@ -413,15 +413,25 @@ module Of_value = struct
              (match at with
               | Annotation ->
                 let constraint_ value : Mode_expr.Constraint.t =
-                  let lower, upper =
-                    pair (mode_expr ~loc) (mode_expr ~loc) value
+                  let lower, upper, axis =
+                    match value with
+                    | Value.Tuple [ lower; upper; axis ] ->
+                      ( within (Component 0) (mode_expr ~loc) lower
+                      , within (Component 1) (mode_expr ~loc) upper
+                      , within (Component 2) (option mode_axis) axis )
+                    | value -> unexpected ~expected:"a triple" value
                   in
-                  match lower.txt, upper.txt with
-                  | Atoms _, Atoms _ ->
+                  match lower.txt, upper.txt, axis with
+                  | Atoms _, Atoms _, _ ->
                     unexpected
                       ~expected:"a constraint relating a mode variable"
                       value
-                  | _ -> { lower; upper }
+                  | Atoms _, _, Some _ | _, Atoms _, Some _ ->
+                    unexpected
+                      ~expected:
+                        "a constraint on one axis between two mode variables"
+                      value
+                  | _ -> { lower; upper; axis }
                 in
                 (match arg 1 (list constraint_) with
                  | [] ->
@@ -446,6 +456,17 @@ module Of_value = struct
                      in [ptr[t @@ external]]"
                   value)
            | _ -> raise Bad_arguments))
+
+  and mode_axis value : Mode_expr.Axis.t =
+    variant
+      "Stag.Mode_expr.Axis.t"
+      value
+      ~f:(fun constructor args : Mode_expr.Axis.t ->
+        match constructor, Args.count args with
+        | "Stage", 0 -> Stage
+        | "Provenance", 0 -> Provenance
+        | "Locality", 0 -> Locality
+        | _ -> raise Bad_arguments)
 
   and mode_expr value ~loc : Mode_expr.t =
     let atom value =
