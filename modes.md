@@ -326,7 +326,7 @@ writable/read-only distinction on pointers; and with mutation, effect purity
 Each step is a branch stacked on the previous one.
 
 - **A. Syntax**: mode annotations (`(x @ local)`, `'a @ 'm -> 'b @ 'n`),
-  `stack_`, `exclave_`, `global_` fields, the non-tail call marker. Parsed
+  `stack_`, `exclave_`, `global_` fields (now `@@ global`), the non-tail call marker. Parsed
   and printed, ignored by the typechecker.
 - **B. Solver**: the `Mode` library (`mode/`): the three axes, mode
   variables with bounds, edges with morphisms (`const ⇒ static`, crossing),
@@ -340,7 +340,7 @@ Each step is a branch stacked on the previous one.
   modes (a closure's mode is the mode of the arrow value); schemes keep mode variables and their constraints; mode
   annotations; printing that hides unconstrained and default modes.
 - **E. Locality**: regions, inferred allocation locality, `stack_`,
-  `exclave_`, the tail call rule, `global_` fields, `Unsafe.assume_global`,
+  `exclave_`, the tail call rule, `global_` fields (now `@@ global`), `Unsafe.assume_global`,
   mutable variables assigned from closures holding `global` values, mode
   crossing by kind on locality, exact binding annotations.
 - **F. Provenance**: `unknown` renamed `external`; deep provenance through
@@ -363,6 +363,14 @@ Each step is a branch stacked on the previous one.
   their definition (`gc` by default). Stores needn't check the pointer
   stored through (every `ptr` is to stag's memory; C's will be `cptr[t]`).
   In `with`, a relation with a cell variable is on provenance.
+  Then one modality syntax, `t @@ m` on record fields, constructor
+  arguments and `ptr`, on every axis (`global_` fields are gone): meet on
+  values (a field read from a block at `b` is at most `b ⊓ m`), exact
+  through storage (a cell's reads are `m`, and no longer join the
+  pointer's own provenance), composing along `p.*.f`. `ptr`'s covers stage
+  and provenance; its locality is always `global`. Types take mode
+  parameters, `type cell['a, 'p : mode]`, applied as `cell[string, external]`
+  (the declaration says which arguments are modes); invariant for now.
 
 ## Later
 

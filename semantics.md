@@ -193,7 +193,7 @@ Provenance follows reachability, not evaluation:
 
 - A block (a record, tuple or constructor, by value), a pointer and a closure
   are at least what they hold or capture; a part read from them is at most
-  their provenance. A `global_` field still counts: it is reachable.
+  their provenance. A field with a modality still counts: it is reachable.
 - What is only evaluated (a `let`'s bound expression, a sequence's first
   part, a scrutinee) doesn't count towards the result's provenance.
 - Literals and toplevel constants are `static`; prims, declared functions and
@@ -253,8 +253,8 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   records, tuples and variants of them) crosses locality: a copy of it is as
   good anywhere.
 - A function's result is at most `regional` (it outlives the function's
-  region); a toplevel, what is stored through a pointer and what a `global_`
-  field holds must be `global`. A closure is at least the localities of what
+  region); a toplevel, what is stored through a pointer and what a
+  `@@ global` field holds must be `global`. A closure is at least the localities of what
   it captures, as seen from its body (what is `local` to the enclosing body is
   `regional` inside it).
 - `exclave_ e` ends the current region early and evaluates `e` in the caller's,
@@ -268,11 +268,20 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   `local` parameters (and what is read from them) are `regional`, as they
   live in the caller's region. `stack_` allocations of the current body are
   `local`. Returning needs `global` (`regional` or `local` under `exclave_`).
-- `global_` on record fields and constructor arguments: always `global`, even
-  inside a local block.
+- Modalities, `t @@ m` on a record field or constructor argument, on any
+  axis: building one needs the part at most `m`, and reading it from a block
+  at mode `b` gives at most `b ⊓ m` (`@@ global`: always `global`, even
+  inside a local block; `@@ portable`: embeddable even when the block isn't;
+  `@@ gc`: GC-owned even in an `external` block). A `const` modality is also
+  `static`. Through a pointer the modality is exact instead: a store takes
+  at most `m`, and a read gives `m` whatever the pointer's mode, as the
+  cell's aliases may store anything that fits. Modalities compose along a
+  path (`p.*.f`: the cell's, then the field's). A type's mode parameters
+  (`type cell['a, 'p : mode]`) are full modes, of which each position uses
+  the axes it allows; for now they are invariant.
 - Records have no mutable fields: mutation is through a `ptr` (`p.* <- v`,
   `p.*.x <- v`), whose pointee is storage rather than a value. Such a store
-  is implicitly `global_`, so an older region's block never points into a
+  is implicitly `@@ global`, so an older region's block never points into a
   newer region. `Unsafe.assume_global e` (name tentative) bypasses this, the
   programmer guaranteeing that `e` outlives what it is stored into. The GC
   stays safe either way: it never follows pointers into the data stack, so
