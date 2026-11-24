@@ -11,6 +11,7 @@ type t =
 include Hashable.S_plain with type t := t
 
 val equal : t -> t -> bool
+val compare : t -> t -> int
 val of_var : Mode.Var.t -> Mode.Axis.Any.t -> t
 
 (** The greatest point of the axis. *)

@@ -12,4 +12,5 @@ val signature : string -> (string, string list) Result.t
     does. One it can't compare (weak, with [where] or [as], or a mutable global)
     is listed as such. Prints the signature with [`Signature], the [_copy]
     annotations with [`Copies]. *)
+val checked : string -> (Signature.Item.t list, string list) Result.t
 val round_trip : string -> show:[ `Signature | `Copies ] -> unit
