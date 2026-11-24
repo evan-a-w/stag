@@ -32,7 +32,7 @@ module type Axis = sig
     type t =
       | Static
       | Gc
-      | Unknown
+      | External
 
     include Chain with type t := t
   end

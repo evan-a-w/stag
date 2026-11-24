@@ -154,7 +154,7 @@ let f u = keep (stack_ (Ptr.make (1, 2))) [@nontail]
 let escape (x @ local) = Ptr.make x
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:2:16-21), then x is passed to the function (at t.stag:2:25-35), then x is used (at t.stag:2:34-35), then it is passed to a function (at t.stag:2:25-35), but must be at most global, because a function type fixes it, then the function types are unified |}];
+    {| This is regional, because it is annotated local (at t.stag:2:16-21), then x is passed to the function (at t.stag:2:25-35), then x is used (at t.stag:2:34-35), then it is passed to a function (at t.stag:2:25-35), but must be at most global, because Ptr.make holds it, then the function types are unified |}];
   locality
     {|
 let same x = x
@@ -163,7 +163,7 @@ let g u = let p = same (Ptr.make (1, 2)) in Ptr.make p
 |};
   [%expect
     {|
-    This is local, because it is allocated by [stack_] (at t.stag:3:23-49), then it is part of the value (at t.stag:3:23-49), then it is passed to a function (at t.stag:3:18-49), then the function types are unified, then x is passed to the function (at t.stag:2:13-14), then x is used (at t.stag:2:13-14), then the function returns it (at t.stag:2:13-14), then the function types are unified, then the function returns it (at t.stag:3:18-49), then p is used (at t.stag:3:62-63), then it is passed to a function (at t.stag:3:53-63), but must be at most global, because a function type fixes it, then the function types are unified
+    This is local, because it is allocated by [stack_] (at t.stag:3:23-49), then it is part of the value (at t.stag:3:23-49), then it is passed to a function (at t.stag:3:18-49), then the function types are unified, then x is passed to the function (at t.stag:2:13-14), then x is used (at t.stag:2:13-14), then the function returns it (at t.stag:2:13-14), then the function types are unified, then the function returns it (at t.stag:3:18-49), then p is used (at t.stag:3:62-63), then it is passed to a function (at t.stag:3:53-63), but must be at most global, because Ptr.make holds it, then the function types are unified
     This is local, because it is allocated by [stack_] (at t.stag:3:23-49), then it is part of the value (at t.stag:3:23-49), then it is passed to a function (at t.stag:3:18-49), then the function types are unified, then x is passed to the function (at t.stag:2:13-14), then x is used (at t.stag:2:13-14), then the function returns it (at t.stag:2:13-14), then the function types are unified, then the function returns it (at t.stag:3:18-49), then p is used (at t.stag:3:62-63), but must be at most regional, because it is passed in a tail call, after the current region has ended (mark the call [@nontail]) (at t.stag:3:62-63)
     |}]
 ;;
@@ -191,7 +191,7 @@ let get (r @ local) = Ptr.make r.g
 let get_l (r @ local) = Ptr.make r.l
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:4:15-20), then r is passed to the function (at t.stag:4:24-36), then r is used (at t.stag:4:33-34), then its field is read (at t.stag:4:33-36), then it is passed to a function (at t.stag:4:24-36), but must be at most global, because a function type fixes it, then the function types are unified |}];
+    {| This is regional, because it is annotated local (at t.stag:4:15-20), then r is passed to the function (at t.stag:4:24-36), then r is used (at t.stag:4:33-34), then its field is read (at t.stag:4:33-36), then it is passed to a function (at t.stag:4:24-36), but must be at most global, because Ptr.make holds it, then the function types are unified |}];
   locality
     {|
 type r = { g : global_ ptr[int]; l : ptr[int] }
@@ -218,7 +218,7 @@ type t = A of global_ ptr[int] * ptr[int]
 let h (x @ local) = match x with A (g, _) -> Ptr.make g
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:4:13-18), then r is passed to the function (at t.stag:4:22-65), then r is used (at t.stag:4:28-29), then l is used (at t.stag:4:64-65), then it is passed to a function (at t.stag:4:55-65), but must be at most global, because a function type fixes it, then the function types are unified |}]
+    {| This is regional, because it is annotated local (at t.stag:4:13-18), then r is passed to the function (at t.stag:4:22-65), then r is used (at t.stag:4:28-29), then l is used (at t.stag:4:64-65), then it is passed to a function (at t.stag:4:55-65), but must be at most global, because Ptr.make holds it, then the function types are unified |}]
 ;;
 
 let%expect_test "let mut" =
@@ -628,7 +628,7 @@ let w = { f = g }
   [%expect
     {|
     This expression has type ptr[int] -> ptr[ptr[int]] but an expression was expected of type ptr[int] @ local -> ptr[ptr[int]]
-    Their modes differ: This is local, because a function type fixes it, then the function types are unified, but must be at most global, because a function type fixes it, then the function types are unified, then it is passed to a function (at t.stag:3:23-33), then p is used (at t.stag:3:32-33), then p is passed to the function (at t.stag:3:23-33)
+    Their modes differ: This is local, because a function type fixes it, then the function types are unified, but must be at most global, because Ptr.make holds it, then the function types are unified, then it is passed to a function (at t.stag:3:23-33), then p is used (at t.stag:3:32-33), then p is passed to the function (at t.stag:3:23-33)
     |}];
   locality
     {|
@@ -704,5 +704,5 @@ let f (p @ local) = same
 let g (r : r) (p @ local) = Ptr.make (r.f p) [@nontail]
 |};
   [%expect
-    {| This is local, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:5:37-44), then it is passed to a function (at t.stag:5:28-44), but must be at most global, because a function type fixes it, then the function types are unified |}]
+    {| This is local, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:5:37-44), then it is passed to a function (at t.stag:5:28-44), but must be at most global, because Ptr.make holds it, then the function types are unified |}]
 ;;

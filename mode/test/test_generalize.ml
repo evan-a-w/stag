@@ -31,10 +31,10 @@ let%expect_test "constraints through internal variables are kept, instances \
       (generic (m0.provenance <= m2.provenance)
        (m0.provenance <= (const_is_static m0.stage))))
      (m0.locality Global..Local (generic (m0.locality <= m2.locality))))
-    ((m1.stage Const..Nonportable) (m1.provenance Static..Unknown)
+    ((m1.stage Const..Nonportable) (m1.provenance Static..External)
      (m1.locality Global..Local))
     ((m2.stage Const..Nonportable (generic))
-     (m2.provenance Static..Unknown
+     (m2.provenance Static..External
       (generic (m2.provenance <= (const_is_static m2.stage))))
      (m2.locality Global..Local (generic)))
     |}];
@@ -50,11 +50,11 @@ let%expect_test "constraints through internal variables are kept, instances \
     {|
     ((m3.stage Const..Nonportable) (m3.provenance Static..Gc)
      (m3.locality Global..Local))
-    ((m4.stage Const..Nonportable) (m4.provenance Static..Unknown)
+    ((m4.stage Const..Nonportable) (m4.provenance Static..External)
      (m4.locality Global..Local))
     ((m5.stage Const..Nonportable) (m5.provenance Static..Gc)
      (m5.locality Global..Local))
-    ((m6.stage Const..Nonportable) (m6.provenance Static..Unknown)
+    ((m6.stage Const..Nonportable) (m6.provenance Static..External)
      (m6.locality Global..Local))
     |}];
   ok (Var.at_least x1 Locality Local (reason "local argument"));
@@ -64,21 +64,21 @@ let%expect_test "constraints through internal variables are kept, instances \
     {|
     ((m3.stage Const..Nonportable) (m3.provenance Static..Gc)
      (m3.locality Local))
-    ((m4.stage Const..Nonportable) (m4.provenance Static..Unknown)
+    ((m4.stage Const..Nonportable) (m4.provenance Static..External)
      (m4.locality Local))
     ((m5.stage Const..Portable) (m5.provenance Static..Gc)
      (m5.locality Global..Local))
-    ((m6.stage Const..Portable) (m6.provenance Static..Unknown)
+    ((m6.stage Const..Portable) (m6.provenance Static..External)
      (m6.locality Global..Local))
     ((m0.stage Const..Nonportable (generic (m0.stage <= m2.stage)))
      (m0.provenance Static..Gc
       (generic (m0.provenance <= m2.provenance)
        (m0.provenance <= (const_is_static m0.stage))))
      (m0.locality Global..Local (generic (m0.locality <= m2.locality))))
-    ((m1.stage Const..Nonportable) (m1.provenance Static..Unknown)
+    ((m1.stage Const..Nonportable) (m1.provenance Static..External)
      (m1.locality Global..Local))
     ((m2.stage Const..Nonportable (generic))
-     (m2.provenance Static..Unknown
+     (m2.provenance Static..External
       (generic (m2.provenance <= (const_is_static m2.stage))))
      (m2.locality Global..Local (generic)))
     |}];
@@ -108,15 +108,15 @@ let%expect_test "constraints with outer variables" =
     {|
     ((m2.stage Const..Nonportable
       (generic (m2.stage <= m1.stage) (m0.stage <= m2.stage)))
-     (m2.provenance Static..Unknown
+     (m2.provenance Static..External
       (generic (m2.provenance <= m1.provenance)
        (m2.provenance <= (const_is_static m2.stage))
        (m0.provenance <= m2.provenance)))
      (m2.locality Global..Local
       (generic (m2.locality <= m1.locality) (m0.locality <= m2.locality))))
-    ((m0.stage Const..Nonportable) (m0.provenance Static..Unknown)
+    ((m0.stage Const..Nonportable) (m0.provenance Static..External)
      (m0.locality Global..Local))
-    ((m1.stage Const..Nonportable) (m1.provenance Static..Unknown)
+    ((m1.stage Const..Nonportable) (m1.provenance Static..External)
      (m1.locality Global..Local))
     |}];
   let k1 = Var.Instance.instantiate (Var.Instance.create ids ~rank:0) k in
@@ -126,9 +126,9 @@ let%expect_test "constraints with outer variables" =
   show [ outer_out ];
   [%expect
     {|
-    ((m4.stage Const..Nonportable) (m4.provenance Static..Unknown)
+    ((m4.stage Const..Nonportable) (m4.provenance Static..External)
      (m4.locality Regional..Local))
-    ((m1.stage Nonportable) (m1.provenance Static..Unknown)
+    ((m1.stage Nonportable) (m1.provenance Static..External)
      (m1.locality Regional..Local))
     |}];
   print_result (Var.at_most k1 Locality Global (reason "k1 is returned"));
@@ -154,11 +154,11 @@ let%expect_test "morphisms compose along paths" =
     {|
     ((m0.stage Const..Nonportable
       (generic (m0.stage <= (cross_portable m2.stage))))
-     (m0.provenance Static..Unknown
+     (m0.provenance Static..External
       (generic (m0.provenance <= (const_is_static m0.stage))))
      (m0.locality Global..Local (generic)))
     ((m2.stage Const..Nonportable (generic))
-     (m2.provenance Static..Unknown
+     (m2.provenance Static..External
       (generic (m2.provenance <= (const_is_static m2.stage))))
      (m2.locality Global..Local (generic)))
     |}];
@@ -169,8 +169,8 @@ let%expect_test "morphisms compose along paths" =
   show [ a1; b1 ];
   [%expect
     {|
-    ((m3.stage Nonportable) (m3.provenance Unknown) (m3.locality Local))
-    ((m4.stage Portable..Nonportable) (m4.provenance Static..Unknown)
+    ((m3.stage Nonportable) (m3.provenance External) (m3.locality Local))
+    ((m4.stage Portable..Nonportable) (m4.provenance Static..External)
      (m4.locality Global..Local))
     |}]
 ;;
@@ -188,14 +188,14 @@ let%expect_test "cycles, sharing within an instance, and non-generic variables" 
   [%expect
     {|
     ((m0.stage Const..Nonportable (generic (m0.stage <= m1.stage)))
-     (m0.provenance Static..Unknown (generic (m0.provenance <= m1.provenance)))
+     (m0.provenance Static..External (generic (m0.provenance <= m1.provenance)))
      (m0.locality Global..Local (generic (m0.locality <= m1.locality))))
     ((m1.stage Const..Nonportable (generic (m1.stage <= m0.stage)))
-     (m1.provenance Static..Unknown
+     (m1.provenance Static..External
       (generic (m1.provenance <= m0.provenance)
        (m1.provenance <= (const_is_static m1.stage))))
      (m1.locality Global..Local (generic (m1.locality <= m0.locality))))
-    ((m2.stage Const..Nonportable) (m2.provenance Static..Unknown)
+    ((m2.stage Const..Nonportable) (m2.provenance Static..External)
      (m2.locality Global..Local))
     (c_is_generic false)
     |}];
@@ -215,9 +215,9 @@ let%expect_test "cycles, sharing within an instance, and non-generic variables" 
   [%expect
     {|
     ((same_copy true) (c_unchanged true) (a1_is_generic false))
-    ((m3.stage Const..Nonportable) (m3.provenance Static..Unknown)
+    ((m3.stage Const..Nonportable) (m3.provenance Static..External)
      (m3.locality Local))
-    ((m4.stage Const..Nonportable) (m4.provenance Static..Unknown)
+    ((m4.stage Const..Nonportable) (m4.provenance Static..External)
      (m4.locality Local))
     |}]
 ;;
@@ -239,7 +239,7 @@ let%expect_test "nested generalization: an older scheme's variables are \
     {|
     ((m2.stage Const..Nonportable
       (generic (m2.stage <= m1.stage) (m0.stage <= m2.stage)))
-     (m2.provenance Static..Unknown
+     (m2.provenance Static..External
       (generic (m2.provenance <= m1.provenance)
        (m2.provenance <= (const_is_static m2.stage))
        (m0.provenance <= m2.provenance)))
@@ -251,12 +251,12 @@ let%expect_test "nested generalization: an older scheme's variables are \
   [%expect
     {|
     ((m0.stage Const..Nonportable (generic (m0.stage <= m1.stage)))
-     (m0.provenance Static..Unknown
+     (m0.provenance Static..External
       (generic (m0.provenance <= m1.provenance)
        (m0.provenance <= (const_is_static m0.stage))))
      (m0.locality Global..Local (generic (m0.locality <= m1.locality))))
     ((m1.stage Const..Nonportable (generic))
-     (m1.provenance Static..Unknown
+     (m1.provenance Static..External
       (generic (m1.provenance <= (const_is_static m1.stage))))
      (m1.locality Global..Local (generic)))
     |}]
@@ -277,11 +277,11 @@ let%expect_test "instances of the template carry later raised bounds of outer \
   [%expect
     {|
     ((m1.stage Portable..Nonportable (generic (m0.stage <= m1.stage)))
-     (m1.provenance Static..Unknown
+     (m1.provenance Static..External
       (generic (m1.provenance <= (const_is_static m1.stage))
        (m0.provenance <= m1.provenance)))
      (m1.locality Global..Local (generic (m0.locality <= m1.locality))))
-    ((m2.stage Portable..Nonportable) (m2.provenance Static..Unknown)
+    ((m2.stage Portable..Nonportable) (m2.provenance Static..External)
      (m2.locality Global..Local))
     (Error
      ("Mode mismatch" (var m2) (axis stage) (lower Portable) (upper Const)
@@ -309,20 +309,20 @@ let%expect_test "instantiating nested schemes together links the copies" =
   show [ p; inner ];
   [%expect
     {|
-    ((m3.stage Const..Nonportable) (m3.provenance Static..Unknown)
+    ((m3.stage Const..Nonportable) (m3.provenance Static..External)
      (m3.locality Local))
-    ((m5.stage Const..Nonportable) (m5.provenance Static..Unknown)
+    ((m5.stage Const..Nonportable) (m5.provenance Static..External)
      (m5.locality Local))
-    ((m4.stage Const..Nonportable) (m4.provenance Static..Unknown)
+    ((m4.stage Const..Nonportable) (m4.provenance Static..External)
      (m4.locality Local))
     ((m0.stage Const..Nonportable (generic (m0.stage <= m1.stage)))
-     (m0.provenance Static..Unknown
+     (m0.provenance Static..External
       (generic (m0.provenance <= m1.provenance)
        (m0.provenance <= (const_is_static m0.stage))))
      (m0.locality Global..Local (generic (m0.locality <= m1.locality))))
     ((m2.stage Const..Nonportable
       (generic (m2.stage <= m1.stage) (m0.stage <= m2.stage)))
-     (m2.provenance Static..Unknown
+     (m2.provenance Static..External
       (generic (m2.provenance <= m1.provenance)
        (m2.provenance <= (const_is_static m2.stage))
        (m0.provenance <= m2.provenance)))
@@ -349,10 +349,10 @@ let%expect_test "constraints from outer variables compose morphisms" =
     ((m2.stage Const..Nonportable
       (generic (m0.stage <= (cross_portable m2.stage))
        (m0.provenance <= (const_is_static m2.stage))))
-     (m2.provenance Static..Unknown
+     (m2.provenance Static..External
       (generic (m2.provenance <= (const_is_static m2.stage))))
      (m2.locality Global..Local (generic)))
-    ((m3.stage Portable..Nonportable) (m3.provenance Static..Unknown)
+    ((m3.stage Portable..Nonportable) (m3.provenance Static..External)
      (m3.locality Global..Local))
     |}]
 ;;
@@ -367,7 +367,7 @@ let%expect_test "cycles through internal variables leave no self constraint" =
   [%expect
     {|
     ((m0.stage Const..Nonportable (generic))
-     (m0.provenance Static..Unknown
+     (m0.provenance Static..External
       (generic (m0.provenance <= (const_is_static m0.stage))))
      (m0.locality Global..Local (generic)))
     |}]
@@ -393,12 +393,12 @@ let%expect_test "implied constraints are dropped" =
   [%expect
     {|
     ((m0.stage Const..Nonportable (generic (m0.stage <= m1.stage)))
-     (m0.provenance Static..Unknown
+     (m0.provenance Static..External
       (generic (m0.provenance <= m1.provenance)
        (m0.provenance <= (const_is_static m0.stage))))
      (m0.locality Global..Local (generic (m0.locality <= m1.locality))))
     ((m1.stage Const..Nonportable (generic (m1.stage <= m2.stage)))
-     (m1.provenance Static..Unknown
+     (m1.provenance Static..External
       (generic (m1.provenance <= m2.provenance)
        (m1.provenance <= (const_is_static m1.stage))))
      (m1.locality Global..Local (generic (m1.locality <= m2.locality))))
@@ -422,8 +422,8 @@ let%expect_test "defaulting an outer variable after generalization" =
   [%expect
     {|
     ((m0.stage Const) (m0.provenance Static) (m0.locality Regional))
-    ((m1.stage Nonportable) (m1.provenance Unknown) (m1.locality Local))
-    ((m3.stage Const..Nonportable) (m3.provenance Static..Unknown)
+    ((m1.stage Nonportable) (m1.provenance External) (m1.locality Local))
+    ((m3.stage Const..Nonportable) (m3.provenance Static..External)
      (m3.locality Regional..Local))
     |}]
 ;;
@@ -447,9 +447,9 @@ let%expect_test "constraints implied only through outer variables are kept, as \
   show [ inner1; q1 ];
   [%expect
     {|
-    ((m4.stage Const..Nonportable) (m4.provenance Static..Unknown)
+    ((m4.stage Const..Nonportable) (m4.provenance Static..External)
      (m4.locality Local))
-    ((m3.stage Const..Nonportable) (m3.provenance Static..Unknown)
+    ((m3.stage Const..Nonportable) (m3.provenance Static..External)
      (m3.locality Local))
     |}]
 ;;
@@ -465,7 +465,7 @@ let%expect_test "generalize is not allowed under atomically" =
   [%expect
     {|
     ("cannot be undone, so not allowed under atomically" generalize)
-    ((m0.stage Const..Nonportable) (m0.provenance Static..Unknown)
+    ((m0.stage Const..Nonportable) (m0.provenance Static..External)
      (m0.locality Global..Local))
     |}]
 ;;
@@ -492,7 +492,7 @@ let%expect_test "instances made under a failed atomically are forgotten" =
     (Error
      ("Mode mismatch" (var m1) (axis locality) (lower Local) (upper Global)
       (lower_because ("x1 is local")) (upper_because ("x1 is global"))))
-    ((m1.stage Const..Nonportable) (m1.provenance Static..Unknown)
+    ((m1.stage Const..Nonportable) (m1.provenance Static..External)
      (m1.locality Global))
     |}]
 ;;

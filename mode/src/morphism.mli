@@ -8,9 +8,14 @@ type t [@@deriving compare, sexp_of]
 
 val identity : Axis.Any.t -> t
 
-(** [x |-> f x] from stage to provenance, with [f const = static] and [unknown]
+(** [x |-> f x] from stage to provenance, with [f const = static] and [external]
     otherwise: [provenance <= f stage] says [const] implies [static]. *)
 val const_is_static : t
+
+(** [x |-> f x] from provenance to stage, with [f static = const] and
+    [nonportable] otherwise: [stage <= f provenance] says that what isn't
+    [const] is at least [gc], as what is allocated at run time is. *)
+val runtime_is_gc : t
 
 (** On stage, the right adjoint of [x |-> meet x portable]: a value of a type
     crossing [portable] used at [nonportable]. *)

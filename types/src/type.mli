@@ -273,7 +273,8 @@ module Printer : sig
       a declaration's default are. *)
   val create : ?type_name:(string -> string) -> ?modes:bool -> unit -> t
 
-  val ty : t -> ty -> string
+  (** With [atomic], parenthesized unless a single word or bracketed. *)
+  val ty : ?atomic:bool -> t -> ty -> string
 
   (** Renders [row] as the context of a code type. *)
   val context : t -> row -> string

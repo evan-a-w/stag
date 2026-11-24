@@ -1086,47 +1086,61 @@ module Printer = struct
     @ atom Locality const.locality default.locality
   ;;
 
-  (* A variable's locality, where it is known to be at least other than
-     [global]: what [@ local] would read back as. *)
-  let locality_atom var =
-    let lower = (Mode.Var.lower var).locality in
-    if Mode.Locality.equal lower Global
-    then None
-    else
-      Some (Sexp.to_string (Mode.Locality.sexp_of_t lower) |> String.lowercase)
+  (* What a variable is known to be at least, where that restricts its uses: a
+     locality other than [global], or [external]. As [@ local external] would
+     read back. *)
+  let lower_atoms var =
+    let lower = Mode.Var.lower var in
+    let locality =
+      if Mode.Locality.equal lower.locality Global
+      then []
+      else
+        [ Sexp.to_string (Mode.Locality.sexp_of_t lower.locality)
+          |> String.lowercase
+        ]
+    in
+    let provenance =
+      if Mode.Provenance.equal lower.provenance External
+      then [ "external" ]
+      else []
+    in
+    match locality @ provenance with
+    | [] -> None
+    | atoms -> Some (String.concat ~sep:" " atoms)
   ;;
 
   let is_default_side t : Arrow_modes.Side.t -> bool = function
     | Fixed const -> List.is_empty (const_atoms const)
     | Var var ->
       (match t.modes, t.counting with
-       | None, _ -> Option.is_none (locality_atom var)
+       | None, _ -> Option.is_none (lower_atoms var)
        | Some _, Some _ -> false
        | Some modes, None ->
          Option.is_none (Mode_printing.side modes var)
-         && Option.is_none (locality_atom var))
+         && Option.is_none (lower_atoms var))
   ;;
 
-  let mode_side t (side : Arrow_modes.Side.t) =
+  let mode_side t (side : Arrow_modes.Side.t) ~position =
     match side with
     | Fixed const ->
       (match const_atoms const with
        | [] -> ""
        | atoms -> " @ " ^ String.concat ~sep:" " atoms)
     | Var var ->
-      let locality =
-        Option.value_map (locality_atom var) ~default:"" ~f:(fun atom ->
+      let atoms =
+        Option.value_map (lower_atoms var) ~default:"" ~f:(fun atom ->
           " @ " ^ atom)
       in
       (match t.modes, t.counting with
-       | None, _ -> locality
+       | None, _ -> atoms
        | Some modes, Some _ ->
-         Mode_printing.count modes var;
+         Mode_printing.count modes var ~side:position;
          " @ _"
        | Some modes, None ->
-         (* A variable's name doesn't say its locality yet, a constant does. *)
-         (match Mode_printing.side modes var, locality_atom var with
-          | None, _ -> locality
+         (* A variable's name doesn't say its locality or provenance yet, a
+            constant does. *)
+         (match Mode_printing.side modes var, lower_atoms var with
+          | None, _ -> atoms
           | Some side, Some atom when not (String.is_prefix side ~prefix:" @ '")
             -> side ^ " " ^ atom
           | Some side, _ -> side))
@@ -1177,7 +1191,9 @@ module Printer = struct
            | ARow row -> record_to_string t row)
          |> String.concat ~sep:", ")
     | TArrow (ty1, ty2, modes) ->
-      let ty1 = ty_to_string t ~prec:1 ty1 ^ mode_side t modes.arg in
+      let ty1 =
+        ty_to_string t ~prec:1 ty1 ^ mode_side t modes.arg ~position:`Arg
+      in
       let curried =
         match canonical_ty ty2 with
         | TArrow _ -> Mode.Locality.join curried (side_locality modes.arg)
@@ -1192,7 +1208,7 @@ module Printer = struct
           ty2
       in
       let res =
-        match mode_side t modes.res, global with
+        match mode_side t modes.res ~position:`Res, global with
         | side, false -> side
         | "", true -> " @ global"
         | side, true when String.is_prefix side ~prefix:" @ '" -> side
@@ -1391,10 +1407,10 @@ module Printer = struct
     render t
   ;;
 
-  let ty t ty =
+  let ty ?(atomic = false) t ty =
     eliding t ~render:(fun t ->
       Hashtbl.clear t.introduced;
-      ty_to_string t ~prec:0 ty)
+      ty_to_string t ~prec:(if atomic then 2 else 0) ty)
   ;;
 
   let context t row =

@@ -21,7 +21,7 @@ module Atom = struct
     | Nonportable
     | Static
     | Gc
-    | Unknown
+    | External
     | Global
     | Regional
     | Local
@@ -29,7 +29,7 @@ module Atom = struct
 
   let axis : t -> Axis.t = function
     | Const | Portable | Nonportable -> Stage
-    | Static | Gc | Unknown -> Provenance
+    | Static | Gc | External -> Provenance
     | Global | Regional | Local -> Locality
   ;;
 

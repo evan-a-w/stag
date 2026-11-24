@@ -73,7 +73,7 @@ let%expect_test "the prelude's signature" =
       end
       module Mode_expr : sig
         module Atom : sig
-          type t = Const | Portable | Nonportable | Static | Gc | Unknown | Global | Regional | Local
+          type t = Const | Portable | Nonportable | Static | Gc | External | Global | Regional | Local
         end
         type t = Var of string | Atoms of list[Atom.t]
       end
@@ -738,11 +738,12 @@ let%expect_test "constructors are made as the typechecker resolves them" =
     ((constructors 103)
      (reflected
       (prelude.Stag.Expr.Deref prelude.Stag.Expr.Store
+       prelude.Stag.Mode_expr.Atom.External
        prelude.Stag.Mode_expr.Atom.Nonportable
-       prelude.Stag.Mode_expr.Atom.Regional prelude.Stag.Mode_expr.Atom.Unknown
-       prelude.Stag.Pattern.Deref prelude.Stag.Type.Kind.Alias
-       prelude.Stag.Type.Kind.Record prelude.Stag.Type.Kind.Variant
-       prelude.Stag.Type_ref.Path.Prelude prelude.Stag.Type_ref.Path.Program))
+       prelude.Stag.Mode_expr.Atom.Regional prelude.Stag.Pattern.Deref
+       prelude.Stag.Type.Kind.Alias prelude.Stag.Type.Kind.Record
+       prelude.Stag.Type.Kind.Variant prelude.Stag.Type_ref.Path.Prelude
+       prelude.Stag.Type_ref.Path.Program))
      (others_same_as_to_value true))
     |}]
 ;;

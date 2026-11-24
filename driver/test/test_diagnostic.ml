@@ -431,7 +431,7 @@ let%expect_test "end to end: source to rendered errors" =
     File "a.stag", line 1, characters 8-13:
     1 | let x @ bogus = 1
                 ^^^^^
-    Error: Unknown mode `bogus`, expected one of `const`, `portable`, `nonportable`, `static`, `gc`, `unknown`, `global`, `regional`, `local`
+    Error: Unknown mode `bogus`, expected one of `const`, `portable`, `nonportable`, `static`, `gc`, `external`, `global`, `regional`, `local`
     File "a.stag", line 1, characters 7-8:
     1 | type t[] = int
                ^

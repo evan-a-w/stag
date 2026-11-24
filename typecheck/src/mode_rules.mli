@@ -320,3 +320,7 @@ end
 
 (** The argument and result modes of [Unsafe.assume_global]. *)
 val assume_global : Ctx.t -> Mode.Var.t * Mode.Var.t
+
+(** The argument and result modes of [Ptr.make]: the pointer is allocated at run
+    time, and reaches what it holds. *)
+val ptr_make : Ctx.t -> Mode.Var.t * Mode.Var.t

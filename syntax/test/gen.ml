@@ -101,7 +101,7 @@ and mode_expr t : Mode_expr.t =
          (List.filter_map
             [ [ Mode_expr.Atom.Global; Regional; Local ]
             ; [ Const; Portable; Nonportable ]
-            ; [ Static; Gc; Unknown ]
+            ; [ Static; Gc; External ]
             ]
             ~f:(fun atoms -> Option.some_if (bool t) (pick t atoms))
           |> function

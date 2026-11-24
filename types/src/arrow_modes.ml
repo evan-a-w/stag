@@ -13,7 +13,7 @@ type t =
   }
 
 let default_const : Mode.Const.t =
-  { stage = Nonportable; provenance = Unknown; locality = Global }
+  { stage = Nonportable; provenance = Gc; locality = Global }
 ;;
 
 let default_curry_const : Mode.Const.t =

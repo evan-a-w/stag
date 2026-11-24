@@ -29,7 +29,7 @@ let%expect_test "the morphisms" =
     (id (right ((Const 0) (Portable 1) (Nonportable 2)))
      (left ((Const 0) (Portable 1) (Nonportable 2))) (inflationary true))
     (const_is_static (right ((Const 0) (Portable 2) (Nonportable 2)))
-     (left ((Static 0) (Gc 1) (Unknown 1))) (inflationary false))
+     (left ((Static 0) (Gc 1) (External 1))) (inflationary false))
     (cross_portable (right ((Const 0) (Portable 2) (Nonportable 2)))
      (left ((Const 0) (Portable 1) (Nonportable 1))) (inflationary true))
     |}]
@@ -43,7 +43,7 @@ let%expect_test "composition and order" =
   [%expect
     {|
     (const_is_static (right ((Const 0) (Portable 2) (Nonportable 2)))
-     (left ((Static 0) (Gc 1) (Unknown 1))) (inflationary false))
+     (left ((Static 0) (Gc 1) (External 1))) (inflationary false))
     (cross_portable (right ((Const 0) (Portable 2) (Nonportable 2)))
      (left ((Const 0) (Portable 1) (Nonportable 1))) (inflationary true))
     (cross_portable (right ((Const 0) (Portable 2) (Nonportable 2)))

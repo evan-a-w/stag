@@ -32,10 +32,10 @@ let%expect_test "axes are chains" =
        Nonportable Nonportable))
      (meets
       (Const Const Const Const Portable Portable Const Portable Nonportable)))
-    ((axis provenance) (all (Static Gc Unknown)) (min Static) (max Unknown)
+    ((axis provenance) (all (Static Gc External)) (min Static) (max External)
      (indices (0 1 2))
-     (joins (Static Gc Unknown Gc Gc Unknown Unknown Unknown Unknown))
-     (meets (Static Static Static Static Gc Gc Static Gc Unknown)))
+     (joins (Static Gc External Gc Gc External External External External))
+     (meets (Static Static Static Static Gc Gc Static Gc External)))
     ((axis locality) (all (Global Regional Local)) (min Global) (max Local)
      (indices (0 1 2))
      (joins (Global Regional Local Regional Regional Local Local Local Local))
@@ -64,7 +64,7 @@ let%expect_test "constant modes are ordered axis by axis" =
   [%expect
     {|
     ((min ((stage Const) (provenance Static) (locality Global)))
-     (max ((stage Nonportable) (provenance Unknown) (locality Local)))
+     (max ((stage Nonportable) (provenance External) (locality Local)))
      (a_le_b false) (b_le_a false) (a_le_join true) (meet_le_b true)
      (join ((stage Portable) (provenance Gc) (locality Local)))
      (meet ((stage Const) (provenance Static) (locality Global)))

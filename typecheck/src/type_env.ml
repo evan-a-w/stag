@@ -253,8 +253,7 @@ end
 
 module Mode_atoms = struct
   (* The constant of a declaration's arrow: the axes not written are
-     [default]'s, but a [const] one is [static]. Provenance isn't checked so
-     far. *)
+     [default]'s, but a [const] one is [static]. *)
   let declared ~(default : Mode.Const.t) (atoms : Syntax.Mode_expr.Atom.t list) =
     let const : Mode.Const.t =
       List.fold atoms ~init:default ~f:(fun const atom ->
@@ -265,12 +264,14 @@ module Mode_atoms = struct
         | Global -> { const with locality = Global }
         | Regional -> { const with locality = Regional }
         | Local -> { const with locality = Local }
-        | Static | Gc | Unknown -> const)
+        | Static -> { const with provenance = Static }
+        | Gc -> { const with provenance = Gc }
+        | External -> { const with provenance = External })
     in
     const
   ;;
 
-  (* Fixes the axes written, of those checked so far (not provenance). *)
+  (* Fixes the axes written. *)
   let constrain var (atoms : Syntax.Mode_expr.Atom.t list) ~loc =
     let reason =
       Mode.Reason.create
@@ -295,13 +296,19 @@ module Mode_atoms = struct
         | Global -> fix Locality Global
         | Regional -> fix Locality Regional
         | Local -> fix Locality Local
-        | Static | Gc | Unknown -> Ok ())
+        | Static -> fix Provenance Static
+        | Gc -> fix Provenance Gc
+        | External -> fix Provenance External)
     |> Result.map_error ~f:(fun (_ : Mode.Error.t) ->
       Typecheck_error.create ~loc (Invalid_mode "its modes are inconsistent"))
   ;;
 end
 
 module Vars = struct
+  module Bound = struct
+    type t = { f : 'a. 'a Mode.Axis.t -> 'a -> (unit, Mode.Error.t) Result.t }
+  end
+
   type t =
     | Params of Type.arg String.Map.t
     | Annotation of Annotation_vars.t
@@ -362,8 +369,8 @@ module Vars = struct
       Ok (Arrow_modes.Side.Fixed (Mode_atoms.declared atoms ~default))
   ;;
 
-  (* [lower <= upper] between variables, or bounding a variable by the atoms: on
-     the axes checked so far (stage), as printed. *)
+  (* [lower <= upper] between variables, on stage, or bounding a variable by the
+     atoms, on stage and provenance: as printed. *)
   let mode_constraint t ({ lower; upper } : Syntax.Mode_expr.Constraint.t) ~loc
     : (unit, Typecheck_error.t) Result.t
     =
@@ -374,13 +381,16 @@ module Vars = struct
            "it is annotated %s"
            (Syntax.Mode_expr.Constraint.to_string { lower; upper }))
     in
-    let bound (atoms : Syntax.Mode_expr.Atom.t list) ~f =
+    let bound (atoms : Syntax.Mode_expr.Atom.t list) ~(f : Bound.t) =
       List.fold_result atoms ~init:() ~f:(fun () atom ->
         match atom with
-        | Const -> f Mode.Stage.Const
-        | Portable -> f Portable
-        | Nonportable -> f Nonportable
-        | Static | Gc | Unknown | Global | Regional | Local -> Ok ())
+        | Const -> f.f Stage Mode.Stage.Const
+        | Portable -> f.f Stage Portable
+        | Nonportable -> f.f Stage Nonportable
+        | Static -> f.f Provenance Static
+        | Gc -> f.f Provenance Gc
+        | External -> f.f Provenance External
+        | Global | Regional | Local -> Ok ())
     in
     let checked result =
       Result.map_error result ~f:(fun error ->
@@ -401,11 +411,16 @@ module Vars = struct
     | Annotation vars, Var lower, Atoms atoms ->
       let var = Annotation_vars.mode vars lower in
       checked
-        (bound atoms ~f:(fun point -> Mode.Var.at_most var Stage point reason))
+        (bound
+           atoms
+           ~f:{ f = (fun axis point -> Mode.Var.at_most var axis point reason) })
     | Annotation vars, Atoms atoms, Var upper ->
       let var = Annotation_vars.mode vars upper in
       checked
-        (bound atoms ~f:(fun point -> Mode.Var.at_least var Stage point reason))
+        (bound
+           atoms
+           ~f:
+             { f = (fun axis point -> Mode.Var.at_least var axis point reason) })
   ;;
 end
 
@@ -442,6 +457,26 @@ let map_result xs ~f =
     let%map.Result y = f x in
     y :: ys)
   |> Result.map ~f:List.rev
+;;
+
+(* An application's result is computed at run time, so never [const]: neither is
+   an arrow's result, which printing then leaves unsaid. *)
+let result_floor (side : Arrow_modes.Side.t) ~loc =
+  let never_const =
+    Typecheck_error.create
+      ~loc
+      (Invalid_mode "the result of a function is never const")
+  in
+  match side with
+  | Fixed { stage = Const; _ } -> Error never_const
+  | Fixed { stage = Portable | Nonportable; _ } -> Ok ()
+  | Var var ->
+    Mode.Var.at_least
+      var
+      Stage
+      Portable
+      (Mode.Reason.create ~loc "it is the result of a function")
+    |> Result.map_error ~f:(fun (_ : Mode.Error.t) -> never_const)
 ;;
 
 (* Each elaborates to the type and the syntax with each type it names by its
@@ -483,7 +518,7 @@ let rec elaborate'
       let%bind.Result ty1, side1, syntax1 = side ty1 ~default ~elaborate in
       (* A curried declaration's partial applications hold its arguments so far,
          so are as local as they are, as in OxCaml. *)
-      let%map.Result ty2, side2, syntax2 =
+      let%bind.Result ty2, side2, syntax2 =
         match ty2.txt, side1 with
         | Arrow _, Fixed { locality; _ } ->
           let curried = Mode.Locality.join curried locality in
@@ -493,6 +528,7 @@ let rec elaborate'
             ~elaborate:(elaborate' ~curried t module_ vars ~splices ~expansions)
         | _ -> side ty2 ~default ~elaborate
       in
+      let%map.Result () = result_floor side2 ~loc:syntax2.loc in
       ( Type.TArrow
           ( ty1
           , ty2

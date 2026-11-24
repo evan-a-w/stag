@@ -74,8 +74,8 @@ let code2 = .<m>.
   [%expect
     {|
     val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1
-    val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and 'm2 <= 'm5 and 'm4 <= 'm1 and portable <= 'm5
-    val const_ : 'a @ 'm0 -> ('b -> 'a @ 'm2) @ 'm1 with 'm0 <= 'm2 and 'm0 <= 'm1
+    val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and 'm4 <= 'm1 and gc <= 'm3
+    val const_ : 'a @ 'm0 -> ('b -> 'a @ 'm2) @ 'm1 with 'm0 <= 'm2 and 'm0 <= 'm1 and gc <= 'm1
     val n : int
     val code : <int>{..'a}
     val m : string
@@ -113,9 +113,9 @@ type t = { k : int @ portable -> int }
 |};
   [%expect
     {|
-    val f : 'a @ portable -> <'a>{..'b} @ 'm0 with portable <= 'm0
-    val g : 'a @ 'm0 -> 'a @ 'm0
-    val h : int @ 'm0 -> int @ 'm0
+    val f : 'a @ portable -> <'a>{..'b} @ 'm0 with gc <= 'm0
+    val g : 'a @ 'm0 -> 'a @ 'm0 with portable <= 'm0
+    val h : int @ 'm0 -> int @ 'm0 with portable <= 'm0
     type t = { k : int @ portable -> int }
     |}]
 ;;
@@ -151,10 +151,10 @@ let both (x @ portable) = x
 |};
   [%expect
     {|
-    val h : int @ 'm0 -> int @ 'm0
-    val chain : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> (('c @ 'm5 -> 'a @ 'm6) @ 'm4 -> ('c @ 'm8 -> 'b @ 'm9) @ 'm7) @ 'm3 with 'm0 <= 'm7 and 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm9 and 'm4 <= 'm7 and 'm6 <= 'm1 and 'm8 <= 'm5 and portable <= 'm9
+    val h : int @ 'm0 -> int @ 'm0 with portable <= 'm0
+    val chain : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> (('c @ 'm5 -> 'a @ 'm6) @ 'm4 -> ('c @ 'm8 -> 'b @ 'm9) @ 'm7) @ 'm3 with 'm0 <= 'm7 and 'm0 <= 'm3 and 'm2 <= 'm9 and 'm4 <= 'm7 and portable <= 'm5 and 'm6 <= 'm1 and 'm8 <= 'm5 and gc <= 'm7 and gc <= 'm3
     val fixed : int @ portable -> int @ portable
-    val both : 'a @ portable -> 'a @ 'm0 with portable <= 'm0
+    val both : 'a @ portable -> 'a
     |}]
 ;;
 
@@ -173,12 +173,12 @@ let fixed (x @ portable) : int @ portable = x
   [%expect
     {|
     let ident_copy : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 = ident
-    let apply_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and 'm2 <= 'm5 and 'm4 <= 'm1 and portable <= 'm5 = apply
-    let const__copy : 'a @ 'm0 -> ('b -> 'a @ 'm2) @ 'm1 with 'm0 <= 'm2 and 'm0 <= 'm1 = const_
-    let chain_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> (('c @ 'm5 -> 'a @ 'm6) @ 'm4 -> ('c @ 'm8 -> 'b @ 'm9) @ 'm7) @ 'm3 with 'm0 <= 'm7 and 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm9 and 'm4 <= 'm7 and 'm6 <= 'm1 and 'm8 <= 'm5 and portable <= 'm9 = chain
-    let f_copy : 'a @ portable -> <'a>{..'b} @ 'm0 with portable <= 'm0 = f
+    let apply_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and 'm4 <= 'm1 and gc <= 'm3 = apply
+    let const__copy : 'a @ 'm0 -> ('b -> 'a @ 'm2) @ 'm1 with 'm0 <= 'm2 and 'm0 <= 'm1 and gc <= 'm1 = const_
+    let chain_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> (('c @ 'm5 -> 'a @ 'm6) @ 'm4 -> ('c @ 'm8 -> 'b @ 'm9) @ 'm7) @ 'm3 with 'm0 <= 'm7 and 'm0 <= 'm3 and 'm2 <= 'm9 and 'm4 <= 'm7 and portable <= 'm5 and 'm6 <= 'm1 and 'm8 <= 'm5 and gc <= 'm7 and gc <= 'm3 = chain
+    let f_copy : 'a @ portable -> <'a>{..'b} @ 'm0 with gc <= 'm0 = f
     let g_copy : 'a @ 'm0 -> <'b>{h : 'b; ..'c} @ 'm1 with 'm0 <= 'm1 = g
-    let h_copy : int @ 'm0 -> int @ 'm0 = h
+    let h_copy : int @ 'm0 -> int @ 'm0 with portable <= 'm0 = h
     let fixed_copy : int @ portable -> int @ portable = fixed
     |}]
 ;;
@@ -194,8 +194,8 @@ let ok = capped 1
   [%expect
     {|
     val loose : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1
-    val tight : 'a @ 'm0 -> 'a @ 'm0
-    val capped : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and 'm1 <= portable
+    val tight : 'a @ 'm0 -> 'a @ 'm0 with portable <= 'm0
+    val capped : 'a @ 'm0 -> 'a @ portable with 'm0 <= portable
     val ok : int
     |}];
   modes
@@ -209,7 +209,13 @@ let bad = capped (Int.to_string 3)
     {|
 let pinned : int @ 'm -> int @ 'n with 'n <= 'm and 'm <= const = fun x -> x
 |};
-  [%expect {| val pinned : int @ const -> int @ const |}]
+  [%expect
+    {| This is portable, because it is the result of a function (at t.stag:2:25-33), then it is annotated 'n <= 'm (at t.stag:2:39-47), but must be at most const, because it is annotated 'm <= const (at t.stag:2:52-63) |}];
+  modes
+    {|
+let pinned : int @ 'm -> int @ 'n with 'n <= 'm and 'm <= portable = fun x -> x
+|};
+  [%expect {| val pinned : int @ portable -> int @ portable |}]
 ;;
 
 let%expect_test "equalities between arrows of different modes are kept" =
@@ -225,7 +231,7 @@ let prov = .< let mut cell = "a" in let f (u : string) = cell in .~both >.
     {|
     val f : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1
     val user : <<'a>{r : 'a; ..'b}>{..'c}
-    val pair : <'a>{..'b} @ 'm0 -> (<'c>{..'d} @ 'm2 -> <'a * 'c>{..'e} @ 'm3) @ 'm1 where ..'b <= {..'e}, ..'d <= {..'e} with 'm0 <= 'm3 and 'm0 <= 'm1 and 'm2 <= 'm3
+    val pair : <'a>{..'b} @ 'm0 -> (<'c>{..'d} @ 'm2 -> <'a * 'c>{..'e} @ 'm3) @ 'm1 where ..'b <= {..'e}, ..'d <= {..'e} with 'm0 <= 'm3 and 'm0 <= 'm1 and 'm2 <= 'm3 and gc <= 'm3 and gc <= 'm1
     val both : <<'_a>{r : '_a; ..'_b} * string>{cell?'_c : string; f?'_d : immut string @ '_m0 -> string @ nonportable; ..'_e} where ..'_e <= {..'_f}
     val prov : <<'_a>{r : '_a; ..'_b} * string>{..'_c}
     |}]
@@ -240,8 +246,8 @@ let s = .~(r 1)
 |};
   [%expect
     {|
-    val q : <'a @ portable -> <'a>{..'b} @ 'm0>{..'c} with portable <= 'm0
-    val r : 'a @ portable -> <'a>{..'b} @ 'm0 with portable <= 'm0
+    val q : <'a @ portable -> <'a>{..'b} @ 'm0>{..'c} with gc <= 'm0
+    val r : 'a @ portable -> <'a>{..'b} @ 'm0 with gc <= 'm0
     val s : int
     |}]
 ;;
@@ -253,7 +259,7 @@ let u = t (Int.add 1)
 |};
   [%expect
     {|
-    val t : (int -> 'a @ 'm0) -> <'b>{r : 'b; ..'c} @ 'm1 with 'm0 <= 'm1 and portable <= 'm1
+    val t : (int -> 'a @ 'm0) -> <'b>{r : 'b; ..'c} @ 'm1 with 'm0 <= 'm1
     val u : <'_a>{r : '_a; ..'_b}
     |}];
   modes
@@ -264,8 +270,8 @@ let c = a (Int.add 1 2)
 |};
   [%expect
     {|
-    val b : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and portable <= 'm1
-    val a : 'a @ 'm0 -> <'b>{r : 'b; ..'c} @ 'm1 with 'm0 <= 'm1 and portable <= 'm1
+    val b : 'a @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm0 <= 'm1
+    val a : 'a @ 'm0 -> <'b>{r : 'b; ..'c} @ 'm1 with portable <= 'm0 and 'm0 <= 'm1
     val c : <'_a>{r : '_a; ..'_b}
     |}];
   modes
@@ -276,8 +282,8 @@ let c = a (Int.add 1 2)
 |};
   [%expect
     {|
-    val a : 'a @ 'm0 -> <'b>{r : 'b; ..'c} @ 'm1 with 'm0 <= 'm1 and portable <= 'm1
-    val b : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and portable <= 'm1
+    val a : 'a @ 'm0 -> <'b>{r : 'b; ..'c} @ 'm1 with portable <= 'm0 and 'm0 <= 'm1
+    val b : 'a @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm0 <= 'm1
     val c : <'_a>{r : '_a; ..'_b}
     |}]
 ;;
@@ -291,8 +297,8 @@ let b y = let w = a y in y
 |};
   [%expect
     {|
-    let a_copy : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and portable <= 'm1 = a
-    let b_copy : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and portable <= 'm1 = b
+    let a_copy : 'a @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 = a
+    let b_copy : 'a @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 = b
     |}]
 ;;
 
@@ -330,7 +336,7 @@ let same (x @ 'm) = let y = (x @ 'm) in y
     {|
     val cap : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and 'm0 <= portable
     val cap_with : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and 'm0 <= portable
-    val same : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1
+    val same : 'a @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm0 <= 'm1
     |}];
   modes {|
 let bad = let mut c = 1 in (c @ portable)
@@ -384,4 +390,53 @@ let r2 = .~q2
     val q2 : <string @ 'm0 -> string @ nonportable>{..'a} with 'm0 <= portable
     val r2 : string @ 'm0 -> string @ nonportable with 'm0 <= portable
     |}]
+;;
+
+let%expect_test "provenance bounds read back" =
+  round_trip
+    {|
+let ext (x : string) = let y @ external = x in y
+let p = Ptr.make "a"
+let store (s : string) = p.* <- s
+let keep (s : string) = let y @ static = s in y
+let in_ptr u = Ptr.make (ext "a")
+let k (a : int) (b : int) = a
+let captures (s : string) = fun (v : int) -> s
+let closed u = fun (v : int) -> 1
+let ints (q : ptr[int]) = q.* <- 1
+let strings (q : ptr[string]) (s : string) = q.* <- s
+|};
+  [%expect
+    {|
+    let ext_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1 = ext
+    let p_copy : ptr[string] = p
+    let store_copy : string @ 'm0 -> unit with 'm0 <= gc = store
+    let keep_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and 'm0 <= static = keep
+    let in_ptr_copy : 'a -> ptr[string] @ nonportable external = in_ptr
+    let k_copy : int @ 'm0 -> (int -> int) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1 = k
+    let captures_copy : string @ 'm0 -> (int -> string @ 'm2) @ 'm1 with 'm0 <= 'm2 and 'm0 <= 'm1 and gc <= 'm1 = captures
+    let closed_copy : 'a @ 'm0 -> (int -> int) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1 = closed
+    let ints_copy : ptr[int] -> unit = ints
+    let strings_copy : ptr[string] @ 'm0 -> (string @ 'm2 -> unit) @ 'm1 with 'm0 <= 'm1 and 'm0 <= gc and 'm2 <= gc and gc <= 'm1 = strings
+    |}]
+;;
+
+let%expect_test "an arrow's result is never const" =
+  modes {|
+let f : int -> int @ const = fun (x : int) -> 1
+|};
+  [%expect {| This mode is invalid: the result of a function is never const |}];
+  modes {|
+let g (h : int -> int @ 'm with 'm <= const) = h
+|};
+  [%expect
+    {| This is portable, because it is the result of a function (at t.stag:2:18-26), but must be at most const, because it is annotated 'm <= const (at t.stag:2:32-43) |}];
+  modes {|
+type t = { f : int -> int @ const }
+|};
+  [%expect {| This mode is invalid: the result of a function is never const |}];
+  modes {|
+type t = { f : int @ const -> int @ portable }
+|};
+  [%expect {| type t = { f : int @ const static -> int @ portable } |}]
 ;;

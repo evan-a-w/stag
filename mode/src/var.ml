@@ -94,6 +94,11 @@ let submode ?(crossing = Crossing.none) ?(locality = Locality_map.id) a b reason
     all_axes (fun (T axis) -> submode_axis ~crossing ~locality a b axis reason))
 ;;
 
+let allocated t reason =
+  Graph.atomically (fun () ->
+    Graph.add_edge t.stage Morphism.runtime_is_gc t.provenance reason)
+;;
+
 let submode_on a b axis reason =
   Graph.atomically (fun () ->
     submode_axis

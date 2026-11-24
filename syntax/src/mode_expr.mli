@@ -19,7 +19,7 @@ module Atom : sig
     | Nonportable
     | Static
     | Gc
-    | Unknown
+    | External
     | Global
     | Regional
     | Local

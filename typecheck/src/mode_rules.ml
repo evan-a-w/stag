@@ -57,8 +57,20 @@ let joins ?crossing ?locality ctx (expected : Expected.t) mode ~loc ~why =
     (Mode.Var.submode ?crossing ?locality mode expected.mode (reason ~loc why))
 ;;
 
-let evaluated ctx expected mode ~loc ~why =
+(* What the value reaches, but not what it is allocated with. *)
+let held ctx expected mode ~loc ~why =
   joins ctx expected mode ~locality:Mode.Locality_map.ignore ~loc ~why
+;;
+
+let evaluated ctx expected mode ~loc ~why =
+  joins
+    ctx
+    expected
+    mode
+    ~crossing:{ Mode.Crossing.none with provenance = true }
+    ~locality:Mode.Locality_map.ignore
+    ~loc
+    ~why
 ;;
 
 let evaluate ?inner ctx expected ~loc ~why f =
@@ -130,7 +142,9 @@ let annotate ?(exact = false) ctx mode (annot : Syntax.Mode_expr.t option) ~var 
         | Global -> fix Locality Global
         | Regional -> fix Locality Regional
         | Local -> fix Locality Local
-        | Static | Gc | Unknown -> ()))
+        | Static -> fix Provenance Static
+        | Gc -> fix Provenance Gc
+        | External -> fix Provenance External))
 ;;
 
 let annotated ctx annot ~var =
@@ -174,7 +188,7 @@ let part ?ty ctx expected (modality : Modality.t) f =
          Global
          ~loc:part.loc
          ~why:"it is held by a [global_] field");
-    evaluated ctx expected sub.mode ~loc:part.loc ~why:"it is held";
+    held ctx expected sub.mode ~loc:part.loc ~why:"it is held";
     part
 ;;
 
@@ -183,7 +197,7 @@ let project ctx expected ~loc ~why f =
   let result, (modality : Modality.t) = f block in
   (match modality with
    | Id -> joins ctx expected block.mode ~loc ~why
-   | Global -> evaluated ctx expected block.mode ~loc ~why);
+   | Global -> held ctx expected block.mode ~loc ~why);
   result
 ;;
 
@@ -218,7 +232,7 @@ module Binding = struct
             match atom with
             | Const | Portable | Nonportable -> Some (Mode.Axis.Any.T Stage)
             | Global | Regional | Local -> Some (T Locality)
-            | Static | Gc | Unknown -> None)
+            | Static | Gc | External -> Some (T Provenance))
         | Var _ -> [ T Stage; T Locality; T Provenance ]
       in
       List.iter
@@ -282,14 +296,13 @@ module Binding = struct
         ~loc
         ~why:(sprintf "%s was computed at compile time" name)
     in
+    let reason = reason ~loc (sprintf "%s was computed at compile time" name) in
     Ctx.add
       ctx
       ~loc
-      (Mode.Var.at_most
-         mode
-         Locality
-         Global
-         (reason ~loc (sprintf "%s was computed at compile time" name)));
+      (Mode.Var.at_most mode Locality Global reason
+       |> Result.bind ~f:(fun () ->
+         Mode.Var.at_most mode Provenance Static reason));
     of_mode mode
   ;;
 
@@ -304,7 +317,16 @@ module Binding = struct
 end
 
 let raised ctx ~loc =
-  stage_at_least ctx Nonportable ~loc ~why:"it is a raised exception"
+  let mode =
+    stage_at_least ctx Nonportable ~loc ~why:"it is a raised exception"
+  in
+  Mode.Error.ok_exn
+    (Mode.Var.at_least
+       mode
+       Provenance
+       Gc
+       (reason ~loc "it is a raised exception"));
+  mode
 ;;
 
 module Alloc = struct
@@ -312,18 +334,32 @@ module Alloc = struct
     Option.iter expected.stack ~f:(fun allocates -> allocates := true)
   ;;
 
+  let allocates mode ~loc ~why =
+    Mode.Var.allocated
+      mode
+      (reason ~loc (sprintf "%s at run time, unless it is [const]" why))
+  ;;
+
+  let allocated ctx ~loc ~why =
+    let mode = Ctx.fresh ctx in
+    Mode.Error.ok_exn (allocates mode ~loc ~why);
+    mode
+  ;;
+
   let closure ctx expected ~loc f =
     site expected;
-    let closure = Ctx.fresh ctx in
+    let why = "the closure is made" in
+    let closure = allocated ctx ~loc ~why in
     let result = f closure in
-    joins ctx expected closure ~loc ~why:"the closure is made";
+    joins ctx expected closure ~loc ~why;
     result
   ;;
 
   let code ctx expected ~loc =
     site expected;
-    let code = Ctx.fresh ctx in
-    joins ctx expected code ~loc ~why:"the code is built";
+    let why = "the code is built" in
+    let code = allocated ctx ~loc ~why in
+    joins ctx expected code ~loc ~why;
     code
   ;;
 
@@ -361,6 +397,18 @@ module Function = struct
   let partial_applications ctx ~closure ~arg_modes ~partial_modes ~loc =
     let reason = reason ~loc "a partial application holds it" in
     List.iteri partial_modes ~f:(fun index partial ->
+      Ctx.add
+        ctx
+        ~loc
+        (Alloc.allocates partial ~loc ~why:"the partial application is made"
+         |> Result.bind ~f:(fun () ->
+           Mode.Var.at_least
+             partial
+             Stage
+             Portable
+             (Mode.Reason.create
+                ~loc
+                "a partial application is made at run time")));
       Ctx.add ctx ~loc (Mode.Var.submode closure partial reason);
       List.iteri arg_modes ~f:(fun index' arg ->
         if index' <= index
@@ -368,7 +416,15 @@ module Function = struct
   ;;
 
   let param ctx ~arg_mode ~name ~loc =
-    let mode = Ctx.fresh ctx in
+    (* A parameter may differ between calls, so is never [const] in the body,
+       whatever its callers pass. *)
+    let mode =
+      stage_at_least
+        ctx
+        Portable
+        ~loc
+        ~why:(sprintf "%s is a parameter, which may differ between calls" name)
+    in
     Ctx.add
       ctx
       ~loc
@@ -441,7 +497,7 @@ let exclave ctx (expected : Expected.t) ~loc f =
             res_mode
             (reason ~loc "the function returns it"))
      | Nontail | Quoted -> ());
-    evaluated
+    held
       ctx
       expected
       inner.mode
@@ -592,9 +648,20 @@ let assign ctx expected ~held ~crossed ~ty ~name ~loc f =
 ;;
 
 let store ctx expected ~loc ~target ~value =
-  let (target : Typed.Expr.t), (_ : Mode.Var.t) =
+  let (target : Typed.Expr.t), target_mode =
     evaluate ctx expected ~loc ~why:"it is stored to" target
   in
+  Ctx.add
+    ctx
+    ~loc
+    (Mode.Var.at_most
+       ~crossing:(ctx.crossing target.ty)
+       target_mode
+       Provenance
+       Gc
+       (reason
+          ~loc:target.loc
+          "it is stored through, which needs a cell the GC scans"));
   let sub = Expected.fresh ctx in
   let (value : Typed.Expr.t) = value sub ~ty:target.ty in
   evaluated ctx expected sub.mode ~loc ~why:"it is stored";
@@ -608,6 +675,17 @@ let store ctx expected ~loc ~target ~value =
        Global
        ~loc:value.loc
        ~why:"it is stored through a pointer, which may outlive any region");
+  Ctx.add
+    ctx
+    ~loc
+    (Mode.Var.at_most
+       ~crossing:(ctx.crossing target.ty)
+       sub.mode
+       Provenance
+       Gc
+       (reason
+          ~loc:value.loc
+          "it is stored through a pointer, whose cell may be managed by the GC"));
   target, value
 ;;
 
@@ -785,6 +863,10 @@ module Toplevel = struct
       if mut
       then (
         let cell, held = Binding.mutable_ ctx ~value annot ~var ~name ~loc in
+        (* A toplevel cell outlives every generalization: its readers relate to
+           it rather than copying its bounds. *)
+        List.iter [ cell; held ] ~f:(fun binding ->
+          Mode.Var.lower_rank (binding :> Mode.Var.t) ~rank:0);
         cell, Some held)
       else if is_function
       then Binding.closure value, None
@@ -811,6 +893,22 @@ module Toplevel = struct
              ~why:(sprintf "%s is a toplevel" name)))
   ;;
 end
+
+let ptr_make ctx =
+  let arg = Ctx.fresh ctx in
+  let res = Ctx.fresh ctx in
+  let reason = Mode.Reason.create "Ptr.make holds it" in
+  let made = Mode.Reason.create "Ptr.make allocates it at run time" in
+  Result.all_unit
+    [ Mode.Var.at_most arg Locality Global reason
+    ; Mode.Var.submode_on arg res Provenance reason
+    ; Mode.Var.at_least res Stage Nonportable made
+    ; Mode.Var.at_least res Provenance Gc made
+    ]
+  |> Result.iter_error ~f:(fun error ->
+    raise_s [%message "Ptr.make" (error : Mode.Error.t)]);
+  arg, res
+;;
 
 let assume_global ctx =
   let arg = Ctx.fresh ctx in

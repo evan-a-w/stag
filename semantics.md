@@ -71,7 +71,7 @@ All explicit. A `ptr[t]` is never null (`option[ptr[t]]` is represented as a
 nullable pointer, unobservably).
 
 ```ocaml
-Ptr.make e          (* allocate: heap, data stack under stack_, static if const *)
+Ptr.make e          (* allocate: heap, or data stack under stack_ *)
 &x                  (* address of a variable: local *)
 *e   e.*            (* read *)
 e.*.x               (* field of the pointee *)
@@ -116,10 +116,10 @@ let sum p =
 
 Two arrow types:
 
-- **Closure** `a -> b` (the existing arrow): boxed, with mode `static` or `gc`
-  only. A `static` closure captures only `static` values and is a constant
-  global; a `gc` closure is heap allocated and captures `global` values
-  (capturing `unknown` ones is unsafe, as storing them).
+- **Closure** `a -> b` (the existing arrow): boxed, at least the provenance
+  of what it captures. A `static` closure is `const` and a constant global;
+  others are allocated (heap or data stack); one capturing an `external`
+  value is `external`.
 - **Function pointer** `a => b`: a code pointer, capturing nothing (it may
   refer to `const`/`static` toplevels directly). No allocation, C ABI
   compatible. Same precedence and associativity as `->` (`int * int => int`
@@ -156,37 +156,83 @@ Modes are a product of independent axes, each a small lattice:
   `const ≤ portable ≤ nonportable`. Whether a value is known at compile time
   (`const`), and whether code of the next stage may refer to it (`portable`).
   `const` values are deeply immutable, since lifting copies them.
-- **Provenance** (memory): `static ≤ gc ≤ unknown`. Where pointers point.
-  - `static`: immortal data with GC headers marked immortal, so tracing it is
-    harmless. Deep: everything reachable from a `static` value is `static`.
-  - `gc`: in the GC heap, or `static`.
-  - `unknown`: anything (FFI, malloc). The safety escape hatch: it may be
-    stored into GC objects and captured by closures, unmarked, but that is
-    unsafe (the programmer guarantees it outlives them). Since an `unknown`
-    may point into the GC heap, it is traced, wherever it is stored: the GC
-    tolerates pointers outside its heap, in roots and in GC objects alike
-    (Boehm does; a precise GC checks headers or the heap range on such
-    fields). Stores of `unknown` keep their write barrier.
+- **Provenance** (memory): `static ≤ gc ≤ external`. What a value may reach.
+  Deep: a value's provenance is at least that of everything reachable from it.
+  - `static`: immortal data emitted with the program (literals, constants,
+    `const` values, closures capturing nothing allocated at run time). Never
+    scanned by the GC, as it can only reach `static` data.
+  - `gc`: may reach the GC heap (and `static` data). Everything allocated at
+    run time is at least `gc` (closures, partial applications, code,
+    `Ptr.make`, raised exceptions), data stack blocks included (only their
+    locality differs).
+  - `external`: may reach memory the GC doesn't manage (C's `malloc`, mapped
+    memory). The GC ignores such pointers (it finds objects by address, see
+    [GC](#gc)), but they may dangle, and C may not expect them to be retained.
 - **Locality**: `global ≤ regional ≤ local`, as OxCaml's regionality. See
   [Locality](#locality).
 
-The axes are independent except for one link: `const` implies `static` (a
-value known at compile time is emitted as static data). In the solver this is
-a monotone morphism bounding provenance by stage, `prov ≤ f(stage)` with
-`f(const) = static` and `f(_) = unknown`, as OxCaml's solver relates axes.
-They cannot be one axis, because of mode crossing by kind: pointer-free data
-(ints) crosses provenance and locality entirely, and crosses `portable` (it
-can be lifted into code), but never `const`, as a runtime int is not known at
-compile time. Crossing is applied when the type is known where the constraint
-arises.
+The axes are independent except for two links between stage and provenance:
+`const` implies `static` (a value known at compile time is emitted as static
+data), and what is allocated at run time (a closure, a partial application,
+code, `Ptr.make`) is at least `gc` unless it is `const` (emitted statically).
+In the solver these are monotone morphisms between the axes, as OxCaml's
+solver relates axes: `prov ≤ const_is_static(stage)` with
+`const_is_static(const) = static` and `external` otherwise, in every
+variable, and `stage ≤ runtime_is_gc(prov)` with
+`runtime_is_gc(static) = const` and `nonportable` otherwise, in each
+allocation's. They cannot be one axis, because of
+mode crossing by kind: pointer-free data (ints) crosses provenance and
+locality entirely, and crosses `portable` (it can be lifted into code), but
+never `const`, as a runtime int is not known at compile time. Crossing is
+applied when the type is known where the constraint arises. A raised
+exception's payload is at least `gc` outright, as it is allocated whatever
+its stage.
 
-`unknown` is produced by annotations (`(p @ unknown)`), and later by an
-`External` FFI: declarations of C functions, with a C compatible ABI that
-rejects signatures it can't express.
+A function's parameter is at least `portable` in its body: `const` means the
+same value on every evaluation, and a parameter may differ between calls. So
+what a function builds from its parameters is never `const`, so never
+`static`. Likewise an application's result is at least `portable`, so an
+arrow's result is too: annotations floor it (`int -> int @ const` is
+rejected), and printing leaves that bound out.
+
+Provenance follows reachability, not evaluation:
+
+- A block (a record, tuple or constructor, by value), a pointer and a closure
+  are at least what they hold or capture; a part read from them is at most
+  their provenance. A `global_` field still counts: it is reachable.
+- What is only evaluated (a `let`'s bound expression, a sequence's first
+  part, a scrutinee) doesn't count towards the result's provenance.
+- Literals and toplevel constants are `static`; prims and declared functions
+  take and return `gc` values unless their types say otherwise
+  (`string @ external -> ...`), and an `external` result is trusted as
+  declared.
+- A heap block holding an `external` value is itself `external`. Stores must
+  not raise a cell's provenance, as the cell's other aliases rely on it: a
+  store through a pointer (`p.* <- v`) takes only `gc` values (every pointer
+  cell is at least `gc`, and its provenance may have been forgotten by
+  subsumption). A cell holding `external` values is made by `Ptr.make` of
+  one, and keeps it. A mutable variable (`let mut`, a mutable global) has a
+  held mode of its own, inferred from what is assigned to it: an `external`
+  assignment makes it `external` (its reads then are), unless it is annotated
+  `@ gc`, which rejects it. `@ external` opts in.
+- Until pointers into foreign memory are designed, a store of a value that
+  may be a GC pointer also needs the pointer stored through to be at most
+  `gc`: an `external` pointer may be to memory the GC doesn't scan, which
+  must never hold the only reference to a GC object. Stores of pointer-free
+  values (`ptr[int]`) cross this, as they hold no GC pointer.
+- A closure is `static` only if it is `const`: what it captures is then
+  known at compile time, so it is emitted statically. A callback passed to C
+  must be `@ static` (C may retain it), once the FFI has callbacks.
+
+`external` is produced by annotations (`let x @ external = e`, a declared
+function type's `@ external` result), and later by an `External` FFI:
+declarations of C functions, with a C compatible ABI that rejects signatures
+it can't express.
 
 In compiled code, a value crossing from compile time into a quote must be
-`const` (lifted, as static data) or a runtime toplevel (`static`, referred to
-by its symbol, so mutable globals keep their identity).
+`const` (lifted, as static data) or a runtime toplevel, referred to by its
+symbol (the symbol is `static`, whatever the toplevel holds, so mutable
+globals keep their identity).
 
 ### Locality
 
@@ -257,10 +303,14 @@ machine (function) stack, and managed by the runtime as a bump allocator:
 - The interpreter has no regions: `stack_` allocates on its heap and
   `exclave_ e` is `e`. The rules are checked all the same.
 
-Data stack blocks have GC headers, so their provenance is `gc` (traceable)
-and only their locality differs. The data stack is a GC root region (with
-Boehm, registered with `GC_add_roots`). Stores into local blocks need no
-write barrier.
+A local value of fixed size that reaches neither an `exclave_` nor a caller
+(it dies with its own region) may be put on the machine stack instead (an
+`alloca` in the entry block, or a promoted register): the data stack is only
+needed for `exclave_` results and for local allocations of dynamic size or in
+loops. Either way, local blocks have the provenance `gc` (the GC scans them as
+roots: the data stack is a root region, with Boehm registered with
+`GC_add_roots`) and only their locality differs. Stores into local blocks need
+no write barrier.
 
 ### Solver
 
@@ -275,11 +325,16 @@ explain errors ("`x` is `gc` because it is allocated here, and must be
 `static` because it is captured by this static closure").
 
 The `const ⇒ static` link is a morphism edge between the stage and provenance
-graphs, `prov ≤ f(stage)`. It propagates upper bounds through `f`
-(`upper prov ⊓= f (upper stage)`) and lower bounds through its left adjoint
-`g` (`lower stage ⊔= g (lower prov)`, with `g(static) = const`,
-`g(gc) = g(unknown) = portable`: a heap value is not `const`). Morphisms
-must have adjoints for this to work, as in OxCaml.
+graphs, `prov ≤ const_is_static(stage)`. It propagates upper bounds through
+it (`upper prov ⊓= const_is_static (upper stage)`) and lower bounds through
+its left adjoint `l` (`lower stage ⊔= l (lower prov)`, with
+`l(static) = const`, `l(gc) = l(external) = portable`: a heap value is not
+`const`). An allocation adds the edge `stage ≤ runtime_is_gc(prov)` the other
+way: upper bounds give `upper stage ⊓= runtime_is_gc (upper prov)` (a `static`
+allocation is `const`), and its left adjoint `l'`, with `l'(const) = static`
+and `l'(portable) = l'(nonportable) = gc`, gives
+`lower prov ⊔= l' (lower stage)` (an allocation that isn't `const` is at
+least `gc`). Morphisms must have adjoints for this to work, as in OxCaml.
 
 The presence variables of rows (`Absent ≤ Present`, today `Type.presence`
 with `At_most`/`At_least` bounds) are another axis of the same solver, a
@@ -319,9 +374,9 @@ Full monomorphisation over types, and over the code-relevant modes, for
 compiled code. Polymorphic recursion is rejected in compiled code
 (instantiation that does not reach a fixpoint). A mode variable is
 code-relevant when the generated code depends on it: locality at an
-allocation site (data stack or heap), provenance at a store (write barrier,
-address space), transitively through callees. Others (the stage axis always,
-locality of a parameter that is only read) are erased to their upper bound,
+allocation site (data stack or heap), provenance of a stored value (a
+`static` one skips half of the write barrier), transitively through callees.
+Others (the stage axis always, locality of a parameter that is only read) are erased to their upper bound,
 which is always sound since the body was checked for every mode within its
 bounds. A function is compiled once per distinct assignment of its relevant
 variables, so instances differing only in irrelevant modes share code.
@@ -342,7 +397,7 @@ Typed  (after compile-time splices, run by the interpreter)
 ```
 
 Lowering of modes to LLVM: `static` is `ptr` (globals, constant if `const`),
-`gc` and `unknown` are `ptr addrspace(1)` (GC references).
+`gc` and `external` are `ptr addrspace(1)` (GC references).
 
 Runtime quotes (code values at level 0 in a compiled program) are not compiled
 initially.
@@ -359,10 +414,37 @@ initially.
 
 ## GC
 
-1. Boehm (conservative, non-moving): modes only serve as optimisations.
-2. Precise non-moving GC with LLVM's `shadow-stack` strategy.
-3. Statepoints (`RewriteStatepointsForGC`), possibly moving: `unknown` roots
-   and fields then need a heap check before relocation.
+As Go's: non-moving, non-generational, mark and sweep, finding objects by
+address rather than by header.
+
+- The heap is made of arenas of size-classed spans. A pointer's object is
+  found by its address: the arena index maps it to its span, which gives the
+  object's start and size, and its pointer bitmap (spans of pointer-free
+  objects are `noscan`, and are never scanned). A pointer outside the arenas
+  (into `static` data, the data stack, C's memory) is ignored, so no header is
+  needed on `static` or `external` data, and `external` values are traced
+  safely wherever they are stored.
+- `static` data is never scanned: by deep provenance it only reaches `static`
+  data. Mutable globals are roots (they may be assigned `gc` values), as are
+  the machine stacks and the data stack.
+- Marking is incremental first, then concurrent with the program. While (and
+  only while) marking, stores run Go's hybrid write barrier, shading the
+  overwritten pointer and the stored one. No barrier is needed on stores into
+  the data stack or other stack slots, on initialising stores (into an object
+  allocated since marking began, which is allocated black), or on stores of
+  pointer-free values. A barrier is needed whatever the stored value's
+  provenance, as the overwritten pointer must be shaded; only shading the
+  stored one may be skipped when it is `static`.
+- As cgo's rule: C may not retain a GC pointer beyond the call it was passed
+  to (a callback passed to C must be `static`).
+
+Steps:
+
+1. Boehm (conservative, non-moving): modes only serve as optimisations. It
+   also finds objects by address and tolerates pointers outside its heap.
+2. The precise collector above, stop the world, with LLVM's `shadow-stack`
+   strategy or stack maps for roots.
+3. Incremental, then concurrent marking, with the write barrier.
 
 ## Plan
 
