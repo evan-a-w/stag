@@ -210,10 +210,14 @@ The printer finds the exact set as follows (`types/src/mode_closure.ml`,
    bounds and every `g`): a printer that would print something inexact fails
    with an internal error instead.
 
-A mode argument (`ptr[t @@ 'm]`, `cell[t, 'm]`) has no locality: a variable
-only in mode arguments has its locality left out of the comparison, and is
-never related plainly through it (which would relate its neighbours'
-localities).
+A mode argument (`ptr[t @@ 'm]`, `cell[t, 'm]`) has no locality, so neither
+has a variable only in mode arguments: nothing in the solver relates its
+locality, a `with` clause naming it (`locality('m)`, `'m <= local`) is an
+error, and a plain `'m <= 'n` with it relates stage and provenance only. A
+variable also on an arrow has the arrow's locality. Such a variable prints as
+atoms only if fixed on both its axes (`ptr['a @@ const static]`), as a mode
+argument's unwritten axes read back as the default; one also on an arrow, and
+free there on locality, keeps its name in both places.
 
 With modes printed, an arrow's side fixed to a constant (by a declaration, as
 a record field's `string -> string`) prints with an atom on every axis,
