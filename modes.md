@@ -36,6 +36,12 @@ const  <  portable  <  nonportable
   domains). Replaces `persistent`.
 - **nonportable**: everything else, e.g. function arguments by default.
 
+`const` means the same value on every evaluation. So a function's parameter
+is at least `portable` in its body, whatever its callers pass: it may differ
+between calls, even if each is `const`. What is built from it (a closure
+capturing it, code embedding it) is then never `const`, so never `static`,
+while what the body builds from constants alone stays `const`.
+
 `const` implies `portable`: what is known at compile time exists at every
 stage. This is the stage axis of [semantics.md](semantics.md), alongside
 provenance and locality; `const` also implies `static` provenance there.
@@ -76,11 +82,11 @@ See [Arrow modes](#arrow-modes).
 ## Arrow modes
 
 Arrows carry the modes of their argument and result, `'a @ 'm -> 'b @ 'n`; a
-closure's own mode is the mode of the arrow value, like any value's. Only the
-stage axis is constrained so far.
+closure's own mode is the mode of the arrow value, like any value's.
 
-- **Functions.** Each parameter has the arrow's argument mode, and the body's
-  value is at most its result mode. The closure of a partial application holds
+- **Functions.** Each parameter has the arrow's argument mode, joined with
+  `portable` (see [The mode axis](#the-mode-axis)), and the body's value is at
+  most its result mode. The closure of a partial application holds
   the closure and the arguments given so far.
 - **Application.** The argument is at most the arrow's argument mode, and the
   result has the arrow's result mode, joined with `portable`: calling runs
@@ -94,14 +100,14 @@ stage axis is constrained so far.
 - **Annotations.** In an annotation, a side written without a mode is a fresh
   variable, so annotating restricts no mode; `'m` names one variable across a
   definition's annotations. In a declaration (and for builtins), it is the
-  default, `nonportable external global`, and a mode variable is an error. As
+  default, `nonportable gc global`, and a mode variable is an error. As
   in OxCaml, the result of a curried arrow written without a mode is as local
   as the arguments before it (`ptr[int] @ local -> int -> int` is
   `ptr[int] @ local -> (int -> int) @ local`), as it is the closure of a
   partial application holding them. Its `curry` is still fixed `regional`,
   as a declaration can't tell a partial application from a function value
   returned, so a tail call through it given a `local` argument must be marked
-  `[@nontail]`. Provenance written in a declaration isn't checked yet.
+  `[@nontail]`.
 - **Decisions made while checking a function.** Whether a variable is
   embedded in a quote, and whether a `let` is `const` enough to generalise,
   can't wait for the function's uses. They take the lower bound the mode would
@@ -142,6 +148,8 @@ may reach external memory) and `'m <= gc` or `'m <= static` (an argument
 stored through a pointer, or bound `@ static`). A constant side shows its
 provenance when it is not the default `gc`, and a variable side known to be
 `external` when it prints as a constant (`ptr[int] @ nonportable external`).
+A mutable global whose reads are `external` shows it
+(`val g : string @ external`).
 
 The `with` clause is also syntax for annotations (see syntax.md), so printed
 types read back as themselves. A constraint between variables constrains only
@@ -288,7 +296,8 @@ by the code that uses it) and that of the value it holds.
   only by `local` closures, on the data stack; captured by a `gc` closure, a
   heap box, whose stores have a write barrier unless the value is `static`.
 
-Mutable globals are `static`, referred to by symbol (so code may assign them:
+Mutable globals are referred to by their symbol, `static` whatever they hold
+(so code may assign them:
 `.< counter <- 1 >.` captures nothing), and hold `global` values (a global
 is a GC root). They are not `const`, so compile-time code can't use them: the
 toplevel splice lock, applied to the toplevels a splice reaches, replaces the

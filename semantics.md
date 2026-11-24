@@ -162,7 +162,8 @@ Modes are a product of independent axes, each a small lattice:
     `const` values, closures capturing nothing allocated at run time). Never
     scanned by the GC, as it can only reach `static` data.
   - `gc`: may reach the GC heap (and `static` data). Everything allocated at
-    run time is at least `gc`, data stack blocks included (only their
+    run time is at least `gc` (closures, partial applications, code,
+    `Ptr.make`, raised exceptions), data stack blocks included (only their
     locality differs).
   - `external`: may reach memory the GC doesn't manage (C's `malloc`, mapped
     memory). The GC ignores such pointers (it finds objects by address, see
@@ -172,16 +173,25 @@ Modes are a product of independent axes, each a small lattice:
 
 The axes are independent except for two links between stage and provenance:
 `const` implies `static` (a value known at compile time is emitted as static
-data), and what is allocated at run time (a closure, code, `Ptr.make`) is at
-least `gc` unless it is `const` (emitted statically). In the solver these are
-monotone morphisms between the axes, as OxCaml's solver relates axes:
-`prov ≤ f(stage)` with `f(const) = static` and `f(_) = external` in every
-variable, and `stage ≤ g(prov)` with `g(static) = const` and
-`g(_) = nonportable` in each allocation's. They cannot be one axis, because of
+data), and what is allocated at run time (a closure, a partial application,
+code, `Ptr.make`) is at least `gc` unless it is `const` (emitted statically).
+In the solver these are monotone morphisms between the axes, as OxCaml's
+solver relates axes: `prov ≤ const_is_static(stage)` with
+`const_is_static(const) = static` and `external` otherwise, in every
+variable, and `stage ≤ runtime_is_gc(prov)` with
+`runtime_is_gc(static) = const` and `nonportable` otherwise, in each
+allocation's. They cannot be one axis, because of
 mode crossing by kind: pointer-free data (ints) crosses provenance and
 locality entirely, and crosses `portable` (it can be lifted into code), but
 never `const`, as a runtime int is not known at compile time. Crossing is
-applied when the type is known where the constraint arises.
+applied when the type is known where the constraint arises. A raised
+exception's payload is at least `gc` outright, as it is allocated whatever
+its stage.
+
+A function's parameter is at least `portable` in its body: `const` means the
+same value on every evaluation, and a parameter may differ between calls. So
+what a function builds from its parameters is never `const`, so never
+`static`.
 
 Provenance follows reachability, not evaluation:
 
@@ -213,8 +223,9 @@ declarations of C functions, with a C compatible ABI that rejects signatures
 it can't express.
 
 In compiled code, a value crossing from compile time into a quote must be
-`const` (lifted, as static data) or a runtime toplevel (`static`, referred to
-by its symbol, so mutable globals keep their identity).
+`const` (lifted, as static data) or a runtime toplevel, referred to by its
+symbol (the symbol is `static`, whatever the toplevel holds, so mutable
+globals keep their identity).
 
 ### Locality
 
@@ -307,11 +318,16 @@ explain errors ("`x` is `gc` because it is allocated here, and must be
 `static` because it is captured by this static closure").
 
 The `const ⇒ static` link is a morphism edge between the stage and provenance
-graphs, `prov ≤ f(stage)`. It propagates upper bounds through `f`
-(`upper prov ⊓= f (upper stage)`) and lower bounds through its left adjoint
-`g` (`lower stage ⊔= g (lower prov)`, with `g(static) = const`,
-`g(gc) = g(external) = portable`: a heap value is not `const`). Morphisms
-must have adjoints for this to work, as in OxCaml.
+graphs, `prov ≤ const_is_static(stage)`. It propagates upper bounds through
+it (`upper prov ⊓= const_is_static (upper stage)`) and lower bounds through
+its left adjoint `l` (`lower stage ⊔= l (lower prov)`, with
+`l(static) = const`, `l(gc) = l(external) = portable`: a heap value is not
+`const`). An allocation adds the edge `stage ≤ runtime_is_gc(prov)` the other
+way: upper bounds give `upper stage ⊓= runtime_is_gc (upper prov)` (a `static`
+allocation is `const`), and its left adjoint `l'`, with `l'(const) = static`
+and `l'(portable) = l'(nonportable) = gc`, gives
+`lower prov ⊔= l' (lower stage)` (an allocation that isn't `const` is at
+least `gc`). Morphisms must have adjoints for this to work, as in OxCaml.
 
 The presence variables of rows (`Absent ≤ Present`, today `Type.presence`
 with `At_most`/`At_least` bounds) are another axis of the same solver, a
