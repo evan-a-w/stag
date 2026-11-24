@@ -380,16 +380,15 @@ let rec kind_message (kind : Kind.t) ~show_type =
       name
       (level_name var_level)
       (level_name used_at)
-  | Free_in_spliced_code { name; unusable = { var_level; used_at; loc = _ } } ->
+  | Free_in_spliced_code { name; unusable = { var_level; used_at = _; loc = _ } } ->
     sprintf
-      "Unbound value %s, which the spliced code uses: %s is a variable of its \
-       quote's context, as the %s bound at %s can't be used in the quote \
-       (level %d), as it is not portable"
+      "Unbound value %s, which the spliced code uses: %s is a free variable of \
+       the quote that made it, as the %s in scope there, %s, is bound in \
+       another quote"
       name
       name
       name
       (level_name var_level)
-      used_at
   | Not_embeddable { name; why = Defining } ->
     sprintf
       "The quote can't embed %s, as it is still being defined. Write [forget \

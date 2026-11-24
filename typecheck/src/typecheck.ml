@@ -1501,6 +1501,8 @@ let resolution_type t (scope : Scope.t) ~at ~name ~loc : Resolution.t -> _
     use_entry scope ~at entry ~name ~loc ~by_symbol:true;
     Ok (Scope.instantiate t scope entry.scheme, Persistent entry.binder)
   | Outside_quote { quote; usable = None; unusable } ->
+    (* Only a local bound in another quote of this level: a toplevel is
+       referred to by symbol. *)
     Option.iter unusable ~f:(fun entry ->
       Hashtbl.set
         scope.program.unusable_in_quotes

@@ -51,14 +51,15 @@ module Kind : sig
         { name : string
         ; unusable : Unusable_in_quote.t
         }
+    (** Code is spliced where [name] is unbound, from a quote that had [name]
+        as a free variable: there, [name] was bound in another quote of the
+        same level ([unusable]), so not usable. *)
     | Not_embeddable of
         { name : string
         ; why : Not_embeddable_why.t
         }
     | Forgotten of string
     | Duplicate_forget of string
-    (** Spliced where [name] is unbound, code from a quote in which [name] is
-        free, as the binding of [name] there was [unusable]. *)
     | Unbound_module of Syntax.Decl_path.t
     | Unbound_type of Syntax.Decl_path.t
     | Unbound_type_variable of string
