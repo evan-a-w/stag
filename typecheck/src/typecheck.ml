@@ -4378,9 +4378,13 @@ let rec signature (program_env : Program_env.t) module_ ~complete =
                 { name
                 ; scheme
                 ; stage = (Mode.Var.lower (mode :> Mode.Var.t)).stage
-                ; held =
-                    Option.map held ~f:(fun held ->
-                      (Mode.Var.lower (held :> Mode.Var.t)).provenance)
+                ; provenance =
+                    (Mode.Var.lower
+                       (Option.value_map
+                          held
+                          ~default:(mode :> Mode.Var.t)
+                          ~f:(fun held -> (held :> Mode.Var.t))))
+                      .provenance
                 })
          | Unchecked | In_progress _ ->
            missing "toplevel" [%sexp (toplevel : Toplevel.t)])
