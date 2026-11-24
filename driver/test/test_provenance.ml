@@ -160,6 +160,8 @@ let ext (x : string) = let y @ external = x in y
 let mut g = "a"
 let set u = g <- ext "b"
 let get u = g
+let mut h = "a"
+let set_h u = h <- Int.to_string 1
 |};
   [%expect
     {|
@@ -167,6 +169,8 @@ let get u = g
     val g : string @ external
     val set : 'a -> unit @ 'm0 with portable <= 'm0
     val get : 'a -> string @ nonportable external
+    val h : string
+    val set_h : 'a -> unit @ 'm0 with portable <= 'm0
     |}];
   provenance
     {|
