@@ -13,4 +13,5 @@ val signature : string -> (string, string list) Result.t
     is listed as such. Prints the signature with [`Signature], the [_copy]
     annotations with [`Copies]. *)
 val checked : string -> (Signature.Item.t list, string list) Result.t
+
 val round_trip : string -> show:[ `Signature | `Copies ] -> unit

@@ -323,9 +323,9 @@ let f : 'a @ 'm -> 'a @ 'n with stage('m) <= stage('n) and 'n <= portable = f
           ((lower (Axis Provenance (Var n))) (upper (Axis Provenance (Var m))))))))
       (Var f ())))
     t.stag:1:17-42: the sides of `<=` are on different axes, stage and locality
-    t.stag:1:17-38: a constraint on one axis names it on both sides, as in `stage('m) <= stage('n)`
-    t.stag:1:17-38: a constraint on one axis names it on both sides, as in `stage('m) <= stage('n)`
-    t.stag:1:17-32: a constraint on one axis names it on both sides, as in `stage('m) <= stage('n)`
+    t.stag:1:17-38: a bound is on the whole variable, as in `'m <= portable`
+    t.stag:1:17-38: a bound is on the whole variable, as in `portable <= 'm`
+    t.stag:1:17-32: both sides of a constraint on one axis name it: write `stage('n)` for `'n`
     t.stag:1:17-23: unknown mode `height`, expected one of `const`, `portable`, `nonportable`, `static`, `gc`, `external`, `global`, `regional`, `local`
     t.stag:1:17-42: `stage(...)` takes a mode variable, as in `stage('m)`: a mode like `portable` names its axis
     let f : 'a @ 'm -> 'a @ 'n with stage('m) <= stage('n) and 'n <= portable = f
@@ -372,10 +372,10 @@ let f : 'a @ 'm -> 'a @ 'n with stage('n) <= const_if_static(provenance('m)) = f
     {|
     t.stag:1:17-59: `meet(...)` is only on the left of `<=`
     t.stag:1:17-61: `static_if_const(...)` is only on the right of `<=`
-    t.stag:1:17-48: `release(...)` takes a locality term, as in `release(locality('m))`
-    t.stag:1:17-49: `meet(...)` takes a provenance term, as in `meet(provenance('m), gc)`
+    t.stag:1:17-48: `release(...)` is on locality, but its term is on stage: as in `release(locality('m))`
+    t.stag:1:17-49: `meet(...)` is on the axis of its mode gc, provenance, but its term is on stage: as in `meet(provenance('m), gc)`
     t.stag:1:17-56: `static_if_const(...)` is only on the right of `<=`
-    t.stag:1:17-35: a constraint on one axis names it on both sides, as in `stage('m) <= stage('n)`
+    t.stag:1:17-35: the variable in `meet(...)` names its axis, as in `meet(provenance('m), gc)`
     t.stag:1:31-32: expected `,`, found `)`
     |}]
 ;;

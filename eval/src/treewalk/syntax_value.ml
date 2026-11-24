@@ -425,7 +425,8 @@ module Of_value = struct
                   | Ok () -> constraint_
                   | Error message ->
                     unexpected
-                      ~expected:(sprintf "a well-formed mode constraint (%s)" message)
+                      ~expected:
+                        (sprintf "a well-formed mode constraint (%s)" message)
                       value
                 in
                 (match arg 1 (list constraint_) with

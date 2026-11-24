@@ -136,25 +136,30 @@ and annot_type t : Type_expr.t =
       | 3 ->
         let axis = pick t [ Mode_expr.Axis.Stage; Locality; Provenance ] in
         { lower = on axis; upper = on axis }
-      | 4 ->
-        pick
-          t
-          [ { Mode_expr.Constraint.lower = Meet (on Provenance, Gc)
-            ; upper = on Provenance
-            }
-          ; { lower = Release (on Locality); upper = on Locality }
-          ; { lower = Meet (Release (on Locality), Regional)
-            ; upper = on Locality
-            }
-          ]
       | _ ->
-        pick
-          t
-          [ { Mode_expr.Constraint.lower = on Provenance
-            ; upper = Static_if_const (on Stage)
-            }
-          ; { lower = on Stage; upper = Const_if_static (on Provenance) }
-          ]
+        (* Functions nested up to three deep, each of a term on its axis. *)
+        let rec left (axis : Mode_expr.Axis.t) depth : Mode_expr.Term.t =
+          match int t (if depth = 0 then 1 else 3) with
+          | 1 ->
+            let atom =
+              pick
+                t
+                (List.filter Mode_expr.Atom.all ~f:(fun atom ->
+                   Mode_expr.Axis.equal (Mode_expr.Atom.axis atom) axis))
+            in
+            Meet (left axis (depth - 1), atom)
+          | 2 when Mode_expr.Axis.equal axis Locality ->
+            Release (left axis (depth - 1))
+          | _ -> on axis
+        in
+        let rec right (axis : Mode_expr.Axis.t) depth : Mode_expr.Term.t =
+          match axis, int t (if depth = 0 then 1 else 2) with
+          | Provenance, 1 -> Static_if_const (right Stage (depth - 1))
+          | Stage, 1 -> Const_if_static (right Provenance (depth - 1))
+          | _ -> on axis
+        in
+        let axis = pick t [ Mode_expr.Axis.Stage; Locality; Provenance ] in
+        { lower = left axis 3; upper = right axis 3 }
     in
     loc
       (Type_expr.Constrained

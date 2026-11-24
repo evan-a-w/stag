@@ -210,7 +210,8 @@ let p @ portable = portable 1
 external plain : int -> int = "labs"
 let p @ portable = plain 1
 |};
-  [%expect {|
+  [%expect
+    {|
     val plain : int @ nonportable gc global -> int @ nonportable gc global
     val p : int
     |}];
@@ -227,7 +228,8 @@ let f : int -> int @ portable = plain
   modes {|
 external results : int @ local -> int @ external = "labs"
 |};
-  [%expect {| val results : int @ nonportable gc local -> int @ nonportable external global |}];
+  [%expect
+    {| val results : int @ nonportable gc local -> int @ nonportable external global |}];
   modes {|
 external const_result : int -> int @ const = "labs"
 |};

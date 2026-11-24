@@ -22,9 +22,3 @@ let morphism = function
   | Static_if_const -> Morphism.const_is_static
   | Const_if_static -> Morphism.runtime_is_gc
 ;;
-
-let is_trivial m =
-  List.for_all
-    (List.init (Axis.Any.size (Morphism.dst m)) ~f:Fn.id)
-    ~f:(fun x -> Morphism.left m x = 0)
-;;
