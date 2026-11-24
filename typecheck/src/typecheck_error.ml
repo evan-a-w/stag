@@ -376,18 +376,19 @@ let rec kind_message (kind : Kind.t) ~show_type =
       name
       (level_name var_level)
       used_at
-  | Not_embeddable { name; var_level; used_at; defining } ->
+  | Not_embeddable { name; var_level = _; used_at = _; defining = true } ->
     sprintf
-      "The variable %s is bound at %s, outside the quote, so the quote (at \
-       %s) would embed its value, but %s. Annotate it as (%s @ portable) to \
-       embed it, or write [forget %s in ...] to make %s a free variable of the \
-       quote"
+      "The quote can't embed %s, as it is still being defined. Write [forget \
+       %s in ...] to make %s a free variable of the quote"
       name
-      (level_name var_level)
-      (level_name used_at)
-      (if defining
-       then "it is being defined"
-       else "it may not be portable")
+      name
+      name
+  | Not_embeddable { name; var_level = _; used_at = _; defining = false } ->
+    sprintf
+      "The quote can't embed %s, as it may not be portable. Bind it as (%s @ \
+       portable) to embed it, or write [forget %s in ...] to make %s a free \
+       variable of the quote"
+      name
       name
       name
       name

@@ -281,8 +281,8 @@ let%expect_test "level crossing" =
 let n = 3
 let not_persistent = .<n>.
 let persistent = .<id 1>.
-let outer_arg x = .<x>.
-let local_persistent n = let g x = add x n in .<g 1>.
+let outer_arg x = forget x in .<x>.
+let local_persistent n = let g x = add x n in forget g in .<g 1>.
 let local_not_persistent = let k = 1 in .<k>.
 |};
   [%expect
@@ -538,7 +538,7 @@ let even n = cond (eq n 0) true (odd n)
 let odd n = cond (eq n 0) false (even n)
 let a = b
 let b = 1
-let gen n = .<gen n>.
+let gen n = forget n in .<gen n>.
 |};
   [%expect
     {|
@@ -598,7 +598,7 @@ let gen n = .<gen n>.
 let%expect_test "recursive components" =
   print
     {|
-let gen n = .<gen n>.
+let gen n = forget n in .<gen n>.
 let a = .<b>.
 let b = .<a>.
 let loop x = loop x
@@ -919,7 +919,7 @@ let%expect_test "local recursion" =
   print
     {|
 let direct y = let f x = f x in f y
-let in_quote = let f x = .<f x>. in .<f>.
+let in_quote = let f x = forget f, x in .<f x>. in forget f in .<f>.
 |};
   [%expect
     {|

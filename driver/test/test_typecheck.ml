@@ -487,7 +487,7 @@ let local = .<let y = 1 in add y y>.
 let persistent = .<id 1>.
 let n = 5
 let not_persistent = .<n>.
-let outer_arg x = .<x>.
+let outer_arg x = forget x in .<x>.
 let nested = .< .<add x 1>. >.
 |};
   [%expect
@@ -767,7 +767,7 @@ let%expect_test "only binders of the enclosing quote capture" =
   check
     {|
 let outer_persistent c = let g v = v in .<.~c>.
-let add_free add = .<add>.
+let add_free add = forget add in .<add>.
 let not_toplevel = .<.~(add_free 1)>.
 |};
   [%expect
@@ -1037,12 +1037,12 @@ let%expect_test "bounds and presences no instance can use are dropped" =
 let unused e = let h c = .< let _ = .~e in .~c >. in e
 let used e = let h c = .< let _ = .~e in .~c >. in let _ = h .< 1 >. in e
 let partial e = let h c = .< let _ = .~e in .~c >. in let _ = h .< 1 >. in h
-let lh e = .< let h d = let _ = .< let x = 1 in .~d >. in cond true .< .~d >. e in h >.
+let lh e = forget e in .< let h d = let _ = .< let x = 1 in .~d >. in cond true .< .~d >. e in h >.
 let not_spliced e k =
-  let r = .< let h d = let _ = .< let x = 1 in .~d >. in cond true .< .~d >. e in 0 >. in
+  let r = forget e in .< let h d = let _ = .< let x = 1 in .~d >. in cond true .< .~d >. e in 0 >. in
   let _ = closeit k in r
 let spliced e k =
-  let r = .< let h d = let _ = .< let x = 1 in .~d >. in cond true .< .~d >. e in .~k >. in
+  let r = forget e in .< let h d = let _ = .< let x = 1 in .~d >. in cond true .< .~d >. e in .~k >. in
   let _ = closeit k in r|};
   [%expect
     {|

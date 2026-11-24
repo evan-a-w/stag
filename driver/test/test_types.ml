@@ -875,13 +875,13 @@ let%expect_test "recursive local non-functions are not generalized" =
   print_local "match x with _ -> Nil";
   (* The splices' providers are of the quote's level, so are never the binder. *)
   print_local ".<.~(.<Nil>.)>.";
-  print_local ".<.~(.<x>.)>.";
+  print_local ".<.~(forget x in .<x>.)>.";
   print_local "Nil";
   print_local "let x = Nil in x";
   print_local "match Nil with x -> x";
   print_local "let g x = x in g; Nil";
   print_local ".<.~(.<Nil>.).{y}>.";
-  print_local ".<.~(.<Nil>.).{x}>.";
+  print_local ".<forget x in .~(.<Nil>.).{x}>.";
   [%expect
     {|
     val local : '_a * '_a

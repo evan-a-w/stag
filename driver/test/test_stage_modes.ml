@@ -174,11 +174,11 @@ let f y = x
 let%expect_test "a splice of unknown code captures what it may use" =
   check
     {|
-let argument c = .< fun a -> let h b = .~c in .< h 1 >. >.
+let argument c = .< fun a -> let h b = .~c in forget h in .< h 1 >. >.
 let uses_argument = argument .<a>.
-let mutable_ c = .< let mut m = 1 in let h b = .~c in .< h 1 >. >.
+let mutable_ c = .< let mut m = 1 in let h b = .~c in forget h in .< h 1 >. >.
 let uses_mutable = mutable_ .<m>.
-let free_of_the_quote c = .< let h b = .~c in .< h 1 >. >.
+let free_of_the_quote c = .< let h b = .~c in forget h in .< h 1 >. >.
 let closed (c : <int>{}) = .< let h b = .~c in .< h 1 >. >.
 |};
   [%expect
@@ -416,7 +416,7 @@ let q_param c = .< let h a = .~c in .<h>. >.
     |}];
   run
     {|
-let q = .< let h a = .~(.<x>.) in .<h>. >.
+let q = .< let h a = .~(.<x>.) in forget h in .<h>. >.
 let g = .< fun (y : int) -> .~q.{x = y} >.
 let k : int -> <int -> int>{..'r} = .~g
 |};

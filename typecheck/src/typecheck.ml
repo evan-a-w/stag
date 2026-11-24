@@ -585,7 +585,8 @@ module Resolution = struct
            { name; var_level = entry.level; used_at = scope.level })
     | Some _, Some ({ binder = Local _; _ } as entry)
       when (not spliced) && entry.level < scope.level && not (usable entry) ->
-      (* A local of an earlier level: the quote can only embed its value. *)
+      (* A local of an earlier level: the quote can only embed its value. A
+         toplevel is referred to by name instead. *)
       Unusable
         (Not_embeddable
            { name
@@ -2014,8 +2015,8 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
     in
     (match scope.quote with
      | Some _ when not toplevel.mut ->
-       (* Its mode isn't known yet, so it is a free variable of the quote: the
-          quote's value doesn't depend on [toplevel]. *)
+       (* Its mode isn't known yet, so it is referred to by name: the quote's
+          value doesn't depend on [toplevel]. *)
        Ok
          (at_scope_level
             (entry
