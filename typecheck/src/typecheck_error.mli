@@ -51,9 +51,9 @@ module Kind : sig
         { name : string
         ; unusable : Unusable_in_quote.t
         }
-    (** Code is spliced where [name] is unbound, from a quote that had [name]
-        as a free variable: there, [name] was bound in another quote of the
-        same level ([unusable]), so not usable. *)
+    (** Code is spliced where [name] is unbound, from a quote that had [name] as
+        a free variable: there, [name] was bound in another quote of the same
+        level ([unusable]), so not usable. *)
     | Not_embeddable of
         { name : string
         ; why : Not_embeddable_why.t

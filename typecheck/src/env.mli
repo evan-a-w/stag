@@ -90,9 +90,4 @@ val with_bindings : t -> (string * Entry.t) list -> f:(unit -> 'a) @ local -> 'a
 
 (** Hides [names]' bindings, local and toplevel, for the duration of [f], at
     [level] and the quotes in it, but not in splices back to an earlier level. *)
-val forgetting
-  :  t
-  -> string list
-  -> level:int
-  -> f:(unit -> 'a) @ local
-  -> 'a
+val forgetting : t -> string list -> level:int -> f:(unit -> 'a) @ local -> 'a

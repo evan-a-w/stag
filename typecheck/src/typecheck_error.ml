@@ -372,7 +372,8 @@ let rec kind_message (kind : Kind.t) ~show_type =
       name
       (level_name var_level)
       (level_name used_at)
-  | Free_in_spliced_code { name; unusable = { var_level; used_at = _; loc = _ } } ->
+  | Free_in_spliced_code
+      { name; unusable = { var_level; used_at = _; loc = _ } } ->
     sprintf
       "Unbound value %s, which the spliced code uses: %s is a free variable of \
        the quote that made it, as the %s in scope there, %s, is bound in \
