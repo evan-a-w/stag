@@ -10,6 +10,7 @@ module Lock = struct
       | Closure of Mode.Var.t
       | Quote of Mode.Var.t
       | Splice
+      | Exclave
   end
 
   type t =
@@ -25,12 +26,12 @@ module Lock = struct
       match stack with
       | [] -> None
       | { kind = Quote _; _ } :: rest -> Some rest
-      | { kind = Closure _ | Splice; _ } :: rest -> leave_quote rest
+      | { kind = Closure _ | Splice | Exclave; _ } :: rest -> leave_quote rest
     in
     List.fold_right locks ~init:[] ~f:(fun lock stack ->
       match lock.kind with
       | Splice -> Option.value (leave_quote stack) ~default:stack
-      | Closure _ | Quote _ -> lock :: stack)
+      | Closure _ | Quote _ | Exclave -> lock :: stack)
   ;;
 end
 

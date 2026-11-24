@@ -59,7 +59,7 @@ unless its expansion reaches itself through a `ptr` and some other type
 constructor: `type al = ptr[al]` is rejected, `type f = int -> ptr[f]` is not.
 
 Where the pointee lives is the pointer's mode, as for any `ptr`: a `const`
-list is static data, an allocated one in the heap, a `local_` one on the data
+list is static data, an allocated one in the heap, a `stack_` one on the data
 stack.
 
 The existing tests and examples using recursive variants (`list`, `nat`) are
@@ -71,7 +71,7 @@ All explicit. A `ptr[t]` is never null (`option[ptr[t]]` is represented as a
 nullable pointer, unobservably).
 
 ```ocaml
-Ptr.make e          (* allocate: heap, data stack under local_, static if const *)
+Ptr.make e          (* allocate: heap, data stack under stack_, static if const *)
 &x                  (* address of a variable: local *)
 *e   e.*            (* read *)
 e.*.x               (* field of the pointee *)
@@ -195,9 +195,22 @@ machine (function) stack, and managed by the runtime as a bump allocator:
 
 - Each function body is a region: on entry it saves the data stack pointer,
   on exit restores it, freeing everything allocated locally in the call.
-- `local_ e` allocates `e`'s blocks in the current region (closures included,
-  as a third closure mode beside `static` and `gc`). Allocation is otherwise
-  `global` (GC heap), unless inferred local because the value does not escape.
+- Allocation is inferred, as in OxCaml: each allocation (closure, quote,
+  `Ptr.make`) has a mode variable, at least its parts' (a block holding a
+  value local to the region is itself local) and at most what its uses allow.
+  Records, tuples and constructors are values, as local as their parts.
+  Nothing needs a keyword to be local: compiled code allocates in the current
+  region whatever may be `local`, the interpreter on its heap. `stack_ e`
+  forces `e`'s allocations to be `local`, so it is an error if they escape,
+  and an error if `e` allocates nothing (a record, tuple or constructor must
+  hold an allocation). Pointer-free data (`int`, `bool`, `char`, `unit`, and
+  records, tuples and variants of them) crosses locality: a copy of it is as
+  good anywhere.
+- A function's result is at most `regional` (it outlives the function's
+  region); a toplevel, what is stored through a pointer and what a `global_`
+  field holds must be `global`. A closure is at least the localities of what
+  it captures, as seen from its body (what is `local` to the enclosing body is
+  `regional` inside it).
 - `exclave_ e` ends the current region early and evaluates `e` in the caller's,
   so a function can return a local value (allocate in the caller's region).
 - `&x` of a variable puts `x` on the data stack, and is a `local` `ptr`.
@@ -207,7 +220,7 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   borrowed: the callee may not retain it.
 - `regional` is local to an *outer* region: inside a function body, its
   `local` parameters (and what is read from them) are `regional`, as they
-  live in the caller's region. `local_` allocations of the current body are
+  live in the caller's region. `stack_` allocations of the current body are
   `local`. Returning needs `global` (`regional` or `local` under `exclave_`).
 - `global_` on record fields and constructor arguments: always `global`, even
   inside a local block.
@@ -223,7 +236,7 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   in tail position must be at most `regional`: passing a `local` value is an
   error, fixed by marking the call non-tail (see syntax.md), which keeps the
   region alive until it returns. A call inside `exclave_` is always fine.
-- The interpreter has no regions: `local_` allocates on its heap and
+- The interpreter has no regions: `stack_` allocates on its heap and
   `exclave_ e` is `e`. The rules are checked all the same.
 
 Data stack blocks have GC headers, so their provenance is `gc` (traceable)

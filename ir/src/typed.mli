@@ -144,6 +144,16 @@ module Pattern : sig
 end
 
 (** [ty] is the type of the node, instantiated where it is a variable. *)
+(** The locality markers of expressions: [stack_ e], [exclave_ e] and
+    [e [@nontail]]. *)
+module Marker : sig
+  type t =
+    | Stack
+    | Exclave
+    | Nontail
+  [@@deriving sexp_of, equal]
+end
+
 module Expr : sig
   module Subs : sig
     type 'e t =
@@ -191,6 +201,7 @@ module Expr : sig
           ; body : 'e
           }
       | Annotated of 'e * Syntax.Annot.t
+      | Marked of Marker.t * 'e
       (** [(x : t @ m)], of a [Var], its type resolved as [Let]'s. *)
       | Splice of
           { code : 'e (** At the level outside the splice. *)

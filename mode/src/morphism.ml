@@ -52,6 +52,25 @@ let cross_portable =
     ~left:[| i Const; i Portable; i Portable |]
 ;;
 
+let locality ~right ~left =
+  let i = Axis.Locality.index in
+  create
+    ~src:(T Locality)
+    ~dst:(T Locality)
+    ~right:(Array.map right ~f:i)
+    ~left:(Array.map left ~f:i)
+;;
+
+let borrow =
+  locality
+    ~right:[| Global; Local; Local |]
+    ~left:[| Global; Regional; Regional |]
+;;
+
+let release =
+  locality ~right:[| Global; Global; Local |] ~left:[| Global; Local; Local |]
+;;
+
 let src t = t.src
 let dst t = t.dst
 
@@ -60,7 +79,11 @@ let is_identity t =
 ;;
 
 let named =
-  [ "const_is_static", const_is_static; "cross_portable", cross_portable ]
+  [ "const_is_static", const_is_static
+  ; "cross_portable", cross_portable
+  ; "borrow", borrow
+  ; "release", release
+  ]
 ;;
 
 let sexp_of_t t =

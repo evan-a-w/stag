@@ -97,6 +97,11 @@ module Kind : sig
     | Assign_to_immutable of string
     | Store_not_through_pointer
     (** A [Store] whose target is not a dereference, or a field of one. *)
+    | Exclave_not_in_tail_position
+    (** [exclave_ e] other than as the result of a function body. *)
+    | Mutable_captured_in_exclave of string
+    (** A closure in [exclave_ e] capturing a [let mut] of the region it ends. *)
+    | Stack_not_on_allocation (** [stack_ e] where [e] allocates nothing. *)
     | Compile_time_use_of_mutable of
         { toplevel : string
         ; mutable_ : string

@@ -9,6 +9,7 @@ module Constructor = struct
     ; index : int
     ; args : Type.ty list
     ; result : Type.ty
+    ; global_args : bool list
     }
   [@@deriving sexp_of]
 end
@@ -19,6 +20,7 @@ module Field = struct
     ; record : Type.ty
     ; index : int
     ; ty : Type.ty
+    ; is_global : bool
     }
   [@@deriving sexp_of]
 
@@ -825,7 +827,13 @@ let check_exception t name =
       Typed.Constructor_ref.exception_ name
     in
     let checked =
-      { Constructor.name; type_name; index; args; result = Type.exn }
+      { Constructor.name
+      ; type_name
+      ; index
+      ; args
+      ; result = Type.exn
+      ; global_args = List.map args ~f:(fun _ -> false)
+      }
     in
     decl.checked <- Some checked;
     checked
@@ -858,7 +866,10 @@ let prepare_kind t (decl : Decl.t) =
       map_result constructors ~f:(fun ((name : Name.t), args) ->
         let%map.Result args = map_result args ~f:elaborate in
         let args, syntax = List.unzip args in
-        ( { Signature.Constructor.name = name.txt; args }
+        ( { Signature.Constructor.name = name.txt
+          ; args
+          ; global_args = List.map syntax ~f:Syntax.Type_expr.is_global
+          }
         , (canonical_name name.txt, syntax) ))
     in
     let constructors, reflected = List.unzip constructors in
@@ -868,7 +879,10 @@ let prepare_kind t (decl : Decl.t) =
     let%map.Result fields =
       map_result fields ~f:(fun ((name : Name.t), ty) ->
         let%map.Result ty, syntax = elaborate ty in
-        ( { Signature.Field.name = name.txt; ty }
+        ( { Signature.Field.name = name.txt
+          ; ty
+          ; is_global = Syntax.Type_expr.is_global syntax
+          }
         , (canonical_name name.txt, syntax) ))
     in
     let fields, reflected = List.unzip fields in
@@ -980,12 +994,19 @@ let define t (decl : Decl.t) =
    | Alias _ | Abstract -> ()
    | Variant constructors ->
      let result = Type.TCon (decl.name, Decl.params decl) in
-     List.iteri constructors ~f:(fun index { name; args } ->
+     List.iteri constructors ~f:(fun index { name; args; global_args } ->
        let name = canonical_name name in
        Hashtbl.add_exn
          t.constructors
          ~key:name
-         ~data:{ Constructor.name; type_name = decl.name; index; args; result })
+         ~data:
+           { Constructor.name
+           ; type_name = decl.name
+           ; index
+           ; args
+           ; result
+           ; global_args
+           })
    | Record fields ->
      let record_type =
        { Typed.Record_type.name = decl.name
@@ -994,7 +1015,7 @@ let define t (decl : Decl.t) =
              canonical_name field.name)
        }
      in
-     List.iteri fields ~f:(fun index { name = _; ty } ->
+     List.iteri fields ~f:(fun index { name = _; ty; is_global } ->
        Hashtbl.add_exn
          t.fields
          ~key:record_type.fields.(index)
@@ -1003,6 +1024,7 @@ let define t (decl : Decl.t) =
            ; index
            ; record = TCon (decl.name, Decl.params decl)
            ; ty
+           ; is_global
            }));
   checked
 ;;
@@ -1148,4 +1170,121 @@ let find_field t module_ ({ txt = path; loc } : Decl_path.t Located.t) =
 let reflect t name =
   let%map.Result (_ : Signature.Type_decl.t) = check t name in
   (Hashtbl.find_exn t.types name).reflected
+;;
+
+let is_global_field t name =
+  Option.value_map (Hashtbl.find t.fields name) ~default:false ~f:(fun field ->
+    field.is_global)
+;;
+
+let global_constructor_args t name =
+  Option.map (Hashtbl.find t.constructors name) ~f:(fun constructor ->
+    constructor.global_args)
+;;
+
+let pointer_free t ty =
+  let visiting = String.Hash_set.create () in
+  let visiting_ids = Int.Hash_set.create () in
+  (* Shared aliases and nodes are visited once: a DAG of them is linear. *)
+  let nominals = Hashtbl.Poly.create () in
+  let nodes = Int.Table.create () in
+  let links = Int.Table.create () in
+  let visit id ~f =
+    (not (Hash_set.mem visiting_ids id))
+    &&
+    (Hash_set.add visiting_ids id;
+     let result = f () in
+     Hash_set.remove visiting_ids id;
+     result)
+  in
+  let node ?(table = nodes) params id ~f =
+    if not (Map.is_empty params)
+    then visit id ~f
+    else (
+      match Hashtbl.find table id with
+      | Some result -> result
+      | None ->
+        let result = visit id ~f in
+        Hashtbl.set table ~key:id ~data:result;
+        result)
+  in
+  let rec ty_ params (ty : Type.ty) =
+    match ty with
+    | TVar { id; state = Generic; _ } when Map.mem params id ->
+      Map.find_exn params id
+    | TVar { id; state = Link target; _ } ->
+      node ~table:links params id ~f:(fun () -> ty_ params target)
+    | _ ->
+      (match Type.canonical_ty ty with
+       | TVar _ | TArrow _ | TCode _ -> false
+       | TCon (("int" | "bool" | "char" | "unit"), []) -> true
+       | TCon (name, args) -> nominal name (List.map args ~f:(arg params))
+       | TTuple tys -> List.for_all tys ~f:(ty_ params)
+       | TRecord { id; row } | TVariant { id; row } ->
+         node params id ~f:(fun () -> row_ params row))
+  and row_ params (row : Type.row) =
+    match row with
+    | RVar { id; state = Generic; _ } when Map.mem params id ->
+      Map.find_exn params id
+    | RVar { id; state = Link target; _ } ->
+      node ~table:links params id ~f:(fun () -> row_ params target)
+    | _ ->
+      (match Type.canonical_row row with
+       | REmpty -> true
+       | RVar _ -> false
+       | RExtend (_, presence, _, entry, rest) ->
+         (match Type.canonical_presence presence with
+          | Absent -> true
+          | Present | PVar _ -> ty_ params entry)
+         && row_ params rest)
+  and arg params : Type.arg -> bool = function
+    | ATy entry -> ty_ params entry
+    | ARow entry -> row_ params entry
+  and nominal name args =
+    match Hashtbl.find nominals (name, args) with
+    | Some result -> result
+    | None ->
+      let result = nominal' name args in
+      if not (Hash_set.mem visiting name)
+      then Hashtbl.set nominals ~key:(name, args) ~data:result;
+      result
+  and nominal' name args =
+    (not (Hash_set.mem visiting name))
+    &&
+    match
+      (* A type computed by a splice isn't forced: that may need what is being
+         checked. *)
+      match Hashtbl.find t.types name with
+      | None -> Error ()
+      | Some { checked = Some checked; _ } -> Ok checked
+      | Some { decl = { kind = Splice _; _ }; _ } -> Error ()
+      | Some _ -> Result.map_error (check t name) ~f:ignore
+    with
+    | Error () -> false
+    | Ok decl ->
+      Hash_set.add visiting name;
+      let params =
+        List.zip_exn decl.params args
+        |> List.filter_map ~f:(fun (param, pointer_free) ->
+          match param with
+          | ATy (TVar v) -> Some (v.id, pointer_free)
+          | ARow (RVar v) -> Some (v.id, pointer_free)
+          | _ -> None)
+        |> Int.Map.of_alist_exn
+      in
+      let result =
+        match decl.kind with
+        | Abstract -> false
+        | Alias body -> ty_ params body
+        | Record fields ->
+          List.for_all fields ~f:(fun (field : Signature.Field.t) ->
+            ty_ params field.ty)
+        | Variant constructors ->
+          List.for_all constructors ~f:(fun (ctor : Signature.Constructor.t) ->
+            List.for_all ctor.args ~f:(ty_ params))
+      in
+      Hash_set.remove visiting name;
+      result
+  in
+  ty_ Int.Map.empty ty
 ;;

@@ -16,6 +16,11 @@ module Ptr = struct
   let make = Intrinsic.ptr_make
 end
 
+module Unsafe = struct
+  (* The caller vouches that the value outlives every region. *)
+  let assume_global = Intrinsic.assume_global
+end
+
 module Stag = struct
   (* The syntax of stag as data, mirroring [Syntax], for declarations generated
      at compile time. Names are as written, without backticks or quotes: [x],
@@ -254,7 +259,7 @@ module Stag = struct
       | Poly_variant of ptr[string * option[t]]
       | Expect of string
       | Struct_quote of list[Toplevel.t]
-      | Local of ptr[t]
+      | Stack of ptr[t]
       | Exclave of ptr[t]
       (* [f x [@nontail]], of an application. *)
       | Nontail of ptr[t]

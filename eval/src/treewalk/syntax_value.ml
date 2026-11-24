@@ -424,7 +424,8 @@ module Of_value = struct
                 (match arg 1 (list constraint_) with
                  | [] ->
                    unexpected ~expected:"at least one mode constraint" value
-                 | constraints -> Constrained (arg 0 (type_expr ~loc), constraints))
+                 | constraints ->
+                   Constrained (arg 0 (type_expr ~loc), constraints))
               | Plain | Arrow_side | Member ->
                 unexpected
                   ~expected:
@@ -663,7 +664,7 @@ module Of_value = struct
            Poly_variant (arg 0 (name Label ~loc), arg 1 (option (expr ~loc)))
          | "Expect", 1 -> Expect (Located.create ~loc (arg 0 string))
          | "Struct_quote", 1 -> Struct_quote (arg 0 (list (toplevel ~loc)))
-         | "Local", 1 -> Local (arg 0 (expr ~loc))
+         | "Stack", 1 -> Stack (arg 0 (expr ~loc))
          | "Exclave", 1 -> Exclave (arg 0 (expr ~loc))
          | "Nontail", 1 ->
            (match arg 0 (expr ~loc) with

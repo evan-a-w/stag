@@ -162,7 +162,7 @@ module Syntax_at = struct
       recurse e;
       snds fields
     | Poly_variant (_, e) -> Option.iter e ~f:recurse
-    | Local e | Exclave e | Nontail e -> recurse e
+    | Stack e | Exclave e | Nontail e -> recurse e
   ;;
 end
 
@@ -374,7 +374,7 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
      typed ();
      List.iter (cases @ exception_cases) ~f:(fun (p, _) ->
        pattern t ~syntax ~program p)
-   | Annotated _ -> ()
+   | Annotated _ | Marked _ -> ()
    | Lit _
    | Store _
    | App _

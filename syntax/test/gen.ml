@@ -302,7 +302,7 @@ and expr t : Expr.t =
                (expr t, list t ~min:1 ~max:3 (fun t -> label t, expr t)))
          ; (fun t -> Poly_variant (label t, Some (expr t)))
          ; (fun t -> Struct_quote (list t ~min:0 ~max:3 toplevel))
-         ; (fun t -> Local (expr t))
+         ; (fun t -> Stack (expr t))
          ; (fun t -> Exclave (expr t))
          ; (fun t -> Nontail (loc (Expr.App (expr t, expr t))))
          ])

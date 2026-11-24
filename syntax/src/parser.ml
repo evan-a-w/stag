@@ -918,7 +918,7 @@ let rec expr ?(seq = true) t : Expr.t =
   | Let -> let_ t ~seq
   | Match -> match_ t ~seq
   | Fun -> fun_ t ~seq
-  | Local_ | Exclave_ -> region t ~seq
+  | Stack_ | Exclave_ -> region t ~seq
   | _ ->
     let first = assignment t ~seq in
     if seq && is t Semi
@@ -1068,7 +1068,7 @@ and tuple_item t ~seq : Expr.t =
   | Let -> let_ t ~seq
   | Match -> match_ t ~seq
   | Fun -> fun_ t ~seq
-  | Local_ | Exclave_ -> region t ~seq
+  | Stack_ | Exclave_ -> region t ~seq
   | _ -> construct t
 
 (** [local_ e] or [exclave_ e]. *)
@@ -1081,7 +1081,7 @@ and region t ~seq : Expr.t =
     ~loc:(Loc.merge start body.loc)
     (match keyword with
      | Exclave_ -> Exclave body
-     | _ -> Local body)
+     | _ -> Stack body)
 
 (** A value in [{...}]. *)
 and entry_value t = assignment t ~seq:false

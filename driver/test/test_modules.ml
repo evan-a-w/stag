@@ -802,7 +802,7 @@ let%expect_test "splicing code with canonically named free variables" =
     (parse_exn
        {|
 module M = struct
-  let n = Int.add 2 3
+  let n = Int.to_string 5
 end
 let implicit = .~.<M.n>.
 let local_does_not_provide n = cond n () (); .~.<M.n>.
@@ -817,19 +817,19 @@ let local_does_not_provide n = cond n () (); .~.<M.n>.
   check
     {|
 module M = struct
-  let n = Int.add 2 3
+  let n = Int.to_string 5
   let as_written = .~.<n>..{n}
 end
 |};
   [%expect
     {|
     module M : sig
-      val n : int
+      val n : string
     end
-    val implicit : int
-    val local_does_not_provide : bool -> int
+    val implicit : string
+    val local_does_not_provide : bool -> string
     val explicit : string
-    val shorthand : int
+    val shorthand : string
     ((Unused_substitution n) @ t.stag:4:28-29)
     |}]
 ;;

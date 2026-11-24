@@ -34,7 +34,7 @@ let indirect_constructors =
     ; "Expr.Poly_restrict", 2
     ; "Expr.Poly_update", 2
     ; "Expr.Poly_variant", 2
-    ; "Expr.Local", 1
+    ; "Expr.Stack", 1
     ; "Expr.Exclave", 1
     ; "Expr.Nontail", 1
     ]
@@ -264,7 +264,7 @@ module Make (B : Builder) = struct
       | Poly_variant (tag, arg) ->
         con "Poly_variant" [ name tag; option expr arg ]
       | Expect expected -> con "Expect" [ B.string expected.txt ]
-      | Local e -> con "Local" [ expr e ]
+      | Stack e -> con "Stack" [ expr e ]
       | Exclave e -> con "Exclave" [ expr e ]
       | Nontail e -> con "Nontail" [ expr e ]
       | Error -> raise_s [%message "Lift: an expression that did not parse"]

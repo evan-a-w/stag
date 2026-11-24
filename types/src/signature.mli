@@ -18,6 +18,7 @@ module Constructor : sig
   type t =
     { name : string
     ; args : Type.ty list
+    ; global_args : bool list (** Per argument: whether written [global_]. *)
     }
   [@@deriving sexp_of]
 end
@@ -26,6 +27,7 @@ module Field : sig
   type t =
     { name : string
     ; ty : Type.ty
+    ; is_global : bool
     }
   [@@deriving sexp_of]
 end

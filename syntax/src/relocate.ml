@@ -298,9 +298,9 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
   | Struct_quote ts, Struct_quote ts' ->
     let+ ts = toplevels ts ts' in
     Expr.Struct_quote ts
-  | Local e, Local e' ->
+  | Stack e, Stack e' ->
     let+ e = expr e e' in
-    Expr.Local e
+    Expr.Stack e
   | Exclave e, Exclave e' ->
     let+ e = expr e e' in
     Expr.Exclave e
@@ -333,7 +333,7 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
       | Poly_variant _
       | Expect _
       | Struct_quote _
-      | Local _
+      | Stack _
       | Exclave _
       | Nontail _
       | Error )

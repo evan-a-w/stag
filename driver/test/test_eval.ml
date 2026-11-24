@@ -280,7 +280,11 @@ let embedded = embedding 7
         (subs (Implicit ())) : 'b)
        : <'b>{..'c} (where "..'_a <= {..'_d}"))))
     (embedding <fun>)
-    (embedded (Code (App (Var (Free h) : "unit -> 'a") (Lit Unit : unit) : 'a)))
+    (embedded
+     (Code
+      (App (Var (Persistent (Local h/21)) : "unit -> int") (Lit Unit : unit) :
+       int)
+      ((h/21 <fun>))))
     |}]
 ;;
 

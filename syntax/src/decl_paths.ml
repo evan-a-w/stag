@@ -142,7 +142,7 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
       | Poly_update (e, fs) -> Poly_update (expr e, poly_fields fs)
       | Poly_variant (n, e) -> Poly_variant (n, Option.map e ~f:expr)
       | Struct_quote ts -> Struct_quote (List.map ts ~f:toplevel)
-      | Local e -> Local (expr e)
+      | Stack e -> Stack (expr e)
       | Exclave e -> Exclave (expr e)
       | Nontail e -> Nontail (expr e)
     in

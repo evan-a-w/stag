@@ -44,9 +44,16 @@ This is about what values *capture*, not about effects. Effect purity (calling
 a function performs no side effects) would be a separate property of arrows,
 needing a small effect system; deferred until the language has effects.
 
-Mode crossing by kind, as in OxCaml: plain data like `int` can always be
-lifted into code, so crosses `portable` regardless of mode, but never `const`.
-Applied when the type is known where the constraint arises.
+Mode crossing by layout: a value of a pointer-free by-value type (`int`,
+`bool`, `char`, `unit`, and records, tuples and variants of pointer-free
+types) holds nothing a mode could restrict. It crosses locality and
+provenance entirely, and stage up to `portable` (it can always be lifted into
+code, but `const` stays a promise about how it was computed). Applied when the
+type is known where the constraint arises; a function's parameter type is
+unified with what the context expects before its body is checked, so whether
+a use crosses does not depend on the order things are checked in. Records,
+tuples and variants are values, not allocations: what is local in a local
+`(p, 1)` is `p`.
 
 ## Expression modes
 
@@ -121,8 +128,7 @@ val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3
 - bounds every mode meets (`const <= 'm`, `'m <= nonportable`) are left out;
 - a weak (not generalized) variable is named `'_m0`, as weak type variables,
   and shown with its current constraints;
-- relations through a crossing morphism are not printed (nothing crosses
-  until crossing by kind, chunk E).
+- relations through a crossing morphism are not printed.
 
 The `with` clause is also syntax for annotations (see syntax.md), so printed
 types read back as themselves. As only the stage axis is printed, a constraint
@@ -131,8 +137,16 @@ checked.
 
 ### Annotations on uses
 
-`(x @ m)` (or `(x : t @ m)`) bounds the mode of `x` at this use, so of the
-variable: `let cap x = (x @ portable)` restricts `cap`'s argument to portable
+`(x @ m)` (or `(x : t @ m)`) is the check-only form: it bounds the mode of `x`
+at this use, so of the variable, and `x` keeps its own mode. A binding's
+annotation, `let x @ m = e`, is instead the variable's mode (as in OxCaml): `e`
+must be at most `m`, and uses of `x` see `m` on the axes it names (`e`'s mode
+on the others), though generalisation is still decided by `e`'s own mode.
+Parameters `(x @ m)` and `let mut x @ m` are likewise exact. So
+`let n @ portable = 1` gives a `portable` `n`, while `let n = (one @ portable)`
+leaves `n` as `const` as `one`.
+
+For example, `let cap x = (x @ portable)` restricts `cap`'s argument to portable
 values, and with `@ 'm` the use is `'m`, shared with the definition's other
 annotations (`(x : t @ 'm with 'm <= portable)`).
 
@@ -226,8 +240,8 @@ toplevel splice has the mode of its expansion, checked after it is generated.
 - Toplevel constants like `n` resolve directly inside quotes (they are
   `const`), instead of becoming free variables filled in at the splice.
 - Local closures capturing arguments, mutable locals or computed values no
-  longer cross levels: they are free variables of the quote. (Ints too, until
-  mode crossing by kind.)
+  longer cross levels: they are free variables of the quote, unless their type
+  is pointer-free.
 - Constant data is generalized, local or not; values computed by applying
   or splicing are not.
 
@@ -251,9 +265,11 @@ by the code that uses it) and that of the value it holds.
   (or a mutable toplevel's `@ m`) bounds `m`. Reading is `nonportable` for
   now, as the variable is. Locality: a value local to an inner region (each function body,
   closures included, is one) must not be stored in a variable of an outer
-  one, so a variable captured by a closure holds `global` values, unless the
-  closure is `local`. An uncaptured variable may hold values local to its own
-  region.
+  one. Assigning a variable from inside a closure (which may be called from a
+  shorter region) needs a `global` value; reading it there sees what is
+  `local` to the variable's region as `regional`, so a closure that reads a
+  variable holding local values is itself local. An uncaptured variable may
+  hold values local to its own region.
 - **Representation** (see semantics.md): uncaptured, a stack slot; captured
   only by `local` closures, on the data stack; captured by a `gc` closure, a
   heap box, whose stores have a write barrier unless the value is `static`.
@@ -280,7 +296,7 @@ writable/read-only distinction on pointers; and with mutation, effect purity
 Each step is a branch stacked on the previous one.
 
 - **A. Syntax**: mode annotations (`(x @ local)`, `'a @ 'm -> 'b @ 'n`),
-  `local_`, `exclave_`, `global_` fields, the non-tail call marker. Parsed
+  `stack_`, `exclave_`, `global_` fields, the non-tail call marker. Parsed
   and printed, ignored by the typechecker.
 - **B. Solver**: the `Mode` library (`mode/`): the three axes, mode
   variables with bounds, edges with morphisms (`const ⇒ static`, crossing),
@@ -293,9 +309,10 @@ Each step is a branch stacked on the previous one.
 - **D. Arrow modes and polymorphism**: arrows carry argument and return
   modes (a closure's mode is the mode of the arrow value); schemes keep mode variables and their constraints; mode
   annotations; printing that hides unconstrained and default modes.
-- **E. Locality**: regions, `local_`, `exclave_`, the tail call rule,
-  `global_` fields, `Unsafe.assume_global`, mutable variables captured by
-  closures holding `global` values, mode crossing by kind.
+- **E. Locality**: regions, inferred allocation locality, `stack_`,
+  `exclave_`, the tail call rule, `global_` fields, `Unsafe.assume_global`,
+  mutable variables assigned from closures holding `global` values, mode
+  crossing by kind on locality, exact binding annotations.
 - **F. Provenance**: allocation is `gc`, literals and `const` values
   `static`, stores, mutable globals.
 - **G. `External`**: C functions with a C compatible ABI (rejecting
@@ -312,4 +329,4 @@ Each step is a branch stacked on the previous one.
   wait for the entry to be `Present`. They move into the mode solver, as a
   two point axis whose equalities are triggers (see
   [semantics.md](semantics.md#solver)).
-- Effect purity, `const fn`, mode crossing by kind.
+- Effect purity, `const fn`.

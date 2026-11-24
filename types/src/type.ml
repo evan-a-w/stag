@@ -1093,13 +1093,25 @@ module Printer = struct
     @ atom Locality const.locality default.locality
   ;;
 
+  (* A variable's locality, where it is known to be at least other than
+     [global]: what [@ local] would read back as. *)
+  let locality_atom var =
+    let lower = (Mode.Var.lower var).locality in
+    if Mode.Locality.equal lower Global
+    then None
+    else
+      Some (Sexp.to_string (Mode.Locality.sexp_of_t lower) |> String.lowercase)
+  ;;
+
   let is_default_side t : Arrow_modes.Side.t -> bool = function
     | Fixed const -> List.is_empty (const_atoms const)
     | Var var ->
       (match t.modes, t.counting with
-       | None, _ -> true
+       | None, _ -> Option.is_none (locality_atom var)
        | Some _, Some _ -> false
-       | Some modes, None -> Option.is_none (Mode_printing.side modes var))
+       | Some modes, None ->
+         Option.is_none (Mode_printing.side modes var)
+         && Option.is_none (locality_atom var))
   ;;
 
   let mode_side t (side : Arrow_modes.Side.t) =
@@ -1109,13 +1121,22 @@ module Printer = struct
        | [] -> ""
        | atoms -> " @ " ^ String.concat ~sep:" " atoms)
     | Var var ->
+      let locality =
+        Option.value_map (locality_atom var) ~default:"" ~f:(fun atom ->
+          " @ " ^ atom)
+      in
       (match t.modes, t.counting with
-       | None, _ -> ""
+       | None, _ -> locality
        | Some modes, Some _ ->
          Mode_printing.count modes var;
          " @ _"
        | Some modes, None ->
-         Option.value (Mode_printing.side modes var) ~default:"")
+         (* A variable's name doesn't say its locality yet, a constant does. *)
+         (match Mode_printing.side modes var, locality_atom var with
+          | None, _ -> locality
+          | Some side, Some atom when not (String.is_prefix side ~prefix:" @ '")
+            -> side ^ " " ^ atom
+          | Some side, _ -> side))
   ;;
 
   let rec ty_to_string t ~prec ty =

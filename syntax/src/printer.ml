@@ -191,7 +191,7 @@ let level (e : Expr.t) : Level.t =
   let e = unwrap e in
   match e.txt with
   | Let _ when Option.is_some (seq e) -> Seq
-  | Let _ | Let_mut _ | Match _ | Fun _ | Local _ | Exclave _ -> Item
+  | Let _ | Let_mut _ | Match _ | Fun _ | Stack _ | Exclave _ -> Item
   | Assign _ | Store _ -> Assign
   | Nontail _ -> Construct
   | Lit (Int n) when n < 0 -> Item
@@ -220,7 +220,7 @@ let bare_at at e = Level.compare (level e) at >= 0
 
 let rec extends_right e =
   match (unwrap e).txt with
-  | Let _ | Let_mut _ | Match _ | Fun _ | Local _ | Exclave _ -> true
+  | Let _ | Let_mut _ | Match _ | Fun _ | Stack _ | Exclave _ -> true
   | Assign (_, value) | Store (_, value) -> extends_right value
   | _ -> false
 ;;
@@ -235,7 +235,7 @@ let rec ends_with_match ~seq:in_seq e =
   | ( ( Let (_, _, _, _, body)
       | Let_mut (_, _, _, body)
       | Fun (_, body)
-      | Local body
+      | Stack body
       | Exclave body )
     , _ ) ->
     bare_at (Ctx.body { Ctx.top with seq = in_seq }) body
@@ -632,7 +632,7 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
     parens
       (text (decl_path_txt ~root_modules:roots.root_modules p)
        ^^ annot_doc roots annot)
-  | Local body, _ -> region roots ctx "local_" body
+  | Stack body, _ -> region roots ctx "stack_" body
   | Exclave body, _ -> region roots ctx "exclave_" body
   | Nontail app, _ ->
     group (expr roots (Ctx.at App) app ^^ nest 2 (line ^^ text "[@nontail]"))

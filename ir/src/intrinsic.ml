@@ -11,6 +11,7 @@ type t =
   | Erase
   | Raise
   | Ptr_make
+  | Assume_global
 [@@deriving sexp_of, equal, enumerate]
 
 let name = function
@@ -24,6 +25,7 @@ let name = function
   | Erase -> "erase"
   | Raise -> "raise"
   | Ptr_make -> "ptr_make"
+  | Assume_global -> "assume_global"
 ;;
 
 let public_name = function
@@ -37,6 +39,7 @@ let public_name = function
   | Erase -> "Stag.Code.erase"
   | Raise -> "raise"
   | Ptr_make -> "Ptr.make"
+  | Assume_global -> "Unsafe.assume_global"
 ;;
 
 let prelude ?(args = []) name = Type.TCon (Prelude_path.canonical name, args)
@@ -66,6 +69,14 @@ let ty t ~var ~row =
   | Ptr_make ->
     let pointee = var () in
     Type.arrow pointee (TCon ("ptr", [ ATy pointee ]))
+  | Assume_global ->
+    let ty = var () in
+    TArrow
+      ( ty
+      , ty
+      , { arg = Fixed { Arrow_modes.default_const with locality = Local }
+        ; res = Fixed Arrow_modes.default_const
+        } )
 ;;
 
 let find path =

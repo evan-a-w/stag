@@ -52,6 +52,7 @@ module Constructor : sig
     ; index : int
     ; args : Type.ty list
     ; result : Type.ty
+    ; global_args : bool list
     }
   [@@deriving sexp_of]
 end
@@ -64,6 +65,7 @@ module Field : sig
     ; record : Type.ty
     ; index : int
     ; ty : Type.ty
+    ; is_global : bool
     }
   [@@deriving sexp_of]
 
@@ -177,3 +179,15 @@ val reflect
   :  t
   -> string
   -> (Reflected_decl.t option, Typecheck_error.t) Result.t
+
+(** Whether the field of canonical name [name] is declared [global_]. *)
+val is_global_field : t -> string -> bool
+
+(** Per argument of the constructor of canonical name [name], whether it is
+    declared [global_]. [None] for exceptions. *)
+val global_constructor_args : t -> string -> bool list option
+
+(** Whether values of [ty] hold no pointers by value: immediates, and tuples,
+    records and variants of such types. [false] while unknown, e.g. for a
+    variable or an open row. *)
+val pointer_free : t -> Type.ty -> bool
