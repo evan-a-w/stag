@@ -920,3 +920,20 @@ let substitution = .<.~(.<x>.).{x = id Nil}>.
     val substitution : <list['a]>{..'b}
     |}]
 ;;
+
+let%expect_test "a record pattern may end with [_]" =
+  check
+    {|
+type r = {a : int; b : string; c : bool}
+let f x = match x with {a = n; _} -> n
+let g (x : r) = match x with {b = s} -> s
+let h x = match x with {a = 1; c = true; _} -> 1 | {a = n; _} -> n
+|};
+  [%expect
+    {|
+    type r = { a : int; b : string; c : bool }
+    val f : r -> int
+    val g : r -> string
+    val h : r -> int
+    |}]
+;;
