@@ -385,3 +385,22 @@ let r2 = .~q2
     val r2 : string @ 'm0 -> string @ nonportable with 'm0 <= portable
     |}]
 ;;
+
+let%expect_test "provenance bounds read back" =
+  round_trip
+    {|
+let ext (x : string) = let y @ external = x in y
+let p = Ptr.make "a"
+let store (s : string) = p.* <- s
+let keep (s : string) = let y @ static = s in y
+let in_ptr u = Ptr.make (ext "a")
+|};
+  [%expect
+    {|
+    let ext_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and portable <= 'm1 and external <= 'm1 = ext
+    let p_copy : ptr[string] = p
+    let store_copy : string @ 'm0 -> unit @ 'm1 with portable <= 'm1 and 'm0 <= gc = store
+    let keep_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and 'm0 <= static = keep
+    let in_ptr_copy : 'a -> ptr[string] @ nonportable external = in_ptr
+    |}]
+;;

@@ -5,10 +5,13 @@ module Operand = struct
   type t =
     | Var of int
     | Const of Stage.t
+    | Provenance of Mode.Provenance.t
 
   let to_string ~name = function
     | Var rep -> name rep
     | Const stage -> Sexp.to_string (Stage.sexp_of_t stage) |> String.lowercase
+    | Provenance provenance ->
+      Sexp.to_string (Mode.Provenance.sexp_of_t provenance) |> String.lowercase
   ;;
 end
 
@@ -129,7 +132,7 @@ let settle t =
       let lower, upper = bounds rep in
       let op = Hashtbl.find_exn t.operand rep in
       match op with
-      | Const _ ->
+      | Const _ | Provenance _ ->
         List.filter_map edges ~f:(fun (a, b) ->
           Option.some_if (a = rep) (op, Hashtbl.find_exn t.operand b))
       | Var _ ->
@@ -152,15 +155,44 @@ let settle t =
       | Const _, Const _ -> false
       | Const lo, Var _ -> not (Stage.equal lo Stage.min)
       | Var _, Const hi -> not (Stage.equal hi Stage.max)
-      | Var _, Var _ -> true)
+      | Var _, Var _ -> true
+      | Provenance _, _ | _, Provenance _ -> true)
   in
+  let provenance rep : (Operand.t * Operand.t) list =
+    let bounds =
+      List.filter_map (members rep) ~f:(Hashtbl.find t.vars)
+      |> List.map ~f:(fun var ->
+        (Mode.Var.lower var).provenance, (Mode.Var.upper var).provenance)
+    in
+    let lower =
+      List.map bounds ~f:fst
+      |> List.reduce ~f:Mode.Provenance.join
+      |> Option.value ~default:Mode.Provenance.min
+    in
+    let upper =
+      List.map bounds ~f:snd
+      |> List.reduce ~f:Mode.Provenance.meet
+      |> Option.value ~default:Mode.Provenance.max
+    in
+    match Hashtbl.find_exn t.operand rep with
+    | Const _ | Provenance _ -> []
+    | Var _ as op ->
+      (if Mode.Provenance.equal lower External
+       then [ Operand.Provenance lower, op ]
+       else [])
+      @
+      if Mode.Provenance.equal upper External
+      then []
+      else [ op, Operand.Provenance upper ]
+  in
+  let constraints = constraints @ List.concat_map reps ~f:provenance in
   t.constraints <- constraints;
   Hash_set.clear t.elided;
   let mentioned = Int.Hash_set.create () in
   List.iter constraints ~f:(fun (lo, hi) ->
     List.iter [ lo; hi ] ~f:(function
       | Var rep -> Hash_set.add mentioned rep
-      | Const _ -> ()));
+      | Const _ | Provenance _ -> ()));
   List.iter reps ~f:(fun rep ->
     match members rep, Hashtbl.find_exn t.operand rep with
     | [ id ], Var _ ->

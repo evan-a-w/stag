@@ -1,12 +1,13 @@
 open! Import
 
-(** The mode variables of the arrows a [Type.Printer] renders, on the stage axis
-    (the only one checked so far), and the constraints to print after them,
-    simplified: variables equal by their constraints print as one, a variable
-    fixed to a constant prints as it, constraints and bounds the others imply
-    are left out, and a variable named once and in no constraint is elided (as
-    an annotation's side without a mode is a fresh variable, it reads back as
-    it). *)
+(** The mode variables of the arrows a [Type.Printer] renders, related on the
+    stage axis, and the constraints to print after them, simplified: variables
+    equal by their constraints print as one, a variable fixed to a constant
+    prints as it, constraints and bounds the others imply are left out, and a
+    variable named once and in no constraint is elided (as an annotation's side
+    without a mode is a fresh variable, it reads back as it). On provenance,
+    only a variable's bounds print: an [external] lower bound, as
+    [external <= 'm0], and an upper bound below [external], as ['m0 <= gc]. *)
 
 type t
 

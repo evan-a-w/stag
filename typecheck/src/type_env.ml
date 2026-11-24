@@ -305,6 +305,10 @@ module Mode_atoms = struct
 end
 
 module Vars = struct
+  module Bound = struct
+    type t = { f : 'a. 'a Mode.Axis.t -> 'a -> (unit, Mode.Error.t) Result.t }
+  end
+
   type t =
     | Params of Type.arg String.Map.t
     | Annotation of Annotation_vars.t
@@ -365,8 +369,8 @@ module Vars = struct
       Ok (Arrow_modes.Side.Fixed (Mode_atoms.declared atoms ~default))
   ;;
 
-  (* [lower <= upper] between variables, or bounding a variable by the atoms: on
-     the axes checked so far (stage), as printed. *)
+  (* [lower <= upper] between variables, on stage, or bounding a variable by the
+     atoms, on stage and provenance: as printed. *)
   let mode_constraint t ({ lower; upper } : Syntax.Mode_expr.Constraint.t) ~loc
     : (unit, Typecheck_error.t) Result.t
     =
@@ -377,13 +381,16 @@ module Vars = struct
            "it is annotated %s"
            (Syntax.Mode_expr.Constraint.to_string { lower; upper }))
     in
-    let bound (atoms : Syntax.Mode_expr.Atom.t list) ~f =
+    let bound (atoms : Syntax.Mode_expr.Atom.t list) ~(f : Bound.t) =
       List.fold_result atoms ~init:() ~f:(fun () atom ->
         match atom with
-        | Const -> f Mode.Stage.Const
-        | Portable -> f Portable
-        | Nonportable -> f Nonportable
-        | Static | Gc | External | Global | Regional | Local -> Ok ())
+        | Const -> f.f Stage Mode.Stage.Const
+        | Portable -> f.f Stage Portable
+        | Nonportable -> f.f Stage Nonportable
+        | Static -> f.f Provenance Static
+        | Gc -> f.f Provenance Gc
+        | External -> f.f Provenance External
+        | Global | Regional | Local -> Ok ())
     in
     let checked result =
       Result.map_error result ~f:(fun error ->
@@ -404,11 +411,16 @@ module Vars = struct
     | Annotation vars, Var lower, Atoms atoms ->
       let var = Annotation_vars.mode vars lower in
       checked
-        (bound atoms ~f:(fun point -> Mode.Var.at_most var Stage point reason))
+        (bound
+           atoms
+           ~f:{ f = (fun axis point -> Mode.Var.at_most var axis point reason) })
     | Annotation vars, Atoms atoms, Var upper ->
       let var = Annotation_vars.mode vars upper in
       checked
-        (bound atoms ~f:(fun point -> Mode.Var.at_least var Stage point reason))
+        (bound
+           atoms
+           ~f:
+             { f = (fun axis point -> Mode.Var.at_least var axis point reason) })
   ;;
 end
 
