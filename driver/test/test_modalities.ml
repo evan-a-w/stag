@@ -560,3 +560,64 @@ let s : 'a @ 'm -> 'a @ 'n with release(locality('m)) <= locality('m) = fun x ->
     val s : 'a @ 'm0 -> 'a with release(locality('m0)) <= locality('m0)
     |}]
 ;;
+
+let%expect_test "a variable fixed on some axes keeps its name where others are \
+                 free"
+  =
+  (* [const] fixes stage, and so provenance ([static]); as only a mode argument
+     it has no locality, so it is fixed and prints as atoms. *)
+  round_trip
+    {|
+let diverge (u : unit) = diverge u
+let s : ptr['a @@ 'm1] -> 'a with 'm1 <= const = fun x -> diverge ()
+|};
+  [%expect
+    {|
+    val diverge : unit @ 'm0 -> 'a @ global with portable <= 'm0
+    val s : ptr['a @@ const static] -> 'a
+    |}];
+  (* Also an arrow's side, its locality is free: one name in both places. *)
+  round_trip
+    {|
+let diverge (u : unit) = diverge u
+let s : 'a @ 'm1 -> ptr['a @@ 'm1] -> 'a with 'm1 <= const = fun x -> diverge ()
+|};
+  [%expect
+    {|
+    val diverge : unit @ 'm0 -> 'a @ global with portable <= 'm0
+    val s : 'a @ 'm0 -> ptr['a @@ 'm0] -> 'a with 'm0 <= const
+    |}]
+;;
+
+let%expect_test "a variable only of mode arguments has no locality" =
+  check
+    {|
+type box['p : mode] = { v : string @@ 'p }
+let diverge (u : unit) = diverge u
+let s : 'a @ 'm0 -> box['m3] @ 'm2 -> 'a @ 'm4
+  with release(locality('m0)) <= locality('m3) and 'm3 <= 'm4 = fun x -> diverge ()
+|};
+  [%expect
+    {| This mode is invalid: 'm3 is only a mode argument, which has no locality |}];
+  check
+    {|
+type box['p : mode] = { v : string @@ 'p }
+let s : box['m3] -> unit with 'm3 <= local = fun x -> ()
+|};
+  [%expect
+    {| This mode is invalid: 'm3 is only a mode argument, which has no locality |}];
+  (* A plain relation relates the axes it has: stage and provenance. *)
+  round_trip
+    {|
+type box['p : mode] = { v : string @@ 'p }
+let diverge (u : unit) = diverge u
+let s : box['m3] @ 'm2 -> 'a @ 'm0 -> 'a @ 'm4
+  with 'm0 <= 'm3 and 'm3 <= 'm4 and locality('m0) <= locality('m4) = fun x -> diverge ()
+|};
+  [%expect
+    {|
+    type box['m0 : mode] = { v : string @@ 'm0 }
+    val diverge : unit @ 'm0 -> 'a @ global with portable <= 'm0
+    val s : box['m0] -> 'a @ 'm1 -> 'a @ 'm2 with 'm0 <= 'm2 and 'm1 <= 'm0 and 'm1 <= 'm2
+    |}]
+;;

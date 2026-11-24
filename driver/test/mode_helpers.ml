@@ -189,7 +189,12 @@ let round_trip source ~show =
          || String.is_suffix ty ~suffix:" @ external")
     in
     List.iter annotated ~f:(fun (name, ty) ->
-      if not (comparable (name, ty))
+      if not
+           (comparable (name, ty)
+            ||
+            match show with
+            | `Quiet -> true
+            | `Signature | `Copies -> false)
       then print_s [%message "not compared" (name : string) ty]);
     let annotated = List.filter annotated ~f:comparable in
     let copies =
@@ -220,7 +225,8 @@ let round_trip source ~show =
     in
     (match show with
      | `Signature -> print_string printed
-     | `Copies -> print_endline (String.concat ~sep:"\n" copies));
+     | `Copies -> print_endline (String.concat ~sep:"\n" copies)
+     | `Quiet -> ());
     let round_trip_diverge =
       "let round_trip_diverge (u : unit) = round_trip_diverge u"
     in
@@ -244,7 +250,10 @@ let round_trip source ~show =
        List.iter annotated ~f:(fun (original, _) ->
          match project (Option.value_exn (find items original)) with
          | Error error ->
-           print_s [%message "not compared" original (error : Sexp.t)]
+           (match show with
+            | `Quiet -> ()
+            | `Signature | `Copies ->
+              print_s [%message "not compared" original (error : Sexp.t)])
          | Ok expected ->
            List.iter [ "_copy"; "_alone" ] ~f:(fun suffix ->
              let name = original ^ suffix in

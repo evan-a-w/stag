@@ -275,8 +275,8 @@ module Annotation_vars = struct
 
   let fresh_mode t = Mode.Var.create (Fresh.modes t.fresh) ~rank:t.rank
 
-  (* [`Mode_arg] for a mode argument, which has no locality, [`Located] where
-     it has, and [`Related] in a constraint, which relates its axes. *)
+  (* [`Mode_arg] for a mode argument, which has no locality, [`Located] where it
+     has, and [`Related] in a constraint, which relates its axes. *)
   let var t name ~loc ~(use : [ `Located | `Mode_arg | `Related ]) =
     (match use with
      | `Located -> Hash_set.add t.located name
@@ -478,8 +478,9 @@ module Vars = struct
     =
     match t, txt with
     | Annotation vars, Var name ->
-      Result.map (Annotation_vars.var vars name ~loc ~use:`Mode_arg) ~f:(fun var ->
-        Mode_arg.Var var)
+      Result.map
+        (Annotation_vars.var vars name ~loc ~use:`Mode_arg)
+        ~f:(fun var -> Mode_arg.Var var)
     | Params params, Var name ->
       (match Map.find params name with
        | Some (AMode mode) -> Ok mode
@@ -511,9 +512,7 @@ module Vars = struct
     Typecheck_error.create
       ~loc
       (Invalid_mode
-         (sprintf
-            "'%s is only a mode argument, which has no locality"
-            name))
+         (sprintf "'%s is only a mode argument, which has no locality" name))
   ;;
 
   (* A term of one variable as [m(var)] on the right of [<=], or, on the left,

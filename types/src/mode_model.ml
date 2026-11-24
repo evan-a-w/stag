@@ -169,7 +169,9 @@ let implied t (item : Item.t) =
       and hi = t.index hi in
       List.for_all (domain t lo) ~f:(fun p ->
         let need = Mode.Morphism.left morphism p in
-        let level, _ = raise_ t lows lo p ~stop:(fun level -> level hi >= need) in
+        let level, _ =
+          raise_ t lows lo p ~stop:(fun level -> level hi >= need)
+        in
         level hi >= need))
   | Lower _ -> Array.for_alli (lows t) ~f:(fun i p -> p = real_lower t i)
   | Upper _ -> Array.for_alli (ups t) ~f:(fun i p -> p = real_upper t i)
@@ -206,20 +208,20 @@ let check_exact t =
             Hashtbl.update real j ~f:(fun current ->
               Int.max point (Option.value current ~default:point))));
       let level, touched = raise_ t lows i p ~stop:(fun _ -> false) in
-      List.iter (touched @ Hashtbl.keys real) ~f:(fun j ->
-        let real =
-          Hashtbl.find real j |> Option.value ~default:lows.(j)
-        in
-        if level j <> real
-        then
-          fail
-            [%message
-              "raise"
-                (x : Mode_node.t)
-                (p : int)
-                ~y:(t.nodes.(j) : Mode_node.t)
-                ~level:(level j : int)
-                (real : int)])))
+      List.iter
+        (touched @ Hashtbl.keys real)
+        ~f:(fun j ->
+          let real = Hashtbl.find real j |> Option.value ~default:lows.(j) in
+          if level j <> real
+          then
+            fail
+              [%message
+                "raise"
+                  (x : Mode_node.t)
+                  (p : int)
+                  ~y:(t.nodes.(j) : Mode_node.t)
+                  ~level:(level j : int)
+                  (real : int)])))
 ;;
 
 let reduce closure ~nodes ~base_lower ~implicit items ~item =

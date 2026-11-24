@@ -1550,8 +1550,8 @@ module Printer = struct
     in
     ignore (render copy : string);
     ignore (bounds copy : string list);
-    (* A declaration's mode variables are its parameters, related to nothing,
-       so print by name, and there is no [with] to settle. *)
+    (* A declaration's mode variables are its parameters, related to nothing, so
+       print by name, and there is no [with] to settle. *)
     if not t.declaration then Option.iter t.modes ~f:Mode_printing.settle;
     Hashtbl.iteri counts ~f:(fun ~key:id ~data:count ->
       if count = 1 && not (Hashtbl.mem t.names id) then Hash_set.add t.elided id);

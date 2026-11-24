@@ -11,7 +11,8 @@ val signature : string -> (string, string list) Result.t
     aren't printed, left out): the printed type implies just what the value's
     does. One it can't compare (weak, with [where] or [as], or a mutable global)
     is listed as such. Prints the signature with [`Signature], the [_copy]
-    annotations with [`Copies]. *)
-val checked : string -> (Signature.Item.t list, string list) Result.t
+    annotations with [`Copies], neither with [`Quiet] (which also leaves out
+    those it can't compare). *)
+val round_trip : string -> show:[ `Signature | `Copies | `Quiet ] -> unit
 
-val round_trip : string -> show:[ `Signature | `Copies ] -> unit
+val checked : string -> (Signature.Item.t list, string list) Result.t

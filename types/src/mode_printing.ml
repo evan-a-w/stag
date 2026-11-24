@@ -107,7 +107,8 @@ let written_forms =
    bounds do (or, from a node to itself, than that it is itself). *)
 let strongest closure ~(lo : Mode_node.t) ~(hi : Mode_node.t) =
   let points =
-    Array.of_list (Mode_closure.lower closure lo :: Mode_closure.domain closure lo)
+    Array.of_list
+      (Mode_closure.lower closure lo :: Mode_closure.domain closure lo)
   in
   let raised =
     Array.map points ~f:(fun p -> Mode_closure.raise closure lo p hi)
@@ -118,7 +119,9 @@ let strongest closure ~(lo : Mode_node.t) ~(hi : Mode_node.t) =
       && Mode.Axis.Any.equal (Mode.Morphism.src m) hi.axis
       && Array.for_alli points ~f:(fun i p -> table.(p) <= raised.(i)))
   in
-  let le (_, _, a) (_, _, b) = Array.for_all points ~f:(fun p -> a.(p) <= b.(p)) in
+  let le (_, _, a) (_, _, b) =
+    Array.for_all points ~f:(fun p -> a.(p) <= b.(p))
+  in
   List.find valid ~f:(fun w -> List.for_all valid ~f:(fun w' -> le w' w))
   |> Option.filter ~f:(fun (_, m, _) ->
     List.exists (Mode_closure.domain closure lo) ~f:(fun p ->
@@ -314,13 +317,13 @@ let settle t =
        && List.for_all (axes rep) ~f:(fun axis ->
          fixed axis || not (Hash_set.mem bounded (node axis)))
        && (all_fixed
-           || (not (List.exists members ~f:(Hash_set.mem t.mode_args)))
-              &&
-              match members with
-           | [ id ] ->
-             [%equal: int option] (Hashtbl.find t.counts id) (Some 1)
-             && Mode.Var.is_generic (Hashtbl.find_exn t.vars id)
-           | _ -> false)
+           || ((not (List.exists members ~f:(Hash_set.mem t.mode_args)))
+               &&
+               match members with
+               | [ id ] ->
+                 [%equal: int option] (Hashtbl.find t.counts id) (Some 1)
+                 && Mode.Var.is_generic (Hashtbl.find_exn t.vars id)
+               | _ -> false))
     then
       Hashtbl.set
         t.atoms
