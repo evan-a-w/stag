@@ -499,6 +499,17 @@ let bad = capped (Int.to_string 3)
 ```
 
 ```stag-error
+(* `(x @ m)` only checks; `let x @ m = e` makes `x` exactly `m`. *)
+let s = "s"
+let checked = (s @ external)       (* still static: fits a gc cell *)
+let exact @ external = s           (* now external: doesn't *)
+let cell = Ptr.make "c"
+let ok = cell.* <- checked
+let bad = cell.* <- exact
+(* Error: This is external, because it is annotated external *)
+```
+
+```stag-error
 (* Toplevels are global, and so must be what is stored through a pointer. *)
 let store (p : ptr[ptr[int]]) x = p.* <- stack_ (Ptr.make x)
 (* Error: must be at most global *)
