@@ -408,6 +408,28 @@ let f (c : cell[local]) = c
 |};
   [%expect
     {| The mode parameter 'p reaches what a pointer's cell holds, which is on stage and provenance only: a pointer's cell is always [global], so its argument has no locality |}]
+;
+  (* Through another type's parameter, and not where it only meets a field. *)
+  check
+    {|
+type cell['p : mode] = { v : ptr[int @@ 'p] }
+type wrap['q : mode] = { c : cell['q] }
+let f (w : wrap[local]) = w
+|};
+  [%expect {| The mode parameter 'q reaches what a pointer's cell holds, which is on stage and provenance only: a pointer's cell is always [global], so its argument has no locality |}];
+  check
+    {|
+type tagged['p : mode] = { payload : string @@ 'p }
+let f (t : tagged[local]) = t
+type cell['p : mode] = { v : ptr[int @@ 'p] }
+let g (c : cell[portable external]) = c
+|};
+  [%expect {|
+    type tagged['m0 : mode] = { payload : string @@ 'm0 }
+    val f : tagged[local] @ 'm0 -> tagged[local] @ 'm1 with 'm0 <= 'm1
+    type cell['m0 : mode] = { v : ptr[int @@ 'm0] }
+    val g : cell[portable external] @ 'm0 -> cell[portable external] @ 'm1 with 'm0 <= 'm1
+    |}]
 ;;
 
 let%expect_test "in quotes, re-checked once erased" =

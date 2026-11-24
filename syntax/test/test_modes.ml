@@ -287,6 +287,43 @@ let%expect_test "mode constraint errors" =
     |}]
 ;;
 
+let%expect_test "mode constraints on one axis" =
+  prog "let f : 'a @ 'm -> 'a @ 'n with stage('m) <= stage('n) = f";
+  prog
+    "let f : 'a @ 'm -> 'a @ 'n with locality('m) <= locality('n) and \
+     provenance('n) <= provenance('m) = f";
+  prog "let f : int with stage('m) <= locality('n) = f";
+  prog "let f : int with stage('m) <= portable = f";
+  prog "let f : int with portable <= stage('m) = f";
+  prog "let f : int with stage('m) <= 'n = f";
+  prog "let f : int with height('m) <= height('n) = f";
+  prog "let f : int with stage(local) <= stage('n) = f";
+  print
+    {|
+let f : 'a @ 'm -> 'a @ 'n with stage('m) <= stage('n) and 'n <= portable = f
+|};
+  [%expect {|
+    ((Let f ()
+      ((ty
+        (Constrained (Arrow (Moded (Var a) (Var m)) (Moded (Var a) (Var n)))
+         (((lower (Var m)) (upper (Var n)) (axis Stage))))))
+      (Var f ())))
+    ((Let f ()
+      ((ty
+        (Constrained (Arrow (Moded (Var a) (Var m)) (Moded (Var a) (Var n)))
+         (((lower (Var m)) (upper (Var n)) (axis Locality))
+          ((lower (Var n)) (upper (Var m)) (axis Provenance))))))
+      (Var f ())))
+    t.stag:1:23-41: a constraint on one axis names it on both sides, as in `stage('m) <= stage('n)`
+    t.stag:1:23-38: a constraint on one axis names it on both sides, as in `stage('m) <= stage('n)`
+    t.stag:1:17-37: a constraint on one axis names it on both sides, as in `stage('m) <= stage('n)`
+    t.stag:1:23-32: a constraint on one axis names it on both sides, as in `stage('m) <= stage('n)`
+    t.stag:1:17-23: unknown mode `height`, expected one of `const`, `portable`, `nonportable`, `static`, `gc`, `external`, `global`, `regional`, `local`
+    t.stag:1:23-28: `stage(...)` takes a mode variable, as in `stage('m)`: a mode like `portable` names its axis
+    let f : 'a @ 'm -> 'a @ 'n with stage('m) <= stage('n) and 'n <= portable = f
+    |}]
+;;
+
 let%expect_test "printing mode constraints" =
   print
     {|

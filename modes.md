@@ -127,12 +127,14 @@ signatures print as without modes. With modes shown
 
 ```
 val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3
-  with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and 'm4 <= 'm1
+  with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and 'm2 <= regional
+  and stage('m4) <= stage('m1) and provenance('m4) <= provenance('m1)
   and gc <= 'm3
 ```
 
 - variables equal by their constraints (a cycle) print as one;
-- a variable fixed to a constant prints as it (`int @ portable -> int @ portable`);
+- a variable fixed or free on each axis prints as its atoms
+  (`string @ external`);
 - constraints and bounds implied by the others are left out;
 - a generic variable named once and in no constraint is left out, which
   reads back as a fresh variable;
@@ -144,23 +146,34 @@ val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3
   are never `const` (an annotation's are floored at `portable`);
 - a weak (not generalized) variable is named `'_m0`, as weak type variables,
   and shown with its current constraints;
-- relations through a crossing morphism are not printed.
+- relations through a crossing morphism (or `borrow`) are not printed.
 
-On provenance, only bounds print, where they restrict: `gc <= 'm` (made at
-run time, as a closure or partial application), `external <= 'm` (it
-may reach external memory) and `'m <= gc` or `'m <= static` (an argument
-stored or stored through, or bound `@ static`). A constant side shows its
-provenance when it is not the default `gc`, and a variable side known to be
-`external` when it prints as a constant (`ptr[int] @ nonportable external`).
+Provenance bounds print where they restrict: `gc <= 'm` (made at run time,
+as a closure or partial application), `external <= 'm` (it may reach external
+memory) and `'m <= gc` or `'m <= static` (an argument stored or stored
+through, or bound `@ static`); `const` implies `static`, so `'m <= const`
+needs no `'m <= static`. A constant side shows its provenance when it is not
+the default `gc`.
 A mutable global whose reads are `external` shows it
 (`val g : string @ external`), parenthesizing an arrow or tuple type
 (`val g : (int -> int) @ external`).
 
 The `with` clause is also syntax for annotations (see syntax.md), so printed
-types read back as themselves. A constraint between variables constrains only
-the stage axis, and a bound the axis of its atoms; provenance relations
-between variables are not printed (nor written), so a printed type may read
-back with them unrelated.
+types read back as themselves. A relation `'m0 <= 'm1` is on every axis; one
+holding on only some is printed per axis (`stage('m0) <= stage('m1) and
+provenance('m0) <= provenance('m1)`), and a bound names its axes by its atoms
+(`portable external <= 'm0`, every axis's bound on one side together).
+Variables equal on every axis print as one; a variable on `ptr` cells only
+has no locality to relate. A side fixed on some axes and free on the others
+prints as its atoms (`string @ external`); one bounded on an axis
+(`nonportable gc <= 'm0`) is named.
+
+Relations through a morphism print as the plain relation they imply
+(on locality, `release`'s: `a <= release(b)` implies `a <= b`); those
+through one implying none (`borrow`, crossing, or between axes) are not
+printed. So a printed type may be weaker than the real one there, but never
+stronger, and annotating with it is sound: an annotated value's own
+constraints still apply to its uses.
 
 ### Annotations on uses
 
@@ -362,7 +375,8 @@ Each step is a branch stacked on the previous one.
   `@@ gc`. `Ptr.make` infers it; weak toplevel cells are fixed at the end of
   their definition (`gc` by default). Stores needn't check the pointer
   stored through (every `ptr` is to stag's memory; C's will be `cptr[t]`).
-  In `with`, a relation with a cell variable is on provenance.
+  In `with`, `'m <= 'n` is on every axis and `provenance('m) <= provenance('n)`
+  on one (likewise `stage`, `locality`).
   Then one modality syntax, `t @@ m` on record fields, constructor
   arguments and `ptr`, on every axis (`global_` fields are gone): meet on
   values (a field read from a block at `b` is at most `b ⊓ m`), exact
@@ -370,7 +384,9 @@ Each step is a branch stacked on the previous one.
   pointer's own provenance), composing along `p.*.f`. `ptr`'s covers stage
   and provenance; its locality is always `global`. Types take mode
   parameters, `type cell['a, 'p : mode]`, applied as `cell[string, external]`
-  (the declaration says which arguments are modes); invariant for now.
+  (the declaration says which arguments are modes); invariant for now. A
+  locality atom in the argument of a parameter reaching a `ptr` cell
+  (through other types' parameters too) is an error.
 
 ## Later
 
@@ -378,7 +394,6 @@ Each step is a branch stacked on the previous one.
 - `cptr[t]`: pointers into C's memory, which the GC doesn't scan, holding
   only C-compatible data (pointer-free values and `cptr`s), for `external`
   signatures.
-- Printing provenance relations between mode variables.
 - Pointers in `external` signatures, and callbacks (`@ static` closures
   passed to C).
 - A dynamic mode checker in the interpreter, as a test oracle.
