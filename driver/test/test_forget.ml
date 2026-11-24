@@ -215,5 +215,5 @@ let q = .< fun (y : string) -> .~(cell.* <- .< String.length y >.; .< y >.) >.
 let r = .~(cell.*)
 |};
   [%expect
-    {| Unbound value y, which the spliced code uses: y is a variable of its quote's context, as the y bound at inside 1 quote(s) (level 1) can't be used in the quote (level 1), as it is not portable |}]
+    {| Unbound value y, which the spliced code uses: y is a free variable of the quote that made it, as the y in scope there, inside 1 quote(s) (level 1), is bound in another quote |}]
 ;;
