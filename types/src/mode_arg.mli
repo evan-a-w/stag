@@ -15,13 +15,8 @@ val default : Mode.Const.t
 (** [ptr[t]]'s: [default]. *)
 val gc : t
 
-val fresh : Mode.Id_source.t -> rank:int -> t
-
-(** Equates the two, on every axis. *)
+(** Equates the two, on stage and provenance: a mode argument has no locality. *)
 val equate : Mode.Id_source.t -> t -> t -> (unit, Mode.Error.t) Result.t
-
-(** [Var v] as is, a [Fixed] one as a new variable fixed to it. *)
-val var : Mode.Id_source.t -> t -> Mode.Var.t
 
 val iter_result
   :  t
@@ -33,10 +28,11 @@ val exists : t -> f:(Mode.Var.t -> bool) @ local -> bool
 (** Keeps [t] (physically) if [f] keeps the variable. *)
 val map : t -> f:(Mode.Var.t -> Mode.Var.t) -> t
 
-(** Equal constants, or the same variable. *)
+(** Equal constants (on stage and provenance), or the same variable. *)
 val same : t -> t -> bool
 
-(** The constant it is fixed to: [Fixed], or a variable whose bounds meet. *)
+(** The constant it is fixed to: [Fixed], or a variable whose bounds meet on
+    stage and provenance. *)
 val known : t -> Mode.Const.t option
 
 val sexp_of_t : t -> Sexp.t

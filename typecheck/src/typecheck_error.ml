@@ -123,7 +123,8 @@ module Kind = struct
     | Misplaced_type_splice
     | Misplaced_mut
     | Misplaced_modality
-    | Invalid_modality of { mode_param : string option }
+    | Locality_in_mode_argument
+    | Relative_locality_modality
     | Mode_variable_in_declaration of string
     | Invalid_mode of string
     | Invalid_external of
@@ -261,7 +262,7 @@ let mode_message
 ;;
 
 let unification_message (error : Unification_error.t) ~show_type =
-  let printer = Type.Printer.create ~type_name:show_type () in
+  let printer = Type.Printer.create ~type_name:show_type ~name_mode_args:true () in
   let ty = Type.Printer.ty printer in
   let row row = ty (TRecord { id = -1; row }) in
   let arg : Type.arg -> string = function
@@ -517,7 +518,7 @@ let rec kind_message (kind : Kind.t) ~show_type =
     "A splice of syntax can't give an [%expect]: its expected output is \
      generated, so it could not be corrected"
   | Toplevel_splice_of_neither ty ->
-    let printer = Type.Printer.create ~type_name:show_type () in
+    let printer = Type.Printer.create ~type_name:show_type ~name_mode_args:true () in
     let ty = Type.Printer.ty printer ty in
     sprintf
       "This expression has type %s, but a toplevel splice is of code (of type \
@@ -547,7 +548,7 @@ let rec kind_message (kind : Kind.t) ~show_type =
       var
   | Invalid_mode why -> sprintf "This mode is invalid: %s" why
   | Invalid_external { symbol; problem } ->
-    let printer = Type.Printer.create ~type_name:show_type () in
+    let printer = Type.Printer.create ~type_name:show_type ~name_mode_args:true () in
     let problem =
       match problem with
       | Not_a_function -> "it must be a function"
@@ -579,17 +580,16 @@ let rec kind_message (kind : Kind.t) ~show_type =
   | Misplaced_modality ->
     "A modality is only written on a record field's type, a constructor's \
      argument or a pointer's type argument, as in [ptr[string @@ external]]"
-  | Invalid_modality { mode_param = None } ->
-    "The modality of a pointer's type argument is on stage and provenance \
-     ([const], [portable], [nonportable], [static], [gc], [external]) or a \
-     mode variable, as in [ptr[string @@ external]]: a pointer's cell is \
-     always [global]"
-  | Invalid_modality { mode_param = Some param } ->
-    sprintf
-      "The mode parameter '%s reaches what a pointer's cell holds, which is on \
-       stage and provenance only: a pointer's cell is always [global], so its \
-       argument has no locality"
-      param
+  | Locality_in_mode_argument ->
+    "A mode argument is on stage and provenance only ([const], [portable], \
+     [nonportable], [static], [gc], [external]) or a mode variable, as in \
+     [ptr[string @@ external]]: a pointer's cell is always [global], and a \
+     type's mode parameters have no locality"
+  | Relative_locality_modality ->
+    "A modality's locality can only be [global]: [regional] and [local] are \
+     relative to a region, and a part read from a block returned to the \
+     caller's region (with [exclave_]) would outlive the region it was \
+     allocated in"
   | Misplaced_mut ->
     "Only an entry of a code type's context can be [mut] or [immut], for a \
      variable the code assigns or doesn't"

@@ -973,12 +973,16 @@ module Printer = struct
            named. *)
     ; modes : Mode_printing.t option (* With [create ~modes:true]. *)
     ; mode_names : string Int.Table.t
+    ; name_mode_args : bool
+    (* Without [modes], whether a mode argument not known is named rather than
+       left out as if the default. *)
     (* Without [modes], of the mode variables a type's mode argument names. *)
     }
 
   let create
     ?(type_name = fun name -> Prelude_path.to_string_hum name)
     ?(modes = false)
+    ?(name_mode_args = false)
     ()
     =
     { type_name
@@ -994,6 +998,7 @@ module Printer = struct
     ; counting = None
     ; modes = Option.some_if modes (Mode_printing.create ())
     ; mode_names = Int.Table.create ()
+    ; name_mode_args
     }
   ;;
 
@@ -1195,6 +1200,11 @@ module Printer = struct
          Option.value (Mode_printing.side modes var) ~default:"")
   ;;
 
+  let mode_var_name t var =
+    Hashtbl.find_or_add t.mode_names (Mode.Var.id var) ~default:(fun () ->
+      sprintf "'m%d" (Hashtbl.length t.mode_names))
+  ;;
+
   (* A mode argument, unless the default ([ptr[t]]'s [gc]). *)
   let held_mode ?(cell = false) t (held : Mode_arg.t) =
     let atom provenance =
@@ -1214,6 +1224,8 @@ module Printer = struct
          then atom External
          else if Mode.Provenance.equal (Mode.Var.upper var).provenance Static
          then atom Static
+         else if t.name_mode_args
+         then Some (mode_var_name t var)
          else None
        | Some modes, Some _ ->
          Mode_printing.count modes var ~side:(if cell then `Cell else `Held);
@@ -1226,9 +1238,7 @@ module Printer = struct
     match held_mode t mode, mode with
     | Some printed, _ -> printed
     | None, Fixed _ -> "gc"
-    | None, Var var ->
-      Hashtbl.find_or_add t.mode_names (Mode.Var.id var) ~default:(fun () ->
-        sprintf "'m%d" (Hashtbl.length t.mode_names))
+    | None, Var var -> mode_var_name t var
   ;;
 
   let side_locality : Arrow_modes.Side.t -> Mode.Locality.t = function

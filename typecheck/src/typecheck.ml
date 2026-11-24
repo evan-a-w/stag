@@ -487,7 +487,13 @@ module Scope = struct
   ;;
 
   let arrow_mode t = Mode_rules.arrow_mode (modes t)
-  let mode_var t = Type_env.Annotation_vars.mode t.annotation_vars
+  let mode_var t name ~loc =
+    match Type_env.Annotation_vars.mode t.annotation_vars name ~loc with
+    | Ok var -> var
+    | Error error ->
+      report t error;
+      Mode_rules.arrow_mode (modes t)
+  ;;
 
   (* Whether they unify: if not, what checked is to become [Error]. *)
   let unifies ids t ~ty1 ~ty2 ~loc =
@@ -2872,7 +2878,6 @@ and expr_type
                 | Ok expansion ->
                   node (Toplevel_splice { code; expansion }) inner))))
   | Deref pointer ->
-    Mode_rules.runs modes at Nonportable ~loc ~why:"it reads through a pointer";
     (* What a pointer points to is global, as it is stored global. *)
     let pointee, pointer, held =
       Mode_rules.project modes at ~loc ~why:"it is dereferenced" (fun at ->
@@ -3064,6 +3069,35 @@ and expr_type
                 ~ty2:(inst_out member.ty)
                 ~loc
               && unified)
+          in
+          (* So are the mode parameters of their modalities. *)
+          let unified =
+            let kept =
+              List.filter_map known.members ~f:(fun member ->
+                match member.modality with
+                | Param index when not (is_given fields member) -> Some index
+                | Param _ | Id | Meet _ -> None)
+            in
+            match
+              ( Type.canonical_ty (inst_in (declared_record known))
+              , Type.canonical_ty record )
+            with
+            | TCon (name, args_in), TCon (_, args_out)
+              when not (List.is_empty kept) ->
+              Scope.unifies
+                t
+                scope
+                ~ty1:
+                  (TCon
+                     ( name
+                     , List.mapi args_out ~f:(fun index arg ->
+                         if List.mem kept index ~equal:Int.equal
+                         then List.nth_exn args_in index
+                         else arg) ))
+                ~ty2:record
+                ~loc
+              && unified
+            | _ -> unified
           in
           let exprs =
             List.map fields ~f:(fun (field, _, expr) ->

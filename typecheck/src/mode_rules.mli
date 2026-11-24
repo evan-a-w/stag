@@ -69,7 +69,7 @@ val evaluate
 val annotated
   :  Ctx.t
   -> Syntax.Mode_expr.t option
-  -> var:(string -> Mode.Var.t)
+  -> var:(string -> loc:Loc.t -> Mode.Var.t)
   -> Mode.Var.t
 
 (** [e @ annot]: with a mode, [e] is checked at a mode of its own that the
@@ -78,7 +78,7 @@ val annotated_use
   :  Ctx.t
   -> Expected.t
   -> annot:Syntax.Mode_expr.t option
-  -> var:(string -> Mode.Var.t)
+  -> var:(string -> loc:Loc.t -> Mode.Var.t)
   -> loc:Loc.t
   -> (Expected.t -> (Typed.Expr.t, 'e) Result.t)
   -> (Typed.Expr.t, 'e) Result.t
@@ -113,7 +113,7 @@ module Binding : sig
     :  Ctx.t
     -> Mode.Var.t
     -> Syntax.Mode_expr.t option
-    -> var:(string -> Mode.Var.t)
+    -> var:(string -> loc:Loc.t -> Mode.Var.t)
     -> t
 
   (** A function, of its closure's mode. *)
@@ -130,7 +130,7 @@ module Binding : sig
     -> Ctx.t
     -> value:Mode.Var.t
     -> Syntax.Mode_expr.t option
-    -> var:(string -> Mode.Var.t)
+    -> var:(string -> loc:Loc.t -> Mode.Var.t)
     -> name:string
     -> loc:Loc.t
     -> t * t
@@ -242,8 +242,9 @@ val assign
   -> (Expected.t -> 'a)
   -> 'a
 
-(** [target := value], [value] being checked at the target's type, into the cell
-    of a pointer whose cell may hold the provenance given. *)
+(** [target := value], [value] being checked at the target's type. [target]
+    gives the modality of what it stores into: the cell of the pointer
+    dereferenced last, then the fields stored into. *)
 val store
   :  Ctx.t
   -> Expected.t
@@ -313,7 +314,7 @@ module Toplevel : sig
     -> is_function:bool
     -> mut:bool
     -> Syntax.Mode_expr.t option
-    -> var:(string -> Mode.Var.t)
+    -> var:(string -> loc:Loc.t -> Mode.Var.t)
     -> name:string
     -> loc:Loc.t
     -> t
