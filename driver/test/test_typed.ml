@@ -585,13 +585,13 @@ let gen n = forget n in .<gen n>.
         (body (Var (Bound (Toplevel b/8)) : int)))))
      (recursive false))
     ((members
-      (((ident gen/9) (args (n/21))
-        (scheme "'a -> <'b>{gen : 'c -> 'b; n : 'c; ..'d}")
+      (((ident gen/9) (args (n/21)) (scheme "'a -> <'b>{n : 'c; ..'d}")
         (body
          (Quote
-          (App (Var (Free_toplevel gen) : "'c -> 'b") (Var (Free n) : 'c) : 'b) :
-          "<'b>{gen : 'c -> 'b; n : 'c; ..'d}")))))
-     (recursive false))
+          (App (Var (Persistent (Toplevel gen/9)) : "'c -> 'b")
+           (Var (Free n) : 'c) : 'b)
+          : "<'b>{n : 'c; ..'d}")))))
+     (recursive true))
     |}]
 ;;
 
@@ -607,22 +607,22 @@ let captured x = .~(.<captured x>.)
   [%expect
     {|
     ((members
-      (((ident gen/4) (args (n/18))
-        (scheme "'a -> <'b>{gen : 'c -> 'b; n : 'c; ..'d}")
+      (((ident gen/4) (args (n/18)) (scheme "'a -> <'b>{n : 'c; ..'d}")
         (body
          (Quote
-          (App (Var (Free_toplevel gen) : "'c -> 'b") (Var (Free n) : 'c) : 'b) :
-          "<'b>{gen : 'c -> 'b; n : 'c; ..'d}")))))
+          (App (Var (Persistent (Toplevel gen/4)) : "'c -> 'b")
+           (Var (Free n) : 'c) : 'b)
+          : "<'b>{n : 'c; ..'d}")))))
+     (recursive true))
+    ((members
+      (((ident b/6) (args ()) (scheme <'a>{..'b})
+        (body (Quote (Var (Persistent (Toplevel a/5)) : 'a) : <'a>{..'b})))))
      (recursive false))
     ((members
-      (((ident b/6) (args ()) (scheme "<'a>{a : 'a; ..'b}")
-        (body (Quote (Var (Free_toplevel a) : 'a) : "<'a>{a : 'a; ..'b}")))))
-     (recursive false))
-    ((members
-      (((ident a/5) (args ()) (scheme "<<'a>{a : 'a; ..'b}>{..'c}")
+      (((ident a/5) (args ()) (scheme <<'a>{..'b}>{..'c})
         (body
-         (Quote (Var (Persistent (Toplevel b/6)) : "<'a>{a : 'a; ..'b}") :
-          "<<'a>{a : 'a; ..'b}>{..'c}")))))
+         (Quote (Var (Persistent (Toplevel b/6)) : <'a>{..'b}) :
+          <<'a>{..'b}>{..'c})))))
      (recursive false))
     ((members
       (((ident loop/7) (args (x/19)) (scheme "'a -> 'b")
@@ -636,9 +636,9 @@ let captured x = .~(.<captured x>.)
          (Toplevel_splice
           (code
            (Quote
-            (App (Var (Free_toplevel captured) : "'a -> 'b") (Var (Free x) : 'a)
-             : 'b)
-            : "<'b>{captured : immut 'a -> 'b; x : immut 'a}"))
+            (App (Var (Persistent (Toplevel captured/8)) : "'a -> 'b")
+             (Var (Free x) : 'a) : 'b)
+            : "<'b>{x : immut 'a}"))
           (expansion
            (App (Var (Bound (Toplevel captured/8)) : "'a -> 'b")
             (Var (Bound (Local x/20)) : 'a) : 'b))
@@ -857,7 +857,7 @@ let%expect_test "explicit substitutions" =
     {|
 let n = Int.to_string 3
 let persistent_shorthand = let f y = y in .<.~(.<id (f 1)>.).{f; id}>.
-let at_toplevel = .~(.<String.append n y>.).{n; y = "1"}
+let at_toplevel = .~(forget n in .<String.append n y>.).{n; y = "1"}
 |};
   [%expect
     {|
@@ -898,7 +898,7 @@ let at_toplevel = .~(.<String.append n y>.).{n; y = "1"}
            (Quote
             (App
              (App (Var (Prim String.append) : "string -> string -> string")
-              (Var (Free_toplevel n) : string) : "string -> string")
+              (Var (Free n) : string) : "string -> string")
              (Var (Free y) : string) : string)
             : "<string>{n : immut string; y : immut string}"))
           (expansion

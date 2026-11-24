@@ -148,7 +148,6 @@ let expr (expr : Typed.Expr.t) =
     | Bound (Toplevel ident) | Persistent (Toplevel ident) ->
       Ok (resolved ident.name)
     | Free name -> Ok (Path (Syntax.Path.of_string name))
-    | Free_toplevel name -> Ok (resolved name)
     | Prim prim -> Ok (resolved (Prim.canonical_name prim))
     | Intrinsic Ptr_make -> Ok (resolved (Prelude_path.canonical "Ptr.make"))
     | Intrinsic Assume_global ->

@@ -1153,10 +1153,10 @@ let%expect_test "references to toplevels in quotes don't join their components" 
   check (b ^ a);
   [%expect
     {|
-    val a : <'_a>{b : '_a; ..'_b}
-    val b : <'_a>{b : '_a; ..'_b} * int
-    val b : <'a>{b : 'a; ..'b} * int
-    val a : <'a>{b : 'a; ..'b}
+    val a : <'_a>{..'_b}
+    val b : <'_a>{..'_b} * int
+    val b : <'a>{..'b} * int
+    val a : <'a>{..'b}
     |}]
 ;;
 

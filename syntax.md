@@ -158,14 +158,19 @@ quote (whether `forget` is outside the quote or inside it), a forgotten name
 is a free variable of the quote, to be provided where the code is spliced
 (implicitly or by `.{x = ...}`). A binding inside `e` (`let x = ... in`, a
 parameter, a pattern) binds `x` again as usual. Naming a variable twice is an
-error.
+error. `forget` works at the level it is written, and in the quotes nested in
+`e`: a splice in `e` back to an earlier level, where `x` is a variable, still
+sees it, so `.< forget x in .~(f x) >.` passes the outer `x` to `f` while the
+quote's own `x` is free.
 
 A name in scope inside a quote always means that variable. A local of an
 earlier level is embedded in the code if the quote may use its value (it is
 `portable`, or its type crosses stage, see [modes.md](modes.md)); otherwise
-using it is an error, which suggests `(x @ portable)` or `forget`. A toplevel
-is referred to by name. So the quote's free variables are exactly the names
-not in scope:
+using it is an error, which suggests `forget` (and `(x @ portable)` where
+that could hold). A toplevel the quote can't embed is referred to by symbol:
+the code names that toplevel wherever it is spliced, so no local there can
+capture it, no substitution can replace it, and `forget` at the splice doesn't
+hide it. So the quote's free variables are exactly the names not in scope:
 
 ```ocaml
 let argument x = .< x >.             (* error: x may not be portable *)
@@ -306,9 +311,8 @@ parameter whose type is fixed by a later use), the lookup is lexical. So the
 order matters, and nothing warns of it (there is no `-principal`):
 `let f v = let _ = (v : N.r) in v.x` finds `N.r`'s `x`, but
 `let f v = let _ = v.x in (v : N.r)` the `x` in scope. Inside a quote, a
-non-function toplevel is a free variable of the quote, whose type is not its
-own (see modes.md), so in `.< N.v.x >.` the `x` is the one in scope whatever
-`N.v`'s type.
+toplevel still being checked has a fresh type there (see modes.md), so in
+`.< N.v.x >.` the `x` is then the one in scope whatever `N.v`'s type.
 
 ## Patterns
 
@@ -415,9 +419,9 @@ This is the same at a toplevel splice and in a quote.
 A substitution must be of a free variable of the code: substituting a name
 the code's context is known not to have (it is closed without it, or the
 entry is absent) is an error, as is one the code run at a toplevel splice
-turns out not to use when its type doesn't list it. A toplevel constant used
-in a quote is not a free variable (see modes.md), so `.~(.<n>.).{n = 1}` is
-an error for `let n = 3`. Nor is a free variable of a quote inside the
+turns out not to use when its type doesn't list it. A toplevel used in a
+quote is never a free variable (see modes.md), so `.~(.<n>.).{n = 1}` is an
+error for `let n = 3` or `let n = Int.to_string 3`. Nor is a free variable of a quote inside the
 generated code: in `.~(.< .<x>. >.).{x = 1}`, the inner `x` is provided where
 that inner code is spliced, not by the substitution, so it is an error too.
 
@@ -1069,10 +1073,8 @@ there), as if named by a path there. Whatever made it was visible where the
 quote was checked, so it exists by the time a splice can use it; checking it
 on demand is subject to the usual rules (eg. a toplevel that needs what the
 running splice generates is an error). Toplevels referred to from inside a
-quote but not yet checked are the quote's free variables by their canonical
-names, and are erased as refs too; a splice provides these from where it is
-even with explicit substitutions, which can't name them (so
-`.~(.<n>.).{n}` inside `module M` works while `M.n` is unchecked). A local the code embeds (a local function
+quote but not yet checked are refs too (by symbol), so a splice never provides
+them. A local the code embeds (a local function
 of the code that made it, used in the quote) has no name where the code is
 spliced: `erase` is a runtime error naming it. A splice inside a nested quote
 of the code takes its entries from what is in scope where spliced, by name,

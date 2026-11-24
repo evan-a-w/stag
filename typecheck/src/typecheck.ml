@@ -530,6 +530,9 @@ module Resolution = struct
     (** Not bound in the enclosing [quote], so a free variable of it, unless
         used directly while [usable]. Splices never capture the name. [unusable]
         is the entry of the name, if it has one that isn't [usable]. *)
+    | By_symbol of Env.Entry.t
+    (** A toplevel from outside the enclosing quote whose value can't be
+        embedded: the code refers to the toplevel itself, by symbol. *)
     | Unusable of Typecheck_error.Kind.t (** The error if the name is used. *)
 
   (* [spliced]: [name] is a free variable of code spliced here, not written
@@ -579,14 +582,16 @@ module Resolution = struct
     | None, Some entry when usable entry -> Local entry
     | Some quote, Some entry
       when [%equal: int option] entry.quote_id (Some quote.id) -> Local entry
+    | Some quote, Some ({ binder = Local _; _ } as entry)
+      when spliced && entry.level < scope.level ->
+      Outside_quote { quote; usable = None; unusable = Some entry }
     | _, Some entry when is_mutable_local entry && entry.level <> scope.level ->
       Unusable
         (Mutable_used_outside_its_code
            { name; var_level = entry.level; used_at = scope.level })
     | Some _, Some ({ binder = Local _; _ } as entry)
-      when (not spliced) && entry.level < scope.level && not (usable entry) ->
-      (* A local of an earlier level: the quote can only embed its value. A
-         toplevel is referred to by name instead. *)
+      when entry.level < scope.level && not (usable entry) ->
+      (* A local of an earlier level: the quote can only embed its value. *)
       Unusable
         (Not_embeddable
            { name
@@ -594,6 +599,9 @@ module Resolution = struct
            ; used_at = scope.level
            ; defining = entry.defining
            })
+    | Some _, Some ({ binder = Toplevel _; _ } as entry)
+      when (not spliced) && entry.level <= scope.level && not (usable entry) ->
+      By_symbol entry
     | Some quote, Some entry when entry.level <= scope.level ->
       let usable = usable entry in
       Outside_quote
@@ -1402,12 +1410,20 @@ module Variant_match = struct
   ;;
 end
 
-let use_entry (scope : Scope.t) ~at (entry : Env.Entry.t) ~name ~loc =
+let use_entry
+  ?(by_symbol = false)
+  (scope : Scope.t)
+  ~at
+  (entry : Env.Entry.t)
+  ~name
+  ~loc
+  =
   Mode_rules.use
     (Scope.modes scope)
     at
     entry
     ~locks:scope.locks
+    ~by_symbol
     ~toplevel:
       (match entry.binder with
        | Toplevel _ -> true
@@ -1441,15 +1457,17 @@ let generalizes (scope : Scope.t) mode ~is_function ~loc =
 ;;
 
 (* [name] is the context entry the variable is provided as, if it becomes a free
-   variable of the quote: a local's name or a toplevel's canonical name. *)
-let resolution_type t (scope : Scope.t) ~at ~name ~toplevel ~loc
-  : Resolution.t -> _
+   variable of the quote. *)
+let resolution_type t (scope : Scope.t) ~at ~name ~loc : Resolution.t -> _
   = function
   | Local entry ->
     use_entry scope ~at entry ~name ~loc;
     Ok (Scope.instantiate t scope entry.scheme, Typed.Var_ref.Bound entry.binder)
   | Outside_quote { usable = Some entry; _ } ->
     use_entry scope ~at entry ~name ~loc;
+    Ok (Scope.instantiate t scope entry.scheme, Persistent entry.binder)
+  | By_symbol entry ->
+    use_entry scope ~at entry ~name ~loc ~by_symbol:true;
     Ok (Scope.instantiate t scope entry.scheme, Persistent entry.binder)
   | Outside_quote { quote; usable = None; unusable } ->
     Option.iter unusable ~f:(fun entry ->
@@ -1466,7 +1484,7 @@ let resolution_type t (scope : Scope.t) ~at ~name ~toplevel ~loc
       Unify.present_entry t ~row:quote.context ~name ~rank:quote.outside.rank
       |> lift ~loc
     in
-    ty, if toplevel then Typed.Var_ref.Free_toplevel name else Free name
+    ty, Typed.Var_ref.Free name
   | Unusable kind -> error ~loc kind
 ;;
 
@@ -1861,7 +1879,6 @@ let rec var_type t (scope : Scope.t) ~at ~(path : Syntax.Decl_path.t) ~loc =
       scope
       ~at
       ~name
-      ~toplevel:false
       ~loc
       (Resolution.of_entry scope ~name entry)
   in
@@ -1869,7 +1886,7 @@ let rec var_type t (scope : Scope.t) ~at ~(path : Syntax.Decl_path.t) ~loc =
     match path with
     | Path path ->
       (match (path :> string list) with
-       | [ name ] -> Some (name, Env.lookup scope.locals name)
+       | [ name ] -> Some (name, Env.lookup scope.locals name ~level:scope.level)
        | _ -> None)
     | Root _ | Resolved _ -> None
   in
@@ -1899,7 +1916,6 @@ and toplevel_type t scope ~at (toplevel : Toplevel.t) ~loc =
     scope
     ~at
     ~name
-    ~toplevel:true
     ~loc
     (Resolution.of_entry scope ~name (Some entry))
 
@@ -1916,13 +1932,12 @@ and resolved_value_type t (scope : Scope.t) ~at name ~loc =
 (* Generated code's variables are already resolved, so are found by binder
    rather than by name, which may be shadowed. *)
 and var_ref_type t (scope : Scope.t) ~at (var_ref : Typed.Var_ref.t) ~loc =
-  let resolve ~name ~toplevel entry =
+  let resolve ~name entry =
     resolution_type
       t
       scope
       ~at
       ~name
-      ~toplevel
       ~loc
       (Resolution.of_entry scope ~name (Some entry))
   in
@@ -1932,7 +1947,7 @@ and var_ref_type t (scope : Scope.t) ~at (var_ref : Typed.Var_ref.t) ~loc =
   match var_ref with
   | Prim prim -> Ok (prim_type scope prim, var_ref)
   | Intrinsic intrinsic -> Ok (intrinsic_type t scope intrinsic, var_ref)
-  | (Free name | Free_toplevel name) as var_ref ->
+  | Free name ->
     (match scope.quote with
      | Some quote ->
        resolution_type
@@ -1940,10 +1955,6 @@ and var_ref_type t (scope : Scope.t) ~at (var_ref : Typed.Var_ref.t) ~loc =
          scope
          ~at
          ~name
-         ~toplevel:
-           (match var_ref with
-            | Free_toplevel _ -> true
-            | _ -> false)
          ~loc
          (Outside_quote { quote; usable = None; unusable = None })
      | None -> not_in_scope name)
@@ -1955,10 +1966,10 @@ and var_ref_type t (scope : Scope.t) ~at (var_ref : Typed.Var_ref.t) ~loc =
         (Program_env.toplevel scope.program ident.name)
         ~loc
     in
-    resolve ~name:ident.name ~toplevel:true entry
+    resolve ~name:ident.name entry
   | Bound (Local ident as binder) | Persistent (Local ident as binder) ->
     (match Env.find_binder scope.locals binder ~name:ident.name with
-     | Some entry -> resolve ~name:ident.name ~toplevel:false entry
+     | Some entry -> resolve ~name:ident.name entry
      | None ->
        (match Program_env.embedded scope.program ident with
         | Some info ->
@@ -2005,21 +2016,24 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
     if failed then scope.scc.failed <- true;
     Ok (at_scope_level entry)
   | In_progress in_progress ->
-    let entry ?(defining = false) mode =
+    let entry ?(defining = false) ?(scheme = in_progress.ty) mode =
       Env.Entry.toplevel
         ~defining
         ~ident:toplevel.ident
-        ~scheme:in_progress.ty
+        ~scheme
         ~mode
         ~held:in_progress.held
     in
     (match scope.quote with
      | Some _ when not toplevel.mut ->
-       (* Its mode isn't known yet, so it is referred to by name: the quote's
-          value doesn't depend on [toplevel]. *)
+       (* Its mode isn't known yet, so the code refers to it by symbol: the
+          quote's value doesn't depend on [toplevel], so neither does its
+          component. Nor does the code's type, a fresh one: where the code is
+          spliced, its expansion is checked against [toplevel]'s. *)
        Ok
          (at_scope_level
             (entry
+               ~scheme:(Scope.fresh_ty t scope)
                (Mode_rules.Binding.being_checked
                   (Scope.modes scope)
                   ~name:toplevel.ident.name
@@ -2394,6 +2408,7 @@ and expr_type
     Env.forgetting
       scope.locals
       (List.map names ~f:(fun (name : Syntax.Name.t) -> name.txt))
+      ~level:scope.level
       ~f:(fun () -> expr_type t scope ~at ~expr:body)
   | Var (Ref var_ref) ->
     (match var_ref_type t scope ~at var_ref ~loc with
@@ -2633,7 +2648,7 @@ and expr_type
       | Path (path, _) -> Syntax.Decl_path.to_string path
       | Ref (Bound (Local ident | Toplevel ident))
       | Ref (Persistent (Local ident | Toplevel ident)) -> ident.name
-      | Ref (Free name | Free_toplevel name) -> name
+      | Ref (Free name) -> name
       | Ref (Prim prim) -> Prim.canonical_name prim
       | Ref (Intrinsic intrinsic) -> Intrinsic.public_name intrinsic
     in
@@ -2657,7 +2672,6 @@ and expr_type
              |> lift ~loc
            in
            var_ref)
-      | Free_toplevel _ -> error ~loc (Assign_to_immutable name)
       | Prim _ | Intrinsic _ -> error ~loc (Assign_to_immutable name)
     in
     (match
@@ -2689,7 +2703,7 @@ and expr_type
                       "Assigned toplevel not checked" (ident : Typed.Ident.t)])
              , [] ) )
          | Free _ -> name, (None, [])
-         | Free_toplevel _ | Prim _ | Intrinsic _ ->
+         | Prim _ | Intrinsic _ ->
            raise_s [%message "Assigned to an immutable" name]
        in
        let value =
@@ -3600,30 +3614,32 @@ and substitute_entry
   ~loc
   ~may_capture
   =
-  let entry : Env.Lookup.t -> _ = function
-    | Bound entry -> Ok (Some entry)
-    (* Toplevels are free variables of the quote, like any name not bound in it. *)
-    | (Forgotten | Unbound) when Option.is_some scope.quote -> Ok None
-    | Forgotten | Unbound ->
+  let%bind.Result resolution =
+    match Env.lookup scope.locals name ~level:scope.level, scope.quote with
+    | Bound entry, _ ->
+      Ok (Resolution.of_entry ~spliced:true scope ~name (Some entry))
+    | Forgotten, None -> Ok (Resolution.Unusable (Forgotten name))
+    (* Within a quote, a name no local binds stays a free variable of it. *)
+    | (Forgotten | Unbound), Some _ ->
+      Ok (Resolution.of_entry ~spliced:true scope ~name None)
+    | Unbound, None ->
       (* The code is checked and runs now, so if it may use [name], it doesn't.
          Providing it anyway could add a dependency on its toplevel, and would
          depend on whether that is checked yet. *)
-      (match
-         ( Program_env.find_toplevel scope.program name
-         , Type.canonical_presence presence )
-       with
-       | Some toplevel, Present ->
-         toplevel_entry t scope toplevel ~loc |> Result.map ~f:Option.some
-       | None, _ | Some _, (Absent | PVar _) -> Ok None)
-  in
-  let%bind.Result resolution =
-    match Env.lookup scope.locals name, scope.quote with
-    | Forgotten, None -> Ok (Resolution.Unusable (Forgotten name))
-    | lookup, _ ->
-      let%map.Result entry = entry lookup in
+      let%map.Result entry =
+        match
+          ( Program_env.find_toplevel scope.program name
+          , Type.canonical_presence presence )
+        with
+        | Some toplevel, Present ->
+          toplevel_entry t scope toplevel ~loc |> Result.map ~f:Option.some
+        | None, _ | Some _, (Absent | PVar _) -> Ok None
+      in
       Resolution.of_entry ~spliced:true scope ~name entry
   in
   match resolution with
+  | By_symbol _ ->
+    raise_s [%message "Spliced code's free variable by symbol" name]
   | Unusable (Not_in_scope _)
     when Option.is_none scope.quote
          && Hashtbl.mem scope.program.unusable_in_quotes name ->
@@ -3707,7 +3723,7 @@ and substitute_tail
   ~may_capture
   =
   let captured =
-    Env.visible scope.locals
+    Env.visible scope.locals ~level:scope.level
     |> List.filter_map ~f:(fun (name, entry) ->
       if Set.mem seen name
       then None
@@ -3724,7 +3740,9 @@ and substitute_tail
             , Some entry.binder )
         | Local _ | Unusable _ ->
           Some (name, Absent, Absent, Scope.fresh_ty t scope, None)
-        | Outside_quote _ -> None))
+        | Outside_quote _ -> None
+        | By_symbol _ ->
+          raise_s [%message "Spliced code's free variable by symbol" name]))
   in
   let rest = Scope.fresh_row t scope in
   use_free

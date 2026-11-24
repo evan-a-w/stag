@@ -150,7 +150,7 @@ let captures t ~ident ~args ~body =
     then Hash_set.add captures ident
   in
   let var ~depth : Typed.Var_ref.t -> unit = function
-    | Free _ | Free_toplevel _ | Prim _ | Intrinsic _ -> ()
+    | Free _ | Prim _ | Intrinsic _ -> ()
     | Bound (Toplevel ident | Local ident)
     | Persistent (Toplevel ident | Local ident) -> use ~depth ident
   in
@@ -443,10 +443,9 @@ let instantiate t (code : Typed.Expr.t) ~entry =
   and go_step ~depth (expr : Typed.Expr.t) =
     let desc : Typed.Expr.t Typed.Expr.Desc.t =
       match expr.desc with
-      | Var ((Free name | Free_toplevel name) as var_ref) when depth = 0 ->
+      | Var (Free name as var_ref) when depth = 0 ->
         Var (Option.value (entry name) ~default:var_ref)
-      | Assign (((Free name | Free_toplevel name) as var_ref), value)
-        when depth = 0 ->
+      | Assign ((Free name as var_ref), value) when depth = 0 ->
         Assign (Option.value (entry name) ~default:var_ref, value)
       | Var (Bound binder) -> Var (Bound (rename_binder binder))
       | Var (Persistent binder) -> Var (Persistent (rename_binder binder))
@@ -868,7 +867,7 @@ and step_value t ~env ~level (expr : Typed.Expr.t)
   | Var (Bound (Local ident | Toplevel ident))
   | Var (Persistent (Local ident | Toplevel ident)) ->
     lookup t env ident ~loc:expr.loc
-  | Var (Free name | Free_toplevel name) ->
+  | Var (Free name) ->
     Eval_result.error_s [%message "Free variable of code evaluated" name]
   | Var (Prim prim) -> Eval_result.return (Value.Prim { prim; applied = [] })
   | External { symbol; signature; at_compile_time } ->
@@ -889,7 +888,7 @@ and step_value t ~env ~level (expr : Typed.Expr.t)
         | Null ->
           Eval_result.error_s
             [%message "Assigned an unbound ident" (ident : Typed.Ident.t)])
-     | Free _ | Free_toplevel _ | Prim _ | Intrinsic _ ->
+     | Free _ | Prim _ | Intrinsic _ ->
        Eval_result.error_s
          [%message "Assigned a non-variable" (var_ref : Typed.Var_ref.t)])
   | App _

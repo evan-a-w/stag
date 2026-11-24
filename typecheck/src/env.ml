@@ -72,7 +72,7 @@ end
 module Slot = struct
   type t =
     | Bound of Entry.t
-    | Forgotten
+    | Forgotten of int (** At this level and the quotes in it. *)
   [@@deriving sexp_of]
 end
 
@@ -87,11 +87,18 @@ type t = Slot.t list String.Table.t [@@deriving sexp_of]
 
 let create () = String.Table.create ()
 
-let lookup t name : Lookup.t =
-  match Hashtbl.find t name |> Option.bind ~f:List.hd with
-  | Some (Slot.Bound entry) -> Bound entry
-  | Some Slot.Forgotten -> Forgotten
-  | None -> Unbound
+(* A [forget] at a later level than [level] doesn't hide the name: a splice back
+   to [level] sees through it. *)
+let rec innermost (slots : Slot.t list) ~level : Lookup.t =
+  match slots with
+  | [] -> Unbound
+  | Bound entry :: _ -> Bound entry
+  | Forgotten at :: _ when at <= level -> Forgotten
+  | Forgotten _ :: slots -> innermost slots ~level
+;;
+
+let lookup t name ~level =
+  innermost (Hashtbl.find t name |> Option.value ~default:[]) ~level
 ;;
 
 let find_binder t binder ~name =
@@ -102,15 +109,15 @@ let find_binder t binder ~name =
            | Slot.Bound entry
              when [%equal: Typed.Binder.t] entry.Entry.binder binder ->
              Some entry
-           | Bound _ | Forgotten -> None))
+           | Bound _ | Forgotten _ -> None))
 ;;
 
-let visible t =
+let visible t ~level =
   Hashtbl.to_alist t
   |> List.filter_map ~f:(fun (name, slots) ->
-    match List.hd slots with
-    | Some (Slot.Bound entry) -> Some (name, entry)
-    | Some Slot.Forgotten | None -> None)
+    match innermost slots ~level with
+    | Bound entry -> Some (name, entry)
+    | Forgotten | Unbound -> None)
   |> List.sort ~compare:(Comparable.lift String.compare ~f:fst)
 ;;
 
@@ -128,6 +135,6 @@ let with_bindings t bindings ~(local_ f) =
     ~f
 ;;
 
-let forgetting t names ~(local_ f) =
-  with_slots t (List.map names ~f:(fun name -> name, Slot.Forgotten)) ~f
+let forgetting t names ~level ~(local_ f) =
+  with_slots t (List.map names ~f:(fun name -> name, Slot.Forgotten level)) ~f
 ;;
