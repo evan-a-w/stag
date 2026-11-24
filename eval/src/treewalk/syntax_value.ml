@@ -360,9 +360,8 @@ module Of_value = struct
       | _ -> raise Bad_arguments)
   ;;
 
-  (* Where a type is, so which of [t @ m], [global_ t], [t @@ m] and [t with ...]
-     it may
-     be, as the parser allows. *)
+  (* Where a type is, so which of [t @ m], [global_ t], [t @@ m] and
+     [t with ...] it may be, as the parser allows. *)
   module Type_position = struct
     type t =
       | Plain

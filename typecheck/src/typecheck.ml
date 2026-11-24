@@ -2859,8 +2859,8 @@ and expr_type
                   node (Toplevel_splice { code; expansion }) inner))))
   | Deref pointer ->
     Mode_rules.runs modes at Nonportable ~loc ~why:"it reads through a pointer";
-    (* What a pointer points to is global, as it is stored global. Whether it
-       is a [ptr[_ @@ external]] is known from the pointer's type, else it is a
+    (* What a pointer points to is global, as it is stored global. Whether it is
+       a [ptr[_ @@ external]] is known from the pointer's type, else it is a
        [ptr[_]]. *)
     let pointee, pointer, kind =
       Mode_rules.project modes at ~loc ~why:"it is dereferenced" (fun at ->
@@ -2885,13 +2885,12 @@ and expr_type
         in
         (pointee, pointer, kind), Modality.of_pointee kind)
     in
-    if
-      Scope.unifies
-        t
-        scope
-        ~ty1:pointer.ty
-        ~ty2:(Type.Pointee.ptr kind pointee)
-        ~loc
+    if Scope.unifies
+         t
+         scope
+         ~ty1:pointer.ty
+         ~ty2:(Type.Pointee.ptr kind pointee)
+         ~loc
     then node (Deref pointer) pointee
     else node (Error [ pointer ]) Type.error
   | Store (target, value) ->
@@ -2911,7 +2910,10 @@ and expr_type
       let rec cell_pointee (expr : Typed.Expr.t) : Type.Pointee.t =
         match expr.desc with
         | Deref pointer ->
-          Option.value_map (Type.Pointee.of_ptr pointer.ty) ~default:Type.Pointee.Gc ~f:fst
+          Option.value_map
+            (Type.Pointee.of_ptr pointer.ty)
+            ~default:Type.Pointee.Gc
+            ~f:fst
         | Field (inner, _) | Poly_field (inner, _) -> cell_pointee inner
         | _ -> Gc
       in
@@ -2932,7 +2934,8 @@ and expr_type
         exprs
         (tuple_components expected (List.length exprs))
         ~f:(fun expr expected ->
-          part Modality.id (fun at -> expr_type t scope ~at ~expr ?expected ~hint))
+          part Modality.id (fun at ->
+            expr_type t scope ~at ~expr ?expected ~hint))
     in
     node (Tuple exprs) (Type.TTuple (tys exprs))
   | Construct (constructor, args) ->
@@ -3198,7 +3201,8 @@ and expr_type
     let fields = labelled_types t scope ~at fields ~expected ~hint in
     let rest = Scope.fresh_row t scope in
     let expr =
-      part Modality.id (fun at -> check_expr t scope ~at ~expr ~ty:(Fresh.record t rest))
+      part Modality.id (fun at ->
+        check_expr t scope ~at ~expr ~ty:(Fresh.record t rest))
     in
     node
       (Poly_extend (fields, expr))
@@ -3206,7 +3210,8 @@ and expr_type
   | Poly_restrict (expr, label) ->
     let row, rest = Poly_row.open_ t scope [ label, Scope.fresh_ty t scope ] in
     let expr =
-      part Modality.id (fun at -> check_expr t scope ~at ~expr ~ty:(Fresh.record t row))
+      part Modality.id (fun at ->
+        check_expr t scope ~at ~expr ~ty:(Fresh.record t row))
     in
     node (Poly_restrict (expr, label)) (Fresh.record t rest)
   | Poly_update (expr, fields) ->
@@ -3218,7 +3223,8 @@ and expr_type
         (List.map fields ~f:(fun (label, _) -> label, Scope.fresh_ty t scope))
     in
     let expr =
-      part Modality.id (fun at -> check_expr t scope ~at ~expr ~ty:(Fresh.record t row))
+      part Modality.id (fun at ->
+        check_expr t scope ~at ~expr ~ty:(Fresh.record t row))
     in
     node
       (Poly_update (expr, fields))

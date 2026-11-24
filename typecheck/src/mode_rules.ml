@@ -193,8 +193,8 @@ let part ?ty ctx expected (modality : Modality.t) f =
 ;;
 
 (* What may be stored into the cell of a [ptr[t @@ external]] is [external],
-   whatever the provenance of the pointer read through: as with deep
-   provenance, a pointer is then taken to be at least what its cell holds. *)
+   whatever the provenance of the pointer read through: as with deep provenance,
+   a pointer is then taken to be at least what its cell holds. *)
 let holds_external ctx block ~loc =
   Ctx.add
     ctx
