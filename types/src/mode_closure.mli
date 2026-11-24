@@ -16,3 +16,10 @@ val domain : t -> Mode_node.t -> int list
 
 (** [raise t x p y]: [y]'s least point when [x] is at least [p]. *)
 val raise : t -> Mode_node.t -> int -> Mode_node.t -> int
+
+(** The nodes raising [x] raises above their lower bounds. *)
+val reached : t -> Mode_node.t -> Mode_node.t list
+
+(** The nodes raising [x] to [p] raises, with their points (others stay at their
+    lower bounds). *)
+val raised_alist : t -> Mode_node.t -> int -> (Mode_node.t * int) list

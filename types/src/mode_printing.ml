@@ -106,21 +106,37 @@ let equal_on closure ~dead a b axis =
 (* The relation of a written form from [lo] to [hi] the closure has, the
    greatest (they are a chain), or [None] if it implies nothing more than the
    bounds do (or, from a node to itself, than that it is itself). *)
+(* Each written form, with its morphism and table, by index. *)
+let written_forms =
+  List.map Written.all ~f:(fun written ->
+    let m = Written.morphism written in
+    ( written
+    , m
+    , Array.init
+        (Mode.Axis.Any.size (Mode.Morphism.dst m))
+        ~f:(Mode.Morphism.left m) ))
+;;
+
 let strongest closure ~(lo : Mode_node.t) ~(hi : Mode_node.t) =
   let points =
     Mode_closure.lower closure lo :: Mode_closure.domain closure lo
   in
-  let raised p = Mode_closure.raise closure lo p hi in
+  let raised =
+    List.map points ~f:(fun p -> Mode_closure.raise closure lo p hi)
+  in
   let values written =
-    let m = Written.morphism written in
-    List.map points ~f:(Mode.Morphism.left m)
+    let _, _, table =
+      List.find_exn written_forms ~f:(fun (w, _, _) -> Poly.equal w written)
+    in
+    List.map points ~f:(fun p -> table.(p))
   in
   let valid =
-    List.filter Written.all ~f:(fun written ->
-      let m = Written.morphism written in
-      Mode.Axis.Any.equal (Mode.Morphism.dst m) lo.axis
-      && Mode.Axis.Any.equal (Mode.Morphism.src m) hi.axis
-      && List.for_all2_exn points (values written) ~f:(fun p v -> v <= raised p))
+    List.filter_map written_forms ~f:(fun (written, m, table) ->
+      Option.some_if
+        (Mode.Axis.Any.equal (Mode.Morphism.dst m) lo.axis
+         && Mode.Axis.Any.equal (Mode.Morphism.src m) hi.axis
+         && List.for_all2_exn points raised ~f:(fun p r -> table.(p) <= r))
+        written)
   in
   let le a b = List.for_all2_exn (values a) (values b) ~f:( <= ) in
   List.find valid ~f:(fun w -> List.for_all valid ~f:(fun w' -> le w' w))
@@ -202,9 +218,11 @@ let settle t =
       ; hi = { var; axis = T Stage }
       })
   in
+  let is_node = Mode_node.Hash_set.of_list nodes in
   let relations =
     List.concat_map nodes ~f:(fun lo ->
-      List.filter_map nodes ~f:(fun hi -> strongest closure ~lo ~hi))
+      List.filter_map (Mode_closure.reached closure lo) ~f:(fun hi ->
+        if Hash_set.mem is_node hi then strongest closure ~lo ~hi else None))
   in
   let plain_valid a b =
     List.for_all Mode.Axis.Any.all ~f:(fun axis ->
@@ -217,25 +235,30 @@ let settle t =
            ~f:(fun p -> Mode_closure.raise closure lo p hi >= p))
   in
   let plain_pairs =
-    List.concat_map reps ~f:(fun a ->
-      List.filter_map reps ~f:(fun b ->
-        Option.some_if
-          (a <> b
-           && plain_valid a b
-           && List.exists relations ~f:(fun r ->
-             r.lo.var = a && r.hi.var = b && is_plain r))
-          (a, b)))
+    List.filter_map relations ~f:(fun r ->
+      Option.some_if (is_plain r && r.lo.var <> r.hi.var) (r.lo.var, r.hi.var))
+    |> List.dedup_and_sort ~compare:(fun (a, b) (a', b') ->
+      let order id = Hashtbl.find_exn t.order id in
+      [%compare: int * int] (order a, order b) (order a', order b'))
+    |> List.filter ~f:(fun (a, b) -> plain_valid a b)
   in
   (* A dead locality is related to nothing: through it, those related into it
      would be to those it is related into. *)
   let plain_pairs =
+    let sources = Int.Hash_set.of_list (List.map plain_pairs ~f:fst) in
     List.filter plain_pairs ~f:(fun (_, b) ->
       (not (dead { var = b; axis = T Locality }))
-      || not (List.exists plain_pairs ~f:(fun (a, _) -> a = b)))
+      || not (Hash_set.mem sources b))
   in
+  let plain_set = Int.Table.create () in
+  List.iter plain_pairs ~f:(fun (a, b) ->
+    Hash_set.add
+      (Hashtbl.find_or_add plain_set a ~default:Int.Hash_set.create)
+      b);
   let in_plain (r : Relation.t) =
     is_plain r
-    && List.mem plain_pairs (r.lo.var, r.hi.var) ~equal:[%equal: int * int]
+    && Option.exists (Hashtbl.find plain_set r.lo.var) ~f:(fun set ->
+      Hash_set.mem set r.hi.var)
   in
   let bounds =
     List.concat_map nodes ~f:(fun n ->

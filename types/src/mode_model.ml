@@ -21,7 +21,9 @@ type t =
   { closure : Mode_closure.t
   ; nodes : Mode_node.t array
   ; index : Mode_node.t -> int
+  ; find : Mode_node.t -> int option
   ; dead : bool array
+  ; real_lows : int array
   ; base_lower : int array
   ; kept : bool array (* By item; the implicit edges' item is the last. *)
   ; forward : (int * Mode.Morphism.t * int) list array
@@ -41,7 +43,9 @@ let create closure ~nodes ~dead ~base_lower ~implicit items =
     { closure
     ; nodes
     ; index
+    ; find = Hashtbl.find table
     ; dead = Array.map nodes ~f:dead
+    ; real_lows = Array.map nodes ~f:(Mode_closure.lower closure)
     ; base_lower = Array.map nodes ~f:base_lower
     ; kept = Array.create ~len:(Array.length items) true
     ; forward = Array.create ~len:size []
@@ -121,7 +125,7 @@ let raised t lows x p =
   levels
 ;;
 
-let real_lower t i = Mode_closure.lower t.closure t.nodes.(i)
+let real_lower t i = t.real_lows.(i)
 let real_upper t i = Mode_closure.upper t.closure t.nodes.(i)
 
 (* What a node may be raised to from outside: nothing, if dead. A dead node's
@@ -133,7 +137,14 @@ let domain t i =
 let implied t (item : Item.t) =
   match item with
   | Edges edges ->
-    let lows = lows t in
+    (* While the rest are exact, an edge raising nothing above [0] at its
+       source's lower bound adds nothing to the lower bounds. *)
+    let lows =
+      if List.exists edges ~f:(fun { lo; morphism; hi = _ } ->
+           Mode.Morphism.left morphism (real_lower t (t.index lo)) > 0)
+      then lows t
+      else t.real_lows
+    in
     List.for_all edges ~f:(fun { lo; morphism; hi } ->
       let lo = t.index lo
       and hi = t.index hi in
@@ -169,8 +180,11 @@ let check_exact t =
   Array.iteri t.nodes ~f:(fun i x ->
     List.iter (domain t i) ~f:(fun p ->
       let levels = raised t lows i p in
+      let real = Array.copy t.real_lows in
+      List.iter (Mode_closure.raised_alist t.closure x p) ~f:(fun (y, point) ->
+        Option.iter (t.find y) ~f:(fun j -> real.(j) <- Int.max real.(j) point));
       Array.iteri t.nodes ~f:(fun j y ->
-        let real = Mode_closure.raise t.closure x p y in
+        let real = real.(j) in
         if (not t.dead.(j)) && levels.(j) <> real
         then
           fail

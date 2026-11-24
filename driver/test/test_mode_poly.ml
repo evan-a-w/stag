@@ -117,7 +117,8 @@ type r2 = { x : string @@ gc; y : string }
 let fx (r : r2) = r.x
 let fy (r : r2) = r.y
 |};
-  [%expect {|
+  [%expect
+    {|
     let fx_copy : r2 @ 'm0 -> string @ 'm1 with stage('m0) <= stage('m1) and meet(provenance('m0), gc) <= provenance('m1) and release(locality('m0)) <= locality('m1) = fx
     let fy_copy : r2 @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) = fy
     |}];
@@ -128,7 +129,8 @@ let mk (x : ptr[int] @ local) = exclave_ stack_ (Ptr.make 1)
 let pass (p : ptr[int] @ local) = exclave_ p
 let wrap x = exclave_ stack_ (Ptr.make x)
 |};
-  [%expect {|
+  [%expect
+    {|
     let mk_copy : ptr[int] @ local -> ptr[int @@ 'm1] @ 'm0 with nonportable gc local <= 'm0 = mk
     let pass_copy : ptr[int] @ 'm0 -> ptr[int] @ 'm1 with local <= 'm0 and 'm0 <= 'm1 = pass
     let wrap_copy : 'a @ 'm0 -> ptr['a @@ 'm2] @ 'm1 with 'm0 <= 'm2 and 'm0 <= global and portable <= 'm2 and nonportable gc local <= 'm1 = wrap
@@ -140,7 +142,8 @@ let cross (x : int) = x
 let pair (x : int) (s : string) = (x, s)
 let embed (x : int) = .< x >.
 |};
-  [%expect {|
+  [%expect
+    {|
     let cross_copy : int -> int = cross
     let pair_copy : int @ 'm0 -> (string @ 'm2 -> int * string @ 'm3) @ 'm1 with 'm0 <= 'm1 and 'm2 <= 'm3 and release(locality('m2)) <= locality('m3) and gc <= 'm1 = pair
     let embed_copy : int -> <int>{..'a} @ 'm0 with gc <= 'm0 = embed
@@ -152,7 +155,8 @@ let closure x = fun (y : int) -> x
 let keep (s : string) = s
 let pinned : string @ 'm -> string @ 'n with 'm <= const = fun s -> s
 |};
-  [%expect {|
+  [%expect
+    {|
     let closure_copy : 'a @ 'm0 -> (int -> 'a @ 'm2) @ 'm1 with 'm0 <= 'm2 and release(locality('m0)) <= locality('m2) and 'm0 <= 'm1 and gc <= 'm1 = closure
     let keep_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) = keep
     let pinned_copy : string @ 'm0 -> string @ 'm1 with release(locality('m0)) <= locality('m1) and 'm0 <= const = pinned
@@ -169,7 +173,8 @@ let nested : 'a @ 'm -> 'a @ 'n with meet(release(locality('m)), regional) <= lo
 let static_if : 'a @ 'm -> 'a @ 'n with provenance('n) <= static_if_const(stage('m)) = fun x -> diverge ()
 let const_if : 'a @ 'm -> 'a @ 'n with stage('n) <= const_if_static(provenance('m)) = fun x -> diverge ()
 |};
-  [%expect {|
+  [%expect
+    {|
     let diverge_copy : unit @ 'm0 -> 'a @ global with portable <= 'm0 = diverge
     let meet__copy : 'a @ 'm0 -> 'a @ 'm1 with meet(provenance('m0), gc) <= provenance('m1) = meet_
     let release__copy : 'a @ 'm0 -> 'a @ 'm1 with release(locality('m0)) <= locality('m1) = release_
@@ -513,5 +518,33 @@ let apply f x = f x
     let fixed_and_related_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and nonportable <= 'm1 = fixed_and_related
     let local_closure_copy : 'a @ 'm0 -> (int -> 'a @ 'm2) @ 'm1 with local <= 'm0 and 'm0 <= 'm2 and 'm0 <= 'm1 and gc <= 'm1 = local_closure
     let apply_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm2 <= regional and stage('m4) <= stage('m1) and provenance('m4) <= provenance('m1) and meet(locality('m4), regional) <= locality('m1) and gc <= 'm3 = apply
+    |}]
+;;
+
+let big_apply n =
+  let args = List.init n ~f:(sprintf "a%d") |> String.concat ~sep:" " in
+  sprintf "let big f %s = f %s" args args
+;;
+
+(* Printing checks itself exact, so a large signature printing at all is
+   correct; a smaller one is compared through annotations. *)
+let%expect_test "printing: a large higher-order function" =
+  round_trip (big_apply 4);
+  [%expect
+    {| let big_copy : ('a @ 'm1 -> 'b @ 'm2 -> 'c @ 'm3 -> 'd @ 'm4 -> 'e @ 'm5) @ 'm0 -> ('a @ 'm7 -> ('b @ 'm9 -> ('c @ 'm11 -> ('d @ 'm13 -> 'e @ 'm14) @ 'm12) @ 'm10) @ 'm8) @ 'm6 with 'm0 <= 'm12 and 'm0 <= 'm10 and 'm0 <= 'm8 and 'm0 <= 'm6 and portable <= 'm1 and portable <= 'm2 and portable <= 'm3 and portable <= 'm4 and 'm5 <= 'm14 and release(locality('m5)) <= locality('m14) and 'm5 <= regional and stage('m7) <= stage('m1) and provenance('m7) <= provenance('m1) and meet(locality('m7), regional) <= locality('m1) and 'm7 <= 'm12 and 'm7 <= 'm10 and 'm7 <= 'm8 and stage('m9) <= stage('m2) and provenance('m9) <= provenance('m2) and meet(locality('m9), regional) <= locality('m2) and 'm9 <= 'm12 and 'm9 <= 'm10 and stage('m11) <= stage('m3) and provenance('m11) <= provenance('m3) and meet(locality('m11), regional) <= locality('m3) and 'm11 <= 'm12 and stage('m13) <= stage('m4) and provenance('m13) <= provenance('m4) and meet(locality('m13), regional) <= locality('m4) and gc <= 'm12 and gc <= 'm10 and gc <= 'm8 and gc <= 'm6 = big |}];
+  let items =
+    Result.ok_or_failwith
+      (Result.map_error (checked (big_apply 40)) ~f:(String.concat ~sep:"\n"))
+  in
+  let printed = Signature.to_string_hum ~modes:true items in
+  print_s
+    [%message
+      (String.substr_index_all printed ~may_overlap:false ~pattern:" and "
+       |> List.length
+       : int)];
+  [%expect
+    {|
+    ( "(String.substr_index_all printed ~may_overlap:false ~pattern:\" and \") |>\
+     \n  List.length" 1022)
     |}]
 ;;

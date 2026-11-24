@@ -66,20 +66,32 @@ let domain t node =
   List.range ~start:`exclusive (lower t node) ~stop:`inclusive (upper t node)
 ;;
 
+let raised t x p =
+  let cached = Hashtbl.find_multi t.raises x in
+  match List.Assoc.find cached p ~equal:Int.equal with
+  | Some raised -> raised
+  | None ->
+    let raised = levels t ((solver_node t x, p) :: t.floors) in
+    Hashtbl.add_multi t.raises ~key:x ~data:(p, raised);
+    raised
+;;
+
+(* [x]'s raise to [p], as the nodes raised and their points. *)
+let raised_alist t x p = Hashtbl.to_alist (raised t x p)
+
 let raise t x p y =
   if p <= lower t x
   then lower t y
   else (
-    let raised =
-      let cached = Hashtbl.find_multi t.raises x in
-      match List.Assoc.find cached p ~equal:Int.equal with
-      | Some raised -> raised
-      | None ->
-        let raised = levels t ((solver_node t x, p) :: t.floors) in
-        Hashtbl.add_multi t.raises ~key:x ~data:(p, raised);
-        raised
-    in
-    match Hashtbl.find raised y with
-    | Some point -> point
+    match Hashtbl.find (raised t x p) y with
+    | Some point -> Int.max point (lower t y)
     | None -> lower t y)
+;;
+
+let reached t x =
+  List.concat_map (domain t x) ~f:(fun p ->
+    Hashtbl.to_alist (raised t x p)
+    |> List.filter_map ~f:(fun (y, point) ->
+      Option.some_if (point > lower t y) y))
+  |> List.dedup_and_sort ~compare:Mode_node.compare
 ;;
