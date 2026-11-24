@@ -44,9 +44,6 @@ module Var_ref : sig
         embedded in the code. *)
     | Free of string
     (** A free variable of the enclosing quote: its context entry of this name. *)
-    | Free_toplevel of string
-    (** A toplevel, by canonical name, as a free variable of the enclosing quote
-        (see modes.md): its context entry of that name. *)
     | Prim of Prim.t (** Usable at any level, like a persistent toplevel. *)
     | Intrinsic of Intrinsic.t (** As [Prim]. *)
   [@@deriving sexp_of]

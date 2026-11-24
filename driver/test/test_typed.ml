@@ -600,9 +600,9 @@ let captured x = .~(.<captured x>.)
          (Toplevel_splice
           (code
            (Quote
-            (App (Var (Free_toplevel captured) : "'a -> 'b") (Var (Free x) : 'a)
-             : 'b)
-            : "<'b>{captured : immut 'a -> 'b; x : immut 'a}"))
+            (App (Var (Persistent (Toplevel captured/8)) : "'a -> 'b")
+             (Var (Free x) : 'a) : 'b)
+            : "<'b>{x : immut 'a}"))
           (expansion
            (App (Var (Bound (Toplevel captured/8)) : "'a -> 'b")
             (Var (Bound (Local x/19)) : 'a) : 'b))
@@ -805,7 +805,7 @@ let%expect_test "explicit substitutions" =
     {|
 let n = Int.to_string 3
 let persistent_shorthand = let f y = y in .<.~(.<id (f 1)>.).{f; id}>.
-let at_toplevel = .~(.<String.append n y>.).{n; y = "1"}
+let at_toplevel = .~(forget n in .<String.append n y>.).{n; y = "1"}
 |};
   [%expect
     {|
@@ -844,7 +844,7 @@ let at_toplevel = .~(.<String.append n y>.).{n; y = "1"}
            (Quote
             (App
              (App (Var (Prim String.append) : "string -> string -> string")
-              (Var (Free_toplevel n) : string) : "string -> string")
+              (Var (Free n) : string) : "string -> string")
              (Var (Free y) : string) : string)
             : "<string>{n : immut string; y : immut string}"))
           (expansion

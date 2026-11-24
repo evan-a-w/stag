@@ -756,6 +756,7 @@ let use
   expected
   (entry : Env.Entry.t)
   ~locks
+  ~by_symbol
   ~toplevel
   ~name
   ~loc
@@ -765,6 +766,7 @@ let use
   let held = (entry.held :> Mode.Var.t option) in
   let mode = (entry.mode :> Mode.Var.t) in
   let mutable_ = Option.is_some held in
+  let by_symbol = by_symbol || (toplevel && mutable_) in
   let crossing = ctx.Ctx.crossing entry.scheme in
   let crossed = Env.Entry.crossed entry ~locks in
   List.iteri crossed ~f:(fun index lock ->
@@ -827,7 +829,7 @@ let use
              Stage
              Nonportable
              (reason "%s is captured by a closure in its own definition"))
-    | Quote _ when toplevel && mutable_ -> ()
+    | Quote _ when by_symbol -> ()
     | Quote code ->
       Ctx.add
         ctx
@@ -871,6 +873,14 @@ let use
       ~locality
       ~loc
       ~why
+  | None when by_symbol ->
+    runs
+      ctx
+      expected
+      Nonportable
+      ~loc
+      ~why:(sprintf "%s is read where the code runs" name);
+    joins ctx expected mode ~crossing ~locality ~loc ~why
   | None -> joins ctx expected mode ~crossing ~locality ~loc ~why
 ;;
 

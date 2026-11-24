@@ -257,14 +257,16 @@ val store
 
 (** Uses [entry] under [locks]: constrains its mode by the locks the use
     crosses. Toplevels are referred to by symbol, so closures and code don't
-    capture them: they only cross a quote lock if [portable], so as not to be
-    free variables of the quote, unless mutable. A mutable's value is the one it
-    holds, but closures capture its cell. *)
+    capture them: they cross a quote lock if [portable], and otherwise if
+    [by_symbol] (mutable, or not embeddable), when what the code reads is not
+    known until it runs. A mutable's value is the one it holds, but closures
+    capture its cell. *)
 val use
   :  Ctx.t
   -> Expected.t
   -> Env.Entry.t
   -> locks:Env.Lock.t list
+  -> by_symbol:bool
   -> toplevel:bool
   -> name:string
   -> loc:Loc.t

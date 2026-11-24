@@ -29,7 +29,7 @@ let code2 = .<m>.
     val n : int
     val code : <int>{..'a}
     val m : string
-    val code2 : <'a>{m : 'a; ..'b}
+    val code2 : <string>{..'a}
     |}]
 ;;
 
@@ -48,7 +48,7 @@ let qb = .<b>.
     val a : int
     val b : string
     val qa : <int>{..'a}
-    val qb : <'a>{b : 'a; ..'b}
+    val qb : <string>{..'a}
     |}]
 ;;
 

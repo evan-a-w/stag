@@ -74,17 +74,24 @@ end
 type t [@@deriving sexp_of]
 
 val create : unit -> t
-val lookup : t -> string -> Lookup.t
+(** The innermost binding of [name] seen at [level]. *)
+val lookup : t -> string -> level:int -> Lookup.t
 
 (** The entry of [name] binding [binder], even if shadowed. *)
 val find_binder : t -> Typed.Binder.t -> name:string -> Entry.t option
 
-(** The innermost entry of each bound name, sorted by name. *)
-val visible : t -> (string * Entry.t) list
+(** The innermost entry of each name bound at [level], sorted by name. *)
+val visible : t -> level:int -> (string * Entry.t) list
 
 (** Binds [bindings] (later ones shadowing earlier ones) for the duration of
     [f]. *)
 val with_bindings : t -> (string * Entry.t) list -> f:(unit -> 'a) @ local -> 'a
 
-(** Hides [names]' bindings, local and toplevel, for the duration of [f]. *)
-val forgetting : t -> string list -> f:(unit -> 'a) @ local -> 'a
+(** Hides [names]' bindings, local and toplevel, for the duration of [f], at
+    [level] and the quotes in it, but not in splices back to an earlier level. *)
+val forgetting
+  :  t
+  -> string list
+  -> level:int
+  -> f:(unit -> 'a) @ local
+  -> 'a

@@ -397,6 +397,7 @@ let unknown c = .<.~c.{x = 1}>.
   [%expect
     {|
     n is substituted, but the spliced code has no free variable n
+    computed is substituted, but the spliced code has no free variable computed
     x is substituted, but the spliced code has no free variable x
     y is substituted, but the spliced code has no free variable y
     |}]
@@ -415,7 +416,7 @@ let q = .<later>.
     {|
     The toplevel q is used at compile time before it is fully checked (it is in the same recursive group as this splice)
     val later : int
-    val q : <'a>{later : 'a; ..'b}
+    val q : <'a>{..'b}
     |}]
 ;;
 
@@ -506,7 +507,7 @@ let r = (.<q>., Int.add 1 2)
 let q = let z = r in 3
 |};
   [%expect {|
-    val r : <'_a>{q : '_a; ..'_b} * int
+    val r : <'_a>{..'_b} * int
     val q : int
     |}];
   modes {|
@@ -515,7 +516,7 @@ let r = (.<q>., Int.add 1 2)
 |};
   [%expect {|
     val q : int
-    val r : <'_a>{q : '_a; ..'_b} * int
+    val r : <'_a>{..'_b} * int
     |}]
 ;;
 

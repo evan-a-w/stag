@@ -339,9 +339,12 @@ A compiler flag, e.g. `Typecheck.create ~const_toplevels:bool`:
 ## Toplevels in quotes
 
 A toplevel used in a quote is checked first, to know its mode: `const` ones
-are used directly, others are free variables of the quote. One whose checking
-is underway (a recursive reference) is a free variable, and computing with it
-elsewhere is nonportable: `let z = r` in a toplevel `r` depends on is not
+are used directly, others are referred to by symbol: the code reads the
+toplevel where it runs, so the use is nonportable, and no local or
+substitution where the code is spliced can replace it. One whose checking is
+underway (a recursive reference) is referred to by symbol too, at a fresh type
+(the expansion is checked against its own where spliced), and doesn't join its
+component; computing with it elsewhere is nonportable: `let z = r` in a toplevel `r` depends on is not
 generalized, whichever order they are checked in. So the order of
 checking matters: with
 
@@ -352,7 +355,7 @@ let later = .~(let z = q in .<1>.)
 
 checking `q` checks `later`, whose splice needs `q`, which isn't checked yet:
 an error. With the two swapped, `later` is checked first, so `q` is checked
-during its splice, and `later` is a free variable of `q`'s quote.
+during its splice, and refers to `later` by symbol.
 
 ## Toplevel splices
 
