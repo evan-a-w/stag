@@ -302,3 +302,35 @@ let use u = let y @ static = s in y
   [%expect
     {| This is gc, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:2:8-23), then s is used (at t.stag:3:29-30), then it is bound by an annotated let (at t.stag:3:20-26), but must be at most static, because it is annotated static (at t.stag:3:20-26) |}]
 ;;
+
+let%expect_test "global_ fields and exclave_ keep provenance" =
+  provenance
+    {|
+let ext (x : string) = let y @ external = x in y
+type r = { g : global_ string; n : int }
+let make u = { g = ext "a"; n = 1 }
+let read u = (make ()).g
+let returned u = exclave_ ext "a"
+|};
+  [%expect
+    {|
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and portable <= 'm1 and external <= 'm1
+    type r = { g : global_ string; n : int }
+    val make : 'a -> r @ 'm0 with portable <= 'm0 and external <= 'm0
+    val read : 'a -> string @ 'm0 with portable <= 'm0 and external <= 'm0
+    val returned : 'a -> string @ 'm0 with portable <= 'm0 and external <= 'm0
+    |}]
+;;
+
+let%expect_test "a toplevel closure capturing nothing is static" =
+  provenance
+    {|
+let f @ static = fun (x : int) -> x
+let g @ static = fun (x : int) -> f x
+|};
+  [%expect
+    {|
+    val f : int -> int
+    val g : int -> int @ 'm0 with portable <= 'm0
+    |}]
+;;

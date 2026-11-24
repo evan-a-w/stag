@@ -95,7 +95,8 @@ let%expect_test "what is allocated at run time is gc unless it is const" =
   print_result (Var.at_least c Stage Portable (reason "made at run time"));
   print_result (Var.at_most c Provenance Static (reason "annotated static"));
   show [ c ];
-  [%expect {|
+  [%expect
+    {|
     (Ok ())
     ((m0.stage Portable..Nonportable) (m0.provenance Gc..External)
      (m0.locality Global..Local))
