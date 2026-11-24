@@ -187,25 +187,45 @@ Each variable's own `provenance <= static_if_const(stage)` (`const` is
 `static`) is never printed, and neither is a result's `portable` lower bound,
 which every annotation's result has.
 
-The printer finds the exact set as follows:
+The printer finds the exact set as follows (`types/src/mode_closure.ml`,
+`mode_model.ml`, `mode_printing.ml`):
 
-1. For each pair of counted variables' axes `x`, `y`, and each point `p` of
-   `x` within its bounds, it asks the solver how far raising `x` to `p`
-   raises `y` (following the constraints that hold, a generic variable's
-   being those its scheme keeps). This is what the constraints imply between
-   them: `y >= g(x)` for a monotone `g`.
+1. For each counted variable's axis `x` and each point `p` of `x` within its
+   bounds, it asks the solver how far raising `x` to `p` raises every other
+   axis `y` (following the constraints that hold, a generic variable's being
+   those its scheme keeps). This is what the constraints imply between them:
+   `y >= g(x)` for a monotone `g`, including `y = x` (`g` may be above the
+   identity, as `release` is on locality).
 2. Variables equal on every axis (each at least the other, with the same
    bounds) are grouped as one.
-3. Every written relation `w` with `w* <= g` (so implied), raising `y` above
-   its lower bound somewhere, and not below another such, is a candidate;
+3. The written forms per pair of axes form a chain (nothing < `meet` <
+   identity < `release`), so for each pair the greatest written `w` with
+   `w* <= g`, raising `y` above its lower bound somewhere, is the candidate:
    with every variable's bounds, they imply exactly what the solver does.
-4. Each candidate the others imply as read back is dropped, latest first;
-   then a pair related plainly on an axis, and on each other one by what
-   holds, prints as `'a <= 'b`, and the rest are reduced again; then each
-   bound the rest imply is dropped. "Implies as read back" is checked by
-   propagating the printed constraints and bounds (plus what every variable
-   reads back with) on a model of the variables' axes and comparing both
-   bounds and every `g` with the solver's.
+4. Candidates are dropped, latest first, when the rest still imply them: an
+   edge `x -> y` with map `w` is redundant iff propagating from `x` at each
+   point of its domain without it still raises `y` to `w*(p)`. Pairs related
+   on every axis (by the plain map) print as `'a <= 'b` and are reduced in the
+   same pass, then bounds. The final set is checked against the solver (both
+   bounds and every `g`): a printer that would print something inexact fails
+   with an internal error instead.
+
+A mode argument (`ptr[t @@ 'm]`, `cell[t, 'm]`) has no locality: a variable
+only in mode arguments has its locality left out of the comparison, and is
+never related plainly through it (which would relate its neighbours'
+localities).
+
+With modes printed, an arrow's side fixed to a constant (by a declaration, as
+a record field's `string -> string`) prints with an atom on every axis,
+`string @ nonportable gc global`, as an annotation reads unwritten axes as
+fresh variables. A type declaration's own body still prints its arrows by its
+defaults.
+
+`release(locality('a)) <= locality('b)` is not a default between a
+parameter and its result: most curried and higher-order functions don't have
+it (the outer arrow of `first x y = x` only has `'m0 <= 'm1`, and `apply f x =
+f x` relates `x` to nothing), so it would need an opt-out wherever they're
+printed.
 
 So, for example, reading a field `x : string @@ gc`:
 
