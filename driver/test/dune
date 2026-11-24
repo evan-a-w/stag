@@ -2,10 +2,14 @@
  (name test_driver)
  (preprocess
   (pps ppx_jane))
- (inline_tests)
+ (inline_tests
+  (deps ../../learn_stag.md))
  (libraries
   stag_measure
   core
+  core_unix
+  core_unix.filename_unix
+  core_unix.sys_unix
   parsexp
   sexplib0
   stag_common
@@ -17,4 +21,5 @@
   stag_typecheck
   stag_mode
   stag_driver
+  stag_build
   stag_syntax_round_trip))
