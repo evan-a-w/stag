@@ -510,22 +510,33 @@ module Resolution = struct
       | Toplevel ident -> Program_env.is_mutable scope.program ident
       | Local _ -> false
     in
+    let is_mutable_local (entry : Env.Entry.t) =
+      match entry.binder with
+      | Local ident -> Program_env.is_mutable scope.program ident
+      | Toplevel _ -> false
+    in
+    (* A local of plain data may be copied into code whatever its stage, but
+       not a mutable one, whose value changes, nor a toplevel, which may not
+       have a value yet. *)
+    let crosses (entry : Env.Entry.t) =
+      match entry.binder with
+      | Local _ ->
+        (not (is_mutable_local entry))
+        && (Scope.crossing scope entry.scheme).stage
+      | Toplevel _ -> false
+    in
     (* Crossing a quote lock needs [portable]: so far, as only its lower bound
        is final, the constraint being added where it is used. *)
     let usable (entry : Env.Entry.t) =
       (entry.level = scope.level
        && [%equal: int option] entry.quote_id (Scope.quote_id scope))
       || (entry.level <= scope.level
-          && ((Mode.Stage.le
-                 (Scope.known_stage scope (entry.mode :> Mode.Var.t))
-                 Portable
-               && not entry.defining)
+          && ((crosses entry
+               || Mode.Stage.le
+                    (Scope.known_stage scope (entry.mode :> Mode.Var.t))
+                    Portable)
+              && not entry.defining
               || is_mutable_toplevel entry))
-    in
-    let is_mutable_local (entry : Env.Entry.t) =
-      match entry.binder with
-      | Local ident -> Program_env.is_mutable scope.program ident
-      | Toplevel _ -> false
     in
     match scope.quote, entry with
     | None, Some entry when usable entry -> Local entry

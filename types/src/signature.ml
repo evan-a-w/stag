@@ -202,12 +202,13 @@ let rec lines ~of_prelude ~modes enclosing : Item.t -> _ =
   function
   | Value { name; scheme; stage = _; held } ->
     line (fun printer ->
-      let held =
+      let external_ =
         match held with
-        | Some External when modes -> " @ external"
-        | Some (Static | Gc | External) | None -> ""
+        | Some External -> modes
+        | Some (Static | Gc) | None -> false
       in
-      sprintf "val %s : %s%s" name (Type.Printer.ty printer scheme) held)
+      let ty = Type.Printer.ty printer scheme ~atomic:external_ in
+      sprintf "val %s : %s%s" name ty (if external_ then " @ external" else ""))
   | Type decl ->
     line (fun printer ->
       Type_decl.to_string_hum

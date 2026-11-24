@@ -1120,7 +1120,7 @@ module Printer = struct
          && Option.is_none (lower_atoms var))
   ;;
 
-  let mode_side t (side : Arrow_modes.Side.t) =
+  let mode_side t (side : Arrow_modes.Side.t) ~position =
     match side with
     | Fixed const ->
       (match const_atoms const with
@@ -1134,7 +1134,7 @@ module Printer = struct
       (match t.modes, t.counting with
        | None, _ -> atoms
        | Some modes, Some _ ->
-         Mode_printing.count modes var;
+         Mode_printing.count modes var ~side:position;
          " @ _"
        | Some modes, None ->
          (* A variable's name doesn't say its locality or provenance yet, a
@@ -1191,7 +1191,7 @@ module Printer = struct
            | ARow row -> record_to_string t row)
          |> String.concat ~sep:", ")
     | TArrow (ty1, ty2, modes) ->
-      let ty1 = ty_to_string t ~prec:1 ty1 ^ mode_side t modes.arg in
+      let ty1 = ty_to_string t ~prec:1 ty1 ^ mode_side t modes.arg ~position:`Arg in
       let curried =
         match canonical_ty ty2 with
         | TArrow _ -> Mode.Locality.join curried (side_locality modes.arg)
@@ -1206,7 +1206,7 @@ module Printer = struct
           ty2
       in
       let res =
-        match mode_side t modes.res, global with
+        match mode_side t modes.res ~position:`Res, global with
         | side, false -> side
         | "", true -> " @ global"
         | side, true when String.is_prefix side ~prefix:" @ '" -> side
@@ -1405,10 +1405,10 @@ module Printer = struct
     render t
   ;;
 
-  let ty t ty =
+  let ty ?(atomic = false) t ty =
     eliding t ~render:(fun t ->
       Hashtbl.clear t.introduced;
-      ty_to_string t ~prec:0 ty)
+      ty_to_string t ~prec:(if atomic then 2 else 0) ty)
   ;;
 
   let context t row =

@@ -26,8 +26,8 @@ let g (x : string) = x
 |};
   [%expect
     {|
-    val f : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and portable <= 'm1 and external <= 'm1
-    val g : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and portable <= 'm1
+    val f : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
+    val g : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1
     |}]
 ;;
 
@@ -44,13 +44,13 @@ let field u = match in_record () with (s, _) -> s
 |};
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and portable <= 'm1 and external <= 'm1
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
     val in_ptr : 'a -> ptr[string] @ nonportable external
-    val in_record : 'a -> string * int @ 'm0 with portable <= 'm0 and external <= 'm0
-    val in_closure : 'a -> ('b -> string @ 'm1) @ 'm0 with portable <= 'm1 and portable <= 'm0 and external <= 'm1 and external <= 'm0
+    val in_record : 'a -> string * int @ 'm0 with external <= 'm0
+    val in_closure : 'a -> ('b -> string @ 'm1) @ 'm0 with external <= 'm1 and external <= 'm0
     val read : ptr['a] -> 'a @ nonportable
     val read_ext : 'a -> string @ nonportable external
-    val field : 'a -> string @ 'm0 with portable <= 'm0 and external <= 'm0
+    val field : 'a -> string @ 'm0 with external <= 'm0
     |}]
 ;;
 
@@ -64,10 +64,10 @@ let sequenced u = ext "a"; "b"
 |};
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and portable <= 'm1 and external <= 'm1
-    val evaluated : 'a -> int @ 'm0 with portable <= 'm0
-    val ignored : 'a -> string @ 'm0 with portable <= 'm0
-    val sequenced : 'a -> string @ 'm0 with portable <= 'm0
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
+    val evaluated : 'a -> int
+    val ignored : 'a -> string
+    val sequenced : 'a -> string
     |}]
 ;;
 
@@ -90,9 +90,9 @@ let ints (q : ptr[int]) = q.* <- 1
   [%expect
     {|
     val p : ptr[string]
-    val store : string @ 'm0 -> unit @ 'm1 with portable <= 'm1 and 'm0 <= gc
-    val literal : 'a -> unit @ 'm0 with portable <= 'm0
-    val ints : ptr[int] -> unit @ 'm0 with portable <= 'm0
+    val store : string @ 'm0 -> unit with 'm0 <= gc
+    val literal : 'a -> unit
+    val ints : ptr[int] -> unit
     |}];
   provenance
     {|
@@ -114,10 +114,10 @@ let in_closure u = let n = ext 1 in fun v -> n
 |};
   [%expect
     {|
-    val ext : int -> int @ 'm0 with portable <= 'm0
+    val ext : int -> int
     val p : ptr[int]
-    val store : 'a -> unit @ 'm0 with portable <= 'm0
-    val in_closure : 'a -> ('b -> int @ 'm1) @ 'm0 with portable <= 'm1 and portable <= 'm0
+    val store : 'a -> unit
+    val in_closure : 'a -> ('b -> int) @ 'm0 with gc <= 'm0
     |}]
 ;;
 
@@ -130,7 +130,7 @@ let gc_only u = let mut s = "a" in s <- "b"; s
 |};
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and portable <= 'm1 and external <= 'm1
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
     val inferred : 'a -> string @ nonportable external
     val gc_only : 'a -> string @ nonportable
     |}];
@@ -148,7 +148,7 @@ let opted_in u = let mut s @ external = "a" in s
 |};
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and portable <= 'm1 and external <= 'm1
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
     val opted_in : 'a -> string @ nonportable external
     |}]
 ;;
@@ -165,12 +165,12 @@ let set_h u = h <- Int.to_string 1
 |};
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and portable <= 'm1 and external <= 'm1
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
     val g : string @ external
-    val set : 'a -> unit @ 'm0 with portable <= 'm0
+    val set : 'a -> unit
     val get : 'a -> string @ nonportable external
     val h : string
-    val set_h : 'a -> unit @ 'm0 with portable <= 'm0
+    val set_h : 'a -> unit
     |}];
   provenance
     {|
@@ -193,7 +193,7 @@ let closed u = let f @ static = fun x -> x in f
   [%expect
     {|
     val literal : 'a -> string
-    val closed : 'a -> 'b @ 'm0 -> 'b @ 'm1 with 'm0 <= 'm1 and portable <= 'm1
+    val closed : 'a -> 'b @ 'm0 -> 'b @ 'm1 with 'm0 <= 'm1
     |}];
   provenance {|
 let made u = let p @ static = Ptr.make 1 in p
@@ -316,11 +316,11 @@ let returned u = exclave_ ext "a"
 |};
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and portable <= 'm1 and external <= 'm1
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
     type r = { g : global_ string; n : int }
-    val make : 'a -> r @ 'm0 with portable <= 'm0 and external <= 'm0
-    val read : 'a -> string @ 'm0 with portable <= 'm0 and external <= 'm0
-    val returned : 'a -> string @ 'm0 with portable <= 'm0 and external <= 'm0
+    val make : 'a -> r @ 'm0 with external <= 'm0
+    val read : 'a -> string @ 'm0 with external <= 'm0
+    val returned : 'a -> string @ 'm0 with external <= 'm0
     |}]
 ;;
 
@@ -332,8 +332,8 @@ let g @ static = fun (x : int) -> f x
 |};
   [%expect
     {|
-    val f : int -> int @ 'm0 with portable <= 'm0
-    val g : int -> int @ 'm0 with portable <= 'm0
+    val f : int -> int
+    val g : int -> int
     |}]
 ;;
 
@@ -364,8 +364,8 @@ let g = k 1
 |};
   [%expect
     {|
-    val k : int @ 'm0 -> (int -> int @ 'm2) @ 'm1 with 'm0 <= 'm1 and portable <= 'm2 and portable <= 'm1
-    val g : int @ '_m0 -> int @ '_m1 with portable <= '_m1
+    val k : int @ 'm0 -> (int -> int) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
+    val g : int @ '_m0 -> int @ '_m1
     |}]
 ;;
 

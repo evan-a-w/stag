@@ -19,6 +19,8 @@ type t =
   { vars : Mode.Var.t Int.Table.t
   ; order : int Int.Table.t
   ; counts : int Int.Table.t
+  ; results : Int.Hash_set.t
+  ; args : Int.Hash_set.t
   ; rep : int Int.Table.t
   ; operand : Operand.t Int.Table.t
   ; elided : Int.Hash_set.t
@@ -30,6 +32,8 @@ let create () =
   { vars = Int.Table.create ()
   ; order = Int.Table.create ()
   ; counts = Int.Table.create ()
+  ; results = Int.Hash_set.create ()
+  ; args = Int.Hash_set.create ()
   ; rep = Int.Table.create ()
   ; operand = Int.Table.create ()
   ; elided = Int.Hash_set.create ()
@@ -38,9 +42,14 @@ let create () =
   }
 ;;
 
-let count t var =
+let count t var ~(side : [ `Arg | `Res ]) =
   let id = Mode.Var.id var in
   Hashtbl.set t.vars ~key:id ~data:var;
+  Hash_set.add
+    (match side with
+     | `Arg -> t.args
+     | `Res -> t.results)
+    id;
   if not (Hashtbl.mem t.order id)
   then Hashtbl.set t.order ~key:id ~data:(Hashtbl.length t.order);
   Hashtbl.incr t.counts id
@@ -115,6 +124,16 @@ let settle t =
   Hashtbl.clear t.operand;
   List.iter reps ~f:(fun rep ->
     Hashtbl.set t.operand ~key:rep ~data:(operand rep));
+  (* As an arrow's result is never [const], a variable only on results is at
+     least [portable] where read back. *)
+  let only_result rep =
+    let members = members rep in
+    List.exists members ~f:(Hash_set.mem t.results)
+    && not (List.exists members ~f:(Hash_set.mem t.args))
+  in
+  let read_back_lower rep =
+    if only_result rep then Stage.Portable else Stage.min
+  in
   (* Strictly above, between classes. *)
   let above a b = (not (a = b)) && reaches a b in
   let edges =
@@ -137,9 +156,12 @@ let settle t =
           Option.some_if (a = rep) (op, Hashtbl.find_exn t.operand b))
       | Var _ ->
         let implied_lower =
-          Stage.equal lower Stage.min
+          Stage.le lower (read_back_lower rep)
           || List.exists reps ~f:(fun other ->
-            above other rep && Stage.le lower (fst (bounds other)))
+            above other rep
+            && Stage.le
+                 lower
+                 (Stage.join (fst (bounds other)) (read_back_lower other)))
         in
         let implied_upper =
           Stage.equal upper Stage.max
@@ -153,7 +175,7 @@ let settle t =
     |> List.filter ~f:(fun ((lo : Operand.t), (hi : Operand.t)) ->
       match lo, hi with
       | Const _, Const _ -> false
-      | Const lo, Var _ -> not (Stage.equal lo Stage.min)
+      | Const lo, Var rep -> not (Stage.le lo (read_back_lower rep))
       | Var _, Const hi -> not (Stage.equal hi Stage.max)
       | Var _, Var _ -> true
       | Provenance _, _ | _, Provenance _ -> true)
@@ -177,7 +199,7 @@ let settle t =
     match Hashtbl.find_exn t.operand rep with
     | Const _ | Provenance _ -> []
     | Var _ as op ->
-      (if Mode.Provenance.equal lower External
+      (if not (Mode.Provenance.equal lower Static)
        then [ Operand.Provenance lower, op ]
        else [])
       @

@@ -648,9 +648,20 @@ let assign ctx expected ~held ~crossed ~ty ~name ~loc f =
 ;;
 
 let store ctx expected ~loc ~target ~value =
-  let (target : Typed.Expr.t), (_ : Mode.Var.t) =
+  let (target : Typed.Expr.t), target_mode =
     evaluate ctx expected ~loc ~why:"it is stored to" target
   in
+  Ctx.add
+    ctx
+    ~loc
+    (Mode.Var.at_most
+       ~crossing:(ctx.crossing target.ty)
+       target_mode
+       Provenance
+       Gc
+       (reason
+          ~loc:target.loc
+          "it is stored through, which needs a cell the GC scans"));
   let sub = Expected.fresh ctx in
   let (value : Typed.Expr.t) = value sub ~ty:target.ty in
   evaluated ctx expected sub.mode ~loc ~why:"it is stored";

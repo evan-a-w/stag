@@ -459,6 +459,26 @@ let map_result xs ~f =
   |> Result.map ~f:List.rev
 ;;
 
+(* An application's result is computed at run time, so never [const]: neither
+   is an arrow's result, which printing then leaves unsaid. *)
+let result_floor (side : Arrow_modes.Side.t) ~loc =
+  let never_const =
+    Typecheck_error.create
+      ~loc
+      (Invalid_mode "the result of a function is never const")
+  in
+  match side with
+  | Fixed { stage = Const; _ } -> Error never_const
+  | Fixed { stage = Portable | Nonportable; _ } -> Ok ()
+  | Var var ->
+    Mode.Var.at_least
+      var
+      Stage
+      Portable
+      (Mode.Reason.create ~loc "it is the result of a function")
+    |> Result.map_error ~f:(fun (_ : Mode.Error.t) -> never_const)
+;;
+
 (* Each elaborates to the type and the syntax with each type it names by its
    canonical name ([Resolved]), so that it names the same types wherever it is. *)
 let rec elaborate'
@@ -498,7 +518,7 @@ let rec elaborate'
       let%bind.Result ty1, side1, syntax1 = side ty1 ~default ~elaborate in
       (* A curried declaration's partial applications hold its arguments so far,
          so are as local as they are, as in OxCaml. *)
-      let%map.Result ty2, side2, syntax2 =
+      let%bind.Result ty2, side2, syntax2 =
         match ty2.txt, side1 with
         | Arrow _, Fixed { locality; _ } ->
           let curried = Mode.Locality.join curried locality in
@@ -508,6 +528,7 @@ let rec elaborate'
             ~elaborate:(elaborate' ~curried t module_ vars ~splices ~expansions)
         | _ -> side ty2 ~default ~elaborate
       in
+      let%map.Result () = result_floor side2 ~loc:syntax2.loc in
       ( Type.TArrow
           ( ty1
           , ty2

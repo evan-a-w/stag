@@ -5,16 +5,19 @@ open! Import
     equal by their constraints print as one, a variable fixed to a constant
     prints as it, constraints and bounds the others imply are left out, and a
     variable named once and in no constraint is elided (as an annotation's side
-    without a mode is a fresh variable, it reads back as it). On provenance,
-    only a variable's bounds print: an [external] lower bound, as
-    [external <= 'm0], and an upper bound below [external], as ['m0 <= gc]. *)
+    without a mode is a fresh variable, it reads back as it). A [portable] lower
+    bound of a variable only on arrows' results is left out too, as an arrow's
+    result is never [const]. On provenance, only a variable's bounds print: a
+    lower bound above [static], as [gc <= 'm0], and an upper bound below
+    [external], as ['m0 <= gc]. *)
 
 type t
 
 val create : unit -> t
 
-(** Counts an occurrence, while counting what a rendering names. *)
-val count : t -> Mode.Var.t -> unit
+(** Counts an occurrence, on an arrow's argument or result, while counting what
+    a rendering names. *)
+val count : t -> Mode.Var.t -> side:[ `Arg | `Res ] -> unit
 
 (** After counting a rendering: groups the variables counted so far. *)
 val settle : t -> unit
