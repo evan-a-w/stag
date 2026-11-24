@@ -291,6 +291,9 @@ module Printer : sig
   (** Renders a mode argument. *)
   val mode_arg : t -> Mode_arg.t -> string
 
+  (** The head of a type's declaration, as [cell['a, 'm0 : mode]]. *)
+  val declaration : t -> string -> arg list -> string
+
   (** Renders [row] as the context of a code type. *)
   val context : t -> row -> string
 

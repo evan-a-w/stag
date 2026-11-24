@@ -369,7 +369,9 @@ let rec kind_message (kind : Kind.t) ~show_type =
   | Unbound_type path -> sprintf "Unbound type %s" (decl_path path)
   | Unbound_type_variable name -> sprintf "Unbound type variable '%s" name
   | Type_variable_kind_mismatch name ->
-    sprintf "The variable %s is used both as a type and as a row" name
+    sprintf
+      "The variable %s is used as more than one of a type, a row and a mode"
+      name
   | Unbound_constructor path ->
     sprintf "Unbound constructor %s" (decl_path path)
   | Unbound_field path -> sprintf "Unbound record field %s" (decl_path path)

@@ -78,7 +78,7 @@ module Type_decl = struct
 
   let to_string_hum printer t ~canonical_name =
     let ty = Type.Printer.ty printer in
-    let head = ty (TCon (canonical_name, t.params)) in
+    let head = Type.Printer.declaration printer canonical_name t.params in
     let body =
       match t.kind with
       | Abstract -> None
@@ -105,7 +105,12 @@ module Type_decl = struct
         |> String.concat ~sep:"; "
         |> sprintf "{ %s }"
         |> Some
-      | Alias body -> Some (Type.Printer.recursive printer body ~name:head)
+      | Alias body ->
+        Some
+          (Type.Printer.recursive
+             printer
+             body
+             ~name:(ty (TCon (canonical_name, t.params))))
     in
     match body with
     | None -> sprintf "type %s" head

@@ -1138,9 +1138,10 @@ let value_parameters t (root : Decl.t) =
            | Abstract -> assert false
          in
          let params =
-           List.mapi (Decl.params decl) ~f:(fun index -> function
-             | ATy (TVar v) -> v.id, index
-             | ARow (RVar v) -> v.id, index
+           List.filter_mapi (Decl.params decl) ~f:(fun index -> function
+             | ATy (TVar v) -> Some (v.id, index)
+             | ARow (RVar v) -> Some (v.id, index)
+             | AMode _ -> None
              | _ -> assert false)
            |> Int.Map.of_alist_exn
          in

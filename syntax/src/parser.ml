@@ -456,6 +456,8 @@ and type_arg t : Type_expr.arg =
   match peek t with
   | Lbrace -> Row (record_row t)
   | first when is_atom first && is_atom (peek_at t 1) -> Mode (mode_expr t)
+  (* A keyword, so never a type. *)
+  | External -> Mode (mode_expr t)
   | _ ->
     let ty = type_expr t in
     if is t At_at

@@ -972,6 +972,8 @@ module Printer = struct
         (* Set while rendering only to count how often each presence variable is
            named. *)
     ; modes : Mode_printing.t option (* With [create ~modes:true]. *)
+    ; mode_names : string Int.Table.t
+    (* Without [modes], of the mode variables a type's mode argument names. *)
     }
 
   let create
@@ -991,6 +993,7 @@ module Printer = struct
     ; elided = Int.Hash_set.create ()
     ; counting = None
     ; modes = Option.some_if modes (Mode_printing.create ())
+    ; mode_names = Int.Table.create ()
     }
   ;;
 
@@ -1226,6 +1229,16 @@ module Printer = struct
        | Some modes, None -> Some (Mode_printing.held modes var))
   ;;
 
+  (* A mode argument other than [ptr]'s, which is always written. *)
+  let mode_arg_to_string t (mode : Mode_arg.t) =
+    match held_mode t mode, mode with
+    | Some printed, _ -> printed
+    | None, Fixed _ -> "gc"
+    | None, Var var ->
+      Hashtbl.find_or_add t.mode_names (Mode.Var.id var) ~default:(fun () ->
+        sprintf "'m%d" (Hashtbl.length t.mode_names))
+  ;;
+
   let side_locality : Arrow_modes.Side.t -> Mode.Locality.t = function
     | Fixed const -> const.locality
     | Var var -> (Mode.Var.lower var).locality
@@ -1262,7 +1275,8 @@ module Printer = struct
     let parens_if cond s = if cond then "(" ^ s ^ ")" else s in
     match canonical_ty ty with
     | TCon (name, []) -> t.type_name name
-    | TCon (name, [ ATy pointee; AMode held ]) ->
+    | TCon (name, [ ATy pointee; AMode held ]) when String.equal name ptr_name
+      ->
       (match held_mode t held with
        | None ->
          sprintf "%s[%s]" (t.type_name name) (ty_to_string t ~prec:0 pointee)
@@ -1279,7 +1293,7 @@ module Printer = struct
         (List.map args ~f:(function
            | ATy ty -> ty_to_string t ~prec:0 ty
            | ARow row -> record_to_string t row
-           | AMode held -> Option.value (held_mode t held) ~default:"gc")
+           | AMode mode -> mode_arg_to_string t mode)
          |> String.concat ~sep:", ")
     | TArrow (ty1, ty2, modes) ->
       let ty1 =
@@ -1504,8 +1518,20 @@ module Printer = struct
       ty_to_string t ~prec:(if atomic then 2 else 0) ty)
   ;;
 
-  let mode_arg t mode =
-    eliding t ~render:(fun t -> Option.value (held_mode t mode) ~default:"gc")
+  let mode_arg t mode = eliding t ~render:(fun t -> mode_arg_to_string t mode)
+
+  let declaration t name params =
+    eliding t ~render:(fun t ->
+      Hashtbl.clear t.introduced;
+      match params with
+      | [] -> t.type_name name
+      | params ->
+        List.map params ~f:(function
+          | ATy ty -> ty_to_string t ~prec:0 ty
+          | ARow row -> record_to_string t row
+          | AMode mode -> mode_arg_to_string t mode ^ " : mode")
+        |> String.concat ~sep:", "
+        |> sprintf "%s[%s]" (t.type_name name))
   ;;
 
   let context t row =
