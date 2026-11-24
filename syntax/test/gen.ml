@@ -129,9 +129,13 @@ and annot_type t : Type_expr.t =
     let var () = loc (Mode_expr.Var (pick t [ "m"; "n" ])) in
     let constraint_ () : Mode_expr.Constraint.t =
       match int t 3 with
-      | 0 -> { lower = var (); upper = mode_expr t }
-      | 1 -> { lower = mode_expr t; upper = var () }
-      | _ -> { lower = var (); upper = var () }
+      | 0 -> { lower = var (); upper = mode_expr t; axis = None }
+      | 1 -> { lower = mode_expr t; upper = var (); axis = None }
+      | _ ->
+        { lower = var ()
+        ; upper = var ()
+        ; axis = pick t [ None; Some Mode_expr.Axis.Stage; Some Locality ]
+        }
     in
     loc
       (Type_expr.Constrained

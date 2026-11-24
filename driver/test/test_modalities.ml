@@ -74,7 +74,7 @@ let g (r @ local) = Ptr.make r.g
   [%expect
     {|
     type r = { g : ptr[int] @@ global; l : ptr[int] }
-    val g : r @ 'm0 -> ptr[ptr[int] @@ 'm1] @ nonportable with 'm0 <= 'm1
+    val g : r @ 'm0 -> ptr[ptr[int] @@ 'm2] @ 'm1 with local <= 'm0 and stage('m0) <= stage('m2) and provenance('m0) <= provenance('m2) and portable <= 'm2 and nonportable gc <= 'm1
     |}];
   check
     {|
@@ -94,7 +94,7 @@ let p u = let f @ portable = (make ()).p in f
   [%expect
     {|
     type r = { p : (string -> string) @@ portable; n : string -> string }
-    val make : 'a -> r @ nonportable
+    val make : 'a -> r @ 'm0 with nonportable gc <= 'm0
     val p : 'a -> (string -> string) @ 'm0 with gc <= 'm0
     |}];
   check
@@ -126,7 +126,7 @@ let owned u = let s @ gc = (make ()).owned in s
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
     type r = { owned : string @@ gc; borrowed : string }
-    val make : 'a -> r @ 'm0 with external <= 'm0
+    val make : 'a -> r @ external
     val owned : 'a -> string @ 'm0 with gc <= 'm0
     |}];
   check
@@ -159,7 +159,7 @@ let a (x @ local) = match x with A s -> let s2 @ gc = s in Ptr.make s2 | B _ -> 
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
     type t = A of string @@ portable gc global | B of string
-    val a : t @ local -> ptr[string @@ 'm0] @ nonportable with gc <= 'm0
+    val a : t @ local -> ptr[string @@ 'm1] @ 'm0 with portable gc <= 'm1 and nonportable gc <= 'm0
     |}]
 ;;
 
@@ -195,7 +195,7 @@ let read (p : ptr[string] @ external) = let s @ gc = p.* in s
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
-    val read : ptr[string] @ 'm0 -> string @ nonportable with portable <= 'm0 and external <= 'm0
+    val read : ptr[string] @ 'm0 -> string @ 'm1 with portable external <= 'm0 and nonportable gc <= 'm1
     |}]
 ;;
 
@@ -243,7 +243,7 @@ let read_owned u = let s @ gc = p.*.owned in s
     {|
     type r = { owned : string @@ gc; any : string }
     val p : ptr[r @@ external]
-    val read_owned : 'a -> string @ nonportable
+    val read_owned : 'a -> string @ 'm0 with nonportable gc <= 'm0
     |}];
   (* Only the last cell's [@@] says what is stored: the earlier ones hold the
      pointer to it. *)
@@ -315,13 +315,13 @@ let static_tagged : tagged[static] = { tag = 1; payload = "a" }
     {|
     type cell['a, 'm0 : mode] = { v : ptr['a @@ 'm0] }
     type tagged['m0 : mode] = { tag : int; payload : string @@ 'm0 }
-    val get : cell['a, 'm0] -> 'a @ 'm1 with 'm0 <= 'm1 and nonportable <= 'm1
-    val set : cell['a, 'm1] @ 'm0 -> ('a @ 'm3 -> unit) @ 'm2 with 'm0 <= 'm2 and 'm3 <= 'm1 and gc <= 'm2
+    val get : cell['a, 'm0] -> 'a @ 'm1 with provenance('m0) <= provenance('m1) and nonportable <= 'm1
+    val set : cell['a, 'm1] @ 'm0 -> ('a @ 'm3 -> unit) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and 'm3 <= global and gc <= 'm2
     val ext_cell : cell[string, external]
     val portable_cell : cell[string, portable]
     val gc_cell : cell[string, gc]
     val tag : tagged['m0] -> int
-    val payload : tagged['m0] -> string @ 'm1 with 'm0 <= 'm1
+    val payload : tagged['m1] @ 'm0 -> string @ 'm2 with locality('m0) <= locality('m2) and stage('m1) <= stage('m2) and provenance('m1) <= provenance('m2)
     val static_tagged : tagged[static]
     |}]
 ;;
@@ -407,10 +407,7 @@ type cell['p : mode] = { v : ptr[int @@ 'p] }
 let f (c : cell[local]) = c
 |};
   [%expect
-    {|
-    type cell['m0 : mode] = { v : ptr[int @@ 'm0] }
-    val f : cell[local] @ 'm0 -> cell[local] @ 'm1 with 'm0 <= 'm1
-    |}]
+    {| The mode parameter 'p reaches what a pointer's cell holds, which is on stage and provenance only: a pointer's cell is always [global], so its argument has no locality |}]
 ;;
 
 let%expect_test "in quotes, re-checked once erased" =
@@ -430,7 +427,7 @@ let constrained = .< fun (r : r) -> let s @ gc = r.any in s >.
     type cell['a, 'm0 : mode] = { v : ptr['a @@ 'm0] }
     type r = { owned : string @@ gc; any : string }
     val code : <cell[string, external] -> unit>{..'a}
-    val fields : <r @ 'm0 -> string @ 'm1>{..'a} with 'm0 <= 'm1 and gc <= 'm1
+    val fields : <r @ 'm0 -> string @ 'm1>{..'a} with stage('m0) <= stage('m1) and locality('m0) <= locality('m1) and gc <= 'm1
     val constrained : <r @ 'm0 -> string @ 'm1>{..'a} with 'm0 <= 'm1 and 'm0 <= gc and gc <= 'm1
     |}]
 ;;

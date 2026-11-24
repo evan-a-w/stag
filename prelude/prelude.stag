@@ -104,6 +104,10 @@ module Stag = struct
   (* A mode as written after [@]: [@ 'm], standing for every axis, or
      [@ local portable], at most one of each axis. *)
   module Mode_expr = struct
+    module Axis = struct
+      type t = Stage | Provenance | Locality
+    end
+
     module Atom = struct
       type t =
         | Const
@@ -138,7 +142,7 @@ module Stag = struct
       | Moded of ptr[t * Mode_expr.t]
       (* [t with c and ...], only as an annotation's type: each constraint
          [(lower, upper)] is [lower <= upper], at least one a variable. *)
-      | Constrained of ptr[t * list[Mode_expr.t * Mode_expr.t]]
+      | Constrained of ptr[t * list[Mode_expr.t * Mode_expr.t * option[Mode_expr.Axis.t]]]
       (* [t @@ m], only as a record field's type, a constructor's argument or
          a pointer's type argument. *)
       | Modality of ptr[t * Mode_expr.t]

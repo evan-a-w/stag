@@ -103,8 +103,18 @@ module Make (B : Builder) = struct
         ]
   ;;
 
-  let mode_constraint ({ lower; upper } : Mode_expr.Constraint.t) =
-    B.tuple [ mode_expr lower; mode_expr upper ]
+  let mode_constraint ({ lower; upper; axis } : Mode_expr.Constraint.t) =
+    B.tuple
+      [ mode_expr lower
+      ; mode_expr upper
+      ; option
+          (fun (axis : Mode_expr.Axis.t) ->
+            con
+              ("Stag.Mode_expr.Axis."
+               ^ Sexp.to_string (Mode_expr.Axis.sexp_of_t axis))
+              [])
+          axis
+      ]
   ;;
 
   let type_param ({ txt; loc = _ } : Type_decl.Param.t Located.t) =

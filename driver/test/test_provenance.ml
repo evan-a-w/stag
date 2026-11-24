@@ -45,12 +45,12 @@ let field u = match in_record () with (s, _) -> s
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
-    val in_ptr : 'a -> ptr[string @@ 'm0] @ nonportable with external <= 'm0
-    val in_record : 'a -> string * int @ 'm0 with external <= 'm0
-    val in_closure : 'a -> ('b -> string @ 'm1) @ 'm0 with external <= 'm1 and external <= 'm0
-    val read : ptr['a @@ 'm0] -> 'a @ 'm1 with 'm0 <= 'm1 and nonportable <= 'm1
+    val in_ptr : 'a -> ptr[string @@ 'm1] @ 'm0 with portable external <= 'm1 and nonportable gc <= 'm0
+    val in_record : 'a -> string * int @ external
+    val in_closure : 'a -> ('b -> string @ external) @ external
+    val read : ptr['a @@ 'm0] -> 'a @ 'm1 with provenance('m0) <= provenance('m1) and nonportable <= 'm1
     val read_ext : 'a -> string @ nonportable external
-    val field : 'a -> string @ 'm0 with external <= 'm0
+    val field : 'a -> string @ external
     |}]
 ;;
 
@@ -90,7 +90,7 @@ let ints (q : ptr[int]) = q.* <- 1
   [%expect
     {|
     val p : ptr[string]
-    val store : string @ 'm0 -> unit with 'm0 <= gc
+    val store : string @ 'm0 -> unit with 'm0 <= gc global
     val literal : 'a -> unit
     val ints : ptr[int] -> unit
     |}];
@@ -102,7 +102,7 @@ let bad u = store_param (Ptr.make "a") (ext "b")
 |};
   [%expect
     {|
-    val store_param : ptr['a @@ 'm1] @ 'm0 -> ('a @ 'm3 -> unit) @ 'm2 with 'm0 <= 'm2 and 'm3 <= 'm1 and gc <= 'm2
+    val store_param : ptr['a @@ 'm1] @ 'm0 -> ('a @ 'm3 -> unit) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and 'm3 <= global and gc <= 'm2
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
     val bad : 'a -> unit
     |}]
@@ -251,7 +251,7 @@ let length u = String.length (ext "a")
   provenance {|
 let built u = String.append "a" "b"
 |};
-  [%expect {| val built : 'a -> string @ nonportable |}]
+  [%expect {| val built : 'a -> string @ 'm0 with nonportable gc <= 'm0 |}]
 ;;
 
 let%expect_test "a closure is static only if it is const" =
@@ -322,9 +322,9 @@ let returned u = exclave_ ext "a"
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
     type r = { g : string @@ global; n : int }
-    val make : 'a -> r @ 'm0 with external <= 'm0
-    val read : 'a -> string @ 'm0 with external <= 'm0
-    val returned : 'a -> string @ 'm0 with external <= 'm0
+    val make : 'a -> r @ external
+    val read : 'a -> string @ external
+    val returned : 'a -> string @ external
     |}]
 ;;
 

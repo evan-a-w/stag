@@ -1172,9 +1172,7 @@ module Printer = struct
       (match t.modes, t.counting with
        | None, _ -> Option.is_none (lower_atoms var)
        | Some _, Some _ -> false
-       | Some modes, None ->
-         Option.is_none (Mode_printing.side modes var)
-         && Option.is_none (lower_atoms var))
+       | Some modes, None -> Option.is_none (Mode_printing.side modes var))
   ;;
 
   let mode_side t (side : Arrow_modes.Side.t) ~position =
@@ -1194,17 +1192,11 @@ module Printer = struct
          Mode_printing.count modes var ~side:position;
          " @ _"
        | Some modes, None ->
-         (* A variable's name doesn't say its locality or provenance yet, a
-            constant does. *)
-         (match Mode_printing.side modes var, lower_atoms var with
-          | None, _ -> atoms
-          | Some side, Some atom when not (String.is_prefix side ~prefix:" @ '")
-            -> side ^ " " ^ atom
-          | Some side, _ -> side))
+         Option.value (Mode_printing.side modes var) ~default:"")
   ;;
 
   (* A mode argument, unless the default ([ptr[t]]'s [gc]). *)
-  let held_mode t (held : Mode_arg.t) =
+  let held_mode ?(cell = false) t (held : Mode_arg.t) =
     let atom provenance =
       Some
         (Sexp.to_string (Mode.Provenance.sexp_of_t provenance)
@@ -1224,7 +1216,7 @@ module Printer = struct
          then atom Static
          else None
        | Some modes, Some _ ->
-         Mode_printing.count modes var ~side:`Held;
+         Mode_printing.count modes var ~side:(if cell then `Cell else `Held);
          Some "_"
        | Some modes, None -> Some (Mode_printing.held modes var))
   ;;
@@ -1246,9 +1238,13 @@ module Printer = struct
 
   (* A declared curried arrow's result defaults to as local as the arguments
      before it, so a less local result says so. *)
-  let curried_global ~curried (side : Arrow_modes.Side.t) =
+  let curried_global t ~curried (side : Arrow_modes.Side.t) =
     (not (Mode.Locality.equal curried Global))
     && Mode.Locality.equal (side_locality side) Global
+    &&
+    match side, t.modes with
+    | Var _, Some _ -> false
+    | Var _, None | Fixed _, _ -> true
   ;;
 
   let rec ty_to_string ?curried t ~prec ty =
@@ -1277,7 +1273,7 @@ module Printer = struct
     | TCon (name, []) -> t.type_name name
     | TCon (name, [ ATy pointee; AMode held ]) when String.equal name ptr_name
       ->
-      (match held_mode t held with
+      (match held_mode ~cell:true t held with
        | None ->
          sprintf "%s[%s]" (t.type_name name) (ty_to_string t ~prec:0 pointee)
        | Some mode ->
@@ -1304,7 +1300,7 @@ module Printer = struct
         | TArrow _ -> Mode.Locality.join curried (side_locality modes.arg)
         | _ -> Global
       in
-      let global = curried_global ~curried modes.res in
+      let global = curried_global t ~curried modes.res in
       let ty2 =
         ty_to_string
           t

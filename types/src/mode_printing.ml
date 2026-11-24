@@ -1,18 +1,49 @@
 open! Import
-module Stage = Mode.Stage
 
-module Operand = struct
-  type t =
-    | Var of int
-    | Const of Stage.t
-    | Provenance of Mode.Provenance.t
+(* An axis, with its points as indices from [0], its least. *)
+module Axis = struct
+  type t = Mode.Axis.Any.t
 
-  let to_string ~name = function
-    | Var rep -> name rep
-    | Const stage -> Sexp.to_string (Stage.sexp_of_t stage) |> String.lowercase
-    | Provenance provenance ->
-      Sexp.to_string (Mode.Provenance.sexp_of_t provenance) |> String.lowercase
+  let all = Mode.Axis.Any.all
+
+  let name : t -> string = function
+    | T Stage -> "stage"
+    | T Provenance -> "provenance"
+    | T Locality -> "locality"
   ;;
+
+  let index (T axis : t) const =
+    let module C = (val Mode.Axis.chain axis) in
+    C.index (Mode.Const.get const axis)
+  ;;
+
+  let max (T axis : t) =
+    let module C = (val Mode.Axis.chain axis) in
+    C.index C.max
+  ;;
+
+  let atom (T axis : t) index =
+    let module C = (val Mode.Axis.chain axis) in
+    Sexp.to_string (C.sexp_of_t (C.of_index_exn index)) |> String.lowercase
+  ;;
+
+  let node (T axis : t) var = Mode.Var.node var axis
+  let is_stage : t -> bool = function
+    | T Stage -> true
+    | T (Provenance | Locality) -> false
+  ;;
+
+  let is_provenance : t -> bool = function
+    | T Provenance -> true
+    | T (Stage | Locality) -> false
+  ;;
+end
+
+module Printed = struct
+  type t =
+    | Lower of (Axis.t * int) list * int (** Atoms, at most one per axis. *)
+    | Upper of int * (Axis.t * int) list
+    | Relation of int * int * Axis.t list (** On the axes, every one if all. *)
 end
 
 type t =
@@ -21,12 +52,13 @@ type t =
   ; counts : int Int.Table.t
   ; results : Int.Hash_set.t
   ; args : Int.Hash_set.t
+  ; named : Int.Hash_set.t
+  ; cells : Int.Hash_set.t
   ; held : Int.Hash_set.t
   ; rep : int Int.Table.t
-  ; operand : Operand.t Int.Table.t
-  ; elided : Int.Hash_set.t
+  ; atoms : (Axis.t * int) list Int.Table.t
   ; names : string Int.Table.t
-  ; mutable constraints : (Operand.t * Operand.t) list
+  ; mutable printed : Printed.t list
   }
 
 let create () =
@@ -35,24 +67,28 @@ let create () =
   ; counts = Int.Table.create ()
   ; results = Int.Hash_set.create ()
   ; args = Int.Hash_set.create ()
+  ; named = Int.Hash_set.create ()
+  ; cells = Int.Hash_set.create ()
   ; held = Int.Hash_set.create ()
   ; rep = Int.Table.create ()
-  ; operand = Int.Table.create ()
-  ; elided = Int.Hash_set.create ()
+  ; atoms = Int.Table.create ()
   ; names = Int.Table.create ()
-  ; constraints = []
+  ; printed = []
   }
 ;;
 
-let count t var ~(side : [ `Arg | `Res | `Held ]) =
+let count t var ~(side : [ `Arg | `Res | `Held | `Cell ]) =
   let id = Mode.Var.id var in
   Hashtbl.set t.vars ~key:id ~data:var;
-  Hash_set.add
-    (match side with
-     | `Arg -> t.args
-     | `Res -> t.results
-     | `Held -> t.held)
-    id;
+  (match side with
+   | `Arg -> Hash_set.add t.args id
+   | `Res -> Hash_set.add t.results id
+   | `Held ->
+     Hash_set.add t.named id;
+     Hash_set.add t.held id
+   | `Cell ->
+     Hash_set.add t.named id;
+     Hash_set.add t.cells id);
   if not (Hashtbl.mem t.order id)
   then Hashtbl.set t.order ~key:id ~data:(Hashtbl.length t.order);
   Hashtbl.incr t.counts id
@@ -72,7 +108,7 @@ let reach t axis =
       Hash_set.add visited id;
       Queue.enqueue queue node)
   in
-  Hashtbl.iter t.vars ~f:(fun var -> visit (Mode.Var.node var axis));
+  Hashtbl.iter t.vars ~f:(fun var -> visit (Axis.node axis var));
   while not (Queue.is_empty queue) do
     let node = Queue.dequeue_exn queue in
     let id = Mode.Var.Node.var_id node in
@@ -97,171 +133,258 @@ let reach t axis =
   fun a b -> Hash_set.mem (Hashtbl.find_exn reach a) b
 ;;
 
+(* The variables are grouped into classes equal on every axis, each printed as
+   one. Then, on each axis: classes equal on it (a cycle) are related in a ring,
+   others by the edges not implied through a third or by their bounds; a bound
+   is printed where neither the edges into the class nor what an annotation
+   gives every variable (a result's [portable]) imply it. A class related to no
+   other, named once (or fixed on every axis) and with each axis free or fixed
+   prints as the atoms of its fixed axes, which read back as it. *)
 let settle t =
-  (* A relation with a cell's variable is on provenance, the only axis a cell's
-     variable means; others are on stage. *)
-  let on_stage = reach t Stage in
-  let on_provenance = reach t Provenance in
-  let is_cell = Hash_set.mem t.held in
-  let reaches a b =
-    if is_cell a || is_cell b then on_provenance a b else on_stage a b
+  let reaches =
+    let by_axis = List.map Axis.all ~f:(fun axis -> axis, reach t axis) in
+    fun axis -> List.Assoc.find_exn by_axis axis ~equal:Mode.Axis.Any.equal
   in
   let by_position =
     Hashtbl.keys t.vars
     |> List.sort ~compare:(fun a b ->
       Int.compare (Hashtbl.find_exn t.order a) (Hashtbl.find_exn t.order b))
   in
+  let var_bounds axis id =
+    let var = Hashtbl.find_exn t.vars id in
+    Axis.index axis (Mode.Var.lower var), Axis.index axis (Mode.Var.upper var)
+  in
+  (* A cell's locality means nothing: a variable only on cells is left out of
+     the locality relations and bounds. *)
+  let cell_only id =
+    Hash_set.mem t.cells id
+    && not
+         (Hash_set.mem t.args id
+          || Hash_set.mem t.results id
+          || Hash_set.mem t.held id)
+  in
+  let irrelevant (axis : Axis.t) id =
+    match axis with
+    | T Locality -> cell_only id
+    | T (Stage | Provenance) -> false
+  in
+  (* Equal on the axis: by their constraints, or fixed to the same point. *)
+  let equal_on axis a b =
+    (irrelevant axis a && irrelevant axis b)
+    || (reaches axis a b && reaches axis b a)
+
+    ||
+    let lower, upper = var_bounds axis a in
+    lower = upper && [%equal: int * int] (lower, upper) (var_bounds axis b)
+  in
   Hashtbl.clear t.rep;
   List.iter by_position ~f:(fun id ->
-    match
-      List.find by_position ~f:(fun other ->
-        Bool.equal (is_cell id) (is_cell other)
-        && reaches id other
-        && reaches other id)
-    with
-    | Some rep -> Hashtbl.set t.rep ~key:id ~data:rep
-    | None -> Hashtbl.set t.rep ~key:id ~data:id);
+    let rep =
+      List.find_exn by_position ~f:(fun other ->
+        List.for_all Axis.all ~f:(fun axis -> equal_on axis id other))
+    in
+    Hashtbl.set t.rep ~key:id ~data:rep);
   let reps =
     List.filter by_position ~f:(fun id -> Hashtbl.find_exn t.rep id = id)
   in
   let members rep =
     List.filter by_position ~f:(fun id -> Hashtbl.find_exn t.rep id = rep)
   in
-  let bounds rep =
-    List.find_map (members rep) ~f:(fun id ->
-      Hashtbl.find t.vars id
-      |> Option.map ~f:(fun var ->
-        (Mode.Var.lower var).stage, (Mode.Var.upper var).stage))
-    |> Option.value ~default:(Stage.min, Stage.max)
+  let lower axis rep =
+    List.fold (members rep) ~init:0 ~f:(fun acc id ->
+      Int.max acc (fst (var_bounds axis id)))
   in
-  let related_to_cell rep =
-    List.exists reps ~f:(fun cell ->
-      is_cell cell && cell <> rep && (reaches cell rep || reaches rep cell))
+  let upper axis rep =
+    List.fold (members rep) ~init:(Axis.max axis) ~f:(fun acc id ->
+      Int.min acc (snd (var_bounds axis id)))
   in
-  let operand rep : Operand.t =
-    let lower, upper = bounds rep in
-    if Stage.equal lower upper && not (is_cell rep || related_to_cell rep)
-    then Const lower
-    else Var rep
-  in
-  Hashtbl.clear t.operand;
-  List.iter reps ~f:(fun rep ->
-    Hashtbl.set t.operand ~key:rep ~data:(operand rep));
-  (* As an arrow's result is never [const], a variable only on results is at
-     least [portable] where read back. *)
-  let only_result rep =
+  let ignored axis rep = List.for_all (members rep) ~f:(irrelevant axis) in
+  (* What an annotation's variable is at least: as an arrow's result is never
+     [const], one only on results is [portable]. *)
+  let floor axis rep =
     let members = members rep in
-    List.exists members ~f:(Hash_set.mem t.results)
-    && not (List.exists members ~f:(Hash_set.mem t.args))
+    if Axis.is_stage axis
+       && List.exists members ~f:(Hash_set.mem t.results)
+       && not (List.exists members ~f:(Hash_set.mem t.args))
+    then Axis.index axis { Mode.Const.min with stage = Portable }
+    else 0
   in
-  let read_back_lower rep =
-    if only_result rep then Stage.Portable else Stage.min
+  (* What a variable is at most by its other axes: [const] is [static]. *)
+  let ceiling axis rep =
+    if Axis.is_provenance axis
+       && upper (T Stage) rep = Axis.index (T Stage) Mode.Const.min
+    then Axis.index axis Mode.Const.min
+    else Axis.max axis
   in
-  (* Strictly above, between classes. *)
-  let above a b = (not (a = b)) && reaches a b in
-  let stage_above a b =
-    (not (a = b)) && (not (is_cell a || is_cell b)) && on_stage a b
+  (* Implied by the bounds, once they read back. *)
+  let by_bounds axis a b = upper axis a <= lower axis b in
+  (* On each axis, the classes equal on it are related in a ring, others by the
+     edges not implied through a third. *)
+  let edges axis =
+    let reaches = reaches axis in
+    let cycle rep =
+      List.filter reps ~f:(fun other -> reaches rep other && reaches other rep)
+    in
+    let leaders =
+      List.filter reps ~f:(fun rep -> List.hd_exn (cycle rep) = rep)
+    in
+    let rings =
+      List.concat_map leaders ~f:(fun leader ->
+        match cycle leader with
+        | [ _ ] -> []
+        | cycle ->
+          List.zip_exn cycle (List.tl_exn cycle @ [ List.hd_exn cycle ]))
+    in
+    let above a b = a <> b && reaches a b && not (reaches b a) in
+    let between =
+      List.concat_map leaders ~f:(fun a ->
+        List.filter_map leaders ~f:(fun b ->
+          Option.some_if
+            (above a b
+             && not (List.exists leaders ~f:(fun c -> above a c && above c b))
+            )
+            (a, b)))
+    in
+    rings @ between
+    |> List.filter ~f:(fun (a, b) ->
+      not (by_bounds axis a b || ignored axis a || ignored axis b))
   in
-  (* An edge is implied by a path through [c] read back on its axis. *)
-  let edges =
+  let edges = List.map Axis.all ~f:(fun axis -> axis, edges axis) in
+  let edge axis pair =
+    List.Assoc.find_exn edges axis ~equal:Mode.Axis.Any.equal
+    |> fun edges -> List.mem edges pair ~equal:[%equal: int * int]
+  in
+  (* A relation on the axes of its edges, or on every axis where that is
+     implied on the others. *)
+  let relations =
     List.concat_map reps ~f:(fun a ->
       List.filter_map reps ~f:(fun b ->
-        let through c =
-          Bool.equal (is_cell c) (is_cell a || is_cell b)
-          && above a c
-          && above c b
-        in
-        Option.some_if
-          (above a b
-           && not (List.exists reps ~f:(fun c -> c <> a && c <> b && through c))
-          )
-          (a, b)))
+        match List.filter Axis.all ~f:(fun axis -> edge axis (a, b)) with
+        | [] -> None
+        | axes ->
+          if List.for_all Axis.all ~f:(fun axis ->
+               reaches axis a b
+               || by_bounds axis a b
+               || (ignored axis a && ignored axis b))
+          then Some (a, b, Axis.all)
+          else Some (a, b, axes)))
   in
-  let constraints =
-    List.concat_map reps ~f:(fun rep ->
-      let lower, upper = bounds rep in
-      let op = Hashtbl.find_exn t.operand rep in
-      match op with
-      | Const _ | Provenance _ ->
-        List.filter_map edges ~f:(fun (a, b) ->
-          Option.some_if (a = rep) (op, Hashtbl.find_exn t.operand b))
-      | Var _ when is_cell rep ->
-        List.filter_map edges ~f:(fun (a, b) ->
-          Option.some_if (a = rep) (op, Hashtbl.find_exn t.operand b))
-      | Var _ ->
-        let implied_lower =
-          Stage.le lower (read_back_lower rep)
-          || List.exists reps ~f:(fun other ->
-            stage_above other rep
-            && Stage.le
-                 lower
-                 (Stage.join (fst (bounds other)) (read_back_lower other)))
-        in
-        let implied_upper =
-          Stage.equal upper Stage.max
-          || List.exists reps ~f:(fun other ->
-            stage_above rep other && Stage.le (snd (bounds other)) upper)
-        in
-        (if implied_lower then [] else [ Operand.Const lower, op ])
-        @ List.filter_map edges ~f:(fun (a, b) ->
-          Option.some_if (a = rep) (op, Hashtbl.find_exn t.operand b))
-        @ if implied_upper then [] else [ op, Operand.Const upper ])
-    |> List.filter ~f:(fun ((lo : Operand.t), (hi : Operand.t)) ->
-      match lo, hi with
-      | Const _, Const _ -> false
-      | Const lo, Var rep -> not (Stage.le lo (read_back_lower rep))
-      | Var _, Const hi -> not (Stage.equal hi Stage.max)
-      | Var lo, Var hi ->
-        (* Below what is above every stage is implied, on stage. *)
-        is_cell lo
-        || is_cell hi
-        || not (Stage.equal (fst (bounds hi)) Stage.max)
-      | Provenance _, _ | _, Provenance _ -> true)
+  let related rep =
+    List.exists relations ~f:(fun (a, b, _) -> a = rep || b = rep)
   in
-  let provenance rep : (Operand.t * Operand.t) list =
-    let bounds =
-      List.filter_map (members rep) ~f:(Hashtbl.find t.vars)
-      |> List.map ~f:(fun var ->
-        (Mode.Var.lower var).provenance, (Mode.Var.upper var).provenance)
-    in
-    let lower =
-      List.map bounds ~f:fst
-      |> List.reduce ~f:Mode.Provenance.join
-      |> Option.value ~default:Mode.Provenance.min
-    in
-    let upper =
-      List.map bounds ~f:snd
-      |> List.reduce ~f:Mode.Provenance.meet
-      |> Option.value ~default:Mode.Provenance.max
-    in
-    match Hashtbl.find_exn t.operand rep with
-    | Const _ | Provenance _ -> []
-    | Var _ as op ->
-      (if not (Mode.Provenance.equal lower Static)
-       then [ Operand.Provenance lower, op ]
-       else [])
-      @
-      if Mode.Provenance.equal upper External
-      then []
-      else [ op, Operand.Provenance upper ]
+  (* A class's bounds on the axis read back from atoms alone if it is free there
+     or fixed to a point. *)
+  let atom axis rep =
+    let lower = lower axis rep
+    and upper = upper axis rep in
+    if lower = upper
+    then (
+      (* [const] says [static]. *)
+      let implied = ceiling axis rep < Axis.max axis && lower = ceiling axis rep in
+      Some (Option.some_if (not implied) lower))
+    else if lower <= floor axis rep && upper >= ceiling axis rep
+    then Some None
+    else None
   in
-  let constraints = constraints @ List.concat_map reps ~f:provenance in
-  t.constraints <- constraints;
-  Hash_set.clear t.elided;
-  let mentioned = Int.Hash_set.create () in
-  List.iter constraints ~f:(fun (lo, hi) ->
-    List.iter [ lo; hi ] ~f:(function
-      | Var rep -> Hash_set.add mentioned rep
-      | Const _ | Provenance _ -> ()));
+  Hashtbl.clear t.atoms;
   List.iter reps ~f:(fun rep ->
-    match members rep, Hashtbl.find_exn t.operand rep with
-    | [ id ], Var _ ->
-      if (not (Hash_set.mem t.held id))
-         && [%equal: int option] (Hashtbl.find t.counts id) (Some 1)
-         && (not (Hash_set.mem mentioned rep))
-         && Hashtbl.find t.vars id |> Option.for_all ~f:Mode.Var.is_generic
-      then Hash_set.add t.elided rep
-    | _ -> ())
+    let members = members rep in
+    match
+      List.map Axis.all ~f:(fun axis ->
+        Option.map (atom axis rep) ~f:(Option.map ~f:(fun point -> axis, point)))
+      |> Option.all
+    with
+    | Some atoms
+      when (not (related rep))
+           && (not (List.exists members ~f:(Hash_set.mem t.named)))
+           && (List.for_all Axis.all ~f:(fun axis ->
+                 lower axis rep = upper axis rep)
+               ||
+               match members with
+               | [ id ] ->
+                 [%equal: int option] (Hashtbl.find t.counts id) (Some 1)
+                 && Mode.Var.is_generic (Hashtbl.find_exn t.vars id)
+               | _ -> false) ->
+      Hashtbl.set t.atoms ~key:rep ~data:(List.filter_opt atoms)
+    | _ -> ());
+  (* A bound, unless implied where read back by the printed relations into and
+     out of the class, or by what every annotation's variable is. A cycle's is
+     printed once, on its first member. *)
+  let bounds axis =
+    let printed (a, b) =
+      List.exists relations ~f:(fun (a', b', axes) ->
+        a = a' && b = b' && List.mem axes axis ~equal:Mode.Axis.Any.equal)
+    in
+    let closure ~step start =
+      let seen = Int.Hash_set.create () in
+      let rec go id =
+        List.iter reps ~f:(fun next ->
+          if step id next && not (Hash_set.mem seen next)
+          then (
+            Hash_set.add seen next;
+            go next))
+      in
+      go start;
+      seen
+    in
+    let done_lower = Int.Hash_set.create () in
+    let done_upper = Int.Hash_set.create () in
+    List.filter reps ~f:(fun rep ->
+      not (Hashtbl.mem t.atoms rep || ignored axis rep))
+    |> List.concat_map ~f:(fun rep ->
+      let below = closure rep ~step:(fun id next -> printed (next, id)) in
+      let above = closure rep ~step:(fun id next -> printed (id, next)) in
+      let cycle = Hash_set.filter below ~f:(Hash_set.mem above) in
+      Hash_set.add cycle rep;
+      let outside set = Hash_set.filter set ~f:(Fn.non (Hash_set.mem cycle)) in
+      let implied_lower =
+        Hash_set.fold
+          (outside below)
+          ~init:(Hash_set.fold cycle ~init:0 ~f:(fun acc id -> Int.max acc (floor axis id)))
+          ~f:(fun acc id -> Int.max acc (Int.max (lower axis id) (floor axis id)))
+      in
+      let implied_upper =
+        Hash_set.fold
+          (outside above)
+          ~init:(Hash_set.fold cycle ~init:(Axis.max axis) ~f:(fun acc id -> Int.min acc (ceiling axis id)))
+          ~f:(fun acc id -> Int.min acc (upper axis id))
+      in
+      let bound done_ ~implied printed =
+        if implied || Hash_set.exists cycle ~f:(Hash_set.mem done_)
+        then []
+        else (
+          Hash_set.add done_ rep;
+          [ printed ])
+      in
+      bound
+        done_lower
+        ~implied:(lower axis rep <= implied_lower)
+        (`Lower, rep, lower axis rep)
+      @ bound
+          done_upper
+          ~implied:(upper axis rep >= implied_upper)
+          (`Upper, rep, upper axis rep))
+  in
+  let bounds =
+    List.concat_map Axis.all ~f:(fun axis ->
+      List.map (bounds axis) ~f:(fun bound -> axis, bound))
+  in
+  (* A class's bounds on one side, every axis's together. *)
+  let bounds_of rep side =
+    List.filter_map bounds ~f:(fun (axis, (side', rep', point)) ->
+      Option.some_if (rep = rep' && Poly.equal side side') (axis, point))
+  in
+  t.printed
+  <- List.concat_map reps ~f:(fun rep ->
+       (match bounds_of rep `Lower with
+        | [] -> []
+        | atoms -> [ Printed.Lower (atoms, rep) ])
+       @ List.filter_map relations ~f:(fun (a, b, axes) ->
+         Option.some_if (a = rep) (Printed.Relation (a, b, axes)))
+       @
+       match bounds_of rep `Upper with
+       | [] -> []
+       | atoms -> [ Printed.Upper (rep, atoms) ])
 ;;
 
 let name t rep =
@@ -273,26 +396,44 @@ let name t rep =
     sprintf "'%sm%d" (if weak then "_" else "") (Hashtbl.length t.names))
 ;;
 
-let side t var =
+let rep t var =
   let id = Mode.Var.id var in
-  let rep = Hashtbl.find t.rep id |> Option.value ~default:id in
-  if Hash_set.mem t.elided rep
-  then None
-  else (
-    let operand =
-      Hashtbl.find t.operand rep |> Option.value ~default:(Operand.Var rep)
-    in
-    Some (" @ " ^ Operand.to_string ~name:(name t) operand))
+  Hashtbl.find t.rep id |> Option.value ~default:id
 ;;
 
-let held t var =
-  let id = Mode.Var.id var in
-  name t (Hashtbl.find t.rep id |> Option.value ~default:id)
+let side t var =
+  let rep = rep t var in
+  match Hashtbl.find t.atoms rep with
+  | Some [] -> None
+  | Some atoms ->
+    Some
+      (" @ "
+       ^ String.concat
+           ~sep:" "
+           (List.map atoms ~f:(fun (axis, point) -> Axis.atom axis point)))
+  | None -> Some (" @ " ^ name t rep)
 ;;
+
+let held t var = name t (rep t var)
 
 let constraints t =
-  List.map t.constraints ~f:(fun (lo, hi) ->
-    Operand.to_string ~name:(name t) lo
-    ^ " <= "
-    ^ Operand.to_string ~name:(name t) hi)
+  let atoms points =
+    String.concat
+      ~sep:" "
+      (List.map points ~f:(fun (axis, point) -> Axis.atom axis point))
+  in
+  List.concat_map t.printed ~f:(function
+    | Lower (points, rep) -> [ atoms points ^ " <= " ^ name t rep ]
+    | Upper (rep, points) -> [ name t rep ^ " <= " ^ atoms points ]
+    | Relation (lo, hi, axes) ->
+      if List.length axes = List.length Axis.all
+      then [ name t lo ^ " <= " ^ name t hi ]
+      else
+        List.map axes ~f:(fun axis ->
+          sprintf
+            "%s(%s) <= %s(%s)"
+            (Axis.name axis)
+            (name t lo)
+            (Axis.name axis)
+            (name t hi)))
 ;;

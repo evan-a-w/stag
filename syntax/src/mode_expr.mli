@@ -10,6 +10,7 @@ module Axis : sig
   [@@deriving sexp_of, compare, equal]
 
   val to_string : t -> string
+  val of_string : string -> t option
 end
 
 module Atom : sig
@@ -39,13 +40,16 @@ type t = desc Located.t [@@deriving sexp_of, compare, equal]
 
 val to_string : t -> string
 
-(** [lower <= upper] of a [with] clause, at least one of them a variable. *)
+(** [lower <= upper] of a [with] clause, at least one of them a variable: on
+    every axis, or, with [axis], between two variables on that axis only, as
+    [stage('m) <= stage('n)]. *)
 module Constraint : sig
   type mode := t
 
   type t =
     { lower : mode
     ; upper : mode
+    ; axis : Axis.t option [@sexp.option]
     }
   [@@deriving sexp_of, compare, equal]
 

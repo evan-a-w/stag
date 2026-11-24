@@ -41,6 +41,10 @@ val is_identity : t -> bool
     for morphisms from an axis to itself. *)
 val is_inflationary : t -> bool
 
+(** Whether [right x <= x] for every [x], so that [y <= m(x)] implies
+    [y <= x]. Only for morphisms from an axis to itself. *)
+val is_deflationary : t -> bool
+
 (** [le a b]: [x <= a(y)] implies [x <= b(y)]. *)
 val le : t -> t -> bool
 
