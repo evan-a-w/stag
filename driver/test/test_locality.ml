@@ -704,5 +704,5 @@ let f (p @ local) = same
 let g (r : r) (p @ local) = Ptr.make (r.f p) [@nontail]
 |};
   [%expect
-    {| This is local, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:5:37-44), then it is passed to a function (at t.stag:5:28-44), but must be at most global, because a function type fixes it, then the function types are unified |}]
+    {| This is local, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:5:37-44), then it is passed to a function (at t.stag:5:28-44), but must be at most global, because Ptr.make holds it, then the function types are unified |}]
 ;;

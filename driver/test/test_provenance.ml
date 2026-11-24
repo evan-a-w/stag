@@ -47,7 +47,7 @@ let field u = match in_record () with (s, _) -> s
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and portable <= 'm1 and external <= 'm1
     val in_ptr : 'a -> ptr[string] @ nonportable external
     val in_record : 'a -> string * int @ 'm0 with portable <= 'm0 and external <= 'm0
-    val in_closure : 'a -> ('b -> string @ 'm1) @ 'm0 with portable <= 'm0 and portable <= 'm1 and external <= 'm0 and external <= 'm1
+    val in_closure : 'a -> ('b -> string @ 'm1) @ 'm0 with portable <= 'm1 and portable <= 'm0 and external <= 'm1 and external <= 'm0
     val read : ptr['a] -> 'a @ nonportable
     val read_ext : 'a -> string @ nonportable external
     val field : 'a -> string @ 'm0 with portable <= 'm0 and external <= 'm0
@@ -117,7 +117,7 @@ let in_closure u = let n = ext 1 in fun v -> n
     val ext : int -> int @ 'm0 with portable <= 'm0
     val p : ptr[int]
     val store : 'a -> unit @ 'm0 with portable <= 'm0
-    val in_closure : 'a -> ('b -> int @ 'm1) @ 'm0 with portable <= 'm0 and portable <= 'm1
+    val in_closure : 'a -> ('b -> int @ 'm1) @ 'm0 with portable <= 'm1 and portable <= 'm0
     |}]
 ;;
 
