@@ -127,29 +127,34 @@ signatures print as without modes. With modes shown
 
 ```
 val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3
-  with 'm0 <= 'm3 and 'm2 <= 'm5 and 'm4 <= 'm1 and portable <= 'm5
+  with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and 'm4 <= 'm1
+  and gc <= 'm3
 ```
 
 - variables equal by their constraints (a cycle) print as one;
-- a variable fixed to a constant prints as it (`int @ const -> int @ const`);
+- a variable fixed to a constant prints as it (`int @ portable -> int @ portable`);
 - constraints and bounds implied by the others are left out;
 - a generic variable named once and in no constraint is left out, which
   reads back as a fresh variable;
 - only the item's own variables are named: constraints through other
   variables (of other members of a recursive group, or a weak variable's
   current neighbours) are projected onto its own;
-- bounds every mode meets (`const <= 'm`, `'m <= nonportable`) are left out;
+- bounds every mode meets (`const <= 'm`, `'m <= nonportable`) are left out,
+  and so is `portable <= 'm` for a variable only on arrows' results, which
+  are never `const` (an annotation's are floored at `portable`);
 - a weak (not generalized) variable is named `'_m0`, as weak type variables,
   and shown with its current constraints;
 - relations through a crossing morphism are not printed.
 
-On provenance, only bounds print, where they restrict: `external <= 'm` (it
+On provenance, only bounds print, where they restrict: `gc <= 'm` (made at
+run time, as a closure or partial application), `external <= 'm` (it
 may reach external memory) and `'m <= gc` or `'m <= static` (an argument
-stored through a pointer, or bound `@ static`). A constant side shows its
+stored or stored through, or bound `@ static`). A constant side shows its
 provenance when it is not the default `gc`, and a variable side known to be
 `external` when it prints as a constant (`ptr[int] @ nonportable external`).
 A mutable global whose reads are `external` shows it
-(`val g : string @ external`).
+(`val g : string @ external`), parenthesizing an arrow or tuple type
+(`val g : (int -> int) @ external`).
 
 The `with` clause is also syntax for annotations (see syntax.md), so printed
 types read back as themselves. A constraint between variables constrains only
@@ -191,7 +196,9 @@ splice, while one bound outside the quote crosses none of them.
 - **Quote lock**: the variable must be `portable`, and the code is at least
   as nonportable as it. Otherwise it becomes a free variable of the quote.
   Whether it is `portable` is decided by its lower bound where it is used,
-  then required: a later rise is an error. A variable used in its own
+  then required: a later rise is an error. A (non-mutable) local of a type
+  that crosses stage (plain data, as `int`) is `portable` whatever its
+  stage, so is used directly. A variable used in its own
   definition (a local function in its body, a toplevel being checked) is not
   decided on, so is always a free variable of a quote there. A local function
   in its own body is nonportable to compute with, as is a local closure
@@ -340,7 +347,8 @@ Each step is a branch stacked on the previous one.
   blocks, pointers and closures, not through what is only evaluated; what is
   allocated at run time is `gc` unless `const`, literals and toplevel
   constants `static`; declared arrows default to `gc`; stores through
-  pointers take `gc` values, mutable variables infer their held provenance;
+  pointers take `gc` values (through `gc` pointers, until FFI pointers are
+  designed), mutable variables infer their held provenance;
   provenance annotations and bounds in `with`; the Go-style GC design.
 - **G. `External`**: C functions with a C compatible ABI (rejecting
   signatures it can't express), producing `external` values.

@@ -191,7 +191,9 @@ its stage.
 A function's parameter is at least `portable` in its body: `const` means the
 same value on every evaluation, and a parameter may differ between calls. So
 what a function builds from its parameters is never `const`, so never
-`static`.
+`static`. Likewise an application's result is at least `portable`, so an
+arrow's result is too: annotations floor it (`int -> int @ const` is
+rejected), and printing leaves that bound out.
 
 Provenance follows reachability, not evaluation:
 
@@ -213,6 +215,11 @@ Provenance follows reachability, not evaluation:
   held mode of its own, inferred from what is assigned to it: an `external`
   assignment makes it `external` (its reads then are), unless it is annotated
   `@ gc`, which rejects it. `@ external` opts in.
+- Until pointers into foreign memory are designed, a store of a value that
+  may be a GC pointer also needs the pointer stored through to be at most
+  `gc`: an `external` pointer may be to memory the GC doesn't scan, which
+  must never hold the only reference to a GC object. Stores of pointer-free
+  values (`ptr[int]`) cross this, as they hold no GC pointer.
 - A closure is `static` only if it is `const`: what it captures is then
   known at compile time, so it is emitted statically. A callback passed to C
   must be `@ static` (C may retain it), once the FFI has callbacks.
