@@ -42,6 +42,9 @@ end
 (** A mode on an arrow: of an argument, a result or a partial application. *)
 val arrow_mode : Ctx.t -> Mode.Var.t
 
+(** What the cell of a pointer of a type not yet known may hold. *)
+val fresh_held : Ctx.t -> Mode_arg.t
+
 (** Its value is at least [stage], e.g. as computing it runs code. *)
 val runs
   :  Ctx.t
@@ -239,13 +242,13 @@ val assign
   -> (Expected.t -> 'a)
   -> 'a
 
-(** [target := value], [value] being checked at the target's type, through a
-    pointer of the modality given. *)
+(** [target := value], [value] being checked at the target's type, into the cell
+    of a pointer whose cell may hold the provenance given. *)
 val store
   :  Ctx.t
   -> Expected.t
   -> loc:Loc.t
-  -> target:(Expected.t -> Typed.Expr.t * Type.Pointee.t)
+  -> target:(Expected.t -> Typed.Expr.t * Mode_arg.t)
   -> value:(Expected.t -> ty:Type.ty -> Typed.Expr.t)
   -> Typed.Expr.t * Typed.Expr.t
 
@@ -322,6 +325,10 @@ end
 (** The argument and result modes of [Unsafe.assume_global]. *)
 val assume_global : Ctx.t -> Mode.Var.t * Mode.Var.t
 
-(** The argument and result modes of [Ptr.make]: the pointer is allocated at run
-    time, and reaches what it holds. *)
-val ptr_make : Ctx.t -> Mode.Var.t * Mode.Var.t
+(** The argument and result modes of [Ptr.make], and what its cell may hold: the
+    pointer is allocated at run time, and its cell holds the argument. *)
+val ptr_make : Ctx.t -> Mode.Var.t * Mode.Var.t * Mode_arg.t
+
+(** Fixes what the cell of a pointer not generalized may hold, once nothing more
+    can constrain it: [gc] if it may, else what it must. *)
+val default_held : Mode.Var.t -> name:string -> unit

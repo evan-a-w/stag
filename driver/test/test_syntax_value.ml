@@ -32,7 +32,6 @@ let%expect_test "the prelude's signature" =
     val raise : exn -> 'a
     module Ptr : sig
       val make : 'a -> ptr['a]
-      val make_external : 'a -> ptr['a @@ external]
     end
     module Unsafe : sig
       val assume_global : 'a @ local -> 'a

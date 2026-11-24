@@ -45,10 +45,10 @@ let field u = match in_record () with (s, _) -> s
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
-    val in_ptr : 'a -> ptr[string] @ nonportable external
+    val in_ptr : 'a -> ptr[string @@ external] @ nonportable
     val in_record : 'a -> string * int @ 'm0 with external <= 'm0
     val in_closure : 'a -> ('b -> string @ 'm1) @ 'm0 with external <= 'm1 and external <= 'm0
-    val read : ptr['a] -> 'a @ nonportable
+    val read : ptr['a @@ 'm0] -> 'a @ 'm1 with 'm0 <= 'm1 and nonportable <= 'm1
     val read_ext : 'a -> string @ nonportable external
     val field : 'a -> string @ 'm0 with external <= 'm0
     |}]
@@ -79,7 +79,7 @@ let p = Ptr.make "a"
 let store u = p.* <- ext "b"
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:4:21-28), but must be at most gc, because it is stored through a [ptr[t]], which holds only gc values (a [ptr[t @@ external]] may hold external ones) (at t.stag:4:21-28) |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:4:21-28), then it is stored into a pointer's cell, which holds only values of the provenance after its [@@] ([ptr[t]]: gc) (at t.stag:4:21-28), but must be at most gc, because p is not generalized, so what its cells hold is fixed by its definition (gc by default) |}];
   provenance
     {|
 let p = Ptr.make "a"
@@ -101,7 +101,11 @@ let ext (x : string) = let y @ external = x in y
 let bad u = store_param (Ptr.make "a") (ext "b")
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:3:31-39), then y is used (at t.stag:3:47-48), then the function returns it (at t.stag:3:23-48), then the function types are unified, then the function returns it (at t.stag:4:39-48), then it is passed to a function (at t.stag:4:12-48), but must be at most gc, because it is stored through a [ptr[t]], which holds only gc values (a [ptr[t @@ external]] may hold external ones) (at t.stag:2:29-30), then s is used (at t.stag:2:29-30), then s is passed to the function (at t.stag:2:22-30), then the function types are unified |}]
+    {|
+    val store_param : ptr['a @@ 'm1] @ 'm0 -> ('a @ 'm3 -> unit) @ 'm2 with 'm0 <= 'm2 and 'm3 <= 'm1 and gc <= 'm2
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
+    val bad : 'a -> unit
+    |}]
 ;;
 
 let%expect_test "pointer-free values cross provenance" =
@@ -281,7 +285,7 @@ let p = Ptr.make (fun (v : int) -> "a")
 let store u = let s = ext "a" in p.* <- (fun v -> s)
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:4:22-29), then s is captured by a closure (at t.stag:4:50-51), then the closure is made (at t.stag:4:40-52), but must be at most gc, because it is stored through a [ptr[t]], which holds only gc values (a [ptr[t @@ external]] may hold external ones) (at t.stag:4:40-52) |}]
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:4:22-29), then s is captured by a closure (at t.stag:4:50-51), then the closure is made (at t.stag:4:40-52), then it is stored into a pointer's cell, which holds only values of the provenance after its [@@] ([ptr[t]]: gc) (at t.stag:4:40-52), but must be at most gc, because p is not generalized, so what its cells hold is fixed by its definition (gc by default) |}]
 ;;
 
 let%expect_test "toplevel constants are static" =
@@ -379,7 +383,7 @@ let copy u = p.* <- get ()
 let set u = g <- ext "b"
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:7:17-24), then it is assigned to g (at t.stag:7:12-24), but must be at most gc, because it is stored through a [ptr[t]], which holds only gc values (a [ptr[t @@ external]] may hold external ones) (at t.stag:6:20-26), then the function returns it (at t.stag:6:20-26), then the function types are unified, then the function returns it (at t.stag:4:12-13), then g is used (at t.stag:4:12-13) |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:7:17-24), then it is assigned to g (at t.stag:7:12-24), but must be at most gc, because p is not generalized, so what its cells hold is fixed by its definition (gc by default), then it is stored into a pointer's cell, which holds only values of the provenance after its [@@] ([ptr[t]]: gc) (at t.stag:6:20-26), then the function returns it (at t.stag:6:20-26), then the function types are unified, then the function returns it (at t.stag:4:12-13), then g is used (at t.stag:4:12-13) |}];
   provenance
     {|
 let ext (x : string) = let y @ external = x in y

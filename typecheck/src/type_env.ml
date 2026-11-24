@@ -227,6 +227,8 @@ module Annotation_vars = struct
     ; tys : Type.ty String.Table.t
     ; rows : Type.row String.Table.t
     ; modes : Mode.Var.t String.Table.t
+    ; cells : String.Hash_set.t
+    (** The mode variables of what pointers' cells hold. *)
     }
 
   let create fresh ~rank =
@@ -235,6 +237,7 @@ module Annotation_vars = struct
     ; tys = String.Table.create ()
     ; rows = String.Table.create ()
     ; modes = String.Table.create ()
+    ; cells = String.Hash_set.create ()
     }
   ;;
 
@@ -325,7 +328,8 @@ module Vars = struct
     | Params params ->
       (match Map.find params name with
        | Some (ATy ty) -> Ok ty
-       | Some (ARow _) -> error ~loc (Type_variable_kind_mismatch name)
+       | Some (ARow _ | AMode _) ->
+         error ~loc (Type_variable_kind_mismatch name)
        | None -> error ~loc (Unbound_type_variable name))
   ;;
 
@@ -342,7 +346,7 @@ module Vars = struct
     | Params params ->
       (match Map.find params name with
        | Some (ARow row) -> Ok row
-       | Some (ATy _) -> error ~loc (Type_variable_kind_mismatch name)
+       | Some (ATy _ | AMode _) -> error ~loc (Type_variable_kind_mismatch name)
        | None -> error ~loc (Unbound_type_variable name))
   ;;
 
@@ -373,8 +377,24 @@ module Vars = struct
       Ok (Arrow_modes.Side.Fixed (Mode_atoms.declared atoms ~default))
   ;;
 
-  (* [lower <= upper] between variables, on stage, or bounding a variable by the
-     atoms, on stage and provenance: as printed. *)
+  (* What the cell of a [ptr[t @@ mode]] may hold: a provenance. *)
+  let held t ({ txt; loc } : Syntax.Mode_expr.t)
+    : (Mode_arg.t, Typecheck_error.t) Result.t
+    =
+    match t, txt with
+    | Annotation vars, Var name ->
+      Hash_set.add vars.cells name;
+      Ok (Var (Annotation_vars.mode vars name))
+    | Params _, Var name -> error ~loc (Mode_variable_in_declaration name)
+    | _, Atoms [ Static ] -> Ok (Fixed Static)
+    | _, Atoms [ Gc ] -> Ok (Fixed Gc)
+    | _, Atoms [ External ] -> Ok (Fixed External)
+    | _, Atoms _ -> error ~loc Invalid_modality
+  ;;
+
+  (* [lower <= upper] between variables, on provenance if either is a cell's,
+     else on stage, or bounding a variable by the atoms, on stage and
+     provenance: as printed. *)
   let mode_constraint t ({ lower; upper } : Syntax.Mode_expr.Constraint.t) ~loc
     : (unit, Typecheck_error.t) Result.t
     =
@@ -406,12 +426,17 @@ module Vars = struct
     | Params _, Var name, _ | Params _, _, Var name ->
       error ~loc (Mode_variable_in_declaration name)
     | Annotation vars, Var lower, Var upper ->
+      let submode axis =
+        Mode.Var.submode_on
+          (Annotation_vars.mode vars lower)
+          (Annotation_vars.mode vars upper)
+          axis
+          reason
+      in
       checked
-        (Mode.Var.submode_on
-           (Annotation_vars.mode vars lower)
-           (Annotation_vars.mode vars upper)
-           Stage
-           reason)
+        (if Hash_set.mem vars.cells lower || Hash_set.mem vars.cells upper
+         then submode Provenance
+         else submode Stage)
     | Annotation vars, Var lower, Atoms atoms ->
       let var = Annotation_vars.mode vars lower in
       checked
@@ -449,7 +474,8 @@ module Expansion = struct
         match arg1, arg2 with
         | ATy ty1, ATy ty2 -> phys_equal ty1 ty2
         | ARow row1, ARow row2 -> phys_equal row1 row2
-        | ATy _, ARow _ | ARow _, ATy _ -> false)
+        | AMode mode1, AMode mode2 -> Mode_arg.same mode1 mode2
+        | (ATy _ | ARow _ | AMode _), _ -> false)
       t.args
       args
   ;;
@@ -665,18 +691,18 @@ and elaborate_con
     then Ok ()
     else error ~loc (Type_arity_mismatch { type_name = path; expected; got })
   in
+  let is_ptr = String.equal decl.name Type.ptr_name in
+  let held = ref Mode_arg.gc in
   let%bind.Result args =
     map_result (List.zip_exn decl.decl.params args) ~f:(fun (param, arg) ->
       match param.txt, arg with
-      | Ty _, Ty { txt = Modality (ty, mode); loc }
-        when String.equal decl.name (Type.Pointee.type_name Gc) ->
-        (match mode.txt with
-         | Atoms [ External ] ->
-           let%map.Result ty, syntax =
-             elaborate' t module_ vars ~splices ~expansions ty
-           in
-           Type.ATy ty, Type_expr.Ty { txt = Modality (syntax, mode); loc }
-         | Atoms _ | Var _ -> error ~loc:mode.loc Invalid_modality)
+      | Ty _, Ty { txt = Modality (ty, mode); loc } when is_ptr ->
+        let%bind.Result mode_arg = Vars.held vars mode in
+        held := mode_arg;
+        let%map.Result ty, syntax =
+          elaborate' t module_ vars ~splices ~expansions ty
+        in
+        Type.ATy ty, Type_expr.Ty { txt = Modality (syntax, mode); loc }
       | Ty _, Ty ty ->
         let%map.Result ty, syntax =
           elaborate' t module_ vars ~splices ~expansions ty
@@ -706,12 +732,9 @@ and elaborate_con
   let%map.Result ty =
     match (kind : Type_decl.Kind.t) with
     | Variant _ | Record _ | Abstract | Splice _ | Malformed _ ->
-      let name =
-        match args_syntax with
-        | [ Ty { txt = Modality _; _ } ] -> Type.Pointee.type_name External
-        | _ -> decl.name
-      in
-      Ok (Type.TCon (name, args))
+      Ok
+        (Type.TCon
+           (decl.name, if is_ptr then args @ [ Type.AMode !held ] else args))
     | Alias body ->
       let instances = Hashtbl.find_multi expansions decl.name in
       (match
@@ -1311,6 +1334,7 @@ let pointer_free t ty =
       (match Type.canonical_ty ty with
        | TVar _ | TArrow _ | TCode _ -> false
        | TCon (("int" | "bool" | "char" | "unit"), []) -> true
+       | TCon (name, _) when String.equal name Type.ptr_name -> false
        | TCon (name, args) -> nominal name (List.map args ~f:(arg params))
        | TTuple tys -> List.for_all tys ~f:(ty_ params)
        | TRecord { id; row } | TVariant { id; row } ->
@@ -1333,6 +1357,7 @@ let pointer_free t ty =
   and arg params : Type.arg -> bool = function
     | ATy entry -> ty_ params entry
     | ARow entry -> row_ params entry
+    | AMode _ -> true
   and nominal name args =
     match Hashtbl.find nominals (name, args) with
     | Some result -> result

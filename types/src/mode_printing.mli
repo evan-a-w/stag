@@ -15,9 +15,9 @@ type t
 
 val create : unit -> t
 
-(** Counts an occurrence, on an arrow's argument or result, while counting what
-    a rendering names. *)
-val count : t -> Mode.Var.t -> side:[ `Arg | `Res ] -> unit
+(** Counts an occurrence, on an arrow's argument or result or as what a
+    pointer's cell holds, while counting what a rendering names. *)
+val count : t -> Mode.Var.t -> side:[ `Arg | `Res | `Held ] -> unit
 
 (** After counting a rendering: groups the variables counted so far. *)
 val settle : t -> unit
@@ -25,6 +25,10 @@ val settle : t -> unit
 (** How to print a side of an arrow with the variable: [None] if elided, else
     the mode, as in [" @ 'm0"]. *)
 val side : t -> Mode.Var.t -> string option
+
+(** The name of a variable a pointer's cell holds, never elided: [ptr[t]] reads
+    back as [gc], not as a fresh variable. Its provenance is not fixed. *)
+val held : t -> Mode.Var.t -> string
 
 (** The constraints between the variables counted, as [["'m0 <= 'm1"]]. *)
 val constraints : t -> string list
