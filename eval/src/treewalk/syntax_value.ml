@@ -718,6 +718,7 @@ module Of_value = struct
            (match arg 0 (expr ~loc) with
             | { txt = App _; _ } as app -> Nontail app
             | _ -> unexpected ~expected:"an application under Nontail" value)
+         | "Annotated", 2 -> Annotated (arg 0 (expr ~loc), arg 1 (annot ~loc))
          | _ -> raise Bad_arguments))
 
   and toplevel value ~loc : Toplevel.t =

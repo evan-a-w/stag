@@ -637,6 +637,7 @@ type v = A of int @@ global * int | B of (int -> int) @@ global
 let f (x @ local) (y : int @ 'm) : int @ global portable = exclave_ stack_ (x, y)
 let g (h : int @ local -> int @ 'm -> (int -> int @ local) @ global) = h 1 [@nontail]
 let annotated = ((f : (int -> int) @ local), (f @ local portable gc))
+let annotated_exprs = ((f 1 : int @ local), (stack_ (Some 1) @ local), (((x : int)) : int))
 let x @ const = stack_ (Some (f x [@nontail]), `A (g y [@nontail]))
 let mut counter : int @ static = 0
 let compose : ('b @ 'n -> 'c) -> ('a -> 'b @ 'm) -> 'a -> 'c with 'm <= 'n and portable <= 'm = compose
@@ -1715,6 +1716,7 @@ let decls = .< struct
   let g (h : int @ local -> int @ 'm) = h 1 [@nontail]
   let annotated = (f : int @ local -> int -> int * int)
   let var = (g @ local)
+  let app = (g 1 : int @ local)
   let mut counter : int @ static = 0
   let h (x : int @ 'm with 'm <= portable) : int @ 'n with 'm <= 'n and 'n <= nonportable = x
 end >.
@@ -1750,6 +1752,9 @@ end >.
          (Arrow (Moded (Con int ()) (Atoms (Local)))
           (Arrow (Con int ()) (Tuple ((Con int ()) (Con int ())))))))))
      (Let var () () (Var g ((mode (Atoms (Local))))))
+     (Let app () ()
+      (Annotated (App (Var g ()) (Lit (Int 1)))
+       ((ty (Con int ())) (mode (Atoms (Local))))))
      (Let_mut counter ((ty (Con int ())) (mode (Atoms (Static)))) (Lit (Int 0)))
      (Let h
       ((x
@@ -1772,6 +1777,7 @@ end >.
     let g (h : int @ local -> int @ 'm) = h 1 [@nontail]
     let annotated = (f : int @ local -> int -> int * int)
     let var = (g @ local)
+    let app = (g 1 : int @ local)
     let mut counter : int @ static = 0
 
     let h

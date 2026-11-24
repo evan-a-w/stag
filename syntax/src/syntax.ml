@@ -244,6 +244,9 @@ module Defs = struct
     | Stack of expr (** [stack_ e] *)
     | Exclave of expr (** [exclave_ e] *)
     | Nontail of expr (** [f x [@nontail]], of an application. *)
+    | Annotated of expr * annot
+    (** [(e : t @ m)], of an expression not a variable, whose annotation is
+        [Var]'s. *)
     | Error (** In place of what did not parse. *)
 
   and bench_param =
@@ -465,6 +468,7 @@ module Expr = struct
     | Stack of t
     | Exclave of t
     | Nontail of t
+    | Annotated of t * Annot.t
     | Error
 
   let sexp_of_t = sexp_of_expr

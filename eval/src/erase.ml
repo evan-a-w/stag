@@ -242,9 +242,7 @@ let expr (expr : Typed.Expr.t) =
       (match e.txt with
        | Var (path, existing) when Syntax.Annot.is_none existing ->
          node (Var (path, annot))
-       | _ ->
-         Or_error.error_s
-           [%message "annotated non-variable" (e : Syntax.Expr.t)])
+       | _ -> node (Annotated (e, annot)))
     | App (f, x) ->
       let%bind f = go names f in
       let%bind x = go names x in

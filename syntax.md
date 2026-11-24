@@ -90,7 +90,7 @@ e1; e2                              (* Stag.Expr.Seq: runs as let _ = e1 in e2 *
 fun x (y : int) _ -> e              (* anonymous function, of let's params *)
 match e with | p -> e | ...         (* leading | optional; arms are e1; e2 level *)
 f x y                               (* application, left assoc *)
-(x : t)                             (* annotated variable: Expr.Var's annotation *)
+(x : t)   (e : t)   (e @ m)         (* annotations: Expr.Var's, else Expr.Annotated *)
 (a, b, c)   ()   (e)
 [a; b; c]   []                      (* the prelude's list, see List literals *)
 C   C e   C (a, b)   C ((a, b))     (* C (a, b): 2 args, or 1 tuple if C has 1 *)
@@ -404,8 +404,8 @@ allocates everything on its heap, so `stack_`, `exclave_` and `[@nontail]` evalu
 A binding's annotation is the variable's mode: `let x @ m = e` needs `e`'s
 mode to be at most `m`, and `x` is then `m` on the axes `m` names (and `e`'s
 mode on the others), as are parameters `(x @ m)` and `let mut x @ m`. An
-expression's annotation `(x @ m)` only checks: it bounds `x`'s mode, which it
-keeps. So `let n @ portable = 1` is a `portable` `n`, while
+expression's annotation `(e @ m)` (on any expression) only checks: it bounds
+`e`'s mode, which it keeps. So `let n @ portable = 1` is a `portable` `n`, while
 `let n = (one @ portable)` is as `const` as `one`.
 
 A mode, after `@`, is a mode variable (`'m`, standing for every axis), or one
@@ -423,7 +423,7 @@ keeps a side polymorphic: `(f : int @ 'm -> int @ 'n)`.
 let x @ const = 1                       (* a binder's mode *)
 let f (x @ local) (y : int @ 'm) : int @ global = ...
 let mut name : string @ gc = ""
-(e : t @ m)   (x @ local)               (* an annotated variable *)
+(e : t @ m)   (x @ local)               (* an annotated expression *)
 int @ local -> int @ local              (* a function type's argument/result *)
 'a @ 'm -> 'b @ 'n
 stack_ e                                (* allocate e's allocations in the current region *)
@@ -1021,7 +1021,7 @@ their names, but are renamed (eg. `x_1`) where one would capture a variable
 of the same name bound elsewhere, or a free one; a renamed binder providing
 an implicit splice `.~c` (in a nested quote) provides it explicitly,
 `.~c.{x = x_1}`. Type annotations (on parameters, a let's result, and
-`(x : t)`) are kept as written, the types they name as refs (printed as
+`(e : t)`) are kept as written, the types they name as refs (printed as
 root paths, eg. `(y : .int)`), so generated code has the types its quote
 did; types as values are given as by `Stag.Type.expr`.
 

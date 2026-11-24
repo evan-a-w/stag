@@ -831,8 +831,8 @@ let%expect_test "errors" =
     t.stag:1:21-21: expected a pattern, found end of file
     t.stag:1:10-12: expected `with` for the `match` at 1:0, found `->`
     t.stag:1:16-16: expected `->`, found end of file
-    t.stag:1:1-4: annotations are only supported on variables, as in `(x : t)` or `(x @ m)`
-    t.stag:1:1-2: annotations are only supported on variables, as in `(x : t)` or `(x @ m)`
+    (Annotated (App (Var f ()) (Var x ())) ((ty (Con int ()))))
+    (Annotated (Lit (Int 1)) ((ty (Con int ()))))
     t.stag:1:2-3: unmatched `)`
     t.stag:1:6-8: expected end of file, found `in`
     t.stag:1:8-10: expected a field name, found the label `y
