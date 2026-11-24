@@ -27,10 +27,13 @@ module Exception : sig
   [@@deriving sexp_of]
 end
 
+(** A prim only reads its arguments, and returns a new value, sharing nothing
+    with them: so it may take arguments of any mode, and its result is [gc] and
+    [global] (see [Mode_rules.prim]). Implementations copy where a library
+    function may return an argument itself. *)
 type t [@@deriving sexp_of, equal]
 
-(** The types of its arguments, in order. A prim only reads its arguments, and
-    returns a new value. *)
+(** The types of its arguments, in order. *)
 val args : t -> Type.ty list
 
 val result : t -> Type.ty

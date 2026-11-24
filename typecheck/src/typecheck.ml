@@ -595,8 +595,8 @@ module Resolution = struct
       when spliced
            && entry.level < scope.level
            && (is_mutable_local entry || not (usable entry)) ->
-      (* Spliced code's free variable, which this local can't provide: it
-         stays a free variable of the quote. *)
+      (* Spliced code's free variable, which this local can't provide: it stays
+         a free variable of the quote. *)
       Outside_quote { quote; usable = None; unusable = Some entry }
     | _, Some entry when is_mutable_local entry && entry.level <> scope.level ->
       Unusable
@@ -1501,8 +1501,8 @@ let resolution_type t (scope : Scope.t) ~at ~name ~loc : Resolution.t -> _
     use_entry scope ~at entry ~name ~loc ~by_symbol:true;
     Ok (Scope.instantiate t scope entry.scheme, Persistent entry.binder)
   | Outside_quote { quote; usable = None; unusable } ->
-    (* Only a local bound in another quote of this level: a toplevel is
-       referred to by symbol. *)
+    (* Only a local bound in another quote of this level: a toplevel is referred
+       to by symbol. *)
     Option.iter unusable ~f:(fun entry ->
       Hashtbl.set
         scope.program.unusable_in_quotes
