@@ -99,9 +99,9 @@ let weak_ext = Ptr.make (ext "a")
     );
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
-    val from_init : 'a -> ptr[string @@ 'm1] @ 'm0 with portable external <= 'm1 and nonportable gc <= 'm0
-    val from_store : 'a -> ptr[string @@ 'm1] @ 'm0 with portable external <= 'm1 and nonportable gc <= 'm0
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
+    val from_init : 'a -> ptr[string @@ 'm1] @ 'm0 with external <= 'm1 and nonportable gc <= 'm0
+    val from_store : 'a -> ptr[string @@ 'm1] @ 'm0 with external <= 'm1 and nonportable gc <= 'm0
     val from_read : 'a -> ptr[string @@ 'm1] @ 'm0 with 'm1 <= gc and nonportable gc <= 'm0
     val unconstrained : 'a -> ptr[string @@ 'm1] @ 'm0 with nonportable gc <= 'm0
     val weak : ptr[string]
@@ -140,7 +140,7 @@ let rename_any (p : ptr[r @@ 'm]) s = p.*.name <- s
     );
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     type r = { name : string; n : int }
     val cell : ptr[r @@ external]
     val rename : 'a -> unit
@@ -170,7 +170,7 @@ let f u = let p = ext (Ptr.make "a") in p.* <- Int.to_string 1
 |};
   [%expect
     {|
-    val ext : ptr[string] @ 'm0 -> ptr[string] @ 'm1 with 'm0 <= 'm1 and external <= 'm1
+    val ext : ptr[string] @ 'm0 -> ptr[string] @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     val f : 'a -> unit
     |}]
 ;;
@@ -195,7 +195,8 @@ let f (p : ptr[string @@ static]) : ptr[string @@ gc] = p
   provenance {|
 let f (p : ptr[string @@ 'm]) : ptr[string @@ gc] = p
 |};
-  [%expect {| val f : ptr[string] @ 'm0 -> ptr[string] @ 'm1 with 'm0 <= 'm1 |}]
+  [%expect
+    {| val f : ptr[string] @ 'm0 -> ptr[string] @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) |}]
 ;;
 
 let%expect_test "polymorphism over what a cell holds" =
@@ -217,8 +218,8 @@ let use u =
     );
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
-    val get : ptr['a @@ 'm0] -> 'a @ 'm1 with stage('m0) <= stage('m1) and provenance('m0) <= provenance('m1)
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
+    val get : ptr['a @@ 'm0] -> 'a @ 'm1 with 'm0 <= 'm1
     val set : ptr['a @@ 'm1] @ 'm0 -> ('a @ 'm3 -> unit) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and 'm3 <= global and gc <= 'm2
     val swap : ptr['a @@ 'm1] @ 'm0 -> (ptr['a @@ 'm1] -> unit) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and gc <= 'm2
     val ints : ptr[int]
@@ -278,8 +279,8 @@ let id_cell (p : ptr['a @@ 'm]) = p
     type alias['a] = ptr['a @@ external]
     type poly['a, 'b] = ptr['a]
     val via_alias : ptr[int @@ external]
-    val get : ptr['a @@ 'm0] -> 'a @ 'm1 with stage('m0) <= stage('m1) and provenance('m0) <= provenance('m1)
-    val id_cell : ptr['a @@ 'm1] @ 'm0 -> ptr['a @@ 'm1] @ 'm2 with 'm0 <= 'm2
+    val get : ptr['a @@ 'm0] -> 'a @ 'm1 with 'm0 <= 'm1
+    val id_cell : ptr['a @@ 'm1] @ 'm0 -> ptr['a @@ 'm1] @ 'm2 with 'm0 <= 'm2 and release(locality('m0)) <= locality('m2)
     |}]
 ;;
 
@@ -293,7 +294,7 @@ let f (p : ptr[string @@ local]) = p
 let f (p : ptr[string @@ portable]) = p
 |};
   [%expect
-    {| val f : ptr[string @@ portable] @ 'm0 -> ptr[string @@ portable] @ 'm1 with 'm0 <= 'm1 |}];
+    {| val f : ptr[string @@ portable] @ 'm0 -> ptr[string @@ portable] @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) |}];
   provenance {|
 let f (p : list[string @@ external]) = p
 |};

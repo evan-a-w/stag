@@ -1,63 +1,13 @@
 open! Import
 open Source_helpers
+open Mode_helpers
 
-let signature source =
-  let stamps = Stamp_counter.create () in
-  let interpreter = Interpreter.create Treewalk.interpreter ~stamps in
-  Interpreter.set_limits interpreter limits;
-  let typecheck = Typecheck.create ~stamps ~interpreter () in
-  let prelude = program ~prelude:true "" in
-  match Typecheck.typecheck typecheck ~program:(program source) with
-  | Ok checked ->
-    Ok
-      (Signature.to_string_hum
-         ~modes:true
-         (List.drop checked.signature (List.length prelude)))
-  | Error { errors; partial = _ } ->
-    Error (List.map errors ~f:Typecheck_error.message)
-;;
+let round_trip source = round_trip source ~show:`Signature
 
 let check source =
   match signature source with
   | Ok signature -> print_string signature
   | Error errors -> List.iter errors ~f:print_endline
-;;
-
-(* Annotates a copy of each value with its printed type, which must read back as
-   the same type. *)
-let round_trip source =
-  let printed = signature source |> Result.ok |> Option.value_exn in
-  let copies =
-    String.split_lines printed
-    |> List.filter_map ~f:(fun line ->
-      String.chop_prefix line ~prefix:"val "
-      |> Option.map ~f:(fun rest ->
-        let name, ty = String.lsplit2_exn rest ~on:':' in
-        let name = String.strip name in
-        sprintf "let %s_copy :%s = %s" name ty name))
-  in
-  print_string printed;
-  match signature (String.concat ~sep:"\n" (source :: copies)) with
-  | Error errors -> List.iter errors ~f:print_endline
-  | Ok signature' ->
-    let lines = String.split_lines signature' in
-    let find name =
-      List.find_map lines ~f:(fun line ->
-        String.chop_prefix line ~prefix:("val " ^ name ^ " :"))
-    in
-    List.iter copies ~f:(fun copy ->
-      let name = String.chop_prefix_exn copy ~prefix:"let " in
-      let name = String.prefix name (String.index_exn name ' ') in
-      let original = String.chop_suffix_exn name ~suffix:"_copy" in
-      if [%equal: string option] (find name) (find original)
-      then ()
-      else
-        print_s
-          [%message
-            "differs"
-              (name : string)
-              (find original : string option)
-              (find name : string option)])
 ;;
 
 let ext = {|
@@ -74,7 +24,7 @@ let g (r @ local) = Ptr.make r.g
   [%expect
     {|
     type r = { g : ptr[int] @@ global; l : ptr[int] }
-    val g : r @ 'm0 -> ptr[ptr[int] @@ 'm2] @ 'm1 with local <= 'm0 and stage('m0) <= stage('m2) and provenance('m0) <= provenance('m2) and portable <= 'm2 and nonportable gc <= 'm1
+    val g : r @ 'm0 -> ptr[ptr[int] @@ 'm2] @ 'm1 with local <= 'm0 and 'm0 <= 'm2 and portable <= 'm2 and nonportable gc <= 'm1
     |}];
   check
     {|
@@ -124,7 +74,7 @@ let owned u = let s @ gc = (make ()).owned in s
     );
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     type r = { owned : string @@ gc; borrowed : string }
     val make : 'a -> r @ external
     val owned : 'a -> string @ 'm0 with gc <= 'm0
@@ -157,9 +107,9 @@ let a (x @ local) = match x with A s -> let s2 @ gc = s in Ptr.make s2 | B _ -> 
     );
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     type t = A of string @@ portable gc global | B of string
-    val a : t @ local -> ptr[string @@ 'm1] @ 'm0 with portable gc <= 'm1 and nonportable gc <= 'm0
+    val a : t @ local -> ptr[string @@ 'm1] @ 'm0 with gc <= 'm1 and nonportable gc <= 'm0
     |}]
 ;;
 
@@ -194,8 +144,8 @@ let read (p : ptr[string] @ external) = let s @ gc = p.* in s
 |});
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
-    val read : ptr[string] @ 'm0 -> string @ 'm1 with portable external <= 'm0 and nonportable gc <= 'm1
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
+    val read : ptr[string] @ external -> string @ 'm0 with nonportable gc <= 'm0
     |}]
 ;;
 
@@ -210,7 +160,7 @@ let set_any u = p.*.any <- ext "c"
     );
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     type r = { owned : string @@ gc; any : string }
     val p : ptr[r @@ external]
     val set_any : 'a -> unit
@@ -256,7 +206,7 @@ let set u = p.*.* <- ext "b"
     );
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     val p : ptr[ptr[string @@ external]]
     val set : 'a -> unit
     |}]
@@ -298,7 +248,7 @@ let f (p : ptr[int @@ local]) = p
 let f (p : ptr[int @@ portable external]) = p
 |};
   [%expect
-    {| val f : ptr[int @@ portable external] @ 'm0 -> ptr[int @@ portable external] @ 'm1 with 'm0 <= 'm1 |}]
+    {| val f : ptr[int @@ portable external] @ 'm0 -> ptr[int @@ portable external] @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) |}]
 ;;
 
 let%expect_test "mode parameters" =
@@ -319,13 +269,13 @@ let static_tagged : tagged[static] = { tag = 1; payload = "a" }
     {|
     type cell['a, 'm0 : mode] = { v : ptr['a @@ 'm0] }
     type tagged['m0 : mode] = { tag : int; payload : string @@ 'm0 }
-    val get : cell['a, 'm0] -> 'a @ 'm1 with stage('m0) <= stage('m1) and provenance('m0) <= provenance('m1)
+    val get : cell['a, 'm0] -> 'a @ 'm1 with 'm0 <= 'm1
     val set : cell['a, 'm1] @ 'm0 -> ('a @ 'm3 -> unit) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and 'm3 <= global and gc <= 'm2
     val ext_cell : cell[string, external]
     val portable_cell : cell[string, portable]
     val gc_cell : cell[string, gc]
     val tag : tagged['m0] -> int
-    val payload : tagged['m1] @ 'm0 -> string @ 'm2 with locality('m0) <= locality('m2) and stage('m1) <= stage('m2) and provenance('m1) <= provenance('m2)
+    val payload : tagged['m1] @ 'm0 -> string @ 'm2 with release(locality('m0)) <= locality('m2) and 'm1 <= 'm2
     val static_tagged : tagged[static]
     |}]
 ;;
@@ -341,7 +291,7 @@ let ok u = c.v.* <- ext "b"
     );
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     type cell['a, 'm0 : mode] = { v : ptr['a @@ 'm0] }
     val c : cell[string, external]
     val ok : 'a -> unit
@@ -492,10 +442,10 @@ let infer (t : two['p]) = { t with b = 1 }
     );
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     type two['m0 : mode] = { a : string @@ 'm0; b : int }
-    val launder : two[external] @ 'm0 -> two[static] @ 'm1 with 'm0 <= 'm1
-    val infer : two['m1] @ 'm0 -> two['m1] @ 'm2 with 'm0 <= 'm2
+    val launder : two[external] @ 'm0 -> two[static] @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val infer : two['m1] @ 'm0 -> two['m1] @ 'm2 with 'm0 <= 'm2 and release(locality('m0)) <= locality('m2)
     |}]
 ;;
 
@@ -536,11 +486,11 @@ let constrained = .< fun (r : r) -> let s @ gc = r.any in s >.
     );
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     type cell['a, 'm0 : mode] = { v : ptr['a @@ 'm0] }
     type r = { owned : string @@ gc; any : string }
     val code : <cell[string, external] -> unit>{..'a}
-    val fields : <r @ 'm0 -> string @ 'm1>{..'a} with stage('m0) <= stage('m1) and locality('m0) <= locality('m1) and gc <= 'm1
-    val constrained : <r @ 'm0 -> string @ 'm1>{..'a} with 'm0 <= 'm1 and 'm0 <= gc and gc <= 'm1
+    val fields : <r @ 'm0 -> string @ 'm1>{..'a} with stage('m0) <= stage('m1) and release(locality('m0)) <= locality('m1) and gc <= 'm1
+    val constrained : <r @ 'm0 -> string @ 'm1>{..'a} with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= gc and gc <= 'm1
     |}]
 ;;

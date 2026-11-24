@@ -128,14 +128,33 @@ and annot_type t : Type_expr.t =
   then (
     let var () = loc (Mode_expr.Var (pick t [ "m"; "n" ])) in
     let constraint_ () : Mode_expr.Constraint.t =
-      match int t 3 with
-      | 0 -> { lower = var (); upper = mode_expr t; axis = None }
-      | 1 -> { lower = mode_expr t; upper = var (); axis = None }
+      let on axis : Mode_expr.Term.t = Axis (axis, var ()) in
+      match int t 6 with
+      | 0 -> { lower = Mode (var ()); upper = Mode (mode_expr t) }
+      | 1 -> { lower = Mode (mode_expr t); upper = Mode (var ()) }
+      | 2 -> { lower = Mode (var ()); upper = Mode (var ()) }
+      | 3 ->
+        let axis = pick t [ Mode_expr.Axis.Stage; Locality; Provenance ] in
+        { lower = on axis; upper = on axis }
+      | 4 ->
+        pick
+          t
+          [ { Mode_expr.Constraint.lower = Meet (on Provenance, Gc)
+            ; upper = on Provenance
+            }
+          ; { lower = Release (on Locality); upper = on Locality }
+          ; { lower = Meet (Release (on Locality), Regional)
+            ; upper = on Locality
+            }
+          ]
       | _ ->
-        { lower = var ()
-        ; upper = var ()
-        ; axis = pick t [ None; Some Mode_expr.Axis.Stage; Some Locality ]
-        }
+        pick
+          t
+          [ { Mode_expr.Constraint.lower = on Provenance
+            ; upper = Static_if_const (on Stage)
+            }
+          ; { lower = on Stage; upper = Const_if_static (on Provenance) }
+          ]
     in
     loc
       (Type_expr.Constrained

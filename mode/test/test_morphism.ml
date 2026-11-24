@@ -1,5 +1,5 @@
 open! Import
-module Morphism = Private.Morphism
+module Morphism = Stag_mode.Morphism
 
 let table axis m ~f =
   let (Axis.Any.T axis) = axis in
@@ -102,4 +102,44 @@ let%expect_test "locality maps" =
     ("ignore . borrow" ignore)
     ("borrow . ignore" ignore)
     |}]
+;;
+
+let%expect_test "what the solver composes, a with clause writes" =
+  let generators =
+    List.concat_map Axis.Any.all ~f:(fun axis ->
+      Morphism.identity axis
+      :: List.init (Axis.Any.size axis) ~f:(Morphism.meet_with axis))
+    @ Morphism.
+        [ const_is_static; runtime_is_gc; cross_portable; borrow; release ]
+  in
+  let closure = ref generators in
+  let mem m = List.exists !closure ~f:(fun m' -> Morphism.compare m m' = 0) in
+  let rec grow () =
+    let added =
+      List.concat_map !closure ~f:(fun m1 ->
+        List.filter_map !closure ~f:(fun m2 ->
+          if Axis.Any.equal (Morphism.src m1) (Morphism.dst m2)
+          then (
+            let m = Morphism.compose m1 m2 in
+            Option.some_if (not (mem m)) m)
+          else None))
+      |> List.dedup_and_sort ~compare:Morphism.compare
+    in
+    if not (List.is_empty added)
+    then (
+      closure := !closure @ added;
+      grow ())
+  in
+  grow ();
+  let written m =
+    List.find Written_morphism.all ~f:(fun w ->
+      Morphism.compare (Written_morphism.morphism w) m = 0)
+  in
+  List.iter !closure ~f:(fun m ->
+    match written m with
+    | Some _ -> ()
+    | None when Written_morphism.is_trivial m -> ()
+    | None -> print_s [%message "not written" (m : Morphism.t)]);
+  print_s [%message (List.length !closure : int)];
+  [%expect {| ("List.length (!closure)" 19) |}]
 ;;

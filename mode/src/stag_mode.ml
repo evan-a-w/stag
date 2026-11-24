@@ -9,8 +9,9 @@ module Error = Mode_error
 module Id_source = Id_source
 module Reason = Reason
 module Var = Var
+module Morphism = Morphism
+module Written_morphism = Written_morphism
 
 module Private = struct
-  module Morphism = Morphism
   module Undo = Undo
 end

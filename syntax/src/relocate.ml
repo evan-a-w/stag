@@ -104,14 +104,43 @@ and type_desc (g : Type_expr.desc) (w : Type_expr.desc) : Type_expr.desc option 
 
 and mode_expr m m' = located (same Mode_expr.equal_desc) m m'
 
+and mode_term (term : Mode_expr.Term.t) (term' : Mode_expr.Term.t) =
+  match term, term' with
+  | Mode m, Mode m' ->
+    let+ m = mode_expr m m' in
+    Mode_expr.Term.Mode m
+  | Axis (axis, m), Axis (axis', m') ->
+    let* axis = same Mode_expr.Axis.equal axis axis' in
+    let+ m = mode_expr m m' in
+    Mode_expr.Term.Axis (axis, m)
+  | Meet (t, atom), Meet (t', atom') ->
+    let* atom = same Mode_expr.Atom.equal atom atom' in
+    let+ t = mode_term t t' in
+    Mode_expr.Term.Meet (t, atom)
+  | Release t, Release t' ->
+    let+ t = mode_term t t' in
+    Mode_expr.Term.Release t
+  | Static_if_const t, Static_if_const t' ->
+    let+ t = mode_term t t' in
+    Mode_expr.Term.Static_if_const t
+  | Const_if_static t, Const_if_static t' ->
+    let+ t = mode_term t t' in
+    Mode_expr.Term.Const_if_static t
+  | ( ( Mode _
+      | Axis _
+      | Meet _
+      | Release _
+      | Static_if_const _
+      | Const_if_static _ )
+    , _ ) -> None
+
 and mode_constraint
-  ({ lower; upper; axis } : Mode_expr.Constraint.t)
-  ({ lower = lower'; upper = upper'; axis = axis' } : Mode_expr.Constraint.t)
+  ({ lower; upper } : Mode_expr.Constraint.t)
+  ({ lower = lower'; upper = upper' } : Mode_expr.Constraint.t)
   =
-  let* lower = mode_expr lower lower' in
-  let* upper = mode_expr upper upper' in
-  let+ axis = same [%equal: Mode_expr.Axis.t option] axis axis' in
-  { Mode_expr.Constraint.lower; upper; axis }
+  let* lower = mode_term lower lower' in
+  let+ upper = mode_term upper upper' in
+  { Mode_expr.Constraint.lower; upper }
 
 and annot ({ ty; mode } : Annot.t) ({ ty = ty'; mode = mode' } : Annot.t) =
   let* ty = option type_expr ty ty' in

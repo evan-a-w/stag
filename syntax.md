@@ -207,7 +207,7 @@ pointee, not with the pointer.
 `ptr[t @@ m]` says what stage and provenance (see [Modes](#modes)) the
 values in the pointer's cell may have, as atoms (`portable external`) or a
 mode variable, as in
-`get : ptr['a @@ 'm0] -> 'a @ 'm1 with provenance('m0) <= provenance('m1)`.
+`get : ptr['a @@ 'm0] -> 'a @ 'm1 with 'm0 <= 'm1`.
 `ptr[t]` is `ptr[t @@ nonportable gc]`; `ptr[t @@ m]` is sugar for `ptr[t, m]`,
 `ptr` being declared `ptr['a, 'p : mode]`. A cell's locality is always
 `global`, so a locality atom is an error. A store through it takes values
@@ -464,11 +464,29 @@ following constraints it always continues them. A constraint between two
 variables relates every axis; `stage('m) <= stage('n)` (or `locality(...)`,
 `provenance(...)`) relates only that one, naming the same axis on both sides.
 One between a variable and modes bounds the axes the modes name
-(`portable external <= 'm`). Printed types use the same syntax, so read back
-as themselves:
+(`portable external <= 'm`). A constraint on one axis may apply functions to
+its sides: `meet(t, c)` and `release(t)` on the left of `<=`,
+`static_if_const(t)` and `const_if_static(t)` on the right:
+
+```
+constraint := side <= side                     (every axis, or the atoms' axes)
+            | left <= right                    (one axis)
+side       := mode | 'm
+left       := axis('m) | meet(left, atom) | release(left)
+right      := axis('m) | static_if_const(right) | const_if_static(right)
+axis       := stage | locality | provenance
+```
+
+`release` takes a locality term, `static_if_const` a stage term (giving a
+provenance one) and `const_if_static` a provenance term (giving a stage one);
+`meet`'s atom is of its term's axis, and both sides end on the same axis.
+modes.md (Printed constraints) says what each means and where it arises.
+Printed types use the same syntax, and read back as exactly themselves:
 
 ```ocaml
 let stage_only : string @ 'm -> string @ 'n with stage('m) <= stage('n) = ...
+let field : r2 @ 'm -> string @ 'n
+    with meet(provenance('m), gc) <= provenance('n) = ...
 ```
 
 In reflected syntax, a binder's or variable's annotation is a

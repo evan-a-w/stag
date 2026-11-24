@@ -33,16 +33,24 @@ module Node : sig
   (** The id of the variable it belongs to. *)
   val var_id : t -> int
 
-  (** [`Le n] for [this <= n], [`Ge n] for [n <= this], on the same axis: of a
-      generic variable, the constraints its scheme keeps; of another, those it
-      has now. A relation through a morphism counts as the plain one it implies
-      (on locality, [a <= borrow(release(b))] implies [a <= b]); one through a
-      morphism implying none (crossing, or between axes) is left out, as no
-      annotation can write it. *)
-  val relations : t -> ([ `Le | `Ge ] * t) list
+  val axis : t -> Axis.Any.t
+
+  (** Bounds, as points of the axis by index. *)
+  val lower : t -> int
+
+  val upper : t -> int
+
+  (** The nodes that rise, with their least points (by index), if each node
+      given is raised to its point: what the constraints imply of them then.
+      [None] if one can't be. *)
+  val raised : (t * int) list -> (t * int) list option
 end
 
 val node : t -> _ Axis.t -> Node.t
+
+(** [relate a m b]: [a <= m(b)], of [a] on [Morphism.dst m] and [b] on
+    [Morphism.src m]. *)
+val relate : t -> Morphism.t -> t -> Reason.t -> (unit, Mode_error.t) Result.t
 
 (** [submode a b]: a value of mode [a] may be used at mode [b]. With [crossing],
     [a] is first lowered on the axes it crosses. On locality, [a <= locality(b)]
