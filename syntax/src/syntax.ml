@@ -246,6 +246,8 @@ module Defs = struct
     | Annotated of expr * annot
     (** [(e : t @ m)], of an expression not a variable, whose annotation is
         [Var]'s. *)
+    | Forget of Name.t list * expr
+    (** [forget x, y in e]: [e] without the bindings of [x] and [y]. *)
     | Error (** In place of what did not parse. *)
 
   and bench_param =
@@ -467,6 +469,7 @@ module Expr = struct
     | Exclave of t
     | Nontail of t
     | Annotated of t * Annot.t
+    | Forget of Name.t list * t
     | Error
 
   let sexp_of_t = sexp_of_expr

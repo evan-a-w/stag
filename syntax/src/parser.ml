@@ -996,6 +996,7 @@ let rec expr ?(seq = true) t : Expr.t =
   | Match -> match_ t ~seq
   | Fun -> fun_ t ~seq
   | Stack_ | Exclave_ -> region t ~seq
+  | Forget -> forget t ~seq
   | _ ->
     let first = assignment t ~seq in
     if seq && is t Semi
@@ -1146,6 +1147,7 @@ and tuple_item t ~seq : Expr.t =
   | Match -> match_ t ~seq
   | Fun -> fun_ t ~seq
   | Stack_ | Exclave_ -> region t ~seq
+  | Forget -> forget t ~seq
   | _ -> construct t
 
 (** [local_ e] or [exclave_ e]. *)
@@ -1159,6 +1161,23 @@ and region t ~seq : Expr.t =
     (match keyword with
      | Exclave_ -> Exclave body
      | _ -> Stack body)
+
+(** [forget x, y in e]. *)
+and forget t ~seq : Expr.t =
+  let start = loc t in
+  expect t Forget;
+  let rec names acc =
+    let acc = lident t ~what:"a name to forget" :: acc in
+    if is t Comma
+    then (
+      advance t;
+      names acc)
+    else List.rev acc
+  in
+  let names = names [] in
+  expect_for t In ~opener:Forget ~open_loc:start;
+  let body = expr t ~seq in
+  expr_at ~loc:(Loc.merge start body.loc) (Expr.Forget (names, body))
 
 (** A value in [{...}]. *)
 and entry_value t = assignment t ~seq:false

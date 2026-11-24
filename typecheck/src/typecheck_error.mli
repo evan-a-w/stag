@@ -40,6 +40,14 @@ module Kind : sig
         { name : string
         ; unusable : Unusable_in_quote.t
         }
+    | Not_embeddable of
+        { name : string
+        ; var_level : Env.Level.t
+        ; used_at : Env.Level.t
+        ; defining : bool
+        }
+    | Forgotten of string
+    | Duplicate_forget of string
     (** Spliced where [name] is unbound, code from a quote in which [name] is
         free, as the binding of [name] there was [unusable]. *)
     | Unbound_module of Syntax.Decl_path.t

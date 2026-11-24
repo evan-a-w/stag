@@ -298,6 +298,7 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
     | Annotated (expr, annot) ->
       recurse expr;
       Option.iter annot.ty ~f:type_expr
+    | Forget (_, expr) -> recurse expr
   in
   walk_toplevels ~module_path toplevels;
   Queue.to_list occurrences

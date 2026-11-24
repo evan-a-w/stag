@@ -63,11 +63,18 @@ module Entry : sig
   val crossed : t -> locks:Lock.t list -> Lock.t list
 end
 
+module Lookup : sig
+  type t =
+    | Bound of Entry.t
+    | Forgotten (** By [forget], so neither a local nor a toplevel. *)
+    | Unbound (** No local: maybe a toplevel. *)
+end
+
 (** Local bindings, each name mapping to its stack of shadowed entries. *)
 type t [@@deriving sexp_of]
 
 val create : unit -> t
-val find : t -> string -> Entry.t option
+val lookup : t -> string -> Lookup.t
 
 (** The entry of [name] binding [binder], even if shadowed. *)
 val find_binder : t -> Typed.Binder.t -> name:string -> Entry.t option
@@ -78,3 +85,6 @@ val visible : t -> (string * Entry.t) list
 (** Binds [bindings] (later ones shadowing earlier ones) for the duration of
     [f]. *)
 val with_bindings : t -> (string * Entry.t) list -> f:(unit -> 'a) @ local -> 'a
+
+(** Hides [names]' bindings, local and toplevel, for the duration of [f]. *)
+val forgetting : t -> string list -> f:(unit -> 'a) @ local -> 'a

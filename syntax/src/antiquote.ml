@@ -137,6 +137,7 @@ let map ?type_expr:replace_type_expr toplevels ~f =
       | Exclave e -> Exclave (sub e)
       | Nontail e -> Nontail (sub e)
       | Annotated (e, a) -> Annotated (sub e, annot a)
+      | Forget (names, e) -> Forget (names, sub e)
     in
     { e with txt }
   and toplevel depth (t : Toplevel.t) : Toplevel.t =

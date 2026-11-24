@@ -69,29 +69,64 @@ module Entry = struct
   ;;
 end
 
-type t = Entry.t list String.Table.t [@@deriving sexp_of]
+module Slot = struct
+  type t =
+    | Bound of Entry.t
+    | Forgotten
+  [@@deriving sexp_of]
+end
+
+module Lookup = struct
+  type t =
+    | Bound of Entry.t
+    | Forgotten
+    | Unbound
+end
+
+type t = Slot.t list String.Table.t [@@deriving sexp_of]
 
 let create () = String.Table.create ()
-let find t name = Hashtbl.find t name |> Option.bind ~f:List.hd
+
+let lookup t name : Lookup.t =
+  match Hashtbl.find t name |> Option.bind ~f:List.hd with
+  | Some (Slot.Bound entry) -> Bound entry
+  | Some Slot.Forgotten -> Forgotten
+  | None -> Unbound
+;;
 
 let find_binder t binder ~name =
   Hashtbl.find t name
   |> Option.bind
        ~f:
-         (List.find ~f:(fun (entry : Entry.t) ->
-            [%equal: Typed.Binder.t] entry.binder binder))
+         (List.find_map ~f:(function
+           | Slot.Bound entry
+             when [%equal: Typed.Binder.t] entry.Entry.binder binder ->
+             Some entry
+           | Bound _ | Forgotten -> None))
 ;;
 
 let visible t =
   Hashtbl.to_alist t
-  |> List.filter_map ~f:(fun (name, entries) ->
-    List.hd entries |> Option.map ~f:(fun entry -> name, entry))
+  |> List.filter_map ~f:(fun (name, slots) ->
+    match List.hd slots with
+    | Some (Slot.Bound entry) -> Some (name, entry)
+    | Some Slot.Forgotten | None -> None)
   |> List.sort ~compare:(Comparable.lift String.compare ~f:fst)
 ;;
 
-let with_bindings t bindings ~(local_ f) =
-  List.iter bindings ~f:(fun (name, entry) ->
-    Hashtbl.add_multi t ~key:name ~data:entry);
+let with_slots t slots ~(local_ f) =
+  List.iter slots ~f:(fun (name, slot) -> Hashtbl.add_multi t ~key:name ~data:slot);
   Exn.protect ~f ~finally:(fun () ->
-    List.iter bindings ~f:(fun (name, _) -> Hashtbl.remove_multi t name))
+    List.iter slots ~f:(fun (name, _) -> Hashtbl.remove_multi t name))
+;;
+
+let with_bindings t bindings ~(local_ f) =
+  with_slots
+    t
+    (List.map bindings ~f:(fun (name, entry) -> name, Slot.Bound entry))
+    ~f
+;;
+
+let forgetting t names ~(local_ f) =
+  with_slots t (List.map names ~f:(fun name -> name, Slot.Forgotten)) ~f
 ;;

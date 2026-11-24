@@ -17,6 +17,7 @@ type t =
   | Stack_ (** [stack_] *)
   | Exclave_ (** [exclave_] *)
   | Global_ (** [global_] *)
+  | Forget
   | Let_expect_test (** [let%expect_test] *)
   | Let_bench (** [let%bench] *)
   | In
@@ -75,6 +76,7 @@ let keyword = function
   | "stack_" -> Some Stack_
   | "exclave_" -> Some Exclave_
   | "global_" -> Some Global_
+  | "forget" -> Some Forget
   | "in" -> Some In
   | "match" -> Some Match
   | "with" -> Some With
@@ -106,6 +108,7 @@ let to_string = function
   | Stack_ -> "stack_"
   | Exclave_ -> "exclave_"
   | Global_ -> "global_"
+  | Forget -> "forget"
   | Let_expect_test -> "let%expect_test"
   | Let_bench -> "let%bench"
   | In -> "in"
@@ -189,6 +192,7 @@ let ends_code : t -> bool = function
   | Stack_
   | Exclave_
   | Global_
+  | Forget
   | At
   | At_at -> false
   | Int _

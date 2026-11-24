@@ -164,6 +164,7 @@ module Syntax_at = struct
     | Poly_variant (_, e) -> Option.iter e ~f:recurse
     | Stack e | Exclave e | Nontail e -> recurse e
     | Annotated (e, _) -> recurse e
+    | Forget (_, e) -> recurse e
   ;;
 end
 
