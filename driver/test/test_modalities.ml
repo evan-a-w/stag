@@ -44,8 +44,8 @@ let p u = let f @ portable = (make ()).p in f
   [%expect
     {|
     type r = { p : (string -> string) @@ portable; n : string -> string }
-    val make : 'a @ 'm0 -> r @ 'm1 with nonportable gc <= 'm1
-    val p : 'a @ 'm0 -> (string -> string) @ 'm1 with gc <= 'm1
+    val make : 'a -> r @ 'm0 with nonportable gc <= 'm0
+    val p : 'a -> (string @ nonportable gc global -> string @ nonportable gc global) @ 'm0 with gc <= 'm0
     |}];
   check
     {|
@@ -76,8 +76,8 @@ let owned u = let s @ gc = (make ()).owned in s
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     type r = { owned : string @@ gc; borrowed : string }
-    val make : 'a @ 'm0 -> r @ 'm1 with external <= 'm1
-    val owned : 'a @ 'm0 -> string @ 'm1 with gc <= 'm1
+    val make : 'a -> r @ external
+    val owned : 'a -> string @ 'm0 with gc <= 'm0
     |}];
   check
     (ext
@@ -109,7 +109,7 @@ let a (x @ local) = match x with A s -> let s2 @ gc = s in Ptr.make s2 | B _ -> 
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     type t = A of string @@ portable gc global | B of string
-    val a : t @ 'm0 -> ptr[string @@ 'm2] @ 'm1 with local <= 'm0 and gc <= 'm2 and nonportable gc <= 'm1
+    val a : t @ local -> ptr[string @@ 'm1] @ 'm0 with gc <= 'm1 and nonportable gc <= 'm0
     |}]
 ;;
 
@@ -126,7 +126,7 @@ let read u = let s @ static = r.s in s
     {|
     type r = { s : string @@ portable }
     val r : r
-    val read : 'a @ 'm0 -> string @ 'm1
+    val read : 'a -> string
     |}];
   (* Read through a pointer, it is what the cell's [@@] says, whatever the
      pointer's own mode: a cell's aliases may store anything that fits. *)
@@ -145,7 +145,7 @@ let read (p : ptr[string] @ external) = let s @ gc = p.* in s
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val read : ptr[string] @ 'm0 -> string @ 'm1 with external <= 'm0 and nonportable gc <= 'm1
+    val read : ptr[string] @ external -> string @ 'm0 with nonportable gc <= 'm0
     |}]
 ;;
 
@@ -163,7 +163,7 @@ let set_any u = p.*.any <- ext "c"
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     type r = { owned : string @@ gc; any : string }
     val p : ptr[r @@ external]
-    val set_any : 'a @ 'm0 -> unit @ 'm1
+    val set_any : 'a -> unit
     |}];
   check
     {|
@@ -193,7 +193,7 @@ let read_owned u = let s @ gc = p.*.owned in s
     {|
     type r = { owned : string @@ gc; any : string }
     val p : ptr[r @@ external]
-    val read_owned : 'a @ 'm0 -> string @ 'm1 with nonportable gc <= 'm1
+    val read_owned : 'a -> string @ 'm0 with nonportable gc <= 'm0
     |}];
   (* Only the last cell's [@@] says what is stored: the earlier ones hold the
      pointer to it. *)
@@ -208,7 +208,7 @@ let set u = p.*.* <- ext "b"
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     val p : ptr[ptr[string @@ external]]
-    val set : 'a @ 'm0 -> unit @ 'm1
+    val set : 'a -> unit
     |}]
 ;;
 
@@ -221,9 +221,9 @@ let store u = p.* <- (fun x -> String.append x x)
 |};
   [%expect
     {|
-    val p : ptr[(string -> string) @@ portable]
-    val read : 'a @ 'm0 -> (string -> string) @ 'm1 with gc <= 'm1
-    val store : 'a @ 'm0 -> unit @ 'm1
+    val p : ptr[(string @ '_m0 -> string @ '_m1) @@ portable] with '_m0 <= '_m1 and release(locality('_m0)) <= locality('_m1) and nonportable gc <= '_m1
+    val read : 'a -> (string @ '_m1 -> string @ '_m2) @ 'm0 with '_m1 <= '_m2 and release(locality('_m1)) <= locality('_m2) and nonportable gc <= '_m2 and gc <= 'm0
+    val store : 'a -> unit
     |}];
   check
     {|
@@ -269,12 +269,12 @@ let static_tagged : tagged[static] = { tag = 1; payload = "a" }
     {|
     type cell['a, 'm0 : mode] = { v : ptr['a @@ 'm0] }
     type tagged['m0 : mode] = { tag : int; payload : string @@ 'm0 }
-    val get : cell['a, 'm1] @ 'm0 -> 'a @ 'm2 with 'm1 <= 'm2
-    val set : cell['a, 'm1] @ 'm0 -> ('a @ 'm3 -> unit @ 'm4) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and 'm3 <= global and gc <= 'm2
+    val get : cell['a, 'm0] -> 'a @ 'm1 with 'm0 <= 'm1
+    val set : cell['a, 'm1] @ 'm0 -> ('a @ 'm3 -> unit) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and 'm3 <= global and gc <= 'm2
     val ext_cell : cell[string, external]
     val portable_cell : cell[string, portable]
     val gc_cell : cell[string, gc]
-    val tag : tagged['m1] @ 'm0 -> int @ 'm2
+    val tag : tagged['m0] -> int
     val payload : tagged['m1] @ 'm0 -> string @ 'm2 with release(locality('m0)) <= locality('m2) and 'm1 <= 'm2
     val static_tagged : tagged[static]
     |}]
@@ -294,7 +294,7 @@ let ok u = c.v.* <- ext "b"
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     type cell['a, 'm0 : mode] = { v : ptr['a @@ 'm0] }
     val c : cell[string, external]
-    val ok : 'a @ 'm0 -> unit @ 'm1
+    val ok : 'a -> unit
     |}];
   check
     (ext
@@ -459,7 +459,7 @@ let read u = let s @ portable = p.* in .< s >.
   [%expect
     {|
     val p : ptr[string @@ portable]
-    val read : 'a @ 'm0 -> <string>{..'b} @ 'm1 with gc <= 'm1
+    val read : 'a -> <string>{..'b} @ 'm0 with gc <= 'm0
     |}];
   (* A cell may change between evaluations, so what is read from it is never
      [const], even from a [const] cell. *)
@@ -489,7 +489,7 @@ let constrained = .< fun (r : r) -> let s @ gc = r.any in s >.
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     type cell['a, 'm0 : mode] = { v : ptr['a @@ 'm0] }
     type r = { owned : string @@ gc; any : string }
-    val code : <cell[string, external] @ 'm0 -> unit @ 'm1>{..'a}
+    val code : <cell[string, external] -> unit>{..'a}
     val fields : <r @ 'm0 -> string @ 'm1>{..'a} with stage('m0) <= stage('m1) and release(locality('m0)) <= locality('m1) and gc <= 'm1
     val constrained : <r @ 'm0 -> string @ 'm1>{..'a} with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= gc and gc <= 'm1
     |}]
@@ -514,7 +514,7 @@ let f x b = let c = match 0 with | 0 -> b | _ -> {v = x} in b.v
 type box['p : mode] = { v : string @@ 'p }
 let f x b = let c = match 0 with | 0 -> b | _ -> {v = x} in b.v
 let gb : box[gc] = { v = "a" }
-let f_copy : string @ 'm0 -> (box['m3] @ 'm2 -> string @ 'm4) @ 'm1 = f
+let f_copy : string @ 'm0 -> box['m3] @ 'm2 -> string @ 'm4 = f
 let use (x @ local) = let r @ global = f x gb in r
 |};
   [%expect
@@ -537,7 +537,7 @@ let get_f (r : r) = r.f
   [%expect
     {|
     type r = { f : string -> string }
-    val get_f : r @ 'm0 -> (string -> string) @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val get_f : r @ 'm0 -> (string @ nonportable gc global -> string @ nonportable gc global) @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     |}];
   check
     {|
@@ -557,8 +557,8 @@ let s : 'a @ 'm -> 'a @ 'n with release(locality('m)) <= locality('m) = fun x ->
 |};
   [%expect
     {|
-    val diverge : unit @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm1 <= global
-    val s : 'a @ 'm0 -> 'a @ 'm1 with release(locality('m0)) <= locality('m0)
+    val diverge : unit @ 'm0 -> 'a @ global with portable <= 'm0
+    val s : 'a @ 'm0 -> 'a with release(locality('m0)) <= locality('m0)
     |}]
 ;;
 
@@ -574,7 +574,7 @@ let s : ptr['a @@ 'm1] -> 'a with 'm1 <= const = fun x -> diverge ()
 |};
   [%expect
     {|
-    val diverge : unit @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm1 <= global
+    val diverge : unit @ 'm0 -> 'a @ global with portable <= 'm0
     val s : ptr['a @@ const static] -> 'a
     |}];
   (* Also an arrow's side, its locality is free: one name in both places. *)
@@ -585,7 +585,7 @@ let s : 'a @ 'm1 -> ptr['a @@ 'm1] -> 'a with 'm1 <= const = fun x -> diverge ()
 |};
   [%expect
     {|
-    val diverge : unit @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm1 <= global
+    val diverge : unit @ 'm0 -> 'a @ global with portable <= 'm0
     val s : 'a @ 'm0 -> ptr['a @@ 'm0] -> 'a with 'm0 <= const
     |}]
 ;;

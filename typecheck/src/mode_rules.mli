@@ -332,6 +332,11 @@ val assume_global : Ctx.t -> Mode.Var.t * Mode.Var.t
     pointer is allocated at run time, and its cell holds the argument. *)
 val ptr_make : Ctx.t -> Mode.Var.t * Mode.Var.t * Mode_arg.t
 
+(** The modes of the arrows of a prim taking arguments [args], outermost first.
+    A prim only reads its arguments, so takes any, and returns a new value; a
+    partial application holds the arguments so far. *)
+val prim : Ctx.t -> args:Type.ty list -> Arrow_modes.t list
+
 (** Fixes what the cell of a pointer not generalized may hold, once nothing more
     can constrain it: [nonportable gc] on each axis it may, else what it must. *)
 val default_held : Mode.Var.t -> name:string -> unit

@@ -483,6 +483,9 @@ let embed (x @ portable) = .< x >.
 (* `@ local`: the parameter is borrowed, so callers may pass local values. *)
 let first (p : (int * int) @ local) = match p with (a, _) -> a
 
+(* Prims only read their arguments, so take local (and external) ones. *)
+let len (s : string @ local) = String.length s
+
 (* A mode variable makes the result exactly as the argument (printed without
    modes, this is just string -> string). *)
 let same (x : string @ 'm) : string @ 'm = x

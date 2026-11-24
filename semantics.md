@@ -196,10 +196,12 @@ Provenance follows reachability, not evaluation:
   their provenance. A field with a modality still counts: it is reachable.
 - What is only evaluated (a `let`'s bound expression, a sequence's first
   part, a scrutinee) doesn't count towards the result's provenance.
-- Literals and toplevel constants are `static`; prims, declared functions and
+- Literals and toplevel constants are `static`; declared functions and
   `external`s take and return `gc` values unless their types say otherwise
   (`string @ external -> ...`), and an `external`'s result is trusted as
-  declared.
+  declared. Prims only read their arguments, so take any (`local`,
+  `external`), and return new `gc` values; a partial application of one holds
+  the arguments so far, so is as local as they are.
 - A heap block holding an `external` value is itself `external`. Stores must
   not raise a cell's provenance, as the cell's other aliases rely on it, and
   a pointer's mode may have been raised by subsumption: what a cell may be

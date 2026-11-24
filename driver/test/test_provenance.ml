@@ -240,14 +240,17 @@ let call u = r.f "a"
     |}]
 ;;
 
-let%expect_test "prims take and return gc values" =
+let%expect_test "prims read any values and return gc values" =
   provenance
     {|
 let ext (x : string) = let y @ external = x in y
 let length u = String.length (ext "a")
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:3:29-38), then it is passed to a function (at t.stag:3:15-38), but must be at most gc, because a function type fixes it, as the function types are unified |}];
+    {|
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
+    val length : 'a -> int
+    |}];
   provenance {|
 let built u = String.append "a" "b"
 |};

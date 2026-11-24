@@ -29,8 +29,11 @@ end
 
 type t [@@deriving sexp_of, equal]
 
-(** Monomorphic, so needs no instantiation. *)
-val ty : t -> Type.ty
+(** The types of its arguments, in order. A prim only reads its arguments, and
+    returns a new value. *)
+val args : t -> Type.ty list
+
+val result : t -> Type.ty
 
 (** The number of arguments, at least one. *)
 val arity : t -> int
