@@ -334,3 +334,35 @@ let g @ static = fun (x : int) -> f x
     val g : int -> int @ 'm0 with portable <= 'm0
     |}]
 ;;
+
+let%expect_test "a partial application is allocated at run time" =
+  provenance
+    {|
+let k (a : int) (b : int) = a
+let g3 (n : int) = let h @ static = k n in h
+|};
+  [%expect
+    {| This is gc, because a partial application is made at run time (at t.stag:2:28-29), then the partial application is made at run time, unless it is [const] (at t.stag:2:28-29), then the function types are unified, then the function returns it (at t.stag:3:36-39), then it is bound by an annotated let (at t.stag:3:27-33), but must be at most static, because it is annotated static (at t.stag:3:27-33) |}];
+  provenance
+    {|
+let f (a : string) (b : int) = a
+let g u = let h @ static = f "x" in h
+|};
+  [%expect
+    {| This is gc, because a partial application is made at run time (at t.stag:2:31-32), then the partial application is made at run time, unless it is [const] (at t.stag:2:31-32), then the function types are unified, then the function returns it (at t.stag:3:27-32), then it is bound by an annotated let (at t.stag:3:18-24), but must be at most static, because it is annotated static (at t.stag:3:18-24) |}];
+  provenance {|
+let mk x = fun v -> x
+let g u = let h @ static = mk "a" in h
+|};
+  [%expect
+    {| This is gc, because a partial application is made at run time (at t.stag:2:11-21), then the partial application is made at run time, unless it is [const] (at t.stag:2:11-21), then the function types are unified, then the function returns it (at t.stag:3:27-33), then it is bound by an annotated let (at t.stag:3:18-24), but must be at most static, because it is annotated static (at t.stag:3:18-24) |}];
+  provenance {|
+let k (a : int) (b : int) = a
+let g = k 1
+|};
+  [%expect
+    {|
+    val k : int @ 'm0 -> (int -> int) @ 'm1 with 'm0 <= 'm1 and portable <= 'm1
+    val g : int @ '_m0 -> int @ '_m1
+    |}]
+;;

@@ -74,8 +74,8 @@ let code2 = .<m>.
   [%expect
     {|
     val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1
-    val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and 'm2 <= 'm5 and 'm4 <= 'm1 and portable <= 'm5
-    val const_ : 'a @ 'm0 -> ('b -> 'a @ 'm2) @ 'm1 with 'm0 <= 'm2 and 'm0 <= 'm1
+    val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and 'm2 <= 'm5 and 'm4 <= 'm1 and portable <= 'm5 and portable <= 'm3
+    val const_ : 'a @ 'm0 -> ('b -> 'a @ 'm2) @ 'm1 with 'm0 <= 'm2 and 'm0 <= 'm1 and portable <= 'm1
     val n : int
     val code : <int>{..'a}
     val m : string
@@ -152,7 +152,7 @@ let both (x @ portable) = x
   [%expect
     {|
     val h : int @ 'm0 -> int @ 'm0
-    val chain : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> (('c @ 'm5 -> 'a @ 'm6) @ 'm4 -> ('c @ 'm8 -> 'b @ 'm9) @ 'm7) @ 'm3 with 'm0 <= 'm7 and 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm9 and 'm4 <= 'm7 and 'm6 <= 'm1 and 'm8 <= 'm5 and portable <= 'm9
+    val chain : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> (('c @ 'm5 -> 'a @ 'm6) @ 'm4 -> ('c @ 'm8 -> 'b @ 'm9) @ 'm7) @ 'm3 with 'm0 <= 'm7 and 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm9 and 'm4 <= 'm7 and 'm6 <= 'm1 and 'm8 <= 'm5 and portable <= 'm9 and portable <= 'm7 and portable <= 'm3
     val fixed : int @ portable -> int @ portable
     val both : 'a @ portable -> 'a @ 'm0 with portable <= 'm0
     |}]
@@ -173,9 +173,9 @@ let fixed (x @ portable) : int @ portable = x
   [%expect
     {|
     let ident_copy : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 = ident
-    let apply_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and 'm2 <= 'm5 and 'm4 <= 'm1 and portable <= 'm5 = apply
-    let const__copy : 'a @ 'm0 -> ('b -> 'a @ 'm2) @ 'm1 with 'm0 <= 'm2 and 'm0 <= 'm1 = const_
-    let chain_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> (('c @ 'm5 -> 'a @ 'm6) @ 'm4 -> ('c @ 'm8 -> 'b @ 'm9) @ 'm7) @ 'm3 with 'm0 <= 'm7 and 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm9 and 'm4 <= 'm7 and 'm6 <= 'm1 and 'm8 <= 'm5 and portable <= 'm9 = chain
+    let apply_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and 'm2 <= 'm5 and 'm4 <= 'm1 and portable <= 'm5 and portable <= 'm3 = apply
+    let const__copy : 'a @ 'm0 -> ('b -> 'a @ 'm2) @ 'm1 with 'm0 <= 'm2 and 'm0 <= 'm1 and portable <= 'm1 = const_
+    let chain_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> (('c @ 'm5 -> 'a @ 'm6) @ 'm4 -> ('c @ 'm8 -> 'b @ 'm9) @ 'm7) @ 'm3 with 'm0 <= 'm7 and 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm9 and 'm4 <= 'm7 and 'm6 <= 'm1 and 'm8 <= 'm5 and portable <= 'm9 and portable <= 'm7 and portable <= 'm3 = chain
     let f_copy : 'a @ portable -> <'a>{..'b} @ 'm0 with portable <= 'm0 = f
     let g_copy : 'a @ 'm0 -> <'b>{h : 'b; ..'c} @ 'm1 with 'm0 <= 'm1 = g
     let h_copy : int @ 'm0 -> int @ 'm0 = h
@@ -225,7 +225,7 @@ let prov = .< let mut cell = "a" in let f (u : string) = cell in .~both >.
     {|
     val f : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1
     val user : <<'a>{r : 'a; ..'b}>{..'c}
-    val pair : <'a>{..'b} @ 'm0 -> (<'c>{..'d} @ 'm2 -> <'a * 'c>{..'e} @ 'm3) @ 'm1 where ..'b <= {..'e}, ..'d <= {..'e} with 'm0 <= 'm3 and 'm0 <= 'm1 and 'm2 <= 'm3
+    val pair : <'a>{..'b} @ 'm0 -> (<'c>{..'d} @ 'm2 -> <'a * 'c>{..'e} @ 'm3) @ 'm1 where ..'b <= {..'e}, ..'d <= {..'e} with 'm0 <= 'm3 and 'm0 <= 'm1 and 'm2 <= 'm3 and portable <= 'm1
     val both : <<'_a>{r : '_a; ..'_b} * string>{cell?'_c : string; f?'_d : immut string @ '_m0 -> string @ nonportable; ..'_e} where ..'_e <= {..'_f}
     val prov : <<'_a>{r : '_a; ..'_b} * string>{..'_c}
     |}]

@@ -325,12 +325,15 @@ module Alloc = struct
     Option.iter expected.stack ~f:(fun allocates -> allocates := true)
   ;;
 
+  let allocates mode ~loc ~why =
+    Mode.Var.allocated
+      mode
+      (reason ~loc (sprintf "%s at run time, unless it is [const]" why))
+  ;;
+
   let allocated ctx ~loc ~why =
     let mode = Ctx.fresh ctx in
-    Mode.Error.ok_exn
-      (Mode.Var.allocated
-         mode
-         (reason ~loc (sprintf "%s at run time, unless it is [const]" why)));
+    Mode.Error.ok_exn (allocates mode ~loc ~why);
     mode
   ;;
 
@@ -385,6 +388,18 @@ module Function = struct
   let partial_applications ctx ~closure ~arg_modes ~partial_modes ~loc =
     let reason = reason ~loc "a partial application holds it" in
     List.iteri partial_modes ~f:(fun index partial ->
+      Ctx.add
+        ctx
+        ~loc
+        (Alloc.allocates partial ~loc ~why:"the partial application is made"
+         |> Result.bind ~f:(fun () ->
+           Mode.Var.at_least
+             partial
+             Stage
+             Portable
+             (Mode.Reason.create
+                ~loc
+                "a partial application is made at run time")));
       Ctx.add ctx ~loc (Mode.Var.submode closure partial reason);
       List.iteri arg_modes ~f:(fun index' arg ->
         if index' <= index
