@@ -1132,7 +1132,19 @@ module Printer = struct
           | Some side, _ -> side))
   ;;
 
-  let rec ty_to_string t ~prec ty =
+  let side_locality : Arrow_modes.Side.t -> Mode.Locality.t = function
+    | Fixed const -> const.locality
+    | Var var -> (Mode.Var.lower var).locality
+  ;;
+
+  (* A declared curried arrow's result defaults to as local as the arguments
+     before it, so a less local result says so. *)
+  let curried_global ~curried (side : Arrow_modes.Side.t) =
+    (not (Mode.Locality.equal curried Global))
+    && Mode.Locality.equal (side_locality side) Global
+  ;;
+
+  let rec ty_to_string ?curried t ~prec ty =
     let canonical = canonical_ty ty in
     match canonical, t.recursive with
     | ty, Some (body, name) when phys_equal ty body -> name
@@ -1149,10 +1161,10 @@ module Printer = struct
            t
            id
            ~name:(fun () -> cycle_name t id canonical)
-           ~render:(fun () -> structure t ~prec canonical)
-       | _ -> structure t ~prec canonical)
+           ~render:(fun () -> structure ?curried t ~prec canonical)
+       | _ -> structure ?curried t ~prec canonical)
 
-  and structure t ~prec ty =
+  and structure ?(curried = Mode.Locality.Global) t ~prec ty =
     let parens_if cond s = if cond then "(" ^ s ^ ")" else s in
     match canonical_ty ty with
     | TCon (name, []) -> t.type_name name
@@ -1166,11 +1178,27 @@ module Printer = struct
          |> String.concat ~sep:", ")
     | TArrow (ty1, ty2, modes) ->
       let ty1 = ty_to_string t ~prec:1 ty1 ^ mode_side t modes.arg in
-      let ty2 =
-        ty_to_string t ~prec:(if is_default_side t modes.res then 0 else 1) ty2
-        ^ mode_side t modes.res
+      let curried =
+        match canonical_ty ty2 with
+        | TArrow _ -> Mode.Locality.join curried (side_locality modes.arg)
+        | _ -> Global
       in
-      parens_if (prec > 0) (sprintf "%s -> %s" ty1 ty2)
+      let global = curried_global ~curried modes.res in
+      let ty2 =
+        ty_to_string
+          t
+          ~curried
+          ~prec:(if is_default_side t modes.res && not global then 0 else 1)
+          ty2
+      in
+      let res =
+        match mode_side t modes.res, global with
+        | side, false -> side
+        | "", true -> " @ global"
+        | side, true when String.is_prefix side ~prefix:" @ '" -> side
+        | side, true -> side ^ " global"
+      in
+      parens_if (prec > 0) (sprintf "%s -> %s%s" ty1 ty2 res)
     | TTuple [] -> "()"
     | TTuple tys ->
       parens_if

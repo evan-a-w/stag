@@ -242,6 +242,7 @@ let mode_message
       if Loc.is_none loc
       then what
       else sprintf "%s (at %s)" what (Loc.to_string loc))
+    |> List.remove_consecutive_duplicates ~equal:String.equal
     |> String.concat ~sep:", then "
   in
   sprintf

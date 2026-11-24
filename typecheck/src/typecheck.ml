@@ -572,24 +572,51 @@ let report_duplicates scope (names : Syntax.Name.t list) ~error:kind =
 ;;
 
 module Function_type = struct
+  module Level = struct
+    type t =
+      { args : (Typed.Ident.t * Type.ty) list
+      ; annots : (Typed.Ident.t * Syntax.Annot.t) list
+      ; ty : Type.ty
+      ; loc : Loc.t
+      }
+  end
+
   type t =
-    { args : (Typed.Ident.t * Type.ty) list
+    { args : (Typed.Ident.t * Type.ty) list (** The outermost [fun]'s. *)
     ; annots : (Typed.Ident.t * Syntax.Annot.t) list
+    ; inner : Level.t list
+    (** The [fun]s directly nested in its body, outermost first: one function
+        with theirs, as [fun a b -> e] is. *)
+    ; body : Source.Expr.t (** The innermost [fun]'s. *)
     ; result_annot : Syntax.Type_expr.t option
     ; res_ty : Type.ty
     ; ty : Type.ty
-    ; arg_modes : Mode.Var.t list
+    ; arg_modes : Mode.Var.t list (** Of every level's arguments. *)
     ; res_mode : Mode.Var.t (** The mode of the body's value. *)
     ; partial_modes : Mode.Var.t list
     (** Those of the closures of partial applications, of all but the last
         argument. *)
     }
+
+  let params t = t.args @ List.concat_map t.inner ~f:(fun level -> level.args)
 end
+
+(* [fun]s directly nested in [body], each with its arguments and location, and
+   the innermost body. *)
+let rec nested_funs (body : Source.Expr.t) =
+  match Source.Expr.view body with
+  | Fun { args; body = inner } ->
+    let levels, innermost = nested_funs inner in
+    (args, Source.Expr.loc body) :: levels, innermost
+  | _ -> [], body
+;;
 
 (* An annotation that fails to elaborate is reported, and ignored. Mode
    annotations on the arguments, and with [res_mode] on the result, bound their
-   modes. *)
+   modes. Unless [merge] is false, [fun]s directly nested in an unannotated body
+   are arguments of the same function. *)
 let function_type
+  ?(merge = true)
   t
   (scope : Scope.t)
   ~(args : (Source.Binder.t * Syntax.Annot.t) list)
@@ -598,13 +625,22 @@ let function_type
   ~(body : Source.Expr.t)
   ~loc
   =
-  report_duplicates
-    scope
-    (List.filter_map args ~f:(fun ((binder : Source.Binder.t), _) ->
-       match binder with
-       | Name name when not (String.equal name.txt "_") -> Some name
-       | Name _ | Ident _ -> None))
-    ~error:(fun name -> Duplicate_parameter name);
+  let levels, body =
+    match annot, res_mode with
+    | None, None when merge && not (List.is_empty args) -> nested_funs body
+    | _ -> [], body
+  in
+  List.iter (args :: List.map levels ~f:fst) ~f:(fun args ->
+    report_duplicates
+      scope
+      (List.filter_map args ~f:(fun ((binder : Source.Binder.t), _) ->
+         match binder with
+         | Name name when not (String.equal name.txt "_") -> Some name
+         | Name _ | Ident _ -> None))
+      ~error:(fun name -> Duplicate_parameter name));
+  let arity = List.length args in
+  let level_arities = List.map levels ~f:(fun (args, _) -> List.length args) in
+  let args = args @ List.concat_map levels ~f:fst in
   let annot_type = function
     | None -> Scope.fresh_ty t scope, None
     | Some annot ->
@@ -631,42 +667,56 @@ let function_type
     |> Option.value ~default:[]
     |> List.map ~f:(fun _ -> Scope.arrow_mode scope)
   in
-  let ty =
+  (* The type after each number of arguments, the full type first. *)
+  let tys =
     let results =
       if List.is_empty args
       then []
       else
         List.map partial_modes ~f:(fun partial ->
           partial, Scope.arrow_mode scope)
-        @ [ ( res_mode
-            , match Source.Expr.view body with
-              | Fun _ -> Scope.arrow_mode scope
-              | _ -> Mode_rules.Function.result_curry (Scope.modes scope) ~loc
-            )
+        @ [ res_mode, Mode_rules.Function.result_curry (Scope.modes scope) ~loc
           ]
     in
     List.fold_right
       (List.zip_exn args results)
-      ~init:res_ty
-      ~f:(fun ((_, arg_ty, _, arg_mode), (res_mode, curry)) ty ->
+      ~init:[ res_ty ]
+      ~f:(fun ((_, arg_ty, _, arg_mode), (res_mode, curry)) tys ->
         Type.TArrow
           ( arg_ty
-          , ty
-          , { arg = Var arg_mode; res = Var res_mode; curry = Var curry } ))
+          , List.hd_exn tys
+          , { arg = Var arg_mode; res = Var res_mode; curry = Var curry } )
+        :: tys)
   in
   let arg_modes = List.map args ~f:(fun (_, _, _, mode) -> mode) in
-  let args, annots =
+  let bound =
     List.map args ~f:(fun (binder, ty, resolved, _) ->
       let ident = Program_env.bind scope.program binder ty ~level:scope.level in
       ( (ident, ty)
       , Option.some_if (not (Syntax.Annot.is_none resolved)) (ident, resolved) ))
-    |> List.unzip
+  in
+  let level bound =
+    let args, annots = List.unzip bound in
+    args, List.filter_opt annots
+  in
+  let args, annots = level (List.take bound arity) in
+  let inner =
+    List.folding_map
+      (List.zip_exn level_arities (List.map levels ~f:snd))
+      ~init:arity
+      ~f:(fun start (count, loc) ->
+        let args, annots = level (List.sub bound ~pos:start ~len:count) in
+        ( start + count
+        , { Function_type.Level.args; annots; ty = List.nth_exn tys start; loc }
+        ))
   in
   { Function_type.args
-  ; annots = List.filter_opt annots
+  ; annots
+  ; inner
+  ; body
   ; result_annot
   ; res_ty
-  ; ty
+  ; ty = List.hd_exn tys
   ; arg_modes
   ; res_mode
   ; partial_modes
@@ -1981,14 +2031,7 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
     let body =
       match
         if Toplevel.is_function toplevel
-        then
-          check_body
-            t
-            scope
-            ~closure:rules.value
-            ~fn
-            ~body:(Source.Expr.Syntax toplevel.expr)
-            ~loc:toplevel.expr.loc
+        then check_body t scope ~closure:rules.value ~fn ~loc:toplevel.expr.loc
         else
           check_expr
             t
@@ -2040,32 +2083,47 @@ and abandon (program : Program_env.t) (scc : Scc_frame.t) ~unfinished =
    modes of its arrows' arguments, and its value of the last one's result. The
    closure of a partial application holds what the function captures and the
    arguments given so far. *)
-and check_body t (scope : Scope.t) ~closure ~(fn : Function_type.t) ~body ~loc =
+and check_body t (scope : Scope.t) ~closure ~(fn : Function_type.t) ~loc =
   Mode_rules.Function.partial_applications
     (Scope.modes scope)
     ~closure
     ~arg_modes:fn.arg_modes
     ~partial_modes:fn.partial_modes
     ~loc;
+  let fn_params = Function_type.params fn in
   let scope =
     { (Scope.enter_closure t scope closure) with
-      params = List.map fn.args ~f:snd @ scope.params
+      params = List.map fn_params ~f:snd @ scope.params
     }
   in
   let modes = Scope.modes scope in
-  Mode_rules.Function.body modes ~res_mode:fn.res_mode ~ty:fn.res_ty (fun at ->
-    let params =
-      List.map2_exn
-        fn.args
-        fn.arg_modes
-        ~f:(fun ((ident : Typed.Ident.t), ty) arg_mode ->
-          let mode =
-            Mode_rules.Function.param modes ~arg_mode ~name:ident.name ~loc
-          in
-          ident.name, Scope.entry scope ~ident ~scheme:ty ~mode)
-    in
-    Env.with_bindings scope.locals params ~f:(fun () ->
-      check_expr t scope ~at ~expr:body ~ty:fn.res_ty))
+  let body =
+    Mode_rules.Function.body
+      modes
+      ~res_mode:fn.res_mode
+      ~ty:fn.res_ty
+      (fun at ->
+         let params =
+           List.map2_exn
+             fn_params
+             fn.arg_modes
+             ~f:(fun ((ident : Typed.Ident.t), ty) arg_mode ->
+               let mode =
+                 Mode_rules.Function.param modes ~arg_mode ~name:ident.name ~loc
+               in
+               ident.name, Scope.entry scope ~ident ~scheme:ty ~mode)
+         in
+         Env.with_bindings scope.locals params ~f:(fun () ->
+           check_expr t scope ~at ~expr:fn.body ~ty:fn.res_ty))
+  in
+  List.fold_right
+    fn.inner
+    ~init:body
+    ~f:(fun { Function_type.Level.args; annots; ty; loc } body ->
+      { Typed.Expr.desc = Fun { args = List.map args ~f:fst; annots; body }
+      ; ty
+      ; loc
+      })
 
 and with_monomorphic_bindings (scope : Scope.t) bindings ~f =
   Env.with_bindings
@@ -2330,7 +2388,7 @@ and expr_type
                (fun closure ->
                   let body =
                     defining (Mode_rules.Binding.closure closure) ~f:(fun () ->
-                      check_body t inner ~closure ~fn ~body ~loc)
+                      check_body t inner ~closure ~fn ~loc)
                   in
                   fn, ident, body, Some (Mode_rules.Binding.closure closure)))
     in
@@ -2531,7 +2589,7 @@ and expr_type
      | Some _ | None -> ());
     let body =
       Mode_rules.Alloc.closure modes at ~loc (fun closure ->
-        check_body t scope ~closure ~fn ~body ~loc)
+        check_body t scope ~closure ~fn ~loc)
     in
     node (Fun { args = List.map args ~f:fst; annots; body }) ty
   | Quote expr ->
@@ -3692,6 +3750,7 @@ let check_bench t program module_ ~name ~param ~body ~loc ~generated =
   | Some { name = param; args } ->
     let fn =
       function_type
+        ~merge:false
         t
         scope
         ~args:[ Source.Binder.Name param, Syntax.Annot.none ]
@@ -3708,7 +3767,7 @@ let check_bench t program module_ ~name ~param ~body ~loc ~generated =
     in
     let body =
       Mode_rules.Alloc.closure (Scope.modes scope) at ~loc (fun closure ->
-        check_body t scope ~closure ~fn ~body:(Source.Expr.Syntax body) ~loc)
+        check_body t scope ~closure ~fn ~loc)
     in
     { Typed.Bench.name
     ; param = Some (ident, args)

@@ -54,9 +54,8 @@ let reason = Mode.Reason.create "the function types are unified"
 
 let curry_reason =
   Mode.Reason.create
-    "the function types are unified, including whether a call giving their \
-     results arguments needs them to outlive its region, which types don't \
-     print"
+    "the function types are unified, including whether their results may take \
+     arguments after the region ends (not printed)"
 ;;
 
 let equate_side ids (side1 : Side.t) (side2 : Side.t) ~reason =
