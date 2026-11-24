@@ -146,6 +146,7 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
       | Stack e -> Stack (expr e)
       | Exclave e -> Exclave (expr e)
       | Nontail e -> Nontail (expr e)
+      | Annotated (e, a) -> Annotated (expr e, Annot.map a ~f:type_expr)
     in
     { e with txt }
   and toplevel (t : Toplevel.t) : Toplevel.t =

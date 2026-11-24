@@ -486,6 +486,9 @@ let first (p : (int * int) @ local) = match p with (a, _) -> a
 (* Prims only read their arguments, so take local (and external) ones. *)
 let len (s : string @ local) = String.length s
 
+(* Any expression can be annotated, which only checks it. *)
+let sum = (Int.add 1 2 : int @ portable)    (* val sum : int = 3 *)
+
 (* A mode variable makes the result exactly as the argument (printed without
    modes, this is just string -> string). *)
 let same (x : string @ 'm) : string @ 'm = x

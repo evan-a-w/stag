@@ -213,6 +213,7 @@ let level (e : Expr.t) : Level.t =
   | Poly_update _
   | Record_update _
   | Expect _
+  | Annotated _
   | Error -> Atom
 ;;
 
@@ -640,6 +641,7 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
     parens
       (text (decl_path_txt ~root_modules:roots.root_modules p)
        ^^ annot_doc roots annot)
+  | Annotated (e, annot), _ -> parens (flat roots e ^^ annot_doc roots annot)
   | Stack body, _ -> region roots ctx "stack_" body
   | Exclave body, _ -> region roots ctx "exclave_" body
   | Nontail app, _ ->

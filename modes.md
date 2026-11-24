@@ -249,8 +249,9 @@ a local result (`release`): it was regional in `fx`'s region, which ends.
 
 ### Annotations on uses
 
-`(x @ m)` (or `(x : t @ m)`) is the check-only form: it bounds the mode of `x`
-at this use, so of the variable, and `x` keeps its own mode. A binding's
+`(e @ m)` (or `(e : t @ m)`, on any expression) is the check-only form: it
+bounds the mode of `e`, so of a variable `x` at this use, and `x` keeps its own
+mode. A binding's
 annotation, `let x @ m = e`, is instead the variable's mode (as in OxCaml): `e`
 must be at most `m`, and uses of `x` see `m` on the axes it names (`e`'s mode
 on the others), though generalisation is still decided by `e`'s own mode.

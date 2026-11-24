@@ -341,6 +341,10 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
   | Nontail e, Nontail e' ->
     let+ e = expr e e' in
     Expr.Nontail e
+  | Annotated (e, a), Annotated (e', a') ->
+    let* e = expr e e' in
+    let+ a = annot a a' in
+    Expr.Annotated (e, a)
   | ( ( Lit _
       | Var _
       | App _
@@ -370,6 +374,7 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
       | Stack _
       | Exclave _
       | Nontail _
+      | Annotated _
       | Error )
     , _ ) -> None
 

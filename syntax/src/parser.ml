@@ -1321,16 +1321,12 @@ and atom t : Expr.t =
       let e = expr t in
       match peek t with
       | Colon | At ->
+        let annot = annot t in
+        close t Rparen ~opener:Lparen ~open_loc:start;
         (match e.txt with
          | Var (path, existing) when Annot.is_none existing ->
-           let annot = annot t in
-           close t Rparen ~opener:Lparen ~open_loc:start;
            expr_since t start (Var (path, annot))
-         | _ ->
-           fail
-             e.loc
-             "annotations are only supported on variables, as in `(x : t)` or \
-              `(x @ m)`")
+         | _ -> expr_since t start (Annotated (e, annot)))
       | _ ->
         close_parens t ~open_loc:start e ~tuple_items:(function
           | Expr.Tuple items -> Some items

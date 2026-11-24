@@ -344,6 +344,12 @@ and expr t : Expr.t =
          ; (fun t -> Stack (expr t))
          ; (fun t -> Exclave (expr t))
          ; (fun t -> Nontail (loc (Expr.App (expr t, expr t))))
+         ; (fun t ->
+             Annotated
+               ( loc (Expr.App (expr t, expr t))
+               , if bool t
+                 then { ty = Some (annot_type t); mode = None }
+                 else { ty = None; mode = Some (mode_expr t) } ))
          ])
 
 and type_decl t : Type_decl.t =

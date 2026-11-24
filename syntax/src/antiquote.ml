@@ -136,6 +136,7 @@ let map ?type_expr:replace_type_expr toplevels ~f =
       | Stack e -> Stack (sub e)
       | Exclave e -> Exclave (sub e)
       | Nontail e -> Nontail (sub e)
+      | Annotated (e, a) -> Annotated (sub e, annot a)
     in
     { e with txt }
   and toplevel depth (t : Toplevel.t) : Toplevel.t =

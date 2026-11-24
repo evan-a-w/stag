@@ -287,6 +287,7 @@ module Expr = struct
     | Stack expr -> Marked (Stack, sub expr)
     | Exclave expr -> Marked (Exclave, sub expr)
     | Nontail expr -> Marked (Nontail, sub expr)
+    | Annotated (expr, annot) -> Annotated (sub expr, annot)
     | Error -> Error
   ;;
 
