@@ -450,3 +450,41 @@ type t = { f : int @ const -> int @ portable }
 |};
   [%expect {| type t = { f : int @ const static -> int @ portable } |}]
 ;;
+
+let%expect_test "a relation between variables is on every axis, or on the one named" =
+  (* Through [through_all], [f]'s result is as external as its argument, so
+     the result is [external]; through [through_stage], it need not be. *)
+  modes
+    {|
+let ext (x : string) = let y @ external = x in y
+let through_all (f : string @ 'm -> string @ 'n with 'm <= 'n) (x : string) = f (ext x)
+let through_stage (f : string @ 'm -> string @ 'n with stage('m) <= stage('n)) (x : string) = f (ext x)
+|};
+  [%expect {|
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
+    val through_all : (string @ 'm1 -> string @ 'm2) @ 'm0 -> (string @ 'm4 -> string @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable external <= 'm1 and 'm1 <= 'm2 and 'm2 <= 'm5 and 'm2 <= regional and 'm4 <= 'm1 and 'm4 <= global and gc <= 'm3
+    val through_stage : (string @ 'm1 -> string @ 'm2) @ 'm0 -> (string @ 'm4 -> string @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable external <= 'm1 and stage('m1) <= stage('m2) and 'm2 <= 'm5 and 'm2 <= regional and 'm4 <= 'm1 and 'm4 <= global and gc <= 'm3
+    |}]
+;;
+
+let%expect_test "relations on some axes read back" =
+  round_trip
+    {|
+let pick (x : string) (y : string) = let z @ external = y in x
+let ext (x : string) = let y @ external = x in y
+let through_stage (f : string @ 'm -> string @ 'n with stage('m) <= stage('n)) (x : string) = f (ext x)
+let fixed_stage u = Int.to_string 1
+let fixed_and_related (x : string) = let y @ nonportable = x in y
+let local_closure (x @ local) = exclave_ stack_ (fun (u : int) -> x)
+let apply f x = f x
+|};
+  [%expect {|
+    let pick_copy : string @ 'm0 -> (string @ 'm2 -> string @ 'm3) @ 'm1 with 'm0 <= 'm3 and 'm0 <= 'm1 and stage('m2) <= stage('m3) and gc <= 'm1 = pick
+    let ext_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1 = ext
+    let through_stage_copy : (string @ 'm1 -> string @ 'm2) @ 'm0 -> (string @ 'm4 -> string @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable external <= 'm1 and stage('m1) <= stage('m2) and 'm2 <= 'm5 and 'm2 <= regional and 'm4 <= 'm1 and 'm4 <= global and gc <= 'm3 = through_stage
+    let fixed_stage_copy : 'a -> string @ 'm0 with nonportable gc <= 'm0 = fixed_stage
+    let fixed_and_related_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and nonportable <= 'm1 = fixed_and_related
+    let local_closure_copy : 'a @ 'm0 -> (int -> 'a @ 'm2) @ 'm1 with local <= 'm0 and 'm0 <= 'm2 and 'm0 <= 'm1 and gc <= 'm1 = local_closure
+    let apply_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and 'm2 <= regional and stage('m4) <= stage('m1) and provenance('m4) <= provenance('m1) and gc <= 'm3 = apply
+    |}]
+;;

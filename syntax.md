@@ -206,14 +206,13 @@ pointee, not with the pointer.
 
 `ptr[t @@ m]` says what stage and provenance (see [Modes](#modes)) the
 values in the pointer's cell may have, as atoms (`portable external`) or a
-mode variable, as in `get : ptr['a @@ 'm0] -> 'a @ 'm1 with 'm0 <= 'm1`.
+mode variable, as in
+`get : ptr['a @@ 'm0] -> 'a @ 'm1 with provenance('m0) <= provenance('m1)`.
 `ptr[t]` is `ptr[t @@ nonportable gc]`. A cell's locality is always
 `global`, so a locality atom is an error. A store through it takes values
 of at most `m`, and a read through it is exactly `m` (on those axes),
 whatever the pointer's own mode. `Ptr.make e` infers `m` from `e` and the
-cell's uses. In a `with` clause, a relation with a cell's variable (or a
-user type's mode parameter) is on provenance; one between other variables
-is on stage.
+cell's uses.
 
 Recursive data types must cross a pointer or another indirection (such
 as a function) before returning to the same type. For example:
@@ -457,9 +456,15 @@ let h (x : int @ 'm with 'm <= portable) = x
 `with` is only in an annotation's type, never in a function type's argument or
 in a declaration. `and` is not a keyword (there is no `let ... and`), so
 following constraints it always continues them. A constraint between two
-variables relates their stage; one between a variable and modes bounds the
-axes the modes name (`external <= 'm`). Printed types use the same syntax, so
-read back as themselves.
+variables relates every axis; `stage('m) <= stage('n)` (or `locality(...)`,
+`provenance(...)`) relates only that one, naming the same axis on both sides.
+One between a variable and modes bounds the axes the modes name
+(`portable external <= 'm`). Printed types use the same syntax, so read back
+as themselves:
+
+```ocaml
+let stage_only : string @ 'm -> string @ 'n with stage('m) <= stage('n) = ...
+```
 
 In reflected syntax, a binder's or variable's annotation is a
 ``Stag.Annot.t = {`ty : option[Type_expr.t]; `mode : option[Mode_expr.t]}``
