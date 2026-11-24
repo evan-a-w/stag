@@ -158,9 +158,11 @@ module Kind : sig
     | Misplaced_modality
     (** [t @@ m] other than as a field's or constructor argument's type or
         [ptr]'s argument. *)
-    | Invalid_modality of { mode_param : string option }
-    (** A locality in what a pointer's cell holds: [ptr[t @@ local]], or the
-        argument of a mode parameter ([mode_param]) that reaches one. *)
+    | Locality_in_mode_argument
+    (** A locality in a mode argument, as in [ptr[t @@ local]] or
+        [cell[t, local]]: mode arguments are on stage and provenance only. *)
+    | Relative_locality_modality
+    (** A [regional] or [local] modality on a field or constructor argument. *)
     | Mode_variable_in_declaration of string
     (** A mode variable in a declaration's type, whose arrows have fixed modes. *)
     | Invalid_mode of string

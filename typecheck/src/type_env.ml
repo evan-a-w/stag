@@ -38,7 +38,6 @@ module Decl = struct
     ; mutable prepared :
         (Signature.Type_decl.Kind.t * Reflected_decl.Kind.t option) option
     ; mutable value_parameters : Int.Set.t option
-    ; mutable storage_params : String.Set.t option
     ; mutable checked : Signature.Type_decl.t option
     ; mutable failed : bool (** Checking it reported an error. *)
     ; mutable reflected : Reflected_decl.t option
@@ -120,7 +119,10 @@ let builtins =
     ~f:(fun name ->
       { Type_decl.name = Located.create name; params = []; kind = Abstract })
   @ [ { Type_decl.name = Located.create "ptr"
-      ; params = [ Located.create (Type_decl.Param.Ty "a") ]
+      ; params =
+          [ Located.create (Type_decl.Param.Ty "a")
+          ; Located.create (Type_decl.Param.Mode "p")
+          ]
       ; kind = Abstract
       }
     ]
@@ -236,20 +238,45 @@ module Annotation_vars = struct
     }
   ;;
 
-  let ty t name =
-    Hashtbl.find_or_add t.tys name ~default:(fun () ->
-      Type.TVar (Fresh.var t.fresh ~rank:t.rank))
+  (* A name stands for one kind of variable throughout. *)
+  let only_kind name ~loc ~(in_ : _ Hashtbl.t) ~others ~default =
+    match Hashtbl.find in_ name with
+    | Some var -> Ok var
+    | None when List.exists others ~f:(fun other -> other name) ->
+      Error (Typecheck_error.create ~loc (Type_variable_kind_mismatch name))
+    | None ->
+      let var = default () in
+      Hashtbl.set in_ ~key:name ~data:var;
+      Ok var
   ;;
 
-  let row t name =
-    Hashtbl.find_or_add t.rows name ~default:(fun () ->
-      Type.RVar (Fresh.var t.fresh ~rank:t.rank))
+  let ty t name ~loc =
+    only_kind
+      name
+      ~loc
+      ~in_:t.tys
+      ~others:[ Hashtbl.mem t.rows; Hashtbl.mem t.modes ]
+      ~default:(fun () -> Type.TVar (Fresh.var t.fresh ~rank:t.rank))
+  ;;
+
+  let row t name ~loc =
+    only_kind
+      name
+      ~loc
+      ~in_:t.rows
+      ~others:[ Hashtbl.mem t.tys; Hashtbl.mem t.modes ]
+      ~default:(fun () -> Type.RVar (Fresh.var t.fresh ~rank:t.rank))
   ;;
 
   let fresh_mode t = Mode.Var.create (Fresh.modes t.fresh) ~rank:t.rank
 
-  let mode t name =
-    Hashtbl.find_or_add t.modes name ~default:(fun () -> fresh_mode t)
+  let mode t name ~loc =
+    only_kind
+      name
+      ~loc
+      ~in_:t.modes
+      ~others:[ Hashtbl.mem t.tys; Hashtbl.mem t.rows ]
+      ~default:(fun () -> fresh_mode t)
   ;;
 end
 
@@ -313,6 +340,52 @@ let atom_of_path (path : Path.t) =
   | _ -> None
 ;;
 
+(* An argument as of its parameter's kind, [None] if of another: a mode variable
+   or a single mode atom parses as a type. *)
+let resolve_arg (param : Type_decl.Param.t) (arg : Type_expr.arg)
+  : Type_expr.arg option
+  =
+  match param, arg with
+  | Mode _, Ty { txt = Var name; loc } ->
+    Some (Mode (Located.create ~loc (Mode_expr.Var name)))
+  | Mode _, Ty { txt = Con ({ txt = Path path; _ }, []); loc } ->
+    Option.map (atom_of_path path) ~f:(fun atom ->
+      Type_expr.Mode (Located.create ~loc (Mode_expr.Atoms [ atom ])))
+  | Mode _, Mode _ | Ty _, (Ty _ | Row _) | Row _, Row _ -> Some arg
+  | Mode _, (Ty _ | Row _) | Ty _, Mode _ | Row _, (Ty _ | Mode _) -> None
+;;
+
+let arg_loc : Type_expr.arg -> Loc.t = function
+  | Ty { loc; _ } | Row { loc; _ } | Mode { loc; _ } -> loc
+;;
+
+(* [ptr[t @@ m]] is [ptr[t, m]], and [ptr[t]] is [ptr[t, nonportable gc]]. *)
+module Ptr_sugar = struct
+  type t =
+    | Modality
+    | Default
+    | Args
+
+  let desugar (args : Type_expr.arg list) ~loc =
+    match args with
+    | [ Ty { txt = Modality (ty, mode); _ } ] -> [ Type_expr.Ty ty; Mode mode ], Modality
+    | [ ((Ty _ | Row _) as arg) ] ->
+      ( [ arg
+        ; Mode (Located.create ~loc (Mode_expr.Atoms [ Nonportable; Gc ]))
+        ]
+      , Default )
+    | args -> args, Args
+  ;;
+
+  let resugar t (args : Type_expr.arg list) =
+    match t, args with
+    | Modality, [ Ty ty; Mode mode ] ->
+      [ Type_expr.Ty (Located.create ~loc:ty.loc (Type_expr.Modality (ty, mode))) ]
+    | Default, [ arg; Mode _ ] -> [ arg ]
+    | (Modality | Default | Args), args -> args
+  ;;
+end
+
 module Vars = struct
   module Bound = struct
     type t = { f : 'a. 'a Mode.Axis.t -> 'a -> (unit, Mode.Error.t) Result.t }
@@ -326,7 +399,7 @@ module Vars = struct
 
   let ty t name ~loc : (Type.ty, Typecheck_error.t) Result.t =
     match t with
-    | Annotation vars -> Ok (Annotation_vars.ty vars name)
+    | Annotation vars -> Annotation_vars.ty vars name ~loc
     | Params params ->
       (match Map.find params name with
        | Some (ATy ty) -> Ok ty
@@ -344,7 +417,7 @@ module Vars = struct
 
   let row t name ~loc : (Type.row, Typecheck_error.t) Result.t =
     match t with
-    | Annotation vars -> Ok (Annotation_vars.row vars name)
+    | Annotation vars -> Annotation_vars.row vars name ~loc
     | Params params ->
       (match Map.find params name with
        | Some (ARow row) -> Ok row
@@ -369,7 +442,8 @@ module Vars = struct
     : (Arrow_modes.Side.t, Typecheck_error.t) Result.t
     =
     match t, txt with
-    | Annotation vars, Var name -> Ok (Var (Annotation_vars.mode vars name))
+    | Annotation vars, Var name ->
+      Result.map (Annotation_vars.mode vars name ~loc) ~f:(fun var -> Arrow_modes.Side.Var var)
     | Params _, Var name -> error ~loc (Mode_variable_in_declaration name)
     | Annotation vars, Atoms atoms ->
       let var = Annotation_vars.fresh_mode vars in
@@ -380,34 +454,24 @@ module Vars = struct
   ;;
 
   (* A mode argument: of a type's mode parameter, or what the cell of a
-     [ptr[t @@ mode]] may hold, which is on stage and provenance only. *)
-  let mode_arg ?(cell = `No) t ({ txt; loc } : Syntax.Mode_expr.t)
+     [ptr[t @@ mode]] may hold, which are on stage and provenance only. *)
+  let mode_arg t ({ txt; loc } : Syntax.Mode_expr.t)
     : (Mode_arg.t, Typecheck_error.t) Result.t
     =
     match t, txt with
-    | Annotation vars, Var name -> Ok (Var (Annotation_vars.mode vars name))
+    | Annotation vars, Var name ->
+      Result.map (Annotation_vars.mode vars name ~loc) ~f:(fun var -> Mode_arg.Var var)
     | Params params, Var name ->
       (match Map.find params name with
        | Some (AMode mode) -> Ok mode
        | Some (ATy _ | ARow _) -> error ~loc (Type_variable_kind_mismatch name)
        | None -> error ~loc (Mode_variable_in_declaration name))
     | _, Atoms atoms ->
-      if (match cell with
-          | `No -> false
-          | `Ptr | `Param _ -> true)
-         && List.exists atoms ~f:(fun (atom : Syntax.Mode_expr.Atom.t) ->
+      if List.exists atoms ~f:(fun (atom : Syntax.Mode_expr.Atom.t) ->
            match atom with
            | Global | Regional | Local -> true
            | Const | Portable | Nonportable | Static | Gc | External -> false)
-      then
-        error
-          ~loc
-          (Invalid_modality
-             { mode_param =
-                 (match cell with
-                  | `Param name -> Some name
-                  | `No | `Ptr -> None)
-             })
+      then error ~loc Locality_in_mode_argument
       else Ok (Fixed (Mode_atoms.declared ~default:Mode_arg.default atoms))
   ;;
 
@@ -449,8 +513,8 @@ module Vars = struct
     | Params _, Var name, _ | Params _, _, Var name ->
       error ~loc (Mode_variable_in_declaration name)
     | Annotation vars, Var lower, Var upper ->
-      let lower = Annotation_vars.mode vars lower in
-      let upper = Annotation_vars.mode vars upper in
+      let%bind.Result lower = Annotation_vars.mode vars lower ~loc in
+      let%bind.Result upper = Annotation_vars.mode vars upper ~loc in
       checked
         (match axis with
          | None -> Mode.Var.submode lower upper reason
@@ -463,13 +527,13 @@ module Vars = struct
         ~loc
         (Invalid_mode "a constraint on one axis relates two mode variables")
     | Annotation vars, Var lower, Atoms atoms ->
-      let var = Annotation_vars.mode vars lower in
+      let%bind.Result var = Annotation_vars.mode vars lower ~loc in
       checked
         (bound
            atoms
            ~f:{ f = (fun axis point -> Mode.Var.at_most var axis point reason) })
     | Annotation vars, Atoms atoms, Var upper ->
-      let var = Annotation_vars.mode vars upper in
+      let%bind.Result var = Annotation_vars.mode vars upper ~loc in
       checked
         (bound
            atoms
@@ -706,6 +770,10 @@ and elaborate_con
   let%bind.Result () =
     if decl.failed then Error Typecheck_error.already_reported else Ok ()
   in
+  let ptr_sugar = String.equal decl.name Type.ptr_name in
+  let args, sugar =
+    if ptr_sugar then Ptr_sugar.desugar args ~loc else args, Ptr_sugar.Args
+  in
   let expected = List.length decl.decl.params in
   let got = List.length args in
   let%bind.Result () =
@@ -713,94 +781,44 @@ and elaborate_con
     then Ok ()
     else error ~loc (Type_arity_mismatch { type_name = path; expected; got })
   in
-  let is_ptr = String.equal decl.name Type.ptr_name in
-  let storage = storage_params t decl in
-  let storage_cell param =
-    if Set.mem storage param then `Param param else `No
-  in
-  let held = ref Mode_arg.gc in
   let%bind.Result args =
     map_result (List.zip_exn decl.decl.params args) ~f:(fun (param, arg) ->
-      match param.txt, arg with
-      | Ty _, Ty { txt = Modality (ty, mode); loc } when is_ptr ->
-        let%bind.Result mode_arg = Vars.mode_arg ~cell:`Ptr vars mode in
-        held := mode_arg;
-        let%map.Result ty, syntax =
-          elaborate' t module_ vars ~splices ~expansions ty
-        in
-        Type.ATy ty, Type_expr.Ty { txt = Modality (syntax, mode); loc }
-      | Ty _, Ty ty ->
+      match param.txt, resolve_arg param.txt arg with
+      | _, Some (Ty ty) ->
         let%map.Result ty, syntax =
           elaborate' t module_ vars ~splices ~expansions ty
         in
         Type.ATy ty, Type_expr.Ty syntax
-      | Row _, Row row ->
-        let%map.Result row, syntax =
-          elaborate_row t module_ vars ~splices ~expansions row
-        in
-        Type.ARow row, Type_expr.Row syntax
       (* [{...}] parses as a row, but is a record type for a type parameter. *)
-      | Ty _, Row row ->
+      | Ty _, Some (Row row) ->
         let%map.Result row, syntax =
           elaborate_row t module_ vars ~splices ~expansions row
         in
         Type.ATy (Fresh.record t.fresh row), Type_expr.Row syntax
-      | Mode param, Mode mode ->
-        let%map.Result mode_arg =
-          Vars.mode_arg ~cell:(storage_cell param) vars mode
+      | (Row _ | Mode _), Some (Row row) ->
+        let%map.Result row, syntax =
+          elaborate_row t module_ vars ~splices ~expansions row
         in
-        Type.AMode mode_arg, Type_expr.Mode mode
-      | Mode _, Ty { txt = Var name; loc } ->
-        let mode = Located.create ~loc (Syntax.Mode_expr.Var name) in
+        Type.ARow row, Type_expr.Row syntax
+      | _, Some (Mode mode) ->
         let%map.Result mode_arg = Vars.mode_arg vars mode in
         Type.AMode mode_arg, Type_expr.Mode mode
-      | Mode param, Ty { txt = Con ({ txt = Path path; _ }, []); loc }
-        when Option.is_some (atom_of_path path) ->
-        let mode =
-          Located.create
-            ~loc
-            (Syntax.Mode_expr.Atoms [ Option.value_exn (atom_of_path path) ])
-        in
-        let%map.Result mode_arg =
-          Vars.mode_arg ~cell:(storage_cell param) vars mode
-        in
-        Type.AMode mode_arg, Type_expr.Mode mode
-      | Ty _, Mode { txt = Atoms [ atom ]; loc } ->
-        let%map.Result ty, syntax =
-          elaborate'
-            t
-            module_
-            vars
-            ~splices
-            ~expansions
-            (Located.create
-               ~loc
-               (Type_expr.Con
-                  ( Located.create
-                      ~loc
-                      (Decl_path.Path
-                         (Path.name (Syntax.Mode_expr.Atom.to_string atom)))
-                  , [] )))
-        in
-        Type.ATy ty, Type_expr.Ty syntax
-      | (Row _ | Mode _), Ty { loc; _ }
-      | (Ty _ | Row _), Mode { loc; _ }
-      | Mode _, Row { loc; _ } ->
+      | _, None ->
         error
-          ~loc
+          ~loc:(arg_loc arg)
           (Type_arg_kind_mismatch { type_name = path; param = param.txt }))
   in
   let args, args_syntax = List.unzip args in
   let syntax =
-    Type_expr.Con ({ located_path with txt = Resolved decl.name }, args_syntax)
+    Type_expr.Con
+      ( { located_path with txt = Resolved decl.name }
+      , Ptr_sugar.resugar sugar args_syntax )
   in
   let%bind.Result kind = definition decl ~loc in
   let%map.Result ty =
     match (kind : Type_decl.Kind.t) with
     | Variant _ | Record _ | Abstract | Splice _ | Malformed _ ->
-      Ok
-        (Type.TCon
-           (decl.name, if is_ptr then args @ [ Type.AMode !held ] else args))
+      Ok (Type.TCon (decl.name, args))
     | Alias body ->
       let instances = Hashtbl.find_multi expansions decl.name in
       (match
@@ -842,96 +860,6 @@ and definition (decl : Decl.t) ~loc =
     then Error Typecheck_error.already_reported
     else Ok decl.decl.kind
   | Variant _ | Record _ | Alias _ | Abstract | Malformed _ -> Ok decl.decl.kind
-
-(* The names of [decl]'s mode parameters that reach what a [ptr]'s cell holds,
-   which is on stage and provenance only. *)
-and storage_params t (decl : Decl.t) =
-  match decl.storage_params with
-  | Some params -> params
-  | None ->
-    (* While computing it, as for a recursive reference: none. *)
-    decl.storage_params <- Some String.Set.empty;
-    let reached = String.Hash_set.create () in
-    let mode_var (mode : Mode_expr.t) =
-      match mode.txt with
-      | Var name -> Some name
-      | Atoms _ -> None
-    in
-    let rec walk (ty : Type_expr.t) =
-      match ty.txt with
-      | Var _ | Splice _ -> ()
-      | Con (path, args) ->
-        let callee =
-          find_type t decl.module_ path.txt ~loc:path.loc |> Result.ok
-        in
-        let is_ptr =
-          Option.exists callee ~f:(fun callee ->
-            String.equal callee.name Type.ptr_name)
-        in
-        let callee_storage =
-          match callee with
-          | Some callee when not is_ptr -> storage_params t callee
-          | Some _ | None -> String.Set.empty
-        in
-        let callee_params =
-          Option.value_map callee ~default:[] ~f:(fun callee ->
-            List.map callee.decl.params ~f:(fun param -> Some param.txt))
-        in
-        let callee_params =
-          if List.length callee_params = List.length args
-          then callee_params
-          else List.map args ~f:(fun _ -> None)
-        in
-        List.iter2_exn args callee_params ~f:(fun arg param ->
-          let into_storage name =
-            match param with
-            | Some (Type_decl.Param.Mode param) ->
-              if Set.mem callee_storage param then Hash_set.add reached name
-            | Some (Ty _ | Row _) | None -> ()
-          in
-          match arg with
-          | Ty { txt = Modality (ty, mode); _ } when is_ptr ->
-            Option.iter (mode_var mode) ~f:(Hash_set.add reached);
-            walk ty
-          | Ty { txt = Var name; _ } -> into_storage name
-          | Ty ty -> walk ty
-          | Row row -> walk_row row
-          | Mode mode -> Option.iter (mode_var mode) ~f:into_storage)
-      | Arrow (a, b) ->
-        walk a;
-        walk b
-      | Tuple tys -> List.iter tys ~f:walk
-      | Code { inner; context } ->
-        walk inner;
-        walk_row context
-      | Record row | Variant row -> walk_row row
-      | Mut ty
-      | Immut ty
-      | Moded (ty, _)
-      | Constrained (ty, _)
-      | Modality (ty, _) -> walk ty
-    and walk_row (row : Type_expr.row) =
-      match row.txt with
-      | Empty | Var _ -> ()
-      | Extend (_, ty, row) ->
-        walk ty;
-        walk_row row
-    in
-    (match definition decl ~loc:decl.decl.name.loc with
-     | Ok (Variant constructors) ->
-       List.iter constructors ~f:(fun (_, args) -> List.iter args ~f:walk)
-     | Ok (Record fields) -> List.iter fields ~f:(fun (_, ty) -> walk ty)
-     | Ok (Alias body) -> walk body
-     | Ok (Abstract | Splice _ | Malformed _) | Error _ -> ());
-    let params =
-      List.filter_map decl.decl.params ~f:(fun param ->
-        match param.txt with
-        | Mode name when Hash_set.mem reached name -> Some name
-        | Mode _ | Ty _ | Row _ -> None)
-      |> String.Set.of_list
-    in
-    decl.storage_params <- Some params;
-    params
 
 and expand t (decl : Decl.t) ~args ~expansions body =
   let knot = Type.Var.create (Fresh.id t.fresh) Generic in
@@ -1041,7 +969,6 @@ let declare
       ; params
       ; wrap_error
       ; used_while_defined = false
-      ; storage_params = None
       ; prepared = None
       ; value_parameters = None
       ; checked = None
@@ -1138,6 +1065,14 @@ let prepare_kind t (decl : Decl.t) =
     | Modality (inner, mode) ->
       let%bind.Result modality =
         match mode.txt with
+        | Atoms atoms
+          when List.exists atoms ~f:(fun (atom : Mode_expr.Atom.t) ->
+                 match atom with
+                 | Regional | Local -> true
+                 | Global | Const | Portable | Nonportable | Static | Gc
+                 | External -> false) ->
+          Error
+            (Typecheck_error.create ~loc:mode.loc Relative_locality_modality)
         | Atoms atoms ->
           Ok
             (Member_modality.of_atoms

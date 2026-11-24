@@ -116,7 +116,7 @@ let annotate ?(exact = false) ctx mode (annot : Syntax.Mode_expr.t option) ~var 
           then Mode.Var.equate
           else Mode.Var.submode ?crossing:None ?locality:None)
            mode
-           (var name)
+           (var name ~loc)
            (reason ~loc (sprintf "it is annotated '%s" name)))
     | Atoms atoms ->
       List.iter atoms ~f:(fun atom ->
@@ -230,6 +230,8 @@ let read_step ctx block (step : Modality.Step.t) ~loc ~why =
      | Cell mode ->
        Result.all_unit
          [ from_param mode Stage ~meet:false
+         ; (* A cell may change between evaluations. *)
+           Mode.Var.at_least read Stage Portable reason
          ; from_param mode Provenance ~meet:false
          ]);
   read
@@ -732,9 +734,7 @@ let store ctx expected ~loc ~target ~value =
     (Modality.from_last_cell modality)
     ~loc:value.loc
     ~why:
-      "it is stored into a pointer's cell, which holds only what fits its [@@] \
-       ([ptr[t]]: nonportable gc), and the modalities of the fields stored \
-       into";
+      "it is stored into a cell, which holds only what fits its modality";
   target, value
 ;;
 

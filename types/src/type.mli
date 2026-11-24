@@ -282,8 +282,14 @@ module Printer : sig
       ([Prelude_path.to_string_hum]). With [modes], the mode variables of arrows
       are named, and the constraints between them listed by [where] (as
       [with 'm0 <= 'm1]); otherwise only the modes of arrows fixed to other than
-      a declaration's default are. *)
-  val create : ?type_name:(string -> string) -> ?modes:bool -> unit -> t
+      a declaration's default are, and with [name_mode_args], mode arguments
+      not known are named, as [ptr[t @@ 'm0]], rather than left out. *)
+  val create
+    :  ?type_name:(string -> string)
+    -> ?modes:bool
+    -> ?name_mode_args:bool
+    -> unit
+    -> t
 
   (** With [atomic], parenthesized unless a single word or bracketed. *)
   val ty : ?atomic:bool -> t -> ty -> string
