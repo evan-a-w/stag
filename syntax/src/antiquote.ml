@@ -44,7 +44,6 @@ let map ?type_expr:replace_type_expr toplevels ~f =
       | Moded (t, m) -> Moded (type_expr t, m)
       | Modality (t, m) -> Modality (type_expr t, m)
       | Constrained (t, cs) -> Constrained (type_expr t, cs)
-      | Global t -> Global (type_expr t)
       | Splice e ->
         (match replace_type_expr with
          | Some replace when depth = 0 ->
@@ -66,6 +65,7 @@ let map ?type_expr:replace_type_expr toplevels ~f =
   and arg depth : Type_expr.arg -> Type_expr.arg = function
     | Ty t -> Ty (type_expr depth t)
     | Row r -> Row (row depth r)
+    | Mode _ as arg -> arg
   and binding depth ((n, a) : Binding.t) = n, Annot.map a ~f:(type_expr depth)
   and expr depth (e : Expr.t) : Expr.t =
     let sub = expr depth in

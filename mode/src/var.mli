@@ -59,7 +59,30 @@ val submode
 val allocated : t -> Reason.t -> (unit, Mode_error.t) Result.t
 
 (** [submode a b] on [axis] only. *)
-val submode_on : t -> t -> _ Axis.t -> Reason.t -> (unit, Mode_error.t) Result.t
+val submode_on
+  :  ?crossing:Crossing.t
+  -> t
+  -> t
+  -> _ Axis.t
+  -> Reason.t
+  -> (unit, Mode_error.t) Result.t
+
+(** [submode_meet a c b]: [meet a c <= b], on every axis. *)
+val submode_meet
+  :  t
+  -> Const.t
+  -> t
+  -> Reason.t
+  -> (unit, Mode_error.t) Result.t
+
+(** [submode_meet_on a axis c b]: [meet a c <= b] on [axis]. *)
+val submode_meet_on
+  :  t
+  -> 'a Axis.t
+  -> 'a
+  -> t
+  -> Reason.t
+  -> (unit, Mode_error.t) Result.t
 
 val equate : t -> t -> Reason.t -> (unit, Mode_error.t) Result.t
 val at_least : t -> 'a Axis.t -> 'a -> Reason.t -> (unit, Mode_error.t) Result.t

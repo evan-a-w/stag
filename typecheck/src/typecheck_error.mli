@@ -155,7 +155,9 @@ module Kind : sig
         evaluates it. *)
     | Misplaced_mut
     (** [mut t] other than as the type of an entry of a code type's context. *)
-    | Misplaced_modality (** [t @@ m] other than as [ptr]'s argument. *)
+    | Misplaced_modality
+    (** [t @@ m] other than as a field's or constructor argument's type or
+        [ptr]'s argument. *)
     | Invalid_modality
     (** [ptr[t @@ m]] with [m] other than [external], the only modality yet. *)
     | Mode_variable_in_declaration of string

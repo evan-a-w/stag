@@ -288,6 +288,9 @@ module Printer : sig
   (** With [atomic], parenthesized unless a single word or bracketed. *)
   val ty : ?atomic:bool -> t -> ty -> string
 
+  (** Renders a mode argument. *)
+  val mode_arg : t -> Mode_arg.t -> string
+
   (** Renders [row] as the context of a code type. *)
   val context : t -> row -> string
 

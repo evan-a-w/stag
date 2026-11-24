@@ -248,7 +248,7 @@ val store
   :  Ctx.t
   -> Expected.t
   -> loc:Loc.t
-  -> target:(Expected.t -> Typed.Expr.t * Mode_arg.t)
+  -> target:(Expected.t -> Typed.Expr.t * Modality.t)
   -> value:(Expected.t -> ty:Type.ty -> Typed.Expr.t)
   -> Typed.Expr.t * Typed.Expr.t
 
@@ -330,5 +330,5 @@ val assume_global : Ctx.t -> Mode.Var.t * Mode.Var.t
 val ptr_make : Ctx.t -> Mode.Var.t * Mode.Var.t * Mode_arg.t
 
 (** Fixes what the cell of a pointer not generalized may hold, once nothing more
-    can constrain it: [gc] if it may, else what it must. *)
+    can constrain it: [nonportable gc] on each axis it may, else what it must. *)
 val default_held : Mode.Var.t -> name:string -> unit

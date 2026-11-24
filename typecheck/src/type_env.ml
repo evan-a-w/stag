@@ -9,7 +9,7 @@ module Constructor = struct
     ; index : int
     ; args : Type.ty list
     ; result : Type.ty
-    ; global_args : bool list
+    ; modalities : Member_modality.t list
     }
   [@@deriving sexp_of]
 end
@@ -20,7 +20,7 @@ module Field = struct
     ; record : Type.ty
     ; index : int
     ; ty : Type.ty
-    ; is_global : bool
+    ; modality : Member_modality.t
     }
   [@@deriving sexp_of]
 
@@ -149,17 +149,14 @@ let rec has_splice (expr : Type_expr.t) =
   | Con (_, args) ->
     List.exists args ~f:(function
       | Ty ty -> has_splice ty
-      | Row row -> row_has_splice row)
+      | Row row -> row_has_splice row
+      | Mode _ -> false)
   | Arrow (ty1, ty2) -> has_splice ty1 || has_splice ty2
   | Tuple tys -> List.exists tys ~f:has_splice
   | Code { inner; context } -> has_splice inner || row_has_splice context
   | Record row | Variant row -> row_has_splice row
-  | Mut ty
-  | Immut ty
-  | Moded (ty, _)
-  | Constrained (ty, _)
-  | Global ty
-  | Modality (ty, _) -> has_splice ty
+  | Mut ty | Immut ty | Moded (ty, _) | Constrained (ty, _) | Modality (ty, _)
+    -> has_splice ty
 
 and row_has_splice (row : Type_expr.row) =
   match row.txt with
@@ -311,6 +308,13 @@ module Mode_atoms = struct
   ;;
 end
 
+(* A mode atom written as a type argument, as in [cell[t, external]]. *)
+let atom_of_path (path : Path.t) =
+  match (path :> string list) with
+  | [ name ] -> Syntax.Mode_expr.Atom.of_string name
+  | _ -> None
+;;
+
 module Vars = struct
   module Bound = struct
     type t = { f : 'a. 'a Mode.Axis.t -> 'a -> (unit, Mode.Error.t) Result.t }
@@ -377,19 +381,28 @@ module Vars = struct
       Ok (Arrow_modes.Side.Fixed (Mode_atoms.declared atoms ~default))
   ;;
 
-  (* What the cell of a [ptr[t @@ mode]] may hold: a provenance. *)
-  let held t ({ txt; loc } : Syntax.Mode_expr.t)
+  (* A mode argument: of a type's mode parameter, or what the cell of a
+     [ptr[t @@ mode]] may hold, which is on stage and provenance only. *)
+  let mode_arg ?(ptr = false) t ({ txt; loc } : Syntax.Mode_expr.t)
     : (Mode_arg.t, Typecheck_error.t) Result.t
     =
     match t, txt with
     | Annotation vars, Var name ->
       Hash_set.add vars.cells name;
       Ok (Var (Annotation_vars.mode vars name))
-    | Params _, Var name -> error ~loc (Mode_variable_in_declaration name)
-    | _, Atoms [ Static ] -> Ok (Fixed Static)
-    | _, Atoms [ Gc ] -> Ok (Fixed Gc)
-    | _, Atoms [ External ] -> Ok (Fixed External)
-    | _, Atoms _ -> error ~loc Invalid_modality
+    | Params params, Var name ->
+      (match Map.find params name with
+       | Some (AMode mode) -> Ok mode
+       | Some (ATy _ | ARow _) -> error ~loc (Type_variable_kind_mismatch name)
+       | None -> error ~loc (Mode_variable_in_declaration name))
+    | _, Atoms atoms ->
+      if ptr
+         && List.exists atoms ~f:(fun (atom : Syntax.Mode_expr.Atom.t) ->
+           match atom with
+           | Global | Regional | Local -> true
+           | Const | Portable | Nonportable | Static | Gc | External -> false)
+      then error ~loc Invalid_modality
+      else Ok (Fixed (Mode_atoms.declared ~default:Mode_arg.default atoms))
   ;;
 
   (* [lower <= upper] between variables, on provenance if either is a cell's,
@@ -606,9 +619,6 @@ let rec elaborate'
             ~loc:(Loc.merge constraint_.lower.loc constraint_.upper.loc))
       in
       ty, Type_expr.Constrained (syntax, constraints)
-    | Global ty ->
-      let%map.Result ty, syntax = elaborate ty in
-      ty, Type_expr.Global syntax
     | Modality _ -> Error (Typecheck_error.create ~loc Misplaced_modality)
   in
   ty, { expr with txt }
@@ -697,7 +707,7 @@ and elaborate_con
     map_result (List.zip_exn decl.decl.params args) ~f:(fun (param, arg) ->
       match param.txt, arg with
       | Ty _, Ty { txt = Modality (ty, mode); loc } when is_ptr ->
-        let%bind.Result mode_arg = Vars.held vars mode in
+        let%bind.Result mode_arg = Vars.mode_arg ~ptr:true vars mode in
         held := mode_arg;
         let%map.Result ty, syntax =
           elaborate' t module_ vars ~splices ~expansions ty
@@ -719,7 +729,43 @@ and elaborate_con
           elaborate_row t module_ vars ~splices ~expansions row
         in
         Type.ATy (Fresh.record t.fresh row), Type_expr.Row syntax
-      | Row _, Ty { loc; _ } ->
+      | Mode _, Mode mode ->
+        let%map.Result mode_arg = Vars.mode_arg vars mode in
+        Type.AMode mode_arg, Type_expr.Mode mode
+      | Mode _, Ty { txt = Var name; loc } ->
+        let mode = Located.create ~loc (Syntax.Mode_expr.Var name) in
+        let%map.Result mode_arg = Vars.mode_arg vars mode in
+        Type.AMode mode_arg, Type_expr.Mode mode
+      | Mode _, Ty { txt = Con ({ txt = Path path; _ }, []); loc }
+        when Option.is_some (atom_of_path path) ->
+        let mode =
+          Located.create
+            ~loc
+            (Syntax.Mode_expr.Atoms [ Option.value_exn (atom_of_path path) ])
+        in
+        let%map.Result mode_arg = Vars.mode_arg vars mode in
+        Type.AMode mode_arg, Type_expr.Mode mode
+      | Ty _, Mode { txt = Atoms [ atom ]; loc } ->
+        let%map.Result ty, syntax =
+          elaborate'
+            t
+            module_
+            vars
+            ~splices
+            ~expansions
+            (Located.create
+               ~loc
+               (Type_expr.Con
+                  ( Located.create
+                      ~loc
+                      (Decl_path.Path
+                         (Path.name (Syntax.Mode_expr.Atom.to_string atom)))
+                  , [] )))
+        in
+        Type.ATy ty, Type_expr.Ty syntax
+      | (Row _ | Mode _), Ty { loc; _ }
+      | (Ty _ | Row _), Mode { loc; _ }
+      | Mode _, Row { loc; _ } ->
         error
           ~loc
           (Type_arg_kind_mismatch { type_name = path; param = param.txt }))
@@ -868,7 +914,11 @@ let declare
       (List.map decl.params ~f:(fun param ->
          match param.txt with
          | Ty _ -> Type.ATy (TVar (Type.Var.create (Fresh.id t.fresh) Generic))
-         | Row _ -> ARow (RVar (Type.Var.create (Fresh.id t.fresh) Generic))))
+         | Row _ -> ARow (RVar (Type.Var.create (Fresh.id t.fresh) Generic))
+         | Mode _ ->
+           let var = Mode.Var.create (Fresh.modes t.fresh) ~rank:1 in
+           Mode.Var.generalize [ var ] ~rank:0;
+           AMode (Var var)))
   in
   if not lazily then ignore (force params : Type.arg list);
   Hashtbl.add_exn
@@ -954,7 +1004,7 @@ let check_exception t name =
       ; index
       ; args
       ; result = Type.exn
-      ; global_args = List.map args ~f:(fun _ -> false)
+      ; modalities = List.map args ~f:(fun _ -> Member_modality.Id)
       }
     in
     decl.checked <- Some checked;
@@ -971,6 +1021,40 @@ let prepare_kind t (decl : Decl.t) =
       ~splices:true
       ~expansions
   in
+  (* A member's type, with its modality. *)
+  let member (ty : Type_expr.t) =
+    match ty.txt with
+    | Modality (inner, mode) ->
+      let%bind.Result modality =
+        match mode.txt with
+        | Atoms atoms ->
+          Ok
+            (Member_modality.of_atoms
+               (Mode_atoms.declared ~default:Mode.Const.max atoms))
+        | Var name ->
+          (match
+             List.findi decl.decl.params ~f:(fun _ param ->
+               String.equal (Type_decl.Param.name param.txt) name)
+           with
+           | Some (index, { txt = Mode _; _ }) ->
+             Ok (Member_modality.Param index)
+           | Some (_, { txt = Ty _ | Row _; _ }) ->
+             Error
+               (Typecheck_error.create
+                  ~loc:mode.loc
+                  (Type_variable_kind_mismatch name))
+           | None ->
+             Error
+               (Typecheck_error.create
+                  ~loc:mode.loc
+                  (Mode_variable_in_declaration name)))
+      in
+      let%map.Result elaborated, syntax = elaborate inner in
+      elaborated, { ty with txt = Type_expr.Modality (syntax, mode) }, modality
+    | _ ->
+      let%map.Result elaborated, syntax = elaborate ty in
+      elaborated, syntax, Member_modality.Id
+  in
   let canonical_name = Module_scope.canonical_name decl.module_ in
   match decl.decl.kind with
   | Alias body ->
@@ -986,12 +1070,9 @@ let prepare_kind t (decl : Decl.t) =
   | Variant constructors ->
     let%map.Result constructors =
       map_result constructors ~f:(fun ((name : Name.t), args) ->
-        let%map.Result args = map_result args ~f:elaborate in
-        let args, syntax = List.unzip args in
-        ( { Signature.Constructor.name = name.txt
-          ; args
-          ; global_args = List.map syntax ~f:Syntax.Type_expr.is_global
-          }
+        let%map.Result args = map_result args ~f:member in
+        let args, syntax, modalities = List.unzip3 args in
+        ( { Signature.Constructor.name = name.txt; args; modalities }
         , (canonical_name name.txt, syntax) ))
     in
     let constructors, reflected = List.unzip constructors in
@@ -1000,11 +1081,8 @@ let prepare_kind t (decl : Decl.t) =
   | Record fields ->
     let%map.Result fields =
       map_result fields ~f:(fun ((name : Name.t), ty) ->
-        let%map.Result ty, syntax = elaborate ty in
-        ( { Signature.Field.name = name.txt
-          ; ty
-          ; is_global = Syntax.Type_expr.is_global syntax
-          }
+        let%map.Result ty, syntax, modality = member ty in
+        ( { Signature.Field.name = name.txt; ty; modality }
         , (canonical_name name.txt, syntax) ))
     in
     let fields, reflected = List.unzip fields in
@@ -1116,7 +1194,7 @@ let define t (decl : Decl.t) =
    | Alias _ | Abstract -> ()
    | Variant constructors ->
      let result = Type.TCon (decl.name, Decl.params decl) in
-     List.iteri constructors ~f:(fun index { name; args; global_args } ->
+     List.iteri constructors ~f:(fun index { name; args; modalities } ->
        let name = canonical_name name in
        Hashtbl.add_exn
          t.constructors
@@ -1127,7 +1205,7 @@ let define t (decl : Decl.t) =
            ; index
            ; args
            ; result
-           ; global_args
+           ; modalities
            })
    | Record fields ->
      let record_type =
@@ -1137,7 +1215,7 @@ let define t (decl : Decl.t) =
              canonical_name field.name)
        }
      in
-     List.iteri fields ~f:(fun index { name = _; ty; is_global } ->
+     List.iteri fields ~f:(fun index { name = _; ty; modality } ->
        Hashtbl.add_exn
          t.fields
          ~key:record_type.fields.(index)
@@ -1146,7 +1224,7 @@ let define t (decl : Decl.t) =
            ; index
            ; record = TCon (decl.name, Decl.params decl)
            ; ty
-           ; is_global
+           ; modality
            }));
   checked
 ;;
@@ -1294,8 +1372,23 @@ let reflect t name =
   (Hashtbl.find_exn t.types name).reflected
 ;;
 
-let field_modality t name =
-  Modality.of_global (Hashtbl.find_exn t.fields name).is_global
+let modality (modality : Member_modality.t) ~(of_ : Type.ty) : Modality.t =
+  match modality with
+  | Id -> Modality.id
+  | Meet const -> Modality.of_step (Meet const)
+  | Param index ->
+    (match Type.canonical_ty of_ with
+     | TCon (_, args) ->
+       (match List.nth_exn args index with
+        | AMode mode -> Modality.of_step (Param mode)
+        | ATy _ | ARow _ ->
+          raise_s
+            [%message "Type_env.modality: not a mode argument" (index : int)])
+     | _ -> raise_s [%message "Type_env.modality: not of a type constructor"])
+;;
+
+let field_modality t name ~record =
+  modality (Hashtbl.find_exn t.fields name).modality ~of_:record
 ;;
 
 let pointer_free t ty =

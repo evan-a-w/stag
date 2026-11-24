@@ -16,7 +16,7 @@ module Constructor = struct
   type t =
     { name : string
     ; args : Type.ty list
-    ; global_args : bool list (** Per argument: whether written [global_]. *)
+    ; modalities : Member_modality.t list (** Per argument. *)
     }
   [@@deriving sexp_of]
 end
@@ -25,23 +25,35 @@ module Field = struct
   type t =
     { name : string
     ; ty : Type.ty
-    ; is_global : bool
+    ; modality : Member_modality.t
     }
   [@@deriving sexp_of]
 end
 
+let with_modality printer printed modality ~params =
+  match
+    Member_modality.to_string modality ~param:(fun index ->
+      match List.nth params index with
+      | Some (Type.AMode mode) -> Type.Printer.mode_arg printer mode
+      | Some (ATy _ | ARow _) | None -> "?")
+  with
+  | None -> printed
+  | Some mode -> printed ^ " @@ " ^ mode
+;;
+
 (* A tuple parenthesizes its components as constructor arguments need. *)
-let constructor_args printer name args ~global_args =
-  if List.exists global_args ~f:Fn.id
+let constructor_args printer name args ~modalities ~params =
+  if List.exists modalities ~f:(fun modality ->
+       not (Member_modality.equal modality Id))
   then
-    List.map2_exn args global_args ~f:(fun arg is_global ->
+    List.map2_exn args modalities ~f:(fun arg modality ->
       let printed = Type.Printer.ty printer arg in
       let printed =
         match Type.canonical_ty arg with
         | TTuple _ | TArrow _ -> "(" ^ printed ^ ")"
         | _ -> printed
       in
-      if is_global then "global_ " ^ printed else printed)
+      with_modality printer printed modality ~params)
     |> String.concat ~sep:" * "
     |> sprintf "%s of %s" name
   else sprintf "%s of %s" name (Type.Printer.ty printer (TTuple args))
@@ -72,19 +84,24 @@ module Type_decl = struct
       | Abstract -> None
       | Variant [] -> Some "|"
       | Variant constructors ->
-        List.map constructors ~f:(fun { name; args; global_args } ->
+        List.map constructors ~f:(fun { name; args; modalities } ->
           match args with
           | [] -> name
-          | args -> constructor_args printer name args ~global_args)
+          | args ->
+            constructor_args printer name args ~modalities ~params:t.params)
         |> String.concat ~sep:" | "
         |> Some
       | Record fields ->
-        List.map fields ~f:(fun { name; ty = field; is_global } ->
+        List.map fields ~f:(fun { name; ty = field; modality } ->
+          let printed =
+            match modality, Type.canonical_ty field with
+            | (Meet _ | Param _), TArrow _ -> "(" ^ ty field ^ ")"
+            | _ -> ty field
+          in
           sprintf
-            "%s : %s%s"
+            "%s : %s"
             name
-            (if is_global then "global_ " else "")
-            (ty field))
+            (with_modality printer printed modality ~params:t.params))
         |> String.concat ~sep:"; "
         |> sprintf "{ %s }"
         |> Some
@@ -216,9 +233,9 @@ let rec lines ~of_prelude ~modes enclosing : Item.t -> _ =
         decl
         ~canonical_name:(Scope.canonical_name scope decl.name))
   | Exception { name; args = [] } -> [ "exception " ^ name ]
-  | Exception { name; args; global_args } ->
+  | Exception { name; args; modalities } ->
     line (fun printer ->
-      "exception " ^ constructor_args printer name args ~global_args)
+      "exception " ^ constructor_args printer name args ~modalities ~params:[])
   | Module { name; items = [] } -> [ sprintf "module %s : sig end" name ]
   | Module { name; items } ->
     let enclosing = Scope.create (scope.path @ [ name ]) items :: enclosing in

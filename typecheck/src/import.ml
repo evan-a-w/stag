@@ -5,6 +5,7 @@ module Stamp_counter = Stag_common.Stamp_counter
 module Type = Stag_types.Type
 module Arrow_modes = Stag_types.Arrow_modes
 module Mode_arg = Stag_types.Mode_arg
+module Member_modality = Stag_types.Member_modality
 module Fresh = Stag_types.Fresh
 module Unify = Stag_types.Unify
 module Unification_error = Stag_types.Unification_error

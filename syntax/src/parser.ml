@@ -448,8 +448,14 @@ and type_app t : Type_expr.t =
   ty
 
 and type_arg t : Type_expr.arg =
+  let is_atom : Token.t -> bool = function
+    | Lident name -> Option.is_some (Mode_expr.Atom.of_string name)
+    | External -> true
+    | _ -> false
+  in
   match peek t with
   | Lbrace -> Row (record_row t)
+  | first when is_atom first && is_atom (peek_at t 1) -> Mode (mode_expr t)
   | _ ->
     let ty = type_expr t in
     if is t At_at
@@ -1397,7 +1403,15 @@ let type_param t : Type_decl.Param.t Located.t =
   match peek t with
   | Tyvar _ | Weak_tyvar _ ->
     let var = tyvar t in
-    located ~loc:var.loc (Type_decl.Param.Ty var.txt)
+    (match peek t, peek_at t 1 with
+     | Colon, Lident "mode" ->
+       advance t;
+       advance t;
+       since t start (Type_decl.Param.Mode var.txt)
+     | Colon, _ ->
+       advance t;
+       expected t "`mode`, the only kind a parameter is declared with"
+     | _ -> located ~loc:var.loc (Type_decl.Param.Ty var.txt))
   | Lbrace ->
     advance t;
     expect t Dotdot;
@@ -1407,30 +1421,38 @@ let type_param t : Type_decl.Param.t Located.t =
   | _ -> expected t "a type parameter like `'a` or `{..'r}`"
 ;;
 
-(** [global_ t], with [t] parsed by [ty], or [t]. *)
-let maybe_global t ~ty : Type_expr.t =
+(** [t @@ m], with [t] parsed by [ty], or [t]. *)
+let maybe_modality t ~(ty : _ -> Type_expr.t) : Type_expr.t =
   match peek t with
   | Global_ ->
-    let start = loc t in
-    advance t;
+    fail (loc t) "a modality is written after the type: `t @@ global`"
+  | _ ->
     let inner = ty t in
-    since t start (Type_expr.Global inner)
-  | _ -> ty t
+    if is t At_at
+    then (
+      advance t;
+      let mode = mode_expr t in
+      located
+        ~loc:(Loc.merge inner.loc mode.loc)
+        (Type_expr.Modality (inner, mode)))
+    else inner
 ;;
 
 (* [parsed] is told the arguments parsed so far, as they are parsed. An
-   exception's arguments are always global, so are not written [global_]. *)
+   exception's arguments are always global, so have no modality. *)
 let constructor_args ?(parsed = ignore) ~exception_ t =
   if is t Of
   then (
     advance t;
     let rec args acc =
-      if exception_ && is t Global_
-      then
-        fail
-          (loc t)
-          "an exception's arguments are always global: remove `global_`";
-      let acc = maybe_global t ~ty:type_app :: acc in
+      let arg = maybe_modality t ~ty:type_app in
+      (match arg.txt with
+       | Modality _ when exception_ ->
+         fail
+           arg.loc
+           "an exception's arguments are always global, and have no modality"
+       | _ -> ());
+      let acc = arg :: acc in
       parsed (List.rev acc);
       match peek t with
       | At ->
@@ -1440,7 +1462,7 @@ let constructor_args ?(parsed = ignore) ~exception_ t =
            then "an exception's arguments have no mode, they are always global"
            else
              "a constructor's argument has no mode: to make it always global, \
-              write `global_ t`")
+              write `t @@ global`")
       | Star ->
         advance t;
         args acc
@@ -1506,7 +1528,7 @@ let type_kind t ~(parsed : Type_decl.Kind.t -> unit) : Type_decl.Kind.t =
          let missing = located ~loc:name.loc (Type_expr.Tuple []) in
          parsed (Record (List.rev ((name, missing) :: !fields)));
          expect t Colon;
-         let field = name, maybe_global t ~ty:type_expr in
+         let field = name, maybe_modality t ~ty:type_expr in
          fields := field :: !fields;
          parsed (Record (List.rev !fields));
          field))

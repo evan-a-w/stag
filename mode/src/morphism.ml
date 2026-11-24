@@ -134,3 +134,13 @@ let compose m1 m2 =
   ; left = Array.map m1.left ~f:(fun x -> m2.left.(x))
   }
 ;;
+
+let meet_with axis point =
+  let size = Axis.Any.size axis in
+  let top = size - 1 in
+  create
+    ~src:axis
+    ~dst:axis
+    ~right:(Array.init size ~f:(fun y -> if point <= y then top else y))
+    ~left:(Array.init size ~f:(fun x -> Int.min x point))
+;;

@@ -391,6 +391,7 @@ let rec kind_message (kind : Kind.t) ~show_type =
       match param with
       | Ty _ -> "a type"
       | Row _ -> "a row"
+      | Mode _ -> "a mode"
     in
     sprintf
       "The parameter %s of type %s expects %s"
@@ -538,8 +539,9 @@ let rec kind_message (kind : Kind.t) ~show_type =
       name
   | Mode_variable_in_declaration var ->
     sprintf
-      "The mode variable '%s is not allowed in a declaration: its arrows have \
-       fixed modes"
+      "The mode variable '%s is not allowed in a declaration unless it is a \
+       parameter declared ['%s : mode]: its arrows have fixed modes"
+      var
       var
   | Invalid_mode why -> sprintf "This mode is invalid: %s" why
   | Invalid_external { symbol; problem } ->
@@ -573,11 +575,13 @@ let rec kind_message (kind : Kind.t) ~show_type =
       "The C symbol %S is invalid: it must be non-empty, with no NUL character"
       symbol
   | Misplaced_modality ->
-    "A modality is only written on a pointer's type argument, as in \
-     [ptr[string @@ external]]"
+    "A modality is only written on a record field's type, a constructor's \
+     argument or a pointer's type argument, as in [ptr[string @@ external]]"
   | Invalid_modality ->
-    "The modality of a pointer's type argument is a provenance ([static], [gc] \
-     or [external]) or a mode variable, as in [ptr[string @@ external]]"
+    "The modality of a pointer's type argument is on stage and provenance \
+     ([const], [portable], [nonportable], [static], [gc], [external]) or a \
+     mode variable, as in [ptr[string @@ external]]: a pointer's cell is \
+     always [global]"
   | Misplaced_mut ->
     "Only an entry of a code type's context can be [mut] or [immut], for a \
      variable the code assigns or doesn't"

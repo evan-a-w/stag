@@ -140,30 +140,40 @@ let%expect_test "stack_, exclave_ and [@nontail]" =
     |}]
 ;;
 
-let%expect_test "global_ fields and constructor arguments" =
-  prog "type r = { x : global_ int; y : list[int] }";
-  prog "type t = A of global_ int * int | B of global_ (int -> int)";
-  prog "exception E of global_ int";
+let%expect_test "modalities of fields and constructor arguments" =
+  prog "type r = { x : int @@ global; y : list[int] @@ portable gc }";
+  prog "type t = A of int @@ global * int | B of (int -> int) @@ global";
+  prog "type r = { x : int -> int @@ global }";
+  prog "type r = { x : global_ int }";
+  prog "exception E of int @@ global";
   prog "exception E of int @ local";
   prog "type t = A of int @ local";
-  prog "type t = A of global_ int @ local";
+  prog "type t = A of int @@ global @ local";
   ty "global_ int";
   [%expect
     {|
     ((Type
       ((name r) (params ())
        (kind
-        (Record ((x (Global (Con int ()))) (y (Con list ((Ty (Con int ())))))))))))
+        (Record
+         ((x (Modality (Con int ()) (Atoms (Global))))
+          (y (Modality (Con list ((Ty (Con int ())))) (Atoms (Portable Gc))))))))))
     ((Type
       ((name t) (params ())
        (kind
         (Variant
-         ((A ((Global (Con int ())) (Con int ())))
-          (B ((Global (Arrow (Con int ()) (Con int ())))))))))))
-    t.stag:1:15-22: an exception's arguments are always global: remove `global_`
+         ((A ((Modality (Con int ()) (Atoms (Global))) (Con int ())))
+          (B ((Modality (Arrow (Con int ()) (Con int ())) (Atoms (Global)))))))))))
+    ((Type
+      ((name r) (params ())
+       (kind
+        (Record
+         ((x (Modality (Arrow (Con int ()) (Con int ())) (Atoms (Global))))))))))
+    t.stag:1:15-22: a modality is written after the type: `t @@ global`
+    t.stag:1:15-28: an exception's arguments are always global, and have no modality
     t.stag:1:19-20: an exception's arguments have no mode, they are always global
-    t.stag:1:18-19: a constructor's argument has no mode: to make it always global, write `global_ t`
-    t.stag:1:26-27: a constructor's argument has no mode: to make it always global, write `global_ t`
+    t.stag:1:18-19: a constructor's argument has no mode: to make it always global, write `t @@ global`
+    t.stag:1:28-29: a constructor's argument has no mode: to make it always global, write `t @@ global`
     t.stag:1:0-7: expected a type, found `global_`
     |}]
 ;;
@@ -173,7 +183,7 @@ let%expect_test "printing" =
     {|
 let f (x @ local) (y : int @ 'm) : int @ global = exclave_ (x, stack_ (y, y))
 let g (h : int @ local -> int @ local) = h 1 [@nontail]
-type r = { x : global_ int; y : int }
+type r = { x : int @@ global; y : int }
 let mut counter : int @ static = 0
 |};
   [%expect
@@ -181,7 +191,7 @@ let mut counter : int @ static = 0
     let f (x @ local) (y : int @ 'm) : int @ global = exclave_ (x, stack_ (y, y))
     let g (h : int @ local -> int @ local) = h 1 [@nontail]
 
-    type r = {x : global_ int; y : int}
+    type r = {x : int @@ global; y : int}
 
     let mut counter : int @ static = 0
     |}];

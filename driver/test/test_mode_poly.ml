@@ -417,7 +417,7 @@ let swap_any p q = let v = p.* in p.* <- q.*; q.* <- v
     let p_copy : ptr[string] = p
     let store_copy : string @ 'm0 -> unit with 'm0 <= gc = store
     let keep_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and 'm0 <= static = keep
-    let in_ptr_copy : 'a -> ptr[string @@ external] @ nonportable = in_ptr
+    let in_ptr_copy : 'a -> ptr[string @@ 'm0] @ nonportable with external <= 'm0 = in_ptr
     let k_copy : int @ 'm0 -> (int -> int) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1 = k
     let captures_copy : string @ 'm0 -> (int -> string @ 'm2) @ 'm1 with 'm0 <= 'm2 and 'm0 <= 'm1 and gc <= 'm1 = captures
     let closed_copy : 'a @ 'm0 -> (int -> int) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1 = closed
@@ -427,7 +427,7 @@ let swap_any p q = let v = p.* in p.* <- q.*; q.* <- v
     let id_cell_copy : ptr['a @@ 'm1] @ 'm0 -> ptr['a @@ 'm1] @ 'm2 with 'm0 <= 'm2 = id_cell
     let static_cell_copy : ptr[string @@ static] = static_cell
     let ext_cell_copy : ptr[string @@ external] = ext_cell
-    let swap_any_copy : ptr['a @@ 'm1] @ 'm0 -> (ptr['a @@ 'm1] @ 'm3 -> unit) @ 'm2 with 'm0 <= 'm1 and 'm0 <= 'm2 and 'm3 <= 'm1 and gc <= 'm2 = swap_any
+    let swap_any_copy : ptr['a @@ 'm1] @ 'm0 -> (ptr['a @@ 'm1] -> unit) @ 'm2 with 'm0 <= 'm2 and gc <= 'm2 = swap_any
     |}]
 ;;
 

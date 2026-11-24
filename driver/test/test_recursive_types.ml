@@ -682,7 +682,10 @@ type l['a] = [`Nil | `Cons of 'a * ptr[l['a]]]
               (RExtend Cons Present
                (TTuple
                 ((TVar (Generic 1))
-                 (TCon ptr ((ATy (TVar (Link (Cycle_ref 0)))) (AMode Gc)))))
+                 (TCon ptr
+                  ((ATy (TVar (Link (Cycle_ref 0))))
+                   (AMode
+                    ((stage Nonportable) (provenance Gc) (locality Global)))))))
                REmpty)))))))))))
     |}]
 ;;

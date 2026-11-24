@@ -236,7 +236,7 @@ external const_result : int -> int @ const = "labs"
 external bad : int @ 'm -> int = "labs"
 |};
   [%expect
-    {| The mode variable 'm is not allowed in a declaration: its arrows have fixed modes |}]
+    {| The mode variable 'm is not allowed in a declaration unless it is a parameter declared ['m : mode]: its arrows have fixed modes |}]
 ;;
 
 let%expect_test "externals are const toplevels" =
