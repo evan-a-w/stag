@@ -77,15 +77,18 @@ let f x = .<x>.
   modes {|
 let g x = let h u = x in .<h>.
 |};
-  [%expect {|
+  [%expect
+    {|
     The quote can't embed x, as it may not be portable. Bind it as (x @ portable) to embed it, or write [forget x in ...] to make x a free variable of the quote
     The quote can't embed h, as it may not be portable. Bind it as (h @ portable) to embed it, or write [forget h in ...] to make h a free variable of the quote
     |}];
-  modes {|
+  modes
+    {|
 let f x = forget x in .<x>.
 let g x = let h u = x in forget h in .<h>.
 |};
-  [%expect {|
+  [%expect
+    {|
     val f : 'a -> <'b>{x : 'b; ..'c}
     val g : 'a @ 'm0 -> <'b>{h : 'b; ..'c} @ 'm1 with stage('m0) <= stage('m1)
     |}]
