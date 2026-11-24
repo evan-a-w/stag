@@ -164,7 +164,7 @@ let get u = g
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and portable <= 'm1 and external <= 'm1
-    val g : string
+    val g : string @ external
     val set : 'a -> unit @ 'm0 with portable <= 'm0
     val get : 'a -> string @ nonportable external
     |}];

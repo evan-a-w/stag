@@ -6,6 +6,8 @@ module Value = struct
     ; scheme : Type.ty
     ; stage : Stag_mode.Stage.t
     (** Its least, so whether it may be used in quotes. *)
+    ; held : Stag_mode.Provenance.t option
+    (** Of a [let mut], the least provenance of what it holds. *)
     }
   [@@deriving sexp_of]
 end
@@ -198,9 +200,14 @@ let rec lines ~of_prelude ~modes enclosing : Item.t -> _ =
     [ line ^ Type.Printer.where printer ]
   in
   function
-  | Value { name; scheme; stage = _ } ->
+  | Value { name; scheme; stage = _; held } ->
     line (fun printer ->
-      sprintf "val %s : %s" name (Type.Printer.ty printer scheme))
+      let held =
+        match held with
+        | Some External when modes -> " @ external"
+        | Some (Static | Gc | External) | None -> ""
+      in
+      sprintf "val %s : %s%s" name (Type.Printer.ty printer scheme) held)
   | Type decl ->
     line (fun printer ->
       Type_decl.to_string_hum

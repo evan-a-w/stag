@@ -4160,12 +4160,15 @@ let rec signature (program_env : Program_env.t) module_ ~complete =
       | Let_mut ({ txt = name; loc = _ }, _, _) ->
         let toplevel = Program_env.toplevel program_env (canonical_name name) in
         (match toplevel.state with
-         | Done { entry = { scheme; mode; _ }; _ } ->
+         | Done { entry = { scheme; mode; held; _ }; _ } ->
            Some
              (Value
                 { name
                 ; scheme
                 ; stage = (Mode.Var.lower (mode :> Mode.Var.t)).stage
+                ; held =
+                    Option.map held ~f:(fun held ->
+                      (Mode.Var.lower (held :> Mode.Var.t)).provenance)
                 })
          | Unchecked | In_progress _ ->
            missing "toplevel" [%sexp (toplevel : Toplevel.t)])
