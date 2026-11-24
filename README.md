@@ -52,6 +52,12 @@ would hide `Int.*`). Evaluation is as for `stag run` (see
 [syntax.md](syntax.md#files)): libraries and files in dependency order, and the
 files of each library ordered among themselves likewise.
 
+A stanza may have the field `(compile_time_c_calls)`, letting the `external`s
+it declares be called at compile time (see
+[syntax.md](syntax.md#external-functions)). Without it, calling one of them
+while running compile-time code is an error. The editor uses the same
+configuration.
+
 ```
 stag-build build             # typecheck every stanza
 stag-build exec NAME         # typecheck and evaluate an executable

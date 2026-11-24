@@ -239,6 +239,13 @@ module Expr : sig
       | Poly_variant of string * 'e option
       | Expect of string Located.t
       (** Checks the output so far against the string, see [Expect_test_runner]. *)
+      | External of
+          { symbol : string
+          ; signature : C_signature.t
+          ; at_compile_time : Compile_time_c_calls.Policy.t
+          }
+      (** The body of [external f : t = "symbol"]: the C function [symbol],
+          called once given [C_signature.arity signature] arguments. *)
       | Type of Syntax.Type_expr.t
       (** [type t], its types named by canonical names ([Resolved]). *)
       | Error of 'e list

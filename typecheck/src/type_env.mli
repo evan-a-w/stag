@@ -148,6 +148,14 @@ val elaborate
   -> splices:bool
   -> (Type.ty * Syntax.Type_expr.t, Typecheck_error.t) Result.t
 
+(** As a declaration's type, [expr] having no type variables and its arrows
+    fixed modes, unwritten ones the default. *)
+val elaborate_declared
+  :  t
+  -> Module_scope.t
+  -> Syntax.Type_expr.t
+  -> (Type.ty, Typecheck_error.t) Result.t
+
 (** How a type splice [.~e] at [loc] is evaluated, in the scope it is written
     in, to the type it gives (located at [loc]). Types and exceptions are always
     declarations, so evaluate theirs. *)

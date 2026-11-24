@@ -390,6 +390,7 @@ let rec expr t ~syntax ~program (e : Typed.Expr.t) =
    | Poly_update _
    | Poly_variant _
    | Expect _
+   | External _
    | Type _
    | Error _ -> typed ());
   match e.desc with
@@ -451,6 +452,7 @@ let rec declarations
       members kind
     | Exception (name, _) | Malformed_exception (name, _) ->
       set t.constructors name
+    | External { name; _ } -> set t.values name
     | Module (name, toplevels) ->
       declarations
         t
@@ -547,7 +549,7 @@ let create
         List.iter args ~f:(Syntax_at.expr syntax));
       Syntax_at.expr syntax body
     | Module (_, toplevels) -> List.iter toplevels ~f:syntax_of_toplevel
-    | Type _ | Exception _ | Malformed_exception _ -> ()
+    | Type _ | Exception _ | External _ | Malformed_exception _ -> ()
   in
   List.iter files ~f:(fun (_, toplevel) -> syntax_of_toplevel toplevel);
   List.iter files ~f:(fun (module_path, toplevel) ->

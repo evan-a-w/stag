@@ -278,6 +278,15 @@ module Make (B : Builder) = struct
       | Type decl -> con "Type" [ type_decl decl ]
       | Exception (exn_name, args) | Malformed_exception (exn_name, args) ->
         con "Exception" [ name exn_name; list type_expr args ]
+      | External { name = ext_name; ty; symbol } ->
+        con
+          "External"
+          [ B.record
+              [ "name", name ext_name
+              ; "ty", type_expr ty
+              ; "symbol", B.string symbol.txt
+              ]
+          ]
       | Module (module_name, items) ->
         con "Module" [ name module_name; program items ]
       | Module_splice (module_name, e, _) ->

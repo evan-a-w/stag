@@ -32,6 +32,26 @@ let parse_recovering project (target : Project.Target.t) =
   , List.concat_map parsed ~f:snd )
 ;;
 
+let compile_time_c_calls project (target : Project.Target.t) =
+  let modules (target : Project.Target.t) =
+    match target.stanza.kind with
+    | Library -> [ Stanza.module_name target.stanza ]
+    | Executable | Test ->
+      List.filter_map target.files ~f:(fun file ->
+        Source_file.module_name file.path |> Result.ok)
+  in
+  Project.closure project target @ [ target ]
+  |> List.concat_map ~f:(fun (target : Project.Target.t) ->
+    let library =
+      { Compile_time_c_calls.Library.name = target.stanza.name.txt
+      ; allowed = target.stanza.compile_time_c_calls
+      }
+    in
+    List.map (modules target) ~f:(fun module_ -> module_, library))
+  |> String.Map.of_alist_reduce ~f:(fun first _ -> first)
+  |> Compile_time_c_calls.of_libraries
+;;
+
 let parse project target =
   match parse_recovering project target with
   | Some groups, [] -> Ok groups
@@ -43,7 +63,13 @@ let check ?output project target =
   match groups with
   | None -> Error (Diagnostic.sort errors)
   | Some groups ->
-    (match Driver.check_modules ?output groups, errors with
+    (match
+       ( Driver.check_modules
+           ~compile_time_c_calls:(compile_time_c_calls project target)
+           ?output
+           groups
+       , errors )
+     with
      | Ok driver, [] -> Ok driver
      | Ok _, errors -> Error (Diagnostic.sort errors)
      | Error { errors = type_errors; partial = _ }, errors ->

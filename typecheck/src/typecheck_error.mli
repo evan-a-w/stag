@@ -160,6 +160,12 @@ module Kind : sig
     | Invalid_mode of string
     (** A mode whose atoms contradict each other, as [const external], or a
         [with] constraint on no mode variable. *)
+    | Invalid_external of
+        { symbol : string
+        ; problem : C_signature.Problem.t
+        } (** An [external] whose type has no C signature. *)
+    | Invalid_external_symbol of string
+    (** An [external]'s symbol is empty or contains a NUL character. *)
     | Spliced_code_assigns_immutable of string
     (** Code spliced where the variable it assigns is not mutable. *)
     | Type_splice_failed of Error.t

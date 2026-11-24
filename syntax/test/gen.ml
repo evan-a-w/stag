@@ -349,6 +349,8 @@ and toplevel t : Toplevel.t =
               else None)
          ; body = expr t
          }
+     | 9 ->
+       External { name = name t; ty = type_expr t; symbol = loc (string t) }
      | 10 -> Let_mut (name t, annot t, expr t)
      | _ -> Let (name t, [], Annot.none, expr t))
 

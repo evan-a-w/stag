@@ -26,6 +26,12 @@ type t =
       { prim : Prim.t
       ; applied : t list
       }
+  | External of
+      { symbol : string
+      ; signature : C_signature.t
+      ; at_compile_time : Compile_time_c_calls.Policy.t
+      ; applied : t list
+      }
   | Intrinsic of Intrinsic.t
   | Type of Syntax.Type_expr.t
   | Ref of Decl_ref.t
@@ -68,6 +74,7 @@ let to_prim : t -> Prim.Value.t or_null = function
   | Function _
   | Code _
   | Prim _
+  | External _
   | Intrinsic _
   | Type _
   | Ref _ -> Null
@@ -130,7 +137,7 @@ let sexp_of_t value =
         [%sexp (Map.map fields ~f:sexp_of_t : Sexp.t String.Map.t)]
       | Poly_variant (tag, Unit) -> Atom ("`" ^ tag)
       | Poly_variant (tag, arg) -> List [ Atom ("`" ^ tag); sexp_of_t arg ]
-      | Function _ | Prim _ | Intrinsic _ -> Atom "<fun>"
+      | Function _ | Prim _ | External _ | Intrinsic _ -> Atom "<fun>"
       | Type ty -> List [ Atom "Type"; Syntax.Type_expr.sexp_of_t ty ]
       | Ref ref_ -> List [ Atom "Ref"; Decl_ref.sexp_of_t ref_ ]
       | Code { expr; persistent } ->
@@ -219,7 +226,7 @@ let to_string_hum ?max_length value =
     | Poly_variant (tag, value) ->
       add (sprintf "`%s " tag);
       argument value
-    | Function _ | Prim _ | Intrinsic _ -> add "<fun>"
+    | Function _ | Prim _ | External _ | Intrinsic _ -> add "<fun>"
     | Code _ -> add "<code>"
     | Type _ -> add "<type>"
     | Ref ref_ -> add (Decl_ref.to_string_hum ref_)

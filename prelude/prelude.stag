@@ -308,6 +308,7 @@ module Stag = struct
       | Let_mut of string * Annot.t * Expr.t
       | Type of Type_decl.t
       | Exception of string * list[Type_expr.t]
+      | External of {`name : string; `ty : Type_expr.t; `symbol : string}
       | Module of string * list[t]
       | Module_splice of string * Expr.t
       | Include of Expr.t

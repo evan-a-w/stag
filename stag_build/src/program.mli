@@ -14,6 +14,14 @@ val parse_recovering
   -> Project.Target.t
   -> Driver.Module_group.t list option * Diagnostic.t list
 
+(** Which externals of [target]'s program may be called at compile time: those
+    of the libraries (and executable or test) whose stanza has
+    [(compile_time_c_calls)]. *)
+val compile_time_c_calls
+  :  Project.t
+  -> Project.Target.t
+  -> Compile_time_c_calls.t
+
 (** [parse_recovering], if without errors. *)
 val parse
   :  Project.t

@@ -62,12 +62,18 @@ val program : ?prelude:bool -> string -> Syntax.Program.t
 
 (** Checks [source], printing the error if it fails to parse or check. Toplevel
     splices run, printing to stdout. *)
-val typecheck : ?limits:Limits.t -> ?prelude:bool -> string -> t option
+val typecheck
+  :  ?limits:Limits.t
+  -> ?compile_time_c_calls:Compile_time_c_calls.t
+  -> ?prelude:bool
+  -> string
+  -> t option
 
 (** As [typecheck], for toplevels built otherwise, eg. by [Helpers] for what
     source can't express. *)
 val typecheck_program
   :  ?limits:Limits.t
+  -> ?compile_time_c_calls:Compile_time_c_calls.t
   -> ?prelude:bool
   -> Syntax.Program.t
   -> t option
@@ -124,6 +130,7 @@ val check_program
     leaving out the last part if [~eval:false]. *)
 val run
   :  ?limits:Limits.t
+  -> ?compile_time_c_calls:Compile_time_c_calls.t
   -> ?prelude:bool
   -> ?bodies:string list
   -> ?eval:bool

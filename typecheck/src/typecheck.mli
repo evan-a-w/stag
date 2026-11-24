@@ -12,11 +12,14 @@ type t
     [Interpreter.set_limits]) is shared by every program checked with [t], and
     toplevels it evaluates keep their values when [Interpreter.eval]ed. Programs
     see [prelude], by default [Prelude.toplevels]. With [const_toplevels]
-    (default false, as for the interpreter), every toplevel must be [const]. *)
+    (default false, as for the interpreter), every toplevel must be [const].
+    Externals may be called at compile time as [compile_time_c_calls] says, by
+    default only the prelude's. *)
 val create
   :  stamps:Stamp_counter.t
   -> interpreter:Interpreter.t
   -> ?const_toplevels:bool
+  -> ?compile_time_c_calls:Compile_time_c_calls.t
   -> ?prelude:Syntax.Toplevel.t list
   -> unit
   -> t

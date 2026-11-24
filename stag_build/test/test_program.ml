@@ -319,3 +319,105 @@ let main = print_endline (show 3)|}
       let bad = 0 .Gen.Helper.describe
     |}]
 ;;
+
+(* [Ffi] allows calls of its externals at compile time, [Plain] doesn't, so
+   [Main] may run [Ffi]'s at compile time, also through [Plain]'s wrapper, but
+   not [Plain]'s own. Calls at runtime are always allowed. *)
+let c_calls_project ~main =
+  [ "ffi/stag", "(library (name ffi) (compile_time_c_calls))"
+  ; "ffi/ffi.stag", {|external labs : int -> int = "labs"|}
+  ; "plain/stag", "(library (name plain) (libraries ffi))"
+  ; ( "plain/plain.stag"
+    , {|external labs : int -> int = "labs"
+let wrapped x = Ffi.Ffi.labs x|} )
+  ; "bin/stag", "(executable (name main) (libraries plain))"
+  ; "bin/main.stag", main
+  ]
+;;
+
+let%expect_test "C calls at compile time are allowed by stanzas" =
+  check
+    (c_calls_project
+       ~main:
+         {|let a = .~(match Ffi.Ffi.labs (Int.sub 0 1) with 1 -> .<1>. | _ -> .<0>.)
+let b = .~(match Plain.Plain.wrapped (Int.sub 0 2) with 2 -> .<2>. | _ -> .<0>.)
+let c = Plain.Plain.labs (Int.sub 0 3)
+let main = print_int (Int.add a (Int.add b c))|})
+    ~target:"main";
+  [%expect
+    {|
+    module Ffi : sig
+      module Ffi : sig
+        val labs : int -> int
+      end
+    end
+    module Plain : sig
+      module Plain : sig
+        val labs : int -> int
+        val wrapped : int -> int
+      end
+    end
+    module Main : sig
+      val a : int
+      val b : int
+      val c : int
+      val main : unit
+    end
+    ---
+    6
+    |}];
+  check
+    (c_calls_project
+       ~main:
+         {|let d = .~(match Plain.Plain.labs (Int.sub 0 4) with 4 -> .<4>. | _ -> .<0>.)|})
+    ~target:"main";
+  [%expect
+    {|
+    File "bin/main.stag", line 1, characters 8-77:
+    1 | let d = .~(match Plain.Plain.labs (Int.sub 0 4) with 4 -> .<4>. | _ -> .<0>.)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This toplevel splice failed at compile time: The external Plain.Plain.labs can't be called at compile time: its library plain doesn't allow C calls at compile time (add (compile_time_c_calls) to its stanza)
+    File "bin/main.stag", line 1, characters 17-47:
+    1 | let d = .~(match Plain.Plain.labs (Int.sub 0 4) with 4 -> .<4>. | _ -> .<0>.)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: The error was raised here
+    |}]
+;;
+
+let%expect_test "an executable's own externals" =
+  check
+    [ "bin/stag", "(executable (name main))"
+    ; ( "bin/main.stag"
+      , {|external labs : int -> int = "labs"
+let a = .~(match labs (Int.sub 0 1) with 1 -> .<1>. | _ -> .<0>.)|}
+      )
+    ]
+    ~target:"main";
+  [%expect
+    {|
+    File "bin/main.stag", line 2, characters 8-65:
+    2 | let a = .~(match labs (Int.sub 0 1) with 1 -> .<1>. | _ -> .<0>.)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This toplevel splice failed at compile time: The external Main.labs can't be called at compile time: its library main doesn't allow C calls at compile time (add (compile_time_c_calls) to its stanza)
+    File "bin/main.stag", line 2, characters 17-35:
+    2 | let a = .~(match labs (Int.sub 0 1) with 1 -> .<1>. | _ -> .<0>.)
+                         ^^^^^^^^^^^^^^^^^^
+    Note: The error was raised here
+    |}];
+  check
+    [ "bin/stag", "(executable (name main) (compile_time_c_calls))"
+    ; ( "bin/main.stag"
+      , {|external labs : int -> int = "labs"
+let a = .~(match labs (Int.sub 0 1) with 1 -> .<1>. | _ -> .<0>.)|}
+      )
+    ]
+    ~target:"main";
+  [%expect
+    {|
+    module Main : sig
+      val labs : int -> int
+      val a : int
+    end
+    ---
+    |}]
+;;

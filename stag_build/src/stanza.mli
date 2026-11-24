@@ -20,6 +20,9 @@ type t =
   { kind : Kind.t
   ; name : string Located.t
   ; libraries : string Located.t list
+  ; compile_time_c_calls : bool
+  (** [(compile_time_c_calls)]: whether its externals may be called at compile
+      time (see [Compile_time_c_calls]). *)
   ; loc : Loc.t
   }
 [@@deriving sexp_of]

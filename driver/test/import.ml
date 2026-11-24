@@ -14,6 +14,7 @@ module Printer = Stag_syntax.Printer
 module Source_file = Stag_syntax.Source_file
 module Syntax = Stag_syntax.Syntax
 module Typed = Stag_ir.Typed
+module Compile_time_c_calls = Stag_ir.Compile_time_c_calls
 module Treewalk = Stag_treewalk
 module Interpreter = Stag_eval.Interpreter
 module Generated_syntax = Stag_eval.Generated_syntax

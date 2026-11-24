@@ -341,6 +341,8 @@ let expr (expr : Typed.Expr.t) =
       in
       node (Poly_variant (label tag, e))
     | Expect expected -> node (Expect expected)
+    | External { symbol; signature = _; at_compile_time = _ } ->
+      Or_error.error_s [%message "An external is not code" (symbol : string)]
     | Type ty -> node (Type ty)
     | Error (_ : Typed.Expr.t list) -> raise Reached_error
   in

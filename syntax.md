@@ -37,10 +37,12 @@ node, for good errors.
   `(* c *).x` start root paths, and `r.x`, `M.x`, `(e).x`, `"s".x` do not.
   The longest tokens `.<` `.~` `..` `.{` are unaffected (`..x` is `..` then
   `x`).
-- Keywords: `let rec in match with fun exception type of module struct end`,
-  `true false`, and `stack_ exclave_ global_` (see [Modes](#modes)), so
-  these are not identifiers anywhere, even qualified (`M.stack_`). Mode names
-  (`local`, `const`, ...) are not keywords.
+- Keywords: `let rec in match with fun exception external type of module
+  struct end`, `true false`, and `stack_ exclave_ global_` (see
+  [Modes](#modes)), so these are not identifiers anywhere, even qualified
+  (`M.stack_`). Mode names (`local`, `const`, ...) are not keywords, but
+  `external`: it is the `external` mode after `@`, unless it starts a
+  declaration (`external name :`).
   `rec` is reserved, as lets are always recursive.
 - `@` introduces a mode (see [Modes](#modes)); `@@` is reserved (for
   modalities). `[@nontail]` is the one attribute.
@@ -460,6 +462,55 @@ type t                                 (* abstract *)
 module M = struct ... end
 module M = .~e                         (* declaration splices, see below *)
 include .~e
+external labs : int -> int = "labs"   (* a C function, see below *)
+```
+
+### External functions
+
+`external name : t = "symbol"` declares the C function `symbol`, found in the
+process (by `dlsym`, in the interpreter, which calls it through libffi), as
+the toplevel function `name : t`. `t` is an ordinary curried arrow, with no
+type variables: `a -> b -> r` is C's `r symbol(a, b)`, and `unit -> r` is
+`r symbol(void)`. Each argument and the result is `int` (C's `int64_t`),
+`bool` or `char`, and the result may be `unit` (`void`). An `int` is 63 bits, so
+a C result outside that range is a runtime error. Pointers (`string`,
+`ptr[...]`) are not supported yet, and other types are rejected. The symbol
+must be non-empty, with no NUL character. The C function must have exactly
+that signature: nothing checks it. For instance C's `isdigit` returns an
+`int`, so `external isdigit : char -> bool = "isdigit"` misreads its result
+(only the low byte is read as a `bool`): declare it `char -> int`. An external is
+a toplevel function like any other: it can be partially applied and passed
+around, and C is called once it has all its arguments.
+
+C is called at compile time only if the library declaring the external allows
+it: the prelude's always may, and a stag-build library, executable or test
+opts in with the stanza field `(compile_time_c_calls)` (see
+[README.md](README.md#stag-build)). Calling another external while running
+compile-time code (a toplevel splice, or a toplevel it uses) is an error,
+when the call happens, naming the external and its library. The check is on
+the library declaring the external, so a permitted library's functions that
+call its externals may be called at compile time from anywhere. Calls at
+runtime are always allowed. Files checked outside a project (`stag check`,
+`stag run`, an editor buffer outside any project) may not call externals at
+compile time. This keeps opening or checking a file from running arbitrary C
+code.
+
+Modes written in `t` are trusted, as C code is not checked, and unwritten
+ones are a declaration's defaults, `nonportable gc global` (see
+[modes.md](modes.md#arrow-modes)):
+`external f : int @ portable -> int @ portable = "f"` returns portable
+values, while a plain `int -> int` returns nonportable `gc` ones
+(`@ external` declares a result outside the GC's heap). The values C passes
+are pointer-free, so cross modes (but never to `const`): for now the modes
+matter in the external's type, as where it is passed as a function value of
+an annotated type. The external itself, a code pointer, has no mode of its
+own to declare: as a toplevel function it is `static` and `const`, so may be
+used anywhere.
+
+```ocaml
+external srand48 : int -> unit = "srand48"
+external lrand48 : unit -> int = "lrand48"
+let seeded = srand48 7; lrand48 ()
 ```
 
 ## Primitives

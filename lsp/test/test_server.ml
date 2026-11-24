@@ -1002,11 +1002,11 @@ let%expect_test "files changed on disk, project errors, closing" =
       write "lib/stag" "(library (nme lib))";
       [%expect
         {|
-         diagnostics lib/stag:
-           0:10-0:13 error: Unknown field nme: expected name or libraries
-           0:0-0:19 error: The library stanza has no name: add (name ...)
-         diagnostics lib/b.stag: none
-         |}];
+        diagnostics lib/stag:
+          0:10-0:13 error: Unknown field nme: expected name, libraries or compile_time_c_calls
+          0:0-0:19 error: The library stanza has no name: add (name ...)
+        diagnostics lib/b.stag: none
+        |}];
       write "lib/stag" "(library (name lib))";
       [%expect
         {|
@@ -1019,4 +1019,28 @@ let%expect_test "files changed on disk, project errors, closing" =
         "textDocument/didClose"
         (Client.text_document client "lib/a.stag");
       [%expect {| diagnostics lib/b.stag: none |}])
+;;
+
+(* The project's stanzas say which externals may be called at compile time, as
+   for [stag-build]. *)
+let%expect_test "C calls at compile time follow the stanzas" =
+  Client.with_server
+    ~files:
+      [ "stag-project", ""
+      ; "ffi/stag", "(library (name ffi) (compile_time_c_calls))"
+      ; "ffi/ffi.stag", "external labs : int -> int = \"labs\"\n"
+      ; "bin/stag", "(executable (name main) (libraries ffi))"
+      ; ( "bin/main.stag"
+        , "external own : int -> int = \"labs\"\n\
+           let a = .~(match Ffi.Ffi.labs 1 with 1 -> .<1>. | _ -> .<0>.)\n\
+           let b = .~(match own 1 with 1 -> .<1>. | _ -> .<0>.)\n" )
+      ]
+    (fun client ->
+      Client.did_open client "bin/main.stag";
+      [%expect
+        {|
+        diagnostics bin/main.stag (version 1):
+          2:8-2:52 error: This toplevel splice failed at compile time: The external Main.own can't be called at compile time: its library main doesn't allow C calls at compile time (add (compile_time_c_calls) to its stanza)
+            related bin/main.stag 2:17-2:22: The error was raised here
+        |}])
 ;;

@@ -124,6 +124,11 @@ module Kind = struct
     | Misplaced_mut
     | Mode_variable_in_declaration of string
     | Invalid_mode of string
+    | Invalid_external of
+        { symbol : string
+        ; problem : C_signature.Problem.t
+        }
+    | Invalid_external_symbol of string
     | Spliced_code_assigns_immutable of string
     | Type_splice_failed of Error.t
     | Malformed_type_splice of Error.t
@@ -534,6 +539,36 @@ let rec kind_message (kind : Kind.t) ~show_type =
        fixed modes"
       var
   | Invalid_mode why -> sprintf "This mode is invalid: %s" why
+  | Invalid_external { symbol; problem } ->
+    let printer = Type.Printer.create ~type_name:show_type () in
+    let problem =
+      match problem with
+      | Not_a_function -> "it must be a function"
+      | Argument ty ->
+        sprintf
+          "C functions can't take arguments of type %s, only int, bool and \
+           char%s"
+          (Type.Printer.ty printer ty)
+          (Type.Printer.where printer)
+      | Result ty ->
+        sprintf
+          "C functions can't return values of type %s, only int, bool, char \
+           and unit%s"
+          (Type.Printer.ty printer ty)
+          (Type.Printer.where printer)
+      | Unit_argument ->
+        "unit can only be the only argument, of a C function of no arguments"
+      | Pointer ty ->
+        sprintf
+          "%s would be passed to C as a pointer, which is not supported yet%s"
+          (Type.Printer.ty printer ty)
+          (Type.Printer.where printer)
+    in
+    sprintf "The external %s has no C signature: %s" symbol problem
+  | Invalid_external_symbol symbol ->
+    sprintf
+      "The C symbol %S is invalid: it must be non-empty, with no NUL character"
+      symbol
   | Misplaced_mut ->
     "Only an entry of a code type's context can be [mut] or [immut], for a \
      variable the code assigns or doesn't"
