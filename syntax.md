@@ -204,11 +204,14 @@ evaluating `e : t`. Both `p.*` and `*p` read that value. In a pattern,
 tightly than function application; for example, `f *p` calls `f` with the
 pointee, not with the pointer.
 
-`ptr[t @@ external]` is a pointer whose cell may hold `external` values (see
-[Modes](#modes)): `Ptr.make_external e` allocates one, a store through it
-takes any value, and a read through it is `external`. It is a distinct type
-from `ptr[t]`, whose stores take only `gc` values. `@@ external` is only
-written on `ptr`'s type argument, and `external` is its only modality.
+`ptr[t @@ m]` says what provenance (see [Modes](#modes)) the values in the
+pointer's cell may have: `static`, `gc` (the default: `ptr[t]` is
+`ptr[t @@ gc]`), `external`, or a mode variable, as in
+`get : ptr['a @@ 'm0] -> 'a @ 'm1 with 'm0 <= 'm1`. A store through it takes
+values of at most `m`, and a read through it is at least `m`. `Ptr.make e`
+infers `m` from `e` and the cell's uses. `@@ m` is only written on `ptr`'s
+type argument. In a `with` clause, a relation with a cell's variable is on
+provenance; one between other variables is on stage.
 
 Recursive data types must cross a pointer or another indirection (such
 as a function) before returning to the same type. For example:

@@ -203,13 +203,15 @@ Provenance follows reachability, not evaluation:
 - A heap block holding an `external` value is itself `external`. Stores must
   not raise a cell's provenance, as the cell's other aliases rely on it, and
   a pointer's mode may have been raised by subsumption: what a cell may be
-  given is in the pointer's type instead. A store through a `ptr[t]`
-  (`p.* <- v`) takes only `gc` values; through a `ptr[t @@ external]`, any
-  value, and a read through one is `external` (unless its type crosses).
-  The two types are distinct, neither a subtype of the other. `Ptr.make`
-  makes a `ptr[t]` (of an `external` value too: it can then be read, not
-  stored to, with `external` values), `Ptr.make_external` a
-  `ptr[t @@ external]`. A mutable variable (`let mut`, a mutable global) has
+  given is in the pointer's type instead: `ptr[t @@ m]`, whose `m` is
+  unified exactly, so all aliases agree on it. A store through it
+  (`p.* <- v`) takes values of at most `m`, and a read through it is at
+  least `m` (unless the type crosses). `ptr[t]` is `ptr[t @@ gc]`, and `m`
+  may be a variable, so code can be polymorphic in it. `Ptr.make` infers
+  `m` from its argument and the cell's uses; a toplevel cell that is not
+  generalized has its `m` fixed by its definition, `gc` unless that needs
+  more. A pointer's own provenance is that of its cell (`gc`), not of what
+  the cell holds: the type says that, and can't be forgotten. A mutable variable (`let mut`, a mutable global) has
   a held mode of its own, inferred from what is assigned to it: an
   `external` assignment makes it `external` (its reads then are), unless it
   is annotated `@ gc`, which rejects it. `@ external` opts in.
