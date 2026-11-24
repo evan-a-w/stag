@@ -816,7 +816,11 @@ and record_pattern t : Pattern.t =
        anyway. *)
     let fields =
       delimited t ~opener:Lbrace ~close:Rbrace ~sep:Semi ~item:(fun t ->
-        if is t Underscore && [%equal: Token.t] (peek_at t 1) Rbrace
+        if is t Underscore
+           &&
+           match peek_at t 1, peek_at t 2 with
+           | Rbrace, _ | Semi, Rbrace -> true
+           | _ -> false
         then (
           advance t;
           None)
