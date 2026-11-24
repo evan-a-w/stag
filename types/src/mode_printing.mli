@@ -25,9 +25,12 @@ val settle : t -> unit
     the mode, as in [" @ 'm0"]. *)
 val side : t -> Mode.Var.t -> string option
 
-(** The name of a variable of a mode argument, never elided: [ptr[t]] reads back
-    as [nonportable gc], not as a fresh variable. *)
-val held : t -> Mode.Var.t -> string
+(** A variable of a mode argument: its name, or, if fixed and related to
+    nothing, its fixed points on stage and provenance. *)
+val held
+  :  t
+  -> Mode.Var.t
+  -> [ `Name of string | `Atoms of (Mode.Axis.Any.t * int) list ]
 
 (** The constraints between the variables counted, as [["'m0 <= 'm1"]]. *)
 val constraints : t -> string list

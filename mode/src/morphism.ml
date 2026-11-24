@@ -1,14 +1,23 @@
 open! Import
 
+(* [code] identifies the morphism (its axes and [right]): comparing and
+   composing go by it. *)
 type t =
-  { src : Axis.Any.t [@compare.ignore]
-  ; dst : Axis.Any.t [@compare.ignore]
+  { src : Axis.Any.t
+  ; dst : Axis.Any.t
   ; src_index : int
   ; dst_index : int
   ; right : int array
   ; left : int array
+  ; code : int
   }
-[@@deriving compare]
+
+let compare a b = Int.compare a.code b.code
+
+let code ~src_index ~dst_index right =
+  Array.fold right ~init:((src_index * 3) + dst_index) ~f:(fun acc p ->
+    (acc * 8) + p)
+;;
 
 let create ~src ~dst ~right ~left =
   let src_size = Axis.Any.size src
@@ -25,6 +34,11 @@ let create ~src ~dst ~right ~left =
   ; dst_index = Axis.Any.index dst
   ; right
   ; left
+  ; code =
+      code
+        ~src_index:(Axis.Any.index src)
+        ~dst_index:(Axis.Any.index dst)
+        right
   }
 ;;
 
@@ -124,15 +138,23 @@ let le a b =
 let right t x = t.right.(x)
 let left t x = t.left.(x)
 
+let composed = Int.Table.create ()
+
 let compose m1 m2 =
   assert (m1.src_index = m2.dst_index);
-  { src = m2.src
-  ; dst = m1.dst
-  ; src_index = m2.src_index
-  ; dst_index = m1.dst_index
-  ; right = Array.map m2.right ~f:(fun y -> m1.right.(y))
-  ; left = Array.map m1.left ~f:(fun x -> m2.left.(x))
-  }
+  Hashtbl.find_or_add
+    composed
+    ((m1.code * 1_000_000) + m2.code)
+    ~default:(fun () ->
+      let right = Array.map m2.right ~f:(fun y -> m1.right.(y)) in
+      { src = m2.src
+      ; dst = m1.dst
+      ; src_index = m2.src_index
+      ; dst_index = m1.dst_index
+      ; right
+      ; left = Array.map m1.left ~f:(fun x -> m2.left.(x))
+      ; code = code ~src_index:m2.src_index ~dst_index:m1.dst_index right
+      })
 ;;
 
 let meet_with axis point =

@@ -91,22 +91,7 @@ let at_least closure a b axis =
     Mode_closure.raise closure a p b >= p)
 ;;
 
-let equal_on closure ~dead a b axis =
-  let node var = { Mode_node.var; axis } in
-  match dead (node a), dead (node b) with
-  | true, true -> true
-  | true, false | false, true -> false
-  | false, false ->
-    Mode_closure.lower closure (node a) = Mode_closure.lower closure (node b)
-    && Mode_closure.upper closure (node a) = Mode_closure.upper closure (node b)
-    && at_least closure a b axis
-    && at_least closure b a axis
-;;
-
-(* The relation of a written form from [lo] to [hi] the closure has, the
-   greatest (they are a chain), or [None] if it implies nothing more than the
-   bounds do (or, from a node to itself, than that it is itself). *)
-(* Each written form, with its morphism and table, by index. *)
+(* Each written form, with its morphism and table. *)
 let written_forms =
   List.map Written.all ~f:(fun written ->
     let m = Written.morphism written in
@@ -117,35 +102,29 @@ let written_forms =
         ~f:(Mode.Morphism.left m) ))
 ;;
 
+(* The relation of a written form from [lo] to [hi] the closure has, the
+   greatest (they are a chain), or [None] if it implies nothing more than the
+   bounds do (or, from a node to itself, than that it is itself). *)
 let strongest closure ~(lo : Mode_node.t) ~(hi : Mode_node.t) =
   let points =
-    Mode_closure.lower closure lo :: Mode_closure.domain closure lo
+    Array.of_list (Mode_closure.lower closure lo :: Mode_closure.domain closure lo)
   in
   let raised =
-    List.map points ~f:(fun p -> Mode_closure.raise closure lo p hi)
-  in
-  let values written =
-    let _, _, table =
-      List.find_exn written_forms ~f:(fun (w, _, _) -> Poly.equal w written)
-    in
-    List.map points ~f:(fun p -> table.(p))
+    Array.map points ~f:(fun p -> Mode_closure.raise closure lo p hi)
   in
   let valid =
-    List.filter_map written_forms ~f:(fun (written, m, table) ->
-      Option.some_if
-        (Mode.Axis.Any.equal (Mode.Morphism.dst m) lo.axis
-         && Mode.Axis.Any.equal (Mode.Morphism.src m) hi.axis
-         && List.for_all2_exn points raised ~f:(fun p r -> table.(p) <= r))
-        written)
+    List.filter written_forms ~f:(fun (_, m, table) ->
+      Mode.Axis.Any.equal (Mode.Morphism.dst m) lo.axis
+      && Mode.Axis.Any.equal (Mode.Morphism.src m) hi.axis
+      && Array.for_alli points ~f:(fun i p -> table.(p) <= raised.(i)))
   in
-  let le a b = List.for_all2_exn (values a) (values b) ~f:( <= ) in
+  let le (_, _, a) (_, _, b) = Array.for_all points ~f:(fun p -> a.(p) <= b.(p)) in
   List.find valid ~f:(fun w -> List.for_all valid ~f:(fun w' -> le w' w))
-  |> Option.filter ~f:(fun written ->
-    let m = Written.morphism written in
+  |> Option.filter ~f:(fun (_, m, _) ->
     List.exists (Mode_closure.domain closure lo) ~f:(fun p ->
       Mode.Morphism.left m p
       > if Mode_node.equal lo hi then p else Mode_closure.lower closure hi))
-  |> Option.map ~f:(fun written -> { Relation.lo; written; hi })
+  |> Option.map ~f:(fun (written, _, _) -> { Relation.lo; written; hi })
 ;;
 
 let is_plain (r : Relation.t) =
@@ -159,7 +138,11 @@ let is_plain (r : Relation.t) =
    classes (as the greatest form per pair of nodes), or of every axis between
    two classes, and every bound is a candidate; [Mode_model.reduce] drops those
    the rest imply. A class related to nothing, named once (or fixed on every
-   axis), prints as the atoms of its fixed axes. *)
+   axis), prints as the atoms of its fixed axes.
+
+   A mode argument has no locality, so neither has a variable only of mode
+   arguments (a [with] clause can't relate it, and relates it on its other axes
+   only): its locality is left out. *)
 let settle t =
   let ids =
     Hashtbl.keys t.vars
@@ -175,35 +158,53 @@ let settle t =
              (Hash_set.mem t.results id)
              ({ Mode_node.var = id; axis = T Stage }, portable)))
   in
-  (* A mode argument has no locality: that of a variable only of mode arguments
-     is related to nothing, and raised by nothing but what the constraints
-     printed relate to it. *)
-  let dead ({ var; axis } : Mode_node.t) =
+  let live var (Mode.Axis.Any.T axis) =
     match axis with
-    | T Locality -> not (Hash_set.mem t.on_arrows var)
-    | T (Stage | Provenance) -> false
+    | Locality -> Hash_set.mem t.on_arrows var
+    | Stage | Provenance -> true
+  in
+  let axes var = List.filter Mode.Axis.Any.all ~f:(live var) in
+  (* Candidates to be equal share their bounds, so are found by them. *)
+  let signature var =
+    List.fold Mode.Axis.Any.all ~init:0 ~f:(fun acc axis ->
+      (acc * 16)
+      +
+      if live var axis
+      then (
+        let node = { Mode_node.var; axis } in
+        1
+        + (Mode_closure.lower closure node * 4)
+        + Mode_closure.upper closure node)
+      else 0)
+  in
+  let equal a b =
+    List.for_all (axes a) ~f:(fun axis ->
+      at_least closure a b axis && at_least closure b a axis)
   in
   Hashtbl.clear t.rep;
-  let reps =
-    List.fold ids ~init:[] ~f:(fun reps id ->
-      match
-        List.find reps ~f:(fun rep ->
-          List.for_all Mode.Axis.Any.all ~f:(equal_on closure ~dead id rep))
-      with
-      | Some rep ->
-        Hashtbl.set t.rep ~key:id ~data:rep;
-        reps
+  let classes = Int.Table.create () in
+  let reps = Queue.create () in
+  let members = Int.Table.create () in
+  List.iter ids ~f:(fun id ->
+    let key = signature id in
+    let candidates = Hashtbl.find_multi classes key in
+    let rep =
+      match List.find candidates ~f:(equal id) with
+      | Some rep -> rep
       | None ->
-        Hashtbl.set t.rep ~key:id ~data:id;
-        reps @ [ id ])
-  in
-  let members rep =
-    List.filter ids ~f:(fun id -> Hashtbl.find_exn t.rep id = rep)
-  in
+        Hashtbl.add_multi classes ~key ~data:id;
+        Queue.enqueue reps id;
+        id
+    in
+    Hashtbl.set t.rep ~key:id ~data:rep;
+    Hashtbl.add_multi members ~key:rep ~data:id);
+  let reps = Queue.to_list reps in
+  let members rep = Hashtbl.find_multi members rep in
   let nodes =
     List.concat_map reps ~f:(fun var ->
-      List.map Mode.Axis.Any.all ~f:(fun axis -> { Mode_node.var; axis }))
+      List.map (axes var) ~f:(fun axis -> { Mode_node.var; axis }))
   in
+  let is_node = Mode_node.Hash_set.of_list nodes in
   let base_lower ({ var; axis } : Mode_node.t) =
     match axis with
     | T Stage when List.exists (members var) ~f:(Hash_set.mem t.results) ->
@@ -218,37 +219,29 @@ let settle t =
       ; hi = { var; axis = T Stage }
       })
   in
-  let is_node = Mode_node.Hash_set.of_list nodes in
   let relations =
     List.concat_map nodes ~f:(fun lo ->
       List.filter_map (Mode_closure.reached closure lo) ~f:(fun hi ->
         if Hash_set.mem is_node hi then strongest closure ~lo ~hi else None))
   in
+  (* A pair related on every axis both have prints as one relation. *)
   let plain_valid a b =
-    List.for_all Mode.Axis.Any.all ~f:(fun axis ->
+    List.for_all (axes a) ~f:(fun axis ->
+      (not (live b axis))
+      ||
       let lo = { Mode_node.var = a; axis } in
       let hi = { Mode_node.var = b; axis } in
-      dead lo
-      || dead hi
-      || List.for_all
-           (Mode_closure.lower closure lo :: Mode_closure.domain closure lo)
-           ~f:(fun p -> Mode_closure.raise closure lo p hi >= p))
+      List.for_all
+        (Mode_closure.lower closure lo :: Mode_closure.domain closure lo)
+        ~f:(fun p -> Mode_closure.raise closure lo p hi >= p))
   in
+  let order id = Hashtbl.find_exn t.order id in
   let plain_pairs =
     List.filter_map relations ~f:(fun r ->
       Option.some_if (is_plain r && r.lo.var <> r.hi.var) (r.lo.var, r.hi.var))
     |> List.dedup_and_sort ~compare:(fun (a, b) (a', b') ->
-      let order id = Hashtbl.find_exn t.order id in
       [%compare: int * int] (order a, order b) (order a', order b'))
     |> List.filter ~f:(fun (a, b) -> plain_valid a b)
-  in
-  (* A dead locality is related to nothing: through it, those related into it
-     would be to those it is related into. *)
-  let plain_pairs =
-    let sources = Int.Hash_set.of_list (List.map plain_pairs ~f:fst) in
-    List.filter plain_pairs ~f:(fun (_, b) ->
-      (not (dead { var = b; axis = T Locality }))
-      || not (Hash_set.mem sources b))
   in
   let plain_set = Int.Table.create () in
   List.iter plain_pairs ~f:(fun (a, b) ->
@@ -268,12 +261,24 @@ let settle t =
       @
       if upper < Mode_node.max n.axis then [ Printed.Upper (n, upper) ] else [])
   in
+  let item : Printed.t -> Mode_model.Item.t = function
+    | Plain (a, b) ->
+      Edges
+        (List.filter_map Mode.Axis.Any.all ~f:(fun axis ->
+           Option.some_if
+             (live a axis && live b axis)
+             (Relation.edge
+                { lo = { var = a; axis }
+                ; written = Plain axis
+                ; hi = { var = b; axis }
+                })))
+    | printed -> Printed.item printed
+  in
   (* Latest first, then pairs, then bounds. *)
   let printed =
     Mode_model.reduce
       closure
       ~nodes
-      ~dead
       ~base_lower
       ~implicit
       (List.rev_map
@@ -281,21 +286,21 @@ let settle t =
          ~f:(fun r -> Printed.Relation r)
        @ List.rev_map plain_pairs ~f:(fun (a, b) -> Printed.Plain (a, b))
        @ bounds)
-      ~item:Printed.item
+      ~item
   in
-  let related rep =
-    List.exists printed ~f:(function
-      | Relation r -> r.lo.var = rep || r.hi.var = rep
-      | Plain (a, b) -> a = rep || b = rep
-      | Lower _ | Upper _ -> false)
-  in
-  let bounded (n : Mode_node.t) =
-    List.exists printed ~f:(function
-      | Lower (n', _) | Upper (n', _) -> Mode_node.equal n n'
-      | Relation _ | Plain _ -> false)
-  in
-  (* A class's axis reads back from an atom if it is fixed, or if no bound of it
-     is printed. *)
+  let related = Int.Hash_set.create () in
+  let bounded = Mode_node.Hash_set.create () in
+  List.iter printed ~f:(function
+    | Relation r ->
+      Hash_set.add related r.lo.var;
+      Hash_set.add related r.hi.var
+    | Plain (a, b) ->
+      Hash_set.add related a;
+      Hash_set.add related b
+    | Lower (n, _) | Upper (n, _) -> Hash_set.add bounded n);
+  (* A class's axis reads back from an atom if it is fixed, or, on an arrow, if
+     no bound of it is printed. A mode argument's unwritten axes read back as
+     the default, so a class of one is written as atoms only if fixed. *)
   Hashtbl.clear t.atoms;
   List.iter reps ~f:(fun rep ->
     let members = members rep in
@@ -304,13 +309,14 @@ let settle t =
       Mode_closure.lower closure (node axis)
       = Mode_closure.upper closure (node axis)
     in
-    if (not (related rep))
-       && (not (List.exists members ~f:(Hash_set.mem t.mode_args)))
-       && List.for_all Mode.Axis.Any.all ~f:(fun axis ->
-         fixed axis || not (bounded (node axis)))
-       && (List.for_all Mode.Axis.Any.all ~f:fixed
-           ||
-           match members with
+    let all_fixed = List.for_all (axes rep) ~f:fixed in
+    if (not (Hash_set.mem related rep))
+       && List.for_all (axes rep) ~f:(fun axis ->
+         fixed axis || not (Hash_set.mem bounded (node axis)))
+       && (all_fixed
+           || (not (List.exists members ~f:(Hash_set.mem t.mode_args)))
+              &&
+              match members with
            | [ id ] ->
              [%equal: int option] (Hashtbl.find t.counts id) (Some 1)
              && Mode.Var.is_generic (Hashtbl.find_exn t.vars id)
@@ -320,9 +326,10 @@ let settle t =
         t.atoms
         ~key:rep
         ~data:
-          (List.filter_map Mode.Axis.Any.all ~f:(fun axis ->
+          (List.filter_map (axes rep) ~f:(fun axis ->
              Option.some_if
-               (bounded (node axis))
+               ((fixed axis && List.exists members ~f:(Hash_set.mem t.mode_args))
+                || Hash_set.mem bounded (node axis))
                (axis, Mode_closure.lower closure (node axis)))));
   let rank = Int.Table.create () in
   List.iteri reps ~f:(fun i rep -> Hashtbl.set rank ~key:rep ~data:i);
@@ -370,7 +377,14 @@ let side t var =
   | None -> Some (" @ " ^ name t rep)
 ;;
 
-let held t var = name t (rep t var)
+(* Never elided: [ptr[t]] reads back as [nonportable gc], not as a fresh
+   variable. Atoms only when fixed (on its axes), as [settle] makes them. *)
+let held t var =
+  let rep = rep t var in
+  match Hashtbl.find t.atoms rep with
+  | Some atoms -> `Atoms atoms
+  | None -> `Name (name t rep)
+;;
 
 let constraints t =
   let on ({ var; axis } : Mode_node.t) =

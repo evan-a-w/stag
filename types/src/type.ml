@@ -1234,25 +1234,39 @@ module Printer = struct
         (Sexp.to_string (Mode.Provenance.sexp_of_t provenance)
          |> String.lowercase)
     in
-    match held, Mode_arg.known held with
-    | _, Some const | Fixed const, None ->
-      (match const_atoms const ~default:(Some Mode_arg.default) with
-       | [] -> None
-       | atoms -> Some (String.concat ~sep:" " atoms))
-    | Var var, None ->
-      (match t.modes, t.counting with
-       | None, _ ->
-         if Mode.Provenance.equal (Mode.Var.lower var).provenance External
-         then atom External
-         else if Mode.Provenance.equal (Mode.Var.upper var).provenance Static
-         then atom Static
-         else if t.name_mode_args
-         then Some (mode_var_name t var)
-         else None
-       | Some modes, Some _ ->
+    let const_atoms const =
+      match const_atoms const ~default:(Some Mode_arg.default) with
+      | [] -> None
+      | atoms -> Some (String.concat ~sep:" " atoms)
+    in
+    match held, Mode_arg.known held, t.modes with
+    | Fixed const, _, _ | Var _, Some const, None -> const_atoms const
+    | Var var, _, Some modes ->
+      (match t.counting with
+       | Some _ ->
          Mode_printing.count modes var ~side:`Mode_arg;
          Some "_"
-       | Some modes, None -> Some (Mode_printing.held modes var))
+       | None ->
+         (match Mode_printing.held modes var with
+          | `Name name -> Some name
+          | `Atoms atoms ->
+            let point axis =
+              List.Assoc.find atoms axis ~equal:Mode.Axis.Any.equal
+              |> Option.value ~default:0
+            in
+            const_atoms
+              { Mode_arg.default with
+                stage = Mode.Stage.of_index_exn (point (T Stage))
+              ; provenance = Mode.Provenance.of_index_exn (point (T Provenance))
+              }))
+    | Var var, None, None ->
+      if Mode.Provenance.equal (Mode.Var.lower var).provenance External
+      then atom External
+      else if Mode.Provenance.equal (Mode.Var.upper var).provenance Static
+      then atom Static
+      else if t.name_mode_args
+      then Some (mode_var_name t var)
+      else None
   ;;
 
   (* A mode argument other than [ptr]'s, which is always written. *)
@@ -1260,7 +1274,8 @@ module Printer = struct
     match held_mode t mode, mode with
     | Some printed, _ -> printed
     | None, Fixed _ -> "gc"
-    | None, Var var -> mode_var_name t var
+    | None, Var var ->
+      if Option.is_some t.modes then "gc" else mode_var_name t var
   ;;
 
   let side_locality : Arrow_modes.Side.t -> Mode.Locality.t = function
@@ -1535,7 +1550,9 @@ module Printer = struct
     in
     ignore (render copy : string);
     ignore (bounds copy : string list);
-    Option.iter t.modes ~f:Mode_printing.settle;
+    (* A declaration's mode variables are its parameters, related to nothing,
+       so print by name, and there is no [with] to settle. *)
+    if not t.declaration then Option.iter t.modes ~f:Mode_printing.settle;
     Hashtbl.iteri counts ~f:(fun ~key:id ~data:count ->
       if count = 1 && not (Hashtbl.mem t.names id) then Hash_set.add t.elided id);
     render t
