@@ -384,9 +384,8 @@ that inner code is spliced, not by the substitution, so it is an error too.
 ### Modes
 
 The syntax of modes (see [modes.md](modes.md) and
-[semantics.md](semantics.md#modes)). The stage and locality axes are checked;
-provenance annotations are ignored. The interpreter allocates everything on
-its heap, so `stack_`, `exclave_` and `[@nontail]` evaluate as their body.
+[semantics.md](semantics.md#modes)), all three axes checked. The interpreter
+allocates everything on its heap, so `stack_`, `exclave_` and `[@nontail]` evaluate as their body.
 
 A binding's annotation is the variable's mode: `let x @ m = e` needs `e`'s
 mode to be at most `m`, and `x` is then `m` on the axes `m` names (and `e`'s
@@ -403,7 +402,7 @@ or more of `const portable nonportable` (stage), `static gc external`
 ```ocaml
 let x @ const = 1                       (* a binder's mode *)
 let f (x @ local) (y : int @ 'm) : int @ global = ...
-let mut counter : int @ static = 0
+let mut name : string @ gc = ""
 (e : t @ m)   (x @ local)               (* an annotated variable *)
 int @ local -> int @ local              (* a function type's argument/result *)
 'a @ 'm -> 'b @ 'n
@@ -436,8 +435,10 @@ let h (x : int @ 'm with 'm <= portable) = x
 
 `with` is only in an annotation's type, never in a function type's argument or
 in a declaration. `and` is not a keyword (there is no `let ... and`), so
-following constraints it always continues them. Printed types use the same syntax, so read back as
-themselves.
+following constraints it always continues them. A constraint between two
+variables relates their stage; one between a variable and modes bounds the
+axes the modes name (`external <= 'm`). Printed types use the same syntax, so
+read back as themselves.
 
 In reflected syntax, a binder's or variable's annotation is a
 ``Stag.Annot.t = {`ty : option[Type_expr.t]; `mode : option[Mode_expr.t]}``

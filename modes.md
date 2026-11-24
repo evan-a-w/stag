@@ -137,10 +137,17 @@ val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3
   and shown with its current constraints;
 - relations through a crossing morphism are not printed.
 
+On provenance, only bounds print, where they restrict: `external <= 'm` (it
+may reach external memory) and `'m <= gc` or `'m <= static` (an argument
+stored through a pointer, or bound `@ static`). A constant side shows its
+provenance when it is not the default `gc`, and a variable side known to be
+`external` when it prints as a constant (`ptr[int] @ nonportable external`).
+
 The `with` clause is also syntax for annotations (see syntax.md), so printed
-types read back as themselves. As only the stage axis is printed, a constraint
-between variables constrains only the stage axis, until the others are
-checked.
+types read back as themselves. A constraint between variables constrains only
+the stage axis, and a bound the axis of its atoms; provenance relations
+between variables are not printed (nor written), so a printed type may read
+back with them unrelated.
 
 ### Annotations on uses
 
@@ -320,14 +327,22 @@ Each step is a branch stacked on the previous one.
   `exclave_`, the tail call rule, `global_` fields, `Unsafe.assume_global`,
   mutable variables assigned from closures holding `global` values, mode
   crossing by kind on locality, exact binding annotations.
-- **F. Provenance**: allocation is `gc`, literals and `const` values
-  `static`, stores, mutable globals.
+- **F. Provenance**: `unknown` renamed `external`; deep provenance through
+  blocks, pointers and closures, not through what is only evaluated; what is
+  allocated at run time is `gc` unless `const`, literals and toplevel
+  constants `static`; declared arrows default to `gc`; stores through
+  pointers take `gc` values, mutable variables infer their held provenance;
+  provenance annotations and bounds in `with`; the Go-style GC design.
 - **G. `External`**: C functions with a C compatible ABI (rejecting
   signatures it can't express), producing `external` values.
 
 ## Later
 
 - `<t @ m>{ctx}` code modes.
+- Pointers to cells holding `external` values that may be stored to: the
+  cell's provenance in its type (as a modality), as a pointer's mode may
+  have been raised by subsumption.
+- Printing provenance relations between mode variables.
 - Function pointer arrows (`=>`).
 - A dynamic mode checker in the interpreter, as a test oracle.
 - Presence ordering constraints (`Absent <= Present`) are kept as bounds
