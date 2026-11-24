@@ -450,6 +450,7 @@ let swap_any p q = let v = p.* in p.* <- q.*; q.* <- v
     let static_cell_copy : ptr[string @@ static] = static_cell
     let ext_cell_copy : ptr[string @@ external] = ext_cell
     let swap_any_copy : ptr['a @@ 'm1] @ 'm0 -> (ptr['a @@ 'm1] -> unit) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and gc <= 'm2 = swap_any
+    ("not compared" p (error weak))
     |}]
 ;;
 

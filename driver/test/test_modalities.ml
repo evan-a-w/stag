@@ -494,3 +494,69 @@ let constrained = .< fun (r : r) -> let s @ gc = r.any in s >.
     val constrained : <r @ 'm0 -> string @ 'm1>{..'a} with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= gc and gc <= 'm1
     |}]
 ;;
+
+(* A mode argument's variable has no locality: relating others through it
+   plainly mustn't relate their localities. *)
+let%expect_test "printing: through a mode argument's variable" =
+  round_trip
+    {|
+type box['p : mode] = { v : string @@ 'p }
+let f x b = let c = match 0 with | 0 -> b | _ -> {v = x} in b.v
+|};
+  [%expect
+    {|
+    type box['m0 : mode] = { v : string @@ 'm0 }
+    val f : string @ 'm0 -> (box['m3] @ 'm2 -> string @ 'm4) @ 'm1 with stage('m0) <= stage('m3) and provenance('m0) <= provenance('m3) and 'm0 <= 'm1 and stage('m2) <= stage('m4) and release(locality('m2)) <= locality('m4) and portable <= 'm3 and 'm3 <= 'm4 and gc <= 'm1
+    |}];
+  check
+    {|
+type box['p : mode] = { v : string @@ 'p }
+let f x b = let c = match 0 with | 0 -> b | _ -> {v = x} in b.v
+let gb : box[gc] = { v = "a" }
+let f_copy : string @ 'm0 -> box['m3] @ 'm2 -> string @ 'm4 = f
+let use (x @ local) = let r @ global = f x gb in r
+|};
+  [%expect
+    {|
+    type box['m0 : mode] = { v : string @@ 'm0 }
+    val f : string @ 'm0 -> (box['m3] @ 'm2 -> string @ 'm4) @ 'm1 with stage('m0) <= stage('m3) and provenance('m0) <= provenance('m3) and 'm0 <= 'm1 and stage('m2) <= stage('m4) and release(locality('m2)) <= locality('m4) and portable <= 'm3 and 'm3 <= 'm4 and gc <= 'm1
+    val gb : box[gc]
+    val f_copy : string @ 'm0 -> (box['m3] @ 'm2 -> string @ 'm4) @ 'm1 with stage('m0) <= stage('m3) and provenance('m0) <= provenance('m3) and 'm0 <= 'm1 and stage('m2) <= stage('m4) and release(locality('m2)) <= locality('m4) and portable <= 'm3 and 'm3 <= 'm4 and gc <= 'm1
+    val use : string @ 'm0 -> string @ 'm1 with local <= 'm0 and 'm0 <= gc and nonportable gc <= 'm1
+    |}]
+;;
+
+(* A side fixed by a declaration reads back, in an annotation, as the atoms
+   written: every axis is. *)
+let%expect_test "printing: a declared arrow's fixed sides" =
+  round_trip {|
+type r = { f : string -> string }
+let get_f (r : r) = r.f
+|};
+  [%expect
+    {|
+    type r = { f : string -> string }
+    val get_f : r @ 'm0 -> (string @ nonportable gc global -> string @ nonportable gc global) @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    |}];
+  check
+    {|
+type r = { f : string -> string }
+let get_f : r -> (string @ nonportable gc global -> string @ nonportable gc global) = fun r -> r.f
+let use (x @ local) = get_f {f = fun s -> s} x
+|};
+  [%expect
+    {| This is regional, because it is annotated local (at t.stag:4:13-18), then x is passed to the function (at t.stag:4:22-46), then x is used (at t.stag:4:45-46), then it is passed to a function (at t.stag:4:22-46), but must be at most global, because it is annotated nonportable gc global (at t.stag:3:27-48), then the function types are unified |}]
+;;
+
+let%expect_test "printing: a variable's relation to itself" =
+  round_trip
+    {|
+let diverge (u : unit) = diverge u
+let s : 'a @ 'm -> 'a @ 'n with release(locality('m)) <= locality('m) = fun x -> diverge ()
+|};
+  [%expect
+    {|
+    val diverge : unit @ 'm0 -> 'a @ global with portable <= 'm0
+    val s : 'a @ 'm0 -> 'a with release(locality('m0)) <= locality('m0)
+    |}]
+;;
