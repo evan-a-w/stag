@@ -461,7 +461,8 @@ let h (x : int @ 'm with 'm <= portable) = x
 `with` is only in an annotation's type, never in a function type's argument or
 in a declaration. `and` is not a keyword (there is no `let ... and`), so
 following constraints it always continues them. A constraint between two
-variables relates every axis; `stage('m) <= stage('n)` (or `locality(...)`,
+variables relates every axis both have (a variable only in mode arguments
+has no locality, so can't be related or bounded on it); `stage('m) <= stage('n)` (or `locality(...)`,
 `provenance(...)`) relates only that one, naming the same axis on both sides.
 One between a variable and modes bounds the axes the modes name
 (`portable external <= 'm`). A constraint on one axis may apply functions to
