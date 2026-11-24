@@ -92,7 +92,8 @@ let argument x = .<x>.
   check {|
 let mutable_ = let mut m = 1 in let g u = m in .<g ()>.
 |};
-  [%expect {|
+  [%expect
+    {|
     ((Not_embeddable (name k) (var_level 0) (used_at 1) (defining false)) @
      t.stag:2:44-45)
     ((Not_embeddable (name x) (var_level 0) (used_at 1) (defining false)) @
@@ -492,7 +493,8 @@ let outer n =
 let outer2 n =
   let f x = let p = (fun u -> f) in let c = .<p>. in Int.add x n in f 1
 |};
-  [%expect {|
+  [%expect
+    {|
     The quote can't embed g, as it may not be portable. Bind it as (g @ portable) to embed it, or write [forget g in ...] to make g a free variable of the quote
     The quote can't embed p, as it may not be portable. Bind it as (p @ portable) to embed it, or write [forget p in ...] to make p a free variable of the quote
     |}]

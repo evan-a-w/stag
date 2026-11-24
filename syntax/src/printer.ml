@@ -648,7 +648,9 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
       roots
       ctx
       ("forget "
-       ^ String.concat ~sep:", " (List.map names ~f:(fun (name : Name.t) -> name.txt))
+       ^ String.concat
+           ~sep:", "
+           (List.map names ~f:(fun (name : Name.t) -> name.txt))
        ^ " in")
       body
   | Stack body, _ -> region roots ctx "stack_" body
