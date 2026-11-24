@@ -179,7 +179,10 @@ module Model = struct
     done
   ;;
 
-  let exact model (real : Real.t) ~lower ~upper =
+  (* With [`Reaching n], the raises compared are those from the nodes reaching
+     [n], the only ones a removed edge out of [n] can change; with [`None],
+     none, as bounds don't change them while the lower bounds stay. *)
+  let exact model (real : Real.t) ~lower ~upper ~raises =
     let nodes = Array.of_list model.nodes in
     let index = index model.nodes in
     let edges =
@@ -206,14 +209,30 @@ module Model = struct
     done;
     Array.for_alli nodes ~f:(fun i n ->
       lows.(i) = real.lower n && ups.(i) = real.upper n)
-    && Array.for_alli nodes ~f:(fun i x ->
-      List.for_all
-        (List.range ~start:`exclusive lows.(i) ~stop:`inclusive ups.(i))
-        ~f:(fun p ->
-          let levels = Array.copy lows in
-          levels.(i) <- p;
-          propagate edges levels;
-          Array.for_alli nodes ~f:(fun j y -> levels.(j) = real.raise x p y)))
+    &&
+    let from =
+      match raises with
+      | `None -> Fn.const false
+      | `Reaching n ->
+        let reached = Array.create ~len:(Array.length nodes) false in
+        let rec go i =
+          if not reached.(i)
+          then (
+            reached.(i) <- true;
+            List.iter edges ~f:(fun (lo, _, hi) -> if hi = i then go lo))
+        in
+        go (index n);
+        fun i -> reached.(i)
+    in
+    Array.for_alli nodes ~f:(fun i x ->
+      (not (from i))
+      || List.for_all
+           (List.range ~start:`exclusive lows.(i) ~stop:`inclusive ups.(i))
+           ~f:(fun p ->
+             let levels = Array.copy lows in
+             levels.(i) <- p;
+             propagate edges levels;
+             Array.for_alli nodes ~f:(fun j y -> levels.(j) = real.raise x p y)))
   ;;
 end
 
@@ -344,11 +363,16 @@ let settle t =
   let reduce items ~exact =
     List.fold (List.rev items) ~init:items ~f:(fun kept item ->
       let without = List.filter kept ~f:(fun i -> not (phys_equal i item)) in
-      if exact without then without else kept)
+      if exact without ~removed:item then without else kept)
   in
   let relations =
-    reduce candidates ~exact:(fun relations ->
-      Model.exact (model relations) real ~lower:all_lower ~upper:all_upper)
+    reduce candidates ~exact:(fun relations ~removed ->
+      Model.exact
+        (model relations)
+        real
+        ~lower:all_lower
+        ~upper:all_upper
+        ~raises:(`Reaching removed.lo))
   in
   (* A pair related plainly on an axis, and on each other one by what holds,
      prints as [a <= b], every axis at once: then the rest are reduced again,
@@ -384,12 +408,13 @@ let settle t =
   let relations =
     reduce
       (List.filter relations ~f:(fun r -> not (is_plain r && in_plain r)))
-      ~exact:(fun relations ->
+      ~exact:(fun relations ~(removed : Relation.t) ->
         Model.exact
           (model (plain_relations @ relations))
           real
           ~lower:all_lower
-          ~upper:all_upper)
+          ~upper:all_upper
+          ~raises:(`Reaching removed.lo))
   in
   let model = model (plain_relations @ relations) in
   let bounds =
@@ -402,12 +427,13 @@ let settle t =
       Option.some_if (Poly.equal side side' && Node.equal n n') p)
   in
   let bounds =
-    reduce bounds ~exact:(fun bounds ->
+    reduce bounds ~exact:(fun bounds ~removed:_ ->
       Model.exact
         model
         real
         ~lower:(find bounds `Lower)
-        ~upper:(find bounds `Upper))
+        ~upper:(find bounds `Upper)
+        ~raises:`None)
   in
   let related rep =
     List.exists relations ~f:(fun r -> fst r.lo = rep || fst r.hi = rep)
