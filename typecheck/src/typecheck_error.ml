@@ -242,6 +242,7 @@ let mode_message
       if Loc.is_none loc
       then what
       else sprintf "%s (at %s)" what (Loc.to_string loc))
+    |> List.remove_consecutive_duplicates ~equal:String.equal
     |> String.concat ~sep:", then "
   in
   sprintf
@@ -273,6 +274,9 @@ let unification_message (error : Unification_error.t) ~show_type =
         | Mismatch_arg_kind (a, b) ->
           let a = arg a in
           sprintf "\nThe arguments %s and %s are of different kinds." a (arg b)
+        | Modes error when String.equal expected actual ->
+          "\nTheir modes differ, in ways types don't print: "
+          ^ mode_message error
         | Modes error -> "\nTheir modes differ: " ^ mode_message error
       in
       sprintf

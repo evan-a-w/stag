@@ -363,3 +363,346 @@ let g h = match h () with x -> x | exception E p -> Ptr.make p
     val g : (unit -> ptr[ptr[int]]) -> ptr[ptr[int]]
     |}]
 ;;
+
+let%expect_test "a value in its own definition is at least its value" =
+  locality
+    {|
+let f (q : ptr[unit -> unit]) =
+  let x = (let p = stack_ (Ptr.make 1) in fun u -> let y = p in q.* <- x) in
+  x () [@nontail]
+|};
+  [%expect
+    {| This is local, because it is allocated by [stack_] (at t.stag:3:19-38), then it is part of the value (at t.stag:3:19-38), then p is captured by a closure (at t.stag:3:59-60), then the closure is made (at t.stag:3:42-72), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:3:71-72), then x is used (at t.stag:3:71-72), then it defines x (at t.stag:3:2-4:17) |}];
+  locality
+    {|
+let f (q : ptr[unit -> unit]) =
+  let x = stack_ (fun u -> q.* <- x) in
+  x () [@nontail]
+|};
+  [%expect
+    {| This is local, because it is allocated by [stack_] (at t.stag:3:10-36), then it is part of the value (at t.stag:3:10-36), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:3:34-35), then x is used (at t.stag:3:34-35), then it defines x (at t.stag:3:2-4:17) |}]
+;;
+
+let%expect_test "explicit substitutions are bound at their own modes" =
+  locality
+    {|
+let f (q : ptr[ptr[int]]) = .~(.<q.* <- x>.).{q; x = stack_ (Ptr.make 1)}
+|};
+  [%expect
+    {| This is local, because it is allocated by [stack_] (at t.stag:2:53-72), then it is part of the value (at t.stag:2:53-72), then x is used (at t.stag:2:40-41), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:2:40-41) |}];
+  locality
+    {|
+let f (q : ptr[ptr[int]]) = .~(.<q.* <- x>.).{q; x = Ptr.make 1}
+let g (q : ptr[int]) = .~(.<match x.* with (a, _) -> a>.).{x = stack_ (Ptr.make (1, 2))}
+|};
+  [%expect
+    {|
+    val f : ptr[ptr[int]] -> unit
+    val g : ptr[int] -> int
+    |}]
+;;
+
+let%expect_test "a toplevel splice's expansion is in tail position if it is" =
+  locality
+    {|
+let use (p @ local) = match p.* with (a, _) -> a
+let f u = let p = stack_ (Ptr.make (1, 2)) in .~(.<use p>.)
+|};
+  [%expect
+    {| This is local, because it is allocated by [stack_] (at t.stag:3:18-42), then it is part of the value (at t.stag:3:18-42), then p is used (at t.stag:3:55-56), but must be at most regional, because it is passed in a tail call, after the current region has ended (mark the call [@nontail]) (at t.stag:3:55-56) |}];
+  locality
+    {|
+let f u = .~(.<exclave_ stack_ (Ptr.make (1, 2))>.)
+let g u = let p = stack_ (Ptr.make (1, 2)) in .~(.<p>.)
+|};
+  [%expect
+    {| This is local, because it is allocated by [stack_] (at t.stag:3:18-42), then it is part of the value (at t.stag:3:18-42), then p is used (at t.stag:3:46-55), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:3:10-55) |}];
+  locality {|
+let c = .<exclave_ stack_ (Ptr.make 1)>.
+|};
+  [%expect {| val c : <ptr[int]>{..'a} |}];
+  locality {|
+let f u = let p = .~(.<exclave_ stack_ (Ptr.make 1)>.) in 1
+|};
+  [%expect
+    {| [exclave_] ends the function's region, so must be the function's result, in tail position |}]
+;;
+
+let%expect_test "a pointer's pointee is global in patterns" =
+  locality
+    {|
+let f (p : ptr[ptr[int]] @ local) = match p with *q -> Ptr.make q
+|};
+  [%expect {| val f : ptr[ptr[int]] @ local -> ptr[ptr[int]] |}]
+;;
+
+let%expect_test "stack_ doesn't apply to what a global_ field holds" =
+  locality
+    {|
+type r = { g : global_ ptr[int] }
+let f u = stack_ { g = Ptr.make 1 }
+|};
+  [%expect
+    {| [stack_] allocates its value on the stack, so must be on an allocation: a closure, a quote, [Ptr.make e], or a record, tuple or constructor holding one (records, tuples and constructors are values) |}]
+;;
+
+let%expect_test "a tail call can't call a function value local to the region" =
+  locality
+    {|
+let mk u = exclave_ stack_ (fun (x : int) -> x)
+let f u = mk () 1
+|};
+  [%expect
+    {| This is local, because it is allocated by [stack_] (at t.stag:2:20-47), then it is part of the value (at t.stag:2:20-47), then the function returns it (at t.stag:2:11-47), then the function types are unified, then a tail call gives it further arguments, after the current region has ended (mark the call [@nontail]) (at t.stag:3:10-15), but must be at most regional, because the function returns a function value, not the closure of a partial application (at t.stag:2:11-47), then the function types are unified, including whether their results may take arguments after the region ends (not printed) |}];
+  locality
+    {|
+let mk u = exclave_ stack_ (fun (x : int) -> x)
+let g u = let h = mk () in h 1
+|};
+  [%expect
+    {| This is local, because it is allocated by [stack_] (at t.stag:2:20-47), then it is part of the value (at t.stag:2:20-47), then the function returns it (at t.stag:2:11-47), then the function types are unified, then the function returns it (at t.stag:3:18-23), then h is used (at t.stag:3:27-28), but must be at most regional, because it is passed in a tail call, after the current region has ended (mark the call [@nontail]) (at t.stag:3:27-28) |}];
+  locality
+    {|
+let mk (p : ptr[int]) = exclave_ stack_ (fun (x : int) -> Int.add x p.*)
+let f u = mk (Ptr.make 1) 1
+|};
+  [%expect
+    {| This is local, because it is allocated by [stack_] (at t.stag:2:33-72), then it is part of the value (at t.stag:2:33-72), then the function returns it (at t.stag:2:24-72), then the function types are unified, then a tail call gives it further arguments, after the current region has ended (mark the call [@nontail]) (at t.stag:3:10-25), but must be at most regional, because the function returns a function value, not the closure of a partial application (at t.stag:2:24-72), then the function types are unified, including whether their results may take arguments after the region ends (not printed) |}];
+  (* Not in tail position, or the closure of a partial application, which a tail
+     call never makes. *)
+  locality
+    {|
+let mk u = exclave_ stack_ (fun (x : int) -> x)
+let f u = mk () 1 [@nontail]
+let plus (p @ local) (x : int) = Int.add p.* x
+let g (p @ local) = plus p 2
+let k f = f 1 2
+let use u = k (fun (x : int) (y : int) -> Int.add x y)
+let use2 u = k Int.add
+let use3 (f : int -> int -> int) = k f
+|};
+  [%expect
+    {|
+    val mk : 'a -> (int -> int) @ local
+    val f : 'a -> int
+    val plus : ptr[int] @ local -> (int -> int) @ local
+    val g : ptr[int] @ local -> int
+    val k : (int -> int -> 'a) -> 'a
+    val use : 'a -> int
+    val use2 : 'a -> int
+    val use3 : (int -> int -> int) -> int
+    |}];
+  (* A function whose body is a [fun] is one function of both's parameters. *)
+  locality
+    {|
+let plus (p @ local) = fun (x : int) -> Int.add p.* x
+let plus2 = fun (p @ local) -> fun (x : int) -> Int.add p.* x
+let g (p @ local) = plus p 2
+let g2 (p @ local) = plus2 p 2
+let k f = f 1 2
+let use u = k (fun (x : int) -> fun (y : int) -> Int.add x y)
+|};
+  [%expect
+    {|
+    val plus : ptr[int] @ local -> (int -> int) @ local
+    val plus2 : ptr[int] @ local -> (int -> int) @ local
+    val g : ptr[int] @ local -> int
+    val g2 : ptr[int] @ local -> int
+    val k : (int -> int -> 'a) -> 'a
+    val use : 'a -> int
+    |}];
+  (* So the closure of its partial application holds the outer arguments, even
+     if the inner [fun] doesn't use them, at every level. *)
+  locality
+    {|
+let f (p @ local) = fun (x : int) -> x
+let mut cell : int -> int = fun (x : int) -> x
+let h u = let p = stack_ (Ptr.make 1) in cell <- f p; 0
+|};
+  [%expect
+    {| This is local, because it is annotated local (at t.stag:2:11-16), then a partial application holds it (at t.stag:2:20-38), then the function types are unified, then the function returns it (at t.stag:4:49-52), then it is assigned to cell (at t.stag:4:41-52), but must be at most global, because cell is a toplevel (at t.stag:3:28-46) |}];
+  locality
+    {|
+let f (p @ local) = fun (x : int) -> x
+let cell = Ptr.make (fun (x : int) -> x)
+let h u = let p = stack_ (Ptr.make 1) in cell.* <- f p; 0
+|};
+  [%expect
+    {| This is local, because it is annotated local (at t.stag:2:11-16), then a partial application holds it (at t.stag:2:20-38), then the function types are unified, then the function returns it (at t.stag:4:51-54), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:4:51-54) |}];
+  locality
+    {|
+let f (p @ local) = fun (x : int) -> fun (y : int) -> y
+let cell = Ptr.make (fun (x : int) -> x)
+let h u = let p = stack_ (Ptr.make 1) in cell.* <- f p 1; 0
+|};
+  [%expect
+    {| This is local, because it is annotated local (at t.stag:2:11-16), then a partial application holds it (at t.stag:2:20-55), then the function types are unified, then the function returns it (at t.stag:4:51-56), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:4:51-56) |}];
+  locality
+    {|
+let f (p @ local) = fun (x : int) -> fun (y : int) -> y
+let g (p @ local) = exclave_ f p
+let h (p @ local) = exclave_ f p 1
+let i (p @ local) = f p 1 2
+let plus x = fun (y : int) -> Int.add x y
+let j u = plus 1 2
+let shadow = fun (x : int) -> fun (x : bool) -> x
+|};
+  [%expect
+    {|
+    val f : 'a @ local -> (int -> (int -> int) @ local) @ local
+    val g : 'a @ local -> (int -> (int -> int) @ local) @ local
+    val h : 'a @ local -> (int -> int) @ local
+    val i : 'a @ local -> int
+    val plus : int -> int -> int
+    val j : 'a -> int
+    val shadow : int -> bool -> bool
+    |}];
+  (* A function returning a function value, called with both arguments by a tail
+     call, must return one that outlives the region. *)
+  locality
+    {|
+let k f = f 1 2
+let use u = k (fun (x : int) -> exclave_ stack_ (fun (y : int) -> Int.add x y))
+|};
+  [%expect
+    {| This is local, because it is allocated by [stack_] (at t.stag:3:41-78), then it is part of the value (at t.stag:3:41-78), then the function returns it (at t.stag:3:32-78), but must be at most regional, because the function returns a function value, not the closure of a partial application (at t.stag:3:14-79), then the function types are unified, including whether their results may take arguments after the region ends (not printed), then a tail call gives it further arguments, after the current region has ended (mark the call [@nontail]) (at t.stag:2:10-13), then the function types are unified |}]
+;;
+
+let%expect_test "locality in declarations" =
+  locality
+    {|
+type r = { f : int -> int -> int; g : ptr[int] @ local -> int -> int }
+let plus (p @ local) (x : int) = Int.add p.* x
+let one p = Int.add p
+let v = { f = Int.add; g = plus }
+let w = { f = one; g = plus }
+let h (r : r) = r.f 1 2
+let i (r : r) (p @ local) = r.g p 2 [@nontail]
+|};
+  [%expect
+    {|
+    type r = { f : int -> int -> int; g : ptr[int] @ local -> (int -> int) @ local }
+    val plus : ptr[int] @ local -> (int -> int) @ local
+    val one : int -> int -> int
+    val v : r
+    val w : r
+    val h : r -> int
+    val i : r -> ptr[int] @ local -> int
+    |}];
+  locality
+    {|
+type r = { g : ptr[int] @ local -> int -> int }
+let i (r : r) (p @ local) = r.g p 2
+|};
+  [%expect
+    {| This is local, because a function type fixes it, then the function types are unified, then a tail call gives it further arguments, after the current region has ended (mark the call [@nontail]) (at t.stag:3:28-33), but must be at most regional, because a function type fixes it, then the function types are unified, including whether their results may take arguments after the region ends (not printed) |}];
+  locality
+    {|
+type r = { f : int -> int -> int }
+let mk (x : int) = exclave_ stack_ (fun (y : int) -> Int.add x y)
+let v = { f = mk }
+|};
+  [%expect
+    {|
+    This expression has type int -> (int -> int) @ local but an expression was expected of type int -> int -> int
+    Their modes differ: This is local, because it is allocated by [stack_] (at t.stag:3:28-65), then it is part of the value (at t.stag:3:28-65), then the function returns it (at t.stag:3:19-65), then the function types are unified, but must be at most global, because a function type fixes it
+    |}];
+  locality
+    {|
+type r = { f : ptr[int] @ local -> int }
+let f (p : ptr[int]) = p.*
+let v = { f = f }
+|};
+  [%expect
+    {|
+    type r = { f : ptr[int] @ local -> int }
+    val f : ptr[int] -> int
+    val v : r
+    |}];
+  locality
+    {|
+type r = { f : ptr[int] @ local -> ptr[ptr[int]] }
+let g (p : ptr[int]) = Ptr.make p
+let w = { f = g }
+|};
+  [%expect
+    {|
+    This expression has type ptr[int] -> ptr[ptr[int]] but an expression was expected of type ptr[int] @ local -> ptr[ptr[int]]
+    Their modes differ: This is local, because a function type fixes it, then the function types are unified, but must be at most global, because a function type fixes it, then the function types are unified, then it is passed to a function (at t.stag:3:23-33), then p is used (at t.stag:3:32-33), then p is passed to the function (at t.stag:3:23-33)
+    |}];
+  locality
+    {|
+type r = { f : int -> ptr[int] @ local }
+let mk (x : int) = exclave_ stack_ (Ptr.make x)
+let v = { f = mk }
+let g (r : r) = let p = r.f 1 in p.*
+|};
+  [%expect
+    {|
+    type r = { f : int -> ptr[int] @ local }
+    val mk : int -> ptr[int] @ local
+    val v : r
+    val g : r -> int
+    |}];
+  locality {|
+type r = { f : int -> ptr[int] @ local }
+let g (r : r) = r.f 1
+|};
+  [%expect
+    {| This is local, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:3:16-21), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:3:16-21) |}]
+;;
+
+let%expect_test "arrows differing only in what they don't print" =
+  locality
+    {|
+type r = { f : int -> (int -> int) @ local }
+let k (f : int -> (int -> int) @ local) = f 1 2
+let use (r : r) = k r.f
+|};
+  [%expect
+    {|
+    This expression has type int -> (int -> int) @ local but an expression was expected of type int -> (int -> int) @ local
+    Their modes differ, in ways types don't print: This is local, because it is annotated local (at t.stag:3:33-38), then the function types are unified, then a tail call gives it further arguments, after the current region has ended (mark the call [@nontail]) (at t.stag:3:42-45), then the function types are unified, including whether their results may take arguments after the region ends (not printed), but must be at most regional, because a function type fixes it
+    |}]
+;;
+
+let%expect_test "a curried result less local than its arguments prints so" =
+  locality
+    {|
+type r = { f : ptr[int] @ local -> (int -> int) @ global; g : ptr[int] @ local -> int -> int }
+let same (x : int) = x
+let f (p @ local) = same
+let v = { f = f; g = f }
+|};
+  [%expect
+    {|
+    type r = { f : ptr[int] @ local -> (int -> int) @ global; g : ptr[int] @ local -> (int -> int) @ local }
+    val same : int -> int
+    val f : 'a @ local -> (int -> int) @ global
+    val v : r
+    |}];
+  (* Read back, the printed types are the same. *)
+  locality
+    {|
+type r = { f : ptr[int] @ local -> (int -> int) @ global; g : ptr[int] @ local -> (int -> int) @ local }
+let same (x : int) = x
+let f (p @ local) = same
+let v : r = { f = f; g = f }
+|};
+  [%expect
+    {|
+    type r = { f : ptr[int] @ local -> (int -> int) @ global; g : ptr[int] @ local -> (int -> int) @ local }
+    val same : int -> int
+    val f : 'a @ local -> (int -> int) @ global
+    val v : r
+    |}];
+  locality
+    {|
+type r = { f : ptr[int] @ local -> int -> int }
+let same (x : int) = x
+let f (p @ local) = same
+let g (r : r) (p @ local) = Ptr.make (r.f p) [@nontail]
+|};
+  [%expect
+    {| This is local, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:5:37-44), then it is passed to a function (at t.stag:5:28-44), but must be at most global, because a function type fixes it, then the function types are unified |}]
+;;

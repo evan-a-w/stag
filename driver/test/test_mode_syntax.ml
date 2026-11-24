@@ -27,7 +27,7 @@ let var = (summed @ local)
     type t = A of global_ int * int
     val f : int @ local -> (int -> int) @ local
     val pair : 'a @ local -> 'a * ('b -> 'a @ local) @ local
-    val apply : (int -> int) -> int
+    val apply : (int @ local -> int @ local) -> int
     val annotated : int @ local -> (int -> int) @ local
     val counter : int
     val record : int

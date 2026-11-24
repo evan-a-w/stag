@@ -94,7 +94,14 @@ stage axis is constrained so far.
 - **Annotations.** In an annotation, a side written without a mode is a fresh
   variable, so annotating restricts no mode; `'m` names one variable across a
   definition's annotations. In a declaration (and for builtins), it is the
-  default, `nonportable unknown global`, and a mode variable is an error.
+  default, `nonportable unknown global`, and a mode variable is an error. As
+  in OxCaml, the result of a curried arrow written without a mode is as local
+  as the arguments before it (`ptr[int] @ local -> int -> int` is
+  `ptr[int] @ local -> (int -> int) @ local`), as it is the closure of a
+  partial application holding them. Its `curry` is still fixed `regional`,
+  as a declaration can't tell a partial application from a function value
+  returned, so a tail call through it given a `local` argument must be marked
+  `[@nontail]`. Provenance written in a declaration isn't checked yet.
 - **Decisions made while checking a function.** Whether a variable is
   embedded in a quote, and whether a `let` is `const` enough to generalise,
   can't wait for the function's uses. They take the lower bound the mode would

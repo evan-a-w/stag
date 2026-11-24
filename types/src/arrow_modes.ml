@@ -9,17 +9,30 @@ end
 type t =
   { arg : Side.t
   ; res : Side.t
+  ; curry : Side.t
   }
 
 let default_const : Mode.Const.t =
   { stage = Nonportable; provenance = Unknown; locality = Global }
 ;;
 
-let default = { arg = Fixed default_const; res = Fixed default_const }
+let default_curry_const : Mode.Const.t =
+  { default_const with locality = Regional }
+;;
+
+let default_curry : Side.t = Fixed default_curry_const
+
+let default =
+  { arg = Fixed default_const
+  ; res = Fixed default_const
+  ; curry = default_curry
+  }
+;;
 
 let fresh ids ~rank =
   { arg = Var (Mode.Var.create ids ~rank)
   ; res = Var (Mode.Var.create ids ~rank)
+  ; curry = Var (Mode.Var.create ids ~rank)
   }
 ;;
 
@@ -39,7 +52,13 @@ let side_var ids ~rank : Side.t -> Mode.Var.t = function
 
 let reason = Mode.Reason.create "the function types are unified"
 
-let equate_side ids (side1 : Side.t) (side2 : Side.t) =
+let curry_reason =
+  Mode.Reason.create
+    "the function types are unified, including whether their results may take \
+     arguments after the region ends (not printed)"
+;;
+
+let equate_side ids (side1 : Side.t) (side2 : Side.t) ~reason =
   match side1, side2 with
   | Fixed const1, Fixed const2 when Mode.Const.equal const1 const2 -> Ok ()
   | _ ->
@@ -50,16 +69,34 @@ let equate_side ids (side1 : Side.t) (side2 : Side.t) =
 ;;
 
 let equate ids t1 t2 =
-  let%bind.Result () = equate_side ids t1.arg t2.arg in
-  equate_side ids t1.res t2.res
+  let%bind.Result () = equate_side ids t1.arg t2.arg ~reason in
+  let%bind.Result () = equate_side ids t1.res t2.res ~reason in
+  equate_side ids t1.curry t2.curry ~reason:curry_reason
 ;;
 
-let side_vars : Side.t -> _ = function
-  | Var var -> [ var ]
-  | Fixed _ -> []
+let iter_side (side : Side.t) ~(local_ f) =
+  match side with
+  | Var var -> f var [@nontail]
+  | Fixed _ -> Ok ()
 ;;
 
-let vars t = side_vars t.arg @ side_vars t.res
+let iter_result t ~(local_ f) =
+  match iter_side t.arg ~f with
+  | Error _ as error -> error
+  | Ok () ->
+    (match iter_side t.res ~f with
+     | Error _ as error -> error
+     | Ok () -> iter_side t.curry ~f [@nontail])
+;;
+
+let exists t ~(local_ f) =
+  let side (side : Side.t) =
+    match side with
+    | Var var -> f var
+    | Fixed _ -> false
+  in
+  side t.arg || side t.res || (side t.curry [@nontail])
+;;
 
 let map_side (side : Side.t) ~f : Side.t =
   match side with
@@ -72,7 +109,10 @@ let map_side (side : Side.t) ~f : Side.t =
 let map t ~f =
   let arg = map_side t.arg ~f in
   let res = map_side t.res ~f in
-  if phys_equal arg t.arg && phys_equal res t.res then t else { arg; res }
+  let curry = map_side t.curry ~f in
+  if phys_equal arg t.arg && phys_equal res t.res && phys_equal curry t.curry
+  then t
+  else { arg; res; curry }
 ;;
 
 let same_side (a : Side.t) (b : Side.t) =
@@ -82,4 +122,6 @@ let same_side (a : Side.t) (b : Side.t) =
   | Fixed _, Var _ | Var _, Fixed _ -> false
 ;;
 
-let same t t' = same_side t.arg t'.arg && same_side t.res t'.res
+let same t t' =
+  same_side t.arg t'.arg && same_side t.res t'.res && same_side t.curry t'.curry
+;;

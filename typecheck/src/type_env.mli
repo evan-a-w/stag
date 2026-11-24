@@ -180,12 +180,8 @@ val reflect
   -> string
   -> (Reflected_decl.t option, Typecheck_error.t) Result.t
 
-(** Whether the field of canonical name [name] is declared [global_]. *)
-val is_global_field : t -> string -> bool
-
-(** Per argument of the constructor of canonical name [name], whether it is
-    declared [global_]. [None] for exceptions. *)
-val global_constructor_args : t -> string -> bool list option
+(** Of the field of canonical name [name]. *)
+val field_modality : t -> string -> Modality.t
 
 (** Whether values of [ty] hold no pointers by value: immediates, and tuples,
     records and variants of such types. [false] while unknown, e.g. for a

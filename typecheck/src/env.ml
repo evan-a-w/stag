@@ -40,21 +40,23 @@ module Entry = struct
     { scheme : Type.ty
     ; level : Level.t
     ; quote_id : int option
-    ; mode : Mode.Var.t
+    ; mode : Binding.t
+    ; held : Binding.t option
     ; locks : (Lock.t list[@sexp.opaque])
     ; binder : Typed.Binder.t
     ; defining : bool
     }
   [@@deriving sexp_of]
 
-  let toplevel ~ident ~scheme ~mode =
+  let toplevel ~defining ~ident ~scheme ~mode ~held =
     { scheme
     ; level = 0
     ; quote_id = None
     ; mode
+    ; held
     ; locks = []
     ; binder = Toplevel ident
-    ; defining = false
+    ; defining
     }
   ;;
 

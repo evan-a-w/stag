@@ -31,4 +31,5 @@ module Inline_expansion = Stag_driver.Inline_expansion
 module Corrected_file = Stag_driver.Corrected_file
 module Source_edit = Stag_driver.Source_edit
 module Env = Stag_typecheck.Env
+module Binding = Stag_typecheck.Binding
 module Mode = Stag_mode

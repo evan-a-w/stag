@@ -76,6 +76,7 @@ let ty t ~var ~row =
       , ty
       , { arg = Fixed { Arrow_modes.default_const with locality = Local }
         ; res = Fixed Arrow_modes.default_const
+        ; curry = Arrow_modes.default_curry
         } )
 ;;
 

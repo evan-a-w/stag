@@ -39,7 +39,8 @@ module Entry : sig
     { scheme : Type.ty
     ; level : Level.t
     ; quote_id : int option (** The innermost quote the entry is bound in. *)
-    ; mode : Mode.Var.t
+    ; mode : Binding.t (** Of the variable, or of a [let mut]'s cell. *)
+    ; held : Binding.t option (** Of the values a [let mut] holds. *)
     ; locks : Lock.t list
     (** The locks enclosing its binding, innermost first. *)
     ; binder : Typed.Binder.t
@@ -49,7 +50,13 @@ module Entry : sig
     }
   [@@deriving sexp_of]
 
-  val toplevel : ident:Typed.Ident.t -> scheme:Type.ty -> mode:Mode.Var.t -> t
+  val toplevel
+    :  defining:bool
+    -> ident:Typed.Ident.t
+    -> scheme:Type.ty
+    -> mode:Binding.t
+    -> held:Binding.t option
+    -> t
 
   (** The locks of [locks], innermost first, that a use under them crosses:
       never a [Splice]. *)
