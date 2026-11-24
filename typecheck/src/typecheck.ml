@@ -3623,7 +3623,7 @@ and substitute_entry
   let entry : Env.Lookup.t -> _ = function
     | Bound entry -> Ok (Some entry)
     (* Toplevels are free variables of the quote, like any name not bound in it. *)
-    | Forgotten | Unbound when Option.is_some scope.quote -> Ok None
+    | (Forgotten | Unbound) when Option.is_some scope.quote -> Ok None
     | Forgotten | Unbound ->
       (* The code is checked and runs now, so if it may use [name], it doesn't.
          Providing it anyway could add a dependency on its toplevel, and would

@@ -402,7 +402,10 @@ let rec kind_message (kind : Kind.t) ~show_type =
       name
   | Duplicate_forget name -> sprintf "%s is forgotten twice" name
   | Forgotten name ->
-    sprintf "%s is not in scope here: it was forgotten by [forget %s in ...]" name name
+    sprintf
+      "%s is not in scope here: it was forgotten by [forget %s in ...]"
+      name
+      name
   | Unbound_module path -> sprintf "Unbound module %s" (decl_path path)
   | Unbound_type path -> sprintf "Unbound type %s" (decl_path path)
   | Unbound_type_variable name -> sprintf "Unbound type variable '%s" name

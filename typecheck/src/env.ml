@@ -115,7 +115,8 @@ let visible t =
 ;;
 
 let with_slots t slots ~(local_ f) =
-  List.iter slots ~f:(fun (name, slot) -> Hashtbl.add_multi t ~key:name ~data:slot);
+  List.iter slots ~f:(fun (name, slot) ->
+    Hashtbl.add_multi t ~key:name ~data:slot);
   Exn.protect ~f ~finally:(fun () ->
     List.iter slots ~f:(fun (name, _) -> Hashtbl.remove_multi t name))
 ;;

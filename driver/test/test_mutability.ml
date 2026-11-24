@@ -215,8 +215,7 @@ let at_compile_time =
     |}]
 ;;
 
-let%expect_test "closures reaching a mutable local can't be embedded in quotes"
-  =
+let%expect_test "closures reaching a mutable local can't be embedded in quotes" =
   (* They are [nonportable], so not usable in quotes: the code leaves them to
      its context. *)
   (* Directly. *)
@@ -264,7 +263,8 @@ let bad x = let g u = x in .<g ()>.
 let bad (x : option[unit -> int]) = let g u = x in .<g ()>.
 |};
   (* Arguments that can't hold a closure, but aren't portable either. *)
-  check {|
+  check
+    {|
 let not_portable (x : int) (y : list[string]) = let g u = (x, y) in .<g ()>.
 |};
   check {|
@@ -720,7 +720,8 @@ let bad =
            , Stag.Expr.var "n"
            , Stag.Expr.Quote (Ptr.make ( (Stag.Expr.App (Ptr.make ( (Stag.Expr.var "f", Stag.Expr.Lit Stag.Lit.Unit)))))) ))) ))))
 |};
-  [%expect {|
+  [%expect
+    {|
     ((In_syntax_splice
       (generated
        ((Let_mut (n @ t.stag:3:2-12:130) () ((Lit (Int 0)) @ t.stag:3:2-12:130)
