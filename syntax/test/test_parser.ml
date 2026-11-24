@@ -457,6 +457,7 @@ let%expect_test "patterns" =
   pat "C exception e";
   pat "{x = p; M.y = q}";
   pat "{x = p; _}";
+  pat "{x = p; _;}";
   pat "`A";
   pat "`A p";
   pat "`A (p, q)";
@@ -491,6 +492,7 @@ let%expect_test "patterns" =
     (Exception (Tuple ((Var e) (Var x))))
     t.stag:1:2-11: expected end of file, found `exception`
     (Record ((x (Var p)) (M.y (Var q))))
+    (Record ((x (Var p))))
     (Record ((x (Var p))))
     (Poly_variant A ())
     (Poly_variant A ((Var p)))
@@ -859,7 +861,7 @@ let%expect_test "errors" =
     t.stag:1:2-3: expected a constructor, found `x`
     t.stag:1:2-3: expected `=`, found `}`
     t.stag:1:8-9: expected a field name, found `_`
-    t.stag:1:8-9: expected a field name, found `_`
+    (Record ((x (Var p))))
     t.stag:1:0-3: weak type variables like `'_a` cannot be written, they are only printed
     t.stag:1:5-11: weak type variables like `'_weak` cannot be written, they are only printed
     t.stag:1:2-3: only type constructors like `list` take type arguments
