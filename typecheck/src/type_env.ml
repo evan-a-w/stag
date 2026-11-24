@@ -675,8 +675,7 @@ and elaborate_con
            let%map.Result ty, syntax =
              elaborate' t module_ vars ~splices ~expansions ty
            in
-           ( Type.ATy ty
-           , Type_expr.Ty { txt = Modality (syntax, mode); loc } )
+           Type.ATy ty, Type_expr.Ty { txt = Modality (syntax, mode); loc }
          | Atoms _ | Var _ -> error ~loc:mode.loc Invalid_modality)
       | Ty _, Ty ty ->
         let%map.Result ty, syntax =

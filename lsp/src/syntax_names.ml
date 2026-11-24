@@ -178,8 +178,7 @@ let of_toplevels ?(walk_expansion = Fn.const true) ~module_path toplevels =
     | Moded (ty, _)
     | Constrained (ty, _)
     | Global ty
-    | Modality (ty, _) ->
-      recurse ty
+    | Modality (ty, _) -> recurse ty
     | Splice e -> expr e
   and walk_row ~(add : add) ~expr ~kind (row : Syntax.Type_expr.row) =
     match row.txt with

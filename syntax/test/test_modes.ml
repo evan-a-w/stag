@@ -316,6 +316,29 @@ let%expect_test "modalities on type arguments" =
   ty "string @@ external";
   prog "let f (x : string @@ external) = x";
   print
-    "type t = { cell : ptr[(int -> int) @@ external]; pair : ptr[int * int @@ external] }";
-  [%expect {| |}]
+    "type t = { cell : ptr[(int -> int) @@ external]; pair : ptr[int * int @@ \
+     external] }";
+  [%expect
+    {|
+    (Con ptr ((Ty (Modality (Con string ()) (Atoms (External))))))
+    (Con ptr
+     ((Ty (Modality (Tuple ((Con int ()) (Con string ()))) (Atoms (External))))))
+    (Con ptr
+     ((Ty (Modality (Arrow (Con int ()) (Con int ())) (Atoms (External))))))
+    (Con ptr
+     ((Ty (Modality (Arrow (Con int ()) (Con int ())) (Atoms (External))))))
+    (Con ptr
+     ((Ty
+       (Modality (Con ptr ((Ty (Modality (Con int ()) (Atoms (External))))))
+        (Atoms (External))))))
+    (Con ptr ((Ty (Modality (Var a) (Var m)))))
+    t.stag:1:17-25: `gc` and `external` are both provenance modes
+    t.stag:1:13-14: expected a mode like `local`, or a mode variable like `'m`, found `]`
+    t.stag:1:7-9: a modality (`@@`) is only written on a type argument, as in `ptr[t @@ external]`
+    t.stag:1:18-20: expected `)` to close this `(` (opened at 1:6), found `@@`
+    type t = {
+      cell : ptr[(int -> int) @@ external];
+      pair : ptr[int * int @@ external];
+    }
+    |}]
 ;;

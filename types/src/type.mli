@@ -166,8 +166,8 @@ val arrow : ty -> ty -> ty
 val error_name : string
 val is_error : ty -> bool
 
-(** A pointer's type says which values its cell may be given by a store, so
-    that every alias of the cell agrees on it, whatever their modes. *)
+(** A pointer's type says which values its cell may be given by a store, so that
+    every alias of the cell agrees on it, whatever their modes. *)
 module Pointee : sig
   type t =
     | Gc (** [ptr[t]]: values at most [gc]. *)
