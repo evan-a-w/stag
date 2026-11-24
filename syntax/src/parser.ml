@@ -814,13 +814,20 @@ and record_pattern t : Pattern.t =
   let start = loc t in
   match peek_at t 1 with
   | Lident _ | Uident _ | Root ->
+    (* A final [_], as in OCaml, says the other fields are ignored, as they are
+       anyway. *)
     let fields =
       delimited t ~opener:Lbrace ~close:Rbrace ~sep:Semi ~item:(fun t ->
-        let path = lowercase_path t ~what:"a field name" in
-        expect t Equal;
-        path, pattern t)
+        if is t Underscore && [%equal: Token.t] (peek_at t 1) Rbrace
+        then (
+          advance t;
+          None)
+        else (
+          let path = lowercase_path t ~what:"a field name" in
+          expect t Equal;
+          Some (path, pattern t)))
     in
-    since t start (Pattern.Record fields)
+    since t start (Pattern.Record (List.filter_opt fields))
   | _ ->
     advance t;
     let rec loop acc =

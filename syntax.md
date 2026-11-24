@@ -290,7 +290,7 @@ own (see modes.md), so in `.< N.v.x >.` the `x` is the one in scope whatever
 _   x   1   'c'   "s"   true   ()   (p, q)
 C   C p   C (p, q)   C ((p, q))     (* as in expressions *)
 [p; q]   []                         (* list literals, as in expressions *)
-{x = p; M.y = q}                    (* nominal *)
+{x = p; M.y = q}   {x = p; _}       (* nominal: any fields; a final _ as in OCaml *)
 `A   `A p
 {`x = p}   {`x = p; ..}   {`x = p; ..rest}   (* closed, open, bind rest *)
 exception p                         (* only at the top of a match arm *)

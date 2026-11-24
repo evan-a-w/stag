@@ -396,7 +396,7 @@ let constructors ty =
   match Stag.Type.expr ty with
   | Stag.Type_expr.Con (Stag.Path.Ref r, _) ->
     (match Stag.Type.decl r with
-     | Some {params = _; kind = Stag.Type.Kind.Variant cs} -> Core.List.length cs
+     | Some {kind = Stag.Type.Kind.Variant cs; _} -> Core.List.length cs
      | _ -> 0)
   | _ -> 0
 let n_colors = .~(Stag.Expr.int (constructors (type color)))   (* val n_colors : int = 3 *)
