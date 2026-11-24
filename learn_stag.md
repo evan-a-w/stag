@@ -333,9 +333,11 @@ include%inline .~[Stag.Toplevel.let_ "square" ["y"] (Stag.Code.erase (power 2 .<
 end%inline
 ```
 
-What a quote may use from outside it is decided by the stage axis of modes
-(below): `const` and `portable` values are embedded in the code, anything else
-becomes a free variable of the quote, provided where the code is spliced.
+A name in scope inside a quote always means that variable. The quote embeds its
+value if the stage axis of modes (below) allows it: `const` and `portable`
+values. Anything else is an error. Names not in scope are free variables of the
+quote, provided where the code is spliced, and `forget x in e` takes `x` out of
+scope in `e`, so a quote in `e` can use a free `x`.
 
 ```stag
 let n = 3                           (* a toplevel constant: const *)
@@ -345,12 +347,12 @@ let uses_n = .< Int.add n 1 >.      (* val uses_n : <int>{..'a} *)
 let local_const = let k = "s" in .< k >.          (* val local_const : <string>{..'a} *)
 let local_int = let k = Int.add 1 2 in .< k >.    (* val local_int : <int>{..'_a} *)
 
-(* A computed string, a function's argument, or a closure capturing one, is
-   not: it becomes a free variable of the quote, so the `k` and `x` below are
+(* A computed string, a function's argument, or a closure capturing one, can't
+   be embedded. `forget` makes the quote's `k` and `x` free variables instead:
    whatever `k` and `x` are where the code is spliced, not these. *)
-let computed = let k = Int.to_string 3 in .< k >.
+let computed = let k = Int.to_string 3 in forget k in .< k >.
 (* val computed : <'_a>{k : '_a; ..'_b} *)
-let argument x = .< x >.            (* val argument : 'a -> <'b>{x : 'b; ..'c} *)
+let argument x = forget x in .< x >. (* val argument : 'a -> <'b>{x : 'b; ..'c} *)
 
 (* Annotating an argument portable embeds it, but then callers must pass
    portable values. *)
@@ -365,6 +367,20 @@ let twice_incr u =
   .~incr;
   x
 let two = twice_incr ()             (* val two : int = 2 *)
+```
+
+Without `forget`, using a variable the quote can't embed is an error:
+
+```stag-error
+let argument x = .< x >.
+(* Error: The quote can't embed x, as it may not be portable. Bind it as (x @ portable) to embed it, or write [forget x in ...] to make x a free variable of the quote *)
+```
+
+A forgotten name is out of scope outside quotes too:
+
+```stag-error
+let shadowed x = let y = 1 in forget y in Int.add x y
+(* Error: y is not in scope here: it was forgotten by [forget y in ...] *)
 ```
 
 Compile-time code only sees what exists at compile time: no mutable globals,

@@ -38,7 +38,7 @@ node, for good errors.
   The longest tokens `.<` `.~` `..` `.{` are unaffected (`..x` is `..` then
   `x`).
 - Keywords: `let rec in match with fun exception external type of module
-  struct end`, `true false`, and `stack_ exclave_` (see
+  struct end forget`, `true false`, and `stack_ exclave_` (see
   [Modes](#modes)), so these are not identifiers anywhere, even qualified
   (`M.stack_`). Mode names (`local`, `const`, ...) are not keywords, but
   `external`: it is the `external` mode after `@`, unless it starts a
@@ -106,6 +106,7 @@ r \ `x                              (* restrict *)
 .~e.{}                              (* explicit, nothing provided (Some []) *)
 .~e.{x = e1; y}                     (* explicit; `y` alone is a variable: (y, None) *)
 type t   type list[int]   type (a * b)  (* a type as a value, see Reflection *)
+forget x, y in e                    (* e without x and y in scope, see Forget *)
 ```
 
 Splice binds tighter than application (`.~f x` is `(.~f) x`), and looser than
@@ -119,7 +120,7 @@ Precedence, loosest first:
 
 | Construct                                  | Associativity      |
 | ------------------------------------------ | ------------------ |
-| `let ... in`, `match`, `fun` (extend right) |                    |
+| `let ... in`, `match`, `fun`, `forget` (extend right) |                    |
 | `e1; e2`                                   | right              |
 | `x <- e`                                   | right              |
 | `e1, e2`                                   | n-ary              |
@@ -146,6 +147,31 @@ the typechecker from the declaration (and so also for generated code: `C` of
 polymorphic variant has at most one argument, so `` `A (a, b) `` is always
 `` `A `` of a tuple. A parenthesized expression's location includes its
 parentheses.
+
+### Forget
+
+`forget x, y in e` takes `x` and `y` out of scope in `e`: locals and
+toplevels of those names, so they don't resolve to an outer binding either.
+Only plain names are forgotten; qualified paths (`M.x`, `.x`) are
+unaffected. Outside a quote, using a forgotten name is an error. Inside a
+quote (whether `forget` is outside the quote or inside it), a forgotten name
+is a free variable of the quote, to be provided where the code is spliced
+(implicitly or by `.{x = ...}`). A binding inside `e` (`let x = ... in`, a
+parameter, a pattern) binds `x` again as usual. Naming a variable twice is an
+error.
+
+A name in scope inside a quote always means that variable. A local of an
+earlier level is embedded in the code if the quote may use its value (it is
+`portable`, or its type crosses stage, see [modes.md](modes.md)); otherwise
+using it is an error, which suggests `(x @ portable)` or `forget`. A toplevel
+is referred to by name. So the quote's free variables are exactly the names
+not in scope:
+
+```ocaml
+let argument x = .< x >.             (* error: x may not be portable *)
+let argument x = forget x in .< x >. (* a free x: 'a -> <'b>{x : 'b; ..'c} *)
+let embedded (x @ portable) = .< x >. (* x's value: 'a -> <'a>{..'b} *)
+```
 
 ### List literals
 
@@ -349,7 +375,7 @@ A closure captures a mutable local by reference: it shares the variable with
 the code that binds it. Mutable locals are values of their level only: a
 quote can't use one bound outside it, nor can compile-time code use a runtime
 one. A closure capturing one is `nonportable` (see [modes.md](modes.md)), so
-is not used directly in a quote: it becomes a free variable of the quote.
+a quote can't use it either (see [Forget](#forget)).
 
 Toplevel `let mut x = e` declares a mutable global, assignable from anywhere
 it is in scope (`M.x <- 1`). Its value can't need itself (see Evaluation),

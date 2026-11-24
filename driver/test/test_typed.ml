@@ -919,7 +919,7 @@ let%expect_test "local recursion" =
   print
     {|
 let direct y = let f x = f x in f y
-let in_quote = let f x = forget f, x in .<f x>. in forget f in .<f>.
+let in_quote = let f x = forget f, x in .<f x>. in .<f>.
 |};
   [%expect
     {|

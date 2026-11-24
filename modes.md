@@ -281,13 +281,16 @@ splice, while one bound outside the quote crosses none of them.
 - **Closure lock** (entering a function body): the captured variable's mode
   must be at most the closure's mode.
 - **Quote lock**: the variable must be `portable`, and the code is at least
-  as nonportable as it. Otherwise it becomes a free variable of the quote.
+  as nonportable as it. Otherwise using it is an error, unless it is
+  forgotten (`forget x in ...`, see syntax.md), which makes the name a free
+  variable of the quote.
   Whether it is `portable` is decided by its lower bound where it is used,
   then required: a later rise is an error. A (non-mutable) local of a type
   that crosses stage (plain data, as `int`) is `portable` whatever its
   stage, so is used directly. A variable used in its own
-  definition (a local function in its body, a toplevel being checked) is not
-  decided on, so is always a free variable of a quote there. A local function
+  definition is not decided on: a local function in its body can't be used in
+  a quote there (an error), and a toplevel being checked is referred to by
+  name. A local function
   in its own body is nonportable to compute with, as is a local closure
   capturing it (other than itself); so is a toplevel non-function being
   checked. A toplevel function captures nothing, so its mode is known while
@@ -356,8 +359,8 @@ toplevel splice has the mode of its expansion, checked after it is generated.
 - Toplevel constants like `n` resolve directly inside quotes (they are
   `const`), instead of becoming free variables filled in at the splice.
 - Local closures capturing arguments, mutable locals or computed values no
-  longer cross levels: they are free variables of the quote, unless their type
-  is pointer-free.
+  longer cross levels: using one in a quote is an error, unless its type is
+  pointer-free. `forget` makes the name a free variable of the quote instead.
 - Constant data is generalized, local or not; values computed by applying
   or splicing are not.
 - An arrow written in an annotation without modes has the default modes

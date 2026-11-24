@@ -500,7 +500,7 @@ let%expect_test "toplevels of a component are evaluated separately" =
   run
     {|
 type abc = A | B
-let f x = v; .<x>.
+let f x = v; forget x in .<x>.
 let v = f; match B with A -> 0
 let g y = .~(f; .<y>.)
 |};
