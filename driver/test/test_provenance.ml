@@ -459,7 +459,7 @@ let set_t u = t <- (ext "x", 2)
     |}]
 ;;
 
-let%expect_test "stores go only through pointers to cells the GC scans" =
+let%expect_test "a store's pointer may be external: every [ptr] cell is stag's" =
   provenance
     {|
 let ext (x : ptr[string]) = let y @ external = x in y

@@ -20,8 +20,10 @@ is rejected by the backend (the interpreter supports everything).
   tagged unions). Polymorphic records and variants are monomorphised, so their
   layout is static.
 - Pointers are one type, `ptr[t]`; where the pointee lives (static data, GC
-  heap, data stack, foreign memory) is given by the pointer's modes, not its
-  type.
+  heap, data stack) is given by the pointer's modes, not its type.
+  `ptr[t @@ external]`, a pointer to a cell that may hold `external` values,
+  is a distinct type (see [Modes](#modes)). C's memory will have a
+  type of its own.
 - No implicit boxing: a recursive type must recurse through `ptr[t]` (see
   [Recursive types](#recursive-types)).
 - Mutation: mutable fields and stores through pointers. A store into a GC
@@ -199,19 +201,23 @@ Provenance follows reachability, not evaluation:
   (`string @ external -> ...`), and an `external`'s result is trusted as
   declared.
 - A heap block holding an `external` value is itself `external`. Stores must
-  not raise a cell's provenance, as the cell's other aliases rely on it: a
-  store through a pointer (`p.* <- v`) takes only `gc` values (every pointer
-  cell is at least `gc`, and its provenance may have been forgotten by
-  subsumption). A cell holding `external` values is made by `Ptr.make` of
-  one, and keeps it. A mutable variable (`let mut`, a mutable global) has a
-  held mode of its own, inferred from what is assigned to it: an `external`
-  assignment makes it `external` (its reads then are), unless it is annotated
-  `@ gc`, which rejects it. `@ external` opts in.
-- Until pointers into foreign memory are designed, a store of a value that
-  may be a GC pointer also needs the pointer stored through to be at most
-  `gc`: an `external` pointer may be to memory the GC doesn't scan, which
-  must never hold the only reference to a GC object. Stores of pointer-free
-  values (`ptr[int]`) cross this, as they hold no GC pointer.
+  not raise a cell's provenance, as the cell's other aliases rely on it, and
+  a pointer's mode may have been raised by subsumption: what a cell may be
+  given is in the pointer's type instead. A store through a `ptr[t]`
+  (`p.* <- v`) takes only `gc` values; through a `ptr[t @@ external]`, any
+  value, and a read through one is `external` (unless its type crosses).
+  The two types are distinct, neither a subtype of the other. `Ptr.make`
+  makes a `ptr[t]` (of an `external` value too: it can then be read, not
+  stored to, with `external` values), `Ptr.make_external` a
+  `ptr[t @@ external]`. A mutable variable (`let mut`, a mutable global) has
+  a held mode of its own, inferred from what is assigned to it: an
+  `external` assignment makes it `external` (its reads then are), unless it
+  is annotated `@ gc`, which rejects it. `@ external` opts in.
+- Every `ptr` points to stag's memory (static data, the GC heap or the data
+  stack), whatever its mode, so a store needn't check the pointer stored
+  through: no `external` signature takes or returns pointers yet, and C's
+  memory will have its own type (`cptr[t]`), whose stores will be limited to
+  C-compatible data.
 - A closure is `static` only if it is `const`: what it captures is then
   known at compile time, so it is emitted statically. A callback passed to C
   must be `@ static` (C may retain it), once the FFI has callbacks.
