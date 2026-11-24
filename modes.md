@@ -356,11 +356,13 @@ Each step is a branch stacked on the previous one.
   toplevel function), called through libffi by the interpreter. Only
   immediates (`int`, `bool`, `char`, `unit`) for now: other signatures,
   pointers included, are rejected.
-- **H. Pointee modality**: `ptr[t @@ external]`, a distinct pointer type
-  whose cell may be given `external` values (`Ptr.make_external`), reads
-  through it `external`; stores through a `ptr[t]` take `gc` values, through
-  any pointer whatever its mode (every `ptr` is to stag's memory; C's will
-  be `cptr[t]`).
+- **H. Pointee modality**: `ptr[t @@ m]`, `m` a provenance or a mode
+  variable in the type, unified exactly and generalized like arrow modes:
+  stores through it take at most `m`, reads are at least `m`. `ptr[t]` is
+  `@@ gc`. `Ptr.make` infers it; weak toplevel cells are fixed at the end of
+  their definition (`gc` by default). Stores needn't check the pointer
+  stored through (every `ptr` is to stag's memory; C's will be `cptr[t]`).
+  In `with`, a relation with a cell variable is on provenance.
 
 ## Later
 
