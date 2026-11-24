@@ -189,6 +189,19 @@ module Report = struct
     }
 end
 
+(* A use, in a quote, of a toplevel whose checking was underway, at a type of
+   its own until the toplevel is finished: then it is unified with an instance
+   of the toplevel's. *)
+module Deferred_use = struct
+  type t =
+    { toplevel : Toplevel.t
+    ; ty : Type.ty
+    ; loc : Loc.t
+    ; frame : int (** Of the code the quote is in. *)
+    ; report : Typecheck_error.t -> unit
+    }
+end
+
 (* What one call of [typecheck] checks. *)
 module Program_env = struct
   type t =
@@ -230,6 +243,7 @@ module Program_env = struct
     ; parameter_modes : Int.Hash_set.t
     (** The ids of the modes of parameters: what they are is decided by each use
         of their function, so is not known while it is checked. *)
+    ; mutable deferred_uses : Deferred_use.t list
     }
 
   let report ?frame t error =
@@ -242,8 +256,12 @@ module Program_env = struct
       Option.some_if (not (Typecheck_error.is_already_reported error)) error)
   ;;
 
-  (* Forgets the errors of the code of [frames], abandoned to be checked anew. *)
+  (* Forgets the errors and deferred uses of the code of [frames], abandoned to
+     be checked anew. *)
   let forget t ~frames =
+    t.deferred_uses
+    <- List.filter t.deferred_uses ~f:(fun (use : Deferred_use.t) ->
+         not (List.mem frames use.frame ~equal:Int.equal));
     t.reports
     <- List.filter t.reports ~f:(fun { error = _; frame } ->
          not
@@ -575,11 +593,16 @@ module Resolution = struct
       | Toplevel _ -> false
     in
     (* Crossing a quote lock needs [portable]: so far, as only its lower bound
-       is final, the constraint being added where it is used. *)
+       is final, the constraint being added where it is used. A local of this
+       level bound in another quote has no value here to embed. *)
     let usable (entry : Env.Entry.t) =
       (entry.level = scope.level
        && [%equal: int option] entry.quote_id (Scope.quote_id scope))
-      || (entry.level <= scope.level
+      || ((entry.level < scope.level
+           ||
+           match entry.binder with
+           | Toplevel _ -> entry.level <= scope.level
+           | Local _ -> false)
           && (((crosses entry
                 || Mode.Stage.le
                      (Scope.known_stage scope (entry.mode :> Mode.Var.t))
@@ -2042,15 +2065,35 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
         ~held:in_progress.held
     in
     (match scope.quote with
-     | Some _ when not toplevel.mut ->
-       (* Its mode isn't known yet, so the code refers to it by symbol: the
-          quote's value doesn't depend on [toplevel], so neither does its
-          component. Nor does the code's type, a fresh one: where the code is
-          spliced, its expansion is checked against [toplevel]'s. *)
+     | Some _ when (not toplevel.mut) && in_progress.index = scope.scc.id ->
+       (* By symbol, in its own code: a recursive use, of its type. *)
+       in_progress.recursive <- true;
        Ok
          (at_scope_level
             (entry
-               ~scheme:(Scope.fresh_ty t scope)
+               (Mode_rules.Binding.being_checked
+                  (Scope.modes scope)
+                  ~name:toplevel.ident.name
+                  ~loc)))
+     | Some _ when not toplevel.mut ->
+       (* Its mode isn't known yet, so the code refers to it by symbol: the
+          quote's value doesn't depend on [toplevel], so neither does its
+          component, which may be finished first. So the use is of a type of its
+          own, never generalized (of rank 0), unified with an instance of
+          [toplevel]'s once that is finished. *)
+       let ty = Type.TVar (Fresh.var t ~rank:0) in
+       scope.program.deferred_uses
+       <- { toplevel
+          ; ty
+          ; loc
+          ; frame = scope.scc.id
+          ; report = Scope.report scope
+          }
+          :: scope.program.deferred_uses;
+       Ok
+         (at_scope_level
+            (entry
+               ~scheme:ty
                (Mode_rules.Binding.being_checked
                   (Scope.modes scope)
                   ~name:toplevel.ident.name
@@ -2176,8 +2219,32 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
       scc.pending <- [];
       while Stack.length program.unfinished > unfinished do
         Unify.lower_ty ~rank:0 (Stack.pop_exn program.unfinished)
-      done);
+      done;
+      check_deferred_uses t program);
     scc
+
+(* The deferred uses of the toplevels now finished. *)
+and check_deferred_uses t (program : Program_env.t) =
+  let finished, deferred =
+    List.partition_tf program.deferred_uses ~f:(fun (use : Deferred_use.t) ->
+      match use.toplevel.state with
+      | Done _ -> true
+      | Unchecked | In_progress _ -> false)
+  in
+  program.deferred_uses <- deferred;
+  List.iter (List.rev finished) ~f:(fun (use : Deferred_use.t) ->
+    match use.toplevel.state with
+    | Done { entry; _ } ->
+      (match
+         Unify.unify_ty
+           t
+           ~ty1:use.ty
+           ~ty2:(Scheme.instantiate t ~rank:0 entry.scheme)
+       with
+       | Ok () -> ()
+       | Error error ->
+         use.report (Typecheck_error.unification_error ~loc:use.loc error))
+    | Unchecked | In_progress _ -> ())
 
 (* Its modes are as declared: C code is trusted to keep to them. *)
 and check_external
@@ -4520,6 +4587,7 @@ let program_env
     ; compile_time_c_calls
     ; mode_limits_reported = String.Hash_set.create ()
     ; parameter_modes = Int.Hash_set.create ()
+    ; deferred_uses = []
     }
   in
   (report := fun error -> Program_env.report program_env error);

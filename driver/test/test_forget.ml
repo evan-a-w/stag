@@ -141,13 +141,19 @@ let d = .~c.{s = "other"}
 ;;
 
 let%expect_test "toplevels by symbol in recursive generators" =
-  (* A toplevel being checked is referred to by symbol, and doesn't join the
-     quote's component: the code's type for it is fresh, the expansion being
-     checked where it is spliced. *)
+  (* A toplevel referred to by symbol in its own code is a recursive use, of its
+     type. Code calling the generator that made it has no type, being of a code
+     type containing itself. *)
+  show {|
+let gen n = forget n in .< let _ = gen in n >.
+|};
+  [%expect {| val gen : 'a -> <'b>{n : 'b; ..'c} |}];
   show {|
 let gen n = forget n in .< gen n >.
 |};
-  [%expect {| val gen : 'a -> <'b>{n : 'c; ..'d} |}];
+  [%expect {| The type variable '_a occurs inside its own definition |}];
+  (* [code] is finished before [f], whose splice uses it: its use of [f] is
+     checked once [f] is. *)
   eval
     {|
 type nat = Z | S of ptr[nat]
@@ -159,20 +165,16 @@ let used = f (S (Ptr.make (S (Ptr.make Z))))
     {|
     (code
      (Code
-      (App (Var (Persistent (Toplevel f/4)) : "'a -> 'b") (Var (Free m) : 'a) :
-       'b)))
+      (App (Var (Persistent (Toplevel f/4)) : "nat -> int") (Var (Free m) : nat)
+       : int)))
     (f <fun>)
     (used 0)
     |}];
-  (* Code that would contain itself has no type. *)
   show {|
 let a = .< b >.
 let b = .< a >.
 |};
-  [%expect {|
-    val a : <<'a>{..'b}>{..'c}
-    val b : <'a>{..'b}
-    |}]
+  [%expect {| The type variable '_a occurs inside its own definition |}]
 ;;
 
 let%expect_test "spliced code's free variables pass mutable locals by" =
@@ -216,4 +218,67 @@ let r = .~(cell.*)
 |};
   [%expect
     {| Unbound value y, which the spliced code uses: y is a free variable of the quote that made it, as the y in scope there, inside 1 quote(s) (level 1), is bound in another quote |}]
+;;
+
+let%expect_test "a crossing local bound in another quote isn't embedded" =
+  show
+    {|
+let cell = Ptr.make .< 1 >.
+let q = .< fun (y : int) -> .~(cell.* <- .< y >.; .< y >.) >.
+let r = .~(cell.*)
+|};
+  [%expect
+    {| Unbound value y, which the spliced code uses: y is a free variable of the quote that made it, as the y in scope there, inside 1 quote(s) (level 1), is bound in another quote |}]
+;;
+
+let%expect_test "a quote's use of a toplevel being checked is checked once it \
+                 is"
+  =
+  (* [c] is finished before [f], whose splice uses it. *)
+  show
+    {|
+let f (x : int) : int = .~(let _ = c in .< x >.)
+let c : <bool -> string>{} = .< f >.
+|};
+  [%expect
+    {| This expression has type int but an expression was expected of type bool |}];
+  show
+    {|
+let f (x : int) : int = .~(let _ = c2 in .< x >.)
+let c2 = .< (f true, f "s") >.
+|};
+  [%expect
+    {|
+    This expression has type int but an expression was expected of type bool
+    This expression has type int but an expression was expected of type string
+    |}];
+  (* Its type is then the toplevel's, as if [f] was finished first. *)
+  show {|
+let f (x : int) : int = .~(let _ = c in .< x >.)
+let c = .< f >.
+|};
+  [%expect
+    {|
+    val f : int -> int
+    val c : <int @ '_m0 -> int @ '_m1>{..'a}
+    |}];
+  show {|
+let f (x : int) : int = x
+let c = .< f >.
+|};
+  [%expect {|
+    val f : int -> int
+    val c : <int -> int>{..'a}
+    |}];
+  (* Each use is of an instance. *)
+  show
+    {|
+let ident x = .~(let _ = c in .< x >.)
+let c = .< (ident 1, ident "s") >.
+|};
+  [%expect
+    {|
+    val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val c : <int * string>{..'a}
+    |}]
 ;;

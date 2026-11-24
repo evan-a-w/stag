@@ -333,7 +333,7 @@ let explicit = .<let x = 1 in .~(.<add x y>.).{x; y = z}>.
                 (App (Var (Persistent (Toplevel add/0)) : "int -> int -> int")
                  (Var (Persistent (Local x/13)) : int) : "int -> int")
                 (Var (Free y) : int) : int)
-               : "<int>{x?'_b : immut int; y : immut int}"))
+               : "<int>{x : immut int; y : immut int}"))
              (subs
               (Explicit
                ((x (Var (Bound (Local x/13)) : int)) (y (Var (Free z) : int)))))
@@ -511,7 +511,7 @@ let even n = cond (eq n 0) true (odd n)
 let odd n = cond (eq n 0) false (even n)
 let a = b
 let b = 1
-let gen n = forget n in .<gen n>.
+let gen n = forget n in .<let _ = gen in n>.
 |};
   [%expect
     {|
@@ -566,9 +566,9 @@ let gen n = forget n in .<gen n>.
 let%expect_test "recursive components" =
   print
     {|
-let gen n = forget n in .<gen n>.
-let a = .<b>.
-let b = .<a>.
+let gen n = forget n in .<let _ = gen in n>.
+let a = .<let _ = b in 1>.
+let b = .<let _ = a in 2>.
 let loop x = loop x
 let captured x = .~(.<captured x>.)
 |};
@@ -652,7 +652,7 @@ let n_shadowed = let n = 1 in .~(.<n>.)
              (code
               (App
                (Var (Bound (Toplevel id/3)) :
-                "<int>{f?'_c : immut '_d -> '_d; ..'_e} -> <int>{f?'_c : immut '_d -> '_d; ..'_e}")
+                "<int>{f : immut int -> int; ..'_c} -> <int>{f : immut int -> int; ..'_c}")
                (Quote
                 (App (Var (Persistent (Local f/18)) : "int -> int")
                  (Lit (Int 1) : int) : int)
