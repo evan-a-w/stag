@@ -573,7 +573,8 @@ let mk (x : ptr[int] @ local) = exclave_ stack_ (Ptr.make 1)
 (* val mk : ptr[int] @ local -> ptr[int @@ 'm1] @ 'm0 with nonportable gc local <= 'm0 *)
 
 let same (x : string @ 'm) : string @ 'm = x
-(* val same : string @ 'm0 -> string @ 'm0 *)
+(* val same : string @ 'm0 -> string @ 'm0 with release(locality('m0)) <= locality('m0) *)
+(* [release(..) <= ..] on one variable: 'm isn't regional, as a regional argument is local to the caller once returned. *)
 
 let static_if : 'a @ 'm -> 'a @ 'n with provenance('n) <= static_if_const(stage('m)) = fun x -> x
 (* val static_if : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and provenance('m1) <= static_if_const(stage('m0)) *)
