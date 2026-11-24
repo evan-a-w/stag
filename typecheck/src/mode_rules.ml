@@ -960,6 +960,37 @@ let ptr_make ctx =
   arg, res, Mode_arg.Var held
 ;;
 
+let prim ctx ~args =
+  let made =
+    Mode.Reason.create "a partial application is allocated at run time"
+  in
+  let held = Mode.Reason.create "a partial application holds it" in
+  let last = List.length args - 1 in
+  let _, arrows =
+    List.fold_mapi args ~init:[] ~f:(fun i taken ty ->
+      let arg = Ctx.fresh ctx in
+      let taken = (arg, ty) :: taken in
+      let res : Arrow_modes.Side.t =
+        if i = last
+        then Fixed Arrow_modes.default_const
+        else (
+          let res = Ctx.fresh ctx in
+          Result.all_unit
+            (Mode.Var.at_least res Stage Portable made
+             :: Mode.Var.allocated res made
+             :: List.map taken ~f:(fun (arg, ty) ->
+               Mode.Var.submode ~crossing:(ctx.Ctx.crossing ty) arg res held))
+          |> Result.iter_error ~f:(fun error ->
+            raise_s [%message "prim" (error : Mode.Error.t)]);
+          Var res)
+      in
+      ( taken
+      , ({ arg = Var arg; res; curry = Arrow_modes.default_curry }
+         : Arrow_modes.t) ))
+  in
+  arrows
+;;
+
 let assume_global ctx =
   let arg = Ctx.fresh ctx in
   let res = Ctx.fresh ctx in

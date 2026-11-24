@@ -1797,6 +1797,14 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
   Interpreter.add_scc program.interpreter scc
 ;;
 
+let prim_type (scope : Scope.t) prim =
+  List.fold_right2_exn
+    (Prim.args prim)
+    (Mode_rules.prim (Scope.modes scope) ~args:(Prim.args prim))
+    ~init:(Prim.result prim)
+    ~f:(fun arg modes res -> Type.TArrow (arg, res, modes))
+;;
+
 let intrinsic_type t (scope : Scope.t) (intrinsic : Intrinsic.t) =
   match intrinsic with
   | Assume_global ->
@@ -1853,7 +1861,7 @@ let rec var_type t (scope : Scope.t) ~at ~(path : Syntax.Decl_path.t) ~loc =
     (match%bind.Result Module_scope.find_value scope.module_ path ~loc with
      | Toplevel name ->
        toplevel_type t scope ~at (Program_env.toplevel scope.program name) ~loc
-     | Prim prim -> Ok (Prim.ty prim, Typed.Var_ref.Prim prim)
+     | Prim prim -> Ok (prim_type scope prim, Typed.Var_ref.Prim prim)
      | Intrinsic intrinsic ->
        Ok (intrinsic_type t scope intrinsic, Typed.Var_ref.Intrinsic intrinsic)
      | Unbound ->
@@ -1879,7 +1887,7 @@ and resolved_value_type t (scope : Scope.t) ~at name ~loc =
   match
     Prim.of_canonical_name name, Program_env.find_toplevel scope.program name
   with
-  | Some prim, _ -> Ok (Prim.ty prim, Typed.Var_ref.Prim prim)
+  | Some prim, _ -> Ok (prim_type scope prim, Typed.Var_ref.Prim prim)
   | None, Some toplevel -> toplevel_type t scope ~at toplevel ~loc
   | None, None -> error ~loc (Not_in_scope (Path (Syntax.Path.of_string name)))
 
@@ -1900,7 +1908,7 @@ and var_ref_type t (scope : Scope.t) ~at (var_ref : Typed.Var_ref.t) ~loc =
     error ~loc (Not_in_scope (Path (Syntax.Path.of_string name)))
   in
   match var_ref with
-  | Prim prim -> Ok (Prim.ty prim, var_ref)
+  | Prim prim -> Ok (prim_type scope prim, var_ref)
   | Intrinsic intrinsic -> Ok (intrinsic_type t scope intrinsic, var_ref)
   | (Free name | Free_toplevel name) as var_ref ->
     (match scope.quote with
