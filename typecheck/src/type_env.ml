@@ -385,8 +385,7 @@ module Vars = struct
     : (Mode_arg.t, Typecheck_error.t) Result.t
     =
     match t, txt with
-    | Annotation vars, Var name ->
-      Ok (Var (Annotation_vars.mode vars name))
+    | Annotation vars, Var name -> Ok (Var (Annotation_vars.mode vars name))
     | Params params, Var name ->
       (match Map.find params name with
        | Some (AMode mode) -> Ok mode
@@ -716,7 +715,9 @@ and elaborate_con
   in
   let is_ptr = String.equal decl.name Type.ptr_name in
   let storage = storage_params t decl in
-  let storage_cell param = if Set.mem storage param then `Param param else `No in
+  let storage_cell param =
+    if Set.mem storage param then `Param param else `No
+  in
   let held = ref Mode_arg.gc in
   let%bind.Result args =
     map_result (List.zip_exn decl.decl.params args) ~f:(fun (param, arg) ->
@@ -760,7 +761,7 @@ and elaborate_con
             ~loc
             (Syntax.Mode_expr.Atoms [ Option.value_exn (atom_of_path path) ])
         in
-        let%map.Result mode_arg = 
+        let%map.Result mode_arg =
           Vars.mode_arg ~cell:(storage_cell param) vars mode
         in
         Type.AMode mode_arg, Type_expr.Mode mode
@@ -885,16 +886,14 @@ and storage_params t (decl : Decl.t) =
           let into_storage name =
             match param with
             | Some (Type_decl.Param.Mode param) ->
-              if Set.mem callee_storage param
-              then Hash_set.add reached name
+              if Set.mem callee_storage param then Hash_set.add reached name
             | Some (Ty _ | Row _) | None -> ()
           in
           match arg with
           | Ty { txt = Modality (ty, mode); _ } when is_ptr ->
             Option.iter (mode_var mode) ~f:(Hash_set.add reached);
             walk ty
-          | Ty { txt = Var name; _ } ->
-            into_storage name
+          | Ty { txt = Var name; _ } -> into_storage name
           | Ty ty -> walk ty
           | Row row -> walk_row row
           | Mode mode -> Option.iter (mode_var mode) ~f:into_storage)
@@ -906,8 +905,11 @@ and storage_params t (decl : Decl.t) =
         walk inner;
         walk_row context
       | Record row | Variant row -> walk_row row
-      | Mut ty | Immut ty | Moded (ty, _) | Constrained (ty, _) | Modality (ty, _)
-        -> walk ty
+      | Mut ty
+      | Immut ty
+      | Moded (ty, _)
+      | Constrained (ty, _)
+      | Modality (ty, _) -> walk ty
     and walk_row (row : Type_expr.row) =
       match row.txt with
       | Empty | Var _ -> ()

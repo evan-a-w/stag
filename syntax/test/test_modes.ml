@@ -302,7 +302,8 @@ let%expect_test "mode constraints on one axis" =
     {|
 let f : 'a @ 'm -> 'a @ 'n with stage('m) <= stage('n) and 'n <= portable = f
 |};
-  [%expect {|
+  [%expect
+    {|
     ((Let f ()
       ((ty
         (Constrained (Arrow (Moded (Var a) (Var m)) (Moded (Var a) (Var n)))
