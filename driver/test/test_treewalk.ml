@@ -100,7 +100,7 @@ let%expect_test "quotes and splices" =
     {|
 let q c = .<let inner z = add z .~c in 0>.
 let h u = .<let w = 1 in .~u>.
-let build c = let mk x = .<add .~c x>. in 0
+let build c = let mk x = forget x in .<add .~c x>. in 0
 let persistent n = let k y = y in .<let g x = k x in g 1>.
 let explicit c d = let e x = .<.~c.{y = .~d}>. in 0
 |};

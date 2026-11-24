@@ -263,11 +263,15 @@ let bad x = let g u = x in .<g ()>.
   check {|
 let bad (x : option[unit -> int]) = let g u = x in .<g ()>.
 |};
-  (* Arguments that can't hold a closure. *)
+  (* Arguments that can't hold a closure, but aren't portable either. *)
+  check {|
+let not_portable (x : int) (y : list[string]) = let g u = (x, y) in .<g ()>.
+|};
+  check {|
+let not_portable_code (c : <int>{}) = let g u = c in .<g ()>.
+|};
   run
     {|
-let ok (x : int) (y : list[string]) = let g u = (x, y) in .<g ()>.
-let ok_code (c : <int>{}) = let g u = c in .<g ()>.
 let not_mentioned = let mut n = 0 in let g u = 1 in .<g ()>.
 let only_data = let mut n = 0 in let v = n in let g u = v in .<g ()>.
 let at_runtime = let mut n = 0 in let f u = n in f ()
@@ -791,7 +795,7 @@ let f y = .<.~incr.{x = 1}>.
   check
     {|
 let incr = .<x <- Int.add x 1>.
-let f y = .<.~incr.{x = Int.add y 1}>.
+let f (y : int) = .<.~incr.{x = Int.add y 1}>.
 |};
   check
     {|
