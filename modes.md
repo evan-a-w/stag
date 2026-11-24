@@ -156,9 +156,10 @@ their own, by interfaces and separately checked code.
   and shown with its current constraints;
 - a variable on `ptr` cells and mode arguments only has no locality.
 
-A mutable global whose reads are `external` shows it
-(`val g : string @ external`), parenthesizing an arrow or tuple type
-(`val g : (int -> int) @ external`).
+A toplevel whose uses see an `external` value (its own, or of a mutable global
+what it holds) shows it (`val g : string @ external`), parenthesizing an arrow
+or tuple type (`val g : (int -> int) @ external`). It reads back as a binding
+annotation, `let g : string @ external = ...`.
 
 ### Printed constraints
 

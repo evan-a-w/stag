@@ -490,3 +490,43 @@ let f u = let p = ext (Ptr.make 1) in p.* <- 2
     val f : 'a @ 'm0 -> unit @ 'm1
     |}]
 ;;
+
+let%expect_test "a toplevel's provenance shows in its signature" =
+  provenance
+    {|
+let ext (x : string) = let y @ external = x in y
+let s = "s"
+let exact @ external = s
+let made = ext "s"
+let plain = Core.String.length s
+let back : string @ external = "t"
+|};
+  [%expect
+    {|
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
+    val s : string
+    val exact : string @ external
+    val made : string @ external
+    val plain : int
+    val back : string @ external
+    |}];
+  (* Read back as a binding annotation. *)
+  provenance
+    {|
+let exact @ external = "s"
+let copy : string @ external = exact
+let gc_copy : string = exact
+|};
+  [%expect
+    {|
+    val exact : string @ external
+    val copy : string @ external
+    val gc_copy : string @ external
+    |}];
+  provenance {|
+let exact @ external = "s"
+let bad : string @ gc = exact
+|};
+  [%expect
+    {| This is external, because it is annotated external (at t.stag:2:12-20), then exact is used (at t.stag:3:24-29), but must be at most gc, because it is annotated gc (at t.stag:3:19-21), then it is bound by an annotated let (at t.stag:3:19-21) |}]
+;;

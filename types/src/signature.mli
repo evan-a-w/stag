@@ -10,8 +10,9 @@ module Value : sig
     ; scheme : Type.ty
     ; stage : Stag_mode.Stage.t
     (** Its least, so whether it may be used in quotes. *)
-    ; held : Stag_mode.Provenance.t option
-    (** Of a [let mut], the least provenance of what it holds. *)
+    ; provenance : Stag_mode.Provenance.t
+    (** The least provenance of what its uses see: of a [let mut], what it
+        holds. *)
     }
   [@@deriving sexp_of]
 end
