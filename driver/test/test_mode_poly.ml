@@ -413,24 +413,30 @@ let strings (q : ptr[string]) (s : string) = q.* <- s
     let store_copy : string @ 'm0 -> unit with 'm0 <= gc = store
     let keep_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and 'm0 <= static = keep
     let in_ptr_copy : 'a -> ptr[string] @ nonportable external = in_ptr
+    let k_copy : int @ 'm0 -> (int -> int) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1 = k
+    let captures_copy : string @ 'm0 -> (int -> string @ 'm2) @ 'm1 with 'm0 <= 'm2 and 'm0 <= 'm1 and gc <= 'm1 = captures
+    let closed_copy : 'a @ 'm0 -> (int -> int) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1 = closed
+    let ints_copy : ptr[int] -> unit = ints
+    let strings_copy : ptr[string] @ 'm0 -> (string @ 'm2 -> unit) @ 'm1 with 'm0 <= 'm1 and 'm0 <= gc and 'm2 <= gc and gc <= 'm1 = strings
     |}]
 ;;
 
 let%expect_test "an arrow's result is never const" =
   modes {|
-let f = (fun (x : int) -> 1 : int -> int @ const)
+let f : int -> int @ const = fun (x : int) -> 1
 |};
-  [%expect {||}];
+  [%expect {| This mode is invalid: the result of a function is never const |}];
   modes {|
 let g (h : int -> int @ 'm with 'm <= const) = h
 |};
-  [%expect {||}];
+  [%expect
+    {| This is portable, because it is the result of a function (at t.stag:2:18-26), but must be at most const, because it is annotated 'm <= const (at t.stag:2:32-43) |}];
   modes {|
 type t = { f : int -> int @ const }
 |};
-  [%expect {||}];
+  [%expect {| This mode is invalid: the result of a function is never const |}];
   modes {|
 type t = { f : int @ const -> int @ portable }
 |};
-  [%expect {||}]
+  [%expect {| type t = { f : int @ const static -> int @ portable } |}]
 ;;

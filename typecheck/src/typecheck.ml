@@ -515,9 +515,9 @@ module Resolution = struct
       | Local ident -> Program_env.is_mutable scope.program ident
       | Toplevel _ -> false
     in
-    (* A local of plain data may be copied into code whatever its stage, but
-       not a mutable one, whose value changes, nor a toplevel, which may not
-       have a value yet. *)
+    (* A local of plain data may be copied into code whatever its stage, but not
+       a mutable one, whose value changes, nor a toplevel, which may not have a
+       value yet. *)
     let crosses (entry : Env.Entry.t) =
       match entry.binder with
       | Local _ ->
@@ -531,11 +531,11 @@ module Resolution = struct
       (entry.level = scope.level
        && [%equal: int option] entry.quote_id (Scope.quote_id scope))
       || (entry.level <= scope.level
-          && ((crosses entry
-               || Mode.Stage.le
-                    (Scope.known_stage scope (entry.mode :> Mode.Var.t))
-                    Portable)
-              && not entry.defining
+          && (((crosses entry
+                || Mode.Stage.le
+                     (Scope.known_stage scope (entry.mode :> Mode.Var.t))
+                     Portable)
+               && not entry.defining)
               || is_mutable_toplevel entry))
     in
     match scope.quote, entry with

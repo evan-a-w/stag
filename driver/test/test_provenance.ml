@@ -330,8 +330,7 @@ let%expect_test "a toplevel closure capturing nothing is static" =
 let f @ static = fun (x : int) -> x
 let g @ static = fun (x : int) -> f x
 |};
-  [%expect
-    {|
+  [%expect {|
     val f : int -> int
     val g : int -> int
     |}]
@@ -438,4 +437,44 @@ let not_const = let c @ const = ident 1 in c
 |};
   [%expect
     {| This is portable, because it applies a function (at t.stag:4:32-39), then it is bound by an annotated let (at t.stag:4:24-29), but must be at most const, because it is annotated const (at t.stag:4:24-29) |}]
+;;
+
+let%expect_test "a mutable global's held provenance prints after its whole type"
+  =
+  provenance
+    {|
+let ext (x : string) = let y @ external = x in y
+let mut g = fun (u : int) -> 1
+let set u = g <- (let s = ext "b" in fun (u : int) -> let k = s in 1)
+let mut t = ("a", 1)
+let set_t u = t <- (ext "x", 2)
+|};
+  [%expect
+    {|
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
+    val g : (int @ '_m0 -> int @ '_m1) @ external
+    val set : 'a -> unit
+    val t : (string * int) @ external
+    val set_t : 'a -> unit
+    |}]
+;;
+
+let%expect_test "stores go only through pointers to cells the GC scans" =
+  provenance
+    {|
+let ext (x : ptr[string]) = let y @ external = x in y
+let f u = let p = ext (Ptr.make "a") in p.* <- Int.to_string 1
+|};
+  [%expect
+    {| This is external, because it is annotated external (at t.stag:2:36-44), then y is used (at t.stag:2:52-53), then the function returns it (at t.stag:2:28-53), then the function types are unified, then the function returns it (at t.stag:3:18-36), then p is used (at t.stag:3:40-41), then it is dereferenced (at t.stag:3:40-43), but must be at most gc, because it is stored through, which needs a cell the GC scans (at t.stag:3:40-43) |}];
+  provenance
+    {|
+let ext (x : ptr[int]) = let y @ external = x in y
+let f u = let p = ext (Ptr.make 1) in p.* <- 2
+|};
+  [%expect
+    {|
+    val ext : ptr[int] @ 'm0 -> ptr[int] @ 'm1 with 'm0 <= 'm1 and external <= 'm1
+    val f : 'a -> unit
+    |}]
 ;;

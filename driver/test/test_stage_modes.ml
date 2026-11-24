@@ -591,3 +591,20 @@ let f u = let p @ local = Ptr.make (1, 2) in p
   [%expect
     {| This is local, because it is annotated local (at t.stag:2:18-23), then p is used (at t.stag:2:45-46), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:2:10-46) |}]
 ;;
+
+let%expect_test "a local of plain data is copied into code whatever its stage" =
+  modes {|
+let r = .~(let q (s : int) = .< s >. in q 1)
+|};
+  [%expect {| val r : int |}];
+  modes {|
+let r = .~(let q (s : string) = .< s >. in q "a")
+|};
+  [%expect
+    {| Unbound value s, which the spliced code uses: s is a variable of its quote's context, as the s bound at compile time (level -1) can't be used in the quote (level 0), as it is not portable |}];
+  modes {|
+let r = .~(let mut x = 1 in x <- 2; .< x >.)
+|};
+  [%expect
+    {| The mutable variable x is bound at compile time (level -1) but used at runtime (level 0): a [let mut] local can only be used by the code that binds it, not in a quote or at compile time |}]
+;;

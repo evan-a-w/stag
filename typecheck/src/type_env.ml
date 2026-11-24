@@ -459,8 +459,8 @@ let map_result xs ~f =
   |> Result.map ~f:List.rev
 ;;
 
-(* An application's result is computed at run time, so never [const]: neither
-   is an arrow's result, which printing then leaves unsaid. *)
+(* An application's result is computed at run time, so never [const]: neither is
+   an arrow's result, which printing then leaves unsaid. *)
 let result_floor (side : Arrow_modes.Side.t) ~loc =
   let never_const =
     Typecheck_error.create

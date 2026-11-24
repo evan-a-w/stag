@@ -1191,7 +1191,9 @@ module Printer = struct
            | ARow row -> record_to_string t row)
          |> String.concat ~sep:", ")
     | TArrow (ty1, ty2, modes) ->
-      let ty1 = ty_to_string t ~prec:1 ty1 ^ mode_side t modes.arg ~position:`Arg in
+      let ty1 =
+        ty_to_string t ~prec:1 ty1 ^ mode_side t modes.arg ~position:`Arg
+      in
       let curried =
         match canonical_ty ty2 with
         | TArrow _ -> Mode.Locality.join curried (side_locality modes.arg)
