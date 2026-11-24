@@ -541,7 +541,15 @@ module Resolution = struct
         is the entry of the name, if it has one that isn't [usable]. *)
     | Unusable of Typecheck_error.Kind.t (** The error if the name is used. *)
 
-  let of_entry (scope : Scope.t) ~name (entry : Env.Entry.t option) =
+  (* [spliced]: [name] is a free variable of code spliced here, not written
+     here. Such code is of the quote's level, so a local of an earlier level
+     doesn't bind it, and it stays a free variable of the quote. *)
+  let of_entry
+    ?(spliced = false)
+    (scope : Scope.t)
+    ~name
+    (entry : Env.Entry.t option)
+    =
     (* Referred to by symbol, as is the variable code assigns. *)
     let is_mutable_toplevel (entry : Env.Entry.t) =
       match entry.binder with
@@ -584,6 +592,16 @@ module Resolution = struct
       Unusable
         (Mutable_used_outside_its_code
            { name; var_level = entry.level; used_at = scope.level })
+    | Some _, Some ({ binder = Local _; _ } as entry)
+      when (not spliced) && entry.level < scope.level && not (usable entry) ->
+      (* A local of an earlier level: the quote can only embed its value. *)
+      Unusable
+        (Not_embeddable
+           { name
+           ; var_level = entry.level
+           ; used_at = scope.level
+           ; defining = entry.defining
+           })
     | Some quote, Some entry when entry.level <= scope.level ->
       let usable = usable entry in
       Outside_quote
@@ -1851,18 +1869,21 @@ let rec var_type t (scope : Scope.t) ~at ~(path : Syntax.Decl_path.t) ~loc =
       ~loc
       (Resolution.of_entry scope ~name entry)
   in
-  let local =
+  let local : (string * Env.Lookup.t) option =
     match path with
     | Path path ->
       (match (path :> string list) with
-       | [ name ] ->
-         Env.find scope.locals name |> Option.map ~f:(fun entry -> name, entry)
+       | [ name ] -> Some (name, Env.lookup scope.locals name)
        | _ -> None)
     | Root _ | Resolved _ -> None
   in
   match local with
-  | Some (name, entry) -> resolve ~name (Some entry)
-  | None ->
+  | Some (name, Bound entry) -> resolve ~name (Some entry)
+  | Some (name, Forgotten) ->
+    (match scope.quote with
+     | Some _ -> resolve ~name None
+     | None -> error ~loc (Forgotten name))
+  | Some (_, Unbound) | None ->
     (match%bind.Result Module_scope.find_value scope.module_ path ~loc with
      | Toplevel name ->
        toplevel_type t scope ~at (Program_env.toplevel scope.program name) ~loc
@@ -2372,6 +2393,12 @@ and expr_type
       |> Result.ok_exn
     in
     annotate t scope var annot ~loc
+  | Forget (names, body) ->
+    report_duplicates scope names ~error:(fun name -> Duplicate_forget name);
+    Env.forgetting
+      scope.locals
+      (List.map names ~f:(fun (name : Syntax.Name.t) -> name.txt))
+      ~f:(fun () -> expr_type t scope ~at ~expr:body)
   | Var (Ref var_ref) ->
     (match var_ref_type t scope ~at var_ref ~loc with
      | Error error -> fail error
@@ -3592,12 +3619,11 @@ and substitute_entry
   ~loc
   ~may_capture
   =
-  let%bind.Result entry =
-    match Env.find scope.locals name, scope.quote with
-    | Some entry, _ -> Ok (Some entry)
+  let entry : Env.Lookup.t -> _ = function
+    | Bound entry -> Ok (Some entry)
     (* Toplevels are free variables of the quote, like any name not bound in it. *)
-    | None, Some _ -> Ok None
-    | None, None ->
+    | Forgotten | Unbound when Option.is_some scope.quote -> Ok None
+    | Forgotten | Unbound ->
       (* The code is checked and runs now, so if it may use [name], it doesn't.
          Providing it anyway could add a dependency on its toplevel, and would
          depend on whether that is checked yet. *)
@@ -3609,7 +3635,14 @@ and substitute_entry
          toplevel_entry t scope toplevel ~loc |> Result.map ~f:Option.some
        | None, _ | Some _, (Absent | PVar _) -> Ok None)
   in
-  match Resolution.of_entry scope ~name entry with
+  let%bind.Result resolution =
+    match Env.lookup scope.locals name, scope.quote with
+    | Forgotten, None -> Ok (Resolution.Unusable (Forgotten name))
+    | lookup, _ ->
+      let%map.Result entry = entry lookup in
+      Resolution.of_entry ~spliced:true scope ~name entry
+  in
+  match resolution with
   | Unusable (Not_in_scope _)
     when Option.is_none scope.quote
          && Hashtbl.mem scope.program.unusable_in_quotes name ->
@@ -3698,7 +3731,7 @@ and substitute_tail
       if Set.mem seen name
       then None
       else (
-        match Resolution.of_entry scope ~name (Some entry) with
+        match Resolution.of_entry ~spliced:true scope ~name (Some entry) with
         | Local entry when may_capture name entry.binder ->
           (* Whether the code uses it is not known: assume it does. *)
           use_entry scope ~at entry ~name ~loc;

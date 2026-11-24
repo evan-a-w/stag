@@ -32,6 +32,14 @@ module Kind = struct
         { name : string
         ; unusable : Unusable_in_quote.t
         }
+    | Not_embeddable of
+        { name : string
+        ; var_level : Env.Level.t
+        ; used_at : Env.Level.t
+        ; defining : bool
+        }
+    | Forgotten of string
+    | Duplicate_forget of string
     | Unbound_module of Syntax.Decl_path.t
     | Unbound_type of Syntax.Decl_path.t
     | Unbound_type_variable of string
@@ -376,6 +384,24 @@ let rec kind_message (kind : Kind.t) ~show_type =
       name
       (level_name var_level)
       used_at
+  | Not_embeddable { name; var_level; used_at; defining } ->
+    sprintf
+      "The variable %s is bound at %s, outside the quote, so the quote (at \
+       %s) would embed its value, but %s. Annotate it as (%s @ portable) to \
+       embed it, or write [forget %s in ...] to make %s a free variable of the \
+       quote"
+      name
+      (level_name var_level)
+      (level_name used_at)
+      (if defining
+       then "it is being defined"
+       else "it may not be portable")
+      name
+      name
+      name
+  | Duplicate_forget name -> sprintf "%s is forgotten twice" name
+  | Forgotten name ->
+    sprintf "%s is not in scope here: it was forgotten by [forget %s in ...]" name name
   | Unbound_module path -> sprintf "Unbound module %s" (decl_path path)
   | Unbound_type path -> sprintf "Unbound type %s" (decl_path path)
   | Unbound_type_variable name -> sprintf "Unbound type variable '%s" name

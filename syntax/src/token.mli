@@ -17,6 +17,7 @@ type t =
   | Stack_ (** [stack_] *)
   | Exclave_ (** [exclave_] *)
   | Global_ (** [global_] *)
+  | Forget
   | Let_expect_test (** [let%expect_test] *)
   | Let_bench (** [let%bench] *)
   | In

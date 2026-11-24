@@ -354,6 +354,7 @@ and expr t : Expr.t =
                , if bool t
                  then { ty = Some (annot_type t); mode = None }
                  else { ty = None; mode = Some (mode_expr t) } ))
+         ; (fun t -> Forget (list t ~min:1 ~max:3 name, expr t))
          ])
 
 and type_decl t : Type_decl.t =

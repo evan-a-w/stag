@@ -100,6 +100,7 @@ module Expr : sig
       | Lit of Syntax.Lit.t
       | Var of Var.t
       | Annotated of t * Syntax.Annot.t
+      | Forget of Syntax.Name.t list * t
       (** A generated [(x : t)], whose annotation re-inference keeps. *)
       | Marked of Typed.Marker.t * t
       | App of t * t

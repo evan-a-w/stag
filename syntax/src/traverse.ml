@@ -253,6 +253,7 @@ let rec expr (v : _ Visitor_type.t) ctx (e : Expr.t) : Expr.t =
     | Annotated (e, a) ->
       let e = sub e in
       Annotated (e, annot a)
+    | Forget (names, e) -> Forget (names, sub e)
   in
   { e with txt }
 

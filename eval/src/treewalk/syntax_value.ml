@@ -719,6 +719,8 @@ module Of_value = struct
             | { txt = App _; _ } as app -> Nontail app
             | _ -> unexpected ~expected:"an application under Nontail" value)
          | "Annotated", 2 -> Annotated (arg 0 (expr ~loc), arg 1 (annot ~loc))
+         | "Forget", 2 ->
+           Forget (arg 0 (list (name Binder ~loc)), arg 1 (expr ~loc))
          | _ -> raise Bad_arguments))
 
   and toplevel value ~loc : Toplevel.t =

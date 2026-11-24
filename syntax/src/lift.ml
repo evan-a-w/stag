@@ -43,6 +43,7 @@ let indirect_constructors =
     ; "Expr.Exclave", 1
     ; "Expr.Nontail", 1
     ; "Expr.Annotated", 2
+    ; "Expr.Forget", 2
     ]
 ;;
 
@@ -302,6 +303,7 @@ module Make (B : Builder) = struct
       | Exclave e -> con "Exclave" [ expr e ]
       | Nontail e -> con "Nontail" [ expr e ]
       | Annotated (e, a) -> con "Annotated" [ expr e; annot a ]
+      | Forget (names, e) -> con "Forget" [ list name names; expr e ]
       | Error -> raise_s [%message "Lift: an expression that did not parse"]
 
     and toplevel ({ txt; loc = _ } : Toplevel.t) =
