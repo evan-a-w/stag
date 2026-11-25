@@ -414,7 +414,9 @@ let rec skip_trivia (t : State.t) =
 
 let rec token (t : State.t) : Located.t =
   try token_or_skip t with
-  | Skipped -> token t
+  | Skipped ->
+    t.previous <- None;
+    token t
 
 and token_or_skip (t : State.t) : Located.t =
   let previous_end = t.offset in

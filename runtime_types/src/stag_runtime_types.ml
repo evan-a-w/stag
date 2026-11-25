@@ -331,11 +331,18 @@ and declared t context ~name ~args =
     (match cycle_check context (Path.Step.Declaration { name; args }) with
      | Error error -> Error error
      | Ok () ->
-       (match Cache.find t.cache ~name ~args with
-        | Some { shape; work; depth; _ } ->
-          let%bind.Result () =
-            reach context (List.length context.path + depth)
-          in
+       (* A hit too deep for this path is expanded afresh, so the error is the
+          one a fresh expansion gives (it may run out of work first). *)
+       let cached =
+         match Cache.find t.cache ~name ~args with
+         | Some { shape; work; depth; _ } ->
+           (match reach context (List.length context.path + depth) with
+            | Ok () -> Some (shape, work)
+            | Error _ -> None)
+         | None -> None
+       in
+       (match cached with
+        | Some (shape, work) ->
           let%map.Result () = charge context work in
           shape
         | None ->

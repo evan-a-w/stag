@@ -1972,10 +1972,6 @@ let recover ~steps ~file source =
     program, errors
 ;;
 
-let program_recovering ~file source = recover ~steps:(ref 0) ~file source
-
-let program_recovering_steps ~file source =
-  let steps = ref 0 in
-  let (_ : Program.t * Error.t list) = recover ~steps ~file source in
-  !steps
+let program_recovering ?(steps = ref 0) ~file source =
+  recover ~steps ~file source
 ;;

@@ -889,7 +889,7 @@ and toplevel roots ~indent (t : Toplevel.t) =
     definition
       (let_lhs roots "external" name [] { ty = Some ty; mode = None })
       (text (string_literal symbol.txt))
-  | Module (name, []) -> text ("module " ^ name.txt ^ " = struct end")
+  | Module (name, []) -> text (module_open ~name:name.txt ^ " " ^ module_close)
   | Module (name, members) ->
     text (module_open ~name:name.txt)
     ^^ nest 2 (hardline ^^ toplevels roots ~indent:(indent + 2) members)

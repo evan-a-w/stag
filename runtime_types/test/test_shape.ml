@@ -888,3 +888,43 @@ let%expect_test "the depth bound does not depend on the cache" =
     (Ok ok)
     |}]
 ;;
+
+let%expect_test "which bound is hit does not depend on the cache" =
+  (* [x] is 999 expansions deep below a large [d10]. A fresh [y] runs out of
+     work inside a copy of [x] before getting deep; with [x] cached, it must not
+     report the depth instead. *)
+  let d i = tycon (sprintf "d%d" i) [] in
+  let x i = tycon (sprintf "x%d" i) [] in
+  let declarations =
+    List.init 12 ~f:(fun i ->
+      decl
+        ~name:(sprintf "d%d" i)
+        (alias (if i = 0 then int else Type.TTuple [ d (i - 1); d (i - 1) ])))
+    @ List.init 999 ~f:(fun i ->
+      decl
+        ~name:(sprintf "x%d" i)
+        (if i = 0 then alias int else variant [ ctor "C" [ x (i - 1) ] ]))
+    @ [ decl ~name:"x" (alias (Type.TTuple [ d 10; x 998 ]))
+      ; decl
+          ~name:"y"
+          (alias
+             (Type.TTuple (List.init 12 ~f:(fun _ -> d 11) @ [ tycon "x" [] ])))
+      ]
+  in
+  let shape t ty =
+    print_s
+      [%sexp
+        (Result.map (Runtime_types.shape t ty) ~f:(fun _ -> "ok")
+         : (string, Error.t) Result.t)]
+  in
+  shape (Runtime_types.create (resolver declarations)) (tycon "y" []);
+  let t = Runtime_types.create (resolver declarations) in
+  shape t (tycon "x" []);
+  shape t (tycon "y" []);
+  [%expect
+    {|
+    (Error (Too_large 100000))
+    (Ok ok)
+    (Error (Too_large 100000))
+    |}]
+;;
