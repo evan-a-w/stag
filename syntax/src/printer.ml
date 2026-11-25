@@ -174,13 +174,6 @@ let rec unwrap (e : Expr.t) =
   | _ -> e
 ;;
 
-let seq (e : Expr.t) =
-  match e.txt with
-  | Let ({ txt = "_"; _ }, [], annot, first, second) when Annot.is_none annot ->
-    Some (first, second)
-  | _ -> None
-;;
-
 let is_list_literal e = Option.is_some (List_literal.expr_items e)
 
 let is_construct (e : Expr.t) =
@@ -193,7 +186,7 @@ let is_construct (e : Expr.t) =
 let level (e : Expr.t) : Level.t =
   let e = unwrap e in
   match e.txt with
-  | Let _ when Option.is_some (seq e) -> Seq
+  | Seq _ -> Seq
   | Let _ | Let_mut _ | Match _ | Fun _ | Stack _ | Exclave _ -> Item
   | Assign _ | Store _ -> Assign
   | Nontail _ -> Construct
@@ -223,7 +216,7 @@ let bare_at at e = Level.compare (level e) at >= 0
 
 let rec extends_right e =
   match (unwrap e).txt with
-  | Let _ | Let_mut _ | Match _ | Fun _ | Stack _ | Exclave _ -> true
+  | Let _ | Seq _ | Let_mut _ | Match _ | Fun _ | Stack _ | Exclave _ -> true
   | Assign (_, value) | Store (_, value) -> extends_right value
   | _ -> false
 ;;
@@ -232,18 +225,17 @@ let rec extends_right e =
    takes a following [|]. *)
 let rec ends_with_match ~seq:in_seq e =
   let e = unwrap e in
-  match e.txt, seq e with
-  | Match _, _ -> true
-  | Let _, Some (_, second) -> ends_with_match ~seq:true second
-  | ( ( Let (_, _, _, _, body)
-      | Let_mut (_, _, _, body)
-      | Fun (_, body)
-      | Stack body
-      | Exclave body )
-    , _ ) ->
+  match e.txt with
+  | Match _ -> true
+  | Seq (_, second) -> ends_with_match ~seq:true second
+  | Let (_, _, _, _, body)
+  | Let_mut (_, _, _, body)
+  | Fun (_, body)
+  | Stack body
+  | Exclave body ->
     bare_at (Ctx.body { Ctx.top with seq = in_seq }) body
     && ends_with_match ~seq:in_seq body
-  | (Assign (_, value) | Store (_, value)), _ ->
+  | Assign (_, value) | Store (_, value) ->
     bare_at Assign value && ends_with_match ~seq:in_seq value
   | _ -> false
 ;;
@@ -557,13 +549,13 @@ and bare roots (ctx : Ctx.t) (e : Expr.t) =
   | None -> bare_desc roots ctx e
 
 and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
-  match e.txt, seq e with
-  | Let _, Some (first, second) ->
+  match e.txt with
+  | Seq (first, second) ->
     expr roots { (Ctx.item Semi) with level = Assign } first
     ^^ text ";"
     ^^ (if ctx.flat then line else hardline)
     ^^ expr roots { ctx with level = Seq } second
-  | Let (name, params, annot, rhs, body), None ->
+  | Let (name, params, annot, rhs, body) ->
     definition
       ~record:(is_bracketed rhs)
       ~ending:"in"
@@ -571,7 +563,7 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
       (expr roots Ctx.top rhs)
     ^^ (if ctx.flat then line else hardline)
     ^^ expr roots { ctx with level = Ctx.body ctx } body
-  | Let_mut (name, annot, rhs, body), _ ->
+  | Let_mut (name, annot, rhs, body) ->
     definition
       ~record:(is_bracketed rhs)
       ~ending:"in"
@@ -579,17 +571,17 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
       (expr roots Ctx.top rhs)
     ^^ (if ctx.flat then line else hardline)
     ^^ expr roots { ctx with level = Ctx.body ctx } body
-  | Assign (p, value), _ ->
+  | Assign (p, value) ->
     group
       (decl_path roots p
        ^^ text " <-"
        ^^ nest 2 (line ^^ expr roots { ctx with level = Assign } value))
-  | Store (target, value), _ ->
+  | Store (target, value) ->
     group
       (postfix roots target
        ^^ text " <-"
        ^^ nest 2 (line ^^ expr roots { ctx with level = Assign } value))
-  | Fun (params, body), _ ->
+  | Fun (params, body) ->
     group
       (group
          (text "fun"
@@ -598,7 +590,7 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
                (concat (List.map params ~f:(fun p -> line ^^ binding roots p)))
           ^^ text " ->")
        ^^ nest 2 (line ^^ expr roots { ctx with level = Ctx.body ctx } body))
-  | Match (scrutinee, arms), _ ->
+  | Match (scrutinee, arms) ->
     let last = List.length arms - 1 in
     let arm i (p, body) =
       let after : After.t = if i = last then ctx.after else Bar in
@@ -611,7 +603,7 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
       in
       (* A flat [let] or sequence is only kept on the line of a flat match. *)
       match ctx.flat, (unwrap body).txt with
-      | true, (Let _ | Let_mut _) -> doc
+      | true, (Let _ | Seq _ | Let_mut _) -> doc
       | _ -> group doc
     in
     let head =
@@ -634,20 +626,20 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
        head
        ^^ concat
             (List.mapi arms ~f:(fun i a -> hardline ^^ text case_bar ^^ arm i a)))
-  | Tuple (_ :: _ :: _ as es), _ -> parens (tuple_items roots es)
-  | Tuple _, _ -> text "()"
-  | Lit l, _ -> lit l
-  | Var (p, annot), _ when Annot.is_none annot ->
+  | Tuple (_ :: _ :: _ as es) -> parens (tuple_items roots es)
+  | Tuple _ -> text "()"
+  | Lit l -> lit l
+  | Var (p, annot) when Annot.is_none annot ->
     text (decl_path_txt ~root_modules:roots.root_modules p)
-  | Var (p, annot), _ ->
+  | Var (p, annot) ->
     parens
       (text (decl_path_txt ~root_modules:roots.root_modules p)
        ^^ annot_doc roots annot)
-  | Stack body, _ -> region roots ctx "stack_" body
-  | Exclave body, _ -> region roots ctx "exclave_" body
-  | Nontail app, _ ->
+  | Stack body -> region roots ctx "stack_" body
+  | Exclave body -> region roots ctx "exclave_" body
+  | Nontail app ->
     group (expr roots (Ctx.at App) app ^^ nest 2 (line ^^ text "[@nontail]"))
-  | App _, _ ->
+  | App _ ->
     let rec spine (e : Expr.t) args =
       match e.txt with
       | App (f, arg) -> spine f (arg :: args)
@@ -673,10 +665,10 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
                     | _ -> false
                   in
                   line ^^ expr roots ~parenthesize (Ctx.at Splice) arg))))
-  | Construct (c, []), _ -> decl_path roots c
-  | Poly_variant (tag, None), _ -> text ("`" ^ tag.txt)
-  | (Construct _ | Poly_variant _), _ -> construct roots e
-  | Splice { expr = inner; subs }, _ ->
+  | Construct (c, []) -> decl_path roots c
+  | Poly_variant (tag, None) -> text ("`" ^ tag.txt)
+  | Construct _ | Poly_variant _ -> construct roots e
+  | Splice { expr = inner; subs } ->
     let subs =
       match subs with
       | None -> empty
@@ -689,49 +681,48 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
              | Some value -> field roots (text name.txt) value))
     in
     spliced roots inner ^^ subs
-  | Type t, _ -> text "type " ^^ type_expr roots ~prec:2 t
-  | Quote e, _ ->
+  | Type t -> text "type " ^^ type_expr roots ~prec:2 t
+  | Quote e ->
     group
       (text ".<" ^^ nest 2 (line ^^ flat roots (unwrap e)) ^^ line ^^ text ">.")
-  | Struct_quote [], _ -> text ".< struct end >."
-  | Struct_quote ts, _ ->
+  | Struct_quote [] -> text ".< struct end >."
+  | Struct_quote ts ->
     text ".< struct"
     ^^ nest 2 (hardline ^^ toplevels roots ~indent:2 ts)
     ^^ hardline
     ^^ text "end >."
-  | Deref pointer, _ -> postfix roots pointer ^^ text ".*"
-  | Field (record, p), _ ->
+  | Deref pointer -> postfix roots pointer ^^ text ".*"
+  | Field (record, p) ->
     let field =
       match p.txt with
       | Path _ -> decl_path roots p
       | Root _ | Resolved _ -> parens (decl_path roots p)
     in
     postfix roots record ^^ text "." ^^ field
-  | Poly_field (record, label), _ ->
-    postfix roots record ^^ text (".`" ^ label.txt)
-  | Poly_restrict (record, label), _ ->
+  | Poly_field (record, label) -> postfix roots record ^^ text (".`" ^ label.txt)
+  | Poly_restrict (record, label) ->
     postfix roots record ^^ text (" \\ `" ^ label.txt)
-  | Record fields, _ ->
+  | Record fields ->
     braces
       (List.map fields ~f:(fun (p, value) ->
          field roots (decl_path roots p) value))
-  | Poly_record fields, _ -> braces (poly_fields roots fields)
-  | Poly_extend (fields, record), _ ->
+  | Poly_record fields -> braces (poly_fields roots fields)
+  | Poly_extend (fields, record) ->
     braces
       ~trailing:false
       ~tail:(group (text " |" ^^ nest 2 (line ^^ entry roots record)))
       (poly_fields roots ~last_after:After.Bar fields)
-  | Poly_update (record, fields), _ ->
+  | Poly_update (record, fields) ->
     update roots record (poly_fields roots fields)
-  | Record_update (record, fields), _ ->
+  | Record_update (record, fields) ->
     update
       roots
       record
       (List.map fields ~f:(fun (p, value) ->
          field roots (decl_path roots p) value))
-  | Expect { txt = ""; _ }, _ -> text "[%expect]"
-  | Expect s, _ -> text "[%expect " ^^ text (quoted_string s.txt) ^^ text "]"
-  | Error, _ -> text "<error>"
+  | Expect { txt = ""; _ } -> text "[%expect]"
+  | Expect s -> text "[%expect " ^^ text (quoted_string s.txt) ^^ text "]"
+  | Error -> text "<error>"
 
 and update roots record fields =
   let record =

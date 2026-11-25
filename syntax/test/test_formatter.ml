@@ -903,3 +903,21 @@ let%expect_test "a comment ending a definition's line doesn't make it dock" =
     end
     |}]
 ;;
+
+let%expect_test "[let _ = a in b] is kept apart from [a; b]" =
+  test
+    {|let f x =
+  let _ = print_int 1 in
+  print_int 2;
+  let _ = g x in
+  x
+|};
+  [%expect
+    {|
+    let f x =
+      let _ = print_int 1 in
+      print_int 2;
+      let _ = g x in
+      x
+    |}]
+;;

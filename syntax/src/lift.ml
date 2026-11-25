@@ -23,6 +23,7 @@ let indirect_constructors =
     ; "Pattern.Exception", 1
     ; "Expr.App", 2
     ; "Expr.Let", 5
+    ; "Expr.Seq", 2
     ; "Expr.Let_mut", 4
     ; "Expr.Assign", 2
     ; "Expr.Store", 2
@@ -254,6 +255,7 @@ module Make (B : Builder) = struct
         con
           "Let"
           [ name var; list binding bindings; annot a; expr equal; expr body ]
+      | Seq (first, second) -> con "Seq" [ expr first; expr second ]
       | Let_mut (var, a, equal, body) ->
         con "Let_mut" [ name var; annot a; expr equal; expr body ]
       | Assign (p, value) ->

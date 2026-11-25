@@ -231,6 +231,15 @@ module Expr = struct
         ; body = sub equal
         ; in_ = sub in_
         }
+    | Seq (first, second) ->
+      Let
+        { binder = Name (Located.create ~loc:first.loc "_")
+        ; args = []
+        ; annot = None
+        ; mode = None
+        ; body = sub first
+        ; in_ = sub second
+        }
     | Let_mut (name, annot, equal, in_) ->
       Let_mut
         { binder = Name name

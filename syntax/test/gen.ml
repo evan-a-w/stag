@@ -280,7 +280,7 @@ and expr t : Expr.t =
          ; (fun t -> App (expr t, expr t))
          ; (fun t ->
              Let (name t, list t ~min:0 ~max:2 binding, annot t, expr t, expr t))
-         ; (fun t -> Let (loc "_", [], Annot.none, expr t, expr t))
+         ; (fun t -> Seq (expr t, expr t))
          ; (fun t -> Let_mut (name t, annot t, expr t, expr t))
          ; (fun t -> Assign (loc (decl_path t ~last:lident), expr t))
          ; (fun t -> Store (loc (Expr.Deref (expr t)), expr t))

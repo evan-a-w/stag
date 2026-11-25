@@ -199,7 +199,7 @@ let of_toplevels ?(walk_expansion = Fn.const true) toplevels =
     | Var (path, annot) ->
       decl_path ~add ~kind:Kind.Value ~loc:expr.loc path;
       Option.iter annot.ty ~f:type_expr
-    | App (f, arg) ->
+    | App (f, arg) | Seq (f, arg) ->
       recurse f;
       recurse arg
     | Let (binder, bindings, annot, body, in_) ->

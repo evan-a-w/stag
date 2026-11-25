@@ -991,12 +991,9 @@ let rec expr ?(seq = true) t : Expr.t =
     let first = assignment t ~seq in
     if seq && is t Semi
     then (
-      let semi = loc t in
       advance t;
       let second = expr t in
-      expr_at
-        ~loc:(Loc.merge first.loc second.loc)
-        (Let (located ~loc:semi "_", [], Annot.none, first, second)))
+      expr_at ~loc:(Loc.merge first.loc second.loc) (Seq (first, second)))
     else first
 
 and binding_name t =

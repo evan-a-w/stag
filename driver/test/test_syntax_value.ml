@@ -741,7 +741,7 @@ let%expect_test "constructors are made as the typechecker resolves them" =
            : bool)];
   [%expect
     {|
-    ((constructors 115)
+    ((constructors 116)
      (reflected
       (prelude.Stag.Expr.Deref prelude.Stag.Expr.Store
        prelude.Stag.Mode_expr.Atom.External

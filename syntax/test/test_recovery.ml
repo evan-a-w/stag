@@ -626,7 +626,8 @@ let%expect_test "an error after a struct quote salvages the outer toplevel" =
   parse {|let x = (.< struct let y = 1 end >.
 let z = 2
 |};
-  [%expect {|
+  [%expect
+    {|
     t.stag:2:0-3: expected `)` to close this `(` (opened at 1:8), found `let`
     ---
     let x = <error>

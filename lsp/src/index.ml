@@ -120,7 +120,7 @@ module Syntax_at = struct
     let snds list = List.iter list ~f:(fun (_, e) -> recurse e) in
     match e.txt with
     | Lit _ | Var _ | Type _ | Expect _ | Error -> ()
-    | App (a, b) ->
+    | App (a, b) | Seq (a, b) ->
       recurse a;
       recurse b
     | Let (name, bindings, _, body, in_) ->
