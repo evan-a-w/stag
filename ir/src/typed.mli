@@ -325,16 +325,21 @@ module Bench : sig
   [@@deriving sexp_of]
 end
 
-(** An allocation in run time code, and where a compiler makes it: a function
-    whose allocations are made differently when its result is [global] than when
-    it is [local] is compiled once for each. *)
+(** An allocation in run time code, and where a compiler makes it. The modes of
+    a function's type are chosen by each instance of it; a function whose
+    allocations are made differently in some instances than in others is
+    compiled once for each way. *)
 module Allocation : sig
   module Kind : sig
     type t =
       | Closure
+      | Partial_application
+      (** The closure of a function given some of its arguments: made by the
+          caller, as the result of its call. *)
       | Code
       | Pointer (** [Ptr.make] *)
       | Box (** [Box.make] *)
+      | Cell (** Of a [let mut]. *)
     [@@deriving sexp_of, compare, equal]
   end
 
@@ -344,18 +349,65 @@ module Allocation : sig
       | Region (** The function's (or [region_]'s) own. *)
       | Caller_region
       (** The one around it: returned by the function (or [region_]), or under
-          [exclave_]. *)
+          [exclave_]. Of a partial application, its caller's own. *)
     [@@deriving sexp_of, compare, equal]
   end
 
+  (** A side of an arrow in a type: the path down to the arrow, then which side. *)
+  module Side : sig
+    module Step : sig
+      type t =
+        | Arg
+        | Res
+        | Component of int (** Of a tuple, from 0. *)
+        | Type_arg of int (** Of a type constructor, from 0. *)
+      [@@deriving sexp_of, compare, equal]
+    end
+
+    type t =
+      { steps : Step.t list
+      ; side : [ `Arg | `Res ]
+      }
+    [@@deriving sexp_of, compare, equal]
+
+    (** As [res], [arg.res]: the steps, then the side. *)
+    val to_string : t -> string
+  end
+
+  (** The function whose instances decide where it is made: a toplevel, or a
+      function bound by a [let] in it (generalized, so with instances of its
+      own), by name and location. *)
+  module Owner : sig
+    type t =
+      { toplevel : Ident.t
+      ; local : (string * Loc.t) option
+      }
+    [@@deriving sexp_of]
+  end
+
+  (** An allocation made more locally in the instances of its owner where a side
+      of the owner's type is [local]. *)
+  module Follows : sig
+    type t =
+      { side : Side.t (** In the owner's type. *)
+      ; if_local : Placement.t
+      }
+    [@@deriving sexp_of]
+  end
+
   type t =
-    { toplevel : Ident.t (** The toplevel whose code makes it. *)
+    { owner : Owner.t
     ; loc : Loc.t
     ; kind : Kind.t
-    ; if_global : Placement.t
-    (** Where it is made in calls of the toplevel, a function, whose result is
-        used at [global]. Of a non-function, the same as [if_local]. *)
-    ; if_local : Placement.t (** Where its result is used at [local]. *)
+    ; placement : Placement.t
+    (** Where it is made in every instance of its owner: as locally as its least
+        instance, with every mode of the owner's type as low as it may be,
+        allows. *)
+    ; follows : Follows.t option
+    (** Where it is made instead in the instances where that side is [local]
+        (with every other side, for all it relies on, at its least). A site that
+        needs several sides [local] to be made more locally is made at
+        [placement]. *)
     }
   [@@deriving sexp_of]
 end

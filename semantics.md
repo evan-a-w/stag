@@ -282,19 +282,40 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   Allocations it gives are made in the region around it.
 - Allocation is polymorphic in locality: an allocation whose block is
   returned (the function's value or part of it, by-value records, tuples and
-  constructors included) has the function's result locality, so a scheme
-  `int -> box[int] @ 'm` is used at `global` (allocated on the heap) or at
-  `local` (allocated in the caller's region, as by `exclave_`) as its caller
-  chooses, the same function serving "GC or arena". Only returned
+  constructors included, and what a returned `Box.make` boxes, so both
+  cells of a returned `[1; 2]` are) has the function's result locality, so a
+  scheme `int -> box[int] @ 'm` is used at `global` (allocated on the heap)
+  or at `local` (allocated in the caller's region, as by `exclave_`) as its
+  caller chooses, the same function serving "GC or arena". Only returned
   allocations are: one bound and then returned (`let b = Box.make x in b`)
   is made before the function knows its caller's choice, so on the heap
   unless `local` (then the function can't return it). A recursive function
   builds a structure in its caller's region only under `exclave_` (the
   recursive call's value is otherwise in the current call's region, which
-  ends as it returns). Where each allocation is made is recorded per
-  toplevel (`Typed.Program.allocations`): on the heap, in the current
-  region, or in the caller's (or, at a `region_`'s end, the enclosing)
-  region, for each of the function's result used at `global` and at `local`.
+  ends as it returns). A `region_` at a function's end makes what it gives
+  global, so its allocations are on the heap in every instance: the
+  function is no longer polymorphic in where they are made (use `exclave_`
+  inside it to give a local value). A call under `exclave_` inside a
+  `region_` is not a tail call either: the `region_`'s own region is only
+  freed after it.
+- Where each allocation is made is recorded (`Typed.Program.allocations`)
+  for its owner, the toplevel or generalised `let`-bound function it is
+  made in, relative to the innermost region around it: the heap, that
+  region (the function's own, or a `region_`'s), or the one around that
+  (the caller's, under `exclave_` or when returned, or for a `region_`, the
+  enclosing one). An allocation is recorded as made where the owner's
+  least instance, with every side of its type's arrows as low (as global)
+  as its constraints allow, puts it, and, where making one side `local`
+  moves it, as following that side (`res`, `arg.res`, …), with where it is
+  made when that side is local. Sites are closures (including the
+  intermediate closures of a curried function), partial applications (made
+  by the caller, in its own region, when the closure it gets is local),
+  `Box.make` and `Ptr.make` blocks, code values, and the cells of `let mut`s
+  that closures capture. A captured cell outlives each closure capturing
+  it: it is made on the heap unless every capturing closure stays in the
+  cell's own region. `Box.make` used as a value (`apply Box.make x`) is an
+  instance of the primitive, allocating where its instance's result says,
+  like a call of any polymorphic function; it is not a site of its own.
 - `&x` of a variable puts `x` on the data stack, and is a `local` `ptr`.
 - `local` values cannot escape their region: not returned (except via
   `exclave_`), not stored into `global` blocks (including GC objects), not
@@ -432,22 +453,33 @@ which is always sound since the body was checked for every mode within its
 bounds. A function is compiled once per distinct assignment of its relevant
 variables, so instances differing only in irrelevant modes share code.
 
-Allocation locality is the main code-relevant mode. A function with a
-returned allocation (`Typed.Allocation` with `if_global` and `if_local`
-differing) is compiled twice: an instance whose result is `global`, which
-allocates there on the heap, and one whose result is `local`, which
-allocates there in its caller's region (as `exclave_` would). A `regional`
-result instantiates the `global` copy. Functions all of whose allocations
-are placed the same either way (none returned, or all forced by `stack_`
-or a captured local) are compiled once. Callers pick the instance from
-their use of the result, transitively: a caller that is itself
-polymorphic in its result passes its own choice on. Let-bound polymorphic
-functions are instantiated the same way.
+Allocation locality is the main code-relevant mode. Each allocation site
+(`Typed.Allocation`) belongs to an owner, a toplevel or a generalised
+`let`-bound function, and is either placed the same in every instance of
+its owner or follows one side of the owner's type (its result, a curried
+closure's result `res.res`, a higher-order parameter's argument `arg.arg`,
+…): made as `placement` when that side is global, and as `if_local` when
+it is local. An owner is compiled once per assignment of locality to the
+sides its sites follow; one none of whose sites follow a side (none
+returned, or all forced by `stack_`, a `region_` or a captured local) is
+compiled once. A `regional` side instantiates the `global` copy.
+
+The monomorphiser picks each call's copy from the instance it is
+compiling: the call's instantiated scheme relates the callee's sides to
+the caller's mode variables, which, with the caller's own sides fixed by
+its instance and its internal variables at their greatest solution (the
+one the placements are read under), fix each callee side the callee's
+sites follow. A caller that is itself polymorphic in its result passes its
+own choice on, so the choice is made transitively from the outermost
+instance. A primitive used as a value (`Box.make` passed to `apply`) is an
+instance like any other, allocating as its instance's result says.
 
 A scheme only copies the mode variables it keeps, not the internal ones of
-the body (such as an allocation site's locality). So the monomorphiser keeps
-each definition's body mode constraints and re-solves them per instance,
-rather than relying on scheme instantiation.
+the body (such as an allocation site's locality). So the monomorphiser
+keeps each definition's body mode constraints and re-solves them per
+instance, rather than relying on scheme instantiation; the recorded
+placements are what that solving gives for the owner's least instance and
+for each followed side raised to `local`.
 
 ## Pipeline
 

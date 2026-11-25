@@ -6,6 +6,7 @@ module Site = struct
       | Here
       | Returned
       | Exclaved
+      | Caller
     [@@deriving sexp_of]
   end
 
@@ -73,6 +74,7 @@ module Expected = struct
   ;;
 
   let returned t = t.returned
+  let boxed t ~whole = { t with returned = whole.returned }
   let whole t = { t with stack = None; applied = false }
   let nontail t = { t with region = Nontail; applied = false; returned = false }
   let part t = { t with region = Nontail; applied = false }
@@ -475,6 +477,10 @@ module Alloc = struct
 
   let pointer ctx expected ~loc ~kind mode = record ctx expected ~loc ~kind mode
 
+  let cell (ctx : Ctx.t) ~loc mode =
+    ctx.allocated { Site.loc; kind = Cell; mode; position = Here }
+  ;;
+
   let stack ctx expected ~loc f =
     let allocates = ref false in
     let inner =
@@ -507,6 +513,12 @@ module Function = struct
   let partial_applications ctx ~closure ~arg_modes ~partial_modes ~loc =
     let reason = reason ~loc "a partial application holds it" in
     List.iteri partial_modes ~f:(fun index partial ->
+      ctx.Ctx.allocated
+        { Site.loc
+        ; kind = Partial_application
+        ; mode = partial
+        ; position = Caller
+        };
       Ctx.add
         ctx
         ~loc
@@ -560,10 +572,11 @@ module Function = struct
     curry
   ;;
 
-  let body' ctx ~res_mode ~ty ~what ~region f =
+  (* Of type [ty], else its value's. *)
+  let body' ?ty ctx ~res_mode ~what ~region f =
     let expected = { (Expected.fresh ctx) with region; returned = true } in
     let (body : Typed.Expr.t) = f expected in
-    let crossing = ctx.Ctx.crossing (ty body) in
+    let crossing = ctx.Ctx.crossing (Option.value ty ~default:body.ty) in
     let loc = body.loc in
     Ctx.add
       ctx
@@ -592,26 +605,14 @@ module Function = struct
   ;;
 
   let body ctx ~res_mode ~ty f =
-    body'
-      ctx
-      ~res_mode
-      ~ty:(fun _ -> ty)
-      ~what:"the function"
-      ~region:(Returns res_mode)
-      f
+    body' ctx ~res_mode ~ty ~what:"the function" ~region:(Returns res_mode) f
   ;;
 end
 
 let region ctx expected ~loc f =
   let res_mode = Ctx.fresh ctx in
   let (body : Typed.Expr.t) =
-    Function.body'
-      ctx
-      ~res_mode
-      ~ty:(fun (body : Typed.Expr.t) -> body.ty)
-      ~what:"the [region_]"
-      ~region:(Ends res_mode)
-      f
+    Function.body' ctx ~res_mode ~what:"the [region_]" ~region:(Ends res_mode) f
   in
   joins ctx expected res_mode ~loc ~why:"the [region_] gives it";
   body
@@ -632,7 +633,11 @@ let exclave ctx (expected : Expected.t) ~loc f =
             ~crossing:(ctx.crossing result.ty)
             inner.mode
             res_mode
-            (reason ~loc "the function returns it"))
+            (reason
+               ~loc
+               (match region with
+                | Ends _ -> "the [region_] gives it"
+                | Returns _ | Nontail | Quoted -> "the function returns it")))
      | Nontail | Quoted -> ());
     held
       ctx
@@ -847,7 +852,6 @@ let use
   ~toplevel
   ~name
   ~loc
-  ~mutable_captured_in_exclave
   =
   let reason what = reason ~loc (sprintf what name) in
   let held = (entry.held :> Mode.Var.t option) in
@@ -865,28 +869,37 @@ let use
          gone. *)
       let inside = List.take crossed index in
       let outside = List.drop crossed (index + 1) in
-      let ended = Ctx.fresh ctx in
-      Ctx.add
-        ctx
-        ~loc
-        (Mode.Var.submode
-           ~crossing
-           ~locality:(locality_map outside)
-           (Option.value held ~default:mode)
-           ended
-           (reason "%s is used in an [exclave_]")
-         |> Result.bind ~f:(fun () ->
-           Mode.Var.at_most
+      let ended ?crossing value ~why =
+        let ended = Ctx.fresh ctx in
+        Ctx.add
+          ctx
+          ~loc
+          (Mode.Var.submode
+             ?crossing
+             ~locality:(locality_map outside)
+             value
              ended
-             Locality
-             Regional
-             (Mode.Reason.create ~loc "the [exclave_] has ended its region")));
-      (* The cell of a mutable captured by a closure only lives as long as its
-         region, when the closure is local. *)
-      if mutable_
-         && List.exists inside ~f:is_closure
-         && not (List.exists outside ~f:is_closure)
-      then mutable_captured_in_exclave ()
+             (reason why)
+           |> Result.bind ~f:(fun () ->
+             Mode.Var.at_most
+               ended
+               Locality
+               Regional
+               (Mode.Reason.create ~loc "the [exclave_] has ended its region"))
+          )
+      in
+      ended
+        ~crossing
+        (Option.value held ~default:mode)
+        ~why:"%s is used in an [exclave_]";
+      (* A closure in it capturing a mutable holds its cell, which must then
+         outlive the region. *)
+      if mutable_ && List.exists inside ~f:is_closure
+      then
+        ended
+          mode
+          ~why:
+            "%s is captured by a closure in an [exclave_], which holds its cell"
     | Closure closure ->
       Ctx.add
         ctx
@@ -993,7 +1006,7 @@ module Splice = struct
   let code ~code f = f (Expected.of_mode code)
 
   let captured (expected : Expected.t) =
-    { expected with region = Nontail; stack = None }
+    { expected with region = Nontail; stack = None; returned = false }
   ;;
 
   let substitution ctx expected ~loc f =
@@ -1188,32 +1201,106 @@ let default_mode_arg var (position : Mode_arg_position.t option) ~name =
 let placement (site : Site.t) : Typed.Allocation.Placement.t =
   match site.position, (Mode.Var.upper site.mode).locality with
   | (Here | Returned), Local -> Region
-  | Returned, Regional | Exclaved, Local -> Caller_region
-  | Here, Regional | Exclaved, Regional | _, Global -> Heap
+  | Returned, Regional | (Exclaved | Caller), Local -> Caller_region
+  | (Here | Exclaved | Caller), Regional | _, Global -> Heap
 ;;
 
-let placements sites ~result =
-  let read () = List.map sites ~f:placement in
-  let assuming constrain =
-    match result with
-    | None -> None
-    | Some result ->
-      Mode.Var.assuming
-        (fun () ->
-          constrain result (Mode.Reason.create "the result is used so"))
-        ~read
+(* The modes of the sides of the arrows in [ty], with where each is, the first
+   of each variable only. *)
+let sides ty =
+  let seen = Hash_set.create (module Int) in
+  let found = Queue.create () in
+  let side ~steps (side : Arrow_modes.Side.t) which =
+    match side with
+    | Fixed _ -> ()
+    | Var var ->
+      if not (Hash_set.mem seen (Mode.Var.id var))
+      then (
+        Hash_set.add seen (Mode.Var.id var);
+        Queue.enqueue
+          found
+          ({ Typed.Allocation.Side.steps = List.rev steps; side = which }, var))
   in
-  let if_local =
-    match assuming (fun result -> Mode.Var.at_least result Locality Local) with
-    | Some placements -> placements
-    | None -> read ()
+  (* Bounded, as a type may be cyclic. *)
+  let rec walk ty ~steps ~depth =
+    if depth < 16
+    then (
+      let walk ty step = walk ty ~steps:(step :: steps) ~depth:(depth + 1) in
+      match Type.canonical_ty ty with
+      | TArrow (arg, res, modes) ->
+        side ~steps modes.arg `Arg;
+        side ~steps modes.res `Res;
+        walk arg Arg;
+        walk res Res
+      | TTuple tys -> List.iteri tys ~f:(fun i ty -> walk ty (Component i))
+      | TCon (_, args) ->
+        List.iteri args ~f:(fun i (arg : Type.arg) ->
+          match arg with
+          | ATy ty -> walk ty (Type_arg i)
+          | ARow _ | AMode _ -> ())
+      | TCode _ | TRecord _ | TVariant _ | TVar _ -> ())
   in
-  let if_global =
-    match assuming (fun result -> Mode.Var.at_most result Locality Global) with
-    | Some placements -> placements
-    | None -> if_local
+  walk ty ~steps:[] ~depth:0;
+  Queue.to_list found
+;;
+
+let placements sites ~ty =
+  let sides =
+    List.filter (sides ty) ~f:(fun (_, var) ->
+      let lower = Mode.Var.lower var
+      and upper = Mode.Var.upper var in
+      not (Mode.Locality.equal lower.locality upper.locality))
   in
-  List.zip_exn sites (List.zip_exn if_global if_local)
-  |> List.map ~f:(fun (site, (if_global, if_local)) ->
-    site, if_global, if_local)
+  let read () = Array.of_list_map sites ~f:placement in
+  (* Every side of [sides] but [except] at its least, after [first]. *)
+  let assuming ?except first =
+    Mode.Var.assuming
+      (fun () ->
+        Result.bind (first ()) ~f:(fun () ->
+          List.map sides ~f:(fun (_, var) ->
+            if Option.exists except ~f:(fun except ->
+                 Mode.Var.id except = Mode.Var.id var)
+            then Ok ()
+            else
+              Mode.Var.at_most
+                var
+                Locality
+                (Mode.Var.lower var).locality
+                (Mode.Reason.create "an instance has it at its least"))
+          |> Result.all_unit))
+      ~read
+  in
+  let least =
+    Option.value_or_thunk (assuming (fun () -> Ok ())) ~default:read
+  in
+  let follows = Array.create ~len:(Array.length least) None in
+  (* The variables a site's mode is below, as its placement can only follow one
+     of those. *)
+  let above =
+    Array.of_list_map sites ~f:(fun (site : Site.t) ->
+      let node = Mode.Var.node site.mode Locality in
+      match Mode.Var.Node.raised [ node, Mode.Var.Node.upper node ] with
+      | None -> Int.Set.empty
+      | Some raised ->
+        Int.Set.of_list
+          (List.map raised ~f:(fun (node, _) -> Mode.Var.Node.var_id node)))
+  in
+  List.iter sides ~f:(fun (side, var) ->
+    if Array.existsi follows ~f:(fun i follows ->
+         Option.is_none follows && Set.mem above.(i) (Mode.Var.id var))
+    then
+      Option.iter
+        (assuming ~except:var (fun () ->
+           Mode.Var.at_least
+             var
+             Locality
+             Local
+             (Mode.Reason.create "an instance has it local")))
+        ~f:(fun if_local ->
+          Array.iteri if_local ~f:(fun i if_local ->
+            if Option.is_none follows.(i)
+               && Set.mem above.(i) (Mode.Var.id var)
+               && not (Typed.Allocation.Placement.equal if_local least.(i))
+            then follows.(i) <- Some { Typed.Allocation.Follows.side; if_local })));
+  List.mapi sites ~f:(fun i site -> site, least.(i), follows.(i))
 ;;

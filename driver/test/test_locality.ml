@@ -262,7 +262,8 @@ let f u =
 ;;
 
 let%expect_test "exclave_" =
-  (* Reviewer: a [let mut] cell lives in the region [exclave_] ends. *)
+  (* A [let mut] cell captured under [exclave_] is put where it outlives the
+     closure: here on the heap. *)
   locality
     {|
 let f u = let mut x = 1 in exclave_ stack_ (fun v -> x)
@@ -270,8 +271,8 @@ let f2 u = let mut x = 0 in exclave_ stack_ (fun v -> x <- 1)
 |};
   [%expect
     {|
-    The mutable variable x is captured by a closure in an [exclave_], but lives in the region the [exclave_] ends
-    The mutable variable x is captured by a closure in an [exclave_], but lives in the region the [exclave_] ends
+    val f : 'a -> ('b -> int) @ local
+    val f2 : 'a -> ('b -> unit) @ local
     |}];
   (* Reviewer: [p] is in [outer]'s region, which outlives [f]'s [exclave_]. *)
   locality

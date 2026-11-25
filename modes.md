@@ -516,7 +516,9 @@ Each step is a branch stacked on the previous one.
   is `'a -> box['a] @ 'm`, made on the heap or in the caller's region as
   each use of the result chooses (see
   [semantics.md](semantics.md#locality)); the placement of each allocation
-  per result locality is recorded for the monomorphiser
+  site (closures, partial applications, boxes, pointers, captured `let mut`
+  cells) is recorded for its owner (toplevel or generalised `let`), as
+  fixed or following one side of the owner's type, for the monomorphiser
   (`Typed.Program.allocations`). `region_ e` opens a region of its own,
   freed when it ends (its value is checked as a function's result, and
   `exclave_` ends it early). Chosen over a `with_region (fun () -> e)`

@@ -20,3 +20,8 @@ val checked : string -> (Signature.Item.t list, string list) Result.t
 (** Prints the signature of [source], as [signature], then where each allocation
     of its toplevels is made (see [Typed.Allocation]), or its errors. *)
 val allocations : string -> unit
+
+(** As [allocations], each with where it is in the source. *)
+val placements
+  :  string
+  -> (Signature.Item.t list * (Loc.t * string) list, string list) Result.t

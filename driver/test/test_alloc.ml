@@ -24,11 +24,12 @@ let pair (x : int) = (Box.make x, Box.make (Int.add x 1))
     val adder : int @ 'm0 -> (int @ _ -> int @ _) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
     val wrap : 'a @ 'm0 -> option[box['a]] @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and gc <= 'm1
     val pair : int @ _ -> box[int] * box[int] @ 'm0 with gc <= 'm0
-    t.stag:2:19-29 Box in mk: heap if global, caller's region if local
-    t.stag:3:21-31 Pointer in cell: heap if global, caller's region if local
-    t.stag:5:18-30 Box in wrap: heap if global, caller's region if local
-    t.stag:6:22-32 Box in pair: heap if global, caller's region if local
-    t.stag:6:34-56 Box in pair: heap if global, caller's region if local
+    t.stag:2:19-29 Box in mk: heap, caller's region if res is local
+    t.stag:3:21-31 Pointer in cell: heap, caller's region if res is local
+    t.stag:4:22-50 Partial_application in adder: heap, caller's region if res is local
+    t.stag:5:18-30 Box in wrap: heap, caller's region if res is local
+    t.stag:6:22-32 Box in pair: heap, caller's region if res is local
+    t.stag:6:34-56 Box in pair: heap, caller's region if res is local
     |}]
 ;;
 
@@ -54,7 +55,7 @@ let passed_on (u : unit) = exclave_ mk 1
     val in_region : unit @ _ -> int @ _
     val inferred : unit @ _ -> int @ _
     val passed_on : unit @ _ -> box[int] @ 'm0 with gc <= 'm0
-    t.stag:2:19-29 Box in mk: heap if global, caller's region if local
+    t.stag:2:19-29 Box in mk: heap, caller's region if res is local
     t.stag:6:29-44 Pointer in stored: heap
     |}]
 ;;
@@ -97,16 +98,16 @@ let captured (x : int) = let b = Box.make x in fun (y : int) -> Int.add (sum b) 
     val always_caller : int @ _ -> box[int] @ 'm0 with gc local <= 'm0
     val in_exclave : int @ _ -> box[int] @ 'm0 with gc <= 'm0
     val captured : int @ _ -> (int @ _ -> int @ _) @ 'm0 with gc <= 'm0
-    t.stag:2:19-29 Box in mk: heap if global, caller's region if local
+    t.stag:2:19-29 Box in mk: heap, caller's region if res is local
     t.stag:5:29-39 Box in kept: region
     t.stag:5:51-67 Box in kept: heap
     t.stag:6:35-45 Box in local_only: heap
     t.stag:7:38-50 Box in forced: region
     t.stag:8:46-58 Box in always_caller: caller's region
     t.stag:9:45-55 Box in in_exclave: caller's region
-    t.stag:9:59-75 Box in in_exclave: heap if global, caller's region if local
+    t.stag:9:59-75 Box in in_exclave: heap, caller's region if res is local
     t.stag:10:33-43 Box in captured: heap
-    t.stag:10:47-81 Closure in captured: heap if global, caller's region if local
+    t.stag:10:47-81 Closure in captured: heap, caller's region if res is local
     |}]
 ;;
 
@@ -131,7 +132,7 @@ let sum_region (u : unit) = region_ (let l @ local = range 3 in length l)
     val in_region : unit @ _ -> int @ _
     val sum_region : unit @ _ -> int @ _
     t.stag:2:56-91 Box in range: heap
-    t.stag:3:73-116 Box in range_exclave: heap if global, caller's region if local
+    t.stag:3:73-116 Box in range_exclave: heap, caller's region if res is local
     |}]
 ;;
 
@@ -176,7 +177,7 @@ let%expect_test "region_" =
     val mk : int @ _ -> box[int] @ 'm0 with gc <= 'm0
     val sum : box[int] @ _ -> int @ _
     val count : unit @ _ -> int @ _
-    t.stag:2:19-29 Box in mk: heap if global, caller's region if local
+    t.stag:2:19-29 Box in mk: heap, caller's region if res is local
     ----
     This is local, because it is annotated local (at t.stag:4:40-45), then b is used (at t.stag:4:56-57), then the [region_] returns it (at t.stag:4:31-58), then the [region_] gives it (at t.stag:4:23-58), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:4:23-58)
     This is local, because it is annotated local (at t.stag:4:40-45), then b is used (at t.stag:4:56-57), but must be at most regional, because the [region_] returns it, ending its region (return it with [exclave_] instead) (at t.stag:4:31-58)
@@ -184,30 +185,30 @@ let%expect_test "region_" =
     val mk : int @ _ -> box[int] @ 'm0 with gc <= 'm0
     val sum : box[int] @ _ -> int @ _
     val call : unit @ _ -> int @ _
-    t.stag:2:19-29 Box in mk: heap if global, caller's region if local
+    t.stag:2:19-29 Box in mk: heap, caller's region if res is local
     ----
     This is local, because it is annotated local (at t.stag:4:30-35), then b is used (at t.stag:4:50-51), but must be at most regional, because it is passed in a tail call, after the current region has ended (mark the call [@nontail]) (at t.stag:4:50-51)
     ----
     val mk : int @ _ -> box[int] @ 'm0 with gc <= 'm0
     val sum : box[int] @ _ -> int @ _
     val early : unit @ _ -> int @ _
-    t.stag:2:19-29 Box in mk: heap if global, caller's region if local
+    t.stag:2:19-29 Box in mk: heap, caller's region if res is local
     ----
     val mk : int @ _ -> box[int] @ 'm0 with gc <= 'm0
     val sum : box[int] @ _ -> int @ _
     val early_leak : unit @ _ -> box[int] @ 'm0 with gc <= 'm0
-    t.stag:2:19-29 Box in mk: heap if global, caller's region if local
+    t.stag:2:19-29 Box in mk: heap, caller's region if res is local
     ----
     val mk : int @ _ -> box[int] @ 'm0 with gc <= 'm0
     val sum : box[int] @ _ -> int @ _
     val outer : unit @ _ -> int @ _
-    t.stag:2:19-29 Box in mk: heap if global, caller's region if local
+    t.stag:2:19-29 Box in mk: heap, caller's region if res is local
     t.stag:4:72-82 Box in outer: region
     ----
     val mk : int @ _ -> box[int] @ 'm0 with gc <= 'm0
     val sum : box[int] @ _ -> int @ _
     val outer_kept : unit @ _ -> int @ _
-    t.stag:2:19-29 Box in mk: heap if global, caller's region if local
+    t.stag:2:19-29 Box in mk: heap, caller's region if res is local
     t.stag:4:76-88 Box in outer_kept: caller's region
     ----
     This is local, because it is annotated local (at t.stag:4:36-41), then o is used (at t.stag:4:70-71), then it is passed to a function (at t.stag:4:60-72), then a function is used at a type with other modes, then Box.make holds it, then a function is used at a type with other modes, then the function returns it (at t.stag:4:60-72), then the [region_] returns it (at t.stag:4:60-72), then the [region_] gives it (at t.stag:4:52-72), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:4:28-72)
@@ -215,7 +216,7 @@ let%expect_test "region_" =
     val mk : int @ _ -> box[int] @ 'm0 with gc <= 'm0
     val sum : box[int] @ _ -> int @ _
     val nested : unit @ _ -> int @ _
-    t.stag:2:19-29 Box in mk: heap if global, caller's region if local
+    t.stag:2:19-29 Box in mk: heap, caller's region if res is local
     ----
     This is local, because it is annotated local (at t.stag:4:46-51), then a is used (at t.stag:4:95-96), then the [region_] returns it (at t.stag:4:70-97), then the [region_] gives it (at t.stag:4:62-97), then the [region_] returns it (at t.stag:4:37-98), then the [region_] gives it (at t.stag:4:29-98), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:4:29-98)
     This is local, because it is annotated local (at t.stag:4:46-51), then a is used (at t.stag:4:95-96), then the [region_] returns it (at t.stag:4:70-97), then the [region_] gives it (at t.stag:4:62-97), but must be at most regional, because the [region_] returns it, ending its region (return it with [exclave_] instead) (at t.stag:4:37-98)
@@ -227,14 +228,15 @@ let%expect_test "region_" =
     val mk : int @ _ -> box[int] @ 'm0 with gc <= 'm0
     val sum : box[int] @ _ -> int @ _
     val assigned_ok : unit @ _ -> int @ _
-    t.stag:2:19-29 Box in mk: heap if global, caller's region if local
+    t.stag:2:19-29 Box in mk: heap, caller's region if res is local
+    t.stag:4:53-100 Cell in assigned_ok: region
     ----
     This is local, because it is annotated local (at t.stag:4:78-83), then b is used (at t.stag:4:108-109), then it is assigned to c (at t.stag:4:103-109), but must be at most regional, because c outlives the [region_], which it is assigned in (at t.stag:4:103-109)
     ----
     val mk : int @ _ -> box[int] @ 'm0 with gc <= 'm0
     val sum : box[int] @ _ -> int @ _
     val closure : unit @ _ -> int @ _
-    t.stag:2:19-29 Box in mk: heap if global, caller's region if local
+    t.stag:2:19-29 Box in mk: heap, caller's region if res is local
     t.stag:4:66-100 Closure in closure: region
     ----
     This is local, because it is annotated local (at t.stag:4:47-52), then b is captured by a closure (at t.stag:4:95-96), then the closure is made (at t.stag:4:63-97), then the [region_] returns it (at t.stag:4:38-98), then the [region_] gives it (at t.stag:4:30-98), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:4:30-98)
@@ -243,12 +245,13 @@ let%expect_test "region_" =
     val mk : int @ _ -> box[int] @ 'm0 with gc <= 'm0
     val sum : box[int] @ _ -> int @ _
     val in_closure : unit @ 'm0 -> (int @ _ -> int @ _) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
-    t.stag:2:19-29 Box in mk: heap if global, caller's region if local
+    t.stag:2:19-29 Box in mk: heap, caller's region if res is local
+    t.stag:4:28-84 Partial_application in in_closure: heap, caller's region if res is local
     ----
     val mk : int @ _ -> box[int] @ 'm0 with gc <= 'm0
     val sum : box[int] @ _ -> int @ _
     val gives : int @ _ -> box[int] @ 'm0 with gc <= 'm0
-    t.stag:2:19-29 Box in mk: heap if global, caller's region if local
+    t.stag:2:19-29 Box in mk: heap, caller's region if res is local
     t.stag:4:55-71 Box in gives: heap
     |}]
 ;;
@@ -267,5 +270,146 @@ let early = sum (region_ (exclave_ mk 3))
     (sum <fun>)
     (total 3)
     (early 3)
+    |}]
+;;
+
+let%expect_test "placements hold in every instance" =
+  allocations
+    (lib
+     ^ {|
+let keep : ptr[box[int]] = Ptr.make (Box.make 0)
+let f g = Int.add 0 (g (Box.make 1))
+let use2 (u : unit) = f (fun b -> keep.* <- b; 0)
+let inner (x : int) = let b = Box.make x in fun (y : int) -> Box.make (Int.add y (sum b))
+let use (u : unit) = let g = inner 1 in keep.* <- g 2
+let letpoly (x : int) =
+  let g = fun (y : int) -> Box.make y in
+  let a @ local = g 1 in
+  keep.* <- g 2;
+  sum a [@nontail]
+|}
+    );
+  [%expect
+    {|
+    val mk : int @ _ -> box[int] @ 'm0 with gc <= 'm0
+    val sum : box[int] @ _ -> int @ _
+    val keep : ptr[box[int]]
+    val f : (box[int] @ 'm0 -> int @ _) @ _ -> int @ _ with gc <= 'm0
+    val use2 : unit @ _ -> int @ _
+    val inner : int @ _ -> (int @ _ -> box[int] @ 'm1) @ 'm0 with gc <= 'm1 and gc <= 'm0
+    val use : unit @ _ -> unit @ _
+    val letpoly : int @ _ -> int @ _
+    t.stag:2:19-29 Box in mk: heap, caller's region if res is local
+    t.stag:5:27-48 Pointer in keep: heap
+    t.stag:5:36-48 Box in keep: heap
+    t.stag:6:23-35 Box in f: heap, region if arg.arg is local
+    t.stag:7:24-49 Closure in use2: heap
+    t.stag:8:30-40 Box in inner: heap
+    t.stag:8:44-89 Closure in inner: heap, caller's region if res is local
+    t.stag:8:61-89 Box in inner: heap, caller's region if res.res is local
+    t.stag:11:10-37 Closure in letpoly.g: region
+    t.stag:11:27-37 Box in letpoly.g: heap, caller's region if res is local
+    |}]
+;;
+
+let%expect_test "the cell of a [let mut] outlives what captures it" =
+  allocations
+    {|
+let f1 (u : unit) = let mut c = 0 in fun (z : int) -> c
+let f2 (u : unit) = let g @ local = region_ (let mut c = 0 in fun (z : int) -> c) in g 1 [@nontail]
+let f3 (u : unit) = let mut c = 0 in exclave_ fun (z : int) -> c
+let f4 (u : unit) = let mut c = 0 in let g @ local = region_ (exclave_ fun (z : int) -> c) in g 1 [@nontail]
+let f5 (u : unit) = let mut c = 0 in let g @ local = fun (z : int) -> c in g 1 [@nontail]
+let f6 (u : unit) = let mut c = 0 in c <- 1; c
+|};
+  [%expect
+    {|
+    val f1 : unit @ _ -> (int @ _ -> int @ _) @ 'm0 with nonportable gc <= 'm0
+    val f2 : unit @ _ -> int @ _
+    val f3 : unit @ _ -> (int @ _ -> int @ _) @ 'm0 with nonportable gc <= 'm0
+    val f4 : unit @ _ -> int @ _
+    val f5 : unit @ _ -> int @ _
+    val f6 : unit @ _ -> int @ _
+    t.stag:2:20-55 Cell in f1: heap
+    t.stag:2:37-55 Closure in f1: heap, caller's region if res is local
+    t.stag:3:44-81 Cell in f2: heap
+    t.stag:3:62-80 Closure in f2: caller's region
+    t.stag:4:20-64 Cell in f3: heap
+    t.stag:4:46-64 Closure in f3: heap, caller's region if res is local
+    t.stag:5:20-108 Cell in f4: region
+    t.stag:5:71-89 Closure in f4: caller's region
+    t.stag:6:20-89 Cell in f5: region
+    t.stag:6:53-71 Closure in f5: region
+    t.stag:7:20-46 Cell in f6: region
+    |}]
+;;
+
+let%expect_test "partial applications are made by the caller" =
+  allocations
+    {|
+let add2 (a : box[int]) (b : int) = b
+let p1 (u : unit) = add2 (Box.make 1)
+let adder (n : int) = fun (x : int) -> Int.add n x
+let three (a : int) (b : int) (c : int) = Int.add a (Int.add b c)
+|};
+  [%expect
+    {|
+    val add2 : box[int] @ 'm0 -> (int @ _ -> int @ _) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
+    val p1 : unit @ _ -> (int @ _ -> int @ _) @ 'm0 with gc <= 'm0
+    val adder : int @ 'm0 -> (int @ _ -> int @ _) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
+    val three : int @ 'm0 -> (int @ 'm2 -> (int @ _ -> int @ _) @ 'm3) @ 'm1 with 'm0 <= 'm3 and 'm0 <= 'm1 and 'm2 <= 'm3 and gc <= 'm3 and gc <= 'm1
+    t.stag:2:36-37 Partial_application in add2: heap, caller's region if res is local
+    t.stag:3:25-37 Box in p1: heap
+    t.stag:4:22-50 Partial_application in adder: heap, caller's region if res is local
+    t.stag:5:42-65 Partial_application in three: heap, caller's region if res is local
+    t.stag:5:42-65 Partial_application in three: heap, caller's region if res.res is local
+    |}]
+;;
+
+let%expect_test "what a returned box boxes is returned too" =
+  allocations
+    {|
+let two (u : unit) = [1; 2]
+let nested (x : int) = Box.make (Box.make x, 1)
+let apply f x = f x
+let boxed (x : int) = apply Box.make x
+|};
+  [%expect
+    {|
+    val two : unit @ _ -> list[int] @ 'm0 with gc <= 'm0
+    val nested : int @ _ -> box[box[int] * int] @ 'm0 with gc <= 'm0
+    val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm2 <= regional and stage('m4) <= stage('m1) and provenance('m4) <= provenance('m1) and meet(locality('m4), regional) <= locality('m1) and gc <= 'm3
+    val boxed : int @ _ -> box[int] @ 'm0 with gc <= 'm0
+    t.stag:2:21-27 Box in two: heap, caller's region if res is local
+    t.stag:2:23-27 Box in two: heap, caller's region if res is local
+    t.stag:3:23-47 Box in nested: heap, caller's region if res is local
+    t.stag:3:33-43 Box in nested: heap, caller's region if res is local
+    t.stag:4:16-19 Partial_application in apply: heap, caller's region if res is local
+    |}]
+;;
+
+(* [Region] is the innermost region around the allocation: the function's or a
+   [region_]'s; [Caller_region] is the one around that. *)
+let%expect_test "placements are relative to the innermost region" =
+  allocations
+    {|
+let sum (b : box[int]) = match b with *n -> n
+let f (x : int) = region_ (exclave_ (let n = sum (Box.make 1) in Box.make x))
+let g (x : int) = exclave_ (let n = sum (Box.make 1) in region_ (let m = sum (Box.make 2) in exclave_ Box.make x))
+let h (x : int) = exclave_ (let n = sum (stack_ (Box.make 1)) in stack_ (Box.make x))
+|};
+  [%expect
+    {|
+    val sum : box[int] @ _ -> int @ _
+    val f : int @ _ -> box[int] @ 'm0 with gc <= 'm0
+    val g : int @ _ -> box[int] @ 'm0 with gc <= 'm0
+    val h : int @ _ -> box[int] @ 'm0 with gc local <= 'm0
+    t.stag:3:49-61 Box in f: caller's region
+    t.stag:3:65-75 Box in f: heap
+    t.stag:4:40-52 Box in g: caller's region
+    t.stag:4:77-89 Box in g: region
+    t.stag:4:102-112 Box in g: heap, caller's region if res is local
+    t.stag:5:48-60 Box in h: caller's region
+    t.stag:5:72-84 Box in h: caller's region
     |}]
 ;;

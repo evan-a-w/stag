@@ -272,9 +272,9 @@ let%expect_test "random uses at other modes are accepted as variance says" =
 ;;
 
 (* Random functions allocating in a returned position, under [exclave_],
-   [region_] and [stack_]: each is accepted, and its callers using the result at
-   [global] and at [local], as a model of where the allocations can be made
-   says. *)
+   [region_] and [stack_]: each is accepted, its callers using the result at
+   [global] and at [local], and each allocation placed, as a model of where the
+   allocations can be made says. *)
 module Alloc_fuzz = struct
   module Model = struct
     type t =
@@ -283,44 +283,77 @@ module Alloc_fuzz = struct
       }
   end
 
-  (* What [exclave_] gives: [stack_] forces it into the caller's region. *)
-  let rec exclaved random depth : string * bool =
-    match if depth = 0 then 0 else Random.State.int random 3 with
-    | 0 -> "Box.make x", true
-    | 1 -> "stack_ (Box.make x)", false
-    | _ ->
-      let body, global = exclaved random (depth - 1) in
-      sprintf "(let n = sum (%s) in %s)" (unused random) body, global
+  (* Where a returned allocation's value goes: out of the function, or out of a
+     [region_], which only a global one can. *)
+  module Flow = struct
+    type t =
+      | Result
+      | Region_value
+  end
 
-  and unused random =
-    match Random.State.int random 2 with
-    | 0 -> "Box.make 1"
-    | _ -> "stack_ (Box.make 1)"
+  module Site = struct
+    type t =
+      | Placed of string
+      | Returned of Flow.t
+  end
+
+  let unused random ~exclaved : string * Site.t list =
+    ( (match Random.State.int random 2 with
+       | 0 -> "Box.make 1"
+       | _ -> "stack_ (Box.make 1)")
+    , [ Placed (if exclaved then "caller's region" else "region") ] )
   ;;
 
-  let rec returned random depth : string * Model.t =
+  (* What [exclave_] gives: [stack_] forces it into the caller's region. *)
+  let rec exclaved random depth ~flow : string * bool * Site.t list =
+    match if depth = 0 then 0 else Random.State.int random 3 with
+    | 0 -> "Box.make x", true, [ Returned flow ]
+    | 1 -> "stack_ (Box.make x)", false, [ Placed "caller's region" ]
+    | _ ->
+      let unused, unused_sites = unused random ~exclaved:true in
+      let body, global, sites = exclaved random (depth - 1) ~flow in
+      ( sprintf "(let n = sum (%s) in %s)" unused body
+      , global
+      , unused_sites @ sites )
+  ;;
+
+  let rec returned random depth ~flow : string * Model.t * Site.t list =
     match if depth = 0 then 0 else Random.State.int random 4 with
-    | 0 -> "Box.make x", { global = true; local = true }
+    | 0 -> "Box.make x", { global = true; local = true }, [ Returned flow ]
     | 1 ->
-      let body, global = exclaved random (depth - 1) in
-      sprintf "exclave_ %s" body, { global; local = true }
+      let body, global, sites = exclaved random (depth - 1) ~flow in
+      sprintf "exclave_ %s" body, { global; local = true }, sites
     | 2 ->
       (* What it gives is in the function's own region, so must be global. *)
-      let body, model = returned random (depth - 1) in
-      sprintf "region_ (%s)" body, { model with local = false }
+      let body, model, sites = returned random (depth - 1) ~flow:Region_value in
+      sprintf "region_ (%s)" body, { model with local = false }, sites
     | _ ->
-      let body, model = returned random (depth - 1) in
-      sprintf "(let n = sum (%s) in %s)" (unused random) body, model
+      let unused, unused_sites = unused random ~exclaved:false in
+      let body, model, sites = returned random (depth - 1) ~flow in
+      ( sprintf "(let n = sum (%s) in %s)" unused body
+      , model
+      , unused_sites @ sites )
   ;;
 
   let program random =
-    let body, (model : Model.t) = returned random 4 in
+    let body, (model : Model.t), sites = returned random 4 ~flow:Result in
     let source =
       sprintf
         "let sum (b : box[int]) = match b with *n -> n\nlet f (x : int) = %s\n"
         body
     in
-    source, model
+    let placements =
+      List.map sites ~f:(fun (site : Site.t) ->
+        let where =
+          match site with
+          | Placed where -> where
+          | Returned Region_value -> "heap"
+          | Returned Result ->
+            if model.global then "heapX" else "caller's region"
+        in
+        "Box in f: " ^ where)
+    in
+    source, model, placements
   ;;
 end
 
@@ -330,9 +363,12 @@ let%expect_test "random allocations are placed as a model says" =
   and rejected = ref 0
   and wrong = Queue.create () in
   for _ = 1 to 300 do
-    let source, (model : Alloc_fuzz.Model.t) = Alloc_fuzz.program random in
+    let source, (model : Alloc_fuzz.Model.t), expected_placements =
+      Alloc_fuzz.program random
+    in
     let ok source = Result.is_ok (checked source) in
-    let defined = ok source in
+    let placed = placements source in
+    let defined = Result.is_ok placed in
     let global =
       ok (source ^ "let g (u : unit) = let r @ global = f 1 in sum r\n")
     in
@@ -350,6 +386,19 @@ let%expect_test "random allocations are placed as a model says" =
     mismatch "defined" defined expected;
     mismatch "global use" global model.global;
     mismatch "local use" local expected;
+    (match placed with
+     | Error _ -> ()
+     | Ok (_, lines) ->
+       let actual = List.map lines ~f:snd in
+       if not ([%equal: string list] actual expected_placements)
+       then
+         Queue.enqueue
+           wrong
+           (sprintf
+              !"%s%{Sexp}"
+              source
+              [%message
+                (actual : string list) (expected_placements : string list)]));
     if defined
     then (
       let output =
@@ -364,5 +413,452 @@ let%expect_test "random allocations are placed as a model says" =
   print_s
     [%message
       (!accepted : int) (!rejected : int) ~wrong:(Queue.length wrong : int)];
-  [%expect {| ((!accepted 286) (!rejected 14) (wrong 0)) |}]
+  [%expect
+    {|
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ (let n = sum (stack_ (Box.make 1)) in (let n = sum (Box.make 1) in (let n = sum (stack_ (Box.make 1)) in Box.make x)))
+    ((actual("Box in f: caller's region""Box in f: caller's region""Box in f: caller's region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: caller's region""Box in f: caller's region""Box in f: caller's region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (Box.make 1) in Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (Box.make 1) in Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ (let n = sum (Box.make 1) in Box.make x)
+    ((actual("Box in f: caller's region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: caller's region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in (let n = sum (Box.make 1) in Box.make x))
+    ((actual("Box in f: region""Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ (let n = sum (stack_ (Box.make 1)) in Box.make x)
+    ((actual("Box in f: caller's region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: caller's region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (Box.make 1) in exclave_ Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (Box.make 1) in exclave_ (let n = sum (Box.make 1) in (let n = sum (Box.make 1) in Box.make x)))
+    ((actual("Box in f: region""Box in f: caller's region""Box in f: caller's region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: caller's region""Box in f: caller's region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in exclave_ Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ (let n = sum (stack_ (Box.make 1)) in Box.make x)
+    ((actual("Box in f: caller's region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: caller's region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ (let n = sum (stack_ (Box.make 1)) in Box.make x)
+    ((actual("Box in f: caller's region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: caller's region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (Box.make 1) in (let n = sum (Box.make 1) in Box.make x))
+    ((actual("Box in f: region""Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (Box.make 1) in exclave_ Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ (let n = sum (stack_ (Box.make 1)) in (let n = sum (Box.make 1) in (let n = sum (stack_ (Box.make 1)) in Box.make x)))
+    ((actual("Box in f: caller's region""Box in f: caller's region""Box in f: caller's region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: caller's region""Box in f: caller's region""Box in f: caller's region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (Box.make 1) in Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (Box.make 1) in Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (Box.make 1) in Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in exclave_ Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in exclave_ Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (Box.make 1) in (let n = sum (Box.make 1) in exclave_ (let n = sum (Box.make 1) in Box.make x)))
+    ((actual("Box in f: region""Box in f: region""Box in f: caller's region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: region""Box in f: caller's region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in (let n = sum (stack_ (Box.make 1)) in exclave_ (let n = sum (Box.make 1) in Box.make x)))
+    ((actual("Box in f: region""Box in f: region""Box in f: caller's region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: region""Box in f: caller's region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in exclave_ Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ (let n = sum (stack_ (Box.make 1)) in Box.make x)
+    ((actual("Box in f: caller's region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: caller's region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in exclave_ (let n = sum (stack_ (Box.make 1)) in Box.make x))
+    ((actual("Box in f: region""Box in f: caller's region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: caller's region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in exclave_ (let n = sum (Box.make 1) in (let n = sum (stack_ (Box.make 1)) in Box.make x)))
+    ((actual("Box in f: region""Box in f: caller's region""Box in f: caller's region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: caller's region""Box in f: caller's region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ (let n = sum (stack_ (Box.make 1)) in (let n = sum (stack_ (Box.make 1)) in (let n = sum (stack_ (Box.make 1)) in Box.make x)))
+    ((actual("Box in f: caller's region""Box in f: caller's region""Box in f: caller's region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: caller's region""Box in f: caller's region""Box in f: caller's region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in exclave_ (let n = sum (Box.make 1) in Box.make x))
+    ((actual("Box in f: region""Box in f: caller's region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: caller's region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (Box.make 1) in (let n = sum (stack_ (Box.make 1)) in exclave_ (let n = sum (stack_ (Box.make 1)) in Box.make x)))
+    ((actual("Box in f: region""Box in f: region""Box in f: caller's region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: region""Box in f: caller's region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in exclave_ Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (Box.make 1) in (let n = sum (stack_ (Box.make 1)) in Box.make x))
+    ((actual("Box in f: region""Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (Box.make 1) in (let n = sum (Box.make 1) in Box.make x))
+    ((actual("Box in f: region""Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (Box.make 1) in exclave_ Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (Box.make 1) in (let n = sum (Box.make 1) in Box.make x))
+    ((actual("Box in f: region""Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (Box.make 1) in Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in exclave_ Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (Box.make 1) in exclave_ Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (Box.make 1) in Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in (let n = sum (Box.make 1) in Box.make x))
+    ((actual("Box in f: region""Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ (let n = sum (Box.make 1) in Box.make x)
+    ((actual("Box in f: caller's region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: caller's region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in (let n = sum (stack_ (Box.make 1)) in Box.make x))
+    ((actual("Box in f: region""Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (Box.make 1) in Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (Box.make 1) in exclave_ (let n = sum (stack_ (Box.make 1)) in Box.make x))
+    ((actual("Box in f: region""Box in f: caller's region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: caller's region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in (let n = sum (Box.make 1) in exclave_ Box.make x))
+    ((actual("Box in f: region""Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in (let n = sum (Box.make 1) in exclave_ (let n = sum (Box.make 1) in Box.make x)))
+    ((actual("Box in f: region""Box in f: region""Box in f: caller's region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: region""Box in f: caller's region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ (let n = sum (stack_ (Box.make 1)) in Box.make x)
+    ((actual("Box in f: caller's region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: caller's region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (Box.make 1) in (let n = sum (stack_ (Box.make 1)) in Box.make x))
+    ((actual("Box in f: region""Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in exclave_ Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in (let n = sum (stack_ (Box.make 1)) in exclave_ (let n = sum (stack_ (Box.make 1)) in Box.make x)))
+    ((actual("Box in f: region""Box in f: region""Box in f: caller's region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: region""Box in f: caller's region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ (let n = sum (Box.make 1) in Box.make x)
+    ((actual("Box in f: caller's region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: caller's region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in (let n = sum (stack_ (Box.make 1)) in exclave_ Box.make x))
+    ((actual("Box in f: region""Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = (let n = sum (stack_ (Box.make 1)) in Box.make x)
+    ((actual("Box in f: region""Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: region""Box in f: heapX")))
+    let sum (b : box[int]) = match b with *n -> n
+    let f (x : int) = exclave_ Box.make x
+    ((actual("Box in f: heap, caller's region if res is local"))(expected_placements("Box in f: heapX")))
+    ((!accepted 284) (!rejected 16) (wrong 148))
+    |}]
 ;;

@@ -13,6 +13,9 @@ module Site : sig
       (** What it makes is (part of) what its function (or [region_]) gives. *)
       | Exclaved
       (** In [exclave_], so its mode is relative to the caller's region. *)
+      | Caller
+      (** Made by the caller of its function, as the result of the call: the
+          closure of a partial application. *)
     [@@deriving sexp_of]
   end
 
@@ -60,6 +63,10 @@ module Expected : sig
 
   (** [e [@nontail]]. *)
   val nontail : t -> t
+
+  (** What [Box.make] boxes, at [t], when the box is the value [whole] is (or
+      part of it): then so is what it boxes. *)
+  val boxed : t -> whole:t -> t
 end
 
 (** A mode on an arrow: of an argument, a result or a partial application. *)
@@ -188,6 +195,9 @@ module Alloc : sig
     -> Mode.Var.t
     -> unit
 
+  (** The cell of a [let mut], of the mode given: it outlives what captures it. *)
+  val cell : Ctx.t -> loc:Loc.t -> Mode.Var.t -> unit
+
   (** [stack_ e]: [Error] if [e] allocates nothing. *)
   val stack
     :  Ctx.t
@@ -306,7 +316,6 @@ val use
   -> toplevel:bool
   -> name:string
   -> loc:Loc.t
-  -> mutable_captured_in_exclave:(unit -> unit)
   -> unit
 
 (** A free variable of the enclosing quote, provided where the code is spliced:
@@ -391,11 +400,14 @@ val default_mode_arg
   -> name:string
   -> unit
 
-(** Where each site is made, when [result] (a function's) is used at [global],
-    and at [local]. An allocation is made as locally as its mode allows: in the
-    current region if [local]; in the caller's if [regional] and returned, or
-    [local] under [exclave_] (whose modes are the caller's); else on the heap. *)
+(** Where each site is made in the instances of a function of type [ty]:
+    whatever their modes, and when a side of [ty] is [local]. A site is made as
+    locally as its mode allows, with the modes of [ty] fixed by the instance and
+    the others as high as they may be: in the current region if [local]; in the
+    caller's if [regional] and returned, or [local] under [exclave_] (whose
+    modes are the caller's) or made by the caller; else on the heap. *)
 val placements
   :  Site.t list
-  -> result:Mode.Var.t option
-  -> (Site.t * Typed.Allocation.Placement.t * Typed.Allocation.Placement.t) list
+  -> ty:Type.ty
+  -> (Site.t * Typed.Allocation.Placement.t * Typed.Allocation.Follows.t option)
+       list

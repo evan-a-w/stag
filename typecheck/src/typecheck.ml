@@ -6,7 +6,7 @@ module Generated = struct
   type t =
     { splice : Loc.t
     ; declaration : string
-    ; generated : Syntax.Toplevel.t
+    ; generated : Syntax.Toplevel.t [@sexp.opaque]
     }
   [@@deriving sexp_of]
 
@@ -93,8 +93,7 @@ module Toplevel = struct
           ; held : Binding.t option (** Of the values a mutable one holds. *)
           ; mutable body : Typed.Expr.t option
           ; mutable recursive : bool
-          ; sites : Mode_rules.Site.t Queue.t (** Its allocation sites. *)
-          ; result : Mode.Var.t option (** A function's. *)
+          ; sites : (Allocation_sites.t[@sexp.opaque])
           }
       | Done of
           { entry : Env.Entry.t
@@ -382,7 +381,7 @@ module Scope = struct
     ; params : Type.ty list
     (** The types of the parameters of the functions being checked, whose modes
         are decided by each use of their function. *)
-    ; allocations : Mode_rules.Site.t Queue.t option
+    ; allocations : Allocation_sites.t option
     (** Of the toplevel being checked: its allocation sites, as its run time
         code is checked. *)
     }
@@ -521,9 +520,12 @@ module Scope = struct
              |> Option.value ~default:false
            in
            fun (site : Mode_rules.Site.t) ->
-             Queue.enqueue
+             Allocation_sites.add
                sites
-               (if exclaved then { site with position = Exclaved } else site)
+               (match site.position with
+                | (Here | Returned) when exclaved ->
+                  { site with position = Exclaved }
+                | Here | Returned | Exclaved | Caller -> site)
          | _ -> ignore)
   ;;
 
@@ -1503,10 +1505,6 @@ let use_entry
        | Local _ -> false)
     ~name
     ~loc
-    ~mutable_captured_in_exclave:(fun () ->
-      Scope.report
-        scope
-        (Typecheck_error.create ~loc (Mutable_captured_in_exclave name)))
 ;;
 
 let field_modality (scope : Scope.t) field ~record =
@@ -1847,17 +1845,11 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
   (* Before generalizing, while its result may still be constrained. *)
   List.iter members ~f:(fun member ->
     match member.state with
-    | In_progress { sites; result; _ } ->
-      Mode_rules.placements (Queue.to_list sites) ~result
-      |> List.iter ~f:(fun ((site : Mode_rules.Site.t), if_global, if_local) ->
-        Queue.enqueue
-          program.allocations
-          { Typed.Allocation.toplevel = member.ident
-          ; loc = site.loc
-          ; kind = site.kind
-          ; if_global
-          ; if_local
-          })
+    | In_progress { sites; ty; _ } ->
+      Allocation_sites.place sites ~since:0 ~ty ~local:None;
+      List.iter
+        (Allocation_sites.placed sites)
+        ~f:(Queue.enqueue program.allocations)
     | Unchecked | Done _ -> ());
   if generalize
   then
@@ -2195,7 +2187,7 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
   let unfinished = Stack.length program.unfinished in
   let reported = program.reported in
   let rank = 1 in
-  let sites = Queue.create () in
+  let sites = Allocation_sites.create toplevel.ident in
   let scope =
     { Scope.program
     ; level = 0
@@ -2255,7 +2247,6 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
          ; body = None
          ; recursive = false
          ; sites
-         ; result = Option.some_if (Toplevel.is_function toplevel) fn.res_mode
          };
     let body =
       match
@@ -2613,6 +2604,7 @@ and expr_type
       | Some _ | None -> true
     in
     let result_matches = ref true in
+    let boxes = ref false in
     let f, x =
       Mode_rules.apply
         modes
@@ -2625,20 +2617,34 @@ and expr_type
         ~arg_ty:a
         ~res_ty:b
         ~callee:(fun at ->
-          check_expr
-            t
-            scope
-            ~at
-            ~expr:f
-            ~ty:
-              (TArrow
-                 ( a
-                 , b
-                 , { arg = Var arg_mode; res = Var res_mode; curry = Var curry }
-                 )))
-        ~arg:(fun at ->
+          let (f : Typed.Expr.t) =
+            check_expr
+              t
+              scope
+              ~at
+              ~expr:f
+              ~ty:
+                (TArrow
+                   ( a
+                   , b
+                   , { arg = Var arg_mode
+                     ; res = Var res_mode
+                     ; curry = Var curry
+                     } ))
+          in
+          (boxes
+           := match f.desc with
+              | Var (Intrinsic Box_make) -> true
+              | Var (Bound (Toplevel ident) | Persistent (Toplevel ident)) ->
+                String.equal ident.name (Prelude_path.canonical "Box.make")
+              | _ -> false);
+          f)
+        ~arg:(fun x_at ->
           result_matches := result_matches_expected ();
-          check_expr t scope ~at ~expr:x ~ty:a)
+          let x_at =
+            if !boxes then Mode_rules.Expected.boxed x_at ~whole:at else x_at
+          in
+          check_expr t scope ~at:x_at ~expr:x ~ty:a)
     in
     let allocates kind =
       Mode_rules.Alloc.pointer modes at ~loc ~kind res_mode
@@ -2660,6 +2666,12 @@ and expr_type
     let inner = { scope with rank = scope.rank + 1 } in
     let is_function = not (List.is_empty args) in
     let name = Source.Binder.name binder in
+    let since =
+      ref
+        (if is_function
+         then None
+         else Option.map scope.allocations ~f:Allocation_sites.mark)
+    in
     let (fn, ident, body, closure), mode =
       Mode_rules.evaluate
         modes
@@ -2706,6 +2718,7 @@ and expr_type
                inner_at
                ~loc
                (fun closure ->
+                  since := Option.map scope.allocations ~f:Allocation_sites.mark;
                   let body =
                     defining (Mode_rules.Binding.closure closure) ~f:(fun () ->
                       check_body t inner ~closure ~fn ~loc)
@@ -2715,6 +2728,10 @@ and expr_type
     let { Function_type.args = arg_types; annots; result_annot; ty; _ } = fn in
     let args = List.map arg_types ~f:fst in
     let generalized = generalizes scope mode ~is_function ~loc in
+    (match scope.allocations, !since with
+     | Some sites, Some since when generalized ->
+       Allocation_sites.place sites ~since ~ty:fn.ty ~local:(Some (name, loc))
+     | _ -> ());
     if generalized
     then Scheme.generalize t ~rank:scope.rank [ ty ]
     else Unify.lower_ty ~rank:scope.rank ty;
@@ -2793,6 +2810,7 @@ and expr_type
         ~name
         ~loc
     in
+    Mode_rules.Alloc.cell modes ~loc (mode :> Mode.Var.t);
     let in_ =
       Env.with_bindings
         scope.locals

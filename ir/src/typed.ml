@@ -415,9 +415,11 @@ module Allocation = struct
   module Kind = struct
     type t =
       | Closure
+      | Partial_application
       | Code
       | Pointer
       | Box
+      | Cell
     [@@deriving sexp_of, compare, equal]
   end
 
@@ -429,12 +431,61 @@ module Allocation = struct
     [@@deriving sexp_of, compare, equal]
   end
 
+  module Side = struct
+    module Step = struct
+      type t =
+        | Arg
+        | Res
+        | Component of int
+        | Type_arg of int
+      [@@deriving sexp_of, compare, equal]
+    end
+
+    type t =
+      { steps : Step.t list
+      ; side : [ `Arg | `Res ]
+      }
+    [@@deriving sexp_of, compare, equal]
+
+    let to_string { steps; side } =
+      let step : Step.t -> string = function
+        | Arg -> "arg"
+        | Res -> "res"
+        | Component i -> sprintf "component %d" (i + 1)
+        | Type_arg i -> sprintf "type arg %d" (i + 1)
+      in
+      String.concat
+        ~sep:"."
+        (List.map steps ~f:step
+         @ [ (match side with
+              | `Arg -> "arg"
+              | `Res -> "res")
+           ])
+    ;;
+  end
+
+  module Owner = struct
+    type t =
+      { toplevel : Ident.t
+      ; local : (string * Loc.t) option
+      }
+    [@@deriving sexp_of]
+  end
+
+  module Follows = struct
+    type t =
+      { side : Side.t
+      ; if_local : Placement.t
+      }
+    [@@deriving sexp_of]
+  end
+
   type t =
-    { toplevel : Ident.t
+    { owner : Owner.t
     ; loc : Loc.t
     ; kind : Kind.t
-    ; if_global : Placement.t
-    ; if_local : Placement.t
+    ; placement : Placement.t
+    ; follows : Follows.t option
     }
   [@@deriving sexp_of]
 end
