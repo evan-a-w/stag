@@ -1191,6 +1191,109 @@ end%inline
     |}]
 ;;
 
+let%expect_test "a toplevel under [forget] of its name is printed by its path" =
+  test
+    {|
+let helper = 2
+let e = Stag.Expr.Forget (Ptr.make (Cons (Ptr.make ("helper", Nil)), Stag.Code.erase .< helper >.))
+include%inline .~(value "f" e)
+end%inline
+|};
+  [%expect
+    {|
+    File "a.stag", line 18, characters 0-30:
+    18 | include%inline .~(value "f" e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    --- a.stag corrected ---
+    let helper = 2
+    let e = Stag.Expr.Forget (Ptr.make (Cons (Ptr.make ("helper", Nil)), Stag.Code.erase .< helper >.))
+    include%inline .~(value "f" e)
+      let f = forget helper in A.helper
+    end%inline
+    |}];
+  test
+    {|
+let helper = 2
+let e = Stag.Expr.Forget (Ptr.make (Cons (Ptr.make ("helper", Nil)), Stag.Code.erase .< helper >.))
+include%inline .~(value "f" e)
+  let f = forget helper in A.helper
+end%inline
+let shown = print_int f
+|};
+  [%expect {|
+    --- output ---
+    2
+    (a.stag up to date)
+    |}]
+;;
+
+let%expect_test "a generated annotated variable is the variable's annotation" =
+  let source corrected =
+    {|
+let helper = 2
+let e = Stag.Expr.Annotated (Ptr.make (Stag.Code.erase .< helper >., Stag.Annot.ty (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))))
+include%inline .~(value "g" e)
+|}
+    ^ corrected
+    ^ {|end%inline
+|}
+  in
+  test (source "");
+  [%expect
+    {|
+    File "a.stag", line 18, characters 0-30:
+    18 | include%inline .~(value "g" e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Error: This inline expansion is out of date
+    --- a.stag corrected ---
+    let helper = 2
+    let e = Stag.Expr.Annotated (Ptr.make (Stag.Code.erase .< helper >., Stag.Annot.ty (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))))
+    include%inline .~(value "g" e)
+      let g = (helper : int)
+    end%inline
+    |}];
+  test (source "  let g = (helper : int)\n");
+  [%expect {| (a.stag up to date) |}]
+;;
+
+let%expect_test "a [forget] in an antiquote of a generated struct quote" =
+  test
+    {|
+let helper = Stag.Expr.string "s"
+let hidden = Stag.Expr.Forget (Ptr.make (Cons (Ptr.make ("helper", Nil)), Stag.Code.erase .< helper >.))
+include%inline .~(.< struct
+  let x = .< struct
+    let z = .~(.~hidden)
+  end >.
+end >.)
+end%inline
+|};
+  [%expect
+    {|
+    File "a.stag", lines 18-22, characters 0-7:
+    18 | include%inline .~(.< struct
+    19 |   let x = .< struct
+    20 |     let z = .~(.~hidden)
+    21 |   end >.
+    22 | end >.)
+    Error: This inline expansion is out of date
+    --- a.stag corrected ---
+    let helper = Stag.Expr.string "s"
+    let hidden = Stag.Expr.Forget (Ptr.make (Cons (Ptr.make ("helper", Nil)), Stag.Code.erase .< helper >.))
+    include%inline .~(.< struct
+      let x = .< struct
+        let z = .~(.~hidden)
+      end >.
+    end >.)
+      let x =
+        .< struct
+          let z = .~(forget helper in A.helper)
+        end >.
+    end%inline
+    |}]
+;;
+
 let%expect_test "a module in a generated struct quote is not a module of the \
                  program"
   =

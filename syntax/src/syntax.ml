@@ -474,6 +474,14 @@ module Expr = struct
     | Forget of Name.t list * t
     | Error
 
+  (** [(e : annot)], with an annotation of a plain variable kept as the
+      variable's, so each annotated expression has one representation. *)
+  let annotated (e : t) annot =
+    match e.txt with
+    | Var (path, existing) when Annot.is_none existing -> Var (path, annot)
+    | _ -> Annotated (e, annot)
+  ;;
+
   let sexp_of_t = sexp_of_expr
   let compare = compare_expr
   let equal = equal_expr

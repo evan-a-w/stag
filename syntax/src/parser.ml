@@ -1348,10 +1348,7 @@ and atom t : Expr.t =
       | Colon | At ->
         let annot = annot t in
         close t Rparen ~opener:Lparen ~open_loc:start;
-        (match e.txt with
-         | Var (path, existing) when Annot.is_none existing ->
-           expr_since t start (Var (path, annot))
-         | _ -> expr_since t start (Annotated (e, annot)))
+        expr_since t start (Expr.annotated e annot)
       | _ ->
         close_parens t ~open_loc:start e ~tuple_items:(function
           | Expr.Tuple items -> Some items

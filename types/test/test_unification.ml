@@ -1866,6 +1866,58 @@ let%expect_test "iteration past the first steps visits cycles once and reports \
   [%expect {| (0 ((0 true) (0 false))) |}]
 ;;
 
+let%expect_test "a reopened scheme's presences are bounded by outside ones \
+                 again"
+  =
+  let fresh = Fresh.create () in
+  let outer = pvar fresh ~rank:1 in
+  let p = pvar fresh ~rank:2 in
+  at_most fresh ~presence:outer ~bound:p;
+  let scheme = code (ext "x" int REmpty ~presence:p) in
+  Scheme.generalize fresh ~rank:1 [ scheme ];
+  print_presences [ p; outer ];
+  print_s
+    [%sexp
+      (Scheme.reopen fresh ~rank:2 [ scheme ]
+       : (unit, Unification_error.t) Result.t)];
+  (* What [outer] becomes flows into the reopened [p]. *)
+  at_most fresh ~presence:Present ~bound:outer;
+  print_presences [ p; outer ];
+  [%expect
+    {|
+    (Ok ())
+    <int>{x?'a : immut int} * <int>{x?'_b : immut int} where '_b <= 'a
+    (Ok ())
+    (Ok ())
+    <int>{x : immut int} * <int>{x : immut int}
+    |}]
+;;
+
+let%expect_test "reopening errs if a kept bound no longer holds" =
+  let fresh = Fresh.create () in
+  let outer = rvar fresh ~rank:1 in
+  let g = row [ "x", bool ] ~tail:(rvar fresh ~rank:2) in
+  constrain fresh ~row:outer ~bound:g;
+  let scheme = code g in
+  Scheme.generalize fresh ~rank:1 [ scheme ];
+  unify_row
+    fresh
+    ~row1:outer
+    ~row2:(row [ "x", int ] ~tail:(rvar fresh ~rank:1));
+  print_s
+    [%sexp
+      (Scheme.reopen fresh ~rank:2 [ scheme ]
+       : (unit, Unification_error.t) Result.t)];
+  [%expect
+    {|
+    (Ok ())
+    (Error
+     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    (Error
+     (Type_mismatch (TCon int ()) (TCon bool ()) (Base_types_not_equal int bool)))
+    |}]
+;;
+
 let%expect_test "a reopened scheme is refined in place" =
   let fresh = Fresh.create () in
   let a = tvar fresh ~rank:2 in
@@ -1879,7 +1931,10 @@ let%expect_test "a reopened scheme is refined in place" =
   Scheme.generalize fresh ~rank:1 [ scheme ];
   show ();
   let before = Scheme.instantiate fresh ~rank:2 scheme in
-  Scheme.reopen fresh ~rank:2 [ scheme ];
+  print_s
+    [%sexp
+      (Scheme.reopen fresh ~rank:2 [ scheme ]
+       : (unit, Unification_error.t) Result.t)];
   (* The bound of [outer] the scheme kept holds again. *)
   show ();
   unify_ty fresh ~ty1:a ~ty2:int;
@@ -1892,6 +1947,7 @@ let%expect_test "a reopened scheme is refined in place" =
     (Ok ())
     ('_a * '_a * <int>{..'_b}) * <int>{..'_c} where ..'_c <= {..'_b}
     ('a * 'a * <int>{..'b}) * <int>{..'_c} where ..'_c <= {..'b}
+    (Ok ())
     ('_a * '_a * <int>{..'_b}) * <int>{..'_c} where ..'_c <= {..'_b}, ..'_c <= {..'_d}
     (Ok ())
     (int * int * <int>{..'a}) * <int>{..'_b} where ..'_b <= {..'a}, ..'_b <= {..'_c}

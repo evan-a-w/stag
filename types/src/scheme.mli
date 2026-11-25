@@ -30,5 +30,10 @@ val generalize : Fresh.t -> rank:Type.rank -> Type.ty list -> unit
     generalized with: the scheme is refined by unifying its own variables, and
     whatever shares them (such as the code it is the type of) sees it, before it
     is generalized anew. Instances made before are unaffected. [tys] must have
-    every type of the scheme, as for [generalize]. *)
-val reopen : Fresh.t -> rank:Type.rank -> Type.ty list -> unit
+    every type of the scheme, as for [generalize]. Errs if a kept constraint no
+    longer holds, as a variable outside the scheme has changed since. *)
+val reopen
+  :  Fresh.t
+  -> rank:Type.rank
+  -> Type.ty list
+  -> (unit, Unification_error.t) Result.t

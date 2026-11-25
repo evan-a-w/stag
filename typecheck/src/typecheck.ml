@@ -216,7 +216,7 @@ end
    anew, so the code, whose types share the variables, is refined too. *)
 module Awaiting = struct
   type t =
-    { schemes : Type.ty list
+    { schemes : (string * Type.ty) list (** Each member's name and type. *)
     ; mutable uses : Quoted_use.t list
     }
 
@@ -2100,11 +2100,19 @@ let refine t (program : Program_env.t) (awaiting : Awaiting.t) =
     then raise_s [%message "refine: a use not awaited" (use : Quoted_use.t)]);
   if not (List.is_empty finished)
   then (
-    Scheme.reopen
-      t
-      ~rank:Scc_frame.toplevel_rank
-      (awaiting.schemes
-       @ List.map awaiting.uses ~f:(fun (use : Quoted_use.t) -> use.ty));
+    let schemes = List.map awaiting.schemes ~f:snd in
+    (match
+       Scheme.reopen
+         t
+         ~rank:Scc_frame.toplevel_rank
+         (schemes
+          @ List.map awaiting.uses ~f:(fun (use : Quoted_use.t) -> use.ty))
+     with
+     | Ok () -> ()
+     | Error error ->
+       (match finished with
+        | use :: _ -> Program_env.report_use program use error
+        | [] -> ()));
     let added = ref [] in
     List.iter finished ~f:(fun use ->
       let ty =
@@ -2120,7 +2128,9 @@ let refine t (program : Program_env.t) (awaiting : Awaiting.t) =
     Scheme.generalize
       t
       ~rank:0
-      (awaiting.schemes @ List.map uses ~f:(fun (use : Quoted_use.t) -> use.ty));
+      (schemes @ List.map uses ~f:(fun (use : Quoted_use.t) -> use.ty));
+    List.iter awaiting.schemes ~f:(fun (name, ty) ->
+      Type.iter_held ty ~f:(Mode_rules.default_held ~name));
     awaiting.uses <- uses;
     List.iter uses ~f:(fun use -> await awaiting (awaited use)))
 ;;
@@ -2268,7 +2278,13 @@ let finish_scc
       match others with
       | [] -> None
       | _ :: _ ->
-        let awaiting = { Awaiting.schemes = tys; uses = others } in
+        let awaiting =
+          { Awaiting.schemes =
+              List.map2_exn members tys ~f:(fun (member : Toplevel.t) ty ->
+                member.ident.name, ty)
+          ; uses = others
+          }
+        in
         List.iter others ~f:(fun use ->
           await awaiting (Program_env.toplevel program use.awaited.name));
         Some awaiting)
