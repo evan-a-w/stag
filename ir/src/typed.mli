@@ -274,9 +274,9 @@ module Expr : sig
   end
 
   (** The one enumeration of an expression's children, which every walker over
-      expressions shares. The children are what the expression evaluates, in
-      the order it does: not a [Toplevel_splice]'s [code], which ran while
-      checking, so is no part of what it means. *)
+      expressions shares. The children are what the expression evaluates, in the
+      order it does: not a [Toplevel_splice]'s [code], which ran while checking,
+      so is no part of what it means. *)
   module Traverse (M : Local_monad.S) : sig
     (** [t] with [f] applied to each of its children, in order. *)
     val map_children : t -> f:(Child.t -> t -> t M.t) @ local -> t M.t
