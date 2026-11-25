@@ -511,6 +511,17 @@ Each step is a branch stacked on the previous one.
   inferred, an immutable `box['a]` (covariant, read as a part) that `list`
   is built of, so `list` is covariant. A mode variable written once and
   related to nothing prints as `_`, which reads back as a fresh variable.
+- **J. Allocation locality and regions**: an allocation returned by its
+  function has the function's result locality, so `let mk x = Box.make x`
+  is `'a -> box['a] @ 'm`, made on the heap or in the caller's region as
+  each use of the result chooses (see
+  [semantics.md](semantics.md#locality)); the placement of each allocation
+  per result locality is recorded for the monomorphiser
+  (`Typed.Program.allocations`). `region_ e` opens a region of its own,
+  freed when it ends (its value is checked as a function's result, and
+  `exclave_` ends it early). Chosen over a `with_region (fun () -> e)`
+  function: a keyword needs no closure, and reads like `stack_` and
+  `exclave_`.
 
 ## Later
 

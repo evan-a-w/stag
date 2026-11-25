@@ -272,6 +272,29 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   `regional` inside it).
 - `exclave_ e` ends the current region early and evaluates `e` in the caller's,
   so a function can return a local value (allocate in the caller's region).
+- `region_ e` evaluates `e` in a region of its own, freed when it ends: what
+  `e` allocates locally is gone after it, so its value must not be local to
+  it (as a function's result: at most `regional` inside, local outside),
+  what is local outside it outlives it (`regional` inside), and what is
+  assigned to a `let mut` outside it must not be local to it. A call at its
+  end is not a tail call (the region ends after the call returns), but
+  `exclave_` may end it early, giving a value in the region around it.
+  Allocations it gives are made in the region around it.
+- Allocation is polymorphic in locality: an allocation whose block is
+  returned (the function's value or part of it, by-value records, tuples and
+  constructors included) has the function's result locality, so a scheme
+  `int -> box[int] @ 'm` is used at `global` (allocated on the heap) or at
+  `local` (allocated in the caller's region, as by `exclave_`) as its caller
+  chooses, the same function serving "GC or arena". Only returned
+  allocations are: one bound and then returned (`let b = Box.make x in b`)
+  is made before the function knows its caller's choice, so on the heap
+  unless `local` (then the function can't return it). A recursive function
+  builds a structure in its caller's region only under `exclave_` (the
+  recursive call's value is otherwise in the current call's region, which
+  ends as it returns). Where each allocation is made is recorded per
+  toplevel (`Typed.Program.allocations`): on the heap, in the current
+  region, or in the caller's (or, at a `region_`'s end, the enclosing)
+  region, for each of the function's result used at `global` and at `local`.
 - `&x` of a variable puts `x` on the data stack, and is a `local` `ptr`.
 - `local` values cannot escape their region: not returned (except via
   `exclave_`), not stored into `global` blocks (including GC objects), not
@@ -329,7 +352,7 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   mode is checked again where the code it is substituted into is finally
   spliced.
 - The interpreter has no regions: `stack_` allocates on its heap and
-  `exclave_ e` is `e`. The rules are checked all the same.
+  `exclave_ e` and `region_ e` are `e`. The rules are checked all the same.
 
 A local value of fixed size that reaches neither an `exclave_` nor a caller
 (it dies with its own region) may be put on the machine stack instead (an
@@ -408,6 +431,18 @@ Others (the stage axis always, locality of a parameter that is only read) are er
 which is always sound since the body was checked for every mode within its
 bounds. A function is compiled once per distinct assignment of its relevant
 variables, so instances differing only in irrelevant modes share code.
+
+Allocation locality is the main code-relevant mode. A function with a
+returned allocation (`Typed.Allocation` with `if_global` and `if_local`
+differing) is compiled twice: an instance whose result is `global`, which
+allocates there on the heap, and one whose result is `local`, which
+allocates there in its caller's region (as `exclave_` would). A `regional`
+result instantiates the `global` copy. Functions all of whose allocations
+are placed the same either way (none returned, or all forced by `stack_`
+or a captured local) are compiled once. Callers pick the instance from
+their use of the result, transitively: a caller that is itself
+polymorphic in its result passes its own choice on. Let-bound polymorphic
+functions are instantiated the same way.
 
 A scheme only copies the mode variables it keeps, not the internal ones of
 the body (such as an allocation site's locality). So the monomorphiser keeps

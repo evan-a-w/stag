@@ -500,6 +500,38 @@ let f x = let p = stack_ (Ptr.make x) in g p [@nontail]
 let seven = f 7                     (* val seven : int = 7 *)
 ```
 
+### Where allocations go, and regions
+
+An allocation a function returns is made where its caller wants it: on the
+heap if the result is used `global`ly, in the caller's region if `local`ly. The
+same function serves both, so code can be "GC or arena" by how it is used.
+
+```stag modes
+let mk (x : int) = Box.make x
+(* val mk : int @ _ -> box[int] @ 'm0 with gc <= 'm0 *)
+let unbox (b : box[int]) = match b with *n -> n
+let kept : box[int] = mk 1          (* on the heap *)
+let temp (u : unit) = let b @ local = mk 2 in unbox b [@nontail]
+(* in temp's region *)
+```
+
+`region_ e` evaluates `e` in a region of its own, freed when it ends, like a
+function body: nothing local to it can be its value.
+
+```stag
+let mk (x : int) = Box.make x
+let unbox (b : box[int]) = match b with *n -> n
+let total = region_ (let a @ local = mk 1 in let b @ local = mk 2 in Int.add (unbox a) (unbox b))
+(* val total : int = 3 *)
+```
+
+```stag-error
+let mk (x : int) = Box.make x
+let leaks (u : unit) = region_ (let b @ local = mk 1 in b)
+(* Error: but must be at most regional, because the [region_] returns it, ending its region (return it with [exclave_] instead) *)
+```
+
+
 ### Annotations
 
 `(e @ m)` checks that `e` is at most `m`. On a binding, `let x @ m = e` and a
