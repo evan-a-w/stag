@@ -382,8 +382,10 @@ substitution where the code is spliced can replace it. One whose checking is
 underway is referred to by symbol too, and doesn't join its component. In its
 own code, the use is a recursive one, of its type (so `let gen n = forget n in
 .< gen n >.`, whose code type would contain itself, is an error). Elsewhere,
-the use is of a type of its own, unified with the toplevel's once it is
-known, an error being reported at the use:
+the use is of a type of its own, which the toplevel's is related to by
+variance once it is known, as it is at a use of a finished toplevel (so
+whether the toplevel was finished first changes nothing), an error being
+reported at the use:
 
 - If the quote's code is in the toplevel's component (it also uses the
   toplevel directly), the use is a recursive one, unified before the

@@ -358,6 +358,13 @@ let unification_message (error : Unification_error.t) ~show_type =
         expected
         reason
     | Occurs_check_failed var ->
+      (* Named as the variable of the scheme it would be in, not as weak. *)
+      let var : Type.arg =
+        match var with
+        | ATy (TVar var) -> ATy (TVar { var with state = Generic })
+        | ARow (RVar var) -> ARow (RVar { var with state = Generic })
+        | ATy _ | ARow _ | AMode _ -> var
+      in
       sprintf "The type variable %s occurs inside its own definition" (arg var)
     | Assigned_in_record (name, assigned) ->
       sprintf

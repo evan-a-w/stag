@@ -303,8 +303,9 @@ let poison ty =
 
 (* [lower <= upper] between type variables not bound yet ([sub_ty]): the two are
    to have the same structure, with their modes related by variance, once either
-   is bound. Kept on both by a watcher, which then relates them as [sub_ty]
-   would have, or makes them equal if neither is bound when one is generalized. *)
+   is bound. Kept on both, by a watcher which settles them once its variable is
+   bound to a structure, relating each as [sub_ty] would have, or makes all its
+   variable's class equal if none is bound when one is generalized. *)
 module Sub_edge = struct
   type t =
     { lower : Type.ty
@@ -320,16 +321,46 @@ module Sub_edge = struct
      [members] may also hold ones bound since. *)
   module Class = struct
     type t =
-      { members : var list
-      ; size : int
+      { mutable members : var list
+      ; uppers : Int.Hash_set.t Int.Table.t
+      ; mutable size : int
+      }
+
+    let create var =
+      { members = [ var ]; uppers = Int.Table.create (); size = 1 }
+    ;;
+
+    (* Whether [lower <= upper] is new, recording it if so. *)
+    let add_pair t ~lower ~upper =
+      let uppers =
+        Hashtbl.find_or_add t.uppers lower ~default:Int.Hash_set.create
+      in
+      Hash_set.strict_add uppers upper |> Hash_set.Ok_or_duplicate.is_ok
+    ;;
+
+    (* [small]'s members added to [large]'s. *)
+    let absorb large ~small =
+      large.members <- List.rev_append small.members large.members;
+      Hashtbl.iteri small.uppers ~f:(fun ~key:lower ~data:uppers ->
+        Hash_set.iter uppers ~f:(fun upper ->
+          ignore (add_pair large ~lower ~upper : bool)));
+      large.size <- large.size + small.size
+    ;;
+  end
+
+  (* The edges of the variables bound to one another, settled once one of them
+     is bound to a structure. *)
+  module Edges = struct
+    type t =
+      { mutable edges : edge list
+      ; mutable count : int
       }
   end
 
   module State = struct
     type t =
-      { mutable edges : edge list
-      ; uppers : Int.Hash_set.t
-      ; class_ : Class.t Union_find.t
+      { class_ : Class.t Union_find.t
+      ; edges : Edges.t Union_find.t
       ; mutable join : bool
       }
   end
@@ -355,17 +386,47 @@ module Sub_edge = struct
   let union (state : State.t) (other : State.t) =
     if not (Union_find.same_class state.class_ other.class_)
     then (
-      let (small : Class.t), (large : Class.t) =
-        let a = Union_find.get state.class_ in
-        let b = Union_find.get other.class_ in
-        if a.size <= b.size then a, b else b, a
-      in
+      let a = Union_find.get state.class_ in
+      let b = Union_find.get other.class_ in
+      let small, large = if a.size <= b.size then a, b else b, a in
+      Class.absorb large ~small;
       Union_find.union state.class_ other.class_;
-      Union_find.set
-        state.class_
-        { members = List.rev_append small.members large.members
-        ; size = small.size + large.size
-        })
+      Union_find.set state.class_ large)
+  ;;
+
+  (* [state]'s variable is bound to [other]'s: their edges are one's. *)
+  let merge_edges (state : State.t) (other : State.t) =
+    union state other;
+    if not (Union_find.same_class state.edges other.edges)
+    then (
+      let a = Union_find.get state.edges in
+      let b = Union_find.get other.edges in
+      let (small : Edges.t), (large : Edges.t) =
+        if a.count <= b.count then a, b else b, a
+      in
+      large.edges <- List.rev_append small.edges large.edges;
+      large.count <- large.count + small.count;
+      Union_find.union state.edges other.edges;
+      Union_find.set state.edges large)
+  ;;
+
+  let add (state : State.t) edge =
+    let edges = Union_find.get state.edges in
+    edges.edges <- edge :: edges.edges;
+    edges.count <- edges.count + 1
+  ;;
+
+  (* Drops the members of [var]'s class bound since they joined it. *)
+  let prune (var : var) =
+    Option.iter (state var) ~f:(fun state ->
+      let class_ = Union_find.get state.class_ in
+      let before = List.length class_.members in
+      class_.members
+      <- List.filter class_.members ~f:(fun member ->
+           match member.state with
+           | Unbound _ -> true
+           | Generic | Link _ -> false);
+      class_.size <- class_.size - (before - List.length class_.members))
   ;;
 
   (* The unbound variables other than [var] whose structure is to be [var]'s. *)
@@ -373,16 +434,12 @@ module Sub_edge = struct
     match state var with
     | None -> []
     | Some state ->
-      let unbound =
-        List.filter (Union_find.get state.class_).members ~f:(fun member ->
-          match member.state with
-          | Unbound _ -> true
-          | Generic | Link _ -> false)
-      in
-      Union_find.set
-        state.class_
-        { members = unbound; size = List.length unbound };
-      List.filter unbound ~f:(fun member -> member.id <> var.id)
+      List.filter (Union_find.get state.class_).members ~f:(fun member ->
+        member.id <> var.id
+        &&
+        match member.state with
+        | Unbound _ -> true
+        | Generic | Link _ -> false)
   ;;
 
   (* Those of [ty]'s unbound variables that are [var] or to have its structure. *)
@@ -476,8 +533,13 @@ and unify_structure state ~ty1 ~ty2 =
         (ATy ty)
     in
     var.state <- Link ty;
-    Watcher.bind var.watchers ty
-    |> Result.map_error ~f:(fun error -> Unification_error.Bound_var error)
+    let bound =
+      Watcher.bind var.watchers ty
+      |> Result.map_error ~f:(fun error -> Unification_error.Bound_var error)
+    in
+    (match Fresh.take_unreported state.State.fresh with
+     | Some error -> Error error
+     | None -> bound)
   | _ -> Error (Type_mismatch (ty1, ty2, Structural_mismatch))
 
 (* What is to have [var]'s structure ([Sub_edge.related]) and is in [ty] is made
@@ -900,15 +962,14 @@ let fresh_modes_copy fresh ~rank top =
 
 (* What settling or fixing a join gives: what is related has the same structure,
    so only modes can differ. *)
-let only_modes result =
-  Result.map_error result ~f:(fun (error : Unification_error.t) ->
-    match error with
-    | Type_mismatch (_, _, Modes error) | Bound_var error -> error
-    | error ->
-      raise_s
-        [%message
-          "Unify: settling a join failed other than by modes"
-            (error : Unification_error.t)])
+(* For a watcher: other errors go to [Fresh.fail_unreported]. *)
+let only_modes fresh (result : (unit, Unification_error.t) Result.t) =
+  match result with
+  | Ok () -> Ok ()
+  | Error (Type_mismatch (_, _, Modes error) | Bound_var error) -> Error error
+  | Error error ->
+    Fresh.fail_unreported fresh error;
+    Ok ()
 ;;
 
 (* Relates by variance even while a side is unknown if [join], or either side is
@@ -1017,33 +1078,34 @@ and sub_structure state sub ~join ~flip ~lower ~upper =
     else unify_row' state ~row1:row2 ~row2:row1
   | _ -> unify_ty ~lower:ty1 ~upper:ty2
 
-(* [lower <= upper], kept on both until either is bound, then settled as
-   [sub_ty]. *)
+(* [lower <= upper], kept on both until either is bound to a structure, then
+   settled as [sub_ty]. *)
 and add_edge fresh (lower : Sub_edge.var) (upper : Sub_edge.var) =
   let (lower_state : Sub_edge.State.t) = edges fresh ~join:false lower in
   let (upper_state : Sub_edge.State.t) = edges fresh ~join:false upper in
-  if Hash_set.strict_add lower_state.uppers upper.id
-     |> Hash_set.Ok_or_duplicate.is_ok
+  Sub_edge.union lower_state upper_state;
+  if Sub_edge.Class.add_pair
+       (Union_find.get lower_state.class_)
+       ~lower:lower.id
+       ~upper:upper.id
   then (
     let edge =
       { Sub_edge.lower = TVar lower; upper = TVar upper; settled = false }
     in
-    Sub_edge.union lower_state upper_state;
-    lower_state.edges <- edge :: lower_state.edges;
-    upper_state.edges <- edge :: upper_state.edges)
+    Sub_edge.add lower_state edge;
+    Sub_edge.add upper_state edge)
 
-(* [var]'s edges, given the watcher keeping them if it has none yet: a join
-   variable if [join]. They are settled once [var] is bound, and [var] is
-   [fix]ed if generalized while still unbound. *)
+(* [var]'s state, given the watcher keeping it if it has none yet: a join
+   variable if [join]. Its edges are settled once [var] is bound to a structure,
+   and [var] is [fix]ed if generalized while still unbound. Bound to another
+   unbound variable, [var]'s edges become that one's. *)
 and edges fresh ~join (var : Sub_edge.var) =
   match Sub_edge.state var with
   | Some state -> state
   | None ->
     let state =
-      { Sub_edge.State.edges = []
-      ; uppers = Int.Hash_set.create ()
-      ; class_ =
-          Union_find.create { Sub_edge.Class.members = [ var ]; size = 1 }
+      { Sub_edge.State.class_ = Union_find.create (Sub_edge.Class.create var)
+      ; edges = Union_find.create { Sub_edge.Edges.edges = []; count = 0 }
       ; join
       }
     in
@@ -1052,11 +1114,13 @@ and edges fresh ~join (var : Sub_edge.var) =
          Sub_edge.key
          state
          ~bind:(fun state ty ->
-           (match Type.canonical_ty ty with
-            | TVar ({ state = Unbound _; _ } as other) when state.join ->
-              (edges fresh ~join:true other).join <- true
-            | _ -> ());
-           Fresh.settle fresh (fun () -> settle fresh state))
+           match Type.canonical_ty ty with
+           | TVar ({ state = Unbound _; _ } as other) ->
+             let other_state = edges fresh ~join:state.join other in
+             if state.join then other_state.join <- true;
+             Sub_edge.merge_edges state other_state;
+             Ok ()
+           | _ -> Fresh.settle fresh (fun () -> settle fresh state))
          ~instantiate:(fun (_ : Sub_edge.State.t) -> None)
          ~generalize:(fun (_ : Sub_edge.State.t) -> fix fresh var)
        :: var.watchers;
@@ -1065,8 +1129,10 @@ and edges fresh ~join (var : Sub_edge.var) =
 (* Each edge is settled once, from whichever side is bound first: the other
    side's list still has it, but each list is walked once. *)
 and settle fresh (state : Sub_edge.State.t) =
-  let edges = state.edges in
-  state.edges <- [];
+  let (pending : Sub_edge.Edges.t) = Union_find.get state.edges in
+  let edges = List.rev pending.edges in
+  pending.edges <- [];
+  pending.count <- 0;
   List.fold edges ~init:(Ok ()) ~f:(fun result (edge : Sub_edge.t) ->
     if edge.settled
     then result
@@ -1080,7 +1146,7 @@ and settle fresh (state : Sub_edge.State.t) =
           ~flip:false
           ~lower:edge.lower
           ~upper:edge.upper
-        |> only_modes
+        |> only_modes fresh
       in
       Result.combine result settled ~ok:Fn.const ~err:Fn.const))
 
@@ -1088,9 +1154,10 @@ and settle fresh (state : Sub_edge.State.t) =
    them apart, one type variable stands for them, as [unify_ty] would have made
    it. *)
 and fix fresh var =
+  Sub_edge.prune var;
   List.fold_result (Sub_edge.related var) ~init:() ~f:(fun () other ->
     unify_ty' (State.create fresh) ~ty1:(TVar other) ~ty2:(TVar var))
-  |> only_modes
+  |> only_modes fresh
 ;;
 
 let join_var fresh ~rank =

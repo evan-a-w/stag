@@ -1720,7 +1720,7 @@ let add_quoted_use (scope : Scope.t) (use : Quoted_use.t) =
 ;;
 
 let quoted_use t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
-  let ty = Type.TVar (Fresh.var t ~rank:scope.rank) in
+  let ty = Scope.join_ty t scope in
   add_quoted_use
     scope
     { awaited = toplevel.ident
@@ -2056,11 +2056,12 @@ let has_failed (toplevel : Toplevel.t) =
   | Unchecked | In_progress _ -> false
 ;;
 
-(* Unifies [use]'s type with [ty], the type of the toplevel it uses, reporting
-   if they differ. In an instance of a scheme that failed, eg. as its own use of
-   the toplevel differs, the error was reported there. *)
+(* Relates [ty], the type of the toplevel [use] is of, to [use]'s type by
+   variance, as a use of a finished toplevel is, reporting if they differ. In an
+   instance of a scheme that failed, eg. as its own use of the toplevel differs,
+   the error was reported there. *)
 let unify_use t (program : Program_env.t) (use : Quoted_use.t) ~ty =
-  match Unify.unify_ty t ~ty1:use.ty ~ty2:ty with
+  match Unify.sub_ty t ~lower:ty ~upper:use.ty with
   | Ok () -> true
   | Error error ->
     if List.exists use.via ~f:(fun via ->
@@ -4195,7 +4196,7 @@ and check_expr ?expected ?hint t scope ~at ~expr ~ty =
       ?hint
   in
   if Scope.subtypes t scope ~lower:expr.ty ~upper:ty ~loc:expr.loc
-  then if Type.is_error expr.ty then expr else { expr with ty }
+  then expr
   else { desc = Error [ expr ]; ty = Type.error; loc = expr.loc }
 
 (* Returns the binder each entry that may be captured is captured by: entries

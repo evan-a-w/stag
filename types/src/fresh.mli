@@ -21,6 +21,12 @@ val settle
   -> (unit -> (unit, Mode.Error.t) Result.t)
   -> (unit, Mode.Error.t) Result.t
 
+(** Keeps the first error a watcher can't report, as it fails only by modes, for
+    the unification binding the watcher's variable to report instead. *)
+val fail_unreported : t -> Unification_error.t -> unit
+
+val take_unreported : t -> Unification_error.t option
+
 (** The source of mode variables' ids. *)
 val modes : t -> Mode.Id_source.t
 

@@ -151,7 +151,7 @@ let gen n = forget n in .< let _ = gen in n >.
   show {|
 let gen n = forget n in .< gen n >.
 |};
-  [%expect {| The type variable '_a occurs inside its own definition |}];
+  [%expect {| The type variable 'a occurs inside its own definition |}];
   (* [code] is finished before [f], whose splice uses it: its use of [f] is
      checked once [f] is. *)
   eval
@@ -175,7 +175,7 @@ let a = .< b >.
 let b = .< a >.
 |};
   [%expect
-    {| In this instance of b, a use in its quote is wrong: The type variable '_a occurs inside its own definition |}]
+    {| In this instance of b, a use in its quote is wrong: The type variable 'a occurs inside its own definition |}]
 ;;
 
 let%expect_test "spliced code's free variables pass mutable locals by" =
@@ -289,7 +289,7 @@ let%expect_test "a quote's use of a toplevel of its component is a recursive \
                  one"
   =
   (* [c] uses [f] directly too, so is checked with it: its quote's use is
-     unified with [f]'s type before it is generalized. *)
+     related to [f]'s type before it is generalized. *)
   show {|
 let f x = let _ = c in x
 let c (u : unit) = (f u, .< f >.)
@@ -297,7 +297,7 @@ let c (u : unit) = (f u, .< f >.)
   [%expect
     {|
     val f : unit @ 'm0 -> unit @ 'm1 with portable <= 'm0 and 'm1 <= regional
-    val c : unit @ _ -> unit * <unit @ 'm1 -> unit @ 'm2>{..'a} @ 'm0 with portable <= 'm1 and 'm2 <= 'm0 and release(locality('m2)) <= locality('m0) and 'm2 <= regional
+    val c : unit @ _ -> unit * <unit @ _ -> unit @ _>{..'a} @ _
     |}];
   show
     {|

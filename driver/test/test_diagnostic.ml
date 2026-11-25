@@ -101,7 +101,7 @@ let%expect_test "messages" =
     File "a.stag", line 1, characters 8-14:
     1 | let x = Some x
                 ^^^^^^
-    Error: The type variable '_a occurs inside its own definition
+    Error: The type variable 'a occurs inside its own definition
     File "a.stag", line 1, characters 8-16:
     1 | let r = {`a = 1}.`b
                 ^^^^^^^^

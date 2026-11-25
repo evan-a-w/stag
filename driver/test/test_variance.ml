@@ -706,3 +706,67 @@ let%expect_test "many joins take time comparable to unification" =
     ("100 arms of parameters" (ok true) (fast true))
     |}]
 ;;
+
+let%expect_test "joins of variables that stay unknown take linear time" =
+  let source n =
+    sprintf
+      "let myid x = x\nlet f (n : int) x = match n with\n%s| _ -> x\n"
+      (String.concat (List.init n ~f:(fun i -> sprintf "| %d -> myid x\n" i)))
+  in
+  let time n =
+    List.init 3 ~f:(fun _ ->
+      let start = Time_ns.now () in
+      assert (Result.is_ok (checked (source n)));
+      Time_ns.diff (Time_ns.now ()) start)
+    |> List.min_elt ~compare:Time_ns.Span.compare
+    |> Option.value_exn
+  in
+  let small = time 500 in
+  let large = time 2000 in
+  print_s
+    [%message
+      "4 times the arms"
+        ~within_6_times_the_time:
+          (Time_ns.Span.( < ) large (Time_ns.Span.scale small 6.) : bool)
+        ~under_4s:(Time_ns.Span.( < ) large (Time_ns.Span.of_int_sec 4) : bool)];
+  [%expect
+    {| ("4 times the arms" (within_6_times_the_time true) (under_4s true)) |}]
+;;
+
+let%expect_test "a quote's use of a toplevel being checked is by variance" =
+  (* [c]'s quote uses [ident] before [ident] is finished (its splice needs [c]),
+     or after (no splice): either way, it is used as a finished toplevel is. *)
+  let ident_first body =
+    sprintf
+      "let apply (f : string -> int) = 1\n\
+       %s\n\
+       let c (u : unit) = .< apply ident >."
+      body
+  in
+  check
+    (ident_first
+       "let ident (x : string @ local) : int = .~(let _ = c () in .< 1 >.)");
+  check (ident_first "let ident (x : string @ local) : int = 1");
+  let joined ident =
+    sprintf
+      "%s\n\
+       let c (n : int) = .< fun y -> match n with 0 -> ident y | _ -> (fun (s \
+       @ local) -> String.length s) >."
+      ident
+  in
+  check (joined "let ident x = .~(let _ = c 0 in .< x >.)");
+  check (joined "let ident x = x");
+  [%expect
+    {|
+    val apply : (string -> int) @ _ -> int @ _
+    val ident : string @ 'm0 -> int @ _ with local <= 'm0
+    val c : unit @ _ -> <int>{..'a} @ _
+    val apply : (string -> int) @ _ -> int @ _
+    val ident : string @ 'm0 -> int @ _ with local <= 'm0
+    val c : unit @ _ -> <int>{..'a} @ _
+    val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val c : int @ _ -> <(string @ 'm2 -> int @ 'm3) @ 'm1 -> (string @ 'm5 -> int @ 'm6) @ 'm4>{..'a} @ 'm0 with 'm1 <= 'm4 and 'm1 <= global and 'm3 <= 'm6 and 'm5 <= 'm2 and gc <= 'm0
+    val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val c : int @ _ -> <(string @ 'm2 -> int @ 'm3) @ 'm1 -> (string @ 'm5 -> int @ 'm6) @ 'm4>{..'a} @ 'm0 with 'm1 <= 'm4 and 'm1 <= global and 'm3 <= 'm6 and 'm5 <= 'm2 and gc <= 'm0
+    |}]
+;;
