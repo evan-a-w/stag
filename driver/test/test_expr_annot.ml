@@ -23,11 +23,11 @@ let g u = (fun (x : int) -> x : int -> int)
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     val a : string
     val b : int
-    val c : 'a -> string @ external
-    val d : 'a -> string @ 'm0 with nonportable gc <= 'm0
-    val e : string @ local -> int
-    val f : int -> int
-    val g : 'a -> int -> int
+    val c : 'a @ 'm0 -> string @ 'm1 with external <= 'm1
+    val d : 'a @ 'm0 -> string @ 'm1 with nonportable gc <= 'm1
+    val e : string @ 'm0 -> int @ 'm1 with local <= 'm0
+    val f : int @ 'm0 -> int @ 'm1
+    val g : 'a @ 'm0 -> (int -> int) @ 'm1
     |}];
   show
     {|
@@ -59,7 +59,7 @@ let t (u : unit) = exclave_ (stack_ (Ptr.make 1) @ local)
     {|
     val one : int
     val n : int
-    val t : unit -> ptr[int @@ 'm1] @ 'm0 with nonportable gc local <= 'm0
+    val t : unit @ 'm0 -> ptr[int @@ 'm2] @ 'm1 with nonportable gc local <= 'm1
     |}];
   show {|
 let s u = (stack_ (Ptr.make 1) @ local)
@@ -79,7 +79,7 @@ let erased = Stag.Code.erase .< (Int.add 1 2 : int @ portable) >.
   [%expect
     {|
     val q : <int>{..'a}
-    val r : <string @ local -> int>{..'a}
+    val r : <string @ 'm0 -> int @ 'm1>{..'a} with local <= 'm0
     val s : int
     val erased : Stag.Expr.t
     |}]

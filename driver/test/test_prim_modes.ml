@@ -19,11 +19,11 @@ let concat (l : list[string] @ local) = String.concat ", " l
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val len : string @ local -> int
-    val len_ext : 'a -> int
-    val sub : string @ local -> string @ 'm0 with nonportable gc <= 'm0
-    val print : string @ local -> unit
-    val concat : list[string] @ local -> string @ 'm0 with nonportable gc <= 'm0
+    val len : string @ 'm0 -> int @ 'm1 with local <= 'm0
+    val len_ext : 'a @ 'm0 -> int @ 'm1
+    val sub : string @ 'm0 -> string @ 'm1 with local <= 'm0 and nonportable gc <= 'm1
+    val print : string @ 'm0 -> unit @ 'm1 with local <= 'm0
+    val concat : list[string] @ 'm0 -> string @ 'm1 with local <= 'm0 and nonportable gc <= 'm1
     |}]
 ;;
 
@@ -33,7 +33,7 @@ let fresh (s : string @ local) = String.append s s
 
 |};
   [%expect
-    {| val fresh : string @ local -> string @ 'm0 with nonportable gc <= 'm0 |}]
+    {| val fresh : string @ 'm0 -> string @ 'm1 with local <= 'm0 and nonportable gc <= 'm1 |}]
 ;;
 
 let%expect_test "a partial application holds the arguments so far" =
@@ -46,16 +46,16 @@ let int_part (n : int @ local) = Int.add n
 |};
   [%expect
     {|
-    val app : string @ 'm0 -> (string -> string @ nonportable gc global) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
-    val part : string @ 'm0 -> (string -> string @ nonportable gc global) @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and gc <= 'm1
-    val part_local : string @ 'm0 -> (string -> string @ nonportable gc global) @ 'm1 with local <= 'm0 and 'm0 <= 'm1 and gc <= 'm1
-    val int_part : int @ local -> (int -> int @ nonportable gc global) @ 'm0 with gc <= 'm0
+    val app : string @ 'm0 -> (string @ 'm2 -> string) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
+    val part : string @ 'm0 -> (string @ 'm2 -> string) @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and gc <= 'm1
+    val part_local : string @ 'm0 -> (string @ 'm2 -> string) @ 'm1 with local <= 'm0 and 'm0 <= 'm1 and gc <= 'm1
+    val int_part : int @ 'm0 -> (int @ 'm2 -> int) @ 'm1 with local <= 'm0 and gc <= 'm1
     |}];
   show {|
 let returned (s : string @ local) = String.append s
 |};
   [%expect
-    {| val returned : string @ 'm0 -> (string -> string @ nonportable gc global) @ 'm1 with local <= 'm0 and 'm0 <= 'm1 and gc <= 'm1 |}];
+    {| val returned : string @ 'm0 -> (string @ 'm2 -> string) @ 'm1 with local <= 'm0 and 'm0 <= 'm1 and gc <= 'm1 |}];
   show
     {|
 let stored = Ptr.make (String.append "a")
@@ -78,12 +78,12 @@ let set (n : ptr[int] @ local) = Core.List.iter (fun x -> n.* <- x) [1; 2]
 |};
   [%expect
     {|
-    val is_empty : string @ local -> bool
-    val equal : string @ 'm0 -> (string @ local -> bool) @ 'm1 with local <= 'm0 and 'm0 <= 'm1 and gc <= 'm1
-    val upper : string @ local -> string @ 'm0 with nonportable gc <= 'm0
-    val iter : string @ local -> unit
-    val count : string @ local -> int
-    val lengths : list[string] @ local -> list[int] @ 'm0 with nonportable gc <= 'm0
-    val set : ptr[int] @ local -> unit
+    val is_empty : string @ 'm0 -> bool @ 'm1 with local <= 'm0
+    val equal : string @ 'm0 -> (string @ 'm2 -> bool @ 'm3) @ 'm1 with local <= 'm0 and 'm0 <= 'm1 and local <= 'm2 and gc <= 'm1
+    val upper : string @ 'm0 -> string @ 'm1 with local <= 'm0 and nonportable gc <= 'm1
+    val iter : string @ 'm0 -> unit @ 'm1 with local <= 'm0
+    val count : string @ 'm0 -> int @ 'm1 with local <= 'm0
+    val lengths : list[string] @ 'm0 -> list[int] @ 'm1 with local <= 'm0 and nonportable gc <= 'm1
+    val set : ptr[int] @ 'm0 -> unit @ 'm1 with local <= 'm0
     |}]
 ;;

@@ -43,14 +43,14 @@ let qualified = forget used in .< Int.add 1 2 >.
 |};
   [%expect
     {|
-    val argument : 'a -> <'b>{x : 'b; ..'c}
-    val inside : 'a -> <'b>{x : 'b; ..'c}
-    val two : 'a @ 'm0 -> ('b -> <int>{x : int; y : int; ..'c}) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
-    val filled : 'a -> <int>{x : int; ..'b}
+    val argument : 'a @ 'm0 -> <'b>{x : 'b; ..'c} @ 'm1
+    val inside : 'a @ 'm0 -> <'b>{x : 'b; ..'c} @ 'm1
+    val two : 'a @ 'm0 -> ('b @ 'm2 -> <int>{x : int; y : int; ..'c} @ 'm3) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
+    val filled : 'a @ 'm0 -> <int>{x : int; ..'b} @ 'm1
     val used : int
-    val spliced : int -> int
-    val rebound : 'a -> <int>{..'b}
-    val nested : 'a -> <<'b>{x : 'b; ..'c}>{..'d}
+    val spliced : int @ 'm0 -> int @ 'm1
+    val rebound : 'a @ 'm0 -> <int>{..'b} @ 'm1
+    val nested : 'a @ 'm0 -> <<'b>{x : 'b; ..'c}>{..'d} @ 'm1
     val toplevel_forgotten : <'a>{used : 'a; ..'b}
     val qualified : <int>{..'a}
     |}]
@@ -75,7 +75,7 @@ let shadow x = let y = 1 in forget y in let y = 2 in y
     x is not in scope here: it was forgotten by [forget x in ...]
     used is not in scope here: it was forgotten by [forget used in ...]
     x is forgotten twice
-    val shadow : 'a -> int
+    val shadow : 'a @ 'm0 -> int @ 'm1
     |}]
 ;;
 
@@ -90,7 +90,7 @@ let rechecked = .~(code)
   [%expect
     {|
     val code : Stag.Expr.t
-    val rechecked : 'a -> <'b>{x : 'b; ..'c}
+    val rechecked : 'a @ 'm0 -> <'b>{x : 'b; ..'c} @ 'm1
     |}]
 ;;
 
@@ -147,7 +147,7 @@ let%expect_test "toplevels by symbol in recursive generators" =
   show {|
 let gen n = forget n in .< let _ = gen in n >.
 |};
-  [%expect {| val gen : 'a -> <'b>{n : 'b; ..'c} |}];
+  [%expect {| val gen : 'a @ 'm0 -> <'b>{n : 'b; ..'c} @ 'm1 |}];
   show {|
 let gen n = forget n in .< gen n >.
 |};
@@ -196,11 +196,11 @@ let%expect_test "forget in a quote doesn't hide names from splices back out" =
   show {|
 let f (x : int) = .< forget x in .~(Some x; .< 1 >.) >.
 |};
-  [%expect {| val f : int -> <int>{..'a} @ 'm0 with gc <= 'm0 |}];
+  [%expect {| val f : int @ 'm0 -> <int>{..'a} @ 'm1 with gc <= 'm1 |}];
   show {|
 let g (x : int) = .< forget x in .~(.< x >.) >.
 |};
-  [%expect {| val g : int -> <'a>{x : 'a; ..'b} |}];
+  [%expect {| val g : int @ 'm0 -> <'a>{x : 'a; ..'b} @ 'm1 |}];
   (* Written at level 0, it hides [x] in splices back to level 0. *)
   show {|
 let h (x : int) = forget x in .< .~(Some x; .< 1 >.) >.
@@ -259,16 +259,17 @@ let c = .< f >.
 |};
   [%expect
     {|
-    val f : int -> int
+    val f : int @ 'm0 -> int @ 'm1
     val c : <int @ '_m0 -> int @ '_m1>{..'a}
     |}];
   show {|
 let f (x : int) : int = x
 let c = .< f >.
 |};
-  [%expect {|
-    val f : int -> int
-    val c : <int -> int>{..'a}
+  [%expect
+    {|
+    val f : int @ 'm0 -> int @ 'm1
+    val c : <int @ 'm0 -> int @ 'm1>{..'a}
     |}];
   (* Each use is of an instance. *)
   show
