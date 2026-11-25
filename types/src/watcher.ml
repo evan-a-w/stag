@@ -22,7 +22,8 @@ let find (type w) ts (key : w Type_equal.Id.t) : w option =
 ;;
 
 let bind ts target =
-  List.fold_result ts ~init:() ~f:(fun () (T t) -> t.bind t.state target)
+  Mode.Private.Undo.atomically (fun () ->
+    List.fold_result ts ~init:() ~f:(fun () (T t) -> t.bind t.state target))
 ;;
 
 let instantiate ts =

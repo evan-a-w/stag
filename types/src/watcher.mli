@@ -15,7 +15,8 @@ val create
 
 val find : 'a t list -> 'w Type_equal.Id.t -> 'w option
 
-(** Once the variable is bound to the ['a]. *)
+(** Once the variable is bound to the ['a]: the first error, if one fails, and
+    then none of their changes are made. *)
 val bind : 'a t list -> 'a -> (unit, Mode.Error.t) Result.t
 
 val instantiate : 'a t list -> 'a t list
