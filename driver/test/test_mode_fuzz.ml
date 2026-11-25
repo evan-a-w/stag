@@ -270,3 +270,99 @@ let%expect_test "random uses at other modes are accepted as variance says" =
       (!accepted : int) (!rejected : int) ~wrong:(Queue.length wrong : int)];
   [%expect {| ((!accepted 206) (!rejected 194) (wrong 0)) |}]
 ;;
+
+(* Random functions allocating in a returned position, under [exclave_],
+   [region_] and [stack_]: each is accepted, and its callers using the result at
+   [global] and at [local], as a model of where the allocations can be made
+   says. *)
+module Alloc_fuzz = struct
+  module Model = struct
+    type t =
+      { global : bool (** Its value can be on the heap. *)
+      ; local : bool (** Its value can be in the caller's region. *)
+      }
+  end
+
+  (* What [exclave_] gives: [stack_] forces it into the caller's region. *)
+  let rec exclaved random depth : string * bool =
+    match if depth = 0 then 0 else Random.State.int random 3 with
+    | 0 -> "Box.make x", true
+    | 1 -> "stack_ (Box.make x)", false
+    | _ ->
+      let body, global = exclaved random (depth - 1) in
+      sprintf "(let n = sum (%s) in %s)" (unused random) body, global
+
+  and unused random =
+    match Random.State.int random 2 with
+    | 0 -> "Box.make 1"
+    | _ -> "stack_ (Box.make 1)"
+  ;;
+
+  let rec returned random depth : string * Model.t =
+    match if depth = 0 then 0 else Random.State.int random 4 with
+    | 0 -> "Box.make x", { global = true; local = true }
+    | 1 ->
+      let body, global = exclaved random (depth - 1) in
+      sprintf "exclave_ %s" body, { global; local = true }
+    | 2 ->
+      (* What it gives is in the function's own region, so must be global. *)
+      let body, model = returned random (depth - 1) in
+      sprintf "region_ (%s)" body, { model with local = false }
+    | _ ->
+      let body, model = returned random (depth - 1) in
+      sprintf "(let n = sum (%s) in %s)" (unused random) body, model
+  ;;
+
+  let program random =
+    let body, (model : Model.t) = returned random 4 in
+    let source =
+      sprintf
+        "let sum (b : box[int]) = match b with *n -> n\nlet f (x : int) = %s\n"
+        body
+    in
+    source, model
+  ;;
+end
+
+let%expect_test "random allocations are placed as a model says" =
+  let random = Random.State.make [| 13 |] in
+  let accepted = ref 0
+  and rejected = ref 0
+  and wrong = Queue.create () in
+  for _ = 1 to 300 do
+    let source, (model : Alloc_fuzz.Model.t) = Alloc_fuzz.program random in
+    let ok source = Result.is_ok (checked source) in
+    let defined = ok source in
+    let global =
+      ok (source ^ "let g (u : unit) = let r @ global = f 1 in sum r\n")
+    in
+    let local =
+      ok
+        (source ^ "let l (u : unit) = let r @ local = f 1 in sum r [@nontail]\n")
+    in
+    let expected = model.global || model.local in
+    if defined then incr accepted else incr rejected;
+    let mismatch what actual expected =
+      if Bool.( <> ) actual expected
+      then
+        Queue.enqueue wrong (sprintf "%s(%s: expected %b)" source what expected)
+    in
+    mismatch "defined" defined expected;
+    mismatch "global use" global model.global;
+    mismatch "local use" local expected;
+    if defined
+    then (
+      let output =
+        match round_trip source ~show:`Quiet with
+        | () -> [%expect.output]
+        | exception exn -> [%expect.output] ^ Exn.to_string exn
+      in
+      if not (String.is_empty output)
+      then Queue.enqueue wrong (source ^ "\n" ^ output))
+  done;
+  Queue.iter wrong ~f:print_endline;
+  print_s
+    [%message
+      (!accepted : int) (!rejected : int) ~wrong:(Queue.length wrong : int)];
+  [%expect {| ((!accepted 286) (!rejected 14) (wrong 0)) |}]
+;;
