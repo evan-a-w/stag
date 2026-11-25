@@ -534,6 +534,13 @@ module Scope = struct
 
   let arrow_mode t = Mode_rules.arrow_mode (modes t)
 
+  let retract_site t ~loc ~kind =
+    match t.allocations, t.quote with
+    | Some sites, None when t.level = 0 ->
+      Allocation_sites.retract sites ~loc ~kind
+    | _ -> ()
+  ;;
+
   let mode_var t name ~loc =
     match Type_env.Annotation_vars.mode t.annotation_vars name ~loc with
     | Ok var -> var
@@ -1935,6 +1942,58 @@ let prim_type (scope : Scope.t) prim =
     ~f:(fun arg modes res -> Type.TArrow (arg, res, modes))
 ;;
 
+(* What applying [var] allocates, beyond what it runs: the closure of a partial
+   application of a prim, or the block of [Box.make] or [Ptr.make]. *)
+let value_allocation (var : Typed.Var_ref.t) : Typed.Allocation.Kind.t option =
+  match var with
+  | Prim prim when Prim.arity prim > 1 -> Some Partial_application
+  | Intrinsic Box_make -> Some Box
+  | Intrinsic Ptr_make -> Some Pointer
+  | Bound (Toplevel ident) | Persistent (Toplevel ident) ->
+    if String.equal ident.name (Prelude_path.canonical "Box.make")
+    then Some Box
+    else if String.equal ident.name (Prelude_path.canonical "Ptr.make")
+    then Some Pointer
+    else None
+  | _ -> None
+;;
+
+(* The prim [expr] applies, its reference, and to how many arguments. *)
+let rec prim_head (expr : Typed.Expr.t) =
+  match expr.desc with
+  | Var (Prim prim) -> Some (prim, expr, 0)
+  | App (f, _) ->
+    Option.map (prim_head f) ~f:(fun (prim, head, args) ->
+      prim, head, args + 1)
+  | _ -> None
+;;
+
+(* The mode of the closure of a prim of type [ty] given [args] arguments. *)
+let prim_partial ty ~args =
+  let rec go ty args =
+    match Type.canonical_ty ty with
+    | Type.TArrow (_, res, modes) ->
+      if args = 1
+      then (
+        match modes.res with
+        | Var var -> Some var
+        | Fixed _ -> None)
+      else go res (args - 1)
+    | _ -> None
+  in
+  go ty args
+;;
+
+(* Where a prim, [Box.make] or [Ptr.make] is named as a value: what it makes is
+   on the heap, unless the application it heads retracts that. *)
+let value_sites (scope : Scope.t) (expr : Typed.Expr.t) =
+  match expr.desc with
+  | Var var ->
+    Option.iter (value_allocation var) ~f:(fun kind ->
+      Mode_rules.Alloc.on_heap (Scope.modes scope) ~loc:expr.loc ~kind)
+  | _ -> ()
+;;
+
 let intrinsic_type t (scope : Scope.t) (intrinsic : Intrinsic.t) =
   match intrinsic with
   | Assume_global ->
@@ -2499,7 +2558,9 @@ and expr_type
             node (Var var_ref) ty)
      with
      | Error error -> fail error
-     | Ok var -> annotate t scope var annot ~loc)
+     | Ok var ->
+       value_sites scope var;
+       annotate t scope var annot ~loc)
   | Marked (Nontail, inner) ->
     let inner =
       expr_type
@@ -2575,7 +2636,10 @@ and expr_type
   | Var (Ref var_ref) ->
     (match var_ref_type t scope ~at var_ref ~loc with
      | Error error -> fail error
-     | Ok (ty, var_ref) -> node (Var var_ref) ty)
+     | Ok (ty, var_ref) ->
+       let var = node (Var var_ref) ty in
+       value_sites scope var;
+       var)
   | App (f, x) ->
     Mode_rules.runs modes at Portable ~loc ~why:"it applies a function";
     let a = Scope.fresh_ty t scope in
@@ -2652,6 +2716,24 @@ and expr_type
     let allocates kind =
       Mode_rules.Alloc.pointer modes at ~loc ~kind res_mode
     in
+    (match f.desc with
+     | Var var ->
+       Option.iter (value_allocation var) ~f:(fun kind ->
+         Scope.retract_site scope ~loc:f.loc ~kind)
+     | App _ -> Scope.retract_site scope ~loc:f.loc ~kind:Partial_application
+     | _ -> ());
+    (match prim_head f with
+     | Some (prim, head, args) when args + 1 < Prim.arity prim ->
+       (match prim_partial head.ty ~args:(args + 1) with
+        | Some partial ->
+          Mode_rules.Alloc.pointer
+            modes
+            at
+            ~loc
+            ~kind:Partial_application
+            partial
+        | None -> ())
+     | Some _ | None -> ());
     (match f.desc with
      | Var (Intrinsic Ptr_make) -> allocates Pointer
      | Var (Intrinsic Box_make) -> allocates Box

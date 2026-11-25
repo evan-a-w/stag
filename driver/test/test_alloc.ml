@@ -385,6 +385,7 @@ let boxed (x : int) = apply Box.make x
     t.stag:3:23-47 Box in nested: heap, caller's region if res is local
     t.stag:3:33-43 Box in nested: heap, caller's region if res is local
     t.stag:4:16-19 Partial_application in apply: heap, caller's region if res is local
+    t.stag:5:28-36 Box in boxed: heap
     |}]
 ;;
 

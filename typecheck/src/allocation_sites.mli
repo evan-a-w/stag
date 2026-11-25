@@ -27,6 +27,10 @@ val frame
 (** A site, in the function of [frame] (else of the toplevel). *)
 val add : t -> Mode_rules.Site.t -> frame:Frame.t option -> unit
 
+(** Removes the sites of [kind] at [loc]: a function used as a value, as
+    recorded, turns out to be applied where it is named. *)
+val retract : t -> loc:Loc.t -> kind:Typed.Allocation.Kind.t -> unit
+
 (** Where each site of a component's toplevels (each with its type) is made, in
     program order: once they are checked and before they are generalized, so
     that every constraint on their modes, but those of instances, holds.

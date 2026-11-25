@@ -477,6 +477,17 @@ module Alloc = struct
 
   let pointer ctx expected ~loc ~kind mode = record ctx expected ~loc ~kind mode
 
+  let on_heap (ctx : Ctx.t) ~loc ~kind =
+    let mode = Ctx.fresh ctx in
+    Mode.Error.ok_exn
+      (Mode.Var.at_most
+         mode
+         Locality
+         Global
+         (reason ~loc "it is made by a function used as a value"));
+    ctx.allocated { Site.loc; kind; mode; position = Here }
+  ;;
+
   let cell (ctx : Ctx.t) ~loc mode =
     ctx.allocated { Site.loc; kind = Cell; mode; position = Here }
   ;;

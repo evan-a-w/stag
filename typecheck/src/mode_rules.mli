@@ -186,7 +186,8 @@ module Alloc : sig
   (** A quote: the mode of its code. *)
   val code : Ctx.t -> Expected.t -> loc:Loc.t -> Mode.Var.t
 
-  (** A [Ptr.make] or [Box.make] application, of the mode given. *)
+  (** A [Ptr.make] or [Box.make] application, or a partial application of a
+      prim, of the mode given. *)
   val pointer
     :  Ctx.t
     -> Expected.t
@@ -194,6 +195,11 @@ module Alloc : sig
     -> kind:Typed.Allocation.Kind.t
     -> Mode.Var.t
     -> unit
+
+  (** What a prim, [Ptr.make] or [Box.make] used as a value (not applied where
+      it is named) makes when it is applied: on the heap, as where it is applied
+      isn't known. *)
+  val on_heap : Ctx.t -> loc:Loc.t -> kind:Typed.Allocation.Kind.t -> unit
 
   (** The cell of a [let mut], of the mode given: it outlives what captures it. *)
   val cell : Ctx.t -> loc:Loc.t -> Mode.Var.t -> unit
