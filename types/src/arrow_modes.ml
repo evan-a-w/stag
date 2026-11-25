@@ -36,21 +36,12 @@ let fresh ids ~rank =
   }
 ;;
 
-let fixed_reason = Mode.Reason.create "a function type fixes it"
-
-let side_var ids ~rank : Side.t -> Mode.Var.t = function
-  | Var var -> var
-  | Fixed const ->
-    let var = Mode.Var.create ids ~rank in
-    (match
-       let%bind.Result () = Mode.Var.at_least_const var const fixed_reason in
-       Mode.Var.at_most_const var const fixed_reason
-     with
-     | Ok () -> var
-     | Error error -> raise_s [%sexp (error : Mode.Error.t)])
-;;
-
 let reason = Mode.Reason.create "the function types are unified"
+
+let fixed_reason =
+  Mode.Reason.create
+    "a function type fixes it, as the function types are unified"
+;;
 
 let curry_reason =
   Mode.Reason.create
@@ -58,20 +49,28 @@ let curry_reason =
      arguments after the region ends (not printed)"
 ;;
 
-let equate_side ids (side1 : Side.t) (side2 : Side.t) ~reason =
+let equate_side (side1 : Side.t) (side2 : Side.t) ~reason =
   match side1, side2 with
-  | Fixed const1, Fixed const2 when Mode.Const.equal const1 const2 -> Ok ()
-  | _ ->
-    Mode.Var.equate
-      (side_var ids ~rank:0 side1)
-      (side_var ids ~rank:0 side2)
-      reason
+  | Fixed const1, Fixed const2 ->
+    let on (type a) (axis : a Mode.Axis.t) =
+      let a = Mode.Const.get const1 axis
+      and b = Mode.Const.get const2 axis in
+      let module C = (val Mode.Axis.chain axis) in
+      if C.equal a b then Ok () else Error (Mode.Error.unequal axis a b reason)
+    in
+    let%bind.Result () = on Stage in
+    let%bind.Result () = on Provenance in
+    on Locality
+  | Var var, Fixed const | Fixed const, Var var ->
+    let%bind.Result () = Mode.Var.at_least_const var const fixed_reason in
+    Mode.Var.at_most_const var const fixed_reason
+  | Var var1, Var var2 -> Mode.Var.equate var1 var2 reason
 ;;
 
-let equate ids t1 t2 =
-  let%bind.Result () = equate_side ids t1.arg t2.arg ~reason in
-  let%bind.Result () = equate_side ids t1.res t2.res ~reason in
-  equate_side ids t1.curry t2.curry ~reason:curry_reason
+let equate t1 t2 =
+  let%bind.Result () = equate_side t1.arg t2.arg ~reason in
+  let%bind.Result () = equate_side t1.res t2.res ~reason in
+  equate_side t1.curry t2.curry ~reason:curry_reason
 ;;
 
 let iter_side (side : Side.t) ~(local_ f) =

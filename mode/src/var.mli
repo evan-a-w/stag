@@ -133,6 +133,9 @@ val default_to_upper : t -> unit
     inconsistent anyway). *)
 val generalize : t list -> rank:int -> unit
 
+(** Generic and unconstrained: a placeholder each instance copies afresh. *)
+val create_generic : Id_source.t -> t
+
 module Instance : sig
   type var := t
   type t

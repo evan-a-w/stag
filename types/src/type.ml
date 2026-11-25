@@ -1139,24 +1139,30 @@ module Printer = struct
       else body
   ;;
 
+  let axis_atom
+    (type a)
+    (axis : a Mode.Axis.t)
+    (point : a)
+    ~(default : a option)
+    =
+    let module C = (val Mode.Axis.chain axis) in
+    if Option.exists default ~f:(C.equal point)
+    then []
+    else [ Sexp.to_string (C.sexp_of_t point) |> String.lowercase ]
+  ;;
+
   (* The atoms of the axes other than [default]'s, or of every axis. *)
   let const_atoms (const : Mode.Const.t) ~(default : Mode.Const.t option) =
-    let atom (type a) (axis : a Mode.Axis.t) (point : a) ~(default : a option) =
-      let module C = (val Mode.Axis.chain axis) in
-      if Option.exists default ~f:(C.equal point)
-      then []
-      else [ Sexp.to_string (C.sexp_of_t point) |> String.lowercase ]
-    in
-    atom
+    axis_atom
       Stage
       const.stage
       ~default:(Option.map default ~f:(fun (d : Mode.Const.t) -> d.stage))
-    @ atom
+    @ axis_atom
         Provenance
         const.provenance
         ~default:
           (Option.map default ~f:(fun (d : Mode.Const.t) -> d.provenance))
-    @ atom
+    @ axis_atom
         Locality
         const.locality
         ~default:(Option.map default ~f:(fun (d : Mode.Const.t) -> d.locality))
@@ -1247,8 +1253,12 @@ module Printer = struct
         (Sexp.to_string (Mode.Provenance.sexp_of_t provenance)
          |> String.lowercase)
     in
-    let const_atoms const =
-      match const_atoms const ~default:(Some Mode_arg.default) with
+    let const_atoms ({ stage; provenance } : Mode_arg.Const.t) =
+      let default = Mode_arg.Const.default in
+      match
+        axis_atom Stage stage ~default:(Some default.stage)
+        @ axis_atom Provenance provenance ~default:(Some default.provenance)
+      with
       | [] -> None
       | atoms -> Some (String.concat ~sep:" " atoms)
     in
@@ -1268,8 +1278,7 @@ module Printer = struct
               |> Option.value ~default:0
             in
             const_atoms
-              { Mode_arg.default with
-                stage = Mode.Stage.of_index_exn (point (T Stage))
+              { stage = Mode.Stage.of_index_exn (point (T Stage))
               ; provenance = Mode.Provenance.of_index_exn (point (T Provenance))
               }))
     | Var var, None, None ->

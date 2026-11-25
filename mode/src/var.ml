@@ -190,6 +190,12 @@ let default_to_lower t = List.iter (nodes t) ~f:Graph.default_to_lower
 let default_to_upper t = List.iter (nodes t) ~f:Graph.default_to_upper
 let generalize ts ~rank = Graph.generalize (List.concat_map ts ~f:nodes) ~rank
 
+let create_generic ids =
+  let t = create ids ~rank:1 in
+  generalize [ t ] ~rank:0;
+  t
+;;
+
 module Instance = struct
   type var = t
 

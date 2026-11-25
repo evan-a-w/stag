@@ -39,8 +39,12 @@ module Positions = struct
         List.iter args ~f:(function
           | ATy ty -> ty_ ty ~seen
           | ARow row -> row_ row ~seen
-          | AMode (Fixed const) ->
-            add (Fixed const) ~result:false ~mode_arg:true
+          | AMode (Fixed { stage; provenance }) ->
+            (* Its locality is unread. *)
+            add
+              (Fixed { stage; provenance; locality = Global })
+              ~result:false
+              ~mode_arg:true
           | AMode (Var var) -> add (Var var) ~result:false ~mode_arg:true)
       | TArrow (ty1, ty2, modes) ->
         ty_ ty1 ~seen;
@@ -106,7 +110,7 @@ let projection positions =
   let floors =
     List.filter_map positions ~f:(fun p ->
       match p.side, p.result with
-      | Var var, true -> Some (node var (T Stage), 1)
+      | Var var, true -> Some (node var (T Stage), Mode.Stage.index Portable)
       | _ -> None)
   in
   if List.exists vars ~f:(Fn.non Mode.Var.is_generic)

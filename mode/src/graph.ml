@@ -123,7 +123,7 @@ let check t =
     let module C = (val Axis.chain axis) in
     Error
       (Mode_error.Mismatch
-         { var = t.var_id
+         { var = Some t.var_id
          ; axis
          ; lower = C.of_index_exn t.lower
          ; upper = C.of_index_exn t.upper

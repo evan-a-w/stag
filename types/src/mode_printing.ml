@@ -281,8 +281,9 @@ let settle t =
       in
       List.for_all lows ~f:(fun lo ->
         List.for_all highs ~f:(fun hi -> holds closure lo hi (T Locality)))
-      && (Queue.enqueue through_unread (a, b);
-          true))
+      &&
+      (Queue.enqueue through_unread (a, b);
+       true))
   in
   let plain_set = Int.Table.create () in
   List.iter plain_pairs ~f:(fun (a, b) ->

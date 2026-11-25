@@ -182,19 +182,17 @@ let fits ?ty ctx value (modality : Modality.t) ~loc ~why =
       ~loc
       (match step with
        | Meet const -> Mode.Var.at_most_const ?crossing value const reason
-       | Param mode | Cell mode ->
-         let on (type a) (axis : a Mode.Axis.t) =
-           match mode with
-           | Fixed const ->
-             Mode.Var.at_most
-               ?crossing
-               value
-               axis
-               (Mode.Const.get const axis)
-               reason
-           | Var var -> Mode.Var.submode_on ?crossing value var axis reason
-         in
-         Result.all_unit [ on Stage; on Provenance ]))
+       | Param (Fixed { stage; provenance })
+       | Cell (Fixed { stage; provenance }) ->
+         Result.all_unit
+           [ Mode.Var.at_most ?crossing value Stage stage reason
+           ; Mode.Var.at_most ?crossing value Provenance provenance reason
+           ]
+       | Param (Var var) | Cell (Var var) ->
+         Result.all_unit
+           [ Mode.Var.submode_on ?crossing value var Stage reason
+           ; Mode.Var.submode_on ?crossing value var Provenance reason
+           ]))
 ;;
 
 (* At least what a part of a block of mode [block] is, through [step]. *)
@@ -207,10 +205,16 @@ let read_step ctx block (step : Modality.Step.t) ~loc ~why =
        | Cell _ -> "it is read from a pointer's cell, which may hold it"
        | Meet _ | Param _ -> why)
   in
-  let from_param (type a) (mode : Mode_arg.t) (axis : a Mode.Axis.t) ~meet =
+  let from_param
+    (type a)
+    (mode : Mode_arg.t)
+    (axis : a Mode.Axis.t)
+    ~(fixed : Mode_arg.Const.t -> a)
+    ~meet
+    =
     match mode with
     | Fixed const ->
-      let point = Mode.Const.get const axis in
+      let point = fixed const in
       if meet
       then Mode.Var.submode_meet_on block axis point read reason
       else Mode.Var.at_least read axis point reason
@@ -223,16 +227,16 @@ let read_step ctx block (step : Modality.Step.t) ~loc ~why =
      | Meet const -> Mode.Var.submode_meet block const read reason
      | Param mode ->
        Result.all_unit
-         [ from_param mode Stage ~meet:true
-         ; from_param mode Provenance ~meet:true
+         [ from_param mode Stage ~fixed:(fun c -> c.stage) ~meet:true
+         ; from_param mode Provenance ~fixed:(fun c -> c.provenance) ~meet:true
          ; Mode.Var.submode_on block read Locality reason
          ]
      | Cell mode ->
        Result.all_unit
-         [ from_param mode Stage ~meet:false
+         [ from_param mode Stage ~fixed:(fun c -> c.stage) ~meet:false
          ; (* A cell may change between evaluations. *)
            Mode.Var.at_least read Stage Portable reason
-         ; from_param mode Provenance ~meet:false
+         ; from_param mode Provenance ~fixed:(fun c -> c.provenance) ~meet:false
          ]);
   read
 ;;
@@ -986,22 +990,15 @@ let assume_global ctx =
 let default_held var ~name =
   if not (Mode.Var.is_generic var)
   then (
-    let lower = Mode.Var.lower var
-    and upper = Mode.Var.upper var
-    and default = Mode_arg.default in
-    let pick (type a) (axis : a Mode.Axis.t) : a =
+    let fix (type a) (axis : a Mode.Axis.t) ~(default : a) reason =
       let module C = (val Mode.Axis.chain axis) in
-      let lower = Mode.Const.get lower axis
-      and upper = Mode.Const.get upper axis
-      and default = Mode.Const.get default axis in
-      if C.le default upper then C.join lower default else lower
+      let lower = Mode.Const.get (Mode.Var.lower var) axis
+      and upper = Mode.Const.get (Mode.Var.upper var) axis in
+      let held = if C.le default upper then C.join lower default else lower in
+      let%bind.Result () = Mode.Var.at_least var axis held reason in
+      Mode.Var.at_most var axis held reason
     in
-    let held : Mode.Const.t =
-      { stage = pick Stage
-      ; provenance = pick Provenance
-      ; locality = pick Locality
-      }
-    in
+    let default = Mode_arg.Const.default in
     let reason =
       Mode.Reason.create
         (sprintf
@@ -1009,9 +1006,7 @@ let default_held var ~name =
             definition (nonportable gc by default)"
            name)
     in
-    Result.all_unit
-      [ Mode.Var.at_least_const var held reason
-      ; Mode.Var.at_most_const var held reason
-      ]
+    (let%bind.Result () = fix Stage ~default:default.stage reason in
+     fix Provenance ~default:default.provenance reason)
     |> Mode.Error.ok_exn)
 ;;

@@ -1,39 +1,44 @@
 open! Import
 
+module Const = struct
+  type t =
+    { stage : Mode.Stage.t
+    ; provenance : Mode.Provenance.t
+    }
+  [@@deriving sexp_of, equal]
+
+  let default = { stage = Nonportable; provenance = Gc }
+
+  let of_mode ({ stage; provenance; locality = _ } : Mode.Const.t) =
+    { stage; provenance }
+  ;;
+end
+
 type t =
-  | Fixed of Mode.Const.t
+  | Fixed of Const.t
   | Var of Mode.Var.t
 
-let default : Mode.Const.t =
-  { stage = Nonportable; provenance = Gc; locality = Global }
-;;
-
-let gc = Fixed default
+let gc = Fixed Const.default
 let reason = Mode.Reason.create "the types are unified"
 
-(* On stage and provenance: a mode argument has no locality. *)
-let fix var (const : Mode.Const.t) =
-  let on (type a) (axis : a Mode.Axis.t) =
-    let point = Mode.Const.get const axis in
+let fix var ({ stage; provenance } : Const.t) =
+  let on (type a) (axis : a Mode.Axis.t) (point : a) =
     let%bind.Result () = Mode.Var.at_least var axis point reason in
     Mode.Var.at_most var axis point reason
   in
-  let%bind.Result () = on Stage in
-  on Provenance
+  let%bind.Result () = on Stage stage in
+  on Provenance provenance
 ;;
 
-let same_const (c1 : Mode.Const.t) (c2 : Mode.Const.t) =
-  Mode.Stage.equal c1.stage c2.stage
-  && Mode.Provenance.equal c1.provenance c2.provenance
-;;
-
-let equate ids t1 t2 =
+let equate t1 t2 =
   match t1, t2 with
-  | Fixed c1, Fixed c2 when same_const c1 c2 -> Ok ()
   | Fixed c1, Fixed c2 ->
-    let var = Mode.Var.create ids ~rank:0 in
-    let%bind.Result () = fix var c1 in
-    fix var c2
+    if not (Mode.Stage.equal c1.stage c2.stage)
+    then Error (Mode.Error.unequal Stage c1.stage c2.stage reason)
+    else if not (Mode.Provenance.equal c1.provenance c2.provenance)
+    then
+      Error (Mode.Error.unequal Provenance c1.provenance c2.provenance reason)
+    else Ok ()
   | Var var, Fixed const | Fixed const, Var var -> fix var const
   | Var var1, Var var2 ->
     let on axis =
@@ -66,7 +71,7 @@ let map t ~f =
 
 let same t1 t2 =
   match t1, t2 with
-  | Fixed c1, Fixed c2 -> same_const c1 c2
+  | Fixed c1, Fixed c2 -> Const.equal c1 c2
   | Var v1, Var v2 -> Mode.Var.id v1 = Mode.Var.id v2
   | Fixed _, Var _ | Var _, Fixed _ -> false
 ;;
@@ -75,15 +80,14 @@ let known t =
   match t with
   | Fixed const -> Some const
   | Var var ->
-    let lower = Mode.Var.lower var in
-    let upper = Mode.Var.upper var in
+    let lower = Const.of_mode (Mode.Var.lower var) in
     Option.some_if
-      (same_const lower upper)
-      { lower with locality = default.locality }
+      (Const.equal lower (Const.of_mode (Mode.Var.upper var)))
+      lower
 ;;
 
 let sexp_of_t t =
   match t with
-  | Fixed const -> [%sexp (const : Mode.Const.t)]
+  | Fixed const -> [%sexp (const : Const.t)]
   | Var var -> [%sexp Var (Mode.Var.id var : int)]
 ;;

@@ -231,12 +231,14 @@ let check_exact t =
     then
       List.iter (domain t i) ~f:(fun p ->
         let real = Int.Table.create () in
-        List.iter (Mode_closure.raised_alist t.closure x p) ~f:(fun (y, point) ->
-          Option.iter (t.find y) ~f:(fun j ->
-            if observed t j && point > lows.(j)
-            then
-              Hashtbl.update real j ~f:(fun current ->
-                Int.max point (Option.value current ~default:point))));
+        List.iter
+          (Mode_closure.raised_alist t.closure x p)
+          ~f:(fun (y, point) ->
+            Option.iter (t.find y) ~f:(fun j ->
+              if observed t j && point > lows.(j)
+              then
+                Hashtbl.update real j ~f:(fun current ->
+                  Int.max point (Option.value current ~default:point))));
         let level, touched = raise_ t lows i p ~stop:(fun _ -> false) in
         List.iter
           (List.filter touched ~f:(observed t) @ Hashtbl.keys real)

@@ -54,14 +54,14 @@ let make u = { p = (fun x -> x); n = (let n = Int.to_string 3 in fun x -> String
 let n u = let f @ portable = (make ()).n in f
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:3:46-61), then n is bound (at t.stag:3:37-92), then the function returns it (at t.stag:3:13-94), then the function types are unified, then the function returns it (at t.stag:4:29-38), then its field is read (at t.stag:4:29-40), then it is bound by an annotated let (at t.stag:4:18-26), but must be at most portable, because it is annotated portable (at t.stag:4:18-26) |}];
+    {| This is nonportable, because a function type fixes it, as the function types are unified, then the function returns it (at t.stag:3:46-61), then n is bound (at t.stag:3:37-92), then the function returns it (at t.stag:3:13-94), then the function types are unified, then the function returns it (at t.stag:4:29-38), then its field is read (at t.stag:4:29-40), then it is bound by an annotated let (at t.stag:4:18-26), but must be at most portable, because it is annotated portable (at t.stag:4:18-26) |}];
   check
     {|
 type r = { p : string -> string @@ portable }
 let bad u = { p = (let n = Int.to_string 3 in fun x -> String.append x n) }
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:3:27-42), then n is bound (at t.stag:3:18-73), but must be at most portable, because it is held by a field or argument with a modality (at t.stag:3:18-73) |}];
+    {| This is nonportable, because a function type fixes it, as the function types are unified, then the function returns it (at t.stag:3:27-42), then n is bound (at t.stag:3:18-73), but must be at most portable, because it is held by a field or argument with a modality (at t.stag:3:18-73) |}];
   (* Provenance: a [@@ gc] field is gc even when the record holds external
      values. *)
   check
@@ -231,7 +231,7 @@ let p : ptr[(string -> string) @@ portable] = Ptr.make (fun x -> x)
 let store u = p.* <- (let n = Int.to_string 3 in fun x -> String.append x n)
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:3:30-45), then n is bound (at t.stag:3:21-76), but must be at most portable, because it is stored into a cell, which holds only what fits its modality (at t.stag:3:21-76) |}];
+    {| This is nonportable, because a function type fixes it, as the function types are unified, then the function returns it (at t.stag:3:30-45), then n is bound (at t.stag:3:21-76), but must be at most portable, because it is stored into a cell, which holds only what fits its modality (at t.stag:3:21-76) |}];
   check
     {|
 let p : ptr[string -> string] = Ptr.make (fun x -> x)

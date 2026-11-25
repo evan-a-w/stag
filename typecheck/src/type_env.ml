@@ -282,23 +282,29 @@ module Annotation_vars = struct
 end
 
 module Mode_atoms = struct
+  module Point = struct
+    type t = T : 'a Mode.Axis.t * 'a -> t
+  end
+
+  let point : Syntax.Mode_expr.Atom.t -> Point.t = function
+    | Const -> T (Stage, Const)
+    | Portable -> T (Stage, Portable)
+    | Nonportable -> T (Stage, Nonportable)
+    | Static -> T (Provenance, Static)
+    | Gc -> T (Provenance, Gc)
+    | External -> T (Provenance, External)
+    | Global -> T (Locality, Global)
+    | Regional -> T (Locality, Regional)
+    | Local -> T (Locality, Local)
+  ;;
+
   (* The constant of a declaration's arrow: the axes not written are
      [default]'s, but a [const] one is [static]. *)
   let declared ~(default : Mode.Const.t) (atoms : Syntax.Mode_expr.Atom.t list) =
-    let const : Mode.Const.t =
-      List.fold atoms ~init:default ~f:(fun const atom ->
-        match atom with
-        | Const -> { const with stage = Const; provenance = Static }
-        | Portable -> { const with stage = Portable }
-        | Nonportable -> { const with stage = Nonportable }
-        | Global -> { const with locality = Global }
-        | Regional -> { const with locality = Regional }
-        | Local -> { const with locality = Local }
-        | Static -> { const with provenance = Static }
-        | Gc -> { const with provenance = Gc }
-        | External -> { const with provenance = External })
-    in
-    const
+    List.fold atoms ~init:default ~f:(fun const atom ->
+      match atom, point atom with
+      | Const, _ -> { const with stage = Const; provenance = Static }
+      | _, T (axis, point) -> Mode.Const.set const axis point)
   ;;
 end
 
@@ -451,21 +457,24 @@ module Vars = struct
     =
     match t, txt with
     | Annotation vars, Var name ->
-      Result.map
-        (Annotation_vars.mode vars name ~loc)
-        ~f:(fun var -> Mode_arg.Var var)
+      Result.map (Annotation_vars.mode vars name ~loc) ~f:(fun var ->
+        Mode_arg.Var var)
     | Params params, Var name ->
       (match Map.find params name with
        | Some (AMode mode) -> Ok mode
        | Some (ATy _ | ARow _) -> error ~loc (Type_variable_kind_mismatch name)
        | None -> error ~loc (Mode_variable_in_declaration name))
     | _, Atoms atoms ->
-      if List.exists atoms ~f:(fun (atom : Syntax.Mode_expr.Atom.t) ->
-           match atom with
-           | Global | Regional | Local -> true
-           | Const | Portable | Nonportable | Static | Gc | External -> false)
-      then error ~loc Locality_in_mode_argument
-      else Ok (Fixed (Mode_atoms.declared ~default:Mode_arg.default atoms))
+      List.fold_result
+        atoms
+        ~init:Mode_arg.Const.default
+        ~f:(fun const atom : (Mode_arg.Const.t, _) Result.t ->
+          match atom, Mode_atoms.point atom with
+          | Const, _ -> Ok { stage = Const; provenance = Static }
+          | _, T (Stage, stage) -> Ok { const with stage }
+          | _, T (Provenance, provenance) -> Ok { const with provenance }
+          | _, T (Locality, _) -> error ~loc Locality_in_mode_argument)
+      |> Result.map ~f:(fun const -> Mode_arg.Fixed const)
   ;;
 
   let rec term_loc : Syntax.Mode_expr.Term.t -> Loc.t = function
@@ -490,18 +499,6 @@ module Vars = struct
       | Provenance -> T Provenance
       | Locality -> T Locality
     in
-    let point (atom : Syntax.Mode_expr.Atom.t) =
-      match atom with
-      | Const -> 0
-      | Portable -> 1
-      | Nonportable -> 2
-      | Static -> 0
-      | Gc -> 1
-      | External -> 2
-      | Global -> 0
-      | Regional -> 1
-      | Local -> 2
-    in
     (* [m1] applied after [m2]'s left adjoint, on the left; [m1] of [m2], on the
        right: [Morphism.compose m2 m1] and [compose m1 m2]. *)
     let under t m ~left =
@@ -516,12 +513,9 @@ module Vars = struct
       let%map var = Annotation_vars.mode vars name ~loc in
       var, Mode.Morphism.identity (axis on)
     | Meet (t, atom) ->
-      under
-        t
-        (Mode.Morphism.meet_with
-           (axis (Syntax.Mode_expr.Atom.axis atom))
-           (point atom))
-        ~left:true
+      let (T (on, point)) = Mode_atoms.point atom in
+      let module C = (val Mode.Axis.chain on) in
+      under t (Mode.Morphism.meet_with (T on) (C.index point)) ~left:true
     | Release t -> under t Mode.Morphism.release ~left:true
     | Static_if_const t -> under t Mode.Morphism.const_is_static ~left:false
     | Const_if_static t -> under t Mode.Morphism.runtime_is_gc ~left:false
@@ -549,16 +543,8 @@ module Vars = struct
     in
     let bound (atoms : Syntax.Mode_expr.Atom.t list) ~(f : Bound.t) =
       List.fold_result atoms ~init:() ~f:(fun () atom ->
-        match atom with
-        | Const -> f.f Stage Mode.Stage.Const
-        | Portable -> f.f Stage Portable
-        | Nonportable -> f.f Stage Nonportable
-        | Static -> f.f Provenance Static
-        | Gc -> f.f Provenance Gc
-        | External -> f.f Provenance External
-        | Global -> f.f Locality Global
-        | Regional -> f.f Locality Regional
-        | Local -> f.f Locality Local)
+        let (T (axis, point)) = Mode_atoms.point atom in
+        f.f axis point)
     in
     let checked result =
       Result.map_error result ~f:(fun error ->
@@ -1029,10 +1015,7 @@ let declare
          match param.txt with
          | Ty _ -> Type.ATy (TVar (Type.Var.create (Fresh.id t.fresh) Generic))
          | Row _ -> ARow (RVar (Type.Var.create (Fresh.id t.fresh) Generic))
-         | Mode _ ->
-           let var = Mode.Var.create (Fresh.modes t.fresh) ~rank:1 in
-           Mode.Var.generalize [ var ] ~rank:0;
-           AMode (Var var)))
+         | Mode _ -> AMode (Var (Mode.Var.create_generic (Fresh.modes t.fresh)))))
   in
   if not lazily then ignore (force params : Type.arg list);
   Hashtbl.add_exn

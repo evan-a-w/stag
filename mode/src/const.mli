@@ -14,3 +14,4 @@ val le : t -> t -> bool
 val join : t -> t -> t
 val meet : t -> t -> t
 val get : t -> 'a Axis.t -> 'a
+val set : t -> 'a Axis.t -> 'a -> t

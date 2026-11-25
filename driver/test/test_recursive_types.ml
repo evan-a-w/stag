@@ -684,8 +684,7 @@ type l['a] = [`Nil | `Cons of 'a * ptr[l['a]]]
                 ((TVar (Generic 1))
                  (TCon ptr
                   ((ATy (TVar (Link (Cycle_ref 0))))
-                   (AMode
-                    ((stage Nonportable) (provenance Gc) (locality Global)))))))
+                   (AMode ((stage Nonportable) (provenance Gc)))))))
                REmpty)))))))))))
     |}]
 ;;
