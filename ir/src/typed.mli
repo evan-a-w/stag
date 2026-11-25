@@ -341,10 +341,10 @@ module Allocation : sig
   module Placement : sig
     type t =
       | Heap
-      | Region (** The region current when it is made. *)
+      | Region (** The function's (or [region_]'s) own. *)
       | Caller_region
-      (** Returned by its function (or [region_]): made once the region has
-          ended, in the one around it, as under [exclave_]. *)
+      (** The one around it: returned by the function (or [region_]), or under
+          [exclave_]. *)
     [@@deriving sexp_of, compare, equal]
   end
 

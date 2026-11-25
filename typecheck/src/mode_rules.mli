@@ -393,8 +393,8 @@ val default_mode_arg
 
 (** Where each site is made, when [result] (a function's) is used at [global],
     and at [local]. An allocation is made as locally as its mode allows: in the
-    current region if [local], in the caller's if [regional] and returned (ended
-    as by [exclave_]), else on the heap. *)
+    current region if [local]; in the caller's if [regional] and returned, or
+    [local] under [exclave_] (whose modes are the caller's); else on the heap. *)
 val placements
   :  Site.t list
   -> result:Mode.Var.t option
