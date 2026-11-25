@@ -2671,6 +2671,7 @@ and expr_type
     in
     let result_matches = ref true in
     let boxes = ref false in
+    let allocator = ref false in
     let f, x =
       Mode_rules.apply
         modes
@@ -2704,7 +2705,16 @@ and expr_type
               | Var (Bound (Toplevel ident) | Persistent (Toplevel ident)) ->
                 String.equal ident.name (Prelude_path.canonical "Box.make")
               | _ -> false);
+          (allocator
+           := !boxes
+              ||
+              match f.desc with
+              | Var (Intrinsic Ptr_make) -> true
+              | Var (Bound (Toplevel ident) | Persistent (Toplevel ident)) ->
+                String.equal ident.name (Prelude_path.canonical "Ptr.make")
+              | _ -> false);
           f)
+        ~allocator:(fun () -> !allocator)
         ~arg:(fun x_at ->
           result_matches := result_matches_expected ();
           let x_at =

@@ -525,7 +525,11 @@ Each step is a branch stacked on the previous one.
   freed when it ends (its value is checked as a function's result, and
   `exclave_` ends it early). Chosen over a `with_region (fun () -> e)`
   function: a keyword needs no closure, and reads like `stack_` and
-  `exclave_`.
+  `exclave_`. A tail call's value is returned as an `exclave_`'s is (the
+  callee runs after the region has ended, so its caller's region is the
+  function's caller's): `let apply f x = f x` returns what `f` does, local
+  or not, and a search recursing by tail calls (`Map.find`) returns a local
+  part of a local argument.
 
 ## Later
 

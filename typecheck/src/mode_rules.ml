@@ -659,6 +659,12 @@ let exclave ctx (expected : Expected.t) ~loc f =
     Some result
 ;;
 
+let is_arrow ty =
+  match Type.canonical_ty ty with
+  | TArrow _ -> true
+  | _ -> false
+;;
+
 let apply
   ctx
   (expected : Expected.t)
@@ -670,6 +676,7 @@ let apply
   ~arg_ty
   ~res_ty
   ~callee
+  ~allocator
   ~arg
   =
   let tail_reason =
@@ -729,13 +736,32 @@ let apply
             ~loc
             "a tail call gives it further arguments, after the current region \
              has ended (mark the call [@nontail])"));
-  joins
-    ctx
-    expected
-    res_mode
-    ~crossing:(ctx.crossing res_ty)
-    ~loc
-    ~why:"the function returns it";
+  (match expected.region with
+   | Returns function_res
+     when (not expected.applied)
+          && (not (allocator ()))
+          && not (is_arrow res_ty) ->
+     (* A tail call ends the region before the callee runs, so what the callee
+        returns is made in the caller's region, as by [exclave_]. An
+        allocator like [Box.make] is no call, and nor may be an application
+        giving a function (a partial application): they allocate here. *)
+     Ctx.add
+       ctx
+       ~loc
+       (Mode.Var.submode
+          ~crossing:(ctx.crossing res_ty)
+          res_mode
+          function_res
+          (reason ~loc "the function returns it, by a tail call"));
+     held ctx expected res_mode ~loc ~why:"the function returns it"
+   | Returns _ | Ends _ | Nontail | Quoted ->
+     joins
+       ctx
+       expected
+       res_mode
+       ~crossing:(ctx.crossing res_ty)
+       ~loc
+       ~why:"the function returns it");
   f, x
 ;;
 

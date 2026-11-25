@@ -650,7 +650,10 @@ type r = { f : int -> ptr[int] @ local }
 let g (r : r) = r.f 1
 |};
   [%expect
-    {| This is local, because a function type fixes it, then a function is used at a type with other modes, then the function returns it (at t.stag:3:16-21), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:3:16-21) |}]
+    {|
+    type r = { f : int -> ptr[int] @ local }
+    val g : r -> ptr[int] @ local
+    |}]
 ;;
 
 let%expect_test "arrows differing only in what they don't print" =
