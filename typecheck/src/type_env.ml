@@ -281,58 +281,6 @@ module Annotation_vars = struct
   ;;
 end
 
-module Mode_atoms = struct
-  module Point = struct
-    type t = T : 'a Mode.Axis.t * 'a -> t
-  end
-
-  let point : Syntax.Mode_expr.Atom.t -> Point.t = function
-    | Const -> T (Stage, Const)
-    | Portable -> T (Stage, Portable)
-    | Nonportable -> T (Stage, Nonportable)
-    | Static -> T (Provenance, Static)
-    | Gc -> T (Provenance, Gc)
-    | External -> T (Provenance, External)
-    | Global -> T (Locality, Global)
-    | Regional -> T (Locality, Regional)
-    | Local -> T (Locality, Local)
-  ;;
-
-  (* The constant the atoms write: the axes not written are [default]'s, but a
-     [const] one is [static], and written with another provenance is an error. *)
-  let declared
-    ~(default : Mode.Const.t)
-    (atoms : Syntax.Mode_expr.Atom.t list)
-    ~loc
-    =
-    let const =
-      List.fold atoms ~init:default ~f:(fun const atom ->
-        let (T (axis, point)) = point atom in
-        Mode.Const.set const axis point)
-    in
-    let provenance_written =
-      List.exists atoms ~f:(fun atom ->
-        match Syntax.Mode_expr.Atom.axis atom with
-        | Provenance -> true
-        | Stage | Locality -> false)
-    in
-    match const.stage, const.provenance with
-    | (Portable | Nonportable), _ | Const, Static -> Ok const
-    | Const, _ when not provenance_written ->
-      Ok { const with provenance = Static }
-    | Const, ((Gc | External) as provenance) ->
-      Error
-        (Typecheck_error.create
-           ~loc
-           (Invalid_mode
-              (sprintf
-                 "const and %s can't be combined: what is const is computed \
-                  without running code, so is static"
-                 (String.lowercase
-                    (Sexp.to_string (Mode.Provenance.sexp_of_t provenance))))))
-  ;;
-end
-
 (* A mode atom written as a type argument, as in [cell[t, external]]. *)
 let atom_of_path (path : Path.t) =
   match (path :> string list) with

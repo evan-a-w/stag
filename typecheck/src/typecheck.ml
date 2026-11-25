@@ -489,6 +489,7 @@ module Scope = struct
       ~rank:t.rank
       ~holds:(mode_holds t)
       ~crossing:(crossing t)
+      ~report:(report t)
   ;;
 
   let arrow_mode t = Mode_rules.arrow_mode (modes t)
@@ -1709,7 +1710,9 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
                   member.module_
                   (Typecheck_error.create ~loc (Mode_error error)));
              false)
-         ~crossing:(fun _ -> Mode.Crossing.none))
+         ~crossing:(fun _ -> Mode.Crossing.none)
+         ~report:(fun error ->
+           Program_env.report program (Module_scope.within member.module_ error)))
       (init_mode member)
       ~loc:member.expr.loc
       ~why:(why member.ident.name)

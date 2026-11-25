@@ -7,12 +7,14 @@ open! Import
 module Ctx : sig
   type t
 
-  (** [holds] reports a constraint that doesn't hold, returning whether it did. *)
+  (** [holds] reports a constraint that doesn't hold, returning whether it did;
+      [report], an annotation that is invalid. *)
   val create
     :  modes:Mode.Id_source.t
     -> rank:int
     -> holds:(loc:Loc.t -> (unit, Mode.Error.t) Result.t -> bool)
     -> crossing:(Type.ty -> Mode.Crossing.t)
+    -> report:(Typecheck_error.t -> unit)
     -> t
 end
 

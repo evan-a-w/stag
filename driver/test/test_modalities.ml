@@ -742,7 +742,7 @@ let%expect_test "[const] and a runtime provenance, written" =
     This mode is invalid: const and external can't be combined: what is const is computed without running code, so is static
     This mode is invalid: const and external can't be combined: what is const is computed without running code, so is static
     This mode is invalid: const and external can't be combined: what is const is computed without running code, so is static
-    This is external, because it is annotated external (at t.stag:1:20-34), but must be at most static, because it is annotated const (at t.stag:1:20-34), then const implies static
-    This is portable, because it is annotated external (at t.stag:1:20-34), then const implies static, but must be at most const, because it is annotated const (at t.stag:1:20-34)
+    This mode is invalid: const and external can't be combined: what is const is computed without running code, so is static
+    This mode is invalid: const and external can't be combined: what is const is computed without running code, so is static
     |}]
 ;;

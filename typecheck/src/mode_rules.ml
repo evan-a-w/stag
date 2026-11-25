@@ -6,9 +6,13 @@ module Ctx = struct
     ; rank : int
     ; holds : loc:Loc.t -> (unit, Mode.Error.t) Result.t -> bool
     ; crossing : Type.ty -> Mode.Crossing.t
+    ; report : Typecheck_error.t -> unit
     }
 
-  let create ~modes ~rank ~holds ~crossing = { modes; rank; holds; crossing }
+  let create ~modes ~rank ~holds ~crossing ~report =
+    { modes; rank; holds; crossing; report }
+  ;;
+
   let fresh t = Mode.Var.create t.modes ~rank:t.rank
   let add t ~loc result = ignore (t.holds ~loc result : bool)
 end
@@ -119,33 +123,29 @@ let annotate ?(exact = false) ctx mode (annot : Syntax.Mode_expr.t option) ~var 
            (var name ~loc)
            (reason ~loc (sprintf "it is annotated '%s" name)))
     | Atoms atoms ->
-      List.iter atoms ~f:(fun atom ->
-        let reason =
-          reason
-            ~loc
-            (sprintf
-               "it is annotated %s"
-               (Syntax.Mode_expr.Atom.to_string atom))
-        in
-        let fix axis point =
-          Ctx.add
-            ctx
-            ~loc
-            (Mode.Var.at_most mode axis point reason
-             |> Result.bind ~f:(fun () ->
-               if exact then Mode.Var.at_least mode axis point reason else Ok ())
-            )
-        in
-        match atom with
-        | Const -> fix Stage Const
-        | Portable -> fix Stage Portable
-        | Nonportable -> fix Stage Nonportable
-        | Global -> fix Locality Global
-        | Regional -> fix Locality Regional
-        | Local -> fix Locality Local
-        | Static -> fix Provenance Static
-        | Gc -> fix Provenance Gc
-        | External -> fix Provenance External))
+      (match Mode_atoms.invalid atoms with
+       | Some why -> ctx.report (Typecheck_error.create ~loc (Invalid_mode why))
+       | None ->
+         List.iter atoms ~f:(fun atom ->
+           let reason =
+             reason
+               ~loc
+               (sprintf
+                  "it is annotated %s"
+                  (Syntax.Mode_expr.Atom.to_string atom))
+           in
+           let fix axis point =
+             Ctx.add
+               ctx
+               ~loc
+               (Mode.Var.at_most mode axis point reason
+                |> Result.bind ~f:(fun () ->
+                  if exact
+                  then Mode.Var.at_least mode axis point reason
+                  else Ok ()))
+           in
+           let (T (axis, point)) = Mode_atoms.point atom in
+           fix axis point)))
 ;;
 
 let annotated ctx annot ~var =
