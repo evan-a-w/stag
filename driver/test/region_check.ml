@@ -431,8 +431,9 @@ let rec toplevel t (ident : Typed.Ident.t) =
     let value =
       match top.args with
       | _ :: _ ->
+        t.next_id <- t.next_id + 1;
         Obj
-          { id = 0
+          { id = t.next_id
           ; region = Region.heap
           ; site = "toplevel " ^ ident.name
           ; payload =
@@ -815,7 +816,7 @@ let reachable values =
     | Poly_record values -> Map.iter values ~f:value
     | Poly_variant (_, v) -> value v
     | Obj obj ->
-      if not (Hash_set.mem seen obj.id && obj.id <> 0)
+      if not (Hash_set.mem seen obj.id)
       then (
         Hash_set.add seen obj.id;
         live obj ~what:"a reference, from a toplevel,";
