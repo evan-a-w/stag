@@ -559,3 +559,59 @@ let b = w
     t.stag:6:8-9: Unbound value w
     |}]
 ;;
+
+(* While a splice computes a type's definition, code its expression uses may use
+   the type: whether it has pointers is then not known, until the definition is.
+   [g] is checked before or after that, and its constraint is the same. *)
+let%expect_test "a type used while its splice computes it" =
+  let prelude ~def =
+    [%string
+      {|let loop u = loop u
+let pointer_free = Stag.Type_decl.Kind.Variant (Cons (Box.make (("A", Nil), Nil)))
+let with_pointers = Stag.Type_decl.Kind.Variant (Cons (Box.make (("A", Cons (Box.make (Stag.Type_expr.con "string" Nil, Nil))), Nil)))
+let of_param = Stag.Type_decl.Kind.Variant (Cons (Box.make (("A", Cons (Box.make (Stag.Type_expr.Var "a", Nil))), Nil)))
+let cell = Ptr.make (loop ())
+%{def}|}]
+  in
+  let g = "let g (x @ local) = cell.* <- x\n" in
+  let stores ~kind ~ty =
+    [%string
+      "type t['a] = .~(let _ = h in %{kind})\n\
+       let h (u : unit) = cell.* <- (loop () : %{ty})\n"]
+  in
+  let local ~kind =
+    [%string
+      "let f (x : t[int] @ local) = let r @ global = x in r\n\
+       type t['a] = .~(let _ = f in %{kind})\n"]
+  in
+  List.iter
+    [ "pointer-free", stores ~kind:"pointer_free" ~ty:"t[string]"
+    ; "with pointers", stores ~kind:"with_pointers" ~ty:"t[int]"
+    ; "of a pointer-free argument", stores ~kind:"of_param" ~ty:"t[int]"
+    ; "of an argument with pointers", stores ~kind:"of_param" ~ty:"t[string]"
+    ]
+    ~f:(fun (name, def) ->
+      List.iter [ "before"; "after" ] ~f:(fun order ->
+        printf "%s, g %s: " name order;
+        located
+          (match order with
+           | "before" -> prelude ~def:(g ^ def)
+           | _ -> prelude ~def:(def ^ g))));
+  List.iter [ "pointer_free"; "with_pointers"; "of_param" ] ~f:(fun kind ->
+    printf "crossing in its splice, %s: " kind;
+    located (prelude ~def:(local ~kind)));
+  [%expect
+    {|
+    pointer-free, g before: ok
+    pointer-free, g after: ok
+    with pointers, g before: t.stag:7:5-6: This is regional, because it is annotated local (at t.stag:6:11-16), then x is passed to the function (at t.stag:6:20-31), then x is used (at t.stag:6:30-31), then its type turned out to be t, whose definition has pointers (at t.stag:7:5-6), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:6:30-31), then its type turned out to be t, whose definition has pointers (at t.stag:7:5-6)
+    with pointers, g after: t.stag:8:20-31: This is regional, because it is annotated local (at t.stag:8:11-16), then x is passed to the function (at t.stag:8:20-31), then x is used (at t.stag:8:30-31), then its type turned out to be t[int], which has pointers, but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:8:30-31)
+    of a pointer-free argument, g before: ok
+    of a pointer-free argument, g after: ok
+    of an argument with pointers, g before: t.stag:7:5-6: This is regional, because it is annotated local (at t.stag:6:11-16), then x is passed to the function (at t.stag:6:20-31), then x is used (at t.stag:6:30-31), then its type turned out to be t, which has pointers when an argument that has them is (at t.stag:7:5-6), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:6:30-31), then its type turned out to be t, which has pointers when an argument that has them is (at t.stag:7:5-6)
+    of an argument with pointers, g after: t.stag:8:20-31: This is regional, because it is annotated local (at t.stag:8:11-16), then x is passed to the function (at t.stag:8:20-31), then x is used (at t.stag:8:30-31), then its type turned out to be t[string], which has pointers, but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:8:30-31)
+    crossing in its splice, pointer_free: ok
+    crossing in its splice, with_pointers: t.stag:7:5-6: This is regional, because it is annotated local (at t.stag:6:20-25), then x is passed to the function (at t.stag:6:29-52), then x is used (at t.stag:6:46-47), then its type turned out to be t, whose definition has pointers (at t.stag:7:5-6), but must be at most global, because it is annotated global (at t.stag:6:37-43), then it is bound by an annotated let (at t.stag:6:37-43)
+    crossing in its splice, of_param: ok
+    |}]
+;;

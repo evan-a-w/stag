@@ -489,6 +489,13 @@ let kept (x : int @ local) = keep x     (* val kept : int @ local -> int *)
 let make_local x = exclave_ stack_ (Ptr.make x)
 (* val make_local : 'a -> ptr['a] @ local *)
 let used = read_local (make_local 5)    (* val used : int = 5 *)
+
+(* The components of a by-value tuple or record keep their own modes: the
+   global pointer can be returned though its pair holds a local one. *)
+let second x =
+  let pair = ((stack_ (Ptr.make x)), Ptr.make x) in
+  match pair with (_, g) -> g
+(* val second : 'a -> ptr['a] *)
 ```
 
 ```stag-error
@@ -757,6 +764,8 @@ parameter is the provenance of the values held: a map of GC strings is also
 one of possibly external strings (it is covariant), but a cache, being
 mutable, is invariant. What they build goes where the caller wants it, as
 their builders return it with `exclave_`, and `int` values cross every axis.
+A pair's components keep their own modes, so `concat` can match `(l, r)`
+without either map's mode constraining the other's.
 A value used at compile time and lifted into code must be `portable`, and
 at most `gc` (static data can't refer outside the GC heap); the code then
 holds it as a constant (`const static`).

@@ -81,10 +81,19 @@ module Expected = struct
         application. *)
     ; returned : bool
     (** The value, or a part of it, is what its function (or [region_]) gives. *)
+    ; shape : Mode_shape.t option ref option
+    (** Where the modes of the value's components are wanted, given by what
+        makes the value from them: else they are not known. *)
     }
 
   let of_mode mode =
-    { mode; region = Nontail; stack = None; applied = false; returned = false }
+    { mode
+    ; region = Nontail
+    ; stack = None
+    ; applied = false
+    ; returned = false
+    ; shape = None
+    }
   ;;
 
   let fresh ctx = of_mode (Ctx.fresh ctx)
@@ -97,10 +106,21 @@ module Expected = struct
   ;;
 
   let returned t = t.returned
-  let boxed t ~whole = { t with returned = whole.returned }
+  let boxed t ~whole = { t with returned = whole.returned; shape = None }
   let whole t = { t with stack = None; applied = false }
   let nontail t = { t with region = Nontail; applied = false; returned = false }
-  let part t = { t with region = Nontail; applied = false }
+  let part t = { t with region = Nontail; applied = false; shape = None }
+
+  let wanting t =
+    let shape = ref None in
+    { t with shape = Some shape }, shape
+  ;;
+
+  let shape t shape = Option.value !shape ~default:(Mode_shape.opaque t.mode)
+
+  let gives t shape =
+    Option.iter t.shape ~f:(fun wanted -> wanted := Some shape)
+  ;;
 
   (* The same value, at a mode of its own, which is then related to [t]'s. *)
   let same_value ctx t =
@@ -149,12 +169,59 @@ let evaluated ctx expected mode ~loc ~why =
     ~why
 ;;
 
+let evaluate_shaped ?inner ctx expected ~loc ~why f =
+  let sub, shape =
+    Expected.wanting (Expected.fresh (Option.value inner ~default:ctx))
+  in
+  let result = f sub in
+  evaluated ctx expected sub.mode ~loc ~why;
+  result, Expected.shape sub shape
+;;
+
 let evaluate ?inner ctx expected ~loc ~why f =
   let sub = Expected.fresh (Option.value inner ~default:ctx) in
   let result = f sub in
   evaluated ctx expected sub.mode ~loc ~why;
   result, sub.mode
 ;;
+
+module Arms = struct
+  type t =
+    { ctx : Ctx.t
+    ; expected : Expected.t
+    ; arms : (Expected.t * Mode_shape.t option ref) Queue.t
+    }
+
+  let create ctx expected = { ctx; expected; arms = Queue.create () }
+
+  let arm t =
+    let arm = Expected.whole t.expected in
+    match arm.shape with
+    | None -> arm
+    | Some _ ->
+      let arm, shape = Expected.wanting arm in
+      Queue.enqueue t.arms (arm, shape);
+      arm
+  ;;
+
+  let finish t ~loc =
+    if Option.is_some t.expected.shape
+    then
+      Mode_shape.join
+        (Queue.to_list t.arms
+         |> List.map ~f:(fun (arm, shape) -> Expected.shape arm shape))
+        ~whole:t.expected.mode
+        ~component:(fun modes ->
+          let joined = Ctx.fresh t.ctx in
+          List.iter modes ~f:(fun mode ->
+            Ctx.add
+              t.ctx
+              ~loc
+              (Mode.Var.submode mode joined (reason ~loc "it is of a case")));
+          joined)
+      |> Expected.gives t.expected
+  ;;
+end
 
 let runs ctx (expected : Expected.t) stage ~loc ~why =
   Ctx.add
@@ -358,10 +425,92 @@ let part ?ty ctx expected (modality : Modality.t) f =
     part
 ;;
 
+module Parts = struct
+  type t =
+    { ctx : Ctx.t
+    ; expected : Expected.t
+    ; known : (Mode_shape.Step.t * Mode_shape.t) Queue.t option
+    }
+
+  let create ctx (expected : Expected.t) =
+    { ctx
+    ; expected
+    ; known = Option.map expected.shape ~f:(fun _ -> Queue.create ())
+    }
+  ;;
+
+  (* Of its own mode, so that it is known apart from the rest of the value: what
+     [stack_] allocates of it is local, whatever the rest is. *)
+  let own ?ty { ctx; expected; _ } modality f =
+    let global = Modality.is_global modality in
+    let sub =
+      if global
+      then Expected.fresh ctx
+      else { (Expected.part expected) with mode = Ctx.fresh ctx }
+    in
+    let allocates = Option.map sub.stack ~f:(fun _ -> ref false) in
+    let sub, shape = Expected.wanting { sub with stack = allocates } in
+    let (part : Typed.Expr.t) = f sub in
+    let ty = Option.value ty ~default:part.ty in
+    let loc = part.loc in
+    (match allocates, expected.stack with
+     | Some allocates, Some whole when !allocates ->
+       whole := true;
+       Ctx.add
+         ctx
+         ~loc
+         (Mode.Var.at_least
+            sub.mode
+            Locality
+            Local
+            (reason ~loc "it is allocated by [stack_]"))
+     | _ -> ());
+    fits
+      ~ty
+      ctx
+      sub.mode
+      modality
+      ~loc
+      ~why:"it is held by a field or argument with a modality";
+    if global
+    then held ctx expected sub.mode ~loc ~why:"it is held"
+    else joins ctx expected sub.mode ~ty ~loc ~why:"it is held";
+    part, Expected.shape sub shape
+  ;;
+
+  let part ?ty t step modality f =
+    match t.known with
+    | None -> part ?ty t.ctx t.expected modality f
+    | Some known ->
+      let part, shape = own ?ty t modality f in
+      Queue.enqueue known (step, shape);
+      part
+  ;;
+
+  let finish t =
+    Option.iter t.known ~f:(fun known ->
+      Expected.gives
+        t.expected
+        (Mode_shape.known ~whole:t.expected.mode (Queue.to_list known)))
+  ;;
+end
+
+let component (block : Mode_shape.t) step =
+  Option.bind step ~f:(fun step ->
+    match Mode_shape.follow block [ Part (step, Modality.id) ] with
+    | component, _, Some _ -> Some component
+    | _, _, None -> None)
+;;
+
 let project ctx expected ~loc ~why f =
-  let block = Expected.fresh ctx in
-  let result, (modality : Modality.t) = f block in
-  joins ctx expected (read ctx block.mode modality ~loc ~why) ~loc ~why;
+  let block, shape = Expected.wanting (Expected.fresh ctx) in
+  let result, (modality : Modality.t), step = f block in
+  let read =
+    match component (Expected.shape block shape) step with
+    | Some component -> component
+    | None -> read ctx block.mode modality ~loc ~why
+  in
+  joins ctx expected read ~loc ~why;
   result
 ;;
 
@@ -437,8 +586,10 @@ module Binding = struct
     Binding.of_mode cell, Binding.of_mode held
   ;;
 
-  let project ctx ~block (modality : Modality.t) ~loc =
-    Binding.of_mode (read ctx block modality ~loc ~why:"it is bound to a part")
+  let component ctx block path ~loc =
+    let mode, modality, shape = Mode_shape.follow block path in
+    ( Binding.of_mode (read ctx mode modality ~loc ~why:"it is bound to a part")
+    , shape )
   ;;
 
   let embedded ctx ~name ~loc =
@@ -547,7 +698,10 @@ module Alloc = struct
   let stack ctx expected ~loc f =
     let allocates = ref false in
     let inner =
-      { (Expected.same_value ctx expected) with stack = Some allocates }
+      { (Expected.same_value ctx expected) with
+        stack = Some allocates
+      ; shape = expected.shape
+      }
     in
     let (result : Typed.Expr.t) = f inner in
     if !allocates || Typed.Expr.has_error result
@@ -1073,7 +1227,17 @@ let use
       (constant ctx ~loc ~why:(sprintf "%s is lifted into the code" name))
       ~loc
       ~why
-  | None -> joins ctx expected mode ~ty ~locality ~loc ~why
+  | None ->
+    joins ctx expected mode ~ty ~locality ~loc ~why;
+    Option.iter entry.shape ~f:(fun shape ->
+      Mode_shape.map shape ~whole:expected.mode ~component:(fun component ->
+        let used = Ctx.fresh ctx in
+        Ctx.add
+          ctx
+          ~loc
+          (Mode.Var.submode ~locality component used (reason "%s is used"));
+        used)
+      |> Expected.gives expected)
 ;;
 
 let use_free ctx expected ~locks ~loc ~why =
@@ -1097,7 +1261,12 @@ module Splice = struct
   let code ~code f = f (Expected.of_mode code)
 
   let captured (expected : Expected.t) =
-    { expected with region = Nontail; stack = None; returned = false }
+    { expected with
+      region = Nontail
+    ; stack = None
+    ; returned = false
+    ; shape = None
+    }
   ;;
 
   let substitution ctx expected ~loc f =

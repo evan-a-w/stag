@@ -118,7 +118,7 @@ module Gen = struct
     match
       if depth <= 0
       then Random.State.int t.random 2
-      else Random.State.int t.random 30
+      else Random.State.int t.random 34
     with
     | 0 -> sprintf "Box.make %s" (pick t ints)
     | 1 -> sprintf "stack_ (Box.make %s)" (pick t ints)
@@ -282,6 +282,85 @@ module Gen = struct
         (int ())
         p
         (int ())
+    | 27 | 28 ->
+      (* A tuple mixing [stack_] and other parts, bound, then taken apart. *)
+      let p = name t "p"
+      and a = name t "a"
+      and b = name t "b" in
+      sprintf
+        "(let %s = ((stack_ (Box.make %s)), %s) in match %s with (%s, %s) -> \
+         %s)"
+        p
+        (int ())
+        (sub ~tail:false ())
+        p
+        a
+        b
+        (pick t [ b; a; sprintf "Box.make (Int.add (sum %s) (sum %s))" a b ])
+    | 29 ->
+      (* Nested, through another variable, with a closure part. *)
+      let p = name t "p"
+      and q = name t "q"
+      and f = name t "f"
+      and b = name t "b" in
+      sprintf
+        "(let %s = ((%s, %s), stack_ (Box.make %s)) in let %s = %s in match %s \
+         with ((%s, %s), _) -> %s)"
+        p
+        (closure ())
+        (sub ~tail:false ())
+        (int ())
+        q
+        p
+        q
+        f
+        b
+        (pick t [ b; sprintf "%s %s" f (int ()) ])
+    | 30 ->
+      (* Cases joined part by part. *)
+      let p = name t "p"
+      and a = name t "a"
+      and b = name t "b" in
+      sprintf
+        "(let %s = match Int.equal %s 0 with true -> ((stack_ (Box.make 1)), \
+         %s) | false -> (%s, stack_ (Box.make 2)) in match %s with (%s, %s) -> \
+         %s)"
+        p
+        (int ())
+        (sub ~tail:false ())
+        (sub ~tail:false ())
+        p
+        a
+        b
+        (pick t [ a; b ])
+    | 31 ->
+      (* A field of a record of a local and another part. *)
+      let r = name t "r" in
+      sprintf
+        "(let %s = {`l = (stack_ (Box.make %s)); `r = %s} in %s)"
+        r
+        (int ())
+        (sub ~tail:false ())
+        (pick t [ r ^ ".`r"; r ^ ".`l" ])
+    | 32 ->
+      (* A part used inside a closure, bound outside it. *)
+      let p = name t "p"
+      and g = name t "g"
+      and a = name t "a"
+      and b = name t "b" in
+      sprintf
+        "(let %s = ((stack_ (Box.make %s)), %s) in let %s (y : int) = match %s \
+         with (%s, %s) -> %s in %s %s)"
+        p
+        (int ())
+        (sub ~tail:false ())
+        g
+        p
+        a
+        b
+        (pick t [ a; b ])
+        g
+        (int ())
     | _ ->
       let n = name t "n" in
       sprintf
@@ -420,9 +499,9 @@ let%expect_test "no allocation is used after its region ends" =
       [%message (seed : int) (outcomes : (string * int) list) (regions : int)]);
   [%expect
     {|
-    ((seed 7) (outcomes ((ran 896) (rejected 604))) (regions 4246))
-    ((seed 8) (outcomes ((ran 884) (rejected 616))) (regions 4545))
-    ((seed 9) (outcomes ((ran 935) (rejected 565))) (regions 4754))
+    ((seed 7) (outcomes ((ran 588) (rejected 912))) (regions 3057))
+    ((seed 8) (outcomes ((ran 726) (rejected 774))) (regions 4027))
+    ((seed 9) (outcomes ((ran 695) (rejected 805))) (regions 3698))
     |}]
 ;;
 
@@ -440,7 +519,7 @@ let%expect_test "with placements that ignore their instance, some are" =
   print_endline (Option.value_exn (Queue.peek failures));
   [%expect
     {|
-    (outcomes ((ran 485) (rejected 604) ("use after free" 411)))
+    (outcomes ((ran 324) (rejected 912) ("use after free" 264)))
 
     let keep : ptr[box[int]] = Ptr.make (Box.make 0)
     let keepc : ptr[int -> box[int]] = Ptr.make (fun (y : int) -> Box.make y)
@@ -457,10 +536,9 @@ let%expect_test "with placements that ignore their instance, some are" =
     let h (y : int) = Box.make y
     let k (j : int -> box[int]) = sum (j 1)
     let m (a : int) (b : int) = Box.make (Int.add a b)
-    let t1 (a : int) (b : int) = ((match `A (m (Int.add a b)) with `A g2 -> g2 (Int.add b b)))
-    let f h k m (x : int) = (Box.make (k (fun (z : int) -> ((t1 (Int.add z x)) 1))))
-    let g (u : unit) = let r @ global = f (fun (y : int) -> Box.make y) (fun j -> sum (j 1)) (fun (a : int) -> fun (b : int) -> Box.make (Int.add a b)) 1 in sum r
-    a call of the Partial_application at t.stag:16:28-50, made in the region of a call of toplevel t1, after it ended
+    let f h k m (x : int) = ((let p1 = m 1 in p1 (Int.add 1 x)))
+    let l (u : unit) = let r @ local = f (fun (y : int) -> Box.make y) (fun j -> sum (j 1)) mk2 1 in sum r [@nontail]
+    a call of the Partial_application at t.stag:5:30-52, made in the region of a call of toplevel f, after it ended
     |}]
 ;;
 
@@ -475,7 +553,7 @@ let%expect_test "with tail calls not ending their region" =
   Option.iter (Queue.peek failures) ~f:print_endline;
   [%expect
     {|
-    (outcomes ((ran 422) (rejected 604) ("use after free" 474)))
+    (outcomes ((ran 324) (rejected 912) ("use after free" 264)))
 
     let keep : ptr[box[int]] = Ptr.make (Box.make 0)
     let keepc : ptr[int -> box[int]] = Ptr.make (fun (y : int) -> Box.make y)
@@ -492,9 +570,8 @@ let%expect_test "with tail calls not ending their region" =
     let h (y : int) = Box.make y
     let k (j : int -> box[int]) = sum (j 1)
     let m (a : int) (b : int) = Box.make (Int.add a b)
-    let t1 (a : int) (b : int) = ((match `A (m (Int.add a b)) with `A g2 -> g2 (Int.add b b)))
-    let f h k m (x : int) = (Box.make (k (fun (z : int) -> ((t1 (Int.add z x)) 1))))
-    let t (u : unit) = let r @ local = f (fun (y : int) -> exclave_ Box.make y) (fun j -> let b @ local = j 1 in sum b [@nontail]) (fun (a : int) -> exclave_ fun (b : int) -> exclave_ Box.make (Int.add a b)) 1 in sum r [@nontail]
-    a reference, from the result of a call of toplevel t1, of the Box at t.stag:16:28-50, made in the region of a call of toplevel t1, after it ended
+    let f h k m (x : int) = ((let p1 = m 1 in p1 (Int.add 1 x)))
+    let l (u : unit) = let r @ local = f (fun (y : int) -> Box.make y) (fun j -> sum (j 1)) mk2 1 in sum r [@nontail]
+    a reference, from the result of a call of toplevel f, of the Box at t.stag:5:30-52, made in the region of a call of toplevel f, after it ended
     |}]
 ;;

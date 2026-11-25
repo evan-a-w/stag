@@ -336,8 +336,23 @@ module Alloc_fuzz = struct
   ;;
 
   let rec returned random depth ~flow : string * Model.t * Site.t list =
-    match if depth = 0 then 0 else Random.State.int random 4 with
+    match if depth = 0 then 0 else Random.State.int random 6 with
     | 0 -> "Box.make x", { global = true; local = true }, [ Returned flow ]
+    | 3 | 4 ->
+      (* A component next to a [stack_] one is returned as if alone: as it is
+         bound first, it is on the heap. *)
+      let body, model, sites = returned random (depth - 1) ~flow in
+      ( sprintf
+          (if Random.State.bool random
+           then
+             "(let p = ((stack_ (Box.make 1)), Box.make x) in match p with (l, \
+              r) -> match Int.equal (sum l) 0 with true -> r | false -> %s)"
+           else
+             "(let p = {`l = (stack_ (Box.make 1)); `r = Box.make x} in match \
+              Int.equal (sum p.`l) 0 with true -> p.`r | false -> %s)")
+          body
+      , model
+      , Placed "region" :: Placed "heap" :: sites )
     | 1 ->
       let body, global, sites = exclaved random (depth - 1) ~flow in
       sprintf "exclave_ %s" body, { global; local = true }, sites
@@ -433,5 +448,5 @@ let%expect_test "random allocations are placed as a model says" =
   print_s
     [%message
       (!accepted : int) (!rejected : int) ~wrong:(Queue.length wrong : int)];
-  [%expect {| ((!accepted 284) (!rejected 16) (wrong 0)) |}]
+  [%expect {| ((!accepted 295) (!rejected 5) (wrong 0)) |}]
 ;;

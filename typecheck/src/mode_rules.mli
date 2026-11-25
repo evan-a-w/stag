@@ -99,6 +99,17 @@ val evaluate
   -> (Expected.t -> 'a)
   -> 'a * Mode.Var.t
 
+(** As [evaluate], with the modes of the value's components, if known: a value
+    bound or matched on. *)
+val evaluate_shaped
+  :  ?inner:Ctx.t
+  -> Ctx.t
+  -> Expected.t
+  -> loc:Loc.t
+  -> why:string
+  -> (Expected.t -> 'a)
+  -> 'a * Mode_shape.t
+
 (** A fresh mode fixed to the annotation on the axes it names. *)
 val annotated
   :  Ctx.t
@@ -127,14 +138,50 @@ val part
   -> (Expected.t -> Typed.Expr.t)
   -> Typed.Expr.t
 
+(** The parts of a by-value value being built (a tuple, record or constructor
+    argument), each held through a modality. Where the modes of the value's
+    components are wanted, each part is at a mode of its own. *)
+module Parts : sig
+  type t
+
+  val create : Ctx.t -> Expected.t -> t
+
+  (** Of [ty] (by default its type). *)
+  val part
+    :  ?ty:Type.ty
+    -> t
+    -> Mode_shape.Step.t
+    -> Modality.t
+    -> (Expected.t -> Typed.Expr.t)
+    -> Typed.Expr.t
+
+  (** Once each part is checked: the value is made of them. *)
+  val finish : t -> unit
+end
+
+(** The cases of a [match]: its value is one of theirs, so each of its
+    components is the join of theirs. *)
+module Arms : sig
+  type t
+
+  val create : Ctx.t -> Expected.t -> t
+
+  (** Where a case's body is checked. *)
+  val arm : t -> Expected.t
+
+  (** Once each case is checked. *)
+  val finish : t -> loc:Loc.t -> unit
+end
+
 (** Reads a part of a block, checked at the mode given: the value is the part,
-    through the modality it returns. *)
+    through the modality it returns, or the component at the step, if its mode
+    is known. *)
 val project
   :  Ctx.t
   -> Expected.t
   -> loc:Loc.t
   -> why:string
-  -> (Expected.t -> 'a * Modality.t)
+  -> (Expected.t -> 'a * Modality.t * Mode_shape.Step.t option)
   -> 'a
 
 (** The mode of a variable: only these make one. *)
@@ -169,8 +216,14 @@ module Binding : sig
     -> loc:Loc.t
     -> t * t
 
-  (** Bound by a pattern to a part of a block of mode [block]. *)
-  val project : Ctx.t -> block:Mode.Var.t -> Modality.t -> loc:Loc.t -> t
+  (** Bound by a pattern to the part of a block at the end of the path: with the
+      modes of its own components, if known. *)
+  val component
+    :  Ctx.t
+    -> Mode_shape.t
+    -> Mode_shape.Path.t
+    -> loc:Loc.t
+    -> t * Mode_shape.t option
 
   (** A value computed at compile time, embedded in the code. *)
   val embedded : Ctx.t -> name:string -> loc:Loc.t -> t

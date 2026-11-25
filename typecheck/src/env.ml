@@ -44,6 +44,7 @@ module Entry = struct
     ; quote_id : int option
     ; mode : Binding.t
     ; held : Binding.t option
+    ; shape : (Mode_shape.t option[@sexp.opaque])
     ; locks : (Lock.t list[@sexp.opaque])
     ; binder : Typed.Binder.t
     ; defining : bool
@@ -56,6 +57,7 @@ module Entry = struct
     ; quote_id = None
     ; mode
     ; held
+    ; shape = None
     ; locks = []
     ; binder = Toplevel ident
     ; defining
