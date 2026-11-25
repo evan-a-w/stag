@@ -3340,19 +3340,27 @@ and expr_type
              ( var.ident.name
              , Scope.entry scope ~ident:var.ident ~scheme:var.ty ~mode )))
           ~f:(fun () ->
-            check_expr
-              t
-              scope
-              ~at:(Mode_rules.Expected.whole at)
-              ~expr:body
-              ~ty:result
-              ?expected:(either_known result expected)
-              ~hint:
-                (match Type.canonical_ty result with
-                 | TVar _ -> hint
-                 | _ ->
-                   (* An earlier case's type, which this one must have. *)
-                   Required))
+            (* Typed on its own, as the expected type would make it the
+               result's, then used at the result: the join of the cases. *)
+            let body =
+              check_expr
+                t
+                scope
+                ~at:(Mode_rules.Expected.whole at)
+                ~expr:body
+                ~ty:(Scope.fresh_ty t scope)
+                ?expected:(either_known result expected)
+                ~hint:
+                  (match Type.canonical_ty result with
+                   | TVar _ -> hint
+                   | _ ->
+                     (* An earlier case's type, which this one must have. *)
+                     Required)
+            in
+            if Type.is_error body.ty
+               || Scope.subtypes t scope ~lower:body.ty ~upper:result ~loc:body.loc
+            then body
+            else { desc = Error [ body ]; ty = Type.error; loc = body.loc })
       in
       (pattern, body), unified
     in
