@@ -25,7 +25,7 @@ let code2 = .<m>.
     {|
     val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm2 <= regional and stage('m4) <= stage('m1) and provenance('m4) <= provenance('m1) and meet(locality('m4), regional) <= locality('m1) and gc <= 'm3
-    val const_ : 'a @ 'm0 -> ('b @ 'm2 -> 'a @ 'm3) @ 'm1 with 'm0 <= 'm3 and release(locality('m0)) <= locality('m3) and 'm0 <= 'm1 and gc <= 'm1
+    val const_ : 'a @ 'm0 -> ('b @ _ -> 'a @ 'm2) @ 'm1 with 'm0 <= 'm2 and release(locality('m0)) <= locality('m2) and 'm0 <= 'm1 and gc <= 'm1
     val n : int
     val code : <int>{..'a}
     val m : string
@@ -109,8 +109,8 @@ let use u = apply (fun (x @ local) -> x) 1
 |};
   [%expect
     {|
-    val apply : (int -> int) @ 'm0 -> (int @ 'm2 -> int @ 'm3) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
-    val use : 'a @ 'm0 -> int @ 'm1
+    val apply : (int -> int) @ 'm0 -> (int @ _ -> int @ _) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
+    val use : 'a @ _ -> int @ _
     |}];
   modes
     {|
@@ -140,7 +140,7 @@ let g x = let h u = x in forget h in .<h>.
 |};
   [%expect
     {|
-    val f : 'a @ 'm0 -> <'b>{x : 'b; ..'c} @ 'm1
+    val f : 'a @ _ -> <'b>{x : 'b; ..'c} @ _
     val g : 'a @ 'm0 -> <'b>{h : 'b; ..'c} @ 'm1 with stage('m0) <= stage('m1)
     |}]
 ;;
@@ -194,7 +194,7 @@ let wrap x = exclave_ stack_ (Ptr.make x)
 |};
   [%expect
     {|
-    let mk_copy : ptr[int] @ 'm0 -> ptr[int @@ 'm2] @ 'm1 with local <= 'm0 and nonportable gc local <= 'm1 = mk
+    let mk_copy : ptr[int] @ 'm0 -> ptr[int @@ _] @ 'm1 with local <= 'm0 and nonportable gc local <= 'm1 = mk
     let pass_copy : ptr[int] @ 'm0 -> ptr[int] @ 'm1 with local <= 'm0 and 'm0 <= 'm1 = pass
     let wrap_copy : 'a @ 'm0 -> ptr['a @@ 'm2] @ 'm1 with 'm0 <= 'm2 and 'm0 <= global and portable <= 'm2 and nonportable gc local <= 'm1 = wrap
     |}];
@@ -207,9 +207,9 @@ let embed (x : int) = .< x >.
 |};
   [%expect
     {|
-    let cross_copy : int @ 'm0 -> int @ 'm1 = cross
+    let cross_copy : int @ _ -> int @ _ = cross
     let pair_copy : int @ 'm0 -> (string @ 'm2 -> int * string @ 'm3) @ 'm1 with 'm0 <= 'm1 and 'm2 <= 'm3 and release(locality('m2)) <= locality('m3) and gc <= 'm1 = pair
-    let embed_copy : int @ 'm0 -> <int>{..'a} @ 'm1 with gc <= 'm1 = embed
+    let embed_copy : int @ _ -> <int>{..'a} @ 'm0 with gc <= 'm0 = embed
     |}];
   (* [const] is [static], and a value allocated at run time is [gc]. *)
   round_trip
@@ -220,7 +220,7 @@ let pinned : string @ 'm -> string @ 'n with 'm <= const = fun s -> s
 |};
   [%expect
     {|
-    let closure_copy : 'a @ 'm0 -> (int @ 'm2 -> 'a @ 'm3) @ 'm1 with 'm0 <= 'm3 and release(locality('m0)) <= locality('m3) and 'm0 <= 'm1 and gc <= 'm1 = closure
+    let closure_copy : 'a @ 'm0 -> (int @ _ -> 'a @ 'm2) @ 'm1 with 'm0 <= 'm2 and release(locality('m0)) <= locality('m2) and 'm0 <= 'm1 and gc <= 'm1 = closure
     let keep_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) = keep
     let pinned_copy : string @ 'm0 -> string @ 'm1 with release(locality('m0)) <= locality('m1) and 'm0 <= const = pinned
     |}]
@@ -243,7 +243,7 @@ let const_if : 'a @ 'm -> 'a @ 'n with stage('n) <= const_if_static(provenance('
     let release__copy : 'a @ 'm0 -> 'a @ 'm1 with release(locality('m0)) <= locality('m1) = release_
     let nested_copy : 'a @ 'm0 -> 'a @ 'm1 with meet(locality('m0), regional) <= locality('m1) = nested
     let static_if_copy : 'a @ 'm0 -> 'a @ 'm1 with provenance('m1) <= static_if_const(stage('m0)) = static_if
-    let const_if_copy : 'a @ 'm0 -> 'a @ 'm1 with gc <= 'm0 = const_if
+    let const_if_copy : 'a @ 'm0 -> 'a @ _ with gc <= 'm0 = const_if
     |}]
 ;;
 
@@ -263,7 +263,7 @@ let fixed (x @ portable) : int @ portable = x
     {|
     let ident_copy : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) = ident
     let apply_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm2 <= regional and stage('m4) <= stage('m1) and provenance('m4) <= provenance('m1) and meet(locality('m4), regional) <= locality('m1) and gc <= 'm3 = apply
-    let const__copy : 'a @ 'm0 -> ('b @ 'm2 -> 'a @ 'm3) @ 'm1 with 'm0 <= 'm3 and release(locality('m0)) <= locality('m3) and 'm0 <= 'm1 and gc <= 'm1 = const_
+    let const__copy : 'a @ 'm0 -> ('b @ _ -> 'a @ 'm2) @ 'm1 with 'm0 <= 'm2 and release(locality('m0)) <= locality('m2) and 'm0 <= 'm1 and gc <= 'm1 = const_
     let chain_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> (('c @ 'm5 -> 'a @ 'm6) @ 'm4 -> ('c @ 'm8 -> 'b @ 'm9) @ 'm7) @ 'm3 with 'm0 <= 'm7 and 'm0 <= 'm3 and 'm2 <= 'm9 and release(locality('m2)) <= locality('m9) and 'm2 <= regional and 'm4 <= 'm7 and portable <= 'm5 and 'm6 <= 'm1 and 'm6 <= regional and stage('m8) <= stage('m5) and provenance('m8) <= provenance('m5) and meet(locality('m8), regional) <= locality('m5) and gc <= 'm7 and gc <= 'm3 = chain
     let f_copy : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= portable and gc <= 'm1 = f
     let g_copy : 'a @ 'm0 -> <'b>{h : 'b; ..'c} @ 'm1 with stage('m0) <= stage('m1) = g
@@ -434,7 +434,7 @@ let%expect_test "a let mut's mode bounds the values it holds" =
   modes {|
 let ok u = let mut x @ portable = "a" in x <- "b"; x
 |};
-  [%expect {| val ok : 'a @ 'm0 -> string @ 'm1 with nonportable <= 'm1 |}];
+  [%expect {| val ok : 'a @ _ -> string @ 'm0 with nonportable <= 'm0 |}];
   modes {|
 let bad u = let mut x @ const = "a" in x <- Int.to_string 3; x
 |};
@@ -494,19 +494,19 @@ let swap_any p q = let v = p.* in p.* <- q.*; q.* <- v
     {|
     let ext_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1 = ext
     let p_copy : ptr[string] = p
-    let store_copy : string @ 'm0 -> unit @ 'm1 with 'm0 <= gc global = store
+    let store_copy : string @ 'm0 -> unit @ _ with 'm0 <= gc global = store
     let keep_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= static = keep
-    let in_ptr_copy : 'a @ 'm0 -> ptr[string @@ 'm2] @ 'm1 with external <= 'm2 and nonportable gc <= 'm1 = in_ptr
-    let k_copy : int @ 'm0 -> (int @ 'm2 -> int @ 'm3) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1 = k
-    let captures_copy : string @ 'm0 -> (int @ 'm2 -> string @ 'm3) @ 'm1 with 'm0 <= 'm3 and release(locality('m0)) <= locality('m3) and 'm0 <= 'm1 and gc <= 'm1 = captures
-    let closed_copy : 'a @ 'm0 -> (int @ 'm2 -> int @ 'm3) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1 = closed
-    let ints_copy : ptr[int] @ 'm0 -> unit @ 'm1 = ints
-    let strings_copy : ptr[string] @ 'm0 -> (string @ 'm2 -> unit @ 'm3) @ 'm1 with 'm0 <= 'm1 and 'm2 <= gc global and gc <= 'm1 = strings
-    let get_any_copy : ptr['a @@ 'm1] @ 'm0 -> 'a @ 'm2 with 'm1 <= 'm2 = get_any
+    let in_ptr_copy : 'a @ _ -> ptr[string @@ 'm1] @ 'm0 with external <= 'm1 and nonportable gc <= 'm0 = in_ptr
+    let k_copy : int @ 'm0 -> (int @ _ -> int @ _) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1 = k
+    let captures_copy : string @ 'm0 -> (int @ _ -> string @ 'm2) @ 'm1 with 'm0 <= 'm2 and release(locality('m0)) <= locality('m2) and 'm0 <= 'm1 and gc <= 'm1 = captures
+    let closed_copy : 'a @ 'm0 -> (int @ _ -> int @ _) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1 = closed
+    let ints_copy : ptr[int] @ _ -> unit @ _ = ints
+    let strings_copy : ptr[string] @ 'm0 -> (string @ 'm2 -> unit @ _) @ 'm1 with 'm0 <= 'm1 and 'm2 <= gc global and gc <= 'm1 = strings
+    let get_any_copy : ptr['a @@ 'm0] @ _ -> 'a @ 'm1 with 'm0 <= 'm1 = get_any
     let id_cell_copy : ptr['a @@ 'm1] @ 'm0 -> ptr['a @@ 'm1] @ 'm2 with 'm0 <= 'm2 and release(locality('m0)) <= locality('m2) = id_cell
     let static_cell_copy : ptr[string @@ static] = static_cell
     let ext_cell_copy : ptr[string @@ external] = ext_cell
-    let swap_any_copy : ptr['a @@ 'm1] @ 'm0 -> (ptr['a @@ 'm1] @ 'm3 -> unit @ 'm4) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and gc <= 'm2 = swap_any
+    let swap_any_copy : ptr['a @@ 'm1] @ 'm0 -> (ptr['a @@ 'm1] @ _ -> unit @ _) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and gc <= 'm2 = swap_any
     ("not compared" p (error weak))
     |}]
 ;;
@@ -566,9 +566,9 @@ let apply f x = f x
     let pick_copy : string @ 'm0 -> (string @ 'm2 -> string @ 'm3) @ 'm1 with 'm0 <= 'm3 and release(locality('m0)) <= locality('m3) and 'm0 <= 'm1 and stage('m2) <= stage('m3) and gc <= 'm1 = pick
     let ext_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1 = ext
     let through_stage_copy : (string @ 'm1 -> string @ 'm2) @ 'm0 -> (string @ 'm4 -> string @ 'm5) @ 'm3 with 'm0 <= 'm3 and external <= 'm1 and stage('m1) <= stage('m2) and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm2 <= regional and 'm4 <= 'm1 and 'm4 <= global and gc <= 'm3 = through_stage
-    let fixed_stage_copy : 'a @ 'm0 -> string @ 'm1 with nonportable gc <= 'm1 = fixed_stage
+    let fixed_stage_copy : 'a @ _ -> string @ 'm0 with nonportable gc <= 'm0 = fixed_stage
     let fixed_and_related_copy : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and nonportable <= 'm1 = fixed_and_related
-    let local_closure_copy : 'a @ 'm0 -> (int @ 'm2 -> 'a @ 'm3) @ 'm1 with local <= 'm0 and 'm0 <= 'm3 and 'm0 <= 'm1 and gc <= 'm1 = local_closure
+    let local_closure_copy : 'a @ 'm0 -> (int @ _ -> 'a @ 'm2) @ 'm1 with local <= 'm0 and 'm0 <= 'm2 and 'm0 <= 'm1 and gc <= 'm1 = local_closure
     let apply_copy : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3 with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm2 <= regional and stage('m4) <= stage('m1) and provenance('m4) <= provenance('m1) and meet(locality('m4), regional) <= locality('m1) and gc <= 'm3 = apply
     |}]
 ;;
@@ -583,7 +583,7 @@ let big_apply n =
 let%expect_test "printing: a large higher-order function" =
   round_trip (big_apply 4);
   [%expect
-    {| let big_copy : ('a @ 'm1 -> ('b @ 'm3 -> ('c @ 'm5 -> ('d @ 'm7 -> 'e @ 'm8) @ 'm6) @ 'm4) @ 'm2) @ 'm0 -> ('a @ 'm10 -> ('b @ 'm12 -> ('c @ 'm14 -> ('d @ 'm16 -> 'e @ 'm17) @ 'm15) @ 'm13) @ 'm11) @ 'm9 with 'm0 <= 'm15 and 'm0 <= 'm13 and 'm0 <= 'm11 and 'm0 <= 'm9 and portable <= 'm1 and portable <= 'm3 and portable <= 'm5 and portable <= 'm7 and 'm8 <= 'm17 and release(locality('m8)) <= locality('m17) and 'm8 <= regional and stage('m10) <= stage('m1) and provenance('m10) <= provenance('m1) and meet(locality('m10), regional) <= locality('m1) and 'm10 <= 'm15 and 'm10 <= 'm13 and 'm10 <= 'm11 and stage('m12) <= stage('m3) and provenance('m12) <= provenance('m3) and meet(locality('m12), regional) <= locality('m3) and 'm12 <= 'm15 and 'm12 <= 'm13 and stage('m14) <= stage('m5) and provenance('m14) <= provenance('m5) and meet(locality('m14), regional) <= locality('m5) and 'm14 <= 'm15 and stage('m16) <= stage('m7) and provenance('m16) <= provenance('m7) and meet(locality('m16), regional) <= locality('m7) and gc <= 'm15 and gc <= 'm13 and gc <= 'm11 and gc <= 'm9 = big |}];
+    {| let big_copy : ('a @ 'm1 -> ('b @ 'm2 -> ('c @ 'm3 -> ('d @ 'm4 -> 'e @ 'm5) @ _) @ _) @ _) @ 'm0 -> ('a @ 'm7 -> ('b @ 'm9 -> ('c @ 'm11 -> ('d @ 'm13 -> 'e @ 'm14) @ 'm12) @ 'm10) @ 'm8) @ 'm6 with 'm0 <= 'm12 and 'm0 <= 'm10 and 'm0 <= 'm8 and 'm0 <= 'm6 and portable <= 'm1 and portable <= 'm2 and portable <= 'm3 and portable <= 'm4 and 'm5 <= 'm14 and release(locality('m5)) <= locality('m14) and 'm5 <= regional and stage('m7) <= stage('m1) and provenance('m7) <= provenance('m1) and meet(locality('m7), regional) <= locality('m1) and 'm7 <= 'm12 and 'm7 <= 'm10 and 'm7 <= 'm8 and stage('m9) <= stage('m2) and provenance('m9) <= provenance('m2) and meet(locality('m9), regional) <= locality('m2) and 'm9 <= 'm12 and 'm9 <= 'm10 and stage('m11) <= stage('m3) and provenance('m11) <= provenance('m3) and meet(locality('m11), regional) <= locality('m3) and 'm11 <= 'm12 and stage('m13) <= stage('m4) and provenance('m13) <= provenance('m4) and meet(locality('m13), regional) <= locality('m4) and gc <= 'm12 and gc <= 'm10 and gc <= 'm8 and gc <= 'm6 = big |}];
   let items =
     Result.ok_or_failwith
       (Result.map_error (checked (big_apply 40)) ~f:(String.concat ~sep:"\n"))

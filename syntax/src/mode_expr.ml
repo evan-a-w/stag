@@ -59,6 +59,7 @@ type t = desc Located.t [@@deriving sexp_of, compare, equal]
 
 let to_string (t : t) =
   match t.txt with
+  | Var "_" -> "_"
   | Var name -> "'" ^ name
   | Atoms atoms -> String.concat ~sep:" " (List.map atoms ~f:Atom.to_string)
 ;;

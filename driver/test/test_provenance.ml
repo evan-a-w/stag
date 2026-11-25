@@ -45,12 +45,12 @@ let field u = match in_record () with (s, _) -> s
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val in_ptr : 'a @ 'm0 -> ptr[string @@ 'm2] @ 'm1 with external <= 'm2 and nonportable gc <= 'm1
-    val in_record : 'a @ 'm0 -> string * int @ 'm1 with external <= 'm1
-    val in_closure : 'a @ 'm0 -> ('b @ 'm2 -> string @ 'm3) @ 'm1 with external <= 'm3 and external <= 'm1
-    val read : ptr['a @@ 'm1] @ 'm0 -> 'a @ 'm2 with 'm1 <= 'm2
-    val read_ext : 'a @ 'm0 -> string @ 'm1 with external <= 'm1
-    val field : 'a @ 'm0 -> string @ 'm1 with external <= 'm1
+    val in_ptr : 'a @ _ -> ptr[string @@ 'm1] @ 'm0 with external <= 'm1 and nonportable gc <= 'm0
+    val in_record : 'a @ _ -> string * int @ 'm0 with external <= 'm0
+    val in_closure : 'a @ _ -> ('b @ _ -> string @ 'm1) @ 'm0 with external <= 'm1 and external <= 'm0
+    val read : ptr['a @@ 'm0] @ _ -> 'a @ 'm1 with 'm0 <= 'm1
+    val read_ext : 'a @ _ -> string @ 'm0 with external <= 'm0
+    val field : 'a @ _ -> string @ 'm0 with external <= 'm0
     |}]
 ;;
 
@@ -65,9 +65,9 @@ let sequenced u = ext "a"; "b"
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val evaluated : 'a @ 'm0 -> int @ 'm1
-    val ignored : 'a @ 'm0 -> string @ 'm1
-    val sequenced : 'a @ 'm0 -> string @ 'm1
+    val evaluated : 'a @ _ -> int @ _
+    val ignored : 'a @ _ -> string @ _
+    val sequenced : 'a @ _ -> string @ _
     |}]
 ;;
 
@@ -90,9 +90,9 @@ let ints (q : ptr[int]) = q.* <- 1
   [%expect
     {|
     val p : ptr[string]
-    val store : string @ 'm0 -> unit @ 'm1 with 'm0 <= gc global
-    val literal : 'a @ 'm0 -> unit @ 'm1
-    val ints : ptr[int] @ 'm0 -> unit @ 'm1
+    val store : string @ 'm0 -> unit @ _ with 'm0 <= gc global
+    val literal : 'a @ _ -> unit @ _
+    val ints : ptr[int] @ _ -> unit @ _
     |}];
   provenance
     {|
@@ -102,9 +102,9 @@ let bad u = store_param (Ptr.make "a") (ext "b")
 |};
   [%expect
     {|
-    val store_param : ptr['a @@ 'm1] @ 'm0 -> ('a @ 'm3 -> unit @ 'm4) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and 'm3 <= global and gc <= 'm2
+    val store_param : ptr['a @@ 'm1] @ 'm0 -> ('a @ 'm3 -> unit @ _) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and 'm3 <= global and gc <= 'm2
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val bad : 'a @ 'm0 -> unit @ 'm1
+    val bad : 'a @ _ -> unit @ _
     |}]
 ;;
 
@@ -118,10 +118,10 @@ let in_closure u = let n = ext 1 in fun v -> n
 |};
   [%expect
     {|
-    val ext : int @ 'm0 -> int @ 'm1
+    val ext : int @ _ -> int @ _
     val p : ptr[int]
-    val store : 'a @ 'm0 -> unit @ 'm1
-    val in_closure : 'a @ 'm0 -> ('b @ 'm2 -> int @ 'm3) @ 'm1 with gc <= 'm1
+    val store : 'a @ _ -> unit @ _
+    val in_closure : 'a @ _ -> ('b @ _ -> int @ _) @ 'm0 with gc <= 'm0
     |}]
 ;;
 
@@ -135,8 +135,8 @@ let gc_only u = let mut s = "a" in s <- "b"; s
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val inferred : 'a @ 'm0 -> string @ 'm1 with nonportable external <= 'm1
-    val gc_only : 'a @ 'm0 -> string @ 'm1 with nonportable <= 'm1
+    val inferred : 'a @ _ -> string @ 'm0 with nonportable external <= 'm0
+    val gc_only : 'a @ _ -> string @ 'm0 with nonportable <= 'm0
     |}];
   provenance
     {|
@@ -153,7 +153,7 @@ let opted_in u = let mut s @ external = "a" in s
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val opted_in : 'a @ 'm0 -> string @ 'm1 with nonportable external <= 'm1
+    val opted_in : 'a @ _ -> string @ 'm0 with nonportable external <= 'm0
     |}]
 ;;
 
@@ -171,10 +171,10 @@ let set_h u = h <- Int.to_string 1
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     val g : string @ external
-    val set : 'a @ 'm0 -> unit @ 'm1
-    val get : 'a @ 'm0 -> string @ 'm1 with nonportable external <= 'm1
+    val set : 'a @ _ -> unit @ _
+    val get : 'a @ _ -> string @ 'm0 with nonportable external <= 'm0
     val h : string
-    val set_h : 'a @ 'm0 -> unit @ 'm1
+    val set_h : 'a @ _ -> unit @ _
     |}];
   provenance
     {|
@@ -196,8 +196,8 @@ let closed u = let f @ static = fun x -> x in f
 |};
   [%expect
     {|
-    val literal : 'a @ 'm0 -> string @ 'm1
-    val closed : 'a @ 'm0 -> ('b @ 'm2 -> 'b @ 'm3) @ 'm1 with 'm2 <= 'm3 and release(locality('m2)) <= locality('m3)
+    val literal : 'a @ _ -> string @ _
+    val closed : 'a @ _ -> ('b @ 'm0 -> 'b @ 'm1) @ _ with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     |}];
   provenance {|
 let made u = let p @ static = Ptr.make 1 in p
@@ -236,7 +236,7 @@ let call u = r.f "a"
     {|
     type t = { f : string @ external -> string @ external }
     val r : t
-    val call : 'a @ 'm0 -> string @ 'm1 with nonportable external <= 'm1
+    val call : 'a @ _ -> string @ 'm0 with nonportable external <= 'm0
     |}]
 ;;
 
@@ -249,13 +249,12 @@ let length u = String.length (ext "a")
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val length : 'a @ 'm0 -> int @ 'm1
+    val length : 'a @ _ -> int @ _
     |}];
   provenance {|
 let built u = String.append "a" "b"
 |};
-  [%expect
-    {| val built : 'a @ 'm0 -> string @ 'm1 with nonportable gc <= 'm1 |}]
+  [%expect {| val built : 'a @ _ -> string @ 'm0 with nonportable gc <= 'm0 |}]
 ;;
 
 let%expect_test "a closure is static only if it is const" =
@@ -303,7 +302,7 @@ let use u = let y @ static = pair in y
     {|
     val s : string
     val pair : string * int
-    val use : 'a @ 'm0 -> string * int @ 'm1
+    val use : 'a @ _ -> string * int @ _
     |}];
   provenance {|
 let s = Int.to_string 1
@@ -326,9 +325,9 @@ let returned u = exclave_ ext "a"
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     type r = { g : string @@ global; n : int }
-    val make : 'a @ 'm0 -> r @ 'm1 with external <= 'm1
-    val read : 'a @ 'm0 -> string @ 'm1 with external <= 'm1
-    val returned : 'a @ 'm0 -> string @ 'm1 with external <= 'm1
+    val make : 'a @ _ -> r @ 'm0 with external <= 'm0
+    val read : 'a @ _ -> string @ 'm0 with external <= 'm0
+    val returned : 'a @ _ -> string @ 'm0 with external <= 'm0
     |}]
 ;;
 
@@ -340,8 +339,8 @@ let g @ static = fun (x : int) -> f x
 |};
   [%expect
     {|
-    val f : int @ 'm0 -> int @ 'm1
-    val g : int @ 'm0 -> int @ 'm1
+    val f : int @ _ -> int @ _
+    val g : int @ _ -> int @ _
     |}]
 ;;
 
@@ -372,7 +371,7 @@ let g = k 1
 |};
   [%expect
     {|
-    val k : int @ 'm0 -> (int @ 'm2 -> int @ 'm3) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
+    val k : int @ 'm0 -> (int @ _ -> int @ _) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
     val g : int @ '_m0 -> int @ '_m1
     |}]
 ;;
@@ -462,9 +461,9 @@ let set_t u = t <- (ext "x", 2)
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     val g : (int @ '_m0 -> int @ '_m1) @ external
-    val set : 'a @ 'm0 -> unit @ 'm1
+    val set : 'a @ _ -> unit @ _
     val t : (string * int) @ external
-    val set_t : 'a @ 'm0 -> unit @ 'm1
+    val set_t : 'a @ _ -> unit @ _
     |}]
 ;;
 
@@ -477,7 +476,7 @@ let f u = let p = ext (Ptr.make "a") in p.* <- Int.to_string 1
   [%expect
     {|
     val ext : ptr[string] @ 'm0 -> ptr[string] @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val f : 'a @ 'm0 -> unit @ 'm1
+    val f : 'a @ _ -> unit @ _
     |}];
   provenance
     {|
@@ -487,7 +486,7 @@ let f u = let p = ext (Ptr.make 1) in p.* <- 2
   [%expect
     {|
     val ext : ptr[int] @ 'm0 -> ptr[int] @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val f : 'a @ 'm0 -> unit @ 'm1
+    val f : 'a @ _ -> unit @ _
     |}]
 ;;
 

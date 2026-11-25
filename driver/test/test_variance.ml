@@ -23,7 +23,7 @@ let annotated : string -> int = fun (s @ local) -> String.length s
 |};
   [%expect
     {|
-    val apply : (string -> int) @ 'm0 -> int @ 'm1
+    val apply : (string -> int) @ _ -> int @ _
     val local_ok : int
     val annotated : string -> int
     |}];
@@ -49,7 +49,7 @@ let gc_ok = take (fun (u : unit) -> "a")
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val take : (unit -> string @ external) @ 'm0 -> string @ 'm1 with nonportable external <= 'm1
+    val take : (unit -> string @ external) @ _ -> string @ 'm0 with nonportable external <= 'm0
     val gc_ok : string @ external
     |}];
   check
@@ -71,7 +71,7 @@ let ok = twice (fun (g : string -> int) -> g "a")
 |};
   [%expect
     {|
-    val twice : ((string @ local -> int) -> int) @ 'm0 -> int @ 'm1
+    val twice : ((string @ local -> int) -> int) @ _ -> int @ _
     val ok : int
     |}];
   check
@@ -114,7 +114,7 @@ let matched (b : box['a]) = match b with *x -> x
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val read : box[string -> int] @ 'm0 -> int @ 'm1
+    val read : box[string -> int] @ _ -> int @ _
     val boxed : box[string @ '_m0 -> int @ '_m1] with nonportable gc local <= '_m0 and '_m1 <= gc global
     val used : int
     val get : box[string] @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
@@ -285,8 +285,8 @@ let compose f g x = f (g x)
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val apply : (string -> int) @ 'm0 -> int @ 'm1
-    val twice : ((string @ local -> int) -> int) @ 'm0 -> int @ 'm1
+    val apply : (string -> int) @ _ -> int @ _
+    val twice : ((string @ local -> int) -> int) @ _ -> int @ _
     val read : box[string] @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     type co['m0 : mode] = { v : string @@ 'm0 }
     val unwrap : co['m1] @ 'm0 -> string @ 'm2 with release(locality('m0)) <= locality('m2) and 'm1 <= 'm2

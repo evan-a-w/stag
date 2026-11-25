@@ -304,12 +304,15 @@ module Annotation_vars = struct
   let fresh_mode t = Mode.Var.create (Fresh.modes t.fresh) ~rank:t.rank
 
   let mode t name ~loc =
-    only_kind
-      name
-      ~loc
-      ~in_:t.modes
-      ~others:[ Hashtbl.mem t.tys; Hashtbl.mem t.rows ]
-      ~default:(fun () -> fresh_mode t)
+    if String.equal name "_"
+    then Ok (fresh_mode t)
+    else
+      only_kind
+        name
+        ~loc
+        ~in_:t.modes
+        ~others:[ Hashtbl.mem t.tys; Hashtbl.mem t.rows ]
+        ~default:(fun () -> fresh_mode t)
   ;;
 end
 
