@@ -86,13 +86,9 @@ let[@cold] [@zero_alloc assume] grow_stack t =
   t.stack_top <- Addr.add t.stack_base used
 ;;
 
-let[@inline] [@zero_alloc] is_small word =
-  Int.(Addr.compare word (Addr.of_word #4096n) < 0)
-;;
-
 (* Marks and pushes the block [word] points into, if it should be. *)
 let[@inline] [@zero_alloc] visit t word =
-  if not (is_small word)
+  if not (Addr.is_non_pointer word)
   then (
     let block = Heap.block_start t.heap word in
     if not (Addr.is_null block)
@@ -212,7 +208,7 @@ let alloc_handle t kind value =
   let refs_count = Array.length refs in
   for index = 0 to refs_count - 1 do
     let ref_ = refs.(index) in
-    if (not (is_small ref_)) && Data_stack.contains t.data_stack ref_
+    if (not (Addr.is_non_pointer ref_)) && Data_stack.contains t.data_stack ref_
     then
       fail
         [%message
@@ -270,7 +266,7 @@ let check_invariants t =
   let errors = ref [] in
   let error message = errors := message :: !errors in
   let check_word ~from ~immortal word =
-    if (not (is_small word)) && Heap.owns t.heap word
+    if (not (Addr.is_non_pointer word)) && Heap.owns t.heap word
     then (
       let block = Heap.block_start t.heap word in
       if Addr.is_null block
@@ -286,7 +282,7 @@ let check_invariants t =
               "an immortal block points to a mortal one" (from : Sexp.t)]))
   in
   let in_data_stack word =
-    (not (is_small word)) && Data_stack.contains t.data_stack word
+    (not (Addr.is_non_pointer word)) && Data_stack.contains t.data_stack word
   in
   let check_not_data_stack ~from word =
     if in_data_stack word
@@ -350,7 +346,7 @@ let check_invariants t =
          let from =
            [%message "static" ~block:(!block_index : int) ~word:(i : int)]
          in
-         if (not (is_small word)) && Heap.owns t.heap word
+         if (not (Addr.is_non_pointer word)) && Heap.owns t.heap word
          then
            error [%message "static data points into the heap" (from : Sexp.t)];
          check_not_data_stack ~from word

@@ -27,13 +27,10 @@ val program : file:string -> string -> (Syntax.Program.t, Error.t) Result.t
     [type] [Malformed] with the members that parsed, a [module] or [include] as
     a splice of [Expr.Error], a [struct] with the toplevels in it. *)
 val program_recovering
-  :  file:string
+  :  ?steps:int ref
+  -> file:string
   -> string
   -> Syntax.Program.t * Error.t list
-
-(** How many times the parser has looked at a token so far, to test that it
-    takes linear time. *)
-val steps : unit -> int
 
 (** Also the tokens and the comments, in order. *)
 val program_with_comments

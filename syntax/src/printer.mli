@@ -50,3 +50,12 @@ val program_doc
   -> blank_between:(Loc.t -> Loc.t -> bool)
   -> Syntax.Program.t
   -> Doc.t
+
+(** The text of the [|] that starts a match arm or variant constructor, which
+    starts a line when broken. *)
+val case_bar : string
+
+(** The texts of the first and last lines of a module with members. *)
+val module_open : name:string -> string
+
+val module_close : string

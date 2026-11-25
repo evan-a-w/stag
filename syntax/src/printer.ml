@@ -2,6 +2,9 @@ open! Import
 open Syntax
 open Doc
 
+let case_bar = "| "
+let module_open ~name = "module " ^ name ^ " = struct"
+let module_close = "end"
 let path p = text (Path.to_string p)
 
 (* What printing depends on beyond the syntax. Declarations in struct quotes are
@@ -618,11 +621,11 @@ and bare_desc roots (ctx : Ctx.t) (e : Expr.t) =
          ^^ text "with")
     in
     (match arms with
-     | [ only ] -> group (head ^^ line ^^ if_break "| " ^^ arm 0 only)
+     | [ only ] -> group (head ^^ line ^^ if_break case_bar ^^ arm 0 only)
      | arms ->
        head
        ^^ concat
-            (List.mapi arms ~f:(fun i a -> hardline ^^ text "| " ^^ arm i a)))
+            (List.mapi arms ~f:(fun i a -> hardline ^^ text case_bar ^^ arm i a)))
   | Tuple (_ :: _ :: _ as es), _ -> parens (tuple_items roots es)
   | Tuple _, _ -> text "()"
   | Lit l, _ -> lit l
@@ -856,7 +859,7 @@ and type_decl roots ({ name; params; kind } : Type_decl.t) =
               (concat
                  (List.mapi constructors ~f:(fun i c ->
                     line
-                    ^^ (if i = 0 then if_break "| " else text "| ")
+                    ^^ (if i = 0 then if_break case_bar else text case_bar)
                     ^^ constructor_decl roots c))))
     | Record fields ->
       lhs
@@ -886,12 +889,12 @@ and toplevel roots ~indent (t : Toplevel.t) =
     definition
       (let_lhs roots "external" name [] { ty = Some ty; mode = None })
       (text (string_literal symbol.txt))
-  | Module (name, []) -> text ("module " ^ name.txt ^ " = struct end")
+  | Module (name, []) -> text (module_open ~name:name.txt ^ " " ^ module_close)
   | Module (name, members) ->
-    text ("module " ^ name.txt ^ " = struct")
+    text (module_open ~name:name.txt)
     ^^ nest 2 (hardline ^^ toplevels roots ~indent:(indent + 2) members)
     ^^ hardline
-    ^^ text "end"
+    ^^ text module_close
   | Module_splice (name, e, expansion) ->
     splice_toplevel
       roots

@@ -580,11 +580,11 @@ let%expect_test "recovery takes linear time" =
         (List.init n ~f:(fun i ->
            sprintf "let y%d = (\nlet z%d = f (1, .<\n" i i))
     in
-    let before = Parser.steps () in
+    let steps = ref 0 in
     let (_ : Syntax.Program.t * Parser.Error.t list) =
-      Parser.program_recovering ~file source
+      Parser.program_recovering ~steps ~file source
     in
-    Parser.steps () - before
+    !steps
   in
   let small = steps 1000 in
   let large = steps 2000 in

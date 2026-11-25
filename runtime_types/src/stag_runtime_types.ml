@@ -99,16 +99,17 @@ end
    for every [shape] of a [t]: an expansion depends only on those. Only a shape
    that was computed is stored, never one that was refused, and [declared] looks
    for a cycle first: a shape computed outside a cycle would not be the one
-   inside it. A shape keeps the work it took, which a hit charges again: the
-   result of a [shape], and whether it is [Too_large], do not depend on what
-   earlier calls cached, and the work bounds the size of the shape as a tree,
-   which shares the cached subtrees. *)
+   inside it. A shape keeps the work it took, which a hit charges again, and how
+   deep its expansion went below it, which a hit checks again: the result of a
+   [shape] does not depend on what earlier calls cached, and the work bounds the
+   size of the shape as a tree, which shares the cached subtrees. *)
 module Cache = struct
   module Entry = struct
     type t =
       { args : Type.arg list
       ; shape : Shape.t
       ; work : int
+      ; depth : int
       }
   end
 
@@ -139,6 +140,7 @@ module Context = struct
            from [Fresh]'s, which a key compares records by, and shared by a
            [t]'s calls, as its cache keeps copies. *)
     ; work : int ref
+    ; deepest : int ref (* The longest path a step was checked at. *)
     }
 end
 
@@ -287,9 +289,14 @@ and variant t context row =
 and cycle_check context step =
   if Path.repeats step context.Context.path
   then Error (Error.Recursive (Path.names (step :: context.path)))
-  else if List.length context.path >= max_expansions
+  else reach context (List.length context.path)
+
+and reach context depth =
+  if depth >= max_expansions
   then Error (Error.Too_deep max_expansions)
-  else Ok ()
+  else (
+    context.Context.deepest := Int.max !(context.deepest) depth;
+    Ok ())
 
 and arity ~name ~args expected =
   if List.length args = expected
@@ -324,12 +331,25 @@ and declared t context ~name ~args =
     (match cycle_check context (Path.Step.Declaration { name; args }) with
      | Error error -> Error error
      | Ok () ->
-       (match Cache.find t.cache ~name ~args with
-        | Some { shape; work; _ } ->
+       (* A hit too deep for this path is expanded afresh, so the error is the
+          one a fresh expansion gives (it may run out of work first). *)
+       let cached =
+         match Cache.find t.cache ~name ~args with
+         | Some { shape; work; depth; _ } ->
+           (match reach context (List.length context.path + depth) with
+            | Ok () -> Some (shape, work)
+            | Error _ -> None)
+         | None -> None
+       in
+       (match cached with
+        | Some (shape, work) ->
           let%map.Result () = charge context work in
           shape
         | None ->
           let work_before = !(context.work) in
+          let length = List.length context.path in
+          let deepest_before = !(context.deepest) in
+          context.deepest := length;
           let path = Path.Step.Declaration { name; args } :: context.path in
           let%bind.Result bindings =
             bind_parameters context declaration ~name ~args
@@ -361,7 +381,12 @@ and declared t context ~name ~args =
           Cache.add
             t.cache
             ~name
-            { args; shape; work = !(context.work) - work_before };
+            { args
+            ; shape
+            ; work = !(context.work) - work_before
+            ; depth = !(context.deepest) - length
+            };
+          context.deepest := Int.max deepest_before !(context.deepest);
           Ok shape))
 
 (* A parameter is bound to its argument as it stands, which [declared] has
@@ -468,6 +493,7 @@ let context t =
   ; path = []
   ; ids = t.ids
   ; work = ref 0
+  ; deepest = ref 0
   }
 ;;
 

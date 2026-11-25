@@ -36,6 +36,12 @@ module Addr = struct
     Nativeint_u.unsigned_compare (to_word a) (to_word b)
   ;;
 
+  let non_pointer_bound = 4096
+
+  let[@inline] [@zero_alloc] is_non_pointer t =
+    Int.( < ) (compare t (of_word (Nativeint_u.of_int non_pointer_bound))) 0
+  ;;
+
   (* Whether [a - b] is in [[0, bytes)], as words, so without overflow. *)
   let[@inline] [@zero_alloc] within a ~from ~bytes =
     Int.( < )

@@ -47,12 +47,15 @@ type t =
   (** When recovering, the index of the next token that ends the toplevel being
       parsed (it appears as [Eof]), else that of [Eof]. *)
   ; mutable col : int (** That of the toplevel being parsed, if recovering. *)
+  ; steps : int ref (** How many times a token was looked at. *)
+  ; spliced_expr : t -> Expr.t
+  (** Types hold splices of expressions, and expressions struct quotes of
+      declarations, which are parsed after them. *)
+  ; struct_toplevels : t -> Toplevel.t list
   }
 
-let steps = ref 0
-
 let peek_at t n =
-  incr steps;
+  incr t.steps;
   let i = t.pos + n in
   t.tokens.(if i >= t.limit then Array.length t.tokens - 1 else i).token
 ;;
@@ -255,11 +258,6 @@ let uppercase_path t ~what =
     t.pos <- t.pos - 1;
     expected t what
 ;;
-
-(* Types hold splices of expressions, and expressions struct quotes of
-   declarations, which are parsed after them. *)
-let spliced_expr : (t -> Expr.t) ref = ref (fun _ -> assert false)
-let struct_toplevels : (t -> Toplevel.t list) ref = ref (fun _ -> assert false)
 
 (* Types *)
 
@@ -509,7 +507,7 @@ and type_atom t : Type_expr.t =
     since t start (Type_expr.Code { inner; context })
   | Splice ->
     advance t;
-    let e = !spliced_expr t in
+    let e = t.spliced_expr t in
     since t start (Type_expr.Splice e)
   | _ -> expected t "a type"
 
@@ -1282,7 +1280,7 @@ and atom t : Expr.t =
     advance t;
     let struct_loc = loc t in
     advance t;
-    let toplevels = !struct_toplevels t in
+    let toplevels = t.struct_toplevels t in
     close t End ~opener:Struct ~open_loc:struct_loc;
     close t Quote_close ~opener:Quote_open ~open_loc:start;
     expr_since t start (Struct_quote toplevels)
@@ -1576,7 +1574,7 @@ let starts_toplevel_at t i ~col =
    more than [col], or of [Eof]. *)
 let next_toplevel t ~from ~col =
   let rec go i =
-    incr steps;
+    incr t.steps;
     match t.tokens.(i).token with
     | Eof -> i
     | _ when starts_toplevel_at t i ~col -> i
@@ -1599,7 +1597,7 @@ let closer : Token.t -> Token.t option = function
    its closer, if any. *)
 let unclosed t ~start ~stop =
   let rec go i open_ =
-    incr steps;
+    incr t.steps;
     if i >= stop
     then List.hd open_
     else (
@@ -1751,7 +1749,7 @@ let rec toplevel t : Toplevel.t =
 and resync t ~start ~in_struct =
   let col = t.tokens.(start).loc.start.#col in
   let rec go i ~depth =
-    incr steps;
+    incr t.steps;
     let ({ token; loc } : Lexer.Located.t) = t.tokens.(i) in
     match token with
     | Eof -> i
@@ -1877,22 +1875,27 @@ and toplevels t ~in_struct =
     toplevels
 ;;
 
-let run_with_comments ~file source f =
+let create ~tokens ~comments ~errors ~lex_errors ~steps =
+  { tokens
+  ; comments = Array.of_list comments
+  ; pos = 0
+  ; bare_tuple_end = -1
+  ; errors
+  ; salvage = None
+  ; lex_errors
+  ; limit = Array.length tokens - 1
+  ; col = 0
+  ; steps
+  ; spliced_expr = postfix
+  ; struct_toplevels = toplevels ~in_struct:true
+  }
+;;
+
+let run_with_comments ?(steps = ref 0) ~file source f =
   match Lexer.tokenize_with_comments ~file source with
   | Error error -> Result.Error (Error.Lex error)
   | Ok (tokens, comments) ->
-    let t =
-      { tokens
-      ; comments = Array.of_list comments
-      ; pos = 0
-      ; bare_tuple_end = -1
-      ; errors = None
-      ; salvage = None
-      ; lex_errors = [||]
-      ; limit = Array.length tokens - 1
-      ; col = 0
-      }
-    in
+    let t = create ~tokens ~comments ~errors:None ~lex_errors:[||] ~steps in
     (match
        let result = f t in
        (match peek t with
@@ -1906,14 +1909,9 @@ let run_with_comments ~file source f =
      | exception Syntax_error (loc, message) -> Error (Syntax { loc; message }))
 ;;
 
-let run ~file source f =
-  Result.map (run_with_comments ~file source f) ~f:(fun (result, _, _) ->
+let run ?steps ~file source f =
+  Result.map (run_with_comments ?steps ~file source f) ~f:(fun (result, _, _) ->
     result)
-;;
-
-let () =
-  spliced_expr := postfix;
-  struct_toplevels := toplevels ~in_struct:true
 ;;
 
 let program ~file source = run ~file source (toplevels ~in_struct:false)
@@ -1925,9 +1923,8 @@ let program_with_comments ~file source =
 let expr ~file source = run ~file source expr
 let pattern ~file source = run ~file source pattern
 let type_expr ~file source = run ~file source type_expr
-let steps () = !steps
 
-let program_recovering ~file source =
+let recover ~steps ~file source =
   let { Lexer.Recovered.tokens; comments; errors = lex_errors } =
     Lexer.tokenize_recovering ~file source
   in
@@ -1935,22 +1932,18 @@ let program_recovering ~file source =
     List.filter lex_errors ~f:Lexer.Error.skipped
     |> List.map ~f:(fun (error : Lexer.Error.t) -> error.loc)
   in
-  match lex_errors, program ~file source with
+  match lex_errors, run ~steps ~file source (toplevels ~in_struct:false) with
   | [], Ok program -> program, []
   | _ ->
     let errors = Queue.create () in
     let t =
-      { tokens
-      ; comments = Array.of_list comments
-      ; pos = 0
-      ; bare_tuple_end = -1
-      ; errors = Some errors
-      ; salvage = None
-      ; lex_errors =
-          List.map skipped ~f:(fun loc -> loc.start.#offset) |> Array.of_list
-      ; limit = Array.length tokens - 1
-      ; col = 0
-      }
+      create
+        ~tokens
+        ~comments
+        ~errors:(Some errors)
+        ~lex_errors:
+          (List.map skipped ~f:(fun loc -> loc.start.#offset) |> Array.of_list)
+        ~steps
     in
     let program = toplevels t ~in_struct:false in
     (* A syntax error at the token after a skipped lexeme is likely due to it. *)
@@ -1977,4 +1970,8 @@ let program_recovering ~file source =
            ~equal:(fun a b -> start a = start b)
     in
     program, errors
+;;
+
+let program_recovering ?(steps = ref 0) ~file source =
+  recover ~steps ~file source
 ;;

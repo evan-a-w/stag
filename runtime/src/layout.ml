@@ -56,7 +56,9 @@ module Niche = struct
     { t with leaf = Leaf.shift t.leaf ~scalar_offset ~ptr_index }
   ;;
 
-  let below_4096 leaf = { leaf; start = 0; available = 4096 }
+  let non_pointers leaf =
+    { leaf; start = 0; available = Memory.Addr.non_pointer_bound }
+  ;;
 
   (* What is left after taking [count] values. *)
   let take t ~count =
@@ -168,7 +170,7 @@ let scalar (scalar : Shape.Scalar.t) ~valid =
   let leaf = Leaf.Scalar { scalar_offset = 0; scalar } in
   let niche : Niche.t option =
     match valid, scalar with
-    | None, Code -> Some (Niche.below_4096 leaf)
+    | None, Code -> Some (Niche.non_pointers leaf)
     | None, _ -> None
     | Some _, Code -> invalid [%message "a valid range on Code"]
     | Some (min, max), _ ->
@@ -205,7 +207,7 @@ let ptr =
   ; scalar_align = 1
   ; ptr_words = 1
   ; inhabited = true
-  ; niche = Some (Niche.below_4096 (Ptr { ptr_index = 0 }))
+  ; niche = Some (Niche.non_pointers (Ptr { ptr_index = 0 }))
   ; desc = Ptr
   }
 ;;

@@ -799,6 +799,7 @@ let%expect_test "a dot before a name starts a root path unless after an atom" =
     ; ">.x .~.x .<.x>. .{.x} ..x"
     ; "(* c *).x x(* c *).x x .x"
     ; ". x .1 .`a"
+    ; "in.M.x with.x fun.x true.x 'c'.x"
     ]
     ~f:tokens;
   [%expect
@@ -809,5 +810,28 @@ let%expect_test "a dot before a name starts a root path unless after an atom" =
     >. x .~ ROOT x .< ROOT x >. .{ ROOT x } .. x
     ROOT x x ROOT x x ROOT x
     DOT x DOT 1 DOT `a
+    in ROOT M DOT x with ROOT x fun ROOT x true DOT x 'c' DOT x
+    |}]
+;;
+
+let%expect_test "a dot after a skipped character starts a root path" =
+  List.iter [ "x #.y"; "x$.y" ] ~f:(fun src ->
+    let { Lexer.Recovered.tokens; errors; _ } =
+      Lexer.tokenize_recovering ~file:"t.stag" src
+    in
+    List.iter errors ~f:(fun error ->
+      print_endline (Lexer.Error.to_string error));
+    Array.iter tokens ~f:(fun { token; loc = _ } ->
+      match token with
+      | Eof -> print_endline ""
+      | Root -> print_string "ROOT "
+      | Dot -> print_string "DOT "
+      | token -> printf "%s " (Token.to_string token)));
+  [%expect
+    {|
+    t.stag:1:2-3: illegal character '#'
+    x ROOT y
+    t.stag:1:1-2: illegal character '$'
+    x ROOT y
     |}]
 ;;

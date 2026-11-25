@@ -75,6 +75,10 @@ val to_string : t -> string
     it, rather than what follows (as after [=] or [(]). *)
 val ends_code : t -> bool
 
+(** Whether it ends an atom, so that a [.] glued after it is a projection, not
+    the start of a root path. *)
+val ends_atom : t -> bool
+
 (** Whether the token only ends or continues what is before it, so that a
     comment before it on its line is about that, eg. [)], [;] or [in]. *)
 val follows : t -> bool
