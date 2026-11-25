@@ -97,15 +97,19 @@ closure's own mode is the mode of the arrow value, like any value's.
 - **Polymorphism.** Mode variables are generalised with the type variables of
   a scheme, with the constraints between them, and copied per instance, so
   `let apply f x = f x` works for portable and nonportable `f` alike.
-- **Annotations.** In an annotation, a side written without a mode is a fresh
-  variable, so annotating restricts no mode; `'m` names one variable across a
-  definition's annotations. In a declaration (and for builtins), it is the
-  default, `nonportable gc global`, and a mode variable is an error. As
-  in OxCaml, the result of a curried arrow written without a mode is as local
-  as the arguments before it (`ptr[int] @ local -> int -> int` is
+- **Annotations.** A side written without a mode is the default,
+  `nonportable gc global`, in an annotation as in a declaration (and for
+  builtins), as OxCaml's legacy modes: `(f : int -> int)` makes `f`'s arrow
+  the default's, and `'m` keeps a side polymorphic (one variable across a
+  definition's annotations; in a declaration a mode variable is an error).
+  Axes not written are the default's, so `int @ local -> int` is
+  `int @ nonportable gc local -> int @ nonportable gc global`. An arrow's
+  `curry`, never written, is free in an annotation. As in OxCaml, the result
+  of a curried arrow written without a mode is as local as the arguments
+  before it (`ptr[int] @ local -> int -> int` is
   `ptr[int] @ local -> (int -> int) @ local`), as it is the closure of a
-  partial application holding them. Its `curry` is still fixed `regional`,
-  as a declaration can't tell a partial application from a function value
+  partial application holding them. In a declaration its
+  `curry` is fixed `regional`, as a declaration can't tell a partial application from a function value
   returned, so a tail call through it given a `local` argument must be marked
   `[@nontail]`.
 - **Decisions made while checking a function.** Whether a variable is
@@ -140,9 +144,10 @@ annotation gives a result: `portable`). So printed types can be trusted on
 their own, by interfaces and separately checked code.
 
 - variables equal on every axis by their constraints print as one;
-- a variable in no relation, named once (or fixed on every axis), prints as
-  the atoms of its fixed axes (`string @ external`), or not at all if none
-  are, which reads back as a fresh variable;
+- a variable in no relation and fixed on every axis prints as its atoms
+  other than the default (`string @ external`), or not at all if it is the
+  default, as an unwritten mode reads back as the default; any other is
+  named, even if unconstrained (`'a @ 'm0 -> unit @ 'm1`);
 - constraints and bounds the others imply, as read back, are left out;
 - only the item's own variables are named: constraints through other
   variables (of other members of a recursive group, or a weak variable's
@@ -219,11 +224,9 @@ atoms only if fixed on both its axes (`ptr['a @@ const static]`), as a mode
 argument's unwritten axes read back as the default; one also on an arrow, and
 free there on locality, keeps its name in both places.
 
-With modes printed, an arrow's side fixed to a constant (by a declaration, as
-a record field's `string -> string`) prints with an atom on every axis,
-`string @ nonportable gc global`, as an annotation reads unwritten axes as
-fresh variables. A type declaration's own body still prints its arrows by its
-defaults.
+An arrow's side fixed to a constant (by a declaration, as a record field's
+`string -> string`) prints only its atoms other than the default, as
+annotations and declarations alike read unwritten axes as the default.
 
 `release(locality('a)) <= locality('b)` is not a default between a
 parameter and its result: most curried and higher-order functions don't have
@@ -355,6 +358,10 @@ toplevel splice has the mode of its expansion, checked after it is generated.
   is pointer-free.
 - Constant data is generalized, local or not; values computed by applying
   or splicing are not.
+- An arrow written in an annotation without modes has the default modes
+  (`nonportable gc global`), as in a declaration, rather than fresh
+  variables: `(f : int -> int)` makes `f` take and return global values.
+  Write `'m` to keep a side polymorphic.
 
 ## Mutable variables
 

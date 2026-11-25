@@ -317,38 +317,6 @@ module Mode_atoms = struct
     in
     const
   ;;
-
-  (* Fixes the axes written. *)
-  let constrain var (atoms : Syntax.Mode_expr.Atom.t list) ~loc =
-    let reason =
-      Mode.Reason.create
-        ~loc
-        (sprintf
-           "it is annotated %s"
-           (List.map atoms ~f:Syntax.Mode_expr.Atom.to_string
-            |> String.concat ~sep:" "))
-    in
-    let fix axis point =
-      let%bind.Result () = Mode.Var.at_least var axis point reason in
-      Mode.Var.at_most var axis point reason
-    in
-    List.fold_result
-      atoms
-      ~init:()
-      ~f:(fun () (atom : Syntax.Mode_expr.Atom.t) ->
-        match atom with
-        | Const -> fix Mode.Axis.Stage Mode.Stage.Const
-        | Portable -> fix Stage Portable
-        | Nonportable -> fix Stage Nonportable
-        | Global -> fix Locality Global
-        | Regional -> fix Locality Regional
-        | Local -> fix Locality Local
-        | Static -> fix Provenance Static
-        | Gc -> fix Provenance Gc
-        | External -> fix Provenance External)
-    |> Result.map_error ~f:(fun (_ : Mode.Error.t) ->
-      Typecheck_error.create ~loc (Invalid_mode "its modes are inconsistent"))
-  ;;
 end
 
 (* A mode atom written as a type argument, as in [cell[t, external]]. *)
@@ -442,17 +410,34 @@ module Vars = struct
        | None -> error ~loc (Unbound_type_variable name))
   ;;
 
-  (* An arrow side written without a mode: in an annotation, any, so as not to
-     restrict the modes of what it annotates; in a declaration, the default. *)
-  let unannotated_side t ~default : Arrow_modes.Side.t =
-    match t with
-    | Annotation vars -> Var (Annotation_vars.fresh_mode vars)
-    | Params _ -> Fixed default
-  ;;
-
-  let unannotated_curry : t -> Arrow_modes.Side.t = function
+  (* Unwritten, in an annotation any (it is never printed, so reads back as what
+     it annotates has), in a declaration the default. *)
+  let curry : t -> Arrow_modes.Side.t = function
     | Annotation vars -> Var (Annotation_vars.fresh_mode vars)
     | Params _ -> Arrow_modes.default_curry
+  ;;
+
+  (* In an annotation, a variable fixed to [const], so that errors say why; in a
+     declaration, [const]. *)
+  let fixed t (const : Mode.Const.t) ~reason ~loc : Arrow_modes.Side.t =
+    match t with
+    | Params _ -> Fixed const
+    | Annotation vars ->
+      let var = Annotation_vars.fresh_mode vars in
+      let reason = Mode.Reason.create ~loc reason in
+      (match
+         ( Mode.Var.at_least_const var const reason
+         , Mode.Var.at_most_const var const reason )
+       with
+       | Ok (), Ok () -> ()
+       | Error _, _ | _, Error _ ->
+         raise_s [%message "a fresh mode variable is any constant"]);
+      Var var
+  ;;
+
+  (* An arrow side written without a mode: the default. *)
+  let unwritten t ~default ~loc =
+    fixed t default ~reason:"its type is written without a mode" ~loc
   ;;
 
   let mode_side t ({ txt; loc } : Syntax.Mode_expr.t) ~default
@@ -463,12 +448,17 @@ module Vars = struct
       Result.map (Annotation_vars.mode vars name ~loc) ~f:(fun var ->
         Arrow_modes.Side.Var var)
     | Params _, Var name -> error ~loc (Mode_variable_in_declaration name)
-    | Annotation vars, Atoms atoms ->
-      let var = Annotation_vars.fresh_mode vars in
-      let%map.Result () = Mode_atoms.constrain var atoms ~loc in
-      Arrow_modes.Side.Var var
-    | Params _, Atoms atoms ->
-      Ok (Arrow_modes.Side.Fixed (Mode_atoms.declared atoms ~default))
+    | (Annotation _ | Params _), Atoms atoms ->
+      Ok
+        (fixed
+           t
+           (Mode_atoms.declared atoms ~default)
+           ~reason:
+             (sprintf
+                "it is annotated %s"
+                (List.map atoms ~f:Syntax.Mode_expr.Atom.to_string
+                 |> String.concat ~sep:" "))
+           ~loc)
   ;;
 
   (* A mode argument: of a type's mode parameter, or what the cell of a
@@ -763,16 +753,25 @@ let rec elaborate'
           elaborated, side, { ty with txt = Type_expr.Moded (syntax, mode) }
         | _ ->
           let%map.Result elaborated, syntax = elaborate ty in
-          elaborated, Vars.unannotated_side vars ~default, syntax
+          elaborated, Vars.unwritten vars ~default ~loc:ty.loc, syntax
       in
       let default = Arrow_modes.default_const in
       let%bind.Result ty1, side1, syntax1 = side ty1 ~default ~elaborate in
       (* A curried declaration's partial applications hold its arguments so far,
          so are as local as they are, as in OxCaml. *)
       let%bind.Result ty2, side2, syntax2 =
-        match ty2.txt, side1 with
-        | Arrow _, Fixed { locality; _ } ->
-          let curried = Mode.Locality.join curried locality in
+        match ty2.txt with
+        | Arrow _ ->
+          (* A named argument adds nothing: its locality isn't known. *)
+          let curried =
+            match side1 with
+            | Fixed { locality; _ } -> Mode.Locality.join curried locality
+            | Var var ->
+              let lower = (Mode.Var.lower var).locality in
+              if Mode.Locality.equal lower (Mode.Var.upper var).locality
+              then Mode.Locality.join curried lower
+              else curried
+          in
           side
             ty2
             ~default:{ default with locality = curried }
@@ -781,9 +780,7 @@ let rec elaborate'
       in
       let%map.Result () = result_floor side2 ~loc:syntax2.loc in
       ( Type.TArrow
-          ( ty1
-          , ty2
-          , { arg = side1; res = side2; curry = Vars.unannotated_curry vars } )
+          (ty1, ty2, { arg = side1; res = side2; curry = Vars.curry vars })
       , Type_expr.Arrow (syntax1, syntax2) )
     | Tuple tys ->
       let%map.Result tys = map_result tys ~f:elaborate in

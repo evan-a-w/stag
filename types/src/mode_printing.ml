@@ -301,39 +301,24 @@ let settle t =
       Hash_set.add related a;
       Hash_set.add related b
     | Lower (n, _) | Upper (n, _) -> Hash_set.add bounded n);
-  (* A class's axis reads back from an atom if it is fixed, or, on an arrow, if
-     no bound of it is printed. A mode argument's unwritten axes read back as
-     the default, so a class of one is written as atoms only if fixed. *)
+  (* Written atoms read back as a constant, the axes not written the default's,
+     so a class is written as atoms only if related to nothing and fixed on
+     every axis it has. *)
   Hashtbl.clear t.atoms;
   List.iter reps ~f:(fun rep ->
-    let members = members rep in
     let node axis = { Mode_node.var = rep; axis } in
     let fixed axis =
       Mode_closure.lower closure (node axis)
       = Mode_closure.upper closure (node axis)
     in
-    let all_fixed = List.for_all (axes rep) ~f:fixed in
-    if (not (Hash_set.mem related rep))
-       && List.for_all (axes rep) ~f:(fun axis ->
-         fixed axis || not (Hash_set.mem bounded (node axis)))
-       && (all_fixed
-           || ((not (List.exists members ~f:(Hash_set.mem t.mode_args)))
-               &&
-               match members with
-               | [ id ] ->
-                 [%equal: int option] (Hashtbl.find t.counts id) (Some 1)
-                 && Mode.Var.is_generic (Hashtbl.find_exn t.vars id)
-               | _ -> false))
+    if (not (Hash_set.mem related rep)) && List.for_all (axes rep) ~f:fixed
     then
       Hashtbl.set
         t.atoms
         ~key:rep
         ~data:
-          (List.filter_map (axes rep) ~f:(fun axis ->
-             Option.some_if
-               ((fixed axis && List.exists members ~f:(Hash_set.mem t.mode_args))
-                || Hash_set.mem bounded (node axis))
-               (axis, Mode_closure.lower closure (node axis)))));
+          (List.map (axes rep) ~f:(fun axis ->
+             axis, Mode_closure.lower closure (node axis))));
   let rank = Int.Table.create () in
   List.iteri reps ~f:(fun i rep -> Hashtbl.set rank ~key:rep ~data:i);
   let rank = Hashtbl.find_exn rank in
@@ -367,22 +352,6 @@ let rep t var =
 ;;
 
 let side t var =
-  let rep = rep t var in
-  match Hashtbl.find t.atoms rep with
-  | Some [] -> None
-  | Some atoms ->
-    Some
-      (" @ "
-       ^ String.concat
-           ~sep:" "
-           (List.map atoms ~f:(fun (axis, point) -> Mode_node.atom axis point))
-      )
-  | None -> Some (" @ " ^ name t rep)
-;;
-
-(* Never elided: [ptr[t]] reads back as [nonportable gc], not as a fresh
-   variable. Atoms only when fixed (on its axes), as [settle] makes them. *)
-let held t var =
   let rep = rep t var in
   match Hashtbl.find t.atoms rep with
   | Some atoms -> `Atoms atoms

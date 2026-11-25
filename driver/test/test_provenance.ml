@@ -45,12 +45,12 @@ let field u = match in_record () with (s, _) -> s
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val in_ptr : 'a -> ptr[string @@ 'm1] @ 'm0 with external <= 'm1 and nonportable gc <= 'm0
-    val in_record : 'a -> string * int @ external
-    val in_closure : 'a -> ('b -> string @ external) @ external
-    val read : ptr['a @@ 'm0] -> 'a @ 'm1 with 'm0 <= 'm1
-    val read_ext : 'a -> string @ external
-    val field : 'a -> string @ external
+    val in_ptr : 'a @ 'm0 -> ptr[string @@ 'm2] @ 'm1 with external <= 'm2 and nonportable gc <= 'm1
+    val in_record : 'a @ 'm0 -> string * int @ 'm1 with external <= 'm1
+    val in_closure : 'a @ 'm0 -> ('b @ 'm2 -> string @ 'm3) @ 'm1 with external <= 'm3 and external <= 'm1
+    val read : ptr['a @@ 'm1] @ 'm0 -> 'a @ 'm2 with 'm1 <= 'm2
+    val read_ext : 'a @ 'm0 -> string @ 'm1 with external <= 'm1
+    val field : 'a @ 'm0 -> string @ 'm1 with external <= 'm1
     |}]
 ;;
 
@@ -65,9 +65,9 @@ let sequenced u = ext "a"; "b"
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val evaluated : 'a -> int
-    val ignored : 'a -> string
-    val sequenced : 'a -> string
+    val evaluated : 'a @ 'm0 -> int @ 'm1
+    val ignored : 'a @ 'm0 -> string @ 'm1
+    val sequenced : 'a @ 'm0 -> string @ 'm1
     |}]
 ;;
 
@@ -90,9 +90,9 @@ let ints (q : ptr[int]) = q.* <- 1
   [%expect
     {|
     val p : ptr[string]
-    val store : string @ 'm0 -> unit with 'm0 <= gc global
-    val literal : 'a -> unit
-    val ints : ptr[int] -> unit
+    val store : string @ 'm0 -> unit @ 'm1 with 'm0 <= gc global
+    val literal : 'a @ 'm0 -> unit @ 'm1
+    val ints : ptr[int] @ 'm0 -> unit @ 'm1
     |}];
   provenance
     {|
@@ -102,9 +102,9 @@ let bad u = store_param (Ptr.make "a") (ext "b")
 |};
   [%expect
     {|
-    val store_param : ptr['a @@ 'm1] @ 'm0 -> ('a @ 'm3 -> unit) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and 'm3 <= global and gc <= 'm2
+    val store_param : ptr['a @@ 'm1] @ 'm0 -> ('a @ 'm3 -> unit @ 'm4) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and 'm3 <= global and gc <= 'm2
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val bad : 'a -> unit
+    val bad : 'a @ 'm0 -> unit @ 'm1
     |}]
 ;;
 
@@ -118,10 +118,10 @@ let in_closure u = let n = ext 1 in fun v -> n
 |};
   [%expect
     {|
-    val ext : int -> int
+    val ext : int @ 'm0 -> int @ 'm1
     val p : ptr[int]
-    val store : 'a -> unit
-    val in_closure : 'a -> ('b -> int) @ 'm0 with gc <= 'm0
+    val store : 'a @ 'm0 -> unit @ 'm1
+    val in_closure : 'a @ 'm0 -> ('b @ 'm2 -> int @ 'm3) @ 'm1 with gc <= 'm1
     |}]
 ;;
 
@@ -135,8 +135,8 @@ let gc_only u = let mut s = "a" in s <- "b"; s
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val inferred : 'a -> string @ nonportable external
-    val gc_only : 'a -> string @ nonportable
+    val inferred : 'a @ 'm0 -> string @ 'm1 with nonportable external <= 'm1
+    val gc_only : 'a @ 'm0 -> string @ 'm1 with nonportable <= 'm1
     |}];
   provenance
     {|
@@ -153,7 +153,7 @@ let opted_in u = let mut s @ external = "a" in s
   [%expect
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val opted_in : 'a -> string @ nonportable external
+    val opted_in : 'a @ 'm0 -> string @ 'm1 with nonportable external <= 'm1
     |}]
 ;;
 
@@ -171,10 +171,10 @@ let set_h u = h <- Int.to_string 1
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     val g : string @ external
-    val set : 'a -> unit
-    val get : 'a -> string @ nonportable external
+    val set : 'a @ 'm0 -> unit @ 'm1
+    val get : 'a @ 'm0 -> string @ 'm1 with nonportable external <= 'm1
     val h : string
-    val set_h : 'a -> unit
+    val set_h : 'a @ 'm0 -> unit @ 'm1
     |}];
   provenance
     {|
@@ -196,8 +196,8 @@ let closed u = let f @ static = fun x -> x in f
 |};
   [%expect
     {|
-    val literal : 'a -> string
-    val closed : 'a -> 'b @ 'm0 -> 'b @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val literal : 'a @ 'm0 -> string @ 'm1
+    val closed : 'a @ 'm0 -> ('b @ 'm2 -> 'b @ 'm3) @ 'm1 with 'm2 <= 'm3 and release(locality('m2)) <= locality('m3)
     |}];
   provenance {|
 let made u = let p @ static = Ptr.make 1 in p
@@ -236,7 +236,7 @@ let call u = r.f "a"
     {|
     type t = { f : string @ external -> string @ external }
     val r : t
-    val call : 'a -> string @ nonportable external
+    val call : 'a @ 'm0 -> string @ 'm1 with nonportable external <= 'm1
     |}]
 ;;
 
@@ -251,7 +251,8 @@ let length u = String.length (ext "a")
   provenance {|
 let built u = String.append "a" "b"
 |};
-  [%expect {| val built : 'a -> string @ 'm0 with nonportable gc <= 'm0 |}]
+  [%expect
+    {| val built : 'a @ 'm0 -> string @ 'm1 with nonportable gc <= 'm1 |}]
 ;;
 
 let%expect_test "a closure is static only if it is const" =
@@ -299,7 +300,7 @@ let use u = let y @ static = pair in y
     {|
     val s : string
     val pair : string * int
-    val use : 'a -> string * int
+    val use : 'a @ 'm0 -> string * int @ 'm1
     |}];
   provenance {|
 let s = Int.to_string 1
@@ -322,9 +323,9 @@ let returned u = exclave_ ext "a"
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     type r = { g : string @@ global; n : int }
-    val make : 'a -> r @ external
-    val read : 'a -> string @ external
-    val returned : 'a -> string @ external
+    val make : 'a @ 'm0 -> r @ 'm1 with external <= 'm1
+    val read : 'a @ 'm0 -> string @ 'm1 with external <= 'm1
+    val returned : 'a @ 'm0 -> string @ 'm1 with external <= 'm1
     |}]
 ;;
 
@@ -334,9 +335,10 @@ let%expect_test "a toplevel closure capturing nothing is static" =
 let f @ static = fun (x : int) -> x
 let g @ static = fun (x : int) -> f x
 |};
-  [%expect {|
-    val f : int -> int
-    val g : int -> int
+  [%expect
+    {|
+    val f : int @ 'm0 -> int @ 'm1
+    val g : int @ 'm0 -> int @ 'm1
     |}]
 ;;
 
@@ -367,7 +369,7 @@ let g = k 1
 |};
   [%expect
     {|
-    val k : int @ 'm0 -> (int -> int) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
+    val k : int @ 'm0 -> (int @ 'm2 -> int @ 'm3) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
     val g : int @ '_m0 -> int @ '_m1
     |}]
 ;;
@@ -457,9 +459,9 @@ let set_t u = t <- (ext "x", 2)
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     val g : (int @ '_m0 -> int @ '_m1) @ external
-    val set : 'a -> unit
+    val set : 'a @ 'm0 -> unit @ 'm1
     val t : (string * int) @ external
-    val set_t : 'a -> unit
+    val set_t : 'a @ 'm0 -> unit @ 'm1
     |}]
 ;;
 
@@ -472,7 +474,7 @@ let f u = let p = ext (Ptr.make "a") in p.* <- Int.to_string 1
   [%expect
     {|
     val ext : ptr[string] @ 'm0 -> ptr[string] @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val f : 'a -> unit
+    val f : 'a @ 'm0 -> unit @ 'm1
     |}];
   provenance
     {|
@@ -482,6 +484,6 @@ let f u = let p = ext (Ptr.make 1) in p.* <- 2
   [%expect
     {|
     val ext : ptr[int] @ 'm0 -> ptr[int] @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
-    val f : 'a -> unit
+    val f : 'a @ 'm0 -> unit @ 'm1
     |}]
 ;;

@@ -413,6 +413,12 @@ or more of `const portable nonportable` (stage), `static gc external`
 (provenance) and `global regional local` (locality), at most one per axis:
 `@ local portable`.
 
+A function type's side written without a mode, or the axes its mode doesn't
+name, are the default, `nonportable gc global`, in an annotation as in a
+declaration: `(f : int -> int)` takes and returns global values, and
+`int @ local -> int` is `int @ nonportable gc local -> int`. A mode variable
+keeps a side polymorphic: `(f : int @ 'm -> int @ 'n)`.
+
 ```ocaml
 let x @ const = 1                       (* a binder's mode *)
 let f (x @ local) (y : int @ 'm) : int @ global = ...

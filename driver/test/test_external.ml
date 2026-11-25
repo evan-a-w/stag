@@ -201,8 +201,8 @@ let p @ portable = portable 1
 |};
   [%expect
     {|
-    val plain : int @ nonportable gc global -> int @ nonportable gc global
-    val portable : int @ portable gc global -> int @ portable gc global
+    val plain : int -> int
+    val portable : int @ portable -> int @ portable
     val p : int
     |}];
   (* Its result is declared nonportable, but an int crosses modes. *)
@@ -210,9 +210,8 @@ let p @ portable = portable 1
 external plain : int -> int = "labs"
 let p @ portable = plain 1
 |};
-  [%expect
-    {|
-    val plain : int @ nonportable gc global -> int @ nonportable gc global
+  [%expect {|
+    val plain : int -> int
     val p : int
     |}];
   modes
@@ -228,8 +227,7 @@ let f : int -> int @ portable = plain
   modes {|
 external results : int @ local -> int @ external = "labs"
 |};
-  [%expect
-    {| val results : int @ nonportable gc local -> int @ nonportable external global |}];
+  [%expect {| val results : int @ local -> int @ external |}];
   modes {|
 external const_result : int -> int @ const = "labs"
 |};
@@ -251,8 +249,8 @@ let code = .<labs 1>.
 |};
   [%expect
     {|
-    val labs : int @ nonportable gc global -> int @ nonportable gc global
-    val f : int @ nonportable gc global -> int @ nonportable gc global
+    val labs : int -> int
+    val f : int -> int
     val code : <int>{..'a}
     |}]
 ;;
@@ -306,9 +304,9 @@ let p @ portable = labs
 |};
   [%expect
     {|
-    val labs : int @ nonportable gc global -> int @ nonportable gc global
-    val k : int @ nonportable gc global -> int @ nonportable gc global
-    val p : int @ nonportable gc global -> int @ nonportable gc global
+    val labs : int -> int
+    val k : int -> int
+    val p : int -> int
     |}]
 ;;
 

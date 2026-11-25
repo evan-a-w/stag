@@ -283,10 +283,11 @@ module Printer : sig
       are named, and the constraints between them listed by [where] (as
       [with 'm0 <= 'm1]); otherwise only the modes of arrows fixed to other than
       a declaration's default are, and with [name_mode_args], mode arguments not
-      known are named, as [ptr[t @@ 'm0]], rather than left out. With [modes],
-      an arrow's side fixed to a constant is written with an atom for every
-      axis, as an annotation reads it back, unless [declaration], for the body
-      of a type's declaration, where only those other than the default are. *)
+      known are named, as [ptr[t @@ 'm0]], rather than left out. A side fixed to
+      a constant is written by its atoms other than the default, as both
+      declarations and annotations read an unwritten mode back. [declaration]
+      prints the body of a type's declaration, whose mode variables are its
+      parameters. *)
   val create
     :  ?type_name:(string -> string)
     -> ?modes:bool

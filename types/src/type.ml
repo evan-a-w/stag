@@ -977,8 +977,8 @@ module Printer = struct
         (* Without [modes], whether a mode argument not known is named rather
            than left out as if the default. *)
     ; declaration : bool
-    (* With [modes], whether a fixed side reads back by a declaration's
-       defaults, else, in an annotation, from the atoms written. *)
+    (* Whether this prints a declaration, whose mode variables are its
+       parameters. *)
     }
 
   let create
@@ -1185,46 +1185,59 @@ module Printer = struct
     | atoms -> Some (String.concat ~sep:" " atoms)
   ;;
 
-  (* In an annotation, an axis not written is a fresh variable's. *)
-  let all_atoms t = Option.is_some t.modes && not t.declaration
+  (* A side's variable printed as the constant it is fixed to, as [Fixed]. *)
+  let effective t (side : Arrow_modes.Side.t) : Arrow_modes.Side.t =
+    match side, t.modes, t.counting with
+    | Var var, Some modes, None ->
+      (match Mode_printing.side modes var with
+       | `Name _ -> side
+       | `Atoms atoms ->
+         let point axis =
+           List.Assoc.find atoms axis ~equal:Mode.Axis.Any.equal
+           |> Option.value ~default:0
+         in
+         Fixed
+           { stage = Mode.Stage.of_index_exn (point (T Stage))
+           ; provenance = Mode.Provenance.of_index_exn (point (T Provenance))
+           ; locality = Mode.Locality.of_index_exn (point (T Locality))
+           })
+    | (Var _ | Fixed _), _, _ -> side
+  ;;
 
-  let is_default_side t : Arrow_modes.Side.t -> bool = function
-    | Fixed _ when all_atoms t -> false
+  let is_default_side t side =
+    match effective t side with
     | Fixed const ->
       List.is_empty
         (const_atoms const ~default:(Some Arrow_modes.default_const))
     | Var var ->
-      (match t.modes, t.counting with
-       | None, _ -> Option.is_none (lower_atoms var)
-       | Some _, Some _ -> false
-       | Some modes, None -> Option.is_none (Mode_printing.side modes var))
-  ;;
-
-  let mode_side t (side : Arrow_modes.Side.t) ~position =
-    match side with
-    | Fixed const when all_atoms t ->
-      " @ " ^ String.concat ~sep:" " (const_atoms const ~default:None)
-    | Fixed const ->
-      (match const_atoms const ~default:(Some Arrow_modes.default_const) with
-       | [] -> ""
-       | atoms -> " @ " ^ String.concat ~sep:" " atoms)
-    | Var var ->
-      let atoms =
-        Option.value_map (lower_atoms var) ~default:"" ~f:(fun atom ->
-          " @ " ^ atom)
-      in
-      (match t.modes, t.counting with
-       | None, _ -> atoms
-       | Some modes, Some _ ->
-         Mode_printing.count modes var ~side:position;
-         " @ _"
-       | Some modes, None ->
-         Option.value (Mode_printing.side modes var) ~default:"")
+      (match t.modes with
+       | None -> Option.is_none (lower_atoms var)
+       | Some _ -> false)
   ;;
 
   let mode_var_name t var =
     Hashtbl.find_or_add t.mode_names (Mode.Var.id var) ~default:(fun () ->
       sprintf "'m%d" (Hashtbl.length t.mode_names))
+  ;;
+
+  let mode_side t side ~position =
+    match effective t side with
+    | Fixed const ->
+      (match const_atoms const ~default:(Some Arrow_modes.default_const) with
+       | [] -> ""
+       | atoms -> " @ " ^ String.concat ~sep:" " atoms)
+    | Var var ->
+      (match t.modes, t.counting with
+       | None, _ ->
+         Option.value_map (lower_atoms var) ~default:"" ~f:(fun atom ->
+           " @ " ^ atom)
+       | Some modes, Some _ ->
+         Mode_printing.count modes var ~side:position;
+         " @ _"
+       | Some modes, None ->
+         (match Mode_printing.side modes var with
+          | `Name name -> " @ " ^ name
+          | `Atoms _ -> assert false))
   ;;
 
   (* A mode argument, unless the default ([ptr[t]]'s [nonportable gc]). *)
@@ -1247,7 +1260,7 @@ module Printer = struct
          Mode_printing.count modes var ~side:`Mode_arg;
          Some "_"
        | None ->
-         (match Mode_printing.held modes var with
+         (match Mode_printing.side modes var with
           | `Name name -> Some name
           | `Atoms atoms ->
             let point axis =
@@ -1278,7 +1291,8 @@ module Printer = struct
       if Option.is_some t.modes then "gc" else mode_var_name t var
   ;;
 
-  let side_locality : Arrow_modes.Side.t -> Mode.Locality.t = function
+  let side_locality t side : Mode.Locality.t =
+    match effective t side with
     | Fixed const -> const.locality
     | Var var -> (Mode.Var.lower var).locality
   ;;
@@ -1287,10 +1301,9 @@ module Printer = struct
      before it, so a less local result says so. *)
   let curried_global t ~curried (side : Arrow_modes.Side.t) =
     (not (Mode.Locality.equal curried Global))
-    && Mode.Locality.equal (side_locality side) Global
-    && (not (all_atoms t))
+    && Mode.Locality.equal (side_locality t side) Global
     &&
-    match side, t.modes with
+    match effective t side, t.modes with
     | Var _, Some _ -> false
     | Var _, None | Fixed _, _ -> true
   ;;
@@ -1345,7 +1358,12 @@ module Printer = struct
       in
       let curried =
         match canonical_ty ty2 with
-        | TArrow _ -> Mode.Locality.join curried (side_locality modes.arg)
+        | TArrow _ ->
+          (* As read back: a named argument adds nothing to the default. *)
+          (match effective t modes.arg, t.modes with
+           | Var _, Some _ -> curried
+           | (Fixed _ | Var _), _ ->
+             Mode.Locality.join curried (side_locality t modes.arg))
         | _ -> Global
       in
       let global = curried_global t ~curried modes.res in
