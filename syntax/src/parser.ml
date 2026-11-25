@@ -1895,6 +1895,7 @@ and toplevels t ~in_struct =
     let no_limit = Array.length t.tokens - 1 in
     let outer_limit = t.limit in
     let outer_col = t.col in
+    let outer_salvage = t.salvage in
     (* Unless the declarations in it are not indented more than it. *)
     let limit = if t.limit = t.pos then no_limit else t.limit in
     let rec loop acc =
@@ -1942,6 +1943,7 @@ and toplevels t ~in_struct =
            | Some desc -> loop (located ~loc (desc (expr_at ~loc Error)) :: acc)))
     in
     let toplevels = loop [] in
+    t.salvage <- outer_salvage;
     t.col <- outer_col;
     t.limit
     <- (if outer_limit = no_limit || t.pos <= outer_limit

@@ -621,3 +621,15 @@ exception D of int
      (((Con (int @ t.stag:4:15-18) ()) @ t.stag:4:15-18)))
     |}]
 ;;
+
+let%expect_test "an error after a struct quote salvages the outer toplevel" =
+  parse {|let x = (.< struct let y = 1 end >.
+let z = 2
+|};
+  [%expect {|
+    t.stag:2:0-3: expected `)` to close this `(` (opened at 1:8), found `let`
+    ---
+    let x = <error>
+    let z = 2
+    |}]
+;;
