@@ -16,14 +16,22 @@ let compute ~con ~params (kind : Signature.Type_decl.Kind.t) =
       variances.(i) <- Variance.join variances.(i) variance)
   in
   let mode_var variance var = occurs (Mode.Var.id var) variance in
-  let visited = Int.Hash_set.create () in
+  (* A cyclic type reaches the same linked node again, maybe at another
+     variance: it is walked again whenever that adds to the variances it has
+     been walked at. *)
+  let visited = Int.Table.create () in
+  let first_visit id variance =
+    let before =
+      Option.value (Hashtbl.find visited id) ~default:Variance.Bivariant
+    in
+    let after = Variance.join before variance in
+    Hashtbl.set visited ~key:id ~data:after;
+    not (Variance.equal before after)
+  in
   let rec ty variance (ty' : Type.ty) =
     match ty' with
     | TVar { id; state = Link target; _ } ->
-      if not (Hash_set.mem visited id)
-      then (
-        Hash_set.add visited id;
-        ty variance target)
+      if first_visit id variance then ty variance target
     | TVar var -> occurs var.id variance
     | TCon (name, args) ->
       let declared = con name in
@@ -58,10 +66,8 @@ let compute ~con ~params (kind : Signature.Type_decl.Kind.t) =
       ty variance inner;
       row (Variance.compose ~outer:variance Invariant) context
     | TRecord { id; row = r } | TVariant { id; row = r } ->
-      if not (Hash_set.mem visited id)
-      then (
-        Hash_set.add visited id;
-        row (Variance.compose ~outer:variance Invariant) r)
+      let variance = Variance.compose ~outer:variance Invariant in
+      if first_visit id variance then row variance r
   and row variance (row' : Type.row) =
     match row' with
     | REmpty -> ()
@@ -69,10 +75,7 @@ let compute ~con ~params (kind : Signature.Type_decl.Kind.t) =
       ty variance t;
       row variance rest
     | RVar { id; state = Link target; _ } ->
-      if not (Hash_set.mem visited id)
-      then (
-        Hash_set.add visited id;
-        row variance target)
+      if first_visit id variance then row variance target
     | RVar var -> occurs var.id variance
   in
   let modality (modality : Member_modality.t) =
