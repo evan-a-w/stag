@@ -205,6 +205,13 @@ module Kind : sig
         { generated : Syntax.Type_expr.t
         ; error : t
         } (** An error in the type [generated] the type splice here gave. *)
+    | Via_quote of
+        { toplevel : string
+        ; quote : Loc.t
+        ; error : t
+        }
+    (** An error of an instance here of the scheme of [toplevel], in its quote
+        at [quote]: its code uses a toplevel at a type the instance makes wrong. *)
     | Type_splice_cycle
     (** Evaluating the type splice needs the splice itself, eg. its expression
         uses the declaration it is in. *)

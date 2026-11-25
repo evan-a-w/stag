@@ -174,7 +174,8 @@ let used = f (S (Ptr.make (S (Ptr.make Z))))
 let a = .< b >.
 let b = .< a >.
 |};
-  [%expect {| The type variable '_a occurs inside its own definition |}]
+  [%expect
+    {| In this instance of b, a use in its quote is wrong: The type variable '_a occurs inside its own definition |}]
 ;;
 
 let%expect_test "spliced code's free variables pass mutable locals by" =
@@ -345,7 +346,7 @@ let g (x : int) : int = .~(let _ = d .< "s" >. in .< x >.)
 let d (y : <'a>{..'r}) = .< g .~y >.
 |};
   [%expect
-    {| This expression has type int but an expression was expected of type string |}];
+    {| In this instance of d, a use in its quote is wrong: This expression has type int but an expression was expected of type string |}];
   (* Uses by instances made before and after it is refined agree. *)
   show
     {|
@@ -417,5 +418,155 @@ let m y = let _ = .~(let _ = n () in .< 0 >.) in .< k .~y >.
 let n (u : unit) = .< m .< "s" >. >.
 |};
   [%expect
-    {| This expression has type int but an expression was expected of type string |}]
+    {| In this instance of m, a use in its quote is wrong: This expression has type int but an expression was expected of type string |}]
+;;
+
+let%expect_test "a toplevel finished in a splice's code has a scheme of its own"
+  =
+  (* [c], checked for [ident]'s splice through [p], quotes [ident] while it is
+     being checked; [p] is finished in a component of its own. *)
+  show
+    {|
+let ident (x : string) = .~(.< x >.)
+let p = let _ = c in 1
+let c (_ : int) = .< ident "s" >.
+|};
+  [%expect
+    {|
+    val ident : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val p : int
+    val c : int @ 'm0 -> <string>{..'a} @ 'm1
+    |}];
+  show
+    {|
+let ident (x : string) = .~(let _ = p in .< x >.)
+let p = let _ = c in 1
+let c (_ : int) = .< ident "s" >.
+let q = .~(let _ = (fun (u : int) -> p) in .< 1 >.)
+|};
+  [%expect
+    {|
+    val ident : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val p : int
+    val c : int @ 'm0 -> <string>{..'a} @ 'm1
+    val q : int
+    |}]
+;;
+
+let%expect_test "abandoning a splice keeps the errors of the components it \
+                 finished"
+  =
+  (* The include's code finishes [x], then needs [c], whose component is being
+     checked outside it ([b] is after the include), so it is abandoned. *)
+  show
+    {|
+let c = b
+let x : int = "s"
+include .~ (let _ = x in let _ = c in Nil)
+let b = zzz
+|};
+  [%expect
+    {|
+    This expression has type string but an expression was expected of type int
+    Unbound value zzz
+    |}]
+;;
+
+let%expect_test "a toplevel whose quote's use turns out wrong has failed" =
+  (* [c] is finished in [ident]'s splice, awaiting [ident], which it uses at
+     [int]: once [ident] is finished, [c] fails, and its error is reported once,
+     at its use, not again at its instance in [ident]'s splice. [c] isn't run at
+     compile time then, and neither is [ident], whose splice used it. *)
+  Source_helpers.check
+    {|
+let ident (x : string) = .~(let _ = c in .< x >.)
+let c (_ : int) = .< ident 1 >.
+let d = .~(let _ = c 0 in let _ = print_endline "ran c" in .< 1 >.)
+let e = .~(let _ = ident "a" in let _ = print_endline "ran ident" in .< 1 >.)
+|};
+  [%expect
+    {|
+    ((Unification_error
+      (Type_mismatch (TCon int ()) (TCon string ())
+       (Base_types_not_equal int string)))
+     @ t.stag:3:21-26)
+    |}]
+;;
+
+let%expect_test "a wrong use in an instance is reported at the instance" =
+  (* [d]'s quote uses [g] at its argument's type: [d .< "s" >.] is the wrong
+     one, through [d]'s quote. *)
+  Source_helpers.check
+    {|
+let g (x : int) : int = .~(let _ = d .< "s" >. in .< x >.)
+let d (y : <'a>{..'r}) = .< g .~y >.
+|};
+  [%expect
+    {|
+    ((Via_quote (toplevel d) (quote t.stag:3:28-29)
+      (error
+       (Unification_error
+        (Type_mismatch (TCon string ()) (TCon int ())
+         (Base_types_not_equal string int)))))
+     @ t.stag:2:35-36)
+    |}];
+  (* Through two quotes: [n]'s quote's instance of [m] is the wrong one, and the
+     instance of [n] in [m]'s splice, through [n]'s quote, isn't reported again. *)
+  Source_helpers.check
+    {|
+let k (x : int) : int = .~(let _ = m .< 1 >. in .< x >.)
+let m y = let _ = .~(let _ = n () in .< 0 >.) in .< k .~y >.
+let n (u : unit) = .< m .< "s" >. >.
+|};
+  [%expect
+    {|
+    ((Via_quote (toplevel m) (quote t.stag:3:52-53)
+      (error
+       (Unification_error
+        (Type_mismatch (TCon string ()) (TCon int ())
+         (Base_types_not_equal string int)))))
+     @ t.stag:4:22-23)
+    |}]
+;;
+
+let%expect_test "schemes of a component awaiting a toplevel are refined \
+                 together"
+  =
+  show
+    {|
+let ident (x : string) = .~(let _ = (a .< 1 >., b) in .< x >.)
+let a y = let _ = b in .< ident >.
+let b z = let _ = a z in .< ident >.
+|};
+  [%expect
+    {|
+    val ident : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val a : 'a @ 'm0 -> <string @ 'm2 -> string @ 'm3>{..'b} @ 'm1 with portable <= 'm0 and 'm2 <= 'm3 and release(locality('m2)) <= locality('m3)
+    val b : 'a @ 'm0 -> <string @ 'm2 -> string @ 'm3>{..'b} @ 'm1 with 'm2 <= 'm3 and release(locality('m2)) <= locality('m3)
+    |}]
+;;
+
+let%expect_test "a local bound to an awaiting instance isn't generalized in \
+                 its uses"
+  =
+  show
+    {|
+let ident x = .~(let _ = h () in .< x >.)
+let c y = .< ident .~y >.
+let h (u : unit) = (c .< 1 >., c .< "s" >.)
+|};
+  [%expect
+    {|
+    val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val c : <'a>{..'b} @ 'm0 -> <'a>{..'c} @ 'm1 where ..'b <= {..'c} with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and gc <= 'm1
+    val h : unit @ 'm0 -> <int>{..'a} * <string>{..'b} @ 'm1 with gc <= 'm1
+    |}];
+  show
+    {|
+let ident x = .~(let _ = h () in .< x >.)
+let c y = .< ident .~y >.
+let h (u : unit) = let f = c in (f .< 1 >., f .< "s" >.)
+|};
+  [%expect
+    {| This expression has type string but an expression was expected of type int |}]
 ;;

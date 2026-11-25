@@ -89,6 +89,8 @@ let%expect_test "messages" =
     ; "module M = struct end module M = struct end"
     ; "let w = .~(let z = 1 in .< z >.)"
     ; "let f z = .< z >.\nlet u = .~(f 3)"
+    ; "let g (x : int) : int = .~(let _ = d .< \"s\" >. in .< x >.)\n\
+       let d y = .< g .~y >."
     ];
   [%expect
     {|
@@ -178,6 +180,14 @@ let%expect_test "messages" =
     1 | let f z = .< z >.
                      ^
     Error: The quote can't embed z, as it may not be portable. Bind it as (z @ portable) to embed it, or write [forget z in ...] to make z a free variable of the quote
+    File "a.stag", line 1, characters 35-36:
+    1 | let g (x : int) : int = .~(let _ = d .< "s" >. in .< x >.)
+                                           ^
+    Error: In this instance of A.d, a use in its quote is wrong: This expression has type int but an expression was expected of type string
+    File "a.stag", line 2, characters 13-14:
+    2 | let d y = .< g .~y >.
+                     ^
+    Note: The use in A.d's quote is here
     |}]
 ;;
 

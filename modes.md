@@ -369,6 +369,16 @@ known, an error being reported at the use:
 
   gives `c` the type `<'a>{..'b} -> <'a>{..'c}`, used at `int` and `string`
   in `ident`'s splice, before `ident`'s type is known.
+
+  An error of an instance's use is reported at the instance, with a note at
+  the use in the awaiting toplevel's quote: `c .<"s">.` above is wrong if
+  `ident` turns out to take an `int`, not `c`. If the awaiting toplevel's own
+  use is wrong (its refinement fails), the error is reported there, once, and
+  not again at each instance.
+
+  A local bound to an instance (`let f = c in ...`) is not generalized in the
+  variables the instance's uses involve: `(f .<1>., f .<"s">.)` is an error
+  where `(c .<1>., c .<"s">.)` isn't. Use the toplevel directly.
 - A component that is not generalized (see the value restriction) doesn't
   generalize the use either: it is unified with an instance of the
   toplevel's scheme once it is finished.
@@ -376,8 +386,13 @@ known, an error being reported at the use:
 Code run at compile time while checking a toplevel
 (eg. a type or declaration splice) is not of a component: toplevels it
 checks that depend on ones being checked are finished with the component of
-the toplevel it was checked for. Code abandoned to be checked anew (see
-syntax.md, Evaluation) has its uses dropped. Computing with it elsewhere is
+the toplevel it was checked for. Toplevels it checks that don't are finished
+in components of their own, whatever happens to the code after. Code
+abandoned to be checked anew (see syntax.md, Evaluation) has its uses, and
+the errors reported in it, dropped; those of components it finished are
+kept. A toplevel whose use in a quote turns out wrong once the toplevel used
+is finished has failed, like one with an error of its own, so isn't run at
+compile time. Computing with it elsewhere is
 nonportable: `let z = r` in a toplevel `r` depends on is not generalized,
 whichever order they are checked in. So the order of checking matters: with
 

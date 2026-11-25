@@ -154,6 +154,11 @@ module Kind = struct
         { generated : Syntax.Type_expr.t [@sexp.opaque]
         ; error : t
         }
+    | Via_quote of
+        { toplevel : string
+        ; quote : Loc.t
+        ; error : t
+        }
     | Type_splice_cycle
     | Nested_type_splice
     | Type_definition_cycle of
@@ -671,6 +676,11 @@ let rec kind_message (kind : Kind.t) ~show_type =
   | In_type_splice { generated = _; error } ->
     sprintf
       "In the type this type splice gave: %s"
+      (kind_message error ~show_type)
+  | Via_quote { toplevel; quote = _; error } ->
+    sprintf
+      "In this instance of %s, a use in its quote is wrong: %s"
+      toplevel
       (kind_message error ~show_type)
   | Type_splice_cycle ->
     "This type splice's expression depends on the splice itself (eg. it uses \

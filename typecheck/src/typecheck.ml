@@ -68,11 +68,72 @@ module Syntax_splice = struct
   ;;
 end
 
-(* How errors in some code are reported: in the [Scc_frame] it is checked in,
-   and as in the module and the splice it was written in. *)
+(* The component of toplevels some code is part of, found as it is checked (see
+   [Scc_frame]): its errors are dropped if it is abandoned, and once finished,
+   whether it failed is that of its toplevels. Code a frame absorbs while
+   unfinished is [Merged] into its component; code finished first, of another
+   component, never is. *)
+module Component = struct
+  type t =
+    { mutable state : state
+    ; mutable failed : bool
+    }
+
+  and state =
+    | Open
+    | Merged of t
+    | Abandoned
+    | Finished
+
+  let create () = { state = Open; failed = false }
+
+  let rec root t =
+    match t.state with
+    | Merged into -> root into
+    | Open | Abandoned | Finished -> t
+  ;;
+
+  let failed t = (root t).failed
+  let fail t = (root t).failed <- true
+
+  let is_abandoned t =
+    match (root t).state with
+    | Abandoned -> true
+    | Open | Merged _ | Finished -> false
+  ;;
+
+  let is_open t =
+    match (root t).state with
+    | Open -> true
+    | Merged _ | Abandoned | Finished -> false
+  ;;
+
+  let set_state t state ~from =
+    let t = root t in
+    match t.state with
+    | Open -> t.state <- state
+    | Merged _ | Abandoned | Finished ->
+      raise_s [%message "Component: not open" (from : string)]
+  ;;
+
+  let merge t ~into =
+    let t = root t
+    and into = root into in
+    if not (phys_equal t into)
+    then (
+      if t.failed then into.failed <- true;
+      set_state t (Merged into) ~from:"merge")
+  ;;
+
+  let abandon t = set_state t Abandoned ~from:"abandon"
+  let finish t = set_state t Finished ~from:"finish"
+end
+
+(* How errors in some code are reported: in the component it is part of, and as
+   in the module and the splice it was written in. *)
 module Reporter = struct
   type t =
-    { frame : int
+    { component : Component.t
     ; module_ : Module_scope.t
     ; syntax_splice : Syntax_splice.t option
     ; generated : Generated.t option
@@ -92,20 +153,58 @@ module Reporter = struct
   ;;
 end
 
-(* A use of a toplevel being checked, in a quote of other code: it is referred
-   to by symbol, at a type of its own, unified with the toplevel's once it is
-   known (see [finish_scc] and [settle]). *)
+(* A use of a toplevel being checked, [awaited], in a quote of other code: it is
+   referred to by symbol, at a type of its own, unified with the toplevel's once
+   it is known (see [finish_scc] and [settle]). *)
 module Quoted_use = struct
+  (* The use is in the quote of [toplevel] at [loc], in an instance of its
+     scheme. *)
+  module Via = struct
+    type t =
+      { toplevel : string
+      ; loc : Loc.t
+      }
+  end
+
   type t =
-    { ty : Type.ty
+    { awaited : Typed.Ident.t
+    ; ty : Type.ty
     ; loc : Loc.t
-    ; reporter : Reporter.t (** Of the code using it. *)
-    ; instance : bool
-    (** Of a quote of other code, in an instance of its scheme (see [Awaiting]),
-        so never a recursive use. *)
+    (** Of the use, or of the instance of the scheme it is in ([via]). *)
+    ; via : Via.t list
+    (** Outermost first: the quote of the scheme instantiated at [loc] first. *)
+    ; reporter : Reporter.t (** Of the code at [loc]. *)
     }
 
-  let sexp_of_t { loc; _ } = [%sexp (loc : Loc.t)]
+  let sexp_of_t { awaited; loc; _ } =
+    [%sexp (awaited : Typed.Ident.t), (loc : Loc.t)]
+  ;;
+
+  (* Of a quote of other code, in an instance of its scheme (see [Awaiting]), so
+     never a recursive use. *)
+  let in_instance t = not (List.is_empty t.via)
+
+  (* [t], awaited by the scheme of [toplevel], in an instance of it at [loc]
+     (itself [via] quotes) by code [reporter] reports in. *)
+  let instance t ~toplevel ~ty ~loc ~via ~reporter =
+    { t with
+      ty
+    ; loc
+    ; reporter
+    ; via = via @ ({ Via.toplevel; loc = t.loc } :: t.via)
+    }
+  ;;
+
+  let error t error =
+    let error = Typecheck_error.unification_error ~loc:t.loc error in
+    List.fold
+      (List.rev t.via)
+      ~init:error
+      ~f:(fun error { Via.toplevel; loc } ->
+        { error with
+          kind = Via_quote { toplevel; quote = loc; error = error.kind }
+        })
+  ;;
 end
 
 (* The schemes of a finished component whose code used toplevels still being
@@ -116,25 +215,12 @@ end
    uses of it unified with instances of its scheme, and they are generalized
    anew, so the code, whose types share the variables, is refined too. *)
 module Awaiting = struct
-  module Use = struct
-    type t =
-      { awaited : Typed.Ident.t
-      ; ty : Type.ty
-      ; loc : Loc.t
-      ; reporter : Reporter.t
-      }
-  end
-
   type t =
     { schemes : Type.ty list
-    ; mutable uses : Use.t list
+    ; mutable uses : Quoted_use.t list
     }
 
-  let sexp_of_t { uses; _ } =
-    [%sexp
-      (List.map uses ~f:(fun (use : Use.t) -> use.awaited, use.loc)
-       : (Typed.Ident.t * Loc.t) list)]
-  ;;
+  let sexp_of_t { uses; _ } = [%sexp (uses : Quoted_use.t list)]
 end
 
 module Toplevel = struct
@@ -166,9 +252,9 @@ module Toplevel = struct
       | Done of
           { entry : Env.Entry.t
           ; typed : Typed.Toplevel.t
-          ; failed : bool
-          (** Its component, or one it uses, had an error, so it is not run at
-              compile time. *)
+          ; component : (Component.t[@sexp.opaque])
+          (** If it failed (an error in it, or in a toplevel it uses), it is not
+              run at compile time. *)
           ; runtime_only : string option
           (** The mutable toplevel it may use when run, if any, so it can't be
               run at compile time, where there is none. *)
@@ -244,18 +330,16 @@ let error ~loc kind = Error (Typecheck_error.create ~loc kind)
    with Tarjan's algorithm as we go. A frame is of the code of a toplevel, whose
    component [finish_scc] finishes once complete, or of other code, eg. run at
    compile time, maybe [within] the checking of a toplevel. [pending] are the
-   visited toplevels whose component is not yet complete. [id] identifies the
-   errors reported while checking the frame's code. *)
+   visited toplevels whose component is not yet complete. [component] is that of
+   the frame's code. *)
 module Scc_frame = struct
   type t =
     { id : int
     ; kind : kind
-    ; mutable frames : int list
-    (** Its [id] and those of the frames it absorbed: of its component's code. *)
+    ; component : Component.t
     ; mutable lowlink : int
     ; mutable pending : Toplevel.t list
-    ; mutable failed : bool
-    ; mutable quoting : (Toplevel.t * Quoted_use.t) list
+    ; mutable quoting : Quoted_use.t list
     (** The uses a toplevel's code made of toplevels being checked, latest
         first. *)
     }
@@ -267,42 +351,46 @@ module Scc_frame = struct
   let create id kind =
     { id
     ; kind
-    ; frames = [ id ]
+    ; component = Component.create ()
     ; lowlink = id
     ; pending = []
-    ; failed = false
     ; quoting = []
     }
   ;;
 
+  (* The rank a toplevel's code is checked at. *)
+  let toplevel_rank = 1
+
   (* The rank of the types of the uses its code makes of toplevels being
-     checked: a toplevel's are generalized with its component, if it is. *)
+     checked: a toplevel's are generalized with its component, if it is. Other
+     code's are left to [settle]. *)
   let use_rank t =
     match t.kind with
-    | Toplevel -> 1
+    | Toplevel -> toplevel_rank
     | Code _ -> 0
   ;;
 
   let depends_on t ~lowlink = t.lowlink <- Int.min t.lowlink lowlink
 
   (* What [child], of code [t] checked a toplevel for, left unfinished is part
-     of [t]'s component. *)
+     of [t]'s component. A finished [child] is of a component of its own. *)
   let absorb t ~child =
-    depends_on t ~lowlink:child.lowlink;
-    t.frames <- child.frames @ t.frames;
-    t.pending <- child.pending @ t.pending;
-    t.quoting <- child.quoting @ t.quoting;
-    if child.failed then t.failed <- true
+    if Component.is_open child.component
+    then (
+      depends_on t ~lowlink:child.lowlink;
+      Component.merge child.component ~into:t.component;
+      t.pending <- child.pending @ t.pending;
+      t.quoting <- child.quoting @ t.quoting;
+      child.pending <- [];
+      child.quoting <- [])
   ;;
 
-  (* The code of [t] other than a toplevel's is checked and run: what it left
-     unfinished is part of the component of the toplevel it was within. *)
+  (* The code of [t] other than a toplevel's is checked and run: it is part of
+     the component of the toplevel it was within, if any. Code within none is
+     checked only where no toplevel is being checked, so leaves none unfinished. *)
   let hand_over t =
     match t.kind with
-    | Code { within = Some within } ->
-      absorb within ~child:t;
-      t.pending <- [];
-      t.quoting <- []
+    | Code { within = Some within } -> absorb within ~child:t
     | Code { within = None }
       when List.is_empty t.pending && List.is_empty t.quoting -> ()
     | Code { within = None } | Toplevel ->
@@ -313,9 +401,8 @@ end
 module Report = struct
   type t =
     { error : Typecheck_error.t
-    ; frame : int option
-    (** The [Scc_frame.id] of the code it is in, if its checking may be
-        abandoned. *)
+    ; component : Component.t option
+    (** Of the code it is in, if its checking may be abandoned. *)
     ; once : string option
     (** Only the first error reported with this key is shown. *)
     }
@@ -359,59 +446,46 @@ module Program_env = struct
     ; parameter_modes : Int.Hash_set.t
     (** The ids of the modes of parameters: what they are is decided by each use
         of their function, so is not known while it is checked. *)
-    ; abandoned : Int.Hash_set.t
-    (** The [Scc_frame.id]s of code abandoned, to be checked anew: what was
-        reported in it, or is owed to it, is dropped. *)
     ; checking : Scc_frame.t Stack.t
     (** The frames of the toplevels being checked, innermost first. *)
-    ; components : Toplevel.t list Int.Table.t
-    (** The members of each finished component, by the frame ids of their code. *)
     }
 
-  let report ?frame ?once t error =
+  let report ?component ?once t error =
     t.reported <- t.reported + 1;
-    t.reports <- { Report.error; frame; once } :: t.reports
+    t.reports <- { Report.error; component; once } :: t.reports
   ;;
 
-  let is_abandoned t frame = Hash_set.mem t.abandoned frame
-
   let report_by t (reporter : Reporter.t) ?once error =
+    let component = reporter.component in
     if Typecheck_error.is_already_reported error
-    then report t error ~frame:reporter.frame
-    else
-      report t ?once ~frame:reporter.frame (Reporter.wrap_error reporter error)
+    then report t error ~component
+    else report t ?once ~component (Reporter.wrap_error reporter error)
   ;;
 
   (* A use of a toplevel being checked, in a quote: its error is shown once,
-     however many instances of the quoting code have it. *)
-  let report_use t ~(reporter : Reporter.t) ~loc error =
-    let error = Typecheck_error.unification_error ~loc error in
+     however many instances of the quoting code have it. The code using it did
+     not check. *)
+  let report_use t (use : Quoted_use.t) error =
+    let error = Quoted_use.error use error in
     report_by
       t
-      reporter
+      use.reporter
       ~once:
         (Sexp.to_string
            [%sexp
-             (loc : Loc.t)
-             , (Typecheck_error.message (Reporter.wrap_error reporter error)
+             (use.loc : Loc.t)
+             , (Typecheck_error.message (Reporter.wrap_error use.reporter error)
                 : string)])
       error;
-    (* The code using it did not check. *)
-    Option.iter
-      (Hashtbl.find t.components reporter.frame)
-      ~f:
-        (List.iter ~f:(fun (toplevel : Toplevel.t) ->
-           match toplevel.state with
-           | Done done_ -> toplevel.state <- Done { done_ with failed = true }
-           | Unchecked | In_progress _ -> ()))
+    Component.fail use.reporter.component
   ;;
 
   let errors t =
     let shown = String.Hash_set.create () in
     List.rev t.reports
-    |> List.filter ~f:(fun { Report.error; frame; once } ->
+    |> List.filter ~f:(fun { Report.error; component; once } ->
       (not (Typecheck_error.is_already_reported error))
-      && (not (Option.exists frame ~f:(is_abandoned t)))
+      && (not (Option.exists component ~f:Component.is_abandoned))
       && Option.for_all once ~f:(fun key ->
         Hash_set.strict_add shown key |> Hash_set.Ok_or_duplicate.is_ok))
     |> List.rev_map ~f:(fun { Report.error; _ } -> error)
@@ -609,7 +683,7 @@ module Scope = struct
   let splices t = Option.is_none t.quote && t.level >= 0
 
   let reporter t =
-    { Reporter.frame = t.scc.id
+    { Reporter.component = t.scc.component
     ; module_ = t.module_
     ; syntax_splice = t.syntax_splice
     ; generated = t.generated
@@ -1602,40 +1676,47 @@ module Variant_match = struct
   ;;
 end
 
-(* An instance of [scheme], a toplevel's, made by [instantiate]; with the
+(* An instance of [scheme], [toplevel]'s, made by [instantiate]; with the
    instances of the uses its scheme awaits, passed to [on_use]. *)
 let instance (toplevel : Toplevel.t) ~scheme ~instantiate ~on_use =
   let ty = instantiate scheme in
   (match toplevel.state with
    | Done { awaiting = Some awaiting; _ } ->
-     List.iter awaiting.uses ~f:(fun (use : Awaiting.Use.t) ->
-       on_use { use with ty = instantiate use.ty })
+     List.iter awaiting.uses ~f:(fun (use : Quoted_use.t) ->
+       on_use use ~ty:(instantiate use.ty))
    | Done { awaiting = None; _ } | Unchecked | In_progress _ -> ());
   ty
 ;;
 
-(* A use of [toplevel], whose checking is underway, at [ty], by code of
-   [scope]'s frame: in a quote of the code, or in an instance of a scheme
-   awaiting it ([instance]). [ty] is of the frame's [use_rank]: what code in it
-   generalizes doesn't generalize the use, which is unified with [toplevel]'s
-   type once it is known. *)
-let add_quoted_use (scope : Scope.t) (toplevel : Toplevel.t) ~ty ~loc ~instance =
-  let use = { Quoted_use.ty; loc; reporter = Scope.reporter scope; instance } in
-  Unify.lower_ty ~rank:(Scc_frame.use_rank scope.scc) ty;
+(* [use], by code of [scope]'s frame, of a toplevel being checked: in a quote of
+   the code, or in an instance of a scheme awaiting it. Its type is of the
+   frame's [use_rank]: what code in it generalizes doesn't generalize the use,
+   which is unified with the toplevel's type once it is known. *)
+let add_quoted_use (scope : Scope.t) (use : Quoted_use.t) =
+  Unify.lower_ty ~rank:(Scc_frame.use_rank scope.scc) use.ty;
   match scope.scc.kind with
-  | Toplevel -> scope.scc.quoting <- (toplevel, use) :: scope.scc.quoting
-  | Code _ -> toplevel.pending_uses <- use :: toplevel.pending_uses
+  | Toplevel -> scope.scc.quoting <- use :: scope.scc.quoting
+  | Code _ ->
+    let awaited = Program_env.toplevel scope.program use.awaited.name in
+    awaited.pending_uses <- use :: awaited.pending_uses
 ;;
 
-let quoted_use t (scope : Scope.t) toplevel ~loc =
+let quoted_use t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
   let ty = Type.TVar (Fresh.var t ~rank:scope.rank) in
-  add_quoted_use scope toplevel ~ty ~loc ~instance:false;
+  add_quoted_use
+    scope
+    { awaited = toplevel.ident
+    ; ty
+    ; loc
+    ; via = []
+    ; reporter = Scope.reporter scope
+    };
   ty
 ;;
 
-(* An instance of [entry]'s scheme. A toplevel's may await others (see
+(* An instance of [entry]'s scheme, at [loc]. A toplevel's may await others (see
    [Awaiting]): the instance's uses of them are uses by this code. *)
-let instantiate_entry t (scope : Scope.t) (entry : Env.Entry.t) =
+let instantiate_entry t (scope : Scope.t) (entry : Env.Entry.t) ~loc =
   let instantiate = Scope.instantiate t scope in
   match entry.binder with
   | Local _ -> instantiate entry.scheme
@@ -1644,13 +1725,16 @@ let instantiate_entry t (scope : Scope.t) (entry : Env.Entry.t) =
       (Program_env.toplevel scope.program ident.name)
       ~scheme:entry.scheme
       ~instantiate
-      ~on_use:(fun (use : Awaiting.Use.t) ->
+      ~on_use:(fun use ~ty ->
         add_quoted_use
           scope
-          (Program_env.toplevel scope.program use.awaited.name)
-          ~ty:use.ty
-          ~loc:use.loc
-          ~instance:true)
+          (Quoted_use.instance
+             use
+             ~toplevel:ident.name
+             ~ty
+             ~loc
+             ~via:[]
+             ~reporter:(Scope.reporter scope)))
 ;;
 
 let use_entry
@@ -1705,13 +1789,13 @@ let resolution_type t (scope : Scope.t) ~at ~name ~loc : Resolution.t -> _
   = function
   | Local entry ->
     use_entry scope ~at entry ~name ~loc;
-    Ok (instantiate_entry t scope entry, Typed.Var_ref.Bound entry.binder)
+    Ok (instantiate_entry t scope entry ~loc, Typed.Var_ref.Bound entry.binder)
   | Outside_quote { usable = Some entry; _ } ->
     use_entry scope ~at entry ~name ~loc;
-    Ok (instantiate_entry t scope entry, Persistent entry.binder)
+    Ok (instantiate_entry t scope entry ~loc, Persistent entry.binder)
   | By_symbol entry ->
     use_entry scope ~at entry ~name ~loc ~by_symbol:true;
-    Ok (instantiate_entry t scope entry, Persistent entry.binder)
+    Ok (instantiate_entry t scope entry ~loc, Persistent entry.binder)
   | Outside_quote { quote; usable = None; unusable } ->
     (* Only a local bound in another quote of this level: a toplevel is referred
        to by symbol. *)
@@ -1942,15 +2026,37 @@ let runtime_only (program : Program_env.t) (members : Toplevel.t list) =
       | In_progress { body = None; _ } | Unchecked | Done _ -> None))
 ;;
 
-let unify_use t program ~reporter ~loc ~ty1 ~ty2 =
-  match Unify.unify_ty t ~ty1 ~ty2 with
+let is_finished (toplevel : Toplevel.t) =
+  match toplevel.state with
+  | Done _ -> true
+  | Unchecked | In_progress _ -> false
+;;
+
+let has_failed (toplevel : Toplevel.t) =
+  match toplevel.state with
+  | Done { component; _ } -> Component.failed component
+  | Unchecked | In_progress _ -> false
+;;
+
+(* Unifies [use]'s type with [ty], the type of the toplevel it uses, reporting
+   if they differ. In an instance of a scheme that failed, eg. as its own use of
+   the toplevel differs, the error was reported there. *)
+let unify_use t (program : Program_env.t) (use : Quoted_use.t) ~ty =
+  match Unify.unify_ty t ~ty1:use.ty ~ty2:ty with
   | Ok () -> true
   | Error error ->
-    Program_env.report_use program ~reporter ~loc error;
+    if List.exists use.via ~f:(fun via ->
+         has_failed (Program_env.toplevel program via.toplevel))
+    then Component.fail use.reporter.component
+    else Program_env.report_use program use error;
     false
 ;;
 
+(* [awaiting] has uses of [toplevel], which is not finished: it is refined once
+   it is. *)
 let await (awaiting : Awaiting.t) (toplevel : Toplevel.t) =
+  if is_finished toplevel
+  then raise_s [%message "await: finished" (toplevel.ident : Typed.Ident.t)];
   if not (List.mem toplevel.awaited_by awaiting ~equal:phys_equal)
   then toplevel.awaited_by <- awaiting :: toplevel.awaited_by
 ;;
@@ -1962,85 +2068,84 @@ let scheme (toplevel : Toplevel.t) =
     raise_s [%message "scheme: not finished" (toplevel : Toplevel.t)]
 ;;
 
+(* An instance of the scheme of [awaited], finished, for [use] of it: the uses
+   its scheme awaits are of the code of [use], through [awaited]'s quote. *)
+let instance_for_use t (awaited : Toplevel.t) (use : Quoted_use.t) ~rank ~on_use
+  =
+  instance
+    awaited
+    ~scheme:(scheme awaited)
+    ~instantiate:(Scheme.instantiate t ~rank)
+    ~on_use:(fun added ~ty ->
+      on_use
+        (Quoted_use.instance
+           added
+           ~toplevel:awaited.ident.name
+           ~ty
+           ~loc:use.loc
+           ~via:use.via
+           ~reporter:use.reporter))
+;;
+
 (* Refines [awaiting]'s schemes by the finished toplevels it uses. *)
 let refine t (program : Program_env.t) (awaiting : Awaiting.t) =
-  let finished (use : Awaiting.Use.t) =
-    match (Program_env.toplevel program use.awaited.name).state with
-    | Done _ -> true
-    | Unchecked | In_progress _ -> false
+  let awaited (use : Quoted_use.t) =
+    Program_env.toplevel program use.awaited.name
   in
-  if List.exists awaiting.uses ~f:finished
+  let finished, remaining =
+    List.partition_tf awaiting.uses ~f:(fun use -> is_finished (awaited use))
+  in
+  List.iter remaining ~f:(fun use ->
+    if not (List.mem (awaited use).awaited_by awaiting ~equal:phys_equal)
+    then raise_s [%message "refine: a use not awaited" (use : Quoted_use.t)]);
+  if not (List.is_empty finished)
   then (
-    let tys =
-      awaiting.schemes
-      @ List.map awaiting.uses ~f:(fun (use : Awaiting.Use.t) -> use.ty)
-    in
-    Scheme.reopen t ~rank:1 tys;
-    let finished, remaining = List.partition_tf awaiting.uses ~f:finished in
+    Scheme.reopen
+      t
+      ~rank:Scc_frame.toplevel_rank
+      (awaiting.schemes
+       @ List.map awaiting.uses ~f:(fun (use : Quoted_use.t) -> use.ty));
     let added = ref [] in
     List.iter finished ~f:(fun use ->
-      let awaited = Program_env.toplevel program use.awaited.name in
       let ty =
-        instance
-          awaited
-          ~scheme:(scheme awaited)
-          ~instantiate:(Scheme.instantiate t ~rank:1)
+        instance_for_use
+          t
+          (awaited use)
+          use
+          ~rank:Scc_frame.toplevel_rank
           ~on_use:(fun added_use -> added := added_use :: !added)
       in
-      ignore
-        (unify_use
-           t
-           program
-           ~reporter:use.reporter
-           ~loc:use.loc
-           ~ty1:use.ty
-           ~ty2:ty
-         : bool));
+      ignore (unify_use t program use ~ty : bool));
     let uses = remaining @ List.rev !added in
     Scheme.generalize
       t
       ~rank:0
-      (awaiting.schemes
-       @ List.map uses ~f:(fun (use : Awaiting.Use.t) -> use.ty));
+      (awaiting.schemes @ List.map uses ~f:(fun (use : Quoted_use.t) -> use.ty));
     awaiting.uses <- uses;
-    List.iter uses ~f:(fun use ->
-      await awaiting (Program_env.toplevel program use.awaited.name)))
+    List.iter uses ~f:(fun use -> await awaiting (awaited use)))
 ;;
 
 (* Once [members]' component is finished, and what was not generalized lowered:
-   the uses of them by code finished before them are unified with instances of
-   their schemes, and the schemes awaiting them refined. *)
+   the schemes awaiting them are refined, and the uses of them by code finished
+   before them unified with instances of their schemes, after, so that an
+   instance of a scheme that failed is not reported again. *)
 let settle t (program : Program_env.t) (members : Toplevel.t list) =
+  List.iter members ~f:(fun member ->
+    let awaiting = member.awaited_by in
+    member.awaited_by <- [];
+    List.iter awaiting ~f:(refine t program));
   List.iter members ~f:(fun member ->
     let uses = member.pending_uses in
     member.pending_uses <- [];
     List.iter (List.rev uses) ~f:(fun (use : Quoted_use.t) ->
-      if not (Program_env.is_abandoned program use.reporter.frame)
+      if not (Component.is_abandoned use.reporter.component)
       then (
         let ty =
-          instance
-            member
-            ~scheme:(scheme member)
-            ~instantiate:(Scheme.instantiate t ~rank:0)
-            ~on_use:(fun added ->
-              let awaited = Program_env.toplevel program added.awaited.name in
-              awaited.pending_uses
-              <- { use with ty = added.ty; loc = added.loc; instance = true }
-                 :: awaited.pending_uses)
+          instance_for_use t member use ~rank:0 ~on_use:(fun added ->
+            let awaited = Program_env.toplevel program added.awaited.name in
+            awaited.pending_uses <- added :: awaited.pending_uses)
         in
-        ignore
-          (unify_use
-             t
-             program
-             ~reporter:use.reporter
-             ~loc:use.loc
-             ~ty1:use.ty
-             ~ty2:ty
-           : bool))));
-  List.iter members ~f:(fun member ->
-    let awaiting = member.awaited_by in
-    member.awaited_by <- [];
-    List.iter awaiting ~f:(refine t program))
+        ignore (unify_use t program use ~ty : bool))))
 ;;
 
 (* [quoting] are the uses the component's code made of toplevels being checked.
@@ -2053,44 +2158,33 @@ let finish_scc
   t
   (program : Program_env.t)
   (members : Toplevel.t list)
-  ~frames
+  ~(component : Component.t)
   ~quoting
-  ~failed
   =
-  List.iter frames ~f:(fun frame ->
-    Hashtbl.set program.components ~key:frame ~data:members);
-  let own, others =
-    List.partition_tf (List.rev quoting) ~f:(fun (quoted, _) ->
-      List.mem members quoted ~equal:phys_equal)
+  let is_member (use : Quoted_use.t) =
+    List.exists members ~f:(fun (member : Toplevel.t) ->
+      Typed.Ident.equal member.ident use.awaited)
   in
-  let own, own_instances =
-    List.partition_tf own ~f:(fun (_, (use : Quoted_use.t)) -> not use.instance)
-  in
-  List.iter own_instances ~f:(fun ((quoted : Toplevel.t), use) ->
+  let pend (use : Quoted_use.t) =
     Unify.lower_ty ~rank:0 use.ty;
-    quoted.pending_uses <- use :: quoted.pending_uses);
+    let awaited = Program_env.toplevel program use.awaited.name in
+    awaited.pending_uses <- use :: awaited.pending_uses
+  in
+  let own, others = List.partition_tf (List.rev quoting) ~f:is_member in
+  let own_instances, own = List.partition_tf own ~f:Quoted_use.in_instance in
+  List.iter own_instances ~f:pend;
   let recursive_uses_unified =
-    List.fold
-      own
-      ~init:true
-      ~f:(fun unified ((quoted : Toplevel.t), (use : Quoted_use.t)) ->
-        match quoted.state with
-        | In_progress { ty; _ } ->
-          unify_use
-            t
-            program
-            ~reporter:use.reporter
-            ~loc:use.loc
-            ~ty1:use.ty
-            ~ty2:ty
-          && unified
-        | Unchecked | Done _ ->
-          raise_s
-            [%message
-              "finish_scc: quoted member not checked" (quoted : Toplevel.t)])
+    List.fold own ~init:true ~f:(fun unified (use : Quoted_use.t) ->
+      let quoted = Program_env.toplevel program use.awaited.name in
+      match quoted.state with
+      | In_progress { ty; _ } -> unify_use t program use ~ty && unified
+      | Unchecked | Done _ ->
+        raise_s
+          [%message
+            "finish_scc: quoted member not checked" (quoted : Toplevel.t)])
   in
   let failed =
-    failed
+    Component.failed component
     || (not recursive_uses_unified)
     || check_initialization_cycles
          program
@@ -2170,29 +2264,20 @@ let finish_scc
       Scheme.generalize
         t
         ~rank:0
-        (tys @ List.map others ~f:(fun (_, (use : Quoted_use.t)) -> use.ty));
+        (tys @ List.map others ~f:(fun (use : Quoted_use.t) -> use.ty));
       match others with
       | [] -> None
       | _ :: _ ->
-        let awaiting =
-          { Awaiting.schemes = tys
-          ; uses =
-              List.map others ~f:(fun ((quoted : Toplevel.t), use) ->
-                { Awaiting.Use.awaited = quoted.ident
-                ; ty = use.ty
-                ; loc = use.loc
-                ; reporter = use.reporter
-                })
-          }
-        in
-        List.iter others ~f:(fun (quoted, _) -> await awaiting quoted);
+        let awaiting = { Awaiting.schemes = tys; uses = others } in
+        List.iter others ~f:(fun use ->
+          await awaiting (Program_env.toplevel program use.awaited.name));
         Some awaiting)
     else (
-      List.iter others ~f:(fun ((quoted : Toplevel.t), use) ->
-        Unify.lower_ty ~rank:0 use.ty;
-        quoted.pending_uses <- use :: quoted.pending_uses);
+      List.iter others ~f:pend;
       None)
   in
+  if failed then Component.fail component;
+  Component.finish component;
   List.iter2_exn members tys ~f:(fun member ty ->
     Type.iter_held ty ~f:(Mode_rules.default_held ~name:member.ident.name));
   let members =
@@ -2218,7 +2303,7 @@ let finish_scc
                    ~mode
                    ~held
              ; typed
-             ; failed
+             ; component
              ; runtime_only
              ; awaiting
              };
@@ -2401,10 +2486,12 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
     { entry with level = Int.min entry.level scope.level }
   in
   match toplevel.state with
-  | Done { failed = true; _ } when scope.level < 0 && Option.is_none scope.quote
-    ->
+  | Done { component; _ }
+    when Component.failed component
+         && scope.level < 0
+         && Option.is_none scope.quote ->
     (* Code that did not check is not run. *)
-    scope.scc.failed <- true;
+    Component.fail scope.scc.component;
     Error Typecheck_error.already_reported
   | Done { runtime_only = Some global; _ }
     when scope.level < 0 && Option.is_none scope.quote ->
@@ -2412,8 +2499,8 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
       ~loc
       (Compile_time_use_of_mutable
          { toplevel = toplevel.ident.name; mutable_ = global })
-  | Done { entry; failed; typed = _; runtime_only = _; awaiting = _ } ->
-    if failed then scope.scc.failed <- true;
+  | Done { entry; component; typed = _; runtime_only = _; awaiting = _ } ->
+    if Component.failed component then Component.fail scope.scc.component;
     Ok (at_scope_level entry)
   | In_progress in_progress ->
     let entry ?(defining = false) ?(scheme = in_progress.ty) mode =
@@ -2483,7 +2570,7 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
 and check_toplevel_in t program (toplevel : Toplevel.t) scc ~index =
   let unfinished = Stack.length program.unfinished in
   let reported = program.reported in
-  let rank = 1 in
+  let rank = Scc_frame.toplevel_rank in
   let scope =
     { Scope.program
     ; level = 0
@@ -2562,7 +2649,7 @@ and check_toplevel_in t program (toplevel : Toplevel.t) scc ~index =
         raise Uses_unfinished
     in
     Mode_rules.Toplevel.outlives modes rules ~ty ~name ~loc;
-    if program.reported > reported then scc.failed <- true;
+    if program.reported > reported then Component.fail scc.component;
     (match toplevel.state with
      | In_progress in_progress -> in_progress.body <- Some body
      | Unchecked | Done _ ->
@@ -2571,13 +2658,7 @@ and check_toplevel_in t program (toplevel : Toplevel.t) scc ~index =
     if scc.lowlink = index
     then (
       let members = scc.pending in
-      finish_scc
-        t
-        program
-        members
-        ~frames:scc.frames
-        ~quoting:scc.quoting
-        ~failed:scc.failed;
+      finish_scc t program members ~component:scc.component ~quoting:scc.quoting;
       scc.pending <- [];
       scc.quoting <- [];
       while Stack.length program.unfinished > unfinished do
@@ -2626,11 +2707,8 @@ and check_external
 (* Abandons the toplevels of [scc] with the splice whose code reached them, to
    be checked anew. *)
 and abandon (program : Program_env.t) (scc : Scc_frame.t) ~unfinished =
-  List.iter scc.frames ~f:(Hash_set.add program.abandoned);
+  Component.abandon scc.component;
   List.iter scc.pending ~f:(fun (toplevel : Toplevel.t) ->
-    (match toplevel.state with
-     | In_progress { index; _ } -> Hash_set.add program.abandoned index
-     | Unchecked | Done _ -> ());
     toplevel.state <- Unchecked);
   scc.pending <- [];
   scc.quoting <- [];
@@ -4112,7 +4190,7 @@ and substitute_entry
         t
         ~presence
         ~ty1:ty
-        ~ty2:(instantiate_entry t scope entry)
+        ~ty2:(instantiate_entry t scope entry ~loc)
       |> lift ~loc
     in
     Some entry.binder
@@ -4172,7 +4250,7 @@ and substitute_tail
             ( name
             , Scope.fresh_presence t scope
             , may_be_assigned t scope entry.binder
-            , instantiate_entry t scope entry
+            , instantiate_entry t scope entry ~loc
             , Some entry.binder )
         | Local _ | Unusable _ ->
           Some (name, Absent, Absent, Scope.fresh_ty t scope, None)
@@ -4929,9 +5007,7 @@ let program_env
     ; const_toplevels
     ; compile_time_c_calls
     ; parameter_modes = Int.Hash_set.create ()
-    ; abandoned = Int.Hash_set.create ()
     ; checking = Stack.create ()
-    ; components = Int.Table.create ()
     }
   in
   (report := fun error -> Program_env.report program_env error);
