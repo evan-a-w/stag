@@ -35,8 +35,13 @@ let frame t ~parent ~name ~loc ~ty =
 ;;
 
 (* The locality nodes of the sides of the arrows in [ty] that aren't fixed, with
-   where each first is. *)
+   where each first is; and every mode variable in [ty]. *)
 let sides start =
+  let vars = Queue.create () in
+  let var v =
+    Queue.enqueue vars (Mode.Var.node v Locality);
+    false
+  in
   let seen_types = Int.Hash_set.create () in
   let seen_modes = Int.Hash_set.create () in
   let found = Queue.create () in
@@ -68,6 +73,7 @@ let sides start =
     | TVar { id; state = Link target; _ } -> if first id then ty target ~steps
     | TVar _ -> ()
     | TArrow (arg, res, modes) ->
+      ignore (Arrow_modes.exists modes ~f:var : bool);
       side ~steps modes.arg `Arg;
       side ~steps modes.res `Res;
       step arg Arg;
@@ -78,7 +84,7 @@ let sides start =
         match arg with
         | ATy ty' -> step ty' (Type_arg i)
         | ARow r -> row r ~steps:(Typed.Allocation.Side.Step.Type_arg i :: steps)
-        | AMode _ -> ())
+        | AMode mode -> ignore (Mode_arg.exists mode ~f:var : bool))
     | TCode { inner; context } ->
       step inner Code;
       row context ~steps
@@ -94,7 +100,7 @@ let sides start =
     | RVar _ -> ()
   in
   ty start ~steps:[];
-  Queue.to_list found
+  Queue.to_list found, Queue.to_list vars
 ;;
 
 module Owner = struct
@@ -102,6 +108,7 @@ module Owner = struct
     { owner : Typed.Allocation.Owner.t
     ; depth : int
     ; sides : (Typed.Allocation.Side.t * Mode.Var.Node.t) list
+    ; vars : Mode.Var.Node.t list
     }
 end
 
@@ -129,6 +136,7 @@ let place members =
         known
         (toplevel, List.map lets ~f:(fun (frame : Frame.t) -> frame.loc))
         ~default:(fun () ->
+          let sides, vars = sides ty in
           let owner =
             { Owner.owner =
                 { toplevel
@@ -137,7 +145,8 @@ let place members =
                       frame.name, frame.loc)
                 }
             ; depth = List.length lets
-            ; sides = sides ty
+            ; sides
+            ; vars
             }
           in
           Queue.enqueue owners owner;
@@ -161,25 +170,30 @@ let place members =
   in
   let owners = Queue.to_list owners in
   let sides = List.concat_map owners ~f:(fun owner -> owner.sides) in
-  let is_side =
+  let in_scheme =
     let ids =
-      Int.Hash_set.of_list (List.map sides ~f:(fun (_, node) -> id node))
+      Int.Hash_set.of_list
+        (List.concat_map owners ~f:(fun owner ->
+           List.map (List.map owner.sides ~f:snd @ owner.vars) ~f:id))
     in
     fun node -> Hash_set.mem ids (id node)
   in
   (* A site is made as locally as its mode's upper bound allows, which the nodes
-     above it bound. Each of those is a side of an owner, fixed by the instance;
-     or else may yet be constrained by code outside the component (of rank at
-     most [0]), or is of a scheme (generic); or is internal to the component,
-     with every constraint it will have. All but internal ones are pinned at
-     their least, as an instance may have them, so that the upper bound read is
-     the least any instance gives. *)
+     above it bound. Each of those is a side or other mode variable of an
+     owner's type, chosen by the instance; or else may yet be constrained by
+     code outside the component (of rank at most [0]), or is of a scheme
+     (generic); or is internal to the component, with every constraint it will
+     have. All but internal ones are pinned at their least, as an instance may
+     have them, so that the upper bound read is the least any instance gives. So
+     a site is only made in a region when every node above it is pinned or
+     internal: no instance, and no code yet to be checked, can make it any less
+     local. *)
   let above =
     Array.map sites ~f:(fun ((site : Mode_rules.Site.t), _) ->
       Mode.Var.Node.above (Mode.Var.node site.mode Locality))
   in
   let internal node =
-    (not (is_side node))
+    (not (in_scheme node))
     &&
     match Mode.Var.Node.rank node with
     | Some rank -> rank > 0
