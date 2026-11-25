@@ -293,7 +293,7 @@ let capped : 'a @ 'm -> 'a @ 'n with 'n <= portable = fun x -> x
 let bad = capped (Int.to_string 3)
 |};
   [%expect
-    {| This is nonportable, because a function type fixes it, then a function is used at a type with other modes, then the function returns it (at t.stag:3:17-34), then it is passed to a function (at t.stag:3:10-34), but must be at most portable, because it is annotated 'n <= portable (at t.stag:2:37-51), then the function types are unified, then the function returns it (at t.stag:2:63-64), then x is used (at t.stag:2:63-64), then x is passed to the function (at t.stag:2:54-64), then the function types are unified, then a function is used at a type with other modes |}];
+    {| This is nonportable, because a function type fixes it, then a function is used at a type with other modes, then the function returns it (at t.stag:3:17-34), then it is passed to a function (at t.stag:3:10-34), but must be at most portable, because it is annotated 'n <= portable (at t.stag:2:37-51), then a function is used at a type with other modes, then the function returns it (at t.stag:2:63-64), then x is used (at t.stag:2:63-64), then x is passed to the function (at t.stag:2:54-64), then a function is used at a type with other modes |}];
   modes
     {|
 let pinned : int @ 'm -> int @ 'n with 'n <= 'm and 'm <= const = fun x -> x

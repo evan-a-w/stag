@@ -368,7 +368,7 @@ let different_rows r =
      @ t.stag:2:21-35)
     ((Unification_error
       (Row_mismatch (RExtend x Present (TVar (Unbound 26 1)) REmpty)
-       (RExtend y Present (TVar (Unbound 29 1)) REmpty) (Missing_label x)))
+       (RExtend y Present (TVar (Unbound 30 1)) REmpty) (Missing_label x)))
      @ t.stag:3:47-55)
     |}]
 ;;

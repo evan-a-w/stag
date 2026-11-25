@@ -114,7 +114,12 @@ closure's own mode is the mode of the arrow value, like any value's.
   structure, with new mode variables that each value is used at by
   variance. So the result doesn't depend on their order: a match with an arm
   taking `string @ local` and one taking only global strings is a function
-  taking global strings, whichever comes first.
+  taking global strings, whichever comes first. The join is made from the
+  first value's type: modes it reaches only through a type variable still
+  unknown then, or inside a record, variant or code context, are unified
+  (equal for every value), not joined. A function literal expected at a known
+  type (a later arm, an argument) is used at it by variance too, rather than
+  made equal to it.
 - **Polymorphism.** Mode variables are generalised with the type variables of
   a scheme, with the constraints between them, and copied per instance, so
   `let apply f x = f x` works for portable and nonportable `f` alike.

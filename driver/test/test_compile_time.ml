@@ -30,7 +30,7 @@ let used = cube 7
     (three (S (Ptr (S (Ptr (S (Ptr (Z))))))))
     (cube <fun>)
     (used
-     (Cons (Ptr (Tuple 7 (Cons (Ptr (Tuple 7 (Cons (Ptr (Tuple 7 (Nil)))))))))))
+     (Cons (Box (Tuple 7 (Cons (Box (Tuple 7 (Cons (Box (Tuple 7 (Nil)))))))))))
     |}]
 ;;
 

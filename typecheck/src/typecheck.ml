@@ -3281,11 +3281,15 @@ and expr_type
     let { Function_type.args; annots; ty; _ } = fn in
     (* The parameters' types are known before the body is checked where they are
        expected, so that what crosses modes by its type does: [f (fun x -> ...)]
-       with [f]'s type known. A mismatch is left to the caller to report. *)
-    (match expected with
+       with [f]'s type known. Used at it by variance, as the caller will: made
+       equal, a later arm would be bound to an earlier one's modes. A mismatch
+       is left to the caller to report. *)
+    (match
+       Option.bind expected ~f:(fun expected -> either_known expected None)
+     with
      | Some expected
        when Expectation.is_required hint && not (Unify.clash expected ty) ->
-       ignore (Unify.unify_ty t ~ty1:expected ~ty2:ty : (unit, _) Result.t)
+       ignore (Unify.sub_ty t ~lower:ty ~upper:expected : (unit, _) Result.t)
      | Some _ | None -> ());
     let body =
       Mode_rules.Alloc.closure modes at ~loc (fun closure ->
@@ -3809,7 +3813,12 @@ and expr_type
                      Required)
             in
             if Type.is_error body.ty
-               || Scope.subtypes t scope ~lower:body.ty ~upper:result ~loc:body.loc
+               || Scope.subtypes
+                    t
+                    scope
+                    ~lower:body.ty
+                    ~upper:result
+                    ~loc:body.loc
             then body
             else { desc = Error [ body ]; ty = Type.error; loc = body.loc })
       in

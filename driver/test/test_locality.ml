@@ -565,7 +565,7 @@ let k f = f 1 2
 let use u = k (fun (x : int) -> exclave_ stack_ (fun (y : int) -> Int.add x y))
 |};
   [%expect
-    {| This is local, because it is allocated by [stack_] (at t.stag:3:41-78), then it is part of the value (at t.stag:3:41-78), then the function returns it (at t.stag:3:32-78), but must be at most regional, because the function returns a function value, not the closure of a partial application (at t.stag:3:14-79), then the function types are unified, including whether their results may take arguments after the region ends (not printed), then a tail call gives it further arguments, after the current region has ended (mark the call [@nontail]) (at t.stag:2:10-13), then the function types are unified |}]
+    {| This is local, because it is allocated by [stack_] (at t.stag:3:41-78), then it is part of the value (at t.stag:3:41-78), then the function returns it (at t.stag:3:32-78), but must be at most regional, because the function returns a function value, not the closure of a partial application (at t.stag:3:14-79), then the function types are unified, including whether their results may take arguments after the region ends (not printed), then a tail call gives it further arguments, after the current region has ended (mark the call [@nontail]) (at t.stag:2:10-13), then a function is used at a type with other modes |}]
 ;;
 
 let%expect_test "locality in declarations" =
