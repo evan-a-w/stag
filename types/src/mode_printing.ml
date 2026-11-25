@@ -50,6 +50,7 @@ type t =
   ; rep : int Int.Table.t
   ; atoms : (Mode.Axis.Any.t * int) list Int.Table.t
   ; names : string Int.Table.t
+  ; anonymous : Int.Hash_set.t
   ; mutable printed : Printed.t list
   }
 
@@ -63,6 +64,7 @@ let create () =
   ; rep = Int.Table.create ()
   ; atoms = Int.Table.create ()
   ; names = Int.Table.create ()
+  ; anonymous = Int.Hash_set.create ()
   ; printed = []
   }
 ;;
@@ -319,6 +321,26 @@ let settle t =
         ~data:
           (List.map (axes rep) ~f:(fun axis ->
              axis, Mode_closure.lower closure (node axis))));
+  (* A class of one variable, written once, in no relation and with no bound
+     printed, reads back as any fresh variable: it is written [_]. *)
+  Hash_set.clear t.anonymous;
+  let members = Int.Table.create () in
+  Hashtbl.iteri t.counts ~f:(fun ~key:id ~data:count ->
+    let rep = Hashtbl.find t.rep id |> Option.value ~default:id in
+    Hashtbl.update members rep ~f:(fun previous ->
+      count + Option.value previous ~default:0));
+  List.iter reps ~f:(fun rep ->
+    let generic =
+      Hashtbl.find t.vars rep |> Option.exists ~f:Mode.Var.is_generic
+    in
+    if generic
+       && (not (Hash_set.mem related rep))
+       && (not (Hashtbl.mem t.atoms rep))
+       && (not
+             (List.exists (axes rep) ~f:(fun axis ->
+                Hash_set.mem bounded { Mode_node.var = rep; axis })))
+       && Option.equal Int.equal (Hashtbl.find members rep) (Some 1)
+    then Hash_set.add t.anonymous rep);
   let rank = Int.Table.create () in
   List.iteri reps ~f:(fun i rep -> Hashtbl.set rank ~key:rep ~data:i);
   let rank = Hashtbl.find_exn rank in
@@ -338,12 +360,15 @@ let settle t =
 ;;
 
 let name t rep =
-  Hashtbl.find_or_add t.names rep ~default:(fun () ->
-    let weak =
-      Hashtbl.find t.vars rep
-      |> Option.exists ~f:(fun var -> not (Mode.Var.is_generic var))
-    in
-    sprintf "'%sm%d" (if weak then "_" else "") (Hashtbl.length t.names))
+  if Hash_set.mem t.anonymous rep
+  then "_"
+  else
+    Hashtbl.find_or_add t.names rep ~default:(fun () ->
+      let weak =
+        Hashtbl.find t.vars rep
+        |> Option.exists ~f:(fun var -> not (Mode.Var.is_generic var))
+      in
+      sprintf "'%sm%d" (if weak then "_" else "") (Hashtbl.length t.names))
 ;;
 
 let rep t var =

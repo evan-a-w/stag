@@ -279,16 +279,19 @@ module Annotation_vars = struct
   (* [`Mode_arg] for a mode argument, which has no locality, [`Located] where it
      has, and [`Related] in a constraint, which relates its axes. *)
   let var t name ~loc ~(use : [ `Located | `Mode_arg | `Related ]) =
-    (match use with
-     | `Located -> Hash_set.add t.located name
-     | `Mode_arg -> Hash_set.add t.mode_args name
-     | `Related -> ());
-    only_kind
-      name
-      ~loc
-      ~in_:t.modes
-      ~others:[ Hashtbl.mem t.tys; Hashtbl.mem t.rows ]
-      ~default:(fun () -> fresh_mode t)
+    if String.equal name "_"
+    then Ok (fresh_mode t)
+    else (
+      (match use with
+       | `Located -> Hash_set.add t.located name
+       | `Mode_arg -> Hash_set.add t.mode_args name
+       | `Related -> ());
+      only_kind
+        name
+        ~loc
+        ~in_:t.modes
+        ~others:[ Hashtbl.mem t.tys; Hashtbl.mem t.rows ]
+        ~default:(fun () -> fresh_mode t))
   ;;
 
   (* A variable only of mode arguments has no locality. *)
