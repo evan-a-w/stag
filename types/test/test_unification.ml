@@ -1865,3 +1865,36 @@ let%expect_test "iteration past the first steps visits cycles once and reports \
   print_s [%sexp (x.id : int), (List.rev !calls : (int * bool) list)];
   [%expect {| (0 ((0 true) (0 false))) |}]
 ;;
+
+let%expect_test "a reopened scheme is refined in place" =
+  let fresh = Fresh.create () in
+  let a = tvar fresh ~rank:2 in
+  let outer = rvar fresh ~rank:1 in
+  let g = rvar fresh ~rank:2 in
+  constrain fresh ~row:outer ~bound:g;
+  let scheme = TTuple [ a; a; code g ] in
+  let both = TTuple [ scheme; code outer ] in
+  let show () = print_endline (Type.to_string_hum both) in
+  show ();
+  Scheme.generalize fresh ~rank:1 [ scheme ];
+  show ();
+  let before = Scheme.instantiate fresh ~rank:2 scheme in
+  Scheme.reopen fresh ~rank:2 [ scheme ];
+  (* The bound of [outer] the scheme kept holds again. *)
+  show ();
+  unify_ty fresh ~ty1:a ~ty2:int;
+  Scheme.generalize fresh ~rank:1 [ scheme ];
+  show ();
+  (* An instance made before is unaffected. *)
+  print_endline (Type.to_string_hum (TTuple [ before; code outer ]));
+  [%expect
+    {|
+    (Ok ())
+    ('_a * '_a * <int>{..'_b}) * <int>{..'_c} where ..'_c <= {..'_b}
+    ('a * 'a * <int>{..'b}) * <int>{..'_c} where ..'_c <= {..'b}
+    ('_a * '_a * <int>{..'_b}) * <int>{..'_c} where ..'_c <= {..'_b}, ..'_c <= {..'_d}
+    (Ok ())
+    (int * int * <int>{..'a}) * <int>{..'_b} where ..'_b <= {..'a}, ..'_b <= {..'_c}
+    ('_a * '_a * <int>{..'_b}) * <int>{..'_c} where ..'_c <= {..'_b}
+    |}]
+;;

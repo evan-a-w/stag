@@ -355,9 +355,12 @@ known, an error being reported at the use:
   generalized with its schemes: the schemes *await* the toplevel. Each
   instance of them has its own instance of the use, unified with an instance
   of the toplevel's scheme once it is finished, like a use of its own. Once
-  the toplevel is finished, the awaiting schemes are refined: an instance of
-  them, with its use unified with an instance of the toplevel's scheme, is
-  generalized anew, and is the scheme from then on. So
+  the toplevel is finished, the awaiting schemes are refined in place: their
+  variables are made ones of the code being checked again, the use is
+  unified with an instance of the toplevel's scheme, and they are
+  generalized anew. The typed code shares the variables, so it has the
+  refined types too. Instances made before are unaffected: they have their
+  own uses. So
 
   ```ocaml
   let ident x = .~(let _ = (c .<1>., c .<"s">.) in .<x>.)
@@ -370,8 +373,7 @@ known, an error being reported at the use:
   generalize the use either: it is unified with an instance of the
   toplevel's scheme once it is finished.
 
-The typed code of an awaiting scheme keeps the type it was checked at; only
-the scheme is refined. Code run at compile time while checking a toplevel
+Code run at compile time while checking a toplevel
 (eg. a type or declaration splice) is not of a component: toplevels it
 checks that depend on ones being checked are finished with the component of
 the toplevel it was checked for. Code abandoned to be checked anew (see

@@ -914,3 +914,32 @@ let first p = match p with (a, _) -> (a : int)
     ((a/14 (int 0)) (first/4 ("int * 'a -> int" 0)) (p/13 ("int * 'a" 0)))
     |}]
 ;;
+
+let%expect_test "the code of a scheme refined once a toplevel it awaits is \
+                 finished has the refined types"
+  =
+  print {|
+let f (x : int) : int = .~(let _ = c in .< x >.)
+let c = .< f >.
+|};
+  [%expect
+    {|
+    ((members
+      (((ident c/5) (args ()) (scheme "<int -> int>{..'a}")
+        (body
+         (Quote (Var (Persistent (Toplevel f/4)) : "int -> int") :
+          "<int -> int>{..'a}")))))
+     (recursive false))
+    ((members
+      (((ident f/4) (args (x/15)) (scheme "int -> int")
+        (body
+         (Toplevel_splice
+          (code
+           (Let (ident _/16) (args ()) (generalized true)
+            (body (Var (Bound (Toplevel c/5)) : "<int -> int>{..'a}"))
+            (in_ (Quote (Var (Free x) : int) : "<int>{x : immut int}")) :
+            "<int>{x : immut int}"))
+          (expansion (Var (Bound (Local x/15)) : int)) : int)))))
+     (recursive false))
+    |}]
+;;

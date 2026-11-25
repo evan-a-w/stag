@@ -165,8 +165,8 @@ let used = f (S (Ptr.make (S (Ptr.make Z))))
     {|
     (code
      (Code
-      (App (Var (Persistent (Toplevel f/4)) : "'a -> 'b") (Var (Free m) : 'a) :
-       'b)))
+      (App (Var (Persistent (Toplevel f/4)) : "nat -> int") (Var (Free m) : nat)
+       : int)))
     (f <fun>)
     (used 0)
     |}];
@@ -390,4 +390,32 @@ let y = let _ = b in fun a -> a
     end
     val y : '_a @ '_m0 -> '_a @ '_m1 with '_m0 <= '_m1 and release(locality('_m0)) <= locality('_m1)
     |}]
+;;
+
+let%expect_test "schemes awaiting schemes that await others are refined in turn"
+  =
+  (* [n] is finished awaiting [m], which is finished awaiting [k]: once [k] is,
+     both are refined in place, and [n]'s use of [m], at [string], fails. *)
+  show
+    {|
+let k (x : int) : int = .~(let _ = m .< 1 >. in .< x >.)
+let m y = let _ = .~(let _ = n () in .< 0 >.) in .< k .~y >.
+let n (u : unit) = .< m .< 2 >. >.
+let both = n ()
+|};
+  [%expect
+    {|
+    val k : int @ 'm0 -> int @ 'm1
+    val m : <int>{..'a} @ 'm0 -> <int>{..'b} @ 'm1 where ..'a <= {..'b} with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and gc <= 'm1
+    val n : unit @ 'm0 -> <<int>{..'a}>{..'b} @ 'm1
+    val both : <<int>{..'_a}>{..'_b}
+    |}];
+  show
+    {|
+let k (x : int) : int = .~(let _ = m .< 1 >. in .< x >.)
+let m y = let _ = .~(let _ = n () in .< 0 >.) in .< k .~y >.
+let n (u : unit) = .< m .< "s" >. >.
+|};
+  [%expect
+    {| This expression has type int but an expression was expected of type string |}]
 ;;

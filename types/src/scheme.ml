@@ -1146,6 +1146,81 @@ let decide_clashing_presences (presences : Presence_var.t list) =
     | Generic | Unbound _ | Link _ -> ())
 ;;
 
+let reopen fresh ~rank tys =
+  let kept = Queue.create () in
+  let seen_kept = Int.Hash_set.create () in
+  let reopened (var : _ Type.Var.t) =
+    match var.state with
+    | Generic ->
+      var.state <- Unbound rank;
+      List.iter var.kept ~f:(enqueue_kept ~pending:kept ~seen_kept);
+      var.kept <- [];
+      true
+    | Unbound _ | Link _ -> false
+  in
+  let rec reopener : Nothing.t Type.Iter.t =
+    { ty =
+        (fun ~guarded:_ var ->
+          ignore (reopened var : bool);
+          Ok ())
+    ; row =
+        (fun ~guarded:_ var ->
+          if reopened var
+          then
+            List.fold_result
+              var.bounds
+              ~init:()
+              ~f:(fun () (bound : Type.bound) ->
+                Type.iter_row reopener bound.row)
+          else Ok ())
+    ; presence =
+        (fun ~guarded var ->
+          if reopened var
+          then
+            List.fold_result var.bounds ~init:() ~f:(fun () bound ->
+              match bound with
+              | At_most _ | At_least _ ->
+                (match Type.presence_bound_var bound with
+                 | Some other -> reopener.presence ~guarded other
+                 | None -> Ok ())
+              | If_present (ty1, ty2) ->
+                let%bind.Result () = Type.iter_ty reopener ty1 in
+                Type.iter_ty reopener ty2)
+          else Ok ())
+    ; mode =
+        (fun var ->
+          if Mode.Var.is_generic var then Mode.Var.reopen var ~rank;
+          Ok ())
+    }
+  in
+  let iter_kept_vars kept =
+    match iter_kept kept reopener with
+    | Ok () -> ()
+    | Error _ -> .
+  in
+  (match
+     List.fold_result tys ~init:() ~f:(fun () ty -> Type.iter_ty reopener ty)
+   with
+   | Ok () -> ()
+   | Error _ -> .);
+  (* What the scheme kept of the constraints with the variables it was not
+     generalized with hold again, as for an instance. *)
+  let rec add_kept () =
+    match Queue.dequeue kept with
+    | None -> ()
+    | Some (Pending.Kept kept') ->
+      iter_kept_vars kept';
+      (match kept' with
+       | Row_bound { lower; bound; _ } ->
+         constrain_row_exn fresh ~row:(RVar lower) ~bound
+       | If_present_kept { presence; ty1; ty2; _ } ->
+         unify_if_present_exn fresh ~presence:(PVar presence) ~ty1 ~ty2);
+      add_kept ()
+    | Some (Presence_bounds _ | Row_bounds _) -> add_kept ()
+  in
+  add_kept ()
+;;
+
 let generalize fresh ~rank tys =
   let presences = Queue.create () in
   let rows = Queue.create () in

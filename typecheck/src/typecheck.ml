@@ -112,9 +112,9 @@ end
    checked, in quotes: the uses' types are generalized with the schemes, so each
    instance of a scheme has its own instances of the uses, which are unified
    with the toplevels' types like the code's own uses. Once a toplevel used is
-   finished, the schemes are refined: an instance of them, with its uses of it
-   unified with instances of its scheme, is generalized anew. Those holding a
-   scheme hold the [Link] var in [schemes], which refining links anew. *)
+   finished, the schemes are refined in place: their variables are reopened, the
+   uses of it unified with instances of its scheme, and they are generalized
+   anew, so the code, whose types share the variables, is refined too. *)
 module Awaiting = struct
   module Use = struct
     type t =
@@ -126,7 +126,7 @@ module Awaiting = struct
   end
 
   type t =
-    { schemes : (Type.ty, Nothing.t) Type.Var.t list
+    { schemes : Type.ty list
     ; mutable uses : Use.t list
     }
 
@@ -1971,15 +1971,12 @@ let refine t (program : Program_env.t) (awaiting : Awaiting.t) =
   in
   if List.exists awaiting.uses ~f:finished
   then (
-    let instantiate = Scheme.instantiate t ~rank:1 in
-    let schemes =
-      List.map awaiting.schemes ~f:(fun var -> instantiate (Type.TVar var))
+    let tys =
+      awaiting.schemes
+      @ List.map awaiting.uses ~f:(fun (use : Awaiting.Use.t) -> use.ty)
     in
-    let finished, remaining =
-      List.map awaiting.uses ~f:(fun use ->
-        { use with ty = instantiate use.ty })
-      |> List.partition_tf ~f:finished
-    in
+    Scheme.reopen t ~rank:1 tys;
+    let finished, remaining = List.partition_tf awaiting.uses ~f:finished in
     let added = ref [] in
     List.iter finished ~f:(fun use ->
       let awaited = Program_env.toplevel program use.awaited.name in
@@ -2003,9 +2000,8 @@ let refine t (program : Program_env.t) (awaiting : Awaiting.t) =
     Scheme.generalize
       t
       ~rank:0
-      (schemes @ List.map uses ~f:(fun (use : Awaiting.Use.t) -> use.ty));
-    List.iter2_exn awaiting.schemes schemes ~f:(fun var ty ->
-      var.state <- Link ty);
+      (awaiting.schemes
+       @ List.map uses ~f:(fun (use : Awaiting.Use.t) -> use.ty));
     awaiting.uses <- uses;
     List.iter uses ~f:(fun use ->
       await awaiting (Program_env.toplevel program use.awaited.name)))
@@ -2179,11 +2175,7 @@ let finish_scc
       | [] -> None
       | _ :: _ ->
         let awaiting =
-          { Awaiting.schemes =
-              List.map tys ~f:(fun ty ->
-                let var = Fresh.var t ~rank:0 in
-                var.state <- Link ty;
-                var)
+          { Awaiting.schemes = tys
           ; uses =
               List.map others ~f:(fun ((quoted : Toplevel.t), use) ->
                 { Awaiting.Use.awaited = quoted.ident
@@ -2203,13 +2195,8 @@ let finish_scc
   in
   List.iter2_exn members tys ~f:(fun member ty ->
     Type.iter_held ty ~f:(Mode_rules.default_held ~name:member.ident.name));
-  let schemes =
-    match awaiting with
-    | Some awaiting -> List.map awaiting.schemes ~f:(fun var -> Type.TVar var)
-    | None -> tys
-  in
   let members =
-    List.map2_exn members schemes ~f:(fun member ty ->
+    List.map2_exn members tys ~f:(fun member ty ->
       match member.state with
       | In_progress { index; args; mode; held; body = Some body; _ } ->
         Program_env.add_info program member.ident ~ty ~level:0;

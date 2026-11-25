@@ -35,6 +35,11 @@ val default_to_upper : t -> unit
     allowed under [atomically]. *)
 val generalize : t list -> rank:int -> unit
 
+(** Makes a generic node one of rank [rank] again, constrained by its edges in
+    the graph, which it kept: generalizing it anew summarizes the constraints
+    added since too. Not allowed under [atomically]. *)
+val reopen : t -> rank:int -> unit
+
 module Instance : sig
   type node := t
   type t

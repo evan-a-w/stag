@@ -444,13 +444,13 @@ let used = f (S (Ptr.make (S (Ptr.make Z))))
     -- evaluated at compile time
     (code
      (Code
-      (App (Var (Persistent (Toplevel f/4)) : "'a -> 'b") (Var (Free m) : 'a) :
-       'b)))
+      (App (Var (Persistent (Toplevel f/4)) : "nat -> int") (Var (Free m) : nat)
+       : int)))
     -- evaluated
     (code
      (Code
-      (App (Var (Persistent (Toplevel f/4)) : "'a -> 'b") (Var (Free m) : 'a) :
-       'b)))
+      (App (Var (Persistent (Toplevel f/4)) : "nat -> int") (Var (Free m) : nat)
+       : int)))
     (f <fun>)
     (used 0)
     ((Compile_time_use_of_toplevel_being_checked code) @ t.stag:4:43-47)
