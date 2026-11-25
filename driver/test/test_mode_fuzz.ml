@@ -96,3 +96,153 @@ let%expect_test "random [with] clauses read back exactly" =
       (!accepted : int) (!rejected : int) ~wrong:(Queue.length wrong : int)];
   [%expect {| ((!accepted 355) (!rejected 45) (wrong 0)) |}]
 ;;
+
+(* Random pairs of types of one shape, differing in their modes: a value of the
+   one is accepted at the other just when each mode is related as its position's
+   variance says. *)
+module Variance_fuzz = struct
+  module Shape = struct
+    type t =
+      | String
+      | Arrow of t * t
+      | Box of t
+      | Ptr of t
+      | Co
+      | Contra
+  end
+
+  (* Locality and provenance: annotations fix both, and neither has floors in
+     these positions. *)
+  let localities = [| "global"; "local" |]
+  let provenances = [| "gc"; "external" |]
+
+  let rec shape random depth : Shape.t =
+    match if depth = 0 then 0 else Random.State.int random 6 with
+    | 0 -> String
+    | 1 | 2 -> Arrow (shape random (depth - 1), shape random (depth - 1))
+    | 3 -> Box (shape random (depth - 1))
+    | 4 -> Ptr (shape random (depth - 1))
+    | _ -> if Random.State.bool random then Co else Contra
+  ;;
+
+  (* The atoms of each mode in [shape], outermost first, as indices. *)
+  let rec slots (shape : Shape.t) =
+    match shape with
+    | String -> 0
+    | Arrow (arg, res) -> 4 + slots arg + slots res
+    | Box inner | Ptr inner -> slots inner
+    | Co | Contra -> 1
+  ;;
+
+  let render (shape : Shape.t) atoms =
+    let next = ref atoms in
+    let take () =
+      match !next with
+      | atom :: rest ->
+        next := rest;
+        atom
+      | [] -> assert false
+    in
+    let side () =
+      let locality = localities.(take ()) in
+      let provenance = provenances.(take ()) in
+      sprintf "%s %s" locality provenance
+    in
+    let rec go (shape : Shape.t) =
+      match shape with
+      | String -> "string"
+      | Arrow (arg, res) ->
+        let arg_side = side () in
+        let res_side = side () in
+        let arg = go arg in
+        let res = go res in
+        sprintf "(%s @ %s -> %s @ %s)" arg arg_side res res_side
+      | Box inner -> sprintf "box[%s]" (go inner)
+      | Ptr inner -> sprintf "ptr[%s]" (go inner)
+      | Co -> sprintf "co[%s]" provenances.(take ())
+      | Contra -> sprintf "contra[%s]" provenances.(take ())
+    in
+    go shape
+  ;;
+
+  (* Whether [lower] may be used as [upper], comparing the atoms in [render]'s
+     order. *)
+  let expected (shape : Shape.t) lower upper =
+    let lower = ref lower
+    and upper = ref upper in
+    let take () =
+      match !lower, !upper with
+      | l :: ls, u :: us ->
+        lower := ls;
+        upper := us;
+        l, u
+      | _ -> assert false
+    in
+    let related (variance : [ `Co | `Contra | `Inv ]) =
+      let l, u = take () in
+      match variance with
+      | `Co -> l <= u
+      | `Contra -> u <= l
+      | `Inv -> l = u
+    in
+    let flip = function
+      | `Co -> `Contra
+      | `Contra -> `Co
+      | `Inv -> `Inv
+    in
+    let rec go variance (shape : Shape.t) =
+      match shape with
+      | String -> true
+      | Arrow (arg, res) ->
+        let a1 = related (flip variance) in
+        let a2 = related (flip variance) in
+        let r1 = related variance in
+        let r2 = related variance in
+        let arg = go (flip variance) arg in
+        let res = go variance res in
+        a1 && a2 && r1 && r2 && arg && res
+      | Box inner -> go variance inner
+      | Ptr inner -> go `Inv inner
+      | Co -> related variance
+      | Contra -> related (flip variance)
+    in
+    go `Co shape
+  ;;
+
+  let program random =
+    let shape = shape random 3 in
+    let atoms () =
+      List.init (slots shape) ~f:(fun _ -> Random.State.int random 2)
+    in
+    let lower = atoms () in
+    let upper = atoms () in
+    ( sprintf
+        "type co['p : mode] = { v : string @@ 'p }\n\
+         type contra['p : mode] = { f : co['p] -> unit }\n\
+         let diverge (u : unit) = diverge u\n\
+         let f : %s = diverge ()\n\
+         let g : %s = f"
+        (render shape lower)
+        (render shape upper)
+    , expected shape lower upper )
+  ;;
+end
+
+let%expect_test "random uses at other modes are accepted as variance says" =
+  let random = Random.State.make [| 11 |] in
+  let accepted = ref 0
+  and rejected = ref 0
+  and wrong = Queue.create () in
+  for _ = 1 to 400 do
+    let source, expected = Variance_fuzz.program random in
+    let actual = Result.is_ok (checked source) in
+    if actual then incr accepted else incr rejected;
+    if Bool.( <> ) actual expected
+    then Queue.enqueue wrong (sprintf "%s\n(expected %b)" source expected)
+  done;
+  Queue.iter wrong ~f:print_endline;
+  print_s
+    [%message
+      (!accepted : int) (!rejected : int) ~wrong:(Queue.length wrong : int)];
+  [%expect {| ((!accepted 212) (!rejected 188) (wrong 0)) |}]
+;;
