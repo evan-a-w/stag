@@ -353,8 +353,8 @@ module Allocation : sig
     ; loc : Loc.t
     ; kind : Kind.t
     ; if_global : Placement.t
-    (** Where it is made in calls of the toplevel, a function, whose result
-        is used at [global]. Of a non-function, the same as [if_local]. *)
+    (** Where it is made in calls of the toplevel, a function, whose result is
+        used at [global]. Of a non-function, the same as [if_local]. *)
     ; if_local : Placement.t (** Where its result is used at [local]. *)
     }
   [@@deriving sexp_of]

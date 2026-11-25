@@ -1,11 +1,19 @@
 open! Import
 
 module Site = struct
+  module Position = struct
+    type t =
+      | Here
+      | Returned
+      | Exclaved
+    [@@deriving sexp_of]
+  end
+
   type t =
     { loc : Loc.t
     ; kind : Typed.Allocation.Kind.t
     ; mode : Mode.Var.t
-    ; tail : bool
+    ; position : Position.t
     }
   [@@deriving sexp_of]
 end
@@ -34,8 +42,8 @@ module Tail = struct
     | Nontail
     | Returns of Mode.Var.t (** The function's result mode. *)
     | Ends of Mode.Var.t
-    (** The [region_]'s result mode: the region ends after a call there, so
-        it is not a tail call, but [exclave_] may end it early. *)
+    (** The [region_]'s result mode: the region ends after a call there, so it
+        is not a tail call, but [exclave_] may end it early. *)
     | Quoted (** Where the code is spliced decides. *)
 end
 
@@ -47,9 +55,14 @@ module Expected = struct
     ; applied : bool
     (** A function a tail call gives further arguments: the result of an
         application. *)
+    ; returned : bool
+    (** The value, or a part of it, is what its function (or [region_]) gives. *)
     }
 
-  let of_mode mode = { mode; region = Nontail; stack = None; applied = false }
+  let of_mode mode =
+    { mode; region = Nontail; stack = None; applied = false; returned = false }
+  ;;
+
   let fresh ctx = of_mode (Ctx.fresh ctx)
   let quoted ctx = { (fresh ctx) with region = Quoted }
 
@@ -59,18 +72,19 @@ module Expected = struct
     | Ends _ | Nontail | Quoted -> false
   ;;
 
-  let returned t =
-    match t.region with
-    | Returns _ | Ends _ -> true
-    | Nontail | Quoted -> false
-  ;;
-
+  let returned t = t.returned
   let whole t = { t with stack = None; applied = false }
-  let nontail t = { t with region = Nontail; applied = false }
+  let nontail t = { t with region = Nontail; applied = false; returned = false }
   let part t = { t with region = Nontail; applied = false }
 
   (* The same value, at a mode of its own, which is then related to [t]'s. *)
-  let same_value ctx t = { (fresh ctx) with region = t.region; stack = t.stack }
+  let same_value ctx t =
+    { (fresh ctx) with
+      region = t.region
+    ; stack = t.stack
+    ; returned = t.returned
+    }
+  ;;
 end
 
 let joins ?crossing ?locality ctx (expected : Expected.t) mode ~loc ~why =
@@ -434,7 +448,12 @@ module Alloc = struct
 
   let record (ctx : Ctx.t) (expected : Expected.t) ~loc ~kind mode =
     site expected;
-    ctx.allocated { Site.loc; kind; mode; tail = Expected.returned expected }
+    ctx.allocated
+      { Site.loc
+      ; kind
+      ; mode
+      ; position = (if Expected.returned expected then Returned else Here)
+      }
   ;;
 
   let closure ctx expected ~loc f =
@@ -542,7 +561,7 @@ module Function = struct
   ;;
 
   let body' ctx ~res_mode ~ty ~what ~region f =
-    let expected = { (Expected.fresh ctx) with region } in
+    let expected = { (Expected.fresh ctx) with region; returned = true } in
     let (body : Typed.Expr.t) = f expected in
     let crossing = ctx.Ctx.crossing (ty body) in
     let loc = body.loc in
@@ -714,8 +733,10 @@ let locality_map ?(assign = false) (locks : Env.Lock.t list) =
     ~f:(fun inner (lock : Env.Lock.t) ->
       let map : Mode.Locality_map.t =
         match lock.kind, assign with
-        | (Closure _ | Region), false | Exclave, true -> Mode.Locality_map.borrow
-        | Exclave, false | (Closure _ | Region), true -> Mode.Locality_map.release
+        | (Closure _ | Region), false | Exclave, true ->
+          Mode.Locality_map.borrow
+        | Exclave, false | (Closure _ | Region), true ->
+          Mode.Locality_map.release
         | (Quote _ | Splice), _ -> Mode.Locality_map.id
       in
       if assign
@@ -1165,10 +1186,10 @@ let default_mode_arg var (position : Mode_arg_position.t option) ~name =
 ;;
 
 let placement (site : Site.t) : Typed.Allocation.Placement.t =
-  match (Mode.Var.upper site.mode).locality with
-  | Local -> Region
-  | Regional -> if site.tail then Caller_region else Heap
-  | Global -> Heap
+  match site.position, (Mode.Var.upper site.mode).locality with
+  | (Here | Returned), Local -> Region
+  | Returned, Regional | Exclaved, Local -> Caller_region
+  | Here, Regional | Exclaved, Regional | _, Global -> Heap
 ;;
 
 let placements sites ~result =
@@ -1183,19 +1204,16 @@ let placements sites ~result =
         ~read
   in
   let if_local =
-    match
-      assuming (fun result -> Mode.Var.at_least result Locality Local)
-    with
+    match assuming (fun result -> Mode.Var.at_least result Locality Local) with
     | Some placements -> placements
     | None -> read ()
   in
   let if_global =
-    match
-      assuming (fun result -> Mode.Var.at_most result Locality Global)
-    with
+    match assuming (fun result -> Mode.Var.at_most result Locality Global) with
     | Some placements -> placements
     | None -> if_local
   in
   List.zip_exn sites (List.zip_exn if_global if_local)
-  |> List.map ~f:(fun (site, (if_global, if_local)) -> site, if_global, if_local)
+  |> List.map ~f:(fun (site, (if_global, if_local)) ->
+    site, if_global, if_local)
 ;;

@@ -69,6 +69,7 @@ let assuming f ~read =
   | Error (`Read read) -> Some read
   | Error `Failed -> None
 ;;
+
 let is_generic t = Graph.is_generic t.stage
 let lower_rank t ~rank = List.iter (nodes t) ~f:(Graph.lower_rank ~rank)
 

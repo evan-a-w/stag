@@ -4,14 +4,23 @@ open! Import
     it is expected at, and relates that to the mode its value is part of (or is
     only evaluated for). *)
 
-(** An allocation site, of the mode given. [tail] if what it makes is the value
-    of the function (or [region_]) it is in. *)
+(** An allocation site, of the mode given. *)
 module Site : sig
+  module Position : sig
+    type t =
+      | Here (** Its mode is relative to the current region. *)
+      | Returned
+      (** What it makes is (part of) what its function (or [region_]) gives. *)
+      | Exclaved
+      (** In [exclave_], so its mode is relative to the caller's region. *)
+    [@@deriving sexp_of]
+  end
+
   type t =
     { loc : Loc.t
     ; kind : Typed.Allocation.Kind.t
     ; mode : Mode.Var.t
-    ; tail : bool
+    ; position : Position.t
     }
   [@@deriving sexp_of]
 end

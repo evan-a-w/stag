@@ -93,8 +93,7 @@ module Toplevel = struct
           ; held : Binding.t option (** Of the values a mutable one holds. *)
           ; mutable body : Typed.Expr.t option
           ; mutable recursive : bool
-          ; sites : Mode_rules.Site.t Queue.t
-          (** Its allocation sites. *)
+          ; sites : Mode_rules.Site.t Queue.t (** Its allocation sites. *)
           ; result : Mode.Var.t option (** A function's. *)
           }
       | Done of
@@ -512,7 +511,19 @@ module Scope = struct
       ~crossing:(crossing t)
       ~allocated:
         (match t.allocations, t.quote with
-         | Some sites, None when t.level = 0 -> Queue.enqueue sites
+         | Some sites, None when t.level = 0 ->
+           let exclaved =
+             List.find_map t.locks ~f:(fun (lock : Env.Lock.t) ->
+               match lock.kind with
+               | Exclave -> Some true
+               | Closure _ | Region -> Some false
+               | Quote _ | Splice -> None)
+             |> Option.value ~default:false
+           in
+           fun (site : Mode_rules.Site.t) ->
+             Queue.enqueue
+               sites
+               (if exclaved then { site with position = Exclaved } else site)
          | _ -> ignore)
   ;;
 
@@ -2244,8 +2255,7 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
          ; body = None
          ; recursive = false
          ; sites
-         ; result =
-             Option.some_if (Toplevel.is_function toplevel) fn.res_mode
+         ; result = Option.some_if (Toplevel.is_function toplevel) fn.res_mode
          };
     let body =
       match
@@ -2630,7 +2640,9 @@ and expr_type
           result_matches := result_matches_expected ();
           check_expr t scope ~at ~expr:x ~ty:a)
     in
-    let allocates kind = Mode_rules.Alloc.pointer modes at ~loc ~kind res_mode in
+    let allocates kind =
+      Mode_rules.Alloc.pointer modes at ~loc ~kind res_mode
+    in
     (match f.desc with
      | Var (Intrinsic Ptr_make) -> allocates Pointer
      | Var (Intrinsic Box_make) -> allocates Box
