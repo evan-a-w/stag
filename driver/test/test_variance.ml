@@ -86,17 +86,49 @@ let bad = twice (fun (g : string @ local -> int) -> g "a")
     |}]
 ;;
 
-let%expect_test "where there is no direction, types are equal" =
-  (* The arms of a match are unified: neither is used as the other. *)
+let%expect_test "arms and elements join, in either order" =
+  (* Each arm is used at the match's type, made of new modes: a function taking
+     only global strings, whichever arm comes first. *)
   check
     {|
 let pick (b : bool) =
   match b with
   | true -> (fun (s @ local) -> String.length s)
   | false -> (fun (s : string) -> let g @ global = s in String.length g)
+let pick2 (b : bool) =
+  match b with
+  | true -> (fun (s : string) -> let g @ global = s in String.length g)
+  | false -> (fun (s @ local) -> String.length s)
+let both = [ (fun (s @ local) -> String.length s); (fun (s : string) -> let g @ global = s in String.length g) ]
+let both2 = [ (fun (s : string) -> let g @ global = s in String.length g); (fun (s @ local) -> String.length s) ]
 |};
-  [%expect
-    {| This is regional, because it is annotated local (at t.stag:4:22-27), then the function types are unified, then s is passed to the function (at t.stag:5:13-72), then s is used (at t.stag:5:51-52), then it is bound by an annotated let (at t.stag:5:42-48), but must be at most global, because it is annotated global (at t.stag:5:42-48) |}]
+  [%expect {| |}];
+  (* Neither accepts a local string. *)
+  check
+    {|
+let pick (b : bool) =
+  match b with
+  | true -> (fun (s @ local) -> String.length s)
+  | false -> (fun (s : string) -> let g @ global = s in String.length g)
+let use (s @ local) = pick true s
+|};
+  [%expect {| |}];
+  check
+    {|
+let pick (b : bool) =
+  match b with
+  | true -> (fun (s : string) -> let g @ global = s in String.length g)
+  | false -> (fun (s @ local) -> String.length s)
+let use (s @ local) = pick true s
+|};
+  [%expect {| |}]
+;;
+
+let%expect_test "_ can't be constrained or declared" =
+  check {|let f : string @ _ -> string @ 'm with _ <= 'm = fun s -> s|};
+  [%expect {| |}];
+  check {|type t = { f : string @ _ -> string }|};
+  [%expect {| |}]
 ;;
 
 let%expect_test "an immutable box is covariant" =
@@ -295,7 +327,8 @@ let compose f g x = f (g x)
     |}]
 ;;
 
-let%expect_test "a cyclic alias's parameter is invariant when reached both ways" =
+let%expect_test "a cyclic alias's parameter is invariant when reached both ways"
+  =
   (* [f['a]] reaches its own expansion contravariantly (in [box[f['a]] ->]) and
      ['a] covariantly, so ['a] is invariant in [r], and a local-accepting
      function in [r1] can't be passed off as a global-accepting one. *)
@@ -312,7 +345,8 @@ let pf : f[ptr[int] @ local -> unit] =
 let r1 : r[ptr[int] @ local -> unit] = { x = pf }
 let r2 : r[ptr[int] -> unit] = r1
 |};
-  [%expect {|
+  [%expect
+    {|
     This expression has type ptr[int] @ local -> unit but an expression was expected of type ptr[int] -> unit
     Their modes differ: This is local, because it is annotated local (at t.stag:10:22-27), then the function types are unified, but must be at most global, because its type is written without a mode (at t.stag:11:11-19)
     |}];
@@ -323,7 +357,8 @@ type f['p : mode] = box[f['p]] -> co['p]
 type r['p : mode] = { x : f['p] }
 let widen (r : r[gc]) : r[external] = r
 |};
-  [%expect {|
+  [%expect
+    {|
     This expression has type r[gc] but an expression was expected of type r[external]
     Their modes differ: This is external, because the types are unified, but must be at most gc, because the types are unified
     |}];
@@ -334,9 +369,36 @@ type f['p : mode] = box[f['p]] -> co['p]
 type r['p : mode] = { x : f['p] }
 let narrow (r : r[external]) : r[gc] = r
 |};
-  [%expect {|
+  [%expect
+    {|
     This expression has type r[external] but an expression was expected of type r[gc]
     Their modes differ: This is external, because the types are unified, but must be at most gc, because the types are unified
     |}]
 ;;
 
+let%expect_test "scratch" =
+  check
+    {|
+let pick (b : bool) =
+  match b with
+  | true -> (fun (s @ local) -> String.length s)
+  | false -> (fun (s : string) -> String.length s)
+|};
+  check
+    {|
+let f = fun (s @ local) -> String.length s
+let pick (b : bool) =
+  match b with
+  | true -> f
+  | false -> (fun (s : string) -> let g @ global = s in String.length g)
+|};
+  check
+    {|
+let g = (fun (s : string) -> let g @ global = s in String.length g)
+let pick (b : bool) =
+  match b with
+  | true -> (fun (s @ local) -> String.length s)
+  | false -> g
+|};
+  [%expect {| |}]
+;;

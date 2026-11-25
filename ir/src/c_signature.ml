@@ -38,7 +38,9 @@ end
 let con_name ty =
   match Type.canonical_ty ty with
   | TCon (name, []) -> Some name
-  | TCon (name, _) when String.equal name Type.ptr_name -> Some "ptr"
+  | TCon (name, _)
+    when String.equal name Type.ptr_name || String.equal name Type.box_name ->
+    Some "ptr"
   | _ -> None
 ;;
 

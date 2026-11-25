@@ -187,6 +187,8 @@ module Kind : sig
     | Mode_parameter_on_arrow of string
     (** A declaration's mode parameter as one of its arrows' modes, which are
         fixed. *)
+    | Anonymous_mode_in_constraint
+    (** [_] in a [with] constraint, which would relate nothing else. *)
     | Invalid_mode of string
     (** A mode whose atoms contradict each other, as [const external], or a
         [with] constraint on no mode variable. *)

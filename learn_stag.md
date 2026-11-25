@@ -193,6 +193,8 @@ type bad = Bad of int * bad        (* Error: recursive *)
 ```stag
 let b = Box.make (1, 2)             (* val b : box[int * int] *)
 let pair = b.*                      (* val pair : int * int = (1, 2) *)
+(* An unannotated dereference is of a ptr: annotate a box you are given. *)
+let first (b : box[int * int]) = match b.* with (x, _) -> x
 ```
 
 ```stag-error

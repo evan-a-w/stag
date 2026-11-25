@@ -674,6 +674,7 @@ module Scope = struct
   ;;
 
   let fresh_ty ids t = Type.TVar (Fresh.var ids ~rank:t.rank)
+  let join_ty ids t = Type.TVar (Fresh.join_var ids ~rank:t.rank)
   let fresh_row ids t = Type.RVar (Fresh.var ids ~rank:t.rank)
   let fresh_presence ids t = Type.PVar (Fresh.var ids ~rank:t.rank)
   let instantiate ids t = Scheme.instantiate ids ~rank:t.rank
@@ -3748,7 +3749,7 @@ and expr_type
       Mode_rules.evaluate modes at ~loc ~why:"it is matched on" (fun at ->
         expr_type t scope ~at ~expr)
     in
-    let result = Scope.fresh_ty t scope in
+    let result = Scope.join_ty t scope in
     (* Closing the scrutinee to patterns in error would only add errors. *)
     let patterns_failed = ref false in
     let counting_errors f =

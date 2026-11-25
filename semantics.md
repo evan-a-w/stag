@@ -19,12 +19,14 @@ is rejected by the backend (the interpreter supports everything).
 - Records, tuples, nominal and polymorphic variants are by value (C structs and
   tagged unions). Polymorphic records and variants are monomorphised, so their
   layout is static.
-- Pointers are one type, `ptr[t]`; where the pointee lives (static data, GC
-  heap, data stack) is given by the pointer's modes, not its type.
-  `ptr[t @@ external]`, a pointer to a cell that may hold `external` values,
-  is a distinct type (see [Modes](#modes)). C's memory will have a
-  type of its own.
-- No implicit boxing: a recursive type must recurse through `ptr[t]` (see
+- Pointers are of two types: `ptr[t]`, a mutable cell, and `box[t]`, an
+  immutable one (`Box.make v`), which share a representation. Where the
+  pointee lives (static data, GC heap, data stack) is given by the pointer's
+  modes, not its type. `ptr[t @@ external]`, a pointer to a cell that may hold
+  `external` values, is a distinct type (see [Modes](#modes)). C's memory
+  will have a type of its own.
+- No implicit boxing: a recursive type must recurse through `ptr[t]` or
+  `box[t]` (see
   [Recursive types](#recursive-types)).
 - Mutation: mutable fields and stores through pointers. A store into a GC
   object has a write barrier, unless the stored value is at most `static`.
@@ -39,10 +41,11 @@ is rejected by the backend (the interpreter supports everything).
 ## Recursive types
 
 Nothing is boxed implicitly: a type whose by-value layout would be infinite
-is an error, and recursion is written through `ptr[t]`:
+is an error, and recursion is written through `box[t]` (or `ptr[t]`, to
+mutate it):
 
 ```ocaml
-type list['a] = Nil | Cons of 'a * ptr[list['a]]
+type list['a] = Nil | Cons of box['a * list['a]]
 ```
 
 Checked per declaration SCC, at declaration time: a nominal type is an error
@@ -287,7 +290,8 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   cell's aliases may store anything that fits. Modalities compose along a
   path (`p.*.f`: the cell's, then the field's). A type's mode parameters
   (`type cell['a, 'p : mode]`) are on stage and provenance only (a locality
-  atom in a mode argument is an error); for now they are invariant. A record
+  atom in a mode argument is an error); their variance is inferred from where
+  they occur (see Variance). A record
   update `{ r with ... }` may change a mode parameter only if no field it
   keeps refers to it, by its type or its modality.
 - Records have no mutable fields: mutation is through a `ptr` (`p.* <- v`,

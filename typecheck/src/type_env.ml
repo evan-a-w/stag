@@ -314,6 +314,13 @@ module Annotation_vars = struct
         ~others:[ Hashtbl.mem t.tys; Hashtbl.mem t.rows ]
         ~default:(fun () -> fresh_mode t)
   ;;
+
+  (* In a constraint, [_] would relate nothing else. *)
+  let related t name ~loc =
+    if String.equal name "_"
+    then Error (Typecheck_error.create ~loc Anonymous_mode_in_constraint)
+    else mode t name ~loc
+  ;;
 end
 
 (* A mode atom written as a type argument, as in [cell[t, external]]. *)
@@ -526,7 +533,7 @@ module Vars = struct
     in
     match expr with
     | Axis (on, { txt = Var name; loc }) ->
-      let%map var = Annotation_vars.mode vars name ~loc in
+      let%map var = Annotation_vars.related vars name ~loc in
       var, Mode.Morphism.identity (axis on)
     | Meet (t, atom) ->
       let (T (on, point)) = Mode_atoms.point atom in
@@ -577,11 +584,11 @@ module Vars = struct
        | Atoms _, Atoms _ ->
          error ~loc (Invalid_mode "a constraint must be on a mode variable")
        | Var lower_name, Var upper_name ->
-         let%bind.Result lower = Annotation_vars.mode vars lower_name ~loc in
-         let%bind.Result upper = Annotation_vars.mode vars upper_name ~loc in
+         let%bind.Result lower = Annotation_vars.related vars lower_name ~loc in
+         let%bind.Result upper = Annotation_vars.related vars upper_name ~loc in
          checked (Mode.Var.submode lower upper reason)
        | Var lower, Atoms atoms ->
-         let%bind.Result var = Annotation_vars.mode vars lower ~loc in
+         let%bind.Result var = Annotation_vars.related vars lower ~loc in
          checked
            (bound
               atoms
@@ -589,7 +596,7 @@ module Vars = struct
                 { f = (fun axis point -> Mode.Var.at_most var axis point reason)
                 })
        | Atoms atoms, Var upper ->
-         let%bind.Result var = Annotation_vars.mode vars upper ~loc in
+         let%bind.Result var = Annotation_vars.related vars upper ~loc in
          checked
            (bound
               atoms

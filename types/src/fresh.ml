@@ -5,6 +5,7 @@ type t =
   ; mutable value_parameters : Value_layout.parameters
   ; mutable variances : Variance.of_con
   ; modes : Mode.Id_source.t
+  ; joins : Int.Hash_set.t
   }
 
 let create () =
@@ -12,6 +13,7 @@ let create () =
   ; value_parameters = (fun _ -> None)
   ; variances = (fun _ -> None)
   ; modes = Mode.Id_source.create ()
+  ; joins = Int.Hash_set.create ()
   }
 ;;
 
@@ -28,6 +30,14 @@ let id t =
 ;;
 
 let var t ~rank = Type.Var.create (id t) (Unbound rank)
+
+let join_var t ~rank =
+  let var = var t ~rank in
+  Hash_set.add t.joins var.id;
+  var
+;;
+
+let is_join t id = Hash_set.mem t.joins id
 
 let mark_in_record row =
   Option.iter (Type.tail_var row) ~f:(fun (var : _ Type.Var.t) ->
