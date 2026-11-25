@@ -1,0 +1,262 @@
+(* [Core.Map]: persistent AVL maps. *)
+
+let print_sexp t = print_endline (Core.Sexp.to_string_hum t)
+
+let sexp_of_bindings l =
+  Core.Sexp.sexp_of_list
+    (Core.Sexp.sexp_of_pair Core.Sexp.sexp_of_int Core.Sexp.sexp_of_string)
+    l
+
+let print_map m = print_sexp (sexp_of_bindings (Core.Map.to_list m))
+let print_int n = print_endline (Core.Int.to_string n)
+let print_bool b = print_endline (Core.Bool.to_string b)
+
+let print_found o =
+  print_sexp (Core.Sexp.sexp_of_option Core.Sexp.sexp_of_string o)
+
+let of_list l = Core.Map.of_list Core.Int.compare l
+let add m k v = Core.Map.add Core.Int.compare m k v
+let find m k = Core.Map.find Core.Int.compare m k
+let remove m k = Core.Map.remove Core.Int.compare m k
+
+let both a b =
+  match a with
+  | true -> b
+  | false -> false
+
+(* Whether [k] is past the bound [lo] (and before [hi]), if any. *)
+let after lo k =
+  match lo with
+  | Some lo -> Core.Int.lt lo k
+  | None -> true
+
+let before k hi =
+  match hi with
+  | Some hi -> Core.Int.lt k hi
+  | None -> true
+
+(* Whether [m] is an AVL tree: its keys increasing, each node's height right,
+   and its children's differing by at most one. *)
+let valid m =
+  let check t lo hi =
+    match t with
+    | Core.Map.Empty -> Some 0
+    | Core.Map.Node *{left = l; key = k; right = r; height = h} ->
+      match
+        (both (after lo k) (before k hi),
+         check l lo (Some k),
+         check r (Some k) hi)
+      with
+      | true, Some hl, Some hr ->
+        (let balanced = Core.Int.le (Core.Int.abs (Core.Int.sub hl hr)) 1 in
+         match
+           both
+             balanced
+             (Core.Int.equal h (Core.Int.add 1 (Core.Int.max hl hr)))
+         with
+         | true -> Some h
+         | false -> None)
+      | _ -> None
+  in
+  Core.Option.is_some (check m None None)
+
+let same_binding a b =
+  match (a, b) with
+  | (k1, v1), (k2, v2) -> both (Core.Int.equal k1 k2) (Core.String.equal v1 v2)
+
+let%expect_test "add, find, remove, to_list" =
+  let m = of_list [(3, "c"); (1, "a"); (2, "b"); (5, "e"); (4, "d")] in
+  print_map m;
+  print_int (Core.Map.cardinal m);
+  print_found (find m 4);
+  print_found (find m 6);
+  print_bool (Core.Map.mem Core.Int.compare m 1);
+  print_map (add m 3 "C");
+  print_map (remove m 3);
+  print_map (remove m 9);
+  print_map m;
+  print_bool (Core.Map.is_empty (remove (Core.Map.singleton 1 "a") 1));
+  print_bool (valid m);
+  [%expect {|
+    ((1 a) (2 b) (3 c) (4 d) (5 e))
+    5
+    (d)
+    ()
+    true
+    ((1 a) (2 b) (3 C) (4 d) (5 e))
+    ((1 a) (2 b) (4 d) (5 e))
+    ((1 a) (2 b) (3 c) (4 d) (5 e))
+    ((1 a) (2 b) (3 c) (4 d) (5 e))
+    true
+    true
+    |}]
+
+let%expect_test "fold and iter go in key order" =
+  let m = of_list [(2, "b"); (1, "a"); (3, "c")] in
+  print_endline (Core.Map.fold (fun _ v acc -> Core.String.append acc v) m "");
+  Core.Map.iter
+    (fun k v ->
+       print_endline (Core.String.concat "=" [Core.Int.to_string k; v]))
+    m;
+  [%expect {|
+    abc
+    1=a
+    2=b
+    3=c
+    |}]
+
+let print_binding o =
+  print_sexp
+    (Core.Sexp.sexp_of_option
+       (Core.Sexp.sexp_of_pair Core.Sexp.sexp_of_int Core.Sexp.sexp_of_string)
+       o)
+
+let update m k f = Core.Map.update Core.Int.compare m k f
+
+let%expect_test "min_binding and max_binding" =
+  let m = of_list [(3, "c"); (1, "a"); (2, "b")] in
+  print_binding (Core.Map.min_binding m);
+  print_binding (Core.Map.max_binding m);
+  print_binding (Core.Map.min_binding Core.Map.empty);
+  print_binding (Core.Map.max_binding Core.Map.empty);
+  [%expect {|
+    ((1 a))
+    ((3 c))
+    ()
+    ()
+    |}]
+
+let%expect_test "update adds, replaces and removes" =
+  let m = of_list [(1, "a"); (2, "b"); (3, "c")] in
+  let suffix o =
+    match o with
+    | Some v -> Some (Core.String.append v "!")
+    | None -> Some "new"
+  in
+  print_map (update m 2 suffix);
+  print_map (update m 5 suffix);
+  print_map (update m 2 (fun _ -> None));
+  print_map (update m 5 (fun _ -> None));
+  print_map (update Core.Map.empty 1 suffix);
+  print_map m;
+  print_bool (valid (update (update m 4 suffix) 1 (fun _ -> None)));
+  [%expect {|
+    ((1 a) (2 b!) (3 c))
+    ((1 a) (2 b) (3 c) (5 new))
+    ((1 a) (3 c))
+    ((1 a) (2 b) (3 c))
+    ((1 new))
+    ((1 a) (2 b) (3 c))
+    true
+    |}]
+
+let%expect_test "map and filter call their function in key order" =
+  let m = of_list [(2, "b"); (1, "a"); (3, "c"); (4, "d")] in
+  let mapped =
+    Core.Map.map
+      (fun k v -> print_endline v; Core.Int.add k (Core.String.length v))
+      m
+  in
+  print_sexp
+    (Core.Sexp.sexp_of_list
+       (Core.Sexp.sexp_of_pair Core.Sexp.sexp_of_int Core.Sexp.sexp_of_int)
+       (Core.Map.to_list mapped));
+  let even =
+    Core.Map.filter
+      (fun k v -> print_endline v; Core.Int.equal (Core.Int.rem k 2) 0)
+      m
+  in
+  print_map even;
+  print_bool (valid even);
+  print_map (Core.Map.filter (fun _ _ -> false) m);
+  print_map (Core.Map.filter (fun _ _ -> true) m);
+  [%expect {|
+    a
+    b
+    c
+    d
+    ((1 2) (2 3) (3 4) (4 5))
+    a
+    b
+    c
+    d
+    ((2 b) (4 d))
+    true
+    ()
+    ((1 a) (2 b) (3 c) (4 d))
+    |}]
+
+(* A linear congruential generator, for reproducible random operations. *)
+let next seed =
+  Core.Int.rem (Core.Int.add (Core.Int.mul seed 1103515245) 12345) 2147483648
+
+(* The reference: an association list, without duplicate keys. *)
+let ref_remove l k =
+  Core.List.filter
+    (fun kv -> match kv with k2, _ -> Core.Bool.not (Core.Int.equal k k2))
+    l
+
+let ref_add l k v = Cons (Box.make ((k, v), ref_remove l k))
+
+let ref_find l k = Core.List.assoc Core.Int.equal k l
+
+let ref_sorted l =
+  Core.List.sort
+    (fun a b -> match (a, b) with (x, _), (y, _) -> Core.Int.compare x y)
+    l
+
+let agree m l =
+  both
+    (valid m)
+    (Core.List.equal same_binding (Core.Map.to_list m) (ref_sorted l))
+
+let%expect_test "random operations agree with an association list, and stay balanced" =
+  let run n seed m l bad =
+    match n with
+    | 0 -> (m, l, bad)
+    | _ ->
+      let s1 = next seed in
+      let k = Core.Int.rem (Core.Int.div s1 65536) 64 in
+      let s2 = next s1 in
+      let v = Core.Int.to_string s2 in
+      let step =
+        match Core.Int.rem (Core.Int.div s2 65536) 6 with
+        | 0 -> (remove m k, ref_remove l k)
+        | 1 ->
+          (match ref_find l k with
+           | Some _ -> (update m k (fun _ -> None), ref_remove l k)
+           | None -> (update m k (fun _ -> Some v), ref_add l k v))
+        | 2 ->
+          (match Core.Int.rem s2 16 with
+           | 0 ->
+             let keep k2 =
+               Core.Bool.not (Core.Int.equal (Core.Int.rem k2 3) 0)
+             in
+             (Core.Map.filter (fun k2 _ -> keep k2) m,
+              Core.List.filter (fun kv -> match kv with k2, _ -> keep k2) l)
+           | _ -> (add m k v, ref_add l k v))
+        | _ -> (add m k v, ref_add l k v)
+      in
+      match step with
+      | m, l ->
+        run
+          (Core.Int.sub n 1)
+          s2
+          m
+          l
+          (match agree m l with
+           | true -> bad
+           | false -> Core.Int.add bad 1)
+  in
+  (match run 2000 42 Core.Map.empty [] 0 with
+   | m, l, bad ->
+     print_int bad;
+     print_int (Core.Map.cardinal m);
+     print_int (Core.Map.height m);
+     print_bool (agree m l));
+  [%expect {|
+    0
+    34
+    6
+    true
+    |}]

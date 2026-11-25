@@ -1,0 +1,131 @@
+(* Least-recently-used caches: at most [capacity] bindings, adding one past
+   that evicts the binding used least recently. Finding or adding a key uses
+   it.
+
+   The bindings are a doubly linked list of pointer cells, most recently used
+   first, indexed by a [Map] from keys to cells. ['p] bounds the provenance
+   (and stage) of what the cells hold, as [ptr[t @@ 'p]]'s: a
+   [t[string, string, external]] may hold C strings. A cache is mutable, so
+   unlike a [Map.t] it is invariant in ['p]: a [t[_, _, gc]] is not a
+   [t[_, _, external]], as storing an external value through the latter would
+   break what the former promises. *)
+
+type link['k, 'v, 'p : mode] = Nil | Entry of ptr[entry['k, 'v, 'p] @@ 'p]
+
+type entry['k, 'v, 'p : mode] = {
+  key : 'k @@ gc;
+  value : 'v;
+  prev : link['k, 'v, 'p];
+  next : link['k, 'v, 'p];
+}
+
+type t['k, 'v, 'p : mode] = {
+  capacity : int;
+  compare : 'k @ local -> 'k @ local -> int;
+  index : ptr[Map.t['k, ptr[entry['k, 'v, 'p] @@ 'p], 'p] @@ 'p];
+  first : ptr[link['k, 'v, 'p] @@ 'p];
+  last : ptr[link['k, 'v, 'p] @@ 'p];
+  size : ptr[int];
+}
+
+(* A cache of at most [capacity] bindings, which must not be negative. *)
+let create capacity compare =
+  match Int.lt capacity 0 with
+  | true -> raise (Failure "Lru.create: negative capacity")
+  | false ->
+    {
+      capacity = capacity;
+      compare = compare;
+      index = Ptr.make Map.empty;
+      first = Ptr.make Nil;
+      last = Ptr.make Nil;
+      size = Ptr.make 0;
+    }
+
+let length t = t.size.*
+
+module Internal = struct
+  (* Takes [cell] out of the list. *)
+  let unlink t cell =
+    let prev = cell.*.prev in
+    let next = cell.*.next in
+    (match prev with
+     | Nil -> t.first.* <- next
+     | Entry p -> p.*.next <- next);
+    match next with
+    | Nil -> t.last.* <- prev
+    | Entry n -> n.*.prev <- prev
+
+  (* Puts [cell], which is not in the list, first. *)
+  let push_front t cell =
+    let first = t.first.* in
+    cell.*.prev <- Nil;
+    cell.*.next <- first;
+    (match first with
+     | Nil -> t.last.* <- Entry cell
+     | Entry f -> f.*.prev <- Entry cell);
+    t.first.* <- Entry cell
+
+  let use t cell =
+    unlink t cell;
+    push_front t cell
+
+  let evict_last t =
+    match t.last.* with
+    | Nil -> ()
+    | Entry cell ->
+      unlink t cell;
+      t.index.* <- Map.remove t.compare t.index.* cell.*.key;
+      t.size.* <- Int.sub t.size.* 1
+end
+
+(* [k]'s value, if bound, which [k] is then the most recently used. *)
+let find t k =
+  match Map.find t.compare t.index.* k with
+  | None -> None
+  | Some cell ->
+    Internal.use t cell;
+    Some cell.*.value
+
+(* Binds [k] to [v], as the most recently used, evicting the least recently
+   used binding if that makes more than [capacity]. *)
+let add t k v =
+  match Map.find t.compare t.index.* k with
+  | Some cell ->
+    cell.*.value <- v;
+    Internal.use t cell
+  | None ->
+    let cell = Ptr.make {key = k; value = v; prev = Nil; next = Nil} in
+    Internal.push_front t cell;
+    t.index.* <- Map.add t.compare t.index.* k cell;
+    t.size.* <- Int.add t.size.* 1;
+    match Int.gt t.size.* t.capacity with
+    | true -> Internal.evict_last t
+    | false -> ()
+
+let mem t k = Map.mem t.compare t.index.* k
+
+(* Unbinds [k], if bound. *)
+let remove t k =
+  match Map.find t.compare t.index.* k with
+  | None -> ()
+  | Some cell ->
+    Internal.unlink t cell;
+    t.index.* <- Map.remove t.compare t.index.* k;
+    t.size.* <- Int.sub t.size.* 1
+
+let clear t =
+  t.index.* <- Map.empty;
+  t.first.* <- Nil;
+  t.last.* <- Nil;
+  t.size.* <- 0
+
+(* The bindings, most recently used first. *)
+let to_list t =
+  let from link =
+    match link with
+    | Nil -> []
+    | Entry cell ->
+      Cons (Box.make ((cell.*.key, cell.*.value), from cell.*.next))
+  in
+  from t.first.*

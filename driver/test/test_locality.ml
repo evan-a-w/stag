@@ -162,10 +162,7 @@ let f u = let p = same (stack_ (Ptr.make (1, 2))) in Ptr.make p
 let g u = let p = same (Ptr.make (1, 2)) in Ptr.make p
 |};
   [%expect
-    {|
-    This is local, because it is allocated by [stack_] (at t.stag:3:23-49), then it is part of the value (at t.stag:3:23-49), then it is passed to a function (at t.stag:3:18-49), then a function is used at a type with other modes, then x is passed to the function (at t.stag:2:13-14), then x is used (at t.stag:2:13-14), then the function returns it (at t.stag:2:13-14), then a function is used at a type with other modes, then the function returns it (at t.stag:3:18-49), then p is used (at t.stag:3:62-63), then it is passed to a function (at t.stag:3:53-63), but must be at most global, because Ptr.make holds it, then a function is used at a type with other modes
-    This is local, because it is allocated by [stack_] (at t.stag:3:23-49), then it is part of the value (at t.stag:3:23-49), then it is passed to a function (at t.stag:3:18-49), then a function is used at a type with other modes, then x is passed to the function (at t.stag:2:13-14), then x is used (at t.stag:2:13-14), then the function returns it (at t.stag:2:13-14), then a function is used at a type with other modes, then the function returns it (at t.stag:3:18-49), then p is used (at t.stag:3:62-63), but must be at most regional, because it is passed in a tail call, after the current region has ended (mark the call [@nontail]) (at t.stag:3:62-63)
-    |}]
+    {| This is local, because it is allocated by [stack_] (at t.stag:3:23-49), then it is part of the value (at t.stag:3:23-49), then it is passed to a function (at t.stag:3:18-49), then a function is used at a type with other modes, then x is passed to the function (at t.stag:2:13-14), then x is used (at t.stag:2:13-14), then the function returns it (at t.stag:2:13-14), then a function is used at a type with other modes, then the function returns it (at t.stag:3:18-49), then p is used (at t.stag:3:62-63), then it is passed to a function (at t.stag:3:53-63), but must be at most global, because Ptr.make holds it, then a function is used at a type with other modes |}]
 ;;
 
 let%expect_test "stores through pointers are global" =
@@ -650,7 +647,10 @@ type r = { f : int -> ptr[int] @ local }
 let g (r : r) = r.f 1
 |};
   [%expect
-    {| This is local, because a function type fixes it, as a function is used at a type with other modes, then the function returns it (at t.stag:3:16-21), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:3:16-21) |}]
+    {|
+    type r = { f : int -> ptr[int] @ local }
+    val g : r -> ptr[int] @ local
+    |}]
 ;;
 
 let%expect_test "arrows differing only in what they don't print" =

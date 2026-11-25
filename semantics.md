@@ -272,6 +272,16 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   `regional` inside it).
 - `exclave_ e` ends the current region early and evaluates `e` in the caller's,
   so a function can return a local value (allocate in the caller's region).
+- A tail call ends the current region before the callee runs (so it can't
+  be passed what is local to it, see below): the callee's caller's region is
+  then the function's own caller's, so what a tail call returns may be local
+  there, and the function returns it as it would an `exclave_`'s value
+  (`let apply f x = f x` returns a local value when `f` does). A recursive
+  function whose recursive call is a tail call (a search, as `Map.find`) can
+  so return a local part of a local argument. A call of an allocator
+  (`Box.make`, `Ptr.make`) is no call, and a call giving a function may make
+  a partial application's closure: both allocate in the current region, as
+  other allocations do.
 - `region_ e` evaluates `e` in a region of its own, freed when it ends: what
   `e` allocates locally is gone after it, so its value must not be local to
   it (as a function's result: at most `regional` inside, local outside),

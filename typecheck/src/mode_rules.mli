@@ -299,6 +299,7 @@ val apply
   -> arg_ty:Type.ty
   -> res_ty:Type.ty
   -> callee:(Expected.t -> Typed.Expr.t)
+  -> allocator:(unit -> bool)
   -> arg:(Expected.t -> Typed.Expr.t)
   -> Typed.Expr.t * Typed.Expr.t
 

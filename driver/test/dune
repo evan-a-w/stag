@@ -3,7 +3,7 @@
  (preprocess
   (pps ppx_jane))
  (inline_tests
-  (deps ../../learn_stag.md))
+  (deps ../../learn_stag.md ../../core/map.stag ../../core/lru.stag))
  (libraries
   stag_measure
   core

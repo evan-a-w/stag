@@ -3182,7 +3182,8 @@ and expr_type
       | Some _ | None -> true
     in
     let result_matches = ref true in
-    (* What the application allocates, rather than running a function. *)
+    (* What the application allocates in the current region, rather than running
+       a function: then it is no call, even in tail position. *)
     let allocation = ref None in
     let f, x =
       Mode_rules.apply
@@ -3221,6 +3222,7 @@ and expr_type
               | Var var, _ -> value_allocation scope var
               | _ -> None);
           f)
+        ~allocator:(fun () -> Option.is_some !allocation)
         ~arg:(fun x_at ->
           result_matches := result_matches_expected ();
           let x_at =
