@@ -159,7 +159,7 @@ let b (n : int) = match Int.equal n 0 with true -> Box.make n | false -> a (Int.
 let a (n : int) = match Int.equal n 0 with true -> Box.make n | false -> b (Int.sub n 1)
 let c (u : unit) = let x @ local = a 3 in match x with *n -> n
 |};
-  [%expect {| (Returned (value 0) (on_heap 1) (in_regions 0)) |}]
+  [%expect {| (Returned (value 0) (on_heap 0) (in_regions 1)) |}]
 ;;
 
 let%expect_test "a recursive group's argument stored globally" =
@@ -331,4 +331,110 @@ let main (u : unit) = Int.add (sum (boxed 1)) (Int.add (plus () 2) (partly 3))
     (Use_after_free
      "a reference, from the result of a call of toplevel plus, of the Partial_application at t.stag:7:22-31, made in the region of a call of toplevel plus, after it ended")
     |}]
+
+(* What a tail call returns is made in the caller's region of the function
+   making it: [via]'s Box, by [wrap], a search's part of a local argument, and a
+   recursive builder's Box; each wrong if the tail call didn't end the region
+   first. *)
+let%expect_test "tail calls returning allocations" =
+  let source =
+    {|
+let sum (b : box[int]) = match b with *n -> n
+let wrap (x : int) = Box.make x
+let via (x : int) = wrap x
+let count (n : int) (x : int) =
+  match Int.equal n 0 with true -> Box.make x | false -> count (Int.sub n 1) (Int.add x 1)
+let pick (n : int) (b : box[int]) =
+  match Int.equal n 0 with true -> b | false -> pick (Int.sub n 1) b
+let use (u : unit) =
+  let a @ local = via 1 in
+  let c @ local = count 3 1 in
+  let p @ local = pick 2 (stack_ (Box.make 7)) in
+  Int.add (sum a) (Int.add (sum c) (sum p)) [@nontail]
+|}
+  in
+  allocations_of source;
+  run source ~entry:"use";
+  print_s
+    [%sexp
+      (Region_check.run ~tail_calls_end_regions:false source ~entry:"use"
+       : Region_check.Outcome.t)];
+  [%expect
+    {|
+    val sum : box[int] @ _ -> int @ _
+    val wrap : int @ _ -> box[int] @ 'm0 with gc <= 'm0
+    val via : int @ _ -> box[int] @ 'm0 with gc <= 'm0
+    val count : int @ 'm0 -> (int @ 'm2 -> box[int] @ 'm3) @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and portable <= 'm2 and gc <= 'm3 and gc <= 'm1
+    val pick : int @ 'm0 -> (box[int] @ 'm2 -> box[int] @ 'm3) @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and portable <= 'm2 and 'm2 <= 'm3 and release(locality('m2)) <= locality('m3) and gc <= 'm1
+    val use : unit @ _ -> int @ _
+    t.stag:3:21-31 Box in wrap: heap, caller's region if res is local
+    t.stag:6:2-90 Partial_application in count: heap, caller's region if res is local
+    t.stag:6:35-45 Box in count: heap, caller's region if res.res is local
+    t.stag:8:2-68 Partial_application in pick: heap, caller's region if res is local
+    t.stag:12:33-45 Box in use: region
+    (Returned (value 12) (on_heap 0) (in_regions 10))
+    (Use_after_free
+     "a match of the Box at t.stag:3:21-31, made in the region of a call of toplevel via, after it ended")
+    |}]
+;;
+
+(* [Core.Map]'s code, built and searched in a caller's region and in a
+   [region_]: its nodes are made there, and nothing is used after it ends. *)
+let%expect_test "maps built in regions" =
+  let map = In_channel.read_all "../../core/map.stag" in
+  let uses =
+    {|
+let cmp (a : int) (b : int) = Int.sub a b
+let build (n : int) =
+  let go (i : int) (m : M.t[int, int, gc]) =
+    match Int.equal i 0 with true -> m | false -> go (Int.sub i 1) (M.add cmp m i (Int.mul i i))
+  in
+  go n M.empty
+let local_use (u : unit) =
+  let m @ local = M.add cmp (M.add cmp (M.add cmp M.empty 1 10) 2 20) 3 30 in
+  match M.find cmp m 2 with Some v -> v | None -> 0
+let removed (u : unit) =
+  let m @ local = M.remove cmp (M.add cmp (M.add cmp M.empty 1 10) 2 20) 1 in
+  M.cardinal m [@nontail]
+let in_region (u : unit) =
+  region_ (let m = M.add cmp (M.add cmp M.empty 5 50) 6 60 in
+           match M.find cmp m 6 with Some v -> v | None -> 0)
+let built (u : unit) = match M.find cmp (build 5) 4 with Some v -> v | None -> 0
+|}
+  in
+  List.iter [ "local_use"; "removed"; "in_region"; "built" ] ~f:(fun entry ->
+    run ("module M = struct\n" ^ map ^ "\nend\n" ^ uses) ~entry);
+  [%expect
+    {|
+    (Returned (value 20) (on_heap 0) (in_regions 68))
+    (Returned (value 1) (on_heap 1) (in_regions 40))
+    (Returned (value 60) (on_heap 0) (in_regions 34))
+    (Returned (value 16) (on_heap 16) (in_regions 140))
+    |}]
+;;
+
+(* [Core.Lru]'s code, a cache used in a [region_]: its record is made there (its
+   nodes, stored through pointers, are on the heap). *)
+let%expect_test "lru caches in regions" =
+  let map = In_channel.read_all "../../core/map.stag" in
+  let lru = In_channel.read_all "../../core/lru.stag" in
+  let uses =
+    {|
+let cmp (a : int) (b : int) = Int.sub a b
+let in_region (u : unit) =
+  region_ (
+    let c = Lru.create 2 cmp in
+    Lru.add c 1 10; Lru.add c 2 20; Lru.add c 3 30;
+    match Lru.find c 3 with Some v -> v | None -> 0)
+|}
+  in
+  run
+    ("module Map = struct\n"
+     ^ map
+     ^ "\nend\nmodule Lru = struct\n"
+     ^ lru
+     ^ "\nend\n"
+     ^ uses)
+    ~entry:"in_region";
+  [%expect {| (Returned (value 30) (on_heap 21) (in_regions 102)) |}]
 ;;

@@ -568,10 +568,10 @@ let c (u : unit) = let x @ local = a 3 in match x with *n -> n
 |};
   [%expect
     {|
-    val b : int @ 'm0 -> box[int] @ 'm1 with portable <= 'm0 and gc <= 'm1 and 'm1 <= global
-    val a : int @ 'm0 -> box[int] @ 'm1 with portable <= 'm0 and gc <= 'm1 and 'm1 <= global
+    val b : int @ 'm0 -> box[int] @ 'm1 with portable <= 'm0 and gc <= 'm1
+    val a : int @ 'm0 -> box[int] @ 'm1 with portable <= 'm0 and gc <= 'm1
     val c : unit @ _ -> int @ _
-    t.stag:2:51-61 Box in b: heap
-    t.stag:3:51-61 Box in a: heap
+    t.stag:2:51-61 Box in b: heap, caller's region if res is local
+    t.stag:3:51-61 Box in a: heap, caller's region if res is local
     |}]
 ;;
