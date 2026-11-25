@@ -124,13 +124,14 @@ let rec group_order
         | Module _ | Toplevel _ -> None)
       |> Option.value ~default:[])
   in
+  let member_toplevels = Array.map member_items ~f:toplevels in
   let member_of = Typed.Ident.Table.create () in
-  Array.iteri member_items ~f:(fun i items ->
-    List.iter (toplevels items) ~f:(fun ident ->
+  Array.iteri member_toplevels ~f:(fun i toplevels ->
+    List.iter toplevels ~f:(fun ident ->
       Hashtbl.set member_of ~key:ident ~data:i));
   let deps =
-    Array.mapi member_items ~f:(fun i items ->
-      List.concat_map (toplevels items) ~f:(fun ident ->
+    Array.mapi member_toplevels ~f:(fun i toplevels ->
+      List.concat_map toplevels ~f:(fun ident ->
         Hashtbl.find references ident |> Option.value ~default:[])
       |> List.filter_map ~f:(Hashtbl.find member_of)
       |> List.filter ~f:(fun j -> j <> i)
@@ -141,7 +142,7 @@ let rec group_order
   |> List.concat
   |> List.concat_map ~f:(fun i ->
     match members.(i) with
-    | File _ -> toplevels member_items.(i)
+    | File _ -> member_toplevels.(i)
     | Group (_, members) -> group_order ~references member_items.(i) members)
 ;;
 
@@ -178,11 +179,8 @@ let check_modules
 
 let eval ?(limits = Limits.unlimited) t =
   Interpreter.set_limits t.interpreter limits;
-  let%bind.Or_error () =
-    List.fold_result t.eval_order ~init:() ~f:(fun () ident ->
-      Interpreter.eval_toplevel t.interpreter ~ident)
-  in
-  Interpreter.eval t.interpreter
+  List.fold_result t.eval_order ~init:() ~f:(fun () ident ->
+    Interpreter.eval_toplevel t.interpreter ~ident)
 ;;
 
 let check_files

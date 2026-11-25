@@ -375,11 +375,7 @@ module Toplevel = struct
 end
 
 module Scc = struct
-  type t =
-    { members : Toplevel.t list
-    ; recursive : bool
-    }
-  [@@deriving sexp_of]
+  type t = { members : Toplevel.t list } [@@deriving sexp_of]
 end
 
 module Ident_info = struct

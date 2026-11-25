@@ -285,15 +285,9 @@ end
 
 (** A strongly connected component of toplevels, in the order they were reached.
     Components may be larger than needed, as references to functions from within
-    quotes count. [recursive] if the members need a recursive binding: a member
-    refers to a member by a [Bound] or [Persistent] variable, or by an
-    [Implicit] substitution. *)
+    quotes count. *)
 module Scc : sig
-  type t =
-    { members : Toplevel.t list
-    ; recursive : bool
-    }
-  [@@deriving sexp_of]
+  type t = { members : Toplevel.t list } [@@deriving sexp_of]
 end
 
 module Ident_info : sig

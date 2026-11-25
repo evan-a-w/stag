@@ -137,8 +137,7 @@ let f x =
                   (Var (Bound (Local x/16)) : "int * int") : "int * int"))
                 : "int * int"))))
             : "int * int"))
-          : "int * int")))))
-     (recursive false))
+          : "int * int"))))))
     ((f/4 ("'a -> int * int" 0)) (g/18 ("'a -> 'a" 0)) (x/14 ('a 0))
      (x/15 (int 0)) (x/16 ("int * int" 0)) (y/17 ('a 0)))
     |}]

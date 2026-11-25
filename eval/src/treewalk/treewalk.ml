@@ -123,10 +123,9 @@ module Toplevel_state = struct
 end
 
 type t =
-  { sccs : Typed.Scc.t Queue.t
-  ; toplevels : Toplevel_state.t Typed.Ident.Table.t
-  (** Each has a slot in [env] once queued, filled once [Evaluated]. Only
-      [force] changes the state of one queued. *)
+  { toplevels : Toplevel_state.t Typed.Ident.Table.t
+  (** Each has a slot in [env] once queued, filled once [Evaluated]. Once
+      queued, only [force] and [bind_functions] change its state. *)
   ; ident_info : Typed.Ident_info.t Typed.Ident.Table.t
   ; closure_captures : Typed.Ident.Hash_set.t Typed.Ident.Table.t
   ; mutable env : Value.t Env.t
@@ -224,8 +223,7 @@ let captures t ~ident ~args ~body =
 let type_id = Type_equal.Id.create ~name:"Treewalk" sexp_of_opaque
 
 let create ~stamps () =
-  { sccs = Queue.create ()
-  ; toplevels = Typed.Ident.Table.create ()
+  { toplevels = Typed.Ident.Table.create ()
   ; ident_info = Typed.Ident.Table.create ()
   ; closure_captures = Typed.Ident.Table.create ()
   ; env = Env.create ()
@@ -259,7 +257,6 @@ let add_scc t (scc : Typed.Scc.t) =
         [%message
           "Treewalk.add_scc: toplevel already evaluated" (ident : Typed.Ident.t)]
     | Some (Component _ | Unevaluated _ | Failed _) | None -> ());
-  Queue.enqueue t.sccs scc;
   List.iter scc.members ~f:(fun { ident; _ } ->
     if not (Env.mem t.env ident) then Env.declare t.env ~ident;
     Hashtbl.set t.toplevels ~key:ident ~data:(Component scc))
@@ -274,10 +271,6 @@ let map_result list ~(f @ local) =
     let%map y = f x in
     y :: acc)
   >>| List.rev
-;;
-
-let iter_result list ~(f @ local) =
-  List.fold_result list ~init:() ~f:(fun () x -> f x) [@nontail]
 ;;
 
 let map_fields fields ~(f @ local) =
@@ -758,21 +751,37 @@ and lookup_forcing t env ident ~loc : Value.t Eval_result.t @ local = exclave_
      | Null -> Eval_result.of_or_error (Env.lookup env ~fallback:t.env ~ident))
 
 (* Making closures reads nothing, so a component's functions are all bound at
-   once, and its values evaluated each when first used. *)
-and bind_functions t ({ members; recursive = _ } : Typed.Scc.t)
-  : unit Eval_result.t @ local
+   once, and its values evaluated each when first used. Its members leave
+   [Component] together, here. *)
+and bind_functions t ({ members } : Typed.Scc.t) : unit Eval_result.t @ local
   = exclave_
+  let members =
+    List.filter members ~f:(fun { ident; _ } ->
+      match Hashtbl.find t.toplevels ident with
+      | Some (Component _) -> true
+      | Some (Unevaluated _ | Evaluating | Evaluated | Failed _) | None -> false)
+  in
   let functions, values =
     List.partition_tf members ~f:(fun { args; _ } -> not (List.is_empty args))
   in
-  List.iter values ~f:(fun { ident; body; _ } ->
-    Hashtbl.set t.toplevels ~key:ident ~data:(Unevaluated body));
-  Eval_result.List.iter functions ~f:(fun { ident; args; body; _ } -> exclave_
-    let%mapl_fun.Local_result { global = value } =
-      closure t ~env:t.env ~level:0 ~ident ~args ~body
-    in
-    Env.set t.env ~ident ~value;
-    { global = Hashtbl.set t.toplevels ~key:ident ~data:Evaluated })
+  match
+    Eval_result.List.map functions ~f:(fun { ident; args; body; _ } -> exclave_
+      closure t ~env:t.env ~level:0 ~ident ~args ~body)
+  with
+  | Error { global = error } ->
+    List.iter members ~f:(fun { ident; _ } ->
+      Hashtbl.set
+        t.toplevels
+        ~key:ident
+        ~data:(Failed { error; uncatchable = error }));
+    Eval_result.error error
+  | Ok { global = closures } ->
+    List.iter2_exn functions closures ~f:(fun { ident; _ } value ->
+      Env.set t.env ~ident ~value;
+      Hashtbl.set t.toplevels ~key:ident ~data:Evaluated);
+    List.iter values ~f:(fun { ident; body; _ } ->
+      Hashtbl.set t.toplevels ~key:ident ~data:(Unevaluated body));
+    Eval_result.return ()
 
 and store_place t ~env ~level (expr : Typed.Expr.t)
   : Store_place.t Eval_result.t @ local
@@ -1277,17 +1286,4 @@ let find t ~ident = Env.lookup t.env ~ident
 let eval_toplevel t ~ident =
   Budget.protect_depth t.budget ~f:(fun () ->
     Eval_result.to_or_error (force t ident) [@nontail])
-;;
-
-let eval t =
-  let rec loop () =
-    match Queue.dequeue t.sccs with
-    | None -> Ok ()
-    | Some scc ->
-      let%bind () =
-        iter_result scc.members ~f:(fun { ident; _ } -> eval_toplevel t ~ident)
-      in
-      loop ()
-  in
-  loop ()
 ;;

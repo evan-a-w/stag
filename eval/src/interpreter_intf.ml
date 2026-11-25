@@ -51,9 +51,9 @@ module type S = sig
     -> info:Typed.Ident_info.t
     -> unit
 
-  (** Queues [scc] to [eval]. Its toplevels are evaluated earlier if used
-      before, eg. by a toplevel splice: each is evaluated at most once, when
-      first used, and the component's functions are bound when any member is. *)
+  (** Queues [scc]. Its toplevels are evaluated by [eval_toplevel], or earlier
+      when first used, eg. by a toplevel splice: each at most once, and the
+      component's functions are bound when any member is. *)
   val add_scc : t -> Typed.Scc.t -> unit
 
   (** Evaluates the toplevel splice [code], at [level] in an empty env, to code,
@@ -85,19 +85,16 @@ module type S = sig
       toplevel splice's code. *)
   val global_info : t -> ident:Typed.Ident.t -> Typed.Ident_info.t option
 
-  (** Evaluates the components queued not yet evaluated, in order. *)
-  val eval : t -> unit Or_error.t
-
-  (** Evaluates the test's body, after [eval], calling [on_expect] at each
-      [[%expect]] it reaches. *)
+  (** Evaluates the test's body, after the program's toplevels, calling
+      [on_expect] at each [[%expect]] it reaches. *)
   val run_expect_test
     :  t
     -> Typed.Expect_test.t
     -> on_expect:(string Located.t -> unit)
     -> unit Or_error.t
 
-  (** Evaluates [expr] at runtime (level 0), after [eval], in an env of
-      [bindings], eg. the body of a [let%bench]. *)
+  (** Evaluates [expr] at runtime (level 0), after the program's toplevels, in
+      an env of [bindings], eg. the body of a [let%bench]. *)
   val eval_expr
     :  ?bindings:(Typed.Ident.t * Value.t) list
     -> t

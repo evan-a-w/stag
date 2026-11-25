@@ -1765,19 +1765,7 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
     |> List.sort ~compare:(Comparable.lift Int.compare ~f:fst)
     |> List.map ~f:snd
   in
-  let idents =
-    Typed.Ident.Set.of_list
-      (List.map members ~f:(fun (member : Typed.Toplevel.t) -> member.ident))
-  in
-  let scc =
-    { Typed.Scc.members
-    ; recursive =
-        List.exists members ~f:(fun member ->
-          Typed.Expr.refers_to member.body ~f:(function
-            | Toplevel ident -> Set.mem idents ident
-            | Local _ -> false))
-    }
-  in
+  let scc = { Typed.Scc.members } in
   Queue.enqueue program.sccs scc;
   Interpreter.add_scc program.interpreter scc
 ;;

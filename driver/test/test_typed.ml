@@ -35,8 +35,7 @@ let f x =
                   (Var (Bound (Local x/16)) : "int * int") : "int * int"))
                 : "int * int"))))
             : "int * int"))
-          : "int * int")))))
-     (recursive false))
+          : "int * int"))))))
     ((f/4 ("'a -> int * int" 0)) (g/18 ("'a -> 'a" 0)) (x/14 ('a 0))
      (x/15 (int 0)) (x/16 ("int * int" 0)) (y/17 ('a 0)))
     |}]
@@ -67,8 +66,7 @@ let use = let pair x = (x, x) in (id 1, id true, pair (), pair)
               (Lit Unit : unit) : "unit * unit")
              (Var (Bound (Local pair/15)) : "'_a -> '_a * '_a"))
             : "int * bool * (unit * unit) * ('_a -> '_a * '_a)"))
-          : "int * bool * (unit * unit) * ('_a -> '_a * '_a)")))))
-     (recursive false))
+          : "int * bool * (unit * unit) * ('_a -> '_a * '_a)"))))))
     |}]
 ;;
 
@@ -93,8 +91,7 @@ let get r = r.M.x
       (((ident M.in_m/4) (args ()) (scheme M.t)
         (body
          (Construct ((type_name M.t) (name M.C) (index 2))
-          ((Lit (Bool true) : bool) (Lit (Int 1) : int)) : M.t)))))
-     (recursive false))
+          ((Lit (Bool true) : bool) (Lit (Int 1) : int)) : M.t))))))
     ((members
       (((ident outside/5) (args (v/16)) (scheme "M.t -> M.r")
         (body
@@ -130,14 +127,12 @@ let get r = r.M.x
                    (Var (Bound (Local r/18)) : M.r))))
                 : M.r))
               : M.r))))
-          : M.r)))))
-     (recursive false))
+          : M.r))))))
     ((members
       (((ident get/6) (args (r/20)) (scheme "M.r -> int")
         (body
          (Field (Var (Bound (Local r/20)) : M.r)
-          ((type_name M.r) (name M.x) (index 0)) : int)))))
-     (recursive false))
+          ((type_name M.r) (name M.x) (index 0)) : int))))))
     |}]
 ;;
 
@@ -169,8 +164,7 @@ let open_ r = match r with {`a = a; ..} -> a
            (Poly_record ((a (Lit (Int 1) : int)) (b (Lit Unit : unit))) :
             "{`a : int; `b : unit}"))
           :
-          "'a * {`a : 'a; `b : 'b; `c : int; ..'c} * {`a : 'a; ..'c} * {`a : bool; `b : 'b; ..'c} * {`a : int; `b : unit}")))))
-     (recursive false))
+          "'a * {`a : 'a; `b : 'b; `c : int; ..'c} * {`a : 'a; ..'c} * {`a : bool; `b : 'b; ..'c} * {`a : int; `b : unit}"))))))
     ((members
       (((ident rest/5) (args (r/17))
         (scheme "{`a : 'a; `b : 'b; ..'c} -> 'a * {..'c}")
@@ -184,8 +178,7 @@ let open_ r = match r with {`a = a; ..} -> a
               ((Var (Bound (Local a/18)) : 'a)
                (Var (Bound (Local others/19)) : {..'c}))
               : "'a * {..'c}"))))
-          : "'a * {..'c}")))))
-     (recursive false))
+          : "'a * {..'c}"))))))
     ((members
       (((ident open_/6) (args (r/20)) (scheme "{`a : 'a; ..'b} -> 'a")
         (body
@@ -194,8 +187,7 @@ let open_ r = match r with {`a = a; ..} -> a
            (((Poly_record (fields ((a (Var a/21 : 'a)))) (rest Open) :
               "{`a : 'a; ..'b}")
              (Var (Bound (Local a/21)) : 'a))))
-          : 'a)))))
-     (recursive false))
+          : 'a))))))
     ((a/18 ('a 0)) (a/21 ('a 0)) (open_/6 ("{`a : 'a; ..'b} -> 'a" 0))
      (ops/4
       ("{`a : 'a; `b : 'b; ..'c} -> 'a * {`a : 'a; `b : 'b; `c : int; ..'c} * {`a : 'a; ..'c} * {`a : bool; `b : 'b; ..'c} * {`a : int; `b : unit}"
@@ -221,8 +213,7 @@ let handle v = match v with `A -> 0 | `B n -> n | other -> 2
          (Tuple
           ((Poly_variant A () : "[`A; ..'a]")
            (Poly_variant B ((Lit (Int 1) : int)) : "[`B of int; ..'b]"))
-          : "[`A; ..'a] * [`B of int; ..'b]")))))
-     (recursive false))
+          : "[`A; ..'a] * [`B of int; ..'b]"))))))
     ((members
       (((ident handle/5) (args (v/15)) (scheme "[`A | `B of int; ..'a] -> int")
         (body
@@ -232,8 +223,7 @@ let handle v = match v with `A -> 0 | `B n -> n | other -> 2
             ((Poly_variant B ((Var n/16 : int)) : "[`A | `B of int; ..'a]")
              (Var (Bound (Local n/16)) : int))
             ((Var other/17 : "[`A | `B of int; ..'a]") (Lit (Int 2) : int))))
-          : int)))))
-     (recursive false))
+          : int))))))
     ((handle/5 ("[`A | `B of int; ..'a] -> int" 0)) (n/16 (int 0))
      (other/17 ([..'a] 0)) (tags/4 ("[`A; ..'a] * [`B of int; ..'b]" 0))
      (v/15 ("[`A | `B of int; ..'a]" 0)))
@@ -256,8 +246,7 @@ let nested = .<.<add x 1>.>.
           (Let (ident y/15) (args ()) (generalized true)
            (body (Lit (Int 1) : int)) (in_ (Var (Bound (Local y/15)) : int)) :
            int)
-          : <int>{..'a})))))
-     (recursive false))
+          : <int>{..'a}))))))
     ((members
       (((ident nested/5) (args ()) (scheme "<<int>{x : int; ..'a}>{..'b}")
         (body
@@ -268,8 +257,7 @@ let nested = .<.<add x 1>.>.
              (Var (Free x) : int) : "int -> int")
             (Lit (Int 1) : int) : int)
            : "<int>{x : int; ..'a}")
-          : "<<int>{x : int; ..'a}>{..'b}")))))
-     (recursive false))
+          : "<<int>{x : int; ..'a}>{..'b}"))))))
     ((closed/4 (<int>{..'a} 0)) (nested/5 ("<<int>{x : int; ..'a}>{..'b}" 0))
      (y/15 (int 1)))
     |}]
@@ -287,24 +275,20 @@ let local_not_persistent = let k = 1 in .<k>.
 |};
   [%expect
     {|
-    ((members (((ident n/4) (args ()) (scheme int) (body (Lit (Int 3) : int)))))
-     (recursive false))
+    ((members (((ident n/4) (args ()) (scheme int) (body (Lit (Int 3) : int))))))
     ((members
       (((ident not_persistent/5) (args ()) (scheme <int>{..'a})
-        (body (Quote (Var (Persistent (Toplevel n/4)) : int) : <int>{..'a})))))
-     (recursive false))
+        (body (Quote (Var (Persistent (Toplevel n/4)) : int) : <int>{..'a}))))))
     ((members
       (((ident persistent/6) (args ()) (scheme <int>{..'a})
         (body
          (Quote
           (App (Var (Persistent (Toplevel id/3)) : "int -> int")
            (Lit (Int 1) : int) : int)
-          : <int>{..'a})))))
-     (recursive false))
+          : <int>{..'a}))))))
     ((members
       (((ident outer_arg/7) (args (x/19)) (scheme "'a -> <'b>{x : 'b; ..'c}")
-        (body (Quote (Var (Free x) : 'b) : "<'b>{x : 'b; ..'c}")))))
-     (recursive false))
+        (body (Quote (Var (Free x) : 'b) : "<'b>{x : 'b; ..'c}"))))))
     ((members
       (((ident local_persistent/8) (args (n/20))
         (scheme "int -> <'a>{g : int -> 'a; ..'b}")
@@ -318,16 +302,14 @@ let local_not_persistent = let k = 1 in .<k>.
           (in_
            (Quote (App (Var (Free g) : "int -> 'a") (Lit (Int 1) : int) : 'a) :
             "<'a>{g : int -> 'a; ..'b}"))
-          : "<'a>{g : int -> 'a; ..'b}")))))
-     (recursive false))
+          : "<'a>{g : int -> 'a; ..'b}"))))))
     ((members
       (((ident local_not_persistent/9) (args ()) (scheme <int>{..'a})
         (body
          (Let (ident k/23) (args ()) (generalized true)
           (body (Lit (Int 1) : int))
           (in_ (Quote (Var (Persistent (Local k/23)) : int) : <int>{..'a})) :
-          <int>{..'a})))))
-     (recursive false))
+          <int>{..'a}))))))
     |}]
 ;;
 
@@ -357,8 +339,7 @@ let explicit = .<let x = 1 in .~(.<add x y>.).{x; y = z}>.
                ((x (Var (Bound (Local x/14)) : int)) (y (Var (Free z) : int)))))
              : int))
            : int)
-          : "<int>{z : int; ..'a}")))))
-     (recursive false))
+          : "<int>{z : int; ..'a}"))))))
     |}]
 ;;
 
@@ -391,8 +372,7 @@ let later_level c = .<.<let y = 1 in .~(.~c)>.>.
              (subs (Implicit ((x (Local x/17))))) : int))
            : int)
           : <int>{..'a}))
-        (where "..'_c <= {..'a}"))))
-     (recursive false))
+        (where "..'_c <= {..'a}")))))
     ((members
       (((ident propagates/5) (args ()) (scheme "<int>{x : int; ..'a}")
         (body
@@ -407,8 +387,7 @@ let later_level c = .<.<let y = 1 in .~(.~c)>.>.
              : "<int>{x : immut int; ..'_b}"))
            (subs (Implicit ())) : int)
           : "<int>{x : int; ..'a}"))
-        (where "..'_b <= {x : int; ..'a}"))))
-     (recursive false))
+        (where "..'_b <= {x : int; ..'a}")))))
     ((members
       (((ident tail/6) (args (c/18))
         (scheme
@@ -433,8 +412,7 @@ let later_level c = .<.<let y = 1 in .~(.~c)>.>.
              : 'a)
             : <'a>{..'f}))
           : <'a>{..'f}))
-        (where "..'e <= {..'f}"))))
-     (recursive false))
+        (where "..'e <= {..'f}")))))
     ((members
       (((ident later_level/7) (args (c/23))
         (scheme "<<'a>{y?'b : immut int; ..'c}>{-y; ..'d} -> <<'a>{..'e}>{..'f}")
@@ -455,8 +433,7 @@ let later_level c = .<.<let y = 1 in .~(.~c)>.>.
             : 'a)
            : <'a>{..'e})
           : <<'a>{..'e}>{..'f}))
-        (where "..'c <= {..'e}, ..'d <= {..'f}"))))
-     (recursive false))
+        (where "..'c <= {..'e}, ..'d <= {..'f}")))))
     ((a/21 ('a 1)) (bound/4 (<int>{..'a} 0))
      (c/18
       ("<'a>{f?'b : immut 'c -> 'c; y?'d : immut int; ..'e} where ..'e <= {..'f}"
@@ -487,12 +464,10 @@ let closed = .~(.<1>.)
 |};
   [%expect
     {|
-    ((members (((ident n/4) (args ()) (scheme int) (body (Lit (Int 3) : int)))))
-     (recursive false))
+    ((members (((ident n/4) (args ()) (scheme int) (body (Lit (Int 3) : int))))))
     ((members
       (((ident m/5) (args ()) (scheme int)
-        (body (Var (Bound (Toplevel n/4)) : int)))))
-     (recursive false))
+        (body (Var (Bound (Toplevel n/4)) : int))))))
     ((members
       (((ident f/6) (args (x/17)) (scheme "int -> int")
         (body
@@ -517,14 +492,12 @@ let closed = .~(.<1>.)
               (Var (Bound (Toplevel n/4)) : int) : "int -> int")
              (Lit (Int 1) : int) : int)
             : int))
-          : int)))))
-     (recursive false))
+          : int))))))
     ((members
       (((ident closed/7) (args ()) (scheme int)
         (body
          (Toplevel_splice (code (Quote (Lit (Int 1) : int) : <int>{}))
-          (expansion (Lit (Int 1) : int)) : int)))))
-     (recursive false))
+          (expansion (Lit (Int 1) : int)) : int))))))
     ((closed/7 (int 0)) (f/6 ("int -> int" 0)) (m/5 (int 0)) (n/4 (int 0))
      (x/17 (int 0)))
     |}]
@@ -570,28 +543,23 @@ let gen n = .<gen n>.
            (Lit (Bool false) : bool) : "bool -> bool")
           (App (Var (Bound (Toplevel even/5)) : "int -> bool")
            (Var (Bound (Local n/20)) : int) : bool)
-          : bool)))))
-     (recursive true))
+          : bool))))))
     ((members
       (((ident main/4) (args ()) (scheme bool)
         (body
          (App (Var (Bound (Toplevel even/5)) : "int -> bool") (Lit (Int 3) : int)
-          : bool)))))
-     (recursive false))
-    ((members (((ident b/8) (args ()) (scheme int) (body (Lit (Int 1) : int)))))
-     (recursive false))
+          : bool))))))
+    ((members (((ident b/8) (args ()) (scheme int) (body (Lit (Int 1) : int))))))
     ((members
       (((ident a/7) (args ()) (scheme int)
-        (body (Var (Bound (Toplevel b/8)) : int)))))
-     (recursive false))
+        (body (Var (Bound (Toplevel b/8)) : int))))))
     ((members
       (((ident gen/9) (args (n/21))
         (scheme "'a -> <'b>{gen : 'c -> 'b; n : 'c; ..'d}")
         (body
          (Quote
           (App (Var (Free_toplevel gen) : "'c -> 'b") (Var (Free n) : 'c) : 'b) :
-          "<'b>{gen : 'c -> 'b; n : 'c; ..'d}")))))
-     (recursive false))
+          "<'b>{gen : 'c -> 'b; n : 'c; ..'d}"))))))
     |}]
 ;;
 
@@ -612,24 +580,20 @@ let captured x = .~(.<captured x>.)
         (body
          (Quote
           (App (Var (Free_toplevel gen) : "'c -> 'b") (Var (Free n) : 'c) : 'b) :
-          "<'b>{gen : 'c -> 'b; n : 'c; ..'d}")))))
-     (recursive false))
+          "<'b>{gen : 'c -> 'b; n : 'c; ..'d}"))))))
     ((members
       (((ident b/6) (args ()) (scheme "<'a>{a : 'a; ..'b}")
-        (body (Quote (Var (Free_toplevel a) : 'a) : "<'a>{a : 'a; ..'b}")))))
-     (recursive false))
+        (body (Quote (Var (Free_toplevel a) : 'a) : "<'a>{a : 'a; ..'b}"))))))
     ((members
       (((ident a/5) (args ()) (scheme "<<'a>{a : 'a; ..'b}>{..'c}")
         (body
          (Quote (Var (Persistent (Toplevel b/6)) : "<'a>{a : 'a; ..'b}") :
-          "<<'a>{a : 'a; ..'b}>{..'c}")))))
-     (recursive false))
+          "<<'a>{a : 'a; ..'b}>{..'c}"))))))
     ((members
       (((ident loop/7) (args (x/19)) (scheme "'a -> 'b")
         (body
          (App (Var (Bound (Toplevel loop/7)) : "'a -> 'b")
-          (Var (Bound (Local x/19)) : 'a) : 'b)))))
-     (recursive true))
+          (Var (Bound (Local x/19)) : 'a) : 'b))))))
     ((members
       (((ident captured/8) (args (x/20)) (scheme "'a -> 'b")
         (body
@@ -642,8 +606,7 @@ let captured x = .~(.<captured x>.)
           (expansion
            (App (Var (Bound (Toplevel captured/8)) : "'a -> 'b")
             (Var (Bound (Local x/20)) : 'a) : 'b))
-          : 'b)))))
-     (recursive true))
+          : 'b))))))
     |}]
 ;;
 
@@ -661,8 +624,7 @@ let lits s = match s with "\0000" -> ('\000', "\0003")
            (((Lit (String "\0000") : string)
              (Tuple ((Lit (Char "\000") : char) (Lit (String "\0003") : string))
               : "char * string"))))
-          : "char * string")))))
-     (recursive false))
+          : "char * string"))))))
     |}]
 ;;
 
@@ -678,8 +640,7 @@ let n_shadowed = let n = 1 in .~(.<n>.)
 |};
   [%expect
     {|
-    ((members (((ident n/4) (args ()) (scheme int) (body (Lit (Int 3) : int)))))
-     (recursive false))
+    ((members (((ident n/4) (args ()) (scheme int) (body (Lit (Int 3) : int))))))
     ((members
       (((ident persistent_local/5) (args ()) (scheme <int>{..'_a})
         (body
@@ -700,8 +661,7 @@ let n_shadowed = let n = 1 in .~(.<n>.)
              (subs (Implicit ((f (Local f/19))))) : int))
            : int)
           : <int>{..'_a}))
-        (where "..'_e <= {..'_a}"))))
-     (recursive false))
+        (where "..'_e <= {..'_a}")))))
     ((members
       (((ident outside_binder/6) (args ()) (scheme <int>{..'a})
         (body
@@ -714,8 +674,7 @@ let n_shadowed = let n = 1 in .~(.<n>.)
              (subs (Implicit ())) : int)
             : <int>{..'a}))
           : <int>{..'a}))
-        (where "..'_b <= {..'a}"))))
-     (recursive false))
+        (where "..'_b <= {..'a}")))))
     ((members
       (((ident shadowed/7) (args (c/21))
         (scheme "<'a>{x?'b : immut int; ..'c} -> <'a>{..'d}")
@@ -733,8 +692,7 @@ let n_shadowed = let n = 1 in .~(.<n>.)
              : 'a))
            : 'a)
           : <'a>{..'d}))
-        (where "..'c <= {..'d}"))))
-     (recursive false))
+        (where "..'c <= {..'d}")))))
     ((members
       (((ident n_shadowed/8) (args ()) (scheme int)
         (body
@@ -744,8 +702,7 @@ let n_shadowed = let n = 1 in .~(.<n>.)
            (Toplevel_splice
             (code (Quote (Var (Persistent (Local n/24)) : int) : <int>{}))
             (expansion (Var (Bound (Local n/24)) : int)) : int))
-          : int)))))
-     (recursive false))
+          : int))))))
     ((c/21 ("<'a>{x?'b : immut int; ..'c} where ..'c <= {..'d}" 0))
      (f/19 ("'a -> 'a" 1)) (n/4 (int 0)) (n/24 (int 0)) (n_shadowed/8 (int 0))
      (outside_binder/6 (<int>{..'a} 0)) (persistent_local/5 (<int>{..'_a} 0))
@@ -766,8 +723,7 @@ let deep =
 |};
   [%expect
     {|
-    ((members (((ident n/4) (args ()) (scheme int) (body (Lit (Int 3) : int)))))
-     (recursive false))
+    ((members (((ident n/4) (args ()) (scheme int) (body (Lit (Int 3) : int))))))
     ((members
       (((ident deep/5) (args ()) (scheme int)
         (body
@@ -803,8 +759,7 @@ let deep =
                 : <<int>{}>{}))
               (expansion (Var (Bound (Local x/15)) : <int>{})) : <int>{}))
             : <int>{}))
-          (expansion (Lit (Int 1) : int)) : int)))))
-     (recursive false))
+          (expansion (Lit (Int 1) : int)) : int))))))
     ((_/18 (<'a>{..'b} -2)) (c/16 ("<'a>{n?'b : immut int; ..'c}" -2))
      (deep/5 (int 0))
      (k/17 ("<'a>{n?'b : immut int; ..'c} -> <'a>{n?'b : immut int; ..'c}" -2))
@@ -820,8 +775,7 @@ let deep = .~(let x = .<1>. in .~(let n = 5 in .<n; x>.))
 |};
   [%expect
     {|
-    ((members (((ident n/4) (args ()) (scheme int) (body (Lit (Int 3) : int)))))
-     (recursive false))
+    ((members (((ident n/4) (args ()) (scheme int) (body (Lit (Int 3) : int))))))
     ((members
       (((ident deep/5) (args ()) (scheme int)
         (body
@@ -847,8 +801,7 @@ let deep = .~(let x = .<1>. in .~(let n = 5 in .<n; x>.))
                 (in_ (Var (Bound (Local x/15)) : <int>{})) : <int>{}))
               : <int>{}))
             : <int>{}))
-          (expansion (Lit (Int 1) : int)) : int)))))
-     (recursive false))
+          (expansion (Lit (Int 1) : int)) : int))))))
     |}]
 ;;
 
@@ -865,8 +818,7 @@ let at_toplevel = .~(.<String.append n y>.).{n; y = "1"}
       (((ident n/4) (args ()) (scheme string)
         (body
          (App (Var (Prim Int.to_string) : "int -> string") (Lit (Int 3) : int) :
-          string)))))
-     (recursive false))
+          string))))))
     ((members
       (((ident persistent_shorthand/5) (args ()) (scheme <int>{..'a})
         (body
@@ -888,8 +840,7 @@ let at_toplevel = .~(.<String.append n y>.).{n; y = "1"}
                 (id (Var (Persistent (Toplevel id/3)) : "'_f -> '_f")))))
              : int)
             : <int>{..'a}))
-          : <int>{..'a})))))
-     (recursive false))
+          : <int>{..'a}))))))
     ((members
       (((ident at_toplevel/6) (args ()) (scheme string)
         (body
@@ -910,8 +861,7 @@ let at_toplevel = .~(.<String.append n y>.).{n; y = "1"}
                (Var (Bound (Toplevel n/4)) : string) : "string -> string")
               (Var (Bound (Local y/18)) : string) : string))
             : string))
-          : string)))))
-     (recursive false))
+          : string))))))
     |}]
 ;;
 
@@ -933,8 +883,7 @@ let in_quote = let f x = .<f x>. in .<f>.
           (in_
            (App (Var (Bound (Local f/17)) : "'a -> 'b")
             (Var (Bound (Local y/15)) : 'a) : 'b))
-          : 'b)))))
-     (recursive false))
+          : 'b))))))
     ((members
       (((ident in_quote/5) (args ())
         (scheme "<'a -> <'b>{f : 'c -> 'b; x : 'c; ..'d}>{..'e}")
@@ -948,8 +897,7 @@ let in_quote = let f x = .<f x>. in .<f>.
             (Var (Persistent (Local f/19)) :
              "'a -> <'b>{f : 'c -> 'b; x : 'c; ..'d}")
             : "<'a -> <'b>{f : 'c -> 'b; x : 'c; ..'d}>{..'e}"))
-          : "<'a -> <'b>{f : 'c -> 'b; x : 'c; ..'d}>{..'e}")))))
-     (recursive false))
+          : "<'a -> <'b>{f : 'c -> 'b; x : 'c; ..'d}>{..'e}"))))))
     |}]
 ;;
 
@@ -967,8 +915,7 @@ let first p = match p with (a, _) -> (a : int)
            (((Tuple ((Var a/15 : int) (Any : 'a)) : "int * 'a")
              (Annotated (Var (Bound (Local a/15)) : int)
               ((ty ((Con (<int> @ t.stag:2:42-45) ()) @ t.stag:2:42-45))) : int))))
-          : int)))))
-     (recursive false))
+          : int))))))
     ((a/15 (int 0)) (first/4 ("int * 'a -> int" 0)) (p/14 ("int * 'a" 0)))
     |}]
 ;;

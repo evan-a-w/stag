@@ -1020,7 +1020,11 @@ the files are given, and the files of a component are in the order given.
 Within a file, toplevels are evaluated top to bottom. A toplevel used before
 its turn (eg. by an earlier one, or one in an earlier file of a cycle) is
 evaluated on demand at that point, once. Toplevels used by toplevel splices
-are evaluated at compile time, once.
+are evaluated at compile time, once. The exception: if the typechecker abandons
+a compile-time evaluation part way (eg. a splice needs a type whose definition
+is not yet computed, and is retried later), the toplevel it was evaluating is
+evaluated again from the start when next used, so its side effects may repeat.
+Prelude toplevels are evaluated on demand only.
 
 Computing a toplevel's value may not need that value: this is checked, not
 found when run. A value needs the toplevels it uses, except functions it only
