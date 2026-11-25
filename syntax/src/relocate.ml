@@ -342,6 +342,9 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
   | Exclave e, Exclave e' ->
     let+ e = expr e e' in
     Expr.Exclave e
+  | Region e, Region e' ->
+    let+ e = expr e e' in
+    Expr.Region e
   | Nontail e, Nontail e' ->
     let+ e = expr e e' in
     Expr.Nontail e
@@ -382,6 +385,7 @@ and expr_desc (g : Expr.desc) (w : Expr.desc) : Expr.desc option =
       | Struct_quote _
       | Stack _
       | Exclave _
+      | Region _
       | Nontail _
       | Annotated _
       | Forget _

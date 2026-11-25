@@ -286,3 +286,150 @@ let%expect_test "random uses at other modes are accepted as variance says" =
       (!accepted : int) (!rejected : int) ~wrong:(Queue.length wrong : int)];
   [%expect {| ((!accepted 206) (!rejected 194) (wrong 0)) |}]
 ;;
+
+(* Random functions allocating in a returned position, under [exclave_],
+   [region_] and [stack_]: each is accepted, its callers using the result at
+   [global] and at [local], and each allocation placed, as a model of where the
+   allocations can be made says. *)
+module Alloc_fuzz = struct
+  module Model = struct
+    type t =
+      { global : bool (** Its value can be on the heap. *)
+      ; local : bool (** Its value can be in the caller's region. *)
+      }
+  end
+
+  (* Where a returned allocation's value goes: out of the function, or out of a
+     [region_], which only a global one can. *)
+  module Flow = struct
+    type t =
+      | Result
+      | Region_value
+  end
+
+  module Site = struct
+    type t =
+      | Placed of string
+      | Returned of Flow.t
+  end
+
+  let unused random ~exclaved : string * Site.t list =
+    ( (match Random.State.int random 2 with
+       | 0 -> "Box.make 1"
+       | _ -> "stack_ (Box.make 1)")
+    , [ Placed (if exclaved then "caller's region" else "region") ] )
+  ;;
+
+  (* What [exclave_] gives: [stack_] forces it into the caller's region. *)
+  let rec exclaved random depth ~flow : string * bool * Site.t list =
+    match if depth = 0 then 0 else Random.State.int random 3 with
+    | 0 -> "Box.make x", true, [ Returned flow ]
+    | 1 -> "stack_ (Box.make x)", false, [ Placed "caller's region" ]
+    | _ ->
+      let unused, unused_sites = unused random ~exclaved:true in
+      let body, global, sites = exclaved random (depth - 1) ~flow in
+      ( sprintf "(let n = sum (%s) in %s)" unused body
+      , global
+      , unused_sites @ sites )
+  ;;
+
+  let rec returned random depth ~flow : string * Model.t * Site.t list =
+    match if depth = 0 then 0 else Random.State.int random 4 with
+    | 0 -> "Box.make x", { global = true; local = true }, [ Returned flow ]
+    | 1 ->
+      let body, global, sites = exclaved random (depth - 1) ~flow in
+      sprintf "exclave_ %s" body, { global; local = true }, sites
+    | 2 ->
+      (* What it gives is in the function's own region, so must be global. *)
+      let body, model, sites = returned random (depth - 1) ~flow:Region_value in
+      sprintf "region_ (%s)" body, { model with local = false }, sites
+    | _ ->
+      let unused, unused_sites = unused random ~exclaved:false in
+      let body, model, sites = returned random (depth - 1) ~flow in
+      ( sprintf "(let n = sum (%s) in %s)" unused body
+      , model
+      , unused_sites @ sites )
+  ;;
+
+  let program random =
+    let body, (model : Model.t), sites = returned random 4 ~flow:Result in
+    let source =
+      sprintf
+        "let sum (b : box[int]) = match b with *n -> n\nlet f (x : int) = %s\n"
+        body
+    in
+    let placements =
+      List.map sites ~f:(fun (site : Site.t) ->
+        let where =
+          match site with
+          | Placed where -> where
+          | Returned Region_value -> "heap"
+          | Returned Result ->
+            if model.global
+            then "heap, caller's region if res is local"
+            else "caller's region"
+        in
+        "Box in f: " ^ where)
+    in
+    source, model, placements
+  ;;
+end
+
+let%expect_test "random allocations are placed as a model says" =
+  let random = Random.State.make [| 13 |] in
+  let accepted = ref 0
+  and rejected = ref 0
+  and wrong = Queue.create () in
+  for _ = 1 to 300 do
+    let source, (model : Alloc_fuzz.Model.t), expected_placements =
+      Alloc_fuzz.program random
+    in
+    let ok source = Result.is_ok (checked source) in
+    let placed = placements source in
+    let defined = Result.is_ok placed in
+    let global =
+      ok (source ^ "let g (u : unit) = let r @ global = f 1 in sum r\n")
+    in
+    let local =
+      ok
+        (source ^ "let l (u : unit) = let r @ local = f 1 in sum r [@nontail]\n")
+    in
+    let expected = model.global || model.local in
+    if defined then incr accepted else incr rejected;
+    let mismatch what actual expected =
+      if Bool.( <> ) actual expected
+      then
+        Queue.enqueue wrong (sprintf "%s(%s: expected %b)" source what expected)
+    in
+    mismatch "defined" defined expected;
+    mismatch "global use" global model.global;
+    mismatch "local use" local expected;
+    (match placed with
+     | Error _ -> ()
+     | Ok (_, lines) ->
+       let actual = List.map lines ~f:snd in
+       if not ([%equal: string list] actual expected_placements)
+       then
+         Queue.enqueue
+           wrong
+           (sprintf
+              !"%s%{Sexp}"
+              source
+              [%message
+                (actual : string list) (expected_placements : string list)]));
+    if defined
+    then (
+      let output =
+        match round_trip source ~show:`Quiet with
+        | () -> [%expect.output]
+        | exception exn -> [%expect.output] ^ Exn.to_string exn
+      in
+      if not (String.is_empty output)
+      then Queue.enqueue wrong (source ^ "\n" ^ output))
+  done;
+  Queue.iter wrong ~f:print_endline;
+  print_s
+    [%message
+      (!accepted : int) (!rejected : int) ~wrong:(Queue.length wrong : int)];
+  [%expect {| ((!accepted 284) (!rejected 16) (wrong 0)) |}]
+;;

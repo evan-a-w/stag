@@ -173,7 +173,7 @@ module Syntax_at = struct
       recurse e;
       snds fields
     | Poly_variant (_, e) -> Option.iter e ~f:recurse
-    | Stack e | Exclave e | Nontail e -> recurse e
+    | Stack e | Exclave e | Region e | Nontail e -> recurse e
     | Annotated (e, _) -> recurse e
     | Forget (_, e) -> recurse e
   ;;

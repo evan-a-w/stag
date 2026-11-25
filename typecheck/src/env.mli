@@ -22,6 +22,9 @@ module Lock : sig
       | Exclave
       (** [exclave_ e]: [e] is in the caller's region, after the function's has
           ended, so what is local to the function's is gone. *)
+      | Region
+      (** [region_ e]: [e] is in a region of its own, so what is local outside
+          it outlives it, as for a closure's body, but nothing is captured. *)
   end
 
   type t =

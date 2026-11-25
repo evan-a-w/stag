@@ -248,6 +248,7 @@ module Toplevel = struct
           ; held : Binding.t option (** Of the values a mutable one holds. *)
           ; mutable body : Typed.Expr.t option
           ; mutable recursive : bool
+          ; sites : (Allocation_sites.t[@sexp.opaque])
           }
       | Done of
           { entry : Env.Entry.t
@@ -448,6 +449,7 @@ module Program_env = struct
         of their function, so is not known while it is checked. *)
     ; checking : Scc_frame.t Stack.t
     (** The frames of the toplevels being checked, innermost first. *)
+    ; allocations : Typed.Allocation.t Queue.t
     }
 
   let report ?component ?once t error =
@@ -602,6 +604,11 @@ module Scope = struct
     ; params : Type.ty list
     (** The types of the parameters of the functions being checked, whose modes
         are decided by each use of their function. *)
+    ; allocations : Allocation_sites.t option
+    (** Of the toplevel being checked: its allocation sites, as its run time
+        code is checked. *)
+    ; owner : Allocation_sites.Frame.t option
+    (** The innermost [let] whose function (or value) is being checked. *)
     }
 
   and quote =
@@ -724,6 +731,26 @@ module Scope = struct
       ~holds:(mode_holds t)
       ~crossing:(crossing t)
       ~report:(report t)
+      ~allocated:
+        (match t.allocations, t.quote with
+         | Some sites, None when t.level = 0 ->
+           let exclaved =
+             List.find_map t.locks ~f:(fun (lock : Env.Lock.t) ->
+               match lock.kind with
+               | Exclave -> Some true
+               | Closure _ | Region -> Some false
+               | Quote _ | Splice -> None)
+             |> Option.value ~default:false
+           in
+           fun (site : Mode_rules.Site.t) ->
+             Allocation_sites.add
+               sites
+               ~frame:t.owner
+               (match site.position with
+                | (Here | Returned) when exclaved ->
+                  { site with position = Exclaved }
+                | Here | Returned | Exclaved | Caller -> site)
+         | _ -> ignore)
   ;;
 
   let arrow_mode t = Mode_rules.arrow_mode (modes t)
@@ -1775,10 +1802,6 @@ let use_entry
        | Local _ -> false)
     ~name
     ~loc
-    ~mutable_captured_in_exclave:(fun () ->
-      Scope.report
-        scope
-        (Typecheck_error.create ~loc (Mutable_captured_in_exclave name)))
 ;;
 
 let field_modality (scope : Scope.t) field ~record =
@@ -2274,7 +2297,8 @@ let finish_scc
              false)
          ~crossing:(fun _ -> Mode.Crossing.none)
          ~report:(fun error ->
-           Program_env.report program (Module_scope.within member.module_ error)))
+           Program_env.report program (Module_scope.within member.module_ error))
+         ~allocated:ignore)
       (init_mode member)
       ~loc:member.expr.loc
       ~why:(why member.ident.name)
@@ -2325,6 +2349,19 @@ let finish_scc
            (Typecheck_error.unification_error ~loc:member.expr.loc error))));
   List.iter others ~f:(fun (use : Quoted_use.t) ->
     List.iter (settle_joins use.ty) ~f:(Program_env.report_use program use));
+  (* Once the join variables are settled, and before generalizing, while the
+     result may still be constrained. *)
+  List.iter
+    (Allocation_sites.place
+       ~rank:0
+       (List.map2_exn members tys ~f:(fun member ty ->
+          match member.state with
+          | In_progress { sites; _ } -> sites, ty
+          | Unchecked | Done _ ->
+            raise_s
+              [%message "finish_scc: member not checked" (member : Toplevel.t)]))
+       ~awaiting:(List.map others ~f:(fun (use : Quoted_use.t) -> use.ty)))
+    ~f:(Queue.enqueue program.allocations);
   let awaiting =
     if generalize
     then (
@@ -2398,6 +2435,58 @@ let prim_type (scope : Scope.t) prim =
     (Mode_rules.prim (Scope.modes scope) ~args:(Prim.args prim))
     ~init:(Prim.result prim)
     ~f:(fun arg modes res -> Type.TArrow (arg, res, modes))
+;;
+
+(* What applying [var] allocates, beyond what it runs: the closure of a partial
+   application of a prim, or the block of [Box.make] or [Ptr.make]. *)
+let value_allocation (var : Typed.Var_ref.t) : Typed.Allocation.Kind.t option =
+  match var with
+  | Prim prim when Prim.arity prim > 1 -> Some Partial_application
+  | Intrinsic Box_make -> Some Box
+  | Intrinsic Ptr_make -> Some Pointer
+  | Bound (Toplevel ident) | Persistent (Toplevel ident) ->
+    if String.equal ident.name (Prelude_path.canonical "Box.make")
+    then Some Box
+    else if String.equal ident.name (Prelude_path.canonical "Ptr.make")
+    then Some Pointer
+    else None
+  | _ -> None
+;;
+
+(* The prim [expr] applies, its reference, and to how many arguments. *)
+let rec prim_head (expr : Typed.Expr.t) =
+  match expr.desc with
+  | Var (Prim prim) -> Some (prim, expr, 0)
+  | App (f, _) ->
+    Option.map (prim_head f) ~f:(fun (prim, head, args) -> prim, head, args + 1)
+  | _ -> None
+;;
+
+(* The mode of the closure of a prim of type [ty] given [args] arguments. *)
+let prim_partial ty ~args =
+  let rec go ty args =
+    match Type.canonical_ty ty with
+    | Type.TArrow (_, res, modes) ->
+      if args = 1
+      then (
+        match modes.res with
+        | Var var -> Some var
+        | Fixed _ -> None)
+      else go res (args - 1)
+    | _ -> None
+  in
+  go ty args
+;;
+
+(* Where a prim, [Box.make] or [Ptr.make] is named as a value: what it makes is
+   on the heap. Where it heads an application, it isn't a value, and the
+   application decides. *)
+let value_sites (scope : Scope.t) (expr : Typed.Expr.t) =
+  match expr.desc with
+  | Var var ->
+    Option.iter (value_allocation var) ~f:(fun kind ->
+      Mode_rules.Alloc.on_heap (Scope.modes scope) ~loc:expr.loc ~kind)
+  | _ -> ()
 ;;
 
 let intrinsic_type t (scope : Scope.t) (intrinsic : Intrinsic.t) =
@@ -2651,6 +2740,7 @@ and check_toplevel_in t program (toplevel : Toplevel.t) scc ~index =
   let unfinished = Stack.length program.unfinished in
   let reported = program.reported in
   let rank = Scc_frame.toplevel_rank in
+  let sites = Allocation_sites.create toplevel.ident in
   let scope =
     { Scope.program
     ; level = 0
@@ -2665,6 +2755,8 @@ and check_toplevel_in t program (toplevel : Toplevel.t) scc ~index =
     ; syntax_splice = None
     ; locks = []
     ; params = []
+    ; allocations = Some sites
+    ; owner = None
     }
   in
   let modes = Scope.modes scope in
@@ -2708,6 +2800,7 @@ and check_toplevel_in t program (toplevel : Toplevel.t) scc ~index =
          ; held = rules.held
          ; body = None
          ; recursive = false
+         ; sites
          };
     let body =
       match
@@ -2856,6 +2949,7 @@ and with_monomorphic_bindings (scope : Scope.t) bindings ~f =
 and expr_type
   ?expected
   ?(hint = Expectation.Required)
+  ?(applied = false)
   t
   (scope : Scope.t)
   ~(at : Mode_rules.Expected.t)
@@ -2930,7 +3024,9 @@ and expr_type
             node (Var var_ref) ty)
      with
      | Error error -> fail error
-     | Ok var -> annotate t scope var annot ~loc)
+     | Ok var ->
+       if not applied then value_sites scope var;
+       annotate t scope var annot ~loc)
   | Marked (Nontail, inner) ->
     let inner =
       expr_type
@@ -2952,6 +3048,20 @@ and expr_type
        fail
          ~children:[ inner ]
          (Typecheck_error.create ~loc Stack_not_on_allocation))
+  | Marked (Region, inner) ->
+    let inner =
+      Mode_rules.region modes at ~loc (fun at ->
+        expr_type
+          ?expected
+          ~hint
+          t
+          { scope with
+            locks = { Env.Lock.id = Fresh.id t; kind = Region } :: scope.locks
+          }
+          ~at
+          ~expr:inner)
+    in
+    node (Marked (Region, inner)) inner.ty
   | Marked (Exclave, inner) ->
     (match
        Mode_rules.exclave modes at ~loc (fun at ->
@@ -2992,7 +3102,10 @@ and expr_type
   | Var (Ref var_ref) ->
     (match var_ref_type t scope ~at var_ref ~loc with
      | Error error -> fail error
-     | Ok (ty, var_ref) -> node (Var var_ref) ty)
+     | Ok (ty, var_ref) ->
+       let var = node (Var var_ref) ty in
+       if not applied then value_sites scope var;
+       var)
   | App (f, x) ->
     Mode_rules.runs modes at Portable ~loc ~why:"it applies a function";
     let a = Scope.fresh_ty t scope in
@@ -3024,6 +3137,7 @@ and expr_type
       | Some _ | None -> true
     in
     let result_matches = ref true in
+    let boxes = ref false in
     let f, x =
       Mode_rules.apply
         modes
@@ -3036,27 +3150,61 @@ and expr_type
         ~arg_ty:a
         ~res_ty:b
         ~callee:(fun at ->
-          check_expr
-            t
-            scope
-            ~at
-            ~expr:f
-            ~ty:
-              (TArrow
-                 ( a
-                 , b
-                 , { arg = Var arg_mode; res = Var res_mode; curry = Var curry }
-                 )))
-        ~arg:(fun at ->
+          let (f : Typed.Expr.t) =
+            check_expr
+              ~applied:true
+              t
+              scope
+              ~at
+              ~expr:f
+              ~ty:
+                (TArrow
+                   ( a
+                   , b
+                   , { arg = Var arg_mode
+                     ; res = Var res_mode
+                     ; curry = Var curry
+                     } ))
+          in
+          (boxes
+           := match f.desc with
+              | Var (Intrinsic Box_make) -> true
+              | Var (Bound (Toplevel ident) | Persistent (Toplevel ident)) ->
+                String.equal ident.name (Prelude_path.canonical "Box.make")
+              | _ -> false);
+          f)
+        ~arg:(fun x_at ->
           result_matches := result_matches_expected ();
-          check_expr t scope ~at ~expr:x ~ty:a)
+          let x_at =
+            if !boxes then Mode_rules.Expected.boxed x_at ~whole:at else x_at
+          in
+          check_expr t scope ~at:x_at ~expr:x ~ty:a)
     in
+    let allocates kind =
+      Mode_rules.Alloc.pointer modes at ~loc ~kind res_mode
+    in
+    (match prim_head f with
+     | Some (prim, head, args) when (not applied) && args + 1 < Prim.arity prim
+       ->
+       (match prim_partial head.ty ~args:(args + 1) with
+        | Some partial ->
+          Mode_rules.Alloc.pointer
+            modes
+            at
+            ~loc
+            ~kind:Partial_application
+            partial
+        | None -> ())
+     | Some _ | None -> ());
     (match f.desc with
-     | Var (Intrinsic (Ptr_make | Box_make)) -> Mode_rules.Alloc.pointer at
+     | Var (Intrinsic Ptr_make) -> allocates Pointer
+     | Var (Intrinsic Box_make) -> allocates Box
      | Var (Bound (Toplevel ident) | Persistent (Toplevel ident))
-       when String.equal ident.name (Prelude_path.canonical "Ptr.make")
-            || String.equal ident.name (Prelude_path.canonical "Box.make") ->
-       Mode_rules.Alloc.pointer at
+       when String.equal ident.name (Prelude_path.canonical "Ptr.make") ->
+       allocates Pointer
+     | Var (Bound (Toplevel ident) | Persistent (Toplevel ident))
+       when String.equal ident.name (Prelude_path.canonical "Box.make") ->
+       allocates Box
      | _ -> ());
     if !result_matches
     then node (App (f, x)) b
@@ -3065,6 +3213,7 @@ and expr_type
     let inner = { scope with rank = scope.rank + 1 } in
     let is_function = not (List.is_empty args) in
     let name = Source.Binder.name binder in
+    let frame = ref None in
     let (fn, ident, body, closure), mode =
       Mode_rules.evaluate
         modes
@@ -3086,6 +3235,19 @@ and expr_type
            let ident =
              Program_env.bind scope.program binder fn.ty ~level:scope.level
            in
+           (* Its function's sites, or its value's, are its own if it is
+              generalized. *)
+           frame
+           := Option.map scope.allocations ~f:(fun sites ->
+                Allocation_sites.frame
+                  sites
+                  ~parent:scope.owner
+                  ~name
+                  ~loc
+                  ~ty:fn.ty);
+           let own =
+             { inner with owner = Option.first_some !frame inner.owner }
+           in
            let defining mode ~f =
              Env.with_bindings
                scope.locals
@@ -3102,7 +3264,7 @@ and expr_type
                defining
                  (Mode_rules.Binding.defining modes inner_at ~name ~loc)
                  ~f:(fun () ->
-                   check_expr t inner ~at:inner_at ~expr:body ~ty:fn.res_ty)
+                   check_expr t own ~at:inner_at ~expr:body ~ty:fn.res_ty)
              in
              fn, ident, body, None
            | _ :: _ ->
@@ -3113,7 +3275,7 @@ and expr_type
                (fun closure ->
                   let body =
                     defining (Mode_rules.Binding.closure closure) ~f:(fun () ->
-                      check_body t inner ~closure ~fn ~loc)
+                      check_body t own ~closure ~fn ~loc)
                   in
                   fn, ident, body, Some (Mode_rules.Binding.closure closure)))
     in
@@ -3122,6 +3284,7 @@ and expr_type
     let generalized = generalizes scope mode ~is_function ~loc in
     if generalized
     then (
+      Option.iter !frame ~f:Allocation_sites.Frame.set_generalized;
       List.iter
         (Scheme.generalize_watchers ~rank:scope.rank [ ty ])
         ~f:(fun error ->
@@ -3218,6 +3381,7 @@ and expr_type
         ~name
         ~loc
     in
+    Mode_rules.Alloc.cell modes ~loc (mode :> Mode.Var.t);
     let in_ =
       Env.with_bindings
         scope.locals
@@ -4182,9 +4346,10 @@ and labelled_types t scope ~at fields ~expected ~hint =
 
 (* Checks [expr] has type [ty], [expected] (by default [ty]) being what it is
    known to be. *)
-and check_expr ?expected ?hint t scope ~at ~expr ~ty =
+and check_expr ?expected ?hint ?applied t scope ~at ~expr ~ty =
   let expr =
     expr_type
+      ?applied
       t
       scope
       ~at
@@ -4563,6 +4728,8 @@ let toplevel_scope ?generated t program module_ ~level ~in_expect_test =
   ; syntax_splice = None
   ; locks = []
   ; params = []
+  ; allocations = None
+  ; owner = None
   }
 ;;
 
@@ -5119,6 +5286,7 @@ let program_env
     ; ident_info = Typed.Ident.Map.empty
     ; sccs = Queue.create ()
     ; declaration_splices = Queue.create ()
+    ; allocations = Queue.create ()
     ; unusable_in_quotes = String.Table.create ()
     ; unfinished = Stack.create ()
     ; reports = []
@@ -5219,6 +5387,7 @@ let check_module t (program_env : Program_env.t) module_
     ; benches
     ; declaration_splices = Queue.to_list program_env.declaration_splices
     ; ident_info = program_env.ident_info
+    ; allocations = Queue.to_list program_env.allocations
     }
   in
   let errors =

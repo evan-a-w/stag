@@ -218,6 +218,7 @@ module Marker = struct
   type t =
     | Stack
     | Exclave
+    | Region
     | Nontail
   [@@deriving sexp_of, equal]
 end
@@ -551,6 +552,99 @@ module Bench = struct
   [@@deriving sexp_of]
 end
 
+module Allocation = struct
+  module Kind = struct
+    type t =
+      | Closure
+      | Partial_application
+      | Code
+      | Pointer
+      | Box
+      | Cell
+    [@@deriving sexp_of, compare, equal]
+  end
+
+  module Placement = struct
+    type t =
+      | Heap
+      | Region
+      | Caller_region
+    [@@deriving sexp_of, compare, equal]
+  end
+
+  module Side = struct
+    module Step = struct
+      type t =
+        | Arg
+        | Res
+        | Component of int
+        | Type_arg of int
+        | Field of string
+        | Code
+      [@@deriving sexp_of, compare, equal]
+    end
+
+    type t =
+      { steps : Step.t list
+      ; side : [ `Arg | `Res ]
+      }
+    [@@deriving sexp_of, compare, equal]
+
+    let to_string { steps; side } =
+      let step : Step.t -> string = function
+        | Arg -> "arg"
+        | Res -> "res"
+        | Component i -> sprintf "component %d" (i + 1)
+        | Type_arg i -> sprintf "type arg %d" (i + 1)
+        | Field name -> name
+        | Code -> "code"
+      in
+      String.concat
+        ~sep:"."
+        (List.map steps ~f:step
+         @ [ (match side with
+              | `Arg -> "arg"
+              | `Res -> "res")
+           ])
+    ;;
+  end
+
+  module Owner = struct
+    type t =
+      { toplevel : Ident.t
+      ; lets : (string * Loc.t) list
+      }
+    [@@deriving sexp_of]
+
+    let equal a b =
+      Ident.equal a.toplevel b.toplevel
+      && List.equal (fun (_, a) (_, b) -> Loc.equal a b) a.lets b.lets
+    ;;
+
+    let to_string { toplevel; lets } =
+      String.concat ~sep:"." (toplevel.name :: List.map lets ~f:fst)
+    ;;
+  end
+
+  module Follows = struct
+    type t =
+      { owner : Owner.t
+      ; side : Side.t
+      ; if_local : Placement.t
+      }
+    [@@deriving sexp_of]
+  end
+
+  type t =
+    { owner : Owner.t
+    ; loc : Loc.t
+    ; kind : Kind.t
+    ; placement : Placement.t
+    ; follows : Follows.t option
+    }
+  [@@deriving sexp_of]
+end
+
 module Program = struct
   module Item = struct
     type t =
@@ -571,6 +665,7 @@ module Program = struct
     ; benches : Bench.t list
     ; declaration_splices : Expr.t list
     ; ident_info : Ident_info.t Ident.Map.t
+    ; allocations : Allocation.t list
     }
   [@@deriving sexp_of]
 
@@ -581,6 +676,7 @@ module Program = struct
     ; benches
     ; declaration_splices
     ; ident_info = _
+    ; allocations = _
     }
     =
     List.concat_map sccs ~f:(fun (scc : Scc.t) ->

@@ -28,6 +28,20 @@ val default_to_lower : t -> unit
 
 val default_to_upper : t -> unit
 
+(** What generalizing [kept] at [rank] does with a node: it is left to the code
+    outside ([Outer]), made generic ([Kept]), already of a scheme ([Generic]),
+    or summarized away ([Eliminated]), as it has every constraint it will have. *)
+module Fate : sig
+  type t =
+    | Outer
+    | Kept
+    | Generic
+    | Eliminated
+  [@@deriving equal]
+end
+
+val fate : t -> rank:int -> kept:(t -> bool) -> Fate.t
+
 (** Makes generic the nodes in the list of rank greater than [rank]. Each keeps
     the constraints the graph implies between it and the other such nodes or
     nodes of rank at most [rank], through paths in the remaining nodes, which
@@ -58,6 +72,11 @@ end
 val rank : t -> int option
 
 val var_id : t -> int
+
+(** [t] and the nodes its edges [t <= m(hi)] lead to, transitively: those whose
+    upper bounds bound [t]'s. *)
+val above : t -> t list
+
 val axis : t -> Axis.Any.t
 
 (** The nodes that rise, with their least points, if each node given is raised

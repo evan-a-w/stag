@@ -16,6 +16,7 @@ type t =
   | Mut
   | Stack_ (** [stack_] *)
   | Exclave_ (** [exclave_] *)
+  | Region_ (** [region_] *)
   | Global_ (** [global_] *)
   | Forget
   | Let_expect_test (** [let%expect_test] *)
@@ -75,6 +76,7 @@ let keyword = function
   | "mut" -> Some Mut
   | "stack_" -> Some Stack_
   | "exclave_" -> Some Exclave_
+  | "region_" -> Some Region_
   | "global_" -> Some Global_
   | "forget" -> Some Forget
   | "in" -> Some In
@@ -107,6 +109,7 @@ let to_string = function
   | Mut -> "mut"
   | Stack_ -> "stack_"
   | Exclave_ -> "exclave_"
+  | Region_ -> "region_"
   | Global_ -> "global_"
   | Forget -> "forget"
   | Let_expect_test -> "let%expect_test"
@@ -180,6 +183,7 @@ let ends_atom : t -> bool = function
   | Mut
   | Stack_
   | Exclave_
+  | Region_
   | Global_
   | Forget
   | Let_expect_test
@@ -258,6 +262,7 @@ let ends_code : t -> bool = function
   | Include_inline
   | Stack_
   | Exclave_
+  | Region_
   | Global_
   | Forget
   | At
