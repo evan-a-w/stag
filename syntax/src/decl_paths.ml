@@ -6,23 +6,27 @@ module Context = struct
   type t =
     { modules : string list
     ; locals : String.Set.t
-    ; in_struct_quote : bool
+    ; quoted : quoted option
     }
 
-  (* A struct quote's declarations are in no module of the program, so are bound
-     as locals, and its modules are not the enclosing toplevel's. *)
+  (* Inside a struct quote, [depth] quotes in. Only its antiquotes, back at
+     depth 0, hold resolved paths, and they are evaluated outside the quote. *)
+  and quoted =
+    { depth : int
+    ; outside : t
+    }
+
   let enter t (child : Traverse.Child.t) =
-    let in_struct_quote =
-      t.in_struct_quote
-      || [%equal: Traverse.Members.t option] child.members (Some Struct_quote)
-    in
-    let locals () = Set.union t.locals (String.Set.of_list child.binds) in
-    match child.members with
-    | Some (Module name) when not in_struct_quote ->
-      { t with modules = t.modules @ [ name ] }
-    | Some (Module _ | Expansion) when not in_struct_quote -> t
-    | Some (Module _ | Expansion | Struct_quote) | None ->
-      { t with locals = locals (); in_struct_quote }
+    match t.quoted, child.members with
+    | Some { depth; outside }, _ ->
+      let depth = depth + child.depth in
+      if depth = 0 then outside else { t with quoted = Some { depth; outside } }
+    | None, Some Struct_quote ->
+      { t with quoted = Some { depth = child.depth; outside = t } }
+    | None, Some (Module name) -> { t with modules = t.modules @ [ name ] }
+    | None, Some Expansion -> t
+    | None, None ->
+      { t with locals = Set.union t.locals (String.Set.of_list child.binds) }
   ;;
 end
 
@@ -46,19 +50,20 @@ let map (t : Toplevel.t) ~f =
           | Some p -> p
           | None -> Traverse.pattern v ctx p)
     ; decl_path =
-        (fun ({ modules; locals; in_struct_quote = _ } : Context.t)
-          namespace
-          path ->
-          let locals =
-            match namespace with
-            | Value -> locals
-            | Type | Constructor | Field -> String.Set.empty
-          in
-          f namespace ~modules ~locals path)
+        (fun ({ modules; locals; quoted } : Context.t) namespace path ->
+          match quoted with
+          | Some _ -> path
+          | None ->
+            let locals =
+              match namespace with
+              | Value -> locals
+              | Type | Constructor | Field -> String.Set.empty
+            in
+            f namespace ~modules ~locals path)
     }
   in
   visitor.toplevel
     visitor
-    { modules = []; locals = String.Set.empty; in_struct_quote = false }
+    { modules = []; locals = String.Set.empty; quoted = None }
     t
 ;;

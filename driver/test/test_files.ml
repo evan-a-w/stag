@@ -190,6 +190,32 @@ let q = .~(print_endline "compile time"; .<B.r>.)
     |}]
 ;;
 
+let%expect_test "what only compile-time code uses is not a runtime dependency" =
+  run
+    [ file
+        "a.stag"
+        {|
+let p = print_endline "a1"
+let q = .~(let _ = B.s in .<1>.)
+|}
+    ; file "b.stag" {| let r = print_endline "b" let s = 1 |}
+    ];
+  [%expect
+    {|
+    module A : sig
+      val p : unit
+      val q : int
+    end
+    module B : sig
+      val r : unit
+      val s : int
+    end
+    ---
+    a1
+    b
+    |}]
+;;
+
 let%expect_test "errors" =
   run [ file "a.stag" "let x = (" ];
   [%expect

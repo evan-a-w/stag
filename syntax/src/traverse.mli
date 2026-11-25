@@ -49,8 +49,8 @@ module Child : sig
     { depth : int
     (** Quotes in, relative to its parent: [1] in a quote, [-1] in a splice. *)
     ; binds : string list
-    (** The values bound in it that are not in its parent: by its parent's
-        binders, or for one of [members], declared by the members before it. *)
+    (** The locals its parent binds in it. Members bind none: declarations are
+        not locals, and members see each other in any order. *)
     ; splice : Splice.t option (** It is the expression of this splice. *)
     ; members : Members.t option
     }

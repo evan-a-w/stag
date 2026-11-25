@@ -69,19 +69,6 @@ let rec pattern_binders (p : Pattern.t) =
       | Closed | Open -> [])
 ;;
 
-let declared (t : Toplevel.t) =
-  match t.txt with
-  | Let (n, _, _, _) | Let_mut (n, _, _) | External { name = n; _ } -> [ n.txt ]
-  | Type _
-  | Exception _
-  | Malformed_exception _
-  | Module _
-  | Module_splice _
-  | Include _
-  | Expect_test _
-  | Bench _ -> []
-;;
-
 module Visitor_type = struct
   type 'ctx t =
     { enter : 'ctx -> Child.t -> 'ctx
@@ -266,16 +253,8 @@ let rec expr (v : _ Visitor_type.t) ctx (e : Expr.t) : Expr.t =
   in
   { e with txt }
 
-(* Each member of [ts] as a child like [child], binding the values the members
-   before it declare. *)
 and members v ctx ts (child : Child.t) =
-  let declared_before = ref [] in
-  map ts ~f:(fun t ->
-    let child =
-      { child with binds = List.concat (List.rev !declared_before) }
-    in
-    declared_before := declared t :: !declared_before;
-    v.toplevel v (v.enter ctx child) t)
+  map ts ~f:(v.toplevel v (v.enter ctx child))
 
 and toplevel (v : _ Visitor_type.t) ctx (t : Toplevel.t) : Toplevel.t =
   let child child e = v.expr v (v.enter ctx child) child e in

@@ -107,7 +107,7 @@ let%expect_test "children with how their scope differs" =
       \nend >.")
      (depth 0) (locals ()) (splice ()))
     (("Printer.expr e" 1) (depth 1) (locals ()) (splice ()))
-    (("Printer.expr e" x) (depth 1) (locals (x)) (splice ()))
+    (("Printer.expr e" x) (depth 1) (locals ()) (splice ()))
     |}];
   show
     "let f x = let g y = (x, y) in match g x with (a, b) -> fun c -> (a, b, c)";

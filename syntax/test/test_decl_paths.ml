@@ -98,27 +98,29 @@ let%expect_test "a type splice sees the locals around it" =
     |}]
 ;;
 
-let%expect_test "a struct quote's declarations are locals, in no module" =
+let%expect_test "of a struct quote, only the antiquotes are visited, in the \
+                 scope around the quote"
+  =
   show
     {|
 module M = struct
   let f x =
     .< struct
       let y = x
+      let g u = .~(k x)
       type t = .~(k x)
-      module N = struct let z = y end
+      module N = struct let z = .~(.< y >.) end
       let w = (y, z)
     end >.
 end
 |};
   [%expect
     {|
+    (k (namespace Value) (modules (M)) (locals (x)))
     (x (namespace Value) (modules (M)) (locals (x)))
-    (k (namespace Value) (modules (M)) (locals (x y)))
-    (x (namespace Value) (modules (M)) (locals (x y)))
-    (y (namespace Value) (modules (M)) (locals (x y)))
-    (y (namespace Value) (modules (M)) (locals (x y)))
-    (z (namespace Value) (modules (M)) (locals (x y)))
+    (k (namespace Value) (modules (M)) (locals (x)))
+    (x (namespace Value) (modules (M)) (locals (x)))
+    (y (namespace Value) (modules (M)) (locals (x)))
     |}]
 ;;
 

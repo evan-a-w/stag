@@ -1150,6 +1150,117 @@ let%expect_test "values" =
     |xxx}]
 ;;
 
+let%expect_test "an antiquote in a generated struct quote is printed in the \
+                 scope around the quote, not the quote's own"
+  =
+  test
+    {|
+let helper = Stag.Expr.string "s"
+include%inline .~(.< struct
+  let x = .< struct
+    let helper = .~(Stag.Expr.string "t")
+    let z = .~(.~(Stag.Code.erase .< helper >.))
+  end >.
+end >.)
+end%inline
+|};
+  [%expect
+    {|
+    File "a.stag", lines 17-22, characters 0-7:
+    17 | include%inline .~(.< struct
+    18 |   let x = .< struct
+    19 |     let helper = .~(Stag.Expr.string "t")
+    20 |     let z = .~(.~(Stag.Code.erase .< helper >.))
+    21 |   end >.
+    22 | end >.)
+    Error: This inline expansion is out of date
+    --- a.stag corrected ---
+    let helper = Stag.Expr.string "s"
+    include%inline .~(.< struct
+      let x = .< struct
+        let helper = .~(Stag.Expr.string "t")
+        let z = .~(.~(Stag.Code.erase .< helper >.))
+      end >.
+    end >.)
+      let x =
+        .< struct
+          let helper = .~(Stag.Expr.string "t")
+          let z = .~helper
+        end >.
+    end%inline
+    |}]
+;;
+
+let%expect_test "a module in a generated struct quote is not a module of the \
+                 program"
+  =
+  test
+    {|
+let helper = Stag.Expr.string "s"
+include%inline .~(.< struct
+  let x = .< struct
+    module K = struct let z = .~(.~(Stag.Code.erase .< helper >.)) end
+  end >.
+end >.)
+end%inline
+|};
+  [%expect
+    {|
+    File "a.stag", lines 17-21, characters 0-7:
+    17 | include%inline .~(.< struct
+    18 |   let x = .< struct
+    19 |     module K = struct let z = .~(.~(Stag.Code.erase .< helper >.)) end
+    20 |   end >.
+    21 | end >.)
+    Error: This inline expansion is out of date
+    --- a.stag corrected ---
+    let helper = Stag.Expr.string "s"
+    include%inline .~(.< struct
+      let x = .< struct
+        module K = struct let z = .~(.~(Stag.Code.erase .< helper >.)) end
+      end >.
+    end >.)
+      let x =
+        .< struct
+          module K = struct
+            let z = .~helper
+          end
+        end >.
+    end%inline
+    |}]
+;;
+
+let%expect_test "a local around a generated struct quote shadows in its \
+                 antiquotes"
+  =
+  test
+    {|
+let helper = Stag.Expr.string "s"
+include%inline .~(.< struct
+  let x helper = .< struct let z = .~(.~(Stag.Code.erase .< helper >.)) end >.
+end >.)
+end%inline
+|};
+  [%expect
+    {|
+    File "a.stag", lines 17-19, characters 0-7:
+    17 | include%inline .~(.< struct
+    18 |   let x helper = .< struct let z = .~(.~(Stag.Code.erase .< helper >.)) end >.
+    19 | end >.)
+    Error: This inline expansion is out of date
+    --- a.stag corrected ---
+    let helper = Stag.Expr.string "s"
+    include%inline .~(.< struct
+      let x helper = .< struct let z = .~(.~(Stag.Code.erase .< helper >.)) end >.
+    end >.)
+      let x helper =
+        .< struct
+          let z = .~A.helper
+        end >.
+    end%inline
+    |}]
+;;
+
 let%expect_test "erased sequences stay sequences, and erased [let _] stays a \
                  let"
   =
