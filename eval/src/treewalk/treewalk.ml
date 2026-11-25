@@ -144,23 +144,28 @@ let captures t ~ident ~args ~body =
   let closure_level = level ident in
   let defined = Typed.Ident.Hash_set.of_list args in
   let captures = Typed.Ident.Hash_set.create () in
-  let use ~depth ident =
+  let use_at ~depth ident ~level =
     if depth >= 0
        && (not (Hash_set.mem defined ident))
-       && level ident <= closure_level
+       && level <= closure_level
     then Hash_set.add captures ident
   in
+  let use ~depth ident = use_at ~depth ident ~level:(level ident) in
   let var ~depth : Typed.Var_ref.t -> unit = function
     | Free _ | Prim _ | Intrinsic _ -> ()
-    | Bound (Toplevel ident | Local ident)
-    | Persistent (Toplevel ident | Local ident) -> use ~depth ident
+    (* In a quote, a toplevel is referred to by symbol: only its value is
+       captured, and it may still be being checked. *)
+    | Bound (Toplevel ident) | Persistent (Toplevel ident) ->
+      if depth = 0 then use_at ~depth ident ~level:0
+    | Bound (Local ident) | Persistent (Local ident) -> use ~depth ident
   in
   let rec go ~depth (expr : Typed.Expr.t) =
     (match expr.desc with
      | Var var_ref | Assign (var_ref, _) -> var ~depth var_ref
      | Splice { subs = Implicit providers; _ } ->
-       Map.iter providers ~f:(fun (Toplevel ident | Local ident) ->
-         use ~depth ident)
+       Map.iter providers ~f:(function
+         | Toplevel ident -> if depth = 0 then use_at ~depth ident ~level:0
+         | Local ident -> use ~depth ident)
      | _ -> ());
     Typed.Expr.iter_children expr ~f:(fun child expr ->
       List.iter child.binds ~f:(Hash_set.add defined);

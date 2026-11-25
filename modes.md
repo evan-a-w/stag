@@ -345,22 +345,39 @@ substitution where the code is spliced can replace it. One whose checking is
 underway is referred to by symbol too, and doesn't join its component. In its
 own code, the use is a recursive one, of its type (so `let gen n = forget n in
 .< gen n >.`, whose code type would contain itself, is an error). Elsewhere,
-the use is of a type of its own, which the toplevel keeps, and unifies with
-its type when its component is finished, an error being reported at the use.
-If the quote's code is in that component (it also uses the toplevel
-directly), the use is a recursive one, unified before the component is
-generalized. Otherwise the quote's component is finished first, and its use
-is not generalized (weak: `'_a`), but unified with an instance of the
-toplevel's scheme. So the code's type is the toplevel's, but with weak
-variables where they would have been generalized had the toplevel been
-finished first. This can't be helped: the quote's component is finished
-first because code checked while the toplevel is (eg. its splice) needs its
-value, and may also use its type, so share its weak variables: generalizing
-them later would make that use polymorphic after the fact. Code abandoned to
-be checked anew (see syntax.md, Evaluation) has its uses dropped. Computing
-with it elsewhere is nonportable: `let z = r` in a toplevel `r` depends on is not
-generalized, whichever order they are checked in. So the order of
-checking matters: with
+the use is of a type of its own, unified with the toplevel's once it is
+known, an error being reported at the use:
+
+- If the quote's code is in the toplevel's component (it also uses the
+  toplevel directly), the use is a recursive one, unified before the
+  component is generalized.
+- Otherwise the quote's component is finished first, and the use's type is
+  generalized with its schemes: the schemes *await* the toplevel. Each
+  instance of them has its own instance of the use, unified with an instance
+  of the toplevel's scheme once it is finished, like a use of its own. Once
+  the toplevel is finished, the awaiting schemes are refined: an instance of
+  them, with its use unified with an instance of the toplevel's scheme, is
+  generalized anew, and is the scheme from then on. So
+
+  ```ocaml
+  let ident x = .~(let _ = (c .<1>., c .<"s">.) in .<x>.)
+  let c (y : <'a>{..'r}) = .< ident .~y >.
+  ```
+
+  gives `c` the type `<'a>{..'b} -> <'a>{..'c}`, used at `int` and `string`
+  in `ident`'s splice, before `ident`'s type is known.
+- A component that is not generalized (see the value restriction) doesn't
+  generalize the use either: it is unified with an instance of the
+  toplevel's scheme once it is finished.
+
+The typed code of an awaiting scheme keeps the type it was checked at; only
+the scheme is refined. Code run at compile time while checking a toplevel
+(eg. a type or declaration splice) is not of a component: toplevels it
+checks that depend on ones being checked are finished with the component of
+the toplevel it was checked for. Code abandoned to be checked anew (see
+syntax.md, Evaluation) has its uses dropped. Computing with it elsewhere is
+nonportable: `let z = r` in a toplevel `r` depends on is not generalized,
+whichever order they are checked in. So the order of checking matters: with
 
 ```ocaml
 let q = .<later>.

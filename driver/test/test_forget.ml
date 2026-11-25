@@ -165,8 +165,8 @@ let used = f (S (Ptr.make (S (Ptr.make Z))))
     {|
     (code
      (Code
-      (App (Var (Persistent (Toplevel f/4)) : "nat -> int") (Var (Free m) : nat)
-       : int)))
+      (App (Var (Persistent (Toplevel f/4)) : "'a -> 'b") (Var (Free m) : 'a) :
+       'b)))
     (f <fun>)
     (used 0)
     |}];
@@ -260,7 +260,7 @@ let c = .< f >.
   [%expect
     {|
     val f : int @ 'm0 -> int @ 'm1
-    val c : <int @ '_m0 -> int @ '_m1>{..'a}
+    val c : <int @ 'm0 -> int @ 'm1>{..'a}
     |}];
   show {|
 let f (x : int) : int = x
@@ -317,5 +317,77 @@ let c (u : unit) = .< (f 1, f "s") >.
     {|
     val f : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     val c : unit @ 'm0 -> <int * string>{..'a} @ 'm1
+    |}]
+;;
+
+let%expect_test "a quote's use of a toplevel being checked is generalized with \
+                 it"
+  =
+  (* [c] is finished before [ident], whose splice uses [c] at two types: the use
+     of [ident] in [c]'s quote is generalized with [c], so each instance of [c]
+     has its own, unified with an instance of [ident] once it is finished. *)
+  show
+    {|
+let ident x = .~(let _ = (c .< 1 >., c .< "s" >.) in .< x >.)
+let c (y : <'a>{..'r}) = .< ident .~y >.
+let both = (c .< 1 >., c .< "s" >.)
+|};
+  [%expect
+    {|
+    val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val c : <'a>{..'b} @ 'm0 -> <'a>{..'c} @ 'm1 where ..'b <= {..'c} with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and gc <= 'm1
+    val both : <int>{..'_a} * <string>{..'_b}
+    |}];
+  (* An instance's use fails once [g] is finished. *)
+  show
+    {|
+let g (x : int) : int = .~(let _ = d .< "s" >. in .< x >.)
+let d (y : <'a>{..'r}) = .< g .~y >.
+|};
+  [%expect
+    {| This expression has type int but an expression was expected of type string |}];
+  (* Uses by instances made before and after it is refined agree. *)
+  show
+    {|
+let h x = .~(let _ = e .< 1 >. in .< (x, x) >.)
+let e (y : <'a>{..'r}) = .< h .~y >.
+let later = e .< true >.
+|};
+  [%expect
+    {|
+    val h : 'a @ 'm0 -> 'a * 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val e : <'a>{..'b} @ 'm0 -> <'a * 'a>{..'c} @ 'm1 where ..'b <= {..'c} with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and gc <= 'm1
+    val later : <bool * bool>{..'_a}
+    |}]
+;;
+
+let%expect_test "a toplevel checked by compile-time code is finished with the \
+                 toplevel it was checked for"
+  =
+  show
+    {|
+let b = let _ = c in 1
+let c : .~(let _ = .< y >. in Stag.Type_expr.Con (Stag.Path.Name "int", Nil)) = 1
+let y = let _ = b in fun a -> a
+|};
+  [%expect
+    {|
+    val b : int
+    val c : int
+    val y : '_a @ '_m0 -> '_a @ '_m1 with '_m0 <= '_m1 and release(locality('_m0)) <= locality('_m1)
+    |}];
+  show
+    {|
+let b = let _ = M.zz in 1
+module M = .~(let _ = .< y >. in Cons (Ptr.make (Stag.Toplevel.let_ "zz" Nil (Stag.Expr.int 1), Nil)))
+let y = let _ = b in fun a -> a
+|};
+  [%expect
+    {|
+    val b : int
+    module M : sig
+      val zz : int
+    end
+    val y : '_a @ '_m0 -> '_a @ '_m1 with '_m0 <= '_m1 and release(locality('_m0)) <= locality('_m1)
     |}]
 ;;
