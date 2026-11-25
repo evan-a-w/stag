@@ -111,7 +111,12 @@ closure's own mode is the mode of the arrow value, like any value's.
   taking global strings, whichever comes first. The join is made from the
   first value's type: modes it reaches only through a type variable still
   unknown then, or inside a record, variant or code context, are unified
-  (equal for every value), not joined. A function literal expected at a known
+  (equal for every value), not joined. A value whose type is itself still
+  unknown (a parameter as an arm) is made the join's type, which stays a
+  join, so what comes after it is joined as if it came first. A weak
+  toplevel's join keeps its own modes (it is only the join's bounds):
+  `Box.make (fun (s @ local) -> ...)` holds a function whose argument mode
+  is any up to `local`, which a use settles. A function literal expected at a known
   type (a later arm, an argument) is used at it by variance too, rather than
   made equal to it.
 - **Polymorphism.** Mode variables are generalised with the type variables of

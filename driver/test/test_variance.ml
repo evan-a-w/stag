@@ -385,3 +385,48 @@ let narrow (r : r[external]) : r[gc] = r
     Their modes differ: This is external, because the types are unified, but must be at most gc, because the types are unified
     |}]
 ;;
+
+let%expect_test "weak toplevels keep their instances' modes" =
+  (* A polymorphic function's instance is a join of new modes, which a weak
+     toplevel fixes at the end of its definition: where it would be used, at the
+     bound its own type gave it, so a contravariant parameter stays as declared. *)
+  check
+    {|
+type co['p : mode] = { v : string @@ 'p }
+type contra['p : mode] = { f : co['p] -> unit }
+let diverge (u : unit) = diverge u
+let ident x = x
+let f1 : contra[external] = diverge ()
+let x = ident f1
+let g : contra[external] = x
+let p = Ptr.make f1
+let q : ptr[contra[external]] = p
+let c = Ptr.make "a"
+|};
+  [%expect
+    {|
+    type co['m0 : mode] = { v : string @@ 'm0 }
+    type contra['m0 : mode] = { f : co['m0] -> unit }
+    val diverge : unit @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm1 <= global
+    val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val f1 : contra[external]
+    val x : contra[external]
+    val g : contra[external]
+    val p : ptr[contra[external]]
+    val q : ptr[contra[external]]
+    val c : ptr[string]
+    |}]
+;;
+
+let%expect_test "an arm of unknown type joins too, in either order" =
+  check
+    {|
+let f b x = match b with | true -> (fun (s @ local) -> String.length s) | false -> x
+let f2 b x = match b with | true -> x | false -> (fun (s @ local) -> String.length s)
+|};
+  [%expect
+    {|
+    val f : bool @ 'm0 -> ((string @ 'm3 -> int @ 'm4) @ 'm2 -> (string @ 'm3 -> int @ 'm4) @ 'm5) @ 'm1 with stage('m0) <= stage('m5) and 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and gc <= 'm1
+    val f2 : bool @ 'm0 -> ((string @ 'm3 -> int @ 'm4) @ 'm2 -> (string @ 'm3 -> int @ 'm4) @ 'm5) @ 'm1 with stage('m0) <= stage('m5) and 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and gc <= 'm1
+    |}]
+;;

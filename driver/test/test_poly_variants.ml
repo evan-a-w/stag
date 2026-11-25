@@ -474,7 +474,7 @@ let two = T (`Cons (1, Ptr.make (T `Nil)))
 |};
   [%expect
     {|
-    ((Unification_error (Occurs_check_failed (ATy (TVar (Unbound 22 1))))) @
+    ((Unification_error (Occurs_check_failed (ATy (TVar (Unbound 32 1))))) @
      t.stag:2:27-33)
     ((Unification_error
       (Row_mismatch

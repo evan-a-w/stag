@@ -219,7 +219,11 @@ Provenance follows reachability, not evaluation:
   may be a variable, so code can be polymorphic in it. `Ptr.make` infers
   `m` from its argument and the cell's uses; a toplevel cell that is not
   generalized has its `m` fixed by its definition, `gc` unless that needs
-  more. A pointer's own provenance is that of its cell (`gc`), not of what
+  more. Its type's other mode arguments, of parameters that aren't
+  invariant, are fixed at the bound its definition gave them, the most a
+  use at another type allows: a covariant one at its lower bound, a
+  contravariant one at its upper (`let x = ident f` keeps `f`'s
+  `contra[external]`). A pointer's own provenance is that of its cell (`gc`), not of what
   the cell holds: the type says that, and can't be forgotten. A mutable variable (`let mut`, a mutable global) has
   a held mode of its own, inferred from what is assigned to it: an
   `external` assignment makes it `external` (its reads then are), unless it

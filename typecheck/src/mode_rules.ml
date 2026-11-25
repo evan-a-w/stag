@@ -1039,7 +1039,7 @@ let assume_global ctx =
   arg, res
 ;;
 
-let default_held var ~name =
+let default_mode_arg var (position : Mode_arg_position.t option) ~name =
   if not (Mode.Var.is_generic var)
   then (
     let lower = Mode.Var.lower var
@@ -1050,7 +1050,11 @@ let default_held var ~name =
       let lower = Mode.Const.get lower axis
       and upper = Mode.Const.get upper axis
       and default = Mode.Const.get default axis in
-      if C.le default upper then C.join lower default else lower
+      match position with
+      | Some Covariant -> lower
+      | Some Contravariant -> upper
+      | Some Held | None ->
+        if C.le default upper then C.join lower default else lower
     in
     let held : Mode.Const.t =
       { stage = pick Stage
@@ -1060,10 +1064,17 @@ let default_held var ~name =
     in
     let reason =
       Mode.Reason.create
-        (sprintf
-           "%s is not generalized, so what its cells hold is fixed by its \
-            definition (nonportable gc by default)"
-           name)
+        (match position with
+         | Some Held | None ->
+           sprintf
+             "%s is not generalized, so what its cells hold is fixed by its \
+              definition (nonportable gc by default)"
+             name
+         | Some (Covariant | Contravariant) ->
+           sprintf
+             "%s is not generalized, so its type's mode arguments are fixed by \
+              its definition"
+             name)
     in
     Result.all_unit
       [ Mode.Var.at_least_const var held reason

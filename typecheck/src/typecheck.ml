@@ -1835,7 +1835,15 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
   List.iter members ~f:(fun member ->
     match member.state with
     | In_progress { ty; _ } ->
-      Type.iter_held ty ~f:(Mode_rules.default_held ~name:member.ident.name)
+      let positions = Int.Table.create () in
+      Mode_arg_position.iter ~con:(Fresh.variances t) ty ~f:(fun var position ->
+        Hashtbl.update positions (Mode.Var.id var) ~f:(function
+          | None -> var, Some position
+          | Some (var, Some before) when Mode_arg_position.equal before position
+            -> var, Some position
+          | Some (var, _) -> var, None));
+      Hashtbl.iter positions ~f:(fun (var, position) ->
+        Mode_rules.default_mode_arg var position ~name:member.ident.name)
     | Unchecked | Done _ -> ());
   let members =
     List.map members ~f:(fun member ->
