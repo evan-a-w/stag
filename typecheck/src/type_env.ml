@@ -1298,7 +1298,13 @@ let value_parameters t (root : Decl.t) =
    depend on assumptions about it. *)
 let variances t =
   let assumed = String.Table.create () in
-  let rec of_decl (decl : Decl.t) =
+  let rec lookup name =
+    match name with
+    | name when String.equal name Type.ptr_name ->
+      Some [ Variance.Invariant; Invariant ]
+    | name when String.equal name Type.box_name -> Some [ Variance.Covariant ]
+    | _ -> Option.map (Hashtbl.find t.types name) ~f:of_decl
+  and of_decl (decl : Decl.t) =
     match decl.variances with
     | Some variances -> variances
     | None ->
@@ -1316,8 +1322,7 @@ let variances t =
               Hashtbl.set assumed ~key:decl.name ~data:assumption;
               let variances =
                 Param_variance.compute
-                  ~con:(fun name ->
-                    Option.map (Hashtbl.find t.types name) ~f:of_decl)
+                  ~con:lookup
                   ~params:(Decl.params decl)
                   kind
               in
@@ -1333,11 +1338,7 @@ let variances t =
             if outermost then decl.variances <- Some variances;
             variances))
   in
-  fun name ->
-    match name with
-    | "ptr" -> Some [ Variance.Invariant; Invariant ]
-    | name when String.equal name Type.box_name -> Some [ Variance.Covariant ]
-    | _ -> Option.map (Hashtbl.find t.types name) ~f:of_decl
+  lookup
 ;;
 
 let create ?(record_references = false) fresh ~report =
