@@ -323,7 +323,7 @@ let f (c : cell[string, gc]) : cell[string, external] = c
   [%expect
     {|
     This expression has type cell[string, gc] but an expression was expected of type cell[string, external]
-    Their modes differ: This is external, because the types are unified, but must be at most gc, because the types are unified
+    Their modes differ: The modes external and gc must be equal, because the types are unified
     |}]
 ;;
 
@@ -591,8 +591,8 @@ let s : 'a @ 'm1 -> ptr['a @@ 'm1] -> 'a with 'm1 <= const = fun x -> diverge ()
 ;;
 
 let%expect_test "a variable only of mode arguments: its locality is unread" =
-  (* Related and bounded on locality like any other: relations through it
-     print, its own locality doesn't. *)
+  (* Related and bounded on locality like any other: relations through it print,
+     its own locality doesn't. *)
   check
     {|
 type box['p : mode] = { v : string @@ 'p }
@@ -632,7 +632,9 @@ let s : box['m3] @ 'm2 -> 'a @ 'm0 -> 'a @ 'm4
     |}]
 ;;
 
-let%expect_test "printing: localities related through a mode argument's variable" =
+let%expect_test "printing: localities related through a mode argument's \
+                 variable"
+  =
   round_trip
     {|
 type box['p : mode] = { v : string @@ 'p }
@@ -644,11 +646,103 @@ let t : 'a @ 'm0 -> box['m3] @ 'm2 -> 'a @ 'm4
 let u : 'a @ 'm0 -> box['m3] @ 'm2 -> 'a @ 'm4
   with 'm0 <= 'm3 and 'm3 <= 'm4 and 'm2 <= 'm3 = fun x -> diverge ()
 |};
-  [%expect {|
+  [%expect
+    {|
     type box['m0 : mode] = { v : string @@ 'm0 }
     val diverge : unit @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm1 <= global
     val s : 'a @ 'm0 -> box['m2] @ 'm1 -> 'a @ 'm3 with locality('m0) <= locality('m3)
     val t : 'a @ 'm0 -> box['m2] @ 'm1 -> 'a @ 'm3 with 'm0 <= 'm2 and locality('m0) <= locality('m3)
     val u : 'a @ 'm0 -> box['m2] @ 'm1 -> 'a @ 'm3 with 'm0 <= 'm2 and 'm1 <= 'm2 and 'm2 <= 'm3
+    |}]
+;;
+
+let%expect_test "a function's result is never const" =
+  (* As an annotation's arrow's isn't: calling runs code. *)
+  check {|let g (x : string) : string @ const = "lit"|};
+  check
+    {|
+type r = { x : string @@ const }
+let g (b : r) : string @ const = b.x
+|};
+  check
+    {|
+type box['p : mode] = { v : string @@ 'p }
+let g (b : box[const]) : string @ const = b.v
+|};
+  check {|let g : string -> string @ const = fun x -> "lit"|};
+  [%expect
+    {|
+    This is portable, because it is the result of a function, computed when it is called (at t.stag:1:38-43), but must be at most const, because it is annotated const (at t.stag:1:30-35)
+    This is portable, because it is the result of a function, computed when it is called (at t.stag:3:33-36), but must be at most const, because it is annotated const (at t.stag:3:25-30)
+    This is portable, because it is the result of a function, computed when it is called (at t.stag:3:42-45), but must be at most const, because it is annotated const (at t.stag:3:34-39)
+    This mode is invalid: the result of a function is never const
+    |}]
+;;
+
+let%expect_test "what is read from a block is const only if the block is" =
+  (* A parameter's block may differ between calls, so what its [@@ const] field
+     holds may too: [y] isn't generalised. A constant record's is the same on
+     every evaluation. *)
+  check
+    {|
+type r = { x : string @@ const }
+type box['p : mode] = { v : ptr[int] @@ 'p }
+let r = { x = "a" }
+let y = r.x
+let y_const = let z @ const = y in z
+let g (b : r) = b.x
+let h (b : r) = let z @ const = b.x in z
+let k (b : box[const]) = let z @ const = b.v in z
+let b = { v = Ptr.make 1 }
+let read = let z @ const = b.v in z
+|};
+  [%expect
+    {|
+    This is portable, because b is a parameter, which may differ between calls (at t.stag:8:16-40), then b is used (at t.stag:8:32-33), then its field is read (at t.stag:8:32-35), then it is bound by an annotated let (at t.stag:8:24-29), but must be at most const, because it is annotated const (at t.stag:8:24-29)
+    This is portable, because b is a parameter, which may differ between calls (at t.stag:9:25-49), then b is used (at t.stag:9:41-42), then its field is read (at t.stag:9:41-44), then it is bound by an annotated let (at t.stag:9:33-38), but must be at most const, because it is annotated const (at t.stag:9:33-38)
+    This is nonportable, because Ptr.make allocates it at run time, then the function types are unified, then the function returns it (at t.stag:10:14-24), then it is held by a field or argument with a modality (at t.stag:10:14-24), then the types are unified, then its field is read (at t.stag:11:27-30), then it is bound by an annotated let (at t.stag:11:19-24), but must be at most const, because it is annotated const (at t.stag:11:19-24)
+    |}]
+;;
+
+let%expect_test "a mode parameter isn't an arrow's mode" =
+  check {|type t['p : mode] = { f : string @ 'p -> string }|};
+  [%expect
+    {| The mode parameter 'p can't be the mode of an arrow: a declaration's arrows have fixed modes, and its mode parameters are only arguments of types and modalities, as in [ptr[string @@ 'p]] |}]
+;;
+
+let%expect_test "printing: a variable only of mode arguments shares an equal \
+                 arrow variable's name"
+  =
+  round_trip
+    {|
+type box['p : mode] = { v : string @@ 'p }
+let f (x : string @ 'p) (b : box['p]) = { v = x }
+|};
+  [%expect
+    {|
+    type box['m0 : mode] = { v : string @@ 'm0 }
+    val f : string @ 'm0 -> (box['m0] @ 'm2 -> box['m4] @ 'm3) @ 'm1 with 'm0 <= 'm4 and 'm0 <= 'm3 and release(locality('m0)) <= locality('m3) and 'm0 <= 'm1 and portable <= 'm4 and gc <= 'm1
+    |}]
+;;
+
+let%expect_test "[const] and a runtime provenance, written" =
+  check {|type r = { f : string @ const external -> string }|};
+  check {|type r = { f : string @ external const -> string }|};
+  check {|type r = { f : string @@ gc const }|};
+  check {|let p : ptr[string @@ external const] = Ptr.make "a"|};
+  check {|let p : ptr[string @@ const external] = Ptr.make "a"|};
+  check {|let f (x : string @ external const -> string) = x|};
+  check {|let h (x : string @ const external) = x|};
+  check {|let h (x : string @ external const) = x|};
+  [%expect
+    {|
+    This mode is invalid: const and external can't be combined: what is const is computed without running code, so is static
+    This mode is invalid: const and external can't be combined: what is const is computed without running code, so is static
+    This mode is invalid: const and gc can't be combined: what is const is computed without running code, so is static
+    This mode is invalid: const and external can't be combined: what is const is computed without running code, so is static
+    This mode is invalid: const and external can't be combined: what is const is computed without running code, so is static
+    This mode is invalid: const and external can't be combined: what is const is computed without running code, so is static
+    This is external, because it is annotated external (at t.stag:1:20-34), but must be at most static, because it is annotated const (at t.stag:1:20-34), then const implies static
+    This is portable, because it is annotated external (at t.stag:1:20-34), then const implies static, but must be at most const, because it is annotated const (at t.stag:1:20-34)
     |}]
 ;;

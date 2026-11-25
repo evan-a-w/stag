@@ -182,17 +182,16 @@ let fits ?ty ctx value (modality : Modality.t) ~loc ~why =
       ~loc
       (match step with
        | Meet const -> Mode.Var.at_most_const ?crossing value const reason
-       | Param (Fixed { stage; provenance })
-       | Cell (Fixed { stage; provenance }) ->
-         Result.all_unit
-           [ Mode.Var.at_most ?crossing value Stage stage reason
-           ; Mode.Var.at_most ?crossing value Provenance provenance reason
-           ]
-       | Param (Var var) | Cell (Var var) ->
-         Result.all_unit
-           [ Mode.Var.submode_on ?crossing value var Stage reason
-           ; Mode.Var.submode_on ?crossing value var Provenance reason
-           ]))
+       | Param mode | Cell mode ->
+         Mode_arg.on_axes
+           { f =
+               (fun axis ~get ->
+                 match mode with
+                 | Fixed const ->
+                   Mode.Var.at_most ?crossing value axis (get const) reason
+                 | Var var ->
+                   Mode.Var.submode_on ?crossing value var axis reason)
+           }))
 ;;
 
 (* At least what a part of a block of mode [block] is, through [step]. *)
@@ -205,39 +204,40 @@ let read_step ctx block (step : Modality.Step.t) ~loc ~why =
        | Cell _ -> "it is read from a pointer's cell, which may hold it"
        | Meet _ | Param _ -> why)
   in
-  let from_param
-    (type a)
-    (mode : Mode_arg.t)
-    (axis : a Mode.Axis.t)
-    ~(fixed : Mode_arg.Const.t -> a)
-    ~meet
-    =
-    match mode with
-    | Fixed const ->
-      let point = fixed const in
-      if meet
-      then Mode.Var.submode_meet_on block axis point read reason
-      else Mode.Var.at_least read axis point reason
-    | Var var -> Mode.Var.submode_on var read axis reason
+  let from_param (mode : Mode_arg.t) ~meet =
+    Mode_arg.on_axes
+      { f =
+          (fun axis ~get ->
+            match mode with
+            | Fixed const ->
+              if meet
+              then Mode.Var.submode_meet_on block axis (get const) read reason
+              else Mode.Var.at_least read axis (get const) reason
+            | Var var -> Mode.Var.submode_on var read axis reason)
+      }
+  in
+  (* What is read is [const] only if it is the same on every evaluation: a
+     part's only if its block's is (a parameter's isn't), a cell's never, as its
+     contents may change. *)
+  let not_const =
+    match step with
+    | Meet _ | Param _ -> Mode.Var.submode_meet_on block Stage Portable read
+    | Cell _ -> Mode.Var.at_least read Stage Portable
   in
   Ctx.add
     ctx
     ~loc
-    (match step with
-     | Meet const -> Mode.Var.submode_meet block const read reason
-     | Param mode ->
-       Result.all_unit
-         [ from_param mode Stage ~fixed:(fun c -> c.stage) ~meet:true
-         ; from_param mode Provenance ~fixed:(fun c -> c.provenance) ~meet:true
-         ; Mode.Var.submode_on block read Locality reason
-         ]
-     | Cell mode ->
-       Result.all_unit
-         [ from_param mode Stage ~fixed:(fun c -> c.stage) ~meet:false
-         ; (* A cell may change between evaluations. *)
-           Mode.Var.at_least read Stage Portable reason
-         ; from_param mode Provenance ~fixed:(fun c -> c.provenance) ~meet:false
-         ]);
+    (Result.all_unit
+       [ (match step with
+          | Meet const -> Mode.Var.submode_meet block const read reason
+          | Param mode ->
+            Result.all_unit
+              [ from_param mode ~meet:true
+              ; Mode.Var.submode_on block read Locality reason
+              ]
+          | Cell mode -> from_param mode ~meet:false)
+       ; not_const reason
+       ]);
   read
 ;;
 
@@ -522,6 +522,16 @@ module Function = struct
     let (body : Typed.Expr.t) = f expected in
     let crossing = ctx.Ctx.crossing ty in
     let loc = body.loc in
+    Ctx.add
+      ctx
+      ~loc
+      (Mode.Var.at_least
+         res_mode
+         Stage
+         Portable
+         (reason
+            ~loc
+            "it is the result of a function, computed when it is called"));
     Ctx.add
       ctx
       ~loc

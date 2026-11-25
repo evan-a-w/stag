@@ -180,7 +180,9 @@ let implied t (item : Item.t) =
   | Edges edges ->
     (* While the rest are exact, an edge raising nothing above [0] at its
        source's lower bound adds nothing to the observed lower bounds; hidden
-       ones are known only by fixpoint. *)
+       ones are known only by fixpoint, so with any hidden node each edge
+       recomputes them all: quadratic in the items, but only for types with a
+       variable only of mode arguments related through them. *)
     let lows =
       if t.observed < size t
          || List.exists edges ~f:(fun { lo; morphism; hi = _ } ->

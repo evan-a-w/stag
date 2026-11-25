@@ -14,6 +14,16 @@ module Const = struct
   ;;
 end
 
+module On_axis = struct
+  type 'e t =
+    { f : 'a. 'a Mode.Axis.t -> get:(Const.t -> 'a) -> (unit, 'e) Result.t }
+end
+
+let on_axes ({ f } : _ On_axis.t) =
+  let%bind.Result () = f Stage ~get:(fun c -> c.stage) in
+  f Provenance ~get:(fun c -> c.provenance)
+;;
+
 type t =
   | Fixed of Const.t
   | Var of Mode.Var.t
@@ -21,32 +31,22 @@ type t =
 let gc = Fixed Const.default
 let reason = Mode.Reason.create "the types are unified"
 
-let fix var ({ stage; provenance } : Const.t) =
-  let on (type a) (axis : a Mode.Axis.t) (point : a) =
-    let%bind.Result () = Mode.Var.at_least var axis point reason in
-    Mode.Var.at_most var axis point reason
-  in
-  let%bind.Result () = on Stage stage in
-  on Provenance provenance
-;;
-
 let equate t1 t2 =
-  match t1, t2 with
-  | Fixed c1, Fixed c2 ->
-    if not (Mode.Stage.equal c1.stage c2.stage)
-    then Error (Mode.Error.unequal Stage c1.stage c2.stage reason)
-    else if not (Mode.Provenance.equal c1.provenance c2.provenance)
-    then
-      Error (Mode.Error.unequal Provenance c1.provenance c2.provenance reason)
-    else Ok ()
-  | Var var, Fixed const | Fixed const, Var var -> fix var const
-  | Var var1, Var var2 ->
-    let on axis =
-      let%bind.Result () = Mode.Var.submode_on var1 var2 axis reason in
-      Mode.Var.submode_on var2 var1 axis reason
-    in
-    let%bind.Result () = on Mode.Axis.Stage in
-    on Provenance
+  on_axes
+    { f =
+        (fun axis ~get ->
+          match t1, t2 with
+          | Fixed c1, Fixed c2 ->
+            Mode.Error.equal_on axis (get c1) (get c2) reason
+          | Var var, Fixed const | Fixed const, Var var ->
+            let%bind.Result () =
+              Mode.Var.at_least var axis (get const) reason
+            in
+            Mode.Var.at_most var axis (get const) reason
+          | Var var1, Var var2 ->
+            let%bind.Result () = Mode.Var.submode_on var1 var2 axis reason in
+            Mode.Var.submode_on var2 var1 axis reason)
+    }
 ;;
 
 let iter_result t ~(local_ f) =

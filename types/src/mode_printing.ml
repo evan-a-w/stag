@@ -143,19 +143,20 @@ let is_plain (r : Relation.t) =
   | Meet _ | Release | Static_if_const | Const_if_static -> false
 ;;
 
-(* The variables are grouped into classes equal on every axis, each printed as
-   one. Every relation of the written forms the constraints imply between
-   classes (as the greatest form per pair of nodes), or of every axis between
-   two classes, and every bound is a candidate; [Mode_model.reduce] drops those
-   the rest imply. A class related to nothing, named once (or fixed on every
-   axis), prints as the atoms of its fixed axes.
+(* The variables are grouped into classes equal on every axis they read, each
+   printed as one. Every relation of the written forms the constraints imply
+   between classes (as the greatest form per pair of nodes), or of every axis
+   between two classes, and every bound is a candidate; [Mode_model.reduce]
+   drops those the rest imply. A class related to nothing, named once (or fixed
+   on every axis), prints as the atoms of its fixed axes.
 
    A mode argument reads only stage and provenance, so a variable only of mode
    arguments has a locality no position reads: its node is eliminated, the
    closure composing the relations through it, and neither bounded nor related
-   on its own. Plain relations still relate it as read back, so it is a hidden
-   node of the reduction, and they are kept only where the localities they
-   relate through it are related. *)
+   on its own. Equal on stage and provenance to a variable whose locality is
+   read, it is printed as that one. Plain relations still relate it as read
+   back, so it is a hidden node of the reduction, and they are kept only where
+   the localities they relate through it are related. *)
 let settle t =
   let ids =
     Hashtbl.keys t.vars
@@ -177,28 +178,32 @@ let settle t =
     | Stage | Provenance -> true
   in
   let axes var = List.filter Mode.Axis.Any.all ~f:(live var) in
+  let unread var = not (live var (T Locality)) in
   (* Candidates to be equal share their bounds, so are found by them. *)
   let signature var =
-    List.fold Mode.Axis.Any.all ~init:0 ~f:(fun acc axis ->
-      (acc * 16)
-      +
-      if live var axis
-      then (
+    List.fold
+      [ Mode.Axis.Any.T Stage; T Provenance ]
+      ~init:0
+      ~f:(fun acc axis ->
         let node = { Mode_node.var; axis } in
-        1
+        (acc * 16)
         + (Mode_closure.lower closure node * 4)
         + Mode_closure.upper closure node)
-      else 0)
   in
   let equal a b =
     List.for_all (axes a) ~f:(fun axis ->
-      at_least closure a b axis && at_least closure b a axis)
+      (not (live b axis))
+      || (at_least closure a b axis && at_least closure b a axis))
   in
   Hashtbl.clear t.rep;
   let classes = Int.Table.create () in
   let reps = Queue.create () in
   let members = Int.Table.create () in
-  List.iter ids ~f:(fun id ->
+  (* A class's representative reads every axis a member does: the variables
+     whose locality is read are grouped first, and one whose locality isn't
+     joins any class equal on the axes it reads. *)
+  let read, unread_ids = List.partition_tf ids ~f:(Fn.non unread) in
+  List.iter (read @ unread_ids) ~f:(fun id ->
     let key = signature id in
     let candidates = Hashtbl.find_multi classes key in
     let rep =
@@ -211,7 +216,11 @@ let settle t =
     in
     Hashtbl.set t.rep ~key:id ~data:rep;
     Hashtbl.add_multi members ~key:rep ~data:id);
-  let reps = Queue.to_list reps in
+  let order id = Hashtbl.find_exn t.order id in
+  let reps =
+    Queue.to_list reps
+    |> List.sort ~compare:(fun a b -> Int.compare (order a) (order b))
+  in
   let members rep = Hashtbl.find_multi members rep in
   let nodes =
     List.concat_map reps ~f:(fun var ->
@@ -242,7 +251,6 @@ let settle t =
     List.for_all (axes a) ~f:(fun axis ->
       (not (live b axis)) || holds closure a b axis)
   in
-  let order id = Hashtbl.find_exn t.order id in
   let plain_pairs =
     List.filter_map relations ~f:(fun r ->
       Option.some_if (is_plain r && r.lo.var <> r.hi.var) (r.lo.var, r.hi.var))
@@ -253,7 +261,6 @@ let settle t =
   (* Read back, a pair relates the localities no position reads too, and so the
      localities at either end of a path of pairs through them: kept only where
      the closure has that. *)
-  let unread var = not (live var (T Locality)) in
   let through_unread = Queue.create () in
   let ends start ~step =
     let seen = Int.Hash_set.create () in

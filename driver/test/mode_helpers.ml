@@ -75,8 +75,8 @@ end
 
 (* What the modes' constraints imply of the positions, as a [with] clause reads
    back: each axis's bounds, and how far raising one raises the others, with
-   results at least [portable]. A mode argument's locality is not compared
-   unless the variable is also an arrow's. *)
+   results at least [portable]. A mode argument's locality is never compared: a
+   variable's is where it is an arrow's. *)
 let projection positions =
   let open Positions in
   let vars =
@@ -85,19 +85,10 @@ let projection positions =
       | Var var -> Some var
       | Fixed _ -> None)
   in
-  let on_arrow var =
-    List.exists positions ~f:(fun p ->
-      (not p.mode_arg)
-      &&
-      match p.side with
-      | Var var' -> Mode.Var.id var' = Mode.Var.id var
-      | Fixed _ -> false)
-  in
   let dead (p : position) (Mode.Axis.Any.T axis) =
-    match axis, p.side with
-    | Locality, Var var -> not (on_arrow var)
-    | Locality, Fixed _ -> p.mode_arg
-    | (Stage | Provenance), _ -> false
+    match axis with
+    | Locality -> p.mode_arg
+    | Stage | Provenance -> false
   in
   let point (const : Mode.Const.t) (Mode.Axis.Any.T axis) =
     let module C = (val Mode.Axis.chain axis) in

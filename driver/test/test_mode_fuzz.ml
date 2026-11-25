@@ -96,3 +96,19 @@ let%expect_test "random [with] clauses read back exactly" =
       (!accepted : int) (!rejected : int) ~wrong:(Queue.length wrong : int)];
   [%expect {| ((!accepted 392) (!rejected 8) (wrong 0)) |}]
 ;;
+
+let%expect_test "a mode argument's fixed locality isn't compared" =
+  (* [s]'s constraints fix ['m1], so its [ptr] prints a constant, whose locality
+     nothing reads. *)
+  round_trip
+    "let diverge (u : unit) = diverge u\n\
+     let s : 'a @ 'm1 -> ptr['a @@ 'm1] @ 'm0 -> 'a @ 'm2 with 'm1 <= 'm2 and \
+     'm2 <= regional and 'm1 <= const and 'm2 <= external and \
+     release(locality('m1)) <= locality('m2) = fun x -> diverge ()"
+    ~show:`Signature;
+  [%expect
+    {|
+    val diverge : unit @ 'm0 -> 'a @ 'm1 with portable <= 'm0 and 'm1 <= global
+    val s : 'a @ const static -> ptr['a @@ const static] @ 'm0 -> 'a @ 'm1 with 'm1 <= regional
+    |}]
+;;

@@ -165,6 +165,9 @@ module Kind : sig
     (** A [regional] or [local] modality on a field or constructor argument. *)
     | Mode_variable_in_declaration of string
     (** A mode variable in a declaration's type, whose arrows have fixed modes. *)
+    | Mode_parameter_on_arrow of string
+    (** A declaration's mode parameter as one of its arrows' modes, which are
+        fixed. *)
     | Invalid_mode of string
     (** A mode whose atoms contradict each other, as [const external], or a
         [with] constraint on no mode variable. *)

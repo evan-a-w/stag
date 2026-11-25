@@ -469,8 +469,13 @@ module Scope = struct
   (* Whether the mode constraint held: if not, it is reported. *)
   let mode_holds t ~loc = function
     | Ok () -> true
-    | Error (Mode.Error.Mismatch { upper_because; _ } as error) ->
-      let key = Sexp.to_string [%sexp (upper_because : Mode.Reason.t list)] in
+    | Error error ->
+      let key =
+        match error with
+        | Mode.Error.Mismatch { upper_because; _ } ->
+          Sexp.to_string [%sexp (upper_because : Mode.Reason.t list)]
+        | Unequal _ -> Sexp.to_string [%sexp (error : Mode.Error.t)]
+      in
       if not (Hash_set.mem t.program.mode_limits_reported key)
       then (
         Hash_set.add t.program.mode_limits_reported key;

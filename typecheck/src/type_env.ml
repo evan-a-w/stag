@@ -298,13 +298,38 @@ module Mode_atoms = struct
     | Local -> T (Locality, Local)
   ;;
 
-  (* The constant of a declaration's arrow: the axes not written are
-     [default]'s, but a [const] one is [static]. *)
-  let declared ~(default : Mode.Const.t) (atoms : Syntax.Mode_expr.Atom.t list) =
-    List.fold atoms ~init:default ~f:(fun const atom ->
-      match atom, point atom with
-      | Const, _ -> { const with stage = Const; provenance = Static }
-      | _, T (axis, point) -> Mode.Const.set const axis point)
+  (* The constant the atoms write: the axes not written are [default]'s, but a
+     [const] one is [static], and written with another provenance is an error. *)
+  let declared
+    ~(default : Mode.Const.t)
+    (atoms : Syntax.Mode_expr.Atom.t list)
+    ~loc
+    =
+    let const =
+      List.fold atoms ~init:default ~f:(fun const atom ->
+        let (T (axis, point)) = point atom in
+        Mode.Const.set const axis point)
+    in
+    let provenance_written =
+      List.exists atoms ~f:(fun atom ->
+        match Syntax.Mode_expr.Atom.axis atom with
+        | Provenance -> true
+        | Stage | Locality -> false)
+    in
+    match const.stage, const.provenance with
+    | (Portable | Nonportable), _ | Const, Static -> Ok const
+    | Const, _ when not provenance_written ->
+      Ok { const with provenance = Static }
+    | Const, ((Gc | External) as provenance) ->
+      Error
+        (Typecheck_error.create
+           ~loc
+           (Invalid_mode
+              (sprintf
+                 "const and %s can't be combined: what is const is computed \
+                  without running code, so is static"
+                 (String.lowercase
+                    (Sexp.to_string (Mode.Provenance.sexp_of_t provenance))))))
   ;;
 end
 
@@ -436,18 +461,22 @@ module Vars = struct
     | Annotation vars, Var name ->
       Result.map (Annotation_vars.mode vars name ~loc) ~f:(fun var ->
         Arrow_modes.Side.Var var)
-    | Params _, Var name -> error ~loc (Mode_variable_in_declaration name)
+    | Params params, Var name ->
+      (match Map.find params name with
+       | Some (AMode _) -> error ~loc (Mode_parameter_on_arrow name)
+       | Some (ATy _ | ARow _) | None ->
+         error ~loc (Mode_variable_in_declaration name))
     | (Annotation _ | Params _), Atoms atoms ->
-      Ok
-        (fixed
-           t
-           (Mode_atoms.declared atoms ~default)
-           ~reason:
-             (sprintf
-                "it is annotated %s"
-                (List.map atoms ~f:Syntax.Mode_expr.Atom.to_string
-                 |> String.concat ~sep:" "))
-           ~loc)
+      let%map.Result const = Mode_atoms.declared atoms ~default ~loc in
+      fixed
+        t
+        const
+        ~reason:
+          (sprintf
+             "it is annotated %s"
+             (List.map atoms ~f:Syntax.Mode_expr.Atom.to_string
+              |> String.concat ~sep:" "))
+        ~loc
   ;;
 
   (* A mode argument: of a type's mode parameter, or what the cell of a
@@ -465,16 +494,20 @@ module Vars = struct
        | Some (ATy _ | ARow _) -> error ~loc (Type_variable_kind_mismatch name)
        | None -> error ~loc (Mode_variable_in_declaration name))
     | _, Atoms atoms ->
-      List.fold_result
-        atoms
-        ~init:Mode_arg.Const.default
-        ~f:(fun const atom : (Mode_arg.Const.t, _) Result.t ->
-          match atom, Mode_atoms.point atom with
-          | Const, _ -> Ok { stage = Const; provenance = Static }
-          | _, T (Stage, stage) -> Ok { const with stage }
-          | _, T (Provenance, provenance) -> Ok { const with provenance }
-          | _, T (Locality, _) -> error ~loc Locality_in_mode_argument)
-      |> Result.map ~f:(fun const -> Mode_arg.Fixed const)
+      if List.exists atoms ~f:(fun atom ->
+           match Syntax.Mode_expr.Atom.axis atom with
+           | Locality -> true
+           | Stage | Provenance -> false)
+      then error ~loc Locality_in_mode_argument
+      else (
+        let { Mode_arg.Const.stage; provenance } = Mode_arg.Const.default in
+        let%map.Result const =
+          Mode_atoms.declared
+            atoms
+            ~default:{ stage; provenance; locality = Global }
+            ~loc
+        in
+        Mode_arg.Fixed (Mode_arg.Const.of_mode const))
   ;;
 
   let rec term_loc : Syntax.Mode_expr.Term.t -> Loc.t = function
@@ -1138,9 +1171,8 @@ let prepare_kind t (decl : Decl.t) =
           Error
             (Typecheck_error.create ~loc:mode.loc Relative_locality_modality)
         | Atoms atoms ->
-          Ok
-            (Member_modality.of_atoms
-               (Mode_atoms.declared ~default:Mode.Const.max atoms))
+          Mode_atoms.declared ~default:Mode.Const.max atoms ~loc:mode.loc
+          |> Result.map ~f:Member_modality.of_atoms
         | Var name ->
           (match
              List.findi decl.decl.params ~f:(fun _ param ->

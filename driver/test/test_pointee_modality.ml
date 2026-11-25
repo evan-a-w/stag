@@ -182,7 +182,7 @@ let f (p : ptr[string @@ external]) : ptr[string] = p
   [%expect
     {|
     This expression has type ptr[string @@ external] but an expression was expected of type ptr[string]
-    Their modes differ: This is external, because the types are unified, but must be at most gc, because the types are unified
+    Their modes differ: The modes gc and external must be equal, because the types are unified
     |}];
   provenance {|
 let f (p : ptr[string @@ static]) : ptr[string @@ gc] = p
@@ -190,7 +190,7 @@ let f (p : ptr[string @@ static]) : ptr[string @@ gc] = p
   [%expect
     {|
     This expression has type ptr[string @@ static] but an expression was expected of type ptr[string]
-    Their modes differ: This is gc, because the types are unified, but must be at most static, because the types are unified
+    Their modes differ: The modes gc and static must be equal, because the types are unified
     |}];
   provenance {|
 let f (p : ptr[string @@ 'm]) : ptr[string @@ gc] = p

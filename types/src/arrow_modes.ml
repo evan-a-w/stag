@@ -52,11 +52,12 @@ let curry_reason =
 let equate_side (side1 : Side.t) (side2 : Side.t) ~reason =
   match side1, side2 with
   | Fixed const1, Fixed const2 ->
-    let on (type a) (axis : a Mode.Axis.t) =
-      let a = Mode.Const.get const1 axis
-      and b = Mode.Const.get const2 axis in
-      let module C = (val Mode.Axis.chain axis) in
-      if C.equal a b then Ok () else Error (Mode.Error.unequal axis a b reason)
+    let on axis =
+      Mode.Error.equal_on
+        axis
+        (Mode.Const.get const1 axis)
+        (Mode.Const.get const2 axis)
+        reason
     in
     let%bind.Result () = on Stage in
     let%bind.Result () = on Provenance in

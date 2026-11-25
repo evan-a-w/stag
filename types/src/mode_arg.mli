@@ -22,6 +22,15 @@ module Const : sig
   val of_mode : Mode.Const.t -> t
 end
 
+module On_axis : sig
+  type 'e t =
+    { f : 'a. 'a Mode.Axis.t -> get:(Const.t -> 'a) -> (unit, 'e) Result.t }
+end
+
+(** Applies [f] on stage then provenance, the axes a mode argument relates,
+    stopping at the first error. *)
+val on_axes : 'e On_axis.t -> (unit, 'e) Result.t
+
 type t =
   | Fixed of Const.t
   | Var of Mode.Var.t

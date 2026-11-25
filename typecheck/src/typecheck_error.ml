@@ -126,6 +126,7 @@ module Kind = struct
     | Locality_in_mode_argument
     | Relative_locality_modality
     | Mode_variable_in_declaration of string
+    | Mode_parameter_on_arrow of string
     | Invalid_mode of string
     | Invalid_external of
         { symbol : string
@@ -237,28 +238,35 @@ let level_name level =
   | level -> sprintf "inside %d quote(s) (level %d)" level level
 ;;
 
-let mode_message
-  (Mode.Error.Mismatch
-    { var = _; axis; lower; upper; lower_because; upper_because })
-  =
+let mode_message (error : Mode.Error.t) =
   let point (type a) (axis : a Mode.Axis.t) (point : a) =
     let module C = (val Mode.Axis.chain axis) in
     Sexp.to_string (C.sexp_of_t point) |> String.lowercase
   in
+  let reason ({ loc; what } : Mode.Reason.t) =
+    if Loc.is_none loc
+    then what
+    else sprintf "%s (at %s)" what (Loc.to_string loc)
+  in
   let reasons because =
-    List.map because ~f:(fun ({ loc; what } : Mode.Reason.t) ->
-      if Loc.is_none loc
-      then what
-      else sprintf "%s (at %s)" what (Loc.to_string loc))
+    List.map because ~f:reason
     |> List.remove_consecutive_duplicates ~equal:String.equal
     |> String.concat ~sep:", then "
   in
-  sprintf
-    "This is %s, because %s, but must be at most %s, because %s"
-    (point axis lower)
-    (reasons lower_because)
-    (point axis upper)
-    (reasons upper_because)
+  match error with
+  | Mismatch { var = _; axis; lower; upper; lower_because; upper_because } ->
+    sprintf
+      "This is %s, because %s, but must be at most %s, because %s"
+      (point axis lower)
+      (reasons lower_because)
+      (point axis upper)
+      (reasons upper_because)
+  | Unequal { axis; first; second; because } ->
+    sprintf
+      "The modes %s and %s must be equal, because %s"
+      (point axis first)
+      (point axis second)
+      (reason because)
 ;;
 
 let unification_message (error : Unification_error.t) ~show_type =
@@ -548,6 +556,13 @@ let rec kind_message (kind : Kind.t) ~show_type =
     sprintf
       "The mode variable '%s is not allowed in a declaration unless it is a \
        parameter declared ['%s : mode]: its arrows have fixed modes"
+      var
+      var
+  | Mode_parameter_on_arrow var ->
+    sprintf
+      "The mode parameter '%s can't be the mode of an arrow: a declaration's \
+       arrows have fixed modes, and its mode parameters are only arguments of \
+       types and modalities, as in [ptr[string @@ '%s]]"
       var
       var
   | Invalid_mode why -> sprintf "This mode is invalid: %s" why

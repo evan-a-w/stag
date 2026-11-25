@@ -41,6 +41,12 @@ is at least `portable` in its body, whatever its callers pass: it may differ
 between calls, even if each is `const`. What is built from it (a closure
 capturing it, code embedding it) is then never `const`, so never `static`,
 while what the body builds from constants alone stays `const`.
+A function's result is likewise never `const` (calling it runs code), whether
+written on an annotation's arrow or as a definition's result (`let g x : t @ const`
+is an error). What is read from a block, through a field's modality or a cell,
+is met with the block's mode, so it is `const` only if the block is: a
+parameter's `@@ const` field isn't. `const` implies `static`: written with `gc`
+or `external`, in either order, it is an error.
 
 `const` implies `portable`: what is known at compile time exists at every
 stage. This is the stage axis of [semantics.md](semantics.md), alongside
