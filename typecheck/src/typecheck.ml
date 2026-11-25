@@ -2060,7 +2060,7 @@ let has_failed (toplevel : Toplevel.t) =
    variance, as a use of a finished toplevel is, reporting if they differ. In an
    instance of a scheme that failed, eg. as its own use of the toplevel differs,
    the error was reported there. *)
-let unify_use t (program : Program_env.t) (use : Quoted_use.t) ~ty =
+let relate_use t (program : Program_env.t) (use : Quoted_use.t) ~ty =
   match Unify.sub_ty t ~lower:ty ~upper:use.ty with
   | Ok () -> true
   | Error error ->
@@ -2156,7 +2156,7 @@ let refine t (program : Program_env.t) (awaiting : Awaiting.t) =
           ~rank:Scc_frame.toplevel_rank
           ~on_use:(fun added_use -> added := added_use :: !added)
       in
-      ignore (unify_use t program use ~ty : bool));
+      ignore (relate_use t program use ~ty : bool));
     let uses = remaining @ List.rev !added in
     let errors =
       Scheme.generalize_watchers
@@ -2164,9 +2164,7 @@ let refine t (program : Program_env.t) (awaiting : Awaiting.t) =
         (schemes @ List.map uses ~f:(fun (use : Quoted_use.t) -> use.ty))
     in
     (match finished with
-     | use :: _ ->
-       List.iter errors ~f:(fun error ->
-         Program_env.report_use program use (Bound_var error))
+     | use :: _ -> List.iter errors ~f:(Program_env.report_use program use)
      | [] -> ());
     Scheme.generalize
       t
@@ -2198,7 +2196,7 @@ let settle t (program : Program_env.t) (members : Toplevel.t list) =
             let awaited = Program_env.toplevel program added.awaited.name in
             awaited.pending_uses <- added :: awaited.pending_uses)
         in
-        ignore (unify_use t program use ~ty : bool))))
+        ignore (relate_use t program use ~ty : bool))))
 ;;
 
 (* [quoting] are the uses the component's code made of toplevels being checked.
@@ -2230,7 +2228,7 @@ let finish_scc
     List.fold own ~init:true ~f:(fun unified (use : Quoted_use.t) ->
       let quoted = Program_env.toplevel program use.awaited.name in
       match quoted.state with
-      | In_progress { ty; _ } -> unify_use t program use ~ty && unified
+      | In_progress { ty; _ } -> relate_use t program use ~ty && unified
       | Unchecked | Done _ ->
         raise_s
           [%message
@@ -2324,10 +2322,9 @@ let finish_scc
         program
         (Module_scope.within
            member.module_
-           (Typecheck_error.create ~loc:member.expr.loc (Mode_error error)))));
+           (Typecheck_error.unification_error ~loc:member.expr.loc error))));
   List.iter others ~f:(fun (use : Quoted_use.t) ->
-    List.iter (settle_joins use.ty) ~f:(fun error ->
-      Program_env.report_use program use (Bound_var error)));
+    List.iter (settle_joins use.ty) ~f:(Program_env.report_use program use));
   let awaiting =
     if generalize
     then (
@@ -3128,7 +3125,7 @@ and expr_type
       List.iter
         (Scheme.generalize_watchers ~rank:scope.rank [ ty ])
         ~f:(fun error ->
-          ignore (Scope.mode_holds scope ~loc (Error error) : bool));
+          Scope.report scope (Typecheck_error.unification_error ~loc error));
       Scheme.generalize t ~rank:scope.rank [ ty ])
     else Unify.lower_ty ~rank:scope.rank ty;
     let in_ =

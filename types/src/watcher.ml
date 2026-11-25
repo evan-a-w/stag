@@ -1,14 +1,14 @@
 open! Import
 
-type 'a t =
+type ('a, 'e) t =
   | T :
       { id : 'w Type_equal.Id.t
       ; state : 'w
-      ; bind : 'w -> 'a -> (unit, Mode.Error.t) Result.t
+      ; bind : 'w -> 'a -> (unit, 'e) Result.t
       ; instantiate : 'w -> 'w option
-      ; generalize : 'w -> (unit, Mode.Error.t) Result.t
+      ; generalize : 'w -> (unit, 'e) Result.t
       }
-      -> 'a t
+      -> ('a, 'e) t
 
 let create id state ~bind ~instantiate ~generalize =
   T { id; state; bind; instantiate; generalize }

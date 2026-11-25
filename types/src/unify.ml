@@ -533,13 +533,7 @@ and unify_structure state ~ty1 ~ty2 =
         (ATy ty)
     in
     var.state <- Link ty;
-    let bound =
-      Watcher.bind var.watchers ty
-      |> Result.map_error ~f:(fun error -> Unification_error.Bound_var error)
-    in
-    (match Fresh.take_unreported state.State.fresh with
-     | Some error -> Error error
-     | None -> bound)
+    Watcher.bind var.watchers ty
   | _ -> Error (Type_mismatch (ty1, ty2, Structural_mismatch))
 
 (* What is to have [var]'s structure ([Sub_edge.related]) and is in [ty] is made
@@ -567,10 +561,7 @@ and bind_rvar state (var : _ Type.Var.t) row =
       (ARow row)
   in
   var.state <- Link row;
-  let%bind.Result () =
-    Watcher.bind var.watchers row
-    |> Result.map_error ~f:(fun error -> Unification_error.Bound_var error)
-  in
+  let%bind.Result () = Watcher.bind var.watchers row in
   let%bind.Result () =
     if var.in_record then in_record' state row ~whole:row else Ok ()
   in
@@ -960,16 +951,13 @@ let fresh_modes_copy fresh ~rank top =
   | _ -> shared ~key:top_key top
 ;;
 
-(* What settling or fixing a join gives: what is related has the same structure,
-   so only modes can differ. *)
-(* For a watcher: other errors go to [Fresh.fail_unreported]. *)
-let only_modes fresh (result : (unit, Unification_error.t) Result.t) =
-  match result with
-  | Ok () -> Ok ()
-  | Error (Type_mismatch (_, _, Modes error) | Bound_var error) -> Error error
-  | Error error ->
-    Fresh.fail_unreported fresh error;
-    Ok ()
+(* What is related has the same structure, so settling or fixing a join fails by
+   modes, reported as what binding the variable needs. *)
+let as_bound
+  : (unit, Unification_error.t) Result.t -> (unit, Unification_error.t) Result.t
+  = function
+  | Error (Type_mismatch (_, _, Modes error)) -> Error (Bound_var error)
+  | result -> result
 ;;
 
 (* Relates by variance even while a side is unknown if [join], or either side is
@@ -1126,8 +1114,10 @@ and edges fresh ~join (var : Sub_edge.var) =
        :: var.watchers;
     state
 
-(* Each edge is settled once, from whichever side is bound first: the other
-   side's list still has it, but each list is walked once. *)
+(* Each edge is settled once: it is in the lists of both its sides, which may be
+   one list once merged, and [settled] skips it the second time. All are settled
+   even after an error, so each adds what it can, and the first error is the
+   bind's. *)
 and settle fresh (state : Sub_edge.State.t) =
   let (pending : Sub_edge.Edges.t) = Union_find.get state.edges in
   let edges = List.rev pending.edges in
@@ -1146,7 +1136,7 @@ and settle fresh (state : Sub_edge.State.t) =
           ~flip:false
           ~lower:edge.lower
           ~upper:edge.upper
-        |> only_modes fresh
+        |> as_bound
       in
       Result.combine result settled ~ok:Fn.const ~err:Fn.const))
 
@@ -1155,9 +1145,10 @@ and settle fresh (state : Sub_edge.State.t) =
    it. *)
 and fix fresh var =
   Sub_edge.prune var;
-  List.fold_result (Sub_edge.related var) ~init:() ~f:(fun () other ->
-    unify_ty' (State.create fresh) ~ty1:(TVar other) ~ty2:(TVar var))
-  |> only_modes fresh
+  List.fold (Sub_edge.related var) ~init:(Ok ()) ~f:(fun result other ->
+    unify_ty' (State.create fresh) ~ty1:(TVar other) ~ty2:(TVar var)
+    |> as_bound
+    |> Result.combine result ~ok:Fn.const ~err:Fn.const)
 ;;
 
 let join_var fresh ~rank =

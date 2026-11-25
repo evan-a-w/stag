@@ -1,25 +1,26 @@
 open! Import
 
 (** What a client keeps on a type variable, run as the variable is bound,
-    instantiated or generalized. ['a] is what the variable is bound to. *)
-type 'a t
+    instantiated or generalized. ['a] is what the variable is bound to, and ['e]
+    what binding or generalizing it can fail with. *)
+type ('a, 'e) t
 
 val create
   :  'w Type_equal.Id.t
   -> 'w
-  -> bind:('w -> 'a -> (unit, Mode.Error.t) Result.t)
+  -> bind:('w -> 'a -> (unit, 'e) Result.t)
   -> instantiate:('w -> 'w option)
        (** The state of an instance's copy, if it keeps one. *)
-  -> generalize:('w -> (unit, Mode.Error.t) Result.t)
-  -> 'a t
+  -> generalize:('w -> (unit, 'e) Result.t)
+  -> ('a, 'e) t
 
-val find : 'a t list -> 'w Type_equal.Id.t -> 'w option
+val find : ('a, _) t list -> 'w Type_equal.Id.t -> 'w option
 
 (** Once the variable is bound to the ['a]: the first error, if one fails, and
     then none of their changes are made. *)
-val bind : 'a t list -> 'a -> (unit, Mode.Error.t) Result.t
+val bind : ('a, 'e) t list -> 'a -> (unit, 'e) Result.t
 
-val instantiate : 'a t list -> 'a t list
+val instantiate : ('a, 'e) t list -> ('a, 'e) t list
 
 (** Before the variable is generalized: the errors of each. *)
-val generalize : 'a t list -> Mode.Error.t list
+val generalize : (_, 'e) t list -> 'e list

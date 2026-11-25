@@ -21,7 +21,7 @@ type ('a, 'bound) var =
   ; mutable in_bounds_of : bounded list
   ; mutable kept : kept list
   ; mutable in_record : bool
-  ; mutable watchers : 'a Watcher.t list
+  ; mutable watchers : ('a, unification_error) Watcher.t list
   }
 
 and ty =
@@ -104,6 +104,28 @@ and kept =
       ; ty2 : ty
       }
 
+(** Why unifying failed: see [Unification_error], which re-exports it. A
+    watcher's errors are these too, as binding a variable is part of unifying. *)
+and unification_error =
+  | Type_mismatch of ty * ty * type_mismatch_reason
+  | Row_mismatch of row * row * row_mismatch_reason
+  | Occurs_check_failed of arg
+  | Assigned_in_record of string * row
+  | Bound_var of Mode.Error.t
+
+and type_mismatch_reason =
+  | Base_types_not_equal of string * string
+  | Args_length_mismatch of int * int
+  | Mismatch_arg_kind of arg * arg
+  | Structural_mismatch
+  | Modes of Mode.Error.t
+
+and row_mismatch_reason =
+  | Missing_label of string
+  | Presence_mismatch of string
+  | Assigned of string
+  | Cyclic_row
+
 val kept_id : kept -> id
 
 module Var : sig
@@ -119,7 +141,7 @@ module Var : sig
     ; mutable in_bounds_of : bounded list
     ; mutable kept : kept list
     ; mutable in_record : bool
-    ; mutable watchers : 'a Watcher.t list
+    ; mutable watchers : ('a, unification_error) Watcher.t list
     }
 
   val create : id -> 'a state -> ('a, _) t

@@ -5,8 +5,8 @@ type t =
   ; mutable value_parameters : Value_layout.parameters
   ; mutable variances : Variance.of_con
   ; modes : Mode.Id_source.t
-  ; mutable settling : (unit -> (unit, Mode.Error.t) Result.t) Queue.t option
-  ; mutable unreported : Unification_error.t option
+  ; mutable settling :
+      (unit -> (unit, Unification_error.t) Result.t) Queue.t option
   }
 
 let create () =
@@ -15,7 +15,6 @@ let create () =
   ; variances = (fun _ -> None)
   ; modes = Mode.Id_source.create ()
   ; settling = None
-  ; unreported = None
   }
 ;;
 
@@ -45,16 +44,6 @@ let settle t f =
     Exn.protect
       ~f:(fun () -> drain (Ok ()))
       ~finally:(fun () -> t.settling <- None)
-;;
-
-let fail_unreported t error =
-  if Option.is_none t.unreported then t.unreported <- Some error
-;;
-
-let take_unreported t =
-  let error = t.unreported in
-  t.unreported <- None;
-  error
 ;;
 
 let id t =

@@ -88,7 +88,7 @@ val join_var : Fresh.t -> rank:Type.rank -> (Type.ty, Nothing.t) Type.Var.t
 val fix_join
   :  Fresh.t
   -> (Type.ty, Nothing.t) Type.Var.t
-  -> (unit, Mode.Error.t) Result.t
+  -> (unit, Unification_error.t) Result.t
 
 (** [lower <= upper]: what has type [lower] may be used where [upper] is
     expected. Their structures are unified as by [unify_ty], but the modes in

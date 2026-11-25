@@ -41,9 +41,12 @@ val reopen
 (** Runs the [Watcher.generalize] of the variables [generalize] would
     generalize, with the same arguments: before it, and before anything that
     depends on the constraints they may add. *)
-val generalize_watchers : rank:Type.rank -> Type.ty list -> Mode.Error.t list
+val generalize_watchers
+  :  rank:Type.rank
+  -> Type.ty list
+  -> Unification_error.t list
 
 (** Makes each variable of [tys] still unknown, of any rank, equal to what is to
     have its structure ([Unify.fix_join]), reaching them as [generalize] would:
     for a weak toplevel, whose type is then fixed without being generalized. *)
-val fix_joins : Fresh.t -> Type.ty list -> Mode.Error.t list
+val fix_joins : Fresh.t -> Type.ty list -> Unification_error.t list

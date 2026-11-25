@@ -15,17 +15,12 @@ val variances : t -> Variance.of_con
 
 (** Runs [f], unless within another [settle]: then once what that one runs is
     done, so watchers binding variables whose watchers bind others don't nest.
-    The first error of all that is run goes to the outermost [settle]. *)
+    All that is queued runs, even after an error, so each adds its constraints:
+    the first error of all goes to the outermost [settle]. *)
 val settle
   :  t
-  -> (unit -> (unit, Mode.Error.t) Result.t)
-  -> (unit, Mode.Error.t) Result.t
-
-(** Keeps the first error a watcher can't report, as it fails only by modes, for
-    the unification binding the watcher's variable to report instead. *)
-val fail_unreported : t -> Unification_error.t -> unit
-
-val take_unreported : t -> Unification_error.t option
+  -> (unit -> (unit, Unification_error.t) Result.t)
+  -> (unit, Unification_error.t) Result.t
 
 (** The source of mode variables' ids. *)
 val modes : t -> Mode.Id_source.t
