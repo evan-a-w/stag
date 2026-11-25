@@ -286,6 +286,19 @@ let generalize nodes ~rank =
   let find table node =
     Hashtbl.find table node.id |> Option.value ~default:[]
   in
+  (* The constraints [n <= m(y)] of the kept [y] by the outer [n]. *)
+  let outer_below = Int.Table.create () in
+  List.iter kept ~f:(fun y ->
+    List.iter (find below y) ~f:(fun c ->
+      if is_outer c.other
+      then Hashtbl.add_multi outer_below ~key:c.other.id ~data:(y, c)));
+  let remove_outer_below c =
+    if is_outer c.other
+    then
+      Hashtbl.change outer_below c.other.id ~f:(fun current ->
+        Option.map current ~f:(fun current ->
+          List.filter current ~f:(fun (_, c') -> not (phys_equal c c'))))
+  in
   (* The constraints [n <= m(other)] from [n] in the scheme, except [excluding].
      Edges between outer nodes are not used: a later generalization may make one
      end generic and the other not, so an instance would lose them. *)
@@ -297,9 +310,8 @@ let generalize nodes ~rank =
         Option.some_if (keep c) (c.other, c.implied_morphism))
     else if is_outer n
     then
-      List.concat_map kept ~f:(fun y ->
-        List.filter_map (find below y) ~f:(fun c ->
-          Option.some_if (keep c && phys_equal c.other n) (y, c.implied_morphism)))
+      List.filter_map (Hashtbl.find_multi outer_below n.id) ~f:(fun (y, c) ->
+        Option.some_if (keep c) (y, c.implied_morphism))
     else []
   in
   (* Whether [src <= m(dst)] follows from the constraints other than
@@ -323,10 +335,11 @@ let generalize nodes ~rank =
   let reduce table node ~src ~dst =
     List.iter (find table node) ~f:(fun c ->
       if derivable ~excluding:c ~src:(src c) ~dst:(dst c) c.implied_morphism
-      then
+      then (
+        if phys_equal table below then remove_outer_below c;
         Hashtbl.update table node.id ~f:(fun current ->
           List.filter (Option.value current ~default:[]) ~f:(fun c' ->
-            not (phys_equal c c'))))
+            not (phys_equal c c')))))
   in
   List.iter kept ~f:(fun x ->
     reduce above x ~src:(fun _ -> x) ~dst:(fun c -> c.other);
@@ -401,21 +414,54 @@ let rank t =
 
 let var_id t = t.var_id
 
-let relations t =
-  let related direction other morphism =
-    Option.some_if
-      (Morphism.is_identity morphism && Axis.Any.equal other.axis t.axis)
-      (direction, other)
-  in
+(* A generic node's constraints are those its scheme keeps, which imply the
+   rest. *)
+let forward t =
   match t.state with
-  | Rank _ ->
-    List.filter_map t.succ ~f:(fun edge -> related `Le edge.hi edge.morphism)
-    @ List.filter_map t.pred ~f:(fun edge -> related `Ge edge.lo edge.morphism)
-  | Generic { above; below } ->
-    List.filter_map above ~f:(fun { other; implied_morphism; _ } ->
-      related `Le other implied_morphism)
-    @ List.filter_map below ~f:(fun { other; implied_morphism; _ } ->
-      related `Ge other implied_morphism)
+  | Rank _ -> List.map t.succ ~f:(fun edge -> edge.morphism, edge.hi)
+  | Generic { above; _ } ->
+    List.map above ~f:(fun { other; implied_morphism; _ } ->
+      implied_morphism, other)
+;;
+
+let raised seeds =
+  let estimates = Int.Table.create () in
+  let raised = Int.Table.create () in
+  let estimate node =
+    Hashtbl.find estimates node.id |> Option.value ~default:node.lower
+  in
+  let nodes = Queue.create () in
+  let raise_to node point =
+    if point <= estimate node
+    then Ok ()
+    else if point > node.upper
+    then Error ()
+    else (
+      Hashtbl.set estimates ~key:node.id ~data:point;
+      Hashtbl.set raised ~key:node.id ~data:node;
+      Queue.enqueue nodes node;
+      Ok ())
+  in
+  let rec propagate () =
+    match Queue.dequeue nodes with
+    | None -> Ok ()
+    | Some node ->
+      let%bind.Result () =
+        List.fold_result (forward node) ~init:() ~f:(fun () (morphism, other) ->
+          raise_to other (Morphism.left morphism (estimate node)))
+      in
+      propagate ()
+  in
+  match
+    let%bind.Result () =
+      List.fold_result seeds ~init:() ~f:(fun () (node, point) ->
+        raise_to node point)
+    in
+    propagate ()
+  with
+  | Error () -> None
+  | Ok () ->
+    Some (Hashtbl.data raised |> List.map ~f:(fun node -> node, estimate node))
 ;;
 
 let lower_assuming t ~raised =
@@ -450,3 +496,5 @@ let lower_assuming t ~raised =
   done;
   Hashtbl.find_exn estimates t.id
 ;;
+
+let axis t = t.axis

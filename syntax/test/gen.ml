@@ -112,9 +112,9 @@ and moded t : Type_expr.t =
   let ty = type_expr t in
   if int t 3 = 0 then loc (Type_expr.Moded (ty, mode_expr t)) else ty
 
-and maybe_global t : Type_expr.t =
+and maybe_modality t : Type_expr.t =
   let ty = type_expr t in
-  if int t 4 = 0 then loc (Type_expr.Global ty) else ty
+  if int t 4 = 0 then loc (Type_expr.Modality (ty, mode_expr t)) else ty
 
 and annot t : Annot.t =
   { ty = Option.some_if (bool t) (annot_type t)
@@ -128,10 +128,38 @@ and annot_type t : Type_expr.t =
   then (
     let var () = loc (Mode_expr.Var (pick t [ "m"; "n" ])) in
     let constraint_ () : Mode_expr.Constraint.t =
-      match int t 3 with
-      | 0 -> { lower = var (); upper = mode_expr t }
-      | 1 -> { lower = mode_expr t; upper = var () }
-      | _ -> { lower = var (); upper = var () }
+      let on axis : Mode_expr.Term.t = Axis (axis, var ()) in
+      match int t 6 with
+      | 0 -> { lower = Mode (var ()); upper = Mode (mode_expr t) }
+      | 1 -> { lower = Mode (mode_expr t); upper = Mode (var ()) }
+      | 2 -> { lower = Mode (var ()); upper = Mode (var ()) }
+      | 3 ->
+        let axis = pick t [ Mode_expr.Axis.Stage; Locality; Provenance ] in
+        { lower = on axis; upper = on axis }
+      | _ ->
+        (* Functions nested up to three deep, each of a term on its axis. *)
+        let rec left (axis : Mode_expr.Axis.t) depth : Mode_expr.Term.t =
+          match int t (if depth = 0 then 1 else 3) with
+          | 1 ->
+            let atom =
+              pick
+                t
+                (List.filter Mode_expr.Atom.all ~f:(fun atom ->
+                   Mode_expr.Axis.equal (Mode_expr.Atom.axis atom) axis))
+            in
+            Meet (left axis (depth - 1), atom)
+          | 2 when Mode_expr.Axis.equal axis Locality ->
+            Release (left axis (depth - 1))
+          | _ -> on axis
+        in
+        let rec right (axis : Mode_expr.Axis.t) depth : Mode_expr.Term.t =
+          match axis, int t (if depth = 0 then 1 else 2) with
+          | Provenance, 1 -> Static_if_const (right Stage (depth - 1))
+          | Stage, 1 -> Const_if_static (right Provenance (depth - 1))
+          | _ -> on axis
+        in
+        let axis = pick t [ Mode_expr.Axis.Stage; Locality; Provenance ] in
+        { lower = left axis 3; upper = right axis 3 }
     in
     loc
       (Type_expr.Constrained
@@ -155,9 +183,20 @@ and type_expr t : Type_expr.t =
              Con
                ( loc (decl_path t ~last:lident)
                , list t ~min:1 ~max:3 (fun t : Type_expr.arg ->
-                   if bool t
-                   then Ty (type_expr t)
-                   else Row (row t ~entry:type_expr)) ))
+                   match int t 5 with
+                   | 0 | 1 -> Ty (type_expr t)
+                   | 2 -> Ty (maybe_modality t)
+                   | 3 -> Row (row t ~entry:type_expr)
+                   | _ ->
+                     (* One atom would read back as a type. *)
+                     Mode
+                       (loc
+                          (Mode_expr.Atoms
+                             [ pick
+                                 t
+                                 [ Mode_expr.Atom.Const; Portable; Nonportable ]
+                             ; pick t [ Mode_expr.Atom.Static; Gc; External ]
+                             ]))) ))
          ; (fun t -> Arrow (moded t, moded t))
          ; (fun t -> Tuple (list t ~min:2 ~max:3 type_expr))
          ; (fun t ->
@@ -311,7 +350,11 @@ and type_decl t : Type_decl.t =
   { name = name t
   ; params =
       list t ~min:0 ~max:2 (fun t ->
-        loc (if bool t then Type_decl.Param.Ty "a" else Row "r"))
+        loc
+          (match int t 3 with
+           | 0 -> Type_decl.Param.Ty "a"
+           | 1 -> Row "r"
+           | _ -> Mode "p"))
   ; kind =
       (match int t 5 with
        | 0 -> Abstract
@@ -319,8 +362,8 @@ and type_decl t : Type_decl.t =
        | 2 ->
          Variant
            (list t ~min:0 ~max:3 (fun t ->
-              loc (uident t), list t ~min:0 ~max:3 maybe_global))
-       | 3 -> Record (list t ~min:1 ~max:3 (fun t -> name t, maybe_global t))
+              loc (uident t), list t ~min:0 ~max:3 maybe_modality))
+       | 3 -> Record (list t ~min:1 ~max:3 (fun t -> name t, maybe_modality t))
        | _ -> Splice (Located.create (expr t)))
   }
 

@@ -38,14 +38,14 @@ node, for good errors.
   The longest tokens `.<` `.~` `..` `.{` are unaffected (`..x` is `..` then
   `x`).
 - Keywords: `let rec in match with fun exception external type of module
-  struct end`, `true false`, and `stack_ exclave_ global_` (see
+  struct end`, `true false`, and `stack_ exclave_` (see
   [Modes](#modes)), so these are not identifiers anywhere, even qualified
   (`M.stack_`). Mode names (`local`, `const`, ...) are not keywords, but
   `external`: it is the `external` mode after `@`, unless it starts a
   declaration (`external name :`).
   `rec` is reserved, as lets are always recursive.
-- `@` introduces a mode (see [Modes](#modes)); `@@` is reserved (for
-  modalities). `[@nontail]` is the one attribute.
+- `@` introduces a mode (see [Modes](#modes)); `@@` introduces a
+  modality, of a record field, a constructor argument or `ptr`'s argument. `[@nontail]` is the one attribute.
 - Staging tokens: `.<` `>.` `.~`, and `.{` (a splice's substitutions).
 - Expect test tokens: `let%expect_test`, `[%expect`. Benchmarks: `let%bench`.
   Inline expansions: `include%inline`, `module%inline`, `end%inline`.
@@ -203,6 +203,18 @@ evaluating `e : t`. Both `p.*` and `*p` read that value. In a pattern,
 `*p` matches the pointee with pattern `p`. Dereferencing binds more
 tightly than function application; for example, `f *p` calls `f` with the
 pointee, not with the pointer.
+
+`ptr[t @@ m]` says what stage and provenance (see [Modes](#modes)) the
+values in the pointer's cell may have, as atoms (`portable external`) or a
+mode variable, as in
+`get : ptr['a @@ 'm0] -> 'a @ 'm1 with 'm0 <= 'm1`.
+`ptr[t]` is `ptr[t @@ nonportable gc]`; `ptr[t @@ m]` is sugar for `ptr[t, m]`,
+`ptr` being declared `ptr['a, 'p : mode]`. A cell's locality is always
+`global`, so a locality atom is an error. A store through it takes values
+of at most `m`, and a read through it is exactly `m` (on those axes),
+whatever the pointer's own mode, but at least `portable`, as the cell may
+change between evaluations. `Ptr.make e` infers `m` from `e` and the
+cell's uses.
 
 Recursive data types must cross a pointer or another indirection (such
 as a function) before returning to the same type. For example:
@@ -401,6 +413,12 @@ or more of `const portable nonportable` (stage), `static gc external`
 (provenance) and `global regional local` (locality), at most one per axis:
 `@ local portable`.
 
+A function type's side written without a mode, or the axes its mode doesn't
+name, are the default, `nonportable gc global`, in an annotation as in a
+declaration: `(f : int -> int)` takes and returns global values, and
+`int @ local -> int` is `int @ nonportable gc local -> int`. A mode variable
+keeps a side polymorphic: `(f : int @ 'm -> int @ 'n)`.
+
 ```ocaml
 let x @ const = 1                       (* a binder's mode *)
 let f (x @ local) (y : int @ 'm) : int @ global = ...
@@ -411,8 +429,10 @@ int @ local -> int @ local              (* a function type's argument/result *)
 stack_ e                                (* allocate e's allocations in the current region *)
 exclave_ e                              (* end the region, then evaluate e *)
 f x [@nontail]                          (* not a tail call *)
-type r = {x : global_ int; y : int}     (* always global, even in a local r *)
-type t = A of global_ int * int
+type r = {x : int @@ global; y : int}   (* always global, even in a local r *)
+type t = A of int @@ global portable * int
+type cell['a, 'p : mode] = {v : ptr['a @@ 'p]}
+cell[string, external]   cell['a, gc portable]   cell['a, 'm]
 ```
 
 `@` binds looser than `*` and tighter than `->`: `int * int @ local -> int`
@@ -421,9 +441,18 @@ annotation, or a function type's argument or result: `list[int @ local]` and
 `(int @ local) -> int` are errors. `stack_` and `exclave_` extend as far right
 as `fun` does. `[@nontail]` follows an application, but not as a
 constructor's argument, where it would read as applying to the construction:
-`C (f x [@nontail])`, not `C (f x) [@nontail]`. `global_` is written only
-on a record field or a constructor argument; an exception's arguments are
-always global, so take no `global_`.
+`C (f x [@nontail])`, not `C (f x) [@nontail]`.
+
+A modality `t @@ m` (atoms, at most one per axis, or a mode variable) is
+written only on a record field, a constructor argument or `ptr`'s type
+argument. Its locality can only be `global` (`regional` and `local` are
+relative to a region). It binds looser than `->`: `{f : int -> int @@ portable}` is a
+portable function field. An exception's arguments are always global, so
+take none. A declaration's mode parameters are declared `'p : mode`, and are
+on stage and provenance only (a locality atom in a mode argument is an
+error); a type argument of several atoms is a mode, and one of one atom or
+a variable is read as a mode or a type by the declaration's parameter. A
+name in an annotation is a mode variable or a type variable, not both.
 
 An annotation's type may end with constraints between mode variables, or
 between a variable and a mode, joined by `and`; each relates at least one
@@ -438,14 +467,38 @@ let h (x : int @ 'm with 'm <= portable) = x
 `with` is only in an annotation's type, never in a function type's argument or
 in a declaration. `and` is not a keyword (there is no `let ... and`), so
 following constraints it always continues them. A constraint between two
-variables relates their stage; one between a variable and modes bounds the
-axes the modes name (`external <= 'm`). Printed types use the same syntax, so
-read back as themselves.
+variables relates every axis; `stage('m) <= stage('n)` (or `locality(...)`,
+`provenance(...)`) relates only that one, naming the same axis on both sides.
+One between a variable and modes bounds the axes the modes name
+(`portable external <= 'm`). A constraint on one axis may apply functions to
+its sides: `meet(t, c)` and `release(t)` on the left of `<=`,
+`static_if_const(t)` and `const_if_static(t)` on the right:
+
+```
+constraint := side <= side                     (every axis, or the atoms' axes)
+            | left <= right                    (one axis)
+side       := mode | 'm
+left       := axis('m) | meet(left, atom) | release(left)
+right      := axis('m) | static_if_const(right) | const_if_static(right)
+axis       := stage | locality | provenance
+```
+
+`release` takes a locality term, `static_if_const` a stage term (giving a
+provenance one) and `const_if_static` a provenance term (giving a stage one);
+`meet`'s atom is of its term's axis, and both sides end on the same axis.
+modes.md (Printed constraints) says what each means and where it arises.
+Printed types use the same syntax, and read back as exactly themselves:
+
+```ocaml
+let stage_only : string @ 'm -> string @ 'n with stage('m) <= stage('n) = ...
+let field : r2 @ 'm -> string @ 'n
+    with meet(provenance('m), gc) <= provenance('n) = ...
+```
 
 In reflected syntax, a binder's or variable's annotation is a
 ``Stag.Annot.t = {`ty : option[Type_expr.t]; `mode : option[Mode_expr.t]}``
 (`Stag.Annot.none`, `Stag.Annot.ty t`). Reflected syntax is checked to have
-modes and `global_` only where the parser allows them, so the annotation's
+modes and modalities only where the parser allows them, so the annotation's
 `` `ty `` has no mode of its own.
 
 ## Declarations
@@ -1099,7 +1152,7 @@ Typed declaration quotes (code types of signatures, `<sig ... end>{ctx}`) and
 ### Modalities and code modes
 
 ```ocaml
-val n : int @@ const      (* modalities on signature items and fields *)
+val n : int @@ const      (* modalities on signature items *)
 <t @ m>{ctx}              (* code modes *)
 ```
 

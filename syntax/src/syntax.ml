@@ -123,8 +123,9 @@ module Defs = struct
     (** [t @ m]: only as a function type's argument or result. *)
     | Constrained of type_expr * Mode_expr.Constraint.t list
     (** [t with c and ...], non-empty: only as an annotation's type. *)
-    | Global of type_expr
-    (** [global_ t]: only as a record field's type or a constructor's argument. *)
+    | Modality of type_expr * Mode_expr.t
+    (** [t @@ m]: only as a record field's type, a constructor's argument or a
+        pointer's type argument, as in [ptr[string @@ external]]. *)
 
   and row = row_desc Located.t
 
@@ -136,10 +137,15 @@ module Defs = struct
   and type_arg =
     | Ty of type_expr
     | Row of row
+    | Mode of Mode_expr.t
+    (** A mode argument of more than one atom, as in [cell[t, gc portable]]. One
+        of one atom or a variable parses as a type: the declaration's parameters
+        say which it is. *)
 
   and type_decl_param =
     | Ty of string
     | Row of string
+    | Mode of string (** ['p : mode] *)
 
   and type_decl_kind =
     | Variant of (Name.t * type_expr list) list
@@ -289,6 +295,7 @@ module Type_expr = struct
   type arg = type_arg =
     | Ty of type_expr
     | Row of row
+    | Mode of Mode_expr.t
 
   type t = type_expr
 
@@ -308,7 +315,7 @@ module Type_expr = struct
     | Splice of expr
     | Moded of t * Mode_expr.t
     | Constrained of t * Mode_expr.Constraint.t list
-    | Global of t
+    | Modality of t * Mode_expr.t
 
   type nonrec row_desc = row_desc =
     | Empty
@@ -318,12 +325,6 @@ module Type_expr = struct
   let sexp_of_t = sexp_of_type_expr
   let compare = compare_type_expr
   let equal = equal_type_expr
-
-  let is_global (t : t) =
-    match t.txt with
-    | Global _ -> true
-    | _ -> false
-  ;;
 end
 
 module Type_decl = struct
@@ -331,11 +332,12 @@ module Type_decl = struct
     type t = type_decl_param =
       | Ty of string
       | Row of string
+      | Mode of string
 
     let sexp_of_t = sexp_of_type_decl_param
     let compare = compare_type_decl_param
     let equal = equal_type_decl_param
-    let name (Ty name | Row name) = name
+    let name (Ty name | Row name | Mode name) = name
   end
 
   module Kind = struct

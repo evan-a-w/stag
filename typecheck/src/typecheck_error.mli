@@ -155,8 +155,19 @@ module Kind : sig
         evaluates it. *)
     | Misplaced_mut
     (** [mut t] other than as the type of an entry of a code type's context. *)
+    | Misplaced_modality
+    (** [t @@ m] other than as a field's or constructor argument's type or
+        [ptr]'s argument. *)
+    | Locality_in_mode_argument
+    (** A locality in a mode argument, as in [ptr[t @@ local]] or
+        [cell[t, local]]: mode arguments are on stage and provenance only. *)
+    | Relative_locality_modality
+    (** A [regional] or [local] modality on a field or constructor argument. *)
     | Mode_variable_in_declaration of string
     (** A mode variable in a declaration's type, whose arrows have fixed modes. *)
+    | Mode_parameter_on_arrow of string
+    (** A declaration's mode parameter as one of its arrows' modes, which are
+        fixed. *)
     | Invalid_mode of string
     (** A mode whose atoms contradict each other, as [const external], or a
         [with] constraint on no mode variable. *)

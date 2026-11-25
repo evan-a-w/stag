@@ -143,7 +143,6 @@ module Pattern : sig
   val has_error : t -> bool
 end
 
-(** [ty] is the type of the node, instantiated where it is a variable. *)
 (** The locality markers of expressions: [stack_ e], [exclave_ e] and
     [e [@nontail]]. *)
 module Marker : sig
@@ -154,6 +153,7 @@ module Marker : sig
   [@@deriving sexp_of, equal]
 end
 
+(** [ty] is the type of the node, instantiated where it is a variable. *)
 module Expr : sig
   module Subs : sig
     type 'e t =
@@ -336,8 +336,8 @@ module Program : sig
     { sccs : Scc.t list (** Each component after the ones it refers to. *)
     ; items : Item.t list
     (** The toplevel bindings and modules of the program, in program order, with
-        what a splice or include generated in its place: the order toplevels
-        are evaluated in, but for [Driver] ordering files by dependency. *)
+        what a splice or include generated in its place: the order toplevels are
+        evaluated in, but for [Driver] ordering files by dependency. *)
     ; expect_tests : Expect_test.t list (** In program order. *)
     ; benches : Bench.t list (** In program order. *)
     ; declaration_splices : Expr.t list

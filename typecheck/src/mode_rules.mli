@@ -7,12 +7,14 @@ open! Import
 module Ctx : sig
   type t
 
-  (** [holds] reports a constraint that doesn't hold, returning whether it did. *)
+  (** [holds] reports a constraint that doesn't hold, returning whether it did;
+      [report], an annotation that is invalid. *)
   val create
     :  modes:Mode.Id_source.t
     -> rank:int
     -> holds:(loc:Loc.t -> (unit, Mode.Error.t) Result.t -> bool)
     -> crossing:(Type.ty -> Mode.Crossing.t)
+    -> report:(Typecheck_error.t -> unit)
     -> t
 end
 
@@ -42,6 +44,9 @@ end
 (** A mode on an arrow: of an argument, a result or a partial application. *)
 val arrow_mode : Ctx.t -> Mode.Var.t
 
+(** What the cell of a pointer of a type not yet known may hold. *)
+val fresh_held : Ctx.t -> Mode_arg.t
+
 (** Its value is at least [stage], e.g. as computing it runs code. *)
 val runs
   :  Ctx.t
@@ -66,7 +71,7 @@ val evaluate
 val annotated
   :  Ctx.t
   -> Syntax.Mode_expr.t option
-  -> var:(string -> Mode.Var.t)
+  -> var:(string -> loc:Loc.t -> Mode.Var.t)
   -> Mode.Var.t
 
 (** [e @ annot]: with a mode, [e] is checked at a mode of its own that the
@@ -75,7 +80,7 @@ val annotated_use
   :  Ctx.t
   -> Expected.t
   -> annot:Syntax.Mode_expr.t option
-  -> var:(string -> Mode.Var.t)
+  -> var:(string -> loc:Loc.t -> Mode.Var.t)
   -> loc:Loc.t
   -> (Expected.t -> (Typed.Expr.t, 'e) Result.t)
   -> (Typed.Expr.t, 'e) Result.t
@@ -110,7 +115,7 @@ module Binding : sig
     :  Ctx.t
     -> Mode.Var.t
     -> Syntax.Mode_expr.t option
-    -> var:(string -> Mode.Var.t)
+    -> var:(string -> loc:Loc.t -> Mode.Var.t)
     -> t
 
   (** A function, of its closure's mode. *)
@@ -127,7 +132,7 @@ module Binding : sig
     -> Ctx.t
     -> value:Mode.Var.t
     -> Syntax.Mode_expr.t option
-    -> var:(string -> Mode.Var.t)
+    -> var:(string -> loc:Loc.t -> Mode.Var.t)
     -> name:string
     -> loc:Loc.t
     -> t * t
@@ -239,12 +244,14 @@ val assign
   -> (Expected.t -> 'a)
   -> 'a
 
-(** [target := value], [value] being checked at the target's type. *)
+(** [target := value], [value] being checked at the target's type. [target]
+    gives the modality of what it stores into: the cell of the pointer
+    dereferenced last, then the fields stored into. *)
 val store
   :  Ctx.t
   -> Expected.t
   -> loc:Loc.t
-  -> target:(Expected.t -> Typed.Expr.t)
+  -> target:(Expected.t -> Typed.Expr.t * Modality.t)
   -> value:(Expected.t -> ty:Type.ty -> Typed.Expr.t)
   -> Typed.Expr.t * Typed.Expr.t
 
@@ -309,7 +316,7 @@ module Toplevel : sig
     -> is_function:bool
     -> mut:bool
     -> Syntax.Mode_expr.t option
-    -> var:(string -> Mode.Var.t)
+    -> var:(string -> loc:Loc.t -> Mode.Var.t)
     -> name:string
     -> loc:Loc.t
     -> t
@@ -321,6 +328,10 @@ end
 (** The argument and result modes of [Unsafe.assume_global]. *)
 val assume_global : Ctx.t -> Mode.Var.t * Mode.Var.t
 
-(** The argument and result modes of [Ptr.make]: the pointer is allocated at run
-    time, and reaches what it holds. *)
-val ptr_make : Ctx.t -> Mode.Var.t * Mode.Var.t
+(** The argument and result modes of [Ptr.make], and what its cell may hold: the
+    pointer is allocated at run time, and its cell holds the argument. *)
+val ptr_make : Ctx.t -> Mode.Var.t * Mode.Var.t * Mode_arg.t
+
+(** Fixes what the cell of a pointer not generalized may hold, once nothing more
+    can constrain it: [nonportable gc] on each axis it may, else what it must. *)
+val default_held : Mode.Var.t -> name:string -> unit

@@ -186,7 +186,7 @@ let f (p : ptr[ptr[int] * int]) =
 let%expect_test "global_ fields" =
   locality
     {|
-type r = { g : global_ ptr[int]; l : ptr[int] }
+type r = { g : ptr[int] @@ global; l : ptr[int] }
 let get (r @ local) = Ptr.make r.g
 let get_l (r @ local) = Ptr.make r.l
 |};
@@ -194,27 +194,27 @@ let get_l (r @ local) = Ptr.make r.l
     {| This is regional, because it is annotated local (at t.stag:4:15-20), then r is passed to the function (at t.stag:4:24-36), then r is used (at t.stag:4:33-34), then its field is read (at t.stag:4:33-36), then it is passed to a function (at t.stag:4:24-36), but must be at most global, because Ptr.make holds it, then the function types are unified |}];
   locality
     {|
-type r = { g : global_ ptr[int]; l : ptr[int] }
+type r = { g : ptr[int] @@ global; l : ptr[int] }
 let mk u = { g = stack_ (Ptr.make 1); l = Ptr.make 2 }
 |};
   [%expect
-    {| This is local, because it is allocated by [stack_] (at t.stag:3:17-36), then it is part of the value (at t.stag:3:17-36), but must be at most global, because it is held by a [global_] field (at t.stag:3:17-36) |}];
+    {| This is local, because it is allocated by [stack_] (at t.stag:3:17-36), then it is part of the value (at t.stag:3:17-36), but must be at most global, because it is held by a field or argument with a modality (at t.stag:3:17-36) |}];
   (* Reviewer: record update must check [global_] fields too. *)
   locality
     {|
-type r = { g : global_ ptr[int]; l : ptr[int] }
+type r = { g : ptr[int] @@ global; l : ptr[int] }
 let mk u = { g = Ptr.make 1; l = Ptr.make 2 }
 let f u = let r = mk () in let r2 = { r with g = stack_ (Ptr.make 5) } in Ptr.make r2.g
 |};
   [%expect
-    {| This is local, because it is allocated by [stack_] (at t.stag:4:49-68), then it is part of the value (at t.stag:4:49-68), but must be at most global, because it is held by a [global_] field (at t.stag:4:49-68) |}];
+    {| This is local, because it is allocated by [stack_] (at t.stag:4:49-68), then it is part of the value (at t.stag:4:49-68), but must be at most global, because it is held by a field or argument with a modality (at t.stag:4:49-68) |}];
   (* Reviewer: a [global_] field bound by a pattern is global, as [r.g] is. *)
   locality
     {|
-type r = { g : global_ ptr[int]; l : ptr[int] }
+type r = { g : ptr[int] @@ global; l : ptr[int] }
 let f (r @ local) = match r with { g = g; l = _ } -> Ptr.make g
 let f_l (r @ local) = match r with { g = _; l = l } -> Ptr.make l
-type t = A of global_ ptr[int] * ptr[int]
+type t = A of ptr[int] @@ global * ptr[int]
 let h (x @ local) = match x with A (g, _) -> Ptr.make g
 |};
   [%expect
@@ -349,7 +349,7 @@ let f u = let p = stack_ (Ptr.make 1) in raise (E p)
 |};
   [%expect
     {|
-    This is local, because it is allocated by [stack_] (at t.stag:3:18-37), then it is part of the value (at t.stag:3:18-37), then p is used (at t.stag:3:50-51), then it is passed to a function (at t.stag:3:41-52), but must be at most global, because a function type fixes it, then the function types are unified
+    This is local, because it is allocated by [stack_] (at t.stag:3:18-37), then it is part of the value (at t.stag:3:18-37), then p is used (at t.stag:3:50-51), then it is passed to a function (at t.stag:3:41-52), but must be at most global, because a function type fixes it, as the function types are unified
     This is local, because it is allocated by [stack_] (at t.stag:3:18-37), then it is part of the value (at t.stag:3:18-37), then p is used (at t.stag:3:50-51), but must be at most regional, because it is passed in a tail call, after the current region has ended (mark the call [@nontail]) (at t.stag:3:47-52)
     |}];
   locality
@@ -439,7 +439,7 @@ let f (p : ptr[ptr[int]] @ local) = match p with *q -> Ptr.make q
 let%expect_test "stack_ doesn't apply to what a global_ field holds" =
   locality
     {|
-type r = { g : global_ ptr[int] }
+type r = { g : ptr[int] @@ global }
 let f u = stack_ { g = Ptr.make 1 }
 |};
   [%expect
@@ -595,7 +595,7 @@ type r = { g : ptr[int] @ local -> int -> int }
 let i (r : r) (p @ local) = r.g p 2
 |};
   [%expect
-    {| This is local, because a function type fixes it, then the function types are unified, then a tail call gives it further arguments, after the current region has ended (mark the call [@nontail]) (at t.stag:3:28-33), but must be at most regional, because a function type fixes it, then the function types are unified, including whether their results may take arguments after the region ends (not printed) |}];
+    {| This is local, because a function type fixes it, as the function types are unified, then a tail call gives it further arguments, after the current region has ended (mark the call [@nontail]) (at t.stag:3:28-33), but must be at most regional, because a function type fixes it, as the function types are unified |}];
   locality
     {|
 type r = { f : int -> int -> int }
@@ -605,7 +605,7 @@ let v = { f = mk }
   [%expect
     {|
     This expression has type int -> (int -> int) @ local but an expression was expected of type int -> int -> int
-    Their modes differ: This is local, because it is allocated by [stack_] (at t.stag:3:28-65), then it is part of the value (at t.stag:3:28-65), then the function returns it (at t.stag:3:19-65), then the function types are unified, but must be at most global, because a function type fixes it
+    Their modes differ: This is local, because it is allocated by [stack_] (at t.stag:3:28-65), then it is part of the value (at t.stag:3:28-65), then the function returns it (at t.stag:3:19-65), but must be at most global, because a function type fixes it, as the function types are unified
     |}];
   locality
     {|
@@ -628,7 +628,7 @@ let w = { f = g }
   [%expect
     {|
     This expression has type ptr[int] -> ptr[ptr[int]] but an expression was expected of type ptr[int] @ local -> ptr[ptr[int]]
-    Their modes differ: This is local, because a function type fixes it, then the function types are unified, but must be at most global, because Ptr.make holds it, then the function types are unified, then it is passed to a function (at t.stag:3:23-33), then p is used (at t.stag:3:32-33), then p is passed to the function (at t.stag:3:23-33)
+    Their modes differ: This is local, because a function type fixes it, as the function types are unified, but must be at most global, because Ptr.make holds it, then the function types are unified, then it is passed to a function (at t.stag:3:23-33), then p is used (at t.stag:3:32-33), then p is passed to the function (at t.stag:3:23-33)
     |}];
   locality
     {|
@@ -649,7 +649,7 @@ type r = { f : int -> ptr[int] @ local }
 let g (r : r) = r.f 1
 |};
   [%expect
-    {| This is local, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:3:16-21), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:3:16-21) |}]
+    {| This is local, because a function type fixes it, as the function types are unified, then the function returns it (at t.stag:3:16-21), but must be at most regional, because the function returns it, ending its region (return it with [exclave_] instead) (at t.stag:3:16-21) |}]
 ;;
 
 let%expect_test "arrows differing only in what they don't print" =
@@ -662,7 +662,7 @@ let use (r : r) = k r.f
   [%expect
     {|
     This expression has type int -> (int -> int) @ local but an expression was expected of type int -> (int -> int) @ local
-    Their modes differ, in ways types don't print: This is local, because it is annotated local (at t.stag:3:33-38), then the function types are unified, then a tail call gives it further arguments, after the current region has ended (mark the call [@nontail]) (at t.stag:3:42-45), then the function types are unified, including whether their results may take arguments after the region ends (not printed), but must be at most regional, because a function type fixes it
+    Their modes differ, in ways types don't print: This is local, because it is annotated local (at t.stag:3:33-38), then the function types are unified, then a tail call gives it further arguments, after the current region has ended (mark the call [@nontail]) (at t.stag:3:42-45), then the function types are unified, including whether their results may take arguments after the region ends (not printed), but must be at most regional, because a function type fixes it, as the function types are unified
     |}]
 ;;
 
@@ -704,5 +704,5 @@ let f (p @ local) = same
 let g (r : r) (p @ local) = Ptr.make (r.f p) [@nontail]
 |};
   [%expect
-    {| This is local, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:5:37-44), then it is passed to a function (at t.stag:5:28-44), but must be at most global, because Ptr.make holds it, then the function types are unified |}]
+    {| This is local, because a function type fixes it, as the function types are unified, then the function returns it (at t.stag:5:37-44), then it is passed to a function (at t.stag:5:28-44), but must be at most global, because Ptr.make holds it, then the function types are unified |}]
 ;;

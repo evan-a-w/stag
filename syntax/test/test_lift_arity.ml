@@ -18,7 +18,7 @@ let indirect_constructors program =
               (* [ptr[{`x : t}]] parses as a row argument. *)
               match pointee with
               | Ty { txt = Tuple components; _ } -> List.length components
-              | Ty _ | Row _ -> 1
+              | Ty _ | Row _ | Mode _ -> 1
             in
             Some (String.concat ~sep:"." (prefix @ [ name.txt ]), arity)
           | _ -> None)
@@ -48,9 +48,12 @@ let%expect_test "Lift.indirect_arity matches the prelude's declarations" =
            : bool)];
   [%expect
     {|
-    ((Stag.Type_expr.Arrow 2) (Stag.Type_expr.Code 1) (Stag.Type_expr.Mut 1)
-     (Stag.Type_expr.Immut 1) (Stag.Type_expr.Splice 1) (Stag.Type_expr.Moded 2)
-     (Stag.Type_expr.Constrained 2) (Stag.Type_expr.Global 1)
+    ((Stag.Mode_expr.Term.Meet 2) (Stag.Mode_expr.Term.Release 1)
+     (Stag.Mode_expr.Term.Static_if_const 1)
+     (Stag.Mode_expr.Term.Const_if_static 1) (Stag.Type_expr.Arrow 2)
+     (Stag.Type_expr.Code 1) (Stag.Type_expr.Mut 1) (Stag.Type_expr.Immut 1)
+     (Stag.Type_expr.Splice 1) (Stag.Type_expr.Moded 2)
+     (Stag.Type_expr.Constrained 2) (Stag.Type_expr.Modality 2)
      (Stag.Type_expr.Row.Extend 3) (Stag.Pattern.Deref 1)
      (Stag.Pattern.Poly_variant 2) (Stag.Pattern.Exception 1) (Stag.Expr.App 2)
      (Stag.Expr.Let 5) (Stag.Expr.Let_mut 4) (Stag.Expr.Assign 2)

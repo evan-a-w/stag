@@ -68,7 +68,7 @@ let ty t ~var ~row =
   | Raise -> Type.arrow Type.exn (var ())
   | Ptr_make ->
     let pointee = var () in
-    Type.arrow pointee (TCon ("ptr", [ ATy pointee ]))
+    Type.arrow pointee (Type.ptr pointee)
   | Assume_global ->
     let ty = var () in
     TArrow

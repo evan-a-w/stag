@@ -9,7 +9,7 @@ module Constructor = struct
     ; index : int
     ; args : Type.ty list
     ; result : Type.ty
-    ; global_args : bool list
+    ; modalities : Member_modality.t list
     }
   [@@deriving sexp_of]
 end
@@ -20,7 +20,7 @@ module Field = struct
     ; record : Type.ty
     ; index : int
     ; ty : Type.ty
-    ; is_global : bool
+    ; modality : Member_modality.t
     }
   [@@deriving sexp_of]
 
@@ -119,7 +119,10 @@ let builtins =
     ~f:(fun name ->
       { Type_decl.name = Located.create name; params = []; kind = Abstract })
   @ [ { Type_decl.name = Located.create "ptr"
-      ; params = [ Located.create (Type_decl.Param.Ty "a") ]
+      ; params =
+          [ Located.create (Type_decl.Param.Ty "a")
+          ; Located.create (Type_decl.Param.Mode "p")
+          ]
       ; kind = Abstract
       }
     ]
@@ -149,13 +152,14 @@ let rec has_splice (expr : Type_expr.t) =
   | Con (_, args) ->
     List.exists args ~f:(function
       | Ty ty -> has_splice ty
-      | Row row -> row_has_splice row)
+      | Row row -> row_has_splice row
+      | Mode _ -> false)
   | Arrow (ty1, ty2) -> has_splice ty1 || has_splice ty2
   | Tuple tys -> List.exists tys ~f:has_splice
   | Code { inner; context } -> has_splice inner || row_has_splice context
   | Record row | Variant row -> row_has_splice row
-  | Mut ty | Immut ty | Moded (ty, _) | Constrained (ty, _) | Global ty ->
-    has_splice ty
+  | Mut ty | Immut ty | Moded (ty, _) | Constrained (ty, _) | Modality (ty, _)
+    -> has_splice ty
 
 and row_has_splice (row : Type_expr.row) =
   match row.txt with
@@ -234,73 +238,98 @@ module Annotation_vars = struct
     }
   ;;
 
-  let ty t name =
-    Hashtbl.find_or_add t.tys name ~default:(fun () ->
-      Type.TVar (Fresh.var t.fresh ~rank:t.rank))
+  (* A mode variable's name is not also a type or row variable's (a type and a
+     row variable may share one, as in [<'r>{..'r}]). *)
+  let only_kind name ~loc ~(in_ : _ Hashtbl.t) ~others ~default =
+    match Hashtbl.find in_ name with
+    | Some var -> Ok var
+    | None when List.exists others ~f:(fun other -> other name) ->
+      Error (Typecheck_error.create ~loc (Type_variable_kind_mismatch name))
+    | None ->
+      let var = default () in
+      Hashtbl.set in_ ~key:name ~data:var;
+      Ok var
   ;;
 
-  let row t name =
-    Hashtbl.find_or_add t.rows name ~default:(fun () ->
-      Type.RVar (Fresh.var t.fresh ~rank:t.rank))
+  let ty t name ~loc =
+    only_kind
+      name
+      ~loc
+      ~in_:t.tys
+      ~others:[ Hashtbl.mem t.modes ]
+      ~default:(fun () -> Type.TVar (Fresh.var t.fresh ~rank:t.rank))
+  ;;
+
+  let row t name ~loc =
+    only_kind
+      name
+      ~loc
+      ~in_:t.rows
+      ~others:[ Hashtbl.mem t.modes ]
+      ~default:(fun () -> Type.RVar (Fresh.var t.fresh ~rank:t.rank))
   ;;
 
   let fresh_mode t = Mode.Var.create (Fresh.modes t.fresh) ~rank:t.rank
 
-  let mode t name =
-    Hashtbl.find_or_add t.modes name ~default:(fun () -> fresh_mode t)
+  let mode t name ~loc =
+    only_kind
+      name
+      ~loc
+      ~in_:t.modes
+      ~others:[ Hashtbl.mem t.tys; Hashtbl.mem t.rows ]
+      ~default:(fun () -> fresh_mode t)
   ;;
 end
 
-module Mode_atoms = struct
-  (* The constant of a declaration's arrow: the axes not written are
-     [default]'s, but a [const] one is [static]. *)
-  let declared ~(default : Mode.Const.t) (atoms : Syntax.Mode_expr.Atom.t list) =
-    let const : Mode.Const.t =
-      List.fold atoms ~init:default ~f:(fun const atom ->
-        match atom with
-        | Const -> { const with stage = Const; provenance = Static }
-        | Portable -> { const with stage = Portable }
-        | Nonportable -> { const with stage = Nonportable }
-        | Global -> { const with locality = Global }
-        | Regional -> { const with locality = Regional }
-        | Local -> { const with locality = Local }
-        | Static -> { const with provenance = Static }
-        | Gc -> { const with provenance = Gc }
-        | External -> { const with provenance = External })
-    in
-    const
+(* A mode atom written as a type argument, as in [cell[t, external]]. *)
+let atom_of_path (path : Path.t) =
+  match (path :> string list) with
+  | [ name ] -> Syntax.Mode_expr.Atom.of_string name
+  | _ -> None
+;;
+
+(* An argument as of its parameter's kind, [None] if of another: a mode variable
+   or a single mode atom parses as a type. *)
+let resolve_arg (param : Type_decl.Param.t) (arg : Type_expr.arg)
+  : Type_expr.arg option
+  =
+  match param, arg with
+  | Mode _, Ty { txt = Var name; loc } ->
+    Some (Mode (Located.create ~loc (Mode_expr.Var name)))
+  | Mode _, Ty { txt = Con ({ txt = Path path; _ }, []); loc } ->
+    Option.map (atom_of_path path) ~f:(fun atom ->
+      Type_expr.Mode (Located.create ~loc (Mode_expr.Atoms [ atom ])))
+  | Mode _, Mode _ | Ty _, (Ty _ | Row _) | Row _, Row _ -> Some arg
+  | Mode _, (Ty _ | Row _) | Ty _, Mode _ | Row _, (Ty _ | Mode _) -> None
+;;
+
+let arg_loc : Type_expr.arg -> Loc.t = function
+  | Ty { loc; _ } | Row { loc; _ } | Mode { loc; _ } -> loc
+;;
+
+(* [ptr[t @@ m]] is [ptr[t, m]], and [ptr[t]] is [ptr[t, nonportable gc]]. *)
+module Ptr_sugar = struct
+  type t =
+    | Modality of Loc.t
+    | Default
+    | Args
+
+  let desugar (args : Type_expr.arg list) ~loc =
+    match args with
+    | [ Ty { txt = Modality (ty, mode); loc } ] ->
+      [ Type_expr.Ty ty; Mode mode ], Modality loc
+    | [ ((Ty _ | Row _) as arg) ] ->
+      ( [ arg; Mode (Located.create ~loc (Mode_expr.Atoms [ Nonportable; Gc ])) ]
+      , Default )
+    | args -> args, Args
   ;;
 
-  (* Fixes the axes written. *)
-  let constrain var (atoms : Syntax.Mode_expr.Atom.t list) ~loc =
-    let reason =
-      Mode.Reason.create
-        ~loc
-        (sprintf
-           "it is annotated %s"
-           (List.map atoms ~f:Syntax.Mode_expr.Atom.to_string
-            |> String.concat ~sep:" "))
-    in
-    let fix axis point =
-      let%bind.Result () = Mode.Var.at_least var axis point reason in
-      Mode.Var.at_most var axis point reason
-    in
-    List.fold_result
-      atoms
-      ~init:()
-      ~f:(fun () (atom : Syntax.Mode_expr.Atom.t) ->
-        match atom with
-        | Const -> fix Mode.Axis.Stage Mode.Stage.Const
-        | Portable -> fix Stage Portable
-        | Nonportable -> fix Stage Nonportable
-        | Global -> fix Locality Global
-        | Regional -> fix Locality Regional
-        | Local -> fix Locality Local
-        | Static -> fix Provenance Static
-        | Gc -> fix Provenance Gc
-        | External -> fix Provenance External)
-    |> Result.map_error ~f:(fun (_ : Mode.Error.t) ->
-      Typecheck_error.create ~loc (Invalid_mode "its modes are inconsistent"))
+  let resugar t (args : Type_expr.arg list) =
+    match t, args with
+    | Modality loc, [ Ty ty; Mode mode ] ->
+      [ Type_expr.Ty (Located.create ~loc (Type_expr.Modality (ty, mode))) ]
+    | Default, [ arg; Mode _ ] -> [ arg ]
+    | (Modality _ | Default | Args), args -> args
   ;;
 end
 
@@ -317,11 +346,12 @@ module Vars = struct
 
   let ty t name ~loc : (Type.ty, Typecheck_error.t) Result.t =
     match t with
-    | Annotation vars -> Ok (Annotation_vars.ty vars name)
+    | Annotation vars -> Annotation_vars.ty vars name ~loc
     | Params params ->
       (match Map.find params name with
        | Some (ATy ty) -> Ok ty
-       | Some (ARow _) -> error ~loc (Type_variable_kind_mismatch name)
+       | Some (ARow _ | AMode _) ->
+         error ~loc (Type_variable_kind_mismatch name)
        | None -> error ~loc (Unbound_type_variable name))
   ;;
 
@@ -334,44 +364,155 @@ module Vars = struct
 
   let row t name ~loc : (Type.row, Typecheck_error.t) Result.t =
     match t with
-    | Annotation vars -> Ok (Annotation_vars.row vars name)
+    | Annotation vars -> Annotation_vars.row vars name ~loc
     | Params params ->
       (match Map.find params name with
        | Some (ARow row) -> Ok row
-       | Some (ATy _) -> error ~loc (Type_variable_kind_mismatch name)
+       | Some (ATy _ | AMode _) -> error ~loc (Type_variable_kind_mismatch name)
        | None -> error ~loc (Unbound_type_variable name))
   ;;
 
-  (* An arrow side written without a mode: in an annotation, any, so as not to
-     restrict the modes of what it annotates; in a declaration, the default. *)
-  let unannotated_side t ~default : Arrow_modes.Side.t =
-    match t with
-    | Annotation vars -> Var (Annotation_vars.fresh_mode vars)
-    | Params _ -> Fixed default
-  ;;
-
-  let unannotated_curry : t -> Arrow_modes.Side.t = function
+  (* Unwritten, in an annotation any (it is never printed, so reads back as what
+     it annotates has), in a declaration the default. *)
+  let curry : t -> Arrow_modes.Side.t = function
     | Annotation vars -> Var (Annotation_vars.fresh_mode vars)
     | Params _ -> Arrow_modes.default_curry
+  ;;
+
+  (* In an annotation, a variable fixed to [const], so that errors say why; in a
+     declaration, [const]. *)
+  let fixed t (const : Mode.Const.t) ~reason ~loc : Arrow_modes.Side.t =
+    match t with
+    | Params _ -> Fixed const
+    | Annotation vars ->
+      let var = Annotation_vars.fresh_mode vars in
+      let reason = Mode.Reason.create ~loc reason in
+      (match
+         ( Mode.Var.at_least_const var const reason
+         , Mode.Var.at_most_const var const reason )
+       with
+       | Ok (), Ok () -> ()
+       | Error _, _ | _, Error _ ->
+         raise_s [%message "a fresh mode variable is any constant"]);
+      Var var
+  ;;
+
+  (* An arrow side written without a mode: the default. *)
+  let unwritten t ~default ~loc =
+    fixed t default ~reason:"its type is written without a mode" ~loc
   ;;
 
   let mode_side t ({ txt; loc } : Syntax.Mode_expr.t) ~default
     : (Arrow_modes.Side.t, Typecheck_error.t) Result.t
     =
     match t, txt with
-    | Annotation vars, Var name -> Ok (Var (Annotation_vars.mode vars name))
-    | Params _, Var name -> error ~loc (Mode_variable_in_declaration name)
-    | Annotation vars, Atoms atoms ->
-      let var = Annotation_vars.fresh_mode vars in
-      let%map.Result () = Mode_atoms.constrain var atoms ~loc in
-      Arrow_modes.Side.Var var
-    | Params _, Atoms atoms ->
-      Ok (Arrow_modes.Side.Fixed (Mode_atoms.declared atoms ~default))
+    | Annotation vars, Var name ->
+      Result.map (Annotation_vars.mode vars name ~loc) ~f:(fun var ->
+        Arrow_modes.Side.Var var)
+    | Params params, Var name ->
+      (match Map.find params name with
+       | Some (AMode _) -> error ~loc (Mode_parameter_on_arrow name)
+       | Some (ATy _ | ARow _) | None ->
+         error ~loc (Mode_variable_in_declaration name))
+    | (Annotation _ | Params _), Atoms atoms ->
+      let%map.Result const = Mode_atoms.declared atoms ~default ~loc in
+      fixed
+        t
+        const
+        ~reason:
+          (sprintf
+             "it is annotated %s"
+             (List.map atoms ~f:Syntax.Mode_expr.Atom.to_string
+              |> String.concat ~sep:" "))
+        ~loc
   ;;
 
-  (* [lower <= upper] between variables, on stage, or bounding a variable by the
-     atoms, on stage and provenance: as printed. *)
-  let mode_constraint t ({ lower; upper } : Syntax.Mode_expr.Constraint.t) ~loc
+  (* A mode argument: of a type's mode parameter, or what the cell of a
+     [ptr[t @@ mode]] may hold, which are on stage and provenance only. *)
+  let mode_arg t ({ txt; loc } : Syntax.Mode_expr.t)
+    : (Mode_arg.t, Typecheck_error.t) Result.t
+    =
+    match t, txt with
+    | Annotation vars, Var name ->
+      Result.map (Annotation_vars.mode vars name ~loc) ~f:(fun var ->
+        Mode_arg.Var var)
+    | Params params, Var name ->
+      (match Map.find params name with
+       | Some (AMode mode) -> Ok mode
+       | Some (ATy _ | ARow _) -> error ~loc (Type_variable_kind_mismatch name)
+       | None -> error ~loc (Mode_variable_in_declaration name))
+    | _, Atoms atoms ->
+      if List.exists atoms ~f:(fun atom ->
+           match Syntax.Mode_expr.Atom.axis atom with
+           | Locality -> true
+           | Stage | Provenance -> false)
+      then error ~loc Locality_in_mode_argument
+      else (
+        let { Mode_arg.Const.stage; provenance } = Mode_arg.Const.default in
+        let%map.Result const =
+          Mode_atoms.declared
+            atoms
+            ~default:{ stage; provenance; locality = Global }
+            ~loc
+        in
+        Mode_arg.Fixed (Mode_arg.Const.of_mode const))
+  ;;
+
+  let rec term_loc : Syntax.Mode_expr.Term.t -> Loc.t = function
+    | Mode mode | Axis (_, mode) -> mode.loc
+    | Meet (t, _) | Release t | Static_if_const t | Const_if_static t ->
+      term_loc t
+  ;;
+
+  let rec term_var : Syntax.Mode_expr.Term.t -> string option = function
+    | Mode { txt = Var name; _ } | Axis (_, { txt = Var name; _ }) -> Some name
+    | Mode { txt = Atoms _; _ } | Axis (_, { txt = Atoms _; _ }) -> None
+    | Meet (t, _) | Release t | Static_if_const t | Const_if_static t ->
+      term_var t
+  ;;
+
+  (* A term of one variable as [m(var)] on the right of [<=], or, on the left,
+     as the morphism whose left adjoint it applies. *)
+  let rec term vars (expr : Syntax.Mode_expr.Term.t) ~loc =
+    let open Result.Let_syntax in
+    let axis : Syntax.Mode_expr.Axis.t -> Mode.Axis.Any.t = function
+      | Stage -> T Stage
+      | Provenance -> T Provenance
+      | Locality -> T Locality
+    in
+    (* [m1] applied after [m2]'s left adjoint, on the left; [m1] of [m2], on the
+       right: [Morphism.compose m2 m1] and [compose m1 m2]. *)
+    let under t m ~left =
+      let%map var, inner = term vars t ~loc in
+      ( var
+      , if left
+        then Mode.Morphism.compose inner m
+        else Mode.Morphism.compose m inner )
+    in
+    match expr with
+    | Axis (on, { txt = Var name; loc }) ->
+      let%map var = Annotation_vars.mode vars name ~loc in
+      var, Mode.Morphism.identity (axis on)
+    | Meet (t, atom) ->
+      let (T (on, point)) = Mode_atoms.point atom in
+      let module C = (val Mode.Axis.chain on) in
+      under t (Mode.Morphism.meet_with (T on) (C.index point)) ~left:true
+    | Release t -> under t Mode.Morphism.release ~left:true
+    | Static_if_const t -> under t Mode.Morphism.const_is_static ~left:false
+    | Const_if_static t -> under t Mode.Morphism.runtime_is_gc ~left:false
+    | Mode _ | Axis (_, { txt = Atoms _; _ }) ->
+      Error
+        (Typecheck_error.create
+           ~loc
+           (Invalid_mode "a constraint on one axis relates two mode variables"))
+  ;;
+
+  (* [lower <= upper]: between variables, on every axis or the one named, or
+     bounding a variable by the atoms, on their axes. *)
+  let mode_constraint
+    t
+    ({ lower; upper } as constraint_ : Syntax.Mode_expr.Constraint.t)
+    ~loc
     : (unit, Typecheck_error.t) Result.t
     =
     let reason =
@@ -379,48 +520,58 @@ module Vars = struct
         ~loc
         (sprintf
            "it is annotated %s"
-           (Syntax.Mode_expr.Constraint.to_string { lower; upper }))
+           (Syntax.Mode_expr.Constraint.to_string constraint_))
     in
     let bound (atoms : Syntax.Mode_expr.Atom.t list) ~(f : Bound.t) =
       List.fold_result atoms ~init:() ~f:(fun () atom ->
-        match atom with
-        | Const -> f.f Stage Mode.Stage.Const
-        | Portable -> f.f Stage Portable
-        | Nonportable -> f.f Stage Nonportable
-        | Static -> f.f Provenance Static
-        | Gc -> f.f Provenance Gc
-        | External -> f.f Provenance External
-        | Global | Regional | Local -> Ok ())
+        let (T (axis, point)) = Mode_atoms.point atom in
+        f.f axis point)
     in
     let checked result =
       Result.map_error result ~f:(fun error ->
         Typecheck_error.create ~loc (Mode_error error))
     in
-    match t, lower.txt, upper.txt with
-    | _, Atoms _, Atoms _ ->
-      error ~loc (Invalid_mode "a constraint must be on a mode variable")
-    | Params _, Var name, _ | Params _, _, Var name ->
-      error ~loc (Mode_variable_in_declaration name)
-    | Annotation vars, Var lower, Var upper ->
+    match t, lower, upper with
+    | Params _, _, _ ->
+      (match Option.first_some (term_var lower) (term_var upper) with
+       | Some name -> error ~loc (Mode_variable_in_declaration name)
+       | None ->
+         error ~loc (Invalid_mode "a constraint must be on a mode variable"))
+    | Annotation vars, Mode lower, Mode upper ->
+      (match lower.txt, upper.txt with
+       | Atoms _, Atoms _ ->
+         error ~loc (Invalid_mode "a constraint must be on a mode variable")
+       | Var lower_name, Var upper_name ->
+         let%bind.Result lower = Annotation_vars.mode vars lower_name ~loc in
+         let%bind.Result upper = Annotation_vars.mode vars upper_name ~loc in
+         checked (Mode.Var.submode lower upper reason)
+       | Var lower, Atoms atoms ->
+         let%bind.Result var = Annotation_vars.mode vars lower ~loc in
+         checked
+           (bound
+              atoms
+              ~f:
+                { f = (fun axis point -> Mode.Var.at_most var axis point reason)
+                })
+       | Atoms atoms, Var upper ->
+         let%bind.Result var = Annotation_vars.mode vars upper ~loc in
+         checked
+           (bound
+              atoms
+              ~f:
+                { f =
+                    (fun axis point -> Mode.Var.at_least var axis point reason)
+                }))
+    | Annotation vars, lower, upper ->
+      let%bind.Result () =
+        Syntax.Mode_expr.Constraint.check constraint_
+        |> Result.map_error ~f:(fun message ->
+          Typecheck_error.create ~loc (Invalid_mode message))
+      in
+      let%bind.Result lower, left = term vars lower ~loc in
+      let%bind.Result upper, right = term vars upper ~loc in
       checked
-        (Mode.Var.submode_on
-           (Annotation_vars.mode vars lower)
-           (Annotation_vars.mode vars upper)
-           Stage
-           reason)
-    | Annotation vars, Var lower, Atoms atoms ->
-      let var = Annotation_vars.mode vars lower in
-      checked
-        (bound
-           atoms
-           ~f:{ f = (fun axis point -> Mode.Var.at_most var axis point reason) })
-    | Annotation vars, Atoms atoms, Var upper ->
-      let var = Annotation_vars.mode vars upper in
-      checked
-        (bound
-           atoms
-           ~f:
-             { f = (fun axis point -> Mode.Var.at_least var axis point reason) })
+        (Mode.Var.relate lower (Mode.Morphism.compose left right) upper reason)
   ;;
 end
 
@@ -445,7 +596,8 @@ module Expansion = struct
         match arg1, arg2 with
         | ATy ty1, ATy ty2 -> phys_equal ty1 ty2
         | ARow row1, ARow row2 -> phys_equal row1 row2
-        | ATy _, ARow _ | ARow _, ATy _ -> false)
+        | AMode mode1, AMode mode2 -> Mode_arg.same mode1 mode2
+        | (ATy _ | ARow _ | AMode _), _ -> false)
       t.args
       args
   ;;
@@ -512,16 +664,25 @@ let rec elaborate'
           elaborated, side, { ty with txt = Type_expr.Moded (syntax, mode) }
         | _ ->
           let%map.Result elaborated, syntax = elaborate ty in
-          elaborated, Vars.unannotated_side vars ~default, syntax
+          elaborated, Vars.unwritten vars ~default ~loc:ty.loc, syntax
       in
       let default = Arrow_modes.default_const in
       let%bind.Result ty1, side1, syntax1 = side ty1 ~default ~elaborate in
       (* A curried declaration's partial applications hold its arguments so far,
          so are as local as they are, as in OxCaml. *)
       let%bind.Result ty2, side2, syntax2 =
-        match ty2.txt, side1 with
-        | Arrow _, Fixed { locality; _ } ->
-          let curried = Mode.Locality.join curried locality in
+        match ty2.txt with
+        | Arrow _ ->
+          (* A named argument adds nothing: its locality isn't known. *)
+          let curried =
+            match side1 with
+            | Fixed { locality; _ } -> Mode.Locality.join curried locality
+            | Var var ->
+              let lower = (Mode.Var.lower var).locality in
+              if Mode.Locality.equal lower (Mode.Var.upper var).locality
+              then Mode.Locality.join curried lower
+              else curried
+          in
           side
             ty2
             ~default:{ default with locality = curried }
@@ -530,9 +691,7 @@ let rec elaborate'
       in
       let%map.Result () = result_floor side2 ~loc:syntax2.loc in
       ( Type.TArrow
-          ( ty1
-          , ty2
-          , { arg = side1; res = side2; curry = Vars.unannotated_curry vars } )
+          (ty1, ty2, { arg = side1; res = side2; curry = Vars.curry vars })
       , Type_expr.Arrow (syntax1, syntax2) )
     | Tuple tys ->
       let%map.Result tys = map_result tys ~f:elaborate in
@@ -573,12 +732,13 @@ let rec elaborate'
           Vars.mode_constraint
             vars
             constraint_
-            ~loc:(Loc.merge constraint_.lower.loc constraint_.upper.loc))
+            ~loc:
+              (Loc.merge
+                 (Vars.term_loc constraint_.lower)
+                 (Vars.term_loc constraint_.upper)))
       in
       ty, Type_expr.Constrained (syntax, constraints)
-    | Global ty ->
-      let%map.Result ty, syntax = elaborate ty in
-      ty, Type_expr.Global syntax
+    | Modality _ -> Error (Typecheck_error.create ~loc Misplaced_modality)
   in
   ty, { expr with txt }
 
@@ -653,6 +813,10 @@ and elaborate_con
   let%bind.Result () =
     if decl.failed then Error Typecheck_error.already_reported else Ok ()
   in
+  let ptr_sugar = String.equal decl.name Type.ptr_name in
+  let args, sugar =
+    if ptr_sugar then Ptr_sugar.desugar args ~loc else args, Ptr_sugar.Args
+  in
   let expected = List.length decl.decl.params in
   let got = List.length args in
   let%bind.Result () =
@@ -662,31 +826,36 @@ and elaborate_con
   in
   let%bind.Result args =
     map_result (List.zip_exn decl.decl.params args) ~f:(fun (param, arg) ->
-      match param.txt, arg with
-      | Ty _, Ty ty ->
+      match param.txt, resolve_arg param.txt arg with
+      | _, Some (Ty ty) ->
         let%map.Result ty, syntax =
           elaborate' t module_ vars ~splices ~expansions ty
         in
         Type.ATy ty, Type_expr.Ty syntax
-      | Row _, Row row ->
-        let%map.Result row, syntax =
-          elaborate_row t module_ vars ~splices ~expansions row
-        in
-        Type.ARow row, Type_expr.Row syntax
       (* [{...}] parses as a row, but is a record type for a type parameter. *)
-      | Ty _, Row row ->
+      | Ty _, Some (Row row) ->
         let%map.Result row, syntax =
           elaborate_row t module_ vars ~splices ~expansions row
         in
         Type.ATy (Fresh.record t.fresh row), Type_expr.Row syntax
-      | Row _, Ty { loc; _ } ->
+      | (Row _ | Mode _), Some (Row row) ->
+        let%map.Result row, syntax =
+          elaborate_row t module_ vars ~splices ~expansions row
+        in
+        Type.ARow row, Type_expr.Row syntax
+      | _, Some (Mode mode) ->
+        let%map.Result mode_arg = Vars.mode_arg vars mode in
+        Type.AMode mode_arg, Type_expr.Mode mode
+      | _, None ->
         error
-          ~loc
+          ~loc:(arg_loc arg)
           (Type_arg_kind_mismatch { type_name = path; param = param.txt }))
   in
   let args, args_syntax = List.unzip args in
   let syntax =
-    Type_expr.Con ({ located_path with txt = Resolved decl.name }, args_syntax)
+    Type_expr.Con
+      ( { located_path with txt = Resolved decl.name }
+      , Ptr_sugar.resugar sugar args_syntax )
   in
   let%bind.Result kind = definition decl ~loc in
   let%map.Result ty =
@@ -826,7 +995,8 @@ let declare
       (List.map decl.params ~f:(fun param ->
          match param.txt with
          | Ty _ -> Type.ATy (TVar (Type.Var.create (Fresh.id t.fresh) Generic))
-         | Row _ -> ARow (RVar (Type.Var.create (Fresh.id t.fresh) Generic))))
+         | Row _ -> ARow (RVar (Type.Var.create (Fresh.id t.fresh) Generic))
+         | Mode _ -> AMode (Var (Mode.Var.create_generic (Fresh.modes t.fresh)))))
   in
   if not lazily then ignore (force params : Type.arg list);
   Hashtbl.add_exn
@@ -912,7 +1082,7 @@ let check_exception t name =
       ; index
       ; args
       ; result = Type.exn
-      ; global_args = List.map args ~f:(fun _ -> false)
+      ; modalities = List.map args ~f:(fun _ -> Member_modality.Id)
       }
     in
     decl.checked <- Some checked;
@@ -929,6 +1099,52 @@ let prepare_kind t (decl : Decl.t) =
       ~splices:true
       ~expansions
   in
+  (* A member's type, with its modality. *)
+  let member (ty : Type_expr.t) =
+    match ty.txt with
+    | Modality (inner, mode) ->
+      let%bind.Result modality =
+        match mode.txt with
+        | Atoms atoms
+          when List.exists atoms ~f:(fun (atom : Mode_expr.Atom.t) ->
+                 match atom with
+                 | Regional | Local -> true
+                 | Global
+                 | Const
+                 | Portable
+                 | Nonportable
+                 | Static
+                 | Gc
+                 | External -> false) ->
+          Error
+            (Typecheck_error.create ~loc:mode.loc Relative_locality_modality)
+        | Atoms atoms ->
+          Mode_atoms.declared ~default:Mode.Const.max atoms ~loc:mode.loc
+          |> Result.map ~f:Member_modality.of_atoms
+        | Var name ->
+          (match
+             List.findi decl.decl.params ~f:(fun _ param ->
+               String.equal (Type_decl.Param.name param.txt) name)
+           with
+           | Some (index, { txt = Mode _; _ }) ->
+             Ok (Member_modality.Param index)
+           | Some (_, { txt = Ty _ | Row _; _ }) ->
+             Error
+               (Typecheck_error.create
+                  ~loc:mode.loc
+                  (Type_variable_kind_mismatch name))
+           | None ->
+             Error
+               (Typecheck_error.create
+                  ~loc:mode.loc
+                  (Mode_variable_in_declaration name)))
+      in
+      let%map.Result elaborated, syntax = elaborate inner in
+      elaborated, { ty with txt = Type_expr.Modality (syntax, mode) }, modality
+    | _ ->
+      let%map.Result elaborated, syntax = elaborate ty in
+      elaborated, syntax, Member_modality.Id
+  in
   let canonical_name = Module_scope.canonical_name decl.module_ in
   match decl.decl.kind with
   | Alias body ->
@@ -944,12 +1160,9 @@ let prepare_kind t (decl : Decl.t) =
   | Variant constructors ->
     let%map.Result constructors =
       map_result constructors ~f:(fun ((name : Name.t), args) ->
-        let%map.Result args = map_result args ~f:elaborate in
-        let args, syntax = List.unzip args in
-        ( { Signature.Constructor.name = name.txt
-          ; args
-          ; global_args = List.map syntax ~f:Syntax.Type_expr.is_global
-          }
+        let%map.Result args = map_result args ~f:member in
+        let args, syntax, modalities = List.unzip3 args in
+        ( { Signature.Constructor.name = name.txt; args; modalities }
         , (canonical_name name.txt, syntax) ))
     in
     let constructors, reflected = List.unzip constructors in
@@ -958,11 +1171,8 @@ let prepare_kind t (decl : Decl.t) =
   | Record fields ->
     let%map.Result fields =
       map_result fields ~f:(fun ((name : Name.t), ty) ->
-        let%map.Result ty, syntax = elaborate ty in
-        ( { Signature.Field.name = name.txt
-          ; ty
-          ; is_global = Syntax.Type_expr.is_global syntax
-          }
+        let%map.Result ty, syntax, modality = member ty in
+        ( { Signature.Field.name = name.txt; ty; modality }
         , (canonical_name name.txt, syntax) ))
     in
     let fields, reflected = List.unzip fields in
@@ -1018,9 +1228,10 @@ let value_parameters t (root : Decl.t) =
            | Abstract -> assert false
          in
          let params =
-           List.mapi (Decl.params decl) ~f:(fun index -> function
-             | ATy (TVar v) -> v.id, index
-             | ARow (RVar v) -> v.id, index
+           List.filter_mapi (Decl.params decl) ~f:(fun index -> function
+             | ATy (TVar v) -> Some (v.id, index)
+             | ARow (RVar v) -> Some (v.id, index)
+             | AMode _ -> None
              | _ -> assert false)
            |> Int.Map.of_alist_exn
          in
@@ -1074,7 +1285,7 @@ let define t (decl : Decl.t) =
    | Alias _ | Abstract -> ()
    | Variant constructors ->
      let result = Type.TCon (decl.name, Decl.params decl) in
-     List.iteri constructors ~f:(fun index { name; args; global_args } ->
+     List.iteri constructors ~f:(fun index { name; args; modalities } ->
        let name = canonical_name name in
        Hashtbl.add_exn
          t.constructors
@@ -1085,7 +1296,7 @@ let define t (decl : Decl.t) =
            ; index
            ; args
            ; result
-           ; global_args
+           ; modalities
            })
    | Record fields ->
      let record_type =
@@ -1095,7 +1306,7 @@ let define t (decl : Decl.t) =
              canonical_name field.name)
        }
      in
-     List.iteri fields ~f:(fun index { name = _; ty; is_global } ->
+     List.iteri fields ~f:(fun index { name = _; ty; modality } ->
        Hashtbl.add_exn
          t.fields
          ~key:record_type.fields.(index)
@@ -1104,7 +1315,7 @@ let define t (decl : Decl.t) =
            ; index
            ; record = TCon (decl.name, Decl.params decl)
            ; ty
-           ; is_global
+           ; modality
            }));
   checked
 ;;
@@ -1252,8 +1463,23 @@ let reflect t name =
   (Hashtbl.find_exn t.types name).reflected
 ;;
 
-let field_modality t name =
-  Modality.of_global (Hashtbl.find_exn t.fields name).is_global
+let modality (modality : Member_modality.t) ~(of_ : Type.ty) : Modality.t =
+  match modality with
+  | Id -> Modality.id
+  | Meet const -> Modality.of_step (Meet const)
+  | Param index ->
+    (match Type.canonical_ty of_ with
+     | TCon (_, args) ->
+       (match List.nth_exn args index with
+        | AMode mode -> Modality.of_step (Param mode)
+        | ATy _ | ARow _ ->
+          raise_s
+            [%message "Type_env.modality: not a mode argument" (index : int)])
+     | _ -> raise_s [%message "Type_env.modality: not of a type constructor"])
+;;
+
+let field_modality t name ~record =
+  modality (Hashtbl.find_exn t.fields name).modality ~of_:record
 ;;
 
 let pointer_free t ty =
@@ -1292,6 +1518,7 @@ let pointer_free t ty =
       (match Type.canonical_ty ty with
        | TVar _ | TArrow _ | TCode _ -> false
        | TCon (("int" | "bool" | "char" | "unit"), []) -> true
+       | TCon (name, _) when String.equal name Type.ptr_name -> false
        | TCon (name, args) -> nominal name (List.map args ~f:(arg params))
        | TTuple tys -> List.for_all tys ~f:(ty_ params)
        | TRecord { id; row } | TVariant { id; row } ->
@@ -1314,6 +1541,7 @@ let pointer_free t ty =
   and arg params : Type.arg -> bool = function
     | ATy entry -> ty_ params entry
     | ARow entry -> row_ params entry
+    | AMode _ -> true
   and nominal name args =
     match Hashtbl.find nominals (name, args) with
     | Some result -> result

@@ -26,8 +26,8 @@ let g (x : string) = x
 |};
   [%expect
     {|
-    val f : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
-    val g : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1
+    val f : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
+    val g : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     |}]
 ;;
 
@@ -44,13 +44,13 @@ let field u = match in_record () with (s, _) -> s
 |};
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
-    val in_ptr : 'a -> ptr[string] @ nonportable external
-    val in_record : 'a -> string * int @ 'm0 with external <= 'm0
-    val in_closure : 'a -> ('b -> string @ 'm1) @ 'm0 with external <= 'm1 and external <= 'm0
-    val read : ptr['a] -> 'a @ nonportable
-    val read_ext : 'a -> string @ nonportable external
-    val field : 'a -> string @ 'm0 with external <= 'm0
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
+    val in_ptr : 'a @ 'm0 -> ptr[string @@ 'm2] @ 'm1 with external <= 'm2 and nonportable gc <= 'm1
+    val in_record : 'a @ 'm0 -> string * int @ 'm1 with external <= 'm1
+    val in_closure : 'a @ 'm0 -> ('b @ 'm2 -> string @ 'm3) @ 'm1 with external <= 'm3 and external <= 'm1
+    val read : ptr['a @@ 'm1] @ 'm0 -> 'a @ 'm2 with 'm1 <= 'm2
+    val read_ext : 'a @ 'm0 -> string @ 'm1 with external <= 'm1
+    val field : 'a @ 'm0 -> string @ 'm1 with external <= 'm1
     |}]
 ;;
 
@@ -64,10 +64,10 @@ let sequenced u = ext "a"; "b"
 |};
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
-    val evaluated : 'a -> int
-    val ignored : 'a -> string
-    val sequenced : 'a -> string
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
+    val evaluated : 'a @ 'm0 -> int @ 'm1
+    val ignored : 'a @ 'm0 -> string @ 'm1
+    val sequenced : 'a @ 'm0 -> string @ 'm1
     |}]
 ;;
 
@@ -79,7 +79,7 @@ let p = Ptr.make "a"
 let store u = p.* <- ext "b"
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:4:21-28), but must be at most gc, because it is stored through a pointer, whose cell may be managed by the GC (at t.stag:4:21-28) |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:4:21-28), then it is stored into a cell, which holds only what fits its modality (at t.stag:4:21-28), but must be at most gc, because p is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default) |}];
   provenance
     {|
 let p = Ptr.make "a"
@@ -90,9 +90,9 @@ let ints (q : ptr[int]) = q.* <- 1
   [%expect
     {|
     val p : ptr[string]
-    val store : string @ 'm0 -> unit with 'm0 <= gc
-    val literal : 'a -> unit
-    val ints : ptr[int] -> unit
+    val store : string @ 'm0 -> unit @ 'm1 with 'm0 <= gc global
+    val literal : 'a @ 'm0 -> unit @ 'm1
+    val ints : ptr[int] @ 'm0 -> unit @ 'm1
     |}];
   provenance
     {|
@@ -101,7 +101,11 @@ let ext (x : string) = let y @ external = x in y
 let bad u = store_param (Ptr.make "a") (ext "b")
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:3:31-39), then y is used (at t.stag:3:47-48), then the function returns it (at t.stag:3:23-48), then the function types are unified, then the function returns it (at t.stag:4:39-48), then it is passed to a function (at t.stag:4:12-48), but must be at most gc, because it is stored through a pointer, whose cell may be managed by the GC (at t.stag:2:29-30), then s is used (at t.stag:2:29-30), then s is passed to the function (at t.stag:2:22-30), then the function types are unified |}]
+    {|
+    val store_param : ptr['a @@ 'm1] @ 'm0 -> ('a @ 'm3 -> unit @ 'm4) @ 'm2 with 'm0 <= 'm2 and portable <= 'm1 and 'm3 <= 'm1 and 'm3 <= global and gc <= 'm2
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
+    val bad : 'a @ 'm0 -> unit @ 'm1
+    |}]
 ;;
 
 let%expect_test "pointer-free values cross provenance" =
@@ -114,10 +118,10 @@ let in_closure u = let n = ext 1 in fun v -> n
 |};
   [%expect
     {|
-    val ext : int -> int
+    val ext : int @ 'm0 -> int @ 'm1
     val p : ptr[int]
-    val store : 'a -> unit
-    val in_closure : 'a -> ('b -> int) @ 'm0 with gc <= 'm0
+    val store : 'a @ 'm0 -> unit @ 'm1
+    val in_closure : 'a @ 'm0 -> ('b @ 'm2 -> int @ 'm3) @ 'm1 with gc <= 'm1
     |}]
 ;;
 
@@ -130,9 +134,9 @@ let gc_only u = let mut s = "a" in s <- "b"; s
 |};
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
-    val inferred : 'a -> string @ nonportable external
-    val gc_only : 'a -> string @ nonportable
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
+    val inferred : 'a @ 'm0 -> string @ 'm1 with nonportable external <= 'm1
+    val gc_only : 'a @ 'm0 -> string @ 'm1 with nonportable <= 'm1
     |}];
   provenance
     {|
@@ -148,8 +152,8 @@ let opted_in u = let mut s @ external = "a" in s
 |};
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
-    val opted_in : 'a -> string @ nonportable external
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
+    val opted_in : 'a @ 'm0 -> string @ 'm1 with nonportable external <= 'm1
     |}]
 ;;
 
@@ -165,12 +169,12 @@ let set_h u = h <- Int.to_string 1
 |};
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     val g : string @ external
-    val set : 'a -> unit
-    val get : 'a -> string @ nonportable external
+    val set : 'a @ 'm0 -> unit @ 'm1
+    val get : 'a @ 'm0 -> string @ 'm1 with nonportable external <= 'm1
     val h : string
-    val set_h : 'a -> unit
+    val set_h : 'a @ 'm0 -> unit @ 'm1
     |}];
   provenance
     {|
@@ -192,8 +196,8 @@ let closed u = let f @ static = fun x -> x in f
 |};
   [%expect
     {|
-    val literal : 'a -> string
-    val closed : 'a -> 'b @ 'm0 -> 'b @ 'm1 with 'm0 <= 'm1
+    val literal : 'a @ 'm0 -> string @ 'm1
+    val closed : 'a @ 'm0 -> ('b @ 'm2 -> 'b @ 'm3) @ 'm1 with 'm2 <= 'm3 and release(locality('m2)) <= locality('m3)
     |}];
   provenance {|
 let made u = let p @ static = Ptr.make 1 in p
@@ -209,7 +213,7 @@ let captures (s : string) = let f @ static = fun v -> s in f
 let built u = let s @ static = String.append "a" "b" in s
 |};
   [%expect
-    {| This is gc, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:2:31-52), then it is bound by an annotated let (at t.stag:2:22-28), but must be at most static, because it is annotated static (at t.stag:2:22-28) |}]
+    {| This is gc, because a function type fixes it, as the function types are unified, then the function returns it (at t.stag:2:31-52), then it is bound by an annotated let (at t.stag:2:22-28), but must be at most static, because it is annotated static (at t.stag:2:22-28) |}]
 ;;
 
 let%expect_test "declared function types default to gc" =
@@ -221,7 +225,7 @@ let r = { f = fun s -> s }
 let bad u = r.f (ext "a")
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:5:16-25), then it is passed to a function (at t.stag:5:12-25), but must be at most gc, because a function type fixes it, then the function types are unified |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:5:16-25), then it is passed to a function (at t.stag:5:12-25), but must be at most gc, because a function type fixes it, as the function types are unified |}];
   provenance
     {|
 type t = { f : string @ external -> string @ external }
@@ -232,7 +236,7 @@ let call u = r.f "a"
     {|
     type t = { f : string @ external -> string @ external }
     val r : t
-    val call : 'a -> string @ nonportable external
+    val call : 'a @ 'm0 -> string @ 'm1 with nonportable external <= 'm1
     |}]
 ;;
 
@@ -243,11 +247,12 @@ let ext (x : string) = let y @ external = x in y
 let length u = String.length (ext "a")
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:3:29-38), then it is passed to a function (at t.stag:3:15-38), but must be at most gc, because a function type fixes it, then the function types are unified |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:3:29-38), then it is passed to a function (at t.stag:3:15-38), but must be at most gc, because a function type fixes it, as the function types are unified |}];
   provenance {|
 let built u = String.append "a" "b"
 |};
-  [%expect {| val built : 'a -> string @ nonportable |}]
+  [%expect
+    {| val built : 'a @ 'm0 -> string @ 'm1 with nonportable gc <= 'm1 |}]
 ;;
 
 let%expect_test "a closure is static only if it is const" =
@@ -281,7 +286,7 @@ let p = Ptr.make (fun (v : int) -> "a")
 let store u = let s = ext "a" in p.* <- (fun v -> s)
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:4:22-29), then s is captured by a closure (at t.stag:4:50-51), then the closure is made (at t.stag:4:40-52), but must be at most gc, because it is stored through a pointer, whose cell may be managed by the GC (at t.stag:4:40-52) |}]
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:4:22-29), then s is captured by a closure (at t.stag:4:50-51), then the closure is made (at t.stag:4:40-52), then it is stored into a cell, which holds only what fits its modality (at t.stag:4:40-52), but must be at most gc, because p is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default) |}]
 ;;
 
 let%expect_test "toplevel constants are static" =
@@ -295,32 +300,32 @@ let use u = let y @ static = pair in y
     {|
     val s : string
     val pair : string * int
-    val use : 'a -> string * int
+    val use : 'a @ 'm0 -> string * int @ 'm1
     |}];
   provenance {|
 let s = Int.to_string 1
 let use u = let y @ static = s in y
 |};
   [%expect
-    {| This is gc, because a function type fixes it, then the function types are unified, then the function returns it (at t.stag:2:8-23), then s is used (at t.stag:3:29-30), then it is bound by an annotated let (at t.stag:3:20-26), but must be at most static, because it is annotated static (at t.stag:3:20-26) |}]
+    {| This is gc, because a function type fixes it, as the function types are unified, then the function returns it (at t.stag:2:8-23), then s is used (at t.stag:3:29-30), then it is bound by an annotated let (at t.stag:3:20-26), but must be at most static, because it is annotated static (at t.stag:3:20-26) |}]
 ;;
 
 let%expect_test "global_ fields and exclave_ keep provenance" =
   provenance
     {|
 let ext (x : string) = let y @ external = x in y
-type r = { g : global_ string; n : int }
+type r = { g : string @@ global; n : int }
 let make u = { g = ext "a"; n = 1 }
 let read u = (make ()).g
 let returned u = exclave_ ext "a"
 |};
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
-    type r = { g : global_ string; n : int }
-    val make : 'a -> r @ 'm0 with external <= 'm0
-    val read : 'a -> string @ 'm0 with external <= 'm0
-    val returned : 'a -> string @ 'm0 with external <= 'm0
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
+    type r = { g : string @@ global; n : int }
+    val make : 'a @ 'm0 -> r @ 'm1 with external <= 'm1
+    val read : 'a @ 'm0 -> string @ 'm1 with external <= 'm1
+    val returned : 'a @ 'm0 -> string @ 'm1 with external <= 'm1
     |}]
 ;;
 
@@ -330,9 +335,10 @@ let%expect_test "a toplevel closure capturing nothing is static" =
 let f @ static = fun (x : int) -> x
 let g @ static = fun (x : int) -> f x
 |};
-  [%expect {|
-    val f : int -> int
-    val g : int -> int
+  [%expect
+    {|
+    val f : int @ 'm0 -> int @ 'm1
+    val g : int @ 'm0 -> int @ 'm1
     |}]
 ;;
 
@@ -363,7 +369,7 @@ let g = k 1
 |};
   [%expect
     {|
-    val k : int @ 'm0 -> (int -> int) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
+    val k : int @ 'm0 -> (int @ 'm2 -> int @ 'm3) @ 'm1 with 'm0 <= 'm1 and gc <= 'm1
     val g : int @ '_m0 -> int @ '_m1
     |}]
 ;;
@@ -379,7 +385,7 @@ let copy u = p.* <- get ()
 let set u = g <- ext "b"
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:7:17-24), then it is assigned to g (at t.stag:7:12-24), but must be at most gc, because it is stored through a pointer, whose cell may be managed by the GC (at t.stag:6:20-26), then the function returns it (at t.stag:6:20-26), then the function types are unified, then the function returns it (at t.stag:4:12-13), then g is used (at t.stag:4:12-13) |}];
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then the function types are unified, then the function returns it (at t.stag:7:17-24), then it is assigned to g (at t.stag:7:12-24), but must be at most gc, because p is not generalized, so what its cells hold is fixed by its definition (nonportable gc by default), then it is stored into a cell, which holds only what fits its modality (at t.stag:6:20-26), then the function returns it (at t.stag:6:20-26), then the function types are unified, then the function returns it (at t.stag:4:12-13), then g is used (at t.stag:4:12-13) |}];
   provenance
     {|
 let ext (x : string) = let y @ external = x in y
@@ -451,22 +457,25 @@ let set_t u = t <- (ext "x", 2)
 |};
   [%expect
     {|
-    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and external <= 'm1
+    val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     val g : (int @ '_m0 -> int @ '_m1) @ external
-    val set : 'a -> unit
+    val set : 'a @ 'm0 -> unit @ 'm1
     val t : (string * int) @ external
-    val set_t : 'a -> unit
+    val set_t : 'a @ 'm0 -> unit @ 'm1
     |}]
 ;;
 
-let%expect_test "stores go only through pointers to cells the GC scans" =
+let%expect_test "a store's pointer may be external: every [ptr] cell is stag's" =
   provenance
     {|
 let ext (x : ptr[string]) = let y @ external = x in y
 let f u = let p = ext (Ptr.make "a") in p.* <- Int.to_string 1
 |};
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:36-44), then y is used (at t.stag:2:52-53), then the function returns it (at t.stag:2:28-53), then the function types are unified, then the function returns it (at t.stag:3:18-36), then p is used (at t.stag:3:40-41), then it is dereferenced (at t.stag:3:40-43), but must be at most gc, because it is stored through, which needs a cell the GC scans (at t.stag:3:40-43) |}];
+    {|
+    val ext : ptr[string] @ 'm0 -> ptr[string] @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
+    val f : 'a @ 'm0 -> unit @ 'm1
+    |}];
   provenance
     {|
 let ext (x : ptr[int]) = let y @ external = x in y
@@ -474,7 +483,7 @@ let f u = let p = ext (Ptr.make 1) in p.* <- 2
 |};
   [%expect
     {|
-    val ext : ptr[int] @ 'm0 -> ptr[int] @ 'm1 with 'm0 <= 'm1 and external <= 'm1
-    val f : 'a -> unit
+    val ext : ptr[int] @ 'm0 -> ptr[int] @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
+    val f : 'a @ 'm0 -> unit @ 'm1
     |}]
 ;;

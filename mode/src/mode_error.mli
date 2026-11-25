@@ -1,8 +1,5 @@
 open! Import
 
-(** A mode variable whose lower bound exceeds its upper bound on an axis. The
-    reasons explain each bound: the first is where the bound came from, the rest
-    the constraints that carried it to [var], in order. *)
 type t =
   | Mismatch :
       { var : int
@@ -13,7 +10,20 @@ type t =
       ; upper_because : Reason.t list
       }
       -> t
+  (** A variable (by its id) whose lower bound exceeds its upper bound on an
+      axis. The reasons explain each bound: the first is where the bound came
+      from, the rest the constraints that carried it to [var], in order. *)
+  | Unequal :
+      { axis : 'a Axis.t
+      ; first : 'a
+      ; second : 'a
+      ; because : Reason.t
+      }
+      -> t (** Two different constants that [because] requires equal. *)
 [@@deriving sexp_of]
+
+(** [Unequal] unless the points are equal. *)
+val equal_on : 'a Axis.t -> 'a -> 'a -> Reason.t -> (unit, t) Result.t
 
 (** Raises on [Error]: for constraints that cannot fail. *)
 val ok_exn : (unit, t) Result.t -> unit

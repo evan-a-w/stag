@@ -12,8 +12,12 @@ let indirect_constructors =
     ; "Type_expr.Splice", 1
     ; "Type_expr.Moded", 2
     ; "Type_expr.Constrained", 2
-    ; "Type_expr.Global", 1
+    ; "Type_expr.Modality", 2
     ; "Type_expr.Row.Extend", 3
+    ; "Mode_expr.Term.Meet", 2
+    ; "Mode_expr.Term.Release", 1
+    ; "Mode_expr.Term.Static_if_const", 1
+    ; "Mode_expr.Term.Const_if_static", 1
     ; "Pattern.Deref", 1
     ; "Pattern.Poly_variant", 2
     ; "Pattern.Exception", 1
@@ -103,14 +107,40 @@ module Make (B : Builder) = struct
         ]
   ;;
 
+  let mode_axis (axis : Mode_expr.Axis.t) =
+    con
+      ("Stag.Mode_expr.Axis." ^ Sexp.to_string (Mode_expr.Axis.sexp_of_t axis))
+      []
+  ;;
+
+  let rec mode_term (term : Mode_expr.Term.t) =
+    let con name = con ("Stag.Mode_expr.Term." ^ name) in
+    match term with
+    | Mode m -> con "Mode" [ mode_expr m ]
+    | Axis (axis, m) -> con "Axis" [ mode_axis axis; mode_expr m ]
+    | Meet (t, atom) ->
+      con
+        "Meet"
+        [ mode_term t
+        ; con
+            ("Stag.Mode_expr.Atom."
+             ^ Sexp.to_string (Mode_expr.Atom.sexp_of_t atom))
+            []
+        ]
+    | Release t -> con "Release" [ mode_term t ]
+    | Static_if_const t -> con "Static_if_const" [ mode_term t ]
+    | Const_if_static t -> con "Const_if_static" [ mode_term t ]
+  ;;
+
   let mode_constraint ({ lower; upper } : Mode_expr.Constraint.t) =
-    B.tuple [ mode_expr lower; mode_expr upper ]
+    B.tuple [ mode_term lower; mode_term upper ]
   ;;
 
   let type_param ({ txt; loc = _ } : Type_decl.Param.t Located.t) =
     match txt with
     | Ty var -> con "Stag.Type_decl.Param.Ty" [ B.string var ]
     | Row var -> con "Stag.Type_decl.Param.Row" [ B.string var ]
+    | Mode var -> con "Stag.Type_decl.Param.Mode" [ B.string var ]
   ;;
 
   let rec pattern ({ txt; loc = _ } : Pattern.t) =
@@ -165,9 +195,9 @@ module Make (B : Builder) = struct
       | Mut t -> con "Mut" [ type_expr t ]
       | Immut t -> con "Immut" [ type_expr t ]
       | Moded (t, m) -> con "Moded" [ type_expr t; mode_expr m ]
+      | Modality (t, m) -> con "Modality" [ type_expr t; mode_expr m ]
       | Constrained (t, cs) ->
         con "Constrained" [ type_expr t; list mode_constraint cs ]
-      | Global t -> con "Global" [ type_expr t ]
       | Splice e ->
         (match A.antiquote Type_expr e with
          | Some lifted -> lifted
@@ -184,6 +214,7 @@ module Make (B : Builder) = struct
     and type_arg : Type_expr.arg -> B.t = function
       | Ty ty -> con "Stag.Type_expr.Arg.Ty" [ type_expr ty ]
       | Row r -> con "Stag.Type_expr.Arg.Row" [ row r ]
+      | Mode m -> con "Stag.Type_expr.Arg.Mode" [ mode_expr m ]
 
     and type_decl ({ name = decl_name; params; kind } : Type_decl.t) =
       B.record

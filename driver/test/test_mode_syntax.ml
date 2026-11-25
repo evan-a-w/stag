@@ -6,8 +6,8 @@ open Source_helpers
 let%expect_test "mode syntax typechecks and evaluates as its body" =
   run
     {|
-type r = { x : global_ int; y : int }
-type t = A of global_ int * int
+type r = { x : int @@ global; y : int }
+type t = A of int @@ global * int
 let f (x @ local) (y : int @ 'm) : int @ global = Int.add x y
 let pair (x @ local) = exclave_ (x, stack_ (fun u -> x))
 let apply (h : int @ local -> int @ local) = h 1 [@nontail]
@@ -23,8 +23,8 @@ let var = (summed @ local)
 |};
   [%expect
     {|
-    type r = { x : global_ int; y : int }
-    type t = A of global_ int * int
+    type r = { x : int @@ global; y : int }
+    type t = A of int @@ global * int
     val f : int @ local -> (int -> int) @ local
     val pair : 'a @ local -> 'a * ('b -> 'a @ local) @ local
     val apply : (int @ local -> int @ local) -> int

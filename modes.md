@@ -41,6 +41,12 @@ is at least `portable` in its body, whatever its callers pass: it may differ
 between calls, even if each is `const`. What is built from it (a closure
 capturing it, code embedding it) is then never `const`, so never `static`,
 while what the body builds from constants alone stays `const`.
+A function's result is likewise never `const` (calling it runs code), whether
+written on an annotation's arrow or as a definition's result (`let g x : t @ const`
+is an error). What is read from a block, through a field's modality or a cell,
+is met with the block's mode, so it is `const` only if the block is: a
+parameter's `@@ const` field isn't. `const` implies `static`: written with `gc`
+or `external`, in either order, it is an error.
 
 `const` implies `portable`: what is known at compile time exists at every
 stage. This is the stage axis of [semantics.md](semantics.md), alongside
@@ -97,15 +103,19 @@ closure's own mode is the mode of the arrow value, like any value's.
 - **Polymorphism.** Mode variables are generalised with the type variables of
   a scheme, with the constraints between them, and copied per instance, so
   `let apply f x = f x` works for portable and nonportable `f` alike.
-- **Annotations.** In an annotation, a side written without a mode is a fresh
-  variable, so annotating restricts no mode; `'m` names one variable across a
-  definition's annotations. In a declaration (and for builtins), it is the
-  default, `nonportable gc global`, and a mode variable is an error. As
-  in OxCaml, the result of a curried arrow written without a mode is as local
-  as the arguments before it (`ptr[int] @ local -> int -> int` is
+- **Annotations.** A side written without a mode is the default,
+  `nonportable gc global`, in an annotation as in a declaration (and for
+  builtins), as OxCaml's legacy modes: `(f : int -> int)` makes `f`'s arrow
+  the default's, and `'m` keeps a side polymorphic (one variable across a
+  definition's annotations; in a declaration a mode variable is an error).
+  Axes not written are the default's, so `int @ local -> int` is
+  `int @ nonportable gc local -> int @ nonportable gc global`. An arrow's
+  `curry`, never written, is free in an annotation. As in OxCaml, the result
+  of a curried arrow written without a mode is as local as the arguments
+  before it (`ptr[int] @ local -> int -> int` is
   `ptr[int] @ local -> (int -> int) @ local`), as it is the closure of a
-  partial application holding them. Its `curry` is still fixed `regional`,
-  as a declaration can't tell a partial application from a function value
+  partial application holding them. In a declaration its
+  `curry` is fixed `regional`, as a declaration can't tell a partial application from a function value
   returned, so a tail call through it given a `local` argument must be marked
   `[@nontail]`.
 - **Decisions made while checking a function.** Whether a variable is
@@ -123,44 +133,130 @@ closure's own mode is the mode of the arrow value, like any value's.
 By default, types show only fixed modes other than the default, so most
 signatures print as without modes. With modes shown
 (`Signature.to_string_hum ~modes:true`), mode variables are named `'m0`,
-`'m1`, ... and their constraints follow the type, simplified:
+`'m1`, ... and their constraints follow the type:
 
 ```
 val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3
-  with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5 and 'm4 <= 'm1
-  and gc <= 'm3
+  with 'm0 <= 'm3 and portable <= 'm1 and 'm2 <= 'm5
+  and release(locality('m2)) <= locality('m5) and 'm2 <= regional
+  and stage('m4) <= stage('m1) and provenance('m4) <= provenance('m1)
+  and meet(locality('m4), regional) <= locality('m1) and gc <= 'm3
 ```
 
-- variables equal by their constraints (a cycle) print as one;
-- a variable fixed to a constant prints as it (`int @ portable -> int @ portable`);
-- constraints and bounds implied by the others are left out;
-- a generic variable named once and in no constraint is left out, which
-  reads back as a fresh variable;
+The `with` clause is also syntax for annotations (see syntax.md), and the
+printed constraints are exact: read back, they imply just what the
+variables' constraints do, no more and no less (up to the floor every
+annotation gives a result: `portable`). So printed types can be trusted on
+their own, by interfaces and separately checked code.
+
+- variables equal on every axis by their constraints print as one;
+- a variable in no relation and fixed on every axis prints as its atoms
+  other than the default (`string @ external`), or not at all if it is the
+  default, as an unwritten mode reads back as the default; any other is
+  named, even if unconstrained (`'a @ 'm0 -> unit @ 'm1`);
+- constraints and bounds the others imply, as read back, are left out;
 - only the item's own variables are named: constraints through other
   variables (of other members of a recursive group, or a weak variable's
   current neighbours) are projected onto its own;
-- bounds every mode meets (`const <= 'm`, `'m <= nonportable`) are left out,
-  and so is `portable <= 'm` for a variable only on arrows' results, which
-  are never `const` (an annotation's are floored at `portable`);
 - a weak (not generalized) variable is named `'_m0`, as weak type variables,
   and shown with its current constraints;
-- relations through a crossing morphism are not printed.
+- a variable only on `ptr` cells and mode arguments prints no locality, which
+  no position reads; relations through it still print.
 
-On provenance, only bounds print, where they restrict: `gc <= 'm` (made at
-run time, as a closure or partial application), `external <= 'm` (it
-may reach external memory) and `'m <= gc` or `'m <= static` (an argument
-stored or stored through, or bound `@ static`). A constant side shows its
-provenance when it is not the default `gc`, and a variable side known to be
-`external` when it prints as a constant (`ptr[int] @ nonportable external`).
 A mutable global whose reads are `external` shows it
 (`val g : string @ external`), parenthesizing an arrow or tuple type
 (`val g : (int -> int) @ external`).
 
-The `with` clause is also syntax for annotations (see syntax.md), so printed
-types read back as themselves. A constraint between variables constrains only
-the stage axis, and a bound the axis of its atoms; provenance relations
-between variables are not printed (nor written), so a printed type may read
-back with them unrelated.
+### Printed constraints
+
+The solver's constraints between two variables' axes are each
+`a <= m(b)`, `m` a monotone map from `b`'s axis to `a`'s with a left
+adjoint `m*` (`m*(x) <= y` iff `x <= m(y)`). Composing the solver's maps
+gives only these, up to ones relating nothing (`m*` always the least point),
+each written in one form:
+
+| Written | Map | `m*` (least to greatest point) | Where it arises |
+| --- | --- | --- | --- |
+| `'a <= 'b` | identity, every axis | | subsumption |
+| `stage('a) <= stage('b)` (and `locality`, `provenance`) | identity, one axis | | a relation holding on only some axes |
+| `meet(stage('a), portable) <= stage('b)` | `meet_with portable` | const, portable, portable | crossing: a value whose type crosses to `portable` |
+| `meet(provenance('a), gc) <= provenance('b)` | `meet_with gc` | static, gc, gc | a field `@@ gc` read from a record at `'a` |
+| `meet(locality('a), regional) <= locality('b)` | `borrow` | global, regional, regional | a value seen from a nested region: a parameter, a capture |
+| `release(locality('a)) <= locality('b)` | `release` | global, local, local | a regional value seen from the enclosing region: a result, `exclave_` |
+| `provenance('a) <= static_if_const(stage('b))` | `const_is_static` (stage to provenance: const ↦ static, else external) | static ↦ const, else portable | a `const` value is `static` |
+| `stage('a) <= const_if_static(provenance('b))` | `runtime_is_gc` (provenance to stage: static ↦ const, else nonportable) | const ↦ static, else gc | a value allocated at run time is `gc` |
+
+`meet` and `release` apply `m*` on the left of `<=`; `static_if_const` and
+`const_if_static` apply `m` itself on the right, naming the map rather than
+its adjoint. `meet(t, c)` takes any atom `c` of `t`'s axis (meeting with the
+greatest is the identity, with the least relates nothing); the printer only
+uses the middle one. Functions nest: `meet(release(locality('m)), regional)`
+is `borrow` after `release`, which is `borrow` again, as the printer would
+write it; a constraint's left functions compose with its right ones, so
+`f(a) <= g(b)` is `a <= (f ∘ g)(b)` with `f`'s map.
+
+Each variable's own `provenance <= static_if_const(stage)` (`const` is
+`static`) is never printed, and neither is a result's `portable` lower bound,
+which every annotation's result has.
+
+The printer finds the exact set as follows (`types/src/mode_closure.ml`,
+`mode_model.ml`, `mode_printing.ml`):
+
+1. For each counted variable's axis `x` and each point `p` of `x` within its
+   bounds, it asks the solver how far raising `x` to `p` raises every other
+   axis `y` (following the constraints that hold, a generic variable's being
+   those its scheme keeps). This is what the constraints imply between them:
+   `y >= g(x)` for a monotone `g`, including `y = x` (`g` may be above the
+   identity, as `release` is on locality).
+2. Variables equal on every axis (each at least the other, with the same
+   bounds) are grouped as one.
+3. The written forms per pair of axes form a chain (nothing < `meet` <
+   identity < `release`), so for each pair the greatest written `w` with
+   `w* <= g`, raising `y` above its lower bound somewhere, is the candidate:
+   with every variable's bounds, they imply exactly what the solver does.
+4. Candidates are dropped, latest first, when the rest still imply them: an
+   edge `x -> y` with map `w` is redundant iff propagating from `x` at each
+   point of its domain without it still raises `y` to `w*(p)`. Pairs related
+   on every axis (by the plain map) print as `'a <= 'b` and are reduced in the
+   same pass, then bounds. The final set is checked against the solver (both
+   bounds and every `g`): a printer that would print something inexact fails
+   with an internal error instead.
+
+A mode argument (`ptr[t @@ 'm]`, `cell[t, 'm]`) relates only stage and
+provenance, and a locality atom in one is an error. Its variable is a mode
+variable like any other: a `with` clause may bound or relate its locality, and
+a plain `'m <= 'n` relates every axis. But if it is only in mode arguments, no
+position reads its locality, so the printer eliminates that node: the solver's
+closure composes the relations through it, which print between the nodes that
+are read. A plain relation still relates the eliminated node when read back,
+so the reduction keeps it as a hidden node, and a pair is printed plainly only
+where the localities it relates through it are related (else per axis). Such
+a variable prints as atoms only if fixed on both its axes (`ptr['a @@ const static]`), as a mode
+argument's unwritten axes read back as the default; one also on an arrow, and
+free there on locality, keeps its name in both places.
+
+An arrow's side fixed to a constant (by a declaration, as a record field's
+`string -> string`) prints only its atoms other than the default, as
+annotations and declarations alike read unwritten axes as the default.
+
+`release(locality('a)) <= locality('b)` is not a default between a
+parameter and its result: most curried and higher-order functions don't have
+it (the outer arrow of `first x y = x` only has `'m0 <= 'm1`, and `apply f x =
+f x` relates `x` to nothing), so it would need an opt-out wherever they're
+printed.
+
+So, for example, reading a field `x : string @@ gc`:
+
+```
+type r2 = { x : string @@ gc; y : string }
+let fx (r : r2) = r.x
+val fx : r2 @ 'm0 -> string @ 'm1 with stage('m0) <= stage('m1)
+  and meet(provenance('m0), gc) <= provenance('m1)
+  and release(locality('m0)) <= locality('m1)
+```
+
+The result is `'m0` met with `gc` on provenance, and a regional record gives
+a local result (`release`): it was regional in `fx`'s region, which ends.
 
 ### Annotations on uses
 
@@ -273,6 +369,10 @@ toplevel splice has the mode of its expansion, checked after it is generated.
   is pointer-free.
 - Constant data is generalized, local or not; values computed by applying
   or splicing are not.
+- An arrow written in an annotation without modes has the default modes
+  (`nonportable gc global`), as in a declaration, rather than fresh
+  variables: `(f : int -> int)` makes `f` take and return global values.
+  Write `'m` to keep a side polymorphic.
 
 ## Mutable variables
 
@@ -326,7 +426,7 @@ writable/read-only distinction on pointers; and with mutation, effect purity
 Each step is a branch stacked on the previous one.
 
 - **A. Syntax**: mode annotations (`(x @ local)`, `'a @ 'm -> 'b @ 'n`),
-  `stack_`, `exclave_`, `global_` fields, the non-tail call marker. Parsed
+  `stack_`, `exclave_`, `global_` fields (now `@@ global`), the non-tail call marker. Parsed
   and printed, ignored by the typechecker.
 - **B. Solver**: the `Mode` library (`mode/`): the three axes, mode
   variables with bounds, edges with morphisms (`const ⇒ static`, crossing),
@@ -340,15 +440,14 @@ Each step is a branch stacked on the previous one.
   modes (a closure's mode is the mode of the arrow value); schemes keep mode variables and their constraints; mode
   annotations; printing that hides unconstrained and default modes.
 - **E. Locality**: regions, inferred allocation locality, `stack_`,
-  `exclave_`, the tail call rule, `global_` fields, `Unsafe.assume_global`,
+  `exclave_`, the tail call rule, `global_` fields (now `@@ global`), `Unsafe.assume_global`,
   mutable variables assigned from closures holding `global` values, mode
   crossing by kind on locality, exact binding annotations.
 - **F. Provenance**: `unknown` renamed `external`; deep provenance through
   blocks, pointers and closures, not through what is only evaluated; what is
   allocated at run time is `gc` unless `const`, literals and toplevel
   constants `static`; declared arrows default to `gc`; stores through
-  pointers take `gc` values (through `gc` pointers, until FFI pointers are
-  designed), mutable variables infer their held provenance;
+  pointers take `gc` values (through `gc` pointers, until H), mutable variables infer their held provenance;
   provenance annotations and bounds in `with`; the Go-style GC design.
 - **G. `external`**: C functions at ordinary curried types, their modes
   trusted as written (unwritten ones a declaration's defaults, so they may
@@ -357,14 +456,34 @@ Each step is a branch stacked on the previous one.
   toplevel function), called through libffi by the interpreter. Only
   immediates (`int`, `bool`, `char`, `unit`) for now: other signatures,
   pointers included, are rejected.
+- **H. Pointee modality**: `ptr[t @@ m]`, `m` a provenance or a mode
+  variable in the type, unified exactly and generalized like arrow modes:
+  stores through it take at most `m`, reads are at least `m`. `ptr[t]` is
+  `@@ gc`. `Ptr.make` infers it; weak toplevel cells are fixed at the end of
+  their definition (`gc` by default). Stores needn't check the pointer
+  stored through (every `ptr` is to stag's memory; C's will be `cptr[t]`).
+  In `with`, `'m <= 'n` is on every axis and `provenance('m) <= provenance('n)`
+  on one (likewise `stage`, `locality`).
+  Then one modality syntax, `t @@ m` on record fields, constructor
+  arguments and `ptr`, on every axis (`global_` fields are gone): meet on
+  values (a field read from a block at `b` is at most `b ⊓ m`), exact
+  through storage (a cell's reads are `m`, and no longer join the
+  pointer's own provenance), composing along `p.*.f`. `ptr`'s covers stage
+  and provenance; its locality is always `global`. Types take mode
+  parameters, `type cell['a, 'p : mode]`, applied as `cell[string, external]`
+  (the declaration says which arguments are modes); invariant for now. Mode
+  parameters (and so `ptr`'s cells) are on stage and provenance only, and a
+  modality's locality is only `global`. `ptr` is declared
+  `ptr['a, 'p : mode]`, with `ptr[t @@ m]` as sugar. A cell's reads are at
+  least `portable` (never `const`). Record updates keep the mode parameters
+  of the fields they copy.
 
 ## Later
 
 - `<t @ m>{ctx}` code modes.
-- Pointers to cells holding `external` values that may be stored to: the
-  cell's provenance in its type (as a modality), as a pointer's mode may
-  have been raised by subsumption.
-- Printing provenance relations between mode variables.
+- `cptr[t]`: pointers into C's memory, which the GC doesn't scan, holding
+  only C-compatible data (pointer-free values and `cptr`s), for `external`
+  signatures.
 - Pointers in `external` signatures, and callbacks (`@ static` closures
   passed to C).
 - A dynamic mode checker in the interpreter, as a test oracle.

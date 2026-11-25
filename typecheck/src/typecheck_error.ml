@@ -122,7 +122,11 @@ module Kind = struct
     | Malformed_struct_quote of string
     | Misplaced_type_splice
     | Misplaced_mut
+    | Misplaced_modality
+    | Locality_in_mode_argument
+    | Relative_locality_modality
     | Mode_variable_in_declaration of string
+    | Mode_parameter_on_arrow of string
     | Invalid_mode of string
     | Invalid_external of
         { symbol : string
@@ -234,37 +238,47 @@ let level_name level =
   | level -> sprintf "inside %d quote(s) (level %d)" level level
 ;;
 
-let mode_message
-  (Mode.Error.Mismatch
-    { var = _; axis; lower; upper; lower_because; upper_because })
-  =
+let mode_message (error : Mode.Error.t) =
   let point (type a) (axis : a Mode.Axis.t) (point : a) =
     let module C = (val Mode.Axis.chain axis) in
     Sexp.to_string (C.sexp_of_t point) |> String.lowercase
   in
+  let reason ({ loc; what } : Mode.Reason.t) =
+    if Loc.is_none loc
+    then what
+    else sprintf "%s (at %s)" what (Loc.to_string loc)
+  in
   let reasons because =
-    List.map because ~f:(fun ({ loc; what } : Mode.Reason.t) ->
-      if Loc.is_none loc
-      then what
-      else sprintf "%s (at %s)" what (Loc.to_string loc))
+    List.map because ~f:reason
     |> List.remove_consecutive_duplicates ~equal:String.equal
     |> String.concat ~sep:", then "
   in
-  sprintf
-    "This is %s, because %s, but must be at most %s, because %s"
-    (point axis lower)
-    (reasons lower_because)
-    (point axis upper)
-    (reasons upper_because)
+  match error with
+  | Mismatch { var = _; axis; lower; upper; lower_because; upper_because } ->
+    sprintf
+      "This is %s, because %s, but must be at most %s, because %s"
+      (point axis lower)
+      (reasons lower_because)
+      (point axis upper)
+      (reasons upper_because)
+  | Unequal { axis; first; second; because } ->
+    sprintf
+      "The modes %s and %s must be equal, because %s"
+      (point axis first)
+      (point axis second)
+      (reason because)
 ;;
 
 let unification_message (error : Unification_error.t) ~show_type =
-  let printer = Type.Printer.create ~type_name:show_type () in
+  let printer =
+    Type.Printer.create ~type_name:show_type ~name_mode_args:true ()
+  in
   let ty = Type.Printer.ty printer in
   let row row = ty (TRecord { id = -1; row }) in
   let arg : Type.arg -> string = function
     | ATy t -> ty t
     | ARow r -> "row " ^ row r
+    | AMode _ -> "a mode"
   in
   let message =
     match error with
@@ -366,7 +380,9 @@ let rec kind_message (kind : Kind.t) ~show_type =
   | Unbound_type path -> sprintf "Unbound type %s" (decl_path path)
   | Unbound_type_variable name -> sprintf "Unbound type variable '%s" name
   | Type_variable_kind_mismatch name ->
-    sprintf "The variable %s is used both as a type and as a row" name
+    sprintf
+      "The variable %s is used as more than one of a type, a row and a mode"
+      name
   | Unbound_constructor path ->
     sprintf "Unbound constructor %s" (decl_path path)
   | Unbound_field path -> sprintf "Unbound record field %s" (decl_path path)
@@ -388,6 +404,7 @@ let rec kind_message (kind : Kind.t) ~show_type =
       match param with
       | Ty _ -> "a type"
       | Row _ -> "a row"
+      | Mode _ -> "a mode"
     in
     sprintf
       "The parameter %s of type %s expects %s"
@@ -511,7 +528,9 @@ let rec kind_message (kind : Kind.t) ~show_type =
     "A splice of syntax can't give an [%expect]: its expected output is \
      generated, so it could not be corrected"
   | Toplevel_splice_of_neither ty ->
-    let printer = Type.Printer.create ~type_name:show_type () in
+    let printer =
+      Type.Printer.create ~type_name:show_type ~name_mode_args:true ()
+    in
     let ty = Type.Printer.ty printer ty in
     sprintf
       "This expression has type %s, but a toplevel splice is of code (of type \
@@ -535,12 +554,22 @@ let rec kind_message (kind : Kind.t) ~show_type =
       name
   | Mode_variable_in_declaration var ->
     sprintf
-      "The mode variable '%s is not allowed in a declaration: its arrows have \
-       fixed modes"
+      "The mode variable '%s is not allowed in a declaration unless it is a \
+       parameter declared ['%s : mode]: its arrows have fixed modes"
+      var
+      var
+  | Mode_parameter_on_arrow var ->
+    sprintf
+      "The mode parameter '%s can't be the mode of an arrow: a declaration's \
+       arrows have fixed modes, and its mode parameters are only arguments of \
+       types and modalities, as in [ptr[string @@ '%s]]"
+      var
       var
   | Invalid_mode why -> sprintf "This mode is invalid: %s" why
   | Invalid_external { symbol; problem } ->
-    let printer = Type.Printer.create ~type_name:show_type () in
+    let printer =
+      Type.Printer.create ~type_name:show_type ~name_mode_args:true ()
+    in
     let problem =
       match problem with
       | Not_a_function -> "it must be a function"
@@ -569,6 +598,19 @@ let rec kind_message (kind : Kind.t) ~show_type =
     sprintf
       "The C symbol %S is invalid: it must be non-empty, with no NUL character"
       symbol
+  | Misplaced_modality ->
+    "A modality is only written on a record field's type, a constructor's \
+     argument or a pointer's type argument, as in [ptr[string @@ external]]"
+  | Locality_in_mode_argument ->
+    "A mode argument is on stage and provenance only ([const], [portable], \
+     [nonportable], [static], [gc], [external]) or a mode variable, as in \
+     [ptr[string @@ external]]: a pointer's cell is always [global], and a \
+     type's mode parameters relate only stage and provenance"
+  | Relative_locality_modality ->
+    "A modality's locality can only be [global]: [regional] and [local] are \
+     relative to a region, and a part read from a block returned to the \
+     caller's region (with [exclave_]) would outlive the region it was \
+     allocated in"
   | Misplaced_mut ->
     "Only an entry of a code type's context can be [mut] or [immut], for a \
      variable the code assigns or doesn't"

@@ -12,6 +12,13 @@ module Axis = struct
     | Provenance -> "provenance"
     | Locality -> "locality"
   ;;
+
+  let of_string = function
+    | "stage" -> Some Stage
+    | "provenance" -> Some Provenance
+    | "locality" -> Some Locality
+    | _ -> None
+  ;;
 end
 
 module Atom = struct
@@ -56,14 +63,159 @@ let to_string (t : t) =
   | Atoms atoms -> String.concat ~sep:" " (List.map atoms ~f:Atom.to_string)
 ;;
 
-module Constraint = struct
+module Term = struct
   type mode = t [@@deriving sexp_of, compare, equal]
 
+  let mode_string = to_string
+
   type t =
-    { lower : mode
-    ; upper : mode
+    | Mode of mode
+    | Axis of Axis.t * mode
+    | Meet of t * Atom.t
+    | Release of t
+    | Static_if_const of t
+    | Const_if_static of t
+  [@@deriving sexp_of, compare, equal]
+
+  let rec to_string = function
+    | Mode mode -> mode_string mode
+    | Axis (axis, mode) ->
+      sprintf "%s(%s)" (Axis.to_string axis) (mode_string mode)
+    | Meet (t, atom) ->
+      sprintf "meet(%s, %s)" (to_string t) (Atom.to_string atom)
+    | Release t -> sprintf "release(%s)" (to_string t)
+    | Static_if_const t -> sprintf "static_if_const(%s)" (to_string t)
+    | Const_if_static t -> sprintf "const_if_static(%s)" (to_string t)
+  ;;
+
+  (* The axis of a term of one variable, on the side of [<=] its functions are
+     on: [`Left] for [meet] and [release], [`Right] for the others. *)
+  let rec axis t ~side =
+    let open Result.Let_syntax in
+    let inner ?(rest = "") t ~(on : Axis.t) ~name =
+      let example = sprintf "`%s(%s('m)%s)`" name (Axis.to_string on) rest in
+      match t with
+      | Mode { txt = Var _; _ } ->
+        Error
+          (sprintf
+             "the variable in `%s(...)` names its axis, as in %s"
+             name
+             example)
+      | _ ->
+        let%bind axis = axis t ~side in
+        if Axis.equal axis on
+        then Ok ()
+        else
+          Error
+            (sprintf
+               "`%s(...)` %s, but its term is on %s: as in %s"
+               name
+               (if String.is_empty rest
+                then sprintf "is on %s" (Axis.to_string on)
+                else
+                  sprintf
+                    "is on the axis of its mode%s, %s"
+                    (String.drop_prefix rest 1)
+                    (Axis.to_string on))
+               (Axis.to_string axis)
+               example)
+    in
+    let on ~(sides : [ `Left | `Right ]) ~name =
+      if Poly.equal side sides
+      then Ok ()
+      else
+        Error
+          (sprintf
+             "`%s(...)` is only on the %s of `<=`"
+             name
+             (match sides with
+              | `Left -> "left"
+              | `Right -> "right"))
+    in
+    match t with
+    | Mode { txt = Var _; _ } ->
+      Error "a mode variable here names its axis, as in `stage('m)`"
+    | Mode { txt = Atoms _; _ } ->
+      Error "a constraint on one axis relates two mode variables"
+    | Axis (axis, { txt = Var _; _ }) -> Ok axis
+    | Axis (axis, { txt = Atoms _; _ }) ->
+      Error
+        (sprintf
+           "`%s(...)` takes a mode variable, as in `%s('m)`: a mode like \
+            `portable` names its axis"
+           (Axis.to_string axis)
+           (Axis.to_string axis))
+    | Meet (t, atom) ->
+      let%bind () = on ~sides:`Left ~name:"meet" in
+      let%map () =
+        inner
+          t
+          ~on:(Atom.axis atom)
+          ~name:"meet"
+          ~rest:(", " ^ Atom.to_string atom)
+      in
+      Atom.axis atom
+    | Release t ->
+      let%bind () = on ~sides:`Left ~name:"release" in
+      let%map () = inner t ~on:Locality ~name:"release" in
+      Axis.Locality
+    | Static_if_const t ->
+      let%bind () = on ~sides:`Right ~name:"static_if_const" in
+      let%map () = inner t ~on:Stage ~name:"static_if_const" in
+      Axis.Provenance
+    | Const_if_static t ->
+      let%bind () = on ~sides:`Right ~name:"const_if_static" in
+      let%map () = inner t ~on:Provenance ~name:"const_if_static" in
+      Axis.Stage
+  ;;
+end
+
+module Constraint = struct
+  type t =
+    { lower : Term.t
+    ; upper : Term.t
     }
   [@@deriving sexp_of, compare, equal]
 
-  let to_string { lower; upper } = to_string lower ^ " <= " ^ to_string upper
+  let to_string { lower; upper } =
+    Term.to_string lower ^ " <= " ^ Term.to_string upper
+  ;;
+
+  let check { lower; upper } =
+    match lower, upper with
+    | Mode { txt = Atoms _; _ }, Mode { txt = Atoms _; _ } ->
+      Error
+        "a mode constraint relates a mode variable, as in `'m <= 'n` or `'m <= \
+         portable`"
+    | Mode _, Mode _ -> Ok ()
+    | Mode mode, term | term, Mode mode ->
+      let side = if phys_equal term lower then `Left else `Right in
+      (match Term.axis term ~side, mode.txt with
+       | Error message, _ -> Error message
+       | Ok axis, Var _ ->
+         Error
+           (sprintf
+              "both sides of a constraint on one axis name it: write `%s('n)` \
+               for `'n`"
+              (Axis.to_string axis))
+       | Ok _, Atoms _ ->
+         Error
+           (sprintf
+              "a bound is on the whole variable, as in `%s`"
+              (match side with
+               | `Left -> "'m <= " ^ Term.mode_string mode
+               | `Right -> Term.mode_string mode ^ " <= 'm")))
+    | _ ->
+      let open Result.Let_syntax in
+      let%bind lower_axis = Term.axis lower ~side:`Left in
+      let%bind upper_axis = Term.axis upper ~side:`Right in
+      if Axis.equal lower_axis upper_axis
+      then Ok ()
+      else
+        Error
+          (sprintf
+             "the sides of `<=` are on different axes, %s and %s"
+             (Axis.to_string lower_axis)
+             (Axis.to_string upper_axis))
+  ;;
 end

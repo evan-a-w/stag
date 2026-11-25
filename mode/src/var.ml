@@ -99,15 +99,37 @@ let allocated t reason =
     Graph.add_edge t.stage Morphism.runtime_is_gc t.provenance reason)
 ;;
 
-let submode_on a b axis reason =
+let submode_on ?(crossing = Crossing.none) a b axis reason =
   Graph.atomically (fun () ->
-    submode_axis
-      ~crossing:Crossing.none
-      ~locality:Locality_map.id
-      a
-      b
-      axis
-      reason)
+    submode_axis ~crossing ~locality:Locality_map.id a b axis reason)
+;;
+
+let meet_on (type a) a (axis : a Axis.t) (point : a) b reason =
+  let point = index axis point in
+  if point = 0
+  then Ok ()
+  else if point = Axis.Any.size (T axis) - 1
+  then
+    Graph.add_edge
+      (node a axis)
+      (Morphism.identity (T axis))
+      (node b axis)
+      reason
+  else
+    Graph.add_edge
+      (node a axis)
+      (Morphism.meet_with (T axis) point)
+      (node b axis)
+      reason
+;;
+
+let submode_meet a (point : Const.t) b reason =
+  Graph.atomically (fun () ->
+    all_axes (fun (T axis) -> meet_on a axis (Const.get point axis) b reason))
+;;
+
+let submode_meet_on a axis point b reason =
+  Graph.atomically (fun () -> meet_on a axis point b reason)
 ;;
 
 let equate a b reason =
@@ -168,6 +190,12 @@ let default_to_lower t = List.iter (nodes t) ~f:Graph.default_to_lower
 let default_to_upper t = List.iter (nodes t) ~f:Graph.default_to_upper
 let generalize ts ~rank = Graph.generalize (List.concat_map ts ~f:nodes) ~rank
 
+let create_generic ids =
+  let t = create ids ~rank:1 in
+  generalize [ t ] ~rank:0;
+  t
+;;
+
 module Instance = struct
   type var = t
 
@@ -208,8 +236,22 @@ module Node = struct
   type t = Graph.t
 
   let var_id = Graph.var_id
-  let relations = Graph.relations
+  let axis = Graph.axis
+  let lower = Graph.lower
+  let upper = Graph.upper
+  let raised = Graph.raised
 end
+
+let node_any t (Axis.Any.T axis) = node t axis
+
+let relate a morphism b reason =
+  Graph.atomically (fun () ->
+    Graph.add_edge
+      (node_any a (Morphism.dst morphism))
+      morphism
+      (node_any b (Morphism.src morphism))
+      reason)
+;;
 
 let lower_assuming (type a) t (axis : a Axis.t) ~raised : a =
   let module C = (val Axis.chain axis) in

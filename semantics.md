@@ -20,8 +20,10 @@ is rejected by the backend (the interpreter supports everything).
   tagged unions). Polymorphic records and variants are monomorphised, so their
   layout is static.
 - Pointers are one type, `ptr[t]`; where the pointee lives (static data, GC
-  heap, data stack, foreign memory) is given by the pointer's modes, not its
-  type.
+  heap, data stack) is given by the pointer's modes, not its type.
+  `ptr[t @@ external]`, a pointer to a cell that may hold `external` values,
+  is a distinct type (see [Modes](#modes)). C's memory will have a
+  type of its own.
 - No implicit boxing: a recursive type must recurse through `ptr[t]` (see
   [Recursive types](#recursive-types)).
 - Mutation: mutable fields and stores through pointers. A store into a GC
@@ -191,7 +193,7 @@ Provenance follows reachability, not evaluation:
 
 - A block (a record, tuple or constructor, by value), a pointer and a closure
   are at least what they hold or capture; a part read from them is at most
-  their provenance. A `global_` field still counts: it is reachable.
+  their provenance. A field with a modality still counts: it is reachable.
 - What is only evaluated (a `let`'s bound expression, a sequence's first
   part, a scrutinee) doesn't count towards the result's provenance.
 - Literals and toplevel constants are `static`; prims, declared functions and
@@ -199,19 +201,28 @@ Provenance follows reachability, not evaluation:
   (`string @ external -> ...`), and an `external`'s result is trusted as
   declared.
 - A heap block holding an `external` value is itself `external`. Stores must
-  not raise a cell's provenance, as the cell's other aliases rely on it: a
-  store through a pointer (`p.* <- v`) takes only `gc` values (every pointer
-  cell is at least `gc`, and its provenance may have been forgotten by
-  subsumption). A cell holding `external` values is made by `Ptr.make` of
-  one, and keeps it. A mutable variable (`let mut`, a mutable global) has a
-  held mode of its own, inferred from what is assigned to it: an `external`
-  assignment makes it `external` (its reads then are), unless it is annotated
-  `@ gc`, which rejects it. `@ external` opts in.
-- Until pointers into foreign memory are designed, a store of a value that
-  may be a GC pointer also needs the pointer stored through to be at most
-  `gc`: an `external` pointer may be to memory the GC doesn't scan, which
-  must never hold the only reference to a GC object. Stores of pointer-free
-  values (`ptr[int]`) cross this, as they hold no GC pointer.
+  not raise a cell's provenance, as the cell's other aliases rely on it, and
+  a pointer's mode may have been raised by subsumption: what a cell may be
+  given is in the pointer's type instead: `ptr[t @@ m]`, whose `m` is
+  unified exactly, so all aliases agree on it. A store through it
+  (`p.* <- v`) takes values of at most `m`, and a read through it is at
+  least `m` (unless the type crosses), and at least `portable`: a cell may
+  change between evaluations, so what is read from it is never `const`.
+  `ptr[t]` is `ptr[t @@ nonportable gc]` (`ptr` is a type with a mode
+  parameter, `ptr['a, 'p : mode]`, and `ptr[t @@ m]` is `ptr[t, m]`), and `m`
+  may be a variable, so code can be polymorphic in it. `Ptr.make` infers
+  `m` from its argument and the cell's uses; a toplevel cell that is not
+  generalized has its `m` fixed by its definition, `gc` unless that needs
+  more. A pointer's own provenance is that of its cell (`gc`), not of what
+  the cell holds: the type says that, and can't be forgotten. A mutable variable (`let mut`, a mutable global) has
+  a held mode of its own, inferred from what is assigned to it: an
+  `external` assignment makes it `external` (its reads then are), unless it
+  is annotated `@ gc`, which rejects it. `@ external` opts in.
+- Every `ptr` points to stag's memory (static data, the GC heap or the data
+  stack), whatever its mode, so a store needn't check the pointer stored
+  through: no `external` signature takes or returns pointers yet, and C's
+  memory will have its own type (`cptr[t]`), whose stores will be limited to
+  C-compatible data.
 - A closure is `static` only if it is `const`: what it captures is then
   known at compile time, so it is emitted statically. A callback passed to C
   must be `@ static` (C may retain it), once the FFI has callbacks.
@@ -245,8 +256,8 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   records, tuples and variants of them) crosses locality: a copy of it is as
   good anywhere.
 - A function's result is at most `regional` (it outlives the function's
-  region); a toplevel, what is stored through a pointer and what a `global_`
-  field holds must be `global`. A closure is at least the localities of what
+  region); a toplevel, what is stored through a pointer and what a
+  `@@ global` field holds must be `global`. A closure is at least the localities of what
   it captures, as seen from its body (what is `local` to the enclosing body is
   `regional` inside it).
 - `exclave_ e` ends the current region early and evaluates `e` in the caller's,
@@ -260,11 +271,25 @@ machine (function) stack, and managed by the runtime as a bump allocator:
   `local` parameters (and what is read from them) are `regional`, as they
   live in the caller's region. `stack_` allocations of the current body are
   `local`. Returning needs `global` (`regional` or `local` under `exclave_`).
-- `global_` on record fields and constructor arguments: always `global`, even
-  inside a local block.
+- Modalities, `t @@ m` on a record field or constructor argument, on any
+  axis, but only `global` on locality: `regional` and `local` are relative
+  to a region, so a block returned to its caller's region with `exclave_`
+  would keep its parts `regional` there though they were allocated in the
+  callee's: building one needs the part at most `m`, and reading it from a block
+  at mode `b` gives at most `b ⊓ m` (`@@ global`: always `global`, even
+  inside a local block; `@@ portable`: embeddable even when the block isn't;
+  `@@ gc`: GC-owned even in an `external` block). A `const` modality is also
+  `static`. Through a pointer the modality is exact instead: a store takes
+  at most `m`, and a read gives `m` whatever the pointer's mode, as the
+  cell's aliases may store anything that fits. Modalities compose along a
+  path (`p.*.f`: the cell's, then the field's). A type's mode parameters
+  (`type cell['a, 'p : mode]`) are on stage and provenance only (a locality
+  atom in a mode argument is an error); for now they are invariant. A record
+  update `{ r with ... }` may change a mode parameter only if no field it
+  keeps refers to it, by its type or its modality.
 - Records have no mutable fields: mutation is through a `ptr` (`p.* <- v`,
   `p.*.x <- v`), whose pointee is storage rather than a value. Such a store
-  is implicitly `global_`, so an older region's block never points into a
+  is implicitly `@@ global`, so an older region's block never points into a
   newer region. `Unsafe.assume_global e` (name tentative) bypasses this, the
   programmer guaranteeing that `e` outlives what it is stored into. The GC
   stays safe either way: it never follows pointers into the data stack, so

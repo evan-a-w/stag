@@ -29,6 +29,10 @@ val borrow : t
     seen from the enclosing one. *)
 val release : t
 
+(** On [axis], the right adjoint of [x |-> meet x point]: [x <= right y] iff
+    [meet x point <= y]. *)
+val meet_with : Axis.Any.t -> int -> t
+
 val src : t -> Axis.Any.t
 val dst : t -> Axis.Any.t
 val is_identity : t -> bool
@@ -46,3 +50,6 @@ val left : t -> int -> int
 (** [compose m1 m2] is [m1 . m2]: [x <= m1(y)] and [y <= m2(z)] give
     [x <= (compose m1 m2)(z)]. *)
 val compose : t -> t -> t
+
+(** Identifies the morphism: equal codes, equal morphisms. *)
+val code : t -> int

@@ -96,7 +96,8 @@ let simplify ~is_generalized ~tys ~presences ~rows ~kept =
     | TCon (_, args) ->
       List.iter args ~f:(function
         | ATy ty -> walk_ty ty
-        | ARow row -> walk_row row)
+        | ARow row -> walk_row row
+        | AMode _ -> ())
     | TArrow (ty1, ty2, _) ->
       walk_ty ty1;
       walk_ty ty2

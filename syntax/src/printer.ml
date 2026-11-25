@@ -277,6 +277,7 @@ let type_param (param : Type_decl.Param.t Located.t) =
   match param.txt with
   | Ty name -> tyvar name
   | Row name -> text ("{..'" ^ name ^ "}")
+  | Mode name -> tyvar name ^^ text " : mode"
 ;;
 
 module Kind = struct
@@ -351,7 +352,10 @@ let rec type_expr roots ~prec (t : Type_expr.t) =
     paren_if
       (prec > 0)
       (type_expr roots ~prec:0 t ^^ constraints_doc constraints)
-  | Global t -> text "global_ " ^^ type_expr roots ~prec t
+  | Modality (t, mode) ->
+    (* Only where [maybe_modality] or a type argument parses it. *)
+    type_expr roots ~prec:(Int.max prec 1) t
+    ^^ text (" @@ " ^ Mode_expr.to_string mode)
 
 and mode_doc mode = text (" @ " ^ Mode_expr.to_string mode)
 
@@ -370,10 +374,14 @@ and constraints_doc constraints =
 (* A [{...}] argument is a row, so a type argument starting with a record type
    is parenthesized. *)
 and type_arg roots : Type_expr.arg -> Doc.t = function
+  | Ty { txt = Modality (t, mode); _ } when starts_with_record t ->
+    parens (type_expr roots ~prec:0 t)
+    ^^ text (" @@ " ^ Mode_expr.to_string mode)
   | Ty t ->
     let doc = type_expr roots ~prec:0 t in
     if starts_with_record t then parens doc else doc
   | Row r -> row roots ~label:(fun name -> "`" ^ name) r
+  | Mode mode -> text (Mode_expr.to_string mode)
 
 (* Whether [t], printed at precedence 0, starts with a record type. *)
 and starts_with_record (t : Type_expr.t) =
@@ -382,10 +390,10 @@ and starts_with_record (t : Type_expr.t) =
   | Arrow (first, _)
   | Tuple (first :: _)
   | Moded (first, _)
-  | Constrained (first, _) -> starts_with_record first
-  | Var _ | Con _
-  | Tuple []
-  | Code _ | Variant _ | Mut _ | Immut _ | Splice _ | Global _ -> false
+  | Constrained (first, _)
+  | Modality (first, _) -> starts_with_record first
+  | Var _ | Con _ | Tuple [] | Code _ | Variant _ | Mut _ | Immut _ | Splice _
+    -> false
 
 (* Whether [t], printed at precedence 0, starts with a splice, which would read
    as a definition's splice after [type t =]. *)
@@ -395,10 +403,10 @@ and starts_with_splice (t : Type_expr.t) =
   | Arrow (first, _)
   | Tuple (first :: _)
   | Moded (first, _)
-  | Constrained (first, _) -> starts_with_splice first
-  | Var _ | Con _
-  | Tuple []
-  | Code _ | Record _ | Variant _ | Mut _ | Immut _ | Global _ -> false
+  | Constrained (first, _)
+  | Modality (first, _) -> starts_with_splice first
+  | Var _ | Con _ | Tuple [] | Code _ | Record _ | Variant _ | Mut _ | Immut _
+    -> false
 
 and row_entries roots (r : Type_expr.row) =
   match r.txt with

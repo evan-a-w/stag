@@ -89,7 +89,11 @@ let found t = t.tokens.(t.pos).token
 
 let expected t what =
   match found t with
-  | At_at -> fail (loc t) "`@@` is reserved (for modalities)"
+  | At_at ->
+    fail
+      (loc t)
+      "a modality (`@@`) is only written on a type argument, as in `ptr[t @@ \
+       external]`"
   | token ->
     fail (loc t) (sprintf "expected %s, found %s" what (describe token))
 ;;
@@ -334,22 +338,60 @@ let mode_expr t : Mode_expr.t =
   | _ -> expected t "a mode like `local`, or a mode variable like `'m`"
 ;;
 
+(** A side of a constraint: a mode, or a term of a variable on one axis:
+    [axis('m)], or a function of a term, [meet(t, atom)], [release(t)],
+    [static_if_const(t)] or [const_if_static(t)]. *)
+let rec constraint_term t : Mode_expr.Term.t =
+  match peek t, peek_at t 1 with
+  | Lident name, Lparen ->
+    let call ~f =
+      advance t;
+      let open_loc = loc t in
+      advance t;
+      let term = f () in
+      close t Rparen ~opener:Lparen ~open_loc;
+      term
+    in
+    (match name, Mode_expr.Axis.of_string name with
+     | _, Some axis ->
+       call ~f:(fun () -> Mode_expr.Term.Axis (axis, mode_expr t))
+     | "meet", None ->
+       call ~f:(fun () ->
+         let term = constraint_term t in
+         if not (is t Comma) then expected t "`,`";
+         advance t;
+         match peek t with
+         | (Lident _ | External) as token ->
+           (match Mode_expr.Atom.of_string (Token.to_string token) with
+            | Some atom ->
+              advance t;
+              Mode_expr.Term.Meet (term, atom)
+            | None -> expected t "a mode like `gc`")
+         | _ -> expected t "a mode like `gc`")
+     | "release", None ->
+       call ~f:(fun () -> Mode_expr.Term.Release (constraint_term t))
+     | "static_if_const", None ->
+       call ~f:(fun () -> Mode_expr.Term.Static_if_const (constraint_term t))
+     | "const_if_static", None ->
+       call ~f:(fun () -> Mode_expr.Term.Const_if_static (constraint_term t))
+     | _ -> Mode (mode_expr t))
+  | _ -> Mode (mode_expr t)
+;;
+
 (** [with 'm <= 'n and ...], after the [with]. *)
 let mode_constraints t =
   let rec loop acc =
-    let lower = mode_expr t in
+    let start = loc t in
+    let lower = constraint_term t in
     if not (is t Less && Token.equal (peek_at t 1) Equal) then expected t "`<=`";
     advance t;
     advance t;
-    let upper = mode_expr t in
-    (match lower.txt, upper.txt with
-     | Atoms _, Atoms _ ->
-       fail
-         (Loc.merge lower.loc upper.loc)
-         "a mode constraint relates a mode variable, as in `'m <= 'n` or `'m \
-          <= portable`"
-     | _ -> ());
-    let acc = { Mode_expr.Constraint.lower; upper } :: acc in
+    let upper = constraint_term t in
+    let constraint_ = { Mode_expr.Constraint.lower; upper } in
+    (match Mode_expr.Constraint.check constraint_ with
+     | Ok () -> ()
+     | Error message -> fail (Loc.merge start (prev_loc t)) message);
+    let acc = constraint_ :: acc in
     match peek t with
     | Lident "and" ->
       advance t;
@@ -442,9 +484,27 @@ and type_app t : Type_expr.t =
   ty
 
 and type_arg t : Type_expr.arg =
+  let is_atom : Token.t -> bool = function
+    | Lident name -> Option.is_some (Mode_expr.Atom.of_string name)
+    | External -> true
+    | _ -> false
+  in
   match peek t with
   | Lbrace -> Row (record_row t)
-  | _ -> Ty (type_expr t)
+  | first when is_atom first && is_atom (peek_at t 1) -> Mode (mode_expr t)
+  (* A keyword, so never a type. *)
+  | External -> Mode (mode_expr t)
+  | _ ->
+    let ty = type_expr t in
+    if is t At_at
+    then (
+      advance t;
+      let mode = mode_expr t in
+      Ty
+        (located
+           ~loc:(Loc.merge ty.loc mode.loc)
+           (Type_expr.Modality (ty, mode))))
+    else Ty ty
 
 and record_row t =
   row
@@ -867,9 +927,8 @@ let annot t : Annot.t =
       then (
         advance t;
         let constraints = mode_constraints t in
-        let last = List.last_exn constraints in
         located
-          ~loc:(Loc.merge ty.loc last.upper.loc)
+          ~loc:(Loc.merge ty.loc (prev_loc t))
           (Type_expr.Constrained (ty, constraints)))
       else ty
     in
@@ -1381,7 +1440,15 @@ let type_param t : Type_decl.Param.t Located.t =
   match peek t with
   | Tyvar _ | Weak_tyvar _ ->
     let var = tyvar t in
-    located ~loc:var.loc (Type_decl.Param.Ty var.txt)
+    (match peek t, peek_at t 1 with
+     | Colon, Lident "mode" ->
+       advance t;
+       advance t;
+       since t start (Type_decl.Param.Mode var.txt)
+     | Colon, _ ->
+       advance t;
+       expected t "`mode`, the only kind a parameter is declared with"
+     | _ -> located ~loc:var.loc (Type_decl.Param.Ty var.txt))
   | Lbrace ->
     advance t;
     expect t Dotdot;
@@ -1391,30 +1458,38 @@ let type_param t : Type_decl.Param.t Located.t =
   | _ -> expected t "a type parameter like `'a` or `{..'r}`"
 ;;
 
-(** [global_ t], with [t] parsed by [ty], or [t]. *)
-let maybe_global t ~ty : Type_expr.t =
+(** [t @@ m], with [t] parsed by [ty], or [t]. *)
+let maybe_modality t ~(ty : _ -> Type_expr.t) : Type_expr.t =
   match peek t with
   | Global_ ->
-    let start = loc t in
-    advance t;
+    fail (loc t) "a modality is written after the type: `t @@ global`"
+  | _ ->
     let inner = ty t in
-    since t start (Type_expr.Global inner)
-  | _ -> ty t
+    if is t At_at
+    then (
+      advance t;
+      let mode = mode_expr t in
+      located
+        ~loc:(Loc.merge inner.loc mode.loc)
+        (Type_expr.Modality (inner, mode)))
+    else inner
 ;;
 
 (* [parsed] is told the arguments parsed so far, as they are parsed. An
-   exception's arguments are always global, so are not written [global_]. *)
+   exception's arguments are always global, so have no modality. *)
 let constructor_args ?(parsed = ignore) ~exception_ t =
   if is t Of
   then (
     advance t;
     let rec args acc =
-      if exception_ && is t Global_
-      then
-        fail
-          (loc t)
-          "an exception's arguments are always global: remove `global_`";
-      let acc = maybe_global t ~ty:type_app :: acc in
+      let arg = maybe_modality t ~ty:type_app in
+      (match arg.txt with
+       | Modality _ when exception_ ->
+         fail
+           arg.loc
+           "an exception's arguments are always global, and have no modality"
+       | _ -> ());
+      let acc = arg :: acc in
       parsed (List.rev acc);
       match peek t with
       | At ->
@@ -1424,7 +1499,7 @@ let constructor_args ?(parsed = ignore) ~exception_ t =
            then "an exception's arguments have no mode, they are always global"
            else
              "a constructor's argument has no mode: to make it always global, \
-              write `global_ t`")
+              write `t @@ global`")
       | Star ->
         advance t;
         args acc
@@ -1490,7 +1565,7 @@ let type_kind t ~(parsed : Type_decl.Kind.t -> unit) : Type_decl.Kind.t =
          let missing = located ~loc:name.loc (Type_expr.Tuple []) in
          parsed (Record (List.rev ((name, missing) :: !fields)));
          expect t Colon;
-         let field = name, maybe_global t ~ty:type_expr in
+         let field = name, maybe_modality t ~ty:type_expr in
          fields := field :: !fields;
          parsed (Record (List.rev !fields));
          field))

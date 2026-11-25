@@ -83,9 +83,10 @@ and type_desc (g : Type_expr.desc) (w : Type_expr.desc) : Type_expr.desc option 
     let* t = type_expr t t' in
     let+ cs = list mode_constraint cs cs' in
     Type_expr.Constrained (t, cs)
-  | Global t, Global t' ->
-    let+ t = type_expr t t' in
-    Type_expr.Global t
+  | Modality (t, m), Modality (t', m') ->
+    let* t = type_expr t t' in
+    let+ m = mode_expr m m' in
+    Type_expr.Modality (t, m)
   | ( ( Var _
       | Con _
       | Arrow _
@@ -98,17 +99,47 @@ and type_desc (g : Type_expr.desc) (w : Type_expr.desc) : Type_expr.desc option 
       | Splice _
       | Moded _
       | Constrained _
-      | Global _ )
+      | Modality _ )
     , _ ) -> None
 
 and mode_expr m m' = located (same Mode_expr.equal_desc) m m'
+
+and mode_term (term : Mode_expr.Term.t) (term' : Mode_expr.Term.t) =
+  match term, term' with
+  | Mode m, Mode m' ->
+    let+ m = mode_expr m m' in
+    Mode_expr.Term.Mode m
+  | Axis (axis, m), Axis (axis', m') ->
+    let* axis = same Mode_expr.Axis.equal axis axis' in
+    let+ m = mode_expr m m' in
+    Mode_expr.Term.Axis (axis, m)
+  | Meet (t, atom), Meet (t', atom') ->
+    let* atom = same Mode_expr.Atom.equal atom atom' in
+    let+ t = mode_term t t' in
+    Mode_expr.Term.Meet (t, atom)
+  | Release t, Release t' ->
+    let+ t = mode_term t t' in
+    Mode_expr.Term.Release t
+  | Static_if_const t, Static_if_const t' ->
+    let+ t = mode_term t t' in
+    Mode_expr.Term.Static_if_const t
+  | Const_if_static t, Const_if_static t' ->
+    let+ t = mode_term t t' in
+    Mode_expr.Term.Const_if_static t
+  | ( ( Mode _
+      | Axis _
+      | Meet _
+      | Release _
+      | Static_if_const _
+      | Const_if_static _ )
+    , _ ) -> None
 
 and mode_constraint
   ({ lower; upper } : Mode_expr.Constraint.t)
   ({ lower = lower'; upper = upper' } : Mode_expr.Constraint.t)
   =
-  let* lower = mode_expr lower lower' in
-  let+ upper = mode_expr upper upper' in
+  let* lower = mode_term lower lower' in
+  let+ upper = mode_term upper upper' in
   { Mode_expr.Constraint.lower; upper }
 
 and annot ({ ty; mode } : Annot.t) ({ ty = ty'; mode = mode' } : Annot.t) =
@@ -139,7 +170,10 @@ and arg (g : Type_expr.arg) (w : Type_expr.arg) =
   | Row r, Row r' ->
     let+ r = row r r' in
     Type_expr.Row r
-  | (Ty _ | Row _), _ -> None
+  | Mode m, Mode m' ->
+    let+ m = mode_expr m m' in
+    Type_expr.Mode m
+  | (Ty _ | Row _ | Mode _), _ -> None
 
 and binding b b' = pair name annot b b'
 and pattern g w = located pattern_desc g w

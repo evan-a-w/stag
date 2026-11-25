@@ -1,14 +1,29 @@
 open! Import
 
-type t =
-  | Id
-  | Global
-[@@deriving sexp_of, equal]
+module Step = struct
+  type t =
+    | Meet of Mode.Const.t
+    | Param of Mode_arg.t
+    | Cell of Mode_arg.t
+  [@@deriving sexp_of]
+end
 
-let of_global global = if global then Global else Id
+type t = Step.t list [@@deriving sexp_of]
 
-let compose outer inner =
-  match outer with
-  | Id -> inner
-  | Global -> Global
+let id = []
+let of_step step = [ step ]
+let of_cell held = [ Step.Cell held ]
+let compose outer inner = outer @ inner
+
+let is_global t =
+  List.exists t ~f:(function
+    | Step.Meet { locality = Global; _ } | Cell _ -> true
+    | Meet _ | Param _ -> false)
+;;
+
+let from_last_cell t =
+  List.fold t ~init:[] ~f:(fun acc (step : Step.t) ->
+    match step with
+    | Cell _ -> [ step ]
+    | Meet _ | Param _ -> acc @ [ step ])
 ;;

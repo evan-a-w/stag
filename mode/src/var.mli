@@ -33,15 +33,24 @@ module Node : sig
   (** The id of the variable it belongs to. *)
   val var_id : t -> int
 
-  (** [`Le n] for [this <= n], [`Ge n] for [n <= this], on the same axis and
-      without crossing: of a generic variable, the constraints its scheme keeps;
-      of another, those it has now. A relation through a crossing morphism is
-      left out: no annotation can write it, and nothing crosses modes until
-      crossing by kind. *)
-  val relations : t -> ([ `Le | `Ge ] * t) list
+  val axis : t -> Axis.Any.t
+
+  (** Bounds, as points of the axis by index. *)
+  val lower : t -> int
+
+  val upper : t -> int
+
+  (** The nodes that rise, with their least points (by index), if each node
+      given is raised to its point: what the constraints imply of them then.
+      [None] if one can't be. *)
+  val raised : (t * int) list -> (t * int) list option
 end
 
 val node : t -> _ Axis.t -> Node.t
+
+(** [relate a m b]: [a <= m(b)], of [a] on [Morphism.dst m] and [b] on
+    [Morphism.src m]. *)
+val relate : t -> Morphism.t -> t -> Reason.t -> (unit, Mode_error.t) Result.t
 
 (** [submode a b]: a value of mode [a] may be used at mode [b]. With [crossing],
     [a] is first lowered on the axes it crosses. On locality, [a <= locality(b)]
@@ -59,7 +68,30 @@ val submode
 val allocated : t -> Reason.t -> (unit, Mode_error.t) Result.t
 
 (** [submode a b] on [axis] only. *)
-val submode_on : t -> t -> _ Axis.t -> Reason.t -> (unit, Mode_error.t) Result.t
+val submode_on
+  :  ?crossing:Crossing.t
+  -> t
+  -> t
+  -> _ Axis.t
+  -> Reason.t
+  -> (unit, Mode_error.t) Result.t
+
+(** [submode_meet a c b]: [meet a c <= b], on every axis. *)
+val submode_meet
+  :  t
+  -> Const.t
+  -> t
+  -> Reason.t
+  -> (unit, Mode_error.t) Result.t
+
+(** [submode_meet_on a axis c b]: [meet a c <= b] on [axis]. *)
+val submode_meet_on
+  :  t
+  -> 'a Axis.t
+  -> 'a
+  -> t
+  -> Reason.t
+  -> (unit, Mode_error.t) Result.t
 
 val equate : t -> t -> Reason.t -> (unit, Mode_error.t) Result.t
 val at_least : t -> 'a Axis.t -> 'a -> Reason.t -> (unit, Mode_error.t) Result.t
@@ -100,6 +132,9 @@ val default_to_upper : t -> unit
     fail with a mismatch at a generic variable (one of its instances would be
     inconsistent anyway). *)
 val generalize : t list -> rank:int -> unit
+
+(** Generic and unconstrained: a placeholder each instance copies afresh. *)
+val create_generic : Id_source.t -> t
 
 module Instance : sig
   type var := t

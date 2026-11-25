@@ -360,14 +360,15 @@ module Of_value = struct
       | _ -> raise Bad_arguments)
   ;;
 
-  (* Where a type is, so which of [t @ m], [global_ t] and [t with ...] it may
-     be, as the parser allows. *)
+  (* Where a type is, so which of [t @ m], [t @@ m] and [t with ...] it may be,
+     as the parser allows. *)
   module Type_position = struct
     type t =
       | Plain
       | Arrow_side
       | Member
       | Annotation
+      | Type_arg
   end
 
   let rec type_expr ?(at = Type_position.Plain) value ~loc : Type_expr.t =
@@ -402,7 +403,7 @@ module Of_value = struct
              (match at with
               | Arrow_side ->
                 Moded (arg 0 (type_expr ~loc), arg 1 (mode_expr ~loc))
-              | Plain | Member | Annotation ->
+              | Plain | Member | Annotation | Type_arg ->
                 unexpected
                   ~expected:
                     "a type without a mode: a mode is only on a function \
@@ -412,37 +413,80 @@ module Of_value = struct
              (match at with
               | Annotation ->
                 let constraint_ value : Mode_expr.Constraint.t =
-                  let lower, upper =
-                    pair (mode_expr ~loc) (mode_expr ~loc) value
+                  let constraint_ : Mode_expr.Constraint.t =
+                    match value with
+                    | Value.Tuple [ lower; upper ] ->
+                      { lower = within (Component 0) (mode_term ~loc) lower
+                      ; upper = within (Component 1) (mode_term ~loc) upper
+                      }
+                    | value -> unexpected ~expected:"a pair" value
                   in
-                  match lower.txt, upper.txt with
-                  | Atoms _, Atoms _ ->
+                  match Mode_expr.Constraint.check constraint_ with
+                  | Ok () -> constraint_
+                  | Error message ->
                     unexpected
-                      ~expected:"a constraint relating a mode variable"
+                      ~expected:
+                        (sprintf "a well-formed mode constraint (%s)" message)
                       value
-                  | _ -> { lower; upper }
                 in
                 (match arg 1 (list constraint_) with
                  | [] ->
                    unexpected ~expected:"at least one mode constraint" value
                  | constraints ->
                    Constrained (arg 0 (type_expr ~loc), constraints))
-              | Plain | Arrow_side | Member ->
+              | Plain | Arrow_side | Member | Type_arg ->
                 unexpected
                   ~expected:
                     "a type without mode constraints: they are only on an \
                      annotation's type"
                   value)
-           | "Global", 1 ->
+           | "Modality", 2 ->
              (match at with
-              | Member -> Global (arg 0 (type_expr ~loc))
+              | Type_arg | Member ->
+                Modality (arg 0 (type_expr ~loc), arg 1 (mode_expr ~loc))
               | Plain | Arrow_side | Annotation ->
                 unexpected
                   ~expected:
-                    "a type without [global_]: [global_] is only on a record \
-                     field or a constructor's argument"
+                    "a type without a modality: a modality is only on a type \
+                     argument, a record field or a constructor's argument, as \
+                     in [ptr[t @@ external]]"
                   value)
            | _ -> raise Bad_arguments))
+
+  and mode_axis value : Mode_expr.Axis.t =
+    variant
+      "Stag.Mode_expr.Axis.t"
+      value
+      ~f:(fun constructor args : Mode_expr.Axis.t ->
+        match constructor, Args.count args with
+        | "Stage", 0 -> Stage
+        | "Provenance", 0 -> Provenance
+        | "Locality", 0 -> Locality
+        | _ -> raise Bad_arguments)
+
+  and mode_atom value : Mode_expr.Atom.t =
+    variant
+      "Stag.Mode_expr.Atom.t"
+      value
+      ~f:(fun constructor args : Mode_expr.Atom.t ->
+        match Args.count args with
+        | 0 -> Mode_expr.Atom.t_of_sexp (Atom constructor)
+        | _ -> raise Bad_arguments)
+
+  and mode_term value ~loc : Mode_expr.Term.t =
+    variant
+      "Stag.Mode_expr.Term.t"
+      value
+      ~f:(fun constructor args : Mode_expr.Term.t ->
+        let arg i read = Args.read args i read in
+        match constructor, Args.count args with
+        | "Mode", 1 -> Mode (arg 0 (mode_expr ~loc))
+        | "Axis", 2 -> Axis (arg 0 mode_axis, arg 1 (mode_expr ~loc))
+        | "Meet", 2 -> Meet (arg 0 (mode_term ~loc), arg 1 mode_atom)
+        | "Release", 1 -> Release (arg 0 (mode_term ~loc))
+        | "Static_if_const", 1 -> Static_if_const (arg 0 (mode_term ~loc))
+        | "Const_if_static", 1 -> Const_if_static (arg 0 (mode_term ~loc))
+        | _ -> raise Bad_arguments)
 
   and mode_expr value ~loc : Mode_expr.t =
     let atom value =
@@ -502,8 +546,9 @@ module Of_value = struct
       ~f:(fun constructor args : Type_expr.arg ->
         let arg i read = Args.read args i read in
         match constructor, Args.count args with
-        | "Ty", 1 -> Ty (arg 0 (type_expr ~loc))
+        | "Ty", 1 -> Ty (arg 0 (type_expr ~at:Type_arg ~loc))
         | "Row", 1 -> Row (arg 0 (row ~labels:Label ~loc))
+        | "Mode", 1 -> Mode (arg 0 (mode_expr ~loc))
         | _ -> raise Bad_arguments)
 
   and type_decl value ~loc : Type_decl.t =
@@ -518,6 +563,7 @@ module Of_value = struct
              match constructor, Args.count args with
              | "Ty", 1 -> Ty (arg 0 (ident Tyvar))
              | "Row", 1 -> Row (arg 0 (ident Tyvar))
+             | "Mode", 1 -> Mode (arg 0 (ident Tyvar))
              | _ -> raise Bad_arguments))
     in
     { name = field "name" (name Lower ~loc) value

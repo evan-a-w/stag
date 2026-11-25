@@ -73,6 +73,7 @@ and presence_bound =
 and arg =
   | ATy of ty
   | ARow of row
+  | AMode of Mode_arg.t
 
 (** An upper bound of a row variable: every entry the variable gets must also be
     an entry of [row], unless shadowed where the bound arose. The variables of
@@ -165,6 +166,14 @@ val arrow : ty -> ty -> ty
 
 val error_name : string
 val is_error : ty -> bool
+val ptr_name : string
+
+(** [ptr[pointee @@ held]], by default [ptr[pointee]], whose cell holds only
+    values of provenance at most [held] ([gc] by default). *)
+val ptr : ?held:Mode_arg.t -> ty -> ty
+
+(** Of a pointer type, with what it points to. *)
+val of_ptr : ty -> (ty * Mode_arg.t) option
 
 (** Copies of types as they are now, unaffected by later unification, eg. for an
     error to show them as they were when it arose. Variables keep their ids, and
@@ -257,6 +266,9 @@ end
 val iter_ty : 'e Iter.t @ local -> ty -> (unit, 'e) Result.t
 val iter_row : 'e Iter.t @ local -> row -> (unit, 'e) Result.t
 
+(** The variables of what the cells of the pointers in the type may hold. *)
+val iter_held : ty -> f:(Mode.Var.t -> unit) @ local -> unit
+
 (** Renders types for humans. Variables are named in order of appearance,
     consistently across the types one printer renders; weak (unbound) ones are
     prefixed with [_]. A cyclic type is written [(t as 'a)], with ['a] in [t]
@@ -270,11 +282,28 @@ module Printer : sig
       ([Prelude_path.to_string_hum]). With [modes], the mode variables of arrows
       are named, and the constraints between them listed by [where] (as
       [with 'm0 <= 'm1]); otherwise only the modes of arrows fixed to other than
-      a declaration's default are. *)
-  val create : ?type_name:(string -> string) -> ?modes:bool -> unit -> t
+      a declaration's default are, and with [name_mode_args], mode arguments not
+      known are named, as [ptr[t @@ 'm0]], rather than left out. A side fixed to
+      a constant is written by its atoms other than the default, as both
+      declarations and annotations read an unwritten mode back. [declaration]
+      prints the body of a type's declaration, whose mode variables are its
+      parameters. *)
+  val create
+    :  ?type_name:(string -> string)
+    -> ?modes:bool
+    -> ?name_mode_args:bool
+    -> ?declaration:bool
+    -> unit
+    -> t
 
   (** With [atomic], parenthesized unless a single word or bracketed. *)
   val ty : ?atomic:bool -> t -> ty -> string
+
+  (** Renders a mode argument. *)
+  val mode_arg : t -> Mode_arg.t -> string
+
+  (** The head of a type's declaration, as [cell['a, 'm0 : mode]]. *)
+  val declaration : t -> string -> arg list -> string
 
   (** Renders [row] as the context of a code type. *)
   val context : t -> row -> string

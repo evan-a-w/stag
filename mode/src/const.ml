@@ -47,3 +47,10 @@ let get (type a) t (axis : a Axis.t) : a =
   | Provenance -> t.provenance
   | Locality -> t.locality
 ;;
+
+let set (type a) t (axis : a Axis.t) (point : a) =
+  match axis with
+  | Stage -> { t with stage = point }
+  | Provenance -> { t with provenance = point }
+  | Locality -> { t with locality = point }
+;;

@@ -52,7 +52,7 @@ module Constructor : sig
     ; index : int
     ; args : Type.ty list
     ; result : Type.ty
-    ; global_args : bool list
+    ; modalities : Member_modality.t list
     }
   [@@deriving sexp_of]
 end
@@ -65,7 +65,7 @@ module Field : sig
     ; record : Type.ty
     ; index : int
     ; ty : Type.ty
-    ; is_global : bool
+    ; modality : Member_modality.t
     }
   [@@deriving sexp_of]
 
@@ -131,8 +131,13 @@ module Annotation_vars : sig
   (** Variables are created at [rank] on first use. *)
   val create : Fresh.t -> rank:Type.rank -> t
 
-  (** The mode a mode variable stands for. *)
-  val mode : t -> string -> Mode.Var.t
+  (** The mode a mode variable stands for, an error if the name is also a type
+      or row variable. *)
+  val mode
+    :  t
+    -> string
+    -> loc:Loc.t
+    -> (Mode.Var.t, Typecheck_error.t) Result.t
 end
 
 (** The type, and the syntax with each type it names by its canonical name
@@ -188,8 +193,11 @@ val reflect
   -> string
   -> (Reflected_decl.t option, Typecheck_error.t) Result.t
 
-(** Of the field of canonical name [name]. *)
-val field_modality : t -> string -> Modality.t
+(** Of the field of canonical name [name], in a record of type [record]. *)
+val field_modality : t -> string -> record:Type.ty -> Modality.t
+
+(** A member's modality, in a value of type [of_]. *)
+val modality : Member_modality.t -> of_:Type.ty -> Modality.t
 
 (** Whether values of [ty] hold no pointers by value: immediates, and tuples,
     records and variants of such types. [false] while unknown, e.g. for a

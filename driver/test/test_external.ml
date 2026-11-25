@@ -222,7 +222,7 @@ let f : int -> int @ portable = plain
   [%expect
     {|
     This expression has type int -> int but an expression was expected of type int -> int
-    Their modes differ, in ways types don't print: This is nonportable, because a function type fixes it, then the function types are unified, but must be at most portable, because it is annotated portable (at t.stag:3:21-29)
+    Their modes differ, in ways types don't print: This is nonportable, because a function type fixes it, as the function types are unified, but must be at most portable, because it is annotated portable (at t.stag:3:21-29)
     |}];
   modes {|
 external results : int @ local -> int @ external = "labs"
@@ -236,7 +236,7 @@ external const_result : int -> int @ const = "labs"
 external bad : int @ 'm -> int = "labs"
 |};
   [%expect
-    {| The mode variable 'm is not allowed in a declaration: its arrows have fixed modes |}]
+    {| The mode variable 'm is not allowed in a declaration unless it is a parameter declared ['m : mode]: its arrows have fixed modes |}]
 ;;
 
 let%expect_test "externals are const toplevels" =

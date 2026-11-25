@@ -20,7 +20,7 @@ module Constructor : sig
   type t =
     { name : string
     ; args : Type.ty list
-    ; global_args : bool list (** Per argument: whether written [global_]. *)
+    ; modalities : Member_modality.t list (** Per argument. *)
     }
   [@@deriving sexp_of]
 end
@@ -29,7 +29,7 @@ module Field : sig
   type t =
     { name : string
     ; ty : Type.ty
-    ; is_global : bool
+    ; modality : Member_modality.t
     }
   [@@deriving sexp_of]
 end
