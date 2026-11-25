@@ -92,8 +92,19 @@ closure's own mode is the mode of the arrow value, like any value's.
   result has the arrow's result mode, joined with `portable`: calling runs
   code, so an application is never `const` (a Rust-style `const fn` could
   later be an arrow whose result is `const` when its arguments are).
-- **Unification** equates the modes of two arrows: there is no subtyping
-  (variance) of arrow modes for now, a known limitation.
+- **Variance.** Where a value is used at a type (an application's function
+  and argument, an annotation, a binding's annotated type, an expected
+  result, a field or constructor argument), the types' structure is unified
+  but the modes in them are related by variance: a function's argument modes
+  contravariantly, its result modes covariantly (nesting composes: an
+  argument's argument is covariant), the [curry] mode exactly. A type's
+  parameters get the variance of their uses: an immutable field, a
+  constructor argument and a `box`'s contents covariant, a `ptr`'s contents
+  and mode argument invariant (aliases of a cell must agree), solved as a
+  fixpoint over recursive types. Variance is inferred, never written. The
+  value then has the type it is used at. Where nothing is used as the other
+  (a match's arms, a list's elements, a polymorphic variable's uses),
+  types are equal.
 - **Polymorphism.** Mode variables are generalised with the type variables of
   a scheme, with the constraints between them, and copied per instance, so
   `let apply f x = f x` works for portable and nonportable `f` alike.
@@ -127,7 +138,8 @@ closure's own mode is the mode of the arrow value, like any value's.
 By default, types show only fixed modes other than the default, so most
 signatures print as without modes. With modes shown
 (`Signature.to_string_hum ~modes:true`), mode variables are named `'m0`,
-`'m1`, ... and their constraints follow the type:
+`'m1`, ... (one written once and related to nothing as `_`, which reads
+back as a fresh variable) and their constraints follow the type:
 
 ```
 val apply : ('a @ 'm1 -> 'b @ 'm2) @ 'm0 -> ('a @ 'm4 -> 'b @ 'm5) @ 'm3
@@ -474,12 +486,17 @@ Each step is a branch stacked on the previous one.
   pointer's own provenance), composing along `p.*.f`. `ptr`'s covers stage
   and provenance; its locality is always `global`. Types take mode
   parameters, `type cell['a, 'p : mode]`, applied as `cell[string, external]`
-  (the declaration says which arguments are modes); invariant for now. Mode
+  (the declaration says which arguments are modes). Mode
   parameters (and so `ptr`'s cells) are on stage and provenance only, and a
   modality's locality is only `global`. `ptr` is declared
   `ptr['a, 'p : mode]`, with `ptr[t @@ m]` as sugar. A cell's reads are at
   least `portable` (never `const`). Record updates keep the mode parameters
   of the fields they copy.
+- **I. Variance**: modes in types related by variance where a value is used
+  at a type (see [Arrow modes](#arrow-modes)), mode parameters' variance
+  inferred, an immutable `box['a]` (covariant, read as a part) that `list`
+  is built of, so `list` is covariant. A mode variable written once and
+  related to nothing prints as `_`, which reads back as a fresh variable.
 
 ## Later
 
