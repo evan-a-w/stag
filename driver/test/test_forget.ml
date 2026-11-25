@@ -296,7 +296,7 @@ let c (u : unit) = (f u, .< f >.)
 |};
   [%expect
     {|
-    val f : unit @ 'm0 -> unit @ 'm1 with portable <= 'm0 and 'm1 <= regional
+    val f : unit @ 'm0 -> unit @ _ with portable <= 'm0
     val c : unit @ _ -> unit * <unit @ _ -> unit @ _>{..'a} @ _
     |}];
   show
@@ -375,7 +375,7 @@ let y = let _ = b in fun a -> a
     {|
     val b : int
     val c : int
-    val y : '_a @ '_m0 -> '_a @ '_m1 with '_m0 <= '_m1 and release(locality('_m0)) <= locality('_m1)
+    val y : '_a @ '_m0 -> '_a @ '_m1 with stage('_m0) <= stage('_m1) unless pointer_free('_a) and provenance('_m0) <= provenance('_m1) unless pointer_free('_a) and release(locality('_m0)) <= locality('_m1) unless pointer_free('_a)
     |}];
   show
     {|
@@ -389,7 +389,7 @@ let y = let _ = b in fun a -> a
     module M : sig
       val zz : int
     end
-    val y : '_a @ '_m0 -> '_a @ '_m1 with '_m0 <= '_m1 and release(locality('_m0)) <= locality('_m1)
+    val y : '_a @ '_m0 -> '_a @ '_m1 with stage('_m0) <= stage('_m1) unless pointer_free('_a) and provenance('_m0) <= provenance('_m1) unless pointer_free('_a) and release(locality('_m0)) <= locality('_m1) unless pointer_free('_a)
     |}]
 ;;
 

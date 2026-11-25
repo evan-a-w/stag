@@ -188,7 +188,7 @@ let get (r @ local) = Ptr.make r.g
 let get_l (r @ local) = Ptr.make r.l
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:4:15-20), then r is passed to the function (at t.stag:4:24-36), then r is used (at t.stag:4:33-34), then its field is read (at t.stag:4:33-36), then it is passed to a function (at t.stag:4:24-36), but must be at most global, because Ptr.make holds it, then a function is used at a type with other modes |}];
+    {| This is regional, because it is annotated local (at t.stag:4:15-20), then r is passed to the function (at t.stag:4:24-36), then r is used (at t.stag:4:33-34), then its type turned out to be r, which has pointers, then its field is read (at t.stag:4:33-36), then it is passed to a function (at t.stag:4:24-36), but must be at most global, because Ptr.make holds it, then a function is used at a type with other modes |}];
   locality
     {|
 type r = { g : ptr[int] @@ global; l : ptr[int] }
@@ -215,7 +215,7 @@ type t = A of ptr[int] @@ global * ptr[int]
 let h (x @ local) = match x with A (g, _) -> Ptr.make g
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:4:13-18), then r is passed to the function (at t.stag:4:22-65), then r is used (at t.stag:4:28-29), then l is used (at t.stag:4:64-65), then it is passed to a function (at t.stag:4:55-65), but must be at most global, because Ptr.make holds it, then a function is used at a type with other modes |}]
+    {| This is regional, because it is annotated local (at t.stag:4:13-18), then r is passed to the function (at t.stag:4:22-65), then r is used (at t.stag:4:28-29), then its type turned out to be r, which has pointers, then l is used (at t.stag:4:64-65), then it is passed to a function (at t.stag:4:55-65), but must be at most global, because Ptr.make holds it, then a function is used at a type with other modes |}]
 ;;
 
 let%expect_test "let mut" =
@@ -370,7 +370,7 @@ let f (q : ptr[unit -> unit]) =
   x () [@nontail]
 |};
   [%expect
-    {| This is local, because it is allocated by [stack_] (at t.stag:3:19-38), then it is part of the value (at t.stag:3:19-38), then p is captured by a closure (at t.stag:3:59-60), then the closure is made (at t.stag:3:42-72), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:3:71-72), then x is used (at t.stag:3:71-72), then it defines x (at t.stag:3:2-4:17) |}];
+    {| This is local, because it is allocated by [stack_] (at t.stag:3:19-38), then it is part of the value (at t.stag:3:19-38), then p is captured by a closure (at t.stag:3:59-60), then the closure is made (at t.stag:3:42-72), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:3:71-72), then its type turned out to be unit -> unit, which has pointers, then x is used (at t.stag:3:71-72), then it defines x (at t.stag:3:2-4:17) |}];
   locality
     {|
 let f (q : ptr[unit -> unit]) =
@@ -378,7 +378,7 @@ let f (q : ptr[unit -> unit]) =
   x () [@nontail]
 |};
   [%expect
-    {| This is local, because it is allocated by [stack_] (at t.stag:3:10-36), then it is part of the value (at t.stag:3:10-36), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:3:34-35), then x is used (at t.stag:3:34-35), then it defines x (at t.stag:3:2-4:17) |}]
+    {| This is local, because it is allocated by [stack_] (at t.stag:3:10-36), then it is part of the value (at t.stag:3:10-36), but must be at most global, because it is stored through a pointer, which may outlive any region (at t.stag:3:34-35), then its type turned out to be unit -> unit, which has pointers, then x is used (at t.stag:3:34-35), then it defines x (at t.stag:3:2-4:17) |}]
 ;;
 
 let%expect_test "explicit substitutions are bound at their own modes" =

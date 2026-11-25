@@ -10,6 +10,7 @@ module Member_modality = Stag_types.Member_modality
 module Variance = Stag_types.Variance
 module Param_variance = Stag_types.Param_variance
 module Fresh = Stag_types.Fresh
+module Var_layout = Stag_types.Var_layout
 module Unify = Stag_types.Unify
 module Unification_error = Stag_types.Unification_error
 module Scheme = Stag_types.Scheme

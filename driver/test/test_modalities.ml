@@ -32,7 +32,7 @@ type r = { g : ptr[int] @@ global; l : ptr[int] }
 let l (r @ local) = Ptr.make r.l
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:3:11-16), then r is passed to the function (at t.stag:3:20-32), then r is used (at t.stag:3:29-30), then its field is read (at t.stag:3:29-32), then it is passed to a function (at t.stag:3:20-32), but must be at most global, because Ptr.make holds it, then a function is used at a type with other modes |}];
+    {| This is regional, because it is annotated local (at t.stag:3:11-16), then r is passed to the function (at t.stag:3:20-32), then r is used (at t.stag:3:29-30), then its type turned out to be r, which has pointers, then its field is read (at t.stag:3:29-32), then it is passed to a function (at t.stag:3:20-32), but must be at most global, because Ptr.make holds it, then a function is used at a type with other modes |}];
   (* Stage: what a [@@ portable] field holds is portable, whatever else the
      record holds. *)
   check
@@ -546,7 +546,7 @@ let get_f : r -> (string @ nonportable gc global -> string @ nonportable gc glob
 let use (x @ local) = get_f {f = fun s -> s} x
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:4:13-18), then x is passed to the function (at t.stag:4:22-46), then x is used (at t.stag:4:45-46), then it is passed to a function (at t.stag:4:22-46), but must be at most global, because it is annotated nonportable gc global (at t.stag:3:27-48), then a function is used at a type with other modes |}]
+    {| This is regional, because it is annotated local (at t.stag:4:13-18), then x is passed to the function (at t.stag:4:22-46), then x is used (at t.stag:4:45-46), then its type turned out to be string, which has pointers, then it is passed to a function (at t.stag:4:22-46), but must be at most global, because it is annotated nonportable gc global (at t.stag:3:27-48), then a function is used at a type with other modes |}]
 ;;
 
 let%expect_test "printing: a variable's relation to itself" =

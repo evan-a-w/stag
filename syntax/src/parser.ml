@@ -381,16 +381,43 @@ let rec constraint_term t : Mode_expr.Term.t =
   | _ -> Mode (mode_expr t)
 ;;
 
+(** ['a] or [..'r], of a kind. *)
+let layout_var t =
+  match peek t with
+  | Dotdot ->
+    advance t;
+    "..'" ^ (tyvar t).txt
+  | Tyvar _ -> "'" ^ (tyvar t).txt
+  | _ -> expected t "a type variable like `'a`"
+;;
+
+let pointer_free t =
+  match peek t with
+  | Lident "pointer_free" -> advance t
+  | _ -> expected t "`pointer_free`"
+;;
+
 (** [with 'm <= 'n and ...], after the [with]. *)
 let mode_constraints t =
   let rec loop acc =
     let start = loc t in
-    let lower = constraint_term t in
-    if not (is t Less && Token.equal (peek_at t 1) Equal) then expected t "`<=`";
-    advance t;
-    advance t;
-    let upper = constraint_term t in
-    let constraint_ = { Mode_expr.Constraint.lower; upper } in
+    let constraint_ : Mode_expr.Constraint.t =
+      match peek t, peek_at t 1 with
+      | Tyvar _, Colon | Dotdot, Tyvar _ ->
+        let var = layout_var t in
+        if not (is t Colon) then expected t "`:`";
+        advance t;
+        pointer_free t;
+        Pointer_free var
+      | _ ->
+        let lower = constraint_term t in
+        if not (is t Less && Token.equal (peek_at t 1) Equal)
+        then expected t "`<=`";
+        advance t;
+        advance t;
+        let upper = constraint_term t in
+        Submode { lower; upper }
+    in
     (match Mode_expr.Constraint.check constraint_ with
      | Ok () -> ()
      | Error message -> fail (Loc.merge start (prev_loc t)) message);

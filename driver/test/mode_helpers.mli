@@ -17,6 +17,9 @@ val round_trip : string -> show:[ `Signature | `Copies | `Quiet ] -> unit
 
 val checked : string -> (Signature.Item.t list, string list) Result.t
 
+(** Its errors, each where it is. *)
+val located_errors : string -> (unit, (Loc.t * string) list) Result.t
+
 (** Prints the signature of [source], as [signature], then where each allocation
     of its toplevels is made (see [Typed.Allocation]), or its errors. *)
 val allocations : string -> unit

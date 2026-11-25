@@ -224,7 +224,36 @@ let sexp_of_t { loc; kind; in_scope = _ } =
   [%sexp_of: Kind.t Located.t] { txt = kind; loc }
 ;;
 
-let create ~loc kind = { loc; kind; in_scope = None }
+(* An instance needing pointer-free values is where it fails: the binding that
+   gave it pointers, at [loc], is said in the reason. *)
+let at_instance ~loc (error : Mode.Error.t) =
+  match error with
+  | Has_pointers { because; bound = { instance = Some instance; _ } as bound }
+    ->
+    let because =
+      List.map because ~f:(fun (reason : Mode.Reason.t) ->
+        if Loc.is_none reason.loc && not (Loc.equal loc instance)
+        then { reason with loc }
+        else reason)
+    in
+    Some (instance, Mode.Error.Has_pointers { because; bound })
+  | Has_pointers _ | Mismatch _ | Unequal _ | Exceeds _ -> None
+;;
+
+let create ~loc (kind : Kind.t) =
+  let relocated =
+    match kind with
+    | Mode_error error ->
+      Option.map (at_instance ~loc error) ~f:(fun (loc, error) ->
+        loc, Kind.Mode_error error)
+    | Unification_error (Bound_var error) ->
+      Option.map (at_instance ~loc error) ~f:(fun (loc, error) ->
+        loc, Kind.Unification_error (Bound_var error))
+    | _ -> None
+  in
+  let loc, kind = Option.value relocated ~default:(loc, kind) in
+  { loc; kind; in_scope = None }
+;;
 
 let within t ~in_scope =
   match t.in_scope with
@@ -257,41 +286,55 @@ let level_name level =
   | level -> sprintf "inside %d quote(s) (level %d)" level level
 ;;
 
-let mode_message (error : Mode.Error.t) =
+(* Why a type has pointers is given once in a message: [said] are the reasons
+   given already. *)
+let mode_reasons ?(said = String.Hash_set.create ()) because =
+  List.filter_map because ~f:(fun ({ loc; what } : Mode.Reason.t) ->
+    if Loc.is_none loc && String.is_substring what ~substring:"turned out to be"
+    then
+      Option.some_if
+        (Hash_set.strict_add said what |> Hash_set.Ok_or_duplicate.is_ok)
+        what
+    else if Loc.is_none loc
+    then Some what
+    else Some (sprintf "%s (at %s)" what (Loc.to_string loc)))
+  |> List.remove_consecutive_duplicates ~equal:String.equal
+  |> String.concat ~sep:", then "
+;;
+
+let mode_message : Mode.Error.t -> string =
   let point (type a) (axis : a Mode.Axis.t) (point : a) =
     let module C = (val Mode.Axis.chain axis) in
     Sexp.to_string (C.sexp_of_t point) |> String.lowercase
   in
-  let reason ({ loc; what } : Mode.Reason.t) =
-    if Loc.is_none loc
-    then what
-    else sprintf "%s (at %s)" what (Loc.to_string loc)
-  in
-  let reasons because =
-    List.map because ~f:reason
-    |> List.remove_consecutive_duplicates ~equal:String.equal
-    |> String.concat ~sep:", then "
-  in
-  match error with
+  function
+  | Has_pointers { because; bound } ->
+    sprintf
+      "This type has pointers, because %s, but must be pointer-free, because %s"
+      (mode_reasons because)
+      (mode_reasons [ bound.reason ])
   | Mismatch { var = _; axis; lower; upper; lower_because; upper_because } ->
+    let said = String.Hash_set.create () in
+    let lower_because = mode_reasons ~said lower_because in
+    let upper_because = mode_reasons ~said upper_because in
     sprintf
       "This is %s, because %s, but must be at most %s, because %s"
       (point axis lower)
-      (reasons lower_because)
+      lower_because
       (point axis upper)
-      (reasons upper_because)
+      upper_because
   | Unequal { axis; first; second; because } ->
     sprintf
       "The modes %s and %s must be equal, because %s"
       (point axis first)
       (point axis second)
-      (reason because)
+      (mode_reasons [ because ])
   | Exceeds { axis; lower; upper; because } ->
     sprintf
       "This is %s, but must be at most %s, because %s"
       (point axis lower)
       (point axis upper)
-      (reason because)
+      (mode_reasons [ because ])
 ;;
 
 let unification_message (error : Unification_error.t) ~show_type =

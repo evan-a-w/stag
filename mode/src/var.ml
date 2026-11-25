@@ -84,21 +84,42 @@ let crosses (type a) (crossing : Crossing.t) (axis : a Axis.t) =
   | Locality -> crossing.locality
 ;;
 
+(* What [crossed] (a value that crosses) and [full] (one that doesn't) add, with
+   the crossing of [axis]. *)
+let with_crossing ~crossing axis ~crossed ~full ~guard =
+  match (crosses crossing axis : Crossing.When.t) with
+  | Never -> full ()
+  | Always -> crossed ()
+  | While_pointer_free layout ->
+    let%bind.Result () = crossed () in
+    guard layout
+;;
+
 let submode_axis (type a) ~crossing ~locality t1 t2 (axis : a Axis.t) reason =
-  match axis, crosses crossing axis with
-  | Locality, false ->
-    (match Locality_map.morphism locality with
-     | None -> Ok ()
-     | Some morphism -> Graph.add_edge t1.locality morphism t2.locality reason)
-  | _, false ->
-    Graph.add_edge
-      (node t1 axis)
-      (Morphism.identity (T axis))
-      (node t2 axis)
-      reason
-  | Stage, true ->
-    Graph.add_edge t1.stage Morphism.cross_portable t2.stage reason
-  | (Provenance | Locality), true -> Ok ()
+  let full =
+    match axis with
+    | Locality ->
+      Option.map (Locality_map.morphism locality) ~f:(fun morphism ->
+        t1.locality, morphism, t2.locality)
+    | Stage | Provenance ->
+      Some (node t1 axis, Morphism.identity (T axis), node t2 axis)
+  in
+  with_crossing
+    ~crossing
+    axis
+    ~crossed:(fun () ->
+      match axis with
+      | Stage -> Graph.add_edge t1.stage Morphism.cross_portable t2.stage reason
+      | Provenance | Locality -> Ok ())
+    ~full:(fun () ->
+      match full with
+      | None -> Ok ()
+      | Some (lo, morphism, hi) -> Graph.add_edge lo morphism hi reason)
+    ~guard:(fun layout ->
+      match full with
+      | None -> Ok ()
+      | Some (lo, morphism, hi) ->
+        Graph.Layout.guard_edge lo morphism hi ~guards:[ layout ] reason)
 ;;
 
 let submode ?(crossing = Crossing.none) ?(locality = Locality_map.id) a b reason
@@ -157,16 +178,20 @@ let at_least' t axis point reason =
 
 let at_most' (type a) ~crossing t (axis : a Axis.t) (point : a) reason =
   let point = index axis point in
-  if not (crosses crossing axis)
-  then Graph.at_most (node t axis) point reason
-  else (
-    match axis with
-    | Stage ->
-      Graph.at_most
-        t.stage
-        (Morphism.right Morphism.cross_portable point)
-        reason
-    | Provenance | Locality -> Ok ())
+  with_crossing
+    ~crossing
+    axis
+    ~crossed:(fun () ->
+      match axis with
+      | Stage ->
+        Graph.at_most
+          t.stage
+          (Morphism.right Morphism.cross_portable point)
+          reason
+      | Provenance | Locality -> Ok ())
+    ~full:(fun () -> Graph.at_most (node t axis) point reason)
+    ~guard:(fun layout ->
+      Graph.Layout.guard_upper (node t axis) point ~guards:[ layout ] reason)
 ;;
 
 let at_least t axis point reason =
@@ -277,6 +302,21 @@ module Node = struct
   let above = Graph.above
   let at_most = Graph.at_most
   let at_least = Graph.at_least
+
+  module Guarded = struct
+    type kind = Graph.Guarded.kind =
+      | Edge of t * Morphism.t * t
+      | Upper of t * int
+      | Lower of t * int
+
+    type t = Graph.Guarded.t =
+      { kind : kind
+      ; guards : Graph.Layout.t list
+      ; holds : bool
+      }
+
+    let among = Graph.Guarded.among
+  end
 end
 
 let node_any t (Axis.Any.T axis) = node t axis
@@ -290,7 +330,11 @@ let relate a morphism b reason =
       reason)
 ;;
 
-let lower_assuming (type a) t (axis : a Axis.t) ~raised : a =
+let lower_assuming (type a) t (axis : a Axis.t) ~(raised : int -> a option) : a =
   let module C = (val Axis.chain axis) in
-  C.of_index_exn (Graph.lower_assuming (node t axis) ~raised)
+  C.of_index_exn
+    (Graph.lower_assuming (node t axis) ~raised:(fun node ->
+       Option.map (raised (Graph.var_id node)) ~f:C.index))
 ;;
+
+let waits_on t axis = snd (Graph.lower_sources (node t axis))

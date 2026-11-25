@@ -100,6 +100,8 @@ type t =
   (** Constructors and fields, whose names differ by case. *)
   ; references : Name_reference.t Loc.Table.t option
   ; report : Typecheck_error.t -> unit
+  ; layouts : Var_layout.t Set_once.t
+  (** Set by [create]: what a layout is depends on the types declared. *)
   }
 
 let create_tables fresh ~record_references ~report =
@@ -118,6 +120,7 @@ let create_tables fresh ~record_references ~report =
   ; declared_types = String.Table.create ()
   ; declared_members = String.Table.create ()
   ; references = Option.some_if record_references (Loc.Table.create ())
+  ; layouts = Set_once.create ()
   }
 ;;
 
@@ -252,17 +255,21 @@ let find_type t module_ path ~loc =
       (Typecheck_error.create ~loc (Unbound_type (Path (Path.of_string name))))
 ;;
 
+type env = t
+
 module Annotation_vars = struct
   type t =
     { fresh : Fresh.t
+    ; layouts : Var_layout.t
     ; rank : Type.rank
     ; tys : Type.ty String.Table.t
     ; rows : Type.row String.Table.t
     ; modes : Mode.Var.t String.Table.t
     }
 
-  let create fresh ~rank =
-    { fresh
+  let create (env : env) ~rank =
+    { fresh = env.fresh
+    ; layouts = Set_once.get_exn env.layouts
     ; rank
     ; tys = String.Table.create ()
     ; rows = String.Table.create ()
@@ -549,14 +556,59 @@ module Vars = struct
            (Invalid_mode "a constraint on one axis relates two mode variables"))
   ;;
 
+  (* Of ['a] or [..'r]. *)
+  let layout vars name ~loc =
+    let%map.Result ty =
+      match String.chop_prefix name ~prefix:"..'" with
+      | Some name ->
+        let%map.Result row = Annotation_vars.row vars name ~loc in
+        Type.TRecord { id = -1; row }
+      | None ->
+        Annotation_vars.ty
+          vars
+          (String.chop_prefix_if_exists name ~prefix:"'")
+          ~loc
+    in
+    Var_layout.layout_of vars.layouts ty
+  ;;
+
   (* [lower <= upper]: between variables, on every axis or the one named, or
      bounding a variable by the atoms, on their axes. *)
-  let mode_constraint
-    t
-    ({ lower; upper } as constraint_ : Syntax.Mode_expr.Constraint.t)
-    ~loc
+  let rec mode_constraint t (constraint_ : Syntax.Mode_expr.Constraint.t) ~loc
     : (unit, Typecheck_error.t) Result.t
     =
+    let reason =
+      Mode.Reason.create
+        ~loc
+        (sprintf
+           "it is annotated %s"
+           (Syntax.Mode_expr.Constraint.to_string constraint_))
+    in
+    let checked result =
+      Result.map_error result ~f:(fun error ->
+        Typecheck_error.create ~loc (Mode_error error))
+    in
+    match t, constraint_ with
+    | Params _, Pointer_free name ->
+      error ~loc (Mode_variable_in_declaration name)
+    | Annotation vars, Pointer_free name ->
+      (match%bind.Result layout vars name ~loc with
+       | Pointer_free -> Ok ()
+       | Has_pointers ->
+         error
+           ~loc
+           (Invalid_mode
+              (sprintf "%s has pointers, so is not pointer_free" name))
+       | Depends layouts ->
+         checked
+           (List.fold_result layouts ~init:() ~f:(fun () layout ->
+              Mode.Layout.bound_by layout reason)))
+    | _, Submode { lower; upper } -> submode t ~lower ~upper ~loc
+
+  and submode t ~lower ~upper ~loc =
+    let constraint_ : Syntax.Mode_expr.Constraint.t =
+      Submode { lower; upper }
+    in
     let reason =
       Mode.Reason.create
         ~loc
@@ -775,9 +827,10 @@ let rec elaborate'
             vars
             constraint_
             ~loc:
-              (Loc.merge
-                 (Vars.term_loc constraint_.lower)
-                 (Vars.term_loc constraint_.upper)))
+              (match constraint_ with
+               | Submode { lower; upper } ->
+                 Loc.merge (Vars.term_loc lower) (Vars.term_loc upper)
+               | Pointer_free _ -> loc))
       in
       ty, Type_expr.Constrained (syntax, constraints)
     | Modality _ -> Error (Typecheck_error.create ~loc Misplaced_modality)
@@ -1351,17 +1404,6 @@ let variances t =
   lookup
 ;;
 
-let create ?(record_references = false) fresh ~report =
-  let t = create_tables fresh ~record_references ~report in
-  Fresh.set_value_parameters fresh (fun name ->
-    Option.bind (Hashtbl.find t.types name) ~f:(fun decl ->
-      match value_parameters t decl with
-      | Ok params -> params
-      | Error _ -> None));
-  Fresh.set_variances fresh (variances t);
-  t
-;;
-
 let define t (decl : Decl.t) =
   let%bind.Result kind, reflected = prepare t decl in
   let%map.Result (_ : Int.Set.t option) = value_parameters t decl in
@@ -1585,7 +1627,9 @@ let field_modality t name ~record =
   modality (Hashtbl.find_exn t.fields name).modality ~of_:record
 ;;
 
-let pointer_free t ty =
+let layouts t = Set_once.get_exn t.layouts
+
+let pointer_free' t ty ~unknown =
   let visiting = String.Hash_set.create () in
   let visiting_ids = Int.Hash_set.create () in
   (* Shared aliases and nodes are visited once: a DAG of them is linear. *)
@@ -1619,6 +1663,8 @@ let pointer_free t ty =
       node ~table:links params id ~f:(fun () -> ty_ params target)
     | _ ->
       (match Type.canonical_ty ty with
+       | TVar ({ state = Unbound _; _ } as var) ->
+         unknown (fun () -> Var_layout.of_ty (layouts t) var)
        | TVar _ | TArrow _ | TCode _ -> false
        | TCon (("int" | "bool" | "char" | "unit"), []) -> true
        | TCon (name, _) when Type.is_pointer_name name -> false
@@ -1635,11 +1681,16 @@ let pointer_free t ty =
     | _ ->
       (match Type.canonical_row row with
        | REmpty -> true
+       | RVar ({ state = Unbound _; _ } as var) ->
+         unknown (fun () -> Var_layout.of_row (layouts t) var)
        | RVar _ -> false
        | RExtend (_, presence, _, entry, rest) ->
          (match Type.canonical_presence presence with
           | Absent -> true
-          | Present | PVar _ -> ty_ params entry)
+          | Present -> ty_ params entry
+          | PVar var ->
+            ty_ params entry
+            || unknown (fun () -> Var_layout.of_presence (layouts t) var))
          && row_ params rest)
   and arg params : Type.arg -> bool = function
     | ATy entry -> ty_ params entry
@@ -1692,4 +1743,31 @@ let pointer_free t ty =
       result
   in
   ty_ Int.Map.empty ty
+;;
+
+let pointer_free t ty = pointer_free' t ty ~unknown:(fun _ -> false)
+
+let layout_of t ty : Var_layout.Layout_of.t =
+  let unknown = ref [] in
+  if not
+       (pointer_free' t ty ~unknown:(fun layout ->
+          unknown := layout () :: !unknown;
+          true))
+  then Has_pointers
+  else (
+    match Mode.Layout.roots !unknown with
+    | [] -> Pointer_free
+    | layouts -> Depends layouts)
+;;
+
+let create ?(record_references = false) fresh ~report =
+  let t = create_tables fresh ~record_references ~report in
+  Fresh.set_value_parameters fresh (fun name ->
+    Option.bind (Hashtbl.find t.types name) ~f:(fun decl ->
+      match value_parameters t decl with
+      | Ok params -> params
+      | Error _ -> None));
+  Fresh.set_variances fresh (variances t);
+  Set_once.set_exn t.layouts (Var_layout.create ~layout_of:(layout_of t));
+  t
 ;;

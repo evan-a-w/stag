@@ -27,6 +27,32 @@ let tidy (var : (Type.presence, Type.presence_bound) Type.Var.t) =
      @ equalities
 ;;
 
+let set_state (var : (_, _) Type.Var.t) state =
+  match
+    Mode.Private.Undo.atomically (fun () ->
+      let old = var.state in
+      Mode.Private.Undo.record (fun () -> var.state <- old);
+      var.state <- state;
+      Ok ())
+  with
+  | Ok () -> ()
+  | Error (_ : Nothing.t) -> .
+;;
+
+(* Binds [var] to [target], running its watchers. If one fails, none of their
+   changes are made, and [var] is bound to [failed] without them: what they
+   would decide is never decided, nor what failed added later, so the error is
+   reported once. Join edges settled by the binding are restored unsettled;
+   classes and edge lists merged stay so, relating [failed] to the rest. *)
+let link (var : (_, _) Type.Var.t) target ~failed =
+  Mode.Layout.attempt (fun () ->
+    set_state var (Link target);
+    Watcher.bind var.watchers target)
+  |> Result.map_error ~f:(fun error ->
+    set_state var (Link failed);
+    error)
+;;
+
 let lower_presence (var : (Type.presence, _) Type.Var.t) ~rank =
   match var.state with
   | Unbound rank' when rank' > rank -> var.state <- Unbound rank
@@ -532,8 +558,7 @@ and unify_structure state ~ty1 ~ty2 =
         ~occurs:(ATy (TVar var))
         (ATy ty)
     in
-    var.state <- Link ty;
-    Watcher.bind var.watchers ty
+    link var ty ~failed:Type.error
   | _ -> Error (Type_mismatch (ty1, ty2, Structural_mismatch))
 
 (* What is to have [var]'s structure ([Sub_edge.related]) and is in [ty] is made
@@ -560,8 +585,7 @@ and bind_rvar state (var : _ Type.Var.t) row =
       ~occurs:(ARow (RVar var))
       (ARow row)
   in
-  var.state <- Link row;
-  let%bind.Result () = Watcher.bind var.watchers row in
+  let%bind.Result () = link var row ~failed:row in
   let%bind.Result () =
     if var.in_record then in_record' state row ~whole:row else Ok ()
   in
@@ -747,7 +771,7 @@ and unify_presence' state ~presence1 ~presence2 ~error =
        lower_presence var' ~rank:(Type.Var.rank_exn var);
        add_in_bounds_of var' var.in_bounds_of
      | Present | Absent -> ());
-    var.state <- Link presence;
+    let%bind.Result () = link var presence ~failed:presence in
     let bounds = var.bounds in
     var.bounds <- [];
     let%map.Result () =
@@ -1105,11 +1129,14 @@ and edges fresh ~join (var : Sub_edge.var) =
            match Type.canonical_ty ty with
            | TVar ({ state = Unbound _; _ } as other) ->
              let other_state = edges fresh ~join:state.join other in
-             if state.join then other_state.join <- true;
+             if state.join && not other_state.join
+             then (
+               Mode.Private.Undo.record (fun () -> other_state.join <- false);
+               other_state.join <- true);
              Sub_edge.merge_edges state other_state;
              Ok ()
            | _ -> Fresh.settle fresh (fun () -> settle fresh state))
-         ~instantiate:(fun (_ : Sub_edge.State.t) -> None)
+         ~instantiate:(fun (_ : Sub_edge.State.t) ~at:_ -> None)
          ~generalize:(fun (_ : Sub_edge.State.t) -> fix fresh var)
        :: var.watchers;
     state
@@ -1120,13 +1147,18 @@ and edges fresh ~join (var : Sub_edge.var) =
    bind's. *)
 and settle fresh (state : Sub_edge.State.t) =
   let (pending : Sub_edge.Edges.t) = Union_find.get state.edges in
-  let edges = List.rev pending.edges in
+  let ({ edges = pending_edges; count } : Sub_edge.Edges.t) = pending in
+  Mode.Private.Undo.record (fun () ->
+    pending.edges <- pending_edges;
+    pending.count <- count);
+  let edges = List.rev pending_edges in
   pending.edges <- [];
   pending.count <- 0;
   List.fold edges ~init:(Ok ()) ~f:(fun result (edge : Sub_edge.t) ->
     if edge.settled
     then result
     else (
+      Mode.Private.Undo.record (fun () -> edge.settled <- false);
       edge.settled <- true;
       let settled =
         sub_ty'

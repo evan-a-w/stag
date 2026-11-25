@@ -2,8 +2,9 @@ open! Import
 open Mode_helpers
 
 (* Random [with] clauses over fixed signature shapes, with arrows, [ptr]
-   modalities and a type's mode parameter: each annotation either is rejected,
-   or prints a type that reads back as exactly what it says. *)
+   modalities and a type's mode parameter, some with ['a : pointer_free]: each
+   annotation either is rejected, or prints a type that reads back as exactly
+   what it says. *)
 
 let shapes =
   [ "'a @ 'm0 -> 'a @ 'm1"
@@ -62,6 +63,7 @@ let program random =
     List.init
       (1 + Random.State.int random 3)
       ~f:(fun _ -> constraint_ random vars)
+    @ if Random.State.int random 3 = 0 then [ "'a : pointer_free" ] else []
   in
   sprintf
     "type box['p : mode] = { v : string @@ 'p }\n\
@@ -94,7 +96,7 @@ let%expect_test "random [with] clauses read back exactly" =
   print_s
     [%message
       (!accepted : int) (!rejected : int) ~wrong:(Queue.length wrong : int)];
-  [%expect {| ((!accepted 392) (!rejected 8) (wrong 0)) |}]
+  [%expect {| ((!accepted 394) (!rejected 6) (wrong 0)) |}]
 ;;
 
 let%expect_test "a mode argument's fixed locality isn't compared" =

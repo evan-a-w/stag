@@ -30,6 +30,7 @@ module Stage = Axis.Stage
 module Provenance = Axis.Provenance
 module Locality = Axis.Locality
 module Const = Const
+module Layout = Layout
 module Crossing = Crossing
 module Locality_map = Locality_map
 module Error = Mode_error

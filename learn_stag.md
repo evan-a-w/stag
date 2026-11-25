@@ -469,6 +469,19 @@ let s = sum3 1 2 3                  (* val s : int = 7 *)
    the same value anywhere, so a local int is returned freely. *)
 let read_local (p : ptr[int] @ local) = p.*
 (* val read_local : ptr[int] @ local -> int *)
+(* Crossing waits for the type: [c] is known to be an int only once it is
+   compared, yet it crosses. *)
+let sign (p : ptr[int] @ local) f =
+  let c = f p in
+  match Int.lt c 0 with
+  | true -> c
+  | false -> 0
+(* val sign : ptr[int] @ local -> ((ptr[int] @ regional -> int) -> int) @ local *)
+(* A type variable may be bounded to pointer-free types (with 'a :
+   pointer_free), so its values cross: a local argument is returned global. *)
+let keep : 'a @ 'm -> 'a @ global with 'a : pointer_free = fun x -> x
+(* val keep : 'a -> 'a *)
+let kept (x : int @ local) = keep x     (* val kept : int @ local -> int *)
 
 (* exclave_ ends the region early, so a function can return a value allocated
    in its caller's region. *)
@@ -483,6 +496,20 @@ let leak x = stack_ (Ptr.make x)
 (* Error: This is local, because it is allocated by [stack_] *)
 (* ... but must be at most regional, because the function returns it, ending
    its region (return it with [exclave_] instead) *)
+```
+
+While a weak variable's type isn't known, a constraint crossing would spare
+waits on it, and `stag check` (which shows modes in full) prints it with what
+it waits on: after `let cell = Ptr.make (loop ())`, a function storing a local
+argument into `cell` is `'_a @ 'm0 -> unit with local <= 'm0 and 'm0 <= global
+unless pointer_free('_a)`. This form is only printed, never written.
+
+```stag-error
+(* An instance of a pointer-free variable at a type with pointers is an error
+   where it is used. *)
+let keep : 'a @ 'm -> 'a @ global with 'a : pointer_free = fun x -> x
+let s = keep "s"
+(* Error: This type has pointers, because its type turned out to be string *)
 ```
 
 ```stag-error
@@ -701,7 +728,8 @@ let get_x (r : r) = r.x
 (* val get_x : r @ 'm0 -> string @ 'm1 with stage('m0) <= stage('m1) and meet(provenance('m0), gc) <= provenance('m1) and release(locality('m0)) <= locality('m1) *)
 
 let embed (x @ portable) = .< x >.
-(* val embed : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with portable <= 'm0 and 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and 'm0 <= portable and gc <= 'm1 *)
+(* val embed : 'a @ 'm0 -> <'a>{..'b} @ 'm1 with portable <= 'm0 and release(locality('m0)) <= locality('m1) and 'm0 <= portable gc and gc <= 'm1 *)
+(* What is lifted into code is copied as static data, so must be in the GC heap: [gc]. *)
 
 let mk (x : ptr[int] @ local) = exclave_ stack_ (Ptr.make 1)
 (* val mk : ptr[int] @ 'm0 -> ptr[int @@ _] @ 'm1 with local <= 'm0 and nonportable gc local <= 'm1 *)
@@ -722,7 +750,9 @@ parameter is the provenance of the values held: a map of GC strings is also
 one of possibly external strings (it is covariant), but a cache, being
 mutable, is invariant. What they build goes where the caller wants it, as
 their builders return it with `exclave_`, and `int` values cross every axis.
-A value used at compile time and lifted into code must be `portable`.
+A value used at compile time and lifted into code must be `portable`, and
+at most `gc` (static data can't refer outside the GC heap); the code then
+holds it as a constant (`const static`).
 
 ```stag
 let m = Core.Map.of_list Core.Int.compare [(1, "a"); (2, "b")]
@@ -737,6 +767,7 @@ let keywords = .~(
     Core.Map.of_list Core.String.compare [("let", 1); ("in", 2)] in
   .< table >.)
 let is_let = Core.Map.mem Core.String.compare keywords "let"  (* val is_let : bool = true *)
+let static_keywords @ const static = keywords
 
 let cache : Core.Lru.t[int, string, gc] = Core.Lru.create 2 Core.Int.compare
 let used =

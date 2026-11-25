@@ -446,7 +446,7 @@ module Program_env = struct
     ; modes : Mode.Id_source.t
     ; const_toplevels : bool
     ; compile_time_c_calls : Compile_time_c_calls.t
-    ; parameter_modes : Int.Hash_set.t
+    ; parameter_modes : Mode.Var.t Int.Table.t
     (** The ids of the modes of parameters: what they are is decided by each use
         of their function, so is not known while it is checked. *)
     ; checking : Scc_frame.t Stack.t
@@ -651,16 +651,18 @@ module Scope = struct
 
   (* What [mode] is at least however the functions being checked are used: with
      the modes of their parameters, those within their types, and those of the
-     types of the components not finished yet raised. *)
-  let known_stage t mode =
-    let raised = Int.Hash_set.create () in
+     types of the components not finished yet raised to their upper bounds. As
+     those are now if [snapshot], however they are bounded later: as what a
+     quote embeds then makes them. *)
+  let known_stage ?(snapshot = false) t =
+    let raised = Int.Table.create () in
     let iter : Nothing.t Type.Iter.t =
       { ty = (fun ~guarded:_ _ -> Ok ())
       ; row = (fun ~guarded:_ _ -> Ok ())
       ; presence = (fun ~guarded:_ _ -> Ok ())
       ; mode =
           (fun var ->
-            Hash_set.add raised (Mode.Var.id var);
+            Hashtbl.set raised ~key:(Mode.Var.id var) ~data:var;
             Ok ())
       }
     in
@@ -670,8 +672,22 @@ module Scope = struct
         match Type.iter_ty iter ty with
         | Ok () -> ()
         | Error _ -> .);
-    Mode.Var.lower_assuming mode Stage ~raised:(fun id ->
-      Hash_set.mem t.program.parameter_modes id || Hash_set.mem raised id)
+    let upper var = (Mode.Var.upper var).stage in
+    let find id =
+      match Hashtbl.find t.program.parameter_modes id with
+      | Some _ as var -> var
+      | None -> Hashtbl.find raised id
+    in
+    let raised =
+      if snapshot
+      then (
+        let uppers = Hashtbl.map raised ~f:upper in
+        Hashtbl.iteri t.program.parameter_modes ~f:(fun ~key ~data ->
+          Hashtbl.set uppers ~key ~data:(upper data));
+        Hashtbl.find uppers)
+      else fun id -> Option.map (find id) ~f:upper
+    in
+    fun mode -> Mode.Var.lower_assuming mode Stage ~raised
   ;;
 
   let enter_closure ids t mode =
@@ -688,11 +704,52 @@ module Scope = struct
     else Mode.Crossing.none
   ;;
 
+  (* As [crossing], but for a type not yet known, until it is found to have
+     pointers. *)
+  let mode_crossing t ty =
+    match Type_env.layout_of t.program.type_env ty with
+    | Pointer_free -> Mode.Crossing.immediate
+    | Has_pointers -> Mode.Crossing.none
+    | Depends [ layout ] -> Mode.Crossing.while_pointer_free layout
+    | Depends layouts ->
+      Mode.Crossing.while_pointer_free
+        (Var_layout.above (Type_env.layouts t.program.type_env) layouts)
+  ;;
+
+  (* Whether the quote may embed a local of [ty] and [mode], by [known_stage]:
+     plain data may be, else what is [portable] however the functions being
+     checked are used. [`Wait]s while whether it has pointers, or whether what
+     it is built from does, isn't known: unless [final], assuming they do. *)
+  let embeddable t ty mode ~known_stage ~final =
+    let layout : [ `Pointer_free | `Has_pointers | `Unknown ] =
+      match Type_env.layout_of t.program.type_env ty with
+      | Pointer_free -> `Pointer_free
+      | Has_pointers -> `Has_pointers
+      | Depends layouts ->
+        if List.exists layouts ~f:Mode.Layout.has_pointers
+        then `Has_pointers
+        else if List.exists layouts ~f:Mode.Layout.is_unknown
+        then if final then `Has_pointers else `Unknown
+        else `Pointer_free
+    in
+    match layout with
+    | `Pointer_free -> `Yes
+    | `Unknown -> `Wait
+    | `Has_pointers ->
+      if not (Mode.Stage.le (known_stage mode) Portable)
+      then `No
+      else if List.is_empty (Mode.Var.waits_on mode Stage)
+      then `Yes
+      else if final
+      then `No
+      else `Wait
+  ;;
+
   let fresh_ty ids t = Type.TVar (Fresh.var ids ~rank:t.rank)
   let join_ty ids t = Type.TVar (Unify.join_var ids ~rank:t.rank)
   let fresh_row ids t = Type.RVar (Fresh.var ids ~rank:t.rank)
   let fresh_presence ids t = Type.PVar (Fresh.var ids ~rank:t.rank)
-  let instantiate ids t = Scheme.instantiate ids ~rank:t.rank
+  let instantiate ?at ids t = Scheme.instantiate ?at ids ~rank:t.rank
 
   (* Type splices are evaluated in declarations, not in what is evaluated or
      quoted then. *)
@@ -726,6 +783,8 @@ module Scope = struct
         match error with
         | Mode.Error.Mismatch { upper_because; _ } ->
           Sexp.to_string [%sexp (upper_because : Mode.Reason.t list)]
+        | Has_pointers { bound; _ } ->
+          Sexp.to_string [%sexp (bound.reason : Mode.Reason.t)]
         | Unequal _ | Exceeds _ -> Sexp.to_string [%sexp (error : Mode.Error.t)]
       in
       report t ~once (Typecheck_error.create ~loc (Mode_error error));
@@ -737,7 +796,7 @@ module Scope = struct
       ~modes:t.program.modes
       ~rank:t.rank
       ~holds:(mode_holds t)
-      ~crossing:(crossing t)
+      ~crossing:(mode_crossing t)
       ~report:(report t)
       ~allocated:
         (match t.allocations, t.quote with
@@ -828,13 +887,25 @@ module Resolution = struct
     in
     (* A local of plain data may be copied into code whatever its stage, but not
        a mutable one, whose value changes, nor a toplevel, which may not have a
-       value yet. *)
-    let crosses (entry : Env.Entry.t) =
+       value yet. One that may be, once what isn't known yet is, is until then
+       ([Scope.embeddable]). *)
+    let embeddable (entry : Env.Entry.t) =
       match entry.binder with
-      | Local _ ->
-        (not (is_mutable_local entry))
-        && (Scope.crossing scope entry.scheme).stage
-      | Toplevel _ -> false
+      | Local _ when not (is_mutable_local entry) ->
+        (match
+           Scope.embeddable
+             scope
+             entry.scheme
+             (entry.mode :> Mode.Var.t)
+             ~known_stage:(Scope.known_stage scope)
+             ~final:false
+         with
+         | `Yes | `Wait -> true
+         | `No -> false)
+      | Local _ | Toplevel _ ->
+        Mode.Stage.le
+          (Scope.known_stage scope (entry.mode :> Mode.Var.t))
+          Portable
     in
     (* Crossing a quote lock needs [portable]: so far, as only its lower bound
        is final, the constraint being added where it is used. A local of this
@@ -847,11 +918,7 @@ module Resolution = struct
            match entry.binder with
            | Toplevel _ -> entry.level <= scope.level
            | Local _ -> false)
-          && (((crosses entry
-                || Mode.Stage.le
-                     (Scope.known_stage scope (entry.mode :> Mode.Var.t))
-                     Portable)
-               && not entry.defining)
+          && ((embeddable entry && not entry.defining)
               || is_mutable_toplevel entry))
     in
     match scope.quote, entry with
@@ -879,7 +946,7 @@ module Resolution = struct
                   (Mode.Var.lower_assuming
                      (entry.mode :> Mode.Var.t)
                      Stage
-                     ~raised:(fun _ -> false))
+                     ~raised:(fun _ -> None))
                   Portable
         then Unknown
         else Nonportable
@@ -1010,7 +1077,10 @@ let function_type
     List.map args ~f:(fun (binder, (annot : Syntax.Annot.t)) ->
       let ty, resolved = annot_type annot.ty in
       let mode = moded annot.mode in
-      Hash_set.add scope.program.parameter_modes (Mode.Var.id mode);
+      Hashtbl.set
+        scope.program.parameter_modes
+        ~key:(Mode.Var.id mode)
+        ~data:mode;
       binder, ty, { annot with ty = resolved }, mode)
   in
   let res_ty, result_annot = annot_type annot in
@@ -1756,7 +1826,7 @@ let quoted_use t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
 (* An instance of [entry]'s scheme, at [loc]. A toplevel's may await others (see
    [Awaiting]): the instance's uses of them are uses by this code. *)
 let instantiate_entry t (scope : Scope.t) (entry : Env.Entry.t) ~loc =
-  let instantiate = Scope.instantiate t scope in
+  let instantiate = Scope.instantiate ~at:loc t scope in
   match entry.binder with
   | Local _ -> instantiate entry.scheme
   | Toplevel ident ->
@@ -1778,6 +1848,7 @@ let instantiate_entry t (scope : Scope.t) (entry : Env.Entry.t) ~loc =
 
 let use_entry
   ?(by_symbol = false)
+  ?embedding
   (scope : Scope.t)
   ~at
   (entry : Env.Entry.t)
@@ -1785,6 +1856,7 @@ let use_entry
   ~loc
   =
   Mode_rules.use
+    ?embedding
     (Scope.modes scope)
     at
     entry
@@ -1818,15 +1890,59 @@ let generalizes (scope : Scope.t) mode ~is_function ~loc =
      )
 ;;
 
+(* Whether a local of an earlier level may be embedded, if that isn't known yet:
+   it is decided once it is, whatever the order those are found in, by the
+   bounds of the parameters when it is embedded. Only then is it required to be
+   [portable], as embedding it requires: were it not embeddable, that would only
+   add errors. *)
+let embedding (scope : Scope.t) (entry : Env.Entry.t) ~name ~loc =
+  match entry.binder with
+  | Local ident
+    when entry.level < scope.level
+         && not (Program_env.is_mutable scope.program ident) ->
+    let known_stage = Scope.known_stage scope ~snapshot:true in
+    let embeddable ~final =
+      Scope.embeddable
+        scope
+        entry.scheme
+        (entry.mode :> Mode.Var.t)
+        ~known_stage
+        ~final
+    in
+    (match embeddable ~final:false with
+     | `Yes | `No -> None
+     | `Wait ->
+       Some
+         (fun require ->
+           Var_layout.wait
+             (Type_env.layouts scope.program.type_env)
+             (fun ~final ->
+                match embeddable ~final with
+                | `Yes ->
+                  require ();
+                  true
+                | `Wait -> false
+                | `No ->
+                  Scope.report
+                    scope
+                    (Typecheck_error.create
+                       ~loc
+                       (Not_embeddable { name; why = Unknown }));
+                  true)))
+  | Local _ | Toplevel _ -> None
+;;
+
 (* [name] is the context entry the variable is provided as, if it becomes a free
    variable of the quote. *)
 let resolution_type t (scope : Scope.t) ~at ~name ~loc : Resolution.t -> _
   = function
   | Local entry ->
-    use_entry scope ~at entry ~name ~loc;
+    let embedding = embedding scope entry ~name ~loc in
+    use_entry ?embedding scope ~at entry ~name ~loc;
     Ok (instantiate_entry t scope entry ~loc, Typed.Var_ref.Bound entry.binder)
   | Outside_quote { usable = Some entry; _ } ->
-    use_entry scope ~at entry ~name ~loc;
+    let embedding = embedding scope entry ~name ~loc in
+    use_entry ?embedding scope ~at entry ~name ~loc;
     Ok (instantiate_entry t scope entry ~loc, Persistent entry.binder)
   | By_symbol entry ->
     use_entry scope ~at entry ~name ~loc ~by_symbol:true;
@@ -2177,6 +2293,7 @@ let refine t (program : Program_env.t) (awaiting : Awaiting.t) =
     let uses = remaining @ List.rev !added in
     let errors =
       Scheme.generalize_watchers
+        t
         ~rank:0
         (schemes @ List.map uses ~f:(fun (use : Quoted_use.t) -> use.ty))
     in
@@ -2226,6 +2343,7 @@ let finish_scc
   t
   (program : Program_env.t)
   (members : Toplevel.t list)
+  ~layouts
   ~(component : Component.t)
   ~quoting
   =
@@ -2329,11 +2447,13 @@ let finish_scc
         raise_s
           [%message "finish_scc: member not checked" (member : Toplevel.t)])
   in
-  (* What generalizing does to the join variables, or, if [tys] are not
-     generalized, so fixed, its equivalent. *)
+  let others_tys = List.map others ~f:(fun (use : Quoted_use.t) -> use.ty) in
+  (* What generalizing does to the join variables and layouts, or, if [tys] are
+     not generalized, so fixed, its equivalent. Before placing allocations, as
+     they may add constraints. *)
   let settle_joins ty =
     if generalize
-    then Scheme.generalize_watchers ~rank:0 [ ty ]
+    then Scheme.generalize_watchers t ~rank:0 [ ty ]
     else Scheme.fix_joins t [ ty ]
   in
   List.iter2_exn members tys ~f:(fun member ty ->
@@ -2345,6 +2465,24 @@ let finish_scc
            (Typecheck_error.unification_error ~loc:member.expr.loc error))));
   List.iter others ~f:(fun (use : Quoted_use.t) ->
     List.iter (settle_joins use.ty) ~f:(Program_env.report_use program use));
+  (* The layouts of what its types reach but it doesn't generalize are decided
+     where they are bound. *)
+  let except =
+    if generalize
+    then None
+    else Some (Hash_set.mem (Scheme.reachable_ids ~rank:0 (tys @ others_tys)))
+  in
+  (match members with
+   | [] -> ()
+   | first :: _ ->
+     List.iter
+       (Var_layout.decide ?except ~final:true layouts ~rank:0)
+       ~f:(fun error ->
+         Program_env.report
+           program
+           (Module_scope.within
+              first.module_
+              (Typecheck_error.create ~loc:first.expr.loc (Mode_error error)))));
   (* Once the join variables are settled, and before generalizing, while the
      result may still be constrained. *)
   List.iter
@@ -2673,7 +2811,9 @@ and var_ref_type t (scope : Scope.t) ~at (var_ref : Typed.Var_ref.t) ~loc =
             }
             ~name:ident.name
             ~loc;
-          Ok (Scope.instantiate t scope info.ty, Typed.Var_ref.Persistent binder)
+          Ok
+            ( Scope.instantiate ~at:loc t scope info.ty
+            , Typed.Var_ref.Persistent binder )
         | None -> not_in_scope ident.name))
 
 (* Toplevels may be used from code run at compile time, as if bound at its
@@ -2757,14 +2897,16 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
 
 and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
   let index = Fresh.id t in
+  Var_layout.within (Type_env.layouts program.type_env) ~first_id:index
+  @@ fun layouts ->
   let scc = Scc_frame.create index Toplevel in
   scc.pending <- [ toplevel ];
   Stack.push program.checking scc;
   Exn.protect
     ~finally:(fun () -> ignore (Stack.pop_exn program.checking : Scc_frame.t))
-    ~f:(fun () -> check_toplevel_in t program toplevel scc ~index)
+    ~f:(fun () -> check_toplevel_in t program toplevel scc ~index ~layouts)
 
-and check_toplevel_in t program (toplevel : Toplevel.t) scc ~index =
+and check_toplevel_in t program (toplevel : Toplevel.t) scc ~index ~layouts =
   let unfinished = Stack.length program.unfinished in
   let reported = program.reported in
   let rank = Scc_frame.toplevel_rank in
@@ -2780,7 +2922,7 @@ and check_toplevel_in t program (toplevel : Toplevel.t) scc ~index =
     ; quote = None
     ; module_ = toplevel.module_
     ; scc
-    ; annotation_vars = Type_env.Annotation_vars.create t ~rank
+    ; annotation_vars = Type_env.Annotation_vars.create program.type_env ~rank
     ; in_expect_test = false
     ; generated = toplevel.generated
     ; syntax_splice = None
@@ -2869,7 +3011,13 @@ and check_toplevel_in t program (toplevel : Toplevel.t) scc ~index =
     if scc.lowlink = index
     then (
       let members = scc.pending in
-      finish_scc t program members ~component:scc.component ~quoting:scc.quoting;
+      finish_scc
+        t
+        program
+        members
+        ~layouts
+        ~component:scc.component
+        ~quoting:scc.quoting;
       scc.pending <- [];
       scc.quoting <- [];
       while Stack.length program.unfinished > unfinished do
@@ -3044,7 +3192,9 @@ and expr_type
        Type_env.elaborate
          scope.program.type_env
          scope.module_
-         (Type_env.Annotation_vars.create t ~rank:scope.rank)
+         (Type_env.Annotation_vars.create
+            scope.program.type_env
+            ~rank:scope.rank)
          ty
          ~splices:(Scope.splices scope)
      with
@@ -3253,6 +3403,10 @@ and expr_type
     let is_function = not (List.is_empty args) in
     let name = Source.Binder.name binder in
     let frame = ref None in
+    Var_layout.within
+      (Type_env.layouts scope.program.type_env)
+      ~first_id:(Fresh.next_id t)
+    @@ fun layouts ->
     let (fn, ident, body, closure, made), mode =
       Mode_rules.evaluate
         modes
@@ -3329,15 +3483,22 @@ and expr_type
     let { Function_type.args = arg_types; annots; result_annot; ty; _ } = fn in
     let args = List.map arg_types ~f:fst in
     let generalized = generalizes scope mode ~is_function ~loc in
+    let decided errors =
+      List.iter errors ~f:(fun error ->
+        ignore (Scope.mode_holds scope ~loc (Error error) : bool))
+    in
     if generalized
     then (
       Option.iter !frame ~f:Allocation_sites.Frame.set_generalized;
       List.iter
-        (Scheme.generalize_watchers ~rank:scope.rank [ ty ])
+        (Scheme.generalize_watchers t ~rank:scope.rank [ ty ])
         ~f:(fun error ->
           Scope.report scope (Typecheck_error.unification_error ~loc error));
+      decided (Var_layout.decide layouts ~rank:scope.rank);
       Scheme.generalize t ~rank:scope.rank [ ty ])
-    else Unify.lower_ty ~rank:scope.rank ty;
+    else (
+      Unify.lower_ty ~rank:scope.rank ty;
+      decided (Var_layout.decide layouts ~rank:scope.rank));
     let in_ =
       Env.with_bindings
         scope.locals
@@ -3660,6 +3821,7 @@ and expr_type
         Typed.Expr.Subs.Explicit subs, bindings
     in
     let failed code =
+      Var_layout.check_waiting (Type_env.layouts scope.program.type_env);
       scope.program.reported > reported || Typed.Expr.has_error code
     in
     (match scope.quote with
@@ -4386,7 +4548,10 @@ and expand
         (* Each expansion's annotations name their own type variables. *)
         let scope =
           { scope with
-            annotation_vars = Type_env.Annotation_vars.create t ~rank:scope.rank
+            annotation_vars =
+              Type_env.Annotation_vars.create
+                scope.program.type_env
+                ~rank:scope.rank
           }
         in
         check_expr t scope ~at ~expr:(Source.Expr.Generated generated) ~ty)
@@ -4811,7 +4976,7 @@ let toplevel_scope ?generated t program module_ ~level ~in_expect_test =
       Scc_frame.create
         (Fresh.id t)
         (Code { within = Stack.top program.Program_env.checking })
-  ; annotation_vars = Type_env.Annotation_vars.create t ~rank
+  ; annotation_vars = Type_env.Annotation_vars.create program.type_env ~rank
   ; in_expect_test
   ; generated
   ; syntax_splice = None
@@ -4942,6 +5107,7 @@ let run_at_compile_time t (program : Program_env.t) scope ~expr ~ty ~loc ~error 
       ~ty
   in
   Scc_frame.hand_over scope.Scope.scc;
+  Var_layout.check_waiting (Type_env.layouts program.type_env);
   if program.reported > reported
   then Error Typecheck_error.already_reported
   else (
@@ -5389,7 +5555,7 @@ let program_env
     ; modes
     ; const_toplevels
     ; compile_time_c_calls
-    ; parameter_modes = Int.Hash_set.create ()
+    ; parameter_modes = Int.Table.create ()
     ; checking = Stack.create ()
     }
   in

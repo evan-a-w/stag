@@ -29,5 +29,8 @@ val side
   -> Mode.Var.t
   -> [ `Name of string | `Atoms of (Mode.Axis.Any.t * int) list ]
 
-(** The constraints between the variables counted, as [["'m0 <= 'm1"]]. *)
-val constraints : t -> string list
+(** The constraints between the variables counted, as [["'m0 <= 'm1"]]. Those
+    not added yet, as the layouts guarding them aren't known, print as
+    ["'m0 <= 'm1 unless pointer_free('_a)"], [layout_name] naming the layouts:
+    they are never generic, so this is never read back. *)
+val constraints : t -> layout_name:(Mode.Layout.t -> string) -> string list
