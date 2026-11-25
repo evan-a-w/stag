@@ -1,6 +1,7 @@
 open! Import
 open Source_helpers
 module Arrow_modes = Stag_types.Arrow_modes
+module Mode_arg = Stag_types.Mode_arg
 module Allocation = Typed.Allocation
 module Prim = Stag_ir.Prim
 module Mode = Stag_mode
@@ -279,21 +280,96 @@ let value (instance : Instance.t) (side : Arrow_modes.Side.t) =
      | None -> failwith "the instances used from can't all hold")
 ;;
 
-(* The instance of [owner] used at type [ty], from [instance]. *)
+(* The mode variables of [scheme], each with what it is at in [ty], an instance
+   of it. *)
+let instance_vars ~scheme ~ty =
+  let pairs = Queue.create () in
+  let seen = Int.Hash_set.create () in
+  let vars exists =
+    let found = Queue.create () in
+    ignore
+      (exists ~f:(fun var ->
+         Queue.enqueue found var;
+         false)
+       : bool);
+    Queue.to_list found
+  in
+  let both of_scheme of_ty =
+    match List.zip of_scheme of_ty with
+    | Ok zipped -> Queue.enqueue_all pairs zipped
+    | Unequal_lengths -> unsupported "an instance of another shape"
+  in
+  let rec walk (scheme : Type.ty) (ty : Type.ty) =
+    match scheme, Type.canonical_ty ty with
+    | TVar { id; state = Link scheme; _ }, _ ->
+      if not (Hash_set.mem seen id)
+      then (
+        Hash_set.add seen id;
+        walk scheme ty)
+    | TVar _, _ -> ()
+    | TArrow (a, r, modes), TArrow (a', r', modes') ->
+      both (vars (Arrow_modes.exists modes)) (vars (Arrow_modes.exists modes'));
+      walk a a';
+      walk r r'
+    | TTuple tys, TTuple tys' -> List.iter2_exn tys tys' ~f:walk
+    | TCon (_, args), TCon (_, args') ->
+      List.iter2_exn args args' ~f:(fun (arg : Type.arg) (arg' : Type.arg) ->
+        match arg, arg' with
+        | ATy ty, ATy ty' -> walk ty ty'
+        | ARow row, ARow row' -> rows row row'
+        | AMode mode, AMode mode' ->
+          both (vars (Mode_arg.exists mode)) (vars (Mode_arg.exists mode'))
+        | _ -> unsupported "an instance of another shape")
+    | TCode { inner; _ }, TCode { inner = inner'; _ } -> walk inner inner'
+    | ( (TRecord { id; row } | TVariant { id; row })
+      , (TRecord { row = row'; _ } | TVariant { row = row'; _ }) ) ->
+      if not (Hash_set.mem seen (-id - 1))
+      then (
+        Hash_set.add seen (-id - 1);
+        rows row row')
+    | _ -> unsupported "an instance of another shape"
+  and rows (row : Type.row) (row' : Type.row) =
+    match row with
+    | RExtend (name, _, _, ty, rest) ->
+      let rec find (row' : Type.row) =
+        match Type.canonical_row row' with
+        | RExtend (name', _, _, ty', rest') ->
+          if String.equal name name' then Some ty' else find rest'
+        | REmpty | RVar _ -> None
+      in
+      Option.iter (find row') ~f:(walk ty);
+      rows rest row'
+    | RVar { state = Link row; _ } -> rows row row'
+    | REmpty | RVar _ -> ()
+  in
+  walk scheme ty;
+  Queue.to_list pairs
+;;
+
+(* The instance of [owner] used at type [ty], from [instance]: each of its mode
+   variables as local as it may be there. *)
 let instantiate t (instance : Instance.t) ~owner ~scheme ~ty =
   let key = owner_key owner in
+  let pins =
+    List.fold
+      (instance_vars ~scheme ~ty)
+      ~init:instance.pins
+      ~f:(fun pins (var, var') ->
+        let node = Mode.Var.node var Locality in
+        Map.set
+          pins
+          ~key:(Mode.Var.Node.var_id node)
+          ~data:(node, value instance (Var var')))
+  in
   let sides = Hashtbl.find t.sides key |> Option.value ~default:[] in
-  List.fold sides ~init:instance ~f:(fun acc side ->
-    let value = value instance (side_of ty side) in
-    { Instance.local =
-        (if value >= local then (key, side) :: acc.local else acc.local)
-    ; pins =
-        (match side_of scheme side with
-         | Fixed _ -> acc.pins
-         | Var var ->
-           let node = Mode.Var.node var Locality in
-           Map.set acc.pins ~key:(Mode.Var.Node.var_id node) ~data:(node, value))
-    })
+  { Instance.pins
+  ; local =
+      List.filter_map sides ~f:(fun side ->
+        if value instance (side_of ty side) >= local
+        then Some (key, side)
+        else None)
+      @ instance.local
+  }
 ;;
 
 let partials t (loc : Loc.t) =
@@ -734,11 +810,15 @@ let reachable values =
         match obj.payload with
         | Box v -> value v
         | Ptr cell | Cell cell -> value !cell
-        | Closure closure -> env closure.env)
-  and env env = Map.iter env ~f:(fun binding -> bound !binding)
+        | Closure closure -> env closure.env ~body:closure.body)
+  and env env ~body =
+    Map.iteri env ~f:(fun ~key:ident ~data:binding ->
+      if Typed.Expr.refers_to body ~f:(fun binder ->
+           Typed.Binder.equal binder (Local ident))
+      then bound !binding)
   and bound = function
     | Value v -> value v
-    | Generic_value { env = e; _ } -> env e
+    | Generic_value { env = e; body; _ } -> env e ~body
     | Generic_function { obj; _ } -> value (Obj obj)
   in
   List.iter values ~f:value
@@ -750,6 +830,7 @@ let run ?(override = Fn.id) source ~entry =
   Interpreter.set_limits interpreter limits;
   let typecheck = Typecheck.create ~stamps ~interpreter () in
   match Typecheck.typecheck typecheck ~program:(program source) with
+  | exception exn -> Outcome.Rejected [ Exn.to_string exn ]
   | Error { errors; partial = _ } ->
     Outcome.Rejected (List.map errors ~f:Typecheck_error.message)
   | Ok { program; _ } ->

@@ -61,7 +61,7 @@ let use3 (u : unit) = match f3 () 1 with (a, b) -> b 2
     (Returned (value 1) (on_heap 1) (in_regions 0))
     (Use_after_free
      "a call of the Closure at t.stag:7:28-46, made in the region of a call of toplevel f2, after it ended")
-    (Returned (value 2) (on_heap 1) (in_regions 1))
+    (Returned (value 2) (on_heap 2) (in_regions 0))
     (Use_after_free
      "a call of the Closure at t.stag:8:28-68, made in the region of a call of toplevel f3, after it ended")
     |}]
