@@ -1,7 +1,6 @@
 open! Import
 open Source_helpers
 module Arrow_modes = Stag_types.Arrow_modes
-module Mode_arg = Stag_types.Mode_arg
 module Allocation = Typed.Allocation
 module Prim = Stag_ir.Prim
 module Mode = Stag_mode
@@ -138,6 +137,7 @@ type t =
   ; mutable fuel : int
   ; mutable on_heap : int
   ; mutable in_regions : int
+  ; tail_calls_end_regions : bool
   }
 
 let site t kind loc =
@@ -286,23 +286,16 @@ let bounds pins node =
 ;;
 
 (* The mode variables of [scheme], each with what it is at in [ty], an instance
-   of it. *)
+   of it: another variable, or a fixed locality. *)
 let instance_vars ~scheme ~ty =
   let pairs = Queue.create () in
   let seen = Int.Hash_set.create () in
-  let vars exists =
-    let found = Queue.create () in
-    ignore
-      (exists ~f:(fun var ->
-         Queue.enqueue found var;
-         false)
-       : bool);
-    Queue.to_list found
-  in
-  let both of_scheme of_ty =
-    match List.zip of_scheme of_ty with
-    | Ok zipped -> Queue.enqueue_all pairs zipped
-    | Unequal_lengths -> unsupported "an instance of another shape"
+  let side (s : Arrow_modes.Side.t) (s' : Arrow_modes.Side.t) =
+    match s, s' with
+    | Var var, Var var' -> Queue.enqueue pairs (var, `Var var')
+    | Var var, Fixed const ->
+      Queue.enqueue pairs (var, `Fixed (Mode.Locality.index const.locality))
+    | Fixed _, _ -> ()
   in
   let rec walk (scheme : Type.ty) (ty : Type.ty) =
     match scheme, Type.canonical_ty ty with
@@ -313,7 +306,9 @@ let instance_vars ~scheme ~ty =
         walk scheme ty)
     | TVar _, _ -> ()
     | TArrow (a, r, modes), TArrow (a', r', modes') ->
-      both (vars (Arrow_modes.exists modes)) (vars (Arrow_modes.exists modes'));
+      side modes.arg modes'.arg;
+      side modes.res modes'.res;
+      side modes.curry modes'.curry;
       walk a a';
       walk r r'
     | TTuple tys, TTuple tys' -> List.iter2_exn tys tys' ~f:walk
@@ -322,8 +317,8 @@ let instance_vars ~scheme ~ty =
         match arg, arg' with
         | ATy ty, ATy ty' -> walk ty ty'
         | ARow row, ARow row' -> rows row row'
-        | AMode mode, AMode mode' ->
-          both (vars (Mode_arg.exists mode)) (vars (Mode_arg.exists mode'))
+        (* A mode argument has no locality. *)
+        | AMode _, AMode _ -> ()
         | _ -> unsupported "an instance of another shape")
     | TCode { inner; _ }, TCode { inner = inner'; _ } -> walk inner inner'
     | ( (TRecord { id; row } | TVariant { id; row })
@@ -364,7 +359,12 @@ let instantiate t (instance : Instance.t) ~owner ~scheme ~ty =
       ~f:(fun pins (var, var') ->
         let node = Mode.Var.node var Locality in
         let lower, upper = bounds pins node in
-        let used = snd (bounds instance.pins (Mode.Var.node var' Locality)) in
+        let used =
+          match var' with
+          | `Var var' ->
+            snd (bounds instance.pins (Mode.Var.node var' Locality))
+          | `Fixed used -> used
+        in
         Map.set
           pins
           ~key:(Mode.Var.Node.var_id node)
@@ -514,7 +514,7 @@ and apply t ctx value arg ~tail =
     live obj ~what:"a call";
     (* A tail call ends the region of the function making it first. *)
     let caller =
-      if tail
+      if tail && t.tail_calls_end_regions
       then (
         Region.free ctx.region;
         ctx.caller)
@@ -706,13 +706,40 @@ and eval t ctx env (expr : Typed.Expr.t) ~tail : Value.t =
        live obj ~what:"a read";
        value
      | _ -> unsupported "dereferencing a non-pointer")
-  | Store ({ desc = Deref place; _ }, value) ->
-    let place = eval' place in
+  | Store (place, value) ->
+    (* The cell stored into, and the path of fields in what it holds. *)
+    let rec path (place : Typed.Expr.t) fields =
+      match place.desc with
+      | Deref pointer -> eval' pointer, fields
+      | Field (record, field) -> path record (`Field field.index :: fields)
+      | Poly_field (record, name) -> path record (`Poly name :: fields)
+      | _ -> unsupported "storing into a non-path"
+    in
+    let pointer, fields = path place [] in
     let value = eval' value in
-    (match place with
+    let rec update old = function
+      | [] -> value
+      | `Field index :: fields ->
+        (match old with
+         | Record values ->
+           let values = Array.copy values in
+           values.(index) <- update values.(index) fields;
+           Record values
+         | _ -> unsupported "a field of a non-record")
+      | `Poly name :: fields ->
+        (match old with
+         | Poly_record values ->
+           Poly_record
+             (Map.set
+                values
+                ~key:name
+                ~data:(update (Map.find_exn values name) fields))
+         | _ -> unsupported "a field of a non-record")
+    in
+    (match pointer with
      | Obj ({ payload = Ptr cell; _ } as obj) ->
        live obj ~what:"a store";
-       cell := value;
+       cell := update !cell fields;
        unit
      | _ -> unsupported "storing into a non-pointer")
   | Match { scrutinee; cases; exception_cases = [] } ->
@@ -723,7 +750,6 @@ and eval t ctx env (expr : Typed.Expr.t) ~tail : Value.t =
      with
      | Some (env, body) -> eval' ~env ~tail body
      | None -> unsupported "no case matches")
-  | Store _
   | Match _
   | Record_update _
   | Poly_extend _
@@ -837,7 +863,7 @@ let reachable values =
   List.iter values ~f:value
 ;;
 
-let run ?(override = Fn.id) source ~entry =
+let run ?(override = Fn.id) ?(tail_calls_end_regions = true) source ~entry =
   let stamps = Stamp_counter.create () in
   let interpreter = Interpreter.create Treewalk.interpreter ~stamps in
   Interpreter.set_limits interpreter limits;
@@ -857,6 +883,7 @@ let run ?(override = Fn.id) source ~entry =
       ; fuel = 1_000_000
       ; on_heap = 0
       ; in_regions = 0
+      ; tail_calls_end_regions
       }
     in
     List.iter program.allocations ~f:(fun allocation ->

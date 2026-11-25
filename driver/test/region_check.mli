@@ -32,9 +32,14 @@ end
 
 (** Checks [source] (after [Source_helpers.prelude]) and runs its toplevel
     [entry], a function of [unit]. [override] replaces the placements the
-    typechecker gives, eg. by a broken placement, to see what goes wrong. *)
+    typechecker gives, eg. by a broken placement, to see what goes wrong.
+    Without [tail_calls_end_regions], a tail call runs its callee in the
+    caller's region, freed when the caller returns, as a call that isn't a tail
+    call would: wrong, to see that the placements rely on tail calls ending the
+    region. *)
 val run
   :  ?override:(Typed.Allocation.t -> Typed.Allocation.t)
+  -> ?tail_calls_end_regions:bool
   -> string
   -> entry:string
   -> Outcome.t
