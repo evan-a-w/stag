@@ -78,7 +78,8 @@ let defaults : 'a -> 'a = fun x -> x
 let poly : 'a @ 'm -> 'a @ 'n = fun x -> x
 let local_arg : 'a @ local -> 'a @ local = fun x -> x
 |};
-  [%expect {|
+  [%expect
+    {|
     val defaults : 'a -> 'a
     val poly : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     val local_arg : 'a @ local -> 'a @ local
@@ -88,13 +89,15 @@ let local_arg : 'a @ local -> 'a @ local = fun x -> x
 let defaults : 'a -> 'a = fun x -> x
 let use (x @ local) = defaults x
 |};
-  [%expect {| This is regional, because it is annotated local (at t.stag:3:13-18), then x is passed to the function (at t.stag:3:22-32), then x is used (at t.stag:3:31-32), then it is passed to a function (at t.stag:3:22-32), but must be at most global, because its type is written without a mode (at t.stag:2:15-17), then the function types are unified |}];
+  [%expect
+    {| This is regional, because it is annotated local (at t.stag:3:13-18), then x is passed to the function (at t.stag:3:22-32), then x is used (at t.stag:3:31-32), then it is passed to a function (at t.stag:3:22-32), but must be at most global, because its type is written without a mode (at t.stag:2:15-17), then the function types are unified |}];
   modes
     {|
 let poly : 'a @ 'm -> 'a @ 'n = fun x -> x
 let use (x @ local) = exclave_ poly x
 |};
-  [%expect {|
+  [%expect
+    {|
     val poly : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     val use : 'a @ 'm0 -> 'a @ 'm1 with local <= 'm0 and 'm0 <= 'm1
     |}];
@@ -104,7 +107,8 @@ let use (x @ local) = exclave_ poly x
 let apply (f : int -> int) x = f x
 let use u = apply (fun (x @ local) -> x) 1
 |};
-  [%expect {|
+  [%expect
+    {|
     This expression has type int @ local -> int but an expression was expected of type int -> int
     Their modes differ: This is local, because it is annotated local (at t.stag:3:28-33), then the function types are unified, but must be at most global, because its type is written without a mode (at t.stag:2:15-18)
     |}];
@@ -113,7 +117,8 @@ let use u = apply (fun (x @ local) -> x) 1
 let apply (f : string -> string) x = f x
 let use (x @ local) = apply (fun y -> y) x
 |};
-  [%expect {| This is regional, because it is annotated local (at t.stag:3:13-18), then x is passed to the function (at t.stag:3:22-42), then x is used (at t.stag:3:41-42), then it is passed to a function (at t.stag:3:22-42), but must be at most global, because its type is written without a mode (at t.stag:2:15-21), then the function types are unified, then it is passed to a function (at t.stag:2:37-40), then x is used (at t.stag:2:39-40), then x is passed to the function (at t.stag:2:37-40), then the function types are unified |}]
+  [%expect
+    {| This is regional, because it is annotated local (at t.stag:3:13-18), then x is passed to the function (at t.stag:3:22-42), then x is used (at t.stag:3:41-42), then it is passed to a function (at t.stag:3:22-42), but must be at most global, because its type is written without a mode (at t.stag:2:15-21), then the function types are unified, then it is passed to a function (at t.stag:2:37-40), then x is used (at t.stag:2:39-40), then x is passed to the function (at t.stag:2:37-40), then the function types are unified |}]
 ;;
 
 let%expect_test "parameters used in quotes are free variables" =
