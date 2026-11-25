@@ -578,8 +578,8 @@ let twice (u : unit) =
     val twice : unit @ _ -> box[int] * box[int] @ 'm0 with gc <= 'm0
     t.stag:3:17-52 Closure in twice: region
     t.stag:3:17-52 Closure in twice: region
-    t.stag:3:35-45 Box in twice.g: heap, caller's region if res is local
-    t.stag:3:35-45 Box in twice.g: heap, caller's region if res is local
+    t.stag:3:35-45 Box in twice.g#1: heap, caller's region if res is local
+    t.stag:3:35-45 Box in twice.g#2: heap, caller's region if res is local
     |}]
 ;;
 

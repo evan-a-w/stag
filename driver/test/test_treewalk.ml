@@ -336,6 +336,7 @@ let y = x
     { Typed.Expr.desc = Var (Bound (Toplevel y))
     ; ty = Type.error
     ; loc = Loc.none
+    ; made = Typed.Expr.Made.none
     }
   in
   print_s

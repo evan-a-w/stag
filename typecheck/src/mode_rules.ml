@@ -26,11 +26,20 @@ module Ctx = struct
     ; holds : loc:Loc.t -> (unit, Mode.Error.t) Result.t -> bool
     ; crossing : Type.ty -> Mode.Crossing.t
     ; report : Typecheck_error.t -> unit
-    ; allocated : Site.t -> unit
+    ; allocated : Site.t -> Typed.Allocation.Id.t option
+    ; exclaved : bool
     }
 
-  let create ~modes ~rank ~holds ~crossing ~report ~allocated =
-    { modes; rank; holds; crossing; report; allocated }
+  let create ~modes ~rank ~holds ~crossing ~report ~allocated ~locks =
+    let exclaved =
+      List.find_map locks ~f:(fun (lock : Env.Lock.t) ->
+        match lock.kind with
+        | Exclave -> Some true
+        | Closure _ | Region -> Some false
+        | Quote _ | Splice -> None)
+      |> Option.value ~default:false
+    in
+    { modes; rank; holds; crossing; report; allocated; exclaved }
   ;;
 
   let fresh t = Mode.Var.create t.modes ~rank:t.rank
@@ -449,31 +458,39 @@ module Alloc = struct
     mode
   ;;
 
+  (* Under [exclave_], its mode is the caller's, returned or not. *)
+  let here (ctx : Ctx.t) : Site.Position.t =
+    if ctx.exclaved then Exclaved else Here
+  ;;
+
   let record (ctx : Ctx.t) (expected : Expected.t) ~loc ~kind mode =
     site expected;
     ctx.allocated
       { Site.loc
       ; kind
       ; mode
-      ; position = (if Expected.returned expected then Returned else Here)
+      ; position =
+          (if Expected.returned expected && not ctx.exclaved
+           then Returned
+           else here ctx)
       }
   ;;
 
   let closure ctx expected ~loc f =
     let why = "the closure is made" in
     let closure = allocated ctx ~loc ~why in
-    record ctx expected ~loc ~kind:Closure closure;
+    let id = record ctx expected ~loc ~kind:Closure closure in
     let result = f closure in
     joins ctx expected closure ~loc ~why;
-    result
+    result, id
   ;;
 
   let code ctx expected ~loc =
     let why = "the code is built" in
     let code = allocated ctx ~loc ~why in
-    record ctx expected ~loc ~kind:Code code;
+    let id = record ctx expected ~loc ~kind:Code code in
     joins ctx expected code ~loc ~why;
-    code
+    code, id
   ;;
 
   let pointer ctx expected ~loc ~kind mode = record ctx expected ~loc ~kind mode
@@ -486,11 +503,11 @@ module Alloc = struct
          Locality
          Global
          (reason ~loc "it is made by a function used as a value"));
-    ctx.allocated { Site.loc; kind; mode; position = Here }
+    ctx.allocated { Site.loc; kind; mode; position = here ctx }
   ;;
 
   let cell (ctx : Ctx.t) ~loc mode =
-    ctx.allocated { Site.loc; kind = Cell; mode; position = Here }
+    ctx.allocated { Site.loc; kind = Cell; mode; position = here ctx }
   ;;
 
   let stack ctx expected ~loc f =
@@ -524,13 +541,15 @@ end
 module Function = struct
   let partial_applications ctx ~closure ~arg_modes ~partial_modes ~loc =
     let reason = reason ~loc "a partial application holds it" in
-    List.iteri partial_modes ~f:(fun index partial ->
-      ctx.Ctx.allocated
-        { Site.loc
-        ; kind = Partial_application
-        ; mode = partial
-        ; position = Caller
-        };
+    List.filter_mapi partial_modes ~f:(fun index partial ->
+      let id =
+        ctx.Ctx.allocated
+          { Site.loc
+          ; kind = Partial_application
+          ; mode = partial
+          ; position = Caller
+          }
+      in
       Ctx.add
         ctx
         ~loc
@@ -546,7 +565,8 @@ module Function = struct
       Ctx.add ctx ~loc (Mode.Var.submode closure partial reason);
       List.iteri arg_modes ~f:(fun index' arg ->
         if index' <= index
-        then Ctx.add ctx ~loc (Mode.Var.submode arg partial reason)))
+        then Ctx.add ctx ~loc (Mode.Var.submode arg partial reason));
+      id)
   ;;
 
   let param ctx ~arg_mode ~name ~loc =

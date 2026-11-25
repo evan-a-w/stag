@@ -2,7 +2,7 @@ open! Import
 
 module Frame = struct
   type t =
-    { id : int
+    { id : Typed.Allocation.Id.t
     ; name : string
     ; loc : Loc.t
     ; ty : Type.ty
@@ -10,34 +10,30 @@ module Frame = struct
     ; mutable generalized : bool
     }
 
+  let id t = t.id
   let set_generalized t = t.generalized <- true
-
-  (* The generalized [let]s from the toplevel down to [t]. *)
-  let rec lets t =
-    let outer = Option.value_map t.parent ~default:[] ~f:lets in
-    if t.generalized then outer @ [ t ] else outer
-  ;;
 end
 
 type t =
   { toplevel : Typed.Ident.t
-  ; mutable sites : (Mode_rules.Site.t * Frame.t option) list
+  ; fresh : unit -> Typed.Allocation.Id.t
+  ; mutable sites :
+      (Typed.Allocation.Id.t * Mode_rules.Site.t * Frame.t option) list
   (** Latest first. *)
-  ; mutable frames : Frame.t list
+  ; mutable frames : Frame.t list (** Latest first. *)
   }
 
-let create toplevel = { toplevel; sites = []; frames = [] }
-let add t site ~frame = t.sites <- (site, frame) :: t.sites
+let create toplevel ~fresh = { toplevel; fresh; sites = []; frames = [] }
+
+let add t site ~frame =
+  let id = t.fresh () in
+  t.sites <- (id, site, frame) :: t.sites;
+  id
+;;
 
 let frame t ~parent ~name ~loc ~ty =
   let frame =
-    { Frame.id = List.length t.frames
-    ; name
-    ; loc
-    ; ty
-    ; parent
-    ; generalized = false
-    }
+    { Frame.id = t.fresh (); name; loc; ty; parent; generalized = false }
   in
   t.frames <- frame :: t.frames;
   frame
@@ -145,7 +141,11 @@ let place ~rank members ~awaiting =
       { Owner.owner =
           { toplevel
           ; lets =
-              List.map lets ~f:(fun (frame : Frame.t) -> frame.name, frame.loc)
+              List.rev_map lets ~f:(fun (frame : Frame.t) ->
+                { Typed.Allocation.Owner.Let.id = frame.id
+                ; name = frame.name
+                ; loc = frame.loc
+                })
           }
       ; depth = List.length lets
       ; sides
@@ -155,25 +155,34 @@ let place ~rank members ~awaiting =
     Queue.enqueue owners owner;
     owner
   in
-  (* Each site, with the owners it is in, innermost first. *)
+  (* Each site, with its id and the owners it is in, innermost first. *)
   let sites =
     List.concat_map members ~f:(fun (t, ty) ->
       let toplevel = owner t.toplevel [] ~ty in
-      let of_frame =
-        Int.Table.of_alist_exn
-          (List.filter_map t.frames ~f:(fun (frame : Frame.t) ->
-             if frame.generalized
-             then
-               Some (frame.id, owner t.toplevel (Frame.lets frame) ~ty:frame.ty)
-             else None))
-      in
-      List.rev_map t.sites ~f:(fun (site, frame) ->
-        let lets = Option.value_map frame ~default:[] ~f:Frame.lets in
-        let nested =
-          List.map lets ~f:(fun (frame : Frame.t) ->
-            Hashtbl.find_exn of_frame frame.id)
+      (* Of each frame, the owners down to it, innermost first, and the
+         generalized frames they are of. A frame is made after its parent. *)
+      let within = Typed.Allocation.Id.Table.create () in
+      List.iter (List.rev t.frames) ~f:(fun (frame : Frame.t) ->
+        let outer =
+          Option.value_map
+            frame.parent
+            ~default:([ toplevel ], [])
+            ~f:(fun parent -> Hashtbl.find_exn within parent.id)
         in
-        site, List.rev (toplevel :: nested)))
+        Hashtbl.add_exn
+          within
+          ~key:frame.id
+          ~data:
+            (if frame.generalized
+             then (
+               let owners, lets = outer in
+               let lets = frame :: lets in
+               owner t.toplevel lets ~ty:frame.ty :: owners, lets)
+             else outer));
+      List.rev_map t.sites ~f:(fun (id, site, frame) ->
+        ( (id, site)
+        , Option.value_map frame ~default:[ toplevel ] ~f:(fun frame ->
+            fst (Hashtbl.find_exn within frame.id)) )))
     |> Array.of_list
   in
   let owners = Queue.to_list owners in
@@ -198,7 +207,7 @@ let place ~rank members ~awaiting =
      away: no instance, and no code yet to be checked, can make it any less
      local. *)
   let above =
-    Array.map sites ~f:(fun ((site : Mode_rules.Site.t), _) ->
+    Array.map sites ~f:(fun ((_, (site : Mode_rules.Site.t)), _) ->
       Mode.Var.Node.above (Mode.Var.node site.mode Locality))
   in
   let internal node =
@@ -221,7 +230,7 @@ let place ~rank members ~awaiting =
         ~f:(fun node -> if internal node then None else pin node)
   in
   let read () =
-    Array.map sites ~f:(fun (site, _) -> Mode_rules.placement site)
+    Array.map sites ~f:(fun ((_, site), _) -> Mode_rules.placement site)
   in
   let least =
     match assuming pinned ~also:(fun () -> Ok ()) ~read with
@@ -269,8 +278,9 @@ let place ~rank members ~awaiting =
                      ; if_local
                      }))));
   Array.to_list
-    (Array.mapi sites ~f:(fun i ((site : Mode_rules.Site.t), chain) ->
-       { Typed.Allocation.owner = (List.hd_exn chain : Owner.t).owner
+    (Array.mapi sites ~f:(fun i ((id, (site : Mode_rules.Site.t)), chain) ->
+       { Typed.Allocation.id
+       ; owner = (List.hd_exn chain : Owner.t).owner
        ; loc = site.loc
        ; kind = site.kind
        ; placement = least.(i)

@@ -223,6 +223,120 @@ module Marker = struct
   [@@deriving sexp_of, equal]
 end
 
+module Allocation = struct
+  module Id = struct
+    include Int
+
+    let of_int = Fn.id
+  end
+
+  module Kind = struct
+    type t =
+      | Closure
+      | Partial_application
+      | Code
+      | Pointer
+      | Box
+      | Cell
+    [@@deriving sexp_of, compare, equal]
+  end
+
+  module Placement = struct
+    type t =
+      | Heap
+      | Region
+      | Caller_region
+    [@@deriving sexp_of, compare, equal]
+  end
+
+  module Side = struct
+    module Step = struct
+      type t =
+        | Arg
+        | Res
+        | Component of int
+        | Type_arg of int
+        | Field of string
+        | Code
+      [@@deriving sexp_of, compare, equal]
+    end
+
+    type t =
+      { steps : Step.t list
+      ; side : [ `Arg | `Res ]
+      }
+    [@@deriving sexp_of, compare, equal]
+
+    let to_string { steps; side } =
+      let step : Step.t -> string = function
+        | Arg -> "arg"
+        | Res -> "res"
+        | Component i -> sprintf "component %d" i
+        | Type_arg i -> sprintf "type arg %d" i
+        | Field name -> name
+        | Code -> "code"
+      in
+      String.concat
+        ~sep:"."
+        (List.map steps ~f:step
+         @ [ (match side with
+              | `Arg -> "arg"
+              | `Res -> "res")
+           ])
+    ;;
+  end
+
+  module Owner = struct
+    module Let = struct
+      type t =
+        { id : Id.t
+        ; name : string
+        ; loc : Loc.t
+        }
+      [@@deriving sexp_of]
+    end
+
+    type t =
+      { toplevel : Ident.t
+      ; lets : Let.t list
+      }
+    [@@deriving sexp_of]
+
+    let equal a b =
+      Ident.equal a.toplevel b.toplevel
+      && List.equal
+           (fun (a : Let.t) (b : Let.t) -> Id.equal a.id b.id)
+           a.lets
+           b.lets
+    ;;
+
+    let to_string { toplevel; lets } =
+      String.concat
+        ~sep:"."
+        (toplevel.name :: List.map lets ~f:(fun (l : Let.t) -> l.name))
+    ;;
+  end
+
+  module Follows = struct
+    type t =
+      { owner : Owner.t
+      ; side : Side.t
+      ; if_local : Placement.t
+      }
+    [@@deriving sexp_of]
+  end
+
+  type t =
+    { id : Id.t
+    ; owner : Owner.t
+    ; loc : Loc.t
+    ; kind : Kind.t
+    ; placement : Placement.t
+    ; follows : Follows.t option
+    }
+  [@@deriving sexp_of]
+end
+
 module Expr = struct
   module Subs = struct
     type 'e t =
@@ -303,10 +417,22 @@ module Expr = struct
     [@@deriving sexp_of]
   end
 
+  module Made = struct
+    type t =
+      { made : Allocation.Id.t option
+      ; partials : Allocation.Id.t list
+      ; owns : Allocation.Id.t option
+      }
+    [@@deriving sexp_of]
+
+    let none = { made = None; partials = []; owns = None }
+  end
+
   type t =
     { desc : t Desc.t
     ; ty : Type.ty
     ; loc : Loc.t
+    ; made : Made.t
     }
 
   let rec sexp_of_t' t = Hum.typed (Desc.sexp_of_t sexp_of_t' t.desc) t.ty
@@ -513,6 +639,7 @@ module Toplevel = struct
     ; args : Ident.t list
     ; scheme : Hum.Ty.t
     ; body : Expr.t
+    ; partials : Allocation.Id.t list [@sexp.list]
     }
   [@@deriving sexp_of]
 
@@ -548,99 +675,6 @@ module Bench = struct
     ; body : Expr.t
     ; loc : Loc.t
     ; generated : bool [@sexp.bool]
-    }
-  [@@deriving sexp_of]
-end
-
-module Allocation = struct
-  module Kind = struct
-    type t =
-      | Closure
-      | Partial_application
-      | Code
-      | Pointer
-      | Box
-      | Cell
-    [@@deriving sexp_of, compare, equal]
-  end
-
-  module Placement = struct
-    type t =
-      | Heap
-      | Region
-      | Caller_region
-    [@@deriving sexp_of, compare, equal]
-  end
-
-  module Side = struct
-    module Step = struct
-      type t =
-        | Arg
-        | Res
-        | Component of int
-        | Type_arg of int
-        | Field of string
-        | Code
-      [@@deriving sexp_of, compare, equal]
-    end
-
-    type t =
-      { steps : Step.t list
-      ; side : [ `Arg | `Res ]
-      }
-    [@@deriving sexp_of, compare, equal]
-
-    let to_string { steps; side } =
-      let step : Step.t -> string = function
-        | Arg -> "arg"
-        | Res -> "res"
-        | Component i -> sprintf "component %d" (i + 1)
-        | Type_arg i -> sprintf "type arg %d" (i + 1)
-        | Field name -> name
-        | Code -> "code"
-      in
-      String.concat
-        ~sep:"."
-        (List.map steps ~f:step
-         @ [ (match side with
-              | `Arg -> "arg"
-              | `Res -> "res")
-           ])
-    ;;
-  end
-
-  module Owner = struct
-    type t =
-      { toplevel : Ident.t
-      ; lets : (string * Loc.t) list
-      }
-    [@@deriving sexp_of]
-
-    let equal a b =
-      Ident.equal a.toplevel b.toplevel
-      && List.equal (fun (_, a) (_, b) -> Loc.equal a b) a.lets b.lets
-    ;;
-
-    let to_string { toplevel; lets } =
-      String.concat ~sep:"." (toplevel.name :: List.map lets ~f:fst)
-    ;;
-  end
-
-  module Follows = struct
-    type t =
-      { owner : Owner.t
-      ; side : Side.t
-      ; if_local : Placement.t
-      }
-    [@@deriving sexp_of]
-  end
-
-  type t =
-    { owner : Owner.t
-    ; loc : Loc.t
-    ; kind : Kind.t
-    ; placement : Placement.t
-    ; follows : Follows.t option
     }
   [@@deriving sexp_of]
 end

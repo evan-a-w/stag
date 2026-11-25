@@ -10,10 +10,14 @@ type t
 module Frame : sig
   type t
 
+  (** As the [let]'s [Typed.Expr.Made.owns]. *)
+  val id : t -> Typed.Allocation.Id.t
+
   val set_generalized : t -> unit
 end
 
-val create : Typed.Ident.t -> t
+(** Each site and frame is named by [fresh]. *)
+val create : Typed.Ident.t -> fresh:(unit -> Typed.Allocation.Id.t) -> t
 
 (** A [let] of type [ty], in [parent] (else directly in the toplevel). *)
 val frame
@@ -24,8 +28,12 @@ val frame
   -> ty:Type.ty
   -> Frame.t
 
-(** A site, in the function of [frame] (else of the toplevel). *)
-val add : t -> Mode_rules.Site.t -> frame:Frame.t option -> unit
+(** A site, in the function of [frame] (else of the toplevel), named. *)
+val add
+  :  t
+  -> Mode_rules.Site.t
+  -> frame:Frame.t option
+  -> Typed.Allocation.Id.t
 
 (** Where each site of a component's toplevels (each with its type) is made, in
     program order: once they are checked and before they are generalized at

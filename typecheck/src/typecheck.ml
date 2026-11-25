@@ -247,6 +247,8 @@ module Toplevel = struct
               variable is referred to by symbol. *)
           ; held : Binding.t option (** Of the values a mutable one holds. *)
           ; mutable body : Typed.Expr.t option
+          ; mutable partials : Typed.Allocation.Id.t list
+          (** As [Typed.Toplevel.partials]. *)
           ; mutable recursive : bool
           ; sites : (Allocation_sites.t[@sexp.opaque])
           }
@@ -450,7 +452,13 @@ module Program_env = struct
     ; checking : Scc_frame.t Stack.t
     (** The frames of the toplevels being checked, innermost first. *)
     ; allocations : Typed.Allocation.t Queue.t
+    ; mutable allocation_ids : int
     }
+
+  let allocation_id t =
+    t.allocation_ids <- t.allocation_ids + 1;
+    Typed.Allocation.Id.of_int t.allocation_ids
+  ;;
 
   let report ?component ?once t error =
     t.reported <- t.reported + 1;
@@ -734,23 +742,9 @@ module Scope = struct
       ~allocated:
         (match t.allocations, t.quote with
          | Some sites, None when t.level = 0 ->
-           let exclaved =
-             List.find_map t.locks ~f:(fun (lock : Env.Lock.t) ->
-               match lock.kind with
-               | Exclave -> Some true
-               | Closure _ | Region -> Some false
-               | Quote _ | Splice -> None)
-             |> Option.value ~default:false
-           in
-           fun (site : Mode_rules.Site.t) ->
-             Allocation_sites.add
-               sites
-               ~frame:t.owner
-               (match site.position with
-                | (Here | Returned) when exclaved ->
-                  { site with position = Exclaved }
-                | Here | Returned | Exclaved | Caller -> site)
-         | _ -> ignore)
+           fun site -> Some (Allocation_sites.add sites site ~frame:t.owner)
+         | _ -> fun _ -> None)
+      ~locks:t.locks
   ;;
 
   let arrow_mode t = Mode_rules.arrow_mode (modes t)
@@ -2264,13 +2258,14 @@ let finish_scc
          program
          (List.filter_map members ~f:(fun member ->
             match member.state with
-            | In_progress { ty; args; body = Some body; _ } ->
+            | In_progress { ty; args; body = Some body; partials; _ } ->
               Some
                 { Typed.Toplevel.ident = member.ident
                 ; mut = member.mut
                 ; args
                 ; scheme = ty
                 ; body
+                ; partials
                 }
             | In_progress { body = None; _ } | Unchecked | Done _ -> None))
   in
@@ -2298,7 +2293,8 @@ let finish_scc
          ~crossing:(fun _ -> Mode.Crossing.none)
          ~report:(fun error ->
            Program_env.report program (Module_scope.within member.module_ error))
-         ~allocated:ignore)
+         ~allocated:(fun _ -> None)
+         ~locks:[])
       (init_mode member)
       ~loc:member.expr.loc
       ~why:(why member.ident.name)
@@ -2393,7 +2389,8 @@ let finish_scc
   let members =
     List.map2_exn members tys ~f:(fun member ty ->
       match member.state with
-      | In_progress { index; args; mode; held; body = Some body; _ } ->
+      | In_progress { index; args; mode; held; body = Some body; partials; _ }
+        ->
         Program_env.add_info program member.ident ~ty ~level:0;
         let typed =
           { Typed.Toplevel.ident = member.ident
@@ -2401,6 +2398,7 @@ let finish_scc
           ; args
           ; scheme = ty
           ; body
+          ; partials
           }
         in
         member.state
@@ -2437,20 +2435,42 @@ let prim_type (scope : Scope.t) prim =
     ~f:(fun arg modes res -> Type.TArrow (arg, res, modes))
 ;;
 
+(* The intrinsic [var] is, through toplevels defined as one ([Box.make] is
+   [Intrinsic.box_make]). *)
+let intrinsic_of (scope : Scope.t) (var : Typed.Var_ref.t) =
+  let rec go (var : Typed.Var_ref.t) ~seen =
+    match var with
+    | Intrinsic intrinsic -> Some intrinsic
+    | (Bound (Toplevel ident) | Persistent (Toplevel ident))
+      when not (List.mem seen ident.name ~equal:String.equal) ->
+      (match Program_env.find_toplevel scope.program ident.name with
+       | Some
+           { state =
+               Done
+                 { typed =
+                     { args = []; mut = false; body = { desc = Var var; _ }; _ }
+                 ; _
+                 }
+           ; _
+           } -> go var ~seen:(ident.name :: seen)
+       | Some _ | None -> None)
+    | Bound _ | Persistent _ | Free _ | Prim _ -> None
+  in
+  go var ~seen:[]
+;;
+
 (* What applying [var] allocates, beyond what it runs: the closure of a partial
    application of a prim, or the block of [Box.make] or [Ptr.make]. *)
-let value_allocation (var : Typed.Var_ref.t) : Typed.Allocation.Kind.t option =
+let value_allocation scope (var : Typed.Var_ref.t)
+  : Typed.Allocation.Kind.t option
+  =
   match var with
   | Prim prim when Prim.arity prim > 1 -> Some Partial_application
-  | Intrinsic Box_make -> Some Box
-  | Intrinsic Ptr_make -> Some Pointer
-  | Bound (Toplevel ident) | Persistent (Toplevel ident) ->
-    if String.equal ident.name (Prelude_path.canonical "Box.make")
-    then Some Box
-    else if String.equal ident.name (Prelude_path.canonical "Ptr.make")
-    then Some Pointer
-    else None
-  | _ -> None
+  | _ ->
+    (match intrinsic_of scope var with
+     | Some Box_make -> Some Box
+     | Some Ptr_make -> Some Pointer
+     | Some _ | None -> None)
 ;;
 
 (* The prim [expr] applies, its reference, and to how many arguments. *)
@@ -2484,9 +2504,17 @@ let prim_partial ty ~args =
 let value_sites (scope : Scope.t) (expr : Typed.Expr.t) =
   match expr.desc with
   | Var var ->
-    Option.iter (value_allocation var) ~f:(fun kind ->
-      Mode_rules.Alloc.on_heap (Scope.modes scope) ~loc:expr.loc ~kind)
-  | _ -> ()
+    (match value_allocation scope var with
+     | None -> expr
+     | Some kind ->
+       { expr with
+         made =
+           { Typed.Expr.Made.none with
+             made =
+               Mode_rules.Alloc.on_heap (Scope.modes scope) ~loc:expr.loc ~kind
+           }
+       })
+  | _ -> expr
 ;;
 
 let intrinsic_type t (scope : Scope.t) (intrinsic : Intrinsic.t) =
@@ -2740,7 +2768,10 @@ and check_toplevel_in t program (toplevel : Toplevel.t) scc ~index =
   let unfinished = Stack.length program.unfinished in
   let reported = program.reported in
   let rank = Scc_frame.toplevel_rank in
-  let sites = Allocation_sites.create toplevel.ident in
+  let sites =
+    Allocation_sites.create toplevel.ident ~fresh:(fun () ->
+      Program_env.allocation_id program)
+  in
   let scope =
     { Scope.program
     ; level = 0
@@ -2799,6 +2830,7 @@ and check_toplevel_in t program (toplevel : Toplevel.t) scc ~index =
          ; init_mode = rules.value
          ; held = rules.held
          ; body = None
+         ; partials = []
          ; recursive = false
          ; sites
          };
@@ -2807,7 +2839,13 @@ and check_toplevel_in t program (toplevel : Toplevel.t) scc ~index =
         match toplevel.external_ with
         | Some external_ -> check_external t scope external_ ~ty:res_ty
         | None when Toplevel.is_function toplevel ->
-          check_body t scope ~closure:rules.value ~fn ~loc:toplevel.expr.loc
+          let body, partials =
+            check_body t scope ~closure:rules.value ~fn ~loc:toplevel.expr.loc
+          in
+          (match toplevel.state with
+           | In_progress in_progress -> in_progress.partials <- partials
+           | Unchecked | Done _ -> ());
+          body
         | None ->
           check_expr
             t
@@ -2852,7 +2890,7 @@ and check_external
   let error error =
     Scope.report scope error;
     ignore (Scope.unifies t scope ~ty1:ty ~ty2:Type.error ~loc : bool);
-    { Typed.Expr.desc = Error []; ty; loc }
+    { Typed.Expr.desc = Error []; ty; loc; made = Typed.Expr.Made.none }
   in
   match
     Type_env.elaborate_declared scope.program.type_env scope.module_ declared
@@ -2875,6 +2913,7 @@ and check_external
        { desc = External { symbol = symbol.txt; signature; at_compile_time }
        ; ty
        ; loc
+       ; made = Typed.Expr.Made.none
        })
 
 (* Abandons the toplevels of [scc] with the splice whose code reached them, to
@@ -2892,14 +2931,17 @@ and abandon (program : Program_env.t) (scc : Scc_frame.t) ~unfinished =
 (* A function's body, in a closure of mode [closure]. Its parameters are of the
    modes of its arrows' arguments, and its value of the last one's result. The
    closure of a partial application holds what the function captures and the
-   arguments given so far. *)
+   arguments given so far. With the sites of those, as
+   [Typed.Expr.Made.partials]. *)
 and check_body t (scope : Scope.t) ~closure ~(fn : Function_type.t) ~loc =
-  Mode_rules.Function.partial_applications
-    (Scope.modes scope)
-    ~closure
-    ~arg_modes:fn.arg_modes
-    ~partial_modes:fn.partial_modes
-    ~loc;
+  let partials =
+    Mode_rules.Function.partial_applications
+      (Scope.modes scope)
+      ~closure
+      ~arg_modes:fn.arg_modes
+      ~partial_modes:fn.partial_modes
+      ~loc
+  in
   let fn_params = Function_type.params fn in
   let scope =
     { (Scope.enter_closure t scope closure) with
@@ -2926,14 +2968,16 @@ and check_body t (scope : Scope.t) ~closure ~(fn : Function_type.t) ~loc =
          Env.with_bindings scope.locals params ~f:(fun () ->
            check_expr t scope ~at ~expr:fn.body ~ty:fn.res_ty))
   in
-  List.fold_right
-    fn.inner
-    ~init:body
-    ~f:(fun { Function_type.Level.args; annots; ty; loc } body ->
-      { Typed.Expr.desc = Fun { args = List.map args ~f:fst; annots; body }
-      ; ty
-      ; loc
-      })
+  ( List.fold_right
+      fn.inner
+      ~init:body
+      ~f:(fun { Function_type.Level.args; annots; ty; loc } body ->
+        { Typed.Expr.desc = Fun { args = List.map args ~f:fst; annots; body }
+        ; ty
+        ; loc
+        ; made = Typed.Expr.Made.none
+        })
+  , partials )
 
 and with_monomorphic_bindings (scope : Scope.t) bindings ~f =
   Env.with_bindings
@@ -2958,7 +3002,9 @@ and expr_type
   =
   let modes = Scope.modes scope in
   let loc = Source.Expr.loc expr in
-  let node desc ty = { Typed.Expr.desc; ty; loc } in
+  let node ?(made = Typed.Expr.Made.none) desc ty =
+    { Typed.Expr.desc; ty; loc; made }
+  in
   let fail ?(children = []) error =
     Scope.report scope error;
     node (Error children) Type.error
@@ -3025,7 +3071,7 @@ and expr_type
      with
      | Error error -> fail error
      | Ok var ->
-       if not applied then value_sites scope var;
+       let var = if applied then var else value_sites scope var in
        annotate t scope var annot ~loc)
   | Marked (Nontail, inner) ->
     let inner =
@@ -3104,8 +3150,7 @@ and expr_type
      | Error error -> fail error
      | Ok (ty, var_ref) ->
        let var = node (Var var_ref) ty in
-       if not applied then value_sites scope var;
-       var)
+       if applied then var else value_sites scope var)
   | App (f, x) ->
     Mode_rules.runs modes at Portable ~loc ~why:"it applies a function";
     let a = Scope.fresh_ty t scope in
@@ -3137,7 +3182,8 @@ and expr_type
       | Some _ | None -> true
     in
     let result_matches = ref true in
-    let boxes = ref false in
+    (* What the application allocates, rather than running a function. *)
+    let allocation = ref None in
     let f, x =
       Mode_rules.apply
         modes
@@ -3166,55 +3212,49 @@ and expr_type
                      ; curry = Var curry
                      } ))
           in
-          (boxes
-           := match f.desc with
-              | Var (Intrinsic Box_make) -> true
-              | Var (Bound (Toplevel ident) | Persistent (Toplevel ident)) ->
-                String.equal ident.name (Prelude_path.canonical "Box.make")
-              | _ -> false);
+          (allocation
+           := match f.desc, prim_head f with
+              | _, Some (prim, _, args)
+                when (not applied) && args + 1 < Prim.arity prim ->
+                Some Typed.Allocation.Kind.Partial_application
+              | Var (Prim _), _ -> None
+              | Var var, _ -> value_allocation scope var
+              | _ -> None);
           f)
         ~arg:(fun x_at ->
           result_matches := result_matches_expected ();
           let x_at =
-            if !boxes then Mode_rules.Expected.boxed x_at ~whole:at else x_at
+            match !allocation with
+            | Some Box -> Mode_rules.Expected.boxed x_at ~whole:at
+            | Some _ | None -> x_at
           in
           check_expr t scope ~at:x_at ~expr:x ~ty:a)
     in
-    let allocates kind =
-      Mode_rules.Alloc.pointer modes at ~loc ~kind res_mode
+    let made =
+      match !allocation, prim_head f with
+      | Some Partial_application, Some (_, head, args) ->
+        Option.bind
+          (prim_partial head.ty ~args:(args + 1))
+          ~f:(fun partial ->
+            Mode_rules.Alloc.pointer
+              modes
+              at
+              ~loc
+              ~kind:Partial_application
+              partial)
+      | Some ((Box | Pointer) as kind), _ ->
+        Mode_rules.Alloc.pointer modes at ~loc ~kind res_mode
+      | (Some _ | None), _ -> None
     in
-    (match prim_head f with
-     | Some (prim, head, args) when (not applied) && args + 1 < Prim.arity prim
-       ->
-       (match prim_partial head.ty ~args:(args + 1) with
-        | Some partial ->
-          Mode_rules.Alloc.pointer
-            modes
-            at
-            ~loc
-            ~kind:Partial_application
-            partial
-        | None -> ())
-     | Some _ | None -> ());
-    (match f.desc with
-     | Var (Intrinsic Ptr_make) -> allocates Pointer
-     | Var (Intrinsic Box_make) -> allocates Box
-     | Var (Bound (Toplevel ident) | Persistent (Toplevel ident))
-       when String.equal ident.name (Prelude_path.canonical "Ptr.make") ->
-       allocates Pointer
-     | Var (Bound (Toplevel ident) | Persistent (Toplevel ident))
-       when String.equal ident.name (Prelude_path.canonical "Box.make") ->
-       allocates Box
-     | _ -> ());
     if !result_matches
-    then node (App (f, x)) b
+    then node ~made:{ Typed.Expr.Made.none with made } (App (f, x)) b
     else node (Error [ f; x ]) Type.error
   | Let { binder; args; annot; mode = mode_annot; body; in_ } ->
     let inner = { scope with rank = scope.rank + 1 } in
     let is_function = not (List.is_empty args) in
     let name = Source.Binder.name binder in
     let frame = ref None in
-    let (fn, ident, body, closure), mode =
+    let (fn, ident, body, closure, made), mode =
       Mode_rules.evaluate
         modes
         at
@@ -3266,18 +3306,26 @@ and expr_type
                  ~f:(fun () ->
                    check_expr t own ~at:inner_at ~expr:body ~ty:fn.res_ty)
              in
-             fn, ident, body, None
+             fn, ident, body, None, Typed.Expr.Made.none
            | _ :: _ ->
-             Mode_rules.Alloc.closure
-               (Scope.modes inner)
-               inner_at
-               ~loc
-               (fun closure ->
-                  let body =
-                    defining (Mode_rules.Binding.closure closure) ~f:(fun () ->
-                      check_body t own ~closure ~fn ~loc)
-                  in
-                  fn, ident, body, Some (Mode_rules.Binding.closure closure)))
+             let (body, partials, closure), made =
+               Mode_rules.Alloc.closure
+                 (Scope.modes inner)
+                 inner_at
+                 ~loc
+                 (fun closure ->
+                    let body, partials =
+                      defining
+                        (Mode_rules.Binding.closure closure)
+                        ~f:(fun () -> check_body t own ~closure ~fn ~loc)
+                    in
+                    body, partials, Mode_rules.Binding.closure closure)
+             in
+             ( fn
+             , ident
+             , body
+             , Some closure
+             , { Typed.Expr.Made.none with made; partials } ))
     in
     let { Function_type.args = arg_types; annots; result_annot; ty; _ } = fn in
     let args = List.map arg_types ~f:fst in
@@ -3319,6 +3367,13 @@ and expr_type
             ~hint)
     in
     node
+      ~made:
+        { made with
+          owns =
+            (if generalized
+             then Option.map !frame ~f:Allocation_sites.Frame.id
+             else None)
+        }
       (Let
          { ident
          ; args
@@ -3381,7 +3436,7 @@ and expr_type
         ~name
         ~loc
     in
-    Mode_rules.Alloc.cell modes ~loc (mode :> Mode.Var.t);
+    let made = Mode_rules.Alloc.cell modes ~loc (mode :> Mode.Var.t) in
     let in_ =
       Env.with_bindings
         scope.locals
@@ -3395,7 +3450,10 @@ and expr_type
             ?expected
             ~hint)
     in
-    node (Let_mut { ident; annot; mode = held_annot; body; in_ }) in_.ty
+    node
+      ~made:{ Typed.Expr.Made.none with made }
+      (Let_mut { ident; annot; mode = held_annot; body; in_ })
+      in_.ty
   | Assign (var, value) ->
     Mode_rules.runs modes at Nonportable ~loc ~why:"it assigns a variable";
     let target, (_ : Mode.Var.t) =
@@ -3499,17 +3557,21 @@ and expr_type
        when Expectation.is_required hint && not (Unify.clash expected ty) ->
        ignore (Unify.sub_ty t ~lower:ty ~upper:expected : (unit, _) Result.t)
      | Some _ | None -> ());
-    let body =
+    let (body, partials), made =
       Mode_rules.Alloc.closure modes at ~loc (fun closure ->
         check_body t scope ~closure ~fn ~loc)
     in
-    node (Fun { args = List.map args ~f:fst; annots; body }) ty
+    node
+      ~made:{ Typed.Expr.Made.none with made; partials }
+      (Fun { args = List.map args ~f:fst; annots; body })
+      ty
   | Quote expr ->
+    let mode, made = Mode_rules.Alloc.code modes at ~loc in
     let quote =
       { Scope.id = Fresh.id t
       ; context = Scope.fresh_row t scope
       ; outside = scope
-      ; mode = Mode_rules.Alloc.code modes at ~loc
+      ; mode
       }
     in
     let expected =
@@ -3530,7 +3592,10 @@ and expr_type
         ?expected
         ~hint:(Expectation.quoted hint)
     in
-    node (Quote inner) (TCode { inner = inner.ty; context = quote.context })
+    node
+      ~made:{ Typed.Expr.Made.none with made }
+      (Quote inner)
+      (TCode { inner = inner.ty; context = quote.context })
   | Splice { code; subs } ->
     let source_subs = subs in
     (match scope.quote, expr with
@@ -4028,7 +4093,12 @@ and expr_type
                     ~upper:result
                     ~loc:body.loc
             then body
-            else { desc = Error [ body ]; ty = Type.error; loc = body.loc })
+            else
+              { desc = Error [ body ]
+              ; ty = Type.error
+              ; loc = body.loc
+              ; made = Typed.Expr.Made.none
+              })
       in
       (pattern, body), unified
     in
@@ -4157,7 +4227,8 @@ and annotate
   =
   match annot.ty with
   | None when Option.is_none annot.mode -> var
-  | None -> { var with desc = Annotated (var, annot); loc }
+  | None ->
+    { var with desc = Annotated (var, annot); loc; made = Typed.Expr.Made.none }
   | Some ty ->
     (match Scope.elaborate_resolved scope ty with
      | Ok (annot_ty, resolved) ->
@@ -4165,11 +4236,17 @@ and annotate
          { Typed.Expr.desc = Annotated (var, { annot with ty = Some resolved })
          ; ty = (if Type.is_error var.ty then var.ty else annot_ty)
          ; loc
+         ; made = Typed.Expr.Made.none
          }
        in
        if Scope.subtypes t scope ~lower:var.ty ~upper:annot_ty ~loc
        then annotated
-       else { desc = Error [ annotated ]; ty = Type.error; loc }
+       else
+         { desc = Error [ annotated ]
+         ; ty = Type.error
+         ; loc
+         ; made = Typed.Expr.Made.none
+         }
      | Error error ->
        Scope.report scope error;
        var)
@@ -4329,6 +4406,7 @@ and expand
           }
     ; ty = in_.ty
     ; loc
+    ; made = Typed.Expr.Made.none
     })
 
 and labelled_types t scope ~at fields ~expected ~hint =
@@ -4359,7 +4437,12 @@ and check_expr ?expected ?hint ?applied t scope ~at ~expr ~ty =
   in
   if Scope.subtypes t scope ~lower:expr.ty ~upper:ty ~loc:expr.loc
   then expr
-  else { desc = Error [ expr ]; ty = Type.error; loc = expr.loc }
+  else
+    { desc = Error [ expr ]
+    ; ty = Type.error
+    ; loc = expr.loc
+    ; made = Typed.Expr.Made.none
+    }
 
 (* Returns the binder each entry that may be captured is captured by: entries
    bound in the quote may be captured by their binders if [may_capture]. *)
@@ -4617,7 +4700,11 @@ and substitute_explicitly t scope ~at ~context ~subs ~loc =
                 ~path:(Path (Syntax.Path.of_string name))
                 ~loc:name_loc
             in
-            { Typed.Expr.desc = Var var_ref; ty; loc = name_loc }
+            { Typed.Expr.desc = Var var_ref
+            ; ty
+            ; loc = name_loc
+            ; made = Typed.Expr.Made.none
+            }
           | Some expr ->
             let expr, binding =
               Mode_rules.Splice.substitution
@@ -4650,7 +4737,10 @@ and substitute_explicitly t scope ~at ~context ~subs ~loc =
           name
           ~loc
       in
-      (name, { Typed.Expr.desc = Var var_ref; ty; loc }) :: acc)
+      ( name
+      , { Typed.Expr.desc = Var var_ref; ty; loc; made = Typed.Expr.Made.none }
+      )
+      :: acc)
   in
   (* Only a variable that is mutable can be assigned, as itself. *)
   let assigned (expr : Typed.Expr.t) : Type.presence =
@@ -4783,7 +4873,9 @@ let check_bench t program module_ ~name ~param ~body ~loc ~generated =
       List.map args ~f:(fun arg ->
         check_expr t scope ~at ~expr:(Source.Expr.Syntax arg) ~ty:param_ty)
     in
-    let body =
+    let ( (body, (_ : Typed.Allocation.Id.t list))
+        , (_ : Typed.Allocation.Id.t option) )
+      =
       Mode_rules.Alloc.closure (Scope.modes scope) at ~loc (fun closure ->
         check_body t scope ~closure ~fn ~loc)
     in
@@ -5287,6 +5379,7 @@ let program_env
     ; sccs = Queue.create ()
     ; declaration_splices = Queue.create ()
     ; allocations = Queue.create ()
+    ; allocation_ids = 0
     ; unusable_in_quotes = String.Table.create ()
     ; unfinished = Stack.create ()
     ; reports = []

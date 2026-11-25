@@ -25,6 +25,29 @@ let placement_lines (checked : Typecheck.Checked.t) =
     | Region -> "region"
     | Caller_region -> "caller's region"
   in
+  (* Owners of the same name, as those of code spliced in twice, numbered in the
+     order they are first seen. *)
+  let owner_name =
+    let seen = String.Table.create () in
+    List.iter checked.program.allocations ~f:(fun allocation ->
+      let name = Typed.Allocation.Owner.to_string allocation.owner in
+      let owners = Hashtbl.find seen name |> Option.value ~default:[] in
+      if not
+           (List.mem
+              owners
+              allocation.owner
+              ~equal:Typed.Allocation.Owner.equal)
+      then Hashtbl.set seen ~key:name ~data:(owners @ [ allocation.owner ]));
+    fun owner ->
+      let name = Typed.Allocation.Owner.to_string owner in
+      match Hashtbl.find seen name with
+      | Some (_ :: _ :: _ as owners) ->
+        let index, _ =
+          List.findi_exn owners ~f:(fun _ -> Typed.Allocation.Owner.equal owner)
+        in
+        sprintf "%s#%d" name (index + 1)
+      | Some _ | None -> name
+  in
   let line (allocation : Typed.Allocation.t) =
     let where =
       match allocation.follows with
@@ -36,10 +59,10 @@ let placement_lines (checked : Typecheck.Checked.t) =
           (placement if_local)
           (if Typed.Allocation.Owner.equal owner allocation.owner
            then ""
-           else Typed.Allocation.Owner.to_string owner ^ "'s ")
+           else owner_name owner ^ "'s ")
           (Typed.Allocation.Side.to_string side)
     in
-    let owner = Typed.Allocation.Owner.to_string allocation.owner in
+    let owner = owner_name allocation.owner in
     ( allocation.loc
     , sprintf
         !"%{Sexp} in %s: %s"

@@ -412,3 +412,58 @@ let use (u : unit) = Int.add (c ()) (f (Box.make 2))
     (Returned (value 3) (on_heap 5) (in_regions 2))
     |}]
 ;;
+
+let%expect_test "code spliced in twice is placed once for each copy" =
+  let source =
+    reviewed
+    ^ {|
+let code = .< Box.make 7 >.
+let f (u : unit) = let b = .~code in (sum b, .~code)
+let use (u : unit) = match f () with (n, c) -> keep.* <- c; Int.add n (sum keep.*)
+|}
+  in
+  allocations_of source;
+  run source ~entry:"use";
+  [%expect
+    {|
+    val keep : ptr[box[int]]
+    val sum : box[int] @ _ -> int @ _
+    val code : <box[int]>{..'a}
+    val f : unit @ _ -> int * box[int] @ 'm0 with gc <= 'm0
+    val use : unit @ _ -> int @ _
+    t.stag:2:27-48 Pointer in keep: heap
+    t.stag:2:36-48 Box in keep: heap
+    t.stag:5:11-27 Code in code: heap
+    t.stag:5:14-24 Box in f: region
+    t.stag:5:14-24 Box in f: heap, caller's region if res is local
+    (Returned (value 14) (on_heap 3) (in_regions 1))
+    |}]
+;;
+
+let%expect_test "a toplevel value is made for each of its instances" =
+  let source =
+    reviewed
+    ^ {|
+let p = ((fun (x : int) -> Box.make x), 1)
+let local_use (u : unit) = match p with (mk, n) -> let b @ local = mk n in sum b [@nontail]
+let global_use (u : unit) = match p with (mk, n) -> let b @ global = mk n in sum b
+let use (u : unit) = Int.add (local_use ()) (global_use ())
+|}
+  in
+  allocations_of source;
+  run source ~entry:"use";
+  [%expect
+    {|
+    val keep : ptr[box[int]]
+    val sum : box[int] @ _ -> int @ _
+    val p : (int @ _ -> box[int] @ 'm0) * int with gc <= 'm0
+    val local_use : unit @ _ -> int @ _
+    val global_use : unit @ _ -> int @ _
+    val use : unit @ _ -> int @ _
+    t.stag:2:27-48 Pointer in keep: heap
+    t.stag:2:36-48 Box in keep: heap
+    t.stag:5:9-38 Closure in p: heap
+    t.stag:5:27-37 Box in p: heap, caller's region if component 0.res is local
+    (Returned (value 2) (on_heap 3) (in_regions 1))
+    |}]
+;;

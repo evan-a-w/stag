@@ -53,8 +53,11 @@ module Instance = struct
   ;;
 end
 
-let owner_key (owner : Allocation.Owner.t) =
-  Sexp.to_string [%sexp (owner : Allocation.Owner.t)]
+let owner_key ({ toplevel; lets } : Allocation.Owner.t) =
+  Sexp.to_string
+    [%sexp
+      (toplevel.name : string)
+      , (List.map lets ~f:(fun let_ -> let_.id) : Allocation.Id.t list)]
 ;;
 
 module Value = struct
@@ -66,11 +69,11 @@ module Value = struct
     | Poly_record of t String.Map.t
     | Poly_variant of string * t
     | Obj of obj
-    | Prim_fn of Prim.t * Loc.t
-    (** A prim named as a value at [loc], where what applying it to too few
-        arguments makes is. *)
-    | Allocator of Allocation.Kind.t * Loc.t
-    (** [Box.make] or [Ptr.make] named as a value at [loc]. *)
+    | Prim_fn of Prim.t * Allocation.t option
+    (** A prim named as a value, with what applying it to too few arguments
+        makes. *)
+    | Allocator of Allocation.t
+    (** [Box.make] or [Ptr.make] named as a value, with what applying it makes. *)
 
   and obj =
     { id : int
@@ -84,15 +87,16 @@ module Value = struct
     | Ptr of t ref
     | Cell of t ref
     | Closure of closure
-    | Prim_partial of Prim.t * t list * Loc.t
-    (** The arguments given so far, latest first, and where it is made. *)
+    | Prim_partial of Prim.t * t list * Allocation.t
+    (** The arguments given so far, latest first, and what it is made by. *)
 
   and closure =
     { params : Typed.Ident.t list
     ; body : Typed.Expr.t
     ; env : env
     ; instance : Instance.t
-    ; partials : Allocation.t list (** Of the applications still to come. *)
+    ; partials : Allocation.t list
+    (** Of the applications still to come, given 1, 2, ... arguments. *)
     ; owner : Allocation.Owner.t
     }
 
@@ -139,10 +143,11 @@ end
 open Value
 
 type t =
-  { sites : (Allocation.Kind.t * Loc.t, Allocation.t list) Hashtbl.Poly.t
+  { sites : Allocation.t Allocation.Id.Table.t
   ; sides : (string, Allocation.Side.t list) Hashtbl.t
   ; toplevels : (string, Typed.Toplevel.t) Hashtbl.t
   ; values : (string, Value.t) Hashtbl.t
+  (** Of each toplevel: a function's closure, or a value of each instance. *)
   ; ident_info : Typed.Ident_info.t Typed.Ident.Map.t
   ; mutable next_id : int
   ; mutable fuel : int
@@ -151,27 +156,27 @@ type t =
   ; tail_calls_end_regions : bool
   }
 
-let site t kind loc =
-  match Hashtbl.find t.sites (kind, loc) with
-  | Some (allocation :: others) ->
-    let where (allocation : Allocation.t) =
-      [%sexp
-        (allocation.placement : Allocation.Placement.t)
-        , (allocation.follows : Allocation.Follows.t option)]
-    in
-    if List.for_all others ~f:(fun other ->
-         Sexp.equal (where allocation) (where other))
-    then allocation
-    else
-      unsupported
-        !"%{Sexp} sites at %s placed differently"
-        [%sexp (kind : Allocation.Kind.t)]
-        (Loc.to_string loc)
-  | Some [] | None ->
-    unsupported
-      !"no %{Sexp} site at %s"
-      [%sexp (kind : Allocation.Kind.t)]
-      (Loc.to_string loc)
+let site t id =
+  match Hashtbl.find t.sites id with
+  | Some allocation -> allocation
+  | None -> unsupported !"no site %{Sexp}" [%sexp (id : Allocation.Id.t)]
+;;
+
+(* What [expr] makes: [unsupported] if it makes nothing. *)
+let made t (expr : Typed.Expr.t) =
+  match expr.made.made with
+  | Some id -> site t id
+  | None -> unsupported "no site at %s" (Loc.to_string expr.loc)
+;;
+
+(* A [Box.make] or [Ptr.make] application. *)
+let is_block t (expr : Typed.Expr.t) =
+  match expr.desc, expr.made.made with
+  | App _, Some id ->
+    (match (site t id).kind with
+     | Box | Pointer -> true
+     | Closure | Partial_application | Code | Cell -> false)
+  | _ -> false
 ;;
 
 let describe (allocation : Allocation.t) =
@@ -296,8 +301,7 @@ let free t (region : Region.t) =
   check_globals t
 ;;
 
-let make ?also t ctx kind loc payload =
-  let allocation = site t kind loc in
+let make ?also t ctx (allocation : Allocation.t) payload =
   alloc
     t
     allocation
@@ -481,10 +485,6 @@ let instantiate t (instance : Instance.t) ~owner ~scheme ~ty =
   }
 ;;
 
-let partials t (loc : Loc.t) =
-  Hashtbl.find t.sites (Partial_application, loc) |> Option.value ~default:[]
-;;
-
 (* A function whose body is a function is one function of the parameters of
    both, as the typechecker has it. *)
 let rec merged params (body : Typed.Expr.t) =
@@ -493,20 +493,20 @@ let rec merged params (body : Typed.Expr.t) =
   | _ -> params, body
 ;;
 
-let closure t ctx ~kind ~loc ~params ~body ~env ~partials_at ~owner =
+(* The closure [expr] makes. *)
+let closure t ctx (expr : Typed.Expr.t) ~params ~body ~env ~owner =
   let params, body = merged params body in
   Obj
     (make
        t
        ctx
-       kind
-       loc
+       (made t expr)
        (Closure
           { params
           ; body
           ; env
           ; instance = ctx.instance
-          ; partials = partials t partials_at
+          ; partials = List.map expr.made.partials ~f:(site t)
           ; owner
           }))
 ;;
@@ -516,36 +516,70 @@ let tick t =
   if t.fuel < 0 then unsupported "out of fuel"
 ;;
 
-let rec toplevel t (ident : Typed.Ident.t) =
-  match Hashtbl.find t.values ident.name with
-  | Some value -> value
-  | None ->
-    let (top : Typed.Toplevel.t) =
-      match Hashtbl.find t.toplevels ident.name with
-      | Some top -> top
-      | None -> unsupported "toplevel %s" ident.name
+let toplevel_owner (top : Typed.Toplevel.t) =
+  { Allocation.Owner.toplevel = top.ident; lets = [] }
+;;
+
+(* The toplevel [ident] used at type [ty] from [instance]: a function's closure,
+   of that instance, or the value of that instance, each instance of a value
+   evaluated once (a compiler makes a copy of the value for each way its sites
+   are made). Without [ty], of its least instance, as the entry is. *)
+let rec toplevel ?ty t (instance : Instance.t) (ident : Typed.Ident.t) =
+  let (top : Typed.Toplevel.t) =
+    match Hashtbl.find t.toplevels ident.name with
+    | Some top -> top
+    | None -> unsupported "toplevel %s" ident.name
+  in
+  let owner = toplevel_owner top in
+  let instance =
+    match ty with
+    | Some ty -> instantiate t instance ~owner ~scheme:top.scheme ~ty
+    | None -> instance
+  in
+  let memo key ~f =
+    match Hashtbl.find t.values key with
+    | Some value -> value
+    | None ->
+      let value = f () in
+      Hashtbl.set t.values ~key ~data:value;
+      check_globals t;
+      value
+  in
+  match top.args with
+  | _ :: _ ->
+    (match
+       memo ident.name ~f:(fun () ->
+         t.next_id <- t.next_id + 1;
+         let params, body = merged top.args top.body in
+         Obj
+           { id = t.next_id
+           ; region = Region.heap
+           ; site = "toplevel " ^ ident.name
+           ; payload =
+               Closure
+                 { params
+                 ; body
+                 ; env = Typed.Ident.Map.empty
+                 ; instance = Instance.empty
+                 ; partials = List.map top.partials ~f:(site t)
+                 ; owner
+                 }
+           })
+     with
+     | Obj ({ payload = Closure closure; _ } as obj) ->
+       Obj { obj with payload = Closure { closure with instance } }
+     | value -> value)
+  | [] ->
+    let key = owner_key owner in
+    let own =
+      List.filter instance.local ~f:(fun (owner, _) -> String.equal owner key)
     in
-    let owner = { Allocation.Owner.toplevel = top.ident; lets = [] } in
-    let value =
-      match top.args with
-      | _ :: _ ->
-        t.next_id <- t.next_id + 1;
-        let params, body = merged top.args top.body in
-        Obj
-          { id = t.next_id
-          ; region = Region.heap
-          ; site = "toplevel " ^ ident.name
-          ; payload =
-              Closure
-                { params
-                ; body
-                ; env = Typed.Ident.Map.empty
-                ; instance = Instance.empty
-                ; partials = partials t top.body.loc
-                ; owner
-                }
-          }
-      | [] ->
+    memo
+      (sprintf
+         !"%s %{Sexp}"
+         ident.name
+         [%sexp (List.map own ~f:snd : Allocation.Side.t list)])
+      ~f:(fun () ->
         (* An initializer's region ends when it does. *)
         let region =
           Region.create (sprintf "the initializer of %s" ident.name)
@@ -554,7 +588,7 @@ let rec toplevel t (ident : Typed.Ident.t) =
           { region
           ; caller = Region.heap
           ; current = region
-          ; instance = Instance.empty
+          ; instance = { instance with local = own }
           ; owner
           ; running = None
           }
@@ -562,17 +596,13 @@ let rec toplevel t (ident : Typed.Ident.t) =
         let value = eval t ctx Typed.Ident.Map.empty top.body ~tail:false in
         free t region;
         if top.mut then unsupported "a mutable toplevel";
-        value
-    in
-    Hashtbl.set t.values ~key:ident.name ~data:value;
-    check_globals t;
-    value
+        value)
 
 and reference t ctx env (expr : Typed.Expr.t) (var : Typed.Var_ref.t) =
-  match var with
-  | _ when Option.is_some (allocates var) ->
-    Allocator (Option.value_exn (allocates var), expr.loc)
-  | Bound (Local ident) | Persistent (Local ident) ->
+  match var, expr.made.made with
+  | Prim prim, made -> Prim_fn (prim, Option.map made ~f:(site t))
+  | _, Some id -> Allocator (site t id)
+  | (Bound (Local ident) | Persistent (Local ident)), None ->
     (match Map.find env ident with
      | None -> unsupported "unbound %s" ident.name
      | Some binding ->
@@ -612,25 +642,12 @@ and reference t ctx env (expr : Typed.Expr.t) (var : Typed.Var_ref.t) =
              in
              Obj { obj with payload = Closure { closure with instance } }
            | Box _ | Ptr _ | Cell _ | Prim_partial _ -> assert false)))
-  | Bound (Toplevel ident) | Persistent (Toplevel ident) ->
-    (match toplevel t ident with
-     | Obj ({ payload = Closure closure; _ } as obj) ->
-       let top = Hashtbl.find_exn t.toplevels ident.name in
-       let instance =
-         instantiate
-           t
-           ctx.instance
-           ~owner:{ toplevel = top.ident; lets = [] }
-           ~scheme:top.scheme
-           ~ty:expr.ty
-       in
-       Obj { obj with payload = Closure { closure with instance } }
-     | value -> value)
-  | Prim prim -> Prim_fn (prim, expr.loc)
-  | Free name -> unsupported "free %s" name
-  | Intrinsic _ -> unsupported "an intrinsic not applied"
+  | (Bound (Toplevel ident) | Persistent (Toplevel ident)), None ->
+    toplevel t ctx.instance ident ~ty:expr.ty
+  | Free name, None -> unsupported "free %s" name
+  | Intrinsic _, None -> unsupported "an intrinsic not applied"
 
-(* [prim] given [applied] (latest first) then [args]: a closure made at [site]
+(* [prim] given [applied] (latest first) then [args]: a closure made by [site]
    while too few. *)
 and apply_prim t ctx prim applied args ~site =
   let rec take applied = function
@@ -641,9 +658,10 @@ and apply_prim t ctx prim applied args ~site =
   in
   let applied, rest = take applied args in
   if List.length applied < Prim.arity prim
-  then
-    Obj
-      (make t ctx Partial_application site (Prim_partial (prim, applied, site)))
+  then (
+    match site with
+    | Some site -> Obj (make t ctx site (Prim_partial (prim, applied, site)))
+    | None -> unsupported "a partial application of a prim without a site")
   else (
     let values =
       List.rev_map applied ~f:(function
@@ -664,17 +682,12 @@ and apply t ctx value args ~tail =
   | [] -> value
   | arg :: rest ->
     (match value with
-     | Prim_fn (prim, loc) -> apply_prim t ctx prim [] args ~site:loc
+     | Prim_fn (prim, site) -> apply_prim t ctx prim [] args ~site
      | Obj ({ payload = Prim_partial (prim, applied, site); _ } as obj) ->
        live obj ~what:"a call";
-       apply_prim t ctx prim applied args ~site
-     | Allocator (kind, loc) ->
-       let payload : payload =
-         match kind with
-         | Box -> Box arg
-         | _ -> Ptr (ref arg)
-       in
-       apply t ctx (Obj (make t ctx kind loc payload)) rest ~tail
+       apply_prim t ctx prim applied args ~site:(Some site)
+     | Allocator allocation ->
+       apply t ctx (block t ctx allocation arg) rest ~tail
      | Obj ({ payload = Closure closure; _ } as obj) ->
        let given = List.length args in
        if given < List.length closure.params
@@ -780,25 +793,26 @@ and eval t ctx env (expr : Typed.Expr.t) ~tail : Value.t =
   match expr.desc with
   | Lit lit -> Prim_value (prim_of_lit lit)
   | Var var -> reference t ctx env expr var
-  | App ({ desc = Var var; _ }, arg) when Option.is_some (allocates var) ->
-    let arg = eval' arg in
-    (match allocates var with
-     | Some Box -> Obj (make t ctx Box expr.loc (Box arg))
-     | Some _ -> Obj (make t ctx Pointer expr.loc (Ptr (ref arg)))
-     | None -> assert false)
+  | App (_, arg) when is_block t expr -> block t ctx (made t expr) (eval' arg)
   | App _ ->
     (* A function given several arguments at once is called with them all, as
        compiled code would, making no closure in between. *)
     let rec spine (expr : Typed.Expr.t) args =
       match expr.desc with
-      | App (f, arg) when not (is_allocation f) -> spine f (arg :: args)
+      | App (f, arg) when not (is_block t expr) -> spine f (arg :: args)
       | _ -> expr, args
     in
     let head, args = spine expr [] in
     (match head.desc with
      | Var (Prim prim) ->
        let args = List.map args ~f:(fun arg -> eval' arg) in
-       apply_prim t ctx prim [] args ~site:expr.loc
+       apply_prim
+         t
+         ctx
+         prim
+         []
+         args
+         ~site:(Option.map expr.made.made ~f:(site t))
      | _ ->
        let f = eval' head in
        let args = List.map args ~f:(fun arg -> eval' arg) in
@@ -811,7 +825,12 @@ and eval t ctx env (expr : Typed.Expr.t) ~tail : Value.t =
     let binding = ref Undefined in
     let env' = Map.set env ~key:ident ~data:binding in
     let owner () =
-      { ctx.owner with lets = ctx.owner.lets @ [ ident.name, expr.loc ] }
+      match expr.made.owns with
+      | Some id ->
+        { ctx.owner with
+          lets = ctx.owner.lets @ [ { id; name = ident.name; loc = expr.loc } ]
+        }
+      | None -> unsupported "a generalized let owning no sites"
     in
     let scheme () = (Map.find_exn t.ident_info ident).ty in
     (match args with
@@ -821,12 +840,10 @@ and eval t ctx env (expr : Typed.Expr.t) ~tail : Value.t =
            closure
              t
              ctx
-             ~kind:Closure
-             ~loc:expr.loc
+             expr
              ~params:args
              ~body
              ~env:env'
-             ~partials_at:expr.loc
              ~owner:(if generalized then owner () else ctx.owner)
          with
          | Obj obj -> obj
@@ -851,7 +868,7 @@ and eval t ctx env (expr : Typed.Expr.t) ~tail : Value.t =
     eval' ~env:env' ~tail in_
   | Let_mut { ident; body; in_; _ } ->
     let value = eval' body in
-    let cell = make t ctx Cell expr.loc (Cell (ref value)) in
+    let cell = make t ctx (made t expr) (Cell (ref value)) in
     eval' ~env:(Map.set env ~key:ident ~data:(ref (Value (Obj cell)))) ~tail in_
   | Assign (Bound (Local ident), value) ->
     let value = eval' value in
@@ -865,16 +882,7 @@ and eval t ctx env (expr : Typed.Expr.t) ~tail : Value.t =
      | _ -> unsupported "assigning a non-cell")
   | Assign _ -> unsupported "assigning a toplevel"
   | Fun { args; body; _ } ->
-    closure
-      t
-      ctx
-      ~kind:Closure
-      ~loc:expr.loc
-      ~params:args
-      ~body
-      ~env
-      ~partials_at:expr.loc
-      ~owner:ctx.owner
+    closure t ctx expr ~params:args ~body ~env ~owner:ctx.owner
   | Annotated (expr, _) -> eval' ~tail expr
   | Marked (Nontail, expr) -> eval' expr
   | Marked (Stack, expr) -> eval' ~tail expr
@@ -988,22 +996,17 @@ and eval t ctx env (expr : Typed.Expr.t) ~tail : Value.t =
       !"%{Sexp}"
       (Typed.Expr.Desc.sexp_of_t (fun _ -> Atom "_") expr.desc)
 
-and is_allocation (expr : Typed.Expr.t) =
-  match expr.desc with
-  | Var var -> Option.is_some (allocates var)
-  | _ -> false
-
-and allocates (var : Typed.Var_ref.t) : Allocation.Kind.t option =
-  match var with
-  | Intrinsic Box_make -> Some Box
-  | Intrinsic Ptr_make -> Some Pointer
-  | Bound (Toplevel ident) | Persistent (Toplevel ident) ->
-    if String.equal ident.name (Prelude_path.canonical "Box.make")
-    then Some Box
-    else if String.equal ident.name (Prelude_path.canonical "Ptr.make")
-    then Some Pointer
-    else None
-  | _ -> None
+and block t ctx (allocation : Allocation.t) arg =
+  Obj
+    (make
+       t
+       ctx
+       allocation
+       (match allocation.kind with
+        | Box -> Box arg
+        | Pointer -> Ptr (ref arg)
+        | Closure | Partial_application | Code | Cell ->
+          unsupported "applying what isn't [Box.make] or [Ptr.make]"))
 
 and matches env (pattern : Typed.Pattern.t) (value : Value.t) =
   match pattern.desc, value with
@@ -1070,7 +1073,7 @@ let run ?(override = Fn.id) ?(tail_calls_end_regions = true) source ~entry =
     Outcome.Rejected (List.map errors ~f:Typecheck_error.message)
   | Ok { program; _ } ->
     let t =
-      { sites = Hashtbl.Poly.create ()
+      { sites = Allocation.Id.Table.create ()
       ; sides = String.Table.create ()
       ; toplevels = String.Table.create ()
       ; values = String.Table.create ()
@@ -1084,16 +1087,12 @@ let run ?(override = Fn.id) ?(tail_calls_end_regions = true) source ~entry =
     in
     List.iter program.allocations ~f:(fun allocation ->
       let allocation = override allocation in
-      Hashtbl.add_multi
-        t.sites
-        ~key:(allocation.kind, allocation.loc)
-        ~data:allocation;
+      Hashtbl.add_exn t.sites ~key:allocation.id ~data:allocation;
       Option.iter allocation.follows ~f:(fun { owner; side; _ } ->
         let key = owner_key owner in
         let sides = Hashtbl.find t.sides key |> Option.value ~default:[] in
         if not (List.mem sides side ~equal:Allocation.Side.equal)
         then Hashtbl.set t.sides ~key ~data:(sides @ [ side ])));
-    Hashtbl.map_inplace t.sites ~f:List.rev;
     List.iter program.sccs ~f:(fun scc ->
       List.iter scc.members ~f:(fun (top : Typed.Toplevel.t) ->
         Hashtbl.set t.toplevels ~key:top.ident.name ~data:top));
@@ -1101,7 +1100,7 @@ let run ?(override = Fn.id) ?(tail_calls_end_regions = true) source ~entry =
      | None -> Outcome.Unsupported ("no toplevel " ^ entry)
      | Some top ->
        (try
-          let f = toplevel t top.ident in
+          let f = toplevel t Instance.empty top.ident in
           let result =
             apply
               t

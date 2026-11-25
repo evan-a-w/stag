@@ -33,14 +33,16 @@ module Ctx : sig
 
   (** [holds] reports a constraint that doesn't hold, returning whether it did;
       [report], an annotation that is invalid. [allocated] is told of each
-      allocation site checked. *)
+      allocation site checked, and names it if it is in run time code. [locks]
+      are those the expression checked is under. *)
   val create
     :  modes:Mode.Id_source.t
     -> rank:int
     -> holds:(loc:Loc.t -> (unit, Mode.Error.t) Result.t -> bool)
     -> crossing:(Type.ty -> Mode.Crossing.t)
     -> report:(Typecheck_error.t -> unit)
-    -> allocated:(Site.t -> unit)
+    -> allocated:(Site.t -> Typed.Allocation.Id.t option)
+    -> locks:Env.Lock.t list
     -> t
 end
 
@@ -182,11 +184,22 @@ val raised : Ctx.t -> loc:Loc.t -> Mode.Var.t
 
 (** Allocation sites: [stack_] applies to those the value is made of. *)
 module Alloc : sig
+  (** Each names the site, as [Ctx.create]'s [allocated] does. *)
+
   (** A closure of the mode given. *)
-  val closure : Ctx.t -> Expected.t -> loc:Loc.t -> (Mode.Var.t -> 'a) -> 'a
+  val closure
+    :  Ctx.t
+    -> Expected.t
+    -> loc:Loc.t
+    -> (Mode.Var.t -> 'a)
+    -> 'a * Typed.Allocation.Id.t option
 
   (** A quote: the mode of its code. *)
-  val code : Ctx.t -> Expected.t -> loc:Loc.t -> Mode.Var.t
+  val code
+    :  Ctx.t
+    -> Expected.t
+    -> loc:Loc.t
+    -> Mode.Var.t * Typed.Allocation.Id.t option
 
   (** A [Ptr.make] or [Box.make] application, or a partial application of a
       prim, of the mode given. *)
@@ -196,15 +209,19 @@ module Alloc : sig
     -> loc:Loc.t
     -> kind:Typed.Allocation.Kind.t
     -> Mode.Var.t
-    -> unit
+    -> Typed.Allocation.Id.t option
 
   (** What a prim, [Ptr.make] or [Box.make] used as a value (not applied where
       it is named) makes when it is applied: on the heap, as where it is applied
       isn't known. *)
-  val on_heap : Ctx.t -> loc:Loc.t -> kind:Typed.Allocation.Kind.t -> unit
+  val on_heap
+    :  Ctx.t
+    -> loc:Loc.t
+    -> kind:Typed.Allocation.Kind.t
+    -> Typed.Allocation.Id.t option
 
   (** The cell of a [let mut], of the mode given: it outlives what captures it. *)
-  val cell : Ctx.t -> loc:Loc.t -> Mode.Var.t -> unit
+  val cell : Ctx.t -> loc:Loc.t -> Mode.Var.t -> Typed.Allocation.Id.t option
 
   (** [stack_ e]: [Error] if [e] allocates nothing. *)
   val stack
@@ -223,14 +240,14 @@ module Function : sig
   val result_curry : Ctx.t -> loc:Loc.t -> Mode.Var.t
 
   (** The closures of partial applications hold what the function captures and
-      the arguments given so far. *)
+      the arguments given so far. Their sites, as [Typed.Expr.Made.partials]. *)
   val partial_applications
     :  Ctx.t
     -> closure:Mode.Var.t
     -> arg_modes:Mode.Var.t list
     -> partial_modes:Mode.Var.t list
     -> loc:Loc.t
-    -> unit
+    -> Typed.Allocation.Id.t list
 
   (** A parameter in the body, passed at [arg_mode]: the body is a region of its
       own. *)

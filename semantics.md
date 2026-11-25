@@ -462,7 +462,13 @@ type of its owner or of an owner around it (`f.g`'s site may follow `f`'s
 `arg.arg`), the side's owner being named (its result, a curried
 closure's result `res.res`, a higher-order parameter's argument `arg.arg`,
 …): made as `placement` when that side is global, and as `if_local` when
-it is local. An owner is compiled once per assignment of locality to the
+it is local. A higher-order parameter annotated with an arrow type
+without mode variables (`(k : int -> box[int])`) has that arrow's modes
+fixed, so nothing follows its `arg.arg`: only one whose modes are inferred
+has sides to follow. Each site,
+and each generalised `let` owning some, is named by an id
+(`Typed.Allocation.Id`) its expression carries (`Typed.Expr.Made`), so each
+copy of code spliced in twice is placed, and owns its sites, on its own. An owner is compiled once per assignment of locality to the
 sides its sites follow; one none of whose sites follow a side (none
 returned, or all forced by `stack_`, a `region_` or a captured local) is
 compiled once. A `regional` side instantiates the `global` copy.

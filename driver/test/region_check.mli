@@ -14,8 +14,16 @@ open! Import
     where it is used allow, given the instances it is used from (the greatest
     instance, so as many sites as can be are made in regions).
 
-    It runs the run time subset of stag: no quotes, exceptions or externals.
-    Applications of prims are calls into [Prim]. *)
+    Each allocation is found by the id ([Typed.Allocation.Id]) on the expression
+    making it ([Typed.Expr.Made]), so code spliced in twice is made as each
+    copy's record says. A toplevel value (not a function) is evaluated once for
+    each instance it is used at, as a compiler makes a copy of it for each,
+    keyed by the sides of its own type that are [local] in that instance.
+
+    It runs the run time subset of stag: no quotes, exceptions or externals. A
+    toplevel splice runs as the expansion the typechecker inferred; the code
+    that computed it ran at compile time, and is not run, nor is the code of any
+    quote. Applications of prims are calls into [Prim]. *)
 
 module Outcome : sig
   type t =

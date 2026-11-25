@@ -151,6 +151,124 @@ module Marker : sig
   [@@deriving sexp_of, equal]
 end
 
+(** An allocation in run time code, and where a compiler makes it. The modes of
+    a function's type are chosen by each instance of it; a function whose
+    allocations are made differently in some instances than in others is
+    compiled once for each way. *)
+module Allocation : sig
+  (** Names an allocation site, or a [let] owning some: unique in the program,
+      so each copy of spliced code has its own. *)
+  module Id : sig
+    type t [@@deriving sexp_of, compare, equal, hash]
+
+    include Hashable.S_plain with type t := t
+
+    val of_int : int -> t
+  end
+
+  module Kind : sig
+    type t =
+      | Closure
+      | Partial_application
+      (** The closure of a function given some of its arguments: made by the
+          caller, as the result of its call. *)
+      | Code
+      | Pointer (** [Ptr.make] *)
+      | Box (** [Box.make] *)
+      | Cell (** Of a [let mut]. *)
+    [@@deriving sexp_of, compare, equal]
+  end
+
+  module Placement : sig
+    type t =
+      | Heap
+      | Region (** The function's (or [region_]'s) own. *)
+      | Caller_region
+      (** The one around it: returned by the function (or [region_]), or under
+          [exclave_]. Of a partial application, its caller's own. *)
+    [@@deriving sexp_of, compare, equal]
+  end
+
+  (** A side of an arrow in a type: the path down to the arrow, then which side. *)
+  module Side : sig
+    module Step : sig
+      type t =
+        | Arg
+        | Res
+        | Component of int (** Of a tuple, from 0, as printed. *)
+        | Type_arg of int (** Of a type constructor, from 0, as printed. *)
+        | Field of string (** Of a structural record, or a variant's tag. *)
+        | Code (** What the code computes. *)
+      [@@deriving sexp_of, compare, equal]
+    end
+
+    type t =
+      { steps : Step.t list
+      ; side : [ `Arg | `Res ]
+      }
+    [@@deriving sexp_of, compare, equal]
+
+    (** As [res], [arg.res], [component 0.res]: the steps, then the side. *)
+    val to_string : t -> string
+  end
+
+  (** The function whose instances decide where it is made: a toplevel, or a
+      function bound by a [let] in it (generalized, so with instances of its
+      own), by each [let] down to it. *)
+  module Owner : sig
+    module Let : sig
+      type t =
+        { id : Id.t (** As the [let]'s [Expr.Made.owns]. *)
+        ; name : string
+        ; loc : Loc.t
+        }
+      [@@deriving sexp_of]
+    end
+
+    type t =
+      { toplevel : Ident.t
+      ; lets : Let.t list (** Outermost first. *)
+      }
+    [@@deriving sexp_of]
+
+    (** By the toplevel and the ids of the lets. *)
+    val equal : t -> t -> bool
+
+    (** As [f.g]. *)
+    val to_string : t -> string
+  end
+
+  (** An allocation made more locally in the instances of an owner (its own, or
+      one around it) where a side of that owner's type is [local]. *)
+  module Follows : sig
+    type t =
+      { owner : Owner.t
+      ; side : Side.t
+      (** In [owner]'s type: of the site's owner, or one around it. *)
+      ; if_local : Placement.t
+      }
+    [@@deriving sexp_of]
+  end
+
+  type t =
+    { id : Id.t (** As the [Expr.Made] of the expression that makes it. *)
+    ; owner : Owner.t
+    ; loc : Loc.t
+    ; kind : Kind.t
+    ; placement : Placement.t
+    (** Where it is made in every instance of its owner: as locally as its least
+        instance, with every mode of its owners' types as low as it may be,
+        allows, or on the heap where anything it is bounded by may yet be
+        constrained by code outside its component. *)
+    ; follows : Follows.t option
+    (** Where it is made instead in the instances where that side is [local]
+        (with every other side, for all it relies on, at its least). A site that
+        needs several sides [local] to be made more locally is made at
+        [placement]. *)
+    }
+  [@@deriving sexp_of]
+end
+
 (** [ty] is the type of the node, instantiated where it is a variable. *)
 module Expr : sig
   module Subs : sig
@@ -253,10 +371,30 @@ module Expr : sig
     [@@deriving sexp_of]
   end
 
+  (** The allocation sites an expression in run time code makes, by
+      [Allocation.Id]. *)
+  module Made : sig
+    type t =
+      { made : Allocation.Id.t option
+      (** What evaluating it allocates: a closure, code, a [Box.make] or
+          [Ptr.make] block, a cell, or a partial application of a prim (where it
+          is applied, or what applying it makes where it is named as a value). *)
+      ; partials : Allocation.Id.t list
+      (** Of a function, the partial applications given 1, 2, ... of its
+          arguments. *)
+      ; owns : Allocation.Id.t option
+      (** Of a [let], naming it in the [Allocation.Owner]s it is in. *)
+      }
+    [@@deriving sexp_of]
+
+    val none : t
+  end
+
   type t =
     { desc : t Desc.t
     ; ty : Type.ty
     ; loc : Loc.t (** Of the syntax it was inferred from. *)
+    ; made : Made.t
     }
   [@@deriving sexp_of]
 
@@ -302,6 +440,7 @@ module Toplevel : sig
     ; args : Ident.t list
     ; scheme : Type.ty
     ; body : Expr.t
+    ; partials : Allocation.Id.t list (** As [Expr.Made.partials]. *)
     }
   [@@deriving sexp_of]
 end
@@ -340,103 +479,6 @@ module Bench : sig
     ; body : Expr.t (** At level 0, of any type. *)
     ; loc : Loc.t
     ; generated : bool (** By a declaration splice, so located at the splice. *)
-    }
-  [@@deriving sexp_of]
-end
-
-(** An allocation in run time code, and where a compiler makes it. The modes of
-    a function's type are chosen by each instance of it; a function whose
-    allocations are made differently in some instances than in others is
-    compiled once for each way. *)
-module Allocation : sig
-  module Kind : sig
-    type t =
-      | Closure
-      | Partial_application
-      (** The closure of a function given some of its arguments: made by the
-          caller, as the result of its call. *)
-      | Code
-      | Pointer (** [Ptr.make] *)
-      | Box (** [Box.make] *)
-      | Cell (** Of a [let mut]. *)
-    [@@deriving sexp_of, compare, equal]
-  end
-
-  module Placement : sig
-    type t =
-      | Heap
-      | Region (** The function's (or [region_]'s) own. *)
-      | Caller_region
-      (** The one around it: returned by the function (or [region_]), or under
-          [exclave_]. Of a partial application, its caller's own. *)
-    [@@deriving sexp_of, compare, equal]
-  end
-
-  (** A side of an arrow in a type: the path down to the arrow, then which side. *)
-  module Side : sig
-    module Step : sig
-      type t =
-        | Arg
-        | Res
-        | Component of int (** Of a tuple, from 0. *)
-        | Type_arg of int (** Of a type constructor, from 0. *)
-        | Field of string (** Of a structural record, or a variant's tag. *)
-        | Code (** What the code computes. *)
-      [@@deriving sexp_of, compare, equal]
-    end
-
-    type t =
-      { steps : Step.t list
-      ; side : [ `Arg | `Res ]
-      }
-    [@@deriving sexp_of, compare, equal]
-
-    (** As [res], [arg.res]: the steps, then the side. *)
-    val to_string : t -> string
-  end
-
-  (** The function whose instances decide where it is made: a toplevel, or a
-      function bound by a [let] in it (generalized, so with instances of its
-      own), by the name and location of each [let] down to it. *)
-  module Owner : sig
-    type t =
-      { toplevel : Ident.t
-      ; lets : (string * Loc.t) list (** Outermost first. *)
-      }
-    [@@deriving sexp_of]
-
-    val equal : t -> t -> bool
-
-    (** As [f.g]. *)
-    val to_string : t -> string
-  end
-
-  (** An allocation made more locally in the instances of an owner (its own, or
-      one around it) where a side of that owner's type is [local]. *)
-  module Follows : sig
-    type t =
-      { owner : Owner.t
-      ; side : Side.t
-      (** In [owner]'s type: of the site's owner, or one around it. *)
-      ; if_local : Placement.t
-      }
-    [@@deriving sexp_of]
-  end
-
-  type t =
-    { owner : Owner.t
-    ; loc : Loc.t
-    ; kind : Kind.t
-    ; placement : Placement.t
-    (** Where it is made in every instance of its owner: as locally as its least
-        instance, with every mode of its owners' types as low as it may be,
-        allows, or on the heap where anything it is bounded by may yet be
-        constrained by code outside its component. *)
-    ; follows : Follows.t option
-    (** Where it is made instead in the instances where that side is [local]
-        (with every other side, for all it relies on, at its least). A site that
-        needs several sides [local] to be made more locally is made at
-        [placement]. *)
     }
   [@@deriving sexp_of]
 end
