@@ -336,8 +336,8 @@ module Program : sig
     { sccs : Scc.t list (** Each component after the ones it refers to. *)
     ; items : Item.t list
     (** The toplevel bindings and modules of the program, in program order, with
-        what a splice or include generated in its place: the order toplevels
-        are evaluated in, but for [Driver] ordering files by dependency. *)
+        what a splice or include generated in its place: the order toplevels are
+        evaluated in, but for [Driver] ordering files by dependency. *)
     ; expect_tests : Expect_test.t list (** In program order. *)
     ; benches : Bench.t list (** In program order. *)
     ; declaration_splices : Expr.t list
