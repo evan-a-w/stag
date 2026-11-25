@@ -260,3 +260,83 @@ let%expect_test "random operations agree with an association list, and stay bala
     6
     true
     |}]
+
+let range lo hi =
+  let loop k acc =
+    match Core.Int.lt k lo with
+    | true -> acc
+    | false ->
+      loop (Core.Int.sub k 1) (Cons (Box.make ((k, Core.Int.to_string k), acc)))
+  in
+  loop (Core.Int.sub hi 1) []
+
+let%expect_test "filters keeping skewed parts of a map stay balanced" =
+  let m = of_list (range 0 300) in
+  let show name p =
+    let kept = Core.Map.filter (fun k _ -> p k) m in
+    print_endline name;
+    print_bool (valid kept);
+    print_int (Core.Map.cardinal kept);
+    print_int (Core.Map.height kept)
+  in
+  show "prefix" (fun k -> Core.Int.lt k 50);
+  show "suffix" (fun k -> Core.Int.ge k 250);
+  show "sparse" (fun k -> Core.Int.equal (Core.Int.rem k 37) 0);
+  show
+    "window removed"
+    (fun k -> Core.Bool.not (both (Core.Int.ge k 100) (Core.Int.lt k 200)));
+  [%expect {|
+    prefix
+    true
+    50
+    6
+    suffix
+    true
+    50
+    6
+    sparse
+    true
+    9
+    4
+    window removed
+    true
+    200
+    8
+    |}]
+
+let%expect_test "600 removals, half of unbound keys, keep a map balanced" =
+  let m = of_list (range 0 300) in
+  let loop i m bad =
+    match Core.Int.equal i 600 with
+    | true -> (m, bad)
+    | false ->
+      let removed = remove m (Core.Int.rem (Core.Int.mul i 7) 600) in
+      loop
+        (Core.Int.add i 1)
+        removed
+        (match valid removed with
+         | true -> bad
+         | false -> Core.Int.add bad 1)
+  in
+  (match loop 0 m 0 with
+   | m, bad ->
+     print_int bad;
+     print_int (Core.Map.cardinal m));
+  [%expect {|
+    0
+    0
+    |}]
+
+let by_fst a b = match (a, b) with (x, _), (y, _) -> Core.Int.compare x y
+
+let print_keys m =
+  Core.Map.iter (fun k _ -> match k with _, s -> print_endline s) m
+
+let%expect_test "add and update keep the new key" =
+  let m = Core.Map.add by_fst Core.Map.empty (1, "first") "a" in
+  print_keys (Core.Map.add by_fst m (1, "added") "b");
+  print_keys (Core.Map.update by_fst m (1, "updated") (fun _ -> Some "c"));
+  [%expect {|
+    added
+    updated
+    |}]

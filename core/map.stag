@@ -137,11 +137,24 @@ module Internal = struct
     | _, Empty -> l
     | _, Node *{left = rl; key = k; value = v; right = rr} ->
       exclave_ join (concat l rl) k v rr
+
+  let remove compare t k =
+    match t with
+    | Empty -> Empty
+    | Node *{left = l; key = k2; value = v2; right = r} ->
+      let c : int = compare k k2 in
+      match Int.equal c 0 with
+      | true -> concat l r
+      | false ->
+        match Int.lt c 0 with
+        | true -> exclave_ bal (remove compare l k) k2 v2 r
+        | false -> exclave_ bal l k2 v2 (remove compare r k)
 end
 
 let singleton k v = Internal.create Empty k v Empty
 
-(* [add compare t k v] binds [k] to [v], replacing any binding of [k]. *)
+(* [add compare t k v] binds [k] to [v], replacing any binding of [k] (and its
+   key, by [k]). *)
 let add compare t k v =
   match t with
   | Empty -> Internal.create Empty k v Empty
@@ -172,21 +185,16 @@ let mem compare t k =
   | Some _ -> true
   | None -> false
 
-(* [remove compare t k] has no binding of [k]. *)
+(* [remove compare t k] has no binding of [k]: it is [t] itself if [k] is
+   unbound. *)
 let remove compare t k =
-  match t with
-  | Empty -> Empty
-  | Node *{left = l; key = k2; value = v2; right = r} ->
-    let c : int = compare k k2 in
-    match Int.equal c 0 with
-    | true -> Internal.concat l r
-    | false ->
-      match Int.lt c 0 with
-      | true -> exclave_ Internal.bal (remove compare l k) k2 v2 r
-      | false -> exclave_ Internal.bal l k2 v2 (remove compare r k)
+  match mem compare t k with
+  | false -> t
+  | true -> Internal.remove compare t k
 
 (* [update compare t k f] binds [k] as [f] says, given [k]'s value if bound:
-   [Some v] binds it to [v], and [None] unbinds it. *)
+   [Some v] binds it to [v], and [None] unbinds it. As [add], a binding keeps
+   [k] as its key. *)
 let update compare t k f =
   match t with
   | Empty ->
@@ -203,7 +211,7 @@ let update compare t k f =
          | None -> Internal.concat l r
          | Some v ->
            Node
-             (Box.make {left = l; key = k2; value = v; right = r; height = h}))
+             (Box.make {left = l; key = k; value = v; right = r; height = h}))
     | false ->
       match Int.lt c 0 with
       | true -> exclave_ Internal.bal (update compare l k f) k2 v2 r

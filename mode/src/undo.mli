@@ -12,7 +12,3 @@ val atomically : (unit -> ('a, 'e) Result.t) -> ('a, 'e) Result.t
 
 (** Raises if under [atomically], for changes that can't be undone. *)
 val assert_not_atomic : string -> unit
-
-(** Runs [f] as if not under [atomically]: what it changes stays even if an
-    enclosing [atomically] is undone. Only for changes to what [f] creates. *)
-val detached : (unit -> 'a) -> 'a

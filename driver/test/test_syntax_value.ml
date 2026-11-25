@@ -301,6 +301,7 @@ let%expect_test "the prelude's signature" =
           val add_max : 'a -> 'b -> t['a, 'b, 'm0] -> t['a, 'b, 'm1]
           val join : t['a, 'b, 'm0] -> 'a -> 'b -> t['a, 'b, 'm1] -> t['a, 'b, 'm2]
           val concat : t['a, 'b, 'm0] -> t['a, 'b, 'm1] -> t['a, 'b, 'm2]
+          val remove : ('a -> 'b -> int) -> t['b, 'c, 'm0] -> 'a -> t['b, 'c, 'm1]
         end
         val singleton : 'a -> 'b -> t['a, 'b, 'm0]
         val add : ('a -> 'a -> int) -> t['a, 'b, 'm0] -> 'a -> 'b -> t['a, 'b, 'm1]

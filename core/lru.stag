@@ -45,16 +45,18 @@ let create capacity compare =
 let length t = t.size.*
 
 module Internal = struct
-  (* Takes [cell] out of the list. *)
+  (* Takes [cell] out of the list, clearing its links. *)
   let unlink t cell =
     let prev = cell.*.prev in
     let next = cell.*.next in
     (match prev with
      | Nil -> t.first.* <- next
      | Entry p -> p.*.next <- next);
-    match next with
-    | Nil -> t.last.* <- prev
-    | Entry n -> n.*.prev <- prev
+    (match next with
+     | Nil -> t.last.* <- prev
+     | Entry n -> n.*.prev <- prev);
+    cell.*.prev <- Nil;
+    cell.*.next <- Nil
 
   (* Puts [cell], which is not in the list, first. *)
   let push_front t cell =
