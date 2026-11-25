@@ -788,9 +788,9 @@ and sub_structure state sub ~flip ~lower ~upper =
      | Invariant | Bivariant -> Mode_arg.equate ids mode1 mode2)
     |> Result.map_error ~f:modes_error
   in
-  (* A join variable (see [Fresh.join_var]) is made the join of what is used
-     at it, not equal to the first: [ty] at a new copy of its modes, which
-     [var] becomes. *)
+  (* A join variable (see [Fresh.join_var]) is made the join of what is used at
+     it, not equal to the first: [ty] at a new copy of its modes, which [var]
+     becomes. *)
   let join_at ~(var : Type.ty) ~rank ty ~sub =
     match fresh_modes_copy state.fresh ~rank ty with
     | None -> unify_ty ~lower:ty1 ~upper:ty2

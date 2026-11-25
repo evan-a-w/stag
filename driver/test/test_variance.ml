@@ -33,7 +33,7 @@ let apply (f : string @ local -> int) = f "a"
 let global_only = apply (fun (s : string) -> let g @ global = s in String.length g)
 |};
   [%expect
-    {| This is regional, because it is annotated local (at t.stag:2:24-29), then the function types are unified, then s is passed to the function (at t.stag:3:24-83), then s is used (at t.stag:3:62-63), then it is bound by an annotated let (at t.stag:3:53-59), but must be at most global, because it is annotated global (at t.stag:3:53-59) |}]
+    {| This is regional, because it is annotated local (at t.stag:2:24-29), then a function is used at a type with other modes, then s is passed to the function (at t.stag:3:24-83), then s is used (at t.stag:3:62-63), then it is bound by an annotated let (at t.stag:3:53-59), but must be at most global, because it is annotated global (at t.stag:3:53-59) |}]
 ;;
 
 let%expect_test "a result's modes are covariant" =
@@ -60,7 +60,7 @@ let external_bad = take (fun (u : unit) -> ext "a")
 |}
     );
   [%expect
-    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:43-50), but must be at most gc, because its type is written without a mode (at t.stag:4:22-28), then the function types are unified |}]
+    {| This is external, because it is annotated external (at t.stag:2:31-39), then y is used (at t.stag:2:47-48), then the function returns it (at t.stag:2:23-48), then a function is used at a type with other modes, then the function returns it (at t.stag:5:43-50), but must be at most gc, because its type is written without a mode (at t.stag:4:22-28), then a function is used at a type with other modes |}]
 ;;
 
 let%expect_test "nested arrows compose: an argument's argument is covariant" =
@@ -102,7 +102,13 @@ let pick2 (b : bool) =
 let both = [ (fun (s @ local) -> String.length s); (fun (s : string) -> let g @ global = s in String.length g) ]
 let both2 = [ (fun (s : string) -> let g @ global = s in String.length g); (fun (s @ local) -> String.length s) ]
 |};
-  [%expect {| |}];
+  [%expect
+    {|
+    val pick : bool @ _ -> (string @ 'm0 -> int @ _) @ _ with 'm0 <= global
+    val pick2 : bool @ _ -> (string @ 'm0 -> int @ _) @ _ with 'm0 <= global
+    val both : list[string @ '_m0 -> int @ '_m1] with '_m0 <= global
+    val both2 : list[string @ '_m0 -> int @ '_m1] with '_m0 <= global
+    |}];
   (* Neither accepts a local string. *)
   check
     {|
@@ -112,7 +118,8 @@ let pick (b : bool) =
   | false -> (fun (s : string) -> let g @ global = s in String.length g)
 let use (s @ local) = pick true s
 |};
-  [%expect {| |}];
+  [%expect
+    {| This is regional, because it is annotated local (at t.stag:6:13-18), then s is passed to the function (at t.stag:6:22-33), then s is used (at t.stag:6:32-33), then it is passed to a function (at t.stag:6:22-33), but must be at most global, because it is annotated global (at t.stag:5:42-48), then it is bound by an annotated let (at t.stag:5:42-48), then s is used (at t.stag:5:51-52), then s is passed to the function (at t.stag:5:13-72), then a function is used at a type with other modes |}];
   check
     {|
 let pick (b : bool) =
@@ -121,14 +128,17 @@ let pick (b : bool) =
   | false -> (fun (s @ local) -> String.length s)
 let use (s @ local) = pick true s
 |};
-  [%expect {| |}]
+  [%expect
+    {| This is regional, because it is annotated local (at t.stag:6:13-18), then s is passed to the function (at t.stag:6:22-33), then s is used (at t.stag:6:32-33), then it is passed to a function (at t.stag:6:22-33), but must be at most global, because it is annotated global (at t.stag:4:41-47), then it is bound by an annotated let (at t.stag:4:41-47), then s is used (at t.stag:4:50-51), then s is passed to the function (at t.stag:4:12-71), then a function is used at a type with other modes |}]
 ;;
 
 let%expect_test "_ can't be constrained or declared" =
   check {|let f : string @ _ -> string @ 'm with _ <= 'm = fun s -> s|};
-  [%expect {| |}];
+  [%expect
+    {| The anonymous mode _ can't be constrained: name a mode variable like 'm instead |}];
   check {|type t = { f : string @ _ -> string }|};
-  [%expect {| |}]
+  [%expect
+    {| The anonymous mode _ is not allowed in a declaration: its arrows have fixed modes, written as atoms like [local], or a mode parameter declared ['p : mode] |}]
 ;;
 
 let%expect_test "an immutable box is covariant" =
@@ -147,7 +157,7 @@ let matched (b : box['a]) = match b with *x -> x
     {|
     val ext : string @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and external <= 'm1
     val read : box[string -> int] @ _ -> int @ _
-    val boxed : box[string @ '_m0 -> int @ '_m1] with nonportable gc local <= '_m0 and '_m1 <= gc global
+    val boxed : box[string @ '_m0 -> int @ '_m1] with nonportable gc <= '_m0 and '_m1 <= gc global
     val used : int
     val get : box[string] @ 'm0 -> string @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
     val matched : box['a] @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
@@ -327,7 +337,8 @@ let compose f g x = f (g x)
     |}]
 ;;
 
-let%expect_test "a cyclic alias's parameter is invariant when reached both ways" =
+let%expect_test "a cyclic alias's parameter is invariant when reached both ways"
+  =
   (* [f['a]] reaches its own expansion contravariantly (in [box[f['a]] ->]) and
      ['a] covariantly, so ['a] is invariant in [r], and a local-accepting
      function in [r1] can't be passed off as a global-accepting one. *)
@@ -344,7 +355,8 @@ let pf : f[ptr[int] @ local -> unit] =
 let r1 : r[ptr[int] @ local -> unit] = { x = pf }
 let r2 : r[ptr[int] -> unit] = r1
 |};
-  [%expect {|
+  [%expect
+    {|
     This expression has type ptr[int] @ local -> unit but an expression was expected of type ptr[int] -> unit
     Their modes differ: This is local, because it is annotated local (at t.stag:10:22-27), then the function types are unified, but must be at most global, because its type is written without a mode (at t.stag:11:11-19)
     |}];
@@ -355,7 +367,8 @@ type f['p : mode] = box[f['p]] -> co['p]
 type r['p : mode] = { x : f['p] }
 let widen (r : r[gc]) : r[external] = r
 |};
-  [%expect {|
+  [%expect
+    {|
     This expression has type r[gc] but an expression was expected of type r[external]
     Their modes differ: This is external, because the types are unified, but must be at most gc, because the types are unified
     |}];
@@ -366,32 +379,9 @@ type f['p : mode] = box[f['p]] -> co['p]
 type r['p : mode] = { x : f['p] }
 let narrow (r : r[external]) : r[gc] = r
 |};
-  [%expect {|
+  [%expect
+    {|
     This expression has type r[external] but an expression was expected of type r[gc]
     Their modes differ: This is external, because the types are unified, but must be at most gc, because the types are unified
     |}]
 ;;
-
-
-let%expect_test "scratch" =
-  check {|
-let pick (b : bool) =
-  match b with
-  | true -> (fun (s @ local) -> String.length s)
-  | false -> (fun (s : string) -> String.length s)
-|};
-  check {|
-let f = fun (s @ local) -> String.length s
-let pick (b : bool) =
-  match b with
-  | true -> f
-  | false -> (fun (s : string) -> let g @ global = s in String.length g)
-|};
-  check {|
-let g = (fun (s : string) -> let g @ global = s in String.length g)
-let pick (b : bool) =
-  match b with
-  | true -> (fun (s @ local) -> String.length s)
-  | false -> g
-|};
-  [%expect {| |}]

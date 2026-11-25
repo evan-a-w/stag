@@ -20,8 +20,8 @@ val modes : t -> Mode.Id_source.t
 val var : t -> rank:Type.rank -> (_, _) Type.Var.t
 
 (** Like [var], for a type that values are used at by variance (a scheme's
-    instance, a match's result): it becomes their join, a type with modes of
-    its own each is used at, rather than the first's type. *)
+    instance, a match's result): it becomes their join, a type with modes of its
+    own each is used at, rather than the first's type. *)
 val join_var : t -> rank:Type.rank -> (_, _) Type.Var.t
 
 val is_join : t -> Type.id -> bool

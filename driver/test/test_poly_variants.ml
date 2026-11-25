@@ -61,7 +61,7 @@ let argument_mismatch v = match v with `A 1 -> 1 | `A -> 2
     val repeated : [`A of int] -> int
     ((Unification_error
       (Row_mismatch REmpty
-       (RExtend C Present (TCon unit ()) (RVar (Unbound 45 1)))
+       (RExtend C Present (TCon unit ()) (RVar (Unbound 47 1)))
        (Missing_label C)))
      @ t.stag:3:18-20)
     (Unification_error
@@ -131,7 +131,7 @@ let%expect_test "residuals of a catch-all" =
     val open_ended : [`A of 'a | `B of 'a; ..'b] -> ([..'b] -> 'a) -> 'a
     (Unification_error
      (Row_mismatch REmpty
-      (RExtend C Present (TCon unit ()) (RVar (Unbound 115 1)))
+      (RExtend C Present (TCon unit ()) (RVar (Unbound 119 1)))
       (Missing_label C)))
     |}]
 ;;
@@ -319,7 +319,7 @@ let maybe_c v =
      @ t.stag:2:32-41)
     ((Unification_error
       (Row_mismatch REmpty
-       (RExtend C Present (TCon unit ()) (RVar (Unbound 35 1)))
+       (RExtend C Present (TCon unit ()) (RVar (Unbound 36 1)))
        (Missing_label C)))
      @ t.stag:2:13-44)
     ((Unification_error

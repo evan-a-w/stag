@@ -1125,9 +1125,7 @@ let%expect_test "malformed values made otherwise" =
        ~f:(fun ref args ->
          match payload args ~default:Unit with
          | Tuple [ name; rest ] ->
-           Construct
-             ( ref
-             , [ Box (Treewalk.Value.Tuple [ name; rest; rest ]) ] )
+           Construct (ref, [ Box (Treewalk.Value.Tuple [ name; rest; rest ]) ])
          | _ -> assert false));
   [%expect
     {| Malformed syntax: expected a list cell's pair, got (("x", {`mode = None; `ty = None}), Cons (Box.make (("y", {`mode = None; `ty = Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))}), Nil)), Cons (Box.make (("y", {`mode = None; `ty = Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))}), Nil))), within Stag.Expr.Let argument 1 |}];
