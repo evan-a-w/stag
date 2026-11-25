@@ -458,3 +458,29 @@ let b : int = "b"
     Error: This expression has type string but an expression was expected of type int
     |}]
 ;;
+
+let%expect_test "a mode error in code abandoned and checked anew is reported" =
+  (* Checking [b] runs the include, whose code uses [c], still being checked:
+     the include is abandoned, then checked again once [c] is. *)
+  check
+    {|let keep (f : int -> int) = Ptr.make f
+let c = b
+include .~ (let g = stack_ (fun u -> u) in let _ = keep g in let _ = c in Nil)
+let b = zzz
+|};
+  [%expect
+    {|
+    File "a.stag", line 3, characters 51-57:
+    3 | include .~ (let g = stack_ (fun u -> u) in let _ = keep g in let _ = c in Nil)
+                                                           ^^^^^^
+    Error: This is local, because it is allocated by [stack_] (at a.stag:3:20-39), then it is part of the value (at a.stag:3:20-39), then g is used (at a.stag:3:56-57), then it is passed to a function (at a.stag:3:51-57), but must be at most global, because Ptr.make holds it, then the function types are unified, then it is passed to a function (at a.stag:1:28-38), then f is used (at a.stag:1:37-38), then f is passed to the function (at a.stag:1:28-38), then the function types are unified
+    File "a.stag", line 4, characters 8-11:
+    4 | let b = zzz
+                ^^^
+    Error: Unbound value zzz
+    File "a.stag", line 3, characters 0-78:
+    3 | include .~ (let g = stack_ (fun u -> u) in let _ = keep g in let _ = c in Nil)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Note: This include, still being generated because its expression uses this code, may define it: move this code before the include or into another module
+    |}]
+;;

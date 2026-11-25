@@ -345,11 +345,19 @@ substitution where the code is spliced can replace it. One whose checking is
 underway is referred to by symbol too, and doesn't join its component. In its
 own code, the use is a recursive one, of its type (so `let gen n = forget n in
 .< gen n >.`, whose code type would contain itself, is an error). Elsewhere,
-the quote's component may be finished first, so the use is of a type of its
-own, never generalized (weak: `'_a`), unified with an instance of the
-toplevel's as soon as that is finished, and an error is reported at the use.
-So the code's type is the toplevel's, but with weak variables where they
-would have been generalized had the toplevel been finished first. Computing
+the use is of a type of its own, which the toplevel keeps, and unifies with
+its type when its component is finished, an error being reported at the use.
+If the quote's code is in that component (it also uses the toplevel
+directly), the use is a recursive one, unified before the component is
+generalized. Otherwise the quote's component is finished first, and its use
+is not generalized (weak: `'_a`), but unified with an instance of the
+toplevel's scheme. So the code's type is the toplevel's, but with weak
+variables where they would have been generalized had the toplevel been
+finished first. This can't be helped: the quote's component is finished
+first because code checked while the toplevel is (eg. its splice) needs its
+value, and may also use its type, so share its weak variables: generalizing
+them later would make that use polymorphic after the fact. Code abandoned to
+be checked anew (see syntax.md, Evaluation) has its uses dropped. Computing
 with it elsewhere is nonportable: `let z = r` in a toplevel `r` depends on is not
 generalized, whichever order they are checked in. So the order of
 checking matters: with

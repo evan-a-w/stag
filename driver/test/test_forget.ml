@@ -283,3 +283,39 @@ let c = .< (ident 1, ident "s") >.
     val c : <int * string>{..'a}
     |}]
 ;;
+
+let%expect_test "a quote's use of a toplevel of its component is a recursive \
+                 one"
+  =
+  (* [c] uses [f] directly too, so is checked with it: its quote's use is
+     unified with [f]'s type before it is generalized. *)
+  show {|
+let f x = let _ = c in x
+let c (u : unit) = (f u, .< f >.)
+|};
+  [%expect
+    {|
+    val f : unit @ 'm0 -> unit @ 'm1 with portable <= 'm0 and 'm1 <= regional
+    val c : unit @ 'm0 -> unit * <unit @ 'm2 -> unit @ 'm3>{..'a} @ 'm1 with portable <= 'm2 and 'm3 <= 'm1 and release(locality('m3)) <= locality('m1) and 'm3 <= regional
+    |}];
+  show
+    {|
+let f x = let _ = c in x
+let c (u : unit) = (f u, .< (f 1, f "s") >.)
+|};
+  [%expect
+    {|
+    This expression has type unit but an expression was expected of type int
+    This expression has type unit but an expression was expected of type string
+    |}];
+  (* Without the direct use, [c] is finished first, and uses an instance. *)
+  show {|
+let f x = let _ = c in x
+let c (u : unit) = .< (f 1, f "s") >.
+|};
+  [%expect
+    {|
+    val f : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val c : unit @ 'm0 -> <int * string>{..'a} @ 'm1
+    |}]
+;;

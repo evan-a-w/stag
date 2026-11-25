@@ -315,7 +315,7 @@ order matters, and nothing warns of it (there is no `-principal`):
 `let f v = let _ = (v : N.r) in v.x` finds `N.r`'s `x`, but
 `let f v = let _ = v.x in (v : N.r)` the `x` in scope. Inside a quote, a
 toplevel still being checked by another toplevel has a type of its own there,
-unified with the toplevel's once it is finished (see modes.md), so in
+unified with the toplevel's once its component is finished (see modes.md), so in
 `.< N.v.x >.` the `x` is then the one in scope whatever `N.v`'s type.
 
 ## Patterns

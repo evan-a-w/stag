@@ -68,6 +68,20 @@ module Syntax_splice = struct
   ;;
 end
 
+(* A use of a toplevel being checked, in a quote of other code: it is referred
+   to by symbol, at a type of its own, unified with the toplevel's in
+   [finish_scc]. *)
+module Quoted_use = struct
+  type t =
+    { ty : Type.ty
+    ; loc : Loc.t
+    ; frame : int (** Of the quoting code. *)
+    ; report : Typecheck_error.t -> unit
+    }
+
+  let sexp_of_t { loc; _ } = [%sexp (loc : Loc.t)]
+end
+
 module Toplevel = struct
   (** [external name : ty = "symbol"], whose [expr] is a placeholder. *)
   module External = struct
@@ -118,6 +132,9 @@ module Toplevel = struct
     ; external_ : External.t option
     ; generated : Generated.t option
     ; mutable state : State.t
+    ; mutable quoted_uses : Quoted_use.t list
+    (** Not yet unified with its type. They outlive an abandoned check of it, as
+        the code quoting it may have been finished. *)
     }
   [@@deriving sexp_of]
 
@@ -172,12 +189,19 @@ let error ~loc kind = Error (Typecheck_error.create ~loc kind)
 module Scc_frame = struct
   type t =
     { id : int
+    ; of_toplevel : bool
+    (** Whether it is a toplevel's, so finished by [finish_scc]. *)
     ; mutable lowlink : int
     ; mutable pending : Toplevel.t list
     ; mutable failed : bool
+    ; mutable quoting : (Toplevel.t * Type.ty) list
+    (** The types of the [Quoted_use]s its code made, which [finish_scc] keeps
+        from being generalized unless the toplevel they use is in the component. *)
     }
 
-  let create id ~pending = { id; lowlink = id; pending; failed = false }
+  let create id ~of_toplevel ~pending =
+    { id; of_toplevel; lowlink = id; pending; failed = false; quoting = [] }
+  ;;
 end
 
 module Report = struct
@@ -186,19 +210,8 @@ module Report = struct
     ; frame : int option
     (** The [Scc_frame.id] of the code it is in, if its checking may be
         abandoned. *)
-    }
-end
-
-(* A use, in a quote, of a toplevel whose checking was underway, at a type of
-   its own until the toplevel is finished: then it is unified with an instance
-   of the toplevel's. *)
-module Deferred_use = struct
-  type t =
-    { toplevel : Toplevel.t
-    ; ty : Type.ty
-    ; loc : Loc.t
-    ; frame : int (** Of the code the quote is in. *)
-    ; report : Typecheck_error.t -> unit
+    ; once : string option
+    (** Only the first error reported with this key is shown. *)
     }
 end
 
@@ -237,38 +250,30 @@ module Program_env = struct
     ; modes : Mode.Id_source.t
     ; const_toplevels : bool
     ; compile_time_c_calls : Compile_time_c_calls.t
-    ; mode_limits_reported : String.Hash_set.t
-    (** The reasons of the upper bounds of mode errors reported, so that each
-        limit is reported once, at what first exceeded it. *)
     ; parameter_modes : Int.Hash_set.t
     (** The ids of the modes of parameters: what they are is decided by each use
         of their function, so is not known while it is checked. *)
-    ; mutable deferred_uses : Deferred_use.t list
+    ; abandoned : Int.Hash_set.t
+    (** The [Scc_frame.id]s of code abandoned, to be checked anew: what was
+        reported in it, or is owed to it, is dropped. *)
     }
 
-  let report ?frame t error =
+  let report ?frame ?once t error =
     t.reported <- t.reported + 1;
-    t.reports <- { Report.error; frame } :: t.reports
+    t.reports <- { Report.error; frame; once } :: t.reports
   ;;
+
+  let is_abandoned t frame = Hash_set.mem t.abandoned frame
 
   let errors t =
-    List.filter_map t.reports ~f:(fun { error; frame = _ } ->
-      Option.some_if (not (Typecheck_error.is_already_reported error)) error)
-  ;;
-
-  (* Forgets the errors and deferred uses of the code of [frames], abandoned to
-     be checked anew. *)
-  let forget t ~frames =
-    t.deferred_uses
-    <- List.filter t.deferred_uses ~f:(fun (use : Deferred_use.t) ->
-         not (List.mem frames use.frame ~equal:Int.equal));
-    t.reports
-    <- List.filter t.reports ~f:(fun { error = _; frame } ->
-         not
-           (Option.value_map
-              frame
-              ~default:false
-              ~f:(List.mem frames ~equal:Int.equal)))
+    let shown = String.Hash_set.create () in
+    List.rev t.reports
+    |> List.filter ~f:(fun { Report.error; frame; once } ->
+      (not (Typecheck_error.is_already_reported error))
+      && (not (Option.exists frame ~f:(is_abandoned t)))
+      && Option.for_all once ~f:(fun key ->
+        Hash_set.strict_add shown key |> Hash_set.Ok_or_duplicate.is_ok))
+    |> List.rev_map ~f:(fun { Report.error; _ } -> error)
   ;;
 
   let fresh_ident t name = Typed.Ident.fresh t.stamps name
@@ -475,11 +480,11 @@ module Scope = struct
        | Some generated -> Generated.wrap_error generated error)
   ;;
 
-  let report t (error : Typecheck_error.t) =
+  let report ?once t (error : Typecheck_error.t) =
     let frame = t.scc.id in
     if Typecheck_error.is_already_reported error
     then Program_env.report t.program error ~frame
-    else Program_env.report t.program ~frame (wrap_error t error)
+    else Program_env.report t.program ?once ~frame (wrap_error t error)
   ;;
 
   let report_if_error t = function
@@ -487,20 +492,18 @@ module Scope = struct
     | Error error -> report t error
   ;;
 
-  (* Whether the mode constraint held: if not, it is reported. *)
+  (* Whether the mode constraint held: if not, it is reported. Each limit is
+     shown once, at what first exceeded it. *)
   let mode_holds t ~loc = function
     | Ok () -> true
     | Error error ->
-      let key =
+      let once =
         match error with
         | Mode.Error.Mismatch { upper_because; _ } ->
           Sexp.to_string [%sexp (upper_because : Mode.Reason.t list)]
         | Unequal _ -> Sexp.to_string [%sexp (error : Mode.Error.t)]
       in
-      if not (Hash_set.mem t.program.mode_limits_reported key)
-      then (
-        Hash_set.add t.program.mode_limits_reported key;
-        report t (Typecheck_error.create ~loc (Mode_error error)));
+      report t ~once (Typecheck_error.create ~loc (Mode_error error));
       false
   ;;
 
@@ -1753,9 +1756,55 @@ let runtime_only (program : Program_env.t) (members : Toplevel.t list) =
       | In_progress { body = None; _ } | Unchecked | Done _ -> None))
 ;;
 
-let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
+(* The [Quoted_use]s of a toplevel are unified with its type: by code of its
+   component, before it is generalized, as recursive uses, and by code finished
+   before it, with an instance of its scheme. [quoting] are those of the
+   component's code: of toplevels not in it, they are not generalized. *)
+let finish_scc
+  t
+  (program : Program_env.t)
+  (members : Toplevel.t list)
+  ~quoting
+  ~failed
+  =
+  let fulfil (member : Toplevel.t) ~in_component ~ty =
+    let uses, others =
+      List.partition_tf member.quoted_uses ~f:(fun use ->
+        in_component use.frame)
+    in
+    member.quoted_uses <- others;
+    List.fold (List.rev uses) ~init:true ~f:(fun unified (use : Quoted_use.t) ->
+      Program_env.is_abandoned program use.frame
+      ||
+      match Unify.unify_ty t ~ty1:use.ty ~ty2:(ty ()) with
+      | Ok () -> unified
+      | Error error ->
+        use.report (Typecheck_error.unification_error ~loc:use.loc error);
+        false)
+  in
+  let indices =
+    List.filter_map members ~f:(fun member ->
+      match member.state with
+      | In_progress { index; _ } -> Some index
+      | Unchecked | Done _ -> None)
+  in
+  let recursive_uses_unified =
+    List.fold members ~init:true ~f:(fun unified member ->
+      match member.state with
+      | In_progress { ty; _ } ->
+        fulfil
+          member
+          ~in_component:(List.mem indices ~equal:Int.equal)
+          ~ty:(fun () -> ty)
+        && unified
+      | Unchecked | Done _ -> unified)
+  in
+  List.iter quoting ~f:(fun (quoted, ty) ->
+    if not (List.mem members quoted ~equal:phys_equal)
+    then Unify.lower_ty ~rank:0 ty);
   let failed =
     failed
+    || (not recursive_uses_unified)
     || check_initialization_cycles
          program
          (List.filter_map members ~f:(fun member ->
@@ -1862,6 +1911,10 @@ let finish_scc t (program : Program_env.t) (members : Toplevel.t list) ~failed =
              ; failed
              ; runtime_only
              };
+        ignore
+          (fulfil member ~in_component:(Fn.const true) ~ty:(fun () ->
+             Scheme.instantiate t ~rank:0 ty)
+           : bool);
         index, typed
       | In_progress { body = None; _ } | Unchecked | Done _ ->
         raise_s
@@ -2079,17 +2132,15 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
        (* Its mode isn't known yet, so the code refers to it by symbol: the
           quote's value doesn't depend on [toplevel], so neither does its
           component, which may be finished first. So the use is of a type of its
-          own, never generalized (of rank 0), unified with an instance of
-          [toplevel]'s once that is finished. *)
-       let ty = Type.TVar (Fresh.var t ~rank:0) in
-       scope.program.deferred_uses
-       <- { toplevel
-          ; ty
-          ; loc
-          ; frame = scope.scc.id
-          ; report = Scope.report scope
-          }
-          :: scope.program.deferred_uses;
+          own, generalized only with [toplevel]'s component. *)
+       let ty =
+         Type.TVar (Fresh.var t ~rank:(if scope.scc.of_toplevel then 1 else 0))
+       in
+       toplevel.quoted_uses
+       <- { ty; loc; frame = scope.scc.id; report = Scope.report scope }
+          :: toplevel.quoted_uses;
+       if scope.scc.of_toplevel
+       then scope.scc.quoting <- (toplevel, ty) :: scope.scc.quoting;
        Ok
          (at_scope_level
             (entry
@@ -2120,12 +2171,13 @@ and toplevel_entry t (scope : Scope.t) (toplevel : Toplevel.t) ~loc =
     let scc = check_toplevel t scope.program toplevel in
     scope.scc.lowlink <- Int.min scope.scc.lowlink scc.lowlink;
     scope.scc.pending <- scc.pending @ scope.scc.pending;
+    scope.scc.quoting <- scc.quoting @ scope.scc.quoting;
     if scc.failed then scope.scc.failed <- true;
     toplevel_entry t scope toplevel ~loc
 
 and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
   let index = Fresh.id t in
-  let scc = Scc_frame.create index ~pending:[ toplevel ] in
+  let scc = Scc_frame.create index ~of_toplevel:true ~pending:[ toplevel ] in
   let unfinished = Stack.length program.unfinished in
   let reported = program.reported in
   let rank = 1 in
@@ -2161,7 +2213,7 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
   | In_progress _ | Done _ ->
     (* Checked while elaborating its annotations, through a type splice that
        uses it: the cycle is reported. *)
-    Scc_frame.create index ~pending:[]
+    Scc_frame.create index ~of_toplevel:true ~pending:[]
   | Unchecked ->
     Stack.push program.unfinished ty;
     let loc = toplevel.expr.loc in
@@ -2215,36 +2267,13 @@ and check_toplevel t program (toplevel : Toplevel.t) : Scc_frame.t =
          [%message "check_toplevel: not in progress" (toplevel : Toplevel.t)]);
     if scc.lowlink = index
     then (
-      finish_scc t program scc.pending ~failed:scc.failed;
+      finish_scc t program scc.pending ~quoting:scc.quoting ~failed:scc.failed;
       scc.pending <- [];
+      scc.quoting <- [];
       while Stack.length program.unfinished > unfinished do
         Unify.lower_ty ~rank:0 (Stack.pop_exn program.unfinished)
-      done;
-      check_deferred_uses t program);
+      done);
     scc
-
-(* The deferred uses of the toplevels now finished. *)
-and check_deferred_uses t (program : Program_env.t) =
-  let finished, deferred =
-    List.partition_tf program.deferred_uses ~f:(fun (use : Deferred_use.t) ->
-      match use.toplevel.state with
-      | Done _ -> true
-      | Unchecked | In_progress _ -> false)
-  in
-  program.deferred_uses <- deferred;
-  List.iter (List.rev finished) ~f:(fun (use : Deferred_use.t) ->
-    match use.toplevel.state with
-    | Done { entry; _ } ->
-      (match
-         Unify.unify_ty
-           t
-           ~ty1:use.ty
-           ~ty2:(Scheme.instantiate t ~rank:0 entry.scheme)
-       with
-       | Ok () -> ()
-       | Error error ->
-         use.report (Typecheck_error.unification_error ~loc:use.loc error))
-    | Unchecked | In_progress _ -> ())
 
 (* Its modes are as declared: C code is trusted to keep to them. *)
 and check_external
@@ -2286,17 +2315,14 @@ and check_external
 (* Abandons the toplevels of [scc] with the splice whose code reached them, to
    be checked anew. *)
 and abandon (program : Program_env.t) (scc : Scc_frame.t) ~unfinished =
-  Program_env.forget
-    program
-    ~frames:
-      (scc.id
-       :: List.filter_map scc.pending ~f:(fun (toplevel : Toplevel.t) ->
-         match toplevel.state with
-         | In_progress { index; _ } -> Some index
-         | Unchecked | Done _ -> None));
+  Hash_set.add program.abandoned scc.id;
   List.iter scc.pending ~f:(fun (toplevel : Toplevel.t) ->
+    (match toplevel.state with
+     | In_progress { index; _ } -> Hash_set.add program.abandoned index
+     | Unchecked | Done _ -> ());
     toplevel.state <- Unchecked);
   scc.pending <- [];
+  scc.quoting <- [];
   while Stack.length program.unfinished > unfinished do
     ignore (Stack.pop_exn program.unfinished : Type.ty)
   done
@@ -4015,7 +4041,7 @@ let toplevel_scope ?generated t program module_ ~level ~in_expect_test =
   ; locals = Env.create ()
   ; quote = None
   ; module_
-  ; scc = Scc_frame.create (Fresh.id t) ~pending:[]
+  ; scc = Scc_frame.create (Fresh.id t) ~of_toplevel:false ~pending:[]
   ; annotation_vars = Type_env.Annotation_vars.create t ~rank
   ; in_expect_test
   ; generated
@@ -4302,6 +4328,7 @@ let declare
          ; external_
          ; generated
          ; state = Unchecked
+         ; quoted_uses = []
          })
     in
     if not in_prelude then ignore (force toplevel : Toplevel.t);
@@ -4585,9 +4612,8 @@ let program_env
     ; modes
     ; const_toplevels
     ; compile_time_c_calls
-    ; mode_limits_reported = String.Hash_set.create ()
     ; parameter_modes = Int.Hash_set.create ()
-    ; deferred_uses = []
+    ; abandoned = Int.Hash_set.create ()
     }
   in
   (report := fun error -> Program_env.report program_env error);
