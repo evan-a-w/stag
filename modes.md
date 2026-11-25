@@ -102,9 +102,13 @@ closure's own mode is the mode of the arrow value, like any value's.
   constructor argument and a `box`'s contents covariant, a `ptr`'s contents
   and mode argument invariant (aliases of a cell must agree), solved as a
   fixpoint over recursive types. Variance is inferred, never written. The
-  value then has the type it is used at. Where nothing is used as the other
-  (a match's arms, a list's elements, a polymorphic variable's uses),
-  types are equal.
+  value then has the type it is used at. Where several values are used at a
+  type not yet known (a match's arms, a list's elements, the arguments a
+  type variable is instantiated by), that type becomes their join: their
+  structure, with new mode variables that each value is used at by
+  variance. So the result doesn't depend on their order: a match with an arm
+  taking `string @ local` and one taking only global strings is a function
+  taking global strings, whichever comes first.
 - **Polymorphism.** Mode variables are generalised with the type variables of
   a scheme, with the constraints between them, and copied per instance, so
   `let apply f x = f x` works for portable and nonportable `f` alike.

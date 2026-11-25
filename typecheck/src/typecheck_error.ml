@@ -100,8 +100,8 @@ module Kind = struct
     | Duplicate_row_entry of string
     | Assign_to_immutable of string
     | Store_not_through_pointer
-    | Store_into_box
     (** A [Store] whose target is not a dereference, or a field of one. *)
+    | Store_into_box (** A [Store] through a [box], which is immutable. *)
     | Exclave_not_in_tail_position
     (** [exclave_ e] other than as the result of a function body. *)
     | Mutable_captured_in_exclave of string
@@ -141,6 +141,7 @@ module Kind = struct
     | Locality_in_mode_argument
     | Relative_locality_modality
     | Mode_variable_in_declaration of string
+    | Anonymous_mode_in_constraint
     | Invalid_mode of string
     | Invalid_external of
         { symbol : string
@@ -590,6 +591,13 @@ let rec kind_message (kind : Kind.t) ~show_type =
        be provided by a variable bound by [let mut] or a mutable toplevel"
       name
       name
+  | Mode_variable_in_declaration "_" ->
+    "The anonymous mode _ is not allowed in a declaration: its arrows have \
+     fixed modes, written as atoms like [local], or a mode parameter declared \
+     ['p : mode]"
+  | Anonymous_mode_in_constraint ->
+    "The anonymous mode _ can't be constrained: name a mode variable like 'm \
+     instead"
   | Mode_variable_in_declaration var ->
     sprintf
       "The mode variable '%s is not allowed in a declaration unless it is a \

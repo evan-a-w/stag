@@ -679,6 +679,80 @@ let modes_error ty1 ty2 error =
   Unification_error.Type_mismatch (ty1, ty2, Modes error)
 ;;
 
+(* [ty]'s structure with a new variable of [rank] at each mode that [sub_ty]
+   relates by variance, rather than equates: a type every value of [ty]'s
+   structure may be used at, if its modes allow. [None] if [ty] has no such
+   modes. Cycles are kept as they are, and what is shared through links is
+   copied once. *)
+let fresh_modes_copy fresh ~rank ty =
+  let ids = Fresh.modes fresh in
+  let var () = Mode.Var.create ids ~rank in
+  let in_progress = Int.Hash_set.create () in
+  let copies = Int.Table.create () in
+  let rec copy (ty : Type.ty) : Type.ty option =
+    match ty with
+    | TVar { id; state = Link target; _ } ->
+      (match Hashtbl.find copies id with
+       | Some copied -> copied
+       | None when Hash_set.mem in_progress id -> None
+       | None ->
+         Hash_set.add in_progress id;
+         let copied =
+           Option.map (copy target) ~f:(fun copied ->
+             (* Shared by a link of its own, as the original is. *)
+             let var = Fresh.var fresh ~rank in
+             var.state <- Link copied;
+             Type.TVar var)
+         in
+         Hash_set.remove in_progress id;
+         Hashtbl.set copies ~key:id ~data:copied;
+         copied)
+    | TVar _ | TRecord _ | TVariant _ -> None
+    | TCon (name, args) ->
+      let variances =
+        match Fresh.variances fresh name with
+        | Some variances when List.length variances = List.length args ->
+          variances
+        | Some _ | None -> List.map args ~f:(fun _ -> Variance.Invariant)
+      in
+      let copied =
+        List.map2_exn args variances ~f:(fun (arg : Type.arg) variance ->
+          match arg, (variance : Variance.t) with
+          | _, (Invariant | Bivariant) | ARow _, _ -> None
+          | ATy ty, (Covariant | Contravariant) ->
+            Option.map (copy ty) ~f:(fun ty -> Type.ATy ty)
+          | AMode _, (Covariant | Contravariant) ->
+            Some (Type.AMode (Var (var ()))))
+      in
+      if List.for_all copied ~f:Option.is_none
+      then None
+      else
+        Some
+          (TCon
+             ( name
+             , List.map2_exn args copied ~f:(fun arg copied ->
+                 Option.value copied ~default:arg) ))
+    | TArrow (arg, res, modes) ->
+      Some
+        (TArrow
+           ( Option.value (copy arg) ~default:arg
+           , Option.value (copy res) ~default:res
+           , { modes with arg = Var (var ()); res = Var (var ()) } ))
+    | TTuple tys ->
+      let copied = List.map tys ~f:copy in
+      if List.for_all copied ~f:Option.is_none
+      then None
+      else
+        Some
+          (TTuple
+             (List.map2_exn tys copied ~f:(fun ty copied ->
+                Option.value copied ~default:ty)))
+    | TCode { inner; context } ->
+      Option.map (copy inner) ~f:(fun inner -> Type.TCode { inner; context })
+  in
+  if Type.is_error ty then None else copy ty
+;;
+
 let rec sub_ty' state sub ~flip ~lower ~upper
   : (unit, Unification_error.t) Result.t
   =
@@ -714,8 +788,23 @@ and sub_structure state sub ~flip ~lower ~upper =
      | Invariant | Bivariant -> Mode_arg.equate ids mode1 mode2)
     |> Result.map_error ~f:modes_error
   in
+  (* A join variable (see [Fresh.join_var]) is made the join of what is used
+     at it, not equal to the first: [ty] at a new copy of its modes, which
+     [var] becomes. *)
+  let join_at ~(var : Type.ty) ~rank ty ~sub =
+    match fresh_modes_copy state.fresh ~rank ty with
+    | None -> unify_ty ~lower:ty1 ~upper:ty2
+    | Some copy ->
+      let%bind.Result () = unify_ty' state ~ty1:var ~ty2:copy in
+      sub copy
+  in
   match ty1, ty2 with
   | _ when phys_equal ty1 ty2 -> Ok ()
+  | TVar _, TVar _ -> unify_ty ~lower:ty1 ~upper:ty2
+  | _, TVar { id; state = Unbound rank; _ } when Fresh.is_join state.fresh id ->
+    join_at ~var:ty2 ~rank ty1 ~sub:(fun copy -> co ~lower:ty1 ~upper:copy)
+  | TVar { id; state = Unbound rank; _ }, _ when Fresh.is_join state.fresh id ->
+    join_at ~var:ty1 ~rank ty2 ~sub:(fun copy -> co ~lower:copy ~upper:ty2)
   | TCon (name1, args1), TCon (name2, args2)
     when String.equal name1 name2 && List.length args1 = List.length args2 ->
     let variances =

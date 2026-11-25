@@ -585,6 +585,7 @@ let rec match_pattern env (pattern : Typed.Pattern.t) (value : Value.t)
   | Lit Unit, Unit -> Eval_result.return true
   | Tuple patterns, Tuple values -> match_all env pattern patterns values
   | Deref inner, Ptr cell -> match_pattern env inner !cell
+  | Deref inner, Box value -> match_pattern env inner value
   | Construct (constructor, patterns), Construct (constructor', values) ->
     if constructor.index = constructor'.index
        && ((not (Typed.Constructor_ref.is_exception constructor))
@@ -935,6 +936,7 @@ and step_value t ~env ~level (expr : Typed.Expr.t)
     let%bindl.Local_result { global = pointer } = eval t ~env ~level pointer in
     (match pointer with
      | Ptr cell -> Eval_result.return !cell
+     | Box value -> Eval_result.return value
      | _ ->
        Eval_result.error_s
          [%message "Dereferenced a non-pointer" (pointer : Value.t)])
@@ -1111,7 +1113,7 @@ and apply_non_function t (f : Value.t) arg ~loc : Value.t Eval_result.t @ local
        Eval_result.return (Syntax_value.type_ref_path (Decl_ref.root_path ref_))
      | Raise, exn -> raise_exn ~loc exn
      | Ptr_make, value -> Eval_result.return (Value.Ptr (ref value))
-     | Box_make, value -> Eval_result.return (Value.Ptr (ref value))
+     | Box_make, value -> Eval_result.return (Value.Box value)
      | Assume_global, value -> Eval_result.return value
      | Erase, Code { expr; persistent = _ } ->
        (match Erase.expr expr with

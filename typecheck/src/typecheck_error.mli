@@ -184,6 +184,8 @@ module Kind : sig
     (** A [regional] or [local] modality on a field or constructor argument. *)
     | Mode_variable_in_declaration of string
     (** A mode variable in a declaration's type, whose arrows have fixed modes. *)
+    | Anonymous_mode_in_constraint
+    (** [_] in a [with] constraint, which would relate nothing else. *)
     | Invalid_mode of string
     (** A mode whose atoms contradict each other, as [const external], or a
         [with] constraint on no mode variable. *)

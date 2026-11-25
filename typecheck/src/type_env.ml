@@ -280,7 +280,11 @@ module Annotation_vars = struct
      has, and [`Related] in a constraint, which relates its axes. *)
   let var t name ~loc ~(use : [ `Located | `Mode_arg | `Related ]) =
     if String.equal name "_"
-    then Ok (fresh_mode t)
+    then (
+      match use with
+      | `Related ->
+        Error (Typecheck_error.create ~loc Anonymous_mode_in_constraint)
+      | `Located | `Mode_arg -> Ok (fresh_mode t))
     else (
       (match use with
        | `Located -> Hash_set.add t.located name

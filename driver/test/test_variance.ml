@@ -86,17 +86,49 @@ let bad = twice (fun (g : string @ local -> int) -> g "a")
     |}]
 ;;
 
-let%expect_test "where there is no direction, types are equal" =
-  (* The arms of a match are unified: neither is used as the other. *)
+let%expect_test "arms and elements join, in either order" =
+  (* Each arm is used at the match's type, made of new modes: a function taking
+     only global strings, whichever arm comes first. *)
   check
     {|
 let pick (b : bool) =
   match b with
   | true -> (fun (s @ local) -> String.length s)
   | false -> (fun (s : string) -> let g @ global = s in String.length g)
+let pick2 (b : bool) =
+  match b with
+  | true -> (fun (s : string) -> let g @ global = s in String.length g)
+  | false -> (fun (s @ local) -> String.length s)
+let both = [ (fun (s @ local) -> String.length s); (fun (s : string) -> let g @ global = s in String.length g) ]
+let both2 = [ (fun (s : string) -> let g @ global = s in String.length g); (fun (s @ local) -> String.length s) ]
 |};
-  [%expect
-    {| This is regional, because it is annotated local (at t.stag:4:22-27), then the function types are unified, then s is passed to the function (at t.stag:5:13-72), then s is used (at t.stag:5:51-52), then it is bound by an annotated let (at t.stag:5:42-48), but must be at most global, because it is annotated global (at t.stag:5:42-48) |}]
+  [%expect {| |}];
+  (* Neither accepts a local string. *)
+  check
+    {|
+let pick (b : bool) =
+  match b with
+  | true -> (fun (s @ local) -> String.length s)
+  | false -> (fun (s : string) -> let g @ global = s in String.length g)
+let use (s @ local) = pick true s
+|};
+  [%expect {| |}];
+  check
+    {|
+let pick (b : bool) =
+  match b with
+  | true -> (fun (s : string) -> let g @ global = s in String.length g)
+  | false -> (fun (s @ local) -> String.length s)
+let use (s @ local) = pick true s
+|};
+  [%expect {| |}]
+;;
+
+let%expect_test "_ can't be constrained or declared" =
+  check {|let f : string @ _ -> string @ 'm with _ <= 'm = fun s -> s|};
+  [%expect {| |}];
+  check {|type t = { f : string @ _ -> string }|};
+  [%expect {| |}]
 ;;
 
 let%expect_test "an immutable box is covariant" =
@@ -340,3 +372,26 @@ let narrow (r : r[external]) : r[gc] = r
     |}]
 ;;
 
+
+let%expect_test "scratch" =
+  check {|
+let pick (b : bool) =
+  match b with
+  | true -> (fun (s @ local) -> String.length s)
+  | false -> (fun (s : string) -> String.length s)
+|};
+  check {|
+let f = fun (s @ local) -> String.length s
+let pick (b : bool) =
+  match b with
+  | true -> f
+  | false -> (fun (s : string) -> let g @ global = s in String.length g)
+|};
+  check {|
+let g = (fun (s : string) -> let g @ global = s in String.length g)
+let pick (b : bool) =
+  match b with
+  | true -> (fun (s @ local) -> String.length s)
+  | false -> g
+|};
+  [%expect {| |}]

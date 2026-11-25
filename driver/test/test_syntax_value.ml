@@ -575,6 +575,7 @@ let rec constructors_of (value : Treewalk.Value.t) =
   | Tuple values -> union values
   | Poly_record fields -> union (Map.data fields)
   | Ptr cell -> constructors_of !cell
+  | Box value -> constructors_of value
   | _ -> String.Map.empty
 ;;
 
@@ -1074,12 +1075,14 @@ let%expect_test "malformed values made otherwise" =
     | Tuple values -> Tuple (List.map values ~f:(edit ~name ~f))
     | Poly_record fields -> Poly_record (Map.map fields ~f:(edit ~name ~f))
     | Ptr cell -> Ptr (ref (edit !cell ~name ~f))
+    | Box value -> Box (edit value ~name ~f)
     | value -> value
   in
   (* The value a pointer-bearing constructor holds. *)
   let payload (args : Treewalk.Value.t list) ~default =
     match args with
     | [ Ptr cell ] -> !cell
+    | [ Box value ] -> value
     | _ -> default
   in
   (* Wrong arity. *)
@@ -1124,8 +1127,7 @@ let%expect_test "malformed values made otherwise" =
          | Tuple [ name; rest ] ->
            Construct
              ( ref
-             , [ Ptr (Stdlib.ref (Treewalk.Value.Tuple [ name; rest; rest ])) ]
-             )
+             , [ Box (Treewalk.Value.Tuple [ name; rest; rest ]) ] )
          | _ -> assert false));
   [%expect
     {| Malformed syntax: expected a list cell's pair, got (("x", {`mode = None; `ty = None}), Cons (Box.make (("y", {`mode = None; `ty = Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))}), Nil)), Cons (Box.make (("y", {`mode = None; `ty = Some (Stag.Type_expr.Con (Stag.Path.Name "int", Nil))}), Nil))), within Stag.Expr.Let argument 1 |}];
@@ -1645,8 +1647,8 @@ let decls =
   let each of_value sexp_of name =
     let rec elements (value : Treewalk.Value.t) =
       match value with
-      | Construct ({ name = "prelude.Cons"; _ }, [ Ptr cell ]) ->
-        (match !cell with
+      | Construct ({ name = "prelude.Cons"; _ }, [ Box cell ]) ->
+        (match cell with
          | Tuple [ x; rest ] -> x :: elements rest
          | _ -> [])
       | _ -> []
