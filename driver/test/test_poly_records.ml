@@ -368,7 +368,7 @@ let different_rows r =
      @ t.stag:2:21-35)
     ((Unification_error
       (Row_mismatch (RExtend x Present (TVar (Unbound 26 1)) REmpty)
-       (RExtend y Present (TVar (Unbound 30 1)) REmpty) (Missing_label x)))
+       (RExtend y Present (TVar (Unbound 31 1)) REmpty) (Missing_label x)))
      @ t.stag:3:47-55)
     |}]
 ;;
@@ -463,11 +463,11 @@ let deref t = match t with T r -> r.`next.*
        (RExtend x Present (TCon int ())
         (RVar
          (Link
-          (RExtend x (PVar (Unbound 40 1)) (TCon int ()) (RVar (Unbound 41 1))))))
+          (RExtend x (PVar (Unbound 43 1)) (TCon int ()) (RVar (Unbound 44 1))))))
        (RExtend y Present (TCon int ())
         (RVar
          (Link
-          (RExtend x (PVar (Unbound 40 1)) (TCon int ()) (RVar (Unbound 41 1))))))
+          (RExtend x (PVar (Unbound 43 1)) (TCon int ()) (RVar (Unbound 44 1))))))
        Cyclic_row))
      @ t.stag:2:38-50)
     ((Infinite_type_layout t) @ t.stag:2:5-6)

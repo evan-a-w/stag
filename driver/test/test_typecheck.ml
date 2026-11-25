@@ -620,9 +620,9 @@ let wrong_type = .<let x = true in .~(.<add x 1>.)>.
           (cases
            (((Lit (Int 2) : int)
              (App (Var (Bound (Local opaque/15)) : "int -> <'_c>{}")
-              (Lit (Int 1) : int) : <'_d>{}))))
-          : <'_e>{}))
-        : <'_e>{}))
+              (Lit (Int 1) : int) : <'_c>{}))))
+          : <'_d>{}))
+        : <'_d>{}))
       (error ("Match failure: no case matches the value 1" @ t.stag:3:32-58)))
      @ t.stag:3:2-59)
     ((Unification_error
@@ -694,7 +694,7 @@ let%expect_test "staged power" =
     ((Unification_error
       (Row_mismatch
        (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 85 1)))
+        (RVar (Unbound 88 1)))
        (RVar (Link REmpty)) (Missing_label y)))
      @ t.stag:2:39-44)
     ((Unification_error
@@ -869,7 +869,7 @@ let pong n c = .<add .~(ping (add n -1) c) y>.
     ((Unification_error
       (Row_mismatch REmpty
        (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 94 1)))
+        (RVar (Unbound 100 1)))
        (Missing_label y)))
      @ t.stag:4:33-45)
     |}]
@@ -1023,9 +1023,9 @@ let%expect_test "instances of a scheme bounded by an outer presence" =
     ((Unification_error
       (Row_mismatch
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
-        (RVar (Link (RVar (Unbound 74 1)))))
+        (RVar (Link (RVar (Unbound 79 1)))))
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 85 1)))
+        (RVar (Unbound 90 1)))
        (Presence_mismatch x)))
      @ t.stag:2:78-89)
     val closeit : <int>{} -> unit
@@ -1085,14 +1085,14 @@ let partial e = let h c = .< let _ = .~e in .~c >. in let _ = h .< 1 >. in h
     val ok : <int>{..'_a}
     ((Unification_error
       (Row_mismatch
-       (RExtend y (PVar (Link Present)) (TVar (Unbound 125 1))
-        (RVar (Unbound 128 1)))
+       (RExtend y (PVar (Link Present)) (TVar (Unbound 127 1))
+        (RVar (Unbound 130 1)))
        (RVar (Link REmpty)) (Missing_label y)))
      @ t.stag:4:21-28)
     ((Unification_error
       (Row_mismatch REmpty
-       (RExtend y (PVar (Link Present)) (TVar (Unbound 139 1))
-        (RVar (Unbound 140 1)))
+       (RExtend y (PVar (Link Present)) (TVar (Unbound 141 1))
+        (RVar (Unbound 142 1)))
        (Missing_label y)))
      @ t.stag:4:18-43)
     |}]
@@ -1137,15 +1137,15 @@ let use = conflict_later %s
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon bool ())))
         (RVar (Link (RVar (Unbound 60 1)))))
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon bool ())))
-        (RVar (Unbound 84 1)))
+        (RVar (Unbound 85 1)))
        (Presence_mismatch x)))
      @ t.stag:3:30-44)
     ((Unification_error
       (Row_mismatch
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon bool ())))
-        (RVar (Link (RVar (Unbound 88 1)))))
+        (RVar (Link (RVar (Unbound 90 1)))))
        (RExtend x (PVar (Link Present)) (TVar (Link (TCon bool ())))
-        (RVar (Unbound 109 1)))
+        (RVar (Unbound 111 1)))
        (Presence_mismatch x)))
      @ t.stag:4:25-39)
     |}]
@@ -1258,16 +1258,16 @@ let%expect_test "instances of a scheme bounded by an outer row" =
     ((Unification_error
       (Row_mismatch REmpty
        (RExtend y (PVar (Link Present)) (TVar (Link (TCon int ())))
-        (RVar (Unbound 142 1)))
+        (RVar (Unbound 153 1)))
        (Missing_label y)))
      @ t.stag:4:77-78)
     used after, k closed
     ((Unification_error
-      (Row_mismatch (RExtend y Present (TCon int ()) (RVar (Unbound 132 1)))
+      (Row_mismatch (RExtend y Present (TCon int ()) (RVar (Unbound 138 1)))
        (RExtend x (PVar (Link Absent)) (TVar (Link (TCon int ())))
         (RVar
          (Link
-          (RExtend y (PVar (Link Absent)) (TCon int ()) (RVar (Unbound 134 1))))))
+          (RExtend y (PVar (Link Absent)) (TCon int ()) (RVar (Unbound 140 1))))))
        (Presence_mismatch y)))
      @ t.stag:4:77-78)
     |}]

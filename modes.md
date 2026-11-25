@@ -118,11 +118,18 @@ closure's own mode is the mode of the arrow value, like any value's.
   the join's are both unknown (a parameter as an arm), the relation between
   them is kept, and applied by variance as soon as either type is known,
   wherever that happens: so the parameter keeps modes of its own, related
-  to the join's, rather than being made the join's type. Modes inside a
+  to the join's, rather than being made the join's type. Whether a use
+  relates by variance depends only on where it is (an arm, an element, an
+  instance's argument), not on what was checked first: a join's variable
+  stays one after being made equal to another variable, or bound. A
+  recursive type is copied as a cycle, its modes shared around it, so
+  joining `type sl = (string @ local -> int) * box[sl]` with its global
+  counterpart gives the same type in either order. Modes inside a
   record, variant or code context are unified (equal for every value), not
   joined. If a scope ends with both still unknown (the variables are
-  generalised, or a weak toplevel's definition ends), they are made one type
-  variable, as in ML: `let pick n x y = match n with 0 -> x | _ -> y` is
+  generalised, or a weak toplevel's definition ends: wherever the
+  generalised type reaches, through row and presence bounds too), they are
+  made one type variable, as in ML: `let pick n x y = match n with 0 -> x | _ -> y` is
   `'a -> 'a -> 'a`, and an instance is again a join of its uses. A weak
   toplevel's join keeps its own modes (it is only the join's bounds):
   `Box.make (fun (s @ local) -> ...)` holds a function whose argument mode

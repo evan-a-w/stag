@@ -404,19 +404,6 @@ module Sub_edge = struct
   ;;
 end
 
-let occurs (var : _ Type.Var.t) ty =
-  Type.iter_ty
-    { ty =
-        (fun ~guarded:_ (var' : _ Type.Var.t) ->
-          if var'.id = var.id then Error () else Ok ())
-    ; row = (fun ~guarded:_ _ -> Ok ())
-    ; presence = (fun ~guarded:_ _ -> Ok ())
-    ; mode = (fun _ -> Ok ())
-    }
-    ty
-  |> Result.is_error
-;;
-
 let rec unify_ty' state ~ty1 ~ty2 : (unit, Unification_error.t) Result.t =
   match ty1, ty2 with
   | ( Type.TVar { id = id1; state = Link _; _ }
@@ -929,7 +916,8 @@ let only_modes result =
 let rec sub_ty' state sub ~join ~flip ~lower ~upper
   : (unit, Unification_error.t) Result.t
   =
-  let is_join : Type.ty -> bool = function
+  let rec is_join : Type.ty -> bool = function
+    | TVar ({ state = Link ty; _ } as var) -> Sub_edge.is_join var || is_join ty
     | TVar var -> Sub_edge.is_join var
     | _ -> false
   in
@@ -989,8 +977,8 @@ and sub_structure state sub ~join ~flip ~lower ~upper =
     , TVar ({ state = Unbound _; _ } as var2) )
     when join -> Ok (add_edge state.fresh var1 var2)
   | TVar _, TVar _ -> unify_ty ~lower:ty1 ~upper:ty2
-  | TVar ({ state = Unbound _; _ } as var), _ when join -> bind_copy var upper
-  | _, TVar ({ state = Unbound _; _ } as var) when join -> bind_copy var lower
+  | TVar ({ state = Unbound _; _ } as var), _ when join -> bind_copy var ty2
+  | _, TVar ({ state = Unbound _; _ } as var) when join -> bind_copy var ty1
   | TCon (name1, args1), TCon (name2, args2)
     when String.equal name1 name2 && List.length args1 = List.length args2 ->
     let variances =

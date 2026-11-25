@@ -567,3 +567,121 @@ let weak = pick 0 (Ptr.make []) (Ptr.make [])
     val weak : ptr[list['_a]]
     |}]
 ;;
+
+let%expect_test "every order of a list's elements, known or not" =
+  same_in_every_order
+    ~prefix:""
+    ~arms:[ local_arm; global_arm; "x"; "y" ]
+    ~make:(fun arms ->
+      sprintf "let l x y = [ %s ]\n" (String.concat ~sep:"; " arms));
+  [%expect
+    {| val l : (string @ 'm1 -> int @ 'm2) @ 'm0 -> ((string @ 'm5 -> int @ 'm6) @ 'm4 -> list[string @ 'm8 -> int @ 'm9] @ 'm7) @ 'm3 with 'm0 <= 'm7 and release(locality('m0)) <= locality('m7) and 'm0 <= 'm3 and 'm2 <= 'm9 and 'm4 <= 'm7 and release(locality('m4)) <= locality('m7) and 'm6 <= 'm9 and 'm8 <= 'm1 and 'm8 <= 'm5 and 'm8 <= global and gc <= 'm7 and gc <= 'm3 |}]
+;;
+
+let%expect_test "a use's arms in either order" =
+  let program ~use_first ~arms =
+    let match_ =
+      sprintf
+        "match n with | 0 -> %s | _ -> %s"
+        (List.nth_exn arms 0)
+        (List.nth_exn arms 1)
+    in
+    if use_first
+    then sprintf "let f (n : int) x = let _ = take_local x in %s\n" match_
+    else
+      sprintf
+        "let f (n : int) x = let r = %s in let _ = take_local x in r\n"
+        match_
+  in
+  List.iter [ false; true ] ~f:(fun use_first ->
+    same_in_every_order
+      ~prefix:"let take_local (f : string @ local -> int) = 1\n"
+      ~arms:[ "x"; "(fun (s : string) -> 1)" ]
+      ~make:(fun arms -> program ~use_first ~arms));
+  [%expect
+    {|
+    val take_local : (string @ local -> int) @ _ -> int @ _
+    val f : int @ 'm0 -> ((string @ 'm3 -> int @ 'm4) @ 'm2 -> (string @ 'm6 -> int @ 'm7) @ 'm5) @ 'm1 with 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and nonportable gc local <= 'm3 and 'm4 <= 'm7 and 'm4 <= gc global and 'm6 <= 'm3 and gc <= 'm1
+    val take_local : (string @ local -> int) @ _ -> int @ _
+    val f : int @ 'm0 -> ((string @ local -> int) @ 'm2 -> (string @ 'm4 -> int @ 'm5) @ 'm3) @ 'm1 with 'm0 <= 'm1 and 'm2 <= 'm3 and release(locality('m2)) <= locality('m3) and 'm4 <= gc and nonportable gc <= 'm5 and gc <= 'm1
+    |}]
+;;
+
+let%expect_test "a join of cyclic types, in any order" =
+  (* The join's copy of [sl] is cyclic, its modes shared around the cycle. *)
+  check
+    {|
+type sl = (string @ local -> int) * box[sl]
+type sg = (string -> int) * box[sg]
+let j1 (n : int) (a : sl) (b : sg) = match n with | 0 -> a | _ -> b
+let j2 (n : int) (a : sl) (b : sg) = match n with | 0 -> b | _ -> a
+let j3 (n : int) x (a : sl) (b : sg) = match n with | 0 -> x | 1 -> a | _ -> b
+|};
+  [%expect
+    {|
+    type sl = (string @ local -> int) * box[sl]
+    type sg = (string -> int) * box[sg]
+    val j1 : int @ 'm0 -> (((string @ local -> int) * box['a] as 'a) @ 'm2 -> (((string -> int) * box['b] as 'b) @ 'm4 -> (string @ 'm6 -> int @ 'm7) * box[((string @ 'm6 -> int @ 'm7) * box['c] as 'c)] @ 'm5) @ 'm3) @ 'm1 with 'm0 <= 'm3 and 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm2 <= 'm3 and 'm4 <= 'm5 and release(locality('m4)) <= locality('m5) and 'm6 <= gc global and nonportable gc <= 'm7 and gc <= 'm3 and gc <= 'm1
+    val j2 : int @ 'm0 -> (((string @ local -> int) * box['a] as 'a) @ 'm2 -> (((string -> int) * box['b] as 'b) @ 'm4 -> (string @ 'm6 -> int @ 'm7) * box[((string @ 'm6 -> int @ 'm7) * box['c] as 'c)] @ 'm5) @ 'm3) @ 'm1 with 'm0 <= 'm3 and 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm2 <= 'm3 and 'm4 <= 'm5 and release(locality('m4)) <= locality('m5) and 'm6 <= gc global and nonportable gc <= 'm7 and gc <= 'm3 and gc <= 'm1
+    val j3 : int @ 'm0 -> ((string @ 'm3 -> int @ 'm4) * box[((string @ 'm3 -> int @ 'm4) * box['a] as 'a)] @ 'm2 -> (((string @ local -> int) * box['b] as 'b) @ 'm6 -> (((string -> int) * box['c] as 'c) @ 'm8 -> (string @ 'm10 -> int @ 'm11) * box[((string @ 'm10 -> int @ 'm11) * box['d] as 'd)] @ 'm9) @ 'm7) @ 'm5) @ 'm1 with 'm0 <= 'm7 and 'm0 <= 'm5 and 'm0 <= 'm1 and 'm2 <= 'm9 and release(locality('m2)) <= locality('m9) and 'm2 <= 'm7 and 'm2 <= 'm5 and 'm4 <= 'm11 and 'm6 <= 'm9 and release(locality('m6)) <= locality('m9) and 'm6 <= 'm7 and 'm8 <= 'm9 and release(locality('m8)) <= locality('m9) and 'm10 <= 'm3 and 'm10 <= gc global and nonportable gc <= 'm11 and gc <= 'm7 and gc <= 'm5 and gc <= 'm1
+    |}]
+;;
+
+let%expect_test "a join made recursive by its own arms is a recursive type" =
+  check
+    {|
+let f (n : int) x y =
+  let _ = match n with | 0 -> x | _ -> y in
+  match n with | 0 -> x | _ -> [ y ]
+|};
+  [%expect
+    {| val f : int @ 'm0 -> (list[(list['a] as 'a)] @ 'm2 -> (list[(list['b] as 'b)] @ 'm4 -> list[(list['c] as 'c)] @ 'm5) @ 'm3) @ 'm1 with 'm0 <= 'm3 and 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm2 <= 'm3 and 'm4 <= 'm5 and release(locality('m4)) <= locality('m5) and gc <= 'm5 and gc <= 'm3 and gc <= 'm1 |}]
+;;
+
+let%expect_test "a join reached through a code context's presence" =
+  check {|
+let f c = let id y = y in .<Int.add (.~c) (id 1)>.
+|};
+  [%expect
+    {| val f : <int>{..'a} @ 'm0 -> <int>{..'b} @ 'm1 where ..'a <= {..'b} with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1) and gc <= 'm1 |}]
+;;
+
+let%expect_test "many joins take time comparable to unification" =
+  let params n = String.concat ~sep:" " (List.init n ~f:(sprintf "x%d")) in
+  let arms n arm =
+    String.concat (List.init n ~f:(fun i -> sprintf "| %d -> %s\n" i (arm i)))
+  in
+  let within_bound name source =
+    let start = Time_ns.now () in
+    let ok = Result.is_ok (checked source) in
+    let elapsed = Time_ns.diff (Time_ns.now ()) start in
+    print_s
+      [%message
+        name
+          (ok : bool)
+          ~fast:(Time_ns.Span.( < ) elapsed (Time_ns.Span.of_int_sec 60) : bool)]
+  in
+  within_bound
+    "800 arms of an instance"
+    (sprintf
+       "let myid x = x\nlet f (n : int) x = match n with\n%s| _ -> x\n"
+       (arms 800 (fun _ -> "myid x")));
+  within_bound
+    "a list of 100 parameters"
+    (sprintf
+       "let f %s = [ %s ]\n"
+       (params 100)
+       (String.concat ~sep:"; " (List.init 100 ~f:(sprintf "x%d"))));
+  within_bound
+    "100 arms of parameters"
+    (sprintf
+       "let f (n : int) %s = match n with\n%s| _ -> x0\n"
+       (params 100)
+       (arms 100 (sprintf "x%d")));
+  [%expect
+    {|
+    ("800 arms of an instance" (ok true) (fast true))
+    ("a list of 100 parameters" (ok true) (fast true))
+    ("100 arms of parameters" (ok true) (fast true))
+    |}]
+;;
