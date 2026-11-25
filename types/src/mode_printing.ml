@@ -195,7 +195,13 @@ let settle t =
   let equal a b =
     List.for_all (axes a) ~f:(fun axis ->
       (not (live b axis))
-      || (at_least closure a b axis && at_least closure b a axis))
+      ||
+      let node var = { Mode_node.var; axis } in
+      Mode_closure.lower closure (node a) = Mode_closure.lower closure (node b)
+      && Mode_closure.upper closure (node a)
+         = Mode_closure.upper closure (node b)
+      && at_least closure a b axis
+      && at_least closure b a axis)
   in
   Hashtbl.clear t.rep;
   let classes = Int.Table.create () in

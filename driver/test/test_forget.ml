@@ -570,3 +570,27 @@ let h (u : unit) = let f = c in (f .< 1 >., f .< "s" >.)
   [%expect
     {| This expression has type string but an expression was expected of type int |}]
 ;;
+
+let%expect_test "an awaiting scheme's joins are refined in place, in either \
+                 order"
+  =
+  (* [c] is finished before [ident]: its arms join code types with modes, and
+     the refinement keeps what the join had either way round. *)
+  let program ~arms =
+    sprintf
+      {|
+let ident x = .~(let _ = c 0 .< 1 >. .< 2 >. in .< x >.)
+let c (n : int) y z = let j = match n with %s in .< ident .~j >.
+|}
+      arms
+  in
+  show (program ~arms:"| 0 -> y | _ -> z");
+  show (program ~arms:"| 0 -> z | _ -> y");
+  [%expect
+    {|
+    val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val c : int @ 'm0 -> (<'a>{..'b} @ 'm2 -> (<'a>{..'b} @ 'm4 -> <'a>{..'c} @ 'm5) @ 'm3) @ 'm1 where ..'b <= {..'c} with 'm0 <= 'm3 and 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm2 <= 'm3 and 'm4 <= 'm5 and release(locality('m4)) <= locality('m5) and gc <= 'm5 and gc <= 'm3 and gc <= 'm1
+    val ident : 'a @ 'm0 -> 'a @ 'm1 with 'm0 <= 'm1 and release(locality('m0)) <= locality('m1)
+    val c : int @ 'm0 -> (<'a>{..'b} @ 'm2 -> (<'a>{..'b} @ 'm4 -> <'a>{..'c} @ 'm5) @ 'm3) @ 'm1 where ..'b <= {..'c} with 'm0 <= 'm3 and 'm0 <= 'm1 and 'm2 <= 'm5 and release(locality('m2)) <= locality('m5) and 'm2 <= 'm3 and 'm4 <= 'm5 and release(locality('m4)) <= locality('m5) and gc <= 'm5 and gc <= 'm3 and gc <= 'm1
+    |}]
+;;

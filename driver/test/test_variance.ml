@@ -197,7 +197,7 @@ let bad = widen p
   [%expect
     {|
     This expression has type ptr[string] but an expression was expected of type ptr[string @@ external]
-    Their modes differ: This is external, because the types are unified, but must be at most gc, because the types are unified
+    Their modes differ: The modes external and gc must be equal, because the types are unified
     |}];
   (* Nor narrowed: a reader expecting gc values would see the external ones
      stored by the alias. *)
@@ -212,7 +212,7 @@ let bad = read q
   [%expect
     {|
     This expression has type ptr[string @@ external] but an expression was expected of type ptr[string]
-    Their modes differ: This is external, because the types are unified, but must be at most gc, because the types are unified
+    Their modes differ: The modes gc and external must be equal, because the types are unified
     |}]
 ;;
 
@@ -246,7 +246,7 @@ let co_bad (x : co[external]) : co[gc] = x
   [%expect
     {|
     This expression has type co[external] but an expression was expected of type co[gc]
-    Their modes differ: This is external, because the types are unified, then a type is used at one with another mode, but must be at most gc, because the types are unified
+    Their modes differ: This is external, but must be at most gc, because a type is used at one with another mode
     |}];
   check
     {|
@@ -256,7 +256,7 @@ let cell_bad (x : cell[gc]) : cell[external] = x
   [%expect
     {|
     This expression has type cell[gc] but an expression was expected of type cell[external]
-    Their modes differ: This is external, because the types are unified, but must be at most gc, because the types are unified
+    Their modes differ: The modes external and gc must be equal, because the types are unified
     |}];
   check
     {|
@@ -268,7 +268,7 @@ let contra_bad (x : contra[gc]) : contra[external] = x
   [%expect
     {|
     This expression has type contra[gc] but an expression was expected of type contra[external]
-    Their modes differ: This is external, because the types are unified, then a type is used at one with another mode, but must be at most gc, because the types are unified
+    Their modes differ: This is external, but must be at most gc, because a type is used at one with another mode
     |}];
   check
     {|
@@ -281,7 +281,7 @@ let flipped_bad (x : flipped[external]) : flipped[gc] = x
   [%expect
     {|
     This expression has type flipped[external] but an expression was expected of type flipped[gc]
-    Their modes differ: This is external, because the types are unified, then a type is used at one with another mode, but must be at most gc, because the types are unified
+    Their modes differ: This is external, but must be at most gc, because a type is used at one with another mode
     |}];
   check
     {|
@@ -293,7 +293,7 @@ let rec_bad (x : recursive[external]) : recursive[gc] = x
   [%expect
     {|
     This expression has type recursive[external] but an expression was expected of type recursive[gc]
-    Their modes differ: This is external, because the types are unified, then a type is used at one with another mode, but must be at most gc, because the types are unified
+    Their modes differ: This is external, but must be at most gc, because a type is used at one with another mode
     |}]
 ;;
 
@@ -337,6 +337,27 @@ let compose f g x = f (g x)
     |}]
 ;;
 
+let%expect_test "fixed modes of nested arrows round trip" =
+  (* Variables fixed to different constants are never printed as one. *)
+  round_trip
+    {|
+let a (k : (string @ local -> int) -> int) = 1
+let b (k : ((string @ local -> int) -> int) -> int) = 1
+let c (k : (string @ local -> string) -> string @ local -> int) = 1
+let d (k : (string @ external -> int) -> int) = 1
+let e (k : (string @ local external -> int) -> (string @ regional -> int) -> int) = 1
+|}
+    ~show:`Signature;
+  [%expect
+    {|
+    val a : ((string @ local -> int) -> int) @ _ -> int @ _
+    val b : (((string @ local -> int) -> int) -> int) @ _ -> int @ _
+    val c : ((string @ local -> string) -> string @ local -> int) @ _ -> int @ _
+    val d : ((string @ external -> int) -> int) @ _ -> int @ _
+    val e : ((string @ external local -> int) -> (string @ regional -> int) -> int) @ _ -> int @ _
+    |}]
+;;
+
 let%expect_test "a cyclic alias's parameter is invariant when reached both ways"
   =
   (* [f['a]] reaches its own expansion contravariantly (in [box[f['a]] ->]) and
@@ -370,7 +391,7 @@ let widen (r : r[gc]) : r[external] = r
   [%expect
     {|
     This expression has type r[gc] but an expression was expected of type r[external]
-    Their modes differ: This is external, because the types are unified, but must be at most gc, because the types are unified
+    Their modes differ: The modes external and gc must be equal, because the types are unified
     |}];
   check
     {|
@@ -382,7 +403,7 @@ let narrow (r : r[external]) : r[gc] = r
   [%expect
     {|
     This expression has type r[external] but an expression was expected of type r[gc]
-    Their modes differ: This is external, because the types are unified, but must be at most gc, because the types are unified
+    Their modes differ: The modes gc and external must be equal, because the types are unified
     |}]
 ;;
 
@@ -547,7 +568,7 @@ let cells (n : int) (p : ptr[string @@ external]) (q : ptr[string]) = match n wi
   [%expect
     {|
     This expression has type ptr[string] but an expression was expected of type ptr[string @@ external]
-    Their modes differ: This is external, because the types are unified, but must be at most gc, because the types are unified
+    Their modes differ: The modes external and gc must be equal, because the types are unified
     |}]
 ;;
 
