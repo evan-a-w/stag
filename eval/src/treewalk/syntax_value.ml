@@ -714,6 +714,7 @@ module Of_value = struct
          | "Struct_quote", 1 -> Struct_quote (arg 0 (list (toplevel ~loc)))
          | "Stack", 1 -> Stack (arg 0 (expr ~loc))
          | "Exclave", 1 -> Exclave (arg 0 (expr ~loc))
+         | "Region", 1 -> Region (arg 0 (expr ~loc))
          | "Nontail", 1 ->
            (match arg 0 (expr ~loc) with
             | { txt = App _; _ } as app -> Nontail app

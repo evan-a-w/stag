@@ -33,6 +33,9 @@ module Tail = struct
   type t =
     | Nontail
     | Returns of Mode.Var.t (** The function's result mode. *)
+    | Ends of Mode.Var.t
+    (** The [region_]'s result mode: the region ends after a call there, so
+        it is not a tail call, but [exclave_] may end it early. *)
     | Quoted (** Where the code is spliced decides. *)
 end
 
@@ -53,6 +56,12 @@ module Expected = struct
   let is_tail t =
     match t.region with
     | Returns _ -> true
+    | Ends _ | Nontail | Quoted -> false
+  ;;
+
+  let returned t =
+    match t.region with
+    | Returns _ | Ends _ -> true
     | Nontail | Quoted -> false
   ;;
 
@@ -425,7 +434,7 @@ module Alloc = struct
 
   let record (ctx : Ctx.t) (expected : Expected.t) ~loc ~kind mode =
     site expected;
-    ctx.allocated { Site.loc; kind; mode; tail = Expected.is_tail expected }
+    ctx.allocated { Site.loc; kind; mode; tail = Expected.returned expected }
   ;;
 
   let closure ctx expected ~loc f =
@@ -532,10 +541,10 @@ module Function = struct
     curry
   ;;
 
-  let body ctx ~res_mode ~ty f =
-    let expected = { (Expected.fresh ctx) with region = Returns res_mode } in
+  let body' ctx ~res_mode ~ty ~what ~region f =
+    let expected = { (Expected.fresh ctx) with region } in
     let (body : Typed.Expr.t) = f expected in
-    let crossing = ctx.Ctx.crossing ty in
+    let crossing = ctx.Ctx.crossing (ty body) in
     let loc = body.loc in
     Ctx.add
       ctx
@@ -547,8 +556,10 @@ module Function = struct
          Regional
          (reason
             ~loc
-            "the function returns it, ending its region (return it with \
-             [exclave_] instead)"));
+            (sprintf
+               "%s returns it, ending its region (return it with [exclave_] \
+                instead)"
+               what)));
     Ctx.add
       ctx
       ~loc
@@ -557,19 +568,44 @@ module Function = struct
          ~locality:Mode.Locality_map.release
          expected.mode
          res_mode
-         (reason ~loc "the function returns it"));
+         (reason ~loc (sprintf "%s returns it" what)));
     body
   ;;
+
+  let body ctx ~res_mode ~ty f =
+    body'
+      ctx
+      ~res_mode
+      ~ty:(fun _ -> ty)
+      ~what:"the function"
+      ~region:(Returns res_mode)
+      f
+  ;;
 end
+
+let region ctx expected ~loc f =
+  let res_mode = Ctx.fresh ctx in
+  let (body : Typed.Expr.t) =
+    Function.body'
+      ctx
+      ~res_mode
+      ~ty:(fun (body : Typed.Expr.t) -> body.ty)
+      ~what:"the [region_]"
+      ~region:(Ends res_mode)
+      f
+  in
+  joins ctx expected res_mode ~loc ~why:"the [region_] gives it";
+  body
+;;
 
 let exclave ctx (expected : Expected.t) ~loc f =
   match expected.region with
   | Nontail -> None
-  | (Returns _ | Quoted) as region ->
+  | (Returns _ | Ends _ | Quoted) as region ->
     let inner = Expected.fresh ctx in
     let (result : Typed.Expr.t) = f inner in
     (match region with
-     | Returns res_mode ->
+     | Returns res_mode | Ends res_mode ->
        Ctx.add
          ctx
          ~loc
@@ -678,8 +714,8 @@ let locality_map ?(assign = false) (locks : Env.Lock.t list) =
     ~f:(fun inner (lock : Env.Lock.t) ->
       let map : Mode.Locality_map.t =
         match lock.kind, assign with
-        | Closure _, false | Exclave, true -> Mode.Locality_map.borrow
-        | Exclave, false | Closure _, true -> Mode.Locality_map.release
+        | (Closure _ | Region), false | Exclave, true -> Mode.Locality_map.borrow
+        | Exclave, false | (Closure _ | Region), true -> Mode.Locality_map.release
         | (Quote _ | Splice), _ -> Mode.Locality_map.id
       in
       if assign
@@ -690,7 +726,7 @@ let locality_map ?(assign = false) (locks : Env.Lock.t list) =
 let is_closure (lock : Env.Lock.t) =
   match lock.kind with
   | Closure _ -> true
-  | Quote _ | Splice | Exclave -> false
+  | Quote _ | Splice | Exclave | Region -> false
 ;;
 
 let assign ctx expected ~held ~crossed ~ty ~name ~loc f =
@@ -717,6 +753,31 @@ let assign ctx expected ~held ~crossed ~ty ~name ~loc f =
                 "it is assigned to %s from a closure, which may be called from \
                  a shorter region"
                 name));
+    (* What is local to a [region_] is gone once it ends. *)
+    List.iteri crossed ~f:(fun index (lock : Env.Lock.t) ->
+      match lock.kind with
+      | Region ->
+        let ended = Ctx.fresh ctx in
+        Ctx.add
+          ctx
+          ~loc
+          (Mode.Var.submode
+             ~crossing:(ctx.crossing ty)
+             ~locality:(locality_map ~assign:true (List.take crossed index))
+             value.mode
+             ended
+             (reason ~loc (sprintf "it is assigned to %s" name))
+           |> Result.bind ~f:(fun () ->
+             Mode.Var.at_most
+               ended
+               Locality
+               Regional
+               (reason
+                  ~loc
+                  (sprintf
+                     "%s outlives the [region_], which it is assigned in"
+                     name))))
+      | Closure _ | Quote _ | Splice | Exclave -> ());
     Ctx.add
       ctx
       ~loc
@@ -777,7 +838,7 @@ let use
   List.iteri crossed ~f:(fun index lock ->
     match lock.kind with
     | Splice -> ()
-    | (Closure _ | Exclave) when toplevel -> ()
+    | (Closure _ | Exclave | Region) when toplevel -> ()
     | Exclave ->
       (* As seen where [exclave_] ends the region: what is local to it then is
          gone. *)
@@ -834,6 +895,7 @@ let use
              Stage
              Nonportable
              (reason "%s is captured by a closure in its own definition"))
+    | Region -> ()
     | Quote _ when by_symbol -> ()
     | Quote code ->
       Ctx.add
@@ -893,7 +955,7 @@ let use_free ctx expected ~locks ~loc ~why =
   Env.Lock.cancel_splices locks
   |> List.take_while ~f:(fun (lock : Env.Lock.t) ->
     match lock.kind with
-    | Closure _ | Exclave -> true
+    | Closure _ | Exclave | Region -> true
     | Quote _ | Splice -> false)
   |> List.iter ~f:(fun (lock : Env.Lock.t) ->
     match lock.kind with
@@ -902,7 +964,7 @@ let use_free ctx expected ~locks ~loc ~why =
         ctx
         ~loc
         (Mode.Var.at_least closure Stage Nonportable (reason ~loc why))
-    | Quote _ | Splice | Exclave -> ());
+    | Quote _ | Splice | Exclave | Region -> ());
   runs ctx expected Nonportable ~loc ~why
 ;;
 

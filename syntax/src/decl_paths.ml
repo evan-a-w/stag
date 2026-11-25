@@ -145,6 +145,7 @@ let rec map' (t : Toplevel.t) ~modules ~f:f' =
       | Struct_quote ts -> Struct_quote (List.map ts ~f:toplevel)
       | Stack e -> Stack (expr e)
       | Exclave e -> Exclave (expr e)
+      | Region e -> Region (expr e)
       | Nontail e -> Nontail (expr e)
       | Annotated (e, a) -> Annotated (expr e, Annot.map a ~f:type_expr)
       | Forget (names, e) -> Forget (names, expr e)

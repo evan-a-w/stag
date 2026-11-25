@@ -218,6 +218,7 @@ module Marker = struct
   type t =
     | Stack
     | Exclave
+    | Region
     | Nontail
   [@@deriving sexp_of, equal]
 end

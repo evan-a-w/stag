@@ -16,6 +16,7 @@ type t =
   | Mut
   | Stack_ (** [stack_] *)
   | Exclave_ (** [exclave_] *)
+  | Region_ (** [region_] *)
   | Global_ (** [global_] *)
   | Forget (** [forget] *)
   | Let_expect_test (** [let%expect_test] *)

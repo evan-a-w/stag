@@ -2517,6 +2517,20 @@ and expr_type
        fail
          ~children:[ inner ]
          (Typecheck_error.create ~loc Stack_not_on_allocation))
+  | Marked (Region, inner) ->
+    let inner =
+      Mode_rules.region modes at ~loc (fun at ->
+        expr_type
+          ?expected
+          ~hint
+          t
+          { scope with
+            locks = { Env.Lock.id = Fresh.id t; kind = Region } :: scope.locks
+          }
+          ~at
+          ~expr:inner)
+    in
+    node (Marked (Region, inner)) inner.ty
   | Marked (Exclave, inner) ->
     (match
        Mode_rules.exclave modes at ~loc (fun at ->

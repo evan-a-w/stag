@@ -202,6 +202,7 @@ let expr (expr : Typed.Expr.t) =
         (match marker with
          | Stack -> Stack e
          | Exclave -> Exclave e
+         | Region -> Region e
          | Nontail -> Nontail e)
     | Annotated (e, annot) ->
       let%bind e = go names e in

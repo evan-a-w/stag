@@ -135,6 +135,7 @@ let map ?type_expr:replace_type_expr toplevels ~f =
       | Poly_variant (n, e) -> Poly_variant (n, Option.map e ~f:sub)
       | Stack e -> Stack (sub e)
       | Exclave e -> Exclave (sub e)
+      | Region e -> Region (sub e)
       | Nontail e -> Nontail (sub e)
       | Annotated (e, a) -> Annotated (sub e, annot a)
       | Forget (names, e) -> Forget (names, sub e)

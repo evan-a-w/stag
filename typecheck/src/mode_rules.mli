@@ -223,6 +223,15 @@ module Function : sig
     -> Typed.Expr.t
 end
 
+(** [region_ e]: [e] is in a region of its own, which it may not return what is
+    local to (but may with [exclave_]), as a function's body. *)
+val region
+  :  Ctx.t
+  -> Expected.t
+  -> loc:Loc.t
+  -> (Expected.t -> Typed.Expr.t)
+  -> Typed.Expr.t
+
 (** [exclave_ e]: [None] if not in tail position. In a quote, it is checked
     where the code is spliced. *)
 val exclave

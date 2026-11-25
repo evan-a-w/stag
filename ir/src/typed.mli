@@ -140,12 +140,13 @@ module Pattern : sig
   val has_error : t -> bool
 end
 
-(** The locality markers of expressions: [stack_ e], [exclave_ e] and
-    [e [@nontail]]. *)
+(** The locality markers of expressions: [stack_ e], [exclave_ e], [region_ e]
+    and [e [@nontail]]. *)
 module Marker : sig
   type t =
     | Stack
     | Exclave
+    | Region
     | Nontail
   [@@deriving sexp_of, equal]
 end
